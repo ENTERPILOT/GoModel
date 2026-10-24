@@ -2,6 +2,8 @@ package gateway
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -30,7 +32,28 @@ func ResolvedProviderName(provider core.RoutableProvider, selector core.ModelSel
 			return providerName
 		}
 	}
+	// A model the catalog does not list (a pinned jev version) still belongs to
+	// the provider its selector names, not to the fallback's.
+	if providerName, providerType := configuredSelectorProvider(provider, selector); providerType != "" {
+		return providerName
+	}
 	return fallback
+}
+
+// configuredSelectorProvider returns the provider a selector names explicitly
+// and that provider's type, or empty strings when the selector names no
+// configured provider.
+func configuredSelectorProvider(provider core.RoutableProvider, selector core.ModelSelector) (string, string) {
+	providerName := strings.TrimSpace(selector.Provider)
+	named, ok := provider.(core.ProviderNameTypeResolver)
+	if providerName == "" || !ok {
+		return "", ""
+	}
+	providerType := strings.TrimSpace(named.GetProviderTypeForName(providerName))
+	if providerType == "" {
+		return "", ""
+	}
+	return providerName, providerType
 }
 
 // ResolvedWorkflowProviderName returns the configured provider name recorded in a resolution.
@@ -75,11 +98,11 @@ func ResolveRequestModelWithAuthorizer(
 			return nil, refreshErr
 		}
 		if !refreshed {
-			return nil, core.NewInvalidRequestError(err.Error(), err)
+			return nil, resolutionError(err)
 		}
 		resolvedSelector, aliasApplied, err = ResolveExecutionSelector(ctx, provider, resolver, requested)
 		if err != nil {
-			return nil, core.NewInvalidRequestError(err.Error(), err)
+			return nil, resolutionError(err)
 		}
 	}
 	if resolvedSelector == (core.ModelSelector{}) {
@@ -100,14 +123,14 @@ func ResolveRequestModelWithAuthorizer(
 			if refreshed {
 				resolvedSelector, aliasApplied, err = ResolveExecutionSelector(ctx, provider, resolver, requested)
 				if err != nil {
-					return nil, core.NewInvalidRequestError(err.Error(), err)
+					return nil, resolutionError(err)
 				}
 				resolvedModel = resolvedSelector.QualifiedModel()
 			}
 		}
 	}
 	if counted, ok := provider.(modelCountProvider); ok && counted.ModelCount() == 0 {
-		return nil, core.NewProviderError("", 0, "model registry not initialized", nil)
+		return nil, core.NewProviderError("", http.StatusServiceUnavailable, "model registry not initialized: no models have been loaded yet, retry shortly", nil)
 	}
 	if !provider.Supports(resolvedModel) {
 		if !refreshed {
@@ -119,7 +142,7 @@ func ResolveRequestModelWithAuthorizer(
 			if refreshed {
 				resolvedSelector, aliasApplied, err = ResolveExecutionSelector(ctx, provider, resolver, requested)
 				if err != nil {
-					return nil, core.NewInvalidRequestError(err.Error(), err)
+					return nil, resolutionError(err)
 				}
 				resolvedModel = resolvedSelector.QualifiedModel()
 			}
@@ -146,6 +169,16 @@ func ResolveRequestModelWithAuthorizer(
 	}
 	resolution.CacheDerivedSelectors()
 	return resolution, nil
+}
+
+// resolutionError reports a failed model resolution. A typed gateway error
+// keeps its status (the router answers 503 while the model registry is still
+// empty, so clients retry); anything else is a selector the caller got wrong.
+func resolutionError(err error) error {
+	if gatewayErr, ok := errors.AsType[*core.GatewayError](err); ok {
+		return gatewayErr
+	}
+	return core.NewInvalidRequestError(err.Error(), err)
 }
 
 func refreshProviderModelsForResolution(

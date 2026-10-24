@@ -37,16 +37,6 @@ func NewChatCompatible(apiKey string, opts providers.ProviderOptions, cfg Compat
 	}
 }
 
-// NewChatCompatibleWithHTTPClient creates a chat-centric adapter with a
-// custom HTTP client. If httpClient is nil, http.DefaultClient is used.
-func NewChatCompatibleWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks, cfg CompatibleProviderConfig) *ChatCompatible {
-	applyChatCompatibleDefaults(&cfg)
-	return &ChatCompatible{
-		compatible:   NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, cfg),
-		providerName: cfg.ProviderName,
-	}
-}
-
 func applyChatCompatibleDefaults(cfg *CompatibleProviderConfig) {
 	if cfg.SetHeaders == nil {
 		cfg.SetHeaders = bearerHeaders
@@ -55,6 +45,14 @@ func applyChatCompatibleDefaults(cfg *CompatibleProviderConfig) {
 
 func bearerHeaders(req *http.Request, apiKey string) {
 	providers.SetAuthHeaders(req, apiKey, providers.AuthHeaderConfig{AuthScheme: "Bearer "})
+}
+
+// Compatible exposes the underlying OpenAI-compatible adapter, so a provider
+// that embeds ChatCompatible can serve a native Responses endpoint through
+// the same instance instead of building a second adapter with the same
+// configuration.
+func (c *ChatCompatible) Compatible() *CompatibleProvider {
+	return c.compatible
 }
 
 // SetBaseURL allows configuring a custom base URL for the provider.
@@ -83,9 +81,16 @@ func (c *ChatCompatible) ListModels(ctx context.Context) (*core.ModelsResponse, 
 	return c.compatible.ListModels(ctx)
 }
 
+// Do sends a request through the underlying compatible provider's client,
+// for adapters that decode a provider-specific payload (a richer model
+// listing) while keeping the shared transport, auth and resilience.
+func (c *ChatCompatible) Do(ctx context.Context, req llmclient.Request, out any) error {
+	return c.compatible.Do(ctx, req, out)
+}
+
 // Responses sends a Responses API request using chat-completions translation.
 func (c *ChatCompatible) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	return providers.ResponsesViaChat(ctx, c, req)
+	return providers.ResponsesViaChat(ctx, c, req, c.providerName)
 }
 
 // StreamResponses streams a Responses API request using chat-completions translation.

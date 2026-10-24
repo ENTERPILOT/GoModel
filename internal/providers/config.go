@@ -1,13 +1,10 @@
 package providers
 
 import (
-	"maps"
-	"math"
+	"context"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
-	"unicode"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
@@ -28,7 +25,12 @@ type ProviderConfig struct {
 	// APIKeys is the provider's full, ordered, de-duplicated key set. Identified
 	// sessions stay on one key when SessionStickyKeys is true; sessionless
 	// traffic rotates round robin.
-	APIKeys                  []string
+	APIKeys []string
+	// APIKeySources[i] lists where APIKeys[i] was configured: config.yaml
+	// paths ("providers.openai.api_keys[1]") or environment variable names
+	// ("OPENAI_API_KEY_2"); more than one when identical keys were collapsed.
+	// Set by configuration resolution; nil elsewhere.
+	APIKeySources            [][]string
 	SessionStickyKeys        bool
 	BaseURL                  string
 	APIVersion               string
@@ -41,9 +43,13 @@ type ProviderConfig struct {
 	ServiceAccountJSON       string
 	ServiceAccountJSONBase64 string
 	GCPScope                 string
-	InferenceObjective       string
-	FairnessFromUserPath     bool
-	Models                   []string
+	// ProxyURL routes this provider's upstream traffic through one HTTP(S)
+	// or SOCKS5 proxy. Empty defers to the extension proxy selector, if any,
+	// and then to the process environment.
+	ProxyURL             string
+	InferenceObjective   string
+	FairnessFromUserPath bool
+	Models               []string
 	// ModelMetadataOverrides holds operator-supplied metadata keyed by raw model
 	// ID (as it appears in the provider's /models response). The registry merges
 	// these onto remote-registry metadata after enrichment; non-zero fields here
@@ -55,752 +61,110 @@ type ProviderConfig struct {
 	Resilience  config.ResilienceConfig
 }
 
-// resolveProviders applies env var overrides to the raw YAML provider map, filters
-// out entries with invalid credentials, and merges each entry with the global
-// ResilienceConfig. The second return value is the credential-filtered raw map
-// (same keys as the first); use it for auxiliary clients that need the same
-// API keys and base URLs as the live router (e.g. semantic-cache embeddings).
-func resolveProviders(raw map[string]config.RawProviderConfig, global config.ResilienceConfig, discovery map[string]DiscoveryConfig) (map[string]ProviderConfig, map[string]config.RawProviderConfig) {
-	merged := normalizeProviderAPIKeys(applyProviderEnvVars(raw, discovery))
-	filtered := filterEmptyProviders(merged, discovery)
-	return buildProviderConfigs(filtered, global), filtered
-}
-
-// normalizeProviderAPIKeys collapses each provider's `api_key` and `api_keys`
-// into one canonical ordered set: APIKeys holds every usable key and APIKey
-// holds the first. Unresolved `${VAR}` placeholders are dropped here rather
-// than forwarded as literal credentials, so a provider whose only key failed
-// to resolve ends up keyless and is then dropped by filterEmptyProviders --
-// the same outcome as before rotation existed.
-func normalizeProviderAPIKeys(raw map[string]config.RawProviderConfig) map[string]config.RawProviderConfig {
-	result := make(map[string]config.RawProviderConfig, len(raw))
-	for name, p := range raw {
-		keys := resolvedAPIKeys(append([]string{p.APIKey}, p.APIKeys...))
-		p.APIKeys = keys
-		p.APIKey = ""
-		if len(keys) > 0 {
-			p.APIKey = keys[0]
-		}
-		result[name] = p
-	}
-	return result
-}
-
-// resolvedAPIKeys trims, drops unresolved and empty entries, and de-duplicates
-// while preserving order.
-func resolvedAPIKeys(keys []string) []string {
-	resolved := make([]string, 0, len(keys))
-	seen := make(map[string]struct{}, len(keys))
-	for _, key := range keys {
-		key = strings.TrimSpace(key)
-		if !HasResolvedProviderValue(key) {
-			continue
-		}
-		if _, dup := seen[key]; dup {
-			continue
-		}
-		seen[key] = struct{}{}
-		resolved = append(resolved, key)
-	}
-	if len(resolved) == 0 {
-		return nil
-	}
-	return resolved
-}
-
-// applyProviderEnvVars overlays well-known provider env vars onto the raw YAML map.
-// Env var values always win over YAML values for the same provider name.
-func applyProviderEnvVars(raw map[string]config.RawProviderConfig, discovery map[string]DiscoveryConfig) map[string]config.RawProviderConfig {
-	result := make(map[string]config.RawProviderConfig, len(raw))
-	maps.Copy(result, raw)
-	environ := os.Environ()
-
-	for _, providerType := range sortedDiscoveryTypes(discovery) {
-		spec := discovery[providerType]
-		for _, source := range providerEnvSources(providerType, spec) {
-			envGroups := collectProviderEnvValues(source.Prefix, spec, environ)
-
-			if values, ok := envGroups[""]; ok {
-				applyUnsuffixedProviderEnvVars(result, providerType, spec, source, values)
-			}
-
-			for _, suffix := range sortedProviderEnvSuffixes(envGroups) {
-				if suffix == "" {
-					continue
-				}
-				applySuffixedProviderEnvVars(result, providerType, spec, source, suffix, envGroups[suffix])
-			}
-		}
-	}
-
-	return result
-}
-
-type providerEnvField int
-
-const (
-	providerEnvFieldAPIKey providerEnvField = iota
-	providerEnvFieldBaseURL
-	providerEnvFieldAPIVersion
-	providerEnvFieldModels
-	providerEnvFieldBackend
-	providerEnvFieldAuthType
-	providerEnvFieldAPIMode
-	providerEnvFieldVertexProject
-	providerEnvFieldVertexLocation
-	providerEnvFieldServiceAccountFile
-	providerEnvFieldServiceAccountJSON
-	providerEnvFieldServiceAccountJSONBase64
-	providerEnvFieldGCPScope
-	providerEnvFieldSessionStickyKeys
-	providerEnvFieldInferenceObjective
-	providerEnvFieldFairnessFromUserPath
-	providerEnvFieldModelFilterInclude
-	providerEnvFieldModelFilterExclude
-	providerEnvFieldModelFilterMaxPrice
-)
-
-type providerEnvSource struct {
-	Prefix        string
-	DefaultName   string
-	NameSeparator string
-	OverlayByType bool
-}
-
-type providerEnvValues struct {
-	APIKey string
-	// APIKeysByIndex holds `<PROVIDER>_API_KEY_<n>` values keyed by n. The
-	// unsuffixed `<PROVIDER>_API_KEY` is kept apart in APIKey so it can claim
-	// slot 1 regardless of the order os.Environ happens to return.
-	APIKeysByIndex           map[int]string
-	BaseURL                  string
-	APIVersion               string
-	Backend                  string
-	AuthType                 string
-	APIMode                  string
-	VertexProject            string
-	VertexLocation           string
-	ServiceAccountFile       string
-	ServiceAccountJSON       string
-	ServiceAccountJSONBase64 string
-	GCPScope                 string
-	InferenceObjective       string
-	Models                   []string
-	ModelFilterInclude       []string
-	ModelFilterExclude       []string
-	ModelFilterMaxPrice      *float64
-	SessionStickyKeys        *bool
-	FairnessFromUserPath     *bool
-}
-
-// modelFilter assembles the filter this env group declares.
-func (v providerEnvValues) modelFilter() config.ModelFilter {
-	return config.ModelFilter{
-		Include:         v.ModelFilterInclude,
-		Exclude:         v.ModelFilterExclude,
-		MaxPricePerMtok: v.ModelFilterMaxPrice,
-	}
-}
-
-// apiKeys returns the ordered key set this env group declares: the unsuffixed
-// key leads, then the numbered keys in ascending index order. Gaps are ignored,
-// so setting only `_API_KEY` and `_API_KEY_3` yields two keys, and a key
-// repeated across `_API_KEY` and `_API_KEY_1` is de-duplicated to one.
-func (v providerEnvValues) apiKeys() []string {
-	if strings.TrimSpace(v.APIKey) == "" && len(v.APIKeysByIndex) == 0 {
-		return nil
-	}
-
-	// The unsuffixed key sorts ahead of every numbered slot, which are 1-based.
-	byIndex := make(map[int]string, len(v.APIKeysByIndex)+1)
-	maps.Copy(byIndex, v.APIKeysByIndex)
-	if strings.TrimSpace(v.APIKey) != "" {
-		byIndex[0] = v.APIKey
-	}
-
-	indexes := make([]int, 0, len(byIndex))
-	for index := range byIndex {
-		indexes = append(indexes, index)
-	}
-	sort.Ints(indexes)
-
-	keys := make([]string, 0, len(indexes))
-	for _, index := range indexes {
-		keys = append(keys, byIndex[index])
-	}
-	return resolvedAPIKeys(keys)
-}
-
-// hasAPIKey reports whether this env group carries any credential, numbered or
-// not. Base-URL defaulting keys off it, so a provider configured only through
-// `<PROVIDER>_API_KEY_2` still resolves its default endpoint.
+// resolveProviders applies env var overrides to the raw YAML provider map,
+// resolves secret references, filters out entries with invalid credentials,
+// and merges each entry with the global ResilienceConfig. The second return
+// value is the credential-filtered raw map (same keys as the first); use it for
+// auxiliary clients that need the same API keys and base URLs as the live
+// router (e.g. semantic-cache embeddings).
 //
-// It probes the fields directly rather than calling apiKeys: empty() asks this
-// question for every env group, and ordering the keys to then discard them
-// costs a map, a sort, and two slices. Both spellings agree because a key that
-// fails HasResolvedProviderValue -- blank, whitespace, or an unresolved
-// `${VAR}` -- is one that apiKeys would drop.
-func (v providerEnvValues) hasAPIKey() bool {
-	if HasResolvedProviderValue(v.APIKey) {
-		return true
+// References are resolved only for providers that survive the env overlay and
+// the credential filter, so a YAML value an env var replaces, an env var the
+// overlay ignores, and a provider dropped for lack of credentials are never
+// looked up. Settings that are parsed or steer the overlay or the filter
+// (type, backend, env models, model filters, booleans, Vertex auth_type) are
+// resolved just before they are read, each once. A used reference that cannot
+// be resolved is an error, never a value that is dropped or sent upstream.
+// Legacy ${VAR} placeholders are dropped before resolution; resolved values
+// are data, so a secret that happens to contain "${" is kept.
+//
+// API keys keep their source through normalization (see sourcedKey): each key
+// is resolved, and reported, under the YAML path or env var the operator
+// wrote, and only then are equal values collapsed, so
+// ProviderConfig.APIKeySources maps every normalized key back to all of them.
+func resolveProviders(ctx context.Context, secrets *config.Secrets, raw map[string]config.RawProviderConfig, global config.ResilienceConfig, discovery map[string]DiscoveryConfig) (map[string]ProviderConfig, map[string]config.RawProviderConfig, error) {
+	sources, err := mergeProviderSources(ctx, secrets, raw, discovery)
+	if err != nil {
+		return nil, nil, err
 	}
-	for _, key := range v.APIKeysByIndex {
-		if HasResolvedProviderValue(key) {
-			return true
+	providers, filtered := finishProviders(sources, global, discovery)
+	return providers, filtered, nil
+}
+
+// providerSources is resolution's state before API keys are collapsed: the
+// candidate providers with every field but the keys resolved, and each
+// provider's keys, one entry per source label, resolved but not yet
+// de-duplicated. Key rotation patches the keys by label and runs
+// finishProviders again (see keyRotation).
+type providerSources struct {
+	providers map[string]config.RawProviderConfig
+	keys      map[string][]sourcedKey
+}
+
+// mergeProviderSources is the first half of resolveProviders: settings that
+// steer the overlay, the env overlay, the pre-resolution credential filter,
+// and secret resolution.
+func mergeProviderSources(ctx context.Context, secrets *config.Secrets, raw map[string]config.RawProviderConfig, discovery map[string]DiscoveryConfig) (providerSources, error) {
+	raw, err := resolveProviderSelectors(ctx, secrets, raw)
+	if err != nil {
+		return providerSources{}, err
+	}
+	merged, envKeys, err := applyProviderEnvVars(ctx, secrets, raw, discovery, os.Environ())
+	if err != nil {
+		return providerSources{}, err
+	}
+	if err := resolveFilterSettings(ctx, secrets, merged); err != nil {
+		return providerSources{}, err
+	}
+	keys := make(map[string][]sourcedKey, len(merged))
+	for name, p := range merged {
+		sourced, fromEnv := envKeys[name]
+		if !fromEnv {
+			sourced = usableKeys(yamlAPIKeys(name, p))
 		}
+		keys[name] = sourced
+		p.APIKey, p.APIKeys = keyValues(sourced)
+		merged[name] = p
 	}
-	return false
-}
 
-func (v providerEnvValues) empty() bool {
-	return !v.hasAPIKey() &&
-		strings.TrimSpace(v.BaseURL) == "" &&
-		strings.TrimSpace(v.APIVersion) == "" &&
-		strings.TrimSpace(v.Backend) == "" &&
-		strings.TrimSpace(v.AuthType) == "" &&
-		strings.TrimSpace(v.APIMode) == "" &&
-		strings.TrimSpace(v.VertexProject) == "" &&
-		strings.TrimSpace(v.VertexLocation) == "" &&
-		strings.TrimSpace(v.ServiceAccountFile) == "" &&
-		strings.TrimSpace(v.ServiceAccountJSON) == "" &&
-		strings.TrimSpace(v.ServiceAccountJSONBase64) == "" &&
-		strings.TrimSpace(v.GCPScope) == "" &&
-		strings.TrimSpace(v.InferenceObjective) == "" &&
-		v.SessionStickyKeys == nil &&
-		v.FairnessFromUserPath == nil &&
-		len(v.Models) == 0 &&
-		v.modelFilter().Empty()
-}
-
-func providerEnvSources(providerType string, spec DiscoveryConfig) []providerEnvSource {
-	separator := spec.NameSeparator
-	if separator == "" {
-		separator = "-"
+	candidates := filterProviders(merged, discovery, providerValueSet)
+	for name, p := range candidates {
+		// Keys are resolved below, under their own sources.
+		p.APIKey, p.APIKeys = "", nil
+		candidates[name] = p
 	}
-	return []providerEnvSource{{
-		Prefix:        envPrefix(providerType),
-		DefaultName:   providerType,
-		NameSeparator: separator,
-		OverlayByType: true,
-	}}
-}
-
-func collectProviderEnvValues(prefix string, spec DiscoveryConfig, environ []string) map[string]providerEnvValues {
-	groups := make(map[string]providerEnvValues)
-	prefixWithSeparator := prefix + "_"
-
-	for _, entry := range environ {
-		key, value, ok := strings.Cut(entry, "=")
-		if !ok || value == "" || !strings.HasPrefix(key, prefixWithSeparator) {
-			continue
+	if err := secrets.ResolveFields(ctx, "providers", &candidates); err != nil {
+		return providerSources{}, err
+	}
+	resolvedKeys := make(map[string][]sourcedKey, len(candidates))
+	for name := range candidates {
+		resolved, err := resolveKeySources(ctx, secrets, keys[name])
+		if err != nil {
+			return providerSources{}, err
 		}
-
-		suffix, field, index, ok := parseProviderEnvKey(prefix, key, spec)
-		if !ok {
-			continue
-		}
-
-		values := groups[suffix]
-		switch field {
-		case providerEnvFieldAPIKey:
-			if index == 0 {
-				values.APIKey = value
-				break
-			}
-			if values.APIKeysByIndex == nil {
-				values.APIKeysByIndex = make(map[int]string)
-			}
-			values.APIKeysByIndex[index] = value
-		case providerEnvFieldBaseURL:
-			values.BaseURL = normalizeResolvedBaseURL(value)
-		case providerEnvFieldAPIVersion:
-			values.APIVersion = value
-		case providerEnvFieldModels:
-			values.Models = parseCSVEnvList(value)
-		case providerEnvFieldModelFilterInclude:
-			values.ModelFilterInclude = parseCSVEnvList(value)
-		case providerEnvFieldModelFilterExclude:
-			values.ModelFilterExclude = parseCSVEnvList(value)
-		case providerEnvFieldModelFilterMaxPrice:
-			parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
-			if err != nil {
-				// A price cap is a cost control: a malformed value must fail
-				// validation, not quietly leave the cap unset and let every
-				// model through. NaN carries "not a number" to the validator,
-				// which rejects it the same way it rejects a literal NaN.
-				parsed = math.NaN()
-			}
-			values.ModelFilterMaxPrice = &parsed
-		case providerEnvFieldBackend:
-			values.Backend = value
-		case providerEnvFieldAuthType:
-			values.AuthType = value
-		case providerEnvFieldAPIMode:
-			values.APIMode = value
-		case providerEnvFieldVertexProject:
-			values.VertexProject = value
-		case providerEnvFieldVertexLocation:
-			values.VertexLocation = value
-		case providerEnvFieldServiceAccountFile:
-			values.ServiceAccountFile = value
-		case providerEnvFieldServiceAccountJSON:
-			values.ServiceAccountJSON = value
-		case providerEnvFieldServiceAccountJSONBase64:
-			values.ServiceAccountJSONBase64 = value
-		case providerEnvFieldGCPScope:
-			values.GCPScope = value
-		case providerEnvFieldSessionStickyKeys:
-			if parsed, err := strconv.ParseBool(strings.TrimSpace(value)); err == nil {
-				values.SessionStickyKeys = &parsed
-			}
-		case providerEnvFieldInferenceObjective:
-			values.InferenceObjective = value
-		case providerEnvFieldFairnessFromUserPath:
-			if parsed, err := strconv.ParseBool(strings.TrimSpace(value)); err == nil {
-				values.FairnessFromUserPath = &parsed
-			}
-		}
-		groups[suffix] = values
+		resolvedKeys[name] = resolved
 	}
-
-	for suffix, values := range groups {
-		if values.empty() {
-			delete(groups, suffix)
-		}
-	}
-
-	return groups
+	return providerSources{providers: candidates, keys: resolvedKeys}, nil
 }
 
-// parseProviderEnvKey splits a provider env var into the provider-name suffix,
-// the field it sets, and (for API keys) the 1-based rotation index. An index of
-// 0 means the unsuffixed `<PREFIX>_API_KEY`.
-func parseProviderEnvKey(prefix, key string, spec DiscoveryConfig) (string, providerEnvField, int, bool) {
-	rest, ok := strings.CutPrefix(key, prefix+"_")
-	if !ok {
-		return "", 0, 0, false
+// finishProviders is the second half of resolveProviders: key
+// de-duplication, credential filtering, and resilience merging over resolved
+// values.
+func finishProviders(sources providerSources, global config.ResilienceConfig, discovery map[string]DiscoveryConfig) (map[string]ProviderConfig, map[string]config.RawProviderConfig) {
+	candidates := make(map[string]config.RawProviderConfig, len(sources.providers))
+	keys := make(map[string][]sourcedKey, len(sources.providers))
+	for name, p := range sources.providers {
+		keys[name] = dedupeKeys(sources.keys[name], resolvedValueSet)
+		p.APIKey, p.APIKeys = keyValues(keys[name])
+		candidates[name] = p
 	}
-
-	// A trailing `_<n>` on an API key names a rotation slot, so check it before
-	// the field table: `OPENAI_API_KEY_2` is key 2 of provider `openai`, and
-	// `OPENAI_EU_API_KEY_2` is key 2 of provider `openai-eu`. A suffix that
-	// merely ends in a number is unambiguous the other way -- in
-	// `OPENAI_REGION_2_API_KEY` the digits do not trail the key, so it stays
-	// provider `openai-region-2`.
-	if base, index, isIndexed := cutAPIKeyIndex(rest); isIndexed {
-		if base == "API_KEY" {
-			return "", providerEnvFieldAPIKey, index, true
-		}
-		if suffix, found := strings.CutSuffix(base, "_API_KEY"); found && validProviderEnvSuffix(suffix) {
-			return suffix, providerEnvFieldAPIKey, index, true
-		}
-		return "", 0, 0, false
+	filtered := filterProviders(candidates, discovery, resolvedValueSet)
+	providers := buildProviderConfigs(filtered, global)
+	for name, p := range providers {
+		p.APIKeySources = keySources(keys[name])
+		providers[name] = p
 	}
-
-	// Match field names from the right so suffixes can contain underscores.
-	// Keep longer field tokens before their shorter overlapping forms; for
-	// example, API_VERSION must be checked before a future VERSION-like token.
-	fields := []struct {
-		name  string
-		field providerEnvField
-	}{
-		{name: "SESSION_STICKY_KEYS", field: providerEnvFieldSessionStickyKeys},
-		{name: "API_VERSION", field: providerEnvFieldAPIVersion},
-		{name: "BASE_URL", field: providerEnvFieldBaseURL},
-		{name: "AUTH_TYPE", field: providerEnvFieldAuthType},
-		{name: "API_MODE", field: providerEnvFieldAPIMode},
-		{name: "BACKEND", field: providerEnvFieldBackend},
-		{name: "API_KEY", field: providerEnvFieldAPIKey},
-		{name: "MODEL_FILTER_MAX_PRICE_PER_MTOK", field: providerEnvFieldModelFilterMaxPrice},
-		{name: "MODEL_FILTER_INCLUDE", field: providerEnvFieldModelFilterInclude},
-		{name: "MODEL_FILTER_EXCLUDE", field: providerEnvFieldModelFilterExclude},
-		{name: "MODELS", field: providerEnvFieldModels},
-	}
-	if strings.EqualFold(prefix, "VERTEX") {
-		fields = append([]struct {
-			name  string
-			field providerEnvField
-		}{
-			{name: "SERVICE_ACCOUNT_JSON_BASE64", field: providerEnvFieldServiceAccountJSONBase64},
-			{name: "SERVICE_ACCOUNT_JSON", field: providerEnvFieldServiceAccountJSON},
-			{name: "SERVICE_ACCOUNT_FILE", field: providerEnvFieldServiceAccountFile},
-			{name: "VERTEX_PROJECT", field: providerEnvFieldVertexProject},
-			{name: "VERTEX_LOCATION", field: providerEnvFieldVertexLocation},
-			{name: "PROJECT", field: providerEnvFieldVertexProject},
-			{name: "LOCATION", field: providerEnvFieldVertexLocation},
-			{name: "GCP_SCOPE", field: providerEnvFieldGCPScope},
-		}, fields...)
-	}
-	if strings.EqualFold(prefix, "LLMD") {
-		fields = append([]struct {
-			name  string
-			field providerEnvField
-		}{
-			{name: "FAIRNESS_FROM_USER_PATH", field: providerEnvFieldFairnessFromUserPath},
-			{name: "INFERENCE_OBJECTIVE", field: providerEnvFieldInferenceObjective},
-		}, fields...)
-	}
-
-	for _, candidate := range fields {
-		if candidate.field == providerEnvFieldAPIVersion && !spec.SupportsAPIVersion {
-			continue
-		}
-		if rest == candidate.name {
-			return "", candidate.field, 0, true
-		}
-		suffix, found := strings.CutSuffix(rest, "_"+candidate.name)
-		if found && validProviderEnvSuffix(suffix) {
-			return suffix, candidate.field, 0, true
-		}
-	}
-
-	return "", 0, 0, false
-}
-
-// cutAPIKeyIndex splits a trailing rotation index off an API-key env var,
-// reporting the remaining base and the 1-based index. `_1` is accepted as well
-// as `_2` and up: operators who spell every slot out (`_1`, `_2`, `_3`) get
-// the keys they configured rather than a silently dropped first one.
-func cutAPIKeyIndex(rest string) (string, int, bool) {
-	base, digits, found := lastCut(rest, "_")
-	if !found || !strings.HasSuffix(base, "API_KEY") {
-		return "", 0, false
-	}
-	index, err := strconv.Atoi(digits)
-	if err != nil || index < 1 {
-		return "", 0, false
-	}
-	return base, index, true
-}
-
-// lastCut is strings.Cut anchored at the final separator.
-func lastCut(s, sep string) (string, string, bool) {
-	i := strings.LastIndex(s, sep)
-	if i < 0 {
-		return s, "", false
-	}
-	return s[:i], s[i+len(sep):], true
-}
-
-func validProviderEnvSuffix(suffix string) bool {
-	suffix = strings.TrimSpace(suffix)
-	if suffix == "" || strings.HasPrefix(suffix, "_") || strings.HasSuffix(suffix, "_") {
-		return false
-	}
-
-	lastUnderscore := false
-	hasAlnum := false
-	for _, r := range suffix {
-		switch {
-		case unicode.IsLetter(r) || unicode.IsDigit(r):
-			hasAlnum = true
-			lastUnderscore = false
-		case r == '_' && !lastUnderscore:
-			lastUnderscore = true
-		default:
-			return false
-		}
-	}
-	return hasAlnum
-}
-
-func sortedProviderEnvSuffixes(groups map[string]providerEnvValues) []string {
-	suffixes := make([]string, 0, len(groups))
-	for suffix := range groups {
-		suffixes = append(suffixes, suffix)
-	}
-	sort.Strings(suffixes)
-	return suffixes
-}
-
-func applyUnsuffixedProviderEnvVars(result map[string]config.RawProviderConfig, providerType string, spec DiscoveryConfig, source providerEnvSource, values providerEnvValues) {
-	if values.empty() {
-		return
-	}
-
-	targetKey, matched, ambiguous := findEnvOverlayTarget(result, providerType, source)
-	if matched {
-		result[targetKey] = overlayProviderEnvValues(result[targetKey], values, spec)
-		return
-	}
-	if ambiguous {
-		return
-	}
-	if spec.RequireBaseURL && values.BaseURL == "" {
-		return
-	}
-
-	result[source.DefaultName] = values.rawConfig(providerType, spec)
-}
-
-func applySuffixedProviderEnvVars(result map[string]config.RawProviderConfig, providerType string, spec DiscoveryConfig, source providerEnvSource, suffix string, values providerEnvValues) {
-	if values.empty() {
-		return
-	}
-
-	targetKey := providerNameForEnvSuffix(source, suffix)
-	if targetKey == "" {
-		return
-	}
-
-	if existing, ok := result[targetKey]; ok {
-		if !rawProviderMatchesType(existing, providerType) {
-			return
-		}
-		result[targetKey] = overlayProviderEnvValues(existing, values, spec)
-		return
-	}
-
-	if spec.RequireBaseURL && values.BaseURL == "" {
-		return
-	}
-
-	result[targetKey] = values.rawConfig(providerType, spec)
-}
-
-func (v providerEnvValues) rawConfig(providerType string, spec DiscoveryConfig) config.RawProviderConfig {
-	backend := v.Backend
-	keys := v.apiKeys()
-	primary := ""
-	if len(keys) > 0 {
-		primary = keys[0]
-	}
-	return config.RawProviderConfig{
-		Type:                     providerType,
-		APIKey:                   primary,
-		APIKeys:                  keys,
-		BaseURL:                  v.resolvedBaseURL(spec),
-		APIVersion:               v.APIVersion,
-		Backend:                  backend,
-		AuthType:                 v.AuthType,
-		APIMode:                  v.APIMode,
-		VertexProject:            v.VertexProject,
-		VertexLocation:           v.VertexLocation,
-		ServiceAccountFile:       v.ServiceAccountFile,
-		ServiceAccountJSON:       v.ServiceAccountJSON,
-		ServiceAccountJSONBase64: v.ServiceAccountJSONBase64,
-		GCPScope:                 v.GCPScope,
-		InferenceObjective:       v.InferenceObjective,
-		FairnessFromUserPath:     v.FairnessFromUserPath,
-		Models:                   rawProviderModelsFromIDs(v.Models),
-		ModelFilter:              v.modelFilter(),
-		SessionStickyKeys:        v.SessionStickyKeys,
-	}
-}
-
-func (v providerEnvValues) resolvedBaseURL(spec DiscoveryConfig) string {
-	baseURL := strings.TrimSpace(v.BaseURL)
-	if baseURL == "" && v.hasAPIKey() && spec.DefaultBaseURL != "" {
-		return spec.DefaultBaseURL
-	}
-	return baseURL
-}
-
-func overlayProviderEnvValues(existing config.RawProviderConfig, values providerEnvValues, spec DiscoveryConfig) config.RawProviderConfig {
-	// Env replaces the provider's whole key set rather than merging into it, so
-	// dropping `OPENAI_API_KEY_2` from the environment removes that key instead
-	// of leaving a stale YAML entry rotating behind it.
-	if keys := values.apiKeys(); len(keys) > 0 {
-		existing.APIKey = keys[0]
-		existing.APIKeys = keys
-	}
-	if values.BaseURL != "" {
-		existing.BaseURL = values.BaseURL
-	} else if normalizeResolvedBaseURL(existing.BaseURL) == "" && values.hasAPIKey() && spec.DefaultBaseURL != "" {
-		existing.BaseURL = spec.DefaultBaseURL
-	}
-	if values.APIVersion != "" {
-		existing.APIVersion = values.APIVersion
-	}
-	if values.Backend != "" {
-		existing.Backend = values.Backend
-	}
-	if values.AuthType != "" {
-		existing.AuthType = values.AuthType
-	}
-	if values.APIMode != "" {
-		existing.APIMode = values.APIMode
-	}
-	if values.VertexProject != "" {
-		existing.VertexProject = values.VertexProject
-	}
-	if values.VertexLocation != "" {
-		existing.VertexLocation = values.VertexLocation
-	}
-	if values.ServiceAccountFile != "" {
-		existing.ServiceAccountFile = values.ServiceAccountFile
-	}
-	if values.ServiceAccountJSON != "" {
-		existing.ServiceAccountJSON = values.ServiceAccountJSON
-	}
-	if values.ServiceAccountJSONBase64 != "" {
-		existing.ServiceAccountJSONBase64 = values.ServiceAccountJSONBase64
-	}
-	if values.GCPScope != "" {
-		existing.GCPScope = values.GCPScope
-	}
-	if values.InferenceObjective != "" {
-		existing.InferenceObjective = values.InferenceObjective
-	}
-	if values.FairnessFromUserPath != nil {
-		existing.FairnessFromUserPath = values.FairnessFromUserPath
-	}
-	if values.SessionStickyKeys != nil {
-		existing.SessionStickyKeys = values.SessionStickyKeys
-	}
-	if len(values.Models) > 0 {
-		existing.Models = rawProviderModelsFromIDs(values.Models)
-	}
-	// Each filter rule overlays independently, so an env price cap can narrow a
-	// YAML pattern filter (and vice versa) without restating the other rule.
-	if len(values.ModelFilterInclude) > 0 {
-		existing.ModelFilter.Include = values.ModelFilterInclude
-	}
-	if len(values.ModelFilterExclude) > 0 {
-		existing.ModelFilter.Exclude = values.ModelFilterExclude
-	}
-	if values.ModelFilterMaxPrice != nil {
-		existing.ModelFilter.MaxPricePerMtok = values.ModelFilterMaxPrice
-	}
-	return existing
-}
-
-func providerNameForEnvSuffix(source providerEnvSource, suffix string) string {
-	baseName := strings.TrimSpace(source.DefaultName)
-	suffixName := normalizeEnvSuffixForProviderName(suffix, source.NameSeparator)
-	if suffixName == "" {
-		return baseName
-	}
-	if baseName == "" {
-		return suffixName
-	}
-	return baseName + source.NameSeparator + suffixName
-}
-
-func normalizeEnvSuffixForProviderName(suffix, separator string) string {
-	if separator == "" {
-		separator = "-"
-	}
-	var b strings.Builder
-	lastHyphen := false
-	for _, r := range strings.TrimSpace(suffix) {
-		switch {
-		case unicode.IsLetter(r) || unicode.IsDigit(r):
-			b.WriteRune(unicode.ToLower(r))
-			lastHyphen = false
-		case r == '_' && !lastHyphen:
-			b.WriteString(separator)
-			lastHyphen = true
-		}
-	}
-	return strings.Trim(b.String(), separator)
-}
-
-func findEnvOverlayTarget(raw map[string]config.RawProviderConfig, providerType string, source providerEnvSource) (string, bool, bool) {
-	if existing, ok := raw[source.DefaultName]; ok && rawProviderMatchesType(existing, providerType) {
-		return source.DefaultName, true, false
-	}
-	if !source.OverlayByType {
-		return "", false, false
-	}
-
-	var matchedKey string
-	var matches int
-	for name, cfg := range raw {
-		if !rawProviderMatchesType(cfg, providerType) {
-			continue
-		}
-		matchedKey = name
-		matches++
-		if matches > 1 {
-			return "", false, true
-		}
-	}
-
-	if matches == 1 {
-		return matchedKey, true, false
-	}
-	return "", false, false
-}
-
-func rawProviderMatchesType(cfg config.RawProviderConfig, providerType string) bool {
-	if strings.EqualFold(strings.TrimSpace(providerType), "vertex") {
-		return isVertexProviderConfig(cfg)
-	}
-	return strings.TrimSpace(cfg.Type) == strings.TrimSpace(providerType)
-}
-
-func envPrefix(providerType string) string {
-	var b strings.Builder
-	b.Grow(len(providerType))
-	lastUnderscore := false
-	for _, r := range providerType {
-		switch {
-		case unicode.IsLetter(r) || unicode.IsDigit(r):
-			b.WriteRune(unicode.ToUpper(r))
-			lastUnderscore = false
-		case !lastUnderscore:
-			b.WriteByte('_')
-			lastUnderscore = true
-		}
-	}
-	return strings.Trim(b.String(), "_")
-}
-
-func sortedDiscoveryTypes(discovery map[string]DiscoveryConfig) []string {
-	types := make([]string, 0, len(discovery))
-	for providerType := range discovery {
-		types = append(types, providerType)
-	}
-	// A registered prefix can also look like a suffixed instance of a shorter
-	// provider (BEDROCK_MANTLE_* vs BEDROCK_*). Apply the more specific prefix
-	// first; the shorter provider will then see an existing, differently typed
-	// target and leave it alone. Keep lexical order as the deterministic tie
-	// breaker.
-	sort.Slice(types, func(i, j int) bool {
-		left, right := envPrefix(types[i]), envPrefix(types[j])
-		if len(left) != len(right) {
-			return len(left) > len(right)
-		}
-		return types[i] < types[j]
-	})
-	return types
-}
-
-func normalizeResolvedBaseURL(value string) string {
-	trimmed := strings.TrimSpace(value)
-	if isUnresolvedEnvPlaceholder(trimmed) {
-		return ""
-	}
-	return trimmed
-}
-
-func parseCSVEnvList(value string) []string {
-	if strings.TrimSpace(value) == "" {
-		return nil
-	}
-
-	items := strings.Split(value, ",")
-	values := make([]string, 0, len(items))
-	for _, item := range items {
-		trimmed := strings.TrimSpace(item)
-		if trimmed == "" {
-			continue
-		}
-		values = append(values, trimmed)
-	}
-	if len(values) == 0 {
-		return nil
-	}
-	return values
-}
-
-func isUnresolvedEnvPlaceholder(value string) bool {
-	if !strings.HasPrefix(value, "${") || !strings.HasSuffix(value, "}") || len(value) <= 3 {
-		return false
-	}
-	inner := value[2 : len(value)-1]
-	return inner != "" && !strings.ContainsAny(inner, "{}")
+	return providers, filtered
 }
 
 // providerOrigins splits the resolved provider names by where they were declared:
@@ -837,6 +201,12 @@ func skippedProviderNames(declared, resolved map[string]config.RawProviderConfig
 
 // filterEmptyProviders removes providers without valid credentials.
 func filterEmptyProviders(raw map[string]config.RawProviderConfig, discovery map[string]DiscoveryConfig) map[string]config.RawProviderConfig {
+	return filterProviders(raw, discovery, HasResolvedProviderValue)
+}
+
+// filterProviders is filterEmptyProviders with set deciding whether a
+// credential field carries a value.
+func filterProviders(raw map[string]config.RawProviderConfig, discovery map[string]DiscoveryConfig, set func(string) bool) map[string]config.RawProviderConfig {
 	result := make(map[string]config.RawProviderConfig, len(raw))
 	for name, p := range raw {
 		providerType := normalizeProviderType(p)
@@ -846,7 +216,7 @@ func filterEmptyProviders(raw map[string]config.RawProviderConfig, discovery map
 		}
 		if isVertexProviderConfig(p) {
 			p.Type = providerType
-			if validVertexProviderConfig(p) {
+			if validVertexProviderConfig(p, set) {
 				result[name] = p
 			}
 			continue
@@ -855,7 +225,7 @@ func filterEmptyProviders(raw map[string]config.RawProviderConfig, discovery map
 			result[name] = p
 			continue
 		}
-		if p.APIKey != "" && !strings.Contains(p.APIKey, "${") {
+		if set(p.APIKey) {
 			result[name] = p
 		}
 	}
@@ -867,9 +237,8 @@ func isVertexProviderConfig(p config.RawProviderConfig) bool {
 		(strings.EqualFold(strings.TrimSpace(p.Type), "gemini") && strings.EqualFold(strings.TrimSpace(p.Backend), "vertex"))
 }
 
-func validVertexProviderConfig(p config.RawProviderConfig) bool {
-	if !HasResolvedProviderValue(p.BaseURL) &&
-		(!HasResolvedProviderValue(p.VertexProject) || !HasResolvedProviderValue(p.VertexLocation)) {
+func validVertexProviderConfig(p config.RawProviderConfig, set func(string) bool) bool {
+	if !vertexHasEndpoint(p, set) {
 		return false
 	}
 	authType := strings.ToLower(strings.TrimSpace(p.AuthType))
@@ -877,12 +246,16 @@ func validVertexProviderConfig(p config.RawProviderConfig) bool {
 	case "", "gcp_adc", "adc", "google_adc":
 		return true
 	case "gcp_service_account", "service_account":
-		return HasResolvedProviderValue(p.ServiceAccountFile) ||
-			HasResolvedProviderValue(p.ServiceAccountJSON) ||
-			HasResolvedProviderValue(p.ServiceAccountJSONBase64)
+		return set(p.ServiceAccountFile) || set(p.ServiceAccountJSON) || set(p.ServiceAccountJSONBase64)
 	default:
 		return false
 	}
+}
+
+// vertexHasEndpoint reports whether a Vertex provider sets a base URL or both
+// a project and a location.
+func vertexHasEndpoint(p config.RawProviderConfig, set func(string) bool) bool {
+	return set(p.BaseURL) || (set(p.VertexProject) && set(p.VertexLocation))
 }
 
 // HasResolvedProviderValue reports whether a provider-config field carries a
@@ -894,6 +267,19 @@ func validVertexProviderConfig(p config.RawProviderConfig) bool {
 func HasResolvedProviderValue(value string) bool {
 	value = strings.TrimSpace(value)
 	return value != "" && !strings.Contains(value, "${")
+}
+
+// providerValueSet is HasResolvedProviderValue for values that have not been
+// resolved yet: a secret reference counts as set, because it is resolved or
+// fails later, while a legacy ${VAR} placeholder still does not.
+func providerValueSet(value string) bool {
+	return strings.TrimSpace(value) != "" && !config.HasUnresolvedPlaceholder(value)
+}
+
+// resolvedValueSet reports whether a resolved provider field carries a value.
+// Resolved secrets are data, so "${" in one is not a placeholder.
+func resolvedValueSet(value string) bool {
+	return strings.TrimSpace(value) != ""
 }
 
 // buildProviderConfigs merges each raw provider config with the global ResilienceConfig,
@@ -927,6 +313,7 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 		ServiceAccountJSON:       raw.ServiceAccountJSON,
 		ServiceAccountJSONBase64: raw.ServiceAccountJSONBase64,
 		GCPScope:                 raw.GCPScope,
+		ProxyURL:                 strings.TrimSpace(raw.ProxyURL),
 		Models:                   config.ProviderModelIDs(raw.Models),
 		ModelMetadataOverrides:   config.ProviderModelMetadataOverrides(raw.Models),
 		ModelFilter:              raw.ModelFilter.Normalize(),
@@ -937,11 +324,15 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 		resolved.FairnessFromUserPath = enabledByDefault(raw.FairnessFromUserPath)
 	}
 
+	resolved.Resilience.CircuitBreaker.Scope = config.NormalizeBreakerScope(resolved.Resilience.CircuitBreaker.Scope)
 	if raw.Resilience == nil {
 		return resolved
 	}
 
-	if r := raw.Resilience.Retry; r != nil {
+	if r := raw.Resilience.Retry; r != nil { //nolint:dupl // Explicit field overrides preserve nil-as-inherit semantics for retry settings.
+		if r.RetryOnStatuses != nil {
+			resolved.Resilience.Retry.RetryOnStatuses = r.RetryOnStatuses
+		}
 		if r.MaxRetries != nil {
 			resolved.Resilience.Retry.MaxRetries = *r.MaxRetries
 		}
@@ -959,7 +350,13 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 		}
 	}
 
-	if cb := raw.Resilience.CircuitBreaker; cb != nil {
+	if cb := raw.Resilience.CircuitBreaker; cb != nil { //nolint:dupl // Breaker settings have independent field overrides with the same inheritance semantics.
+		if cb.FailureOnStatuses != nil {
+			resolved.Resilience.CircuitBreaker.FailureOnStatuses = cb.FailureOnStatuses
+		}
+		if cb.Scope != nil {
+			resolved.Resilience.CircuitBreaker.Scope = config.NormalizeBreakerScope(*cb.Scope)
+		}
 		if cb.Enabled != nil {
 			resolved.Resilience.CircuitBreaker.Enabled = *cb.Enabled
 		}
@@ -971,6 +368,9 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 		}
 		if cb.Timeout != nil {
 			resolved.Resilience.CircuitBreaker.Timeout = *cb.Timeout
+		}
+		if cb.SlowCallThreshold != nil {
+			resolved.Resilience.CircuitBreaker.SlowCallThreshold = *cb.SlowCallThreshold
 		}
 	}
 

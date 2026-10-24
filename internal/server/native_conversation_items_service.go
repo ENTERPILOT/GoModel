@@ -40,6 +40,9 @@ func (s *conversationService) CreateConversationItems(c *echo.Context) error {
 	if normalizeErr != nil {
 		return handleError(c, normalizeErr)
 	}
+	if err := s.authorizeConversation(ctx, id); err != nil {
+		return handleError(c, err)
+	}
 	if err := s.conversationStore.AppendItems(ctx, id, items); err != nil {
 		switch {
 		case errors.Is(err, conversationstore.ErrNotFound):
@@ -109,6 +112,9 @@ func (s *conversationService) DeleteConversationItem(c *echo.Context) error {
 	}
 	itemID, err := conversationItemIDFromRequest(c)
 	if err != nil {
+		return handleError(c, err)
+	}
+	if err := s.authorizeConversation(ctx, id); err != nil {
 		return handleError(c, err)
 	}
 	stored, err := s.conversationStore.DeleteItem(ctx, id, itemID)

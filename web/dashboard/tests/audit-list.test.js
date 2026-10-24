@@ -7,6 +7,11 @@ import assert from "node:assert/strict";
 
 import {
   auditCacheRatioLabel,
+  auditEffectiveTab,
+  auditGuardrailActionClass,
+  auditGuardrailRows,
+  auditGuardrailVerdict,
+  auditGuardrailsPane,
   auditCacheRatioPillLabel,
   auditCacheSharePercent,
   auditChangedRequestRevisions,
@@ -696,6 +701,159 @@ test("entries without revisions render no revision tabs", () => {
   assert.equal(auditRequestRevisions(entry).length, 0);
 });
 
+test("per-attempt response panes carry the tried model for the tab badge", () => {
+  const entry = {
+    data: {
+      request_body: { model: "virtual-model-a" },
+      response_body: { ok: true },
+      attempts: [
+        {
+          seq: 1,
+          kind: "primary",
+          provider_name: "provider-a",
+          model: "provider-a/Qwen/Qwen3.6-35B-A3B-FP8",
+          status_code: 503,
+          success: false,
+        },
+        {
+          seq: 2,
+          kind: "failover",
+          provider_name: "provider-b",
+          model: "provider-b/glm-5.3-flash",
+          status_code: 400,
+          success: false,
+        },
+        {
+          seq: 3,
+          kind: "failover",
+          provider_name: "provider-b",
+          model: "provider-b/glm-5.3-flash",
+          status_code: 200,
+          success: true,
+        },
+      ],
+    },
+  };
+
+  const panes = auditPanes(entry);
+  assert.equal(
+    panes.map((p) => p.id).join(","),
+    "request,response-1,response-2,response-3",
+  );
+
+  // Each failover pane carries the requested → tried model strip: the model
+  // the request named and the concrete model that attempt targeted. Without
+  // an alias resolution the source chip reads "requested", not "virtual".
+  const first = panes.find((p) => p.id === "response-1").pane;
+  assert.deepEqual(first.modelStrip, {
+    label: "requested",
+    source: "virtual-model-a",
+    tried: "provider-a/Qwen/Qwen3.6-35B-A3B-FP8",
+  });
+  const second = panes.find((p) => p.id === "response-2").pane;
+  assert.deepEqual(second.modelStrip, {
+    label: "requested",
+    source: "virtual-model-a",
+    tried: "provider-b/glm-5.3-flash",
+  });
+
+  // Alias-resolved entries label the source "virtual" and prefer top-level
+  // requested_model over entry.model and the request body (the same
+  // precedence the metadata row uses).
+  const aliased = {
+    requested_model: "smart-vm",
+    model: "entry-model",
+    alias_used: true,
+    data: {
+      request_body: { model: "body-model" },
+      attempts: [
+        { seq: 1, kind: "primary", model: "provider-a/qwen-35b", status_code: 503, success: false },
+        { seq: 2, kind: "failover", model: "provider-b/glm-flash", status_code: 200, success: true },
+      ],
+    },
+  };
+  assert.deepEqual(auditPanes(aliased).find((p) => p.id === "response-1").pane.modelStrip, {
+    label: "virtual",
+    source: "smart-vm",
+    tried: "provider-a/qwen-35b",
+  });
+
+  // Without requested_model, top-level entry.model steps in before the body.
+  const entryModel = {
+    model: "entry-model",
+    data: {
+      attempts: [
+        { seq: 1, kind: "primary", model: "provider-a/qwen-35b", status_code: 503, success: false },
+        { seq: 2, kind: "failover", model: "provider-b/glm-flash", status_code: 200, success: true },
+      ],
+    },
+  };
+  assert.deepEqual(auditPanes(entryModel).find((p) => p.id === "response-1").pane.modelStrip, {
+    label: "requested",
+    source: "entry-model",
+    tried: "provider-a/qwen-35b",
+  });
+
+  // Without any request-model value anywhere, no strip renders at all — a
+  // lone "tried" chip would read as if the request model were unknown by
+  // design, which it is not.
+  const noSource = {
+    data: {
+      attempts: [
+        { seq: 1, kind: "primary", model: "provider-a/qwen-35b", status_code: 503, success: false },
+        { seq: 2, kind: "failover", model: "provider-b/glm-flash", status_code: 200, success: true },
+      ],
+    },
+  };
+  const noSourcePanes = auditPanes(noSource);
+  assert.ok(!noSourcePanes.find((p) => p.id === "response-1").pane.modelStrip);
+  assert.ok(!noSourcePanes.find((p) => p.id === "response-2").pane.modelStrip);
+
+  // A single successful attempt collapses to the plain response tab, which
+  // carries no model strip (the row's model column already names it).
+  const single = {
+    data: {
+      request_body: { model: "m" },
+      response_body: { ok: true },
+      attempts: [{ seq: 1, kind: "primary", model: "m", status_code: 200, success: true }],
+    },
+  };
+  const singlePanes = auditPanes(single);
+  assert.equal(singlePanes.map((p) => p.id).join(","), "request,response");
+  assert.ok(!singlePanes.find((p) => p.id === "response").pane.modelStrip);
+
+  // A single FAILED attempt keeps the per-attempt path but still hides the
+  // strip — the same `single` rule as the seq/kind/status chips.
+  const loneFailure = {
+    data: {
+      request_body: { model: "m" },
+      attempts: [{ seq: 1, kind: "primary", model: "m", status_code: 503, success: false }],
+    },
+  };
+  const lonePanes = auditPanes(loneFailure);
+  assert.equal(lonePanes.map((p) => p.id).join(","), "request,response-1");
+  assert.ok(!lonePanes.find((p) => p.id === "response-1").pane.modelStrip);
+
+  // Entries that predate per-attempt model capture render no strip instead of
+  // the "-" placeholder.
+  const legacy = {
+    data: {
+      request_body: { model: "m" },
+      attempts: [
+        { seq: 1, kind: "primary", status_code: 503, success: false },
+        { seq: 2, kind: "failover", model: "m", status_code: 200, success: true },
+      ],
+    },
+  };
+  const legacyPanes = auditPanes(legacy);
+  assert.ok(!legacyPanes.find((p) => p.id === "response-1").pane.modelStrip);
+  assert.deepEqual(legacyPanes.find((p) => p.id === "response-2").pane.modelStrip, {
+    label: "requested",
+    source: "m",
+    tried: "m",
+  });
+});
+
 test("formatJSON pretty-prints JSON strings and objects, passing other text through", () => {
   assert.equal(formatJSON(null), "Not captured");
   assert.equal(formatJSON(""), "Not captured");
@@ -920,4 +1078,181 @@ test("auditGroupedLogWithLiveEntries keeps persisted rows over matching previews
   assert.deepEqual(next.entries.map((entry) => entry.id), ["head-a"]);
   assert.equal(next.entries[0].session_count, 2);
   assert.equal(next.total, 1);
+});
+
+// ─── Guardrail outcomes ───
+
+test("auditPanes adds a Guardrails tab only when a guardrail ran", () => {
+  const entry = {
+    status_code: 403,
+    data: {
+      request_body: { model: "gpt-5" },
+      response_body: { error: { message: "blocked" } },
+      guardrails: [
+        {
+          seq: 1,
+          phase: "prompt",
+          step: 10,
+          instance: "pii-filter",
+          type: "string_replace",
+          action: "allow",
+          edited: true,
+          target: "request",
+          duration_ns: 2500000,
+        },
+        {
+          seq: 2,
+          phase: "prompt",
+          step: 20,
+          instance: "policy",
+          action: "block",
+          code: "content_policy",
+          message: "Not allowed",
+          detail: { matched: ["x"] },
+          duration_ns: 900000,
+        },
+      ],
+    },
+  };
+  const panes = auditPanes(entry);
+  assert.equal(panes.map((p) => p.id).join(","), "request,response,guardrails");
+  const pane = panes[2].pane;
+  assert.equal(pane.type, "guardrails");
+  assert.equal(pane.title, "Guardrails");
+  assert.deepEqual(pane.badge, { text: "Blocked", class: "status-error" });
+  assert.deepEqual(pane.rows[0], {
+    id: "guardrail-1",
+    seq: 1,
+    phase: "Prompt",
+    step: "10",
+    instance: "pii-filter",
+    type: "string_replace",
+    action: "allow",
+    actionLabel: "Passed",
+    actionClass: "status-success",
+    edited: "request",
+    code: "",
+    message: "",
+    failMode: "",
+    streamEvents: "",
+    duration: "2.50 ms",
+    detail: "",
+    error: "",
+  });
+  assert.equal(pane.rows[1].actionLabel, "Blocked");
+  assert.equal(pane.rows[1].actionClass, "status-error");
+  assert.equal(pane.rows[1].code, "content_policy");
+  assert.equal(pane.rows[1].message, "Not allowed");
+  assert.equal(pane.rows[1].detail, formatJSON({ matched: ["x"] }));
+  assert.equal(pane.rows[1].duration, "900 µs");
+
+  // The default tab is untouched by the extra pane.
+  assert.equal(auditEffectiveTab(null, entry, panes), "response");
+
+  // No outcomes, no tab.
+  assert.equal(
+    auditPanes({ data: { request_body: {}, response_body: {} } })
+      .map((p) => p.id)
+      .join(","),
+    "request,response",
+  );
+});
+
+test("guardrail rows label failures, warnings and stream edits", () => {
+  const rows = auditGuardrailRows({
+    data: {
+      guardrails: [
+        { seq: 1, phase: "prompt", instance: "flaky", action: "failure", fail_mode: "open", error: "timeout after 2s" },
+        { seq: 2, phase: "prompt", instance: "strict", action: "failure", fail_mode: "closed", error: "boom" },
+        { seq: 3, phase: "response", instance: "tone", action: "warn", code: "tone", message: "Harsh" },
+        { seq: 4, phase: "stream", instance: "redact", action: "allow", edited: true, replaced_events: 2, dropped_events: 0 },
+        { seq: 5, phase: "prompt", instance: "canned", action: "respond", code: "faq" },
+      ],
+    },
+  });
+  assert.deepEqual(
+    rows.map((row) => [row.instance, row.actionLabel, row.actionClass, row.failMode, row.edited]),
+    [
+      ["flaky", "Failed", "status-warning", "open", ""],
+      ["strict", "Failed", "status-error", "closed", ""],
+      ["tone", "Warned", "status-warning", "", ""],
+      ["redact", "Passed", "status-success", "", "response"],
+      ["canned", "Answered", "status-error", "", ""],
+    ],
+  );
+  assert.equal(rows[0].error, "timeout after 2s");
+  assert.equal(rows[0].step, "");
+  assert.equal(rows[3].streamEvents, "2 replaced · 0 dropped");
+  assert.equal(rows[3].phase, "Stream");
+  assert.equal(auditGuardrailActionClass({ action: "skipped" }), "status-neutral");
+});
+
+test("auditGuardrailVerdict names the guardrail that stopped or warned on the request", () => {
+  const verdict = (guardrails) => auditGuardrailVerdict({ data: { guardrails } });
+  assert.deepEqual(
+    verdict([
+      { phase: "prompt", instance: "pii", action: "warn" },
+      { phase: "prompt", instance: "policy", action: "block", code: "x" },
+    ]),
+    { tone: "danger", text: "Guardrail: blocked · policy", actionLabel: "Blocked" },
+  );
+  assert.equal(
+    verdict([{ phase: "prompt", instance: "faq", action: "respond" }]).text,
+    "Guardrail: answered · faq",
+  );
+  assert.equal(
+    verdict([{ phase: "prompt", instance: "strict", action: "failure", fail_mode: "closed" }]).text,
+    "Guardrail: failed · strict",
+  );
+  assert.deepEqual(
+    verdict([
+      { phase: "prompt", instance: "ok", action: "allow" },
+      { phase: "prompt", instance: "flaky", action: "failure", fail_mode: "open" },
+    ]),
+    { tone: "warning", text: "Guardrail: failed · flaky", actionLabel: "Failed" },
+  );
+  assert.deepEqual(
+    verdict([{ phase: "response", instance: "tone", action: "warn" }]),
+    { tone: "warning", text: "Guardrail: warned · tone", actionLabel: "Warned" },
+  );
+  assert.equal(verdict([{ phase: "prompt", instance: "ok", action: "allow", edited: true }]), null);
+  assert.equal(verdict([]), null);
+  assert.equal(auditGuardrailsPane({ data: { guardrails: [{ instance: "ok", action: "allow" }] } }).badge.text, "1");
+});
+
+test("legacy entries derive the Guardrails tab from the revision trail", () => {
+  const entry = {
+    status_code: 403,
+    data: {
+      request_body: {},
+      request_revisions: [
+        {
+          seq: 1,
+          rewriter: "policy",
+          bytes_before: 10,
+          bytes_after: 10,
+          no_change: true,
+          detail: { phase: "prompt", action: "block", code: "content_policy", message: "no" },
+        },
+      ],
+    },
+  };
+  const panes = auditPanes(entry);
+  // The objection is a no-change revision (a Request-tab pill), and its
+  // outcome shows up on the Guardrails tab.
+  assert.equal(panes.map((p) => p.id).join(","), "request,response,guardrails");
+  assert.equal(panes[2].pane.rows[0].instance, "policy");
+  assert.equal(panes[2].pane.rows[0].actionLabel, "Blocked");
+  assert.equal(auditGuardrailVerdict(entry).text, "Guardrail: blocked · policy");
+  // A plain rewriter revision is not a guardrail outcome.
+  assert.equal(
+    auditPanes({
+      data: {
+        request_revisions: [{ seq: 1, rewriter: "compress", bytes_before: 10, bytes_after: 8, body: {} }],
+      },
+    })
+      .map((p) => p.id)
+      .join(","),
+    "request,revision-1,response",
+  );
 });

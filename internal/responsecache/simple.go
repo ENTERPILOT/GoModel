@@ -20,10 +20,20 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
+const embeddingsPath = "/v1/embeddings"
+
 var cacheablePaths = map[string]bool{
 	"/v1/chat/completions": true,
 	"/v1/responses":        true,
-	"/v1/embeddings":       true,
+	embeddingsPath:         true,
+}
+
+// semanticCacheablePath reports whether a path may be served from the semantic
+// layer. Embeddings are excluded on purpose: an embedding must represent the
+// exact text it was requested for, so replaying the vector of a merely similar
+// input would return a wrong answer rather than an equivalent one.
+func semanticCacheablePath(path string) bool {
+	return cacheablePaths[path] && path != embeddingsPath
 }
 
 const (
@@ -75,14 +85,14 @@ func (m *simpleCacheMiddleware) TryHit(ex exchange, body []byte) (bool, error) {
 		return false, nil
 	}
 	path := ex.Path()
-	plan := core.GetWorkflow(ex.Context())
-	key := hashRequest(path, body, plan)
+	key := exactCacheKey(ex, body)
 	cached, err := m.store.Get(ex.Context(), key)
 	if err != nil {
 		return false, nil
 	}
 	if len(cached) > 0 {
-		if err := ex.ReplayHit(body, cached, CacheTypeExact); err != nil {
+		err := ex.ReplayHit(body, cached, CacheTypeExact)
+		if err != nil && !replayCommitted(err) {
 			slog.Warn("response cache replay failed", "path", path, "cache_type", CacheTypeExact, "err", err)
 			return false, nil
 		}
@@ -94,7 +104,7 @@ func (m *simpleCacheMiddleware) TryHit(ex exchange, body []byte) (bool, error) {
 			"path", path,
 			"request_id", core.GetRequestID(ex.Context()),
 		)
-		return true, nil
+		return true, err
 	}
 	return false, nil
 }
@@ -105,9 +115,7 @@ func (m *simpleCacheMiddleware) StoreAfter(ex exchange, body []byte, next func()
 	if m == nil || m.store == nil {
 		return next()
 	}
-	path := ex.Path()
-	plan := core.GetWorkflow(ex.Context())
-	key := hashRequest(path, body, plan)
+	key := exactCacheKey(ex, body)
 
 	call, leader := m.joinMiss(key)
 	if leader {
@@ -130,14 +138,22 @@ func (m *simpleCacheMiddleware) StoreAfter(ex exchange, body []byte, next func()
 		_, err := m.captureAndStore(ex, key, next)
 		return err
 	}
-	if err := ex.ReplayHit(body, call.data, CacheTypeExact); err != nil {
+	err := ex.ReplayHit(body, call.data, CacheTypeExact)
+	if err != nil && !replayCommitted(err) {
 		return next()
 	}
 	ex.MarkHit(CacheTypeExact)
 	if m.hitRecorder != nil {
 		m.hitRecorder(ex, call.data, CacheTypeExact)
 	}
-	return nil
+	return err
+}
+
+// exactCacheKey derives the exact-cache key for one exchange, scoping the entry
+// to the request's guardrail chain identity.
+func exactCacheKey(ex exchange, body []byte) string {
+	ctx := ex.Context()
+	return hashRequest(ex.Path(), body, core.GetWorkflow(ctx), core.GetGuardrailsHash(ctx))
 }
 
 // captureAndStore executes one cache miss without joining the coalescing
@@ -244,7 +260,7 @@ func isStreamingRequest(path string, body []byte) bool {
 }
 
 func isStreamingRequestGJSON(path string, body []byte) bool {
-	if path == "/v1/embeddings" {
+	if path == embeddingsPath {
 		return false
 	}
 	// gjson returns the first matching top-level field. That differs from
@@ -257,7 +273,13 @@ func isStreamingRequestGJSON(path string, body []byte) bool {
 	return result.Bool()
 }
 
-func hashRequest(path string, body []byte, plan *core.Workflow) string {
+// hashRequest builds the exact-cache key. chainHash is the effective guardrail
+// chain identity (prompt, response and stream phases; see plugins.Chains.CacheHash),
+// already computed once per request by the workflow compiler and carried on the
+// context. Mixing it in scopes every entry to the chain that produced it, so a
+// request whose response or stream guardrails differ misses instead of being
+// served a body those guardrails never saw.
+func hashRequest(path string, body []byte, plan *core.Workflow, chainHash string) string {
 	h := sha256.New()
 	h.Write([]byte(path))
 	h.Write([]byte{0})
@@ -269,6 +291,8 @@ func hashRequest(path string, body []byte, plan *core.Workflow) string {
 		h.Write([]byte(plan.ResolvedQualifiedModel()))
 		h.Write([]byte{0})
 	}
+	h.Write([]byte(chainHash))
+	h.Write([]byte{0})
 	h.Write(cacheKeyRequestBody(path, body))
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -335,7 +359,7 @@ func captureResponseForCache(c *echo.Context, path, warnMessage string, next fun
 	if !shouldStoreCapturedResponse(capture.effectiveStatusCode()) || capture.body.Len() == 0 {
 		return nil, false, nil
 	}
-	if core.GetFailoverUsed(c.Request().Context()) {
+	if ctx := c.Request().Context(); core.GetFailoverUsed(ctx) || core.PluginNoStore(ctx) {
 		return nil, false, nil
 	}
 	data, ok := capture.cachedBody(c.Response().Header().Get("Content-Type"))

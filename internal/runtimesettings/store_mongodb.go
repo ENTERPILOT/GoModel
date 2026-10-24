@@ -41,6 +41,55 @@ func (s *MongoDBStore) Get(ctx context.Context, key string) (string, bool, error
 	return doc.Value, true, nil
 }
 
+// SetDefault inserts value unless key exists, then reads back the winner.
+// An upsert with $setOnInsert is atomic on the _id, so two instances
+// initialising at once cannot both believe they won.
+func (s *MongoDBStore) SetDefault(ctx context.Context, key, value string) (string, error) {
+	_, err := s.settings.UpdateOne(ctx,
+		bson.D{{Key: "_id", Value: key}},
+		bson.D{{Key: "$setOnInsert", Value: bson.D{
+			{Key: "value", Value: value},
+			{Key: "updated_at", Value: time.Now().Unix()},
+		}}},
+		options.UpdateOne().SetUpsert(true),
+	)
+	if err != nil {
+		return "", fmt.Errorf("initialise runtime setting %q: %w", key, err)
+	}
+	stored, found, err := s.Get(ctx, key)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", fmt.Errorf("initialise runtime setting %q: value missing after insert", key)
+	}
+	return stored, nil
+}
+
+// Replace updates key to value only while it still holds old, then reads
+// back the winner. The filtered update is atomic on the document, so of two
+// instances replacing the same old value only one does.
+func (s *MongoDBStore) Replace(ctx context.Context, key, old, value string) (string, error) {
+	_, err := s.settings.UpdateOne(ctx,
+		bson.D{{Key: "_id", Value: key}, {Key: "value", Value: old}},
+		bson.D{{Key: "$set", Value: bson.D{
+			{Key: "value", Value: value},
+			{Key: "updated_at", Value: time.Now().Unix()},
+		}}},
+	)
+	if err != nil {
+		return "", fmt.Errorf("replace runtime setting %q: %w", key, err)
+	}
+	stored, found, err := s.Get(ctx, key)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", fmt.Errorf("replace runtime setting %q: value missing", key)
+	}
+	return stored, nil
+}
+
 // Set upserts a persisted value.
 func (s *MongoDBStore) Set(ctx context.Context, key, value string) error {
 	doc := mongoDocument{Key: key, Value: value, UpdatedAt: time.Now().Unix()}

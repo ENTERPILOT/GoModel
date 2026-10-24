@@ -2,15 +2,13 @@ package xai
 
 import (
 	"context"
-	"encoding/json"
-	"io"
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestCreateImage verifies the xAI provider advertises image generation and
@@ -36,9 +34,9 @@ func TestCreateImage(t *testing.T) {
 			body:       `{"created":1713833628,"data":[{"url":"https://imgen.x.ai/xai-imgen/img.jpg"},{"url":"https://imgen.x.ai/xai-imgen/img2.jpg"}]}`,
 			wantBody:   map[string]any{"model": "grok-imagine-image", "prompt": "A cat", "n": float64(2), "response_format": "url"},
 			check: func(t *testing.T, resp *core.ImageGenerationResponse) {
-				if resp.Created != 1713833628 || len(resp.Data) != 2 || resp.Data[0].URL != "https://imgen.x.ai/xai-imgen/img.jpg" {
-					t.Errorf("response = %+v", resp)
-				}
+				assert.Equal(t, int64(1713833628), resp.Created)
+				require.Len(t, resp.Data, 2)
+				assert.Equal(t, "https://imgen.x.ai/xai-imgen/img.jpg", resp.Data[0].URL)
 			},
 		},
 		{
@@ -47,12 +45,8 @@ func TestCreateImage(t *testing.T) {
 			statusCode: http.StatusOK,
 			body:       `{}`,
 			check: func(t *testing.T, resp *core.ImageGenerationResponse) {
-				if resp.Created == 0 {
-					t.Error("Created should default to now when upstream omits it")
-				}
-				if resp.Data == nil {
-					t.Error("Data should be an empty array, not null")
-				}
+				assert.NotEqual(t, int64(0), resp.Created)
+				assert.NotNil(t, resp.Data)
 			},
 		},
 		{
@@ -66,45 +60,27 @@ func TestCreateImage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var gotMethod, gotPath string
-			var gotBody map[string]any
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				gotMethod, gotPath = r.Method, r.URL.Path
-				if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
-					t.Errorf("Authorization header should start with 'Bearer '")
-				}
-				raw, _ := io.ReadAll(r.Body)
-				_ = json.Unmarshal(raw, &gotBody)
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(tt.statusCode)
-				_, _ = w.Write([]byte(tt.body))
-			}))
-			defer server.Close()
-
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
+			server, capture := providertest.JSONServer(t, tt.statusCode, tt.body)
+			provider := newTestProvider(server.URL)
 
 			var imager core.ImageProvider = provider
 			resp, err := imager.CreateImage(context.Background(), tt.req)
 
-			if gotMethod != http.MethodPost || gotPath != "/images/generations" {
-				t.Errorf("request = %s %s, want POST /images/generations", gotMethod, gotPath)
-			}
+			req := capture.Last(t)
+			assert.Equal(t, http.MethodPost, req.Method)
+			assert.Equal(t, "/images/generations", req.Path)
+			assert.Equal(t, "Bearer "+testAPIKey, req.Header.Get("Authorization"))
+			sent := req.JSON(t)
 			for key, want := range tt.wantBody {
-				if got := gotBody[key]; got != want {
-					t.Errorf("forwarded[%q] = %v, want %v", key, got, want)
-				}
+				assert.Equal(t, want, sent[key], "forwarded field %q", key)
 			}
 
 			if tt.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("error = %v, want message containing %q", err, tt.wantErr)
-				}
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
 				return
 			}
-			if err != nil {
-				t.Fatalf("CreateImage() error = %v", err)
-			}
+			require.NoError(t, err)
 			tt.check(t, resp)
 		})
 	}

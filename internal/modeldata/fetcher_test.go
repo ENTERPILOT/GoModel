@@ -4,23 +4,28 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFetch_EmptyURL(t *testing.T) {
 	list, raw, err := Fetch(context.Background(), "")
-	if list != nil || raw != nil || err != nil {
-		t.Error("expected all nil for empty URL")
-	}
+	assert.Nil(t, list)
+	assert.Nil(t, raw)
+	assert.NoError(t, err)
 }
 
 func TestFetch_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Accept") != "application/json" {
-			t.Error("expected Accept: application/json header")
-		}
+		assert.Equal(t, "application/json", r.Header.Get("Accept"))
+
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
 			"version": 1,
@@ -33,26 +38,13 @@ func TestFetch_Success(t *testing.T) {
 	defer server.Close()
 
 	list, raw, err := Fetch(context.Background(), server.URL)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if list == nil {
-		t.Fatal("expected non-nil list")
-		return
-	}
-	if raw == nil {
-		t.Fatal("expected non-nil raw bytes")
-		return
-	}
-	if list.Version != 1 {
-		t.Errorf("Version = %d, want 1", list.Version)
-	}
-	if len(list.Providers) != 1 {
-		t.Errorf("Providers len = %d, want 1", len(list.Providers))
-	}
-	if len(list.Models) != 1 {
-		t.Errorf("Models len = %d, want 1", len(list.Models))
-	}
+	require.NoError(t, err)
+
+	require.NotNil(t, list, "expected non-nil list")
+	require.NotNil(t, raw, "expected non-nil raw bytes")
+	assert.Equal(t, 1, list.Version)
+	assert.Len(t, list.Providers, 1)
+	assert.Len(t, list.Models, 1)
 }
 
 func TestFetch_HTTPError(t *testing.T) {
@@ -62,9 +54,7 @@ func TestFetch_HTTPError(t *testing.T) {
 	defer server.Close()
 
 	_, _, err := Fetch(context.Background(), server.URL)
-	if err == nil {
-		t.Error("expected error for 404 response")
-	}
+	assert.Error(t, err)
 }
 
 func TestFetch_InvalidJSON(t *testing.T) {
@@ -74,14 +64,16 @@ func TestFetch_InvalidJSON(t *testing.T) {
 	defer server.Close()
 
 	_, _, err := Fetch(context.Background(), server.URL)
-	if err == nil {
-		t.Error("expected error for invalid JSON")
-	}
+	assert.Error(t, err)
 }
 
 func TestFetch_Timeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(500 * time.Millisecond)
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(500 * time.Millisecond):
+		}
 		_, _ = w.Write([]byte("{}"))
 	}))
 	defer server.Close()
@@ -90,9 +82,7 @@ func TestFetch_Timeout(t *testing.T) {
 	defer cancel()
 
 	_, _, err := Fetch(ctx, server.URL)
-	if err == nil {
-		t.Error("expected error for timeout")
-	}
+	assert.Error(t, err)
 }
 
 func TestFetch_OversizedBody(t *testing.T) {
@@ -106,61 +96,46 @@ func TestFetch_OversizedBody(t *testing.T) {
 	defer server.Close()
 
 	_, _, err := Fetch(context.Background(), server.URL)
-	if err == nil {
-		t.Error("expected error for oversized body")
-	}
-	if err != nil && !strings.Contains(err.Error(), "too large") {
-		t.Errorf("expected 'too large' error, got: %v", err)
+	require.Error(t, err)
+
+	if err != nil {
+		assert.Contains(t, err.Error(), "too large")
 	}
 }
 
 func TestFetchIfChanged_CapturesETag(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("If-None-Match"); got != "" {
-			t.Errorf("unexpected If-None-Match header %q on unconditional fetch", got)
-		}
+		got := r.Header.Get("If-None-Match")
+		assert.Empty(t, got)
+
 		w.Header().Set("ETag", `"abc123"`)
 		_, _ = w.Write([]byte(`{"version": 1, "providers": {}, "models": {}, "provider_models": {}}`))
 	}))
 	defer server.Close()
 
 	result, err := FetchIfChanged(context.Background(), server.URL, "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.NotModified {
-		t.Error("expected NotModified=false for 200 response")
-	}
-	if result.List == nil || result.Raw == nil {
-		t.Fatal("expected list and raw bytes")
-	}
-	if result.ETag != `"abc123"` {
-		t.Errorf("ETag = %q, want %q", result.ETag, `"abc123"`)
-	}
+	require.NoError(t, err)
+	assert.False(t, result.NotModified)
+	require.NotNil(t, result.List)
+	require.NotNil(t, result.Raw)
+	assert.Equal(t, `"abc123"`, result.ETag)
 }
 
 func TestFetchIfChanged_NotModified(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("If-None-Match"); got != `"abc123"` {
-			t.Errorf("If-None-Match = %q, want %q", got, `"abc123"`)
-		}
+		got := r.Header.Get("If-None-Match")
+		assert.Equal(t, `"abc123"`, got)
+
 		w.WriteHeader(http.StatusNotModified)
 	}))
 	defer server.Close()
 
 	result, err := FetchIfChanged(context.Background(), server.URL, `"abc123"`)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !result.NotModified {
-		t.Fatal("expected NotModified=true for 304 response")
-	}
-	if result.List != nil || result.Raw != nil {
-		t.Error("expected nil list and raw on 304")
-	}
-	if result.ETag != `"abc123"` {
-		t.Errorf("ETag = %q, want the presented validator carried forward", result.ETag)
-	}
+	require.NoError(t, err)
+	require.True(t, result.NotModified)
+	assert.Nil(t, result.List)
+	assert.Nil(t, result.Raw)
+	assert.Equal(t, `"abc123"`, result.ETag)
 }
 
 func TestFetchIfChanged_NotModifiedAdoptsResponseETag(t *testing.T) {
@@ -171,15 +146,9 @@ func TestFetchIfChanged_NotModifiedAdoptsResponseETag(t *testing.T) {
 	defer server.Close()
 
 	result, err := FetchIfChanged(context.Background(), server.URL, `"stale"`)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !result.NotModified {
-		t.Fatal("expected NotModified=true for 304 response")
-	}
-	if result.ETag != `"refreshed"` {
-		t.Errorf("ETag = %q, want the 304's refreshed validator", result.ETag)
-	}
+	require.NoError(t, err)
+	require.True(t, result.NotModified)
+	assert.Equal(t, `"refreshed"`, result.ETag)
 }
 
 func TestFetchIfChanged_ChangedContent(t *testing.T) {
@@ -190,18 +159,11 @@ func TestFetchIfChanged_ChangedContent(t *testing.T) {
 	defer server.Close()
 
 	result, err := FetchIfChanged(context.Background(), server.URL, `"v1"`)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.NotModified {
-		t.Error("expected NotModified=false when content changed")
-	}
-	if result.List == nil || result.List.Version != 2 {
-		t.Fatal("expected updated list")
-	}
-	if result.ETag != `"v2"` {
-		t.Errorf("ETag = %q, want %q", result.ETag, `"v2"`)
-	}
+	require.NoError(t, err)
+	assert.False(t, result.NotModified)
+	require.NotNil(t, result.List)
+	require.Equal(t, 2, result.List.Version)
+	assert.Equal(t, `"v2"`, result.ETag)
 }
 
 func TestFetchIfChanged_ServerWithoutETagSupport(t *testing.T) {
@@ -211,18 +173,10 @@ func TestFetchIfChanged_ServerWithoutETagSupport(t *testing.T) {
 	defer server.Close()
 
 	result, err := FetchIfChanged(context.Background(), server.URL, `"stale"`)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.NotModified {
-		t.Error("expected NotModified=false when server ignores validators")
-	}
-	if result.List == nil {
-		t.Fatal("expected list from 200 response")
-	}
-	if result.ETag != "" {
-		t.Errorf("ETag = %q, want empty when server returns none", result.ETag)
-	}
+	require.NoError(t, err)
+	assert.False(t, result.NotModified)
+	require.NotNil(t, result.List)
+	assert.Empty(t, result.ETag)
 }
 
 func TestParse_ValidJSON(t *testing.T) {
@@ -234,12 +188,8 @@ func TestParse_ValidJSON(t *testing.T) {
 		"provider_models": {}
 	}`)
 	list, err := Parse(raw)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if list.Version != 1 {
-		t.Errorf("Version = %d, want 1", list.Version)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 1, list.Version)
 }
 
 func TestParse_BuildsReverseIndex(t *testing.T) {
@@ -265,30 +215,21 @@ func TestParse_BuildsReverseIndex(t *testing.T) {
 		}
 	}`)
 	list, err := Parse(raw)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if list.providerModelByActualID == nil {
-		t.Fatal("expected providerModelByActualID to be built")
-		return
-	}
+	require.NoError(t, err)
+
+	require.NotNil(t, list.providerModelByActualID, "expected providerModelByActualID to be built")
 	compositeKey, ok := list.providerModelByActualID["openai/gpt-4o-2024-08-06"]
-	if !ok {
-		t.Fatal("expected reverse index entry for openai/gpt-4o-2024-08-06")
-	}
-	if compositeKey != "openai/gpt-4o" {
-		t.Errorf("reverse index = %s, want openai/gpt-4o", compositeKey)
-	}
+	require.True(t, ok)
+	assert.Equal(t, "openai/gpt-4o", compositeKey)
+
 	targets := list.aliasTargetsByID["gpt-4o-latest"]
-	if len(targets) != 2 {
-		t.Fatalf("expected 2 alias targets for gpt-4o-latest, got %d", len(targets))
-	}
+	require.Len(t, targets, 2)
+
 	var sawGeneric bool
 	var sawProviderSpecific bool
 	for _, target := range targets {
-		if target.ModelRef != "gpt-4o" {
-			t.Fatalf("alias target ModelRef = %q, want gpt-4o", target.ModelRef)
-		}
+		require.Equal(t, "gpt-4o", target.ModelRef)
+
 		if target.ProviderType == "" {
 			sawGeneric = true
 		}
@@ -296,12 +237,8 @@ func TestParse_BuildsReverseIndex(t *testing.T) {
 			sawProviderSpecific = true
 		}
 	}
-	if !sawGeneric {
-		t.Fatal("expected generic alias target for gpt-4o-latest")
-	}
-	if !sawProviderSpecific {
-		t.Fatal("expected provider-qualified alias target for gpt-4o-latest")
-	}
+	require.True(t, sawGeneric)
+	require.True(t, sawProviderSpecific)
 }
 
 func TestParse_BuildsReverseIndexFromProviderModelID(t *testing.T) {
@@ -331,20 +268,172 @@ func TestParse_BuildsReverseIndexFromProviderModelID(t *testing.T) {
 		}
 	}`)
 	list, err := Parse(raw)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got := list.providerModelByActualID["openai/gpt-4o-2024-11-20"]; got != "openai/gpt-4o" {
-		t.Fatalf("reverse index = %q, want %q", got, "openai/gpt-4o")
-	}
-	if list.Models["gpt-4o"].Rankings["chatbot_arena"].Elo == nil {
-		t.Fatal("expected elo ranking to be parsed")
-	}
+	require.NoError(t, err)
+	got := list.providerModelByActualID["openai/gpt-4o-2024-11-20"]
+	require.Equal(t, "openai/gpt-4o", got)
+	require.NotNil(t, list.Models["gpt-4o"].Rankings["chatbot_arena"].Elo)
 }
 
 func TestParse_InvalidJSON(t *testing.T) {
 	_, err := Parse([]byte("not json"))
-	if err == nil {
-		t.Error("expected error for invalid JSON")
+	assert.Error(t, err)
+}
+
+func TestParse_PricingTimeWindows(t *testing.T) {
+	// The registry's time_windows format (ai-model-list pricing.time_windows),
+	// including a per-range "days" list and an unrelated future field that an
+	// older GoModel must keep ignoring.
+	raw := []byte(`{
+		"version": 1,
+		"updated_at": "2026-08-24T00:00:00Z",
+		"providers": {"deepseek": {"display_name": "DeepSeek", "api_type": "openai"}},
+		"models": {"deepseek-v4-flash": {"display_name": "DeepSeek V4 Flash", "modes": ["chat"]}},
+		"provider_models": {
+			"deepseek/deepseek-v4-flash": {
+				"model_ref": "deepseek-v4-flash",
+				"enabled": true,
+				"pricing": {
+					"currency": "USD",
+					"input_per_mtok": 0.44,
+					"output_per_mtok": 1.32,
+					"cached_input_per_mtok": 0.014,
+					"time_windows": [{
+						"label": "off_peak",
+						"utc_ranges": [
+							{"days": ["mon", "tue", "wed", "thu", "fri"], "start": "10:00", "end": "24:00"},
+							{"days": ["sat", "sun"], "start": "00:00", "end": "24:00"},
+							{"start": "04:00", "end": "06:00", "future_field": true}
+						],
+						"pricing": {"input_per_mtok": 0.22, "output_per_mtok": 0.66, "cached_input_per_mtok": 0.007}
+					}]
+				}
+			}
+		}
+	}`)
+
+	list, err := Parse(raw)
+	require.NoError(t, err)
+
+	pricing := list.ProviderModels["deepseek/deepseek-v4-flash"].Pricing
+	require.NotNil(t, pricing)
+	require.Len(t, pricing.TimeWindows, 1)
+
+	window := pricing.TimeWindows[0]
+	require.Equal(t, "off_peak", window.Label)
+	require.Len(t, window.UTCRanges, 3, "window = %+v, want off_peak with 3 ranges", window)
+	got := window.UTCRanges[0]
+	require.Len(t, got.Days, 5)
+	require.Equal(t, "10:00", got.Start)
+	require.Equal(t, "24:00", got.End, "range[0] = %+v", got)
+	got = window.UTCRanges[2]
+	require.Empty(t, got.Days)
+	require.Equal(t, "04:00", got.Start, "range[2] = %+v, want no day restriction", got)
+	require.NotNil(t, window.Pricing.InputPerMtok)
+	require.Equal(t, 0.22, *window.Pricing.InputPerMtok)
+	require.Nil(t, window.Pricing.CacheWritePerMtok, "window rates = %+v", window.Pricing)
+
+	// Saturday 08:00 UTC would be a peak hour on a weekday.
+	saturday := time.Date(2026, 8, 29, 8, 0, 0, 0, time.UTC)
+	offPeak := pricing.AtTime(saturday)
+	require.NotNil(t, offPeak.InputPerMtok)
+	require.NotNil(t, offPeak.OutputPerMtok)
+	require.Equal(t, 0.22, *offPeak.InputPerMtok, "AtTime(saturday) input")
+	require.Equal(t, 0.66, *offPeak.OutputPerMtok, "AtTime(saturday) output")
+	monday := time.Date(2026, 8, 24, 8, 0, 0, 0, time.UTC)
+	peak := pricing.AtTime(monday)
+	require.NotNil(t, peak.InputPerMtok)
+	require.Equal(t, 0.44, *peak.InputPerMtok, "AtTime(monday peak) input")
+}
+
+func TestFetchIfChanged_LocalFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "models.json")
+	content := []byte(`{"models":{"openai/gpt-4o":{"provider":"openai","name":"gpt-4o"}}}`)
+	err := os.WriteFile(path, content, 0o600)
+	require.NoError(t, err)
+
+	for _, location := range []string{path, "file://" + path} {
+		t.Run(location, func(t *testing.T) {
+			first, err := FetchIfChanged(context.Background(), location, "")
+			require.NoError(t, err)
+			require.NotNil(t, first.List)
+			require.False(t, first.NotModified)
+			require.NotEmpty(t, first.ETag, "first read should parse and return a validator: %+v", first)
+			require.Len(t, first.List.Models, 1)
+
+			second, err := FetchIfChanged(context.Background(), location, first.ETag)
+			require.NoError(t, err)
+			require.True(t, second.NotModified)
+			require.Equal(t, first.ETag, second.ETag, "unchanged file should report NotModified with the same validator: %+v", second)
+			err = os.WriteFile(path, []byte(`{"models":{}}`), 0o600)
+			require.NoError(t, err)
+
+			third, err := FetchIfChanged(context.Background(), location, first.ETag)
+			require.NoError(t, err)
+			require.False(t, third.NotModified)
+			require.NotNil(t, third.List)
+			require.NotEqual(t, first.ETag, third.ETag, "changed file should be re-read with a new validator: %+v", third)
+			err = // Restore for the next location.
+				os.WriteFile(path, content, 0o600)
+			require.NoError(t, err)
+		})
 	}
+}
+
+func TestFetchIfChanged_LocalFileErrors(t *testing.T) {
+	dir := t.TempDir()
+	_, err := FetchIfChanged(context.Background(), filepath.Join(dir, "missing.json"), "")
+	require.Error(t, err)
+
+	bad := filepath.Join(dir, "bad.json")
+	err = os.WriteFile(bad, []byte("not json"), 0o600)
+	require.NoError(t, err)
+	_, err = FetchIfChanged(context.Background(), bad, "")
+	require.Error(t, err)
+	_, err = FetchIfChanged(context.Background(), dir, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a regular file")
+}
+
+func TestLocalPath(t *testing.T) {
+	tests := []struct {
+		in       string
+		wantPath string
+		wantOK   bool
+	}{
+		{"https://example.com/m.json", "", false},
+		{"http://example.com/m.json", "", false},
+		{"file:///etc/gomodel/models.json", "/etc/gomodel/models.json", true},
+		{"file://localhost/etc/models.json", "/etc/models.json", true},
+		{"/etc/gomodel/models.json", "/etc/gomodel/models.json", true},
+		{"./models.json", "./models.json", true},
+		{"  /tmp/m.json  ", "/tmp/m.json", true},
+	}
+	for _, tt := range tests {
+		gotPath, gotOK := localPath(tt.in)
+		assert.Equal(t, tt.wantOK, gotOK)
+		assert.Equal(t, tt.wantPath, gotPath, "localPath(%q) = (%q, %v), want (%q, %v)", tt.in, gotPath, gotOK, tt.wantPath, tt.wantOK)
+	}
+}
+
+func TestFetchIfChanged_LocalFileOversizedIsRejectedBeforeAllocation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "huge.json")
+	f, err := os.Create(path)
+	require.NoError(t, err)
+	err = // A sparse file well past the limit costs no disk and no memory to
+		// create; a full read would allocate the whole thing.
+		f.Truncate(maxBodySize * 8)
+	require.NoError(t, err)
+
+	f.Close()
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	_, err = FetchIfChanged(context.Background(), path, "")
+	runtime.ReadMemStats(&after)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "too large")
+	allocated := after.TotalAlloc - before.TotalAlloc
+	require.LessOrEqual(t, allocated, uint64(maxBodySize))
 }

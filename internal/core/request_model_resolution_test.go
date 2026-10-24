@@ -1,6 +1,11 @@
 package core
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
 
 func TestRequestModelResolutionRequestedQualifiedModel(t *testing.T) {
 	tests := []struct {
@@ -40,9 +45,8 @@ func TestRequestModelResolutionRequestedQualifiedModel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.in.RequestedQualifiedModel(); got != tt.want {
-				t.Fatalf("RequestedQualifiedModel() = %q, want %q", got, tt.want)
-			}
+			got := tt.in.RequestedQualifiedModel()
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -81,9 +85,7 @@ func TestRequestModelResolutionResolvedRouteModel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.in.ResolvedRouteModel(); got != tt.want {
-				t.Fatalf("ResolvedRouteModel() = %q, want %q", got, tt.want)
-			}
+			assert.Equal(t, tt.want, tt.in.ResolvedRouteModel())
 		})
 	}
 }
@@ -95,24 +97,39 @@ func TestRequestModelResolutionCacheDerivedSelectors(t *testing.T) {
 	}
 	resolution.CacheDerivedSelectors()
 
-	if got := resolution.ResolvedQualifiedModel(); got != "openai/gpt-4o" {
-		t.Fatalf("ResolvedQualifiedModel() = %q, want openai/gpt-4o", got)
-	}
-	if got := resolution.ResolvedRouteModel(); got != "openai-primary/gpt-4o" {
-		t.Fatalf("ResolvedRouteModel() = %q, want openai-primary/gpt-4o", got)
-	}
+	assert.Equal(t, "openai/gpt-4o", resolution.ResolvedQualifiedModel())
+	assert.Equal(t, "openai-primary/gpt-4o", resolution.ResolvedRouteModel())
 
 	// Without the cache the getters compute the same values.
 	uncached := &RequestModelResolution{
 		ResolvedSelector: ModelSelector{Provider: "openai", Model: "gpt-4o"},
 		ProviderName:     "openai-primary",
 	}
-	if got := uncached.ResolvedQualifiedModel(); got != resolution.ResolvedQualifiedModel() {
-		t.Fatalf("uncached ResolvedQualifiedModel() = %q, want %q", got, resolution.ResolvedQualifiedModel())
-	}
-	if got := uncached.ResolvedRouteModel(); got != resolution.ResolvedRouteModel() {
-		t.Fatalf("uncached ResolvedRouteModel() = %q, want %q", got, resolution.ResolvedRouteModel())
-	}
+	assert.Equal(t, resolution.ResolvedQualifiedModel(), uncached.ResolvedQualifiedModel())
+	assert.Equal(t, resolution.ResolvedRouteModel(), uncached.ResolvedRouteModel())
 
-	(*RequestModelResolution)(nil).CacheDerivedSelectors()
+	assert.NotPanics(t, func() { (*RequestModelResolution)(nil).CacheDerivedSelectors() })
+}
+
+// A copy rewritten after caching, like the failover clone a native dispatch
+// builds, must report its own route rather than the memoized original.
+func TestRequestModelResolutionCacheIgnoresRewrittenCopy(t *testing.T) {
+	primary := &RequestModelResolution{
+		ResolvedSelector: ModelSelector{Provider: "openai", Model: "gpt-4o"},
+		ProviderName:     "openai-primary",
+	}
+	primary.CacheDerivedSelectors()
+
+	failover := *primary
+	failover.ResolvedSelector = ModelSelector{Provider: "anthropic", Model: "claude-sonnet-4-5"}
+	failover.ProviderName = "anthropic-eu"
+
+	assert.Equal(t, "anthropic/claude-sonnet-4-5", failover.ResolvedQualifiedModel())
+	assert.Equal(t, "anthropic-eu/claude-sonnet-4-5", failover.ResolvedRouteModel())
+	assert.Equal(t, "openai/gpt-4o", primary.ResolvedQualifiedModel())
+	assert.Equal(t, "openai-primary/gpt-4o", primary.ResolvedRouteModel())
+
+	renamed := *primary
+	renamed.ProviderName = "openai-backup"
+	assert.Equal(t, "openai-backup/gpt-4o", renamed.ResolvedRouteModel())
 }

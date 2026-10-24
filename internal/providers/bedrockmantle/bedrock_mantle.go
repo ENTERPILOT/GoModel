@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -61,16 +60,24 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 		return &Provider{configErr: err}
 	}
 
+	// opts.HTTPClient carries the factory's proxy-aware transport when the
+	// provider has an outbound proxy; auth wraps it either way, and the AWS
+	// credential chain resolves through it too.
+	base := opts.HTTPClient
+	if base == nil {
+		base = httpclient.NewDefaultHTTPClient()
+	}
+
 	var credentials aws.CredentialsProvider
 	if keys.Len() == 0 {
-		awsCfg, loadErr := awsconfig.LoadDefaultConfig(context.Background(), awsconfig.WithRegion(endpoint.region))
+		awsCfg, loadErr := awsconfig.LoadDefaultConfig(context.Background(), awsconfig.WithRegion(endpoint.region), awsconfig.WithHTTPClient(base))
 		if loadErr != nil {
 			return &Provider{configErr: fmt.Errorf("load AWS config: %w", loadErr)}
 		}
 		credentials = awsCfg.Credentials
 	}
 
-	client := authenticatedClient(httpclient.NewDefaultHTTPClient(), keys, credentials, endpoint.region)
+	client := authenticatedClient(base, keys, credentials, endpoint.region)
 	return newProvider(endpoint, cfg, opts, client)
 }
 
@@ -94,13 +101,13 @@ func (p *Provider) ready() error {
 	return core.NewProviderError(providerName, http.StatusBadGateway, "invalid Bedrock Mantle provider configuration: "+err.Error(), err)
 }
 
+// CheckAvailability confirms the endpoint answers a model list. The caller
+// owns the probe deadline.
 func (p *Provider) CheckAvailability(ctx context.Context) error {
 	if err := p.ready(); err != nil {
 		return err
 	}
-	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	_, err := p.compatible.ListModels(probeCtx)
+	_, err := p.compatible.ListModels(ctx)
 	return err
 }
 

@@ -2,6 +2,7 @@ package virtualmodels
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -19,8 +20,11 @@ type Result struct {
 	Store   Store
 
 	stopRefresh func()
-	closeOnce   sync.Once
-	closeErr    error
+	// closeStrategies releases the routing-strategy plugin instances the
+	// service was given, when the resolver owns any.
+	closeStrategies func() error
+	closeOnce       sync.Once
+	closeErr        error
 }
 
 // Close releases resources held by the virtual models subsystem.
@@ -33,17 +37,32 @@ func (r *Result) Close() error {
 			r.stopRefresh()
 			r.stopRefresh = nil
 		}
+		if r.closeStrategies != nil {
+			if err := r.closeStrategies(); err != nil {
+				r.closeErr = fmt.Errorf("routing strategies close: %w", err)
+			}
+		}
 		if r.Store != nil {
 			if err := r.Store.Close(); err != nil {
-				r.closeErr = fmt.Errorf("store close: %w", err)
+				r.closeErr = errors.Join(r.closeErr, fmt.Errorf("store close: %w", err))
 			}
 		}
 	})
 	return r.closeErr
 }
 
+// Option customizes the service New builds.
+type Option func(*Service)
+
+// WithRouteResolver installs the routing-strategy plugin resolver before the
+// declarative virtual models are validated, so a managed redirect with an
+// invalid strategy_config fails startup loudly.
+func WithRouteResolver(resolver RouteResolver) Option {
+	return func(s *Service) { s.SetRouteResolver(resolver) }
+}
+
 // New creates a virtual models subsystem using an existing storage connection.
-func New(ctx context.Context, cfg *config.Config, shared storage.Storage, catalog Catalog, declaredProviders []string) (*Result, error) {
+func New(ctx context.Context, cfg *config.Config, shared storage.Storage, catalog Catalog, declaredProviders []string, opts ...Option) (*Result, error) {
 	if shared == nil {
 		return nil, fmt.Errorf("shared storage is required")
 	}
@@ -57,13 +76,20 @@ func New(ctx context.Context, cfg *config.Config, shared storage.Storage, catalo
 	if err := rejectUnmigratedLegacyData(ctx, store, shared); err != nil {
 		return nil, err
 	}
-	if err := importLegacyFailoverRules(ctx, store, shared, cfg.Failover.Disabled); err != nil {
+	// The declarative virtual models and the failover configuration are handed
+	// to the migration too: both are overlaid on the store below, so a
+	// conversion must not commit a row that only fails to load once they are.
+	declared := ConfigModels(cfg.VirtualModels)
+	if err := importLegacyFailoverRules(ctx, store, shared, cfg.Failover, declared); err != nil {
 		return nil, err
 	}
 
 	service, err := NewService(store, catalog, cfg.Models.EnabledByDefault)
 	if err != nil {
 		return nil, err
+	}
+	for _, opt := range opts {
+		opt(service)
 	}
 	// Declarative virtual models (config.yaml / VIRTUAL_MODELS), plus the
 	// deprecated failover rules translated into failover-strategy redirects, are
@@ -75,9 +101,14 @@ func New(ctx context.Context, cfg *config.Config, shared storage.Storage, catalo
 	if err != nil {
 		return nil, fmt.Errorf("list virtual models: %w", err)
 	}
-	declared := ConfigModels(cfg.VirtualModels)
 	service.SetConfigModels(append(declared, FailoverConfigModels(cfg.Failover, declared, stored)...))
 	if err := service.Refresh(ctx); err != nil {
+		if IsValidationError(err) {
+			// The named rows may predate today's validation (e.g. a chain cycle
+			// an older failover-rule migration committed), and with the server
+			// down the admin API cannot repair them — point at the store.
+			return nil, fmt.Errorf("virtual models failed to load: %w; edit or delete the named entries (declared under virtual_models in config, or stored virtual_models entries in the database), then restart", err)
+		}
 		return nil, err
 	}
 	// Validate the managed redirects once, here at startup: an invalid declaration
@@ -97,11 +128,15 @@ func New(ctx context.Context, cfg *config.Config, shared storage.Storage, catalo
 		refreshInterval = time.Hour
 	}
 
-	return &Result{
+	result := &Result{
 		Service:     service,
 		Store:       store,
 		stopRefresh: service.StartBackgroundRefresh(refreshInterval),
-	}, nil
+	}
+	if closer, ok := service.routeResolver.(interface{ Close(context.Context) error }); ok {
+		result.closeStrategies = func() error { return closer.Close(context.Background()) }
+	}
+	return result, nil
 }
 
 func createStore(ctx context.Context, store storage.Storage) (Store, error) {

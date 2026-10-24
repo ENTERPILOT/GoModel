@@ -1,10 +1,10 @@
 package admin
 
 import (
-	"sort"
 	"testing"
 
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/require"
 )
 
 // TestRegisterRoutes_RegistersExpectedPaths is a smoke test for the admin
@@ -24,13 +24,13 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 	// reads its own dependencies inside the handler body, so route mounting
 	// itself must remain side-effect-free.
 	defer func() {
-		if r := recover(); r != nil {
-			t.Fatalf("RegisterRoutes panicked: %v", r)
-		}
+		r := recover()
+		require.Nil(t, r)
 	}()
 	h.RegisterRoutes(g)
 
 	want := []string{
+		"GET /admin/access",
 		"GET /admin/runtime/config",
 		"GET /admin/cache/overview",
 		"GET /admin/live/logs",
@@ -42,6 +42,7 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 		"GET /admin/usage/models",
 		"GET /admin/usage/user-paths",
 		"GET /admin/usage/labels",
+		"GET /admin/usage/endpoints",
 		"GET /admin/usage/sessions",
 		"GET /admin/usage/log",
 		"GET /admin/usage/throughput",
@@ -52,6 +53,7 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 		"GET /admin/audit/stats",
 		"GET /admin/audit/detail",
 		"GET /admin/audit/conversation",
+		"GET /admin/media/:id",
 
 		"GET /admin/providers/status",
 		"POST /admin/runtime/refresh",
@@ -80,6 +82,7 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 
 		"GET /admin/models",
 		"GET /admin/models/categories",
+		"GET /admin/models/metadata",
 
 		"GET /admin/virtual-models",
 		"PUT /admin/virtual-models",
@@ -90,6 +93,9 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 		"DELETE /admin/mcp-servers/:name",
 		"POST /admin/mcp-servers/:name/reconnect",
 		"GET /admin/mcp-servers/:name/catalog",
+		"GET /admin/mcp-virtual-servers",
+		"PUT /admin/mcp-virtual-servers",
+		"DELETE /admin/mcp-virtual-servers/:name",
 
 		"GET /admin/model-pricing-overrides",
 		"PUT /admin/model-pricing-overrides",
@@ -97,15 +103,18 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 
 		"GET /admin/auth-keys",
 		"POST /admin/auth-keys",
+		"POST /admin/auth-keys/import",
 		"PUT /admin/auth-keys/:id/labels",
 		"PUT /admin/auth-keys/:id/allowed-models",
 		"PUT /admin/auth-keys/:id/dashboard-access",
+		"PUT /admin/auth-keys/:id/passthrough-access",
 		"POST /admin/auth-keys/:id/deactivate",
 
 		"GET /admin/users",
 		"PUT /admin/users",
 		"DELETE /admin/users",
 
+		"GET /admin/plugins",
 		"GET /admin/guardrails/types",
 		"GET /admin/guardrails",
 		"PUT /admin/guardrails",
@@ -118,34 +127,9 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 		"POST /admin/workflows/:id/deactivate",
 	}
 
-	registered := make(map[string]struct{})
+	registered := make([]string, 0, len(want))
 	for _, route := range e.Router().Routes() {
-		registered[route.Method+" "+route.Path] = struct{}{}
+		registered = append(registered, route.Method+" "+route.Path)
 	}
-
-	sort.Strings(want)
-	missing := make([]string, 0)
-	for _, key := range want {
-		if _, ok := registered[key]; !ok {
-			missing = append(missing, key)
-		}
-	}
-	if len(missing) != 0 {
-		t.Fatalf("RegisterRoutes did not register %d route(s):\n  %s", len(missing), missing)
-	}
-
-	if got, expected := len(registered), len(want); got != expected {
-		extras := make([]string, 0)
-		wantSet := make(map[string]struct{}, len(want))
-		for _, k := range want {
-			wantSet[k] = struct{}{}
-		}
-		for k := range registered {
-			if _, ok := wantSet[k]; !ok {
-				extras = append(extras, k)
-			}
-		}
-		sort.Strings(extras)
-		t.Fatalf("RegisterRoutes registered %d route(s), want %d; extras: %v", got, expected, extras)
-	}
+	require.ElementsMatch(t, want, registered)
 }

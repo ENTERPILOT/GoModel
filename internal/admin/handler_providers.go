@@ -91,6 +91,23 @@ func (h *Handler) collectProviderStatusInputs() (
 		configuredByName[name] = cfg
 		nameSet[name] = struct{}{}
 	}
+	// Dashboard-registered credentials are installed after startup, so they
+	// are absent from the static snapshot above; take their effective config
+	// from the credentials service. Declarative providers keep priority: the
+	// service never registers a store row a config/env provider shadows.
+	if h.providerCredentials != nil {
+		for _, cfg := range h.providerCredentials.ConfiguredProviders() {
+			name := strings.TrimSpace(cfg.Name)
+			if name == "" {
+				continue
+			}
+			if _, exists := configuredByName[name]; exists {
+				continue
+			}
+			configuredByName[name] = cfg
+			nameSet[name] = struct{}{}
+		}
+	}
 
 	runtimeByName := make(map[string]providers.ProviderRuntimeSnapshot)
 	if h.registry != nil {
@@ -244,6 +261,9 @@ func classifyProviderStatus(cfg providers.SanitizedProviderConfig, runtime provi
 	case runtime.DiscoveredModelCount > 0 && modelFetchError == "":
 		if usingCachedModels {
 			return "degraded", "Starting", "serving cached model inventory while live refresh finishes", lastError
+		}
+		if runtime.ModelListingUnsupported {
+			return "healthy", "Healthy", "provider does not list models; serving configured models", lastError
 		}
 		return "healthy", "Healthy", "configured and model discovery succeeded", lastError
 	case modelFetchError != "" && runtime.DiscoveredModelCount > 0:

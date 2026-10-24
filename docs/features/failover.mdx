@@ -75,6 +75,15 @@ are not swept in turn — which is what lets `gpt-4o` fall back to
 other redirect (an alias, a virtual model under a new name) that lists a
 protected model does sweep that model's fallbacks.
 
+Provider retries run before failover for non-streaming requests. To retry
+Cloudflare `522`/`524` responses and then switch models on the same provider,
+use [resilience settings with per-model breakers](/advanced/resilience#retry-cloudflare-timeouts-then-switch-models).
+
+Failover reacts to failed attempts, not slow ones. To move traffic off a
+provider that still answers but takes too long, set a
+[slow-call threshold](/advanced/resilience#fail-over-from-a-slow-provider) on
+its circuit breaker.
+
 ## When it runs
 
 Failover is attempted only after an attempt returns:
@@ -91,11 +100,24 @@ It applies to translated `/v1/chat/completions`, `/v1/responses`, and
 `/v1/messages` requests. The request log shows every attempt, so a served
 failover is visible in the audit trail and priced at the model that answered.
 
+A target model that is disabled, or that the request's API key or
+`user_path` may not use, is never tried: it is skipped both when the first
+target is chosen and in the failover chain, without counting as an attempt.
+
 A request that names its provider in the `provider` field bypasses virtual
 models and reaches the concrete model directly. It still gets the chain of a
 virtual model that shadows exactly that model and lists it as a target (the
 shape the Models page creates for a real model), since that virtual model adds
 failover to the model rather than replacing it.
+
+<Note>
+  A response produced by a failover target is not written to the
+  [response cache](/features/cache#responses-served-through-failover-are-not-cached):
+  the cache key is hashed from the pre-failover resolution, so the backup's
+  answer would otherwise be replayed under the primary's key. While a first
+  target is down, the chain therefore stops adding cache entries; entries
+  written before the outage still serve until their TTL expires.
+</Note>
 
 Set `FAILOVER_ENABLED=false` (or `failover.enabled: false`) to switch the
 sweep off globally; a [workflow](/advanced/workflows) can also turn it off for
@@ -145,6 +167,21 @@ retry_on_errors:
   - 404 disabled
 ```
 
+A non-streaming chat completion that returns `200` with an empty `choices`
+array is treated as a `502` (`provider returned no choices`), so it fails over
+under the default `5xx` status rule. Each such attempt is also logged and
+counted in `gomodel_empty_responses_total`.
+
+Streaming requests are checked the same way before any bytes reach the client.
+A `200` stream that ends without an event is treated as a `502`
+(`provider returned an empty stream`), and a stream whose first event is an
+`{"error": ...}` payload fails with the status that payload carries (for
+example an in-band `429`), or `502` when it carries none. Both fail over under
+the default rules. The response headers wait for that first event.
+
+[Provider failure modes](/advanced/provider-failure-modes) lists every such
+case and which of them fail over.
+
 Example: try at most one backup, treat timeouts as failover-eligible but
 keep serving `429` responses to the client, and add a provider-specific
 overload message:
@@ -178,7 +215,10 @@ converted automatically:
   the setting is kept. A primary that already has a redirect, a path-scoped
   setting, or is disabled is logged and skipped, and the store is kept until
   it is resolved — add its fallbacks as targets of that virtual model with
-  the failover strategy, then delete the row. A primary listed in
+  the failover strategy, then delete the row. A mapping whose fallback names
+  a virtual model that routes back to its primary is kept the same way, since
+  converting it would form a chain cycle — adjust or remove that virtual
+  model, then restart. A primary listed in
   `disabled_models` converts as a disabled virtual model: its fallbacks are
   kept but inactive until you enable it from the Models page.
 - `failover.rules`, `manual_rules_path`, `FAILOVER_RULES_JSON`, and

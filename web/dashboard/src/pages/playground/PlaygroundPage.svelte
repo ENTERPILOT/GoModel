@@ -14,16 +14,24 @@
   import PlaygroundComposer from "./PlaygroundComposer.svelte";
   import PlaygroundJsonPanel from "./PlaygroundJsonPanel.svelte";
   import { playgroundStore as store } from "./playground.svelte.js";
-  import { playgroundModelOptions } from "./playgroundLogic.js";
+  import { playgroundModelOptions, defaultUserPathForModel } from "./playgroundLogic.js";
 
   const PAGE = "playground";
 
   const modelOptions = $derived(playgroundModelOptions(modelsStore.models));
 
   // Pick the first inventory model once, when nothing has been chosen yet.
+  // If a model is already set (restored from storage), prefill the user path
+  // with its first allowed path when one exists and none is chosen yet.
+  // Re-runs when store.userPath changes; Svelte bails on identical assignment,
+  // so this does not loop.
   $effect(() => {
-    if (router.page !== PAGE || store.model || modelOptions.length === 0) return;
-    store.setModel(modelOptions[0].id);
+    if (router.page !== PAGE || modelOptions.length === 0) return;
+    if (!store.model) {
+      store.setModel(modelOptions[0].id);
+    } else if (!store.userPath) {
+      store.setUserPath(defaultUserPathForModel(modelsStore.models, store.model));
+    }
   });
 
   let historyEl = $state(null);
@@ -129,9 +137,18 @@
     max-width: 420px;
   }
 
+  /* Mobile: the page scrolls as a whole. With height: 100% the banner and
+     header above the playground pushed the composer below the fold. */
   @media (max-width: 768px) {
     .playground {
+      height: auto;
       min-height: 0;
+    }
+
+    .playground-history {
+      flex: 0 1 auto;
+      min-height: 160px;
+      max-height: 60dvh;
     }
   }
 </style>

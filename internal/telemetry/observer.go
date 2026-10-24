@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -15,36 +16,52 @@ import (
 	apiMetric "go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 )
 
 var durationBuckets = []float64{0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24, 20.48, 40.96, 81.92}
 
 // observer instruments logical provider calls with the OpenTelemetry GenAI
-// semantic conventions. It never records prompts, responses, credentials, or
-// error messages.
+// semantic conventions. It never records credentials or error messages, and
+// records prompts and responses only when content capture is enabled.
 //
 // Buffered calls get a CLIENT span opened at request start and closed at
-// completion. Streaming calls intentionally get no span at stream
-// establishment — the client only knows that response headers arrived — and
-// record time to first chunk instead; a stream that fails to establish, or
-// ends before its first byte, still gets a retrospective failure span so the
-// error is traced.
+// completion. When the gateway traces the call (core.GenerationTrace), a
+// successful span is parked until the gateway decodes the response, which
+// adds the response model and token usage; the span keeps its original end
+// time. Streams traced by the gateway get a span that ends with the stream.
+// Other streams get no span at establishment — the client only knows that
+// response headers arrived — and record time to first chunk instead. A
+// stream that fails to establish, or ends before its first byte, always gets
+// a failure span so the error is traced.
 type observer struct {
 	tracer           trace.Tracer
 	duration         apiMetric.Float64Histogram
 	timeToFirstChunk apiMetric.Float64Histogram
+	emptyResponses   apiMetric.Int64Counter
+	captureContent   bool
 }
 
 type callState struct {
-	spanName string
-	attrs    []attribute.KeyValue
-	span     trace.Span
+	spanName   string
+	attrs      []attribute.KeyValue
+	span       trace.Span
+	generation *core.GenerationTrace
+	ended      atomic.Bool
+}
+
+// endSpan ends the call's span once: a traced stream can fail after its span
+// was parked, and the parked completion must then do nothing.
+func (s *callState) endSpan(options ...trace.SpanEndOption) {
+	if s.span != nil && s.ended.CompareAndSwap(false, true) {
+		s.span.End(options...)
+	}
 }
 
 type callStateKey struct{}
 
-func newObserver(tp trace.TracerProvider, mp apiMetric.MeterProvider) (*observer, error) {
+func newObserver(tp trace.TracerProvider, mp apiMetric.MeterProvider, captureContent bool) (*observer, error) {
 	meter := mp.Meter(instrumentationName)
 	duration, err := meter.Float64Histogram(
 		"gen_ai.client.operation.duration",
@@ -64,10 +81,20 @@ func newObserver(tp trace.TracerProvider, mp apiMetric.MeterProvider) (*observer
 	if err != nil {
 		return nil, err
 	}
+	emptyResponses, err := meter.Int64Counter(
+		"gomodel.client.empty_responses",
+		apiMetric.WithDescription("Provider responses that returned 200 without choices, output, or usage."),
+		apiMetric.WithUnit("{response}"),
+	)
+	if err != nil {
+		return nil, err
+	}
 	return &observer{
 		tracer:           tp.Tracer(instrumentationName),
 		duration:         duration,
 		timeToFirstChunk: ttfc,
+		emptyResponses:   emptyResponses,
+		captureContent:   captureContent,
 	}, nil
 }
 
@@ -77,22 +104,24 @@ func (o *observer) hooks() llmclient.Hooks {
 		OnRequestEnd:       o.end,
 		OnStreamFirstChunk: o.firstChunk,
 		OnStreamEmpty:      o.streamEmpty,
+		OnEmptyResponse:    o.emptyResponse,
 	}
 }
 
-// start records call attributes and, for buffered inference, opens the
-// client span. Calls without an operation are not inference (model listings,
-// for example) and produce no telemetry.
+// start records call attributes and opens the client span for buffered
+// inference and for streams the gateway traces. Calls without an operation
+// are not inference (model listings, for example) and produce no telemetry.
 func (o *observer) start(ctx context.Context, info llmclient.RequestInfo) context.Context {
 	operation := strings.TrimSpace(info.Operation)
 	if operation == "" {
 		return ctx
 	}
-	state := callState{
-		spanName: operationSpanName(operation, info.Model),
-		attrs:    callAttributes(info, operation),
+	state := &callState{
+		spanName:   operationSpanName(operation, info.Model),
+		attrs:      callAttributes(info, operation),
+		generation: core.GenerationTraceFromContext(ctx),
 	}
-	if !info.Stream && !info.StreamUncertain {
+	if !info.StreamUncertain && (!info.Stream || state.generation != nil) {
 		ctx, state.span = o.tracer.Start(ctx, state.spanName,
 			trace.WithSpanKind(trace.SpanKindClient),
 			trace.WithAttributes(state.attrs...),
@@ -101,16 +130,20 @@ func (o *observer) start(ctx context.Context, info llmclient.RequestInfo) contex
 	return context.WithValue(ctx, callStateKey{}, state)
 }
 
-// end completes buffered spans and the duration metric. For streaming calls
-// completion here only means that response headers arrived, so a successful
-// stream records nothing yet.
+// end completes the duration metric and the span. A successful call is
+// parked for the gateway's outcome when it traces the call. For streaming
+// calls completion here only means that response headers arrived, so a
+// successful stream records nothing yet.
 func (o *observer) end(ctx context.Context, info llmclient.ResponseInfo) {
-	state, ok := ctx.Value(callStateKey{}).(callState)
+	state, ok := ctx.Value(callStateKey{}).(*callState)
 	if !ok {
 		return
 	}
 	errorType := resultErrorType(info)
 	if (info.Stream || info.StreamUncertain) && errorType == "" {
+		if state.span != nil {
+			o.park(state, info)
+		}
 		return
 	}
 
@@ -121,20 +154,46 @@ func (o *observer) end(ctx context.Context, info llmclient.ResponseInfo) {
 	duration := max(info.Duration, 0)
 	o.duration.Record(ctx, duration.Seconds(), apiMetric.WithAttributes(attrs...))
 
-	span := state.span
-	endOptions := []trace.SpanEndOption(nil)
-	if span == nil {
+	if state.span == nil {
 		// No span was opened at start (a stream that failed to establish, or
 		// an uncertain passthrough call the response resolved as buffered);
 		// synthesize one covering the measured duration.
 		endTime := time.Now()
-		_, span = o.tracer.Start(ctx, state.spanName,
+		_, span := o.tracer.Start(ctx, state.spanName,
 			trace.WithSpanKind(trace.SpanKindClient),
 			trace.WithAttributes(state.attrs...),
 			trace.WithTimestamp(endTime.Add(-duration)),
 		)
-		endOptions = append(endOptions, trace.WithTimestamp(endTime))
+		setResultAttributes(span, info, errorType)
+		span.End(trace.WithTimestamp(endTime))
+		return
 	}
+	if errorType == "" {
+		o.park(state, info, trace.WithTimestamp(time.Now()))
+		return
+	}
+	setResultAttributes(state.span, info, errorType)
+	state.endSpan()
+}
+
+// park leaves a successful call's span open until the gateway finishes its
+// generation trace with the decoded outcome; untraced calls end at once.
+// Buffered calls pass their end time so the span keeps the provider latency.
+func (o *observer) park(state *callState, info llmclient.ResponseInfo, endOptions ...trace.SpanEndOption) {
+	setResultAttributes(state.span, info, "")
+	if state.generation == nil {
+		state.endSpan(endOptions...)
+		return
+	}
+	state.generation.Park(func(outcome core.GenerationOutcome) {
+		if attrs := o.outcomeAttributes(outcome); len(attrs) > 0 {
+			state.span.SetAttributes(attrs...)
+		}
+		state.endSpan(endOptions...)
+	})
+}
+
+func setResultAttributes(span trace.Span, info llmclient.ResponseInfo, errorType string) {
 	if info.StatusCode > 0 {
 		span.SetAttributes(attribute.Int("http.response.status_code", info.StatusCode))
 	}
@@ -142,13 +201,12 @@ func (o *observer) end(ctx context.Context, info llmclient.ResponseInfo) {
 		span.SetAttributes(attribute.String("error.type", errorType))
 		span.SetStatus(codes.Error, "")
 	}
-	span.End(endOptions...)
 }
 
 // firstChunk records streaming latency once the response body first returns
 // bytes.
 func (o *observer) firstChunk(ctx context.Context, info llmclient.ResponseInfo) {
-	state, ok := ctx.Value(callStateKey{}).(callState)
+	state, ok := ctx.Value(callStateKey{}).(*callState)
 	if !ok || !info.Stream || info.Error != nil || info.StatusCode < 1 || info.StatusCode >= http.StatusBadRequest {
 		return
 	}
@@ -167,6 +225,22 @@ func (o *observer) streamEmpty(ctx context.Context, info llmclient.ResponseInfo)
 		info.Error = errEmptyStream
 	}
 	o.end(ctx, info)
+}
+
+// emptyResponse counts a 200 response without choices, output, or usage. The
+// call's span and duration already recorded it as a success, so the counter
+// carries the reason as error.type for alerting.
+func (o *observer) emptyResponse(ctx context.Context, info llmclient.EmptyResponseInfo) {
+	attrs := []attribute.KeyValue{
+		attribute.String("gen_ai.operation.name", info.Operation),
+		attribute.String("gen_ai.provider.name", semanticProviderName(info.ProviderType, info.Provider)),
+		attribute.String("gomodel.provider.name", info.Provider),
+		attribute.String("error.type", info.Reason),
+	}
+	if model := modelName(info.Model); model != "" {
+		attrs = append(attrs, attribute.String("gen_ai.request.model", model))
+	}
+	o.emptyResponses.Add(ctx, 1, apiMetric.WithAttributes(attrs...))
 }
 
 func callAttributes(info llmclient.RequestInfo, operation string) []attribute.KeyValue {

@@ -30,6 +30,8 @@ function createLiveLogsApp(overrides = {}) {
     usageFilterLabel: "",
     usageFilterUserPath: "",
     usageFilterSession: "",
+    usageFilterAuthKey: "",
+    usageFilterEndpoints: [],
     usageLogHideCached: false,
     auditGroupSessions: false,
     auditThreadChildren: {},
@@ -435,6 +437,32 @@ test("active session filtering pauses non-matching live usage inserts", () => {
     seq: 1,
     type: "usage.completed",
     data: { id: "usage-1", request_id: "req-1", session_id: "other-session" },
+  });
+
+  assert.equal(app.usageLog.entries.length, 0);
+  assert.equal(app.liveLogsLastSeq, 1);
+});
+
+test("active API key filtering pauses live usage inserts", () => {
+  const app = createLiveLogsApp({ usageFilterAuthKey: "key-a" });
+
+  app.applyLiveLogEvent({
+    seq: 1,
+    type: "usage.completed",
+    data: { id: "usage-1", request_id: "req-1", auth_key_id: "key-b" },
+  });
+
+  assert.equal(app.usageLog.entries.length, 0);
+  assert.equal(app.liveLogsLastSeq, 1);
+});
+
+test("active endpoint filtering pauses live usage inserts", () => {
+  const app = createLiveLogsApp({ usageFilterEndpoints: ["/v1/audio/speech"] });
+
+  app.applyLiveLogEvent({
+    seq: 1,
+    type: "usage.completed",
+    data: { id: "usage-1", request_id: "req-1", endpoint: "/v1/chat/completions" },
   });
 
   assert.equal(app.usageLog.entries.length, 0);
@@ -1246,4 +1274,44 @@ test("re-fold keeps the newest request as head when completions arrive out of or
   assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["req-b"]);
   assert.equal(app.auditLog.entries[0].session_count, 2);
   assert.equal(app.auditLog.total, 1);
+});
+
+test("live guardrail outcomes survive the merge into the audit row", () => {
+  const app = createLiveLogsApp();
+
+  app.applyLiveLogEvent({
+    seq: 1,
+    type: "audit.started",
+    data: { id: "audit-1", request_id: "req-1", method: "POST", path: "/v1/chat/completions" },
+  });
+  app.applyLiveLogEvent({
+    seq: 2,
+    type: "audit.completed",
+    data: {
+      id: "audit-1",
+      request_id: "req-1",
+      status_code: 403,
+      duration_ns: 1000,
+      data: {
+        guardrails: [
+          { seq: 1, phase: "prompt", step: 10, instance: "policy", action: "block", code: "content_policy" },
+        ],
+      },
+    },
+  });
+
+  const completed = app.auditLog.entries[0];
+  assert.equal(completed.data.guardrails.length, 1);
+  assert.equal(completed.data.guardrails[0].action, "block");
+
+  // The flush carries no data of its own: the outcomes stay on the row.
+  app.applyLiveLogEvent({
+    seq: 3,
+    type: "audit.flushed",
+    data: { id: "audit-1", request_id: "req-1", status_code: 403, duration_ns: 1000 },
+  });
+  const flushed = app.auditLog.entries[0];
+  assert.equal(flushed._live_state, "audit.flushed");
+  assert.equal(flushed.data.guardrails[0].instance, "policy");
+  assert.equal(flushed.data.guardrails[0].code, "content_policy");
 });

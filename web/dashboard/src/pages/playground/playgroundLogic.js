@@ -328,10 +328,77 @@ export function playgroundModelOptions(inventory) {
   return [...seen.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
 
+// --- User-path picker --------------------------------------------------------
+
+// Header name the gateway reads user paths from unless USER_PATH_HEADER is
+// customized server-side.
+const DEFAULT_USER_PATH_HEADER = "X-GoModel-User-Path";
+
+// User paths the selected inventory entry is restricted to
+// (access.user_paths), as { value, label } objects; empty when the model is
+// unknown or unrestricted. The playground sends the chosen path on the
+// user-path header so a restricted model can be exercised from the picker.
+export function playgroundUserPathOptions(inventory, selector) {
+  const id = String(selector || "").trim();
+  const entry = (Array.isArray(inventory) ? inventory : []).find(
+    (item) => String(item?.selector || item?.model?.id || "").trim() === id,
+  );
+  const paths = entry?.access && Array.isArray(entry.access.user_paths) ? entry.access.user_paths : [];
+  return paths
+    .filter((path) => typeof path === "string" && path.trim() !== "")
+    .map((path) => {
+      const value = path;
+      return { value, label: value };
+    });
+}
+
+// First allowed user path of the selected model, or "" when unrestricted.
+export function defaultUserPathForModel(inventory, selector) {
+  return playgroundUserPathOptions(inventory, selector)[0]?.value || "";
+}
+
+// Effective user-path header name: the server-configured USER_PATH_HEADER
+// (from /admin/runtime/config) or the default when unset.
+export function effectiveUserPathHeaderName(configured) {
+  return String(configured || "").trim() || DEFAULT_USER_PATH_HEADER;
+}
+
+// Build the header to send when a non-empty user path is selected, under the
+// configured header name so a customized USER_PATH_HEADER is honored.
+export function playgroundUserPathHeader(userPath, headerName) {
+  const path = String(userPath || "").trim();
+  return path ? { [effectiveUserPathHeaderName(headerName)]: path } : {};
+}
+
+// Resolve with `promise`, or reject with an AbortError as soon as `signal`
+// aborts, so a preflight that has no signal of its own still honors Stop.
+export function abortable(promise, signal) {
+  if (!signal) return promise;
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(new DOMException("Aborted", "AbortError"));
+    signal.addEventListener("abort", abort, { once: true });
+    // Always observe the promise, even when already aborted, so a later
+    // rejection never surfaces as an unhandled one.
+    Promise.resolve(promise).then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+    if (signal.aborted) abort();
+  });
+}
+
 // --- JSON panel sizing -------------------------------------------------------
 
 export const DEFAULT_JSON_PANEL_WIDTH = 420;
 export const MIN_JSON_PANEL_WIDTH = 280;
+// Below this viewport width the panel covers the whole screen (see
+// PlaygroundJsonPanel), so it starts closed there regardless of the stored
+// desktop preference; opening it would hide the composer on first load.
+export const JSON_PANEL_FULLSCREEN_MAX_VIEWPORT = 768;
+
+// initialJsonPanelOpen resolves the panel's open state on load from the
+// stored preference ("true"/"false") and the viewport width.
+export function initialJsonPanelOpen(stored, viewportWidth) {
+  if (Number(viewportWidth) <= JSON_PANEL_FULLSCREEN_MAX_VIEWPORT) return false;
+  return stored !== "false";
+}
 
 // Widest the panel may get at a viewport width: 60% of it, capped at 760px.
 export function maxJsonPanelWidth(viewportWidth) {

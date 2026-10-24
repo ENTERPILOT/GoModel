@@ -44,6 +44,47 @@ func (s *SQLStore) Get(ctx context.Context, key string) (string, bool, error) {
 	return value, true, nil
 }
 
+// SetDefault inserts value unless key exists, then reads back the winner.
+// ON CONFLICT DO NOTHING is atomic in both SQLite and PostgreSQL, so two
+// instances inserting at once cannot both believe they won.
+func (s *SQLStore) SetDefault(ctx context.Context, key, value string) (string, error) {
+	_, err := s.db.Exec(ctx, `
+		INSERT INTO runtime_settings (key, value, updated_at) VALUES (?, ?, ?)
+		ON CONFLICT(key) DO NOTHING
+	`, key, value, time.Now().Unix())
+	if err != nil {
+		return "", fmt.Errorf("initialise runtime setting %q: %w", key, err)
+	}
+	stored, found, err := s.Get(ctx, key)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", fmt.Errorf("initialise runtime setting %q: value missing after insert", key)
+	}
+	return stored, nil
+}
+
+// Replace updates key to value only while it still holds old, then reads
+// back the winner. The conditional UPDATE is atomic in both SQLite and
+// PostgreSQL, so of two instances replacing the same old value only one does.
+func (s *SQLStore) Replace(ctx context.Context, key, old, value string) (string, error) {
+	_, err := s.db.Exec(ctx, `
+		UPDATE runtime_settings SET value = ?, updated_at = ? WHERE key = ? AND value = ?
+	`, value, time.Now().Unix(), key, old)
+	if err != nil {
+		return "", fmt.Errorf("replace runtime setting %q: %w", key, err)
+	}
+	stored, found, err := s.Get(ctx, key)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", fmt.Errorf("replace runtime setting %q: value missing", key)
+	}
+	return stored, nil
+}
+
 // Set upserts a persisted value.
 func (s *SQLStore) Set(ctx context.Context, key, value string) error {
 	_, err := s.db.Exec(ctx, `

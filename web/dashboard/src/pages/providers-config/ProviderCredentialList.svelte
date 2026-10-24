@@ -9,8 +9,11 @@
   import {
     providerCredentialAuthLabel,
     providerCredentialModelsLabel,
+    providerRowsHaveActions,
   } from "./providersConfigLogic.js";
   import { Pencil, X } from "lucide";
+
+  const showActions = $derived(providerRowsHaveActions(providersConfig.filteredRows));
 </script>
 
 <div class="table-wrapper">
@@ -24,7 +27,9 @@
         <th>{m.providers_models()}</th>
         <th>{m.providers_enabled()}</th>
         <th>{m.providers_updated()}</th>
-        <th class="col-actions">{m.providers_actions()}</th>
+        {#if showActions}
+          <th class="col-actions">{m.providers_actions()}</th>
+        {/if}
       </tr>
     </thead>
     <tbody>
@@ -51,29 +56,31 @@
               >{row.enabled ? m.common_enabled() : m.common_disabled()}</span>
           </td>
           <td>{timezone.formatTimestamp(row.updated_at)}</td>
-          <td class="col-actions">
-            <div class="alias-actions-cell model-list-actions">
-              {#if !row.managed}
-                <TableActionButton
-                  label={m.providers_edit_action({ name: row.name })}
-                  class="table-icon-btn"
-                  onclick={() => providersConfig.openEdit(row)}
-                >
-                  <Icon icon={Pencil} class="table-icon-svg" />
-                </TableActionButton>
-                <TableActionButton
-                  label={providersConfig.deletingName === row.name
-                    ? m.providers_deleting_action({ name: row.name })
-                    : m.providers_delete_action({ name: row.name })}
-                  class="table-action-btn-danger table-icon-btn"
-                  onclick={() => providersConfig.requestDelete(row.name)}
-                  disabled={providersConfig.deletingName === row.name}
-                >
-                  <Icon icon={X} class="table-icon-svg" />
-                </TableActionButton>
-              {/if}
-            </div>
-          </td>
+          {#if showActions}
+            <td class="col-actions">
+              <div class="alias-actions-cell model-list-actions">
+                {#if !row.managed}
+                  <TableActionButton
+                    label={m.providers_edit_action({ name: row.name })}
+                    class="table-icon-btn"
+                    onclick={() => providersConfig.openEdit(row)}
+                  >
+                    <Icon icon={Pencil} class="table-icon-svg" />
+                  </TableActionButton>
+                  <TableActionButton
+                    label={providersConfig.deletingName === row.name
+                      ? m.providers_deleting_action({ name: row.name })
+                      : m.providers_delete_action({ name: row.name })}
+                    class="table-action-btn-danger table-icon-btn"
+                    onclick={() => providersConfig.requestDelete(row.name)}
+                    disabled={providersConfig.deletingName === row.name}
+                  >
+                    <Icon icon={X} class="table-icon-svg" />
+                  </TableActionButton>
+                {/if}
+              </div>
+            </td>
+          {/if}
         </tr>
       {/each}
     </tbody>

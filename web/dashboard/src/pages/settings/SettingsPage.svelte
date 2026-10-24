@@ -7,6 +7,7 @@
   import { auth } from "$lib/stores/auth.svelte.js";
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+  import { access } from "$lib/stores/access.svelte.js";
   import { appVersion } from "$lib/api/paths.js";
   import UpdateBanner from "$lib/components/molecules/UpdateBanner.svelte";
   import LocaleSelector from "$lib/components/molecules/LocaleSelector.svelte";
@@ -42,12 +43,17 @@
   <div class="settings-panel">
     <TimezoneSettings />
     <LocaleSelector />
-    <BudgetSettings />
-    <BudgetResetSettings />
-    <TaggingSettings />
-    <RuntimeSettings />
-    <PricingRecalculation />
-    <RuntimeRefresh />
+    {#if access.loaded && !access.scoped}
+      <!-- Gateway-wide settings: hidden for a key scoped to a user path, and
+           not mounted until the scope is known so they never fire requests
+           a scoped credential would be refused. -->
+      <BudgetSettings />
+      <BudgetResetSettings />
+      <TaggingSettings />
+      <RuntimeSettings />
+      <PricingRecalculation />
+      <RuntimeRefresh />
+    {/if}
   </div>
 
   <p class="settings-version-footer mono">{appVersion()}</p>

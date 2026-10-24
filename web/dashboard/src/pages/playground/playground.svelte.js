@@ -7,17 +7,24 @@ import { apiFetch, isAbortError } from "$lib/api/client.js";
 import { errorPayloadMessage, isGatewayAuthError } from "$lib/api/errors.js";
 import { consumeEventStream } from "$lib/api/eventStream.js";
 import { auth } from "$lib/stores/auth.svelte.js";
+import { modelsStore } from "$lib/stores/models.svelte.js";
+import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import { readStored, writeStored } from "$lib/utils/storage.js";
 import { moveItem } from "$lib/utils/sortable.js";
 import * as m from "$lib/paraglide/messages.js";
 import {
+  abortable,
   buildPlaygroundRequest,
   createStreamAccumulator,
+  defaultUserPathForModel,
+  effectiveUserPathHeaderName,
   endpointById,
   extractResponseText,
   extractUsage,
+  initialJsonPanelOpen,
   normalizeEndpoint,
   normalizeRole,
+  playgroundUserPathHeader,
 } from "./playgroundLogic.js";
 
 const STORAGE = {
@@ -30,6 +37,10 @@ const STORAGE = {
 class PlaygroundStore {
   endpoint = $state(normalizeEndpoint(readStored(STORAGE.endpoint, "")));
   model = $state(readStored(STORAGE.model, "") || "");
+  // Session-only: the user path to send on the user-path header (see
+  // userPathHeaderName). Defaults to the selected model's first allowed path
+  // when setModel picks a restricted model; never persisted to localStorage.
+  userPath = $state("");
   stream = $state(readStored(STORAGE.stream, "true") !== "false");
   // [{ id, role, content, pending }] — the conversation the user edits.
   messages = $state([]);
@@ -43,7 +54,12 @@ class PlaygroundStore {
   // {status, durationMs, streamed, events, usage} summary.
   response = $state(null);
   responseMeta = $state(null);
-  panelOpen = $state(readStored(STORAGE.panel, "true") !== "false");
+  panelOpen = $state(
+    initialJsonPanelOpen(
+      readStored(STORAGE.panel, "true"),
+      typeof window === "undefined" ? Infinity : window.innerWidth,
+    ),
+  );
   panelTab = $state("request");
 
   requestBody = $derived(
@@ -65,6 +81,12 @@ class PlaygroundStore {
     return !this.sending && (this.draft.trim() !== "" || this.messages.length > 0);
   }
 
+  // Header name the selected user path is sent under: the deployment's
+  // USER_PATH_HEADER when customized, otherwise X-GoModel-User-Path.
+  get userPathHeaderName() {
+    return effectiveUserPathHeaderName(runtimeConfig.userPathHeader());
+  }
+
   setEndpoint(id) {
     this.endpoint = normalizeEndpoint(id);
     writeStored(STORAGE.endpoint, this.endpoint);
@@ -73,6 +95,11 @@ class PlaygroundStore {
   setModel(model) {
     this.model = String(model || "");
     writeStored(STORAGE.model, this.model);
+    this.userPath = defaultUserPathForModel(modelsStore.models, this.model.trim());
+  }
+
+  setUserPath(value) {
+    this.userPath = String(value || "");
   }
 
   setStream(enabled) {
@@ -153,11 +180,24 @@ class PlaygroundStore {
     const meta = { status: 0, durationMs: 0, streamed: false, events: 0, usage: null };
 
     try {
-      const res = await apiFetch(endpoint.path, {
+      // The selected path only reaches the gateway under the configured
+      // USER_PATH_HEADER, so never guess the name: a scoped send needs the
+      // runtime config and fails (retryably) when it cannot be loaded. Stop
+      // aborts the wait like any other phase of the request.
+      if (String(this.userPath || "").trim()) {
+        await abortable(runtimeConfig.ensureLoaded(), controller.signal);
+        if (!runtimeConfig.loaded) {
+          this.error = m.playground_config_unavailable();
+          return;
+        }
+      }
+      const options = {
         method: "POST",
         body: JSON.stringify(body),
+        headers: playgroundUserPathHeader(this.userPath, this.userPathHeaderName),
         signal: controller.signal,
-      });
+      };
+      const res = await apiFetch(endpoint.path, options);
       meta.status = res.status;
       if (!res.ok) {
         let payload = null;

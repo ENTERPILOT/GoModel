@@ -4,14 +4,20 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_MAX_TOKENS,
   ENDPOINTS,
+  abortable,
   buildPlaygroundRequest,
   clampJsonPanelWidth,
   createStreamAccumulator,
+  defaultUserPathForModel,
+  effectiveUserPathHeaderName,
   extractResponseText,
   extractUsage,
+  initialJsonPanelOpen,
   maxJsonPanelWidth,
   normalizeEndpoint,
   playgroundModelOptions,
+  playgroundUserPathHeader,
+  playgroundUserPathOptions,
   sendableMessages,
   streamErrorMessage,
 } from "../src/pages/playground/playgroundLogic.js";
@@ -305,6 +311,118 @@ test("playgroundModelOptions strips a provider prefix that repeats the provider"
   ]);
 });
 
+test("playgroundUserPathOptions returns the user_paths of the selected model as {value,label}", () => {
+  const inventory = [
+    { selector: "gpt-4o", provider_name: "openai", model: { id: "gpt-4o" } },
+    {
+      selector: "team-model",
+      provider_name: "x",
+      model: { id: "team-model" },
+      access: { user_paths: ["/team/alpha", "/team/beta"] },
+    },
+  ];
+  assert.deepEqual(playgroundUserPathOptions(inventory, "team-model"), [
+    { value: "/team/alpha", label: "/team/alpha" },
+    { value: "/team/beta", label: "/team/beta" },
+  ]);
+  // Whitespace around the selector still matches the trimmed id.
+  assert.deepEqual(playgroundUserPathOptions(inventory, " team-model "), [
+    { value: "/team/alpha", label: "/team/alpha" },
+    { value: "/team/beta", label: "/team/beta" },
+  ]);
+  // Unrestricted, unknown, or malformed entries yield no options.
+  assert.deepEqual(playgroundUserPathOptions(inventory, "gpt-4o"), []);
+  assert.deepEqual(playgroundUserPathOptions(inventory, "nope"), []);
+  assert.deepEqual(playgroundUserPathOptions(undefined, "team-model"), []);
+  assert.deepEqual(
+    playgroundUserPathOptions([{ selector: "x", access: { user_paths: "nope" } }], "x"),
+    [],
+  );
+});
+
+test("playgroundUserPathOptions skips non-string user_paths entries without throwing", () => {
+  const inventory = [
+    {
+      selector: "team-model",
+      access: { user_paths: ["/team/alpha", 42, null, "", { value: "/team/beta" }, "/team/beta"] },
+    },
+  ];
+  assert.deepEqual(playgroundUserPathOptions(inventory, "team-model"), [
+    { value: "/team/alpha", label: "/team/alpha" },
+    { value: "/team/beta", label: "/team/beta" },
+  ]);
+});
+
+test("defaultUserPathForModel returns the first allowed path or empty", () => {
+  const inventory = [
+    { selector: "gpt-4o", model: { id: "gpt-4o" }, access: { user_paths: [] } },
+    {
+      selector: "team-model",
+      model: { id: "team-model" },
+      access: { user_paths: ["/team/alpha", "/team/beta"] },
+    },
+  ];
+  assert.equal(defaultUserPathForModel(inventory, "team-model"), "/team/alpha");
+  assert.equal(defaultUserPathForModel(inventory, "gpt-4o"), "");
+  assert.equal(defaultUserPathForModel(inventory, "nope"), "");
+  assert.equal(defaultUserPathForModel(undefined, "team-model"), "");
+});
+
+test("effectiveUserPathHeaderName falls back to the default header name", () => {
+  assert.equal(effectiveUserPathHeaderName(undefined), "X-GoModel-User-Path");
+  assert.equal(effectiveUserPathHeaderName(""), "X-GoModel-User-Path");
+  assert.equal(effectiveUserPathHeaderName("   "), "X-GoModel-User-Path");
+  // A customized USER_PATH_HEADER from /admin/runtime/config wins.
+  assert.equal(effectiveUserPathHeaderName("X-Tenant-Path"), "X-Tenant-Path");
+  assert.equal(effectiveUserPathHeaderName("  X-Tenant-Path  "), "X-Tenant-Path");
+});
+
+test("playgroundUserPathHeader sends the default header name only when non-empty", () => {
+  assert.deepEqual(playgroundUserPathHeader("/team/alpha"), { "X-GoModel-User-Path": "/team/alpha" });
+  assert.deepEqual(playgroundUserPathHeader("/team/alpha", ""), { "X-GoModel-User-Path": "/team/alpha" });
+  // Surrounding whitespace is trimmed before the header is built.
+  assert.deepEqual(playgroundUserPathHeader("  /team/alpha  "), { "X-GoModel-User-Path": "/team/alpha" });
+  // Unrestricted selection or blank input drops the header.
+  assert.deepEqual(playgroundUserPathHeader(""), {});
+  assert.deepEqual(playgroundUserPathHeader("   "), {});
+  assert.deepEqual(playgroundUserPathHeader(undefined), {});
+});
+
+test("playgroundUserPathHeader honors a customized USER_PATH_HEADER", () => {
+  assert.deepEqual(playgroundUserPathHeader("/team/alpha", "X-Tenant-Path"), { "X-Tenant-Path": "/team/alpha" });
+  assert.deepEqual(playgroundUserPathHeader("  /team/alpha  ", "X-Tenant-Path"), { "X-Tenant-Path": "/team/alpha" });
+  // A blank path still produces no header, whatever the configured name.
+  assert.deepEqual(playgroundUserPathHeader("", "X-Tenant-Path"), {});
+  assert.deepEqual(playgroundUserPathHeader("   ", "X-Tenant-Path"), {});
+});
+
+test("abortable resolves normally while the signal stays live", async () => {
+  const controller = new AbortController();
+  assert.equal(await abortable(Promise.resolve("ok"), controller.signal), "ok");
+  // Without a signal the promise passes straight through.
+  assert.equal(await abortable(Promise.resolve("plain"), undefined), "plain");
+  // Rejections propagate unchanged.
+  await assert.rejects(abortable(Promise.reject(new Error("boom")), controller.signal), /boom/);
+});
+
+test("abortable rejects with an AbortError when the signal fires", async () => {
+  const controller = new AbortController();
+  const pending = abortable(new Promise(() => {}), controller.signal);
+  controller.abort();
+  await assert.rejects(pending, (error) => error.name === "AbortError");
+  // An already-aborted signal rejects without waiting on the promise.
+  await assert.rejects(abortable(new Promise(() => {}), controller.signal), (error) => error.name === "AbortError");
+  // A promise that later rejects after an abort is still observed (no
+  // unhandled rejection) and the caller sees the AbortError.
+  let rejectLater;
+  const late = new Promise((_, reject) => {
+    rejectLater = reject;
+  });
+  await assert.rejects(abortable(late, controller.signal), (error) => error.name === "AbortError");
+  rejectLater(new Error("late"));
+  await new Promise((resolve) => setImmediate(resolve));
+});
+
 test("clampJsonPanelWidth keeps the panel inside the viewport", () => {
   assert.equal(clampJsonPanelWidth(420, 1440), 420);
   assert.equal(clampJsonPanelWidth(100, 1440), 280);
@@ -315,4 +433,14 @@ test("clampJsonPanelWidth keeps the panel inside the viewport", () => {
   assert.equal(maxJsonPanelWidth(1440), 760);
   assert.equal(maxJsonPanelWidth(600), 360);
   assert.equal(maxJsonPanelWidth(0), 280);
+});
+
+test("initialJsonPanelOpen honours the stored preference only on wide viewports", () => {
+  assert.equal(initialJsonPanelOpen("true", 1280), true);
+  assert.equal(initialJsonPanelOpen(undefined, 1280), true);
+  assert.equal(initialJsonPanelOpen("false", 1280), false);
+  // The panel covers the whole screen on phones, so it never starts open there.
+  assert.equal(initialJsonPanelOpen("true", 390), false);
+  assert.equal(initialJsonPanelOpen("true", 768), false);
+  assert.equal(initialJsonPanelOpen("true", 769), true);
 });

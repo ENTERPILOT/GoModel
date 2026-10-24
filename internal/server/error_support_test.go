@@ -2,18 +2,24 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v5/middleware"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
 func TestHandleError_RendersDialectSpecificEnvelope(t *testing.T) {
@@ -28,37 +34,26 @@ func TestHandleError_RendersDialectSpecificEnvelope(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			e := echo.New()
-			req := httptest.NewRequest(http.MethodPost, tc.path, nil)
-			rec := httptest.NewRecorder()
-			c := e.NewContext(req, rec)
+			c, rec := echotest.Post(t, tc.path, nil)
 
 			_ = handleError(c, core.NewInvalidRequestError("bad input", nil))
 
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want 400", rec.Code)
-			}
-			var body map[string]any
-			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-				t.Fatalf("unmarshal: %v", err)
-			}
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+
+			body := echotest.Decode[map[string]any](t, rec)
+
 			// Anthropic envelope: {"type":"error","error":{...}}.
 			// OpenAI envelope:    {"error":{...}} with no top-level "type".
 			if tc.wantAnthropic {
-				if body["type"] != "error" {
-					t.Errorf("expected Anthropic envelope, got %v", body)
-				}
+				assert.Equal(t, "error", body["type"], "expected Anthropic envelope, got %v", body)
+
 				errObj, _ := body["error"].(map[string]any)
-				if errObj["type"] != "invalid_request_error" {
-					t.Errorf("error.type = %v", errObj["type"])
-				}
+				assert.Equal(t, "invalid_request_error", errObj["type"])
 			} else {
-				if _, hasType := body["type"]; hasType {
-					t.Errorf("expected OpenAI envelope without top-level type, got %v", body)
-				}
-				if _, hasErr := body["error"]; !hasErr {
-					t.Errorf("expected OpenAI error envelope, got %v", body)
-				}
+				_, hasType := body["type"]
+				assert.False(t, hasType, "expected OpenAI envelope without top-level type, got %v", body)
+				_, hasErr := body["error"]
+				assert.True(t, hasErr, "expected OpenAI error envelope, got %v", body)
 			}
 		})
 	}
@@ -72,33 +67,17 @@ func TestHandleError_LogsClientErrorsAtWarnLevel(t *testing.T) {
 		slog.SetDefault(original)
 	})
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req = req.WithContext(core.WithRequestID(req.Context(), "warn-req-123"))
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := handleError(c, core.NewInvalidRequestError("unsupported model: nope", nil)); err != nil {
-		t.Fatalf("handleError() error = %v", err)
-	}
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
-	}
+	c, rec := echotest.Post(t, "/v1/chat/completions", nil)
+	c.SetRequest(c.Request().WithContext(core.WithRequestID(c.Request().Context(), "warn-req-123")))
+	err := handleError(c, core.NewInvalidRequestError("unsupported model: nope", nil))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 
 	logOutput := buf.String()
-	if !strings.Contains(logOutput, `"level":"WARN"`) {
-		t.Fatalf("expected WARN log, got %q", logOutput)
-	}
-	if !strings.Contains(logOutput, `"msg":"request failed"`) {
-		t.Fatalf("expected request failed log, got %q", logOutput)
-	}
-	if !strings.Contains(logOutput, `"request_id":"warn-req-123"`) {
-		t.Fatalf("expected request_id in log, got %q", logOutput)
-	}
-	if !strings.Contains(logOutput, `"message":"unsupported model: nope"`) {
-		t.Fatalf("expected error message in log, got %q", logOutput)
-	}
+	require.Contains(t, logOutput, `"level":"WARN"`)
+	require.Contains(t, logOutput, `"msg":"request failed"`)
+	require.Contains(t, logOutput, `"request_id":"warn-req-123"`)
+	require.Contains(t, logOutput, `"message":"unsupported model: nope"`)
 }
 
 func TestHandleError_LogsServerErrorsAtErrorLevel(t *testing.T) {
@@ -109,162 +88,363 @@ func TestHandleError_LogsServerErrorsAtErrorLevel(t *testing.T) {
 		slog.SetDefault(original)
 	})
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req = req.WithContext(core.WithRequestID(req.Context(), "error-req-456"))
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", nil)
+	c.SetRequest(c.Request().WithContext(core.WithRequestID(c.Request().Context(), "error-req-456")))
 
 	upstreamErr := errors.New("upstream timed out")
-	if err := handleError(c, core.NewProviderError("openai", http.StatusGatewayTimeout, "provider timeout", upstreamErr)); err != nil {
-		t.Fatalf("handleError() error = %v", err)
-	}
-
-	if rec.Code != http.StatusGatewayTimeout {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusGatewayTimeout)
-	}
+	err := handleError(c, core.NewProviderError("openai", http.StatusGatewayTimeout, "provider timeout", upstreamErr))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusGatewayTimeout, rec.Code)
 
 	logOutput := buf.String()
-	if !strings.Contains(logOutput, `"level":"ERROR"`) {
-		t.Fatalf("expected ERROR log, got %q", logOutput)
-	}
-	if !strings.Contains(logOutput, `"provider":"openai"`) {
-		t.Fatalf("expected provider in log, got %q", logOutput)
-	}
-	if !strings.Contains(logOutput, `"request_id":"error-req-456"`) {
-		t.Fatalf("expected request_id in log, got %q", logOutput)
-	}
-	if !strings.Contains(logOutput, `"message":"provider timeout"`) {
-		t.Fatalf("expected error message in log, got %q", logOutput)
-	}
+	require.Contains(t, logOutput, `"level":"ERROR"`)
+	require.Contains(t, logOutput, `"provider":"openai"`)
+	require.Contains(t, logOutput, `"request_id":"error-req-456"`)
+	require.Contains(t, logOutput, `"message":"provider timeout"`)
 }
 
 func TestHandleError_EnrichesAuditEntryWithGatewayErrorCode(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", nil)
 	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
 	c.Set(string(auditlog.LogEntryKey), entry)
 
 	err := core.NewRateLimitError("budget", "budget exceeded").WithCode("budget_exceeded")
-	if handleErr := handleError(c, err); handleErr != nil {
-		t.Fatalf("handleError() error = %v", handleErr)
-	}
+	handleErr := handleError(c, err)
+	require.NoError(t, handleErr)
+	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+	require.Equal(t, string(core.ErrorTypeRateLimit), entry.ErrorType)
+	require.Equal(t, "budget exceeded", entry.Data.ErrorMessage)
+	require.Equal(t, "budget_exceeded", entry.Data.ErrorCode)
+}
 
-	if rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusTooManyRequests)
+func TestHandleError_ClassifiesClientCancellation(t *testing.T) {
+	tests := []struct {
+		name          string
+		path          string
+		cancelRequest bool
+		err           error
+		wantStatus    int
+		wantErrorType string
+	}{
+		{
+			name:          "raw cancellation after client disconnect",
+			path:          "/v1/chat/completions",
+			cancelRequest: true,
+			err:           fmt.Errorf("send request: %w", context.Canceled),
+			wantStatus:    statusClientClosedRequest,
+			wantErrorType: "client_disconnected",
+		},
+		{
+			name:          "gateway error wrapping cancellation after client disconnect",
+			path:          "/v1/chat/completions",
+			cancelRequest: true,
+			err:           core.NewProviderError("openai", http.StatusBadGateway, "upstream failed", context.Canceled),
+			wantStatus:    statusClientClosedRequest,
+			wantErrorType: "client_disconnected",
+		},
+		{
+			name:          "anthropic dialect after client disconnect",
+			path:          "/v1/messages",
+			cancelRequest: true,
+			err:           context.Canceled,
+			wantStatus:    statusClientClosedRequest,
+			wantErrorType: "client_disconnected",
+		},
+		{
+			name:          "cancellation while the client is still connected",
+			path:          "/v1/chat/completions",
+			err:           context.Canceled,
+			wantStatus:    http.StatusInternalServerError,
+			wantErrorType: string(core.ErrorTypeProvider),
+		},
+		{
+			name:          "provider failure racing a client disconnect",
+			path:          "/v1/chat/completions",
+			cancelRequest: true,
+			err:           core.NewProviderError("openai", http.StatusBadGateway, "upstream failed", errors.New("bad gateway")),
+			wantStatus:    http.StatusBadGateway,
+			wantErrorType: string(core.ErrorTypeProvider),
+		},
 	}
-	if entry.ErrorType != string(core.ErrorTypeRateLimit) {
-		t.Fatalf("entry.ErrorType = %q, want %q", entry.ErrorType, core.ErrorTypeRateLimit)
-	}
-	if entry.Data.ErrorMessage != "budget exceeded" {
-		t.Fatalf("entry.Data.ErrorMessage = %q, want budget exceeded", entry.Data.ErrorMessage)
-	}
-	if entry.Data.ErrorCode != "budget_exceeded" {
-		t.Fatalf("entry.Data.ErrorCode = %q, want budget_exceeded", entry.Data.ErrorCode)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c, rec := echotest.Post(t, tc.path, nil)
+			entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+			c.Set(string(auditlog.LogEntryKey), entry)
+			if tc.cancelRequest {
+				ctx, cancel := context.WithCancel(c.Request().Context())
+				cancel()
+				c.SetRequest(c.Request().WithContext(ctx))
+			}
+
+			require.NoError(t, handleError(c, tc.err))
+
+			assert.Equal(t, tc.wantStatus, rec.Code)
+			assert.Equal(t, tc.wantErrorType, entry.ErrorType)
+		})
 	}
 }
 
-func TestHandleRouteNotFound_AnthropicDialect(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/messages/batches", nil)
-	req.Header.Set("anthropic-version", "2023-06-01")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+func TestHandleError_AuditMiddlewareRecordsClientCancellationStatus(t *testing.T) {
+	logger := &capturingAuditLogger{config: auditlog.Config{Enabled: true}}
+	c, rec := echotest.Post(t, "/v1/chat/completions", nil)
+	ctx, cancel := context.WithCancel(c.Request().Context())
+	cancel()
+	c.SetRequest(c.Request().WithContext(ctx))
 
-	if err := handleRouteNotFound(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", rec.Code)
-	}
-	var body struct {
+	handler := auditlog.Middleware(logger)(func(c *echo.Context) error {
+		return handleError(c, fmt.Errorf("send request: %w", context.Canceled))
+	})
+
+	require.NoError(t, handler(c))
+	require.Len(t, logger.entries, 1)
+	entry := logger.entries[0]
+	assert.Equal(t, statusClientClosedRequest, rec.Code)
+	assert.Equal(t, statusClientClosedRequest, entry.StatusCode)
+	assert.Equal(t, "client_disconnected", entry.ErrorType)
+}
+
+func TestHandleRouteNotFound_AnthropicDialect(t *testing.T) {
+	c, rec := echotest.Post(t, "/v1/messages/batches", nil, echotest.WithHeader("anthropic-version", "2023-06-01"))
+	err := handleRouteNotFound(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusNotFound, rec.Code)
+
+	body := echotest.Decode[struct {
 		Type  string `json:"type"`
 		Error struct {
 			Type    string `json:"type"`
 			Message string `json:"message"`
 		} `json:"error"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if body.Type != "error" || body.Error.Type != "not_found_error" {
-		t.Errorf("envelope = %+v, want anthropic error envelope", body)
-	}
-	if !strings.Contains(body.Error.Message, "/v1/messages/batches") {
-		t.Errorf("message should name the path, got %q", body.Error.Message)
-	}
+	}](t, rec)
+	assert.Equal(t, "error", body.Type)
+	assert.Equal(t, "not_found_error", body.Error.Type, "envelope = %+v, want anthropic error envelope", body)
+	assert.Contains(t, body.Error.Message, "/v1/messages/batches")
 }
 
 func TestHandleRouteNotFound_OpenAIDialect(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/v1/does-not-exist", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Get(t, "/v1/does-not-exist")
+	err := handleRouteNotFound(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusNotFound, rec.Code)
 
-	if err := handleRouteNotFound(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", rec.Code)
-	}
-	var body struct {
+	body := echotest.Decode[struct {
 		Error struct {
 			Type string `json:"type"`
 		} `json:"error"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if body.Error.Type != "not_found_error" {
-		t.Errorf("envelope = %s, want OpenAI error envelope with not_found_error", rec.Body.String())
-	}
+	}](t, rec)
+	assert.Equal(t, "not_found_error", body.Error.Type, "envelope = %s, want OpenAI error envelope with not_found_error", rec.Body.String())
 }
 
 func TestHandleError_RecordsUpstreamProviderOfError(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", nil)
 	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
 	c.Set(string(auditlog.LogEntryKey), entry)
 
 	upstream := core.ParseProviderError("openai", http.StatusUnauthorized, []byte(`{"error":{"message":"Incorrect API key provided"}}`), nil)
-	if handleErr := handleError(c, upstream); handleErr != nil {
-		t.Fatalf("handleError() error = %v", handleErr)
-	}
+	handleErr := handleError(c, upstream)
+	require.NoError(t, handleErr)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	require.Equal(t, string(core.ErrorTypeAuthentication), entry.ErrorType)
+	require.Equal(t, "openai", entry.Data.ErrorProvider)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
-	}
-	if entry.ErrorType != string(core.ErrorTypeAuthentication) {
-		t.Fatalf("entry.ErrorType = %q, want %q", entry.ErrorType, core.ErrorTypeAuthentication)
-	}
-	if entry.Data.ErrorProvider != "openai" {
-		t.Fatalf("entry.Data.ErrorProvider = %q, want openai", entry.Data.ErrorProvider)
-	}
-	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode body: %v", err)
-	}
+	body := echotest.Decode[map[string]any](t, rec)
+
 	errorData, _ := body["error"].(map[string]any)
-	if errorData["provider"] != "openai" {
-		t.Fatalf("body.error.provider = %v, want openai", errorData["provider"])
-	}
+	require.Equal(t, "openai", errorData["provider"])
 
 	// The gateway's own authentication failure names no provider.
-	rec = httptest.NewRecorder()
-	c = e.NewContext(httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), rec)
+	c, rec = echotest.Post(t, "/v1/chat/completions", nil)
 	entry = &auditlog.LogEntry{Data: &auditlog.LogData{}}
 	c.Set(string(auditlog.LogEntryKey), entry)
-	if handleErr := handleError(c, core.NewAuthenticationError("", "invalid API key")); handleErr != nil {
-		t.Fatalf("handleError() error = %v", handleErr)
+	handleErr = handleError(c, core.NewAuthenticationError("", "invalid API key"))
+	require.NoError(t, handleErr)
+	require.Empty(t, entry.Data.ErrorProvider)
+	assert.NotContains(t, rec.Body.String(), `"provider"`)
+}
+
+func TestGatewayErrorHandler_RendersCanonicalEnvelope(t *testing.T) {
+	tests := []struct {
+		name        string
+		err         error
+		wantStatus  int
+		wantType    string
+		wantMessage string
+	}{
+		{
+			name:       "recovered panic",
+			err:        errors.New("runtime error: invalid memory address"),
+			wantStatus: http.StatusInternalServerError,
+			wantType:   "internal_error",
+		},
+		{
+			name:       "unencodable response body",
+			err:        &json.UnsupportedValueError{Str: "+Inf"},
+			wantStatus: http.StatusInternalServerError,
+			wantType:   "internal_error",
+		},
+		{
+			name:       "echo client error keeps its status",
+			err:        echo.NewHTTPError(http.StatusMethodNotAllowed, "Method Not Allowed"),
+			wantStatus: http.StatusMethodNotAllowed,
+			wantType:   "invalid_request_error",
+		},
+		{
+			name:       "middleware sentinel keeps its status",
+			err:        echo.ErrStatusRequestEntityTooLarge,
+			wantStatus: http.StatusRequestEntityTooLarge,
+			wantType:   "invalid_request_error",
+		},
+		{
+			// echo's Decompress middleware answers 500 with err.Error(); a
+			// message describing gateway internals must not reach the client.
+			name:        "echo server error stays opaque",
+			err:         echo.NewHTTPError(http.StatusInternalServerError, "dial tcp 10.0.0.1:5432: connection refused"),
+			wantStatus:  http.StatusInternalServerError,
+			wantType:    "internal_error",
+			wantMessage: "an unexpected error occurred",
+		},
+		{
+			name:       "gateway error passes through",
+			err:        core.NewNotFoundError("no such model"),
+			wantStatus: http.StatusNotFound,
+			wantType:   "not_found_error",
+		},
 	}
-	if entry.Data.ErrorProvider != "" {
-		t.Fatalf("entry.Data.ErrorProvider = %q, want empty", entry.Data.ErrorProvider)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c, rec := echotest.Get(t, "/admin/virtual-models")
+
+			gatewayErrorHandler(c, tc.err)
+
+			require.Equal(t, tc.wantStatus, rec.Code)
+
+			body := echotest.Decode[struct {
+				Error struct {
+					Type    string `json:"type"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}](t, rec)
+			assert.Equal(t, tc.wantType, body.Error.Type, "error type = %q, want %q (body %s)", body.Error.Type, tc.wantType, rec.Body.String())
+			assert.NotEmpty(t, body.Error.Message, "error message is empty, body %s", rec.Body.String())
+
+			if tc.wantMessage != "" {
+				assert.Equal(t, tc.wantMessage, body.Error.Message)
+			}
+		})
 	}
-	if strings.Contains(rec.Body.String(), `"provider"`) {
-		t.Fatalf("gateway auth error body should omit provider: %s", rec.Body.String())
+}
+
+func TestGatewayErrorHandler_LogsPanicWithStackAndRoute(t *testing.T) {
+	var buf bytes.Buffer
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(original) })
+
+	e := echo.NewWithConfig(echo.Config{HTTPErrorHandler: gatewayErrorHandler})
+	e.Use(middleware.Recover())
+	e.GET("/admin/virtual-models", func(*echo.Context) error {
+		panic("listing blew up")
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/virtual-models", nil)
+	req = req.WithContext(core.WithRequestID(req.Context(), "panic-req-1"))
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"type":"internal_error"`)
+
+	logOutput := buf.String()
+	for _, want := range []string{`"level":"ERROR"`, `"path":"/admin/virtual-models"`, `"request_id":"panic-req-1"`, `"panic":"listing blew up"`, `"stack":"goroutine `} {
+		assert.Contains(t, logOutput, want)
 	}
+	assert.NotContains(t, logOutput, "PANIC RECOVER", "panic value and stack should be separate attributes, not one error string")
+}
+
+func TestGatewayErrorHandler_LeavesCommittedResponseAlone(t *testing.T) {
+	var buf bytes.Buffer
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(original) })
+
+	c, rec := echotest.Get(t, "/v1/chat/completions")
+	err := c.String(http.StatusOK, "streamed")
+	require.NoError(t, err)
+
+	gatewayErrorHandler(c, errors.New("failed after the first chunk"))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "streamed", rec.Body.String())
+
+	// The response is untouchable, but the operator still needs to know.
+	require.Contains(t, buf.String(), "failed after the first chunk")
+}
+
+// The direct gatewayErrorHandler tests stub the error; this one drives the real
+// server so the goccy serializer, echo's dispatch and the handler are all in
+// the path — the shape that produced the opaque 500 in #881.
+func TestGatewayErrorHandler_UnencodableResponseThroughRealServer(t *testing.T) {
+	logs := &bytes.Buffer{}
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(original) })
+
+	// A year beyond 9999 is what time.Time refuses to marshal, which is how one
+	// stored row turned a whole admin listing into a 500.
+	type row struct {
+		CreatedAt time.Time `json:"created_at"`
+	}
+	srv := New(&mockProvider{}, nil)
+	srv.echo.GET("/admin/rows", func(c *echo.Context) error {
+		return c.JSON(http.StatusOK, []row{{CreatedAt: time.Unix(1<<40, 0).UTC()}})
+	})
+
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/admin/rows", nil))
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
+
+	body := echotest.Decode[struct {
+		Error struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}](t, rec)
+	require.Equal(t, "internal_error", body.Error.Type)
+	require.Equal(t, "an unexpected error occurred", body.Error.Message, "error = %+v, want the canonical internal_error envelope", body.Error)
+	assert.NotContains(t, rec.Body.String(), "year outside", "serializer detail leaked to the client")
+	assert.Contains(t, logs.String(), "year outside of range")
+}
+
+func TestGatewayErrorHandler_FinalizesHeadersAndAudit(t *testing.T) {
+	c, rec := echotest.Post(t, "/v1/chat/completions", nil)
+	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+	c.Set(string(auditlog.LogEntryKey), entry)
+
+	gatewayErrorHandler(c, &gatewayErrorWithResponseHeaders{
+		GatewayError: core.NewRateLimitError("budget", "budget exceeded").WithCode("budget_exceeded"),
+		headers:      http.Header{"Retry-After": []string{"30"}},
+	})
+
+	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+	assert.Equal(t, "30", rec.Header().Get("Retry-After"))
+	assert.Equal(t, string(core.ErrorTypeRateLimit), entry.ErrorType)
+	assert.Equal(t, "budget_exceeded", entry.Data.ErrorCode)
+}
+
+func TestGatewayErrorHandler_KeepsTheOriginalAuditedError(t *testing.T) {
+	c, _ := echotest.Post(t, "/v1/chat/completions", nil)
+	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+	c.Set(string(auditlog.LogEntryKey), entry)
+
+	// handleError records the real cause and returns its own write failure,
+	// which then escapes here; that follow-up must not overwrite the cause.
+	err := handleError(c, core.NewNotFoundError("no such model"))
+	require.NoError(t, err)
+
+	gatewayErrorHandler(c, errors.New("writing the error response failed"))
+
+	assert.Equal(t, string(core.ErrorTypeNotFound), entry.ErrorType)
+	assert.Equal(t, "no such model", entry.Data.ErrorMessage)
 }

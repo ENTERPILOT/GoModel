@@ -1,182 +1,101 @@
-# GoModel Helm Chart
+# GoModel Helm chart
 
-High-performance AI gateway for multiple LLM providers (OpenAI, Anthropic, Cohere, Gemini, DeepSeek, Groq, Kilo AI, Z.ai, xAI, Oracle, SGLang, vLLM).
+Deploys [GoModel](https://gomodel.enterpilot.io), an OpenAI-compatible AI gateway, on Kubernetes.
 
-## Prerequisites
-
-- Kubernetes 1.29+ (for Gateway API v1 support)
-- Helm 3.x
-- (Optional) Prometheus Operator for ServiceMonitor support
-
-## Installation
-
-### Add the Helm repository (if published)
+## Quick start
 
 ```bash
-helm repo add gomodel https://your-org.github.io/gomodel
-helm repo update
+helm install gomodel ./helm -n gomodel --create-namespace \
+  --set secretEnv.GOMODEL_MASTER_KEY=change-me \
+  --set secretEnv.OPENAI_API_KEY=sk-...
+
+kubectl -n gomodel port-forward svc/gomodel 8080:8080
+curl -H "Authorization: Bearer change-me" http://127.0.0.1:8080/v1/models
 ```
 
-### Install from local chart
-
-```bash
-# Basic install with OpenAI (provider auto-enables when apiKey is set)
-helm install gomodel ./helm \
-  -n gomodel --create-namespace \
-  --set providers.openai.apiKey="sk-..."
-
-# Multi-provider setup with Redis cache
-helm install gomodel ./helm \
-  -n gomodel --create-namespace \
-  --set providers.openai.apiKey="sk-..." \
-  --set providers.anthropic.apiKey="sk-ant-..." \
-  --set redis.enabled=true
-
-# Using existing secrets (GitOps-friendly)
-helm install gomodel ./helm \
-  -n gomodel --create-namespace \
-  --set providers.existingSecret="llm-api-keys" \
-  --set providers.openai.enabled=true \
-  --set providers.anthropic.enabled=true
-```
+The default install runs one pod with SQLite on a 1Gi PersistentVolumeClaim,
+Prometheus metrics on `/metrics`, a read-only root filesystem, and the image's
+non-root user (UID 65532).
 
 ## Configuration
 
-### Key Values
+GoModel is configured entirely through environment variables. Any variable from
+[`.env.template`](../.env.template) goes in one of two maps:
 
-| Parameter                        | Description                                                                                    | Default                |
-| -------------------------------- | ---------------------------------------------------------------------------------------------- | ---------------------- |
-| `replicaCount`                   | Number of replicas                                                                             | `2`                    |
-| `image.repository`               | Image repository                                                                               | `enterpilot/gomodel`   |
-| `image.tag`                      | Image tag                                                                                      | `""` (uses appVersion) |
-| `server.port`                    | Server port                                                                                    | `8080`                 |
-| `server.basePath`                | URL path prefix where GoModel is mounted                                                       | `"/"`                  |
-| `server.userPathHeader`          | Header used to read/write request user_path values                                             | `"X-GoModel-User-Path"` |
-| `server.bodySizeLimit`           | Max request body size                                                                          | `"10M"`                |
-| `auth.masterKey`                 | Master key for auth                                                                            | `""`                   |
-| `auth.existingSecret`            | Existing secret for auth                                                                       | `""`                   |
-| `providers.existingSecret`       | Existing secret for API keys                                                                   | `""`                   |
-| `providers.openai.enabled`       | Enable OpenAI                                                                                  | `false`                |
-| `providers.anthropic.enabled`    | Enable Anthropic                                                                               | `false`                |
-| `providers.cohere.enabled`       | Enable Cohere                                                                                  | `false`                |
-| `providers.cohere.baseUrl`       | Optional Cohere base URL mapped to `COHERE_BASE_URL`                                           | `""`                   |
-| `providers.gemini.enabled`       | Enable Gemini                                                                                  | `false`                |
-| `providers.gemini.useNativeApi`  | Use Gemini native generateContent for chat/responses; set false for Gemini OpenAI compatibility | `true`                 |
-| `providers.groq.enabled`         | Enable Groq                                                                                    | `false`                |
-| `providers.xai.enabled`          | Enable xAI                                                                                     | `false`                |
-| `providers.zai.enabled`          | Enable Z.ai                                                                                    | `false`                |
-| `providers.zai.baseUrl`          | Optional Z.ai base URL mapped to `ZAI_BASE_URL`; use Coding Plan endpoint when needed          | `""`                   |
-| `providers.kilo.enabled`         | Enable Kilo AI                                                                                  | `false`                |
-| `providers.kilo.baseUrl`         | Optional Kilo AI Gateway base URL mapped to `KILO_BASE_URL`                                    | `""`                   |
-| `providers.oracle.enabled`       | Enable Oracle                                                                                  | `false`                |
-| `providers.oracle.baseUrl`       | Oracle OpenAI-compatible base URL mapped to `ORACLE_BASE_URL`; required when Oracle is enabled | `""`                   |
-| `providers.vllm.enabled`         | Enable vLLM                                                                                    | `false`                |
-| `providers.vllm.baseUrl`         | vLLM OpenAI-compatible base URL mapped to `VLLM_BASE_URL`; required when vLLM is enabled       | `""`                   |
-| `providers.sglang.enabled`       | Enable SGLang                                                                                  | `false`                |
-| `providers.sglang.baseUrl`       | SGLang OpenAI-compatible base URL mapped to `SGLANG_BASE_URL`; required when enabled           | `""`                   |
-| `providers.llmd.enabled`         | Enable llm-d                                                                                   | `false`                |
-| `providers.llmd.baseUrl`         | llm-d Router/EPP base URL mapped to `LLMD_BASE_URL`; required when llm-d is enabled            | `""`                   |
-| `providers.llmd.inferenceObjective` | Trusted llm-d objective mapped to `LLMD_INFERENCE_OBJECTIVE`                                | `""`                   |
-| `providers.llmd.fairnessFromUserPath` | Derive llm-d fairness ID from GoModel's effective user path                               | `true`                 |
-| `cache.type`                     | Cache type (local/redis)                                                                       | `"redis"`              |
-| `redis.enabled`                  | Deploy Redis subchart                                                                          | `true`                 |
-| `metrics.enabled`                | Enable Prometheus metrics                                                                      | `true`                 |
-| `metrics.serviceMonitor.enabled` | Create ServiceMonitor                                                                          | `false`                |
-| `logging.format`                 | Log format; empty auto-detects, or set `json`/`text`                                           | `""`                   |
-| `ingress.enabled`                | Enable Ingress                                                                                 | `false`                |
-| `gateway.enabled`                | Enable Gateway API HTTPRoute                                                                   | `false`                |
-| `autoscaling.enabled`            | Enable HPA                                                                                     | `false`                |
+| Value       | Stored in | Use for                                            |
+| ----------- | --------- | -------------------------------------------------- |
+| `env`       | ConfigMap | Plain settings: `LOG_LEVEL`, `REDIS_URL`, `BASE_PATH`, … |
+| `secretEnv` | Secret    | `GOMODEL_MASTER_KEY`, provider API keys, database URLs |
 
-### Using Existing Secrets
-
-Create a secret with your API keys:
+Changing either rolls the pods. To keep secrets out of Helm values, create the
+Secret yourself and reference it:
 
 ```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: llm-api-keys
-type: Opaque
-stringData:
-  OPENAI_API_KEY: "sk-..."
-  ANTHROPIC_API_KEY: "sk-ant-..."
-  COHERE_API_KEY: "..."
-  GEMINI_API_KEY: "..."
-  ZAI_API_KEY: "..."
-  KILO_API_KEY: "..."
-  ORACLE_API_KEY: "..."
-  SGLANG_API_KEY: "..."
-  VLLM_API_KEY: "..."
-  LLMD_API_KEY: "..."
+extraEnvFrom:
+  - secretRef:
+      name: gomodel-keys   # keys: GOMODEL_MASTER_KEY, OPENAI_API_KEY, ...
 ```
 
-Oracle also requires a base URL in values. The chart maps `providers.oracle.baseUrl`
-to the container env var `ORACLE_BASE_URL`.
+Set `GOMODEL_MASTER_KEY`. Without it the gateway accepts unauthenticated requests
+and the install notes print a warning.
 
-vLLM does not require an API key unless the upstream server was started with
-`--api-key`. The chart maps `providers.vllm.baseUrl` to the container env var
-`VLLM_BASE_URL`.
+### config.yaml
 
-llm-d also allows keyless access when its Gateway does not require bearer
-authentication. The chart maps `providers.llmd.baseUrl` to `LLMD_BASE_URL` and
-the optional scheduling controls to their `LLMD_*` environment variables. When
-using `providers.existingSecret`, its `LLMD_API_KEY` entry may be omitted for a
-keyless llm-d route.
+Use `config` for settings that env vars cannot express (per-provider resilience,
+custom provider names, model allowlists). It is mounted at
+`/app/config/config.yaml`; env vars still override it.
 
-SGLang does not require an API key unless the upstream server was started with
-`--api-key`. The chart maps `providers.sglang.baseUrl` to the container env var
-`SGLANG_BASE_URL`.
-
-Then reference it (use `enabled=true` when using existingSecret since apiKey isn't set directly):
-
-```bash
-helm install gomodel ./helm \
-  --set providers.existingSecret="llm-api-keys" \
-  --set providers.openai.enabled=true
+```yaml
+config: |
+  providers:
+    openai-eu:
+      type: openai
+      api_key: ${OPENAI_EU_API_KEY}
+      base_url: https://eu.api.openai.com/v1
 ```
 
-Example Oracle setup with an existing secret:
+Or point `existingConfigMap` at a ConfigMap that has a `config.yaml` key.
 
-```bash
-helm install gomodel ./helm \
-  --set providers.existingSecret="llm-api-keys" \
-  --set providers.oracle.enabled=true \
-  --set providers.oracle.baseUrl="https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1"
+### Storage and replicas
+
+| `storage.type` | Replicas | Data location                                  |
+| -------------- | -------- | ---------------------------------------------- |
+| `sqlite`       | 1        | PVC at `/app/data` (`persistence.enabled: true`) |
+| `postgresql`   | any      | `storage.url` or `POSTGRES_URL`                |
+| `mongodb`      | any      | `storage.url` or `MONGODB_URL`                 |
+
+SQLite is per pod, so the chart refuses `replicaCount > 1` or autoscaling until
+you switch to PostgreSQL or MongoDB:
+
+```yaml
+replicaCount: 3
+storage:
+  type: postgresql
+  url: postgres://gomodel:secret@postgresql:5432/gomodel
 ```
 
-Example keyless vLLM setup:
+`storage.url` lands in the chart Secret. If the URL already lives in a Secret of
+your own, load it through `extraEnvFrom` or an `extraEnv` entry named
+`POSTGRES_URL` / `MONGODB_URL` instead and leave `storage.url` empty.
 
-```bash
-helm install gomodel ./helm \
-  --set providers.vllm.enabled=true \
-  --set providers.vllm.baseUrl="http://vllm.default.svc.cluster.local:8000/v1"
-```
+`helm uninstall` deletes the claim with the release. To keep the database, add
+`persistence.annotations: {helm.sh/resource-policy: keep}`.
 
-Example keyless llm-d setup:
+With SQLite on a ReadWriteOnce volume the Deployment uses the `Recreate`
+strategy, so upgrades briefly stop the gateway. Set `persistence.enabled: false`
+for a throwaway install; the data then lives on an emptyDir and is lost when the
+pod is replaced.
 
-```bash
-helm install gomodel ./helm \
-  --set providers.llmd.enabled=true \
-  --set providers.llmd.baseUrl="http://quickstart-epp.llm-d.svc.cluster.local/v1" \
-  --set providers.llmd.inferenceObjective="standard-traffic"
-```
+### Exposing the gateway
 
-Example keyless SGLang setup:
-
-```bash
-helm install gomodel ./helm \
-  --set providers.sglang.enabled=true \
-  --set providers.sglang.baseUrl="http://sglang.default.svc.cluster.local:30000/v1"
-```
-
-### Ingress Example
+Ingress:
 
 ```yaml
 ingress:
   enabled: true
   className: nginx
   annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
+    cert-manager.io/cluster-issuer: letsencrypt
   hosts:
     - host: gomodel.example.com
       paths:
@@ -184,36 +103,105 @@ ingress:
           pathType: Prefix
   tls:
     - secretName: gomodel-tls
-      hosts:
-        - gomodel.example.com
+      hosts: [gomodel.example.com]
 ```
 
-### Gateway API Example
+Gateway API:
 
 ```yaml
-gateway:
+httpRoute:
   enabled: true
-  parentRef:
-    name: my-gateway
-    namespace: gateway-system
-  hostnames:
-    - gomodel.example.com
+  parentRefs:
+    - name: public-gateway
+      namespace: gateway-system
+  hostnames: [gomodel.example.com]
 ```
 
-## Upgrading
+To serve under a path prefix set `env.BASE_PATH: /g`; probe, metrics and
+HTTPRoute paths follow automatically.
+
+### Metrics
+
+`metrics.enabled` (default `true`) exposes `/metrics` without authentication.
+With the Prometheus Operator, set `metrics.serviceMonitor.enabled: true` and add
+the labels your Prometheus selects on under `metrics.serviceMonitor.labels`.
+
+### Cloud provider credentials
+
+Give the pod's ServiceAccount a cloud identity for AWS Bedrock or Google Vertex AI:
+
+```yaml
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/gomodel
+```
+
+## Values
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `replicaCount` | `1` | Pods. More than one needs `storage.type` postgresql or mongodb. |
+| `image.repository` | `enterpilot/gomodel` | |
+| `image.tag` | `""` | Defaults to the chart `appVersion`. |
+| `env` | `{}` | Plain environment variables. |
+| `secretEnv` | `{}` | Secret environment variables. |
+| `extraEnvFrom` | `[]` | Existing Secrets/ConfigMaps loaded as env vars. |
+| `extraEnv` | `[]` | Raw container env entries (`valueFrom`). |
+| `config` | `""` | Inline `config.yaml`. |
+| `existingConfigMap` | `""` | ConfigMap with a `config.yaml` key. |
+| `storage.type` | `sqlite` | `sqlite`, `postgresql`, or `mongodb`. |
+| `storage.url` | `""` | Connection URL for postgresql/mongodb. |
+| `persistence.enabled` | `true` | PVC for SQLite data. |
+| `persistence.size` | `1Gi` | |
+| `persistence.storageClass` | `""` | Cluster default. `-` disables dynamic provisioning. |
+| `persistence.existingClaim` | `""` | Reuse a PVC. |
+| `updateStrategy` | `{}` | Overrides the automatic Recreate/RollingUpdate choice. |
+| `metrics.enabled` | `true` | Expose `/metrics`. |
+| `metrics.serviceMonitor.enabled` | `false` | Prometheus Operator ServiceMonitor. |
+| `service.type` | `ClusterIP` | |
+| `service.port` | `8080` | |
+| `ingress.enabled` | `false` | |
+| `httpRoute.enabled` | `false` | Gateway API HTTPRoute; needs `httpRoute.parentRefs`. |
+| `serviceAccount.create` | `true` | |
+| `serviceAccount.annotations` | `{}` | Cloud IAM bindings. |
+| `resources` | `100m/128Mi` requests, `512Mi` limit | No CPU limit by default. |
+| `autoscaling.enabled` | `false` | HPA on CPU (70%) and optionally memory. |
+| `podDisruptionBudget.enabled` | `true` | Created only when more than one pod can run. |
+| `terminationGracePeriodSeconds` | `45` | Covers GoModel's 30s drain. |
+| `livenessProbe` / `readinessProbe` | `/health`, `/health/ready` | Readiness fails while storage is down. |
+| `podSecurityContext` / `securityContext` | non-root 65532, read-only FS | |
+| `extraVolumes` / `extraVolumeMounts` | `[]` | CA bundles, local model catalogs, … |
+| `nodeSelector`, `tolerations`, `affinity`, `topologySpreadConstraints`, `priorityClassName`, `podAnnotations`, `podLabels` | | Standard scheduling knobs. |
+
+## Upgrading from chart 0.1.x
+
+Chart 0.2.0 replaced the per-provider values and the Redis subchart with the
+generic `env` / `secretEnv` maps:
+
+| 0.1.x | 0.2.0 |
+| --- | --- |
+| `auth.masterKey` | `secretEnv.GOMODEL_MASTER_KEY` |
+| `providers.openai.apiKey` | `secretEnv.OPENAI_API_KEY` (same pattern for every provider) |
+| `providers.openai.baseUrl` | `env.OPENAI_BASE_URL` |
+| `providers.existingSecret` | `extraEnvFrom: [{secretRef: {name: ...}}]` |
+| `redis.enabled` / `cache.redis.url` | `env.REDIS_URL` pointing at your own Redis |
+| `gateway.*` | `httpRoute.*` |
+| `server.basePath` | `env.BASE_PATH` |
+
+The chart refuses to render while any of the old top-level keys (`auth`,
+`providers`, `redis`, `cache`, `gateway`, `server`, `logging`) are still present,
+so an upgrade cannot silently drop the master key. The default `replicaCount`
+dropped from 2 to 1 because SQLite is per pod, the pod now runs as the image's
+UID 65532, and `/app/data` is on a PVC.
+
+## Testing the chart
 
 ```bash
-helm upgrade gomodel ./helm -n gomodel -f values.yaml
+helm lint --strict ./helm -f helm/ci/default-values.yaml
+helm template gomodel ./helm -f helm/ci/full-values.yaml | kubeconform -strict
+helm install gomodel ./helm -n gomodel --create-namespace -f helm/ci/default-values.yaml --wait
+helm test gomodel -n gomodel
 ```
 
-## Uninstalling
-
-```bash
-helm uninstall gomodel -n gomodel
-```
-
-# Todo
-
-- Add a values-demo.yaml file with a demo setup ready to run
-- Consider adding prometheus + grafana stack as an optional subchart
-- Add an example for production-ready redis configuration with persistence and authentication enabled
+The `ci/*-values.yaml` profiles are what the CI workflow lints, validates,
+and installs on a kind cluster.

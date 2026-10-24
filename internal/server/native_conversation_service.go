@@ -114,6 +114,9 @@ func (s *conversationService) UpdateConversation(c *echo.Context) error {
 		return handleError(c, verr)
 	}
 
+	if err := s.authorizeConversation(ctx, id); err != nil {
+		return handleError(c, err)
+	}
 	stored, err := s.conversationStore.MergeMetadata(ctx, id, *req.Metadata)
 	if err != nil {
 		switch {
@@ -136,6 +139,9 @@ func (s *conversationService) DeleteConversation(c *echo.Context) error {
 
 	id, err := conversationIDFromRequest(c)
 	if err != nil {
+		return handleError(c, err)
+	}
+	if err := s.authorizeConversation(ctx, id); err != nil {
 		return handleError(c, err)
 	}
 	if err := s.conversationStore.Delete(ctx, id); err != nil {
@@ -165,7 +171,19 @@ func (s *conversationService) loadStoredConversation(ctx context.Context, id str
 	if stored == nil || stored.Conversation == nil {
 		return nil, core.NewProviderError("conversation_store", http.StatusInternalServerError, "stored conversation payload missing", nil)
 	}
+	// A conversation outside the caller's user-path scope is reported
+	// exactly like a missing one so IDs reveal nothing across tenants.
+	if !core.AccessScopeFromContext(ctx).Allows(stored.UserPath) {
+		return nil, conversationNotFound(id)
+	}
 	return stored, nil
+}
+
+// authorizeConversation verifies the conversation exists inside the caller's
+// user-path scope before a by-ID mutation that does not load it first.
+func (s *conversationService) authorizeConversation(ctx context.Context, id string) error {
+	_, err := s.loadStoredConversation(ctx, id)
+	return err
 }
 
 func conversationIDFromRequest(c *echo.Context) (string, error) {

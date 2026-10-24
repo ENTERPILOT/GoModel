@@ -3,28 +3,46 @@ package anthropicapi
 import (
 	"bufio"
 	"bytes"
+	"cmp"
+	"fmt"
 	"io"
+	"strings"
 
 	"github.com/goccy/go-json"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
 // chatChunk is the subset of an OpenAI chat.completion.chunk consumed by the
 // stream converter.
 type chatChunk struct {
-	ID      string `json:"id"`
-	Model   string `json:"model"`
+	ID    string `json:"id"`
+	Model string `json:"model"`
+	// Error is an upstream failure reported inside the stream
+	// (data: {"error": {...}}).
+	Error   *upstreamStreamError `json:"error"`
 	Choices []struct {
 		Delta struct {
 			Content          string              `json:"content"`
 			ReasoningContent string              `json:"reasoning_content"`
+			Reasoning        string              `json:"reasoning"`
 			StopSequence     string              `json:"stop_sequence"`
 			ToolCalls        []chatToolCallDelta `json:"tool_calls"`
+			// ExtraContent is provider replay state for the turn so far;
+			// Anthropic thinking signatures arrive here.
+			ExtraContent json.RawMessage `json:"extra_content"`
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *chatUsage `json:"usage"`
+}
+
+// upstreamStreamError is the error object an OpenAI-compatible upstream sends
+// in place of a chunk when it fails mid-stream.
+type upstreamStreamError struct {
+	Message string `json:"message"`
+	Type    string `json:"type"`
 }
 
 type chatToolCallDelta struct {
@@ -34,26 +52,16 @@ type chatToolCallDelta struct {
 		Name      string `json:"name"`
 		Arguments string `json:"arguments"`
 	} `json:"function"`
+	// ExtraContent is provider replay state on the first delta of a tool call.
+	ExtraContent json.RawMessage `json:"extra_content"`
 }
 
 type chatUsage struct {
-	PromptTokens             int `json:"prompt_tokens"`
-	CompletionTokens         int `json:"completion_tokens"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
-	PromptTokensDetails      *struct {
-		CachedTokens int `json:"cached_tokens"`
-	} `json:"prompt_tokens_details"`
-}
-
-func (u chatUsage) cacheRead() int {
-	if u.CacheReadInputTokens > 0 {
-		return u.CacheReadInputTokens
-	}
-	if u.PromptTokensDetails != nil {
-		return u.PromptTokensDetails.CachedTokens
-	}
-	return 0
+	PromptTokens             int                       `json:"prompt_tokens"`
+	CompletionTokens         int                       `json:"completion_tokens"`
+	CacheCreationInputTokens int                       `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int                       `json:"cache_read_input_tokens"`
+	PromptTokensDetails      *core.PromptTokensDetails `json:"prompt_tokens_details"`
 }
 
 // NewStreamConverter wraps an OpenAI-style chat completion SSE stream and emits
@@ -84,18 +92,64 @@ type streamConverter struct {
 	buffer streaming.StreamBuffer
 	model  string
 
-	started       bool
-	blockOpen     bool
-	blockType     string
-	curIndex      int
-	nextIndex     int
-	toolBlock     map[int]int
-	stopReason    string
-	stopSequence  string
+	started      bool
+	blockOpen    bool
+	blockType    string
+	curIndex     int
+	nextIndex    int
+	toolBlock    map[int]int
+	stopReason   string
+	stopSequence string
+	// thinkingSeen counts the thinking blocks already rendered from the
+	// cumulative replay state, so a later chunk repeating them adds nothing.
+	thinkingSeen  int
 	inputEstimate int
 	usage         chatUsage
 	finalized     bool
 	closed        bool
+	// endErr is what Read returns once a stream that stopped early has
+	// emitted its error event.
+	endErr error
+	// upstreamErr is the error the upstream reported mid-stream, if any; it
+	// becomes the error event instead of the generic incomplete-stream one.
+	upstreamErr *upstreamStreamError
+}
+
+// finish ends the converted stream when the upstream stops reading. An
+// upstream that signalled completion ([DONE] or a finish_reason) ends with
+// message_stop, even when the connection fails after that; one that stopped
+// early ends with an error event instead, so a truncated answer is not
+// presented as a finished turn.
+func (sc *streamConverter) finish(err error) {
+	if sc.finalized {
+		return
+	}
+	// An error the upstream reported fails the turn even after a finish:
+	// the stream broke, so it must not end as a completed message.
+	if sc.stopReason != "" && sc.upstreamErr == nil {
+		sc.finalize()
+		return
+	}
+	sc.finalized = true
+	errType, message := "api_error", streaming.ErrStreamIncomplete.Error()
+	if upstream := sc.upstreamErr; upstream != nil && strings.TrimSpace(upstream.Message) != "" {
+		errType, message = upstreamErrorType(upstream.Type), upstream.Message
+		err = fmt.Errorf("upstream error: %s", upstream.Message)
+	}
+	sc.endErr = streaming.IncompleteStreamError(err)
+	sc.emit("error", map[string]any{
+		"type":  "error",
+		"error": map[string]any{"type": errType, "message": message},
+	})
+}
+
+// upstreamErrorType maps an OpenAI-style error type onto the nearest
+// Anthropic error type.
+func upstreamErrorType(upstreamType string) string {
+	if strings.HasPrefix(upstreamType, "rate_limit") {
+		return "rate_limit_error"
+	}
+	return anthropicErrorType(&core.GatewayError{Type: core.ErrorType(upstreamType)})
 }
 
 func (sc *streamConverter) Read(p []byte) (int, error) {
@@ -106,6 +160,9 @@ func (sc *streamConverter) Read(p []byte) (int, error) {
 	// stream stays with Close so observers (audit, usage) still fire on
 	// OnStreamClose; Read must never mark the converter closed.
 	if sc.finalized || sc.closed {
+		if sc.endErr != nil {
+			return 0, sc.endErr
+		}
 		return 0, io.EOF
 	}
 
@@ -113,18 +170,24 @@ func (sc *streamConverter) Read(p []byte) (int, error) {
 		line, err := sc.reader.ReadBytes('\n')
 		if len(bytes.TrimSpace(line)) > 0 {
 			if done := sc.consumeLine(line); done {
-				sc.finalize()
+				if sc.upstreamErr != nil {
+					// [DONE] after an upstream error still ends the
+					// turn as failed.
+					sc.finish(nil)
+				} else {
+					sc.finalize()
+				}
 			}
 		}
 		if err != nil {
-			if err == io.EOF {
-				sc.finalize()
-				if sc.buffer.Len() > 0 {
-					return sc.buffer.Read(p), nil
-				}
-				return 0, io.EOF
+			sc.finish(err)
+			if sc.buffer.Len() > 0 {
+				return sc.buffer.Read(p), nil
 			}
-			return 0, err
+			if sc.endErr != nil {
+				return 0, sc.endErr
+			}
+			return 0, io.EOF
 		}
 		if sc.buffer.Len() > 0 {
 			return sc.buffer.Read(p), nil
@@ -164,19 +227,26 @@ func (sc *streamConverter) consumeLine(line []byte) (done bool) {
 }
 
 func (sc *streamConverter) handleChunk(chunk *chatChunk) {
+	if chunk.Error != nil {
+		sc.upstreamErr = chunk.Error
+		return
+	}
 	sc.ensureStarted(chunk.ID, chunk.Model)
 	if chunk.Usage != nil {
 		sc.usage = *chunk.Usage
 	}
 	for _, choice := range chunk.Choices {
-		if choice.Delta.ReasoningContent != "" {
+		// "reasoning_content" wins over "reasoning" (Groq, OpenRouter), the
+		// same precedence the streaming codec applies.
+		if thinking := cmp.Or(choice.Delta.ReasoningContent, choice.Delta.Reasoning); thinking != "" {
 			sc.ensureBlock("thinking")
 			sc.emit("content_block_delta", map[string]any{
 				"type":  "content_block_delta",
 				"index": sc.curIndex,
-				"delta": map[string]any{"type": "thinking_delta", "thinking": choice.Delta.ReasoningContent},
+				"delta": map[string]any{"type": "thinking_delta", "thinking": thinking},
 			})
 		}
+		sc.handleThinkingReplay(choice.Delta.ExtraContent)
 		if choice.Delta.Content != "" {
 			sc.ensureBlock("text")
 			sc.emit("content_block_delta", map[string]any{
@@ -197,16 +267,65 @@ func (sc *streamConverter) handleChunk(chunk *chatChunk) {
 	}
 }
 
+// handleThinkingReplay renders the Anthropic thinking blocks a chunk carries
+// as replay state. A signed thinking block is closed by writing its
+// signature_delta into the block already open from the reasoning deltas; a
+// redacted block has no deltas at all and is emitted whole. The gateway's own
+// extra_content member never reaches the client here: the Anthropic dialect
+// has native fields for both.
+func (sc *streamConverter) handleThinkingReplay(raw json.RawMessage) {
+	vendor := core.KeepExtraContentVendor(raw, core.ExtraContentVendorAnthropic)
+	if len(vendor) == 0 {
+		return
+	}
+	var extra struct {
+		Anthropic struct {
+			ThinkingBlocks []ResponseContentBlock `json:"thinking_blocks"`
+		} `json:"anthropic"`
+	}
+	if err := json.Unmarshal(vendor, &extra); err != nil {
+		return
+	}
+	blocks := extra.Anthropic.ThinkingBlocks
+	if len(blocks) <= sc.thinkingSeen {
+		return
+	}
+	for _, block := range blocks[sc.thinkingSeen:] {
+		switch block.Type {
+		case "redacted_thinking":
+			sc.closeBlock()
+			sc.openBlock("redacted_thinking", map[string]any{"type": "redacted_thinking", "data": block.Data})
+			sc.closeBlock()
+		default:
+			if block.Signature == nil || *block.Signature == "" {
+				continue
+			}
+			sc.ensureBlock("thinking")
+			sc.emit("content_block_delta", map[string]any{
+				"type":  "content_block_delta",
+				"index": sc.curIndex,
+				"delta": map[string]any{"type": "signature_delta", "signature": *block.Signature},
+			})
+			sc.closeBlock()
+		}
+	}
+	sc.thinkingSeen = len(blocks)
+}
+
 func (sc *streamConverter) handleToolCall(call chatToolCallDelta) {
 	index, seen := sc.toolBlock[call.Index]
 	if !seen {
 		sc.closeBlock()
-		sc.openBlock("tool_use", map[string]any{
+		block := map[string]any{
 			"type":  "tool_use",
 			"id":    call.ID,
 			"name":  call.Function.Name,
 			"input": map[string]any{},
-		})
+		}
+		if extra := bytes.TrimSpace(call.ExtraContent); len(extra) > 0 && !core.IsJSONNull(extra) {
+			block[core.ExtraContentField] = json.RawMessage(extra)
+		}
+		sc.openBlock("tool_use", block)
 		sc.toolBlock[call.Index] = sc.curIndex
 		index = sc.curIndex
 	}
@@ -230,6 +349,10 @@ func (sc *streamConverter) ensureBlock(blockType string) {
 	contentBlock := map[string]any{"type": blockType}
 	if blockType == "thinking" {
 		contentBlock["thinking"] = ""
+		// Anthropic opens a thinking block with an empty signature and fills it
+		// with a signature_delta; a provider that never signs its reasoning
+		// simply leaves it empty, so the block still matches the schema.
+		contentBlock["signature"] = ""
 	} else {
 		contentBlock["text"] = ""
 	}
@@ -312,16 +435,22 @@ func (sc *streamConverter) finalize() {
 	sc.emit("message_stop", map[string]any{"type": "message_stop"})
 }
 
+// usagePayload renders the stream's final usage for message_delta in the
+// Anthropic shape (see anthropicUsage). input_tokens is present only once the
+// upstream reported a prompt count, so the message_start estimate stands until
+// then.
 func (sc *streamConverter) usagePayload() map[string]any {
-	payload := map[string]any{"output_tokens": sc.usage.CompletionTokens}
+	usage := anthropicUsage(sc.usage.PromptTokens, sc.usage.CompletionTokens,
+		sc.usage.CacheReadInputTokens, sc.usage.CacheCreationInputTokens, sc.usage.PromptTokensDetails)
+	payload := map[string]any{"output_tokens": usage.OutputTokens}
 	if sc.usage.PromptTokens > 0 {
-		payload["input_tokens"] = sc.usage.PromptTokens
+		payload["input_tokens"] = usage.InputTokens
 	}
-	if read := sc.usage.cacheRead(); read > 0 {
-		payload["cache_read_input_tokens"] = read
+	if usage.CacheReadInputTokens > 0 {
+		payload["cache_read_input_tokens"] = usage.CacheReadInputTokens
 	}
-	if sc.usage.CacheCreationInputTokens > 0 {
-		payload["cache_creation_input_tokens"] = sc.usage.CacheCreationInputTokens
+	if usage.CacheCreationInputTokens > 0 {
+		payload["cache_creation_input_tokens"] = usage.CacheCreationInputTokens
 	}
 	return payload
 }

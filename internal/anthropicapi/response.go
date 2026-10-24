@@ -28,18 +28,21 @@ func FromChatResponse(resp *core.ChatResponse) *MessagesResponse {
 
 	if len(resp.Choices) > 0 {
 		choice := resp.Choices[0]
-		if thinking := reasoningContent(choice.Message.ExtraFields); thinking != "" {
-			out.Content = append(out.Content, ResponseContentBlock{Type: "thinking", Thinking: thinking})
+		if blocks, ok := thinkingBlocks(choice.Message.ExtraFields); ok {
+			out.Content = append(out.Content, blocks...)
+		} else if thinking := reasoningContent(choice.Message.ExtraFields); thinking != "" {
+			out.Content = append(out.Content, unsignedThinkingBlock(thinking))
 		}
 		if text := core.ExtractTextContent(choice.Message.Content); text != "" {
 			out.Content = append(out.Content, ResponseContentBlock{Type: "text", Text: text})
 		}
 		for _, call := range choice.Message.ToolCalls {
 			out.Content = append(out.Content, ResponseContentBlock{
-				Type:  "tool_use",
-				ID:    call.ID,
-				Name:  call.Function.Name,
-				Input: argumentsToRaw(call.Function.Arguments),
+				Type:         "tool_use",
+				ID:           call.ID,
+				Name:         call.Function.Name,
+				Input:        argumentsToRaw(call.Function.Arguments),
+				ExtraContent: call.ExtraFields.Lookup(core.ExtraContentField),
 			})
 		}
 		out.StopReason = stopReasonFromFinish(choice.FinishReason, len(choice.Message.ToolCalls) > 0)
@@ -59,14 +62,42 @@ func FromChatResponse(resp *core.ChatResponse) *MessagesResponse {
 	return out
 }
 
+// usageFromCore renders a canonical chat response's usage in the Anthropic
+// shape (see anthropicUsage).
 func usageFromCore(usage core.Usage) Usage {
-	out := Usage{
-		InputTokens:  usage.PromptTokens,
-		OutputTokens: usage.CompletionTokens,
+	return anthropicUsage(
+		usage.PromptTokens,
+		usage.CompletionTokens,
+		intFromRaw(usage.RawUsage["cache_read_input_tokens"]),
+		intFromRaw(usage.RawUsage["cache_creation_input_tokens"]),
+		usage.PromptTokensDetails,
+	)
+}
 
-		CacheCreationInputTokens: intFromRaw(usage.RawUsage["cache_creation_input_tokens"]),
-		CacheReadInputTokens:     intFromRaw(usage.RawUsage["cache_read_input_tokens"])}
-	return out
+// anthropicUsage renders token counts in the Anthropic shape, where
+// input_tokens excludes cached tokens: input_tokens + cache_read_input_tokens +
+// cache_creation_input_tokens is the whole prompt. A provider reporting in that
+// shape names its cache counts cache_read_input_tokens and
+// cache_creation_input_tokens (nativeRead, nativeWrite), which pass through.
+// OpenAI-family providers instead report a prompt_tokens total that includes
+// cached_tokens and cache_write_tokens, so those are taken out of it. Both the
+// response and the stream converter render through here so the two agree.
+func anthropicUsage(promptTokens, outputTokens, nativeRead, nativeWrite int, details *core.PromptTokensDetails) Usage {
+	if nativeRead > 0 || nativeWrite > 0 || details == nil {
+		return Usage{
+			InputTokens:              promptTokens,
+			OutputTokens:             outputTokens,
+			CacheReadInputTokens:     nativeRead,
+			CacheCreationInputTokens: nativeWrite,
+		}
+	}
+	read, write := details.CachedTokens, details.CacheWriteTokens
+	return Usage{
+		InputTokens:              max(promptTokens-read-write, 0),
+		OutputTokens:             outputTokens,
+		CacheReadInputTokens:     read,
+		CacheCreationInputTokens: write,
+	}
 }
 
 // normalizeMessageID ensures the response carries an Anthropic-style msg_ id.
@@ -81,18 +112,62 @@ func normalizeMessageID(id string) string {
 	return "msg_" + id
 }
 
-// reasoningContent extracts the reasoning_content surfaced by providers (e.g.
-// the anthropic provider) in a response message's extra fields.
-func reasoningContent(fields core.UnknownJSONFields) string {
-	raw := fields.Lookup("reasoning_content")
+// thinkingBlocks renders the thinking blocks a provider preserved as replay
+// state (extra_content.anthropic.thinking_blocks). Anthropic clients echo the
+// content array back verbatim, and Anthropic rejects a thinking block whose
+// signature is missing, so the signature belongs on the block itself rather
+// than in the gateway's own member. ok is false when there is no usable replay
+// state, which is when the caller falls back to reasoning_content text.
+func thinkingBlocks(fields core.UnknownJSONFields) ([]ResponseContentBlock, bool) {
+	raw := fields.ExtraContent(core.ExtraContentVendorAnthropic)
 	if len(raw) == 0 {
-		return ""
+		return nil, false
 	}
-	var text string
-	if err := json.Unmarshal(raw, &text); err != nil {
-		return ""
+	var extra struct {
+		ThinkingBlocks []ResponseContentBlock `json:"thinking_blocks"`
 	}
-	return text
+	if err := json.Unmarshal(raw, &extra); err != nil || len(extra.ThinkingBlocks) == 0 {
+		return nil, false
+	}
+	for i, block := range extra.ThinkingBlocks {
+		if block.Type == "thinking" && block.Signature == nil {
+			extra.ThinkingBlocks[i].Signature = emptySignature()
+		}
+	}
+	return extra.ThinkingBlocks, true
+}
+
+// unsignedThinkingBlock renders reasoning text a provider produced without a
+// signature. The Anthropic schema marks signature required on a thinking
+// block, so a strictly typed client rejects a block that omits it; the empty
+// string says "this reasoning is not signed" without pretending otherwise.
+// Anthropic refuses any signature it did not mint, so the gateway drops such a
+// block again on its way back in rather than forwarding it to Claude.
+func unsignedThinkingBlock(thinking string) ResponseContentBlock {
+	return ResponseContentBlock{Type: "thinking", Thinking: thinking, Signature: emptySignature()}
+}
+
+func emptySignature() *string {
+	empty := ""
+	return &empty
+}
+
+// reasoningContent extracts the reasoning text surfaced by providers in a
+// response message's extra fields: "reasoning_content" (the anthropic
+// provider, DeepSeek, Fireworks) or "reasoning" (Groq, OpenRouter), matching
+// the member precedence the streaming codec uses.
+func reasoningContent(fields core.UnknownJSONFields) string {
+	for _, member := range []string{"reasoning_content", "reasoning"} {
+		raw := fields.Lookup(member)
+		if len(raw) == 0 {
+			continue
+		}
+		var text string
+		if err := json.Unmarshal(raw, &text); err == nil && text != "" {
+			return text
+		}
+	}
+	return ""
 }
 
 // argumentsToRaw renders a tool-call arguments string as a JSON object value.
@@ -127,7 +202,9 @@ func stopReasonFromFinish(finish string, hasToolCalls bool) string {
 	case "tool_calls":
 		return "tool_use"
 	case "content_filter":
-		return "end_turn"
+		// The model declined or was stopped by the provider's safety
+		// system; Anthropic reports that as a refusal.
+		return "refusal"
 	case "":
 		return ""
 	default:

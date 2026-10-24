@@ -4,6 +4,7 @@
   import CopyButton from "$lib/components/atoms/CopyButton.svelte";
   import DialogCloseButton from "$lib/components/atoms/DialogCloseButton.svelte";
   import SegmentedControl from "$lib/components/atoms/SegmentedControl.svelte";
+  import { modals } from "$lib/stores/ui.svelte.js";
   import { createCopyState } from "$lib/utils/clipboard.svelte.js";
   import { motionDuration } from "$lib/utils/motion.js";
   import { readStored, writeStored } from "$lib/utils/storage.js";
@@ -13,6 +14,7 @@
   import { playgroundStore as store } from "./playground.svelte.js";
   import {
     DEFAULT_JSON_PANEL_WIDTH,
+    JSON_PANEL_FULLSCREEN_MAX_VIEWPORT,
     MIN_JSON_PANEL_WIDTH,
     clampJsonPanelWidth,
     formatJSON,
@@ -29,6 +31,11 @@
   let panelWidth = $state(clampJsonPanelWidth(preferredWidth, initialViewport));
   let panelMax = $state(maxJsonPanelWidth(initialViewport));
   let resizePointerID = null;
+  // True while the panel covers the whole viewport (phone widths, see the
+  // media query below). It then behaves as a modal: the page behind it is
+  // inert, focus moves into it, and Escape closes it.
+  let coversViewport = $state(false);
+  let closeButtonEl = $state(null);
   const copyState = createCopyState({ logPrefix: "Failed to copy playground JSON:" });
 
   const tabOptions = $derived([
@@ -89,6 +96,67 @@
 
   $effect(() => {
     if (!store.panelOpen) return;
+    const phoneViewport = window.matchMedia(
+      "(max-width: " + JSON_PANEL_FULLSCREEN_MAX_VIEWPORT + "px)",
+    );
+    const sync = () => {
+      coversViewport = phoneViewport.matches;
+    };
+    sync();
+    phoneViewport.addEventListener("change", sync);
+    return () => {
+      phoneViewport.removeEventListener("change", sync);
+      coversViewport = false;
+    };
+  });
+
+  // On a phone the open panel hides the whole page, so it must be a
+  // deliberate act each time: leaving the Playground or shrinking an open
+  // desktop panel into the phone tier closes it. The in-memory state is
+  // reset without touching the stored desktop preference.
+  $effect(() => {
+    const phoneViewport = window.matchMedia(
+      "(max-width: " + JSON_PANEL_FULLSCREEN_MAX_VIEWPORT + "px)",
+    );
+    const closeOnShrink = (event) => {
+      if (event.matches) store.panelOpen = false;
+    };
+    phoneViewport.addEventListener("change", closeOnShrink);
+    return () => {
+      phoneViewport.removeEventListener("change", closeOnShrink);
+      if (phoneViewport.matches) store.panelOpen = false;
+    };
+  });
+
+  $effect(() => {
+    if (!coversViewport) return;
+    const shellElements = [
+      document.querySelector(".sidebar"),
+      document.querySelector(".sidebar-toggle"),
+      document.querySelector(".playground-main"),
+    ]
+      .filter(Boolean)
+      .map((element) => ({ element, inert: element.inert }));
+    shellElements.forEach(({ element }) => {
+      element.inert = true;
+    });
+    const returnFocusEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    requestAnimationFrame(() => closeButtonEl?.focus());
+    const onKeydown = (event) => {
+      if (event.key === "Escape" && !modals.anyOpen) store.togglePanel();
+    };
+    window.addEventListener("keydown", onKeydown);
+    return () => {
+      window.removeEventListener("keydown", onKeydown);
+      shellElements.forEach(({ element, inert }) => {
+        element.inert = inert;
+      });
+      if (returnFocusEl && document.contains(returnFocusEl)) returnFocusEl.focus();
+    };
+  });
+
+  $effect(() => {
+    if (!store.panelOpen) return;
     // Re-clamps the committed preference (a plain variable, so this effect
     // depends on panelOpen only) whenever the viewport changes.
     const onResize = () => {
@@ -107,6 +175,8 @@
     id="playground-json-panel"
     class="playground-json-panel"
     style:--playground-json-panel-width={panelWidth + "px"}
+    role={coversViewport ? "dialog" : undefined}
+    aria-modal={coversViewport ? "true" : undefined}
     aria-labelledby="playground-json-title"
     transition:slide={{ axis: "x", duration: motionDuration(180), easing: cubicOut }}
   >
@@ -144,7 +214,11 @@
           errorLabel={m.common_copy_failed()}
           onclick={() => copyState.copy(shownText)}
         />
-        <DialogCloseButton label={m.playground_json_hide()} onclick={() => store.togglePanel()} />
+        <DialogCloseButton
+          label={m.playground_json_hide()}
+          bind:el={closeButtonEl}
+          onclick={() => store.togglePanel()}
+        />
       </div>
     </div>
     <!-- A scrollable region needs a tab stop so keyboard users can scroll it. -->
@@ -258,13 +332,36 @@
     overflow-wrap: anywhere;
   }
 
+  /* Mobile: the panel takes the whole viewport. A partial overlay left a
+     sliver of the page peeking out that was neither readable nor tappable,
+     and dragging the edge is not a phone gesture. */
   @media (max-width: 768px) {
     .playground-json-panel {
       position: fixed;
-      inset: 0 0 0 auto;
-      width: min(100vw, var(--playground-json-panel-width, 420px));
+      inset: 0;
+      width: 100vw;
+      height: 100dvh;
+      border: 0;
       border-radius: 0;
       z-index: 30;
+      padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+        env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+    }
+
+    .playground-json-resize-handle {
+      display: none;
+    }
+
+    .playground-json-header {
+      flex-wrap: nowrap;
+    }
+
+    .playground-json-header :global(.segmented-control) {
+      min-width: 0;
+    }
+
+    .playground-json-actions {
+      flex-shrink: 0;
     }
   }
 </style>

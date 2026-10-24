@@ -38,25 +38,13 @@ var _ core.PassthroughProvider = (*Provider)(nil)
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	p := &Provider{keys: opts.Keyring(cfg.APIKey)}
 	clientCfg := llmclient.Config{
-		ProviderName:   "cohere",
+		ProviderName:   opts.ClientName("cohere"),
 		BaseURL:        providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,
 		CircuitBreaker: opts.Resilience.CircuitBreaker,
 	}
-	p.client = llmclient.New(clientCfg, p.setHeaders)
-	return p
-}
-
-// NewWithHTTPClient creates a Cohere provider with a custom HTTP client.
-func NewWithHTTPClient(apiKey, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
-	p := &Provider{keys: providers.NewKeyring(apiKey)}
-	cfg := llmclient.DefaultConfig("cohere", providers.ResolveBaseURL(baseURL, defaultBaseURL))
-	cfg.Hooks = hooks
-	p.client = llmclient.NewWithHTTPClient(httpClient, cfg, p.setHeaders)
+	p.client = llmclient.NewWithOptionalHTTPClient(opts.HTTPClient, clientCfg, p.setHeaders)
 	return p
 }
 
@@ -91,8 +79,12 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 		}
 		var metadata *core.ModelMetadata
 		modes := modesFromEndpoints(model.Endpoints)
-		if model.ContextLength > 0 || len(modes) > 0 {
-			metadata = &core.ModelMetadata{}
+		capabilities := providers.CapabilitiesFromFeatures(nil, model.Features)
+		if model.SupportsVision {
+			capabilities = providers.SetCapability(capabilities, "vision", true)
+		}
+		if model.ContextLength > 0 || len(modes) > 0 || capabilities != nil {
+			metadata = &core.ModelMetadata{Capabilities: capabilities}
 			if model.ContextLength > 0 {
 				contextWindow := int(model.ContextLength)
 				metadata.ContextWindow = &contextWindow
@@ -151,7 +143,7 @@ func supportedModel(model modelInfo) bool {
 
 // Responses translates the OpenAI Responses API through Cohere chat.
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	return providers.ResponsesViaChat(ctx, p, req)
+	return providers.ResponsesViaChat(ctx, p, req, "cohere")
 }
 
 // StreamResponses translates a streaming OpenAI Responses request through Cohere chat.

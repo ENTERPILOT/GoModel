@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -61,6 +62,34 @@ func BenchmarkResolvePerRequest(b *testing.B) {
 				_ = router.Supports(sel)
 				_ = router.GetProviderType(sel)
 				_ = router.GetProviderName(sel)
+			}
+		})
+	}
+}
+
+// BenchmarkRouterChatCompletion measures a full Router.ChatCompletion dispatch
+// against a populated catalog with an in-memory provider, so the number of
+// registry lock acquisitions per request shows up in ns/op.
+func BenchmarkRouterChatCompletion(b *testing.B) {
+	for _, n := range []int{50, 1000} {
+		b.Run(fmt.Sprintf("models=%d", n), func(b *testing.B) {
+			reg := buildBenchRegistry(6, n)
+			router, err := NewRouter(reg)
+			if err != nil {
+				b.Fatalf("NewRouter: %v", err)
+			}
+			ctx := context.Background()
+			req := &core.ChatRequest{
+				Model:    benchSelector(6, n),
+				Messages: []core.Message{{Role: "user", Content: "hello"}},
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if _, err := router.ChatCompletion(ctx, req); err != nil {
+					b.Fatalf("ChatCompletion: %v", err)
+				}
 			}
 		})
 	}

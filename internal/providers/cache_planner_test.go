@@ -2,11 +2,14 @@ package providers
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -33,27 +36,26 @@ func TestCachePlannerAppliesProviderSpecificChatPlanWithoutMutatingCaller(t *tes
 				{Role: "user", Content: "new turn"},
 			}}
 			planned := planner.planChat(req, tt.provider, core.ModelSelector{Provider: tt.provider + "-primary", Model: tt.model})
-			if planned == req {
-				t.Fatal("planner returned caller-owned request")
+			require.NotSame(t, req, planned)
+
+			if tt.field != "" {
+				require.NotEmpty(t, planned.ExtraFields.Lookup(tt.field), "planned request lacks %q", tt.field)
 			}
-			if tt.field != "" && len(planned.ExtraFields.Lookup(tt.field)) == 0 {
-				t.Fatalf("planned request lacks %q", tt.field)
+			if tt.marker != "" {
+				require.NotEmpty(t, planned.Messages[0].ExtraFields.Lookup(tt.marker), "stable prefix lacks %q", tt.marker)
 			}
-			if tt.marker != "" && len(planned.Messages[0].ExtraFields.Lookup(tt.marker)) == 0 {
-				t.Fatalf("stable prefix lacks %q", tt.marker)
-			}
-			if tt.provider == "gemini" && (planned.PromptCachePlan == nil || planned.PromptCachePlan.Key == "") {
-				t.Fatal("Gemini plan lacks an internal cached-content key")
+			if tt.provider == "gemini" {
+				require.NotNil(t, planned.PromptCachePlan, "Gemini plan lacks an internal cached-content key")
+				require.NotEmpty(t, planned.PromptCachePlan.Key, "Gemini plan lacks an internal cached-content key")
 			}
 			if promptCacheProfileFor(tt.provider).mode == promptCacheOpenAI {
 				parts, ok := planned.Messages[0].Content.([]core.ContentPart)
-				if !ok || len(parts) != 1 || len(parts[0].ExtraFields.Lookup("prompt_cache_breakpoint")) == 0 {
-					t.Fatalf("OpenAI stable content lacks a breakpoint: %#v", planned.Messages[0].Content)
-				}
+				require.True(t, ok)
+				require.Len(t, parts, 1)
+				require.NotEmpty(t, parts[0].ExtraFields.Lookup("prompt_cache_breakpoint"), "OpenAI stable content lacks a breakpoint: %#v", planned.Messages[0].Content)
 			}
-			if !req.ExtraFields.IsEmpty() || !req.Messages[0].ExtraFields.IsEmpty() {
-				t.Fatal("planner mutated caller-owned request")
-			}
+			require.True(t, req.ExtraFields.IsEmpty())
+			require.True(t, req.Messages[0].ExtraFields.IsEmpty())
 		})
 	}
 }
@@ -78,9 +80,8 @@ func TestProviderCacheMinimumByModelGeneration(t *testing.T) {
 	} {
 		t.Run(tt.provider+"/"+tt.model, func(t *testing.T) {
 			profile := promptCacheProfileFor(tt.provider)
-			if got := providerCacheMinimum(profile, tt.model); got != tt.want {
-				t.Fatalf("providerCacheMinimum() = %d, want %d", got, tt.want)
-			}
+			got := providerCacheMinimum(profile, tt.model)
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -112,9 +113,8 @@ func TestNewCachePlanner_EnvironmentKillSwitch(t *testing.T) {
 			} else {
 				_ = os.Unsetenv(providerPromptCachePlannerEnabledEnv)
 			}
-			if got := newCachePlanner().enabled; got != tt.enabled {
-				t.Fatalf("newCachePlanner() enabled = %v, want %v", got, tt.enabled)
-			}
+			got := newCachePlanner().enabled
+			require.Equal(t, tt.enabled, got)
 		})
 	}
 }
@@ -122,17 +122,15 @@ func TestNewCachePlanner_EnvironmentKillSwitch(t *testing.T) {
 func TestCachePlannerHonorsMinimumAndClientDirective(t *testing.T) {
 	planner := &cachePlanner{enabled: true}
 	short := &core.ChatRequest{Messages: []core.Message{{Role: "system", Content: "short"}, {Role: "user", Content: "turn"}}}
-	if got := planner.planChat(short, "openai", core.ModelSelector{Model: "gpt-5.6"}); got != short {
-		t.Fatal("planned prefix below provider minimum")
-	}
+	got := planner.planChat(short, "openai", core.ModelSelector{Model: "gpt-5.6"})
+	require.Same(t, short, got)
 
 	directed := &core.ChatRequest{
 		Messages:    []core.Message{{Role: "system", Content: strings.Repeat("x", 9000)}, {Role: "user", Content: "turn"}},
 		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"prompt_cache_key": json.RawMessage(`"client"`)}),
 	}
-	if got := planner.planChat(directed, "openai", core.ModelSelector{Model: "gpt-5.6"}); got != directed {
-		t.Fatal("overrode client cache directive")
-	}
+	got = planner.planChat(directed, "openai", core.ModelSelector{Model: "gpt-5.6"})
+	require.Same(t, directed, got)
 }
 
 func TestCachePlannerResponsesShapesAndCallerOwnership(t *testing.T) {
@@ -145,6 +143,7 @@ func TestCachePlannerResponsesShapesAndCallerOwnership(t *testing.T) {
 		{name: "string", content: prefix},
 		{name: "typed parts", content: []core.ContentPart{{Type: "input_text", Text: prefix}}},
 		{name: "generic parts", content: []any{map[string]any{"type": "input_text", "text": prefix}}},
+		{name: "map parts", content: []map[string]any{{"type": "input_text", "text": prefix}}},
 	}
 	for _, shape := range shapes {
 		t.Run(shape.name, func(t *testing.T) {
@@ -153,39 +152,43 @@ func TestCachePlannerResponsesShapesAndCallerOwnership(t *testing.T) {
 				{Role: "user", Content: "dynamic"},
 			}}
 			before, err := json.Marshal(req)
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
+
 			planned := planner.planResponses(req, "openai", core.ModelSelector{Provider: "openai-primary", Model: "gpt-5.6"})
-			if planned == req || len(planned.ExtraFields.Lookup("prompt_cache_key")) == 0 ||
-				len(planned.ExtraFields.Lookup("prompt_cache_options")) == 0 {
-				t.Fatalf("Responses plan missing cache fields: %+v", planned)
-			}
+			require.NotSame(t, req, planned)
+			require.NotEmpty(t, planned.ExtraFields.Lookup("prompt_cache_key"))
+			require.NotEmpty(t, planned.ExtraFields.Lookup("prompt_cache_options"))
+
 			plannedJSON, err := json.Marshal(planned)
-			if err != nil || !bytes.Contains(plannedJSON, []byte(`"prompt_cache_breakpoint"`)) {
-				t.Fatalf("Responses plan lacks explicit breakpoint: %s (err=%v)", plannedJSON, err)
-			}
+			require.NoError(t, err)
+			require.Contains(t, string(plannedJSON), string([]byte(`"prompt_cache_breakpoint"`)))
+
+			// The Responses API rejects the Chat content vocabulary, so a
+			// breakpoint must never downgrade a part to {"type":"text"}.
+			require.False(t, bytes.Contains(plannedJSON, []byte(`"type":"text"`)), "Responses plan emitted Chat content vocabulary: %s", plannedJSON)
+			require.Contains(t, string(plannedJSON), string([]byte(`"type":"input_text"`)))
+
+			assertResponsesBreakpointBlock(t, plannedJSON, map[string]any{
+				"type": "input_text", "text": prefix,
+				"prompt_cache_breakpoint": map[string]any{"mode": "explicit"},
+			})
 			after, err := json.Marshal(req)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if string(before) != string(after) {
-				t.Fatalf("planner mutated caller: before=%s after=%s", before, after)
-			}
+			require.NoError(t, err)
+			require.Equal(t, string(after), string(before), "planner mutated caller: before=%s after=%s", before, after)
 		})
 	}
 	anthropic := &core.ResponsesRequest{Input: []core.ResponsesInputElement{
 		{Role: "user", Content: prefix}, {Role: "user", Content: "dynamic"},
 	}}
-	if got := planner.planResponses(anthropic, "anthropic", core.ModelSelector{Model: "claude-sonnet-4-5"}); got == anthropic || len(got.ExtraFields.Lookup("cache_control")) == 0 {
-		t.Fatal("Anthropic Responses plan lacks cache_control")
-	}
+	got := planner.planResponses(anthropic, "anthropic", core.ModelSelector{Model: "claude-sonnet-4-5"})
+	require.NotSame(t, anthropic, got)
+	require.NotEmpty(t, got.ExtraFields.Lookup("cache_control"))
+
 	short := &core.ResponsesRequest{Input: []core.ResponsesInputElement{
 		{Role: "user", Content: "short"}, {Role: "user", Content: "dynamic"},
 	}}
-	if got := planner.planResponses(short, "openai", core.ModelSelector{Model: "gpt-5.6"}); got != short {
-		t.Fatal("planned a Responses prefix below the provider minimum")
-	}
+	got = planner.planResponses(short, "openai", core.ModelSelector{Model: "gpt-5.6"})
+	require.Same(t, short, got)
 }
 
 func TestCachePlannerFindsNestedClientDirective(t *testing.T) {
@@ -199,9 +202,8 @@ func TestCachePlannerFindsNestedClientDirective(t *testing.T) {
 		}}},
 		{Role: "user", Content: "turn"},
 	}}
-	if got := (&cachePlanner{enabled: true}).planChat(req, "openai", core.ModelSelector{Model: "gpt-5.6"}); got != req {
-		t.Fatal("planner overrode a nested client cache directive")
-	}
+	got := (&cachePlanner{enabled: true}).planChat(req, "openai", core.ModelSelector{Model: "gpt-5.6"})
+	require.Same(t, req, got)
 }
 
 func TestCachePlannerProviderCapabilityBoundaries(t *testing.T) {
@@ -211,9 +213,8 @@ func TestCachePlannerProviderCapabilityBoundaries(t *testing.T) {
 	}}
 	planner := &cachePlanner{enabled: true}
 	for _, provider := range []string{"openrouter", "vertex", "unknown"} {
-		if got := planner.planChat(req, provider, core.ModelSelector{Model: "gemini-2.5-pro"}); got != req {
-			t.Fatalf("provider %q unexpectedly received an automatic plan", provider)
-		}
+		got := planner.planChat(req, provider, core.ModelSelector{Model: "gemini-2.5-pro"})
+		require.Same(t, req, got, "provider %q unexpectedly received an automatic plan", provider)
 	}
 }
 
@@ -224,21 +225,168 @@ func TestCachePlannerSkipsUnsupportedResponsesModesBeforeCloning(t *testing.T) {
 	}}
 	planner := &cachePlanner{enabled: true}
 	for _, provider := range []string{"bedrock", "gemini", "openrouter", "unknown"} {
-		if got := planner.planResponses(req, provider, core.ModelSelector{Model: "model"}); got != req {
-			t.Fatalf("provider %q unexpectedly received a Responses plan", provider)
-		}
+		got := planner.planResponses(req, provider, core.ModelSelector{Model: "model"})
+		require.Same(t, req, got, "provider %q unexpectedly received a Responses plan", provider)
 	}
 }
 
 func TestCloneChatRequestPreservesInternalCachePlan(t *testing.T) {
 	req := &core.ChatRequest{PromptCachePlan: &core.PromptCachePlan{Key: "stable"}}
-	clone, ok := cloneChatRequest(req)
-	if !ok || clone.PromptCachePlan == nil || clone.PromptCachePlan.Key != "stable" {
-		t.Fatalf("clone lost internal cache metadata: %+v", clone)
+	clone := cloneChatRequest(req)
+	require.NotNil(t, clone.PromptCachePlan)
+	require.Equal(t, "stable", clone.PromptCachePlan.Key, "clone lost internal cache metadata: %+v", clone)
+	require.NotSame(t, req.PromptCachePlan, clone.PromptCachePlan)
+}
+
+// The planner clones shallowly, so every write it performs must land on a
+// copied slice element or map rather than on memory the caller still holds.
+func TestCachePlannerDoesNotAliasCallerContentOrExtras(t *testing.T) {
+	planner := &cachePlanner{enabled: true}
+	prefix := strings.Repeat("stable context ", 1500)
+
+	t.Run("chat parts and message extras", func(t *testing.T) {
+		parts := []core.ContentPart{{Type: "text", Text: prefix}}
+		req := &core.ChatRequest{
+			Model:       "gpt-5.6",
+			Messages:    []core.Message{{Role: "system", Content: parts}, {Role: "user", Content: "new turn"}},
+			ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"seed": json.RawMessage(`1`)}),
+		}
+		before, err := json.Marshal(req)
+		require.NoError(t, err)
+
+		planned := planner.planChat(req, "openai", core.ModelSelector{Provider: "openai-primary", Model: "gpt-5.6"})
+		require.NotSame(t, req, planned)
+
+		plannedParts, ok := planned.Messages[0].Content.([]core.ContentPart)
+		require.True(t, ok)
+		require.Len(t, plannedParts, 1)
+		require.NotEmpty(t, plannedParts[0].ExtraFields.Lookup("prompt_cache_breakpoint"), "planned content lacks breakpoint: %#v", planned.Messages[0].Content)
+		require.NotSame(t, &parts[0], &plannedParts[0])
+		require.True(t, parts[0].ExtraFields.IsEmpty())
+		require.NotSame(t, &req.Messages[0], &planned.Messages[0])
+		require.Empty(t, req.ExtraFields.Lookup("prompt_cache_key"))
+		require.NotEmpty(t, req.ExtraFields.Lookup("seed"))
+
+		after, err := json.Marshal(req)
+		require.NoError(t, err)
+		require.Equal(t, string(after), string(before), "planner mutated caller: before=%s after=%s", before, after)
+
+		bedrock := planner.planChat(req, "bedrock", core.ModelSelector{Provider: "bedrock-primary", Model: "anthropic.claude-sonnet-4-5"})
+		require.NotEmpty(t, bedrock.Messages[0].ExtraFields.Lookup(core.GatewayCachePointField))
+		require.True(t, req.Messages[0].ExtraFields.IsEmpty())
+	})
+
+	t.Run("responses generic blocks", func(t *testing.T) {
+		block := map[string]any{"type": "input_text", "text": prefix}
+		blocks := []any{block}
+		req := &core.ResponsesRequest{Model: "gpt-5.6", Input: []core.ResponsesInputElement{
+			{Role: "user", Content: blocks},
+			{Role: "user", Content: "dynamic"},
+		}}
+		planned := planner.planResponses(req, "openai", core.ModelSelector{Provider: "openai-primary", Model: "gpt-5.6"})
+		items, ok := planned.Input.([]core.ResponsesInputElement)
+		require.True(t, ok)
+		require.NotSame(t, req, planned)
+
+		plannedBlocks, ok := items[0].Content.([]any)
+		require.True(t, ok)
+		require.Len(t, plannedBlocks, 1, "unexpected planned content: %#v", items[0].Content)
+
+		marked, _ := plannedBlocks[0].(map[string]any)
+		_, exists := marked["prompt_cache_breakpoint"]
+		require.True(t, exists)
+		_, leaked := block["prompt_cache_breakpoint"]
+		require.False(t, leaked)
+		require.NotSame(t, &blocks[0], &plannedBlocks[0])
+
+		original := req.Input.([]core.ResponsesInputElement)
+		require.NotSame(t, &original[0], &items[0])
+	})
+
+	t.Run("responses typed map blocks", func(t *testing.T) {
+		block := map[string]any{"type": "input_text", "text": prefix}
+		req := &core.ResponsesRequest{Model: "gpt-5.6", Input: []core.ResponsesInputElement{
+			{Role: "user", Content: []map[string]any{block}},
+			{Role: "user", Content: "dynamic"},
+		}}
+		planned := planner.planResponses(req, "openai", core.ModelSelector{Provider: "openai-primary", Model: "gpt-5.6"})
+		body, err := json.Marshal(planned)
+		require.NoError(t, err)
+		require.Contains(t, string(body), string([]byte(`"prompt_cache_breakpoint"`)))
+		_, leaked := block["prompt_cache_breakpoint"]
+		require.False(t, leaked)
+	})
+}
+
+// legacyCacheAffinityKey is the pre-streaming key derivation: sha256 over the
+// header fields followed by the fully marshaled prefix object. The streaming
+// digest must produce the same key so deployed cache affinity survives upgrades.
+func legacyCacheAffinityKey(t *testing.T, providerType string, selector core.ModelSelector, user string, prefix any) (string, int) {
+	t.Helper()
+	body, err := json.Marshal(prefix)
+	require.NoError(t, err)
+
+	hash := sha256.New()
+	for _, part := range []string{normalizedProviderType(providerType), selector.Provider, selector.Model, user} {
+		hash.Write([]byte(part))
+		hash.Write([]byte{0})
 	}
-	if clone.PromptCachePlan == req.PromptCachePlan {
-		t.Fatal("clone aliases internal cache metadata")
+	hash.Write(body)
+	return "gomodel-" + hex.EncodeToString(hash.Sum(nil)[:16]), (len(body) + 3) / 4
+}
+
+func TestPrefixDigestMatchesLegacyMarshaledPrefix(t *testing.T) {
+	selector := core.ModelSelector{Provider: "openai-primary", Model: "gpt-5.6"}
+	tools := []map[string]any{{"type": "function", "function": map[string]any{"name": "lookup", "description": "a <b> & c"}}}
+	messages := []core.Message{
+		{Role: "system", Content: "line one\nline \"two\" <html> & more"},
+		{Role: "user", Content: []core.ContentPart{{Type: "text", Text: "part"}, {Type: "image_url", ImageURL: &core.ImageURLContent{URL: "https://x/y?a=1&b=2"}}}},
+		{Role: "assistant", ToolCalls: []core.ToolCall{{ID: "call_1", Type: "function", Function: core.FunctionCall{Name: "lookup", Arguments: `{"q":"x"}`}}},
+			ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"name": json.RawMessage(`"bot"`)})},
+		{Role: "tool", ToolCallID: "call_1", Content: "result"},
 	}
+
+	t.Run("chat", func(t *testing.T) {
+		for _, withTools := range []bool{false, true} {
+			var reqTools []map[string]any
+			if withTools {
+				reqTools = tools
+			}
+			want, wantTokens := legacyCacheAffinityKey(t, "OpenAI ", selector, "user-1", struct {
+				Tools    []map[string]any `json:"tools,omitempty"`
+				Messages []core.Message   `json:"messages"`
+			}{reqTools, messages})
+			digest := newPrefixDigest("OpenAI ", selector, "user-1")
+			digest.writeChatPrefix(reqTools, messages)
+			require.NoError(t, digest.err)
+			require.Equal(t, want, digest.key(), "tools=%v", withTools)
+			require.Equal(t, wantTokens, digest.tokens(), "tools=%v token estimate", withTools)
+		}
+	})
+
+	t.Run("responses", func(t *testing.T) {
+		items := []core.ResponsesInputElement{
+			{Role: "user", Content: "hello <there>"},
+			{Role: "user", Content: []core.ContentPart{{Type: "input_text", Text: "typed"}}},
+			{Role: "user", Content: []any{map[string]any{"type": "input_text", "text": "generic"}}},
+			{Type: "function_call", CallID: "c1", Name: "lookup", Arguments: `{}`},
+		}
+		for _, tc := range []struct {
+			instructions string
+			tools        []map[string]any
+		}{{}, {instructions: "be brief"}, {tools: tools}, {instructions: "be brief", tools: tools}} {
+			want, wantTokens := legacyCacheAffinityKey(t, "openai", selector, "", struct {
+				Instructions string                       `json:"instructions,omitempty"`
+				Tools        []map[string]any             `json:"tools,omitempty"`
+				Input        []core.ResponsesInputElement `json:"input"`
+			}{tc.instructions, tc.tools, items})
+			digest := newPrefixDigest("openai", selector, "")
+			digest.writeResponsesPrefix(tc.instructions, tc.tools, items)
+			require.NoError(t, digest.err)
+			require.Equal(t, want, digest.key(), "%+v", tc)
+			require.Equal(t, wantTokens, digest.tokens(), "%+v token estimate", tc)
+		}
+	})
 }
 
 func TestGeminiPlanKeyIncludesEntireNativePrefixAndBoundary(t *testing.T) {
@@ -262,12 +410,103 @@ func TestGeminiPlanKeyIncludesEntireNativePrefixAndBoundary(t *testing.T) {
 		makeRequest("system-a", "boundary-a", "search"),
 	} {
 		planned := planner.planChat(req, "gemini", core.ModelSelector{Provider: "gemini-primary", Model: req.Model})
-		if planned.PromptCachePlan == nil || planned.PromptCachePlan.Key == "" {
-			t.Fatal("Gemini request was not planned")
-		}
+		require.NotNil(t, planned.PromptCachePlan)
+		require.NotEmpty(t, planned.PromptCachePlan.Key)
+
 		keys[planned.PromptCachePlan.Key] = struct{}{}
 	}
-	if len(keys) != 4 {
-		t.Fatalf("system, boundary, or tools were omitted from Gemini keys: %v", keys)
+	require.Len(t, keys, 4)
+}
+
+// assertResponsesBreakpointBlock decodes the planned request and checks the
+// first input item's content is exactly one block equal to want.
+func assertResponsesBreakpointBlock(t *testing.T, plannedJSON []byte, want map[string]any) {
+	t.Helper()
+	blocks := decodePrefixContentBlocks(t, plannedJSON)
+	require.Len(t, blocks, 1, "expected one content block on the prefix item: %s", plannedJSON)
+
+	got, err := json.Marshal(blocks[0])
+	require.NoError(t, err)
+
+	expected, err := json.Marshal(want)
+	require.NoError(t, err)
+	require.Equal(t, string(expected), string(got), "breakpoint block mismatch:\n got: %s\nwant: %s", got, expected)
+}
+
+func TestCachePlannerResponsesTypedPartsKeepVocabularyAndExtras(t *testing.T) {
+	planner := &cachePlanner{enabled: true}
+	prefix := strings.Repeat("stable response context ", 1200)
+	req := &core.ResponsesRequest{Model: "gpt-5.6", Input: []core.ResponsesInputElement{
+		{Role: "user", Content: []core.ContentPart{
+			{
+				Type: "input_text", Text: prefix,
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"x_note": json.RawMessage(`"keep"`)}),
+			},
+			{Type: "input_image", ImageURL: &core.ImageURLContent{URL: "https://example.com/a.png", Detail: "low"}},
+		}},
+		{Role: "user", Content: "dynamic"},
+	}}
+	planned := planner.planResponses(req, "openai", core.ModelSelector{Provider: "openai-primary", Model: "gpt-5.6"})
+	require.NotSame(t, req, planned)
+
+	plannedJSON, err := json.Marshal(planned)
+	require.NoError(t, err)
+
+	blocks := decodePrefixContentBlocks(t, plannedJSON)
+	require.Len(t, blocks, 2)
+	require.Equal(t, "input_text", blocks[0]["type"])
+	require.Equal(t, "keep", blocks[0]["x_note"])
+	require.Nil(t, blocks[0]["prompt_cache_breakpoint"], "text block lost vocabulary or extras, or gained a breakpoint: %v", blocks[0])
+
+	image := blocks[1]
+	require.Equal(t, "input_image", image["type"])
+	require.NotNil(t, image["prompt_cache_breakpoint"], "last cacheable block should carry the breakpoint with input_image type: %v", image)
+
+	imageURL, _ := image["image_url"].(map[string]any)
+	require.Equal(t, "https://example.com/a.png", imageURL["url"])
+	require.Equal(t, "low", imageURL["detail"], "image payload not preserved: %v", image)
+}
+
+// decodePrefixContentBlocks returns the content blocks of the first input item
+// of a marshalled Responses request.
+func decodePrefixContentBlocks(t *testing.T, plannedJSON []byte) []map[string]any {
+	t.Helper()
+	var decoded struct {
+		Input []struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"input"`
 	}
+	err := json.Unmarshal(plannedJSON, &decoded)
+	require.NoError(t, err)
+	require.NotEmpty(t, decoded.Input, "planned request has no input items: %s", plannedJSON)
+
+	var blocks []map[string]any
+	require.NoError(t, json.Unmarshal(decoded.Input[0].Content, &blocks), "prefix item content is not a block array: %s", decoded.Input[0].Content)
+
+	return blocks
+}
+
+func TestMarkOpenAIResponsesBreakpointEdgeCases(t *testing.T) {
+	t.Run("keeps an existing breakpoint untouched", func(t *testing.T) {
+		block := map[string]any{"type": "input_text", "text": "prefix", "prompt_cache_breakpoint": map[string]any{"mode": "explicit"}}
+		req := &core.ResponsesRequest{Input: []core.ResponsesInputElement{
+			{Role: "user", Content: []any{block}},
+			{Role: "user", Content: "dynamic"},
+		}}
+		require.True(t, markOpenAIResponsesBreakpoint(req))
+
+		items := req.Input.([]core.ResponsesInputElement)
+		blocks, _ := items[0].Content.([]any)
+		require.Len(t, blocks, 1)
+		require.NotNil(t, blocks[0].(map[string]any)["prompt_cache_breakpoint"], "breakpoint block changed: %v", items[0].Content)
+	})
+	t.Run("skips typed parts that cannot be encoded and unsupported shapes", func(t *testing.T) {
+		req := &core.ResponsesRequest{Input: []core.ResponsesInputElement{
+			{Role: "user", Content: 42},
+			{Role: "user", Content: []core.ContentPart{{Type: "input_file"}}},
+			{Role: "user", Content: []any{"not a block"}},
+			{Role: "user", Content: "dynamic"},
+		}}
+		require.False(t, markOpenAIResponsesBreakpoint(req), "marked an item with no cacheable block: %+v", req.Input)
+	})
 }

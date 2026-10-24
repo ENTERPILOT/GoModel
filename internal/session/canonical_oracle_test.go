@@ -1,13 +1,13 @@
 package session
 
 import (
-	"bytes"
 	"math/rand"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/assert"
 	"github.com/tidwall/gjson"
 )
 
@@ -61,9 +61,7 @@ func assertCanonicalMatchesOracle(t *testing.T, raw string) {
 	}
 	got := canonicalSegment(result)
 	want := canonicalSegmentDecoded(json.RawMessage(strings.Clone(result.Raw)))
-	if !bytes.Equal(got, want) {
-		t.Errorf("canonicalSegment(%q) = %q, oracle = %q", raw, got, want)
-	}
+	assert.Equal(t, want, got, "canonicalSegment(%q) = %q, oracle = %q", raw, got, want)
 }
 
 var randomStringPieces = []string{

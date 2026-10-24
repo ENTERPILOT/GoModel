@@ -6,6 +6,7 @@
   import { untrack } from "svelte";
   import { router } from "$lib/stores/router.svelte.js";
   import { auth } from "$lib/stores/auth.svelte.js";
+  import { access } from "$lib/stores/access.svelte.js";
   import { usageData } from "$lib/stores/usageData.svelte.js";
   import DatePicker from "$lib/components/molecules/DatePicker.svelte";
   import LiveTokens from "./LiveTokens.svelte";
@@ -26,21 +27,28 @@
 
   const PAGE = "overview";
 
+  // Gateway-wide widgets (cache overview, provider and MCP status, live
+  // throughput) are skipped for a key scoped to a user path: their
+  // endpoints answer 403 for such credentials.
+  const scoped = $derived(access.scoped);
+
   function loadPage() {
     usageData.fetchUsage();
-    usageData.fetchCacheOverview("");
     auditStatsState.fetch();
+    calendarState.fetch();
+    if (scoped) return;
+    usageData.fetchCacheOverview("");
     providerStatusState.fetch();
     mcpServersState.fetch();
-    calendarState.fetch();
   }
 
   // A reporting-window or interval change refetches usage, the cache
   // overview, and (on the overview) the audit stats.
   function refetchWindow() {
     usageData.fetchUsage();
-    usageData.fetchCacheOverview("");
     auditStatsState.fetch();
+    if (scoped) return;
+    usageData.fetchCacheOverview("");
   }
 
   function onDateRangeChange() {
@@ -54,9 +62,12 @@
   $effect(() => {
     void auth.refreshTick;
     if (router.page !== PAGE) return;
+    // The access scope decides which widgets may fetch, so wait for it; the
+    // effect re-runs once it lands (or lands again under a new key).
+    if (!access.loaded) return;
     untrack(() => {
       loadPage();
-      liveTokensState.start();
+      if (!scoped) liveTokensState.start();
     });
     return () => {
       liveTokensState.stop();
@@ -66,7 +77,9 @@
 </script>
 
 <div class="page-with-sticky-date">
-  <LiveTokens />
+  {#if !scoped}
+    <LiveTokens />
+  {/if}
 
   <div class="page-header date-range-page-header">
     <h2>{m.overview_usage_title()}</h2>
@@ -78,9 +91,13 @@
   <AuthBanner />
 
   <SummaryCards />
-  <CacheMeter />
+  {#if !scoped}
+    <CacheMeter />
+  {/if}
   <UsageChart onintervalchange={refetchWindow} />
   <ContributionCalendar />
   <AuditStatsCharts />
-  <ProviderStatusSection />
+  {#if !scoped}
+    <ProviderStatusSection />
+  {/if}
 </div>

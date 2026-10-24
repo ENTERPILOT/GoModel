@@ -28,7 +28,9 @@ func ApplyWorkflowContextOverrides(ctx context.Context, workflow *core.Workflow)
 	if workflow == nil || ctx == nil {
 		return
 	}
-	if core.GetRequestOrigin(ctx) != core.RequestOriginGuardrail {
+	switch core.GetRequestOrigin(ctx) {
+	case core.RequestOriginGuardrail, core.RequestOriginPlugin:
+	default:
 		return
 	}
 	if workflow.Policy == nil {

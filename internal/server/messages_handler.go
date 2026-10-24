@@ -1,7 +1,10 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -39,7 +42,7 @@ func (h *Handler) Messages(c *echo.Context) error {
 // CountMessageTokens handles POST /v1/messages/count_tokens.
 //
 // @Summary      Count message tokens (Anthropic Messages API)
-// @Description  Returns a provider-agnostic heuristic estimate of the input token count.
+// @Description  Counts the input tokens of a Messages request. Exact when the provider that owns the model has a token counting endpoint (Anthropic); otherwise a calibrated estimate.
 // @Tags         messages
 // @Accept       json
 // @Produce      json
@@ -151,26 +154,63 @@ func (h *Handler) MessagesBatchResults(c *echo.Context) error {
 // Messages translates an Anthropic Messages request and dispatches it through
 // the shared chat-completions pipeline (workflow resolution, response cache).
 func (s *translatedInferenceService) Messages(c *echo.Context) error {
-	req, err := decodeMessagesChatRequest(c)
+	decoded, err := decodeMessagesRequest(c)
 	if err != nil {
 		return handleError(c, err)
 	}
+	req, translateErr := anthropicapi.ToChatRequest(decoded)
+	if translateErr != nil {
+		// Content the canonical translation cannot represent (server-tool
+		// history, container uploads, …) is still fine to forward natively:
+		// the original body reaches Anthropic byte-for-byte. Resolve the
+		// route from a lenient translation and report the strict error only
+		// when the request has to go through the translated pipeline.
+		req, err = anthropicapi.ToChatRequestLenient(decoded)
+		if err != nil {
+			return handleError(c, translateErr)
+		}
+	}
 
-	ctx := core.WithRequestDialect(c.Request().Context(), core.RequestDialectAnthropicMessages)
+	ctx := core.WithRequestDialect(promptEditCaptureContext(c, s.logger), core.RequestDialectAnthropicMessages)
 	ctx, prepared, workflow, err := prepareChatCompletionRequest(s, ctx, req, translatedRequestMeta(c))
 	if err != nil {
+		if short := shortCircuitOf(err); short != nil {
+			attachPreparedWorkflow(c, prepareContext(c, ctx), workflow)
+			s.recordGuardrailOutcomes(c)
+			recordPromptPluginRevisions(c, s.logger, req, nil)
+			return s.writeChatShortCircuit(c, workflow, req, short, messagesJSON, messagesOuterWrap(req, resolvedModelFromWorkflow(workflow, req.Model)))
+		}
+		// A block or fail-closed outcome still belongs to the resolved
+		// workflow: the audit entry must carry it like every other outcome.
+		attachPreparedWorkflow(c, prepareContext(c, ctx), workflow)
+		s.recordGuardrailOutcomes(c)
+		recordPromptPluginRevisions(c, s.logger, req, nil)
 		return handleError(c, err)
 	}
 	attachPreparedWorkflow(c, ctx, workflow)
+	s.recordGuardrailOutcomes(c)
+	recordPromptPluginRevisions(c, s.logger, req, prepared)
+	applyPluginRequestHeaders(c)
 
-	if s.canForwardMessagesNatively(workflow) {
+	// An unsigned thinking block is worth leaving the native path for only when
+	// the translated pipeline can actually carry the request: content it cannot
+	// represent (server-tool history, …) still belongs upstream verbatim.
+	unsignedThinking := translateErr == nil && anthropicapi.HasUnsignedThinking(decoded)
+	if s.canForwardMessagesNatively(ctx, workflow, unsignedThinking) {
 		return s.dispatchMessagesNative(c, prepared, workflow)
+	}
+	if translateErr != nil {
+		return handleError(c, translateErr)
 	}
 	return handleWithCache(s, c, prepared, workflow, s.dispatchMessages)
 }
 
-// CountMessageTokens returns a heuristic input token estimate for a Messages
-// request. It performs no provider call (see ADR-0007).
+// CountMessageTokens answers a Messages token count. The provider that owns
+// the model counts exactly when it has an endpoint for it: Anthropic counts
+// the Messages request natively, OpenAI counts its chat translation.
+// Otherwise, and whenever that call fails, the gateway's estimate answers, so
+// the endpoint works for every model and never depends on an upstream being
+// reachable (ADR-0007, amended).
 func (s *translatedInferenceService) CountMessageTokens(c *echo.Context) error {
 	body, err := requestBodyBytes(c)
 	if err != nil {
@@ -183,9 +223,76 @@ func (s *translatedInferenceService) CountMessageTokens(c *echo.Context) error {
 	if strings.TrimSpace(req.Model) == "" {
 		return handleError(c, core.NewInvalidRequestError("model is required", nil).WithParam("model"))
 	}
+	count, ok, err := s.countMessageTokensUpstream(c.Request().Context(), req, body)
+	if err != nil {
+		return handleError(c, err)
+	}
+	if ok {
+		return c.JSON(http.StatusOK, anthropicapi.CountTokensResponse{InputTokens: count})
+	}
 	return c.JSON(http.StatusOK, anthropicapi.CountTokensResponse{
 		InputTokens: anthropicapi.EstimateInputTokens(req),
 	})
+}
+
+// countMessageTokensUpstream asks the route's provider for an exact count:
+// natively when it counts Messages requests, otherwise from the request's
+// chat translation. ok is false when no provider can answer: guardrails apply
+// to the request, the model does not resolve, the provider has no counting
+// endpoint, or the call failed. err is a denial: the caller may not use the
+// model, as an inference request would be told.
+func (s *translatedInferenceService) countMessageTokensUpstream(ctx context.Context, req *anthropicapi.MessagesRequest, body []byte) (int, bool, error) {
+	selector, err := resolveServiceModel(ctx, s.provider, s.modelResolver, req.Model, "")
+	if err != nil {
+		return 0, false, nil
+	}
+	// The count sends the prompt to the model's provider, so the caller must
+	// be allowed to use the model, exactly as for inference.
+	if s.modelAuthorizer != nil {
+		if err := s.modelAuthorizer.ValidateModelAccess(ctx, selector); err != nil {
+			return 0, false, err
+		}
+	}
+	// Prompt guardrails run in the prompt phase of an inference request,
+	// which a count skips. Under a workflow with prompt guardrails the prompt
+	// must not reach a provider unchecked (it could carry content a rule would
+	// block or redact), so the count is estimated locally instead. Response-
+	// and stream-only rules never see the prompt and keep exact counts.
+	if core.GetWorkflow(ctx).PromptGuardrailsHash() != "" {
+		return 0, false, nil
+	}
+	model := selector.QualifiedModel()
+	if counter, ok := s.provider.(core.MessagesTokenCounter); ok {
+		count, err := counter.CountMessagesTokens(ctx, model, body)
+		if err == nil {
+			return count, true, nil
+		}
+		if !errors.Is(err, core.ErrMessagesTokenCountUnsupported) {
+			slog.Debug("count_tokens: provider count failed, falling back to the estimate", "model", model, "error", err)
+			return 0, false, nil
+		}
+	}
+	counter, ok := s.provider.(core.ChatTokenCounter)
+	if !ok {
+		return 0, false, nil
+	}
+	// A count request carries no max_tokens; the translation requires one,
+	// and it does not affect the input.
+	countable := *req
+	countable.MaxTokens = max(countable.MaxTokens, 1)
+	chatReq, err := anthropicapi.ToChatRequest(&countable)
+	if err != nil {
+		return 0, false, nil
+	}
+	chatReq.Model = model
+	count, err := counter.CountChatTokens(core.WithRequestDialect(ctx, core.RequestDialectAnthropicMessages), chatReq)
+	if err != nil {
+		if !errors.Is(err, core.ErrMessagesTokenCountUnsupported) {
+			slog.Debug("count_tokens: provider count failed, falling back to the estimate", "model", model, "error", err)
+		}
+		return 0, false, nil
+	}
+	return count, true, nil
 }
 
 func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core.ChatRequest, workflow *core.Workflow) error {
@@ -209,20 +316,14 @@ func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core
 		if result.Meta.UsedFailover {
 			markRequestFailoverUsed(c)
 		}
-		model := result.Meta.Model
-		return s.handleStreamingReadCloser(
-			c,
-			workflow,
-			model,
-			result.Meta.ProviderType,
-			result.Meta.ProviderName,
-			result.Meta.FailoverModel,
-			result.Stream,
-			func(stream io.ReadCloser) io.ReadCloser {
-				converted := anthropicapi.NewStreamConverter(stream, model, anthropicapi.EstimateChatInputTokens(req))
-				return result.WrapDeliveryStream(ctx, converted)
-			},
-		)
+		// Anthropic signs its thinking, and the client sends each block back
+		// with the signature, so the thinking it receives must stay as signed.
+		signed := strings.TrimSpace(result.Meta.ProviderType) == anthropicProviderType
+		stream := s.wrapPluginStream(ctx, workflow, messagesStreamDialect(signed), chatPromptOf(req), result.Stream)
+		return s.handleStreamingReadCloser(c, workflow, result.Meta, stream, result.GenerationObserver(), func(stream io.ReadCloser) io.ReadCloser {
+			converted := anthropicapi.NewStreamConverter(stream, result.Meta.Model, anthropicapi.EstimateChatInputTokens(req))
+			return result.WrapDeliveryStream(ctx, converted)
+		})
 	}
 
 	result, err := s.inference().ExecuteChatCompletion(ctx, workflow, req, requestID, "/v1/messages")
@@ -230,6 +331,10 @@ func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core
 		return handleError(c, err)
 	}
 	enrichAuditEntryWithProviderAttempts(c)
+	result.Response, err = chatResponsePhase.run(s, c, workflow, req, result.Response)
+	if err != nil {
+		return handleError(c, err)
+	}
 	if result.Meta.UsedFailover {
 		markRequestFailoverUsed(c)
 		auditlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)
@@ -241,12 +346,13 @@ func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core
 		result.Meta.ProviderName,
 	)
 
+	applyPluginResponseHeaders(c)
 	return c.JSON(http.StatusOK, anthropicapi.FromChatResponse(result.Response))
 }
 
-// decodeMessagesChatRequest reads the request body, decodes the Anthropic
-// Messages request, and translates it to the canonical chat request.
-func decodeMessagesChatRequest(c *echo.Context) (*core.ChatRequest, error) {
+// decodeMessagesRequest reads and decodes the Anthropic Messages request body
+// without translating it.
+func decodeMessagesRequest(c *echo.Context) (*anthropicapi.MessagesRequest, error) {
 	body, err := requestBodyBytes(c)
 	if err != nil {
 		return nil, core.NewInvalidRequestError("invalid request body: "+err.Error(), err)
@@ -255,5 +361,5 @@ func decodeMessagesChatRequest(c *echo.Context) (*core.ChatRequest, error) {
 	if err != nil {
 		return nil, core.NewInvalidRequestError("invalid request body: "+err.Error(), err)
 	}
-	return anthropicapi.ToChatRequest(req)
+	return req, nil
 }

@@ -6,11 +6,15 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRunVersionSkipsSetup(t *testing.T) {
@@ -32,17 +36,41 @@ func TestRunVersionSkipsSetup(t *testing.T) {
 			return nil
 		},
 	})
-	if err != nil {
-		t.Fatalf("Run(--version) error = %v", err)
+	require.NoError(t, err)
+	assert.False(t, setupCalled)
+	assert.False(t, setupConfigCalled)
+	assert.True(t, strings.HasPrefix(stdout.String(), "gomodel-test "), "version output = %q, want prefix %q", stdout.String(), "gomodel-test ")
+}
+
+func TestConfigHooksRunSetupOnceThenReloadForEveryLaterGeneration(t *testing.T) {
+	var setups, reloads int
+	rejected := errors.New("endpoint outside the policy")
+	configure := configHooks(t.Context(), Options{
+		SetupConfig: func(context.Context, *config.LoadResult) error {
+			setups++
+			return nil
+		},
+		ReloadConfig: func(context.Context, *config.LoadResult) error {
+			reloads++
+			if reloads == 2 {
+				return rejected
+			}
+			return nil
+		},
+	})
+	result := &config.LoadResult{Config: &config.Config{}}
+	for i, wantErr := range []error{nil, nil, rejected} {
+		err := configure(result)
+		require.ErrorIs(t, err, wantErr, "generation %d", i)
 	}
-	if setupCalled {
-		t.Error("Setup must not run for --version")
-	}
-	if setupConfigCalled {
-		t.Error("SetupConfig must not run for --version")
-	}
-	if !strings.HasPrefix(stdout.String(), "gomodel-test ") {
-		t.Errorf("version output = %q, want prefix %q", stdout.String(), "gomodel-test ")
+	require.Equal(t, 1, setups)
+	require.Equal(t, 2, reloads)
+
+	// Without hooks every generation passes.
+	noHooks := configHooks(t.Context(), Options{})
+	for generation := 1; generation <= 2; generation++ {
+		err := noHooks(result)
+		require.NoError(t, err, "no hooks, generation %d: %v", generation, err)
 	}
 }
 
@@ -56,18 +84,14 @@ func TestRunSetupConfigReceivesLoadedConfiguration(t *testing.T) {
 		Stderr: io.Discard,
 		SetupConfig: func(_ context.Context, result *config.LoadResult) error {
 			called = true
-			if result == nil || result.Config == nil {
-				t.Fatal("SetupConfig received nil configuration")
-			}
+			require.NotNil(t, result)
+			require.NotNil(t, result.Config)
+
 			return wantErr
 		},
 	})
-	if !called {
-		t.Fatal("SetupConfig was not called")
-	}
-	if !errors.Is(err, wantErr) {
-		t.Fatalf("Run error = %v, want wrapped sentinel", err)
-	}
+	require.True(t, called)
+	require.ErrorIs(t, err, wantErr)
 }
 
 func TestRunUsageErrorExitCode(t *testing.T) {
@@ -76,12 +100,9 @@ func TestRunUsageErrorExitCode(t *testing.T) {
 		Stdout: io.Discard,
 		Stderr: io.Discard,
 	})
-	if err == nil {
-		t.Fatal("expected a usage error")
-	}
-	if got := ExitCode(err); got != 2 {
-		t.Errorf("ExitCode = %d, want 2", got)
-	}
+	require.Error(t, err)
+	got := ExitCode(err)
+	assert.Equal(t, 2, got)
 }
 
 func TestRunHelpIsNotAnError(t *testing.T) {
@@ -90,12 +111,9 @@ func TestRunHelpIsNotAnError(t *testing.T) {
 		Stdout: io.Discard,
 		Stderr: io.Discard,
 	})
-	if err != nil {
-		t.Fatalf("Run(--help) error = %v, want nil", err)
-	}
-	if got := ExitCode(err); got != 0 {
-		t.Errorf("ExitCode = %d, want 0", got)
-	}
+	require.NoError(t, err)
+	got := ExitCode(err)
+	assert.Equal(t, 0, got)
 }
 
 // TestRunHealthAndReadyDispatch exercises the --health/--ready short-circuit
@@ -103,9 +121,8 @@ func TestRunHelpIsNotAnError(t *testing.T) {
 // surface probe failures as non-usage errors (exit code 1).
 func TestRunHealthAndReadyDispatch(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
+	require.NoError(t, err)
+
 	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
@@ -124,13 +141,12 @@ func TestRunHealthAndReadyDispatch(t *testing.T) {
 	t.Setenv("PORT", port)
 
 	for _, flag := range []string{"--health", "--ready"} {
-		if err := Run(context.Background(), Options{
+		err := Run(context.Background(), Options{
 			Args:   []string{flag},
 			Stdout: io.Discard,
 			Stderr: io.Discard,
-		}); err != nil {
-			t.Errorf("Run(%s) against healthy gateway = %v, want nil", flag, err)
-		}
+		})
+		require.NoError(t, err, "Run(%s) against healthy gateway = %v, want nil", flag, err)
 	}
 
 	// An unreachable gateway must surface as a non-usage error (exit code 1).
@@ -146,8 +162,48 @@ func TestRunHealthAndReadyDispatch(t *testing.T) {
 			t.Errorf("Run(%s) against closed port = nil, want error", flag)
 			continue
 		}
-		if got := ExitCode(err); got != 1 {
-			t.Errorf("ExitCode(Run(%s) error) = %d, want 1", flag, got)
-		}
+		got := ExitCode(err)
+		assert.Equal(t, 1, got, "ExitCode(Run(%s) error) = %d, want 1", flag, got)
+	}
+}
+
+func TestRunResolvesSecretReferencesAfterTheConfigHook(t *testing.T) {
+	tests := []struct {
+		name     string
+		register bool
+		wantErr  string
+	}{
+		{
+			name:    "unknown scheme stops startup",
+			wantErr: "failed to resolve secret references: server.master_key: secret reference ${vault:...}: unknown secret scheme \"vault\": the vault scheme is provided by GoModel Pro vaults (extensions.vaults)",
+		},
+		{
+			name:     "scheme registered by the hook is used",
+			register: true,
+			wantErr:  "failed to resolve secret references: server.master_key: secret reference ${vault:...}: lookup prod/master-key failed",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Chdir(dir)
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("server:\n  master_key: ${vault:prod/master-key}\n"), 0o600))
+			t.Setenv("GOMODEL_MASTER_KEY", "")
+
+			err := Run(t.Context(), Options{
+				Args:   []string{},
+				Stdout: io.Discard,
+				Stderr: io.Discard,
+				SetupConfig: func(_ context.Context, result *config.LoadResult) error {
+					if !tt.register {
+						return nil
+					}
+					return result.Secrets.Register("vault", config.SecretResolverFunc(func(_ context.Context, reference string) (string, error) {
+						return "", errors.New("lookup " + reference + " failed")
+					}))
+				},
+			})
+			require.EqualError(t, err, tt.wantErr)
+		})
 	}
 }

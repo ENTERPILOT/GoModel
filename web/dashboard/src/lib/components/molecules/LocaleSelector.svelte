@@ -32,7 +32,8 @@
 
 <style>
   .locale-settings {
-    grid-template-columns: minmax(280px, 420px);
+    /* The floor yields to the panel width so the select never overflows it. */
+    grid-template-columns: minmax(min(280px, 100%), 420px);
   }
 
   .locale-selector-label {

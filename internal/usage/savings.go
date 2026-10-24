@@ -10,7 +10,7 @@ func ApplyRewriteSavings(entry *UsageEntry, tokensSaved int, pricing *core.Model
 		return
 	}
 	entry.RewriteTokensSaved = tokensSaved
-	effective := pricingForEndpoint(pricing, entry.Endpoint)
+	effective := pricingForEndpoint(pricing.AtTime(entry.Timestamp), entry.Endpoint)
 	entry.RewriteCostSaved = rewriteCostSaved(
 		entry.InputTokens,
 		entry.OutputTokens,

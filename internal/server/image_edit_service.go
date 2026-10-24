@@ -40,11 +40,9 @@ func (s *imageService) CreateImageEdit(c *echo.Context) error {
 	}
 	// The upload is multipart, so the audit middleware has no JSON body to
 	// capture; record the edit parameters and the uploads instead. Image
-	// bytes are embedded only when logImageInputs is on. The budget is shared
-	// with the response body so one entry never exceeds the image allowance.
-	budget := auditlog.NewImageBodyBudget()
+	// bytes are stored only when logImageInputs is on.
 	if s.logBodies {
-		auditlog.EnrichEntryWithRequestBody(c, auditlog.BuildImageUploadBody(req.Images, req.Mask, s.logImageInputs, imageEditAuditMeta(req), budget))
+		auditlog.EnrichEntryWithRequestBody(c, auditlog.BuildImageUploadBody(s.inputCapture(c), req.Images, req.Mask, imageEditAuditMeta(req)))
 	}
 	if err := core.ValidateImageEditRequest(req); err != nil {
 		return handleError(c, err)
@@ -68,7 +66,8 @@ func (s *imageService) CreateImageEdit(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	if resp == nil {
-		return handleError(c, core.NewProviderError("", http.StatusBadGateway, "provider returned empty image response", nil))
+		return handleError(c, core.NewProviderError(route.providerName, http.StatusBadGateway,
+			"provider "+route.providerName+" returned empty image response", nil))
 	}
 	s.logUsage(ctx, route, func(pricing *core.ModelPricing) *usage.UsageEntry {
 		return usage.ExtractFromImageEditResponse(resp, route.requestID, route.model, route.providerType, pricing)
@@ -76,7 +75,7 @@ func (s *imageService) CreateImageEdit(c *echo.Context) error {
 	if err := waitForModelSlowdownFactor(ctx, route.slowdown, inferenceTime); err != nil {
 		return handleError(c, err)
 	}
-	return s.respondImages(c, resp, budget)
+	return s.respondImages(c, resp)
 }
 
 // imageEditRequestFromForm decodes the OpenAI multipart edit request. Source

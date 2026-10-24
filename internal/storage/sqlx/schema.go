@@ -8,10 +8,11 @@ import (
 
 // execSchema runs DDL statements in order with portable type tokens expanded.
 //
-// Statements run outside a transaction: SQLite cannot run every schema change
-// transactionally, and `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT
-// EXISTS` are individually idempotent, so a partial application is safe to
-// retry on the next start.
+// On SQLite the statements run outside a transaction: it cannot run every
+// schema change transactionally, and `CREATE TABLE IF NOT EXISTS` / `CREATE
+// INDEX IF NOT EXISTS` are individually idempotent, so a partial application
+// is safe to retry on the next start. PostgreSQL wraps them in a locked
+// transaction instead; see postgresDB.Schema.
 func execSchema(ctx context.Context, q Querier, dialect Dialect, statements []string) error {
 	for _, statement := range statements {
 		if _, err := q.Exec(ctx, dialect.ExpandTypes(statement)); err != nil {
@@ -26,17 +27,29 @@ func execSchema(ctx context.Context, q Querier, dialect Dialect, statements []st
 // present.
 //
 // Tolerating the error is the portable form: SQLite has no ADD COLUMN IF NOT
-// EXISTS, so the PostgreSQL store used the IF NOT EXISTS spelling while the
-// SQLite store pattern-matched its error text. Both engines reject a duplicate
-// add with a recognisable message, so one list now serves both.
+// EXISTS, and both engines reject a duplicate add with a recognisable message,
+// so one list serves both. PostgreSQL still gets the IF NOT EXISTS spelling
+// (see addColumnStatement) so that re-running applied migrations on every
+// start does not write an ERROR line per column to the server log.
 func AddColumns(ctx context.Context, db DB, statements ...string) error {
+	dialect := db.Dialect()
 	for _, statement := range statements {
-		_, err := db.Exec(ctx, db.Dialect().ExpandTypes(statement))
+		_, err := db.Exec(ctx, dialect.addColumnStatement(statement))
 		if err != nil && !IsDuplicateColumnError(err) {
 			return fmt.Errorf("apply migration %q: %w", statement, err)
 		}
 	}
 	return nil
+}
+
+// addColumnStatement expands type tokens and, on PostgreSQL, turns
+// `ADD COLUMN` into `ADD COLUMN IF NOT EXISTS`.
+func (d Dialect) addColumnStatement(statement string) string {
+	statement = d.ExpandTypes(statement)
+	if d != PostgreSQL || strings.Contains(statement, "IF NOT EXISTS") {
+		return statement
+	}
+	return strings.Replace(statement, "ADD COLUMN ", "ADD COLUMN IF NOT EXISTS ", 1)
 }
 
 // IsDuplicateColumnError reports whether err is an engine's complaint that a

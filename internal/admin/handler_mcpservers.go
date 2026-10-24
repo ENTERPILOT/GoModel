@@ -25,53 +25,63 @@ type MCPServerAdmin interface {
 	Delete(ctx context.Context, name string) error
 	Reconnect(ctx context.Context, name string) (mcpgateway.ServerView, error)
 	Catalog(name string) (mcpgateway.CatalogView, bool)
+	IsVirtual(name string) bool
+	IsManagedVirtual(name string) bool
+	VirtualViews() []mcpgateway.VirtualServerView
+	UpsertVirtual(ctx context.Context, virtual mcpgateway.ManagedVirtualServer) (mcpgateway.VirtualServerView, error)
+	DeleteVirtual(ctx context.Context, name string) error
 }
 
 // redactedMCPHeaderValue replaces upstream header values (the credential
 // boundary) in admin views. An upsert that sends the placeholder back keeps
 // the currently stored value, so the dashboard can round-trip a server
-// definition without ever seeing its secrets.
+// definition without ever seeing its secrets. A header made of secret
+// references alone, optionally after an auth scheme ("Bearer ${env:TOKEN}"),
+// is shown as stored instead: the reference is not secret.
 const redactedMCPHeaderValue = "***"
 
 // upsertMCPServerRequest is the admin upsert contract for one MCP server.
 // Header values equal to "***" preserve the stored value; enabled defaults to
 // true, preserving the existing value when omitted on an update.
 type upsertMCPServerRequest struct {
-	Name               string            `json:"name"`
-	Slug               string            `json:"slug,omitempty"`
-	URL                string            `json:"url"`
-	Transport          string            `json:"transport,omitempty"`
-	Headers            map[string]string `json:"headers,omitempty"`
-	Description        string            `json:"description,omitempty"`
-	Enabled            *bool             `json:"enabled,omitempty"`
-	AllowedTools       []string          `json:"allowed_tools,omitempty"`
-	DisallowedTools    []string          `json:"disallowed_tools,omitempty"`
-	UserPaths          []string          `json:"user_paths,omitempty"`
-	ToolTimeoutSeconds int               `json:"tool_timeout_seconds,omitempty"`
+	Name                string            `json:"name"`
+	Slug                string            `json:"slug,omitempty"`
+	URL                 string            `json:"url"`
+	Transport           string            `json:"transport,omitempty"`
+	Headers             map[string]string `json:"headers,omitempty"`
+	Description         string            `json:"description,omitempty"`
+	Enabled             *bool             `json:"enabled,omitempty"`
+	AllowedTools        []string          `json:"allowed_tools,omitempty"`
+	DisallowedTools     []string          `json:"disallowed_tools,omitempty"`
+	UserPaths           []string          `json:"user_paths,omitempty"`
+	DisallowedUserPaths []string          `json:"disallowed_user_paths,omitempty"`
+	ToolTimeoutSeconds  int               `json:"tool_timeout_seconds,omitempty"`
 }
 
 // mcpServerViewResponse is the admin view of one MCP server: its definition
 // (headers redacted) plus runtime connection state. Managed marks
 // config/env-declared servers, which are read-only in the dashboard.
 type mcpServerViewResponse struct {
-	Name               string            `json:"name"`
-	Slug               string            `json:"slug"`
-	URL                string            `json:"url"`
-	Transport          string            `json:"transport"`
-	Description        string            `json:"description,omitempty"`
-	Enabled            bool              `json:"enabled"`
-	AllowedTools       []string          `json:"allowed_tools,omitempty"`
-	DisallowedTools    []string          `json:"disallowed_tools,omitempty"`
-	UserPaths          []string          `json:"user_paths,omitempty"`
-	ToolTimeoutSeconds int               `json:"tool_timeout_seconds,omitempty"`
-	Headers            map[string]string `json:"headers,omitempty"`
-	Managed            bool              `json:"managed"`
-	Status             string            `json:"status"`
-	LastError          string            `json:"last_error,omitempty"`
-	ToolCount          int               `json:"tool_count"`
-	PromptCount        int               `json:"prompt_count"`
-	ResourceCount      int               `json:"resource_count"`
-	ConnectedAt        *time.Time        `json:"connected_at,omitempty"`
+	Name                string            `json:"name"`
+	Slug                string            `json:"slug"`
+	URL                 string            `json:"url"`
+	Transport           string            `json:"transport"`
+	Description         string            `json:"description,omitempty"`
+	Enabled             bool              `json:"enabled"`
+	AllowedTools        []string          `json:"allowed_tools,omitempty"`
+	DisallowedTools     []string          `json:"disallowed_tools,omitempty"`
+	UserPaths           []string          `json:"user_paths,omitempty"`
+	DisallowedUserPaths []string          `json:"disallowed_user_paths,omitempty"`
+	ToolTimeoutSeconds  int               `json:"tool_timeout_seconds,omitempty"`
+	Headers             map[string]string `json:"headers,omitempty"`
+	Managed             bool              `json:"managed"`
+	Status              string            `json:"status"`
+	LastError           string            `json:"last_error,omitempty"`
+	ToolCount           int               `json:"tool_count"`
+	ExcludedToolCount   int               `json:"excluded_tool_count"`
+	PromptCount         int               `json:"prompt_count"`
+	ResourceCount       int               `json:"resource_count"`
+	ConnectedAt         *time.Time        `json:"connected_at,omitempty"`
 }
 
 // ListMCPServers handles GET /admin/mcp-servers.
@@ -130,12 +140,22 @@ func (h *Handler) UpsertMCPServer(c *echo.Context) error {
 	if h.mcpServers.IsManaged(slug) {
 		return handleError(c, core.NewInvalidRequestError("mcp server "+slug+" is managed by config/env and is read-only", nil))
 	}
+	if h.mcpServers.IsVirtual(slug) {
+		// A server stored before the virtual server was declared stays editable.
+		if _, err := h.mcpServers.GetManaged(c.Request().Context(), slug); errors.Is(err, mcpgateway.ErrNotFound) {
+			return handleError(c, core.NewInvalidRequestError(mcpgateway.VirtualNameTakenError(slug).Error(), nil))
+		}
+	}
 
 	server, err := h.buildMCPServerUpsert(c.Request().Context(), slug, displayName, req)
 	if err != nil {
 		return handleError(c, err)
 	}
 	if err := h.mcpServers.Upsert(c.Request().Context(), server); err != nil {
+		if errors.Is(err, mcpgateway.ErrVirtualNameTaken) {
+			// The server was deleted while this edit was in flight.
+			return handleError(c, core.NewInvalidRequestError(err.Error(), err))
+		}
 		return handleError(c, mcpServerWriteError(err))
 	}
 
@@ -203,7 +223,7 @@ func (h *Handler) ReconnectMCPServer(c *echo.Context) error {
 // MCPServerCatalog handles GET /admin/mcp-servers/:name/catalog.
 //
 // @Summary      Inspect one MCP server's current catalog
-// @Description  Lists the tools, prompts, resources, and resource templates the named server currently exposes through the gateway, after operator tool filters. Names are the upstream originals; the aggregated /mcp endpoint prefixes them with the server slug.
+// @Description  Lists the tools, prompts, resources, and resource templates the named server currently exposes through the gateway, after operator tool filters. Discovered tools the filters hide are listed separately under excluded_tools. Names are the upstream originals; the aggregated /mcp endpoint prefixes them with the server slug.
 // @Tags         admin
 // @Produce      json
 // @Security     BearerAuth
@@ -249,17 +269,18 @@ func (h *Handler) buildMCPServerUpsert(ctx context.Context, slug, displayName st
 	}
 
 	server := mcpgateway.ManagedServer{
-		Name:               slug,
-		DisplayName:        displayName,
-		URL:                strings.TrimSpace(req.URL),
-		Transport:          strings.TrimSpace(req.Transport),
-		Headers:            headers,
-		Description:        strings.TrimSpace(req.Description),
-		Enabled:            enabled,
-		AllowedTools:       req.AllowedTools,
-		DisallowedTools:    req.DisallowedTools,
-		UserPaths:          req.UserPaths,
-		ToolTimeoutSeconds: req.ToolTimeoutSeconds,
+		Name:                slug,
+		DisplayName:         displayName,
+		URL:                 strings.TrimSpace(req.URL),
+		Transport:           strings.TrimSpace(req.Transport),
+		Headers:             headers,
+		Description:         strings.TrimSpace(req.Description),
+		Enabled:             enabled,
+		AllowedTools:        req.AllowedTools,
+		DisallowedTools:     req.DisallowedTools,
+		UserPaths:           req.UserPaths,
+		DisallowedUserPaths: req.DisallowedUserPaths,
+		ToolTimeoutSeconds:  req.ToolTimeoutSeconds,
 	}
 	if current != nil {
 		server.CreatedAt = current.CreatedAt
@@ -303,23 +324,25 @@ func (h *Handler) mcpServerView(view mcpgateway.ServerView) mcpServerViewRespons
 		displayName = spec.Name
 	}
 	resp := mcpServerViewResponse{
-		Name:               displayName,
-		Slug:               spec.Name,
-		URL:                spec.URL,
-		Transport:          spec.Transport,
-		Description:        spec.Description,
-		Enabled:            spec.Enabled,
-		AllowedTools:       spec.AllowedTools,
-		DisallowedTools:    spec.DisallowedTools,
-		UserPaths:          spec.UserPaths,
-		ToolTimeoutSeconds: int(spec.ToolTimeout / time.Second),
-		Headers:            redactMCPHeaders(spec.Headers),
-		Managed:            h.mcpServers.IsManaged(spec.Name),
-		Status:             string(view.Status),
-		LastError:          view.LastError,
-		ToolCount:          view.ToolCount,
-		PromptCount:        view.PromptCount,
-		ResourceCount:      view.ResourceCount,
+		Name:                displayName,
+		Slug:                spec.Name,
+		URL:                 spec.URL,
+		Transport:           spec.Transport,
+		Description:         spec.Description,
+		Enabled:             spec.Enabled,
+		AllowedTools:        spec.AllowedTools,
+		DisallowedTools:     spec.DisallowedTools,
+		UserPaths:           spec.UserPaths,
+		DisallowedUserPaths: spec.DisallowedUserPaths,
+		ToolTimeoutSeconds:  int(spec.ToolTimeout / time.Second),
+		Headers:             redactMCPHeaders(spec),
+		Managed:             h.mcpServers.IsManaged(spec.Name),
+		Status:              string(view.Status),
+		LastError:           view.LastError,
+		ToolCount:           view.ToolCount,
+		ExcludedToolCount:   view.ExcludedToolCount,
+		PromptCount:         view.PromptCount,
+		ResourceCount:       view.ResourceCount,
 	}
 	if !view.ConnectedAt.IsZero() {
 		connectedAt := view.ConnectedAt
@@ -328,15 +351,19 @@ func (h *Handler) mcpServerView(view mcpgateway.ServerView) mcpServerViewRespons
 	return resp
 }
 
-// redactMCPHeaders keeps header names but replaces every value, so views can
-// show which headers are configured without exposing upstream credentials.
-func redactMCPHeaders(headers map[string]string) map[string]string {
-	if len(headers) == 0 {
+// redactMCPHeaders keeps header names but replaces every literal value, so
+// views can show which headers are configured without exposing upstream
+// credentials. Headers made of references show them (see mcpHeaderShown).
+func redactMCPHeaders(spec mcpgateway.ServerSpec) map[string]string {
+	if len(spec.Headers) == 0 {
 		return nil
 	}
-	redacted := make(map[string]string, len(headers))
-	for name := range headers {
+	redacted := make(map[string]string, len(spec.Headers))
+	for name := range spec.Headers {
 		redacted[name] = redactedMCPHeaderValue
+		if reference, ok := spec.HeaderReferences[name]; ok && mcpHeaderShown(reference) {
+			redacted[name] = reference
+		}
 	}
 	return redacted
 }
@@ -354,10 +381,17 @@ func (h *Handler) findMCPServerView(name string) (mcpServerViewResponse, bool) {
 
 // mcpServerWriteError surfaces gateway store/reload failures as 502, mirroring
 // virtualModelWriteError. Validation runs in the handler before the service
-// call, so remaining errors are infrastructure failures, not input issues.
+// call, so remaining errors are infrastructure failures, not input issues,
+// except a header secret reference that does not resolve: that is a 400.
 func mcpServerWriteError(err error) error {
 	if err == nil {
 		return nil
+	}
+	if restricted := secretReferenceRestrictedError(err); restricted != nil {
+		return restricted
+	}
+	if _, ok := errors.AsType[*config.SecretError](err); ok {
+		return core.NewInvalidRequestError(err.Error(), err).WithParam("headers")
 	}
 	return core.NewProviderError("mcp_servers", http.StatusBadGateway, err.Error(), err)
 }

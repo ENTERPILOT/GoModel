@@ -1,18 +1,18 @@
 package mcpgateway
 
 import (
-	"reflect"
 	"slices"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNamespacedName(t *testing.T) {
 	t.Parallel()
-	if full := NamespacedName("github", "create_issue"); full != "github_create_issue" {
-		t.Fatalf("NamespacedName() = %q, want github_create_issue", full)
-	}
+	full := NamespacedName("github", "create_issue")
+	require.Equal(t, "github_create_issue", full)
 }
 
 func TestBareToolAliases(t *testing.T) {
@@ -52,14 +52,7 @@ func TestBareToolAliases(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			got := bareToolAliases(tt.owners)
-			if len(got) != len(tt.want) {
-				t.Fatalf("bareToolAliases() = %v, want %v", got, tt.want)
-			}
-			for bare, exposed := range tt.want {
-				if got[bare] != exposed {
-					t.Fatalf("bareToolAliases()[%q] = %q, want %q", bare, got[bare], exposed)
-				}
-			}
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -88,19 +81,17 @@ func TestFilterTools(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			filtered := filterTools(tools, tt.allowed, tt.disallowed)
+			filtered := filterTools(discoverTools(tools), tt.allowed, tt.disallowed)
 			names := make([]string, 0, len(filtered))
 			for _, tool := range filtered {
 				names = append(names, tool.Name)
 			}
-			if !slices.Equal(names, tt.want) {
-				t.Fatalf("filterTools() = %v, want %v", names, tt.want)
-			}
+			require.True(t, slices.Equal(names, tt.want), "filterTools() = %v, want %v", names, tt.want)
 		})
 	}
 }
 
-func TestFilterToolsNormalizesSchemasForDownstream(t *testing.T) {
+func TestDiscoverToolsNormalizesSchemasForDownstream(t *testing.T) {
 	t.Parallel()
 	validInput := map[string]any{"type": "object", "properties": map[string]any{"q": map[string]any{"type": "string"}}}
 	tools := []*mcp.Tool{
@@ -109,24 +100,85 @@ func TestFilterToolsNormalizesSchemasForDownstream(t *testing.T) {
 		{Name: "valid", InputSchema: validInput, OutputSchema: map[string]any{"type": "object"}},
 	}
 
-	filtered := filterTools(tools, nil, nil)
-	byName := make(map[string]*mcp.Tool, len(filtered))
-	for _, tool := range filtered {
+	discovered := discoverTools(tools)
+	byName := make(map[string]*mcp.Tool, len(discovered))
+	for _, tool := range discovered {
 		byName[tool.Name] = tool
 	}
 	for _, name := range []string{"missing", "invalid", "valid"} {
-		if !isObjectSchema(byName[name].InputSchema) {
-			t.Fatalf("%s input schema = %#v, want object schema", name, byName[name].InputSchema)
-		}
+		require.True(t, isObjectSchema(byName[name].InputSchema), "%s input schema = %#v, want object schema", name, byName[name].InputSchema)
 	}
-	if byName["invalid"].OutputSchema != nil {
-		t.Fatalf("invalid output schema = %#v, want nil", byName["invalid"].OutputSchema)
+	require.Nil(t, byName["invalid"].OutputSchema)
+	require.Equal(t, validInput, byName["valid"].InputSchema)
+	require.True(t, isObjectSchema(byName["valid"].OutputSchema), "valid output schema = %#v, want preserved object", byName["valid"].OutputSchema)
+}
+
+func TestCatalogWithToolFiltersKeepsDiscoveredTools(t *testing.T) {
+	t.Parallel()
+	base := &catalog{discovered: discoverTools([]*mcp.Tool{{Name: "write"}, {Name: "read"}})}
+
+	filtered := base.withToolFilters(nil, []string{"write"})
+	require.Len(t, filtered.tools, 1)
+	assert.Equal(t, "read", filtered.tools[0].Name)
+	assert.Equal(t, 1, filtered.excludedToolCount())
+	assert.Len(t, filtered.discovered, 2)
+	assert.Empty(t, base.tools, "withToolFilters must not mutate the receiver")
+
+	var missing *catalog
+	assert.Nil(t, missing.withToolFilters(nil, []string{"write"}))
+}
+
+func TestCatalogToolRelaysExplicitSafetyHints(t *testing.T) {
+	t.Parallel()
+	destructive := true
+	tests := []struct {
+		name            string
+		annotations     *mcp.ToolAnnotations
+		wantReadOnly    bool
+		wantDestructive bool
+	}{
+		{name: "unannotated tool has no hints"},
+		{name: "read-only hint", annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}, wantReadOnly: true},
+		{name: "explicit destructive hint", annotations: &mcp.ToolAnnotations{DestructiveHint: &destructive}, wantDestructive: true},
+		{name: "read-only wins over destructive", annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, DestructiveHint: &destructive}, wantReadOnly: true},
+		{name: "implicit destructive default is not shown", annotations: &mcp.ToolAnnotations{}},
 	}
-	if !reflect.DeepEqual(byName["valid"].InputSchema, validInput) {
-		t.Fatalf("valid input schema = %#v, want %#v", byName["valid"].InputSchema, validInput)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			feature := catalogTool(&mcp.Tool{Name: "tool", Annotations: tt.annotations})
+			assert.Equal(t, tt.wantReadOnly, feature.ReadOnly)
+			assert.Equal(t, tt.wantDestructive, feature.Destructive)
+		})
 	}
-	if !isObjectSchema(byName["valid"].OutputSchema) {
-		t.Fatalf("valid output schema = %#v, want preserved object", byName["valid"].OutputSchema)
+}
+
+func TestServerSpecVisibleTo(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		userPath   string
+		allowed    []string
+		disallowed []string
+		want       bool
+	}{
+		{name: "no scope admits everyone", userPath: "/x", want: true},
+		{name: "excluded subtree is hidden", userPath: "/contractors/acme", disallowed: []string{"/contractors"}, want: false},
+		{name: "sibling of excluded subtree stays visible", userPath: "/staff", disallowed: []string{"/contractors"}, want: true},
+		{name: "exclusion wins inside an allowed subtree", userPath: "/eng/contractors", allowed: []string{"/eng"}, disallowed: []string{"/eng/contractors"}, want: false},
+		{name: "rest of allowed subtree stays visible", userPath: "/eng/platform", allowed: []string{"/eng"}, disallowed: []string{"/eng/contractors"}, want: true},
+		{name: "caller without user path is not in an excluded subtree", userPath: "", disallowed: []string{"/contractors"}, want: true},
+		{name: "root exclusion hides from every caller", userPath: "", disallowed: []string{"/"}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			spec := ServerSpec{
+				UserPaths:           normalizeUserPaths(tt.allowed),
+				DisallowedUserPaths: normalizeUserPaths(tt.disallowed),
+			}
+			assert.Equal(t, tt.want, spec.visibleTo(tt.userPath))
+		})
 	}
 }
 
@@ -150,9 +202,8 @@ func TestUserPathAllowed(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			allowed := normalizeUserPaths(tt.allowed)
-			if got := userPathAllowed(tt.userPath, allowed); got != tt.want {
-				t.Fatalf("userPathAllowed(%q, %v) = %v, want %v", tt.userPath, tt.allowed, got, tt.want)
-			}
+			got := userPathAllowed(tt.userPath, allowed)
+			require.Equal(t, tt.want, got, "userPathAllowed(%q, %v) = %v, want %v", tt.userPath, tt.allowed, got, tt.want)
 		})
 	}
 }

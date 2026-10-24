@@ -340,6 +340,7 @@
   }
 
   .audit-request-badge {
+    flex-shrink: 0;
     gap: 6px;
     min-width: 0;
     white-space: nowrap;
@@ -369,6 +370,22 @@
     .audit-entry-summary {
         flex-direction: column;
         align-items: flex-start;
+      }
+
+    .audit-entry-left {
+        flex-wrap: wrap;
+        max-width: 100%;
+      }
+
+    .audit-provider-model {
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+    .audit-path {
+        flex: 1 1 100%;
+        min-width: 0;
       }
 
     .audit-entry-right {

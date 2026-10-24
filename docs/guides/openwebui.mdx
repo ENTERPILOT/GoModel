@@ -1,0 +1,173 @@
+---
+title: "GoModel & Open WebUI"
+description: "Give Open WebUI one connection to every provider through GoModel, and get audit logs, per-user cost tracking, and metrics for every chat."
+icon: "messages-square"
+keywords: ["Open WebUI", "open-webui", "self-hosted chat", "base URL", "OpenAI connection", "per-user costs", "LLM observability", "setup guide"]
+---
+
+## Overview
+
+Open WebUI is a self-hosted chat UI, but on its own it cannot tell you what
+each user's chats cost or keep an audit trail of model traffic. Pointing its
+OpenAI connection at GoModel fixes that: one connection, and every chat is
+logged, priced, and attributed to the signed-in Open WebUI user. The same
+connection puts Anthropic, Gemini, and every other provider configured in
+GoModel into Open WebUI's model picker.
+
+Flow:
+
+`Open WebUI chat -> Open WebUI backend -> GoModel -> OpenAI/Anthropic/Gemini/...`
+
+What you get:
+
+- Full request and response bodies for every chat in the GoModel audit log.
+- Cost per Open WebUI user via forwarded user headers and
+  [labels](/features/labelling).
+- All providers behind one OpenAI connection; no per-provider setup in
+  Open WebUI.
+- Prometheus metrics and OpenTelemetry traces for chat traffic, once you
+  enable those exporters (see [Notes](#notes)).
+- Failover, rate limits, budgets, and response caching applied to chat
+  traffic, when you configure them in GoModel.
+
+## 1. Run GoModel next to Open WebUI
+
+Run both services on one Docker network so Open WebUI can reach GoModel by
+container name:
+
+```yaml docker-compose.yml
+services:
+  gomodel:
+    image: enterpilot/gomodel
+    environment:
+      GOMODEL_MASTER_KEY: change-me
+      OPENAI_API_KEY: sk-...
+      ANTHROPIC_API_KEY: sk-ant-...
+      TAGGING_HEADER_1: X-OpenWebUI-User-Email
+      TAGGING_HEADER_1_DONOTPASS: "true"
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - gomodel_data:/app/data
+
+  openwebui:
+    image: ghcr.io/open-webui/open-webui:v0.11.3
+    environment:
+      OPENAI_API_BASE_URL: http://gomodel:8080/v1
+      OPENAI_API_KEY: change-me
+      ENABLE_OLLAMA_API: "false"
+      ENABLE_FORWARD_USER_INFO_HEADERS: "true"
+    ports:
+      - "3000:8080"
+    volumes:
+      - openwebui_data:/app/backend/data
+
+volumes:
+  gomodel_data:
+  openwebui_data:
+```
+
+| Variable | Why |
+| --- | --- |
+| `OPENAI_API_BASE_URL` | Sends all OpenAI-API traffic to GoModel. Keep the `/v1` suffix. |
+| `OPENAI_API_KEY` | A GoModel API key (or `GOMODEL_MASTER_KEY`), not a real OpenAI key. |
+| `ENABLE_OLLAMA_API` | Off unless you run Ollama; avoids connection errors in the logs. |
+| `ENABLE_FORWARD_USER_INFO_HEADERS` | Adds the signed-in user's name, email, id, and role as headers on every model call, which GoModel turns into labels below. |
+| `TAGGING_HEADER_1` | Tells GoModel to record that header's value as a label on every request. |
+| `TAGGING_HEADER_1_DONOTPASS` | Keeps the label but strips the header before forwarding, so user emails never reach a provider on [passthrough](/features/passthrough-api) routes. Translated routes never forward client headers. |
+
+Open `http://localhost:3000`, create the first (admin) account, and the model
+picker lists exactly what GoModel exposes — including Anthropic and Gemini
+models and any [virtual models](/features/virtual-models). Existing
+installations can set the same connection at runtime under
+`Admin Panel -> Settings -> Connections -> OpenAI API` instead of using
+environment variables.
+
+<Tip>
+  Create a dedicated API key for Open WebUI in the GoModel dashboard
+  (`API Keys -> Create API Key`) instead of using the master key. Keys carry
+  labels, budgets, and rate limits, so chat spend shows up separately in the
+  dashboard.
+</Tip>
+
+## 2. Chat, and see every call in GoModel
+
+Pick any model — `openai/gpt-5-mini`, `anthropic/claude-haiku-4-5-20251001`,
+`gemini/gemini-2.5-flash` — and chat. Streaming responses, and the follow-up
+title and tag generation Open WebUI runs after each chat, all pass through
+GoModel. Each call appears in the audit log with the full prompt, response,
+tokens, cost, and the headers identifying the user.
+
+<Note>
+  Verified with Open WebUI 0.11.3: model list, streaming and non-streaming
+  chat, title generation, and per-user labels, against OpenAI, Anthropic, and
+  Gemini models routed through GoModel.
+</Note>
+
+### Per-user cost tracking
+
+With the two variables from step 1 set, every request carries
+`X-OpenWebUI-User-Email` (plus `-Name`, `-Id`, and `-Role`) and GoModel
+records the email as a label. The dashboard's usage-by-label view then shows
+requests, tokens, and cost per person. Add
+`TAGGING_HEADER_2: X-OpenWebUI-User-Name` (with its own
+`TAGGING_HEADER_2_DONOTPASS: "true"`) for friendlier labels. If emails should
+not appear in usage data, set `TAGGING_HEADER_1: X-OpenWebUI-User-Id` in
+step 1 instead, keeping `TAGGING_HEADER_1_DONOTPASS`. Header-name matching
+is case-insensitive, so the `X-Openwebui-User-Email` casing Open WebUI
+actually sends is fine. Keep `TAGGING_HEADER_1_DONOTPASS` set: regular routed
+requests never forward client headers, but
+[passthrough](/features/passthrough-api) requests would otherwise carry the
+email header to the provider. See [Labelling](/features/labelling) for prefixes and
+keeping these headers from reaching the upstream provider.
+
+### Tame the model picker
+
+GoModel can expose hundreds of models, and Open WebUI lists all of them. To
+keep the picker usable:
+
+- Hide models or restrict them to user groups under
+  `Admin Panel -> Settings -> Models`.
+- Set `DEFAULT_MODELS` so new users start on a model you chose.
+- Or expose fewer providers in GoModel; the picker follows `GET /v1/models`.
+
+### Pick a cheap task model
+
+After each chat, Open WebUI generates a title and tags using the same model
+as the chat by default — a few hundred extra prompt tokens per conversation,
+which you will now see itemised in the audit log. Set a small model (for
+example `openai/gpt-5-mini`) as the task model under
+`Admin Panel -> Settings -> Interface` to keep that overhead cheap. Task
+calls go through GoModel too, so they stay logged and priced.
+
+## Embeddings and RAG
+
+Open WebUI's document RAG defaults to a local embedding model. To route
+embeddings through GoModel instead, set the embedding engine to `openai`
+under `Admin Panel -> Settings -> Documents` with the same base URL and key
+as step 1. GoModel serves `/v1/embeddings` and prices embedding usage like
+any other call. Switching engines requires reindexing existing documents;
+chat routing works fine without this.
+
+## Troubleshooting
+
+| Symptom | Fix |
+| --- | --- |
+| Connection error when verifying the OpenAI API connection | Open WebUI cannot resolve the base URL. Use the Docker service name (`gomodel`), not `localhost`; `localhost` inside the container is the container itself. |
+| `401 Unauthorized` in GoModel logs | The connection key does not match a GoModel API key or `GOMODEL_MASTER_KEY`. |
+| Model picker is empty | GoModel has no provider configured. Check `GET /v1/models` and provider environment variables, then refresh the connection under `Admin Panel -> Settings -> Connections`. |
+| No per-user labels in usage | `ENABLE_FORWARD_USER_INFO_HEADERS` is off, or `TAGGING_HEADER_1` is not set in GoModel. Both are needed. |
+| Ollama connection errors at startup | No Ollama is running. Set `ENABLE_OLLAMA_API: "false"`. |
+| Same answer repeats for identical prompts | GoModel's [response cache](/features/cache) replays identical requests. This is usually what you want; disable the cache if not. |
+
+## Notes
+
+- GoModel [failover](/features/failover) and [budgets](/features/budgets)
+  apply to chat traffic automatically; a per-key budget caps what the whole
+  Open WebUI instance can spend.
+- Image generation, speech-to-text, and text-to-speech have separate
+  endpoints in Open WebUI's admin settings and were not part of the
+  verification run.
+- For dashboards and alerts, see
+  [Prometheus metrics](/guides/prometheus-metrics) and
+  [OpenTelemetry](/guides/opentelemetry).

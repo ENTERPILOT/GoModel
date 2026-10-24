@@ -91,6 +91,9 @@ func NewMongoDBStore(database *mongo.Database, retentionDays int) (*MongoDBStore
 			Keys: bson.D{{Key: "session_id", Value: 1}},
 		},
 		{
+			Keys: bson.D{{Key: "auth_key_id", Value: 1}},
+		},
+		{
 			Keys: bson.D{{Key: "cache_type", Value: 1}, {Key: "timestamp", Value: 1}},
 		},
 	}
@@ -138,8 +141,9 @@ func (s *MongoDBStore) WriteBatch(ctx context.Context, entries []*UsageEntry) er
 	opts := options.InsertMany().SetOrdered(false)
 	_, err := s.collection.InsertMany(ctx, docs, opts)
 	if err != nil {
-		// Check if it's a bulk write error with some successes
-		if bulkErr, ok := errors.AsType[*mongo.BulkWriteException](err); ok {
+		// Check if it's a bulk write error with some successes. The driver
+		// returns the exception by value, so match the value type.
+		if bulkErr, ok := errors.AsType[mongo.BulkWriteException](err); ok {
 			failedCount := len(bulkErr.WriteErrors)
 			// Log for visibility
 			slog.Warn("partial usage insert failure",
@@ -153,7 +157,7 @@ func (s *MongoDBStore) WriteBatch(ctx context.Context, entries []*UsageEntry) er
 			return &PartialWriteError{
 				TotalEntries: len(entries),
 				FailedCount:  failedCount,
-				Cause:        *bulkErr,
+				Cause:        bulkErr,
 			}
 		}
 		return fmt.Errorf("failed to insert usage entries: %w", err)

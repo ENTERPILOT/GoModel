@@ -12,17 +12,19 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/users"
 	"github.com/enterpilot/gomodel/internal/validation"
 )
 
 type createAuthKeyRequest struct {
-	Name            string     `json:"name"`
-	Description     string     `json:"description,omitempty"`
-	UserPath        string     `json:"user_path,omitempty"`
-	Labels          []string   `json:"labels,omitempty"`
-	AllowedModels   []string   `json:"allowed_models,omitempty"`
-	DashboardAccess bool       `json:"dashboard_access,omitempty"`
-	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
+	Name              string     `json:"name"`
+	Description       string     `json:"description,omitempty"`
+	UserPath          string     `json:"user_path,omitempty"`
+	Labels            []string   `json:"labels,omitempty"`
+	AllowedModels     []string   `json:"allowed_models,omitempty"`
+	DashboardAccess   bool       `json:"dashboard_access,omitempty"`
+	PassthroughAccess bool       `json:"passthrough_access,omitempty"`
+	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
 }
 
 // authKeyResponse is one API key row plus the model access it resolves to.
@@ -35,6 +37,11 @@ type authKeyResponse struct {
 	// use — its user path, its allowlist, and the model-side policies applied
 	// through the same authorizer inference uses. Nil without a catalog.
 	EffectiveModels []string `json:"effective_models"`
+	// LastUsedAvailable reports whether the last-used lookup ran successfully
+	// for this response (even when it found no entries). Without it the
+	// dashboard cannot tell "audit has nothing for this key" from "audit data
+	// was unavailable".
+	LastUsedAvailable bool `json:"last_used_available,omitempty"`
 }
 
 func (h *Handler) ListAuthKeys(c *echo.Context) error {
@@ -43,9 +50,18 @@ func (h *Handler) ListAuthKeys(c *echo.Context) error {
 	}
 	views := h.authKeys.ListViews()
 	catalog := h.userCatalog()
+	scope := requestScope(c)
 	response := make([]authKeyResponse, 0, len(views))
+	keyIDs := make([]string, 0, len(views))
+	byID := make(map[string]*authKeyResponse, len(views))
 	for _, view := range views {
-		row := authKeyResponse{View: view, Restricted: len(view.AllowedModels) > 0}
+		if !scope.Allows(view.UserPath) {
+			continue
+		}
+		response = append(response, authKeyResponse{View: view, Restricted: len(view.AllowedModels) > 0})
+		row := &response[len(response)-1]
+		byID[view.ID] = row
+		keyIDs = append(keyIDs, view.ID)
 		ctx := core.WithEffectiveUserPath(context.Background(), view.UserPath)
 		if len(view.AllowedModels) > 0 {
 			ctx = core.WithCredentialAllowedModels(ctx, view.AllowedModels)
@@ -54,7 +70,29 @@ func (h *Handler) ListAuthKeys(c *echo.Context) error {
 			row.Restricted = true
 		}
 		row.EffectiveModels = h.effectiveModels(ctx, catalog)
-		response = append(response, row)
+	}
+	// Last-used timestamps come from the audit log (the only write-time record
+	// of key activity). The availability flag distinguishes a successful
+	// lookup with no entries from an unavailable audit store: a lookup failure
+	// degrades to no last_used_at fields — the dashboard shows its honest
+	// fallback states instead.
+	lastUsedAvailable := false
+	if h.auditReader != nil && len(keyIDs) > 0 {
+		lastUsed, err := h.auditReader.GetLastUsedByAuthKeys(c.Request().Context(), keyIDs)
+		if err != nil {
+			slog.Warn("failed to load auth key last used", "error", err)
+		} else {
+			lastUsedAvailable = true
+			for id, ts := range lastUsed {
+				if row, ok := byID[id]; ok {
+					ts := ts.UTC()
+					row.LastUsedAt = &ts
+				}
+			}
+		}
+	}
+	for i := range response {
+		response[i].LastUsedAvailable = lastUsedAvailable
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -70,7 +108,9 @@ func (h *Handler) CreateAuthKey(c *echo.Context) error {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
 
-	userPath, err := normalizeUserPathQueryParam("user_path", req.UserPath)
+	// A scoped admin issues keys inside its own subtree: an omitted path
+	// binds the key to the scope root, an outside path is rejected.
+	userPath, err := scopedUserPath(c, "user_path", req.UserPath)
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -79,15 +119,22 @@ func (h *Handler) CreateAuthKey(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
+	if err := requireAllowedModelsWithinCaller(c, allowedModels); err != nil {
+		return handleError(c, err)
+	}
+	if err := requirePassthroughGrantScope(c, req.PassthroughAccess); err != nil {
+		return handleError(c, err)
+	}
 
 	issued, err := h.authKeys.Create(c.Request().Context(), authkeys.CreateInput{
-		Name:            req.Name,
-		Description:     req.Description,
-		UserPath:        userPath,
-		Labels:          req.Labels,
-		AllowedModels:   allowedModels,
-		DashboardAccess: req.DashboardAccess,
-		ExpiresAt:       req.ExpiresAt,
+		Name:              req.Name,
+		Description:       req.Description,
+		UserPath:          userPath,
+		Labels:            req.Labels,
+		AllowedModels:     allowedModels,
+		DashboardAccess:   req.DashboardAccess,
+		PassthroughAccess: req.PassthroughAccess,
+		ExpiresAt:         req.ExpiresAt,
 	})
 	if err != nil {
 		return handleError(c, authKeyWriteError(err))
@@ -102,6 +149,99 @@ func (h *Handler) CreateAuthKey(c *echo.Context) error {
 		}).WithCode("auth_key_issue_failed").ToJSON())
 	}
 	return c.JSON(http.StatusCreated, issued)
+}
+
+type importAuthKeyRequest struct {
+	createAuthKeyRequest
+	ImportedFrom  string `json:"imported_from"`
+	SecretHash    string `json:"secret_hash"`
+	RedactedValue string `json:"redacted_value,omitempty"`
+	// Enabled false marks a key the source blocked or expired. Omitted means
+	// true.
+	Enabled *bool `json:"enabled,omitempty"`
+}
+
+// ImportAuthKey handles POST /admin/auth-keys/import. It stores a key another
+// gateway issued by the hash of its token, so clients keep that token, and
+// answers 201. Importing the same token again updates that key and answers
+// 200; a disabled key that was never imported answers 204.
+func (h *Handler) ImportAuthKey(c *echo.Context) error {
+	if h.authKeys == nil {
+		return handleError(c, featureUnavailableError("auth keys feature is unavailable"))
+	}
+
+	var req importAuthKeyRequest
+	if err := c.Bind(&req); err != nil {
+		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+	}
+
+	allowedModels, err := h.normalizeAllowedModels(h.virtualModelTargets(req.AllowedModels))
+	if err != nil {
+		return handleError(c, err)
+	}
+	// A disabled import only deactivates an existing key, which any key may
+	// do, itself included. Any other import creates or rewrites a key: it
+	// must stay within the caller's models, and since importing a token again
+	// updates the key stored under its hash, that key must not be the caller.
+	if req.Enabled == nil || *req.Enabled {
+		if err := requireAllowedModelsWithinCaller(c, allowedModels); err != nil {
+			return handleError(c, err)
+		}
+		if id, ok := h.authKeys.IDBySecretHash(req.SecretHash); ok {
+			if err := requireNotOwnAuthKey(c, id); err != nil {
+				return handleError(c, err)
+			}
+		}
+	}
+
+	view, outcome, err := h.authKeys.Import(c.Request().Context(), authkeys.ImportInput{
+		Name:              req.Name,
+		Description:       req.Description,
+		UserPath:          req.UserPath,
+		Labels:            req.Labels,
+		AllowedModels:     allowedModels,
+		DashboardAccess:   req.DashboardAccess,
+		PassthroughAccess: req.PassthroughAccess,
+		ExpiresAt:         req.ExpiresAt,
+		ImportedFrom:      req.ImportedFrom,
+		SecretHash:        req.SecretHash,
+		RedactedValue:     req.RedactedValue,
+		Disabled:          req.Enabled != nil && !*req.Enabled,
+	})
+	if errors.Is(err, authkeys.ErrSecretHashExists) {
+		return handleError(c, core.NewInvalidRequestErrorWithStatus(http.StatusConflict, err.Error(), err).WithCode("auth_key_exists"))
+	}
+	if err != nil {
+		return handleError(c, authKeyWriteError(err))
+	}
+	switch outcome {
+	case authkeys.ImportSkipped:
+		return c.NoContent(http.StatusNoContent)
+	case authkeys.ImportUpdated:
+		return c.JSON(http.StatusOK, view)
+	}
+	return c.JSON(http.StatusCreated, view)
+}
+
+// virtualModelTargets replaces each virtual model name with the concrete
+// models it routes to. A LiteLLM key's model list names model groups, which
+// the config converter turned into virtual models, while allowlists match
+// the model a virtual model resolves to.
+func (h *Handler) virtualModelTargets(selectors []string) []string {
+	if h.virtualModels == nil {
+		return selectors
+	}
+	out := make([]string, 0, len(selectors))
+	for _, selector := range selectors {
+		// A virtual model with no target keeps its name, which matches
+		// nothing, so the key never ends up with an empty, unrestricted list.
+		if targets, ok := h.virtualModels.TargetModels(selector); ok && len(targets) > 0 {
+			out = append(out, targets...)
+			continue
+		}
+		out = append(out, selector)
+	}
+	return out
 }
 
 type updateAuthKeyLabelsRequest struct {
@@ -134,6 +274,9 @@ func (h *Handler) UpdateAuthKeyAllowedModels(c *echo.Context) error {
 		}
 		allowedModels, err := h.normalizeAllowedModels(*req.AllowedModels)
 		if err != nil {
+			return nil, err
+		}
+		if err := requireAllowedModelsWithinCaller(c, allowedModels); err != nil {
 			return nil, err
 		}
 		return h.authKeys.UpdateAllowedModels(ctx, id, allowedModels)
@@ -171,6 +314,75 @@ func (h *Handler) UpdateAuthKeyDashboardAccess(c *echo.Context) error {
 	})
 }
 
+type updateAuthKeyPassthroughAccessRequest struct {
+	// Pointer so an omitted or null value is rejected instead of being
+	// treated as an implicit revoke.
+	PassthroughAccess *bool `json:"passthrough_access"`
+}
+
+// UpdateAuthKeyPassthroughAccess handles PUT
+// /admin/auth-keys/:id/passthrough-access. It grants or revokes the key's
+// access to the provider passthrough routes.
+func (h *Handler) UpdateAuthKeyPassthroughAccess(c *echo.Context) error {
+	var req updateAuthKeyPassthroughAccessRequest
+	return h.updateAuthKey(c, &req, func(ctx context.Context, id string) (*authkeys.View, error) {
+		if req.PassthroughAccess == nil {
+			return nil, validation.NewError("passthrough_access is required", nil)
+		}
+		if err := requirePassthroughGrantScope(c, *req.PassthroughAccess); err != nil {
+			return nil, err
+		}
+		return h.authKeys.UpdatePassthroughAccess(ctx, id, *req.PassthroughAccess)
+	})
+}
+
+// requirePassthroughGrantScope lets only global credentials grant passthrough
+// access: a passthrough key reaches the whole shared provider account, past
+// any user-path scope. Scoped credentials may still revoke it.
+func requirePassthroughGrantScope(c *echo.Context, grant bool) error {
+	if grant && !requestScope(c).Global() {
+		return scopeDeniedError()
+	}
+	return nil
+}
+
+// requireAllowedModelsWithinCaller keeps a credential that is itself limited
+// to a model allowlist from issuing broader keys: every selector in the
+// target allowlist must permit only models the caller's own allowlist
+// permits, and an empty target allowlist counts as every model.
+func requireAllowedModelsWithinCaller(c *echo.Context, allowedModels []string) error {
+	callerModels := core.GetCredentialAllowedModels(c.Request().Context())
+	if len(callerModels) == 0 {
+		return nil
+	}
+	if len(allowedModels) == 0 {
+		// An empty allowlist is unrestricted: only a caller allowed every
+		// model may grant it.
+		allowedModels = []string{"/"}
+	}
+	for _, model := range allowedModels {
+		if !users.Covers(callerModels, model) {
+			return allowedModelsOutOfScopeError()
+		}
+	}
+	return nil
+}
+
+func allowedModelsOutOfScopeError() error {
+	return core.NewPermissionError("allowed_models must not permit models outside the credential's own allowed models").
+		WithCode(codeAllowedModelsOutOfScope)
+}
+
+// requireNotOwnAuthKey stops a managed key from changing its own labels,
+// model allowlist, or access flags, so it cannot lift restrictions placed on
+// it. Deactivating itself stays allowed.
+func requireNotOwnAuthKey(c *echo.Context, id string) error {
+	if own := core.GetAuthKeyID(c.Request().Context()); own != "" && own == id {
+		return core.NewPermissionError("an API key cannot change its own settings").WithCode(codeAuthKeySelfUpdate)
+	}
+	return nil
+}
+
 // updateAuthKey handles the shared shape of the PUT /admin/auth-keys/:id/*
 // endpoints: bind the request into req, run the update, and render the
 // updated view.
@@ -186,6 +398,12 @@ func (h *Handler) updateAuthKey(c *echo.Context, req any, update func(ctx contex
 
 	if err := c.Bind(req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+	}
+	if err := h.requireAuthKeyInScope(c, id); err != nil {
+		return handleError(c, err)
+	}
+	if err := requireNotOwnAuthKey(c, id); err != nil {
+		return handleError(c, err)
 	}
 
 	view, err := update(c.Request().Context(), id)
@@ -205,7 +423,27 @@ func (h *Handler) DeactivateAuthKey(c *echo.Context) error {
 	if h.authKeys == nil {
 		unavailableErr = featureUnavailableError("auth keys feature is unavailable")
 	} else {
-		deactivate = h.authKeys.Deactivate
+		deactivate = func(ctx context.Context, id string) error {
+			if err := h.requireAuthKeyInScope(c, id); err != nil {
+				return err
+			}
+			return h.authKeys.Deactivate(ctx, id)
+		}
 	}
 	return deactivateByID(c, unavailableErr, "auth key", authkeys.ErrNotFound, "auth key not found: ", deactivate, authKeyWriteError)
+}
+
+// requireAuthKeyInScope hides keys bound outside the caller's scope behind
+// the same not-found error an unknown id produces. Global scopes skip the
+// lookup so a missing key still surfaces from the update itself.
+func (h *Handler) requireAuthKeyInScope(c *echo.Context, id string) error {
+	scope := requestScope(c)
+	if scope.Global() {
+		return nil
+	}
+	view, err := h.authKeys.View(id)
+	if err != nil || !scope.Allows(view.UserPath) {
+		return core.NewNotFoundError("auth key not found: " + id)
+	}
+	return nil
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -146,6 +147,7 @@ func (s *MongoDBStore) recalculatePricingInMongoTransaction(ctx context.Context,
 	for cursor.Next(ctx) {
 		var row struct {
 			ID                 string         `bson:"_id"`
+			Timestamp          time.Time      `bson:"timestamp"`
 			Model              string         `bson:"model"`
 			Provider           string         `bson:"provider"`
 			ProviderName       string         `bson:"provider_name"`
@@ -162,6 +164,7 @@ func (s *MongoDBStore) recalculatePricingInMongoTransaction(ctx context.Context,
 
 		update := recalculateEntryCosts(recalculationEntry{
 			ID:                 row.ID,
+			Timestamp:          row.Timestamp,
 			Model:              row.Model,
 			Provider:           row.Provider,
 			ProviderName:       row.ProviderName,

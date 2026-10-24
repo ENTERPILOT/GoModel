@@ -22,6 +22,7 @@ import {
   resetProviderCredentialFields,
   validateProviderCredentialForm,
   buildProviderCredentialPayload,
+  providerRowsHaveActions,
 } from "../src/pages/providers-config/providersConfigLogic.js";
 
 // Schemas shaped like GET /admin/provider-credentials/types serves them.
@@ -558,4 +559,52 @@ test("splitCommaList trims and drops empties", () => {
     ["gpt-4o", "gpt-4o-mini"],
   );
   assert.deepEqual(splitCommaList(""), []);
+});
+
+test("providerRowsHaveActions is false when every provider is managed", () => {
+  assert.equal(providerRowsHaveActions([]), false);
+  assert.equal(providerRowsHaveActions([{ name: "openai", managed: true }]), false);
+  assert.equal(
+    providerRowsHaveActions([{ name: "openai", managed: true }, { name: "mine", managed: false }]),
+    true,
+  );
+  assert.equal(providerRowsHaveActions(undefined), false);
+});
+
+test("proxy_url round-trips through the form and is trimmed in the payload", () => {
+  const schema = {
+    ...OPENAI_SCHEMA,
+    fields: [...OPENAI_SCHEMA.fields, { name: "proxy_url", required: false, advanced: true }],
+  };
+  const form = providerCredentialRowToForm({
+    name: "my-openai",
+    type: "openai",
+    api_keys: ["***********"],
+    proxy_url: "socks5://user:xxxxx@proxy:1080",
+  });
+  assert.equal(form.proxy_url, "socks5://user:xxxxx@proxy:1080");
+  assert.equal(providerCredentialFieldMeta("proxy_url").control, "text");
+
+  form.proxy_url = "  http://proxy.internal:3128  ";
+  const body = buildProviderCredentialPayload(form, schema);
+  assert.equal(body.proxy_url, "http://proxy.internal:3128");
+
+  const blank = { ...defaultProviderCredentialForm(), name: "x", type: "openai" };
+  assert.equal("proxy_url" in buildProviderCredentialPayload(blank, OPENAI_SCHEMA), false);
+});
+
+test("a service-account JSON secret reference is not parsed as JSON", () => {
+  const form = {
+    ...defaultProviderCredentialForm(),
+    name: "vertex",
+    type: "vertex",
+    service_account_json: "${file:/run/secrets/vertex.json}",
+  };
+  assert.deepEqual(validateProviderCredentialForm(form, "create", [], VERTEX_SCHEMA), {});
+
+  const invalid = { ...form, service_account_json: "{not json" };
+  assert.equal(
+    validateProviderCredentialForm(invalid, "create", [], VERTEX_SCHEMA).service_account_json,
+    "Paste the service account JSON file's contents — this is not valid JSON.",
+  );
 });

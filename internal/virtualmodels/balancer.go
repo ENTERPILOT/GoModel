@@ -1,8 +1,10 @@
 package virtualmodels
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -47,23 +49,34 @@ func (r *roundRobin) prune(active map[string]*redirectEntry) {
 // strategy picks and the choice is re-pinned. Under the adaptive strategy the
 // installed route selector owns that judgement — it receives the pin and
 // answers with the target to use — because it, and not core, knows whether
-// the pinned target is still healthy. It reports false when no target is
-// available.
-func (s *Service) balancedResolution(snap *snapshot, entry *redirectEntry, sessionID string) (core.ModelSelector, bool) {
-	supported := snap.viableTargets(entry, s.catalog)
+// the pinned target is still healthy. The plugin strategy works the same way
+// with the virtual model's named routing-strategy plugin. A target model that
+// is disabled, or that this request may not use, is skipped like an
+// unavailable one. It reports false when no target is available.
+func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry *redirectEntry, sessionID string) (core.ModelSelector, bool) {
+	allowed := func(selector core.ModelSelector) bool { return s.allowsIn(ctx, snap, selector) }
+	supported := snap.viableTargets(entry, s.catalog, allowed)
 	if len(supported) == 0 {
-		return core.ModelSelector{}, false
+		// Nothing this request may use: resolve to the first available
+		// target without touching strategy state, so access validation
+		// rejects it with model_access_denied instead of the redirect's own
+		// name falling through to "model not found".
+		available := snap.viableTargets(entry, s.catalog, nil)
+		if len(available) == 0 {
+			return core.ModelSelector{}, false
+		}
+		return s.concreteTarget(ctx, snap, entry, available[0], sessionID)
 	}
 	// Prefer targets with live rate-limit capacity. When every live target is
 	// saturated, fall back to the first declared one: the request then reaches
 	// admission and receives an honest 429 with Retry-After (or defers to
 	// failover) instead of the all-targets-down error path.
-	pool := s.targetsWithCapacity(snap, entry, supported)
+	pool := s.targetsWithCapacity(snap, entry, supported, allowed)
 	if len(pool) == 0 {
 		// This target is selected only to reach admission and produce the 429.
 		// Do not run affinity resolution: a transient capacity burst must not
 		// discard or replace the target that actually served the session.
-		return s.concreteTarget(snap, entry, supported[0], sessionID)
+		return s.concreteTarget(ctx, snap, entry, supported[0], sessionID)
 	}
 
 	// selectorChoice consults the route selector, reporting false when there
@@ -75,10 +88,17 @@ func (s *Service) balancedResolution(snap *snapshot, entry *redirectEntry, sessi
 	// and a one-target-available redirect behave identically with and without
 	// a selector installed.
 	selectorChoice := func(pinned string) (resolvedTarget, bool) {
-		if len(pool) == 1 || normalizeStrategy(entry.strategy) != StrategyAdaptive {
+		if len(pool) == 1 {
 			return resolvedTarget{}, false
 		}
-		return s.adaptiveTarget(entry, sessionID, pinned, pool)
+		switch normalizeStrategy(entry.strategy) {
+		case StrategyAdaptive:
+			return s.adaptiveTarget(entry, sessionID, pinned, pool)
+		case StrategyPlugin:
+			return s.pluginTarget(ctx, entry, sessionID, pinned, pool)
+		default:
+			return resolvedTarget{}, false
+		}
 	}
 
 	// pick applies the redirect's strategy to the viable pool. A single viable
@@ -94,9 +114,10 @@ func (s *Service) balancedResolution(snap *snapshot, entry *redirectEntry, sessi
 			// primary; the legs below it are the failover chain.
 			return pool[0]
 		case StrategyCost:
-			return s.cheapestTarget(snap, entry, pool)
+			return s.cheapestTarget(snap, entry, pool, allowed)
 		default:
-			// Round robin, and adaptive whose selector had no usable answer.
+			// Round robin, and adaptive or plugin whose selector had no
+			// usable answer.
 			return pool[weightedIndex(pool, s.balancer.next(entry.vm.Source))]
 		}
 	}
@@ -132,9 +153,9 @@ func (s *Service) balancedResolution(snap *snapshot, entry *redirectEntry, sessi
 		if choice, ok := selectorChoice(pinned); ok {
 			qualified := s.sticky.repin(entry.vm.Source, sessionID, pinned, choice.qualified)
 			if target, found := poolTarget(pool, qualified); found {
-				return s.concreteTarget(snap, entry, target, sessionID)
+				return s.concreteTarget(ctx, snap, entry, target, sessionID)
 			}
-			return s.concreteTarget(snap, entry, choice, sessionID)
+			return s.concreteTarget(ctx, snap, entry, choice, sessionID)
 		}
 
 		// No selector answer — a decline, a panic, an answer outside the pool,
@@ -145,7 +166,7 @@ func (s *Service) balancedResolution(snap *snapshot, entry *redirectEntry, sessi
 		// the next new session receives.
 		if hasPin {
 			if target, found := poolTarget(pool, pinned); found {
-				return s.concreteTarget(snap, entry, target, sessionID)
+				return s.concreteTarget(ctx, snap, entry, target, sessionID)
 			}
 		}
 
@@ -157,21 +178,21 @@ func (s *Service) balancedResolution(snap *snapshot, entry *redirectEntry, sessi
 			choice.qualified,
 		)
 		if target, ok := poolTarget(pool, qualified); ok {
-			return s.concreteTarget(snap, entry, target, sessionID)
+			return s.concreteTarget(ctx, snap, entry, target, sessionID)
 		}
-		return s.concreteTarget(snap, entry, choice, sessionID)
+		return s.concreteTarget(ctx, snap, entry, choice, sessionID)
 	}
 	if choice, ok := selectorChoice(""); ok {
-		return s.concreteTarget(snap, entry, choice, sessionID)
+		return s.concreteTarget(ctx, snap, entry, choice, sessionID)
 	}
-	return s.concreteTarget(snap, entry, pick(), sessionID)
+	return s.concreteTarget(ctx, snap, entry, pick(), sessionID)
 }
 
 // concreteTarget turns a chosen target of entry into the concrete model to
 // execute: the target itself, or — when it names another virtual model — that
 // redirect's own balanced resolution. Chains are acyclic and bounded by
 // construction (see validateChains), so the recursion terminates.
-func (s *Service) concreteTarget(snap *snapshot, entry *redirectEntry, target resolvedTarget, sessionID string) (core.ModelSelector, bool) {
+func (s *Service) concreteTarget(ctx context.Context, snap *snapshot, entry *redirectEntry, target resolvedTarget, sessionID string) (core.ModelSelector, bool) {
 	inner, ok := snap.chained(entry.vm.Source, target)
 	if !ok {
 		return target.selector, true
@@ -179,7 +200,7 @@ func (s *Service) concreteTarget(snap *snapshot, entry *redirectEntry, target re
 	if !inner.vm.Enabled {
 		return core.ModelSelector{}, false
 	}
-	return s.balancedResolution(snap, inner, sessionID)
+	return s.balancedResolution(ctx, snap, inner, sessionID)
 }
 
 // poolTarget finds a qualified model among the viable targets.
@@ -194,15 +215,16 @@ func poolTarget(pool []resolvedTarget, qualified string) (resolvedTarget, bool) 
 
 // targetsWithCapacity filters targets through the optional rate-limit capacity
 // probe. Without a probe every target has capacity. A chained target has
-// capacity while any concrete model behind it does.
-func (s *Service) targetsWithCapacity(snap *snapshot, entry *redirectEntry, targets []resolvedTarget) []resolvedTarget {
+// capacity while any concrete model behind it that allow permits does: a
+// disabled or denied leaf with room never serves this request.
+func (s *Service) targetsWithCapacity(snap *snapshot, entry *redirectEntry, targets []resolvedTarget, allow func(core.ModelSelector) bool) []resolvedTarget {
 	if s.targetCapacity == nil {
 		return targets
 	}
 	out := make([]resolvedTarget, 0, len(targets))
 	for _, target := range targets {
 		for _, leaf := range snap.leaves(entry, target, s.catalog) {
-			if s.targetCapacity(leaf.qualified) {
+			if allow(leaf.selector) && s.targetCapacity(leaf.qualified) {
 				out = append(out, target)
 				break
 			}
@@ -254,12 +276,16 @@ func normalizeWeight(weight float64) int {
 // Targets with no registry pricing are skipped while any priced target exists;
 // when none are priced it falls back to the first supported target so the cost
 // strategy stays deterministic. Ties keep the earlier target in support order.
-// A chained target is priced at the cheapest concrete model behind it.
-func (s *Service) cheapestTarget(snap *snapshot, entry *redirectEntry, supported []resolvedTarget) resolvedTarget {
+// A chained target is priced at the cheapest concrete model behind it that
+// allow permits.
+func (s *Service) cheapestTarget(snap *snapshot, entry *redirectEntry, supported []resolvedTarget, allow func(core.ModelSelector) bool) resolvedTarget {
+	// One timestamp per decision so every candidate is priced in the same
+	// time-of-day pricing window.
+	now := time.Now()
 	best := supported[0]
-	bestCost, bestPriced := s.legCost(snap, entry, best)
+	bestCost, bestPriced := s.legCost(snap, entry, best, now, allow)
 	for _, target := range supported[1:] {
-		cost, priced := s.legCost(snap, entry, target)
+		cost, priced := s.legCost(snap, entry, target, now, allow)
 		if !priced {
 			continue
 		}
@@ -271,28 +297,33 @@ func (s *Service) cheapestTarget(snap *snapshot, entry *redirectEntry, supported
 }
 
 // legCost prices one leg of a strategy: a concrete target's own price, or the
-// lowest price among the available concrete models behind a chained target.
-func (s *Service) legCost(snap *snapshot, entry *redirectEntry, target resolvedTarget) (float64, bool) {
+// lowest price among the available concrete models behind a chained target
+// that allow permits.
+func (s *Service) legCost(snap *snapshot, entry *redirectEntry, target resolvedTarget, now time.Time, allow func(core.ModelSelector) bool) (float64, bool) {
 	if _, ok := snap.chained(entry.vm.Source, target); !ok {
-		return s.targetCost(target)
+		return s.targetCost(target, now)
 	}
 	bestCost, priced := 0.0, false
 	for _, leaf := range snap.leaves(entry, target, s.catalog) {
-		if cost, ok := s.targetCost(leaf); ok && (!priced || cost < bestCost) {
+		if !allow(leaf.selector) {
+			continue
+		}
+		if cost, ok := s.targetCost(leaf, now); ok && (!priced || cost < bestCost) {
 			bestCost, priced = cost, true
 		}
 	}
 	return bestCost, priced
 }
 
-// targetCost returns a comparable per-token price for a concrete target — the sum of its
-// input and output per-million-token rates — and whether the registry priced it.
-func (s *Service) targetCost(target resolvedTarget) (float64, bool) {
+// targetCost returns a comparable per-token price for a concrete target at
+// now — the sum of its input and output per-million-token rates — and whether
+// the registry priced it.
+func (s *Service) targetCost(target resolvedTarget, now time.Time) (float64, bool) {
 	model, ok := s.catalog.LookupModel(target.qualified)
 	if !ok || model == nil || model.Metadata == nil || model.Metadata.Pricing == nil {
 		return 0, false
 	}
-	pricing := model.Metadata.Pricing
+	pricing := model.Metadata.Pricing.AtTime(now)
 	if pricing.InputPerMtok == nil && pricing.OutputPerMtok == nil {
 		return 0, false
 	}

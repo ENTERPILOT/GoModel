@@ -135,6 +135,9 @@ func (a *App) RefreshRuntime(ctx context.Context) (admin.RuntimeRefreshReport, e
 	if err := a.runRefreshableServiceStep(&report, "workflows", a.workflowService(), ctx); err != nil {
 		return report, err
 	}
+	if err := a.runRefreshableServiceStep(&report, "mcp_servers", a.mcpGatewayService(), ctx); err != nil {
+		return report, err
+	}
 
 	if registry != nil {
 		report.ModelCount = registry.ModelCount()
@@ -305,6 +308,14 @@ func (a *App) virtualModelsService() refreshableService {
 		return nil
 	}
 	return a.virtualModels.Service
+}
+
+// mcpGatewayService reloads admin-managed MCP servers and virtual servers.
+func (a *App) mcpGatewayService() refreshableService {
+	if a == nil || a.mcpGateway == nil || a.mcpGateway.Service == nil {
+		return nil
+	}
+	return a.mcpGateway.Service
 }
 
 func (a *App) guardrailService() refreshableService {

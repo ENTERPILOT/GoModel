@@ -4,8 +4,8 @@ import (
 	"bufio"
 	"context"
 	"io"
-	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -24,17 +24,24 @@ func convertAnthropicResponseToResponses(resp *anthropicResponse, model string) 
 	content := extractTextContent(resp.Content)
 	toolCalls := extractToolCalls(resp.Content)
 
-	msg := core.Message{
+	msg := core.ResponseMessage{
+		Role:      "assistant",
 		Content:   content,
 		ToolCalls: toolCalls,
 	}
-	output := providers.BuildResponsesOutputItems(core.ResponseMessage{
-		Role:      "assistant",
-		Content:   msg.Content,
-		ToolCalls: msg.ToolCalls,
-	})
+	if thinking := extractThinkingContent(resp.Content); thinking != "" {
+		if raw, err := json.Marshal(thinking); err == nil {
+			msg.ExtraFields = core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				"reasoning_content": raw,
+			})
+		}
+	}
+	// The reasoning item carries the signatures Anthropic needs back; without
+	// them a Responses client cannot continue a thinking conversation.
+	msg.ExtraFields = withThinkingReplay(msg.ExtraFields, resp.Content)
+	output := providers.BuildResponsesOutputItems(msg)
 
-	return &core.ResponsesResponse{
+	converted := &core.ResponsesResponse{
 		ID:        resp.ID,
 		Object:    "response",
 		CreatedAt: time.Now().Unix(),
@@ -43,14 +50,25 @@ func convertAnthropicResponseToResponses(resp *anthropicResponse, model string) 
 		Output:    output,
 		Usage:     buildAnthropicResponsesUsage(resp.Usage),
 	}
+	providers.ApplyResponsesFinishReason(converted, normalizeAnthropicStopReason(resp.StopReason))
+	return converted
 }
 
-// buildAnthropicResponsesUsage creates a ResponsesUsage from anthropicUsage, including RawUsage.
+// buildAnthropicResponsesUsage creates a ResponsesUsage from anthropicUsage.
+// Cache reads and thinking tokens are reported in the OpenAI Responses shape;
+// the Anthropic-named counts stay in RawUsage, which feeds usage records and
+// cost calculation without reaching the client response.
 func buildAnthropicResponsesUsage(u anthropicUsage) *core.ResponsesUsage {
 	usage := &core.ResponsesUsage{
 		InputTokens:  u.InputTokens,
 		OutputTokens: u.OutputTokens,
 		TotalTokens:  u.InputTokens + u.OutputTokens,
+	}
+	if u.CacheReadInputTokens > 0 {
+		usage.PromptTokensDetails = &core.PromptTokensDetails{CachedTokens: u.CacheReadInputTokens}
+	}
+	if u.OutputTokensDetails.ThinkingTokens > 0 {
+		usage.CompletionTokensDetails = &core.CompletionTokensDetails{ReasoningTokens: u.OutputTokensDetails.ThinkingTokens}
 	}
 	rawUsage := buildAnthropicRawUsage(u)
 	if len(rawUsage) > 0 {
@@ -59,6 +77,10 @@ func buildAnthropicResponsesUsage(u anthropicUsage) *core.ResponsesUsage {
 	return usage
 }
 
+// anthropicResponsesUsagePayload renders the usage object carried by the
+// terminal stream event. It keeps the Anthropic-named cache counts: a stream's
+// usage is recorded by parsing this payload, so dropping them would drop the
+// cache pricing with them.
 func anthropicResponsesUsagePayload(usage *anthropicUsage) map[string]any {
 	if usage == nil {
 		return nil
@@ -120,34 +142,40 @@ func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesReque
 
 // responsesStreamConverter wraps an Anthropic stream and converts it to Responses API format
 type responsesStreamConverter struct {
-	reader          *bufio.Reader
-	body            io.ReadCloser
-	model           string
-	responseID      string
-	createdAt       int64
-	output          *providers.ResponsesOutputEventState
-	nextOutputIndex int
-	toolCalls       map[int]*providers.ResponsesOutputToolCallState
-	thinkingBlocks  map[int]bool // tracks which content block indices are thinking blocks
-	buffer          streaming.StreamBuffer
-	closed          bool
-	sentDone        bool
-	usage           anthropicUsage
-	hasUsage        bool
+	reader               *bufio.Reader
+	body                 io.ReadCloser
+	model                string
+	responseID           string
+	createdAt            int64
+	output               *providers.ResponsesOutputEventState
+	nextOutputIndex      int
+	assistantOutputIndex int
+	reasoningOutputIndex int
+	toolCalls            map[int]*providers.ResponsesOutputToolCallState
+	thinking             thinkingReplayState
+	buffer               streaming.StreamBuffer
+	closed               bool
+	sentCreate           bool
+	sentDone             bool
+	sawStop              bool   // upstream signalled the end of the message
+	stopReason           string // Anthropic stop_reason, used for incomplete_details
+	pendingErr           error  // upstream read error deferred until terminal events are drained
+	usage                anthropicUsage
+	hasUsage             bool
 }
 
 func newResponsesStreamConverter(body io.ReadCloser, model string) *responsesStreamConverter {
 	responseID := "resp_" + uuid.New().String()
 	return &responsesStreamConverter{
-		reader:         bufio.NewReader(body),
-		body:           body,
-		model:          model,
-		responseID:     responseID,
-		createdAt:      time.Now().Unix(),
-		output:         providers.NewResponsesOutputEventState(responseID),
-		toolCalls:      make(map[int]*providers.ResponsesOutputToolCallState),
-		thinkingBlocks: make(map[int]bool),
-		buffer:         streaming.NewStreamBuffer(1024),
+		reader:     bufio.NewReader(body),
+		body:       body,
+		model:      model,
+		responseID: responseID,
+		createdAt:  time.Now().Unix(),
+		output:     providers.NewResponsesOutputEventState(responseID),
+		toolCalls:  make(map[int]*providers.ResponsesOutputToolCallState),
+		thinking:   newThinkingReplayState(),
+		buffer:     streaming.NewStreamBuffer(1024),
 	}
 }
 
@@ -162,48 +190,36 @@ func (sc *responsesStreamConverter) Read(p []byte) (n int, err error) {
 		return sc.buffer.Read(p), nil
 	}
 
+	// Terminal events for a failed upstream read have been drained; surface
+	// the deferred error now.
+	if sc.pendingErr != nil {
+		pendingErr := sc.pendingErr
+		sc.closed = true
+		sc.releaseBuffer()
+		_ = sc.body.Close() //nolint:errcheck
+		if pendingErr == io.EOF {
+			return 0, io.EOF
+		}
+		return 0, pendingErr
+	}
+
 	// Read the next SSE event from Anthropic
 	for {
 		line, err := sc.reader.ReadBytes('\n')
 		if err != nil {
+			// Any upstream read failure — clean EOF, io.ErrUnexpectedEOF from
+			// a chunked body cut mid-transfer, a connection reset — ends the
+			// upstream stream, so emit the terminal events before surfacing a
+			// non-EOF error.
+			sc.appendTerminalEvents()
+			if sc.buffer.Len() > 0 {
+				sc.pendingErr = err
+				return sc.buffer.Read(p), nil
+			}
+			sc.closed = true
+			sc.releaseBuffer()
+			_ = sc.body.Close() //nolint:errcheck
 			if err == io.EOF {
-				// Send final done event and [DONE] message
-				if !sc.sentDone {
-					sc.sentDone = true
-					prefix := sc.output.CompleteAssistantOutput(0)
-					responseData := map[string]any{
-						"id":         sc.responseID,
-						"object":     "response",
-						"status":     "completed",
-						"model":      sc.model,
-						"provider":   "anthropic",
-						"created_at": sc.createdAt,
-					}
-					// Include merged usage data captured across message_start/message_delta.
-					if sc.hasUsage {
-						responseData["usage"] = anthropicResponsesUsagePayload(&sc.usage)
-					}
-					doneEvent := map[string]any{
-						"type":     "response.completed",
-						"response": responseData,
-					}
-					jsonData, marshalErr := json.Marshal(doneEvent)
-					if marshalErr != nil {
-						slog.Error("failed to marshal response.completed event", "error", marshalErr, "response_id", sc.responseID)
-						sc.closed = true
-						sc.releaseBuffer()
-						_ = sc.body.Close() //nolint:errcheck
-						return 0, io.EOF
-					}
-					sc.buffer.AppendString(prefix)
-					sc.buffer.AppendString("event: response.completed\ndata: ")
-					sc.buffer.AppendBytes(jsonData)
-					sc.buffer.AppendString("\n\ndata: [DONE]\n\n")
-					return sc.buffer.Read(p), nil
-				}
-				sc.closed = true
-				sc.releaseBuffer()
-				_ = sc.body.Close() //nolint:errcheck
 				return 0, io.EOF
 			}
 			return 0, err
@@ -238,12 +254,113 @@ func (sc *responsesStreamConverter) releaseBuffer() {
 	sc.buffer.Release()
 }
 
+// reserveReasoningOutput claims the first output slot for the reasoning item.
+// Anthropic emits thinking before any text or tool call, so reserving on the
+// first thinking block gives it index 0.
+func (sc *responsesStreamConverter) reserveReasoningOutput() {
+	if sc.output.ReasoningReserved() {
+		return
+	}
+	sc.output.ReserveReasoning()
+	sc.reasoningOutputIndex = sc.nextOutputIndex
+	sc.nextOutputIndex++
+}
+
 func (sc *responsesStreamConverter) reserveAssistantMessageOutput() {
 	if sc.output.AssistantReserved() {
 		return
 	}
 	sc.output.ReserveAssistant()
+	sc.assistantOutputIndex = sc.nextOutputIndex
 	sc.nextOutputIndex++
+}
+
+// appendTerminalEvents finalizes items still open when the upstream stream
+// ends and appends the terminal event plus the trailing [DONE] marker exactly
+// once. A stream that ends without Anthropic signalling the end of the message
+// (message_stop or a stop_reason) was interrupted: it ends with
+// response.incomplete instead of fabricating completion, and its open items
+// close with status "incomplete". A stream that stopped early on its own
+// (stop_reason "max_tokens") ends the same way, with the matching
+// incomplete_details reason.
+func (sc *responsesStreamConverter) appendTerminalEvents() {
+	if sc.sentDone {
+		return
+	}
+	sc.sentDone = true
+	// A body cut before message_start still owes the client the opening
+	// events: stream helpers snapshot the created response before anything else.
+	sc.buffer.AppendString(sc.startResponse())
+	status := "completed"
+	eventName := "response.completed"
+	incompleteReason := "interrupted"
+	if sc.sawStop {
+		incompleteReason = providers.ResponsesIncompleteReason(normalizeAnthropicStopReason(sc.stopReason))
+	}
+	if incompleteReason != "" {
+		status = "incomplete"
+		eventName = "response.incomplete"
+	}
+	// A stream cut after a thinking block's signature but before its stop
+	// still holds a block Anthropic accepts back, and this is the client's
+	// only chance to receive it.
+	if extra := sc.thinking.extraContent(); extra != nil {
+		sc.output.SetReasoningExtraContent(extra)
+	}
+	prefix := sc.output.FinishReasoningOutput(sc.reasoningOutputIndex, status) +
+		sc.output.FinishAssistantOutput(sc.assistantOutputIndex, status) +
+		sc.completePendingToolCalls(status)
+	responseData := map[string]any{
+		"id":         sc.responseID,
+		"object":     "response",
+		"status":     status,
+		"model":      sc.model,
+		"provider":   "anthropic",
+		"created_at": sc.createdAt,
+		"output":     sc.output.FinalOutputItems(sc.reasoningOutputIndex, sc.assistantOutputIndex, sc.toolCalls, true),
+	}
+	if incompleteReason != "" {
+		responseData["incomplete_details"] = map[string]any{"reason": incompleteReason}
+	}
+	// Include merged usage data captured across message_start/message_delta.
+	if sc.hasUsage {
+		responseData["usage"] = anthropicResponsesUsagePayload(&sc.usage)
+	}
+	sc.buffer.AppendString(prefix)
+	sc.buffer.AppendString(sc.output.FinishResponse(eventName, responseData))
+}
+
+// startResponse opens the stream with response.created and
+// response.in_progress once.
+func (sc *responsesStreamConverter) startResponse() string {
+	if sc.sentCreate {
+		return ""
+	}
+	sc.sentCreate = true
+	return sc.output.StartResponse(map[string]any{
+		"id":         sc.responseID,
+		"object":     "response",
+		"status":     "in_progress",
+		"model":      sc.model,
+		"provider":   "anthropic",
+		"created_at": sc.createdAt,
+	})
+}
+
+// completePendingToolCalls emits the done events for tool calls the upstream
+// stream left open, in content-block order, carrying the given terminal status.
+func (sc *responsesStreamConverter) completePendingToolCalls(status string) string {
+	indices := make([]int, 0, len(sc.toolCalls))
+	for index := range sc.toolCalls {
+		indices = append(indices, index)
+	}
+	slices.Sort(indices)
+
+	var out strings.Builder
+	for _, index := range indices {
+		out.WriteString(sc.output.FinishToolCall(sc.toolCalls[index], status, true))
+	}
+	return out.String()
 }
 
 func (sc *responsesStreamConverter) newResponsesToolCallState(contentBlock *anthropicContent) *providers.ResponsesOutputToolCallState {
@@ -275,34 +392,25 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 		if mergeAnthropicUsage(&sc.usage, event.Usage) {
 			sc.hasUsage = true
 		}
-		// Send response.created event
-		return sc.output.WriteEvent("response.created", map[string]any{
-			"type": "response.created",
-			"response": map[string]any{
-				"id":         sc.responseID,
-				"object":     "response",
-				"status":     "in_progress",
-				"model":      sc.model,
-				"provider":   "anthropic",
-				"created_at": sc.createdAt,
-			},
-		})
+		return sc.startResponse()
 
 	case "content_block_start":
-		if event.ContentBlock != nil && event.ContentBlock.Type == "thinking" {
-			sc.thinkingBlocks[event.Index] = true
+		if sc.thinking.track(event.Index, event.ContentBlock) {
+			// A redacted block has no readable text; its reasoning item
+			// exists purely to carry the replay state.
+			sc.reserveReasoningOutput()
 			return ""
 		}
 		if event.ContentBlock != nil && event.ContentBlock.Type == "tool_use" {
+			// Thinking precedes the tool call it led to, so the reasoning item
+			// closes here; a thinking-enabled tool-use turn is the common case.
+			prefix := sc.output.CompleteReasoningOutput(sc.reasoningOutputIndex)
 			if sc.output.AssistantStarted() && !sc.output.AssistantDone() {
-				prefix := sc.output.CompleteAssistantOutput(0)
-				state := sc.newResponsesToolCallState(event.ContentBlock)
-				sc.toolCalls[event.Index] = state
-				return prefix + sc.output.StartToolCall(state, true)
+				prefix += sc.output.CompleteAssistantOutput(sc.assistantOutputIndex)
 			}
 			state := sc.newResponsesToolCallState(event.ContentBlock)
 			sc.toolCalls[event.Index] = state
-			return sc.output.StartToolCall(state, true)
+			return prefix + sc.output.StartToolCall(state, true)
 		}
 		return ""
 
@@ -312,26 +420,40 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 		}
 
 		switch event.Delta.Type {
-		case "thinking_delta", "signature_delta":
-			// Thinking and signature deltas are part of Anthropic's extended thinking;
-			// the Responses API format does not have a direct equivalent, so skip them.
+		case "thinking_delta":
+			if !sc.thinking.isThinking(event.Index) || event.Delta.Thinking == "" {
+				return ""
+			}
+			sc.thinking.appendThinking(event.Index, event.Delta.Thinking)
+			// A stream has one reasoning item, closed once text or a tool call
+			// follows, and output_item.done cannot be taken back. Thinking
+			// that arrives after that (interleaved thinking) adds no delta;
+			// its text and signature still reach the client inside the
+			// replay state of the terminal output.
+			if sc.output.ReasoningDone() {
+				return ""
+			}
+			return sc.output.AppendReasoningDelta(sc.reasoningOutputIndex, event.Delta.Thinking)
+		case "signature_delta":
+			// A signature has no field of its own in the Responses dialect; it
+			// rides on the reasoning item as replay state instead.
+			sc.thinking.appendSignature(event.Index, event.Delta.Signature)
 			return ""
 		case "text_delta":
 			if event.Delta.Text != "" {
+				prefix := sc.output.CompleteReasoningOutput(sc.reasoningOutputIndex)
 				sc.reserveAssistantMessageOutput()
-				prefix := sc.output.StartAssistantOutput(0)
-				sc.output.AppendAssistantText(event.Delta.Text)
-				return prefix + sc.output.WriteEvent("response.output_text.delta", map[string]any{
-					"type":  "response.output_text.delta",
-					"delta": event.Delta.Text,
-				})
+				return prefix + sc.output.AppendAssistantDelta(sc.assistantOutputIndex, event.Delta.Text)
 			}
 		case "input_json_delta":
 			if event.Delta.PartialJSON == "" {
 				return ""
 			}
 			state := sc.toolCalls[event.Index]
-			if state == nil {
+			// A delta for an already-closed call (stray event after its
+			// content_block_stop) must not mutate the arguments its
+			// output_item.done event declared.
+			if state == nil || state.Completed {
 				return ""
 			}
 			if state.PlaceholderObject {
@@ -349,6 +471,12 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 		return ""
 
 	case "content_block_stop":
+		if sc.thinking.tracked(event.Index) {
+			// The block is complete, signature included, before whatever
+			// closes the reasoning item can arrive.
+			sc.output.SetReasoningExtraContent(sc.thinking.extraContent())
+			return ""
+		}
 		state := sc.toolCalls[event.Index]
 		return sc.output.CompleteToolCall(state, true)
 
@@ -357,6 +485,14 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 		if mergeAnthropicUsage(&sc.usage, event.Usage) {
 			sc.hasUsage = true
 		}
+		// A stop_reason means Anthropic finished generating, even if the
+		// stream is cut before message_stop arrives.
+		if event.Delta != nil && event.Delta.StopReason != "" {
+			sc.sawStop = true
+			if sc.stopReason == "" {
+				sc.stopReason = event.Delta.StopReason
+			}
+		}
 		if !sc.output.AssistantReserved() && len(sc.toolCalls) == 0 {
 			sc.reserveAssistantMessageOutput()
 		}
@@ -364,6 +500,7 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 
 	case "message_stop":
 		// Will be handled in Read() when we get EOF
+		sc.sawStop = true
 		return ""
 	}
 

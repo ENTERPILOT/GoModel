@@ -72,6 +72,11 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 	if region != "" {
 		loadOpts = append(loadOpts, awsconfig.WithRegion(region))
 	}
+	// The factory supplies a proxy-aware client when the provider has an
+	// outbound proxy; both SDK clients and the credential chain must use it.
+	if opts.HTTPClient != nil {
+		loadOpts = append(loadOpts, awsconfig.WithHTTPClient(opts.HTTPClient))
+	}
 
 	awsCfg, err := awsconfig.LoadDefaultConfig(context.Background(), loadOpts...)
 	if err != nil {
@@ -168,14 +173,13 @@ func (p *Provider) ready() error {
 }
 
 // CheckAvailability calls a no-op Bedrock control-plane request to confirm the
-// account has reachability and credentials work.
+// account has reachability and credentials work. The caller owns the probe
+// deadline.
 func (p *Provider) CheckAvailability(ctx context.Context) error {
 	if err := p.ready(); err != nil {
 		return err
 	}
-	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	_, err := p.control.ListFoundationModels(probeCtx, &bedrock.ListFoundationModelsInput{
+	_, err := p.control.ListFoundationModels(ctx, &bedrock.ListFoundationModelsInput{
 		ByInferenceType: bedrocktypes.InferenceTypeOnDemand,
 	})
 	if err != nil {
@@ -208,10 +212,11 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 			owner = strings.ToLower(*m.ProviderName)
 		}
 		models = append(models, core.Model{
-			ID:      *m.ModelId,
-			Object:  "model",
-			OwnedBy: owner,
-			Created: time.Now().Unix(),
+			ID:       *m.ModelId,
+			Object:   "model",
+			OwnedBy:  owner,
+			Created:  time.Now().Unix(),
+			Metadata: foundationModelMetadata(m),
 		})
 	}
 	return &core.ModelsResponse{
@@ -222,6 +227,28 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 
 func supportsTextOutput(modalities []bedrocktypes.ModelModality) bool {
 	return slices.Contains(modalities, bedrocktypes.ModelModalityText)
+}
+
+// foundationModelMetadata keeps what the Bedrock control plane says about a
+// listed model: its display name, whether it accepts images, and whether it
+// streams. Only text-output models reach here (see supportsTextOutput), so
+// every one is a chat model.
+func foundationModelMetadata(m bedrocktypes.FoundationModelSummary) *core.ModelMetadata {
+	modes := []string{"chat"}
+	metadata := &core.ModelMetadata{
+		Modes:      modes,
+		Categories: core.CategoriesForModes(modes),
+	}
+	if m.ModelName != nil {
+		metadata.DisplayName = strings.TrimSpace(*m.ModelName)
+	}
+	if slices.Contains(m.InputModalities, bedrocktypes.ModelModalityImage) {
+		metadata.Capabilities = providers.SetCapability(metadata.Capabilities, "vision", true)
+	}
+	if m.ResponseStreamingSupported != nil {
+		metadata.Capabilities = providers.SetCapability(metadata.Capabilities, "streaming", *m.ResponseStreamingSupported)
+	}
+	return metadata
 }
 
 // Embeddings returns an error: Bedrock embedding models use a different code
@@ -236,7 +263,7 @@ func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*
 	if err := p.ready(); err != nil {
 		return nil, err
 	}
-	return providers.ResponsesViaChat(ctx, p, req)
+	return providers.ResponsesViaChat(ctx, p, req, providerName)
 }
 
 // StreamResponses adapts the streaming Responses API onto Converse via the

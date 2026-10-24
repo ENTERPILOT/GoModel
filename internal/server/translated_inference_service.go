@@ -20,12 +20,14 @@ import (
 	"github.com/enterpilot/gomodel/internal/conversationstore"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/gateway"
-	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/observability"
+	"github.com/enterpilot/gomodel/internal/plugins"
+	"github.com/enterpilot/gomodel/internal/plugins/exchange"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/responsestore"
 	"github.com/enterpilot/gomodel/internal/streaming"
 	"github.com/enterpilot/gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/pluginapi"
 )
 
 // translatedInferenceService adapts Echo requests to the transport-independent
@@ -38,6 +40,7 @@ type translatedInferenceService struct {
 	failoverResolver         RequestFailoverResolver
 	failoverPolicy           *gateway.FailoverPolicy
 	translatedRequestPatcher TranslatedRequestPatcher
+	pluginChains             PluginChainsResolver
 	logger                   auditlog.LoggerInterface
 	usageLogger              usage.LoggerInterface
 	budgetChecker            BudgetChecker
@@ -56,6 +59,10 @@ type translatedInferenceService struct {
 	snapshotWrites   sync.WaitGroup
 	snapshotMu       sync.RWMutex
 	snapshotDraining bool
+	// pendingSnapshots holds the in-flight snapshot write per response id, so
+	// a request chained on a just-returned response can wait for its snapshot.
+	pendingSnapshots  map[string]pendingSnapshot
+	pendingSnapshotMu sync.Mutex
 
 	orchestrator *gateway.InferenceOrchestrator
 
@@ -82,6 +89,11 @@ func (s *translatedInferenceService) newInferenceOrchestrator() *gateway.Inferen
 		FailoverResolver:         s.failoverResolver,
 		FailoverPolicy:           s.failoverPolicy,
 		TranslatedRequestPatcher: s.translatedRequestPatcher,
+		// Conversations and previous_response_id are expanded before the
+		// prompt phase; an id left for a native primary is resolved per
+		// attempt for a failover target that cannot resolve it itself.
+		ResponsesHistoryResolver: s,
+		ResponsesAttemptPatcher:  s,
 		UsageLogger:              s.usageLogger,
 		PricingResolver:          s.pricingResolver,
 		GuardrailsHash:           s.guardrailsHash,
@@ -91,6 +103,9 @@ func (s *translatedInferenceService) newInferenceOrchestrator() *gateway.Inferen
 	// RouteGate).
 	if s.rateLimiter != nil {
 		cfg.RouteGate = s.rateLimiter
+	}
+	if gate, ok := s.budgetChecker.(gateway.BudgetGate); ok {
+		cfg.BudgetGate = gate
 	}
 	return gateway.NewInferenceOrchestrator(cfg)
 }
@@ -116,19 +131,15 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 	defer adm.release()
 	ctx = adm.dispatchContext(ctx)
 
+	feedbackEnabled := hasResponseFeedbackObservers(c)
+
 	if req.Stream {
-		feedbackEnabled := hasResponseFeedbackObservers(c)
 		if feedbackEnabled {
 			req = gateway.CloneChatRequestForStreamUsage(req)
 			if req.StreamOptions == nil {
 				req.StreamOptions = &core.StreamOptions{}
 			}
 			req.StreamOptions.IncludeUsage = true
-		}
-		if !feedbackEnabled && len(s.inference().FailoverSelectors(workflow)) == 0 {
-			if handled, err := s.tryFastPathStreamingChatPassthrough(c, workflow, req); handled {
-				return err
-			}
 		}
 		result, err := s.inference().StreamChatCompletion(ctx, workflow, req)
 		if err != nil {
@@ -137,18 +148,10 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 		if result.Meta.UsedFailover {
 			markRequestFailoverUsed(c)
 		}
-		return s.handleStreamingReadCloser(
-			c,
-			workflow,
-			result.Meta.Model,
-			result.Meta.ProviderType,
-			result.Meta.ProviderName,
-			result.Meta.FailoverModel,
-			result.Stream,
-			func(stream io.ReadCloser) io.ReadCloser {
-				return result.WrapDeliveryStream(ctx, stream)
-			},
-		)
+		stream := s.wrapPluginStream(ctx, workflow, chatStreamDialect(includeStreamUsage(req)), chatPromptOf(req), result.Stream)
+		return s.handleStreamingReadCloser(c, workflow, result.Meta, stream, result.GenerationObserver(), func(stream io.ReadCloser) io.ReadCloser {
+			return result.WrapDeliveryStream(ctx, stream)
+		})
 	}
 
 	result, err := s.inference().ExecuteChatCompletion(ctx, workflow, req, requestID, "/v1/chat/completions")
@@ -156,6 +159,10 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 		return handleError(c, err)
 	}
 	enrichAuditEntryWithProviderAttempts(c)
+	result.Response, err = chatResponsePhase.run(s, c, workflow, req, result.Response)
+	if err != nil {
+		return handleError(c, err)
+	}
 	if result.Meta.UsedFailover {
 		markRequestFailoverUsed(c)
 		auditlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)
@@ -175,6 +182,7 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 		result.Meta.ProviderName,
 	)
 
+	applyPluginResponseHeaders(c)
 	return c.JSON(http.StatusOK, result.Response)
 }
 
@@ -198,13 +206,57 @@ func handleTranslatedJSON[Req any](
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
 
-	ctx, preparedReq, workflow, err := prepare(s, c.Request().Context(), req, translatedRequestMeta(c))
+	ctx, preparedReq, workflow, err := prepare(s, promptEditCaptureContext(c, s.logger), req, translatedRequestMeta(c))
 	if err != nil {
+		if short := shortCircuitOf(err); short != nil {
+			attachPreparedWorkflow(c, prepareContext(c, ctx), workflow)
+			s.recordGuardrailOutcomes(c)
+			recordPromptPluginRevisions(c, s.logger, req, nil)
+			return shortCircuit(s, c, workflow, req, short)
+		}
+		// A block or fail-closed outcome still belongs to the resolved
+		// workflow: the audit entry must carry it like every other outcome.
+		attachPreparedWorkflow(c, prepareContext(c, ctx), workflow)
+		s.recordGuardrailOutcomes(c)
+		recordPromptPluginRevisions(c, s.logger, req, nil)
 		return handleError(c, err)
 	}
 	attachPreparedWorkflow(c, ctx, workflow)
+	s.recordGuardrailOutcomes(c)
+	recordPromptPluginRevisions(c, s.logger, req, preparedReq)
+	applyPluginRequestHeaders(c)
 
 	return handleWithCache(s, c, preparedReq, workflow, dispatch)
+}
+
+// shortCircuit renders a prompt-phase respond decision for the request type.
+func shortCircuit[Req any](s *translatedInferenceService, c *echo.Context, workflow *core.Workflow, req Req, short *plugins.ShortCircuit) error {
+	switch typed := any(req).(type) {
+	case *core.ChatRequest:
+		return s.writeChatShortCircuit(c, workflow, typed, short, chatJSON, nil)
+	case *core.ResponsesRequest:
+		return s.writeResponsesShortCircuit(c, workflow, typed, short)
+	default:
+		return handleError(c, core.NewInvalidRequestError("plugin short-circuit is not supported for this request", nil))
+	}
+}
+
+func includeStreamUsage(req *core.ChatRequest) bool {
+	return req != nil && req.StreamOptions != nil && req.StreamOptions.IncludeUsage
+}
+
+// promptOf drops the mapping error: the prompt is a read-only view for
+// response-phase plugins and may be absent.
+func promptOf(prompt *pluginapi.Prompt, err error) *pluginapi.Prompt {
+	if err != nil {
+		return nil
+	}
+	return prompt
+}
+
+// chatPromptOf defers the request mapping until a stream wrapper needs it.
+func chatPromptOf(req *core.ChatRequest) func() *pluginapi.Prompt {
+	return func() *pluginapi.Prompt { return promptOf(exchange.FromChatRequest(req)) }
 }
 
 func prepareChatCompletionRequest(
@@ -223,15 +275,11 @@ func prepareResponsesRequest(
 	req *core.ResponsesRequest,
 	meta gateway.RequestMeta,
 ) (context.Context, *core.ResponsesRequest, *core.Workflow, error) {
+	// The orchestrator expands conversations and previous_response_id
+	// (ResolveResponsesHistory) before the prompt phase, so guardrails,
+	// the cache key, and the provider all see the merged history.
 	prepared, err := s.inference().PrepareResponsesRequest(ctx, req, meta)
-	ctx, preparedReq, workflow, err := unpackPrepared(ctx, prepared, err, responsesPreparedFields)
-	if err != nil {
-		return ctx, preparedReq, workflow, err
-	}
-	// Resolve gateway-managed conversations before caching and dispatch so the
-	// cache key reflects the merged history and providers never see local IDs.
-	ctx, preparedReq, err = s.applyResponsesConversation(ctx, preparedReq)
-	return ctx, preparedReq, workflow, err
+	return unpackPrepared(ctx, prepared, err, responsesPreparedFields)
 }
 
 func unpackPrepared[Prepared any, Req any](
@@ -240,19 +288,30 @@ func unpackPrepared[Prepared any, Req any](
 	err error,
 	fields func(Prepared) (context.Context, Req, *core.Workflow),
 ) (context.Context, Req, *core.Workflow, error) {
-	if err != nil {
-		var zero Req
-		return fallback, zero, nil, err
-	}
 	ctx, req, workflow := fields(prepared)
+	if err != nil {
+		// A patch-phase error still reports the resolved workflow (and its
+		// context) so the caller can render a plugin outcome with it.
+		var zero Req
+		if ctx == nil {
+			ctx = fallback
+		}
+		return ctx, zero, workflow, err
+	}
 	return ctx, req, workflow, nil
 }
 
 func chatPreparedFields(prepared *gateway.PreparedChatRequest) (context.Context, *core.ChatRequest, *core.Workflow) {
+	if prepared == nil {
+		return nil, nil, nil
+	}
 	return prepared.Context, prepared.Request, prepared.Workflow
 }
 
 func responsesPreparedFields(prepared *gateway.PreparedResponsesRequest) (context.Context, *core.ResponsesRequest, *core.Workflow) {
+	if prepared == nil {
+		return nil, nil, nil
+	}
 	return prepared.Context, prepared.Request, prepared.Workflow
 }
 
@@ -280,9 +339,14 @@ func handleWithCache[R any](
 		if marshalErr != nil {
 			slog.Debug("marshalRequestBody failed", "err", marshalErr)
 		} else {
-			return s.responseCache.HandleRequest(c, body, func() error {
+			err := s.responseCache.HandleRequest(c, body, func() error {
 				return dispatch(c, req, workflow)
 			})
+			if replayErr, ok := errors.AsType[*responsecache.ReplayError](err); ok {
+				recordCachedStreamError(c, replayErr.Err)
+				return nil
+			}
+			return err
 		}
 	}
 
@@ -313,22 +377,15 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 		if result.Meta.UsedFailover {
 			markRequestFailoverUsed(c)
 		}
-		stream := result.Stream
+		stream := s.wrapPluginStream(ctx, workflow, responsesStreamDialect(), func() *pluginapi.Prompt { return promptOf(exchange.FromResponsesRequest(req)) }, result.Stream)
+		stream = withPreviousResponseID(stream, chainedFrom(ctx, req))
 		if turn := conversationTurnFromContext(ctx); turn != nil {
 			stream = turn.persistingStream(ctx, stream)
 		}
-		return s.handleStreamingReadCloser(
-			c,
-			workflow,
-			result.Meta.Model,
-			result.Meta.ProviderType,
-			result.Meta.ProviderName,
-			result.Meta.FailoverModel,
-			stream,
-			func(stream io.ReadCloser) io.ReadCloser {
-				return result.WrapDeliveryStream(ctx, stream)
-			},
-		)
+		stream = s.snapshotStream(ctx, workflow, req, result.Meta.ProviderType, result.Meta.ProviderName, requestID, stream)
+		return s.handleStreamingReadCloser(c, workflow, result.Meta, stream, result.GenerationObserver(), func(stream io.ReadCloser) io.ReadCloser {
+			return result.WrapDeliveryStream(ctx, stream)
+		})
 	}
 
 	result, err := s.inference().ExecuteResponses(ctx, workflow, req, requestID, "/v1/responses")
@@ -336,6 +393,10 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 		return handleError(c, err)
 	}
 	enrichAuditEntryWithProviderAttempts(c)
+	result.Response, err = responsesResponsePhase.run(s, c, workflow, req, result.Response)
+	if err != nil {
+		return handleError(c, err)
+	}
 	if result.Meta.UsedFailover {
 		markRequestFailoverUsed(c)
 		auditlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)
@@ -364,8 +425,12 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 			))
 		}
 	}
+	// A chained response names its predecessor, as OpenAI's does: the client
+	// sees the link, and a later chained turn walks it to rebuild the history.
+	result.Response.PreviousResponseID = chainedFrom(ctx, req)
 	s.storeResponseSnapshotAsync(ctx, workflow, req, result.Response, result.Meta.ProviderType, result.Meta.ProviderName, requestID)
 
+	applyPluginResponseHeaders(c)
 	return c.JSON(http.StatusOK, result.Response)
 }
 
@@ -401,7 +466,7 @@ func (s *translatedInferenceService) storeResponseSnapshotAsync(ctx context.Cont
 	}
 	snapshot, err := responsestore.Detach(&responsestore.StoredResponse{
 		Response:           resp,
-		InputItems:         normalizedResponseInputItems(resp.ID, req),
+		InputItems:         normalizedResponseInputItems(resp.ID, clientInput(ctx, req)),
 		Provider:           strings.TrimSpace(providerType),
 		ProviderName:       strings.TrimSpace(providerName),
 		ProviderResponseID: resp.ID,
@@ -415,7 +480,9 @@ func (s *translatedInferenceService) storeResponseSnapshotAsync(ctx context.Cont
 	}
 
 	writeCtx := context.WithoutCancel(ctx)
+	pending := s.trackPendingSnapshot(resp.ID, core.UserPathFromContext(ctx))
 	scheduled := s.goSnapshotWrite(func() {
+		defer s.finishPendingSnapshot(resp.ID, pending)
 		writeCtx, cancel := context.WithTimeout(writeCtx, snapshotWriteTimeout)
 		defer cancel()
 		if err := snapshot.Persist(writeCtx, store); err != nil {
@@ -423,6 +490,7 @@ func (s *translatedInferenceService) storeResponseSnapshotAsync(ctx context.Cont
 		}
 	})
 	if !scheduled {
+		s.finishPendingSnapshot(resp.ID, pending)
 		s.recordResponseSnapshotStoreFailure(failure, errors.New("server shutting down, snapshot write skipped"))
 	}
 }
@@ -505,50 +573,6 @@ func (s *translatedInferenceService) recordResponseSnapshotStoreFailure(rec snap
 	)
 }
 
-func (s *translatedInferenceService) tryFastPathStreamingChatPassthrough(c *echo.Context, workflow *core.Workflow, req *core.ChatRequest) (bool, error) {
-	if !s.inference().CanFastPathStreamingChatPassthrough(workflow, req) {
-		return false, nil
-	}
-
-	passthroughProvider, ok := s.provider.(core.RoutablePassthrough)
-	if !ok {
-		return false, nil
-	}
-
-	ctx, _ := requestContextWithRequestID(c.Request())
-	c.SetRequest(c.Request().WithContext(ctx))
-
-	const endpoint = "/chat/completions"
-	providerType := strings.TrimSpace(workflow.ProviderType)
-	resp, err := passthroughProvider.Passthrough(ctx, providerType, &core.PassthroughRequest{
-		Method:       c.Request().Method,
-		Endpoint:     endpoint,
-		Operation:    llmclient.OperationChat,
-		Model:        resolvedModelFromWorkflow(workflow, req.Model),
-		Stream:       req.Stream,
-		Body:         c.Request().Body,
-		Headers:      buildPassthroughHeaders(ctx, c.Request().Header),
-		ProviderName: providerNameFromWorkflow(workflow),
-	})
-	if err != nil {
-		return true, handleError(c, err)
-	}
-
-	info := &core.PassthroughRouteInfo{
-		Provider:    providerType,
-		RawEndpoint: strings.TrimPrefix(endpoint, "/"),
-		AuditPath:   c.Request().URL.Path,
-		Model:       resolvedModelFromWorkflow(workflow, req.Model),
-	}
-	passthrough := passthroughService{
-		provider:        s.provider,
-		logger:          s.logger,
-		usageLogger:     s.usageLogger,
-		pricingResolver: s.pricingResolver,
-	}
-	return true, passthrough.proxyPassthroughResponse(c, providerType, providerNameFromWorkflow(workflow), endpoint, info, resp)
-}
-
 func (s *translatedInferenceService) Embeddings(c *echo.Context) error {
 	req, err := canonicalJSONRequestFromSemantics[*core.EmbeddingRequest](c, core.DecodeEmbeddingRequest)
 	if err != nil {
@@ -561,20 +585,24 @@ func (s *translatedInferenceService) Embeddings(c *echo.Context) error {
 	}
 	attachPreparedWorkflow(c, prepared.Context, prepared.Workflow)
 
-	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker, rateLimitRouteFromWorkflow(prepared.Workflow))
+	return handleWithCache(s, c, prepared.Request, prepared.Workflow, s.dispatchEmbeddings)
+}
+
+func (s *translatedInferenceService) dispatchEmbeddings(c *echo.Context, req *core.EmbeddingRequest, workflow *core.Workflow) error {
+	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker, rateLimitRouteFromWorkflow(workflow))
 	if err != nil {
 		return handleError(c, err)
 	}
 	defer adm.release()
 
 	requestID := requestIDFromContextOrHeader(c.Request())
-	result, err := s.inference().ExecuteEmbeddings(c.Request().Context(), prepared.Workflow, prepared.Request, requestID, "/v1/embeddings")
+	result, err := s.inference().ExecuteEmbeddings(c.Request().Context(), workflow, req, requestID, "/v1/embeddings")
 	if err != nil {
 		return handleError(c, err)
 	}
 	auditlog.EnrichEntryWithResolvedRoute(
 		c,
-		qualifyExecutedModel(prepared.Workflow, result.Response.Model, result.Meta.ProviderName),
+		qualifyExecutedModel(workflow, result.Response.Model, result.Meta.ProviderName),
 		result.Meta.ProviderType,
 		result.Meta.ProviderName,
 	)
@@ -624,22 +652,25 @@ func cacheWorkflowResolutionHints(c *echo.Context, workflow *core.Workflow) {
 }
 
 // handleStreamingReadCloser flushes a provider SSE stream to the client while
-// fanning audit and usage observers off the canonical (OpenAI-shaped) stream.
+// fanning audit, usage, and generation-trace observers off the canonical
+// (OpenAI-shaped) stream. generation is the stream result's
+// GenerationObserver, nil for synthesized streams.
 // outerWrap, when non-nil, wraps the observed stream as the outermost layer —
 // used by the Anthropic /v1/messages dialect to re-encode the SSE events after
 // the observers have already seen the canonical form.
 func (s *translatedInferenceService) handleStreamingReadCloser(
 	c *echo.Context,
 	workflow *core.Workflow,
-	model, provider, providerName string,
-	failoverModel string,
+	meta gateway.ExecutionMeta,
 	stream io.ReadCloser,
+	generation streaming.Observer,
 	outerWrap func(io.ReadCloser) io.ReadCloser,
 ) error {
+	model, provider, providerName := meta.Model, meta.ProviderType, meta.ProviderName
 	auditlog.MarkEntryAsStreaming(c, true)
 	auditlog.EnrichEntryWithStream(c, true)
 	enrichAuditEntryWithProviderAttempts(c)
-	auditlog.EnrichEntryWithFailover(c, failoverModel)
+	auditlog.EnrichEntryWithFailover(c, meta.FailoverModel)
 	auditlog.EnrichEntryWithResolvedRoute(c, qualifyExecutedModel(workflow, model, providerName), provider, providerName)
 
 	entry := auditlog.GetStreamEntryFromContext(c)
@@ -654,7 +685,10 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 
 	requestID := requestIDFromContextOrHeader(c.Request())
 	endpoint := c.Request().URL.Path
-	observers := make([]streaming.Observer, 0, 3)
+	observers := make([]streaming.Observer, 0, 4)
+	if generation != nil {
+		observers = append(observers, generation)
+	}
 	if auditEnabled && streamEntry != nil {
 		observers = append(observers, auditlog.NewStreamLogObserver(s.logger, streamEntry, endpoint))
 	}
@@ -663,6 +697,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 		if usageObserver != nil {
 			usageObserver.SetProviderName(providerName)
 			usageObserver.SetSessionID(core.SessionIDFromContext(c.Request().Context()))
+			usageObserver.SetAuthKeyID(core.GetAuthKeyID(c.Request().Context()))
 			usageObserver.SetLabels(core.RequestLabelsFromContext(c.Request().Context()))
 			usageObserver.SetRewriteTokensSaved(core.RewriteTokensSavedFromContext(c.Request().Context()))
 			observers = append(observers, usageObserver)
@@ -680,6 +715,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 			providerName: providerName,
 		})
 	}
+	stream = guardStreamCompletion(endpoint, stream)
 	wrappedStream := streaming.NewObservedSSEStream(stream, observers...)
 	if outerWrap != nil {
 		wrappedStream = outerWrap(wrappedStream)
@@ -689,6 +725,13 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 		_ = wrappedStream.Close() //nolint:errcheck
 	}()
 
+	// Response and stream phase plugins decide while the body is read. When
+	// the request runs any, the headers wait for the first bytes, so a warn
+	// from a buffered response still reaches the client as a header.
+	if s.hasPostResponsePlugins(c.Request().Context()) {
+		wrappedStream = primeStream(wrappedStream)
+	}
+	applyPluginResponseHeaders(c)
 	c.Response().Header().Set("Content-Type", "text/event-stream")
 	c.Response().Header().Set("Cache-Control", "no-cache")
 	c.Response().Header().Set("Connection", "keep-alive")
@@ -717,11 +760,38 @@ func handleStreamingDispatchError(c *echo.Context, err error) error {
 	return handleError(c, err)
 }
 
-func recordStreamingError(streamEntry *auditlog.LogEntry, model, provider, path, requestID string, ctx context.Context, err error) {
-	errorType := "stream_error"
-	if isClientDisconnect(ctx, err) {
-		errorType = "client_disconnected"
+// classifyStreamError names the audit error_type of a failure while writing
+// a stream to the client.
+func classifyStreamError(ctx context.Context, err error) string {
+	switch {
+	case errors.Is(err, ErrClientStall):
+		return "client_stalled"
+	case errors.Is(err, streaming.ErrStreamIncomplete) && (ctx == nil || ctx.Err() != context.Canceled):
+		// The provider stream failed while being read, so a connection reset
+		// it wraps is the provider's, not the client's.
+		return "stream_error"
+	case isClientDisconnect(ctx, err):
+		return "client_disconnected"
 	}
+	return "stream_error"
+}
+
+// recordCachedStreamError records a cache-served stream the client stopped
+// reading or abandoned, so the audit entry does not show a clean 200 for a
+// stalled client just because the response happened to be cached.
+func recordCachedStreamError(c *echo.Context, err error) {
+	errorType := classifyStreamError(c.Request().Context(), err)
+	auditlog.EnrichEntryWithError(c, errorType, err.Error(), "")
+	slog.Warn("cached stream terminated abnormally",
+		"error", err,
+		"error_type", errorType,
+		"path", c.Request().URL.Path,
+		"request_id", requestIDFromContextOrHeader(c.Request()),
+	)
+}
+
+func recordStreamingError(streamEntry *auditlog.LogEntry, model, provider, path, requestID string, ctx context.Context, err error) {
+	errorType := classifyStreamError(ctx, err)
 
 	// The nil-err branch in isClientDisconnect is reachable for callers that
 	// only have a canceled context to report. Fall back to the context error
@@ -780,10 +850,6 @@ func isClientDisconnectDuringDispatch(ctx context.Context, err error) bool {
 		return true
 	}
 	return err == nil && ctx != nil && ctx.Err() == context.Canceled
-}
-
-func providerNameFromWorkflow(workflow *core.Workflow) string {
-	return gateway.ProviderNameFromWorkflow(workflow)
 }
 
 func qualifyExecutedModel(workflow *core.Workflow, model, providerName string) string {

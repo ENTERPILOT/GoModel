@@ -15,9 +15,14 @@ type RequestModelResolution struct {
 	Slowdown float64
 
 	// resolvedQualified and resolvedRoute memoize the derived selector strings
-	// (see CacheDerivedSelectors); empty means "compute on demand".
-	resolvedQualified string
-	resolvedRoute     string
+	// (see CacheDerivedSelectors). cachedSelector and cachedProviderName record
+	// the inputs they were derived from: a copy whose ResolvedSelector or
+	// ProviderName is later rewritten (a failover clone, for instance) no
+	// longer matches, so the getters recompute instead of serving stale values.
+	resolvedQualified  string
+	resolvedRoute      string
+	cachedSelector     ModelSelector
+	cachedProviderName string
 }
 
 // CacheDerivedSelectors precomputes the strings returned by
@@ -30,6 +35,8 @@ func (r *RequestModelResolution) CacheDerivedSelectors() {
 	}
 	r.resolvedQualified = r.ResolvedSelector.QualifiedModel()
 	r.resolvedRoute = r.computeResolvedRouteModel()
+	r.cachedSelector = r.ResolvedSelector
+	r.cachedProviderName = r.ProviderName
 }
 
 // RequestedQualifiedModel returns the canonical requested selector.
@@ -45,7 +52,7 @@ func (r *RequestModelResolution) ResolvedQualifiedModel() string {
 	if r == nil {
 		return ""
 	}
-	if r.resolvedQualified != "" {
+	if r.resolvedQualified != "" && r.cachedSelector == r.ResolvedSelector {
 		return r.resolvedQualified
 	}
 	return r.ResolvedSelector.QualifiedModel()
@@ -58,7 +65,7 @@ func (r *RequestModelResolution) ResolvedRouteModel() string {
 	if r == nil {
 		return ""
 	}
-	if r.resolvedRoute != "" {
+	if r.resolvedRoute != "" && r.cachedSelector == r.ResolvedSelector && r.cachedProviderName == r.ProviderName {
 		return r.resolvedRoute
 	}
 	return r.computeResolvedRouteModel()

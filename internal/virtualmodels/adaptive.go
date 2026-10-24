@@ -2,6 +2,7 @@ package virtualmodels
 
 import (
 	"log/slog"
+	"time"
 
 	"github.com/enterpilot/gomodel/ext"
 )
@@ -36,6 +37,7 @@ func (s *Service) adaptiveTarget(entry *redirectEntry, sessionID, pinned string,
 		SessionTarget: pinned,
 		Candidates:    make([]ext.RouteCandidate, len(pool)),
 	}
+	now := time.Now()
 	for i, t := range pool {
 		candidate := ext.RouteCandidate{
 			Provider:  t.selector.Provider,
@@ -46,8 +48,9 @@ func (s *Service) adaptiveTarget(entry *redirectEntry, sessionID, pinned string,
 		if model, found := s.catalog.LookupModel(t.qualified); found && model != nil && model.Metadata != nil && model.Metadata.Pricing != nil {
 			// Copies, not the catalog's pointers: extension code must not be
 			// able to mutate shared pricing (or race catalog updates).
-			candidate.InputPerMtok = copyPrice(model.Metadata.Pricing.InputPerMtok)
-			candidate.OutputPerMtok = copyPrice(model.Metadata.Pricing.OutputPerMtok)
+			pricing := model.Metadata.Pricing.AtTime(now)
+			candidate.InputPerMtok = copyPrice(pricing.InputPerMtok)
+			candidate.OutputPerMtok = copyPrice(pricing.OutputPerMtok)
 		}
 		req.Candidates[i] = candidate
 	}

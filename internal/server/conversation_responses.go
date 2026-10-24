@@ -64,6 +64,10 @@ func (s *translatedInferenceService) applyResponsesConversation(ctx context.Cont
 		}
 		return ctx, req, core.NewProviderError("conversation_store", 500, "failed to load conversation", err)
 	}
+	// Another tenant's conversation is indistinguishable from a missing one.
+	if !core.AccessScopeFromContext(ctx).Allows(stored.UserPath) {
+		return ctx, req, core.NewNotFoundError(fmt.Sprintf("Conversation with id '%s' not found.", id))
+	}
 
 	merged, err := mergeConversationInput(stored.Items, req.Input)
 	if err != nil {

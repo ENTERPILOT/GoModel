@@ -42,10 +42,27 @@ type MCPConfig struct {
 	// ("*") turns the check off and is logged as a warning at startup.
 	AllowedOrigins []string `yaml:"allowed_origins" env:"MCP_ALLOWED_ORIGINS"`
 
+	// ToolDiscovery selects how sessions see tools by default. "off" (the
+	// default) lists every visible tool. "search" lists only search_tools and
+	// call_tool, so large catalogs stop costing context on every model turn.
+	// Clients override it per session with the X-MCP-Tool-Discovery header.
+	ToolDiscovery string `yaml:"tool_discovery" env:"MCP_TOOL_DISCOVERY"`
+
 	// Servers maps stable server slugs to upstream definitions. Slugs become
 	// tool namespaces and URL segments, so they are restricted to [a-z0-9_-].
 	Servers map[string]MCPServerConfig `yaml:"servers"`
+
+	// VirtualServers maps names to curated subsets of Servers, each served at
+	// /mcp/{name}. Names share that path with server slugs, so they must not
+	// match one.
+	VirtualServers map[string]MCPVirtualServerConfig `yaml:"virtual_servers"`
 }
+
+// MCP tool discovery modes accepted in MCPConfig.ToolDiscovery.
+const (
+	MCPToolDiscoveryOff    = "off"
+	MCPToolDiscoverySearch = "search"
+)
 
 // TrustAnyOrigin is the mcp.allowed_origins entry that trusts every browser
 // origin. It exists for deployments that enforce their own origin checks in
@@ -135,6 +152,10 @@ type MCPServerConfig struct {
 	// (subtree match, same semantics as virtual models). Empty means all.
 	UserPaths []string `yaml:"user_paths,omitempty" json:"user_paths,omitempty"`
 
+	// DisallowedUserPaths hides the server from these user-path subtrees,
+	// even inside an allowed UserPaths subtree. Empty excludes nobody.
+	DisallowedUserPaths []string `yaml:"disallowed_user_paths,omitempty" json:"disallowed_user_paths,omitempty"`
+
 	// ToolTimeout bounds a single tools/call against this server.
 	// Default: 30s.
 	ToolTimeout time.Duration `yaml:"tool_timeout,omitempty" json:"tool_timeout,omitempty"`
@@ -205,6 +226,9 @@ func expandMCPServerEnv(server *MCPServerConfig) {
 	for i := range server.UserPaths {
 		server.UserPaths[i] = expandString(server.UserPaths[i])
 	}
+	for i := range server.DisallowedUserPaths {
+		server.DisallowedUserPaths[i] = expandString(server.DisallowedUserPaths[i])
+	}
 	for key, value := range server.Headers {
 		server.Headers[key] = expandString(value)
 	}
@@ -213,20 +237,88 @@ func expandMCPServerEnv(server *MCPServerConfig) {
 	}
 }
 
+// mcpPass is the MCP validation pass that is running.
+type mcpPass int
+
+const (
+	// mcpLoadPass runs in Load. A value holding a secret reference keeps its
+	// text and is checked by mcpResolvedPass.
+	mcpLoadPass mcpPass = iota
+	// mcpResolvedPass runs once references are resolved. Values without a
+	// reference already passed mcpLoadPass, so anything that fails here came
+	// from a reference and may be a secret: errors name the field, never the
+	// value.
+	mcpResolvedPass
+	// mcpLiteralPass validates values the admin API supplies. They are
+	// literal, so nothing is deferred, and errors name the value the caller
+	// just sent.
+	mcpLiteralPass
+)
+
+// deferred reports whether value is left for the resolved pass.
+func (p mcpPass) deferred(value string) bool {
+	return p == mcpLoadPass && HasSecretReference(value)
+}
+
+// resolvedValueError is the error for a resolved value that fails a check.
+func resolvedValueError(field, want string) error {
+	return fmt.Errorf("%s: the value resolved from its secret reference %s", field, want)
+}
+
 // normalizeMCPConfig canonicalizes server slugs, applies defaults, and rejects
 // invalid entries. It runs at load time so a bad declaration fails startup
-// loudly instead of silently dropping the server.
+// loudly instead of silently dropping the server. Values holding a secret
+// reference keep their text; validateResolvedMCP checks them once resolved.
 func normalizeMCPConfig(cfg *MCPConfig) error {
+	if err := normalizeMCPSettings(cfg, mcpLoadPass); err != nil {
+		return err
+	}
+	if err := normalizeMCPServers(cfg); err != nil {
+		return err
+	}
+	return normalizeMCPVirtualServers(cfg, mcpLoadPass)
+}
+
+// validateResolvedMCP finishes the checks normalizeMCPConfig deferred for
+// values holding a secret reference, now that they are resolved.
+func validateResolvedMCP(cfg *MCPConfig) error {
+	if err := normalizeMCPSettings(cfg, mcpResolvedPass); err != nil {
+		return err
+	}
+	if err := validateResolvedMCPServers(cfg.Servers); err != nil {
+		return err
+	}
+	return normalizeMCPVirtualServers(cfg, mcpResolvedPass)
+}
+
+// normalizeMCPSettings normalizes the gateway-wide MCP settings.
+func normalizeMCPSettings(cfg *MCPConfig, pass mcpPass) error {
+	if !pass.deferred(cfg.ToolDiscovery) {
+		switch mode := strings.ToLower(strings.TrimSpace(cfg.ToolDiscovery)); mode {
+		case "":
+			cfg.ToolDiscovery = MCPToolDiscoveryOff
+		case MCPToolDiscoveryOff, MCPToolDiscoverySearch:
+			cfg.ToolDiscovery = mode
+		default:
+			if pass == mcpResolvedPass {
+				return resolvedValueError("mcp.tool_discovery", fmt.Sprintf("must be %q or %q", MCPToolDiscoveryOff, MCPToolDiscoverySearch))
+			}
+			return fmt.Errorf("mcp.tool_discovery must be %q or %q, got %q", MCPToolDiscoveryOff, MCPToolDiscoverySearch, cfg.ToolDiscovery)
+		}
+	}
 	if len(cfg.AllowedOrigins) > 0 {
 		normalized := make([]string, 0, len(cfg.AllowedOrigins))
-		for _, raw := range cfg.AllowedOrigins {
+		for i, raw := range cfg.AllowedOrigins {
 			entry := strings.TrimSpace(raw)
 			if entry == "" {
 				continue
 			}
-			if entry != TrustAnyOrigin {
+			if entry != TrustAnyOrigin && !pass.deferred(entry) {
 				canonical, err := NormalizeAllowedOrigin(entry)
 				if err != nil {
+					if pass == mcpResolvedPass {
+						return resolvedValueError(fmt.Sprintf("mcp.allowed_origins[%d]", i), "is not a valid origin (want scheme://host[:port])")
+					}
 					return fmt.Errorf("mcp.allowed_origins: %w", err)
 				}
 				entry = canonical
@@ -237,6 +329,10 @@ func normalizeMCPConfig(cfg *MCPConfig) error {
 		}
 		cfg.AllowedOrigins = normalized
 	}
+	return nil
+}
+
+func normalizeMCPServers(cfg *MCPConfig) error {
 	if len(cfg.Servers) == 0 {
 		return nil
 	}
@@ -249,7 +345,7 @@ func normalizeMCPConfig(cfg *MCPConfig) error {
 		if _, dup := normalized[canonical]; dup {
 			return fmt.Errorf("mcp.servers: duplicate server slug %q", canonical)
 		}
-		if err := ValidateMCPServerConfig(&server); err != nil {
+		if err := validateMCPServerConfig(&server, true); err != nil {
 			return fmt.Errorf("mcp.servers[%q]: %w", canonical, err)
 		}
 		normalized[canonical] = server
@@ -330,6 +426,25 @@ func DeriveMCPServerSlug(name string) string {
 // ValidateMCPServerConfig validates one server definition and applies
 // defaults in place. It is shared by config loading and the admin API.
 func ValidateMCPServerConfig(server *MCPServerConfig) error {
+	return validateMCPServerConfig(server, false)
+}
+
+// validateResolvedMCPServers finishes the checks normalizeMCPConfig deferred
+// for values holding a secret reference, now that they are resolved.
+func validateResolvedMCPServers(servers map[string]MCPServerConfig) error {
+	for name, server := range servers {
+		if err := ValidateMCPServerConfig(&server); err != nil {
+			return fmt.Errorf("mcp.servers[%q]: %w", name, err)
+		}
+		servers[name] = server
+	}
+	return nil
+}
+
+// validateMCPServerConfig is ValidateMCPServerConfig. With allowReferences, a
+// URL holding a secret reference skips the scheme check, which
+// validateResolvedMCPServers repeats once the reference is resolved.
+func validateMCPServerConfig(server *MCPServerConfig, allowReferences bool) error {
 	server.Transport = strings.ToLower(strings.TrimSpace(server.Transport))
 	server.URL = strings.TrimSpace(server.URL)
 	server.Command = strings.TrimSpace(server.Command)
@@ -345,7 +460,8 @@ func ValidateMCPServerConfig(server *MCPServerConfig) error {
 		if server.URL == "" {
 			return fmt.Errorf("url is required for the %s transport", server.Transport)
 		}
-		if !strings.HasPrefix(server.URL, "http://") && !strings.HasPrefix(server.URL, "https://") {
+		deferred := allowReferences && HasSecretReference(server.URL)
+		if !deferred && !strings.HasPrefix(server.URL, "http://") && !strings.HasPrefix(server.URL, "https://") {
 			return fmt.Errorf("url must start with http:// or https://")
 		}
 		if server.Command != "" {
@@ -370,21 +486,33 @@ func ValidateMCPServerConfig(server *MCPServerConfig) error {
 	if server.ToolTimeout == 0 {
 		server.ToolTimeout = DefaultMCPToolTimeout
 	}
-	if len(server.UserPaths) > 0 {
-		normalized := make([]string, 0, len(server.UserPaths))
-		for _, raw := range server.UserPaths {
-			path, err := core.NormalizeUserPath(raw)
-			if err != nil {
-				return fmt.Errorf("invalid user_paths value %q: %w", raw, err)
-			}
-			if path != "" && !slices.Contains(normalized, path) {
-				normalized = append(normalized, path)
-			}
-		}
-		slices.Sort(normalized)
-		server.UserPaths = normalized
+	var err error
+	if server.UserPaths, err = normalizeMCPUserPaths("user_paths", server.UserPaths); err != nil {
+		return err
+	}
+	if server.DisallowedUserPaths, err = normalizeMCPUserPaths("disallowed_user_paths", server.DisallowedUserPaths); err != nil {
+		return err
 	}
 	return nil
+}
+
+// normalizeMCPUserPaths canonicalizes, dedupes, and sorts one user-path list.
+func normalizeMCPUserPaths(field string, paths []string) ([]string, error) {
+	if len(paths) == 0 {
+		return paths, nil
+	}
+	normalized := make([]string, 0, len(paths))
+	for _, raw := range paths {
+		path, err := core.NormalizeUserPath(raw)
+		if err != nil {
+			return nil, fmt.Errorf("invalid %s value %q: %w", field, raw, err)
+		}
+		if path != "" && !slices.Contains(normalized, path) {
+			normalized = append(normalized, path)
+		}
+	}
+	slices.Sort(normalized)
+	return normalized, nil
 }
 
 // MCPServerEnabled reports the effective enabled state (default true).

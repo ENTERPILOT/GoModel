@@ -14,6 +14,7 @@ var responsesDataPrefix = []byte("data: ")
 var responsesCompletionPatterns = [][]byte{
 	[]byte(`"type":"response.completed"`),
 	[]byte(`"type":"response.done"`),
+	[]byte(`"type":"response.incomplete"`),
 }
 
 // EnsureResponsesDone normalizes Responses API streams so clients always receive

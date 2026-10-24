@@ -11,9 +11,11 @@ type anthropicThinking struct {
 }
 
 // anthropicOutputConfig controls the effort level for adaptive-thinking models
-// (Opus 4.6+). Effort is one of "low", "medium", "high", "xhigh", or "max".
+// (Opus 4.6+) and the native structured output format. Effort is one of "low",
+// "medium", "high", "xhigh", or "max".
 type anthropicOutputConfig struct {
-	Effort string `json:"effort,omitempty"`
+	Effort string                 `json:"effort,omitempty"`
+	Format *anthropicOutputFormat `json:"format,omitempty"`
 }
 
 // anthropicRequest represents the Anthropic API request format
@@ -37,6 +39,7 @@ type anthropicTool struct {
 	Name         string          `json:"name"`
 	Description  string          `json:"description,omitempty"`
 	InputSchema  map[string]any  `json:"input_schema"`
+	Strict       bool            `json:"strict,omitempty"`
 	CacheControl json.RawMessage `json:"cache_control,omitempty"`
 }
 
@@ -53,8 +56,14 @@ type anthropicMessage struct {
 }
 
 type anthropicContentBlock struct {
-	Type         string                  `json:"type"`
-	Text         string                  `json:"text,omitempty"`
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+	// Thinking is a pointer so a thinking block whose text was omitted by the
+	// model (display: omitted) still round-trips as "thinking": "".
+	Thinking     *string                 `json:"thinking,omitempty"`
+	Signature    string                  `json:"signature,omitempty"`
+	Data         string                  `json:"data,omitempty"`
+	Title        string                  `json:"title,omitempty"`
 	ID           string                  `json:"id,omitempty"`
 	Name         string                  `json:"name,omitempty"`
 	Input        any                     `json:"input,omitempty"`
@@ -70,6 +79,7 @@ type anthropicContentSource struct {
 	MediaType string `json:"media_type,omitempty"`
 	Data      string `json:"data,omitempty"`
 	URL       string `json:"url,omitempty"`
+	FileID    string `json:"file_id,omitempty"`
 }
 
 // anthropicResponse represents the Anthropic API response format
@@ -86,13 +96,15 @@ type anthropicResponse struct {
 
 // anthropicContent represents content in Anthropic response
 type anthropicContent struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	Thinking  string          `json:"thinking,omitempty"`
-	Signature string          `json:"signature,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
+	Type      string `json:"type"`
+	Text      string `json:"text,omitempty"`
+	Thinking  string `json:"thinking,omitempty"`
+	Signature string `json:"signature,omitempty"`
+	// Data is the opaque payload of a redacted_thinking block.
+	Data  string          `json:"data,omitempty"`
+	ID    string          `json:"id,omitempty"`
+	Name  string          `json:"name,omitempty"`
+	Input json.RawMessage `json:"input,omitempty"`
 }
 
 // anthropicUsage represents token usage in Anthropic response
@@ -101,7 +113,15 @@ type anthropicUsage struct {
 	OutputTokens             int                          `json:"output_tokens"`
 	CacheCreationInputTokens int                          `json:"cache_creation_input_tokens"`
 	CacheReadInputTokens     int                          `json:"cache_read_input_tokens"`
+	CacheCreation            anthropicCacheCreation       `json:"cache_creation"`
 	OutputTokensDetails      anthropicOutputTokensDetails `json:"output_tokens_details"`
+}
+
+// anthropicCacheCreation splits cache_creation_input_tokens by cache TTL,
+// which Anthropic bills at different rates.
+type anthropicCacheCreation struct {
+	Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens"`
+	Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens"`
 }
 
 type anthropicOutputTokensDetails struct {
@@ -131,10 +151,20 @@ type anthropicDelta struct {
 
 // anthropicModelInfo represents a model in Anthropic's models API response
 type anthropicModelInfo struct {
-	ID          string `json:"id"`
-	Type        string `json:"type"`
-	CreatedAt   string `json:"created_at"`
-	DisplayName string `json:"display_name"`
+	ID             string `json:"id"`
+	Type           string `json:"type"`
+	CreatedAt      string `json:"created_at"`
+	DisplayName    string `json:"display_name"`
+	MaxInputTokens int    `json:"max_input_tokens"`
+	MaxTokens      int    `json:"max_tokens"`
+	// Capabilities is keyed by feature (image_input, pdf_input, thinking,
+	// structured_outputs, batch, ...); each value carries a "supported" flag
+	// plus feature-specific detail this adapter does not decode.
+	Capabilities map[string]anthropicCapability `json:"capabilities"`
+}
+
+type anthropicCapability struct {
+	Supported *bool `json:"supported"`
 }
 
 // anthropicModelsResponse represents the Anthropic models API response

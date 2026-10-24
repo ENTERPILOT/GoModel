@@ -37,7 +37,7 @@
             {/each}
           </th>
         {/each}
-        <th class="model-actions-header"><ModelGlobalActions /></th>
+        <th class="model-actions-header col-actions"><ModelGlobalActions /></th>
       </tr>
     </thead>
     {#each virtualModels.filteredDisplayModelGroups as group (group.key)}
@@ -95,7 +95,7 @@
           </td>
         </tr>
         {#each group.rows as row (row.key)}
-          <ModelRow {row} {columns} />
+          <ModelRow {row} {columns} colspan={groupColspan} />
         {/each}
       </tbody>
     {/each}

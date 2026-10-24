@@ -9,13 +9,15 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func loadedFailoverPolicy(t *testing.T, cfg config.FailoverConfig) *FailoverPolicy {
 	t.Helper()
-	if err := config.LoadFailoverPolicy(&cfg); err != nil {
-		t.Fatalf("load failover policy: %v", err)
-	}
+	err := config.LoadFailoverPolicy(&cfg)
+	require.NoError(t, err)
+
 	return NewFailoverPolicy(cfg)
 }
 
@@ -51,15 +53,12 @@ func TestFailoverPolicyShouldRetry(t *testing.T) {
 			if tt.code != "" {
 				err = err.WithCode(tt.code)
 			}
-			if got := tt.policy.ShouldRetry(err); got != tt.want {
-				t.Fatalf("ShouldRetry(%d, %q, %q) = %v, want %v", tt.status, tt.code, tt.message, got, tt.want)
-			}
+			got := tt.policy.ShouldRetry(err)
+			require.Equal(t, tt.want, got)
 		})
 	}
-
-	if got := custom.ShouldRetry(io.EOF); got {
-		t.Error("a non-gateway error must never trigger failover")
-	}
+	got := custom.ShouldRetry(io.EOF)
+	assert.False(t, got)
 }
 
 func threeTargetFixture(policy *FailoverPolicy) (*InferenceOrchestrator, *core.Workflow) {
@@ -93,20 +92,35 @@ func TestTryFailoverResponseHonorsMaxAttempts(t *testing.T) {
 				return "", "", core.NewProviderError("openai", http.StatusBadGateway, selector.Model+" down", nil)
 			}
 
-			_, _, _, _, didFailover, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+			_, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, nil, call)
 
-			if didFailover || err == nil {
-				t.Fatalf("expected the sweep to fail, got didFailover=%v err=%v", didFailover, err)
-			}
-			if strings.Join(calls, ",") != strings.Join(tt.wantCalls, ",") {
-				t.Fatalf("calls = %v, want %v", calls, tt.wantCalls)
-			}
+			require.False(t, meta.UsedFailover)
+			require.Error(t, err)
+			require.Equal(t, tt.wantCalls, calls)
 			// The client sees the last attempted target's error, not the cap itself.
-			if want := tt.wantCalls[len(tt.wantCalls)-1]; !strings.Contains(err.Error(), strings.TrimPrefix(want, "openai/")+" down") {
-				t.Fatalf("err = %v, want the error of %s", err, want)
-			}
+			want := tt.wantCalls[len(tt.wantCalls)-1]
+			require.ErrorContains(t, err, strings.TrimPrefix(want, "openai/")+" down", "want the error of %s", want)
 		})
 	}
+}
+
+// Targets that cannot serve the request (a chat model in a System One chain)
+// are skipped before a call, so they do not consume attempts either.
+func TestTryFailoverResponseIneligibleTargetsDoNotConsumeAttempts(t *testing.T) {
+	o, workflow := threeTargetFixture(&FailoverPolicy{MaxAttempts: 1})
+	primaryErr := core.NewProviderError("openai", http.StatusBadGateway, "primary down", nil)
+	eligible := func(selector core.ModelSelector, _ string) bool { return selector.Model != "a" }
+	var calls []string
+	call := func(selector core.ModelSelector, _, _ string) (string, string, error) {
+		calls = append(calls, selector.QualifiedModel())
+		return "ok", "openai", nil
+	}
+
+	_, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, eligible, call)
+
+	require.NoError(t, err)
+	require.True(t, meta.UsedFailover)
+	require.Equal(t, []string{"openai/b"}, calls)
 }
 
 // Targets skipped before a call (rate-limited routes) do not consume attempts.
@@ -120,11 +134,12 @@ func TestTryFailoverResponseMaxAttemptsCountsCallsOnly(t *testing.T) {
 		return "ok", "openai", nil
 	}
 
-	_, _, _, model, didFailover, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+	_, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, nil, call)
 
-	if !didFailover || err != nil || model != "openai/b" || len(calls) != 1 {
-		t.Fatalf("result = (model:%q didFailover:%v err:%v calls:%v), want one successful call to openai/b", model, didFailover, err, calls)
-	}
+	require.True(t, meta.UsedFailover)
+	require.NoError(t, err)
+	require.Equal(t, "openai/b", meta.FailoverModel)
+	require.Len(t, calls, 1)
 }
 
 func TestTryFailoverStreamHonorsMaxAttempts(t *testing.T) {
@@ -136,11 +151,12 @@ func TestTryFailoverStreamHonorsMaxAttempts(t *testing.T) {
 		return nil, "", "", core.NewProviderError("openai", http.StatusBadGateway, selector.Model+" down", nil)
 	}
 
-	stream, _, _, _, _, err := tryFailoverStream(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+	stream, _, err := tryFailoverStream(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
 
-	if stream != nil || err == nil || len(calls) != 1 || calls[0] != "openai/a" {
-		t.Fatalf("calls = %v err = %v, want exactly one failed attempt at openai/a", calls, err)
-	}
+	require.Nil(t, stream)
+	require.Error(t, err)
+	require.Len(t, calls, 1)
+	require.Equal(t, "openai/a", calls[0])
 }
 
 // A policy that does not list the primary's failure leaves the request alone.
@@ -153,11 +169,11 @@ func TestTryFailoverResponseSkipsWhenPolicyDoesNotMatch(t *testing.T) {
 		return "ok", "openai", nil
 	}
 
-	_, _, _, _, didFailover, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+	_, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, nil, call)
 
-	if called || didFailover || err != primaryErr {
-		t.Fatalf("expected the primary 429 to be returned untouched (called=%v didFailover=%v err=%v)", called, didFailover, err)
-	}
+	require.False(t, called)
+	require.False(t, meta.UsedFailover)
+	require.Equal(t, primaryErr, err)
 }
 
 // The stream path applies the same gate: a primary failure the policy does
@@ -171,9 +187,9 @@ func TestTryFailoverStreamSkipsWhenPolicyDoesNotMatch(t *testing.T) {
 		return nil, "", "", nil
 	}
 
-	stream, _, _, _, _, err := tryFailoverStream(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+	stream, _, err := tryFailoverStream(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
 
-	if called || stream != nil || err != primaryErr {
-		t.Fatalf("expected the primary 429 to be returned untouched (called=%v stream=%v err=%v)", called, stream, err)
-	}
+	require.False(t, called)
+	require.Nil(t, stream)
+	require.Equal(t, primaryErr, err)
 }

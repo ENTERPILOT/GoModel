@@ -136,6 +136,7 @@ func (o *StreamLogObserver) OnStreamClose() {
 	}
 
 	if o.logger != nil && o.entry != nil {
+		o.entry.Complete()
 		o.logger.Write(o.entry)
 	}
 }
@@ -342,7 +343,7 @@ func parseResponsesAPIEvent(builder *streamResponseBuilder, event map[string]any
 
 	eventType, _ := event["type"].(string)
 	switch eventType {
-	case "response.created", "response.completed", "response.done":
+	case "response.created", "response.completed", "response.done", "response.incomplete":
 		if resp, ok := event["response"].(map[string]any); ok {
 			if id, ok := resp["id"].(string); ok {
 				builder.ResponseID = id

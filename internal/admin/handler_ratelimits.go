@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"cmp"
 	"errors"
 	"net/http"
 	"strconv"
@@ -21,6 +22,7 @@ import (
 // @Security     BearerAuth
 // @Success      200  {object}  rateLimitListResponse
 // @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
 // @Failure      503  {object}  core.GatewayError
 // @Router       /admin/rate-limits [get]
 func (h *Handler) ListRateLimits(c *echo.Context) error {
@@ -29,7 +31,7 @@ func (h *Handler) ListRateLimits(c *echo.Context) error {
 	}
 	now := time.Now().UTC()
 	return c.JSON(http.StatusOK, rateLimitListResponse{
-		RateLimits: rateLimitStatusResponses(h.rateLimits.Statuses(now)),
+		RateLimits: rateLimitStatusResponses(scopedRateLimitStatuses(requestScope(c), h.rateLimits.Statuses(now))),
 		ServerTime: now,
 	})
 }
@@ -44,6 +46,7 @@ func (h *Handler) ListRateLimits(c *echo.Context) error {
 // @Success      200   {object}  rateLimitListResponse
 // @Failure      400   {object}  core.GatewayError
 // @Failure      401   {object}  core.GatewayError
+// @Failure      403   {object}  core.GatewayError
 // @Failure      503   {object}  core.GatewayError
 // @Router       /admin/rate-limits [put]
 func (h *Handler) UpsertRateLimit(c *echo.Context) error {
@@ -61,14 +64,21 @@ func (h *Handler) UpsertRateLimit(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
 	}
+	if err := requireScopedSubject(c, scope == ratelimit.ScopeUserPath, subject); err != nil {
+		return handleError(c, err)
+	}
 	item, err := ratelimit.NormalizeRule(ratelimit.Rule{
-		Scope:         scope,
-		Subject:       subject,
-		PerChild:      req.PerChild,
-		PeriodSeconds: periodSeconds,
-		MaxRequests:   req.MaxRequests,
-		MaxTokens:     req.MaxTokens,
-		Source:        ratelimit.SourceManual,
+		Scope:   scope,
+		Subject: subject,
+		// The spelling the operator wrote: provider and model subjects are
+		// stored case-folded, and the folded form must not be what the rule
+		// is reported as.
+		SubjectDisplay: cmp.Or(strings.TrimSpace(req.Subject), strings.TrimSpace(req.UserPath)),
+		PerChild:       req.PerChild,
+		PeriodSeconds:  periodSeconds,
+		MaxRequests:    req.MaxRequests,
+		MaxTokens:      req.MaxTokens,
+		Source:         ratelimit.SourceManual,
 	})
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
@@ -89,6 +99,7 @@ func (h *Handler) UpsertRateLimit(c *echo.Context) error {
 // @Success      200   {object}  rateLimitListResponse
 // @Failure      400   {object}  core.GatewayError
 // @Failure      401   {object}  core.GatewayError
+// @Failure      403   {object}  core.GatewayError
 // @Failure      503   {object}  core.GatewayError
 // @Router       /admin/rate-limits [delete]
 //
@@ -104,6 +115,9 @@ func (h *Handler) DeleteRateLimit(c *echo.Context) error {
 	scope, subject, periodSeconds, err := rateLimitRequestKey(req.Scope, req.Subject, req.UserPath, req.LimitKey)
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
+	}
+	if err := requireScopedSubject(c, scope == ratelimit.ScopeUserPath, subject); err != nil {
+		return handleError(c, err)
 	}
 	if err := h.rateLimits.DeleteRule(c.Request().Context(), scope, subject, periodSeconds); err != nil {
 		return handleError(c, rateLimitServiceError("failed to delete rate limit rule", err))
@@ -121,6 +135,7 @@ func (h *Handler) DeleteRateLimit(c *echo.Context) error {
 // @Success      200   {object}  rateLimitListResponse
 // @Failure      400   {object}  core.GatewayError
 // @Failure      401   {object}  core.GatewayError
+// @Failure      403   {object}  core.GatewayError
 // @Failure      503   {object}  core.GatewayError
 // @Router       /admin/rate-limits/reset-one [post]
 func (h *Handler) ResetRateLimit(c *echo.Context) error {
@@ -134,6 +149,9 @@ func (h *Handler) ResetRateLimit(c *echo.Context) error {
 	scope, subject, periodSeconds, err := rateLimitRequestKey(req.Scope, req.Subject, req.UserPath, &rateLimitKeyRequest{Period: req.Period, PeriodSeconds: req.PeriodSeconds})
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
+	}
+	if err := requireScopedSubject(c, scope == ratelimit.ScopeUserPath, subject); err != nil {
+		return handleError(c, err)
 	}
 	if err := h.rateLimits.ResetRule(scope, subject, periodSeconds); err != nil {
 		return handleError(c, rateLimitServiceError("failed to reset rate limit rule", err))
@@ -151,6 +169,7 @@ func (h *Handler) ResetRateLimit(c *echo.Context) error {
 // @Success      200           {object}  resetRateLimitsResponse
 // @Failure      400           {object}  core.GatewayError
 // @Failure      401           {object}  core.GatewayError
+// @Failure      403           {object}  core.GatewayError
 // @Failure      503           {object}  core.GatewayError
 // @Router       /admin/rate-limits/reset [post]
 func (h *Handler) ResetRateLimits(c *echo.Context) error {
@@ -241,7 +260,7 @@ func rateLimitStatusResponses(statuses []ratelimit.Status) []rateLimitStatusResp
 		rule := status.Rule
 		item := rateLimitStatusResponse{
 			Scope:             string(rule.Scope),
-			Subject:           rule.Subject,
+			Subject:           rule.DisplaySubject(),
 			PerChild:          rule.PerChild,
 			EffectiveSubject:  rule.EffectiveSubject,
 			PeriodSeconds:     rule.PeriodSeconds,
@@ -329,4 +348,19 @@ func rateLimitRequestPeriodSeconds(period string, periodSeconds *int64) (int64, 
 		return parsed, nil
 	}
 	return 0, errors.New("period must be one of minute, hour, day, concurrent or period_seconds must be set")
+}
+
+// scopedRateLimitStatuses keeps only the user_path rules a scoped credential
+// may see; provider and model rules are gateway-wide. Global scopes pass through.
+func scopedRateLimitStatuses(scope core.AccessScope, statuses []ratelimit.Status) []ratelimit.Status {
+	if scope.Global() {
+		return statuses
+	}
+	kept := make([]ratelimit.Status, 0, len(statuses))
+	for _, status := range statuses {
+		if status.Rule.Scope == ratelimit.ScopeUserPath && scope.Allows(status.Rule.Subject) {
+			kept = append(kept, status)
+		}
+	}
+	return kept
 }

@@ -107,6 +107,39 @@ func (h *Handler) modelAccessResolver() func(core.ModelSelector) modelAccessResp
 	}
 }
 
+// ModelMetadataLayers handles GET /admin/models/metadata
+//
+// @Summary      Show where one model's metadata comes from
+// @Description  Returns the merged metadata the gateway serves for a model together with each layer it was merged from: the provider's own listing, the model catalog entry and the config.yaml override. A null layer knows nothing about the model. `sources` names the winning layer per field (config, provider, catalog or inferred).
+// @Tags         admin
+// @Produce      json
+// @Security     BearerAuth
+// @Param        provider  query     string  true  "Provider instance name or provider type"
+// @Param        model     query     string  true  "Raw upstream model ID"
+// @Success      200  {object}  providers.ModelMetadataLayers
+// @Failure      400  {object}  core.GatewayError
+// @Failure      401  {object}  core.GatewayError
+// @Failure      404  {object}  core.GatewayError
+// @Router       /admin/models/metadata [get]
+func (h *Handler) ModelMetadataLayers(c *echo.Context) error {
+	provider := strings.TrimSpace(c.QueryParam("provider"))
+	if provider == "" {
+		return handleError(c, core.NewInvalidRequestError("provider is required", nil))
+	}
+	selector, err := core.ParseModelSelector(c.QueryParam("model"), provider)
+	if err != nil {
+		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
+	}
+	if h.registry == nil {
+		return handleError(c, core.NewModelNotFoundError(selector.QualifiedModel()))
+	}
+	layers, ok := h.registry.ModelMetadataLayers(selector.Provider, selector.Model)
+	if !ok {
+		return handleError(c, core.NewModelNotFoundError(selector.QualifiedModel()))
+	}
+	return c.JSON(http.StatusOK, layers)
+}
+
 // isValidCategory returns true if cat is a recognized model category.
 func isValidCategory(cat core.ModelCategory) bool {
 	return slices.Contains(core.AllCategories(), cat)

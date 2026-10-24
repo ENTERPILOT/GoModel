@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/goccy/go-json"
+
+	"github.com/enterpilot/gomodel/internal/storage/sqlutil"
 )
 
 // GroupCacheStats aggregates the cache figures for one chart group (a model,
@@ -42,11 +45,13 @@ type usageCacheStatRow struct {
 	Provider     string
 	ProviderName string
 	UserPath     string
+	Endpoint     string
 	Labels       []string
 	CacheType    string
 	InputTokens  int
 	OutputTokens int
 	RawData      map[string]any
+	Timestamp    time.Time
 }
 
 // groupKeysFunc derives the fold keys one row contributes to. Most groupings
@@ -133,17 +138,22 @@ func accumulateGroupCacheStats(out map[string]*GroupCacheStats, keysFor groupKey
 			if stats.CachedTokensByPricing == nil {
 				stats.CachedTokensByPricing = map[CachedPricingKey]int64{}
 			}
-			stats.CachedTokensByPricing[CachedPricingKey{
+			key := CachedPricingKey{
 				Model:        row.Model,
 				Provider:     row.Provider,
 				ProviderName: strings.TrimSpace(row.ProviderName),
-			}] += cached
+			}
+			if !row.Timestamp.IsZero() {
+				at := row.Timestamp.UTC()
+				key.Timed, key.Weekday, key.Minute = true, at.Weekday(), at.Hour()*60+at.Minute()
+			}
+			stats.CachedTokensByPricing[key] += cached
 		}
 	}
 }
 
 // foldUsageCacheRows folds streamed SQL rows (model, provider, provider_name,
-// user_path, labels JSON, cache_type, input_tokens, output_tokens, raw_data)
+// user_path, endpoint, labels JSON, cache_type, input_tokens, output_tokens, raw_data)
 // into per-group cache stats. Shared by the SQL backends; MongoDB folds its
 // foldUsageCacheRows aggregates streamed usage cache-stat rows by the keys produced by keysFor.
 // It returns an error if scanning the rows fails or the result set reports an error.
@@ -151,9 +161,10 @@ func foldUsageCacheRows(rows inputSegmentRows, keysFor groupKeysFunc) (map[strin
 	out := map[string]*GroupCacheStats{}
 	for rows.Next() {
 		var model, provider string
-		var providerName, userPath, labelsJSON, cacheType, rawDataJSON *string
+		var providerName, userPath, endpoint, labelsJSON, cacheType, rawDataJSON *string
 		var inputTokens, outputTokens int
-		if err := rows.Scan(&model, &provider, &providerName, &userPath, &labelsJSON, &cacheType, &inputTokens, &outputTokens, &rawDataJSON); err != nil {
+		var timestamp any
+		if err := rows.Scan(&model, &provider, &providerName, &userPath, &endpoint, &labelsJSON, &cacheType, &inputTokens, &outputTokens, &rawDataJSON, &timestamp); err != nil {
 			return nil, fmt.Errorf("failed to scan usage cache stat row: %w", err)
 		}
 		row := usageCacheStatRow{
@@ -161,12 +172,16 @@ func foldUsageCacheRows(rows inputSegmentRows, keysFor groupKeysFunc) (map[strin
 			Provider:     provider,
 			InputTokens:  inputTokens,
 			OutputTokens: outputTokens,
+			Timestamp:    cacheStatTimestamp(timestamp),
 		}
 		if providerName != nil {
 			row.ProviderName = *providerName
 		}
 		if userPath != nil {
 			row.UserPath = *userPath
+		}
+		if endpoint != nil {
+			row.Endpoint = *endpoint
 		}
 		if cacheType != nil {
 			row.CacheType = *cacheType
@@ -184,6 +199,26 @@ func foldUsageCacheRows(rows inputSegmentRows, keysFor groupKeysFunc) (map[strin
 		accumulateGroupCacheStats(out, keysFor, row)
 	}
 	return out, rows.Err()
+}
+
+// cacheStatTimestamp reads the streamed timestamp column, which arrives as
+// time.Time from PostgreSQL and as stored text (or a driver-parsed time)
+// from SQLite. Unreadable values yield the zero time, which prices at the
+// base rates.
+func cacheStatTimestamp(value any) time.Time {
+	switch v := value.(type) {
+	case time.Time:
+		return v
+	case string:
+		if parsed, ok := sqlutil.ParseSQLiteTimestamp(v); ok {
+			return parsed
+		}
+	case []byte:
+		if parsed, ok := sqlutil.ParseSQLiteTimestamp(string(v)); ok {
+			return parsed
+		}
+	}
+	return time.Time{}
 }
 
 // assign copies the fold result onto a row's shared cache fields.
@@ -266,10 +301,9 @@ func applyLabelCacheStats(rows []LabelUsage, stats map[string]*GroupCacheStats) 
 // current catalog pricing (CachedInputPerMtok per pricing identity). It is an
 // estimate: models without a cached-input rate contribute nothing, and it
 // reflects today's prices, not the prices at request time — the same
-// trade-off as pricing recalculation. Returns nil when nothing could be
-// EstimateCachedInputCost estimates cached-input cost using the applicable pricing.
-// It returns a pointer to the estimate when at least one token bucket can be priced,
-// or nil when no pricing is available.
+// trade-off as pricing recalculation. Time-of-day pricing windows are applied
+// per bucket at minute precision (see CachedPricingKey). Returns nil when
+// nothing could be priced.
 func EstimateCachedInputCost(byPricing map[CachedPricingKey]int64, resolver PricingResolver) *float64 {
 	if resolver == nil || len(byPricing) == 0 {
 		return nil
@@ -280,7 +314,7 @@ func EstimateCachedInputCost(byPricing map[CachedPricingKey]int64, resolver Pric
 		if tokens <= 0 {
 			continue
 		}
-		pricing := resolver.ResolvePricing(key.Model, effectiveRecalculationPricingProvider(key.Provider, key.ProviderName))
+		pricing := resolver.ResolvePricing(key.Model, effectiveRecalculationPricingProvider(key.Provider, key.ProviderName)).AtTime(key.slotTime())
 		if pricing == nil || pricing.CachedInputPerMtok == nil {
 			continue
 		}

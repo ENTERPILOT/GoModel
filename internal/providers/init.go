@@ -33,6 +33,10 @@ type InitResult struct {
 	// map (same keys as Router). Keys match top-level providers YAML names.
 	CredentialResolvedProviders map[string]config.RawProviderConfig
 
+	// keys swaps rotated API keys into the registered providers; see
+	// PlanKeyRotation.
+	keys *keyRotation
+
 	// stopRefresh is called to stop the background refresh goroutine
 	stopRefresh func()
 
@@ -82,7 +86,12 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 		ctx = context.Background()
 	}
 
-	providerMap, credentialResolved := resolveProviders(result.RawProviders, result.Config.Resilience, factory.discoveryConfigsSnapshot())
+	discovery := factory.discoveryConfigsSnapshot()
+	sources, err := mergeProviderSources(ctx, result.Secrets, result.RawProviders, discovery)
+	if err != nil {
+		return nil, err
+	}
+	providerMap, credentialResolved := finishProviders(sources, result.Config.Resilience, discovery)
 	// Validated after the env overlay so one rule covers both sources: a bad
 	// price cap must not start the gateway with a cost control that silently
 	// admits everything.
@@ -110,7 +119,7 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 	registry.SetCache(modelCache)
 	registry.SetConfiguredProviderModelsMode(result.Config.Models.ConfiguredProviderModelsMode)
 
-	count, err := initializeProviders(ctx, providerMap, factory, registry)
+	count, keyrings, err := initializeProviders(ctx, providerMap, factory, registry)
 	if err != nil {
 		modelCache.Close()
 		return nil, err
@@ -184,6 +193,7 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 		return nil, fmt.Errorf("failed to create router: %w", err)
 	}
 	router.SetUnqualifiedModelIDs(result.Config.Models.UnqualifiedModelIDsAtModelsEndpoint)
+	router.SetEmptyResponseHook(factory.emptyResponseHook())
 
 	return &InitResult{
 		ConfiguredProviders:         SanitizeProviderConfigs(providerMap),
@@ -192,6 +202,7 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 		Cache:                       modelCache,
 		Factory:                     factory,
 		CredentialResolvedProviders: credentialResolved,
+		keys:                        newKeyRotation(sources, discovery, result.Config.Resilience, providerMap, keyrings),
 		stopRefresh:                 stopRefresh,
 	}, nil
 }
@@ -264,8 +275,9 @@ func defaultModelCacheDir() string {
 }
 
 // initializeProviders instantiates and registers all resolved providers.
-// Returns the count of successfully registered providers.
-func initializeProviders(ctx context.Context, providerMap map[string]ProviderConfig, factory *ProviderFactory, registry *ModelRegistry) (int, error) {
+// Returns the count of successfully registered providers and their keyrings by
+// name (nil for a keyless provider).
+func initializeProviders(ctx context.Context, providerMap map[string]ProviderConfig, factory *ProviderFactory, registry *ModelRegistry) (int, map[string]*Keyring, error) {
 	// Sort provider names for deterministic initialization order
 	names := make([]string, 0, len(providerMap))
 	for name := range providerMap {
@@ -273,32 +285,67 @@ func initializeProviders(ctx context.Context, providerMap map[string]ProviderCon
 	}
 	sort.Strings(names)
 
+	type initializedProvider struct {
+		name            string
+		config          ProviderConfig
+		provider        core.Provider
+		keys            *Keyring
+		createErr       error
+		availabilityErr error
+	}
+	results := make([]initializedProvider, len(names))
+	const maxConcurrentInitializations = 8
+	sem := make(chan struct{}, maxConcurrentInitializations)
+	var wg sync.WaitGroup
+	for i, name := range names {
+		// Acquire capacity before launching the worker so configurations with
+		// many providers do not retain one blocked goroutine per provider.
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(i int, name string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			pCfg := providerMap[name]
+			keys := NewKeyringWithSessionStickiness(pCfg.SessionStickyKeys, pCfg.APIKeys...)
+			p, err := factory.create(pCfg, keys)
+			if err != nil {
+				results[i] = initializedProvider{name: name, config: pCfg, createErr: err}
+				return
+			}
+
+			results[i] = initializedProvider{
+				name:            name,
+				config:          pCfg,
+				provider:        p,
+				keys:            keys,
+				availabilityErr: registry.probeAvailability(ctx, p, name, availabilityProbeTimeout),
+			}
+		}(i, name)
+	}
+	wg.Wait()
+
 	var count int
-	for _, name := range names {
-		pCfg := providerMap[name]
-		p, err := factory.Create(pCfg)
-		if err != nil {
+	keyrings := make(map[string]*Keyring, len(results))
+	for _, result := range results {
+		name, pCfg, p := result.name, result.config, result.provider
+		if result.createErr != nil {
 			slog.Error("failed to initialize provider",
 				"name", name,
 				"type", pCfg.Type,
-				"error", err)
+				"error", result.createErr)
 			continue
 		}
 
-		// Availability checks are diagnostics only. Providers stay registered so
-		// async initialization and periodic refresh can discover them later.
-		if checker, ok := p.(core.AvailabilityChecker); ok {
-			probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			if err := checker.CheckAvailability(probeCtx); err != nil {
-				registry.RecordAvailabilityCheck(name, err)
-				slog.Warn("provider unavailable at startup; keeping registered for refresh",
-					"name", name,
-					"type", pCfg.Type,
-					"reason", err.Error())
-			} else {
-				registry.RecordAvailabilityCheck(name, nil)
-			}
-			cancel()
+		// Availability checks are diagnostics only, and the probe already
+		// recorded its outcome. Providers stay registered so async
+		// initialization and periodic refresh can discover them later; only the
+		// warning is held back to here, to keep startup logs in name order.
+		if result.availabilityErr != nil {
+			slog.Warn("provider unavailable at startup; keeping registered for refresh",
+				"name", name,
+				"type", pCfg.Type,
+				"reason", result.availabilityErr.Error())
 		}
 
 		registry.RegisterProviderWithNameAndType(p, name, pCfg.Type)
@@ -309,11 +356,12 @@ func initializeProviders(ctx context.Context, providerMap map[string]ProviderCon
 			registry.SetProviderMetadataOverrides(name, pCfg.ModelMetadataOverrides)
 		}
 		registry.SetProviderModelFilter(name, pCfg.ModelFilter)
+		keyrings[name] = result.keys
 		count++
 		slog.Info("provider registered", "name", name, "type", pCfg.Type)
 	}
 
-	return count, nil
+	return count, keyrings, nil
 }
 
 // validateProviderModelFilters rejects model filters that cannot express what

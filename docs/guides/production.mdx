@@ -72,6 +72,8 @@ high concurrency with budgets or rate limits enabled.
   directory. Without an explicit volume mount, every audit log, usage record,
   budget, managed API key, and stored credential is lost when the container is
   replaced. Always mount a volume at `/app/data`, or move to Postgres/MongoDB.
+  The gateway logs a warning at startup when it detects this situation, and the
+  repository's `docker-compose.yaml` mounts the `gomodel_data` volume there.
 </Warning>
 
 The default SQLite path is `./data/gomodel.db` when a `./data` directory already
@@ -111,12 +113,14 @@ populated by the External Secrets Operator or the Secrets Store CSI driver.
 There are two reasons, and the second is the one people miss.
 
 **Secrets stay out of the database.** Provider credentials saved from the
-dashboard are persisted to the `provider_credentials` store as plaintext. There
-is no encryption at rest, and the `***` masking is applied on the read path
-only: it stops a key being displayed back over the admin API, but the stored
-value is readable to anyone with the database file, a backup, a snapshot, or a
-read replica. The same is true of MCP server headers. Credentials declared via
-environment variables or `config.yaml` are never written to the store at all.
+dashboard are persisted to the `provider_credentials` store, and MCP server
+headers and guardrail secrets to theirs. Unless `GOMODEL_ENCRYPTION_KEY` is
+set, they are stored in plaintext: the `***` masking is applied on the read
+path only, so the stored value is readable to anyone with the database file, a
+backup, a snapshot, or a read replica. With the key set they are encrypted at
+rest (see [Encryption at Rest](/advanced/encryption-at-rest)), but the key
+then has to be protected and kept. Credentials declared via environment
+variables or `config.yaml` are never written to the store at all.
 
 **Config-declared providers cannot be edited at runtime.** A provider declared
 in env or `config.yaml` is read-only in the dashboard. A provider stored in the
@@ -136,15 +140,24 @@ as code means that change can only arrive through your deploy pipeline.
   or describe the pod.
 </Warning>
 
-GoModel does not support a `<VAR>_FILE` convention for reading secrets from
-mounted files, with the single exception of the Vertex AI
-`SERVICE_ACCOUNT_FILE`. If your secret tooling mounts files, materialize them
-into environment variables in your entrypoint.
+If your secret tooling mounts files, point a setting at the file with a
+[secret reference](/advanced/secret-references) instead of copying it into an
+environment variable:
+
+```bash
+OPENAI_API_KEY='${file:/run/secrets/openai}'
+POSTGRES_URL='${file:/run/secrets/postgres-url}'
+```
+
+A reference that cannot be resolved stops startup, and a failed reload keeps
+the running configuration. Reading secrets straight from HashiCorp Vault, AWS
+Secrets Manager, GCP Secret Manager, or Azure Key Vault comes with
+[GoModel Pro](/pro/overview).
 
 The dashboard path stays the right choice for development, evaluations, and
-adding a provider without a redeploy. If you use it in production, treat the
-database as credential material: encrypt the volume, restrict access, and
-classify backups accordingly.
+adding a provider without a redeploy. If you use it in production, set
+`GOMODEL_ENCRYPTION_KEY` and still treat the database as sensitive: encrypt the
+volume, restrict access, and classify backups accordingly.
 
 ### Other credential handling
 
@@ -170,43 +183,91 @@ key all cross the network in cleartext.
 There is also no CORS middleware, so browser clients on another origin cannot
 call the gateway directly. Add the headers at your proxy if you need that.
 
+### Upstream certificates behind a private CA
+
+Outbound HTTPS — providers and MCP servers — is verified against the system CA
+bundle. The container images ship it (`/etc/ssl/certs/ca-certificates.crt`), so
+public endpoints need no setup.
+
+An upstream whose certificate is issued by an internal or corporate CA fails
+the connection with `x509: certificate signed by unknown authority`. Mount the
+CA certificate into the trusted directory, which GoModel reads in addition to
+the public roots:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -v "$PWD/corp-ca.crt:/etc/ssl/certs/corp-ca.crt:ro" \
+  enterpilot/gomodel:latest
+```
+
+`SSL_CERT_FILE` works too, but it replaces the bundle file rather than adding
+to it, so point it at a bundle that also contains the public roots you need.
+
 ## Air-gapped and offline deployments
 
-**GoModel runs fully air-gapped.** There is no telemetry, no phone-home, no
-update check, and no license check. The admin dashboard is embedded in the
-binary and its fonts are vendored, so the UI loads no CDN assets. Paired with
-local model servers such as [Ollama](/providers/multiple-ollama),
-[SGLang](/providers/sglang), or [vLLM](/providers/vllm), the gateway needs no
-route to the public internet.
+**GoModel runs fully air-gapped.** There is no telemetry, no analytics, and no
+license check. The admin dashboard is embedded in the binary and its fonts are
+vendored, so the UI loads no CDN assets. Paired with local model servers such
+as [Ollama](/providers/multiple-ollama), [SGLang](/providers/sglang), or
+[vLLM](/providers/vllm), the gateway needs no route to the public internet.
 
-There is exactly one outbound call that is not to a configured provider: the
-model metadata registry at `MODEL_LIST_URL`, which supplies pricing, context
-windows, and capabilities. It is fetched in a background goroutine at startup
-and again on each cache refresh.
+By default the gateway makes exactly two outbound calls that are not to a
+configured provider, and one switch turns both off:
 
-That fetch is best-effort. When it fails the gateway boots normally, `/health`
-and `/health/ready` return `200`, provider discovery still works because model
-lists come from each provider's own `/models` endpoint, and requests route
-normally. What you lose is metadata enrichment.
+```bash
+GOMODEL_OFFLINE=true
+```
+
+| Call | What it does | Default |
+| --- | --- | --- |
+| [Update check](/advanced/version-awareness) at `GOMODEL_VERSION_CHECK_URL` | Daily fetch of the latest release number, with an anonymous install id | on |
+| [Model catalog](/advanced/model-metadata) at `MODEL_LIST_URL` | Pricing, context windows, and capabilities, fetched at startup and on each cache refresh | on |
+
+`GOMODEL_OFFLINE=true` (or `offline: true` in `config.yaml`) disables the
+update check and drops any HTTP catalog URL. It is applied after every other
+setting, so nothing in `config.yaml` or the environment can re-enable an
+outbound call underneath it. Calls to configured providers and to anything you
+declared yourself, such as an OTLP collector, MCP upstreams, or a vector
+store, are untouched. The startup log confirms the mode.
+
+You can also control the two calls individually with
+`GOMODEL_VERSION_CHECK_ENABLED=false` and `MODEL_LIST_URL=off`.
+
+The catalog fetch is best-effort. When it is off or fails, the gateway boots
+normally, `/health` and `/health/ready` return `200`, provider discovery still
+works because model lists come from each provider's own `/models` endpoint,
+and requests route normally. What you lose is metadata enrichment.
 
 <Warning>
   Without metadata enrichment, models have **no pricing**. Cost tracking then
   reports no cost, and since [budgets](/features/budgets) read spend from usage
   cost records, budgets have nothing to charge against and will not enforce
   spend limits.
-
-  Fix it either by mirroring the model list internally and pointing
-  `MODEL_LIST_URL` at your mirror, or by declaring pricing per model under
-  `providers.<name>.models[].metadata.pricing` in `config.yaml`.
 </Warning>
 
+Keep pricing in an air gap in one of three ways:
+
+1. **Ship the catalog as a file.** Download `models.min.json` outside the air
+   gap, copy it in, and point the gateway at it. A local file is read, never
+   fetched, so it stays active under `GOMODEL_OFFLINE=true`:
+
+   ```bash
+   MODEL_LIST_URL=/etc/gomodel/models.json   # or file:///etc/gomodel/models.json
+   ```
+
+   The file is re-read on every cache refresh, so replacing it on disk updates
+   pricing without a restart.
+2. **Mirror it.** Serve the file from an internal HTTP host and set
+   `MODEL_LIST_URL` to that URL. Leave `GOMODEL_OFFLINE` unset and disable the
+   update check separately, or point `GOMODEL_VERSION_CHECK_URL` at an
+   internal mirror too.
+3. **Declare pricing per model** under `providers.<name>.models[].metadata.pricing`
+   in `config.yaml`.
+
 <Note>
-  To disable the fetch entirely — for fully air-gapped installs — set
-  `MODEL_LIST_URL=off` (or `cache.model.model_list.url: "off"` in
-  `config.yaml`). Setting the variable to an empty string does **not**
-  disable it: empty env values are skipped, so the default URL survives.
-  To redirect the fetch instead, point `MODEL_LIST_URL` at an internal
-  mirror.
+  Setting `MODEL_LIST_URL` to an empty string does **not** disable the
+  download: empty env values are skipped, so the default URL survives. Use
+  `off` or `GOMODEL_OFFLINE=true`.
 </Note>
 
 If a Bedrock provider is configured, the AWS SDK may also probe the link-local
@@ -270,11 +331,13 @@ itself, which works in a distroless image with no shell or `curl`.
 | Purpose | HTTP | CLI | Checks |
 | --- | --- | --- | --- |
 | Liveness | `GET /health` | `gomodel --health` | Nothing. Confirms the listener answers. |
-| Readiness | `GET /health/ready` | `gomodel --ready` | Storage (503 if down), Redis (degraded, still 200). |
+| Readiness | `GET /health/ready` | `gomodel --ready` | Storage (503 if down), Redis (degraded, still 200), extension components (degraded: 200, down: 503). |
 
-Point Kubernetes readiness at `/health/ready`, not `/health`. A Helm chart is
-included in the repository under `helm/`; check its probe paths and its
-`replicaCount` against the storage backend you chose before using it as-is.
+Point Kubernetes readiness at `/health/ready`, not `/health`. The Helm chart in
+the repository's `helm/` directory does this already, runs the gateway as the
+image's non-root user on a read-only filesystem, keeps SQLite on a persistent
+volume, and refuses more than one replica until you switch `storage.type` to
+`postgresql` or `mongodb`. See `helm/README.md` for the values.
 
 <Note>
   Readiness does not wait for the model catalog, which loads asynchronously. A
@@ -361,10 +424,16 @@ if the file size matters.
 - **Keep `BODY_SIZE_LIMIT` sane.** It defaults to `10M` and is what stops an
   oversized body becoming a memory-exhaustion vector. An unparseable value falls
   back to the default with only a warning, so check the spelling.
+- **Keep `STREAM_STALL_TIMEOUT` on.** It defaults to `60` seconds and is what
+  frees the goroutine and upstream provider connection a client holds when it
+  opens a stream and stops reading. Disabling it (`0`) lets such a client pin
+  both until the provider-side `HTTP_TIMEOUT` expires.
 - **Leave `pprof` disabled.** It is off by default and unauthenticated when on.
 - **Scope managed API keys.** Give each consumer its own key with its own
   [user path](/features/user-path), which is also what makes per-consumer rate
-  limits and budgets possible. Grant `dashboard_access` only where needed.
+  limits and budgets possible. Grant `dashboard_access` and
+  [`passthrough_access`](/features/passthrough-api#access-control) only where
+  needed.
 
 ## Production checklist
 
@@ -382,6 +451,6 @@ if the file size matters.
   `terminationGracePeriodSeconds` above 30.
 - Enable metrics and alert on `gomodel_circuit_breaker_state` and on
   `usage log buffer full`.
-- For air-gapped installs, mirror `MODEL_LIST_URL` (or disable it with
-  `MODEL_LIST_URL=off`) and declare model pricing in config so cost tracking
-  and budgets keep working.
+- For air-gapped installs, set `GOMODEL_OFFLINE=true`, then ship the model
+  catalog as a file or declare model pricing in config so cost tracking and
+  budgets keep working.

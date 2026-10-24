@@ -7,6 +7,9 @@
   // (providerStatusBadgeClass), so its palette rules must stay in this file
   // where the compiler can see the pill markup.
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import { gomodelPath } from "$lib/api/paths.js";
+  import { modelsStore } from "$lib/stores/models.svelte.js";
+  import { router } from "$lib/stores/router.svelte.js";
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { formatNumber } from "$lib/utils/format.js";
   import { providerStatusState } from "./overviewState.svelte.js";
@@ -26,6 +29,21 @@
 
   const expanded = $derived(providerStatusState.cardExpanded(provider));
   const formatTimestamp = (ts) => timezone.formatTimestamp(ts);
+
+  // The models count links to the Models page filtered to this provider. A
+  // real href keeps open-in-new-tab working (unfiltered there); a normal
+  // click routes in-app with the filter applied. The filter is text, so the
+  // category is reset to "all" first: switching categories clears it.
+  const modelsHref = gomodelPath("/admin/dashboard/models");
+  function openProviderModels(event) {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+    event.preventDefault();
+    if (modelsStore.activeCategory !== "all") {
+      modelsStore.selectCategory("all");
+    }
+    modelsStore.filter = provider.name;
+    router.navigate("models");
+  }
 </script>
 
 <article class="provider-status-card">
@@ -61,13 +79,18 @@
   </div>
 
   <div class="provider-status-meta">
-    <div class="provider-status-meta-item">
+    <a
+      class="provider-status-meta-item provider-status-meta-link"
+      href={modelsHref}
+      title={m.overview_view_provider_models({ provider: provider.name })}
+      onclick={openProviderModels}
+    >
       <span class="provider-status-meta-label">{m.overview_models_available()}</span>
       <!-- A stale inventory is carried for direct requests only; the models
            are hidden from the model list, so advertise 0 here. -->
       <span class="provider-status-meta-value mono"
       >{formatNumber(provider.runtime?.inventory_stale ? 0 : provider.runtime?.discovered_model_count)}</span>
-    </div>
+    </a>
     <div class="provider-status-meta-item">
       <span class="provider-status-meta-label">{m.overview_last_checked()}</span>
       <span
@@ -224,6 +247,27 @@
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: 6px;
+  }
+
+  .provider-status-meta-link {
+    color: inherit;
+    text-decoration: none;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+
+  .provider-status-meta-link:hover {
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+  }
+
+  .provider-status-meta-link:hover .provider-status-meta-value {
+    color: var(--accent);
+  }
+
+  .provider-status-meta-link:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 32%, transparent);
+    outline-offset: 2px;
   }
 
   .provider-status-meta-label {

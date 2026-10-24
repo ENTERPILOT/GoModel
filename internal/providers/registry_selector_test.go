@@ -4,15 +4,18 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
-// TestRegistrySelectorLookupsMatchStringLookups pins the selector-keyed fast
-// path to the qualified-string lookups it shortcuts: for every selector shape
+// TestRegistrySelectorLookupMatchesStringLookup pins the selector-keyed fast
+// path to the qualified-string lookup it shortcuts: for every selector shape
 // (provider bucket hit, raw slash-shaped model ID, unknown model, unknown
 // provider, configured provider with a foreign model, empty parts), both
-// paths must answer identically.
-func TestRegistrySelectorLookupsMatchStringLookups(t *testing.T) {
+// paths must return the same entry.
+func TestRegistrySelectorLookupMatchesStringLookup(t *testing.T) {
 	registry := NewModelRegistry()
 	registry.RegisterProviderWithNameAndType(&registryMockProvider{
 		name: "openai-primary",
@@ -28,9 +31,7 @@ func TestRegistrySelectorLookupsMatchStringLookups(t *testing.T) {
 			Data:   []core.Model{{ID: "meta-llama/llama-3-70b", Object: "model", OwnedBy: "meta"}},
 		},
 	}, "groq", "groq")
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	require.NoError(t, registry.Initialize(context.Background()))
 
 	selectors := []core.ModelSelector{
 		{Provider: "openai-primary", Model: "gpt-4o"},
@@ -48,18 +49,7 @@ func TestRegistrySelectorLookupsMatchStringLookups(t *testing.T) {
 	for _, selector := range selectors {
 		qualified := selector.QualifiedModel()
 		t.Run(qualified, func(t *testing.T) {
-			if got, want := registry.SupportsSelector(selector), registry.Supports(qualified); got != want {
-				t.Errorf("SupportsSelector = %v, Supports(%q) = %v", got, qualified, want)
-			}
-			if got, want := registry.GetProviderForSelector(selector), registry.GetProvider(qualified); got != want {
-				t.Errorf("GetProviderForSelector = %v, GetProvider(%q) = %v", got, qualified, want)
-			}
-			if got, want := registry.GetProviderTypeForSelector(selector), registry.GetProviderType(qualified); got != want {
-				t.Errorf("GetProviderTypeForSelector = %q, GetProviderType(%q) = %q", got, qualified, want)
-			}
-			if got, want := registry.GetProviderNameForSelector(selector), registry.GetProviderName(qualified); got != want {
-				t.Errorf("GetProviderNameForSelector = %q, GetProviderName(%q) = %q", got, qualified, want)
-			}
+			assert.Same(t, registry.GetModel(qualified), registry.GetModelForSelector(selector))
 		})
 	}
 }

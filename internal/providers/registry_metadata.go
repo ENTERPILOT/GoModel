@@ -514,10 +514,10 @@ func (a *registryAccessor) GetProviderType(modelID string) string {
 	if !ok {
 		return ""
 	}
-	if providerType := strings.TrimSpace(info.ProviderType); providerType != "" {
-		return providerType
+	if info.ProviderType != "" {
+		return info.ProviderType
 	}
-	return strings.TrimSpace(a.providerTypes[info.Provider])
+	return a.providerTypes[info.Provider]
 }
 
 func (a *registryAccessor) SetMetadata(modelID string, meta *core.ModelMetadata) {

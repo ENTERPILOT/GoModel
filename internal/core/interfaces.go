@@ -197,6 +197,38 @@ type RoutableProvider interface {
 	GetProviderType(model string) string
 }
 
+// MessagesTokenCounter is implemented by providers that count the input tokens
+// of an Anthropic Messages request exactly through an endpoint of their own.
+// It is optional: the router answers ErrMessagesTokenCountUnsupported for a
+// route whose provider lacks it, and the Messages API estimates instead. The
+// body is the client's original request; the provider forwards the fields its
+// endpoint accepts with model replaced by the resolved one.
+type MessagesTokenCounter interface {
+	CountMessagesTokens(ctx context.Context, model string, body []byte) (int, error)
+}
+
+// ChatTokenCounter is implemented by providers that count the input tokens of
+// a canonical chat request exactly through an endpoint of their own (OpenAI's
+// /responses/input_tokens). It serves Messages token counts for providers
+// without a MessagesTokenCounter. It is optional: the router answers
+// ErrMessagesTokenCountUnsupported for a route whose provider lacks it, and so
+// may the provider for a request its endpoint cannot count; the caller then
+// estimates.
+type ChatTokenCounter interface {
+	CountChatTokens(ctx context.Context, req *ChatRequest) (int, error)
+}
+
+// UnlistedModelAcceptor is implemented by providers that serve model IDs
+// their listing omits, such as TypeSafe's versioned Jev IDs (jev-1.13.0), so a
+// virtual model can target a provider-qualified name the catalog lacks.
+type UnlistedModelAcceptor interface {
+	AcceptsUnlistedModels() bool
+}
+
+// ErrMessagesTokenCountUnsupported reports that the provider owning a model
+// has no token counting endpoint, or none that can count the given request.
+var ErrMessagesTokenCountUnsupported = errors.New("provider has no token counting endpoint")
+
 // ProviderNameResolver is an optional interface for components that can map a
 // routed model selector back to the concrete configured provider instance name.
 type ProviderNameResolver interface {
@@ -223,11 +255,19 @@ type AvailabilityChecker interface {
 	// CheckAvailability verifies the provider's backend service is reachable.
 	// Returns nil if available, error otherwise. Initialization logs failures but
 	// keeps the provider registered so later refreshes can retry discovery.
+	//
+	// The caller owns the deadline: implementations honor ctx and must not
+	// impose a timeout of their own, so startup and the request path can each
+	// probe on the budget that suits them.
 	CheckAvailability(ctx context.Context) error
 }
 
 // ModelLookup defines the interface for looking up models and their providers.
 // This abstraction allows the Router to be decoupled from the concrete ModelRegistry implementation.
+//
+// Implementations normalize on write: every provider name, provider type, and
+// model ID they return is whitespace-trimmed, so callers compare the values
+// directly.
 type ModelLookup interface {
 	// Supports returns true if the registry has a provider for the given model
 	Supports(model string) bool

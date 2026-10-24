@@ -63,7 +63,7 @@ Every check carries:
 | ------------------- | ----------- | ----------------------------------- |
 | `X-GoModel-Version` | `0.1.81`    | the release you are running         |
 | `X-GoModel-App`     | `GoModel`   | `GoModel` or `GoModel Pro`          |
-| `X-GoModel-Install` | a UUID      | random per-deployment id, see below |
+| `X-GoModel-Install` | a UUID      | anonymous per-deployment id, below  |
 | `X-GoModel-Source`  | `scheduled` | `scheduled` or `dashboard`          |
 
 A check triggered by a dashboard visit also forwards an **allowlisted** slice of
@@ -80,10 +80,31 @@ personal data. Neither is ever sent.
 
 ### The install identifier
 
-A random UUID stored in `install-id` in the gateway's data directory, created on
-first use. It encodes nothing about your host, your organization, or your
-configuration; it exists only so repeated checks from one deployment count as
-one deployment. Disabling the check means it is never created.
+A random UUID chosen on first use. It encodes nothing about your host, your
+organization, your configuration, or your master key; it exists only so
+repeated checks from one deployment count as one deployment. Disabling the
+check means it is never created.
+
+It is kept in the deployment's database, under the `install_id` key in the
+`runtime_settings` table (or collection), and mirrored to `install-id` in the
+data directory. The database copy is authoritative: it survives a container
+being recreated, and replicas sharing one database report as one deployment.
+An `install-id` file from an earlier release is adopted unchanged the first time
+the gateway starts with this one, unless the database already holds an id — for
+instance because another replica sharing it started first — in which case the
+database's id wins and the file is rewritten to match. If the database cannot
+be reached at startup, the gateway uses the file (or a fresh random id) until
+it can, and switches to the database's id on a later check rather than keeping
+a provisional one for the life of the process.
+
+When neither copy exists — a container recreated without a volume, running
+SQLite — a fresh random id is generated, and the recreated container reads as a
+new deployment. Mount a volume for the data directory to keep the same id.
+
+Earlier releases derived the identifier from `GOMODEL_MASTER_KEY` in that
+situation. An id saved that way is replaced with a random one, in both the
+database and the file, the first time this release starts, so the deployment
+reports as new once.
 
 ## Turning it off if you don't want to get the updates
 
@@ -97,7 +118,11 @@ dashboard simply shows no update notice.
 
 ## Air-gapped and mirrored deployments
 
-Point the check at your own host and serve `core.txt` (or `pro.txt`) from it:
+`GOMODEL_OFFLINE=true` turns the check off together with the remote model
+catalog download; see the
+[production guide](/guides/production#air-gapped-and-offline-deployments).
+
+To keep update notices inside an air gap instead, point the check at your own host and serve `core.txt` (or `pro.txt`) from it:
 
 ```bash
 GOMODEL_VERSION_CHECK_URL=https://releases.internal.example.com/version

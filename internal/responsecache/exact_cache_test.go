@@ -1,7 +1,6 @@
 package responsecache
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,9 +12,12 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/cache"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
 var benchmarkStreamingBody = []byte(`{"model":"gpt-4","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
@@ -113,6 +115,18 @@ func resolvedWorkflow(providerType, model string) *core.Workflow {
 	}
 }
 
+// postWithWorkflow builds the request the inference service hands to the
+// cache: a JSON POST carrying the resolved workflow on its context.
+func postWithWorkflow(t *testing.T, target string, body []byte, workflow *core.Workflow, opts ...echotest.Option) (*echo.Context, *httptest.ResponseRecorder) {
+	t.Helper()
+	c, rec := echotest.Post(t, target, body, opts...)
+	if workflow != nil {
+		req := c.Request()
+		c.SetRequest(req.WithContext(core.WithWorkflow(req.Context(), workflow)))
+	}
+	return c, rec
+}
+
 // driveHandleRequest exercises the production cache entry the way the
 // translated inference service does: workflow on the request context, the
 // patched body passed explicitly, and next writing the LLM response through
@@ -126,33 +140,15 @@ func driveHandleRequest(
 	next func(c *echo.Context) error,
 ) *httptest.ResponseRecorder {
 	t.Helper()
-	rec, err := driveHandleRequestResult(mw, workflow, body, headers, next)
-	if err != nil {
-		t.Fatalf("HandleRequest: %v", err)
-	}
-	return rec
-}
-
-func driveHandleRequestResult(
-	mw *ResponseCacheMiddleware,
-	workflow *core.Workflow,
-	body []byte,
-	headers map[string]string,
-	next func(c *echo.Context) error,
-) (*httptest.ResponseRecorder, error) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
+	opts := make([]echotest.Option, 0, len(headers))
 	for name, value := range headers {
-		req.Header.Set(name, value)
+		opts = append(opts, echotest.WithHeader(name, value))
 	}
-	if workflow != nil {
-		req = req.WithContext(core.WithWorkflow(req.Context(), workflow))
-	}
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := postWithWorkflow(t, "/v1/chat/completions", body, workflow, opts...)
 	err := mw.HandleRequest(c, body, func() error { return next(c) })
-	return rec, err
+	require.NoError(t, err)
+
+	return rec
 }
 
 func TestHandleRequest_ExactCacheHit(t *testing.T) {
@@ -168,29 +164,17 @@ func TestHandleRequest_ExactCacheHit(t *testing.T) {
 	}
 
 	rec := driveHandleRequest(t, mw, workflow, body, nil, next)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("first request: got status %d", rec.Code)
-	}
-	if rec.Header().Get("X-Cache") != "" {
-		t.Fatalf("first request should not have X-Cache: %s", rec.Header().Get("X-Cache"))
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Empty(t, rec.Header().Get("X-Cache"))
 
 	// Wait for the tracked background write to complete before the second request.
 	mw.simple.wg.Wait()
 
 	rec2 := driveHandleRequest(t, mw, workflow, body, nil, next)
-	if rec2.Code != http.StatusOK {
-		t.Fatalf("second request: got status %d", rec2.Code)
-	}
-	if rec2.Header().Get("X-Cache") != "HIT (exact)" {
-		t.Fatalf("second request should have X-Cache=HIT (exact), got %s", rec2.Header().Get("X-Cache"))
-	}
-	if !bytes.Contains(rec2.Body.Bytes(), []byte("cached")) {
-		t.Fatalf("cached response body missing expected content: %s", rec2.Body.String())
-	}
-	if callCount != 1 {
-		t.Fatalf("exact hit should not call next again, callCount=%d", callCount)
-	}
+	require.Equal(t, http.StatusOK, rec2.Code)
+	require.Equal(t, "HIT (exact)", rec2.Header().Get("X-Cache"))
+	require.Contains(t, rec2.Body.String(), "cached")
+	require.Equal(t, 1, callCount)
 }
 
 func TestHandleRequest_DifferentBodyDifferentKey(t *testing.T) {
@@ -206,15 +190,12 @@ func TestHandleRequest_DifferentBodyDifferentKey(t *testing.T) {
 	body2 := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"bye"}]}`)
 
 	rec1 := driveHandleRequest(t, mw, workflow, body1, nil, next)
-	if rec1.Header().Get("X-Cache") != "" {
-		t.Fatal("first request should miss")
-	}
+	require.Empty(t, rec1.Header().Get("X-Cache"))
+
 	mw.simple.wg.Wait()
 
 	rec2 := driveHandleRequest(t, mw, workflow, body2, nil, next)
-	if rec2.Header().Get("X-Cache") != "" {
-		t.Fatal("different body should miss cache")
-	}
+	require.Empty(t, rec2.Header().Get("X-Cache"))
 }
 
 func TestStoreAfter_CoalescesConcurrentIdenticalMisses(t *testing.T) {
@@ -254,14 +235,10 @@ func TestStoreAfter_CoalescesConcurrentIdenticalMisses(t *testing.T) {
 	}
 	close(release)
 	wg.Wait()
+	require.Equal(t, int32(1), calls.Load())
 
-	if got := calls.Load(); got != 1 {
-		t.Fatalf("provider calls = %d, want one coalesced miss", got)
-	}
 	for i := range requests {
-		if errs[i] != nil {
-			t.Fatalf("request %d: %v", i, errs[i])
-		}
+		require.NoError(t, errs[i], "request %d", i)
 	}
 }
 
@@ -283,13 +260,12 @@ func TestStoreAfter_CanceledFollowerDoesNotWaitForLeader(t *testing.T) {
 	followerCtx, cancel := context.WithCancel(context.Background())
 	cancel()
 	follower := &blockingMissExchange{ctx: followerCtx}
-	if err := m.StoreAfter(follower, body, func() error { return nil }); !errors.Is(err, context.Canceled) {
-		t.Fatalf("canceled follower error = %v, want context.Canceled", err)
-	}
+	err := m.StoreAfter(follower, body, func() error { return nil })
+	require.ErrorIs(t, err, context.Canceled)
+
 	close(release)
-	if err := <-leaderDone; err != nil {
-		t.Fatalf("leader error: %v", err)
-	}
+	err = <-leaderDone
+	require.NoError(t, err)
 }
 
 func TestStoreAfter_LeaderErrorIsNotFannedOut(t *testing.T) {
@@ -327,18 +303,14 @@ func TestStoreAfter_LeaderErrorIsNotFannedOut(t *testing.T) {
 		<-waiter
 	}
 	close(release)
-	if err := <-leaderDone; !errors.Is(err, leaderErr) {
-		t.Fatalf("leader error = %v, want %v", err, leaderErr)
-	}
+	err := <-leaderDone
+	require.ErrorIs(t, err, leaderErr)
+
 	wg.Wait()
 	for i, err := range errs {
-		if err != nil {
-			t.Fatalf("follower %d inherited leader error: %v", i, err)
-		}
+		require.NoError(t, err, "follower %d", i)
 	}
-	if got := followerCalls.Load(); got != followers {
-		t.Fatalf("follower provider calls = %d, want %d independent retries", got, followers)
-	}
+	require.Equal(t, int32(followers), followerCalls.Load())
 }
 
 func TestStoreAfter_CacheableFollowerStoresAfterNonCacheableLeader(t *testing.T) {
@@ -365,17 +337,16 @@ func TestStoreAfter_CacheableFollowerStoresAfterNonCacheableLeader(t *testing.T)
 	}()
 	<-joined
 	close(release)
-	if err := <-leaderDone; err != nil {
-		t.Fatalf("leader error: %v", err)
-	}
-	if err := <-followerDone; err != nil {
-		t.Fatalf("follower error: %v", err)
-	}
+	err := <-leaderDone
+	require.NoError(t, err)
+	err = <-followerDone
+	require.NoError(t, err)
+
 	m.wg.Wait()
-	key := hashRequest("/v1/chat/completions", body, nil)
-	if cached, err := store.Get(context.Background(), key); err != nil || len(cached) == 0 {
-		t.Fatalf("cached follower response = %q, err=%v", cached, err)
-	}
+	key := hashRequest("/v1/chat/completions", body, nil, "")
+	cached, err := store.Get(context.Background(), key)
+	require.NoError(t, err)
+	require.NotEmpty(t, cached)
 }
 
 func TestStoreAfter_LeaderPanicReleasesMiss(t *testing.T) {
@@ -389,22 +360,17 @@ func TestStoreAfter_LeaderPanicReleasesMiss(t *testing.T) {
 			panic("provider panic")
 		})
 	}()
-	if recovered == nil {
-		t.Fatal("leader panic did not propagate")
-	}
+	require.NotNil(t, recovered)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	var calls atomic.Int32
-	if err := m.StoreAfter(&blockingMissExchange{ctx: ctx}, body, func() error {
+	err := m.StoreAfter(&blockingMissExchange{ctx: ctx}, body, func() error {
 		calls.Add(1)
 		return nil
-	}); err != nil {
-		t.Fatalf("request after leader panic: %v", err)
-	}
-	if got := calls.Load(); got != 1 {
-		t.Fatalf("provider calls after leader panic = %d, want 1", got)
-	}
+	})
+	require.NoError(t, err)
+	require.Equal(t, int32(1), calls.Load())
 }
 
 func TestHashRequest_CanonicalizesJSONFormattingAndKeyOrder(t *testing.T) {
@@ -426,11 +392,9 @@ func TestHashRequest_CanonicalizesJSONFormattingAndKeyOrder(t *testing.T) {
 		{name: "oversized number before duplicate names", first: `{"n":1e1000000,"model":"a","model":"b"}`, second: `{"n":1e1000000,"model":"b"}`, equal: false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			first := hashRequest("/v1/embeddings", []byte(tt.first), plan)
-			second := hashRequest("/v1/embeddings", []byte(tt.second), plan)
-			if got := first == second; got != tt.equal {
-				t.Fatalf("key equality = %v, want %v: %s / %s", got, tt.equal, first, second)
-			}
+			first := hashRequest("/v1/embeddings", []byte(tt.first), plan, "")
+			second := hashRequest("/v1/embeddings", []byte(tt.second), plan, "")
+			require.Equal(t, tt.equal, first == second, "%s / %s", first, second)
 		})
 	}
 }
@@ -446,11 +410,9 @@ func TestHashRequest_DuplicateNamesDoNotCollideAfterTypedDecoding(t *testing.T) 
 		{path: "/v1/responses", duplicate: `{"model":"a","model":"b","input":[]}`, collapsed: `{"model":"b","input":[]}`},
 	} {
 		t.Run(tt.path, func(t *testing.T) {
-			first := hashRequest(tt.path, []byte(tt.duplicate), plan)
-			second := hashRequest(tt.path, []byte(tt.collapsed), plan)
-			if first == second {
-				t.Fatal("duplicate-member request collided with its collapsed form")
-			}
+			first := hashRequest(tt.path, []byte(tt.duplicate), plan, "")
+			second := hashRequest(tt.path, []byte(tt.collapsed), plan, "")
+			require.NotEqual(t, second, first)
 		})
 	}
 }
@@ -463,17 +425,15 @@ func TestHashRequest_ResolvedModelChangesKey(t *testing.T) {
 		Resolution: &core.RequestModelResolution{
 			ResolvedSelector: core.ModelSelector{Provider: "openai", Model: "gpt-5-nano"},
 		},
-	})
+	}, "")
 	second := hashRequest("/v1/chat/completions", body, &core.Workflow{
 		Mode: core.ExecutionModeTranslated,
 		Resolution: &core.RequestModelResolution{
 			ResolvedSelector: core.ModelSelector{Provider: "anthropic", Model: "claude-opus-4-6"},
 		},
-	})
+	}, "")
 
-	if first == second {
-		t.Fatal("resolved model should affect cache key")
-	}
+	require.NotEqual(t, second, first)
 }
 
 func TestHashRequest_ModeChangesKey(t *testing.T) {
@@ -481,14 +441,12 @@ func TestHashRequest_ModeChangesKey(t *testing.T) {
 
 	first := hashRequest("/v1/chat/completions", body, &core.Workflow{
 		Mode: core.ExecutionModeTranslated,
-	})
+	}, "")
 	second := hashRequest("/v1/chat/completions", body, &core.Workflow{
 		Mode: core.ExecutionModePassthrough,
-	})
+	}, "")
 
-	if first == second {
-		t.Fatal("execution mode should affect cache key")
-	}
+	require.NotEqual(t, second, first)
 }
 
 func TestHashRequest_StreamIncludeUsageChangesKey(t *testing.T) {
@@ -502,12 +460,10 @@ func TestHashRequest_StreamIncludeUsageChangesKey(t *testing.T) {
 		},
 	}
 
-	first := hashRequest("/v1/chat/completions", base, plan)
-	second := hashRequest("/v1/chat/completions", withUsage, plan)
+	first := hashRequest("/v1/chat/completions", base, plan, "")
+	second := hashRequest("/v1/chat/completions", withUsage, plan, "")
 
-	if first == second {
-		t.Fatal("stream_options.include_usage should affect the exact cache key")
-	}
+	require.NotEqual(t, second, first)
 }
 
 func TestHashRequest_StreamModeChangesKey(t *testing.T) {
@@ -521,12 +477,10 @@ func TestHashRequest_StreamModeChangesKey(t *testing.T) {
 		},
 	}
 
-	first := hashRequest("/v1/chat/completions", base, plan)
-	second := hashRequest("/v1/chat/completions", streaming, plan)
+	first := hashRequest("/v1/chat/completions", base, plan, "")
+	second := hashRequest("/v1/chat/completions", streaming, plan, "")
 
-	if first == second {
-		t.Fatal("stream mode should affect the exact cache key")
-	}
+	require.NotEqual(t, second, first)
 }
 
 func TestHandleRequest_SeparatesStreamingAndNonStreamingEntries(t *testing.T) {
@@ -557,55 +511,150 @@ func TestHandleRequest_SeparatesStreamingAndNonStreamingEntries(t *testing.T) {
 	streamingBody := []byte(`{"model":"gpt-4","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
 
 	rec1 := driveHandleRequest(t, mw, workflow, nonStreamingBody, nil, makeNext(nonStreamingBody))
-	if rec1.Header().Get("X-Cache") != "" {
-		t.Fatalf("first request should miss cache, got X-Cache=%q", rec1.Header().Get("X-Cache"))
-	}
+	require.Empty(t, rec1.Header().Get("X-Cache"))
 
 	mw.simple.wg.Wait()
 
 	rec2 := driveHandleRequest(t, mw, workflow, streamingBody, nil, makeNext(streamingBody))
-	if got := rec2.Header().Get("X-Cache"); got != "" {
-		t.Fatalf("streaming request should miss exact cache because stream mode is keyed separately, got X-Cache=%q", got)
-	}
-	if got := rec2.Header().Get("Content-Type"); got != "text/event-stream" {
-		t.Fatalf("streaming miss Content-Type = %q, want text/event-stream", got)
-	}
-	if !bytes.Equal(rec2.Body.Bytes(), rawStream) {
-		t.Fatalf("streaming miss body = %q, want original SSE payload", rec2.Body.String())
-	}
-	if callCount != 2 {
-		t.Fatalf("expected separate stream miss to call handler again, got %d calls", callCount)
-	}
+	require.Empty(t, rec2.Header().Get("X-Cache"))
+	require.Equal(t, "text/event-stream", rec2.Header().Get("Content-Type"))
+	require.Equal(t, rawStream, rec2.Body.Bytes())
+	require.Equal(t, 2, callCount)
 
 	mw.simple.wg.Wait()
 
 	rec3 := driveHandleRequest(t, mw, workflow, streamingBody, nil, makeNext(streamingBody))
-	if got := rec3.Header().Get("X-Cache"); got != "HIT (exact)" {
-		t.Fatalf("streaming follow-up should hit its own exact cache entry, got X-Cache=%q", got)
-	}
-	if got := rec3.Header().Get("Content-Type"); got != "text/event-stream" {
-		t.Fatalf("streaming cache hit Content-Type = %q, want text/event-stream", got)
-	}
-	if !bytes.Equal(rec3.Body.Bytes(), rawStream) {
-		t.Fatalf("streaming cache hit body = %q, want verbatim SSE replay", rec3.Body.String())
-	}
-	if callCount != 2 {
-		t.Fatalf("expected streaming replay to avoid a third handler call, got %d calls", callCount)
-	}
+	require.Equal(t, "HIT (exact)", rec3.Header().Get("X-Cache"))
+	require.Equal(t, "text/event-stream", rec3.Header().Get("Content-Type"))
+	require.Equal(t, rawStream, rec3.Body.Bytes())
+	require.Equal(t, 2, callCount)
 
 	rec4 := driveHandleRequest(t, mw, workflow, nonStreamingBody, nil, makeNext(nonStreamingBody))
-	if got := rec4.Header().Get("X-Cache"); got != "HIT (exact)" {
-		t.Fatalf("non-streaming follow-up should hit its own exact cache entry, got X-Cache=%q", got)
+	require.Equal(t, "HIT (exact)", rec4.Header().Get("X-Cache"))
+	require.Equal(t, "application/json", rec4.Header().Get("Content-Type"))
+	require.Contains(t, rec4.Body.String(), "json cached response")
+	require.Equal(t, 2, callCount)
+}
+
+// driveChainedRequest drives HandleRequest with a guardrail chain identity on
+// the request context, the way the inference orchestrator does for a request
+// whose workflow declares guardrail steps.
+func driveChainedRequest(
+	t *testing.T,
+	mw *ResponseCacheMiddleware,
+	workflow *core.Workflow,
+	chainHash string,
+	body []byte,
+	next func(c *echo.Context) error,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	c, rec := postWithWorkflow(t, "/v1/chat/completions", body, workflow)
+	req := c.Request()
+	c.SetRequest(req.WithContext(core.WithGuardrailsHash(req.Context(), chainHash)))
+	err := mw.HandleRequest(c, body, func() error { return next(c) })
+	require.NoError(t, err)
+
+	return rec
+}
+
+func TestHashRequest_GuardrailChainChangesKey(t *testing.T) {
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`)
+	plan := resolvedWorkflow("openai", "gpt-4")
+
+	none := hashRequest("/v1/chat/completions", body, plan, "")
+	chainA := hashRequest("/v1/chat/completions", body, plan, "chain-a")
+	chainB := hashRequest("/v1/chat/completions", body, plan, "chain-b")
+
+	require.NotEqual(t, chainA, none)
+	require.NotEqual(t, chainB, chainA)
+	require.Equal(t, hashRequest("/v1/chat/completions", body, plan, "chain-a"), chainA)
+}
+
+// A body cached under one guardrail chain must never be replayed to a request
+// whose response/stream chain differs: the replay skips the response phase, so
+// the entry is only valid for the chain that produced it.
+func TestHandleRequest_ExactCacheIsScopedToGuardrailChain(t *testing.T) {
+	store := cache.NewMapStore()
+	defer store.Close()
+	mw := NewResponseCacheMiddlewareWithStore(store, time.Hour)
+	workflow := resolvedWorkflow("openai", "gpt-4")
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`)
+
+	calls := 0
+	next := func(c *echo.Context) error {
+		calls++
+		return c.JSON(http.StatusOK, map[string]string{"result": "unguarded"})
 	}
-	if got := rec4.Header().Get("Content-Type"); got != "application/json" {
-		t.Fatalf("non-streaming cache hit Content-Type = %q, want application/json", got)
+	require.Empty(t, driveChainedRequest(t, mw, workflow, "", body, next).Header().Get("X-Cache"))
+
+	mw.simple.wg.Wait()
+	// Same request, same (empty) chain: still a hit.
+	require.Equal(t, "HIT (exact)", driveChainedRequest(t, mw, workflow, "", body, next).Header().Get("X-Cache"))
+	require.Equal(t, 1, calls)
+
+	// A workflow that adds a response-phase guardrail must miss instead of
+	// receiving the body stored before the guardrail existed.
+	guarded := driveChainedRequest(t, mw, workflow, "response-redaction-chain", body, func(c *echo.Context) error {
+		calls++
+		return c.JSON(http.StatusOK, map[string]string{"result": "guarded"})
+	})
+	require.Empty(t, guarded.Header().Get("X-Cache"))
+	require.Contains(t, guarded.Body.String(), "guarded")
+	require.Equal(t, 2, calls)
+
+	mw.simple.wg.Wait()
+	// The guarded entry is its own entry and replays only to its own chain.
+	require.Equal(t, "HIT (exact)", driveChainedRequest(t, mw, workflow, "response-redaction-chain", body, next).Header().Get("X-Cache"))
+	require.Equal(t, 2, calls)
+}
+
+// Two tenants sharing one cache but resolving different workflows must not
+// share entries when their guardrail chains differ, with no config change.
+func TestHandleRequest_ExactCacheIsolatesTenantsWithDifferentChains(t *testing.T) {
+	store := cache.NewMapStore()
+	defer store.Close()
+	mw := NewResponseCacheMiddlewareWithStore(store, time.Hour)
+	workflow := resolvedWorkflow("openai", "gpt-4")
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"tenant-xtalk"}]}`)
+
+	unguarded := driveChainedRequest(t, mw, workflow, "", body, func(c *echo.Context) error {
+		return c.JSON(http.StatusOK, map[string]string{"result": "ECHO"})
+	})
+	require.Empty(t, unguarded.Header().Get("X-Cache"))
+
+	mw.simple.wg.Wait()
+
+	rec := driveChainedRequest(t, mw, workflow, "tenant-b-chain", body, func(c *echo.Context) error {
+		return c.JSON(http.StatusOK, map[string]string{"result": "GUARDED"})
+	})
+	require.Empty(t, rec.Header().Get("X-Cache"))
+	require.Contains(t, rec.Body.String(), "GUARDED")
+}
+
+// A streaming reply cached under one stream chain must not replay to a request
+// whose stream guardrails differ; the SSE replay runs no stream phase.
+func TestHandleRequest_StreamReplayIsScopedToGuardrailChain(t *testing.T) {
+	store := cache.NewMapStore()
+	defer store.Close()
+	mw := NewResponseCacheMiddlewareWithStore(store, time.Hour)
+	workflow := resolvedWorkflow("openai", "gpt-4")
+	body := []byte(`{"model":"gpt-4","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+	rawStream := []byte(
+		"data: {\"id\":\"chatcmpl-stream\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"gpt-4\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"sk-secret\"},\"finish_reason\":null}]}\n\n" +
+			"data: {\"id\":\"chatcmpl-stream\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"gpt-4\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+			"data: [DONE]\n\n",
+	)
+	streamNext := func(c *echo.Context) error {
+		c.Response().Header().Set("Content-Type", "text/event-stream")
+		c.Response().WriteHeader(http.StatusOK)
+		_, err := c.Response().Write(rawStream)
+		return err
 	}
-	if !bytes.Contains(rec4.Body.Bytes(), []byte("json cached response")) {
-		t.Fatalf("non-streaming cache hit body = %q, want cached JSON response", rec4.Body.String())
-	}
-	if callCount != 2 {
-		t.Fatalf("non-streaming exact hit should not call handler again, got %d calls", callCount)
-	}
+	require.Empty(t, driveChainedRequest(t, mw, workflow, "", body, streamNext).Header().Get("X-Cache"))
+
+	mw.simple.wg.Wait()
+	require.Equal(t, "HIT (exact)", driveChainedRequest(t, mw, workflow, "", body, streamNext).Header().Get("X-Cache"))
+	require.Empty(t, driveChainedRequest(t, mw, workflow, "stream-mask-chain", body, streamNext).Header().Get("X-Cache"))
 }
 
 func TestIsStreamingRequest(t *testing.T) {
@@ -630,10 +679,7 @@ func TestIsStreamingRequest(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := isStreamingRequest(tt.path, []byte(tt.body))
-			if got != tt.want {
-				t.Errorf("isStreamingRequest(%q, %q) = %v, want %v", tt.path, tt.body, got, tt.want)
-			}
+			assert.Equal(t, tt.want, isStreamingRequest(tt.path, []byte(tt.body)))
 		})
 	}
 }
@@ -684,13 +730,9 @@ func TestHandleRequest_SkipsNoCache(t *testing.T) {
 	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`)
 	for range 2 {
 		rec := driveHandleRequest(t, mw, workflow, body, headers, next)
-		if got := rec.Header().Get("X-Cache"); got != "" {
-			t.Fatalf("no-cache request should bypass cache, got X-Cache=%q", got)
-		}
+		require.Empty(t, rec.Header().Get("X-Cache"))
 	}
-	if callCount != 2 {
-		t.Fatalf("no-cache requests should bypass cache, handler called %d times", callCount)
-	}
+	require.Equal(t, 2, callCount)
 }
 
 func TestClose_WaitsForPendingWrites(t *testing.T) {
@@ -702,16 +744,12 @@ func TestClose_WaitsForPendingWrites(t *testing.T) {
 	rec := driveHandleRequest(t, mw, workflow, body, nil, func(c *echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{"result": "ok"})
 	})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-
+	require.Equal(t, http.StatusOK, rec.Code)
 	// Close must drain any in-flight write before closing the store.
 	// If Close races store.Close against the goroutine's Set, this will
 	// panic or produce a data race under -race.
-	if err := mw.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	err := mw.Close()
+	require.NoError(t, err)
 }
 
 func TestLimitsConcurrentCacheWrites(t *testing.T) {
@@ -725,21 +763,12 @@ func TestLimitsConcurrentCacheWrites(t *testing.T) {
 	for i := range requestCount {
 		body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hi ` + string(rune('a'+i)) + `"}]}`)
 		reqWG.Go(func() {
-			e := echo.New()
-			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
-			req.Header.Set("Content-Type", "application/json")
-			req = req.WithContext(core.WithWorkflow(req.Context(), workflow))
-			rec := httptest.NewRecorder()
-			c := e.NewContext(req, rec)
+			c, rec := postWithWorkflow(t, "/v1/chat/completions", body, workflow)
 			err := mw.HandleRequest(c, body, func() error {
 				return c.JSON(http.StatusOK, map[string]string{"result": "ok"})
 			})
-			if err != nil {
-				t.Errorf("HandleRequest: %v", err)
-				return
-			}
-			if rec.Code != http.StatusOK {
-				t.Errorf("expected 200, got %d", rec.Code)
+			if assert.NoError(t, err) {
+				assert.Equal(t, http.StatusOK, rec.Code)
 			}
 		})
 	}
@@ -751,16 +780,68 @@ func TestLimitsConcurrentCacheWrites(t *testing.T) {
 			t.Fatalf("timed out waiting for cache worker %d", i+1)
 		}
 	}
-
-	if got := store.maxConcurrent.Load(); got > cacheWriteWorkerCount {
-		t.Fatalf("expected at most %d concurrent cache writes, got %d", cacheWriteWorkerCount, got)
-	}
+	require.LessOrEqual(t, store.maxConcurrent.Load(), int32(cacheWriteWorkerCount))
 
 	for range requestCount {
 		store.releaseCh <- struct{}{}
 	}
 	reqWG.Wait()
-	if err := mw.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+	err := mw.Close()
+	require.NoError(t, err)
+}
+
+func TestHandleRequest_BackgroundOnlyBypassesResponsesCreate(t *testing.T) {
+	tests := []struct {
+		name      string
+		path      string
+		body      string
+		wantCache string
+		wantCalls int
+	}{
+		{
+			name:      "responses create bypasses the cache",
+			path:      "/v1/responses",
+			body:      `{"model":"gpt-4","input":"hi","background":true}`,
+			wantCache: "",
+			wantCalls: 2,
+		},
+		{
+			name:      "chat completions still caches",
+			path:      "/v1/chat/completions",
+			body:      `{"model":"gpt-4","messages":[{"role":"user","content":"hi"}],"background":true}`,
+			wantCache: "HIT (exact)",
+			wantCalls: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := cache.NewMapStore()
+			defer store.Close()
+			mw := NewResponseCacheMiddlewareWithStore(store, time.Hour)
+			workflow := resolvedWorkflow("openai", "gpt-4")
+			body := []byte(tt.body)
+			callCount := 0
+			drive := func() *httptest.ResponseRecorder {
+				t.Helper()
+				c, rec := postWithWorkflow(t, tt.path, body, workflow)
+				err := mw.HandleRequest(c, body, func() error {
+					callCount++
+					return c.JSON(http.StatusOK, map[string]string{"id": "resp_1"})
+				})
+				require.NoError(t, err)
+
+				return rec
+			}
+			rec := drive()
+			require.Equal(t, http.StatusOK, rec.Code)
+
+			mw.simple.wg.Wait()
+
+			rec2 := drive()
+			require.Equal(t, http.StatusOK, rec2.Code)
+			require.Equal(t, tt.wantCache, rec2.Header().Get("X-Cache"))
+			require.Equal(t, tt.wantCalls, callCount)
+		})
 	}
 }

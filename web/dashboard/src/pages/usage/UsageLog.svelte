@@ -17,6 +17,7 @@
   import { usagePage } from "./usage.svelte.js";
   import SessionIDChip from "./SessionIDChip.svelte";
   import {
+    authKeyDisplayName,
     cachedCostTitle,
     costSourceTooltip,
     entryLabels,
@@ -27,6 +28,7 @@
     providerCacheTitle,
     usageEntryCacheLabel,
     usageEntryCached,
+    usageLogHasAuthKeys,
     usageLogHasLabels,
     usesResponseCostPricing,
   } from "./usage-helpers.js";
@@ -42,9 +44,30 @@
     ),
   );
 
+  const hasAuthKeys = $derived(
+    usageLogHasAuthKeys(usagePage.usageFilterAuthKey, usagePage.usageLog.entries),
+  );
+
   const onSearchInput = debounced(() => usagePage.fetchUsageLog(true));
   $effect(() => onSearchInput.cancel);
 </script>
+
+{#snippet authKeyChip(entry)}
+  {#if entry.auth_key_id}
+    {@const name = authKeyDisplayName(entry.auth_key_id, usagePage.authKeyNames)}
+    <button
+      type="button"
+      class="usage-label-chip"
+      class:active={usagePage.usageFilterAuthKey === entry.auth_key_id}
+      title={usagePage.usageFilterAuthKey === entry.auth_key_id
+        ? m.usage_clear_auth_key_filter()
+        : m.usage_filter_by_auth_key({ name, id: entry.auth_key_id })}
+      onclick={() => usagePage.toggleUsageAuthKeyFilter(entry.auth_key_id)}
+    >{name}</button>
+  {:else}
+    <span>-</span>
+  {/if}
+{/snippet}
 
 {#snippet labelChips(entry)}
   {#if entryLabels(entry).length > 0}
@@ -98,6 +121,9 @@
             <th>{m.usage_column_model()}</th>
             <th>{m.usage_column_user_path()}</th>
             <th>{m.usage_column_session()}</th>
+            {#if hasAuthKeys}
+              <th>{m.usage_column_auth_key()}</th>
+            {/if}
             {#if hasLabels}
               <th>{m.usage_column_labels()}</th>
             {/if}
@@ -134,6 +160,9 @@
                   <span>-</span>
                 {/if}
               </td>
+              {#if hasAuthKeys}
+                <td>{@render authKeyChip(entry)}</td>
+              {/if}
               {#if hasLabels}
                 <td class="usage-log-labels-cell">
                   {@render labelChips(entry)}
@@ -233,19 +262,13 @@
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 24px;
+  padding: var(--space-block);
 }
 
 .usage-log-section :global(h3) {
   font-size: 16px;
   font-weight: 600;
   margin-bottom: 16px;
-}
-
-/* The request log carries many columns (labels included); scroll sideways on
-   narrow windows instead of clipping the trailing cost columns. */
-.usage-log-section :global(.table-wrapper) {
-  overflow-x: auto;
 }
 
 .usage-log-toolbar {

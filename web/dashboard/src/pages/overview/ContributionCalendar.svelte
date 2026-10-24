@@ -114,7 +114,7 @@
     background: var(--bg-surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 24px;
+    padding: var(--space-block);
     margin-top: 24px;
   }
 
@@ -289,10 +289,6 @@
     /* Contribution calendar mobile */
     .contribution-calendar-day-labels {
         display: none;
-      }
-
-    .contribution-calendar-section {
-        padding: 16px;
       }
 
     .contribution-calendar-footer {

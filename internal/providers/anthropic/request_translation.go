@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -131,10 +132,18 @@ func convertOpenAIToolsToAnthropic(tools []map[string]any) ([]anthropicTool, err
 		if err != nil {
 			return nil, err
 		}
+		// strict tools are held to the same schema subset as structured
+		// outputs, so the schema gets the same sanitizing.
+		strict, _ := function["strict"].(bool)
+		schema := inputSchema.(map[string]any)
+		if strict {
+			schema = sanitizeAnthropicSchema(schema)
+		}
 		out = append(out, anthropicTool{
 			Name:         name,
 			Description:  description,
-			InputSchema:  inputSchema.(map[string]any),
+			InputSchema:  schema,
+			Strict:       strict,
 			CacheControl: cacheControl,
 		})
 	}
@@ -241,17 +250,33 @@ func buildAnthropicMessageContent(msg core.Message) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		extra, err := anthropicExtraContentFrom(msg.ExtraFields)
+		if err != nil {
+			return nil, err
+		}
+		// Tool results may carry images (screenshots, image files read by a
+		// tool); Anthropic accepts text and image blocks inside tool_result,
+		// so structured content is forwarded as blocks rather than flattened.
+		content, err := convertMessageContentToAnthropic(msg.Content)
+		if err != nil {
+			return nil, err
+		}
 		return []anthropicContentBlock{
 			{
 				Type:         "tool_result",
 				ToolUseID:    toolUseID,
-				Content:      core.ExtractTextContent(msg.Content),
+				Content:      content,
+				IsError:      extra.IsError,
 				CacheControl: cacheControl,
 			},
 		}, nil
 	}
 
 	content, err := convertMessageContentToAnthropic(msg.Content)
+	if err != nil {
+		return nil, err
+	}
+	content, err = prependThinkingBlocks(msg, content)
 	if err != nil {
 		return nil, err
 	}
@@ -305,14 +330,78 @@ func buildAnthropicMessageContent(msg core.Message) (any, error) {
 	return blocks, nil
 }
 
+// anthropicExtraContent is the extra_content.anthropic object the Anthropic
+// Messages ingress attaches to canonical messages.
+type anthropicExtraContent struct {
+	ThinkingBlocks []anthropicContentBlock `json:"thinking_blocks"`
+	IsError        bool                    `json:"is_error"`
+}
+
+func anthropicExtraContentFrom(fields core.UnknownJSONFields) (anthropicExtraContent, error) {
+	var extra anthropicExtraContent
+	raw := fields.ExtraContent(core.ExtraContentVendorAnthropic)
+	if len(raw) == 0 {
+		return extra, nil
+	}
+	if err := json.Unmarshal(raw, &extra); err != nil {
+		return extra, core.NewInvalidRequestError("invalid extra_content.anthropic payload", err)
+	}
+	return extra, nil
+}
+
+// prependThinkingBlocks restores the thinking blocks the Anthropic ingress
+// preserved on an assistant message. They must lead the content, unchanged,
+// so a thinking-enabled tool-use turn can continue; Anthropic ignores them
+// on models other than the one that produced them.
+func prependThinkingBlocks(msg core.Message, content any) (any, error) {
+	if msg.Role != "assistant" {
+		return content, nil
+	}
+	extra, err := anthropicExtraContentFrom(msg.ExtraFields)
+	if err != nil {
+		return nil, err
+	}
+	thinking := signedThinkingBlocks(extra.ThinkingBlocks)
+	if len(thinking) == 0 {
+		return content, nil
+	}
+	blocks := make([]anthropicContentBlock, 0, len(thinking)+1)
+	blocks = append(blocks, thinking...)
+	switch c := content.(type) {
+	case string:
+		if strings.TrimSpace(c) != "" {
+			blocks = append(blocks, anthropicContentBlock{Type: "text", Text: c})
+		}
+	case []anthropicContentBlock:
+		blocks = append(blocks, c...)
+	}
+	return blocks, nil
+}
+
+// signedThinkingBlocks keeps the replayed blocks Anthropic can accept back.
+// Anthropic rejects a thinking block whose signature it did not mint — a
+// missing one with "signature: Field required", any other with "Invalid
+// signature" — so reasoning another provider produced (which the Messages
+// dialect surfaces as a thinking block with an empty signature) is dropped
+// here instead of failing the whole turn. Redacted blocks carry opaque data
+// rather than a signature and are always kept.
+func signedThinkingBlocks(blocks []anthropicContentBlock) []anthropicContentBlock {
+	kept := make([]anthropicContentBlock, 0, len(blocks))
+	for _, block := range blocks {
+		if block.Type == "thinking" && strings.TrimSpace(block.Signature) == "" {
+			continue
+		}
+		kept = append(kept, block)
+	}
+	return kept
+}
+
 // convertToAnthropicRequest converts core.ChatRequest to Anthropic format.
 func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error) {
 	if req == nil {
 		return nil, core.NewInvalidRequestError("anthropic chat request is required", nil)
 	}
-	if err := validateAnthropicUnsupportedChatExtras(req.ExtraFields); err != nil {
-		return nil, err
-	}
+	dropUnsupportedVerbosity(req.ExtraFields)
 
 	anthropicReq := &anthropicRequest{
 		Model:         req.Model,
@@ -334,16 +423,25 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 		anthropicReq.MaxTokens = resolveDefaultMaxTokens()
 	}
 
+	dropUnsupportedSamplingParameters(anthropicReq)
+	dropConflictingSamplingParameter(anthropicReq)
+
 	if effort := resolveAnthropicReasoningEffort(req); effort != "" {
 		applyReasoning(anthropicReq, req.Model, effort)
 	}
 
-	tools, err := convertOpenAIToolsToAnthropic(req.Tools)
+	// Anthropic has no subset choice: declare only the allowed functions.
+	reqTools, reqToolChoice, err := core.NarrowToAllowedTools(req.Tools, req.ToolChoice)
+	if err != nil {
+		return nil, err
+	}
+	tools, err := convertOpenAIToolsToAnthropic(reqTools)
 	if err != nil {
 		return nil, err
 	}
 	anthropicReq.Tools = tools
-	if toolChoice, disableTools, err := convertOpenAIToolChoiceToAnthropic(req.ToolChoice); err != nil {
+	var forcedToolInstruction string
+	if toolChoice, disableTools, err := convertOpenAIToolChoiceToAnthropic(reqToolChoice); err != nil {
 		return nil, err
 	} else if err := validateAnthropicToolChoice(toolChoice, anthropicReq.Tools, disableTools); err != nil {
 		return nil, err
@@ -353,13 +451,15 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 		if toolChoice == nil && req.ParallelToolCalls != nil && !*req.ParallelToolCalls {
 			toolChoice = &anthropicToolChoice{Type: "auto"}
 		}
+		toolChoice, forcedToolInstruction = relaxForcedToolChoice(toolChoice, req.Model)
 		toolChoice = applyParallelToolCalls(toolChoice, req.ParallelToolCalls)
 		anthropicReq.ToolChoice = toolChoice
 	}
 
 	conversationStarted := false
 	for _, msg := range req.Messages {
-		if msg.Role == "system" {
+		// "developer" is OpenAI's newer name for "system"; Anthropic rejects it.
+		if msg.Role == "system" || msg.Role == "developer" {
 			systemContent, err := buildAnthropicSystemContent(msg.Content)
 			if err != nil {
 				return nil, err
@@ -396,32 +496,78 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 		})
 	}
 
+	if forcedToolInstruction != "" {
+		anthropicReq.System = appendAnthropicSystemContent(anthropicReq.System, forcedToolInstruction)
+	}
+
+	if err := applyAnthropicResponseFormat(anthropicReq, req.ExtraFields); err != nil {
+		return nil, err
+	}
+
 	return anthropicReq, nil
 }
 
-func validateAnthropicUnsupportedChatExtras(extra core.UnknownJSONFields) error {
-	for _, field := range []string{"response_format", "verbosity"} {
-		raw := bytes.TrimSpace(extra.Lookup(field))
-		if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
-			continue
-		}
-		if field == "response_format" && isNoopResponseFormat(raw) {
-			continue
-		}
-		return core.NewInvalidRequestError("chat field "+field+" is not supported by Anthropic translation", nil)
+// dropUnsupportedSamplingParameters removes temperature and top_p for models
+// that reject them outright (Opus 4.7 onward and the Claude 5 generation).
+// The values are logged so operators can see the client intent that was
+// discarded; failing the request would break every OpenAI SDK default.
+func dropUnsupportedSamplingParameters(req *anthropicRequest) {
+	if !rejectsSamplingParameters(req.Model) || (req.Temperature == nil && req.TopP == nil) {
+		return
 	}
-	return nil
+	attrs := []any{"model", req.Model}
+	if req.Temperature != nil {
+		attrs = append(attrs, "temperature", *req.Temperature)
+	}
+	if req.TopP != nil {
+		attrs = append(attrs, "top_p", *req.TopP)
+	}
+	slog.Warn("dropping sampling parameters the model does not accept", attrs...)
+	req.Temperature = nil
+	req.TopP = nil
 }
 
-func isNoopResponseFormat(raw json.RawMessage) bool {
-	var responseFormat struct {
-		Type string `json:"type"`
+// dropConflictingSamplingParameter drops top_p when the caller sent both
+// temperature and top_p. Anthropic documents the two as mutually exclusive
+// ("we generally recommend altering temperature or top_p, but not both") and
+// every current model answers a request carrying both with a 400
+// ("`temperature` and `top_p` cannot both be specified for this model"), so an
+// OpenAI SDK that fills in both defaults could not reach Anthropic at all.
+// temperature is kept because it is the parameter OpenAI clients actually vary
+// and the one Anthropic's own guidance treats as primary.
+func dropConflictingSamplingParameter(req *anthropicRequest) {
+	if req.Temperature == nil || req.TopP == nil {
+		return
 	}
-	if err := json.Unmarshal(raw, &responseFormat); err != nil {
-		return false
+	slog.Warn("dropping top_p; Anthropic accepts only one of temperature and top_p",
+		"model", req.Model, "temperature", *req.Temperature, "top_p", *req.TopP)
+	req.TopP = nil
+}
+
+// relaxForcedToolChoice downgrades tool_choice "any" and "tool" to "auto" on
+// models that reject forced tool use (Fable 5.1 and Mythos 5.1). Anthropic's
+// documented replacement is "auto" plus a prompt instruction naming the tool,
+// so the returned instruction is appended to the system prompt to preserve the
+// caller's intent as closely as the provider allows.
+func relaxForcedToolChoice(choice *anthropicToolChoice, model string) (*anthropicToolChoice, string) {
+	if choice == nil || !rejectsForcedToolChoice(model) {
+		return choice, ""
 	}
-	responseFormatType := strings.TrimSpace(responseFormat.Type)
-	return responseFormatType == "" || responseFormatType == "text"
+	var instruction string
+	switch choice.Type {
+	case "any":
+		instruction = "You must respond by calling one of the provided tools."
+	case "tool":
+		instruction = "You must respond by calling the tool named " + strconv.Quote(choice.Name) + "."
+	default:
+		return choice, ""
+	}
+	slog.Warn("tool_choice downgraded to auto; model rejects forced tool use",
+		"model", model, "tool_choice", choice.Type, "tool", choice.Name)
+	relaxed := *choice
+	relaxed.Type = "auto"
+	relaxed.Name = ""
+	return &relaxed, instruction
 }
 
 // convertResponsesRequestToAnthropic converts a canonical Responses request by
@@ -733,6 +879,17 @@ func convertMessageContentToAnthropic(content any) (any, error) {
 				Source:       source,
 				CacheControl: cacheControl,
 			})
+		case "file":
+			source, err := anthropicDocumentSource(part.File)
+			if err != nil {
+				return nil, err
+			}
+			blocks = append(blocks, anthropicContentBlock{
+				Type:         "document",
+				Source:       source,
+				Title:        strings.TrimSpace(part.File.Filename),
+				CacheControl: cacheControl,
+			})
 		case "input_audio":
 			return nil, core.NewInvalidRequestError("anthropic chat does not support input_audio content", nil)
 		default:
@@ -798,6 +955,72 @@ func anthropicImageSource(raw, mediaTypeHint string) (*anthropicContentSource, e
 		Type: "url",
 		URL:  raw,
 	}, nil
+}
+
+// anthropicDocumentSource maps a canonical file part onto an Anthropic
+// document source: a provider file_id, a base64 data: URL (PDF stays base64,
+// plain text is decoded into a text source), or an http(s) URL.
+func anthropicDocumentSource(file *core.FileContent) (*anthropicContentSource, error) {
+	if !core.ValidFilePayload(file) {
+		return nil, core.NewInvalidRequestError("anthropic document content requires file.file_data, file.file_url, or file.file_id", nil)
+	}
+	if fileID := strings.TrimSpace(file.FileID); fileID != "" {
+		return &anthropicContentSource{Type: "file", FileID: fileID}, nil
+	}
+	if fileURL := strings.TrimSpace(file.FileURL); fileURL != "" {
+		return anthropicURLDocumentSource(fileURL, "anthropic file.file_url must be an http/https URL")
+	}
+	raw := strings.TrimSpace(file.FileData)
+	if strings.HasPrefix(raw, "data:") {
+		comma := strings.IndexByte(raw, ',')
+		if comma < 0 {
+			return nil, core.NewInvalidRequestError("invalid anthropic document data URL", nil)
+		}
+		tokens := strings.Split(raw[len("data:"):comma], ";")
+		mediaType := strings.ToLower(strings.TrimSpace(tokens[0]))
+		hasBase64 := false
+		for _, token := range tokens[1:] {
+			if strings.EqualFold(strings.TrimSpace(token), "base64") {
+				hasBase64 = true
+				break
+			}
+		}
+		data := raw[comma+1:]
+		if data == "" {
+			return nil, core.NewInvalidRequestError("anthropic document data URL is missing file data", nil)
+		}
+		switch {
+		case mediaType == "application/pdf" && hasBase64:
+			return &anthropicContentSource{Type: "base64", MediaType: mediaType, Data: data}, nil
+		case mediaType == "text/plain" || strings.HasPrefix(mediaType, "text/"):
+			text := data
+			if hasBase64 {
+				decoded, err := base64.StdEncoding.DecodeString(data)
+				if err != nil {
+					return nil, core.NewInvalidRequestError("anthropic document data URL is not valid base64", err)
+				}
+				text = string(decoded)
+			} else if unescaped, err := url.PathUnescape(data); err == nil {
+				text = unescaped
+			}
+			return &anthropicContentSource{Type: "text", MediaType: "text/plain", Data: text}, nil
+		default:
+			return nil, core.NewInvalidRequestError("anthropic document media type is not supported: "+mediaType, nil)
+		}
+	}
+	// Remote URLs in file_data are accepted leniently for clients that never
+	// adopted file_url.
+	return anthropicURLDocumentSource(raw, "anthropic file.file_data must be a data: URL or http/https URL")
+}
+
+// anthropicURLDocumentSource builds a url document source, rejecting anything
+// that is not an absolute http(s) URL with the given message.
+func anthropicURLDocumentSource(raw, rejectMessage string) (*anthropicContentSource, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil || !parsed.IsAbs() || parsed.Hostname() == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return nil, core.NewInvalidRequestError(rejectMessage, nil)
+	}
+	return &anthropicContentSource{Type: "url", URL: raw}, nil
 }
 
 func isAllowedAnthropicImageMediaType(mediaType string) bool {

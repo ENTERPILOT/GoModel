@@ -6,9 +6,11 @@
   min-height: 0;
   min-width: 0;
   width: 100%;
-  padding: 32px;
+  padding: var(--space-page);
   overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
+  /* No -webkit-overflow-scrolling here: iOS has scrolled with momentum
+     natively since iOS 13, and the property makes the column a stacking
+     context there, which paints the sidebar over fixed popovers inside it. */
   transition: width 0.2s;
 }
 
@@ -30,7 +32,7 @@ body.dashboard-modal-open .content {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 24px;
+  margin-bottom: var(--space-stack);
 }
 
 .page-header h2 {
@@ -72,6 +74,6 @@ body.dashboard-modal-open .content {
 }
 
 .provider-status-section {
-  margin-top: 28px;
+  margin-top: var(--space-stack);
   scroll-margin-top: 24px;
 }

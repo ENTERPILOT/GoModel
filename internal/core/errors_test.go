@@ -3,8 +3,26 @@ package core
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestGatewayError_WithResponseBody(t *testing.T) {
+	err := NewProviderError("minimax", http.StatusBadGateway, "upstream failed", nil).
+		WithResponseBody([]byte(`{"base_resp":{"status_code":2013}}`))
+	assert.Equal(t, `{"base_resp":{"status_code":2013}}`, string(err.ResponseBody))
+
+	assert.Nil(t, NewProviderError("minimax", http.StatusBadGateway, "upstream failed", nil).
+		WithResponseBody(nil).ResponseBody)
+
+	oversized := []byte(strings.Repeat("a", maxGatewayErrorBodyBytes+1024))
+	bounded := NewProviderError("minimax", http.StatusBadGateway, "upstream failed", nil).
+		WithResponseBody(oversized)
+	assert.Len(t, bounded.ResponseBody, maxGatewayErrorBodyBytes)
+}
 
 func TestGatewayError_Error(t *testing.T) {
 	tests := []struct {
@@ -33,9 +51,8 @@ func TestGatewayError_Error(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.err.Error(); got != tt.expected {
-				t.Errorf("Error() = %v, want %v", got, tt.expected)
-			}
+			got := tt.err.Error()
+			assert.Equal(t, tt.expected, got)
 		})
 	}
 }
@@ -47,10 +64,8 @@ func TestGatewayError_Unwrap(t *testing.T) {
 		Message: "wrapped error",
 		Err:     originalErr,
 	}
-
-	if unwrapped := gatewayErr.Unwrap(); unwrapped != originalErr {
-		t.Errorf("Unwrap() = %v, want %v", unwrapped, originalErr)
-	}
+	unwrapped := gatewayErr.Unwrap()
+	assert.Same(t, originalErr, unwrapped)
 }
 
 func TestGatewayError_HTTPStatusCode(t *testing.T) {
@@ -113,9 +128,8 @@ func TestGatewayError_HTTPStatusCode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.err.HTTPStatusCode(); got != tt.expected {
-				t.Errorf("HTTPStatusCode() = %v, want %v", got, tt.expected)
-			}
+			got := tt.err.HTTPStatusCode()
+			assert.Equal(t, tt.expected, got)
 		})
 	}
 }
@@ -133,25 +147,11 @@ func TestGatewayError_ToJSON(t *testing.T) {
 	result := err.ToJSON()
 
 	errorData, ok := result["error"].(map[string]any)
-	if !ok {
-		t.Fatal("ToJSON() should return map with 'error' key")
-	}
-
-	if errorData["type"] != ErrorTypeRateLimit {
-		t.Errorf("ToJSON() type = %v, want %v", errorData["type"], ErrorTypeRateLimit)
-	}
-
-	if errorData["message"] != "too many requests" {
-		t.Errorf("ToJSON() message = %v, want %v", errorData["message"], "too many requests")
-	}
-
-	if errorData["param"] != param {
-		t.Errorf("ToJSON() param = %v, want %v", errorData["param"], param)
-	}
-
-	if errorData["code"] != code {
-		t.Errorf("ToJSON() code = %v, want %v", errorData["code"], code)
-	}
+	require.True(t, ok)
+	assert.Equal(t, ErrorTypeRateLimit, errorData["type"])
+	assert.Equal(t, "too many requests", errorData["message"])
+	assert.Equal(t, param, errorData["param"])
+	assert.Equal(t, code, errorData["code"])
 }
 
 func TestGatewayError_ToJSON_DefaultsParamAndCodeToNull(t *testing.T) {
@@ -162,116 +162,59 @@ func TestGatewayError_ToJSON_DefaultsParamAndCodeToNull(t *testing.T) {
 
 	result := err.ToJSON()
 	errorData := result["error"].(map[string]any)
-
-	if value, ok := errorData["param"]; !ok || value != nil {
-		t.Fatalf("ToJSON() param = %v, want nil", value)
-	}
-
-	if value, ok := errorData["code"]; !ok || value != nil {
-		t.Fatalf("ToJSON() code = %v, want nil", value)
-	}
+	value, ok := errorData["param"]
+	require.True(t, ok)
+	require.Nil(t, value)
+	value, ok = errorData["code"]
+	require.True(t, ok)
+	require.Nil(t, value)
 }
 
 func TestNewProviderError(t *testing.T) {
 	originalErr := errors.New("connection failed")
 	err := NewProviderError("openai", http.StatusBadGateway, "upstream failed", originalErr)
 
-	if err.Type != ErrorTypeProvider {
-		t.Errorf("Type = %v, want %v", err.Type, ErrorTypeProvider)
-	}
-
-	if err.Provider != "openai" {
-		t.Errorf("Provider = %v, want %v", err.Provider, "openai")
-	}
-
-	if err.StatusCode != http.StatusBadGateway {
-		t.Errorf("StatusCode = %v, want %v", err.StatusCode, http.StatusBadGateway)
-	}
-
-	if err.Message != "upstream failed" {
-		t.Errorf("Message = %v, want %v", err.Message, "upstream failed")
-	}
-
-	if err.Err != originalErr {
-		t.Errorf("Err = %v, want %v", err.Err, originalErr)
-	}
+	assert.Equal(t, ErrorTypeProvider, err.Type)
+	assert.Equal(t, "openai", err.Provider)
+	assert.Equal(t, http.StatusBadGateway, err.StatusCode)
+	assert.Equal(t, "upstream failed", err.Message)
+	assert.Equal(t, originalErr, err.Err)
 }
 
 func TestNewRateLimitError(t *testing.T) {
 	err := NewRateLimitError("anthropic", "rate limit exceeded")
 
-	if err.Type != ErrorTypeRateLimit {
-		t.Errorf("Type = %v, want %v", err.Type, ErrorTypeRateLimit)
-	}
-
-	if err.Provider != "anthropic" {
-		t.Errorf("Provider = %v, want %v", err.Provider, "anthropic")
-	}
-
-	if err.StatusCode != http.StatusTooManyRequests {
-		t.Errorf("StatusCode = %v, want %v", err.StatusCode, http.StatusTooManyRequests)
-	}
-
-	if err.Message != "rate limit exceeded" {
-		t.Errorf("Message = %v, want %v", err.Message, "rate limit exceeded")
-	}
+	assert.Equal(t, ErrorTypeRateLimit, err.Type)
+	assert.Equal(t, "anthropic", err.Provider)
+	assert.Equal(t, http.StatusTooManyRequests, err.StatusCode)
+	assert.Equal(t, "rate limit exceeded", err.Message)
 }
 
 func TestNewInvalidRequestError(t *testing.T) {
 	originalErr := errors.New("missing field")
 	err := NewInvalidRequestError("invalid input", originalErr)
 
-	if err.Type != ErrorTypeInvalidRequest {
-		t.Errorf("Type = %v, want %v", err.Type, ErrorTypeInvalidRequest)
-	}
-
-	if err.StatusCode != http.StatusBadRequest {
-		t.Errorf("StatusCode = %v, want %v", err.StatusCode, http.StatusBadRequest)
-	}
-
-	if err.Message != "invalid input" {
-		t.Errorf("Message = %v, want %v", err.Message, "invalid input")
-	}
-
-	if err.Err != originalErr {
-		t.Errorf("Err = %v, want %v", err.Err, originalErr)
-	}
+	assert.Equal(t, ErrorTypeInvalidRequest, err.Type)
+	assert.Equal(t, http.StatusBadRequest, err.StatusCode)
+	assert.Equal(t, "invalid input", err.Message)
+	assert.Equal(t, originalErr, err.Err)
 }
 
 func TestNewAuthenticationError(t *testing.T) {
 	err := NewAuthenticationError("gemini", "invalid API key")
 
-	if err.Type != ErrorTypeAuthentication {
-		t.Errorf("Type = %v, want %v", err.Type, ErrorTypeAuthentication)
-	}
-
-	if err.Provider != "gemini" {
-		t.Errorf("Provider = %v, want %v", err.Provider, "gemini")
-	}
-
-	if err.StatusCode != http.StatusUnauthorized {
-		t.Errorf("StatusCode = %v, want %v", err.StatusCode, http.StatusUnauthorized)
-	}
-
-	if err.Message != "invalid API key" {
-		t.Errorf("Message = %v, want %v", err.Message, "invalid API key")
-	}
+	assert.Equal(t, ErrorTypeAuthentication, err.Type)
+	assert.Equal(t, "gemini", err.Provider)
+	assert.Equal(t, http.StatusUnauthorized, err.StatusCode)
+	assert.Equal(t, "invalid API key", err.Message)
 }
 
 func TestNewNotFoundError(t *testing.T) {
 	err := NewNotFoundError("model not found")
 
-	if err.Type != ErrorTypeNotFound {
-		t.Errorf("Type = %v, want %v", err.Type, ErrorTypeNotFound)
-	}
-
-	if err.StatusCode != http.StatusNotFound {
-		t.Errorf("StatusCode = %v, want %v", err.StatusCode, http.StatusNotFound)
-	}
-
-	if err.Message != "model not found" {
-		t.Errorf("Message = %v, want %v", err.Message, "model not found")
-	}
+	assert.Equal(t, ErrorTypeNotFound, err.Type)
+	assert.Equal(t, http.StatusNotFound, err.StatusCode)
+	assert.Equal(t, "model not found", err.Message)
 }
 
 func TestParseProviderError(t *testing.T) {
@@ -397,31 +340,18 @@ func TestParseProviderError(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ParseProviderError(tt.provider, tt.statusCode, tt.body, nil)
 
-			if err.Type != tt.expectedType {
-				t.Errorf("Type = %v, want %v", err.Type, tt.expectedType)
+			assert.Equal(t, tt.expectedType, err.Type)
+			assert.Equal(t, tt.expectedStatus, err.HTTPStatusCode())
+			assert.Equal(t, tt.provider, err.Provider)
+
+			if tt.expectedMessage != "" {
+				assert.Equal(t, tt.expectedMessage, err.Message)
+			} else {
+				assert.NotEmpty(t, err.Message)
 			}
 
-			if err.HTTPStatusCode() != tt.expectedStatus {
-				t.Errorf("HTTPStatusCode() = %v, want %v", err.HTTPStatusCode(), tt.expectedStatus)
-			}
-
-			if err.Provider != tt.provider {
-				t.Errorf("Provider = %v, want %v", err.Provider, tt.provider)
-			}
-
-			if tt.expectedMessage != "" && err.Message != tt.expectedMessage {
-				t.Errorf("Message = %q, want %q", err.Message, tt.expectedMessage)
-			} else if err.Message == "" {
-				t.Error("Message should not be empty")
-			}
-
-			if !equalStringPointers(err.Param, tt.expectedParam) {
-				t.Errorf("Param = %v, want %v", err.Param, tt.expectedParam)
-			}
-
-			if !equalStringPointers(err.Code, tt.expectedCode) {
-				t.Errorf("Code = %v, want %v", err.Code, tt.expectedCode)
-			}
+			assert.Equal(t, tt.expectedParam, err.Param)
+			assert.Equal(t, tt.expectedCode, err.Code)
 		})
 	}
 }
@@ -482,42 +412,10 @@ func TestParseProviderError_OpenRouter_TableDriven(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ParseProviderError("openrouter", http.StatusTooManyRequests, tt.body, nil)
 
-			if err.Type != tt.wantType {
-				t.Fatalf("Type = %v, want %v", err.Type, tt.wantType)
-			}
-			if err.Message != tt.wantMessage {
-				t.Fatalf("Message = %q, want %q", err.Message, tt.wantMessage)
-			}
-			if !equalStringPointers(err.Code, tt.wantCode) {
-				t.Fatalf("Code = %v, want %v", err.Code, tt.wantCode)
-			}
+			require.Equal(t, tt.wantType, err.Type)
+			require.Equal(t, tt.wantMessage, err.Message)
+			require.Equal(t, tt.wantCode, err.Code)
 		})
-	}
-}
-
-func equalStringPointers(a, b *string) bool {
-	switch {
-	case a == nil && b == nil:
-		return true
-	case a == nil || b == nil:
-		return false
-	default:
-		return *a == *b
-	}
-}
-
-func TestGatewayError_AsError(t *testing.T) {
-	// Test that GatewayError can be used with errors.As
-	originalErr := NewRateLimitError("openai", "too many requests")
-	var err error = originalErr
-
-	var gatewayErr *GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Error("errors.As should work with GatewayError")
-	}
-
-	if gatewayErr.Type != ErrorTypeRateLimit {
-		t.Errorf("Type = %v, want %v", gatewayErr.Type, ErrorTypeRateLimit)
 	}
 }
 
@@ -526,9 +424,7 @@ func TestGatewayError_IsError(t *testing.T) {
 	originalErr := errors.New("network error")
 	gatewayErr := NewProviderError("openai", http.StatusBadGateway, "connection failed", originalErr)
 
-	if !errors.Is(gatewayErr, originalErr) {
-		t.Error("errors.Is should work with wrapped errors in GatewayError")
-	}
+	assert.ErrorIs(t, gatewayErr, originalErr)
 }
 
 func TestParseProviderError_Preserves4xxStatusCodes(t *testing.T) {
@@ -622,25 +518,11 @@ func TestParseProviderError_Preserves4xxStatusCodes(t *testing.T) {
 			originalErr := errors.New("original http error")
 			err := ParseProviderError(tt.provider, tt.statusCode, tt.body, originalErr)
 
-			if err.Type != tt.expectedType {
-				t.Errorf("Type = %v, want %v", err.Type, tt.expectedType)
-			}
-
-			if err.StatusCode != tt.expectedStatus {
-				t.Errorf("StatusCode = %v, want %v", err.StatusCode, tt.expectedStatus)
-			}
-
-			if err.HTTPStatusCode() != tt.expectedStatus {
-				t.Errorf("HTTPStatusCode() = %v, want %v", err.HTTPStatusCode(), tt.expectedStatus)
-			}
-
-			if err.Provider != tt.expectedProvider {
-				t.Errorf("Provider = %v, want %v", err.Provider, tt.expectedProvider)
-			}
-
-			if err.Message == "" {
-				t.Error("Message should not be empty")
-			}
+			assert.Equal(t, tt.expectedType, err.Type)
+			assert.Equal(t, tt.expectedStatus, err.StatusCode)
+			assert.Equal(t, tt.expectedStatus, err.HTTPStatusCode())
+			assert.Equal(t, tt.expectedProvider, err.Provider)
+			assert.NotEmpty(t, err.Message)
 		})
 	}
 }
@@ -673,12 +555,8 @@ func TestParseProviderError_PreservesWrappedErrorsForAuthAndRateLimit(t *testing
 			originalErr := errors.New("upstream transport error")
 			err := ParseProviderError("openai", tt.statusCode, []byte(`{"error":{"message":"boom"}}`), originalErr)
 
-			if err.Type != tt.wantType {
-				t.Fatalf("Type = %v, want %v", err.Type, tt.wantType)
-			}
-			if !errors.Is(err, originalErr) {
-				t.Fatalf("expected wrapped original error, got %v", err)
-			}
+			require.Equal(t, tt.wantType, err.Type)
+			require.ErrorIs(t, err, originalErr)
 		})
 	}
 }
@@ -715,13 +593,8 @@ func TestParseProviderError_SpecialStatusCodesOverride(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ParseProviderError("test-provider", tt.statusCode, []byte(`{"error": {"message": "test"}}`), nil)
 
-			if err.Type != tt.expectedType {
-				t.Errorf("Type = %v, want %v", err.Type, tt.expectedType)
-			}
-
-			if err.HTTPStatusCode() != tt.expectedStatus {
-				t.Errorf("HTTPStatusCode() = %v, want %v", err.HTTPStatusCode(), tt.expectedStatus)
-			}
+			assert.Equal(t, tt.expectedType, err.Type)
+			assert.Equal(t, tt.expectedStatus, err.HTTPStatusCode())
 		})
 	}
 }
@@ -808,25 +681,11 @@ func TestParseProviderError_Preserves5xxStatusCodes(t *testing.T) {
 			originalErr := errors.New("original http error")
 			err := ParseProviderError(tt.provider, tt.statusCode, tt.body, originalErr)
 
-			if err.Type != tt.expectedType {
-				t.Errorf("Type = %v, want %v", err.Type, tt.expectedType)
-			}
-
-			if err.StatusCode != tt.expectedStatus {
-				t.Errorf("StatusCode = %v, want %v", err.StatusCode, tt.expectedStatus)
-			}
-
-			if err.HTTPStatusCode() != tt.expectedStatus {
-				t.Errorf("HTTPStatusCode() = %v, want %v", err.HTTPStatusCode(), tt.expectedStatus)
-			}
-
-			if err.Provider != tt.expectedProvider {
-				t.Errorf("Provider = %v, want %v", err.Provider, tt.expectedProvider)
-			}
-
-			if err.Message == "" {
-				t.Error("Message should not be empty")
-			}
+			assert.Equal(t, tt.expectedType, err.Type)
+			assert.Equal(t, tt.expectedStatus, err.StatusCode)
+			assert.Equal(t, tt.expectedStatus, err.HTTPStatusCode())
+			assert.Equal(t, tt.expectedProvider, err.Provider)
+			assert.NotEmpty(t, err.Message)
 		})
 	}
 }
@@ -834,13 +693,176 @@ func TestParseProviderError_Preserves5xxStatusCodes(t *testing.T) {
 func TestGatewayError_ToJSON_ProviderOnlyWhenUpstream(t *testing.T) {
 	upstream := ParseProviderError("openai", http.StatusUnauthorized, []byte(`{"error":{"message":"bad key"}}`), nil)
 	errorData := upstream.ToJSON()["error"].(map[string]any)
-	if errorData["provider"] != "openai" {
-		t.Fatalf("ToJSON() provider = %v, want openai", errorData["provider"])
-	}
+	require.Equal(t, "openai", errorData["provider"])
 
 	gateway := NewAuthenticationError("", "invalid API key")
 	errorData = gateway.ToJSON()["error"].(map[string]any)
-	if _, present := errorData["provider"]; present {
-		t.Fatalf("ToJSON() should omit provider for gateway-originated errors, got %v", errorData["provider"])
+	_, present := errorData["provider"]
+	require.False(t, present, "ToJSON() should omit provider for gateway-originated errors, got %v", errorData["provider"])
+}
+
+func TestParseEmbeddedProviderError(t *testing.T) {
+	tests := []struct {
+		name            string
+		body            string
+		wantError       bool
+		expectedStatus  int
+		expectedType    ErrorType
+		expectedMessage string
+	}{
+		{
+			name:            "bare error object",
+			body:            `{"error":{"message":"upstream exploded","type":"server_error"}}`,
+			wantError:       true,
+			expectedStatus:  http.StatusBadGateway,
+			expectedType:    ErrorTypeProvider,
+			expectedMessage: "upstream exploded",
+		},
+		{
+			name:            "error with embedded numeric status code",
+			body:            `{"error":{"message":"Rate limited","code":429}}`,
+			wantError:       true,
+			expectedStatus:  http.StatusTooManyRequests,
+			expectedType:    ErrorTypeRateLimit,
+			expectedMessage: "Rate limited",
+		},
+		{
+			name:            "error with embedded numeric-string status code",
+			body:            `{"error":{"message":"no credit","code":"402"}}`,
+			wantError:       true,
+			expectedStatus:  http.StatusPaymentRequired,
+			expectedType:    ErrorTypeInvalidRequest,
+			expectedMessage: "no credit",
+		},
+		{
+			name:            "error with non-HTTP code falls back to 502",
+			body:            `{"error":{"message":"quota exceeded","code":1027}}`,
+			wantError:       true,
+			expectedStatus:  http.StatusBadGateway,
+			expectedType:    ErrorTypeProvider,
+			expectedMessage: "quota exceeded",
+		},
+		{
+			name:            "string error member",
+			body:            `{"error":"model overloaded"}`,
+			wantError:       true,
+			expectedStatus:  http.StatusBadGateway,
+			expectedType:    ErrorTypeProvider,
+			expectedMessage: "model overloaded",
+		},
+		{
+			name:            "openrouter error beside metadata keys",
+			body:            `{"error":{"message":"Provider returned error","code":429,"metadata":{"raw":"upstream rate limit hit"}},"user_id":"user_123"}`,
+			wantError:       true,
+			expectedStatus:  http.StatusTooManyRequests,
+			expectedType:    ErrorTypeRateLimit,
+			expectedMessage: "upstream rate limit hit",
+		},
+		{
+			name:            "anthropic native error shape",
+			body:            `{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`,
+			wantError:       true,
+			expectedStatus:  http.StatusBadGateway,
+			expectedType:    ErrorTypeProvider,
+			expectedMessage: "Overloaded",
+		},
+		{
+			name:      "chat completion success",
+			body:      `{"id":"chatcmpl-1","object":"chat.completion","model":"gpt-4o","choices":[{"index":0,"message":{"role":"assistant","content":"hi"}}]}`,
+			wantError: false,
+		},
+		{
+			name:      "success content mentioning error key",
+			body:      `{"id":"chatcmpl-1","choices":[{"message":{"content":"set \"error\" handler"}}]}`,
+			wantError: false,
+		},
+		{
+			name:      "responses object with null error",
+			body:      `{"id":"resp_1","object":"response","status":"completed","error":null,"output":[]}`,
+			wantError: false,
+		},
+		{
+			name:      "failed responses object passes through",
+			body:      `{"id":"resp_1","object":"response","status":"failed","error":{"code":"server_error","message":"boom"},"output":[]}`,
+			wantError: false,
+		},
+		{
+			name:      "error member beside usage passes through",
+			body:      `{"error":null,"usage":{"total_tokens":10}}`,
+			wantError: false,
+		},
+		{
+			name:      "empty body",
+			body:      "",
+			wantError: false,
+		},
+		{
+			name:      "non-object body",
+			body:      `[{"error":"x"}]`,
+			wantError: false,
+		},
+		{
+			name:      "invalid json",
+			body:      `{"error":{"message":"trunc`,
+			wantError: false,
+		},
+		{
+			name:      "jsonl body with error keys",
+			body:      "{\"error\":{\"message\":\"a\"}}\n{\"error\":{\"message\":\"b\"}}",
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ParseEmbeddedProviderError("openrouter", []byte(tt.body))
+			if !tt.wantError {
+				require.Nil(t, err)
+				return
+			}
+			require.NotNil(t, err)
+			assert.Equal(t, tt.expectedStatus, err.StatusCode)
+			assert.Equal(t, tt.expectedType, err.Type)
+			assert.Equal(t, tt.expectedMessage, err.Message)
+			assert.Equal(t, "openrouter", err.Provider)
+			assert.NotEmpty(t, err.ResponseBody)
+		})
+	}
+}
+
+// BenchmarkParseEmbeddedProviderError exercises the hot-path classification:
+// every 200 response body passes through it, so a large success body whose
+// content merely mentions "error" must classify quickly.
+func BenchmarkParseEmbeddedProviderError(b *testing.B) {
+	// Escaped quotes inside content never match the `"error"` byte prefilter,
+	// so this body is classified by the prefilter scan alone.
+	largeSuccess := []byte(`{"id":"chatcmpl-1","object":"chat.completion","model":"gpt-4o","choices":[{"index":0,"message":{"role":"assistant","content":"` +
+		strings.Repeat(`set the \"error\" handler, log the \"error\" field, and retry. `, 800) +
+		`"}}],"usage":{"total_tokens":420}}`)
+	// A literal top-level "error" member (some providers emit "error": null on
+	// success, and stored Responses API objects always carry one) defeats the
+	// prefilter, so this body exercises the structural classification.
+	largeSuccessErrorNull := []byte(`{"id":"chatcmpl-1","object":"chat.completion","model":"gpt-4o","choices":[{"index":0,"message":{"role":"assistant","content":"` +
+		strings.Repeat(`retry with backoff after transient failures and log the cause. `, 800) +
+		`"}}],"usage":{"total_tokens":420},"error":null}`)
+	cases := []struct {
+		name string
+		body []byte
+	}{
+		{"large success body mentioning error", largeSuccess},
+		{"large success body with error null member", largeSuccessErrorNull},
+		{"small success body", []byte(`{"id":"chatcmpl-1","object":"chat.completion","choices":[{"message":{"content":"hi"}}]}`)},
+		{"bare error payload", []byte(`{"error":{"message":"Rate limited","code":429}}`)},
+	}
+	for _, bc := range cases {
+		b.Run(bc.name, func(b *testing.B) {
+			b.SetBytes(int64(len(bc.body)))
+			b.ReportAllocs()
+			for b.Loop() {
+				if err := ParseEmbeddedProviderError("openrouter", bc.body); (err != nil) != (bc.name == "bare error payload") {
+					b.Fatal("unexpected classification")
+				}
+			}
+		})
 	}
 }

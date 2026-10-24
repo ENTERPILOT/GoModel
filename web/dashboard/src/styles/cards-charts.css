@@ -2,15 +2,16 @@
 .cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
-  margin-bottom: 28px;
+  gap: var(--space-grid);
+  margin-bottom: var(--space-stack);
 }
 
 .card {
+  min-width: 0;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 20px;
+  padding: var(--space-card);
 }
 
 .card-label {
@@ -33,15 +34,15 @@
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 24px;
-  margin-bottom: 28px;
+  padding: var(--space-block);
+  margin-bottom: var(--space-stack);
 }
 
 .chart-container {
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 24px;
+  padding: var(--space-block);
 }
 
 .chart-container h3 {

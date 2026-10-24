@@ -25,12 +25,17 @@ type ProviderCredentialsAdmin interface {
 	IsManaged(name string) bool
 	RegisteredTypes() []string
 	CredentialSchemas() []providers.CredentialSchema
+	// ConfiguredProviders returns the effective, admin-safe configuration of
+	// every credential currently installed in the registry.
+	ConfiguredProviders() []providers.SanitizedProviderConfig
 }
 
 // redactedCredentialValue replaces secret values (API keys, service account
 // JSON) in admin views. An all-asterisk value of at least three characters is
 // accepted on upsert to keep the currently stored value, so older dashboard
-// clients that send "***" remain compatible.
+// clients that send "***" remain compatible. A value made of secret
+// references alone (${scheme:reference}) is shown as stored: it names where
+// the secret lives and is not secret itself.
 const redactedCredentialValue = "***********"
 
 // upsertProviderCredentialRequest is the admin upsert contract for one
@@ -53,8 +58,11 @@ type upsertProviderCredentialRequest struct {
 	ServiceAccountJSON       string   `json:"service_account_json,omitempty"`
 	ServiceAccountJSONBase64 string   `json:"service_account_json_base64,omitempty"`
 	GCPScope                 string   `json:"gcp_scope,omitempty"`
-	Models                   []string `json:"models,omitempty"`
-	Enabled                  *bool    `json:"enabled,omitempty"`
+	// ProxyURL may be sent back exactly as the view rendered it (password
+	// masked) to keep the stored proxy credentials.
+	ProxyURL string   `json:"proxy_url,omitempty"`
+	Models   []string `json:"models,omitempty"`
+	Enabled  *bool    `json:"enabled,omitempty"`
 }
 
 // providerCredentialFieldResponse describes one credential field a provider
@@ -85,26 +93,28 @@ type providerCredentialTypeResponse struct {
 // credential: its definition (secrets redacted) plus whether it is read-only
 // (config/env-declared).
 type providerCredentialViewResponse struct {
-	Name                     string     `json:"name"`
-	Type                     string     `json:"type"`
-	APIKeys                  []string   `json:"api_keys,omitempty"`
-	SessionStickyKeys        bool       `json:"session_sticky_keys"`
-	BaseURL                  string     `json:"base_url,omitempty"`
-	APIVersion               string     `json:"api_version,omitempty"`
-	Backend                  string     `json:"backend,omitempty"`
-	AuthType                 string     `json:"auth_type,omitempty"`
-	APIMode                  string     `json:"api_mode,omitempty"`
-	VertexProject            string     `json:"vertex_project,omitempty"`
-	VertexLocation           string     `json:"vertex_location,omitempty"`
-	ServiceAccountFile       string     `json:"service_account_file,omitempty"`
-	ServiceAccountJSON       string     `json:"service_account_json,omitempty"`
-	ServiceAccountJSONBase64 string     `json:"service_account_json_base64,omitempty"`
-	GCPScope                 string     `json:"gcp_scope,omitempty"`
-	Models                   []string   `json:"models,omitempty"`
-	Enabled                  bool       `json:"enabled"`
-	Managed                  bool       `json:"managed"`
-	CreatedAt                *time.Time `json:"created_at,omitempty"`
-	UpdatedAt                *time.Time `json:"updated_at,omitempty"`
+	Name                     string   `json:"name"`
+	Type                     string   `json:"type"`
+	APIKeys                  []string `json:"api_keys,omitempty"`
+	SessionStickyKeys        bool     `json:"session_sticky_keys"`
+	BaseURL                  string   `json:"base_url,omitempty"`
+	APIVersion               string   `json:"api_version,omitempty"`
+	Backend                  string   `json:"backend,omitempty"`
+	AuthType                 string   `json:"auth_type,omitempty"`
+	APIMode                  string   `json:"api_mode,omitempty"`
+	VertexProject            string   `json:"vertex_project,omitempty"`
+	VertexLocation           string   `json:"vertex_location,omitempty"`
+	ServiceAccountFile       string   `json:"service_account_file,omitempty"`
+	ServiceAccountJSON       string   `json:"service_account_json,omitempty"`
+	ServiceAccountJSONBase64 string   `json:"service_account_json_base64,omitempty"`
+	GCPScope                 string   `json:"gcp_scope,omitempty"`
+	// ProxyURL is the provider's outbound proxy with any password masked.
+	ProxyURL  string     `json:"proxy_url,omitempty"`
+	Models    []string   `json:"models,omitempty"`
+	Enabled   bool       `json:"enabled"`
+	Managed   bool       `json:"managed"`
+	CreatedAt *time.Time `json:"created_at,omitempty"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 }
 
 // ListProviderCredentials handles GET /admin/provider-credentials.
@@ -327,6 +337,7 @@ func (h *Handler) buildProviderCredentialUpsert(ctx context.Context, name string
 		ServiceAccountJSON:       serviceAccountJSON,
 		ServiceAccountJSONBase64: serviceAccountJSONBase64,
 		GCPScope:                 strings.TrimSpace(req.GCPScope),
+		ProxyURL:                 mergeRedactedProxyURL(req.ProxyURL, currentField(current, func(c providers.ManagedProviderCredential) string { return c.ProxyURL })),
 		Models:                   req.Models,
 		Enabled:                  enabled,
 	}
@@ -389,6 +400,17 @@ func mergeRedactedValue(field, incoming, stored string) (string, error) {
 	return stored, nil
 }
 
+// mergeRedactedProxyURL keeps the stored proxy URL when the client echoes the
+// masked form the view rendered ("socks5://user:xxxxx@host:1080"), so editing
+// another field never strips the proxy password. Any other value replaces it.
+func mergeRedactedProxyURL(incoming, stored string) string {
+	incoming = strings.TrimSpace(incoming)
+	if incoming != "" && stored != "" && incoming == redactProxyURL(stored) {
+		return stored
+	}
+	return incoming
+}
+
 // isRedactedCredentialValue recognizes both the current display mask and
 // legacy masks emitted by older dashboard versions. Requiring at least three
 // asterisks avoids treating a stray single character as an intentional
@@ -414,19 +436,25 @@ func (h *Handler) providerCredentialView(cred providers.ManagedProviderCredentia
 		VertexLocation:     cred.VertexLocation,
 		ServiceAccountFile: cred.ServiceAccountFile,
 		GCPScope:           cred.GCPScope,
+		ProxyURL:           redactProxyURL(cred.ProxyURL),
 		Models:             cred.Models,
 		Enabled:            cred.Enabled,
 		Managed:            h.providerCredentials.IsManaged(cred.Name),
 		CreatedAt:          nonZeroTime(cred.CreatedAt),
 		UpdatedAt:          nonZeroTime(cred.UpdatedAt),
 	}
-	if cred.ServiceAccountJSON != "" {
-		resp.ServiceAccountJSON = redactedCredentialValue
-	}
-	if cred.ServiceAccountJSONBase64 != "" {
-		resp.ServiceAccountJSONBase64 = redactedCredentialValue
-	}
+	resp.ServiceAccountJSON = redactCredentialValue(cred.ServiceAccountJSON)
+	resp.ServiceAccountJSONBase64 = redactCredentialValue(cred.ServiceAccountJSONBase64)
 	return resp
+}
+
+// redactCredentialValue masks a secret field unless it is made of secret
+// references alone (see secretValueShown). Empty stays empty.
+func redactCredentialValue(value string) string {
+	if value == "" || secretValueShown(value) {
+		return value
+	}
+	return redactedCredentialValue
 }
 
 // declaredProviderCredentialView builds a read-only view row for one
@@ -443,6 +471,7 @@ func (h *Handler) declaredProviderCredentialView(cfg providers.SanitizedProvider
 		APIVersion:        cfg.APIVersion,
 		Models:            cfg.Models,
 		SessionStickyKeys: cfg.SessionStickyKeys,
+		ProxyURL:          cfg.ProxyURL,
 		Enabled:           true,
 		Managed:           true,
 	}
@@ -458,14 +487,14 @@ func nonZeroTime(t time.Time) *time.Time {
 }
 
 // redactList keeps the entry count (so operators can see how many keys are
-// configured) but replaces every value.
+// configured) but masks every literal value; secret references are kept.
 func redactList(values []string) []string {
 	if len(values) == 0 {
 		return nil
 	}
 	redacted := make([]string, len(values))
-	for i := range values {
-		redacted[i] = redactedCredentialValue
+	for i, value := range values {
+		redacted[i] = redactCredentialValue(value)
 	}
 	return redacted
 }
@@ -477,6 +506,9 @@ func redactList(values []string) []string {
 func providerCredentialWriteError(err error) error {
 	if err == nil {
 		return nil
+	}
+	if restricted := secretReferenceRestrictedError(err); restricted != nil {
+		return restricted
 	}
 	if fieldErr, ok := errors.AsType[*providers.CredentialFieldError](err); ok {
 		invalid := core.NewInvalidRequestError(fieldErr.Message, err)

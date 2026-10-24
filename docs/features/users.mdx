@@ -107,8 +107,13 @@ Each entry in an allowlist is one selector:
 | `*`                | every model; redundant unless you want an explicit row, and it never widens a parent's list (rule 3) |
 
 Provider names must match a configured provider; unknown names are rejected
-when the policy is saved. Virtual model aliases resolve to their target before
-the check runs, so allow the target model, not the alias.
+when the policy is saved. Virtual models are not selectors: an alias or a load
+balancer resolves to the concrete provider model before the check runs, so allow
+the target models, not the virtual model. A virtual model name in a list is
+accepted as a bare model ID but never matches anything; a load balancer whose
+targets span providers is only usable when every target it can pick is allowed,
+otherwise requests fail with `400` whenever it picks a disallowed target. The
+user tree shows such a node with an empty effective list.
 
 ## Example
 
