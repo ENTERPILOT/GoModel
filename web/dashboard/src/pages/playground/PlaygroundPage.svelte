@@ -4,6 +4,7 @@
   // conversation (or a media mode's result) in the middle, the composer (or
   // the media form) at the bottom, and a slidable request/response JSON panel
   // on the right.
+  import { onDestroy } from "svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { router } from "$lib/stores/router.svelte.js";
   import { modelsStore } from "$lib/stores/models.svelte.js";
@@ -22,6 +23,8 @@
   import { modeModelOptions } from "./playgroundMedia.js";
 
   const PAGE = "playground";
+
+  onDestroy(() => media.releaseAudio());
 
   const modelOptions = $derived(modeModelOptions(modelsStore.models, store.mode));
   const error = $derived(store.mode === "chat" ? store.error : media.error);

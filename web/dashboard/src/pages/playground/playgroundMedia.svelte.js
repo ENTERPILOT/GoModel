@@ -119,6 +119,12 @@ class PlaygroundMediaStore {
     if (this.#abort) this.#abort.abort();
   }
 
+  // Called when the Playground closes: a speech result (or request) is
+  // dropped so its audio blob does not stay in memory while the page is gone.
+  releaseAudio() {
+    if (chat.mode === "speech") this.clear();
+  }
+
   // Mode switches go through here so a result (or a picked file, whose input
   // re-mounts empty) never outlives the mode it belongs to.
   switchMode(id) {
