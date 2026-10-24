@@ -58,7 +58,8 @@ func TestRewriteBatchSource_RefusesLinesItCannotCheck(t *testing.T) {
 		{name: "body twice", line: `{"custom_id":"1","url":"/v1/chat/completions","body":{"model":"forbidden","messages":[]},"body":` + batchChatBody + `}`, wantErr: `key "body" is repeated`},
 		{name: "body and Body", line: `{"custom_id":"1","url":"/v1/chat/completions","body":{"model":"forbidden","messages":[]},"Body":` + batchChatBody + `}`, wantErr: `key "Body" is not a batch item field`},
 		{name: "model twice", line: `{"custom_id":"1","url":"/v1/chat/completions","body":{"model":"forbidden","model":"gpt-4o-mini","messages":[]}}`, wantErr: `key "model" is repeated`},
-		{name: "model repeated through an escape", line: `{"custom_id":"1","url":"/v1/chat/completions","body":{"model":"forbidden","model":"gpt-4o-mini","messages":[]}}`, wantErr: `key "model" is repeated`},
+		{name: "model repeated through an escape", line: `{"custom_id":"1","url":"/v1/chat/completions","body":{"model":"forbidden","mo\u0064el":"gpt-4o-mini","messages":[]}}`, wantErr: `key "model" is repeated`},
+		{name: "repeat after a repeated empty key", line: `{"custom_id":"1","url":"/v1/chat/completions","body":{"":0,"":1,"model":"forbidden","model":"gpt-4o-mini","messages":[]}}`, wantErr: `key "" is repeated`},
 		{name: "model and Model", line: `{"custom_id":"1","url":"/v1/chat/completions","body":{"model":"forbidden","Model":"gpt-4o-mini","messages":[]}}`, wantErr: `keys "model" and "Model" differ only in case`},
 		{name: "nested key repeated", line: `{"custom_id":"1","url":"/v1/chat/completions","body":{"model":"gpt-4o-mini","messages":[{"role":"user","content":"x","content":"y"}]}}`, wantErr: `key "content" is repeated`},
 	}
@@ -138,6 +139,8 @@ func TestRewriteBatchSource_ChecksInlineItems(t *testing.T) {
 		wantURL string
 	}{
 		{name: "unsupported url", item: `{"custom_id":"1","url":"/v1/completions","body":{"model":"m","prompt":"hi"}}`, wantErr: "batch item 0: unsupported batch url"},
+		{name: "body twice", item: `{"custom_id":"1","url":"/v1/chat/completions","body":{"model":"forbidden","messages":[]},"body":` + batchChatBody + `}`, wantErr: `key "body" is repeated`},
+		{name: "url twice", item: `{"custom_id":"1","url":"/v1/completions","url":"/v1/chat/completions","body":` + batchChatBody + `}`, wantErr: `key "url" is repeated`},
 		{name: "case variant of body", item: `{"custom_id":"1","url":"/v1/chat/completions","body":` + batchChatBody + `,"Body":{"model":"forbidden","messages":[]}}`, wantErr: `key "Body" is not a batch item field`},
 		{name: "model and Model", item: `{"custom_id":"1","url":"/v1/chat/completions","body":{"Model":"forbidden","model":"gpt-4o-mini","messages":[]}}`, wantErr: "differ only in case"},
 		{name: "full url", item: `{"custom_id":"1","url":"https://provider.example/v1/chat/completions/","body":` + batchChatBody + `}`, wantURL: "/v1/chat/completions"},
@@ -145,7 +148,11 @@ func TestRewriteBatchSource_ChecksInlineItems(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var req BatchRequest
-			require.NoError(t, json.Unmarshal([]byte(`{"endpoint":"/v1/chat/completions","requests":[`+tt.item+`]}`), &req))
+			if err := json.Unmarshal([]byte(`{"endpoint":"/v1/chat/completions","requests":[`+tt.item+`]}`), &req); err != nil {
+				require.NotEmpty(t, tt.wantErr, "decode: %v", err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
 
 			result, err := RewriteBatchSource(context.Background(), "openai", &req, nil, []Operation{OperationChatCompletions},
 				func(_ context.Context, item BatchRequestItem, _ *DecodedBatchItemRequest) (json.RawMessage, error) {

@@ -102,17 +102,18 @@ func checkBatchJSONKeys(data []byte) error {
 	}
 	seen := map[string]string{}
 	var first, second string
+	found := false
 	root.ForEach(func(key, _ gjson.Result) bool {
 		name := key.String()
 		folded := strings.ToLower(name)
 		if prior, ok := seen[folded]; ok {
-			first, second = prior, name
+			first, second, found = prior, name, true
 			return false
 		}
 		seen[folded] = name
 		return true
 	})
-	if first != "" {
+	if found {
 		return fmt.Errorf("keys %q and %q differ only in case", first, second)
 	}
 	return nil
@@ -122,32 +123,27 @@ func checkBatchJSONKeys(data []byte) error {
 // depth. Keys are compared unescaped, so "model" repeats "model".
 func repeatedJSONKey(value gjson.Result) (string, bool) {
 	var repeated string
+	found := false
 	switch {
 	case value.IsObject():
 		seen := map[string]struct{}{}
 		value.ForEach(func(key, member gjson.Result) bool {
 			name := key.String()
 			if _, ok := seen[name]; ok {
-				repeated = name
+				repeated, found = name, true
 				return false
 			}
 			seen[name] = struct{}{}
-			if nested, ok := repeatedJSONKey(member); ok {
-				repeated = nested
-				return false
-			}
-			return true
+			repeated, found = repeatedJSONKey(member)
+			return !found
 		})
 	case value.IsArray():
 		value.ForEach(func(_, element gjson.Result) bool {
-			if nested, ok := repeatedJSONKey(element); ok {
-				repeated = nested
-				return false
-			}
-			return true
+			repeated, found = repeatedJSONKey(element)
+			return !found
 		})
 	}
-	return repeated, repeated != ""
+	return repeated, found
 }
 
 func unsupportedBatchURLMessage(field, url string) string {

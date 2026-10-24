@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/goccy/go-json"
-	"github.com/tidwall/gjson"
 )
 
 // BatchPreparationMetadata captures request-scoped batch preprocessing effects
@@ -233,15 +232,7 @@ func rewriteBatchJSONLContent(
 				err,
 			)
 		}
-		// The line is forwarded as written when the rewrite leaves it
-		// unchanged, so a key repeated outside the body must not let the
-		// provider read a different item than the one decoded here.
-		if key, repeated := repeatedJSONKey(gjson.ParseBytes(line)); repeated {
-			return nil, nil, false, NewInvalidRequestError(
-				fmt.Sprintf("batch input file line %d: key %q is repeated", lineNo, key),
-				nil,
-			)
-		}
+
 		recordBatchEndpointHint(hints, defaultEndpoint, item)
 
 		decoded, handled, err := MaybeDecodeKnownBatchItemRequest(defaultEndpoint, item, operations...)
