@@ -54,6 +54,7 @@ przez providera upstream.
 | Google Vertex AI | `VERTEX_PROJECT` + `VERTEX_LOCATION` + dane uwierzytelniające GCP | `google/gemini-2.5-flash` | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | [Google Vertex AI](/pl/providers/vertex) |
 | DeepSeek | `DEEPSEEK_API_KEY` | `deepseek-v4-pro` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [DeepSeek](/pl/providers/deepseek) |
 | DeepInfra | `DEEPINFRA_API_KEY` (`DEEPINFRA_BASE_URL` opcjonalnie) | `Qwen/Qwen3-32B` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [DeepInfra](/pl/providers/deepinfra) |
+| Together AI | `TOGETHER_API_KEY` (`TOGETHER_BASE_URL` opcjonalnie) | `meta-llama/Llama-3.3-70B-Instruct-Turbo` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Together AI](/pl/providers/together) |
 | Groq | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | — |
 | Fireworks AI | `FIREWORKS_API_KEY` (`FIREWORKS_BASE_URL` opcjonalnie) | `accounts/fireworks/models/gpt-oss-120b` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | — |
 | Chutes AI | `CHUTES_API_KEY` (`CHUTES_BASE_URL` opcjonalnie) | `Qwen/Qwen3-32B-TEE` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | — |
@@ -416,6 +417,11 @@ całej sekcji), aby zobaczyć szczegóły zdrowia requestów:
   10 minut.
 - **Breaker State** – bieżący stan circuit breakera providera
   (zobacz [Odporność na awarie](/pl/advanced/resilience#circuit-breaker-a-stan-providerów-w-dashboardzie)).
+  Gdy breaker jest otwarty, linia błędu na karcie nadal pokazuje błąd upstreamu,
+  który go otworzył, z dopiskiem `— circuit breaker otwarty`, zamiast szybkiego
+  odrzucenia `circuit breaker is open`. Odrzucenie pojawia się tylko wtedy, gdy
+  z ostatnich 10 minut nie jest znany żaden błąd upstreamu, np. gdy breaker
+  otworzyły wolne wywołania.
 - **Models (Recent Traffic)** – liczba requestów i błędów per model. Model z co
   najmniej 3 błędami stanowiącymi połowę lub więcej jego requestów w danym oknie
   jest oznaczany na czerwono – pozwala to wychwycić pojedynczy zepsuty model u

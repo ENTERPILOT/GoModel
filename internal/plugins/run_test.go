@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/pluginapi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -358,6 +359,48 @@ func TestBlockErrorClampsStatus(t *testing.T) {
 	assert.Equal(t, 451, got.HTTPStatusCode())
 	got = BlockError(pluginapi.Block(0, "x", "y"), 99)
 	assert.Equal(t, 400, got.HTTPStatusCode())
+}
+
+// No provider is involved in a plugin decision, so plugin errors must not
+// claim the provider_error type or name a provider.
+func TestPluginErrorsUseInternalErrorType(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      *core.GatewayError
+		wantType core.ErrorType
+		wantCode string
+	}{
+		{
+			name:     "fail closed",
+			err:      FailureError(errFake),
+			wantType: core.ErrorTypeInternal,
+			wantCode: CodePluginFailure,
+		},
+		{
+			name:     "block with a 5xx status",
+			err:      BlockError(pluginapi.Block(0, "", ""), 502),
+			wantType: core.ErrorTypeInternal,
+			wantCode: CodeBlocked,
+		},
+		{
+			name:     "block with a 4xx status",
+			err:      BlockError(pluginapi.Block(0, "", ""), 400),
+			wantType: core.ErrorTypeInvalidRequest,
+			wantCode: CodeBlocked,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.wantType, tt.err.Type)
+			require.NotNil(t, tt.err.Code)
+			assert.Equal(t, tt.wantCode, *tt.err.Code)
+			assert.Empty(t, tt.err.Provider)
+			rendered, ok := tt.err.ToJSON()["error"].(map[string]any)
+			require.True(t, ok)
+			assert.NotContains(t, rendered, "provider", "rendered error names a provider")
+		})
+	}
 }
 
 // A step with one reader takes its own path, which skips the goroutine and

@@ -115,6 +115,7 @@ The official SDKs therefore work unchanged. Configure their base URLs as follows
 - DeepSeek
 - Groq
 - Fireworks AI
+- Together AI
 - Meta (Muse Spark)
 - OpenRouter
 - Z.ai

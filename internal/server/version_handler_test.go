@@ -112,6 +112,9 @@ func TestVersionEndpointChecksOnFirstVisit(t *testing.T) {
 	assert.Equal(t, "Mozilla/5.0 (X11; Linux x86_64)", headers().Get("User-Agent"))
 
 	date, id := versioncheck.SplitVisit(visitCookie(t, rec))
+	// The visit cookie's day is UTC (versioncheck.NewVisit), so the comparison
+	// must be too: a local date fails for every run made on the other side of
+	// midnight UTC.
 	require.Equal(t, time.Now().UTC().Format(time.DateOnly), date)
 	require.NotEmpty(t, id)
 	assert.Equal(t, headers().Get("X-GoModel-Date"), visitCookie(t, rec))
@@ -150,6 +153,7 @@ func TestVersionEndpointRechecksOnANewDay(t *testing.T) {
 
 	awaitChecks(t, calls, 1)
 	date, id := versioncheck.SplitVisit(visitCookie(t, rec))
+	// The cookie's day is UTC, so today must be read in UTC too.
 	assert.Equal(t, time.Now().UTC().Format(time.DateOnly), date)
 	assert.Equal(t, "3f2504e0-4f89-11d3-9a0c-0305e82c3301", id)
 }

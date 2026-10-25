@@ -10,6 +10,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/enterpilot/gomodel/internal/storage/mongotest"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -156,9 +157,9 @@ func TestReadersReportBilledCost(t *testing.T) {
 		db, err := sql.Open("sqlite", ":memory:")
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = db.Close() })
-		store, err := NewSQLiteStore(db, 0)
+		store, err := newSQLiteStore(db, 0)
 		require.NoError(t, err)
-		reader, err := NewSQLiteReader(db)
+		reader, err := newSQLiteReader(db)
 		require.NoError(t, err)
 		assertBilledCostReads(t, store, reader)
 	})
@@ -168,10 +169,12 @@ func TestReadersReportBilledCost(t *testing.T) {
 		if pool == nil {
 			return // skipped: no test server configured
 		}
-		store, err := NewPostgreSQLStore(pool, 0)
+		pgDB, err := sqlx.NewPostgreSQL(pool)
+		require.NoError(t, err)
+		store, err := NewSQLStore(context.Background(), pgDB, 0)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = store.Close() })
-		reader, err := NewPostgreSQLReader(pool)
+		reader, err := NewSQLReader(pgDB)
 		require.NoError(t, err)
 		assertBilledCostReads(t, store, reader)
 	})

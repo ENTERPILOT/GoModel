@@ -15,8 +15,8 @@ import (
 // a single SQL one serving both SQLite and PostgreSQL through sqlx.DB, and a
 // MongoDB one.
 //
-// It replaces ResolveBackend for stores that have been unified. ResolveBackend
-// remains for the readers and stores that still branch per SQL dialect.
+// Every SQL store is served through it; ResolveBackend is the dispatch
+// underneath.
 func ResolveSQLBackend[T any](
 	ctx context.Context,
 	store Storage,

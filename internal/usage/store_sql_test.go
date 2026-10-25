@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
 func TestBuildUsageInsert(t *testing.T) {
@@ -17,7 +19,7 @@ func TestBuildUsageInsert(t *testing.T) {
 	markupPercent := 20.0
 	billedCost := 0.36
 
-	query, args := buildUsageInsert([]*UsageEntry{
+	query, args := buildUsageInsert(sqlx.PostgreSQL, []*UsageEntry{
 		{
 			ID:                     "usage-1",
 			RequestID:              "req-1",
@@ -67,7 +69,7 @@ func TestBuildUsageInsert(t *testing.T) {
 	})
 
 	normalized := strings.Join(strings.Fields(query), " ")
-	wantQuery := "INSERT INTO usage (id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, session_id, cache_type, labels, input_tokens, output_tokens, total_tokens, rewrite_tokens_saved, rewrite_cost_saved, raw_data, input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat, auth_key_id, markup_percent, markup_selector, billed_cost) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27), ($28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54) ON CONFLICT (id) DO NOTHING"
+	wantQuery := "INSERT INTO usage (id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, session_id, cache_type, labels, input_tokens, output_tokens, total_tokens, rewrite_tokens_saved, rewrite_cost_saved, raw_data, input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat, auth_key_id, markup_percent, markup_selector, billed_cost) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING"
 	require.Equal(t, wantQuery, normalized)
 
 	require.Len(t, args, 54)
@@ -84,20 +86,44 @@ func TestBuildUsageInsert(t *testing.T) {
 	require.Equal(t, `["alpha","prod"]`, args[11])
 	require.Equal(t, 42, args[15])
 	require.Equal(t, &rewriteCostSaved, args[16])
-	require.JSONEq(t, `{"cached_tokens":3}`, string(args[17].([]byte)))
+	require.Equal(t, now, args[3])
+	require.JSONEq(t, `{"cached_tokens":3}`, args[17].(string))
 	require.Nil(t, args[37])
 	require.Nil(t, args[38])
 	require.Equal(t, 0, args[42])
 	require.Nil(t, args[43].(*float64), "rewrite_cost_saved")
-	rawData, ok := args[44].([]byte)
-	require.True(t, ok, "args[44] has type %T, want []byte", args[44])
+	require.Nil(t, args[44], "raw_data")
 	require.Empty(t, args[50], "auth_key_id")
 	require.Nil(t, args[51].(*float64), "markup_percent")
 	require.Nil(t, args[53].(*float64), "billed_cost")
-	require.Nil(t, rawData)
 }
 
-func TestUsageInsertMaxRowsPerQueryRespectsPostgresLimit(t *testing.T) {
-	got := usageInsertMaxRowsPerQuery * usageInsertColumnCount
-	require.LessOrEqual(t, got, postgresMaxBindParameters)
+func TestBuildUsageInsertWritesSQLiteTimestampsAsRFC3339Text(t *testing.T) {
+	at := time.Date(2026, 1, 16, 12, 0, 0, 123, time.FixedZone("CET", 3600))
+	_, args := buildUsageInsert(sqlx.SQLite, []*UsageEntry{{ID: "usage-1", Timestamp: at}})
+	require.Equal(t, "2026-01-16T11:00:00.000000123Z", args[3])
+}
+
+func TestPostgreSQLSessionUsageQueriesArePagedAndExcludeCachedCost(t *testing.T) {
+	countQuery, dataQuery, args, dataArgs, limit, offset, err := usageDialectFor(sqlx.PostgreSQL).sessionUsageQueries(SessionUsageParams{
+		SessionID: "scoped-session", CacheMode: CacheModeUncached,
+		Limit:  25,
+		Offset: 10,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 25, limit)
+	require.Equal(t, 10, offset)
+	require.Contains(t, countQuery, "GROUP BY session_id")
+	require.NotContains(t, countQuery, "cache_type")
+
+	for _, fragment := range []string{
+		"session_id = ?",
+		"COUNT(CASE WHEN (cache_type IS NULL OR cache_type = '') THEN 1 END)",
+		"ORDER BY MAX(timestamp) DESC, session_id ASC, user_path ASC",
+		"LIMIT ? OFFSET ?",
+	} {
+		require.Contains(t, dataQuery, fragment)
+	}
+	require.Equal(t, []any{"scoped-session"}, args)
+	require.Equal(t, []any{"scoped-session", 25, 10}, dataArgs)
 }
