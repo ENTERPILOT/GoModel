@@ -11,7 +11,7 @@ GoModel 可以位于您的智能体客户端（Claude Code、Claude Desktop、Cu
 
 - **一个端点，一个密钥。** 客户端使用 GoModel API 密钥连接到 `https://your-gateway/mcp`。客户端从不持有上游 MCP 凭据；网关会自行注入每个服务器的请求头。
 - **带命名空间的聚合。** 所有已配置服务器的工具和提示词会以 `{slug}_{name}` 的形式（例如 `github_create_issue`）出现在同一个目录中，顺序稳定且确定。
-- **最小权限发现。** 可以将服务器的可见范围限定到 `user_paths`，并通过 `disallowed_user_paths` 排除部分调用方；被隐藏的调用方不只是收到错误，这些工具根本不会出现在它们的 `tools/list` 中。运维人员级别的 `allowed_tools` / `disallowed_tools` 过滤器可以精简工具繁杂的服务器，从而保持智能体上下文精简。
+- **最小权限发现。** 可以将服务器的可见范围限定到 `user_paths`，并通过 `disallowed_user_paths` 排除部分调用方；被隐藏的调用方不只是收到错误，这些工具根本不会出现在它们的 `tools/list` 中。运维人员级别的 `allowed_tools` / `disallowed_tools` 过滤器可以精简工具繁杂的服务器，而[按密钥的 MCP 允许列表](/zh/features/mcp-gateway#限制每个-api-密钥可用的内容)只为每个客户端提供它需要的服务器和工具，从而保持智能体上下文精简。
 - **可观测性。** 每次工具调用都会成为一条用量条目（服务器、工具、耗时、大小、错误标志、标签、用户路径），MCP 请求也会像其他模型流量一样出现在审计日志和请求日志中，并标注 JSON-RPC 方法；对于调用，还会标注工具或提示词名称，因此 `tools/call` 这一行显示的是 `github_create_issue`，而不是一个单纯的路径。设置 `LOGGING_LOG_BODIES=true` 时，JSON-RPC 请求帧和响应帧也会记录在审计条目中（包括工具参数和结果），并与其他端点一样受 1 MB 捕获上限的限制。用户路径的速率限制和预算同样会管控 MCP 请求。
 
 ## 连接客户端
@@ -274,6 +274,28 @@ mcp:
 如果调用方的 API 密钥带有用户路径，则用户路径取自该密钥。否则（包括使用主密钥时），用户路径取自 `X-GoModel-User-Path` 请求头（或 `USER_PATH_HEADER` 指定的请求头），这也是快速检查某个子树能看到哪些内容的方法。
 
 被隐藏的服务器不会出现在 `tools/list` 中，`/mcp/{slug}` 对它们返回 404。与工具过滤器一样，可见性的修改无需重新连接服务器即可生效，并在每次调用时检查，因此同样适用于已经打开的 MCP 会话。
+
+## 限制每个 API 密钥可用的内容
+
+为托管 API 密钥设置 MCP 允许列表，让每个客户端只获得它需要的服务器和工具。可以在控制台中设置（**API Keys** 页面，创建密钥时的 **MCP 访问**，或密钥所在行的扳手图标），也可以通过[管理 API](/zh/advanced/admin-endpoints) 的 `allowed_mcp` 设置：
+
+```bash
+curl -X POST https://your-gateway/admin/auth-keys \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "coding-agent", "allowed_mcp": ["github/*", "exa/web_search_exa"]}'
+```
+
+| 选择器 | 授予 |
+| --- | --- |
+| `github/*`（或 `github`） | `github` 的所有工具、提示词和资源 |
+| `exa/web_search_exa` | 仅该工具；该服务器的提示词和资源保持隐藏 |
+
+- **留空表示不设密钥级限制**（默认），因此现有密钥仍可使用其用户路径可见的所有服务器。
+- **它只会收窄范围。** 用户路径范围、工具过滤器、虚拟服务器和 `X-MCP-Servers` 依然生效。工具名称是上游的原始名称，与 `allowed_tools` 相同。
+- 允许列表之外的工具不会出现在 `tools/list` 和搜索结果中，对它们的调用会失败；对于密钥没有授权的服务器，`/mcp/{slug}` 返回 404。
+- 修改从该密钥的下一个 MCP 请求起生效，包括已打开的会话。新授予的工具会在客户端重新连接后出现。
+- 主密钥永远不受限制。
 
 ## 查看服务器的目录
 

@@ -21,7 +21,10 @@ tak samo, jak już stoi między Twoimi aplikacjami a providerami modeli:
   `user_paths` i wykluczyć z niego część ścieżek przez `disallowed_user_paths`;
   ukryci wywołujący nie dostają jedynie błędów – narzędzia w ogóle nie pojawiają się
   w ich `tools/list`. Filtry `allowed_tools` / `disallowed_tools` na poziomie
-  operatora przycinają rozbudowane serwery, dzięki czemu kontekst agenta pozostaje mały.
+  operatora przycinają rozbudowane serwery, a
+  [allowlista MCP dla klucza](/pl/features/mcp-gateway#ogranicz-dostęp-każdego-klucza-api)
+  daje każdemu klientowi tylko potrzebne serwery i narzędzia, dzięki czemu kontekst
+  agenta pozostaje mały.
 - **Obserwowalność.** Każde wywołanie narzędzia staje się wpisem użycia (serwer,
   narzędzie, czas trwania, rozmiary, flaga błędu, etykiety, ścieżka użytkownika),
   a requesty MCP pojawiają się w logu audytowym i logu requestów jak każdy inny
@@ -396,6 +399,37 @@ sprawdzenie, co widzi dane poddrzewo.
 Ukryte serwery są pomijane w `tools/list`, a `/mcp/{slug}` zwraca dla nich 404.
 Podobnie jak filtry narzędzi, zmiany widoczności obowiązują bez ponownego łączenia
 z serwerem i są sprawdzane przy każdym wywołaniu, więc obejmują też już otwarte sesje MCP.
+
+## Ogranicz dostęp każdego klucza API
+
+Nadaj zarządzanemu kluczowi API allowlistę MCP, aby każdy klient dostawał tylko
+potrzebne mu serwery i narzędzia. Ustawisz ją w panelu (strona **API Keys**, pole
+**Dostęp MCP** przy tworzeniu klucza lub ikona klucza francuskiego w wierszu klucza)
+albo przez `allowed_mcp` w [API administracyjnym](/pl/advanced/admin-endpoints):
+
+```bash
+curl -X POST https://your-gateway/admin/auth-keys \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "coding-agent", "allowed_mcp": ["github/*", "exa/web_search_exa"]}'
+```
+
+| Selektor | Daje dostęp do |
+| --- | --- |
+| `github/*` (lub `github`) | Wszystkich narzędzi, promptów i zasobów `github` |
+| `exa/web_search_exa` | Tylko tego narzędzia; prompty i zasoby serwera pozostają ukryte |
+
+- **Pusta lista oznacza brak ograniczenia na poziomie klucza** (domyślnie), więc
+  istniejące klucze zachowują każdy serwer widoczny dla ich ścieżki użytkownika.
+- **Tylko zawęża.** Zakresy ścieżek użytkownika, filtry narzędzi, serwery wirtualne
+  i `X-MCP-Servers` nadal obowiązują. Nazwy narzędzi to oryginalne nazwy z upstreamu,
+  jak w `allowed_tools`.
+- Narzędzia spoza allowlisty nie pojawiają się w `tools/list` ani w wynikach
+  wyszukiwania, ich wywołania kończą się błędem, a `/mcp/{slug}` zwraca 404 dla
+  serwerów, do których klucz nie ma uprawnień.
+- Zmiana obowiązuje od następnego żądania MCP klucza, także w otwartych sesjach.
+  Nowo przyznane narzędzia pojawiają się po ponownym połączeniu klienta.
+- Klucz główny (master key) nigdy nie jest ograniczony.
 
 ## Sprawdź katalog serwera
 

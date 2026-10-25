@@ -10,6 +10,7 @@ export function defaultAuthKeyForm() {
     user_path: "",
     labels: "",
     allowed_models: [],
+    allowed_mcp: [],
     dashboard_access: false,
     passthrough_access: false,
     expires_at: "",
@@ -26,6 +27,25 @@ export function parseAuthKeyAllowedModels(value) {
 // authKeySelectorOptions builds the allowed-models picker from the inventory.
 export function authKeySelectorOptions(models) {
   return modelSelectorOptions(models, (name) => m.model_selectors_provider_all({ name }));
+}
+
+// parseAuthKeyAllowedMCP turns the MCP access field (a list from the
+// multi-select, or comma/newline-separated text) into the `allowed_mcp`
+// payload: "server/*" or "server/tool" selectors.
+export function parseAuthKeyAllowedMCP(value) {
+  return parseModelSelectors(value);
+}
+
+// authKeyMCPSelectorOptions builds the MCP access picker: one whole-server
+// selector per MCP server slug, sorted. Single tools are typed in as
+// "server/tool" through the picker's custom entry.
+export function authKeyMCPSelectorOptions(slugs) {
+  const list = [...new Set((Array.isArray(slugs) ? slugs : []).filter(Boolean))].sort();
+  return list.map((name) => ({
+    value: name + "/*",
+    label: name + "/*",
+    description: m.api_keys_allowed_mcp_server_all({ name }),
+  }));
 }
 
 // parseAuthKeyLabels splits a comma-separated label string into a trimmed,
@@ -106,12 +126,14 @@ export function buildCreateAuthKeyPayload(form) {
   const userPath = normalizeAuthKeyUserPath(source.user_path);
   const labels = parseAuthKeyLabels(source.labels);
   const allowedModels = parseAuthKeyAllowedModels(source.allowed_models);
+  const allowedMCP = parseAuthKeyAllowedMCP(source.allowed_mcp);
   const payload = {
     name,
     description: String(source.description || "").trim() || undefined,
     user_path: userPath || undefined,
     labels: labels.length ? labels : undefined,
     allowed_models: allowedModels.length ? allowedModels : undefined,
+    allowed_mcp: allowedMCP.length ? allowedMCP : undefined,
     dashboard_access: source.dashboard_access ? true : undefined,
     passthrough_access: source.passthrough_access ? true : undefined,
   };
@@ -162,6 +184,7 @@ function authKeySearchText(key) {
     key.redacted_value,
     ...(key.labels || []),
     ...(key.allowed_models || []),
+    ...(key.allowed_mcp || []),
   ]
     .filter(Boolean)
     .join(" ")

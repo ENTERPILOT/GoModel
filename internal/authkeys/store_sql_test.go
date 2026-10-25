@@ -124,3 +124,22 @@ func TestStore_PassthroughAccessBackfill(t *testing.T) {
 		})
 	})
 }
+
+func TestSQLStoreAddsAllowedMCPColumn(t *testing.T) {
+	ctx := context.Background()
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		legacyTable := strings.Replace(sqlTable, "allowed_mcp "+sqlx.TypeJSON+",", "", 1)
+		require.NotEqual(t, sqlTable, legacyTable)
+		require.NoError(t, db.Schema(ctx, legacyTable))
+		_, err := db.Exec(ctx, `INSERT INTO auth_keys (id, name, redacted_value, secret_hash, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)`, "key-legacy", "legacy", TokenPrefix+"...old", "hash-legacy", storeTestNow.Unix(), storeTestNow.Unix())
+		require.NoError(t, err)
+
+		store, err := NewSQLStore(ctx, db)
+		require.NoError(t, err)
+		require.Nil(t, listByID(t, store)["key-legacy"].AllowedMCP, "legacy keys stay unrestricted")
+
+		require.NoError(t, store.UpdateAllowedMCP(ctx, "key-legacy", []string{"exa/*"}, storeTestNow))
+		require.Equal(t, []string{"exa/*"}, listByID(t, store)["key-legacy"].AllowedMCP)
+	})
+}

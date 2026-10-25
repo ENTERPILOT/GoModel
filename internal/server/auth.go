@@ -107,6 +107,7 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
 				ctx := ext.WithoutAuthentication(c.Request().Context())
 				ctx = core.WithEffectiveUserPath(ctx, transportOwnedUserPath(c.Request(), userPathHeaderName))
 				ctx = core.WithCredentialAllowedModels(ctx, nil)
+				ctx = core.WithCredentialAllowedMCP(ctx, nil)
 				ctx = core.WithAccessScope(ctx, core.AccessScope{})
 				c.SetRequest(c.Request().WithContext(ctx))
 				if tokenErr != "" {
@@ -370,6 +371,9 @@ func applyAuthKeyResult(c *echo.Context, authResult authkeys.AuthenticationResul
 	ctx = context.WithValue(ctx, interactionContinuationAllowedKey{}, authResult.DashboardAccess)
 	if len(authResult.AllowedModels) > 0 {
 		ctx = core.WithCredentialAllowedModels(ctx, authResult.AllowedModels)
+	}
+	if len(authResult.AllowedMCP) > 0 {
+		ctx = core.WithCredentialAllowedMCP(ctx, authResult.AllowedMCP)
 	}
 	if len(authResult.Labels) > 0 {
 		// Key labels join any labels the tagging middleware already

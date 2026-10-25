@@ -35,6 +35,7 @@ type AuthenticationResult struct {
 	UserPath          string
 	Labels            []string
 	AllowedModels     []string
+	AllowedMCP        []string
 	DashboardAccess   bool
 	PassthroughAccess bool
 }
@@ -184,6 +185,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*IssuedKey, er
 		UserPath:          normalized.UserPath,
 		Labels:            normalized.Labels,
 		AllowedModels:     normalized.AllowedModels,
+		AllowedMCP:        normalized.AllowedMCP,
 		DashboardAccess:   normalized.DashboardAccess,
 		PassthroughAccess: normalized.PassthroughAccess,
 		RedactedValue:     redactedValue,
@@ -366,23 +368,50 @@ func (s *Service) UpdateAllowedModels(ctx context.Context, id string, allowedMod
 	if s == nil {
 		return nil, fmt.Errorf("auth key service is required")
 	}
+	return s.updateSelectors(ctx, id, "allowed models", allowedModels, s.store.UpdateAllowedModels, func(key *AuthKey, values []string) {
+		key.AllowedModels = values
+	})
+}
+
+// UpdateAllowedMCP replaces a managed auth key's MCP allowlist the same way
+// UpdateAllowedModels replaces its model allowlist. Passing no selectors lifts
+// the key-level MCP restriction.
+func (s *Service) UpdateAllowedMCP(ctx context.Context, id string, allowedMCP []string) (*View, error) {
+	if s == nil {
+		return nil, fmt.Errorf("auth key service is required")
+	}
+	return s.updateSelectors(ctx, id, "allowed mcp", allowedMCP, s.store.UpdateAllowedMCP, func(key *AuthKey, values []string) {
+		key.AllowedMCP = values
+	})
+}
+
+// updateSelectors persists one normalized selector list with save, mirrors it
+// into the cached key with apply, best-effort reconciles from storage, and
+// returns the updated view. name labels errors and the reconcile operation.
+func (s *Service) updateSelectors(
+	ctx context.Context,
+	id, name string,
+	values []string,
+	save func(ctx context.Context, id string, values []string, now time.Time) error,
+	apply func(key *AuthKey, values []string),
+) (*View, error) {
 	id = normalizeID(id)
 	if id == "" {
 		return nil, newValidationError("auth key id is required", nil)
 	}
-	allowedModels = NormalizeAllowedModels(allowedModels)
+	values = NormalizeAllowedModels(values)
 
 	now := time.Now().UTC()
-	if err := s.store.UpdateAllowedModels(ctx, id, allowedModels, now); err != nil {
+	if err := save(ctx, id, values, now); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil, ErrNotFound
 		}
-		return nil, fmt.Errorf("update auth key allowed models: %w", err)
+		return nil, fmt.Errorf("update auth key %s: %w", name, err)
 	}
 	s.applyKeyUpdate(id, now, func(key *AuthKey) {
-		key.AllowedModels = allowedModels
+		apply(key, values)
 	})
-	s.refreshBestEffort(ctx, "update-allowed-models")
+	s.refreshBestEffort(ctx, "update-"+strings.ReplaceAll(name, " ", "-"))
 	return s.viewByID(id)
 }
 
@@ -552,6 +581,7 @@ func authenticateKey(key AuthKey, now time.Time) (AuthenticationResult, error) {
 		UserPath:          strings.TrimSpace(key.UserPath),
 		Labels:            key.Labels,
 		AllowedModels:     key.AllowedModels,
+		AllowedMCP:        key.AllowedMCP,
 		DashboardAccess:   key.DashboardAccess,
 		PassthroughAccess: key.PassthroughAccess,
 	}, nil

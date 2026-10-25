@@ -21,7 +21,9 @@ genauso, wie es bereits zwischen Ihren Anwendungen und den Modell-Providern steh
   beschränkt und mit `disallowed_user_paths` für Teilbereiche ausgenommen werden;
   Aufrufer, für die er verborgen ist, erhalten nicht nur Fehler — die Tools erscheinen
   in ihrem `tools/list` überhaupt nicht. Filter auf Betreiberebene,
-  `allowed_tools` / `disallowed_tools`, stutzen umfangreiche Server zurecht, was den
+  `allowed_tools` / `disallowed_tools`, stutzen umfangreiche Server zurecht, und eine
+  [MCP-Allowlist pro Key](/de/features/mcp-gateway#pro-api-key-begrenzen-was-genutzt-werden-kann)
+  gibt jedem Client nur die Server und Tools, die er braucht, was den
   Agent-Kontext klein hält.
 - **Observability.** Jeder Tool-Aufruf wird zu einem Nutzungseintrag (Server, Tool,
   Dauer, Größen, Fehler-Flag, Labels, User-Path), und MCP-Requests erscheinen im
@@ -414,6 +416,38 @@ Verborgene Server fehlen in `tools/list`, und `/mcp/{slug}` gibt für sie 404 zu
 Wie bei Tool-Filtern werden Änderungen an der Sichtbarkeit ohne neuen
 Verbindungsaufbau zum Server wirksam und bei jedem Aufruf geprüft; sie erreichen
 daher auch bereits offene MCP-Sessions.
+
+## Pro API-Key begrenzen, was genutzt werden kann
+
+Geben Sie einem verwalteten API-Key eine MCP-Allowlist, damit jeder Client nur die
+Server und Tools erhält, die er braucht. Sie setzen sie im Dashboard (Seite
+**API Keys**, **MCP-Zugriff** beim Erstellen eines Keys oder das Schraubenschlüssel-Symbol
+in der Zeile eines Keys) oder mit `allowed_mcp` über die
+[Admin-API](/de/advanced/admin-endpoints):
+
+```bash
+curl -X POST https://your-gateway/admin/auth-keys \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "coding-agent", "allowed_mcp": ["github/*", "exa/web_search_exa"]}'
+```
+
+| Selektor | Gewährt |
+| --- | --- |
+| `github/*` (oder `github`) | Alle Tools, Prompts und Ressourcen von `github` |
+| `exa/web_search_exa` | Nur dieses Tool; Prompts und Ressourcen des Servers bleiben verborgen |
+
+- **Leer bedeutet keine Beschränkung auf Key-Ebene** (Standard), daher behalten
+  bestehende Keys jeden Server, den ihr User-Path sehen darf.
+- **Sie schränkt nur ein.** User-Path-Bereiche, Tool-Filter, virtuelle Server und
+  `X-MCP-Servers` gelten weiterhin. Tool-Namen sind die Originalnamen des Upstreams,
+  wie bei `allowed_tools`.
+- Tools außerhalb der Allowlist fehlen in `tools/list` und in Suchergebnissen,
+  Aufrufe schlagen fehl, und `/mcp/{slug}` liefert 404 für Server, auf die der Key
+  keine Berechtigung hat.
+- Eine Änderung gilt ab der nächsten MCP-Anfrage des Keys, auch für bereits offene
+  Sitzungen. Neu gewährte Tools erscheinen, sobald sich der Client neu verbindet.
+- Der Master-Key ist nie eingeschränkt.
 
 ## Den Katalog eines Servers einsehen
 

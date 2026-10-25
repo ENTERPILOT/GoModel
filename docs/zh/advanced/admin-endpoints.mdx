@@ -124,6 +124,9 @@ console.log(authKey);
 `PUT /admin/auth-keys/<key-id>/allowed-models` 设置（`{"allowed_models": ["anthropic/*", "openai/gpt-4o"]}`；
 显式传入空列表会解除密钥级限制；省略该字段会被拒绝）。组级和用户级允许列表通过[用户端点](#用户端点)管理。
 
+要限制密钥通过 [MCP 网关](/zh/features/mcp-gateway#限制每个-api-密钥可用的内容)可访问的 MCP 服务器和工具，可在 `POST /admin/auth-keys` 中使用可选的 `allowed_mcp`，或之后通过
+`PUT /admin/auth-keys/<key-id>/allowed-mcp` 设置（`{"allowed_mcp": ["github/*", "exa/web_search_exa"]}`）。`server/*` 授予整个服务器，`server/tool` 授予单个工具；单独的 `server` 会存储为 `server/*`。显式传入空列表会解除限制；省略该字段会被拒绝。
+
 控制台访问权限只控制 `/admin/*`。模型端点和自助式 [`GET /v1/usage`](/zh/advanced/usage-api) 端点对所有托管密钥开放，但提供商透传路由（`/p/{provider}/...`）除外：托管密钥创建时不带透传访问权限，您可以通过在 `POST /admin/auth-keys` 中设置 `"passthrough_access": true` 或调用 `PUT /admin/auth-keys/<key-id>/passthrough-access` 来授予（参见[透传访问控制](/zh/features/passthrough-api#访问控制)）。
 
 ### 从 LiteLLM 导入密钥
@@ -183,6 +186,7 @@ SSO 会话等扩展身份遵循相同的规则：会话的用户路径就是它�
 - 密钥不能修改自身的标签、允许的模型或访问标志
   （`403 auth_key_self_update`），但仍可以停用自身。设置了允许模型的密钥，只能为其创建或编辑的密钥授予它自己被允许的模型：`openai/*` 可以授予 `openai/gpt-4o-mini`，但不能授予
   `anthropic/*` 或不受限制的密钥（`403 allowed_models_out_of_scope`）。
+  `allowed_mcp` 遵循相同规则：`github/*` 可以授予 `github/create_issue`，但不能授予 `jira/*` 或不受限制的密钥（`403 allowed_mcp_out_of_scope`）。
   这些规则同样适用于全局密钥：全局密钥也不能导入模型范围更广的密钥，也不能重新导入自己的 Token，除非使用
   `"enabled": false` 来停用它。
 - 只有用户路径预算和速率限制可见且可编辑；标签、提供商和模型规则作用于整个网关。

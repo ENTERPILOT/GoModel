@@ -7,7 +7,7 @@
   import { displayModelSelector } from "$lib/utils/modelSelectors.js";
   import { authKeyDeactivated, authKeyExpired, labelChipStyle, lastUsedCellState } from "./authKeysLogic.js";
   import { authKeysStore as store } from "./authKeys.svelte.js";
-  import { Boxes, Info, Pencil, Plug, Power, ShieldCheck, ShieldOff, TriangleAlert, Unplug } from "lucide";
+  import { Boxes, Info, Pencil, Plug, Power, ShieldCheck, ShieldOff, TriangleAlert, Unplug, Wrench } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 </script>
 
@@ -26,6 +26,9 @@
             <Icon icon={Info} width="13" height="13" />
           </span>
         </th>
+        {#if store.mcpVisible}
+          <th>{m.api_keys_column_allowed_mcp()}</th>
+        {/if}
         <th>{m.api_keys_column_token()}</th>
         <th>
           <span
@@ -98,6 +101,19 @@
               </span>
             {/if}
           </td>
+          {#if store.mcpVisible}
+            <td>
+              {#if (key.allowed_mcp || []).length > 0}
+                <div class="auth-key-selector-list">
+                  {#each key.allowed_mcp || [] as selector (selector)}
+                    <code class="auth-key-selector">{selector}</code>
+                  {/each}
+                </div>
+              {:else}
+                <span class="auth-key-unrestricted">{m.api_keys_allowed_mcp_all()}</span>
+              {/if}
+            </td>
+          {/if}
           <td><code class="auth-key-redacted">{key.redacted_value}</code></td>
           <td>
             <span
@@ -185,6 +201,15 @@
                 >
                   <Icon icon={Boxes} class="table-icon-svg" />
                 </TableActionButton>
+                {#if store.mcpVisible}
+                  <TableActionButton
+                    label={m.api_keys_edit_allowed_mcp_action({ name: key.name })}
+                    class="table-icon-btn"
+                    onclick={() => store.openAllowedMCPEditor(key)}
+                  >
+                    <Icon icon={Wrench} class="table-icon-svg" />
+                  </TableActionButton>
+                {/if}
                 <TableActionButton
                   label={store.deactivatingID === key.id
                     ? m.api_keys_deactivating_action({ name: key.name })

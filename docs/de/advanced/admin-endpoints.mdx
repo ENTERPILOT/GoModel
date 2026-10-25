@@ -131,6 +131,15 @@ keine Beschränkung auf Key-Ebene) oder nachträglich mit
 eine explizit leere Liste hebt die Beschränkung auf Key-Ebene auf; ein fehlendes Feld wird abgelehnt). Allowlists auf Gruppen- und
 Benutzerebene verwalten Sie über die [Benutzer-Endpunkte](/de/advanced/admin-endpoints#benutzer-endpunkte).
 
+Beschränken Sie, welche MCP-Server und Tools ein Key über das
+[MCP-Gateway](/de/features/mcp-gateway#pro-api-key-begrenzen-was-genutzt-werden-kann) erreicht, mit dem
+optionalen Feld `allowed_mcp` bei `POST /admin/auth-keys` oder nachträglich mit
+`PUT /admin/auth-keys/<key-id>/allowed-mcp`
+(`{"allowed_mcp": ["github/*", "exa/web_search_exa"]}`). `server/*` gewährt einen
+ganzen Server und `server/tool` ein einzelnes Tool; ein reines `server` wird als
+`server/*` gespeichert. Eine explizit leere Liste hebt die Beschränkung auf; ein
+fehlendes Feld wird abgelehnt.
+
 Dashboard-Zugriff regelt nur `/admin/*`. Modell-Endpunkte und der Self-Service-Endpunkt [`GET /v1/usage`](/de/advanced/usage-api) bleiben für jeden verwalteten Key verfügbar, mit Ausnahme der Provider-Passthrough-Routen (`/p/{provider}/...`): Verwaltete Keys werden ohne Passthrough-Zugriff erstellt; Sie erteilen ihn mit `"passthrough_access": true` bei `POST /admin/auth-keys` oder mit `PUT /admin/auth-keys/<key-id>/passthrough-access` (siehe [Passthrough-Zugriffskontrolle](/de/features/passthrough-api#zugriffskontrolle)).
 
 ### Keys aus LiteLLM importieren
@@ -212,6 +221,9 @@ Für einen bereichsbeschränkten Admin gilt:
   erlaubten Modellen kann den Keys, die er erstellt oder bearbeitet, nur Modelle geben, die ihm selbst
   erlaubt sind: `openai/*` kann `openai/gpt-4o-mini` vergeben, aber weder
   `anthropic/*` noch einen unbeschränkten Key (`403 allowed_models_out_of_scope`).
+  Für `allowed_mcp` gilt dieselbe Regel: `github/*` kann `github/create_issue`
+  vergeben, aber weder `jira/*` noch einen unbeschränkten Key
+  (`403 allowed_mcp_out_of_scope`).
   Diese Regeln gelten auch für globale Keys, die außerdem keinen Key mit
   umfassenderen Modellen importieren und ihr eigenes Token nicht erneut importieren können, außer mit
   `"enabled": false`, um es zu deaktivieren.

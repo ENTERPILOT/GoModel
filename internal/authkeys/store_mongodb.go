@@ -17,6 +17,7 @@ type mongoAuthKeyDocument struct {
 	UserPath        string   `bson:"user_path,omitempty"`
 	Labels          []string `bson:"labels,omitempty"`
 	AllowedModels   []string `bson:"allowed_models,omitempty"`
+	AllowedMCP      []string `bson:"allowed_mcp,omitempty"`
 	DashboardAccess bool     `bson:"dashboard_access,omitempty"`
 	// Not omitempty: a missing field marks a key issued before the flag
 	// existed, which NewMongoDBStore backfills to true.
@@ -97,6 +98,7 @@ func (s *MongoDBStore) Create(ctx context.Context, key AuthKey) error {
 		UserPath:          key.UserPath,
 		Labels:            key.Labels,
 		AllowedModels:     key.AllowedModels,
+		AllowedMCP:        key.AllowedMCP,
 		DashboardAccess:   key.DashboardAccess,
 		PassthroughAccess: key.PassthroughAccess,
 		RedactedValue:     key.RedactedValue,
@@ -187,6 +189,13 @@ func (s *MongoDBStore) updateStringList(ctx context.Context, id, field string, v
 	return nil
 }
 
+func (s *MongoDBStore) UpdateAllowedMCP(ctx context.Context, id string, allowedMCP []string, now time.Time) error {
+	if err := s.updateStringList(ctx, id, "allowed_mcp", allowedMCP, now); err != nil {
+		return fmt.Errorf("update auth key allowed mcp: %w", err)
+	}
+	return nil
+}
+
 func (s *MongoDBStore) UpdateDashboardAccess(ctx context.Context, id string, allowed bool, now time.Time) error {
 	if err := s.updateBool(ctx, id, "dashboard_access", allowed, now); err != nil {
 		return fmt.Errorf("update auth key dashboard access: %w", err)
@@ -249,6 +258,7 @@ func authKeyFromMongo(doc mongoAuthKeyDocument) AuthKey {
 		UserPath:          doc.UserPath,
 		Labels:            doc.Labels,
 		AllowedModels:     doc.AllowedModels,
+		AllowedMCP:        doc.AllowedMCP,
 		DashboardAccess:   doc.DashboardAccess,
 		PassthroughAccess: doc.PassthroughAccess,
 		RedactedValue:     doc.RedactedValue,
