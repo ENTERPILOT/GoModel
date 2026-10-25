@@ -114,6 +114,15 @@ export function isSecretPlaceholder(value) {
   return String(value ?? "") === SECRET_PLACEHOLDER;
 }
 
+// schemaRangeNumber converts a stored range value to a number, treating null,
+// undefined and a blank string as absent instead of zero. Without this an
+// empty field would display 0 and silently bypass its default and its minimum.
+function schemaRangeNumber(value) {
+  if (value === null || value === undefined) return Number.NaN;
+  if (typeof value === "string" && value.trim() === "") return Number.NaN;
+  return Number(value);
+}
+
 // schemaFieldValue reads a field's current value from a config.
 export function schemaFieldValue(config, field) {
   const value = field && config ? config[field.key] : undefined;
@@ -127,7 +136,7 @@ export function schemaFieldValue(config, field) {
     case "range": {
       // A slider cannot render an empty value: fall back to the field's
       // default, then to its lower bound.
-      const stored = Number(value);
+      const stored = schemaRangeNumber(value);
       if (Number.isFinite(stored)) return stored;
       const fallback = Number(field.default);
       if (Number.isFinite(fallback)) return fallback;
@@ -141,27 +150,48 @@ export function schemaFieldValue(config, field) {
 
 // schemaFieldRangeBounds returns the bounds a range field renders with. A
 // missing or zero maximum falls back to 1, the same default the server applies
-// to a range that declares none.
+// to a range that declares none; an explicitly negative maximum is a real
+// bound and is kept.
 export function schemaFieldRangeBounds(field) {
   const min = Number(field && field.min);
   const max = Number(field && field.max);
   const step = Number(field && field.step);
   return {
     min: Number.isFinite(min) ? min : 0,
-    max: Number.isFinite(max) && max > 0 ? max : 1,
+    max: Number.isFinite(max) && max !== 0 ? max : 1,
     step: Number.isFinite(step) && step > 0 ? step : 0.01,
   };
 }
 
-// schemaFieldRangeValue returns the number a range field displays, clamped to
-// its bounds. A stored value outside the bounds stays in the config until the
-// operator moves the slider; only the display is clamped so the number and the
-// thumb agree.
+// decimalPlaces counts the decimal places a number needs to be written without
+// rounding, honouring the exponent of very small values: 1e-12 needs 12.
+function decimalPlaces(value) {
+  const [coefficient, exponentText = "0"] = String(value)
+    .toLowerCase()
+    .split("e");
+  const fraction = (coefficient.split(".")[1] || "").length;
+  return Math.max(0, fraction - Number(exponentText));
+}
+
+// schemaFieldRangeValue returns the number a range field displays: clamped to
+// its bounds and snapped to the step the slider uses, so the output and the
+// thumb agree. A stored value outside the bounds stays in the config until the
+// operator moves the slider; only the display is clamped and snapped.
 export function schemaFieldRangeValue(config, field) {
-  const { min, max } = schemaFieldRangeBounds(field);
+  const { min, max, step } = schemaFieldRangeBounds(field);
   const stored = Number(schemaFieldValue(config, field));
   if (!Number.isFinite(stored)) return min;
-  return Math.min(Math.max(stored, min), max);
+  const clamped = Math.min(Math.max(stored, min), max);
+  const places = Math.max(decimalPlaces(min), decimalPlaces(step));
+  // Round to the step's own precision, not a fixed one: a positive step such
+  // as 1e-12 is legal, and ten decimals would turn 3e-12 into 0. This also has
+  // to run before the max check — 0.2 + 8 * 0.1 lands a hair above 1, and only
+  // the rounding shows it is exactly the bound.
+  const normalize = (value) =>
+    places <= 100 ? Number(value.toFixed(places)) : value;
+  let snapped = normalize(min + Math.round((clamped - min) / step) * step);
+  if (snapped > max) snapped = normalize(snapped - step);
+  return Math.max(snapped, min);
 }
 
 // setSchemaFieldValue returns the next config with a field updated: numbers
