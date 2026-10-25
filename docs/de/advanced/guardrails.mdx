@@ -14,7 +14,7 @@ drei Phasen:
 
 - **prompt**: nach dem Routing, bevor der Request den Provider erreicht
 - **response**: auf der vollständigen Response, bevor sie den Client erreicht
-- **stream**: auf jedem gestreamten Event (oder je nach Plugin auf dem gepufferten Stream)
+- **stream**: auf jedem gestreamten Event (oder je nach Plugin auf dem gepufferten Stream) – nur bei Requests mit `stream: true`; ein Request ohne Streaming führt nie einen Guardrail der Stream-Phase aus
 
 Ein Guardrail kann Inhalte bearbeiten, Header hinzufügen, den Request mit einem
 Fehler ablehnen, ihn mit einer sicheren Nachricht beantworten oder ihn mit einer
@@ -363,9 +363,9 @@ nicht erkannt.
 | `case_insensitive` | Nein | `false` | Ohne Berücksichtigung der Groß-/Kleinschreibung suchen. |
 | `roles` | Nein | `["user"]` | Prompt-Nachrichten, für die die Regeln gelten: `system` (einschließlich Developer), `user`, `assistant`, `tool`. In der Response-Phase ist immer der Assistant-Text das Ziel. |
 | `on_match` | Nein | `replace` | `replace` ersetzt; `block` lehnt mit einem Fehler ab; `respond` antwortet mit `message` als Assistant-Antwort; `warn` fährt fort und erfasst den Treffer. Nur `replace` bearbeitet den Text. |
-| `message` | Nein | `Request blocked by policy` | Fehlermeldung für `block`, Assistant-Antwort für `respond`, Audit-Notiz für `warn`. |
+| `message` | Nein | `Request blocked by policy` für `block` und `respond`, keiner für `warn` | Fehlermeldung für `block`, Assistant-Antwort für `respond`, Audit-Notiz für `warn`. Ein `warn` erfasst nur dann eine Notiz, wenn Sie eine festlegen, damit das Ergebnis im Dashboard nicht als Block gekennzeichnet wird. |
 | `block_status` | Nein | Standard der Phase | Ein HTTP-Statuscode zwischen 400 und 599 für `block`, zum Beispiel `403`. Leer bedeutet 400, wenn der Prompt blockiert wird, und 502, wenn die Response blockiert wird. |
-| `stream_lookbehind` | Nein | `64` | Anzahl der Zeichen gestreamten Texts, die zurückgehalten werden, damit ein Treffer, der sich über zwei Chunks erstreckt, trotzdem umgeschrieben wird; setzen Sie den Wert mindestens auf die Länge des längsten Suchtexts. Ein Treffer am Ende des bisher gestreamten Texts wird zurückgehalten, bis er nicht mehr wächst, sodass ein offenes Muster wie `sk-[A-Za-z0-9]{20,}` den gesamten Wert maskiert, sofern er höchstens so lang ist. Wird von `replace` und `warn` verwendet. |
+| `stream_lookbehind` | Nein | `64` | Anzahl der Zeichen gestreamten Texts, die zurückgehalten werden, damit ein Treffer, der sich über zwei Chunks erstreckt, trotzdem umgeschrieben wird; setzen Sie den Wert mindestens auf die Länge des längsten Suchtexts. Ein Treffer am Ende des bisher gestreamten Texts wird zurückgehalten, bis er nicht mehr wächst, sodass ein offenes Muster wie `sk-[A-Za-z0-9_-]{20,}` den gesamten Wert maskiert, sofern er höchstens so lang ist – bei einem längeren Wert bleibt der Teil jenseits des Lookbehinds stehen, setzen Sie den Wert daher über das längste erwartete Secret. Wird von `replace` und `warn` verwendet. |
 
 In der Stream-Phase transformieren `replace` und `warn` Events im laufenden
 Betrieb mit dem konfigurierten Lookbehind. `block` und `respond` puffern den
@@ -668,6 +668,19 @@ enthalten nie den übergebenen Text. Der Analyzer erhält den Text im Klartext.
 Betreiben Sie ihn daher als Sidecar auf demselben Host oder erreichen Sie ihn
 über `https://` oder ein privates Netzwerk.
 
+<Warning>
+  Die Anonymisierung verbirgt die Werte vor dem Provider, nicht vor Ihrem
+  Audit-Log. `LOGGING_LOG_BODIES` ist standardmäßig `true`, und die
+  gespeicherten `request_body` und `response_body` sind die, die der Client
+  gesendet und empfangen hat, mit den personenbezogenen Daten im Klartext –
+  anonymisiert ist nur der umgeschriebene Body unter `request_revisions`.
+  Setzen Sie
+  [`LOGGING_LOG_BODIES=false`](/de/advanced/configuration#audit-logging), wenn
+  der Audit-Speicher keine personenbezogenen Daten enthalten darf.
+  `LOGGING_LOG_REVISION_BODIES=false` verwirft nur die anonymisierten Kopien;
+  die Original-Bodys werden weiterhin gespeichert.
+</Warning>
+
 <Tip>
   Beginnen Sie mit einer expliziten `entities`-Liste. Sind alle Typen aktiviert,
   meldet das Sprachmodell des Analyzers auch `DATE_TIME`, `LOCATION`, `NRP` und
@@ -678,7 +691,13 @@ Betreiben Sie ihn daher als Sidecar auf demselben Host oder erreichen Sie ihn
   begegnen unerklärten Tokens im Stil von `<PERSON_1>` mit Misstrauen und
   verweigern womöglich, sie zu wiederholen; eine Zeile im System-Prompt wie
   `Values like <PERSON_1> are privacy placeholders;
-  use them as ordinary values` behebt das.
+  use them as ordinary values` behebt das. Die `PERSON`-Spans des Analyzers
+  können außerdem ein benachbartes Token in Großbuchstaben mit erfassen
+  (`TOOLESC Katarzyna` wird als ein `PERSON` gemeldet), sodass ein
+  `presidio`-Schritt vor einem `string_replace`-Schritt genau den Text ersetzen
+  kann, nach dem die spätere Regel sucht; muss eine Regel die Originalwörter
+  sehen, geben Sie dem `string_replace`-Schritt die niedrigere `order`, damit er
+  zuerst läuft, oder nehmen Sie diese Wörter in `allow_list` auf.
 </Tip>
 
 In der Stream-Phase transformieren `anonymize` und `warn` Events im laufenden
@@ -707,6 +726,18 @@ behält das Anthropic-Thinking seine Platzhalter. Auch Reasoning-Items einer
 `/v1/responses`-Ausgabe (Zusammenfassungen und Reasoning-Text) behalten die
 Platzhalter: Clients geben sie unverändert in `input` wieder, sodass
 wiederhergestellte Werte im nächsten Turn den Provider erreichen würden.
+
+<Warning>
+  Kombinieren Sie die Instanz in der Prompt-Phase mit einer in der
+  **Response**-Phase. Die Response-Phase deckt beide Arten von Requests ab –
+  einen gestreamten puffert sie –, während eine Instanz in der Stream-Phase nur
+  bei gestreamten Antworten läuft. Mit einer Instanz nur in der Stream-Phase
+  gibt ein Request ohne Streaming die rohen `<PERSON_1>`-Platzhalter an den
+  Client zurück, und personenbezogene Daten, die das Modell selbst erfunden
+  hat, erreichen den Client unmaskiert. Eine Instanz in der Stream-Phase ist nur
+  dann die richtige Wahl, wenn jeder Request, der wiederhergestellt werden muss,
+  gestreamt wird und die Auslieferung inkrementell bleiben muss.
+</Warning>
 
 Die Instanz in der Prompt-Phase benötigt `restore`, um die Werte zu erfassen;
 die wiederherstellende Instanz liest `restore_tools` und
@@ -865,17 +896,20 @@ guardrails:
       config:
         mode: "regex"
         rules: |
-          sk-[A-Za-z0-9]{20,} => [redacted]
+          sk-[A-Za-z0-9_-]{20,} => [redacted]
           AKIA[0-9A-Z]{16} => [redacted]
 ```
 
 ### Stream-Phase: Im laufenden Betrieb schwärzen und die gesamte Antwort beurteilen
 
 Dieselbe Instanz kann in mehreren Phasen referenziert werden. `mask-keys`
-transformiert gestreamte Chunks im laufenden Betrieb (64 Zeichen Lookbehind,
-sodass ein über zwei Chunks verteilter Key trotzdem erkannt wird).
-`answer-judge` benötigt die gesamte Antwort, puffert daher den Stream, und der
-Client erhält ihn, sobald das Urteil vorliegt.
+transformiert gestreamte Chunks im laufenden Betrieb; `stream_lookbehind` legt
+fest, wie viel Text zurückgehalten wird. Setzen Sie den Wert daher über das
+längste erwartete Secret (Provider-Keys wie `sk-proj-…` und `sk-ant-…` sind
+deutlich länger als der Standard von 64 Zeichen, und alles jenseits des
+Lookbehinds erreicht den Client unmaskiert). `answer-judge` benötigt die
+gesamte Antwort, puffert daher den Stream, und der Client erhält ihn, sobald
+das Urteil vorliegt.
 
 ```yaml
 guardrails:
@@ -887,8 +921,9 @@ guardrails:
       order: 10
       config:
         mode: "regex"
+        stream_lookbehind: 256
         rules: |
-          sk-[A-Za-z0-9]{20,} => [redacted]
+          sk-[A-Za-z0-9_-]{20,} => [redacted]
 
     - name: "answer-judge"
       type: "llm_judge"
