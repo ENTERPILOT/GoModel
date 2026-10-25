@@ -31,12 +31,14 @@ providers:
     # base_url 默认为 "https://api.together.ai/v1"。
 ```
 
-仅在需要时覆盖 Base URL 或固定模型列表，例如使用 Together 的区域端点（`https://us-api.together.ai/v1`）：
+仅在需要时覆盖 Base URL 或设置模型列表，例如使用 Together 的区域端点（`https://us-api.together.ai/v1`）：
 
 ```bash
 TOGETHER_BASE_URL=https://api.together.ai/v1
 TOGETHER_MODELS=meta-llama/Llama-3.3-70B-Instruct-Turbo,BAAI/bge-base-en-v1.5
 ```
+
+`TOGETHER_MODELS` 是备用列表，仅在 `/models` 失败或为空时使用；设置 `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` 后，它将成为唯一的模型列表。
 
 ## 模型
 
@@ -48,6 +50,8 @@ curl http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model": "together/meta-llama/Llama-3.3-70B-Instruct-Turbo", "messages": [{"role": "user", "content": "Hello"}]}'
 ```
+
+当模型 ID 以另一个已配置提供商的名称开头时，请务必加上前缀：例如配置了 OpenAI 提供商时，`openai/gpt-oss-120b` 会在 OpenAI 中查找并失败，因此请改为发送 `together/openai/gpt-oss-120b`。
 
 ## 行为说明
 

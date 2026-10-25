@@ -32,13 +32,16 @@ providers:
     # base_url domyślnie to "https://api.together.ai/v1".
 ```
 
-Nadpisz base URL albo przypnij listę modeli tylko wtedy, gdy jest to potrzebne,
+Nadpisz base URL albo ustaw listę modeli tylko wtedy, gdy jest to potrzebne,
 na przykład żeby użyć regionalnych endpointów Together (`https://us-api.together.ai/v1`):
 
 ```bash
 TOGETHER_BASE_URL=https://api.together.ai/v1
 TOGETHER_MODELS=meta-llama/Llama-3.3-70B-Instruct-Turbo,BAAI/bge-base-en-v1.5
 ```
+
+`TOGETHER_MODELS` to lista zapasowa, używana tylko wtedy, gdy `/models` zwraca błąd
+lub pustą listę; `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` czyni ją jedyną listą.
 
 ## Modele
 
@@ -54,6 +57,10 @@ curl http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model": "together/meta-llama/Llama-3.3-70B-Instruct-Turbo", "messages": [{"role": "user", "content": "Hello"}]}'
 ```
+
+Używaj prefiksu zawsze, gdy identyfikator zaczyna się od nazwy innego
+skonfigurowanego providera: przy skonfigurowanym providerze OpenAI
+`openai/gpt-oss-120b` jest szukany w OpenAI i kończy się błędem, więc wyślij `together/openai/gpt-oss-120b`.
 
 ## Uwagi o działaniu
 

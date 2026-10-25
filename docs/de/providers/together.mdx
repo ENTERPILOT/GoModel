@@ -32,7 +32,7 @@ providers:
     # base_url ist standardmäßig "https://api.together.ai/v1".
 ```
 
-Überschreiben Sie die Base-URL oder legen Sie eine feste Modellliste nur fest,
+Überschreiben Sie die Base-URL oder legen Sie eine Modellliste nur fest,
 wenn Sie dies benötigen, zum Beispiel für die regionalen Endpunkte von Together
 (`https://us-api.together.ai/v1`):
 
@@ -40,6 +40,10 @@ wenn Sie dies benötigen, zum Beispiel für die regionalen Endpunkte von Togethe
 TOGETHER_BASE_URL=https://api.together.ai/v1
 TOGETHER_MODELS=meta-llama/Llama-3.3-70B-Instruct-Turbo,BAAI/bge-base-en-v1.5
 ```
+
+`TOGETHER_MODELS` ist eine Fallback-Liste, die nur verwendet wird, wenn `/models`
+fehlschlägt oder leer ist; mit `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` wird sie
+zur einzigen Liste.
 
 ## Modelle
 
@@ -55,6 +59,11 @@ curl http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model": "together/meta-llama/Llama-3.3-70B-Instruct-Turbo", "messages": [{"role": "user", "content": "Hello"}]}'
 ```
+
+Verwenden Sie das Präfix immer dann, wenn die ID mit dem Namen eines anderen
+konfigurierten Providers beginnt: Ist ein OpenAI-Provider konfiguriert, wird
+`openai/gpt-oss-120b` bei OpenAI gesucht und schlägt fehl; senden Sie stattdessen
+`together/openai/gpt-oss-120b`.
 
 ## Hinweise zum Verhalten
 

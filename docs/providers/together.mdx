@@ -32,13 +32,16 @@ providers:
     # base_url defaults to "https://api.together.ai/v1".
 ```
 
-Override the base URL or pin a model list only when you need to, for example
+Override the base URL or set a model list only when you need to, for example
 to use Together's regional endpoints (`https://us-api.together.ai/v1`):
 
 ```bash
 TOGETHER_BASE_URL=https://api.together.ai/v1
 TOGETHER_MODELS=meta-llama/Llama-3.3-70B-Instruct-Turbo,BAAI/bge-base-en-v1.5
 ```
+
+`TOGETHER_MODELS` is a fallback list, used only when `/models` fails or is
+empty; `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` makes it the only list.
 
 ## Models
 
@@ -54,6 +57,10 @@ curl http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model": "together/meta-llama/Llama-3.3-70B-Instruct-Turbo", "messages": [{"role": "user", "content": "Hello"}]}'
 ```
+
+Use the prefix whenever the ID starts with the name of another configured
+provider: with an OpenAI provider configured, `openai/gpt-oss-120b` is looked up
+on OpenAI and fails, so send `together/openai/gpt-oss-120b` instead.
 
 ## Behavior notes
 
