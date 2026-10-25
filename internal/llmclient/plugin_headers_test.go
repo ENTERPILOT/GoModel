@@ -60,6 +60,7 @@ func TestBuildRequestPluginHeadersCannotOverrideCredentials(t *testing.T) {
 	assert.Empty(t, req.Header.Get("Cookie"))
 	assert.Empty(t, req.Header.Get("Set-Cookie"))
 	assert.Equal(t, "upstream.test", req.Host)
+	assert.Empty(t, req.Header.Get("Host"), "a plugin Host is denied, not merely shadowed by the URL host")
 	assert.Empty(t, req.Header.Get("Content-Length"))
 	assert.Empty(t, req.Header.Get("Transfer-Encoding"))
 	assert.Equal(t, "allowed", req.Header.Get("X-Allowed-Header"))
