@@ -33,7 +33,11 @@
         flash.error(m.settings_config_export_failed());
         return;
       }
-      const url = URL.createObjectURL(await res.blob());
+      const blob = await res.blob();
+      if (generation < auth.generation) {
+        return;
+      }
+      const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
       link.download = FILENAME;

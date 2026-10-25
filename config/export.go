@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -153,7 +154,13 @@ func (e *exporter) walk(path string, v reflect.Value, node *yaml.Node, class exp
 				if isNil(child) {
 					continue
 				}
-				e.walk(childPath, child, value, class, "")
+				// A map key is a setting name too: one naming a credential
+				// marks its value secret, as in free-form plugin settings.
+				childClass := class
+				if childClass == exportPlain && credentialKey(key.Value) {
+					childClass = exportSecret
+				}
+				e.walk(childPath, child, value, childClass, "")
 			case reflect.Struct:
 				field, child, ok := yamlField(v, key.Value)
 				if !ok {
@@ -186,7 +193,7 @@ func isNil(v reflect.Value) bool {
 func (e *exporter) walkUntyped(path string, node *yaml.Node, secret bool) {
 	switch node.Kind {
 	case yaml.ScalarNode:
-		if node.ShortTag() != "!!str" {
+		if node.ShortTag() != "!!str" && !e.extra[path] {
 			return
 		}
 		class := exportPlain
@@ -360,14 +367,24 @@ const referencePlaceholder = "gomodelsecretreference"
 // query parameter named like a credential, that is not made of secret
 // references alone. A URL that does not parse is assumed to.
 func urlHasLiteralCredential(value string) bool {
+	literal := func(s string) bool { return strings.ReplaceAll(s, referencePlaceholder, "") != "" }
+	replaced := replaceReferences(value, referencePlaceholder)
+	if !strings.Contains(replaced, "://") {
+		// A PostgreSQL keyword/value connection string
+		// ("host=db user=app password=secret").
+		for _, match := range dsnPasswordPattern.FindAllStringSubmatch(replaced, -1) {
+			if literal(strings.Trim(match[1], "'")) {
+				return true
+			}
+		}
+	}
 	if !strings.ContainsAny(value, "@?") {
 		return false
 	}
-	u, err := url.Parse(replaceReferences(value, referencePlaceholder))
+	u, err := url.Parse(replaced)
 	if err != nil {
 		return true
 	}
-	literal := func(s string) bool { return strings.ReplaceAll(s, referencePlaceholder, "") != "" }
 	if password, set := u.User.Password(); set && literal(password) {
 		return true
 	}
@@ -378,6 +395,9 @@ func urlHasLiteralCredential(value string) bool {
 	}
 	return false
 }
+
+// dsnPasswordPattern matches the password of a keyword/value connection string.
+var dsnPasswordPattern = regexp.MustCompile(`(?i)(?:^|\s)password\s*=\s*('(?:[^'\\]|\\.)*'|\S*)`)
 
 // replaceReferences replaces every secret reference in value with with.
 func replaceReferences(value, with string) string {

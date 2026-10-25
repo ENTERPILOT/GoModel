@@ -1427,11 +1427,6 @@
                 "schema": {
                   "type": "string"
                 }
-              },
-              "application/json": {
-                "schema": {
-                  "type": "string"
-                }
               }
             }
           },
@@ -1439,11 +1434,6 @@
             "description": "Unauthorized",
             "content": {
               "application/yaml": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
-              },
-              "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/core.GatewayError"
                 }
@@ -1457,11 +1447,6 @@
                 "schema": {
                   "$ref": "#/components/schemas/core.GatewayError"
                 }
-              },
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
               }
             }
           },
@@ -1469,11 +1454,6 @@
             "description": "Service Unavailable",
             "content": {
               "application/yaml": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
-              },
-              "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/core.GatewayError"
                 }

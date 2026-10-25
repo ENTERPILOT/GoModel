@@ -109,10 +109,15 @@ func TestExportYAMLUntypedSettings(t *testing.T) {
 	cfg.Extensions = map[string]yaml.Node{"vaults": *ext.Content[0]}
 	cfg.Guardrails.Rules = []GuardrailRuleConfig{{
 		Name: "scan", Type: "presidio",
-		Config: map[string]any{"endpoint": "https://presidio", "subscription": "sub-literal", "max_tokens": 10},
+		Config: map[string]any{"endpoint": "https://presidio", "subscription": "sub-literal", "max_tokens": 10, "api_key": "gr-literal", "pin": 424242},
+	}}
+	cfg.VirtualModels = []VirtualModelConfig{{
+		Source:         "smart",
+		StrategyPlugin: "router",
+		StrategyConfig: map[string]any{"api_key": "route-literal", "mode": "fast"},
 	}}
 
-	out := exportYAML(t, NewSecrets(), cfg, nil, nil, "guardrails.rules[0].config.subscription")
+	out := exportYAML(t, NewSecrets(), cfg, nil, nil, "guardrails.rules[0].config.subscription", "guardrails.rules[0].config.pin")
 
 	assert.Equal(t, "https://vault.example.com", exportedValue(t, out, "extensions", "vaults", "address"))
 	assert.Equal(t, "${env:GOMODEL_EXTENSIONS_VAULTS_TOKEN}", exportedValue(t, out, "extensions", "vaults", "token"))
@@ -123,6 +128,13 @@ func TestExportYAMLUntypedSettings(t *testing.T) {
 	assert.NotContains(t, out, "hvs-literal")
 	assert.NotContains(t, out, "cs-literal")
 	assert.NotContains(t, out, "sub-literal")
+	assert.Equal(t, "${env:GOMODEL_GUARDRAILS_RULES_0_CONFIG_API_KEY}", exportedValue(t, out, "guardrails", "rules", "0", "config", "api_key"))
+	assert.Equal(t, "${env:GOMODEL_GUARDRAILS_RULES_0_CONFIG_PIN}", exportedValue(t, out, "guardrails", "rules", "0", "config", "pin"))
+	assert.Equal(t, "${env:GOMODEL_VIRTUAL_MODELS_0_STRATEGY_CONFIG_API_KEY}", exportedValue(t, out, "virtual_models", "0", "strategy_config", "api_key"))
+	assert.Equal(t, "fast", exportedValue(t, out, "virtual_models", "0", "strategy_config", "mode"))
+	for _, secret := range []string{"gr-literal", "424242", "route-literal"} {
+		assert.NotContains(t, out, secret)
+	}
 }
 
 func TestExportYAMLRedactsSecretsUnderUnknownNames(t *testing.T) {
@@ -274,6 +286,11 @@ func TestURLHasLiteralCredential(t *testing.T) {
 		"https://example.com/m.json?v=2":        false,
 		"https://example.com/?api_key=${env:K}": false,
 		"://bad@url":                            true,
+		"host=db user=app password=secret":      true,
+		"host=db password='p w' dbname=x":       true,
+		"host=db password=${env:PG_PASS}":       false,
+		"host=db password='' dbname=x":          false,
+		"host=db user=app dbname=gomodel":       false,
 	} {
 		assert.Equal(t, want, urlHasLiteralCredential(value), value)
 	}

@@ -42,7 +42,7 @@ const configExportFilename = "gomodel-config.yaml"
 // @Summary      Export the effective configuration as config.yaml
 // @Description  Returns every setting in effect, from defaults, config.yaml, environment variables, and objects managed in the dashboard, as a config.yaml document. No secret is included: a secret is written as the reference it was configured with (${env:...}, ${file:...}, ${vault:...}) or as ${env:NAME}, with a comment naming the variable to set.
 // @Tags         admin
-// @Produce      application/yaml,json
+// @Produce      application/yaml
 // @Security     BearerAuth
 // @Success      200  {string}  string  "config.yaml document"
 // @Failure      401  {object}  core.GatewayError

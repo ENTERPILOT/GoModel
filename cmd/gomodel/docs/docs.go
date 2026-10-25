@@ -1034,8 +1034,7 @@ const docTemplate = `{
             "get": {
                 "description": "Returns every setting in effect, from defaults, config.yaml, environment variables, and objects managed in the dashboard, as a config.yaml document. No secret is included: a secret is written as the reference it was configured with (${env:...}, ${file:...}, ${vault:...}) or as ${env:NAME}, with a comment naming the variable to set.",
                 "produces": [
-                    "application/yaml",
-                    "application/json"
+                    "application/yaml"
                 ],
                 "tags": [
                     "admin"
