@@ -251,6 +251,12 @@ func convertChatRequestToGemini(req *core.ChatRequest) (*geminiGenerateContentRe
 				}
 			}
 		case "tool":
+			// Gemini expects all responses to a parallel function call turn in
+			// one content, so consecutive tool messages share it.
+			if last := len(out.Contents) - 1; last >= 0 && isFunctionResponseContent(out.Contents[last]) {
+				out.Contents[last].Parts = append(out.Contents[last].Parts, parts...)
+				continue
+			}
 			out.Contents = append(out.Contents, geminiContent{Role: "user", Parts: parts})
 		default:
 			out.Contents = append(out.Contents, geminiContent{Role: "user", Parts: parts})
@@ -375,6 +381,18 @@ func geminiPartsFromContent(content core.MessageContent) ([]geminiPart, error) {
 		}
 		return geminiPartsFromContentParts(parts)
 	}
+}
+
+func isFunctionResponseContent(content geminiContent) bool {
+	if content.Role != "user" || len(content.Parts) == 0 {
+		return false
+	}
+	for _, part := range content.Parts {
+		if part.FunctionResponse == nil {
+			return false
+		}
+	}
+	return true
 }
 
 func geminiPartsFromToolMessage(msg core.Message, functionName string) ([]geminiPart, error) {
