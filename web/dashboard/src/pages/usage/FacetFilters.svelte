@@ -88,6 +88,7 @@
       bind:values={usagePage.usageFilterUserPaths}
       onchange={onPicksChange}
       placeholder={access.scoped ? access.userPath : m.usage_all_user_paths()}
+      scope={access.scoped ? access.userPath : "/"}
       ariaLabel={m.usage_filter_user_path()}
     />
   </div>

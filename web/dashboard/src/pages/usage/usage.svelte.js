@@ -31,7 +31,7 @@ import {
   usageFilterQueryStr,
   usageLogQueryParams,
 } from "./usage-helpers.js";
-import { usageViewFromQuery, usageViewToQuery } from "./usage-url-state.js";
+import { defaultPivotConfig, usageViewFromQuery, usageViewToQuery } from "./usage-url-state.js";
 import { usagePivot } from "./usagePivot.svelte.js";
 
 class UsagePageState {
@@ -284,7 +284,8 @@ class UsagePageState {
     this.usageFilterEndpoints = view.filters.endpoints;
     this.usageFilterSession = view.session;
     dateRange.applyWindow(view.window);
-    if (view.pivot) usagePivot.applyConfig(view.pivot);
+    // The URL leaves default breakdown settings out, so none means default.
+    usagePivot.applyConfig(view.pivot || defaultPivotConfig());
   }
 
   toggleUsageChartView(target, view) {

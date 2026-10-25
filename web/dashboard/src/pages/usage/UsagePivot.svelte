@@ -60,7 +60,8 @@
     const csv = pivotCsv(table, {
       cornerLabel: DIMENSION_LABELS[data.row_dimension],
       rowLabels,
-      columnLabels: hasColumns ? columnLabels : [],
+      columnLabels,
+      hasColumns,
     });
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a");

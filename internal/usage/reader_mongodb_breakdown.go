@@ -12,10 +12,12 @@ import (
 // usage. One aggregation groups every (row, column) pair; the top-N cut and
 // the "other" bucket are folded in Go, shared with the SQL backends.
 func (r *MongoDBReader) GetUsageBreakdown(ctx context.Context, params UsageBreakdownParams) (*UsageBreakdown, error) {
-	params, err := NormalizeUsageBreakdownParams(params)
-	if err != nil {
-		return nil, err
-	}
+	return readUsageBreakdown(ctx, params, r.breakdownGroups)
+}
+
+// breakdownGroups returns every (row, column) aggregate of params, at most
+// maxBreakdownGroups+1 of them.
+func (r *MongoDBReader) breakdownGroups(ctx context.Context, params UsageBreakdownParams) ([]breakdownGroup, error) {
 	pipeline, err := mongoUsageBreakdownPipeline(params)
 	if err != nil {
 		return nil, err
@@ -56,10 +58,7 @@ func (r *MongoDBReader) GetUsageBreakdown(ctx context.Context, params UsageBreak
 	if err := cursor.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating usage breakdown cursor: %w", err)
 	}
-	if len(groups) > maxBreakdownGroups {
-		return nil, tooManyBreakdownGroupsError()
-	}
-	return buildUsageBreakdown(groups, params), nil
+	return groups, nil
 }
 
 // mongoUsageBreakdownPipeline builds the grouping aggregation. Breaking down

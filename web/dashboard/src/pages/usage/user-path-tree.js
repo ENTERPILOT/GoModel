@@ -16,16 +16,20 @@ export function normalizeUserPath(raw) {
 
 // buildUserPathTree turns a flat path list into nested nodes
 // { path, name, children }, sorted by name. Intermediate prefixes become
-// nodes even when no request used them directly.
-export function buildUserPathTree(paths) {
-  const root = { path: "/", name: "/", children: [] };
-  const byPath = new Map([["/", root]]);
+// nodes even when no request used them directly. With a scope (a scoped
+// key's subtree root) the tree starts at that root and paths outside it are
+// dropped, so no ancestor the key may not filter by is offered.
+export function buildUserPathTree(paths, scope = "/") {
+  const rootPath = normalizeUserPath(scope) || "/";
+  const root = { path: rootPath, name: rootPath, children: [] };
+  const byPath = new Map([[rootPath, root]]);
+  const base = rootPath === "/" ? "" : rootPath;
   for (const raw of paths || []) {
     const path = normalizeUserPath(raw);
-    if (!path || path === "/") continue;
+    if (!path || path === rootPath || !userPathWithin(path, rootPath)) continue;
     let parent = root;
-    let prefix = "";
-    for (const segment of path.slice(1).split("/")) {
+    let prefix = base;
+    for (const segment of path.slice(base.length + 1).split("/")) {
       prefix += "/" + segment;
       let node = byPath.get(prefix);
       if (!node) {
@@ -37,7 +41,12 @@ export function buildUserPathTree(paths) {
     }
   }
   sortTree(root);
-  return root.children;
+  return rootPath === "/" ? root.children : [root];
+}
+
+// userPathWithin reports whether path is scope or lies below it.
+export function userPathWithin(path, scope) {
+  return scope === "/" || path === scope || path.startsWith(scope + "/");
 }
 
 function sortTree(node) {
@@ -78,10 +87,11 @@ export function userPathCovered(path, selected) {
 }
 
 // customUserPath returns the typed query as a path to offer when it is not
-// already a known node or selection, or "" when there is nothing to offer.
-export function customUserPath(query, tree, selected) {
+// already a known node or selection and lies inside scope, or "" when there
+// is nothing to offer.
+export function customUserPath(query, tree, selected, scope = "/") {
   const path = normalizeUserPath(query);
-  if (!path || (selected || []).includes(path)) return "";
+  if (!path || (selected || []).includes(path) || !userPathWithin(path, normalizeUserPath(scope) || "/")) return "";
   const known = (nodes) => nodes.some((node) => node.path === path || known(node.children));
   return known(tree || []) ? "" : path;
 }

@@ -500,9 +500,9 @@ którego modelu”.
 | `rows`            | string | Wymiar wierszy (wymagany): `model`, `provider`, `user_path`, `label`, `endpoint`, `auth_key`, `period` | — |
 | `columns`         | string | Wymiar kolumn, inny niż `rows`; pomiń (lub `none`), aby dostać jedną kolumnę| —         |
 | `metric`          | string | Kolejność do wyboru top N: `cost`, `tokens`, `requests`                     | `cost`    |
-| `limit`           | int    | Liczba kluczy na wymiar; reszta trafia do jednego klucza „other” (maks. 50)  | `10`      |
+| `limit`           | int    | Liczba kluczy na wymiar; reszta trafia do jednego klucza „other”; wartości powyżej 50 są obcinane do 50 | `10`      |
 | `interval`        | string | Długość okresu dla `period`: `daily`, `weekly`, `monthly`, `yearly`         | `daily`   |
-| `user_path_depth` | int    | Grupuje ścieżki użytkownika po pierwszych N segmentach; `2` liczy `/team/alice/laptop` jako `/team/alice`. `0` zostawia pełne ścieżki | `0` |
+| `user_path_depth` | int    | Grupuje ścieżki użytkownika po pierwszych N segmentach; `2` liczy `/team/alice/laptop` jako `/team/alice`. `0` zostawia pełne ścieżki; najwyżej `16`, większe wartości zwracają `400` | `0` |
 
 Przyjmuje też parametry zakresu dat, `cache_mode` i każdy filtr danych. Okresy
 używają strefy czasowej z nagłówka `X-GoModel-Timezone`, tak jak
@@ -568,7 +568,7 @@ curl "http://localhost:8080/admin/usage/summary?user_path=/team/alpha&cache_mode
 
 Akceptowany przez `/admin/usage/summary`, `/admin/usage/daily`, `/admin/usage/log`,
 `/admin/usage/models`, `/admin/usage/labels`, `/admin/usage/user-paths`,
-`/admin/usage/endpoints` oraz
+`/admin/usage/endpoints`, `/admin/usage/breakdown` oraz
 `/v1/usage` (zobacz [Usage API](/pl/advanced/usage-api#tryb-cache)). Nierozpoznane
 wartości są traktowane jak `uncached`. `/admin/usage/sessions` go ignoruje: sumy
 requestów i tokenów sesji zawsze obejmują trafienia w cache, a pola kosztów pozostają

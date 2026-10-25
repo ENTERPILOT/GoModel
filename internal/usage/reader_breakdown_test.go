@@ -31,7 +31,8 @@ func multiFilterFixture() []*UsageEntry {
 	}
 	jan := time.Date(2026, 1, 10, 12, 0, 0, 0, time.UTC)
 	feb := time.Date(2026, 2, 10, 12, 0, 0, 0, time.UTC)
-	hit := entry("5", "gpt-5", "openai", "primary", "/team/alice/laptop", "key-a", []string{"dev"}, 1000, new(9.0), nil, feb)
+	// Billed cache hits count toward billed totals only.
+	hit := entry("5", "gpt-5", "openai", "primary", "/team/alice/laptop", "key-a", []string{"dev"}, 1000, new(9.0), new(9.6), feb)
 	hit.CacheType = CacheTypeExact
 	return []*UsageEntry{
 		entry("1", "gpt-5", "openai", "primary", "/team/alice/laptop", "key-a", []string{"branch:main", "dev"}, 100, new(1.0), new(1.2), jan),
@@ -144,7 +145,7 @@ func assertMultiFilterReads(t *testing.T, store usageBatchWriter, reader UsageRe
 				wantColumns: []BreakdownKey{{Key: "2026-01"}, {Key: "2026-02"}},
 				wantCells: []BreakdownCell{
 					{Row: 0, Column: 0, Requests: 1, InputTokens: 100, TotalTokens: 100, TotalCost: new(1.0), BilledCost: new(1.2)},
-					{Row: 0, Column: 1, Requests: 1, InputTokens: 200, TotalTokens: 200, TotalCost: new(2.0), BilledCost: new(2.0)},
+					{Row: 0, Column: 1, Requests: 1, InputTokens: 200, TotalTokens: 200, TotalCost: new(2.0), BilledCost: new(11.6)},
 					{Row: 1, Column: 1, Requests: 1, InputTokens: 300, TotalTokens: 300, TotalCost: new(3.0), BilledCost: new(3.0)},
 					{Row: 2, Column: 1, Requests: 1, InputTokens: 400, TotalTokens: 400},
 				},
@@ -157,10 +158,22 @@ func assertMultiFilterReads(t *testing.T, store usageBatchWriter, reader UsageRe
 				wantRows:    []BreakdownKey{{Key: "dev"}, {Key: ""}, {Key: "branch:feat"}, {Key: "branch:main"}},
 				wantColumns: []BreakdownKey{{Key: ""}},
 				wantCells: []BreakdownCell{
-					{Row: 0, Column: 0, Requests: 2, InputTokens: 500, TotalTokens: 500, TotalCost: new(1.0), BilledCost: new(1.2)},
+					{Row: 0, Column: 0, Requests: 2, InputTokens: 500, TotalTokens: 500, TotalCost: new(1.0), BilledCost: new(10.8)},
 					{Row: 1, Column: 0, Requests: 1, InputTokens: 300, TotalTokens: 300, TotalCost: new(3.0), BilledCost: new(3.0)},
 					{Row: 2, Column: 0, Requests: 1, InputTokens: 200, TotalTokens: 200, TotalCost: new(2.0), BilledCost: new(2.0)},
 					{Row: 3, Column: 0, Requests: 1, InputTokens: 100, TotalTokens: 100, TotalCost: new(1.0), BilledCost: new(1.2)},
+				},
+			},
+			{
+				name: "all cache mode counts hits once",
+				params: UsageBreakdownParams{
+					Rows: BreakdownAuthKey, Metric: BreakdownMetricTokens,
+					UsageQueryParams: withCacheMode(withUserPaths(multiFilterRange, "/team/alice"), CacheModeAll),
+				},
+				wantRows:    []BreakdownKey{{Key: "key-a"}},
+				wantColumns: []BreakdownKey{{Key: ""}},
+				wantCells: []BreakdownCell{
+					{Row: 0, Column: 0, Requests: 3, InputTokens: 1300, TotalTokens: 1300, TotalCost: new(12.0), BilledCost: new(12.8)},
 				},
 			},
 			{
@@ -172,7 +185,7 @@ func assertMultiFilterReads(t *testing.T, store usageBatchWriter, reader UsageRe
 				wantRows:    []BreakdownKey{{Key: "primary"}, {Other: true, Folded: 1}},
 				wantColumns: []BreakdownKey{{Key: "key-a"}, {Other: true, Folded: 1}},
 				wantCells: []BreakdownCell{
-					{Row: 0, Column: 0, Requests: 2, InputTokens: 300, TotalTokens: 300, TotalCost: new(3.0), BilledCost: new(3.2)},
+					{Row: 0, Column: 0, Requests: 2, InputTokens: 300, TotalTokens: 300, TotalCost: new(3.0), BilledCost: new(12.8)},
 					{Row: 1, Column: 1, Requests: 1, InputTokens: 300, TotalTokens: 300, TotalCost: new(3.0), BilledCost: new(3.0)},
 				},
 			},
@@ -202,6 +215,11 @@ func withInterval(params UsageQueryParams, interval string) UsageQueryParams {
 	return params
 }
 
+func withCacheMode(params UsageQueryParams, mode string) UsageQueryParams {
+	params.CacheMode = mode
+	return params
+}
+
 func withUserPaths(params UsageQueryParams, paths ...string) UsageQueryParams {
 	params.UserPaths = paths
 	return params
@@ -216,4 +234,20 @@ func assertCostEqual(t *testing.T, want, got *float64, msgAndArgs ...any) {
 	if assert.NotNil(t, got, msgAndArgs...) {
 		assert.InDelta(t, *want, *got, 1e-9, msgAndArgs...)
 	}
+}
+
+func TestSQLiteGroupingRangeHonorsUserPaths(t *testing.T) {
+	db := sqlxtest.NewSQLite(t)
+	store, err := NewSQLStore(context.Background(), db, 0)
+	require.NoError(t, err)
+	require.NoError(t, store.WriteBatch(context.Background(), multiFilterFixture()))
+	reader, err := NewSQLReader(db)
+	require.NoError(t, err)
+
+	// Only /team/alice/ci (February) matches, so January must not widen the range.
+	start, end, ok, err := reader.sqliteGroupingRange(context.Background(), UsageQueryParams{UserPaths: []string{"/team/alice/ci"}})
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, time.Date(2026, 2, 10, 12, 0, 0, 0, time.UTC), start)
+	assert.Equal(t, time.Date(2026, 2, 10, 12, 0, 1, 0, time.UTC), end)
 }

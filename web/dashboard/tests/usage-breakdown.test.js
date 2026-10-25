@@ -67,6 +67,20 @@ test("visibleUserPathRows shows expanded nodes, or every match with its ancestor
   );
 });
 
+test("buildUserPathTree starts at a scoped key's root and drops other paths", () => {
+  const tree = buildUserPathTree(["/team/alice/laptop", "/team/alice/ci", "/team/bob", "/ops"], "/team/alice");
+  assert.deepEqual(
+    tree.map((node) => node.path),
+    ["/team/alice"],
+  );
+  assert.deepEqual(
+    tree[0].children.map((node) => node.path),
+    ["/team/alice/ci", "/team/alice/laptop"],
+  );
+  assert.equal(customUserPath("/team/bob", tree, [], "/team/alice"), "");
+  assert.equal(customUserPath("/team/alice/new", tree, [], "/team/alice"), "/team/alice/new");
+});
+
 test("userPathCovered marks paths inside a selected subtree", () => {
   assert.equal(userPathCovered("/team/alice", ["/team"]), true);
   assert.equal(userPathCovered("/team", ["/team"]), false);
@@ -133,8 +147,8 @@ const BREAKDOWN = {
 test("pivotTable lays out cells with row, column and grand totals", () => {
   const table = pivotTable(BREAKDOWN, "cost");
   assert.deepEqual(table.grid, [
-    [1.5, 0],
-    [null, 2],
+    [1.5, null],
+    [undefined, 2],
   ]);
   assert.deepEqual(table.rowTotals, [1.5, 2]);
   assert.deepEqual(table.columnTotals, [1.5, 2]);
@@ -143,30 +157,57 @@ test("pivotTable lays out cells with row, column and grand totals", () => {
   assert.equal(pivotTable(null, "cost").rows.length, 0);
 });
 
+test("pivotTable keeps all-unpriced totals unknown, not zero", () => {
+  const table = pivotTable(
+    {
+      rows: [{ key: "a" }, { key: "b" }],
+      columns: [{ key: "x" }],
+      cells: [{ row: 0, column: 0, requests: 1, total_tokens: 5, total_cost: null }],
+    },
+    "cost",
+  );
+  assert.deepEqual(table.rowTotals, [null, undefined]);
+  assert.equal(table.columnTotals[0], null);
+  assert.equal(table.total, null);
+  assert.equal(formatPivotValue(table.total, "cost"), "---");
+  assert.equal(formatPivotValue(table.rowTotals[1], "cost"), "–");
+});
+
 test("pivotKeyLabel names other, blank and API key keys", () => {
   assert.equal(pivotKeyLabel("model", { key: "", other: true, folded: 3 }), "Other (3)");
   assert.equal(pivotKeyLabel("label", { key: "" }), "(none)");
   assert.equal(pivotKeyLabel("auth_key", { key: "k1" }, { k1: "CI key" }), "CI key");
   assert.equal(pivotKeyLabel("", { key: "" }), "Total");
-  assert.equal(formatPivotValue(null, "cost"), "–");
+  assert.equal(formatPivotValue(null, "cost"), "---");
+  assert.equal(formatPivotValue(undefined, "cost"), "–");
   assert.equal(formatPivotValue(1.5, "cost"), "$1.50");
   assert.equal(formatPivotValue(0.004, "cost"), "$0.0040");
 });
 
 test("pivotCsv exports the table with totals and escapes fields", () => {
-  const table = pivotTable(BREAKDOWN, "tokens");
+  const table = pivotTable(BREAKDOWN, "cost");
   const csv = pivotCsv(table, {
     cornerLabel: "User path",
     rowLabels: ['/team/"a",x', "=SUM(A1)"],
     columnLabels: ["2026-01", "2026-02"],
+    hasColumns: true,
   });
   assert.equal(
     csv,
     "User path,2026-01,2026-02,Total\r\n" +
-      '"/team/""a"",x",100,50,150\r\n' +
-      "'=SUM(A1),,400,400\r\n" +
-      "Total,100,450,550\r\n",
+      '"/team/""a"",x",1.5,,1.5\r\n' +
+      "'=SUM(A1),0,2,2\r\n" +
+      "Total,1.5,2,3.5\r\n",
   );
+});
+
+test("pivotCsv writes only the totals column without a column dimension", () => {
+  const table = pivotTable(
+    { rows: [{ key: "a" }, { key: "b" }], columns: [{ key: "" }], cells: [{ row: 0, column: 0, total_tokens: 7 }, { row: 1, column: 0, total_tokens: 3 }] },
+    "tokens",
+  );
+  const csv = pivotCsv(table, { cornerLabel: "Model", rowLabels: ["a", "b"], columnLabels: ["Total"], hasColumns: false });
+  assert.equal(csv, "Model,Total\r\na,7\r\nb,3\r\nTotal,10\r\n");
 });
 
 test("pivotChartConfig stacks rows per column, or plots row totals alone", () => {

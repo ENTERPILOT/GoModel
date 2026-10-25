@@ -8,13 +8,16 @@ import (
 )
 
 // GetUsageBreakdown returns a bounded two-dimension pivot of the filtered
-// usage. One grouped query returns every (row, column) pair; the top-N cut
-// and the "other" bucket are folded in Go so every backend shares them.
+// usage. One grouped query returns every (row, column) pair (plus one for
+// billed cache hits); the top-N cut and the "other" bucket are folded in Go
+// so every backend shares them.
 func (r *SQLReader) GetUsageBreakdown(ctx context.Context, params UsageBreakdownParams) (*UsageBreakdown, error) {
-	params, err := NormalizeUsageBreakdownParams(params)
-	if err != nil {
-		return nil, err
-	}
+	return readUsageBreakdown(ctx, params, r.breakdownGroups)
+}
+
+// breakdownGroups returns every (row, column) aggregate of params, at most
+// maxBreakdownGroups+1 of them.
+func (r *SQLReader) breakdownGroups(ctx context.Context, params UsageBreakdownParams) ([]breakdownGroup, error) {
 	rowExpr, rowArgs, err := r.breakdownKeyExpr(ctx, params, params.Rows)
 	if err != nil {
 		return nil, err
@@ -71,10 +74,7 @@ func (r *SQLReader) GetUsageBreakdown(ctx context.Context, params UsageBreakdown
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating usage breakdown rows: %w", err)
 	}
-	if len(groups) > maxBreakdownGroups {
-		return nil, tooManyBreakdownGroupsError()
-	}
-	return buildUsageBreakdown(groups, params), nil
+	return groups, nil
 }
 
 // breakdownKeyExpr returns the SQL expression yielding dim's key for each

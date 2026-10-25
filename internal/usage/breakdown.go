@@ -2,6 +2,7 @@ package usage
 
 import (
 	"cmp"
+	"context"
 	"slices"
 	"strings"
 
@@ -173,6 +174,38 @@ func (p UsageBreakdownParams) usesDimension(dim BreakdownDimension) bool {
 
 func tooManyBreakdownGroupsError() error {
 	return core.NewInvalidRequestError("usage breakdown has too many groups; narrow the filters or the date range", nil)
+}
+
+// readUsageBreakdown runs a backend's grouped query and folds the result.
+// Billed totals cover every billed row, so an uncached-mode breakdown also
+// adds the billed charges of response-cache hits — and only those: the hits'
+// requests, tokens and provider cost stay out, like the summary does.
+func readUsageBreakdown(ctx context.Context, params UsageBreakdownParams, query func(context.Context, UsageBreakdownParams) ([]breakdownGroup, error)) (*UsageBreakdown, error) {
+	params, err := NormalizeUsageBreakdownParams(params)
+	if err != nil {
+		return nil, err
+	}
+	groups, err := query(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	if mode := billedCacheHitsMode(params.CacheMode); mode != "" {
+		hitParams := params
+		hitParams.CacheMode = mode
+		hits, err := query(ctx, hitParams)
+		if err != nil {
+			return nil, err
+		}
+		for _, hit := range hits {
+			if hit.BilledCost != nil && *hit.BilledCost != 0 {
+				groups = append(groups, breakdownGroup{Row: hit.Row, Column: hit.Column, BilledCost: hit.BilledCost})
+			}
+		}
+	}
+	if len(groups) > maxBreakdownGroups {
+		return nil, tooManyBreakdownGroupsError()
+	}
+	return buildUsageBreakdown(groups, params), nil
 }
 
 // buildUsageBreakdown folds storage groups into the bounded pivot: it groups

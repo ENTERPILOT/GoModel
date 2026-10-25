@@ -501,9 +501,9 @@ oder „wer nutzt welches Modell“.
 | `rows`            | string | Zeilendimension (Pflicht): `model`, `provider`, `user_path`, `label`, `endpoint`, `auth_key`, `period` | — |
 | `columns`         | string | Spaltendimension, verschieden von `rows`; weglassen (oder `none`) für eine Spalte| —         |
 | `metric`          | string | Rangfolge für die Top-N-Auswahl: `cost`, `tokens`, `requests`                | `cost`    |
-| `limit`           | int    | Behaltene Schlüssel pro Dimension; der Rest landet in einem „other“-Schlüssel (max. 50) | `10` |
+| `limit`           | int    | Behaltene Schlüssel pro Dimension; der Rest landet in einem „other“-Schlüssel; Werte über 50 werden auf 50 begrenzt | `10` |
 | `interval`        | string | Periodengröße für `period`: `daily`, `weekly`, `monthly`, `yearly`           | `daily`   |
-| `user_path_depth` | int    | Nutzerpfade nach ihren ersten N Segmenten gruppieren; `2` zählt `/team/alice/laptop` unter `/team/alice`. `0` behält volle Pfade | `0` |
+| `user_path_depth` | int    | Nutzerpfade nach ihren ersten N Segmenten gruppieren; `2` zählt `/team/alice/laptop` unter `/team/alice`. `0` behält volle Pfade; höchstens `16`, größere Werte liefern `400` | `0` |
 
 Außerdem akzeptiert er die Zeitraumparameter, `cache_mode` und jeden
 Datenfilter. Perioden nutzen die Zeitzone aus dem Header
@@ -570,7 +570,7 @@ curl "http://localhost:8080/admin/usage/summary?user_path=/team/alpha&cache_mode
 
 Akzeptiert von `/admin/usage/summary`, `/admin/usage/daily`, `/admin/usage/log`,
 `/admin/usage/models`, `/admin/usage/labels`, `/admin/usage/user-paths`,
-`/admin/usage/endpoints` und
+`/admin/usage/endpoints`, `/admin/usage/breakdown` und
 `/v1/usage` (siehe die [Usage API](/de/advanced/usage-api#cache-modus)). Nicht erkannte
 Werte fallen auf `uncached` zurück. `/admin/usage/sessions` ignoriert den Parameter: Die Summen für
 Requests und Tokens der Sessions enthalten immer Cache-Treffer, während die Kostenfelder

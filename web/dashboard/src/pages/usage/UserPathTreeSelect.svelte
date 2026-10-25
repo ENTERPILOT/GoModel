@@ -5,12 +5,13 @@
   // SearchSelect beside it in the filter bar.
   //
   // Props: paths (known user paths), values (bindable selection), onchange,
-  // placeholder, ariaLabel.
+  // placeholder, ariaLabel, scope (a scoped key's root: only its subtree is
+  // offered).
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { dismissOnOutside, followViewport } from "$lib/utils/attachments.js";
   import { popoverPlacement, moveActiveIndex } from "$lib/components/molecules/searchSelectLogic.js";
   import { Check, ChevronDown, ChevronRight, Search } from "lucide";
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import * as m from "$lib/paraglide/messages.js";
   import {
     buildUserPathTree,
@@ -20,7 +21,7 @@
     visibleUserPathRows,
   } from "./user-path-tree.js";
 
-  let { paths = [], values = $bindable([]), onchange, placeholder = "", ariaLabel = "" } = $props();
+  let { paths = [], values = $bindable([]), onchange, placeholder = "", ariaLabel = "", scope = "/" } = $props();
 
   const uid = $props.id();
   const listID = uid + "-user-path-tree";
@@ -33,9 +34,9 @@
   let listEl = $state(null);
   let popoverStyle = $state("");
 
-  const tree = $derived(buildUserPathTree([...paths, ...values]));
+  const tree = $derived(buildUserPathTree([...paths, ...values], scope));
   const rows = $derived(visibleUserPathRows(tree, expanded, query));
-  const custom = $derived(customUserPath(query, tree, values));
+  const custom = $derived(customUserPath(query, tree, values, scope));
   const rowCount = $derived(rows.length + (custom ? 1 : 0));
   const triggerText = $derived(values.length ? values.join(", ") : placeholder);
 
@@ -137,9 +138,11 @@
     }
   }
 
+  // Typing resets the highlight to the best match; expanding or collapsing
+  // a node keeps it where it is.
   $effect(() => {
     void query;
-    activeIndex = rowCount > 0 ? 0 : -1;
+    activeIndex = untrack(() => rowCount) > 0 ? 0 : -1;
   });
 </script>
 
