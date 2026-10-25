@@ -240,10 +240,9 @@ func TestModelIndexesMatchReaderExpressions(t *testing.T) {
 	for _, dialect := range []sqlx.Dialect{sqlx.SQLite, sqlx.PostgreSQL} {
 		t.Run(string(dialect), func(t *testing.T) {
 			reader := readerDialectFor(dialect)
-			want := []string{
-				"DROP INDEX IF EXISTS idx_audit_requested_model",
-				"CREATE INDEX IF NOT EXISTS idx_audit_requested_model_timestamp ON audit_logs(" + reader.requestedModel + ", timestamp)",
-				"CREATE INDEX IF NOT EXISTS idx_audit_resolved_model_timestamp ON audit_logs(" + reader.resolvedModel + ", timestamp)",
+			want := []auditIndex{
+				{name: "idx_audit_requested_model_timestamp", columns: reader.requestedModel + ", timestamp"},
+				{name: "idx_audit_resolved_model_timestamp", columns: reader.resolvedModel + ", timestamp"},
 			}
 			require.Equal(t, want, modelIndexes(dialect))
 		})
@@ -268,7 +267,9 @@ func TestNewSQLStoreReplacesSingleColumnRequestedModelIndex(t *testing.T) {
 		store, err := NewSQLStore(ctx, db, 0)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = store.Close() })
-		// Recreating the old index must succeed, proving the startup drop removed it.
+		// PostgreSQL builds the replacements in the background, then drops the old index.
+		store.indexBuild.Wait()
+		// Recreating the old index must succeed, proving the drop removed it.
 		_, err = db.Exec(ctx, `CREATE INDEX idx_audit_requested_model ON audit_logs(requested_model)`)
 		require.NoError(t, err)
 		_, err = db.Exec(ctx, `CREATE INDEX idx_audit_resolved_model_timestamp ON audit_logs(resolved_model, timestamp)`)
@@ -321,4 +322,30 @@ func TestSQLStoreWriteBatchChunksAttemptsBeyondParameterLimit(t *testing.T) {
 
 func TestSQLStoreAttemptParameterLimitFitsOneChunk(t *testing.T) {
 	require.LessOrEqual(t, maxAttemptsPerBatch*columnsPerAttempt, maxSQLParams)
+}
+
+// An interrupted CREATE INDEX CONCURRENTLY leaves an invalid index; the next
+// start must replace it rather than keep the unusable one.
+func TestBuildIndexConcurrentlyRebuildsInvalidIndex(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		if db.Dialect() != sqlx.PostgreSQL {
+			t.Skip("concurrent index builds are PostgreSQL only")
+		}
+		ctx := context.Background()
+		store, err := NewSQLStore(ctx, db, 0)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = store.Close() })
+		store.indexBuild.Wait()
+
+		index := modelIndexes(sqlx.PostgreSQL)[0]
+		_, err = db.Exec(ctx, `UPDATE pg_index SET indisvalid = FALSE WHERE indexrelid = to_regclass(?)`, index.name)
+		if err != nil {
+			t.Skipf("cannot mark the index invalid on this server: %v", err)
+		}
+		require.NoError(t, buildIndexConcurrently(ctx, db, index))
+
+		var valid bool
+		require.NoError(t, db.QueryRow(ctx, `SELECT indisvalid FROM pg_index WHERE indexrelid = to_regclass(?)`, index.name).Scan(&valid))
+		assert.True(t, valid)
+	})
 }

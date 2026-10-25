@@ -82,6 +82,13 @@ func NewMongoDBStore(database *mongo.Database, retentionDays int) (*MongoDBStore
 			Keys: bson.D{{Key: "resolved_model", Value: 1}},
 		},
 		{
+			// The legacy pre-split requested model field. Sparse, so only the
+			// old documents that still carry it are indexed; the prefix filter
+			// cannot match a document without it.
+			Keys:    bson.D{{Key: "model", Value: 1}},
+			Options: options.Index().SetSparse(true),
+		},
+		{
 			Keys: bson.D{{Key: "status_code", Value: 1}},
 		},
 		{

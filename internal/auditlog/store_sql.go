@@ -169,8 +169,10 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 	if err := sqlx.AddColumns(ctx, db, sqlMigrations...); err != nil {
 		return nil, err
 	}
-	indexes := append(append(append(sqlIndexes, userPathIndexes(db.Dialect())...),
-		modelIndexes(db.Dialect())...), jsonPathIndexes(db.Dialect())...)
+	indexes := append(append(sqlIndexes, userPathIndexes(db.Dialect())...), jsonPathIndexes(db.Dialect())...)
+	if db.Dialect() != sqlx.PostgreSQL {
+		indexes = append(indexes, modelIndexStatements(db.Dialect())...)
+	}
 	for _, statement := range indexes {
 		if _, err := db.Exec(ctx, statement); err != nil {
 			slog.Warn("failed to create index", "error", err)
@@ -182,12 +184,14 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 		retentionDays: retentionDays,
 		stopCleanup:   make(chan struct{}),
 	}
-	// The trigram search index can take minutes to build on a large existing
-	// table, so it is built off the startup path (and CONCURRENTLY, so writes
-	// keep flowing); readers pick it up as soon as it exists.
+	// The PostgreSQL model and trigram search indexes can take minutes to
+	// build on a large existing table, so they are built off the startup path
+	// (and CONCURRENTLY, so writes keep flowing); readers pick them up as soon
+	// as they exist.
 	buildCtx, cancel := context.WithCancel(context.Background())
 	store.cancelIndexBuild = cancel
 	store.indexBuild.Go(func() {
+		ensureModelIndexesConcurrently(buildCtx, db)
 		ensureTrigramSearchIndex(buildCtx, db, postgresErrorMessage)
 	})
 	if retentionDays > 0 {
@@ -211,24 +215,6 @@ func userPathIndexes(dialect sqlx.Dialect) []string {
 	return []string{
 		`DROP INDEX IF EXISTS idx_audit_user_path`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_user_path_timestamp ON audit_logs(` + column + `, timestamp)`,
-	}
-}
-
-// modelIndexes serve the model prefix filter, which matches the requested or
-// the resolved model: each branch of that OR is a range on its own index, in
-// byte-wise ordering to match readerDialect.requestedModel and resolvedModel,
-// and the trailing timestamp keeps the date window inside the index. The drop
-// retires the single-column requested_model index; nothing compares that
-// column under its default collation.
-func modelIndexes(dialect sqlx.Dialect) []string {
-	requested, resolved := "requested_model", "resolved_model"
-	if dialect == sqlx.PostgreSQL {
-		requested, resolved = `requested_model COLLATE "C"`, `resolved_model COLLATE "C"`
-	}
-	return []string{
-		`DROP INDEX IF EXISTS idx_audit_requested_model`,
-		`CREATE INDEX IF NOT EXISTS idx_audit_requested_model_timestamp ON audit_logs(` + requested + `, timestamp)`,
-		`CREATE INDEX IF NOT EXISTS idx_audit_resolved_model_timestamp ON audit_logs(` + resolved + `, timestamp)`,
 	}
 }
 

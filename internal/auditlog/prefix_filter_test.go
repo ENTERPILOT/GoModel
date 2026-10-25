@@ -8,7 +8,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 
+	"github.com/enterpilot/gomodel/internal/storage/mongotest"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 )
@@ -141,6 +144,7 @@ func TestSQLReader_PrefixFiltersUseIndexes(t *testing.T) {
 		store, err := newSQLStoreForTest(t, db, 0)
 		require.NoError(t, err)
 		defer store.Close()
+		store.indexBuild.Wait()
 		reader, err := NewSQLReader(db)
 		require.NoError(t, err)
 
@@ -208,4 +212,29 @@ func explainAuditQuery(t *testing.T, db sqlx.DB, query string, args []any) strin
 	})
 	require.NoError(t, err)
 	return strings.Join(plan, "\n")
+}
+
+// Documents written before the requested/resolved split carry the requested
+// model in the legacy "model" field, and the dashboard shows it from there.
+func TestMongoDBReader_ModelPrefixMatchesLegacyModelField(t *testing.T) {
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		ctx := context.Background()
+		store, err := NewMongoDBStore(db, 0)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = store.Close() })
+		_, err = db.Collection("audit_logs").InsertOne(ctx, bson.D{
+			{Key: "_id", Value: "legacy"},
+			{Key: "timestamp", Value: time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC)},
+			{Key: "model", Value: "smart"},
+			{Key: "resolved_model", Value: "openai/gpt-5"},
+		})
+		require.NoError(t, err)
+		reader, err := NewMongoDBReader(db)
+		require.NoError(t, err)
+
+		result, err := reader.GetLogs(ctx, LogQueryParams{ModelPrefix: "sma", Limit: 10})
+		require.NoError(t, err)
+		require.Len(t, result.Entries, 1)
+		assert.Equal(t, "smart", result.Entries[0].RequestedModel)
+	})
 }
