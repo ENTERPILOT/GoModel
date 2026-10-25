@@ -17,7 +17,8 @@ func TestMCPServersFollowBaseURL(t *testing.T) {
 		{name: "coding plan", baseURL: "https://api.z.ai/api/coding/paas/v4", wantRoot: "https://api.z.ai/api"},
 		{name: "mainland host", baseURL: "https://open.bigmodel.cn/api/paas/v4/", wantRoot: "https://open.bigmodel.cn/api"},
 		{name: "path-prefixed proxy", baseURL: "http://proxy.internal:8080/zai/api/paas/v4", wantRoot: "http://proxy.internal:8080/zai/api"},
-		{name: "no api segment", baseURL: "https://proxy.example.com/v4", wantRoot: "https://proxy.example.com/api"},
+		{name: "proxy prefix containing /api/", baseURL: "https://proxy.example.com/api/zai/api/coding/paas/v4", wantRoot: "https://proxy.example.com/api/zai/api"},
+		{name: "unknown path shape", baseURL: "https://proxy.example.com/v4", wantRoot: "https://proxy.example.com/api"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

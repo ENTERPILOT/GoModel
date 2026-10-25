@@ -25,6 +25,17 @@ func TestProviderMCPServers(t *testing.T) {
 		"Hosted EU": {Type: "hosted", APIKey: "key-eu", BaseURL: "https://eu.example.com"},
 		"plain":     {Type: "plain", APIKey: "key-plain"},
 		"keyless":   {Type: "hosted", BaseURL: "https://local.example.com"},
+		"hosted_eu": {Type: "hosted", APIKey: "key-other", BaseURL: "https://other.example.com"},
+	}
+
+	hostedEU := map[string]config.MCPServerConfig{
+		"hosted-eu-search": {
+			URL:         "https://eu.example.com/mcp",
+			Transport:   config.MCPTransportHTTP,
+			Headers:     map[string]string{"Authorization": "Bearer key-eu"},
+			Description: "Search",
+			ToolTimeout: config.DefaultMCPToolTimeout,
+		},
 	}
 
 	tests := []struct {
@@ -36,19 +47,8 @@ func TestProviderMCPServers(t *testing.T) {
 		{name: "unknown provider is skipped", names: []string{"missing"}, want: map[string]config.MCPServerConfig{}},
 		{name: "type without hosted servers is skipped", names: []string{"plain"}, want: map[string]config.MCPServerConfig{}},
 		{name: "provider without a key is skipped", names: []string{"keyless"}, want: map[string]config.MCPServerConfig{}},
-		{
-			name:  "hosted servers use the provider key and a derived slug",
-			names: []string{"Hosted EU", "plain"},
-			want: map[string]config.MCPServerConfig{
-				"hosted-eu-search": {
-					URL:         "https://eu.example.com/mcp",
-					Transport:   config.MCPTransportHTTP,
-					Headers:     map[string]string{"Authorization": "Bearer key-eu"},
-					Description: "Search",
-					ToolTimeout: config.DefaultMCPToolTimeout,
-				},
-			},
-		},
+		{name: "hosted servers use the provider key and a derived slug", names: []string{"Hosted EU", "plain"}, want: hostedEU},
+		{name: "slug clash keeps the first listed provider", names: []string{"Hosted EU", "hosted_eu"}, want: hostedEU},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

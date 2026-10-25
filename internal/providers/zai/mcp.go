@@ -2,6 +2,7 @@ package zai
 
 import (
 	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/providers"
@@ -23,16 +24,22 @@ func mcpServers(baseURL string) []providers.BuiltinMCPServer {
 	}
 }
 
+// paasSuffix matches the chat API part of a Z.ai base URL path:
+// "/paas/v4" or "/coding/paas/v4", after the "/api" root.
+var paasSuffix = regexp.MustCompile(`/(coding/)?paas/v[0-9]+$`)
+
 // apiRoot returns the "scheme://host[/prefix]/api" root of a Z.ai base URL
-// such as "https://api.z.ai/api/paas/v4" or ".../api/coding/paas/v4".
+// such as "https://api.z.ai/api/paas/v4" or ".../api/coding/paas/v4". Only the
+// known chat API suffix is removed, so a proxy prefix, even one containing
+// "/api/", is kept. A path without that suffix falls back to the host's "/api".
 func apiRoot(baseURL string) (string, bool) {
 	u, err := url.Parse(strings.TrimSpace(baseURL))
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
 		return "", false
 	}
-	prefix := ""
-	if i := strings.Index(u.Path+"/", "/api/"); i >= 0 {
-		prefix = u.Path[:i]
+	root := "/api"
+	if path := strings.TrimRight(u.Path, "/"); paasSuffix.MatchString(path) {
+		root = paasSuffix.ReplaceAllString(path, "")
 	}
-	return u.Scheme + "://" + u.Host + prefix + "/api", true
+	return u.Scheme + "://" + u.Host + root, true
 }

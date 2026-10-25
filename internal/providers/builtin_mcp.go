@@ -48,6 +48,7 @@ func (r *InitResult) ProviderMCPServers(names []string) map[string]config.MCPSer
 
 func providerMCPServers(factory *ProviderFactory, resolved map[string]config.RawProviderConfig, names []string) map[string]config.MCPServerConfig {
 	servers := make(map[string]config.MCPServerConfig)
+	owners := make(map[string]string) // slug -> provider that claimed it
 	for _, name := range names {
 		provider, ok := resolved[name]
 		if !ok {
@@ -81,6 +82,15 @@ func providerMCPServers(factory *ProviderFactory, resolved map[string]config.Raw
 				slog.Warn("mcp.provider_servers: skipping server", "provider", core.LogText(name), "server", slug, "error", err)
 				continue
 			}
+			// Distinct provider names can derive one slug ("zai_coding" and
+			// "zai-coding"); the first listed keeps it rather than having its
+			// URL and key silently replaced by another account's.
+			if owner, taken := owners[slug]; taken {
+				slog.Warn("mcp.provider_servers: server slug already used by another provider; skipping",
+					"provider", core.LogText(name), "server", slug, "used_by", core.LogText(owner))
+				continue
+			}
+			owners[slug] = name
 			servers[slug] = server
 		}
 	}
