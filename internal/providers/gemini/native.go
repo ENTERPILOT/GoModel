@@ -1039,7 +1039,7 @@ func nativeChatResponse(req *core.ChatRequest, geminiResp *geminiGenerateContent
 		if index == 0 && i > 0 {
 			index = i
 		}
-		content, toolCalls, signature := openAIMessageFromGeminiParts(candidate.Content.Parts)
+		content, toolCalls, signature := openAIMessageFromGeminiParts(candidate.Content.Parts, 0)
 		// A tool-call-only turn carries content: null in OpenAI responses; an
 		// empty string would surface as an empty Responses message item that
 		// clients cannot echo back.
@@ -1135,12 +1135,13 @@ func geminiPromptBlockReason(raw json.RawMessage) string {
 // openAIMessageFromGeminiParts flattens candidate parts into OpenAI text and
 // tool calls. A functionCall part's thought signature rides on its tool call;
 // the signature of a text turn (Gemini puts it on the last part) is returned
-// separately for the message.
-func openAIMessageFromGeminiParts(parts []geminiPart) (string, []core.ToolCall, string) {
+// separately for the message. Calls without an ID are named call_<n>, counting
+// from firstToolIndex so IDs stay unique across the events of a stream.
+func openAIMessageFromGeminiParts(parts []geminiPart, firstToolIndex int) (string, []core.ToolCall, string) {
 	var text strings.Builder
 	var signature string
 	toolCalls := make([]core.ToolCall, 0)
-	for i, part := range parts {
+	for _, part := range parts {
 		if part.Text != "" && !part.Thought {
 			text.WriteString(part.Text)
 		}
@@ -1152,7 +1153,7 @@ func openAIMessageFromGeminiParts(parts []geminiPart) (string, []core.ToolCall, 
 		if call != nil {
 			id := call.ID
 			if id == "" {
-				id = "call_" + strconv.Itoa(i)
+				id = "call_" + strconv.Itoa(firstToolIndex+len(toolCalls))
 			}
 			args := strings.TrimSpace(string(call.Args))
 			if args == "" {
