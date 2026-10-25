@@ -89,7 +89,7 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 		AllowAPIKeyless: true,
 	},
 	"kimicode": {
-		DefaultBaseURL: "https://api.kimi.com/coding/v1",
+		DefaultBaseURL: "https://api.kimi.ai/coding/v1",
 	},
 	"hetzner": {
 		DefaultBaseURL: "https://inference.hetzner.com/api/v1",
