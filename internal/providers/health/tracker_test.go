@@ -471,6 +471,20 @@ func TestTrackerKeepsUpstreamCauseWhileCircuitOpen(t *testing.T) {
 			wantModelErrs: map[string]string{"glm": "circuit breaker is open"},
 		},
 		{
+			name: "kept rejection is reported once the upstream failure expires",
+			record: func(tracker *Tracker, now *time.Time) {
+				record(tracker, "glm", 429, upstream)
+				*now = now.Add(Window - time.Minute)
+				record(tracker, "glm", 503, rejection)
+				// Snapshot after the upstream failure leaves the window,
+				// with no further request recorded.
+				*now = now.Add(2 * time.Minute)
+			},
+			wantProvider:  "circuit breaker is open",
+			wantModel:     "glm",
+			wantModelErrs: map[string]string{"glm": "circuit breaker is open"},
+		},
+		{
 			name: "a new upstream failure replaces the earlier cause",
 			record: func(tracker *Tracker, now *time.Time) {
 				record(tracker, "glm", 429, upstream)

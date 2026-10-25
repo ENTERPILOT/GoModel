@@ -90,6 +90,9 @@ type event struct {
 type modelState struct {
 	events       []event
 	lastError    *ErrorInfo
+	// lastRejection is the latest circuit-breaker rejection, kept apart so
+	// it can stand in once the upstream failure leaves the window.
+	lastRejection *ErrorInfo
 	lastActivity time.Time
 }
 
@@ -161,7 +164,7 @@ func (t *Tracker) Record(info llmclient.ResponseInfo) {
 	model.events = append(model.events, event{at: now, failed: failed})
 	model.lastActivity = now
 	if failed {
-		model.recordError(now, ErrorInfo{
+		model.recordError(ErrorInfo{
 			StatusCode:      info.StatusCode,
 			Message:         errorMessage(info),
 			At:              now,
@@ -237,8 +240,8 @@ func (t *Tracker) Snapshot() map[string]ProviderHealth {
 				Errors:   errors,
 				Flagged:  errors >= flagMinErrors && errors*2 >= requests,
 			}
-			if model.lastError != nil && now.Sub(model.lastError.At) <= Window {
-				lastError := *model.lastError
+			if reported := model.reportedError(now); reported != nil {
+				lastError := *reported
 				row.LastError = &lastError
 				if moreRelevantError(lastError, snapshot.LastError) {
 					snapshot.LastError = &lastError
@@ -298,15 +301,27 @@ func (p *providerState) model(name string) *modelState {
 	return model
 }
 
-// recordError stores a failure as the model's last error. A circuit-breaker
-// rejection keeps a still-windowed upstream failure in place, so the card
-// keeps showing why the breaker opened instead of the fast-fail message.
-func (m *modelState) recordError(now time.Time, info ErrorInfo) {
-	if info.circuitRejected && m.lastError != nil &&
-		!m.lastError.circuitRejected && now.Sub(m.lastError.At) <= Window {
+// recordError stores a failure. Circuit-breaker rejections are kept apart
+// from upstream failures so a rejection never hides why the breaker opened.
+func (m *modelState) recordError(info ErrorInfo) {
+	if info.circuitRejected {
+		m.lastRejection = &info
 		return
 	}
 	m.lastError = &info
+}
+
+// reportedError returns the windowed error to report for the model: the
+// latest upstream failure, or the latest circuit-breaker rejection when no
+// upstream failure remains in the window.
+func (m *modelState) reportedError(now time.Time) *ErrorInfo {
+	if m.lastError != nil && now.Sub(m.lastError.At) <= Window {
+		return m.lastError
+	}
+	if m.lastRejection != nil && now.Sub(m.lastRejection.At) <= Window {
+		return m.lastRejection
+	}
+	return nil
 }
 
 // moreRelevantError reports whether candidate should replace current as the
