@@ -61,7 +61,9 @@ func (s *Service) ResolveReasoningEffort(
 // pathReasoningEffort walks entry's targets, descending enabled chained
 // redirects, to the concrete target matching attempt, and returns the effort
 // of the deepest redirect on that path that sets one. found is false when no
-// target leads to attempt.
+// target leads to attempt. When several paths lead to the same concrete model,
+// the first declared one decides: the attempt carries only its concrete model,
+// not the path routing took to it.
 func (s *snapshot) pathReasoningEffort(entry *redirectEntry, attempt core.ModelSelector) (effort string, found bool) {
 	for _, target := range entry.targets {
 		inner, chained := s.chained(entry.vm.Source, target)

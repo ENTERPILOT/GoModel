@@ -38,7 +38,8 @@ with two permitted levels: `high` and `max`.
 
 | Client sends | DeepSeek receives |
 | ------------ | ----------------- |
-| `low` / `medium` / `high` | `high` |
+| `none` | field omitted |
+| `minimal` / `low` / `medium` / `high` | `high` |
 | `xhigh` / `max` | `max` |
 | anything else | passed through by GoModel, then rejected by DeepSeek |
 

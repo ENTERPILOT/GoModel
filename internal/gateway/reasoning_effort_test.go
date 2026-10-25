@@ -139,3 +139,22 @@ func TestReasoningEffortOverrideForPrimary(t *testing.T) {
 
 	assert.Empty(t, NewInferenceOrchestrator(InferenceConfig{}).ReasoningEffortOverride(context.Background(), workflow))
 }
+
+// The prepared request must carry the forced effort, since the response cache
+// keys on it: two aliases forcing different efforts on one model must not
+// share an entry.
+func TestPrepareChatRequestAppliesReasoningEffortOverride(t *testing.T) {
+	orchestrator, _, _, workflow := effortFixture()
+	workflow.Mode = core.ExecutionModeTranslated
+	original := &core.ChatRequest{Model: "team-model", Reasoning: &core.Reasoning{Effort: "high"}}
+
+	prepared, err := orchestrator.PrepareChatRequest(context.Background(), original, RequestMeta{
+		Endpoint: workflow.Endpoint,
+		Workflow: workflow,
+	})
+	require.NoError(t, err)
+
+	require.NotNil(t, prepared.Request.Reasoning)
+	assert.Equal(t, "medium", prepared.Request.Reasoning.Effort)
+	assert.Equal(t, "primary", prepared.Request.Model)
+}

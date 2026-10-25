@@ -68,8 +68,9 @@ func adaptChatRequest(jsonSchemaMode JSONSchemaMode) func(*core.ChatRequest) (*c
 		adapted := req
 		var err error
 		if req.Reasoning != nil && strings.TrimSpace(req.Reasoning.Effort) != "" {
-			adapted, err = providers.AdaptReasoningEffortRequest(req, normalizeReasoningEffort(req.Reasoning.Effort))
-			if err != nil {
+			if effort := normalizeReasoningEffort(req.Reasoning.Effort); effort == "" {
+				adapted = providers.DropReasoning(req)
+			} else if adapted, err = providers.AdaptReasoningEffortRequest(req, effort); err != nil {
 				return nil, err
 			}
 		}
@@ -79,17 +80,20 @@ func adaptChatRequest(jsonSchemaMode JSONSchemaMode) func(*core.ChatRequest) (*c
 }
 
 // normalizeReasoningEffort maps GoModel's OpenAI-style effort levels to the two
-// levels DeepSeek V4 accepts ("high" and "max"). "low" and "medium" are mapped
-// up to "high" because DeepSeek does not support lower levels; clients that
-// want to disable reasoning should omit the field entirely. See
-// docs/providers/deepseek.mdx for the user-facing table.
+// levels DeepSeek V4 accepts ("high" and "max"). "minimal", "low" and "medium"
+// are mapped up to "high" because DeepSeek does not support lower levels;
+// "none" returns "" so the field is omitted, as DeepSeek has no effort value
+// that disables reasoning. See docs/providers/deepseek.mdx for the
+// user-facing table.
 func normalizeReasoningEffort(effort string) string {
 	normalized := strings.ToLower(strings.TrimSpace(effort))
 	switch normalized {
-	case "low", "medium":
+	case "minimal", "low", "medium":
 		return "high"
 	case "xhigh", "max":
 		return "max"
+	case "none":
+		return ""
 	default:
 		return normalized
 	}

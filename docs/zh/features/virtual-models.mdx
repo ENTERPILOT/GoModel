@@ -59,7 +59,7 @@ virtual_models:
 
 该覆盖会同时替换 `reasoning.effort` 和扁平的 `reasoning_effort` 字段，即使客户端未发送推理强度也会生效。随后 GoModel 会像处理客户端的值一样，将其转换为各提供商自己的推理参数。
 
-每次尝试都以配置最深的值为准。具体模型的覆盖优先于其上方的任何重定向，内层[链式](#链式虚拟模型)虚拟模型优先于外层。在上面的示例中，`team-model` 向 `openai/gpt-5.2` 发送 `high`，向 `hetzner/qwen3.8` 发送 `medium`，即使通过故障转移到达也是如此。该功能适用于 Chat Completions、Responses API 和 Anthropic Messages API；批处理和提供商直通不会被改写。
+每次尝试都以配置最深的值为准。具体模型的覆盖优先于其上方的任何重定向，内层[链式](#链式虚拟模型)虚拟模型优先于外层。在上面的示例中，`team-model` 向 `openai/gpt-5.2` 发送 `high`，向 `hetzner/qwen3.8` 发送 `medium`，即使通过故障转移到达也是如此。若同一模型可经由多个内层虚拟模型到达，则以第一条声明路径上的值为准。该功能适用于 Chat Completions、Responses API 和 Anthropic Messages API；批处理和提供商直通不会被改写。
 
 本页其余部分介绍重定向。
 

@@ -35,7 +35,8 @@ DeepSeek V4 推理模型接受顶层字符串字段 `reasoning_effort`，允许�
 
 | 客户端发送 | DeepSeek 收到 |
 | ------------ | ----------------- |
-| `low` / `medium` / `high` | `high` |
+| `none` | 省略该字段 |
+| `minimal` / `low` / `medium` / `high` | `high` |
 | `xhigh` / `max` | `max` |
 | 其他任何值 | GoModel 原样透传，随后被 DeepSeek 拒绝 |
 

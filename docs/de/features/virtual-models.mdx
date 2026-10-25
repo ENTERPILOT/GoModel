@@ -96,7 +96,8 @@ konkreten Modells hat Vorrang vor jedem Redirect darüber, und ein inneres
 [verkettetes](#virtuelle-modelle-verketten) virtuelles Modell hat Vorrang vor
 einem äußeren. Im Beispiel oben sendet `team-model` `high` an `openai/gpt-5.2`
 und `medium` an `hetzner/qwen3.8`, auch wenn eines davon per Failover erreicht
-wird. Das gilt für Chat Completions, die Responses API und die Anthropic
+wird. Ist ein Modell über mehrere innere virtuelle Modelle erreichbar, gilt der
+Wert auf dem zuerst deklarierten Pfad. Das gilt für Chat Completions, die Responses API und die Anthropic
 Messages API; Batches und Provider-Passthrough werden nicht umgeschrieben.
 
 Der Rest dieser Seite behandelt Redirects.
