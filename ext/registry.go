@@ -38,6 +38,8 @@ type Registry struct {
 	capabilities    map[Capability]struct{}
 	plugins         []PluginFactory
 
+	updateCheckLicense UpdateCheckLicense
+
 	logHandlerWrappers []func(slog.Handler) slog.Handler
 }
 
