@@ -158,5 +158,8 @@ gomodel usage import /path/to/other/gomodel.db
 
 ```bash
 pg_dump --data-only --table=usage --column-inserts --on-conflict-do-nothing "$SOURCE_URL" | psql "$DEST_URL"
-mongodump --uri "$SOURCE_URL" --collection usage --archive | mongorestore --uri "$DEST_URL" --archive
+mongodump --uri "$SOURCE_URL" --db gomodel --collection usage --archive | mongorestore --uri "$DEST_URL" --archive --nsInclude "gomodel.usage"
 ```
+
+`gomodel` 是 MongoDB 的默认数据库名。如果任一实例设置了 `MONGODB_DATABASE` 或在 URL 中指定了其他数据库，
+请改用该名称；两者不同时，用 `--nsFrom "<源>.usage" --nsTo "<目标>.usage"` 进行映射。

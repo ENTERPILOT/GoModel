@@ -87,7 +87,7 @@ func runUsageImport(ctx context.Context, opts Options, source string) error {
 	}
 	defer dst.Close()
 
-	n, err := usage.ImportSQLiteFile(ctx, source, dst)
+	n, err := usage.ImportSQLiteFile(ctx, source, dst, result.Config.Usage.RetentionDays)
 	if err != nil {
 		return fmt.Errorf("usage import: %w (%d rows copied before the error; run again to resume)", err, n)
 	}

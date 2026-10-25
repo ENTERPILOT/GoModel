@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/goccy/go-json"
@@ -57,25 +59,46 @@ var importColumns = []struct{ name, fallback string }{
 // ImportSQLiteFile copies every usage row from another GoModel instance's
 // SQLite database file into dst. The source is opened read-only. Rows whose
 // id dst already holds are skipped, so running it again is safe. It returns
-// the number of rows read from the source.
-func ImportSQLiteFile(ctx context.Context, sourcePath string, dst storage.Storage) (int, error) {
-	if _, err := os.Stat(sourcePath); err != nil {
+// the number of rows read from the source. retentionDays is the
+// destination's configured usage retention, so the store sets up the same
+// indexes (a MongoDB TTL index) the gateway would.
+func ImportSQLiteFile(ctx context.Context, sourcePath string, dst storage.Storage, retentionDays int) (int, error) {
+	dsn, err := readOnlySQLiteDSN(sourcePath)
+	if err != nil {
 		return 0, fmt.Errorf("open source database: %w", err)
 	}
-	src, err := sql.Open("sqlite", "file:"+sourcePath+"?mode=ro&_busy_timeout=5000")
+	src, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return 0, fmt.Errorf("open source database: %w", err)
 	}
 	defer src.Close()
 
-	// Retention 0: a one-off import must not start the cleanup loop.
-	store, err := createUsageStore(dst, 0)
+	store, err := createUsageStore(dst, retentionDays)
 	if err != nil {
 		return 0, fmt.Errorf("open destination usage store: %w", err)
 	}
 	defer store.Close()
 
 	return copySQLiteUsage(ctx, src, store, importBatchSize)
+}
+
+// readOnlySQLiteDSN returns a read-only SQLite URI for an existing file. The
+// path is escaped so characters such as '#', '?', or '%' in a file name are
+// not read as URI syntax.
+func readOnlySQLiteDSN(path string) (string, error) {
+	if _, err := os.Stat(path); err != nil {
+		return "", err
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	uriPath := filepath.ToSlash(abs)
+	if !strings.HasPrefix(uriPath, "/") {
+		uriPath = "/" + uriPath // Windows drive letter: file:///C:/...
+	}
+	u := url.URL{Scheme: "file", Path: uriPath, RawQuery: "mode=ro&_busy_timeout=5000"}
+	return u.String(), nil
 }
 
 func copySQLiteUsage(ctx context.Context, src *sql.DB, dst UsageStore, batchSize int) (int, error) {

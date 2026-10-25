@@ -173,5 +173,11 @@ Tabelle existiert:
 
 ```bash
 pg_dump --data-only --table=usage --column-inserts --on-conflict-do-nothing "$SOURCE_URL" | psql "$DEST_URL"
-mongodump --uri "$SOURCE_URL" --collection usage --archive | mongorestore --uri "$DEST_URL" --archive
+mongodump --uri "$SOURCE_URL" --db gomodel --collection usage --archive | mongorestore --uri "$DEST_URL" --archive --nsInclude "gomodel.usage"
 ```
+
+`gomodel` ist der Standardname der MongoDB-Datenbank. Wenn eine der Instanzen
+`MONGODB_DATABASE` setzt oder in ihrer URL eine andere Datenbank nennt,
+verwenden Sie diesen Namen und ordnen Sie ihn mit
+`--nsFrom "<quelle>.usage" --nsTo "<ziel>.usage"` zu, wenn sich die Namen
+unterscheiden.

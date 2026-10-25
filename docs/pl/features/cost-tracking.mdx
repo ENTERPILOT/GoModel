@@ -169,5 +169,9 @@ GoModel raz na bazie docelowej, aby tabela istniała:
 
 ```bash
 pg_dump --data-only --table=usage --column-inserts --on-conflict-do-nothing "$SOURCE_URL" | psql "$DEST_URL"
-mongodump --uri "$SOURCE_URL" --collection usage --archive | mongorestore --uri "$DEST_URL" --archive
+mongodump --uri "$SOURCE_URL" --db gomodel --collection usage --archive | mongorestore --uri "$DEST_URL" --archive --nsInclude "gomodel.usage"
 ```
+
+`gomodel` to domyślna nazwa bazy MongoDB. Jeśli któraś instancja ustawia
+`MONGODB_DATABASE` lub podaje inną bazę w swoim URL, użyj tej nazwy, a gdy nazwy
+się różnią, zmapuj je przez `--nsFrom "<źródło>.usage" --nsTo "<cel>.usage"`.

@@ -168,5 +168,10 @@ GoModel against the destination once first so the table exists:
 
 ```bash
 pg_dump --data-only --table=usage --column-inserts --on-conflict-do-nothing "$SOURCE_URL" | psql "$DEST_URL"
-mongodump --uri "$SOURCE_URL" --collection usage --archive | mongorestore --uri "$DEST_URL" --archive
+mongodump --uri "$SOURCE_URL" --db gomodel --collection usage --archive | mongorestore --uri "$DEST_URL" --archive --nsInclude "gomodel.usage"
 ```
+
+`gomodel` is the default MongoDB database name. If either instance sets
+`MONGODB_DATABASE` or names another database in its URL, use that name, and map
+it with `--nsFrom "<source>.usage" --nsTo "<destination>.usage"` when the two
+differ.

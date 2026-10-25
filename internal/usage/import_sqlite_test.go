@@ -25,7 +25,7 @@ func newImportSQLite(t *testing.T, name string) (string, storage.SQLiteStorage) 
 
 func TestImportSQLiteFile_CopiesRowsAndSkipsExisting(t *testing.T) {
 	ctx := context.Background()
-	srcPath, src := newImportSQLite(t, "source.db")
+	srcPath, src := newImportSQLite(t, "history #1 100%.db")
 	srcStore, err := NewSQLiteStore(src.DB(), 0)
 	require.NoError(t, err)
 
@@ -45,7 +45,7 @@ func TestImportSQLiteFile_CopiesRowsAndSkipsExisting(t *testing.T) {
 	require.NoError(t, srcStore.WriteBatch(ctx, entries))
 
 	_, dst := newImportSQLite(t, "destination.db")
-	n, err := ImportSQLiteFile(ctx, srcPath, dst)
+	n, err := ImportSQLiteFile(ctx, srcPath, dst, 0)
 	require.NoError(t, err)
 	assert.Equal(t, 2, n)
 
@@ -68,7 +68,7 @@ func TestImportSQLiteFile_CopiesRowsAndSkipsExisting(t *testing.T) {
 	assert.Len(t, got["req-2"], 1)
 
 	// A second run adds nothing.
-	n, err = ImportSQLiteFile(ctx, srcPath, dst)
+	n, err = ImportSQLiteFile(ctx, srcPath, dst, 0)
 	require.NoError(t, err)
 	assert.Equal(t, 2, n)
 	var count int
@@ -90,7 +90,7 @@ func TestImportSQLiteFile_OlderSourceSchema(t *testing.T) {
 	require.NoError(t, err)
 
 	_, dst := newImportSQLite(t, "destination.db")
-	n, err := ImportSQLiteFile(ctx, srcPath, dst)
+	n, err := ImportSQLiteFile(ctx, srcPath, dst, 0)
 	require.NoError(t, err)
 	assert.Equal(t, 1, n)
 
@@ -107,11 +107,11 @@ func TestImportSQLiteFile_SourceErrors(t *testing.T) {
 	ctx := context.Background()
 	_, dst := newImportSQLite(t, "destination.db")
 
-	_, err := ImportSQLiteFile(ctx, filepath.Join(t.TempDir(), "missing.db"), dst)
+	_, err := ImportSQLiteFile(ctx, filepath.Join(t.TempDir(), "missing.db"), dst, 0)
 	require.ErrorContains(t, err, "open source database")
 
 	emptyPath, _ := newImportSQLite(t, "empty.db")
-	_, err = ImportSQLiteFile(ctx, emptyPath, dst)
+	_, err = ImportSQLiteFile(ctx, emptyPath, dst, 0)
 	require.ErrorContains(t, err, "no usage table")
 }
 
