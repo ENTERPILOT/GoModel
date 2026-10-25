@@ -2,6 +2,7 @@ package providertest
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -58,18 +59,25 @@ func AssertAllowedTools(t *testing.T, forwards bool, newProvider func(baseURL st
 				capture = c
 			}
 			sent := capture.Last(t).JSON(t)
-			tools, _ := sent["tools"].([]any)
+			req := allowedToolsRequest()
 			if forwards {
-				assert.Len(t, tools, 2, "declared tools must reach the upstream unchanged")
-				choice, _ := sent["tool_choice"].(map[string]any)
-				assert.Equal(t, "allowed_tools", choice["type"], "tool_choice = %#v", sent["tool_choice"])
+				assert.Equal(t, asJSON(t, req.Tools), sent["tools"], "declared tools must reach the upstream unchanged")
+				assert.Equal(t, asJSON(t, req.ToolChoice), sent["tool_choice"], "tool_choice must reach the upstream unchanged")
 				return
 			}
-			require.Len(t, tools, 1, "declared tools must be narrowed to the allowed subset")
-			tool, _ := tools[0].(map[string]any)
-			fn, _ := tool["function"].(map[string]any)
-			assert.Equal(t, "get_time", fn["name"])
+			assert.Equal(t, asJSON(t, req.Tools[1:]), sent["tools"], "declared tools must be narrowed to the allowed subset")
 			assert.Equal(t, "required", sent["tool_choice"])
 		})
 	}
+}
+
+// asJSON round-trips v through JSON so it compares equal to a decoded
+// upstream request body.
+func asJSON(t testing.TB, v any) any {
+	t.Helper()
+	data, err := json.Marshal(v)
+	require.NoError(t, err)
+	var out any
+	require.NoError(t, json.Unmarshal(data, &out))
+	return out
 }
