@@ -39,6 +39,8 @@ type Registry struct {
 	plugins         []PluginFactory
 	license         License
 
+	updateCheckLicense UpdateCheckLicense
+
 	logHandlerWrappers []func(slog.Handler) slog.Handler
 }
 

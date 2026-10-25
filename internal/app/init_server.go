@@ -109,7 +109,7 @@ func (b *bootstrap) initServerDependencies() error {
 	// The update check owns the only outbound connection core makes that is
 	// not a provider call. It is constructed even when disabled so GET
 	// /version keeps reporting the local build.
-	app.versionCheck = newVersionChecker(b.ctx, appCfg.VersionCheck, app.storage)
+	app.versionCheck = newVersionChecker(b.ctx, appCfg.VersionCheck, app.storage, b.cfg.Extensions.UpdateCheckLicense())
 	warnIfDataDirEphemeral(appCfg.Storage.BackendConfig())
 	warnIfMediaDirEphemeral(appCfg)
 	return nil
