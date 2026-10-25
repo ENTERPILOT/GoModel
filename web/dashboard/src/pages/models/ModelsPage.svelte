@@ -85,10 +85,10 @@
     return categoryLabels[category.category]?.() || category.display_name;
   }
 
-  // One toggle for every group: it expands all once all are collapsed, and
-  // collapses all otherwise.
+  // One toggle for the groups the table shows (filters apply): it expands
+  // them once all are collapsed, and collapses them otherwise.
   const allGroupsCollapsed = $derived(
-    providerGroups.allCollapsed(virtualModels.displayModelGroups),
+    providerGroups.allCollapsed(virtualModels.filteredDisplayModelGroups),
   );
   const groupToggleLabel = $derived(
     allGroupsCollapsed ? m.models_expand_all_groups() : m.models_collapse_all_groups(),
@@ -152,14 +152,14 @@
         onchange={(value) => (virtualModels.statusFilter = value)}
       />
       <div class="table-toolbar-actions models-toolbar-actions">
-        {#if virtualModels.displayModelGroups.length > 1}
+        {#if virtualModels.filteredDisplayModelGroups.length > 1}
           <button
             type="button"
             class="btn btn-with-icon"
             aria-label={groupToggleLabel}
             title={groupToggleLabel}
             onclick={() =>
-              providerGroups.setAll(virtualModels.displayModelGroups, !allGroupsCollapsed)}
+              providerGroups.setAll(virtualModels.filteredDisplayModelGroups, !allGroupsCollapsed)}
           >
             <Icon
               icon={allGroupsCollapsed ? ChevronsUpDown : ChevronsDownUp}
