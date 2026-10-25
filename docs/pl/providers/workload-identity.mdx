@@ -2,8 +2,15 @@
 title: "Workload Identity Federation"
 description: "Uwierzytelniaj OpenAI i Anthropic, wymieniając token tożsamości Twojej platformy na krótkotrwałe tokeny dostępu dostawcy zamiast używać statycznego klucza API."
 icon: "fingerprint"
+tag: "Beta"
 keywords: ["workload identity", "federacja", "WIF", "OIDC", "Kubernetes", "konto usługi", "wymiana tokenów", "bez klucza"]
 ---
+
+<Warning>
+  Workload identity federation jest w wersji beta. Nie została jeszcze
+  sprawdzona na wszystkich platformach, a jej konfiguracja może się zmienić.
+  Statyczne klucze API pozostają najstabilniejszą opcją.
+</Warning>
 
 Workload identity federation pozwala GoModel uwierzytelniać się u dostawcy bez
 długotrwałego klucza API. Gateway odczytuje token tożsamości, który Twoja

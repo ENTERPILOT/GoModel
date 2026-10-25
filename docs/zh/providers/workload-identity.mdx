@@ -2,8 +2,14 @@
 title: "工作负载身份联合"
 description: "使用以平台身份令牌交换得到的短期令牌对 OpenAI 和 Anthropic 进行身份验证，而不是使用静态 API 密钥。"
 icon: "fingerprint"
+tag: "Beta"
 keywords: ["工作负载身份", "身份联合", "WIF", "OIDC", "Kubernetes", "服务账号", "令牌交换", "无密钥", "workload identity", "federation"]
 ---
+
+<Warning>
+  工作负载身份联合目前处于 Beta 阶段。它尚未在所有平台上经过验证，配置也可能发生变化。静态 API
+  密钥仍是最稳定的选择。
+</Warning>
 
 工作负载身份联合让 GoModel 无需长期 API 密钥即可向提供商进行身份验证。网关读取平台已经签发的身份令牌（Kubernetes 投射的服务账号令牌、AWS、GCP 或 Azure 工作负载身份、GitHub Actions OIDC、SPIFFE JWT-SVID），并将其交换为提供商的短期访问令牌。
 
