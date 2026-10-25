@@ -68,6 +68,9 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	if err := db.Schema(ctx, sqlVirtualTable); err != nil {
 		return nil, fmt.Errorf("failed to create mcp_virtual_servers table: %w", err)
 	}
+	if err := db.Schema(ctx, sqlOAuthTable); err != nil {
+		return nil, fmt.Errorf("failed to create mcp_server_oauth table: %w", err)
+	}
 	return &SQLStore{db: db}, nil
 }
 

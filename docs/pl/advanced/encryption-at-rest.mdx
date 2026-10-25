@@ -1,6 +1,6 @@
 ---
 title: "Szyfrowanie danych w spoczynku"
-description: "Szyfruj dane uwierzytelniające providerów, nagłówki MCP i sekrety guardrails zapisane z dashboardu za pomocą GOMODEL_ENCRYPTION_KEY."
+description: "Szyfruj dane uwierzytelniające providerów, nagłówki i tokeny OAuth MCP oraz sekrety guardrails zapisane z dashboardu za pomocą GOMODEL_ENCRYPTION_KEY."
 icon: "lock"
 keywords: ["szyfrowanie danych w spoczynku", "rotacja klucza", "sekrety", "encryption at rest", "GOMODEL_ENCRYPTION_KEY", "key rotation", "secrets", "AES-256-GCM", "KMS"]
 ---
@@ -16,6 +16,7 @@ Szyfrowane pola:
 | ----------------------- | ------------------------------------------------------------------------------ |
 | `provider_credentials`  | `api_keys`, `service_account_json`, `service_account_json_base64`, `proxy_url` |
 | `mcp_servers`           | wartości `headers`                                                             |
+| `mcp_server_oauth`      | cały rekord logowania OAuth (tokeny i sekret klienta)                          |
 | `guardrail_definitions` | pola konfiguracji, które plugin oznacza jako sekretne (na przykład `api_key` w Presidio) |
 
 Dane uwierzytelniające zadeklarowane w zmiennych środowiskowych lub w `config.yaml`

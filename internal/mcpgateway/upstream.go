@@ -45,11 +45,12 @@ type upstream struct {
 	connectMu sync.Mutex
 	stateMu   sync.Mutex
 
-	session     *mcp.ClientSession
-	catalog     *catalog
-	status      ServerStatus
-	lastErr     string
-	connectedAt time.Time
+	session      *mcp.ClientSession
+	catalog      *catalog
+	status       ServerStatus
+	lastErr      string
+	connectedAt  time.Time
+	authRequired bool
 	// closed marks a permanently disposed upstream (removed or replaced by a
 	// reconcile). A stale background refresh must not redial it and leak an
 	// untracked session.
@@ -82,6 +83,7 @@ func (u *upstream) view() ServerView {
 		PromptCount:       u.catalog.promptCount(),
 		ResourceCount:     u.catalog.resourceCount(),
 		ConnectedAt:       u.connectedAt,
+		AuthRequired:      u.authRequired,
 	}
 }
 
@@ -202,6 +204,9 @@ func (u *upstream) ensureSessionLocked(ctx context.Context) (*mcp.ClientSession,
 		_ = session.Close()
 		err = dialCtx.Err()
 	}
+	u.stateMu.Lock()
+	u.authRequired = err != nil && probe.unauthorized()
+	u.stateMu.Unlock()
 	if err != nil {
 		abort()
 		return nil, u.connectError(err, probe)
@@ -303,6 +308,13 @@ func (u *upstream) dialClient(probe *connectProbe, requests context.Context) *ht
 			origin:  requestOrigin(u.spec.URL),
 		}
 	}
+	if u.spec.oauth != nil {
+		transport = &bearerRoundTripper{
+			base:   transport,
+			source: u.spec.oauth,
+			origin: requestOrigin(u.spec.URL),
+		}
+	}
 	probe.base = transport
 	clone := *base
 	clone.Transport = &boundRoundTripper{base: probe, bound: requests}
@@ -353,6 +365,8 @@ func (b *releasingBody) Close() error {
 // the URL. Only that first request counts: a later 404 on a request carrying
 // a session ID is the server dropping that session, not a missing endpoint,
 // and stateless servers legitimately answer the standalone SSE GET with 405.
+// A 401 there means the server wants a credential, which the admin view
+// reports as AuthRequired so the dashboard can offer an OAuth sign-in.
 type connectProbe struct {
 	base    http.RoundTripper
 	method  string
@@ -365,15 +379,23 @@ func (p *connectProbe) RoundTrip(req *http.Request) (*http.Response, error) {
 	if err != nil || req.Method != p.method || !p.decided.CompareAndSwap(false, true) {
 		return resp, err
 	}
-	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
+	switch resp.StatusCode {
+	case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusUnauthorized:
 		p.status.Store(int32(resp.StatusCode))
 	}
 	return resp, err
 }
 
-// missingEndpoint returns the status of the dial's first handshake request
-// when it showed no MCP endpoint at the URL, and 0 otherwise.
-func (p *connectProbe) missingEndpoint() int {
+// unauthorized reports whether the dial's first handshake request was
+// answered 401 Unauthorized.
+func (p *connectProbe) unauthorized() bool {
+	return p != nil && p.status.Load() == http.StatusUnauthorized
+}
+
+// handshakeStatus returns the status of the dial's first handshake request
+// when it showed no MCP endpoint at the URL or asked for credentials, and 0
+// otherwise.
+func (p *connectProbe) handshakeStatus() int {
 	if p == nil {
 		return 0
 	}
@@ -390,13 +412,16 @@ func (p *connectProbe) missingEndpoint() int {
 // credentials in them.
 func (u *upstream) connectError(err error, probe *connectProbe) error {
 	err = redactDialError(err)
-	switch status := probe.missingEndpoint(); status {
+	switch status := probe.handshakeStatus(); status {
 	case http.StatusNotFound:
 		return fmt.Errorf("connect to mcp server %q: %s answered HTTP 404 Not Found; no MCP endpoint at that path, check the url: %w",
 			u.spec.Name, requestOrigin(u.spec.URL), err)
 	case http.StatusMethodNotAllowed:
 		return fmt.Errorf("connect to mcp server %q: %s answered HTTP 405 Method Not Allowed to the %s handshake; the endpoint likely speaks the other transport, check the transport and the url: %w",
 			u.spec.Name, requestOrigin(u.spec.URL), u.transportName(), err)
+	case http.StatusUnauthorized:
+		return fmt.Errorf("connect to mcp server %q: %s answered HTTP 401 Unauthorized; sign in from the dashboard or configure an Authorization header: %w",
+			u.spec.Name, requestOrigin(u.spec.URL), err)
 	}
 	return fmt.Errorf("connect to mcp server %q: %w", u.spec.Name, err)
 }

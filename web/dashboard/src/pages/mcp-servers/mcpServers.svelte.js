@@ -6,8 +6,10 @@ import { errorPayloadMessage, getJSON } from "$lib/api/client.js";
 import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+import { gomodelPath } from "$lib/api/paths.js";
 import * as m from "$lib/paraglide/messages.js";
 import {
+  buildMcpOAuthStartPayload,
   buildMcpServerPayload,
   buildMcpVirtualServerPayload,
   defaultMcpVirtualServerForm,
@@ -18,7 +20,10 @@ import {
   deriveMcpServerSlug,
   filterMcpServers,
   mcpDiscoveredTools,
+  mcpOAuthRedirectURI,
   mcpServerFormFromServer,
+  parseMcpOAuthOutcome,
+  stripMcpOAuthParams,
   mcpPollShouldRetry,
   mcpServerSlug,
   mcpServersNeedPolling,
@@ -69,6 +74,16 @@ class McpServersState {
 
   deletingName = $state("");
   reconnectingName = $state("");
+
+  // OAuth sign-in dialog. clientRequired is set when the authorization
+  // server has no dynamic client registration, so the client fields open.
+  oauthOpen = $state(false);
+  oauthServer = $state(null);
+  oauthForm = $state({ client_id: "", client_secret: "" });
+  oauthSubmitting = $state(false);
+  oauthError = $state("");
+  oauthClientRequired = $state(false);
+  signingOutName = $state("");
 
   catalogOpen = $state(false);
   catalogLoading = $state(false);
@@ -568,6 +583,121 @@ class McpServersState {
       void this.fetchServers();
     } finally {
       this.deletingName = "";
+    }
+  }
+
+  // --- OAuth sign-in -----------------------------------------------------
+
+  oauthRedirectURI() {
+    return mcpOAuthRedirectURI(window.location.origin, gomodelPath);
+  }
+
+  openSignIn(server) {
+    this.oauthServer = server;
+    this.oauthForm = { client_id: "", client_secret: "" };
+    this.oauthError = "";
+    this.oauthClientRequired = false;
+    this.oauthOpen = true;
+  }
+
+  closeSignIn() {
+    this.oauthOpen = false;
+    this.oauthServer = null;
+    this.oauthError = "";
+  }
+
+  // submitSignIn starts discovery on the gateway and sends the browser to
+  // the authorization server, which returns it to the callback.
+  async submitSignIn() {
+    const slug = mcpServerSlug(this.oauthServer);
+    if (!slug || this.oauthSubmitting) {
+      return;
+    }
+    this.oauthSubmitting = true;
+    this.oauthError = "";
+    try {
+      const outcome = await sendAdminMutation(
+        "/admin/mcp-servers/" + encodeURIComponent(slug) + "/oauth/start",
+        "POST",
+        buildMcpOAuthStartPayload(this.oauthForm, this.oauthRedirectURI()),
+        {
+          label: "start mcp sign-in",
+          errorFallback: m.mcp_oauth_start_failed(),
+          unavailableMessage: m.mcp_unavailable(),
+        },
+      );
+      if (outcome.status === "stale") {
+        return;
+      }
+      if (outcome.status !== "ok") {
+        this.oauthError = outcome.error;
+        if (outcome.result?.data?.error?.code === "oauth_client_required") {
+          this.oauthClientRequired = true;
+        }
+        return;
+      }
+      const url = outcome.result.data && outcome.result.data.authorization_url;
+      if (!url) {
+        this.oauthError = m.mcp_oauth_start_failed();
+        return;
+      }
+      window.location.assign(url);
+    } finally {
+      this.oauthSubmitting = false;
+    }
+  }
+
+  async signOut(server) {
+    const name = String((server && server.name) || "").trim();
+    const slug = mcpServerSlug(server);
+    if (!slug || this.signingOutName) {
+      return;
+    }
+    if (!confirm(m.mcp_oauth_sign_out_confirm({ name }))) {
+      return;
+    }
+    this.signingOutName = slug;
+    try {
+      const outcome = await sendAdminMutation(
+        "/admin/mcp-servers/" + encodeURIComponent(slug) + "/oauth",
+        "DELETE",
+        undefined,
+        {
+          label: "sign out of mcp server",
+          errorFallback: m.mcp_oauth_sign_out_failed(),
+          unavailableMessage: m.mcp_unavailable(),
+        },
+      );
+      if (outcome.status === "stale") {
+        return;
+      }
+      if (outcome.status !== "ok") {
+        flash.error(outcome.error);
+        return;
+      }
+      flash.success(m.mcp_oauth_signed_out({ name }));
+      void this.fetchServers();
+    } finally {
+      this.signingOutName = "";
+    }
+  }
+
+  // showOAuthOutcome flashes the result the sign-in callback redirected
+  // back with, then drops it from the address bar. Failure details are on
+  // the server's row, never in the URL.
+  showOAuthOutcome() {
+    const result = parseMcpOAuthOutcome(window.location.search);
+    if (!result) {
+      return;
+    }
+    history.replaceState(history.state, "", stripMcpOAuthParams(window.location.href));
+    const name = result.server;
+    if (result.outcome === "signed_in") {
+      flash.success(m.mcp_oauth_signed_in_flash({ name }));
+    } else if (result.outcome === "expired") {
+      flash.error(m.mcp_oauth_expired_flash());
+    } else {
+      flash.error(m.mcp_oauth_failed_flash({ name }));
     }
   }
 

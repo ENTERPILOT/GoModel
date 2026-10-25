@@ -85,6 +85,8 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.DELETE("/mcp-servers/:name", h.DeleteMCPServer, global)
 	g.POST("/mcp-servers/:name/reconnect", h.ReconnectMCPServer, global)
 	g.GET("/mcp-servers/:name/catalog", h.MCPServerCatalog, global)
+	g.POST("/mcp-servers/:name/oauth/start", h.StartMCPServerOAuth, global)
+	g.DELETE("/mcp-servers/:name/oauth", h.SignOutMCPServerOAuth, global)
 	g.GET("/mcp-virtual-servers", h.ListMCPVirtualServers, global)
 	g.PUT("/mcp-virtual-servers", h.UpsertMCPVirtualServer, global)
 	g.DELETE("/mcp-virtual-servers/:name", h.DeleteMCPVirtualServer, global)

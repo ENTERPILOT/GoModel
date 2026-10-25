@@ -1708,6 +1708,188 @@
         }
       }
     },
+    "/admin/mcp-servers/{name}/oauth": {
+      "delete": {
+        "description": "Deletes the stored OAuth tokens and reconnects the server without them.",
+        "tags": [
+          "admin"
+        ],
+        "summary": "Sign out of one MCP server",
+        "parameters": [
+          {
+            "description": "MCP server slug",
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/mcp-servers/{name}/oauth",
+            "title": "Sign out of one MCP server",
+            "description": "GoModel API reference for DELETE /admin/mcp-servers/{name}/oauth: Sign out of one MCP server."
+          }
+        }
+      }
+    },
+    "/admin/mcp-servers/{name}/oauth/start": {
+      "post": {
+        "description": "Runs MCP authorization discovery (protected resource metadata, authorization server metadata, PKCE check, dynamic client registration when no client_id is given) and returns the authorization URL to open in the browser. The response sets a short-lived cookie the callback checks.",
+        "tags": [
+          "admin"
+        ],
+        "summary": "Start an OAuth sign-in to one MCP server",
+        "parameters": [
+          {
+            "description": "MCP server slug",
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/admin.startMCPOAuthRequest"
+              }
+            }
+          },
+          "description": "Sign-in request",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/admin.startMCPOAuthResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/mcp-servers/{name}/oauth/start",
+            "title": "Start an OAuth sign-in to one MCP server",
+            "description": "GoModel API reference for POST /admin/mcp-servers/{name}/oauth/start: Start an OAuth sign-in to one MCP server."
+          }
+        }
+      }
+    },
     "/admin/mcp-servers/{name}/reconnect": {
       "post": {
         "tags": [
@@ -12510,7 +12692,7 @@
             "type": "string"
           },
           "PRICING_MARKUPS_ENABLED": {
-            "description": "PricingMarkups is \"on\" when pricing.markups declares at least one rule,\nso the dashboard shows billed cost only where it differs from cost.",
+            "description": "PricingMarkups mirrors pricing.markups_enabled, so the dashboard shows\nbilled cost only when the markup feature is on.",
             "type": "string"
           },
           "RATE_LIMITS_ENABLED": {
@@ -12874,6 +13056,32 @@
           "source"
         ]
       },
+      "admin.mcpOAuthViewResponse": {
+        "type": "object",
+        "properties": {
+          "expires_at": {
+            "type": "string"
+          },
+          "issuer": {
+            "type": "string"
+          },
+          "last_error": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "signed_in_at": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
       "admin.mcpServerViewResponse": {
         "type": "object",
         "properties": {
@@ -12882,6 +13090,10 @@
             "items": {
               "type": "string"
             }
+          },
+          "auth_required": {
+            "description": "AuthRequired reports that the server answered 401 to the last connect.",
+            "type": "boolean"
           },
           "connected_at": {
             "type": "string"
@@ -12921,6 +13133,14 @@
           },
           "name": {
             "type": "string"
+          },
+          "oauth": {
+            "description": "OAuth is the operator sign-in state; absent when never signed in.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/admin.mcpOAuthViewResponse"
+              }
+            ]
           },
           "prompt_count": {
             "type": "integer"
@@ -13334,6 +13554,28 @@
         "type": "object",
         "properties": {
           "status": {
+            "type": "string"
+          }
+        }
+      },
+      "admin.startMCPOAuthRequest": {
+        "type": "object",
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "client_secret": {
+            "type": "string"
+          },
+          "redirect_uri": {
+            "type": "string"
+          }
+        }
+      },
+      "admin.startMCPOAuthResponse": {
+        "type": "object",
+        "properties": {
+          "authorization_url": {
             "type": "string"
           }
         }

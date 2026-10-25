@@ -82,6 +82,10 @@ type mcpServerViewResponse struct {
 	PromptCount         int               `json:"prompt_count"`
 	ResourceCount       int               `json:"resource_count"`
 	ConnectedAt         *time.Time        `json:"connected_at,omitempty"`
+	// AuthRequired reports that the server answered 401 to the last connect.
+	AuthRequired bool `json:"auth_required,omitempty"`
+	// OAuth is the operator sign-in state; absent when never signed in.
+	OAuth *mcpOAuthViewResponse `json:"oauth,omitempty"`
 }
 
 // ListMCPServers handles GET /admin/mcp-servers.
@@ -343,6 +347,8 @@ func (h *Handler) mcpServerView(view mcpgateway.ServerView) mcpServerViewRespons
 		ExcludedToolCount:   view.ExcludedToolCount,
 		PromptCount:         view.PromptCount,
 		ResourceCount:       view.ResourceCount,
+		AuthRequired:        view.AuthRequired,
+		OAuth:               mcpOAuthView(view.OAuth),
 	}
 	if !view.ConnectedAt.IsZero() {
 		connectedAt := view.ConnectedAt

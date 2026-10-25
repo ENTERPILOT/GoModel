@@ -1,6 +1,6 @@
 ---
 title: "静态数据加密"
-description: "使用 GOMODEL_ENCRYPTION_KEY 加密从控制台保存的提供商凭据、MCP 请求头和护栏 Secret。"
+description: "使用 GOMODEL_ENCRYPTION_KEY 加密从控制台保存的提供商凭据、MCP 请求头和 OAuth Token 以及护栏 Secret。"
 icon: "lock"
 keywords: ["静态数据加密", "密钥轮换", "Secret", "加密", "encryption at rest", "GOMODEL_ENCRYPTION_KEY", "key rotation", "secrets", "AES-256-GCM", "KMS"]
 ---
@@ -15,6 +15,7 @@ keywords: ["静态数据加密", "密钥轮换", "Secret", "加密", "encryption
 | ----------------------- | ------------------------------------------------------------------------------ |
 | `provider_credentials`  | `api_keys`、`service_account_json`、`service_account_json_base64`、`proxy_url` |
 | `mcp_servers`           | `headers` 的值                                                                 |
+| `mcp_server_oauth`      | 完整的 OAuth 登录记录（Token 和客户端密钥）                                    |
 | `guardrail_definitions` | 插件标记为 Secret 的配置字段（例如 Presidio 的 `api_key`）                     |
 
 在环境变量或 `config.yaml` 中声明的凭据永远不会写入数据库，因此不受影响。
