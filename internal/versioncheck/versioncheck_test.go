@@ -118,6 +118,37 @@ func TestRefreshSendsIdentityHeaders(t *testing.T) {
 	}
 }
 
+func TestRefreshSendsLicenseOnlyInExpectedShape(t *testing.T) {
+	account := strings.Repeat("ab", 16)
+	for _, tc := range []struct {
+		name, license, account   string
+		wantLicense, wantAccount string
+	}{
+		{name: "core sends neither"},
+		{name: "paid with account", license: "paid", account: account, wantLicense: "paid", wantAccount: account},
+		{name: "trial with account", license: "trial", account: account, wantLicense: "trial", wantAccount: account},
+		{name: "beta without account", license: "beta", wantLicense: "beta"},
+		{name: "unknown kind dropped", license: "enterprise", account: account, wantAccount: account},
+		{name: "org name dropped", license: "paid", account: "Acme Corp", wantLicense: "paid"},
+		{name: "upper-case digest dropped", license: "paid", account: strings.ToUpper(account), wantLicense: "paid"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got http.Header
+			checker, _ := newTestChecker(t, Config{Version: "1.0.0", License: tc.license, Account: tc.account},
+				func(w http.ResponseWriter, r *http.Request) {
+					got = r.Header.Clone()
+					_, _ = w.Write([]byte("1.0.0"))
+				})
+			_, err := checker.Refresh(context.Background(), Beacon{})
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantLicense, got.Get("X-GoModel-License"))
+			assert.Equal(t, tc.wantAccount, got.Get("X-GoModel-Account"))
+			_, sentLicense := got["X-Gomodel-License"]
+			assert.Equal(t, tc.wantLicense != "", sentLicense, "X-GoModel-License present")
+		})
+	}
+}
+
 func TestRefreshAsksInstallIDFuncPerRequest(t *testing.T) {
 	var sent []string
 	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
