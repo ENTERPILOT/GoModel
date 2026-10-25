@@ -44,6 +44,9 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 	"chutes": {
 		DefaultBaseURL: "https://llm.chutes.ai/v1",
 	},
+	"together": {
+		DefaultBaseURL: "https://api.together.ai/v1",
+	},
 	"deepinfra": {
 		DefaultBaseURL: "https://api.deepinfra.com/v1/openai",
 	},
@@ -602,6 +605,7 @@ func TestApplyProviderEnvVars_DiscoversTypeFromAPIKeyWithDefaultBaseURL(t *testi
 		{providerType: "deepseek", envVar: "DEEPSEEK_API_KEY", apiKey: "deepseek-key"},
 		{providerType: "chutes", envVar: "CHUTES_API_KEY", apiKey: "cpk_test"},
 		{providerType: "deepinfra", envVar: "DEEPINFRA_API_KEY", apiKey: "deepinfra-key"},
+		{providerType: "together", envVar: "TOGETHER_API_KEY", apiKey: "together-key"},
 		{providerType: "zai", envVar: "ZAI_API_KEY", apiKey: "zai-key"},
 	}
 

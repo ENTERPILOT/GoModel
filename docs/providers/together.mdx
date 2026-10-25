@@ -1,0 +1,75 @@
+---
+title: "Together AI"
+description: "Configure Together AI in GoModel for chat, Responses, and embeddings on open models."
+icon: "server"
+keywords: ["Together AI", "together", "open models", "provider setup", "embeddings"]
+---
+
+Together AI serves open models through an OpenAI-compatible API at
+`https://api.together.ai/v1`. GoModel routes these endpoints to it:
+
+| GoModel endpoint | Together AI models |
+| ---------------- | ------------------ |
+| `/v1/chat/completions` | chat models (`meta-llama/Llama-3.3-70B-Instruct-Turbo`, `openai/gpt-oss-120b`, ...) |
+| `/v1/responses` | chat models, translated through chat completions |
+| `/v1/embeddings` | embedding models (`BAAI/bge-base-en-v1.5`, ...) |
+
+## Configure
+
+Create an API key in the [Together AI dashboard](https://api.together.ai/settings/api-keys) and set:
+
+```bash
+TOGETHER_API_KEY=...
+```
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  together:
+    type: together
+    api_key: "${TOGETHER_API_KEY}"
+    # base_url defaults to "https://api.together.ai/v1".
+```
+
+Override the base URL or set a model list only when you need to, for example
+to use Together's regional endpoints (`https://us-api.together.ai/v1`):
+
+```bash
+TOGETHER_BASE_URL=https://api.together.ai/v1
+TOGETHER_MODELS=meta-llama/Llama-3.3-70B-Instruct-Turbo,BAAI/bge-base-en-v1.5
+```
+
+`TOGETHER_MODELS` is a fallback list, used only when `/models` fails or is
+empty; `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` makes it the only list.
+
+## Models
+
+GoModel reads Together's live `/models` listing, including each model's type,
+display name, context length, and per-token prices. Image, audio, video, and
+rerank models are left out because GoModel does not route those endpoints to
+Together. Model IDs contain a slash; use them verbatim, or prefix the provider
+name to pin the route:
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "together/meta-llama/Llama-3.3-70B-Instruct-Turbo", "messages": [{"role": "user", "content": "Hello"}]}'
+```
+
+Use the prefix whenever the ID starts with the name of another configured
+provider: with an OpenAI provider configured, `openai/gpt-oss-120b` is looked up
+on OpenAI and fails, so send `together/openai/gpt-oss-120b` instead.
+
+## Behavior notes
+
+- **Responses go through chat completions.** Together's native `/responses`
+  endpoint is a beta that rejects many serverless models, so GoModel
+  translates Responses requests to chat completions, which every chat model
+  supports. With a GoModel response store configured, `previous_response_id`
+  chains work: the gateway replays the stored history.
+- **Passthrough is opt-in.** Add `together` to `ENABLED_PASSTHROUGH_PROVIDERS`
+  to expose `/p/together/...`, which forwards any path under the base URL with
+  the gateway's Together key. Use it for Together endpoints GoModel does not
+  route, such as images or rerank.
