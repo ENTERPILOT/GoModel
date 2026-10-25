@@ -167,6 +167,7 @@ func ResolveRequestModelWithAuthorizer(
 	if slowdownResolver, ok := resolver.(ModelSlowdownResolver); ok {
 		resolution.Slowdown = slowdownResolver.ResolveSlowdown(ctx, requested, resolvedSelector)
 	}
+	resolution.CacheDerivedSelectors()
 	return resolution, nil
 }
 
