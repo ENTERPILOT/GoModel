@@ -2,7 +2,7 @@
 // into a grid with totals, label its keys, format values, export CSV and
 // build the stacked bar chart. Pure functions for node:test.
 
-import { formatTokensShort } from "../../lib/utils/format.js";
+import { formatCost, formatCostShort, formatTokensShort } from "../../lib/utils/format.js";
 import { barColors, chartTickFont, chartTooltip } from "../../lib/utils/chartTheme.js";
 import * as m from "../../lib/paraglide/messages.js";
 
@@ -59,8 +59,8 @@ export function pivotKeyLabel(dimension, key, authKeyNames) {
 // was no traffic, "---" for an unknown (unpriced) cost.
 export function formatPivotValue(value, metric) {
   if (value === undefined) return "–";
+  if (metric === "cost") return formatCost(value);
   if (value === null) return "---";
-  if (metric === "cost") return "$" + Number(value).toFixed(value !== 0 && Math.abs(value) < 0.01 ? 4 : 2);
   return Number(value).toLocaleString();
 }
 
@@ -91,7 +91,7 @@ function csvField(value) {
 // breakdown has no column dimension.
 export function pivotChartConfig(colors, table, { rowLabels, columnLabels, metric, hasColumns }) {
   const palette = barColors();
-  const fmtShort = (v) => (metric === "cost" ? "$" + Number(v).toFixed(2) : formatTokensShort(v));
+  const fmtShort = (v) => (metric === "cost" ? formatCostShort(v) : formatTokensShort(v));
   const datasets = hasColumns
     ? table.rows.map((_, i) => ({
         label: rowLabels[i],

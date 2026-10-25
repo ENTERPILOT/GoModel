@@ -44,13 +44,13 @@
   const hasLabels = $derived(
     usageLogHasLabels(
       usagePage.labelUsage,
-      usagePage.usageFilterLabels,
+      usagePage.filters.labels,
       usagePage.usageLog.entries,
     ),
   );
 
   const hasAuthKeys = $derived(
-    usageLogHasAuthKeys(usagePage.usageFilterAuthKeys, usagePage.usageLog.entries),
+    usageLogHasAuthKeys(usagePage.filters.authKeys, usagePage.usageLog.entries),
   );
 
   const onSearchInput = debounced(() => usagePage.fetchUsageLog(true));
@@ -63,8 +63,8 @@
     <button
       type="button"
       class="usage-label-chip"
-      class:active={usagePage.usageFilterAuthKeys.includes(entry.auth_key_id)}
-      title={usagePage.usageFilterAuthKeys.includes(entry.auth_key_id)
+      class:active={usagePage.filters.authKeys.includes(entry.auth_key_id)}
+      title={usagePage.filters.authKeys.includes(entry.auth_key_id)
         ? m.usage_clear_auth_key_filter()
         : m.usage_filter_by_auth_key({ name, id: entry.auth_key_id })}
       onclick={() => usagePage.toggleUsageAuthKeyFilter(entry.auth_key_id)}
@@ -81,7 +81,7 @@
         <button
           type="button"
           class="usage-label-chip"
-          class:active={usagePage.usageFilterLabels.includes(label)}
+          class:active={usagePage.filters.labels.includes(label)}
           style="--label-color: {labelColor(label)}"
           title={usagePage.usageLabelChipTitle(label)}
           onclick={() => usagePage.toggleUsageLabelFilter(label)}
@@ -160,7 +160,7 @@
                 {#if entry.session_id}
                   <SessionIDChip
                     sessionID={entry.session_id}
-                    active={usagePage.usageFilterSession === entry.session_id}
+                    active={usagePage.filters.session === entry.session_id}
                     compact
                     onfilter={(sessionID) => usagePage.filterBySession(sessionID, entry.user_path)}
                   />

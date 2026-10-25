@@ -27,7 +27,7 @@
     options={usagePage.usageFilterModelOptions()}
     multiple
     mono
-    bind:values={usagePage.usageFilterModels}
+    bind:values={usagePage.filters.models}
     onchange={onPicksChange}
     placeholder={m.usage_all_models()}
     searchPlaceholder={m.usage_search_models()}
@@ -37,7 +37,7 @@
     class="usage-page-filters-select"
     options={usagePage.usageFilterProviderOptions()}
     multiple
-    bind:values={usagePage.usageFilterProviders}
+    bind:values={usagePage.filters.providers}
     onchange={onPicksChange}
     placeholder={m.usage_all_providers()}
     searchPlaceholder={m.usage_search_providers()}
@@ -48,7 +48,7 @@
       class="usage-page-filters-select"
       options={usagePage.usageFilterLabelOptions()}
       multiple
-      bind:values={usagePage.usageFilterLabels}
+      bind:values={usagePage.filters.labels}
       onchange={onPicksChange}
       placeholder={m.usage_all_labels()}
       searchPlaceholder={m.usage_search_labels()}
@@ -61,7 +61,7 @@
       options={usagePage.usageFilterEndpointOptions()}
       multiple
       mono
-      bind:values={usagePage.usageFilterEndpoints}
+      bind:values={usagePage.filters.endpoints}
       onchange={onPicksChange}
       placeholder={m.usage_all_endpoints()}
       searchPlaceholder={m.usage_search_endpoints()}
@@ -73,7 +73,7 @@
       class="usage-page-filters-select"
       options={usagePage.usageFilterAuthKeyOptions()}
       multiple
-      bind:values={usagePage.usageFilterAuthKeys}
+      bind:values={usagePage.filters.authKeys}
       onchange={onPicksChange}
       placeholder={m.usage_all_auth_keys()}
       searchPlaceholder={m.usage_search_auth_keys()}
@@ -85,7 +85,7 @@
   <div class="usage-page-filters-user-path">
     <UserPathTreeSelect
       paths={usagePage.usageFacetOptions.userPaths}
-      bind:values={usagePage.usageFilterUserPaths}
+      bind:values={usagePage.filters.userPaths}
       onchange={onPicksChange}
       placeholder={access.scoped ? access.userPath : m.usage_all_user_paths()}
       scope={access.scoped ? access.userPath : "/"}
@@ -96,9 +96,9 @@
     class="usage-page-filters-session"
     placeholder={m.usage_filter_session_placeholder()}
     label={m.usage_filter_session()}
-    bind:value={usagePage.usageFilterSession}
+    bind:value={usagePage.filters.session}
     oninput={onSessionInput}
-    clearLabel={m.usage_clear_session_filter({ session: usagePage.usageFilterSession })}
+    clearLabel={m.usage_clear_session_filter({ session: usagePage.filters.session })}
     onclear={() => {
       onSessionInput.cancel();
       usagePage.onUsageFilterChanged();
@@ -130,7 +130,7 @@
     max-width: 360px;
   }
 
-  .usage-page-filters-user-path :global(.tree-select) {
+  .usage-page-filters-user-path :global(.user-path-tree-select) {
     flex: 1 1 auto;
   }
 

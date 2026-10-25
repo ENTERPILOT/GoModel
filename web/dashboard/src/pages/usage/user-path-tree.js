@@ -95,9 +95,3 @@ export function customUserPath(query, tree, selected, scope = "/") {
   const known = (nodes) => nodes.some((node) => node.path === path || known(node.children));
   return known(tree || []) ? "" : path;
 }
-
-// toggleUserPath adds or removes path from the selection.
-export function toggleUserPath(selected, path) {
-  const current = selected || [];
-  return current.includes(path) ? current.filter((value) => value !== path) : current.concat(path);
-}

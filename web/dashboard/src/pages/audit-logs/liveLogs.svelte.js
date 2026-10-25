@@ -7,9 +7,9 @@
 // ./live-logs-logic.js.
 //
 // The singleton owns the shared live-preview state (auditLog, usageLog and
-// the insert-gate filter fields); the audit/usage pages write their fetched
-// pages into `liveLogs.auditLog` / `liveLogs.usageLog` and keep the filter
-// fields in sync. Cross-module hooks stay optional and duck-typed: pages
+// the audit insert-gate filter fields); the audit/usage pages write their
+// fetched pages into `liveLogs.auditLog` / `liveLogs.usageLog`. The usage
+// gate asks the usage page's filter state (usageFilters) whether it is empty. Cross-module hooks stay optional and duck-typed: pages
 // assign `liveLogs.fetchAuditLog`, `liveLogs.fetchUsage`,
 // `liveLogs.isAuditEntryExpanded`, `liveLogs.noteLiveTokenUsage`; the
 // the conversation drawer reacts to normalized audit-record changes.
@@ -22,6 +22,7 @@
 // indefinitely) and heartbeat handling. Framing and backoff are shared with
 // the overview's usage-signal stream via $lib/api/eventStream.js.
 
+import { usageFilters } from "../usage/usageFilters.svelte.js";
 import { untrack } from "svelte";
 import { apiFetch, getJSON, isAbortError } from "$lib/api/client.js";
 import { nextReconnect } from "$lib/api/eventStream.js";
@@ -73,14 +74,9 @@ class LiveLogsStore {
   );
   auditThreadChildren = $state({});
   usageLogSearch = $state("");
-  // Multi-value usage filters: each holds the selected values, empty = all.
-  usageFilterModels = $state([]);
-  usageFilterProviders = $state([]);
-  usageFilterLabels = $state([]);
-  usageFilterUserPaths = $state([]);
-  usageFilterSession = $state("");
-  usageFilterAuthKeys = $state([]);
-  usageFilterEndpoints = $state([]);
+  // The usage page's filters: live usage previews merge only while none is
+  // set, since a preview cannot be matched against them client side.
+  usageFilters = usageFilters;
   usageLogHideCached = $state(false);
 
   // True while the stream body is being consumed; drives the audit page's

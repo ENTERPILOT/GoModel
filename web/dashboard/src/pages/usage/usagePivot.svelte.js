@@ -1,11 +1,9 @@
 // Breakdown (pivot) section state: the rows/columns/metric configuration and
-// the last /admin/usage/breakdown result. The page filters and window are
-// passed in by the usage page, which also mirrors the configuration into the
-// URL (see usage-url-state.js).
+// the last /admin/usage/breakdown result. The usage page builds the query
+// (usage-query.js) and mirrors the configuration into the URL.
 
 import { getJSON, isAbortError } from "$lib/api/client.js";
-import { dateRange } from "$lib/stores/dateRange.svelte.js";
-import { defaultPivotConfig } from "./usage-url-state.js";
+import { defaultPivotConfig } from "./usage-query.js";
 
 class UsagePivotState {
   rows = $state(defaultPivotConfig().rows);
@@ -45,22 +43,16 @@ class UsagePivotState {
     return this.rows === dimension || this.columns === dimension;
   }
 
-  queryStr() {
-    let qs = "&rows=" + encodeURIComponent(this.rows) + "&metric=" + encodeURIComponent(this.metric);
-    if (this.columns) qs += "&columns=" + encodeURIComponent(this.columns);
-    if (this.uses("period")) qs += "&interval=" + encodeURIComponent(this.interval);
-    if (this.uses("user_path") && this.depth) qs += "&user_path_depth=" + this.depth;
-    return qs;
-  }
-
-  async fetch(filterQs) {
+  // fetch loads the breakdown for query, which the usage page builds from
+  // its filters, window and this configuration.
+  async fetch(query) {
     if (this.#controller) this.#controller.abort();
     const controller = new AbortController();
     this.#controller = controller;
     this.loading = true;
     try {
       const result = await getJSON(
-        "/admin/usage/breakdown?" + dateRange.queryStr() + (filterQs || "") + this.queryStr(),
+        "/admin/usage/breakdown?" + query,
         { label: "usage breakdown", signal: controller.signal },
       );
       if (result.stale || controller.signal.aborted) return;

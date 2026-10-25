@@ -39,8 +39,6 @@ import {
   shortSessionID,
   usageEntryCached,
   usageEntryCacheLabel,
-  usageFilterQueryStr,
-  toggleFilterValue,
   usageLogHasAuthKeys,
   usageLogHasLabels,
   usageLogQueryParams,
@@ -56,6 +54,7 @@ import {
   usesResponseCostPricing,
 } from "../src/pages/usage/usage-helpers.js";
 import { horizontalUsageChartConfig } from "../src/pages/usage/usage-chart-config.js";
+import { emptyUsageFilters, usageFiltersEmpty, usageQuery } from "../src/pages/usage/usage-query.js";
 
 test("usesResponseCostPricing detects provider-reported costs", () => {
   assert.equal(usesResponseCostPricing({ cost_source: "openrouter_credits" }), true);
@@ -158,78 +157,51 @@ test("cachedCostTitle prepends savings note for cached entries and passes throug
 
 // --- Query building ---
 
-test("usageFilterQueryStr includes every active filter, URL-encoded", () => {
-  const qs = usageFilterQueryStr({
-    model: "gpt-5",
-    provider: "openai",
-    label: "env:prod",
-    user_path: "/team",
-    session_id: "session/a",
-    auth_key_id: "key-a",
-    endpoint: "/v1/chat/completions,/v1/messages",
+test("usageQuery includes every active filter, URL-encoded", () => {
+  const qs = usageQuery({
+    filters: {
+      models: ["gpt-5"],
+      providers: ["openai"],
+      labels: ["env:prod"],
+      userPaths: ["/team"],
+      session: "session/a",
+      authKeys: ["key-a"],
+      endpoints: ["/v1/chat/completions", "/v1/messages"],
+    },
   });
   assert.equal(
     qs,
-    "&model=gpt-5&provider=openai&label=env%3Aprod&user_path=%2Fteam&session_id=session%2Fa&auth_key_id=key-a" +
-      "&endpoint=%2Fv1%2Fchat%2Fcompletions%2C%2Fv1%2Fmessages",
+    "model=gpt-5&provider=openai&label=env%3Aprod&user_path=%2Fteam&auth_key_id=key-a" +
+      "&endpoint=%2Fv1%2Fchat%2Fcompletions&endpoint=%2Fv1%2Fmessages&session_id=session%2Fa",
   );
 });
 
-test("usageFilterQueryStr repeats multi-value filters", () => {
-  const qs = usageFilterQueryStr({
-    model: ["gpt-5", "claude"],
-    label: ["env:dev,local", "pr"],
-    user_path: ["/team/a", "/ops"],
-    auth_key_id: [],
-    endpoint: ["/v1/messages"],
+test("usageQuery repeats multi-value filters and skips empty ones", () => {
+  const qs = usageQuery({
+    filters: { models: ["gpt-5", "claude"], labels: ["env:dev,local", "pr"], userPaths: ["/team/a", "/ops"], authKeys: [], session: "" },
   });
-  assert.equal(
-    qs,
-    "&model=gpt-5&model=claude&label=env%3Adev%2Clocal&label=pr&user_path=%2Fteam%2Fa&user_path=%2Fops&endpoint=%2Fv1%2Fmessages",
-  );
-  assert.doesNotMatch(usageFilterQueryStr({ model: ["a"], label: ["b"] }, "label"), /label=/);
+  assert.equal(qs, "model=gpt-5&model=claude&label=env%3Adev%2Clocal&label=pr&user_path=%2Fteam%2Fa&user_path=%2Fops");
+  assert.equal(usageQuery({ filters: emptyUsageFilters() }), "");
+  assert.equal(usageQuery({ filters: { labels: ["team alpha"] } }), "label=team%20alpha");
 });
 
-test("toggleFilterValue adds and removes one value", () => {
-  assert.deepEqual(toggleFilterValue([], "a"), ["a"]);
-  assert.deepEqual(toggleFilterValue(["a", "b"], "a"), ["b"]);
-  assert.deepEqual(toggleFilterValue(["a"], ""), ["a"]);
-  assert.deepEqual(toggleFilterValue(undefined, "a"), ["a"]);
-});
-
-test("usageFilterQueryStr skips empty filters", () => {
-  assert.equal(usageFilterQueryStr({ model: "", provider: "", label: "", user_path: "", session_id: "" }), "");
-  assert.equal(usageFilterQueryStr({ label: "team alpha" }), "&label=team%20alpha");
-});
-
-test("usageFilterQueryStr honors every filter except the excluded facet", () => {
-  const filters = {
-    model: "gpt-5",
-    provider: "openai",
-    label: "env:prod",
-    user_path: "/team",
-    session_id: "session-a",
-  };
-  const withoutModel = usageFilterQueryStr(filters, "model");
+test("usageQuery honors every filter except the excluded facet", () => {
+  const filters = { models: ["gpt-5"], providers: ["openai"], labels: ["env:prod"], userPaths: ["/team"], session: "session-a" };
+  const withoutModel = usageQuery({ filters, excludeParam: "model" });
   assert.doesNotMatch(withoutModel, /model=/);
   assert.match(withoutModel, /provider=openai/);
   assert.match(withoutModel, /label=env%3Aprod/);
   assert.match(withoutModel, /user_path=%2Fteam/);
 
-  const withoutProvider = usageFilterQueryStr(filters, "provider");
-  assert.doesNotMatch(withoutProvider, /provider=/);
-  assert.match(withoutProvider, /model=gpt-5/);
-
-  const withoutLabel = usageFilterQueryStr(filters, "label");
-  assert.doesNotMatch(withoutLabel, /label=/);
-  assert.match(withoutLabel, /provider=openai/);
-
-  const withoutSession = usageFilterQueryStr(filters, "session_id");
+  const withoutSession = usageQuery({ filters, excludeParam: "session_id" });
   assert.doesNotMatch(withoutSession, /session_id=/);
   assert.match(withoutSession, /model=gpt-5/);
-  assert.match(withoutSession, /provider=openai/);
-  assert.match(withoutSession, /label=env%3Aprod/);
-  assert.match(withoutSession, /user_path=%2Fteam/);
+});
+
+test("usageFiltersEmpty checks every filter in the table", () => {
+  assert.equal(usageFiltersEmpty(emptyUsageFilters()), true);
+  assert.equal(usageFiltersEmpty({ ...emptyUsageFilters(), session: "s" }), false);
+  assert.equal(usageFiltersEmpty({ ...emptyUsageFilters(), endpoints: ["/v1/messages"] }), false);
 });
 
 // --- Request types ---

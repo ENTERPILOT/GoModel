@@ -41,36 +41,11 @@ export function shortSessionID(value) {
 
 // --- Query building ---
 
-// Page-level data filters, applied to every usage-page request so charts,
-// cache cards, and the request log describe the same filtered slice of
-// traffic. excludeFacet omits that one filter — used to build facet dropdown
-// options that honor every filter except their own. A multi-value filter
-// repeats its parameter (model=a&model=b), which the API reads as "any of".
-export function usageFilterQueryStr(filters, excludeFacet) {
-  const facets = ["model", "provider", "label", "user_path", "session_id", "auth_key_id", "endpoint"];
-  let qs = "";
-  for (const facet of facets) {
-    if (facet === excludeFacet) continue;
-    for (const value of filterValues(filters && filters[facet])) {
-      qs += "&" + facet + "=" + encodeURIComponent(value);
-    }
-  }
-  return qs;
-}
-
 // filterValues normalizes one filter to its list of selected values: a
 // string is one value, an array its non-empty entries.
 export function filterValues(value) {
   if (Array.isArray(value)) return value.filter((item) => item != null && String(item) !== "");
   return value ? [value] : [];
-}
-
-// toggleFilterValue adds value to a multi-value filter, or removes it when
-// already selected — the chip-click counterpart of the dropdowns.
-export function toggleFilterValue(selected, value) {
-  const current = filterValues(selected);
-  if (!value) return current;
-  return current.includes(value) ? current.filter((item) => item !== value) : current.concat(value);
 }
 
 // Request-log paging/search params, appended after the window + filter query.

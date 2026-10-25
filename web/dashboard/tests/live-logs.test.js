@@ -13,6 +13,12 @@ import {
   liveLogsStreamPath,
 } from "../src/pages/audit-logs/live-logs-logic.js";
 import { auditRecordKey, mergeAuditRecord } from "../src/pages/audit-logs/audit-records.js";
+import { emptyUsageFilters, usageFiltersEmpty } from "../src/pages/usage/usage-query.js";
+
+// filtersWith stands in for the usage filter state the gate asks isEmpty().
+function filtersWith(values) {
+  return { isEmpty: () => usageFiltersEmpty({ ...emptyUsageFilters(), ...values }) };
+}
 
 function createLiveLogsApp(overrides = {}) {
   return {
@@ -25,13 +31,7 @@ function createLiveLogsApp(overrides = {}) {
     auditStatusCode: "",
     auditStream: "",
     usageLogSearch: "",
-    usageFilterModels: [],
-    usageFilterProviders: [],
-    usageFilterLabels: [],
-    usageFilterUserPaths: [],
-    usageFilterSession: "",
-    usageFilterAuthKeys: [],
-    usageFilterEndpoints: [],
+    usageFilters: filtersWith({}),
     usageLogHideCached: false,
     auditGroupSessions: false,
     auditThreadChildren: {},
@@ -431,7 +431,7 @@ test("live usage event updates usage log and enriches matching audit row", () =>
 });
 
 test("active session filtering pauses non-matching live usage inserts", () => {
-  const app = createLiveLogsApp({ usageFilterSession: "scoped-session" });
+  const app = createLiveLogsApp({ usageFilters: filtersWith({ session: "scoped-session" }) });
 
   app.applyLiveLogEvent({
     seq: 1,
@@ -444,7 +444,7 @@ test("active session filtering pauses non-matching live usage inserts", () => {
 });
 
 test("active API key filtering pauses live usage inserts", () => {
-  const app = createLiveLogsApp({ usageFilterAuthKeys: ["key-a"] });
+  const app = createLiveLogsApp({ usageFilters: filtersWith({ authKeys: ["key-a"] }) });
 
   app.applyLiveLogEvent({
     seq: 1,
@@ -457,7 +457,7 @@ test("active API key filtering pauses live usage inserts", () => {
 });
 
 test("active multi-value filters pause live usage inserts; empty ones do not", () => {
-  const filtered = createLiveLogsApp({ usageFilterLabels: ["dev"], usageFilterUserPaths: ["/team"] });
+  const filtered = createLiveLogsApp({ usageFilters: filtersWith({ labels: ["dev"], userPaths: ["/team"] }) });
   filtered.applyLiveLogEvent({
     seq: 1,
     type: "usage.completed",
@@ -465,12 +465,12 @@ test("active multi-value filters pause live usage inserts; empty ones do not", (
   });
   assert.equal(filtered.usageLog.entries.length, 0);
 
-  const open = createLiveLogsApp({ usageFilterLabels: [], usageFilterModels: [] });
+  const open = createLiveLogsApp({ usageFilters: filtersWith({ labels: [], models: [] }) });
   assert.equal(open.usageLiveInsertAllowed(), true);
 });
 
 test("active endpoint filtering pauses live usage inserts", () => {
-  const app = createLiveLogsApp({ usageFilterEndpoints: ["/v1/audio/speech"] });
+  const app = createLiveLogsApp({ usageFilters: filtersWith({ endpoints: ["/v1/audio/speech"] }) });
 
   app.applyLiveLogEvent({
     seq: 1,

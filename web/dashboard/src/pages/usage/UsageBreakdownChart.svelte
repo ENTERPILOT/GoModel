@@ -291,7 +291,7 @@
                     <button
                       type="button"
                       class="usage-label-chip"
-                      class:active={usagePage.usageFilterLabels.includes(row.label)}
+                      class:active={usagePage.filters.labels.includes(row.label)}
                       style="--label-color: {labelColor(row.label)}"
                       title={usagePage.usageLabelChipTitle(row.label)}
                       onclick={() => usagePage.toggleUsageLabelFilter(row.label)}
@@ -305,7 +305,7 @@
                       type="button"
                       class="usage-label-chip"
                       class:mono={byEndpoint}
-                      class:active={endpointsSelected(usagePage.usageFilterEndpoints, endpoints)}
+                      class:active={endpointsSelected(usagePage.filters.endpoints, endpoints)}
                       style="--label-color: {labelColor(row.type)}"
                       title={usagePage.usageEndpointsChipTitle(endpoints, row.label)}
                       onclick={() => usagePage.toggleUsageEndpointsFilter(endpoints)}
@@ -321,7 +321,7 @@
                   <td>
                     <SessionIDChip
                       sessionID={row.session_id}
-                      active={usagePage.usageFilterSession === row.session_id}
+                      active={usagePage.filters.session === row.session_id}
                       onfilter={(sessionID) => usagePage.filterBySession(sessionID, row.user_path)}
                     />
                   </td>

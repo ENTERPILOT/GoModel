@@ -26,67 +26,22 @@ import {
   foldEndpointUsageByType,
   sessionUsageQueryParams,
   toggleEndpointSelection,
-  toggleFilterValue,
   usageEndpointOptions,
-  usageFilterQueryStr,
   usageLogQueryParams,
 } from "./usage-helpers.js";
-import { defaultPivotConfig, usageViewFromQuery, usageViewToQuery } from "./usage-url-state.js";
+import { toggleSearchValue } from "$lib/components/molecules/searchSelectLogic.js";
+import { defaultPivotConfig, parseUsageQuery, usageQuery } from "./usage-query.js";
+import { usageFilters } from "./usageFilters.svelte.js";
 import { usagePivot } from "./usagePivot.svelte.js";
 
 class UsagePageState {
   usageMode = $state("tokens");
 
-  // Page-level data filters: every widget on the page follows them. They live
-  // on the liveLogs singleton, which uses them as the insert gate for live
-  // request-log previews — delegating keeps the page and the live merge
-  // engine in lockstep by construction.
-  // Multi-value filters hold the selected values (empty = all): any of the
-  // values matches within one filter, and every filter applies.
-  get usageFilterModels() {
-    return liveLogs.usageFilterModels;
-  }
-  set usageFilterModels(value) {
-    liveLogs.usageFilterModels = value;
-  }
-  get usageFilterProviders() {
-    return liveLogs.usageFilterProviders;
-  }
-  set usageFilterProviders(value) {
-    liveLogs.usageFilterProviders = value;
-  }
-  get usageFilterLabels() {
-    return liveLogs.usageFilterLabels;
-  }
-  set usageFilterLabels(value) {
-    liveLogs.usageFilterLabels = value;
-  }
-  // Each selected user path filters its whole subtree.
-  get usageFilterUserPaths() {
-    return liveLogs.usageFilterUserPaths;
-  }
-  set usageFilterUserPaths(value) {
-    liveLogs.usageFilterUserPaths = value;
-  }
-  get usageFilterSession() {
-    return liveLogs.usageFilterSession;
-  }
-  set usageFilterSession(value) {
-    liveLogs.usageFilterSession = value;
-  }
-  get usageFilterAuthKeys() {
-    return liveLogs.usageFilterAuthKeys;
-  }
-  set usageFilterAuthKeys(value) {
-    liveLogs.usageFilterAuthKeys = value;
-  }
-  // Exact request endpoints (e.g. "/v1/messages"); empty means all.
-  get usageFilterEndpoints() {
-    return liveLogs.usageFilterEndpoints;
-  }
-  set usageFilterEndpoints(value) {
-    liveLogs.usageFilterEndpoints = value;
-  }
+  // Page-level data filters: every widget on the page follows them, and the
+  // live request-log merge reads them to pause previews while any is set.
+  // Multi-value filters hold the selected values (empty = all): any value
+  // matches within one filter, and every filter applies.
+  filters = usageFilters;
   usageFacetOptions = $state({ models: [], providers: [], labels: [], endpoints: [], userPaths: [] });
   // Managed auth key names by id, so the API key filter and log column can
   // show names instead of ids. Empty when auth keys are unavailable.
@@ -164,19 +119,21 @@ class UsagePageState {
     }
   }
 
-  filterQueryStr(excludeFacet) {
-    return usageFilterQueryStr(
-      {
-        model: this.usageFilterModels,
-        provider: this.usageFilterProviders,
-        label: this.usageFilterLabels,
-        user_path: this.usageFilterUserPaths,
-        session_id: this.usageFilterSession,
-        auth_key_id: this.usageFilterAuthKeys,
-        endpoint: this.usageFilterEndpoints,
-      },
-      excludeFacet,
-    );
+  // query renders the window and the filters (minus excludeParam, for
+  // faceted dropdown options) as an admin API query.
+  query(excludeParam) {
+    return usageQuery({ filters: this.filters.values(), excludeParam, window: dateRange.window() });
+  }
+
+  // filterQueryStr renders only the filters, for calls that add their own
+  // window (the shared cache overview).
+  filterQueryStr() {
+    const qs = usageQuery({ filters: this.filters.values() });
+    return qs ? "&" + qs : "";
+  }
+
+  pivotQuery() {
+    return usageQuery({ filters: this.filters.values(), window: dateRange.window(), pivot: usagePivot.config() });
   }
 
   onUsageFilterChanged() {
@@ -187,39 +144,33 @@ class UsagePageState {
   onPivotChanged(field, value) {
     usagePivot.set(field, value);
     this.syncUrl();
-    usagePivot.fetch(this.filterQueryStr());
+    usagePivot.fetch(this.pivotQuery());
   }
 
   // Chip click: add the label to the page filter, or remove it when it is
   // already selected.
   toggleUsageLabelFilter(label) {
-    this.usageFilterLabels = toggleFilterValue(this.usageFilterLabels, label);
+    this.filters.labels = toggleSearchValue(this.filters.labels, label);
     this.onUsageFilterChanged();
   }
 
   // Chip click: add the API key to the page filter, or remove it when it is
   // already selected.
   toggleUsageAuthKeyFilter(authKeyID) {
-    this.usageFilterAuthKeys = toggleFilterValue(this.usageFilterAuthKeys, authKeyID);
+    this.filters.authKeys = toggleSearchValue(this.filters.authKeys, authKeyID);
     this.onUsageFilterChanged();
   }
 
   // Chip click: add the row's endpoints (a request type's, or one endpoint)
   // to the endpoint filter, or remove them when all are already selected.
   toggleUsageEndpointsFilter(endpoints) {
-    this.usageFilterEndpoints = toggleEndpointSelection(this.usageFilterEndpoints, endpoints);
+    this.filters.endpoints = toggleEndpointSelection(this.filters.endpoints, endpoints);
     this.onUsageFilterChanged();
   }
 
   filterBySession(sessionID, userPath = "") {
-    this.usageFilterModels = [];
-    this.usageFilterProviders = [];
-    this.usageFilterLabels = [];
-    this.usageFilterAuthKeys = [];
-    this.usageFilterEndpoints = [];
     const path = String(userPath || "").trim();
-    this.usageFilterUserPaths = path ? [path] : [];
-    this.usageFilterSession = String(sessionID || "").trim();
+    this.filters.set({ userPaths: path ? [path] : [], session: String(sessionID || "").trim() });
     this.usageLogSearch = "";
     this.usageLog.offset = 0;
     this.sessionUsage.offset = 0;
@@ -231,12 +182,12 @@ class UsagePageState {
   }
 
   usageLabelChipTitle(label) {
-    if (this.usageFilterLabels.includes(label)) return m.usage_clear_label_filter();
+    if (this.filters.labels.includes(label)) return m.usage_clear_label_filter();
     return m.usage_filter_by_label_value({ label });
   }
 
   usageEndpointsChipTitle(endpoints, label) {
-    if (endpointsSelected(this.usageFilterEndpoints, endpoints)) {
+    if (endpointsSelected(this.filters.endpoints, endpoints)) {
       return m.usage_remove_from_filter({ value: label });
     }
     return m.usage_add_to_filter({ value: label });
@@ -252,18 +203,11 @@ class UsagePageState {
   // bar without adding history entries, so a copied link reproduces it.
   syncUrl() {
     if (router.page !== "usage" || typeof window === "undefined") return;
-    const qs = usageViewToQuery({
-      filters: {
-        models: this.usageFilterModels,
-        providers: this.usageFilterProviders,
-        labels: this.usageFilterLabels,
-        userPaths: this.usageFilterUserPaths,
-        authKeys: this.usageFilterAuthKeys,
-        endpoints: this.usageFilterEndpoints,
-      },
-      session: this.usageFilterSession,
+    const qs = usageQuery({
+      filters: this.filters.values(),
       window: dateRange.window(),
       pivot: usagePivot.config(),
+      omitDefaults: true,
     });
     const url = window.location.pathname + (qs ? "?" + qs : "") + window.location.hash;
     if (url !== window.location.pathname + window.location.search + window.location.hash) {
@@ -275,14 +219,8 @@ class UsagePageState {
   // with a query string; without one the in-memory view stays as it was.
   restoreFromUrl() {
     if (typeof window === "undefined" || !window.location.search) return;
-    const view = usageViewFromQuery(window.location.search);
-    this.usageFilterModels = view.filters.models;
-    this.usageFilterProviders = view.filters.providers;
-    this.usageFilterLabels = view.filters.labels;
-    this.usageFilterUserPaths = view.filters.userPaths;
-    this.usageFilterAuthKeys = view.filters.authKeys;
-    this.usageFilterEndpoints = view.filters.endpoints;
-    this.usageFilterSession = view.session;
+    const view = parseUsageQuery(window.location.search);
+    this.filters.set(view.filters);
     dateRange.applyWindow(view.window);
     // The URL leaves default breakdown settings out, so none means default.
     usagePivot.applyConfig(view.pivot || defaultPivotConfig());
@@ -297,23 +235,23 @@ class UsagePageState {
   }
 
   usageFilterModelOptions() {
-    return facetOptionList(this.usageFacetOptions.models, this.usageFilterModels);
+    return facetOptionList(this.usageFacetOptions.models, this.filters.models);
   }
 
   usageFilterProviderOptions() {
-    return facetOptionList(this.usageFacetOptions.providers, this.usageFilterProviders);
+    return facetOptionList(this.usageFacetOptions.providers, this.filters.providers);
   }
 
   usageFilterLabelOptions() {
-    return facetOptionList(this.usageFacetOptions.labels, this.usageFilterLabels);
+    return facetOptionList(this.usageFacetOptions.labels, this.filters.labels);
   }
 
   usageFilterAuthKeyOptions() {
-    return authKeyOptionList(this.authKeyNames, this.usageFilterAuthKeys);
+    return authKeyOptionList(this.authKeyNames, this.filters.authKeys);
   }
 
   usageFilterEndpointOptions() {
-    return endpointOptionsWithSelection(this.usageFacetOptions.endpoints, this.usageFilterEndpoints);
+    return endpointOptionsWithSelection(this.usageFacetOptions.endpoints, this.filters.endpoints);
   }
 
   // Key names change rarely, so they load when the page opens rather than on
@@ -341,7 +279,7 @@ class UsagePageState {
     this.syncUrl();
     await runtimeConfig.ensureLoaded();
     const requests = [
-      usagePivot.fetch(this.filterQueryStr()),
+      usagePivot.fetch(this.pivotQuery()),
       this.fetchUsagePageSummary(),
       this.fetchUsageFacetOptions(),
       this.fetchModelUsage(),
@@ -363,7 +301,7 @@ class UsagePageState {
     const controller = this.#startRequest("summary");
     this.summaryLoading = true;
     try {
-      const baseQs = dateRange.queryStr() + this.filterQueryStr();
+      const baseQs = this.query();
       const [uncachedResult, allResult] = await Promise.all([
         getJSON("/admin/usage/summary?" + baseQs + "&cache_mode=uncached", {
           label: "usage page summary",
@@ -408,7 +346,7 @@ class UsagePageState {
     try {
       const fetchRows = async (endpoint, excludeFacet) => {
         const result = await getJSON(
-          endpoint + "?" + dateRange.queryStr() + this.filterQueryStr(excludeFacet),
+          endpoint + "?" + this.query(excludeFacet),
           { label: "usage facet options", signal: controller.signal },
         );
         if (result.stale) return null;
@@ -418,7 +356,7 @@ class UsagePageState {
       // Without a model or provider filter, the two by-model queries are
       // identical; fetch once and reuse.
       const modelRowsPromise = fetchRows("/admin/usage/models", "model");
-      const sharedByModel = !this.usageFilterModels.length && !this.usageFilterProviders.length;
+      const sharedByModel = !this.filters.models.length && !this.filters.providers.length;
       const results = await Promise.all([
         modelRowsPromise,
         sharedByModel ? modelRowsPromise : fetchRows("/admin/usage/models", "provider"),
@@ -449,7 +387,7 @@ class UsagePageState {
     setLoading(true);
     try {
       const result = await getJSON(
-        endpoint + "?" + dateRange.queryStr() + this.filterQueryStr(),
+        endpoint + "?" + this.query(),
         { label, signal: controller.signal },
       );
       if (result.stale) return;
@@ -479,7 +417,7 @@ class UsagePageState {
     setLoading(true);
     try {
       if (resetOffset) pageState.offset = 0;
-      const qs = dateRange.queryStr() + this.filterQueryStr() + queryParams();
+      const qs = this.query() + queryParams();
       const result = await getJSON(endpoint + "?" + qs, { label, signal: controller.signal });
       if (result.stale || controller.signal.aborted) return;
       if (!result.ok || !result.data || typeof result.data !== "object") {

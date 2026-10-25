@@ -7,11 +7,10 @@ import {
   buildUserPathTree,
   customUserPath,
   normalizeUserPath,
-  toggleUserPath,
   userPathCovered,
   visibleUserPathRows,
 } from "../src/pages/usage/user-path-tree.js";
-import { defaultPivotConfig, usageViewFromQuery, usageViewToQuery } from "../src/pages/usage/usage-url-state.js";
+import { defaultPivotConfig, parseUsageQuery, usageQuery } from "../src/pages/usage/usage-query.js";
 import {
   formatPivotValue,
   pivotChartConfig,
@@ -94,8 +93,6 @@ test("customUserPath offers only unknown, unselected paths", () => {
   assert.equal(customUserPath("/team/alice", tree, []), "");
   assert.equal(customUserPath("/team/carol", tree, ["/team/carol"]), "");
   assert.equal(customUserPath("", tree, []), "");
-  assert.deepEqual(toggleUserPath(["/a"], "/b"), ["/a", "/b"]);
-  assert.deepEqual(toggleUserPath(["/a", "/b"], "/a"), ["/b"]);
 });
 
 test("usage view round-trips through the URL query", () => {
@@ -107,28 +104,37 @@ test("usage view round-trips through the URL query", () => {
       userPaths: ["/team/alice"],
       authKeys: ["key-a"],
       endpoints: ["/v1/messages"],
+      session: "s-1",
     },
-    session: "s-1",
     window: { start: "2026-01-01", end: "2026-03-31" },
-    pivot: { rows: "model", columns: "", metric: "tokens", interval: "weekly", depth: 2 },
+    pivot: { rows: "user_path", columns: "", metric: "tokens", interval: "monthly", depth: 2 },
   };
-  const qs = usageViewToQuery(view);
+  const qs = usageQuery({ ...view, omitDefaults: true });
   assert.match(qs, /model=gpt-5&model=claude/);
   assert.match(qs, /columns=none/);
-  assert.deepEqual(usageViewFromQuery("?" + qs), view);
+  assert.deepEqual(parseUsageQuery("?" + qs), view);
 });
 
 test("usage view query leaves defaults out and falls back on bad values", () => {
-  assert.equal(usageViewToQuery({ window: { days: 30 }, pivot: defaultPivotConfig() }), "days=30");
-  const parsed = usageViewFromQuery("rows=bogus&columns=user_path&metric=latency&days=9999&user_path_depth=-3");
+  assert.equal(usageQuery({ window: { days: 30 }, pivot: defaultPivotConfig(), omitDefaults: true }), "days=30");
+  const parsed = parseUsageQuery("rows=bogus&columns=user_path&metric=latency&days=9999&user_path_depth=-3");
   assert.deepEqual(parsed.pivot, { rows: "user_path", columns: "", metric: "cost", interval: "monthly", depth: 0 });
   assert.deepEqual(parsed.window, { days: 365 });
-  assert.equal(usageViewFromQuery("").pivot, null);
-  assert.equal(usageViewFromQuery("start_date=2026-02-01&end_date=bad").window, null);
-  assert.deepEqual(usageViewFromQuery("start_date=2026-03-01&end_date=2026-01-01").window, {
+  assert.equal(parseUsageQuery("").pivot, null);
+  assert.equal(parseUsageQuery("start_date=2026-02-01&end_date=bad").window, null);
+  assert.deepEqual(parseUsageQuery("start_date=2026-03-01&end_date=2026-01-01").window, {
     start: "2026-01-01",
     end: "2026-03-01",
   });
+});
+
+test("API and URL queries share one builder: unused breakdown settings stay out of both", () => {
+  const pivot = { rows: "model", columns: "label", metric: "cost", interval: "weekly", depth: 3 };
+  const api = usageQuery({ window: { days: 7 }, pivot });
+  assert.equal(api, "days=7&rows=model&columns=label&metric=cost");
+  assert.equal(usageQuery({ window: { days: 7 }, pivot, omitDefaults: true }), "days=7&rows=model&columns=label");
+  const byPath = usageQuery({ pivot: { ...pivot, rows: "user_path", columns: "period" } });
+  assert.equal(byPath, "rows=user_path&columns=period&metric=cost&interval=weekly&user_path_depth=3");
 });
 
 const BREAKDOWN = {
@@ -181,7 +187,7 @@ test("pivotKeyLabel names other, blank and API key keys", () => {
   assert.equal(formatPivotValue(null, "cost"), "---");
   assert.equal(formatPivotValue(undefined, "cost"), "–");
   assert.equal(formatPivotValue(1.5, "cost"), "$1.50");
-  assert.equal(formatPivotValue(0.004, "cost"), "$0.0040");
+  assert.equal(formatPivotValue(0.004, "cost"), "$0.004");
 });
 
 test("pivotCsv exports the table with totals and escapes fields", () => {

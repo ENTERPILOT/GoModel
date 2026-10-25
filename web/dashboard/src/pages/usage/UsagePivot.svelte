@@ -10,7 +10,7 @@
   import { chartColors } from "$lib/utils/chartTheme.js";
   import { usagePage } from "./usage.svelte.js";
   import { usagePivot } from "./usagePivot.svelte.js";
-  import { PIVOT_DIMENSIONS, PIVOT_INTERVALS } from "./usage-url-state.js";
+  import { PIVOT_DIMENSIONS, PIVOT_INTERVALS } from "./usage-query.js";
   import {
     formatPivotValue,
     pivotChartConfig,
