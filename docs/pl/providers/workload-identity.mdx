@@ -1,6 +1,6 @@
 ---
 title: "Workload Identity Federation"
-description: "Uwierzytelniaj OpenAI i Anthropic krótkotrwałymi tokenami wymienianymi na token tożsamości Twojej platformy zamiast statycznym kluczem API."
+description: "Uwierzytelniaj OpenAI i Anthropic, wymieniając token tożsamości Twojej platformy na krótkotrwałe tokeny dostępu dostawcy zamiast używać statycznego klucza API."
 icon: "fingerprint"
 keywords: ["workload identity", "federacja", "WIF", "OIDC", "Kubernetes", "konto usługi", "wymiana tokenów", "bez klucza"]
 ---
@@ -73,9 +73,11 @@ przykład `OPENAI_EU_IDENTITY_TOKEN_FILE` dla dostawcy o nazwie `openai-eu`.
 
 ## Jak to działa
 
-- Pierwsze żądanie wymienia token tożsamości. Token dostępu jest buforowany i
-  wymieniany dwie minuty przed wygaśnięciem (wcześniej dla bardzo
-  krótkotrwałych tokenów), więc żądania nie czekają na wymianę.
+- Pierwsze żądanie czeka na wymianę tokenu tożsamości. Token dostępu jest
+  buforowany i odświeżany w tle dwie minuty przed wygaśnięciem (wcześniej dla
+  bardzo krótkotrwałych tokenów), a żądania w tym czasie używają tokenu z
+  bufora. Żądanie czeka na wymianę tylko wtedy, gdy w buforze nie ma
+  używalnego tokenu.
 - `identity_token_file` jest odczytywany przy każdej wymianie, więc tokeny
   rotowane na dysku pozostają aktualne. Gdy ustawiono plik i `identity_token`,
   wygrywa plik.

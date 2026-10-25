@@ -1,6 +1,7 @@
 package workloadidentity
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -69,13 +70,37 @@ func (ts *tokenServer) request(t *testing.T, n int) (map[string]string, http.Hea
 	return ts.requests[n], ts.headers[n]
 }
 
-// fakeClock is a settable time source.
-type fakeClock struct{ now time.Time }
+// fakeClock is a settable time source, safe to read from the background
+// refresh while a test advances it.
+type fakeClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
 
-func (c *fakeClock) Now() time.Time          { return c.now }
-func (c *fakeClock) Advance(d time.Duration) { c.now = c.now.Add(d) }
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fakeClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
+}
 
 func newClock() *fakeClock { return &fakeClock{now: time.Unix(1_700_000_000, 0)} }
+
+// waitForRefresh blocks until the exchange running in the background, if
+// any, has finished.
+func waitForRefresh(s *Source) {
+	s.mu.Lock()
+	done := s.inflight
+	s.mu.Unlock()
+	if done != nil {
+		<-done
+	}
+}
 
 func tokenJSON(token string, expiresIn int) string {
 	return `{"access_token":"` + token + `","token_type":"Bearer","expires_in":` + itoa(expiresIn) + `}`
@@ -209,9 +234,14 @@ func TestSourceCachesAndRefreshesAheadOfExpiry(t *testing.T) {
 	assert.Equal(t, 1, server.count())
 
 	// The projected token rotated on disk; the refresh window opens two
-	// minutes before expiry and the next exchange re-reads the file.
+	// minutes before expiry. The still-valid token is served while the
+	// background exchange re-reads the file.
 	writeIdentityToken(t, tokenFile, "jwt-2")
 	clock.Advance(90 * time.Second)
+	token, err = source.Token(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, "access-1", token)
+	waitForRefresh(source)
 	token, err = source.Token(t.Context())
 	require.NoError(t, err)
 	assert.Equal(t, "access-2", token)
@@ -222,7 +252,7 @@ func TestSourceCachesAndRefreshesAheadOfExpiry(t *testing.T) {
 
 func TestSourcePrefersAbsoluteExpiry(t *testing.T) {
 	clock := newClock()
-	expiresAt := clock.now.Add(10 * time.Minute).Unix()
+	expiresAt := clock.Now().Add(10 * time.Minute).Unix()
 	server := newTokenServer(t, func(n int) (int, string) {
 		// expires_in claims an hour; expires_at, which wins, says ten minutes.
 		return http.StatusOK, `{"access_token":"access-` + itoa(n+1) + `","expires_in":3600,"expires_at":` + itoa(int(expiresAt)) + `}`
@@ -233,6 +263,9 @@ func TestSourcePrefersAbsoluteExpiry(t *testing.T) {
 	_, err := source.Token(t.Context())
 	require.NoError(t, err)
 	clock.Advance(9 * time.Minute)
+	_, err = source.Token(t.Context())
+	require.NoError(t, err)
+	waitForRefresh(source)
 	token, err := source.Token(t.Context())
 	require.NoError(t, err)
 	assert.Equal(t, "access-2", token)
@@ -253,6 +286,9 @@ func TestSourceScalesRefreshMarginForShortLivedTokens(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, server.count())
 	clock.Advance(15 * time.Second)
+	_, err = source.Token(t.Context())
+	require.NoError(t, err)
+	waitForRefresh(source)
 	token, err := source.Token(t.Context())
 	require.NoError(t, err)
 	assert.Equal(t, "access-2", token)
@@ -276,6 +312,7 @@ func TestSourceServesCachedTokenWhileRefreshFails(t *testing.T) {
 	token, err := source.Token(t.Context())
 	require.NoError(t, err)
 	assert.Equal(t, "access-1", token)
+	waitForRefresh(source)
 	require.Equal(t, 2, server.count())
 
 	// Within the failure backoff no new exchange is attempted.
@@ -307,6 +344,68 @@ func TestSourceErrorsNeverCarryTokens(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, "token endpoint returned HTTP 401: authentication_error: Authentication failed (request id req_123)", err.Error())
 	assert.NotContains(t, err.Error(), assertion)
+}
+
+func TestSourceRedactsEchoedIdentityToken(t *testing.T) {
+	const assertion = "eyJhbGciOiJSUzI1NiJ9.secret-assertion.sig"
+	server := newTokenServer(t, func(int) (int, string) {
+		return http.StatusBadRequest, `{"error":"invalid_grant","error_description":"rejected subject_token ` + assertion + `"}`
+	})
+	cfg := anthropicConfig(server.URL)
+	cfg.IdentityToken = assertion
+	source := newSource(t, cfg, newClock())
+
+	_, err := source.Token(t.Context())
+	require.Error(t, err)
+	assert.Equal(t, "token endpoint returned HTTP 400: invalid_grant: rejected subject_token [redacted] (request id req_123)", err.Error())
+}
+
+func TestSourceRefreshDoesNotBlockCallersWithUsableToken(t *testing.T) {
+	release := make(chan struct{})
+	server := newTokenServer(t, func(n int) (int, string) {
+		if n > 0 {
+			<-release // the refresh hangs until the test lets it finish
+		}
+		return http.StatusOK, tokenJSON("access-"+itoa(n+1), 3600)
+	})
+	clock := newClock()
+	source := newSource(t, anthropicConfig(server.URL), clock)
+	_, err := source.Token(t.Context())
+	require.NoError(t, err)
+
+	clock.Advance(59 * time.Minute)
+	for range 3 {
+		token, err := source.Token(t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, "access-1", token, "a usable token is served while the refresh hangs")
+	}
+	close(release)
+	waitForRefresh(source)
+	token, err := source.Token(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, "access-2", token)
+	assert.Equal(t, 2, server.count())
+}
+
+func TestSourceWaitEndsWithCallerContext(t *testing.T) {
+	release := make(chan struct{})
+	server := newTokenServer(t, func(int) (int, string) {
+		<-release
+		return http.StatusOK, tokenJSON("access-1", 3600)
+	})
+	source := newSource(t, anthropicConfig(server.URL), newClock())
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := source.Token(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+
+	// The shared exchange keeps running for the next caller.
+	close(release)
+	token, err := source.Token(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, "access-1", token)
+	assert.Equal(t, 1, server.count())
 }
 
 func TestSourceRejectsUnusableResponses(t *testing.T) {

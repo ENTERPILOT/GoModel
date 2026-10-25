@@ -18,16 +18,20 @@ const (
 	// failureBackoff spaces out exchanges after a failure, so a broken token
 	// endpoint or a rejected identity token is not hit by every request.
 	failureBackoff = 5 * time.Second
-	// exchangeTimeout bounds one exchange independently of the request that
-	// triggered it, so a cancelled caller does not fail the shared refresh.
+	// exchangeTimeout bounds one exchange, which runs detached from the
+	// request that triggered it.
 	exchangeTimeout = 30 * time.Second
 	// defaultLifetime is assumed when the endpoint returns no expiry.
 	defaultLifetime = 5 * time.Minute
 )
 
 // Source hands out a cached provider access token, exchanging the identity
-// token for a new one ahead of expiry. It is safe for concurrent use;
-// concurrent callers share one exchange.
+// token for a new one ahead of expiry. It is safe for concurrent use.
+//
+// No exchange runs under the lock. While the cached token is still usable,
+// callers get it immediately and one refresh runs in the background. Callers
+// without a usable token wait for the shared exchange, and each stops waiting
+// when its own context ends.
 type Source struct {
 	cfg    Config
 	client *http.Client
@@ -39,6 +43,9 @@ type Source struct {
 	staleAt   time.Time // stop serving the token from here on
 	lastErr   error
 	retryAt   time.Time
+	// inflight is closed when the running exchange finishes; nil when none
+	// is running.
+	inflight chan struct{}
 }
 
 // New validates cfg and returns a Source that exchanges through client. No
@@ -53,44 +60,70 @@ func New(cfg Config, client *http.Client) (*Source, error) {
 	return &Source{cfg: cfg, client: client, now: time.Now}, nil
 }
 
-// Token returns a valid access token, exchanging for a new one when the
-// cached token is due for refresh. When a refresh fails but the cached token
-// is still safely valid, the cached token is returned.
+// Token returns a valid access token. When the cached token is due for
+// refresh but still usable, it is returned while a refresh runs in the
+// background. Otherwise Token waits for an exchange, or returns the last
+// exchange error while failures are backing off.
 func (s *Source) Token(ctx context.Context) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	now := s.now()
-	if s.token != "" && now.Before(s.refreshAt) {
-		return s.token, nil
-	}
-	usable := s.token != "" && now.Before(s.staleAt)
-	if now.Before(s.retryAt) {
-		if usable {
-			return s.token, nil
+	for {
+		s.mu.Lock()
+		now := s.now()
+		if s.token != "" && now.Before(s.refreshAt) {
+			token := s.token
+			s.mu.Unlock()
+			return token, nil
 		}
-		return "", s.lastErr
+		if s.inflight == nil && !now.Before(s.retryAt) {
+			s.inflight = make(chan struct{})
+			go s.refresh(context.WithoutCancel(ctx), s.inflight)
+		}
+		if s.token != "" && now.Before(s.staleAt) {
+			token := s.token
+			s.mu.Unlock()
+			return token, nil
+		}
+		done, lastErr := s.inflight, s.lastErr
+		s.mu.Unlock()
+		if done == nil {
+			return "", lastErr
+		}
+		select {
+		case <-done:
+			// Re-evaluate against the outcome and the current time.
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
 	}
+}
 
-	exchangeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), exchangeTimeout)
+// refresh runs one exchange and records the outcome. parent carries the
+// triggering request's values but not its cancellation, so a caller that
+// gives up does not fail the shared exchange.
+func (s *Source) refresh(parent context.Context, done chan struct{}) {
+	ctx, cancel := context.WithTimeout(parent, exchangeTimeout)
 	defer cancel()
-	minted, err := s.exchange(exchangeCtx)
+	minted, err := s.exchange(ctx)
+
+	s.mu.Lock()
+	servingCached := false
 	if err != nil {
 		s.lastErr = err
 		s.retryAt = s.now().Add(failureBackoff)
+		servingCached = s.token != "" && s.now().Before(s.staleAt)
+	} else {
+		s.store(minted)
+	}
+	s.inflight = nil
+	close(done)
+	s.mu.Unlock()
+
+	if err != nil {
 		slog.Warn("workload identity token exchange failed",
 			"provider", s.cfg.Provider,
 			"endpoint", s.cfg.TokenEndpoint,
-			"serving_cached_token", usable,
+			"serving_cached_token", servingCached,
 			"error", err)
-		if usable {
-			return s.token, nil
-		}
-		return "", err
 	}
-
-	s.store(minted)
-	return s.token, nil
 }
 
 // store caches minted, scaling the refresh margins down for tokens whose

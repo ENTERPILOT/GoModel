@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/providers/workloadidentity"
 )
@@ -23,8 +24,8 @@ func (f *ProviderFactory) federatedKeyring(cfg ProviderConfig, keys *Keyring, ht
 	}
 	if keys.Len() > 0 {
 		slog.Warn("provider workload_identity ignored: an API key is also configured and takes precedence",
-			"provider", cfg.Name,
-			"type", cfg.Type,
+			"provider", core.LogText(cfg.Name),
+			"type", core.LogText(cfg.Type),
 			"hint", "remove the API key to authenticate with workload identity")
 		return keys, nil
 	}
@@ -40,7 +41,7 @@ func (f *ProviderFactory) federatedKeyring(cfg ProviderConfig, keys *Keyring, ht
 		httpClient = httpclient.NewDefaultHTTPClient()
 	}
 	source, err := workloadidentity.New(workloadidentity.Config{
-		Provider:               cfg.Name,
+		Provider:               core.LogText(cfg.Name),
 		Grant:                  spec.WorkloadIdentity,
 		TokenEndpoint:          endpoint,
 		WorkloadIdentityConfig: cfg.WorkloadIdentity,

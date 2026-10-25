@@ -67,7 +67,7 @@ func (s *Source) exchange(ctx context.Context) (mintedToken, error) {
 		return mintedToken{}, fmt.Errorf("read token response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return mintedToken{}, exchangeError(resp, raw)
+		return mintedToken{}, exchangeError(resp, raw, identityToken)
 	}
 
 	var parsed tokenResponse
@@ -142,12 +142,13 @@ func (s *Source) requestBody(identityToken string) map[string]string {
 }
 
 // exchangeError describes a rejected exchange from the status and the
-// error fields of the body. The rest of the body is dropped, so nothing the
-// endpoint echoes back can leak into logs.
-func exchangeError(resp *http.Response, raw []byte) error {
+// error fields of the body. The rest of the body is dropped, and the
+// identity token is redacted from the kept fields, so an endpoint that
+// echoes it back cannot leak it into logs.
+func exchangeError(resp *http.Response, raw []byte, identityToken string) error {
 	var msg strings.Builder
 	_, _ = fmt.Fprintf(&msg, "token endpoint returned HTTP %d", resp.StatusCode)
-	if detail := errorDetail(raw); detail != "" {
+	if detail := errorDetail(raw, identityToken); detail != "" {
 		msg.WriteString(": " + detail)
 	}
 	for _, header := range []string{"request-id", "x-request-id"} {
@@ -161,8 +162,9 @@ func exchangeError(resp *http.Response, raw []byte) error {
 
 // errorDetail extracts the OAuth ({"error": "...", "error_description":
 // "..."}) or Anthropic ({"error": {"type": "...", "message": "..."}}) error
-// fields.
-func errorDetail(raw []byte) string {
+// fields, with identityToken redacted before truncation so no fragment of it
+// survives.
+func errorDetail(raw []byte, identityToken string) string {
 	var body struct {
 		Error            json.RawMessage `json:"error"`
 		ErrorDescription string          `json:"error_description"`
@@ -189,7 +191,11 @@ func errorDetail(raw []byte) string {
 			kept = append(kept, part)
 		}
 	}
-	return truncate(strings.Join(kept, ": "), maxErrorDetail)
+	detail := strings.Join(kept, ": ")
+	if identityToken != "" {
+		detail = strings.ReplaceAll(detail, identityToken, "[redacted]")
+	}
+	return truncate(detail, maxErrorDetail)
 }
 
 func truncate(s string, n int) string {

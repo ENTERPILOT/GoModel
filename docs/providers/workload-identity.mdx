@@ -1,6 +1,6 @@
 ---
 title: "Workload Identity Federation"
-description: "Authenticate OpenAI and Anthropic with short-lived tokens exchanged for your platform's identity token instead of a static API key."
+description: "Authenticate OpenAI and Anthropic by exchanging your platform's identity token for short-lived provider access tokens instead of using a static API key."
 icon: "fingerprint"
 keywords: ["workload identity", "federation", "WIF", "OIDC", "Kubernetes", "service account", "token exchange", "keyless"]
 ---
@@ -73,9 +73,10 @@ Instance suffixes work like every other provider setting, for example
 
 ## How it works
 
-- The first request exchanges the identity token. The access token is cached
-  and replaced two minutes before it expires (earlier for very short-lived
-  tokens), so requests do not wait on an exchange.
+- The first request waits for the identity token exchange. The access token
+  is cached and refreshed in the background two minutes before it expires
+  (earlier for very short-lived tokens), while requests keep using the cached
+  token. A request waits for an exchange only when no usable token is cached.
 - `identity_token_file` is re-read on every exchange, so tokens that rotate on
   disk stay current. When both the file and `identity_token` are set, the file
   wins.
