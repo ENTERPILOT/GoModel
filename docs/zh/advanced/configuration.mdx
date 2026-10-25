@@ -200,6 +200,10 @@ GoModel 会在启动时忽略任何已配置的主密钥，因此没有任何地
   在 PostgreSQL 上，审计日志的全文搜索使用内置 `pg_trgm` 扩展提供的三元组（trigram）索引。如果数据库角色具有相应权限，GoModel 会在启动时安装该扩展并构建索引；否则搜索仍然可用，但会扫描所选日期范围内的每一条记录。要在受限角色上启用它，请以超级用户身份执行一次 `CREATE EXTENSION pg_trgm;`，然后重启 GoModel。
 </Note>
 
+<Tip>
+  审计表较大时，请在仪表盘审计日志搜索框旁选择具体字段，而不是**所有字段**。**用户路径**和**模型**匹配以输入内容开头的值（区分大小写，因此 `voxina` 可以找到 `/voxinate/events/…`；**模型**同时检查请求的模型和解析后的模型，例如 `openai/gpt-5`）。**请求 ID** 和**会话 ID** 需要完全匹配。这些过滤器在 SQLite、PostgreSQL 和 MongoDB 上都会使用索引。API 参数分别为 `user_path_prefix`、`model_prefix`、`request_id` 和 `session_id`。
+</Tip>
+
 <Warning>
   启用 `LOGGING_LOG_BODIES` 时，请求体和响应体会被完整存储，其中可能包含敏感数据，例如个人身份信息（PII）或嵌入在提示词中的 API 密钥。
 </Warning>

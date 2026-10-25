@@ -1128,6 +1128,18 @@ func TestAuditLog_WithFilters(t *testing.T) {
 	assert.Equal(t, 5, reader.lastQuery.Offset)
 }
 
+func TestAuditLog_FieldFilters(t *testing.T) {
+	reader := &mockAuditReader{logResult: &auditlog.LogListResult{Entries: []auditlog.LogEntry{}}}
+	h := NewHandler(nil, nil, WithAuditReader(reader))
+	c, rec := echotest.Get(t, "/admin/audit/log?days=7&user_path_prefix=voxina&model_prefix=openai%2Fgpt&request_id=%20req-1%20")
+	require.NoError(t, h.AuditLog(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "voxina", reader.lastQuery.UserPathPrefix)
+	assert.Equal(t, "openai/gpt", reader.lastQuery.ModelPrefix)
+	assert.Equal(t, "req-1", reader.lastQuery.RequestID)
+	assert.Empty(t, reader.lastQuery.Search)
+}
+
 func TestAuditLog_InvalidStatusCode(t *testing.T) {
 	reader := &mockAuditReader{
 		logResult: &auditlog.LogListResult{Entries: []auditlog.LogEntry{}},

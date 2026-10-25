@@ -234,6 +234,48 @@ func TestUserPathIndexesMatchReaderExpression(t *testing.T) {
 	require.Equal(t, `user_path COLLATE "C"`, readerDialectFor(sqlx.PostgreSQL).userPath)
 }
 
+// Like the user-path indexes, the model indexes must be declared on the
+// expressions the reader's prefix ranges compare against.
+func TestModelIndexesMatchReaderExpressions(t *testing.T) {
+	for _, dialect := range []sqlx.Dialect{sqlx.SQLite, sqlx.PostgreSQL} {
+		t.Run(string(dialect), func(t *testing.T) {
+			reader := readerDialectFor(dialect)
+			want := []string{
+				"DROP INDEX IF EXISTS idx_audit_requested_model",
+				"CREATE INDEX IF NOT EXISTS idx_audit_requested_model_timestamp ON audit_logs(" + reader.requestedModel + ", timestamp)",
+				"CREATE INDEX IF NOT EXISTS idx_audit_resolved_model_timestamp ON audit_logs(" + reader.resolvedModel + ", timestamp)",
+			}
+			require.Equal(t, want, modelIndexes(dialect))
+		})
+	}
+	require.Equal(t, `requested_model COLLATE "C"`, readerDialectFor(sqlx.PostgreSQL).requestedModel)
+	require.Equal(t, `resolved_model COLLATE "C"`, readerDialectFor(sqlx.PostgreSQL).resolvedModel)
+}
+
+func TestNewSQLStoreReplacesSingleColumnRequestedModelIndex(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		ctx := context.Background()
+		err := db.Schema(ctx, `
+			CREATE TABLE audit_logs (
+				id TEXT PRIMARY KEY,
+				timestamp `+sqlx.TypeTimestamp+` NOT NULL,
+				requested_model TEXT,
+				status_code INTEGER DEFAULT 0
+			)`,
+			`CREATE INDEX idx_audit_requested_model ON audit_logs(requested_model)`,
+		)
+		require.NoError(t, err)
+		store, err := NewSQLStore(ctx, db, 0)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = store.Close() })
+		// Recreating the old index must succeed, proving the startup drop removed it.
+		_, err = db.Exec(ctx, `CREATE INDEX idx_audit_requested_model ON audit_logs(requested_model)`)
+		require.NoError(t, err)
+		_, err = db.Exec(ctx, `CREATE INDEX idx_audit_resolved_model_timestamp ON audit_logs(resolved_model, timestamp)`)
+		require.Error(t, err)
+	})
+}
+
 // Attempt rows are chunked on their own column count: a failover-heavy batch
 // carries several per entry, so the attempts of a single entry chunk can go
 // well past the parameter limit on their own.

@@ -120,14 +120,71 @@ export function auditRetentionHighlight(raw) {
 
 // --- Query building ---------------------------------------------------------
 
+// AUDIT_SEARCH_FIELDS lists the search-box field selector options and the API
+// parameter each one sends. "All fields" (the default) is the free-text
+// search across every column; the others target one column, so the database
+// can answer from that column's index instead of sweeping the whole table.
+export const AUDIT_SEARCH_FIELDS = [
+  {
+    key: "",
+    param: "search",
+    label: () => m.audit_search_field_all(),
+    placeholder: () => m.audit_search_placeholder(),
+  },
+  {
+    key: "user_path",
+    param: "user_path_prefix",
+    label: () => m.audit_search_field_user_path(),
+    placeholder: () => m.audit_search_placeholder_user_path(),
+  },
+  {
+    key: "model",
+    param: "model_prefix",
+    label: () => m.audit_search_field_model(),
+    placeholder: () => m.audit_search_placeholder_model(),
+  },
+  {
+    key: "request_id",
+    param: "request_id",
+    label: () => m.audit_search_field_request_id(),
+    placeholder: () => m.audit_search_placeholder_request_id(),
+  },
+  {
+    key: "session_id",
+    param: "session_id",
+    label: () => m.audit_search_field_session_id(),
+    placeholder: () => m.audit_search_placeholder_session_id(),
+  },
+  {
+    key: "provider",
+    param: "provider",
+    label: () => m.audit_search_field_provider(),
+    placeholder: () => m.audit_search_placeholder_provider(),
+  },
+  {
+    key: "error_type",
+    param: "error_type",
+    label: () => m.audit_search_field_error_type(),
+    placeholder: () => m.audit_search_placeholder_error_type(),
+  },
+];
+
+// auditSearchField returns the selector option for key, falling back to
+// "All fields" for an unknown key.
+export function auditSearchField(key) {
+  return AUDIT_SEARCH_FIELDS.find((field) => field.key === key) || AUDIT_SEARCH_FIELDS[0];
+}
+
 // buildAuditLogQuery renders the GET /admin/audit/log query string: the
 // shared date window first, then paging, then only the consolidated audit
-// filters that are set.
+// filters that are set. The search value goes to the parameter of the
+// selected search field.
 export function buildAuditLogQuery({
   dateQuery,
   limit,
   offset,
   search,
+  searchField,
   method,
   statusCode,
   stream,
@@ -135,7 +192,10 @@ export function buildAuditLogQuery({
 }) {
   let qs = dateQuery;
   qs += "&limit=" + limit + "&offset=" + offset;
-  if (search) qs += "&search=" + encodeURIComponent(search);
+  const term = String(search || "").trim();
+  if (term) {
+    qs += "&" + auditSearchField(searchField).param + "=" + encodeURIComponent(term);
+  }
   if (method) qs += "&method=" + encodeURIComponent(method);
   if (statusCode) qs += "&status_code=" + encodeURIComponent(statusCode);
   if (stream) qs += "&stream=" + encodeURIComponent(stream);

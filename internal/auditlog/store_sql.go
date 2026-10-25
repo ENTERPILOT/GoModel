@@ -113,7 +113,6 @@ var sqlMigrations = []string{
 var sqlIndexes = []string{
 	"CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp)",
 	"DROP INDEX IF EXISTS idx_audit_model",
-	"CREATE INDEX IF NOT EXISTS idx_audit_requested_model ON audit_logs(requested_model)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_status ON audit_logs(status_code)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_provider ON audit_logs(provider)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_provider_name ON audit_logs(provider_name)",
@@ -170,7 +169,8 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 	if err := sqlx.AddColumns(ctx, db, sqlMigrations...); err != nil {
 		return nil, err
 	}
-	indexes := append(append(sqlIndexes, userPathIndexes(db.Dialect())...), jsonPathIndexes(db.Dialect())...)
+	indexes := append(append(append(sqlIndexes, userPathIndexes(db.Dialect())...),
+		modelIndexes(db.Dialect())...), jsonPathIndexes(db.Dialect())...)
 	for _, statement := range indexes {
 		if _, err := db.Exec(ctx, statement); err != nil {
 			slog.Warn("failed to create index", "error", err)
@@ -211,6 +211,24 @@ func userPathIndexes(dialect sqlx.Dialect) []string {
 	return []string{
 		`DROP INDEX IF EXISTS idx_audit_user_path`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_user_path_timestamp ON audit_logs(` + column + `, timestamp)`,
+	}
+}
+
+// modelIndexes serve the model prefix filter, which matches the requested or
+// the resolved model: each branch of that OR is a range on its own index, in
+// byte-wise ordering to match readerDialect.requestedModel and resolvedModel,
+// and the trailing timestamp keeps the date window inside the index. The drop
+// retires the single-column requested_model index; nothing compares that
+// column under its default collation.
+func modelIndexes(dialect sqlx.Dialect) []string {
+	requested, resolved := "requested_model", "resolved_model"
+	if dialect == sqlx.PostgreSQL {
+		requested, resolved = `requested_model COLLATE "C"`, `resolved_model COLLATE "C"`
+	}
+	return []string{
+		`DROP INDEX IF EXISTS idx_audit_requested_model`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_requested_model_timestamp ON audit_logs(` + requested + `, timestamp)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_resolved_model_timestamp ON audit_logs(` + resolved + `, timestamp)`,
 	}
 }
 

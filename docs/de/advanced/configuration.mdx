@@ -331,6 +331,17 @@ gespeicherte Logs sichtbar sind.
   und starten Sie GoModel neu.
 </Note>
 
+<Tip>
+  Wählen Sie bei großen Audit-Tabellen neben dem Suchfeld der Audit-Logs im
+  Dashboard ein Feld statt **Alle Felder**. **Nutzerpfad** und **Modell** finden
+  Werte, die mit der Eingabe beginnen (Groß-/Kleinschreibung zählt, `voxina`
+  findet also `/voxinate/events/…`; **Modell** prüft das angefragte und das
+  aufgelöste Modell, etwa `openai/gpt-5`). **Anfrage-ID** und **Sitzungs-ID**
+  müssen exakt passen. Diese Filter nutzen Indizes auf SQLite, PostgreSQL und
+  MongoDB. Die API nimmt sie als `user_path_prefix`, `model_prefix`,
+  `request_id` und `session_id` entgegen.
+</Tip>
+
 <Warning>
   Wenn `LOGGING_LOG_BODIES` aktiviert ist, werden Request- und Response-Bodys
   vollständig gespeichert. Diese können sensible Daten enthalten, etwa

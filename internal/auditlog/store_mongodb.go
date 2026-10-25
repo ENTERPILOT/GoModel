@@ -77,6 +77,11 @@ func NewMongoDBStore(database *mongo.Database, retentionDays int) (*MongoDBStore
 			Keys: bson.D{{Key: "requested_model", Value: 1}},
 		},
 		{
+			// Lets the model prefix filter, which also matches the resolved
+			// model, stay an index union instead of a collection scan.
+			Keys: bson.D{{Key: "resolved_model", Value: 1}},
+		},
+		{
 			Keys: bson.D{{Key: "status_code", Value: 1}},
 		},
 		{
