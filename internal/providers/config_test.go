@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/providers/workloadidentity"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,10 +24,12 @@ var globalResilience = config.ResilienceConfig{Retry: globalRetry}
 
 var testDiscoveryConfigs = map[string]DiscoveryConfig{
 	"openai": {
-		DefaultBaseURL: "https://api.openai.com/v1",
+		DefaultBaseURL:   "https://api.openai.com/v1",
+		WorkloadIdentity: workloadidentity.TokenExchange,
 	},
 	"anthropic": {
-		DefaultBaseURL: "https://api.anthropic.com/v1",
+		DefaultBaseURL:   "https://api.anthropic.com/v1",
+		WorkloadIdentity: workloadidentity.JWTBearer,
 	},
 	"cohere": {
 		DefaultBaseURL: "https://api.cohere.com",

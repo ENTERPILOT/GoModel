@@ -18,6 +18,14 @@ var credentialEnvFields = map[providerEnvField]bool{
 	providerEnvFieldServiceAccountFile:       true,
 	providerEnvFieldServiceAccountJSON:       true,
 	providerEnvFieldServiceAccountJSONBase64: true,
+	providerEnvFieldIdentityTokenFile:        true,
+	providerEnvFieldIdentityToken:            true,
+	providerEnvFieldTokenEndpoint:            true,
+	providerEnvFieldServiceAccountID:         true,
+	providerEnvFieldIdentityProviderID:       true,
+	providerEnvFieldFederationRuleID:         true,
+	providerEnvFieldOrganizationID:           true,
+	providerEnvFieldWorkspaceID:              true,
 }
 
 // resolveSetting resolves the secret references in a provider setting that is

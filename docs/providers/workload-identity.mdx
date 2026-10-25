@@ -1,0 +1,102 @@
+---
+title: "Workload Identity Federation"
+description: "Authenticate OpenAI and Anthropic with short-lived tokens exchanged for your platform's identity token instead of a static API key."
+icon: "fingerprint"
+keywords: ["workload identity", "federation", "WIF", "OIDC", "Kubernetes", "service account", "token exchange", "keyless"]
+---
+
+Workload identity federation lets GoModel authenticate to a provider without
+a long-lived API key. The gateway reads an identity token your platform
+already issues (a Kubernetes projected service-account token, AWS, GCP, or
+Azure workload identity, GitHub Actions OIDC, a SPIFFE JWT-SVID) and exchanges
+it for a short-lived provider access token.
+
+Supported providers: `openai` (RFC 8693 token exchange) and `anthropic`
+(RFC 7523 jwt-bearer). Set up the identity provider and service account on the
+provider side first:
+[OpenAI](https://developers.openai.com/api/docs/guides/workload-identity-federation),
+[Anthropic](https://platform.claude.com/docs/en/manage-claude/workload-identity-federation).
+
+## Configure
+
+Anthropic reads the same variables as the official SDKs, so an existing
+deployment works unchanged:
+
+```bash
+ANTHROPIC_FEDERATION_RULE_ID=fdrl_...
+ANTHROPIC_ORGANIZATION_ID=00000000-0000-0000-0000-000000000000
+ANTHROPIC_SERVICE_ACCOUNT_ID=svac_...
+ANTHROPIC_IDENTITY_TOKEN_FILE=/var/run/secrets/anthropic.com/token
+ANTHROPIC_WORKSPACE_ID=wrkspc_...   # needed when the rule spans several workspaces
+```
+
+OpenAI:
+
+```bash
+OPENAI_IDENTITY_PROVIDER_ID=idp_...
+OPENAI_SERVICE_ACCOUNT_ID=sa_...
+OPENAI_IDENTITY_TOKEN_FILE=/var/run/secrets/openai/token
+```
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  openai:
+    type: openai
+    workload_identity:
+      identity_token_file: /var/run/secrets/openai/token
+      identity_provider_id: idp_...
+      service_account_id: sa_...
+  anthropic:
+    type: anthropic
+    workload_identity:
+      identity_token_file: /var/run/secrets/anthropic.com/token
+      federation_rule_id: fdrl_...
+      organization_id: 00000000-0000-0000-0000-000000000000
+      service_account_id: svac_...
+      workspace_id: wrkspc_...
+```
+
+Instance suffixes work like every other provider setting, for example
+`OPENAI_EU_IDENTITY_TOKEN_FILE` for a provider named `openai-eu`.
+
+| Setting | Env var suffix | Default |
+| --- | --- | --- |
+| `identity_token_file` | `_IDENTITY_TOKEN_FILE` | none |
+| `identity_token` | `_IDENTITY_TOKEN` | none; use when the platform injects the JWT as a variable |
+| `token_endpoint` | `_TOKEN_ENDPOINT` | OpenAI: `https://auth.openai.com/oauth/token`; Anthropic: `<base_url>/oauth/token` |
+| `service_account_id` | `_SERVICE_ACCOUNT_ID` | required |
+| `identity_provider_id` | `_IDENTITY_PROVIDER_ID` | required for OpenAI |
+| `federation_rule_id`, `organization_id` | `_FEDERATION_RULE_ID`, `_ORGANIZATION_ID` | required for Anthropic |
+| `workspace_id` | `_WORKSPACE_ID` | Anthropic only, optional |
+
+## How it works
+
+- The first request exchanges the identity token. The access token is cached
+  and replaced two minutes before it expires (earlier for very short-lived
+  tokens), so requests do not wait on an exchange.
+- `identity_token_file` is re-read on every exchange, so tokens that rotate on
+  disk stay current. When both the file and `identity_token` are set, the file
+  wins.
+- If a refresh fails, the cached token keeps being used until 30 seconds
+  before it expires. After a failure, the gateway waits 5 seconds before it
+  tries the exchange again.
+- If no valid token is available, the request goes out without one and the
+  provider rejects it. The gateway log says why
+  (`workload identity token exchange failed`).
+- The exchange uses the provider's [outbound proxy](/providers/outbound-proxy)
+  when one is configured.
+- Neither the identity token nor the access token is ever logged.
+
+## Rules
+
+- An API key wins over workload identity, as in the official SDKs. GoModel
+  logs a warning when both are set. Unset `<PROVIDER>_API_KEY` when you
+  migrate.
+- A config provider with `workload_identity` does not pick up a bare
+  `<PROVIDER>_API_KEY` from the environment unless it is named after its type.
+- A missing required field, or `workload_identity` on another provider type,
+  stops that provider from starting, and the log names the field.
+- Workload identity is configured in `config.yaml` or environment variables.
+  It is not available in the dashboard provider editor yet.

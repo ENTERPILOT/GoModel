@@ -1,0 +1,101 @@
+---
+title: "Workload Identity Federation"
+description: "Uwierzytelniaj OpenAI i Anthropic krótkotrwałymi tokenami wymienianymi na token tożsamości Twojej platformy zamiast statycznym kluczem API."
+icon: "fingerprint"
+keywords: ["workload identity", "federacja", "WIF", "OIDC", "Kubernetes", "konto usługi", "wymiana tokenów", "bez klucza"]
+---
+
+Workload identity federation pozwala GoModel uwierzytelniać się u dostawcy bez
+długotrwałego klucza API. Gateway odczytuje token tożsamości, który Twoja
+platforma już wydaje (projektowany token konta usługi Kubernetes, workload
+identity AWS, GCP lub Azure, OIDC z GitHub Actions, SPIFFE JWT-SVID), i wymienia
+go na krótkotrwały token dostępu dostawcy.
+
+Obsługiwani dostawcy: `openai` (wymiana tokenów RFC 8693) i `anthropic`
+(RFC 7523 jwt-bearer). Najpierw skonfiguruj dostawcę tożsamości i konto usługi
+po stronie dostawcy:
+[OpenAI](https://developers.openai.com/api/docs/guides/workload-identity-federation),
+[Anthropic](https://platform.claude.com/docs/en/manage-claude/workload-identity-federation).
+
+## Konfiguracja
+
+Anthropic czyta te same zmienne co oficjalne SDK, więc istniejące wdrożenie
+działa bez zmian:
+
+```bash
+ANTHROPIC_FEDERATION_RULE_ID=fdrl_...
+ANTHROPIC_ORGANIZATION_ID=00000000-0000-0000-0000-000000000000
+ANTHROPIC_SERVICE_ACCOUNT_ID=svac_...
+ANTHROPIC_IDENTITY_TOKEN_FILE=/var/run/secrets/anthropic.com/token
+ANTHROPIC_WORKSPACE_ID=wrkspc_...   # wymagane, gdy reguła obejmuje kilka workspace’ów
+```
+
+OpenAI:
+
+```bash
+OPENAI_IDENTITY_PROVIDER_ID=idp_...
+OPENAI_SERVICE_ACCOUNT_ID=sa_...
+OPENAI_IDENTITY_TOKEN_FILE=/var/run/secrets/openai/token
+```
+
+Albo w `config.yaml`:
+
+```yaml
+providers:
+  openai:
+    type: openai
+    workload_identity:
+      identity_token_file: /var/run/secrets/openai/token
+      identity_provider_id: idp_...
+      service_account_id: sa_...
+  anthropic:
+    type: anthropic
+    workload_identity:
+      identity_token_file: /var/run/secrets/anthropic.com/token
+      federation_rule_id: fdrl_...
+      organization_id: 00000000-0000-0000-0000-000000000000
+      service_account_id: svac_...
+      workspace_id: wrkspc_...
+```
+
+Sufiksy instancji działają jak przy każdym innym ustawieniu dostawcy, na
+przykład `OPENAI_EU_IDENTITY_TOKEN_FILE` dla dostawcy o nazwie `openai-eu`.
+
+| Ustawienie | Sufiks zmiennej środowiskowej | Domyślnie |
+| --- | --- | --- |
+| `identity_token_file` | `_IDENTITY_TOKEN_FILE` | brak |
+| `identity_token` | `_IDENTITY_TOKEN` | brak; użyj, gdy platforma wstrzykuje JWT jako zmienną |
+| `token_endpoint` | `_TOKEN_ENDPOINT` | OpenAI: `https://auth.openai.com/oauth/token`; Anthropic: `<base_url>/oauth/token` |
+| `service_account_id` | `_SERVICE_ACCOUNT_ID` | wymagane |
+| `identity_provider_id` | `_IDENTITY_PROVIDER_ID` | wymagane dla OpenAI |
+| `federation_rule_id`, `organization_id` | `_FEDERATION_RULE_ID`, `_ORGANIZATION_ID` | wymagane dla Anthropic |
+| `workspace_id` | `_WORKSPACE_ID` | tylko Anthropic, opcjonalne |
+
+## Jak to działa
+
+- Pierwsze żądanie wymienia token tożsamości. Token dostępu jest buforowany i
+  wymieniany dwie minuty przed wygaśnięciem (wcześniej dla bardzo
+  krótkotrwałych tokenów), więc żądania nie czekają na wymianę.
+- `identity_token_file` jest odczytywany przy każdej wymianie, więc tokeny
+  rotowane na dysku pozostają aktualne. Gdy ustawiono plik i `identity_token`,
+  wygrywa plik.
+- Jeśli odświeżenie się nie powiedzie, buforowany token jest używany do 30
+  sekund przed wygaśnięciem. Po błędzie gateway czeka 5 sekund, zanim ponowi
+  wymianę.
+- Gdy nie ma ważnego tokenu, żądanie wychodzi bez niego i dostawca je odrzuca.
+  Log gatewaya podaje przyczynę (`workload identity token exchange failed`).
+- Wymiana korzysta z [proxy wychodzącego](/pl/providers/outbound-proxy)
+  dostawcy, jeśli jest skonfigurowane.
+- Ani token tożsamości, ani token dostępu nigdy nie trafia do logów.
+
+## Zasady
+
+- Klucz API ma pierwszeństwo przed workload identity, tak jak w oficjalnych
+  SDK. GoModel loguje ostrzeżenie, gdy ustawiono oba. Przy migracji usuń
+  `<PROVIDER>_API_KEY`.
+- Dostawca z pliku konfiguracji z `workload_identity` nie przejmuje samego
+  `<PROVIDER>_API_KEY` ze środowiska, chyba że jego nazwa to nazwa typu.
+- Brak wymaganego pola albo `workload_identity` przy innym typie dostawcy
+  powoduje, że ten dostawca się nie uruchamia, a log wskazuje pole.
+- Workload identity konfiguruje się w `config.yaml` lub zmiennymi
+  środowiskowymi. W edytorze dostawców w dashboardzie nie jest jeszcze dostępne.

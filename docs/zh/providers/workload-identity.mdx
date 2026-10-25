@@ -1,0 +1,80 @@
+---
+title: "工作负载身份联合"
+description: "使用以平台身份令牌交换得到的短期令牌对 OpenAI 和 Anthropic 进行身份验证，而不是使用静态 API 密钥。"
+icon: "fingerprint"
+keywords: ["工作负载身份", "身份联合", "WIF", "OIDC", "Kubernetes", "服务账号", "令牌交换", "无密钥", "workload identity", "federation"]
+---
+
+工作负载身份联合让 GoModel 无需长期 API 密钥即可向提供商进行身份验证。网关读取平台已经签发的身份令牌（Kubernetes 投射的服务账号令牌、AWS、GCP 或 Azure 工作负载身份、GitHub Actions OIDC、SPIFFE JWT-SVID），并将其交换为提供商的短期访问令牌。
+
+支持的提供商：`openai`（RFC 8693 令牌交换）和 `anthropic`（RFC 7523 jwt-bearer）。请先在提供商侧配置身份提供方和服务账号：
+[OpenAI](https://developers.openai.com/api/docs/guides/workload-identity-federation)、
+[Anthropic](https://platform.claude.com/docs/en/manage-claude/workload-identity-federation)。
+
+## 配置
+
+Anthropic 读取与官方 SDK 相同的变量，因此现有部署无需修改即可使用：
+
+```bash
+ANTHROPIC_FEDERATION_RULE_ID=fdrl_...
+ANTHROPIC_ORGANIZATION_ID=00000000-0000-0000-0000-000000000000
+ANTHROPIC_SERVICE_ACCOUNT_ID=svac_...
+ANTHROPIC_IDENTITY_TOKEN_FILE=/var/run/secrets/anthropic.com/token
+ANTHROPIC_WORKSPACE_ID=wrkspc_...   # 规则覆盖多个工作区时必填
+```
+
+OpenAI：
+
+```bash
+OPENAI_IDENTITY_PROVIDER_ID=idp_...
+OPENAI_SERVICE_ACCOUNT_ID=sa_...
+OPENAI_IDENTITY_TOKEN_FILE=/var/run/secrets/openai/token
+```
+
+或在 `config.yaml` 中：
+
+```yaml
+providers:
+  openai:
+    type: openai
+    workload_identity:
+      identity_token_file: /var/run/secrets/openai/token
+      identity_provider_id: idp_...
+      service_account_id: sa_...
+  anthropic:
+    type: anthropic
+    workload_identity:
+      identity_token_file: /var/run/secrets/anthropic.com/token
+      federation_rule_id: fdrl_...
+      organization_id: 00000000-0000-0000-0000-000000000000
+      service_account_id: svac_...
+      workspace_id: wrkspc_...
+```
+
+实例后缀与其他提供商设置的用法相同，例如名为 `openai-eu` 的提供商使用 `OPENAI_EU_IDENTITY_TOKEN_FILE`。
+
+| 设置 | 环境变量后缀 | 默认值 |
+| --- | --- | --- |
+| `identity_token_file` | `_IDENTITY_TOKEN_FILE` | 无 |
+| `identity_token` | `_IDENTITY_TOKEN` | 无；平台以变量形式注入 JWT 时使用 |
+| `token_endpoint` | `_TOKEN_ENDPOINT` | OpenAI：`https://auth.openai.com/oauth/token`；Anthropic：`<base_url>/oauth/token` |
+| `service_account_id` | `_SERVICE_ACCOUNT_ID` | 必填 |
+| `identity_provider_id` | `_IDENTITY_PROVIDER_ID` | OpenAI 必填 |
+| `federation_rule_id`、`organization_id` | `_FEDERATION_RULE_ID`、`_ORGANIZATION_ID` | Anthropic 必填 |
+| `workspace_id` | `_WORKSPACE_ID` | 仅 Anthropic，可选 |
+
+## 工作原理
+
+- 第一个请求会交换身份令牌。访问令牌会被缓存，并在过期前两分钟被替换（寿命很短的令牌会更早替换），因此请求不必等待交换。
+- 每次交换都会重新读取 `identity_token_file`，因此在磁盘上轮换的令牌始终保持最新。同时设置文件和 `identity_token` 时，以文件为准。
+- 刷新失败时，缓存的令牌会继续使用，直到过期前 30 秒。失败后，网关会等待 5 秒再重试交换。
+- 没有可用的有效令牌时，请求会在不带令牌的情况下发出并被提供商拒绝。网关日志会说明原因（`workload identity token exchange failed`）。
+- 如果配置了提供商的[出站代理](/zh/providers/outbound-proxy)，交换也会经过该代理。
+- 身份令牌和访问令牌都不会被写入日志。
+
+## 规则
+
+- 与官方 SDK 一致，API 密钥优先于工作负载身份。两者同时设置时，GoModel 会记录一条警告。迁移时请移除 `<PROVIDER>_API_KEY`。
+- 配置文件中设置了 `workload_identity` 的提供商，除非以其类型命名，否则不会从环境中继承单独的 `<PROVIDER>_API_KEY`。
+- 缺少必填字段，或在其他提供商类型上设置 `workload_identity`，都会导致该提供商无法启动，日志会指出相应字段。
+- 工作负载身份通过 `config.yaml` 或环境变量配置，暂不支持在控制台的提供商编辑器中设置。

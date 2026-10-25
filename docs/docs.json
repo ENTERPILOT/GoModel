@@ -290,6 +290,7 @@
                         "pages": [
                             "providers/overview",
                             "providers/key-rotation",
+                            "providers/workload-identity",
                             "providers/outbound-proxy",
                             "providers/anthropic",
                             "providers/chatgpt",
@@ -472,6 +473,7 @@
                         "pages": [
                             "de/providers/overview",
                             "de/providers/key-rotation",
+                            "de/providers/workload-identity",
                             "de/providers/outbound-proxy",
                             "de/providers/anthropic",
                             "de/providers/chatgpt",
@@ -654,6 +656,7 @@
                         "pages": [
                             "zh/providers/overview",
                             "zh/providers/key-rotation",
+                            "zh/providers/workload-identity",
                             "zh/providers/outbound-proxy",
                             "zh/providers/anthropic",
                             "zh/providers/chatgpt",
@@ -836,6 +839,7 @@
                         "pages": [
                             "pl/providers/overview",
                             "pl/providers/key-rotation",
+                            "pl/providers/workload-identity",
                             "pl/providers/outbound-proxy",
                             "pl/providers/anthropic",
                             "pl/providers/chatgpt",
