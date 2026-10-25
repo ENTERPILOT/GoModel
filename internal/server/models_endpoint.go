@@ -72,31 +72,27 @@ func (h *Handler) visibleModels(c *echo.Context) (*core.ModelsResponse, error) {
 			resp = mergeExposedModelsResponse(resp, exposed)
 		}
 	}
-	if h.vllmDiscoveryCompat {
-		applyVLLMDiscoveryCompat(resp)
-	} else {
-		stripVLLMDiscoveryFields(resp)
-	}
 	return resp, nil
 }
 
-// stripVLLMDiscoveryFields drops a max_model_len that a provider reported on
-// its own (a custom OpenAI-compatible server may return the field). The model
-// type carries it for the compatibility mode, so without this the field would
-// appear in /v1/models even with models.vllm_discovery_compat off and change a
-// response the setting promises not to touch.
-func stripVLLMDiscoveryFields(resp *core.ModelsResponse) {
-	if resp == nil {
-		return
-	}
-	for i := range resp.Data {
-		resp.Data[i].MaxModelLen = nil
-	}
+// vllmModel is a model entry as a vLLM runtime advertises it: the shared model
+// plus the context field its discovery reads. The type lives here, not on
+// core.Model, so no other response can carry max_model_len and the default
+// listing is untouched by the setting.
+type vllmModel struct {
+	core.Model
+	MaxModelLen int `json:"max_model_len,omitempty"`
 }
 
-// applyVLLMDiscoveryCompat rewrites a model listing into the shape a vLLM
-// runtime advertises: owned_by "vllm" and a max_model_len taken from the
-// model's context window.
+// vllmModelsResponse is the model list in vLLM discovery compatibility mode.
+type vllmModelsResponse struct {
+	Object string      `json:"object"`
+	Data   []vllmModel `json:"data"`
+}
+
+// vllmDiscoveryModels rewrites a listing into the shape a vLLM runtime
+// advertises: owned_by "vllm" and a max_model_len on every entry that has a
+// limit to report.
 //
 // Clients whose model discovery only understands a vLLM runtime (OpenCode
 // probes /health and /v1/models) drop every entry that does not look like one,
@@ -104,20 +100,43 @@ func stripVLLMDiscoveryFields(resp *core.ModelsResponse) {
 // invisible to them. This keeps that compatibility a per-deployment choice:
 // owned_by is metadata, but claiming to be vLLM is still a lie a deployment may
 // not want to tell.
-func applyVLLMDiscoveryCompat(resp *core.ModelsResponse) {
+//
+// The listing is copied, never rewritten in place: a provider that hands back
+// the same models on every call must not have them changed under it.
+func vllmDiscoveryModels(resp *core.ModelsResponse) vllmModelsResponse {
 	if resp == nil {
-		return
+		return vllmModelsResponse{Object: "list"}
 	}
-	for i := range resp.Data {
-		model := &resp.Data[i]
-		model.OwnedBy = vllmDiscoveryOwner
-		if model.Metadata == nil || model.Metadata.ContextWindow == nil {
-			continue
-		}
-		if window := *model.Metadata.ContextWindow; window > 0 {
-			model.MaxModelLen = &window
-		}
+	out := vllmModelsResponse{
+		Object: resp.Object,
+		Data:   make([]vllmModel, 0, len(resp.Data)),
 	}
+	for _, model := range resp.Data {
+		out.Data = append(out.Data, vllmDiscoveryModel(model))
+	}
+	return out
+}
+
+// vllmDiscoveryModel rewrites one model entry for vLLM discovery.
+func vllmDiscoveryModel(model core.Model) vllmModel {
+	out := vllmModel{Model: model, MaxModelLen: vllmModelLen(model)}
+	out.OwnedBy = vllmDiscoveryOwner
+	return out
+}
+
+// vllmModelLen returns the context limit to advertise for a model: the one the
+// provider reported, and only when it reported none, the model's context
+// window. A self-hosted runtime knows its own limit better than the catalog
+// does. Zero means the entry is listed without max_model_len, and a client
+// that needs the field drops it.
+func vllmModelLen(model core.Model) int {
+	if model.MaxModelLen != nil && *model.MaxModelLen > 0 {
+		return *model.MaxModelLen
+	}
+	if model.Metadata != nil && model.Metadata.ContextWindow != nil && *model.Metadata.ContextWindow > 0 {
+		return *model.Metadata.ContextWindow
+	}
+	return 0
 }
 
 // vllmDiscoveryOwner is the value a vLLM runtime reports in owned_by and the
@@ -180,6 +199,9 @@ func (h *Handler) RetrieveModel(c *echo.Context) error {
 	}
 	if model.Object == "" {
 		model.Object = "model"
+	}
+	if h.vllmDiscoveryCompat {
+		return c.JSON(http.StatusOK, vllmDiscoveryModel(model))
 	}
 	return c.JSON(http.StatusOK, model)
 }

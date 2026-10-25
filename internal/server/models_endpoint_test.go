@@ -341,7 +341,8 @@ func TestListModelsMaxModelLenFollowsTheCompatSetting(t *testing.T) {
 	}
 
 	t.Run("off drops the field the provider reported", func(t *testing.T) {
-		srv := New(provider(), &Config{})
+		mock := provider()
+		srv := New(mock, &Config{})
 		req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 		rec := httptest.NewRecorder()
 
@@ -350,10 +351,13 @@ func TestListModelsMaxModelLenFollowsTheCompatSetting(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		require.NotContains(t, rec.Body.String(), "max_model_len")
 		require.Contains(t, rec.Body.String(), `"owned_by":"openai"`)
+		require.NotNil(t, mock.modelsResponse.Data[0].MaxModelLen,
+			"the provider's own models are left alone")
 	})
 
 	t.Run("on advertises the field and the vllm owner", func(t *testing.T) {
-		srv := New(provider(), &Config{VLLMDiscoveryCompat: true})
+		mock := provider()
+		srv := New(mock, &Config{VLLMDiscoveryCompat: true})
 		req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 		rec := httptest.NewRecorder()
 
@@ -362,17 +366,25 @@ func TestListModelsMaxModelLenFollowsTheCompatSetting(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		require.Contains(t, rec.Body.String(), `"max_model_len":4096`)
 		require.Contains(t, rec.Body.String(), `"owned_by":"vllm"`)
+		require.Equal(t, "openai", mock.modelsResponse.Data[0].OwnedBy,
+			"the rewrite happens on a copy, never on the provider's models")
+		require.NotNil(t, mock.modelsResponse.Data[0].MaxModelLen)
 	})
 }
 
-func TestApplyVLLMDiscoveryCompat(t *testing.T) {
-	t.Run("nil response stays nil", func(t *testing.T) {
-		applyVLLMDiscoveryCompat(nil)
+// vllmDiscoveryModels is the endpoint's own listing shape, so these cases run
+// without a server in the way.
+func TestVLLMDiscoveryModels(t *testing.T) {
+	t.Run("a nil listing answers an empty list", func(t *testing.T) {
+		out := vllmDiscoveryModels(nil)
+
+		require.Equal(t, "list", out.Object)
+		require.Empty(t, out.Data)
 	})
 
-	t.Run("owner becomes vllm and the context window becomes max_model_len", func(t *testing.T) {
+	t.Run("the context window supplies the limit when the provider reported none", func(t *testing.T) {
 		window := 131072
-		resp := &core.ModelsResponse{Data: []core.Model{
+		resp := &core.ModelsResponse{Object: "list", Data: []core.Model{
 			{
 				ID:       "deepseek-v4.1-flash-pool",
 				Object:   "model",
@@ -381,48 +393,53 @@ func TestApplyVLLMDiscoveryCompat(t *testing.T) {
 			},
 		}}
 
-		applyVLLMDiscoveryCompat(resp)
+		out := vllmDiscoveryModels(resp)
 
-		require.Equal(t, vllmDiscoveryOwner, resp.Data[0].OwnedBy)
-		require.NotNil(t, resp.Data[0].MaxModelLen)
-		require.Equal(t, window, *resp.Data[0].MaxModelLen)
+		require.Equal(t, vllmDiscoveryOwner, out.Data[0].OwnedBy)
+		require.Equal(t, window, out.Data[0].MaxModelLen)
 	})
 
-	t.Run("a model without a context window still gets the vllm owner", func(t *testing.T) {
-		resp := &core.ModelsResponse{Data: []core.Model{
+	t.Run("the provider's own limit wins over the catalog window", func(t *testing.T) {
+		reported, catalog := 4096, 131072
+		resp := &core.ModelsResponse{Object: "list", Data: []core.Model{
+			{
+				ID:          "local/custom",
+				Object:      "model",
+				OwnedBy:     "openai",
+				MaxModelLen: &reported,
+				Metadata:    &core.ModelMetadata{ContextWindow: &catalog},
+			},
+		}}
+
+		out := vllmDiscoveryModels(resp)
+
+		require.Equal(t, reported, out.Data[0].MaxModelLen,
+			"a self-hosted runtime knows its own limit better than the catalog")
+	})
+
+	t.Run("a model with no limit is listed without max_model_len", func(t *testing.T) {
+		resp := &core.ModelsResponse{Object: "list", Data: []core.Model{
 			{ID: "beam", Object: "model", OwnedBy: "ollama"},
 			{ID: "glm-5.3", Object: "model", OwnedBy: "ollama", Metadata: &core.ModelMetadata{}},
 		}}
 
-		applyVLLMDiscoveryCompat(resp)
+		out := vllmDiscoveryModels(resp)
 
-		for _, model := range resp.Data {
+		for _, model := range out.Data {
 			require.Equal(t, vllmDiscoveryOwner, model.OwnedBy)
-			require.Nil(t, model.MaxModelLen, "no context window, no max_model_len")
+			require.Zero(t, model.MaxModelLen, "no limit, no max_model_len")
 		}
 	})
 
 	t.Run("a non-positive context window is not advertised", func(t *testing.T) {
 		zero := 0
-		resp := &core.ModelsResponse{Data: []core.Model{
+		resp := &core.ModelsResponse{Object: "list", Data: []core.Model{
 			{ID: "broken", Object: "model", Metadata: &core.ModelMetadata{ContextWindow: &zero}},
 		}}
 
-		applyVLLMDiscoveryCompat(resp)
+		out := vllmDiscoveryModels(resp)
 
-		require.Nil(t, resp.Data[0].MaxModelLen)
-	})
-
-	t.Run("a provider-reported max_model_len is dropped when the setting is off", func(t *testing.T) {
-		window := 4096
-		resp := &core.ModelsResponse{Data: []core.Model{
-			{ID: "local/custom", Object: "model", OwnedBy: "openai", MaxModelLen: &window},
-		}}
-
-		stripVLLMDiscoveryFields(resp)
-
-		require.Nil(t, resp.Data[0].MaxModelLen)
-		require.Equal(t, "openai", resp.Data[0].OwnedBy, "the owner is left alone")
+		require.Zero(t, out.Data[0].MaxModelLen)
 	})
 
 	t.Run("the transform keeps the rest of the entry", func(t *testing.T) {
@@ -430,10 +447,42 @@ func TestApplyVLLMDiscoveryCompat(t *testing.T) {
 			{ID: "gemini-3.8-flash", Object: "model", Created: 1712361441, OwnedBy: "gemini"},
 		}}
 
-		applyVLLMDiscoveryCompat(resp)
+		out := vllmDiscoveryModels(resp)
 
-		require.Equal(t, "list", resp.Object)
-		require.Equal(t, "gemini-3.8-flash", resp.Data[0].ID)
-		require.Equal(t, int64(1712361441), resp.Data[0].Created)
+		require.Equal(t, "list", out.Object)
+		require.Equal(t, "gemini-3.8-flash", out.Data[0].ID)
+		require.Equal(t, int64(1712361441), out.Data[0].Created)
 	})
+
+	t.Run("the source listing is not modified", func(t *testing.T) {
+		reported := 4096
+		source := core.Model{ID: "local/custom", Object: "model", OwnedBy: "openai", MaxModelLen: &reported}
+		resp := &core.ModelsResponse{Object: "list", Data: []core.Model{source}}
+
+		vllmDiscoveryModels(resp)
+
+		require.Equal(t, source, resp.Data[0], "the provider's model comes back unchanged")
+	})
+}
+
+// A retrieve answers the same shape as the list, so a client that checks one
+// model sees the limit the listing advertised.
+func TestRetrieveModel_MaxModelLenFollowsTheCompatSetting(t *testing.T) {
+	window := 4096
+	newServer := func(compat bool) *Server {
+		return New(&mockProvider{modelsResponse: &core.ModelsResponse{Object: "list", Data: []core.Model{
+			{ID: "local/custom", Object: "model", OwnedBy: "openai", MaxModelLen: &window},
+		}}}, &Config{VLLMDiscoveryCompat: compat})
+	}
+
+	rec := httptest.NewRecorder()
+	newServer(false).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/models/local/custom", nil))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotContains(t, rec.Body.String(), "max_model_len")
+
+	rec = httptest.NewRecorder()
+	newServer(true).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/models/local/custom", nil))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), `"max_model_len":4096`)
+	require.Contains(t, rec.Body.String(), `"owned_by":"vllm"`)
 }

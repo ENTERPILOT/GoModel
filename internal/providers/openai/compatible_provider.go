@@ -230,24 +230,39 @@ func (p *CompatibleProvider) chatHeaders(ctx context.Context, req *core.ChatRequ
 	return p.chatRequestHeaders(ctx, req)
 }
 
+// ListModels lists the models the server serves. A max_model_len an entry
+// reports is kept on the model, where no response serializes it: only
+// models.vllm_discovery_compat decides whether a listing advertises one.
 func (p *CompatibleProvider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
-	var resp core.ModelsResponse
-	err := p.Do(ctx, llmclient.Request{
-		Method:   http.MethodGet,
-		Endpoint: "/models",
-	}, &resp)
-	if err != nil {
-		return nil, core.MarkModelListingUnsupported(err)
-	}
-	normalizeModelsResponse(&resp)
-	return &resp, nil
+	return p.listModelsWithReportedLimit(ctx)
 }
 
-// ListModelsWithMaxModelLen lists models like ListModels but keeps the
+// ListModelsWithMaxModelLen lists models like ListModels but also reports the
 // max_model_len field vLLM-style servers (vLLM, SGLang, llm-d) add to each
-// entry, reporting it as the model's context window: for a self-hosted
-// server the running process is the only source that knows the real limit.
+// entry as the model's context window: for a self-hosted server the running
+// process is the only source that knows the real limit.
 func (p *CompatibleProvider) ListModelsWithMaxModelLen(ctx context.Context) (*core.ModelsResponse, error) {
+	resp, err := p.listModelsWithReportedLimit(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range resp.Data {
+		model := &resp.Data[i]
+		if model.MaxModelLen == nil || *model.MaxModelLen <= 0 {
+			continue
+		}
+		if model.Metadata == nil {
+			model.Metadata = &core.ModelMetadata{}
+		}
+		window := *model.MaxModelLen
+		model.Metadata.ContextWindow = &window
+	}
+	return resp, nil
+}
+
+// listModelsWithReportedLimit fetches /models, keeping the max_model_len a
+// vLLM-style server reports for an entry.
+func (p *CompatibleProvider) listModelsWithReportedLimit(ctx context.Context) (*core.ModelsResponse, error) {
 	var upstream struct {
 		Object string `json:"object"`
 		Data   []struct {
@@ -265,10 +280,8 @@ func (p *CompatibleProvider) ListModelsWithMaxModelLen(ctx context.Context) (*co
 	for _, entry := range upstream.Data {
 		model := entry.Model
 		if entry.MaxModelLen > 0 {
-			if model.Metadata == nil {
-				model.Metadata = &core.ModelMetadata{}
-			}
-			model.Metadata.ContextWindow = new(entry.MaxModelLen)
+			limit := entry.MaxModelLen
+			model.MaxModelLen = &limit
 		}
 		resp.Data = append(resp.Data, model)
 	}
