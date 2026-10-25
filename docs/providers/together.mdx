@@ -2,8 +2,15 @@
 title: "Together AI"
 description: "Configure Together AI in GoModel for chat, Responses, and embeddings on open models."
 icon: "server"
+tag: "Beta"
 keywords: ["Together AI", "together", "open models", "provider setup", "embeddings"]
 ---
+
+<Warning>
+  Together AI support is in beta. It is covered by automated tests against a
+  simulated API but has not yet been verified against the live Together AI
+  service. Please report any issues you hit.
+</Warning>
 
 Together AI serves open models through an OpenAI-compatible API at
 `https://api.together.ai/v1`. GoModel routes these endpoints to it:
