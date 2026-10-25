@@ -369,6 +369,11 @@ Klappen Sie eine Karte auf (über den Pfeilstreifen unten oder den abschnittswei
 - **Recent Requests** – Requests und Fehler über das Gateway in den letzten 10 Minuten.
 - **Breaker State** – der aktuelle Zustand des Circuit Breakers des Providers
   (siehe [Ausfallsicherheit](/de/advanced/resilience#circuit-breaker-und-provider-status-im-dashboard)).
+  Solange der Breaker offen ist, zeigt die Fehlerzeile der Karte weiter den
+  Upstream-Fehler, der ihn ausgelöst hat, markiert mit `— Circuit Breaker offen`,
+  statt der Schnellablehnung `circuit breaker is open`. Die Ablehnung erscheint
+  nur, wenn aus den letzten 10 Minuten kein Upstream-Fehler bekannt ist, etwa
+  wenn langsame Aufrufe den Breaker ausgelöst haben.
 - **Models (Recent Traffic)** – Anzahl der Requests/Fehler pro Modell. Ein Modell mit mindestens
   3 Fehlern, die die Hälfte oder mehr seiner Requests im Zeitfenster ausmachen, wird rot markiert –
   so wird ein einzelnes defektes Modell bei einem ansonsten gesunden Provider erkannt, was die

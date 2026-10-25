@@ -463,6 +463,7 @@
   "overview_none_healthy": "None healthy",
   "overview_automatic": "Automatic",
   "overview_last_error": "Last error: {error}",
+  "overview_last_error_breaker_open": "{error} — circuit breaker open",
   "overview_all_mcp_connected": "All MCP servers connected",
   "overview_cache_share": "Share of input tokens over the selected period",
   "overview_no_usage": "No usage in the selected period yet",

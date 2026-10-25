@@ -407,6 +407,11 @@ całej sekcji), aby zobaczyć szczegóły zdrowia requestów:
   10 minut.
 - **Breaker State** – bieżący stan circuit breakera providera
   (zobacz [Odporność na awarie](/pl/advanced/resilience#circuit-breaker-a-stan-providerów-w-dashboardzie)).
+  Gdy breaker jest otwarty, linia błędu na karcie nadal pokazuje błąd upstreamu,
+  który go otworzył, z dopiskiem `— circuit breaker otwarty`, zamiast szybkiego
+  odrzucenia `circuit breaker is open`. Odrzucenie pojawia się tylko wtedy, gdy
+  z ostatnich 10 minut nie jest znany żaden błąd upstreamu, np. gdy breaker
+  otworzyły wolne wywołania.
 - **Models (Recent Traffic)** – liczba requestów i błędów per model. Model z co
   najmniej 3 błędami stanowiącymi połowę lub więcej jego requestów w danym oknie
   jest oznaczany na czerwono – pozwala to wychwycić pojedynczy zepsuty model u

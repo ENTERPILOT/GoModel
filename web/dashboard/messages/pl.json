@@ -469,6 +469,7 @@
   "overview_none_healthy": "Żaden nie działa prawidłowo",
   "overview_automatic": "Automatycznie",
   "overview_last_error": "Ostatni błąd: {error}",
+  "overview_last_error_breaker_open": "{error} — circuit breaker otwarty",
   "overview_all_mcp_connected": "Wszystkie serwery MCP są połączone",
   "overview_cache_share": "Udział input tokens w wybranym okresie",
   "overview_no_usage": "Brak danych o zużyciu w wybranym okresie",
