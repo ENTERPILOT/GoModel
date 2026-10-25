@@ -8,6 +8,7 @@
   import { debounced } from "$lib/utils/debounce.js";
   import { access } from "$lib/stores/access.svelte.js";
   import { usagePage } from "./usage.svelte.js";
+  import { usageFacets } from "./usageFacets.svelte.js";
   import UserPathTreeSelect from "./UserPathTreeSelect.svelte";
   import * as m from "$lib/paraglide/messages.js";
 
@@ -24,7 +25,7 @@
 <div class="usage-page-filters" role="group" aria-label={m.usage_filters_label()}>
   <SearchSelect
     class="usage-page-filters-select"
-    options={usagePage.usageFilterModelOptions()}
+    options={usageFacets.modelOptions()}
     multiple
     mono
     bind:values={usagePage.filters.models}
@@ -35,7 +36,7 @@
   />
   <SearchSelect
     class="usage-page-filters-select"
-    options={usagePage.usageFilterProviderOptions()}
+    options={usageFacets.providerOptions()}
     multiple
     bind:values={usagePage.filters.providers}
     onchange={onPicksChange}
@@ -43,10 +44,10 @@
     searchPlaceholder={m.usage_search_providers()}
     ariaLabel={m.usage_filter_provider()}
   />
-  {#if usagePage.usageFilterLabelOptions().length > 0}
+  {#if usageFacets.labelOptions().length > 0}
     <SearchSelect
       class="usage-page-filters-select"
-      options={usagePage.usageFilterLabelOptions()}
+      options={usageFacets.labelOptions()}
       multiple
       bind:values={usagePage.filters.labels}
       onchange={onPicksChange}
@@ -55,10 +56,10 @@
       ariaLabel={m.usage_filter_label()}
     />
   {/if}
-  {#if usagePage.usageFilterEndpointOptions().length > 0}
+  {#if usageFacets.endpointOptions().length > 0}
     <SearchSelect
       class="usage-page-filters-select"
-      options={usagePage.usageFilterEndpointOptions()}
+      options={usageFacets.endpointOptions()}
       multiple
       mono
       bind:values={usagePage.filters.endpoints}
@@ -68,10 +69,10 @@
       ariaLabel={m.usage_filter_endpoint()}
     />
   {/if}
-  {#if usagePage.usageFilterAuthKeyOptions().length > 0}
+  {#if usageFacets.authKeyOptions().length > 0}
     <SearchSelect
       class="usage-page-filters-select"
-      options={usagePage.usageFilterAuthKeyOptions()}
+      options={usageFacets.authKeyOptions()}
       multiple
       bind:values={usagePage.filters.authKeys}
       onchange={onPicksChange}
@@ -84,7 +85,7 @@
        placeholder so an empty filter reads as that subtree. -->
   <div class="usage-page-filters-user-path">
     <UserPathTreeSelect
-      paths={usagePage.usageFacetOptions.userPaths}
+      paths={usageFacets.options.userPaths}
       bind:values={usagePage.filters.userPaths}
       onchange={onPicksChange}
       placeholder={access.scoped ? access.userPath : m.usage_all_user_paths()}

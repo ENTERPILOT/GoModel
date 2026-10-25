@@ -1,36 +1,27 @@
-// Usage page state: page-level facet filters (including the API key and endpoints), filtered
-// summaries backing the stat cards, per-model / per-user-path / per-label / per-request-type /
-// per-session breakdowns, and the
-// request log. The shared window comes from the dateRange store and the
-// shared cache overview lives in usageData (this page passes its filter
-// query through fetchCacheOverview).
+// Usage page state: filtered summaries backing the stat cards, the
+// per-model / per-user-path / per-label / per-request-type / per-session
+// breakdowns, and the request log. The filters live in usageFilters, their
+// dropdown choices in usageFacets, the breakdown in usagePivot, and the API
+// and URL queries are built in usage-view.js. The shared cache overview lives
+// in usageData (this page passes its filter query through fetchCacheOverview).
 
 import { getJSON, isAbortError } from "$lib/api/client.js";
 import { router } from "$lib/stores/router.svelte.js";
-import { dateRange } from "$lib/stores/dateRange.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import { usageData } from "$lib/stores/usageData.svelte.js";
-import { providerDisplayValue } from "$lib/utils/format.js";
 import * as m from "$lib/paraglide/messages.js";
+import { toggleSearchValue } from "$lib/components/molecules/searchSelectLogic.js";
 import { liveLogs } from "../audit-logs/liveLogs.svelte.js";
+import { emptySessionUsage, emptyUsageLog, emptyUsagePageSummary } from "./usage-helpers.js";
 import {
-  authKeyNameMap,
-  authKeyOptionList,
-  emptyUsageLog,
-  emptyUsagePageSummary,
-  emptySessionUsage,
-  facetOptionList,
-  endpointOptionsWithSelection,
   endpointsSelected,
   endpointUsageRows,
   foldEndpointUsageByType,
-  sessionUsageQueryParams,
   toggleEndpointSelection,
-  usageEndpointOptions,
-  usageLogQueryParams,
-} from "./usage-helpers.js";
-import { toggleSearchValue } from "$lib/components/molecules/searchSelectLogic.js";
-import { defaultPivotConfig, parseUsageQuery, usageQuery } from "./usage-query.js";
+} from "./usage-endpoints.js";
+import { sessionUsageQueryParams, usageLogQueryParams } from "./usage-query.js";
+import { syncUsageUrl, usageApiQuery, usageFilterQueryStr, usagePivotQuery } from "./usage-view.js";
+import { usageFacets } from "./usageFacets.svelte.js";
 import { usageFilters } from "./usageFilters.svelte.js";
 import { usagePivot } from "./usagePivot.svelte.js";
 
@@ -42,11 +33,6 @@ class UsagePageState {
   // Multi-value filters hold the selected values (empty = all): any value
   // matches within one filter, and every filter applies.
   filters = usageFilters;
-  usageFacetOptions = $state({ models: [], providers: [], labels: [], endpoints: [], userPaths: [] });
-  // Managed auth key names by id, so the API key filter and log column can
-  // show names instead of ids. Empty when auth keys are unavailable.
-  authKeyNames = $state({});
-
   // Filtered summaries backing the stat cards, fetched in both cache modes:
   // uncached carries real provider spend (cached rows store the avoided
   // cost, which must not inflate the cost card), all carries the row count
@@ -119,23 +105,6 @@ class UsagePageState {
     }
   }
 
-  // query renders the window and the filters (minus excludeParam, for
-  // faceted dropdown options) as an admin API query.
-  query(excludeParam) {
-    return usageQuery({ filters: this.filters.values(), excludeParam, window: dateRange.window() });
-  }
-
-  // filterQueryStr renders only the filters, for calls that add their own
-  // window (the shared cache overview).
-  filterQueryStr() {
-    const qs = usageQuery({ filters: this.filters.values() });
-    return qs ? "&" + qs : "";
-  }
-
-  pivotQuery() {
-    return usageQuery({ filters: this.filters.values(), window: dateRange.window(), pivot: usagePivot.config() });
-  }
-
   onUsageFilterChanged() {
     this.fetchUsagePage();
   }
@@ -143,8 +112,8 @@ class UsagePageState {
   // A breakdown setting changed: only that section refetches.
   onPivotChanged(field, value) {
     usagePivot.set(field, value);
-    this.syncUrl();
-    usagePivot.fetch(this.pivotQuery());
+    syncUsageUrl();
+    usagePivot.fetch(usagePivotQuery());
   }
 
   // Chip click: add the label to the page filter, or remove it when it is
@@ -196,34 +165,7 @@ class UsagePageState {
   toggleUsageMode(mode) {
     this.usageMode = mode;
     router.navigate("usage", mode === "costs" ? "costs" : null);
-    this.syncUrl();
-  }
-
-  // syncUrl mirrors the view (filters, window, breakdown) into the address
-  // bar without adding history entries, so a copied link reproduces it.
-  syncUrl() {
-    if (router.page !== "usage" || typeof window === "undefined") return;
-    const qs = usageQuery({
-      filters: this.filters.values(),
-      window: dateRange.window(),
-      pivot: usagePivot.config(),
-      omitDefaults: true,
-    });
-    const url = window.location.pathname + (qs ? "?" + qs : "") + window.location.hash;
-    if (url !== window.location.pathname + window.location.search + window.location.hash) {
-      history.replaceState(history.state, "", url);
-    }
-  }
-
-  // restoreFromUrl applies a shared link's view. It runs when the page opens
-  // with a query string; without one the in-memory view stays as it was.
-  restoreFromUrl() {
-    if (typeof window === "undefined" || !window.location.search) return;
-    const view = parseUsageQuery(window.location.search);
-    this.filters.set(view.filters);
-    dateRange.applyWindow(view.window);
-    // The URL leaves default breakdown settings out, so none means default.
-    usagePivot.applyConfig(view.pivot || defaultPivotConfig());
+    syncUsageUrl();
   }
 
   toggleUsageChartView(target, view) {
@@ -234,54 +176,14 @@ class UsagePageState {
     if (target === "session") this.sessionUsageView = view;
   }
 
-  usageFilterModelOptions() {
-    return facetOptionList(this.usageFacetOptions.models, this.filters.models);
-  }
-
-  usageFilterProviderOptions() {
-    return facetOptionList(this.usageFacetOptions.providers, this.filters.providers);
-  }
-
-  usageFilterLabelOptions() {
-    return facetOptionList(this.usageFacetOptions.labels, this.filters.labels);
-  }
-
-  usageFilterAuthKeyOptions() {
-    return authKeyOptionList(this.authKeyNames, this.filters.authKeys);
-  }
-
-  usageFilterEndpointOptions() {
-    return endpointOptionsWithSelection(this.usageFacetOptions.endpoints, this.filters.endpoints);
-  }
-
-  // Key names change rarely, so they load when the page opens rather than on
-  // every filter change. The list is already scoped to the caller.
-  async fetchAuthKeyNames() {
-    const controller = this.#startRequest("authKeys");
-    try {
-      const result = await getJSON("/admin/auth-keys", {
-        label: "usage auth key names",
-        signal: controller.signal,
-      });
-      if (result.stale || controller.signal.aborted) return;
-      this.authKeyNames = result.ok && Array.isArray(result.data) ? authKeyNameMap(result.data) : {};
-    } catch (e) {
-      if (isAbortError(e)) return;
-      console.error("Failed to fetch auth key names:", e);
-      this.authKeyNames = {};
-    } finally {
-      this.#clearRequest("authKeys", controller);
-    }
-  }
-
   // Refetch everything the page shows for the current window + filters.
   async fetchUsagePage() {
-    this.syncUrl();
+    syncUsageUrl();
     await runtimeConfig.ensureLoaded();
     const requests = [
-      usagePivot.fetch(this.pivotQuery()),
+      usagePivot.fetch(usagePivotQuery()),
       this.fetchUsagePageSummary(),
-      this.fetchUsageFacetOptions(),
+      usageFacets.fetch(),
       this.fetchModelUsage(),
       this.fetchUserPathUsage(),
       this.fetchLabelUsage(),
@@ -292,7 +194,7 @@ class UsagePageState {
     if (usageData.cacheAnalyticsEnabled()) {
       // The usage page filters its cache cards along with the rest of the
       // page; the overview page stays unfiltered.
-      requests.push(usageData.fetchCacheOverview(this.filterQueryStr()));
+      requests.push(usageData.fetchCacheOverview(usageFilterQueryStr()));
     }
     await Promise.all(requests);
   }
@@ -301,7 +203,7 @@ class UsagePageState {
     const controller = this.#startRequest("summary");
     this.summaryLoading = true;
     try {
-      const baseQs = this.query();
+      const baseQs = usageApiQuery();
       const [uncachedResult, allResult] = await Promise.all([
         getJSON("/admin/usage/summary?" + baseQs + "&cache_mode=uncached", {
           label: "usage page summary",
@@ -338,56 +240,12 @@ class UsagePageState {
     }
   }
 
-  // Facet dropdown options follow the faceted-search rule: each facet's
-  // choices honor every active filter except its own, so a selected value
-  // never erases its alternatives.
-  async fetchUsageFacetOptions() {
-    const controller = this.#startRequest("facets");
-    try {
-      const fetchRows = async (endpoint, excludeFacet) => {
-        const result = await getJSON(
-          endpoint + "?" + this.query(excludeFacet),
-          { label: "usage facet options", signal: controller.signal },
-        );
-        if (result.stale) return null;
-        if (!result.ok) return [];
-        return Array.isArray(result.data) ? result.data : [];
-      };
-      // Without a model or provider filter, the two by-model queries are
-      // identical; fetch once and reuse.
-      const modelRowsPromise = fetchRows("/admin/usage/models", "model");
-      const sharedByModel = !this.filters.models.length && !this.filters.providers.length;
-      const results = await Promise.all([
-        modelRowsPromise,
-        sharedByModel ? modelRowsPromise : fetchRows("/admin/usage/models", "provider"),
-        fetchRows("/admin/usage/labels", "label"),
-        fetchRows("/admin/usage/endpoints", "endpoint"),
-        fetchRows("/admin/usage/user-paths", "user_path"),
-      ]);
-      if (controller.signal.aborted || results.includes(null)) return;
-      const [modelRows, providerRows, labelRows, endpointRows, userPathRows] = results;
-      this.usageFacetOptions = {
-        models: modelRows.map((row) => row && row.model).filter(Boolean),
-        providers: providerRows.map((row) => providerDisplayValue(row)).filter(Boolean),
-        labels: labelRows.map((row) => row && row.label).filter(Boolean),
-        endpoints: usageEndpointOptions(endpointRows),
-        userPaths: userPathRows.map((row) => row && row.user_path).filter(Boolean),
-      };
-    } catch (e) {
-      if (isAbortError(e)) return;
-      console.error("Failed to fetch usage facet options:", e);
-      this.usageFacetOptions = { models: [], providers: [], labels: [], endpoints: [], userPaths: [] };
-    } finally {
-      this.#clearRequest("facets", controller);
-    }
-  }
-
   async #fetchBreakdown(key, endpoint, label, assign, setLoading) {
     const controller = this.#startRequest(key);
     setLoading(true);
     try {
       const result = await getJSON(
-        endpoint + "?" + this.query(),
+        endpoint + "?" + usageApiQuery(),
         { label, signal: controller.signal },
       );
       if (result.stale) return;
@@ -417,7 +275,7 @@ class UsagePageState {
     setLoading(true);
     try {
       if (resetOffset) pageState.offset = 0;
-      const qs = this.query() + queryParams();
+      const qs = usageApiQuery() + queryParams();
       const result = await getJSON(endpoint + "?" + qs, { label, signal: controller.signal });
       if (result.stale || controller.signal.aborted) return;
       if (!result.ok || !result.data || typeof result.data !== "object") {
@@ -537,6 +395,9 @@ export const usagePage = new UsagePageState();
 // Live-stream reset hook: when the stream's replay window is lost, reload the
 // page's data so the request log resyncs. Guarded so usage-page data is only
 // refetched while on the usage page.
+// The live merge pauses usage previews while any usage filter is set.
+liveLogs.usageFilters = usageFilters;
+
 liveLogs.fetchUsage = () => {
   if (router.page === "usage") {
     void usagePage.fetchUsagePage();

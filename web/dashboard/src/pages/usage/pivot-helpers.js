@@ -3,7 +3,8 @@
 // build the stacked bar chart. Pure functions for node:test.
 
 import { formatCost, formatCostShort, formatTokensShort } from "../../lib/utils/format.js";
-import { barColors, chartTickFont, chartTooltip } from "../../lib/utils/chartTheme.js";
+import { barColors } from "../../lib/utils/chartTheme.js";
+import { stackedBarOptions } from "./usage-chart-config.js";
 import * as m from "../../lib/paraglide/messages.js";
 
 // pivotCellValue reads the chosen metric from a breakdown cell. Cost stays
@@ -112,31 +113,10 @@ export function pivotChartConfig(colors, table, { rowLabels, columnLabels, metri
   return {
     type: "bar",
     data: { labels: hasColumns ? columnLabels : rowLabels, datasets },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: { duration: 0 },
-      scales: {
-        x: {
-          stacked: true,
-          grid: { display: false },
-          border: { display: false },
-          ticks: { color: colors.text, font: chartTickFont() },
-        },
-        y: {
-          stacked: true,
-          beginAtZero: true,
-          grid: { color: colors.grid },
-          border: { display: false },
-          ticks: { color: colors.text, font: chartTickFont(), callback: fmtShort },
-        },
-      },
-      plugins: {
-        legend: { display: hasColumns, labels: { color: colors.text, font: { size: 12 } } },
-        tooltip: chartTooltip(colors, {
-          label: (c) => c.dataset.label + ": " + formatPivotValue(c.parsed.y, metric),
-        }),
-      },
-    },
+    options: stackedBarOptions(colors, {
+      formatValue: fmtShort,
+      legend: hasColumns,
+      tooltip: { label: (c) => c.dataset.label + ": " + formatPivotValue(c.parsed.y, metric) },
+    }),
   };
 }

@@ -17,18 +17,17 @@
   } from "$lib/utils/format.js";
   import { usagePage } from "./usage.svelte.js";
   import SessionIDChip from "./SessionIDChip.svelte";
-  import {
-    breakdownHasBilledCost,
-    chartWrapHeight,
-    divergingDataFrom,
-    endpointListSummary,
-    endpointsSelected,
-    isChartView,
-    labelColor,
-    usageRowTotalTokens,
-    usageRowsBySelectedValue,
-    userPathUsageChartVisible,
-  } from "./usage-helpers.js";
+  import { labelColor } from "./usage-labels.js";
+import { breakdownHasBilledCost } from "./usage-cost-format.js";
+import {
+  chartWrapHeight,
+  divergingDataFrom,
+  isChartView,
+  usageRowsBySelectedValue,
+  usageRowTotalTokens,
+  userPathUsageChartVisible,
+} from "./usage-chart-rows.js";
+import { endpointListSummary, endpointsSelected } from "./usage-endpoints.js";
   import { horizontalUsageChartConfig } from "./usage-chart-config.js";
   import * as m from "$lib/paraglide/messages.js";
 
