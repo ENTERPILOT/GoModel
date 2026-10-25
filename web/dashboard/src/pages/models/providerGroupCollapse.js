@@ -21,6 +21,21 @@ export function serializeCollapsedGroups(keys) {
   return JSON.stringify(Array.isArray(keys) ? keys : []);
 }
 
+/** Return a new key list with every one of `groupKeys` collapsed or expanded. */
+export function setGroupsCollapsed(keys, groupKeys, collapsed) {
+  const current = Array.isArray(keys) ? keys : [];
+  const targets = (Array.isArray(groupKeys) ? groupKeys : []).filter(Boolean);
+  if (!collapsed) return current.filter((key) => !targets.includes(key));
+  return [...new Set([...current, ...targets])];
+}
+
+/** True when there is at least one group and every one of them is collapsed. */
+export function allGroupsCollapsed(keys, groupKeys) {
+  const current = Array.isArray(keys) ? keys : [];
+  const targets = (Array.isArray(groupKeys) ? groupKeys : []).filter(Boolean);
+  return targets.length > 0 && targets.every((key) => current.includes(key));
+}
+
 /** Return a new key list with `key` added or removed. */
 export function toggleCollapsedGroup(keys, key) {
   const current = Array.isArray(keys) ? keys : [];

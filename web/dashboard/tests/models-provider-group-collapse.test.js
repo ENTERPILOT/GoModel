@@ -1,8 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  allGroupsCollapsed,
   parseCollapsedGroups,
   serializeCollapsedGroups,
+  setGroupsCollapsed,
   toggleCollapsedGroup,
 } from "../src/pages/models/providerGroupCollapse.js";
 
@@ -40,4 +42,34 @@ test("collapsed groups round-trip through storage serialization", () => {
   const keys = ["provider-group:openai", "virtual-model-group"];
   assert.deepEqual(parseCollapsedGroups(serializeCollapsedGroups(keys)), keys);
   assert.equal(serializeCollapsedGroups(null), "[]");
+});
+
+test("setGroupsCollapsed collapses or expands every given group", () => {
+  const start = ["provider-group:openai", "provider-group:other"];
+  const groups = ["provider-group:openai", "provider-group:anthropic", ""];
+  const cases = [
+    {
+      name: "collapse all keeps unrelated keys without duplicates",
+      collapsed: true,
+      want: ["provider-group:openai", "provider-group:other", "provider-group:anthropic"],
+    },
+    { name: "expand all removes only the given groups", collapsed: false, want: ["provider-group:other"] },
+  ];
+  for (const tc of cases) {
+    assert.deepEqual(setGroupsCollapsed(start, groups, tc.collapsed), tc.want, tc.name);
+  }
+  assert.deepEqual(start, ["provider-group:openai", "provider-group:other"]);
+  assert.deepEqual(setGroupsCollapsed(undefined, undefined, true), []);
+});
+
+test("allGroupsCollapsed needs at least one group, all of them collapsed", () => {
+  const cases = [
+    { name: "no groups", keys: ["a"], groups: [], want: false },
+    { name: "some collapsed", keys: ["a"], groups: ["a", "b"], want: false },
+    { name: "all collapsed", keys: ["a", "b", "c"], groups: ["a", "b"], want: true },
+    { name: "missing keys", keys: undefined, groups: ["a"], want: false },
+  ];
+  for (const tc of cases) {
+    assert.equal(allGroupsCollapsed(tc.keys, tc.groups), tc.want, tc.name);
+  }
 });

@@ -24,6 +24,15 @@
   const category = $derived(modelsStore.activeCategory || "all");
   const columns = $derived(categoryColumns(category));
   const groupColspan = $derived(categoryColspan(category));
+
+  // A click on the header's empty space toggles the group, so the whole row
+  // is a tap target on phones. The row's own controls and text selection keep
+  // their normal behaviour.
+  function onGroupRowClick(event, group) {
+    if (event.target.closest("button, a, input, select, textarea, label")) return;
+    if (window.getSelection?.()?.toString()) return;
+    providerGroups.toggle(group);
+  }
 </script>
 
 <div class="table-wrapper">
@@ -44,7 +53,10 @@
     {#each virtualModels.filteredDisplayModelGroups as group (group.key)}
       {@const collapsed = providerGroups.isCollapsed(group)}
       <tbody>
-        <tr class="provider-group-row">
+        <!-- The chevron button is the keyboard control; the row click only
+             widens the hit area for touch. -->
+        <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+        <tr class="provider-group-row" onclick={(event) => onGroupRowClick(event, group)}>
           <td colspan={groupColspan}>
             <div class="provider-group-header">
               <div class="provider-group-meta">
@@ -125,6 +137,10 @@
     padding-bottom: 12px;
   }
 
+  .provider-group-row {
+    cursor: pointer;
+  }
+
   .provider-group-row:hover :global(td) {
     background: color-mix(in srgb, var(--accent) 8%, var(--bg));
   }
@@ -155,9 +171,12 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    margin: 0;
-    padding: 0;
+    /* Padding grows the hit area; the negative margin keeps the layout. */
+    margin: -6px -8px;
+    padding: 6px 8px;
+    min-height: 32px;
     border: 0;
+    border-radius: 6px;
     background: none;
     color: inherit;
     font: inherit;
@@ -171,8 +190,21 @@
 
   .provider-group-toggle:focus-visible {
     outline: 2px solid color-mix(in srgb, var(--accent) 32%, transparent);
-    outline-offset: 2px;
-    border-radius: 4px;
+    outline-offset: 0;
+  }
+
+  /* Touch screens get the recommended 44px minimum target. */
+  @media (pointer: coarse) {
+    .provider-group-toggle {
+      min-height: 44px;
+      margin: -12px -8px;
+      padding: 12px 8px;
+    }
+
+    .provider-group-toggle :global(.provider-group-toggle-icon) {
+      width: 18px;
+      height: 18px;
+    }
   }
 
   /* The class rides on the Icon child's own <svg>, so it needs :global. */

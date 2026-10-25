@@ -1456,6 +1456,8 @@
   "models_provider_access_for": "dostęp dostawcy {name}",
   "models_expand_provider_group": "Rozwiń {name}",
   "models_collapse_provider_group": "Zwiń {name}",
+  "models_expand_all_groups": "Rozwiń wszystkie",
+  "models_collapse_all_groups": "Zwiń wszystkie",
   "models_global_access": "globalny dostęp do modeli",
   "models_remove_alias": "Usuń alias {name}",
   "models_removing_alias": "Usuwanie aliasu {name}",

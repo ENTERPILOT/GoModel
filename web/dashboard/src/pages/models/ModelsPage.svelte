@@ -22,7 +22,8 @@
   import RateLimitEditor from "$pages/rate-limits/RateLimitEditor.svelte";
   import RateLimitInspector from "$pages/rate-limits/RateLimitInspector.svelte";
   import { rateLimits } from "$pages/rate-limits/rateLimits.svelte.js";
-  import { Plus } from "lucide";
+  import { providerGroups } from "./providerGroups.svelte.js";
+  import { ChevronsDownUp, ChevronsUpDown, Plus } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
   const PAGE = "models";
@@ -83,6 +84,15 @@
   function categoryLabel(category) {
     return categoryLabels[category.category]?.() || category.display_name;
   }
+
+  // One toggle for every group: it expands all once all are collapsed, and
+  // collapses all otherwise.
+  const allGroupsCollapsed = $derived(
+    providerGroups.allCollapsed(virtualModels.displayModelGroups),
+  );
+  const groupToggleLabel = $derived(
+    allGroupsCollapsed ? m.models_expand_all_groups() : m.models_collapse_all_groups(),
+  );
 </script>
 
 <div>
@@ -141,7 +151,23 @@
         ariaLabel={m.models_status_filter_label()}
         onchange={(value) => (virtualModels.statusFilter = value)}
       />
-      <div class="table-toolbar-actions">
+      <div class="table-toolbar-actions models-toolbar-actions">
+        {#if virtualModels.displayModelGroups.length > 1}
+          <button
+            type="button"
+            class="btn btn-with-icon"
+            aria-label={groupToggleLabel}
+            title={groupToggleLabel}
+            onclick={() =>
+              providerGroups.setAll(virtualModels.displayModelGroups, !allGroupsCollapsed)}
+          >
+            <Icon
+              icon={allGroupsCollapsed ? ChevronsUpDown : ChevronsDownUp}
+              class="alias-create-icon"
+            />
+            <span>{groupToggleLabel}</span>
+          </button>
+        {/if}
         {#if virtualModels.virtualModelsAvailable}
           <button
             type="button"
@@ -184,6 +210,10 @@
 </div>
 
 <style>
+.models-toolbar-actions {
+    gap: 8px;
+  }
+
 .category-tabs {
     display: flex;
     align-items: center;

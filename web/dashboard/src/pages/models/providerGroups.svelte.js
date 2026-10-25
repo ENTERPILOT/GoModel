@@ -4,10 +4,16 @@
 import { readStored, writeStored } from "$lib/utils/storage.js";
 import {
   COLLAPSED_PROVIDER_GROUPS_STORAGE_KEY,
+  allGroupsCollapsed,
   parseCollapsedGroups,
   serializeCollapsedGroups,
+  setGroupsCollapsed,
   toggleCollapsedGroup,
 } from "./providerGroupCollapse.js";
+
+function groupKeys(groups) {
+  return (groups || []).map((group) => group?.key);
+}
 
 class ProviderGroupsState {
   collapsedKeys = $state(
@@ -18,9 +24,21 @@ class ProviderGroupsState {
     return Boolean(group && this.collapsedKeys.includes(group.key));
   }
 
+  allCollapsed(groups) {
+    return allGroupsCollapsed(this.collapsedKeys, groupKeys(groups));
+  }
+
   toggle(group) {
     if (!group || !group.key) return;
-    this.collapsedKeys = toggleCollapsedGroup(this.collapsedKeys, group.key);
+    this.#save(toggleCollapsedGroup(this.collapsedKeys, group.key));
+  }
+
+  setAll(groups, collapsed) {
+    this.#save(setGroupsCollapsed(this.collapsedKeys, groupKeys(groups), collapsed));
+  }
+
+  #save(keys) {
+    this.collapsedKeys = keys;
     writeStored(
       COLLAPSED_PROVIDER_GROUPS_STORAGE_KEY,
       serializeCollapsedGroups(this.collapsedKeys),
