@@ -731,6 +731,23 @@ export function parseMcpOAuthOutcome(search) {
   return { outcome, server: params.get("server") || "" };
 }
 
+// MCP_OAUTH_OUTCOMES maps the callback outcome to the flash it shows. The
+// outcome only picks a message: the sign-in itself already happened on the
+// gateway, and the server list is re-read either way.
+const MCP_OAUTH_FAILED = { kind: "error", text: (name) => m.mcp_oauth_failed_flash({ name }) };
+const MCP_OAUTH_OUTCOMES = new Map([
+  ["signed_in", { kind: "success", text: (name) => m.mcp_oauth_signed_in_flash({ name }) }],
+  ["expired", { kind: "error", text: () => m.mcp_oauth_expired_flash() }],
+  ["error", MCP_OAUTH_FAILED],
+]);
+
+// mcpOAuthOutcomeMessage returns the flash { kind, text } for a parsed
+// callback outcome; unknown outcomes read as a failure.
+export function mcpOAuthOutcomeMessage(result) {
+  const entry = MCP_OAUTH_OUTCOMES.get(String(result?.outcome || "")) ?? MCP_OAUTH_FAILED;
+  return { kind: entry.kind, text: entry.text(String(result?.server || "")) };
+}
+
 // stripMcpOAuthParams removes the callback outcome from a URL so a reload
 // does not repeat the message.
 export function stripMcpOAuthParams(href) {

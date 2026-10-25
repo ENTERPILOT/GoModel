@@ -136,12 +136,60 @@ func (s *oauthStore) get(ctx context.Context, name string) (*oauthRecord, error)
 	return &record, nil
 }
 
+// put stores a new sign-in, replacing any earlier one. An error wrapping
+// encryption.ErrSealUnconfirmed means the record was written.
 func (s *oauthStore) put(ctx context.Context, name string, record oauthRecord) error {
 	value, err := s.seal(name, record)
 	if err != nil {
 		return err
 	}
-	return s.rows.putOAuth(ctx, name, value)
+	if err := s.rows.putOAuth(ctx, name, value); err != nil {
+		return err
+	}
+	return s.confirmKey(ctx, name, record, value)
+}
+
+// update replaces the stored record with record only while the stored one
+// still satisfies same, so a refresh from an old sign-in never undoes a
+// sign-out or a newer sign-in. It reports whether it wrote.
+func (s *oauthStore) update(ctx context.Context, name string, record oauthRecord, same func(stored oauthRecord) bool) (bool, error) {
+	current, err := s.rows.getOAuth(ctx, name)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	stored, err := s.open(name, current)
+	if err != nil {
+		return false, err
+	}
+	if !same(stored) {
+		return false, nil
+	}
+	next, err := s.seal(name, record)
+	if err != nil {
+		return false, err
+	}
+	swapped, err := s.rows.swapOAuth(ctx, name, current, next)
+	if err != nil || !swapped {
+		return false, err
+	}
+	return true, s.confirmKey(ctx, name, record, next)
+}
+
+// confirmKey re-seals a just-written record when a data key rotation
+// activated a new key while the save was in flight (see Box.ConfirmSeal).
+// The swap is conditional, so a newer save is never overwritten.
+func (s *oauthStore) confirmKey(ctx context.Context, name string, record oauthRecord, written string) error {
+	return s.box.ConfirmSeal(func() error {
+		resealed, err := s.seal(name, record)
+		if err != nil {
+			return err
+		}
+		_, err = s.rows.swapOAuth(ctx, name, written, resealed)
+		return err
+	}, encryption.Field{Name: oauthSecretField, Value: &written})
 }
 
 func (s *oauthStore) delete(ctx context.Context, name string) error {

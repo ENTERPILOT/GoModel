@@ -20,6 +20,7 @@ import {
   deriveMcpServerSlug,
   filterMcpServers,
   mcpDiscoveredTools,
+  mcpOAuthOutcomeMessage,
   mcpOAuthRedirectURI,
   mcpServerFormFromServer,
   parseMcpOAuthOutcome,
@@ -691,14 +692,8 @@ class McpServersState {
       return;
     }
     history.replaceState(history.state, "", stripMcpOAuthParams(window.location.href));
-    const name = result.server;
-    if (result.outcome === "signed_in") {
-      flash.success(m.mcp_oauth_signed_in_flash({ name }));
-    } else if (result.outcome === "expired") {
-      flash.error(m.mcp_oauth_expired_flash());
-    } else {
-      flash.error(m.mcp_oauth_failed_flash({ name }));
-    }
+    const message = mcpOAuthOutcomeMessage(result);
+    flash[message.kind](message.text);
   }
 
   async reconnectServer(server) {

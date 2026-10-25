@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"golang.org/x/oauth2"
+
+	"github.com/enterpilot/gomodel/internal/encryption"
 )
 
 // OAuth sign-in states shown in admin views.
@@ -22,6 +24,10 @@ const (
 
 // oauthSaveTimeout bounds persisting a refreshed token.
 const oauthSaveTimeout = 10 * time.Second
+
+// oauthRefreshTimeout bounds one token-endpoint request, so a stalled
+// authorization server cannot hold the source's lock for a whole tool call.
+const oauthRefreshTimeout = 15 * time.Second
 
 // errOAuthExpired means the access token expired and no refresh token can
 // renew it: an operator has to sign in again.
@@ -152,22 +158,41 @@ func (o *oauthSource) adoptStored(ctx context.Context) bool {
 	return true
 }
 
+// persist saves the refreshed token only while the stored record still
+// belongs to this sign-in: a sign-out or newer sign-in that landed meanwhile,
+// here or on another instance, wins, and the next reload drops this source.
+// mu must be held.
 func (o *oauthSource) persist(ctx context.Context) {
 	if o.store == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), oauthSaveTimeout)
 	defer cancel()
-	if err := o.store.put(ctx, o.name, o.record); err != nil {
+	saved, err := o.store.update(ctx, o.name, o.record, func(stored oauthRecord) bool {
+		return stored.SignedInAt.Equal(o.record.SignedInAt) && stored.ClientID == o.record.ClientID
+	})
+	switch {
+	case err != nil && !errors.Is(err, encryption.ErrSealUnconfirmed):
 		// The refreshed token keeps working in memory; only a restart loses it.
 		slog.Warn("failed to save a refreshed mcp oauth token", "server", o.name, "error", err)
+	case !saved && err == nil:
+		slog.Info("mcp oauth sign-in changed while a token refresh ran; keeping the stored one", "server", o.name)
 	}
+}
+
+// serverURL is the upstream URL this source's tokens were issued for.
+func (o *oauthSource) serverURL() string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.record.ServerURL
 }
 
 // refresh runs the refresh-token grant, sending the RFC 8707 resource
 // indicator like the authorization and code exchange requests did.
 func (o *oauthSource) refresh(ctx context.Context, record oauthRecord) (*oauth2.Token, error) {
 	cfg := record.config("")
+	ctx, cancel := context.WithTimeout(ctx, oauthRefreshTimeout)
+	defer cancel()
 	ctx = context.WithValue(ctx, oauth2.HTTPClient, resourceClient(o.httpClient, record.TokenURL, record.Resource))
 	token, err := cfg.TokenSource(ctx, &oauth2.Token{RefreshToken: record.RefreshToken}).Token()
 	if err != nil {
@@ -219,7 +244,7 @@ func truncateOAuthText(text string) string {
 }
 
 // bearerRoundTripper sets the OAuth access token on every request to the
-// server's origin. It wraps the static-header transport, so a signed-in
+// server's origin. The static-header transport wraps it, so a signed-in
 // token replaces a configured Authorization header.
 type bearerRoundTripper struct {
 	base   http.RoundTripper

@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"golang.org/x/oauth2"
+
+	"github.com/enterpilot/gomodel/internal/encryption"
 )
 
 // OAuthCallbackPath is where authorization servers send the operator back
@@ -124,7 +126,7 @@ func (m *oauthManager) attach(specs []ServerSpec, records map[string]oauthRecord
 		current := m.sources[spec.Name]
 		record, ok := records[spec.Name]
 		switch {
-		case !ok && keepMissing && current != nil:
+		case !ok && keepMissing && current != nil && current.serverURL() == spec.URL:
 			spec.oauth = current
 		case !ok || record.ServerURL != spec.URL:
 		case current != nil && current.sameSignIn(record):
@@ -341,7 +343,14 @@ func (s *Service) completeOAuth(ctx context.Context, flow *oauthFlow, callback O
 	now := time.Now().UTC()
 	record.SignedInAt = now
 	record.UpdatedAt = now
-	return s.oauth.store.put(ctx, flow.server, record)
+	if err := s.oauth.store.put(ctx, flow.server, record); err != nil {
+		if !errors.Is(err, encryption.ErrSealUnconfirmed) {
+			return err
+		}
+		// The record was written; only its data key is unconfirmed.
+		slog.Warn("mcp oauth sign-in saved, but its data key could not be confirmed", "server", flow.server, "error", err)
+	}
+	return nil
 }
 
 // validateAuthorizationIssuer applies RFC 9207 as the MCP authorization spec

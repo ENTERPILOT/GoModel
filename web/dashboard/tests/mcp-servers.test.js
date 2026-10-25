@@ -46,6 +46,7 @@ import {
   toggleMcpVirtualMember,
   normalizeMcpToolDiscovery,
   buildMcpOAuthStartPayload,
+  mcpOAuthOutcomeMessage,
   mcpOAuthRedirectURI,
   mcpServerCanSignIn,
   mcpServerOAuthClass,
@@ -857,4 +858,12 @@ test("parseMcpOAuthOutcome and stripMcpOAuthParams handle the callback redirect"
     stripMcpOAuthParams("https://gw.example.com/admin/dashboard/mcp-servers?mcp_oauth=error&server=notion&tab=x#top"),
     "/admin/dashboard/mcp-servers?tab=x#top",
   );
+});
+
+test("mcpOAuthOutcomeMessage picks the flash kind and treats unknown outcomes as failures", () => {
+  assert.equal(mcpOAuthOutcomeMessage({ outcome: "signed_in", server: "notion" }).kind, "success");
+  assert.match(mcpOAuthOutcomeMessage({ outcome: "signed_in", server: "notion" }).text, /notion/);
+  assert.equal(mcpOAuthOutcomeMessage({ outcome: "expired" }).kind, "error");
+  assert.equal(mcpOAuthOutcomeMessage({ outcome: "error", server: "notion" }).kind, "error");
+  assert.equal(mcpOAuthOutcomeMessage({ outcome: "__proto__" }).kind, "error");
 });

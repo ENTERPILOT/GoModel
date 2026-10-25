@@ -301,18 +301,20 @@ func (u *upstream) dialClient(probe *connectProbe, requests context.Context) *ht
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
-	if len(u.spec.Headers) > 0 {
-		transport = &headerRoundTripper{
-			base:    transport,
-			headers: u.spec.Headers,
-			origin:  requestOrigin(u.spec.URL),
-		}
-	}
+	// The OAuth transport sits inside the static headers so it runs last: a
+	// signed-in token replaces a configured Authorization header.
 	if u.spec.oauth != nil {
 		transport = &bearerRoundTripper{
 			base:   transport,
 			source: u.spec.oauth,
 			origin: requestOrigin(u.spec.URL),
+		}
+	}
+	if len(u.spec.Headers) > 0 {
+		transport = &headerRoundTripper{
+			base:    transport,
+			headers: u.spec.Headers,
+			origin:  requestOrigin(u.spec.URL),
 		}
 	}
 	probe.base = transport

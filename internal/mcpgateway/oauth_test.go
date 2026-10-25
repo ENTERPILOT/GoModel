@@ -452,3 +452,81 @@ func TestOAuthSourceReportsExpiredWithoutRefreshToken(t *testing.T) {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+func TestOAuthTokenReplacesStaticAuthorizationHeader(t *testing.T) {
+	var got string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(server.Close)
+
+	record := testOAuthRecord()
+	record.ServerURL = server.URL
+	spec := testSpec("notion", server.URL, func(spec *ServerSpec) {
+		spec.Headers = map[string]string{"Authorization": "Bearer static", "X-Team": "alpha"}
+		spec.oauth = newOAuthSource("notion", record, nil, nil)
+	})
+	u := newUpstream(spec, server.Client())
+	client := u.dialClient(&connectProbe{method: http.MethodPost}, context.Background())
+
+	resp, err := client.Get(server.URL)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	assert.Equal(t, "Bearer access-secret", got)
+}
+
+func TestOAuthRefreshNeverUndoesAnotherSignIn(t *testing.T) {
+	store, err := NewSQLStore(context.Background(), sqlxtest.NewSQLite(t))
+	require.NoError(t, err)
+	box, _ := encryptiontest.NewBox(t)
+	oauth := newOAuthStore(store, box)
+	ctx := context.Background()
+
+	record := testOAuthRecord()
+	source := newOAuthSource("notion", record, oauth, nil)
+	refreshed := func() {
+		source.mu.Lock()
+		defer source.mu.Unlock()
+		source.record.AccessToken = "refreshed"
+		source.persist(ctx)
+	}
+
+	// Same sign-in: the refreshed token is saved.
+	require.NoError(t, oauth.put(ctx, "notion", record))
+	refreshed()
+	stored, err := oauth.get(ctx, "notion")
+	require.NoError(t, err)
+	assert.Equal(t, "refreshed", stored.AccessToken)
+
+	// A newer sign-in is kept.
+	newer := testOAuthRecord()
+	newer.SignedInAt = record.SignedInAt.Add(time.Minute)
+	newer.AccessToken = "newer"
+	require.NoError(t, oauth.put(ctx, "notion", newer))
+	refreshed()
+	stored, err = oauth.get(ctx, "notion")
+	require.NoError(t, err)
+	assert.Equal(t, "newer", stored.AccessToken)
+
+	// A sign-out is not undone.
+	require.NoError(t, oauth.delete(ctx, "notion"))
+	refreshed()
+	_, err = oauth.get(ctx, "notion")
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
+func TestOAuthAttachDropsKeptSourceWhenURLChanged(t *testing.T) {
+	record := testOAuthRecord()
+	manager := newOAuthManager(nil, nil)
+	current := newOAuthSource("notion", record, nil, nil)
+	manager.sources["notion"] = current
+
+	specs := []ServerSpec{testSpec("notion", record.ServerURL, nil)}
+	manager.attach(specs, nil, true)
+	assert.Same(t, current, specs[0].oauth, "an unreadable record keeps the current tokens")
+
+	specs = []ServerSpec{testSpec("notion", "https://other.example.com/mcp", nil)}
+	manager.attach(specs, nil, true)
+	assert.Nil(t, specs[0].oauth, "tokens never follow a server to a new URL")
+}
