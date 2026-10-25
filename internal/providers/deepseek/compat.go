@@ -96,7 +96,7 @@ func adaptFileParts(req *core.ChatRequest, providerName string) *core.ChatReques
 			if isFilePart(part) {
 				// The caller's cache_control breakpoints keep their place, so
 				// the replacement inherits the file part's framing.
-				rewritten[j] = adaptedFilePart(part, providerName, req.Model)
+				rewritten[j] = adaptedFilePart(part, message.Role, providerName, req.Model)
 			}
 		}
 		if adapted == nil {
@@ -119,20 +119,24 @@ func isFilePart(part core.ContentPart) bool {
 
 // adaptedFilePart maps one file part onto the image_url DeepSeek reads images
 // with, onto a text part for an inline text file, or onto a text note for an
-// attachment it cannot take.
-func adaptedFilePart(part core.ContentPart, providerName, model string) core.ContentPart {
-	if url, ok := imageFileURL(part.File); ok {
-		return core.ContentPart{
-			Type:        "image_url",
-			ImageURL:    &core.ImageURLContent{URL: url},
-			ExtraFields: part.ExtraFields,
+// attachment it cannot take. DeepSeek takes content parts only in user and
+// tool messages, so an attachment on any other role becomes the note, which
+// keeps the message acceptable upstream.
+func adaptedFilePart(part core.ContentPart, role, providerName, model string) core.ContentPart {
+	if role == "user" || role == "tool" {
+		if url, ok := imageFileURL(part.File); ok {
+			return core.ContentPart{
+				Type:        "image_url",
+				ImageURL:    &core.ImageURLContent{URL: url},
+				ExtraFields: part.ExtraFields,
+			}
 		}
-	}
-	if text, ok := textFileContent(part.File); ok {
-		return core.ContentPart{
-			Type:        "text",
-			Text:        text,
-			ExtraFields: part.ExtraFields,
+		if text, ok := textFileContent(part.File); ok {
+			return core.ContentPart{
+				Type:        "text",
+				Text:        text,
+				ExtraFields: part.ExtraFields,
+			}
 		}
 	}
 	// The contents are dropped here, so leave a trace of why a later answer

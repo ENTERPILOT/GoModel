@@ -198,6 +198,38 @@ func TestAdaptFileParts_KeepsImagesDeepSeekCanRead(t *testing.T) {
 	assert.Equal(t, "https://example.com/B.JPEG?token=1", parts[7].ImageURL.URL)
 }
 
+func TestAdaptFileParts_NotesAttachmentsOutsideUserAndToolMessages(t *testing.T) {
+	// DeepSeek takes content parts only in user and tool messages, so an
+	// attachment on any other role becomes the note rather than an image_url
+	// part the upstream rejects.
+	var req core.ChatRequest
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"model":"deepseek-flash",
+		"messages":[
+			{"role":"assistant","content":[
+				{"type":"file","file":{"file_data":"data:image/png;base64,iVBORw0KGgo=","filename":"x.png"}}
+			]},
+			{"role":"system","content":[
+				{"type":"file","file":{"file_data":"data:text/plain;base64,SGVsbG8=","filename":"notes.txt"}}
+			]}
+		]
+	}`), &req))
+
+	adapted := adaptFileParts(&req, "deepseek")
+
+	assistant, ok := adapted.Messages[0].Content.([]core.ContentPart)
+	require.True(t, ok, "content = %T", adapted.Messages[0].Content)
+	require.Len(t, assistant, 1)
+	assert.Equal(t, "text", assistant[0].Type)
+	assert.Contains(t, assistant[0].Text, "x.png")
+
+	system, ok := adapted.Messages[1].Content.([]core.ContentPart)
+	require.True(t, ok, "content = %T", adapted.Messages[1].Content)
+	require.Len(t, system, 1)
+	assert.Equal(t, "text", system[0].Type)
+	assert.Contains(t, system[0].Text, "notes.txt")
+}
+
 func TestAdaptFileParts_LeavesRequestsWithoutFilesAlone(t *testing.T) {
 	var req core.ChatRequest
 	require.NoError(t, json.Unmarshal([]byte(`{
