@@ -427,8 +427,8 @@ curl -X POST https://your-gateway/admin/auth-keys \
 - Narzędzia spoza allowlisty nie pojawiają się w `tools/list` ani w wynikach
   wyszukiwania, ich wywołania kończą się błędem, a `/mcp/{slug}` zwraca 404 dla
   serwerów, do których klucz nie ma uprawnień.
-- Zmiana obowiązuje od następnego żądania MCP klucza, także w otwartych sesjach.
-  Nowo przyznane narzędzia pojawiają się po ponownym połączeniu klienta.
+- Zmiana kończy otwarte sesje MCP klucza przy ich następnym żądaniu. Klienci
+  łączą się ponownie i dostają zaktualizowaną listę narzędzi.
 - Klucz główny (master key) nigdy nie jest ograniczony.
 
 ## Sprawdź katalog serwera

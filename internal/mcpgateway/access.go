@@ -2,6 +2,7 @@ package mcpgateway
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/enterpilot/gomodel/config"
@@ -45,6 +46,16 @@ func newKeyAccess(selectors []string) *keyAccess {
 		access.tools[server][tool] = struct{}{}
 	}
 	return access
+}
+
+// equal reports whether two allowlists grant exactly the same servers and
+// tools; nil (unrestricted) equals only nil.
+func (a *keyAccess) equal(other *keyAccess) bool {
+	if a == nil || other == nil {
+		return a == other
+	}
+	return maps.Equal(a.servers, other.servers) &&
+		maps.EqualFunc(a.tools, other.tools, func(x, y map[string]struct{}) bool { return maps.Equal(x, y) })
 }
 
 // server reports whether any selector reaches the server, so it is listed.

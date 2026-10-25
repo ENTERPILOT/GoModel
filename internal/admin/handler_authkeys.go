@@ -188,10 +188,15 @@ func (h *Handler) ImportAuthKey(c *echo.Context) error {
 	}
 	// A disabled import only deactivates an existing key, which any key may
 	// do, itself included. Any other import creates or rewrites a key: it
-	// must stay within the caller's models, and since importing a token again
-	// updates the key stored under its hash, that key must not be the caller.
+	// must stay within the caller's models and MCP access, and since
+	// importing a token again updates the key stored under its hash, that key
+	// must not be the caller.
+	var allowedMCP []string
 	if req.Enabled == nil || *req.Enabled {
 		if err := requireAllowedModelsWithinCaller(c, allowedModels); err != nil {
+			return handleError(c, err)
+		}
+		if allowedMCP, err = normalizeAllowedMCP(c, req.AllowedMCP); err != nil {
 			return handleError(c, err)
 		}
 		if id, ok := h.authKeys.IDBySecretHash(req.SecretHash); ok {
@@ -207,6 +212,7 @@ func (h *Handler) ImportAuthKey(c *echo.Context) error {
 		UserPath:          req.UserPath,
 		Labels:            req.Labels,
 		AllowedModels:     allowedModels,
+		AllowedMCP:        allowedMCP,
 		DashboardAccess:   req.DashboardAccess,
 		PassthroughAccess: req.PassthroughAccess,
 		ExpiresAt:         req.ExpiresAt,

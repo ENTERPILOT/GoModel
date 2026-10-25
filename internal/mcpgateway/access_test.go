@@ -151,21 +151,53 @@ func TestKeyAllowlistAppliesToSearchDiscovery(t *testing.T) {
 	assert.True(t, result.IsError, "call_tool must not reach a tool outside the allowlist")
 }
 
-func TestKeyAllowlistEditReachesOpenSessions(t *testing.T) {
+func TestKeyAccessEqual(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b []string
+		want bool
+	}{
+		{name: "both unrestricted", want: true},
+		{name: "restricted vs unrestricted", a: []string{"alpha/*"}, want: false},
+		{name: "same grants in another order", a: []string{"alpha/*", "beta/x"}, b: []string{"beta/x", "alpha/*"}, want: true},
+		{name: "narrowed", a: []string{"alpha/*"}, b: []string{"alpha/read"}, want: false},
+		{name: "other tool", a: []string{"alpha/read"}, b: []string{"alpha/write"}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, newKeyAccess(tt.a).equal(newKeyAccess(tt.b)))
+		})
+	}
+}
+
+func TestKeyAllowlistEditEndsOpenSessions(t *testing.T) {
+	_, gatewayURL := newAllowlistTestService(t)
+	const listTools = `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
+	wide := map[string]string{testAllowedMCPHeader: "alpha/*"}
+
+	sessionID := initializeRawSession(t, gatewayURL+"/mcp", wide)
+	withSession := func(allowed string) map[string]string {
+		return map[string]string{testAllowedMCPHeader: allowed, "Mcp-Session-Id": sessionID}
+	}
+	assert.NotEqual(t, http.StatusNotFound, rawMCPStatus(t, gatewayURL+"/mcp", listTools, withSession("alpha/*")),
+		"an unchanged allowlist keeps the session")
+
+	// The key was narrowed: the session's catalog is stale, so it ends and the
+	// client re-initializes.
+	assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, gatewayURL+"/mcp", listTools, withSession("alpha/read")))
+	assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, gatewayURL+"/mcp", listTools, withSession("alpha/*")),
+		"an ended session stays ended")
+
+	fresh := connectClient(t, gatewayURL+"/mcp", map[string]string{testAllowedMCPHeader: "alpha/read"})
+	assert.Equal(t, []string{"alpha_read"}, listToolNames(t, fresh))
+}
+
+func TestAuthorizeSessionChecksKeyAllowlist(t *testing.T) {
 	service, _ := newAllowlistTestService(t)
 
-	service.bindSession("open", requestScope{authKeyID: "key-1", access: newKeyAccess([]string{"alpha/*"})}, nil, nil)
-	require.NoError(t, service.authorizeSessionID("open", "alpha", "write"))
-	require.NoError(t, service.authorizeSessionID("open", "alpha", ""))
-
-	// The next request of the session carries the key's narrowed allowlist.
-	require.True(t, service.touchBinding("open", "key-1", "", "", newKeyAccess([]string{"alpha/read"}), false))
+	service.bindSession("open", requestScope{authKeyID: "key-1", access: newKeyAccess([]string{"alpha/read"})}, nil, nil)
 	require.NoError(t, service.authorizeSessionID("open", "alpha", "read"))
 	require.ErrorIs(t, service.authorizeSessionID("open", "alpha", "write"), ErrNotAllowedForKey)
 	require.ErrorIs(t, service.authorizeSessionID("open", "alpha", ""), ErrNotAllowedForKey)
 	require.ErrorIs(t, service.authorizeSessionID("open", "beta", "search"), ErrNotAllowedForKey)
-
-	// Lifting the restriction restores access.
-	require.True(t, service.touchBinding("open", "key-1", "", "", nil, false))
-	require.NoError(t, service.authorizeSessionID("open", "beta", "search"))
 }

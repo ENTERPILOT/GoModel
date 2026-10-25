@@ -420,8 +420,8 @@ curl -X POST https://your-gateway/admin/auth-keys \
 - Tools outside the allowlist are left out of `tools/list` and search
   results, calls to them fail, and `/mcp/{slug}` returns 404 for servers the
   key has no grant on.
-- An edit applies to the key's next MCP request, including sessions that are
-  already open. Newly granted tools appear when the client reconnects.
+- An edit ends the key's open MCP sessions on their next request. Clients
+  reconnect and get the updated tool list.
 - The master key is never restricted.
 
 ## Inspect a server's catalog

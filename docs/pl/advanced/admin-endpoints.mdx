@@ -162,7 +162,7 @@ curl -X POST http://localhost:8080/admin/auth-keys/import \
 ```
 
 Endpoint przyjmuje te same opcjonalne pola co `POST /admin/auth-keys` (`description`,
-`user_path`, `labels`, `allowed_models`, `dashboard_access`, `expires_at`) i
+`user_path`, `labels`, `allowed_models`, `allowed_mcp`, `dashboard_access`, `expires_at`) i
 odpowiada `201` z kluczem, który potem pokazuje `"imported_from": "litellm"`.
 `redacted_value` to `key_name` z LiteLLM, np. `sk-...k6Hd`, a domyślnie
 `sk-...`. Wpis w `allowed_models` wskazujący model wirtualny jest zastępowany
@@ -171,7 +171,7 @@ a [listy dozwolonych modeli](/pl/features/users#selektory) dopasowują rozwiąza
 rozwiązywana jednorazowo: późniejsza zmiana celu modelu wirtualnego nie zmienia klucza.
 Ponowny import wcześniej zaimportowanego tokenu aktualizuje ten klucz i
 odpowiada `200`: aktualizowane są nazwa, ścieżka, etykiety, dozwolone modele i data wygaśnięcia. Dostęp
-do dashboardu i dezaktywacja pozostają bez zmian. `"enabled": false` oznacza klucz
+do dashboardu, dostęp MCP i dezaktywacja pozostają bez zmian. `"enabled": false` oznacza klucz
 zablokowany w źródle: wcześniej zaimportowany klucz zostaje dezaktywowany i poza tym pozostaje bez zmian,
 a klucz nigdy nieimportowany nie jest tworzony (`204`). Hash należący do klucza wydanego przez GoModel daje odpowiedź `409`
 z kodem `auth_key_exists`.

@@ -128,8 +128,8 @@ var ErrNotAllowedForKey = errors.New("not allowed for this API key")
 type sessionBinding struct {
 	authKeyID string
 	userPath  string
-	// access is the key's MCP allowlist, refreshed on every request so an
-	// edit reaches open sessions; nil is unrestricted.
+	// access is the key's MCP allowlist when the session initialized; nil is
+	// unrestricted. A request carrying a different one ends the session.
 	access *keyAccess
 	// endpoint identifies the endpoint the session was opened on: a pinned
 	// server slug, virtualBindingPrefix plus a virtual server name, or "" for
@@ -607,9 +607,10 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer
 	}
 	if sessionID := strings.TrimSpace(r.Header.Get("Mcp-Session-Id")); sessionID != "" {
 		if !s.touchBinding(sessionID, authKeyID, userPath, bindingEndpoint, access, r.Method == http.MethodDelete) {
-			// A different principal presented this session ID. Report the
-			// session as gone (404 per the transport spec) so the legitimate
-			// client's session stays unaffected and this caller re-initializes.
+			// A different principal presented this session ID, or the key's
+			// MCP allowlist changed and the session was ended. Report the
+			// session as gone (404 per the transport spec) so this caller
+			// re-initializes; another principal's session stays unaffected.
 			return core.NewNotFoundError("unknown MCP session")
 		}
 	}
@@ -1152,25 +1153,40 @@ func (s *Service) ToolCallLabel(sessionID, name, target string) string {
 // touchBinding refreshes a known session binding and reports whether the
 // caller's authenticated identity, user path, and endpoint pin match it.
 // Unknown session IDs pass through: the SDK rejects them itself, and bindings
-// do not survive restarts. The binding takes the key's current MCP allowlist,
-// so an allowlist edit reaches open sessions on their next request.
+// do not survive restarts.
+//
+// When the key's MCP allowlist changed since the session initialized, the
+// session's catalog no longer matches it, so the session is ended and false
+// returned: the client re-initializes and lists the current tools.
 func (s *Service) touchBinding(sessionID, authKeyID, userPath, endpoint string, access *keyAccess, remove bool) bool {
 	s.bindMu.Lock()
-	defer s.bindMu.Unlock()
 	binding, ok := s.bindings[sessionID]
 	if !ok {
+		s.bindMu.Unlock()
 		return true
 	}
 	if binding.authKeyID != authKeyID || binding.userPath != userPath || binding.endpoint != endpoint {
+		s.bindMu.Unlock()
 		return false
 	}
 	if remove {
 		delete(s.bindings, sessionID)
+		s.bindMu.Unlock()
 		return true
 	}
+	if !binding.access.equal(access) {
+		delete(s.bindings, sessionID)
+		s.bindMu.Unlock()
+		if binding.server != nil {
+			for session := range binding.server.Sessions() {
+				go func() { _ = session.Close() }()
+			}
+		}
+		return false
+	}
 	binding.lastSeen = time.Now()
-	binding.access = access
 	s.bindings[sessionID] = binding
+	s.bindMu.Unlock()
 	return true
 }
 

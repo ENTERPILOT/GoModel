@@ -445,8 +445,8 @@ curl -X POST https://your-gateway/admin/auth-keys \
 - Tools außerhalb der Allowlist fehlen in `tools/list` und in Suchergebnissen,
   Aufrufe schlagen fehl, und `/mcp/{slug}` liefert 404 für Server, auf die der Key
   keine Berechtigung hat.
-- Eine Änderung gilt ab der nächsten MCP-Anfrage des Keys, auch für bereits offene
-  Sitzungen. Neu gewährte Tools erscheinen, sobald sich der Client neu verbindet.
+- Eine Änderung beendet die offenen MCP-Sitzungen des Keys bei ihrer nächsten
+  Anfrage. Clients verbinden sich neu und erhalten die aktualisierte Tool-Liste.
 - Der Master-Key ist nie eingeschränkt.
 
 ## Den Katalog eines Servers einsehen

@@ -162,7 +162,7 @@ curl -X POST http://localhost:8080/admin/auth-keys/import \
 ```
 
 Der Endpunkt akzeptiert dieselben optionalen Felder wie `POST /admin/auth-keys` (`description`,
-`user_path`, `labels`, `allowed_models`, `dashboard_access`, `expires_at`) und
+`user_path`, `labels`, `allowed_models`, `allowed_mcp`, `dashboard_access`, `expires_at`) und
 antwortet mit `201` und dem Key, der dann `"imported_from": "litellm"` anzeigt.
 `redacted_value` ist der `key_name` von LiteLLM, etwa `sk-...k6Hd`, und lautet standardmäßig
 `sk-...`. Ein Eintrag in `allowed_models`, der ein virtuelles Modell benennt, wird durch die
@@ -170,8 +170,8 @@ Modelle ersetzt, an die es routet, da die Modelllisten von LiteLLM-Keys Modellgr
 [Allowlists](/de/features/users#selektoren) das aufgelöste Modell abgleichen. Die Liste wird
 einmalig aufgelöst: Wird das virtuelle Modell später auf ein anderes Ziel umgestellt, ändert sich der Key nicht.
 Der Import eines bereits früher importierten Tokens aktualisiert stattdessen diesen Key und
-antwortet mit `200`: Name, Pfad, Labels, erlaubte Modelle und Ablaufdatum. Dashboard-Zugriff
-und eine Deaktivierung bleiben unverändert. `"enabled": false` kennzeichnet einen Key, den die
+antwortet mit `200`: Name, Pfad, Labels, erlaubte Modelle und Ablaufdatum. Dashboard-Zugriff,
+MCP-Zugriff und eine Deaktivierung bleiben unverändert. `"enabled": false` kennzeichnet einen Key, den die
 Quelle gesperrt hat: Ein früherer Import wird deaktiviert und ansonsten nicht verändert,
 und ein nie importierter Key wird nicht erstellt (`204`). Ein Hash, der zu einem von GoModel ausgestellten Key gehört, liefert `409`
 mit dem Code `auth_key_exists`.

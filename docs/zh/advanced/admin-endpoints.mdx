@@ -148,12 +148,12 @@ curl -X POST http://localhost:8080/admin/auth-keys/import \
 ```
 
 它接受与 `POST /admin/auth-keys` 相同的可选字段（`description`、
-`user_path`、`labels`、`allowed_models`、`dashboard_access`、`expires_at`），
+`user_path`、`labels`、`allowed_models`、`allowed_mcp`、`dashboard_access`、`expires_at`），
 并返回 `201` 和该密钥，此时密钥显示 `"imported_from": "litellm"`。
 `redacted_value` 是 LiteLLM 的 `key_name`，例如 `sk-...k6Hd`，默认值为
 `sk-...`。指向虚拟模型的 `allowed_models` 条目会被替换为该虚拟模型路由到的模型，因为 LiteLLM 密钥的模型列表使用的是模型组名称，而
 [允许列表](/zh/features/users#选择器)匹配的是解析后的模型。该列表只解析一次：之后重新设置虚拟模型的目标不会改变该密钥。
-导入此前已导入过的 Token 会更新该密钥并返回 `200`：更新其名称、路径、标签、允许的模型和过期时间。控制台访问权限和停用状态保持不变。`"enabled": false` 标记源系统中已被禁用的密钥：此前导入的密钥会被停用，其余保持不变；从未导入过的密钥则不会被创建（`204`）。如果哈希属于 GoModel 签发的密钥，则返回 `409`，错误码为 `auth_key_exists`。
+导入此前已导入过的 Token 会更新该密钥并返回 `200`：更新其名称、路径、标签、允许的模型和过期时间。控制台访问权限、MCP 访问权限和停用状态保持不变。`"enabled": false` 标记源系统中已被禁用的密钥：此前导入的密钥会被停用，其余保持不变；从未导入过的密钥则不会被创建（`204`）。如果哈希属于 GoModel 签发的密钥，则返回 `409`，错误码为 `auth_key_exists`。
 
 以 `sk-` 开头的 Token 只与导入的密钥比对，
 `sk_gom_` Token 只与 GoModel 签发的密钥比对。如果没有导入的密钥，

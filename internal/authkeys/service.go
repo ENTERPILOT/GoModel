@@ -288,6 +288,7 @@ func (s *Service) createImported(ctx context.Context, input ImportInput) (*View,
 		UserPath:          input.UserPath,
 		Labels:            input.Labels,
 		AllowedModels:     input.AllowedModels,
+		AllowedMCP:        input.AllowedMCP,
 		DashboardAccess:   input.DashboardAccess,
 		PassthroughAccess: input.PassthroughAccess,
 		RedactedValue:     input.RedactedValue,
@@ -310,8 +311,8 @@ func (s *Service) createImported(ctx context.Context, input ImportInput) (*View,
 }
 
 // updateImported brings an earlier import up to date. Dashboard access,
-// passthrough access, and a deactivation made in GoModel are kept: the import never widens access an
-// administrator narrowed.
+// passthrough access, the MCP allowlist, and a deactivation made in GoModel
+// are kept: the import never widens access an administrator narrowed.
 func (s *Service) updateImported(ctx context.Context, key AuthKey, input ImportInput) (*View, error) {
 	now := time.Now().UTC()
 	key.Name = input.Name
