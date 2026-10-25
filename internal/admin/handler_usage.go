@@ -37,14 +37,14 @@ const (
 // @Param        days        query     int     false  "Number of days (default 30)"
 // @Param        start_date  query     string  false  "Start date (YYYY-MM-DD)"
 // @Param        end_date    query     string  false  "End date (YYYY-MM-DD)"
-// @Param        model       query     string  false  "Filter by exact model name"
-// @Param        provider    query     string  false  "Filter by provider name or provider type"
-// @Param        label       query     string  false  "Filter by request label (exact match)"
-// @Param        endpoint    query     string  false  "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages"
+// @Param        model       query     []string  false  "Filter by exact model names; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        provider    query     []string  false  "Filter by provider names or types; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        label       query     []string  false  "Filter by request labels (exact match); repeat for several"  collectionFormat(multi)
+// @Param        endpoint    query     []string  false  "Filter by exact request endpoints, e.g. /v1/chat/completions,/v1/messages; repeat or comma-separate for several"  collectionFormat(multi)
 // @Param        operation   query     string  false  "Filter by comma-separated operations, e.g. chat_completions,embeddings"
 // @Param        session_id  query     string  false  "Filter by exact detected session ID"
-// @Param        auth_key_id query     string  false  "Filter by exact managed auth key ID"
-// @Param        user_path   query     string  false  "Filter by tracked user path subtree"
+// @Param        auth_key_id query     []string  false  "Filter by managed auth key IDs; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        user_path   query     []string  false  "Filter by tracked user path subtrees; repeat for several"  collectionFormat(multi)
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
 // @Success      200  {object}  usage.UsageSummary
 // @Failure      400  {object}  core.GatewayError
@@ -110,14 +110,14 @@ func usageSliceResponse[T any](
 // @Param        start_date  query     string  false  "Start date (YYYY-MM-DD)"
 // @Param        end_date    query     string  false  "End date (YYYY-MM-DD)"
 // @Param        interval    query     string  false  "Grouping interval: daily, weekly, monthly, yearly (default daily)"
-// @Param        model       query     string  false  "Filter by exact model name"
-// @Param        provider    query     string  false  "Filter by provider name or provider type"
-// @Param        label       query     string  false  "Filter by request label (exact match)"
-// @Param        endpoint    query     string  false  "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages"
+// @Param        model       query     []string  false  "Filter by exact model names; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        provider    query     []string  false  "Filter by provider names or types; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        label       query     []string  false  "Filter by request labels (exact match); repeat for several"  collectionFormat(multi)
+// @Param        endpoint    query     []string  false  "Filter by exact request endpoints, e.g. /v1/chat/completions,/v1/messages; repeat or comma-separate for several"  collectionFormat(multi)
 // @Param        operation   query     string  false  "Filter by comma-separated operations, e.g. chat_completions,embeddings"
 // @Param        session_id  query     string  false  "Filter by exact detected session ID"
-// @Param        auth_key_id query     string  false  "Filter by exact managed auth key ID"
-// @Param        user_path   query     string  false  "Filter by tracked user path subtree"
+// @Param        auth_key_id query     []string  false  "Filter by managed auth key IDs; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        user_path   query     []string  false  "Filter by tracked user path subtrees; repeat for several"  collectionFormat(multi)
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
 // @Success      200  {array}   usage.DailyUsage
 // @Failure      400  {object}  core.GatewayError
@@ -139,14 +139,14 @@ func (h *Handler) DailyUsage(c *echo.Context) error {
 // @Param        days        query     int     false  "Number of days (default 30)"
 // @Param        start_date  query     string  false  "Start date (YYYY-MM-DD)"
 // @Param        end_date    query     string  false  "End date (YYYY-MM-DD)"
-// @Param        model       query     string  false  "Filter by exact model name"
-// @Param        provider    query     string  false  "Filter by provider name or provider type"
-// @Param        label       query     string  false  "Filter by request label (exact match)"
-// @Param        endpoint    query     string  false  "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages"
+// @Param        model       query     []string  false  "Filter by exact model names; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        provider    query     []string  false  "Filter by provider names or types; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        label       query     []string  false  "Filter by request labels (exact match); repeat for several"  collectionFormat(multi)
+// @Param        endpoint    query     []string  false  "Filter by exact request endpoints, e.g. /v1/chat/completions,/v1/messages; repeat or comma-separate for several"  collectionFormat(multi)
 // @Param        operation   query     string  false  "Filter by comma-separated operations, e.g. chat_completions,embeddings"
 // @Param        session_id  query     string  false  "Filter by exact detected session ID"
-// @Param        auth_key_id query     string  false  "Filter by exact managed auth key ID"
-// @Param        user_path   query     string  false  "Filter by tracked user path subtree"
+// @Param        auth_key_id query     []string  false  "Filter by managed auth key IDs; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        user_path   query     []string  false  "Filter by tracked user path subtrees; repeat for several"  collectionFormat(multi)
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
 // @Success      200  {array}   usage.ModelUsage
 // @Failure      400  {object}  core.GatewayError
@@ -172,14 +172,14 @@ func (h *Handler) UsageByModel(c *echo.Context) error {
 // @Param        days        query     int     false  "Number of days (default 30)"
 // @Param        start_date  query     string  false  "Start date (YYYY-MM-DD)"
 // @Param        end_date    query     string  false  "End date (YYYY-MM-DD)"
-// @Param        model       query     string  false  "Filter by exact model name"
-// @Param        provider    query     string  false  "Filter by provider name or provider type"
-// @Param        label       query     string  false  "Filter by request label (exact match)"
-// @Param        endpoint    query     string  false  "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages"
+// @Param        model       query     []string  false  "Filter by exact model names; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        provider    query     []string  false  "Filter by provider names or types; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        label       query     []string  false  "Filter by request labels (exact match); repeat for several"  collectionFormat(multi)
+// @Param        endpoint    query     []string  false  "Filter by exact request endpoints, e.g. /v1/chat/completions,/v1/messages; repeat or comma-separate for several"  collectionFormat(multi)
 // @Param        operation   query     string  false  "Filter by comma-separated operations, e.g. chat_completions,embeddings"
 // @Param        session_id  query     string  false  "Filter by exact detected session ID"
-// @Param        auth_key_id query     string  false  "Filter by exact managed auth key ID"
-// @Param        user_path   query     string  false  "Filter by tracked user path subtree"
+// @Param        auth_key_id query     []string  false  "Filter by managed auth key IDs; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        user_path   query     []string  false  "Filter by tracked user path subtrees; repeat for several"  collectionFormat(multi)
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
 // @Success      200  {array}   usage.UserPathUsage
 // @Failure      400  {object}  core.GatewayError
@@ -208,14 +208,14 @@ func (h *Handler) UsageByUserPath(c *echo.Context) error {
 // @Param        days        query     int     false  "Number of days (default 30)"
 // @Param        start_date  query     string  false  "Start date (YYYY-MM-DD)"
 // @Param        end_date    query     string  false  "End date (YYYY-MM-DD)"
-// @Param        model       query     string  false  "Filter by exact model name"
-// @Param        provider    query     string  false  "Filter by provider name or provider type"
-// @Param        label       query     string  false  "Filter by request label (exact match)"
-// @Param        endpoint    query     string  false  "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages"
+// @Param        model       query     []string  false  "Filter by exact model names; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        provider    query     []string  false  "Filter by provider names or types; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        label       query     []string  false  "Filter by request labels (exact match); repeat for several"  collectionFormat(multi)
+// @Param        endpoint    query     []string  false  "Filter by exact request endpoints, e.g. /v1/chat/completions,/v1/messages; repeat or comma-separate for several"  collectionFormat(multi)
 // @Param        operation   query     string  false  "Filter by comma-separated operations, e.g. chat_completions,embeddings"
 // @Param        session_id  query     string  false  "Filter by exact detected session ID"
-// @Param        auth_key_id query     string  false  "Filter by exact managed auth key ID"
-// @Param        user_path   query     string  false  "Filter by tracked user path subtree"
+// @Param        auth_key_id query     []string  false  "Filter by managed auth key IDs; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        user_path   query     []string  false  "Filter by tracked user path subtrees; repeat for several"  collectionFormat(multi)
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
 // @Success      200  {array}   usage.LabelUsage
 // @Failure      400  {object}  core.GatewayError
@@ -245,14 +245,14 @@ func (h *Handler) UsageByLabel(c *echo.Context) error {
 // @Param        days        query     int     false  "Number of days (default 30)"
 // @Param        start_date  query     string  false  "Start date (YYYY-MM-DD)"
 // @Param        end_date    query     string  false  "End date (YYYY-MM-DD)"
-// @Param        model       query     string  false  "Filter by exact model name"
-// @Param        provider    query     string  false  "Filter by provider name or provider type"
-// @Param        label       query     string  false  "Filter by request label (exact match)"
-// @Param        endpoint    query     string  false  "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages"
+// @Param        model       query     []string  false  "Filter by exact model names; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        provider    query     []string  false  "Filter by provider names or types; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        label       query     []string  false  "Filter by request labels (exact match); repeat for several"  collectionFormat(multi)
+// @Param        endpoint    query     []string  false  "Filter by exact request endpoints, e.g. /v1/chat/completions,/v1/messages; repeat or comma-separate for several"  collectionFormat(multi)
 // @Param        operation   query     string  false  "Filter by comma-separated operations, e.g. chat_completions,embeddings"
 // @Param        session_id  query     string  false  "Filter by exact detected session ID"
-// @Param        auth_key_id query     string  false  "Filter by exact managed auth key ID"
-// @Param        user_path   query     string  false  "Filter by tracked user path subtree"
+// @Param        auth_key_id query     []string  false  "Filter by managed auth key IDs; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        user_path   query     []string  false  "Filter by tracked user path subtrees; repeat for several"  collectionFormat(multi)
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
 // @Success      200  {array}   usage.EndpointUsage
 // @Failure      400  {object}  core.GatewayError
@@ -269,6 +269,88 @@ func (h *Handler) UsageByEndpoint(c *echo.Context) error {
 	})
 }
 
+// UsageBreakdown handles GET /admin/usage/breakdown
+//
+// @Summary      Get a two-dimension usage breakdown
+// @Description  Pivots the filtered usage by a row and an optional column dimension. Keys rank by the metric; those past limit fold into a trailing "other" key. Period keys follow interval and are never folded. A request with several labels counts once per label.
+// @Tags         admin
+// @Produce      json
+// @Security     BearerAuth
+// @Param        rows            query     string  true   "Row dimension: model, provider, user_path, label, endpoint, auth_key, period"
+// @Param        columns         query     string  false  "Column dimension (same values, different from rows); omit or none for one column"
+// @Param        metric          query     string  false  "Ranking metric for the top-N cut: cost, tokens, requests (default cost)"
+// @Param        limit           query     int     false  "Keys kept per dimension before the rest fold into other (default 10, max 50)"
+// @Param        user_path_depth query     int     false  "Group user paths by their first N segments (0 keeps full paths, max 16)"
+// @Param        days        query     int     false  "Number of days (default 30)"
+// @Param        start_date  query     string  false  "Start date (YYYY-MM-DD)"
+// @Param        end_date    query     string  false  "End date (YYYY-MM-DD)"
+// @Param        interval    query     string  false  "Period grouping: daily, weekly, monthly, yearly (default daily)"
+// @Param        model       query     []string  false  "Filter by exact model names; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        provider    query     []string  false  "Filter by provider names or types; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        label       query     []string  false  "Filter by request labels (exact match); repeat for several"  collectionFormat(multi)
+// @Param        endpoint    query     []string  false  "Filter by exact request endpoints, e.g. /v1/chat/completions,/v1/messages; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        operation   query     string  false  "Filter by comma-separated operations, e.g. chat_completions,embeddings"
+// @Param        session_id  query     string  false  "Filter by exact detected session ID"
+// @Param        auth_key_id query     []string  false  "Filter by managed auth key IDs; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        user_path   query     []string  false  "Filter by tracked user path subtrees; repeat for several"  collectionFormat(multi)
+// @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
+// @Success      200  {object}  usage.UsageBreakdown
+// @Failure      400  {object}  core.GatewayError
+// @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
+// @Router       /admin/usage/breakdown [get]
+func (h *Handler) UsageBreakdown(c *echo.Context) error {
+	baseParams, err := parseUsageParams(c)
+	if err != nil {
+		return handleError(c, err)
+	}
+	params := usage.UsageBreakdownParams{
+		UsageQueryParams: baseParams,
+		Rows:             usage.BreakdownDimension(c.QueryParam("rows")),
+		Columns:          usage.BreakdownDimension(c.QueryParam("columns")),
+		Metric:           usage.BreakdownMetric(strings.TrimSpace(c.QueryParam("metric"))),
+	}
+	if params.Limit, err = optionalIntQueryParam(c, "limit"); err != nil {
+		return handleError(c, err)
+	}
+	if params.UserPathDepth, err = optionalIntQueryParam(c, "user_path_depth"); err != nil {
+		return handleError(c, err)
+	}
+	params, err = usage.NormalizeUsageBreakdownParams(params)
+	if err != nil {
+		return handleError(c, err)
+	}
+
+	if h.usageReader == nil {
+		return c.JSON(http.StatusOK, usage.UsageBreakdown{
+			RowDimension: params.Rows, ColumnDimension: params.Columns, Metric: params.Metric,
+			Rows: []usage.BreakdownKey{}, Columns: []usage.BreakdownKey{}, Cells: []usage.BreakdownCell{},
+		})
+	}
+	result, err := h.usageReader.GetUsageBreakdown(c.Request().Context(), params)
+	if err != nil {
+		return handleError(c, err)
+	}
+	if result == nil {
+		result = &usage.UsageBreakdown{RowDimension: params.Rows, ColumnDimension: params.Columns, Metric: params.Metric}
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
+// optionalIntQueryParam parses an optional integer query parameter; an
+// absent value is zero.
+func optionalIntQueryParam(c *echo.Context, name string) (int, error) {
+	raw := strings.TrimSpace(c.QueryParam(name))
+	if raw == "" {
+		return 0, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, core.NewInvalidRequestError("invalid "+name+", expected integer", err)
+	}
+	return value, nil
+}
+
 // UsageBySession handles GET /admin/usage/sessions
 //
 // @Summary      Get usage breakdown by detected session
@@ -282,14 +364,14 @@ func (h *Handler) UsageByEndpoint(c *echo.Context) error {
 // @Param        days        query     int     false  "Number of days (default 30)"
 // @Param        start_date  query     string  false  "Start date (YYYY-MM-DD)"
 // @Param        end_date    query     string  false  "End date (YYYY-MM-DD)"
-// @Param        model       query     string  false  "Filter by exact model name"
-// @Param        provider    query     string  false  "Filter by provider name or provider type"
-// @Param        label       query     string  false  "Filter by request label (exact match)"
-// @Param        endpoint    query     string  false  "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages"
+// @Param        model       query     []string  false  "Filter by exact model names; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        provider    query     []string  false  "Filter by provider names or types; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        label       query     []string  false  "Filter by request labels (exact match); repeat for several"  collectionFormat(multi)
+// @Param        endpoint    query     []string  false  "Filter by exact request endpoints, e.g. /v1/chat/completions,/v1/messages; repeat or comma-separate for several"  collectionFormat(multi)
 // @Param        operation   query     string  false  "Filter by comma-separated operations, e.g. chat_completions,embeddings"
 // @Param        session_id  query     string  false  "Filter by exact detected session ID"
-// @Param        auth_key_id query     string  false  "Filter by exact managed auth key ID"
-// @Param        user_path   query     string  false  "Filter by tracked user path subtree"
+// @Param        auth_key_id query     []string  false  "Filter by managed auth key IDs; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        user_path   query     []string  false  "Filter by tracked user path subtrees; repeat for several"  collectionFormat(multi)
 // @Param        limit       query     int     false  "Page size (default 50, max 200)"
 // @Param        offset      query     int     false  "Offset for pagination"
 // @Success      200  {object}  usage.SessionUsageResult
@@ -351,15 +433,15 @@ func (h *Handler) UsageBySession(c *echo.Context) error {
 // @Param        days        query     int     false  "Number of days (default 30)"
 // @Param        start_date  query     string  false  "Start date (YYYY-MM-DD)"
 // @Param        end_date    query     string  false  "End date (YYYY-MM-DD)"
-// @Param        model       query     string  false  "Filter by exact model name"
-// @Param        provider    query     string  false  "Filter by provider name or provider type"
-// @Param        label       query     string  false  "Filter by request label (exact match)"
-// @Param        endpoint    query     string  false  "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages"
+// @Param        model       query     []string  false  "Filter by exact model names; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        provider    query     []string  false  "Filter by provider names or types; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        label       query     []string  false  "Filter by request labels (exact match); repeat for several"  collectionFormat(multi)
+// @Param        endpoint    query     []string  false  "Filter by exact request endpoints, e.g. /v1/chat/completions,/v1/messages; repeat or comma-separate for several"  collectionFormat(multi)
 // @Param        operation   query     string  false  "Filter by comma-separated operations, e.g. chat_completions,embeddings"
-// @Param        user_path   query     string  false  "Filter by tracked user path subtree"
+// @Param        user_path   query     []string  false  "Filter by tracked user path subtrees; repeat for several"  collectionFormat(multi)
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (default uncached)"
 // @Param        session_id  query     string  false  "Filter by exact detected session ID"
-// @Param        auth_key_id query     string  false  "Filter by exact managed auth key ID"
+// @Param        auth_key_id query     []string  false  "Filter by managed auth key IDs; repeat or comma-separate for several"  collectionFormat(multi)
 // @Param        search      query     string  false  "Search across model, provider, endpoint, request_id, provider_id, session_id"
 // @Param        limit       query     int     false  "Page size (default 50, max 200)"
 // @Param        offset      query     int     false  "Offset for pagination"
@@ -493,14 +575,14 @@ func (h *Handler) RecalculateUsagePricing(c *echo.Context) error {
 // @Param        start_date  query     string  false  "Start date (YYYY-MM-DD)"
 // @Param        end_date    query     string  false  "End date (YYYY-MM-DD)"
 // @Param        interval    query     string  false  "Grouping interval: daily, weekly, monthly, yearly (default daily)"
-// @Param        model       query     string  false  "Filter by exact model name"
-// @Param        provider    query     string  false  "Filter by provider name or provider type"
-// @Param        label       query     string  false  "Filter by request label (exact match)"
-// @Param        endpoint    query     string  false  "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages"
+// @Param        model       query     []string  false  "Filter by exact model names; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        provider    query     []string  false  "Filter by provider names or types; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        label       query     []string  false  "Filter by request labels (exact match); repeat for several"  collectionFormat(multi)
+// @Param        endpoint    query     []string  false  "Filter by exact request endpoints, e.g. /v1/chat/completions,/v1/messages; repeat or comma-separate for several"  collectionFormat(multi)
 // @Param        operation   query     string  false  "Filter by comma-separated operations, e.g. chat_completions,embeddings"
 // @Param        session_id  query     string  false  "Filter by exact detected session ID"
-// @Param        auth_key_id query     string  false  "Filter by exact managed auth key ID"
-// @Param        user_path   query     string  false  "Filter by tracked user path subtree"
+// @Param        auth_key_id query     []string  false  "Filter by managed auth key IDs; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        user_path   query     []string  false  "Filter by tracked user path subtrees; repeat for several"  collectionFormat(multi)
 // @Param        cache_mode  query     string  false  "Cache mode filter: uncached, cached, all (cache overview always uses cached mode)"
 // @Success      200  {object}  usage.CacheOverview
 // @Failure      400  {object}  core.GatewayError

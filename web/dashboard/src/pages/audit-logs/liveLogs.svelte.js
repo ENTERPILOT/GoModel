@@ -73,12 +73,13 @@ class LiveLogsStore {
   );
   auditThreadChildren = $state({});
   usageLogSearch = $state("");
-  usageFilterModel = $state("");
-  usageFilterProvider = $state("");
-  usageFilterLabel = $state("");
-  usageFilterUserPath = $state("");
+  // Multi-value usage filters: each holds the selected values, empty = all.
+  usageFilterModels = $state([]);
+  usageFilterProviders = $state([]);
+  usageFilterLabels = $state([]);
+  usageFilterUserPaths = $state([]);
   usageFilterSession = $state("");
-  usageFilterAuthKey = $state("");
+  usageFilterAuthKeys = $state([]);
   usageFilterEndpoints = $state([]);
   usageLogHideCached = $state(false);
 

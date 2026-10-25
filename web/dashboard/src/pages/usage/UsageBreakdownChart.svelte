@@ -291,7 +291,7 @@
                     <button
                       type="button"
                       class="usage-label-chip"
-                      class:active={usagePage.usageFilterLabel === row.label}
+                      class:active={usagePage.usageFilterLabels.includes(row.label)}
                       style="--label-color: {labelColor(row.label)}"
                       title={usagePage.usageLabelChipTitle(row.label)}
                       onclick={() => usagePage.toggleUsageLabelFilter(row.label)}

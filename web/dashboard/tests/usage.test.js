@@ -40,6 +40,7 @@ import {
   usageEntryCached,
   usageEntryCacheLabel,
   usageFilterQueryStr,
+  toggleFilterValue,
   usageLogHasAuthKeys,
   usageLogHasLabels,
   usageLogQueryParams,
@@ -172,6 +173,28 @@ test("usageFilterQueryStr includes every active filter, URL-encoded", () => {
     "&model=gpt-5&provider=openai&label=env%3Aprod&user_path=%2Fteam&session_id=session%2Fa&auth_key_id=key-a" +
       "&endpoint=%2Fv1%2Fchat%2Fcompletions%2C%2Fv1%2Fmessages",
   );
+});
+
+test("usageFilterQueryStr repeats multi-value filters", () => {
+  const qs = usageFilterQueryStr({
+    model: ["gpt-5", "claude"],
+    label: ["env:dev,local", "pr"],
+    user_path: ["/team/a", "/ops"],
+    auth_key_id: [],
+    endpoint: ["/v1/messages"],
+  });
+  assert.equal(
+    qs,
+    "&model=gpt-5&model=claude&label=env%3Adev%2Clocal&label=pr&user_path=%2Fteam%2Fa&user_path=%2Fops&endpoint=%2Fv1%2Fmessages",
+  );
+  assert.doesNotMatch(usageFilterQueryStr({ model: ["a"], label: ["b"] }, "label"), /label=/);
+});
+
+test("toggleFilterValue adds and removes one value", () => {
+  assert.deepEqual(toggleFilterValue([], "a"), ["a"]);
+  assert.deepEqual(toggleFilterValue(["a", "b"], "a"), ["b"]);
+  assert.deepEqual(toggleFilterValue(["a"], ""), ["a"]);
+  assert.deepEqual(toggleFilterValue(undefined, "a"), ["a"]);
 });
 
 test("usageFilterQueryStr skips empty filters", () => {
@@ -336,21 +359,22 @@ test("authKeyDisplayName prefers the key name, then a short id", () => {
 
 test("authKeyOptionList sorts by name and keeps an unknown active key", () => {
   const names = { k2: "Zeta", k1: "Alpha" };
-  assert.deepEqual(authKeyOptionList(names, ""), [
-    { id: "k1", name: "Alpha" },
-    { id: "k2", name: "Zeta" },
+  assert.deepEqual(authKeyOptionList(names, []), [
+    { id: "k1", name: "Alpha", value: "k1", label: "Alpha" },
+    { id: "k2", name: "Zeta", value: "k2", label: "Zeta" },
   ]);
   assert.deepEqual(
-    authKeyOptionList(names, "gone").map((option) => option.id),
+    authKeyOptionList(names, ["gone", "k1"]).map((option) => option.id),
     ["k1", "gone", "k2"],
   );
-  assert.deepEqual(authKeyOptionList({}, ""), []);
+  assert.deepEqual(authKeyOptionList({}, []), []);
 });
 
 test("usageLogHasAuthKeys shows the column for keyed entries or an active filter", () => {
   assert.equal(usageLogHasAuthKeys("", [{ id: "u1" }]), false);
   assert.equal(usageLogHasAuthKeys("", [{ id: "u1", auth_key_id: "k1" }]), true);
-  assert.equal(usageLogHasAuthKeys("k1", []), true);
+  assert.equal(usageLogHasAuthKeys(["k1"], []), true);
+  assert.equal(usageLogHasAuthKeys([], [{ id: "u1" }]), false);
 });
 
 test("usageLogQueryParams includes cache_mode=all by default so cached records are returned", () => {
@@ -380,6 +404,7 @@ test("facetOptionList sorts choices and keeps a stale selection listed", () => {
   assert.deepEqual(facetOptionList(["gpt-5"], ""), ["gpt-5"]);
   assert.deepEqual(facetOptionList(["prod", "alpha"], "removed"), ["alpha", "prod", "removed"]);
   assert.deepEqual(facetOptionList(["prod", "alpha"], "prod"), ["alpha", "prod"]);
+  assert.deepEqual(facetOptionList(["prod"], ["gone", "prod"]), ["gone", "prod"]);
 });
 
 // --- Stat cards ---
@@ -527,6 +552,8 @@ test("usageLogHasLabels reflects aggregates, active filter, or labelled entries"
   assert.equal(usageLogHasLabels([], "", [{ labels: null }, {}]), false);
   assert.equal(usageLogHasLabels([], "", [{ labels: ["alpha"] }]), true);
   assert.equal(usageLogHasLabels([], "alpha", []), true);
+  assert.equal(usageLogHasLabels([], ["alpha"], []), true);
+  assert.equal(usageLogHasLabels([], [], []), false);
   assert.equal(usageLogHasLabels([{ label: "alpha" }], "", []), true);
 });
 

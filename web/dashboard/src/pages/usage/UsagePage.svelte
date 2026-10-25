@@ -1,6 +1,7 @@
 <script>
   // Usage Analytics page. Route sub "costs" selects the costs mode
   // (deep link /admin/dashboard/usage/costs).
+  import { untrack } from "svelte";
   import DatePicker from "$lib/components/molecules/DatePicker.svelte";
   import SegmentedControl from "$lib/components/atoms/SegmentedControl.svelte";
   import { auth } from "$lib/stores/auth.svelte.js";
@@ -10,6 +11,7 @@
   import FacetFilters from "./FacetFilters.svelte";
   import UsageStatCards from "./UsageStatCards.svelte";
   import UsageBreakdownChart from "./UsageBreakdownChart.svelte";
+  import UsagePivot from "./UsagePivot.svelte";
   import UsageLog from "./UsageLog.svelte";
   import * as m from "$lib/paraglide/messages.js";
 
@@ -21,9 +23,14 @@
   $effect(() => {
     void auth.refreshTick;
     if (router.page === PAGE) {
-      usagePage.fetchUsagePage();
-      usagePage.fetchAuthKeyNames();
-      liveLogs.ensureLiveLogs();
+      // untrack: restoring and fetching read the filters, which must not
+      // become dependencies (a filter change would re-run the restore).
+      untrack(() => {
+        usagePage.restoreFromUrl();
+        usagePage.fetchUsagePage();
+        usagePage.fetchAuthKeyNames();
+        liveLogs.ensureLiveLogs();
+      });
     }
   });
 
@@ -67,6 +74,9 @@
     <UsageBreakdownChart kind="label" />
     <UsageBreakdownChart kind="type" />
   </div>
+
+  <!-- Two-dimension breakdown (e.g. cost per month by user path). -->
+  <UsagePivot />
 
   <!-- Session cardinality and identifiers need the full page width. -->
   <div class="usage-session-breakdown-wrap">

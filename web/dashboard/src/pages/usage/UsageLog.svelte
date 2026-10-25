@@ -44,13 +44,13 @@
   const hasLabels = $derived(
     usageLogHasLabels(
       usagePage.labelUsage,
-      usagePage.usageFilterLabel,
+      usagePage.usageFilterLabels,
       usagePage.usageLog.entries,
     ),
   );
 
   const hasAuthKeys = $derived(
-    usageLogHasAuthKeys(usagePage.usageFilterAuthKey, usagePage.usageLog.entries),
+    usageLogHasAuthKeys(usagePage.usageFilterAuthKeys, usagePage.usageLog.entries),
   );
 
   const onSearchInput = debounced(() => usagePage.fetchUsageLog(true));
@@ -63,8 +63,8 @@
     <button
       type="button"
       class="usage-label-chip"
-      class:active={usagePage.usageFilterAuthKey === entry.auth_key_id}
-      title={usagePage.usageFilterAuthKey === entry.auth_key_id
+      class:active={usagePage.usageFilterAuthKeys.includes(entry.auth_key_id)}
+      title={usagePage.usageFilterAuthKeys.includes(entry.auth_key_id)
         ? m.usage_clear_auth_key_filter()
         : m.usage_filter_by_auth_key({ name, id: entry.auth_key_id })}
       onclick={() => usagePage.toggleUsageAuthKeyFilter(entry.auth_key_id)}
@@ -81,7 +81,7 @@
         <button
           type="button"
           class="usage-label-chip"
-          class:active={usagePage.usageFilterLabel === label}
+          class:active={usagePage.usageFilterLabels.includes(label)}
           style="--label-color: {labelColor(label)}"
           title={usagePage.usageLabelChipTitle(label)}
           onclick={() => usagePage.toggleUsageLabelFilter(label)}

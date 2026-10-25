@@ -13,21 +13,32 @@ import (
 )
 
 // UsageQueryParams specifies the query parameters for usage data retrieval.
-// The optional filters (UserPath, SessionID, AuthKeyID, Model, Provider, Label,
-// Endpoints, Operations) apply uniformly to
-// every reader method, so summaries, breakdowns, and the request log all
-// describe the same filtered slice of traffic.
+// The optional filters apply uniformly to every reader method, so summaries,
+// breakdowns, and the request log all describe the same filtered slice of
+// traffic. Every set filter narrows the result (AND across filters); a
+// multi-value filter keeps rows matching any of its values (OR within it).
 type UsageQueryParams struct {
 	StartDate time.Time // Inclusive start (day precision)
 	EndDate   time.Time // Inclusive end (day precision)
 	Interval  string    // "daily", "weekly", "monthly", "yearly"
 	TimeZone  string    // IANA timezone used for day-boundary interpretation and grouping
-	UserPath  string    // subtree filter on tracked user path
-	SessionID string    // filter by exact detected session id (optional)
-	AuthKeyID string    // filter by exact managed auth key id (optional)
-	Model     string    // filter by exact model name (optional)
-	Provider  string    // filter by provider name or provider type (optional)
-	Label     string    // filter by request label, exact match (optional)
+	// UserPath keeps rows inside this subtree. The admin API sets it to a
+	// scoped credential's root, so the multi-value filters below can only
+	// narrow that scope.
+	UserPath  string
+	SessionID string // filter by exact detected session id (optional)
+	AuthKeyID string // filter by exact managed auth key id (optional)
+	Model     string // filter by exact model name (optional)
+	Provider  string // filter by provider name or provider type (optional)
+	Label     string // filter by request label, exact match (optional)
+	// UserPaths keeps rows inside any of these subtrees (optional).
+	UserPaths []string
+	// Models, Providers, Labels and AuthKeyIDs keep rows matching any of
+	// their values; Providers matches the provider name or type (optional).
+	Models     []string
+	Providers  []string
+	Labels     []string
+	AuthKeyIDs []string
 	// Endpoints keeps rows whose endpoint equals any of these, e.g.
 	// /v1/messages (optional).
 	Endpoints []string
@@ -488,6 +499,11 @@ type UsageReader interface {
 	// GetUsageByEndpoint returns per-endpoint token usage aggregates for the
 	// given date range, each tagged with the operation its endpoint belongs to.
 	GetUsageByEndpoint(ctx context.Context, params UsageQueryParams) ([]EndpointUsage, error)
+
+	// GetUsageBreakdown returns a bounded two-dimension pivot (rows by
+	// columns) of the filtered usage; keys beyond the limit fold into an
+	// "other" bucket.
+	GetUsageBreakdown(ctx context.Context, params UsageBreakdownParams) (*UsageBreakdown, error)
 
 	// GetUsageBySession returns a bounded page of per-session aggregates.
 	// Usage rows without a detected session are omitted. Request and token
