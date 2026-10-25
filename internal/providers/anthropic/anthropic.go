@@ -17,6 +17,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/workloadidentity"
 	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
@@ -26,7 +27,8 @@ var Registration = providers.Registration{
 	New:                         New,
 	PassthroughSemanticEnricher: passthroughSemanticEnricher,
 	Discovery: providers.DiscoveryConfig{
-		DefaultBaseURL: defaultBaseURL,
+		DefaultBaseURL:   defaultBaseURL,
+		WorkloadIdentity: workloadidentity.JWTBearer,
 	},
 }
 
@@ -184,10 +186,15 @@ func (p *Provider) setHeaders(req *http.Request) {
 	if !pinned {
 		key = p.keys.NextForContext(req.Context())
 	}
-	if isOAuthToken(key) {
+	switch {
+	case p.keys.Federated():
+		// Workload identity tokens share the subscription-token prefix but
+		// authenticate as a service account: Bearer alone, no oauth beta.
+		req.Header.Set("Authorization", "Bearer "+key)
+	case isOAuthToken(key):
 		req.Header.Set("Authorization", "Bearer "+key)
 		req.Header.Set(anthropicBetaHeader, oauthBetaFlag)
-	} else {
+	default:
 		req.Header.Set("x-api-key", key)
 	}
 	req.Header.Set("anthropic-version", anthropicAPIVersion)
@@ -243,7 +250,7 @@ func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest
 	key := p.keys.NextForContext(ctx)
 	ctx = withPinnedKey(ctx, key)
 	headers := req.Headers
-	if isOAuthToken(key) {
+	if isOAuthToken(key) && !p.keys.Federated() {
 		headers = ensureOAuthBeta(headers)
 	}
 
