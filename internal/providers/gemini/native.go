@@ -77,7 +77,8 @@ type geminiFileData struct {
 // Thought signatures cross the OpenAI-compatible API the way Google's own
 // OpenAI-compatible endpoint exposes them: a functionCall part's signature as
 // tool_calls[].extra_content.google.thought_signature and a text part's as
-// message.extra_content.google.thought_signature. Gemini 3 rejects (HTTP 400)
+// message.extra_content.google.thought_signature. A generated image's rides on
+// image_url.extra_content.google.thought_signature. Gemini 3 rejects (HTTP 400)
 // any functionCall in the history that comes back without its signature.
 // skipThoughtSignatureValidator is the placeholder Google documents for
 // function calls that never had a signature: a history transferred from
@@ -287,7 +288,16 @@ func geminiPartsFromMessage(msg core.Message, signatureRequired bool) ([]geminiP
 	if err != nil || strings.TrimSpace(msg.Role) != "assistant" {
 		return parts, err
 	}
-	return withThoughtSignature(parts, thoughtSignatureFromExtraFields(msg.ExtraFields)), nil
+	parts = withThoughtSignature(parts, thoughtSignatureFromExtraFields(msg.ExtraFields))
+	images, err := core.ChatImages(msg.ExtraFields)
+	if err != nil {
+		return nil, core.NewInvalidRequestError("invalid assistant images", err)
+	}
+	imageParts, err := geminiPartsFromContentParts(images)
+	if err != nil {
+		return nil, err
+	}
+	return append(parts, imageParts...), nil
 }
 
 func geminiPartsFromToolCallMessage(msg core.Message, signatureRequired bool) []geminiPart {
@@ -327,13 +337,21 @@ func geminiPartsFromToolCallMessage(msg core.Message, signatureRequired bool) []
 	return parts
 }
 
-// withThoughtSignature attaches a text turn's signature to its last part, the
-// position Gemini returned it in.
+// withThoughtSignature attaches a text turn's signature to its last text part,
+// the position Gemini returned it in. Replayed images keep their own signature.
 func withThoughtSignature(parts []geminiPart, signature string) []geminiPart {
 	if signature == "" || len(parts) == 0 {
 		return parts
 	}
-	parts[len(parts)-1].ThoughtSignature = signature
+	for i := len(parts) - 1; i >= 0; i-- {
+		if parts[i].Text != "" {
+			parts[i].ThoughtSignature = signature
+			return parts
+		}
+	}
+	if last := &parts[len(parts)-1]; last.ThoughtSignature == "" {
+		last.ThoughtSignature = signature
+	}
 	return parts
 }
 
@@ -410,6 +428,12 @@ func geminiPartsFromContentParts(parts []core.ContentPart) ([]geminiPart, error)
 			geminiPart, err := geminiPartFromImageURL(part.ImageURL)
 			if err != nil {
 				return nil, err
+			}
+			// A replayed generated image keeps its own signature, emitted on
+			// image_url so it also survives the Responses API.
+			geminiPart.ThoughtSignature = thoughtSignatureFromExtraFields(part.ImageURL.ExtraFields)
+			if geminiPart.ThoughtSignature == "" {
+				geminiPart.ThoughtSignature = thoughtSignatureFromExtraFields(part.ExtraFields)
 			}
 			out = append(out, geminiPart)
 		case "input_audio":
@@ -1005,18 +1029,58 @@ func nativeChatResponse(req *core.ChatRequest, geminiResp *geminiGenerateContent
 		if content == "" && len(toolCalls) > 0 {
 			messageContent = nil
 		}
+		extraFields, err := withGeneratedImages(thoughtSignatureExtraFields(signature), candidate.Content.Parts)
+		if err != nil {
+			return nil, err
+		}
 		resp.Choices = append(resp.Choices, core.Choice{
 			Index: index,
 			Message: core.ResponseMessage{
 				Role:        "assistant",
 				Content:     messageContent,
 				ToolCalls:   toolCalls,
-				ExtraFields: thoughtSignatureExtraFields(signature),
+				ExtraFields: extraFields,
 			},
 			FinishReason: finishReasonFromGemini(candidate.FinishReason, len(toolCalls) > 0),
 		})
 	}
 	return resp, nil
+}
+
+// withGeneratedImages adds a candidate's generated images (inline image blobs)
+// to the message as an OpenRouter-style "images" member, keeping content a
+// string. Each image_url part carries a base64 data URL and the image's thought
+// signature, which Gemini needs back to edit the image in a later turn.
+func withGeneratedImages(fields core.UnknownJSONFields, parts []geminiPart) (core.UnknownJSONFields, error) {
+	var images []core.ContentPart
+	for _, part := range parts {
+		blob := part.inlineData()
+		if blob == nil || blob.Data == "" || part.Thought {
+			continue
+		}
+		mimeType := blob.MimeType
+		if mimeType == "" {
+			mimeType = blob.MimeTypeAlt
+		}
+		if !strings.HasPrefix(mimeType, "image/") {
+			continue
+		}
+		images = append(images, core.ContentPart{
+			Type: "image_url",
+			ImageURL: &core.ImageURLContent{
+				URL:         "data:" + mimeType + ";base64," + blob.Data,
+				ExtraFields: thoughtSignatureExtraFields(part.ThoughtSignature),
+			},
+		})
+	}
+	if len(images) == 0 {
+		return fields, nil
+	}
+	encoded, err := json.Marshal(images)
+	if err != nil {
+		return fields, core.NewProviderError("gemini", http.StatusBadGateway, "failed to encode generated images", err)
+	}
+	return core.MergeUnknownJSONFields(fields, map[string]json.RawMessage{core.ChatImagesField: encoded})
 }
 
 func geminiBlockedPromptError(resp *geminiGenerateContentResponse, providerName string) *core.GatewayError {
@@ -1063,7 +1127,8 @@ func openAIMessageFromGeminiParts(parts []geminiPart) (string, []core.ToolCall, 
 			text.WriteString(part.Text)
 		}
 		call := part.functionCall()
-		if call == nil && part.ThoughtSignature != "" {
+		// Image signatures ride on their image_url part instead.
+		if call == nil && part.inlineData() == nil && part.ThoughtSignature != "" {
 			signature = part.ThoughtSignature
 		}
 		if call != nil {
