@@ -79,9 +79,13 @@ func (h *Handler) visibleModels(c *echo.Context) (*core.ModelsResponse, error) {
 // plus the context field its discovery reads. The type lives here, not on
 // core.Model, so no other response can carry max_model_len and the default
 // listing is untouched by the setting.
+//
+// max_model_len carries no omitempty: every entry has the field, because the
+// clients this mode exists for decode the listing against a schema where it is
+// required.
 type vllmModel struct {
 	core.Model
-	MaxModelLen int `json:"max_model_len,omitempty"`
+	MaxModelLen int `json:"max_model_len"`
 }
 
 // vllmModelsResponse is the model list in vLLM discovery compatibility mode.
@@ -91,8 +95,8 @@ type vllmModelsResponse struct {
 }
 
 // vllmDiscoveryModels rewrites a listing into the shape a vLLM runtime
-// advertises: owned_by "vllm" and a max_model_len on every entry that has a
-// limit to report.
+// advertises: owned_by "vllm" and a max_model_len on every entry, zero when the
+// limit is unknown.
 //
 // Clients whose model discovery only understands a vLLM runtime (OpenCode
 // probes /health and /v1/models) drop every entry that does not look like one,
@@ -127,8 +131,10 @@ func vllmDiscoveryModel(model core.Model) vllmModel {
 // vllmModelLen returns the context limit to advertise for a model: the one the
 // provider reported, and only when it reported none, the model's context
 // window. A self-hosted runtime knows its own limit better than the catalog
-// does. Zero means the entry is listed without max_model_len, and a client
-// that needs the field drops it.
+// does. Zero means the limit is unknown, not that the entry is incomplete: the
+// field is still advertised, because a client that decodes the listing against
+// a schema where it is required fails the whole response over one entry missing
+// it and hides every other model behind it.
 func vllmModelLen(model core.Model) int {
 	if model.MaxModelLen != nil && *model.MaxModelLen > 0 {
 		return *model.MaxModelLen

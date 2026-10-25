@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -370,6 +371,20 @@ func TestListModelsMaxModelLenFollowsTheCompatSetting(t *testing.T) {
 			"the rewrite happens on a copy, never on the provider's models")
 		require.NotNil(t, mock.modelsResponse.Data[0].MaxModelLen)
 	})
+
+	t.Run("on advertises the field for a model with no known limit", func(t *testing.T) {
+		srv := New(&mockProvider{modelsResponse: &core.ModelsResponse{Object: "list", Data: []core.Model{
+			{ID: "diffusiongemma-pool", Object: "model", OwnedBy: "nvidia"},
+		}}}, &Config{VLLMDiscoveryCompat: true})
+		req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		rec := httptest.NewRecorder()
+
+		srv.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.Contains(t, rec.Body.String(), `"max_model_len":0`)
+		require.Contains(t, rec.Body.String(), `"owned_by":"vllm"`)
+	})
 }
 
 // vllmDiscoveryModels is the endpoint's own listing shape, so these cases run
@@ -417,7 +432,7 @@ func TestVLLMDiscoveryModels(t *testing.T) {
 			"a self-hosted runtime knows its own limit better than the catalog")
 	})
 
-	t.Run("a model with no limit is listed without max_model_len", func(t *testing.T) {
+	t.Run("a model with no limit advertises zero", func(t *testing.T) {
 		resp := &core.ModelsResponse{Object: "list", Data: []core.Model{
 			{ID: "beam", Object: "model", OwnedBy: "ollama"},
 			{ID: "glm-5.3", Object: "model", OwnedBy: "ollama", Metadata: &core.ModelMetadata{}},
@@ -427,11 +442,15 @@ func TestVLLMDiscoveryModels(t *testing.T) {
 
 		for _, model := range out.Data {
 			require.Equal(t, vllmDiscoveryOwner, model.OwnedBy)
-			require.Zero(t, model.MaxModelLen, "no limit, no max_model_len")
+			require.Zero(t, model.MaxModelLen, "the limit is unknown")
 		}
+		body, err := json.Marshal(out)
+		require.NoError(t, err)
+		require.Contains(t, string(body), `"max_model_len":0`,
+			"the field is required by the client schema, so it is never omitted")
 	})
 
-	t.Run("a non-positive context window is not advertised", func(t *testing.T) {
+	t.Run("a non-positive context window advertises zero", func(t *testing.T) {
 		zero := 0
 		resp := &core.ModelsResponse{Object: "list", Data: []core.Model{
 			{ID: "broken", Object: "model", Metadata: &core.ModelMetadata{ContextWindow: &zero}},
@@ -440,6 +459,34 @@ func TestVLLMDiscoveryModels(t *testing.T) {
 		out := vllmDiscoveryModels(resp)
 
 		require.Zero(t, out.Data[0].MaxModelLen)
+		body, err := json.Marshal(out)
+		require.NoError(t, err)
+		require.Contains(t, string(body), `"max_model_len":0`)
+	})
+
+	// A client that decodes the listing against a schema where max_model_len is
+	// required fails the whole response over a single entry missing it, so one
+	// model the catalog does not know must not hide the ones it does.
+	t.Run("an unknown limit does not hide the rest of the listing", func(t *testing.T) {
+		window := 131072
+		resp := &core.ModelsResponse{Object: "list", Data: []core.Model{
+			{ID: "deepseek-v4.1-flash-pool", Object: "model", OwnedBy: "anthropic", Metadata: &core.ModelMetadata{ContextWindow: &window}},
+			{ID: "diffusiongemma-pool", Object: "model", OwnedBy: "nvidia"},
+			{ID: "mimo-v2.6-flash-pool", Object: "model", OwnedBy: "opencode", Metadata: &core.ModelMetadata{}},
+		}}
+
+		out := vllmDiscoveryModels(resp)
+
+		body, err := json.Marshal(out)
+		require.NoError(t, err)
+		for _, model := range out.Data {
+			require.Contains(t, string(body), `"id":"`+model.ID+`"`)
+		}
+		require.Equal(t, 3, strings.Count(string(body), `"max_model_len":`),
+			"every entry carries the field")
+		require.Equal(t, window, out.Data[0].MaxModelLen)
+		require.Zero(t, out.Data[1].MaxModelLen)
+		require.Zero(t, out.Data[2].MaxModelLen)
 	})
 
 	t.Run("the transform keeps the rest of the entry", func(t *testing.T) {

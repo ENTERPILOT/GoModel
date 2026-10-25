@@ -17,9 +17,13 @@ type ModelsConfig struct {
 	// VLLMDiscoveryCompat makes GET /v1/models advertise every model the way a
 	// vLLM runtime does, so a client whose model discovery only understands
 	// vLLM picks the gateway's models up instead of requiring a hand-written
-	// list: owned_by becomes "vllm" and each entry carries max_model_len read
-	// from the model's context window. It is a lie about the owner, so it stays
-	// opt-in and only for deployments whose consumers need it.
+	// list: owned_by becomes "vllm" and each entry carries max_model_len, from
+	// the provider's own report, else the model's context window, else 0 when
+	// the limit is unknown. The field is always present because those clients
+	// decode the listing against a schema that requires it: omitting it for one
+	// model fails the response and hides every other model behind it. It is a
+	// lie about the owner, so it stays opt-in and only for deployments whose
+	// consumers need it.
 	// Default: false.
 	VLLMDiscoveryCompat bool `yaml:"vllm_discovery_compat" env:"MODELS_VLLM_DISCOVERY_COMPAT"`
 
