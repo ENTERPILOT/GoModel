@@ -885,6 +885,8 @@
   "mcp_all_tools_summary": "Tools: {tools} · Server: {servers}",
   "mcp_all_tools_issues": "Tools dieser Server fehlen möglicherweise:",
   "mcp_all_tools_hidden": "ausgeblendet",
+  "mcp_all_tools_shadowed": "Name belegt durch {server}",
+  "mcp_all_tools_shadowed_title": "{server} stellt diesen Namen am Endpunkt bereits bereit, daher erreichen Clients dessen Tool statt dieses.",
   "mcp_all_tools_server": "Server {server} · Upstream-Name {name}",
   "mcp_all_tools_empty": "Noch keine Tools freigegeben.",
   "mcp_all_tools_no_match": "Keine Tools entsprechen diesem Filter.",

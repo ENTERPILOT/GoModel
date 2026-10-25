@@ -10,7 +10,6 @@
   import { mcpServers } from "./mcpServers.svelte.js";
   import {
     mcpServedVirtualServers,
-    mcpServerStatusClass,
     mcpServerStatusLabel,
     mcpToolCatalogIssues,
     mcpToolCatalogMembers,
@@ -93,8 +92,7 @@
             {#each issues as issue (issue.server)}
               <li>
                 <code class="mono">{issue.server}</code>
-                <span
-                  class="audit-status-badge {mcpServerStatusClass({ ...issue, last_error: issue.error })}"
+                <span class="audit-status-badge {issue.statusClass}"
                   >{mcpServerStatusLabel(issue)}</span
                 >
                 {#if issue.error}
@@ -109,11 +107,21 @@
       {#if rows.length > 0}
         <ul class="mcp-all-tools-list">
           {#each rows as row (row.key)}
-            <li class="mcp-all-tools-item" class:mcp-all-tools-item-excluded={row.excluded}>
+            <li
+              class="mcp-all-tools-item"
+              class:mcp-all-tools-item-excluded={row.excluded || row.shadowedBy}
+            >
               <code class="mcp-all-tools-name mono">{row.aggregated || row.name}</code>
               {#if row.excluded}
                 <span class="mcp-all-tools-badge" title={m.mcp_catalog_excluded_tools_hint()}
                   >{m.mcp_all_tools_hidden()}</span
+                >
+              {/if}
+              {#if row.shadowedBy}
+                <span
+                  class="mcp-all-tools-badge"
+                  title={m.mcp_all_tools_shadowed_title({ server: row.shadowedBy })}
+                  >{m.mcp_all_tools_shadowed({ server: row.shadowedBy })}</span
                 >
               {/if}
               {#if row.readOnly}

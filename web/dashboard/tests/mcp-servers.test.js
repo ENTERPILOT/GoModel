@@ -848,7 +848,28 @@ test("mcpToolCatalogRows flattens every server's exposed tools under their /mcp 
     readOnly: true,
     destructive: false,
     excluded: false,
+    shadowedBy: "",
   });
+});
+
+test("mcpToolCatalogRows marks a tool whose /mcp name another server already serves", () => {
+  // Server "a" with tool "b_read" and server "a_b" with tool "read" both
+  // produce a_b_read; the gateway keeps the server first in slug byte order.
+  const entries = [
+    { server: "a_b", status: "connected", catalog: normalizeMcpCatalog("a_b", { tools: [{ name: "read" }] }) },
+    { server: "a", status: "connected", catalog: normalizeMcpCatalog("a", { tools: [{ name: "b_read" }] }) },
+  ];
+  const rows = mcpToolCatalogRows(entries);
+  assert.deepEqual(
+    rows.map((row) => [row.key, row.aggregated, row.shadowedBy]),
+    [
+      ["a:b_read", "a_b_read", ""],
+      ["a_b:read", "a_b_read", "a"],
+    ],
+  );
+  assert.deepEqual(mcpToolCatalogSummary(entries), { tools: 1, servers: 2 });
+  // Outside the winner's scope the name is reachable again.
+  assert.equal(mcpToolCatalogRows(entries, { members: ["a_b"] })[0].shadowedBy, "");
 });
 
 test("mcpToolCatalogRows filters by scope, hidden tools, and query", () => {
@@ -899,9 +920,9 @@ test("mcpToolCatalogIssues lists servers whose tools may be missing", () => {
     { server: "notion", status: "connected", catalog: null, error: "Failed" },
   ];
   assert.deepEqual(mcpToolCatalogIssues(entries), [
-    { server: "jira", status: "degraded", error: "dial failed" },
-    { server: "slack", status: "connecting", error: "" },
-    { server: "notion", status: "connected", error: "Failed" },
+    { server: "jira", status: "degraded", error: "dial failed", statusClass: "status-error" },
+    { server: "slack", status: "connecting", error: "", statusClass: "status-neutral" },
+    { server: "notion", status: "connected", error: "Failed", statusClass: "status-error" },
   ]);
   assert.deepEqual(mcpToolCatalogIssues(entries, ["github"]), []);
 });

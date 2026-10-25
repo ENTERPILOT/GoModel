@@ -893,6 +893,8 @@
   "mcp_all_tools_summary": "Narzędzia: {tools} · Serwery: {servers}",
   "mcp_all_tools_issues": "Może brakować narzędzi z tych serwerów:",
   "mcp_all_tools_hidden": "ukryte",
+  "mcp_all_tools_shadowed": "nazwa zajęta przez {server}",
+  "mcp_all_tools_shadowed_title": "{server} już udostępnia tę nazwę na endpoincie, więc klienci trafiają do jego narzędzia zamiast tego.",
   "mcp_all_tools_server": "Serwer {server} · nazwa źródłowa {name}",
   "mcp_all_tools_empty": "Nie udostępniono jeszcze żadnych narzędzi.",
   "mcp_all_tools_no_match": "Żadne narzędzie nie pasuje do filtra.",

@@ -849,6 +849,8 @@
   "mcp_all_tools_summary": "工具：{tools} · 服务器：{servers}",
   "mcp_all_tools_issues": "以下服务器的工具可能缺失：",
   "mcp_all_tools_hidden": "已隐藏",
+  "mcp_all_tools_shadowed": "名称已被 {server} 占用",
+  "mcp_all_tools_shadowed_title": "{server} 已在该端点上提供此名称，因此客户端调用的是它的工具，而不是这个工具。",
   "mcp_all_tools_server": "服务器 {server} · 上游名称 {name}",
   "mcp_all_tools_empty": "尚未公开任何工具。",
   "mcp_all_tools_no_match": "没有匹配此筛选条件的工具。",

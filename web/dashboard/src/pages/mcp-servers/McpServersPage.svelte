@@ -30,7 +30,11 @@
     void auth.refreshTick;
     if (router.page !== PAGE) return;
     mcpServers.fetchServers();
-    return () => mcpServers.stopPolling();
+    return () => {
+      mcpServers.stopPolling();
+      // Catalogs loaded with the previous API key must not stay on screen.
+      mcpServers.closeToolCatalog();
+    };
   });
 </script>
 
