@@ -65,6 +65,10 @@ type Provider struct {
 	// call; providers that reuse the Anthropic dialect behind another
 	// upstream (OpenCode Go) use it for their identification headers.
 	requestHeaders func(context.Context) http.Header
+	// providerName names this provider in the values clients see, such as the
+	// provider field on streamed events: the configured instance name when the
+	// factory supplied one, the provider type otherwise.
+	providerName string
 
 	batchEndpointsMu sync.RWMutex
 	// batchResultEndpoints keeps endpoint hints by provider batch id and custom_id.
@@ -77,9 +81,10 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 	p := &Provider{
 		keys:                 opts.Keyring(providerCfg.APIKey),
 		batchResultEndpoints: make(map[string]map[string]string),
+		providerName:         opts.ClientName("anthropic"),
 	}
 	clientCfg := llmclient.Config{
-		ProviderName:   opts.ClientName("anthropic"),
+		ProviderName:   p.providerName,
 		BaseURL:        providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL),
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,
@@ -92,6 +97,16 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 // GetBaseURL returns the provider's current API base URL.
 func (p *Provider) GetBaseURL() string {
 	return p.client.BaseURL()
+}
+
+// responseProviderName names this provider in the values clients see: the
+// configured instance name when the factory supplied one, the provider type
+// otherwise.
+func (p *Provider) responseProviderName() string {
+	if p.providerName != "" {
+		return p.providerName
+	}
+	return "anthropic"
 }
 
 // SetBaseURL allows configuring a custom base URL for the provider
