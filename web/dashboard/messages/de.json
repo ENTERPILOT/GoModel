@@ -1129,6 +1129,40 @@
   "sidebar_resize_help": "Ziehen zum Anpassen der Größe; klicken zum Einklappen oder Ausklappen",
   "sidebar_scoped_to": "Eingeschränkt auf {path}",
   "sidebar_scoped_to_help": "Dieser API-Schlüssel verwaltet nur den Nutzerpfad {path} und seine Nachfahren.",
+  "sidebar_license_badge_title": "{badge}-Lizenz aktiv",
+  "sidebar_license_days_short": "{count} T",
+  "sidebar_license_days_over_short": "-{count} T",
+  "sidebar_license_trial_left": [
+    {
+      "declarations": ["input count", "input date", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "Testversion endet am {date} - noch {count} Tag",
+        "count_plural=*": "Testversion endet am {date} - noch {count} Tage"
+      }
+    }
+  ],
+  "sidebar_license_expires_in": [
+    {
+      "declarations": ["input count", "input date", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "Lizenz läuft am {date} ab - noch {count} Tag",
+        "count_plural=*": "Lizenz läuft am {date} ab - noch {count} Tage"
+      }
+    }
+  ],
+  "sidebar_license_grace": [
+    {
+      "declarations": ["input count", "input date", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "Lizenz am {date} abgelaufen. Kulanzfrist: noch {count} Tag, dann werden die Pro-Funktionen deaktiviert",
+        "count_plural=*": "Lizenz am {date} abgelaufen. Kulanzfrist: noch {count} Tage, dann werden die Pro-Funktionen deaktiviert"
+      }
+    }
+  ],
+  "sidebar_license_expired": "Lizenz am {date} abgelaufen",
   "access_scope_path_outside": "Der Nutzerpfad muss {root} oder einer seiner Nachfahren sein.",
   "theme_label": "Design",
   "theme_light": "Helles Design",

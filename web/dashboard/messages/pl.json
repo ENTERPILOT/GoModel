@@ -1145,6 +1145,46 @@
   "sidebar_resize_help": "Przeciągnij, aby zmienić szerokość; kliknij, aby zwinąć lub rozwinąć",
   "sidebar_scoped_to": "Zakres: {path}",
   "sidebar_scoped_to_help": "Ten klucz API zarządza tylko ścieżką użytkownika {path} i jej potomkami.",
+  "sidebar_license_badge_title": "Licencja {badge} aktywna",
+  "sidebar_license_days_short": "{count} dn.",
+  "sidebar_license_days_over_short": "-{count} dn.",
+  "sidebar_license_trial_left": [
+    {
+      "declarations": ["input count", "input date", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "Okres próbny kończy się {date} - został {count} dzień",
+        "count_plural=few": "Okres próbny kończy się {date} - zostały {count} dni",
+        "count_plural=many": "Okres próbny kończy się {date} - zostało {count} dni",
+        "count_plural=*": "Okres próbny kończy się {date} - zostało {count} dnia"
+      }
+    }
+  ],
+  "sidebar_license_expires_in": [
+    {
+      "declarations": ["input count", "input date", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "Licencja wygasa {date} - został {count} dzień",
+        "count_plural=few": "Licencja wygasa {date} - zostały {count} dni",
+        "count_plural=many": "Licencja wygasa {date} - zostało {count} dni",
+        "count_plural=*": "Licencja wygasa {date} - zostało {count} dnia"
+      }
+    }
+  ],
+  "sidebar_license_grace": [
+    {
+      "declarations": ["input count", "input date", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "Licencja wygasła {date}. Okres karencji: został {count} dzień, potem funkcje Pro się wyłączą",
+        "count_plural=few": "Licencja wygasła {date}. Okres karencji: zostały {count} dni, potem funkcje Pro się wyłączą",
+        "count_plural=many": "Licencja wygasła {date}. Okres karencji: zostało {count} dni, potem funkcje Pro się wyłączą",
+        "count_plural=*": "Licencja wygasła {date}. Okres karencji: zostało {count} dnia, potem funkcje Pro się wyłączą"
+      }
+    }
+  ],
+  "sidebar_license_expired": "Licencja wygasła {date}",
   "access_scope_path_outside": "Ścieżka użytkownika musi być równa {root} lub znajdować się w poddrzewie {root}.",
   "theme_label": "Motyw",
   "theme_light": "Jasny motyw",

@@ -27,6 +27,12 @@ const CONFIG_KEYS = [
   "MCP_TOOL_DISCOVERY",
   "VIRTUAL_MODEL_STRATEGIES",
   "USER_PATH_HEADER",
+  "LICENSE_BADGE",
+  "LICENSE_TRIAL",
+  "LICENSE_EXPIRES_AT",
+  "LICENSE_VALID_UNTIL",
+  "LICENSE_NOTICE_DAYS",
+  "LICENSE_WARNING_DAYS",
 ];
 
 // Strategies every gateway supports; used when the backend predates the

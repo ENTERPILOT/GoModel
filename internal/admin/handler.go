@@ -91,6 +91,12 @@ const (
 	DashboardConfigMCPToolDiscovery     = "MCP_TOOL_DISCOVERY"
 	DashboardConfigVMStrategies         = "VIRTUAL_MODEL_STRATEGIES"
 	DashboardConfigUserPathHeader       = "USER_PATH_HEADER"
+	DashboardConfigLicenseBadge         = "LICENSE_BADGE"
+	DashboardConfigLicenseTrial         = "LICENSE_TRIAL"
+	DashboardConfigLicenseExpiresAt     = "LICENSE_EXPIRES_AT"
+	DashboardConfigLicenseValidUntil    = "LICENSE_VALID_UNTIL"
+	DashboardConfigLicenseNoticeDays    = "LICENSE_NOTICE_DAYS"
+	DashboardConfigLicenseWarningDays   = "LICENSE_WARNING_DAYS"
 )
 
 // statusClientClosedRequest is the de facto status used by proxies for client-aborted requests.
@@ -129,6 +135,15 @@ type DashboardConfigResponse struct {
 	// reads user paths from (server.user_path_header), so the Playground sends
 	// the header this deployment actually honors.
 	UserPathHeader string `json:"USER_PATH_HEADER,omitempty"`
+	// The license a distribution registered (ext.License), so the sidebar
+	// shows its badge and the days left. Times are RFC 3339 in UTC, windows
+	// whole days; all are empty for open-source builds.
+	LicenseBadge       string `json:"LICENSE_BADGE,omitempty"`
+	LicenseTrial       string `json:"LICENSE_TRIAL,omitempty"`
+	LicenseExpiresAt   string `json:"LICENSE_EXPIRES_AT,omitempty"`
+	LicenseValidUntil  string `json:"LICENSE_VALID_UNTIL,omitempty"`
+	LicenseNoticeDays  string `json:"LICENSE_NOTICE_DAYS,omitempty"`
+	LicenseWarningDays string `json:"LICENSE_WARNING_DAYS,omitempty"`
 }
 
 type providerStatusSummaryResponse struct {
@@ -460,6 +475,12 @@ func normalizeDashboardRuntimeConfig(values DashboardConfigResponse) DashboardCo
 		MCPToolDiscovery:       strings.TrimSpace(values.MCPToolDiscovery),
 		VirtualModelStrategies: strings.TrimSpace(values.VirtualModelStrategies),
 		UserPathHeader:         strings.TrimSpace(values.UserPathHeader),
+		LicenseBadge:           strings.TrimSpace(values.LicenseBadge),
+		LicenseTrial:           strings.TrimSpace(values.LicenseTrial),
+		LicenseExpiresAt:       strings.TrimSpace(values.LicenseExpiresAt),
+		LicenseValidUntil:      strings.TrimSpace(values.LicenseValidUntil),
+		LicenseNoticeDays:      strings.TrimSpace(values.LicenseNoticeDays),
+		LicenseWarningDays:     strings.TrimSpace(values.LicenseWarningDays),
 	}
 }
 
