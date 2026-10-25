@@ -105,6 +105,7 @@ type geminiChoiceStreamState struct {
 	roleSent      bool
 	sawToolCalls  bool
 	nextToolIndex int
+	toolIDs       toolCallIDs
 	finishReason  string
 }
 
@@ -212,7 +213,7 @@ func (s *geminiStreamState) chatChunkChoice(candidate geminiCandidate, fallbackI
 		state.roleSent = true
 	}
 
-	content, toolCalls, signature := openAIMessageFromGeminiParts(candidate.Content.Parts, state.nextToolIndex)
+	content, toolCalls, signature := openAIMessageFromGeminiParts(candidate.Content.Parts, &state.toolIDs)
 	if content != "" {
 		delta["content"] = content
 	}

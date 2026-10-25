@@ -100,6 +100,39 @@ data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name"
 	assert.Equal(t, "lookup_time", results[1].FunctionResponse.Name)
 }
 
+func TestStreamChatCompletion_NativeMixedToolCallIDsStayUnique(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
+	server, _ := providertest.SSEServer(t, `data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"call_1","name":"lookup_weather","args":{}}}]}}]}
+
+data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"lookup_time","args":{}}},{"functionCall":{"id":"call_0","name":"lookup_news","args":{}}}]}}]}
+
+data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"call_1","name":"lookup_tide","args":{}}}]},"finishReason":"STOP"}]}
+
+`)
+
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
+	provider.SetModelsURL(server.URL)
+
+	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "gemini-3.5-flash",
+		Messages: []core.Message{{Role: "user", Content: "Weather, time, news and tide?"}},
+	})
+	require.NoError(t, err)
+
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	require.NoError(t, err)
+
+	toolCalls, _ := collectStreamToolCalls(t, string(raw))
+	ids := make([]any, 0, len(toolCalls))
+	for _, call := range toolCalls {
+		ids = append(ids, call["id"])
+	}
+	assert.Equal(t, []any{"call_1", "call_2", "call_0", "call_3"}, ids, "stream %s", raw)
+}
+
 func TestConvertChatRequestToGemini_GroupsParallelToolResults(t *testing.T) {
 	req, err := convertChatRequestToGemini(&core.ChatRequest{
 		Model: "gemini-3.5-flash",
