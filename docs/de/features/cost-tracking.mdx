@@ -140,7 +140,7 @@ Die Nutzungsseite filtert jede Karte, jedes Diagramm und das Request-Log nach Mo
 
 Der Bereich **Aufschlüsselung** schlüsselt die gefilterte Nutzung nach zwei Dimensionen auf. Zum Beispiel zeigen Zeilen **Nutzerpfad**, Spalten **Zeitraum** und Zeitraum **Monatlich** die Kosten pro Monat und Nutzerpfad. Wählen Sie die Kennzahl (Kosten, Tokens oder Requests); die Top 10 Zeilen und Spalten bleiben erhalten, der Rest wird unter **Sonstige** zusammengefasst. **Nutzerpfade gruppieren** fasst Pfade nach ihren ersten Segmenten zusammen, sodass `/team/alice/laptop` unter `/team/alice` zählt. Wechseln Sie zwischen gestapeltem Diagramm und Tabelle, und exportieren Sie die Tabelle samt Summen mit **CSV herunterladen**.
 
-Filter, Zeitraum und Aufschlüsselung stehen in der URL der Seite, ein kopierter Link öffnet also dieselbe Ansicht. Dieselben Daten liefert [`GET /admin/usage/breakdown`](/de/advanced/admin-endpoints#get-adminusagebreakdown), die Filter gelten für jeden Nutzungs-Endpunkt (siehe [Mehrwertige Filter](/de/advanced/admin-endpoints#mehrwertige-filter)).
+Filter, Zeitraum und Aufschlüsselung stehen in der URL der Seite, ein kopierter Link öffnet also dieselbe Ansicht. Dieselben Daten liefert [`GET /admin/usage/breakdown`](/de/advanced/admin-endpoints#get-adminusagebreakdown), die Filter gelten für jeden Nutzungs-Endpunkt außer `/admin/usage/throughput` (siehe [Mehrwertige Filter](/de/advanced/admin-endpoints#mehrwertige-filter)).
 
 ## Gespeicherte Kosten neu berechnen
 
