@@ -231,6 +231,31 @@ func TestChatToResponsesRequest_RejectsWhatItCannotCarry(t *testing.T) {
 	}
 }
 
+// A client replays the assistant turns it received, including the reasoning
+// text the gateway itself wrote. Those members have no place in the Responses
+// API, but they must not fail the request: rejecting them broke every follow-up
+// turn of a Responses-only model as soon as the client echoed the history.
+func TestChatToResponsesRequest_DropsReplayedReasoning(t *testing.T) {
+	req := &core.ChatRequest{
+		Model: "muse-spark-1.3-contributor",
+		Messages: []core.Message{
+			{Role: "user", Content: "hagamos un plan"},
+			{Role: "assistant", Content: "ok", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				"reasoning_content": json.RawMessage(`"pense el plan"`),
+			})},
+			{Role: "assistant", Content: "ok", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				"reasoning": json.RawMessage(`{"effort":"high"}`),
+			})},
+		},
+	}
+	got, err := chatToResponsesRequest(req)
+	require.NoError(t, err)
+	body, err := json.Marshal(got)
+	require.NoError(t, err)
+	assert.NotContains(t, string(body), "reasoning_content")
+	assert.NotContains(t, string(body), "pense el plan")
+}
+
 func TestChatCompletion_ViaResponsesRendersChatCompletion(t *testing.T) {
 	provider, capture := newRoutingProvider(t)
 	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{

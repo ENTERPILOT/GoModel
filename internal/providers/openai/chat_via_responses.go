@@ -126,12 +126,18 @@ func isOpenAIModelName(model string) bool {
 	return strings.HasPrefix(m, "gpt-") || strings.HasPrefix(m, "chatgpt-") || isOSeriesModel(m)
 }
 
+// chatEchoFields are members the gateway itself writes on assistant messages
+// and any client replays back with the history: the reasoning text of the
+// previous turn plus the provider state carried in extra_content. None of them
+// has a place in the Responses API, so they are dropped instead of failing the
+// request. Rejecting them made every follow-up turn on a Responses-only model
+// fail with 400 as soon as the client echoed the reasoning it had received.
+var chatEchoFields = []string{core.ExtraContentField, "reasoning_content", "reasoning"}
+
 // carriesChatOnlyFields reports whether a message, part or tool call has
 // members beyond the ones the translation maps (for example a speaker name).
-// Other providers' replay state (extra_content) is removed by the router
-// before the request reaches this provider.
 func carriesChatOnlyFields(fields core.UnknownJSONFields) bool {
-	return !fields.Without(core.ExtraContentField).IsEmpty()
+	return !fields.Without(chatEchoFields...).IsEmpty()
 }
 
 // requestedEffort returns the reasoning effort the caller asked for, from the
