@@ -124,7 +124,7 @@ Der spezifischste Selektor gewinnt, in dieser Reihenfolge: Provider/Modell, Mode
 
 Jede Nutzungszeile speichert außerdem den Aufschlag, zu dem sie abgerechnet wurde (`markup_percent`, `markup_selector`), sodass geänderte Aufschläge vergangene Abrechnungen nie umschreiben.
 
-Sobald Aufschläge aktiviert sind, zeigt die Nutzungsseite die abgerechneten Kosten neben den Provider-Kosten: eine Karte **Billed**, eine Spalte in den Aufschlüsselungen nach Modell, User Path und Label sowie eine Spalte im Request-Log, deren Tooltip den Aufschlag jeder Zeile nennt. Die Admin-API liefert sie als `total_billed_cost` in `/admin/usage/summary`, als `billed_cost` in `/admin/usage/models`, `/admin/usage/user-paths` und `/admin/usage/labels` sowie als `billed_cost`, `markup_percent` und `markup_selector` in den Einträgen von `/admin/usage/log`. Abgerechnete Summen enthalten abgerechnete Cache-Treffer, obwohl die übrigen Kostenwerte sie ausnehmen; die abgerechneten Kosten pro User Path sind daher der Betrag, den Sie jedem Kunden berechnen.
+Sobald Aufschläge aktiviert sind, zeigt das Dashboard die abgerechneten Kosten neben den Provider-Kosten: eine Karte **Billed** auf der Übersichts- und der Nutzungsseite, eine Spalte in jeder Nutzungsaufschlüsselung (Modell, User Path, Label, Request-Typ oder Endpoint und Session) sowie eine Spalte im Request-Log, deren Tooltip den Aufschlag jeder Zeile nennt. Die Admin-API liefert sie als `total_billed_cost` in `/admin/usage/summary`, als `billed_cost` in `/admin/usage/daily`, `/admin/usage/models`, `/admin/usage/user-paths`, `/admin/usage/labels`, `/admin/usage/endpoints` und `/admin/usage/sessions` sowie als `billed_cost`, `markup_percent` und `markup_selector` in den Einträgen von `/admin/usage/log`. Ein Tag, an dem nur Cache-Treffer abgerechnet wurden, erscheint trotzdem in `/admin/usage/daily`, mit null Requests. Abgerechnete Summen enthalten abgerechnete Cache-Treffer, obwohl die übrigen Kostenwerte sie ausnehmen; die abgerechneten Kosten pro User Path sind daher der Betrag, den Sie jedem Kunden berechnen.
 
 ## Summen im Dashboard
 
@@ -133,6 +133,14 @@ Sobald Aufschläge aktiviert sind, zeigt die Nutzungsseite die abgerechneten Kos
 - **Billed** – sichtbar, wenn Aufschläge aktiviert sind: Provider-Kosten plus Aufschlag, einschließlich abgerechneter Cache-Treffer.
 
 Ein Wert `---` bedeutet, dass die Kosten unbekannt sind, weil keine Preise verfügbar waren. Das ist nicht dasselbe wie `$0`.
+
+## Ausgaben filtern und aufschlüsseln
+
+Die Nutzungsseite filtert jede Karte, jedes Diagramm und das Request-Log nach Modell, Anbieter, Label, API-Schlüssel, Endpunkt, Nutzerpfad und Session. Jedes Dropdown nimmt mehrere Werte an: Ein Request erfüllt einen Filter, wenn er einen der gewählten Werte hat, und er muss jeden Filter erfüllen. Die Nutzerpfad-Auswahl zeigt bekannte Pfade als Baum, gruppiert nach Präfix; ein gewählter Knoten schließt alles darunter ein, und Sie können einen nicht aufgeführten Pfad eintippen.
+
+Der Bereich **Aufschlüsselung** schlüsselt die gefilterte Nutzung nach zwei Dimensionen auf. Zum Beispiel zeigen Zeilen **Nutzerpfad**, Spalten **Zeitraum** und Zeitraum **Monatlich** die Kosten pro Monat und Nutzerpfad. Wählen Sie die Kennzahl (Kosten, Tokens oder Requests); die Top 10 Zeilen und Spalten bleiben erhalten, der Rest wird unter **Sonstige** zusammengefasst. **Nutzerpfade gruppieren** fasst Pfade nach ihren ersten Segmenten zusammen, sodass `/team/alice/laptop` unter `/team/alice` zählt. Wechseln Sie zwischen gestapeltem Diagramm und Tabelle, und exportieren Sie die Tabelle samt Summen mit **CSV herunterladen**.
+
+Filter, Zeitraum und Aufschlüsselung stehen in der URL der Seite, ein kopierter Link öffnet also dieselbe Ansicht. Dieselben Daten liefert [`GET /admin/usage/breakdown`](/de/advanced/admin-endpoints#get-adminusagebreakdown), die Filter gelten für jeden Nutzungs-Endpunkt außer `/admin/usage/throughput` (siehe [Mehrwertige Filter](/de/advanced/admin-endpoints#mehrwertige-filter)).
 
 ## Gespeicherte Kosten neu berechnen
 

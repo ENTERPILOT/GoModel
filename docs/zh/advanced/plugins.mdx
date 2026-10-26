@@ -257,7 +257,7 @@ guardrails:
       config:                     # 根据插件的 ConfigSchema 进行校验
         mode: "regex"
         rules: |
-          sk-[A-Za-z0-9]{20,} => [redacted]
+          sk-[A-Za-z0-9_-]{20,} => [redacted]
 ```
 
 `config.yaml` 中的规则会按 `phase` 中的 `order` 写入托管的默认工作流。`type` 可以带有可选的 `plugin:` 前缀。

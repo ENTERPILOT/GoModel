@@ -42,6 +42,7 @@ const PROVIDER_DOC_SLUGS = new Set([
   "opencode-go",
   "oracle",
   "sglang",
+  "together",
   "vertex",
   "vllm",
   "xai",

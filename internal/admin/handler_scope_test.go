@@ -105,13 +105,16 @@ func TestScopedUserPathFilter(t *testing.T) {
 		scope    string
 		query    string
 		wantPath string
-		wantCode string
+		// wantPaths is the usage any-of filter; usage keeps the scope root
+		// in UserPath so the filter can only narrow it.
+		wantPaths []string
+		wantCode  string
 	}{
 		{name: "global keeps empty", scope: "", query: "", wantPath: ""},
-		{name: "global keeps any path", scope: "", query: "/team/beta", wantPath: "/team/beta"},
+		{name: "global keeps any path", scope: "", query: "/team/beta", wantPath: "/team/beta", wantPaths: []string{"/team/beta"}},
 		{name: "scoped empty defaults to root", scope: scopeAlpha, query: "", wantPath: scopeAlpha},
-		{name: "scoped root kept", scope: scopeAlpha, query: scopeAlpha, wantPath: scopeAlpha},
-		{name: "scoped descendant kept", scope: scopeAlpha, query: "/team/alpha/svc", wantPath: "/team/alpha/svc"},
+		{name: "scoped root kept", scope: scopeAlpha, query: scopeAlpha, wantPath: scopeAlpha, wantPaths: []string{scopeAlpha}},
+		{name: "scoped descendant kept", scope: scopeAlpha, query: "/team/alpha/svc", wantPath: "/team/alpha/svc", wantPaths: []string{"/team/alpha/svc"}},
 		{name: "scoped sibling rejected", scope: scopeAlpha, query: "/team/beta", wantCode: codeUserPathOutOfScope},
 		{name: "scoped ancestor rejected", scope: scopeAlpha, query: "/team", wantCode: codeUserPathOutOfScope},
 	}
@@ -128,7 +131,8 @@ func TestScopedUserPathFilter(t *testing.T) {
 				assert.Equal(t, tt.wantCode, errorCode(t, rec))
 			} else {
 				assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-				assert.Equal(t, tt.wantPath, usageReader.lastUsageLog.UserPath)
+				assert.Equal(t, tt.scope, usageReader.lastUsageLog.UserPath)
+				assert.Equal(t, tt.wantPaths, usageReader.lastUsageLog.UserPaths)
 			}
 
 			c, rec = scopedRequest(t, http.MethodGet, "/admin/audit/log?user_path="+tt.query, "", tt.scope)
@@ -140,6 +144,38 @@ func TestScopedUserPathFilter(t *testing.T) {
 				assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 				assert.Equal(t, tt.wantPath, auditReader.lastQuery.UserPath)
 			}
+		})
+	}
+}
+
+func TestScopedUsageMultiUserPathFilter(t *testing.T) {
+	tests := []struct {
+		name      string
+		scope     string
+		query     string
+		wantPaths []string
+		wantCode  string
+	}{
+		{name: "global keeps every path", query: "user_path=/team/alpha&user_path=/team/beta", wantPaths: []string{"/team/alpha", "/team/beta"}},
+		{name: "scoped keeps descendants", scope: scopeAlpha, query: "user_path=/team/alpha/a&user_path=/team/alpha/b", wantPaths: []string{"/team/alpha/a", "/team/alpha/b"}},
+		{name: "scoped rejects any path outside", scope: scopeAlpha, query: "user_path=/team/alpha/a&user_path=/team/beta", wantCode: codeUserPathOutOfScope},
+		{name: "commas stay inside one path", query: "user_path=/team/a,b", wantPaths: []string{"/team/a,b"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			usageReader := &mockUsageReader{breakdown: &usage.UsageBreakdown{}}
+			h := NewHandler(usageReader, nil)
+
+			c, rec := scopedRequest(t, http.MethodGet, "/admin/usage/breakdown?rows=model&"+tt.query, "", tt.scope)
+			require.NoError(t, h.UsageBreakdown(c))
+			if tt.wantCode != "" {
+				assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+				assert.Equal(t, tt.wantCode, errorCode(t, rec))
+				return
+			}
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			assert.Equal(t, tt.scope, usageReader.lastBreakdown.UserPath)
+			assert.Equal(t, tt.wantPaths, usageReader.lastBreakdown.UserPaths)
 		})
 	}
 }

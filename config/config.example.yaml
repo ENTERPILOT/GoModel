@@ -558,6 +558,18 @@ providers:
   anthropic:
     type: anthropic
     api_key: "sk-ant-..."
+    # Workload identity federation instead of api_key: exchange the platform's
+    # identity token for short-lived access tokens (openai and anthropic only).
+    # An api_key, when set, wins. Equivalent env vars: ANTHROPIC_FEDERATION_RULE_ID,
+    # ANTHROPIC_ORGANIZATION_ID, ANTHROPIC_SERVICE_ACCOUNT_ID,
+    # ANTHROPIC_IDENTITY_TOKEN_FILE, ANTHROPIC_WORKSPACE_ID.
+    # For openai, set identity_provider_id and service_account_id instead.
+    # workload_identity:
+    #   identity_token_file: /var/run/secrets/anthropic.com/token  # re-read on each exchange
+    #   federation_rule_id: fdrl_...
+    #   organization_id: 00000000-0000-0000-0000-000000000000
+    #   service_account_id: svac_...
+    #   workspace_id: wrkspc_...
 
   # ChatGPT subscription (Codex backend). Serves /v1/responses only and is
   # billed against your ChatGPT plan. The key is the access token from
@@ -624,6 +636,11 @@ providers:
     type: deepinfra
     api_key: "${DEEPINFRA_API_KEY}"
     # base_url defaults to "https://api.deepinfra.com/v1/openai".
+
+  together:
+    type: together
+    api_key: "${TOGETHER_API_KEY}"
+    # base_url defaults to "https://api.together.ai/v1".
 
   chutes:
     type: chutes

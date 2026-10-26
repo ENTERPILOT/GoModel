@@ -82,6 +82,42 @@ werden nicht unterstützt. Details zur Parameterabbildung und zu den Preisen
 finden Sie in den
 [Provider-Hinweisen der Images API](/de/advanced/images-api#google-gemini).
 
+### Bilder in Chat-Responses
+
+Im nativen Modus können bildfähige Modelle (`gemini-2.5-flash-image`,
+`gemini-3-pro-image-preview`, ...) Bilder aus Chat Completions und Responses
+zurückgeben. `message.content` bleibt der Text-String. Bei Chat Completions
+landen die Bilder in einem separaten Array `images`, demselben Feld, das auch
+OpenRouter verwendet. Clients, die das Feld nicht auslesen, ignorieren es
+einfach:
+
+```json
+"message": {
+  "role": "assistant",
+  "content": "Here is an image of a cat",
+  "images": [{
+    "type": "image_url",
+    "image_url": {
+      "url": "data:image/png;base64,iVBORw0...",
+      "extra_content": {"google": {"thought_signature": "EvAC..."}}
+    }
+  }]
+}
+```
+
+In der Responses API ist jedes Bild ein eigenes Output-Item
+`image_generation_call`. Das Base64-Bild steht in `result` und das Format in
+`output_format`, wie im Output von OpenAI. Um das Bild in einem späteren Turn zu
+bearbeiten, senden Sie die Assistant-Nachricht (mit `images`) oder das Item
+`image_generation_call` unverändert zurück, damit Gemini die Thought Signature
+jedes Bildes erhält. Clients von `/v1/messages` (Anthropic Messages API)
+erhalten nur den Text. Gestreamte Responses enthalten generierte Bilder noch
+nicht.
+
+Jedes Bild umfasst mehrere Megabyte Base64. Audit-Logs erfassen höchstens 1 MB
+eines Response-Bodys, sodass ein protokollierter Body gekürzt und entsprechend
+markiert wird. Der Response-Cache speichert die gesamte Response.
+
 ## Reasoning Effort
 
 Im nativen Modus wird `reasoning_effort` (oder `reasoning.effort`) in Geminis

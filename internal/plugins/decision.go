@@ -72,7 +72,9 @@ func BlockError(d pluginapi.Decision, defaultStatus int) *core.GatewayError {
 	}
 	var gatewayErr *core.GatewayError
 	if status >= http.StatusInternalServerError {
-		gatewayErr = core.NewProviderError("", status, message, nil)
+		// The decision came from a plugin, not from an upstream provider, so
+		// the error type names the gateway rather than a provider.
+		gatewayErr = core.NewInternalErrorWithStatus(status, message, nil)
 	} else {
 		gatewayErr = core.NewInvalidRequestErrorWithStatus(status, message, nil)
 	}
@@ -83,10 +85,12 @@ func blockStatusOK(status int) bool {
 	return status >= http.StatusBadRequest && status <= 599
 }
 
-// FailureError renders a fail-closed plugin error: HTTP 500 with code
-// plugin_failure. The instance name stays out of the client message.
+// FailureError renders a fail-closed plugin error: HTTP 500 with type
+// internal_error and code plugin_failure. No provider is involved, so the
+// error is attributed to the gateway. The instance name stays out of the
+// client message.
 func FailureError(err error) *core.GatewayError {
-	return core.NewProviderError("", http.StatusInternalServerError, "a request plugin failed", err).WithCode(CodePluginFailure)
+	return core.NewInternalErrorWithStatus(http.StatusInternalServerError, "a request plugin failed", err).WithCode(CodePluginFailure)
 }
 
 // WarnHeaderValue renders the X-GoModel-Guardrail header for a warn decision.

@@ -91,6 +91,12 @@ const (
 	DashboardConfigMCPToolDiscovery     = "MCP_TOOL_DISCOVERY"
 	DashboardConfigVMStrategies         = "VIRTUAL_MODEL_STRATEGIES"
 	DashboardConfigUserPathHeader       = "USER_PATH_HEADER"
+	DashboardConfigLicenseBadge         = "LICENSE_BADGE"
+	DashboardConfigLicenseTrial         = "LICENSE_TRIAL"
+	DashboardConfigLicenseExpiresAt     = "LICENSE_EXPIRES_AT"
+	DashboardConfigLicenseValidUntil    = "LICENSE_VALID_UNTIL"
+	DashboardConfigLicenseNoticeDays    = "LICENSE_NOTICE_DAYS"
+	DashboardConfigLicenseWarningDays   = "LICENSE_WARNING_DAYS"
 )
 
 // statusClientClosedRequest is the de facto status used by proxies for client-aborted requests.
@@ -129,6 +135,15 @@ type DashboardConfigResponse struct {
 	// reads user paths from (server.user_path_header), so the Playground sends
 	// the header this deployment actually honors.
 	UserPathHeader string `json:"USER_PATH_HEADER,omitempty"`
+	// The license a distribution registered (ext.License), so the sidebar
+	// shows its badge and the days left. Times are RFC 3339 in UTC, windows
+	// whole days; all are empty for open-source builds.
+	LicenseBadge       string `json:"LICENSE_BADGE,omitempty"`
+	LicenseTrial       string `json:"LICENSE_TRIAL,omitempty"`
+	LicenseExpiresAt   string `json:"LICENSE_EXPIRES_AT,omitempty"`
+	LicenseValidUntil  string `json:"LICENSE_VALID_UNTIL,omitempty"`
+	LicenseNoticeDays  string `json:"LICENSE_NOTICE_DAYS,omitempty"`
+	LicenseWarningDays string `json:"LICENSE_WARNING_DAYS,omitempty"`
 }
 
 type providerStatusSummaryResponse struct {
@@ -460,6 +475,12 @@ func normalizeDashboardRuntimeConfig(values DashboardConfigResponse) DashboardCo
 		MCPToolDiscovery:       strings.TrimSpace(values.MCPToolDiscovery),
 		VirtualModelStrategies: strings.TrimSpace(values.VirtualModelStrategies),
 		UserPathHeader:         strings.TrimSpace(values.UserPathHeader),
+		LicenseBadge:           strings.TrimSpace(values.LicenseBadge),
+		LicenseTrial:           strings.TrimSpace(values.LicenseTrial),
+		LicenseExpiresAt:       strings.TrimSpace(values.LicenseExpiresAt),
+		LicenseValidUntil:      strings.TrimSpace(values.LicenseValidUntil),
+		LicenseNoticeDays:      strings.TrimSpace(values.LicenseNoticeDays),
+		LicenseWarningDays:     strings.TrimSpace(values.LicenseWarningDays),
 	}
 }
 
@@ -511,12 +532,15 @@ func parseUsageParams(c *echo.Context) (usage.UsageQueryParams, error) {
 		params.Interval = "daily"
 	}
 	params.CacheMode = c.QueryParam("cache_mode")
-	params.Model = strings.TrimSpace(c.QueryParam("model"))
-	params.Provider = strings.TrimSpace(c.QueryParam("provider"))
-	params.Label = strings.TrimSpace(c.QueryParam("label"))
+	// Multi-value filters repeat the parameter (model=a&model=b). Values that
+	// cannot hold a comma also accept a comma-separated list, like endpoint
+	// always has; labels and user paths may contain commas, so they do not.
+	params.Models = queryValues(c, "model", true)
+	params.Providers = queryValues(c, "provider", true)
+	params.Labels = queryValues(c, "label", false)
+	params.AuthKeyIDs = queryValues(c, "auth_key_id", true)
+	params.Endpoints = queryValues(c, "endpoint", true)
 	params.SessionID = strings.TrimSpace(c.QueryParam("session_id"))
-	params.AuthKeyID = strings.TrimSpace(c.QueryParam("auth_key_id"))
-	params.Endpoints = parseCommaList(c.QueryParam("endpoint"))
 	if raw := c.QueryParam("operation"); raw != "" {
 		ops, unknown, ok := core.ParseOperations(raw)
 		if !ok {
@@ -525,27 +549,34 @@ func parseUsageParams(c *echo.Context) (usage.UsageQueryParams, error) {
 		params.Operations = ops
 	}
 
-	userPath, err := scopedUserPath(c, "user_path", c.QueryParam("user_path"))
+	scope, userPaths, err := scopedUserPaths(c, "user_path", queryValues(c, "user_path", false))
 	if err != nil {
 		return params, err
 	}
-	params.UserPath = userPath
+	params.UserPath = scope
+	params.UserPaths = userPaths
 
 	return params, nil
 }
 
-// parseCommaList splits a comma-separated query value, trimming entries and
-// dropping blanks and duplicates.
-func parseCommaList(raw string) []string {
+// queryValues returns every value of a repeated query parameter, trimmed,
+// without blanks or duplicates. splitCommas also splits each value on commas.
+func queryValues(c *echo.Context, name string, splitCommas bool) []string {
 	var values []string
 	seen := map[string]bool{}
-	for part := range strings.SplitSeq(raw, ",") {
-		value := strings.TrimSpace(part)
-		if value == "" || seen[value] {
-			continue
+	for _, raw := range c.QueryParams()[name] {
+		parts := []string{raw}
+		if splitCommas {
+			parts = strings.Split(raw, ",")
 		}
-		seen[value] = true
-		values = append(values, value)
+		for _, part := range parts {
+			value := strings.TrimSpace(part)
+			if value == "" || seen[value] {
+				continue
+			}
+			seen[value] = true
+			values = append(values, value)
+		}
 	}
 	return values
 }

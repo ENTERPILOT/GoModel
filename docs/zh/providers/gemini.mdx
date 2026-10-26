@@ -49,6 +49,28 @@ GoModel 为原生 Gemini 和兼容 OpenAI 的 API 分别维护内部的 Base URL
 
 在原生模式下，[兼容 OpenAI 的图片端点](/zh/advanced/images-api)可用于 Gemini 图片模型（`gemini-2.5-flash-image` 等，通过 `generateContent`）。Google 已于 2026 年 8 月从 AI Studio API 中下线 Imagen；Imagen 仍可在 [Vertex AI](/zh/providers/vertex) 上使用。图片编辑需要原生模式和 Gemini 图片模型；不支持蒙版。关于参数映射和定价详情，请参阅 [Images API 的提供商说明](/zh/advanced/images-api#google-gemini)。
 
+### 聊天响应中的图片
+
+在原生模式下，支持图片的模型（`gemini-2.5-flash-image`、`gemini-3-pro-image-preview` 等）可以在 Chat Completions 和 Responses 中返回图片。`message.content` 仍为文本字符串。在 Chat Completions 上，图片放在单独的 `images` 数组中，与 OpenRouter 使用的字段相同。不读取该字段的客户端会直接忽略它：
+
+```json
+"message": {
+  "role": "assistant",
+  "content": "Here is an image of a cat",
+  "images": [{
+    "type": "image_url",
+    "image_url": {
+      "url": "data:image/png;base64,iVBORw0...",
+      "extra_content": {"google": {"thought_signature": "EvAC..."}}
+    }
+  }]
+}
+```
+
+在 Responses API 上，每张图片都是一个单独的 `image_generation_call` 输出项。Base64 图片位于 `result` 中，格式位于 `output_format` 中，与 OpenAI 的输出一致。如需在后续轮次中编辑该图片，请原样回传助手消息（包含 `images`）或 `image_generation_call` 输出项，以便 Gemini 获得每张图片的思考签名。`/v1/messages`（Anthropic Messages API）客户端只会收到文本。流式响应目前尚不包含生成的图片。
+
+每张图片都是数 MB 的 Base64 数据。审计日志最多捕获 1 MB 的响应体，因此记录的响应体会被截断并标记为已截断。响应缓存会存储完整的响应。
+
 ## 推理强度
 
 在原生模式下，`reasoning_effort`（或 `reasoning.effort`）会被转换为 Gemini 的 `thinkingConfig`：
