@@ -179,3 +179,30 @@ Recalculation reprices billed cost with the markup each row was billed at, and b
   result reports how many rows still lack pricing. Token counts are never
   modified.
 </Warning>
+
+## Invoice export (GoModel Pro)
+
+<Info>
+  Invoice export requires a GoModel Pro license with the `billing`
+  entitlement, and markups enabled (`PRICING_MARKUPS_ENABLED=true`). Without
+  the entitlement the endpoint returns 403 `invoice_export_not_entitled`;
+  with markups off it returns 409 `markups_disabled`.
+</Info>
+
+`GET /admin/usage/invoice` exports billed usage for a period, one block per customer. Each customer is a user path; with `parent`, each direct child of that path is one customer, the same way [per-child budgets](/features/budgets#dynamic-per-child-budgets) meter them, so `parent=/customers` bills `/customers/acme/app1` and `/customers/acme/app2` together under `/customers/acme`. Usage recorded on the parent itself stays under the parent. Without `parent`, every user path is its own customer.
+
+It takes the same date range and filters as the other usage endpoints, plus `format=csv` (default, downloaded as `gomodel-invoice-<start>-to-<end>.csv`) or `format=json`. On the usage page, **Export invoice** downloads the CSV for the selected date range and filters.
+
+```bash
+curl -OJ "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=2026-10-01&end_date=2026-10-31" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```csv
+row_type,period_start,period_end,currency,customer,model,provider,requests,input_tokens,output_tokens,provider_cost,billed_cost,effective_markup_percent
+item,2026-10-01,2026-10-31,USD,/customers/acme,gpt-5,openai,1200,950000,210000,3.2875,3.945,20
+subtotal,2026-10-01,2026-10-31,USD,/customers/acme,,,1200,950000,210000,3.2875,3.945,20
+total,2026-10-01,2026-10-31,USD,,,,1200,950000,210000,3.2875,3.945,20
+```
+
+Each line item is one model on one provider instance. `row_type` tells line items from each customer's `subtotal` and the grand `total`, so filter on `item` before summing in a spreadsheet. Amounts are plain USD decimals; an empty cost means it is unknown (no pricing). Requests, tokens, and provider cost cover requests sent to providers; billed cost also includes billed response-cache hits, as in the other billed views. `effective_markup_percent` is billed cost over provider cost, minus one, so billed cache hits raise it.

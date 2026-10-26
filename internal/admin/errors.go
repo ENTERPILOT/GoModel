@@ -46,6 +46,14 @@ func quotaTemplatesUnavailableError() error {
 	).WithCode("quota_templates_not_entitled")
 }
 
+func invoiceExportUnavailableError() error {
+	return core.NewInvalidRequestErrorWithStatus(
+		http.StatusForbidden,
+		"invoice export requires a GoModel Pro license with the billing entitlement",
+		nil,
+	).WithCode("invoice_export_not_entitled")
+}
+
 func billedBudgetsUnavailableError() error {
 	return core.NewInvalidRequestErrorWithStatus(
 		http.StatusForbidden,

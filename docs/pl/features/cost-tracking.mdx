@@ -179,3 +179,30 @@ Przeliczanie ponownie wycenia koszt rozliczeniowy z narzutem, z jakim rozliczono
   podaje, ile wierszy nadal nie ma cennika. Liczby tokenów nigdy nie są
   modyfikowane.
 </Warning>
+
+## Eksport faktur (GoModel Pro)
+
+<Info>
+  Eksport faktur wymaga licencji GoModel Pro z uprawnieniem `billing` oraz
+  włączonych narzutów (`PRICING_MARKUPS_ENABLED=true`). Bez uprawnienia
+  endpoint zwraca 403 `invoice_export_not_entitled`, a przy wyłączonych
+  narzutach 409 `markups_disabled`.
+</Info>
+
+`GET /admin/usage/invoice` eksportuje rozliczone użycie za okres, po jednym bloku na klienta. Każdy klient to ścieżka użytkownika; z `parent` każdy bezpośredni potomek tej ścieżki jest jednym klientem, tak jak liczą je [budżety dla każdego potomka](/pl/features/budgets). `parent=/customers` rozlicza więc `/customers/acme/app1` i `/customers/acme/app2` razem pod `/customers/acme`. Użycie zapisane bezpośrednio na ścieżce nadrzędnej zostaje przy niej. Bez `parent` każda ścieżka użytkownika jest osobnym klientem.
+
+Endpoint przyjmuje ten sam zakres dat i te same filtry co pozostałe endpointy użycia, a także `format=csv` (domyślnie, pobierany jako `gomodel-invoice-<start>-to-<end>.csv`) lub `format=json`. Na stronie użycia przycisk **Eksportuj fakturę** pobiera CSV dla wybranego zakresu dat i filtrów.
+
+```bash
+curl -OJ "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=2026-10-01&end_date=2026-10-31" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```csv
+row_type,period_start,period_end,currency,customer,model,provider,requests,input_tokens,output_tokens,provider_cost,billed_cost,effective_markup_percent
+item,2026-10-01,2026-10-31,USD,/customers/acme,gpt-5,openai,1200,950000,210000,3.2875,3.945,20
+subtotal,2026-10-01,2026-10-31,USD,/customers/acme,,,1200,950000,210000,3.2875,3.945,20
+total,2026-10-01,2026-10-31,USD,,,,1200,950000,210000,3.2875,3.945,20
+```
+
+Każda pozycja to jeden model na jednej instancji providera. `row_type` odróżnia pozycje (`item`) od sumy częściowej każdego klienta (`subtotal`) i sumy całkowitej (`total`), więc przed sumowaniem w arkuszu kalkulacyjnym zostaw tylko wiersze `item`. Kwoty to zwykłe liczby dziesiętne w USD; pusty koszt oznacza, że jest nieznany (brak cennika). Requesty, tokeny i koszt providera obejmują requesty wysłane do providerów; rozliczony koszt obejmuje też rozliczone cache hity odpowiedzi tak jak w pozostałych widokach rozliczeń. `effective_markup_percent` to stosunek rozliczonego kosztu do kosztu providera minus jeden, więc rozliczone cache hity go podnoszą.

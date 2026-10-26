@@ -173,3 +173,28 @@ GoModel 选取覆盖请求 user path 的最深一级已配置路径（`/acme` �
   重新计算会**覆盖**每条匹配记录的成本字段，并**清除**模型已无法解析到定价的记录的成本。
   结果会报告仍然缺少定价的记录数量。Token 数永远不会被修改。
 </Warning>
+
+## 账单导出（GoModel Pro）
+
+<Info>
+  账单导出需要带有 `billing` 授权的 GoModel Pro 许可证，并且需要启用加价（`PRICING_MARKUPS_ENABLED=true`）。
+  没有该授权时，端点返回 403 `invoice_export_not_entitled`；加价关闭时返回 409 `markups_disabled`。
+</Info>
+
+`GET /admin/usage/invoice` 导出某个时间段的计费用量，每个客户一个区块。每个客户是一个用户路径；设置 `parent` 后，该路径的每个直接子路径就是一个客户，与[子路径预算](/zh/features/budgets)的计量方式相同。因此 `parent=/customers` 会把 `/customers/acme/app1` 和 `/customers/acme/app2` 一起计入 `/customers/acme`。直接记录在父路径上的用量仍归父路径所有。不设置 `parent` 时，每个用户路径都是独立的客户。
+
+该端点接受与其他用量端点相同的日期范围和筛选条件，另外支持 `format=csv`（默认，下载为 `gomodel-invoice-<start>-to-<end>.csv`）或 `format=json`。在用量页面上，**导出账单** 会下载所选日期范围和筛选条件下的 CSV。
+
+```bash
+curl -OJ "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=2026-10-01&end_date=2026-10-31" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```csv
+row_type,period_start,period_end,currency,customer,model,provider,requests,input_tokens,output_tokens,provider_cost,billed_cost,effective_markup_percent
+item,2026-10-01,2026-10-31,USD,/customers/acme,gpt-5,openai,1200,950000,210000,3.2875,3.945,20
+subtotal,2026-10-01,2026-10-31,USD,/customers/acme,,,1200,950000,210000,3.2875,3.945,20
+total,2026-10-01,2026-10-31,USD,,,,1200,950000,210000,3.2875,3.945,20
+```
+
+每个明细项是一个模型在一个 provider 实例上的用量。`row_type` 用于区分明细项（`item`）、每个客户的小计（`subtotal`）和总计（`total`），因此在电子表格中求和前请先筛选 `item`。金额为普通的 USD 小数；成本为空表示未知（没有定价）。请求数、token 数和 provider 成本只包含发送给 provider 的请求；计费成本还包含已计费的响应缓存命中，与其他计费视图一致。`effective_markup_percent` 是计费成本除以 provider 成本再减一，因此已计费的缓存命中会提高该值。
