@@ -106,7 +106,11 @@ func headerValues(server *ManagedServer) []string {
 // changed (ADR-0014 §5). Every other server keeps its session untouched. A
 // server whose references cannot be re-resolved keeps its current headers.
 func (s *Service) RotateSecrets(ctx context.Context, fields []string) error {
-	return s.reload(ctx, func(name string) bool {
+	unresolved, err := s.reload(ctx, func(name string) bool {
 		return s.secrets.EntityOwnsAny(serverSecretEntity(name), fields)
 	})
+	if err != nil {
+		return err
+	}
+	return unresolved
 }

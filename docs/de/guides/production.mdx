@@ -357,11 +357,21 @@ Preisüberschreibungen, Tagging-Regeln, Guardrails, Workflows und MCP-Server. Ei
 auf einem anderen Replikat hinzugefügter Provider routet, sobald seine
 Modellliste abgerufen wurde.
 
-Ein Replikat, das eine Änderung nicht übernehmen kann, protokolliert eine
-Warnung und versucht es bei jeder Abfrage erneut. Die langsameren periodischen
-Aktualisierungen, die einige dieser Bereiche bereits hatten, laufen als
-Rückfallebene weiter, und `POST /admin/runtime/refresh` lädt die Snapshots auf
-dem empfangenden Replikat neu, Budgets und Rate-Limits eingeschlossen.
+Ein Replikat, das eine Änderung nicht übernehmen kann, protokolliert einmal eine
+Warnung und versucht es bei jeder Abfrage erneut, bis sie gilt. Eine Ausnahme:
+Ein gespeicherter Provider, der sich auf einem Replikat nicht aufbauen lässt,
+behält, was unter seinem Namen bereits lief, und wird bei der nächsten Änderung
+an einem beliebigen gespeicherten Provider erneut versucht, da jede Änderung alle
+neu lädt, oder beim Neustart. Ein Replikat, das eine Änderung nicht in
+`config_revisions` eintragen kann, versucht es ebenfalls bei jeder Abfrage
+erneut. Bis das gelingt, übernehmen die anderen Replikate die Änderung mit einer
+späteren Änderung im selben Bereich, mit der langsameren periodischen
+Aktualisierung, die einige Bereiche bereits hatten, mit einem manuellen
+Runtime-Refresh oder beim Neustart.
+
+`POST /admin/runtime/refresh` lädt auf dem empfangenden Replikat verwaltete
+API-Keys, virtuelle Modelle, Guardrails, Workflows, MCP-Server, Budgets und
+Rate-Limits neu. Gespeicherte Provider-Zugangsdaten lädt es nicht neu.
 
 <Warning>
   **Das Zurücksetzen von Rate-Limit-Zählern gilt nur auf dem Replikat, das den

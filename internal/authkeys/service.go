@@ -45,6 +45,9 @@ type Service struct {
 
 	mu       sync.RWMutex
 	snapshot snapshot
+	// refreshMu serializes Refresh from the store read through the swap, so
+	// a slower refresh never installs an older one over a newer one.
+	refreshMu sync.Mutex
 
 	// changed is called after every successful write; see SetChangeNotifier.
 	changed func(context.Context)
@@ -77,6 +80,8 @@ func NewService(store Store) (*Service, error) {
 
 // Refresh reloads keys from storage and atomically swaps the in-memory snapshot.
 func (s *Service) Refresh(ctx context.Context) error {
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
 	keys, err := s.store.List(ctx)
 	if err != nil {
 		return fmt.Errorf("list auth keys: %w", err)

@@ -33,6 +33,9 @@ type Service struct {
 
 	mu    sync.RWMutex
 	rules []Rule
+	// refreshMu serializes Refresh from the store read through the swap, so
+	// a slower refresh never installs an older snapshot over a newer one.
+	refreshMu sync.Mutex
 
 	quotaTemplates bool
 
@@ -123,6 +126,8 @@ func (s *Service) Refresh(ctx context.Context) error {
 	if s == nil || s.store == nil {
 		return ErrUnavailable
 	}
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
 	rules, err := s.store.ListRules(ctx)
 	if err != nil {
 		return err

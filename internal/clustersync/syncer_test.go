@@ -12,11 +12,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakeStore is an in-memory Store whose reads can be made to fail.
+// fakeStore is an in-memory Store whose reads and bumps can be made to fail.
 type fakeStore struct {
 	mu        sync.Mutex
 	revisions map[string]int64
 	readErr   error
+	bumpErr   error
 }
 
 func newFakeStore(revisions map[string]int64) *fakeStore {
@@ -26,6 +27,9 @@ func newFakeStore(revisions map[string]int64) *fakeStore {
 func (f *fakeStore) Bump(_ context.Context, entity string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.bumpErr != nil {
+		return f.bumpErr
+	}
 	if f.revisions == nil {
 		f.revisions = map[string]int64{}
 	}
@@ -192,4 +196,38 @@ func TestNilSyncerIsInert(t *testing.T) {
 	syncer.Start(context.Background())
 	assert.Nil(t, syncer.Notifier("budgets"))
 	assert.NoError(t, syncer.Close())
+}
+
+func TestSyncerRetriesFailedAnnouncements(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore(nil)
+	syncer, err := NewSyncer(ctx, store)
+	require.NoError(t, err)
+	budgets := &countingRefresh{}
+	syncer.Register("budgets", budgets.refresh)
+	notify := syncer.Notifier("budgets")
+
+	store.mu.Lock()
+	store.bumpErr = errors.New("database unavailable")
+	store.mu.Unlock()
+	notify(ctx)
+	notify(ctx)
+	syncer.poll(ctx)
+	revisions, err := store.Revisions(ctx)
+	require.NoError(t, err)
+	assert.Zero(t, revisions["budgets"], "nothing is announced while bumps fail")
+
+	store.mu.Lock()
+	store.bumpErr = nil
+	store.mu.Unlock()
+	syncer.poll(ctx)
+	revisions, err = store.Revisions(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), revisions["budgets"], "the failed announcements are retried, coalesced")
+	assert.Equal(t, 1, budgets.count())
+
+	syncer.poll(ctx)
+	revisions, err = store.Revisions(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), revisions["budgets"], "an announced change is not announced again")
 }

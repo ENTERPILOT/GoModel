@@ -313,10 +313,18 @@ revocation), user policies, virtual models, pricing overrides, tagging rules,
 guardrails, workflows, and MCP servers. A provider added on another replica
 starts routing once its model list has been fetched.
 
-A replica that fails to apply a change logs a warning and retries on every poll.
-The slower periodic refreshes some of these features already had keep running as
-a fallback, and `POST /admin/runtime/refresh` reloads the snapshots on the
-replica that receives it, budgets and rate limits included.
+A replica that fails to apply a change logs a warning once and retries on every
+poll until it applies. One exception: a stored provider that fails to build on a
+replica keeps whatever was already running under its name and is retried on the
+next change to any stored provider, since each change reloads all of them, or on
+restart. A replica that cannot record a change in `config_revisions` also
+retries on every poll. Until it succeeds, the other replicas pick the change up
+from a later change to the same feature, from the slower periodic refresh some
+features already had, from a manual runtime refresh, or on restart.
+
+`POST /admin/runtime/refresh` reloads managed API keys, virtual models,
+guardrails, workflows, MCP servers, budgets, and rate limits on the replica that
+receives it. It does not reload stored provider credentials.
 
 <Warning>
   **Resetting rate limit counters applies to the replica that handled the

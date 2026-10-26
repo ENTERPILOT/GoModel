@@ -91,6 +91,10 @@ type Service struct {
 	// skipped holds, by name, why the last full reload left out stored
 	// servers whose references did not resolve. Guarded by reloadMu.
 	skipped map[string]error
+	// unresolved holds, by name, the last logged reason a stored server's
+	// references did not resolve, so a reload retried every few seconds logs
+	// a lasting failure once. Guarded by reloadMu.
+	unresolved map[string]string
 	// searchDiscovery is the default for sessions that do not send
 	// ToolDiscoveryHeader: serve search_tools/call_tool instead of the catalog.
 	searchDiscovery bool
@@ -201,6 +205,7 @@ func NewService(ctx context.Context, opts Options) (*Service, error) {
 		virtualStore:    opts.VirtualStore,
 		secrets:         opts.Secrets,
 		recorded:        make(map[string]struct{}),
+		unresolved:      make(map[string]string),
 		searchDiscovery: opts.ToolDiscovery == config.MCPToolDiscoverySearch,
 		bindings:        make(map[string]sessionBinding),
 		requestCancels:  make(map[uint64]context.CancelFunc),
@@ -230,10 +235,15 @@ func NewService(ctx context.Context, opts Options) (*Service, error) {
 	return s, nil
 }
 
-// Refresh re-reads the stores and reconciles; the admin runtime refresh calls
-// it, as does the background loop.
+// Refresh re-reads the stores and reconciles, like Reload, but also reports
+// the stored servers whose references did not resolve, so the admin runtime
+// refresh shows them and the cluster sync poller retries them.
 func (s *Service) Refresh(ctx context.Context) error {
-	return s.Reload(ctx)
+	unresolved, err := s.reload(ctx, nil)
+	if err != nil {
+		return err
+	}
+	return unresolved
 }
 
 func (s *Service) refreshLoop(interval time.Duration) {
@@ -262,12 +272,15 @@ func (s *Service) refreshLoop(interval time.Duration) {
 // server runs, it keeps its current headers instead, so a secret backend
 // outage never disconnects a working upstream.
 func (s *Service) Reload(ctx context.Context) error {
-	return s.reload(ctx, nil)
+	_, err := s.reload(ctx, nil)
+	return err
 }
 
 // reload is Reload resolving only the rows rotated reports true for; every
 // other running server keeps its current spec. A nil rotated resolves all.
-func (s *Service) reload(ctx context.Context, rotated func(name string) bool) error {
+// It reports the rows whose references did not resolve apart from err, which
+// means nothing was applied.
+func (s *Service) reload(ctx context.Context, rotated func(name string) bool) (unresolved, err error) {
 	// Close cancels every reload, not only background ones: an admin save
 	// or a rotation waiting on a slow store read must not hold shutdown open.
 	ctx, cancel := context.WithCancel(ctx)
@@ -277,7 +290,7 @@ func (s *Service) reload(ctx context.Context, rotated func(name string) bool) er
 	s.reloadMu.Lock()
 	defer s.reloadMu.Unlock()
 	if s.reloadStopped || s.stopCtx.Err() != nil {
-		return errServiceClosed
+		return nil, errServiceClosed
 	}
 
 	specs := make([]ServerSpec, 0, len(s.configSpecs))
@@ -293,7 +306,7 @@ func (s *Service) reload(ctx context.Context, rotated func(name string) bool) er
 	if s.store != nil {
 		rows, err := s.store.List(ctx)
 		if err != nil {
-			return fmt.Errorf("list managed mcp servers: %w", err)
+			return nil, fmt.Errorf("list managed mcp servers: %w", err)
 		}
 		for _, row := range rows {
 			if _, shadowed := seen[row.Name]; shadowed {
@@ -309,22 +322,29 @@ func (s *Service) reload(ctx context.Context, rotated func(name string) bool) er
 			spec, secrets, err := s.resolveServer(ctx, row)
 			if err != nil {
 				errs = append(errs, err)
+				repeated := s.unresolved[row.Name] == err.Error()
+				s.unresolved[row.Name] = err.Error()
 				if running {
-					slog.Warn("mcp server secret references could not be resolved; keeping its current headers", "server", row.Name, "error", err)
+					if !repeated {
+						slog.Warn("mcp server secret references could not be resolved; keeping its current headers", "server", row.Name, "error", err)
+					}
 					specs = append(specs, current)
 				} else {
-					slog.Error("mcp server secret references could not be resolved; server skipped", "server", row.Name, "error", err)
+					if !repeated {
+						slog.Error("mcp server secret references could not be resolved; server skipped", "server", row.Name, "error", err)
+					}
 					skipped[row.Name] = err
 				}
 				continue
 			}
+			delete(s.unresolved, row.Name)
 			specs = append(specs, spec)
 			resolved = append(resolved, secrets)
 		}
 	}
 	virtuals, err := s.mergedVirtualSpecs(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	s.virtualMu.Lock()
 	s.virtualSpecs = virtuals
@@ -341,11 +361,15 @@ func (s *Service) reload(ctx context.Context, rotated func(name string) bool) er
 		}
 	}
 	s.recorded = stored
-	if rotated != nil {
-		return errors.Join(errs...)
+	for name := range s.unresolved {
+		if _, ok := stored[name]; !ok {
+			delete(s.unresolved, name)
+		}
 	}
-	s.skipped = skipped
-	return nil
+	if rotated == nil {
+		s.skipped = skipped
+	}
+	return errors.Join(errs...), nil
 }
 
 // mergedVirtualSpecs merges declarative and store virtual servers. Config

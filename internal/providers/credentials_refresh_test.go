@@ -150,3 +150,71 @@ func TestCredentialsServiceAnnouncesSavesAndDeletes(t *testing.T) {
 	require.Error(t, writer.service.Upsert(ctx, ManagedProviderCredential{Name: "p", Type: "unknown", Enabled: true}))
 	assert.Equal(t, 2, announced)
 }
+
+// hookedListStore runs onList, once, after the next List has read the rows.
+type hookedListStore struct {
+	*fakeCredentialStore
+	onList func()
+}
+
+func (s *hookedListStore) List(ctx context.Context) ([]ManagedProviderCredential, error) {
+	rows, err := s.fakeCredentialStore.List(ctx)
+	if hook := s.onList; hook != nil {
+		s.onList = nil
+		hook()
+	}
+	return rows, err
+}
+
+// A local rotation that lands while a refresh reads the rows makes it skip
+// the remote change it read; the refresh must still apply it before it
+// reports success, or the change is marked applied and never retried.
+func TestCredentialsServiceRefreshAppliesRemoteChangeAfterConcurrentRotation(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(t *testing.T, writer *CredentialsService)
+		check  func(t *testing.T, reader credentialsInstance)
+	}{
+		{
+			name: "edit",
+			change: func(t *testing.T, writer *CredentialsService) {
+				require.NoError(t, writer.Upsert(t.Context(), ManagedProviderCredential{Name: "shared", Type: "test", APIKeys: []string{"sk-two"}, Enabled: true}))
+			},
+			check: func(t *testing.T, reader credentialsInstance) {
+				reader.service.mu.RLock()
+				defer reader.service.mu.RUnlock()
+				assert.Equal(t, "sk-two", reader.service.keyrings["shared"].Primary())
+			},
+		},
+		{
+			name: "delete",
+			change: func(t *testing.T, writer *CredentialsService) {
+				require.NoError(t, writer.Delete(t.Context(), "shared"))
+			},
+			check: func(t *testing.T, reader credentialsInstance) {
+				assert.Nil(t, reader.registry.ProviderByName("shared"))
+				assert.False(t, reader.service.Installed("shared"))
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			store := &hookedListStore{fakeCredentialStore: newFakeCredentialStore()}
+			writer := newCredentialsInstance(t, store)
+			require.NoError(t, writer.service.Upsert(ctx, ManagedProviderCredential{Name: "shared", Type: "test", APIKeys: []string{"sk-one"}, Enabled: true}))
+			reader := newCredentialsInstance(t, store)
+			require.NotNil(t, reader.registry.ProviderByName("shared"))
+
+			tc.change(t, writer.service)
+			// What an in-place key swap by rotation does, between the
+			// refresh taking its revisions and installing what it read.
+			store.onList = func() {
+				reader.service.mu.Lock()
+				reader.service.revisions["shared"]++
+				reader.service.mu.Unlock()
+			}
+			require.NoError(t, reader.service.Refresh(ctx))
+			tc.check(t, reader)
+		})
+	}
+}

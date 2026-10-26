@@ -13,6 +13,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"sync"
 	"time"
@@ -41,8 +42,13 @@ type Syncer struct {
 	order     []string
 	refreshes map[string]func(context.Context) error
 	seen      map[string]int64
-	// failures holds the last logged error per entity ("" key for reading the
-	// revisions), so a persistent failure is logged once, not every tick.
+	// unannounced holds the entities whose announcement failed, each with
+	// the sequence number of its latest failure; every tick retries them
+	// until one succeeds.
+	unannounced map[string]uint64
+	failureSeq  uint64
+	// failures holds the last logged error per key (see logFailure), so
+	// a persistent failure is logged once, not every tick.
 	failures map[string]string
 	cancel   context.CancelFunc
 	done     chan struct{}
@@ -80,11 +86,12 @@ func NewSyncer(ctx context.Context, store Store) (*Syncer, error) {
 		seen = make(map[string]int64)
 	}
 	return &Syncer{
-		store:     store,
-		interval:  syncInterval,
-		refreshes: make(map[string]func(context.Context) error),
-		seen:      seen,
-		failures:  make(map[string]string),
+		store:       store,
+		interval:    syncInterval,
+		refreshes:   make(map[string]func(context.Context) error),
+		seen:        seen,
+		unannounced: make(map[string]uint64),
+		failures:    make(map[string]string),
 	}, nil
 }
 
@@ -114,20 +121,44 @@ func (s *Syncer) Entities() []string {
 }
 
 // Notifier returns the function a service calls after each successful admin
-// write of entity. A failed announcement is logged, not returned: the write
-// itself succeeded and this instance already serves it.
+// write of entity. A failed announcement is logged and retried on every tick
+// until one succeeds, not returned: the write itself succeeded and this
+// instance already serves it.
 func (s *Syncer) Notifier(entity string) func(context.Context) {
 	if s == nil {
 		return nil
 	}
 	return func(ctx context.Context) {
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), bumpTimeout)
-		defer cancel()
-		if err := s.store.Bump(ctx, entity); err != nil {
-			slog.Warn("configuration change saved but not announced to other gateway instances; they apply it after a manual runtime refresh or a restart",
-				"entity", entity, "error", err)
-		}
+		s.announce(context.WithoutCancel(ctx), entity)
 	}
+}
+
+// announce bumps entity's revision, or keeps it for the next tick to retry.
+// Bumps only need to move the revision, so retries of one entity coalesce.
+func (s *Syncer) announce(ctx context.Context, entity string) {
+	ctx, cancel := context.WithTimeout(ctx, bumpTimeout)
+	defer cancel()
+	s.mu.Lock()
+	pending := s.unannounced[entity]
+	s.mu.Unlock()
+	err := s.store.Bump(ctx, entity)
+	s.mu.Lock()
+	switch {
+	case err != nil:
+		s.failureSeq++
+		s.unannounced[entity] = s.failureSeq
+	case s.unannounced[entity] == pending:
+		// No announcement failed while this one ran, so every change made
+		// before it is announced.
+		delete(s.unannounced, entity)
+	}
+	s.mu.Unlock()
+	key := "announce:" + entity
+	if err != nil {
+		s.logFailure(key, "configuration change saved but not yet announced to other gateway instances; retrying", err, "entity", entity)
+		return
+	}
+	s.clearFailure(key)
 }
 
 // Start polls until Close or until ctx ends. It is idempotent.
@@ -173,10 +204,17 @@ func (s *Syncer) Close() error {
 	return nil
 }
 
-// poll reads every revision and refreshes each registered entity whose
-// revision moved. An entity is marked applied only after its refresh
-// succeeds, so a failed one is retried on the next tick.
+// poll retries the failed announcements, then reads every revision and
+// refreshes each registered entity whose revision moved. An entity is marked
+// applied only after its refresh succeeds, so a failed one is retried on the
+// next tick.
 func (s *Syncer) poll(ctx context.Context) {
+	for _, entity := range s.unannouncedEntities() {
+		if ctx.Err() != nil {
+			return
+		}
+		s.announce(ctx, entity)
+	}
 	revisions, err := s.store.Revisions(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
@@ -193,7 +231,7 @@ func (s *Syncer) poll(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			s.logFailure(entity, "failed to apply a configuration change made on another gateway instance", err)
+			s.logFailure(entity, "failed to apply a configuration change made on another gateway instance", err, "entity", entity)
 			continue
 		}
 		s.clearFailure(entity)
@@ -217,23 +255,29 @@ func (s *Syncer) changed(revisions map[string]int64) []string {
 	return entities
 }
 
-func (s *Syncer) logFailure(entity, message string, err error) {
+// unannouncedEntities lists, sorted, the entities whose announcement failed.
+func (s *Syncer) unannouncedEntities() []string {
 	s.mu.Lock()
-	repeated := s.failures[entity] == err.Error()
-	s.failures[entity] = err.Error()
+	defer s.mu.Unlock()
+	return slices.Sorted(maps.Keys(s.unannounced))
+}
+
+// logFailure logs err unless it is the error last logged under key: "" for
+// reading the revisions, the entity for refreshing it, and "announce:" plus
+// the entity for announcing it.
+func (s *Syncer) logFailure(key, message string, err error, attrs ...any) {
+	s.mu.Lock()
+	repeated := s.failures[key] == err.Error()
+	s.failures[key] = err.Error()
 	s.mu.Unlock()
 	if repeated {
 		return
 	}
-	if entity == "" {
-		slog.Warn(message, "error", err)
-		return
-	}
-	slog.Warn(message, "entity", entity, "error", err)
+	slog.Warn(message, append(attrs, "error", err)...)
 }
 
-func (s *Syncer) clearFailure(entity string) {
+func (s *Syncer) clearFailure(key string) {
 	s.mu.Lock()
-	delete(s.failures, entity)
+	delete(s.failures, key)
 	s.mu.Unlock()
 }

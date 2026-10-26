@@ -279,16 +279,29 @@ const credentialModelRefreshTimeout = 60 * time.Second
 //
 // Like a save, it builds without holding applyMu and installs or removes only
 // while the credential's revision is still the one it saw before reading the
-// rows: a save, delete, or rotation on this instance in the meantime is
-// newer, and wins.
+// rows. A save, delete, or rotation on this instance in the meantime may have
+// applied an older row than the one read, so the rows are read and applied
+// again until a pass skips nothing.
 func (s *CredentialsService) reconcile(ctx context.Context) (bool, error) {
+	installedAny := false
+	for {
+		installed, stale, err := s.reconcileOnce(ctx)
+		installedAny = installedAny || installed
+		if err != nil || !stale {
+			return installedAny, err
+		}
+	}
+}
+
+// reconcileOnce is one pass of reconcile. It reports stale when it skipped a
+// credential that changed on this instance while it read the rows.
+func (s *CredentialsService) reconcileOnce(ctx context.Context) (installedAny, stale bool, err error) {
 	before := s.revisionsSnapshot()
 	rows, err := s.store.List(ctx)
 	if err != nil {
-		return false, fmt.Errorf("list provider credentials: %w", err)
+		return false, false, fmt.Errorf("list provider credentials: %w", err)
 	}
 
-	installedAny := false
 	skipped := make(map[string]error)
 	stored := make(map[string]struct{}, len(rows))
 	for _, row := range rows {
@@ -299,7 +312,7 @@ func (s *CredentialsService) reconcile(ctx context.Context) (bool, error) {
 		}
 		stored[row.Name] = struct{}{}
 		if !row.Enabled {
-			s.removeUnlessChanged(row.Name, before[row.Name])
+			stale = !s.removeUnlessChanged(row.Name, before[row.Name]) || stale
 			continue
 		}
 		if s.runsRow(row) {
@@ -313,18 +326,20 @@ func (s *CredentialsService) reconcile(ctx context.Context) (bool, error) {
 		}
 		if s.installUnlessChanged(row.Name, before[row.Name], built) {
 			installedAny = true
+		} else {
+			stale = true
 		}
 	}
 	for _, name := range s.installedNames() {
 		if _, ok := stored[name]; !ok {
-			s.removeUnlessChanged(name, before[name])
+			stale = !s.removeUnlessChanged(name, before[name]) || stale
 		}
 	}
 
 	s.mu.Lock()
 	s.skipped = skipped
 	s.mu.Unlock()
-	return installedAny, nil
+	return installedAny, stale, nil
 }
 
 // runsRow reports whether the provider installed under row's name was built
@@ -337,7 +352,7 @@ func (s *CredentialsService) runsRow(row ManagedProviderCredential) bool {
 }
 
 // installUnlessChanged installs built under name unless name was installed,
-// removed, or rotated since revision was read.
+// removed, or rotated since revision was read, reporting whether it did.
 func (s *CredentialsService) installUnlessChanged(name string, revision uint64, built builtCredential) bool {
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
@@ -349,17 +364,20 @@ func (s *CredentialsService) installUnlessChanged(name string, revision uint64, 
 }
 
 // removeUnlessChanged unregisters name, when it is installed, unless it was
-// installed, removed, or rotated since revision was read. The secrets the
-// stored row held are not released here: the instance that deleted or
-// disabled it already did.
-func (s *CredentialsService) removeUnlessChanged(name string, revision uint64) {
+// installed, removed, or rotated since revision was read; it reports false
+// only in that last case. The secrets the stored row held are not released
+// here: the instance that deleted or disabled it already did.
+func (s *CredentialsService) removeUnlessChanged(name string, revision uint64) bool {
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
-	if s.revision(name) != revision || !s.Installed(name) {
-		return
+	if s.revision(name) != revision {
+		return false
 	}
-	s.remove(name)
-	slog.Info("unregistered provider credential removed or disabled on another instance", "provider", name)
+	if s.Installed(name) {
+		s.remove(name)
+		slog.Info("unregistered provider credential removed or disabled on another instance", "provider", name)
+	}
+	return true
 }
 
 // revisionsSnapshot copies the revision of every credential.

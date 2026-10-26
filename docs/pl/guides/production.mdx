@@ -312,10 +312,18 @@ unieważnienia), polityk użytkowników, modeli wirtualnych, nadpisań cen, regu
 guardrails, workflowów i serwerów MCP. Provider dodany na innej replice zaczyna obsługiwać
 ruch, gdy tylko zostanie pobrana jego lista modeli.
 
-Replika, która nie zdoła zastosować zmiany, loguje ostrzeżenie i ponawia próbę przy każdym
-odpytaniu. Wolniejsze okresowe odświeżanie, które część tych obszarów już miała, działa dalej
-jako zabezpieczenie, a `POST /admin/runtime/refresh` przeładowuje snapshoty na replice, która
-je odebrała, łącznie z budżetami i limitami żądań.
+Replika, która nie zdoła zastosować zmiany, raz loguje ostrzeżenie i ponawia próbę przy każdym
+odpytaniu, aż zmiana zacznie obowiązywać. Jeden wyjątek: zapisany provider, którego nie da się
+zbudować na replice, zachowuje to, co już działało pod jego nazwą, i jest ponawiany przy
+następnej zmianie dowolnego zapisanego providera, bo każda zmiana przeładowuje wszystkie, albo
+po restarcie. Replika, która nie zdoła zapisać zmiany w `config_revisions`, również ponawia
+próbę przy każdym odpytaniu. Dopóki się to nie uda, pozostałe repliki przejmą zmianę przy
+późniejszej zmianie w tym samym obszarze, przy wolniejszym okresowym odświeżaniu, które część
+obszarów już miała, przy ręcznym odświeżeniu runtime albo po restarcie.
+
+`POST /admin/runtime/refresh` przeładowuje na replice, która go odebrała, zarządzane klucze API,
+modele wirtualne, guardrails, workflowy, serwery MCP, budżety i limity żądań. Nie przeładowuje
+zapisanych poświadczeń providerów.
 
 <Warning>
   **Reset liczników limitów żądań obowiązuje tylko na replice, która obsłużyła request.**

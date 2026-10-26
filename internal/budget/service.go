@@ -72,6 +72,9 @@ func (c capabilities) validate(budgets []Budget) error {
 type Service struct {
 	store Store
 	mu    sync.RWMutex
+	// refreshMu serializes Refresh from the store read through the swap, so
+	// a slower refresh never installs an older snapshot over a newer one.
+	refreshMu sync.Mutex
 
 	budgets  []Budget
 	settings Settings
@@ -131,6 +134,8 @@ func (s *Service) Refresh(ctx context.Context) error {
 	if s == nil || s.store == nil {
 		return ErrUnavailable
 	}
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
 	budgets, err := s.store.ListBudgets(ctx)
 	if err != nil {
 		return err
