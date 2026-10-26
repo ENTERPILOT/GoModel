@@ -4161,11 +4161,6 @@
           "400": {
             "description": "Bad Request",
             "content": {
-              "text/csv": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
-              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/core.GatewayError"
@@ -4176,11 +4171,6 @@
           "401": {
             "description": "Unauthorized",
             "content": {
-              "text/csv": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
-              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/core.GatewayError"
@@ -4191,11 +4181,6 @@
           "403": {
             "description": "Forbidden",
             "content": {
-              "text/csv": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
-              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/core.GatewayError"
@@ -4206,11 +4191,6 @@
           "409": {
             "description": "Conflict",
             "content": {
-              "text/csv": {
-                "schema": {
-                  "$ref": "#/components/schemas/core.GatewayError"
-                }
-              },
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/core.GatewayError"
@@ -17675,8 +17655,7 @@
           "label",
           "endpoint",
           "auth_key",
-          "period",
-          "model_provider"
+          "period"
         ],
         "x-enum-varnames": [
           "BreakdownNone",
@@ -17686,8 +17665,7 @@
           "BreakdownLabel",
           "BreakdownEndpoint",
           "BreakdownAuthKey",
-          "BreakdownPeriod",
-          "breakdownModelProvider"
+          "BreakdownPeriod"
         ]
       },
       "usage.BreakdownKey": {

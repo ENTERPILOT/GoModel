@@ -22,12 +22,13 @@ const (
 	BreakdownEndpoint BreakdownDimension = "endpoint"
 	BreakdownAuthKey  BreakdownDimension = "auth_key"
 	BreakdownPeriod   BreakdownDimension = "period"
-
-	// breakdownModelProvider keys rows by model and provider joined with
-	// modelProviderSeparator. Invoices use it for their line items; the
-	// public breakdown does not accept it.
-	breakdownModelProvider BreakdownDimension = "model_provider"
 )
+
+// breakdownModelProvider keys rows by model and provider joined with
+// modelProviderSeparator. Invoices use it for their line items; the public
+// breakdown does not accept it. It is untyped so the API docs, which list
+// every BreakdownDimension constant, do not advertise it.
+const breakdownModelProvider = "model_provider"
 
 // modelProviderSeparator joins the model and provider of a
 // breakdownModelProvider key; neither name holds this control character.

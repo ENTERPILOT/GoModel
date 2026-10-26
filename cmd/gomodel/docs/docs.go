@@ -13334,8 +13334,7 @@ const docTemplate = `{
                 "label",
                 "endpoint",
                 "auth_key",
-                "period",
-                "model_provider"
+                "period"
             ],
             "x-enum-varnames": [
                 "BreakdownNone",
@@ -13345,8 +13344,7 @@ const docTemplate = `{
                 "BreakdownLabel",
                 "BreakdownEndpoint",
                 "BreakdownAuthKey",
-                "BreakdownPeriod",
-                "breakdownModelProvider"
+                "BreakdownPeriod"
             ]
         },
         "usage.BreakdownKey": {

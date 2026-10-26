@@ -179,6 +179,14 @@ func assertInvoiceReads(t *testing.T, store usageBatchWriter, reader UsageReader
 		assert.Nil(t, invoice.Total.BilledCost)
 	})
 
+	t.Run("a scope outside the parent bills nothing", func(t *testing.T) {
+		invoice, err := reader.GetUsageInvoice(ctx, InvoiceParams{UsageQueryParams: withScope(period, "/internal"), Parent: "/customers"})
+		require.NoError(t, err)
+		assert.Empty(t, invoice.Customers)
+		assert.Equal(t, "/customers", invoice.Parent)
+		assert.Nil(t, invoice.Total.BilledCost)
+	})
+
 	t.Run("invalid parent", func(t *testing.T) {
 		_, err := reader.GetUsageInvoice(ctx, InvoiceParams{UsageQueryParams: period, Parent: "/a/../b"})
 		require.Error(t, err)

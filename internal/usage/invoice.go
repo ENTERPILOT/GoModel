@@ -129,9 +129,15 @@ func readUsageInvoice(ctx context.Context, params InvoiceParams, query func(cont
 		Columns:          breakdownModelProvider,
 		Metric:           BreakdownMetricCost,
 	}
-	// Narrow to the parent's subtree unless the scope is already narrower.
-	if parent != "" && (breakdown.UserPath == "" || core.UserPathContains(breakdown.UserPath, parent)) {
-		breakdown.UserPath = parent
+	// Narrow to the parent's subtree unless the scope is already narrower. A
+	// scope outside the parent's subtree leaves nothing to bill.
+	if parent != "" {
+		switch {
+		case breakdown.UserPath == "" || core.UserPathContains(breakdown.UserPath, parent):
+			breakdown.UserPath = parent
+		case !core.UserPathContains(parent, breakdown.UserPath):
+			return EmptyInvoice(params), nil
+		}
 	}
 	groups, err := readBilledBreakdownGroups(ctx, breakdown, query)
 	if err != nil {
