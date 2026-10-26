@@ -158,3 +158,60 @@ func TestPrepareChatRequestAppliesReasoningEffortOverride(t *testing.T) {
 	assert.Equal(t, "medium", prepared.Request.Reasoning.Effort)
 	assert.Equal(t, "primary", prepared.Request.Model)
 }
+
+func TestReasoningEffortOverrideFailoverRestoresClientEffort(t *testing.T) {
+	orchestrator, provider, resolver, workflow := effortFixture()
+	delete(resolver.efforts, "openai/backup")
+	clientExtra := core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"reasoning_effort": json.RawMessage(`"high"`)})
+	prepared, err := orchestrator.PrepareChatRequest(context.Background(), &core.ChatRequest{
+		Model:       "primary",
+		Provider:    "openai",
+		Messages:    []core.Message{{Role: "user", Content: "hi"}},
+		Reasoning:   &core.Reasoning{Effort: "high"},
+		ExtraFields: clientExtra,
+	}, RequestMeta{Workflow: workflow})
+	require.NoError(t, err)
+
+	_, _, err = orchestrator.DispatchChatCompletion(prepared.Context, prepared.Workflow, prepared.Request)
+	require.NoError(t, err)
+
+	require.Len(t, provider.chats, 2)
+	assert.Equal(t, "medium", provider.chats[0].Reasoning.Effort)
+	require.NotNil(t, provider.chats[1].Reasoning)
+	assert.Equal(t, "high", provider.chats[1].Reasoning.Effort, "fallback without an override keeps the client's effort")
+	assert.JSONEq(t, `"high"`, string(provider.chats[1].ExtraFields.Lookup("reasoning_effort")))
+}
+
+func TestReasoningEffortOverrideDropsGoogleThinkingEffort(t *testing.T) {
+	tests := []struct {
+		name      string
+		extraBody string
+		want      string
+	}{
+		{name: "budget only drops extra_body", extraBody: `{"google":{"thinking_config":{"thinking_budget":24576}}}`},
+		{name: "keeps include_thoughts", extraBody: `{"google":{"thinking_config":{"thinking_level":"high","include_thoughts":true}}}`, want: `{"google":{"thinking_config":{"include_thoughts":true}}}`},
+		{name: "keeps other members", extraBody: `{"google":{"thinking_config":{"thinkingBudget":1},"cached_content":"c"},"x":1}`, want: `{"google":{"cached_content":"c"},"x":1}`},
+		{name: "unrelated extra_body unchanged", extraBody: `{"google":{"cached_content":"c"}}`, want: `{"google":{"cached_content":"c"}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &core.ChatRequest{Model: "m", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				"extra_body": json.RawMessage(tt.extraBody),
+				"seed":       json.RawMessage(`7`),
+			})}
+
+			for _, fields := range []core.UnknownJSONFields{
+				ChatRequestWithReasoningEffort(req, "none").ExtraFields,
+				ResponsesRequestWithReasoningEffort(&core.ResponsesRequest{ExtraFields: req.ExtraFields}, "none").ExtraFields,
+			} {
+				assert.JSONEq(t, `7`, string(fields.Lookup("seed")))
+				if tt.want == "" {
+					assert.Nil(t, fields.Lookup("extra_body"))
+					continue
+				}
+				assert.JSONEq(t, tt.want, string(fields.Lookup("extra_body")))
+			}
+			assert.JSONEq(t, tt.extraBody, string(req.ExtraFields.Lookup("extra_body")), "client request must not be mutated")
+		})
+	}
+}

@@ -40,7 +40,8 @@ type translatedPrepareSpec[Req any, Prepared any] struct {
 	valid           func(Req) bool
 	// reasoningEffort applies the primary attempt's forced reasoning effort,
 	// so the prepared request (and the response cache key built from it)
-	// carries the effort actually sent upstream.
+	// carries the effort actually sent upstream. The client's request stays in
+	// the context for failover attempts that force no effort of their own.
 	reasoningEffort func(Req, string) Req
 	build           func(context.Context, Req, *core.Workflow) Prepared
 }
@@ -99,6 +100,7 @@ func prepareTranslated[Req any, Prepared any](
 	}
 	if spec.reasoningEffort != nil {
 		if effort := o.ReasoningEffortOverride(ctx, workflow); effort != "" {
+			ctx = withClientRequest(ctx, req)
 			req = spec.reasoningEffort(req, effort)
 		}
 	}
