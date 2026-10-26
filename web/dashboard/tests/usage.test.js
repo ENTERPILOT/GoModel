@@ -6,54 +6,65 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  emptySessionUsage,
+  emptyUsagePageSummary,
+  shortSessionID,
+} from "../src/pages/usage/usage-helpers.js";
+import {
   authKeyDisplayName,
   authKeyNameMap,
   authKeyOptionList,
+  facetOptionList,
+  usageLogHasAuthKeys,
+} from "../src/pages/usage/usage-filter-options.js";
+import { labelColor, usageLogHasLabels } from "../src/pages/usage/usage-labels.js";
+import {
   billedCostTitle,
   cachedCostTitle,
-  chartWrapHeight,
   costSourceTooltip,
+  hasProviderCache,
+  proSavedPercent,
+  proSavedPercentText,
+  proSavedTitle,
+  proSavedValueText,
+  providerCacheLabel,
+  providerCacheTitle,
+  rewriteCostSaved,
+  rewriteSavingsVisible,
+  rewriteTokenEstimateMethodText,
+  rewriteTokensSaved,
+  usageEntryCached,
+  usageEntryCacheLabel,
+  usagePageCostTitle,
+  usagePageRequestsTitle,
+  usagePageTotalRequests,
+  usesResponseCostPricing,
+} from "../src/pages/usage/usage-cost-format.js";
+import {
+  chartWrapHeight,
   divergingDataFrom,
-  emptySessionUsage,
+  usageRowsBySelectedValue,
+  usageRowTotalTokens,
+  userPathUsageChartVisible,
+} from "../src/pages/usage/usage-chart-rows.js";
+import {
   endpointListSummary,
   endpointOptionsWithSelection,
   endpointsSelected,
   endpointUsageRows,
   foldEndpointUsageByType,
-  emptyUsagePageSummary,
-  facetOptionList,
-  hasProviderCache,
-  labelColor,
-  providerCacheLabel,
-  providerCacheTitle,
-  proSavedPercent,
-  proSavedPercentText,
-  proSavedTitle,
-  proSavedValueText,
-  rewriteCostSaved,
-  rewriteSavingsVisible,
-  rewriteTokenEstimateMethodText,
-  rewriteTokensSaved,
-  sessionUsageQueryParams,
-  shortSessionID,
-  usageEntryCached,
-  usageEntryCacheLabel,
-  usageLogHasAuthKeys,
-  usageLogHasLabels,
-  usageLogQueryParams,
-  usagePageCostTitle,
-  usagePageRequestsTitle,
-  usagePageTotalRequests,
-  usageRowsBySelectedValue,
-  usageRowTotalTokens,
   toggleEndpointSelection,
   usageEndpointOptions,
   usageTypeForOperation,
-  userPathUsageChartVisible,
-  usesResponseCostPricing,
-} from "../src/pages/usage/usage-helpers.js";
+} from "../src/pages/usage/usage-endpoints.js";
 import { horizontalUsageChartConfig } from "../src/pages/usage/usage-chart-config.js";
-import { emptyUsageFilters, usageFiltersEmpty, usageQuery } from "../src/pages/usage/usage-query.js";
+import {
+  emptyUsageFilters,
+  sessionUsageQueryParams,
+  usageFiltersEmpty,
+  usageLogQueryParams,
+  usageQuery,
+} from "../src/pages/usage/usage-query.js";
 
 test("usesResponseCostPricing detects provider-reported costs", () => {
   assert.equal(usesResponseCostPricing({ cost_source: "openrouter_credits" }), true);

@@ -8,6 +8,8 @@
   import { router } from "$lib/stores/router.svelte.js";
   import { liveLogs } from "../audit-logs/liveLogs.svelte.js";
   import { usagePage } from "./usage.svelte.js";
+  import { usageFacets } from "./usageFacets.svelte.js";
+  import { restoreUsageUrl } from "./usage-view.js";
   import FacetFilters from "./FacetFilters.svelte";
   import UsageStatCards from "./UsageStatCards.svelte";
   import UsageBreakdownChart from "./UsageBreakdownChart.svelte";
@@ -29,10 +31,10 @@
       // untrack: restoring and fetching read the filters, which must not
       // become dependencies (a filter change would re-run the restore).
       untrack(() => {
-        usagePage.restoreFromUrl({ fromHistory: historyTick !== seenHistoryTick });
+        restoreUsageUrl({ fromHistory: historyTick !== seenHistoryTick });
         seenHistoryTick = historyTick;
         usagePage.fetchUsagePage();
-        usagePage.fetchAuthKeyNames();
+        usageFacets.fetchAuthKeyNames();
         liveLogs.ensureLiveLogs();
       });
     }

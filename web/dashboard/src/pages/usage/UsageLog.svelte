@@ -16,24 +16,22 @@
     providerDisplayValue,
   } from "$lib/utils/format.js";
   import { usagePage } from "./usage.svelte.js";
+  import { usageFacets } from "./usageFacets.svelte.js";
   import SessionIDChip from "./SessionIDChip.svelte";
-  import {
-    authKeyDisplayName,
-    billedCostTitle,
-    cachedCostTitle,
-    costSourceTooltip,
-    entryLabels,
-    formatCostTooltip,
-    hasProviderCache,
-    labelColor,
-    providerCacheLabel,
-    providerCacheTitle,
-    usageEntryCacheLabel,
-    usageEntryCached,
-    usageLogHasAuthKeys,
-    usageLogHasLabels,
-    usesResponseCostPricing,
-  } from "./usage-helpers.js";
+  import { authKeyDisplayName, usageLogHasAuthKeys } from "./usage-filter-options.js";
+import { entryLabels, labelColor, usageLogHasLabels } from "./usage-labels.js";
+import {
+  billedCostTitle,
+  cachedCostTitle,
+  costSourceTooltip,
+  formatCostTooltip,
+  hasProviderCache,
+  providerCacheLabel,
+  providerCacheTitle,
+  usageEntryCached,
+  usageEntryCacheLabel,
+  usesResponseCostPricing,
+} from "./usage-cost-format.js";
   import { CircleDollarSign, DatabaseZap } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
@@ -59,7 +57,7 @@
 
 {#snippet authKeyChip(entry)}
   {#if entry.auth_key_id}
-    {@const name = authKeyDisplayName(entry.auth_key_id, usagePage.authKeyNames)}
+    {@const name = authKeyDisplayName(entry.auth_key_id, usageFacets.authKeyNames)}
     <button
       type="button"
       class="usage-label-chip"

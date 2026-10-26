@@ -22,7 +22,6 @@
 // indefinitely) and heartbeat handling. Framing and backoff are shared with
 // the overview's usage-signal stream via $lib/api/eventStream.js.
 
-import { usageFilters } from "../usage/usageFilters.svelte.js";
 import { untrack } from "svelte";
 import { apiFetch, getJSON, isAbortError } from "$lib/api/client.js";
 import { nextReconnect } from "$lib/api/eventStream.js";
@@ -74,9 +73,10 @@ class LiveLogsStore {
   );
   auditThreadChildren = $state({});
   usageLogSearch = $state("");
-  // The usage page's filters: live usage previews merge only while none is
-  // set, since a preview cannot be matched against them client side.
-  usageFilters = usageFilters;
+  // The usage page registers its filter state here (an object with
+  // isEmpty()): live usage previews merge only while no filter is set, since
+  // a preview cannot be matched against them client side.
+  usageFilters = null;
   usageLogHideCached = $state(false);
 
   // True while the stream body is being consumed; drives the audit page's

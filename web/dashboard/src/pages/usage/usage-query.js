@@ -124,3 +124,15 @@ export function parseUsageQuery(search) {
 function oneOf(value, allowed, fallback) {
   return allowed.includes(value) ? value : fallback;
 }
+
+// Request-log and session paging params, appended after the window and filter query.
+export function usageLogQueryParams({ limit, offset, hideCached, search }) {
+  let qs = "&limit=" + limit + "&offset=" + offset;
+  qs += "&cache_mode=" + (hideCached ? "uncached" : "all");
+  if (search) qs += "&search=" + encodeURIComponent(search);
+  return qs;
+}
+
+export function sessionUsageQueryParams({ limit, offset }) {
+  return "&limit=" + limit + "&offset=" + offset;
+}

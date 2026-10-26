@@ -9,6 +9,7 @@
   import { Download } from "lucide";
   import { chartColors } from "$lib/utils/chartTheme.js";
   import { usagePage } from "./usage.svelte.js";
+  import { usageFacets } from "./usageFacets.svelte.js";
   import { usagePivot } from "./usagePivot.svelte.js";
   import { PIVOT_DIMENSIONS, PIVOT_INTERVALS } from "./usage-query.js";
   import {
@@ -40,9 +41,9 @@
   const data = $derived(usagePivot.data);
   const metric = $derived(data ? data.metric : usagePivot.metric);
   const table = $derived(pivotTable(data, metric));
-  const rowLabels = $derived(table.rows.map((key) => pivotKeyLabel(data.row_dimension, key, usagePage.authKeyNames)));
+  const rowLabels = $derived(table.rows.map((key) => pivotKeyLabel(data.row_dimension, key, usageFacets.authKeyNames)));
   const columnLabels = $derived(
-    table.columns.map((key) => pivotKeyLabel(data.column_dimension, key, usagePage.authKeyNames)),
+    table.columns.map((key) => pivotKeyLabel(data.column_dimension, key, usageFacets.authKeyNames)),
   );
   const hasColumns = $derived(Boolean(data && data.column_dimension));
   const empty = $derived(table.rows.length === 0);
