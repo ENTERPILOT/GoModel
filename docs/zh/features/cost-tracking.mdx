@@ -145,7 +145,7 @@ pricing:
 
 GoModel 选取覆盖请求 user path 的最深一级已配置路径（`/acme` 覆盖 `/acme/team`，但不覆盖 `/acmecorp`），并按常规顺序应用其中最具体的选择器。若该路径没有匹配的选择器，则依次尝试更浅一级的路径，最后使用 `markups`。加价从不叠加。在上例中，`/acme/internal/ci` 按 0% 计费，`/acme/team` 对 `openai/gpt-5` 按 15%、其他模型按 30% 计费，`/beta` 按 20% 计费。
 
-默认不设置：没有 `user_path_markups` 时，`markups` 适用于所有人。来自 `user_path_markups` 的规则会以 `<user path>:<selector>` 的形式记录在 `markup_selector` 中，例如 `/acme:openai/gpt-5`，这样请求日志会显示计费时使用了哪条客户规则。user path 与请求中的规范化方式相同，因此 `acme/` 和 `/acme` 是同一个键；`/` 会被拒绝，因为 `markups` 已经覆盖它。
+默认不设置：没有 `user_path_markups` 时，`markups` 适用于所有人。当 `markups_enabled: false` 时，`user_path_markups` 与 `markups` 一样被忽略，GoModel 会在启动时记录一条警告。来自 `user_path_markups` 的规则会以 `<user path>:<selector>` 的形式记录在 `markup_selector` 中，例如 `/acme:openai/gpt-5`，这样请求日志会显示计费时使用了哪条客户规则。user path 与请求中的规范化方式相同，因此 `acme/` 和 `/acme` 是同一个键；`/` 会被拒绝，因为 `markups` 已经覆盖它。
 
 ## 控制台汇总
 

@@ -149,7 +149,7 @@ pricing:
 
 GoModel takes the deepest configured path that covers the request's user path (`/acme` covers `/acme/team`, not `/acmecorp`) and applies the most specific selector in it, in the usual order. When that path has no matching selector, it tries the next shallower path, then `markups`. Markups never stack. With the example above, `/acme/internal/ci` is billed at 0%, `/acme/team` at 15% for `openai/gpt-5` and 30% for everything else, and `/beta` at 20%.
 
-The default is none: without `user_path_markups`, `markups` applies to everyone. A rule from `user_path_markups` is recorded in `markup_selector` as `<user path>:<selector>`, for example `/acme:openai/gpt-5`, so the request log shows which customer rule was billed. User paths are normalized as on requests, so `acme/` and `/acme` are the same key; `/` is rejected, since `markups` already covers it.
+The default is none: without `user_path_markups`, `markups` applies to everyone. With `markups_enabled: false`, `user_path_markups` is ignored like `markups`, and GoModel logs a warning at startup. A rule from `user_path_markups` is recorded in `markup_selector` as `<user path>:<selector>`, for example `/acme:openai/gpt-5`, so the request log shows which customer rule was billed. User paths are normalized as on requests, so `acme/` and `/acme` are the same key; `/` is rejected, since `markups` already covers it.
 
 ## Dashboard totals
 
