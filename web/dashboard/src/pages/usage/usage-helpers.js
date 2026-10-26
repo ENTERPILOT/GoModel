@@ -295,14 +295,6 @@ export function cachedCostTitle(entry, baseTitle) {
 }
 
 // --- Billed cost (pricing.markups) ---
-// The backend reports billed_cost on the model, user path, and label
-// aggregates only; endpoint and session breakdowns stay provider cost.
-const BILLED_BREAKDOWN_KINDS = new Set(["model", "userPath", "label"]);
-
-export function breakdownHasBilledCost(kind) {
-  return BILLED_BREAKDOWN_KINDS.has(kind);
-}
-
 // billedCostTitle names the markup rule a request-log row was billed at, or
 // says none matched (billed cost then equals provider cost).
 export function billedCostTitle(entry) {
@@ -584,7 +576,7 @@ const TYPE_SUM_FIELDS = [
   "local_cached_input_tokens",
   "local_cached_output_tokens",
 ];
-const TYPE_NULLABLE_FIELDS = ["input_cost", "output_cost", "total_cost", "cached_input_cost"];
+const TYPE_NULLABLE_FIELDS = ["input_cost", "output_cost", "total_cost", "billed_cost", "cached_input_cost"];
 
 // foldEndpointUsageByType sums /admin/usage/endpoints rows into one row per
 // request type, keeping the folded endpoints sorted.

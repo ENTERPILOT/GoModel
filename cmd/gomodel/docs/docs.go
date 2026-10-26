@@ -8361,6 +8361,25 @@ const docTemplate = `{
                 "GUARDRAILS_ENABLED": {
                     "type": "string"
                 },
+                "LICENSE_BADGE": {
+                    "description": "The license a distribution registered (ext.License), so the sidebar\nshows its badge and the days left. Times are RFC 3339 in UTC, windows\nwhole days; all are empty for open-source builds.",
+                    "type": "string"
+                },
+                "LICENSE_EXPIRES_AT": {
+                    "type": "string"
+                },
+                "LICENSE_NOTICE_DAYS": {
+                    "type": "string"
+                },
+                "LICENSE_TRIAL": {
+                    "type": "string"
+                },
+                "LICENSE_VALID_UNTIL": {
+                    "type": "string"
+                },
+                "LICENSE_WARNING_DAYS": {
+                    "type": "string"
+                },
                 "LOGGING_ENABLED": {
                     "type": "string"
                 },
@@ -8381,7 +8400,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "PRICING_MARKUPS_ENABLED": {
-                    "description": "PricingMarkups is \"on\" when pricing.markups declares at least one rule,\nso the dashboard shows billed cost only where it differs from cost.",
+                    "description": "PricingMarkups mirrors pricing.markups_enabled, so the dashboard shows\nbilled cost only when the markup feature is on.",
                     "type": "string"
                 },
                 "RATE_LIMITS_ENABLED": {
@@ -12768,6 +12787,11 @@ const docTemplate = `{
         "usage.DailyUsage": {
             "type": "object",
             "properties": {
+                "billed_cost": {
+                    "description": "BilledCost includes the period's billed response-cache hits in every\ncache mode, so a period served only from the cache can appear with no\nrequests.",
+                    "type": "number",
+                    "x-nullable": true
+                },
                 "cache_write_input_tokens": {
                     "type": "integer"
                 },
@@ -12807,6 +12831,10 @@ const docTemplate = `{
         "usage.EndpointUsage": {
             "type": "object",
             "properties": {
+                "billed_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
                 "cache_write_input_tokens": {
                     "type": "integer"
                 },
@@ -13026,6 +13054,11 @@ const docTemplate = `{
         "usage.SessionUsage": {
             "type": "object",
             "properties": {
+                "billed_cost": {
+                    "description": "BilledCost includes the session's billed response-cache hits.",
+                    "type": "number",
+                    "x-nullable": true
+                },
                 "input_cost": {
                     "type": "number",
                     "x-nullable": true

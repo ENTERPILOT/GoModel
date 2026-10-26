@@ -10,7 +10,6 @@ import {
   authKeyNameMap,
   authKeyOptionList,
   billedCostTitle,
-  breakdownHasBilledCost,
   cachedCostTitle,
   chartWrapHeight,
   costSourceTooltip,
@@ -103,14 +102,6 @@ test("billedCostTitle names the markup rule a row was billed at", () => {
   assert.equal(billedCostTitle({ billed_cost: 1 }), "No markup");
   assert.equal(billedCostTitle({ markup_percent: "n/a" }), "No markup");
   assert.equal(billedCostTitle(null), "No markup");
-});
-
-test("breakdownHasBilledCost covers the model, user path, and label breakdowns", () => {
-  assert.equal(breakdownHasBilledCost("model"), true);
-  assert.equal(breakdownHasBilledCost("userPath"), true);
-  assert.equal(breakdownHasBilledCost("label"), true);
-  assert.equal(breakdownHasBilledCost("type"), false);
-  assert.equal(breakdownHasBilledCost("session"), false);
 });
 
 test("usageEntryCacheLabel returns capitalized cache type or dash", () => {
@@ -288,8 +279,8 @@ test("endpointUsageRows keeps each endpoint separate and tags its type", () => {
 
 test("foldEndpointUsageByType sums endpoint rows per request type", () => {
   const folded = foldEndpointUsageByType([
-    { endpoint: "/v1/messages", operation: "chat_completions", requests: 2, input_tokens: 20, output_tokens: 5, total_tokens: 25, total_cost: null },
-    { endpoint: "/v1/chat/completions", operation: "chat_completions", requests: 1, input_tokens: 10, output_tokens: 5, total_tokens: 15, total_cost: 0.5, cached_input_tokens: 4 },
+    { endpoint: "/v1/messages", operation: "chat_completions", requests: 2, input_tokens: 20, output_tokens: 5, total_tokens: 25, total_cost: null, billed_cost: 0.25 },
+    { endpoint: "/v1/chat/completions", operation: "chat_completions", requests: 1, input_tokens: 10, output_tokens: 5, total_tokens: 15, total_cost: 0.5, billed_cost: 0.6, cached_input_tokens: 4 },
     { endpoint: "/v1/audio/speech", operation: "audio_speech", requests: 3, input_tokens: 0, output_tokens: 9, total_tokens: 9, total_cost: null },
     { endpoint: "/legacy", requests: 1, total_tokens: 1 },
     null,
@@ -303,7 +294,9 @@ test("foldEndpointUsageByType sums endpoint rows per request type", () => {
   assert.equal(byType.chat.total_tokens, 40);
   assert.equal(byType.chat.cached_input_tokens, 4);
   assert.equal(byType.chat.total_cost, 0.5, "a null cost does not erase priced rows");
+  assert.equal(byType.chat.billed_cost, 0.85);
   assert.equal(byType.audio.total_cost, null, "all-unpriced types stay unpriced");
+  assert.equal(byType.audio.billed_cost, null);
   assert.equal(byType.other.label, "Other");
   assert.deepEqual(foldEndpointUsageByType(undefined), []);
 });
