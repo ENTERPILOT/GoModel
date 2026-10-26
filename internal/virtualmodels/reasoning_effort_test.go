@@ -19,6 +19,9 @@ func TestResolveReasoningEffort(t *testing.T) {
 			UserPaths: userPaths, ReasoningEffort: effort, Enabled: true,
 		}
 	}
+	wideModelPolicy := func(model, effort string) VirtualModel {
+		return VirtualModel{Source: model, Model: model, ReasoningEffort: effort, Enabled: true}
+	}
 	balancer := VirtualModel{
 		Source:          "team-model",
 		Targets:         []Target{{Provider: "openai", Model: "gpt-4o"}, {Provider: "openai", Model: "gpt-4o-mini"}},
@@ -113,6 +116,35 @@ func TestResolveReasoningEffort(t *testing.T) {
 			attempt:   gpt4o,
 			ctx:       core.WithEffectiveUserPath(context.Background(), "/team/alpha/member"),
 			want:      "low",
+		},
+		{
+			name:      "provider-wide policy does not hide a model-wide override",
+			rows:      []VirtualModel{wideModelPolicy("gpt-4o", "high"), {Source: "openai/", ProviderName: "openai", Enabled: true}},
+			requested: core.NewRequestedModelSelector("openai/gpt-4o", ""),
+			attempt:   gpt4o,
+			want:      "high",
+		},
+		{
+			name:      "exact policy without an effort does not hide a model-wide override",
+			rows:      []VirtualModel{wideModelPolicy("gpt-4o", "high"), modelPolicy("gpt-4o", "", "/team/alpha")},
+			requested: core.NewRequestedModelSelector("openai/gpt-4o", ""),
+			attempt:   gpt4o,
+			want:      "high",
+		},
+		{
+			name:      "exact override beats a model-wide one",
+			rows:      []VirtualModel{wideModelPolicy("gpt-4o", "high"), modelPolicy("gpt-4o", "low")},
+			requested: core.NewRequestedModelSelector("openai/gpt-4o", ""),
+			attempt:   gpt4o,
+			want:      "low",
+		},
+		{
+			name:      "exact override for another user path falls back to the model-wide one",
+			rows:      []VirtualModel{wideModelPolicy("gpt-4o", "high"), modelPolicy("gpt-4o", "low", "/team/alpha")},
+			requested: core.NewRequestedModelSelector("openai/gpt-4o", ""),
+			attempt:   gpt4o,
+			ctx:       core.WithEffectiveUserPath(context.Background(), "/team/beta"),
+			want:      "high",
 		},
 		{
 			name:      "model override skipped for another user path",
