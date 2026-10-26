@@ -18,7 +18,6 @@
   import { usagePage } from "./usage.svelte.js";
   import SessionIDChip from "./SessionIDChip.svelte";
   import { labelColor } from "./usage-labels.js";
-import { breakdownHasBilledCost } from "./usage-cost-format.js";
 import {
   chartWrapHeight,
   divergingDataFrom,
@@ -121,9 +120,7 @@ import { endpointListSummary, endpointsSelected } from "./usage-endpoints.js";
             : usagePage.sessionUsageLoading,
   );
   const costs = $derived(usagePage.usageMode === "costs");
-  const showBilled = $derived(
-    breakdownHasBilledCost(kind) && runtimeConfig.billedCostVisible(),
-  );
+  const showBilled = $derived(runtimeConfig.billedCostVisible());
   const visible = $derived(
     kind === "userPath" ? userPathUsageChartVisible(rows) : rows.length > 0,
   );

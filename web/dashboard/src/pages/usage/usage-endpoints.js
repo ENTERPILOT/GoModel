@@ -104,7 +104,7 @@ const TYPE_SUM_FIELDS = [
   "local_cached_input_tokens",
   "local_cached_output_tokens",
 ];
-const TYPE_NULLABLE_FIELDS = ["input_cost", "output_cost", "total_cost", "cached_input_cost"];
+const TYPE_NULLABLE_FIELDS = ["input_cost", "output_cost", "total_cost", "billed_cost", "cached_input_cost"];
 
 // foldEndpointUsageByType sums /admin/usage/endpoints rows into one row per
 // request type, keeping the folded endpoints sorted.

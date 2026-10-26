@@ -180,14 +180,6 @@ export function cachedCostTitle(entry, baseTitle) {
 }
 
 // --- Billed cost (pricing.markups) ---
-// The backend reports billed_cost on the model, user path, and label
-// aggregates only; endpoint and session breakdowns stay provider cost.
-const BILLED_BREAKDOWN_KINDS = new Set(["model", "userPath", "label"]);
-
-export function breakdownHasBilledCost(kind) {
-  return BILLED_BREAKDOWN_KINDS.has(kind);
-}
-
 // billedCostTitle names the markup rule a request-log row was billed at, or
 // says none matched (billed cost then equals provider cost).
 export function billedCostTitle(entry) {

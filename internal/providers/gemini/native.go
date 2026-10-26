@@ -251,6 +251,12 @@ func convertChatRequestToGemini(req *core.ChatRequest) (*geminiGenerateContentRe
 				}
 			}
 		case "tool":
+			// Gemini expects all responses to a parallel function call turn in
+			// one content, so consecutive tool messages share it.
+			if last := len(out.Contents) - 1; last >= 0 && isFunctionResponseContent(out.Contents[last]) {
+				out.Contents[last].Parts = append(out.Contents[last].Parts, parts...)
+				continue
+			}
 			out.Contents = append(out.Contents, geminiContent{Role: "user", Parts: parts})
 		default:
 			out.Contents = append(out.Contents, geminiContent{Role: "user", Parts: parts})
@@ -375,6 +381,48 @@ func geminiPartsFromContent(content core.MessageContent) ([]geminiPart, error) {
 		}
 		return geminiPartsFromContentParts(parts)
 	}
+}
+
+// toolCallIDs hands out tool call IDs. Gemini may omit function call IDs, and a
+// client matches tool results to calls by ID, so a missing or repeated ID is
+// replaced with an unused call_<n>.
+type toolCallIDs struct {
+	used map[string]struct{}
+	next int
+}
+
+// assign returns id when it is unused, otherwise a generated ID that avoids
+// both used IDs and the IDs supplied later in the same response.
+func (g *toolCallIDs) assign(id string, supplied map[string]struct{}) string {
+	if g.used == nil {
+		g.used = make(map[string]struct{})
+	}
+	if _, taken := g.used[id]; id != "" && !taken {
+		g.used[id] = struct{}{}
+		return id
+	}
+	for {
+		candidate := "call_" + strconv.Itoa(g.next)
+		g.next++
+		_, taken := g.used[candidate]
+		_, reserved := supplied[candidate]
+		if !taken && !reserved {
+			g.used[candidate] = struct{}{}
+			return candidate
+		}
+	}
+}
+
+func isFunctionResponseContent(content geminiContent) bool {
+	if content.Role != "user" || len(content.Parts) == 0 {
+		return false
+	}
+	for _, part := range content.Parts {
+		if part.FunctionResponse == nil {
+			return false
+		}
+	}
+	return true
 }
 
 func geminiPartsFromToolMessage(msg core.Message, functionName string) ([]geminiPart, error) {
@@ -1021,7 +1069,7 @@ func nativeChatResponse(req *core.ChatRequest, geminiResp *geminiGenerateContent
 		if index == 0 && i > 0 {
 			index = i
 		}
-		content, toolCalls, signature := openAIMessageFromGeminiParts(candidate.Content.Parts)
+		content, toolCalls, signature := openAIMessageFromGeminiParts(candidate.Content.Parts, &toolCallIDs{})
 		// A tool-call-only turn carries content: null in OpenAI responses; an
 		// empty string would surface as an empty Responses message item that
 		// clients cannot echo back.
@@ -1117,12 +1165,19 @@ func geminiPromptBlockReason(raw json.RawMessage) string {
 // openAIMessageFromGeminiParts flattens candidate parts into OpenAI text and
 // tool calls. A functionCall part's thought signature rides on its tool call;
 // the signature of a text turn (Gemini puts it on the last part) is returned
-// separately for the message.
-func openAIMessageFromGeminiParts(parts []geminiPart) (string, []core.ToolCall, string) {
+// separately for the message. ids keeps tool call IDs unique across calls, so a
+// stream shares one per choice.
+func openAIMessageFromGeminiParts(parts []geminiPart, ids *toolCallIDs) (string, []core.ToolCall, string) {
 	var text strings.Builder
 	var signature string
 	toolCalls := make([]core.ToolCall, 0)
-	for i, part := range parts {
+	supplied := make(map[string]struct{})
+	for _, part := range parts {
+		if call := part.functionCall(); call != nil && call.ID != "" {
+			supplied[call.ID] = struct{}{}
+		}
+	}
+	for _, part := range parts {
 		if part.Text != "" && !part.Thought {
 			text.WriteString(part.Text)
 		}
@@ -1132,10 +1187,7 @@ func openAIMessageFromGeminiParts(parts []geminiPart) (string, []core.ToolCall, 
 			signature = part.ThoughtSignature
 		}
 		if call != nil {
-			id := call.ID
-			if id == "" {
-				id = "call_" + strconv.Itoa(i)
-			}
+			id := ids.assign(call.ID, supplied)
 			args := strings.TrimSpace(string(call.Args))
 			if args == "" {
 				args = "{}"
