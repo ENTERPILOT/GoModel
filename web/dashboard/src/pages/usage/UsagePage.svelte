@@ -19,11 +19,13 @@
 
   const PAGE = "usage";
 
-  // Re-fetch when the page becomes active or the API key changes. Live
+  // Re-fetch when the page becomes active, the API key changes or the user
+  // goes back/forward (the URL then holds another view). Live
   // request-log previews stream in via the shared liveLogs singleton
   // (ensureLiveLogs is a no-op when the stream is already running).
   $effect(() => {
     void auth.refreshTick;
+    void router.historyTick;
     if (router.page === PAGE) {
       // untrack: restoring and fetching read the filters, which must not
       // become dependencies (a filter change would re-run the restore).

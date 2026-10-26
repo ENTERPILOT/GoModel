@@ -87,9 +87,16 @@
         value={usagePivot.view}
         onchange={(view) => (usagePivot.view = view)}
       />
-      <button type="button" class="btn btn-with-icon" disabled={empty} onclick={downloadCsv}>
+      <button
+        type="button"
+        class="btn btn-with-icon"
+        aria-label={m.usage_pivot_download_csv()}
+        title={m.usage_pivot_download_csv()}
+        disabled={empty}
+        onclick={downloadCsv}
+      >
         <Icon icon={Download} class="form-action-icon" />
-        <span>{m.usage_pivot_download_csv()}</span>
+        <span>CSV</span>
       </button>
     </div>
   </div>

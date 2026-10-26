@@ -185,9 +185,14 @@ func readUsageBreakdown(ctx context.Context, params UsageBreakdownParams, query 
 	if err != nil {
 		return nil, err
 	}
+	// Each query is capped on its own: hit groups mostly share (row, column)
+	// pairs with the uncached ones, so their combined length overcounts.
 	groups, err := query(ctx, params)
 	if err != nil {
 		return nil, err
+	}
+	if len(groups) > maxBreakdownGroups {
+		return nil, tooManyBreakdownGroupsError()
 	}
 	if mode := billedCacheHitsMode(params.CacheMode); mode != "" {
 		hitParams := params
@@ -196,14 +201,14 @@ func readUsageBreakdown(ctx context.Context, params UsageBreakdownParams, query 
 		if err != nil {
 			return nil, err
 		}
+		if len(hits) > maxBreakdownGroups {
+			return nil, tooManyBreakdownGroupsError()
+		}
 		for _, hit := range hits {
 			if hit.BilledCost != nil && *hit.BilledCost != 0 {
 				groups = append(groups, breakdownGroup{Row: hit.Row, Column: hit.Column, BilledCost: hit.BilledCost})
 			}
 		}
-	}
-	if len(groups) > maxBreakdownGroups {
-		return nil, tooManyBreakdownGroupsError()
 	}
 	return buildUsageBreakdown(groups, params), nil
 }

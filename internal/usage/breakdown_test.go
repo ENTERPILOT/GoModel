@@ -1,6 +1,8 @@
 package usage
 
 import (
+	"context"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -147,6 +149,44 @@ func TestBuildUsageBreakdown(t *testing.T) {
 			assert.Equal(t, tt.wantRows, got.Rows)
 			assert.Equal(t, tt.wantColumns, got.Columns)
 			assert.Equal(t, tt.wantCells, got.Cells)
+		})
+	}
+}
+
+func TestReadUsageBreakdownGroupCap(t *testing.T) {
+	groups := func(n int) []breakdownGroup {
+		out := make([]breakdownGroup, n)
+		for i := range out {
+			out[i] = breakdownGroup{Row: strconv.Itoa(i), Requests: 1, BilledCost: new(1.0)}
+		}
+		return out
+	}
+	tests := []struct {
+		name    string
+		base    int
+		hits    int
+		wantErr bool
+	}{
+		{name: "overlapping hits stay under the cap", base: maxBreakdownGroups, hits: maxBreakdownGroups},
+		{name: "too many uncached groups", base: maxBreakdownGroups + 1, wantErr: true},
+		{name: "too many hit groups", base: 1, hits: maxBreakdownGroups + 1, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			query := func(_ context.Context, params UsageBreakdownParams) ([]breakdownGroup, error) {
+				if params.CacheMode == CacheModeCached {
+					return groups(tt.hits), nil
+				}
+				return groups(tt.base), nil
+			}
+			got, err := readUsageBreakdown(context.Background(), UsageBreakdownParams{Rows: BreakdownModel, CacheMode: CacheModeUncached}, query)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "too many groups")
+				return
+			}
+			require.NoError(t, err)
+			assert.NotEmpty(t, got.Rows)
 		})
 	}
 }

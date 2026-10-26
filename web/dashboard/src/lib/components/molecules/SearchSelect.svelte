@@ -120,6 +120,10 @@
       shell?.notifyChanged();
       query = "";
       await tick();
+      // The pick moves (selected values list first), so the highlight
+      // follows it instead of landing on whatever took its old place.
+      const moved = filtered.findIndex((option) => option.value === pieces[0]);
+      if (moved >= 0) activeIndex = moved;
       shell?.place();
       shell?.focusSearch();
       return;

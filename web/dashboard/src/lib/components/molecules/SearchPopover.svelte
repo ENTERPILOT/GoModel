@@ -44,6 +44,7 @@
   } = $props();
 
   let rootEl = $state(null);
+  let triggerEl = $state(null);
   let searchEl = $state(null);
   // The popover is fixed-positioned from the trigger's viewport rect, so it
   // is never clipped by a scrolling ancestor such as an editor dialog.
@@ -124,6 +125,9 @@
         event.preventDefault();
         event.stopPropagation();
         close();
+        // Closing removes the focused search box; hand focus back to the
+        // trigger so keyboard users stay in place.
+        triggerEl?.focus();
         break;
     }
   }
@@ -146,6 +150,7 @@
   <button
     type="button"
     {id}
+    bind:this={triggerEl}
     class="search-select-trigger"
     class:mono
     class:search-select-trigger-multiple={multiple}
