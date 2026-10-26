@@ -103,7 +103,7 @@ Overrides gelten für neue Requests. Um bereits ausgeführte Requests neu zu bep
 
 ## Aufschläge und abgerechnete Kosten
 
-Legen Sie einen Aufschlag fest, wenn Sie Modellzugriff weiterverkaufen, zum Beispiel um Kunden die von ihnen verbrauchten Tokens weiterzuberechnen. GoModel erfasst für jeden Request die **abgerechneten Kosten** (`billed_cost` in der Nutzungszeile): die Provider-Kosten plus Aufschlag. Die Provider-Kosten selbst ändern sich nie, sodass Budgets, Dashboard-Summen und Einsparungen weiterhin messen, was Sie upstream bezahlen.
+Legen Sie einen Aufschlag fest, wenn Sie Modellzugriff weiterverkaufen, zum Beispiel um Kunden die von ihnen verbrauchten Tokens weiterzuberechnen. GoModel erfasst für jeden Request die **abgerechneten Kosten** (`billed_cost` in der Nutzungszeile): die Provider-Kosten plus Aufschlag. Die Provider-Kosten selbst ändern sich nie, sodass Budgets, Dashboard-Summen und Einsparungen weiterhin messen, was Sie upstream bezahlen. Mit GoModel Pro kann ein Budget stattdessen die abgerechneten Kosten begrenzen; siehe [Budgets](/de/features/budgets).
 
 Aufschläge sind standardmäßig deaktiviert. Aktivieren Sie sie mit `markups_enabled: true` (env `PRICING_MARKUPS_ENABLED=true`) und legen Sie dann Prozentwerte in `config.yaml` fest. Sind Aufschläge aktiviert, aber passt keine Regel auf einen Request, entsprechen seine abgerechneten Kosten den Provider-Kosten. Sind sie deaktiviert, erfasst GoModel keine abgerechneten Kosten und ignoriert `markups` und `bill_cache_hits`; ist `markups` gesetzt, wird beim Start eine Warnung protokolliert.
 

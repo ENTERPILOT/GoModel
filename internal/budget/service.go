@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"sync"
 	"time"
@@ -17,14 +18,55 @@ var ErrUnavailable = errors.New("budget service is unavailable")
 // while the deployment does not have the quota-templates capability.
 var ErrQuotaTemplatesUnavailable = errors.New("per-child quota templates are not enabled")
 
+// ErrBilledBudgetsUnavailable indicates that a budget on billed cost was found
+// while the deployment lacks the billed-budgets capability or has markups
+// disabled.
+var ErrBilledBudgetsUnavailable = errors.New("budgets on billed cost require a GoModel Pro license with the billing entitlement and pricing.markups_enabled")
+
 // ServiceOption configures a budget service.
 type ServiceOption func(*Service)
 
 // WithQuotaTemplates controls whether per-child user-path budgets are accepted.
 func WithQuotaTemplates(enabled bool) ServiceOption {
 	return func(service *Service) {
-		service.quotaTemplates = enabled
+		service.caps.quotaTemplates = enabled
 	}
+}
+
+// WithBilledBudgets controls whether budgets on billed cost are accepted.
+func WithBilledBudgets(enabled bool) ServiceOption {
+	return func(service *Service) {
+		service.caps.billedBudgets = enabled
+	}
+}
+
+// WithBilledCacheHits reports whether response-cache hits add billed cost
+// (markups enabled and bill_cache_hits on), which makes CheckCacheHit enforce
+// billed budgets before a cached response is replayed.
+func WithBilledCacheHits(enabled bool) ServiceOption {
+	return func(service *Service) {
+		service.billedCacheHits = enabled
+	}
+}
+
+// capabilities records which optional budget behaviors the deployment has.
+type capabilities struct {
+	quotaTemplates bool
+	billedBudgets  bool
+}
+
+// validate refuses budgets being written that need a capability the
+// deployment does not have.
+func (c capabilities) validate(budgets []Budget) error {
+	for _, item := range budgets {
+		if item.PerChild && !c.quotaTemplates {
+			return fmt.Errorf("%w: budget for user path %q", ErrQuotaTemplatesUnavailable, item.Subject)
+		}
+		if item.CostBasis == CostBasisBilled && !c.billedBudgets {
+			return fmt.Errorf("%w: budget for %s", ErrBilledBudgetsUnavailable, item.SubjectLabel())
+		}
+	}
+	return nil
 }
 
 type Service struct {
@@ -33,8 +75,15 @@ type Service struct {
 
 	budgets  []Budget
 	settings Settings
+	// billedConsumerBudgets is set when a user-path or label budget limits
+	// billed cost, so CheckCacheHit can return without a store round trip.
+	billedConsumerBudgets bool
+	// downgradeWarned remembers the stored billed budgets already reported as
+	// enforced on provider cost, so each is logged once.
+	downgradeWarned map[string]struct{}
 
-	quotaTemplates bool
+	caps            capabilities
+	billedCacheHits bool
 }
 
 func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Service, error) {
@@ -42,9 +91,9 @@ func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Se
 		return nil, fmt.Errorf("budget store is required")
 	}
 	service := &Service{
-		store:          store,
-		settings:       DefaultSettings(),
-		quotaTemplates: true,
+		store:    store,
+		settings: DefaultSettings(),
+		caps:     capabilities{quotaTemplates: true, billedBudgets: true},
 	}
 	for _, option := range options {
 		if option != nil {
@@ -65,7 +114,9 @@ func (s *Service) Refresh(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := s.validateQuotaTemplates(budgets); err != nil {
+	// Stored per-child templates still need the capability: without it their
+	// limits would silently change meaning.
+	if err := (capabilities{quotaTemplates: s.caps.quotaTemplates, billedBudgets: true}).validate(budgets); err != nil {
 		return err
 	}
 	settings, err := s.store.GetSettings(ctx)
@@ -82,8 +133,12 @@ func (s *Service) Refresh(ctx context.Context) error {
 		return cmp.Compare(b.PeriodSeconds, a.PeriodSeconds)
 	})
 	s.mu.Lock()
+	budgets = s.downgradeUnavailableBilled(budgets)
 	s.budgets = budgets
 	s.settings = settings
+	s.billedConsumerBudgets = slices.ContainsFunc(budgets, func(b Budget) bool {
+		return b.CostBasis == CostBasisBilled && b.Scope != ScopeProvider
+	})
 	s.mu.Unlock()
 	return nil
 }
@@ -106,7 +161,7 @@ func (s *Service) UpsertBudgets(ctx context.Context, budgets []Budget) error {
 	if s == nil || s.store == nil {
 		return ErrUnavailable
 	}
-	if err := s.validateQuotaTemplates(budgets); err != nil {
+	if err := s.validateCapabilities(budgets); err != nil {
 		return err
 	}
 	if err := s.store.UpsertBudgets(ctx, budgets); err != nil {
@@ -133,7 +188,7 @@ func (s *Service) ReplaceConfigBudgets(ctx context.Context, budgets []Budget) er
 	if s == nil || s.store == nil {
 		return ErrUnavailable
 	}
-	if err := s.validateQuotaTemplates(budgets); err != nil {
+	if err := s.validateCapabilities(budgets); err != nil {
 		return err
 	}
 	if err := s.store.ReplaceConfigBudgets(ctx, budgets); err != nil {
@@ -142,16 +197,44 @@ func (s *Service) ReplaceConfigBudgets(ctx context.Context, budgets []Budget) er
 	return s.Refresh(ctx)
 }
 
-func (s *Service) validateQuotaTemplates(budgets []Budget) error {
-	if s == nil || s.quotaTemplates {
+// validateCapabilities refuses budgets being written that need a capability
+// the deployment does not have.
+func (s *Service) validateCapabilities(budgets []Budget) error {
+	if s == nil {
 		return nil
 	}
-	for _, item := range budgets {
-		if item.PerChild {
-			return fmt.Errorf("%w: budget for user path %q", ErrQuotaTemplatesUnavailable, item.Subject)
-		}
+	return s.caps.validate(budgets)
+}
+
+// downgradeUnavailableBilled enforces stored billed budgets on provider cost
+// while billed budgets are unavailable (license lapsed or markups disabled),
+// so the limit stays in force and the gateway still starts; changing the
+// budget or restoring the entitlement ends it. Each budget is logged once.
+// The caller holds s.mu.
+func (s *Service) downgradeUnavailableBilled(budgets []Budget) []Budget {
+	if s.caps.billedBudgets {
+		return budgets
 	}
-	return nil
+	for i := range budgets {
+		if budgets[i].CostBasis != CostBasisBilled {
+			continue
+		}
+		budgets[i].CostBasis = CostBasisProvider
+		key := budgetKey(budgets[i].Scope, budgets[i].Subject, budgets[i].PeriodSeconds)
+		if _, warned := s.downgradeWarned[key]; warned {
+			continue
+		}
+		if s.downgradeWarned == nil {
+			s.downgradeWarned = make(map[string]struct{})
+		}
+		s.downgradeWarned[key] = struct{}{}
+		slog.Warn("budget on billed cost enforced on provider cost: billed budgets need a GoModel Pro license with the billing entitlement and PRICING_MARKUPS_ENABLED=true",
+			"scope", budgets[i].Scope,
+			"subject", budgets[i].Subject,
+			"period", PeriodLabel(budgets[i].PeriodSeconds),
+		)
+	}
+	return budgets
 }
 
 func (s *Service) Budgets() []Budget {
@@ -273,6 +356,42 @@ func (s *Service) CheckWithResults(ctx context.Context, subjects Subjects, now t
 	return results, nil
 }
 
+// CheckCacheHit evaluates the budgets a response-cache hit spends against
+// before the cached response is replayed. Only billed user-path and label
+// budgets qualify, and only while cache hits are billed: provider cost never
+// counts cache hits, and a hit is not routed to any provider. It returns
+// without a store round trip when no such budget exists.
+func (s *Service) CheckCacheHit(ctx context.Context, subjects Subjects, now time.Time) error {
+	if s == nil || s.store == nil || !s.billedCacheHits {
+		return nil
+	}
+	s.mu.RLock()
+	billed := s.billedConsumerBudgets
+	s.mu.RUnlock()
+	if !billed {
+		return nil
+	}
+	subjects.Provider = ""
+	matching, settings, now, err := s.match(&subjects, now)
+	if err != nil {
+		return err
+	}
+	matching = slices.DeleteFunc(matching, func(b Budget) bool { return b.CostBasis != CostBasisBilled })
+	if len(matching) == 0 {
+		return nil
+	}
+	results, err := s.evaluate(ctx, matching, now, settings)
+	if err != nil {
+		return err
+	}
+	for _, result := range results {
+		if result.HasUsage && result.Spent >= result.Budget.Amount {
+			return &ExceededError{Result: result}
+		}
+	}
+	return nil
+}
+
 // ProviderWithinBudget reports whether no provider budget for providerName is
 // exhausted. Failover uses it to skip targets whose provider budget is spent;
 // consumer budgets are deliberately ignored because switching targets cannot
@@ -366,10 +485,11 @@ func (s *Service) evaluate(ctx context.Context, budgets []Budget, now time.Time,
 			continue
 		}
 		windows = append(windows, SpendWindow{
-			Scope:   budget.Scope,
-			Subject: budget.evaluationSubject(),
-			Start:   start,
-			End:     now,
+			Scope:     budget.Scope,
+			Subject:   budget.evaluationSubject(),
+			CostBasis: budget.CostBasis,
+			Start:     start,
+			End:       now,
 		})
 		windowIndexes = append(windowIndexes, i)
 	}

@@ -14,8 +14,24 @@ export function defaultBudgetForm() {
     period_seconds: 86400,
     amount: "",
     per_child: false,
+    cost_basis: "provider",
     source: "manual",
   };
+}
+
+// budgetCostBasis reads which spend a budget limits: "billed" (provider cost
+// plus markup) or "provider", the default for budgets without the field.
+export function budgetCostBasis(item) {
+  return String((item && item.cost_basis) || "").trim() === "billed"
+    ? "billed"
+    : "provider";
+}
+
+export function budgetCostBasisOptions() {
+  return [
+    { value: "provider", label: m.budgets_cost_basis_provider() },
+    { value: "billed", label: m.budgets_cost_basis_billed() },
+  ];
 }
 
 // One scope metadata table drives the select options, list chips, and the
@@ -213,6 +229,7 @@ function budgetFilterText(item) {
     budgetPeriodLabel(item),
     budgetPeriodFromSeconds(seconds),
     item && item.per_child ? m.budgets_per_child_badge() : "",
+    budgetCostBasis(item) === "billed" ? m.budgets_billed_badge() : "",
     seconds ? String(seconds) + "s" : "",
     seconds ? String(seconds) + " seconds" : "",
   ]
@@ -292,6 +309,7 @@ export function buildBudgetFormPayload(form) {
       period_seconds: Math.trunc(periodSeconds),
       amount,
       per_child: scope === "user_path" && Boolean(f.per_child),
+      cost_basis: budgetCostBasis(f),
       source: String(f.source || "manual").trim() || "manual",
     },
     error: "",
@@ -316,6 +334,7 @@ export function budgetPutBody(payload) {
     budget_key: { period_seconds: payload.period_seconds },
     amount: payload.amount,
     per_child: Boolean(payload.per_child),
+    cost_basis: budgetCostBasis(payload),
   };
 }
 

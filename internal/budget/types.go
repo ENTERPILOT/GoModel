@@ -43,11 +43,40 @@ const (
 	ScopeProvider Scope = "provider"
 )
 
+// CostBasis names which recorded cost a budget sums.
+type CostBasis string
+
+const (
+	// CostBasisProvider sums the upstream provider cost (total_cost) of
+	// uncached requests. It is the default.
+	CostBasisProvider CostBasis = "provider"
+	// CostBasisBilled sums what the caller is billed (billed_cost): provider
+	// cost plus markup, including billed response-cache hits. Usage recorded
+	// without a billed cost counts at its provider cost.
+	CostBasisBilled CostBasis = "billed"
+)
+
+// NormalizeCostBasis canonicalizes a cost basis name. An empty basis means
+// provider, keeping budgets stored before cost bases existed unchanged.
+func NormalizeCostBasis(raw string) (CostBasis, error) {
+	switch CostBasis(strings.ToLower(strings.TrimSpace(raw))) {
+	case "", CostBasisProvider:
+		return CostBasisProvider, nil
+	case CostBasisBilled:
+		return CostBasisBilled, nil
+	default:
+		return "", fmt.Errorf("cost_basis must be one of provider, billed")
+	}
+}
+
 // Budget stores one spend limit for one scope, subject, and reset period.
+// CostBasis is an attribute, not part of the identity: one scope, subject,
+// and period holds one budget on either basis.
 type Budget struct {
-	Scope    Scope  `json:"scope" bson:"scope"`
-	Subject  string `json:"subject" bson:"subject"`
-	PerChild bool   `json:"per_child" bson:"per_child"`
+	Scope     Scope     `json:"scope" bson:"scope"`
+	Subject   string    `json:"subject" bson:"subject"`
+	PerChild  bool      `json:"per_child" bson:"per_child"`
+	CostBasis CostBasis `json:"cost_basis" bson:"cost_basis,omitempty"`
 	// EffectiveSubject is populated only while evaluating a per-child budget.
 	// It is not part of the persisted definition or public JSON representation.
 	EffectiveSubject string     `json:"-" bson:"-"`
@@ -280,6 +309,11 @@ func NormalizeBudget(b Budget) (Budget, error) {
 	}
 	b.Subject = subject
 	b.EffectiveSubject = ""
+	costBasis, err := NormalizeCostBasis(string(b.CostBasis))
+	if err != nil {
+		return Budget{}, err
+	}
+	b.CostBasis = costBasis
 	if b.PerChild && scope != ScopeUserPath {
 		return Budget{}, fmt.Errorf("per_child is only valid for user_path budgets")
 	}

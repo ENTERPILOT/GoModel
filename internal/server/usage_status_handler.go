@@ -53,9 +53,12 @@ type usageStatusSummary struct {
 }
 
 type usageStatusBudget struct {
-	Scope         string  `json:"scope"`
-	Subject       string  `json:"subject"`
-	PerChild      bool    `json:"per_child"`
+	Scope    string `json:"scope"`
+	Subject  string `json:"subject"`
+	PerChild bool   `json:"per_child"`
+	// CostBasis names the spend Spent and Amount measure: provider cost or
+	// billed cost.
+	CostBasis     string  `json:"cost_basis" enums:"provider,billed"`
 	UserPath      string  `json:"user_path,omitempty"`
 	PeriodSeconds int64   `json:"period_seconds"`
 	PeriodLabel   string  `json:"period_label"`
@@ -217,6 +220,7 @@ func usageStatusBudgets(results []budget.CheckResult, now time.Time) []usageStat
 			Scope:           string(result.Budget.Scope),
 			Subject:         result.Budget.Subject,
 			PerChild:        result.Budget.PerChild,
+			CostBasis:       string(result.Budget.CostBasis),
 			PeriodSeconds:   result.Budget.PeriodSeconds,
 			PeriodLabel:     budget.PeriodLabel(result.Budget.PeriodSeconds),
 			Amount:          result.Budget.Amount,

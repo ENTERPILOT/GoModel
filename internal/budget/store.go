@@ -13,10 +13,16 @@ var ErrNotFound = errors.New("budget not found")
 // SpendWindow asks for the tracked spend of one budget subject over one time
 // window.
 type SpendWindow struct {
-	Scope   Scope
-	Subject string
-	Start   time.Time
-	End     time.Time
+	Scope     Scope
+	Subject   string
+	CostBasis CostBasis
+	Start     time.Time
+	End       time.Time
+}
+
+// billed reports whether the window sums billed rather than provider cost.
+func (w SpendWindow) billed() bool {
+	return w.CostBasis == CostBasisBilled
 }
 
 // Spend is the total tracked cost for one SpendWindow. HasUsage is false when
@@ -53,8 +59,8 @@ type Store interface {
 	ResetBudget(ctx context.Context, scope Scope, subject string, periodSeconds int64, at time.Time) error
 	ResetAllBudgets(ctx context.Context, at time.Time) error
 
-	// SumSpend totals uncached spend for every window in one round trip, in
-	// the order given. Budget enforcement runs on every request, so the whole
+	// SumSpend totals spend for every window in one round trip, in the order
+	// given: uncached provider cost, or billed cost for a billed window. Budget enforcement runs on every request, so the whole
 	// matching set is asked for at once rather than one query per budget.
 	SumSpend(ctx context.Context, windows []SpendWindow) ([]Spend, error)
 

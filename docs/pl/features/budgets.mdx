@@ -237,6 +237,72 @@ wartość użycia. Użyj `GET /v1/usage` z efektywną ścieżką użytkownika po
 sprawdzić rozwiązany budżet tego potomka. Zresetowanie szablonu rozpoczyna nowy
 okres dla wszystkich jego potomków.
 
+## Budżety na koszcie rozliczeniowym (GoModel Pro)
+
+<Info>
+  Budżety na koszcie rozliczeniowym wymagają licencji GoModel Pro z uprawnieniem
+  `billing` oraz `PRICING_MARKUPS_ENABLED=true`. Bez nich API administracyjne
+  odrzuca zapisy z `"cost_basis": "billed"` (403 `billed_budgets_not_entitled`
+  albo 400 `billed_budgets_markups_disabled`, gdy narzuty są wyłączone), a
+  budżet rozliczeniowy w bieżącej konfiguracji przerywa start. Zapisany już
+  budżet rozliczeniowy (utworzony w dashboardzie albo przez wcześniejszą
+  konfigurację) nigdy nie blokuje startu: dopóki brakuje uprawnienia lub
+  narzutów, GoModel raz loguje ostrzeżenie i egzekwuje go na koszcie providera,
+  więc limit obowiązuje, dopóki go nie zmienisz albo ich nie przywrócisz.
+</Info>
+
+Domyślnie budżet ogranicza koszt providera: to, co płacisz upstream za requesty
+spoza cache. Ustaw `cost_basis: billed`, aby zamiast tego ograniczyć to, czym
+obciążany jest wywołujący — koszt providera plus
+[narzut](/pl/features/cost-tracking). Używaj tego, gdy budżet jest limitem
+kredytowym klienta.
+
+```yaml
+budgets:
+  labels:
+    - label: "customer-acme"
+      limits:
+        - period: "monthly"
+          amount: 500.00
+          cost_basis: "billed"
+```
+
+```bash
+curl -X PUT http://localhost:8080/admin/budgets \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope": "label",
+    "subject": "customer-acme",
+    "cost_basis": "billed",
+    "budget_key": { "period": "monthly" },
+    "amount": 500.00
+  }'
+```
+
+Budżet rozliczeniowy:
+
+- sumuje `billed_cost`, łącznie z rozliczonymi cache hitami w response cache.
+  Przy `PRICING_BILL_CACHE_HITS=false` cache hity są rozliczane na `0` i nic nie
+  dodają.
+- liczy użycie zapisane bez kosztu rozliczeniowego (sprzed włączenia narzutów)
+  po koszcie providera, więc włączenie narzutów w trakcie okresu nigdy nie
+  zaniża wydatków.
+- obejmuje też cache hity: dopóki cache hity są rozliczane, wyczerpany budżet
+  rozliczeniowy ścieżki użytkownika lub labela odrzuca request, zanim
+  odpowiedź z cache zostanie zwrócona. Budżety na koszcie providera nigdy nie
+  liczą cache hitów, a budżety providerów ich nie dotyczą, bo hit nie trafia do
+  żadnego providera.
+
+`cost_basis` przyjmuje wartość `provider` (domyślnie) albo `billed`. To atrybut,
+nie część klucza budżetu: zakres, podmiot i okres wyznaczają jeden budżet na
+jednej z dwóch podstaw, a zmiana podstawy zachowuje bieżący okres. `PUT` bez
+`cost_basis` ustawia `provider`; istniejące budżety nadal ograniczają koszt
+providera. `GET /admin/budgets` i `GET /v1/usage` zwracają `cost_basis` każdego
+budżetu, a `spent` liczone na tej podstawie. W dashboardzie formularz budżetu
+pokazuje wybór **Podstawa kosztu**, gdy uprawnienie i narzuty są włączone, a
+budżety rozliczeniowe mają chip `rozliczany`.
+
 ## Egzekwowanie w workflow
 
 Aktywny workflow decyduje, czy dla requestu są wykonywane sprawdzenia budżetu.

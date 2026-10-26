@@ -100,7 +100,7 @@ Nadpisania dotyczą nowych requestów. Aby ponownie wycenić requesty, które ju
 
 ## Narzuty i koszt rozliczeniowy
 
-Ustaw narzut, gdy odsprzedajesz dostęp do modeli, na przykład żeby refakturować klientom zużyte przez nich tokeny. GoModel zapisuje dla każdego requestu **koszt rozliczeniowy** (`billed_cost` w wierszu użycia): koszt providera plus narzut. Sam koszt providera nigdy się nie zmienia, więc budżety, sumy w dashboardzie i oszczędności nadal mierzą to, co płacisz upstream.
+Ustaw narzut, gdy odsprzedajesz dostęp do modeli, na przykład żeby refakturować klientom zużyte przez nich tokeny. GoModel zapisuje dla każdego requestu **koszt rozliczeniowy** (`billed_cost` w wierszu użycia): koszt providera plus narzut. Sam koszt providera nigdy się nie zmienia, więc budżety, sumy w dashboardzie i oszczędności nadal mierzą to, co płacisz upstream. W GoModel Pro budżet może zamiast tego ograniczać koszt rozliczeniowy; zobacz [Budżety](/pl/features/budgets).
 
 Narzuty są domyślnie wyłączone. Włącz je przez `markups_enabled: true` (env `PRICING_MARKUPS_ENABLED=true`), a następnie ustaw wartości procentowe w `config.yaml`. Gdy narzuty są włączone, ale żadna reguła nie pasuje do requestu, jego koszt rozliczeniowy jest równy kosztowi providera. Gdy są wyłączone, GoModel nie zapisuje kosztu rozliczeniowego i ignoruje `markups` oraz `bill_cache_hits`; jeśli `markups` jest ustawione, przy starcie loguje ostrzeżenie.
 
