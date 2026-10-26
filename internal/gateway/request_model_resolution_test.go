@@ -359,16 +359,15 @@ func TestResolveRequestModelKeepsResolverErrorStatus(t *testing.T) {
 	}
 }
 
-// requestRouteResolver resolves through a user-path aware resolver that
-// records the virtual models its route passed through.
+// requestRouteResolver reports the virtual models its route passed through.
 type requestRouteResolver struct {
 	requestAliasResolver
 	path []string
 }
 
-func (r requestRouteResolver) ResolveModelForUserPath(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
-	core.RecordVirtualModelRoute(ctx, r.path)
-	return r.ResolveModel(requested)
+func (r requestRouteResolver) ResolveModelRouteForUserPath(_ context.Context, requested core.RequestedModelSelector) (core.ModelSelector, []string, bool, error) {
+	selector, changed, err := r.ResolveModel(requested)
+	return selector, r.path, changed, err
 }
 
 func TestResolveRequestModelCarriesVirtualModelPath(t *testing.T) {

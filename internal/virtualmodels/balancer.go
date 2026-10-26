@@ -52,10 +52,12 @@ func (r *roundRobin) prune(active map[string]*redirectEntry) {
 // the pinned target is still healthy. The plugin strategy works the same way
 // with the virtual model's named routing-strategy plugin. A target model that
 // is disabled, or that this request may not use, is skipped like an
-// unavailable one. It reports false when no target is available. path
-// collects the virtual models the chosen route passes through.
+// unavailable one. It reports false when no target is available. path, when
+// not nil, collects the virtual models the chosen route passes through.
 func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry *redirectEntry, sessionID string, path *[]string) (core.ModelSelector, bool) {
-	*path = append(*path, entry.vm.Source)
+	if path != nil {
+		*path = append(*path, entry.vm.Source)
+	}
 	allowed := func(selector core.ModelSelector) bool { return s.allowsIn(ctx, snap, selector) }
 	supported := snap.viableTargets(entry, s.catalog, allowed)
 	if len(supported) == 0 {

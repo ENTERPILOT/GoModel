@@ -40,9 +40,11 @@ func (s *Service) ResolveReasoningEffort(
 	if s == nil || resolution == nil {
 		return ""
 	}
-	requested := resolution.Requested
-
 	snap := s.snapshot()
+	if !snap.reasoningEffort {
+		return ""
+	}
+	requested := resolution.Requested
 	userPath := core.UserPathFromContext(ctx)
 	if policy, ok := snap.matchingPolicy(attempt.Provider, attempt.Model); ok &&
 		policy.ReasoningEffort != "" && userPathAllowed(userPath, policy.UserPaths) {

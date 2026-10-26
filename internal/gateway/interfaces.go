@@ -22,6 +22,14 @@ type UserPathModelResolver interface {
 	ResolveModelForUserPath(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error)
 }
 
+// RoutedModelResolver is an optional UserPathModelResolver that also returns
+// the virtual models the resolution routed through, outermost first, so a
+// per-attempt setting can follow the route routing chose where several lead
+// to the same concrete model. A nil route means none was recorded.
+type RoutedModelResolver interface {
+	ResolveModelRouteForUserPath(ctx context.Context, requested core.RequestedModelSelector) (selector core.ModelSelector, route []string, changed bool, err error)
+}
+
 // ModelSlowdownResolver optionally resolves an extra-time factor for a
 // requested/resolved model pair. The context carries the effective user path.
 type ModelSlowdownResolver interface {

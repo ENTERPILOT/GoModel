@@ -186,12 +186,10 @@ func TestResolveReasoningEffortFollowsRoutedPath(t *testing.T) {
 
 	seen := map[string]bool{}
 	for range 2 {
-		ctx, route := core.WithVirtualModelRoute(context.Background())
-		resolved, changed, err := service.ResolveModelForUserPath(ctx, requested)
+		resolved, path, changed, err := service.ResolveModelRouteForUserPath(context.Background(), requested)
 		require.NoError(t, err)
 		require.True(t, changed)
 		require.Equal(t, gpt4o, resolved)
-		path := route.Path()
 		require.Len(t, path, 2)
 		assert.Equal(t, "team", path[0])
 
@@ -201,4 +199,18 @@ func TestResolveReasoningEffortFollowsRoutedPath(t *testing.T) {
 		seen[path[1]] = true
 	}
 	assert.Len(t, seen, 2, "round robin should route through both legs")
+}
+
+// Without a redirect forcing an effort, routing records no route.
+func TestResolveModelRouteOmitsRouteWithoutEffort(t *testing.T) {
+	service := newSlowdownService(t,
+		VirtualModel{Source: "team", Targets: []Target{{Provider: "openai", Model: "gpt-4o"}}, Enabled: true},
+		VirtualModel{Source: "openai/gpt-4o", ProviderName: "openai", Model: "gpt-4o", ReasoningEffort: "low", Enabled: true},
+	)
+
+	resolved, path, changed, err := service.ResolveModelRouteForUserPath(context.Background(), core.NewRequestedModelSelector("team", ""))
+	require.NoError(t, err)
+	require.True(t, changed)
+	assert.Equal(t, core.ModelSelector{Provider: "openai", Model: "gpt-4o"}, resolved)
+	assert.Nil(t, path)
 }

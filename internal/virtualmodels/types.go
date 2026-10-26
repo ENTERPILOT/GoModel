@@ -236,7 +236,8 @@ type Resolution struct {
 	Requested core.ModelSelector
 	Resolved  core.ModelSelector
 	Source    string
-	// Path lists the virtual models routing passed through, outermost first.
+	// Path lists the virtual models routing passed through, outermost first,
+	// when a redirect forces a reasoning effort.
 	Path []string
 }
 
