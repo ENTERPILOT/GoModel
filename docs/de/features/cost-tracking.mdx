@@ -134,6 +134,14 @@ Sobald Aufschläge aktiviert sind, zeigt das Dashboard die abgerechneten Kosten 
 
 Ein Wert `---` bedeutet, dass die Kosten unbekannt sind, weil keine Preise verfügbar waren. Das ist nicht dasselbe wie `$0`.
 
+## Ausgaben filtern und aufschlüsseln
+
+Die Nutzungsseite filtert jede Karte, jedes Diagramm und das Request-Log nach Modell, Anbieter, Label, API-Schlüssel, Endpunkt, Nutzerpfad und Session. Jedes Dropdown nimmt mehrere Werte an: Ein Request erfüllt einen Filter, wenn er einen der gewählten Werte hat, und er muss jeden Filter erfüllen. Die Nutzerpfad-Auswahl zeigt bekannte Pfade als Baum, gruppiert nach Präfix; ein gewählter Knoten schließt alles darunter ein, und Sie können einen nicht aufgeführten Pfad eintippen.
+
+Der Bereich **Aufschlüsselung** schlüsselt die gefilterte Nutzung nach zwei Dimensionen auf. Zum Beispiel zeigen Zeilen **Nutzerpfad**, Spalten **Zeitraum** und Zeitraum **Monatlich** die Kosten pro Monat und Nutzerpfad. Wählen Sie die Kennzahl (Kosten, Tokens oder Requests); die Top 10 Zeilen und Spalten bleiben erhalten, der Rest wird unter **Sonstige** zusammengefasst. **Nutzerpfade gruppieren** fasst Pfade nach ihren ersten Segmenten zusammen, sodass `/team/alice/laptop` unter `/team/alice` zählt. Wechseln Sie zwischen gestapeltem Diagramm und Tabelle, und exportieren Sie die Tabelle samt Summen mit **CSV herunterladen**.
+
+Filter, Zeitraum und Aufschlüsselung stehen in der URL der Seite, ein kopierter Link öffnet also dieselbe Ansicht. Dieselben Daten liefert [`GET /admin/usage/breakdown`](/de/advanced/admin-endpoints#get-adminusagebreakdown), die Filter gelten für jeden Nutzungs-Endpunkt außer `/admin/usage/throughput` (siehe [Mehrwertige Filter](/de/advanced/admin-endpoints#mehrwertige-filter)).
+
 ## Gespeicherte Kosten neu berechnen
 
 Die Neuberechnung ermittelt die gespeicherten Kosten der passenden Nutzungszeilen anhand der aktuellen Preise neu. Verwenden Sie sie nach der Änderung eines Overrides oder wenn zum Zeitpunkt eines Requests keine Preise verfügbar waren. Die Aktion ist standardmäßig aktiviert (`USAGE_PRICING_RECALCULATION_ENABLED`); wählen Sie in der Nutzungsansicht **Recalculate** und geben Sie dann zur Bestätigung `recalculate` ein. Sie ist auf den ausgewählten Datumsbereich, Provider oder das Modell sowie den User Path beschränkt.

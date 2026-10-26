@@ -38,7 +38,6 @@ import {
   shortSessionID,
   usageEntryCached,
   usageEntryCacheLabel,
-  usageFilterQueryStr,
   usageLogHasAuthKeys,
   usageLogHasLabels,
   usageLogQueryParams,
@@ -54,6 +53,7 @@ import {
   usesResponseCostPricing,
 } from "../src/pages/usage/usage-helpers.js";
 import { horizontalUsageChartConfig } from "../src/pages/usage/usage-chart-config.js";
+import { emptyUsageFilters, usageFiltersEmpty, usageQuery } from "../src/pages/usage/usage-query.js";
 
 test("usesResponseCostPricing detects provider-reported costs", () => {
   assert.equal(usesResponseCostPricing({ cost_source: "openrouter_credits" }), true);
@@ -148,56 +148,51 @@ test("cachedCostTitle prepends savings note for cached entries and passes throug
 
 // --- Query building ---
 
-test("usageFilterQueryStr includes every active filter, URL-encoded", () => {
-  const qs = usageFilterQueryStr({
-    model: "gpt-5",
-    provider: "openai",
-    label: "env:prod",
-    user_path: "/team",
-    session_id: "session/a",
-    auth_key_id: "key-a",
-    endpoint: "/v1/chat/completions,/v1/messages",
+test("usageQuery includes every active filter, URL-encoded", () => {
+  const qs = usageQuery({
+    filters: {
+      models: ["gpt-5"],
+      providers: ["openai"],
+      labels: ["env:prod"],
+      userPaths: ["/team"],
+      session: "session/a",
+      authKeys: ["key-a"],
+      endpoints: ["/v1/chat/completions", "/v1/messages"],
+    },
   });
   assert.equal(
     qs,
-    "&model=gpt-5&provider=openai&label=env%3Aprod&user_path=%2Fteam&session_id=session%2Fa&auth_key_id=key-a" +
-      "&endpoint=%2Fv1%2Fchat%2Fcompletions%2C%2Fv1%2Fmessages",
+    "model=gpt-5&provider=openai&label=env%3Aprod&user_path=%2Fteam&auth_key_id=key-a" +
+      "&endpoint=%2Fv1%2Fchat%2Fcompletions&endpoint=%2Fv1%2Fmessages&session_id=session%2Fa",
   );
 });
 
-test("usageFilterQueryStr skips empty filters", () => {
-  assert.equal(usageFilterQueryStr({ model: "", provider: "", label: "", user_path: "", session_id: "" }), "");
-  assert.equal(usageFilterQueryStr({ label: "team alpha" }), "&label=team%20alpha");
+test("usageQuery repeats multi-value filters and skips empty ones", () => {
+  const qs = usageQuery({
+    filters: { models: ["gpt-5", "claude"], labels: ["env:dev,local", "pr"], userPaths: ["/team/a", "/ops"], authKeys: [], session: "" },
+  });
+  assert.equal(qs, "model=gpt-5&model=claude&label=env%3Adev%2Clocal&label=pr&user_path=%2Fteam%2Fa&user_path=%2Fops");
+  assert.equal(usageQuery({ filters: emptyUsageFilters() }), "");
+  assert.equal(usageQuery({ filters: { labels: ["team alpha"] } }), "label=team%20alpha");
 });
 
-test("usageFilterQueryStr honors every filter except the excluded facet", () => {
-  const filters = {
-    model: "gpt-5",
-    provider: "openai",
-    label: "env:prod",
-    user_path: "/team",
-    session_id: "session-a",
-  };
-  const withoutModel = usageFilterQueryStr(filters, "model");
+test("usageQuery honors every filter except the excluded facet", () => {
+  const filters = { models: ["gpt-5"], providers: ["openai"], labels: ["env:prod"], userPaths: ["/team"], session: "session-a" };
+  const withoutModel = usageQuery({ filters, excludeParam: "model" });
   assert.doesNotMatch(withoutModel, /model=/);
   assert.match(withoutModel, /provider=openai/);
   assert.match(withoutModel, /label=env%3Aprod/);
   assert.match(withoutModel, /user_path=%2Fteam/);
 
-  const withoutProvider = usageFilterQueryStr(filters, "provider");
-  assert.doesNotMatch(withoutProvider, /provider=/);
-  assert.match(withoutProvider, /model=gpt-5/);
-
-  const withoutLabel = usageFilterQueryStr(filters, "label");
-  assert.doesNotMatch(withoutLabel, /label=/);
-  assert.match(withoutLabel, /provider=openai/);
-
-  const withoutSession = usageFilterQueryStr(filters, "session_id");
+  const withoutSession = usageQuery({ filters, excludeParam: "session_id" });
   assert.doesNotMatch(withoutSession, /session_id=/);
   assert.match(withoutSession, /model=gpt-5/);
-  assert.match(withoutSession, /provider=openai/);
-  assert.match(withoutSession, /label=env%3Aprod/);
-  assert.match(withoutSession, /user_path=%2Fteam/);
+});
+
+test("usageFiltersEmpty checks every filter in the table", () => {
+  assert.equal(usageFiltersEmpty(emptyUsageFilters()), true);
+  assert.equal(usageFiltersEmpty({ ...emptyUsageFilters(), session: "s" }), false);
+  assert.equal(usageFiltersEmpty({ ...emptyUsageFilters(), endpoints: ["/v1/messages"] }), false);
 });
 
 // --- Request types ---
@@ -329,21 +324,22 @@ test("authKeyDisplayName prefers the key name, then a short id", () => {
 
 test("authKeyOptionList sorts by name and keeps an unknown active key", () => {
   const names = { k2: "Zeta", k1: "Alpha" };
-  assert.deepEqual(authKeyOptionList(names, ""), [
-    { id: "k1", name: "Alpha" },
-    { id: "k2", name: "Zeta" },
+  assert.deepEqual(authKeyOptionList(names, []), [
+    { id: "k1", name: "Alpha", value: "k1", label: "Alpha" },
+    { id: "k2", name: "Zeta", value: "k2", label: "Zeta" },
   ]);
   assert.deepEqual(
-    authKeyOptionList(names, "gone").map((option) => option.id),
+    authKeyOptionList(names, ["gone", "k1"]).map((option) => option.id),
     ["k1", "gone", "k2"],
   );
-  assert.deepEqual(authKeyOptionList({}, ""), []);
+  assert.deepEqual(authKeyOptionList({}, []), []);
 });
 
 test("usageLogHasAuthKeys shows the column for keyed entries or an active filter", () => {
   assert.equal(usageLogHasAuthKeys("", [{ id: "u1" }]), false);
   assert.equal(usageLogHasAuthKeys("", [{ id: "u1", auth_key_id: "k1" }]), true);
-  assert.equal(usageLogHasAuthKeys("k1", []), true);
+  assert.equal(usageLogHasAuthKeys(["k1"], []), true);
+  assert.equal(usageLogHasAuthKeys([], [{ id: "u1" }]), false);
 });
 
 test("usageLogQueryParams includes cache_mode=all by default so cached records are returned", () => {
@@ -373,6 +369,7 @@ test("facetOptionList sorts choices and keeps a stale selection listed", () => {
   assert.deepEqual(facetOptionList(["gpt-5"], ""), ["gpt-5"]);
   assert.deepEqual(facetOptionList(["prod", "alpha"], "removed"), ["alpha", "prod", "removed"]);
   assert.deepEqual(facetOptionList(["prod", "alpha"], "prod"), ["alpha", "prod"]);
+  assert.deepEqual(facetOptionList(["prod"], ["gone", "prod"]), ["gone", "prod"]);
 });
 
 // --- Stat cards ---
@@ -520,6 +517,8 @@ test("usageLogHasLabels reflects aggregates, active filter, or labelled entries"
   assert.equal(usageLogHasLabels([], "", [{ labels: null }, {}]), false);
   assert.equal(usageLogHasLabels([], "", [{ labels: ["alpha"] }]), true);
   assert.equal(usageLogHasLabels([], "alpha", []), true);
+  assert.equal(usageLogHasLabels([], ["alpha"], []), true);
+  assert.equal(usageLogHasLabels([], [], []), false);
   assert.equal(usageLogHasLabels([{ label: "alpha" }], "", []), true);
 });
 

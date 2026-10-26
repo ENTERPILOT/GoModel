@@ -2,7 +2,7 @@
 // building — the caller supplies theme colors and a CSS color resolver, so
 // node:test can exercise it without a DOM.
 
-import { formatTokensShort } from "../../lib/utils/format.js";
+import { formatCost, formatCostShort, formatTokensShort } from "../../lib/utils/format.js";
 import { chartTickFont, chartTooltip } from "../../lib/utils/chartTheme.js";
 import * as m from "../../lib/paraglide/messages.js";
 
@@ -17,8 +17,8 @@ import * as m from "../../lib/paraglide/messages.js";
 // only when they have data.
 export function horizontalUsageChartConfig(colors, labels, series, options) {
   const { stacked = false, costs = false, resolve = (expr) => expr } = options || {};
-  const fmtShort = (v) => (costs ? "$" + Math.abs(v).toFixed(2) : formatTokensShort(Math.abs(v)));
-  const fmtExact = (v) => (costs ? "$" + Math.abs(v).toFixed(4) : Math.abs(v).toLocaleString());
+  const fmtShort = (v) => (costs ? formatCostShort(Math.abs(v)) : formatTokensShort(Math.abs(v)));
+  const fmtExact = (v) => (costs ? formatCost(Math.abs(v)) : Math.abs(v).toLocaleString());
   const inputSide = (values) => values.map((v) => (stacked ? Math.abs(v) : -Math.abs(v)));
   const bar = (label, data, color) => ({
     label: label,

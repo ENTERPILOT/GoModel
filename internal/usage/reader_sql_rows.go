@@ -18,18 +18,19 @@ func (d usageDialect) usageConditions(params UsageQueryParams) ([]string, []any,
 
 func (d usageDialect) usageConditionsWithUserPathExpr(params UsageQueryParams, userPathExpr string) ([]string, []any, error) {
 	conditions, args := d.dateRangeConditions(params)
-	userPath, err := normalizeUsageUserPathFilter(params.UserPath)
+	userPathConds, userPathArgs, err := userPathConditions(userPathExpr, params)
 	if err != nil {
 		return nil, nil, err
 	}
-	if userPath != "" {
-		condition, conditionArgs := sqlutil.UserPathSubtreeCondition(userPathExpr, userPath)
-		conditions = append(conditions, condition)
-		args = append(args, conditionArgs...)
-	}
+	conditions = append(conditions, userPathConds...)
+	args = append(args, userPathArgs...)
 	if params.Model != "" {
 		conditions = append(conditions, "model = ?")
 		args = append(args, params.Model)
+	}
+	if len(params.Models) > 0 {
+		conditions = append(conditions, "model IN ("+sqlPlaceholders(len(params.Models))+")")
+		args = appendStringArgs(args, params.Models)
 	}
 	if params.SessionID != "" {
 		conditions = append(conditions, "session_id = ?")
@@ -39,19 +40,30 @@ func (d usageDialect) usageConditionsWithUserPathExpr(params UsageQueryParams, u
 		conditions = append(conditions, "auth_key_id = ?")
 		args = append(args, params.AuthKeyID)
 	}
+	if len(params.AuthKeyIDs) > 0 {
+		conditions = append(conditions, "auth_key_id IN ("+sqlPlaceholders(len(params.AuthKeyIDs))+")")
+		args = appendStringArgs(args, params.AuthKeyIDs)
+	}
 	if params.Provider != "" {
 		conditions = append(conditions, "(provider = ? OR provider_name = ?)")
 		args = append(args, params.Provider, params.Provider)
+	}
+	if len(params.Providers) > 0 {
+		placeholders := sqlPlaceholders(len(params.Providers))
+		conditions = append(conditions, "(provider IN ("+placeholders+") OR provider_name IN ("+placeholders+"))")
+		args = appendStringArgs(appendStringArgs(args, params.Providers), params.Providers)
 	}
 	if params.Label != "" {
 		conditions = append(conditions, d.labelMatch)
 		args = append(args, params.Label)
 	}
+	if len(params.Labels) > 0 {
+		conditions = append(conditions, "("+strings.TrimSuffix(strings.Repeat(d.labelMatch+" OR ", len(params.Labels)), " OR ")+")")
+		args = appendStringArgs(args, params.Labels)
+	}
 	if len(params.Endpoints) > 0 {
-		conditions = append(conditions, "endpoint IN ("+strings.TrimSuffix(strings.Repeat("?,", len(params.Endpoints)), ",")+")")
-		for _, endpoint := range params.Endpoints {
-			args = append(args, endpoint)
-		}
+		conditions = append(conditions, "endpoint IN ("+sqlPlaceholders(len(params.Endpoints))+")")
+		args = appendStringArgs(args, params.Endpoints)
 	}
 	if len(params.Operations) > 0 {
 		condition, opArgs := operationCondition(params.Operations)
@@ -62,6 +74,18 @@ func (d usageDialect) usageConditionsWithUserPathExpr(params UsageQueryParams, u
 		conditions = append(conditions, condition)
 	}
 	return conditions, args, nil
+}
+
+// sqlPlaceholders returns n comma-separated bind placeholders.
+func sqlPlaceholders(n int) string {
+	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
+}
+
+func appendStringArgs(args []any, values []string) []any {
+	for _, value := range values {
+		args = append(args, value)
+	}
+	return args
 }
 
 // dateRangeConditions returns WHERE conditions and args for a date range.

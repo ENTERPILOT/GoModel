@@ -41,26 +41,11 @@ export function shortSessionID(value) {
 
 // --- Query building ---
 
-// Page-level data filters, applied to every usage-page request so charts,
-// cache cards, and the request log describe the same filtered slice of
-// traffic. excludeFacet omits that one filter — used to build facet dropdown
-// options that honor every filter except their own.
-export function usageFilterQueryStr(filters, excludeFacet) {
-  const pairs = [
-    ["model", filters && filters.model],
-    ["provider", filters && filters.provider],
-    ["label", filters && filters.label],
-    ["user_path", filters && filters.user_path],
-    ["session_id", filters && filters.session_id],
-    ["auth_key_id", filters && filters.auth_key_id],
-    ["endpoint", filters && filters.endpoint],
-  ];
-  let qs = "";
-  for (const [facet, value] of pairs) {
-    if (!value || facet === excludeFacet) continue;
-    qs += "&" + facet + "=" + encodeURIComponent(value);
-  }
-  return qs;
+// filterValues normalizes one filter to its list of selected values: a
+// string is one value, an array its non-empty entries.
+export function filterValues(value) {
+  if (Array.isArray(value)) return value.filter((item) => item != null && String(item) !== "");
+  return value ? [value] : [];
 }
 
 // Request-log paging/search params, appended after the window + filter query.
@@ -75,12 +60,12 @@ export function sessionUsageQueryParams({ limit, offset }) {
   return "&limit=" + limit + "&offset=" + offset;
 }
 
-// Sorted, deduplicated choices for one facet dropdown. The active selection
-// stays listed so the select never silently shows "All" while a filter is
-// applied.
-export function facetOptionList(values, activeValue) {
+// Sorted, deduplicated choices for one facet dropdown. Active selections
+// stay listed so the dropdown can still uncheck a value that has no traffic
+// under the other filters.
+export function facetOptionList(values, active) {
   const set = new Set(values || []);
-  if (activeValue) set.add(activeValue);
+  for (const value of filterValues(active)) set.add(value);
   return [...set].sort();
 }
 
@@ -102,20 +87,22 @@ export function authKeyDisplayName(id, names) {
   return (names && names[keyID]) || shortSessionID(keyID);
 }
 
-// API key filter choices sorted by name. The active key stays listed even
-// when it is no longer known, so the select never silently shows "All".
-export function authKeyOptionList(names, activeID) {
+// API key filter choices sorted by name, as SearchSelect options. Active keys
+// stay listed even when no longer known, so they can still be unchecked.
+export function authKeyOptionList(names, active) {
   const options = Object.entries(names || {}).map(([id, name]) => ({ id, name }));
-  if (activeID && !(names && names[activeID])) {
-    options.push({ id: activeID, name: authKeyDisplayName(activeID, names) });
+  for (const id of filterValues(active)) {
+    if (!(names && names[id])) options.push({ id, name: authKeyDisplayName(id, names) });
   }
-  return options.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  return options
+    .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
+    .map((option) => ({ ...option, value: option.id, label: option.name }));
 }
 
 // The request log shows its API key column only when there is something to
 // show: an entry made with a managed key, or an active key filter.
-export function usageLogHasAuthKeys(filterAuthKey, logEntries) {
-  if (filterAuthKey) return true;
+export function usageLogHasAuthKeys(filterAuthKeys, logEntries) {
+  if (filterValues(filterAuthKeys).length > 0) return true;
   return (logEntries || []).some((entry) => entry && entry.auth_key_id);
 }
 
@@ -372,8 +359,8 @@ export function entryLabels(entry) {
 // by-label aggregates, a label filter is active, or the current log page
 // carries labelled entries (e.g. cached-only labelled traffic, which the
 // uncached-mode aggregates omit).
-export function usageLogHasLabels(labelUsage, filterLabel, logEntries) {
-  if ((labelUsage || []).length > 0 || filterLabel) return true;
+export function usageLogHasLabels(labelUsage, filterLabels, logEntries) {
+  if ((labelUsage || []).length > 0 || filterValues(filterLabels).length > 0) return true;
   return (logEntries || []).some((entry) => entryLabels(entry).length > 0);
 }
 

@@ -131,6 +131,14 @@ Gdy narzuty są włączone, dashboard pokazuje koszt rozliczeniowy obok kosztu p
 
 Wartość `---` oznacza, że koszt jest nieznany, ponieważ cennik nie był dostępny – to nie to samo co `$0`.
 
+## Filtrowanie i zestawianie wydatków
+
+Strona użycia filtruje każdą kartę, wykres i log requestów według modelu, dostawcy, etykiety, klucza API, endpointu, ścieżki użytkownika i sesji. Każda lista przyjmuje kilka wartości: request spełnia filtr, gdy ma którąkolwiek z wybranych wartości, i musi spełniać każdy filtr. Wybór ścieżki użytkownika pokazuje znane ścieżki jako drzewo pogrupowane według prefiksu; wybrany węzeł obejmuje wszystko poniżej, a ścieżkę spoza listy można wpisać.
+
+Sekcja **Zestawienie** zestawia przefiltrowane użycie według dwóch wymiarów. Na przykład wiersze **Ścieżka użytkownika**, kolumny **Okres** i okres **Miesięcznie** pokazują koszt miesięcznie dla każdej ścieżki. Wybierz miarę (koszt, tokeny lub requesty); zostaje 10 największych wierszy i kolumn, a reszta trafia do **Pozostałe**. **Grupowanie ścieżek** łączy ścieżki po pierwszych segmentach, więc `/team/alice/laptop` liczy się jako `/team/alice`. Przełączaj między wykresem skumulowanym a tabelą, a przyciskiem **Pobierz CSV** wyeksportuj tabelę z sumami.
+
+Filtry, zakres dat i ustawienia zestawienia są zapisane w adresie strony, więc skopiowany link otwiera ten sam widok. Te same dane zwraca [`GET /admin/usage/breakdown`](/pl/advanced/admin-endpoints#get-adminusagebreakdown), a filtry działają na każdym endpoincie użycia poza `/admin/usage/throughput` (zobacz [Filtry wielowartościowe](/pl/advanced/admin-endpoints#filtry-wielowartościowe)).
+
 ## Przeliczanie zapisanych kosztów
 
 Przeliczanie ponownie oblicza zapisany koszt pasujących wierszy użycia według bieżącego cennika. Użyj go po zmianie nadpisania albo gdy cennik nie był dostępny w momencie wykonania requestu. Akcja jest domyślnie włączona (`USAGE_PRICING_RECALCULATION_ENABLED`); w widoku użycia wybierz **Recalculate**, a następnie wpisz `recalculate`, aby potwierdzić. Zakres przeliczenia obejmuje wybrany przedział dat, providera lub model oraz ścieżkę użytkownika.

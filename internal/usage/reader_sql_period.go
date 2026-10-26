@@ -118,15 +118,12 @@ func (r *SQLReader) sqliteGroupingRange(ctx context.Context, params UsageQueryPa
 
 	var minTS, maxTS *int64
 	conditions, args := r.dialect.dateRangeConditions(params)
-	userPath, err := normalizeUsageUserPathFilter(params.UserPath)
+	userPathConds, userPathArgs, err := userPathConditions("user_path", params)
 	if err != nil {
 		return time.Time{}, time.Time{}, false, err
 	}
-	if userPath != "" {
-		condition, conditionArgs := sqlutil.UserPathSubtreeCondition("user_path", userPath)
-		conditions = append(conditions, condition)
-		args = append(args, conditionArgs...)
-	}
+	conditions = append(conditions, userPathConds...)
+	args = append(args, userPathArgs...)
 	query := `SELECT MIN(` + sqliteTimestampEpochExpr + `), MAX(` + sqliteTimestampEpochExpr + `) FROM usage` + sqlutil.BuildWhereClause(conditions)
 	if err := r.db.QueryRow(ctx, query, args...).Scan(&minTS, &maxTS); err != nil {
 		return time.Time{}, time.Time{}, false, fmt.Errorf("failed to determine sqlite usage range: %w", err)
