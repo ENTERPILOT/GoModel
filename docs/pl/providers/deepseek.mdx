@@ -38,7 +38,7 @@ poziomie z dwoma dozwolonymi poziomami: `high` i `max`.
 
 | Klient wysyła | DeepSeek otrzymuje |
 | ------------ | ----------------- |
-| `none` | pole jest pomijane |
+| `none` | `none` (reasoning wyłączony) |
 | `minimal` / `low` / `medium` / `high` | `high` |
 | `xhigh` / `max` | `max` |
 | cokolwiek innego | przekazywane dalej przez GoModel, a następnie odrzucane przez DeepSeek |
@@ -46,8 +46,8 @@ poziomie z dwoma dozwolonymi poziomami: `high` i `max`.
 GoModel przepisuje `"reasoning": {"effort": "..."}` w formacie OpenAI na
 `reasoning_effort` na najwyższym poziomie w formacie DeepSeek – bez zmian po stronie klienta.
 Własne wartości klienta zwaliduj lub znormalizuj do `high` albo `max` przed wywołaniem GoModel.
-Aby wyłączyć reasoning, pomiń pole `reasoning` albo wyślij `none`; każde inne
-`reasoning.effort`, łącznie z `low`, zostaje zmapowane i włącza reasoning.
+DeepSeek domyślnie używa reasoningu, więc pominięcie pola `reasoning` go nie wyłącza;
+aby go wyłączyć, wyślij `none`. Każde inne `reasoning.effort`, łącznie z `low`, zostaje zmapowane i włącza reasoning.
 [Wymuszony reasoning effort](/pl/features/virtual-models#wymuszanie-reasoning-effort)
 zawsze zastępuje wartość klienta.
 

@@ -57,7 +57,7 @@ func TestChatCompletion_MapsReasoningToDeepSeekReasoningEffort(t *testing.T) {
 	assert.Equal(t, "high", sent["reasoning_effort"])
 }
 
-func TestChatCompletion_OmitsReasoningEffortForNone(t *testing.T) {
+func TestChatCompletion_SendsReasoningEffortNone(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
 
 	provider := newTestProvider("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
@@ -68,9 +68,10 @@ func TestChatCompletion_OmitsReasoningEffortForNone(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	// DeepSeek reasons by default, so "none" must be sent to disable it.
 	sent := capture.Last(t).JSON(t)
 	assert.NotContains(t, sent, "reasoning")
-	assert.NotContains(t, sent, "reasoning_effort")
+	assert.Equal(t, "none", sent["reasoning_effort"])
 }
 
 func TestChatCompletion_PadsMissingReasoningContentForAssistantToolCalls(t *testing.T) {
@@ -204,7 +205,7 @@ func TestStreamResponses_TranslatesToChatCompletions(t *testing.T) {
 
 func TestNormalizeReasoningEffort(t *testing.T) {
 	tests := map[string]string{
-		"none":    "",
+		"none":    "none",
 		"minimal": "high",
 		"low":     "high",
 		"medium":  "high",

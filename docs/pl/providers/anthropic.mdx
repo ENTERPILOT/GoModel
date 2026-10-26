@@ -64,7 +64,7 @@ a także formę stringową z Chat Completions `"reasoning_effort": "..."` (niepu
 `reasoning.effort` wygrywa, gdy obecne są oba; pusty obiekt powoduje użycie
 formy stringowej) i tłumaczy je na natywne kontrolki Claude. Pięć
 akceptowanych poziomów to `low`, `medium`, `high`, `xhigh` i `max`; wartości
-są dopasowywane bez rozróżniania wielkości liter, a każda inna wartość jest obniżana do `low` i
+są dopasowywane bez rozróżniania wielkości liter. `none` pozostawia thinking wyłączony; każda inna wartość jest obniżana do `low` i
 logowana. Tłumaczenie
 zależy od tego, czy model obsługuje **adaptive thinking**.
 

@@ -49,7 +49,7 @@ ANTHROPIC_API_KEY=sk-ant-oat01-...
 
 ## 推理强度映射
 
-GoModel 既接受 OpenAI 格式的 `"reasoning": {"effort": "..."}` 对象，也接受 Chat Completions 的字符串形式 `"reasoning_effort": "..."`（两者同时存在时，以非空的 `reasoning.effort` 为准；空对象会回退到字符串形式），并将其转换为 Claude 的原生控制。可接受的五个级别是 `low`、`medium`、`high`、`xhigh` 和 `max`；匹配时不区分大小写，其他任何值都会被降级为 `low` 并记录日志。转换方式取决于模型是否支持**自适应思考**。
+GoModel 既接受 OpenAI 格式的 `"reasoning": {"effort": "..."}` 对象，也接受 Chat Completions 的字符串形式 `"reasoning_effort": "..."`（两者同时存在时，以非空的 `reasoning.effort` 为准；空对象会回退到字符串形式），并将其转换为 Claude 的原生控制。可接受的五个级别是 `low`、`medium`、`high`、`xhigh` 和 `max`；匹配时不区分大小写。`none` 不启用思考；其他任何值都会被降级为 `low` 并记录日志。转换方式取决于模型是否支持**自适应思考**。
 
 | 模型代际 | 思考配置 | effort 去向 |
 | ---------------- | --------------- | ------------------ |

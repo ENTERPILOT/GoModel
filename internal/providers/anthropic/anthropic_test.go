@@ -4125,6 +4125,22 @@ func TestConvertToAnthropicRequest_ReasoningEffort(t *testing.T) {
 			expectedMaxTokens: 25000,
 			expectNilTemp:     true,
 		},
+		{
+			name:              "legacy model - none effort leaves thinking off and keeps temperature",
+			model:             "claude-3-5-sonnet-20241022",
+			reasoning:         &core.Reasoning{Effort: "none"},
+			maxTokens:         new(1000),
+			setTemperature:    true,
+			expectedMaxTokens: 1000,
+			expectedTemp:      new(0.7),
+		},
+		{
+			name:              "4.6 model - none effort leaves thinking off",
+			model:             "claude-opus-4-7",
+			reasoning:         &core.Reasoning{Effort: " None "},
+			maxTokens:         new(4096),
+			expectedMaxTokens: 4096,
+		},
 	}
 
 	for _, tt := range tests {

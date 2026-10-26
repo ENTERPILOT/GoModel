@@ -64,7 +64,7 @@ sowie die String-Form `"reasoning_effort": "..."` aus Chat Completions (ein
 nicht leeres `reasoning.effort` hat Vorrang, wenn beide vorhanden sind; ein leeres Objekt fällt
 auf die String-Form zurück) und übersetzt sie in die nativen Steuerungen von Claude. Die
 fünf akzeptierten Stufen sind `low`, `medium`, `high`, `xhigh` und `max`; Werte
-werden ohne Berücksichtigung der Groß-/Kleinschreibung abgeglichen, und jeder andere Wert wird auf `low` herabgestuft und
+werden ohne Berücksichtigung der Groß-/Kleinschreibung abgeglichen. `none` lässt Thinking aus; jeder andere Wert wird auf `low` herabgestuft und
 protokolliert. Die Übersetzung
 hängt davon ab, ob das Modell **Adaptive Thinking** unterstützt.
 

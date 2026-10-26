@@ -64,8 +64,8 @@ well as the Chat Completions string form `"reasoning_effort": "..."` (a
 non-empty `reasoning.effort` wins when both are present; an empty object falls
 back to the string form) and translates them to Claude's native controls. The
 five accepted levels are `low`, `medium`, `high`, `xhigh`, and `max`; values
-are matched case-insensitively and any other value is downgraded to `low` and
-logged. The translation
+are matched case-insensitively. `none` leaves thinking off; any other value is
+downgraded to `low` and logged. The translation
 depends on whether the model supports **adaptive thinking**.
 
 | Model generation | Thinking config | Effort destination |
