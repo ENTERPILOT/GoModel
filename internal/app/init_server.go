@@ -254,7 +254,8 @@ func (b *bootstrap) initResponseCache() error {
 	return nil
 }
 
-// initServer creates the HTTP server and binds the extension authenticators.
+// initServer creates the HTTP server and binds the extension authenticators
+// and the extension shared store.
 // It is infallible and runs last: everything before it can fail, and a
 // failed replacement generation must not have rebound shared registries.
 func (b *bootstrap) initServer() error {
@@ -270,6 +271,9 @@ func (b *bootstrap) initServer() error {
 	// succeeded: otherwise a failed replacement would leave the still-serving
 	// generation pointing at the replacement's already-closed audit logger.
 	bindAuthenticationEventRecorders(b.cfg.Extensions, auditlog.NewAuthenticationEventRecorder(app.audit.Logger))
+	if app.sharedStore != nil {
+		bindSharedStore(b.cfg.Extensions, app.sharedStore)
+	}
 	return nil
 }
 
