@@ -462,7 +462,9 @@ internal CA or a TLS-intercepting proxy sits between the gateway and upstreams.
 | `HTTP_TLS_INSECURE_SKIP_VERIFY` | Disable certificate verification. Lab use only; logged as a warning | `false` |
 
 A missing or unparseable file is a startup error, so a typo in the path cannot
-silently fall back to trusting nothing extra. See the
+silently fall back to trusting nothing extra. The files are re-read on a
+[configuration reload](/advanced/cli#configuration-reload) but not watched, so
+reload or restart after rotating them. See the
 [production guide](/guides/production#private-cas-and-proxies) for a worked
 example.
 

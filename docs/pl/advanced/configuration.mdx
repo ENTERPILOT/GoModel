@@ -443,6 +443,32 @@ z błędem providera `504`, zamiast wisieć do `HTTP_TIMEOUT`. Czas oczekiwania
 na pierwszy token się nie liczy, więc nie dotyczy to wolnych modeli reasoningowych.
 Zwiększ tę wartość tylko dla providera, który w uzasadniony sposób robi kilkuminutowe przerwy w trakcie streamu.
 
+Standardowe zmienne `HTTP_PROXY`, `HTTPS_PROXY` i `NO_PROXY` dotyczą każdego
+połączenia z upstreamem, chyba że provider ustawia własne
+[proxy wychodzące](/pl/providers/outbound-proxy).
+
+#### Zaufanie TLS dla połączeń wychodzących
+
+Te ustawienia dotyczą każdego wychodzącego połączenia HTTPS: providerów,
+katalogu modeli, sprawdzania aktualizacji, upstreamów MCP, vector store'ów
+i endpointów embeddingów. Domyślnie ufamy magazynowi certyfikatów systemu
+operacyjnego, co wystarcza, o ile między gatewayem a upstreamami nie stoi
+wewnętrzne CA ani proxy przechwytujące TLS.
+
+| Zmienna                         | Opis                                                               | Wartość domyślna |
+| ------------------------------- | ------------------------------------------------------------------ | ---------------- |
+| `HTTP_TLS_CA_FILE`              | Pakiet PEM z dodatkowymi certyfikatami głównymi, dołączany do magazynu systemowego | nieustawione |
+| `HTTP_TLS_CLIENT_CERT_FILE`     | Certyfikat klienta dla mTLS; ustaw razem z kluczem                 | nieustawione |
+| `HTTP_TLS_CLIENT_KEY_FILE`      | Klucz prywatny certyfikatu klienta                                 | nieustawione |
+| `HTTP_TLS_INSECURE_SKIP_VERIFY` | Wyłącza weryfikację certyfikatów. Tylko do testów; logowane jako ostrzeżenie | `false` |
+
+Brakujący lub nieparsowalny plik to błąd startu, więc literówka w ścieżce nie
+sprawi po cichu, że nic dodatkowego nie będzie zaufane. Pliki są czytane ponownie
+przy [przeładowaniu konfiguracji](/pl/advanced/cli#przeładowanie-konfiguracji),
+ale nie są obserwowane, więc po ich rotacji wykonaj przeładowanie lub restart.
+Przykład krok po kroku znajdziesz w
+[przewodniku produkcyjnym](/pl/guides/production#prywatne-ca-i-proxy).
+
 #### Klucze API providerów
 
 Ustaw je, żeby automatycznie rejestrować providerów. Konfiguracja YAML nie jest wymagana.

@@ -203,6 +203,9 @@ docker run --rm -p 8080:8080 \
 `SSL_CERT_FILE` works too, but it replaces the bundle file rather than adding
 to it, so point it at a bundle that also contains the public roots you need.
 
+Outside a container, or to also send a client certificate, set
+`HTTP_TLS_CA_FILE` instead; see [Private CAs and proxies](#private-cas-and-proxies).
+
 ## Air-gapped and offline deployments
 
 **GoModel runs fully air-gapped.** There is no telemetry, no analytics, and no
@@ -307,6 +310,14 @@ certificate:
 HTTP_TLS_CLIENT_CERT_FILE=/etc/gomodel/tls.crt
 HTTP_TLS_CLIENT_KEY_FILE=/etc/gomodel/tls.key
 ```
+
+A single client certificate is sent to every upstream that requests one.
+
+**Rotation.** GoModel reads these files at startup and on every
+[configuration reload](/advanced/cli#configuration-reload), but does not watch
+them. After a rotation, such as cert-manager renewing a mounted secret, run
+`gomodel --reload` (or send `SIGHUP`) or restart. If a rotated file fails to
+load, the reload is rejected and the running configuration keeps serving.
 
 The same settings live under `http.tls` in `config.yaml`. Avoid
 `HTTP_TLS_INSECURE_SKIP_VERIFY=true` outside a lab: it disables verification
