@@ -100,7 +100,7 @@ Overrides apply to new requests. To re-cost requests that already ran, recalcula
 
 ## Markups and billed cost
 
-Add a markup when you resell model access, for example to recharge customers for the tokens they use. GoModel records each request's **billed cost** (`billed_cost` on the usage row): the provider cost plus the markup. The provider cost itself never changes, so budgets, dashboard totals, and savings keep measuring what you pay upstream.
+Add a markup when you resell model access, for example to recharge customers for the tokens they use. GoModel records each request's **billed cost** (`billed_cost` on the usage row): the provider cost plus the markup. The provider cost itself never changes, so budgets, dashboard totals, and savings keep measuring what you pay upstream. With GoModel Pro, a budget can limit billed cost instead; see [Budgets on billed cost](/features/budgets#budgets-on-billed-cost-gomodel-pro).
 
 Markups are off by default. Turn them on with `markups_enabled: true` (env `PRICING_MARKUPS_ENABLED=true`), then set percentages in `config.yaml`. With markups on but no rule matching a request, its billed cost equals its provider cost. With markups off, GoModel records no billed cost and ignores `markups` and `bill_cache_hits`, logging a warning at startup if `markups` is set.
 

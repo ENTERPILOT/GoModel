@@ -1874,6 +1874,7 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 		RateLimitsEnabled:      "off",
 		QuotaTemplatesEnabled:  "on",
 		InvoiceExportEnabled:   "on",
+		BilledBudgetsEnabled:   "on",
 		GuardrailsEnabled:      "on",
 		PluginsEnabled:         "on",
 		CacheEnabled:           "on",

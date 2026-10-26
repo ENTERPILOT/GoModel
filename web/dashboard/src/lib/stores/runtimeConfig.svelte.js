@@ -16,6 +16,7 @@ const CONFIG_KEYS = [
   "RATE_LIMITS_ENABLED",
   "PER_CHILD_QUOTAS_ENABLED",
   "INVOICE_EXPORT_ENABLED",
+  "BILLED_BUDGETS_ENABLED",
   "GUARDRAILS_ENABLED",
   "PLUGINS_ENABLED",
   "CACHE_ENABLED",
@@ -146,6 +147,15 @@ class RuntimeConfigStore {
   // key.
   billedCostVisible() {
     return this.booleanFlag("PRICING_MARKUPS_ENABLED", false);
+  }
+
+  // billedBudgetsVisible gates the budget cost-basis control: budgets on
+  // billed cost need the billed_budgets capability and markups enabled.
+  billedBudgetsVisible() {
+    return (
+      this.booleanFlag("BILLED_BUDGETS_ENABLED", false) &&
+      this.billedCostVisible()
+    );
   }
 
   liveLogsVisible() {

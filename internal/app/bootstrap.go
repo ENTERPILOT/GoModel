@@ -36,6 +36,7 @@ type bootstrap struct {
 	quotaTemplatesEnabled  bool
 	customerMarkupsEnabled bool
 	invoiceExportEnabled   bool
+	billedBudgetsEnabled   bool
 	routeSelector          ext.RouteSelector
 	requestHealth          *health.Tracker
 
@@ -113,6 +114,7 @@ func newBootstrap(ctx context.Context, cfg Config) *bootstrap {
 		quotaTemplatesEnabled:  cfg.Extensions != nil && cfg.Extensions.HasCapability(ext.CapabilityQuotaTemplates),
 		customerMarkupsEnabled: cfg.Extensions != nil && cfg.Extensions.HasCapability(ext.CapabilityCustomerMarkups),
 		invoiceExportEnabled:   cfg.Extensions != nil && cfg.Extensions.HasCapability(ext.CapabilityInvoiceExport),
+		billedBudgetsEnabled:   cfg.Extensions != nil && cfg.Extensions.HasCapability(ext.CapabilityBilledBudgets),
 	}
 }
 

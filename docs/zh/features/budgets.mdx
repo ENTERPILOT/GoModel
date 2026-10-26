@@ -190,6 +190,54 @@ budgets:
 
 控制台会将该定义显示为 `per child` 模板，而不会虚构一个汇总用量值。使用 `GET /v1/usage` 并传入某个子路径的有效用户路径，即可查看该子路径解析后的预算。重置该模板会为其所有子路径开始一个新周期。
 
+## 基于计费成本的预算（GoModel Pro）
+
+<Info>
+  基于计费成本的预算需要带有 `billing` 授权的 GoModel Pro 许可证，并设置
+  `PRICING_MARKUPS_ENABLED=true`。缺少任一条件时，管理 API 会拒绝带有
+  `"cost_basis": "billed"` 的写入（403 `billed_budgets_not_entitled`；加价关闭时为
+  400 `billed_budgets_markups_disabled`），当前配置中的计费预算会中止启动。已存储的计费预算（在仪表盘中创建，或来自之前的配置）不会阻止启动：在授权或加价缺失期间，GoModel
+  只记录一次警告，并按提供商成本执行该预算，因此限额在您修改它或恢复授权和加价之前一直有效。
+</Info>
+
+默认情况下，预算限制的是提供商成本：即您为未缓存请求向上游支付的费用。设置
+`cost_basis: billed` 后，预算改为限制向调用方计费的金额——提供商成本加上
+[加价](/zh/features/cost-tracking)。当预算是客户的信用额度时使用它。
+
+```yaml
+budgets:
+  labels:
+    - label: "customer-acme"
+      limits:
+        - period: "monthly"
+          amount: 500.00
+          cost_basis: "billed"
+```
+
+```bash
+curl -X PUT http://localhost:8080/admin/budgets \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope": "label",
+    "subject": "customer-acme",
+    "cost_basis": "billed",
+    "budget_key": { "period": "monthly" },
+    "amount": 500.00
+  }'
+```
+
+计费预算：
+
+- 累计 `billed_cost`，包括计费的响应缓存命中。设置
+  `PRICING_BILL_CACHE_HITS=false` 时，缓存命中按 `0` 计费，不计入预算。
+- 对没有计费成本的用量（在启用加价之前记录）按其提供商成本计入，因此在周期中途启用加价也不会少算。
+- 同样约束响应缓存命中：在缓存命中计费期间，已用尽的计费用户路径或标签预算会在回放缓存响应之前拒绝请求。基于提供商成本的预算从不计入缓存命中，提供商预算也不适用于缓存命中，因为命中不会路由到任何提供商。
+
+`cost_basis` 为 `provider`（默认）或 `billed`。它是一个属性，而不是预算键的一部分：同一作用域、主体和周期只对应一个预算，可使用任一基准；更改基准不会重置当前周期。不带
+`cost_basis` 的 `PUT` 会设置为 `provider`；现有预算继续限制提供商成本。`GET /admin/budgets`
+和 `GET /v1/usage` 会报告每个预算的 `cost_basis`，`spent` 按该基准计算。在仪表盘中，授权和加价都开启后，预算表单会显示**成本基准**选择器，计费预算会带有 `计费` 标签。
+
 ## 工作流控制
 
 当前工作流决定是否对某个请求执行预算检查。

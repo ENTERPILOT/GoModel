@@ -23,6 +23,9 @@ const (
 	// CapabilityInvoiceExport enables the per-customer invoice export of
 	// billed usage.
 	CapabilityInvoiceExport Capability = "invoice_export"
+	// CapabilityBilledBudgets enables budgets enforced on billed cost (provider
+	// cost plus markup) instead of provider cost.
+	CapabilityBilledBudgets Capability = "billed_budgets"
 )
 
 // Registry collects extensions to be consumed by the gateway at startup.

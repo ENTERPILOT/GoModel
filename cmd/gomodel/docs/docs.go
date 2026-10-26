@@ -8891,6 +8891,10 @@ const docTemplate = `{
         "admin.DashboardConfigResponse": {
             "type": "object",
             "properties": {
+                "BILLED_BUDGETS_ENABLED": {
+                    "description": "BilledBudgetsEnabled reports the billed_budgets capability, so the\ndashboard offers budgets on billed cost only where they are accepted.",
+                    "type": "string"
+                },
                 "BUDGETS_ENABLED": {
                     "type": "string"
                 },
@@ -9187,6 +9191,13 @@ const docTemplate = `{
             "properties": {
                 "amount": {
                     "type": "number"
+                },
+                "cost_basis": {
+                    "type": "string",
+                    "enum": [
+                        "provider",
+                        "billed"
+                    ]
                 },
                 "created_at": {
                     "type": "string"
@@ -9822,6 +9833,14 @@ const docTemplate = `{
                 },
                 "budget_key": {
                     "$ref": "#/definitions/admin.budgetKeyRequest"
+                },
+                "cost_basis": {
+                    "description": "CostBasis selects the spend the amount limits: provider (default) or\nbilled (provider cost plus markup, including billed cache hits). billed\nrequires PRICING_MARKUPS_ENABLED and a GoModel Pro license with the\nbilling entitlement.",
+                    "type": "string",
+                    "enum": [
+                        "provider",
+                        "billed"
+                    ]
                 },
                 "per_child": {
                     "type": "boolean"
@@ -13059,6 +13078,14 @@ const docTemplate = `{
             "properties": {
                 "amount": {
                     "type": "number"
+                },
+                "cost_basis": {
+                    "description": "CostBasis names the spend Spent and Amount measure: provider cost or\nbilled cost.",
+                    "type": "string",
+                    "enum": [
+                        "provider",
+                        "billed"
+                    ]
                 },
                 "exceeded": {
                     "type": "boolean"

@@ -65,6 +65,18 @@ func (h *Handler) UpsertBudget(c *echo.Context) error {
 	if req.PerChild && !h.quotaTemplates {
 		return handleError(c, quotaTemplatesUnavailableError())
 	}
+	costBasis, err := budget.NormalizeCostBasis(req.CostBasis)
+	if err != nil {
+		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
+	}
+	if costBasis == budget.CostBasisBilled {
+		if !h.billedBudgets {
+			return handleError(c, billedBudgetsUnavailableError())
+		}
+		if !h.billing.Enabled {
+			return handleError(c, billedBudgetsMarkupsDisabledError())
+		}
+	}
 	scope, subject, periodSeconds, err := budgetRequestKey(req.Scope, req.Subject, req.UserPath, req.BudgetKey)
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
@@ -76,6 +88,7 @@ func (h *Handler) UpsertBudget(c *echo.Context) error {
 		Scope:         scope,
 		Subject:       subject,
 		PerChild:      req.PerChild,
+		CostBasis:     costBasis,
 		PeriodSeconds: periodSeconds,
 		Amount:        req.Amount,
 		Source:        budget.SourceManual,
@@ -252,6 +265,7 @@ type budgetStatusResponse struct {
 	Scope            string     `json:"scope"`
 	Subject          string     `json:"subject"`
 	PerChild         bool       `json:"per_child"`
+	CostBasis        string     `json:"cost_basis" enums:"provider,billed"`
 	EffectiveSubject string     `json:"effective_subject,omitempty"`
 	UserPath         string     `json:"user_path,omitempty"`
 	PeriodSeconds    int64      `json:"period_seconds"`
@@ -277,6 +291,11 @@ type upsertBudgetRequest struct {
 	BudgetKey *budgetKeyRequest `json:"budget_key"`
 	Amount    float64           `json:"amount"`
 	PerChild  bool              `json:"per_child"`
+	// CostBasis selects the spend the amount limits: provider (default) or
+	// billed (provider cost plus markup, including billed cache hits). billed
+	// requires PRICING_MARKUPS_ENABLED and a GoModel Pro license with the
+	// billing entitlement.
+	CostBasis string `json:"cost_basis,omitempty" enums:"provider,billed"`
 }
 
 type deleteBudgetRequest struct {
@@ -365,6 +384,7 @@ func budgetStatusResponses(statuses []budget.CheckResult, now time.Time) []budge
 			Scope:            string(item.Scope),
 			Subject:          item.Subject,
 			PerChild:         item.PerChild,
+			CostBasis:        string(item.CostBasis),
 			EffectiveSubject: item.EffectiveSubject,
 			PeriodSeconds:    item.PeriodSeconds,
 			PeriodLabel:      budget.PeriodLabel(item.PeriodSeconds),

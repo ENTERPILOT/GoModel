@@ -58,6 +58,7 @@ func (b *bootstrap) initAdmin() error {
 		adminRuntimeConfig.VirtualModelStrategies = dashboardVirtualModelStrategies(b.routeSelector != nil, plugins.RoutePluginNames(app.pluginCatalog))
 		adminRuntimeConfig.QuotaTemplatesEnabled = dashboardEnabledValue(b.quotaTemplatesEnabled)
 		adminRuntimeConfig.InvoiceExportEnabled = dashboardEnabledValue(b.invoiceExportEnabled)
+		adminRuntimeConfig.BilledBudgetsEnabled = dashboardEnabledValue(b.billedBudgetsEnabled)
 		if b.cfg.Extensions != nil {
 			if license, ok := b.cfg.Extensions.License(); ok {
 				setDashboardLicense(&adminRuntimeConfig, license)
@@ -86,6 +87,7 @@ func (b *bootstrap) initAdmin() error {
 			adminRuntimeConfig,
 			b.quotaTemplatesEnabled,
 			b.invoiceExportEnabled,
+			b.billedBudgetsEnabled,
 			app.live,
 			b.requestHealth,
 			usagePricingRecalculationConfigured(appCfg),
@@ -154,6 +156,7 @@ func newAdminHandlers(
 	runtimeConfig admin.DashboardConfigResponse,
 	quotaTemplatesEnabled bool,
 	invoiceExportEnabled bool,
+	billedBudgetsEnabled bool,
 	liveBroker *live.Broker,
 	requestHealth admin.RequestHealthSource,
 	usagePricingRecalculationEnabled bool,
@@ -218,6 +221,7 @@ func newAdminHandlers(
 		admin.WithRateLimits(rateLimitService),
 		admin.WithQuotaTemplatesEnabled(quotaTemplatesEnabled),
 		admin.WithInvoiceExportEnabled(invoiceExportEnabled),
+		admin.WithBilledBudgetsEnabled(billedBudgetsEnabled),
 		admin.WithTagging(taggingService),
 		admin.WithRuntimeSettings(runtimeSettingsService),
 		mcpOption,

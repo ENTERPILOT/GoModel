@@ -72,10 +72,12 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			required:     []string{"base_url"},
 		},
 		{
-			// SGLang supports both unauthenticated and --api-key deployments.
+			// SGLang supports both unauthenticated and --api-key deployments,
+			// and api_mode picks how Responses requests reach it.
 			providerType: "sglang",
-			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "proxy_url", "models"},
+			fields:       []string{"api_keys", "base_url", "api_mode", "session_sticky_keys", "proxy_url", "models"},
 			required:     nil,
+			options:      map[string][]string{"api_mode": {"auto", "native", "chat_compatible"}},
 		},
 		{
 			// Authenticates through the AWS SDK credential chain, never a key.

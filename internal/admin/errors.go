@@ -54,6 +54,21 @@ func invoiceExportUnavailableError() error {
 	).WithCode("invoice_export_not_entitled")
 }
 
+func billedBudgetsUnavailableError() error {
+	return core.NewInvalidRequestErrorWithStatus(
+		http.StatusForbidden,
+		"budgets on billed cost require a GoModel Pro license with the billing entitlement",
+		nil,
+	).WithCode("billed_budgets_not_entitled")
+}
+
+func billedBudgetsMarkupsDisabledError() error {
+	return core.NewInvalidRequestError(
+		"budgets on billed cost require pricing markups; set PRICING_MARKUPS_ENABLED=true",
+		nil,
+	).WithCode("billed_budgets_markups_disabled")
+}
+
 func validationWriter(isValidation func(error) bool) func(error) error {
 	return func(err error) error {
 		if err == nil {

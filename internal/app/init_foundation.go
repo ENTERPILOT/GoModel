@@ -175,7 +175,7 @@ func (b *bootstrap) initTracking() error {
 
 	var budgetResult *budget.Result
 	if appCfg.Budgets.Enabled {
-		budgetResult, err = budget.New(b.ctx, appCfg, app.storage, b.quotaTemplatesEnabled)
+		budgetResult, err = budget.New(b.ctx, appCfg, app.storage, b.quotaTemplatesEnabled, b.billedBudgetsEnabled)
 		if err != nil {
 			return fmt.Errorf("failed to initialize budgets: %w", err)
 		}
