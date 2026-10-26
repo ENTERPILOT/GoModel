@@ -17,6 +17,9 @@ const (
 	// CapabilityQuotaTemplates enables per-child user-path templates for
 	// budgets and rate limits.
 	CapabilityQuotaTemplates Capability = "quota_templates"
+	// CapabilityCustomerMarkups enables per-customer markups by user path
+	// (pricing.user_path_markups).
+	CapabilityCustomerMarkups Capability = "customer_markups"
 )
 
 // Registry collects extensions to be consumed by the gateway at startup.

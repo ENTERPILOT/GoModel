@@ -126,6 +126,34 @@ Jede Nutzungszeile speichert außerdem den Aufschlag, zu dem sie abgerechnet wur
 
 Sobald Aufschläge aktiviert sind, zeigt das Dashboard die abgerechneten Kosten neben den Provider-Kosten: eine Karte **Billed** auf der Übersichts- und der Nutzungsseite, eine Spalte in jeder Nutzungsaufschlüsselung (Modell, User Path, Label, Request-Typ oder Endpoint und Session) sowie eine Spalte im Request-Log, deren Tooltip den Aufschlag jeder Zeile nennt. Die Admin-API liefert sie als `total_billed_cost` in `/admin/usage/summary`, als `billed_cost` in `/admin/usage/daily`, `/admin/usage/models`, `/admin/usage/user-paths`, `/admin/usage/labels`, `/admin/usage/endpoints` und `/admin/usage/sessions` sowie als `billed_cost`, `markup_percent` und `markup_selector` in den Einträgen von `/admin/usage/log`. Ein Tag, an dem nur Cache-Treffer abgerechnet wurden, erscheint trotzdem in `/admin/usage/daily`, mit null Requests. Abgerechnete Summen enthalten abgerechnete Cache-Treffer, obwohl die übrigen Kostenwerte sie ausnehmen; die abgerechneten Kosten pro User Path sind daher der Betrag, den Sie jedem Kunden berechnen.
 
+### Aufschläge pro Kunde (GoModel Pro)
+
+<Info>
+  Aufschläge pro Kunde sind in GoModel Pro verfügbar und erfordern die
+  Lizenzberechtigung `billing`. Ohne sie bricht `user_path_markups` bei
+  aktivierten Aufschlägen den Start ab — GoModel berechnet einem Kunden nie
+  stillschweigend den globalen Satz.
+</Info>
+
+Geben Sie jedem Kunden, identifiziert durch seinen [User-Path](/de/features/user-path)-Teilbaum, mit `user_path_markups` eigene Aufschläge. Jeder Pfad nimmt dieselben Selektoren wie `markups`:
+
+```yaml
+pricing:
+  markups_enabled: true
+  markups:
+    "/": 20             # alle anderen
+  user_path_markups:
+    /acme:
+      "/": 30           # /acme und alles darunter
+      "openai/gpt-5": 15
+    /acme/internal:
+      "/": 0            # interner Traffic zum Selbstkostenpreis
+```
+
+GoModel nimmt den tiefsten konfigurierten Pfad, der den User-Path des Requests abdeckt (`/acme` deckt `/acme/team` ab, nicht `/acmecorp`), und wendet darin den spezifischsten Selektor in der üblichen Reihenfolge an. Hat dieser Pfad keinen passenden Selektor, versucht GoModel den nächsthöheren Pfad und danach `markups`. Aufschläge werden nie addiert. Im Beispiel oben wird `/acme/internal/ci` mit 0 % abgerechnet, `/acme/team` mit 15 % für `openai/gpt-5` und 30 % für alles andere, und `/beta` mit 20 %.
+
+Standardmäßig ist nichts gesetzt: Ohne `user_path_markups` gilt `markups` für alle. Bei `markups_enabled: false` wird `user_path_markups` wie `markups` ignoriert, und GoModel protokolliert beim Start eine Warnung. Eine Regel aus `user_path_markups` wird in `markup_selector` als `<user path>:<selector>` gespeichert, zum Beispiel `/acme:openai/gpt-5`, sodass das Request-Log zeigt, welche Kundenregel abgerechnet wurde. User-Paths werden wie bei Requests normalisiert, sodass `acme/` und `/acme` derselbe Schlüssel sind; `/` wird abgelehnt, da `markups` ihn bereits abdeckt.
+
 ## Summen im Dashboard
 
 - **Estimated Cost** – Ausgaben für Live-Requests an Provider; Cache-Treffer sind ausgenommen.
