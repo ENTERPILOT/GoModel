@@ -84,6 +84,27 @@ type Service struct {
 
 	caps            capabilities
 	billedCacheHits bool
+
+	// changed is called after every successful write; see SetChangeNotifier.
+	changed func(context.Context)
+}
+
+// SetChangeNotifier installs fn, called after every successful write of the
+// budgets or their settings so other gateway instances reload them. Call it
+// before serving; writes made before it was set (startup seeding) are not
+// announced.
+func (s *Service) SetChangeNotifier(fn func(context.Context)) {
+	if s != nil {
+		s.changed = fn
+	}
+}
+
+// notifyChanged announces a successful write. It runs after the local
+// refresh, whether or not that succeeded: the store changed either way.
+func (s *Service) notifyChanged(ctx context.Context) {
+	if s.changed != nil {
+		s.changed(ctx)
+	}
 }
 
 func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Service, error) {
@@ -167,6 +188,7 @@ func (s *Service) UpsertBudgets(ctx context.Context, budgets []Budget) error {
 	if err := s.store.UpsertBudgets(ctx, budgets); err != nil {
 		return err
 	}
+	defer s.notifyChanged(ctx)
 	return s.Refresh(ctx)
 }
 
@@ -181,6 +203,7 @@ func (s *Service) DeleteBudget(ctx context.Context, scope Scope, subject string,
 	if err := s.store.DeleteBudget(ctx, scope, subject, periodSeconds); err != nil {
 		return err
 	}
+	defer s.notifyChanged(ctx)
 	return s.Refresh(ctx)
 }
 
@@ -194,6 +217,7 @@ func (s *Service) ReplaceConfigBudgets(ctx context.Context, budgets []Budget) er
 	if err := s.store.ReplaceConfigBudgets(ctx, budgets); err != nil {
 		return err
 	}
+	defer s.notifyChanged(ctx)
 	return s.Refresh(ctx)
 }
 
@@ -263,6 +287,7 @@ func (s *Service) SaveSettings(ctx context.Context, settings Settings) (Settings
 	if err != nil {
 		return Settings{}, err
 	}
+	defer s.notifyChanged(ctx)
 	if err := s.Refresh(ctx); err != nil {
 		return saved, fmt.Errorf("refresh budget service after saving settings: %w", err)
 	}
@@ -309,6 +334,7 @@ func (s *Service) ResetBudget(ctx context.Context, scope Scope, subject string, 
 	if err := s.store.ResetBudget(ctx, scope, subject, periodSeconds, at.UTC()); err != nil {
 		return err
 	}
+	defer s.notifyChanged(ctx)
 	return s.Refresh(ctx)
 }
 
@@ -322,6 +348,7 @@ func (s *Service) ResetAll(ctx context.Context, at time.Time) error {
 	if err := s.store.ResetAllBudgets(ctx, at.UTC()); err != nil {
 		return err
 	}
+	defer s.notifyChanged(ctx)
 	return s.Refresh(ctx)
 }
 

@@ -42,6 +42,28 @@ type Service struct {
 	persistState  persistState
 	flushStop     chan struct{}
 	flushDone     chan struct{}
+
+	// changed is called after every successful rule write; see
+	// SetChangeNotifier.
+	changed func(context.Context)
+}
+
+// SetChangeNotifier installs fn, called after every successful write of the
+// rules so other gateway instances reload them. Call it before serving;
+// writes made before it was set (startup seeding) are not announced. Counter
+// resets are not rule writes: counters live in each instance's memory.
+func (s *Service) SetChangeNotifier(fn func(context.Context)) {
+	if s != nil {
+		s.changed = fn
+	}
+}
+
+// notifyChanged announces a successful rule write. It runs after the local
+// refresh, whether or not that succeeded: the store changed either way.
+func (s *Service) notifyChanged(ctx context.Context) {
+	if s.changed != nil {
+		s.changed(ctx)
+	}
 }
 
 func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Service, error) {
@@ -156,6 +178,7 @@ func (s *Service) UpsertRules(ctx context.Context, rules []Rule) error {
 	if err := s.store.UpsertRules(ctx, rules); err != nil {
 		return err
 	}
+	defer s.notifyChanged(ctx)
 	return s.Refresh(ctx)
 }
 
@@ -170,6 +193,7 @@ func (s *Service) DeleteRule(ctx context.Context, scope RuleScope, subject strin
 	if err := s.store.DeleteRule(ctx, scope, subject, periodSeconds); err != nil {
 		return err
 	}
+	defer s.notifyChanged(ctx)
 	s.limiter.reset(ruleKey{scope: scope, subject: subject, periodSeconds: periodSeconds})
 	// The rule is already gone from the store, so the refresh has to happen
 	// either way — dropping it on a snapshot-row failure would leave the
@@ -192,6 +216,7 @@ func (s *Service) ReplaceConfigRules(ctx context.Context, rules []Rule) error {
 	if err := s.store.ReplaceConfigRules(ctx, rules); err != nil {
 		return err
 	}
+	defer s.notifyChanged(ctx)
 	return s.Refresh(ctx)
 }
 

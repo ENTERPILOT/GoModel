@@ -108,6 +108,25 @@ type Service struct {
 
 	stopOnce sync.Once
 	stop     chan struct{}
+
+	// changed is called after every successful store write; see
+	// SetChangeNotifier.
+	changed func(context.Context)
+}
+
+// SetChangeNotifier installs fn, called after every successful write of a
+// server or virtual server so other gateway instances reload them. Call it
+// before serving.
+func (s *Service) SetChangeNotifier(fn func(context.Context)) {
+	if s != nil {
+		s.changed = fn
+	}
+}
+
+func (s *Service) notifyChanged(ctx context.Context) {
+	if s.changed != nil {
+		s.changed(ctx)
+	}
 }
 
 // errServiceClosed rejects a reload after Close.
@@ -396,6 +415,7 @@ func (s *Service) Upsert(ctx context.Context, server ManagedServer) error {
 	if saveErr != nil && !errors.Is(saveErr, encryption.ErrSealUnconfirmed) {
 		return saveErr
 	}
+	defer s.notifyChanged(ctx)
 	if err := s.Reload(ctx); err != nil {
 		// The row is persisted; only applying it to the running manager
 		// failed. Say so — a retry or restart picks the row up.
@@ -488,6 +508,7 @@ func (s *Service) Delete(ctx context.Context, name string) error {
 	if err := s.remove(ctx, name); err != nil {
 		return err
 	}
+	defer s.notifyChanged(ctx)
 	if err := s.Reload(ctx); err != nil {
 		return fmt.Errorf("mcp server %q was deleted but the running set was not updated: %w", name, err)
 	}

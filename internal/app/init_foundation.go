@@ -11,6 +11,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/batch"
 	"github.com/enterpilot/gomodel/internal/budget"
+	"github.com/enterpilot/gomodel/internal/clustersync"
 	"github.com/enterpilot/gomodel/internal/conversationstore"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/filestore"
@@ -42,6 +43,15 @@ func (b *bootstrap) initStorage() error {
 	}
 	app.storage = sharedStorage
 	app.register(subsystemStorage, ownedByShutdown, sharedStorage.Close)
+
+	// Opened before any admin-managed snapshot loads: the revisions it
+	// records now are the ones those snapshots include, so a change saved on
+	// another instance from here on is refreshed once this generation serves.
+	app.clusterSync, err = clustersync.New(b.ctx, sharedStorage)
+	if err != nil {
+		return fmt.Errorf("failed to initialize cluster config sync: %w", err)
+	}
+	app.register(subsystemClusterSync, ownedByShutdown, app.clusterSync.Close)
 
 	// Dashboard-managed secrets are sealed with the database's data keys;
 	// every store that holds one is built after this point.

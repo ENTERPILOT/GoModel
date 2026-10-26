@@ -45,6 +45,18 @@ type Service struct {
 
 	mu       sync.RWMutex
 	snapshot snapshot
+
+	// changed is called after every successful write; see SetChangeNotifier.
+	changed func(context.Context)
+}
+
+// SetChangeNotifier installs fn, called after every successful key write so
+// other gateway instances reload the keys, a revocation included. Call it
+// before serving.
+func (s *Service) SetChangeNotifier(fn func(context.Context)) {
+	if s != nil {
+		s.changed = fn
+	}
 }
 
 // NewService creates a managed auth key service backed by storage.
@@ -557,9 +569,14 @@ func authenticateKey(key AuthKey, now time.Time) (AuthenticationResult, error) {
 	}, nil
 }
 
+// refreshBestEffort runs after every successful write: it reconciles the
+// snapshot from storage and announces the change to other instances.
 func (s *Service) refreshBestEffort(ctx context.Context, operation string) {
 	if err := s.Refresh(ctx); err != nil {
 		slog.Warn("auth key snapshot reconciliation failed", "operation", operation, "error", err)
+	}
+	if s.changed != nil {
+		s.changed(ctx)
 	}
 }
 

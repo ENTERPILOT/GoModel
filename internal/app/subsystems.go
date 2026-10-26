@@ -49,6 +49,7 @@ const (
 	subsystemLive                = "live broker"
 	subsystemStorage             = "storage"
 	subsystemRuntimeSettings     = "runtime settings"
+	subsystemClusterSync         = "cluster config sync"
 	subsystemProviders           = "providers"
 	subsystemSecretRotation      = "secret rotation"
 	subsystemRouteStrategies     = "routing-strategy plugins"
@@ -117,6 +118,9 @@ func (a *App) shutdownOrder() []registeredSubsystem {
 		// Stop live setting reconciliation before tearing down anything it can
 		// reconfigure.
 		{name: subsystemRuntimeSettings, close: closerOf(a.runtimeSettings)},
+		// Stop refreshing snapshots changed on other instances before the
+		// services that hold them are torn down.
+		{name: subsystemClusterSync, close: closerOf(a.clusterSync)},
 		// Stops model refresh and provider-owned resources.
 		{name: subsystemProviders, close: closerOf(a.providers)},
 		// Closes routing-strategy plugin instances once no provider selects.
