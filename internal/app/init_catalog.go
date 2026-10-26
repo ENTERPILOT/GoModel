@@ -194,8 +194,8 @@ func (b *bootstrap) initPricing() error {
 	}
 
 	if !b.appCfg.Pricing.MarkupsEnabled {
-		if len(b.appCfg.Pricing.Markups) > 0 {
-			slog.Warn("pricing.markups is set but markups are disabled; no billed cost is recorded",
+		if len(b.appCfg.Pricing.Markups) > 0 || len(b.appCfg.Pricing.UserPathMarkups) > 0 {
+			slog.Warn("pricing markups are set but markups are disabled; no billed cost is recorded",
 				"hint", "set PRICING_MARKUPS_ENABLED=true (pricing.markups_enabled) to apply markups")
 		}
 		return nil
@@ -203,7 +203,7 @@ func (b *bootstrap) initPricing() error {
 
 	// Every usage writer takes the logger from here on, so wrapping it once
 	// stamps the billed cost on all entries, response-cache hits included.
-	markupService, err := markups.New(b.appCfg.Pricing, registry)
+	markupService, err := markups.New(b.appCfg.Pricing, registry, b.customerMarkupsEnabled)
 	if err != nil {
 		return fmt.Errorf("failed to initialize pricing markups: %w", err)
 	}
