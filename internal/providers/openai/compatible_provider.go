@@ -41,6 +41,12 @@ type CompatibleProviderConfig struct {
 	// context and body (e.g. conversation affinity headers). Nil results are
 	// ignored.
 	ChatRequestHeaders func(context.Context, *core.ChatRequest) http.Header
+	// ResponsesRequestHeaders is ChatRequestHeaders for the native
+	// Responses API endpoints (Responses and StreamResponses). Providers
+	// whose upstream requires the same identification or affinity headers on
+	// both dialects set it alongside ChatRequestHeaders; leave it nil for
+	// upstreams that need none.
+	ResponsesRequestHeaders func(context.Context, *core.ResponsesRequest) http.Header
 }
 
 // CompatibleProvider is the single transport engine for every
@@ -81,15 +87,19 @@ type CompatibleProvider struct {
 	requestMutator     RequestMutator
 	adaptChatRequest   func(*core.ChatRequest) (*core.ChatRequest, error)
 	chatRequestHeaders func(context.Context, *core.ChatRequest) http.Header
+	// responsesRequestHeaders mirrors chatRequestHeaders for the native
+	// Responses API endpoints.
+	responsesRequestHeaders func(context.Context, *core.ResponsesRequest) http.Header
 }
 
 func NewCompatibleProvider(apiKey string, opts providers.ProviderOptions, cfg CompatibleProviderConfig) *CompatibleProvider {
 	p := &CompatibleProvider{
-		keys:               opts.Keyring(apiKey),
-		providerName:       opts.ClientName(cfg.ProviderName),
-		requestMutator:     cfg.RequestMutator,
-		adaptChatRequest:   cfg.AdaptChatRequest,
-		chatRequestHeaders: cfg.ChatRequestHeaders,
+		keys:                    opts.Keyring(apiKey),
+		providerName:            opts.ClientName(cfg.ProviderName),
+		requestMutator:          cfg.RequestMutator,
+		adaptChatRequest:        cfg.AdaptChatRequest,
+		chatRequestHeaders:      cfg.ChatRequestHeaders,
+		responsesRequestHeaders: cfg.ResponsesRequestHeaders,
 	}
 	clientCfg := llmclient.Config{
 		ProviderName:   opts.ClientName(cfg.ProviderName),
@@ -236,6 +246,14 @@ func (p *CompatibleProvider) chatHeaders(ctx context.Context, req *core.ChatRequ
 	return p.chatRequestHeaders(ctx, req)
 }
 
+// responsesHeaders is chatHeaders for the native Responses API endpoints.
+func (p *CompatibleProvider) responsesHeaders(ctx context.Context, req *core.ResponsesRequest) http.Header {
+	if p.responsesRequestHeaders == nil {
+		return nil
+	}
+	return p.responsesRequestHeaders(ctx, req)
+}
+
 // ListModels lists the models the server serves. A max_model_len an entry
 // reports is kept on the model, where no response serializes it: only
 // models.vllm_discovery_compat decides whether a listing advertises one.
@@ -320,6 +338,7 @@ func (p *CompatibleProvider) Responses(ctx context.Context, req *core.ResponsesR
 		Operation: llmclient.OperationChat,
 		Model:     req.Model,
 		Body:      req,
+		Headers:   p.responsesHeaders(ctx, req),
 	}, &resp, &resp.Model)
 	if err != nil {
 		return nil, err
@@ -337,6 +356,7 @@ func (p *CompatibleProvider) StreamResponses(ctx context.Context, req *core.Resp
 		Operation: llmclient.OperationChat,
 		Model:     req.Model,
 		Body:      req.WithStreaming(),
+		Headers:   p.responsesHeaders(ctx, req),
 	}))
 	if err != nil {
 		return nil, err
