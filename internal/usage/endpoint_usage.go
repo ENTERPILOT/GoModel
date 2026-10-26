@@ -25,6 +25,7 @@ type EndpointUsage struct {
 	InputCost    *float64 `json:"input_cost" extensions:"x-nullable"`
 	OutputCost   *float64 `json:"output_cost" extensions:"x-nullable"`
 	TotalCost    *float64 `json:"total_cost" extensions:"x-nullable"`
+	BilledCost   *float64 `json:"billed_cost" extensions:"x-nullable"`
 	GroupCacheFields
 }
 
@@ -46,12 +47,13 @@ func applyEndpointCacheStats(rows []EndpointUsage, stats map[string]*GroupCacheS
 	for i := range rows {
 		seen[rows[i].Endpoint] = true
 		rows[i].assign(stats[rows[i].Endpoint])
+		rows[i].BilledCost = addCost(rows[i].BilledCost, stats[rows[i].Endpoint].localBilledCost())
 	}
 	for key, s := range stats {
-		if seen[key] || !s.hasLocalTokens() {
+		if seen[key] || !s.hasLocalActivity() {
 			continue
 		}
-		row := EndpointUsage{Endpoint: key, Requests: s.LocalRequests}
+		row := EndpointUsage{Endpoint: key, Requests: s.LocalRequests, BilledCost: s.LocalBilledCost}
 		row.assign(s)
 		rows = append(rows, row)
 	}

@@ -134,9 +134,9 @@ class RuntimeConfigStore {
     return this.flag("MCP_TOOL_DISCOVERY") === "search" ? "search" : "off";
   }
 
-  // billedCostVisible gates the billed-cost columns and card: they only add
-  // information once pricing.markups declares at least one rule, and stay
-  // hidden on backends that predate the key.
+  // billedCostVisible gates the billed-cost columns and cards: they show
+  // once markups are enabled, and stay hidden on backends that predate the
+  // key.
   billedCostVisible() {
     return this.booleanFlag("PRICING_MARKUPS_ENABLED", false);
   }
