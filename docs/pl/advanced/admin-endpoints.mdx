@@ -437,7 +437,7 @@ Każdy endpoint raportowy pod `/admin/usage/*` z wyjątkiem `throughput`, a tak�
 
 | Parametr    | Opis                                                               |
 | ----------- | ------------------------------------------------------------------ |
-| `endpoint`  | Rozdzielone przecinkami dokładne endpointy requestów, np. `/v1/chat/completions,/v1/messages` |
+| `endpoint`  | Dokładne endpointy requestów, rozdzielone przecinkami lub powtórzone, np. `/v1/chat/completions,/v1/messages` |
 | `operation` | Rozdzielone przecinkami operacje; wiersz pasuje, jeśli jego endpoint należy do którejkolwiek z nich |
 
 Operacje: `chat_completions`, `responses`, `conversations`, `embeddings`,
@@ -463,6 +463,91 @@ curl "http://localhost:8080/admin/usage/summary?endpoint=/v1/chat/completions,/v
 
 `/admin/usage/log` dopasowuje także tekst `search` do endpointu.
 
+### Filtry wielowartościowe
+
+Filtry danych `model`, `provider`, `label`, `auth_key_id`, `user_path` i
+`endpoint` przyjmują po kilka wartości. Powtórz parametr, aby przekazać więcej
+niż jedną. Request spełnia filtr, gdy ma którąkolwiek z wartości, i musi
+spełniać każdy ustawiony filtr:
+
+```bash
+# gpt-5 lub claude-sonnet-4-5, używane przez /team/alice lub /team/bob, z etykietą env:dev
+curl "http://localhost:8080/admin/usage/summary?model=gpt-5&model=claude-sonnet-4-5&user_path=/team/alice&user_path=/team/bob&label=env:dev" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+- Każda wartość `user_path` obejmuje całe swoje poddrzewo.
+- `model`, `provider`, `auth_key_id` i `endpoint` przyjmują też listę
+  rozdzieloną przecinkami. `label` i `user_path` nie, bo etykiety i ścieżki
+  użytkownika mogą zawierać przecinki.
+- Pojedyncza wartość działa jak dotąd, więc istniejące wywołania się nie
+  zmieniają.
+- Dla poświadczeń [zakresowych](/pl/advanced/admin-endpoints#zakresowy-dostęp-administracyjny)
+  każda wartość `user_path` musi leżeć w ich poddrzewie; filtry tylko
+  zawężają zakres.
+
+Filtry działają na każdym endpoincie raportowym pod `/admin/usage/*` poza
+`throughput` oraz na `/admin/cache/overview`.
+
+### GET /admin/usage/breakdown
+
+Zestawia przefiltrowane użycie według wymiaru wierszy i opcjonalnego wymiaru
+kolumn, np. „koszt miesięcznie według ścieżki użytkownika” albo „kto używa
+którego modelu”.
+
+| Parametr          | Typ    | Opis                                                                        | Domyślnie |
+| ----------------- | ------ | --------------------------------------------------------------------------- | --------- |
+| `rows`            | string | Wymiar wierszy (wymagany): `model`, `provider`, `user_path`, `label`, `endpoint`, `auth_key`, `period` | — |
+| `columns`         | string | Wymiar kolumn, inny niż `rows`; pomiń (lub `none`), aby dostać jedną kolumnę| —         |
+| `metric`          | string | Kolejność do wyboru top N: `cost`, `tokens`, `requests`                     | `cost`    |
+| `limit`           | int    | Liczba kluczy na wymiar; reszta trafia do jednego klucza „other”; wartości powyżej 50 są obcinane do 50 | `10`      |
+| `interval`        | string | Długość okresu dla `period`: `daily`, `weekly`, `monthly`, `yearly`         | `daily`   |
+| `user_path_depth` | int    | Grupuje ścieżki użytkownika po pierwszych N segmentach; `2` liczy `/team/alice/laptop` jako `/team/alice`. `0` zostawia pełne ścieżki; najwyżej `16`, większe wartości zwracają `400` | `0` |
+
+Przyjmuje też parametry zakresu dat, `cache_mode` i każdy filtr danych. Okresy
+używają strefy czasowej z nagłówka `X-GoModel-Timezone`, tak jak
+`/admin/usage/daily`.
+
+```bash
+# Koszt miesięcznie według zespołu, z ostatnich 90 dni
+curl "http://localhost:8080/admin/usage/breakdown?rows=user_path&user_path_depth=1&columns=period&interval=monthly&days=90" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```json
+{
+  "row_dimension": "user_path",
+  "column_dimension": "period",
+  "metric": "cost",
+  "rows": [{ "key": "/team" }, { "key": "/ops" }, { "key": "", "other": true, "folded": 4 }],
+  "columns": [{ "key": "2026-08" }, { "key": "2026-09" }],
+  "cells": [
+    {
+      "row": 0,
+      "column": 1,
+      "requests": 1608,
+      "input_tokens": 17444061,
+      "output_tokens": 3910953,
+      "total_tokens": 21355014,
+      "total_cost": 5.2,
+      "billed_cost": 6.24
+    }
+  ]
+}
+```
+
+- Komórki wskazują `rows` i `columns` po indeksie. Pary bez ruchu nie mają
+  komórki.
+- Klucze są posortowane według miary, od największej. Klucze ponad `limit`
+  dzielą ostatni klucz oznaczony `"other": true`, którego `folded` je liczy.
+  Klucze `period` zachowują kolejność dat i nigdy nie są łączone.
+- Pusty `key` grupuje requesty bez wartości: bez etykiety albo bez
+  zarządzanego klucza API.
+- Request z kilkoma etykietami liczy się raz dla każdej etykiety, więc wiersze
+  etykiet mogą sumować się do więcej niż suma okresu.
+- `total_cost` i `billed_cost` mają wartość `null`, gdy żaden request w
+  komórce nie miał cennika.
+
 ### Tryb cache
 
 Każde trafienie w [cache odpowiedzi](/pl/features/cache) jest zapisywane jako wpis użycia, z
@@ -483,7 +568,7 @@ curl "http://localhost:8080/admin/usage/summary?user_path=/team/alpha&cache_mode
 
 Akceptowany przez `/admin/usage/summary`, `/admin/usage/daily`, `/admin/usage/log`,
 `/admin/usage/models`, `/admin/usage/labels`, `/admin/usage/user-paths`,
-`/admin/usage/endpoints` oraz
+`/admin/usage/endpoints`, `/admin/usage/breakdown` oraz
 `/v1/usage` (zobacz [Usage API](/pl/advanced/usage-api#tryb-cache)). Nierozpoznane
 wartości są traktowane jak `uncached`. `/admin/usage/sessions` go ignoruje: sumy
 requestów i tokenów sesji zawsze obejmują trafienia w cache, a pola kosztów pozostają

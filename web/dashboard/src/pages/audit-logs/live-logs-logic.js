@@ -8,8 +8,7 @@
 //     auditThreadChildren ({ [session_id]: {loading, entries, total} })
 //   - insert-gate fields: auditSearch, auditMethod, auditStatusCode,
 //     auditStream, auditHiddenTypes, customStartDate, customEndDate, usageLogSearch,
-//     usageFilterModel, usageFilterProvider, usageFilterLabel,
-//     usageFilterUserPath, usageFilterSession, usageFilterAuthKey, usageFilterEndpoints,
+//     usageFilters (an object whose isEmpty() reports no active usage filter),
 //     usageLogHideCached, page
 //   - optional cross-module hooks (guarded with typeof):
 //     fetchUsage, fetchAuditLog, isAuditEntryExpanded, cacheAuditRecord,
@@ -122,10 +121,7 @@ export function liveLogsMethods() {
 
         usageLiveInsertAllowed() {
             return this.usageLog && this.usageLog.offset === 0 &&
-                !this.usageLogSearch && !this.usageFilterModel && !this.usageFilterProvider &&
-                !this.usageFilterLabel && !this.usageFilterUserPath && !this.usageFilterSession &&
-                !this.usageFilterAuthKey &&
-                !(this.usageFilterEndpoints && this.usageFilterEndpoints.length);
+                !this.usageLogSearch && (!this.usageFilters || this.usageFilters.isEmpty());
         },
 
         mergeLiveAuditEntry(incoming, eventType) {

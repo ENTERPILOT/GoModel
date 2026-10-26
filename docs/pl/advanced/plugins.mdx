@@ -353,7 +353,7 @@ guardrails:
       config:                     # walidowane względem ConfigSchema pluginu
         mode: "regex"
         rules: |
-          sk-[A-Za-z0-9]{20,} => [redacted]
+          sk-[A-Za-z0-9_-]{20,} => [redacted]
 ```
 
 Reguły z `config.yaml` są wstawiane do zarządzanego domyślnego workflow na pozycji

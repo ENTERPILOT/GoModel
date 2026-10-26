@@ -52,6 +52,7 @@ support, not every individual model capability exposed by an upstream provider.
 | Google Vertex AI | `VERTEX_PROJECT` + `VERTEX_LOCATION` + GCP credentials | `google/gemini-2.5-flash` | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | [Google Vertex AI](/providers/vertex) |
 | DeepSeek | `DEEPSEEK_API_KEY` | `deepseek-v4-pro` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [DeepSeek](/providers/deepseek) |
 | DeepInfra | `DEEPINFRA_API_KEY` (`DEEPINFRA_BASE_URL` optional) | `Qwen/Qwen3-32B` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [DeepInfra](/providers/deepinfra) |
+| Together AI | `TOGETHER_API_KEY` (`TOGETHER_BASE_URL` optional) | `meta-llama/Llama-3.3-70B-Instruct-Turbo` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Together AI](/providers/together) |
 | Groq | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | — |
 | Fireworks AI | `FIREWORKS_API_KEY` (`FIREWORKS_BASE_URL` optional) | `accounts/fireworks/models/gpt-oss-120b` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | — |
 | Chutes AI | `CHUTES_API_KEY` (`CHUTES_BASE_URL` optional) | `Qwen/Qwen3-32B-TEE` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | — |
@@ -389,6 +390,11 @@ Expand a card (the arrow strip at the bottom, or the section-wide
   10 minutes.
 - **Breaker State** — the provider's live circuit-breaker state
   (see [Resilience](/advanced/resilience#circuit-breaker-and-dashboard-provider-health)).
+  While the breaker is open, the card's error line keeps the upstream error
+  that tripped it, marked `— circuit breaker open`, instead of the fast-fail
+  `circuit breaker is open` rejection. The rejection shows only when no
+  upstream error is known from the last 10 minutes, for example when slow
+  calls tripped the breaker.
 - **Models (Recent Traffic)** — per-model request/error counts. A model with
   at least 3 errors making up half or more of its windowed requests is
   flagged in red — this catches a single broken model on an otherwise

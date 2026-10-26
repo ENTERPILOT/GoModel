@@ -1138,6 +1138,7 @@ func TestCircuitBreaker_HalfOpenProbeDoesNotRetry(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, http.StatusServiceUnavailable, gatewayErr.StatusCode)
 	require.NotContains(t, gatewayErr.Message, "circuit breaker is open", "expected original upstream error, got circuit breaker error: %s", gatewayErr.Message)
+	require.NotErrorIs(t, err, ErrCircuitOpen, "an upstream failure must not look like a breaker rejection")
 	got := attempts.Load()
 	require.Equal(t, int32(1), got)
 	state := client.circuitBreaker.State()
@@ -1152,6 +1153,7 @@ func TestCircuitBreaker_HalfOpenProbeDoesNotRetry(t *testing.T) {
 	gatewayErr, ok = err.(*core.GatewayError)
 	require.True(t, ok)
 	require.Contains(t, gatewayErr.Message, "circuit breaker is open")
+	require.ErrorIs(t, err, ErrCircuitOpen)
 	got = attempts.Load()
 	require.Equal(t, int32(1), got)
 }

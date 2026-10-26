@@ -1,10 +1,10 @@
 ---
 title: "GoModel Pro"
 sidebarTitle: "Przegląd"
-description: "GoModel Pro dodaje do gatewaya GoModel licencjonowaną kompresję promptów, inteligentny routing, OIDC SSO i pule proxy wychodzącego."
+description: "GoModel Pro dodaje do gatewaya GoModel licencjonowaną kompresję promptów, inteligentny routing, OIDC SSO, pule proxy wychodzącego i sejfy menedżerów sekretów. Wypróbuj za darmo przez 21 dni."
 icon: "gem"
 tag: "Pro"
-keywords: ["GoModel Pro", "kompresja promptów", "prompt compression", "inteligentny routing", "intelligent routing", "OIDC", "SSO", "szablony limitów", "quota templates", "pule proxy wychodzącego", "egress proxy pools", "licencja", "license"]
+keywords: ["GoModel Pro", "kompresja promptów", "prompt compression", "inteligentny routing", "intelligent routing", "OIDC", "SSO", "szablony limitów", "quota templates", "pule proxy wychodzącego", "egress proxy pools", "sejfy", "vaults", "licencja", "license", "darmowy okres próbny", "free trial"]
 ---
 
 ## Czym jest Pro
@@ -12,13 +12,15 @@ keywords: ["GoModel Pro", "kompresja promptów", "prompt compression", "intelige
 GoModel Pro to komercyjna dystrybucja GoModel. Korzysta z tego samego
 gatewaya, konfiguracji, providerów, dashboardu i API co open source'owy
 GoModel, z licencjonowanymi rozszerzeniami do kompresji promptów, inteligentnego routingu,
-jednokrotnego logowania OIDC (SSO), pul proxy wychodzącego i szablonów limitów dla ścieżek podrzędnych.
+jednokrotnego logowania OIDC (SSO), pul proxy wychodzącego, szablonów limitów dla ścieżek podrzędnych
+i sejfów menedżerów sekretów (vaults).
 
 Bez ważnej licencji binarka Pro uruchamia się jako open source'owy gateway i
-nie blokuje ruchu. Wyjątkiem są jawnie włączone SSO lub pule proxy wychodzącego:
-start kończy się błędem (fail closed), gdy ich uprawnienie licencyjne lub konfiguracja są
-nieprawidłowe, więc granica uwierzytelniania nie może po cichu zniknąć, a ruch kierowany przez proxy
-nigdy nie wychodzi z własnego adresu gatewaya.
+nie blokuje ruchu. Wyjątkiem są jawnie włączone SSO, pule proxy wychodzącego, szablony limitów
+dla ścieżek podrzędnych i sejfy: start kończy się błędem (fail closed), gdy ich uprawnienie
+licencyjne lub konfiguracja są nieprawidłowe, więc granica uwierzytelniania nie może po cichu zniknąć,
+ruch kierowany przez proxy nigdy nie wychodzi z własnego adresu gatewaya, limity nie stają się
+po cichu wspólne, a sekrety nigdy nie zostają nierozwiązane.
 
 <CardGroup cols={2}>
   <Card title="Kompresja promptów" icon="package-minus" href="/pl/pro/compression">
@@ -50,8 +52,56 @@ w YAML i ze zmiennymi środowiskowymi oraz reguły dopasowania znajdziesz w
 start, a zapisy przez Admin API są odrzucane z kodem 403
 `quota_templates_not_entitled`.
 
+## Sejfy
+
+Sejfy (vaults) dodają schemat `vault` do [referencji do sekretów](/pl/advanced/secret-references),
+dzięki czemu klucze providerów i inne sekrety są odczytywane z HashiCorp Vault, AWS Secrets Manager,
+GCP Secret Manager lub Azure Key Vault zamiast ze zwykłych zmiennych środowiskowych:
+
+```yaml
+extensions:
+  vaults:
+    enabled: true
+    stores:
+      prod:
+        type: hashicorp
+        address: https://vault.internal:8200
+        auth:
+          method: kubernetes
+          role: gomodel
+
+providers:
+  openai:
+    api_key: ${vault:prod/llm#openai}
+```
+
+Sekrety są buforowane i odczytywane ponownie co `refresh_interval` (domyślnie `5m`).
+Włączenie sejfów bez uprawnienia licencyjnego `vaults` przerywa start.
+
 ## Licencjonowanie
 
 Funkcje Pro są przyznawane przez offline'owy token podpisany kluczem Ed25519 w
 `GOMODEL_PRO_LICENSE`. Walidacja nie wymaga dostępu do sieci i działa w
 środowiskach odizolowanych od sieci (air-gapped).
+
+### Darmowy okres próbny
+
+Wypróbuj wszystkie funkcje Pro za darmo przez 21 dni, bez karty kredytowej: poproś o licencję próbną na
+[gomodel.enterpilot.io/pro/trial](https://gomodel.enterpilot.io/pro/trial), a przyjdzie e-mailem.
+Licencje próbne wymagają GoModel Pro 0.1.1 lub nowszego.
+
+```bash
+docker run -d --restart unless-stopped -p 8080:8080 \
+  -e GOMODEL_PRO_LICENSE="<licencja z e-maila>" \
+  -e OPENAI_API_KEY="your-openai-key" \
+  enterpilot/gomodel-pro
+```
+
+Linia startowa `GoModel Pro: license valid` w logu pokazuje `trial=true` i datę końca. Na siedem dni
+przed końcem przychodzi e-mail z przypomnieniem. Okres próbny nie ma okresu karencji: w ostatnim dniu
+gateway raz się zatrzymuje, dlatego przykład używa polityki restartu. Po restarcie działa jako
+open source'owy gateway, chyba że nadal są skonfigurowane SSO, pule proxy wychodzącego, szablony
+limitów dla ścieżek podrzędnych lub sejfy; najpierw je usuń albo zainstaluj pełną licencję.
+
+Jeden okres próbny na osobę. Aby zachować Pro po okresie próbnym,
+[umów 30-minutową rozmowę](https://cal.com/jakubw/30).

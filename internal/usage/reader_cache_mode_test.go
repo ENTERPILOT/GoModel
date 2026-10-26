@@ -21,7 +21,7 @@ func TestGetCacheOverviewIgnoresRequestedCacheMode(t *testing.T) {
 
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	defer store.Close()
@@ -42,7 +42,7 @@ func TestGetCacheOverviewIgnoresRequestedCacheMode(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	// Every mode a caller could pass, including the one that would otherwise

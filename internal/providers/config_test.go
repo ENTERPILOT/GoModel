@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/providers/workloadidentity"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,10 +24,12 @@ var globalResilience = config.ResilienceConfig{Retry: globalRetry}
 
 var testDiscoveryConfigs = map[string]DiscoveryConfig{
 	"openai": {
-		DefaultBaseURL: "https://api.openai.com/v1",
+		DefaultBaseURL:   "https://api.openai.com/v1",
+		WorkloadIdentity: workloadidentity.TokenExchange,
 	},
 	"anthropic": {
-		DefaultBaseURL: "https://api.anthropic.com/v1",
+		DefaultBaseURL:   "https://api.anthropic.com/v1",
+		WorkloadIdentity: workloadidentity.JWTBearer,
 	},
 	"cohere": {
 		DefaultBaseURL: "https://api.cohere.com",
@@ -40,6 +43,9 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 	},
 	"chutes": {
 		DefaultBaseURL: "https://llm.chutes.ai/v1",
+	},
+	"together": {
+		DefaultBaseURL: "https://api.together.ai/v1",
 	},
 	"deepinfra": {
 		DefaultBaseURL: "https://api.deepinfra.com/v1/openai",
@@ -89,7 +95,7 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 		AllowAPIKeyless: true,
 	},
 	"kimicode": {
-		DefaultBaseURL: "https://api.kimi.com/coding/v1",
+		DefaultBaseURL: "https://api.kimi.ai/coding/v1",
 	},
 	"hetzner": {
 		DefaultBaseURL: "https://inference.hetzner.com/api/v1",
@@ -599,6 +605,7 @@ func TestApplyProviderEnvVars_DiscoversTypeFromAPIKeyWithDefaultBaseURL(t *testi
 		{providerType: "deepseek", envVar: "DEEPSEEK_API_KEY", apiKey: "deepseek-key"},
 		{providerType: "chutes", envVar: "CHUTES_API_KEY", apiKey: "cpk_test"},
 		{providerType: "deepinfra", envVar: "DEEPINFRA_API_KEY", apiKey: "deepinfra-key"},
+		{providerType: "together", envVar: "TOGETHER_API_KEY", apiKey: "together-key"},
 		{providerType: "zai", envVar: "ZAI_API_KEY", apiKey: "zai-key"},
 	}
 

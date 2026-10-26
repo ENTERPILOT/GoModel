@@ -27,6 +27,12 @@ const CONFIG_KEYS = [
   "MCP_TOOL_DISCOVERY",
   "VIRTUAL_MODEL_STRATEGIES",
   "USER_PATH_HEADER",
+  "LICENSE_BADGE",
+  "LICENSE_TRIAL",
+  "LICENSE_EXPIRES_AT",
+  "LICENSE_VALID_UNTIL",
+  "LICENSE_NOTICE_DAYS",
+  "LICENSE_WARNING_DAYS",
 ];
 
 // Strategies every gateway supports; used when the backend predates the
@@ -128,9 +134,9 @@ class RuntimeConfigStore {
     return this.flag("MCP_TOOL_DISCOVERY") === "search" ? "search" : "off";
   }
 
-  // billedCostVisible gates the billed-cost columns and card: they only add
-  // information once pricing.markups declares at least one rule, and stay
-  // hidden on backends that predate the key.
+  // billedCostVisible gates the billed-cost columns and cards: they show
+  // once markups are enabled, and stay hidden on backends that predate the
+  // key.
   billedCostVisible() {
     return this.booleanFlag("PRICING_MARKUPS_ENABLED", false);
   }

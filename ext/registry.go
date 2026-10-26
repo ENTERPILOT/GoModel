@@ -37,6 +37,9 @@ type Registry struct {
 	authenticators  []RequestAuthenticator
 	capabilities    map[Capability]struct{}
 	plugins         []PluginFactory
+	license         License
+
+	updateCheckLicense UpdateCheckLicense
 
 	logHandlerWrappers []func(slog.Handler) slog.Handler
 }

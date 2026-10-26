@@ -3,8 +3,9 @@
 // It reads a plain-text manifest on a daily schedule and on the first
 // dashboard visit of each day. The request
 // carries the running version, the distribution name, an anonymous install
-// identifier, and the dashboard's own hostname; it never carries API keys,
-// provider credentials, model names, prompts, or usage data.
+// identifier and, for a licensed distribution, the kind of license and a
+// keyed digest of its holder; it never carries API keys, provider
+// credentials, model names, prompts, or usage data.
 //
 // Every outbound request is jittered so gateways started together — a Helm
 // rollout, a restarted docker-compose stack — do not query in lockstep.
@@ -19,6 +20,8 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/url"
+	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -45,6 +48,13 @@ const minRefreshInterval = time.Minute
 // must not each hold an outbound connection open.
 const maxConcurrentBeacons = 8
 
+// licenseKinds are the values X-GoModel-License may carry.
+var licenseKinds = []string{"paid", "trial", "beta", "none"}
+
+// accountPattern is the only shape X-GoModel-Account may carry: a digest, so
+// no free text (an organization's name, say) can leave through it.
+var accountPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
+
 // DefaultURL is the public release manifest served by the GoModel website.
 // The channel file ("core.txt" or "pro.txt") is appended to it.
 const DefaultURL = "https://gomodel.enterpilot.io/version"
@@ -59,7 +69,12 @@ type Config struct {
 	// InstallIDFunc, when set, supplies the identifier per request instead
 	// of InstallID. An Identity uses it to keep retrying its database until
 	// it has confirmed which id this deployment has.
-	InstallIDFunc  func(context.Context) string
+	InstallIDFunc func(context.Context) string
+	// License and Account are what a licensed distribution reports about its
+	// license (see ext.UpdateCheckLicense). Each is sent only when it has the
+	// expected shape; core leaves both empty.
+	License        string
+	Account        string
 	Interval       time.Duration
 	Timeout        time.Duration
 	MaxDailyChecks int
@@ -321,6 +336,12 @@ func (c *Checker) fetch(ctx context.Context, beacon Beacon) (string, error) {
 	req.Header.Set("X-GoModel-Version", c.cfg.Version)
 	req.Header.Set("X-GoModel-App", c.cfg.App)
 	req.Header.Set("X-GoModel-Install", c.installID(ctx))
+	if slices.Contains(licenseKinds, c.cfg.License) {
+		req.Header.Set("X-GoModel-License", c.cfg.License)
+	}
+	if accountPattern.MatchString(c.cfg.Account) {
+		req.Header.Set("X-GoModel-Account", c.cfg.Account)
+	}
 	beacon.apply(req)
 
 	resp, err := c.cfg.Client.Do(req)
