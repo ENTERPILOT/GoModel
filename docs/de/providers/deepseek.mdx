@@ -47,7 +47,9 @@ GoModel schreibt das OpenAI-förmige `"reasoning": {"effort": "..."}` in das Dee
 `reasoning_effort` auf oberster Ebene um – eine Änderung am Client ist nicht erforderlich.
 Validieren oder normalisieren Sie benutzerdefinierte Client-Werte auf `high` oder `max`, bevor Sie
 GoModel aufrufen. Um Reasoning zu deaktivieren, lassen Sie das Feld `reasoning` weg oder senden Sie `none`;
-jedes andere `reasoning.effort`, auch `low`, wird abgebildet und aktiviert Reasoning.
+jedes andere `reasoning.effort`, auch `low`, wird abgebildet und aktiviert Reasoning. Ein
+[erzwungener Reasoning-Effort](/de/features/virtual-models#reasoning-effort-erzwingen)
+ersetzt den Wert des Clients in jedem Fall.
 
 ## Tool Calls und Reasoning
 

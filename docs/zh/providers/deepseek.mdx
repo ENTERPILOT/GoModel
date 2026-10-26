@@ -43,7 +43,7 @@ DeepSeek V4 推理模型接受顶层字符串字段 `reasoning_effort`，允许�
 GoModel 会将 OpenAI 格式的 `"reasoning": {"effort": "..."}` 改写为
 DeepSeek 的顶层 `reasoning_effort`，客户端无需任何修改。在调用 GoModel 之前，请将自定义的客户端取值校验或规范化为 `high` 或 `max`。
 如需禁用推理，请省略 `reasoning` 字段或发送 `none`；提供其他任何
-`reasoning.effort`（包括 `low`），都会被映射并启用推理。
+`reasoning.effort`（包括 `low`），都会被映射并启用推理。[强制推理强度](/zh/features/virtual-models#强制推理强度)无论如何都会替换客户端的值。
 
 ## 工具调用与推理
 
