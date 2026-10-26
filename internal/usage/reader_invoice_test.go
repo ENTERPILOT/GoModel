@@ -205,3 +205,21 @@ func TestInvoiceCustomer(t *testing.T) {
 		assert.Equal(t, tt.want, invoiceCustomer(tt.parent, tt.userPath), "parent %q, path %q", tt.parent, tt.userPath)
 	}
 }
+
+func TestBuildInvoiceRoundsSummedCosts(t *testing.T) {
+	billed := []float64{0.1, 0.2}
+	groups := make([]breakdownGroup, 0, len(billed))
+	for _, cost := range billed {
+		groups = append(groups, breakdownGroup{
+			Row: "/acme", Column: "gpt-5" + modelProviderSeparator + "openai",
+			Requests: 1, TotalCost: new(cost / 1.2), BilledCost: new(cost),
+		})
+	}
+	invoice := buildInvoice(groups, InvoiceParams{})
+	require.Len(t, invoice.Customers, 1)
+	line := invoice.Customers[0].Lines[0]
+	assert.Equal(t, new(0.3), line.BilledCost, "no float noise (0.30000000000000004) reaches the export")
+	assert.Equal(t, new(0.3), invoice.Total.BilledCost)
+	assert.Equal(t, new(20.0), invoice.Total.EffectiveMarkupPercent)
+	assert.Equal(t, 0.1, *groups[0].BilledCost, "storage groups stay untouched")
+}

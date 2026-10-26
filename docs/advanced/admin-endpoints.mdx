@@ -546,6 +546,61 @@ curl "http://localhost:8080/admin/usage/breakdown?rows=user_path&user_path_depth
 - `total_cost` and `billed_cost` are `null` when no request in the cell had
   pricing.
 
+### GET /admin/usage/invoice
+
+Exports billed usage for a period as per-customer invoices: model and provider
+line items per customer, each customer's subtotal, and a grand total, in USD.
+Requires a GoModel Pro license with the `billing` entitlement (otherwise `403`
+`invoice_export_not_entitled`) and `PRICING_MARKUPS_ENABLED=true` (otherwise
+`409` `markups_disabled`). See
+[Invoice export](/features/cost-tracking#invoice-export-gomodel-pro).
+
+| Parameter | Type   | Description                                                                 | Default |
+| --------- | ------ | --------------------------------------------------------------------------- | ------- |
+| `format`  | string | `csv` (downloaded as an attachment) or `json`                               | `csv`   |
+| `parent`  | string | Bill each direct child of this user path as one customer; usage on the parent itself stays under the parent. Omit to bill every user path on its own | — |
+
+It also accepts the date range parameters and every data filter. It ignores
+`cache_mode`: requests, tokens, and `provider_cost` cover provider-bound
+requests, while `billed_cost` also includes billed cache hits.
+
+```bash
+curl "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=2026-10-01&end_date=2026-10-31&format=json" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```json
+{
+  "start_date": "2026-10-01",
+  "end_date": "2026-10-31",
+  "currency": "USD",
+  "parent": "/customers",
+  "customers": [
+    {
+      "customer": "/customers/acme",
+      "lines": [
+        {
+          "model": "gpt-5",
+          "provider": "openai",
+          "requests": 1200,
+          "input_tokens": 950000,
+          "output_tokens": 210000,
+          "provider_cost": 3.2875,
+          "billed_cost": 3.945,
+          "effective_markup_percent": 20
+        }
+      ],
+      "subtotal": { "requests": 1200, "input_tokens": 950000, "output_tokens": 210000, "provider_cost": 3.2875, "billed_cost": 3.945, "effective_markup_percent": 20 }
+    }
+  ],
+  "total": { "requests": 1200, "input_tokens": 950000, "output_tokens": 210000, "provider_cost": 3.2875, "billed_cost": 3.945, "effective_markup_percent": 20 }
+}
+```
+
+- Customers are sorted by user path, and lines by model and provider.
+- Costs and `effective_markup_percent` are `null` when unknown;
+  `effective_markup_percent` is billed cost over provider cost, minus one.
+
 ### Cache mode
 
 Every [response-cache](/features/cache) hit is recorded as a usage entry, with

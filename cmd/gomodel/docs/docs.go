@@ -2929,7 +2929,7 @@ const docTemplate = `{
         },
         "/admin/usage/invoice": {
             "get": {
-                "description": "Returns billed usage for the period, one block of model/provider line items per customer user path, with subtotals and a grand total. Amounts are USD. With parent, each direct child of that user path is one customer (usage on the parent itself stays under the parent); without it every user path is its own customer. Requests, tokens and provider cost cover provider-served requests; billed cost also includes billed response-cache hits. CSV rows carry row_type item, subtotal or total. Requires the GoModel Pro invoice_export entitlement and pricing.markups_enabled.",
+                "description": "Returns billed usage for the period, one block of model/provider line items per customer user path, with subtotals and a grand total. Amounts are USD. With parent, each direct child of that user path is one customer (usage on the parent itself stays under the parent); without it every user path is its own customer. Requests, tokens and provider cost cover provider-served requests; billed cost also includes billed response-cache hits. CSV rows carry row_type item, subtotal or total. Requires a GoModel Pro license with the billing entitlement and pricing.markups_enabled.",
                 "produces": [
                     "text/csv",
                     "application/json"

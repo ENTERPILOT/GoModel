@@ -482,6 +482,28 @@ curl "http://localhost:8080/admin/usage/breakdown?rows=user_path&user_path_depth
 - 带有多个标签的请求会按每个标签各计一次，因此标签行的合计可能超过期间总计。
 - 当单元格中没有任何请求具有定价时，`total_cost` 和 `billed_cost` 为 `null`。
 
+### GET /admin/usage/invoice
+
+按客户导出某个时间段的计费用量账单：每个客户按模型和 provider 列出明细项，并给出每个客户的小计和总计，金额单位为 USD。
+需要带有 `billing` 授权的 GoModel Pro 许可证（否则返回 `403` `invoice_export_not_entitled`），并且需要
+`PRICING_MARKUPS_ENABLED=true`（否则返回 `409` `markups_disabled`）。参见[账单导出](/zh/features/cost-tracking)。
+
+| 参数     | 类型   | 说明                                                                         | 默认值 |
+| -------- | ------ | ---------------------------------------------------------------------------- | ------ |
+| `format` | string | `csv`（作为附件下载）或 `json`                                               | `csv`  |
+| `parent` | string | 将该用户路径的每个直接子路径作为一个客户计费；直接记录在父路径上的用量仍归父路径。省略时每个用户路径单独计费 | — |
+
+该端点还接受日期范围参数和所有数据筛选条件。它会忽略 `cache_mode`：请求数、token 数和 `provider_cost`
+只包含发送给 provider 的请求，而 `billed_cost` 还包含已计费的缓存命中。
+
+```bash
+curl "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=2026-10-01&end_date=2026-10-31&format=json" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+- 客户按用户路径排序，明细项按模型和 provider 排序。
+- 成本和 `effective_markup_percent` 未知时为 `null`；`effective_markup_percent` 是计费成本除以 provider 成本再减一。
+
 ### 缓存模式
 
 每次[响应缓存](/zh/features/cache)命中都会被记录为一条用量条目，带有调用方的 `user_path` 以及值为 `exact` 或 `semantic` 的 `cache_type`。用量端点默认不包含这些条目，因此请求数、Token 数和成本都反映的是提供商支出。传入 `cache_mode` 可以改变这一行为：

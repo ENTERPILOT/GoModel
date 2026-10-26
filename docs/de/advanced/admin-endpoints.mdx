@@ -550,6 +550,35 @@ curl "http://localhost:8080/admin/usage/breakdown?rows=user_path&user_path_depth
 - `total_cost` und `billed_cost` sind `null`, wenn kein Request in der Zelle
   Preise hatte.
 
+### GET /admin/usage/invoice
+
+Exportiert die abgerechnete Nutzung eines Zeitraums als Rechnungen pro Kunde:
+Positionen pro Modell und Provider für jeden Kunden, die Zwischensumme jedes
+Kunden und eine Gesamtsumme, in USD. Erfordert eine GoModel-Pro-Lizenz mit der
+`billing`-Berechtigung (sonst `403` `invoice_export_not_entitled`) und
+`PRICING_MARKUPS_ENABLED=true` (sonst `409` `markups_disabled`). Siehe
+[Rechnungsexport](/de/features/cost-tracking).
+
+| Parameter | Typ    | Beschreibung                                                                 | Standard |
+| --------- | ------ | ---------------------------------------------------------------------------- | -------- |
+| `format`  | string | `csv` (als Anhang heruntergeladen) oder `json`                               | `csv`    |
+| `parent`  | string | Jedes direkte Kind dieses User Paths als einen Kunden abrechnen; Nutzung auf dem Parent selbst bleibt beim Parent. Weglassen, um jeden User Path einzeln abzurechnen | — |
+
+Der Endpunkt akzeptiert außerdem die Datumsparameter und alle Datenfilter.
+`cache_mode` wird ignoriert: Requests, Tokens und `provider_cost` umfassen
+Requests an Provider, `billed_cost` enthält zusätzlich abgerechnete
+Cache-Treffer.
+
+```bash
+curl "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=2026-10-01&end_date=2026-10-31&format=json" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+- Kunden sind nach User Path sortiert, Positionen nach Modell und Provider.
+- Kosten und `effective_markup_percent` sind `null`, wenn sie unbekannt sind;
+  `effective_markup_percent` ist das Verhältnis von abgerechneten Kosten zu
+  Provider-Kosten minus eins.
+
 ### Cache-Modus
 
 Jeder Treffer im [Response-Cache](/de/features/cache) wird als Nutzungseintrag erfasst, mit

@@ -81,6 +81,34 @@ func (a *InvoiceAmounts) setMarkup() {
 	a.EffectiveMarkupPercent = &markup
 }
 
+// invoiceCostPrecision is the step costs are rounded to once every sum and
+// markup is computed from the raw values, so float noise (4.1000000000000005)
+// does not reach the export.
+const invoiceCostPrecision = 1e9
+
+func roundInvoiceCost(cost *float64) *float64 {
+	if cost == nil {
+		return nil
+	}
+	return new(math.Round(*cost*invoiceCostPrecision) / invoiceCostPrecision)
+}
+
+// roundCosts rounds every cost into new pointers, leaving the storage
+// groups the amounts were summed from untouched.
+func (inv *Invoice) roundCosts() {
+	round := func(a *InvoiceAmounts) {
+		a.ProviderCost = roundInvoiceCost(a.ProviderCost)
+		a.BilledCost = roundInvoiceCost(a.BilledCost)
+	}
+	for i := range inv.Customers {
+		for j := range inv.Customers[i].Lines {
+			round(&inv.Customers[i].Lines[j].InvoiceAmounts)
+		}
+		round(&inv.Customers[i].Subtotal)
+	}
+	round(&inv.Total)
+}
+
 // readUsageInvoice groups usage by user path and model/provider with the
 // breakdown query, so billed cache hits are folded exactly like the
 // breakdown folds them, and arranges the groups into an invoice. Unlike the
@@ -155,6 +183,7 @@ func buildInvoice(groups []breakdownGroup, params InvoiceParams) *Invoice {
 		invoice.Total.add(invoice.Customers[i].Subtotal)
 	}
 	invoice.Total.setMarkup()
+	invoice.roundCosts()
 	return invoice
 }
 
