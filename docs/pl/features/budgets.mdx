@@ -244,7 +244,11 @@ okres dla wszystkich jego potomków.
   `billing` oraz `PRICING_MARKUPS_ENABLED=true`. Bez nich API administracyjne
   odrzuca zapisy z `"cost_basis": "billed"` (403 `billed_budgets_not_entitled`
   albo 400 `billed_budgets_markups_disabled`, gdy narzuty są wyłączone), a
-  budżet rozliczeniowy w konfiguracji przerywa start.
+  budżet rozliczeniowy w bieżącej konfiguracji przerywa start. Zapisany już
+  budżet rozliczeniowy (utworzony w dashboardzie albo przez wcześniejszą
+  konfigurację) nigdy nie blokuje startu: dopóki brakuje uprawnienia lub
+  narzutów, GoModel raz loguje ostrzeżenie i egzekwuje go na koszcie providera,
+  więc limit obowiązuje, dopóki go nie zmienisz albo ich nie przywrócisz.
 </Info>
 
 Domyślnie budżet ogranicza koszt providera: to, co płacisz upstream za requesty
@@ -284,6 +288,11 @@ Budżet rozliczeniowy:
 - liczy użycie zapisane bez kosztu rozliczeniowego (sprzed włączenia narzutów)
   po koszcie providera, więc włączenie narzutów w trakcie okresu nigdy nie
   zaniża wydatków.
+- obejmuje też cache hity: dopóki cache hity są rozliczane, wyczerpany budżet
+  rozliczeniowy ścieżki użytkownika lub labela odrzuca request, zanim
+  odpowiedź z cache zostanie zwrócona. Budżety na koszcie providera nigdy nie
+  liczą cache hitów, a budżety providerów ich nie dotyczą, bo hit nie trafia do
+  żadnego providera.
 
 `cost_basis` przyjmuje wartość `provider` (domyślnie) albo `billed`. To atrybut,
 nie część klucza budżetu: zakres, podmiot i okres wyznaczają jeden budżet na

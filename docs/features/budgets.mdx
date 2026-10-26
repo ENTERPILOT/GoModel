@@ -242,7 +242,11 @@ a new period for all of its children.
   entitlement and `PRICING_MARKUPS_ENABLED=true`. Without them, admin API
   writes with `"cost_basis": "billed"` are rejected (403
   `billed_budgets_not_entitled`, or 400 `billed_budgets_markups_disabled` when
-  markups are off), and a billed budget in configuration aborts startup.
+  markups are off), and a billed budget in the current configuration aborts
+  startup. A billed budget already stored (created in the dashboard, or by an
+  earlier configuration) never blocks startup: while the entitlement or markups
+  are missing, GoModel logs a warning once and enforces it on provider cost, so
+  the limit stays in force until you change it or restore them.
 </Info>
 
 By default a budget limits provider cost: what you pay upstream for uncached
@@ -279,6 +283,10 @@ A billed budget:
   `PRICING_BILL_CACHE_HITS=false`, cache hits bill `0` and add nothing.
 - counts usage recorded without a billed cost (before markups were enabled) at
   its provider cost, so enabling markups mid-period never under-counts.
+- gates response-cache hits too: while cache hits are billed, an exhausted
+  billed user-path or label budget rejects a request before a cached response
+  is replayed. Provider-cost budgets never count cache hits, and provider
+  budgets do not apply to them, since a hit is not routed to a provider.
 
 `cost_basis` is `provider` (default) or `billed`. It is an attribute, not part
 of the budget key: one scope, subject, and period holds one budget on either

@@ -53,15 +53,12 @@ func TestNormalizeBudgetDefaultsCostBasisToProvider(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestServiceRejectsBilledBudgetsWhenDisabled(t *testing.T) {
+func TestServiceRejectsBilledBudgetWritesWhenDisabled(t *testing.T) {
 	ctx := context.Background()
 	billed := Budget{
 		Scope: ScopeLabel, Subject: "acme", CostBasis: CostBasisBilled,
 		PeriodSeconds: PeriodMonthlySeconds, Amount: 100,
 	}
-	_, err := NewService(ctx, &fakeStore{budgets: []Budget{billed}}, WithBilledBudgets(false))
-	require.ErrorIs(t, err, ErrBilledBudgetsUnavailable)
-
 	store := &fakeStore{}
 	service, err := NewService(ctx, store, WithBilledBudgets(false))
 	require.NoError(t, err)
@@ -75,6 +72,36 @@ func TestServiceRejectsBilledBudgetsWhenDisabled(t *testing.T) {
 	provider := billed
 	provider.CostBasis = CostBasisProvider
 	require.NoError(t, service.UpsertBudgets(ctx, []Budget{provider}))
+}
+
+// A stored billed budget must not stop the gateway when billed budgets become
+// unavailable: it keeps limiting spend, on provider cost.
+func TestServiceEnforcesStoredBilledBudgetOnProviderCostWhenDisabled(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeStore{
+		budgets: []Budget{{
+			Scope: ScopeLabel, Subject: "acme", CostBasis: CostBasisBilled,
+			PeriodSeconds: PeriodMonthlySeconds, Amount: 100, Source: SourceManual,
+		}},
+		sum: func(SpendWindow) (float64, bool, error) { return 100, true, nil },
+	}
+	service, err := NewService(ctx, store, WithBilledBudgets(false), WithBilledCacheHits(true))
+	require.NoError(t, err)
+
+	budgets := service.Budgets()
+	require.Len(t, budgets, 1)
+	assert.Equal(t, CostBasisProvider, budgets[0].CostBasis)
+
+	err = service.Check(ctx, Subjects{UserPath: "/", Labels: []string{"acme"}}, time.Now())
+	var exceeded *ExceededError
+	require.ErrorAs(t, err, &exceeded)
+	require.Len(t, store.lastWindows, 1)
+	assert.Equal(t, CostBasisProvider, store.lastWindows[0].CostBasis)
+
+	// Enforced on provider cost, the budget no longer gates cache hits.
+	store.sumCalls = 0
+	require.NoError(t, service.CheckCacheHit(ctx, Subjects{UserPath: "/", Labels: []string{"acme"}}, time.Now()))
+	assert.Zero(t, store.sumCalls)
 }
 
 func TestServicePassesCostBasisToSpendWindows(t *testing.T) {
@@ -97,26 +124,86 @@ func TestServicePassesCostBasisToSpendWindows(t *testing.T) {
 	assert.Equal(t, CostBasisProvider, bases[ScopeUserPath])
 }
 
+func TestServiceCheckCacheHit(t *testing.T) {
+	billedLabel := Budget{Scope: ScopeLabel, Subject: "acme", CostBasis: CostBasisBilled, PeriodSeconds: PeriodDailySeconds, Amount: 10}
+	providerLabel := Budget{Scope: ScopeLabel, Subject: "acme", PeriodSeconds: PeriodDailySeconds, Amount: 10}
+	billedProvider := Budget{Scope: ScopeProvider, Subject: "openai", CostBasis: CostBasisBilled, PeriodSeconds: PeriodDailySeconds, Amount: 10}
+	billedOther := Budget{Scope: ScopeLabel, Subject: "other", CostBasis: CostBasisBilled, PeriodSeconds: PeriodDailySeconds, Amount: 10}
+	tests := []struct {
+		name            string
+		budgets         []Budget
+		billedCacheHits bool
+		wantExceeded    bool
+		wantStoreCall   bool
+	}{
+		{name: "billed budget exhausted", budgets: []Budget{billedLabel}, billedCacheHits: true, wantExceeded: true, wantStoreCall: true},
+		{name: "cache hits not billed", budgets: []Budget{billedLabel}},
+		{name: "provider cost budget", budgets: []Budget{providerLabel}, billedCacheHits: true},
+		{name: "billed provider-scope budget", budgets: []Budget{billedProvider}, billedCacheHits: true},
+		{name: "billed budget for another label", budgets: []Budget{billedOther}, billedCacheHits: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			store := &fakeStore{
+				budgets: tt.budgets,
+				sum:     func(SpendWindow) (float64, bool, error) { return 10, true, nil },
+			}
+			service, err := NewService(ctx, store, WithBilledCacheHits(tt.billedCacheHits))
+			require.NoError(t, err)
+
+			err = service.CheckCacheHit(ctx, Subjects{UserPath: "/team", Labels: []string{"acme"}, Provider: "openai"}, time.Now())
+			if tt.wantExceeded {
+				var exceeded *ExceededError
+				require.ErrorAs(t, err, &exceeded)
+				assert.Equal(t, "acme", exceeded.Result.Budget.Subject)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tt.wantStoreCall, store.sumCalls > 0)
+		})
+	}
+}
+
 func TestSeedConfiguredBudgetsCarriesCostBasis(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeStore{}
-	service, err := NewService(ctx, store)
-	require.NoError(t, err)
-
-	err = seedConfiguredBudgets(ctx, service, config.BudgetsConfig{
+	err := seedConfiguredBudgets(ctx, store, config.BudgetsConfig{
 		Labels: []config.BudgetLabelConfig{{Label: "acme", Limits: []config.BudgetLimitConfig{
 			{Period: "monthly", Amount: 500, CostBasis: "billed"},
 			{Period: "daily", Amount: 20},
 		}}},
-	})
+	}, allCapabilities)
 	require.NoError(t, err)
 	require.Len(t, store.replacedBudgets, 2)
 	assert.Equal(t, CostBasisBilled, store.replacedBudgets[0].CostBasis)
 	assert.Equal(t, CostBasisProvider, store.replacedBudgets[1].CostBasis)
+
+	err = seedConfiguredBudgets(ctx, store, config.BudgetsConfig{
+		Labels: []config.BudgetLabelConfig{{Label: "acme", Limits: []config.BudgetLimitConfig{
+			{Period: "monthly", Amount: 500, CostBasis: "billed"},
+		}}},
+	}, capabilities{quotaTemplates: true})
+	require.ErrorIs(t, err, ErrBilledBudgetsUnavailable)
+	assert.Equal(t, 1, store.replaceCalls)
 }
 
-// A config-seeded billed budget aborts startup unless the capability is
-// present and markups are enabled, mirroring per-child quota templates.
+func newSQLiteStorage(t *testing.T) storage.Storage {
+	t.Helper()
+	shared, err := storage.NewSQLite(storage.SQLiteConfig{Path: filepath.Join(t.TempDir(), "budgets.db")})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = shared.Close() })
+	return shared
+}
+
+func billedLabelConfig(basis string) []config.BudgetLabelConfig {
+	return []config.BudgetLabelConfig{{Label: "acme", Limits: []config.BudgetLimitConfig{
+		{Period: "monthly", Amount: 500, CostBasis: basis},
+	}}}
+}
+
+// A billed budget in the current config aborts startup unless the capability
+// is present and markups are enabled, mirroring per-child quota templates.
 func TestNewGatesConfiguredBilledBudgets(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -130,19 +217,12 @@ func TestNewGatesConfiguredBilledBudgets(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-			shared, err := storage.NewSQLite(storage.SQLiteConfig{Path: filepath.Join(t.TempDir(), "budgets.db")})
-			require.NoError(t, err)
-			t.Cleanup(func() { _ = shared.Close() })
-
 			cfg := &config.Config{}
 			cfg.Budgets.Enabled = true
 			cfg.Pricing.MarkupsEnabled = tt.markups
-			cfg.Budgets.Labels = []config.BudgetLabelConfig{{Label: "acme", Limits: []config.BudgetLimitConfig{
-				{Period: "monthly", Amount: 500, CostBasis: "billed"},
-			}}}
+			cfg.Budgets.Labels = billedLabelConfig("billed")
 
-			result, err := New(ctx, cfg, shared, false, tt.capability)
+			result, err := New(context.Background(), cfg, newSQLiteStorage(t), false, tt.capability)
 			if tt.wantErr {
 				require.ErrorIs(t, err, ErrBilledBudgetsUnavailable)
 				return
@@ -152,6 +232,56 @@ func TestNewGatesConfiguredBilledBudgets(t *testing.T) {
 			budgets := result.Service.Budgets()
 			require.Len(t, budgets, 1)
 			assert.Equal(t, CostBasisBilled, budgets[0].CostBasis)
+		})
+	}
+}
+
+// Restarting after billed budgets become unavailable must start: a config
+// change that drops or switches the billed budget applies, and a manual billed
+// budget keeps limiting spend on provider cost.
+func TestNewStartsWithStoredBilledBudgetsAfterEntitlementLoss(t *testing.T) {
+	tests := []struct {
+		name      string
+		nextLabel []config.BudgetLabelConfig
+		manual    bool
+		want      []CostBasis
+	}{
+		{name: "config budget switched to provider", nextLabel: billedLabelConfig("provider"), want: []CostBasis{CostBasisProvider}},
+		{name: "config budget removed", want: nil},
+		{name: "manual billed budget", manual: true, want: []CostBasis{CostBasisProvider}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			shared := newSQLiteStorage(t)
+
+			cfg := &config.Config{}
+			cfg.Budgets.Enabled = true
+			cfg.Pricing.MarkupsEnabled = true
+			if !tt.manual {
+				cfg.Budgets.Labels = billedLabelConfig("billed")
+			}
+			first, err := New(ctx, cfg, shared, false, true)
+			require.NoError(t, err)
+			if tt.manual {
+				require.NoError(t, first.Service.UpsertBudgets(ctx, []Budget{{
+					Scope: ScopeLabel, Subject: "acme", CostBasis: CostBasisBilled,
+					PeriodSeconds: PeriodMonthlySeconds, Amount: 500, Source: SourceManual,
+				}}))
+			}
+			require.NoError(t, first.Close())
+
+			cfg.Pricing.MarkupsEnabled = false
+			cfg.Budgets.Labels = tt.nextLabel
+			next, err := New(ctx, cfg, shared, false, false)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = next.Close() })
+
+			var got []CostBasis
+			for _, item := range next.Service.Budgets() {
+				got = append(got, item.CostBasis)
+			}
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }

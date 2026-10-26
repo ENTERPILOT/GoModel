@@ -60,14 +60,22 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 	if err != nil {
 		return nil, err
 	}
-	service, err := NewService(ctx, store,
-		WithQuotaTemplates(quotaTemplatesEnabled),
-		WithBilledBudgets(billedBudgetsEnabled && cfg.Pricing.MarkupsEnabled),
-	)
-	if err != nil {
+	caps := capabilities{
+		quotaTemplates: quotaTemplatesEnabled,
+		billedBudgets:  billedBudgetsEnabled && cfg.Pricing.MarkupsEnabled,
+	}
+	// Apply the configured budgets before the service loads the stored set, so
+	// a config change that drops or switches a budget takes effect even when
+	// the stored row it replaces needs a capability that is gone.
+	if err := seedConfiguredBudgets(ctx, store, cfg.Budgets, caps); err != nil {
 		return nil, err
 	}
-	if err := seedConfiguredBudgets(ctx, service, cfg.Budgets); err != nil {
+	service, err := NewService(ctx, store,
+		WithQuotaTemplates(caps.quotaTemplates),
+		WithBilledBudgets(caps.billedBudgets),
+		WithBilledCacheHits(cfg.Pricing.MarkupsEnabled && cfg.Pricing.BillCacheHits),
+	)
+	if err != nil {
 		return nil, err
 	}
 	return &Result{Service: service, Store: store}, nil
@@ -82,10 +90,9 @@ func createStore(ctx context.Context, store storage.Storage) (Store, error) {
 	)
 }
 
-func seedConfiguredBudgets(ctx context.Context, service *Service, cfg config.BudgetsConfig) error {
-	if service == nil {
-		return nil
-	}
+// seedConfiguredBudgets replaces the config-sourced budgets in store with the
+// ones cfg declares, refusing any that need a capability caps lacks.
+func seedConfiguredBudgets(ctx context.Context, store Store, cfg config.BudgetsConfig, caps capabilities) error {
 	budgets := make([]Budget, 0, len(cfg.UserPaths)+len(cfg.Labels)+len(cfg.Providers))
 	for _, entry := range cfg.UserPaths {
 		seeded, err := seedBudgets(ScopeUserPath, entry.Path, entry.PerChild, entry.Limits)
@@ -108,7 +115,10 @@ func seedConfiguredBudgets(ctx context.Context, service *Service, cfg config.Bud
 		}
 		budgets = append(budgets, seeded...)
 	}
-	return service.ReplaceConfigBudgets(ctx, budgets)
+	if err := caps.validate(budgets); err != nil {
+		return err
+	}
+	return store.ReplaceConfigBudgets(ctx, budgets)
 }
 
 func seedBudgets(scope Scope, rawSubject string, perChild bool, limits []config.BudgetLimitConfig) ([]Budget, error) {

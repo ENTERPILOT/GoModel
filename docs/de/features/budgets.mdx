@@ -253,8 +253,12 @@ Vorlage startet für alle ihre Kinder einen neuen Zeitraum.
   Berechtigung `billing` und `PRICING_MARKUPS_ENABLED=true`. Fehlt eines davon,
   lehnt die Admin-API Schreibzugriffe mit `"cost_basis": "billed"` ab (403
   `billed_budgets_not_entitled` bzw. 400 `billed_budgets_markups_disabled`, wenn
-  Aufschläge deaktiviert sind), und ein abgerechnetes Budget in der
-  Konfiguration bricht den Start ab.
+  Aufschläge deaktiviert sind), und ein abgerechnetes Budget in der aktuellen
+  Konfiguration bricht den Start ab. Ein bereits gespeichertes abgerechnetes
+  Budget (im Dashboard angelegt oder aus einer früheren Konfiguration) blockiert
+  den Start nie: Solange Berechtigung oder Aufschläge fehlen, protokolliert
+  GoModel einmalig eine Warnung und setzt es auf Provider-Kosten durch, sodass
+  das Limit gilt, bis Sie es ändern oder beides wiederherstellen.
 </Info>
 
 Standardmäßig begrenzt ein Budget die Provider-Kosten: was Sie upstream für
@@ -294,6 +298,11 @@ Ein abgerechnetes Budget:
 - zählt Nutzung ohne abgerechnete Kosten (erfasst, bevor Aufschläge aktiviert
   wurden) mit ihren Provider-Kosten, sodass das Aktivieren von Aufschlägen
   mitten in einer Periode nie zu wenig zählt.
+- greift auch bei Cache-Treffern: Solange Cache-Treffer abgerechnet werden,
+  lehnt ein ausgeschöpftes abgerechnetes User-Path- oder Label-Budget einen
+  Request ab, bevor eine gecachte Antwort ausgeliefert wird. Budgets auf
+  Provider-Kosten zählen Cache-Treffer nie, und Provider-Budgets gelten nicht
+  für sie, da ein Treffer an keinen Provider geht.
 
 `cost_basis` ist `provider` (Standard) oder `billed`. Es ist ein Attribut, kein
 Teil des Budget-Schlüssels: Scope, Subjekt und Periode bilden ein Budget auf
