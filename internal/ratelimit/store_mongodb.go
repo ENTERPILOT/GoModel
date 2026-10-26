@@ -269,14 +269,22 @@ func (s *MongoDBStore) ReplaceConfigRules(ctx context.Context, rules []Rule) err
 		rules[i].Source = SourceConfig
 	}
 
+	return s.inTransaction(ctx, "replace config rate limit rules", func(ctx context.Context) error {
+		return s.replaceConfigRules(ctx, rules)
+	})
+}
+
+// inTransaction runs fn in a transaction, or once without one on a deployment
+// that has no transactions (a standalone server).
+func (s *MongoDBStore) inTransaction(ctx context.Context, what string, fn func(ctx context.Context) error) error {
 	session, err := s.rules.Database().Client().StartSession()
 	if err != nil {
-		return fmt.Errorf("start config rate limit replacement transaction: %w", err)
+		return fmt.Errorf("start %s transaction: %w", what, err)
 	}
 	defer session.EndSession(ctx)
 
 	_, err = session.WithTransaction(ctx, func(txCtx context.Context) (any, error) {
-		if err := s.replaceConfigRules(txCtx, rules); err != nil {
+		if err := fn(txCtx); err != nil {
 			if isMongoTransactionCapabilityError(err) {
 				return nil, &mongoTransactionFallbackError{err: err}
 			}
@@ -289,13 +297,13 @@ func (s *MongoDBStore) ReplaceConfigRules(ctx context.Context, rules []Rule) err
 			if fallbackErr == nil {
 				fallbackErr = err
 			}
-			slog.Warn("MongoDB transactions unavailable for rate limit config replacement; falling back to non-transactional update", "error", fallbackErr)
-			if err := s.replaceConfigRules(ctx, rules); err != nil {
-				return fmt.Errorf("replace config rate limit rules without transaction: %w", errors.Join(fallbackErr, err))
+			slog.Warn("MongoDB transactions unavailable; falling back to a non-transactional write", "operation", what, "error", fallbackErr)
+			if err := fn(ctx); err != nil {
+				return fmt.Errorf("%s without transaction: %w", what, errors.Join(fallbackErr, err))
 			}
 			return nil
 		}
-		return fmt.Errorf("replace config rate limit rules transaction: %w", err)
+		return fmt.Errorf("%s transaction: %w", what, err)
 	}
 	return nil
 }
@@ -437,7 +445,9 @@ func counterIdentityFilter(snap WindowSnapshot) bson.D {
 // DeleteCounter removes every writer's rows for the definition, so no other
 // replica's row brings a reset window back on the next start. The legacy
 // collection is cleared too: an older replica in a rolling upgrade may still
-// write there, and the next start would import it.
+// write there, and the next start would import it. It goes first, so a
+// concurrent import either conflicts with this delete and retries, or commits
+// before the window collection is cleared (see importLegacyCounters).
 func (s *MongoDBStore) DeleteCounter(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {
 	filter := bson.D{
 		{Key: "scope", Value: scope},
@@ -458,7 +468,7 @@ func (s *MongoDBStore) DeleteAllCounters(ctx context.Context) error {
 }
 
 func (s *MongoDBStore) deleteCounters(ctx context.Context, filter bson.D) error {
-	for _, collection := range []*mongo.Collection{s.counters, s.legacyCounters} {
+	for _, collection := range []*mongo.Collection{s.legacyCounters, s.counters} {
 		if _, err := collection.DeleteMany(ctx, filter); err != nil {
 			return err
 		}

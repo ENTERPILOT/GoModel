@@ -131,18 +131,23 @@ func (s *Service) Refresh(ctx context.Context) error {
 	s.mu.Unlock()
 
 	// Removed definitions and shared/per-child mode changes must not leave
-	// counters that can reappear if the same key is added again later.
+	// counters that can reappear if the same key is added again later, in
+	// memory or in any writer's saved rows. The rules are already swapped in,
+	// so a failed row delete is reported but does not undo the refresh.
 	next := make(map[ruleKey]Rule, len(rules))
 	for _, rule := range rules {
 		next[keyForRule(rule)] = rule
 	}
+	var persistErrs []error
 	for _, old := range previous {
 		newRule, exists := next[keyForRule(old)]
 		if !exists || old.PerChild != newRule.PerChild {
-			s.limiter.reset(keyForRule(old))
+			key := keyForRule(old)
+			s.limiter.reset(key)
+			persistErrs = append(persistErrs, s.persistDelete(ctx, key.scope, key.subject, key.periodSeconds))
 		}
 	}
-	return nil
+	return errors.Join(persistErrs...)
 }
 
 func (s *Service) Rules() []Rule {

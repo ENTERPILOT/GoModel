@@ -408,3 +408,84 @@ func TestSQLStoreWithoutLegacyCountersTable(t *testing.T) {
 		require.NoError(t, store.DeleteAllCounters(context.Background()))
 	})
 }
+
+// A reset that runs while a starting replica imports the legacy table must
+// not have the import write back what it read before the reset. SQLite
+// serializes every write transaction, so only PostgreSQL can interleave them.
+//
+// A third transaction holds a row of the window table locked so the reset
+// stops partway, then the import starts; once the import has finished or is
+// waiting on the reset, the lock is released and both run to completion.
+func TestSQLStoreLegacyImportCannotUndoConcurrentReset(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		if db.Dialect() != sqlx.PostgreSQL {
+			t.Skip("SQLite serializes write transactions")
+		}
+		ctx := context.Background()
+		require.NoError(t, db.Schema(ctx, legacyCountersSchema))
+		store, err := NewSQLStore(ctx, db)
+		require.NoError(t, err)
+		blocker := WindowSnapshot{
+			Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: PeriodHourSeconds,
+			Writer: "blocker", RequestsWindowStart: 1700000000, RequestsCurrent: 1,
+		}
+		require.NoError(t, store.SaveCounters(ctx, []WindowSnapshot{blocker}))
+		_, err = db.Exec(ctx, legacyUpsertSQL,
+			string(ScopeUserPath), "/team", "", PeriodHourSeconds,
+			1700000000, 90, 0, 0, 0, 0, time.Now().Unix(),
+		)
+		require.NoError(t, err)
+
+		blockedBy := func(pid int64) bool {
+			var waiting int64
+			err := db.QueryRow(ctx, `SELECT COUNT(*) FROM pg_stat_activity WHERE ? = ANY(pg_blocking_pids(pid))`, pid).Scan(&waiting)
+			require.NoError(t, err)
+			return waiting > 0
+		}
+		lockerPID := make(chan int64, 1)
+		release := make(chan struct{})
+		lockerDone := make(chan error, 1)
+		go func() {
+			lockerDone <- db.InTx(ctx, func(q sqlx.Querier) error {
+				var pid int64
+				if err := q.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+					return err
+				}
+				if _, err := q.Exec(ctx, `SELECT 1 FROM rate_limit_window_snapshots WHERE writer = 'blocker' FOR UPDATE`); err != nil {
+					return err
+				}
+				lockerPID <- pid
+				<-release
+				return nil
+			})
+		}()
+		locker := <-lockerPID
+
+		resetDone := make(chan error, 1)
+		go func() { resetDone <- store.DeleteCounter(ctx, ScopeUserPath, "/team", PeriodHourSeconds) }()
+		var resetPID int64
+		require.Eventually(t, func() bool {
+			err := db.QueryRow(ctx, `SELECT COALESCE(MAX(pid), 0) FROM pg_stat_activity WHERE ? = ANY(pg_blocking_pids(pid))`, locker).Scan(&resetPID)
+			require.NoError(t, err)
+			return resetPID != 0
+		}, 5*time.Second, 10*time.Millisecond, "reset never reached the locked row")
+
+		importDone := make(chan error, 1)
+		go func() {
+			_, err := NewSQLStore(ctx, db)
+			importDone <- err
+		}()
+		require.Eventually(t, func() bool {
+			return len(importDone) > 0 || blockedBy(resetPID)
+		}, 5*time.Second, 10*time.Millisecond, "import neither finished nor waited on the reset")
+
+		close(release)
+		require.NoError(t, <-lockerDone)
+		require.NoError(t, <-resetDone)
+		require.NoError(t, <-importDone)
+
+		got, err := store.LoadCounters(ctx)
+		require.NoError(t, err)
+		require.Empty(t, got, "the import must not bring back the count the reset deleted")
+	})
+}

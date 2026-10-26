@@ -165,3 +165,33 @@ func TestResetDeletesEveryWritersRows(t *testing.T) {
 	restarted := startedService(t, store)
 	assert.Equal(t, int64(0), requestsUsed(t, restarted, now))
 }
+
+// A rule change that resets a definition's live counters (here a shared to
+// per-child round trip) must also drop every writer's saved rows, or the next
+// restart would merge the pre-change count of a writer that no longer runs.
+func TestRuleModeChangeDeletesEveryWritersRows(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	store := teamStore(t)
+
+	first := startedService(t, store)
+	acquireN(t, first, 90, now)
+	first.Close()
+
+	second := startedService(t, store)
+	require.Equal(t, int64(90), requestsUsed(t, second, now))
+	rule := Rule{
+		Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodDaySeconds,
+		MaxRequests: new(int64(100)), Source: SourceManual,
+	}
+	perChild := rule
+	perChild.PerChild = true
+	require.NoError(t, second.UpsertRules(ctx, []Rule{perChild}))
+	require.Empty(t, store.counters, "a mode change clears every writer's rows")
+	require.NoError(t, second.UpsertRules(ctx, []Rule{rule}))
+	acquireN(t, second, 1, now)
+	second.Close()
+
+	restarted := startedService(t, store)
+	assert.Equal(t, int64(1), requestsUsed(t, restarted, now))
+}

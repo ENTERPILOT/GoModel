@@ -17,7 +17,17 @@ import (
 // dropped so an older replica in a rolling upgrade keeps working. Only the
 // documents read are deleted, so one an older replica writes meanwhile waits
 // for the next start.
+//
+// The move runs in a transaction so a reset on an active replica cannot land
+// between the read and the write and have its deleted counts written back:
+// the reset's delete of a document read here makes the transaction conflict
+// and retry from a fresh read. A standalone server has no transactions and
+// keeps that narrow window; it only exists during the one-time upgrade.
 func (s *MongoDBStore) importLegacyCounters(ctx context.Context) error {
+	return s.inTransaction(ctx, "import legacy rate limit counters", s.moveLegacyCounters)
+}
+
+func (s *MongoDBStore) moveLegacyCounters(ctx context.Context) error {
 	cursor, err := s.legacyCounters.Find(ctx, bson.D{})
 	if err != nil {
 		return fmt.Errorf("list legacy rate limit counters: %w", err)

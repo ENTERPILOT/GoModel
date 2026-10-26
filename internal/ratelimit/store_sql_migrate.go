@@ -58,8 +58,8 @@ const legacyCountersTable = "rate_limit_counters"
 // The table is emptied, not dropped: during a rolling upgrade an older replica
 // still reads and writes it, and each later start imports what it wrote since.
 // The copy overwrites an earlier import of the same key, because the legacy
-// row is the newer one. A row written between the copy and the delete is lost,
-// which costs at most one flush interval of an older replica's counts.
+// row is the newer one. Other writers of the legacy table, an older replica's
+// flush or a reset, wait for the import to commit (see deleteCounters).
 func importLegacyCounters(ctx context.Context, db sqlx.DB) (bool, error) {
 	columns, err := tableColumns(ctx, db, legacyCountersTable)
 	if err != nil {
@@ -90,6 +90,13 @@ func importLegacyCounters(ctx context.Context, db sqlx.DB) (bool, error) {
 				tokens_previous = excluded.tokens_previous,
 				updated_at = excluded.updated_at`,
 			`DELETE FROM ` + legacyCountersTable,
+		}
+		if db.Dialect() == sqlx.PostgreSQL {
+			// Hold off every other writer of the legacy table until commit:
+			// otherwise a reset could slip in between the copy and the
+			// delete, and the copy would write back rows the reset just
+			// deleted. SQLite needs nothing, as InTx serializes writers.
+			statements = append([]string{`LOCK TABLE ` + legacyCountersTable + ` IN SHARE ROW EXCLUSIVE MODE`}, statements...)
 		}
 		for _, statement := range statements {
 			if _, err := q.Exec(ctx, statement); err != nil {

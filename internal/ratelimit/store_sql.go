@@ -285,11 +285,16 @@ func (s *SQLStore) DeleteAllCounters(ctx context.Context) error {
 	return nil
 }
 
+// deleteCounters clears the legacy table before the window table. A starting
+// replica's import locks the legacy table first (see importLegacyCounters), so
+// in this order a reset either waits for the import to commit and then deletes
+// what it wrote, or deletes first and leaves the import nothing to copy.
 func (s *SQLStore) deleteCounters(ctx context.Context, where string, args ...any) error {
-	tables := []string{"rate_limit_window_snapshots"}
+	var tables []string
 	if s.legacyCounters {
 		tables = append(tables, legacyCountersTable)
 	}
+	tables = append(tables, "rate_limit_window_snapshots")
 	return s.db.InTx(ctx, func(q sqlx.Querier) error {
 		for _, table := range tables {
 			if _, err := q.Exec(ctx, `DELETE FROM `+table+where, args...); err != nil {
