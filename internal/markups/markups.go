@@ -3,69 +3,129 @@
 package markups
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/modelselectors"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
+
+// ErrCustomerMarkupsUnavailable reports pricing.user_path_markups configured
+// without the customer_markups capability. Startup fails rather than billing
+// customers at the global rate.
+var ErrCustomerMarkupsUnavailable = errors.New("pricing.user_path_markups requires GoModel Pro (customer_markups)")
 
 type rule struct {
 	selector string
 	percent  float64
 }
 
+type exactKey struct {
+	providerName string
+	model        string
+}
+
+// ruleSet holds one set of markups, indexed by selector kind.
+type ruleSet struct {
+	global       *rule
+	providerWide map[string]rule
+	modelWide    map[string]rule
+	exact        map[exactKey]rule
+}
+
 // Service resolves markups from config. It is immutable after New, so it is
 // safe for concurrent use.
 type Service struct {
 	billCacheHits bool
-	global        *rule
-	providerWide  map[string]rule
-	modelWide     map[string]rule
-	exact         map[string]rule
+	rules         ruleSet
+	// userPaths maps a canonical user path (never "/") to its own markups.
+	userPaths map[string]*ruleSet
 }
 
 // New builds the markup service, validating each selector against the
-// configured provider names.
-func New(cfg config.PricingConfig, catalog modelselectors.Catalog) (*Service, error) {
-	s := &Service{
-		billCacheHits: cfg.BillCacheHits,
-		providerWide:  map[string]rule{},
-		modelWide:     map[string]rule{},
-		exact:         map[string]rule{},
-	}
+// configured provider names. customerMarkups reports whether the
+// customer_markups capability is enabled; without it, configured
+// pricing.user_path_markups fail with ErrCustomerMarkupsUnavailable.
+func New(cfg config.PricingConfig, catalog modelselectors.Catalog, customerMarkups bool) (*Service, error) {
 	providerNames := modelselectors.ProviderNames(catalog)
-	seen := make(map[string]string, len(cfg.Markups))
-	for raw, percent := range cfg.Markups {
+	rules, err := newRuleSet("pricing.markups", "", cfg.Markups, providerNames)
+	if err != nil {
+		return nil, err
+	}
+	s := &Service{billCacheHits: cfg.BillCacheHits, rules: *rules}
+	if len(cfg.UserPathMarkups) == 0 {
+		return s, nil
+	}
+	if !customerMarkups {
+		return nil, ErrCustomerMarkupsUnavailable
+	}
+
+	s.userPaths = make(map[string]*ruleSet, len(cfg.UserPathMarkups))
+	seen := make(map[string]string, len(cfg.UserPathMarkups))
+	for raw, markups := range cfg.UserPathMarkups {
+		userPath, err := core.NormalizeUserPath(raw)
+		if err != nil {
+			return nil, fmt.Errorf("pricing.user_path_markups[%q]: %w", raw, err)
+		}
+		if userPath == "" || userPath == "/" {
+			return nil, fmt.Errorf("pricing.user_path_markups[%q]: the root user path is covered by pricing.markups", raw)
+		}
+		if previous, ok := seen[userPath]; ok {
+			return nil, fmt.Errorf("pricing.user_path_markups[%q]: duplicates user path %q", raw, previous)
+		}
+		seen[userPath] = raw
+
+		field := fmt.Sprintf("pricing.user_path_markups[%q]", raw)
+		pathRules, err := newRuleSet(field, userPath+":", markups, providerNames)
+		if err != nil {
+			return nil, err
+		}
+		s.userPaths[userPath] = pathRules
+	}
+	return s, nil
+}
+
+// newRuleSet validates and indexes one markup map. labelPrefix is prepended to
+// each recorded selector so a usage row names the rule it was billed at.
+func newRuleSet(field, labelPrefix string, markups map[string]float64, providerNames []string) (*ruleSet, error) {
+	rs := &ruleSet{
+		providerWide: map[string]rule{},
+		modelWide:    map[string]rule{},
+		exact:        map[exactKey]rule{},
+	}
+	seen := make(map[string]string, len(markups))
+	for raw, percent := range markups {
 		sel, err := modelselectors.NormalizeInputWithProviderNames(providerNames, raw)
 		if err != nil {
-			return nil, fmt.Errorf("pricing.markups[%q]: %w", raw, err)
+			return nil, fmt.Errorf("%s[%q]: %w", field, raw, err)
 		}
 		kind := modelselectors.ScopeKindFor(sel.Selector, sel.ProviderName, sel.Model)
 		// "name/" reads as a model selector when name is not a configured
 		// provider; reject it so a misspelled provider never goes unpriced.
 		if strings.HasSuffix(strings.TrimSpace(raw), "/") && kind == modelselectors.ScopeModel {
-			return nil, fmt.Errorf("pricing.markups[%q]: unknown provider name", raw)
+			return nil, fmt.Errorf("%s[%q]: unknown provider name", field, raw)
 		}
 		if previous, ok := seen[sel.Selector]; ok {
-			return nil, fmt.Errorf("pricing.markups[%q]: duplicates selector %q", raw, previous)
+			return nil, fmt.Errorf("%s[%q]: duplicates selector %q", field, raw, previous)
 		}
 		seen[sel.Selector] = raw
 
-		r := rule{selector: sel.Selector, percent: percent}
+		r := rule{selector: labelPrefix + sel.Selector, percent: percent}
 		switch kind {
 		case modelselectors.ScopeGlobal:
-			s.global = &r
+			rs.global = &r
 		case modelselectors.ScopeProvider:
-			s.providerWide[sel.ProviderName] = r
+			rs.providerWide[sel.ProviderName] = r
 		case modelselectors.ScopeModel:
-			s.modelWide[sel.Model] = r
+			rs.modelWide[sel.Model] = r
 		case modelselectors.ScopeProviderModel:
-			s.exact[modelselectors.ExactMatchKey(sel.ProviderName, sel.Model)] = r
+			rs.exact[exactKey{providerName: sel.ProviderName, model: sel.Model}] = r
 		}
 	}
-	return s, nil
+	return rs, nil
 }
 
 // Apply sets the entry's markup and billed cost. The provider cost fields are
@@ -76,7 +136,7 @@ func (s *Service) Apply(entry *usage.UsageEntry) {
 	}
 	entry.MarkupPercent = nil
 	entry.MarkupSelector = ""
-	if r, ok := s.match(entryProvider(entry), entry.RoutedModel, entry.Model); ok {
+	if r, ok := s.match(entry.UserPath, entryProvider(entry), entry.RoutedModel, entry.Model); ok {
 		percent := r.percent
 		entry.MarkupPercent = &percent
 		entry.MarkupSelector = r.selector
@@ -89,34 +149,68 @@ func (s *Service) BillCacheHits() bool {
 	return s != nil && s.billCacheHits
 }
 
+// match tries the markups of the deepest configured user path covering
+// userPath, then each shallower one, then pricing.markups. The first set with
+// a matching selector wins, so markups never stack.
+func (s *Service) match(userPath, providerName string, models ...string) (rule, bool) {
+	providerName = strings.TrimSpace(providerName)
+	if len(s.userPaths) > 0 {
+		for path := strings.TrimSpace(userPath); path != "" && path != "/"; path = parentUserPath(path) {
+			if rs, ok := s.userPaths[path]; ok {
+				if r, ok := rs.match(providerName, models); ok {
+					return r, true
+				}
+			}
+		}
+	}
+	return s.rules.match(providerName, models)
+}
+
 // match returns the most specific rule: provider/model, then model, then
 // provider, then global — the same precedence as model pricing overrides.
 // Model rules are tried for each model in order, so a rule for the routed
 // model wins over one for the answering model, as in usage pricing.
-func (s *Service) match(providerName string, models ...string) (rule, bool) {
-	providerName = strings.TrimSpace(providerName)
+func (rs *ruleSet) match(providerName string, models []string) (rule, bool) {
 	for _, model := range models {
-		model = strings.TrimSpace(model)
-		if providerName != "" {
-			model = strings.TrimPrefix(model, providerName+"/")
-		}
+		model = trimProviderPrefix(strings.TrimSpace(model), providerName)
 		if model == "" {
 			continue
 		}
-		if r, ok := s.exact[modelselectors.ExactMatchKey(providerName, model)]; ok {
-			return r, true
+		if providerName != "" {
+			if r, ok := rs.exact[exactKey{providerName: providerName, model: model}]; ok {
+				return r, true
+			}
 		}
-		if r, ok := s.modelWide[model]; ok {
+		if r, ok := rs.modelWide[model]; ok {
 			return r, true
 		}
 	}
-	if r, ok := s.providerWide[providerName]; ok && providerName != "" {
+	if r, ok := rs.providerWide[providerName]; ok && providerName != "" {
 		return r, true
 	}
-	if s.global != nil {
-		return *s.global, true
+	if rs.global != nil {
+		return *rs.global, true
 	}
 	return rule{}, false
+}
+
+// trimProviderPrefix strips a leading "providerName/" from model without
+// allocating, since match may run once per configured user path level.
+func trimProviderPrefix(model, providerName string) string {
+	n := len(providerName)
+	if n > 0 && len(model) > n && model[n] == '/' && model[:n] == providerName {
+		return model[n+1:]
+	}
+	return model
+}
+
+// parentUserPath returns the parent of a canonical user path: "/a/b" -> "/a",
+// "/a" -> "/".
+func parentUserPath(path string) string {
+	if i := strings.LastIndexByte(path, '/'); i > 0 {
+		return path[:i]
+	}
+	return "/"
 }
 
 // entryProvider is the configured provider instance that served the entry,

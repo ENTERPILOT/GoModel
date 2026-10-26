@@ -120,6 +120,33 @@ pricing:
 
 开启加价后，仪表盘会在提供商成本旁显示计费成本：概览页和用量页上的一张 **Billed** 卡片、每个用量明细（模型、用户路径、标签、请求类型或端点，以及会话）中的一列，以及请求日志中的一列（其提示会显示每条记录计费时使用的加价）。管理 API 通过 `/admin/usage/summary` 中的 `total_billed_cost`，`/admin/usage/daily`、`/admin/usage/models`、`/admin/usage/user-paths`、`/admin/usage/labels`、`/admin/usage/endpoints` 和 `/admin/usage/sessions` 中的 `billed_cost`，以及 `/admin/usage/log` 条目中的 `billed_cost`、`markup_percent` 和 `markup_selector` 提供这些数据。仅因缓存命中而计费的日期仍会出现在 `/admin/usage/daily` 中，其请求数为零。计费汇总包含计费的缓存命中，而其他成本数据不包含它们，因此按用户路径统计的计费成本就是应向每位客户收取的金额。
 
+### 按客户加价（GoModel Pro）
+
+<Info>
+  按客户加价仅在 GoModel Pro 中提供，并需要 `customer_markups` 许可证权限。
+  没有该权限时，在启用加价的情况下设置 `user_path_markups` 会中止启动——GoModel
+  绝不会悄悄按全局费率向客户计费。
+</Info>
+
+使用 `user_path_markups` 为每个客户（由其 [user path](/zh/features/user-path) 子树标识）设置独立的加价。每个路径接受与 `markups` 相同的选择器：
+
+```yaml
+pricing:
+  markups_enabled: true
+  markups:
+    "/": 20             # 其他所有人
+  user_path_markups:
+    /acme:
+      "/": 30           # /acme 及其下所有路径
+      "openai/gpt-5": 15
+    /acme/internal:
+      "/": 0            # 内部流量按成本计费
+```
+
+GoModel 选取覆盖请求 user path 的最深一级已配置路径（`/acme` 覆盖 `/acme/team`，但不覆盖 `/acmecorp`），并按常规顺序应用其中最具体的选择器。若该路径没有匹配的选择器，则依次尝试更浅一级的路径，最后使用 `markups`。加价从不叠加。在上例中，`/acme/internal/ci` 按 0% 计费，`/acme/team` 对 `openai/gpt-5` 按 15%、其他模型按 30% 计费，`/beta` 按 20% 计费。
+
+默认不设置：没有 `user_path_markups` 时，`markups` 适用于所有人。来自 `user_path_markups` 的规则会以 `<user path>:<selector>` 的形式记录在 `markup_selector` 中，例如 `/acme:openai/gpt-5`，这样请求日志会显示计费时使用了哪条客户规则。user path 与请求中的规范化方式相同，因此 `acme/` 和 `/acme` 是同一个键；`/` 会被拒绝，因为 `markups` 已经覆盖它。
+
 ## 控制台汇总
 
 - **Estimated Cost**：实时提供商请求的支出；不包括缓存命中。

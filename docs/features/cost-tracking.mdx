@@ -123,6 +123,34 @@ Each usage row also stores the markup it was billed at (`markup_percent`, `marku
 
 Once markups are enabled, the dashboard shows billed cost next to provider cost: a **Billed** card on the overview and usage pages, a column in every usage breakdown (model, user path, label, request type or endpoint, and session), and a column in the request log whose tooltip names the markup each row was billed at. The admin API reports it as `total_billed_cost` on `/admin/usage/summary`, `billed_cost` on `/admin/usage/daily`, `/admin/usage/models`, `/admin/usage/user-paths`, `/admin/usage/labels`, `/admin/usage/endpoints`, and `/admin/usage/sessions`, and `billed_cost`, `markup_percent`, and `markup_selector` on `/admin/usage/log` entries. A day billed only for cache hits still appears in `/admin/usage/daily`, with zero requests. Billed totals include billed cache hits even though the other cost figures exclude them, so per-user-path billed cost is what to charge each customer.
 
+### Per-customer markups (GoModel Pro)
+
+<Info>
+  Per-customer markups are available in GoModel Pro and require the
+  `customer_markups` license entitlement. Without it, `user_path_markups` with
+  markups enabled aborts startup — GoModel never silently bills a customer at
+  the global rate.
+</Info>
+
+Give each customer, identified by its [user path](/features/user-path) subtree, its own markups with `user_path_markups`. Each path takes the same selectors as `markups`:
+
+```yaml
+pricing:
+  markups_enabled: true
+  markups:
+    "/": 20             # everyone else
+  user_path_markups:
+    /acme:
+      "/": 30           # /acme and everything below it
+      "openai/gpt-5": 15
+    /acme/internal:
+      "/": 0            # internal traffic at cost
+```
+
+GoModel takes the deepest configured path that covers the request's user path (`/acme` covers `/acme/team`, not `/acmecorp`) and applies the most specific selector in it, in the usual order. When that path has no matching selector, it tries the next shallower path, then `markups`. Markups never stack. With the example above, `/acme/internal/ci` is billed at 0%, `/acme/team` at 15% for `openai/gpt-5` and 30% for everything else, and `/beta` at 20%.
+
+The default is none: without `user_path_markups`, `markups` applies to everyone. A rule from `user_path_markups` is recorded in `markup_selector` as `<user path>:<selector>`, for example `/acme:openai/gpt-5`, so the request log shows which customer rule was billed. User paths are normalized as on requests, so `acme/` and `/acme` are the same key; `/` is rejected, since `markups` already covers it.
+
 ## Dashboard totals
 
 - **Estimated Cost** — spend on live provider requests; cache hits are excluded.

@@ -123,6 +123,34 @@ Każdy wiersz użycia zapisuje też narzut, z jakim został rozliczony (`markup_
 
 Gdy narzuty są włączone, dashboard pokazuje koszt rozliczeniowy obok kosztu providera: kartę **Billed** na stronie przeglądu i stronie użycia, kolumnę w każdym podziale użycia (model, ścieżka użytkownika, label, typ requestu lub endpoint oraz sesja) oraz kolumnę w logu requestów, której podpowiedź podaje narzut każdego wiersza. API administracyjne zwraca go jako `total_billed_cost` w `/admin/usage/summary`, `billed_cost` w `/admin/usage/daily`, `/admin/usage/models`, `/admin/usage/user-paths`, `/admin/usage/labels`, `/admin/usage/endpoints` i `/admin/usage/sessions` oraz `billed_cost`, `markup_percent` i `markup_selector` we wpisach `/admin/usage/log`. Dzień rozliczony wyłącznie za cache hity nadal pojawia się w `/admin/usage/daily`, z zerową liczbą requestów. Sumy rozliczeniowe obejmują rozliczone cache hity, choć pozostałe koszty je pomijają, więc koszt rozliczeniowy według ścieżki użytkownika to kwota do obciążenia każdego klienta.
 
+### Narzuty dla klientów (GoModel Pro)
+
+<Info>
+  Narzuty dla klientów są dostępne w GoModel Pro i wymagają uprawnienia
+  licencyjnego `customer_markups`. Bez niego `user_path_markups` przy włączonych
+  narzutach przerywa uruchamianie — GoModel nigdy po cichu nie rozlicza klienta
+  według stawki globalnej.
+</Info>
+
+Nadaj każdemu klientowi, identyfikowanemu przez poddrzewo [user path](/pl/features/user-path), własne narzuty w `user_path_markups`. Każda ścieżka przyjmuje te same selektory co `markups`:
+
+```yaml
+pricing:
+  markups_enabled: true
+  markups:
+    "/": 20             # wszyscy pozostali
+  user_path_markups:
+    /acme:
+      "/": 30           # /acme i wszystko poniżej
+      "openai/gpt-5": 15
+    /acme/internal:
+      "/": 0            # ruch wewnętrzny po kosztach
+```
+
+GoModel wybiera najgłębszą skonfigurowaną ścieżkę, która obejmuje user path żądania (`/acme` obejmuje `/acme/team`, ale nie `/acmecorp`), i stosuje w niej najbardziej szczegółowy selektor w zwykłej kolejności. Gdy ta ścieżka nie ma pasującego selektora, GoModel próbuje kolejnej, płytszej ścieżki, a potem `markups`. Narzuty nigdy się nie sumują. W powyższym przykładzie `/acme/internal/ci` jest rozliczane z narzutem 0%, `/acme/team` z 15% dla `openai/gpt-5` i 30% dla pozostałych modeli, a `/beta` z 20%.
+
+Domyślnie nic nie jest ustawione: bez `user_path_markups` dla wszystkich obowiązuje `markups`. Reguła z `user_path_markups` jest zapisywana w `markup_selector` jako `<user path>:<selector>`, na przykład `/acme:openai/gpt-5`, dzięki czemu log żądań pokazuje, która reguła klienta została rozliczona. User path jest normalizowany tak jak w żądaniach, więc `acme/` i `/acme` to ten sam klucz; `/` jest odrzucany, bo obejmuje go już `markups`.
+
 ## Sumy w dashboardzie
 
 - **Estimated Cost** – wydatki na rzeczywiste requesty do providerów; cache hity są wykluczone.

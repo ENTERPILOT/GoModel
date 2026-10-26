@@ -20,7 +20,7 @@ func (l *recordingLogger) Config() usage.Config          { return usage.Config{E
 func (l *recordingLogger) Close() error                  { l.closed = true; return nil }
 
 func TestUsageTapStampsBilledCostAndDelegates(t *testing.T) {
-	svc, err := New(config.PricingConfig{Markups: map[string]float64{"openai/": 25}}, testCatalog)
+	svc, err := New(config.PricingConfig{Markups: map[string]float64{"openai/": 25}}, testCatalog, false)
 	require.NoError(t, err)
 	inner := &recordingLogger{}
 	tap := NewUsageTap(inner, svc)
@@ -54,7 +54,7 @@ type nopPublisher struct{}
 func (nopPublisher) PublishUsageEvent(string, *usage.UsageEntry) {}
 
 func TestUsageTapForwardsLivePublisher(t *testing.T) {
-	svc, err := New(config.PricingConfig{}, testCatalog)
+	svc, err := New(config.PricingConfig{}, testCatalog, false)
 	require.NoError(t, err)
 	inner := &publishingLogger{}
 	tap := NewUsageTap(inner, svc)
