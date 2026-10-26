@@ -46,7 +46,7 @@ poziomie z dwoma dozwolonymi poziomami: `high` i `max`.
 GoModel przepisuje `"reasoning": {"effort": "..."}` w formacie OpenAI na
 `reasoning_effort` na najwyższym poziomie w formacie DeepSeek – bez zmian po stronie klienta.
 Własne wartości klienta zwaliduj lub znormalizuj do `high` albo `max` przed wywołaniem GoModel.
-Aby wyłączyć reasoning, całkowicie pomiń pole `reasoning`; każde podane
+Aby wyłączyć reasoning, pomiń pole `reasoning` albo wyślij `none`; każde inne
 `reasoning.effort`, łącznie z `low`, zostaje zmapowane i włącza reasoning.
 
 ## Wywołania narzędzi i reasoning

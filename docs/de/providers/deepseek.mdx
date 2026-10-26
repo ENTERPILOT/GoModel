@@ -46,8 +46,8 @@ mit zwei zulässigen Stufen: `high` und `max`.
 GoModel schreibt das OpenAI-förmige `"reasoning": {"effort": "..."}` in das DeepSeek-Feld
 `reasoning_effort` auf oberster Ebene um – eine Änderung am Client ist nicht erforderlich.
 Validieren oder normalisieren Sie benutzerdefinierte Client-Werte auf `high` oder `max`, bevor Sie
-GoModel aufrufen. Um Reasoning zu deaktivieren, lassen Sie das Feld `reasoning` vollständig weg;
-jedes angegebene `reasoning.effort`, auch `low`, wird abgebildet und aktiviert Reasoning.
+GoModel aufrufen. Um Reasoning zu deaktivieren, lassen Sie das Feld `reasoning` weg oder senden Sie `none`;
+jedes andere `reasoning.effort`, auch `low`, wird abgebildet und aktiviert Reasoning.
 
 ## Tool Calls und Reasoning
 
