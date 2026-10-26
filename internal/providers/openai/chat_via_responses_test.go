@@ -231,6 +231,59 @@ func TestChatToResponsesRequest_RejectsWhatItCannotCarry(t *testing.T) {
 	}
 }
 
+// A client replays the assistant turns it received, including the reasoning
+// text the gateway itself wrote. Those members have no place in the Responses
+// API, but they must not fail the request: rejecting them broke every follow-up
+// turn of a Responses-only model as soon as the client echoed the history.
+func TestChatToResponsesRequest_DropsReplayedReasoning(t *testing.T) {
+	req := &core.ChatRequest{
+		Model: "muse-spark-1.3-contributor",
+		Messages: []core.Message{
+			{Role: "user", Content: "hagamos un plan"},
+			{Role: "assistant", Content: "ok", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				"reasoning_content": json.RawMessage(`"pense el plan"`),
+			})},
+			{Role: "assistant", Content: "ok", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				"reasoning": json.RawMessage(`{"effort":"high"}`),
+			})},
+		},
+	}
+	got, err := chatToResponsesRequest(req)
+	require.NoError(t, err)
+	body, err := json.Marshal(got)
+	require.NoError(t, err)
+	assert.NotContains(t, string(body), "reasoning_content")
+	assert.NotContains(t, string(body), "pense el plan")
+}
+
+// The reasoning exemption is scoped to assistant messages: they are the ones
+// the converter itself produced. On any other role the same members are
+// foreign and must still be rejected instead of silently dropped.
+func TestChatToResponsesRequest_DropsReplayedReasoningOnlyForAssistant(t *testing.T) {
+	fields := func() core.UnknownJSONFields {
+		return core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			"reasoning_content": json.RawMessage(`"pense el plan"`),
+		})
+	}
+	tests := []struct {
+		name string
+		role string
+	}{
+		{name: "user", role: "user"},
+		{name: "system", role: "system"},
+		{name: "tool", role: "tool"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := chatToResponsesRequest(&core.ChatRequest{
+				Model:    "muse-spark-1.3-contributor",
+				Messages: []core.Message{{Role: tt.role, Content: "x", ExtraFields: fields()}},
+			})
+			require.ErrorIs(t, err, errNotTranslatable)
+		})
+	}
+}
+
 func TestChatCompletion_ViaResponsesRendersChatCompletion(t *testing.T) {
 	provider, capture := newRoutingProvider(t)
 	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
