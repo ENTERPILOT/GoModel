@@ -502,6 +502,7 @@ curl "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=202
 ```
 
 - 客户按用户路径排序，明细项按模型和 provider 排序。
+- 一张账单最多包含 50,000 个明细项（客户 × 模型 × provider），超出时返回 `400`。请缩小时间段或筛选条件，或使用 `parent` 归并客户。
 - 成本和 `effective_markup_percent` 未知时为 `null`；`effective_markup_percent` 是计费成本除以 provider 成本再减一。
 
 ### 缓存模式

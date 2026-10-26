@@ -2,7 +2,9 @@ package usage
 
 import (
 	"context"
+	"fmt"
 	"math"
+	"net/http"
 	"testing"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/storage/mongotest"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
@@ -223,11 +226,114 @@ func TestBuildInvoiceRoundsSummedCosts(t *testing.T) {
 			Requests: 1, TotalCost: new(cost / 1.2), BilledCost: new(cost),
 		})
 	}
-	invoice := buildInvoice(groups, InvoiceParams{})
+	lines := invoiceLines{amounts: map[invoiceLineKey]*InvoiceAmounts{}}
+	for _, group := range groups {
+		require.NoError(t, lines.add(group))
+	}
+	invoice := lines.invoice(InvoiceParams{})
 	require.Len(t, invoice.Customers, 1)
 	line := invoice.Customers[0].Lines[0]
 	assert.Equal(t, new(0.3), line.BilledCost, "no float noise (0.30000000000000004) reaches the export")
 	assert.Equal(t, new(0.3), invoice.Total.BilledCost)
 	assert.Equal(t, new(20.0), invoice.Total.EffectiveMarkupPercent)
 	assert.Equal(t, 0.1, *groups[0].BilledCost, "storage groups stay untouched")
+}
+
+// setPackageInt lowers a package cap for one test.
+func setPackageInt(t *testing.T, target *int, value int) {
+	t.Helper()
+	previous := *target
+	*target = value
+	t.Cleanup(func() { *target = previous })
+}
+
+// endUserFixture: three customers with four end-user paths each, two models
+// per path, plus one billed cache hit: 24 storage groups that collapse into 6
+// invoice lines.
+func endUserFixture() []*UsageEntry {
+	ts := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
+	var entries []*UsageEntry
+	n := 0
+	for _, customer := range []string{"acme", "globex", "initech"} {
+		for user := range 4 {
+			for _, model := range []string{"gpt-5", "claude"} {
+				n++
+				entries = append(entries, &UsageEntry{
+					ID: fmt.Sprintf("9c4f0000-0000-4000-8000-%012d", n), RequestID: fmt.Sprintf("req-eu-%d", n), ProviderID: fmt.Sprintf("p-eu-%d", n),
+					Timestamp: ts, Model: model, Provider: "openai", ProviderName: "primary", Endpoint: "/v1/chat/completions",
+					UserPath:    fmt.Sprintf("/customers/%s/user-%d", customer, user),
+					InputTokens: 10, OutputTokens: 1, TotalTokens: 11, TotalCost: new(1.0), BilledCost: new(1.5),
+				})
+			}
+		}
+	}
+	hit := *entries[0]
+	hit.ID, hit.RequestID, hit.ProviderID = "9c4f0000-0000-4000-8000-999999999999", "req-eu-hit", "p-eu-hit"
+	hit.CacheType, hit.BilledCost = CacheTypeExact, new(0.25)
+	return append(entries, &hit)
+}
+
+func TestReadersUsageInvoiceStreamsEndUserPaths(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		store, err := NewSQLStore(context.Background(), db, 0)
+		require.NoError(t, err)
+		reader, err := NewSQLReader(db)
+		require.NoError(t, err)
+		assertInvoiceStreamsEndUserPaths(t, store, reader)
+	})
+	t.Run("mongodb", func(t *testing.T) {
+		mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+			store, reader := newMongoUsageStore(t, db, 0)
+			assertInvoiceStreamsEndUserPaths(t, store, reader)
+		})
+	})
+}
+
+func assertInvoiceStreamsEndUserPaths(t *testing.T, store usageBatchWriter, reader UsageReader) {
+	t.Helper()
+	ctx := context.Background()
+	require.NoError(t, store.WriteBatch(ctx, endUserFixture()))
+	period := UsageQueryParams{
+		StartDate: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
+		EndDate:   time.Date(2026, 3, 31, 0, 0, 0, 0, time.UTC),
+		TimeZone:  "UTC",
+	}
+	// Far fewer groups allowed than the 24 the fixture has.
+	setPackageInt(t, &maxBreakdownGroups, 5)
+
+	t.Run("the breakdown keeps its group cap", func(t *testing.T) {
+		_, err := reader.GetUsageBreakdown(ctx, UsageBreakdownParams{UsageQueryParams: period, Rows: BreakdownUserPath, Columns: BreakdownModel})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "usage breakdown has too many groups")
+	})
+
+	t.Run("the invoice streams past it", func(t *testing.T) {
+		invoice, err := reader.GetUsageInvoice(ctx, InvoiceParams{UsageQueryParams: period, Parent: "/customers"})
+		require.NoError(t, err)
+		var want []invoiceRow
+		for _, customer := range []string{"/customers/acme", "/customers/globex", "/customers/initech"} {
+			billed := 6.0
+			if customer == "/customers/acme" {
+				billed = 6.25 // the cache hit adds its billed charge only
+			}
+			want = append(want,
+				invoiceRow{customer, "claude", "primary", 4, 40, new(4.0), new(6.0), new(50.0)},
+				invoiceRow{customer, "gpt-5", "primary", 4, 40, new(4.0), new(billed), new((billed/4 - 1) * 100)},
+				invoiceRow{customer, "", "", 8, 80, new(8.0), new(6 + billed), new(((6+billed)/8 - 1) * 100)},
+			)
+		}
+		want = append(want, invoiceRow{"", "", "", 24, 240, new(24.0), new(36.25), new(51.0417)})
+		assert.Equal(t, want, flattenInvoice(invoice))
+	})
+
+	t.Run("too many invoice lines", func(t *testing.T) {
+		setPackageInt(t, &maxInvoiceLines, 5)
+		_, err := reader.GetUsageInvoice(ctx, InvoiceParams{UsageQueryParams: period, Parent: "/customers"})
+		require.Error(t, err)
+		var gatewayErr *core.GatewayError
+		require.ErrorAs(t, err, &gatewayErr)
+		assert.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
+		assert.Contains(t, gatewayErr.Message, "invoice has more than 5 lines")
+		assert.Contains(t, gatewayErr.Message, "parent")
+	})
 }

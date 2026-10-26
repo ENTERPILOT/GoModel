@@ -52,11 +52,12 @@ const (
 	MaxBreakdownLimit = 50
 	// MaxBreakdownUserPathDepth caps user_path_depth.
 	MaxBreakdownUserPathDepth = 16
-	// maxBreakdownGroups bounds the (row, column) groups a storage query may
-	// return before the top-N fold, so one request cannot pull an unbounded
-	// result set.
-	maxBreakdownGroups = 50000
 )
+
+// maxBreakdownGroups bounds the (row, column) groups a breakdown query may
+// return before the top-N fold, so one request cannot pull an unbounded
+// result set. A variable so tests can lower it.
+var maxBreakdownGroups = 50000
 
 var breakdownDimensions = map[BreakdownDimension]bool{
 	BreakdownModel: true, BreakdownProvider: true, BreakdownUserPath: true, BreakdownLabel: true,
@@ -225,12 +226,21 @@ func readBilledBreakdownGroups(ctx context.Context, params UsageBreakdownParams,
 			return nil, tooManyBreakdownGroupsError()
 		}
 		for _, hit := range hits {
-			if hit.BilledCost != nil && *hit.BilledCost != 0 {
-				groups = append(groups, breakdownGroup{Row: hit.Row, Column: hit.Column, BilledCost: hit.BilledCost})
+			if billed, ok := billedHitGroup(hit); ok {
+				groups = append(groups, billed)
 			}
 		}
 	}
 	return groups, nil
+}
+
+// billedHitGroup keeps only the billed charge of a response-cache hit group,
+// reporting false when it bills nothing.
+func billedHitGroup(hit breakdownGroup) (breakdownGroup, bool) {
+	if hit.BilledCost == nil || *hit.BilledCost == 0 {
+		return breakdownGroup{}, false
+	}
+	return breakdownGroup{Row: hit.Row, Column: hit.Column, BilledCost: hit.BilledCost}, true
 }
 
 // buildUsageBreakdown folds storage groups into the bounded pivot: it groups

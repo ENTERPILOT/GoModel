@@ -598,6 +598,9 @@ curl "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=202
 ```
 
 - Customers are sorted by user path, and lines by model and provider.
+- An invoice holds at most 50,000 lines (customer × model × provider); past
+  that it returns `400`. Narrow the period or filters, or group customers with
+  `parent`.
 - Costs and `effective_markup_percent` are `null` when unknown;
   `effective_markup_percent` is billed cost over provider cost, minus one.
 

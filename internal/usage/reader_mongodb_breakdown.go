@@ -15,27 +15,40 @@ func (r *MongoDBReader) GetUsageBreakdown(ctx context.Context, params UsageBreak
 	return readUsageBreakdown(ctx, params, r.breakdownGroups)
 }
 
-// GetUsageInvoice returns billed usage per customer, built from the same
+// GetUsageInvoice returns billed usage per customer, streamed from the same
 // grouping aggregation as the breakdown.
 func (r *MongoDBReader) GetUsageInvoice(ctx context.Context, params InvoiceParams) (*Invoice, error) {
-	return readUsageInvoice(ctx, params, r.breakdownGroups)
+	return readUsageInvoice(ctx, params, r.breakdownGroupsEach)
 }
 
 // breakdownGroups returns every (row, column) aggregate of params, at most
 // maxBreakdownGroups+1 of them.
 func (r *MongoDBReader) breakdownGroups(ctx context.Context, params UsageBreakdownParams) ([]breakdownGroup, error) {
-	pipeline, err := mongoUsageBreakdownPipeline(params)
+	groups := make([]breakdownGroup, 0)
+	err := r.breakdownGroupsEach(ctx, params, maxBreakdownGroups+1, func(g breakdownGroup) error {
+		groups = append(groups, g)
+		return nil
+	})
 	if err != nil {
 		return nil, err
+	}
+	return groups, nil
+}
+
+// breakdownGroupsEach streams the (row, column) aggregates of params to fn,
+// at most limit of them; limit 0 streams them all.
+func (r *MongoDBReader) breakdownGroupsEach(ctx context.Context, params UsageBreakdownParams, limit int, fn func(breakdownGroup) error) error {
+	pipeline, err := mongoUsageBreakdownPipeline(params, limit)
+	if err != nil {
+		return err
 	}
 
 	cursor, err := r.collection.Aggregate(ctx, pipeline, options.Aggregate().SetAllowDiskUse(true))
 	if err != nil {
-		return nil, fmt.Errorf("failed to aggregate usage breakdown: %w", err)
+		return fmt.Errorf("failed to aggregate usage breakdown: %w", err)
 	}
 	defer cursor.Close(ctx)
 
-	groups := make([]breakdownGroup, 0)
 	for cursor.Next(ctx) {
 		var row struct {
 			ID struct {
@@ -52,25 +65,28 @@ func (r *MongoDBReader) breakdownGroups(ctx context.Context, params UsageBreakdo
 			HasBilledCost int     `bson:"has_billed_cost"`
 		}
 		if err := cursor.Decode(&row); err != nil {
-			return nil, fmt.Errorf("failed to decode usage breakdown row: %w", err)
+			return fmt.Errorf("failed to decode usage breakdown row: %w", err)
 		}
-		groups = append(groups, breakdownGroup{
+		err := fn(breakdownGroup{
 			Row: row.ID.Row, Column: row.ID.Column, Requests: row.Requests,
 			InputTokens: row.InputTokens, OutputTokens: row.OutputTokens, TotalTokens: row.TotalTokens,
 			TotalCost:  costPtr(row.HasTotalCost, row.TotalCost),
 			BilledCost: costPtr(row.HasBilledCost, row.BilledCost),
 		})
+		if err != nil {
+			return err
+		}
 	}
 	if err := cursor.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating usage breakdown cursor: %w", err)
+		return fmt.Errorf("error iterating usage breakdown cursor: %w", err)
 	}
-	return groups, nil
+	return nil
 }
 
 // mongoUsageBreakdownPipeline builds the grouping aggregation. Breaking down
 // by user path filters on the canonical path it groups by; breaking down by
 // label unwinds the labels while keeping unlabelled documents.
-func mongoUsageBreakdownPipeline(params UsageBreakdownParams) (bson.A, error) {
+func mongoUsageBreakdownPipeline(params UsageBreakdownParams, limit int) (bson.A, error) {
 	byUserPath := params.usesDimension(BreakdownUserPath)
 	matchParams := params.UsageQueryParams
 	if byUserPath {
@@ -115,8 +131,10 @@ func mongoUsageBreakdownPipeline(params UsageBreakdownParams) (bson.A, error) {
 			{Key: "billed_cost", Value: mongoCostSum("$billed_cost")},
 			{Key: "has_billed_cost", Value: mongoCostPresenceCount("$billed_cost")},
 		}}},
-		bson.D{{Key: "$limit", Value: maxBreakdownGroups + 1}},
 	)
+	if limit > 0 {
+		pipeline = append(pipeline, bson.D{{Key: "$limit", Value: limit}})
+	}
 	return pipeline, nil
 }
 

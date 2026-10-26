@@ -3,6 +3,7 @@ package usage
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"math"
 	"slices"
 	"strings"
@@ -109,11 +110,22 @@ func (inv *Invoice) roundCosts() {
 	round(&inv.Total)
 }
 
+// maxInvoiceLines bounds the (customer, model, provider) lines one invoice
+// may hold, so memory follows the invoice, not the number of end-user paths
+// streamed into it. A variable so tests can lower it.
+var maxInvoiceLines = 50000
+
+// breakdownGroupStream streams a backend's (row, column) aggregates to fn, at
+// most limit of them (0: all).
+type breakdownGroupStream func(ctx context.Context, params UsageBreakdownParams, limit int, fn func(breakdownGroup) error) error
+
 // readUsageInvoice groups usage by user path and model/provider with the
-// breakdown query, so billed cache hits are folded exactly like the
-// breakdown folds them, and arranges the groups into an invoice. Unlike the
-// breakdown it keeps every group: an invoice may not fold customers away.
-func readUsageInvoice(ctx context.Context, params InvoiceParams, query func(context.Context, UsageBreakdownParams) ([]breakdownGroup, error)) (*Invoice, error) {
+// breakdown query and folds each group into its customer's line as it is
+// streamed, so billed cache hits are added exactly like the breakdown adds
+// them. Unlike the breakdown nothing is folded away and the storage groups
+// are not capped: per-end-user paths collapse into a few customers, so the
+// cap applies to invoice lines instead.
+func readUsageInvoice(ctx context.Context, params InvoiceParams, stream breakdownGroupStream) (*Invoice, error) {
 	parent, err := core.NormalizeUserPath(params.Parent)
 	if err != nil {
 		return nil, core.NewInvalidRequestError("invalid parent: "+err.Error(), err)
@@ -139,37 +151,63 @@ func readUsageInvoice(ctx context.Context, params InvoiceParams, query func(cont
 			return EmptyInvoice(params), nil
 		}
 	}
-	groups, err := readBilledBreakdownGroups(ctx, breakdown, query)
-	if err != nil {
+
+	lines := invoiceLines{parent: parent, amounts: map[invoiceLineKey]*InvoiceAmounts{}}
+	if err := stream(ctx, breakdown, 0, lines.add); err != nil {
 		return nil, err
 	}
-	return buildInvoice(groups, params), nil
+	if mode := billedCacheHitsMode(breakdown.CacheMode); mode != "" {
+		hitParams := breakdown
+		hitParams.CacheMode = mode
+		err := stream(ctx, hitParams, 0, func(hit breakdownGroup) error {
+			if billed, ok := billedHitGroup(hit); ok {
+				return lines.add(billed)
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	return lines.invoice(params), nil
 }
 
-// buildInvoice arranges (user path, model/provider) groups into customers
-// ordered by customer, then lines ordered by model and provider.
-func buildInvoice(groups []breakdownGroup, params InvoiceParams) *Invoice {
-	type lineKey struct{ customer, model, provider string }
-	lines := map[lineKey]*InvoiceAmounts{}
-	for _, group := range groups {
-		model, provider, _ := strings.Cut(group.Column, modelProviderSeparator)
-		key := lineKey{customer: invoiceCustomer(params.Parent, group.Row), model: model, provider: provider}
-		amounts, ok := lines[key]
-		if !ok {
-			amounts = &InvoiceAmounts{}
-			lines[key] = amounts
-		}
-		amounts.add(InvoiceAmounts{
-			Requests: group.Requests, InputTokens: group.InputTokens, OutputTokens: group.OutputTokens,
-			ProviderCost: group.TotalCost, BilledCost: group.BilledCost,
-		})
-	}
+type invoiceLineKey struct{ customer, model, provider string }
 
-	keys := make([]lineKey, 0, len(lines))
-	for key := range lines {
+// invoiceLines accumulates storage groups into (customer, model, provider)
+// line amounts.
+type invoiceLines struct {
+	parent  string
+	amounts map[invoiceLineKey]*InvoiceAmounts
+}
+
+func (l invoiceLines) add(group breakdownGroup) error {
+	model, provider, _ := strings.Cut(group.Column, modelProviderSeparator)
+	key := invoiceLineKey{customer: invoiceCustomer(l.parent, group.Row), model: model, provider: provider}
+	amounts, ok := l.amounts[key]
+	if !ok {
+		if len(l.amounts) >= maxInvoiceLines {
+			return core.NewInvalidRequestError(fmt.Sprintf(
+				"invoice has more than %d lines (customer, model and provider); narrow the period or the filters, or group customers with parent", maxInvoiceLines), nil)
+		}
+		amounts = &InvoiceAmounts{}
+		l.amounts[key] = amounts
+	}
+	amounts.add(InvoiceAmounts{
+		Requests: group.Requests, InputTokens: group.InputTokens, OutputTokens: group.OutputTokens,
+		ProviderCost: group.TotalCost, BilledCost: group.BilledCost,
+	})
+	return nil
+}
+
+// invoice arranges the lines into customers ordered by customer, then lines
+// ordered by model and provider.
+func (l invoiceLines) invoice(params InvoiceParams) *Invoice {
+	keys := make([]invoiceLineKey, 0, len(l.amounts))
+	for key := range l.amounts {
 		keys = append(keys, key)
 	}
-	slices.SortFunc(keys, func(a, b lineKey) int {
+	slices.SortFunc(keys, func(a, b invoiceLineKey) int {
 		return cmp.Or(cmp.Compare(a.customer, b.customer), cmp.Compare(a.model, b.model), cmp.Compare(a.provider, b.provider))
 	})
 
@@ -179,7 +217,7 @@ func buildInvoice(groups []breakdownGroup, params InvoiceParams) *Invoice {
 			invoice.Customers = append(invoice.Customers, InvoiceCustomer{Customer: key.customer, Lines: []InvoiceLine{}})
 		}
 		customer := &invoice.Customers[len(invoice.Customers)-1]
-		line := InvoiceLine{Model: key.model, Provider: key.provider, InvoiceAmounts: *lines[key]}
+		line := InvoiceLine{Model: key.model, Provider: key.provider, InvoiceAmounts: *l.amounts[key]}
 		line.setMarkup()
 		customer.Lines = append(customer.Lines, line)
 		customer.Subtotal.add(line.InvoiceAmounts)

@@ -573,6 +573,9 @@ curl "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=202
 
 - Klienci są posortowani według ścieżki użytkownika, a pozycje według modelu i
   providera.
+- Faktura ma co najwyżej 50 000 pozycji (klient × model × provider); powyżej
+  tego limitu endpoint zwraca `400`. Zawęź okres lub filtry albo grupuj
+  klientów za pomocą `parent`.
 - Koszty i `effective_markup_percent` mają wartość `null`, gdy są nieznane;
   `effective_markup_percent` to stosunek rozliczonego kosztu do kosztu
   providera minus jeden.

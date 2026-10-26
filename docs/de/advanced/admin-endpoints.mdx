@@ -575,6 +575,9 @@ curl "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=202
 ```
 
 - Kunden sind nach User Path sortiert, Positionen nach Modell und Provider.
+- Eine Rechnung enthält höchstens 50.000 Positionen (Kunde × Modell ×
+  Provider); darüber antwortet der Endpunkt mit `400`. Grenzen Sie Zeitraum
+  oder Filter ein oder fassen Sie Kunden mit `parent` zusammen.
 - Kosten und `effective_markup_percent` sind `null`, wenn sie unbekannt sind;
   `effective_markup_percent` ist das Verhältnis von abgerechneten Kosten zu
   Provider-Kosten minus eins.
