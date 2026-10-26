@@ -90,6 +90,21 @@ type readerDialect struct {
 }
 
 func readerDialectFor(dialect sqlx.Dialect) readerDialect {
+	if dialect == sqlx.DuckDB {
+		// PostgreSQL-shaped, but JSON paths use DuckDB's '$.a.b' syntax and
+		// the default collation already compares bytes.
+		return readerDialect{
+			like:               "ILIKE",
+			idColumn:           "id",
+			attemptIDColumn:    "audit_log_id",
+			userPath:           "user_path",
+			errorMessage:       `data->>'$.error_message'`,
+			responseID:         `data->>'$.response_body.id'`,
+			previousResponseID: `data->>'$.request_body.previous_response_id'`,
+			timestampBound:     func(t time.Time) any { return t.UTC() },
+			statsHour:          `date_trunc('hour', timestamp AT TIME ZONE 'UTC')`,
+		}
+	}
 	if dialect == sqlx.PostgreSQL {
 		return readerDialect{
 			like:               "ILIKE",

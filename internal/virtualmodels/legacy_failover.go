@@ -289,7 +289,7 @@ func readLegacyMongoFailoverRules(ctx context.Context, db *mongo.Database) ([]le
 func legacyFailoverColumns(ctx context.Context, db sqlx.DB) (map[string]bool, error) {
 	var query string
 	switch db.Dialect() {
-	case sqlx.PostgreSQL:
+	case sqlx.PostgreSQL, sqlx.DuckDB:
 		query = "SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = '" + legacyFailoverTable + "'"
 	default:
 		query = "SELECT name FROM pragma_table_info('" + legacyFailoverTable + "')"

@@ -16,6 +16,9 @@ type StorageConfig struct {
 	// MongoDB configuration
 	MongoDB MongoDBStorageConfig `yaml:"mongodb"`
 
+	// DuckDB configuration (needs a binary built with -tags duckdb)
+	DuckDB DuckDBStorageConfig `yaml:"duckdb"`
+
 	// EncryptionKey enables encryption at rest for dashboard-managed secrets
 	// (provider credentials, MCP headers, guardrail secrets). Any string is
 	// accepted; 32 random bytes in base64 (openssl rand -base64 32) is
@@ -26,6 +29,13 @@ type StorageConfig struct {
 	// EncryptionKeyPrevious is the old EncryptionKey during a key rotation.
 	// It is only used at startup to re-wrap the data key with EncryptionKey.
 	EncryptionKeyPrevious string `yaml:"encryption_key_previous" env:"GOMODEL_ENCRYPTION_KEY_PREVIOUS"`
+}
+
+// DuckDBStorageConfig holds DuckDB-specific storage configuration
+type DuckDBStorageConfig struct {
+	// Path is the database file path. Default: gomodel.duckdb next to the
+	// SQLite default.
+	Path string `yaml:"path" env:"DUCKDB_PATH"`
 }
 
 // SQLiteStorageConfig holds SQLite-specific storage configuration
@@ -67,6 +77,9 @@ func (c StorageConfig) BackendConfig() storage.Config {
 		MongoDB: storage.MongoDBConfig{
 			URL:      c.MongoDB.URL,
 			Database: c.MongoDB.Database,
+		},
+		DuckDB: storage.DuckDBConfig{
+			Path: c.DuckDB.Path,
 		},
 	}
 	if cfg.Type == "" {

@@ -80,7 +80,13 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	if err := migrateCreatedAtToUnixSeconds(ctx, db); err != nil {
 		return nil, err
 	}
-	if err := db.Schema(ctx, sqlIndexes...); err != nil {
+	indexes := sqlIndexes
+	if db.Dialect() == sqlx.DuckDB {
+		// SPIKE: DuckDB has no partial indexes, so the one-active-version
+		// guarantee rests on Create's transaction alone.
+		indexes = []string{sqlIndexes[0], sqlIndexes[2]}
+	}
+	if err := db.Schema(ctx, indexes...); err != nil {
 		return nil, fmt.Errorf("initialize workflow versions table: %w", err)
 	}
 	// Rows written before managed_default existed are recognised by the name

@@ -62,8 +62,10 @@ func countLegacyRows(ctx context.Context, conn storage.Storage, table string) (i
 }
 
 // isMissingTableError reports whether err says the queried table does not
-// exist: SQLite says "no such table", PostgreSQL raises SQLSTATE 42P01.
+// exist: SQLite says "no such table", PostgreSQL raises SQLSTATE 42P01, and
+// DuckDB says "Catalog Error: Table with name ... does not exist".
 func isMissingTableError(err error) bool {
 	message := err.Error()
-	return strings.Contains(message, "no such table") || strings.Contains(message, "42P01")
+	return strings.Contains(message, "no such table") || strings.Contains(message, "42P01") ||
+		(strings.Contains(message, "Catalog Error: Table with name") && strings.Contains(message, "does not exist"))
 }
