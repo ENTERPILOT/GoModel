@@ -17529,6 +17529,11 @@
       "usage.DailyUsage": {
         "type": "object",
         "properties": {
+          "billed_cost": {
+            "description": "BilledCost includes the period's billed response-cache hits in every\ncache mode, so a period served only from the cache can appear with no\nrequests.",
+            "type": "number",
+            "nullable": true
+          },
           "cache_write_input_tokens": {
             "type": "integer"
           },
@@ -17568,6 +17573,10 @@
       "usage.EndpointUsage": {
         "type": "object",
         "properties": {
+          "billed_cost": {
+            "type": "number",
+            "nullable": true
+          },
           "cache_write_input_tokens": {
             "type": "integer"
           },
@@ -17787,6 +17796,11 @@
       "usage.SessionUsage": {
         "type": "object",
         "properties": {
+          "billed_cost": {
+            "description": "BilledCost includes the session's billed response-cache hits.",
+            "type": "number",
+            "nullable": true
+          },
           "input_cost": {
             "type": "number",
             "nullable": true

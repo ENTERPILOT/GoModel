@@ -185,6 +185,8 @@ type SessionUsage struct {
 	InputCost    *float64 `json:"input_cost" extensions:"x-nullable"`
 	OutputCost   *float64 `json:"output_cost" extensions:"x-nullable"`
 	TotalCost    *float64 `json:"total_cost" extensions:"x-nullable"`
+	// BilledCost includes the session's billed response-cache hits.
+	BilledCost *float64 `json:"billed_cost" extensions:"x-nullable"`
 }
 
 // SessionUsageParams specifies filters and pagination for per-session usage.
@@ -275,6 +277,10 @@ type DailyUsage struct {
 	InputCost             *float64 `json:"input_cost"`
 	OutputCost            *float64 `json:"output_cost"`
 	TotalCost             *float64 `json:"total_cost"`
+	// BilledCost includes the period's billed response-cache hits in every
+	// cache mode, so a period served only from the cache can appear with no
+	// requests.
+	BilledCost *float64 `json:"billed_cost" extensions:"x-nullable"`
 }
 
 // periodInputSplit holds the provider prompt-cache split for one time period.

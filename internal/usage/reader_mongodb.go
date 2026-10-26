@@ -62,6 +62,8 @@ type mongoSessionUsageRow struct {
 	HasInputCost     int     `bson:"has_input_cost"`
 	HasOutputCost    int     `bson:"has_output_cost"`
 	HasTotalCost     int     `bson:"has_total_cost"`
+	BilledCost       float64 `bson:"billed_cost"`
+	HasBilledCost    int     `bson:"has_billed_cost"`
 	ProviderRequests int     `bson:"provider_requests"`
 }
 
@@ -768,6 +770,8 @@ func (r *MongoDBReader) GetUsageByEndpoint(ctx context.Context, params UsageQuer
 			{Key: "has_input_cost", Value: mongoCostPresenceCount("$input_cost")},
 			{Key: "has_output_cost", Value: mongoCostPresenceCount("$output_cost")},
 			{Key: "has_total_cost", Value: mongoCostPresenceCount("$total_cost")},
+			{Key: "billed_cost", Value: mongoCostSum("$billed_cost")},
+			{Key: "has_billed_cost", Value: mongoCostPresenceCount("$billed_cost")},
 		}}},
 		bson.D{{Key: "$sort", Value: bson.D{{Key: "_id", Value: 1}}}},
 	)
@@ -788,6 +792,7 @@ func (r *MongoDBReader) GetUsageByEndpoint(ctx context.Context, params UsageQuer
 			InputCost:    costPtr(row.HasInputCost, row.InputCost),
 			OutputCost:   costPtr(row.HasOutputCost, row.OutputCost),
 			TotalCost:    costPtr(row.HasTotalCost, row.TotalCost),
+			BilledCost:   costPtr(row.HasBilledCost, row.BilledCost),
 		}
 	})
 	if err != nil {
@@ -832,6 +837,7 @@ func (r *MongoDBReader) GetUsageBySession(ctx context.Context, params SessionUsa
 			InputCost:    sessionCostPtr(row.ProviderRequests, row.HasInputCost, row.InputCost),
 			OutputCost:   sessionCostPtr(row.ProviderRequests, row.HasOutputCost, row.OutputCost),
 			TotalCost:    sessionCostPtr(row.ProviderRequests, row.HasTotalCost, row.TotalCost),
+			BilledCost:   costPtr(row.HasBilledCost, row.BilledCost),
 		})
 	}
 	if err := cursor.Err(); err != nil {
@@ -897,6 +903,8 @@ func mongoSessionUsagePipelines(params SessionUsageParams) (bson.A, bson.A, int,
 			{Key: "has_input_cost", Value: mongoProviderCostPresenceCount("$input_cost")},
 			{Key: "has_output_cost", Value: mongoProviderCostPresenceCount("$output_cost")},
 			{Key: "has_total_cost", Value: mongoProviderCostPresenceCount("$total_cost")},
+			{Key: "billed_cost", Value: mongoCostSum("$billed_cost")},
+			{Key: "has_billed_cost", Value: mongoCostPresenceCount("$billed_cost")},
 			{Key: "latest", Value: bson.D{{Key: "$max", Value: "$timestamp"}}},
 		}}},
 	)
@@ -1098,6 +1106,8 @@ func (r *MongoDBReader) GetDailyUsage(ctx context.Context, params UsageQueryPara
 			{Key: "has_input_cost", Value: mongoCostPresenceCount("$input_cost")},
 			{Key: "has_output_cost", Value: mongoCostPresenceCount("$output_cost")},
 			{Key: "has_total_cost", Value: mongoCostPresenceCount("$total_cost")},
+			{Key: "billed_cost", Value: mongoCostSum("$billed_cost")},
+			{Key: "has_billed_cost", Value: mongoCostPresenceCount("$billed_cost")},
 		}}},
 		bson.D{{Key: "$sort", Value: bson.D{{Key: "_id", Value: 1}}}},
 	)
@@ -1118,6 +1128,7 @@ func (r *MongoDBReader) GetDailyUsage(ctx context.Context, params UsageQueryPara
 			InputCost:    costPtr(row.HasInputCost, row.InputCost),
 			OutputCost:   costPtr(row.HasOutputCost, row.OutputCost),
 			TotalCost:    costPtr(row.HasTotalCost, row.TotalCost),
+			BilledCost:   costPtr(row.HasBilledCost, row.BilledCost),
 		}
 	})
 	if err != nil {
@@ -1171,7 +1182,52 @@ func (r *MongoDBReader) GetDailyUsage(ctx context.Context, params UsageQueryPara
 	}
 	applyDailyInputSplit(result, splits)
 
+	if mode := billedCacheHitsMode(params.CacheMode); mode != "" {
+		hits, err := r.periodBilledCost(ctx, params, dateFormat, mode)
+		if err != nil {
+			return nil, err
+		}
+		result = addPeriodBilledCost(result, hits)
+	}
 	return result, nil
+}
+
+// periodBilledCost sums billed_cost per period over the documents params
+// matches in cacheMode, keyed like GetDailyUsage.
+func (r *MongoDBReader) periodBilledCost(ctx context.Context, params UsageQueryParams, dateFormat, cacheMode string) (map[string]*float64, error) {
+	params.CacheMode = cacheMode
+	matchFilters, err := mongoUsageMatchFilters(params)
+	if err != nil {
+		return nil, err
+	}
+	pipeline := bson.A{}
+	if len(matchFilters) > 0 {
+		pipeline = append(pipeline, bson.D{{Key: "$match", Value: matchFilters}})
+	}
+	pipeline = append(pipeline, bson.D{{Key: "$group", Value: bson.D{
+		{Key: "_id", Value: bson.D{{Key: "$dateToString", Value: bson.D{
+			{Key: "format", Value: dateFormat},
+			{Key: "date", Value: "$timestamp"},
+			{Key: "timezone", Value: usageTimeZone(params)},
+		}}}},
+		{Key: "billed_cost", Value: mongoCostSum("$billed_cost")},
+		{Key: "has_billed_cost", Value: mongoCostPresenceCount("$billed_cost")},
+	}}})
+
+	cursor, err := r.collection.Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, fmt.Errorf("failed to aggregate daily billed cost: %w", err)
+	}
+	defer cursor.Close(ctx)
+	rows, err := decodeGroupedUsageRows(ctx, cursor, "daily billed cost", func(row mongoGroupedUsageRow) mongoGroupedUsageRow { return row })
+	if err != nil {
+		return nil, err
+	}
+	billed := make(map[string]*float64, len(rows))
+	for _, row := range rows {
+		billed[row.Key] = costPtr(row.HasBilledCost, row.BilledCost)
+	}
+	return billed, nil
 }
 
 // GetCacheOverview returns cached-only aggregates for the admin dashboard.

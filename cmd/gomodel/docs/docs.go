@@ -13262,6 +13262,11 @@ const docTemplate = `{
         "usage.DailyUsage": {
             "type": "object",
             "properties": {
+                "billed_cost": {
+                    "description": "BilledCost includes the period's billed response-cache hits in every\ncache mode, so a period served only from the cache can appear with no\nrequests.",
+                    "type": "number",
+                    "x-nullable": true
+                },
                 "cache_write_input_tokens": {
                     "type": "integer"
                 },
@@ -13301,6 +13306,10 @@ const docTemplate = `{
         "usage.EndpointUsage": {
             "type": "object",
             "properties": {
+                "billed_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
                 "cache_write_input_tokens": {
                     "type": "integer"
                 },
@@ -13520,6 +13529,11 @@ const docTemplate = `{
         "usage.SessionUsage": {
             "type": "object",
             "properties": {
+                "billed_cost": {
+                    "description": "BilledCost includes the session's billed response-cache hits.",
+                    "type": "number",
+                    "x-nullable": true
+                },
                 "input_cost": {
                     "type": "number",
                     "x-nullable": true
