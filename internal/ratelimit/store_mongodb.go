@@ -16,6 +16,10 @@ import (
 type MongoDBStore struct {
 	rules    *mongo.Collection
 	counters *mongo.Collection
+	// legacyCounters is the pre-writer rate_limit_counters collection. It is
+	// only read by the import at construction and cleared by resets; see
+	// importLegacyCounters.
+	legacyCounters *mongo.Collection
 }
 
 func NewMongoDBStore(ctx context.Context, database *mongo.Database) (*MongoDBStore, error) {
@@ -23,8 +27,9 @@ func NewMongoDBStore(ctx context.Context, database *mongo.Database) (*MongoDBSto
 		return nil, fmt.Errorf("database is required")
 	}
 	store := &MongoDBStore{
-		rules:    database.Collection("rate_limits"),
-		counters: database.Collection("rate_limit_counters"),
+		rules:          database.Collection("rate_limits"),
+		counters:       database.Collection("rate_limit_window_snapshots"),
+		legacyCounters: database.Collection(legacyCountersTable),
 	}
 	if err := store.migratePreScopeDocuments(ctx); err != nil {
 		return nil, err
@@ -42,11 +47,15 @@ func NewMongoDBStore(ctx context.Context, database *mongo.Database) (*MongoDBSto
 			{Key: "subject", Value: 1},
 			{Key: "partition", Value: 1},
 			{Key: "period_seconds", Value: 1},
+			{Key: "writer", Value: 1},
 		},
 		Options: options.Index().SetUnique(true),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create rate limit counter indexes: %w", err)
+	}
+	if err := store.importLegacyCounters(ctx); err != nil {
+		return nil, err
 	}
 	return store, nil
 }
@@ -421,24 +430,38 @@ func counterIdentityFilter(snap WindowSnapshot) bson.D {
 		{Key: "subject", Value: snap.Subject},
 		{Key: "partition", Value: snap.Partition},
 		{Key: "period_seconds", Value: snap.PeriodSeconds},
+		{Key: "writer", Value: snap.Writer},
 	}
 }
 
+// DeleteCounter removes every writer's rows for the definition, so no other
+// replica's row brings a reset window back on the next start. The legacy
+// collection is cleared too: an older replica in a rolling upgrade may still
+// write there, and the next start would import it.
 func (s *MongoDBStore) DeleteCounter(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {
-	_, err := s.counters.DeleteMany(ctx, bson.D{
+	filter := bson.D{
 		{Key: "scope", Value: scope},
 		{Key: "subject", Value: subject},
 		{Key: "period_seconds", Value: periodSeconds},
-	})
-	if err != nil {
+	}
+	if err := s.deleteCounters(ctx, filter); err != nil {
 		return fmt.Errorf("delete rate limit counters %s %s/%d: %w", scope, subject, periodSeconds, err)
 	}
 	return nil
 }
 
 func (s *MongoDBStore) DeleteAllCounters(ctx context.Context) error {
-	if _, err := s.counters.DeleteMany(ctx, bson.D{}); err != nil {
+	if err := s.deleteCounters(ctx, bson.D{}); err != nil {
 		return fmt.Errorf("delete all rate limit counters: %w", err)
+	}
+	return nil
+}
+
+func (s *MongoDBStore) deleteCounters(ctx context.Context, filter bson.D) error {
+	for _, collection := range []*mongo.Collection{s.counters, s.legacyCounters} {
+		if _, err := collection.DeleteMany(ctx, filter); err != nil {
+			return err
+		}
 	}
 	return nil
 }

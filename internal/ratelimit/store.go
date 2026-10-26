@@ -15,13 +15,17 @@ type Store interface {
 	UpsertRules(ctx context.Context, rules []Rule) error
 	DeleteRule(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error
 	ReplaceConfigRules(ctx context.Context, rules []Rule) error
+	// LoadCounters returns every writer's rows; restore merges them per key.
 	LoadCounters(ctx context.Context) ([]WindowSnapshot, error)
-	// SaveCounters upserts the given snapshots and collects rows no writer has
-	// refreshed for two of their own periods — the same staleness bound a load
-	// applies, so it only ever drops rows that could no longer be restored.
+	// SaveCounters upserts the given snapshots, keyed by their Writer as well
+	// as their window, so writers never overwrite each other's rows. It also
+	// collects rows no writer has refreshed for two of their own periods — the
+	// same staleness bound a load applies, so it only ever drops rows that
+	// could no longer be restored.
 	// Nothing is deleted to make room for a write, so a crash mid-save costs at
 	// most the flush interval rather than a whole window.
 	SaveCounters(ctx context.Context, snapshots []WindowSnapshot) error
+	// DeleteCounter and DeleteAllCounters remove the rows of every writer.
 	DeleteCounter(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error
 	DeleteAllCounters(ctx context.Context) error
 	Close() error

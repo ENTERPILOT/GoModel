@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // ErrUnavailable indicates a rate limit service was used without an initialized store.
@@ -36,6 +38,11 @@ type Service struct {
 
 	quotaTemplates bool
 
+	// writer keys this generation's window snapshot rows, so replicas
+	// sharing a store never overwrite each other. Every Service draws a new
+	// one, so a restart or reload writes beside its predecessor's rows and
+	// restore merges them (see limiter.restore).
+	writer        string
 	flushInterval time.Duration
 	persistMu     sync.Mutex
 	lifeMu        sync.Mutex
@@ -52,6 +59,7 @@ func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Se
 		store:          store,
 		limiter:        newLimiter(),
 		quotaTemplates: true,
+		writer:         uuid.NewString(),
 	}
 	for _, option := range options {
 		if option != nil {

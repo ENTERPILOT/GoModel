@@ -4,12 +4,16 @@ import "time"
 
 // WindowSnapshot is one persisted request/token sliding window.
 // Partition is empty for a shared rule and the child path for a per-child
-// template (Rule.EffectiveSubject).
+// template (Rule.EffectiveSubject). Writer is the random ID of the process
+// that wrote the row, so replicas sharing a store keep separate rows instead
+// of overwriting each other's; rows imported from before writer IDs existed
+// carry an empty writer.
 type WindowSnapshot struct {
 	Scope               string `bson:"scope"`
 	Subject             string `bson:"subject"`
 	Partition           string `bson:"partition"`
 	PeriodSeconds       int64  `bson:"period_seconds"`
+	Writer              string `bson:"writer"`
 	RequestsWindowStart int64  `bson:"requests_window_start"`
 	RequestsCurrent     int64  `bson:"requests_current"`
 	RequestsPrevious    int64  `bson:"requests_previous"`
@@ -79,6 +83,23 @@ func (l *limiter) snapshot(rules []Rule) []WindowSnapshot {
 	return out
 }
 
+// restore loads persisted windows into the limiter. A key can have one row
+// per writer: every replica sharing the store writes its own, and a restarted
+// process comes back under a new writer ID next to the rows of its previous
+// run. Rows for the same key are merged per counter (requests and tokens
+// separately):
+//
+//  1. Each row is rolled forward to the window containing now, exactly as
+//     admission would roll it (windowCounter.advance): a row one period behind
+//     shifts current into previous, an older one drops to zero.
+//  2. The merged counter takes the maximum current and the maximum previous
+//     across those normalized rows.
+//
+// The maximum, not the sum, is deliberate. A single instance restarting gets
+// its own counts back: its last run started from the run before it, so its
+// rows dominate every older one field by field. With N replicas each serving
+// about 1/N of the traffic, the largest peer row approximates this replica's
+// own share, where a sum would charge it for all N.
 func (l *limiter) restore(snapshots []WindowSnapshot, rules []Rule, now time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -89,6 +110,8 @@ func (l *limiter) restore(snapshots []WindowSnapshot, rules []Rule, now time.Tim
 	}
 
 	nowUnix := now.Unix()
+	requests := make(map[ruleKey]*windowCounter)
+	tokens := make(map[ruleKey]*windowCounter)
 	for _, snap := range snapshots {
 		if snap.PeriodSeconds <= 0 {
 			continue
@@ -111,23 +134,42 @@ func (l *limiter) restore(snapshots []WindowSnapshot, rules []Rule, now time.Tim
 			partition:     snap.Partition,
 			periodSeconds: snap.PeriodSeconds,
 		}
-		if snap.RequestsWindowStart != 0 || snap.RequestsCurrent != 0 || snap.RequestsPrevious != 0 {
-			counter := &windowCounter{
-				windowStart: snap.RequestsWindowStart,
-				current:     snap.RequestsCurrent,
-				previous:    snap.RequestsPrevious,
-			}
-			l.requests[key] = counter
-			l.trackCounterExpiry(requestCounter, key, counter)
-		}
-		if snap.TokensWindowStart != 0 || snap.TokensCurrent != 0 || snap.TokensPrevious != 0 {
-			counter := &windowCounter{
-				windowStart: snap.TokensWindowStart,
-				current:     snap.TokensCurrent,
-				previous:    snap.TokensPrevious,
-			}
-			l.tokens[key] = counter
-			l.trackCounterExpiry(tokenCounter, key, counter)
-		}
+		mergeCounter(requests, key, windowCounter{
+			windowStart: snap.RequestsWindowStart,
+			current:     snap.RequestsCurrent,
+			previous:    snap.RequestsPrevious,
+		}, now)
+		mergeCounter(tokens, key, windowCounter{
+			windowStart: snap.TokensWindowStart,
+			current:     snap.TokensCurrent,
+			previous:    snap.TokensPrevious,
+		}, now)
 	}
+	for key, counter := range requests {
+		l.requests[key] = counter
+		l.trackCounterExpiry(requestCounter, key, counter)
+	}
+	for key, counter := range tokens {
+		l.tokens[key] = counter
+		l.trackCounterExpiry(tokenCounter, key, counter)
+	}
+}
+
+// mergeCounter folds one persisted row into the merged counter for key, as
+// described on restore. A row that holds nothing at now leaves no counter.
+func mergeCounter(merged map[ruleKey]*windowCounter, key ruleKey, row windowCounter, now time.Time) {
+	if row.current == 0 && row.previous == 0 {
+		return
+	}
+	row.advance(now, key.periodSeconds)
+	if row.current == 0 && row.previous == 0 {
+		return
+	}
+	existing := merged[key]
+	if existing == nil {
+		merged[key] = &row
+		return
+	}
+	existing.current = max(existing.current, row.current)
+	existing.previous = max(existing.previous, row.previous)
 }

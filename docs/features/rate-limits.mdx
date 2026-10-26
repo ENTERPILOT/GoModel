@@ -232,9 +232,15 @@ Details worth knowing:
 - Request and token windows live in memory for admission and are snapshotted
   to the configured store about once a second (and on shutdown), so they
   survive a restart and `gomodel --reload`. Concurrency gauges are not
-  persisted: after a bounce nothing is in flight. With N replicas the
-  effective limit is still about N times the configured value — use budgets
-  for durable, cross-instance control. Tune the snapshot interval with
+  persisted: after a bounce nothing is in flight. Counters are per replica:
+  each instance writes its own snapshot rows, so replicas sharing a database
+  never overwrite each other. On start an instance restores the largest
+  stored count for each window — its own from before the restart, or the
+  busiest peer's — never the sum. A reset takes effect on the replica that
+  serves it and deletes every replica's stored rows for that rule, so a
+  restart does not bring it back. With N replicas the effective limit is
+  still about N times the configured value — use budgets for durable,
+  cross-instance control. Tune the snapshot interval with
   `RATE_LIMITS_FLUSH_INTERVAL` (seconds; default `1`; `0` skips the periodic
   write but still loads on start and flushes on a clean shutdown).
 

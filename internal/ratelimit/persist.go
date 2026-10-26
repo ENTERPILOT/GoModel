@@ -123,7 +123,11 @@ func (s *Service) flush(ctx context.Context) {
 	}
 	s.persistMu.Lock()
 	defer s.persistMu.Unlock()
-	if err := s.store.SaveCounters(ctx, s.limiter.snapshot(s.Rules())); err != nil {
+	snapshots := s.limiter.snapshot(s.Rules())
+	for i := range snapshots {
+		snapshots[i].Writer = s.writer
+	}
+	if err := s.store.SaveCounters(ctx, snapshots); err != nil {
 		slog.Warn("rate limit counters: flush failed", "error", err)
 	}
 }

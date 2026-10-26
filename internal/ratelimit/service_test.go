@@ -76,7 +76,7 @@ func (m *memStore) LoadCounters(context.Context) ([]WindowSnapshot, error) {
 
 // snapshotIdentity is the primary key every store keys a window row by.
 func snapshotIdentity(s WindowSnapshot) string {
-	return s.Scope + "\x00" + s.Subject + "\x00" + s.Partition + "\x00" + strconv.FormatInt(s.PeriodSeconds, 10)
+	return s.Scope + "\x00" + s.Subject + "\x00" + s.Partition + "\x00" + strconv.FormatInt(s.PeriodSeconds, 10) + "\x00" + s.Writer
 }
 
 // SaveCounters mirrors the real stores: upsert by identity, then collect rows
