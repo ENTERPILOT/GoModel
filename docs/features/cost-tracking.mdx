@@ -137,7 +137,7 @@ The usage page filters every card, chart, and the request log by model, provider
 
 The **Breakdown** section pivots the filtered usage by two dimensions. For example, rows **User path**, columns **Period** and period **Monthly** show cost per month per user path. Pick the metric (cost, tokens, or requests); the top 10 rows and columns are kept and the rest fold into **Other**. **User path grouping** folds paths by their first segments, so `/team/alice/laptop` counts under `/team/alice`. Switch between the stacked chart and the table, and use **Download CSV** to export the table with its totals.
 
-Filters, the date range, and the breakdown settings are kept in the page URL, so a copied link opens the same view. The same data is available from [`GET /admin/usage/breakdown`](/advanced/admin-endpoints#get-adminusagebreakdown), and the filters from every usage endpoint (see [Multi-value filters](/advanced/admin-endpoints#multi-value-filters)).
+Filters, the date range, and the breakdown settings are kept in the page URL, so a copied link opens the same view. The same data is available from [`GET /admin/usage/breakdown`](/advanced/admin-endpoints#get-adminusagebreakdown), and the filters from every usage endpoint except `/admin/usage/throughput` (see [Multi-value filters](/advanced/admin-endpoints#multi-value-filters)).
 
 ## Recalculate stored costs
 

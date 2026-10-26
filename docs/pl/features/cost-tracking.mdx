@@ -137,7 +137,7 @@ Strona użycia filtruje każdą kartę, wykres i log requestów według modelu, 
 
 Sekcja **Zestawienie** zestawia przefiltrowane użycie według dwóch wymiarów. Na przykład wiersze **Ścieżka użytkownika**, kolumny **Okres** i okres **Miesięcznie** pokazują koszt miesięcznie dla każdej ścieżki. Wybierz miarę (koszt, tokeny lub requesty); zostaje 10 największych wierszy i kolumn, a reszta trafia do **Pozostałe**. **Grupowanie ścieżek** łączy ścieżki po pierwszych segmentach, więc `/team/alice/laptop` liczy się jako `/team/alice`. Przełączaj między wykresem skumulowanym a tabelą, a przyciskiem **Pobierz CSV** wyeksportuj tabelę z sumami.
 
-Filtry, zakres dat i ustawienia zestawienia są zapisane w adresie strony, więc skopiowany link otwiera ten sam widok. Te same dane zwraca [`GET /admin/usage/breakdown`](/pl/advanced/admin-endpoints#get-adminusagebreakdown), a filtry działają na każdym endpoincie użycia (zobacz [Filtry wielowartościowe](/pl/advanced/admin-endpoints#filtry-wielowartościowe)).
+Filtry, zakres dat i ustawienia zestawienia są zapisane w adresie strony, więc skopiowany link otwiera ten sam widok. Te same dane zwraca [`GET /admin/usage/breakdown`](/pl/advanced/admin-endpoints#get-adminusagebreakdown), a filtry działają na każdym endpoincie użycia poza `/admin/usage/throughput` (zobacz [Filtry wielowartościowe](/pl/advanced/admin-endpoints#filtry-wielowartościowe)).
 
 ## Przeliczanie zapisanych kosztów
 
