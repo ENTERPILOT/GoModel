@@ -363,6 +363,16 @@ function applyAudioTranscriptionTextSchema() {
   textResponse.schema = { type: "string" };
 }
 
+function applyUsageInvoiceCSVSchema() {
+  // swag emits one schema across every produced content type, so the CSV
+  // invoice is generated as the JSON Invoice object. The CSV body is text rows.
+  const csvResponse = spec.paths?.["/admin/usage/invoice"]?.get?.responses?.["200"]?.content?.["text/csv"];
+  if (!csvResponse) {
+    throw new Error("missing OpenAPI text/csv response: GET /admin/usage/invoice 200");
+  }
+  csvResponse.schema = { type: "string" };
+}
+
 function applyImageEditMultiImageSchema() {
   // swag models every formData file as a single binary. The repeatable
   // image[] field carries several source images, and a request may use it
@@ -566,6 +576,7 @@ applyAnthropicMessageSchemas();
 applyResponsesReplayStateSchema();
 applyAnthropicMessagesStreamSchema();
 applyAudioTranscriptionTextSchema();
+applyUsageInvoiceCSVSchema();
 applyRetrieveModelDialects();
 applyImageEditMultiImageSchema();
 ensureBearerAuthSecurityScheme();

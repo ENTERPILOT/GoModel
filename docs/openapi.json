@@ -4148,7 +4148,7 @@
             "content": {
               "text/csv": {
                 "schema": {
-                  "$ref": "#/components/schemas/usage.Invoice"
+                  "type": "string"
                 }
               },
               "application/json": {
