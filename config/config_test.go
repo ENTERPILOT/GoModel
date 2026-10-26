@@ -501,6 +501,43 @@ budgets:
 	})
 }
 
+func TestLoadBudgetYAMLCostBasis(t *testing.T) {
+	tests := []struct {
+		name    string
+		basis   string
+		want    string
+		wantErr string
+	}{
+		{name: "default", basis: "", want: ""},
+		{name: "billed", basis: "Billed", want: "billed"},
+		{name: "provider", basis: "provider", want: "provider"},
+		{name: "unknown", basis: "gross", wantErr: "budgets.labels[0].limits[0].cost_basis must be one of provider, billed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllConfigEnvVars(t)
+			withTempDir(t, func(dir string) {
+				writeConfigYAML(t, dir, `
+budgets:
+  labels:
+    - label: acme
+      limits:
+        - period: monthly
+          amount: 100
+          cost_basis: "`+tt.basis+`"
+`)
+				result, err := Load()
+				if tt.wantErr != "" {
+					require.ErrorContains(t, err, tt.wantErr)
+					return
+				}
+				require.NoError(t, err)
+				assert.Equal(t, tt.want, result.Config.Budgets.Labels[0].Limits[0].CostBasis)
+			})
+		})
+	}
+}
+
 func TestLoadBudgetEnvDisablesBudgetsWhenUsageTrackingDisabled(t *testing.T) {
 	clearAllConfigEnvVars(t)
 

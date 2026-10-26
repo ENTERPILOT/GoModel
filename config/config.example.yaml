@@ -306,6 +306,7 @@ budgets:
       limits:
         - period: "monthly"
           amount: 500.00
+          cost_basis: "provider" # GoModel Pro: "billed" limits billed cost (needs pricing.markups_enabled)
   providers:
     # Caps one provider instance's spend across every user path and label;
     # failover skips a provider whose budget is spent.

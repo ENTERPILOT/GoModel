@@ -39,7 +39,10 @@ func (r *Result) Close() error {
 	return r.closeErr
 }
 
-func New(ctx context.Context, cfg *config.Config, shared storage.Storage, quotaTemplatesEnabled bool) (*Result, error) {
+// New builds the budget service. quotaTemplatesEnabled and billedBudgetsEnabled
+// report the ext capabilities; budgets on billed cost also need
+// pricing.markups_enabled, which New reads from cfg.
+func New(ctx context.Context, cfg *config.Config, shared storage.Storage, quotaTemplatesEnabled, billedBudgetsEnabled bool) (*Result, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
@@ -49,15 +52,18 @@ func New(ctx context.Context, cfg *config.Config, shared storage.Storage, quotaT
 	if shared == nil {
 		return nil, fmt.Errorf("shared storage is required")
 	}
-	return newResult(ctx, cfg, shared, quotaTemplatesEnabled)
+	return newResult(ctx, cfg, shared, quotaTemplatesEnabled, billedBudgetsEnabled)
 }
 
-func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storage, quotaTemplatesEnabled bool) (*Result, error) {
+func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storage, quotaTemplatesEnabled, billedBudgetsEnabled bool) (*Result, error) {
 	store, err := createStore(ctx, storeConn)
 	if err != nil {
 		return nil, err
 	}
-	service, err := NewService(ctx, store, WithQuotaTemplates(quotaTemplatesEnabled))
+	service, err := NewService(ctx, store,
+		WithQuotaTemplates(quotaTemplatesEnabled),
+		WithBilledBudgets(billedBudgetsEnabled && cfg.Pricing.MarkupsEnabled),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -120,10 +126,15 @@ func seedBudgets(scope Scope, rawSubject string, perChild bool, limits []config.
 			}
 			seconds = parsed
 		}
+		costBasis, err := NormalizeCostBasis(limit.CostBasis)
+		if err != nil {
+			return nil, fmt.Errorf("invalid budget cost basis for %s %q limit %d: %w", scope, subject, limitIdx, err)
+		}
 		budgets = append(budgets, Budget{
 			Scope:         scope,
 			Subject:       subject,
 			PerChild:      perChild || limit.PerChild,
+			CostBasis:     costBasis,
 			PeriodSeconds: seconds,
 			Amount:        limit.Amount,
 			Source:        SourceConfig,

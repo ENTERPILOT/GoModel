@@ -17,6 +17,9 @@ const (
 	// CapabilityQuotaTemplates enables per-child user-path templates for
 	// budgets and rate limits.
 	CapabilityQuotaTemplates Capability = "quota_templates"
+	// CapabilityBilledBudgets enables budgets enforced on billed cost (provider
+	// cost plus markup) instead of provider cost.
+	CapabilityBilledBudgets Capability = "billed_budgets"
 )
 
 // Registry collects extensions to be consumed by the gateway at startup.

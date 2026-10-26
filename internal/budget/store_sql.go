@@ -34,6 +34,7 @@ var sqlBudgetsSchema = `CREATE TABLE IF NOT EXISTS budgets (
 		scope TEXT NOT NULL DEFAULT 'user_path',
 		subject TEXT NOT NULL,
 		per_child ` + sqlx.TypeBool + ` NOT NULL DEFAULT FALSE,
+		cost_basis TEXT NOT NULL DEFAULT 'provider',
 		period_seconds ` + sqlx.TypeInt64 + ` NOT NULL,
 		amount ` + sqlx.TypeFloat + ` NOT NULL,
 		source TEXT NOT NULL DEFAULT '',
@@ -58,10 +59,11 @@ var sqlRest = []string{
 // a column is only overwritten when the incoming or stored row is manual, or
 // when both are config-sourced.
 const upsertBudgetSQL = `
-	INSERT INTO budgets (scope, subject, per_child, period_seconds, amount, source, last_reset_at, created_at, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO budgets (scope, subject, per_child, cost_basis, period_seconds, amount, source, last_reset_at, created_at, updated_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(scope, subject, period_seconds) DO UPDATE SET
 		per_child = CASE WHEN excluded.source = ? OR budgets.source = ? THEN excluded.per_child ELSE budgets.per_child END,
+		cost_basis = CASE WHEN excluded.source = ? OR budgets.source = ? THEN excluded.cost_basis ELSE budgets.cost_basis END,
 		amount = CASE WHEN excluded.source = ? OR budgets.source = ? THEN excluded.amount ELSE budgets.amount END,
 		source = CASE WHEN excluded.source = ? OR budgets.source = ? THEN excluded.source ELSE budgets.source END,
 		updated_at = CASE WHEN excluded.source = ? OR budgets.source = ? THEN excluded.updated_at ELSE budgets.updated_at END
@@ -80,6 +82,8 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	}
 	if err := sqlx.AddColumns(ctx, db,
 		`ALTER TABLE budgets ADD COLUMN per_child `+sqlx.TypeBool+` NOT NULL DEFAULT FALSE`,
+		// Budgets stored before cost bases existed keep limiting provider cost.
+		`ALTER TABLE budgets ADD COLUMN cost_basis TEXT NOT NULL DEFAULT 'provider'`,
 	); err != nil {
 		return nil, fmt.Errorf("failed to migrate budgets table: %w", err)
 	}
@@ -91,7 +95,7 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 
 func (s *SQLStore) ListBudgets(ctx context.Context) ([]Budget, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT scope, subject, per_child, period_seconds, amount, source, last_reset_at, created_at, updated_at
+		SELECT scope, subject, per_child, cost_basis, period_seconds, amount, source, last_reset_at, created_at, updated_at
 		FROM budgets
 		ORDER BY scope ASC, subject ASC, period_seconds ASC
 	`)
@@ -244,7 +248,7 @@ func (s *SQLStore) ResetAllBudgets(ctx context.Context, at time.Time) error {
 // of older SQLite builds.
 const spendChunkSize = 64
 
-// SumSpend totals uncached spend for every window with one scan per chunk.
+// SumSpend totals spend for every window with one scan per chunk.
 //
 // A budget check matches several budgets at once — a user-path subtree plus a
 // budget per request label — and running one statement each would scan the
@@ -289,14 +293,13 @@ func (s *SQLStore) sumSpendChunk(ctx context.Context, windows []SpendWindow) ([]
 			return nil, err
 		}
 		columns = append(columns, "SUM(CASE WHEN "+timeExpr+" >= "+timeBound+
-			" AND "+timeExpr+" < "+timeBound+" AND "+match+" THEN total_cost END)")
+			" AND "+timeExpr+" < "+timeBound+" AND "+match+" THEN "+spendCostExpr(window)+" END)")
 		args = append(args, timeArg(window.Start), timeArg(window.End))
 		args = append(args, matchArgs...)
 	}
 	query := `SELECT ` + strings.Join(columns, ", ") + ` FROM ` + table +
 		` WHERE ` + timeExpr + ` >= ` + timeBound +
-		` AND ` + timeExpr + ` < ` + timeBound +
-		` AND (cache_type IS NULL OR cache_type = '')`
+		` AND ` + timeExpr + ` < ` + timeBound
 	minStart, maxEnd := spendBounds(windows)
 	args = append(args, timeArg(minStart), timeArg(maxEnd))
 
@@ -318,6 +321,21 @@ func (s *SQLStore) sumSpendChunk(ctx context.Context, windows []SpendWindow) ([]
 		}
 	}
 	return spends, nil
+}
+
+// sqlUncachedExpr matches usage rows not served from the response cache.
+const sqlUncachedExpr = `(cache_type IS NULL OR cache_type = '')`
+
+// spendCostExpr renders the cost one usage row adds to a window, NULL when it
+// adds nothing. A provider window sums the provider cost of uncached rows. A
+// billed window sums billed cost, response-cache hits included since they are
+// billed too; an uncached row without a billed cost (written before markups
+// were enabled) counts at its provider cost so the budget never under-counts.
+func spendCostExpr(window SpendWindow) string {
+	if window.billed() {
+		return "CASE WHEN " + sqlUncachedExpr + " THEN COALESCE(billed_cost, total_cost) ELSE billed_cost END"
+	}
+	return "CASE WHEN " + sqlUncachedExpr + " THEN total_cost END"
 }
 
 // spendSubjectMatch renders the usage-row predicate for one budget subject.
@@ -368,12 +386,14 @@ func upsertBudgets(ctx context.Context, q sqlx.Querier, budgets []Budget) error 
 			budget.Scope,
 			budget.Subject,
 			budget.PerChild,
+			budget.CostBasis,
 			budget.PeriodSeconds,
 			budget.Amount,
 			budget.Source,
 			sqlutil.UnixOrNil(budget.LastResetAt),
 			budget.CreatedAt.Unix(),
 			budget.UpdatedAt.Unix(),
+			SourceManual, SourceConfig,
 			SourceManual, SourceConfig,
 			SourceManual, SourceConfig,
 			SourceManual, SourceConfig,
@@ -394,6 +414,7 @@ func scanSQLBudget(scanner sqlx.Row) (Budget, error) {
 		&budget.Scope,
 		&budget.Subject,
 		&budget.PerChild,
+		&budget.CostBasis,
 		&budget.PeriodSeconds,
 		&budget.Amount,
 		&budget.Source,

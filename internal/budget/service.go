@@ -17,6 +17,11 @@ var ErrUnavailable = errors.New("budget service is unavailable")
 // while the deployment does not have the quota-templates capability.
 var ErrQuotaTemplatesUnavailable = errors.New("per-child quota templates are not enabled")
 
+// ErrBilledBudgetsUnavailable indicates that a budget on billed cost was found
+// while the deployment lacks the billed-budgets capability or has markups
+// disabled.
+var ErrBilledBudgetsUnavailable = errors.New("budgets on billed cost require a GoModel Pro license with the billing entitlement and pricing.markups_enabled")
+
 // ServiceOption configures a budget service.
 type ServiceOption func(*Service)
 
@@ -24,6 +29,13 @@ type ServiceOption func(*Service)
 func WithQuotaTemplates(enabled bool) ServiceOption {
 	return func(service *Service) {
 		service.quotaTemplates = enabled
+	}
+}
+
+// WithBilledBudgets controls whether budgets on billed cost are accepted.
+func WithBilledBudgets(enabled bool) ServiceOption {
+	return func(service *Service) {
+		service.billedBudgets = enabled
 	}
 }
 
@@ -35,6 +47,7 @@ type Service struct {
 	settings Settings
 
 	quotaTemplates bool
+	billedBudgets  bool
 }
 
 func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Service, error) {
@@ -45,6 +58,7 @@ func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Se
 		store:          store,
 		settings:       DefaultSettings(),
 		quotaTemplates: true,
+		billedBudgets:  true,
 	}
 	for _, option := range options {
 		if option != nil {
@@ -65,7 +79,7 @@ func (s *Service) Refresh(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := s.validateQuotaTemplates(budgets); err != nil {
+	if err := s.validateCapabilities(budgets); err != nil {
 		return err
 	}
 	settings, err := s.store.GetSettings(ctx)
@@ -106,7 +120,7 @@ func (s *Service) UpsertBudgets(ctx context.Context, budgets []Budget) error {
 	if s == nil || s.store == nil {
 		return ErrUnavailable
 	}
-	if err := s.validateQuotaTemplates(budgets); err != nil {
+	if err := s.validateCapabilities(budgets); err != nil {
 		return err
 	}
 	if err := s.store.UpsertBudgets(ctx, budgets); err != nil {
@@ -133,7 +147,7 @@ func (s *Service) ReplaceConfigBudgets(ctx context.Context, budgets []Budget) er
 	if s == nil || s.store == nil {
 		return ErrUnavailable
 	}
-	if err := s.validateQuotaTemplates(budgets); err != nil {
+	if err := s.validateCapabilities(budgets); err != nil {
 		return err
 	}
 	if err := s.store.ReplaceConfigBudgets(ctx, budgets); err != nil {
@@ -142,13 +156,18 @@ func (s *Service) ReplaceConfigBudgets(ctx context.Context, budgets []Budget) er
 	return s.Refresh(ctx)
 }
 
-func (s *Service) validateQuotaTemplates(budgets []Budget) error {
-	if s == nil || s.quotaTemplates {
+// validateCapabilities refuses budgets that need a capability the deployment
+// does not have.
+func (s *Service) validateCapabilities(budgets []Budget) error {
+	if s == nil {
 		return nil
 	}
 	for _, item := range budgets {
-		if item.PerChild {
+		if item.PerChild && !s.quotaTemplates {
 			return fmt.Errorf("%w: budget for user path %q", ErrQuotaTemplatesUnavailable, item.Subject)
+		}
+		if item.CostBasis == CostBasisBilled && !s.billedBudgets {
+			return fmt.Errorf("%w: budget for %s", ErrBilledBudgetsUnavailable, item.SubjectLabel())
 		}
 	}
 	return nil
@@ -366,10 +385,11 @@ func (s *Service) evaluate(ctx context.Context, budgets []Budget, now time.Time,
 			continue
 		}
 		windows = append(windows, SpendWindow{
-			Scope:   budget.Scope,
-			Subject: budget.evaluationSubject(),
-			Start:   start,
-			End:     now,
+			Scope:     budget.Scope,
+			Subject:   budget.evaluationSubject(),
+			CostBasis: budget.CostBasis,
+			Start:     start,
+			End:       now,
 		})
 		windowIndexes = append(windowIndexes, i)
 	}
