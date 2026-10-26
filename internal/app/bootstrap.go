@@ -33,10 +33,11 @@ type bootstrap struct {
 	app    *App
 
 	// Decided in the prologue, read by several phases.
-	quotaTemplatesEnabled bool
-	billedBudgetsEnabled  bool
-	routeSelector         ext.RouteSelector
-	requestHealth         *health.Tracker
+	quotaTemplatesEnabled  bool
+	customerMarkupsEnabled bool
+	billedBudgetsEnabled   bool
+	routeSelector          ext.RouteSelector
+	requestHealth          *health.Tracker
 
 	// Produced by the catalog phases for the server phases.
 	managedProviderNames []string
@@ -105,12 +106,13 @@ func newBootstrap(ctx context.Context, cfg Config) *bootstrap {
 	})
 
 	return &bootstrap{
-		ctx:                   ctx,
-		cfg:                   cfg,
-		appCfg:                appCfg,
-		app:                   app,
-		quotaTemplatesEnabled: cfg.Extensions != nil && cfg.Extensions.HasCapability(ext.CapabilityQuotaTemplates),
-		billedBudgetsEnabled:  cfg.Extensions != nil && cfg.Extensions.HasCapability(ext.CapabilityBilledBudgets),
+		ctx:                    ctx,
+		cfg:                    cfg,
+		appCfg:                 appCfg,
+		app:                    app,
+		quotaTemplatesEnabled:  cfg.Extensions != nil && cfg.Extensions.HasCapability(ext.CapabilityQuotaTemplates),
+		customerMarkupsEnabled: cfg.Extensions != nil && cfg.Extensions.HasCapability(ext.CapabilityCustomerMarkups),
+		billedBudgetsEnabled:   cfg.Extensions != nil && cfg.Extensions.HasCapability(ext.CapabilityBilledBudgets),
 	}
 }
 
