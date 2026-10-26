@@ -6,7 +6,7 @@ keywords: ["DeepSeek", "Reasoning-Aufwand", "reasoning effort", "Provider-Einric
 ---
 
 DeepSeek bietet keine native Responses API, daher übersetzt GoModel `/v1/responses` automatisch in
-`/chat/completions`. Außerdem bildet GoModel Reasoning-Stufen im OpenAI-Stil auf die beiden Stufen
+`/chat/completions`. Außerdem bildet GoModel Reasoning-Stufen im OpenAI-Stil auf die Stufen
 ab, die DeepSeek akzeptiert.
 
 ## Konfiguration
@@ -34,7 +34,7 @@ providers:
 ## Abbildung des Reasoning-Aufwands
 
 Die Reasoning-Modelle von DeepSeek V4 akzeptieren `reasoning_effort` als String auf oberster Ebene
-mit zwei zulässigen Stufen: `high` und `max`.
+mit zwei Reasoning-Stufen, `high` und `max`, sowie `none`, das Reasoning abschaltet.
 
 | Client sendet | DeepSeek erhält |
 | ------------ | ----------------- |

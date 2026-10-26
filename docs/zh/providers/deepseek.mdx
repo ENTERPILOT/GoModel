@@ -6,7 +6,7 @@ keywords: ["DeepSeek", "推理强度", "提供商配置", "reasoning effort", "p
 ---
 
 DeepSeek 不提供原生的 Responses API，因此 GoModel 会自动将
-`/v1/responses` 转换为 `/chat/completions`。它还会将 OpenAI 风格的推理级别重新映射为 DeepSeek 接受的两个级别。
+`/v1/responses` 转换为 `/chat/completions`。它还会将 OpenAI 风格的推理级别重新映射为 DeepSeek 接受的级别。
 
 ## 配置
 
@@ -31,7 +31,7 @@ providers:
 
 ## 推理强度映射
 
-DeepSeek V4 推理模型接受顶层字符串字段 `reasoning_effort`，允许的级别有两个：`high` 和 `max`。
+DeepSeek V4 推理模型接受顶层字符串字段 `reasoning_effort`，有两个推理级别 `high` 和 `max`，以及用于关闭推理的 `none`。
 
 | 客户端发送 | DeepSeek 收到 |
 | ------------ | ----------------- |

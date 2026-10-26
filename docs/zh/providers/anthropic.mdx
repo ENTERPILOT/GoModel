@@ -49,7 +49,7 @@ ANTHROPIC_API_KEY=sk-ant-oat01-...
 
 ## 推理强度映射
 
-GoModel 既接受 OpenAI 格式的 `"reasoning": {"effort": "..."}` 对象，也接受 Chat Completions 的字符串形式 `"reasoning_effort": "..."`（两者同时存在时，以非空的 `reasoning.effort` 为准；空对象会回退到字符串形式），并将其转换为 Claude 的原生控制。可接受的五个级别是 `low`、`medium`、`high`、`xhigh` 和 `max`；匹配时不区分大小写。`none` 不启用思考；其他任何值都会被降级为 `low` 并记录日志。转换方式取决于模型是否支持**自适应思考**。
+GoModel 既接受 OpenAI 格式的 `"reasoning": {"effort": "..."}` 对象，也接受 Chat Completions 的字符串形式 `"reasoning_effort": "..."`（两者同时存在时，以非空的 `reasoning.effort` 为准；空对象会回退到字符串形式），并将其转换为 Claude 的原生控制。可接受的五个级别是 `low`、`medium`、`high`、`xhigh` 和 `max`；匹配时不区分大小写。`none` 会在模型允许时关闭思考（见下文）；其他任何值都会被降级为 `low` 并记录日志。转换方式取决于模型是否支持**自适应思考**。
 
 | 模型代际 | 思考配置 | effort 去向 |
 | ---------------- | --------------- | ------------------ |
@@ -73,8 +73,8 @@ GoModel 既接受 OpenAI 格式的 `"reasoning": {"effort": "..."}` 对象，也
 <Note>
   省略 `reasoning` 即可让思考保持模型的默认行为。只有当您传入 `reasoning.effort`（或
   `reasoning_effort`）时，GoModel 才会设置 `thinking: {type: "adaptive"}`。不传入时，
-  Opus 4.6 到 4.8 以及 Sonnet 4.6/5 不会启用扩展思考，而
-  Fable 5/5.1、Mythos 5/5.1 和 Opus 5 会自行进行自适应思考（参见下方关于始终开启的说明）。Effort 是一个独立的控制项，无论是否启用思考，它都控制整体 Token 支出（文本和工具调用）；未设置时，Anthropic 将其默认为 `high`。它是关于深度和详略程度的行为信号，而不是硬性预算——实际用量因请求而异，并受 `max_tokens` 限制。
+  Opus 4.6 到 4.8、Sonnet 4.6 以及 Sonnet 5.5 不会启用扩展思考，而
+  Opus 5、Sonnet 5 和 Haiku 5.5 会自行思考。发送 `reasoning.effort: "none"` 即可关闭：GoModel 会向这三个模型发送 `thinking: {type: "disabled"}`。Fable 5/5.1、Mythos 5/5.1 和 Opus 5.5 始终会思考（参见下方关于始终开启的说明）。Effort 是一个独立的控制项，无论是否启用思考，它都控制整体 Token 支出（文本和工具调用）；未设置时，Anthropic 将其默认为 `high`。它是关于深度和详略程度的行为信号，而不是硬性预算——实际用量因请求而异，并受 `max_tokens` 限制。
 </Note>
 
 <Note>
@@ -84,7 +84,7 @@ GoModel 既接受 OpenAI 格式的 `"reasoning": {"effort": "..."}` 对象，也
 </Note>
 
 <Note>
-  在 Fable 5/5.1、Mythos 5/5.1 和 Opus 5 上，无论您是否发送 `reasoning`，思考都始终开启；`reasoning.effort` 只调整其深度。思考所消耗的 Token 在 Chat
+  在 Fable 5/5.1、Mythos 5/5.1 和 Opus 5.5 上，无论您是否发送 `reasoning`，思考都始终开启，`none` 也无法关闭；`reasoning.effort` 只调整其深度。思考所消耗的 Token 在 Chat
   Completions 响应中以 `usage.completion_reasoning_tokens` 报告。推理文本本身不会返回，只返回 Token 数量。
 </Note>
 

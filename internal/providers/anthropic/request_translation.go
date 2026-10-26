@@ -49,9 +49,12 @@ func resolveDefaultMaxTokens() int {
 // applyReasoning configures thinking and effort on an anthropicRequest.
 // Adaptive-thinking models (Opus 4.6+) use adaptive thinking with
 // output_config.effort. Older models use manual thinking with budget_tokens.
-// Effort "none" leaves thinking off.
+// Effort "none" turns thinking off where the model allows it.
 func applyReasoning(req *anthropicRequest, model, effort string) {
 	if effort == "none" {
+		if thinksByDefault(model) {
+			req.Thinking = &anthropicThinking{Type: "disabled"}
+		}
 		return
 	}
 	if isAdaptiveThinkingModel(model) {

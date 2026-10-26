@@ -64,7 +64,7 @@ a także formę stringową z Chat Completions `"reasoning_effort": "..."` (niepu
 `reasoning.effort` wygrywa, gdy obecne są oba; pusty obiekt powoduje użycie
 formy stringowej) i tłumaczy je na natywne kontrolki Claude. Pięć
 akceptowanych poziomów to `low`, `medium`, `high`, `xhigh` i `max`; wartości
-są dopasowywane bez rozróżniania wielkości liter. `none` pozostawia thinking wyłączony; każda inna wartość jest obniżana do `low` i
+są dopasowywane bez rozróżniania wielkości liter. `none` wyłącza thinking tam, gdzie model na to pozwala (zobacz niżej); każda inna wartość jest obniżana do `low` i
 logowana. Tłumaczenie
 zależy od tego, czy model obsługuje **adaptive thinking**.
 
@@ -96,9 +96,11 @@ więc w modelach legacy są ograniczane do budżetu `high`, zamiast zawyżać
   Pomiń `reasoning`, aby pozostawić thinking na domyślnym ustawieniu modelu. GoModel ustawia
   `thinking: {type: "adaptive"}` tylko wtedy, gdy przekażesz `reasoning.effort` (lub
   `reasoning_effort`). Bez tego
-  Opus 4.6 do 4.8 i Sonnet 4.6/5 nie włączają extended thinking, podczas gdy
-  Fable 5/5.1, Mythos 5/5.1 i Opus 5 myślą adaptacyjnie same z siebie (zobacz
-  uwagę o trybie zawsze włączonym poniżej). Effort to osobna
+  Opus 4.6 do 4.8, Sonnet 4.6 i Sonnet 5.5 nie włączają extended thinking, podczas gdy
+  Opus 5, Sonnet 5 i Haiku 5.5 myślą same z siebie. Wyślij
+  `reasoning.effort: "none"`, aby to wyłączyć: GoModel wysyła tym trzem modelom
+  `thinking: {type: "disabled"}`. Fable 5/5.1, Mythos 5/5.1 i Opus 5.5 myślą zawsze
+  (zobacz uwagę o trybie zawsze włączonym poniżej). Effort to osobna
   kontrolka, która reguluje ogólne zużycie tokenów (tekst i wywołania narzędzi) niezależnie od tego, czy
   thinking jest włączone, a Anthropic domyślnie ustawia go na `high`, gdy nie jest podany. To
   sygnał behawioralny dotyczący głębi i rozwlekłości, a nie twardy budżet – faktyczne użycie
@@ -115,8 +117,8 @@ więc w modelach legacy są ograniczane do budżetu `high`, zamiast zawyżać
 </Note>
 
 <Note>
-  W Fable 5/5.1, Mythos 5/5.1 i Opus 5 thinking jest zawsze włączone, niezależnie od tego,
-  czy wysyłasz `reasoning`; `reasoning.effort` reguluje jedynie jego głębię. Zużyte
+  W Fable 5/5.1, Mythos 5/5.1 i Opus 5.5 thinking jest zawsze włączone, niezależnie od tego,
+  czy wysyłasz `reasoning`, a `none` nie może go wyłączyć; `reasoning.effort` reguluje jedynie jego głębię. Zużyte
   przez nie tokeny są raportowane jako `usage.completion_reasoning_tokens` w odpowiedziach
   Chat Completions. Sam tekst reasoning nie jest zwracany; zwracana jest tylko
   liczba tokenów.

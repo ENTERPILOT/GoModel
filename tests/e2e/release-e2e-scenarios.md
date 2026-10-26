@@ -8639,6 +8639,7 @@ assert_http_status 403 "$CODE" "$F"
 jq -e '.error.code == "invoice_export_not_entitled"' "$F" >/dev/null
 
 LABEL="QaBilled-$QA_SUFFIX"
+trap 'curl -sS -o /dev/null -X DELETE "$BASE_URL/admin/budgets" -H "Content-Type: application/json" -d "{\"scope\":\"label\",\"subject\":\"$LABEL\",\"budget_key\":{\"period\":\"daily\"}}"' EXIT
 CODE=$(curl -sS -o "$F" -w '%{http_code}' -X PUT "$BASE_URL/admin/budgets" -H 'Content-Type: application/json' \
   -d "{\"scope\":\"label\",\"subject\":\"$LABEL\",\"cost_basis\":\"billed\",\"budget_key\":{\"period\":\"daily\"},\"amount\":5}")
 assert_http_status 403 "$CODE" "$F"
@@ -8719,6 +8720,13 @@ tests; this scenario covers the admin API on all three storage backends.
 ```bash
 SOURCE="qa-effort-$QA_SUFFIX"
 F="$QA_RUN_DIR/s268.json"
+cleanup_s268() {
+  for base in "$BASE_URL" "$PG_BASE_URL" "$MONGO_BASE_URL"; do
+    curl -sS -o /dev/null -X DELETE "$base/admin/virtual-models" -H 'Content-Type: application/json' \
+      -d "{\"source\":\"$SOURCE\"}" || true
+  done
+}
+trap cleanup_s268 EXIT
 for base in "$BASE_URL" "$PG_BASE_URL" "$MONGO_BASE_URL"; do
   CODE=$(curl -sS -o "$F" -w '%{http_code}' -X PUT "$base/admin/virtual-models" -H 'Content-Type: application/json' \
     -d "{\"source\":\"$SOURCE\",\"target_model\":\"openai/gpt-4.1-mini\",\"reasoning_effort\":\"extreme\"}")
@@ -8743,9 +8751,10 @@ done
 
 ### S269 Effort `none` turns reasoning off on DeepSeek and Anthropic
 
-DeepSeek reasons unless it receives `reasoning_effort: "none"`, and Anthropic
-must get no `thinking` block for `none`. A `$QA_SUFFIX`-scoped redirect that
-forces `none` must also drop the thinking a `/v1/messages` client asks for.
+DeepSeek reasons unless it receives `reasoning_effort: "none"`. Claude Haiku
+5.5 thinks unless it receives `thinking: {type: "disabled"}`, which GoModel
+sends for `none`. A `$QA_SUFFIX`-scoped redirect that forces `none` must also
+drop the thinking a `/v1/messages` client asks for.
 
 ```bash
 F="$QA_RUN_DIR/s269.json"
@@ -8757,7 +8766,7 @@ jq -e '(.usage.completion_tokens_details.reasoning_tokens // 0) == 0 and ((.choi
 SOURCE="qa-no-thinking-$QA_SUFFIX"
 trap 'curl -sS -o /dev/null -X DELETE "$BASE_URL/admin/virtual-models" -H "Content-Type: application/json" -d "{\"source\":\"$SOURCE\"}"' EXIT
 curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
-  -d "{\"source\":\"$SOURCE\",\"target_model\":\"anthropic/claude-haiku-4-5-20251001\",\"reasoning_effort\":\"none\"}" >/dev/null
+  -d "{\"source\":\"$SOURCE\",\"target_model\":\"anthropic/claude-haiku-5-5\",\"reasoning_effort\":\"none\"}" >/dev/null
 curl -fsS "$BASE_URL/v1/messages" -H 'Content-Type: application/json' -H 'anthropic-version: 2023-06-01' \
   -d "{\"model\":\"$SOURCE\",\"max_tokens\":3000,\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":2000},\"messages\":[{\"role\":\"user\",\"content\":\"What is 17*23? Think it through. $QA_SUFFIX\"}]}" > "$F"
 jq -c '[.content[].type]' "$F"

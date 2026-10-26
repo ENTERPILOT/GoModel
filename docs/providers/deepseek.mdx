@@ -7,7 +7,7 @@ keywords: ["DeepSeek", "reasoning effort", "provider setup"]
 
 DeepSeek does not expose a native Responses API, so GoModel translates
 `/v1/responses` to `/chat/completions` automatically. It also remaps
-OpenAI-style reasoning levels to the two DeepSeek accepts.
+OpenAI-style reasoning levels to the ones DeepSeek accepts.
 
 ## Configure
 
@@ -34,7 +34,8 @@ providers:
 ## Reasoning effort mapping
 
 DeepSeek V4 reasoning models accept `reasoning_effort` as a top-level string
-with two permitted levels: `high` and `max`.
+with two reasoning levels, `high` and `max`, and `none`, which turns reasoning
+off.
 
 | Client sends | DeepSeek receives |
 | ------------ | ----------------- |
