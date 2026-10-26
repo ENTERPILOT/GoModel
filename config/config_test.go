@@ -1877,6 +1877,26 @@ func TestLoadHTTPTLSEnvOverrides(t *testing.T) {
 	}, result.Config.HTTP.TLS)
 }
 
+func TestLoadHTTPTLSFromYAML(t *testing.T) {
+	clearAllConfigEnvVars(t)
+	withTempDir(t, func(dir string) {
+		result := loadConfigYAML(t, dir, `
+http:
+  tls:
+    ca_file: /etc/gomodel/ca.pem
+    client_cert_file: /etc/gomodel/tls.crt
+    client_key_file: /etc/gomodel/tls.key
+    insecure_skip_verify: true
+`)
+		assert.Equal(t, HTTPTLSConfig{
+			CAFile:             "/etc/gomodel/ca.pem",
+			ClientCertFile:     "/etc/gomodel/tls.crt",
+			ClientKeyFile:      "/etc/gomodel/tls.key",
+			InsecureSkipVerify: true,
+		}, result.Config.HTTP.TLS)
+	})
+}
+
 func TestDefaultHTTPTLSIsSystemTrust(t *testing.T) {
 	cfg := buildDefaultConfig()
 	assert.Equal(t, HTTPTLSConfig{}, cfg.HTTP.TLS, "expected zero TLS config by default")

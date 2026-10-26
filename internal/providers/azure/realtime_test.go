@@ -2,6 +2,7 @@ package azure
 
 import (
 	"context"
+	"net/http"
 	"net/url"
 	"testing"
 
@@ -126,4 +127,16 @@ func TestRealtimeTargetAttachesByCallID(t *testing.T) {
 	// The GA attach surface takes neither api-version nor deployment.
 	assert.False(t, u.Query().Has("api-version"))
 	assert.False(t, u.Query().Has("deployment"), "query = %q, want only call_id", u.RawQuery)
+}
+
+// The websocket dial must go through the provider's own client so its
+// proxy_url, an extension's proxy selection, and the TLS trust apply.
+func TestRealtimeTargetCarriesProviderHTTPClient(t *testing.T) {
+	client := &http.Client{}
+	p := New(providers.ProviderConfig{APIKey: "k", BaseURL: "https://myres.openai.azure.com", APIVersion: "2025-04-01-preview"}, providers.ProviderOptions{HTTPClient: client})
+	rp, ok := p.(core.RealtimeProvider)
+	require.True(t, ok)
+	target, err := rp.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-realtime"})
+	require.NoError(t, err)
+	assert.Same(t, client, target.HTTPClient)
 }

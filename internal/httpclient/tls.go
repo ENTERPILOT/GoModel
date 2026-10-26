@@ -1,9 +1,12 @@
 package httpclient
 
 import (
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -28,12 +31,18 @@ type TLSSettings struct {
 	InsecureSkipVerify bool
 }
 
-// trustState is one installed trust configuration. Each SetConfiguredTLS
-// call installs a fresh value, so the pointer doubles as a generation
-// marker: a transport bound to a different pointer than the one currently
-// installed is stale and rebuilds itself on its next request (see
-// dynamicTransport). A nil cfg means system defaults.
-type trustState struct{ cfg *tls.Config }
+// trustState is one installed trust configuration. Each change installs a
+// fresh value, so the pointer doubles as a generation marker: a transport
+// bound to a different pointer than the one currently installed is stale and
+// rebuilds itself on its next request (see dynamicTransport). A nil state
+// means system defaults.
+type trustState struct {
+	cfg *tls.Config
+	// fingerprint identifies the settings and the file contents cfg was built
+	// from, so re-installing identical material keeps the current state and
+	// every transport's connection pool.
+	fingerprint [sha256.Size]byte
+}
 
 func (s *trustState) tlsConfig() *tls.Config {
 	if s == nil || s.cfg == nil {
@@ -53,13 +62,27 @@ var trust atomic.Pointer[trustState]
 // when a referenced file is missing, unreadable, or holds no usable
 // certificate, so a typo in the path fails startup instead of silently
 // trusting nothing extra.
+//
+// Installing settings whose files hold the same bytes as the installed ones
+// is a no-op, so a reload that changes nothing here keeps every pooled
+// upstream connection.
 func SetConfiguredTLS(settings TLSSettings) error {
-	cfg, err := buildTLSConfig(settings)
+	state, err := buildTrustState(settings)
 	if err != nil {
 		return err
 	}
-	trust.Store(&trustState{cfg: cfg})
+	if sameTrust(trust.Load(), state) {
+		return nil
+	}
+	trust.Store(state)
 	return nil
+}
+
+func sameTrust(a, b *trustState) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.fingerprint == b.fingerprint
 }
 
 // ConfiguredTLS returns a copy of the installed client TLS configuration, or
@@ -84,7 +107,10 @@ func SnapshotTLS() TLSSnapshot { return TLSSnapshot{state: trust.Load()} }
 // bound to that same configuration keep their connection pools.
 func RestoreTLS(s TLSSnapshot) { trust.Store(s.state) }
 
-func buildTLSConfig(settings TLSSettings) (*tls.Config, error) {
+// buildTrustState reads the referenced files once and builds the TLS
+// configuration from those bytes, fingerprinting the same bytes. It returns
+// nil for system defaults.
+func buildTrustState(settings TLSSettings) (*trustState, error) {
 	caFile := strings.TrimSpace(settings.CAFile)
 	certFile := strings.TrimSpace(settings.ClientCertFile)
 	keyFile := strings.TrimSpace(settings.ClientKeyFile)
@@ -96,32 +122,64 @@ func buildTLSConfig(settings TLSSettings) (*tls.Config, error) {
 		return nil, fmt.Errorf("http.tls: client_cert_file and client_key_file must be set together")
 	}
 
+	hash := sha256.New()
+	fmt.Fprintf(hash, "insecure=%t\n", settings.InsecureSkipVerify)
 	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
 
 	if caFile != "" {
-		pool, err := x509.SystemCertPool()
-		if err != nil || pool == nil {
-			pool = x509.NewCertPool()
-		}
-		pem, err := os.ReadFile(caFile)
+		caPEM, err := os.ReadFile(caFile)
 		if err != nil {
 			return nil, fmt.Errorf("http.tls: read ca_file: %w", err)
 		}
-		if !pool.AppendCertsFromPEM(pem) {
+		pool := systemCertPool()
+		if !pool.AppendCertsFromPEM(caPEM) {
 			return nil, fmt.Errorf("http.tls: ca_file %s contains no PEM certificates", caFile)
 		}
 		cfg.RootCAs = pool
+		writeMaterial(hash, "ca", caFile, caPEM)
 	}
 
 	if certFile != "" {
-		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+		certPEM, err := os.ReadFile(certFile)
+		if err != nil {
+			return nil, fmt.Errorf("http.tls: read client_cert_file: %w", err)
+		}
+		keyPEM, err := os.ReadFile(keyFile)
+		if err != nil {
+			return nil, fmt.Errorf("http.tls: read client_key_file: %w", err)
+		}
+		cert, err := tls.X509KeyPair(certPEM, keyPEM)
 		if err != nil {
 			return nil, fmt.Errorf("http.tls: load client certificate: %w", err)
 		}
 		cfg.Certificates = []tls.Certificate{cert}
+		writeMaterial(hash, "cert", certFile, certPEM)
+		writeMaterial(hash, "key", keyFile, keyPEM)
 	}
 
 	//nolint:gosec // Operator opt-in for lab environments; startup logs a warning.
 	cfg.InsecureSkipVerify = settings.InsecureSkipVerify
-	return cfg, nil
+	state := &trustState{cfg: cfg}
+	hash.Sum(state.fingerprint[:0])
+	return state, nil
+}
+
+// writeMaterial adds one labeled file to the fingerprint, length-prefixed so
+// adjacent fields cannot run into each other.
+func writeMaterial(w io.Writer, label, path string, data []byte) {
+	fmt.Fprintf(w, "%s %d:%s %d:", label, len(path), path, len(data))
+	_, _ = w.Write(data)
+}
+
+// systemCertPool returns a copy of the operating system trust store, or an
+// empty pool when it cannot be loaded. The fallback still trusts the
+// configured CA, but nothing else, so it is logged: public upstreams would
+// start failing verification.
+func systemCertPool() *x509.CertPool {
+	pool, err := x509.SystemCertPool()
+	if err != nil || pool == nil {
+		slog.Warn("could not load the system certificate pool; outbound TLS trusts only http.tls.ca_file", "error", err)
+		return x509.NewCertPool()
+	}
+	return pool
 }

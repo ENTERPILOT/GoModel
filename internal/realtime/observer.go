@@ -5,8 +5,6 @@ import (
 	"fmt"
 
 	"github.com/coder/websocket"
-
-	"github.com/enterpilot/gomodel/internal/httpclient"
 )
 
 // Observe dials the target websocket and consumes frames until the upstream
@@ -21,13 +19,7 @@ import (
 //
 // A dial failure is returned as *DialError; a clean close returns nil.
 func Observe(ctx context.Context, target Target, tap func([]byte)) error {
-	conn, _, err := websocket.Dial(ctx, target.URL, &websocket.DialOptions{
-		// Same shared client as Proxy, so the sideband dial honors the
-		// operator's proxy and TLS trust settings.
-		HTTPClient:   httpclient.NewDefaultHTTPClient(),
-		HTTPHeader:   target.Headers,
-		Subprotocols: target.Subprotocols,
-	})
+	conn, _, err := websocket.Dial(ctx, target.URL, target.dialOptions())
 	if err != nil {
 		return &DialError{Err: err}
 	}

@@ -75,6 +75,11 @@ func (c *ChatCompatible) GetBaseURL() string {
 	return c.compatible.GetBaseURL()
 }
 
+// HTTPClient returns the client the provider's requests go through.
+func (c *ChatCompatible) HTTPClient() *http.Client {
+	return c.compatible.HTTPClient()
+}
+
 // ChatCompletion sends a chat completion request to the provider.
 func (c *ChatCompatible) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
 	return c.compatible.ChatCompletion(ctx, req)

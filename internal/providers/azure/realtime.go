@@ -35,7 +35,7 @@ func (p *Provider) RealtimeTarget(ctx context.Context, req *core.RealtimeRequest
 		return nil, err
 	}
 
-	return &core.RealtimeTarget{URL: endpoint, Headers: p.realtimeAuthHeaders(ctx)}, nil
+	return &core.RealtimeTarget{URL: endpoint, Headers: p.realtimeAuthHeaders(ctx), HTTPClient: p.HTTPClient()}, nil
 }
 
 // RealtimeCallTarget implements core.RealtimeCallProvider for Azure OpenAI's GA

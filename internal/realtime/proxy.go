@@ -28,6 +28,23 @@ type Target struct {
 	URL          string
 	Headers      http.Header
 	Subprotocols []string
+	// HTTPClient carries the provider's outbound proxy and TLS trust for the
+	// dial. Nil uses the shared default client, which still applies the
+	// gateway's TLS trust and the process proxy environment.
+	HTTPClient *http.Client
+}
+
+// dialOptions builds the websocket dial options for target.
+func (target Target) dialOptions() *websocket.DialOptions {
+	client := target.HTTPClient
+	if client == nil {
+		client = httpclient.NewDefaultHTTPClient()
+	}
+	return &websocket.DialOptions{
+		HTTPClient:   client,
+		HTTPHeader:   target.Headers,
+		Subprotocols: target.Subprotocols,
+	}
 }
 
 // DialError wraps a failure to establish the upstream websocket. Proxy returns it
@@ -78,13 +95,7 @@ func (h Hooks) clientFrames() func([]byte) []byte {
 // is upgraded the connection is hijacked; Proxy then returns nil on a clean close
 // or the terminal transport error (never a *DialError) for the caller to log.
 func Proxy(w http.ResponseWriter, r *http.Request, target Target, hooks Hooks) error {
-	upstream, _, err := websocket.Dial(r.Context(), target.URL, &websocket.DialOptions{
-		// The shared client carries the operator's proxy and TLS trust
-		// settings (private CA, mTLS); the default dialer would not.
-		HTTPClient:   httpclient.NewDefaultHTTPClient(),
-		HTTPHeader:   target.Headers,
-		Subprotocols: target.Subprotocols,
-	})
+	upstream, _, err := websocket.Dial(r.Context(), target.URL, target.dialOptions())
 	if err != nil {
 		return &DialError{Err: err}
 	}

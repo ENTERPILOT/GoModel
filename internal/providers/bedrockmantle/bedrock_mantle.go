@@ -17,6 +17,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/awscfg"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
 )
 
@@ -70,9 +71,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 
 	var credentials aws.CredentialsProvider
 	if keys.Len() == 0 {
-		awsCfg, loadErr := awsconfig.LoadDefaultConfig(context.Background(),
-			awsconfig.WithRegion(endpoint.region),
-			awsconfig.WithHTTPClient(httpclient.NewAWSSDKClient(base)))
+		awsCfg, loadErr := awscfg.LoadConfig(context.Background(), base, awsconfig.WithRegion(endpoint.region))
 		if loadErr != nil {
 			return &Provider{configErr: fmt.Errorf("load AWS config: %w", loadErr)}
 		}

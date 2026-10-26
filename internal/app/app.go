@@ -156,13 +156,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	// its replacement was rejected with, so the previous configuration is put
 	// back whenever construction fails after this point.
 	previousTLS := httpclient.SnapshotTLS()
-	tlsCfg := cfg.AppConfig.Config.HTTP.TLS
-	if err := httpclient.SetConfiguredTLS(httpclient.TLSSettings{
-		CAFile:             tlsCfg.CAFile,
-		ClientCertFile:     tlsCfg.ClientCertFile,
-		ClientKeyFile:      tlsCfg.ClientKeyFile,
-		InsecureSkipVerify: tlsCfg.InsecureSkipVerify,
-	}); err != nil {
+	if err := ApplyOutboundTLS(cfg.AppConfig.Config.HTTP.TLS); err != nil {
 		return nil, err
 	}
 
