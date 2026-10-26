@@ -17,6 +17,9 @@ const (
 	// CapabilityQuotaTemplates enables per-child user-path templates for
 	// budgets and rate limits.
 	CapabilityQuotaTemplates Capability = "quota_templates"
+	// CapabilityInvoiceExport enables the per-customer invoice export of
+	// billed usage.
+	CapabilityInvoiceExport Capability = "invoice_export"
 )
 
 // Registry collects extensions to be consumed by the gateway at startup.

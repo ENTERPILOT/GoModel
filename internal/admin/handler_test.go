@@ -34,6 +34,8 @@ type mockUsageReader struct {
 	breakdown            *usage.UsageBreakdown
 	lastBreakdown        usage.UsageBreakdownParams
 	breakdownErr         error
+	invoice              *usage.Invoice
+	lastInvoice          usage.InvoiceParams
 	sessionUsage         *usage.SessionUsageResult
 	usageLog             *usage.UsageLogResult
 	usageByRequestID     map[string][]usage.UsageLogEntry
@@ -139,6 +141,11 @@ func (m *mockUsageReader) GetUsageBreakdown(_ context.Context, params usage.Usag
 		return nil, m.breakdownErr
 	}
 	return m.breakdown, nil
+}
+
+func (m *mockUsageReader) GetUsageInvoice(_ context.Context, params usage.InvoiceParams) (*usage.Invoice, error) {
+	m.lastInvoice = params
+	return m.invoice, nil
 }
 
 func (m *mockUsageReader) GetUsageBySession(_ context.Context, params usage.SessionUsageParams) (*usage.SessionUsageResult, error) {
@@ -1866,6 +1873,7 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 		BudgetsEnabled:         "on",
 		RateLimitsEnabled:      "off",
 		QuotaTemplatesEnabled:  "on",
+		InvoiceExportEnabled:   "on",
 		GuardrailsEnabled:      "on",
 		PluginsEnabled:         "on",
 		CacheEnabled:           "on",

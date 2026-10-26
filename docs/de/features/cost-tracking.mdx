@@ -154,3 +154,31 @@ Die Neuberechnung bepreist die abgerechneten Kosten mit dem Aufschlag neu, zu de
   auflösen lässt. Das Ergebnis meldet, wie vielen Zeilen weiterhin Preise
   fehlen. Token-Anzahlen werden nie verändert.
 </Warning>
+
+## Rechnungsexport (GoModel Pro)
+
+<Info>
+  Der Rechnungsexport erfordert eine GoModel-Pro-Lizenz mit der
+  `billing`-Berechtigung sowie aktivierte Aufschläge
+  (`PRICING_MARKUPS_ENABLED=true`). Ohne die Berechtigung antwortet der
+  Endpunkt mit 403 `invoice_export_not_entitled`, bei deaktivierten Aufschlägen
+  mit 409 `markups_disabled`.
+</Info>
+
+`GET /admin/usage/invoice` exportiert die abgerechnete Nutzung eines Zeitraums, ein Block pro Kunde. Jeder Kunde ist ein User Path; mit `parent` ist jedes direkte Kind dieses Pfads ein Kunde, so wie [Budgets pro Kind](/de/features/budgets#dynamische-budgets-pro-kind) sie messen. `parent=/customers` rechnet also `/customers/acme/app1` und `/customers/acme/app2` gemeinsam unter `/customers/acme` ab. Nutzung, die direkt auf dem Parent erfasst wurde, bleibt beim Parent. Ohne `parent` ist jeder User Path ein eigener Kunde.
+
+Der Endpunkt akzeptiert denselben Datumsbereich und dieselben Filter wie die anderen Nutzungsendpunkte, dazu `format=csv` (Standard, heruntergeladen als `gomodel-invoice-<start>-to-<end>.csv`) oder `format=json`. Auf der Nutzungsseite lädt **Rechnung exportieren** die CSV für den gewählten Datumsbereich und die Filter herunter.
+
+```bash
+curl -OJ "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=2026-10-01&end_date=2026-10-31" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```csv
+row_type,period_start,period_end,currency,customer,model,provider,requests,input_tokens,output_tokens,provider_cost,billed_cost,effective_markup_percent
+item,2026-10-01,2026-10-31,USD,/customers/acme,gpt-5,openai,1200,950000,210000,3.2875,3.945,20
+subtotal,2026-10-01,2026-10-31,USD,/customers/acme,,,1200,950000,210000,3.2875,3.945,20
+total,2026-10-01,2026-10-31,USD,,,,1200,950000,210000,3.2875,3.945,20
+```
+
+Jede Position ist ein Modell auf einer Provider-Instanz. `row_type` unterscheidet Positionen (`item`) von der Zwischensumme jedes Kunden (`subtotal`) und der Gesamtsumme (`total`); filtern Sie also in einer Tabellenkalkulation vor dem Summieren auf `item`. Beträge sind einfache Dezimalzahlen in USD; leere Kosten sind unbekannt (keine Preise). Requests, Tokens und Provider-Kosten umfassen an Provider gesendete Requests; die abgerechneten Kosten enthalten zusätzlich abgerechnete Treffer des Response-Caches, wie in den anderen Abrechnungsansichten. `effective_markup_percent` ist das Verhältnis von abgerechneten Kosten zu Provider-Kosten minus eins, abgerechnete Cache-Treffer erhöhen den Wert also.

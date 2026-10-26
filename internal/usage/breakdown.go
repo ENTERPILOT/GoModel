@@ -22,7 +22,16 @@ const (
 	BreakdownEndpoint BreakdownDimension = "endpoint"
 	BreakdownAuthKey  BreakdownDimension = "auth_key"
 	BreakdownPeriod   BreakdownDimension = "period"
+
+	// breakdownModelProvider keys rows by model and provider joined with
+	// modelProviderSeparator. Invoices use it for their line items; the
+	// public breakdown does not accept it.
+	breakdownModelProvider BreakdownDimension = "model_provider"
 )
+
+// modelProviderSeparator joins the model and provider of a
+// breakdownModelProvider key; neither name holds this control character.
+const modelProviderSeparator = "\x1f"
 
 // BreakdownMetric picks the figure that ranks keys for the top-N cut.
 type BreakdownMetric string
@@ -177,14 +186,24 @@ func tooManyBreakdownGroupsError() error {
 }
 
 // readUsageBreakdown runs a backend's grouped query and folds the result.
-// Billed totals cover every billed row, so an uncached-mode breakdown also
-// adds the billed charges of response-cache hits — and only those: the hits'
-// requests, tokens and provider cost stay out, like the summary does.
 func readUsageBreakdown(ctx context.Context, params UsageBreakdownParams, query func(context.Context, UsageBreakdownParams) ([]breakdownGroup, error)) (*UsageBreakdown, error) {
 	params, err := NormalizeUsageBreakdownParams(params)
 	if err != nil {
 		return nil, err
 	}
+	groups, err := readBilledBreakdownGroups(ctx, params, query)
+	if err != nil {
+		return nil, err
+	}
+	return buildUsageBreakdown(groups, params), nil
+}
+
+// readBilledBreakdownGroups runs a backend's grouped query for already
+// normalized params. Billed totals cover every billed row, so an
+// uncached-mode query also adds the billed charges of response-cache hits —
+// and only those: the hits' requests, tokens and provider cost stay out, like
+// the summary does.
+func readBilledBreakdownGroups(ctx context.Context, params UsageBreakdownParams, query func(context.Context, UsageBreakdownParams) ([]breakdownGroup, error)) ([]breakdownGroup, error) {
 	// Each query is capped on its own: hit groups mostly share (row, column)
 	// pairs with the uncached ones, so their combined length overcounts.
 	groups, err := query(ctx, params)
@@ -210,7 +229,7 @@ func readUsageBreakdown(ctx context.Context, params UsageBreakdownParams, query 
 			}
 		}
 	}
-	return buildUsageBreakdown(groups, params), nil
+	return groups, nil
 }
 
 // buildUsageBreakdown folds storage groups into the bounded pivot: it groups

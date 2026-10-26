@@ -511,6 +511,11 @@ type UsageReader interface {
 	// "other" bucket.
 	GetUsageBreakdown(ctx context.Context, params UsageBreakdownParams) (*UsageBreakdown, error)
 
+	// GetUsageInvoice returns billed usage for the period, one block of
+	// model/provider line items per customer user path, with subtotals and a
+	// grand total. Nothing is folded away.
+	GetUsageInvoice(ctx context.Context, params InvoiceParams) (*Invoice, error)
+
 	// GetUsageBySession returns a bounded page of per-session aggregates.
 	// Usage rows without a detected session are omitted. Request and token
 	// totals include local-cache hits; costs include provider-bound rows only.

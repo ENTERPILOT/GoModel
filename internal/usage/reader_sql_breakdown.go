@@ -15,6 +15,12 @@ func (r *SQLReader) GetUsageBreakdown(ctx context.Context, params UsageBreakdown
 	return readUsageBreakdown(ctx, params, r.breakdownGroups)
 }
 
+// GetUsageInvoice returns billed usage per customer, built from the same
+// grouped query as the breakdown.
+func (r *SQLReader) GetUsageInvoice(ctx context.Context, params InvoiceParams) (*Invoice, error) {
+	return readUsageInvoice(ctx, params, r.breakdownGroups)
+}
+
 // breakdownGroups returns every (row, column) aggregate of params, at most
 // maxBreakdownGroups+1 of them.
 func (r *SQLReader) breakdownGroups(ctx context.Context, params UsageBreakdownParams) ([]breakdownGroup, error) {
@@ -85,6 +91,8 @@ func (r *SQLReader) breakdownKeyExpr(ctx context.Context, params UsageBreakdownP
 		return "COALESCE(model, '')", nil, nil
 	case BreakdownProvider:
 		return usageGroupedProviderNameSQL("provider_name", "provider"), nil, nil
+	case breakdownModelProvider:
+		return "COALESCE(model, '') || CAST(? AS TEXT) || COALESCE(" + usageGroupedProviderNameSQL("provider_name", "provider") + ", '')", []any{modelProviderSeparator}, nil
 	case BreakdownUserPath:
 		return usageGroupedUserPathSQL("user_path"), nil, nil
 	case BreakdownLabel:

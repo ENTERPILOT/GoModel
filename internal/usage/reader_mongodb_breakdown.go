@@ -15,6 +15,12 @@ func (r *MongoDBReader) GetUsageBreakdown(ctx context.Context, params UsageBreak
 	return readUsageBreakdown(ctx, params, r.breakdownGroups)
 }
 
+// GetUsageInvoice returns billed usage per customer, built from the same
+// grouping aggregation as the breakdown.
+func (r *MongoDBReader) GetUsageInvoice(ctx context.Context, params InvoiceParams) (*Invoice, error) {
+	return readUsageInvoice(ctx, params, r.breakdownGroups)
+}
+
 // breakdownGroups returns every (row, column) aggregate of params, at most
 // maxBreakdownGroups+1 of them.
 func (r *MongoDBReader) breakdownGroups(ctx context.Context, params UsageBreakdownParams) ([]breakdownGroup, error) {
@@ -125,6 +131,11 @@ func mongoBreakdownKeyExpr(params UsageBreakdownParams, dim BreakdownDimension) 
 		return ifNull("$model")
 	case BreakdownProvider:
 		return mongoUsageGroupedProviderNameExpr()
+	case breakdownModelProvider:
+		return bson.D{{Key: "$concat", Value: bson.A{
+			ifNull("$model"), modelProviderSeparator,
+			bson.D{{Key: "$ifNull", Value: bson.A{mongoUsageGroupedProviderNameExpr(), ""}}},
+		}}}
 	case BreakdownUserPath:
 		return "$" + mongoCanonicalUserPathField
 	case BreakdownLabel:

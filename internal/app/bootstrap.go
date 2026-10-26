@@ -34,6 +34,7 @@ type bootstrap struct {
 
 	// Decided in the prologue, read by several phases.
 	quotaTemplatesEnabled bool
+	invoiceExportEnabled  bool
 	routeSelector         ext.RouteSelector
 	requestHealth         *health.Tracker
 
@@ -109,6 +110,7 @@ func newBootstrap(ctx context.Context, cfg Config) *bootstrap {
 		appCfg:                appCfg,
 		app:                   app,
 		quotaTemplatesEnabled: cfg.Extensions != nil && cfg.Extensions.HasCapability(ext.CapabilityQuotaTemplates),
+		invoiceExportEnabled:  cfg.Extensions != nil && cfg.Extensions.HasCapability(ext.CapabilityInvoiceExport),
 	}
 }
 
