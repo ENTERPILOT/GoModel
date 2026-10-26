@@ -10,6 +10,7 @@
 package clustersync
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -135,7 +136,7 @@ func (s *Syncer) Notifier(entity string) func(context.Context) {
 
 // announce bumps entity's revision, or keeps it for the next tick to retry.
 // Bumps only need to move the revision, so retries of one entity coalesce.
-func (s *Syncer) announce(ctx context.Context, entity string) {
+func (s *Syncer) announce(ctx context.Context, entity string) bool {
 	ctx, cancel := context.WithTimeout(ctx, bumpTimeout)
 	defer cancel()
 	s.mu.Lock()
@@ -156,9 +157,10 @@ func (s *Syncer) announce(ctx context.Context, entity string) {
 	key := "announce:" + entity
 	if err != nil {
 		s.logFailure(key, "configuration change saved but not yet announced to other gateway instances; retrying", err, "entity", entity)
-		return
+		return false
 	}
 	s.clearFailure(key)
+	return true
 }
 
 // Start polls until Close or until ctx ends. It is idempotent.
@@ -209,11 +211,16 @@ func (s *Syncer) Close() error {
 // applied only after its refresh succeeds, so a failed one is retried on the
 // next tick.
 func (s *Syncer) poll(ctx context.Context) {
+	// One failed retry ends the round: the store is most likely down, and
+	// waiting out bumpTimeout for every pending entity would delay the
+	// revision read below by as many timeouts.
 	for _, entity := range s.unannouncedEntities() {
 		if ctx.Err() != nil {
 			return
 		}
-		s.announce(ctx, entity)
+		if !s.announce(ctx, entity) {
+			break
+		}
 	}
 	revisions, err := s.store.Revisions(ctx)
 	if err != nil {
@@ -255,11 +262,15 @@ func (s *Syncer) changed(revisions map[string]int64) []string {
 	return entities
 }
 
-// unannouncedEntities lists, sorted, the entities whose announcement failed.
+// unannouncedEntities lists the entities whose announcement failed, oldest
+// failure first, so an entity that fails again moves behind the others
+// instead of being retried ahead of them every round.
 func (s *Syncer) unannouncedEntities() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return slices.Sorted(maps.Keys(s.unannounced))
+	return slices.SortedFunc(maps.Keys(s.unannounced), func(a, b string) int {
+		return cmp.Compare(s.unannounced[a], s.unannounced[b])
+	})
 }
 
 // logFailure logs err unless it is the error last logged under key: "" for

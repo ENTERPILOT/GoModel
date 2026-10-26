@@ -18,6 +18,7 @@ type fakeStore struct {
 	revisions map[string]int64
 	readErr   error
 	bumpErr   error
+	bumps     []string
 }
 
 func newFakeStore(revisions map[string]int64) *fakeStore {
@@ -27,6 +28,7 @@ func newFakeStore(revisions map[string]int64) *fakeStore {
 func (f *fakeStore) Bump(_ context.Context, entity string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.bumps = append(f.bumps, entity)
 	if f.bumpErr != nil {
 		return f.bumpErr
 	}
@@ -230,4 +232,39 @@ func TestSyncerRetriesFailedAnnouncements(t *testing.T) {
 	revisions, err = store.Revisions(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), revisions["budgets"], "an announced change is not announced again")
+}
+
+func TestSyncerStopsRetryingAnnouncementsAfterFirstFailure(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore(nil)
+	syncer, err := NewSyncer(ctx, store)
+	require.NoError(t, err)
+
+	store.mu.Lock()
+	store.bumpErr = errors.New("database unavailable")
+	store.mu.Unlock()
+	for _, entity := range []string{"budgets", "auth_keys", "rate_limits"} {
+		syncer.Notifier(entity)(ctx)
+	}
+
+	store.mu.Lock()
+	store.bumps = nil
+	store.mu.Unlock()
+	syncer.poll(ctx)
+	store.mu.Lock()
+	assert.Equal(t, []string{"budgets"}, store.bumps, "the oldest failure is retried first and a failure ends the round")
+	store.bumps = nil
+	store.mu.Unlock()
+
+	syncer.poll(ctx)
+	store.mu.Lock()
+	assert.Equal(t, []string{"auth_keys"}, store.bumps, "an entity that failed again moves behind the others")
+	store.bumps = nil
+	store.bumpErr = nil
+	store.mu.Unlock()
+
+	syncer.poll(ctx)
+	store.mu.Lock()
+	assert.Equal(t, []string{"rate_limits", "budgets", "auth_keys"}, store.bumps, "a healthy store drains every pending announcement")
+	store.mu.Unlock()
 }
