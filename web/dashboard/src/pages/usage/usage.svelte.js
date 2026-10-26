@@ -215,10 +215,11 @@ class UsagePageState {
     }
   }
 
-  // restoreFromUrl applies a shared link's view. It runs when the page opens
-  // with a query string; without one the in-memory view stays as it was.
-  restoreFromUrl() {
-    if (typeof window === "undefined" || !window.location.search) return;
+  // restoreFromUrl applies a shared link's view. Opening the page without a
+  // query string keeps the in-memory view; going back/forward to one
+  // (fromHistory) restores the default filters and breakdown it stands for.
+  restoreFromUrl({ fromHistory = false } = {}) {
+    if (typeof window === "undefined" || (!window.location.search && !fromHistory)) return;
     const view = parseUsageQuery(window.location.search);
     this.filters.set(view.filters);
     dateRange.applyWindow(view.window);

@@ -16,6 +16,7 @@
   import * as m from "$lib/paraglide/messages.js";
 
   const PAGE = "usage";
+  let seenHistoryTick = 0;
 
   // Re-fetch when the page becomes active, the API key changes or the user
   // goes back/forward (the URL then holds another view). Live
@@ -23,12 +24,13 @@
   // (ensureLiveLogs is a no-op when the stream is already running).
   $effect(() => {
     void auth.refreshTick;
-    void router.historyTick;
+    const historyTick = router.historyTick;
     if (router.page === PAGE) {
       // untrack: restoring and fetching read the filters, which must not
       // become dependencies (a filter change would re-run the restore).
       untrack(() => {
-        usagePage.restoreFromUrl();
+        usagePage.restoreFromUrl({ fromHistory: historyTick !== seenHistoryTick });
+        seenHistoryTick = historyTick;
         usagePage.fetchUsagePage();
         usagePage.fetchAuthKeyNames();
         liveLogs.ensureLiveLogs();
