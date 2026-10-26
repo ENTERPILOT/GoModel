@@ -26,7 +26,8 @@ func OutboundTLSConfig() *tls.Config {
 // reloads), and core's dial and keep-alive tuning. timeout bounds each
 // request; zero or less keeps core's default HTTP timeout. Extensions use it
 // for their own upstream calls, such as a secret store, so they trust the
-// same private CAs as the gateway.
+// same private CAs as the gateway. Like core's provider clients it never
+// follows a redirect to another origin; set CheckRedirect to change that.
 func NewHTTPClient(timeout time.Duration) *http.Client {
 	return httpclient.NewClientWithTimeout(timeout)
 }

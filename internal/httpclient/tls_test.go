@@ -97,6 +97,27 @@ func TestNewClientWithTimeout(t *testing.T) {
 	assert.Equal(t, DefaultConfig().Timeout, NewClientWithTimeout(0).Timeout, "non-positive timeout should keep the default")
 }
 
+func TestNewDownloadClientFollowsCrossOriginRedirects(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer target.Close()
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer origin.Close()
+
+	resp, err := NewDownloadClient(5 * time.Second).Get(origin.URL)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+
+	resp, err = NewClientWithTimeout(5 * time.Second).Get(origin.URL)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	assert.Equal(t, http.StatusFound, resp.StatusCode, "credentialed clients must keep stopping at cross-origin redirects")
+}
+
 func TestSnapshotAndRestoreTLS(t *testing.T) {
 	resetTLS(t)
 	require.NoError(t, SetConfiguredTLS(TLSSettings{InsecureSkipVerify: true}))

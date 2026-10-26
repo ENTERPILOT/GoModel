@@ -28,8 +28,8 @@ const maxBodySize = 10 * 1024 * 1024 // 10 MB
 // httpClient is shared by every catalog download so refreshes reuse one
 // connection pool. Its transport follows the trust settings (private CA,
 // mTLS) installed at startup or by a reload, so creating it at package init
-// is safe.
-var httpClient = httpclient.NewClientWithTimeout(fetchTimeout)
+// is safe. It follows redirects to other hosts, as a public download should.
+var httpClient = httpclient.NewDownloadClient(fetchTimeout)
 
 // FetchResult carries the outcome of one conditional model list fetch.
 type FetchResult struct {

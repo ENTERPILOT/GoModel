@@ -446,3 +446,22 @@ func TestFetchIfChanged_LocalFileOversizedIsRejectedBeforeAllocation(t *testing.
 	allocated := after.TotalAlloc - before.TotalAlloc
 	require.LessOrEqual(t, allocated, uint64(maxBodySize))
 }
+
+// A catalog URL that redirects to another host (http to https, or a separate
+// file host) must still download.
+func TestFetch_FollowsCrossOriginRedirect(t *testing.T) {
+	files := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"version": 1, "updated_at": "2025-01-01T00:00:00Z", "providers": {}, "models": {"gpt-4o": {"display_name": "GPT-4o", "modes": ["chat"]}}, "provider_models": {}}`))
+	}))
+	defer files.Close()
+	catalog := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, files.URL+"/models.json", http.StatusFound)
+	}))
+	defer catalog.Close()
+
+	list, _, err := Fetch(context.Background(), catalog.URL)
+	require.NoError(t, err)
+	require.NotNil(t, list)
+	assert.Contains(t, list.Models, "gpt-4o")
+}

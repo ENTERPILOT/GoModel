@@ -269,9 +269,10 @@ func NewAWSSDKClient(base *http.Client) *http.Client {
 
 // NewClientWithTimeout returns a client on the shared transport settings
 // (proxy, TLS trust, dial and keep-alive tuning) whose overall request and
-// response-header timeouts are both bound to timeout. Auxiliary callers such
-// as the model catalog fetch, the update check, and vector stores use it so
-// they inherit operator trust settings instead of building bare clients.
+// response-header timeouts are both bound to timeout. Auxiliary callers that
+// send credentials, such as vector stores and embedding endpoints, use it so
+// they inherit operator trust settings instead of building bare clients; like
+// every client here it never follows a redirect to another origin.
 func NewClientWithTimeout(timeout time.Duration) *http.Client {
 	cfg := DefaultConfig()
 	if timeout > 0 {
@@ -279,4 +280,15 @@ func NewClientWithTimeout(timeout time.Duration) *http.Client {
 		cfg.ResponseHeaderTimeout = timeout
 	}
 	return NewHTTPClient(&cfg)
+}
+
+// NewDownloadClient is NewClientWithTimeout with net/http's standard redirect
+// policy: up to 10 hops, to any origin. Unauthenticated downloads such as the
+// model catalog and the update check use it, because their hosts may redirect
+// from http to https or to a separate file host. net/http still drops the
+// Authorization and Cookie headers on a hop to another host.
+func NewDownloadClient(timeout time.Duration) *http.Client {
+	client := NewClientWithTimeout(timeout)
+	client.CheckRedirect = nil
+	return client
 }
