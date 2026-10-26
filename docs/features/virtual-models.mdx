@@ -86,7 +86,8 @@ any redirect above it, and an inner [chained](#chain-virtual-models) virtual
 model beats an outer one. In the example above, `team-model` sends `high` to
 `openai/gpt-5.2` and `medium` to `hetzner/qwen3.8`, including when either is
 reached through failover. When one model is reachable through several inner
-virtual models, the value on the first declared path applies. It applies to Chat Completions, the Responses API,
+virtual models, the path routing chose applies; a failover leg uses the first
+declared path to its model. It applies to Chat Completions, the Responses API,
 and the Anthropic Messages API; batches and provider passthrough are not
 rewritten.
 

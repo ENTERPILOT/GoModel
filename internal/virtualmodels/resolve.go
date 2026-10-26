@@ -21,8 +21,9 @@ func (s *Service) resolveRequested(ctx context.Context, requested core.Requested
 	}
 	snap := s.snapshot()
 	if entry, ok := snap.findRedirect(requested.Model, userPath, enforceUserPaths); ok {
-		if resolved, ok := s.balancedResolution(ctx, snap, entry, sessionID); ok {
-			return Resolution{Requested: selector, Resolved: resolved, Source: entry.vm.Source}, true, nil
+		var path []string
+		if resolved, ok := s.balancedResolution(ctx, snap, entry, sessionID, &path); ok {
+			return Resolution{Requested: selector, Resolved: resolved, Source: entry.vm.Source, Path: path}, true, nil
 		}
 	}
 	return Resolution{Requested: selector, Resolved: selector}, false, nil
@@ -47,6 +48,7 @@ func (s *Service) ResolveModelForUserPath(ctx context.Context, requested core.Re
 	if err != nil {
 		return core.ModelSelector{}, false, err
 	}
+	core.RecordVirtualModelRoute(ctx, resolution.Path)
 	return resolution.Resolved, changed, nil
 }
 

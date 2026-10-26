@@ -23,8 +23,8 @@ func (r *effortResolverStub) ResolveModel(requested core.RequestedModelSelector)
 	return selector, false, err
 }
 
-func (r *effortResolverStub) ResolveReasoningEffort(_ context.Context, requested core.RequestedModelSelector, attempt core.ModelSelector) string {
-	r.requested = append(r.requested, requested)
+func (r *effortResolverStub) ResolveReasoningEffort(_ context.Context, resolution *core.RequestModelResolution, attempt core.ModelSelector) string {
+	r.requested = append(r.requested, resolution.Requested)
 	return r.efforts[attempt.QualifiedModel()]
 }
 

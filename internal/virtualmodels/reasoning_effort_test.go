@@ -131,7 +131,7 @@ func TestResolveReasoningEffort(t *testing.T) {
 				ctx = context.Background()
 			}
 			service := newSlowdownService(t, tt.rows...)
-			assert.Equal(t, tt.want, service.ResolveReasoningEffort(ctx, tt.requested, tt.attempt))
+			assert.Equal(t, tt.want, service.ResolveReasoningEffort(ctx, &core.RequestModelResolution{Requested: tt.requested}, tt.attempt))
 		})
 	}
 }
@@ -171,4 +171,34 @@ func TestUpsertValidatesReasoningEffort(t *testing.T) {
 			assert.Equal(t, tt.want, got.ReasoningEffort)
 		})
 	}
+}
+
+// Two legs of a load balancer reach the same concrete model with different
+// efforts: each primary attempt gets the effort of the leg routing chose.
+func TestResolveReasoningEffortFollowsRoutedPath(t *testing.T) {
+	gpt4o := core.ModelSelector{Provider: "openai", Model: "gpt-4o"}
+	service := newSlowdownService(t,
+		VirtualModel{Source: "team", Targets: []Target{{Model: "fast"}, {Model: "smart"}}, Enabled: true},
+		VirtualModel{Source: "fast", Targets: []Target{{Provider: "openai", Model: "gpt-4o"}}, ReasoningEffort: "low", Enabled: true},
+		VirtualModel{Source: "smart", Targets: []Target{{Provider: "openai", Model: "gpt-4o"}}, ReasoningEffort: "high", Enabled: true},
+	)
+	requested := core.NewRequestedModelSelector("team", "")
+
+	seen := map[string]bool{}
+	for range 2 {
+		ctx, route := core.WithVirtualModelRoute(context.Background())
+		resolved, changed, err := service.ResolveModelForUserPath(ctx, requested)
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Equal(t, gpt4o, resolved)
+		path := route.Path()
+		require.Len(t, path, 2)
+		assert.Equal(t, "team", path[0])
+
+		resolution := &core.RequestModelResolution{Requested: requested, ResolvedSelector: resolved, VirtualModelPath: path}
+		want := map[string]string{"fast": "low", "smart": "high"}[path[1]]
+		assert.Equal(t, want, service.ResolveReasoningEffort(context.Background(), resolution, gpt4o), "route %v", path)
+		seen[path[1]] = true
+	}
+	assert.Len(t, seen, 2, "round robin should route through both legs")
 }

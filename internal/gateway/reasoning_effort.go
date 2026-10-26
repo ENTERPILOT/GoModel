@@ -42,9 +42,9 @@ func withReasoningEffort[Req any, T any](
 	if !ok || workflow == nil || workflow.Resolution == nil {
 		return call
 	}
-	requested := workflow.Resolution.Requested
+	resolution := workflow.Resolution
 	return func(ctx context.Context, req Req, providerName string) (T, error) {
-		if effort := resolver.ResolveReasoningEffort(ctx, requested, selector(req)); effort != "" {
+		if effort := resolver.ResolveReasoningEffort(ctx, resolution, selector(req)); effort != "" {
 			req = apply(req, effort)
 		} else if client, ok := ctx.Value(clientRequestKey{}).(Req); ok {
 			req = restore(req, client)
@@ -62,7 +62,7 @@ func (o *InferenceOrchestrator) ReasoningEffortOverride(ctx context.Context, wor
 	if !ok || workflow == nil || workflow.Resolution == nil {
 		return ""
 	}
-	return resolver.ResolveReasoningEffort(ctx, workflow.Resolution.Requested, workflow.Resolution.ResolvedSelector)
+	return resolver.ResolveReasoningEffort(ctx, workflow.Resolution, workflow.Resolution.ResolvedSelector)
 }
 
 func chatRequestSelectorOf(req *core.ChatRequest) core.ModelSelector {

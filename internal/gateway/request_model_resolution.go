@@ -88,8 +88,9 @@ func ResolveRequestModelWithAuthorizer(
 	requested core.RequestedModelSelector,
 ) (*core.RequestModelResolution, error) {
 	requested = core.NewRequestedModelSelector(requested.Model, requested.ProviderHint)
+	resolveCtx, route := core.WithVirtualModelRoute(ctx)
 
-	resolvedSelector, aliasApplied, err := ResolveExecutionSelector(ctx, provider, resolver, requested)
+	resolvedSelector, aliasApplied, err := ResolveExecutionSelector(resolveCtx, provider, resolver, requested)
 	refreshed := false
 	if err != nil {
 		var refreshErr error
@@ -100,7 +101,7 @@ func ResolveRequestModelWithAuthorizer(
 		if !refreshed {
 			return nil, resolutionError(err)
 		}
-		resolvedSelector, aliasApplied, err = ResolveExecutionSelector(ctx, provider, resolver, requested)
+		resolvedSelector, aliasApplied, err = ResolveExecutionSelector(resolveCtx, provider, resolver, requested)
 		if err != nil {
 			return nil, resolutionError(err)
 		}
@@ -121,7 +122,7 @@ func ResolveRequestModelWithAuthorizer(
 				return nil, refreshErr
 			}
 			if refreshed {
-				resolvedSelector, aliasApplied, err = ResolveExecutionSelector(ctx, provider, resolver, requested)
+				resolvedSelector, aliasApplied, err = ResolveExecutionSelector(resolveCtx, provider, resolver, requested)
 				if err != nil {
 					return nil, resolutionError(err)
 				}
@@ -140,7 +141,7 @@ func ResolveRequestModelWithAuthorizer(
 				return nil, refreshErr
 			}
 			if refreshed {
-				resolvedSelector, aliasApplied, err = ResolveExecutionSelector(ctx, provider, resolver, requested)
+				resolvedSelector, aliasApplied, err = ResolveExecutionSelector(resolveCtx, provider, resolver, requested)
 				if err != nil {
 					return nil, resolutionError(err)
 				}
@@ -163,6 +164,7 @@ func ResolveRequestModelWithAuthorizer(
 		ProviderType:     strings.TrimSpace(provider.GetProviderType(resolvedModel)),
 		ProviderName:     ResolvedProviderName(provider, resolvedSelector, ""),
 		AliasApplied:     aliasApplied,
+		VirtualModelPath: route.Path(),
 	}
 	if slowdownResolver, ok := resolver.(ModelSlowdownResolver); ok {
 		resolution.Slowdown = slowdownResolver.ResolveSlowdown(ctx, requested, resolvedSelector)

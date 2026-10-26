@@ -358,3 +358,29 @@ func TestResolveRequestModelKeepsResolverErrorStatus(t *testing.T) {
 		})
 	}
 }
+
+// requestRouteResolver resolves through a user-path aware resolver that
+// records the virtual models its route passed through.
+type requestRouteResolver struct {
+	requestAliasResolver
+	path []string
+}
+
+func (r requestRouteResolver) ResolveModelForUserPath(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+	core.RecordVirtualModelRoute(ctx, r.path)
+	return r.ResolveModel(requested)
+}
+
+func TestResolveRequestModelCarriesVirtualModelPath(t *testing.T) {
+	resolver := requestRouteResolver{
+		requestAliasResolver: requestAliasResolver{"team": {Provider: "openai", Model: "gpt-4o"}},
+		path:                 []string{"team", "smart"},
+	}
+
+	resolution, err := ResolveRequestModelWithAuthorizer(
+		context.Background(), newRequestRefreshProvider(1), resolver, nil,
+		core.NewRequestedModelSelector("team", ""),
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"team", "smart"}, resolution.VirtualModelPath)
+}

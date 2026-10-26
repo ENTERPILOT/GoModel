@@ -29,15 +29,18 @@ func normalizeReasoningEffort(effort string) (string, error) {
 // wins: a policy on the concrete model the attempt goes to beats every
 // redirect, and within a chain of redirects the one nearest the model beats
 // the ones above it. attempt is the concrete model of this attempt, which for
-// a failover leg differs from the primary resolution.
+// a failover leg differs from the primary resolution. The primary attempt
+// follows the route routing recorded on resolution; a failover leg, which
+// carries only its concrete model, follows the first declared path to it.
 func (s *Service) ResolveReasoningEffort(
 	ctx context.Context,
-	requested core.RequestedModelSelector,
+	resolution *core.RequestModelResolution,
 	attempt core.ModelSelector,
 ) string {
-	if s == nil {
+	if s == nil || resolution == nil {
 		return ""
 	}
+	requested := resolution.Requested
 
 	snap := s.snapshot()
 	userPath := core.UserPathFromContext(ctx)
@@ -47,6 +50,9 @@ func (s *Service) ResolveReasoningEffort(
 	}
 	if requested.ExplicitProvider {
 		return ""
+	}
+	if len(resolution.VirtualModelPath) > 0 && attempt.QualifiedModel() == resolution.ResolvedSelector.QualifiedModel() {
+		return snap.routeReasoningEffort(resolution.VirtualModelPath)
 	}
 	redirect, ok := snap.findRedirect(requested.Model, userPath, true)
 	if !ok {
@@ -58,12 +64,23 @@ func (s *Service) ResolveReasoningEffort(
 	return redirect.vm.ReasoningEffort
 }
 
+// routeReasoningEffort returns the effort of the deepest virtual model on a
+// recorded route that sets one.
+func (s *snapshot) routeReasoningEffort(path []string) string {
+	for _, source := range slices.Backward(path) {
+		if entry, ok := s.redirects[source]; ok && entry.vm.ReasoningEffort != "" {
+			return entry.vm.ReasoningEffort
+		}
+	}
+	return ""
+}
+
 // pathReasoningEffort walks entry's targets, descending enabled chained
 // redirects, to the concrete target matching attempt, and returns the effort
 // of the deepest redirect on that path that sets one. found is false when no
 // target leads to attempt. When several paths lead to the same concrete model,
-// the first declared one decides: the attempt carries only its concrete model,
-// not the path routing took to it.
+// the first declared one decides: a failover leg carries only its concrete
+// model, not a path to it.
 func (s *snapshot) pathReasoningEffort(entry *redirectEntry, attempt core.ModelSelector) (effort string, found bool) {
 	for _, target := range entry.targets {
 		inner, chained := s.chained(entry.vm.Source, target)

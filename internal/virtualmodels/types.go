@@ -236,6 +236,8 @@ type Resolution struct {
 	Requested core.ModelSelector
 	Resolved  core.ModelSelector
 	Source    string
+	// Path lists the virtual models routing passed through, outermost first.
+	Path []string
 }
 
 // EffectiveState is the compiled access decision for one concrete selector.
