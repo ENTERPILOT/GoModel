@@ -2,9 +2,12 @@ package awscfg
 
 import (
 	"context"
+	"encoding/pem"
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -13,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
@@ -49,9 +53,10 @@ func isolateAWSEnv(t *testing.T, endpoint string) {
 	}
 }
 
-func TestLoadConfigKeepsSDKClientForIMDS(t *testing.T) {
+// imdsRoutes answers the IMDSv2 credential lookup for one role.
+func imdsRoutes() map[string]http.HandlerFunc {
 	expiry := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
-	imds, capture := providertest.RouteServer(t, map[string]http.HandlerFunc{
+	return map[string]http.HandlerFunc{
 		"/latest/api/token": func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("X-Aws-Ec2-Metadata-Token-Ttl-Seconds", "21600")
 			_, _ = io.WriteString(w, "imds-token")
@@ -62,7 +67,11 @@ func TestLoadConfigKeepsSDKClientForIMDS(t *testing.T) {
 		"/latest/meta-data/iam/security-credentials/gateway-role": func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = io.WriteString(w, `{"Code":"Success","Type":"AWS-HMAC","AccessKeyId":"AKIDIMDS","SecretAccessKey":"secret","Token":"session","Expiration":"`+expiry+`"}`)
 		},
-	})
+	}
+}
+
+func TestLoadConfigKeepsSDKClientForIMDS(t *testing.T) {
+	imds, capture := providertest.RouteServer(t, imdsRoutes())
 	isolateAWSEnv(t, imds.URL)
 
 	transport := &refusingTransport{}
@@ -79,4 +88,29 @@ func TestLoadConfigKeepsSDKClientForIMDS(t *testing.T) {
 	apiClient, ok := cfg.HTTPClient.(*http.Client)
 	require.True(t, ok, "HTTPClient is %T", cfg.HTTPClient)
 	assert.Same(t, transport, apiClient.Transport)
+}
+
+// An HTTPS metadata endpoint signed by a private CA is trusted through
+// http.tls.ca_file.
+func TestLoadConfigTrustsPrivateCAForIMDS(t *testing.T) {
+	mux := http.NewServeMux()
+	for path, handler := range imdsRoutes() {
+		mux.HandleFunc(path, handler)
+	}
+	imds := httptest.NewTLSServer(mux)
+	defer imds.Close()
+	isolateAWSEnv(t, imds.URL)
+
+	before := httpclient.SnapshotTLS()
+	t.Cleanup(func() { httpclient.RestoreTLS(before) })
+	caFile := filepath.Join(t.TempDir(), "ca.pem")
+	ca := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: imds.Certificate().Raw})
+	require.NoError(t, os.WriteFile(caFile, ca, 0o600))
+	require.NoError(t, httpclient.SetConfiguredTLS(httpclient.TLSSettings{CAFile: caFile}))
+
+	cfg, err := LoadConfig(context.Background(), &http.Client{Transport: &refusingTransport{}})
+	require.NoError(t, err)
+	creds, err := cfg.Credentials.Retrieve(context.Background())
+	require.NoError(t, err, "the IMDS client should trust the configured CA")
+	assert.Equal(t, "AKIDIMDS", creds.AccessKeyID)
 }

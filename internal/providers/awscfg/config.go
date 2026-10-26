@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials/ec2rolecreds"
 	"github.com/aws/aws-sdk-go-v2/feature/ec2/imds"
@@ -23,7 +24,9 @@ import (
 // The EC2 instance metadata (IMDS) credential lookup keeps the SDK's own
 // client. Its sub-second dial and response-header timeouts let the chain fail
 // fast off EC2 (a shared client would wait seconds for the link-local
-// endpoint), and that endpoint must not go through an outbound proxy.
+// endpoint), and that endpoint must not go through an outbound proxy. It does
+// take the gateway's TLS trust, for an HTTPS metadata endpoint
+// (AWS_EC2_METADATA_SERVICE_ENDPOINT) signed by a private CA.
 func LoadConfig(ctx context.Context, client *http.Client, optFns ...func(*awsconfig.LoadOptions) error) (aws.Config, error) {
 	// The SDK-default pass resolves the IMDS settings (endpoint, endpoint
 	// mode, disable flag) from the environment and shared config exactly as
@@ -31,6 +34,12 @@ func LoadConfig(ctx context.Context, client *http.Client, optFns ...func(*awscon
 	sdkDefaults, err := awsconfig.LoadDefaultConfig(ctx, optFns...)
 	if err != nil {
 		return aws.Config{}, err
+	}
+	if trust := httpclient.ConfiguredTLS(); trust != nil {
+		// Still a BuildableClient, so the IMDS client adds its own timeouts.
+		sdkDefaults.HTTPClient = awshttp.NewBuildableClient().WithTransportOptions(func(tr *http.Transport) {
+			tr.TLSClientConfig = trust
+		})
 	}
 	metadata := imds.NewFromConfig(sdkDefaults)
 
