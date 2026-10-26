@@ -57,6 +57,22 @@ func TestChatCompletion_MapsReasoningToDeepSeekReasoningEffort(t *testing.T) {
 	assert.Equal(t, "high", sent["reasoning_effort"])
 }
 
+func TestChatCompletion_OmitsReasoningEffortForNone(t *testing.T) {
+	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
+
+	provider := newTestProvider("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
+	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:     "deepseek-v4-pro",
+		Messages:  []core.Message{{Role: "user", Content: "hi"}},
+		Reasoning: &core.Reasoning{Effort: "none"},
+	})
+	require.NoError(t, err)
+
+	sent := capture.Last(t).JSON(t)
+	assert.NotContains(t, sent, "reasoning")
+	assert.NotContains(t, sent, "reasoning_effort")
+}
+
 func TestChatCompletion_PadsMissingReasoningContentForAssistantToolCalls(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
 
@@ -188,12 +204,14 @@ func TestStreamResponses_TranslatesToChatCompletions(t *testing.T) {
 
 func TestNormalizeReasoningEffort(t *testing.T) {
 	tests := map[string]string{
-		"low":    "high",
-		"medium": "high",
-		"high":   "high",
-		"xhigh":  "max",
-		"max":    "max",
-		"custom": "custom",
+		"none":    "",
+		"minimal": "high",
+		"low":     "high",
+		"medium":  "high",
+		"high":    "high",
+		"xhigh":   "max",
+		"max":     "max",
+		"custom":  "custom",
 	}
 	for input, expected := range tests {
 		t.Run(input, func(t *testing.T) {

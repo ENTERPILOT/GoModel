@@ -38,15 +38,18 @@ with two permitted levels: `high` and `max`.
 
 | Client sends | DeepSeek receives |
 | ------------ | ----------------- |
-| `low` / `medium` / `high` | `high` |
+| `none` | field omitted |
+| `minimal` / `low` / `medium` / `high` | `high` |
 | `xhigh` / `max` | `max` |
 | anything else | passed through by GoModel, then rejected by DeepSeek |
 
 GoModel rewrites the OpenAI-shaped `"reasoning": {"effort": "..."}` into
 DeepSeek's top-level `reasoning_effort` — no client change required. Validate
 or normalize custom client values to `high` or `max` before calling GoModel.
-To disable reasoning, omit the `reasoning` field entirely; any provided
-`reasoning.effort`, including `low`, is mapped and enables reasoning.
+To disable reasoning, omit the `reasoning` field or send `none`; any other
+`reasoning.effort`, including `low`, is mapped and enables reasoning. A
+[forced reasoning effort](/features/virtual-models#force-a-reasoning-effort)
+replaces the client's value either way.
 
 ## Tool calls and reasoning
 

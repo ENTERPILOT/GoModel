@@ -53,3 +53,15 @@ func TestGeminiGenerationConfig_ExplicitThinkingConfigWins(t *testing.T) {
 	cfg := geminiGenerationConfig(&req)
 	require.Equal(t, map[string]any{"thinkingLevel": "minimal"}, cfg["thinkingConfig"])
 }
+
+func TestGeminiGenerationConfig_EffortJoinsPartialThinkingConfig(t *testing.T) {
+	var req core.ChatRequest
+	body := `{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"hi"}],` +
+		`"reasoning":{"effort":"none"},` +
+		`"extra_body":{"google":{"thinking_config":{"include_thoughts":true}}}}`
+	err := json.Unmarshal([]byte(body), &req)
+	require.NoError(t, err)
+
+	cfg := geminiGenerationConfig(&req)
+	require.Equal(t, map[string]any{"thinkingBudget": 0, "includeThoughts": true}, cfg["thinkingConfig"])
+}
