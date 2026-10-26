@@ -282,9 +282,10 @@ func Run(ctx context.Context, opts Options) error {
 		}
 		// Outbound trust goes in first, so extensions setting up and secret
 		// references resolving (a vault behind a private CA) already use it.
-		// A rejected generation puts the serving one's trust back.
+		// app.New applies the fully resolved settings again. A rejected
+		// generation puts the serving one's trust back.
 		previousTLS := httpclient.SnapshotTLS()
-		if err := app.ApplyOutboundTLS(result.Config.HTTP.TLS); err != nil {
+		if err := app.ApplyOutboundTLSEarly(ctx, result.Config.HTTP.TLS); err != nil {
 			return nil, nil, err
 		}
 		built := false
