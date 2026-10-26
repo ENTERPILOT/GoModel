@@ -755,6 +755,10 @@ providers:
     base_url: "http://localhost:30000/v1"
     # Optional: set this only when launch_server uses --api-key.
     # api_key: "token-abc123"
+    # Responses API path: auto (default) sends requests with function tools
+    # through chat completions; native always uses /v1/responses;
+    # chat_compatible always uses chat completions.
+    # api_mode: auto
 
   # Custom OpenAI-compatible provider
   # my-provider:
