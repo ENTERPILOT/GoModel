@@ -137,6 +137,41 @@ func TestStorePutWithPastExpiryRemovesEntry(t *testing.T) {
 	})
 }
 
+// Only the zero time means "never expires": the unix epoch and earlier are
+// past expiries like any other, so the Put removes the entry rather than
+// keeping it forever or leaving a hidden row the sweep never deletes.
+func TestStorePutWithEpochOrPreEpochExpiryRemovesEntry(t *testing.T) {
+	tests := []struct {
+		name      string
+		expiresAt time.Time
+	}{
+		{name: "epoch", expiresAt: time.Unix(0, 0)},
+		{name: "pre-epoch", expiresAt: time.Date(1960, 1, 1, 0, 0, 0, 0, time.UTC)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runStoreSuite(t, func(t *testing.T, store *Store, clk *clock) {
+				ctx := context.Background()
+				require.NoError(t, store.Put(ctx, "test.ns", "k", []byte("v"), time.Time{}))
+				require.NoError(t, store.Put(ctx, "test.ns", "k", []byte("v"), tt.expiresAt))
+				_, found, err := store.Get(ctx, "test.ns", "k")
+				require.NoError(t, err)
+				assert.False(t, found)
+				entries, err := store.List(ctx, "test.ns")
+				require.NoError(t, err)
+				assert.Empty(t, entries)
+
+				// No row is left behind: even a clock rewound to before the
+				// expiry finds nothing.
+				clk.now = tt.expiresAt.Add(-time.Hour)
+				_, found, err = store.Get(ctx, "test.ns", "k")
+				require.NoError(t, err)
+				assert.False(t, found)
+			})
+		})
+	}
+}
+
 func TestStoreIsolatesNamespaces(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store *Store, _ *clock) {
 		ctx := context.Background()

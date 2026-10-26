@@ -22,7 +22,8 @@ import (
 const SweepInterval = time.Hour
 
 // backend is one storage engine's half of a Store. Times are unix seconds;
-// an expiresAt of 0 never expires. Arguments are already validated.
+// an expiresAt of 0 never expires, and put only ever receives 0 or a future
+// expiry. Arguments are already validated.
 type backend interface {
 	put(ctx context.Context, namespace, key string, value []byte, expiresAt, now int64) error
 	get(ctx context.Context, namespace, key string, now int64) ([]byte, bool, error)
@@ -63,7 +64,8 @@ func newStore(b backend, now func() time.Time) *Store {
 	return &Store{backend: b, now: now, stop: make(chan struct{})}
 }
 
-// Put stores value under key until expiresAt (zero: until deleted).
+// Put stores value under key until expiresAt (zero: until deleted). A
+// non-zero expiresAt that is not in the future deletes the entry.
 func (s *Store) Put(ctx context.Context, namespace, key string, value []byte, expiresAt time.Time) error {
 	if err := s.check(namespace, key); err != nil {
 		return err
@@ -74,7 +76,17 @@ func (s *Store) Put(ctx context.Context, namespace, key string, value []byte, ex
 	if value == nil {
 		value = []byte{} // nil binds as SQL NULL
 	}
-	return s.backend.put(ctx, namespace, key, value, storage.UnixOrZero(expiresAt), s.now().Unix())
+	now := s.now().Unix()
+	if expiresAt.IsZero() {
+		return s.backend.put(ctx, namespace, key, value, 0, now)
+	}
+	// Any other expiry that is not in the future, the unix epoch and earlier
+	// included, would be stored as 0 ("never") or as a row the sweep skips;
+	// the entry is gone either way, so delete it.
+	if expiresAt.Unix() <= now {
+		return s.backend.remove(ctx, namespace, key)
+	}
+	return s.backend.put(ctx, namespace, key, value, expiresAt.Unix(), now)
 }
 
 // Get returns the live value under key.

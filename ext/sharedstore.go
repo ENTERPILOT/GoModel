@@ -48,8 +48,9 @@ type SharedEntry struct {
 // Calls go to the database: keep them off the hot request path or bound them
 // with a context deadline. Implementations are safe for concurrent use.
 type SharedStore interface {
-	// Put stores value under key. A zero expiresAt keeps the entry until it
-	// is deleted.
+	// Put stores value under key. Only the zero time.Time keeps the entry
+	// until it is deleted; any other expiresAt that is not in the future,
+	// the unix epoch included, removes the entry.
 	Put(ctx context.Context, namespace, key string, value []byte, expiresAt time.Time) error
 	// Get returns the live value under key, and whether there was one.
 	Get(ctx context.Context, namespace, key string) ([]byte, bool, error)
