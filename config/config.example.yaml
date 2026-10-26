@@ -286,7 +286,7 @@ pricing:
   #   "/": 15
   #   "openai/": 10
   #   "anthropic/claude-opus-4-1": 25
-  # GoModel Pro (customer_markups entitlement): per-customer markups by user path.
+  # GoModel Pro (billing entitlement): per-customer markups by user path.
   # The deepest covering path with a matching selector wins, then pricing.markups.
   user_path_markups: {}
   # user_path_markups:

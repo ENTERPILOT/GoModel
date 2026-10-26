@@ -16,7 +16,7 @@ import (
 // ErrCustomerMarkupsUnavailable reports pricing.user_path_markups configured
 // without the customer_markups capability. Startup fails rather than billing
 // customers at the global rate.
-var ErrCustomerMarkupsUnavailable = errors.New("pricing.user_path_markups requires GoModel Pro (customer_markups)")
+var ErrCustomerMarkupsUnavailable = errors.New("pricing.user_path_markups requires a GoModel Pro license with the billing entitlement")
 
 type rule struct {
 	selector string
