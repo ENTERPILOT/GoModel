@@ -303,6 +303,10 @@ Ein abgerechnetes Budget:
   Request ab, bevor eine gecachte Antwort ausgeliefert wird. Budgets auf
   Provider-Kosten zählen Cache-Treffer nie, und Provider-Budgets gelten nicht
   für sie, da ein Treffer an keinen Provider geht.
+- zählt bei einem Provider die abgerechneten Cache-Treffer seiner Modelle trotzdem
+  zu den Ausgaben. Setzen Sie `BUDGETS_PROVIDER_BILLED_CACHE_HITS=false`
+  (`budgets.provider_billed_cache_hits`), um nur abzurechnen, was für vom Provider
+  bediente Requests berechnet wurde.
 
 `cost_basis` ist `provider` (Standard) oder `billed`. Es ist ein Attribut, kein
 Teil des Budget-Schlüssels: Scope, Subjekt und Periode bilden ein Budget auf

@@ -287,6 +287,10 @@ A billed budget:
   billed user-path or label budget rejects a request before a cached response
   is replayed. Provider-cost budgets never count cache hits, and provider
   budgets do not apply to them, since a hit is not routed to a provider.
+- on a provider, still counts the billed cache hits of that provider's models
+  in its spend. Set `BUDGETS_PROVIDER_BILLED_CACHE_HITS=false`
+  (`budgets.provider_billed_cache_hits`) to limit only what was billed for
+  requests the provider served.
 
 `cost_basis` is `provider` (default) or `billed`. It is an attribute, not part
 of the budget key: one scope, subject, and period holds one budget on either

@@ -233,6 +233,8 @@ curl -X PUT http://localhost:8080/admin/budgets \
   `PRICING_BILL_CACHE_HITS=false` 时，缓存命中按 `0` 计费，不计入预算。
 - 对没有计费成本的用量（在启用加价之前记录）按其提供商成本计入，因此在周期中途启用加价也不会少算。
 - 同样约束响应缓存命中：在缓存命中计费期间，已用尽的计费用户路径或标签预算会在回放缓存响应之前拒绝请求。基于提供商成本的预算从不计入缓存命中，提供商预算也不适用于缓存命中，因为命中不会路由到任何提供商。
+- 用于提供商时，仍会将该提供商模型的计费缓存命中计入支出。设置
+  `BUDGETS_PROVIDER_BILLED_CACHE_HITS=false`（`budgets.provider_billed_cache_hits`）后，只限制该提供商实际处理的请求的计费金额。
 
 `cost_basis` 为 `provider`（默认）或 `billed`。它是一个属性，而不是预算键的一部分：同一作用域、主体和周期只对应一个预算，可使用任一基准；更改基准不会重置当前周期。不带
 `cost_basis` 的 `PUT` 会设置为 `provider`；现有预算继续限制提供商成本。`GET /admin/budgets`

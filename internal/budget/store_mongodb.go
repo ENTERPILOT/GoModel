@@ -503,15 +503,19 @@ func bsonNumber(value any) (float64, bool) {
 // mongoSpendCost renders the cost one usage document adds to a window, null
 // when it adds nothing, matching the SQL stores: a provider window sums the
 // provider cost of uncached documents, and a billed window sums billed cost
-// with response-cache hits included, counting an uncached document without a
-// billed cost at its provider cost.
+// with response-cache hits included unless the window excludes them, counting
+// an uncached document without a billed cost at its provider cost.
 func mongoSpendCost(window SpendWindow) bson.D {
 	uncached := bson.D{{Key: "$eq", Value: bson.A{bson.D{{Key: "$ifNull", Value: bson.A{"$cache_type", ""}}}, ""}}}
 	if window.billed() {
+		var cacheHit any
+		if window.billedCacheHits() {
+			cacheHit = bson.D{{Key: "$ifNull", Value: bson.A{"$billed_cost", nil}}}
+		}
 		return bson.D{{Key: "$cond", Value: bson.A{
 			uncached,
 			bson.D{{Key: "$ifNull", Value: bson.A{"$billed_cost", bson.D{{Key: "$ifNull", Value: bson.A{"$total_cost", nil}}}}}},
-			bson.D{{Key: "$ifNull", Value: bson.A{"$billed_cost", nil}}},
+			cacheHit,
 		}}}
 	}
 	return bson.D{{Key: "$cond", Value: bson.A{
