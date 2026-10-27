@@ -38,6 +38,11 @@ type translatedPrepareSpec[Req any, Prepared any] struct {
 	resolve         func(*InferenceOrchestrator) func(context.Context, Req, *core.Workflow) (context.Context, Req, error)
 	patch           func(*InferenceOrchestrator) func(context.Context, Req) (Req, error)
 	valid           func(Req) bool
+	// reasoningEffort applies the primary attempt's forced reasoning effort,
+	// so the prepared request (and the response cache key built from it)
+	// carries the effort actually sent upstream. The client's request stays in
+	// the context for failover attempts that force no effort of their own.
+	reasoningEffort func(Req, string) Req
 	build           func(context.Context, Req, *core.Workflow) Prepared
 }
 
@@ -47,6 +52,7 @@ var chatPrepareSpec = translatedPrepareSpec[*core.ChatRequest, *PreparedChatRequ
 	selector:        chatRequestSelector,
 	patch:           chatRequestPatch,
 	valid:           validChatRequest,
+	reasoningEffort: ChatRequestWithReasoningEffort,
 	build: func(ctx context.Context, req *core.ChatRequest, workflow *core.Workflow) *PreparedChatRequest {
 		return &PreparedChatRequest{Context: ctx, Request: req, Workflow: workflow}
 	},
@@ -59,6 +65,7 @@ var responsesPrepareSpec = translatedPrepareSpec[*core.ResponsesRequest, *Prepar
 	resolve:         responsesHistoryResolve,
 	patch:           responsesRequestPatch,
 	valid:           validResponsesRequest,
+	reasoningEffort: ResponsesRequestWithReasoningEffort,
 	build: func(ctx context.Context, req *core.ResponsesRequest, workflow *core.Workflow) *PreparedResponsesRequest {
 		return &PreparedResponsesRequest{Context: ctx, Request: req, Workflow: workflow}
 	},
@@ -90,6 +97,12 @@ func prepareTranslated[Req any, Prepared any](
 			return spec.build(ctx, req, workflow), err
 		}
 		return zero, err
+	}
+	if spec.reasoningEffort != nil {
+		if effort := o.ReasoningEffortOverride(ctx, workflow); effort != "" {
+			ctx = withClientRequest(ctx, req)
+			req = spec.reasoningEffort(req, effort)
+		}
 	}
 	return spec.build(ctx, req, workflow), nil
 }
