@@ -255,17 +255,21 @@ func TestExportYAMLRedactsArgumentForms(t *testing.T) {
 			"--header=Authorization: Bearer hdr-do-not-leak",
 			"Authorization", "Bearer split-do-not-leak",
 			`--config={"apiKey":"json-do-not-leak"}`,
+			`{"token": "bare-json-do-not-leak"}`,
 			"--pat", "pat-do-not-leak",
 		},
 	}}
 
 	out := exportYAML(t, NewSecrets(), cfg, nil, nil)
 
-	for _, secret := range []string{"hdr-do-not-leak", "split-do-not-leak", "json-do-not-leak", "pat-do-not-leak"} {
+	for _, secret := range []string{"hdr-do-not-leak", "split-do-not-leak", "json-do-not-leak", "bare-json-do-not-leak", "pat-do-not-leak"} {
 		assert.NotContains(t, out, secret)
 	}
 	assert.Equal(t, "mcp-remote", exportedValue(t, out, "mcp", "servers", "remote", "args", "0"))
 	assert.Equal(t, "--header=Authorization: Bearer ${env:GOMODEL_MCP_SERVERS_REMOTE_ARGS_2}", exportedValue(t, out, "mcp", "servers", "remote", "args", "2"))
+	// The variable holds the whole JSON, so the argument stays valid JSON.
+	assert.Equal(t, "--config=${env:GOMODEL_MCP_SERVERS_REMOTE_ARGS_5}", exportedValue(t, out, "mcp", "servers", "remote", "args", "5"))
+	assert.Equal(t, "${env:GOMODEL_MCP_SERVERS_REMOTE_ARGS_6}", exportedValue(t, out, "mcp", "servers", "remote", "args", "6"))
 }
 
 func TestExportYAMLRedactsCredentialsInText(t *testing.T) {

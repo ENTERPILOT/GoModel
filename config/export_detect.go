@@ -92,16 +92,22 @@ func bearerCredential(value string) bool {
 
 // argCredential reports how a command-line argument carries a credential:
 // after a prefix naming one ("--api-key=", "GITHUB_TOKEN=",
-// "Authorization: ", "--header=Authorization: ", `--config={"apiKey":`),
-// whose length it returns, or in the next argument, after a flag naming one
-// ("--token").
+// "Authorization: ", "--header=Authorization: "), whose length it returns,
+// or in the next argument, after a flag naming one ("--token"). A credential
+// named inside structured text (`{"apiKey":`) is followed by more of its
+// syntax, so the whole text is the credential: the prefix is 0, or ends
+// before the text (`--config=`).
 func argCredential(arg string) (prefix int, next bool) {
 	if i := strings.IndexAny(arg, "=:"); i > 0 {
-		if !credentialKey(strings.TrimLeft(arg[:i], "-")) {
-			if inner, _ := argCredential(arg[i+1:]); inner > 0 {
+		name := strings.TrimLeft(arg[:i], "-")
+		if !credentialKey(name) {
+			if inner, _ := argCredential(arg[i+1:]); inner >= 0 {
 				return i + 1 + inner, false
 			}
 			return -1, false
+		}
+		if strings.ContainsFunc(name, structural) {
+			return 0, false
 		}
 		end := i + 1
 		for end < len(arg) && arg[end] == ' ' {
@@ -113,6 +119,12 @@ func argCredential(arg string) (prefix int, next bool) {
 		return -1, true
 	}
 	return -1, false
+}
+
+// structural reports whether r is syntax of structured text, such as JSON,
+// rather than part of a flag or header name.
+func structural(r rune) bool {
+	return strings.ContainsRune(`{}[]"',`, r)
 }
 
 // replaceReferences replaces every secret reference in value with with.

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -77,4 +78,20 @@ func TestRunConfigExport(t *testing.T) {
 	require.NoError(t, yaml.Unmarshal(stdout.Bytes(), &doc), "stdout holds the document alone")
 	assert.Equal(t, "${env:GOMODEL_MASTER_KEY}", doc.Server.MasterKey)
 	assert.NotContains(t, stdout.String()+stderr.String(), "cli-master-do-not-leak")
+}
+
+func TestRunConfigExportRefusesItsInput(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("STORAGE_TYPE", "sqlite")
+	t.Setenv("SQLITE_PATH", filepath.Join(t.TempDir(), "export.db"))
+	// As `gomodel config export > config.yaml` leaves it.
+	stdout, err := os.Create("config.yaml")
+	require.NoError(t, err)
+	defer func() { _ = stdout.Close() }()
+
+	err = Run(context.Background(), Options{Args: []string{"config", "export"}, Stdout: stdout, Stderr: io.Discard})
+	require.ErrorContains(t, err, "the output file is the config file it reads")
+	info, err := stdout.Stat()
+	require.NoError(t, err)
+	assert.Zero(t, info.Size(), "nothing is written over it")
 }

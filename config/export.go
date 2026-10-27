@@ -323,7 +323,7 @@ func (e *exporter) args(path string, node *yaml.Node) {
 			e.scalar(itemPath, item, exportSecret, "", 0)
 			continue
 		}
-		if prefix > 0 {
+		if prefix >= 0 {
 			e.scalar(itemPath, item, exportSecret, "", prefix)
 			continue
 		}

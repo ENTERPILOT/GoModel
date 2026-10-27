@@ -191,9 +191,15 @@ the running values until the gateway is restarted.
 ready to review, commit, or load on another instance:
 
 ```bash
-gomodel config export > config.yaml
-docker exec my-gateway /gomodel config export > config.yaml
+gomodel config export > gomodel-export.yaml
+docker exec my-gateway /gomodel config export > gomodel-export.yaml
 ```
+
+<Warning>
+Write the export to a new file, not onto the `config.yaml` the gateway reads:
+the shell empties that file before the command starts. The command then
+refuses to run, but the original file is already gone.
+</Warning>
 
 It reads the same configuration, environment, and database as the gateway, so
 run it where the gateway runs, with the same environment. It is safe while the

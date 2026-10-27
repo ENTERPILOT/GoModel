@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/app"
@@ -16,7 +17,7 @@ const configCommand = "config"
 
 func configUsage(productName string) string {
 	return fmt.Sprintf(`Usage:
-  %[1]s config export > config.yaml
+  %[1]s config export > gomodel-export.yaml
 
 Prints the configuration a gateway started now would run with as a
 config.yaml: every setting, from defaults, config.yaml, and environment
@@ -28,7 +29,8 @@ with (${env:...}, ${file:...}, ${vault:...}), or as ${env:NAME} with a
 comment naming the variable to set.
 
 Reads the same configuration, environment, and database as the gateway, and
-is safe to run while it is running.
+is safe to run while it is running. Do not redirect the output onto the
+config.yaml it reads: the shell empties that file before the command starts.
 `, productName)
 }
 
@@ -69,6 +71,13 @@ func parseConfigArgs(productName string, args []string, stdout, stderr io.Writer
 // schemes and a key wrapper), then prints the export to stdout. Logs go to
 // stderr, so the output can be redirected to a file as is.
 func runConfigExport(ctx context.Context, opts Options) error {
+	// By now the shell has emptied a config file redirected onto: exporting
+	// it would print defaults in place of the configuration it held.
+	if f, ok := opts.Stdout.(*os.File); ok {
+		if info, err := f.Stat(); err == nil && info.Mode().IsRegular() && config.IsConfigFile(info) {
+			return errors.New("config export: the output file is the config file it reads, which the shell has already emptied; restore it and write the export to another file")
+		}
+	}
 	if opts.Setup != nil {
 		if err := opts.Setup(ctx); err != nil {
 			return err

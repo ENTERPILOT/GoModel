@@ -422,6 +422,17 @@ var configFilePaths = []string{
 	"config.yaml",
 }
 
+// IsConfigFile reports whether info describes one of the config files Load
+// searches for.
+func IsConfigFile(info os.FileInfo) bool {
+	for _, path := range configFilePaths {
+		if candidate, err := os.Stat(path); err == nil && os.SameFile(info, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
 const envConfigStrict = "CONFIG_STRICT"
 
 // resolveConfigStrict reads CONFIG_STRICT, which defaults to true: an unknown key

@@ -225,8 +225,11 @@ See [Encryption at Rest](/advanced/encryption-at-rest).
 holding no secret.
 
 ```bash
-gomodel config export > config.yaml
+gomodel config export > gomodel-export.yaml
 ```
+
+Do not redirect it onto the `config.yaml` it reads; the shell empties that
+file first.
 
 See [Exporting the Effective Configuration](/advanced/config-yaml#exporting-the-effective-configuration).
 
