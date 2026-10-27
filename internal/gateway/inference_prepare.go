@@ -22,7 +22,7 @@ func (o *InferenceOrchestrator) PrepareEmbeddingRequest(ctx context.Context, req
 	if req == nil {
 		return nil, core.NewInvalidRequestError("embeddings request is required", nil)
 	}
-	ctx = contextWithRequestID(ctx, meta.RequestID)
+	ctx = WithAttemptRecorder(contextWithRequestID(ctx, meta.RequestID))
 	workflow, err := o.ensureTranslatedRequestWorkflow(ctx, meta.Workflow, meta.RequestID, meta.Endpoint, &req.Model, &req.Provider)
 	if err != nil {
 		return nil, err

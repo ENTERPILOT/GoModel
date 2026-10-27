@@ -43,7 +43,7 @@ GoModel 为原生 Gemini 和兼容 OpenAI 的 API 分别维护内部的 Base URL
 
 ## 嵌入
 
-在原生模式下，嵌入通过 `models/{model}:batchEmbedContents` 提供。`dimensions` 映射为 `outputDimensionality`，并支持 `encoding_format: "base64"`。Gemini 在两种 API 接口上都不报告嵌入的 Token 用量，因此嵌入响应中的 Token 数为零，且该用量记录会被标记一条成本计算说明。
+在原生模式下，嵌入通过 `models/{model}:batchEmbedContents` 提供。`dimensions` 映射为 `outputDimensionality`，并支持 `encoding_format: "base64"`。原生模式会记录 Gemini 为较新模型（如 `gemini-embedding-2`）报告的 Token 用量。较旧的模型（如 `gemini-embedding-001`）以及兼容 OpenAI 的接口不报告用量，因此这些嵌入响应中的 Token 数为零，且该用量记录会被标记一条成本计算说明。
 
 ## 图片生成与编辑
 

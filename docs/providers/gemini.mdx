@@ -59,9 +59,10 @@ surface; chat, embeddings, and images follow the API mode.
 
 In native mode, embeddings are served through `models/{model}:batchEmbedContents`.
 `dimensions` maps to `outputDimensionality` and `encoding_format: "base64"` is
-honored. Gemini reports no embedding token usage on either API surface, so
-embedding responses carry zero token counts and the usage row is flagged with
-a cost-calculation caveat.
+honored. Native mode records the token usage Gemini reports for newer models
+such as `gemini-embedding-2`. Older models such as `gemini-embedding-001`, and
+the OpenAI-compatible surface, report none, so those responses carry zero token
+counts and the usage row is flagged with a cost-calculation caveat.
 
 ## Image generation and edits
 

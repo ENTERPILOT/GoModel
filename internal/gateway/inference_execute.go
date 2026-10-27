@@ -552,12 +552,18 @@ func (o *InferenceOrchestrator) executeEmbeddings(
 	}
 	providerType := ProviderTypeFromWorkflow(workflow)
 	providerName := ProviderNameFromWorkflow(workflow)
+	selector := currentSelectorForWorkflow(workflow, req.Model, req.Provider)
+	started := time.Now()
 	resp, err := o.provider.Embeddings(ctx, req)
+	if err == nil && resp == nil {
+		err = emptyProviderResponseError(providerName)
+	}
 	if err == nil {
-		if resp == nil {
-			return nil, "", "", emptyProviderResponseError(providerName)
-		}
-		return resp, ResponseProviderType(providerType, resp.Provider), providerName, nil
+		providerType = ResponseProviderType(providerType, resp.Provider)
+	}
+	recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, providerType, providerName, selector, started, err))
+	if err == nil {
+		return resp, providerType, providerName, nil
 	}
 
 	return o.tryFailoverEmbeddings(ctx, workflow, req, err)

@@ -604,6 +604,7 @@ func (s *translatedInferenceService) dispatchEmbeddings(c *echo.Context, req *co
 	if err != nil {
 		return handleError(c, err)
 	}
+	enrichAuditEntryWithProviderAttempts(c)
 	auditlog.EnrichEntryWithResolvedRoute(
 		c,
 		qualifyExecutedModel(workflow, result.Response.Model, result.Meta.ProviderName),

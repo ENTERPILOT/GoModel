@@ -487,10 +487,17 @@ func TestEmbeddings_DoesNotFailover(t *testing.T) {
 	}, nil)
 
 	c, rec := echotest.Post(t, "/v1/embeddings", `{"model":"text-embedding-3-small","input":"hi"}`)
+	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+	c.Set(string(auditlog.LogEntryKey), entry)
 	err := handler.Embeddings(c)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
 	require.Equal(t, []string{"text-embedding-3-small"}, provider.embeddingCalls)
+
+	require.Len(t, entry.Data.Attempts, 1)
+	require.Equal(t, auditlog.AttemptKindPrimary, entry.Data.Attempts[0].Kind)
+	require.False(t, entry.Data.Attempts[0].Success)
+	require.Equal(t, http.StatusServiceUnavailable, entry.Data.Attempts[0].StatusCode)
 }
 
 // TestChatCompletion_SingleTargetAliasKeepsSubtreeFailover pins the
