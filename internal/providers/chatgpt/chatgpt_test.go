@@ -402,14 +402,6 @@ func TestListModels(t *testing.T) {
 func TestUnsupportedSurfaces(t *testing.T) {
 	provider := New(providers.ProviderConfig{APIKey: "token"}, providers.ProviderOptions{})
 	calls := map[string]func() error{
-		"ChatCompletion": func() error {
-			_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{Model: "gpt-5.6-terra"})
-			return err
-		},
-		"StreamChatCompletion": func() error {
-			_, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{Model: "gpt-5.6-terra"})
-			return err
-		},
 		"Embeddings": func() error {
 			_, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{Model: "gpt-5.6-terra"})
 			return err
@@ -430,6 +422,61 @@ func TestUnsupportedSurfaces(t *testing.T) {
 			assert.Equal(t, unsupportedOperationCode, *gatewayErr.Code)
 		})
 	}
+}
+
+// TestChatCompletion_ViaResponsesTranslation pins the wiring: the Codex
+// backend has no chat endpoint, so a chat request must reach /responses
+// through the OpenAI chat->Responses translation with the Codex dialect
+// (stream/store) pinned, and come back as a chat completion.
+func TestChatCompletion_ViaResponsesTranslation(t *testing.T) {
+	srv, capture := providertest.SSEServer(t, codexSSE)
+	provider := newTestProvider(tokenWithAccount(t, "acct-123"), srv.URL, srv.Client(), llmclient.Hooks{})
+
+	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "gpt-5.6-terra",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	})
+	require.NoError(t, err)
+
+	sent := capture.Last(t)
+	assert.Equal(t, "/responses", sent.Path)
+	gotBody := sent.JSON(t)
+	streamed, _ := gotBody["stream"].(bool)
+	assert.True(t, streamed)
+	require.Contains(t, gotBody, "store")
+	stored, _ := gotBody["store"].(bool)
+	assert.False(t, stored)
+
+	require.Len(t, resp.Choices, 1)
+	assert.Equal(t, "ok", resp.Choices[0].Message.Content)
+	assert.Equal(t, "stop", resp.Choices[0].FinishReason)
+}
+
+// TestStreamChatCompletion_ViaResponsesTranslation pins the streaming wiring:
+// the translated request still targets /responses and the Codex event stream
+// is served back to the client as chat completion chunks.
+func TestStreamChatCompletion_ViaResponsesTranslation(t *testing.T) {
+	srv, capture := providertest.SSEServer(t, codexSSE)
+	provider := newTestProvider(tokenWithAccount(t, "acct-123"), srv.URL, srv.Client(), llmclient.Hooks{})
+
+	stream, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
+		Model:         "gpt-5.6-terra",
+		Messages:      []core.Message{{Role: "user", Content: "hi"}},
+		StreamOptions: &core.StreamOptions{IncludeUsage: true},
+	})
+	require.NoError(t, err)
+	defer func() { _ = stream.Close() }()
+
+	body, err := io.ReadAll(stream)
+	require.NoError(t, err)
+
+	sent := capture.Last(t)
+	assert.Equal(t, "/responses", sent.Path)
+
+	out := string(body)
+	assert.True(t, strings.HasPrefix(out, "data: {"), "stream must open with a chat chunk, got %q", out)
+	assert.Contains(t, out, `"object":"chat.completion.chunk"`)
+	assert.True(t, strings.HasSuffix(out, "data: [DONE]\n\n"), "stream must end with [DONE], got %q", out)
 }
 
 func TestAccountIDFromToken(t *testing.T) {
