@@ -56,9 +56,11 @@ is not supported when using Codex with a ChatGPT account`。
 
 ## 仅支持 Responses API
 
-Codex 后端只提供 `/responses`，因此对于 `chatgpt` 模型，
-`/v1/chat/completions` 和 `/v1/embeddings` 会返回 `501`。
-请使用 `/v1/responses`，这本来也是 Codex 发送的请求。
+Codex 后端只提供 `/responses`。对于 `chatgpt` 模型，`/v1/chat/completions`
+通过将请求转换为 Responses 调用来工作，所用转换与 OpenAI provider 针对仅支持
+Responses 的模型使用的转换相同；流式聊天通过把 Responses 事件流转换回
+chat completion 分块来提供。转换无法精确承载的聊天请求会被拒绝，错误信息指向
+`/v1/responses`。`/v1/embeddings` 返回 `501`。
 
 后端还会按严格的参数允许列表进行校验。GoModel
 会适配请求而不是让请求失败，因此调用方可以继续使用标准的 Responses API：

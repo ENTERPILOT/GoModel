@@ -65,9 +65,14 @@ einem OpenAI-API-Key authentifiziert sind, über den Provider `openai` verfügba
 
 ## Nur Responses API
 
-Das Codex-Backend bedient `/responses` und sonst nichts, daher antworten
-`/v1/chat/completions` und `/v1/embeddings` für `chatgpt`-Modelle mit `501`.
-Verwenden Sie `/v1/responses` – das sendet Codex ohnehin.
+Das Codex-Backend bedient `/responses` und sonst nichts. `/v1/chat/completions`
+funktioniert für `chatgpt`-Modelle, indem der Request auf einen Responses-Call
+übersetzt wird – mit derselben Übersetzung, die der OpenAI-Provider für reine
+Responses-Modelle nutzt; gestreamter Chat wird bedient, indem der
+Responses-Event-Stream zurück in Chat-Completion-Chunks gewandelt wird. Ein
+Chat-Request, den die Übersetzung nicht exakt abbilden kann, wird mit einem
+Fehler abgelehnt, der auf `/v1/responses` verweist. `/v1/embeddings` antwortet
+mit `501`.
 
 Das Backend prüft Requests außerdem gegen eine strikte Allowlist von Parametern.
 GoModel passt Requests an, statt sie fehlschlagen zu lassen, sodass Aufrufer

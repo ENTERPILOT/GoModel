@@ -46,7 +46,7 @@ przez providera upstream.
 | Provider | Dane uwierzytelniające | Przykładowy model | Chat | `/responses` | Embed | Pliki | Batche | Passthru | Przewodnik |
 | -------- | ---------- | ------------- | :--: | :----------: | :---: | :---: | :-----: | :------: | ----- |
 | OpenAI | `OPENAI_API_KEY` | `gpt-5.5` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
-| Subskrypcja ChatGPT | `CHATGPT_API_KEY` (token logowania Codex) | `gpt-5.6-sol` | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | [Subskrypcja ChatGPT](/pl/providers/chatgpt) |
+| Subskrypcja ChatGPT | `CHATGPT_API_KEY` (token logowania Codex) | `gpt-5.6-sol` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Subskrypcja ChatGPT](/pl/providers/chatgpt) |
 | GitHub Copilot | `GITHUB_COPILOT_API_KEY` (token OAuth GitHuba) | `claude-sonnet-5.5` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [GitHub Copilot](/pl/providers/github-copilot) |
 | Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | [Anthropic](/pl/providers/anthropic) |
 | Cohere | `COHERE_API_KEY` | `command-a-plus-05-2026` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Cohere](/pl/providers/cohere) |
@@ -184,8 +184,9 @@ przez providera upstream.
   zawsze myślą i odrzucają requesty, które go pomijają (nadpisz przez
   `OPENCODE_GO_DEFAULT_REASONING_EFFORT`). Ustaw `OPENCODE_GO_API_KEY`; base URL
   domyślnie to `https://opencode.ai/zen/go/v1`.
-- **Subskrypcja ChatGPT** – obsługuje wyłącznie `/v1/responses`, rozliczane z
-  limitu planu ChatGPT, a nie z kredytów API. Upstream akceptuje ścisłą listę
+- **Subskrypcja ChatGPT** – rozliczana z limitu planu ChatGPT, a nie z
+  kredytów API. Upstream obsługuje wyłącznie `/v1/responses`; chat completions
+  są tłumaczone na wywołania Responses. Upstream akceptuje ścisłą listę
   dozwolonych parametrów i działa tylko w trybie streamingu; GoModel dostosowuje
   requesty i składa stream w całość dla wywołań bez streamingu. Ustaw
   `CHATGPT_API_KEY` na token dostępu z `codex login`. Raportowany koszt nie jest
