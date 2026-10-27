@@ -27,6 +27,16 @@ export function budgetCostBasis(item) {
     : "provider";
 }
 
+// budgetBilledOnProviderCost reports a billed budget that is enforced on
+// provider cost because billed budgets are unavailable (no billing
+// entitlement or markups disabled).
+export function budgetBilledOnProviderCost(item) {
+  return (
+    budgetCostBasis(item) === "billed" &&
+    String((item && item.enforced_cost_basis) || "").trim() === "provider"
+  );
+}
+
 export function budgetCostBasisOptions() {
   return [
     { value: "provider", label: m.budgets_cost_basis_provider() },
@@ -230,6 +240,9 @@ function budgetFilterText(item) {
     budgetPeriodFromSeconds(seconds),
     item && item.per_child ? m.budgets_per_child_badge() : "",
     budgetCostBasis(item) === "billed" ? m.budgets_billed_badge() : "",
+    budgetBilledOnProviderCost(item)
+      ? m.budgets_billed_on_provider_badge()
+      : "",
     seconds ? String(seconds) + "s" : "",
     seconds ? String(seconds) + " seconds" : "",
   ]
@@ -426,7 +439,9 @@ export function budgetPeriodLabel(item) {
       return m.budgets_period_monthly();
     default: {
       const label = String((item && item.period_label) || "").trim();
-      return m.budgets_custom_period({ period: label || String(seconds || "") + "s" });
+      return m.budgets_custom_period({
+        period: label || String(seconds || "") + "s",
+      });
     }
   }
 }

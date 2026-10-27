@@ -9205,6 +9205,14 @@ const docTemplate = `{
                 "effective_subject": {
                     "type": "string"
                 },
+                "enforced_cost_basis": {
+                    "description": "EnforcedCostBasis names the spend Spent measures. It is provider for a\nbilled budget while billed budgets are unavailable (no billing\nentitlement or markups disabled); cost_basis keeps the stored basis.",
+                    "type": "string",
+                    "enum": [
+                        "provider",
+                        "billed"
+                    ]
+                },
                 "has_usage": {
                     "type": "boolean"
                 },
@@ -13084,7 +13092,15 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "cost_basis": {
-                    "description": "CostBasis names the spend Spent and Amount measure: provider cost or\nbilled cost.",
+                    "description": "CostBasis is the budget's configured basis: provider cost or billed\ncost.",
+                    "type": "string",
+                    "enum": [
+                        "provider",
+                        "billed"
+                    ]
+                },
+                "enforced_cost_basis": {
+                    "description": "EnforcedCostBasis names the spend Spent and Amount measure. It is\nprovider for a billed budget while billed budgets are unavailable.",
                     "type": "string",
                     "enum": [
                         "provider",

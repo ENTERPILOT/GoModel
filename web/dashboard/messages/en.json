@@ -685,6 +685,8 @@
   "budgets_cost_basis_billed": "Billed cost",
   "budgets_billed_badge": "billed",
   "budgets_billed_title": "Limits billed cost: provider cost plus markup, including billed cache hits",
+  "budgets_billed_on_provider_badge": "billed · on provider cost",
+  "budgets_billed_on_provider_title": "Stored as billed, but enforced on provider cost: billed budgets need a GoModel Pro license with the billing entitlement and PRICING_MARKUPS_ENABLED=true. Editing keeps it billed.",
   "models_title": "Models",
   "models_total_count": "{count} models",
   "models_unavailable": "Virtual models feature is unavailable.",
