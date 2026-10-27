@@ -18,11 +18,20 @@ type SpendWindow struct {
 	CostBasis CostBasis
 	Start     time.Time
 	End       time.Time
+	// ExcludeCacheHits keeps billed response-cache hits out of a billed
+	// window. Provider windows never count cache hits.
+	ExcludeCacheHits bool
 }
 
 // billed reports whether the window sums billed rather than provider cost.
 func (w SpendWindow) billed() bool {
 	return w.CostBasis == CostBasisBilled
+}
+
+// billedCacheHits reports whether the window adds the billed cost of
+// response-cache hits.
+func (w SpendWindow) billedCacheHits() bool {
+	return w.billed() && !w.ExcludeCacheHits
 }
 
 // Spend is the total tracked cost for one SpendWindow. HasUsage is false when

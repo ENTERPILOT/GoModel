@@ -325,6 +325,7 @@ Prozessspeicher und stimmen sich nicht zwischen Instanzen ab.
 | Durchsetzung von [Budgets](/de/features/budgets) | Dauerhaft (Datenbank) | Korrekt über alle Replikate. Ausgaben werden aus der gemeinsamen Nutzungstabelle gelesen. |
 | [Nutzungs- und Kostendaten](/de/features/cost-tracking) | Dauerhaft (Datenbank) | Korrekt aggregiert. |
 | Audit-Logs | Dauerhaft (Datenbank) | Vollständig über alle Replikate. |
+| [SSO](/de/pro/sso)-Abmeldung (Pro) | Dauerhaft (Datenbank) | Eine abgemeldete Session wird innerhalb von etwa 2 Sekunden auf jedem Replikat abgelehnt. |
 | [Rate-Limits](/de/features/rate-limits) | In-Memory, pro Instanz | Das effektive Limit liegt bei etwa dem `N x` des konfigurierten Limits. Zähler werden beim Neustart zurückgesetzt. |
 | Circuit Breaker | In-Memory, pro Prozess | Jedes Replikat erkennt einen Ausfall separat, sodass der Upstream bis zu `N x failure_threshold` Fehler sieht, bevor sich ein Breaker öffnet. |
 | Pins der [Session-Affinität](/de/features/session-keeping) | In-Memory, pro Instanz | Sessions bleiben pro Replikat gebunden, nicht global, sofern der Load Balancer nicht sticky ist. |
@@ -338,33 +339,45 @@ Kontrolle, sodass drei Replikate mit einer Regel von 100 rpm insgesamt bis zu
 [Budgets](/de/features/budgets) als dauerhafte, instanzübergreifende Kontrolle,
 da sie aus der gemeinsamen Datenbank lesen.
 
-### Konfigurationsänderungen werden nicht sofort verteilt
+### Konfigurationsänderungen erreichen alle Replikate in Sekunden
 
-Vom Admin verwaltete Konfiguration liegt dauerhaft in der Datenbank, wird auf
-jedem Replikat aber aus einem In-Memory-Snapshot bedient. Eine im Dashboard
-gespeicherte Änderung aktualisiert das Replikat, das den Request verarbeitet
-hat, sofort. Andere Replikate übernehmen sie in ihrem eigenen
-Aktualisierungsrhythmus – und zwei Bereiche haben gar keinen.
+Vom Admin verwaltete Konfiguration liegt dauerhaft in der Datenbank und wird auf
+jedem Replikat aus einem In-Memory-Snapshot bedient. Eine im Dashboard oder über
+die Admin-API gespeicherte Änderung gilt sofort auf dem Replikat, das sie
+verarbeitet hat; dieses erhöht zusätzlich eine Revision für den betroffenen
+Bereich in der gemeinsamen Tabelle `config_revisions`. Jedes Replikat fragt die
+Tabelle alle 2 Sekunden ab und lädt neu, was sich geändert hat, sodass die
+Änderung die anderen innerhalb weniger Sekunden erreicht. Beteiligt ist nur die
+gemeinsame Datenbank: kein Redis, und es funktioniert auf PostgreSQL und MongoDB
+gleich.
 
-| Im Dashboard geändert | Erreicht andere Replikate nach |
-| --- | --- |
-| Budget-Definitionen | **Nur nach Neustart** |
-| Rate-Limit-Regeln | **Nur nach Neustart** |
-| Virtuelle Modelle (einschließlich Failover-Ketten) | Bis zu `CACHE_REFRESH_INTERVAL` (standardmäßig 1 Stunde) |
-| Verwaltete API-Keys | Bis zu 60 Sekunden |
-| Guardrails, Workflows, Preisüberschreibungen | Etwa 60 Sekunden |
+Das umfasst Budgets (Definitionen, Einstellungen und Resets), Rate-Limit-Regeln,
+Provider-Zugangsdaten (Anlegen, Bearbeiten, Deaktivieren, Löschen), verwaltete
+API-Keys (einschließlich Widerruf), Benutzerrichtlinien, virtuelle Modelle,
+Preisüberschreibungen, Tagging-Regeln, Guardrails, Workflows und MCP-Server. Ein
+auf einem anderen Replikat hinzugefügter Provider routet, sobald seine
+Modellliste abgerufen wurde.
+
+Ein Replikat, das eine Änderung nicht übernehmen kann, protokolliert einmal eine
+Warnung und versucht es bei jeder Abfrage erneut, bis sie gilt. Eine Ausnahme:
+Ein gespeicherter Provider, der sich auf einem Replikat nicht aufbauen lässt,
+behält, was unter seinem Namen bereits lief, und wird bei der nächsten Änderung
+an einem beliebigen gespeicherten Provider erneut versucht, da jede Änderung alle
+neu lädt, oder beim Neustart. Ein Replikat, das eine Änderung nicht in
+`config_revisions` eintragen kann, versucht es ebenfalls bei jeder Abfrage
+erneut. Bis das gelingt, übernehmen die anderen Replikate die Änderung mit einer
+späteren Änderung im selben Bereich, mit der langsameren periodischen
+Aktualisierung, die einige Bereiche bereits hatten, mit einem manuellen
+Runtime-Refresh oder beim Neustart.
+
+`POST /admin/runtime/refresh` lädt auf dem empfangenden Replikat verwaltete
+API-Keys, virtuelle Modelle, Guardrails, Workflows, MCP-Server, Budgets und
+Rate-Limits neu. Gespeicherte Provider-Zugangsdaten lädt es nicht neu.
 
 <Warning>
-  Zwei davon sind betrieblich relevant. **Das Widerrufen eines verwalteten
-  API-Keys kann auf anderen Replikaten bis zu einer Minute dauern.** Und
-  **eine im Dashboard erstellte Budget- oder Rate-Limit-Regel erreicht andere
-  Replikate erst nach deren Neustart** – bei drei Replikaten gilt ein neues
-  Budget also zunächst nur für ein Drittel Ihres Traffics.
-
-  Wenn Sie mehrere Replikate betreiben, deklarieren Sie Budgets und
-  Rate-Limits als Code in `config.yaml` oder in Umgebungsvariablen, damit sie
-  beim Start identisch geladen werden, und starten Sie nach Änderungen im
-  Dashboard neu.
+  **Das Zurücksetzen von Rate-Limit-Zählern gilt nur auf dem Replikat, das den
+  Request verarbeitet hat.** Zähler sind pro Instanz (siehe Tabelle oben):
+  Regeländerungen werden verteilt, Zähler-Resets nicht.
 </Warning>
 
 ### Health-Probes und Herunterfahren
@@ -510,8 +523,8 @@ separat ein VACUUM aus, wenn die Dateigröße wichtig ist.
   Sie `SQLITE_PATH`.
 - Deklarieren Sie Provider in Umgebungsvariablen oder `config.yaml`, mit
   Werten aus einem Secret-Manager.
-- Deklarieren Sie Budgets und Rate-Limits als Code, wenn Sie mehrere Replikate
-  betreiben, und bemessen Sie Rate-Limit-Regeln pro Replikat.
+- Bemessen Sie Rate-Limit-Regeln pro Replikat, wenn Sie mehrere Replikate
+  betreiben.
 - Entscheiden Sie sich bewusst für eine Einstellung von `LOGGING_LOG_BODIES`
   und legen Sie die Aufbewahrungsfristen gezielt fest.
 - Richten Sie die Readiness auf `/health/ready` aus und setzen Sie
