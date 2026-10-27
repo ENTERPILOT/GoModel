@@ -299,6 +299,9 @@ pricing:
 
 budgets:
   enabled: true # env: BUDGETS_ENABLED; with no configured budgets this has no effect
+  # GoModel Pro: provider budgets with cost_basis "billed" count billed
+  # response-cache hits; false limits only requests the provider served.
+  provider_billed_cache_hits: true # env: BUDGETS_PROVIDER_BILLED_CACHE_HITS
   user_paths:
     # Env equivalent:
     # SET_BUDGET_USER__PATH__EXAMPLE="daily=10,weekly=50"

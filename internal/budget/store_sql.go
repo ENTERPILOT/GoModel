@@ -329,13 +329,18 @@ const sqlUncachedExpr = `(cache_type IS NULL OR cache_type = '')`
 // spendCostExpr renders the cost one usage row adds to a window, NULL when it
 // adds nothing. A provider window sums the provider cost of uncached rows. A
 // billed window sums billed cost, response-cache hits included since they are
-// billed too; an uncached row without a billed cost (written before markups
-// were enabled) counts at its provider cost so the budget never under-counts.
+// billed too unless the window excludes them; an uncached row without a billed
+// cost (written before markups were enabled) counts at its provider cost so
+// the budget never under-counts.
 func spendCostExpr(window SpendWindow) string {
-	if window.billed() {
+	switch {
+	case window.billedCacheHits():
 		return "CASE WHEN " + sqlUncachedExpr + " THEN COALESCE(billed_cost, total_cost) ELSE billed_cost END"
+	case window.billed():
+		return "CASE WHEN " + sqlUncachedExpr + " THEN COALESCE(billed_cost, total_cost) END"
+	default:
+		return "CASE WHEN " + sqlUncachedExpr + " THEN total_cost END"
 	}
-	return "CASE WHEN " + sqlUncachedExpr + " THEN total_cost END"
 }
 
 // spendSubjectMatch renders the usage-row predicate for one budget subject.

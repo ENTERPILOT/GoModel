@@ -293,6 +293,9 @@ Budżet rozliczeniowy:
   odpowiedź z cache zostanie zwrócona. Budżety na koszcie providera nigdy nie
   liczą cache hitów, a budżety providerów ich nie dotyczą, bo hit nie trafia do
   żadnego providera.
+- na providerze nadal wlicza do wydatków rozliczone cache hity jego modeli. Ustaw
+  `BUDGETS_PROVIDER_BILLED_CACHE_HITS=false` (`budgets.provider_billed_cache_hits`),
+  aby limitować tylko to, co rozliczono za requesty obsłużone przez providera.
 
 `cost_basis` przyjmuje wartość `provider` (domyślnie) albo `billed`. To atrybut,
 nie część klucza budżetu: zakres, podmiot i okres wyznaczają jeden budżet na

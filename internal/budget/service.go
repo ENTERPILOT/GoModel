@@ -49,6 +49,14 @@ func WithBilledCacheHits(enabled bool) ServiceOption {
 	}
 }
 
+// WithProviderBilledCacheHits controls whether provider budgets on billed cost
+// count billed response-cache hits. The default is true.
+func WithProviderBilledCacheHits(enabled bool) ServiceOption {
+	return func(service *Service) {
+		service.providerBilledCacheHits = enabled
+	}
+}
+
 // capabilities records which optional budget behaviors the deployment has.
 type capabilities struct {
 	quotaTemplates bool
@@ -84,6 +92,9 @@ type Service struct {
 
 	caps            capabilities
 	billedCacheHits bool
+	// providerBilledCacheHits keeps billed cache hits in provider budgets on
+	// billed cost; see config.BudgetsConfig.ProviderBilledCacheHits.
+	providerBilledCacheHits bool
 }
 
 func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Service, error) {
@@ -91,9 +102,10 @@ func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Se
 		return nil, fmt.Errorf("budget store is required")
 	}
 	service := &Service{
-		store:    store,
-		settings: DefaultSettings(),
-		caps:     capabilities{quotaTemplates: true, billedBudgets: true},
+		store:                   store,
+		settings:                DefaultSettings(),
+		caps:                    capabilities{quotaTemplates: true, billedBudgets: true},
+		providerBilledCacheHits: true,
 	}
 	for _, option := range options {
 		if option != nil {
@@ -485,11 +497,12 @@ func (s *Service) evaluate(ctx context.Context, budgets []Budget, now time.Time,
 			continue
 		}
 		windows = append(windows, SpendWindow{
-			Scope:     budget.Scope,
-			Subject:   budget.evaluationSubject(),
-			CostBasis: budget.CostBasis,
-			Start:     start,
-			End:       now,
+			Scope:            budget.Scope,
+			Subject:          budget.evaluationSubject(),
+			CostBasis:        budget.CostBasis,
+			Start:            start,
+			End:              now,
+			ExcludeCacheHits: budget.Scope == ScopeProvider && !s.providerBilledCacheHits,
 		})
 		windowIndexes = append(windowIndexes, i)
 	}
