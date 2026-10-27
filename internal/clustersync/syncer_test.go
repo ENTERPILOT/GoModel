@@ -192,6 +192,30 @@ func TestSyncerStartAndClose(t *testing.T) {
 	assert.Equal(t, 1, budgets.count())
 }
 
+// A server that fails to start ends the context its poller was started on;
+// starting the server again must start polling again.
+func TestSyncerStartsAgainAfterContextEnds(t *testing.T) {
+	ctx := context.Background()
+	syncer, err := NewSyncer(ctx, newFakeStore(nil))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = syncer.Close() })
+	syncer.interval = 5 * time.Millisecond
+	budgets := &countingRefresh{}
+	syncer.Register("budgets", budgets.refresh)
+
+	first, cancel := context.WithCancel(ctx)
+	syncer.Start(first)
+	cancel()
+	syncer.mu.Lock()
+	done := syncer.done
+	syncer.mu.Unlock()
+	<-done
+
+	syncer.Start(ctx)
+	syncer.Notifier("budgets")(ctx)
+	require.Eventually(t, func() bool { return budgets.count() == 1 }, time.Second, 5*time.Millisecond)
+}
+
 func TestNilSyncerIsInert(t *testing.T) {
 	var syncer *Syncer
 	syncer.Register("budgets", func(context.Context) error { return nil })

@@ -163,20 +163,30 @@ func (s *Syncer) announce(ctx context.Context, entity string) bool {
 	return true
 }
 
-// Start polls until Close or until ctx ends. It is idempotent.
+// Start polls until Close or until ctx ends. It does nothing while a poller
+// runs; once ctx has ended, as when the server it was started for failed to
+// start, a later Start polls again.
 func (s *Syncer) Start(ctx context.Context) {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed || s.cancel != nil {
+	if s.closed {
 		return
 	}
-	ctx, s.cancel = context.WithCancel(ctx)
-	s.done = make(chan struct{})
+	if s.done != nil {
+		select {
+		case <-s.done:
+		default:
+			return
+		}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	s.cancel, s.done = cancel, done
 	go func() {
-		defer close(s.done)
+		defer close(done)
 		ticker := time.NewTicker(s.interval)
 		defer ticker.Stop()
 		for {
