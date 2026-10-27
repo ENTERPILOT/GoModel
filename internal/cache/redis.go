@@ -2,8 +2,10 @@ package cache
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
+	"net"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -36,7 +38,7 @@ func NewRedisStore(cfg RedisStoreConfig) (*RedisStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid redis URL: %w", err)
 	}
-	opts.Dialer = egress.DialContext
+	opts.Dialer = redisDialer(opts.TLSConfig)
 	client := redis.NewClient(opts)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -91,4 +93,30 @@ func (s *RedisStore) Close() error {
 		return s.client.Close()
 	}
 	return nil
+}
+
+// A custom go-redis dialer owns the TLS handshake as well as the TCP connection.
+// Keep the egress hook on the raw connection without losing rediss verification.
+func redisDialer(tlsConfig *tls.Config) egress.DialFunc {
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		conn, err := egress.DialContext(ctx, network, address)
+		if err != nil || tlsConfig == nil {
+			return conn, err
+		}
+		config := tlsConfig.Clone()
+		if config.ServerName == "" {
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				_ = conn.Close()
+				return nil, err
+			}
+			config.ServerName = host
+		}
+		tlsConn := tls.Client(conn, config)
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			_ = conn.Close()
+			return nil, err
+		}
+		return tlsConn, nil
+	}
 }
