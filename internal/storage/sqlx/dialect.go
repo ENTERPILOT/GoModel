@@ -41,6 +41,11 @@ const (
 
 	// TypeSerialPK is an auto-assigned integer primary key.
 	TypeSerialPK = "{serial_pk}"
+
+	// TypeBytes is an opaque binary column. Both drivers bind and scan Go
+	// []byte against it; bind []byte{} rather than nil for an empty value,
+	// because a nil slice binds as NULL.
+	TypeBytes = "{bytes}"
 )
 
 var typeExpansions = map[Dialect]*strings.Replacer{
@@ -52,6 +57,7 @@ var typeExpansions = map[Dialect]*strings.Replacer{
 		TypeJSONText, "TEXT",
 		TypeTimestamp, "DATETIME",
 		TypeSerialPK, "INTEGER PRIMARY KEY AUTOINCREMENT",
+		TypeBytes, "BLOB",
 	),
 	PostgreSQL: strings.NewReplacer(
 		TypeInt64, "BIGINT",
@@ -61,6 +67,7 @@ var typeExpansions = map[Dialect]*strings.Replacer{
 		TypeJSONText, "JSONB",
 		TypeTimestamp, "TIMESTAMPTZ",
 		TypeSerialPK, "BIGSERIAL PRIMARY KEY",
+		TypeBytes, "BYTEA",
 	),
 }
 

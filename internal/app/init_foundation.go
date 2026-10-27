@@ -22,13 +22,15 @@ import (
 	"github.com/enterpilot/gomodel/internal/ratelimit"
 	"github.com/enterpilot/gomodel/internal/responsestore"
 	"github.com/enterpilot/gomodel/internal/runtimesettings"
+	"github.com/enterpilot/gomodel/internal/sharedstore"
 	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/telemetry"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
 // initStorage opens the one storage connection every subsystem shares, then
-// the runtime settings service that reconciles live configuration through it.
+// the runtime settings service that reconciles live configuration through it
+// and the shared store extensions coordinate through.
 func (b *bootstrap) initStorage() error {
 	app := b.app
 
@@ -60,6 +62,17 @@ func (b *bootstrap) initStorage() error {
 	}
 	if app.runtimeSettings != nil {
 		app.register(subsystemRuntimeSettings, ownedByShutdown, app.runtimeSettings.Close)
+	}
+
+	// The extension shared store exists only when a registered component
+	// asks for it, so a gateway without one creates no table. initServer
+	// binds it once the generation has built.
+	if len(sharedStoreAwareComponents(b.cfg.Extensions)) > 0 {
+		app.sharedStore, err = sharedstore.New(b.ctx, sharedStorage)
+		if err != nil {
+			return fmt.Errorf("failed to initialize extension shared store: %w", err)
+		}
+		app.register(subsystemSharedStore, ownedByShutdown, app.sharedStore.Close)
 	}
 	return nil
 }

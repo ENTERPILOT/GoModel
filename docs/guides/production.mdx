@@ -285,6 +285,7 @@ coordinate across instances.
 | [Budgets](/features/budgets) enforcement | Durable (database) | Correct across replicas. Spend is read from the shared usage table. |
 | [Usage and cost records](/features/cost-tracking) | Durable (database) | Aggregated correctly. |
 | Audit logs | Durable (database) | Complete across replicas. |
+| [SSO](/pro/sso) sign-out (Pro) | Durable (database) | A signed-out session is rejected on every replica within about 2 seconds. |
 | [Rate limits](/features/rate-limits) | In-memory, per instance | Effective limit is about `N x` the configured limit. Counters reset on restart. |
 | Circuit breakers | In-memory, per process | Each replica learns an outage separately, so upstream sees up to `N x failure_threshold` failures before any breaker opens. |
 | [Session affinity](/features/session-keeping) pins | In-memory, per instance | Sessions stick per replica, not globally, unless the load balancer is sticky. |
