@@ -476,6 +476,7 @@ func TestStreamChatCompletion_ViaResponsesTranslation(t *testing.T) {
 	out := string(body)
 	assert.True(t, strings.HasPrefix(out, "data: {"), "stream must open with a chat chunk, got %q", out)
 	assert.Contains(t, out, `"object":"chat.completion.chunk"`)
+	assert.Contains(t, out, `"total_tokens":5`, "IncludeUsage request must surface the upstream usage, got %q", out)
 	assert.True(t, strings.HasSuffix(out, "data: [DONE]\n\n"), "stream must end with [DONE], got %q", out)
 }
 
