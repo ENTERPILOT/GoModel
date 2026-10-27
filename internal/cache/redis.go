@@ -38,9 +38,13 @@ func NewRedisStore(cfg RedisStoreConfig) (*RedisStore, error) {
 	installRedisLogger()
 	opts, err := redis.ParseURL(cfg.URL)
 	if err != nil {
-		// url.Error quotes the whole URL, password included.
+		// url.Error quotes the whole URL, and an EscapeError the bad escape;
+		// either can hold the password.
 		if urlErr, ok := errors.AsType[*url.Error](err); ok {
 			err = urlErr.Err
+			if _, ok := errors.AsType[url.EscapeError](err); ok {
+				err = errors.New("invalid percent-escape")
+			}
 		}
 		return nil, fmt.Errorf("invalid redis URL: %w", err)
 	}
