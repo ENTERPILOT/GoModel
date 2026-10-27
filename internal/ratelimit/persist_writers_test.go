@@ -2,6 +2,7 @@ package ratelimit
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -101,6 +102,19 @@ func acquireN(t *testing.T, service *Service, n int, now time.Time) {
 	}
 }
 
+// flakyDeleteStore fails DeleteCounter while err is set.
+type flakyDeleteStore struct {
+	*memStore
+	err error
+}
+
+func (s *flakyDeleteStore) DeleteCounter(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {
+	if s.err != nil {
+		return s.err
+	}
+	return s.memStore.DeleteCounter(ctx, scope, subject, periodSeconds)
+}
+
 // A single instance restarting comes back under a new writer ID each time,
 // next to the rows of its earlier runs. It must get exactly its own count
 // back: not lose it, and not add the runs up.
@@ -188,6 +202,41 @@ func TestRuleModeChangeDeletesEveryWritersRows(t *testing.T) {
 	perChild.PerChild = true
 	require.NoError(t, second.UpsertRules(ctx, []Rule{perChild}))
 	require.Empty(t, store.counters, "a mode change clears every writer's rows")
+	require.NoError(t, second.UpsertRules(ctx, []Rule{rule}))
+	acquireN(t, second, 1, now)
+	second.Close()
+
+	restarted := startedService(t, store)
+	assert.Equal(t, int64(1), requestsUsed(t, restarted, now))
+}
+
+// A mode change whose row delete fails has already swapped its rules in, so
+// retrying the same update finds nothing that differs. The delete must still
+// be retried, or switching back and restarting restores the cleared count.
+func TestRuleModeChangeRetriesFailedRowDelete(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	store := &flakyDeleteStore{memStore: teamStore(t)}
+
+	first := startedService(t, store)
+	acquireN(t, first, 90, now)
+	first.Close()
+
+	second := startedService(t, store)
+	require.Equal(t, int64(90), requestsUsed(t, second, now))
+	rule := Rule{
+		Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodDaySeconds,
+		MaxRequests: new(int64(100)), Source: SourceManual,
+	}
+	perChild := rule
+	perChild.PerChild = true
+	store.err = errors.New("store unavailable")
+	require.Error(t, second.UpsertRules(ctx, []Rule{perChild}))
+	require.NotEmpty(t, store.counters)
+
+	store.err = nil
+	require.NoError(t, second.UpsertRules(ctx, []Rule{perChild}))
+	require.Empty(t, store.counters, "the retried update deletes the rows the failed one left")
 	require.NoError(t, second.UpsertRules(ctx, []Rule{rule}))
 	acquireN(t, second, 1, now)
 	second.Close()
