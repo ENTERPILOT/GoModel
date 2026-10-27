@@ -685,6 +685,8 @@
   "budgets_cost_basis_billed": "Abgerechnete Kosten",
   "budgets_billed_badge": "abgerechnet",
   "budgets_billed_title": "Begrenzt abgerechnete Kosten: Anbieterkosten plus Aufschlag, einschließlich abgerechneter Cache-Treffer",
+  "budgets_billed_on_provider_badge": "abgerechnet · auf Anbieterkosten",
+  "budgets_billed_on_provider_title": "Als abgerechnet gespeichert, aber auf Anbieterkosten durchgesetzt: Budgets auf abgerechneten Kosten brauchen eine GoModel-Pro-Lizenz mit der Billing-Berechtigung und PRICING_MARKUPS_ENABLED=true. Beim Bearbeiten bleibt es abgerechnet.",
   "models_title": "Modelle",
   "models_total_count": "{count} Modelle",
   "models_unavailable": "Die Funktion für virtuelle Modelle ist nicht verfügbar.",

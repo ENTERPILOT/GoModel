@@ -149,7 +149,7 @@ func (s *Service) Refresh(ctx context.Context) error {
 	s.budgets = budgets
 	s.settings = settings
 	s.billedConsumerBudgets = slices.ContainsFunc(budgets, func(b Budget) bool {
-		return b.CostBasis == CostBasisBilled && b.Scope != ScopeProvider
+		return b.EnforcedBasis() == CostBasisBilled && b.Scope != ScopeProvider
 	})
 	s.mu.Unlock()
 	return nil
@@ -210,19 +210,43 @@ func (s *Service) ReplaceConfigBudgets(ctx context.Context, budgets []Budget) er
 }
 
 // validateCapabilities refuses budgets being written that need a capability
-// the deployment does not have.
+// the deployment does not have. A budget already stored as billed keeps its
+// basis while billed budgets are unavailable, so editing its amount does not
+// switch it to provider cost for good.
 func (s *Service) validateCapabilities(budgets []Budget) error {
 	if s == nil {
 		return nil
 	}
-	return s.caps.validate(budgets)
+	checked := make([]Budget, 0, len(budgets))
+	for _, item := range budgets {
+		if item.CostBasis == CostBasisBilled && s.StoredAsBilled(item.Scope, item.Subject, item.PeriodSeconds) {
+			item.CostBasis = CostBasisProvider
+		}
+		checked = append(checked, item)
+	}
+	return s.caps.validate(checked)
+}
+
+// StoredAsBilled reports whether the budget with this key is stored on billed
+// cost, whether or not billed budgets are currently available.
+func (s *Service) StoredAsBilled(scope Scope, subject string, periodSeconds int64) bool {
+	if s == nil {
+		return false
+	}
+	key := budgetKey(scope, subject, periodSeconds)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return slices.ContainsFunc(s.budgets, func(b Budget) bool {
+		return b.CostBasis == CostBasisBilled && budgetKey(b.Scope, b.Subject, b.PeriodSeconds) == key
+	})
 }
 
 // downgradeUnavailableBilled enforces stored billed budgets on provider cost
 // while billed budgets are unavailable (license lapsed or markups disabled),
-// so the limit stays in force and the gateway still starts; changing the
-// budget or restoring the entitlement ends it. Each budget is logged once.
-// The caller holds s.mu.
+// so the limit stays in force and the gateway still starts; restoring the
+// entitlement or switching the budget to provider cost ends it. CostBasis
+// keeps the stored basis, so listings show it and edits keep it. Each budget
+// is logged once. The caller holds s.mu.
 func (s *Service) downgradeUnavailableBilled(budgets []Budget) []Budget {
 	if s.caps.billedBudgets {
 		return budgets
@@ -231,7 +255,7 @@ func (s *Service) downgradeUnavailableBilled(budgets []Budget) []Budget {
 		if budgets[i].CostBasis != CostBasisBilled {
 			continue
 		}
-		budgets[i].CostBasis = CostBasisProvider
+		budgets[i].EnforcedCostBasis = CostBasisProvider
 		key := budgetKey(budgets[i].Scope, budgets[i].Subject, budgets[i].PeriodSeconds)
 		if _, warned := s.downgradeWarned[key]; warned {
 			continue
@@ -388,7 +412,7 @@ func (s *Service) CheckCacheHit(ctx context.Context, subjects Subjects, now time
 	if err != nil {
 		return err
 	}
-	matching = slices.DeleteFunc(matching, func(b Budget) bool { return b.CostBasis != CostBasisBilled })
+	matching = slices.DeleteFunc(matching, func(b Budget) bool { return b.EnforcedBasis() != CostBasisBilled })
 	if len(matching) == 0 {
 		return nil
 	}
@@ -499,7 +523,7 @@ func (s *Service) evaluate(ctx context.Context, budgets []Budget, now time.Time,
 		windows = append(windows, SpendWindow{
 			Scope:            budget.Scope,
 			Subject:          budget.evaluationSubject(),
-			CostBasis:        budget.CostBasis,
+			CostBasis:        budget.EnforcedBasis(),
 			Start:            start,
 			End:              now,
 			ExcludeCacheHits: budget.Scope == ScopeProvider && !s.providerBilledCacheHits,
