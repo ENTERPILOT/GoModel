@@ -580,20 +580,12 @@ func firstAndAll(keys []string) (string, []string) {
 	return keys[0], keys
 }
 
-// install unregisters whatever is currently registered under name (a no-op
-// if nothing is), registers the built provider in its place, records its
-// effective configuration, and records its secret references for rotation.
+// install atomically replaces the provider and its inventory settings, records
+// its effective configuration, and records its secret references for rotation.
 func (s *CredentialsService) install(name string, built builtCredential) {
 	cfg := built.cfg
-	s.registry.UnregisterProvider(name)
-	s.registry.RegisterProviderWithNameAndType(built.provider, name, cfg.Type)
-	if len(cfg.Models) > 0 {
-		s.registry.SetProviderConfiguredModels(name, cfg.Models)
-	}
-	if len(cfg.ModelMetadataOverrides) > 0 {
-		s.registry.SetProviderMetadataOverrides(name, cfg.ModelMetadataOverrides)
-	}
-	s.registry.SetProviderModelFilter(name, cfg.ModelFilter)
+	cfg.Name = name
+	s.registry.ReplaceProviderWithConfig(built.provider, cfg)
 
 	s.mu.Lock()
 	s.configs[name] = cfg

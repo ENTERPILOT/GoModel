@@ -154,6 +154,74 @@ func TestCredentialsService_UpsertRegistersAndRoutesImmediately(t *testing.T) {
 	assert.Equal(t, "test", stored.Type)
 }
 
+func TestCredentialsService_UpsertKeepsInventoryWhileReplacementFetchBlocks(t *testing.T) {
+	ctx := t.Context()
+	registry := NewModelRegistry()
+	store := newFakeCredentialStore()
+	var replacement *replacingRegistryProvider
+	providerBuilds := 0
+	replacementBuilt := make(chan struct{})
+	factory := NewProviderFactory()
+	factory.Add(Registration{
+		Type: "test",
+		New: func(_ ProviderConfig, _ ProviderOptions) core.Provider {
+			providerBuilds++
+			if providerBuilds == 2 {
+				replacement = &replacingRegistryProvider{
+					registryMockProvider: &registryMockProvider{modelsResponse: &core.ModelsResponse{Data: []core.Model{{ID: "new-model", Object: "model"}}}},
+					blockList:            true,
+					listStarted:          make(chan struct{}),
+					listRelease:          make(chan struct{}),
+					chatStarted:          make(chan struct{}),
+					chatRelease:          make(chan struct{}),
+				}
+				close(replacementBuilt)
+				return replacement
+			}
+			return &registryMockProvider{modelsResponse: &core.ModelsResponse{Data: []core.Model{{ID: "old-model", Object: "model"}}}}
+		},
+	})
+	svc, err := NewCredentialsService(ctx, factory, registry, store, nil, config.ResilienceConfig{}, nil)
+	require.NoError(t, err)
+	require.NoError(t, svc.Upsert(ctx, ManagedProviderCredential{
+		Name: "managed", Type: "test", APIKeys: []string{"sk-old"}, Models: []string{"old-model"}, Enabled: true,
+	}))
+	require.True(t, registry.Supports("managed/old-model"))
+
+	upsertDone := make(chan error, 1)
+	go func() {
+		upsertDone <- svc.Upsert(ctx, ManagedProviderCredential{
+			Name: "managed", Type: "test", APIKeys: []string{"sk-new"}, Models: []string{"new-model"}, Enabled: true,
+		})
+	}()
+	select {
+	case <-replacementBuilt:
+	case <-time.After(5 * time.Second):
+		t.Fatal("replacement provider was not constructed")
+	}
+	var releaseListOnce sync.Once
+	releaseList := func() { releaseListOnce.Do(func() { close(replacement.listRelease) }) }
+	t.Cleanup(releaseList)
+	select {
+	case <-replacement.listStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("replacement model fetch did not start")
+	}
+
+	assert.True(t, registry.Supports("managed/old-model"))
+	assert.Same(t, replacement, registry.GetProvider("managed/old-model"))
+	releaseList()
+	select {
+	case err := <-upsertDone:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for credential upsert refresh")
+	}
+	assert.False(t, registry.Supports("managed/old-model"))
+	assert.True(t, registry.Supports("managed/new-model"))
+	assert.Same(t, replacement, registry.GetProvider("managed/new-model"))
+}
+
 // TestCredentialsService_UpsertSucceedsWhenTheProviderRejectsTheKey covers the
 // everyday case of a typo'd or expired API key: the row is still valid input
 // (a non-empty key, a known type), so Upsert must report success and leave

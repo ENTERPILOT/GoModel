@@ -335,6 +335,21 @@ func (r *ModelRegistry) applyFetchedInventory(
 
 	r.mu.Lock()
 	r.dropUnregisteredFetchedProvidersLocked(&fetched)
+	// A provider may have been replaced while this sweep was fetching its old
+	// adapter. Keep the replacement's rebound inventory when the old result was
+	// discarded, rather than publishing a temporary catalog gap.
+	for _, provider := range r.providers {
+		name := r.providerNames[provider]
+		if _, fetched := fetched.modelsByProvider[name]; fetched {
+			continue
+		}
+		if _, failed := fetched.runtimeUpdates[name]; failed {
+			continue
+		}
+		if previous := r.discoveredByProvider[name]; len(previous) > 0 {
+			fetched.modelsByProvider[name] = previous
+		}
+	}
 	stale := make(map[string]bool, len(fetched.runtimeUpdates))
 	carriedForward := 0
 	for name := range fetched.runtimeUpdates {
