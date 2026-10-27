@@ -129,6 +129,13 @@ func TestServiceKeepsStoredBilledBasisOnEditWhenDisabled(t *testing.T) {
 		PeriodSeconds: PeriodMonthlySeconds, Amount: 200, Source: SourceManual,
 	}})
 	require.ErrorIs(t, err, ErrBilledBudgetsUnavailable)
+	// Config budgets get the full check, even for a stored billed key.
+	err = service.ReplaceConfigBudgets(ctx, []Budget{{
+		Scope: ScopeLabel, Subject: "acme", CostBasis: CostBasisBilled,
+		PeriodSeconds: PeriodMonthlySeconds, Amount: 200, Source: SourceConfig,
+	}})
+	require.ErrorIs(t, err, ErrBilledBudgetsUnavailable)
+	assert.Zero(t, store.replaceCalls)
 }
 
 func TestServicePassesCostBasisToSpendWindows(t *testing.T) {

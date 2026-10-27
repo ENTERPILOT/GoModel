@@ -173,7 +173,7 @@ func (s *Service) UpsertBudgets(ctx context.Context, budgets []Budget) error {
 	if s == nil || s.store == nil {
 		return ErrUnavailable
 	}
-	if err := s.validateCapabilities(budgets); err != nil {
+	if err := s.validateEdits(budgets); err != nil {
 		return err
 	}
 	if err := s.store.UpsertBudgets(ctx, budgets); err != nil {
@@ -200,7 +200,9 @@ func (s *Service) ReplaceConfigBudgets(ctx context.Context, budgets []Budget) er
 	if s == nil || s.store == nil {
 		return ErrUnavailable
 	}
-	if err := s.validateCapabilities(budgets); err != nil {
+	// Config budgets are declared, not edited, so they get the full check,
+	// like startup seeding.
+	if err := s.caps.validate(budgets); err != nil {
 		return err
 	}
 	if err := s.store.ReplaceConfigBudgets(ctx, budgets); err != nil {
@@ -209,11 +211,11 @@ func (s *Service) ReplaceConfigBudgets(ctx context.Context, budgets []Budget) er
 	return s.Refresh(ctx)
 }
 
-// validateCapabilities refuses budgets being written that need a capability
-// the deployment does not have. A budget already stored as billed keeps its
-// basis while billed budgets are unavailable, so editing its amount does not
-// switch it to provider cost for good.
-func (s *Service) validateCapabilities(budgets []Budget) error {
+// validateEdits refuses budgets being written that need a capability the
+// deployment does not have. A budget already stored as billed keeps its basis
+// while billed budgets are unavailable, so editing its amount does not switch
+// it to provider cost for good.
+func (s *Service) validateEdits(budgets []Budget) error {
 	if s == nil {
 		return nil
 	}
