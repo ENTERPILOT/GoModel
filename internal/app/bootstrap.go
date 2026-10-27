@@ -134,6 +134,7 @@ func (b *bootstrap) phases() []func() error {
 		b.initPricing,
 		b.initWorkflows,
 		b.initServerDependencies,
+		b.initClusterSync,
 		b.initServerConfig,
 		b.initAdmin,
 		b.initResponseCache,

@@ -49,6 +49,7 @@ const (
 	subsystemLive                = "live broker"
 	subsystemStorage             = "storage"
 	subsystemRuntimeSettings     = "runtime settings"
+	subsystemClusterSync         = "cluster config sync"
 	subsystemSharedStore         = "extension shared store"
 	subsystemProviders           = "providers"
 	subsystemSecretRotation      = "secret rotation"
@@ -118,6 +119,9 @@ func (a *App) shutdownOrder() []registeredSubsystem {
 		// Stop live setting reconciliation before tearing down anything it can
 		// reconfigure.
 		{name: subsystemRuntimeSettings, close: closerOf(a.runtimeSettings)},
+		// Stop refreshing snapshots changed on other instances before the
+		// services that hold them are torn down.
+		{name: subsystemClusterSync, close: closerOf(a.clusterSync)},
 		// Fail extension shared-store calls with ext.ErrSharedStoreClosed
 		// from here on, so an extension's background work never reaches the
 		// connection closed below. The server has drained, so no request

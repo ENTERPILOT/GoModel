@@ -19,6 +19,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/batch"
 	"github.com/enterpilot/gomodel/internal/budget"
+	"github.com/enterpilot/gomodel/internal/clustersync"
 	"github.com/enterpilot/gomodel/internal/conversationstore"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/encryption"
@@ -77,6 +78,7 @@ type App struct {
 	storage             storage.Storage
 	secrets             *encryption.Box
 	runtimeSettings     *runtimesettings.Service
+	clusterSync         *clustersync.Syncer
 	sharedStore         *sharedstore.Store // nil unless an extension takes it
 	versionCheck        *versioncheck.Checker
 	extensionAuth       bool
@@ -253,6 +255,10 @@ func (a *App) startServer(ctx context.Context, address string, start func(contex
 	// Rotated secrets apply only to the generation that serves; see
 	// secretRotation.start.
 	a.secretRotation.start(serverCtx)
+	// So do configuration changes made on other instances: a replacement
+	// still being built has nothing to refresh yet, and its first tick
+	// catches up on everything changed since it was built.
+	a.clusterSync.Start(serverCtx)
 
 	slog.Info("starting server", "address", address)
 	err := start(serverCtx)
