@@ -203,7 +203,22 @@ func (s *Syncer) Close() error {
 		cancel()
 		<-done
 	}
+	s.flushAnnouncements(context.Background())
 	return nil
+}
+
+// flushAnnouncements makes one last attempt to announce the changes whose
+// announcement failed, so a graceful shutdown or rolling restart does not
+// strand them. Pending announcements live only in memory: a store that stays
+// unreachable through shutdown, or a crash, still loses them, and other
+// instances then pick the change up from a later change to the same entity,
+// a periodic refresh, or a restart.
+func (s *Syncer) flushAnnouncements(ctx context.Context) {
+	for _, entity := range s.unannouncedEntities() {
+		if !s.announce(ctx, entity) {
+			return
+		}
+	}
 }
 
 // poll retries the failed announcements, then reads every revision and

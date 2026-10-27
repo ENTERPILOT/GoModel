@@ -45,8 +45,9 @@ type Service struct {
 
 	mu       sync.RWMutex
 	snapshot snapshot
-	// refreshMu serializes Refresh from the store read through the swap, so
-	// a slower refresh never installs an older one over a newer one.
+	// refreshMu serializes Refresh, from the store read through the swap, and
+	// the local applies, so a slower refresh never installs an older snapshot
+	// over a newer one.
 	refreshMu sync.Mutex
 
 	// changed is called after every successful write; see SetChangeNotifier.
@@ -589,6 +590,8 @@ func (s *Service) applyUpsert(key AuthKey, now time.Time) {
 	if s == nil {
 		return
 	}
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -616,6 +619,8 @@ func (s *Service) applyKeyUpdate(id string, now time.Time, mutate func(*AuthKey)
 	if s == nil {
 		return
 	}
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -639,6 +644,8 @@ func (s *Service) applyDeactivate(id string, now time.Time) {
 	if s == nil {
 		return
 	}
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

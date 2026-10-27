@@ -268,3 +268,24 @@ func TestSyncerStopsRetryingAnnouncementsAfterFirstFailure(t *testing.T) {
 	assert.Equal(t, []string{"rate_limits", "budgets", "auth_keys"}, store.bumps, "a healthy store drains every pending announcement")
 	store.mu.Unlock()
 }
+
+func TestSyncerCloseFlushesPendingAnnouncements(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore(nil)
+	syncer, err := NewSyncer(ctx, store)
+	require.NoError(t, err)
+
+	store.mu.Lock()
+	store.bumpErr = errors.New("database unavailable")
+	store.mu.Unlock()
+	syncer.Notifier("budgets")(ctx)
+
+	store.mu.Lock()
+	store.bumpErr = nil
+	store.mu.Unlock()
+	require.NoError(t, syncer.Close())
+
+	revisions, err := store.Revisions(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), revisions["budgets"], "a pending announcement is flushed on close")
+}
