@@ -7,7 +7,9 @@ import "github.com/enterpilot/gomodel/pluginapi"
 // policies, failover, usage accounting, and audit apply as for a plugin's
 // internal calls. Calls carry origin "plugin", skip guardrails, and are
 // scoped to "<request user path>/extensions/<extension name>", so usage and
-// the audit trail attribute them to the extension.
+// the audit trail attribute them to the extension; '/' and ':' in the name
+// become '-'. A rewriter runs before its request is admitted, so every call
+// is admitted on its own against that path's rate limits and budgets.
 type Inference interface {
 	pluginapi.Inference
 	pluginapi.Decisions

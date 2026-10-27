@@ -1,6 +1,8 @@
 package app
 
 import (
+	"strings"
+
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/pluginapi"
@@ -19,9 +21,19 @@ func bindRewriterInference(registry *ext.Registry, deps plugins.HostDeps) {
 			continue
 		}
 		if aware, ok := rewriter.(ext.InferenceAware); ok && !nilInterface(aware) {
-			aware.SetInference(newExtensionInference(deps, rewriter.Name()))
+			aware.SetInference(newExtensionInference(deps, userPathSegment(rewriter.Name())))
 		}
 	}
+}
+
+// userPathSegment makes an extension name usable as one user-path segment:
+// '/' and ':' become '-', and an empty or dot-only name becomes "extension".
+func userPathSegment(name string) string {
+	segment := strings.NewReplacer("/", "-", ":", "-").Replace(strings.TrimSpace(name))
+	if strings.Trim(segment, ".") == "" {
+		return "extension"
+	}
+	return segment
 }
 
 // extensionInference adapts a plugin host scoped to extensions to

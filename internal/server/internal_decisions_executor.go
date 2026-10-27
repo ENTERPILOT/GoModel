@@ -43,6 +43,8 @@ func NewInternalDecisionsExecutor(provider core.RoutableProvider, cfg InternalCh
 		usageLogger:            cfg.UsageLogger,
 		pricingResolver:        cfg.PricingResolver,
 		responseCache:          cfg.ResponseCache,
+		rateLimiter:            cfg.RateLimiter,
+		budgetChecker:          cfg.BudgetChecker,
 	}
 	service.orchestrator = service.newInferenceOrchestrator()
 	return &InternalDecisionsExecutor{service: service}
@@ -107,6 +109,11 @@ func (e *InternalDecisionsExecutor) Decide(ctx context.Context, body []byte) (an
 		}
 		workflow = promoted
 	}
+	release, err := admitInternal(ctx, s.rateLimiter, s.budgetChecker, workflow)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	eligible := func(selector core.ModelSelector, providerType string) bool {
 		return s.decisionsUnsupportedReason(router, selector, providerType) == "" && s.readsImages(selector, providerType, images)
 	}

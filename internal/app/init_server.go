@@ -253,7 +253,23 @@ func (b *bootstrap) initResponseCache() error {
 		app.guardrails.Service.SetChatCompleter(internalGuardrailExecutor)
 		app.guardrails.Service.SetDecider(decider)
 	}
-	b.internalInference = plugins.HostDeps{Chat: internalGuardrailExecutor, Decisions: decider}
+	// Rewriters call models before their request is admitted, so their
+	// executors admit every call themselves.
+	extensionCfg := internalCfg
+	if app.rateLimits.Service != nil {
+		extensionCfg.RateLimiter = app.rateLimits.Service
+	}
+	if app.budgets.Service != nil {
+		extensionCfg.BudgetChecker = app.budgets.Service
+	}
+	b.internalInference = plugins.HostDeps{
+		Chat: server.NewInternalChatCompletionExecutor(b.provider, extensionCfg),
+		Decisions: pluginDecider{
+			InternalDecisionsExecutor: server.NewInternalDecisionsExecutor(b.provider, extensionCfg),
+			router:                    app.providers.Router,
+			virtualModels:             vm,
+		},
+	}
 	return nil
 }
 

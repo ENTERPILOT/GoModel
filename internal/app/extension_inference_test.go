@@ -82,6 +82,28 @@ func TestBindRewriterInference(t *testing.T) {
 	assert.False(t, router.inference.DecisionModel("openai/gpt-5-mini"))
 }
 
+// A name that is not one user-path segment still attributes its calls
+// instead of failing them.
+func TestBindRewriterInferenceSanitizesNames(t *testing.T) {
+	for name, want := range map[string]string{
+		"router/v2":   "/acme/extensions/router-v2",
+		"pro:routing": "/acme/extensions/pro-routing",
+		"..":          "/acme/extensions/extension",
+		" ":           "/acme/extensions/extension",
+	} {
+		registry := &ext.Registry{}
+		router := &inferenceAwareRewriter{name: name}
+		registry.RegisterRewriter(router)
+		chat := &recordingChat{}
+		bindRewriterInference(registry, plugins.HostDeps{Chat: chat})
+
+		ctx := core.WithEffectiveUserPath(context.Background(), "/acme")
+		_, err := router.inference.Complete(ctx, pluginapi.InferenceRequest{Model: "openai/gpt-5-mini"})
+		require.NoError(t, err, name)
+		assert.Equal(t, want, core.UserPathFromContext(chat.ctx), name)
+	}
+}
+
 func TestBindRewriterInferenceWithoutExecutors(t *testing.T) {
 	registry := &ext.Registry{}
 	router := &inferenceAwareRewriter{name: "router"}

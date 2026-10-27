@@ -28,6 +28,11 @@ type InternalChatCompletionExecutorConfig struct {
 	UsageLogger            usage.LoggerInterface
 	PricingResolver        usage.PricingResolver
 	ResponseCache          *responsecache.ResponseCacheMiddleware
+	// RateLimiter and BudgetChecker, when set, admit every call before it
+	// dispatches and gate failover targets. Leave them unset for callers
+	// admitted with their request, such as guardrails.
+	RateLimiter   RateLimiter
+	BudgetChecker BudgetChecker
 }
 
 const chatCompletionsPath = "/v1/chat/completions"
@@ -42,11 +47,30 @@ type InternalChatCompletionExecutor struct {
 	orchestrator           *gateway.InferenceOrchestrator
 	modelAuthorizer        RequestModelAuthorizer
 	responseCache          *responsecache.ResponseCacheMiddleware
+	rateLimiter            RateLimiter
+	budgetChecker          BudgetChecker
 }
 
 // NewInternalChatCompletionExecutor creates a transport-free translated chat
 // executor that reuses workflow resolution, failover, usage, and audit logic.
 func NewInternalChatCompletionExecutor(provider core.RoutableProvider, cfg InternalChatCompletionExecutorConfig) *InternalChatCompletionExecutor {
+	inference := gateway.InferenceConfig{
+		Provider:                 provider,
+		ModelResolver:            cfg.ModelResolver,
+		ModelAuthorizer:          cfg.ModelAuthorizer,
+		WorkflowPolicyResolver:   cfg.WorkflowPolicyResolver,
+		FailoverResolver:         cfg.FailoverResolver,
+		FailoverPolicy:           cfg.FailoverPolicy,
+		UsageLogger:              cfg.UsageLogger,
+		PricingResolver:          cfg.PricingResolver,
+		TranslatedRequestPatcher: nil,
+	}
+	if cfg.RateLimiter != nil {
+		inference.RouteGate = cfg.RateLimiter
+	}
+	if gate, ok := cfg.BudgetChecker.(gateway.BudgetGate); ok {
+		inference.BudgetGate = gate
+	}
 	return &InternalChatCompletionExecutor{
 		provider:               provider,
 		modelResolver:          cfg.ModelResolver,
@@ -54,17 +78,9 @@ func NewInternalChatCompletionExecutor(provider core.RoutableProvider, cfg Inter
 		workflowPolicyResolver: cfg.WorkflowPolicyResolver,
 		logger:                 cfg.AuditLogger,
 		responseCache:          cfg.ResponseCache,
-		orchestrator: gateway.NewInferenceOrchestrator(gateway.InferenceConfig{
-			Provider:                 provider,
-			ModelResolver:            cfg.ModelResolver,
-			ModelAuthorizer:          cfg.ModelAuthorizer,
-			WorkflowPolicyResolver:   cfg.WorkflowPolicyResolver,
-			FailoverResolver:         cfg.FailoverResolver,
-			FailoverPolicy:           cfg.FailoverPolicy,
-			UsageLogger:              cfg.UsageLogger,
-			PricingResolver:          cfg.PricingResolver,
-			TranslatedRequestPatcher: nil,
-		}),
+		rateLimiter:            cfg.RateLimiter,
+		budgetChecker:          cfg.BudgetChecker,
+		orchestrator:           gateway.NewInferenceOrchestrator(inference),
 	}
 }
 
@@ -112,6 +128,11 @@ func (e *InternalChatCompletionExecutor) ChatCompletion(ctx context.Context, req
 	if err != nil {
 		return nil, err
 	}
+	release, err := admitInternal(ctx, e.rateLimiter, e.budgetChecker, workflow)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 
 	ctx = e.orchestrator.WithCacheRequestContext(ctx, workflow)
 	execReq := gateway.CloneChatRequestForSelector(req, resolution.ResolvedSelector)
