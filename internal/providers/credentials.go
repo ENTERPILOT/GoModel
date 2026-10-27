@@ -238,25 +238,21 @@ func (s *CredentialsService) IsManaged(name string) bool {
 // Declarative providers are untouched: providers.Init already registered them.
 func (s *CredentialsService) Reload(ctx context.Context) error {
 	installed, err := s.reconcile(ctx)
-	if err != nil {
-		return err
-	}
 	if installed {
 		s.registry.InitializeAsync(ctx)
 	}
-	return nil
+	return err
 }
 
 // Refresh brings the registry in line with the stored rows, which another
 // gateway instance sharing the database may have changed: it installs new
 // and edited credentials, and unregisters deleted and disabled ones.
 // Unchanged credentials keep their running provider. The model inventory of
-// newly installed providers is fetched in the background, bounded by ctx.
+// newly installed providers is fetched in the background, bounded by ctx,
+// even when a later pass fails: the next Refresh sees them as running and
+// would not fetch it again.
 func (s *CredentialsService) Refresh(ctx context.Context) error {
 	installed, err := s.reconcile(ctx)
-	if err != nil {
-		return err
-	}
 	if installed {
 		go func() {
 			refreshCtx, cancel := context.WithTimeout(ctx, credentialModelRefreshTimeout)
@@ -266,7 +262,7 @@ func (s *CredentialsService) Refresh(ctx context.Context) error {
 			}
 		}()
 	}
-	return nil
+	return err
 }
 
 // credentialModelRefreshTimeout bounds the background model fetch after a

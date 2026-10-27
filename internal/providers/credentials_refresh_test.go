@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -152,12 +153,17 @@ func TestCredentialsServiceAnnouncesSavesAndDeletes(t *testing.T) {
 }
 
 // hookedListStore runs onList, once, after the next List has read the rows.
+// List fails with listErr while it is set.
 type hookedListStore struct {
 	*fakeCredentialStore
-	onList func()
+	onList  func()
+	listErr error
 }
 
 func (s *hookedListStore) List(ctx context.Context) ([]ManagedProviderCredential, error) {
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
 	rows, err := s.fakeCredentialStore.List(ctx)
 	if hook := s.onList; hook != nil {
 		s.onList = nil
@@ -217,4 +223,36 @@ func TestCredentialsServiceRefreshAppliesRemoteChangeAfterConcurrentRotation(t *
 			tc.check(t, reader)
 		})
 	}
+}
+
+// A refresh whose retry pass fails has still installed what the first pass
+// read. Those providers' models must be fetched anyway: the next refresh sees
+// them running and installs nothing, so it would never fetch them.
+func TestCredentialsServiceRefreshFetchesModelsWhenRetryPassFails(t *testing.T) {
+	ctx := t.Context()
+	store := &hookedListStore{fakeCredentialStore: newFakeCredentialStore()}
+	writer := newCredentialsInstance(t, store)
+	require.NoError(t, writer.service.Upsert(ctx, ManagedProviderCredential{Name: "rotated", Type: "test", APIKeys: []string{"sk-one"}, Enabled: true}))
+	reader := newCredentialsInstance(t, store)
+	// Let the startup model fetch finish, so only the refresh can fetch
+	// models for what it installs.
+	require.Eventually(t, func() bool { return reader.registry.Supports("rotated/test-model") }, time.Second, 5*time.Millisecond)
+
+	require.NoError(t, writer.service.Upsert(ctx, ManagedProviderCredential{Name: "rotated", Type: "test", APIKeys: []string{"sk-two"}, Enabled: true}))
+	require.NoError(t, writer.service.Upsert(ctx, ManagedProviderCredential{Name: "fresh", Type: "test", APIKeys: []string{"sk-one"}, Enabled: true}))
+	// A local rotation of "rotated" makes the first pass skip it, and the
+	// store is unreachable for the retry pass.
+	store.onList = func() {
+		reader.service.mu.Lock()
+		reader.service.revisions["rotated"]++
+		reader.service.mu.Unlock()
+		store.listErr = errors.New("store unavailable")
+	}
+	require.Error(t, reader.service.Refresh(ctx))
+	require.NotNil(t, reader.registry.ProviderByName("fresh"))
+	require.Eventually(t, func() bool { return reader.registry.Supports("fresh/test-model") }, time.Second, 5*time.Millisecond)
+
+	store.listErr = nil
+	require.NoError(t, reader.service.Refresh(ctx))
+	assert.True(t, reader.registry.Supports("fresh/test-model"))
 }
