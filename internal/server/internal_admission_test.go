@@ -89,3 +89,19 @@ func TestInternalDecisions_AdmitsWhenConfigured(t *testing.T) {
 		})
 	}
 }
+
+// A saturated primary provider defers to failover as over HTTP: the call
+// skips the primary and is served by the configured failover target.
+func TestInternalDecisions_SaturatedPrimaryFailsOver(t *testing.T) {
+	provider := newDecisionsTestProvider()
+	executor := NewInternalDecisionsExecutor(provider, InternalChatCompletionExecutorConfig{
+		FailoverResolver: failoverResolverStub{selectors: []core.ModelSelector{{Provider: "openai", Model: "gpt-6-luna"}}},
+		RateLimiter:      newTestRateLimitService(t, rateLimitProviderRule("kev", 1)),
+	})
+
+	_, err := executor.Decide(extensionContext(), []byte(decisionBody("kev/kev-latest")))
+	require.NoError(t, err)
+	_, err = executor.Decide(extensionContext(), []byte(decisionBody("kev/kev-latest")))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"kev jev kev-latest", "openai openai gpt-6-luna"}, provider.calls)
+}

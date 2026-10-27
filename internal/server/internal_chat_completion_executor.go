@@ -128,7 +128,7 @@ func (e *InternalChatCompletionExecutor) ChatCompletion(ctx context.Context, req
 	if err != nil {
 		return nil, err
 	}
-	release, err := admitInternal(ctx, e.rateLimiter, e.budgetChecker, workflow)
+	ctx, release, err := admitInternal(ctx, e.rateLimiter, e.budgetChecker, workflow, len(e.orchestrator.FailoverSelectors(workflow)))
 	if err != nil {
 		return nil, err
 	}

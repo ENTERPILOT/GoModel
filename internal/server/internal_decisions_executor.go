@@ -109,7 +109,7 @@ func (e *InternalDecisionsExecutor) Decide(ctx context.Context, body []byte) (an
 		}
 		workflow = promoted
 	}
-	release, err := admitInternal(ctx, s.rateLimiter, s.budgetChecker, workflow)
+	ctx, release, err := admitInternal(ctx, s.rateLimiter, s.budgetChecker, workflow, len(s.orchestrator.FailoverSelectors(workflow)))
 	if err != nil {
 		return nil, err
 	}
