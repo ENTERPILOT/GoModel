@@ -186,7 +186,8 @@ func (o *InferenceOrchestrator) executeChatCompletion(
 	if err := o.validateProviderAndRequest(req != nil, "chat request is required"); err != nil {
 		return nil, ExecutionMeta{}, err
 	}
-	return executeTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, CloneChatRequestForSelector, o.chatCompletionProviderCall, chatResponseProvider)
+	call := withReasoningEffort(o, workflow, chatRequestSelectorOf, ChatRequestWithReasoningEffort, chatRequestWithClientReasoning, o.chatCompletionProviderCall)
+	return executeTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, CloneChatRequestForSelector, call, chatResponseProvider)
 }
 
 func (o *InferenceOrchestrator) streamChatCompletion(
@@ -198,7 +199,8 @@ func (o *InferenceOrchestrator) streamChatCompletion(
 	if err := o.validateProviderAndRequest(req != nil, "chat request is required"); err != nil {
 		return nil, ExecutionMeta{}, err
 	}
-	return streamTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, providerType, providerName, usageModel, CloneChatRequestForSelector, o.streamChatCompletionProviderCall)
+	call := withReasoningEffort(o, workflow, chatRequestSelectorOf, ChatRequestWithReasoningEffort, chatRequestWithClientReasoning, o.streamChatCompletionProviderCall)
+	return streamTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, providerType, providerName, usageModel, CloneChatRequestForSelector, call)
 }
 
 func (o *InferenceOrchestrator) executeResponses(
@@ -209,7 +211,8 @@ func (o *InferenceOrchestrator) executeResponses(
 	if err := o.validateProviderAndRequest(req != nil, "responses request is required"); err != nil {
 		return nil, ExecutionMeta{}, err
 	}
-	return executeTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, CloneResponsesRequestForSelector, patchedResponsesCall(o, workflow, o.responsesProviderCall), responsesResponseProvider)
+	call := withReasoningEffort(o, workflow, responsesRequestSelectorOf, ResponsesRequestWithReasoningEffort, responsesRequestWithClientReasoning, patchedResponsesCall(o, workflow, o.responsesProviderCall))
+	return executeTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, CloneResponsesRequestForSelector, call, responsesResponseProvider)
 }
 
 // patchedResponsesCall runs the Responses attempt patcher, when configured,
@@ -240,7 +243,8 @@ func (o *InferenceOrchestrator) streamResponses(
 	if err := o.validateProviderAndRequest(req != nil, "responses request is required"); err != nil {
 		return nil, ExecutionMeta{}, err
 	}
-	return streamTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, providerType, providerName, usageModel, CloneResponsesRequestForSelector, patchedResponsesCall(o, workflow, o.streamResponsesProviderCall))
+	call := withReasoningEffort(o, workflow, responsesRequestSelectorOf, ResponsesRequestWithReasoningEffort, responsesRequestWithClientReasoning, patchedResponsesCall(o, workflow, o.streamResponsesProviderCall))
+	return streamTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, providerType, providerName, usageModel, CloneResponsesRequestForSelector, call)
 }
 
 type translatedExecutionSpec[Req any, Resp any, Result any] struct {

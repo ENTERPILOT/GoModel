@@ -4125,6 +4125,37 @@ func TestConvertToAnthropicRequest_ReasoningEffort(t *testing.T) {
 			expectedMaxTokens: 25000,
 			expectNilTemp:     true,
 		},
+		{
+			name:              "legacy model - none effort leaves thinking off and keeps temperature",
+			model:             "claude-3-5-sonnet-20241022",
+			reasoning:         &core.Reasoning{Effort: "none"},
+			maxTokens:         new(1000),
+			setTemperature:    true,
+			expectedMaxTokens: 1000,
+			expectedTemp:      new(0.7),
+		},
+		{
+			name:              "4.7 model - none effort leaves thinking off",
+			model:             "claude-opus-4-7",
+			reasoning:         &core.Reasoning{Effort: " None "},
+			maxTokens:         new(4096),
+			expectedMaxTokens: 4096,
+		},
+		{
+			name:              "opus 5 - none effort disables default thinking",
+			model:             "claude-opus-5-20260601",
+			reasoning:         &core.Reasoning{Effort: "none"},
+			maxTokens:         new(4096),
+			expectedThinkType: "disabled",
+			expectedMaxTokens: 4096,
+		},
+		{
+			name:              "opus 5.5 - none effort sends no thinking it would reject",
+			model:             "claude-opus-5-5",
+			reasoning:         &core.Reasoning{Effort: "none"},
+			maxTokens:         new(4096),
+			expectedMaxTokens: 4096,
+		},
 	}
 
 	for _, tt := range tests {
@@ -4160,6 +4191,9 @@ func TestConvertToAnthropicRequest_ReasoningEffort(t *testing.T) {
 				if tt.expectedThinkType == "adaptive" {
 					require.NotNil(t, result.OutputConfig)
 					assert.Equal(t, tt.expectedEffort, result.OutputConfig.Effort)
+				}
+				if tt.expectedThinkType == "disabled" {
+					assert.Nil(t, result.OutputConfig)
 				}
 			}
 
@@ -4334,6 +4368,21 @@ func TestConvertResponsesRequestToAnthropic_ReasoningEffort(t *testing.T) {
 			expectedMaxTokens: 25000,
 			expectNilTemp:     true,
 		},
+		{
+			name:              "legacy model - none effort leaves thinking off",
+			model:             "claude-3-5-sonnet-20241022",
+			reasoning:         &core.Reasoning{Effort: "none"},
+			maxOutputTokens:   new(1000),
+			expectedMaxTokens: 1000,
+		},
+		{
+			name:              "sonnet 5 - none effort disables default thinking",
+			model:             "claude-sonnet-5",
+			reasoning:         &core.Reasoning{Effort: "none"},
+			maxOutputTokens:   new(4096),
+			expectedThinkType: "disabled",
+			expectedMaxTokens: 4096,
+		},
 	}
 
 	for _, tt := range tests {
@@ -4367,6 +4416,9 @@ func TestConvertResponsesRequestToAnthropic_ReasoningEffort(t *testing.T) {
 					require.NotNil(t, result.OutputConfig)
 					assert.Equal(t, tt.expectedEffort, result.OutputConfig.Effort)
 				}
+				if tt.expectedThinkType == "disabled" {
+					assert.Nil(t, result.OutputConfig)
+				}
 			}
 
 			assert.Equal(t, tt.expectedMaxTokens, result.MaxTokens)
@@ -4374,6 +4426,35 @@ func TestConvertResponsesRequestToAnthropic_ReasoningEffort(t *testing.T) {
 			if tt.expectNilTemp {
 				assert.Nil(t, result.Temperature)
 			}
+		})
+	}
+}
+
+func TestThinksByDefault(t *testing.T) {
+	tests := []struct {
+		model    string
+		expected bool
+	}{
+		{"claude-opus-5", true},
+		{"claude-opus-5-20260601", true},
+		{"claude-sonnet-5", true},
+		{"claude-haiku-5-5", true},
+		// Opus 5.5 always thinks and Sonnet 5.5 only thinks when asked; both
+		// reject thinking {"type": "disabled"}.
+		{"claude-opus-5-5", false},
+		{"claude-opus-5-5-20261001", false},
+		{"claude-sonnet-5-5", false},
+		// Fable and Mythos always think and reject "disabled" too.
+		{"claude-fable-5-1", false},
+		{"claude-mythos-5", false},
+		// Older models do not think unless asked.
+		{"claude-opus-4-8", false},
+		{"claude-sonnet-4-6", false},
+		{"claude-haiku-4-5-20251001", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			assert.Equal(t, tt.expected, thinksByDefault(tt.model))
 		})
 	}
 }
