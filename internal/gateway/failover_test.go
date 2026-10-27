@@ -320,6 +320,7 @@ func TestExecuteTranslatedSkipsSaturatedPrimaryAndFailsOver(t *testing.T) {
 
 			return "ok", "openai", nil
 		},
+		nil,
 	)
 
 	require.Len(t, calls, 1)
@@ -345,6 +346,7 @@ func TestExecuteTranslatedSaturatedPrimarySurfaces429WhenNoTargetRemains(t *test
 			t.Fatal("no provider call expected: primary saturated, failover gated")
 			return "", "", nil
 		},
+		nil,
 	)
 
 	require.False(t, meta.UsedFailover)

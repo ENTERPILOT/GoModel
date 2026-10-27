@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
@@ -38,6 +41,8 @@ type failoverProvider struct {
 	responsesErrors    map[string]error
 	embeddingResponses map[string]*core.EmbeddingResponse
 	embeddingErrors    map[string]error
+	embeddingCall      func(context.Context, *core.EmbeddingRequest) (*core.EmbeddingResponse, error)
+	embeddingMu        sync.Mutex
 	supportedModels    map[string]string
 	providerNames      map[string]string
 	chatCalls          []string
@@ -92,14 +97,22 @@ func (p *failoverProvider) StreamResponses(_ context.Context, req *core.Response
 	return io.NopCloser(strings.NewReader("data: [DONE]\n\n")), nil
 }
 
-func (p *failoverProvider) Embeddings(_ context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
+func (p *failoverProvider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
 	key := requestSelector(req.Model, req.Provider)
+	p.embeddingMu.Lock()
 	p.embeddingCalls = append(p.embeddingCalls, key)
 	p.embeddingRequests = append(p.embeddingRequests, req)
-	if err := p.embeddingErrors[key]; err != nil {
+	call := p.embeddingCall
+	err := p.embeddingErrors[key]
+	response := p.embeddingResponses[key]
+	p.embeddingMu.Unlock()
+	if call != nil {
+		return call(ctx, req)
+	}
+	if err != nil {
 		return nil, err
 	}
-	return p.embeddingResponses[key], nil
+	return response, nil
 }
 
 func (p *failoverProvider) Supports(model string) bool {
@@ -753,6 +766,266 @@ func TestEmbeddings_AdmissionDefersPrimaryRateLimitToFailover(t *testing.T) {
 	require.Len(t, entry.Data.Attempts, 2)
 	require.Equal(t, auditlog.AttemptKindPrimary, entry.Data.Attempts[0].Kind, "saturated primary is recorded but not sent upstream")
 	require.Equal(t, auditlog.AttemptKindFailover, entry.Data.Attempts[1].Kind)
+}
+
+func TestEmbeddings_FailoverAdmissionReservesBackupRequestsAndCountsConsumerOnce(t *testing.T) {
+	primary := "primary-openai/text-embedding-3-small"
+	backup := "backup-openai/text-embedding-3-small"
+	provider := &failoverProvider{
+		embeddingResponses: map[string]*core.EmbeddingResponse{
+			primary: {Object: "list", Model: "text-embedding-3-small", Provider: "openai"},
+			backup:  {Object: "list", Model: "text-embedding-3-small", Provider: "openai"},
+		},
+		supportedModels: map[string]string{primary: "openai", backup: "openai"},
+		providerNames:   map[string]string{primary: "primary-openai", backup: "backup-openai"},
+	}
+	handler := newHandler(provider, nil, nil, nil, nil, nil, failoverResolverStub{
+		selectors: []core.ModelSelector{{Provider: "backup-openai", Model: "text-embedding-3-small"}},
+	}, nil)
+	primaryRequests, backupRequests, consumerRequests := int64(1), int64(1), int64(3)
+	handler.rateLimiter = newTestRateLimitService(t,
+		ratelimit.Rule{Scope: ratelimit.ScopeProvider, Subject: "primary-openai", PeriodSeconds: ratelimit.PeriodMinuteSeconds, MaxRequests: &primaryRequests},
+		ratelimit.Rule{Scope: ratelimit.ScopeProvider, Subject: "backup-openai", PeriodSeconds: ratelimit.PeriodMinuteSeconds, MaxRequests: &backupRequests},
+		rateLimitRuleWithRequests("/", consumerRequests),
+	)
+	request := `{"model":"text-embedding-3-small","provider":"primary-openai","input":"hi"}`
+	post := func() (*echo.Context, *httptest.ResponseRecorder) {
+		c, rec := echotest.Post(t, "/v1/embeddings", request)
+		require.NoError(t, handler.Embeddings(c))
+		return c, rec
+	}
+
+	_, first := post()
+	require.Equal(t, http.StatusOK, first.Code, first.Body.String())
+	secondContext, second := post()
+	require.Equal(t, http.StatusOK, second.Code, second.Body.String(), "backup admission must not count the consumer twice")
+	require.True(t, core.GetFailoverUsed(secondContext.Request().Context()))
+	_, third := post()
+	require.Equal(t, http.StatusTooManyRequests, third.Code, third.Body.String(), "the backup request limit must reject a second backup attempt")
+	_, fourth := post()
+	require.Equal(t, http.StatusTooManyRequests, fourth.Code, fourth.Body.String(), "each HTTP request must count once against the consumer limit")
+	require.Equal(t, []string{primary, backup}, provider.embeddingCalls, "rate-limited backup attempts must not reach the provider")
+}
+
+func TestEmbeddings_FailoverAdmissionRecordsRejectedTargetAndHonorsAttemptCap(t *testing.T) {
+	primary := "primary-openai/text-embedding-3-small"
+	firstBackup := "first-backup-openai/text-embedding-3-small"
+	secondBackup := "second-backup-openai/text-embedding-3-small"
+	thirdBackup := "third-backup-openai/text-embedding-3-small"
+	provider := &failoverProvider{
+		embeddingErrors: map[string]error{
+			primary:      core.NewProviderError("openai", http.StatusServiceUnavailable, "primary unavailable", nil),
+			secondBackup: core.NewProviderError("openai", http.StatusServiceUnavailable, "backup unavailable", nil),
+		},
+		embeddingResponses: map[string]*core.EmbeddingResponse{
+			thirdBackup: {Object: "list", Model: "text-embedding-3-small", Provider: "openai"},
+		},
+		supportedModels: map[string]string{
+			primary: "openai", firstBackup: "openai", secondBackup: "openai", thirdBackup: "openai",
+		},
+		providerNames: map[string]string{
+			primary: "primary-openai", firstBackup: "first-backup-openai",
+			secondBackup: "second-backup-openai", thirdBackup: "third-backup-openai",
+		},
+	}
+	handler := newHandler(provider, nil, nil, nil, nil, nil, failoverResolverStub{
+		selectors: []core.ModelSelector{
+			{Provider: "first-backup-openai", Model: "text-embedding-3-small"},
+			{Provider: "second-backup-openai", Model: "text-embedding-3-small"},
+			{Provider: "third-backup-openai", Model: "text-embedding-3-small"},
+		},
+	}, nil)
+	handler.failoverPolicy = &gateway.FailoverPolicy{MaxAttempts: 1}
+	firstBackupRequests := int64(1)
+	limiter := newTestRateLimitService(t, ratelimit.Rule{
+		Scope: ratelimit.ScopeProvider, Subject: "first-backup-openai", PeriodSeconds: ratelimit.PeriodMinuteSeconds, MaxRequests: &firstBackupRequests,
+	})
+	consumed, err := limiter.Acquire(ratelimit.Subjects{Provider: "first-backup-openai"}, time.Now().UTC())
+	require.NoError(t, err)
+	consumed.Release()
+	handler.rateLimiter = limiter
+
+	c, rec := echotest.Post(t, "/v1/embeddings", `{"model":"text-embedding-3-small","provider":"primary-openai","input":"hi"}`)
+	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+	c.Set(string(auditlog.LogEntryKey), entry)
+	require.NoError(t, handler.Embeddings(c))
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
+	require.Equal(t, []string{primary, secondBackup}, provider.embeddingCalls, "a rejected route is skipped; the single admitted attempt consumes the cap")
+	require.Len(t, entry.Data.Attempts, 3)
+	require.Equal(t, auditlog.AttemptKindFailover, entry.Data.Attempts[1].Kind)
+	require.Equal(t, firstBackup, entry.Data.Attempts[1].Model)
+	require.Equal(t, http.StatusTooManyRequests, entry.Data.Attempts[1].StatusCode)
+	require.Equal(t, auditlog.AttemptKindFailover, entry.Data.Attempts[2].Kind)
+	require.Equal(t, secondBackup, entry.Data.Attempts[2].Model)
+	require.Equal(t, http.StatusServiceUnavailable, entry.Data.Attempts[2].StatusCode)
+}
+
+func TestEmbeddings_FailoverReleasesPrimaryConcurrencyBeforeSameProviderAttempt(t *testing.T) {
+	primary := "shared-openai/text-embedding-3-small"
+	backup := "shared-openai/text-embedding-3-large"
+	provider := &failoverProvider{
+		embeddingErrors: map[string]error{
+			primary: core.NewProviderError("openai", http.StatusServiceUnavailable, "primary unavailable", nil),
+		},
+		embeddingResponses: map[string]*core.EmbeddingResponse{
+			backup: {Object: "list", Model: "text-embedding-3-large", Provider: "openai"},
+		},
+		supportedModels: map[string]string{primary: "openai", backup: "openai"},
+		providerNames:   map[string]string{primary: "shared-openai", backup: "shared-openai"},
+	}
+	handler := newHandler(provider, nil, nil, nil, nil, nil, failoverResolverStub{
+		selectors: []core.ModelSelector{{Provider: "shared-openai", Model: "text-embedding-3-large"}},
+	}, nil)
+	concurrent := int64(1)
+	handler.rateLimiter = newTestRateLimitService(t, ratelimit.Rule{
+		Scope: ratelimit.ScopeProvider, Subject: "shared-openai", PeriodSeconds: ratelimit.PeriodConcurrent, MaxRequests: &concurrent,
+	})
+	c, rec := echotest.Post(t, "/v1/embeddings", `{"model":"text-embedding-3-small","provider":"shared-openai","input":"hi"}`)
+	require.NoError(t, handler.Embeddings(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, []string{primary, backup}, provider.embeddingCalls)
+}
+
+func TestEmbeddings_FailoverAdmissionReservesBackupConcurrencyAndReleasesAfterError(t *testing.T) {
+	primary := "primary-openai/text-embedding-3-small"
+	backup := "backup-openai/text-embedding-3-small"
+	backupStarted := make(chan struct{}, 2)
+	releaseFirst := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-releaseFirst:
+		default:
+			close(releaseFirst)
+		}
+	})
+	var backupMu sync.Mutex
+	backupCalls := 0
+	provider := &failoverProvider{
+		supportedModels: map[string]string{primary: "openai", backup: "openai"},
+		providerNames:   map[string]string{primary: "primary-openai", backup: "backup-openai"},
+	}
+	provider.embeddingCall = func(_ context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
+		if requestSelector(req.Model, req.Provider) == primary {
+			return nil, core.NewProviderError("openai", http.StatusServiceUnavailable, "primary unavailable", nil)
+		}
+		backupMu.Lock()
+		backupCalls++
+		callNumber := backupCalls
+		backupMu.Unlock()
+		backupStarted <- struct{}{}
+		if callNumber == 1 {
+			<-releaseFirst
+			return nil, core.NewProviderError("openai", http.StatusServiceUnavailable, "backup unavailable", nil)
+		}
+		return &core.EmbeddingResponse{Object: "list", Model: "text-embedding-3-small", Provider: "openai"}, nil
+	}
+	handler := newHandler(provider, nil, nil, nil, nil, nil, failoverResolverStub{
+		selectors: []core.ModelSelector{{Provider: "backup-openai", Model: "text-embedding-3-small"}},
+	}, nil)
+	concurrent := int64(1)
+	handler.rateLimiter = newTestRateLimitService(t, ratelimit.Rule{
+		Scope: ratelimit.ScopeProvider, Subject: "backup-openai", PeriodSeconds: ratelimit.PeriodConcurrent, MaxRequests: &concurrent,
+	})
+	request := `{"model":"text-embedding-3-small","provider":"primary-openai","input":"hi"}`
+	firstContext, firstRecorder := echotest.Post(t, "/v1/embeddings", request)
+	type response struct {
+		err  error
+		code int
+	}
+	firstDone := make(chan response, 1)
+	go func() { firstDone <- response{err: handler.Embeddings(firstContext), code: firstRecorder.Code} }()
+	select {
+	case <-backupStarted:
+	case <-time.After(2 * time.Second):
+		require.FailNow(t, "first backup call did not start")
+	}
+
+	secondContext, secondRecorder := echotest.Post(t, "/v1/embeddings", request)
+	require.NoError(t, handler.Embeddings(secondContext))
+	require.Equal(t, http.StatusTooManyRequests, secondRecorder.Code, secondRecorder.Body.String())
+	backupMu.Lock()
+	gotBackupCalls := backupCalls
+	backupMu.Unlock()
+	require.Equal(t, 1, gotBackupCalls, "a held backup concurrency slot must block another upstream attempt")
+
+	close(releaseFirst)
+	select {
+	case result := <-firstDone:
+		require.NoError(t, result.err)
+		require.Equal(t, http.StatusServiceUnavailable, result.code)
+	case <-time.After(2 * time.Second):
+		require.FailNow(t, "first embedding request did not finish")
+	}
+
+	thirdContext, thirdRecorder := echotest.Post(t, "/v1/embeddings", request)
+	require.NoError(t, handler.Embeddings(thirdContext))
+	require.Equal(t, http.StatusOK, thirdRecorder.Code, thirdRecorder.Body.String(), "the failed backup attempt must release its concurrency slot")
+	backupMu.Lock()
+	gotBackupCalls = backupCalls
+	backupMu.Unlock()
+	require.Equal(t, 2, gotBackupCalls)
+}
+
+func TestEmbeddings_FailoverAdmissionReleasesBackupConcurrencyAfterCancellation(t *testing.T) {
+	primary := "primary-openai/text-embedding-3-small"
+	backup := "backup-openai/text-embedding-3-small"
+	backupStarted := make(chan struct{}, 1)
+	var backupMu sync.Mutex
+	backupCalls := 0
+	provider := &failoverProvider{
+		supportedModels: map[string]string{primary: "openai", backup: "openai"},
+		providerNames:   map[string]string{primary: "primary-openai", backup: "backup-openai"},
+	}
+	provider.embeddingCall = func(ctx context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
+		if requestSelector(req.Model, req.Provider) == primary {
+			return nil, core.NewProviderError("openai", http.StatusServiceUnavailable, "primary unavailable", nil)
+		}
+		backupMu.Lock()
+		backupCalls++
+		callNumber := backupCalls
+		backupMu.Unlock()
+		if callNumber == 1 {
+			close(backupStarted)
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+		return &core.EmbeddingResponse{Object: "list", Model: "text-embedding-3-small", Provider: "openai"}, nil
+	}
+	handler := newHandler(provider, nil, nil, nil, nil, nil, failoverResolverStub{
+		selectors: []core.ModelSelector{{Provider: "backup-openai", Model: "text-embedding-3-small"}},
+	}, nil)
+	concurrent := int64(1)
+	handler.rateLimiter = newTestRateLimitService(t, ratelimit.Rule{
+		Scope: ratelimit.ScopeProvider, Subject: "backup-openai", PeriodSeconds: ratelimit.PeriodConcurrent, MaxRequests: &concurrent,
+	})
+	request := `{"model":"text-embedding-3-small","provider":"primary-openai","input":"hi"}`
+	firstContext, firstRecorder := echotest.Post(t, "/v1/embeddings", request)
+	ctx, cancel := context.WithCancel(firstContext.Request().Context())
+	t.Cleanup(cancel)
+	firstContext.SetRequest(firstContext.Request().WithContext(ctx))
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- handler.Embeddings(firstContext) }()
+	select {
+	case <-backupStarted:
+	case <-time.After(2 * time.Second):
+		require.FailNow(t, "backup call did not start")
+	}
+	cancel()
+	select {
+	case err := <-firstDone:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		require.FailNow(t, "canceled embedding request did not finish")
+	}
+	require.NotZero(t, firstRecorder.Code)
+
+	secondContext, secondRecorder := echotest.Post(t, "/v1/embeddings", request)
+	require.NoError(t, handler.Embeddings(secondContext))
+	require.Equal(t, http.StatusOK, secondRecorder.Code, secondRecorder.Body.String(), "cancellation must release the backup concurrency slot")
+	backupMu.Lock()
+	gotBackupCalls := backupCalls
+	backupMu.Unlock()
+	require.Equal(t, 2, gotBackupCalls)
 }
 
 func TestEmbeddings_AdmissionDoesNotFailOverConsumerRejections(t *testing.T) {

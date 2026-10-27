@@ -161,27 +161,35 @@ func TestCloneEmbeddingRequestForSelectorPreservesAndDetachesRequestFields(t *te
 
 func TestCloneEmbeddingRequestForSelectorDetachesTypedInputs(t *testing.T) {
 	tests := []struct {
-		name   string
-		input  any
-		mutate func(any)
+		name        string
+		input       any
+		want        any
+		wantMutated any
+		mutate      func(any)
 	}{
 		{
-			name:  "strings",
-			input: []string{"first", "second"},
+			name:        "strings",
+			input:       []string{"first", "second"},
+			want:        []string{"first", "second"},
+			wantMutated: []string{"changed", "second"},
 			mutate: func(input any) {
 				input.([]string)[0] = "changed"
 			},
 		},
 		{
-			name:  "integers",
-			input: []int{2, 3},
+			name:        "integers",
+			input:       []int{2, 3},
+			want:        []int{2, 3},
+			wantMutated: []int{99, 3},
 			mutate: func(input any) {
 				input.([]int)[0] = 99
 			},
 		},
 		{
-			name:  "nested integers",
-			input: [][]int{{2, 3}, {5}},
+			name:        "nested integers",
+			input:       [][]int{{2, 3}, {5}},
+			want:        [][]int{{2, 3}, {5}},
+			wantMutated: [][]int{{99, 3}, {5}},
 			mutate: func(input any) {
 				input.([][]int)[0][0] = 99
 			},
@@ -193,9 +201,10 @@ func TestCloneEmbeddingRequestForSelectorDetachesTypedInputs(t *testing.T) {
 			req := &core.EmbeddingRequest{Input: tt.input}
 			cloned := CloneEmbeddingRequestForSelector(req, core.ModelSelector{Model: "backup"})
 			require.IsType(t, tt.input, cloned.Input)
-			require.Equal(t, req.Input, cloned.Input, "cloning must preserve JSON value and number semantics")
+			require.Equal(t, tt.want, cloned.Input, "cloning must preserve JSON value and number semantics")
 			tt.mutate(cloned.Input)
-			require.Equal(t, tt.input, req.Input, "typed request input shares backing storage with its clone")
+			require.Equal(t, tt.wantMutated, cloned.Input)
+			require.Equal(t, tt.want, req.Input, "typed request input shares backing storage with its clone")
 		})
 	}
 }

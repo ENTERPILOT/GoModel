@@ -24,60 +24,67 @@ type BudgetGate interface {
 	ProviderWithinBudget(ctx context.Context, providerName string) bool
 }
 
+// EmbeddingAttemptAdmission reserves provider/model rate-limit capacity for
+// one embedding attempt. The HTTP handler admits the consumer once.
+type EmbeddingAttemptAdmission func(ctx context.Context, selector core.ModelSelector, providerName string) (release func(), err error)
+
 // InferenceConfig configures translated inference orchestration.
 type InferenceConfig struct {
-	Provider                 core.RoutableProvider
-	ModelResolver            ModelResolver
-	ModelAuthorizer          ModelAuthorizer
-	WorkflowPolicyResolver   WorkflowPolicyResolver
-	FailoverResolver         FailoverResolver
-	FailoverPolicy           *FailoverPolicy // Optional: nil applies the default failover policy
-	TranslatedRequestPatcher TranslatedRequestPatcher
-	ResponsesAttemptPatcher  ResponsesAttemptPatcher  // Optional: per-attempt Responses request adaptation
-	ResponsesHistoryResolver ResponsesHistoryResolver // Optional: expands Responses history before the prompt phase
-	UsageLogger              usage.LoggerInterface
-	PricingResolver          usage.PricingResolver
-	RouteGate                RouteGate
-	BudgetGate               BudgetGate
-	GuardrailsHash           string
+	Provider                  core.RoutableProvider
+	ModelResolver             ModelResolver
+	ModelAuthorizer           ModelAuthorizer
+	WorkflowPolicyResolver    WorkflowPolicyResolver
+	FailoverResolver          FailoverResolver
+	FailoverPolicy            *FailoverPolicy // Optional: nil applies the default failover policy
+	TranslatedRequestPatcher  TranslatedRequestPatcher
+	ResponsesAttemptPatcher   ResponsesAttemptPatcher  // Optional: per-attempt Responses request adaptation
+	ResponsesHistoryResolver  ResponsesHistoryResolver // Optional: expands Responses history before the prompt phase
+	UsageLogger               usage.LoggerInterface
+	PricingResolver           usage.PricingResolver
+	RouteGate                 RouteGate
+	BudgetGate                BudgetGate
+	EmbeddingAttemptAdmission EmbeddingAttemptAdmission
+	GuardrailsHash            string
 }
 
 // InferenceOrchestrator owns translated inference workflow resolution, request
 // patching, provider dispatch, failover, usage logging, and cache metadata.
 type InferenceOrchestrator struct {
-	provider                 core.RoutableProvider
-	modelResolver            ModelResolver
-	modelAuthorizer          ModelAuthorizer
-	workflowPolicyResolver   WorkflowPolicyResolver
-	failoverResolver         FailoverResolver
-	failoverPolicy           *FailoverPolicy
-	translatedRequestPatcher TranslatedRequestPatcher
-	responsesAttemptPatcher  ResponsesAttemptPatcher
-	responsesHistoryResolver ResponsesHistoryResolver
-	usageLogger              usage.LoggerInterface
-	pricingResolver          usage.PricingResolver
-	routeGate                RouteGate
-	budgetGate               BudgetGate
-	guardrailsHash           string
+	provider                  core.RoutableProvider
+	modelResolver             ModelResolver
+	modelAuthorizer           ModelAuthorizer
+	workflowPolicyResolver    WorkflowPolicyResolver
+	failoverResolver          FailoverResolver
+	failoverPolicy            *FailoverPolicy
+	translatedRequestPatcher  TranslatedRequestPatcher
+	responsesAttemptPatcher   ResponsesAttemptPatcher
+	responsesHistoryResolver  ResponsesHistoryResolver
+	usageLogger               usage.LoggerInterface
+	pricingResolver           usage.PricingResolver
+	routeGate                 RouteGate
+	budgetGate                BudgetGate
+	embeddingAttemptAdmission EmbeddingAttemptAdmission
+	guardrailsHash            string
 }
 
 // NewInferenceOrchestrator creates a translated inference orchestrator.
 func NewInferenceOrchestrator(cfg InferenceConfig) *InferenceOrchestrator {
 	return &InferenceOrchestrator{
-		provider:                 cfg.Provider,
-		modelResolver:            cfg.ModelResolver,
-		modelAuthorizer:          cfg.ModelAuthorizer,
-		workflowPolicyResolver:   cfg.WorkflowPolicyResolver,
-		failoverResolver:         cfg.FailoverResolver,
-		failoverPolicy:           cfg.FailoverPolicy,
-		translatedRequestPatcher: cfg.TranslatedRequestPatcher,
-		responsesAttemptPatcher:  cfg.ResponsesAttemptPatcher,
-		responsesHistoryResolver: cfg.ResponsesHistoryResolver,
-		usageLogger:              cfg.UsageLogger,
-		pricingResolver:          cfg.PricingResolver,
-		routeGate:                cfg.RouteGate,
-		budgetGate:               cfg.BudgetGate,
-		guardrailsHash:           cfg.GuardrailsHash,
+		provider:                  cfg.Provider,
+		modelResolver:             cfg.ModelResolver,
+		modelAuthorizer:           cfg.ModelAuthorizer,
+		workflowPolicyResolver:    cfg.WorkflowPolicyResolver,
+		failoverResolver:          cfg.FailoverResolver,
+		failoverPolicy:            cfg.FailoverPolicy,
+		translatedRequestPatcher:  cfg.TranslatedRequestPatcher,
+		responsesAttemptPatcher:   cfg.ResponsesAttemptPatcher,
+		responsesHistoryResolver:  cfg.ResponsesHistoryResolver,
+		usageLogger:               cfg.UsageLogger,
+		pricingResolver:           cfg.PricingResolver,
+		routeGate:                 cfg.RouteGate,
+		budgetGate:                cfg.BudgetGate,
+		embeddingAttemptAdmission: cfg.EmbeddingAttemptAdmission,
+		guardrailsHash:            cfg.GuardrailsHash,
 	}
 }
 

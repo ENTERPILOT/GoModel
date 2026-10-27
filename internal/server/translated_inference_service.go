@@ -92,11 +92,12 @@ func (s *translatedInferenceService) newInferenceOrchestrator() *gateway.Inferen
 		// Conversations and previous_response_id are expanded before the
 		// prompt phase; an id left for a native primary is resolved per
 		// attempt for a failover target that cannot resolve it itself.
-		ResponsesHistoryResolver: s,
-		ResponsesAttemptPatcher:  s,
-		UsageLogger:              s.usageLogger,
-		PricingResolver:          s.pricingResolver,
-		GuardrailsHash:           s.guardrailsHash,
+		ResponsesHistoryResolver:  s,
+		ResponsesAttemptPatcher:   s,
+		UsageLogger:               s.usageLogger,
+		PricingResolver:           s.pricingResolver,
+		EmbeddingAttemptAdmission: embeddingsAttemptAdmission(s.rateLimiter),
+		GuardrailsHash:            s.guardrailsHash,
 	}
 	// Guarded assignment keeps the gate nil when rate limits are off (a nil
 	// RateLimiter assigned unconditionally would arrive as a typed non-nil
@@ -594,7 +595,7 @@ func (s *translatedInferenceService) Embeddings(c *echo.Context) error {
 
 func (s *translatedInferenceService) dispatchEmbeddings(c *echo.Context, req *core.EmbeddingRequest, workflow *core.Workflow) error {
 	s.observeLiveProviderAttempts(c, workflow)
-	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker,
+	adm, err := enforceEmbeddingAdmission(c, s.rateLimiter, s.budgetChecker,
 		rateLimitRouteFromWorkflow(workflow).withFailovers(len(s.inference().FailoverSelectors(workflow))))
 	if err != nil {
 		return handleError(c, err)
@@ -602,7 +603,7 @@ func (s *translatedInferenceService) dispatchEmbeddings(c *echo.Context, req *co
 	defer adm.release()
 
 	requestID := requestIDFromContextOrHeader(c.Request())
-	ctx := adm.dispatchContext(c.Request().Context())
+	ctx := withRateLimitHeaderSetter(adm.dispatchContext(c.Request().Context()), rateLimitHeaderSetter(c))
 	result, err := s.inference().ExecuteEmbeddings(ctx, workflow, req, requestID, "/v1/embeddings")
 	if err != nil {
 		return handleError(c, err)

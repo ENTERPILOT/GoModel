@@ -184,7 +184,7 @@ func (o *InferenceOrchestrator) executeChatCompletion(
 		return nil, ExecutionMeta{}, err
 	}
 	call := withReasoningEffort(o, workflow, chatRequestSelectorOf, ChatRequestWithReasoningEffort, chatRequestWithClientReasoning, o.chatCompletionProviderCall)
-	return executeTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, CloneChatRequestForSelector, call, chatResponseProvider)
+	return executeTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, CloneChatRequestForSelector, call, chatResponseProvider, nil)
 }
 
 func (o *InferenceOrchestrator) streamChatCompletion(
@@ -209,7 +209,7 @@ func (o *InferenceOrchestrator) executeResponses(
 		return nil, ExecutionMeta{}, err
 	}
 	call := withReasoningEffort(o, workflow, responsesRequestSelectorOf, ResponsesRequestWithReasoningEffort, responsesRequestWithClientReasoning, patchedResponsesCall(o, workflow, o.responsesProviderCall))
-	return executeTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, CloneResponsesRequestForSelector, call, responsesResponseProvider)
+	return executeTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, CloneResponsesRequestForSelector, call, responsesResponseProvider, nil)
 }
 
 // patchedResponsesCall runs the Responses attempt patcher, when configured,
@@ -357,6 +357,7 @@ func executeTranslatedProviderRequest[Req any, Resp any](
 	cloneForSelector func(Req, core.ModelSelector) Req,
 	call func(context.Context, Req, string) (Resp, error),
 	responseProvider func(Resp) string,
+	admit EmbeddingAttemptAdmission,
 ) (Resp, ExecutionMeta, error) {
 	resp, meta, err := executeTranslatedWithFailover(ctx, o, workflow, req, model, provider, cloneForSelector,
 		func(ctx context.Context, req Req, providerName string) (Resp, string, error) {
@@ -367,6 +368,7 @@ func executeTranslatedProviderRequest[Req any, Resp any](
 			}
 			return resp, responseProvider(resp), nil
 		},
+		admit,
 	)
 	if err != nil {
 		return resp, meta, err
@@ -559,7 +561,7 @@ func (o *InferenceOrchestrator) executeEmbeddings(
 		return nil, ExecutionMeta{}, err
 	}
 	return executeTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider,
-		CloneEmbeddingRequestForSelector, o.embeddingsProviderCall, embeddingResponseProvider)
+		CloneEmbeddingRequestForSelector, o.embeddingsProviderCall, embeddingResponseProvider, o.embeddingAttemptAdmission)
 }
 
 func (o *InferenceOrchestrator) embeddingsProviderCall(ctx context.Context, req *core.EmbeddingRequest, providerName string) (*core.EmbeddingResponse, error) {
