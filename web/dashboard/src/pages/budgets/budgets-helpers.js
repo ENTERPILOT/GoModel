@@ -240,6 +240,9 @@ function budgetFilterText(item) {
     budgetPeriodFromSeconds(seconds),
     item && item.per_child ? m.budgets_per_child_badge() : "",
     budgetCostBasis(item) === "billed" ? m.budgets_billed_badge() : "",
+    budgetBilledOnProviderCost(item)
+      ? m.budgets_billed_on_provider_badge()
+      : "",
     seconds ? String(seconds) + "s" : "",
     seconds ? String(seconds) + " seconds" : "",
   ]

@@ -626,3 +626,27 @@ test("budgetBilledOnProviderCost flags billed budgets enforced on provider cost"
     false,
   );
 });
+
+test("the billed on provider cost badge is searchable", () => {
+  const budgets = [
+    {
+      scope: "label",
+      subject: "acme",
+      period_seconds: 86400,
+      cost_basis: "billed",
+      enforced_cost_basis: "provider",
+    },
+    {
+      scope: "label",
+      subject: "beta",
+      period_seconds: 86400,
+      cost_basis: "billed",
+      enforced_cost_basis: "billed",
+    },
+  ];
+  const found = filterAndSortBudgets(budgets, "on provider cost");
+  assert.deepEqual(
+    found.map((item) => item.subject),
+    ["acme"],
+  );
+});
