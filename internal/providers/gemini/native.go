@@ -823,13 +823,29 @@ func geminiGenerationConfig(req *core.ChatRequest) map[string]any {
 	copyStopSequences(req.ExtraFields.Lookup("stop"), cfg)
 	copyResponseFormat(req.ExtraFields.Lookup("response_format"), cfg)
 	copyGoogleThinkingConfig(req.ExtraFields.Lookup("extra_body"), cfg)
-	if req.Reasoning != nil && strings.TrimSpace(req.Reasoning.Effort) != "" {
-		addEffortThinkingConfig(cfg, req.Model, req.Reasoning.Effort)
+	if effort := nativeReasoningEffort(req); effort != "" {
+		addEffortThinkingConfig(cfg, req.Model, effort)
 	}
 	if len(cfg) == 0 {
 		return nil
 	}
 	return cfg
+}
+
+// nativeReasoningEffort returns the requested reasoning effort: the
+// reasoning.effort object, or else the flat Chat Completions reasoning_effort
+// string that rides in ExtraFields.
+func nativeReasoningEffort(req *core.ChatRequest) string {
+	if req.Reasoning != nil {
+		if effort := strings.TrimSpace(req.Reasoning.Effort); effort != "" {
+			return effort
+		}
+	}
+	var effort string
+	if raw := req.ExtraFields.Lookup("reasoning_effort"); len(raw) > 0 && json.Unmarshal(raw, &effort) == nil {
+		return strings.TrimSpace(effort)
+	}
+	return ""
 }
 
 // dropsSamplingParameters reports whether temperature, topP, topK and

@@ -74,6 +74,7 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 		WithQuotaTemplates(caps.quotaTemplates),
 		WithBilledBudgets(caps.billedBudgets),
 		WithBilledCacheHits(cfg.Pricing.MarkupsEnabled && cfg.Pricing.BillCacheHits),
+		WithProviderBilledCacheHits(cfg.Budgets.ProviderBilledCacheHits),
 	)
 	if err != nil {
 		return nil, err
