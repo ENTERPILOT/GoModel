@@ -50,6 +50,7 @@ const (
 	subsystemStorage             = "storage"
 	subsystemRuntimeSettings     = "runtime settings"
 	subsystemClusterSync         = "cluster config sync"
+	subsystemSharedStore         = "extension shared store"
 	subsystemProviders           = "providers"
 	subsystemSecretRotation      = "secret rotation"
 	subsystemRouteStrategies     = "routing-strategy plugins"
@@ -121,6 +122,11 @@ func (a *App) shutdownOrder() []registeredSubsystem {
 		// Stop refreshing snapshots changed on other instances before the
 		// services that hold them are torn down.
 		{name: subsystemClusterSync, close: closerOf(a.clusterSync)},
+		// Fail extension shared-store calls with ext.ErrSharedStoreClosed
+		// from here on, so an extension's background work never reaches the
+		// connection closed below. The server has drained, so no request
+		// writes to it any more.
+		{name: subsystemSharedStore, close: closerOf(a.sharedStore)},
 		// Stops model refresh and provider-owned resources.
 		{name: subsystemProviders, close: closerOf(a.providers)},
 		// Closes routing-strategy plugin instances once no provider selects.

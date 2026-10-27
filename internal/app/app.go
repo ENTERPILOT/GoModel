@@ -35,6 +35,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/responsestore"
 	"github.com/enterpilot/gomodel/internal/runtimesettings"
 	"github.com/enterpilot/gomodel/internal/server"
+	"github.com/enterpilot/gomodel/internal/sharedstore"
 	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/tagging"
 	"github.com/enterpilot/gomodel/internal/telemetry"
@@ -78,6 +79,7 @@ type App struct {
 	secrets             *encryption.Box
 	runtimeSettings     *runtimesettings.Service
 	clusterSync         *clustersync.Syncer
+	sharedStore         *sharedstore.Store // nil unless an extension takes it
 	versionCheck        *versioncheck.Checker
 	extensionAuth       bool
 

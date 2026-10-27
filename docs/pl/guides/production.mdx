@@ -285,6 +285,7 @@ koordynuje go między instancjami.
 | Egzekwowanie [budżetów](/pl/features/budgets) | Trwały (baza danych) | Poprawne między replikami. Wydatki są odczytywane ze współdzielonej tabeli użycia. |
 | [Rekordy użycia i kosztów](/pl/features/cost-tracking) | Trwały (baza danych) | Agregowane poprawnie. |
 | Logi audytowe | Trwały (baza danych) | Kompletne między replikami. |
+| Wylogowanie [SSO](/pl/pro/sso) (Pro) | Trwały (baza danych) | Wylogowana sesja jest odrzucana na każdej replice w ciągu około 2 sekund. |
 | [Limity żądań](/pl/features/rate-limits) | W pamięci, per instancja | Efektywny limit to około `N x` skonfigurowany limit. Liczniki resetują się przy restarcie. |
 | Circuit breakery | W pamięci, per proces | Każda replika osobno wykrywa awarię, więc upstream widzi do `N x failure_threshold` błędów, zanim otworzy się którykolwiek breaker. |
 | Przypięcia [powiązania sesji](/pl/features/session-keeping) | W pamięci, per instancja | Sesje są przyklejone per replika, a nie globalnie, chyba że load balancer używa sticky sessions. |

@@ -325,6 +325,7 @@ Prozessspeicher und stimmen sich nicht zwischen Instanzen ab.
 | Durchsetzung von [Budgets](/de/features/budgets) | Dauerhaft (Datenbank) | Korrekt über alle Replikate. Ausgaben werden aus der gemeinsamen Nutzungstabelle gelesen. |
 | [Nutzungs- und Kostendaten](/de/features/cost-tracking) | Dauerhaft (Datenbank) | Korrekt aggregiert. |
 | Audit-Logs | Dauerhaft (Datenbank) | Vollständig über alle Replikate. |
+| [SSO](/de/pro/sso)-Abmeldung (Pro) | Dauerhaft (Datenbank) | Eine abgemeldete Session wird innerhalb von etwa 2 Sekunden auf jedem Replikat abgelehnt. |
 | [Rate-Limits](/de/features/rate-limits) | In-Memory, pro Instanz | Das effektive Limit liegt bei etwa dem `N x` des konfigurierten Limits. Zähler werden beim Neustart zurückgesetzt. |
 | Circuit Breaker | In-Memory, pro Prozess | Jedes Replikat erkennt einen Ausfall separat, sodass der Upstream bis zu `N x failure_threshold` Fehler sieht, bevor sich ein Breaker öffnet. |
 | Pins der [Session-Affinität](/de/features/session-keeping) | In-Memory, pro Instanz | Sessions bleiben pro Replikat gebunden, nicht global, sofern der Load Balancer nicht sticky ist. |
