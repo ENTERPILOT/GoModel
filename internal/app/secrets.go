@@ -94,7 +94,7 @@ func ReencryptSecrets(ctx context.Context, opts ReencryptOptions) (ReencryptResu
 	}
 	result.ActiveKeyID = box.ActiveKeyID()
 
-	catalog, err := reencryptCatalog(appCfg, opts.Extensions)
+	catalog, err := commandPluginCatalog(appCfg, opts.Extensions)
 	if err != nil {
 		return result, err
 	}
@@ -113,10 +113,11 @@ func ReencryptSecrets(ctx context.Context, opts ReencryptOptions) (ReencryptResu
 	return result, nil
 }
 
-// reencryptCatalog builds the plugin catalog the gateway would, so plaintext
-// guardrail secrets are recognised by their schema. Without the plugin system
-// only built-in and compiled-in plugins are known.
-func reencryptCatalog(appCfg *config.Config, extensions *ext.Registry) (*plugins.Catalog, error) {
+// commandPluginCatalog builds the plugin catalog the gateway would, for a
+// command that reads guardrail settings, so their secrets are recognised by
+// their schema. Without the plugin system only built-in and compiled-in
+// plugins are known.
+func commandPluginCatalog(appCfg *config.Config, extensions *ext.Registry) (*plugins.Catalog, error) {
 	if pluginsEnabled(appCfg) {
 		return buildPluginCatalog(appCfg, extensions)
 	}

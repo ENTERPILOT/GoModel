@@ -93,32 +93,42 @@ func createStore(ctx context.Context, store storage.Storage) (Store, error) {
 // seedConfiguredBudgets replaces the config-sourced budgets in store with the
 // ones cfg declares, refusing any that need a capability caps lacks.
 func seedConfiguredBudgets(ctx context.Context, store Store, cfg config.BudgetsConfig, caps capabilities) error {
+	budgets, err := ConfigBudgets(cfg)
+	if err != nil {
+		return err
+	}
+	if err := caps.validate(budgets); err != nil {
+		return err
+	}
+	return store.ReplaceConfigBudgets(ctx, budgets)
+}
+
+// ConfigBudgets returns the budgets cfg declares, as they are seeded into
+// the store.
+func ConfigBudgets(cfg config.BudgetsConfig) ([]Budget, error) {
 	budgets := make([]Budget, 0, len(cfg.UserPaths)+len(cfg.Labels)+len(cfg.Providers))
 	for _, entry := range cfg.UserPaths {
 		seeded, err := seedBudgets(ScopeUserPath, entry.Path, entry.PerChild, entry.Limits)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		budgets = append(budgets, seeded...)
 	}
 	for _, entry := range cfg.Labels {
 		seeded, err := seedBudgets(ScopeLabel, entry.Label, false, entry.Limits)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		budgets = append(budgets, seeded...)
 	}
 	for _, entry := range cfg.Providers {
 		seeded, err := seedBudgets(ScopeProvider, entry.Name, false, entry.Limits)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		budgets = append(budgets, seeded...)
 	}
-	if err := caps.validate(budgets); err != nil {
-		return err
-	}
-	return store.ReplaceConfigBudgets(ctx, budgets)
+	return budgets, nil
 }
 
 func seedBudgets(scope Scope, rawSubject string, perChild bool, limits []config.BudgetLimitConfig) ([]Budget, error) {
@@ -151,4 +161,15 @@ func seedBudgets(scope Scope, rawSubject string, perChild bool, limits []config.
 		})
 	}
 	return budgets, nil
+}
+
+// ListStored returns the stored budgets: those saved in the dashboard, and
+// those seeded from the configuration the gateway last started with.
+func ListStored(ctx context.Context, shared storage.Storage) ([]Budget, error) {
+	store, err := createStore(ctx, shared)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = store.Close() }()
+	return store.ListBudgets(ctx)
 }

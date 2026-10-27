@@ -85,6 +85,10 @@ type LoadResult struct {
 	// more schemes in its configuration hook before ResolveSecrets runs.
 	Secrets *Secrets
 
+	// expanded holds the config.yaml strings environment expansion rewrote,
+	// as written, for ExportYAML.
+	expanded map[string]writtenScalar
+
 	secretsResolved bool
 	secretsErr      error
 
@@ -282,10 +286,11 @@ func Load() (*LoadResult, error) {
 		return nil, err
 	}
 
-	rawProviders, masterKeyUnresolved, err := applyYAML(cfg, strict)
+	layer, err := applyYAML(cfg, strict)
 	if err != nil {
 		return nil, err
 	}
+	rawProviders := layer.providers
 	yamlMasterKey := cfg.Server.MasterKey
 
 	if err := applyResponseSimpleEnv(&cfg.Cache.Response); err != nil {
@@ -352,7 +357,7 @@ func Load() (*LoadResult, error) {
 	// Expansion leaves an unset ${NAME} in config.yaml verbatim. As a master
 	// key, that text would be a password anyone who reads the file knows. A
 	// key from GOMODEL_MASTER_KEY replaces it and is used as-is.
-	if masterKeyUnresolved && cfg.Server.MasterKey != "" && cfg.Server.MasterKey == yamlMasterKey {
+	if layer.masterKeyUnresolved && cfg.Server.MasterKey != "" && cfg.Server.MasterKey == yamlMasterKey {
 		return nil, errors.New("server.master_key reads an environment variable that is not set; set it or remove server.master_key")
 	}
 	cfg.Server.BasePath = NormalizeBasePath(cfg.Server.BasePath)
@@ -407,6 +412,7 @@ func Load() (*LoadResult, error) {
 		Config:       cfg,
 		RawProviders: rawProviders,
 		Secrets:      NewSecrets(),
+		expanded:     layer.expanded,
 	}, nil
 }
 
@@ -441,8 +447,18 @@ func resolveConfigStrict() (bool, error) {
 	return strict, nil
 }
 
+// yamlLayer is what applyYAML read besides the settings it overlaid.
+type yamlLayer struct {
+	// providers is the raw provider map parsed from the providers: section.
+	providers map[string]RawProviderConfig
+	// masterKeyUnresolved reports whether server.master_key reads an unset
+	// variable.
+	masterKeyUnresolved bool
+	// expanded holds the strings environment expansion rewrote, as written.
+	expanded map[string]writtenScalar
+}
+
 // applyYAML reads an optional config file and overlays it onto cfg.
-// Returns the raw provider map parsed from the providers: YAML section.
 // If no config file is found, this is a no-op (not an error).
 //
 // When strict, an unknown key is an error rather than a silently ignored one. A
@@ -450,14 +466,14 @@ func resolveConfigStrict() (bool, error) {
 // zero — otherwise parses as a null section plus unknown top-level keys, and the
 // gateway boots with none of the operator's providers. CONFIG_STRICT=false
 // downgrades unknown keys to warnings; malformed values stay fatal either way.
-func applyYAML(cfg *Config, strict bool) (map[string]RawProviderConfig, bool, error) {
+func applyYAML(cfg *Config, strict bool) (yamlLayer, error) {
 	path, data, err := readConfigFile()
 	if err != nil {
-		return nil, false, err
+		return yamlLayer{}, err
 	}
 	if data == nil {
 		slog.Info("no config file found; using defaults and environment", "searched", configFilePaths)
-		return map[string]RawProviderConfig{}, false, nil
+		return yamlLayer{providers: map[string]RawProviderConfig{}}, nil
 	}
 
 	// yamlTarget is a local struct that mirrors Config for YAML unmarshaling,
@@ -477,11 +493,11 @@ func applyYAML(cfg *Config, strict bool) (map[string]RawProviderConfig, bool, er
 	decodeErr := decoder.Decode(&target)
 	if decodeErr != nil && !errors.Is(decodeErr, io.EOF) {
 		if err := reportYAMLDecodeError(path, decodeErr, strict); err != nil {
-			return nil, false, err
+			return yamlLayer{}, err
 		}
 	}
 	if err := ensureSingleDocument(path, decoder); err != nil {
-		return nil, false, err
+		return yamlLayer{}, err
 	}
 
 	slog.Info("config file loaded", "path", path, "providers", len(target.RawProviders))
@@ -489,7 +505,11 @@ func applyYAML(cfg *Config, strict bool) (map[string]RawProviderConfig, bool, er
 	if target.RawProviders == nil {
 		target.RawProviders = map[string]RawProviderConfig{}
 	}
-	return target.RawProviders, masterKeyReadsUnsetVariable(data, cfg.Server.MasterKey), nil
+	return yamlLayer{
+		providers:           target.RawProviders,
+		masterKeyUnresolved: masterKeyReadsUnsetVariable(data, cfg.Server.MasterKey),
+		expanded:            expandedScalars(data),
+	}, nil
 }
 
 // masterKeyReadsUnsetVariable reports whether the master key decoded from

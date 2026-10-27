@@ -147,3 +147,13 @@ func createStore(ctx context.Context, store storage.Storage) (Store, error) {
 		func(db *mongo.Database) (Store, error) { return NewMongoDBStore(db) },
 	)
 }
+
+// ListStored returns the virtual models saved in the dashboard.
+func ListStored(ctx context.Context, shared storage.Storage) ([]VirtualModel, error) {
+	store, err := createStore(ctx, shared)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = store.Close() }()
+	return store.List(ctx)
+}

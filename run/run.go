@@ -182,6 +182,18 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}
 
+	configExport := false
+	if cliOpts.ConfigArgs != nil {
+		configExport, err = parseConfigArgs(opts.ProductName, cliOpts.ConfigArgs, opts.Stdout, opts.Stderr)
+		if err != nil {
+			fmt.Fprintln(opts.Stderr, err)
+			return &usageError{err: err}
+		}
+		if !configExport {
+			return nil // help
+		}
+	}
+
 	if cliOpts.Version {
 		fmt.Fprintln(opts.Stdout, versionLine(opts.ProductName))
 		return nil
@@ -229,6 +241,13 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	if secretsOpts != nil {
 		if err := runSecretsReencrypt(ctx, opts, *secretsOpts); err != nil {
+			fmt.Fprintln(opts.Stderr, err)
+			return err
+		}
+		return nil
+	}
+	if configExport {
+		if err := runConfigExport(ctx, opts); err != nil {
 			fmt.Fprintln(opts.Stderr, err)
 			return err
 		}

@@ -2,7 +2,7 @@
 title: "CLI Operations"
 description: "Command-line flags for inspecting the GoModel binary, probing a running gateway's health, and reloading its configuration."
 icon: "terminal"
-keywords: ["CLI", "command-line flags", "health check", "version probe", "config reload", "SIGHUP"]
+keywords: ["CLI", "command-line flags", "health check", "version probe", "config reload", "SIGHUP", "config export"]
 ---
 
 ## Overview
@@ -217,6 +217,18 @@ gomodel secrets reencrypt [--rotate-data-key]
 ```
 
 See [Encryption at Rest](/advanced/encryption-at-rest).
+
+## Exporting the configuration
+
+`gomodel config export` prints every setting in effect, from defaults,
+`config.yaml`, environment variables, and the dashboard, as a `config.yaml`
+holding no secret.
+
+```bash
+gomodel config export > config.yaml
+```
+
+See [Exporting the Effective Configuration](/advanced/config-yaml#exporting-the-effective-configuration).
 
 ## Migrating from LiteLLM
 
