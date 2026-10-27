@@ -5,6 +5,7 @@ import (
 	"errors"
 	"maps"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -214,6 +215,47 @@ func TestSyncerStartsAgainAfterContextEnds(t *testing.T) {
 	syncer.Start(ctx)
 	syncer.Notifier("budgets")(ctx)
 	require.Eventually(t, func() bool { return budgets.count() == 1 }, time.Second, 5*time.Millisecond)
+}
+
+// A restart can come while the stopped poller is still finishing a poll; it
+// must wait for that poll rather than leave no poller running.
+func TestSyncerStartsAgainWhilePreviousPollFinishes(t *testing.T) {
+	ctx := context.Background()
+	syncer, err := NewSyncer(ctx, newFakeStore(nil))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = syncer.Close() })
+	syncer.interval = 5 * time.Millisecond
+	started, release := make(chan struct{}), make(chan struct{})
+	var refreshes atomic.Int32
+	syncer.Register("budgets", func(context.Context) error {
+		if refreshes.Add(1) == 1 {
+			close(started)
+			<-release
+		}
+		return nil
+	})
+
+	first, cancel := context.WithCancel(ctx)
+	syncer.Start(first)
+	syncer.Notifier("budgets")(ctx)
+	<-started
+	cancel()
+
+	restarted := make(chan struct{})
+	go func() {
+		syncer.Start(ctx)
+		close(restarted)
+	}()
+	// Start returns at once only if it gave up on the finishing poller.
+	select {
+	case <-restarted:
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(release)
+	<-restarted
+
+	syncer.Notifier("budgets")(ctx)
+	require.Eventually(t, func() bool { return refreshes.Load() == 2 }, time.Second, 5*time.Millisecond)
 }
 
 func TestNilSyncerIsInert(t *testing.T) {

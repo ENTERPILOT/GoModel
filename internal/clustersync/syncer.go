@@ -51,9 +51,20 @@ type Syncer struct {
 	// failures holds the last logged error per key (see logFailure), so
 	// a persistent failure is logged once, not every tick.
 	failures map[string]string
-	cancel   context.CancelFunc
-	done     chan struct{}
-	closed   bool
+	// pollCtx, cancel, and done belong to the latest poller.
+	pollCtx context.Context
+	cancel  context.CancelFunc
+	done    chan struct{}
+	closed  bool
+}
+
+func isClosed(ch <-chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
 }
 
 // New opens the revision store on the shared storage connection. Call it
@@ -172,19 +183,24 @@ func (s *Syncer) Start(ctx context.Context) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for !s.closed && s.done != nil && !isClosed(s.done) {
+		if s.pollCtx.Err() == nil {
+			return
+		}
+		// The previous poller's context has ended, but it is still finishing
+		// a poll. Wait for it without s.mu, which the poll's announcement
+		// retries take.
+		done := s.done
+		s.mu.Unlock()
+		<-done
+		s.mu.Lock()
+	}
 	if s.closed {
 		return
 	}
-	if s.done != nil {
-		select {
-		case <-s.done:
-		default:
-			return
-		}
-	}
 	ctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
-	s.cancel, s.done = cancel, done
+	s.pollCtx, s.cancel, s.done = ctx, cancel, done
 	go func() {
 		defer close(done)
 		ticker := time.NewTicker(s.interval)
