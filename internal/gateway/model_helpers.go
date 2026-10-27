@@ -77,6 +77,68 @@ func CloneResponsesRequestForSelector(req *core.ResponsesRequest, selector core.
 	return &cloned
 }
 
+// CloneEmbeddingRequestForSelector clones an embeddings request for a concrete selector.
+func CloneEmbeddingRequestForSelector(req *core.EmbeddingRequest, selector core.ModelSelector) *core.EmbeddingRequest {
+	if req == nil {
+		return nil
+	}
+	cloned := *req
+	cloned.Model = selector.Model
+	cloned.Provider = selector.Provider
+	cloned.Input = cloneEmbeddingInput(req.Input)
+	if req.Dimensions != nil {
+		dimensions := *req.Dimensions
+		cloned.Dimensions = &dimensions
+	}
+	cloned.ExtraFields = core.CloneUnknownJSONFields(req.ExtraFields)
+	return &cloned
+}
+
+func cloneEmbeddingInput(input any) any {
+	switch value := input.(type) {
+	case []any:
+		cloned := make([]any, len(value))
+		for i := range value {
+			cloned[i] = cloneEmbeddingInput(value[i])
+		}
+		return cloned
+	case map[string]any:
+		cloned := make(map[string]any, len(value))
+		for key, item := range value {
+			cloned[key] = cloneEmbeddingInput(item)
+		}
+		return cloned
+	case []string:
+		if value == nil {
+			return []string(nil)
+		}
+		cloned := make([]string, len(value))
+		copy(cloned, value)
+		return cloned
+	case []int:
+		if value == nil {
+			return []int(nil)
+		}
+		cloned := make([]int, len(value))
+		copy(cloned, value)
+		return cloned
+	case [][]int:
+		if value == nil {
+			return [][]int(nil)
+		}
+		cloned := make([][]int, len(value))
+		for i, row := range value {
+			if row != nil {
+				cloned[i] = make([]int, len(row))
+				copy(cloned[i], row)
+			}
+		}
+		return cloned
+	default:
+		return input
+	}
+}
+
 func cloneToolMaps(tools []map[string]any) []map[string]any {
 	if tools == nil {
 		return nil

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strconv"
@@ -125,6 +126,78 @@ func TestCloneRequestsForSelectorCopiesMutableFields(t *testing.T) {
 	require.Equal(t, "original", responsesReq.Metadata["client"])
 	require.False(t, responsesReq.StreamOptions.IncludeUsage)
 	require.Equal(t, "low", responsesReq.Reasoning.Effort)
+}
+
+func TestCloneEmbeddingRequestForSelectorPreservesAndDetachesRequestFields(t *testing.T) {
+	dimensions := 256
+	req := &core.EmbeddingRequest{
+		Model:          "alias",
+		Provider:       "router",
+		Input:          []any{"first", map[string]any{"text": "second"}},
+		Dimensions:     &dimensions,
+		EncodingFormat: "base64",
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			"x_custom": json.RawMessage(`{"mode":"test"}`),
+		}),
+	}
+
+	cloned := CloneEmbeddingRequestForSelector(req, core.ModelSelector{Provider: "openai-backup", Model: "embedding-model"})
+	cloned.Input.([]any)[1].(map[string]any)["text"] = "changed"
+	*cloned.Dimensions = 512
+	cloned.ExtraFields = core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+		"x_custom": json.RawMessage(`{"mode":"changed"}`),
+	})
+
+	require.Equal(t, "embedding-model", cloned.Model)
+	require.Equal(t, "openai-backup", cloned.Provider)
+	require.Equal(t, "first", cloned.Input.([]any)[0])
+	require.Equal(t, "second", req.Input.([]any)[1].(map[string]any)["text"])
+	require.NotSame(t, req.Dimensions, cloned.Dimensions)
+	require.Equal(t, 256, *req.Dimensions)
+	require.Equal(t, 512, *cloned.Dimensions)
+	require.Equal(t, "base64", cloned.EncodingFormat)
+	require.JSONEq(t, `{"mode":"test"}`, string(req.ExtraFields.Lookup("x_custom")))
+}
+
+func TestCloneEmbeddingRequestForSelectorDetachesTypedInputs(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  any
+		mutate func(any)
+	}{
+		{
+			name:  "strings",
+			input: []string{"first", "second"},
+			mutate: func(input any) {
+				input.([]string)[0] = "changed"
+			},
+		},
+		{
+			name:  "integers",
+			input: []int{2, 3},
+			mutate: func(input any) {
+				input.([]int)[0] = 99
+			},
+		},
+		{
+			name:  "nested integers",
+			input: [][]int{{2, 3}, {5}},
+			mutate: func(input any) {
+				input.([][]int)[0][0] = 99
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &core.EmbeddingRequest{Input: tt.input}
+			cloned := CloneEmbeddingRequestForSelector(req, core.ModelSelector{Model: "backup"})
+			require.IsType(t, tt.input, cloned.Input)
+			require.Equal(t, req.Input, cloned.Input, "cloning must preserve JSON value and number semantics")
+			tt.mutate(cloned.Input)
+			require.Equal(t, tt.input, req.Input, "typed request input shares backing storage with its clone")
+		})
+	}
 }
 
 func TestShouldEnforceReturningUsageDataRequiresEnabledLogger(t *testing.T) {

@@ -593,16 +593,24 @@ func (s *translatedInferenceService) Embeddings(c *echo.Context) error {
 }
 
 func (s *translatedInferenceService) dispatchEmbeddings(c *echo.Context, req *core.EmbeddingRequest, workflow *core.Workflow) error {
-	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker, rateLimitRouteFromWorkflow(workflow))
+	s.observeLiveProviderAttempts(c, workflow)
+	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker,
+		rateLimitRouteFromWorkflow(workflow).withFailovers(len(s.inference().FailoverSelectors(workflow))))
 	if err != nil {
 		return handleError(c, err)
 	}
 	defer adm.release()
 
 	requestID := requestIDFromContextOrHeader(c.Request())
-	result, err := s.inference().ExecuteEmbeddings(c.Request().Context(), workflow, req, requestID, "/v1/embeddings")
+	ctx := adm.dispatchContext(c.Request().Context())
+	result, err := s.inference().ExecuteEmbeddings(ctx, workflow, req, requestID, "/v1/embeddings")
 	if err != nil {
 		return handleError(c, err)
+	}
+	enrichAuditEntryWithProviderAttempts(c)
+	if result.Meta.UsedFailover {
+		markRequestFailoverUsed(c)
+		auditlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)
 	}
 	auditlog.EnrichEntryWithResolvedRoute(
 		c,
