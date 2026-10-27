@@ -14,6 +14,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
+	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/server"
@@ -242,19 +243,38 @@ func (b *bootstrap) initResponseCache() error {
 		ResponseCache:   rcm,
 	}
 	internalGuardrailExecutor := server.NewInternalChatCompletionExecutor(b.provider, internalCfg)
+	decider := pluginDecider{
+		InternalDecisionsExecutor: server.NewInternalDecisionsExecutor(b.provider, internalCfg),
+		router:                    app.providers.Router,
+		virtualModels:             vm,
+	}
 	// Instances pick the executors up on their next call; no rebuild needed.
 	if app.guardrails != nil && app.guardrails.Service != nil {
 		app.guardrails.Service.SetChatCompleter(internalGuardrailExecutor)
-		app.guardrails.Service.SetDecider(pluginDecider{
-			InternalDecisionsExecutor: server.NewInternalDecisionsExecutor(b.provider, internalCfg),
+		app.guardrails.Service.SetDecider(decider)
+	}
+	// Rewriters call models before their request is admitted, so their
+	// executors admit every call themselves.
+	extensionCfg := internalCfg
+	if app.rateLimits.Service != nil {
+		extensionCfg.RateLimiter = app.rateLimits.Service
+	}
+	if app.budgets.Service != nil {
+		extensionCfg.BudgetChecker = app.budgets.Service
+	}
+	b.internalInference = plugins.HostDeps{
+		Chat: server.NewInternalChatCompletionExecutor(b.provider, extensionCfg),
+		Decisions: pluginDecider{
+			InternalDecisionsExecutor: server.NewInternalDecisionsExecutor(b.provider, extensionCfg),
 			router:                    app.providers.Router,
 			virtualModels:             vm,
-		})
+		},
 	}
 	return nil
 }
 
-// initServer creates the HTTP server and binds the extension authenticators.
+// initServer creates the HTTP server and binds the extension authenticators
+// and inference-aware rewriters.
 // It is infallible and runs last: everything before it can fail, and a
 // failed replacement generation must not have rebound shared registries.
 func (b *bootstrap) initServer() error {
@@ -270,6 +290,7 @@ func (b *bootstrap) initServer() error {
 	// succeeded: otherwise a failed replacement would leave the still-serving
 	// generation pointing at the replacement's already-closed audit logger.
 	bindAuthenticationEventRecorders(b.cfg.Extensions, auditlog.NewAuthenticationEventRecorder(app.audit.Logger))
+	bindRewriterInference(b.cfg.Extensions, b.internalInference)
 	return nil
 }
 

@@ -76,6 +76,17 @@ func TestHostInferenceUserPathFallsBackToRequest(t *testing.T) {
 	require.Equal(t, "/override/guardrails/i", got)
 }
 
+func TestHostInferenceScope(t *testing.T) {
+	var capturedCtx context.Context
+	h := NewHost(HostDeps{Chat: chatFunc(func(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
+		capturedCtx = ctx
+		return &core.ChatResponse{}, nil
+	})}, HostInfo{PluginName: "router", InstanceName: "router", Scope: ScopeExtensions})
+	_, err := h.Inference().Complete(core.WithEffectiveUserPath(context.Background(), "/acme"), pluginapi.InferenceRequest{Model: "m"})
+	require.NoError(t, err)
+	require.Equal(t, "/acme/extensions/router", core.UserPathFromContext(capturedCtx))
+}
+
 func TestHostInferenceUnavailable(t *testing.T) {
 	h := NewHost(HostDeps{}, HostInfo{PluginName: "p", InstanceName: "i"})
 	_, err := h.Inference().Complete(context.Background(), pluginapi.InferenceRequest{Model: "m"})
