@@ -3,9 +3,11 @@ package cache
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
+	"net/url"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -36,6 +38,10 @@ func NewRedisStore(cfg RedisStoreConfig) (*RedisStore, error) {
 	installRedisLogger()
 	opts, err := redis.ParseURL(cfg.URL)
 	if err != nil {
+		// url.Error quotes the whole URL, password included.
+		if urlErr, ok := errors.AsType[*url.Error](err); ok {
+			err = urlErr.Err
+		}
 		return nil, fmt.Errorf("invalid redis URL: %w", err)
 	}
 	opts.Dialer = redisDialer(opts.TLSConfig)
@@ -59,7 +65,7 @@ func (s *RedisStore) Get(ctx context.Context, key string) ([]byte, error) {
 	fullKey := s.prefix + key
 	data, err := s.client.Get(ctx, fullKey).Bytes()
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("redis get: %w", err)
