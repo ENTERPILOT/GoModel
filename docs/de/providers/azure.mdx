@@ -47,6 +47,7 @@ Provider alle Deployments der Ressource abdeckt. Lassen Sie `AZURE_API_VERSION`
 (und `api_version` im YAML oben) leer; setzen Sie `preview` nur, um
 Preview-Features zu aktivieren. Klassische
 URLs `https://your-resource.openai.azure.com/openai/v1` funktionieren genauso.
+Realtime-Sitzungen verwenden den GA-Websocket `/openai/v1/realtime?model=<deployment>`.
 
 `/openai/v1/models` listet die Modelle der Ressource, daher wird ein Deployment,
 das wie sein Modell heißt (Standard in Foundry), direkt geroutet. Eigene

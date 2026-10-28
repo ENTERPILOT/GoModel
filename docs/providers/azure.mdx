@@ -45,7 +45,8 @@ On a `/openai/v1` base URL GoModel sends no `api-version` by default, and the
 `model` in the request body selects the deployment, so one provider covers
 every deployment in the resource. Leave `AZURE_API_VERSION` (and `api_version`
 in the YAML above) unset; set it to `preview` only to opt into preview features. Classic `https://your-resource.openai.azure.com/openai/v1`
-URLs work the same way.
+URLs work the same way. Realtime sessions use the GA
+`/openai/v1/realtime?model=<deployment>` websocket.
 
 `/openai/v1/models` lists the resource's models, so a deployment named after its
 model (the Foundry default) routes as-is. For custom deployment names, list them

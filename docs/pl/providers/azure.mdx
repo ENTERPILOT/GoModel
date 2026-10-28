@@ -46,7 +46,8 @@ Przy base URL-u `/openai/v1` GoModel domyślnie nie wysyła `api-version`, a
 wszystkie deploymenty zasobu. Nie ustawiaj `AZURE_API_VERSION` (ani
 `api_version` w YAML-u powyżej); użyj `preview` tylko po to, żeby włączyć
 funkcje preview. Klasyczne URL-e
-`https://your-resource.openai.azure.com/openai/v1` działają tak samo.
+`https://your-resource.openai.azure.com/openai/v1` działają tak samo. Sesje
+realtime używają websocketu GA `/openai/v1/realtime?model=<deployment>`.
 
 `/openai/v1/models` zwraca modele zasobu, więc deployment nazwany tak jak jego
 model (domyślnie w Foundry) jest routowany bez zmian. Własne nazwy deploymentów
