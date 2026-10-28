@@ -403,6 +403,9 @@ func Load() (*LoadResult, error) {
 	if err := ResolveClientIPPolicy(&cfg.Server); err != nil {
 		return nil, err
 	}
+	if err := ValidateServerTLS(cfg.Server); err != nil {
+		return nil, err
+	}
 
 	return &LoadResult{
 		Config:       cfg,

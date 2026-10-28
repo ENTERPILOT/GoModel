@@ -52,6 +52,9 @@ The most common way to configure GoModel. Set any of the variables below to over
 | `SERVER_TRUSTED_PROXIES` | Networks your own proxies sit on; enables header-based client addresses | _(empty)_ |
 | `SERVER_CLIENT_IP_HEADER` | Header a trusted proxy passes the client address in | `X-Forwarded-For` |
 | `SERVER_TRUSTED_HOPS` | Proxies between the client and the gateway; `0` scans the chain instead | `0` |
+| `SERVER_TLS_CERT_FILE` | PEM certificate the listener serves HTTPS with; set together with the key | _(empty, plain HTTP)_ |
+| `SERVER_TLS_KEY_FILE` | Private key for `SERVER_TLS_CERT_FILE` | _(empty)_ |
+| `SERVER_TLS_CLIENT_CA_FILE` | PEM CA bundle; when set, every client must present a certificate it signed (mTLS) | _(empty)_ |
 | `SWAGGER_ENABLED`    | Expose [Swagger UI](/advanced/swagger-ui); needs a `-tags=swagger` build | `false`                |
 | `AUTH_VERIFY_ENABLED` | Expose [`GET /v1/auth/verify`](/advanced/api-endpoints#key-verification), which reports whether the API key a request carries is valid | `false`                |
 | `PID_FILE`           | Where the running gateway records its process id for `gomodel --reload`. Changing it needs a restart | `data/gomodel.pid` next to a `./data` directory, otherwise the per-user data directory |
@@ -170,6 +173,28 @@ needs a credential, and the admin API stays behind one carrying dashboard
 access. Issue that credential before flipping the switch — with no master key,
 no managed key, and no authentication extension, the gateway rejects every
 request and logs a warning at startup saying so.
+
+#### Serving HTTPS
+
+Leave the `SERVER_TLS_*` settings unset to serve plain HTTP behind a proxy that
+terminates TLS. Set the certificate and key (`server.tls_cert_file` and
+`server.tls_key_file` in YAML) when clients connect to the gateway directly:
+
+```yaml
+server:
+  tls_cert_file: /etc/gomodel/tls/tls.crt
+  tls_key_file: /etc/gomodel/tls/tls.key
+  # tls_client_ca_file: /etc/gomodel/tls/ca.crt # require client certificates
+```
+
+The listener then serves only HTTPS, with TLS 1.2 or later and HTTP/2. The files
+are checked every 5 seconds and a rotated certificate is picked up without a
+restart; a rotation that fails to load keeps the previous one. Setting only one
+of the pair, or a file that is missing or invalid at startup, is an error. The
+paths accept `${env:...}` and `${file:...}` references like other settings.
+These settings cover inbound connections only; [outbound TLS
+trust](#outbound-tls-trust) is configured separately. See the [production
+guide](/guides/production#native-tls) for a cert-manager example.
 
 #### MCP Gateway
 

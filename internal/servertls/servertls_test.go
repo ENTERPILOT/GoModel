@@ -1,0 +1,239 @@
+package servertls
+
+import (
+	"crypto/tls"
+	"crypto/x509"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/enterpilot/gomodel/internal/tlstest"
+)
+
+// newSource loads settings and checks the files on every handshake, so a
+// test sees a rotation without waiting out DefaultCheckInterval.
+func newSource(t *testing.T, settings Settings) *Source {
+	t.Helper()
+	src, err := New(settings)
+	require.NoError(t, err)
+	src.interval = 0
+	src.nextCheck.Store(0)
+	return src
+}
+
+// serve runs an HTTPS server on loopback that answers with the request's
+// protocol, and returns its address.
+func serve(t *testing.T, src *Source) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	srv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.WriteString(w, r.Proto)
+		}),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() { _ = srv.Serve(tls.NewListener(ln, src.ServerConfig())) }()
+	t.Cleanup(func() { _ = srv.Close() })
+	return ln.Addr().String()
+}
+
+// servedLeaf opens a fresh connection and returns the certificate served on it.
+func servedLeaf(t *testing.T, addr string, roots *x509.CertPool) *x509.Certificate {
+	t.Helper()
+	conn, err := tls.Dial("tcp", addr, &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12})
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+	return conn.ConnectionState().PeerCertificates[0]
+}
+
+// get makes one HTTPS request on a fresh connection and returns the body.
+func get(addr string, cfg *tls.Config) (string, error) {
+	transport := &http.Transport{TLSClientConfig: cfg, ForceAttemptHTTP2: true, DisableKeepAlives: true}
+	defer transport.CloseIdleConnections()
+	resp, err := (&http.Client{Transport: transport, Timeout: 5 * time.Second}).Get("https://" + addr + "/")
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	return string(body), err
+}
+
+func TestServesHTTPSWithHTTP2(t *testing.T) {
+	ca := tlstest.NewCA(t, "test CA")
+	certFile, keyFile := ca.Issue(t, "gateway").Write(t, t.TempDir())
+	addr := serve(t, newSource(t, Settings{CertFile: certFile, KeyFile: keyFile}))
+
+	proto, err := get(addr, &tls.Config{RootCAs: ca.Pool, MinVersion: tls.VersionTLS12})
+	require.NoError(t, err)
+	assert.Equal(t, "HTTP/2.0", proto)
+
+	_, err = get(addr, &tls.Config{RootCAs: ca.Pool, MinVersion: tls.VersionTLS10, MaxVersion: tls.VersionTLS11})
+	require.Error(t, err, "TLS below 1.2 must be refused")
+}
+
+func TestNewRejectsUnusableFiles(t *testing.T) {
+	ca := tlstest.NewCA(t, "test CA")
+	dir := t.TempDir()
+	certFile, keyFile := ca.Issue(t, "gateway").Write(t, dir)
+	_, otherKey := ca.Issue(t, "other").Write(t, t.TempDir())
+	garbage := filepath.Join(dir, "garbage.pem")
+	require.NoError(t, os.WriteFile(garbage, []byte("not a certificate"), 0o600))
+	missing := filepath.Join(dir, "missing.pem")
+
+	tests := []struct {
+		name     string
+		settings Settings
+		wantErr  string
+	}{
+		{"missing certificate", Settings{CertFile: missing, KeyFile: keyFile}, "missing.pem"},
+		{"missing key", Settings{CertFile: certFile, KeyFile: missing}, "missing.pem"},
+		{"certificate is not PEM", Settings{CertFile: garbage, KeyFile: keyFile}, "load certificate"},
+		{"key does not match", Settings{CertFile: certFile, KeyFile: otherKey}, "load certificate"},
+		{"missing client CA", Settings{CertFile: certFile, KeyFile: keyFile, ClientCAFile: missing}, "missing.pem"},
+		{"client CA is not PEM", Settings{CertFile: certFile, KeyFile: keyFile, ClientCAFile: garbage}, "no PEM certificates"},
+		{"half configured", Settings{CertFile: certFile}, "both a certificate and a key"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := New(tt.settings)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+func TestReloadsRotatedCertificate(t *testing.T) {
+	ca := tlstest.NewCA(t, "test CA")
+	dir := t.TempDir()
+	first := ca.Issue(t, "first")
+	certFile, keyFile := first.Write(t, dir)
+	addr := serve(t, newSource(t, Settings{CertFile: certFile, KeyFile: keyFile}))
+	require.Equal(t, first.Cert.SerialNumber, servedLeaf(t, addr, ca.Pool).SerialNumber)
+
+	second := ca.Issue(t, "second")
+	second.Write(t, dir)
+	assert.Equal(t, second.Cert.SerialNumber, servedLeaf(t, addr, ca.Pool).SerialNumber)
+}
+
+// Kubernetes updates a mounted Secret by pointing the ..data symlink at a new
+// directory; the file names the gateway was given never change.
+func TestReloadsAfterKubernetesSymlinkSwap(t *testing.T) {
+	ca := tlstest.NewCA(t, "test CA")
+	mount := t.TempDir()
+	first, second := ca.Issue(t, "first"), ca.Issue(t, "second")
+	for name, leaf := range map[string]tlstest.Leaf{"..v1": first, "..v2": second} {
+		require.NoError(t, os.Mkdir(filepath.Join(mount, name), 0o700))
+		leaf.Write(t, filepath.Join(mount, name))
+	}
+	data := filepath.Join(mount, "..data")
+	require.NoError(t, os.Symlink("..v1", data))
+	for _, name := range []string{"tls.crt", "tls.key"} {
+		require.NoError(t, os.Symlink(filepath.Join("..data", name), filepath.Join(mount, name)))
+	}
+	addr := serve(t, newSource(t, Settings{
+		CertFile: filepath.Join(mount, "tls.crt"),
+		KeyFile:  filepath.Join(mount, "tls.key"),
+	}))
+	require.Equal(t, first.Cert.SerialNumber, servedLeaf(t, addr, ca.Pool).SerialNumber)
+
+	swap := filepath.Join(mount, "..data_tmp")
+	require.NoError(t, os.Symlink("..v2", swap))
+	require.NoError(t, os.Rename(swap, data))
+	assert.Equal(t, second.Cert.SerialNumber, servedLeaf(t, addr, ca.Pool).SerialNumber)
+}
+
+func TestFailedReloadKeepsLastGoodCertificate(t *testing.T) {
+	ca := tlstest.NewCA(t, "test CA")
+	dir := t.TempDir()
+	first := ca.Issue(t, "first")
+	certFile, keyFile := first.Write(t, dir)
+	addr := serve(t, newSource(t, Settings{CertFile: certFile, KeyFile: keyFile}))
+
+	// The new certificate landed but its key has not yet: a mismatched pair.
+	second := ca.Issue(t, "second")
+	tlstest.WriteFile(t, certFile, second.CertPEM)
+	assert.Equal(t, first.Cert.SerialNumber, servedLeaf(t, addr, ca.Pool).SerialNumber)
+
+	// A file truncated mid-write, then one removed outright.
+	tlstest.WriteFile(t, certFile, second.CertPEM[:len(second.CertPEM)/2])
+	assert.Equal(t, first.Cert.SerialNumber, servedLeaf(t, addr, ca.Pool).SerialNumber)
+	require.NoError(t, os.Remove(keyFile))
+	assert.Equal(t, first.Cert.SerialNumber, servedLeaf(t, addr, ca.Pool).SerialNumber)
+
+	// The pair completes, and the next handshake picks it up.
+	second.Write(t, dir)
+	assert.Equal(t, second.Cert.SerialNumber, servedLeaf(t, addr, ca.Pool).SerialNumber)
+}
+
+// Between checks a handshake reuses the loaded certificate without touching
+// the file system.
+func TestChecksFilesAtMostOncePerInterval(t *testing.T) {
+	ca := tlstest.NewCA(t, "test CA")
+	dir := t.TempDir()
+	first := ca.Issue(t, "first")
+	certFile, keyFile := first.Write(t, dir)
+	src, err := New(Settings{CertFile: certFile, KeyFile: keyFile})
+	require.NoError(t, err)
+	addr := serve(t, src)
+
+	ca.Issue(t, "second").Write(t, dir)
+	assert.Equal(t, first.Cert.SerialNumber, servedLeaf(t, addr, ca.Pool).SerialNumber)
+}
+
+func TestMutualTLS(t *testing.T) {
+	ca := tlstest.NewCA(t, "test CA")
+	clientCA := tlstest.NewCA(t, "client CA")
+	dir := t.TempDir()
+	certFile, keyFile := ca.Issue(t, "gateway", x509.ExtKeyUsageServerAuth).Write(t, dir)
+	caFile := filepath.Join(dir, "client-ca.pem")
+	tlstest.WriteFile(t, caFile, clientCA.PEM)
+	src := newSource(t, Settings{CertFile: certFile, KeyFile: keyFile, ClientCAFile: caFile})
+	require.True(t, src.MutualTLS())
+	addr := serve(t, src)
+
+	clientCert := func(issuer *tlstest.CA) []tls.Certificate {
+		leaf := issuer.Issue(t, "client", x509.ExtKeyUsageClientAuth)
+		pair, err := tls.X509KeyPair(leaf.CertPEM, leaf.KeyPEM)
+		require.NoError(t, err)
+		return []tls.Certificate{pair}
+	}
+	request := func(certs []tls.Certificate) error {
+		_, err := get(addr, &tls.Config{RootCAs: ca.Pool, Certificates: certs, MinVersion: tls.VersionTLS12})
+		return err
+	}
+
+	require.NoError(t, request(clientCert(clientCA)), "a client the CA signed must be accepted")
+	require.Error(t, request(nil), "a client without a certificate must be rejected")
+	require.Error(t, request(clientCert(ca)), "a client another CA signed must be rejected")
+
+	// The client CA reloads too.
+	rotated := tlstest.NewCA(t, "rotated client CA")
+	tlstest.WriteFile(t, caFile, rotated.PEM)
+	require.Error(t, request(clientCert(clientCA)), "the replaced CA must no longer be trusted")
+	require.NoError(t, request(clientCert(rotated)))
+}
+
+// The per-handshake path is one clock read and one atomic load between checks.
+func BenchmarkConfigForClient(b *testing.B) {
+	ca := tlstest.NewCA(b, "test CA")
+	certFile, keyFile := ca.Issue(b, "gateway").Write(b, b.TempDir())
+	src, err := New(Settings{CertFile: certFile, KeyFile: keyFile})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := src.configForClient(nil); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

@@ -110,6 +110,48 @@ type ServerConfig struct {
 	// ClientIP is the compiled form of the three settings above, resolved once
 	// at load. It is not configured directly.
 	ClientIP ClientIPPolicy `yaml:"-"`
+
+	// TLSCertFile and TLSKeyFile serve the listener over HTTPS from a PEM
+	// certificate (intermediates after the leaf) and its private key. Both or
+	// neither; unset (default) serves plain HTTP. The files are re-read when
+	// they change on disk, so rotation (cert-manager, certbot) needs no
+	// restart or reload. Inbound only: outbound trust is http.tls.
+	// Default: empty (plain HTTP)
+	TLSCertFile string `yaml:"tls_cert_file" env:"SERVER_TLS_CERT_FILE"`
+	TLSKeyFile  string `yaml:"tls_key_file" env:"SERVER_TLS_KEY_FILE"`
+
+	// TLSClientCAFile requires every client to present a certificate signed
+	// by a CA in this PEM bundle (mTLS). Requires TLSCertFile and TLSKeyFile;
+	// reloaded with them.
+	// Default: empty (no client certificate requested)
+	TLSClientCAFile string `yaml:"tls_client_ca_file" env:"SERVER_TLS_CLIENT_CA_FILE"`
+}
+
+// TLSEnabled reports whether the listener serves HTTPS.
+func (s ServerConfig) TLSEnabled() bool {
+	return strings.TrimSpace(s.TLSCertFile) != "" || strings.TrimSpace(s.TLSKeyFile) != ""
+}
+
+// Scheme is the URL scheme the listener serves: "https" or "http".
+func (s ServerConfig) Scheme() string {
+	if s.TLSEnabled() {
+		return "https"
+	}
+	return "http"
+}
+
+// ValidateServerTLS reports a half-configured certificate pair, and a client
+// CA without one. The files themselves are read when the server starts.
+func ValidateServerTLS(server ServerConfig) error {
+	cert := strings.TrimSpace(server.TLSCertFile) != ""
+	key := strings.TrimSpace(server.TLSKeyFile) != ""
+	if cert != key {
+		return fmt.Errorf("server.tls_cert_file and server.tls_key_file must be set together")
+	}
+	if !cert && strings.TrimSpace(server.TLSClientCAFile) != "" {
+		return fmt.Errorf("server.tls_client_ca_file requires server.tls_cert_file and server.tls_key_file")
+	}
+	return nil
 }
 
 // DefaultStreamStallTimeoutSeconds is the default ServerConfig.StreamStallTimeout.

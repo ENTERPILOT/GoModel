@@ -1,6 +1,7 @@
 package app
 
 import (
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/ratelimit"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/server"
+	"github.com/enterpilot/gomodel/internal/servertls"
 	"github.com/enterpilot/gomodel/internal/session"
 	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/usage"
@@ -173,6 +175,11 @@ func (b *bootstrap) initServerConfig() error {
 	if app.mcpGateway != nil {
 		serverCfg.MCPGateway = app.mcpGateway.Service
 	}
+	tlsConfig, err := serverTLSConfig(appCfg.Server)
+	if err != nil {
+		return err
+	}
+	serverCfg.TLSConfig = tlsConfig
 
 	// Assigned conditionally so a disabled feature leaves the interface nil
 	// (a typed-nil *ratelimit.Service would defeat the fast nil check).
@@ -202,6 +209,30 @@ func (b *bootstrap) initServerConfig() error {
 	}
 	b.serverCfg = serverCfg
 	return nil
+}
+
+// serverTLSConfig loads the listener's certificate when server TLS is
+// configured, and returns nil for plain HTTP. Each generation loads the files
+// afresh, so a configuration reload can change the paths, and a reload whose
+// files are unusable is rejected while the running generation keeps serving.
+func serverTLSConfig(cfg config.ServerConfig) (*tls.Config, error) {
+	if !cfg.TLSEnabled() {
+		return nil, nil
+	}
+	source, err := servertls.New(servertls.Settings{
+		CertFile:     cfg.TLSCertFile,
+		KeyFile:      cfg.TLSKeyFile,
+		ClientCAFile: cfg.TLSClientCAFile,
+	})
+	if err != nil {
+		return nil, err
+	}
+	leaf := source.Leaf()
+	slog.Info("server TLS enabled",
+		"subject", leaf.Subject.String(),
+		"not_after", leaf.NotAfter,
+		"client_certificates_required", source.MutualTLS())
+	return source.ServerConfig(), nil
 }
 
 // initResponseCache builds the response cache middleware and the internal

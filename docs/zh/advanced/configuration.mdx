@@ -51,6 +51,9 @@ GoModel 会根据常用的环境变量自动发现提供商。
 | `SERVER_TRUSTED_PROXIES` | 您自己的代理所在的网络；启用基于 Header 的客户端地址解析 | _（空）_ |
 | `SERVER_CLIENT_IP_HEADER` | 受信任代理用于传递客户端地址的 Header | `X-Forwarded-For` |
 | `SERVER_TRUSTED_HOPS` | 客户端与网关之间的代理数量；`0` 表示改为扫描整条链 | `0` |
+| `SERVER_TLS_CERT_FILE` | 监听器提供 HTTPS 所用的 PEM 证书；需与私钥一起设置 | _（空，纯 HTTP）_ |
+| `SERVER_TLS_KEY_FILE` | `SERVER_TLS_CERT_FILE` 对应的私钥 | _（空）_ |
+| `SERVER_TLS_CLIENT_CA_FILE` | PEM CA 证书包；设置后，每个客户端都必须出示由其签发的证书（mTLS） | _（空）_ |
 | `SWAGGER_ENABLED`    | 暴露 [Swagger UI](/zh/advanced/swagger-ui)；需要使用 `-tags=swagger` 构建 | `false`                |
 | `AUTH_VERIFY_ENABLED` | 暴露 [`GET /v1/auth/verify`](/zh/advanced/api-endpoints#密钥验证)，用于报告请求携带的 API 密钥是否有效 | `false`                |
 | `PID_FILE`           | 运行中的网关为 `gomodel --reload` 记录进程 ID 的位置。修改后需要重启 | 存在 `./data` 目录时为其中的 `data/gomodel.pid`，否则为用户级数据目录 |
@@ -100,6 +103,19 @@ MASTER_KEY_DISABLED=true
 GoModel 会在启动时忽略任何已配置的主密钥，因此没有任何地方接受它或基于它派生：它对网关、对 [`GET /v1/auth/verify`](/zh/advanced/api-endpoints#密钥验证) 以及对 `/admin` 都会失败。留在环境变量或 `config.yaml` 中的密钥不会生效，也不会报错，因此您可以在移除它之前安全地打开这个开关。
 
 禁用主密钥与将 `GOMODEL_MASTER_KEY` 留空不同：留空会让网关以免认证方式运行，并开放 `/admin/*`，以便控制台引导创建第一个托管密钥。除非配置了认证扩展，否则即使已存在托管密钥，`/admin/*` 仍保持开放，GoModel 会在启动时记录安全警告；因此一旦签发了第一个具有控制台访问权限的密钥，请立即设置主密钥或将其禁用。禁用主密钥则是失败即拒绝（fail closed）：每个请求都需要凭据，Admin API 只能通过具有控制台访问权限的凭据访问。请在打开开关之前签发该凭据：如果既没有主密钥、也没有托管密钥和认证扩展，网关会拒绝所有请求，并在启动时记录相应警告。
+
+#### 提供 HTTPS 服务
+
+在终止 TLS 的代理后面提供纯 HTTP 服务时，请保持 `SERVER_TLS_*` 设置为空。当客户端直接连接网关时，请设置证书和私钥（YAML 中为 `server.tls_cert_file` 和 `server.tls_key_file`）：
+
+```yaml
+server:
+  tls_cert_file: /etc/gomodel/tls/tls.crt
+  tls_key_file: /etc/gomodel/tls/tls.key
+  # tls_client_ca_file: /etc/gomodel/tls/ca.crt # require client certificates
+```
+
+此时监听器只提供 HTTPS，使用 TLS 1.2 或更高版本以及 HTTP/2。每 5 秒检查一次文件，轮换后的证书无需重启即可生效；无法加载的轮换会保留之前的证书。只设置证书对中的一个，或启动时文件缺失或无效，都会报错。路径与其他设置一样接受 `${env:...}` 和 `${file:...}` 引用。这些设置仅适用于入站连接；[出站 TLS 信任](#出站-tls-信任)需单独配置。cert-manager 示例请参阅[生产环境指南](/zh/guides/production#原生-tls)。
 
 #### MCP 网关
 
