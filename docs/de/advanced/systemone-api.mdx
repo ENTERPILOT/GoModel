@@ -109,7 +109,7 @@ Part, den kein Asset verwendet, ein Asset, das einen fehlenden Part benennt,
 oder ein Bild, das weder PNG noch JPEG ist, liefert `400`. Senden Sie den
 Header `TypeSafe-Danger-Zone-Images: true`, wie von TypeSafe verlangt; das
 Gateway leitet ihn weiter. Kev-Server und Microsoft-Decision-1 von Azure lesen
-nur Text; ihre Bild-Requests werden unverändert weitergeleitet, und der Upstream
+nur Text; das Gateway lehnt ihre Bild-Requests nicht ab, und der Upstream
 beantwortet sie.
 
 ```bash

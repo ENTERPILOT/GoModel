@@ -168,8 +168,8 @@ curl -s http://localhost:8080/v1/decisions \
 ```
 
 Microsoft-Decision-1 reads text and JSON only: `/v1/decisions` refuses images,
-while `/v1/systemone` forwards requests as sent, so Foundry answers them. New subscriptions start with no quota for it, so request quota before
-deploying.
+while `/v1/systemone` does not refuse them and Foundry answers. New
+subscriptions start with no quota for it, so request quota before deploying.
 
 ## Multiple deployments
 

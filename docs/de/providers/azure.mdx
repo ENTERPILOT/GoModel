@@ -171,8 +171,7 @@ curl -s http://localhost:8080/v1/decisions \
 ```
 
 Microsoft-Decision-1 liest nur Text und JSON: `/v1/decisions` lehnt Bilder ab,
-während `/v1/systemone` Requests unverändert weiterleitet, sodass Foundry sie
-beantwortet. Neue Abonnements haben anfangs kein Kontingent dafür, beantragen Sie
+während `/v1/systemone` sie nicht ablehnt und Foundry sie beantwortet. Neue Abonnements haben anfangs kein Kontingent dafür, beantragen Sie
 also Kontingent, bevor Sie es bereitstellen.
 
 ## Mehrere Deployments

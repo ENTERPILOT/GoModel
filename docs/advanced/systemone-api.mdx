@@ -99,8 +99,8 @@ kept when it states one, and otherwise comes from the image's bytes. A form
 TypeSafe would reject, such as a part no asset uses, an asset naming a
 missing part, or an image that is not a PNG or JPEG, returns `400`. Send the
 `TypeSafe-Danger-Zone-Images: true` header as TypeSafe requires; the gateway
-forwards it. Kev servers and Azure's Microsoft-Decision-1 read text only; their
-image requests are forwarded as sent and the upstream answers them.
+forwards it. Kev servers and Azure's Microsoft-Decision-1 read text only; the
+gateway does not refuse their image requests, and the upstream answers them.
 
 ```bash
 curl -s http://localhost:8080/v1/systemone \

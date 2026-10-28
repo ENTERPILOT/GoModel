@@ -104,8 +104,7 @@ przeciwnym razie wynika z bajtów obrazu. Formularz, który TypeSafe by odrzuci�
 obraz niebędący PNG ani JPEG – zwraca `400`. Wysyłaj nagłówek
 `TypeSafe-Danger-Zone-Images: true`, jak wymaga TypeSafe; gateway go
 przekazuje. Serwery Kev i Microsoft-Decision-1 w Azure odczytują wyłącznie tekst;
-ich requesty z obrazami są przekazywane w wysłanej postaci, a odpowiada na nie
-upstream.
+gateway nie odrzuca ich requestów z obrazami, a odpowiada na nie upstream.
 
 ```bash
 curl -s http://localhost:8080/v1/systemone \
