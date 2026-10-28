@@ -223,6 +223,7 @@ See the [roadmap](https://gomodel.enterpilot.io/docs/about/roadmap?utm_source=re
 ## Sponsors
 
 <a href="https://github.com/Neiko2002"><img src="https://github.com/Neiko2002.png" alt="Neiko2002" width="64"></a>
+<a href="https://github.com/ajboainain"><img src="https://github.com/ajboainain.png" alt="ajboainain" width="64"></a>
 
 ## Community
 
