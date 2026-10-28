@@ -162,12 +162,18 @@ type decisionImageReaders interface {
 // is refused first, since models configured without listing carry no
 // capabilities to check; then a model the catalog explicitly marks as not
 // reading images. jev providers take images inline only, so a link is
-// refused there. Any other model gets the benefit of the doubt.
+// refused there, and Azure's System One models read text only. Any other
+// model gets the benefit of the doubt.
 func (s *translatedInferenceService) readsImages(selector core.ModelSelector, providerType string, images decisionImages) bool {
 	if !images.any {
 		return true
 	}
 	if images.links && strings.TrimSpace(providerType) == jevProviderType {
+		return false
+	}
+	// Azure's System One models (Microsoft-Decision-1) read text only, while
+	// its native Decisions models (gpt-6-luna) read images.
+	if s.decisionsEndpoint(selector, providerType) == core.DecisionsSystemOneEndpoint {
 		return false
 	}
 	if readers, ok := s.provider.(decisionImageReaders); ok {

@@ -369,6 +369,38 @@ func TestDecisions_ImagesStartAtTheFirstTargetThatReadsThem(t *testing.T) {
 	assert.Equal(t, []string{"openai openai gpt-6-luna", "kev jev kev-latest"}, provider.calls)
 }
 
+// Azure's System One models read text only, so an image request whose chain
+// starts at one starts at the first target that reads images instead: an
+// Azure gpt-6-luna deployment, which takes OpenAI's Decisions natively, or
+// another provider. Text keeps the System One model.
+func TestDecisions_AzureSystemOneModelsHandImagesToFailover(t *testing.T) {
+	for _, next := range []core.ModelSelector{{Provider: "azure", Model: "gpt-6-luna"}, {Provider: "openai", Model: "gpt-6-luna"}} {
+		t.Run(next.QualifiedModel(), func(t *testing.T) {
+			provider := newScriptedDecisionsProvider(map[string]string{
+				"azure/ms-decision-1": "azure",
+				"azure/gpt-6-luna":    "azure",
+				"openai/gpt-6-luna":   "openai",
+			}, "azure", "openai")
+			provider.catalog = map[string]core.Model{
+				"azure/gpt-6-luna": {ID: "gpt-6-luna", Metadata: &core.ModelMetadata{
+					Modes: []string{"chat", "responses"}, Capabilities: map[string]bool{"vision": true},
+				}},
+			}
+			handler := newHandler(provider, nil, nil, nil, nil, nil, failoverResolverStub{selectors: []core.ModelSelector{next}}, nil)
+
+			c, rec := echotest.Post(t, "/v1/decisions", fmt.Sprintf(decisionImageBody, "azure/ms-decision-1"))
+			require.NoError(t, handler.Decisions(c))
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			c, rec = echotest.Post(t, "/v1/decisions", decisionBody("azure/ms-decision-1"))
+			require.NoError(t, handler.Decisions(c))
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+			assert.Equal(t, []string{next.Provider + " " + next.Provider + " gpt-6-luna", "azure azure ms-decision-1"}, provider.calls)
+			assert.Equal(t, []string{"decisions", core.DecisionsSystemOneEndpoint}, provider.endpoints)
+		})
+	}
+}
+
 // An image link sent to a jev model, which takes images inline only, says so.
 func TestDecisions_ImageLinksToJevAskForInlineData(t *testing.T) {
 	provider := newVisionDecisionsProvider()
