@@ -140,7 +140,13 @@ func importName(file *ast.File, importPath string) string {
 	return ""
 }
 
+// isCall reports whether call is pkg.name(...), or a bare name(...) when pkg
+// is dot-imported.
 func isCall(call *ast.CallExpr, pkg, name string) bool {
+	if pkg == "." {
+		ident, ok := call.Fun.(*ast.Ident)
+		return ok && ident.Name == name
+	}
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok || sel.Sel.Name != name {
 		return false
@@ -184,6 +190,19 @@ func f(d clock.Duration) {
 	clock.Sleep(d)
 	time.Sleep(d)
 	st.Test(t, func(t *testing.T) { clock.Sleep(d) })
+}`,
+			want: 1,
+		},
+		{
+			name: "dot imports",
+			src: `package p
+import (
+	. "testing/synctest"
+	. "time"
+)
+func f(d Duration) {
+	Sleep(d)
+	Test(t, func(t *testing.T) { Sleep(d) })
 }`,
 			want: 1,
 		},

@@ -159,8 +159,9 @@ func packageCallsChatContract(t *testing.T, dir string) bool {
 
 // callsChatContract reports whether a top-level Test function in file calls
 // AssertChatCompatible through its providertest import, whatever name it
-// imports the package by. A call in a helper only counts through the test
-// that makes it, which is the convention: one TestChatCompatibleContract.
+// imports the package by. Only a call directly in a top-level test body
+// counts; a call in a helper does not, so each provider has one
+// TestChatCompatibleContract that calls AssertChatCompatible itself.
 func callsChatContract(file *ast.File) bool {
 	pkg := ""
 	for _, spec := range file.Imports {
