@@ -62,7 +62,8 @@ W trybie natywnym embeddingi są obsługiwane przez `models/{model}:batchEmbedCo
 respektowane. Tryb natywny zapisuje użycie tokenów raportowane przez Gemini dla nowszych modeli,
 takich jak `gemini-embedding-2`. Starsze modele, takie jak `gemini-embedding-001`, oraz interfejs
 zgodny z OpenAI nie raportują użycia, więc te odpowiedzi zawierają zerowe liczby tokenów. Gdy model
-jest wyceniany za token, wiersz użycia jest oznaczany zastrzeżeniem dotyczącym obliczenia kosztu.
+jest wyceniany za token, takie wiersze użycia z zerową liczbą tokenów są oznaczane zastrzeżeniem
+dotyczącym obliczenia kosztu.
 
 ## Generowanie i edycja obrazów
 
