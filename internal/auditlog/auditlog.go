@@ -541,6 +541,6 @@ type Config struct {
 	RetentionDays int
 
 	// OnlyModelInteractions limits logging to AI model endpoints only
-	// When true, only /v1/chat/completions, /v1/responses, /v1/embeddings, /v1/files, and /v1/batches are logged
+	// When true, only paths matched by core.IsModelInteractionPath are logged
 	OnlyModelInteractions bool
 }

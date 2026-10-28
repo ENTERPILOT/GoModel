@@ -59,9 +59,11 @@ kompatybilnego z OpenAI; czat, embeddingi i obrazy zależą od trybu API.
 
 W trybie natywnym embeddingi są obsługiwane przez `models/{model}:batchEmbedContents`.
 `dimensions` mapuje się na `outputDimensionality`, a `encoding_format: "base64"` jest
-respektowane. Gemini nie raportuje użycia tokenów dla embeddingów w żadnym z interfejsów API, więc
-odpowiedzi z embeddingami zawierają zerowe liczby tokenów, a wiersz użycia jest oznaczany
-zastrzeżeniem dotyczącym obliczenia kosztu.
+respektowane. Tryb natywny zapisuje użycie tokenów raportowane przez Gemini dla nowszych modeli,
+takich jak `gemini-embedding-2`. Starsze modele, takie jak `gemini-embedding-001`, oraz interfejs
+zgodny z OpenAI nie raportują użycia, więc te odpowiedzi zawierają zerowe liczby tokenów. Gdy model
+jest wyceniany za token, takie wiersze użycia z zerową liczbą tokenów są oznaczane zastrzeżeniem
+dotyczącym obliczenia kosztu.
 
 ## Generowanie i edycja obrazów
 
