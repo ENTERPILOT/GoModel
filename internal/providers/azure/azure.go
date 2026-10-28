@@ -161,14 +161,19 @@ func (p *Provider) requestAPIVersion() string {
 	return defaultAPIVersion
 }
 
-// mutateRequest adds the api-version query parameter. Foundry's System One
-// endpoint is unversioned, so it gets none; its body is buffered instead.
+// mutateRequest adds the api-version query parameter. Foundry's decision
+// endpoints get buffered bodies; System One is unversioned, and the v1
+// Decisions endpoint takes only a configured version.
 func (p *Provider) mutateRequest(req *llmclient.Request) {
 	if strings.HasPrefix(req.Endpoint, systemOnePath) {
-		bufferSystemOneBody(req)
+		bufferDecisionBody(req)
 		return
 	}
 	version := p.requestAPIVersion()
+	if strings.HasPrefix(req.Endpoint, openAIDecisionsPath) {
+		bufferDecisionBody(req)
+		version = p.apiVersion
+	}
 	if version == "" {
 		return
 	}
