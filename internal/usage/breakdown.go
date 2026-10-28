@@ -24,6 +24,16 @@ const (
 	BreakdownPeriod   BreakdownDimension = "period"
 )
 
+// breakdownModelProvider keys rows by model and provider joined with
+// modelProviderSeparator. Invoices use it for their line items; the public
+// breakdown does not accept it. It is untyped so the API docs, which list
+// every BreakdownDimension constant, do not advertise it.
+const breakdownModelProvider = "model_provider"
+
+// modelProviderSeparator joins the model and provider of a
+// breakdownModelProvider key; neither name holds this control character.
+const modelProviderSeparator = "\x1f"
+
 // BreakdownMetric picks the figure that ranks keys for the top-N cut.
 type BreakdownMetric string
 
@@ -42,11 +52,12 @@ const (
 	MaxBreakdownLimit = 50
 	// MaxBreakdownUserPathDepth caps user_path_depth.
 	MaxBreakdownUserPathDepth = 16
-	// maxBreakdownGroups bounds the (row, column) groups a storage query may
-	// return before the top-N fold, so one request cannot pull an unbounded
-	// result set.
-	maxBreakdownGroups = 50000
 )
+
+// maxBreakdownGroups bounds the (row, column) groups a breakdown query may
+// return before the top-N fold, so one request cannot pull an unbounded
+// result set. A variable so tests can lower it.
+var maxBreakdownGroups = 50000
 
 var breakdownDimensions = map[BreakdownDimension]bool{
 	BreakdownModel: true, BreakdownProvider: true, BreakdownUserPath: true, BreakdownLabel: true,
@@ -177,14 +188,24 @@ func tooManyBreakdownGroupsError() error {
 }
 
 // readUsageBreakdown runs a backend's grouped query and folds the result.
-// Billed totals cover every billed row, so an uncached-mode breakdown also
-// adds the billed charges of response-cache hits — and only those: the hits'
-// requests, tokens and provider cost stay out, like the summary does.
 func readUsageBreakdown(ctx context.Context, params UsageBreakdownParams, query func(context.Context, UsageBreakdownParams) ([]breakdownGroup, error)) (*UsageBreakdown, error) {
 	params, err := NormalizeUsageBreakdownParams(params)
 	if err != nil {
 		return nil, err
 	}
+	groups, err := readBilledBreakdownGroups(ctx, params, query)
+	if err != nil {
+		return nil, err
+	}
+	return buildUsageBreakdown(groups, params), nil
+}
+
+// readBilledBreakdownGroups runs a backend's grouped query for already
+// normalized params. Billed totals cover every billed row, so an
+// uncached-mode query also adds the billed charges of response-cache hits —
+// and only those: the hits' requests, tokens and provider cost stay out, like
+// the summary does.
+func readBilledBreakdownGroups(ctx context.Context, params UsageBreakdownParams, query func(context.Context, UsageBreakdownParams) ([]breakdownGroup, error)) ([]breakdownGroup, error) {
 	// Each query is capped on its own: hit groups mostly share (row, column)
 	// pairs with the uncached ones, so their combined length overcounts.
 	groups, err := query(ctx, params)
@@ -205,12 +226,21 @@ func readUsageBreakdown(ctx context.Context, params UsageBreakdownParams, query 
 			return nil, tooManyBreakdownGroupsError()
 		}
 		for _, hit := range hits {
-			if hit.BilledCost != nil && *hit.BilledCost != 0 {
-				groups = append(groups, breakdownGroup{Row: hit.Row, Column: hit.Column, BilledCost: hit.BilledCost})
+			if billed, ok := billedHitGroup(hit); ok {
+				groups = append(groups, billed)
 			}
 		}
 	}
-	return buildUsageBreakdown(groups, params), nil
+	return groups, nil
+}
+
+// billedHitGroup keeps only the billed charge of a response-cache hit group,
+// reporting false when it bills nothing.
+func billedHitGroup(hit breakdownGroup) (breakdownGroup, bool) {
+	if hit.BilledCost == nil || *hit.BilledCost == 0 {
+		return breakdownGroup{}, false
+	}
+	return breakdownGroup{Row: hit.Row, Column: hit.Column, BilledCost: hit.BilledCost}, true
 }
 
 // buildUsageBreakdown folds storage groups into the bounded pivot: it groups

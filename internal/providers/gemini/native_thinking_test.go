@@ -53,3 +53,61 @@ func TestGeminiGenerationConfig_ExplicitThinkingConfigWins(t *testing.T) {
 	cfg := geminiGenerationConfig(&req)
 	require.Equal(t, map[string]any{"thinkingLevel": "minimal"}, cfg["thinkingConfig"])
 }
+
+func TestGeminiGenerationConfig_EffortJoinsPartialThinkingConfig(t *testing.T) {
+	var req core.ChatRequest
+	body := `{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"hi"}],` +
+		`"reasoning":{"effort":"none"},` +
+		`"extra_body":{"google":{"thinking_config":{"include_thoughts":true}}}}`
+	err := json.Unmarshal([]byte(body), &req)
+	require.NoError(t, err)
+
+	cfg := geminiGenerationConfig(&req)
+	require.Equal(t, map[string]any{"thinkingBudget": 0, "includeThoughts": true}, cfg["thinkingConfig"])
+}
+
+func TestGeminiGenerationConfig_FlatReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want map[string]any
+	}{
+		{
+			name: "flat field maps like the reasoning object",
+			body: `{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"hi"}],"reasoning_effort":"none"}`,
+			want: map[string]any{"thinkingBudget": 0},
+		},
+		{
+			name: "flat field is normalized",
+			body: `{"model":"gemini-3.8-flash","messages":[{"role":"user","content":"hi"}],"reasoning_effort":" HIGH "}`,
+			want: map[string]any{"thinkingLevel": "high"},
+		},
+		{
+			name: "reasoning object wins",
+			body: `{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"hi"}],"reasoning":{"effort":"high"},"reasoning_effort":"none"}`,
+			want: map[string]any{"thinkingBudget": 24576},
+		},
+		{
+			name: "empty reasoning object falls back to the flat field",
+			body: `{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"hi"}],"reasoning":{},"reasoning_effort":"low"}`,
+			want: map[string]any{"thinkingBudget": 1024},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var req core.ChatRequest
+			require.NoError(t, json.Unmarshal([]byte(tt.body), &req))
+
+			cfg := geminiGenerationConfig(&req)
+			require.Equal(t, tt.want, cfg["thinkingConfig"])
+		})
+	}
+}
+
+func TestGeminiGenerationConfig_NonStringFlatEffortIsIgnored(t *testing.T) {
+	var req core.ChatRequest
+	body := `{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"hi"}],"reasoning_effort":3}`
+	require.NoError(t, json.Unmarshal([]byte(body), &req))
+
+	require.Nil(t, geminiGenerationConfig(&req))
+}

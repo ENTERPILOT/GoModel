@@ -62,6 +62,8 @@ type Handler struct {
 	requestHealth       RequestHealthSource
 	media               *mediastore.Service
 	quotaTemplates      bool
+	invoiceExport       bool
+	billedBudgets       bool
 
 	mutationMu sync.Mutex
 	pricingMu  sync.Mutex
@@ -79,6 +81,8 @@ const (
 	DashboardConfigBudgetsEnabled       = "BUDGETS_ENABLED"
 	DashboardConfigRateLimitsEnabled    = "RATE_LIMITS_ENABLED"
 	DashboardConfigQuotaTemplates       = "PER_CHILD_QUOTAS_ENABLED"
+	DashboardConfigInvoiceExport        = "INVOICE_EXPORT_ENABLED"
+	DashboardConfigBilledBudgets        = "BILLED_BUDGETS_ENABLED"
 	DashboardConfigGuardrailsEnabled    = "GUARDRAILS_ENABLED"
 	DashboardConfigPluginsEnabled       = "PLUGINS_ENABLED"
 	DashboardConfigCacheEnabled         = "CACHE_ENABLED"
@@ -112,12 +116,16 @@ type DashboardConfigResponse struct {
 	BudgetsEnabled        string `json:"BUDGETS_ENABLED,omitempty"`
 	RateLimitsEnabled     string `json:"RATE_LIMITS_ENABLED,omitempty"`
 	QuotaTemplatesEnabled string `json:"PER_CHILD_QUOTAS_ENABLED,omitempty"`
-	GuardrailsEnabled     string `json:"GUARDRAILS_ENABLED,omitempty"`
-	PluginsEnabled        string `json:"PLUGINS_ENABLED,omitempty"`
-	CacheEnabled          string `json:"CACHE_ENABLED,omitempty"`
-	RedisURL              string `json:"REDIS_URL,omitempty"`
-	SemanticCacheEnabled  string `json:"SEMANTIC_CACHE_ENABLED,omitempty"`
-	PricingRecalculation  string `json:"USAGE_PRICING_RECALCULATION_ENABLED,omitempty"`
+	// BilledBudgetsEnabled reports the billed_budgets capability, so the
+	// dashboard offers budgets on billed cost only where they are accepted.
+	BilledBudgetsEnabled string `json:"BILLED_BUDGETS_ENABLED,omitempty"`
+	InvoiceExportEnabled string `json:"INVOICE_EXPORT_ENABLED,omitempty"`
+	GuardrailsEnabled    string `json:"GUARDRAILS_ENABLED,omitempty"`
+	PluginsEnabled       string `json:"PLUGINS_ENABLED,omitempty"`
+	CacheEnabled         string `json:"CACHE_ENABLED,omitempty"`
+	RedisURL             string `json:"REDIS_URL,omitempty"`
+	SemanticCacheEnabled string `json:"SEMANTIC_CACHE_ENABLED,omitempty"`
+	PricingRecalculation string `json:"USAGE_PRICING_RECALCULATION_ENABLED,omitempty"`
 	// PricingMarkups mirrors pricing.markups_enabled, so the dashboard shows
 	// billed cost only when the markup feature is on.
 	PricingMarkups  string `json:"PRICING_MARKUPS_ENABLED,omitempty"`
@@ -356,6 +364,22 @@ func WithQuotaTemplatesEnabled(enabled bool) Option {
 	}
 }
 
+// WithInvoiceExportEnabled controls whether GET /admin/usage/invoice serves
+// invoices (GoModel Pro invoice_export capability).
+func WithInvoiceExportEnabled(enabled bool) Option {
+	return func(h *Handler) {
+		h.invoiceExport = enabled
+	}
+}
+
+// WithBilledBudgetsEnabled controls whether admin writes may create budgets on
+// billed cost. They also need billing (WithBilling) enabled.
+func WithBilledBudgetsEnabled(enabled bool) Option {
+	return func(h *Handler) {
+		h.billedBudgets = enabled
+	}
+}
+
 // WithTagging wires the header tagging service for label rule management.
 func WithTagging(service *tagging.Service) Option {
 	return func(h *Handler) {
@@ -463,6 +487,8 @@ func normalizeDashboardRuntimeConfig(values DashboardConfigResponse) DashboardCo
 		BudgetsEnabled:         strings.TrimSpace(values.BudgetsEnabled),
 		RateLimitsEnabled:      strings.TrimSpace(values.RateLimitsEnabled),
 		QuotaTemplatesEnabled:  strings.TrimSpace(values.QuotaTemplatesEnabled),
+		InvoiceExportEnabled:   strings.TrimSpace(values.InvoiceExportEnabled),
+		BilledBudgetsEnabled:   strings.TrimSpace(values.BilledBudgetsEnabled),
 		GuardrailsEnabled:      strings.TrimSpace(values.GuardrailsEnabled),
 		PluginsEnabled:         strings.TrimSpace(values.PluginsEnabled),
 		CacheEnabled:           strings.TrimSpace(values.CacheEnabled),

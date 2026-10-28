@@ -5,6 +5,7 @@
   import DatePicker from "$lib/components/molecules/DatePicker.svelte";
   import SegmentedControl from "$lib/components/atoms/SegmentedControl.svelte";
   import { auth } from "$lib/stores/auth.svelte.js";
+  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { router } from "$lib/stores/router.svelte.js";
   import { liveLogs } from "../audit-logs/liveLogs.svelte.js";
   import { usagePage } from "./usage.svelte.js";
@@ -15,6 +16,8 @@
   import UsageBreakdownChart from "./UsageBreakdownChart.svelte";
   import UsagePivot from "./UsagePivot.svelte";
   import UsageLog from "./UsageLog.svelte";
+  import ExportInvoiceButton from "./ExportInvoiceButton.svelte";
+  import { invoiceExportVisible } from "./usage-invoice.js";
   import * as m from "$lib/paraglide/messages.js";
 
   const PAGE = "usage";
@@ -65,6 +68,9 @@
       onchange={(mode) => usagePage.toggleUsageMode(mode)}
     />
     <DatePicker onchange={() => usagePage.fetchUsagePage()} />
+    {#if invoiceExportVisible(runtimeConfig)}
+      <ExportInvoiceButton />
+    {/if}
   </div>
 
   <!-- Page-level data filters: every widget below follows them -->

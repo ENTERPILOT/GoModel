@@ -87,6 +87,7 @@ models:
 #   - source: regular # a plain alias
 #     target: anthropic/claude-sonnet-4-6
 #     slowdown: 0.5 # add 50%; use 0 to disable inherited slowdown (active range: 0.1-10)
+#     # reasoning_effort: medium # force this effort upstream (none | minimal | low | medium | high | xhigh | max); empty keeps the client's value
 #   - source: smart # weighted round-robin load balancer
 #     strategy: round_robin # round_robin (default) | cost | failover | adaptive (uses a routing extension when registered; otherwise falls back to round_robin) | plugin (see smart-router below)
 #     targets:
@@ -286,9 +287,21 @@ pricing:
   #   "/": 15
   #   "openai/": 10
   #   "anthropic/claude-opus-4-1": 25
+  # GoModel Pro (billing entitlement): per-customer markups by user path.
+  # The deepest covering path with a matching selector wins, then pricing.markups.
+  user_path_markups: {}
+  # user_path_markups:
+  #   /acme:
+  #     "/": 30
+  #     "openai/gpt-5": 15
+  #   /acme/internal:
+  #     "/": 0
 
 budgets:
   enabled: true # env: BUDGETS_ENABLED; with no configured budgets this has no effect
+  # GoModel Pro: provider budgets with cost_basis "billed" count billed
+  # response-cache hits; false limits only requests the provider served.
+  provider_billed_cache_hits: true # env: BUDGETS_PROVIDER_BILLED_CACHE_HITS
   user_paths:
     # Env equivalent:
     # SET_BUDGET_USER__PATH__EXAMPLE="daily=10,weekly=50"
@@ -306,6 +319,7 @@ budgets:
       limits:
         - period: "monthly"
           amount: 500.00
+          cost_basis: "provider" # GoModel Pro: "billed" limits billed cost (needs pricing.markups_enabled)
   providers:
     # Caps one provider instance's spend across every user path and label;
     # failover skips a provider whose budget is spent.
@@ -763,6 +777,10 @@ providers:
     base_url: "http://localhost:30000/v1"
     # Optional: set this only when launch_server uses --api-key.
     # api_key: "token-abc123"
+    # Responses API path: auto (default) sends requests with function tools
+    # through chat completions; native always uses /v1/responses;
+    # chat_compatible always uses chat completions.
+    # api_mode: auto
 
   # Custom OpenAI-compatible provider
   # my-provider:

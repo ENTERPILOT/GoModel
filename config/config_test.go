@@ -87,7 +87,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"PRICING_BILL_CACHE_HITS",
 		"PRICING_MARKUPS_ENABLED",
 		"USAGE_BUFFER_SIZE", "USAGE_FLUSH_INTERVAL", "USAGE_RETENTION_DAYS",
-		"BUDGETS_ENABLED",
+		"BUDGETS_ENABLED", "BUDGETS_PROVIDER_BILLED_CACHE_HITS",
 		"RATE_LIMITS_ENABLED", "RATE_LIMITS_FLUSH_INTERVAL",
 		"DASHBOARD_LIVE_LOGS_ENABLED", "DASHBOARD_LIVE_LOGS_BUFFER_SIZE",
 		"DASHBOARD_LIVE_LOGS_REPLAY_LIMIT", "DASHBOARD_LIVE_LOGS_HEARTBEAT_SECONDS",
@@ -157,6 +157,7 @@ func TestBuildDefaultConfig(t *testing.T) {
 	assert.Equal(t, 5, cfg.Usage.FlushInterval)
 	assert.Equal(t, 90, cfg.Usage.RetentionDays)
 	assert.True(t, cfg.Budgets.Enabled)
+	assert.True(t, cfg.Budgets.ProviderBilledCacheHits)
 	assert.Equal(t, "/metrics", cfg.Metrics.Endpoint)
 	assert.False(t, cfg.Metrics.Enabled)
 	assert.Equal(t, 600, cfg.HTTP.Timeout)
@@ -501,6 +502,43 @@ budgets:
 	})
 }
 
+func TestLoadBudgetYAMLCostBasis(t *testing.T) {
+	tests := []struct {
+		name    string
+		basis   string
+		want    string
+		wantErr string
+	}{
+		{name: "default", basis: "", want: ""},
+		{name: "billed", basis: "Billed", want: "billed"},
+		{name: "provider", basis: "provider", want: "provider"},
+		{name: "unknown", basis: "gross", wantErr: "budgets.labels[0].limits[0].cost_basis must be one of provider, billed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllConfigEnvVars(t)
+			withTempDir(t, func(dir string) {
+				writeConfigYAML(t, dir, `
+budgets:
+  labels:
+    - label: acme
+      limits:
+        - period: monthly
+          amount: 100
+          cost_basis: "`+tt.basis+`"
+`)
+				result, err := Load()
+				if tt.wantErr != "" {
+					require.ErrorContains(t, err, tt.wantErr)
+					return
+				}
+				require.NoError(t, err)
+				assert.Equal(t, tt.want, result.Config.Budgets.Labels[0].Limits[0].CostBasis)
+			})
+		})
+	}
+}
+
 func TestLoadBudgetEnvDisablesBudgetsWhenUsageTrackingDisabled(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
@@ -551,6 +589,20 @@ func TestLoadDisabledBudgetsIgnoreMalformedBudgetEnv(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, result.Config.Budgets.Enabled)
 		require.Empty(t, result.Config.Budgets.UserPaths)
+	})
+}
+
+func TestLoadProviderBilledCacheHits(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		result := loadConfigYAML(t, dir, "budgets:\n  provider_billed_cache_hits: false\n")
+		require.False(t, result.Config.Budgets.ProviderBilledCacheHits)
+
+		t.Setenv("BUDGETS_PROVIDER_BILLED_CACHE_HITS", "true")
+		result, err := Load()
+		require.NoError(t, err)
+		require.True(t, result.Config.Budgets.ProviderBilledCacheHits, "env overrides config.yaml")
 	})
 }
 

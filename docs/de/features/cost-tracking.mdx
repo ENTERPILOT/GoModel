@@ -103,7 +103,7 @@ Overrides gelten für neue Requests. Um bereits ausgeführte Requests neu zu bep
 
 ## Aufschläge und abgerechnete Kosten
 
-Legen Sie einen Aufschlag fest, wenn Sie Modellzugriff weiterverkaufen, zum Beispiel um Kunden die von ihnen verbrauchten Tokens weiterzuberechnen. GoModel erfasst für jeden Request die **abgerechneten Kosten** (`billed_cost` in der Nutzungszeile): die Provider-Kosten plus Aufschlag. Die Provider-Kosten selbst ändern sich nie, sodass Budgets, Dashboard-Summen und Einsparungen weiterhin messen, was Sie upstream bezahlen.
+Legen Sie einen Aufschlag fest, wenn Sie Modellzugriff weiterverkaufen, zum Beispiel um Kunden die von ihnen verbrauchten Tokens weiterzuberechnen. GoModel erfasst für jeden Request die **abgerechneten Kosten** (`billed_cost` in der Nutzungszeile): die Provider-Kosten plus Aufschlag. Die Provider-Kosten selbst ändern sich nie, sodass Budgets, Dashboard-Summen und Einsparungen weiterhin messen, was Sie upstream bezahlen. Mit GoModel Pro kann ein Budget stattdessen die abgerechneten Kosten begrenzen; siehe [Budgets](/de/features/budgets).
 
 Aufschläge sind standardmäßig deaktiviert. Aktivieren Sie sie mit `markups_enabled: true` (env `PRICING_MARKUPS_ENABLED=true`) und legen Sie dann Prozentwerte in `config.yaml` fest. Sind Aufschläge aktiviert, aber passt keine Regel auf einen Request, entsprechen seine abgerechneten Kosten den Provider-Kosten. Sind sie deaktiviert, erfasst GoModel keine abgerechneten Kosten und ignoriert `markups` und `bill_cache_hits`; ist `markups` gesetzt, wird beim Start eine Warnung protokolliert.
 
@@ -125,6 +125,34 @@ Der spezifischste Selektor gewinnt, in dieser Reihenfolge: Provider/Modell, Mode
 Jede Nutzungszeile speichert außerdem den Aufschlag, zu dem sie abgerechnet wurde (`markup_percent`, `markup_selector`), sodass geänderte Aufschläge vergangene Abrechnungen nie umschreiben.
 
 Sobald Aufschläge aktiviert sind, zeigt das Dashboard die abgerechneten Kosten neben den Provider-Kosten: eine Karte **Billed** auf der Übersichts- und der Nutzungsseite, eine Spalte in jeder Nutzungsaufschlüsselung (Modell, User Path, Label, Request-Typ oder Endpoint und Session) sowie eine Spalte im Request-Log, deren Tooltip den Aufschlag jeder Zeile nennt. Die Admin-API liefert sie als `total_billed_cost` in `/admin/usage/summary`, als `billed_cost` in `/admin/usage/daily`, `/admin/usage/models`, `/admin/usage/user-paths`, `/admin/usage/labels`, `/admin/usage/endpoints` und `/admin/usage/sessions` sowie als `billed_cost`, `markup_percent` und `markup_selector` in den Einträgen von `/admin/usage/log`. Ein Tag, an dem nur Cache-Treffer abgerechnet wurden, erscheint trotzdem in `/admin/usage/daily`, mit null Requests. Abgerechnete Summen enthalten abgerechnete Cache-Treffer, obwohl die übrigen Kostenwerte sie ausnehmen; die abgerechneten Kosten pro User Path sind daher der Betrag, den Sie jedem Kunden berechnen.
+
+### Aufschläge pro Kunde (GoModel Pro)
+
+<Info>
+  Aufschläge pro Kunde sind in GoModel Pro verfügbar und erfordern die
+  Lizenzberechtigung `billing`. Ohne sie bricht `user_path_markups` bei
+  aktivierten Aufschlägen den Start ab — GoModel berechnet einem Kunden nie
+  stillschweigend den globalen Satz.
+</Info>
+
+Geben Sie jedem Kunden, identifiziert durch seinen [User-Path](/de/features/user-path)-Teilbaum, mit `user_path_markups` eigene Aufschläge. Jeder Pfad nimmt dieselben Selektoren wie `markups`:
+
+```yaml
+pricing:
+  markups_enabled: true
+  markups:
+    "/": 20             # alle anderen
+  user_path_markups:
+    /acme:
+      "/": 30           # /acme und alles darunter
+      "openai/gpt-5": 15
+    /acme/internal:
+      "/": 0            # interner Traffic zum Selbstkostenpreis
+```
+
+GoModel nimmt den tiefsten konfigurierten Pfad, der den User-Path des Requests abdeckt (`/acme` deckt `/acme/team` ab, nicht `/acmecorp`), und wendet darin den spezifischsten Selektor in der üblichen Reihenfolge an. Hat dieser Pfad keinen passenden Selektor, versucht GoModel den nächsthöheren Pfad und danach `markups`. Aufschläge werden nie addiert. Im Beispiel oben wird `/acme/internal/ci` mit 0 % abgerechnet, `/acme/team` mit 15 % für `openai/gpt-5` und 30 % für alles andere, und `/beta` mit 20 %.
+
+Standardmäßig ist nichts gesetzt: Ohne `user_path_markups` gilt `markups` für alle. Bei `markups_enabled: false` wird `user_path_markups` wie `markups` ignoriert, und GoModel protokolliert beim Start eine Warnung. Eine Regel aus `user_path_markups` wird in `markup_selector` als `<user path>:<selector>` gespeichert, zum Beispiel `/acme:openai/gpt-5`, sodass das Request-Log zeigt, welche Kundenregel abgerechnet wurde. User-Paths werden wie bei Requests normalisiert, sodass `acme/` und `/acme` derselbe Schlüssel sind; `/` wird abgelehnt, da `markups` ihn bereits abdeckt.
 
 ## Summen im Dashboard
 
@@ -154,3 +182,31 @@ Die Neuberechnung bepreist die abgerechneten Kosten mit dem Aufschlag neu, zu de
   auflösen lässt. Das Ergebnis meldet, wie vielen Zeilen weiterhin Preise
   fehlen. Token-Anzahlen werden nie verändert.
 </Warning>
+
+## Rechnungsexport (GoModel Pro)
+
+<Info>
+  Der Rechnungsexport erfordert eine GoModel-Pro-Lizenz mit der
+  `billing`-Berechtigung sowie aktivierte Aufschläge
+  (`PRICING_MARKUPS_ENABLED=true`). Ohne die Berechtigung antwortet der
+  Endpunkt mit 403 `invoice_export_not_entitled`, bei deaktivierten Aufschlägen
+  mit 409 `markups_disabled`.
+</Info>
+
+`GET /admin/usage/invoice` exportiert die abgerechnete Nutzung eines Zeitraums, ein Block pro Kunde. Jeder Kunde ist ein User Path; mit `parent` ist jedes direkte Kind dieses Pfads ein Kunde, so wie [Budgets pro Kind](/de/features/budgets#dynamische-budgets-pro-kind) sie messen. `parent=/customers` rechnet also `/customers/acme/app1` und `/customers/acme/app2` gemeinsam unter `/customers/acme` ab. Nutzung, die direkt auf dem Parent erfasst wurde, bleibt beim Parent. Ohne `parent` ist jeder User Path ein eigener Kunde.
+
+Der Endpunkt akzeptiert denselben Datumsbereich und dieselben Filter wie die anderen Nutzungsendpunkte, dazu `format=csv` (Standard, heruntergeladen als `gomodel-invoice-<start>-to-<end>.csv`) oder `format=json`. Auf der Nutzungsseite lädt **Rechnung exportieren** die CSV für den gewählten Datumsbereich und die Filter herunter.
+
+```bash
+curl -OJ "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=2026-10-01&end_date=2026-10-31" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```csv
+row_type,period_start,period_end,currency,customer,model,provider,requests,input_tokens,output_tokens,provider_cost,billed_cost,effective_markup_percent
+item,2026-10-01,2026-10-31,USD,/customers/acme,gpt-5,openai,1200,950000,210000,3.2875,3.945,20
+subtotal,2026-10-01,2026-10-31,USD,/customers/acme,,,1200,950000,210000,3.2875,3.945,20
+total,2026-10-01,2026-10-31,USD,,,,1200,950000,210000,3.2875,3.945,20
+```
+
+Jede Position ist ein Modell auf einer Provider-Instanz. `row_type` unterscheidet Positionen (`item`) von der Zwischensumme jedes Kunden (`subtotal`) und der Gesamtsumme (`total`); filtern Sie also in einer Tabellenkalkulation vor dem Summieren auf `item`. Beträge sind einfache Dezimalzahlen in USD; leere Kosten sind unbekannt (keine Preise). Requests, Tokens und Provider-Kosten umfassen an Provider gesendete Requests; die abgerechneten Kosten enthalten zusätzlich abgerechnete Treffer des Response-Caches, wie in den anderen Abrechnungsansichten. `effective_markup_percent` ist das Verhältnis von abgerechneten Kosten zu Provider-Kosten minus eins, abgerechnete Cache-Treffer erhöhen den Wert also.

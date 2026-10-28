@@ -548,6 +548,38 @@ curl "http://localhost:8080/admin/usage/breakdown?rows=user_path&user_path_depth
 - `total_cost` i `billed_cost` mają wartość `null`, gdy żaden request w
   komórce nie miał cennika.
 
+### GET /admin/usage/invoice
+
+Eksportuje rozliczone użycie za okres jako faktury dla poszczególnych klientów:
+pozycje dla każdego modelu i providera u każdego klienta, sumę częściową
+każdego klienta i sumę całkowitą, w USD. Wymaga licencji GoModel Pro z
+uprawnieniem `billing` (w przeciwnym razie `403` `invoice_export_not_entitled`)
+oraz `PRICING_MARKUPS_ENABLED=true` (w przeciwnym razie `409`
+`markups_disabled`). Zobacz [Eksport faktur](/pl/features/cost-tracking).
+
+| Parametr | Typ    | Opis                                                                         | Domyślnie |
+| -------- | ------ | ---------------------------------------------------------------------------- | --------- |
+| `format` | string | `csv` (pobierany jako załącznik) lub `json`                                  | `csv`     |
+| `parent` | string | Rozliczaj każdego bezpośredniego potomka tej ścieżki użytkownika jako jednego klienta; użycie na samej ścieżce nadrzędnej zostaje przy niej. Pomiń, aby rozliczać każdą ścieżkę osobno | — |
+
+Endpoint przyjmuje też parametry zakresu dat i wszystkie filtry danych.
+Ignoruje `cache_mode`: requesty, tokeny i `provider_cost` obejmują requesty
+wysłane do providerów, a `billed_cost` obejmuje też rozliczone trafienia w cache.
+
+```bash
+curl "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=2026-10-01&end_date=2026-10-31&format=json" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+- Klienci są posortowani według ścieżki użytkownika, a pozycje według modelu i
+  providera.
+- Faktura ma co najwyżej 50 000 pozycji (klient × model × provider); powyżej
+  tego limitu endpoint zwraca `400`. Zawęź okres lub filtry albo grupuj
+  klientów za pomocą `parent`.
+- Koszty i `effective_markup_percent` mają wartość `null`, gdy są nieznane;
+  `effective_markup_percent` to stosunek rozliczonego kosztu do kosztu
+  providera minus jeden.
+
 ### Tryb cache
 
 Każde trafienie w [cache odpowiedzi](/pl/features/cache) jest zapisywane jako wpis użycia, z

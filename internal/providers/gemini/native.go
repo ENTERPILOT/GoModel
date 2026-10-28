@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"maps"
 	"mime"
 	"net/http"
 	"net/url"
@@ -822,17 +823,29 @@ func geminiGenerationConfig(req *core.ChatRequest) map[string]any {
 	copyStopSequences(req.ExtraFields.Lookup("stop"), cfg)
 	copyResponseFormat(req.ExtraFields.Lookup("response_format"), cfg)
 	copyGoogleThinkingConfig(req.ExtraFields.Lookup("extra_body"), cfg)
-	if req.Reasoning != nil && strings.TrimSpace(req.Reasoning.Effort) != "" {
-		if _, exists := cfg["thinkingConfig"]; !exists {
-			if thinkingConfig := thinkingConfigForEffort(req.Model, req.Reasoning.Effort); len(thinkingConfig) > 0 {
-				cfg["thinkingConfig"] = thinkingConfig
-			}
-		}
+	if effort := nativeReasoningEffort(req); effort != "" {
+		addEffortThinkingConfig(cfg, req.Model, effort)
 	}
 	if len(cfg) == 0 {
 		return nil
 	}
 	return cfg
+}
+
+// nativeReasoningEffort returns the requested reasoning effort: the
+// reasoning.effort object, or else the flat Chat Completions reasoning_effort
+// string that rides in ExtraFields.
+func nativeReasoningEffort(req *core.ChatRequest) string {
+	if req.Reasoning != nil {
+		if effort := strings.TrimSpace(req.Reasoning.Effort); effort != "" {
+			return effort
+		}
+	}
+	var effort string
+	if raw := req.ExtraFields.Lookup("reasoning_effort"); len(raw) > 0 && json.Unmarshal(raw, &effort) == nil {
+		return strings.TrimSpace(effort)
+	}
+	return ""
 }
 
 // dropsSamplingParameters reports whether temperature, topP, topK and
@@ -954,6 +967,26 @@ func copyGoogleThinkingConfig(raw json.RawMessage, cfg map[string]any) {
 	if err := json.Unmarshal(raw, &extra); err == nil && len(extra.Google.ThinkingConfig) > 0 {
 		cfg["thinkingConfig"] = normalizeSnakeMapKeys(extra.Google.ThinkingConfig)
 	}
+}
+
+// addEffortThinkingConfig maps effort onto cfg's thinkingConfig. A thinking
+// budget or level the client set in extra_body wins; other client members,
+// such as includeThoughts, are kept next to the effort's.
+func addEffortThinkingConfig(cfg map[string]any, model, effort string) {
+	thinkingConfig := thinkingConfigForEffort(model, effort)
+	if len(thinkingConfig) == 0 {
+		return
+	}
+	if existing, ok := cfg["thinkingConfig"].(map[string]any); ok {
+		if _, hasBudget := existing["thinkingBudget"]; hasBudget {
+			return
+		}
+		if _, hasLevel := existing["thinkingLevel"]; hasLevel {
+			return
+		}
+		maps.Copy(thinkingConfig, existing)
+	}
+	cfg["thinkingConfig"] = thinkingConfig
 }
 
 func normalizeSnakeMapKeys(src map[string]any) map[string]any {

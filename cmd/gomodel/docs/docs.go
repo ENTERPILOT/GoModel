@@ -2927,6 +2927,160 @@ const docTemplate = `{
                 ]
             }
         },
+        "/admin/usage/invoice": {
+            "get": {
+                "description": "Returns billed usage for the period, one block of model/provider line items per customer user path, with subtotals and a grand total. Amounts are USD. With parent, each direct child of that user path is one customer (usage on the parent itself stays under the parent); without it every user path is its own customer. Requests, tokens and provider cost cover provider-served requests; billed cost also includes billed response-cache hits. CSV rows carry row_type item, subtotal or total. Requires a GoModel Pro license with the billing entitlement and pricing.markups_enabled.",
+                "produces": [
+                    "text/csv",
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Export billed usage as per-customer invoices",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Export format: csv (default, as an attachment) or json",
+                        "name": "format",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bill each direct child of this user path as one customer, e.g. /customers",
+                        "name": "parent",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Number of days (default 30)",
+                        "name": "days",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date (YYYY-MM-DD)",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date (YYYY-MM-DD)",
+                        "name": "end_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact model names; repeat or comma-separate for several",
+                        "name": "model",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by provider names or types; repeat or comma-separate for several",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by request labels (exact match); repeat for several",
+                        "name": "label",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact request endpoints, e.g. /v1/chat/completions,/v1/messages; repeat or comma-separate for several",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact detected session ID",
+                        "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by managed auth key IDs; repeat or comma-separate for several",
+                        "name": "auth_key_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by tracked user path subtrees; repeat for several",
+                        "name": "user_path",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/usage.Invoice"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/admin/usage/labels": {
             "get": {
                 "description": "Returns per-label token and cost aggregates. Requests carrying\nseveral labels count once per label, so rows overlap and do\nnot sum to the period totals. Unlabelled requests are omitted.",
@@ -8737,6 +8891,10 @@ const docTemplate = `{
         "admin.DashboardConfigResponse": {
             "type": "object",
             "properties": {
+                "BILLED_BUDGETS_ENABLED": {
+                    "description": "BilledBudgetsEnabled reports the billed_budgets capability, so the\ndashboard offers budgets on billed cost only where they are accepted.",
+                    "type": "string"
+                },
                 "BUDGETS_ENABLED": {
                     "type": "string"
                 },
@@ -8753,6 +8911,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "GUARDRAILS_ENABLED": {
+                    "type": "string"
+                },
+                "INVOICE_EXPORT_ENABLED": {
                     "type": "string"
                 },
                 "LICENSE_BADGE": {
@@ -9031,11 +9192,26 @@ const docTemplate = `{
                 "amount": {
                     "type": "number"
                 },
+                "cost_basis": {
+                    "type": "string",
+                    "enum": [
+                        "provider",
+                        "billed"
+                    ]
+                },
                 "created_at": {
                     "type": "string"
                 },
                 "effective_subject": {
                     "type": "string"
+                },
+                "enforced_cost_basis": {
+                    "description": "EnforcedCostBasis names the spend Spent measures. It is provider for a\nbilled budget while billed budgets are unavailable (no billing\nentitlement or markups disabled); cost_basis keeps the stored basis.",
+                    "type": "string",
+                    "enum": [
+                        "provider",
+                        "billed"
+                    ]
                 },
                 "has_usage": {
                     "type": "boolean"
@@ -9666,6 +9842,14 @@ const docTemplate = `{
                 "budget_key": {
                     "$ref": "#/definitions/admin.budgetKeyRequest"
                 },
+                "cost_basis": {
+                    "description": "CostBasis selects the spend the amount limits: provider (default) or\nbilled (provider cost plus markup, including billed cache hits). billed\nrequires PRICING_MARKUPS_ENABLED and a GoModel Pro license with the\nbilling entitlement.",
+                    "type": "string",
+                    "enum": [
+                        "provider",
+                        "billed"
+                    ]
+                },
                 "per_child": {
                     "type": "boolean"
                 },
@@ -9873,6 +10057,10 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "old_source": {
+                    "type": "string"
+                },
+                "reasoning_effort": {
+                    "description": "ReasoningEffort forces the reasoning effort sent upstream (\"none\",\n\"minimal\", \"low\", \"medium\", \"high\", \"xhigh\", or \"max\"); empty keeps the\nclient's value.",
                     "type": "string"
                 },
                 "session_affinity": {
@@ -12903,6 +13091,22 @@ const docTemplate = `{
                 "amount": {
                     "type": "number"
                 },
+                "cost_basis": {
+                    "description": "CostBasis is the budget's configured basis: provider cost or billed\ncost.",
+                    "type": "string",
+                    "enum": [
+                        "provider",
+                        "billed"
+                    ]
+                },
+                "enforced_cost_basis": {
+                    "description": "EnforcedCostBasis names the spend Spent and Amount measure. It is\nprovider for a billed budget while billed budgets are unavailable.",
+                    "type": "string",
+                    "enum": [
+                        "provider",
+                        "billed"
+                    ]
+                },
                 "exceeded": {
                     "type": "boolean"
                 },
@@ -13357,6 +13561,107 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "uncached_input_tokens": {
+                    "type": "integer"
+                }
+            }
+        },
+        "usage.Invoice": {
+            "type": "object",
+            "properties": {
+                "currency": {
+                    "type": "string"
+                },
+                "customers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/usage.InvoiceCustomer"
+                    }
+                },
+                "end_date": {
+                    "type": "string"
+                },
+                "parent": {
+                    "type": "string"
+                },
+                "start_date": {
+                    "type": "string"
+                },
+                "total": {
+                    "$ref": "#/definitions/usage.InvoiceAmounts"
+                }
+            }
+        },
+        "usage.InvoiceAmounts": {
+            "type": "object",
+            "properties": {
+                "billed_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "effective_markup_percent": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "input_tokens": {
+                    "type": "integer"
+                },
+                "output_tokens": {
+                    "type": "integer"
+                },
+                "provider_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "requests": {
+                    "type": "integer"
+                }
+            }
+        },
+        "usage.InvoiceCustomer": {
+            "type": "object",
+            "properties": {
+                "customer": {
+                    "type": "string"
+                },
+                "lines": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/usage.InvoiceLine"
+                    }
+                },
+                "subtotal": {
+                    "$ref": "#/definitions/usage.InvoiceAmounts"
+                }
+            }
+        },
+        "usage.InvoiceLine": {
+            "type": "object",
+            "properties": {
+                "billed_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "effective_markup_percent": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "input_tokens": {
+                    "type": "integer"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "output_tokens": {
+                    "type": "integer"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "provider_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "requests": {
                     "type": "integer"
                 }
             }
@@ -13943,6 +14248,9 @@ const docTemplate = `{
                 "provider_type": {
                     "type": "string"
                 },
+                "reasoning_effort": {
+                    "type": "string"
+                },
                 "resolved_model": {
                     "type": "string"
                 },
@@ -14013,6 +14321,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "provider_name": {
+                    "type": "string"
+                },
+                "reasoning_effort": {
+                    "description": "ReasoningEffort, when set, replaces the reasoning effort of every\nrequest sent upstream through this redirect or to this model, whatever\nthe client asked for. Empty leaves the client's value untouched.",
                     "type": "string"
                 },
                 "session_affinity": {

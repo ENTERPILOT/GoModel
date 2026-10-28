@@ -334,6 +334,7 @@ coordinate across instances.
 | [Budgets](/features/budgets) enforcement | Durable (database) | Correct across replicas. Spend is read from the shared usage table. |
 | [Usage and cost records](/features/cost-tracking) | Durable (database) | Aggregated correctly. |
 | Audit logs | Durable (database) | Complete across replicas. |
+| [SSO](/pro/sso) sign-out (Pro) | Durable (database) | A signed-out session is rejected on every replica within about 2 seconds. |
 | [Rate limits](/features/rate-limits) | In-memory, per instance | Effective limit is about `N x` the configured limit. Counters reset on restart. |
 | Circuit breakers | In-memory, per process | Each replica learns an outage separately, so upstream sees up to `N x failure_threshold` failures before any breaker opens. |
 | [Session affinity](/features/session-keeping) pins | In-memory, per instance | Sessions stick per replica, not globally, unless the load balancer is sticky. |
@@ -346,30 +347,39 @@ three replicas with a 100 rpm rule admit up to 300 rpm in aggregate. Size rules
 per replica, and use [budgets](/features/budgets) as the durable cross-instance
 control since they read from the shared database.
 
-### Config changes do not propagate instantly
+### Config changes reach every replica within seconds
 
-Admin-managed configuration is durable in the database but served from an
-in-memory snapshot on each replica. A change saved in the dashboard updates the
-replica that handled the request immediately. Other replicas pick it up on their
-own refresh cadence, and two of them have none.
+Admin-managed configuration is durable in the database and served from an
+in-memory snapshot on each replica. A change saved in the dashboard or admin API
+applies immediately on the replica that handled it, which also bumps a revision
+for that entity in the shared `config_revisions` table. Every replica polls the
+table every 2 seconds and reloads whatever moved, so the change reaches the
+others within a few seconds. Only the shared database is involved: no Redis, and
+it works the same on PostgreSQL and MongoDB.
 
-| Changed in the dashboard | Reaches other replicas after |
-| --- | --- |
-| Budget definitions | **Restart only** |
-| Rate limit rules | **Restart only** |
-| Virtual models (including failover chains) | Up to `CACHE_REFRESH_INTERVAL` (1 hour by default) |
-| Managed API keys | Up to 60 seconds |
-| Guardrails, workflows, pricing overrides | About 60 seconds |
+This covers budgets (definitions, settings, and resets), rate limit rules,
+provider credentials (add, edit, disable, delete), managed API keys (including
+revocation), user policies, virtual models, pricing overrides, tagging rules,
+guardrails, workflows, and MCP servers. A provider added on another replica
+starts routing once its model list has been fetched.
+
+A replica that fails to apply a change logs a warning once and retries on every
+poll until it applies. One exception: a stored provider that fails to build on a
+replica keeps whatever was already running under its name and is retried on the
+next change to any stored provider, since each change reloads all of them, or on
+restart. A replica that cannot record a change in `config_revisions` also
+retries on every poll. Until it succeeds, the other replicas pick the change up
+from a later change to the same feature, from the slower periodic refresh some
+features already had, from a manual runtime refresh, or on restart.
+
+`POST /admin/runtime/refresh` reloads managed API keys, virtual models,
+guardrails, workflows, MCP servers, budgets, and rate limits on the replica that
+receives it. It does not reload stored provider credentials.
 
 <Warning>
-  Two of these matter operationally. **Revoking a managed API key can take up to
-  a minute to take effect on other replicas.** And **a budget or rate limit rule
-  created in the dashboard does not reach other replicas until they restart**,
-  so with three replicas a new budget initially governs a third of your traffic.
-
-  If you run several replicas, declare budgets and rate limits as code in
-  `config.yaml` or environment variables so they are loaded identically at boot,
-  and restart after dashboard changes.
+  **Resetting rate limit counters applies to the replica that handled the
+  request only.** Counters are per instance (see the table above): rule changes
+  propagate, counter resets do not.
 </Warning>
 
 ### Health probes and shutdown
@@ -493,8 +503,7 @@ if the file size matters.
   with SQLite, mount a volume and set `SQLITE_PATH`.
 - Declare providers in environment variables or `config.yaml`, with values from
   a secret manager.
-- Declare budgets and rate limits as code when running several replicas, and
-  size rate limit rules per replica.
+- Size rate limit rules per replica when running several replicas.
 - Decide on `LOGGING_LOG_BODIES` and set retention windows deliberately.
 - Point readiness at `/health/ready` and set
   `terminationGracePeriodSeconds` above 30.
