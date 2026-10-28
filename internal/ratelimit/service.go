@@ -152,6 +152,11 @@ func (s *Service) Refresh(ctx context.Context) error {
 		}
 		return rules[i].PeriodSeconds < rules[j].PeriodSeconds
 	})
+	// The swap and the counter resets it implies happen under persistMu, so
+	// a flush never pairs the new rules, and with them a new counter epoch,
+	// with counts the change clears.
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
 	s.mu.Lock()
 	previous := s.rules
 	s.rules = rules

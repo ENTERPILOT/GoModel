@@ -285,3 +285,57 @@ func TestRefreshDropsCountsOfRuleReaddedElsewhere(t *testing.T) {
 	require.NoError(t, service.Refresh(ctx))
 	assert.Equal(t, int64(0), requestsUsed(t, service, now))
 }
+
+// blockingSaveStore holds the next SaveCounters, after it starts, until
+// release is closed.
+type blockingSaveStore struct {
+	*memStore
+	started, release chan struct{}
+}
+
+func (s *blockingSaveStore) SaveCounters(ctx context.Context, snapshots []WindowSnapshot) error {
+	if s.started != nil {
+		close(s.started)
+		s.started = nil
+		<-s.release
+	}
+	return s.memStore.SaveCounters(ctx, snapshots)
+}
+
+// A refresh that clears counts must not interleave with a flush: one that
+// saw the new rule's epoch next to the counts not yet cleared would save them
+// as the new rule's, and a restart would restore them.
+func TestRefreshDoesNotInterleaveWithFlush(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	mem := teamStore(t)
+	store := &blockingSaveStore{memStore: mem}
+	service := startedService(t, store)
+	acquireN(t, service, 90, now)
+	oldEpoch := service.Rules()[0].CounterEpoch
+
+	// Deleted and re-added elsewhere: same mode, new epoch.
+	require.NoError(t, mem.DeleteRule(ctx, ScopeUserPath, "/team", PeriodDaySeconds))
+	require.NoError(t, mem.UpsertRules(ctx, []Rule{teamRule(false, 100)}))
+
+	store.started, store.release = make(chan struct{}), make(chan struct{})
+	started := store.started
+	flushed := make(chan struct{})
+	go func() {
+		service.flush(ctx)
+		close(flushed)
+	}()
+	<-started
+	refreshed := make(chan error, 1)
+	go func() { refreshed <- service.Refresh(ctx) }()
+	time.Sleep(20 * time.Millisecond)
+	assert.Equal(t, oldEpoch, service.Rules()[0].CounterEpoch, "the rules do not change under a flush in progress")
+	close(store.release)
+	<-flushed
+	require.NoError(t, <-refreshed)
+
+	service.flush(ctx)
+	service.Close()
+	restarted := startedService(t, store)
+	assert.Equal(t, int64(0), requestsUsed(t, restarted, now))
+}
