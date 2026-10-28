@@ -134,6 +134,46 @@ mit `owned_by: "azure"`. Streaming, Responses, Embeddings und Batches
 funktionieren genauso; Batches werden über den Ressourcenpfad
 `/openai/batches` geroutet (`/openai/v1/batches` bei v1-Base-URLs).
 
+## Decision-Modelle (Microsoft-Decision-1)
+
+Stellen Sie `Microsoft-Decision-1` auf derselben Foundry-Ressource bereit, und
+GoModel bedient es über [`POST /v1/decisions`](/de/advanced/decisions-api)
+(Format von OpenAI, übersetzt) und [`POST /v1/systemone`](/de/advanced/systemone-api)
+(nativ weitergeleitet). Beide erreichen den Foundry-Endpunkt
+`/providers/microsoft/v1/systemone` an der Wurzel der Ressource, unabhängig von
+der Form der `AZURE_BASE_URL`.
+
+Azure lehnt Deployment-Namen ab, die `Microsoft` enthalten. Nennen Sie es daher
+zum Beispiel `ms-decision-1` und listen Sie es auf, damit GoModel es routen kann:
+
+```bash
+AZURE_MODELS=ms-decision-1
+CONFIGURED_PROVIDER_MODELS_MODE=merge
+```
+
+```bash
+curl -s http://localhost:8080/v1/decisions \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "azure/ms-decision-1",
+    "input": "The API returns 500 on every call.",
+    "questions": [{
+      "type": "choice",
+      "name": "team",
+      "instructions": "Which team should handle this ticket?",
+      "choices": [
+        {"value": "billing", "description": "Charges, invoices, and refunds"},
+        {"value": "engineering", "description": "Bugs, errors, and outages"}
+      ]
+    }]
+  }'
+```
+
+Microsoft-Decision-1 liest nur Text und JSON; Requests mit Bildern werden
+abgelehnt. Neue Abonnements haben anfangs kein Kontingent dafür, beantragen Sie
+also Kontingent, bevor Sie es bereitstellen.
+
 ## Mehrere Deployments
 
 Jedes Azure-Deployment ist ein eigener Endpunkt. Registrieren Sie sie über
@@ -180,6 +220,7 @@ stattdessen eine [v1-Base-URL](#azure-ai-foundry-v1-api).
 
 ## Referenzen
 
+- [Microsoft-Decision-1 bereitstellen und verwenden](https://learn.microsoft.com/azure/foundry/foundry-models/how-to/use-foundry-models-microsoft-decision)
 - [Lebenszyklus der Azure-OpenAI-v1-API](https://learn.microsoft.com/azure/ai-foundry/openai/api-version-lifecycle)
 - [Versionierung der Azure-OpenAI-REST-API](https://learn.microsoft.com/azure/ai-services/openai/reference)
 - [Azure-OpenAI-Deployments](https://learn.microsoft.com/azure/ai-services/openai/how-to/create-resource)

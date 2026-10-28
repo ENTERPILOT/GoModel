@@ -1,8 +1,8 @@
 ---
 title: "Decisions API"
-description: "Zadawaj przez GoModel typowane pytania typu predicate, choice i score za pomocą Decisions API od OpenAI, na które odpowiadają OpenAI, Jev / Kev lub modele decyzyjne OpenRouter."
+description: "Zadawaj przez GoModel typowane pytania typu predicate, choice i score za pomocą Decisions API od OpenAI, na które odpowiadają OpenAI, Jev / Kev, modele decyzyjne OpenRouter lub Microsoft-Decision-1 w Azure."
 icon: "list-check"
-keywords: ["Decisions", "decisions API", "gpt-6-luna", "predicate", "choice", "score", "klasyfikacja", "classification", "Jev", "Kev", "System One", "OpenRouter"]
+keywords: ["Decisions", "decisions API", "gpt-6-luna", "predicate", "choice", "score", "klasyfikacja", "classification", "Jev", "Kev", "System One", "OpenRouter", "Azure", "Microsoft-Decision-1"]
 ---
 
 `POST /v1/decisions` obsługuje [Decisions API od OpenAI](https://developers.openai.com/api/docs/guides/decisions):
@@ -10,14 +10,15 @@ request zawiera `input` (tekst lub wiadomości użytkownika z tekstem i obrazami
 listę typowanych pytań, a każda odpowiedź jest prawdopodobieństwem, wyborem lub
 oceną (score) zamiast dowolnego tekstu.
 
-Endpoint jest dostępny, gdy skonfigurowany jest provider `openai`, [`jev`](/pl/providers/jev) lub
-`openrouter`. Bez żadnego z nich odpowiada `404`.
+Endpoint jest dostępny, gdy skonfigurowany jest provider `openai`, [`jev`](/pl/providers/jev),
+`openrouter` lub [`azure`](/pl/providers/azure#modele-decyzyjne-microsoft-decision-1). Bez żadnego z nich odpowiada `404`.
 
 | Provider | Jak odpowiada |
 | --- | --- |
 | `openai` | Natywnie: body trafia do `/v1/decisions` w wysłanej postaci |
 | `jev` (hostowany Jev, self-hosted Kev) | Przez [System One](/pl/advanced/systemone-api), z tłumaczeniem w obie strony; obrazy tylko w hostowanym Jev |
 | `openrouter` | Jego modele decyzyjne System One (`openrouter/typesafe/jev-1.13`, `openrouter/~typesafe/jev-latest`, Kev), tłumaczone w ten sam sposób; tylko tekst. Modele czatowe OpenRouter nie odpowiadają na ten endpoint |
+| `azure` | Deploymenty Microsoft-Decision-1, przez endpoint System One w Foundry, tłumaczone w ten sam sposób; tylko tekst i JSON. Deploymenty czatowe Azure nie odpowiadają na ten endpoint |
 
 W każdym przypadku odpowiedź ma kształt OpenAI, więc SDK OpenAI działają bez zmian.
 
@@ -165,8 +166,8 @@ virtual_models:
 
 | Sytuacja | Wynik |
 | --- | --- |
-| Nie skonfigurowano providera `openai`, `jev` ani `openrouter` | `404` |
-| Model czatowy w OpenRouter | `400 invalid_request_error`: na Decisions odpowiadają tylko jego modele decyzyjne |
+| Nie skonfigurowano providera `openai`, `jev`, `openrouter` ani `azure` | `404` |
+| Model czatowy w OpenRouter lub Azure | `400 invalid_request_error`: na Decisions odpowiadają tylko ich modele decyzyjne |
 | Brak `model` | `400` |
 | Model u providera bez Decisions API (także przez model wirtualny) | `400 invalid_request_error`; gateway loguje ostrzeżenie |
 | Obraz wysłany do modelu obsługującego tylko tekst (Kev), link do obrazu lub obraz inny niż PNG/JPEG wysłany do modelu `jev` albo inny request, którego System One nie potrafi wyrazić | `400 invalid_request_error` ze wskazaniem pola |

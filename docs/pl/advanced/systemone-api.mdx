@@ -2,7 +2,7 @@
 title: "System One API"
 description: "Wysyłaj requesty decyzyjne TypeSafe System One (Jev, Kev) przez GoModel – przekazywane natywnie, z modelami wirtualnymi, guardrails, cache’em, failoverem, audytem i rejestrowaniem użycia."
 icon: "scale"
-keywords: ["System One", "systemone", "Jev", "Kev", "TypeSafe", "decision model", "model decyzyjny", "noul", "choice", "score", "OpenRouter"]
+keywords: ["System One", "systemone", "Jev", "Kev", "TypeSafe", "decision model", "model decyzyjny", "noul", "choice", "score", "OpenRouter", "Azure", "Microsoft-Decision-1"]
 ---
 
 `POST /v1/systemone` obsługuje System One API od TypeSafe: request niesie
@@ -15,8 +15,9 @@ strukturach requestów i odpowiedzi OpenAI, użyj
 One.
 
 Endpoint jest dostępny, gdy skonfigurowano [providera `jev`](/pl/providers/jev)
-(hostowany Jev lub self-hosted serwer Kev) albo providera `openrouter`. Bez
-nich odpowiada `404`.
+(hostowany Jev lub self-hosted serwer Kev), providera `openrouter` albo
+[providera `azure`](/pl/providers/azure#modele-decyzyjne-microsoft-decision-1)
+(Microsoft-Decision-1). Bez nich odpowiada `404`.
 
 ## Request i odpowiedź
 
@@ -68,8 +69,8 @@ GoModel; zobacz [Jev / Kev](/pl/providers/jev#korzystanie-z-sdk-typesafe).
 | `POST /v1/systemone/permute` | Tylko Kev: uruchamia jedno pytanie Choice z kilkoma kolejnościami opcji (`n_perm`, od 1 do 64, domyślnie 6) |
 | `POST /v1/systemone/separate` | Tylko Kev: uruchamia każde pytanie w osobnym przebiegu w przód |
 
-Trasy Kev zachowują się jak `/v1/systemone`. Są odrzucane dla OpenRoutera,
-który obsługuje tylko trasę oceny; hostowany provider TypeSafe `jev` zwraca dla
+Trasy Kev zachowują się jak `/v1/systemone`. Są odrzucane dla OpenRoutera
+i Azure, które obsługują tylko trasę oceny; hostowany provider TypeSafe `jev` zwraca dla
 nich własne `404`.
 
 ## Co robi gateway
@@ -121,6 +122,7 @@ curl -s http://localhost:8080/v1/systemone \
 | `jev` (hostowany) | `jev/jev-latest`, `jev/jev-preview` i dowolne wersjonowane ID, np. `jev/jev-1.13.0` |
 | `jev` (serwer Kev) | `kev/kev-latest` i aliasy checkpointu, dla providera o nazwie `kev` |
 | `openrouter` | `openrouter/typesafe/jev-1.13`, `openrouter/~typesafe/jev-latest` i inne modele decyzyjne OpenRoutera, np. `openrouter/jaredpalmer/kev-4b` |
+| `azure` | Nazwa Twojego deploymentu Microsoft-Decision-1, np. `azure/ms-decision-1` |
 
 Modele System One są wymienione w `GET /v1/models` jako modele narzędziowe bez
 trybu generowania.
@@ -198,7 +200,7 @@ Endpoint nigdy nie tłumaczy i informuje o tym, gdy request nie może zadziała�
 
 | Sytuacja | Wynik |
 | --- | --- |
-| Nie skonfigurowano providera `jev` ani `openrouter` | `404` |
+| Nie skonfigurowano providera `jev`, `openrouter` ani `azure` | `404` |
 | Brak `model` | `400` |
 | Model u providera bez System One albo model czatu, embeddingów lub inny model generujący (także przez model wirtualny) | `400 invalid_request_error` z wyjaśnieniem przyczyny; gateway loguje ostrzeżenie |
 | Model System One wysłany do `/v1/chat/completions`, `/v1/responses` lub `/v1/embeddings` | `400 invalid_request_error` wskazujący na `/v1/decisions` i `/v1/systemone` |

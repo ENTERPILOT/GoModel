@@ -133,6 +133,45 @@ console.log(completion.choices[0].message.content);
 tak samo; batche są routowane przez ścieżkę zasobu `/openai/batches`
 (`/openai/v1/batches` przy base URL-ach v1).
 
+## Modele decyzyjne (Microsoft-Decision-1)
+
+Wdróż `Microsoft-Decision-1` w tym samym zasobie Foundry, a GoModel udostępni go
+na [`POST /v1/decisions`](/pl/advanced/decisions-api) (format OpenAI, z tłumaczeniem)
+i [`POST /v1/systemone`](/pl/advanced/systemone-api) (przekazywany natywnie). Oba
+trafiają do endpointu Foundry `/providers/microsoft/v1/systemone` pod głównym adresem
+zasobu, niezależnie od postaci `AZURE_BASE_URL`.
+
+Azure odrzuca nazwy deploymentów zawierające `Microsoft`, więc nazwij go na przykład
+`ms-decision-1` i dodaj do listy, żeby GoModel mógł go routować:
+
+```bash
+AZURE_MODELS=ms-decision-1
+CONFIGURED_PROVIDER_MODELS_MODE=merge
+```
+
+```bash
+curl -s http://localhost:8080/v1/decisions \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "azure/ms-decision-1",
+    "input": "The API returns 500 on every call.",
+    "questions": [{
+      "type": "choice",
+      "name": "team",
+      "instructions": "Which team should handle this ticket?",
+      "choices": [
+        {"value": "billing", "description": "Charges, invoices, and refunds"},
+        {"value": "engineering", "description": "Bugs, errors, and outages"}
+      ]
+    }]
+  }'
+```
+
+Microsoft-Decision-1 czyta tylko tekst i JSON; requesty z obrazami są
+odrzucane. Nowe subskrypcje startują bez przydziału (quota) dla tego modelu,
+więc przed wdrożeniem poproś o jego zwiększenie.
+
 ## Wiele deploymentów
 
 Każdy deployment Azure to osobny endpoint. Zarejestruj je jako osobnych providerów
@@ -175,6 +214,7 @@ jednego zasobu przez jednego providera, użyj zamiast tego
 
 ## Materiały źródłowe
 
+- [Wdrażanie i używanie Microsoft-Decision-1](https://learn.microsoft.com/azure/foundry/foundry-models/how-to/use-foundry-models-microsoft-decision)
 - [Wersjonowanie REST API Azure OpenAI](https://learn.microsoft.com/azure/ai-services/openai/reference)
 - [Deploymenty Azure OpenAI](https://learn.microsoft.com/azure/ai-services/openai/how-to/create-resource)
 - [Uwierzytelnianie w Azure OpenAI](https://learn.microsoft.com/azure/ai-services/openai/how-to/managed-identity)
