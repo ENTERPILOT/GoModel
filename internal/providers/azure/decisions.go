@@ -1,10 +1,13 @@
 package azure
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/systemone"
 )
@@ -49,6 +52,28 @@ func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest
 	}
 	return p.CompatibleProvider.Passthrough(ctx, req)
 }
+
+// bufferSystemOneBody gives a System One body a known length, since Foundry
+// refuses chunked bodies (no_content_length_header). Decision requests are
+// small. A failed read is kept, so the client reports it when sending.
+func bufferSystemOneBody(req *llmclient.Request) {
+	if req.RawBodyReader == nil {
+		return
+	}
+	body, err := io.ReadAll(req.RawBodyReader)
+	if closer, ok := req.RawBodyReader.(io.Closer); ok {
+		_ = closer.Close()
+	}
+	if err != nil {
+		req.RawBodyReader = io.MultiReader(bytes.NewReader(body), errReader{err})
+		return
+	}
+	req.RawBody, req.RawBodyReader = body, nil
+}
+
+type errReader struct{ err error }
+
+func (r errReader) Read([]byte) (int, error) { return 0, r.err }
 
 func isSystemOneEndpoint(endpoint string) bool {
 	path := providers.PassthroughEndpoint(endpoint)

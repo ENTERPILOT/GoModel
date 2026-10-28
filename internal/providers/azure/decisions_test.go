@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -46,6 +47,7 @@ func TestDecisions_TranslatesThroughFoundrySystemOneRoute(t *testing.T) {
 			assert.Equal(t, "/providers/microsoft/v1/systemone", sent.Path)
 			assert.False(t, sent.Query.Has("api-version"))
 			assert.Equal(t, "test-api-key", sent.Header.Get("api-key"))
+			assert.Equal(t, strconv.Itoa(len(sent.Body)), sent.Header.Get("Content-Length"), "Foundry refuses chunked bodies")
 			assert.JSONEq(t, `{"model":"ms-decision-1","state":"The API returns 500 on every call.","questions":{"team":{"type":"choice","instructions":"Which team?","criteria":{"billing":"Charges and refunds","engineering":"Bugs and outages","support":"How-to questions"}}}}`, string(sent.Body))
 			got, err := io.ReadAll(resp.Body)
 			require.NoError(t, err)
@@ -98,6 +100,9 @@ func TestPassthrough_RoutesSystemOneToFoundry(t *testing.T) {
 			sent := capture.Last(t)
 			assert.Equal(t, tt.wantPath, sent.Path)
 			assert.Equal(t, tt.wantVersion, sent.Query.Has("api-version"))
+			if tt.wantPath == systemOnePath {
+				assert.Equal(t, strconv.Itoa(len(sent.Body)), sent.Header.Get("Content-Length"), "Foundry refuses chunked bodies")
+			}
 			assert.JSONEq(t, body, string(sent.Body))
 		})
 	}
