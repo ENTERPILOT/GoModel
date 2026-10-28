@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/url"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -34,7 +35,8 @@ func chatRequest(stream bool) *core.ChatRequest {
 }
 
 // assertRawPredictRequest checks the request Vertex receives: model in the
-// path, anthropic_version in the body, and only the Google bearer token.
+// path, anthropic_version in the body, the user's message intact, and only
+// the Google bearer token.
 func assertRawPredictRequest(t *testing.T, req providertest.Recorded, verb string) {
 	t.Helper()
 	assert.Equal(t, http.MethodPost, req.Method)
@@ -45,6 +47,10 @@ func assertRawPredictRequest(t *testing.T, req providertest.Recorded, verb strin
 	body := req.JSON(t)
 	assert.NotContains(t, body, "model")
 	assert.Equal(t, vertexAnthropicVersion, body["anthropic_version"])
+	messages, ok := body["messages"].([]any)
+	require.True(t, ok, "messages must be an array")
+	require.Len(t, messages, 1)
+	assert.Equal(t, map[string]any{"role": "user", "content": "hi"}, messages[0])
 }
 
 const anthropicMessageJSON = `{
@@ -118,6 +124,7 @@ data: {"type":"message_stop"}
 	assertRawPredictRequest(t, capture.Last(t), "streamRawPredict")
 	assert.Equal(t, true, capture.Last(t).JSON(t)["stream"])
 	assert.Contains(t, string(body), `"content":"ok"`)
+	assert.Contains(t, string(body), `"provider":"vertex"`)
 	assert.Contains(t, string(body), "data: [DONE]")
 }
 
@@ -147,6 +154,31 @@ func TestVertexAnthropicBaseURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, vertexAnthropicBaseURL(tt.cfg))
+		})
+	}
+}
+
+func TestRawPredictURL(t *testing.T) {
+	messagesURL, err := url.Parse("https://vertex.example" + anthropicBasePath + "/messages")
+	require.NoError(t, err)
+	tests := []struct {
+		name   string
+		model  string
+		stream bool
+		want   string
+	}{
+		{"bare id", "claude-sonnet-5", false, anthropicBasePath + "/models/claude-sonnet-5:rawPredict"},
+		{"stream", "claude-sonnet-5", true, anthropicBasePath + "/models/claude-sonnet-5:streamRawPredict"},
+		{"publisher prefix", "anthropic/claude-sonnet-5", false, anthropicBasePath + "/models/claude-sonnet-5:rawPredict"},
+		{"resource name", "publishers/anthropic/models/claude-sonnet-5", false, anthropicBasePath + "/models/claude-sonnet-5:rawPredict"},
+		{"version suffix", "claude-sonnet-4@20250514", false, anthropicBasePath + "/models/claude-sonnet-4@20250514:rawPredict"},
+		{"separators stay in one segment", "a/../b?x", false, anthropicBasePath + "/models/a%2F..%2Fb%3Fx:rawPredict"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := rawPredictURL(messagesURL, tt.model, tt.stream)
+			assert.Equal(t, tt.want, got.EscapedPath())
+			assert.Equal(t, "vertex.example", got.Host)
 		})
 	}
 }

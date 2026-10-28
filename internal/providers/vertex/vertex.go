@@ -96,8 +96,10 @@ func newProvider(providerCfg providers.ProviderConfig, opts providers.ProviderOp
 	p.gemini = gemini.NewVertexWithHTTPClient(providerCfg, opts, authClient)
 	if useAnthropicAPI(providerCfg.APIMode) {
 		// The Google bearer token is the only credential, so the adapter gets
-		// no API keys of its own.
+		// no API keys of its own. It reports this instance's name, falling
+		// back to "vertex" rather than "anthropic".
 		messagesOpts := opts
+		messagesOpts.Name = p.providerName
 		messagesOpts.Keys = nil
 		messagesOpts.HTTPClient = anthropicHTTPClient(authClient)
 		messages := anthropic.New(providers.ProviderConfig{BaseURL: vertexAnthropicBaseURL(providerCfg)}, messagesOpts)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/providers"
@@ -67,7 +68,7 @@ func (t *anthropicTransport) RoundTrip(req *http.Request) (*http.Response, error
 	}
 	var model string
 	var stream bool
-	if err := json.Unmarshal(body["model"], &model); err != nil || strings.TrimSpace(model) == "" {
+	if err := json.Unmarshal(body["model"], &model); err != nil || vertexAnthropicModelID(model) == "" {
 		return nil, fmt.Errorf("vertex anthropic: request body has no model")
 	}
 	if s, ok := body["stream"]; ok {
@@ -80,19 +81,36 @@ func (t *anthropicTransport) RoundTrip(req *http.Request) (*http.Response, error
 		return nil, err
 	}
 
-	verb := ":rawPredict"
-	if stream {
-		verb = ":streamRawPredict"
-	}
 	out := req.Clone(req.Context())
-	u := *req.URL
-	u.Path = strings.TrimSuffix(u.Path, "/messages") + "/models/" + strings.TrimPrefix(strings.TrimSpace(model), "anthropic/") + verb
-	u.RawPath = ""
-	out.URL = &u
+	out.URL = rawPredictURL(req.URL, model, stream)
 	out.Body = io.NopCloser(bytes.NewReader(rewritten))
 	out.ContentLength = int64(len(rewritten))
 	out.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(rewritten)), nil }
 	out.Header.Del("x-api-key")
 	out.Header.Del("anthropic-version")
 	return t.base.RoundTrip(out)
+}
+
+// vertexAnthropicModelID mirrors normalizeVertexModelID for the Anthropic
+// publisher: it accepts a bare ID, anthropic/{id}, or a full resource name.
+func vertexAnthropicModelID(model string) string {
+	model = strings.TrimSpace(model)
+	if idx := strings.LastIndex(model, "/models/"); idx >= 0 {
+		model = model[idx+len("/models/"):]
+	}
+	return strings.TrimPrefix(model, "anthropic/")
+}
+
+// rawPredictURL returns the Vertex URL that replaces the adapter's
+// {base}/messages URL, with the model escaped as a single path segment.
+func rawPredictURL(messagesURL *url.URL, model string, stream bool) *url.URL {
+	verb := ":rawPredict"
+	if stream {
+		verb = ":streamRawPredict"
+	}
+	id := vertexAnthropicModelID(model)
+	u := *messagesURL
+	u.Path = strings.TrimSuffix(messagesURL.Path, "/messages") + "/models/" + id + verb
+	u.RawPath = strings.TrimSuffix(messagesURL.EscapedPath(), "/messages") + "/models/" + url.PathEscape(id) + verb
+	return &u
 }
