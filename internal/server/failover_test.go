@@ -933,7 +933,10 @@ func TestEmbeddings_FailoverAdmissionReservesBackupConcurrencyAndReleasesAfterEr
 		code int
 	}
 	firstDone := make(chan response, 1)
-	go func() { firstDone <- response{err: handler.Embeddings(firstContext), code: firstRecorder.Code} }()
+	go func() {
+		err := handler.Embeddings(firstContext)
+		firstDone <- response{err: err, code: firstRecorder.Code}
+	}()
 	select {
 	case <-backupStarted:
 	case <-time.After(2 * time.Second):
