@@ -627,7 +627,7 @@ providers:
     # service_account_file: "/var/run/secrets/google/service-account.json"
     # service_account_json: "${VERTEX_SERVICE_ACCOUNT_JSON}"
     # service_account_json_base64: "${VERTEX_SERVICE_ACCOUNT_JSON_BASE64}"
-    # api_mode: native # or openai_compatible
+    # api_mode: native # or openai_compatible, or anthropic for Claude models
     # models:
     #   - id: "google/gemini-2.5-flash"
 
