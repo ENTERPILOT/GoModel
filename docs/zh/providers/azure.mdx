@@ -149,7 +149,7 @@ curl -s http://localhost:8080/v1/decisions \
   }'
 ```
 
-Microsoft-Decision-1 仅读取文本和 JSON；包含图像的请求会被拒绝。新订阅默认没有该模型的配额，因此请在部署前申请配额。
+Microsoft-Decision-1 仅读取文本和 JSON：`/v1/decisions` 会拒绝图像，而 `/v1/systemone` 会按原样转发请求，由 Foundry 作答。新订阅默认没有该模型的配额，因此请在部署前申请配额。
 
 ## 多个部署
 

@@ -76,7 +76,7 @@ Kev 路由的行为与 `/v1/systemone` 相同。OpenRouter 和 Azure 只支持�
 TypeSafe 的 [图像](https://docs.typesafe.ai/images) 请求可按原样发送：
 在 JSON 请求体中使用 `assets`，或使用 TypeSafe 的 `multipart/form-data` 表单——其中 JSON 请求作为第一个部分，名为 `request`，每张图像作为一个文件部分，由某个 asset 通过 `part` 引用。TypeSafe SDK 会为 `Image`
 对象发送该表单。GoModel 会将每个图像部分以 `data_base64` 内联到对应的 asset 中，并转发一个 JSON 请求，因此护栏、缓存和故障转移对两种形式的处理方式相同。图像必须是 PNG 或 JPEG；如果 asset 指定了 `format` 则保留，否则根据图像字节判断。TypeSafe 会拒绝的表单（例如没有任何 asset 使用的部分、asset 引用了不存在的部分，或者图像不是 PNG 或 JPEG）会返回 `400`。请按 TypeSafe 的要求发送
-`TypeSafe-Danger-Zone-Images: true` 请求头；网关会将其转发。Kev 服务器只读取文本。
+`TypeSafe-Danger-Zone-Images: true` 请求头；网关会将其转发。Kev 服务器和 Azure 的 Microsoft-Decision-1 只读取文本；它们的图像请求会按原样转发，由上游作答。
 
 ```bash
 curl -s http://localhost:8080/v1/systemone \

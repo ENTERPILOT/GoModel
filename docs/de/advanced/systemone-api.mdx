@@ -108,7 +108,9 @@ Bytes des Bildes ermittelt. Ein Formular, das TypeSafe ablehnen würde, etwa ein
 Part, den kein Asset verwendet, ein Asset, das einen fehlenden Part benennt,
 oder ein Bild, das weder PNG noch JPEG ist, liefert `400`. Senden Sie den
 Header `TypeSafe-Danger-Zone-Images: true`, wie von TypeSafe verlangt; das
-Gateway leitet ihn weiter. Kev-Server lesen nur Text.
+Gateway leitet ihn weiter. Kev-Server und Microsoft-Decision-1 von Azure lesen
+nur Text; ihre Bild-Requests werden unverändert weitergeleitet, und der Upstream
+beantwortet sie.
 
 ```bash
 curl -s http://localhost:8080/v1/systemone \

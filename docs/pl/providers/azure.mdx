@@ -168,8 +168,9 @@ curl -s http://localhost:8080/v1/decisions \
   }'
 ```
 
-Microsoft-Decision-1 czyta tylko tekst i JSON; requesty z obrazami są
-odrzucane. Nowe subskrypcje startują bez przydziału (quota) dla tego modelu,
+Microsoft-Decision-1 czyta tylko tekst i JSON: `/v1/decisions` odrzuca obrazy,
+a `/v1/systemone` przekazuje requesty w wysłanej postaci, więc odpowiada na nie
+Foundry. Nowe subskrypcje startują bez przydziału (quota) dla tego modelu,
 więc przed wdrożeniem poproś o jego zwiększenie.
 
 ## Wiele deploymentów

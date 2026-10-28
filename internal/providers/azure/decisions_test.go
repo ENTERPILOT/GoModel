@@ -2,11 +2,13 @@ package azure
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -105,5 +107,22 @@ func TestPassthrough_RoutesSystemOneToFoundry(t *testing.T) {
 			}
 			assert.JSONEq(t, body, string(sent.Body))
 		})
+	}
+}
+
+// A System One body that fails to read fails the request rather than
+// reaching Foundry as a complete, truncated body.
+func TestPassthrough_ReportsSystemOneBodyReadError(t *testing.T) {
+	server, capture := providertest.JSONServer(t, http.StatusOK, systemOneAnswerJSON)
+	provider := newTestProvider(server.Client(), server.URL+"/openai/v1")
+
+	_, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
+		Method:   http.MethodPost,
+		Endpoint: "systemone",
+		Body:     io.NopCloser(io.MultiReader(strings.NewReader(`{"model":`), iotest.ErrReader(errors.New("client went away")))),
+	})
+	require.Error(t, err)
+	for _, sent := range capture.All() {
+		assert.Error(t, sent.ReadErr, "the upstream must not receive a complete body")
 	}
 }
