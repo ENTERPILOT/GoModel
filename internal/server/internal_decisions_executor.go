@@ -55,7 +55,7 @@ func (e *InternalDecisionsExecutor) Decide(ctx context.Context, body []byte) (an
 	s := e.service
 	router, ok := s.provider.(core.RoutableDecisions)
 	if !ok || len(router.DecisionsProviderTypes()) == 0 {
-		return nil, core.NewNotFoundError("decisions are available only when an openai, jev, or openrouter provider is configured")
+		return nil, core.NewNotFoundError("decisions are available only when an openai, jev, openrouter, or azure provider is configured")
 	}
 	var req core.DecisionRequest
 	if err := json.Unmarshal(body, &req); err != nil {

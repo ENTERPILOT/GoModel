@@ -132,6 +132,45 @@ console.log(completion.choices[0].message.content);
 same way; batches route through the `/openai/batches` resource path
 (`/openai/v1/batches` on v1 base URLs).
 
+## Decision models (Microsoft-Decision-1)
+
+Deploy `Microsoft-Decision-1` on the same Foundry resource and GoModel serves it
+on [`POST /v1/decisions`](/advanced/decisions-api) (OpenAI's format, translated)
+and [`POST /v1/systemone`](/advanced/systemone-api) (forwarded natively). Both
+reach Foundry's `/providers/microsoft/v1/systemone` endpoint on the resource
+root, whichever `AZURE_BASE_URL` form you use.
+
+Azure rejects deployment names containing `Microsoft`, so name it, for example,
+`ms-decision-1`, and list it so GoModel can route it:
+
+```bash
+AZURE_MODELS=ms-decision-1
+CONFIGURED_PROVIDER_MODELS_MODE=merge
+```
+
+```bash
+curl -s http://localhost:8080/v1/decisions \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "azure/ms-decision-1",
+    "input": "The API returns 500 on every call.",
+    "questions": [{
+      "type": "choice",
+      "name": "team",
+      "instructions": "Which team should handle this ticket?",
+      "choices": [
+        {"value": "billing", "description": "Charges, invoices, and refunds"},
+        {"value": "engineering", "description": "Bugs, errors, and outages"}
+      ]
+    }]
+  }'
+```
+
+Microsoft-Decision-1 reads text and JSON only; requests with images are
+refused. New subscriptions start with no quota for it, so request quota before
+deploying.
+
 ## Multiple deployments
 
 Each Azure deployment is its own endpoint. Register them as separate providers
@@ -174,6 +213,7 @@ one resource through a single provider, use a
 
 ## References
 
+- [Deploy and use Microsoft-Decision-1](https://learn.microsoft.com/azure/foundry/foundry-models/how-to/use-foundry-models-microsoft-decision)
 - [Azure OpenAI v1 API lifecycle](https://learn.microsoft.com/azure/ai-foundry/openai/api-version-lifecycle)
 - [Azure OpenAI REST API versioning](https://learn.microsoft.com/azure/ai-services/openai/reference)
 - [Azure OpenAI deployments](https://learn.microsoft.com/azure/ai-services/openai/how-to/create-resource)

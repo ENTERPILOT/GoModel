@@ -161,9 +161,11 @@ func (p *Provider) requestAPIVersion() string {
 	return defaultAPIVersion
 }
 
+// mutateRequest adds the api-version query parameter. Foundry's System One
+// endpoint is unversioned, so it gets none.
 func (p *Provider) mutateRequest(req *llmclient.Request) {
 	version := p.requestAPIVersion()
-	if version == "" {
+	if version == "" || strings.HasPrefix(req.Endpoint, systemOnePath) {
 		return
 	}
 	endpoint, err := url.Parse(req.Endpoint)
