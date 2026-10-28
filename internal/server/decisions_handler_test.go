@@ -369,6 +369,23 @@ func TestDecisions_ImagesStartAtTheFirstTargetThatReadsThem(t *testing.T) {
 	assert.Equal(t, []string{"openai openai gpt-6-luna", "kev jev kev-latest"}, provider.calls)
 }
 
+// An Azure deployment without a Decisions API, such as a chat deployment, is
+// forwarded rather than refused, and Foundry's own error reaches the caller.
+func TestDecisions_RelaysAzureErrors(t *testing.T) {
+	provider := newScriptedDecisionsProvider(map[string]string{"azure/gpt-4.1-mini": "azure"}, "azure")
+	provider.catalog = map[string]core.Model{
+		"azure/gpt-4.1-mini": {ID: "gpt-4.1-mini", Metadata: &core.ModelMetadata{Modes: []string{"chat"}}},
+	}
+	provider.statuses["gpt-4.1-mini"] = http.StatusBadRequest
+	handler := NewHandler(provider, nil, nil, nil)
+
+	c, rec := echotest.Post(t, "/v1/decisions", decisionBody("azure/gpt-4.1-mini"))
+	require.NoError(t, handler.Decisions(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "overloaded", "the upstream's message")
+	assert.Equal(t, []string{"decisions"}, provider.endpoints)
+}
+
 // Azure's System One models read text only, so an image request whose chain
 // starts at one starts at the first target that reads images instead: an
 // Azure gpt-6-luna deployment, which takes OpenAI's Decisions natively, or
