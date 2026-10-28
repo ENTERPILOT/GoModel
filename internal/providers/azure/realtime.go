@@ -7,14 +7,14 @@ import (
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/providers"
 )
 
 // RealtimeTarget implements core.RealtimeProvider for Azure OpenAI's GPT Realtime
 // API, which uses OpenAI's realtime event schema. Azure differs from OpenAI only
 // in the dial shape: the websocket lives at <resource>/openai/realtime with the
-// deployment and api-version as query parameters, and auth uses the api-key
-// header (not Bearer). The api-key is injected here and must never be logged.
+// deployment and api-version as query parameters (or at the GA
+// <resource>/openai/v1/realtime with a model parameter on a v1 base URL), and
+// auth uses the api-key header (not Bearer). The api-key is injected here and must never be logged.
 // A request carrying a CallID attaches to an existing WebRTC call as a sideband
 // channel on the GA v1 surface (<resource>/openai/v1/realtime?call_id=...),
 // which needs no api-version parameter.
@@ -80,18 +80,26 @@ func (p *Provider) realtimeAttachURL(callID string) (string, error) {
 	return u.String(), nil
 }
 
-// realtimeURL builds wss://<resource>/openai/realtime?api-version=…&deployment=…
-// from the configured base URL's resource root. The model selects the Azure
-// deployment.
+// realtimeURL builds the websocket URL for a new session from the configured
+// base URL's resource root. The model selects the Azure deployment.
+//   - v1 base URL: wss://<resource>/openai/v1/realtime?model=… (GA surface)
+//   - otherwise:   wss://<resource>/openai/realtime?api-version=…&deployment=…
 func (p *Provider) realtimeURL(deployment string) (string, error) {
 	u, err := p.realtimeRoot("ws", "wss")
 	if err != nil {
 		return "", err
 	}
-	u.Path += "/openai/realtime"
 	q := url.Values{}
-	q.Set("api-version", providers.ResolveAPIVersion(p.apiVersion, defaultAPIVersion))
-	q.Set("deployment", deployment)
+	if p.resourcePath == "/openai/v1" {
+		u.Path += "/openai/v1/realtime"
+		q.Set("model", deployment)
+	} else {
+		u.Path += "/openai/realtime"
+		q.Set("deployment", deployment)
+	}
+	if version := p.requestAPIVersion(); version != "" {
+		q.Set("api-version", version)
+	}
 	u.RawQuery = q.Encode()
 	return u.String(), nil
 }

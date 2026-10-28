@@ -37,7 +37,7 @@ AZURE_API_KEY=...
 AZURE_BASE_URL=https://proj1-resource.services.ai.azure.com/openai/v1
 ```
 
-使用 `/openai/v1` Base URL 时，GoModel 默认不发送 `api-version`，并由请求体中的 `model` 选择部署，因此一个提供商即可覆盖该资源下的所有部署。请不要设置 `AZURE_API_VERSION`（也请删除上方 YAML 中的 `api_version`）；仅在需要启用预览功能时将其设为 `preview`。经典的 `https://your-resource.openai.azure.com/openai/v1` URL 用法相同。
+使用 `/openai/v1` Base URL 时，GoModel 默认不发送 `api-version`，并由请求体中的 `model` 选择部署，因此一个提供商即可覆盖该资源下的所有部署。请不要设置 `AZURE_API_VERSION`（也请删除上方 YAML 中的 `api_version`）；仅在需要启用预览功能时将其设为 `preview`。经典的 `https://your-resource.openai.azure.com/openai/v1` URL 用法相同。Realtime 会话使用 GA 的 `/openai/v1/realtime?model=<deployment>` websocket。
 
 `/openai/v1/models` 列出的是该资源的模型，因此与模型同名的部署（Foundry 的默认做法）可直接路由。如果部署使用自定义名称，请在 `AZURE_MODELS` 中列出这些名称，并设置 `CONFIGURED_PROVIDER_MODELS_MODE=merge`。
 
