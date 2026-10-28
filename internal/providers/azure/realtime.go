@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/providers"
 )
 
 // RealtimeTarget implements core.RealtimeProvider for Azure OpenAI's GPT Realtime
@@ -89,7 +90,7 @@ func (p *Provider) realtimeURL(deployment string) (string, error) {
 	}
 	u.Path += "/openai/realtime"
 	q := url.Values{}
-	q.Set("api-version", p.apiVersion)
+	q.Set("api-version", providers.ResolveAPIVersion(p.apiVersion, defaultAPIVersion))
 	q.Set("deployment", deployment)
 	u.RawQuery = q.Encode()
 	return u.String(), nil
