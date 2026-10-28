@@ -43,9 +43,14 @@ AZURE_BASE_URL=https://proj1-resource.services.ai.azure.com/openai/v1
 
 Przy base URL-u `/openai/v1` GoModel domyślnie nie wysyła `api-version`, a
 `model` w body requestu wybiera deployment, więc jeden provider obsługuje
-wszystkie deploymenty zasobu. Ustaw `AZURE_API_VERSION=preview` tylko po to,
-żeby włączyć funkcje preview. Klasyczne URL-e
+wszystkie deploymenty zasobu. Nie ustawiaj `AZURE_API_VERSION` (ani
+`api_version` w YAML-u powyżej); użyj `preview` tylko po to, żeby włączyć
+funkcje preview. Klasyczne URL-e
 `https://your-resource.openai.azure.com/openai/v1` działają tak samo.
+
+`/openai/v1/models` zwraca modele zasobu, więc deployment nazwany tak jak jego
+model (domyślnie w Foundry) jest routowany bez zmian. Własne nazwy deploymentów
+podaj w `AZURE_MODELS` i ustaw `CONFIGURED_PROVIDER_MODELS_MODE=merge`.
 
 ## Uruchomienie GoModel
 
