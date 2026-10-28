@@ -70,7 +70,7 @@ func TestDecisions_AzureRefusesImages(t *testing.T) {
 
 	_, err := decide(t, provider, core.DecisionsSystemOneEndpoint, "ms-decision-1", `{"model":"ms-decision-1","input":[{"role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,iVBORw0KGgo="}]}],"questions":[{"type":"predicate","instructions":"?"}]}`)
 	providertest.AssertUnsupported(t, err)
-	assert.Contains(t, err.Error(), "read text and JSON only")
+	assert.Contains(t, err.Error(), "reads text and JSON only")
 	assert.Zero(t, capture.Count())
 }
 

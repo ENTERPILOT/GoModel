@@ -26,7 +26,7 @@ const (
 
 // decisionImagesRefusal refuses images: Microsoft-Decision-1 reads text and
 // JSON state only.
-const decisionImagesRefusal = "Azure's decision models (Microsoft-Decision-1) read text and JSON only; send images to openai/gpt-6-luna or a hosted jev model"
+const decisionImagesRefusal = "Azure's Microsoft-Decision-1 reads text and JSON only; send images to a gpt-6-luna deployment or a hosted jev model"
 
 // Decisions answers an OpenAI Decisions request. A request the gateway marks
 // for System One (core.DecisionsSystemOneEndpoint), for a Microsoft-Decision-1
