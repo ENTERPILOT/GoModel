@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
@@ -28,9 +29,15 @@ func (m *memStore) UpsertRules(_ context.Context, rules []Rule) error {
 		return err
 	}
 	for _, rule := range normalized {
+		// The counter epoch follows the real stores: kept by an edit, new
+		// for a new rule or a per-child switch.
+		rule.CounterEpoch = uuid.NewString()
 		replaced := false
 		for i, existing := range m.rules {
 			if keyForRule(existing) == keyForRule(rule) {
+				if existing.PerChild == rule.PerChild {
+					rule.CounterEpoch = existing.CounterEpoch
+				}
 				m.rules[i] = rule
 				replaced = true
 				break
@@ -55,9 +62,13 @@ func (m *memStore) DeleteRule(_ context.Context, scope RuleScope, subject string
 }
 
 func (m *memStore) ReplaceConfigRules(ctx context.Context, rules []Rule) error {
+	declared := make(map[ruleKey]bool, len(rules))
+	for _, rule := range rules {
+		declared[keyForRule(rule)] = true
+	}
 	kept := m.rules[:0]
 	for _, existing := range m.rules {
-		if existing.Source != SourceConfig {
+		if existing.Source != SourceConfig || declared[keyForRule(existing)] {
 			kept = append(kept, existing)
 		}
 	}

@@ -180,10 +180,41 @@ func TestResetDeletesEveryWritersRows(t *testing.T) {
 	assert.Equal(t, int64(0), requestsUsed(t, restarted, now))
 }
 
+func teamRule(perChild bool, maxRequests int64) Rule {
+	return Rule{
+		Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodDaySeconds,
+		PerChild: perChild, MaxRequests: new(maxRequests), Source: SourceManual,
+	}
+}
+
 // A rule change that resets a definition's live counters (here a shared to
-// per-child round trip) must also drop every writer's saved rows, or the next
-// restart would merge the pre-change count of a writer that no longer runs.
-func TestRuleModeChangeDeletesEveryWritersRows(t *testing.T) {
+// per-child round trip) must keep a restart from merging the pre-change count
+// of a writer that no longer runs — even though nothing deletes that row.
+func TestRuleModeRoundTripDoesNotRestoreEarlierCounts(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	// Deleting rows always fails, to show restore does not depend on it.
+	store := &flakyDeleteStore{memStore: teamStore(t), err: errors.New("store unavailable")}
+
+	first := startedService(t, store)
+	acquireN(t, first, 90, now)
+	first.Close()
+
+	second := startedService(t, store)
+	require.Equal(t, int64(90), requestsUsed(t, second, now))
+	require.NoError(t, second.UpsertRules(ctx, []Rule{teamRule(true, 100)}))
+	require.NoError(t, second.UpsertRules(ctx, []Rule{teamRule(false, 100)}))
+	require.NotEmpty(t, store.counters, "the old writer's row is still saved")
+	acquireN(t, second, 1, now)
+	second.Close()
+
+	restarted := startedService(t, store)
+	assert.Equal(t, int64(1), requestsUsed(t, restarted, now))
+}
+
+// The rule can change, and change back, while no gateway runs to see it; the
+// next start must still not restore the counts the change cleared.
+func TestRuleRoundTripWhileStoppedDoesNotRestoreEarlierCounts(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 	store := teamStore(t)
@@ -192,55 +223,65 @@ func TestRuleModeChangeDeletesEveryWritersRows(t *testing.T) {
 	acquireN(t, first, 90, now)
 	first.Close()
 
-	second := startedService(t, store)
-	require.Equal(t, int64(90), requestsUsed(t, second, now))
-	rule := Rule{
-		Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodDaySeconds,
-		MaxRequests: new(int64(100)), Source: SourceManual,
-	}
-	perChild := rule
-	perChild.PerChild = true
-	require.NoError(t, second.UpsertRules(ctx, []Rule{perChild}))
-	require.Empty(t, store.counters, "a mode change clears every writer's rows")
-	require.NoError(t, second.UpsertRules(ctx, []Rule{rule}))
-	acquireN(t, second, 1, now)
-	second.Close()
+	require.NoError(t, store.UpsertRules(ctx, []Rule{teamRule(true, 100)}))
+	require.NoError(t, store.UpsertRules(ctx, []Rule{teamRule(false, 100)}))
 
 	restarted := startedService(t, store)
-	assert.Equal(t, int64(1), requestsUsed(t, restarted, now))
+	assert.Equal(t, int64(0), requestsUsed(t, restarted, now))
 }
 
-// A mode change whose row delete fails has already swapped its rules in, so
-// retrying the same update finds nothing that differs. The delete must still
-// be retried, or switching back and restarting restores the cleared count.
-func TestRuleModeChangeRetriesFailedRowDelete(t *testing.T) {
+// Rows another replica saves under the new rule belong to it: nothing the
+// replica that made the change does later may drop them.
+func TestRuleChangeKeepsRowsSavedUnderNewRule(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
-	store := &flakyDeleteStore{memStore: teamStore(t)}
+	store := &flakyDeleteStore{memStore: teamStore(t), err: errors.New("store unavailable")}
+
+	a := startedService(t, store)
+	b := startedService(t, store)
+	acquireN(t, a, 90, now)
+	require.NoError(t, a.UpsertRules(ctx, []Rule{teamRule(true, 100)}))
+	require.NoError(t, a.UpsertRules(ctx, []Rule{teamRule(false, 100)}))
+
+	require.NoError(t, b.Refresh(ctx))
+	acquireN(t, b, 5, now)
+	b.Close()
+
+	store.err = nil
+	require.NoError(t, a.Refresh(ctx))
+	a.Close()
+
+	restarted := startedService(t, store)
+	assert.Equal(t, int64(5), requestsUsed(t, restarted, now))
+}
+
+// Editing a limit is not a reset: the counts survive it and a restart.
+func TestRuleLimitEditKeepsCounts(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	store := teamStore(t)
 
 	first := startedService(t, store)
 	acquireN(t, first, 90, now)
+	require.NoError(t, first.UpsertRules(ctx, []Rule{teamRule(false, 200)}))
+	require.Equal(t, int64(90), requestsUsed(t, first, now))
 	first.Close()
 
-	second := startedService(t, store)
-	require.Equal(t, int64(90), requestsUsed(t, second, now))
-	rule := Rule{
-		Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodDaySeconds,
-		MaxRequests: new(int64(100)), Source: SourceManual,
-	}
-	perChild := rule
-	perChild.PerChild = true
-	store.err = errors.New("store unavailable")
-	require.Error(t, second.UpsertRules(ctx, []Rule{perChild}))
-	require.NotEmpty(t, store.counters)
-
-	store.err = nil
-	require.NoError(t, second.UpsertRules(ctx, []Rule{perChild}))
-	require.Empty(t, store.counters, "the retried update deletes the rows the failed one left")
-	require.NoError(t, second.UpsertRules(ctx, []Rule{rule}))
-	acquireN(t, second, 1, now)
-	second.Close()
-
 	restarted := startedService(t, store)
-	assert.Equal(t, int64(1), requestsUsed(t, restarted, now))
+	assert.Equal(t, int64(90), requestsUsed(t, restarted, now))
+}
+
+// A rule deleted and re-added on another replica, in the same mode, is a new
+// definition there: a refresh here drops the counts of the old one.
+func TestRefreshDropsCountsOfRuleReaddedElsewhere(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	store := teamStore(t)
+
+	service := startedService(t, store)
+	acquireN(t, service, 90, now)
+	require.NoError(t, store.DeleteRule(ctx, ScopeUserPath, "/team", PeriodDaySeconds))
+	require.NoError(t, store.UpsertRules(ctx, []Rule{teamRule(false, 100)}))
+	require.NoError(t, service.Refresh(ctx))
+	assert.Equal(t, int64(0), requestsUsed(t, service, now))
 }

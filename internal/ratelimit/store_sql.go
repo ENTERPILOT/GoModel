@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/enterpilot/gomodel/internal/storage/sqlutil"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
@@ -25,6 +27,7 @@ const sqlRateLimitsSchema = `
 		source TEXT NOT NULL DEFAULT '',
 		created_at ` + sqlx.TypeInt64 + ` NOT NULL,
 		updated_at ` + sqlx.TypeInt64 + ` NOT NULL,
+		counter_epoch TEXT NOT NULL DEFAULT '',
 		PRIMARY KEY (scope, subject, period_seconds)
 	)`
 
@@ -39,6 +42,7 @@ const sqlRateLimitWindowSnapshotsSchema = `
 		partition TEXT NOT NULL DEFAULT '',
 		period_seconds ` + sqlx.TypeInt64 + ` NOT NULL,
 		writer TEXT NOT NULL DEFAULT '',
+		epoch TEXT NOT NULL DEFAULT '',
 		requests_window_start ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
 		requests_current ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
 		requests_previous ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
@@ -60,11 +64,14 @@ type SQLStore struct {
 
 // upsertRuleSQL preserves a manually edited rule against a config re-seed:
 // a column is only overwritten when the incoming or stored row is manual, or
-// when both are config-sourced.
+// when both are config-sourced. The counter epoch the insert carries is kept
+// only by a new row or an update that switches per_child; see
+// Rule.CounterEpoch.
 const upsertRuleSQL = `
-	INSERT INTO rate_limits (scope, subject, subject_display, per_child, period_seconds, max_requests, max_tokens, source, created_at, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO rate_limits (scope, subject, subject_display, per_child, period_seconds, max_requests, max_tokens, source, created_at, updated_at, counter_epoch)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(scope, subject, period_seconds) DO UPDATE SET
+		counter_epoch = CASE WHEN (excluded.source = ? OR rate_limits.source = ?) AND excluded.per_child <> rate_limits.per_child THEN excluded.counter_epoch ELSE rate_limits.counter_epoch END,
 		subject_display = CASE WHEN excluded.source = ? OR rate_limits.source = ? THEN excluded.subject_display ELSE rate_limits.subject_display END,
 		per_child = CASE WHEN excluded.source = ? OR rate_limits.source = ? THEN excluded.per_child ELSE rate_limits.per_child END,
 		max_requests = CASE WHEN excluded.source = ? OR rate_limits.source = ? THEN excluded.max_requests ELSE rate_limits.max_requests END,
@@ -88,6 +95,7 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	if err := sqlx.AddColumns(ctx, db,
 		`ALTER TABLE rate_limits ADD COLUMN per_child `+sqlx.TypeBool+` NOT NULL DEFAULT FALSE`,
 		`ALTER TABLE rate_limits ADD COLUMN subject_display TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE rate_limits ADD COLUMN counter_epoch TEXT NOT NULL DEFAULT ''`,
 	); err != nil {
 		return nil, fmt.Errorf("failed to migrate rate_limits table: %w", err)
 	}
@@ -106,7 +114,7 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 
 func (s *SQLStore) ListRules(ctx context.Context) ([]Rule, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT scope, subject, subject_display, per_child, period_seconds, max_requests, max_tokens, source, created_at, updated_at
+		SELECT scope, subject, subject_display, per_child, period_seconds, max_requests, max_tokens, source, created_at, updated_at, counter_epoch
 		FROM rate_limits
 		ORDER BY scope ASC, subject ASC, period_seconds ASC
 	`)
@@ -191,7 +199,7 @@ func (s *SQLStore) ReplaceConfigRules(ctx context.Context, rules []Rule) error {
 
 func (s *SQLStore) LoadCounters(ctx context.Context) ([]WindowSnapshot, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT scope, subject, partition, period_seconds, writer,
+		SELECT scope, subject, partition, period_seconds, writer, epoch,
 			requests_window_start, requests_current, requests_previous,
 			tokens_window_start, tokens_current, tokens_previous
 		FROM rate_limit_window_snapshots
@@ -205,7 +213,7 @@ func (s *SQLStore) LoadCounters(ctx context.Context) ([]WindowSnapshot, error) {
 	for rows.Next() {
 		var snap WindowSnapshot
 		if err := rows.Scan(
-			&snap.Scope, &snap.Subject, &snap.Partition, &snap.PeriodSeconds, &snap.Writer,
+			&snap.Scope, &snap.Subject, &snap.Partition, &snap.PeriodSeconds, &snap.Writer, &snap.Epoch,
 			&snap.RequestsWindowStart, &snap.RequestsCurrent, &snap.RequestsPrevious,
 			&snap.TokensWindowStart, &snap.TokensCurrent, &snap.TokensPrevious,
 		); err != nil {
@@ -225,11 +233,12 @@ func (s *SQLStore) LoadCounters(ctx context.Context) ([]WindowSnapshot, error) {
 
 const upsertCounterSQL = `
 	INSERT INTO rate_limit_window_snapshots (
-		scope, subject, partition, period_seconds, writer,
+		scope, subject, partition, period_seconds, writer, epoch,
 		requests_window_start, requests_current, requests_previous,
 		tokens_window_start, tokens_current, tokens_previous, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(scope, subject, partition, period_seconds, writer) DO UPDATE SET
+		epoch = excluded.epoch,
 		requests_window_start = excluded.requests_window_start,
 		requests_current = excluded.requests_current,
 		requests_previous = excluded.requests_previous,
@@ -244,7 +253,7 @@ func (s *SQLStore) SaveCounters(ctx context.Context, snapshots []WindowSnapshot)
 	return s.db.InTx(ctx, func(q sqlx.Querier) error {
 		for _, snap := range snapshots {
 			if _, err := q.Exec(ctx, upsertCounterSQL,
-				snap.Scope, snap.Subject, snap.Partition, snap.PeriodSeconds, snap.Writer,
+				snap.Scope, snap.Subject, snap.Partition, snap.PeriodSeconds, snap.Writer, snap.Epoch,
 				snap.RequestsWindowStart, snap.RequestsCurrent, snap.RequestsPrevious,
 				snap.TokensWindowStart, snap.TokensCurrent, snap.TokensPrevious, now,
 			); err != nil {
@@ -322,6 +331,8 @@ func upsertRules(ctx context.Context, q sqlx.Querier, rules []Rule) error {
 			rule.Source,
 			rule.CreatedAt.Unix(),
 			rule.UpdatedAt.Unix(),
+			uuid.NewString(),
+			SourceManual, SourceConfig,
 			SourceManual, SourceConfig,
 			SourceManual, SourceConfig,
 			SourceManual, SourceConfig,
@@ -352,6 +363,7 @@ func scanSQLRule(scanner sqlx.Row) (Rule, error) {
 		&rule.Source,
 		&createdAt,
 		&updatedAt,
+		&rule.CounterEpoch,
 	); err != nil {
 		return Rule{}, fmt.Errorf("scan rate limit rule: %w", err)
 	}

@@ -239,7 +239,11 @@ Details worth knowing:
   busiest peer's — never the sum. A reset clears the counters of the replica
   that serves it and deletes every replica's stored rows for that rule.
   Other running replicas keep their own counts and store them again on their
-  next snapshot, so a later restart can restore those. With N replicas the
+  next snapshot, so a later restart can restore those. Switching a rule
+  between shared and per-child, or deleting and re-creating it, starts its
+  counts from zero: stored rows from before the change are never restored,
+  even after a restart or after switching back. Editing a limit keeps the
+  counts. With N replicas the
   effective limit is still about N times the configured value — use budgets
   for durable, cross-instance control. Tune the snapshot interval with
   `RATE_LIMITS_FLUSH_INTERVAL` (seconds; default `1`; `0` skips the periodic

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -132,19 +133,33 @@ func (s *MongoDBStore) upsertNormalizedRules(ctx context.Context, rules []Rule) 
 		if rule.Source == SourceConfig {
 			filter = append(filter, bson.E{Key: "source", Value: SourceConfig})
 		}
-		update := bson.D{{Key: "$set", Value: bson.D{
-			{Key: "scope", Value: rule.Scope},
-			{Key: "subject", Value: rule.Subject},
-			{Key: "subject_display", Value: rule.SubjectDisplay},
-			{Key: "per_child", Value: rule.PerChild},
-			{Key: "period_seconds", Value: rule.PeriodSeconds},
-			{Key: "max_requests", Value: rule.MaxRequests},
-			{Key: "max_tokens", Value: rule.MaxTokens},
-			{Key: "source", Value: rule.Source},
-			{Key: "updated_at", Value: rule.UpdatedAt},
-		}}, {Key: "$setOnInsert", Value: bson.D{
-			{Key: "created_at", Value: rule.CreatedAt},
+		// A pipeline, so the counter epoch can depend on the stored row in
+		// the same write: a new rule, or one switching per_child, draws a
+		// fresh epoch, and any other edit keeps it (see Rule.CounterEpoch).
+		// Every stage expression sees the row as it was before this write;
+		// on an insert that row has no created_at yet. Values are $literal
+		// so a subject starting with "$" is never read as a field path.
+		existing := bson.D{{Key: "$and", Value: bson.A{
+			bson.D{{Key: "$ne", Value: bson.A{bson.D{{Key: "$type", Value: "$created_at"}}, "missing"}}},
+			bson.D{{Key: "$eq", Value: bson.A{bson.D{{Key: "$ifNull", Value: bson.A{"$per_child", false}}}, literal(rule.PerChild)}}},
 		}}}
+		update := mongo.Pipeline{bson.D{{Key: "$set", Value: bson.D{
+			{Key: "scope", Value: literal(rule.Scope)},
+			{Key: "subject", Value: literal(rule.Subject)},
+			{Key: "subject_display", Value: literal(rule.SubjectDisplay)},
+			{Key: "per_child", Value: literal(rule.PerChild)},
+			{Key: "period_seconds", Value: literal(rule.PeriodSeconds)},
+			{Key: "max_requests", Value: literal(rule.MaxRequests)},
+			{Key: "max_tokens", Value: literal(rule.MaxTokens)},
+			{Key: "source", Value: literal(rule.Source)},
+			{Key: "updated_at", Value: literal(rule.UpdatedAt)},
+			{Key: "created_at", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$created_at", literal(rule.CreatedAt)}}}},
+			{Key: "counter_epoch", Value: bson.D{{Key: "$cond", Value: bson.A{
+				existing,
+				bson.D{{Key: "$ifNull", Value: bson.A{"$counter_epoch", ""}}},
+				literal(uuid.NewString()),
+			}}}},
+		}}}}
 		models = append(models, mongo.NewUpdateOneModel().
 			SetFilter(filter).
 			SetUpdate(update).
@@ -175,6 +190,12 @@ func (s *MongoDBStore) upsertNormalizedRules(ctx context.Context, rules []Rule) 
 }
 
 // bulkWriteOutcome names how a bulk upsert error should be handled.
+// literal keeps an aggregation pipeline from evaluating value as an
+// expression or field path.
+func literal(value any) bson.D {
+	return bson.D{{Key: "$literal", Value: value}}
+}
+
 type bulkWriteOutcome int
 
 const (

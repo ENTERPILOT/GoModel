@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -37,9 +35,6 @@ type Service struct {
 
 	mu    sync.RWMutex
 	rules []Rule
-	// staleRows holds the definitions whose saved rows a rule change must
-	// delete and whose delete has not succeeded yet; see deleteStaleRows.
-	staleRows map[ruleKey]struct{}
 	// refreshMu serializes Refresh from the store read through the swap, so
 	// a slower refresh never installs an older snapshot over a newer one.
 	refreshMu sync.Mutex
@@ -162,53 +157,23 @@ func (s *Service) Refresh(ctx context.Context) error {
 	s.rules = rules
 	s.mu.Unlock()
 
-	// Removed definitions and shared/per-child mode changes must not leave
-	// counters that can reappear if the same key is added again later, in
-	// memory or in any writer's saved rows. The rules are already swapped in,
-	// so a failed row delete is reported but does not undo the refresh; it is
-	// retried by every later refresh until it succeeds.
+	// Removed definitions, shared/per-child mode changes, and definitions
+	// deleted and re-added elsewhere (a new counter epoch) drop their
+	// in-memory counters. Their saved rows need no delete: they carry the old
+	// epoch, which restore skips (see Rule.CounterEpoch), and the store
+	// collects them once no writer refreshes them. Deleting them here could
+	// also take rows another replica already saved under the new rule.
 	next := make(map[ruleKey]Rule, len(rules))
 	for _, rule := range rules {
 		next[keyForRule(rule)] = rule
 	}
 	for _, old := range previous {
 		newRule, exists := next[keyForRule(old)]
-		if !exists || old.PerChild != newRule.PerChild {
-			key := keyForRule(old)
-			s.limiter.reset(key)
-			s.mu.Lock()
-			if s.staleRows == nil {
-				s.staleRows = make(map[ruleKey]struct{})
-			}
-			s.staleRows[key] = struct{}{}
-			s.mu.Unlock()
+		if !exists || old.PerChild != newRule.PerChild || old.CounterEpoch != newRule.CounterEpoch {
+			s.limiter.reset(keyForRule(old))
 		}
 	}
-	return s.deleteStaleRows(ctx)
-}
-
-// deleteStaleRows deletes every writer's saved rows of the definitions in
-// staleRows. A definition stays queued until its delete succeeds: once the
-// rules are swapped in, a retried update no longer differs from them, so
-// nothing else would delete the rows a later restart could restore. A late
-// retry can also drop rows other writers saved under the new rule; that
-// under-counts after a restart instead of reviving a count the change cleared,
-// and this writer's own rows are written again by its next flush.
-func (s *Service) deleteStaleRows(ctx context.Context) error {
-	s.mu.RLock()
-	keys := slices.Collect(maps.Keys(s.staleRows))
-	s.mu.RUnlock()
-	var errs []error
-	for _, key := range keys {
-		if err := s.persistDelete(ctx, key.scope, key.subject, key.periodSeconds); err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		s.mu.Lock()
-		delete(s.staleRows, key)
-		s.mu.Unlock()
-	}
-	return errors.Join(errs...)
+	return nil
 }
 
 func (s *Service) Rules() []Rule {

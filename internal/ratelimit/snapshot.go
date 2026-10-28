@@ -9,11 +9,13 @@ import "time"
 // of overwriting each other's; rows imported from before writer IDs existed
 // carry an empty writer.
 type WindowSnapshot struct {
-	Scope               string `bson:"scope"`
-	Subject             string `bson:"subject"`
-	Partition           string `bson:"partition"`
-	PeriodSeconds       int64  `bson:"period_seconds"`
-	Writer              string `bson:"writer"`
+	Scope         string `bson:"scope"`
+	Subject       string `bson:"subject"`
+	Partition     string `bson:"partition"`
+	PeriodSeconds int64  `bson:"period_seconds"`
+	Writer        string `bson:"writer"`
+	// Epoch is the CounterEpoch of the rule the row was counted under.
+	Epoch               string `bson:"epoch"`
 	RequestsWindowStart int64  `bson:"requests_window_start"`
 	RequestsCurrent     int64  `bson:"requests_current"`
 	RequestsPrevious    int64  `bson:"requests_previous"`
@@ -30,21 +32,21 @@ func (l *limiter) snapshot(rules []Rule) []WindowSnapshot {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	perChild := make(map[ruleKey]bool, len(rules))
+	defs := make(map[ruleKey]Rule, len(rules))
 	for _, rule := range rules {
 		if rule.PeriodSeconds <= 0 {
 			continue
 		}
-		perChild[definitionKey(rule.Scope, rule.Subject, rule.PeriodSeconds)] = rule.PerChild
+		defs[definitionKey(rule.Scope, rule.Subject, rule.PeriodSeconds)] = rule
 	}
 
 	byKey := make(map[ruleKey]*WindowSnapshot)
 	add := func(key ruleKey, kind counterKind, counter windowCounter) {
-		wantChild, ok := perChild[definitionKey(key.scope, key.subject, key.periodSeconds)]
+		rule, ok := defs[definitionKey(key.scope, key.subject, key.periodSeconds)]
 		if !ok {
 			return
 		}
-		if wantChild != (key.partition != "") {
+		if rule.PerChild != (key.partition != "") {
 			return
 		}
 		snap := byKey[key]
@@ -54,6 +56,7 @@ func (l *limiter) snapshot(rules []Rule) []WindowSnapshot {
 				Subject:       key.subject,
 				Partition:     key.partition,
 				PeriodSeconds: key.periodSeconds,
+				Epoch:         rule.CounterEpoch,
 			}
 			byKey[key] = snap
 		}
@@ -121,6 +124,11 @@ func (l *limiter) restore(snapshots []WindowSnapshot, rules []Rule, now time.Tim
 			continue
 		}
 		if rule.PerChild != (snap.Partition != "") {
+			continue
+		}
+		// Counted under an earlier definition of the rule: a mode change or
+		// a delete and re-add cleared these counts.
+		if snap.Epoch != rule.CounterEpoch {
 			continue
 		}
 		latest := max(snap.RequestsWindowStart, snap.TokensWindowStart)
