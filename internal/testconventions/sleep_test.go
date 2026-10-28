@@ -6,8 +6,10 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"path"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -99,8 +101,13 @@ func TestSleepBudget(t *testing.T) {
 }
 
 // countSleeps returns how many time.Sleep calls the file contains outside
-// synctest.Test bubbles.
+// synctest.Test bubbles, whatever names it imports the two packages by.
 func countSleeps(file *ast.File) int {
+	timePkg := importName(file, "time")
+	if timePkg == "" {
+		return 0
+	}
+	synctestPkg := importName(file, "testing/synctest")
 	n := 0
 	ast.Inspect(file, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
@@ -108,14 +115,29 @@ func countSleeps(file *ast.File) int {
 			return true
 		}
 		switch {
-		case isCall(call, "synctest", "Test"):
+		case synctestPkg != "" && isCall(call, synctestPkg, "Test"):
 			return false
-		case isCall(call, "time", "Sleep"):
+		case isCall(call, timePkg, "Sleep"):
 			n++
 		}
 		return true
 	})
 	return n
+}
+
+// importName returns the name file refers to importPath by, or "" when the
+// file does not import it.
+func importName(file *ast.File, importPath string) string {
+	for _, spec := range file.Imports {
+		if spec.Path.Value != strconv.Quote(importPath) {
+			continue
+		}
+		if spec.Name != nil {
+			return spec.Name.Name
+		}
+		return path.Base(importPath)
+	}
+	return ""
 }
 
 func isCall(call *ast.CallExpr, pkg, name string) bool {
@@ -128,8 +150,18 @@ func isCall(call *ast.CallExpr, pkg, name string) bool {
 }
 
 func TestCountSleeps(t *testing.T) {
-	src := `package p
-import "time"
+	tests := []struct {
+		name string
+		src  string
+		want int
+	}{
+		{
+			name: "plain imports",
+			src: `package p
+import (
+	"testing/synctest"
+	"time"
+)
 func f(d time.Duration) {
 	time.Sleep(d)
 	time.Sleep(10 * time.Millisecond)
@@ -138,8 +170,35 @@ func f(d time.Duration) {
 	synctest.Test(t, func(t *testing.T) {
 		time.Sleep(d)
 	})
-}`
-	file, err := parser.ParseFile(token.NewFileSet(), "x_test.go", src, parser.SkipObjectResolution)
-	require.NoError(t, err)
-	assert.Equal(t, 2, countSleeps(file))
+}`,
+			want: 2,
+		},
+		{
+			name: "aliased imports",
+			src: `package p
+import (
+	st "testing/synctest"
+	clock "time"
+)
+func f(d clock.Duration) {
+	clock.Sleep(d)
+	time.Sleep(d)
+	st.Test(t, func(t *testing.T) { clock.Sleep(d) })
+}`,
+			want: 1,
+		},
+		{
+			name: "time not imported",
+			src: `package p
+func f() { time.Sleep(1) }`,
+			want: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file, err := parser.ParseFile(token.NewFileSet(), "x_test.go", tt.src, parser.SkipObjectResolution)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, countSleeps(file))
+		})
+	}
 }

@@ -3,6 +3,7 @@ package testconventions
 import (
 	"errors"
 	"go/ast"
+	"go/build"
 	"go/parser"
 	"go/token"
 	"os"
@@ -86,6 +87,8 @@ func TestCallsChatContractDetection(t *testing.T) {
 	assert.True(t, callsChatContract(parse(`func TestX(t *testing.T) { pt.AssertChatCompatible(t, pt.ChatCompatible{}) }`)), "aliased import")
 	assert.False(t, callsChatContract(parse(`func TestX(t *testing.T) { providertest.AssertChatCompatible(t, nil) }`)), "unimported name")
 	assert.False(t, callsChatContract(parse(`func TestX(t *testing.T) { pt.AssertSomethingElse(t) }`)), "other helper")
+	assert.False(t, callsChatContract(parse(`func runContract(t *testing.T) { pt.AssertChatCompatible(t, pt.ChatCompatible{}) }`)), "helper no test calls")
+	assert.False(t, callsChatContract(parse(`func (s suite) TestX(t *testing.T) { pt.AssertChatCompatible(t, pt.ChatCompatible{}) }`)), "method, not a top-level test")
 }
 
 // registeredProviders returns the package directory name of every provider
@@ -107,15 +110,19 @@ func registeredProviders(t *testing.T, file string) []string {
 	var found []string
 	ast.Inspect(parsed, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
-		if !ok || len(call.Args) != 1 || !isSelectorCall(call, "Add") {
+		if !ok || !isSelectorCall(call, "Add") || !isIdent(call.Fun.(*ast.SelectorExpr).X, "factory") {
 			return true
 		}
-		arg, ok := call.Args[0].(*ast.SelectorExpr)
-		if !ok || arg.Sel.Name != "Registration" {
-			return true
+		// A registration the parser cannot attribute to a package is one
+		// the ratchet cannot check, so it is an error rather than a skip.
+		var pkg *ast.Ident
+		if len(call.Args) == 1 {
+			if arg, ok := call.Args[0].(*ast.SelectorExpr); ok && arg.Sel.Name == "Registration" {
+				pkg, _ = arg.X.(*ast.Ident)
+			}
 		}
-		pkg, ok := arg.X.(*ast.Ident)
-		if !ok {
+		if pkg == nil {
+			t.Errorf("%s: factory.Add must take <pkg>.Registration directly so provider coverage can be checked", registrationFile)
 			return true
 		}
 		importPath, ok := imports[pkg.Name]
@@ -128,13 +135,19 @@ func registeredProviders(t *testing.T, file string) []string {
 	return slices.Compact(found)
 }
 
-// packageCallsChatContract reports whether any _test.go file in dir calls
-// providertest.AssertChatCompatible.
+// packageCallsChatContract reports whether a _test.go file in dir that the
+// default build (what `make test` and CI run) includes calls
+// providertest.AssertChatCompatible from a test function.
 func packageCallsChatContract(t *testing.T, dir string) bool {
 	t.Helper()
 	files, err := filepath.Glob(filepath.Join(dir, "*_test.go"))
 	require.NoError(t, err)
 	for _, file := range files {
+		included, err := build.Default.MatchFile(dir, filepath.Base(file))
+		require.NoError(t, err)
+		if !included {
+			continue
+		}
 		parsed, err := parser.ParseFile(token.NewFileSet(), file, nil, parser.SkipObjectResolution)
 		require.NoError(t, err)
 		if callsChatContract(parsed) {
@@ -144,8 +157,10 @@ func packageCallsChatContract(t *testing.T, dir string) bool {
 	return false
 }
 
-// callsChatContract reports whether file calls AssertChatCompatible through
-// its providertest import, whatever name it imports the package by.
+// callsChatContract reports whether a top-level Test function in file calls
+// AssertChatCompatible through its providertest import, whatever name it
+// imports the package by. A call in a helper only counts through the test
+// that makes it, which is the convention: one TestChatCompatibleContract.
 func callsChatContract(file *ast.File) bool {
 	pkg := ""
 	for _, spec := range file.Imports {
@@ -161,15 +176,25 @@ func callsChatContract(file *ast.File) bool {
 		return false
 	}
 	found := false
-	ast.Inspect(file, func(n ast.Node) bool {
-		if call, ok := n.(*ast.CallExpr); ok && isSelectorCall(call, "AssertChatCompatible") {
-			if recv, ok := call.Fun.(*ast.SelectorExpr).X.(*ast.Ident); ok && recv.Name == pkg {
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv != nil || !strings.HasPrefix(fn.Name.Name, "Test") || fn.Body == nil {
+			continue
+		}
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			if call, ok := n.(*ast.CallExpr); ok && isSelectorCall(call, "AssertChatCompatible") && isIdent(call.Fun.(*ast.SelectorExpr).X, pkg) {
 				found = true
 			}
-		}
-		return !found
-	})
+			return !found
+		})
+	}
 	return found
+}
+
+// isIdent reports whether expr is the identifier name.
+func isIdent(expr ast.Expr, name string) bool {
+	ident, ok := expr.(*ast.Ident)
+	return ok && ident.Name == name
 }
 
 // isSelectorCall reports whether call is of the form <expr>.<name>(...).
@@ -178,7 +203,9 @@ func isSelectorCall(call *ast.CallExpr, name string) bool {
 	return ok && sel.Sel.Name == name
 }
 
-// hasFixtures reports whether dir exists and holds at least one file.
+// hasFixtures reports whether dir exists and holds at least one recorded
+// payload: a JSON body or an SSE transcript, the two shapes the replay suite
+// reads. A README alone does not count.
 func hasFixtures(t *testing.T, dir string) bool {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
@@ -186,5 +213,8 @@ func hasFixtures(t *testing.T, dir string) bool {
 		return false
 	}
 	require.NoError(t, err)
-	return slices.ContainsFunc(entries, func(e os.DirEntry) bool { return !e.IsDir() })
+	return slices.ContainsFunc(entries, func(e os.DirEntry) bool {
+		ext := path.Ext(e.Name())
+		return !e.IsDir() && (ext == ".json" || ext == ".txt")
+	})
 }

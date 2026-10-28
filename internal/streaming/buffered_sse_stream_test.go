@@ -218,6 +218,26 @@ func TestBufferedSSEStream_ResponsesReplay(t *testing.T) {
 // Close may run on another goroutine while the first Read, which starts
 // the drain, is in progress; it must see the ticker and context hook it has
 // to stop. Meaningful under -race.
+// TestBufferedSSEStream_CloseConcurrentWithFirstRead starts Read and Close
+// together, with no ordering between them, so the race detector sees the two
+// overlap wherever the scheduler happens to interleave them. The ordered
+// variant below pins the one interleaving that matters most; this one covers
+// the rest. Meaningful under -race.
+func TestBufferedSSEStream_CloseConcurrentWithFirstRead(t *testing.T) {
+	for range 32 {
+		upstream := newBlockingReader()
+		stream := NewBufferedSSEStream(context.Background(), upstream, ChatCodec(), nil, BufferOptions{KeepAliveInterval: time.Hour})
+		read := make(chan struct{})
+		go func() {
+			defer close(read)
+			_, _ = stream.Read(make([]byte, 64))
+		}()
+		err := stream.Close()
+		require.NoError(t, err)
+		<-read
+	}
+}
+
 func TestBufferedSSEStream_CloseRacesFirstRead(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		upstream := newBlockingReader()
