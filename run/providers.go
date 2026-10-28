@@ -34,6 +34,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers/opencodego"
 	"github.com/enterpilot/gomodel/internal/providers/openrouter"
 	"github.com/enterpilot/gomodel/internal/providers/oracle"
+	"github.com/enterpilot/gomodel/internal/providers/runcrate"
 	"github.com/enterpilot/gomodel/internal/providers/sglang"
 	"github.com/enterpilot/gomodel/internal/providers/together"
 	"github.com/enterpilot/gomodel/internal/providers/vertex"
@@ -83,6 +84,7 @@ func defaultProviderFactory(cfg *config.Config) *providers.ProviderFactory {
 	factory.Add(minimax.Registration)
 	factory.Add(ollama.Registration)
 	factory.Add(opencodego.Registration)
+	factory.Add(runcrate.Registration)
 	factory.Add(sglang.Registration)
 	factory.Add(together.Registration)
 	factory.Add(vllm.Registration)

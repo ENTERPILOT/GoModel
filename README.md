@@ -117,6 +117,7 @@ The official SDKs therefore work unchanged. Configure their base URLs as follows
 - Groq
 - Fireworks AI
 - Together AI
+- Runcrate
 - Meta (Muse Spark)
 - OpenRouter
 - Z.ai

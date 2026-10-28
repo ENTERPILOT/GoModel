@@ -655,6 +655,11 @@ providers:
     api_key: "${TOGETHER_API_KEY}"
     # base_url defaults to "https://api.together.ai/v1".
 
+  runcrate:
+    type: runcrate
+    api_key: "${RUNCRATE_API_KEY}"
+    # base_url defaults to "https://api.runcrate.ai/v1".
+
   chutes:
     type: chutes
     api_key: "${CHUTES_API_KEY}"

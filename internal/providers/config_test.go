@@ -47,6 +47,9 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 	"together": {
 		DefaultBaseURL: "https://api.together.ai/v1",
 	},
+	"runcrate": {
+		DefaultBaseURL: "https://api.runcrate.ai/v1",
+	},
 	"deepinfra": {
 		DefaultBaseURL: "https://api.deepinfra.com/v1/openai",
 	},
@@ -606,6 +609,7 @@ func TestApplyProviderEnvVars_DiscoversTypeFromAPIKeyWithDefaultBaseURL(t *testi
 		{providerType: "chutes", envVar: "CHUTES_API_KEY", apiKey: "cpk_test"},
 		{providerType: "deepinfra", envVar: "DEEPINFRA_API_KEY", apiKey: "deepinfra-key"},
 		{providerType: "together", envVar: "TOGETHER_API_KEY", apiKey: "together-key"},
+		{providerType: "runcrate", envVar: "RUNCRATE_API_KEY", apiKey: "rc_test"},
 		{providerType: "zai", envVar: "ZAI_API_KEY", apiKey: "zai-key"},
 	}
 
