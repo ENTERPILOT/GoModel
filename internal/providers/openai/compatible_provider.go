@@ -134,6 +134,12 @@ func (p *CompatibleProvider) GetBaseURL() string {
 	return p.client.BaseURL()
 }
 
+// HTTPClient returns the client the provider's requests go through, carrying
+// its outbound proxy and the gateway's TLS trust.
+func (p *CompatibleProvider) HTTPClient() *http.Client {
+	return p.client.HTTPClient()
+}
+
 func (p *CompatibleProvider) SetRequestMutator(mutator RequestMutator) {
 	p.requestMutator = mutator
 }

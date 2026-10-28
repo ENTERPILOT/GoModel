@@ -2,6 +2,7 @@ package zai
 
 import (
 	"context"
+	"net/http"
 	"net/url"
 	"strings"
 	"testing"
@@ -62,4 +63,16 @@ func TestRealtimeTargetMissingModel(t *testing.T) {
 	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)
 	_, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: " "})
 	require.Error(t, err)
+}
+
+// The websocket dial must go through the provider's own client so its
+// proxy_url, an extension's proxy selection, and the TLS trust apply.
+func TestRealtimeTargetCarriesProviderHTTPClient(t *testing.T) {
+	client := &http.Client{}
+	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{HTTPClient: client})
+	rp, ok := p.(core.RealtimeProvider)
+	require.True(t, ok)
+	target, err := rp.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "glm-realtime"})
+	require.NoError(t, err)
+	assert.Same(t, client, target.HTTPClient)
 }

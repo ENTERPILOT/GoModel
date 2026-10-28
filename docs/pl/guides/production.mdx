@@ -203,6 +203,9 @@ docker run --rm -p 8080:8080 \
 `SSL_CERT_FILE` też działa, ale zastępuje plik pakietu zamiast go uzupełniać,
 więc wskaż w nim pakiet, który zawiera również potrzebne Ci publiczne certyfikaty główne.
 
+Poza kontenerem albo gdy chcesz też wysyłać certyfikat klienta, ustaw zamiast tego
+`HTTP_TLS_CA_FILE`; zobacz [Prywatne CA i proxy](#prywatne-ca-i-proxy).
+
 ## Wdrożenia air-gapped i offline
 
 **GoModel działa w pełni w trybie air-gapped.** Nie ma telemetrii, analityki ani
@@ -273,6 +276,54 @@ Zachowaj ceny w środowisku air-gapped na jeden z trzech sposobów:
 Jeśli skonfigurowano providera Bedrock, AWS SDK może też odpytywać lokalny dla łącza
 endpoint metadanych instancji (`169.254.169.254`) w poszukiwaniu danych uwierzytelniających. Instalacja
 air-gapped raczej nie skonfiguruje Bedrocka, ale warto o tym wiedzieć.
+
+## Prywatne CA i proxy
+
+Wszystkie wychodzące połączenia gatewaya współdzielą jeden transport HTTP,
+więc ustawienia proxy i zaufania konfigurujesz raz, a obowiązują one tak samo
+dla providerów, katalogu modeli, sprawdzania aktualizacji, upstreamów MCP,
+vector store'ów i endpointów embeddingów.
+
+**Proxy.** Ustaw standardowe `HTTPS_PROXY` i `HTTP_PROXY` (każda obejmuje
+upstreamy ze swoim schematem; większość wdrożeń rozmawia tylko z upstreamami
+`https://`, ale serwer modeli po zwykłym HTTP ominie proxy ustawione tylko przez
+`HTTPS_PROXY`) oraz `NO_PROXY` dla lokalnych serwerów modeli. Nic więcej nie jest
+potrzebne. Jeśli proxy wymaga danych uwierzytelniających, podaj URL `https://`:
+schemat w zmiennej proxy opisuje połączenie do samego proxy, a URL proxy
+`http://` wysyła `Proxy-Authorization` otwartym tekstem. Aby skierować jednego
+providera przez inne proxy, zobacz [proxy wychodzące](/pl/providers/outbound-proxy).
+
+**Prywatne CA.** Zamontuj pakiet CA i wskaż go gatewayowi:
+
+```bash
+HTTP_TLS_CA_FILE=/etc/gomodel/ca.pem
+```
+
+Pakiet jest dołączany do magazynu systemowego, więc publiczni providerzy dalej
+działają obok wewnętrznych. Brakujący lub pusty plik przerywa start, zamiast po
+cichu ufać mniej, niż chciałeś.
+
+**Mutual TLS.** Gdy wewnętrzny serwer modeli lub proxy egress wymaga certyfikatu
+klienta:
+
+```bash
+HTTP_TLS_CLIENT_CERT_FILE=/etc/gomodel/tls.crt
+HTTP_TLS_CLIENT_KEY_FILE=/etc/gomodel/tls.key
+```
+
+Ten sam certyfikat klienta jest wysyłany do każdego upstreamu, który o niego
+poprosi.
+
+**Rotacja.** GoModel czyta te pliki przy starcie i przy każdym
+[przeładowaniu konfiguracji](/pl/advanced/cli#przeładowanie-konfiguracji), ale
+ich nie obserwuje. Po rotacji, np. gdy cert-manager odnowi zamontowany secret,
+uruchom `gomodel --reload` (lub wyślij `SIGHUP`) albo zrestartuj gateway. Jeśli
+rotowanego pliku nie da się wczytać, przeładowanie zostaje odrzucone, a działająca
+konfiguracja nadal obsługuje ruch.
+
+Te same ustawienia znajdują się pod `http.tls` w `config.yaml`. Nie używaj
+`HTTP_TLS_INSECURE_SKIP_VERIFY=true` poza środowiskiem testowym: wyłącza ono
+weryfikację dla każdego upstreamu, a gateway ostrzega o tym przy starcie.
 
 ## Uruchamianie więcej niż jednej repliki
 

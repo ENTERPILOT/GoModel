@@ -485,6 +485,32 @@ Die Wartezeit auf das erste Token zählt nicht mit, langsame Reasoning-Modelle
 sind also nicht betroffen. Erhöhen Sie den Wert nur für einen Provider, der
 mitten im Stream berechtigterweise minutenlang pausiert.
 
+Die Standardvariablen `HTTP_PROXY`, `HTTPS_PROXY` und `NO_PROXY` gelten für
+jede Upstream-Verbindung, sofern ein Provider keinen eigenen
+[ausgehenden Proxy](/de/providers/outbound-proxy) festlegt.
+
+#### Vertrauen für ausgehendes TLS
+
+Diese Einstellungen gelten für jede ausgehende HTTPS-Verbindung: Provider,
+Modellkatalog, Update-Prüfung, MCP-Upstreams, Vector Stores und
+Embedding-Endpunkte. Standardmäßig wird dem Zertifikatsspeicher des
+Betriebssystems vertraut. Das passt, solange keine interne CA und kein
+TLS-abfangender Proxy zwischen Gateway und Upstreams sitzt.
+
+| Variable                        | Beschreibung                                                        | Standardwert |
+| ------------------------------- | ------------------------------------------------------------------- | ------------ |
+| `HTTP_TLS_CA_FILE`              | PEM-Bundle mit zusätzlichen Root-Zertifikaten, an den Systemspeicher angehängt | nicht gesetzt |
+| `HTTP_TLS_CLIENT_CERT_FILE`     | Client-Zertifikat für mTLS; zusammen mit dem Key setzen             | nicht gesetzt |
+| `HTTP_TLS_CLIENT_KEY_FILE`      | Privater Key zum Client-Zertifikat                                  | nicht gesetzt |
+| `HTTP_TLS_INSECURE_SKIP_VERIFY` | Deaktiviert die Zertifikatsprüfung. Nur für Testumgebungen; wird als Warnung geloggt | `false` |
+
+Eine fehlende oder nicht lesbare Datei ist ein Startfehler, sodass ein Tippfehler
+im Pfad nicht stillschweigend dazu führt, dass nichts zusätzlich vertraut wird.
+Bei einem [Reload der Konfiguration](/de/advanced/cli#konfiguration-neu-laden)
+werden die Dateien neu gelesen, aber nicht überwacht. Führen Sie nach dem
+Rotieren also einen Reload oder Neustart aus. Ein vollständiges Beispiel
+finden Sie im [Produktionsleitfaden](/de/guides/production#private-cas-und-proxys).
+
 #### API-Keys der Provider
 
 Setzen Sie diese Variablen, um Provider automatisch zu registrieren. Keine YAML-Konfiguration erforderlich.

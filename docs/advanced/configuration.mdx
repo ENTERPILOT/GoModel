@@ -444,6 +444,31 @@ with a `504` provider error instead of hanging until `HTTP_TIMEOUT`. The wait
 for the first token does not count, so slow reasoning models are unaffected.
 Raise it only for a provider that legitimately pauses for minutes mid-stream.
 
+The standard `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` variables apply to
+every upstream connection, unless a provider sets its own
+[outbound proxy](/providers/outbound-proxy).
+
+#### Outbound TLS trust
+
+These apply to every outbound HTTPS connection: providers, the model catalog,
+the update check, MCP upstreams, vector stores, and embedding endpoints. The
+default trusts the operating system certificate store, which is right unless an
+internal CA or a TLS-intercepting proxy sits between the gateway and upstreams.
+
+| Variable                        | Description                                                        | Default |
+| ------------------------------- | ------------------------------------------------------------------ | ------- |
+| `HTTP_TLS_CA_FILE`              | PEM bundle of extra root certificates, appended to the system store | unset   |
+| `HTTP_TLS_CLIENT_CERT_FILE`     | Client certificate for mTLS; set together with the key             | unset   |
+| `HTTP_TLS_CLIENT_KEY_FILE`      | Private key for the client certificate                             | unset   |
+| `HTTP_TLS_INSECURE_SKIP_VERIFY` | Disable certificate verification. Lab use only; logged as a warning | `false` |
+
+A missing or unparseable file is a startup error, so a typo in the path cannot
+silently fall back to trusting nothing extra. The files are re-read on a
+[configuration reload](/advanced/cli#configuration-reload) but not watched, so
+reload or restart after rotating them. See the
+[production guide](/guides/production#private-cas-and-proxies) for a worked
+example.
+
 #### Provider API Keys
 
 Set these to automatically register providers. No YAML configuration required.
