@@ -93,6 +93,15 @@ type ChatCompatible struct {
 	// default to Authorization and "Bearer ".
 	AuthHeader string
 	AuthPrefix string
+	// PathPrefix is prepended to every upstream path the provider is expected
+	// to call, for providers that mount the OpenAI surface below a prefix.
+	PathPrefix string
+	// ModelsPath overrides the expected model-listing path (after
+	// PathPrefix), for providers that list models from a different resource.
+	ModelsPath string
+	// SkipKeyless leaves keyless requests to the provider's own tests, for
+	// providers whose keyless mode signs with ambient cloud credentials.
+	SkipKeyless bool
 }
 
 // countingTransport records how many requests travelled through it, so the
@@ -124,8 +133,12 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 	if p.AuthPrefix == "" && p.AuthHeader == "Authorization" {
 		p.AuthPrefix = "Bearer "
 	}
+	if p.ModelsPath == "" {
+		p.ModelsPath = "/models"
+	}
 	const apiKey = "test-api-key"
 	wantAuth := p.AuthPrefix + apiKey
+	path := func(suffix string) string { return p.PathPrefix + suffix }
 
 	t.Run("registration", func(t *testing.T) {
 		assert.Equal(t, p.Type, p.Registration.Type, "Registration.Type")
@@ -160,7 +173,7 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 		resp, err := provider.ChatCompletion(context.Background(), chatRequest())
 		require.NoError(t, err)
 		req := capture.Last(t)
-		assertUpstream(t, req, http.MethodPost, "/chat/completions", p.AuthHeader, wantAuth)
+		assertUpstream(t, req, http.MethodPost, path("/chat/completions"), p.AuthHeader, wantAuth)
 		assertChatRequest(t, req.JSON(t), false)
 		assert.Equal(t, Model, resp.Model)
 		require.Len(t, resp.Choices, 1)
@@ -170,7 +183,7 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 		assert.Equal(t, 6, resp.Usage.TotalTokens, "usage total tokens")
 	})
 
-	if p.Registration.Discovery.AllowAPIKeyless {
+	if p.Registration.Discovery.AllowAPIKeyless && !p.SkipKeyless {
 		t.Run("keyless requests carry no credentials", func(t *testing.T) {
 			server, capture := JSONServer(t, http.StatusOK, ChatCompletionJSON)
 			provider := p.Registration.New(providers.ProviderConfig{BaseURL: server.URL}, providers.ProviderOptions{})
@@ -188,7 +201,7 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 		require.NoError(t, err)
 		body := readAll(t, stream)
 		req := capture.Last(t)
-		assertUpstream(t, req, http.MethodPost, "/chat/completions", p.AuthHeader, wantAuth)
+		assertUpstream(t, req, http.MethodPost, path("/chat/completions"), p.AuthHeader, wantAuth)
 		assertChatRequest(t, req.JSON(t), true)
 		assertStreamBody(t, body, Reply, "data: [DONE]")
 	})
@@ -202,7 +215,7 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 		// listing is the first upstream request rather than the last.
 		requests := capture.All()
 		require.NotEmpty(t, requests)
-		assertUpstream(t, requests[0], http.MethodGet, "/models", p.AuthHeader, wantAuth)
+		assertUpstream(t, requests[0], http.MethodGet, path(p.ModelsPath), p.AuthHeader, wantAuth)
 		require.Len(t, resp.Data, 1)
 		assert.Equal(t, Model, resp.Data[0].ID)
 	})
@@ -235,7 +248,7 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 		resp, err := provider.Responses(context.Background(), responsesRequest())
 		require.NoError(t, err)
 		req := capture.Last(t)
-		assertUpstream(t, req, http.MethodPost, responsesPath, p.AuthHeader, wantAuth)
+		assertUpstream(t, req, http.MethodPost, path(responsesPath), p.AuthHeader, wantAuth)
 		checkResponsesRequest(t, req.JSON(t), false)
 		assertResponse(t, resp)
 		assert.Equal(t, wantResponseID, resp.ID, "response id")
@@ -248,7 +261,7 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 		require.NoError(t, err)
 		body := readAll(t, stream)
 		req := capture.Last(t)
-		assertUpstream(t, req, http.MethodPost, responsesPath, p.AuthHeader, wantAuth)
+		assertUpstream(t, req, http.MethodPost, path(responsesPath), p.AuthHeader, wantAuth)
 		checkResponsesRequest(t, req.JSON(t), true)
 		assertStreamBody(t, body, "response.output_text.delta", Reply, "data: [DONE]")
 		createdAt := strings.Index(string(body), `"type":"response.created"`)
@@ -275,7 +288,7 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 		}
 		require.NoError(t, err)
 		req := capture.Last(t)
-		assertUpstream(t, req, http.MethodPost, "/embeddings", p.AuthHeader, wantAuth)
+		assertUpstream(t, req, http.MethodPost, path("/embeddings"), p.AuthHeader, wantAuth)
 		sent := req.JSON(t)
 		assert.Equal(t, Model, sent["model"], "embeddings request model")
 		assert.Equal(t, Prompt, sent["input"], "embeddings request input")
