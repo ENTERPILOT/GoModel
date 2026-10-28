@@ -62,7 +62,8 @@ In native mode, embeddings are served through `models/{model}:batchEmbedContents
 honored. Native mode records the token usage Gemini reports for newer models
 such as `gemini-embedding-2`. Older models such as `gemini-embedding-001`, and
 the OpenAI-compatible surface, report none, so those responses carry zero token
-counts and the usage row is flagged with a cost-calculation caveat.
+counts. When the model is priced per token, the usage row is flagged with a
+cost-calculation caveat.
 
 ## Image generation and edits
 
