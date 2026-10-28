@@ -21,12 +21,15 @@ import (
 // returns it.
 const systemOneAnswerJSON = `{"model":"microsoft-decision-1","answers":{"team":{"type":"choice","choice":"engineering","probabilities":{"billing":0.05,"engineering":0.93,"support":0.02}}},"usage":{"input_tokens":90,"output_tokens":1}}`
 
-func decide(t *testing.T, provider *Provider, body string) (*core.PassthroughResponse, error) {
+// decide sends a Decisions request as the gateway does: endpoint is
+// core.DecisionsSystemOneEndpoint for a System One model, "decisions"
+// otherwise.
+func decide(t *testing.T, provider *Provider, endpoint, model, body string) (*core.PassthroughResponse, error) {
 	t.Helper()
 	return provider.Decisions(context.Background(), &core.PassthroughRequest{
 		Method:   http.MethodPost,
-		Endpoint: "decisions",
-		Model:    "ms-decision-1",
+		Endpoint: endpoint,
+		Model:    model,
 		Body:     io.NopCloser(strings.NewReader(body)),
 		Headers:  http.Header{"Content-Type": {"application/json"}},
 	})
@@ -41,7 +44,7 @@ func TestDecisions_TranslatesThroughFoundrySystemOneRoute(t *testing.T) {
 			server, capture := providertest.JSONServer(t, http.StatusOK, systemOneAnswerJSON)
 			provider := newTestProvider(server.Client(), server.URL+suffix)
 
-			resp, err := decide(t, provider, `{"model":"ms-decision-1","input":"The API returns 500 on every call.","questions":[{"type":"choice","name":"team","instructions":"Which team?","choices":[{"value":"billing","description":"Charges and refunds"},{"value":"engineering","description":"Bugs and outages"},{"value":"support","description":"How-to questions"}]}]}`)
+			resp, err := decide(t, provider, core.DecisionsSystemOneEndpoint, "ms-decision-1", `{"model":"ms-decision-1","input":"The API returns 500 on every call.","questions":[{"type":"choice","name":"team","instructions":"Which team?","choices":[{"value":"billing","description":"Charges and refunds"},{"value":"engineering","description":"Bugs and outages"},{"value":"support","description":"How-to questions"}]}]}`)
 			require.NoError(t, err)
 			defer resp.Body.Close()
 
@@ -65,11 +68,48 @@ func TestDecisions_AzureRefusesImages(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, `{}`)
 	provider := newTestProvider(server.Client(), server.URL+"/openai/v1")
 
-	_, err := decide(t, provider, `{"model":"ms-decision-1","input":[{"role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,iVBORw0KGgo="}]}],"questions":[{"type":"predicate","instructions":"?"}]}`)
+	_, err := decide(t, provider, core.DecisionsSystemOneEndpoint, "ms-decision-1", `{"model":"ms-decision-1","input":[{"role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,iVBORw0KGgo="}]}],"questions":[{"type":"predicate","instructions":"?"}]}`)
 	providertest.AssertUnsupported(t, err)
-	assert.Contains(t, err.Error(), "read text and JSON only")
+	assert.Contains(t, err.Error(), "reads text and JSON only")
 	assert.Zero(t, capture.Count())
-	assert.False(t, provider.DecisionsReadImages())
+}
+
+// OpenAI's Decisions API (gpt-6-luna) is forwarded as sent, images included,
+// to Foundry's v1 Decisions endpoint whichever base URL form is configured.
+// The v1 surface gets no api-version unless one is configured.
+func TestDecisions_ForwardsOpenAIDecisionsNatively(t *testing.T) {
+	tests := []struct {
+		suffix      string
+		apiVersion  string
+		wantVersion string
+	}{
+		{suffix: "/openai/v1"},
+		{suffix: "/openai/deployments/gpt-4o"},
+		{suffix: "/openai/v1", apiVersion: "preview", wantVersion: "preview"},
+	}
+	for _, tt := range tests {
+		t.Run("base"+tt.suffix+"/"+tt.apiVersion, func(t *testing.T) {
+			server, capture := providertest.JSONServer(t, http.StatusOK, `{"model":"gpt-6-luna","answers":[{"type":"predicate","name":"refund","probability":0.95}],"usage":{"input_tokens":162,"output_tokens":0,"total_tokens":162}}`)
+			provider := newTestProvider(server.Client(), server.URL+tt.suffix)
+			provider.SetAPIVersion(tt.apiVersion)
+			body := `{"model":"gpt-6-luna","input":[{"role":"user","content":[{"type":"input_text","text":"Refund?"},{"type":"input_image","image_url":"data:image/png;base64,iVBORw0KGgo="}]}],"questions":[{"type":"predicate","name":"refund","instructions":"Refund?"}]}`
+
+			resp, err := decide(t, provider, "decisions", "gpt-6-luna", body)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+
+			sent := capture.Last(t)
+			assert.Equal(t, "/openai/v1/decisions", sent.Path)
+			assert.Equal(t, tt.wantVersion, sent.Query.Get("api-version"))
+			assert.Equal(t, tt.wantVersion != "", sent.Query.Has("api-version"))
+			assert.Equal(t, "test-api-key", sent.Header.Get("api-key"))
+			assert.Equal(t, strconv.Itoa(len(sent.Body)), sent.Header.Get("Content-Length"), "Foundry refuses chunked bodies")
+			assert.JSONEq(t, body, string(sent.Body))
+			got, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			assert.Contains(t, string(got), `"probability":0.95`)
+		})
+	}
 }
 
 // A native System One request (POST /v1/systemone) reaches the same Foundry

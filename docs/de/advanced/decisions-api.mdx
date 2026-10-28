@@ -1,6 +1,6 @@
 ---
 title: "Decisions API"
-description: "Stellen Sie über GoModel typisierte Fragen (Prädikat, Auswahl, Bewertung) mit der Decisions API von OpenAI, beantwortet von OpenAI, Jev / Kev, den Decision-Modellen von OpenRouter oder Microsoft-Decision-1 von Azure."
+description: "Stellen Sie über GoModel typisierte Fragen (Prädikat, Auswahl, Bewertung) mit der Decisions API von OpenAI, beantwortet von OpenAI, Jev / Kev, den Decision-Modellen von OpenRouter oder gpt-6-luna und Microsoft-Decision-1 von Azure."
 icon: "list-check"
 keywords: ["Decisions", "Decisions API", "gpt-6-luna", "Prädikat", "predicate", "choice", "score", "Klassifizierung", "classification", "Jev", "Kev", "System One", "OpenRouter", "Azure", "Microsoft-Decision-1"]
 ---
@@ -11,7 +11,7 @@ Liste typisierter Fragen, und jede Antwort ist eine Wahrscheinlichkeit, eine Aus
 Bewertung statt Freitext.
 
 Der Endpunkt ist verfügbar, sobald ein `openai`-, [`jev`](/de/providers/jev)-,
-`openrouter`- oder [`azure`](/de/providers/azure#decision-modelle-microsoft-decision-1)-Provider
+`openrouter`- oder [`azure`](/de/providers/azure#decision-modelle)-Provider
 konfiguriert ist. Ohne einen solchen antwortet er mit `404`.
 
 | Provider | Wie er antwortet |
@@ -19,7 +19,7 @@ konfiguriert ist. Ohne einen solchen antwortet er mit `404`.
 | `openai` | Nativ: Der Body erreicht `/v1/decisions` unverändert |
 | `jev` (gehostetes Jev, selbst gehostetes Kev) | Über [System One](/de/advanced/systemone-api), in beide Richtungen übersetzt; Bilder nur bei gehostetem Jev |
 | `openrouter` | Seine System-One-Decision-Modelle (`openrouter/typesafe/jev-1.13`, `openrouter/~typesafe/jev-latest`, Kev), auf dieselbe Weise übersetzt; nur Text. Die Chat-Modelle von OpenRouter beantworten ihn nicht |
-| `azure` | Microsoft-Decision-1-Deployments, über den System-One-Endpunkt von Foundry, auf dieselbe Weise übersetzt; nur Text und JSON. Die Chat-Deployments von Azure beantworten ihn nicht |
+| `azure` | `gpt-6-luna`-Deployments nativ, über `/openai/v1/decisions` von Foundry; Microsoft-Decision-1-Deployments über den System-One-Endpunkt von Foundry, übersetzt wie bei `jev`, nur Text und JSON |
 
 In jedem Fall hat die Antwort das Format von OpenAI, sodass die OpenAI-SDKs unverändert funktionieren.
 
@@ -168,7 +168,7 @@ virtual_models:
 | Situation | Ergebnis |
 | --- | --- |
 | Kein `openai`-, `jev`-, `openrouter`- oder `azure`-Provider konfiguriert | `404` |
-| Ein Chat-Modell bei OpenRouter oder Azure | `400 invalid_request_error`: Nur ihre Decision-Modelle beantworten Decisions |
+| Ein Chat-Modell bei OpenRouter | `400 invalid_request_error`: Nur seine Decision-Modelle beantworten Decisions |
 | `model` fehlt | `400` |
 | Modell bei einem Provider ohne Decisions API (auch über ein virtuelles Modell) | `400 invalid_request_error`; das Gateway protokolliert eine Warnung |
 | Ein Bild an ein reines Textmodell (Kev), ein Bildlink oder ein Nicht-PNG/JPEG-Bild an ein `jev`-Modell oder ein anderer Request, den System One nicht abbilden kann | `400 invalid_request_error` mit Angabe des Felds |

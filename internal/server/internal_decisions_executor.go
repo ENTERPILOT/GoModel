@@ -210,7 +210,7 @@ func (e *InternalDecisionsExecutor) dispatch(
 	headers := internalDecisionHeaders(ctx)
 	resp, executed, meta, err := e.service.orchestrator.ExecutePassthroughWithFailover(ctx, workflow, eligible,
 		func(ctx context.Context, selector core.ModelSelector, providerType, providerName string) (*core.PassthroughResponse, error) {
-			return sendDecisions(ctx, router, selector, providerType, providerName, headers.Clone(), body)
+			return sendDecisions(ctx, router, selector, providerType, providerName, e.service.decisionsEndpoint(selector, providerType), headers.Clone(), body)
 		})
 	if err != nil {
 		return nil, core.ModelSelector{}, meta, err

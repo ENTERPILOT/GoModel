@@ -41,6 +41,9 @@ type scriptedDecisionsProvider struct {
 	imageReaders map[string]bool
 	calls        []string
 	bodies       []map[string]any
+	// endpoints records each call's Endpoint, which marks System One models
+	// on providers that also serve Decisions natively.
+	endpoints []string
 }
 
 func (p *scriptedDecisionsProvider) DecisionsReadImages(providerName string) (bool, bool) {
@@ -78,6 +81,7 @@ func (p *scriptedDecisionsProvider) Decisions(_ context.Context, providerType st
 	model, _ := sent["model"].(string)
 	p.calls = append(p.calls, req.ProviderName+" "+providerType+" "+model)
 	p.bodies = append(p.bodies, sent)
+	p.endpoints = append(p.endpoints, req.Endpoint)
 
 	status := p.statuses[model]
 	body := `{"error":{"message":"overloaded"}}`
@@ -365,6 +369,55 @@ func TestDecisions_ImagesStartAtTheFirstTargetThatReadsThem(t *testing.T) {
 	assert.Equal(t, []string{"openai openai gpt-6-luna", "kev jev kev-latest"}, provider.calls)
 }
 
+// An Azure deployment without a Decisions API, such as a chat deployment, is
+// forwarded rather than refused, and Foundry's own error reaches the caller.
+func TestDecisions_RelaysAzureErrors(t *testing.T) {
+	provider := newScriptedDecisionsProvider(map[string]string{"azure/gpt-4.1-mini": "azure"}, "azure")
+	provider.catalog = map[string]core.Model{
+		"azure/gpt-4.1-mini": {ID: "gpt-4.1-mini", Metadata: &core.ModelMetadata{Modes: []string{"chat"}}},
+	}
+	provider.statuses["gpt-4.1-mini"] = http.StatusBadRequest
+	handler := NewHandler(provider, nil, nil, nil)
+
+	c, rec := echotest.Post(t, "/v1/decisions", decisionBody("azure/gpt-4.1-mini"))
+	require.NoError(t, handler.Decisions(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "overloaded", "the upstream's message")
+	assert.Equal(t, []string{"decisions"}, provider.endpoints)
+}
+
+// Azure's System One models read text only, so an image request whose chain
+// starts at one starts at the first target that reads images instead: an
+// Azure gpt-6-luna deployment, which takes OpenAI's Decisions natively, or
+// another provider. Text keeps the System One model.
+func TestDecisions_AzureSystemOneModelsHandImagesToFailover(t *testing.T) {
+	for _, next := range []core.ModelSelector{{Provider: "azure", Model: "gpt-6-luna"}, {Provider: "openai", Model: "gpt-6-luna"}} {
+		t.Run(next.QualifiedModel(), func(t *testing.T) {
+			provider := newScriptedDecisionsProvider(map[string]string{
+				"azure/ms-decision-1": "azure",
+				"azure/gpt-6-luna":    "azure",
+				"openai/gpt-6-luna":   "openai",
+			}, "azure", "openai")
+			provider.catalog = map[string]core.Model{
+				"azure/gpt-6-luna": {ID: "gpt-6-luna", Metadata: &core.ModelMetadata{
+					Modes: []string{"chat", "responses"}, Capabilities: map[string]bool{"vision": true},
+				}},
+			}
+			handler := newHandler(provider, nil, nil, nil, nil, nil, failoverResolverStub{selectors: []core.ModelSelector{next}}, nil)
+
+			c, rec := echotest.Post(t, "/v1/decisions", fmt.Sprintf(decisionImageBody, "azure/ms-decision-1"))
+			require.NoError(t, handler.Decisions(c))
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			c, rec = echotest.Post(t, "/v1/decisions", decisionBody("azure/ms-decision-1"))
+			require.NoError(t, handler.Decisions(c))
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+			assert.Equal(t, []string{next.Provider + " " + next.Provider + " gpt-6-luna", "azure azure ms-decision-1"}, provider.calls)
+			assert.Equal(t, []string{"decisions", core.DecisionsSystemOneEndpoint}, provider.endpoints)
+		})
+	}
+}
+
 // An image link sent to a jev model, which takes images inline only, says so.
 func TestDecisions_ImageLinksToJevAskForInlineData(t *testing.T) {
 	provider := newVisionDecisionsProvider()
@@ -506,33 +559,34 @@ func TestDecisions_OpenRouterServesOnlyDecisionModels(t *testing.T) {
 	assert.Len(t, provider.calls, 1, "the chat model must not be called")
 }
 
-// Azure answers Decisions with its Microsoft-Decision-1 deployments; its chat
-// deployments are refused, as OpenRouter's chat models are.
-func TestDecisions_AzureServesOnlyDecisionModels(t *testing.T) {
+// Azure serves OpenAI's Decisions API natively (gpt-6-luna) and System One
+// (Microsoft-Decision-1), so every Azure model may answer, and the gateway
+// marks the System One ones: a utility model, or a deployment the catalog
+// does not describe, since a Microsoft-Decision-1 deployment cannot carry the
+// model's name.
+func TestDecisions_AzureMarksSystemOneModels(t *testing.T) {
 	provider := newScriptedDecisionsProvider(map[string]string{
 		"azure/ms-decision-1": "azure",
-		"azure/gpt-4.1-mini":  "azure",
+		"azure/my-decider":    "azure",
+		"azure/gpt-6-luna":    "azure",
 	}, "azure")
 	provider.catalog = map[string]core.Model{
 		"azure/ms-decision-1": {ID: "ms-decision-1", Metadata: &core.ModelMetadata{
 			Categories: []core.ModelCategory{core.CategoryUtility},
 		}},
-		"azure/gpt-4.1-mini": {ID: "gpt-4.1-mini", Metadata: &core.ModelMetadata{
-			Modes: []string{"chat"}, Categories: []core.ModelCategory{core.CategoryTextGeneration},
+		"azure/gpt-6-luna": {ID: "gpt-6-luna", Metadata: &core.ModelMetadata{
+			Modes: []string{"chat", "responses"}, Categories: []core.ModelCategory{core.CategoryTextGeneration},
 		}},
 	}
 	handler := NewHandler(provider, nil, nil, nil)
 
-	c, rec := echotest.Post(t, "/v1/decisions", decisionBody("azure/ms-decision-1"))
-	require.NoError(t, handler.Decisions(c))
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	assert.Equal(t, []string{"azure azure ms-decision-1"}, provider.calls)
-
-	c, rec = echotest.Post(t, "/v1/decisions", decisionBody("azure/gpt-4.1-mini"))
-	require.NoError(t, handler.Decisions(c))
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "is a chat model, not a System One model")
-	assert.Len(t, provider.calls, 1, "the chat deployment must not be called")
+	for _, model := range []string{"azure/ms-decision-1", "azure/my-decider", "azure/gpt-6-luna"} {
+		c, rec := echotest.Post(t, "/v1/decisions", decisionBody(model))
+		require.NoError(t, handler.Decisions(c))
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	}
+	assert.Equal(t, []string{"azure azure ms-decision-1", "azure azure my-decider", "azure azure gpt-6-luna"}, provider.calls)
+	assert.Equal(t, []string{core.DecisionsSystemOneEndpoint, core.DecisionsSystemOneEndpoint, "decisions"}, provider.endpoints)
 }
 
 // Failover skips OpenRouter's chat models, which have no Decisions API.

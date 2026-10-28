@@ -27,7 +27,7 @@ var decisionsRoute = nativeJSONRoute{path: "/v1/decisions", endpoint: "decisions
 // and back, so the answer is always OpenAI's shape.
 //
 // @Summary      Answer typed questions about an input (OpenAI Decisions)
-// @Description  Available when an openai, jev, openrouter, or azure provider is configured. OpenAI models answer natively; jev models (Jev, Kev), OpenRouter's decision models, and Azure Microsoft-Decision-1 deployments answer through System One, translated both ways. Hosted Jev reads images sent as base64 data URLs; Kev, OpenRouter, and Azure read text only.
+// @Description  Available when an openai, jev, openrouter, or azure provider is configured. OpenAI models answer natively; Azure gpt-6-luna deployments answer natively too; jev models (Jev, Kev), OpenRouter's decision models, and Azure Microsoft-Decision-1 deployments answer through System One, translated both ways. Hosted Jev reads images sent as base64 data URLs; Kev, OpenRouter, and Microsoft-Decision-1 read text only.
 // @Tags         decisions
 // @Accept       json
 // @Produce      json
@@ -100,7 +100,7 @@ func (s *translatedInferenceService) serveDecisions(c *echo.Context) error {
 		}
 		return s.dispatchNativeJSON(c, decisionsRoute, workflow, eligible,
 			func(ctx context.Context, selector core.ModelSelector, providerType, providerName string, headers http.Header) (*core.PassthroughResponse, error) {
-				return sendDecisions(ctx, router, selector, providerType, providerName, headers, body)
+				return sendDecisions(ctx, router, selector, providerType, providerName, s.decisionsEndpoint(selector, providerType), headers, body)
 			})
 	})
 }
@@ -162,12 +162,18 @@ type decisionImageReaders interface {
 // is refused first, since models configured without listing carry no
 // capabilities to check; then a model the catalog explicitly marks as not
 // reading images. jev providers take images inline only, so a link is
-// refused there. Any other model gets the benefit of the doubt.
+// refused there, and Azure's System One models read text only. Any other
+// model gets the benefit of the doubt.
 func (s *translatedInferenceService) readsImages(selector core.ModelSelector, providerType string, images decisionImages) bool {
 	if !images.any {
 		return true
 	}
 	if images.links && strings.TrimSpace(providerType) == jevProviderType {
+		return false
+	}
+	// Azure's System One models (Microsoft-Decision-1) read text only, while
+	// its native Decisions models (gpt-6-luna) read images.
+	if s.decisionsEndpoint(selector, providerType) == core.DecisionsSystemOneEndpoint {
 		return false
 	}
 	if readers, ok := s.provider.(decisionImageReaders); ok {
@@ -231,17 +237,32 @@ func decisionInputImages(input json.RawMessage) decisionImages {
 
 // decisionsUnsupportedReason explains why a model cannot answer a Decisions
 // request, or returns "" when it can. Its provider must serve Decisions, and
-// since OpenRouter and Azure also serve chat models, their model must be one
-// of their System One decision models, by the rule /v1/systemone applies.
+// since OpenRouter also serves chat models, an OpenRouter model must be one of
+// its System One decision models, by the rule /v1/systemone applies. Azure
+// serves OpenAI's Decisions API natively too, so any Azure model may answer;
+// see decisionsEndpoint.
 func (s *translatedInferenceService) decisionsUnsupportedReason(router core.RoutableDecisions, selector core.ModelSelector, providerType string) string {
 	providerType = strings.TrimSpace(providerType)
 	if !slices.Contains(router.DecisionsProviderTypes(), providerType) {
 		return fmt.Sprintf("is served by provider type %s, which has no decisions API", providerType)
 	}
-	if providerType == openRouterProviderType || providerType == azureProviderType {
+	if providerType == openRouterProviderType {
 		return s.systemOneUnsupportedReason(systemOneEvaluate, selector, providerType)
 	}
 	return ""
+}
+
+// decisionsEndpoint names the endpoint a Decisions request reaches on one
+// target: core.DecisionsSystemOneEndpoint for a System One model on Azure,
+// which also serves OpenAI's Decisions API (gpt-6-luna), and "decisions"
+// otherwise. A deployment the catalog does not describe counts as System One,
+// as /v1/systemone treats it: a Microsoft-Decision-1 deployment cannot carry
+// the model's name, while gpt-6-luna deployments usually do.
+func (s *translatedInferenceService) decisionsEndpoint(selector core.ModelSelector, providerType string) string {
+	if strings.TrimSpace(providerType) == azureProviderType && s.systemOneUnsupportedReason(systemOneEvaluate, selector, providerType) == "" {
+		return core.DecisionsSystemOneEndpoint
+	}
+	return decisionsRoute.endpoint
 }
 
 // sendDecisions sends the body to one target under its own model name.
@@ -249,7 +270,7 @@ func sendDecisions(
 	ctx context.Context,
 	router core.RoutableDecisions,
 	selector core.ModelSelector,
-	providerType, providerName string,
+	providerType, providerName, endpoint string,
 	headers http.Header,
 	body []byte,
 ) (*core.PassthroughResponse, error) {
@@ -259,7 +280,7 @@ func sendDecisions(
 	}
 	resp, err := router.Decisions(ctx, providerType, &core.PassthroughRequest{
 		Method:       http.MethodPost,
-		Endpoint:     decisionsRoute.endpoint,
+		Endpoint:     endpoint,
 		Operation:    decisionsRoute.operation,
 		Model:        selector.Model,
 		Body:         io.NopCloser(bytes.NewReader(forwarded)),
@@ -287,7 +308,7 @@ func decisionsUnsupportedModelError(requestID string, resolution *core.RequestMo
 		target += fmt.Sprintf(" (resolved to %q)", resolved)
 	}
 	return core.NewInvalidRequestError(fmt.Sprintf(
-		"model %s %s; use a decision model such as openai/gpt-6-luna, a jev model, one of OpenRouter's decision models, or an Azure Microsoft-Decision-1 deployment",
+		"model %s %s; use a decision model such as openai/gpt-6-luna, a jev model, one of OpenRouter's decision models, or an Azure gpt-6-luna or Microsoft-Decision-1 deployment",
 		target, reason,
 	), nil).WithParam("model")
 }
