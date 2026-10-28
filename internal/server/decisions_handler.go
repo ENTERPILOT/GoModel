@@ -27,7 +27,7 @@ var decisionsRoute = nativeJSONRoute{path: "/v1/decisions", endpoint: "decisions
 // and back, so the answer is always OpenAI's shape.
 //
 // @Summary      Answer typed questions about an input (OpenAI Decisions)
-// @Description  Available when an openai, jev, or openrouter provider is configured. OpenAI models answer natively; jev models (Jev, Kev) and OpenRouter's decision models answer through System One, translated both ways. Hosted Jev reads images sent as base64 data URLs; Kev and OpenRouter read text only.
+// @Description  Available when an openai, jev, openrouter, or azure provider is configured. OpenAI models answer natively; jev models (Jev, Kev), OpenRouter's decision models, and Azure Microsoft-Decision-1 deployments answer through System One, translated both ways. Hosted Jev reads images sent as base64 data URLs; Kev, OpenRouter, and Azure read text only.
 // @Tags         decisions
 // @Accept       json
 // @Produce      json
@@ -48,7 +48,7 @@ func (h *Handler) Decisions(c *echo.Context) error {
 func (s *translatedInferenceService) serveDecisions(c *echo.Context) error {
 	router, ok := s.provider.(core.RoutableDecisions)
 	if !ok || len(router.DecisionsProviderTypes()) == 0 {
-		return handleError(c, core.NewNotFoundError("POST "+decisionsRoute.path+" is available only when an openai, jev, or openrouter provider is configured"))
+		return handleError(c, core.NewNotFoundError("POST "+decisionsRoute.path+" is available only when an openai, jev, openrouter, or azure provider is configured"))
 	}
 	body, err := requestBodyBytes(c)
 	if err != nil {
@@ -231,14 +231,14 @@ func decisionInputImages(input json.RawMessage) decisionImages {
 
 // decisionsUnsupportedReason explains why a model cannot answer a Decisions
 // request, or returns "" when it can. Its provider must serve Decisions, and
-// since OpenRouter also serves chat models, an OpenRouter model must be one of
-// its System One decision models, by the rule /v1/systemone applies.
+// since OpenRouter and Azure also serve chat models, their model must be one
+// of their System One decision models, by the rule /v1/systemone applies.
 func (s *translatedInferenceService) decisionsUnsupportedReason(router core.RoutableDecisions, selector core.ModelSelector, providerType string) string {
 	providerType = strings.TrimSpace(providerType)
 	if !slices.Contains(router.DecisionsProviderTypes(), providerType) {
 		return fmt.Sprintf("is served by provider type %s, which has no decisions API", providerType)
 	}
-	if providerType == openRouterProviderType {
+	if providerType == openRouterProviderType || providerType == azureProviderType {
 		return s.systemOneUnsupportedReason(systemOneEvaluate, selector, providerType)
 	}
 	return ""
@@ -287,7 +287,7 @@ func decisionsUnsupportedModelError(requestID string, resolution *core.RequestMo
 		target += fmt.Sprintf(" (resolved to %q)", resolved)
 	}
 	return core.NewInvalidRequestError(fmt.Sprintf(
-		"model %s %s; use a decision model such as openai/gpt-6-luna, a jev model, or one of OpenRouter's decision models",
+		"model %s %s; use a decision model such as openai/gpt-6-luna, a jev model, one of OpenRouter's decision models, or an Azure Microsoft-Decision-1 deployment",
 		target, reason,
 	), nil).WithParam("model")
 }

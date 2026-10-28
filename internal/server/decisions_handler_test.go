@@ -124,7 +124,7 @@ func TestDecisions_UnavailableWithoutDecisionsProvider(t *testing.T) {
 	require.NoError(t, handler.Decisions(c))
 
 	assert.Equal(t, http.StatusNotFound, rec.Code)
-	assert.Contains(t, rec.Body.String(), "openai, jev, or openrouter provider")
+	assert.Contains(t, rec.Body.String(), "openai, jev, openrouter, or azure provider")
 	assert.Empty(t, provider.calls)
 }
 
@@ -504,6 +504,35 @@ func TestDecisions_OpenRouterServesOnlyDecisionModels(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "is a chat model, not a System One model")
 	assert.Len(t, provider.calls, 1, "the chat model must not be called")
+}
+
+// Azure answers Decisions with its Microsoft-Decision-1 deployments; its chat
+// deployments are refused, as OpenRouter's chat models are.
+func TestDecisions_AzureServesOnlyDecisionModels(t *testing.T) {
+	provider := newScriptedDecisionsProvider(map[string]string{
+		"azure/ms-decision-1": "azure",
+		"azure/gpt-4.1-mini":  "azure",
+	}, "azure")
+	provider.catalog = map[string]core.Model{
+		"azure/ms-decision-1": {ID: "ms-decision-1", Metadata: &core.ModelMetadata{
+			Categories: []core.ModelCategory{core.CategoryUtility},
+		}},
+		"azure/gpt-4.1-mini": {ID: "gpt-4.1-mini", Metadata: &core.ModelMetadata{
+			Modes: []string{"chat"}, Categories: []core.ModelCategory{core.CategoryTextGeneration},
+		}},
+	}
+	handler := NewHandler(provider, nil, nil, nil)
+
+	c, rec := echotest.Post(t, "/v1/decisions", decisionBody("azure/ms-decision-1"))
+	require.NoError(t, handler.Decisions(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"azure azure ms-decision-1"}, provider.calls)
+
+	c, rec = echotest.Post(t, "/v1/decisions", decisionBody("azure/gpt-4.1-mini"))
+	require.NoError(t, handler.Decisions(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "is a chat model, not a System One model")
+	assert.Len(t, provider.calls, 1, "the chat deployment must not be called")
 }
 
 // Failover skips OpenRouter's chat models, which have no Decisions API.

@@ -2,7 +2,7 @@
 title: "System One API"
 description: "Senden Sie Entscheidungs-Requests an TypeSafe System One (Jev, Kev) über GoModel – nativ weitergeleitet, mit virtuellen Modellen, Guardrails, Caching, Failover, Audit und Nutzungserfassung."
 icon: "scale"
-keywords: ["System One", "systemone", "Jev", "Kev", "TypeSafe", "Entscheidungsmodell", "decision model", "noul", "choice", "score", "OpenRouter"]
+keywords: ["System One", "systemone", "Jev", "Kev", "TypeSafe", "Entscheidungsmodell", "decision model", "noul", "choice", "score", "OpenRouter", "Azure", "Microsoft-Decision-1"]
 ---
 
 `POST /v1/systemone` bedient die System One API von TypeSafe: Ein Request
@@ -15,8 +15,10 @@ erreichen, verwenden Sie die [Decisions API](/de/advanced/decisions-api), die
 GoModel in System One übersetzt.
 
 Der Endpunkt ist verfügbar, sobald ein [`jev`-Provider](/de/providers/jev)
-(gehostetes Jev oder ein selbst gehosteter Kev-Server) oder ein
-`openrouter`-Provider konfiguriert ist. Ohne einen solchen antwortet er mit
+(gehostetes Jev oder ein selbst gehosteter Kev-Server), ein
+`openrouter`-Provider oder ein
+[`azure`-Provider](/de/providers/azure#decision-modelle-microsoft-decision-1)
+(Microsoft-Decision-1) konfiguriert ist. Ohne einen solchen antwortet er mit
 `404`.
 
 ## Request und Antwort
@@ -69,8 +71,8 @@ aus; siehe [Jev / Kev](/de/providers/jev#die-typesafe-sdks-verwenden).
 | `POST /v1/systemone/permute` | Nur Kev: führt eine Choice-Frage mit mehreren Optionsreihenfolgen aus (`n_perm`, 1 bis 64, Standard 6) |
 | `POST /v1/systemone/separate` | Nur Kev: führt jede Frage in einem eigenen Forward Pass aus |
 
-Die Kev-Routen verhalten sich wie `/v1/systemone`. Für OpenRouter werden sie
-abgelehnt, da OpenRouter nur die Bewertungsroute bedient; ein gehosteter
+Die Kev-Routen verhalten sich wie `/v1/systemone`. Für OpenRouter und Azure
+werden sie abgelehnt, da beide nur die Bewertungsroute bedienen; ein gehosteter
 TypeSafe-`jev`-Provider liefert für sie sein eigenes `404`.
 
 ## Was das Gateway tut
@@ -106,7 +108,9 @@ Bytes des Bildes ermittelt. Ein Formular, das TypeSafe ablehnen würde, etwa ein
 Part, den kein Asset verwendet, ein Asset, das einen fehlenden Part benennt,
 oder ein Bild, das weder PNG noch JPEG ist, liefert `400`. Senden Sie den
 Header `TypeSafe-Danger-Zone-Images: true`, wie von TypeSafe verlangt; das
-Gateway leitet ihn weiter. Kev-Server lesen nur Text.
+Gateway leitet ihn weiter. Kev-Server und Microsoft-Decision-1 von Azure lesen
+nur Text; das Gateway lehnt ihre Bild-Requests nicht ab, und der Upstream
+beantwortet sie.
 
 ```bash
 curl -s http://localhost:8080/v1/systemone \
@@ -125,6 +129,7 @@ curl -s http://localhost:8080/v1/systemone \
 | `jev` (gehostet) | `jev/jev-latest`, `jev/jev-preview` und jede versionierte ID wie `jev/jev-1.13.0` |
 | `jev` (Kev-Server) | `kev/kev-latest` und die Aliase des Checkpoints, für einen Provider namens `kev` |
 | `openrouter` | `openrouter/typesafe/jev-1.13`, `openrouter/~typesafe/jev-latest` und die anderen Decision-Modelle von OpenRouter, etwa `openrouter/jaredpalmer/kev-4b` |
+| `azure` | Der Name Ihres Microsoft-Decision-1-Deployments, etwa `azure/ms-decision-1` |
 
 System-One-Modelle werden in `GET /v1/models` als Utility-Modelle ohne
 Generierungsmodus aufgeführt.
@@ -208,7 +213,7 @@ kann:
 
 | Situation | Ergebnis |
 | --- | --- |
-| Kein `jev`- oder `openrouter`-Provider konfiguriert | `404` |
+| Kein `jev`-, `openrouter`- oder `azure`-Provider konfiguriert | `404` |
 | `model` fehlt | `400` |
 | Modell auf einem Provider ohne System One oder ein Chat-, Embedding- oder anderes Generierungsmodell (auch über ein virtuelles Modell) | `400 invalid_request_error` mit Begründung; das Gateway protokolliert eine Warnung |
 | Ein System-One-Modell, das an `/v1/chat/completions`, `/v1/responses` oder `/v1/embeddings` gesendet wird | `400 invalid_request_error` mit Verweis auf `/v1/decisions` und `/v1/systemone` |
