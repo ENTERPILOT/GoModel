@@ -1,14 +1,14 @@
 ---
 title: "Azure OpenAI: URL-e deploymentów i api-version"
 sidebarTitle: "Azure OpenAI"
-description: "Skonfiguruj Azure OpenAI w GoModel za pomocą URL-i opartych na deploymentach i parametru zapytania api-version."
+description: "Skonfiguruj Azure OpenAI i Azure AI Foundry w GoModel za pomocą URL-i v1 lub opartych na deploymentach."
 icon: "/brand/azure.svg"
-keywords: ["Azure OpenAI", "azure endpoint", "deployment name", "nazwa deploymentu", "api-version", "api_version", "provider setup", "konfiguracja providera"]
+keywords: ["Azure OpenAI", "Azure AI Foundry", "openai/v1", "azure endpoint", "deployment name", "nazwa deploymentu", "api-version", "api_version", "provider setup", "konfiguracja providera"]
 ---
 
 Azure OpenAI posługuje się kształtem API OpenAI z dwiema różnicami, które obsługuje GoModel:
-nagłówkiem `api-key` zamiast `Authorization: Bearer` oraz wymaganym
-parametrem zapytania `api-version` w każdym requeście.
+nagłówkiem `api-key` zamiast `Authorization: Bearer` oraz parametrem zapytania
+`api-version` w URL-ach w zakresie deploymentu.
 
 ## Konfiguracja
 
@@ -29,6 +29,28 @@ providers:
     api_key: "${AZURE_API_KEY}"
     api_version: "2024-10-21"
 ```
+
+### Azure AI Foundry (API v1)
+
+Endpointy Azure AI Foundry, takie jak
+`https://proj1-resource.services.ai.azure.com/openai/v1/responses`, używają
+niewersjonowanego API v1. Ustaw base URL na wszystko do `/openai/v1` włącznie:
+
+```bash
+AZURE_API_KEY=...
+AZURE_BASE_URL=https://proj1-resource.services.ai.azure.com/openai/v1
+```
+
+Przy base URL-u `/openai/v1` GoModel domyślnie nie wysyła `api-version`, a
+`model` w body requestu wybiera deployment, więc jeden provider obsługuje
+wszystkie deploymenty zasobu. Nie ustawiaj `AZURE_API_VERSION` (ani
+`api_version` w YAML-u powyżej); użyj `preview` tylko po to, żeby włączyć
+funkcje preview. Klasyczne URL-e
+`https://your-resource.openai.azure.com/openai/v1` działają tak samo.
+
+`/openai/v1/models` zwraca modele zasobu, więc deployment nazwany tak jak jego
+model (domyślnie w Foundry) jest routowany bez zmian. Własne nazwy deploymentów
+podaj w `AZURE_MODELS` i ustaw `CONFIGURED_PROVIDER_MODELS_MODE=merge`.
 
 ## Uruchomienie GoModel
 
@@ -108,7 +130,8 @@ console.log(completion.choices[0].message.content);
 
 `GET /v1/models` zwraca deploymenty udostępniane przez zasób Azure z
 `owned_by: "azure"`. Streaming, Responses, embeddingi i batche działają
-tak samo; wyniki batchy są routowane przez ścieżkę zasobu `/openai/batches`.
+tak samo; batche są routowane przez ścieżkę zasobu `/openai/batches`
+(`/openai/v1/batches` przy base URL-ach v1).
 
 ## Wiele deploymentów
 
@@ -124,9 +147,8 @@ AZURE_EMBED_BASE_URL=https://your-resource.openai.azure.com/openai/deployments/t
 ```
 
 To rejestruje `azure-gpt5` i `azure-embed`. Żeby udostępnić wszystkie deploymenty
-jednego zasobu przez jednego providera, skieruj `AZURE_BASE_URL` na katalog główny zasobu
-(bez `/deployments/...`) i użyj [modeli wirtualnych](/pl/features/virtual-models) lub
-`AZURE_MODELS`, żeby ogłosić konkretne nazwy deploymentów.
+jednego zasobu przez jednego providera, użyj zamiast tego
+[base URL-a v1](#azure-ai-foundry-api-v1).
 
 ## Uwagi
 
@@ -134,8 +156,9 @@ jednego zasobu przez jednego providera, skieruj `AZURE_BASE_URL` na katalog gł�
   operacji na poziomie konta (listowanie modeli, batche) GoModel automatycznie usuwa
   sufiks `/openai/deployments/<deployment>`, więc jeden
   `AZURE_BASE_URL` obsługuje zarówno czat, jak i wywołania na poziomie zasobu.
-- `AZURE_API_VERSION` trzeba ustawić jawnie tylko wtedy, gdy potrzebujesz innej
-  wersji stabilnej lub preview – na przykład nowszego Responses API.
+- `AZURE_API_VERSION` domyślnie wynosi `2024-10-21` dla URL-i w zakresie
+  deploymentu i nie jest wysyłany dla URL-i v1. Ustaw go tylko wtedy, gdy
+  potrzebujesz innej wersji stabilnej lub preview – na przykład nowszego Responses API.
 
 ## Rozwiązywanie problemów
 
@@ -145,7 +168,10 @@ jednego zasobu przez jednego providera, skieruj `AZURE_BASE_URL` na katalog gł�
   musi być nazwą deploymentu, a nie bazowego modelu.
 - **`unsupported api version`** – podnieś `AZURE_API_VERSION` do wersji, którą
   obsługuje wywoływana funkcja. Nowsze funkcje Responses API wymagają najnowszych
-  wersji preview.
+  wersji preview. Przy base URL-ach v1 zostaw go pustym lub użyj `preview`.
+- **`404` w Azure AI Foundry** – base URL musi kończyć się na `/openai/v1`, a nie
+  na pełnym endpoincie (`/openai/v1/responses`) ani URL-u projektu
+  (`/api/projects/...`).
 
 ## Materiały źródłowe
 

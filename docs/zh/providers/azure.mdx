@@ -1,12 +1,12 @@
 ---
 title: "Azure OpenAI：部署 URL 与 api-version"
 sidebarTitle: "Azure OpenAI"
-description: "在 GoModel 中使用基于部署的 URL 和 api-version 查询参数配置 Azure OpenAI。"
+description: "在 GoModel 中使用 v1 或基于部署的 URL 配置 Azure OpenAI 和 Azure AI Foundry。"
 icon: "/brand/azure.svg"
-keywords: ["Azure OpenAI", "Azure 端点", "部署名称", "提供商配置", "azure endpoint", "deployment name", "api-version", "api_version", "provider setup"]
+keywords: ["Azure OpenAI", "Azure AI Foundry", "openai/v1", "Azure 端点", "部署名称", "提供商配置", "azure endpoint", "deployment name", "api-version", "api_version", "provider setup"]
 ---
 
-Azure OpenAI 使用 OpenAI 的 API 格式，但有两处差异由 GoModel 负责处理：使用 `api-key` 请求头而不是 `Authorization: Bearer`，并且每个请求都必须带有 `api-version` 查询参数。
+Azure OpenAI 使用 OpenAI 的 API 格式，但有两处差异由 GoModel 负责处理：使用 `api-key` 请求头而不是 `Authorization: Bearer`，以及在部署级 URL 上使用 `api-version` 查询参数。
 
 ## 配置
 
@@ -27,6 +27,19 @@ providers:
     api_key: "${AZURE_API_KEY}"
     api_version: "2024-10-21"
 ```
+
+### Azure AI Foundry（v1 API）
+
+Azure AI Foundry 端点（例如 `https://proj1-resource.services.ai.azure.com/openai/v1/responses`）使用不带版本的 v1 API。请将 Base URL 设置为截至 `/openai/v1` 的部分：
+
+```bash
+AZURE_API_KEY=...
+AZURE_BASE_URL=https://proj1-resource.services.ai.azure.com/openai/v1
+```
+
+使用 `/openai/v1` Base URL 时，GoModel 默认不发送 `api-version`，并由请求体中的 `model` 选择部署，因此一个提供商即可覆盖该资源下的所有部署。请不要设置 `AZURE_API_VERSION`（也请删除上方 YAML 中的 `api_version`）；仅在需要启用预览功能时将其设为 `preview`。经典的 `https://your-resource.openai.azure.com/openai/v1` URL 用法相同。
+
+`/openai/v1/models` 列出的是该资源的模型，因此与模型同名的部署（Foundry 的默认做法）可直接路由。如果部署使用自定义名称，请在 `AZURE_MODELS` 中列出这些名称，并设置 `CONFIGURED_PROVIDER_MODELS_MODE=merge`。
 
 ## 运行 GoModel
 
@@ -104,7 +117,7 @@ console.log(completion.choices[0].message.content);
 
 </CodeGroup>
 
-`GET /v1/models` 返回该 Azure 资源暴露的部署，并带有 `owned_by: "azure"`。流式传输、Responses、嵌入（Embeddings）和批处理的使用方式完全相同；批处理结果通过 `/openai/batches` 资源路径路由。
+`GET /v1/models` 返回该 Azure 资源暴露的部署，并带有 `owned_by: "azure"`。流式传输、Responses、嵌入（Embeddings）和批处理的使用方式完全相同；批处理通过 `/openai/batches` 资源路径路由（v1 Base URL 上为 `/openai/v1/batches`）。
 
 ## 多个部署
 
@@ -118,21 +131,23 @@ AZURE_EMBED_API_KEY=...
 AZURE_EMBED_BASE_URL=https://your-resource.openai.azure.com/openai/deployments/text-embedding-3-small
 ```
 
-这会注册 `azure-gpt5` 和 `azure-embed`。如果要通过单个提供商暴露同一资源下的所有部署，请将 `AZURE_BASE_URL` 指向资源根路径（不带 `/deployments/...`），并使用[虚拟模型](/zh/features/virtual-models)或 `AZURE_MODELS` 声明具体的部署名称。
+这会注册 `azure-gpt5` 和 `azure-embed`。如果要通过单个提供商暴露同一资源下的所有部署，请改用 v1 Base URL（见上文“Azure AI Foundry（v1 API）”一节）。
 
 ## 说明
 
 - GoModel 接受门户中提供的部署级 URL。对于账户级操作（模型列表、批处理），GoModel 会自动去掉 `/openai/deployments/<deployment>` 后缀，因此一个 `AZURE_BASE_URL` 即可同时覆盖聊天调用和资源级调用。
-- 只有当您需要其他稳定版或预览版（例如较新的 Responses API 接口）时，才需要显式设置 `AZURE_API_VERSION`。
+- `AZURE_API_VERSION` 在部署级 URL 上默认为 `2024-10-21`，在 v1 URL 上默认不发送。只有当您需要其他稳定版或预览版（例如较新的 Responses API 接口）时，才需要显式设置。
 
 ## 故障排查
 
 - **`401 Unauthorized` / `403`**：`AZURE_API_KEY` 与托管该部署的资源不匹配，或 URL 中的部署名称有误。
 - **`Resource not found` / `DeploymentNotFound`**：请求体中的模型必须是部署名称，而不是底层的基础模型。
-- **`unsupported api version`**：将 `AZURE_API_VERSION` 升级到您所调用功能支持的版本。较新的 Responses API 功能需要较新的预览版本。
+- **`unsupported api version`**：将 `AZURE_API_VERSION` 升级到您所调用功能支持的版本。较新的 Responses API 功能需要较新的预览版本。使用 v1 Base URL 时请留空或使用 `preview`。
+- **Azure AI Foundry 返回 `404`**：Base URL 必须以 `/openai/v1` 结尾，而不是完整端点（`/openai/v1/responses`）或项目 URL（`/api/projects/...`）。
 
 ## 参考
 
+- [Azure OpenAI v1 API lifecycle](https://learn.microsoft.com/azure/ai-foundry/openai/api-version-lifecycle)
 - [Azure OpenAI REST API versioning](https://learn.microsoft.com/azure/ai-services/openai/reference)
 - [Azure OpenAI deployments](https://learn.microsoft.com/azure/ai-services/openai/how-to/create-resource)
 - [Azure OpenAI authentication](https://learn.microsoft.com/azure/ai-services/openai/how-to/managed-identity)
