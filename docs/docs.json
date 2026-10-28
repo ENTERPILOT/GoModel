@@ -133,6 +133,18 @@
         {
             "source": "/pl/pro",
             "destination": "/pl/pro/overview"
+        },
+        {
+            "source": "/de/api-reference/:slug*",
+            "destination": "/api-reference/:slug*"
+        },
+        {
+            "source": "/zh/api-reference/:slug*",
+            "destination": "/api-reference/:slug*"
+        },
+        {
+            "source": "/pl/api-reference/:slug*",
+            "destination": "/api-reference/:slug*"
         }
     ],
     "navbar": {
@@ -512,14 +524,6 @@
                                 ]
                             }
                         ]
-                    },
-                    {
-                        "tab": "API-Referenz",
-                        "icon": "braces",
-                        "openapi": {
-                            "source": "openapi.json",
-                            "directory": "de/api-reference"
-                        }
                     }
                 ]
             },
@@ -696,14 +700,6 @@
                                 ]
                             }
                         ]
-                    },
-                    {
-                        "tab": "API 参考",
-                        "icon": "braces",
-                        "openapi": {
-                            "source": "openapi.json",
-                            "directory": "zh/api-reference"
-                        }
                     }
                 ]
             },
@@ -880,14 +876,6 @@
                                 ]
                             }
                         ]
-                    },
-                    {
-                        "tab": "Dokumentacja API",
-                        "icon": "braces",
-                        "openapi": {
-                            "source": "openapi.json",
-                            "directory": "pl/api-reference"
-                        }
                     }
                 ]
             }
