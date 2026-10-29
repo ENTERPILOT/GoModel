@@ -108,13 +108,22 @@ func repairCompatChunkLine(line string, choices map[int]*compatChoiceState) (str
 		if delta, ok := choice["delta"].(map[string]any); ok {
 			if calls, ok := delta["tool_calls"].([]any); ok && len(calls) > 0 {
 				state.sawToolCalls = true
+				// Reserve every index the chunk already carries before handing
+				// any out, so an unindexed call never takes one that a later
+				// call in the same chunk was given upstream.
+				for _, rawCall := range calls {
+					if call, ok := rawCall.(map[string]any); ok {
+						if existing, has := call["index"].(float64); has {
+							state.markIndex(int(existing))
+						}
+					}
+				}
 				for _, rawCall := range calls {
 					call, ok := rawCall.(map[string]any)
 					if !ok {
 						continue
 					}
-					if existing, has := call["index"].(float64); has {
-						state.markIndex(int(existing))
+					if _, has := call["index"].(float64); has {
 						continue
 					}
 					call["index"] = state.assignIndex()

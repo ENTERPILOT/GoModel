@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/sync/errgroup"
 
@@ -354,6 +355,19 @@ func (p *Provider) imageResponseFromGenerateContent(resp *geminiGenerateContentR
 // failure message so the error stays log-friendly.
 const maxImageFailureTextLen = 240
 
+// truncateImageFailureText cuts upstream prose at maxImageFailureTextLen
+// without splitting a multi-byte character.
+func truncateImageFailureText(text string) string {
+	if len(text) <= maxImageFailureTextLen {
+		return text
+	}
+	cut := maxImageFailureTextLen
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return text[:cut] + "..."
+}
+
 // imageFailureMessage explains a generateContent response that carried no
 // image: a prompt-feedback block reason when present, else the candidate's
 // non-STOP finish reason and message (IMAGE_RECITATION, IMAGE_SAFETY,
@@ -375,19 +389,13 @@ func imageFailureMessage(resp *geminiGenerateContentResponse, text string) strin
 		}
 		message += ": " + reason
 		if finishMessage := strings.TrimSpace(candidate.FinishMessage); finishMessage != "" {
-			if len(finishMessage) > maxImageFailureTextLen {
-				finishMessage = finishMessage[:maxImageFailureTextLen] + "..."
-			}
-			message += " (" + finishMessage + ")"
+			message += " (" + truncateImageFailureText(finishMessage) + ")"
 		}
 		return message
 	}
 	text = strings.TrimSpace(text)
 	if text != "" {
-		if len(text) > maxImageFailureTextLen {
-			text = text[:maxImageFailureTextLen] + "..."
-		}
-		message += ": " + text
+		message += ": " + truncateImageFailureText(text)
 	}
 	return message
 }

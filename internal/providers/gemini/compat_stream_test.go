@@ -87,6 +87,11 @@ func TestRepairCompatChunkLine(t *testing.T) {
 	require.True(t, changed)
 	assert.Contains(t, line, `{"id":"d","index":2}`, "an index the upstream used is skipped")
 
+	line, changed = repairCompatChunkLine(`data: {"choices":[{"index":2,"delta":{"tool_calls":[{"id":"e"},{"index":0,"id":"f"}]}}]}`, choices)
+	require.True(t, changed)
+	assert.Contains(t, line, `{"id":"e","index":1}`, "an explicit index later in the chunk is reserved first")
+	assert.Contains(t, line, `{"id":"f","index":0}`)
+
 	_, changed = repairCompatChunkLine(`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`, choices)
 	assert.False(t, changed, "choice 0 never saw tool calls")
 

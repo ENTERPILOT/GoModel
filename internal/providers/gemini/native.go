@@ -37,7 +37,7 @@ type geminiGenerateContentRequest struct {
 // not a boolean is an error rather than a dropped opt-out.
 func chatStore(req *core.ChatRequest) (*bool, error) {
 	raw := req.ExtraFields.Lookup("store")
-	if len(raw) == 0 {
+	if core.IsJSONNull(bytes.TrimSpace(raw)) {
 		return nil, nil
 	}
 	var store bool

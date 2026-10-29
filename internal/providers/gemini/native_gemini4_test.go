@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/goccy/go-json"
 	"github.com/stretchr/testify/assert"
@@ -96,6 +97,16 @@ func TestChatCompletion_NativeForwardsStoreOnAIStudioOnly(t *testing.T) {
 		require.Error(t, err)
 		assert.Equal(t, 0, capture.Count())
 	})
+	t.Run("a null store is treated as absent", func(t *testing.T) {
+		server, capture := providertest.JSONServer(t, http.StatusOK, reply)
+		provider := newTestProvider("key", nil, llmclient.Hooks{})
+		provider.SetModelsURL(server.URL)
+		var null core.ChatRequest
+		require.NoError(t, json.Unmarshal([]byte(`{"model":"gemini-4-argon","messages":[{"role":"user","content":"hi"}],"store":null}`), &null))
+		_, err := provider.ChatCompletion(context.Background(), &null)
+		require.NoError(t, err)
+		assert.NotContains(t, capture.Last(t).JSON(t), "store")
+	})
 	t.Run("no store member when the client set none", func(t *testing.T) {
 		server, capture := providertest.JSONServer(t, http.StatusOK, reply)
 		provider := newTestProvider("key", nil, llmclient.Hooks{})
@@ -129,6 +140,10 @@ func TestImageFailureMessage_ReportsFinishReason(t *testing.T) {
 	assert.Equal(t, "Gemini returned no images: I cannot draw that", imageFailureMessage(stop, "I cannot draw that"))
 	unspecified := &geminiGenerateContentResponse{Candidates: []geminiCandidate{{FinishReason: "FINISH_REASON_UNSPECIFIED"}}}
 	assert.Equal(t, "Gemini returned no images: refused", imageFailureMessage(unspecified, "refused"))
-	long := &geminiGenerateContentResponse{Candidates: []geminiCandidate{{FinishReason: "IMAGE_SAFETY", FinishMessage: strings.Repeat("x", 300)}}}
-	assert.Len(t, imageFailureMessage(long, ""), len("Gemini returned no images: IMAGE_SAFETY (")+240+len("...)"))
+	long := &geminiGenerateContentResponse{Candidates: []geminiCandidate{{FinishReason: "IMAGE_SAFETY", FinishMessage: "Blocked by policy. " + strings.Repeat("x", 300)}}}
+	assert.Equal(t, "Gemini returned no images: IMAGE_SAFETY (Blocked by policy. "+strings.Repeat("x", 240-len("Blocked by policy. "))+"...)", imageFailureMessage(long, ""))
+	// 239 ASCII bytes then a 3-byte rune: the cut backs up to the rune start.
+	multibyte := strings.Repeat("y", 239) + "€€"
+	assert.Equal(t, "Gemini returned no images: "+strings.Repeat("y", 239)+"...", imageFailureMessage(&geminiGenerateContentResponse{}, multibyte))
+	assert.True(t, utf8.ValidString(imageFailureMessage(&geminiGenerateContentResponse{}, multibyte)))
 }
