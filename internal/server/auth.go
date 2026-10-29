@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"net/http"
+	"net/url"
 	"reflect"
 	"strings"
 
@@ -60,12 +61,26 @@ type AuthMiddlewareConfig struct {
 	RequireCredential bool
 }
 
+// escapedSkipPaths puts configured skip paths in the escaped form requests are
+// compared in, so a non-ASCII entry such as /status/été still matches. Parsing
+// keeps a "/*" suffix and an entry that is already escaped as written.
+func escapedSkipPaths(paths []string) []string {
+	escaped := make([]string, len(paths))
+	for i, p := range paths {
+		escaped[i] = p
+		if u, err := url.Parse(p); err == nil {
+			escaped[i] = u.EscapedPath()
+		}
+	}
+	return escaped
+}
+
 // NewAuthMiddleware creates the authentication middleware from cfg.
 func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
 	masterKey := cfg.MasterKey
 	authenticator := cfg.Authenticator
 	requestAuthenticators := cfg.RequestAuthenticators
-	skipPaths := cfg.SkipPaths
+	skipPaths := escapedSkipPaths(cfg.SkipPaths)
 	userPathHeaderName := configuredUserPathHeaderName(cfg.UserPathHeader)
 	hasRequestAuthenticator := hasRequestAuthenticators(requestAuthenticators)
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
@@ -79,8 +94,10 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
 			}
 
 			// Check if path should skip authentication.
-			// Paths ending with "/*" are treated as prefix matches.
-			requestPath := c.Request().URL.Path
+			// Paths ending with "/*" are treated as prefix matches. The escaped
+			// path is the one the router matches, so /%68ealth cannot reach a
+			// catch-all route as /health.
+			requestPath := c.Request().URL.EscapedPath()
 			for _, skipPath := range skipPaths {
 				if strings.HasSuffix(skipPath, "/*") {
 					prefix := strings.TrimSuffix(skipPath, "*")

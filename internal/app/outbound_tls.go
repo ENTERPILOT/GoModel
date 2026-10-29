@@ -8,7 +8,7 @@ import (
 )
 
 // ApplyOutboundTLS installs the http.tls settings as the process-wide trust
-// for every outbound HTTPS connection. New calls it with resolved settings
+// for the outbound HTTPS clients. New calls it with resolved settings
 // before any provider builds a transport. Installing unchanged settings is a
 // no-op.
 func ApplyOutboundTLS(cfg config.HTTPTLSConfig) error {

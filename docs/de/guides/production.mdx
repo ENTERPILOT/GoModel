@@ -274,7 +274,13 @@ Das Kubelet prüft das Zertifikat einer HTTPS-Probe nicht. Bei aktivem mTLS
 antworten `/health` und `/health/ready` weiterhin ohne Client-Zertifikat, sodass
 diese Probes unverändert funktionieren; jeder andere Pfad antwortet ohne
 verifiziertes Zertifikat mit 401. Der ServiceMonitor des Charts scrapt einfaches
-HTTP; definieren Sie bei nativem TLS einen eigenen mit `scheme: https`.
+HTTP; definieren Sie bei nativem TLS einen eigenen mit `scheme: https`. Bei
+mTLS braucht auch `/metrics` ein Client-Zertifikat; geben Sie diesem
+ServiceMonitor daher eine `tlsConfig` mit `ca` für die CA, die das
+Gateway-Zertifikat ausgestellt hat, sowie `cert` und `keySecret` aus einem
+Zertifikat, das die Client-CA signiert hat. `helm test` und die
+Port-Forward-Hinweise nach der Installation wechseln automatisch zu HTTPS, sobald
+`env.SERVER_TLS_CERT_FILE` gesetzt ist.
 
 ### Upstream-Zertifikate hinter einer privaten CA
 

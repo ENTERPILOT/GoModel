@@ -193,7 +193,9 @@ restart; a rotation that fails to load keeps the previous one. A rotated client
 CA applies from the next TLS handshake, so open connections keep the access
 they were granted. Setting only one
 of the pair, or a file that is missing or invalid at startup, is an error. The
-paths accept `${env:...}` and `${file:...}` references like other settings.
+settings take file paths, not PEM contents, and a value holding PEM is
+rejected. They accept `${env:...}` references; `${file:...}` resolves to a
+file's contents, so use it only for a file that holds a path.
 These settings cover inbound connections only; [outbound TLS
 trust](#outbound-tls-trust) is configured separately. See the [production
 guide](/guides/production#native-tls) for a cert-manager example.
@@ -477,10 +479,17 @@ every upstream connection, unless a provider sets its own
 
 #### Outbound TLS trust
 
-These apply to every outbound HTTPS connection: providers, the model catalog,
-the update check, MCP upstreams, vector stores, and embedding endpoints. The
-default trusts the operating system certificate store, which is right unless an
-internal CA or a TLS-intercepting proxy sits between the gateway and upstreams.
+These apply to the gateway's outbound HTTPS clients: providers, the model
+catalog, the update check, MCP upstreams, vector stores, and embedding
+endpoints. The default trusts the operating system certificate store, which is
+right unless an internal CA or a TLS-intercepting proxy sits between the gateway
+and upstreams.
+
+They do not cover connections that other clients open, which keep their own
+settings: OpenTelemetry export reads `OTEL_EXPORTER_OTLP_CERTIFICATE`,
+PostgreSQL takes `sslmode` and `sslrootcert` in its URL (prefer
+`sslmode=verify-full`), MongoDB takes `tls=true` and `tlsCAFile` in its URL,
+and Redis over `rediss://` trusts the system store.
 
 | Variable                        | Description                                                        | Default |
 | ------------------------------- | ------------------------------------------------------------------ | ------- |

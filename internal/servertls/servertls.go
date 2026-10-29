@@ -5,10 +5,8 @@
 package servertls
 
 import (
-	"bytes"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -17,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/enterpilot/gomodel/internal/pemfile"
 )
 
 // DefaultCheckInterval is how often, at most, the files are checked for a
@@ -56,8 +56,11 @@ type Source struct {
 	settings Settings
 	interval time.Duration
 
-	current   atomic.Pointer[tls.Config]
-	nextCheck atomic.Int64 // unix nanoseconds
+	current atomic.Pointer[tls.Config]
+	// nextCheck is nanoseconds since base. time.Since reads the monotonic
+	// clock, so a wall clock stepped backwards cannot stall the checks.
+	base      time.Time
+	nextCheck atomic.Int64
 
 	mu          sync.Mutex // serializes reloads; guards the fields below
 	stamp       []os.FileInfo
@@ -74,7 +77,14 @@ func New(settings Settings) (*Source, error) {
 	if settings.CertFile == "" || settings.KeyFile == "" {
 		return nil, errors.New("server TLS: both a certificate and a key file are required")
 	}
-	s := &Source{settings: settings, interval: DefaultCheckInterval}
+	if err := errors.Join(
+		pemfile.CheckPath("server.tls_cert_file", settings.CertFile),
+		pemfile.CheckPath("server.tls_key_file", settings.KeyFile),
+		pemfile.CheckPath("server.tls_client_ca_file", settings.ClientCAFile),
+	); err != nil {
+		return nil, err
+	}
+	s := &Source{settings: settings, interval: DefaultCheckInterval, base: time.Now()}
 	stamp, err := statFiles(settings)
 	if err != nil {
 		return nil, err
@@ -85,7 +95,7 @@ func New(settings Settings) (*Source, error) {
 	}
 	s.stamp = stamp
 	s.current.Store(cfg)
-	s.nextCheck.Store(time.Now().Add(s.interval).UnixNano())
+	s.nextCheck.Store(int64(s.interval))
 	return s, nil
 }
 
@@ -108,7 +118,7 @@ func (s *Source) Leaf() *x509.Certificate {
 }
 
 func (s *Source) configForClient(*tls.ClientHelloInfo) (*tls.Config, error) {
-	now := time.Now().UnixNano()
+	now := int64(time.Since(s.base))
 	next := s.nextCheck.Load()
 	// One handshake per interval claims the check; the others never wait.
 	if now >= next && s.nextCheck.CompareAndSwap(next, now+int64(s.interval)) {
@@ -212,48 +222,13 @@ func load(settings Settings) (*tls.Config, error) {
 		if err != nil {
 			return nil, fmt.Errorf("server TLS: read client CA: %w", err)
 		}
-		pool, err := clientCAPool(caPEM)
-		if err != nil {
+		// Only the configured CAs: the system store must not vouch for clients.
+		pool := x509.NewCertPool()
+		if err := pemfile.AppendCertificates(pool, caPEM); err != nil {
 			return nil, fmt.Errorf("server TLS: client CA file %s: %w", settings.ClientCAFile, err)
 		}
 		cfg.ClientCAs = pool
 		cfg.ClientAuth = tls.VerifyClientCertIfGiven
 	}
 	return cfg, nil
-}
-
-// clientCAPool holds only the configured CAs: the system store must not vouch
-// for clients. Unlike AppendCertsFromPEM, it rejects a block that does not
-// parse, so a bundle cannot silently drop one of its CAs. pem.Decode itself
-// skips a block with bad framing or base64, so the decoded blocks are counted
-// against the BEGIN markers. Like pem.Decode, only a marker that starts a
-// line counts, so a comment that quotes one does not fail the bundle.
-func clientCAPool(data []byte) (*x509.CertPool, error) {
-	markers := bytes.Count(append([]byte("\n"), data...), []byte("\n-----BEGIN "))
-	pool := x509.NewCertPool()
-	count, blocks := 0, 0
-	for {
-		var block *pem.Block
-		block, data = pem.Decode(data)
-		if block == nil {
-			break
-		}
-		blocks++
-		if block.Type != "CERTIFICATE" {
-			continue
-		}
-		cert, err := x509.ParseCertificate(block.Bytes)
-		if err != nil {
-			return nil, fmt.Errorf("certificate %d: %w", count+1, err)
-		}
-		pool.AddCert(cert)
-		count++
-	}
-	if blocks != markers {
-		return nil, fmt.Errorf("%d of %d PEM blocks are malformed", markers-blocks, markers)
-	}
-	if count == 0 {
-		return nil, errors.New("contains no PEM certificates")
-	}
-	return pool, nil
 }

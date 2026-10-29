@@ -2,6 +2,7 @@ package httpclient
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,6 +14,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/enterpilot/gomodel/internal/tlstest"
 )
 
 func resetTLS(t *testing.T) {
@@ -54,12 +57,17 @@ func TestSetConfiguredTLS_Errors(t *testing.T) {
 	dir := t.TempDir()
 	empty := filepath.Join(dir, "empty.pem")
 	require.NoError(t, os.WriteFile(empty, []byte("not a certificate"), 0o600))
+	// A bundle with one broken block fails as a whole instead of silently
+	// dropping that CA, as AppendCertsFromPEM would.
+	partial := filepath.Join(dir, "partial.pem")
+	tlstest.WriteFile(t, partial, append(tlstest.NewCA(t, "test CA").PEM, "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n"...))
 	tests := []struct {
 		name     string
 		settings TLSSettings
 	}{
 		{"missing ca file", TLSSettings{CAFile: filepath.Join(dir, "missing.pem")}},
 		{"ca file without certificates", TLSSettings{CAFile: empty}},
+		{"ca file with a malformed certificate", TLSSettings{CAFile: partial}},
 		{"client cert without key", TLSSettings{ClientCertFile: empty}},
 		{"client key without cert", TLSSettings{ClientKeyFile: empty}},
 		{"unparseable client pair", TLSSettings{ClientCertFile: empty, ClientKeyFile: empty}},
@@ -68,6 +76,30 @@ func TestSetConfiguredTLS_Errors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			require.Error(t, SetConfiguredTLS(tt.settings))
 			assert.Nil(t, ConfiguredTLS(), "a failed install must not replace the previous configuration")
+		})
+	}
+}
+
+// PEM contents passed where a path belongs, as with a ${file:...} reference
+// that resolves to the key itself, must never be echoed into the error, which
+// is logged.
+func TestSetConfiguredTLS_RejectsPEMContentsAsPath(t *testing.T) {
+	resetTLS(t)
+	leaf := tlstest.NewCA(t, "test CA").Issue(t, "client", x509.ExtKeyUsageClientAuth)
+	certFile, keyFile := leaf.Write(t, t.TempDir())
+	tests := []struct {
+		name     string
+		settings TLSSettings
+		field    string
+	}{
+		{"ca file", TLSSettings{CAFile: string(leaf.CertPEM)}, "http.tls.ca_file"},
+		{"client cert", TLSSettings{ClientCertFile: string(leaf.CertPEM), ClientKeyFile: keyFile}, "http.tls.client_cert_file"},
+		{"client key", TLSSettings{ClientCertFile: certFile, ClientKeyFile: string(leaf.KeyPEM)}, "http.tls.client_key_file"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.EqualError(t, SetConfiguredTLS(tt.settings), tt.field+" expects a file path, not PEM contents")
+			assert.Nil(t, ConfiguredTLS())
 		})
 	}
 }

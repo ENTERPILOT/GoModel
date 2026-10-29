@@ -247,7 +247,11 @@ The kubelet does not verify the certificate of an HTTPS probe. With mTLS on,
 `/health` and `/health/ready` still answer without a client certificate, so
 these probes work unchanged; every other path returns 401 without a verified
 one. The chart's ServiceMonitor scrapes plain HTTP, so with native TLS define
-your own with `scheme: https`.
+your own with `scheme: https`. Under mTLS `/metrics` needs a client certificate
+too, so give that ServiceMonitor a `tlsConfig` with `ca` set to the CA that
+issued the gateway certificate, plus `cert` and `keySecret` from a certificate
+the client CA signed. `helm test` and the port-forward install notes switch to
+HTTPS on their own when `env.SERVER_TLS_CERT_FILE` is set.
 
 ### Upstream certificates behind a private CA
 

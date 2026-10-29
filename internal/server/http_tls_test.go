@@ -83,6 +83,8 @@ func TestClientCertificateRequired(t *testing.T) {
 		ClientCertificatesRequired: source.MutualTLS(),
 	})
 	srv.echo.GET("/private", func(c *echo.Context) error { return c.String(http.StatusOK, "ok") })
+	// An extension catch-all must not answer an encoded health path.
+	srv.echo.GET("/*", func(c *echo.Context) error { return c.String(http.StatusOK, "catch-all") })
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -111,5 +113,7 @@ func TestClientCertificateRequired(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, status(nil, "/private"))
 	assert.Equal(t, http.StatusUnauthorized, status(nil, "/health/../private"))
 	assert.Equal(t, http.StatusUnauthorized, status(nil, "/health/"))
+	assert.Equal(t, http.StatusUnauthorized, status(nil, "/%68ealth"))
+	assert.Equal(t, http.StatusUnauthorized, status(nil, "/health%2Fready"))
 	assert.Equal(t, http.StatusOK, status([]tls.Certificate{pair}, "/private"))
 }

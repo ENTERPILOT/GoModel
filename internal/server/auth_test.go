@@ -764,6 +764,33 @@ func TestAuthMiddleware_WildcardSkipPaths(t *testing.T) {
 	}
 }
 
+// Skip paths match the escaped path the router uses, so an encoded form of a
+// public path cannot reach a catch-all route without a credential.
+func TestAuthMiddleware_SkipPathsMatchEscapedPath(t *testing.T) {
+	e := echo.New()
+	e.Use(AuthMiddleware("secret-key", []string{"/health", "/admin/static/*", "/status/été"}))
+	e.GET("/*", func(c *echo.Context) error { return c.String(http.StatusOK, "ok") })
+
+	tests := []struct {
+		path string
+		want int
+	}{
+		{"/health", http.StatusOK},
+		{"/admin/static/app.js", http.StatusOK},
+		{"/status/%C3%A9t%C3%A9", http.StatusOK},
+		{"/%68ealth", http.StatusUnauthorized},
+		{"/admin/%73tatic/app.js", http.StatusUnauthorized},
+		{"/admin%2Fstatic/app.js", http.StatusUnauthorized},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tt.path, nil))
+			assert.Equal(t, tt.want, rec.Code)
+		})
+	}
+}
+
 func TestAuthMiddleware_SkipPathEnrichesNoKeyAuditMethod(t *testing.T) {
 	handler := AuthMiddlewareWithAuthenticator("secret-key", nil, []string{"/health"})(func(c *echo.Context) error {
 		entryVal := c.Get(string(auditlog.LogEntryKey))

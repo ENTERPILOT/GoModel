@@ -18,14 +18,16 @@ type HTTPConfig struct {
 	// accepts Go durations such as "2m" as well as seconds.
 	StreamIdleTimeout int `yaml:"stream_idle_timeout"`
 
-	// TLS configures client-side trust for every outbound HTTPS connection.
+	// TLS configures client-side trust for the gateway's outbound HTTPS
+	// clients; see HTTPTLSConfig for what it covers.
 	TLS HTTPTLSConfig `yaml:"tls"`
 }
 
 // HTTPTLSConfig configures client TLS trust for outbound connections: providers,
 // the model catalog, the update check, MCP upstreams, vector stores, and
-// embedding endpoints. All fields are optional; the zero value trusts the
-// operating system certificate store.
+// embedding endpoints. The OTLP exporters and the PostgreSQL, MongoDB, and
+// Redis drivers keep their own TLS settings. All fields are optional; the zero
+// value trusts the operating system certificate store.
 type HTTPTLSConfig struct {
 	// CAFile is a PEM bundle of additional root certificates, appended to the
 	// system store. Set it for a private CA behind a TLS-intercepting proxy or
@@ -37,7 +39,7 @@ type HTTPTLSConfig struct {
 	ClientCertFile string `yaml:"client_cert_file" env:"HTTP_TLS_CLIENT_CERT_FILE"`
 	ClientKeyFile  string `yaml:"client_key_file" env:"HTTP_TLS_CLIENT_KEY_FILE"`
 
-	// InsecureSkipVerify disables certificate verification for every outbound
-	// connection. Lab use only; the gateway logs a warning at startup.
+	// InsecureSkipVerify disables certificate verification for those outbound
+	// clients. Lab use only; the gateway logs a warning at startup.
 	InsecureSkipVerify bool `yaml:"insecure_skip_verify" env:"HTTP_TLS_INSECURE_SKIP_VERIFY"`
 }

@@ -128,3 +128,11 @@ rendering as no prefix at all.
 {{- end -}}
 {{- printf "%s%s" $base .path -}}
 {{- end }}
+
+{{/*
+URL scheme the gateway serves: https once env.SERVER_TLS_CERT_FILE turns on
+native TLS, http otherwise.
+*/}}
+{{- define "gomodel.scheme" -}}
+{{- if .Values.env.SERVER_TLS_CERT_FILE }}https{{ else }}http{{ end -}}
+{{- end }}
