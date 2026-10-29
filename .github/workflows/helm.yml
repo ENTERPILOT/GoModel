@@ -59,6 +59,10 @@ jobs:
           test "$(helm template gomodel helm --set 'env.BASE_PATH=//g//api/../secure//' -s templates/deployment.yaml | grep -c 'path: /g/secure/health')" = 2
           helm template gomodel helm --set env.SERVER_TLS_CERT_FILE=/tls/tls.crt -s templates/tests/test-connection.yaml | grep -q '"https://gomodel:8080/health/ready"'
           helm template gomodel helm --set env.SERVER_TLS_CERT_FILE=/tls/tls.crt -s templates/tests/test-connection.yaml | grep -q -- '- --insecure'
+          test "$(helm template gomodel helm --set env.SERVER_TLS_CERT_FILE=/tls/tls.crt -s templates/deployment.yaml | grep -c 'scheme: HTTPS')" = 2
+          ! helm template gomodel helm -s templates/deployment.yaml | grep -q 'scheme:'
+          test "$(helm template gomodel helm --set env.SERVER_TLS_CERT_FILE=/tls/tls.crt --set env.BASE_PATH=/g -s templates/deployment.yaml | grep -c -e 'path: /g/health' -e 'scheme: HTTPS')" = 4
+          helm template gomodel helm --set env.SERVER_TLS_CERT_FILE=/tls/tls.crt --set readinessProbe.httpGet.scheme=HTTP -s templates/deployment.yaml | grep -q 'scheme: HTTP$'
           helm template gomodel helm --set replicaCount=2 --set storage.type=postgresql --set storage.url=postgres://x \
             --set podDisruptionBudget.maxUnavailable=0 -s templates/pdb.yaml | grep -q 'maxUnavailable: 0'
 

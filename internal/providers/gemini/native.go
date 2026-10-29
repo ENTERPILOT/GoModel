@@ -1033,6 +1033,9 @@ func normalizeSnakeMapKeys(src map[string]any) map[string]any {
 }
 
 func thinkingConfigForEffort(model, effort string) map[string]any {
+	if isGemmaModel(model) {
+		return nil
+	}
 	effort = strings.ToLower(strings.TrimSpace(effort))
 	if strings.Contains(strings.ToLower(model), "gemini-2.5") {
 		switch effort {
@@ -1056,6 +1059,19 @@ func thinkingConfigForEffort(model, effort string) map[string]any {
 		}
 	}
 	return map[string]any{"thinkingLevel": effort}
+}
+
+// isGemmaModel reports whether model is one of the Gemma open models Google
+// serves on the Gemini API. Gemma has no thinking knob: generateContent
+// answers HTTP 400 "Thinking level is not supported for this model" to any
+// thinkingLevel or thinkingBudget, so a requested reasoning effort is dropped
+// rather than translated.
+func isGemmaModel(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if idx := strings.LastIndex(model, "/"); idx >= 0 {
+		model = model[idx+1:]
+	}
+	return strings.HasPrefix(model, "gemma-")
 }
 
 // supportsMinimalThinking reports whether the model accepts the "minimal"

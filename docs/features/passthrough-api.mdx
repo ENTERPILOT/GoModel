@@ -186,7 +186,8 @@ Passthrough is intentionally narrow while the API is in beta.
   into OpenAI-compatible responses, so provider SDKs raise their own typed
   errors. Errors raised by GoModel itself (authentication, rate limits, budgets,
   a provider that is not enabled, an unreachable upstream) use the gateway's
-  error shape, as does an upstream error body that is not JSON.
+  error shape, as does an upstream error body that is not JSON or is larger
+  than 1 MiB.
 - Features that depend on OpenAI-compatible request or response shapes may not
   apply to passthrough traffic in the same way as `/v1` traffic.
 

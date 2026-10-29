@@ -110,9 +110,9 @@ providers:
       - id: claude-sonnet-5
 ```
 
-An instance in this mode serves only Claude chat and Responses; keep a second
-`vertex` instance for Gemini. Token counting and Anthropic batches are not
-supported.
+An instance in this mode serves Claude chat and Responses, and still serves
+embeddings through the native Vertex API for any embedding model you list under
+`models`; keep a second `vertex` instance for Gemini chat. Token counting and Anthropic batches are not supported.
 
 ## Image input
 

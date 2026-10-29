@@ -37,6 +37,28 @@ func TestCompatReasoningEffort(t *testing.T) {
 	}
 }
 
+// Gemma has no thinking level: Google answers HTTP 400 to every
+// reasoning_effort on both endpoints, so the adapter drops the member instead
+// of clamping it.
+func TestAdaptChatRequest_GemmaDropsReasoningEffort(t *testing.T) {
+	for _, body := range []string{
+		`{"model":"gemma-4-31b-it","messages":[{"role":"user","content":"hi"}],"reasoning_effort":"low"}`,
+		`{"model":"gemma-4-31b-it","messages":[{"role":"user","content":"hi"}],"reasoning":{"effort":"none"}}`,
+	} {
+		var req core.ChatRequest
+		require.NoError(t, json.Unmarshal([]byte(body), &req))
+
+		adapted, err := adaptChatRequest(&req)
+		require.NoError(t, err)
+		assert.Nil(t, adapted.Reasoning)
+		assert.Empty(t, adapted.ExtraFields.Lookup("reasoning_effort"))
+	}
+
+	var req core.ChatRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"model":"gemma-4-31b-it","messages":[{"role":"user","content":"hi"}],"reasoning_effort":"low"}`), &req))
+	assert.Nil(t, geminiGenerationConfig(&req)["thinkingConfig"], "native path sends no thinkingConfig for Gemma")
+}
+
 // Google's OpenAI-compatible endpoint rejects several Chat Completions members
 // outright and the "minimal" level on Gemini 4; the adapter sends what it
 // accepts.

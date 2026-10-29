@@ -21,7 +21,7 @@ GoModel 通过一个网关将兼容 OpenAI 的请求路由到众多 AI 提供商
 | 提供商 | 凭据 | 示例模型 | Chat | `/responses` | 嵌入 | Files | Batches | 透传 | 指南 |
 | -------- | ---------- | ------------- | :--: | :----------: | :---: | :---: | :-----: | :------: | ----- |
 | OpenAI | `OPENAI_API_KEY` | `gpt-5.5` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
-| ChatGPT 订阅 | `CHATGPT_API_KEY`（Codex 登录 Token） | `gpt-5.6-sol` | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | [ChatGPT 订阅](/zh/providers/chatgpt) |
+| ChatGPT 订阅 | `CHATGPT_API_KEY`（Codex 登录 Token） | `gpt-5.6-sol` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [ChatGPT 订阅](/zh/providers/chatgpt) |
 | GitHub Copilot | `GITHUB_COPILOT_API_KEY`（GitHub OAuth Token） | `claude-sonnet-5.5` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [GitHub Copilot](/zh/providers/github-copilot) |
 | Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | [Anthropic](/zh/providers/anthropic) |
 | Cohere | `COHERE_API_KEY` | `command-a-plus-05-2026` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Cohere](/zh/providers/cohere) |
@@ -78,7 +78,7 @@ GoModel 通过一个网关将兼容 OpenAI 的请求路由到众多 AI 提供商
 - **Eden AI**：模型 ID 使用 `provider/model` 格式（例如 `openai/gpt-4`），并原样转发；当另一个已配置的提供商提供了相同的原始 ID 时，请使用 `edenai/openai/gpt-4` 显式选择 Eden。GoModel 从 Eden 自身的 `/v3/models` 中发现其模型目录、上下文窗口、能力和按 Token 计的定价，因此没有内置模型列表，新的 Eden 模型也无需升级即可使用。每个请求的成本来自 Eden 在每个响应中返回的精确美元 `cost`，而不是基于 Token 计算。GoModel 通过将 `/v1/responses` 转换为 Eden 的 Chat Completions 端点来提供该接口；Eden 自身的 `/v3/responses` 是另一套 API，永远不会被使用。参阅 [Eden AI 指南](/zh/providers/edenai)。
 - **Xiaomi MiMo**：TTS（`mimo-v2.5-tts*`）和 ASR（`mimo-v2.5-asr`）既可以通过 `/v1/audio/speech` 和 `/v1/audio/transcriptions` 提供（转换为 MiMo 的 Chat Completions 音频协议），也可以直接通过 Chat Completions 使用；如需 1M 上下文，请在模型 ID 后追加 `[1m]`，并将其列入 `XIAOMI_MODELS`。
 - **OpenCode Go（OpenCode Zen）**：按模型路由：大多数模型使用 OpenAI 风格的 `/chat/completions`，而仅支持 `/messages` 的模型（默认为 `qwen3.7-max`，可通过 `OPENCODE_GO_MESSAGES_MODELS` 覆盖）会发送到 Anthropic 原生端点。没有推理参数的聊天请求会被注入 `reasoning_effort: "low"`，因为部分模型始终进行思考，并会拒绝省略该参数的请求（可通过 `OPENCODE_GO_DEFAULT_REASONING_EFFORT` 覆盖）。请设置 `OPENCODE_GO_API_KEY`；Base URL 默认为 `https://opencode.ai/zen/go/v1`。
-- **ChatGPT 订阅**：仅提供 `/v1/responses`，按 ChatGPT 套餐配额计费，而不是 API 额度。上游只接受严格的参数白名单且仅支持流式传输；GoModel 会适配请求，并为非流式调用方合并流。请将 `CHATGPT_API_KEY` 设置为 `codex login` 获取的访问 Token。报告的成本并非实际支出：这些模型 ID 在 OpenAI Platform 上同样存在，因此注册表会将其按 Token 计的价格套用到固定费率的订阅流量上。请不要对其使用预算和 `cost` 负载均衡。
+- **ChatGPT 订阅**：按 ChatGPT 套餐配额计费，而不是 API 额度。上游仅提供 `/v1/responses`；聊天补全会被翻译为 Responses 调用。上游只接受严格的参数白名单且仅支持流式传输；GoModel 会适配请求，并为非流式调用方合并流。请将 `CHATGPT_API_KEY` 设置为 `codex login` 获取的访问 Token。报告的成本并非实际支出：这些模型 ID 在 OpenAI Platform 上同样存在，因此注册表会将其按 Token 计的价格套用到固定费率的订阅流量上。请不要对其使用预算和 `cost` 负载均衡。
 - **GitHub Copilot**：以 GitHub AI Credits 按 Token 计费，优先从 Copilot 套餐的每月额度中扣除。Copilot 仅通过 `/responses` 提供 GPT-5 及更新的模型，其他模型仅通过 `/chat/completions` 提供；GoModel 从 `/models` 读取每个模型的端点并进行转换，因此两种 API 对每个模型都可用。请将 `GITHUB_COPILOT_API_KEY` 设置为该账号的 GitHub OAuth Token，例如 `gh auth token` 的输出；可调用的模型取决于 Copilot 套餐。报告的成本是估算值，未考虑套餐包含的额度。
 - **Kimi Code**：没有按 Token 计的定价；配额每周刷新，同时还受滚动 5 小时窗口的限制。用量成本追踪对 Kimi Code 报告为零，因此 `cost` 负载均衡无法为其定价；建议采用保守的重试策略。
 - **Hetzner（实验性）**：Hetzner 声明其推理 API 处于实验阶段：可能出现破坏性变更，且不提供 SLA。实验期间，模型目录和速率限制窗口会发生变化；请查询实时的 `/v1/models` 端点和官方文档，而不要依赖快照。上表中的示例模型 ID（`Qwen/Qwen3.6-35B-A3B-FP8`）取自 2026-08-17 的 Hetzner 官方文档，阅读时可能已有所不同。实验期间免费，因此用量成本追踪报告为零，`cost` 负载均衡也无法为其定价。没有嵌入端点；仅支持聊天、`/v1/responses`（通过 Chat 转换）、模型列表和透传。透传是通用的转发器，✅ 标记表示适配器具备该能力；在 API 处于实验阶段时，Hetzner 对任意上游路径的兼容性尚未验证。`hetzner` 已包含在默认的 `ENABLED_PASSTHROUGH_PROVIDERS` 白名单中，因此 `/p/hetzner/...` 路由无需运维人员启用即可使用；如需限制，请将其从列表中移除。

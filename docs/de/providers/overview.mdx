@@ -42,7 +42,7 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
 | Provider | Zugangsdaten | Beispielmodell | Chat | `/responses` | Embed | Files | Batches | Passthru | Leitfaden |
 | -------- | ---------- | ------------- | :--: | :----------: | :---: | :---: | :-----: | :------: | ----- |
 | OpenAI | `OPENAI_API_KEY` | `gpt-5.5` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
-| ChatGPT-Abonnement | `CHATGPT_API_KEY` (Anmelde-Token von Codex) | `gpt-5.6-sol` | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | [ChatGPT-Abonnement](/de/providers/chatgpt) |
+| ChatGPT-Abonnement | `CHATGPT_API_KEY` (Anmelde-Token von Codex) | `gpt-5.6-sol` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [ChatGPT-Abonnement](/de/providers/chatgpt) |
 | GitHub Copilot | `GITHUB_COPILOT_API_KEY` (GitHub-OAuth-Token) | `claude-sonnet-5.5` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [GitHub Copilot](/de/providers/github-copilot) |
 | Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | [Anthropic](/de/providers/anthropic) |
 | Cohere | `COHERE_API_KEY` | `command-a-plus-05-2026` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Cohere](/de/providers/cohere) |
@@ -170,8 +170,9 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
   `reasoning_effort: "low"`, weil manche Modelle immer denken und Requests ablehnen, in denen er
   fehlt (überschreibbar mit `OPENCODE_GO_DEFAULT_REASONING_EFFORT`). Setzen Sie
   `OPENCODE_GO_API_KEY`; die Base-URL ist standardmäßig `https://opencode.ai/zen/go/v1`.
-- **ChatGPT-Abonnement** – bedient nur `/v1/responses` und wird über das Kontingent des
-  ChatGPT-Plans abgerechnet statt über API-Guthaben. Der Upstream akzeptiert nur eine strikte
+- **ChatGPT-Abonnement** – wird über das Kontingent des ChatGPT-Plans abgerechnet statt über
+  API-Guthaben. Der Upstream bedient nur `/v1/responses`; Chat Completions werden in
+  Responses-Aufrufe übersetzt. Der Upstream akzeptiert nur eine strikte
   Allowlist von Parametern und ausschließlich Streaming; GoModel passt Requests an und fasst den
   Stream für Aufrufer ohne Streaming zusammen. Setzen Sie `CHATGPT_API_KEY` auf das Access-Token
   aus `codex login`. Die gemeldeten Kosten sind keine tatsächlichen Ausgaben: Diese Modell-IDs gibt
