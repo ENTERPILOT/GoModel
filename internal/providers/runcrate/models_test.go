@@ -74,6 +74,7 @@ func TestListModels_NormalizesMetadata(t *testing.T) {
 		ownedBy     string
 		displayName string
 		modes       []string
+		categories  []core.ModelCategory
 		context     *int
 		pricing     *core.ModelPricing
 	}{
@@ -82,6 +83,7 @@ func TestListModels_NormalizesMetadata(t *testing.T) {
 			ownedBy:     "deepseek-ai",
 			displayName: "DeepSeek V4.1 Flash",
 			modes:       []string{"chat", "responses"},
+			categories:  []core.ModelCategory{core.CategoryTextGeneration},
 			context:     new(1048576),
 			pricing:     &core.ModelPricing{Currency: "USD", InputPerMtok: ptr(0.147), OutputPerMtok: ptr(0.441)},
 		},
@@ -90,16 +92,19 @@ func TestListModels_NormalizesMetadata(t *testing.T) {
 			ownedBy:     "Qwen",
 			displayName: "Qwen3 Embedding 0.6B",
 			modes:       []string{"embedding"},
+			categories:  []core.ModelCategory{core.CategoryEmbedding},
 			context:     new(32768),
 			pricing:     &core.ModelPricing{Currency: "USD", InputPerMtok: ptr(0.01), OutputPerMtok: ptr(0)},
 		},
 		{
-			id:    "openai/gpt-oss-120b",
-			modes: []string{"chat", "responses"},
+			id:         "openai/gpt-oss-120b",
+			modes:      []string{"chat", "responses"},
+			categories: []core.ModelCategory{core.CategoryTextGeneration},
 		},
 		{
-			id:    "example/image-text-model",
-			modes: []string{"chat", "responses"},
+			id:         "example/image-text-model",
+			modes:      []string{"chat", "responses"},
+			categories: []core.ModelCategory{core.CategoryTextGeneration},
 		},
 		{id: "untyped/model"},
 	}
@@ -112,6 +117,7 @@ func TestListModels_NormalizesMetadata(t *testing.T) {
 			assert.Equal(t, tt.ownedBy, model.OwnedBy)
 			assert.Equal(t, tt.displayName, model.Metadata.DisplayName)
 			assert.Equal(t, tt.modes, model.Metadata.Modes)
+			assert.Equal(t, tt.categories, model.Metadata.Categories)
 			assert.Equal(t, tt.context, model.Metadata.ContextWindow)
 			assert.Equal(t, tt.pricing, model.Metadata.Pricing)
 		})
