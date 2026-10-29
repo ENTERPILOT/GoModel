@@ -17,6 +17,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/enterpilot/gomodel/internal/pemfile"
 )
 
 // DefaultCheckInterval is how often, at most, the files are checked for a
@@ -73,6 +75,13 @@ func New(settings Settings) (*Source, error) {
 	settings.ClientCAFile = strings.TrimSpace(settings.ClientCAFile)
 	if settings.CertFile == "" || settings.KeyFile == "" {
 		return nil, errors.New("server TLS: both a certificate and a key file are required")
+	}
+	if err := errors.Join(
+		pemfile.CheckPath("server.tls_cert_file", settings.CertFile),
+		pemfile.CheckPath("server.tls_key_file", settings.KeyFile),
+		pemfile.CheckPath("server.tls_client_ca_file", settings.ClientCAFile),
+	); err != nil {
+		return nil, err
 	}
 	s := &Source{settings: settings, interval: DefaultCheckInterval}
 	stamp, err := statFiles(settings)

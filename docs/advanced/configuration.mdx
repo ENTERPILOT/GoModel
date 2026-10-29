@@ -193,7 +193,9 @@ restart; a rotation that fails to load keeps the previous one. A rotated client
 CA applies from the next TLS handshake, so open connections keep the access
 they were granted. Setting only one
 of the pair, or a file that is missing or invalid at startup, is an error. The
-paths accept `${env:...}` and `${file:...}` references like other settings.
+settings take file paths, not PEM contents, and a value holding PEM is
+rejected. They accept `${env:...}` references; `${file:...}` resolves to a
+file's contents, so use it only for a file that holds a path.
 These settings cover inbound connections only; [outbound TLS
 trust](#outbound-tls-trust) is configured separately. See the [production
 guide](/guides/production#native-tls) for a cert-manager example.

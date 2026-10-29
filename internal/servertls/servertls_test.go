@@ -121,6 +121,32 @@ func TestNewRejectsUnusableFiles(t *testing.T) {
 	}
 }
 
+// PEM contents passed where a path belongs, as with a ${file:...} reference
+// that resolves to the key itself, must never be echoed into the error, which
+// is logged.
+func TestNewRejectsPEMContentsAsPath(t *testing.T) {
+	ca := tlstest.NewCA(t, "test CA")
+	leaf := ca.Issue(t, "gateway")
+	certFile, keyFile := leaf.Write(t, t.TempDir())
+	key := string(leaf.KeyPEM)
+
+	tests := []struct {
+		name     string
+		settings Settings
+		field    string
+	}{
+		{"certificate", Settings{CertFile: string(leaf.CertPEM), KeyFile: keyFile}, "server.tls_cert_file"},
+		{"key", Settings{CertFile: certFile, KeyFile: key}, "server.tls_key_file"},
+		{"client CA", Settings{CertFile: certFile, KeyFile: keyFile, ClientCAFile: string(ca.PEM)}, "server.tls_client_ca_file"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := New(tt.settings)
+			require.EqualError(t, err, tt.field+" expects a file path, not PEM contents")
+		})
+	}
+}
+
 func TestReloadsRotatedCertificate(t *testing.T) {
 	ca := tlstest.NewCA(t, "test CA")
 	dir := t.TempDir()

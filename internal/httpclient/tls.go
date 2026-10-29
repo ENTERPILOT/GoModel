@@ -4,12 +4,15 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"strings"
 	"sync/atomic"
+
+	"github.com/enterpilot/gomodel/internal/pemfile"
 )
 
 // TLSSettings is the process-wide client TLS trust configuration for every
@@ -120,6 +123,13 @@ func buildTrustState(settings TLSSettings) (*trustState, error) {
 	}
 	if (certFile == "") != (keyFile == "") {
 		return nil, fmt.Errorf("http.tls: client_cert_file and client_key_file must be set together")
+	}
+	if err := errors.Join(
+		pemfile.CheckPath("http.tls.ca_file", caFile),
+		pemfile.CheckPath("http.tls.client_cert_file", certFile),
+		pemfile.CheckPath("http.tls.client_key_file", keyFile),
+	); err != nil {
+		return nil, err
 	}
 
 	hash := sha256.New()

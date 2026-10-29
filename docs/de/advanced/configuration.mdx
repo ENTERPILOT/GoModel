@@ -210,8 +210,10 @@ ohne Neustart übernommen; eine Rotation, die sich nicht laden lässt, behält d
 bisherige. Eine rotierte Client-CA gilt ab dem nächsten TLS-Handshake; offene
 Verbindungen behalten den Zugriff, den sie erhalten haben. Nur eine Hälfte des
 Paars zu setzen oder eine beim Start fehlende
-oder ungültige Datei ist ein Fehler. Die Pfade akzeptieren `${env:...}`- und
-`${file:...}`-Referenzen wie andere Einstellungen. Diese Einstellungen betreffen
+oder ungültige Datei ist ein Fehler. Die Einstellungen erwarten Dateipfade,
+keine PEM-Inhalte; ein Wert mit PEM wird abgelehnt. Sie akzeptieren
+`${env:...}`-Referenzen; `${file:...}` liefert den Inhalt einer Datei, nutzen Sie
+es also nur für eine Datei, die einen Pfad enthält. Diese Einstellungen betreffen
 nur eingehende Verbindungen; das [Vertrauen für ausgehendes
 TLS](#vertrauen-für-ausgehendes-tls) wird separat konfiguriert. Ein Beispiel mit
 cert-manager finden Sie im [Produktionsleitfaden](/de/guides/production#natives-tls).
