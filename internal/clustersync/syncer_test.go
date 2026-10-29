@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -173,24 +174,29 @@ func TestNewSyncerFailsWhenRevisionsCannotBeRead(t *testing.T) {
 }
 
 func TestSyncerStartAndClose(t *testing.T) {
-	ctx := context.Background()
-	syncer, err := NewSyncer(ctx, newFakeStore(nil))
-	require.NoError(t, err)
-	syncer.interval = 5 * time.Millisecond
-	budgets := &countingRefresh{}
-	syncer.Register("budgets", budgets.refresh)
+	synctest.Test(t, func(t *testing.T) {
+		ctx := context.Background()
+		syncer, err := NewSyncer(ctx, newFakeStore(nil))
+		require.NoError(t, err)
+		syncer.interval = 5 * time.Millisecond
+		budgets := &countingRefresh{}
+		syncer.Register("budgets", budgets.refresh)
 
-	syncer.Start(ctx)
-	syncer.Start(ctx) // idempotent
-	syncer.Notifier("budgets")(ctx)
-	require.Eventually(t, func() bool { return budgets.count() == 1 }, time.Second, 5*time.Millisecond)
+		syncer.Start(ctx)
+		syncer.Start(ctx) // idempotent
+		syncer.Notifier("budgets")(ctx)
+		// The next tick on the bubble's clock picks the change up.
+		time.Sleep(syncer.interval)
+		synctest.Wait()
+		require.Equal(t, 1, budgets.count())
 
-	require.NoError(t, syncer.Close())
-	require.NoError(t, syncer.Close())
-	syncer.Start(ctx) // a closed syncer stays closed
-	syncer.Notifier("budgets")(ctx)
-	time.Sleep(20 * time.Millisecond)
-	assert.Equal(t, 1, budgets.count())
+		require.NoError(t, syncer.Close())
+		require.NoError(t, syncer.Close())
+		syncer.Start(ctx) // a closed syncer stays closed
+		syncer.Notifier("budgets")(ctx)
+		time.Sleep(10 * syncer.interval)
+		assert.Equal(t, 1, budgets.count())
+	})
 }
 
 // A server that fails to start ends the context its poller was started on;
