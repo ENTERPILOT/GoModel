@@ -88,7 +88,7 @@ providers:
       - id: claude-sonnet-5
 ```
 
-处于此模式的实例提供 Claude 聊天和 Responses，并仍通过原生 Vertex API 提供嵌入；请为 Gemini 聊天保留另一个 `vertex` 实例。不支持 Token 计数和 Anthropic 批处理。
+处于此模式的实例提供 Claude 聊天和 Responses，并仍通过原生 Vertex API 为 `models` 中列出的任何嵌入模型提供嵌入；请为 Gemini 聊天保留另一个 `vertex` 实例。不支持 Token 计数和 Anthropic 批处理。
 
 ## 图片输入
 

@@ -109,7 +109,8 @@ providers:
 ```
 
 Eine Instanz in diesem Modus bedient Claude-Chat und -Responses und weiterhin Embeddings über
-die native Vertex-API; behalten Sie eine zweite `vertex`-Instanz für Gemini-Chat. Token-Zählung
+die native Vertex-API für jedes unter `models` aufgeführte Embedding-Modell; behalten Sie eine
+zweite `vertex`-Instanz für Gemini-Chat. Token-Zählung
 und Anthropic-Batches werden nicht unterstützt.
 
 ## Bild-Input

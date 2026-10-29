@@ -111,8 +111,8 @@ providers:
 ```
 
 An instance in this mode serves Claude chat and Responses, and still serves
-embeddings through the native Vertex API; keep a second `vertex` instance for
-Gemini chat. Token counting and Anthropic batches are not supported.
+embeddings through the native Vertex API for any embedding model you list under
+`models`; keep a second `vertex` instance for Gemini chat. Token counting and Anthropic batches are not supported.
 
 ## Image input
 
