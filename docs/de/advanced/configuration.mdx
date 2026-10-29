@@ -52,6 +52,9 @@ Der gängigste Weg, GoModel zu konfigurieren. Setzen Sie eine der folgenden Vari
 | `SERVER_TRUSTED_PROXIES` | Netzwerke, in denen Ihre eigenen Proxys stehen; aktiviert Client-Adressen aus Headern | _(leer)_ |
 | `SERVER_CLIENT_IP_HEADER` | Header, in dem ein vertrauenswürdiger Proxy die Client-Adresse übergibt | `X-Forwarded-For` |
 | `SERVER_TRUSTED_HOPS` | Anzahl der Proxys zwischen Client und Gateway; `0` durchsucht stattdessen die Kette | `0` |
+| `SERVER_TLS_CERT_FILE` | PEM-Zertifikat, mit dem der Listener HTTPS ausliefert; zusammen mit dem Schlüssel setzen | _(leer, einfaches HTTP)_ |
+| `SERVER_TLS_KEY_FILE` | Privater Schlüssel zu `SERVER_TLS_CERT_FILE` | _(leer)_ |
+| `SERVER_TLS_CLIENT_CA_FILE` | PEM-CA-Bundle; wenn gesetzt, braucht jeder Request außer `/health` und `/health/ready` ein davon signiertes Client-Zertifikat (mTLS) | _(leer)_ |
 | `SWAGGER_ENABLED`    | Stellt die [Swagger UI](/de/advanced/swagger-ui) bereit; erfordert einen Build mit `-tags=swagger` | `false`                |
 | `AUTH_VERIFY_ENABLED` | Stellt [`GET /v1/auth/verify`](/de/advanced/api-endpoints#key-verifizierung) bereit, das meldet, ob der API-Key eines Requests gültig ist | `false`                |
 | `PID_FILE`           | Ort, an dem das laufende Gateway seine Prozess-ID für `gomodel --reload` ablegt. Eine Änderung erfordert einen Neustart | `data/gomodel.pid` neben einem `./data`-Verzeichnis, andernfalls das benutzerspezifische Datenverzeichnis |
@@ -186,6 +189,32 @@ und die Admin API bleibt hinter Zugangsdaten mit Dashboard-Zugriff. Geben Sie
 diese Zugangsdaten aus, bevor Sie den Schalter umlegen – ohne Master-Key, ohne
 verwalteten Key und ohne Authentifizierungserweiterung lehnt das Gateway jeden
 Request ab und protokolliert beim Start eine entsprechende Warnung.
+
+#### HTTPS ausliefern
+
+Lassen Sie die `SERVER_TLS_*`-Einstellungen leer, um hinter einem Proxy, der TLS
+terminiert, einfaches HTTP auszuliefern. Setzen Sie Zertifikat und Schlüssel
+(`server.tls_cert_file` und `server.tls_key_file` in YAML), wenn Clients sich
+direkt mit dem Gateway verbinden:
+
+```yaml
+server:
+  tls_cert_file: /etc/gomodel/tls/tls.crt
+  tls_key_file: /etc/gomodel/tls/tls.key
+  # tls_client_ca_file: /etc/gomodel/tls/ca.crt # require client certificates
+```
+
+Der Listener liefert dann nur noch HTTPS aus, mit TLS 1.2 oder neuer und HTTP/2.
+Die Dateien werden alle 5 Sekunden geprüft, und ein rotiertes Zertifikat wird
+ohne Neustart übernommen; eine Rotation, die sich nicht laden lässt, behält das
+bisherige. Eine rotierte Client-CA gilt ab dem nächsten TLS-Handshake; offene
+Verbindungen behalten den Zugriff, den sie erhalten haben. Nur eine Hälfte des
+Paars zu setzen oder eine beim Start fehlende
+oder ungültige Datei ist ein Fehler. Die Pfade akzeptieren `${env:...}`- und
+`${file:...}`-Referenzen wie andere Einstellungen. Diese Einstellungen betreffen
+nur eingehende Verbindungen; das [Vertrauen für ausgehendes
+TLS](#vertrauen-für-ausgehendes-tls) wird separat konfiguriert. Ein Beispiel mit
+cert-manager finden Sie im [Produktionsleitfaden](/de/guides/production#natives-tls).
 
 #### MCP Gateway
 

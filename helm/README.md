@@ -120,6 +120,13 @@ httpRoute:
 To serve under a path prefix set `env.BASE_PATH: /g`; probe, metrics and
 HTTPRoute paths follow automatically.
 
+For pod-to-pod HTTPS without an ingress, mount a certificate Secret through
+`extraVolumes`/`extraVolumeMounts`, set `env.SERVER_TLS_CERT_FILE` and
+`env.SERVER_TLS_KEY_FILE`, and add `scheme: HTTPS` to both probes. The
+ServiceMonitor scrapes plain HTTP, so define your own with `scheme: https`. See
+[Native TLS](https://gomodel.enterpilot.io/guides/production#native-tls) for a
+cert-manager example.
+
 ### Metrics
 
 `metrics.enabled` (default `true`) exposes `/metrics` without authentication.
