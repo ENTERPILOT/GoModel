@@ -355,6 +355,29 @@ server:
 
 如果要缩小某个提供商的模型清单，而不是逐个列出模型，请使用 `<PROVIDER>_MODEL_FILTER_INCLUDE`、`<PROVIDER>_MODEL_FILTER_EXCLUDE` 和 `<PROVIDER>_MODEL_FILTER_MAX_PRICE_PER_MTOK`（YAML：`providers.<name>.model_filter`）。请参阅[过滤提供商的模型](/zh/advanced/config-yaml#过滤提供商的模型)。
 
+当客户端只从 vLLM 运行时发现模型时，请设置 `MODELS_VLLM_DISCOVERY_COMPAT=true`（YAML：`models.vllm_discovery_compat`）。OpenCode 的 `vllm` 提供商就是一个例子：它会探测 `/health` 和 `/v1/models`，并丢弃所有 `owned_by` 不是 `vllm` 或缺少 `max_model_len` 的条目。启用该设置后，`GET /v1/models` 会将 `owned_by` 报告为 `vllm`，并为每个条目填写 `max_model_len`，这样客户端无需手写列表即可识别网关的模型。这样报告的所有者并不真实，因此该设置默认关闭，仅适用于其客户端确实需要它的网关。
+
+上下文限制有两个来源，按以下顺序使用：
+
+1. **提供商自身的报告。** 自行提供模型服务的运行时（vLLM、SGLang、llm-d，以及任何在 `/models` 列表中返回 `max_model_len` 的 OpenAI 兼容服务器）了解其进程的真实限制，因此其值优先。
+2. **`metadata.context_window`。** 目录中的值，仅用于提供商未报告限制的模型。托管模型正是依靠它才能被发现。
+
+两者都没有的模型（目录不认识、其运行时也不报告限制）会以 `owned_by: "vllm"` 和 `max_model_len: 0` 列出。零表示限制未知，而不是条目不完整：该字段从不省略，因为这些客户端会按要求该字段的 schema 解析整个列表，只要有一个条目缺少它，整个响应就会失败，其他所有模型也会随之消失。只在值为正数时才读取它的客户端会保留自己的默认值。要公布真实的上下文窗口，请在模型上声明：
+
+```yaml
+providers:
+  my-custom-llm:
+    type: openai
+    base_url: "https://api.example.com/v1"
+    api_key: "..."
+    models:
+      - id: "my-finetune"
+        metadata:
+          context_window: 32768
+```
+
+条目的其他字段请参阅[模型元数据](/zh/advanced/model-metadata)。
+
 对于 OpenRouter，除非请求已自行设置，否则 GoModel 还会发送默认的归属（attribution）Header。可通过 `OPENROUTER_SITE_URL` 和 `OPENROUTER_APP_NAME` 覆盖这些默认值。
 
 ### 2. `.env` 文件
