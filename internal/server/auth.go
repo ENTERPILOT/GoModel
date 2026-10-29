@@ -79,8 +79,10 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
 			}
 
 			// Check if path should skip authentication.
-			// Paths ending with "/*" are treated as prefix matches.
-			requestPath := c.Request().URL.Path
+			// Paths ending with "/*" are treated as prefix matches. The escaped
+			// path is the one the router matches, so /%68ealth cannot reach a
+			// catch-all route as /health.
+			requestPath := c.Request().URL.EscapedPath()
 			for _, skipPath := range skipPaths {
 				if strings.HasSuffix(skipPath, "/*") {
 					prefix := strings.TrimSuffix(skipPath, "*")
