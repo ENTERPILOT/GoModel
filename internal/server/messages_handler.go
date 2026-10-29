@@ -310,6 +310,7 @@ func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core
 
 	if req.Stream {
 		result, err := s.inference().StreamChatCompletion(ctx, workflow, req)
+		adm.applyHeaders(c)
 		if err != nil {
 			return handleStreamingDispatchError(c, err)
 		}
@@ -327,6 +328,7 @@ func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core
 	}
 
 	result, err := s.inference().ExecuteChatCompletion(ctx, workflow, req, requestID, "/v1/messages")
+	adm.applyHeaders(c)
 	if err != nil {
 		return handleError(c, err)
 	}

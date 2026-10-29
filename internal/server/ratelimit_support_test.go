@@ -219,8 +219,7 @@ func rateLimitProviderRule(provider string, maxRequests int64) ratelimit.Rule {
 }
 
 // A saturated provider/model route with failover targets defers to the sweep:
-// the request is admitted against consumer limits and the 429 is stamped for
-// dispatch instead of being returned.
+// the 429 is stamped for dispatch. Consumer admission waits for a usable route.
 func TestEnforceAdmissionDefersSaturatedRouteToFailover(t *testing.T) {
 	service := newTestRateLimitService(t,
 		rateLimitProviderRule("openai", 1),
@@ -250,10 +249,18 @@ func TestEnforceAdmissionDefersSaturatedRouteToFailover(t *testing.T) {
 	ctx := second.dispatchContext(context.Background())
 	require.Error(t, core.PrimaryRouteSaturated(ctx))
 
-	// The deferred request still consumed its consumer window.
+	// A rejected primary does not consume the deferred request's quota.
 	for _, status := range service.Statuses(time.Now().UTC()) {
 		if status.Rule.Scope == ratelimit.ScopeUserPath {
-			require.Equal(t, int64(2), status.RequestsUsed, "deferred request still counts")
+			require.Equal(t, int64(1), status.RequestsUsed)
+		}
+	}
+	release, err := second.attempts.Acquire(ctx, "backup", "backup/gpt-4o")
+	require.NoError(t, err)
+	defer release()
+	for _, status := range service.Statuses(time.Now().UTC()) {
+		if status.Rule.Scope == ratelimit.ScopeUserPath {
+			require.Equal(t, int64(2), status.RequestsUsed, "the admitted fallback counts once")
 		}
 	}
 	require.Equal(t, 2, checker.calls)

@@ -256,17 +256,44 @@ func (s *Service) HasTokenRules() bool {
 // Reservation represents one admitted request. Release must be called when
 // the request finishes so concurrency slots return; it is idempotent.
 type Reservation struct {
-	limiter *limiter
-	held    []ruleKey
-	headers HeaderSnapshot
-	once    sync.Once
+	limiter         *limiter
+	held            []ruleKey
+	headers         HeaderSnapshot
+	consumerHeaders HeaderSnapshot
+	once            sync.Once
+	routeOnce       sync.Once
 }
 
 func (r *Reservation) Release() {
 	if r == nil || r.limiter == nil {
 		return
 	}
-	r.once.Do(func() { r.limiter.release(r.held) })
+	r.ReleaseRoute()
+	r.once.Do(func() {
+		var held []ruleKey
+		for _, key := range r.held {
+			if key.scope == ScopeUserPath {
+				held = append(held, key)
+			}
+		}
+		r.limiter.release(held)
+	})
+}
+
+// ReleaseRoute frees attempt capacity while retaining consumer concurrency.
+func (r *Reservation) ReleaseRoute() {
+	if r == nil || r.limiter == nil {
+		return
+	}
+	r.routeOnce.Do(func() {
+		var held []ruleKey
+		for _, key := range r.held {
+			if key.scope != ScopeUserPath {
+				held = append(held, key)
+			}
+		}
+		r.limiter.release(held)
+	})
 }
 
 // Headers returns the x-ratelimit-* snapshot captured at admission.
@@ -275,6 +302,14 @@ func (r *Reservation) Headers() HeaderSnapshot {
 		return HeaderSnapshot{}
 	}
 	return r.headers
+}
+
+// ConsumerHeaders excludes provider/model limits from the admission snapshot.
+func (r *Reservation) ConsumerHeaders() HeaderSnapshot {
+	if r == nil {
+		return HeaderSnapshot{}
+	}
+	return r.consumerHeaders
 }
 
 // Acquire admits or rejects a request for the given subjects. On rejection
@@ -297,11 +332,12 @@ func (s *Service) Acquire(subjects Subjects, now time.Time) (*Reservation, error
 	if len(matching) == 0 {
 		return &Reservation{}, nil
 	}
-	headers, held, exceeded := s.limiter.admit(matching, now)
+	var consumerHeaders HeaderSnapshot
+	headers, held, exceeded := s.limiter.admit(matching, now, &consumerHeaders)
 	if exceeded != nil {
 		return nil, exceeded
 	}
-	return &Reservation{limiter: s.limiter, held: held, headers: headers}, nil
+	return &Reservation{limiter: s.limiter, held: held, headers: headers, consumerHeaders: consumerHeaders}, nil
 }
 
 // RouteAvailable reports whether the provider/model route currently has

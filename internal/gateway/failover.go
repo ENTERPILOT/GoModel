@@ -114,8 +114,17 @@ func tryFailoverResponse[T any](
 		)
 
 		started := time.Now()
+		release, admissionErr := acquireAttempt(ctx, providerName, qualified)
+		if admissionErr != nil {
+			if !routeAdmissionRejected(admissionErr) {
+				return zero, ExecutionMeta{}, admissionErr
+			}
+			continue
+		}
 		attempts++
-		resp, resolvedProviderType, err := call(selector, providerType, providerName)
+		resp, resolvedProviderType, err := callReserved(release, func() (T, string, error) {
+			return call(selector, providerType, providerName)
+		})
 		recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindFailover, firstNonEmptyString(resolvedProviderType, providerType), providerName, qualified, started, err))
 		if err == nil {
 			slog.Info("failover model attempt succeeded",
@@ -156,6 +165,9 @@ func executeWithFailoverResponse[T any](
 	if err == nil {
 		return resp, ExecutionMeta{ProviderType: resolvedProviderType, ProviderName: resolvedProviderName}, nil
 	}
+	if stopsFailover(err) {
+		return resp, ExecutionMeta{}, err
+	}
 	return tryFailoverResponse(ctx, o, workflow, model, provider, err, eligible, failoverFn)
 }
 
@@ -179,6 +191,12 @@ func executeTranslatedWithFailover[Req any, Resp any](
 				recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, ProviderTypeFromWorkflow(workflow), ProviderNameFromWorkflow(workflow), currentSelectorForWorkflow(workflow, model, provider), started, saturated))
 				return zero, "", "", saturated
 			}
+			release, err := acquireAttempt(ctx, ProviderNameFromWorkflow(workflow), currentSelectorForWorkflow(workflow, model, provider))
+			if err != nil {
+				recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, ProviderTypeFromWorkflow(workflow), ProviderNameFromWorkflow(workflow), currentSelectorForWorkflow(workflow, model, provider), started, err))
+				return zero, "", "", err
+			}
+			defer release()
 			resp, responseProvider, err := call(ctx, req, ProviderNameFromWorkflow(workflow))
 			attemptProviderType := ResponseProviderType(ProviderTypeFromWorkflow(workflow), responseProvider)
 			recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, attemptProviderType, ProviderNameFromWorkflow(workflow), currentSelectorForWorkflow(workflow, model, provider), started, err))
@@ -209,6 +227,9 @@ func tryFailoverStream(
 	primaryErr error,
 	call func(selector core.ModelSelector, providerType, providerName string) (io.ReadCloser, string, string, error),
 ) (io.ReadCloser, ExecutionMeta, error) {
+	if stopsFailover(primaryErr) {
+		return nil, ExecutionMeta{}, primaryErr
+	}
 	// See tryFailoverResponse: never sweep failover targets once the context is
 	// done, or the doomed attempts pollute healthy providers' circuit breakers.
 	if ctx.Err() != nil {
@@ -261,8 +282,17 @@ func tryFailoverStream(
 		)
 
 		started := time.Now()
+		release, admissionErr := acquireAttempt(ctx, providerName, qualified)
+		if admissionErr != nil {
+			if !routeAdmissionRejected(admissionErr) {
+				return nil, ExecutionMeta{}, admissionErr
+			}
+			continue
+		}
 		attempts++
-		stream, resolvedProviderType, usageModel, err := call(selector, providerType, providerName)
+		stream, resolvedProviderType, usageModel, err := callReservedStream(release, func() (io.ReadCloser, string, string, error) {
+			return call(selector, providerType, providerName)
+		})
 		recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindFailover, firstNonEmptyString(resolvedProviderType, providerType), providerName, qualified, started, err))
 		if err == nil {
 			slog.Info("failover stream attempt succeeded",
@@ -312,12 +342,8 @@ func (o *InferenceOrchestrator) ExecutePassthroughWithFailover(ctx context.Conte
 	if workflow != nil && workflow.Resolution != nil {
 		primary = workflow.Resolution.ResolvedSelector
 	}
-	type answer struct {
-		resp     *core.PassthroughResponse
-		selector core.ModelSelector
-	}
 	result, meta, err := executeWithFailoverResponse(ctx, o, workflow, primary.Model, primary.Provider,
-		func() (answer, string, string, error) {
+		func() (*core.PassthroughResponse, string, string, error) {
 			started := time.Now()
 			providerType, providerName := ProviderTypeFromWorkflow(workflow), ProviderNameFromWorkflow(workflow)
 			qualified := primary.QualifiedModel()
@@ -325,25 +351,36 @@ func (o *InferenceOrchestrator) ExecutePassthroughWithFailover(ctx context.Conte
 			// stored 429 becomes the primary failure that starts the sweep.
 			if saturated := core.PrimaryRouteSaturated(ctx); saturated != nil {
 				recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, providerType, providerName, qualified, started, saturated))
-				return answer{}, "", "", saturated
+				return nil, "", "", saturated
 			}
-			resp, err := call(ctx, primary, providerType, providerName)
+			release, err := acquireAttempt(ctx, providerName, qualified)
+			if err != nil {
+				return nil, "", "", err
+			}
+			resp, _, err := callReserved(release, func() (*core.PassthroughResponse, string, error) {
+				resp, err := call(ctx, primary, providerType, providerName)
+				return resp, providerType, err
+			})
 			recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, providerType, providerName, qualified, started, err))
 			if err != nil {
-				return answer{}, "", "", err
+				return nil, "", "", err
 			}
-			return answer{resp: resp, selector: primary}, providerType, providerName, nil
+			return resp, providerType, providerName, nil
 		},
 		eligible,
-		func(selector core.ModelSelector, providerType, providerName string) (answer, string, error) {
+		func(selector core.ModelSelector, providerType, providerName string) (*core.PassthroughResponse, string, error) {
 			// A failover target gets a different body, so it must not reuse
 			// the client's idempotency key.
 			resp, err := call(core.WithIdempotencyKey(ctx, ""), selector, providerType, providerName)
 			if err != nil {
-				return answer{}, "", err
+				return nil, "", err
 			}
-			return answer{resp: resp, selector: selector}, providerType, nil
+			return resp, providerType, nil
 		},
 	)
-	return result.resp, result.selector, meta, err
+	executed := primary
+	if meta.UsedFailover {
+		executed, _ = core.ParseModelSelector(meta.FailoverModel, "")
+	}
+	return result, executed, meta, err
 }

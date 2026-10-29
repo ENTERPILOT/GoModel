@@ -119,7 +119,7 @@ func (l *limiter) counter(counters map[ruleKey]*windowCounter, key ruleKey) *win
 // the most-constrained matching limits. On breach it reports the exceeded
 // rule with the longest recovery, so Retry-After stays honest when several
 // windows (e.g. minute and day) are exhausted at once.
-func (l *limiter) admit(rules []Rule, now time.Time) (HeaderSnapshot, []ruleKey, *ExceededError) {
+func (l *limiter) admit(rules []Rule, now time.Time, consumer ...*HeaderSnapshot) (HeaderSnapshot, []ruleKey, *ExceededError) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -148,6 +148,12 @@ func (l *limiter) admit(rules []Rule, now time.Time) (HeaderSnapshot, []ruleKey,
 			counter := l.requests[key]
 			counter.current++
 			remaining := max(*rule.MaxRequests-counter.estimate(now, rule.PeriodSeconds), 0)
+			if rule.Scope == ScopeUserPath && len(consumer) > 0 && (!consumer[0].HasRequests || remaining < consumer[0].RequestRemaining) {
+				consumer[0].HasRequests = true
+				consumer[0].RequestLimit = *rule.MaxRequests
+				consumer[0].RequestRemaining = remaining
+				consumer[0].RequestResetAfter = counter.resetAfter(now, rule.PeriodSeconds)
+			}
 			if !headers.HasRequests || remaining < headers.RequestRemaining {
 				headers.HasRequests = true
 				headers.RequestLimit = *rule.MaxRequests
@@ -158,6 +164,12 @@ func (l *limiter) admit(rules []Rule, now time.Time) (HeaderSnapshot, []ruleKey,
 		if rule.MaxTokens != nil {
 			counter := l.tokens[key]
 			remaining := max(*rule.MaxTokens-counter.estimate(now, rule.PeriodSeconds), 0)
+			if rule.Scope == ScopeUserPath && len(consumer) > 0 && (!consumer[0].HasTokens || remaining < consumer[0].TokenRemaining) {
+				consumer[0].HasTokens = true
+				consumer[0].TokenLimit = *rule.MaxTokens
+				consumer[0].TokenRemaining = remaining
+				consumer[0].TokenResetAfter = counter.resetAfter(now, rule.PeriodSeconds)
+			}
 			if !headers.HasTokens || remaining < headers.TokenRemaining {
 				headers.HasTokens = true
 				headers.TokenLimit = *rule.MaxTokens

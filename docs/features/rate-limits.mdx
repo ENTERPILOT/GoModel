@@ -24,8 +24,16 @@ The scopes behave differently on breach. A **user path** over its limit gets
 `x-ratelimit-*` headers — switching models would not help, the consumer is the
 subject. A saturated **provider or model** is instead treated like an
 unavailable target: virtual-model load balancing and failover route around it
-while another target has capacity, and only when no viable target remains does
-the client get `429`.
+while another target has capacity. If admission fails for every target, the
+client gets `429`. Skipping a saturated backup does not replace an error from
+a provider that was actually called, such as the primary's `503`.
+
+Failover counts the consumer once, at the first admitted provider attempt;
+locally rejected routes do not consume its request quota. Each admitted attempt
+counts against its own provider/model limits. Provider/model concurrency slots
+are released between attempts, while consumer concurrency remains reserved for
+the whole request. Streaming attempts retain their slots until the stream ends
+or is closed.
 
 Limits apply to every model endpoint: chat completions, responses, messages,
 embeddings, audio, passthrough, realtime sessions, and batch submission.

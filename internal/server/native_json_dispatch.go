@@ -87,6 +87,7 @@ func (s *translatedInferenceService) dispatchNativeJSON(
 		func(ctx context.Context, selector core.ModelSelector, providerType, providerName string) (*core.PassthroughResponse, error) {
 			return send(ctx, selector, providerType, providerName, headers.Clone())
 		})
+	adm.applyHeaders(c)
 	enrichAuditEntryWithProviderAttempts(c)
 	if err != nil {
 		return handleError(c, err)

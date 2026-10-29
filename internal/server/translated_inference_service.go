@@ -142,6 +142,7 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 			req.StreamOptions.IncludeUsage = true
 		}
 		result, err := s.inference().StreamChatCompletion(ctx, workflow, req)
+		adm.applyHeaders(c)
 		if err != nil {
 			return handleStreamingDispatchError(c, err)
 		}
@@ -155,6 +156,7 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 	}
 
 	result, err := s.inference().ExecuteChatCompletion(ctx, workflow, req, requestID, "/v1/chat/completions")
+	adm.applyHeaders(c)
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -375,6 +377,7 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 			ctx = core.WithEnforceReturningUsageData(ctx, true)
 		}
 		result, err := s.inference().StreamResponses(ctx, workflow, req)
+		adm.applyHeaders(c)
 		if err != nil {
 			return handleStreamingDispatchError(c, err)
 		}
@@ -393,6 +396,7 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 	}
 
 	result, err := s.inference().ExecuteResponses(ctx, workflow, req, requestID, "/v1/responses")
+	adm.applyHeaders(c)
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -600,7 +604,9 @@ func (s *translatedInferenceService) dispatchEmbeddings(c *echo.Context, req *co
 	defer adm.release()
 
 	requestID := requestIDFromContextOrHeader(c.Request())
-	result, err := s.inference().ExecuteEmbeddings(c.Request().Context(), workflow, req, requestID, "/v1/embeddings")
+	ctx := adm.dispatchContext(c.Request().Context())
+	result, err := s.inference().ExecuteEmbeddings(ctx, workflow, req, requestID, "/v1/embeddings")
+	adm.applyHeaders(c)
 	if err != nil {
 		return handleError(c, err)
 	}
