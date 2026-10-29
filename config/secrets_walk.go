@@ -37,7 +37,16 @@ func (r *LoadResult) resolveSecrets(ctx context.Context) error {
 	if r.Config == nil {
 		return nil
 	}
+	tlsConfigured := r.Config.Server.TLSEnabled()
 	if err := r.Secrets.ResolveFields(ctx, "", r.Config); err != nil {
+		return err
+	}
+	// References that resolve to empty must not quietly fall back to plain
+	// HTTP, nor leave half a pair.
+	if tlsConfigured && !r.Config.Server.TLSEnabled() {
+		return fmt.Errorf("server.tls_cert_file and server.tls_key_file resolved to empty values")
+	}
+	if err := ValidateServerTLS(r.Config.Server); err != nil {
 		return err
 	}
 	return validateResolvedMCP(&r.Config.MCP)

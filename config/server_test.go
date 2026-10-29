@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -182,4 +183,36 @@ func TestServerTLSPathReferencesResolve(t *testing.T) {
 		assert.Equal(t, "/etc/tls/tls.crt", result.Config.Server.TLSCertFile)
 		assert.Equal(t, "/etc/tls/tls.key", result.Config.Server.TLSKeyFile)
 	})
+}
+
+// A reference that resolves to empty must fail instead of quietly serving
+// plain HTTP or half a pair. The built-in schemes already reject empty values;
+// a scheme an extension registers, such as a vault, may not.
+func TestServerTLSReferencesResolvingEmptyFail(t *testing.T) {
+	tests := []struct {
+		name    string
+		cert    string
+		wantErr string
+	}{
+		{name: "both empty", cert: "${blank:cert}", wantErr: "resolved to empty values"},
+		{name: "key empty", cert: "/etc/tls/tls.crt", wantErr: "must be set together"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllConfigEnvVars(t)
+			withTempDir(t, func(dir string) {
+				yaml := "server:\n  tls_cert_file: " + tt.cert + "\n  tls_key_file: ${blank:key}\n"
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0o600))
+
+				result, err := Load()
+				require.NoError(t, err)
+				require.NoError(t, result.Secrets.Register("blank", SecretResolverFunc(func(context.Context, string) (string, error) {
+					return "", nil
+				})))
+				err = result.ResolveSecrets(t.Context())
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+			})
+		})
+	}
 }

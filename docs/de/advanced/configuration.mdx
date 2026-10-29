@@ -207,7 +207,9 @@ server:
 Der Listener liefert dann nur noch HTTPS aus, mit TLS 1.2 oder neuer und HTTP/2.
 Die Dateien werden alle 5 Sekunden geprüft, und ein rotiertes Zertifikat wird
 ohne Neustart übernommen; eine Rotation, die sich nicht laden lässt, behält das
-bisherige. Nur eine Hälfte des Paars zu setzen oder eine beim Start fehlende
+bisherige. Eine rotierte Client-CA gilt ab dem nächsten TLS-Handshake; offene
+Verbindungen behalten den Zugriff, den sie erhalten haben. Nur eine Hälfte des
+Paars zu setzen oder eine beim Start fehlende
 oder ungültige Datei ist ein Fehler. Die Pfade akzeptieren `${env:...}`- und
 `${file:...}`-Referenzen wie andere Einstellungen. Diese Einstellungen betreffen
 nur eingehende Verbindungen; das [Vertrauen für ausgehendes

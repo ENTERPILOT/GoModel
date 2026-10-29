@@ -88,6 +88,8 @@ func TestNewRejectsUnusableFiles(t *testing.T) {
 	garbage := filepath.Join(dir, "garbage.pem")
 	require.NoError(t, os.WriteFile(garbage, []byte("not a certificate"), 0o600))
 	missing := filepath.Join(dir, "missing.pem")
+	malformedCA := filepath.Join(dir, "malformed-ca.pem")
+	require.NoError(t, os.WriteFile(malformedCA, append(append([]byte{}, ca.PEM...), "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n"...), 0o600))
 
 	tests := []struct {
 		name     string
@@ -100,6 +102,7 @@ func TestNewRejectsUnusableFiles(t *testing.T) {
 		{"key does not match", Settings{CertFile: certFile, KeyFile: otherKey}, "load certificate"},
 		{"missing client CA", Settings{CertFile: certFile, KeyFile: keyFile, ClientCAFile: missing}, "missing.pem"},
 		{"client CA is not PEM", Settings{CertFile: certFile, KeyFile: keyFile, ClientCAFile: garbage}, "no PEM certificates"},
+		{"client CA bundle drops a CA", Settings{CertFile: certFile, KeyFile: keyFile, ClientCAFile: malformedCA}, "certificate 2"},
 		{"half configured", Settings{CertFile: certFile}, "both a certificate and a key"},
 		{"certificate is a directory", Settings{CertFile: dir, KeyFile: keyFile}, "not a regular file"},
 	}

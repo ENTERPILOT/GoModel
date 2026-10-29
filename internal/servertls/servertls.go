@@ -7,6 +7,7 @@ package servertls
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -210,13 +211,40 @@ func load(settings Settings) (*tls.Config, error) {
 		if err != nil {
 			return nil, fmt.Errorf("server TLS: read client CA: %w", err)
 		}
-		// Only the configured CAs: the system store must not vouch for clients.
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(caPEM) {
-			return nil, fmt.Errorf("server TLS: client CA file %s contains no PEM certificates", settings.ClientCAFile)
+		pool, err := clientCAPool(caPEM)
+		if err != nil {
+			return nil, fmt.Errorf("server TLS: client CA file %s: %w", settings.ClientCAFile, err)
 		}
 		cfg.ClientCAs = pool
 		cfg.ClientAuth = tls.VerifyClientCertIfGiven
 	}
 	return cfg, nil
+}
+
+// clientCAPool holds only the configured CAs: the system store must not vouch
+// for clients. Unlike AppendCertsFromPEM, it rejects a certificate block that
+// does not parse, so a bundle cannot silently drop one of its CAs.
+func clientCAPool(data []byte) (*x509.CertPool, error) {
+	pool := x509.NewCertPool()
+	count := 0
+	for {
+		var block *pem.Block
+		block, data = pem.Decode(data)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("certificate %d: %w", count+1, err)
+		}
+		pool.AddCert(cert)
+		count++
+	}
+	if count == 0 {
+		return nil, errors.New("contains no PEM certificates")
+	}
+	return pool, nil
 }

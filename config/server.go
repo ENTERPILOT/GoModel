@@ -122,8 +122,10 @@ type ServerConfig struct {
 
 	// TLSClientCAFile requires a client certificate signed by a CA in this PEM
 	// bundle on every request except /health and /health/ready, which probes
-	// reach without one (mTLS). Requires TLSCertFile and TLSKeyFile; reloaded
-	// with them.
+	// reach without one (mTLS). The CA is checked during the TLS handshake, so
+	// a rotated CA applies from the next one; an open connection keeps the
+	// access it was granted. Requires TLSCertFile and TLSKeyFile; reloaded with
+	// them.
 	// Default: empty (no client certificate requested)
 	TLSClientCAFile string `yaml:"tls_client_ca_file" env:"SERVER_TLS_CLIENT_CA_FILE"`
 }
