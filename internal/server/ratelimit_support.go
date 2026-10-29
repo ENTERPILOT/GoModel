@@ -12,6 +12,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
 )
 
@@ -99,22 +100,40 @@ func reserveRateLimit(ctx context.Context, limiter RateLimiter, route rateLimitR
 
 // admission is the outcome of the shared admission sequence. release must run
 // when the request finishes. saturatedRoute, when set, is the 429 the client
-// would have received for a provider/model-scoped breach: the request was
-// admitted against its consumer limits anyway so dispatch can skip the
-// saturated primary and sweep the configured failover targets.
+// would have received for a provider/model-scoped breach. Dispatch skips the
+// saturated primary; consumer quota is committed when an alternate is admitted.
 type admission struct {
 	release        func()
 	saturatedRoute error
+	attempts       *requestAttemptAdmission
 }
 
 // dispatchContext stamps the saturated-route marker for the orchestrator.
 func (a admission) dispatchContext(ctx context.Context) context.Context {
+	if a.attempts != nil {
+		ctx = gateway.WithAttemptAdmission(ctx, a.attempts)
+	} else {
+		ctx = gateway.WithAttemptAdmission(ctx, nil)
+	}
 	return core.WithPrimaryRouteSaturated(ctx, a.saturatedRoute)
 }
 
-// enforceAdmission runs the shared admission sequence — rate limits first,
-// then budget. On a budget rejection the reservation is released here, so
-// callers never hold a concurrency slot for a refused request.
+func (a admission) applyHeaders(c *echo.Context) {
+	if a.attempts != nil {
+		snapshot := a.attempts.headers
+		elapsed := time.Since(a.attempts.headersAt)
+		snapshot.RequestResetAfter = max(snapshot.RequestResetAfter-elapsed, 0)
+		snapshot.TokenResetAfter = max(snapshot.TokenResetAfter-elapsed, 0)
+		headers := c.Response().Header()
+		for _, name := range []string{rateLimitLimitRequestsHeader, rateLimitRemainingRequestsHeader, rateLimitResetRequestsHeader, rateLimitLimitTokensHeader, rateLimitRemainingTokensHeader, rateLimitResetTokensHeader} {
+			headers.Del(name)
+		}
+		applyRateLimitHeaders(headers, snapshot)
+	}
+}
+
+// enforceAdmission checks budgets and rate limits. Resolved routes check budget
+// before committing request counters, so rejected requests consume no quota.
 func enforceAdmission(c *echo.Context, limiter RateLimiter, checker BudgetChecker, route rateLimitRoute) (admission, error) {
 	if c == nil || c.Request() == nil {
 		return admission{release: noopRelease}, nil
@@ -125,6 +144,9 @@ func enforceAdmission(c *echo.Context, limiter RateLimiter, checker BudgetChecke
 // admit is enforceAdmission over a context, for callers without an HTTP
 // exchange. onReserve, when set, receives each admitted reservation.
 func admit(ctx context.Context, limiter RateLimiter, checker BudgetChecker, route rateLimitRoute, onReserve func(*ratelimit.Reservation)) (admission, error) {
+	if limiter != nil && route.provider != "" && route.model != "" {
+		return admitAttemptRequest(ctx, limiter, checker, route, onReserve)
+	}
 	release, err := reserveRateLimit(ctx, limiter, route, onReserve)
 	var saturated error
 	if err != nil {
@@ -265,12 +287,12 @@ func applyRateLimitHeaders(target http.Header, snapshot ratelimit.HeaderSnapshot
 	if snapshot.HasRequests {
 		target.Set(rateLimitLimitRequestsHeader, strconv.FormatInt(snapshot.RequestLimit, 10))
 		target.Set(rateLimitRemainingRequestsHeader, strconv.FormatInt(snapshot.RequestRemaining, 10))
-		target.Set(rateLimitResetRequestsHeader, strconv.FormatInt(retryAfterSeconds(snapshot.RequestResetAfter), 10))
+		target.Set(rateLimitResetRequestsHeader, strconv.FormatInt(max(int64(math.Ceil(snapshot.RequestResetAfter.Seconds())), 0), 10))
 	}
 	if snapshot.HasTokens {
 		target.Set(rateLimitLimitTokensHeader, strconv.FormatInt(snapshot.TokenLimit, 10))
 		target.Set(rateLimitRemainingTokensHeader, strconv.FormatInt(snapshot.TokenRemaining, 10))
-		target.Set(rateLimitResetTokensHeader, strconv.FormatInt(retryAfterSeconds(snapshot.TokenResetAfter), 10))
+		target.Set(rateLimitResetTokensHeader, strconv.FormatInt(max(int64(math.Ceil(snapshot.TokenResetAfter.Seconds())), 0), 10))
 	}
 }
 

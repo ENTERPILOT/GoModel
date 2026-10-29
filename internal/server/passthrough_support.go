@@ -208,6 +208,10 @@ func copyPassthroughResponseHeaders(dst, src http.Header) {
 		if _, hopByHop := connectionHeaders[canonicalKey]; hopByHop {
 			continue
 		}
+		// Gateway quotas take precedence over the upstream's unrelated quotas.
+		if strings.HasPrefix(canonicalKey, "X-Ratelimit-") && dst.Get(canonicalKey) != "" {
+			continue
+		}
 		dst.Del(canonicalKey)
 		for _, value := range values {
 			dst.Add(canonicalKey, value)

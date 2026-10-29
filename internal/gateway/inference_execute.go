@@ -419,7 +419,9 @@ func streamTranslatedProviderRequest[Req any](
 	// the provider call and enters the failover sweep with its stored 429.
 	err := core.PrimaryRouteSaturated(ctx)
 	if err == nil {
-		stream, err = call(ctx, req, providerName)
+		stream, err = callAdmittedStream(ctx, providerName, currentSelectorForWorkflow(workflow, model, provider), func() (io.ReadCloser, error) {
+			return call(ctx, req, providerName)
+		})
 		if err == nil && stream != nil {
 			recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, providerType, providerName, currentSelectorForWorkflow(workflow, model, provider), started, nil))
 			return stream, ExecutionMeta{ProviderType: providerType, ProviderName: providerName, Model: usageModel}, nil
@@ -554,6 +556,12 @@ func (o *InferenceOrchestrator) executeEmbeddings(
 	providerName := ProviderNameFromWorkflow(workflow)
 	selector := currentSelectorForWorkflow(workflow, req.Model, req.Provider)
 	started := time.Now()
+	release, err := acquireAttempt(ctx, providerName, selector)
+	if err != nil {
+		recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, providerType, providerName, selector, started, err))
+		return nil, "", "", err
+	}
+	defer release()
 	resp, err := o.provider.Embeddings(ctx, req)
 	if err == nil && resp == nil {
 		err = emptyProviderResponseError(providerName)
