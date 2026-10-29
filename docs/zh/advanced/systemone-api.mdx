@@ -8,7 +8,7 @@ keywords: ["System One", "systemone", "Jev", "Kev", "TypeSafe", "决策模型", 
 `POST /v1/systemone` 提供 TypeSafe 的 System One API：请求携带一个
 `state`（要评估的文本或记录）和一组类型化问题，回答则是每个问题经过校准的概率。它是决策 API，而不是文本生成器，因此 GoModel 会以**原生**方式转发它，从不在它与聊天格式之间进行翻译。如需使用 OpenAI 的请求和回答结构访问相同的模型，请使用 [Decisions API](/zh/advanced/decisions-api)，GoModel 会将其翻译为 System One。
 
-配置了 [`jev` 提供商](/zh/providers/jev)（托管的 Jev 或自托管的 Kev 服务器）、`openrouter` 提供商或 [`azure` 提供商](/zh/providers/azure)（Microsoft-Decision-1）后，该端点即可使用。否则，它会返回 `404`。
+配置了 [`jev` 提供商](/zh/providers/jev)（托管的 Jev 或自托管的 Kev 服务器）、`openrouter` 提供商或 [`azure` 提供商](/zh/providers/azure#决策模型)（Microsoft-Decision-1）后，该端点即可使用。否则，它会返回 `404`。
 
 ## 请求与回答
 

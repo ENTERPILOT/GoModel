@@ -292,7 +292,11 @@ durchgängig erhalten:
   Ausgabe selbst abschneidet, weil OpenAI `stop` für sie ablehnt. Andere Modelle der
   OpenAI-Familie vermischen Treffer des Stop-Parameters mit natürlichen Stopps in
   `finish_reason`, sodass Completions dort `stop_reason: "end_turn"` melden (die
-  Ausgabe wird trotzdem korrekt abgeschnitten).
+  Ausgabe wird trotzdem korrekt abgeschnitten). OpenAI (außer den oben genannten
+  Reasoning-Modellen), Azure OpenAI und Groq akzeptieren höchstens vier
+  Stop-Sequenzen; eine längere Liste wird auf die ersten vier gekürzt (mit einer
+  Warnung im Gateway-Log), statt den Request scheitern zu lassen. Anthropic
+  akzeptiert die vollständige Liste.
 - **`output_config`**: `effort` legt den Reasoning-Effort fest (mit Vorrang vor dem
   aus `thinking` abgeleiteten), und `format` (oder das ältere `output_format` auf
   oberster Ebene) wird zu Structured Output mit JSON-Schema — strikt, wenn das

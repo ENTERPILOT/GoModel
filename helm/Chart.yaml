@@ -3,7 +3,7 @@ name: gomodel
 description: GoModel is a lightweight AI gateway that routes OpenAI-compatible requests to many LLM providers.
 type: application
 version: 0.2.0
-appVersion: "0.1.89"
+appVersion: "0.2.0"
 kubeVersion: ">=1.25.0-0"
 
 keywords:

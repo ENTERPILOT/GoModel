@@ -1,6 +1,6 @@
 ---
 title: "Google Vertex AI"
-description: "Konfigurieren Sie Gemini auf Google Vertex AI in GoModel, einschließlich ADC- und Service-Account-Authentifizierung, Regionen sowie nativem und OpenAI-kompatiblem Routing."
+description: "Konfigurieren Sie Gemini und Claude auf Google Vertex AI in GoModel, einschließlich ADC- und Service-Account-Authentifizierung, Regionen sowie nativem, OpenAI-kompatiblem oder Anthropic-Routing."
 icon: "/brand/vertex.svg"
 keywords: ["Google Vertex AI", "Gemini", "ADC", "Service-Account", "service account", "Provider-Einrichtung"]
 ---
@@ -24,7 +24,7 @@ OpenAI-kompatiblen Endpunkt, wenn Sie dessen Kompatibilitätsverhalten benötige
 VERTEX_PROJECT=my-gcp-project
 VERTEX_LOCATION=us-central1
 VERTEX_AUTH_TYPE=gcp_adc       # Standard; ADC über gcloud, GKE Workload Identity oder Metadata-Server
-VERTEX_API_MODE=native         # oder openai_compatible
+VERTEX_API_MODE=native         # oder openai_compatible, anthropic (Claude)
 ```
 
 Oder in `config.yaml`:
@@ -77,6 +77,39 @@ von Vertex AI. Im nativen Modus (dem Standard) werden die [Bild-Endpunkte](/de/a
 `generateContent`); im Modus `openai_compatible` wird die Bildgenerierung an den OpenAI-kompatiblen
 Endpunkt weitergeleitet, und Bildbearbeitungen werden abgelehnt. Vertex stellt weder Gemini Files
 noch OpenAI-kompatible Batch-Operationen bereit.
+
+Die Request-Übersetzung wird mit dem [Gemini-Provider](/de/providers/gemini) geteilt: Die
+Begrenzung des Reasoning-Efforts, die nie weitergeleiteten Penalties und die Behandlung von
+Thought-Signaturen gelten in beiden Modi für Vertex-Gemini-Modelle (`google/gemini-4-argon`, …),
+und der native Modus verwirft zusätzlich die Sampling-Parameter bei Gemini 3 und 4. Gemini 4 wird
+aus den Locations `global`, `us` und `eu` bedient.
+
+## Claude-Modelle
+
+Setzen Sie `api_mode: anthropic`, um Claude (Partnermodelle von Anthropic) über Vertex zu bedienen.
+Chat- und Responses-Requests werden als Anthropic Messages an
+`.../publishers/anthropic/models/{model}:rawPredict` gesendet (`:streamRawPredict` beim Streaming),
+authentifiziert mit denselben ADC- oder Service-Account-Credentials.
+
+Die Base-URL kann die `/endpoints/openapi`- oder `/publishers/google`-URL sein, die Sie bereits
+verwenden; GoModel leitet daraus die `/publishers/anthropic`-URL ab. Vertex listet Claude-Modelle
+nicht pro Projekt auf, führen Sie sie daher unter `models` auf. Verwenden Sie die Modell-ID von der
+Model-Garden-Karte.
+
+```yaml
+providers:
+  vertex-claude:
+    type: vertex
+    auth_type: gcp_service_account
+    service_account_file: /secrets/service-account.json
+    base_url: https://aiplatform.eu.rep.googleapis.com/v1/projects/my-gcp-project/locations/eu/endpoints/openapi
+    api_mode: anthropic
+    models:
+      - id: claude-sonnet-5
+```
+
+Eine Instanz in diesem Modus bedient nur Claude-Chat und -Responses; behalten Sie eine zweite
+`vertex`-Instanz für Gemini. Token-Zählung und Anthropic-Batches werden nicht unterstützt.
 
 ## Bild-Input
 

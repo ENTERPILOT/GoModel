@@ -45,6 +45,11 @@ func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
 	if effort == "" {
 		return &adapted, nil
 	}
+	if isGemmaModel(req.Model) {
+		// Gemma has no thinking level; the endpoint rejects every value.
+		adapted.ExtraFields = adapted.ExtraFields.Without("reasoning_effort")
+		return providers.DropReasoning(&adapted), nil
+	}
 	return providers.AdaptReasoningEffortRequest(&adapted, compatReasoningEffort(req.Model, effort))
 }
 
@@ -53,7 +58,8 @@ func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
 // so "minimal" is HTTP 400 on the models without that level (Gemini 3 Pro,
 // 3.7 and 3.8 Flash, Gemini 4) and "none" cannot turn thinking off on any
 // Gemini 3 or 4 model. Gemini 2.5 keeps the value: there it is a budget and
-// "none" disables thinking.
+// "none" disables thinking. Gemma is handled by the caller: it has no level
+// at all, so the effort is dropped before this runs.
 func compatReasoningEffort(model, effort string) string {
 	normalized := strings.ToLower(strings.TrimSpace(effort))
 	if normalized != "none" && normalized != "minimal" {

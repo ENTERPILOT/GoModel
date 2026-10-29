@@ -44,8 +44,14 @@ Routing als fünfminütige Cached-Content-Objekte von Gemini umsetzen. Die
 Wiederverwendung ist auf den für die Session gewählten API-Key beschränkt;
 Datenverkehr ohne Session mit rotierenden Keys überspringt das Anlegen der
 Objekte, damit eine Ressource nie unter falschen Zugangsdaten wiederverwendet
-wird. Vertex erhält derzeit den ursprünglichen Request ohne
-Cached-Content-Objekte.
+wird. Gemini-4-Modelle haben kein explizites Caching (Google cacht gemeinsame
+Präfixe implizit), daher werden für sie keine Objekte angelegt. Vertex erhält
+derzeit den ursprünglichen Request ohne Cached-Content-Objekte.
+
+Google speichert Gemini-API-Requests bei neuen Projekten im kostenpflichtigen
+Tarif standardmäßig. Im nativen Modus wird ein `store: false` aus Chat
+Completions als Geminis Opt-out pro Request weitergeleitet; der
+OpenAI-kompatible Endpunkt hat kein solches Feld.
 
 ## Base-URLs
 
@@ -76,7 +82,10 @@ Token-Zahlen mit einem Vorbehalt zur Kostenberechnung markiert.
 
 Im nativen Modus funktionieren die
 [OpenAI-kompatiblen Bild-Endpunkte](/de/advanced/images-api) mit
-Gemini-Bildmodellen (`gemini-2.5-flash-image`, ..., über `generateContent`).
+Gemini-Bildmodellen (`gemini-2.5-flash-image`, `gemini-3.1-flash-image`,
+`gemini-nano-banana-2.1`, ..., über `generateContent`). Liefert das Modell kein
+Bild, enthält der Fehler Geminis Finish-Reason und Meldung (zum Beispiel
+`IMAGE_RECITATION`).
 Google hat Imagen im August 2026 aus der AI-Studio-API entfernt; Imagen wird
 weiterhin auf [Vertex AI](/de/providers/vertex) bereitgestellt.
 Bildbearbeitungen erfordern den nativen Modus und ein Gemini-Bildmodell; Masken
@@ -129,28 +138,46 @@ Im nativen Modus wird `reasoning_effort` (oder `reasoning.effort`) in Geminis
 | ------------ | ------------------ | ------------------------- |
 | Gemini 2.5 | `thinkingBudget` 0 / 1024 | `thinkingBudget` 1024 / 8192 / 24576 |
 | Gemini 3 Flash, 3.5, 3.6 | `thinkingLevel: minimal` | `thinkingLevel` wie angegeben |
-| Gemini 3 Pro, 3.1 Pro, 3.7 Flash, 3.8 Flash | `thinkingLevel: low` | `thinkingLevel` wie angegeben |
+| Gemini 3 Pro, 3.1 Pro, 3.7 Flash, 3.8 Flash, Gemini 4 | `thinkingLevel: low` | `thinkingLevel` wie angegeben |
 
-Thinking lässt sich bei Gemini 3 nicht abschalten, und Pro-Modelle sowie 3.7
-und 3.8 Flash lehnen `minimal` ab. GoModel sendet daher die niedrigste Stufe,
-die diese Modelle akzeptieren, statt Googles 400 weiterzugeben. Ein explizites
-`extra_body.google.thinking_config` wird immer unverändert weitergeleitet.
+Thinking lässt sich bei Gemini 3 und 4 nicht abschalten, und Pro-Modelle, 3.7
+und 3.8 Flash sowie Gemini 4 (`gemini-4-argon`, ...) lehnen `minimal` ab.
+GoModel sendet daher die niedrigste Stufe, die diese Modelle akzeptieren, statt
+Googles 400 weiterzugeben. Ein explizites `extra_body.google.thinking_config`
+wird unverändert weitergeleitet, wenn es `thinking_budget` oder
+`thinking_level` setzt; andernfalls ergänzt `reasoning_effort` darin seine
+Stufe oder sein Budget. Dieselbe Begrenzung gilt im Modus `openai_compatible`,
+in dem Googles Endpunkt `reasoning_effort` als Thinking-Stufe weiterleitet und
+dieselben Werte ablehnt.
 
-## Sampling-Parameter bei Gemini 3
+Bei Gemini 4 zählen Thinking-Tokens gegen `max_tokens`, und eine lange Antwort,
+die das Ausgabelimit pro Request erreicht, endet mit `length` (Geminis
+`CONTINUATION`); GoModel setzt sie nicht fort.
 
-Googles Migrationsleitfäden für Gemini 3 empfehlen, `temperature`, `top_p` und
-`top_k` aus jedem Request zu entfernen, weil die Modelle auf ihre
-Standardwerte abgestimmt sind, und führen `candidate_count` für Gemini 3.x als
-nicht unterstützt. Im nativen Modus entfernt GoModel diese vier Felder daher
-für Gemini 3 und neuer (`gemini-3-*`, `gemini-3.5-*`, `gemini-3.8-*`, ...) und
-leitet sie für Gemini 2.5, Gemma und andere Modelle weiterhin weiter.
-`max_tokens`, `stop`, Penalties, `response_format` und Thinking-Einstellungen
-sind nicht betroffen.
+## Sampling-Parameter bei Gemini 3 und 4
+
+Googles Migrationsleitfäden für Gemini 3 und 4 empfehlen, `temperature`,
+`top_p` und `top_k` aus jedem Request zu entfernen, weil die Modelle auf ihre
+Standardwerte abgestimmt sind (Gemini 4 ignoriert sie), und führen
+`candidate_count` als nicht unterstützt. Im nativen Modus entfernt GoModel
+diese vier Felder daher für Gemini 3 und neuer (`gemini-3-*`, `gemini-3.8-*`,
+`gemini-4-*`, ...) und leitet sie für Gemini 2.5, Gemma und andere Modelle
+weiterhin weiter. `presence_penalty` und `frequency_penalty` werden nie
+weitergeleitet: Jedes aktuelle Modell der Gemini API, 2.5 eingeschlossen,
+antwortet mit HTTP 400 „Penalty is not enabled for this model“. `max_tokens`,
+`stop`, `response_format` und Thinking-Einstellungen sind nicht betroffen.
+
+Im Modus `openai_compatible` entfernt GoModel außerdem die Felder, die Googles
+Endpunkt als unbekannt ablehnt (`seed`, `logprobs`, `top_logprobs`, `store`,
+`metadata`, `logit_bias`, `top_k`, `prediction`, `prompt_cache_key`,
+`safety_identifier`, `verbosity`, `web_search_options`), zusammen mit den
+Penalties, und repariert die gestreamten Tool-Aufrufe, die dieser Endpunkt ohne
+`index` ausgibt und mit `stop` statt `tool_calls` beendet.
 
 ## Thought Signatures
 
-Gemini 3 hängt den von ihm ausgegebenen Funktionsaufrufen eine verschlüsselte
-`thoughtSignature` an und lehnt einen Folge-Request ab (HTTP 400, „Function
+Gemini 3 und 4 hängen den von ihnen ausgegebenen Funktionsaufrufen eine
+verschlüsselte `thoughtSignature` an und lehnen einen Folge-Request ab (HTTP 400, „Function
 call is missing a thought_signature“), wenn dieser Aufruf ohne Signatur im
 Verlauf zurückkommt. Im nativen Modus stellt GoModel die Signatur auf dieselbe
 Weise bereit wie Googles eigener OpenAI-kompatibler Endpunkt, sodass ein
@@ -180,12 +207,12 @@ beschrieben. Eine flache `thought_signature` (oder `thoughtSignature`) am
 Tool-Aufruf oder an dessen `function`-Objekt wird ebenfalls akzeptiert, sodass
 Clients, die für andere Gateways gebaut wurden, weiterhin funktionieren.
 
-Enthält ein Gemini-3-Verlauf einen Funktionsaufruf ohne jede Signatur (die
-Konversation begann mit einem anderen Modell, oder der Client hat das Feld
-verworfen), sendet GoModel Googles dokumentierten Platzhalter
-`skip_thought_signature_validator`, statt den 400 weiterzugeben. Die
-Reasoning-Kontinuität ist für diesen Turn eingeschränkt, senden Sie daher
-bevorzugt die echte Signatur zurück.
+Enthält ein Gemini-3- oder Gemini-4-Verlauf einen Funktionsaufruf ohne jede
+Signatur (die Konversation begann mit einem anderen Modell, oder der Client hat
+das Feld verworfen), sendet GoModel Googles dokumentierten Platzhalter
+`skip_thought_signature_validator`, statt den 400 weiterzugeben – im nativen
+Modus wie im Modus `openai_compatible`. Die Reasoning-Kontinuität ist für
+diesen Turn eingeschränkt, senden Sie daher bevorzugt die echte Signatur zurück.
 
 ## Bildeingabe
 
