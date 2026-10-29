@@ -135,3 +135,62 @@ func TestProxyPassthroughNonStreamingSkipsNonAccountableResponses(t *testing.T) 
 		})
 	}
 }
+
+// The passthrough contract proxies provider-native error bodies: the Anthropic
+// SDK parses {"type":"error",...} and loses its typed errors — and the
+// request_id — when the gateway rewrites the body into the OpenAI envelope.
+func TestProxyPassthroughRelaysProviderErrorBody(t *testing.T) {
+	body := `{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens: Field required"},"request_id":"req_011CexSaBK"}`
+	resp := &core.PassthroughResponse{
+		StatusCode: http.StatusBadRequest,
+		Headers: map[string][]string{
+			"Content-Type": {"application/json"},
+			"X-Upstream":   {"must-not-leak"},
+			"Set-Cookie":   {"session=secret"},
+		},
+		Body: io.NopCloser(strings.NewReader(body)),
+	}
+
+	c, rec := echotest.Post(t, "/p/anthropic/messages", `{}`)
+
+	info := &core.PassthroughRouteInfo{Provider: "anthropic", RawEndpoint: "messages"}
+	require.NoError(t, proxyPassthroughResponse(c, nil, nil, nil, "anthropic", "anthropic", "messages", info, resp))
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Equal(t, body, rec.Body.String(), "error body not relayed verbatim")
+	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+	for _, header := range []string{"X-Upstream", "Set-Cookie"} {
+		assert.Empty(t, rec.Header().Get(header), "%s should not be relayed", header)
+	}
+}
+
+// A provider error body the gateway cannot hand over as-is (an intermediary's
+// HTML page, an empty body, an oversized payload) still has to reach the
+// client as a parseable gateway error.
+func TestProxyPassthroughConvertsUnrelayableErrorBody(t *testing.T) {
+	cases := []struct {
+		name        string
+		contentType string
+		body        string
+	}{
+		{name: "HTML error page", contentType: "text/html", body: "<html>502</html>"},
+		{name: "empty body", contentType: "application/json", body: ""},
+		{name: "invalid JSON", contentType: "application/json", body: "{"},
+		{name: "oversized body", contentType: "application/json", body: `{"error":"` + strings.Repeat("x", maxRelayedPassthroughErrorBytes) + `"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := &core.PassthroughResponse{
+				StatusCode: http.StatusBadGateway,
+				Headers:    map[string][]string{"Content-Type": {tc.contentType}},
+				Body:       io.NopCloser(strings.NewReader(tc.body)),
+			}
+
+			c, rec := echotest.Post(t, "/p/anthropic/messages", `{}`)
+
+			info := &core.PassthroughRouteInfo{Provider: "anthropic", RawEndpoint: "messages"}
+			require.NoError(t, proxyPassthroughResponse(c, nil, nil, nil, "anthropic", "anthropic", "messages", info, resp))
+			require.Equal(t, http.StatusBadGateway, rec.Code)
+			assert.Contains(t, rec.Body.String(), `"error"`, "body is not a gateway error envelope")
+		})
+	}
+}

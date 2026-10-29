@@ -71,7 +71,12 @@ type CompatibleProvider struct {
 	// keys resolves the credential for each outbound request. Providers in this
 	// package read it directly (see realtime.go) so a websocket dial picks up
 	// the same rotation as the HTTP endpoints.
-	keys               *providers.Keyring
+	keys *providers.Keyring
+	// providerName names this provider in the values clients see — the
+	// response's provider field, file objects, translation errors. It is the
+	// configured instance name when the factory supplied one (so two
+	// instances of one type stay distinguishable), the provider type
+	// otherwise.
 	providerName       string
 	requestMutator     RequestMutator
 	adaptChatRequest   func(*core.ChatRequest) (*core.ChatRequest, error)
@@ -81,7 +86,7 @@ type CompatibleProvider struct {
 func NewCompatibleProvider(apiKey string, opts providers.ProviderOptions, cfg CompatibleProviderConfig) *CompatibleProvider {
 	p := &CompatibleProvider{
 		keys:               opts.Keyring(apiKey),
-		providerName:       cfg.ProviderName,
+		providerName:       opts.ClientName(cfg.ProviderName),
 		requestMutator:     cfg.RequestMutator,
 		adaptChatRequest:   cfg.AdaptChatRequest,
 		chatRequestHeaders: cfg.ChatRequestHeaders,
@@ -114,11 +119,25 @@ func (p *CompatibleProvider) SetBaseURL(url string) {
 	p.client.SetBaseURL(url)
 }
 
+// ProviderName returns the name this provider reports to clients: the
+// configured instance name when there is one, the provider type otherwise.
+// Providers that translate the Responses API themselves pass it on, so their
+// responses name the same instance the errors do.
+func (p *CompatibleProvider) ProviderName() string {
+	return p.providerName
+}
+
 // GetBaseURL returns the provider's current base URL. It reads from the client so
 // it always reflects SetBaseURL overrides (used to derive the realtime websocket
 // target without a separately retained, staleable copy).
 func (p *CompatibleProvider) GetBaseURL() string {
 	return p.client.BaseURL()
+}
+
+// HTTPClient returns the client the provider's requests go through, carrying
+// its outbound proxy and the gateway's TLS trust.
+func (p *CompatibleProvider) HTTPClient() *http.Client {
+	return p.client.HTTPClient()
 }
 
 func (p *CompatibleProvider) SetRequestMutator(mutator RequestMutator) {
@@ -196,6 +215,10 @@ func (p *CompatibleProvider) StreamChatCompletion(ctx context.Context, req *core
 	if err != nil {
 		return nil, err
 	}
+	// Chat SSE is relayed byte for byte: the chunk payloads are the upstream's
+	// own, so the instance naming this package applies covers only the
+	// provider field GoModel authors. An upstream that self-reports a
+	// "provider" member in its chunks (OpenRouter-style) keeps its value.
 	return providers.EnsureChatCompletionSSE(stream), nil
 }
 

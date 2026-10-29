@@ -14,6 +14,7 @@ import (
 
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/httpclient"
 )
 
 // captureOptionsFactory registers a provider type whose constructor records
@@ -36,7 +37,7 @@ func captureOptionsFactory(t *testing.T) (*ProviderFactory, *ProviderOptions) {
 func transportProxy(t *testing.T, client *http.Client, target string) *url.URL {
 	t.Helper()
 	require.NotNil(t, client)
-	transport, ok := client.Transport.(*http.Transport)
+	transport, ok := httpclient.CurrentTransport(client)
 	require.True(t, ok)
 	req, err := http.NewRequest(http.MethodGet, target, nil)
 	require.NoError(t, err)
@@ -160,7 +161,7 @@ func TestProviderFactory_SelectorErrorFailsTheRequest(t *testing.T) {
 	_, err := factory.Create(ProviderConfig{Name: "p", Type: "capture", APIKey: "k"})
 	require.NoError(t, err)
 
-	transport, ok := captured.HTTPClient.Transport.(*http.Transport)
+	transport, ok := httpclient.CurrentTransport(captured.HTTPClient)
 	require.True(t, ok)
 	req, err := http.NewRequest(http.MethodGet, "https://api.example.com/v1/models", nil)
 	require.NoError(t, err)

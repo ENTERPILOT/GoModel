@@ -59,9 +59,11 @@ surface; chat, embeddings, and images follow the API mode.
 
 In native mode, embeddings are served through `models/{model}:batchEmbedContents`.
 `dimensions` maps to `outputDimensionality` and `encoding_format: "base64"` is
-honored. Gemini reports no embedding token usage on either API surface, so
-embedding responses carry zero token counts and the usage row is flagged with
-a cost-calculation caveat.
+honored. Native mode records the token usage Gemini reports for newer models
+such as `gemini-embedding-2`. Older models such as `gemini-embedding-001`, and
+the OpenAI-compatible surface, report none, so those responses carry zero token
+counts. When the model is priced per token, these zero-count usage rows are
+flagged with a cost-calculation caveat.
 
 ## Image generation and edits
 
@@ -72,6 +74,40 @@ work with Gemini image models (`gemini-2.5-flash-image`, ..., via
 require native mode and a Gemini image model; masks are not supported. See the
 [Images API provider notes](/advanced/images-api#google-gemini) for parameter
 mapping and pricing details.
+
+### Images in chat responses
+
+In native mode, image-capable models (`gemini-2.5-flash-image`,
+`gemini-3-pro-image-preview`, ...) can return images from Chat Completions and
+Responses. `message.content` stays the text string. On Chat Completions the
+images go in a separate `images` array, the same field OpenRouter uses.
+Clients that don't read the field just ignore it:
+
+```json
+"message": {
+  "role": "assistant",
+  "content": "Here is an image of a cat",
+  "images": [{
+    "type": "image_url",
+    "image_url": {
+      "url": "data:image/png;base64,iVBORw0...",
+      "extra_content": {"google": {"thought_signature": "EvAC..."}}
+    }
+  }]
+}
+```
+
+On the Responses API each image is a separate `image_generation_call` output
+item. The base64 image is in `result` and the format in `output_format`, as in
+OpenAI's output. To edit the image in a later turn, send the assistant message
+(with `images`) or the `image_generation_call` item back unchanged, so Gemini
+gets each image's thought signature. `/v1/messages` (Anthropic Messages API)
+clients get only the text. Streaming responses don't include generated images
+yet.
+
+Each image is several megabytes of base64. Audit logs capture at most 1 MB of
+a response body, so a logged body is truncated and marked as such. The response
+cache stores the whole response.
 
 ## Reasoning effort
 

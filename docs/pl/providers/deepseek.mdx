@@ -7,7 +7,7 @@ keywords: ["DeepSeek", "reasoning effort", "poziom reasoningu", "konfiguracja pr
 
 DeepSeek nie udostępnia natywnego Responses API, więc GoModel automatycznie tłumaczy
 `/v1/responses` na `/chat/completions`. Mapuje też poziomy reasoningu w stylu OpenAI
-na dwa poziomy akceptowane przez DeepSeek.
+na poziomy akceptowane przez DeepSeek.
 
 ## Konfiguracja
 
@@ -34,19 +34,22 @@ providers:
 ## Mapowanie poziomu reasoningu
 
 Modele reasoningowe DeepSeek V4 przyjmują `reasoning_effort` jako string na najwyższym
-poziomie z dwoma dozwolonymi poziomami: `high` i `max`.
+poziomie z dwoma poziomami reasoningu, `high` i `max`, oraz `none`, które wyłącza reasoning.
 
 | Klient wysyła | DeepSeek otrzymuje |
 | ------------ | ----------------- |
-| `low` / `medium` / `high` | `high` |
+| `none` | `none` (reasoning wyłączony) |
+| `minimal` / `low` / `medium` / `high` | `high` |
 | `xhigh` / `max` | `max` |
 | cokolwiek innego | przekazywane dalej przez GoModel, a następnie odrzucane przez DeepSeek |
 
 GoModel przepisuje `"reasoning": {"effort": "..."}` w formacie OpenAI na
 `reasoning_effort` na najwyższym poziomie w formacie DeepSeek – bez zmian po stronie klienta.
 Własne wartości klienta zwaliduj lub znormalizuj do `high` albo `max` przed wywołaniem GoModel.
-Aby wyłączyć reasoning, całkowicie pomiń pole `reasoning`; każde podane
-`reasoning.effort`, łącznie z `low`, zostaje zmapowane i włącza reasoning.
+DeepSeek domyślnie używa reasoningu, więc pominięcie pola `reasoning` go nie wyłącza;
+aby go wyłączyć, wyślij `none`. Każde inne `reasoning.effort`, łącznie z `low`, zostaje zmapowane i włącza reasoning.
+[Wymuszony reasoning effort](/pl/features/virtual-models#wymuszanie-reasoning-effort)
+zawsze zastępuje wartość klienta.
 
 ## Wywołania narzędzi i reasoning
 

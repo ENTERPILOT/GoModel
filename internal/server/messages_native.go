@@ -28,8 +28,8 @@ const anthropicProviderType = "anthropic"
 // translation cannot round-trip (cache_control breakpoints, thinking block
 // signatures, anthropic-beta headers), which Claude Code clients depend on.
 // Features that operate on the canonical translated request take precedence:
-// requests using guardrails patching, response caching, or failover stay on
-// the translated pipeline. So does a request replaying an unsigned thinking
+// requests using guardrails patching, response caching, failover, or a forced
+// reasoning effort stay on the translated pipeline. So does a request replaying an unsigned thinking
 // block, which Anthropic rejects and only the translated pipeline can drop.
 func (s *translatedInferenceService) canForwardMessagesNatively(ctx context.Context, workflow *core.Workflow, unsignedThinking bool) bool {
 	if workflow == nil || strings.TrimSpace(workflow.ProviderType) != anthropicProviderType {
@@ -48,6 +48,11 @@ func (s *translatedInferenceService) canForwardMessagesNatively(ctx context.Cont
 		return false
 	}
 	if len(s.inference().FailoverSelectors(workflow)) > 0 {
+		return false
+	}
+	// A forced reasoning effort rewrites the request, which the verbatim
+	// body cannot carry.
+	if s.inference().ReasoningEffortOverride(ctx, workflow) != "" {
 		return false
 	}
 	_, ok := s.provider.(core.RoutablePassthrough)
@@ -69,7 +74,7 @@ func (s *translatedInferenceService) dispatchMessagesNative(c *echo.Context, req
 	}
 	body, err = rewriteMessagesModel(body, req.Model)
 	if err != nil {
-		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+		return handleError(c, invalidRequestBodyError(c, err))
 	}
 
 	s.observeLiveProviderAttempts(c, workflow)

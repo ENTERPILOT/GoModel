@@ -107,15 +107,16 @@ func TestExpandTypes(t *testing.T) {
 		cost ` + TypeFloat + `,
 		doc ` + TypeJSONText + ` NOT NULL DEFAULT '[]',
 		blob ` + TypeJSON + `,
-		at ` + TypeTimestamp + `
+		at ` + TypeTimestamp + `,
+		raw ` + TypeBytes + `
 	)`
 
 	tests := []struct {
 		dialect Dialect
 		want    []string
 	}{
-		{SQLite, []string{"INTEGER NOT NULL", "INTEGER NOT NULL DEFAULT TRUE", "REAL", "TEXT NOT NULL", "JSON", "DATETIME"}},
-		{PostgreSQL, []string{"BIGINT NOT NULL", "BOOLEAN NOT NULL DEFAULT TRUE", "DOUBLE PRECISION", "JSONB NOT NULL", "JSONB", "TIMESTAMPTZ"}},
+		{SQLite, []string{"INTEGER NOT NULL", "INTEGER NOT NULL DEFAULT TRUE", "REAL", "TEXT NOT NULL", "JSON", "DATETIME", "BLOB"}},
+		{PostgreSQL, []string{"BIGINT NOT NULL", "BOOLEAN NOT NULL DEFAULT TRUE", "DOUBLE PRECISION", "JSONB NOT NULL", "JSONB", "TIMESTAMPTZ", "BYTEA"}},
 	}
 
 	for _, tt := range tests {

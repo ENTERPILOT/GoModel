@@ -241,8 +241,13 @@ Anthropic, które nie mają kanonicznego odpowiednika, nie są zachowywane od po
   są tłumaczone na część treści `file` w stylu OpenAI (`file_data` dla treści
   inline, `file_url` dla zdalnych URL-i, `file_id` dla uploadów). Anthropic otrzymuje
   dokument z powrotem natywnie wraz z jego `title`; Gemini otrzymuje tylko dane inline;
-  providerzy kompatybilni z OpenAI otrzymują część `file` bez zmian. W OpenAI
-  PDF bez tytułu dostaje nazwę pliku (`document.pdf`), a dokumenty z URL przechodzą
+  providerzy kompatybilni z OpenAI otrzymują część `file` bez zmian. Wyjątkiem jest
+  DeepSeek: jego wejście plikowe obsługuje tylko obrazy (webp, png, jpeg, gif). Dokument
+  graficzny jest wysyłany jako `image_url` i pozostaje widoczny dla modelu, a dokument
+  tekstowy jest wysyłany jako tekst. Każdy inny dokument, w tym URL, który nie wskazuje
+  obrazu, staje się krótką notatką tekstową, która pojawia się zawsze i podaje nazwę
+  pliku tylko wtedy, gdy request ją zawiera; treść dokumentu nie jest wysyłana.
+  W OpenAI PDF bez tytułu dostaje nazwę pliku (`document.pdf`), a dokumenty z URL przechodzą
   przez Responses API. Dokument tekstowy w requeście, który pozostaje na Chat
   Completions, jest wysyłany jako tekst (poprzedzony swoim `title`), ponieważ akceptowane
   są tam tylko dane plików PDF; w requeście obsługiwanym przez Responses API,

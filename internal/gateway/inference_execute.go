@@ -186,7 +186,8 @@ func (o *InferenceOrchestrator) executeChatCompletion(
 	if err := o.validateProviderAndRequest(req != nil, "chat request is required"); err != nil {
 		return nil, ExecutionMeta{}, err
 	}
-	return executeTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, CloneChatRequestForSelector, o.chatCompletionProviderCall, chatResponseProvider)
+	call := withReasoningEffort(o, workflow, chatRequestSelectorOf, ChatRequestWithReasoningEffort, chatRequestWithClientReasoning, o.chatCompletionProviderCall)
+	return executeTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, CloneChatRequestForSelector, call, chatResponseProvider)
 }
 
 func (o *InferenceOrchestrator) streamChatCompletion(
@@ -198,7 +199,8 @@ func (o *InferenceOrchestrator) streamChatCompletion(
 	if err := o.validateProviderAndRequest(req != nil, "chat request is required"); err != nil {
 		return nil, ExecutionMeta{}, err
 	}
-	return streamTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, providerType, providerName, usageModel, CloneChatRequestForSelector, o.streamChatCompletionProviderCall)
+	call := withReasoningEffort(o, workflow, chatRequestSelectorOf, ChatRequestWithReasoningEffort, chatRequestWithClientReasoning, o.streamChatCompletionProviderCall)
+	return streamTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, providerType, providerName, usageModel, CloneChatRequestForSelector, call)
 }
 
 func (o *InferenceOrchestrator) executeResponses(
@@ -209,7 +211,8 @@ func (o *InferenceOrchestrator) executeResponses(
 	if err := o.validateProviderAndRequest(req != nil, "responses request is required"); err != nil {
 		return nil, ExecutionMeta{}, err
 	}
-	return executeTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, CloneResponsesRequestForSelector, patchedResponsesCall(o, workflow, o.responsesProviderCall), responsesResponseProvider)
+	call := withReasoningEffort(o, workflow, responsesRequestSelectorOf, ResponsesRequestWithReasoningEffort, responsesRequestWithClientReasoning, patchedResponsesCall(o, workflow, o.responsesProviderCall))
+	return executeTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, CloneResponsesRequestForSelector, call, responsesResponseProvider)
 }
 
 // patchedResponsesCall runs the Responses attempt patcher, when configured,
@@ -240,7 +243,8 @@ func (o *InferenceOrchestrator) streamResponses(
 	if err := o.validateProviderAndRequest(req != nil, "responses request is required"); err != nil {
 		return nil, ExecutionMeta{}, err
 	}
-	return streamTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, providerType, providerName, usageModel, CloneResponsesRequestForSelector, patchedResponsesCall(o, workflow, o.streamResponsesProviderCall))
+	call := withReasoningEffort(o, workflow, responsesRequestSelectorOf, ResponsesRequestWithReasoningEffort, responsesRequestWithClientReasoning, patchedResponsesCall(o, workflow, o.streamResponsesProviderCall))
+	return streamTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, providerType, providerName, usageModel, CloneResponsesRequestForSelector, call)
 }
 
 type translatedExecutionSpec[Req any, Resp any, Result any] struct {
@@ -357,7 +361,7 @@ func executeTranslatedProviderRequest[Req any, Resp any](
 	call func(context.Context, Req, string) (Resp, error),
 	responseProvider func(Resp) string,
 ) (Resp, ExecutionMeta, error) {
-	return executeTranslatedWithFailover(ctx, o, workflow, req, model, provider, cloneForSelector,
+	resp, meta, err := executeTranslatedWithFailover(ctx, o, workflow, req, model, provider, cloneForSelector,
 		func(ctx context.Context, req Req, providerName string) (Resp, string, error) {
 			resp, err := call(ctx, req, providerName)
 			if err != nil {
@@ -367,6 +371,36 @@ func executeTranslatedProviderRequest[Req any, Resp any](
 			return resp, responseProvider(resp), nil
 		},
 	)
+	if err != nil {
+		return resp, meta, err
+	}
+	// The provider type drives routing and audit filters, so it is what the
+	// attempt reported above; the client-facing field names the configured
+	// instance that served the request, as errors and breaker messages do.
+	return nameProviderInstance(resp, meta.ProviderName), meta, nil
+}
+
+// nameProviderInstance rewrites the response's public provider field to the
+// configured provider instance name. The router stamps the provider type; an
+// instance name is more precise whenever two instances share a type, and it
+// matches how the gateway names providers everywhere else. A request served
+// without a configured name keeps the type.
+func nameProviderInstance[Resp any](resp Resp, providerName string) Resp {
+	providerName = strings.TrimSpace(providerName)
+	if providerName == "" {
+		return resp
+	}
+	switch typed := any(resp).(type) {
+	case *core.ChatResponse:
+		if typed != nil {
+			typed.Provider = providerName
+		}
+	case *core.ResponsesResponse:
+		if typed != nil {
+			typed.Provider = providerName
+		}
+	}
+	return resp
 }
 
 func streamTranslatedProviderRequest[Req any](
@@ -518,12 +552,18 @@ func (o *InferenceOrchestrator) executeEmbeddings(
 	}
 	providerType := ProviderTypeFromWorkflow(workflow)
 	providerName := ProviderNameFromWorkflow(workflow)
+	selector := currentSelectorForWorkflow(workflow, req.Model, req.Provider)
+	started := time.Now()
 	resp, err := o.provider.Embeddings(ctx, req)
+	if err == nil && resp == nil {
+		err = emptyProviderResponseError(providerName)
+	}
 	if err == nil {
-		if resp == nil {
-			return nil, "", "", emptyProviderResponseError(providerName)
-		}
-		return resp, ResponseProviderType(providerType, resp.Provider), providerName, nil
+		providerType = ResponseProviderType(providerType, resp.Provider)
+	}
+	recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, providerType, providerName, selector, started, err))
+	if err == nil {
+		return resp, providerType, providerName, nil
 	}
 
 	return o.tryFailoverEmbeddings(ctx, workflow, req, err)

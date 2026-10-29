@@ -175,13 +175,79 @@ volume, restrict access, and classify backups accordingly.
 
 ### TLS
 
-GoModel does not terminate TLS. It serves plain HTTP and expects a reverse proxy
-or load balancer in front of it. Run one for any deployment that is not
-loopback-only: without it, client API keys, managed gateway keys, and the master
-key all cross the network in cleartext.
+By default GoModel serves plain HTTP and expects a reverse proxy or load
+balancer in front of it to terminate TLS. For any deployment that is not
+loopback-only, use one or turn on [native TLS](#native-tls): without either,
+client API keys, managed gateway keys, and the master key all cross the network
+in cleartext.
 
 There is also no CORS middleware, so browser clients on another origin cannot
 call the gateway directly. Add the headers at your proxy if you need that.
+
+### Native TLS
+
+Set a certificate and key and the listener serves HTTPS on the same port, with
+TLS 1.2 or later, Go's default cipher suites, and HTTP/2. Use it when clients
+reach the gateway directly, for example pod to pod through a Kubernetes
+Service: no TLS sidecar to maintain, and the gateway sees the real client
+address.
+
+```bash
+SERVER_TLS_CERT_FILE=/etc/gomodel/tls/tls.crt
+SERVER_TLS_KEY_FILE=/etc/gomodel/tls/tls.key
+# Optional: require a client certificate signed by this CA (mTLS)
+SERVER_TLS_CLIENT_CA_FILE=/etc/gomodel/tls/ca.crt
+```
+
+- The files are checked for changes at most every 5 seconds. A rotated
+  certificate, or client CA, is served from the next handshake on, with no
+  restart or reload.
+- A rotation that fails to load, such as a pair caught half written, keeps the
+  previous certificate and logs a warning. A missing or invalid file at startup
+  is an error.
+- Changing the paths takes effect on a
+  [configuration reload](/advanced/cli#configuration-reload).
+- Once TLS is on, the port no longer answers plain HTTP. `gomodel --health` and
+  `gomodel --ready`, which the Docker `HEALTHCHECK` runs, switch to HTTPS
+  automatically.
+
+**Kubernetes with cert-manager.** Issue the certificate into a Secret and mount
+it as a volume. Do not use `subPath`: the kubelet does not update `subPath`
+mounts, so a renewed certificate would never reach the pod.
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gomodel-tls
+spec:
+  secretName: gomodel-tls
+  dnsNames: [gomodel.ai.svc, gomodel.ai.svc.cluster.local]
+  issuerRef: { kind: ClusterIssuer, name: internal-ca }
+```
+
+With the Helm chart in `helm/`:
+
+```yaml
+env:
+  SERVER_TLS_CERT_FILE: /etc/gomodel/tls/tls.crt
+  SERVER_TLS_KEY_FILE: /etc/gomodel/tls/tls.key
+extraVolumes:
+  - name: tls
+    secret: { secretName: gomodel-tls }
+extraVolumeMounts:
+  - { name: tls, mountPath: /etc/gomodel/tls, readOnly: true }
+livenessProbe:
+  httpGet: { path: /health, port: http, scheme: HTTPS }
+readinessProbe:
+  httpGet: { path: /health/ready, port: http, scheme: HTTPS }
+```
+
+The kubelet does not verify the certificate of an HTTPS probe. With mTLS on,
+`/health` and `/health/ready` still answer without a client certificate, so
+these probes work unchanged; every other path returns 401 without a verified
+one. The chart's ServiceMonitor scrapes plain HTTP, so with native TLS define
+your own with `scheme: https`.
 
 ### Upstream certificates behind a private CA
 
@@ -202,6 +268,9 @@ docker run --rm -p 8080:8080 \
 
 `SSL_CERT_FILE` works too, but it replaces the bundle file rather than adding
 to it, so point it at a bundle that also contains the public roots you need.
+
+Outside a container, or to also send a client certificate, set
+`HTTP_TLS_CA_FILE` instead; see [Private CAs and proxies](#private-cas-and-proxies).
 
 ## Air-gapped and offline deployments
 
@@ -274,6 +343,52 @@ If a Bedrock provider is configured, the AWS SDK may also probe the link-local
 instance metadata endpoint (`169.254.169.254`) for credentials. An air-gapped
 install would not configure Bedrock, but it is worth knowing.
 
+## Private CAs and proxies
+
+Every outbound connection the gateway opens shares one HTTP transport, so
+proxy and trust settings are configured once and apply to providers, the model
+catalog, the update check, MCP upstreams, vector stores, and embedding
+endpoints alike.
+
+**Proxy.** Set the standard `HTTPS_PROXY` and `HTTP_PROXY` (each covers
+upstreams of its own scheme; most deployments only talk to `https://`
+upstreams, but a plain-HTTP model server would bypass a proxy set only through
+`HTTPS_PROXY`), plus `NO_PROXY` for local model servers. Nothing else is
+needed. If the proxy needs credentials, give it an `https://` URL: the scheme
+in the proxy variable describes the hop to the proxy, and an `http://` proxy
+URL sends `Proxy-Authorization` in cleartext. To send one provider through a
+different proxy, see [outbound proxy](/providers/outbound-proxy).
+
+**Private CA.** Mount the CA bundle and point the gateway at it:
+
+```bash
+HTTP_TLS_CA_FILE=/etc/gomodel/ca.pem
+```
+
+The bundle is appended to the system store, so public providers keep working
+next to internal ones. A missing or empty file fails startup rather than
+silently trusting less than you asked for.
+
+**Mutual TLS.** When an internal model server or egress proxy requires a client
+certificate:
+
+```bash
+HTTP_TLS_CLIENT_CERT_FILE=/etc/gomodel/tls.crt
+HTTP_TLS_CLIENT_KEY_FILE=/etc/gomodel/tls.key
+```
+
+A single client certificate is sent to every upstream that requests one.
+
+**Rotation.** GoModel reads these files at startup and on every
+[configuration reload](/advanced/cli#configuration-reload), but does not watch
+them. After a rotation, such as cert-manager renewing a mounted secret, run
+`gomodel --reload` (or send `SIGHUP`) or restart. If a rotated file fails to
+load, the reload is rejected and the running configuration keeps serving.
+
+The same settings live under `http.tls` in `config.yaml`. Avoid
+`HTTP_TLS_INSECURE_SKIP_VERIFY=true` outside a lab: it disables verification
+for every upstream, and the gateway warns about it at startup.
+
 ## Running more than one replica
 
 Request handling is stateless, so replicas need no affinity for ordinary
@@ -285,6 +400,7 @@ coordinate across instances.
 | [Budgets](/features/budgets) enforcement | Durable (database) | Correct across replicas. Spend is read from the shared usage table. |
 | [Usage and cost records](/features/cost-tracking) | Durable (database) | Aggregated correctly. |
 | Audit logs | Durable (database) | Complete across replicas. |
+| [SSO](/pro/sso) sign-out (Pro) | Durable (database) | A signed-out session is rejected on every replica within about 2 seconds. |
 | [Rate limits](/features/rate-limits) | In-memory, per instance | Effective limit is about `N x` the configured limit. Counters reset on restart. |
 | Circuit breakers | In-memory, per process | Each replica learns an outage separately, so upstream sees up to `N x failure_threshold` failures before any breaker opens. |
 | [Session affinity](/features/session-keeping) pins | In-memory, per instance | Sessions stick per replica, not globally, unless the load balancer is sticky. |
@@ -297,30 +413,39 @@ three replicas with a 100 rpm rule admit up to 300 rpm in aggregate. Size rules
 per replica, and use [budgets](/features/budgets) as the durable cross-instance
 control since they read from the shared database.
 
-### Config changes do not propagate instantly
+### Config changes reach every replica within seconds
 
-Admin-managed configuration is durable in the database but served from an
-in-memory snapshot on each replica. A change saved in the dashboard updates the
-replica that handled the request immediately. Other replicas pick it up on their
-own refresh cadence, and two of them have none.
+Admin-managed configuration is durable in the database and served from an
+in-memory snapshot on each replica. A change saved in the dashboard or admin API
+applies immediately on the replica that handled it, which also bumps a revision
+for that entity in the shared `config_revisions` table. Every replica polls the
+table every 2 seconds and reloads whatever moved, so the change reaches the
+others within a few seconds. Only the shared database is involved: no Redis, and
+it works the same on PostgreSQL and MongoDB.
 
-| Changed in the dashboard | Reaches other replicas after |
-| --- | --- |
-| Budget definitions | **Restart only** |
-| Rate limit rules | **Restart only** |
-| Virtual models (including failover chains) | Up to `CACHE_REFRESH_INTERVAL` (1 hour by default) |
-| Managed API keys | Up to 60 seconds |
-| Guardrails, workflows, pricing overrides | About 60 seconds |
+This covers budgets (definitions, settings, and resets), rate limit rules,
+provider credentials (add, edit, disable, delete), managed API keys (including
+revocation), user policies, virtual models, pricing overrides, tagging rules,
+guardrails, workflows, and MCP servers. A provider added on another replica
+starts routing once its model list has been fetched.
+
+A replica that fails to apply a change logs a warning once and retries on every
+poll until it applies. One exception: a stored provider that fails to build on a
+replica keeps whatever was already running under its name and is retried on the
+next change to any stored provider, since each change reloads all of them, or on
+restart. A replica that cannot record a change in `config_revisions` also
+retries on every poll. Until it succeeds, the other replicas pick the change up
+from a later change to the same feature, from the slower periodic refresh some
+features already had, from a manual runtime refresh, or on restart.
+
+`POST /admin/runtime/refresh` reloads managed API keys, virtual models,
+guardrails, workflows, MCP servers, budgets, and rate limits on the replica that
+receives it. It does not reload stored provider credentials.
 
 <Warning>
-  Two of these matter operationally. **Revoking a managed API key can take up to
-  a minute to take effect on other replicas.** And **a budget or rate limit rule
-  created in the dashboard does not reach other replicas until they restart**,
-  so with three replicas a new budget initially governs a third of your traffic.
-
-  If you run several replicas, declare budgets and rate limits as code in
-  `config.yaml` or environment variables so they are loaded identically at boot,
-  and restart after dashboard changes.
+  **Resetting rate limit counters applies to the replica that handled the
+  request only.** Counters are per instance (see the table above): rule changes
+  propagate, counter resets do not.
 </Warning>
 
 ### Health probes and shutdown
@@ -438,14 +563,14 @@ if the file size matters.
 ## Production checklist
 
 - Set `GOMODEL_MASTER_KEY` to a strong value.
-- Terminate TLS in a proxy in front of the gateway.
+- Terminate TLS in a proxy in front of the gateway, or turn on
+  [native TLS](#native-tls).
 - Restrict `/admin/*`, the dashboard, and `/metrics` at the network perimeter.
 - Use Postgres or MongoDB for more than one replica or any ephemeral filesystem;
   with SQLite, mount a volume and set `SQLITE_PATH`.
 - Declare providers in environment variables or `config.yaml`, with values from
   a secret manager.
-- Declare budgets and rate limits as code when running several replicas, and
-  size rate limit rules per replica.
+- Size rate limit rules per replica when running several replicas.
 - Decide on `LOGGING_LOG_BODIES` and set retention windows deliberately.
 - Point readiness at `/health/ready` and set
   `terminationGracePeriodSeconds` above 30.

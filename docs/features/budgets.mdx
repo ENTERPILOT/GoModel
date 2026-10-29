@@ -235,6 +235,77 @@ inventing an aggregate usage value. Use `GET /v1/usage` with a child's effective
 user path to inspect that child's resolved budget. Resetting the template starts
 a new period for all of its children.
 
+## Budgets on billed cost (GoModel Pro)
+
+<Info>
+  Budgets on billed cost require a GoModel Pro license with the `billing`
+  entitlement and `PRICING_MARKUPS_ENABLED=true`. Without them, admin API
+  writes with `"cost_basis": "billed"` are rejected (403
+  `billed_budgets_not_entitled`, or 400 `billed_budgets_markups_disabled` when
+  markups are off), and a billed budget in the current configuration aborts
+  startup. A billed budget already stored (created in the dashboard, or by an
+  earlier configuration) never blocks startup: while the entitlement or markups
+  are missing, GoModel logs a warning once and enforces it on provider cost, so
+  the limit stays in force. It stays stored as billed: editing its amount in
+  the dashboard or with `"cost_basis": "billed"` keeps it billed, and it limits
+  billed cost again once the entitlement and markups are back.
+</Info>
+
+By default a budget limits provider cost: what you pay upstream for uncached
+requests. Set `cost_basis: billed` to limit what the caller is billed instead —
+provider cost plus its [markup](/features/cost-tracking#markups-and-billed-cost).
+Use it when a budget is a customer's credit limit.
+
+```yaml
+budgets:
+  labels:
+    - label: "customer-acme"
+      limits:
+        - period: "monthly"
+          amount: 500.00
+          cost_basis: "billed"
+```
+
+```bash
+curl -X PUT http://localhost:8080/admin/budgets \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope": "label",
+    "subject": "customer-acme",
+    "cost_basis": "billed",
+    "budget_key": { "period": "monthly" },
+    "amount": 500.00
+  }'
+```
+
+A billed budget:
+
+- sums `billed_cost`, including billed response-cache hits. With
+  `PRICING_BILL_CACHE_HITS=false`, cache hits bill `0` and add nothing.
+- counts usage recorded without a billed cost (before markups were enabled) at
+  its provider cost, so enabling markups mid-period never under-counts.
+- gates response-cache hits too: while cache hits are billed, an exhausted
+  billed user-path or label budget rejects a request before a cached response
+  is replayed. Provider-cost budgets never count cache hits, and provider
+  budgets do not apply to them, since a hit is not routed to a provider.
+- on a provider, still counts the billed cache hits of that provider's models
+  in its spend. Set `BUDGETS_PROVIDER_BILLED_CACHE_HITS=false`
+  (`budgets.provider_billed_cache_hits`) to limit only what was billed for
+  requests the provider served.
+
+`cost_basis` is `provider` (default) or `billed`. It is an attribute, not part
+of the budget key: one scope, subject, and period holds one budget on either
+basis, and changing the basis keeps the current period. A `PUT` without
+`cost_basis` sets `provider`; existing budgets keep limiting provider cost.
+`GET /admin/budgets` and `GET /v1/usage` report each budget's stored
+`cost_basis` and its `enforced_cost_basis`, the basis `spent` is measured on.
+They differ only for a billed budget enforced on provider cost. In the
+dashboard, the budget form shows a **Cost basis** selector once the
+entitlement and markups are on, billed budgets carry a `billed` chip, and a
+billed budget enforced on provider cost carries a `billed · on provider cost`
+chip.
+
 ## Workflow enforcement
 
 The active workflow controls whether budget checks run for a request.

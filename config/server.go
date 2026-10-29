@@ -117,6 +117,51 @@ type ServerConfig struct {
 	// ClientIP is the compiled form of the three settings above, resolved once
 	// at load. It is not configured directly.
 	ClientIP ClientIPPolicy `yaml:"-"`
+
+	// TLSCertFile and TLSKeyFile serve the listener over HTTPS from a PEM
+	// certificate (intermediates after the leaf) and its private key. Both or
+	// neither; unset (default) serves plain HTTP. The files are re-read when
+	// they change on disk, so rotation (cert-manager, certbot) needs no
+	// restart or reload. Inbound only: outbound trust is http.tls.
+	// Default: empty (plain HTTP)
+	TLSCertFile string `yaml:"tls_cert_file" env:"SERVER_TLS_CERT_FILE"`
+	TLSKeyFile  string `yaml:"tls_key_file" env:"SERVER_TLS_KEY_FILE"`
+
+	// TLSClientCAFile requires a client certificate signed by a CA in this PEM
+	// bundle on every request except /health and /health/ready, which probes
+	// reach without one (mTLS). The CA is checked during the TLS handshake, so
+	// a rotated CA applies from the next one; an open connection keeps the
+	// access it was granted. Requires TLSCertFile and TLSKeyFile; reloaded with
+	// them.
+	// Default: empty (no client certificate requested)
+	TLSClientCAFile string `yaml:"tls_client_ca_file" env:"SERVER_TLS_CLIENT_CA_FILE"`
+}
+
+// TLSEnabled reports whether the listener serves HTTPS.
+func (s ServerConfig) TLSEnabled() bool {
+	return strings.TrimSpace(s.TLSCertFile) != "" || strings.TrimSpace(s.TLSKeyFile) != ""
+}
+
+// Scheme is the URL scheme the listener serves: "https" or "http".
+func (s ServerConfig) Scheme() string {
+	if s.TLSEnabled() {
+		return "https"
+	}
+	return "http"
+}
+
+// ValidateServerTLS reports a half-configured certificate pair, and a client
+// CA without one. The files themselves are read when the server starts.
+func ValidateServerTLS(server ServerConfig) error {
+	cert := strings.TrimSpace(server.TLSCertFile) != ""
+	key := strings.TrimSpace(server.TLSKeyFile) != ""
+	if cert != key {
+		return fmt.Errorf("server.tls_cert_file and server.tls_key_file must be set together")
+	}
+	if !cert && strings.TrimSpace(server.TLSClientCAFile) != "" {
+		return fmt.Errorf("server.tls_client_ca_file requires server.tls_cert_file and server.tls_key_file")
+	}
+	return nil
 }
 
 // DefaultStreamStallTimeoutSeconds is the default ServerConfig.StreamStallTimeout.
@@ -234,4 +279,23 @@ func ParseBodySizeLimitBytes(s string) (int64, error) {
 	}
 
 	return value, nil
+}
+
+// checkResolvedServerTLS rejects a TLS path whose secret reference resolved
+// to an empty value. Load validated the configured values, so an empty one
+// would otherwise quietly serve plain HTTP, leave half a pair, or drop the
+// client certificate requirement. The built-in schemes already refuse empty
+// values; one an extension registers may not.
+func checkResolvedServerTLS(configured, resolved ServerConfig) error {
+	fields := []struct{ name, configured, resolved string }{
+		{"server.tls_cert_file", configured.TLSCertFile, resolved.TLSCertFile},
+		{"server.tls_key_file", configured.TLSKeyFile, resolved.TLSKeyFile},
+		{"server.tls_client_ca_file", configured.TLSClientCAFile, resolved.TLSClientCAFile},
+	}
+	for _, f := range fields {
+		if strings.TrimSpace(f.configured) != "" && strings.TrimSpace(f.resolved) == "" {
+			return fmt.Errorf("%s resolved to an empty value", f.name)
+		}
+	}
+	return nil
 }

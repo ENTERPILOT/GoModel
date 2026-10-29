@@ -43,6 +43,9 @@ func (s *translatedInferenceService) dispatchNativeJSONWithCache(c *echo.Context
 	if s.responseCache == nil || !workflow.CacheEnabled() {
 		return dispatch()
 	}
+	if err := enforceCacheHitBudget(c, s.budgetChecker, workflow); err != nil {
+		return handleError(c, err)
+	}
 	c.SetRequest(c.Request().WithContext(s.inference().WithCacheRequestContext(c.Request().Context(), workflow)))
 	err := s.responseCache.HandleRequest(c, body, dispatch)
 	if replayErr, ok := errors.AsType[*responsecache.ReplayError](err); ok {

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"log/slog"
 	"net"
@@ -43,6 +44,7 @@ type Server struct {
 	responseCacheMiddleware *responsecache.ResponseCacheMiddleware
 	responseStore           responsestore.Store
 	conversationStore       conversationstore.Store
+	tlsConfig               *tls.Config
 }
 
 const (
@@ -132,6 +134,8 @@ type Config struct {
 	Tagging                         *tagging.Service                       // Optional: request labelling based on configured tagging headers
 	SessionDetector                 *session.Detector                      // Optional: client session identification for sticky routing and audit grouping
 	VersionChecker                  *versioncheck.Checker                  // Optional: daily update check backing GET /version
+	TLSConfig                       *tls.Config                            // Optional: serve HTTPS with this configuration; nil serves plain HTTP
+	ClientCertificatesRequired      bool                                   // With TLSConfig: reject requests without a verified client certificate, except the health probes
 }
 
 // effectiveMasterKey returns the master key this gateway accepts as a
@@ -181,6 +185,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	basePath := configuredBasePath(cfg)
 	if basePath != "/" {
 		e.Pre(stripBasePathMiddleware(basePath))
+	}
+	if cfg != nil && cfg.TLSConfig != nil && cfg.ClientCertificatesRequired {
+		e.Pre(requireClientCertificate)
 	}
 	// Keep client IP handling explicit after Echo v5.1.0 changed RealIP defaults.
 	// Direct extraction is the safe baseline unless a caller opts into trusted
@@ -528,13 +535,13 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	e.POST("/v1/audio/translations", handler.AudioTranslations)
 	e.POST("/v1/images/generations", handler.ImageGenerations)
 	e.POST("/v1/images/edits", handler.ImageEdits)
-	// System One decisions (Jev / Kev). The handler answers 404 until a jev
-	// or openrouter provider is configured.
+	// System One decisions (Jev / Kev, Microsoft-Decision-1). The handler
+	// answers 404 until a jev, openrouter, or azure provider is configured.
 	e.POST("/v1/systemone", handler.SystemOne)
 	e.POST("/v1/systemone/permute", handler.SystemOnePermute)
 	e.POST("/v1/systemone/separate", handler.SystemOneSeparate)
-	// OpenAI Decisions. The handler answers 404 until an openai, jev, or openrouter
-	// provider is configured.
+	// OpenAI Decisions. The handler answers 404 until an openai, jev,
+	// openrouter, or azure provider is configured.
 	e.POST("/v1/decisions", handler.Decisions)
 	if cfg == nil || cfg.RealtimeEnabled {
 		e.GET("/v1/realtime", handler.Realtime)
@@ -616,13 +623,17 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	if cfg != nil {
 		rcm = cfg.ResponseCacheMiddleware
 	}
-	return &Server{
+	srv := &Server{
 		echo:                    e,
 		handler:                 handler,
 		responseCacheMiddleware: rcm,
 		responseStore:           handler.currentResponseStore(),
 		conversationStore:       handler.conversationStore,
 	}
+	if cfg != nil {
+		srv.tlsConfig = cfg.TLSConfig
+	}
+	return srv
 }
 
 // adminLegacySunset is the sunset date advertised on responses served from the
@@ -650,7 +661,9 @@ func passthroughV1PrefixNormalizationEnabled(cfg *Config) bool {
 
 // Start starts the HTTP server on the given address and exits when ctx is canceled.
 func (s *Server) Start(ctx context.Context, addr string) error {
-	return newGatewayStartConfig(addr).Start(ctx, s.echo)
+	sc := newGatewayStartConfig(addr)
+	sc.TLSConfig = s.tlsConfig
+	return sc.Start(ctx, s.echo)
 }
 
 // StartWithListener starts the HTTP server using a pre-bound listener. The
@@ -661,6 +674,11 @@ func (s *Server) Start(ctx context.Context, addr string) error {
 func (s *Server) StartWithListener(ctx context.Context, listener net.Listener) error {
 	if listener == nil {
 		return errors.New("listener is required")
+	}
+	// Echo wraps only listeners it creates itself, so a pre-bound one is
+	// wrapped here. net/http then negotiates HTTP/2 through ALPN.
+	if s.tlsConfig != nil {
+		listener = tls.NewListener(listener, s.tlsConfig)
 	}
 	return newGatewayStartConfigForListener(listener).Start(ctx, s.echo)
 }

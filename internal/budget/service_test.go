@@ -88,6 +88,9 @@ func (s *fakeStore) Close() error {
 	return nil
 }
 
+// allCapabilities enables every optional budget behavior.
+var allCapabilities = capabilities{quotaTemplates: true, billedBudgets: true}
+
 // path builds the Subjects of a request with no labels.
 func path(userPath string) Subjects {
 	return Subjects{UserPath: userPath}
@@ -211,11 +214,7 @@ func TestServiceRefreshSortsBudgetsByScopeSubjectThenLongestPeriod(t *testing.T)
 func TestSeedConfiguredBudgetsReplacesEmptyConfigSet(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeStore{}
-	service, err := NewService(ctx, store)
-	require.NoError(t, err)
-
-	store.replaceCalls = 0
-	err = seedConfiguredBudgets(ctx, service, config.BudgetsConfig{})
+	err := seedConfiguredBudgets(ctx, store, config.BudgetsConfig{}, allCapabilities)
 	require.NoError(t, err)
 	require.Equal(t, 1, store.replaceCalls)
 	require.Empty(t, store.replacedBudgets)
@@ -224,17 +223,14 @@ func TestSeedConfiguredBudgetsReplacesEmptyConfigSet(t *testing.T) {
 func TestSeedConfiguredBudgetsSeedsBothScopes(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeStore{}
-	service, err := NewService(ctx, store)
-	require.NoError(t, err)
-
-	err = seedConfiguredBudgets(ctx, service, config.BudgetsConfig{
+	err := seedConfiguredBudgets(ctx, store, config.BudgetsConfig{
 		UserPaths: []config.BudgetUserPathConfig{
 			{Path: "team", PerChild: true, Limits: []config.BudgetLimitConfig{{Period: "daily", Amount: 10}}},
 		},
 		Labels: []config.BudgetLabelConfig{
 			{Label: "Mobile-App-iOS", Limits: []config.BudgetLimitConfig{{Period: "monthly", Amount: 500}}},
 		},
-	})
+	}, allCapabilities)
 	require.NoError(t, err)
 
 	want := []Budget{
@@ -257,12 +253,7 @@ func TestSeedConfiguredBudgetsSeedsBothScopes(t *testing.T) {
 func TestSeedConfiguredBudgetsRejectsInvalidPeriodBeforeReplacing(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeStore{}
-	service, err := NewService(ctx, store)
-	require.NoError(t, err)
-
-	store.replaceCalls = 0
-
-	err = seedConfiguredBudgets(ctx, service, config.BudgetsConfig{
+	err := seedConfiguredBudgets(ctx, store, config.BudgetsConfig{
 		UserPaths: []config.BudgetUserPathConfig{
 			{
 				Path: "/team",
@@ -271,7 +262,7 @@ func TestSeedConfiguredBudgetsRejectsInvalidPeriodBeforeReplacing(t *testing.T) 
 				},
 			},
 		},
-	})
+	}, allCapabilities)
 
 	require.ErrorContains(t, err, `invalid budget period for user_path "/team" limit 0: "fortnightly"`)
 	require.Equal(t, 0, store.replaceCalls)

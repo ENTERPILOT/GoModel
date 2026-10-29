@@ -24,6 +24,13 @@ type DecisionsProvider interface {
 	Decisions(ctx context.Context, req *PassthroughRequest) (*PassthroughResponse, error)
 }
 
+// DecisionsSystemOneEndpoint is the Endpoint the gateway sets on a Decisions
+// request whose model answers System One, sent to a provider that serves both
+// that and OpenAI's Decisions API (azure: Microsoft-Decision-1 and
+// gpt-6-luna). Such a provider translates the request to System One instead
+// of forwarding it; every other Decisions request carries "decisions".
+const DecisionsSystemOneEndpoint = "systemone"
+
 // DecisionImageReader is an optional DecisionsProvider capability: whether
 // the provider can answer a Decisions request whose input holds images. A
 // provider that does not implement it is assumed to read them.

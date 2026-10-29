@@ -191,10 +191,42 @@ enthalten, etwa `/v1/rerank` oder `/v1/tokenize`:
 GoModel entfernt die Autorisierung des Clients vor der Weiterleitung und wendet
 `SGLANG_API_KEY` an, sofern konfiguriert.
 
+## Responses-API-Modus
+
+Manche SGLang-Builds antworten auf `/v1/responses` mit HTTP 500, wenn der
+Request Function Tools enthält. Das bricht Clients wie Codex CLI. SGLangs
+`/v1/chat/completions` verarbeitet diese Tools, daher kann GoModel den
+Responses-Request in Chat Completions übersetzen und eine normale
+Responses-Antwort liefern. `SGLANG_API_MODE` (oder `api_mode` in
+`config.yaml`) wählt den Weg:
+
+| Wert | Verhalten |
+| --- | --- |
+| `auto` (Standard) | Chat Completions, wenn der Request Function Tools enthält; sonst `/v1/responses`. |
+| `native` | Immer `/v1/responses`. Verwenden Sie es, wenn Ihr SGLang-Build Function Tools dort verarbeitet. |
+| `chat_compatible` | Immer Chat Completions, für eine einheitliche Upstream-API. |
+
+Der Standard passt für die meisten Setups. Gehostete Tools wie
+`web_search_preview` haben kein Chat-Äquivalent: Requests nur mit gehosteten
+Tools bleiben unter `auto` auf `/v1/responses`, übersetzte Requests lassen sie
+weg. Setzen Sie `native`, wenn Sie gehostete Tools zusammen mit Function Tools
+brauchen. `previous_response_id` funktioniert in jedem Modus, weil GoModel die
+gespeicherte Konversation selbst wiederholt.
+
+```yaml
+providers:
+  sglang:
+    type: sglang
+    base_url: "http://localhost:30000/v1"
+    api_mode: native   # auto (default), native, chat_compatible
+```
+
 ## Hinweise zu Fähigkeiten
 
 - Chat Completions, Streaming, Modelllisten, Responses und Embeddings verwenden
-  die OpenAI-kompatible API von SGLang.
+  die OpenAI-kompatible API von SGLang. Responses mit Function Tools laufen
+  standardmäßig über Chat Completions; siehe
+  [Responses-API-Modus](#responses-api-modus).
 - Embeddings und modellspezifische Features hängen vom Modell ab, das SGLang
   geladen hat.
 - Native Schnittstellen für Batches, Dateien und den Lebenszyklus gespeicherter

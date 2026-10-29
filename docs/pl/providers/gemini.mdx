@@ -59,9 +59,11 @@ kompatybilnego z OpenAI; czat, embeddingi i obrazy zależą od trybu API.
 
 W trybie natywnym embeddingi są obsługiwane przez `models/{model}:batchEmbedContents`.
 `dimensions` mapuje się na `outputDimensionality`, a `encoding_format: "base64"` jest
-respektowane. Gemini nie raportuje użycia tokenów dla embeddingów w żadnym z interfejsów API, więc
-odpowiedzi z embeddingami zawierają zerowe liczby tokenów, a wiersz użycia jest oznaczany
-zastrzeżeniem dotyczącym obliczenia kosztu.
+respektowane. Tryb natywny zapisuje użycie tokenów raportowane przez Gemini dla nowszych modeli,
+takich jak `gemini-embedding-2`. Starsze modele, takie jak `gemini-embedding-001`, oraz interfejs
+zgodny z OpenAI nie raportują użycia, więc te odpowiedzi zawierają zerowe liczby tokenów. Gdy model
+jest wyceniany za token, takie wiersze użycia z zerową liczbą tokenów są oznaczane zastrzeżeniem
+dotyczącym obliczenia kosztu.
 
 ## Generowanie i edycja obrazów
 
@@ -71,6 +73,40 @@ działają z modelami obrazowymi Gemini (`gemini-2.5-flash-image`, ..., przez
 2026; Imagen jest nadal dostępny w [Vertex AI](/pl/providers/vertex). Edycja obrazów
 wymaga trybu natywnego i modelu obrazowego Gemini; maski nie są obsługiwane. Szczegóły
 mapowania parametrów i cen znajdziesz w [uwagach o providerze w Images API](/pl/advanced/images-api#google-gemini).
+
+### Obrazy w odpowiedziach czatu
+
+W trybie natywnym modele obsługujące obrazy (`gemini-2.5-flash-image`,
+`gemini-3-pro-image-preview`, ...) mogą zwracać obrazy z Chat Completions i
+Responses. `message.content` pozostaje ciągiem tekstowym. W Chat Completions
+obrazy trafiają do osobnej tablicy `images` – tego samego pola, którego używa OpenRouter.
+Klienci, którzy nie odczytują tego pola, po prostu je ignorują:
+
+```json
+"message": {
+  "role": "assistant",
+  "content": "Here is an image of a cat",
+  "images": [{
+    "type": "image_url",
+    "image_url": {
+      "url": "data:image/png;base64,iVBORw0...",
+      "extra_content": {"google": {"thought_signature": "EvAC..."}}
+    }
+  }]
+}
+```
+
+W Responses API każdy obraz jest osobnym elementem wyjścia `image_generation_call`.
+Obraz w base64 znajduje się w `result`, a format w `output_format`, tak jak w
+odpowiedziach OpenAI. Aby edytować obraz w kolejnej turze, odeślij wiadomość asystenta
+(z `images`) lub element `image_generation_call` bez zmian, tak aby Gemini
+otrzymał thought signature każdego obrazu. Klienci `/v1/messages` (Anthropic Messages API)
+otrzymują tylko tekst. Odpowiedzi streamowane nie zawierają jeszcze wygenerowanych
+obrazów.
+
+Każdy obraz to kilka megabajtów base64. Logi audytowe przechwytują maksymalnie 1 MB
+body odpowiedzi, więc zalogowane body jest obcinane i odpowiednio oznaczane. Cache
+odpowiedzi przechowuje całą odpowiedź.
 
 ## Reasoning effort
 
