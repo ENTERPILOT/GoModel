@@ -102,9 +102,10 @@ attempt, so a served failover is visible in the audit trail and priced at the
 model that answered.
 
 Embedding requests use the same configured failover chain and global/workflow
-controls; there is no embedding-specific option. Configure only targets whose
-vector dimensions and representation are compatible with your index and
-consumers. GoModel does not validate embedding compatibility.
+controls; there is no embedding-specific option. Only targets with the same
+model ID as the resolved primary are eligible (the provider may differ).
+Cross-model embedding failover is not supported. Operators must still ensure
+that providers serving that model return compatible vectors.
 
 A target model that is disabled, or that the request's API key or
 `user_path` may not use, is never tried: it is skipped both when the first

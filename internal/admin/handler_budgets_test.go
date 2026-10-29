@@ -196,6 +196,40 @@ func TestBudgetEndpointsGateBilledCostBasis(t *testing.T) {
 	}
 }
 
+func TestBudgetEndpointsKeepStoredBilledBasisWithoutEntitlement(t *testing.T) {
+	store := &adminBudgetStore{budgets: []budget.Budget{{
+		Scope: budget.ScopeLabel, Subject: "acme", CostBasis: budget.CostBasisBilled,
+		PeriodSeconds: budget.PeriodMonthlySeconds, Amount: 100, Source: budget.SourceManual,
+	}}}
+	service, err := budget.NewService(context.Background(), store, budget.WithBilledBudgets(false))
+	require.NoError(t, err)
+	h := NewHandler(nil, nil, WithBudgets(service))
+
+	// The listing reports the stored basis and the one spend is measured on.
+	c, rec := echotest.Request(t, http.MethodGet, "/admin/budgets", "")
+	require.NoError(t, h.ListBudgets(c))
+	body := echotest.Decode[budgetListResponse](t, rec)
+	require.Len(t, body.Budgets, 1)
+	assert.Equal(t, "billed", body.Budgets[0].CostBasis)
+	assert.Equal(t, "provider", body.Budgets[0].EnforcedCostBasis)
+
+	// Editing the amount, as the dashboard does, keeps the billed basis.
+	c, rec = echotest.Request(t, http.MethodPut, "/admin/budgets", `{"scope":"label","subject":"acme","cost_basis":"billed","budget_key":{"period":"monthly"},"amount":250}`)
+	require.NoError(t, h.UpsertBudget(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	body = echotest.Decode[budgetListResponse](t, rec)
+	require.Len(t, body.Budgets, 1)
+	assert.Equal(t, "billed", body.Budgets[0].CostBasis)
+	assert.Equal(t, "provider", body.Budgets[0].EnforcedCostBasis)
+	assert.InDelta(t, 250.0, body.Budgets[0].Amount, 1e-9)
+
+	// A new billed budget still needs the entitlement.
+	c, rec = echotest.Request(t, http.MethodPut, "/admin/budgets", `{"scope":"label","subject":"beta","cost_basis":"billed","budget_key":{"period":"monthly"},"amount":250}`)
+	require.NoError(t, h.UpsertBudget(c))
+	require.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "billed_budgets_not_entitled")
+}
+
 func TestBudgetEndpointsDefaultCostBasisToProvider(t *testing.T) {
 	store := &adminBudgetStore{}
 	h := newBudgetHandler(t, store)

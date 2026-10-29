@@ -12,7 +12,6 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
 )
 
@@ -22,24 +21,6 @@ import (
 type RateLimiter interface {
 	Acquire(subjects ratelimit.Subjects, now time.Time) (*ratelimit.Reservation, error)
 	RouteAvailable(providerName, model string) bool
-}
-
-type rateLimitHeaderSetterContextKey struct{}
-
-func withRateLimitHeaderSetter(ctx context.Context, setter func(*ratelimit.Reservation)) context.Context {
-	if ctx == nil || setter == nil {
-		return ctx
-	}
-	return context.WithValue(ctx, rateLimitHeaderSetterContextKey{}, setter)
-}
-
-func setRateLimitHeadersForContext(ctx context.Context, reservation *ratelimit.Reservation) {
-	if ctx == nil || reservation == nil {
-		return
-	}
-	if setter, ok := ctx.Value(rateLimitHeaderSetterContextKey{}).(func(*ratelimit.Reservation)); ok {
-		setter(reservation)
-	}
 }
 
 func noopRelease() {}
@@ -141,28 +122,6 @@ func enforceAdmission(c *echo.Context, limiter RateLimiter, checker BudgetChecke
 	return admit(c.Request().Context(), limiter, checker, route, rateLimitHeaderSetter(c))
 }
 
-// enforceEmbeddingAdmission keeps consumer admission for the whole request;
-// provider/model capacity is reserved separately for each provider attempt.
-func enforceEmbeddingAdmission(c *echo.Context, limiter RateLimiter, checker BudgetChecker, route rateLimitRoute) (admission, error) {
-	if c == nil || c.Request() == nil {
-		return admission{release: noopRelease}, nil
-	}
-	ctx := c.Request().Context()
-	release, err := reserveRateLimit(ctx, limiter, rateLimitRoute{}, rateLimitHeaderSetter(c))
-	if err != nil {
-		return admission{release: noopRelease}, err
-	}
-	if err := enforceBudgetForContext(ctx, checker, route); err != nil {
-		deferred := providerBudgetDeferrableToFailover(err, route)
-		if deferred == nil {
-			release()
-			return admission{release: noopRelease}, err
-		}
-		return admission{release: release, saturatedRoute: deferred}, nil
-	}
-	return admission{release: release}, nil
-}
-
 // admit is enforceAdmission over a context, for callers without an HTTP
 // exchange. onReserve, when set, receives each admitted reservation.
 func admit(ctx context.Context, limiter RateLimiter, checker BudgetChecker, route rateLimitRoute, onReserve func(*ratelimit.Reservation)) (admission, error) {
@@ -243,31 +202,6 @@ func acquireRateLimitForContext(ctx context.Context, limiter RateLimiter, route 
 		return nil, rateLimitCheckError(err)
 	}
 	return reservation, nil
-}
-
-// embeddingsAttemptAdmission reserves only provider/model capacity for an
-// attempt; consumer limits were already counted once by request admission.
-func embeddingsAttemptAdmission(limiter RateLimiter) gateway.EmbeddingAttemptAdmission {
-	if limiter == nil {
-		return nil
-	}
-	return func(ctx context.Context, selector core.ModelSelector, providerName string) (func(), error) {
-		if ctx != nil && ctx.Err() != nil {
-			return noopRelease, ctx.Err()
-		}
-		reservation, err := limiter.Acquire(ratelimit.Subjects{
-			Provider: providerName,
-			Model:    selector.QualifiedModel(),
-		}, time.Now().UTC())
-		if err != nil {
-			return noopRelease, rateLimitCheckError(err)
-		}
-		if reservation == nil {
-			return noopRelease, nil
-		}
-		setRateLimitHeadersForContext(ctx, reservation)
-		return reservation.Release, nil
-	}
 }
 
 func rateLimitCheckError(err error) error {

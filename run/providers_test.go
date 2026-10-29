@@ -110,7 +110,7 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 		},
 		{
 			// No API key at all; api_mode reaches the Gemini adapter Vertex
-			// delegates translation to (VERTEX_API_MODE).
+			// delegates translation to (VERTEX_API_MODE), except anthropic.
 			providerType: "vertex",
 			fields: []string{
 				"auth_type", "vertex_project", "vertex_location", "service_account_json",
@@ -118,7 +118,7 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 				"api_mode", "gcp_scope", "proxy_url", "models",
 			},
 			absent:  []string{"api_keys"},
-			options: map[string][]string{"api_mode": {"native", "openai_compatible"}},
+			options: map[string][]string{"api_mode": {"native", "openai_compatible", "anthropic"}},
 		},
 	}
 

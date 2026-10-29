@@ -34,6 +34,12 @@ type BudgetsConfig struct {
 	// provider budget caps all spend routed to that provider instance;
 	// failover skips a provider whose budget is exhausted.
 	Providers []BudgetProviderConfig `yaml:"providers"`
+
+	// ProviderBilledCacheHits controls whether a provider budget on billed
+	// cost counts the billed response-cache hits of that provider's models.
+	// Default: true. Set false to limit only what was billed for requests the
+	// provider served. Provider-cost budgets never count cache hits.
+	ProviderBilledCacheHits bool `yaml:"provider_billed_cache_hits" env:"BUDGETS_PROVIDER_BILLED_CACHE_HITS"`
 }
 
 // BudgetUserPathConfig declares one or more budget limits for a user path.

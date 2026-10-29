@@ -55,7 +55,7 @@ func (e *InternalDecisionsExecutor) Decide(ctx context.Context, body []byte) (an
 	s := e.service
 	router, ok := s.provider.(core.RoutableDecisions)
 	if !ok || len(router.DecisionsProviderTypes()) == 0 {
-		return nil, core.NewNotFoundError("decisions are available only when an openai, jev, or openrouter provider is configured")
+		return nil, core.NewNotFoundError("decisions are available only when an openai, jev, openrouter, or azure provider is configured")
 	}
 	var req core.DecisionRequest
 	if err := json.Unmarshal(body, &req); err != nil {
@@ -210,7 +210,7 @@ func (e *InternalDecisionsExecutor) dispatch(
 	headers := internalDecisionHeaders(ctx)
 	resp, executed, meta, err := e.service.orchestrator.ExecutePassthroughWithFailover(ctx, workflow, eligible,
 		func(ctx context.Context, selector core.ModelSelector, providerType, providerName string) (*core.PassthroughResponse, error) {
-			return sendDecisions(ctx, router, selector, providerType, providerName, headers.Clone(), body)
+			return sendDecisions(ctx, router, selector, providerType, providerName, e.service.decisionsEndpoint(selector, providerType), headers.Clone(), body)
 		})
 	if err != nil {
 		return nil, core.ModelSelector{}, meta, err

@@ -90,7 +90,8 @@ func TestServiceEnforcesStoredBilledBudgetOnProviderCostWhenDisabled(t *testing.
 
 	budgets := service.Budgets()
 	require.Len(t, budgets, 1)
-	assert.Equal(t, CostBasisProvider, budgets[0].CostBasis)
+	assert.Equal(t, CostBasisBilled, budgets[0].CostBasis, "the stored basis is kept")
+	assert.Equal(t, CostBasisProvider, budgets[0].EnforcedBasis())
 
 	err = service.Check(ctx, Subjects{UserPath: "/", Labels: []string{"acme"}}, time.Now())
 	var exceeded *ExceededError
@@ -102,6 +103,39 @@ func TestServiceEnforcesStoredBilledBudgetOnProviderCostWhenDisabled(t *testing.
 	store.sumCalls = 0
 	require.NoError(t, service.CheckCacheHit(ctx, Subjects{UserPath: "/", Labels: []string{"acme"}}, time.Now()))
 	assert.Zero(t, store.sumCalls)
+}
+
+func TestServiceKeepsStoredBilledBasisOnEditWhenDisabled(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeStore{budgets: []Budget{{
+		Scope: ScopeLabel, Subject: "acme", CostBasis: CostBasisBilled,
+		PeriodSeconds: PeriodMonthlySeconds, Amount: 100, Source: SourceManual,
+	}}}
+	service, err := NewService(ctx, store, WithBilledBudgets(false))
+	require.NoError(t, err)
+
+	assert.True(t, service.StoredAsBilled(ScopeLabel, "acme", PeriodMonthlySeconds))
+	assert.False(t, service.StoredAsBilled(ScopeLabel, "acme", PeriodDailySeconds))
+	assert.False(t, service.StoredAsBilled(ScopeLabel, "other", PeriodMonthlySeconds))
+
+	// Editing the amount keeps the stored billed basis.
+	require.NoError(t, service.UpsertBudgets(ctx, []Budget{{
+		Scope: ScopeLabel, Subject: "acme", CostBasis: CostBasisBilled,
+		PeriodSeconds: PeriodMonthlySeconds, Amount: 200, Source: SourceManual,
+	}}))
+	// A new billed budget still needs the capability.
+	err = service.UpsertBudgets(ctx, []Budget{{
+		Scope: ScopeLabel, Subject: "other", CostBasis: CostBasisBilled,
+		PeriodSeconds: PeriodMonthlySeconds, Amount: 200, Source: SourceManual,
+	}})
+	require.ErrorIs(t, err, ErrBilledBudgetsUnavailable)
+	// Config budgets get the full check, even for a stored billed key.
+	err = service.ReplaceConfigBudgets(ctx, []Budget{{
+		Scope: ScopeLabel, Subject: "acme", CostBasis: CostBasisBilled,
+		PeriodSeconds: PeriodMonthlySeconds, Amount: 200, Source: SourceConfig,
+	}})
+	require.ErrorIs(t, err, ErrBilledBudgetsUnavailable)
+	assert.Zero(t, store.replaceCalls)
 }
 
 func TestServicePassesCostBasisToSpendWindows(t *testing.T) {
@@ -244,11 +278,12 @@ func TestNewStartsWithStoredBilledBudgetsAfterEntitlementLoss(t *testing.T) {
 		name      string
 		nextLabel []config.BudgetLabelConfig
 		manual    bool
-		want      []CostBasis
+		stored    []CostBasis
+		enforced  []CostBasis
 	}{
-		{name: "config budget switched to provider", nextLabel: billedLabelConfig("provider"), want: []CostBasis{CostBasisProvider}},
-		{name: "config budget removed", want: nil},
-		{name: "manual billed budget", manual: true, want: []CostBasis{CostBasisProvider}},
+		{name: "config budget switched to provider", nextLabel: billedLabelConfig("provider"), stored: []CostBasis{CostBasisProvider}, enforced: []CostBasis{CostBasisProvider}},
+		{name: "config budget removed"},
+		{name: "manual billed budget", manual: true, stored: []CostBasis{CostBasisBilled}, enforced: []CostBasis{CostBasisProvider}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -277,11 +312,13 @@ func TestNewStartsWithStoredBilledBudgetsAfterEntitlementLoss(t *testing.T) {
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = next.Close() })
 
-			var got []CostBasis
+			var stored, enforced []CostBasis
 			for _, item := range next.Service.Budgets() {
-				got = append(got, item.CostBasis)
+				stored = append(stored, item.CostBasis)
+				enforced = append(enforced, item.EnforcedBasis())
 			}
-			assert.Equal(t, tt.want, got)
+			assert.Equal(t, tt.stored, stored)
+			assert.Equal(t, tt.enforced, enforced)
 		})
 	}
 }
@@ -320,6 +357,9 @@ func assertBilledSpend(t *testing.T, store Store, now time.Time) {
 		{Scope: ScopeLabel, Subject: "cache-only", CostBasis: CostBasisProvider, Start: start, End: end},
 		{Scope: ScopeLabel, Subject: "cache-only", CostBasis: CostBasisBilled, Start: start, End: end},
 		{Scope: ScopeLabel, Subject: "absent", CostBasis: CostBasisBilled, Start: start, End: end},
+		{Scope: ScopeProvider, Subject: "test", CostBasis: CostBasisBilled, Start: start, End: end},
+		{Scope: ScopeProvider, Subject: "test", CostBasis: CostBasisBilled, Start: start, End: end, ExcludeCacheHits: true},
+		{Scope: ScopeLabel, Subject: "cache-only", CostBasis: CostBasisBilled, Start: start, End: end, ExcludeCacheHits: true},
 	}
 	want := []Spend{
 		{Total: 3, HasUsage: true},    // provider: uncached marked-up + pre-markup
@@ -328,6 +368,9 @@ func assertBilledSpend(t *testing.T, store Store, now time.Time) {
 		{},                            // provider never counts cache hits
 		{Total: 0, HasUsage: true},    // an unbilled hit is billed usage worth 0
 		{},
+		{Total: 7.75, HasUsage: true}, // billed provider budget counts billed hits by default
+		{Total: 3.25, HasUsage: true}, // without them: 1.25 + 2 (fallback)
+		{},                            // nothing left once the only rows are hits
 	}
 
 	got, err := store.SumSpend(context.Background(), windows)
@@ -336,6 +379,35 @@ func assertBilledSpend(t *testing.T, store Store, now time.Time) {
 	for i := range want {
 		assert.Equal(t, want[i].HasUsage, got[i].HasUsage, "spend[%d] has usage", i)
 		assert.InDelta(t, want[i].Total, got[i].Total, 1e-9, "spend[%d] total", i)
+	}
+}
+
+func TestServiceExcludesBilledCacheHitsFromProviderBudgetsWhenConfigured(t *testing.T) {
+	budgets := []Budget{
+		{Scope: ScopeProvider, Subject: "openai", CostBasis: CostBasisBilled, PeriodSeconds: PeriodDailySeconds, Amount: 10},
+		{Scope: ScopeLabel, Subject: "acme", CostBasis: CostBasisBilled, PeriodSeconds: PeriodDailySeconds, Amount: 10},
+	}
+	for _, tt := range []struct {
+		name    string
+		options []ServiceOption
+		exclude map[Scope]bool
+	}{
+		{name: "default counts hits", exclude: map[Scope]bool{ScopeProvider: false, ScopeLabel: false}},
+		{name: "disabled excludes provider hits", options: []ServiceOption{WithProviderBilledCacheHits(false)}, exclude: map[Scope]bool{ScopeProvider: true, ScopeLabel: false}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &fakeStore{budgets: budgets}
+			options := append([]ServiceOption{WithBilledBudgets(true)}, tt.options...)
+			service, err := NewService(context.Background(), store, options...)
+			require.NoError(t, err)
+			_, err = service.Statuses(context.Background(), time.Now())
+			require.NoError(t, err)
+			got := map[Scope]bool{}
+			for _, window := range store.lastWindows {
+				got[window.Scope] = window.ExcludeCacheHits
+			}
+			assert.Equal(t, tt.exclude, got)
+		})
 	}
 }
 

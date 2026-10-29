@@ -19,10 +19,7 @@ import (
 //
 // A dial failure is returned as *DialError; a clean close returns nil.
 func Observe(ctx context.Context, target Target, tap func([]byte)) error {
-	conn, _, err := websocket.Dial(ctx, target.URL, &websocket.DialOptions{
-		HTTPHeader:   target.Headers,
-		Subprotocols: target.Subprotocols,
-	})
+	conn, _, err := websocket.Dial(ctx, target.URL, target.dialOptions())
 	if err != nil {
 		return &DialError{Err: err}
 	}

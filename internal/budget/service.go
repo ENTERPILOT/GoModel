@@ -49,6 +49,14 @@ func WithBilledCacheHits(enabled bool) ServiceOption {
 	}
 }
 
+// WithProviderBilledCacheHits controls whether provider budgets on billed cost
+// count billed response-cache hits. The default is true.
+func WithProviderBilledCacheHits(enabled bool) ServiceOption {
+	return func(service *Service) {
+		service.providerBilledCacheHits = enabled
+	}
+}
+
 // capabilities records which optional budget behaviors the deployment has.
 type capabilities struct {
 	quotaTemplates bool
@@ -72,6 +80,9 @@ func (c capabilities) validate(budgets []Budget) error {
 type Service struct {
 	store Store
 	mu    sync.RWMutex
+	// refreshMu serializes Refresh from the store read through the swap, so
+	// a slower refresh never installs an older snapshot over a newer one.
+	refreshMu sync.Mutex
 
 	budgets  []Budget
 	settings Settings
@@ -84,6 +95,30 @@ type Service struct {
 
 	caps            capabilities
 	billedCacheHits bool
+	// providerBilledCacheHits keeps billed cache hits in provider budgets on
+	// billed cost; see config.BudgetsConfig.ProviderBilledCacheHits.
+	providerBilledCacheHits bool
+
+	// changed is called after every successful write; see SetChangeNotifier.
+	changed func(context.Context)
+}
+
+// SetChangeNotifier installs fn, called after every successful write of the
+// budgets or their settings so other gateway instances reload them. Call it
+// before serving; writes made before it was set (startup seeding) are not
+// announced.
+func (s *Service) SetChangeNotifier(fn func(context.Context)) {
+	if s != nil {
+		s.changed = fn
+	}
+}
+
+// notifyChanged announces a successful write. It runs after the local
+// refresh, whether or not that succeeded: the store changed either way.
+func (s *Service) notifyChanged(ctx context.Context) {
+	if s.changed != nil {
+		s.changed(ctx)
+	}
 }
 
 func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Service, error) {
@@ -91,9 +126,10 @@ func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Se
 		return nil, fmt.Errorf("budget store is required")
 	}
 	service := &Service{
-		store:    store,
-		settings: DefaultSettings(),
-		caps:     capabilities{quotaTemplates: true, billedBudgets: true},
+		store:                   store,
+		settings:                DefaultSettings(),
+		caps:                    capabilities{quotaTemplates: true, billedBudgets: true},
+		providerBilledCacheHits: true,
 	}
 	for _, option := range options {
 		if option != nil {
@@ -110,6 +146,8 @@ func (s *Service) Refresh(ctx context.Context) error {
 	if s == nil || s.store == nil {
 		return ErrUnavailable
 	}
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
 	budgets, err := s.store.ListBudgets(ctx)
 	if err != nil {
 		return err
@@ -137,7 +175,7 @@ func (s *Service) Refresh(ctx context.Context) error {
 	s.budgets = budgets
 	s.settings = settings
 	s.billedConsumerBudgets = slices.ContainsFunc(budgets, func(b Budget) bool {
-		return b.CostBasis == CostBasisBilled && b.Scope != ScopeProvider
+		return b.EnforcedBasis() == CostBasisBilled && b.Scope != ScopeProvider
 	})
 	s.mu.Unlock()
 	return nil
@@ -161,12 +199,13 @@ func (s *Service) UpsertBudgets(ctx context.Context, budgets []Budget) error {
 	if s == nil || s.store == nil {
 		return ErrUnavailable
 	}
-	if err := s.validateCapabilities(budgets); err != nil {
+	if err := s.validateEdits(budgets); err != nil {
 		return err
 	}
 	if err := s.store.UpsertBudgets(ctx, budgets); err != nil {
 		return err
 	}
+	defer s.notifyChanged(ctx)
 	return s.Refresh(ctx)
 }
 
@@ -181,6 +220,7 @@ func (s *Service) DeleteBudget(ctx context.Context, scope Scope, subject string,
 	if err := s.store.DeleteBudget(ctx, scope, subject, periodSeconds); err != nil {
 		return err
 	}
+	defer s.notifyChanged(ctx)
 	return s.Refresh(ctx)
 }
 
@@ -188,29 +228,56 @@ func (s *Service) ReplaceConfigBudgets(ctx context.Context, budgets []Budget) er
 	if s == nil || s.store == nil {
 		return ErrUnavailable
 	}
-	if err := s.validateCapabilities(budgets); err != nil {
+	// Config budgets are declared, not edited, so they get the full check,
+	// like startup seeding.
+	if err := s.caps.validate(budgets); err != nil {
 		return err
 	}
 	if err := s.store.ReplaceConfigBudgets(ctx, budgets); err != nil {
 		return err
 	}
+	defer s.notifyChanged(ctx)
 	return s.Refresh(ctx)
 }
 
-// validateCapabilities refuses budgets being written that need a capability
-// the deployment does not have.
-func (s *Service) validateCapabilities(budgets []Budget) error {
+// validateEdits refuses budgets being written that need a capability the
+// deployment does not have. A budget already stored as billed keeps its basis
+// while billed budgets are unavailable, so editing its amount does not switch
+// it to provider cost for good.
+func (s *Service) validateEdits(budgets []Budget) error {
 	if s == nil {
 		return nil
 	}
-	return s.caps.validate(budgets)
+	checked := make([]Budget, 0, len(budgets))
+	for _, item := range budgets {
+		if item.CostBasis == CostBasisBilled && s.StoredAsBilled(item.Scope, item.Subject, item.PeriodSeconds) {
+			item.CostBasis = CostBasisProvider
+		}
+		checked = append(checked, item)
+	}
+	return s.caps.validate(checked)
+}
+
+// StoredAsBilled reports whether the budget with this key is stored on billed
+// cost, whether or not billed budgets are currently available.
+func (s *Service) StoredAsBilled(scope Scope, subject string, periodSeconds int64) bool {
+	if s == nil {
+		return false
+	}
+	key := budgetKey(scope, subject, periodSeconds)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return slices.ContainsFunc(s.budgets, func(b Budget) bool {
+		return b.CostBasis == CostBasisBilled && budgetKey(b.Scope, b.Subject, b.PeriodSeconds) == key
+	})
 }
 
 // downgradeUnavailableBilled enforces stored billed budgets on provider cost
 // while billed budgets are unavailable (license lapsed or markups disabled),
-// so the limit stays in force and the gateway still starts; changing the
-// budget or restoring the entitlement ends it. Each budget is logged once.
-// The caller holds s.mu.
+// so the limit stays in force and the gateway still starts; restoring the
+// entitlement or switching the budget to provider cost ends it. CostBasis
+// keeps the stored basis, so listings show it and edits keep it. Each budget
+// is logged once. The caller holds s.mu.
 func (s *Service) downgradeUnavailableBilled(budgets []Budget) []Budget {
 	if s.caps.billedBudgets {
 		return budgets
@@ -219,7 +286,7 @@ func (s *Service) downgradeUnavailableBilled(budgets []Budget) []Budget {
 		if budgets[i].CostBasis != CostBasisBilled {
 			continue
 		}
-		budgets[i].CostBasis = CostBasisProvider
+		budgets[i].EnforcedCostBasis = CostBasisProvider
 		key := budgetKey(budgets[i].Scope, budgets[i].Subject, budgets[i].PeriodSeconds)
 		if _, warned := s.downgradeWarned[key]; warned {
 			continue
@@ -263,6 +330,7 @@ func (s *Service) SaveSettings(ctx context.Context, settings Settings) (Settings
 	if err != nil {
 		return Settings{}, err
 	}
+	defer s.notifyChanged(ctx)
 	if err := s.Refresh(ctx); err != nil {
 		return saved, fmt.Errorf("refresh budget service after saving settings: %w", err)
 	}
@@ -309,6 +377,7 @@ func (s *Service) ResetBudget(ctx context.Context, scope Scope, subject string, 
 	if err := s.store.ResetBudget(ctx, scope, subject, periodSeconds, at.UTC()); err != nil {
 		return err
 	}
+	defer s.notifyChanged(ctx)
 	return s.Refresh(ctx)
 }
 
@@ -322,6 +391,7 @@ func (s *Service) ResetAll(ctx context.Context, at time.Time) error {
 	if err := s.store.ResetAllBudgets(ctx, at.UTC()); err != nil {
 		return err
 	}
+	defer s.notifyChanged(ctx)
 	return s.Refresh(ctx)
 }
 
@@ -376,7 +446,7 @@ func (s *Service) CheckCacheHit(ctx context.Context, subjects Subjects, now time
 	if err != nil {
 		return err
 	}
-	matching = slices.DeleteFunc(matching, func(b Budget) bool { return b.CostBasis != CostBasisBilled })
+	matching = slices.DeleteFunc(matching, func(b Budget) bool { return b.EnforcedBasis() != CostBasisBilled })
 	if len(matching) == 0 {
 		return nil
 	}
@@ -485,11 +555,12 @@ func (s *Service) evaluate(ctx context.Context, budgets []Budget, now time.Time,
 			continue
 		}
 		windows = append(windows, SpendWindow{
-			Scope:     budget.Scope,
-			Subject:   budget.evaluationSubject(),
-			CostBasis: budget.CostBasis,
-			Start:     start,
-			End:       now,
+			Scope:            budget.Scope,
+			Subject:          budget.evaluationSubject(),
+			CostBasis:        budget.EnforcedBasis(),
+			Start:            start,
+			End:              now,
+			ExcludeCacheHits: budget.Scope == ScopeProvider && !s.providerBilledCacheHits,
 		})
 		windowIndexes = append(windowIndexes, i)
 	}

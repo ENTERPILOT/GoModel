@@ -27,14 +27,20 @@ func TestEmbeddingsVirtualModelFailover_E2E(t *testing.T) {
 		primaryStatus int
 		wantStatus    int
 		wantReserve   int
+		crossModel    bool
 	}{
 		{name: "unavailable primary", primaryStatus: http.StatusServiceUnavailable, wantStatus: http.StatusOK, wantReserve: 1},
 		{name: "invalid request", primaryStatus: http.StatusBadRequest, wantStatus: http.StatusBadRequest},
 		{name: "invalid credential", primaryStatus: http.StatusUnauthorized, wantStatus: http.StatusUnauthorized},
+		{name: "different model rejected", primaryStatus: http.StatusServiceUnavailable, wantStatus: http.StatusServiceUnavailable, crossModel: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			primary, primaryCapture := embeddingFailoverUpstream(t, "embedding-a", tc.primaryStatus)
-			reserve, reserveCapture := embeddingFailoverUpstream(t, "embedding-b", http.StatusOK)
+			backupModel := "embedding-a"
+			if tc.crossModel {
+				backupModel = "embedding-b"
+			}
+			reserve, reserveCapture := embeddingFailoverUpstream(t, backupModel, http.StatusOK)
 			factory := providers.NewProviderFactory()
 			factory.Add(openai.Registration)
 			registry := providers.NewModelRegistry()
@@ -64,7 +70,7 @@ func TestEmbeddingsVirtualModelFailover_E2E(t *testing.T) {
 				Source: "embedding-pool", Enabled: true, Strategy: virtualmodels.StrategyFailover,
 				Targets: []virtualmodels.Target{
 					{Model: "embedding-primary/embedding-a"},
-					{Model: "embedding-reserve/embedding-b"},
+					{Model: "embedding-reserve/" + backupModel},
 				},
 			}))
 			gateway := httptest.NewServer(setupE2EServer(t, e2eServerOptions{
@@ -88,12 +94,12 @@ func TestEmbeddingsVirtualModelFailover_E2E(t *testing.T) {
 			}
 
 			require.Equal(t, map[string]any{
-				"model": "embedding-b", "input": []any{"first", "second"},
+				"model": "embedding-a", "input": []any{"first", "second"},
 				"dimensions": float64(2), "encoding_format": "base64", "user": "local-embedding-test",
 			}, reserveAttempts[0].JSON(t))
 			var result core.EmbeddingResponse
 			require.NoError(t, json.Unmarshal(body, &result))
-			require.Equal(t, "embedding-b", result.Model)
+			require.Equal(t, "embedding-a", result.Model)
 			require.Len(t, result.Data, 2)
 			for i, item := range result.Data {
 				require.Equal(t, i, item.Index)

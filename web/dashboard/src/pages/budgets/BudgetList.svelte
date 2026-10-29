@@ -7,6 +7,7 @@
   import { labelColor } from "$lib/utils/chartTheme.js";
   import { budgetsStore as store } from "./budgets.svelte.js";
   import {
+    budgetBilledOnProviderCost,
     budgetCostBasis,
     budgetKey,
     budgetPeriodBarClass,
@@ -72,7 +73,11 @@
                 <span>{m.budgets_per_child_badge()}</span>
               </span>
             {/if}
-            {#if budgetCostBasis(item) === "billed"}
+            {#if budgetBilledOnProviderCost(item)}
+              <span class="budget-period-label" title={m.budgets_billed_on_provider_title()}>
+                <span>{m.budgets_billed_on_provider_badge()}</span>
+              </span>
+            {:else if budgetCostBasis(item) === "billed"}
               <span class="budget-period-label" title={m.budgets_billed_title()}>
                 <span>{m.budgets_billed_badge()}</span>
               </span>

@@ -302,7 +302,7 @@ Bei diesen Providern stoßen die meisten Benutzer auf Schwierigkeiten:
   Credentials oder einen JSON-Key eines Service-Accounts.
 - **Amazon Bedrock** – kein eigener API-Key; verwendet die AWS-Credential-Chain und erfordert einen
   expliziten Modellzugriff in der Bedrock-Konsole.
-- **Azure OpenAI** – Deployment-bezogene Base-URLs, der Query-Parameter `api-version` und der
+- **Azure OpenAI** – Deployment-bezogene oder `/openai/v1`-Base-URLs, der Query-Parameter `api-version` und der
   Header `api-key` statt `Authorization: Bearer`.
 - **Oracle GenAI** – erfordert eine OCI-IAM-Richtlinie für `generativeaiapikey` und eine
   regionsspezifische OpenAI-kompatible Endpunkt-URL.

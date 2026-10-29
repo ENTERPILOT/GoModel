@@ -407,6 +407,7 @@ Budgetverwaltung und protokolliert eine Warnung.
 | Variable                     | Beschreibung                                                                        | Standardwert   |
 | ---------------------------- | ---------------------------------------------------------------------------------- | --------- |
 | `BUDGETS_ENABLED`            | Aktiviert die Budgetverwaltung und Budgetprüfungen in Workflows, sofern die Nutzungserfassung aktiv ist | `true`    |
+| `BUDGETS_PROVIDER_BILLED_CACHE_HITS` | Zählt abgerechnete Cache-Treffer in Provider-Budgets auf abgerechneten Kosten (GoModel Pro) | `true` |
 | `SET_BUDGET_<PATH>`          | Legt anfängliche Budgetlimits für einen User Path fest, etwa `daily=10`                             | _(leer)_ |
 | `SET_PROVIDER_BUDGET_<NAME>` | Legt anfängliche Budgetlimits für eine Provider-Instanz fest, etwa `daily=100`                    | _(leer)_ |
 
@@ -484,6 +485,32 @@ Die Wartezeit auf das erste Token zählt nicht mit, langsame Reasoning-Modelle
 sind also nicht betroffen. Erhöhen Sie den Wert nur für einen Provider, der
 mitten im Stream berechtigterweise minutenlang pausiert.
 
+Die Standardvariablen `HTTP_PROXY`, `HTTPS_PROXY` und `NO_PROXY` gelten für
+jede Upstream-Verbindung, sofern ein Provider keinen eigenen
+[ausgehenden Proxy](/de/providers/outbound-proxy) festlegt.
+
+#### Vertrauen für ausgehendes TLS
+
+Diese Einstellungen gelten für jede ausgehende HTTPS-Verbindung: Provider,
+Modellkatalog, Update-Prüfung, MCP-Upstreams, Vector Stores und
+Embedding-Endpunkte. Standardmäßig wird dem Zertifikatsspeicher des
+Betriebssystems vertraut. Das passt, solange keine interne CA und kein
+TLS-abfangender Proxy zwischen Gateway und Upstreams sitzt.
+
+| Variable                        | Beschreibung                                                        | Standardwert |
+| ------------------------------- | ------------------------------------------------------------------- | ------------ |
+| `HTTP_TLS_CA_FILE`              | PEM-Bundle mit zusätzlichen Root-Zertifikaten, an den Systemspeicher angehängt | nicht gesetzt |
+| `HTTP_TLS_CLIENT_CERT_FILE`     | Client-Zertifikat für mTLS; zusammen mit dem Key setzen             | nicht gesetzt |
+| `HTTP_TLS_CLIENT_KEY_FILE`      | Privater Key zum Client-Zertifikat                                  | nicht gesetzt |
+| `HTTP_TLS_INSECURE_SKIP_VERIFY` | Deaktiviert die Zertifikatsprüfung. Nur für Testumgebungen; wird als Warnung geloggt | `false` |
+
+Eine fehlende oder nicht lesbare Datei ist ein Startfehler, sodass ein Tippfehler
+im Pfad nicht stillschweigend dazu führt, dass nichts zusätzlich vertraut wird.
+Bei einem [Reload der Konfiguration](/de/advanced/cli#konfiguration-neu-laden)
+werden die Dateien neu gelesen, aber nicht überwacht. Führen Sie nach dem
+Rotieren also einen Reload oder Neustart aus. Ein vollständiges Beispiel
+finden Sie im [Produktionsleitfaden](/de/guides/production#private-cas-und-proxys).
+
 #### API-Keys der Provider
 
 Setzen Sie diese Variablen, um Provider automatisch zu registrieren. Keine YAML-Konfiguration erforderlich.
@@ -512,7 +539,7 @@ Setzen Sie diese Variablen, um Provider automatisch zu registrieren. Keine YAML-
 | `LLAMACPP_BASE_URL`  | llama.cpp llama-server / LM Studio (kein API-Key nötig, sofern nicht mit `--api-key` gestartet) |
 | `LLMD_BASE_URL`      | llm-d Router/EPP (kein API-Key nötig, sofern dessen Gateway keinen verlangt) |
 
-Die meisten Provider können über `<PROVIDER>_BASE_URL` (zum Beispiel `OPENAI_BASE_URL`) eine eigene Base-URL verwenden. Chutes AI verwendet standardmäßig `https://llm.chutes.ai/v1`; dies lässt sich mit `CHUTES_BASE_URL` überschreiben. DeepSeek verwendet standardmäßig `https://api.deepseek.com`; setzen Sie `DEEPSEEK_BASE_URL` nur für einen kompatiblen Proxy oder einen alternativen DeepSeek-Endpunkt. OpenRouter verwendet standardmäßig `https://openrouter.ai/api/v1`; dies lässt sich mit `OPENROUTER_BASE_URL` überschreiben. Kilo AI verwendet standardmäßig `https://api.kilo.ai/api/gateway`; dies lässt sich mit `KILO_BASE_URL` überschreiben. Eden AI verwendet standardmäßig `https://api.edenai.run/v3`; dies lässt sich mit `EDENAI_BASE_URL` überschreiben. Z.ai verwendet standardmäßig `https://api.z.ai/api/paas/v4`; setzen Sie `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4` für den Endpunkt des GLM Coding Plan. SGLang verwendet standardmäßig `http://localhost:30000/v1`, wenn `SGLANG_API_KEY` gesetzt ist; Deployments ohne Key sollten `SGLANG_BASE_URL` jedoch explizit setzen, um den Provider zu registrieren. vLLM folgt demselben Muster mit `http://localhost:8000/v1`. Für llama.cpp ist `LLAMACPP_BASE_URL` immer erforderlich (der Standardport von llama-server kollidiert mit GoModels eigenem Port 8080, daher gibt es keinen Standardwert); `LLAMACPP_API_KEY` ist optional. llm-d hat keinen universellen Endpunkt, daher ist `LLMD_BASE_URL` immer erforderlich; `LLMD_API_KEY` ist optional. Azure verwendet `AZURE_BASE_URL` für die Base-URL seines Deployments und akzeptiert optional `AZURE_API_VERSION` zum Überschreiben; andernfalls gilt standardmäßig `2024-10-21`. Oracle erfordert `ORACLE_BASE_URL`, weil sein OpenAI-kompatibler Endpunkt regionsspezifisch ist.
+Die meisten Provider können über `<PROVIDER>_BASE_URL` (zum Beispiel `OPENAI_BASE_URL`) eine eigene Base-URL verwenden. Chutes AI verwendet standardmäßig `https://llm.chutes.ai/v1`; dies lässt sich mit `CHUTES_BASE_URL` überschreiben. DeepSeek verwendet standardmäßig `https://api.deepseek.com`; setzen Sie `DEEPSEEK_BASE_URL` nur für einen kompatiblen Proxy oder einen alternativen DeepSeek-Endpunkt. OpenRouter verwendet standardmäßig `https://openrouter.ai/api/v1`; dies lässt sich mit `OPENROUTER_BASE_URL` überschreiben. Kilo AI verwendet standardmäßig `https://api.kilo.ai/api/gateway`; dies lässt sich mit `KILO_BASE_URL` überschreiben. Eden AI verwendet standardmäßig `https://api.edenai.run/v3`; dies lässt sich mit `EDENAI_BASE_URL` überschreiben. Z.ai verwendet standardmäßig `https://api.z.ai/api/paas/v4`; setzen Sie `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4` für den Endpunkt des GLM Coding Plan. SGLang verwendet standardmäßig `http://localhost:30000/v1`, wenn `SGLANG_API_KEY` gesetzt ist; Deployments ohne Key sollten `SGLANG_BASE_URL` jedoch explizit setzen, um den Provider zu registrieren. vLLM folgt demselben Muster mit `http://localhost:8000/v1`. Für llama.cpp ist `LLAMACPP_BASE_URL` immer erforderlich (der Standardport von llama-server kollidiert mit GoModels eigenem Port 8080, daher gibt es keinen Standardwert); `LLAMACPP_API_KEY` ist optional. llm-d hat keinen universellen Endpunkt, daher ist `LLMD_BASE_URL` immer erforderlich; `LLMD_API_KEY` ist optional. Azure verwendet `AZURE_BASE_URL` für die Base-URL seines Deployments und akzeptiert optional `AZURE_API_VERSION` zum Überschreiben; andernfalls gilt für Deployment-URLs standardmäßig `2024-10-21`, für `/openai/v1`-URLs (Azure AI Foundry) wird keine Version gesendet. Oracle erfordert `ORACLE_BASE_URL`, weil sein OpenAI-kompatibler Endpunkt regionsspezifisch ist.
 
 Jeder Provider-Typ akzeptiert außerdem über `<PROVIDER>_MODELS` eine
 kommagetrennte Liste konfigurierter Modelle, zum Beispiel

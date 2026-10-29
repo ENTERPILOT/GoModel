@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -198,29 +199,33 @@ func TestRestoreIgnoresSharedRowOnPerChildRule(t *testing.T) {
 }
 
 func TestFailedLoadDoesNotReplacePersistedWindows(t *testing.T) {
-	now := time.Now().Unix()
-	store := &failLoadStore{err: errors.New("store down")}
-	store.counters = []WindowSnapshot{{
-		Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: PeriodHourSeconds,
-		RequestsWindowStart: now, RequestsCurrent: 9,
-	}}
-	err := store.UpsertRules(context.Background(), []Rule{{
-		Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodHourSeconds,
-		MaxRequests: new(int64(10)), Source: SourceManual,
-	}})
-	require.NoError(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		now := time.Now().Unix()
+		store := &failLoadStore{err: errors.New("store down")}
+		store.counters = []WindowSnapshot{{
+			Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: PeriodHourSeconds,
+			RequestsWindowStart: now, RequestsCurrent: 9,
+		}}
+		err := store.UpsertRules(context.Background(), []Rule{{
+			Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodHourSeconds,
+			MaxRequests: new(int64(10)), Source: SourceManual,
+		}})
+		require.NoError(t, err)
 
-	service, err := NewService(context.Background(), store, WithFlushInterval(10*time.Millisecond))
-	require.NoError(t, err)
+		const interval = 10 * time.Millisecond
+		service, err := NewService(context.Background(), store, WithFlushInterval(interval))
+		require.NoError(t, err)
 
-	service.Start(context.Background())
-	_, err = service.Acquire(onPath("/team"), time.Now().UTC())
-	require.NoError(t, err)
+		service.Start(context.Background())
+		_, err = service.Acquire(onPath("/team"), time.Now().UTC())
+		require.NoError(t, err)
 
-	service.Close()
-	time.Sleep(30 * time.Millisecond)
-	require.Len(t, store.counters, 1)
-	require.Equal(t, int64(9), store.counters[0].RequestsCurrent)
+		service.Close()
+		// Several flush intervals pass on the bubble's clock without a write.
+		time.Sleep(3 * interval)
+		require.Len(t, store.counters, 1)
+		require.Equal(t, int64(9), store.counters[0].RequestsCurrent)
+	})
 }
 
 func TestStartIsIdempotentAndCloseStopsTheLoop(t *testing.T) {
@@ -230,16 +235,21 @@ func TestStartIsIdempotentAndCloseStopsTheLoop(t *testing.T) {
 	}})
 	require.NoError(t, err)
 
-	service, err := NewService(context.Background(), store, WithFlushInterval(15*time.Millisecond))
-	require.NoError(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		const interval = 15 * time.Millisecond
+		service, err := NewService(context.Background(), store, WithFlushInterval(interval))
+		require.NoError(t, err)
 
-	service.Start(context.Background())
-	service.Start(context.Background())
-	service.Close()
-	afterClose := store.saves.Load()
-	time.Sleep(50 * time.Millisecond)
-	got := store.saves.Load()
-	require.Equal(t, afterClose, got)
+		service.Start(context.Background())
+		service.Start(context.Background())
+		service.Close()
+		afterClose := store.saves.Load()
+		// Several flush intervals pass on the bubble's clock; a loop still
+		// running would write again.
+		time.Sleep(3 * interval)
+		got := store.saves.Load()
+		require.Equal(t, afterClose, got)
+	})
 }
 
 func TestFlushIntervalWritesBeforeClose(t *testing.T) {
@@ -249,19 +259,21 @@ func TestFlushIntervalWritesBeforeClose(t *testing.T) {
 	}})
 	require.NoError(t, err)
 
-	service, err := NewService(context.Background(), store, WithFlushInterval(15*time.Millisecond))
-	require.NoError(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		const interval = 15 * time.Millisecond
+		service, err := NewService(context.Background(), store, WithFlushInterval(interval))
+		require.NoError(t, err)
 
-	t.Cleanup(service.Close)
-	_, err = service.Acquire(onPath("/"), time.Now().UTC())
-	require.NoError(t, err)
+		t.Cleanup(service.Close)
+		_, err = service.Acquire(onPath("/"), time.Now().UTC())
+		require.NoError(t, err)
 
-	service.Start(context.Background())
-	deadline := time.Now().Add(200 * time.Millisecond)
-	for store.saves.Load() == 0 && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
-	require.NotEqual(t, int64(0), store.saves.Load())
+		service.Start(context.Background())
+		// The first tick of the flush loop lands exactly one interval later.
+		time.Sleep(interval)
+		synctest.Wait()
+		require.NotZero(t, store.saves.Load())
+	})
 }
 
 func TestFlushIntervalZeroOnlyWritesOnClose(t *testing.T) {
@@ -271,17 +283,19 @@ func TestFlushIntervalZeroOnlyWritesOnClose(t *testing.T) {
 	}})
 	require.NoError(t, err)
 
-	service, err := NewService(context.Background(), store, WithFlushInterval(0))
-	require.NoError(t, err)
-	_, err = service.Acquire(onPath("/"), time.Now().UTC())
-	require.NoError(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		service, err := NewService(context.Background(), store, WithFlushInterval(0))
+		require.NoError(t, err)
+		_, err = service.Acquire(onPath("/"), time.Now().UTC())
+		require.NoError(t, err)
 
-	service.Start(context.Background())
-	time.Sleep(30 * time.Millisecond)
-	require.Equal(t, int64(0), store.saves.Load())
+		service.Start(context.Background())
+		time.Sleep(time.Second)
+		require.Zero(t, store.saves.Load())
 
-	service.Close()
-	require.Equal(t, int64(1), store.saves.Load())
+		service.Close()
+		require.Equal(t, int64(1), store.saves.Load())
+	})
 }
 
 func TestCloseDuringLoadDoesNotRestore(t *testing.T) {

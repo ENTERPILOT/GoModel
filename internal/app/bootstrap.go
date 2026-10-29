@@ -80,6 +80,9 @@ func newBootstrap(ctx context.Context, cfg Config) *bootstrap {
 		slog.Info("offline mode: update check disabled, remote model catalog download disabled; only configured providers and declared endpoints are contacted",
 			"model_catalog", catalog)
 	}
+	if appCfg.HTTP.TLS.InsecureSkipVerify {
+		slog.Warn("outbound TLS certificate verification is disabled (http.tls.insecure_skip_verify); do not run this in production")
+	}
 	if appCfg.Budgets.Enabled && !appCfg.Usage.Enabled {
 		appCfg.Budgets.Enabled = false
 		slog.Warn("budget management disabled because usage tracking is disabled",
@@ -134,6 +137,7 @@ func (b *bootstrap) phases() []func() error {
 		b.initPricing,
 		b.initWorkflows,
 		b.initServerDependencies,
+		b.initClusterSync,
 		b.initServerConfig,
 		b.initAdmin,
 		b.initResponseCache,

@@ -2,13 +2,13 @@
 title: "System One API"
 description: "通过 GoModel 发送 TypeSafe System One 决策请求（Jev、Kev），以原生方式转发，并支持虚拟模型、护栏、缓存、故障转移、审计和用量统计。"
 icon: "scale"
-keywords: ["System One", "systemone", "Jev", "Kev", "TypeSafe", "决策模型", "decision model", "noul", "choice", "score", "OpenRouter"]
+keywords: ["System One", "systemone", "Jev", "Kev", "TypeSafe", "决策模型", "decision model", "noul", "choice", "score", "OpenRouter", "Azure", "Microsoft-Decision-1"]
 ---
 
 `POST /v1/systemone` 提供 TypeSafe 的 System One API：请求携带一个
 `state`（要评估的文本或记录）和一组类型化问题，回答则是每个问题经过校准的概率。它是决策 API，而不是文本生成器，因此 GoModel 会以**原生**方式转发它，从不在它与聊天格式之间进行翻译。如需使用 OpenAI 的请求和回答结构访问相同的模型，请使用 [Decisions API](/zh/advanced/decisions-api)，GoModel 会将其翻译为 System One。
 
-配置了 [`jev` 提供商](/zh/providers/jev)（托管的 Jev 或自托管的 Kev 服务器）或 `openrouter` 提供商后，该端点即可使用。否则，它会返回 `404`。
+配置了 [`jev` 提供商](/zh/providers/jev)（托管的 Jev 或自托管的 Kev 服务器）、`openrouter` 提供商或 [`azure` 提供商](/zh/providers/azure)（Microsoft-Decision-1）后，该端点即可使用。否则，它会返回 `404`。
 
 ## 请求与回答
 
@@ -59,7 +59,7 @@ TypeSafe SDK 会发送 `POST {base_url}/v1/systemone`，因此请将它们指向
 | `POST /v1/systemone/permute` | 仅限 Kev：以多种选项顺序运行一个 Choice 问题（`n_perm`，1 到 64，默认 6） |
 | `POST /v1/systemone/separate` | 仅限 Kev：每个问题各自单独执行一次前向传播 |
 
-Kev 路由的行为与 `/v1/systemone` 相同。OpenRouter 只支持评估路由，因此这些路由对 OpenRouter 会被拒绝；托管的 TypeSafe `jev` 提供商会自行返回 `404`。
+Kev 路由的行为与 `/v1/systemone` 相同。OpenRouter 和 Azure 只支持评估路由，因此这些路由对 OpenRouter 和 Azure 会被拒绝；托管的 TypeSafe `jev` 提供商会自行返回 `404`。
 
 ## 网关的处理过程
 
@@ -76,7 +76,7 @@ Kev 路由的行为与 `/v1/systemone` 相同。OpenRouter 只支持评估路由
 TypeSafe 的 [图像](https://docs.typesafe.ai/images) 请求可按原样发送：
 在 JSON 请求体中使用 `assets`，或使用 TypeSafe 的 `multipart/form-data` 表单——其中 JSON 请求作为第一个部分，名为 `request`，每张图像作为一个文件部分，由某个 asset 通过 `part` 引用。TypeSafe SDK 会为 `Image`
 对象发送该表单。GoModel 会将每个图像部分以 `data_base64` 内联到对应的 asset 中，并转发一个 JSON 请求，因此护栏、缓存和故障转移对两种形式的处理方式相同。图像必须是 PNG 或 JPEG；如果 asset 指定了 `format` 则保留，否则根据图像字节判断。TypeSafe 会拒绝的表单（例如没有任何 asset 使用的部分、asset 引用了不存在的部分，或者图像不是 PNG 或 JPEG）会返回 `400`。请按 TypeSafe 的要求发送
-`TypeSafe-Danger-Zone-Images: true` 请求头；网关会将其转发。Kev 服务器只读取文本。
+`TypeSafe-Danger-Zone-Images: true` 请求头；网关会将其转发。Kev 服务器和 Azure 的 Microsoft-Decision-1 只读取文本；网关不会拒绝它们的图像请求，由上游作答。
 
 ```bash
 curl -s http://localhost:8080/v1/systemone \
@@ -95,6 +95,7 @@ curl -s http://localhost:8080/v1/systemone \
 | `jev`（托管） | `jev/jev-latest`、`jev/jev-preview`，以及任何带版本的 ID，例如 `jev/jev-1.13.0` |
 | `jev`（Kev 服务器） | 对于名为 `kev` 的提供商，为 `kev/kev-latest` 以及该检查点的别名 |
 | `openrouter` | `openrouter/typesafe/jev-1.13`、`openrouter/~typesafe/jev-latest`，以及 OpenRouter 的其他决策模型，例如 `openrouter/jaredpalmer/kev-4b` |
+| `azure` | 您的 Microsoft-Decision-1 部署名称，例如 `azure/ms-decision-1` |
 
 System One 模型在 `GET /v1/models` 中被列为不带生成模式的工具类模型。
 
@@ -145,7 +146,7 @@ One 的调用方期望得到类型化的回答，而不是文本。
 
 | 情况 | 结果 |
 | --- | --- |
-| 未配置 `jev` 或 `openrouter` 提供商 | `404` |
+| 未配置 `jev`、`openrouter` 或 `azure` 提供商 | `404` |
 | 缺少 `model` | `400` |
 | 模型所在的提供商不支持 System One，或者是聊天、嵌入或其他生成类模型（包括通过虚拟模型） | `400 invalid_request_error` 并说明原因；网关会输出一条警告 |
 | System One 模型被发送到 `/v1/chat/completions`、`/v1/responses` 或 `/v1/embeddings` | `400 invalid_request_error`，并指向 `/v1/decisions` 和 `/v1/systemone` |

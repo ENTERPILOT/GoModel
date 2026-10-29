@@ -15,7 +15,17 @@ func (o *InferenceOrchestrator) FailoverSelectors(workflow *core.Workflow) []cor
 	if o.failoverResolver == nil || workflow == nil || workflow.Resolution == nil || !workflow.FailoverEnabled() {
 		return nil
 	}
-	return o.failoverResolver.ResolveFailovers(workflow.Resolution, workflow.Endpoint.Operation)
+	selectors := o.failoverResolver.ResolveFailovers(workflow.Resolution, workflow.Endpoint.Operation)
+	if workflow.Endpoint.Operation != core.OperationEmbeddings {
+		return selectors
+	}
+	var compatible []core.ModelSelector
+	for _, selector := range selectors {
+		if selector.Model == workflow.Resolution.ResolvedSelector.Model {
+			compatible = append(compatible, selector)
+		}
+	}
+	return compatible
 }
 
 // ProviderTypeForSelector returns the provider type for a selector.
@@ -46,19 +56,6 @@ func tryFailoverResponse[T any](
 	model, provider string,
 	primaryErr error,
 	eligible func(selector core.ModelSelector, providerType string) bool,
-	call func(selector core.ModelSelector, providerType, providerName string) (T, string, error),
-) (T, ExecutionMeta, error) {
-	return tryFailoverResponseWithAdmission(ctx, o, workflow, model, provider, primaryErr, eligible, nil, call)
-}
-
-func tryFailoverResponseWithAdmission[T any](
-	ctx context.Context,
-	o *InferenceOrchestrator,
-	workflow *core.Workflow,
-	model, provider string,
-	primaryErr error,
-	eligible func(selector core.ModelSelector, providerType string) bool,
-	admit EmbeddingAttemptAdmission,
 	call func(selector core.ModelSelector, providerType, providerName string) (T, string, error),
 ) (T, ExecutionMeta, error) {
 	var zero T
@@ -102,7 +99,7 @@ func tryFailoverResponseWithAdmission[T any](
 			)
 			continue
 		}
-		if admit == nil && o.routeGate != nil && !o.routeGate.RouteAvailable(providerName, qualified) {
+		if o.routeGate != nil && !o.routeGate.RouteAvailable(providerName, qualified) {
 			slog.Info("skipping rate-limited failover target",
 				"request_id", requestID,
 				"to", qualified,
@@ -118,20 +115,6 @@ func tryFailoverResponseWithAdmission[T any](
 			)
 			continue
 		}
-		started := time.Now()
-		release := noopAdmissionRelease
-		if admit != nil {
-			var err error
-			admittedRelease, err := admit(ctx, selector, providerName)
-			if err != nil {
-				recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindFailover, providerType, providerName, qualified, started, err))
-				lastErr = err
-				continue
-			}
-			if admittedRelease != nil {
-				release = admittedRelease
-			}
-		}
 		slog.Warn("primary model attempt failed, trying failover",
 			"request_id", requestID,
 			"from", primaryModel,
@@ -140,11 +123,9 @@ func tryFailoverResponseWithAdmission[T any](
 			"error", lastErr,
 		)
 
+		started := time.Now()
 		attempts++
-		resp, resolvedProviderType, err := func() (T, string, error) {
-			defer release()
-			return call(selector, providerType, providerName)
-		}()
+		resp, resolvedProviderType, err := call(selector, providerType, providerName)
 		recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindFailover, firstNonEmptyString(resolvedProviderType, providerType), providerName, qualified, started, err))
 		if err == nil {
 			slog.Info("failover model attempt succeeded",
@@ -166,8 +147,6 @@ func tryFailoverResponseWithAdmission[T any](
 	return zero, ExecutionMeta{}, lastErr
 }
 
-func noopAdmissionRelease() {}
-
 // providerOverBudget reports whether a failover target's provider budget is
 // spent. A workflow that disables budgets skips the gate, as admission does.
 func (o *InferenceOrchestrator) providerOverBudget(ctx context.Context, workflow *core.Workflow, providerName string) bool {
@@ -181,14 +160,13 @@ func executeWithFailoverResponse[T any](
 	model, provider string,
 	primary func() (T, string, string, error),
 	eligible func(selector core.ModelSelector, providerType string) bool,
-	admit EmbeddingAttemptAdmission,
 	failoverFn func(selector core.ModelSelector, providerType, providerName string) (T, string, error),
 ) (T, ExecutionMeta, error) {
 	resp, resolvedProviderType, resolvedProviderName, err := primary()
 	if err == nil {
 		return resp, ExecutionMeta{ProviderType: resolvedProviderType, ProviderName: resolvedProviderName}, nil
 	}
-	return tryFailoverResponseWithAdmission(ctx, o, workflow, model, provider, err, eligible, admit, failoverFn)
+	return tryFailoverResponse(ctx, o, workflow, model, provider, err, eligible, failoverFn)
 }
 
 func executeTranslatedWithFailover[Req any, Resp any](
@@ -199,7 +177,6 @@ func executeTranslatedWithFailover[Req any, Resp any](
 	model, provider string,
 	cloneForSelector func(Req, core.ModelSelector) Req,
 	call func(context.Context, Req, string) (Resp, string, error),
-	admit EmbeddingAttemptAdmission,
 ) (Resp, ExecutionMeta, error) {
 	return executeWithFailoverResponse(ctx, o, workflow, model, provider,
 		func() (Resp, string, string, error) {
@@ -212,35 +189,15 @@ func executeTranslatedWithFailover[Req any, Resp any](
 				recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, ProviderTypeFromWorkflow(workflow), ProviderNameFromWorkflow(workflow), currentSelectorForWorkflow(workflow, model, provider), started, saturated))
 				return zero, "", "", saturated
 			}
-			providerName := ProviderNameFromWorkflow(workflow)
-			release := noopAdmissionRelease
-			if admit != nil {
-				primarySelector := core.ModelSelector{Model: model, Provider: provider}
-				if workflow != nil && workflow.Resolution != nil {
-					primarySelector = workflow.Resolution.ResolvedSelector
-				}
-				admittedRelease, err := admit(ctx, primarySelector, providerName)
-				if err != nil {
-					recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, ProviderTypeFromWorkflow(workflow), providerName, currentSelectorForWorkflow(workflow, model, provider), started, err))
-					return zero, "", "", err
-				}
-				if admittedRelease != nil {
-					release = admittedRelease
-				}
-			}
-			resp, responseProvider, err := func() (Resp, string, error) {
-				defer release()
-				return call(ctx, req, providerName)
-			}()
+			resp, responseProvider, err := call(ctx, req, ProviderNameFromWorkflow(workflow))
 			attemptProviderType := ResponseProviderType(ProviderTypeFromWorkflow(workflow), responseProvider)
-			recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, attemptProviderType, providerName, currentSelectorForWorkflow(workflow, model, provider), started, err))
+			recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, attemptProviderType, ProviderNameFromWorkflow(workflow), currentSelectorForWorkflow(workflow, model, provider), started, err))
 			if err != nil {
 				return zero, "", "", err
 			}
-			return resp, ResponseProviderType(ProviderTypeFromWorkflow(workflow), responseProvider), providerName, nil
+			return resp, ResponseProviderType(ProviderTypeFromWorkflow(workflow), responseProvider), ProviderNameFromWorkflow(workflow), nil
 		},
 		nil,
-		admit,
 		func(selector core.ModelSelector, providerType, providerName string) (Resp, string, error) {
 			// A failover target gets a different request body, so it must not
 			// reuse the client's idempotency key.
@@ -388,7 +345,6 @@ func (o *InferenceOrchestrator) ExecutePassthroughWithFailover(ctx context.Conte
 			return answer{resp: resp, selector: primary}, providerType, providerName, nil
 		},
 		eligible,
-		nil,
 		func(selector core.ModelSelector, providerType, providerName string) (answer, string, error) {
 			// A failover target gets a different body, so it must not reuse
 			// the client's idempotency key.
