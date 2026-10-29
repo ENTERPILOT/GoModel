@@ -3,6 +3,7 @@ package runcrate
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -33,9 +34,9 @@ type modelPricing struct {
 	Output *float64 `json:"output"`
 }
 
-// modalityModes maps Runcrate's output modality onto gateway modes. Image,
-// video, and audio models are absent: the gateway does not route those to
-// Runcrate, so they are left out of the catalog.
+// modalityModes maps Runcrate's output modalities onto gateway modes. Image,
+// video, and audio outputs are absent: the gateway does not route those to
+// Runcrate, so models that only produce them are left out of the catalog.
 var modalityModes = map[string][]string{
 	"text":       {"chat", "responses"},
 	"embeddings": {"embedding"},
@@ -43,7 +44,7 @@ var modalityModes = map[string][]string{
 
 // ListModels returns Runcrate's model catalog with the output modality,
 // context length, display name, and token prices its listing carries. Models
-// whose output the gateway cannot serve are skipped; models without an output
+// with no output the gateway can serve are skipped; models without an output
 // modality are kept.
 func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
 	var upstream modelList
@@ -79,17 +80,20 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 	return result, nil
 }
 
-// metadata normalizes one listing entry. It reports false when the model's
-// output modality is known but not served by the gateway.
+// metadata normalizes one listing entry. It collects the gateway modes of every
+// listed output modality and reports false when modalities are listed but none
+// is served by the gateway.
 func (m modelInfo) metadata() (*core.ModelMetadata, bool) {
 	var modes []string
-	if len(m.OutputModalities) > 0 {
-		modality := strings.ToLower(strings.TrimSpace(m.OutputModalities[0]))
-		known := false
-		modes, known = modalityModes[modality]
-		if !known {
-			return nil, false
+	for _, modality := range m.OutputModalities {
+		for _, mode := range modalityModes[strings.ToLower(strings.TrimSpace(modality))] {
+			if !slices.Contains(modes, mode) {
+				modes = append(modes, mode)
+			}
 		}
+	}
+	if len(m.OutputModalities) > 0 && len(modes) == 0 {
+		return nil, false
 	}
 
 	metadata := &core.ModelMetadata{
@@ -97,7 +101,7 @@ func (m modelInfo) metadata() (*core.ModelMetadata, bool) {
 		Pricing:     m.Pricing.toCore(),
 	}
 	if len(modes) > 0 {
-		metadata.Modes = append([]string(nil), modes...)
+		metadata.Modes = modes
 		metadata.Categories = core.CategoriesForModes(metadata.Modes)
 	}
 	if m.ContextLength > 0 {

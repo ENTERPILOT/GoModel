@@ -25,6 +25,7 @@ const modelsFixture = `{"object":"list","data":[
 		"context_length":32768,"output_modalities":["embeddings"],"pricing":{"input":0.01,"output":0}},
 	{"id":"openai/gpt-oss-120b","object":"model","output_modalities":["text"],"pricing":{"input":0,"output":0}},
 	{"id":"black-forest-labs/FLUX.2-dev","object":"model","output_modalities":["image"]},
+	{"id":"example/image-text-model","object":"model","output_modalities":["image","text"]},
 	{"id":"example/video-model","object":"model","output_modalities":["video"]},
 	{"id":"example/speech-model","object":"model","output_modalities":["audio"]},
 	{"id":"   ","output_modalities":["text"]},
@@ -60,6 +61,7 @@ func TestListModels_KeepsOnlyServableModalities(t *testing.T) {
 		"Qwen/Qwen3-Embedding-0.6B",
 		"openai/gpt-oss-120b",
 		"untyped/model",
+		"example/image-text-model",
 	}, keys(models))
 }
 
@@ -93,6 +95,10 @@ func TestListModels_NormalizesMetadata(t *testing.T) {
 		},
 		{
 			id:    "openai/gpt-oss-120b",
+			modes: []string{"chat", "responses"},
+		},
+		{
+			id:    "example/image-text-model",
 			modes: []string{"chat", "responses"},
 		},
 		{id: "untyped/model"},
