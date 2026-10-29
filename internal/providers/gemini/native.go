@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"maps"
 	"mime"
 	"net/http"
 	"net/url"
@@ -24,6 +25,26 @@ type geminiGenerateContentRequest struct {
 	GenerationConfig  map[string]any    `json:"generationConfig,omitempty"`
 	SafetySettings    []map[string]any  `json:"safetySettings,omitempty"`
 	CachedContent     string            `json:"cachedContent,omitempty"`
+	// Store is the Gemini API's per-request opt-out of Google's request
+	// storage, which is on by default for new paid-tier projects since
+	// October 2026. Only the AI Studio backend sets it: Vertex has no such
+	// member and rejects unknown fields.
+	Store *bool `json:"store,omitempty"`
+}
+
+// chatStore reads the Chat Completions store flag, which has the same meaning
+// as Gemini's: whether the provider may retain the request. A value that is
+// not a boolean is an error rather than a dropped opt-out.
+func chatStore(req *core.ChatRequest) (*bool, error) {
+	raw := req.ExtraFields.Lookup("store")
+	if core.IsJSONNull(bytes.TrimSpace(raw)) {
+		return nil, nil
+	}
+	var store bool
+	if err := json.Unmarshal(raw, &store); err != nil {
+		return nil, core.NewInvalidRequestError("store must be a boolean", err)
+	}
+	return &store, nil
 }
 
 type geminiContent struct {
@@ -192,8 +213,11 @@ type geminiPromptFeedback struct {
 }
 
 type geminiCandidate struct {
-	Content       geminiContent   `json:"content"`
-	FinishReason  string          `json:"finishReason,omitempty"`
+	Content      geminiContent `json:"content"`
+	FinishReason string        `json:"finishReason,omitempty"`
+	// FinishMessage explains a non-STOP finish in prose, such as why an image
+	// model produced no image.
+	FinishMessage string          `json:"finishMessage,omitempty"`
 	Index         int             `json:"index,omitempty"`
 	SafetyRatings json.RawMessage `json:"safetyRatings,omitempty"`
 }
@@ -251,6 +275,12 @@ func convertChatRequestToGemini(req *core.ChatRequest) (*geminiGenerateContentRe
 				}
 			}
 		case "tool":
+			// Gemini expects all responses to a parallel function call turn in
+			// one content, so consecutive tool messages share it.
+			if last := len(out.Contents) - 1; last >= 0 && isFunctionResponseContent(out.Contents[last]) {
+				out.Contents[last].Parts = append(out.Contents[last].Parts, parts...)
+				continue
+			}
 			out.Contents = append(out.Contents, geminiContent{Role: "user", Parts: parts})
 		default:
 			out.Contents = append(out.Contents, geminiContent{Role: "user", Parts: parts})
@@ -375,6 +405,48 @@ func geminiPartsFromContent(content core.MessageContent) ([]geminiPart, error) {
 		}
 		return geminiPartsFromContentParts(parts)
 	}
+}
+
+// toolCallIDs hands out tool call IDs. Gemini may omit function call IDs, and a
+// client matches tool results to calls by ID, so a missing or repeated ID is
+// replaced with an unused call_<n>.
+type toolCallIDs struct {
+	used map[string]struct{}
+	next int
+}
+
+// assign returns id when it is unused, otherwise a generated ID that avoids
+// both used IDs and the IDs supplied later in the same response.
+func (g *toolCallIDs) assign(id string, supplied map[string]struct{}) string {
+	if g.used == nil {
+		g.used = make(map[string]struct{})
+	}
+	if _, taken := g.used[id]; id != "" && !taken {
+		g.used[id] = struct{}{}
+		return id
+	}
+	for {
+		candidate := "call_" + strconv.Itoa(g.next)
+		g.next++
+		_, taken := g.used[candidate]
+		_, reserved := supplied[candidate]
+		if !taken && !reserved {
+			g.used[candidate] = struct{}{}
+			return candidate
+		}
+	}
+}
+
+func isFunctionResponseContent(content geminiContent) bool {
+	if content.Role != "user" || len(content.Parts) == 0 {
+		return false
+	}
+	for _, part := range content.Parts {
+		if part.FunctionResponse == nil {
+			return false
+		}
+	}
+	return true
 }
 
 func geminiPartsFromToolMessage(msg core.Message, functionName string) ([]geminiPart, error) {
@@ -769,22 +841,37 @@ func geminiGenerationConfig(req *core.ChatRequest) map[string]any {
 		copyJSONNumber(req.ExtraFields.Lookup("top_k"), cfg, "topK")
 		copyJSONNumber(req.ExtraFields.Lookup("candidate_count"), cfg, "candidateCount")
 	}
-	copyJSONNumber(req.ExtraFields.Lookup("presence_penalty"), cfg, "presencePenalty")
-	copyJSONNumber(req.ExtraFields.Lookup("frequency_penalty"), cfg, "frequencyPenalty")
+	// presence_penalty and frequency_penalty are never forwarded: every
+	// current generateContent model (Gemini 2.5, 3.x, 4, Gemma 4, the image
+	// models) answers HTTP 400 "Penalty is not enabled for this model", and
+	// Google's Gemini 4 migration guide lists both among the parameters to
+	// remove because they error.
 	copyStopSequences(req.ExtraFields.Lookup("stop"), cfg)
 	copyResponseFormat(req.ExtraFields.Lookup("response_format"), cfg)
 	copyGoogleThinkingConfig(req.ExtraFields.Lookup("extra_body"), cfg)
-	if req.Reasoning != nil && strings.TrimSpace(req.Reasoning.Effort) != "" {
-		if _, exists := cfg["thinkingConfig"]; !exists {
-			if thinkingConfig := thinkingConfigForEffort(req.Model, req.Reasoning.Effort); len(thinkingConfig) > 0 {
-				cfg["thinkingConfig"] = thinkingConfig
-			}
-		}
+	if effort := nativeReasoningEffort(req); effort != "" {
+		addEffortThinkingConfig(cfg, req.Model, effort)
 	}
 	if len(cfg) == 0 {
 		return nil
 	}
 	return cfg
+}
+
+// nativeReasoningEffort returns the requested reasoning effort: the
+// reasoning.effort object, or else the flat Chat Completions reasoning_effort
+// string that rides in ExtraFields.
+func nativeReasoningEffort(req *core.ChatRequest) string {
+	if req.Reasoning != nil {
+		if effort := strings.TrimSpace(req.Reasoning.Effort); effort != "" {
+			return effort
+		}
+	}
+	var effort string
+	if raw := req.ExtraFields.Lookup("reasoning_effort"); len(raw) > 0 && json.Unmarshal(raw, &effort) == nil {
+		return strings.TrimSpace(effort)
+	}
+	return ""
 }
 
 // dropsSamplingParameters reports whether temperature, topP, topK and
@@ -908,6 +995,26 @@ func copyGoogleThinkingConfig(raw json.RawMessage, cfg map[string]any) {
 	}
 }
 
+// addEffortThinkingConfig maps effort onto cfg's thinkingConfig. A thinking
+// budget or level the client set in extra_body wins; other client members,
+// such as includeThoughts, are kept next to the effort's.
+func addEffortThinkingConfig(cfg map[string]any, model, effort string) {
+	thinkingConfig := thinkingConfigForEffort(model, effort)
+	if len(thinkingConfig) == 0 {
+		return
+	}
+	if existing, ok := cfg["thinkingConfig"].(map[string]any); ok {
+		if _, hasBudget := existing["thinkingBudget"]; hasBudget {
+			return
+		}
+		if _, hasLevel := existing["thinkingLevel"]; hasLevel {
+			return
+		}
+		maps.Copy(thinkingConfig, existing)
+	}
+	cfg["thinkingConfig"] = thinkingConfig
+}
+
 func normalizeSnakeMapKeys(src map[string]any) map[string]any {
 	out := make(map[string]any, len(src))
 	for key, value := range src {
@@ -952,14 +1059,18 @@ func thinkingConfigForEffort(model, effort string) map[string]any {
 }
 
 // supportsMinimalThinking reports whether the model accepts the "minimal"
-// thinkingLevel. Gemini 3 Pro models never had it, and Gemini 3.7 and 3.8
-// Flash dropped it; Google answers HTTP 400 for those, so the lowest accepted
-// level ("low") is sent instead. Thinking cannot be turned off on Gemini 3,
-// so "none" is clamped the same way. A family matches only as a whole
-// dash-delimited prefix of the model ID (after any "publisher/" prefix), so
-// "gemini-3.8-flash-cyber" matches while "gemini-3.8-pro-preview" or
-// "gemini-3.70-flash" do not.
+// thinkingLevel. Gemini 3 Pro models never had it, Gemini 3.7 and 3.8 Flash
+// dropped it, and Gemini 4 (Argon, and its successors per Google's Gemini 4
+// guide) accepts only low, medium and high; Google answers HTTP 400 for those,
+// so the lowest accepted level ("low") is sent instead. Thinking cannot be
+// turned off on Gemini 3 or 4, so "none" is clamped the same way. A Gemini 3
+// family matches only as a whole dash-delimited prefix of the model ID (after
+// any "publisher/" prefix), so "gemini-3.8-flash-cyber" matches while
+// "gemini-3.8-pro-preview" or "gemini-3.70-flash" do not.
 func supportsMinimalThinking(model string) bool {
+	if major, _, ok := geminiGeneration(model); ok && major >= 4 {
+		return false
+	}
 	model = strings.ToLower(strings.TrimSpace(model))
 	if idx := strings.LastIndex(model, "/"); idx >= 0 {
 		model = model[idx+1:]
@@ -1021,7 +1132,7 @@ func nativeChatResponse(req *core.ChatRequest, geminiResp *geminiGenerateContent
 		if index == 0 && i > 0 {
 			index = i
 		}
-		content, toolCalls, signature := openAIMessageFromGeminiParts(candidate.Content.Parts)
+		content, toolCalls, signature := openAIMessageFromGeminiParts(candidate.Content.Parts, &toolCallIDs{})
 		// A tool-call-only turn carries content: null in OpenAI responses; an
 		// empty string would surface as an empty Responses message item that
 		// clients cannot echo back.
@@ -1117,12 +1228,19 @@ func geminiPromptBlockReason(raw json.RawMessage) string {
 // openAIMessageFromGeminiParts flattens candidate parts into OpenAI text and
 // tool calls. A functionCall part's thought signature rides on its tool call;
 // the signature of a text turn (Gemini puts it on the last part) is returned
-// separately for the message.
-func openAIMessageFromGeminiParts(parts []geminiPart) (string, []core.ToolCall, string) {
+// separately for the message. ids keeps tool call IDs unique across calls, so a
+// stream shares one per choice.
+func openAIMessageFromGeminiParts(parts []geminiPart, ids *toolCallIDs) (string, []core.ToolCall, string) {
 	var text strings.Builder
 	var signature string
 	toolCalls := make([]core.ToolCall, 0)
-	for i, part := range parts {
+	supplied := make(map[string]struct{})
+	for _, part := range parts {
+		if call := part.functionCall(); call != nil && call.ID != "" {
+			supplied[call.ID] = struct{}{}
+		}
+	}
+	for _, part := range parts {
 		if part.Text != "" && !part.Thought {
 			text.WriteString(part.Text)
 		}
@@ -1132,10 +1250,7 @@ func openAIMessageFromGeminiParts(parts []geminiPart) (string, []core.ToolCall, 
 			signature = part.ThoughtSignature
 		}
 		if call != nil {
-			id := call.ID
-			if id == "" {
-				id = "call_" + strconv.Itoa(i)
-			}
+			id := ids.assign(call.ID, supplied)
 			args := strings.TrimSpace(string(call.Args))
 			if args == "" {
 				args = "{}"
@@ -1265,7 +1380,10 @@ func finishReasonFromGemini(reason string, hasToolCalls bool) string {
 		return ""
 	case "STOP":
 		return "stop"
-	case "MAX_TOKENS":
+	case "MAX_TOKENS", "CONTINUATION":
+		// CONTINUATION is Gemini 4's long-decode cut: the per-request output
+		// cap was hit and the candidate carries a continuationToken to resume
+		// with. Chat Completions has no resume, so it is a length stop.
 		return "length"
 	case "SAFETY", "RECITATION", "LANGUAGE", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT", "IMAGE_RECITATION":
 		return "content_filter"
@@ -1309,12 +1427,13 @@ func displayModelIDFromGemini(model, backend string) string {
 }
 
 // isGeminiExposedModel normalizes provider model names and exposes only the
-// model families reachable through Gemini/OpenAI-compatible text endpoints.
-// Families such as imagen-* use different upstream endpoints.
+// model families reachable through the Gemini generateContent and
+// OpenAI-compatible endpoints, including the Gemma open models Google serves
+// there. Families such as imagen-* use different upstream endpoints.
 func isGeminiExposedModel(modelID string) bool {
 	modelID = normalizeGeminiModelID(modelID)
-	return strings.HasPrefix(modelID, "gemini-") || strings.HasPrefix(modelID, "text-embedding-") ||
-		strings.HasPrefix(modelID, "imagen-")
+	return strings.HasPrefix(modelID, "gemini-") || strings.HasPrefix(modelID, "gemma-") ||
+		strings.HasPrefix(modelID, "text-embedding-") || strings.HasPrefix(modelID, "imagen-")
 }
 
 func nativeProviderError(providerName, message string, err error) *core.GatewayError {

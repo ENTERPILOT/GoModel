@@ -819,6 +819,7 @@ func TestApplyProviderEnvVars_DiscoversSGLang(t *testing.T) {
 		name        string
 		apiKey      string
 		baseURL     string
+		apiMode     string
 		wantAPIKey  string
 		wantBaseURL string
 	}{
@@ -833,6 +834,12 @@ func TestApplyProviderEnvVars_DiscoversSGLang(t *testing.T) {
 			wantAPIKey:  "sglang-key",
 			wantBaseURL: testDiscoveryConfigs["sglang"].DefaultBaseURL,
 		},
+		{
+			name:        "API mode",
+			baseURL:     "http://localhost:30000/v1",
+			apiMode:     "chat_compatible",
+			wantBaseURL: "http://localhost:30000/v1",
+		},
 	}
 
 	for _, tt := range tests {
@@ -841,6 +848,7 @@ func TestApplyProviderEnvVars_DiscoversSGLang(t *testing.T) {
 			// between the keyless and authenticated discovery cases.
 			t.Setenv("SGLANG_API_KEY", tt.apiKey)
 			t.Setenv("SGLANG_BASE_URL", tt.baseURL)
+			t.Setenv("SGLANG_API_MODE", tt.apiMode)
 
 			got, _ := applyEnv(t, map[string]config.RawProviderConfig{})
 			p, exists := got["sglang"]
@@ -848,6 +856,7 @@ func TestApplyProviderEnvVars_DiscoversSGLang(t *testing.T) {
 			require.Equal(t, "sglang", p.Type)
 			require.Equal(t, tt.wantAPIKey, p.APIKey)
 			require.Equal(t, tt.wantBaseURL, p.BaseURL, "sglang config = %+v, want api_key=%q base_url=%q", p, tt.wantAPIKey, tt.wantBaseURL)
+			require.Equal(t, tt.apiMode, p.APIMode)
 		})
 	}
 }

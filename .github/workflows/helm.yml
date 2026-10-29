@@ -57,6 +57,8 @@ jobs:
           helm template gomodel helm --set storage.type=postgresql \
             --set 'extraEnv[0].name=POSTGRES_URL' --set 'extraEnv[0].value=postgres://x' >/dev/null
           test "$(helm template gomodel helm --set 'env.BASE_PATH=//g//api/../secure//' -s templates/deployment.yaml | grep -c 'path: /g/secure/health')" = 2
+          helm template gomodel helm --set env.SERVER_TLS_CERT_FILE=/tls/tls.crt -s templates/tests/test-connection.yaml | grep -q '"https://gomodel:8080/health/ready"'
+          helm template gomodel helm --set env.SERVER_TLS_CERT_FILE=/tls/tls.crt -s templates/tests/test-connection.yaml | grep -q -- '- --insecure'
           helm template gomodel helm --set replicaCount=2 --set storage.type=postgresql --set storage.url=postgres://x \
             --set podDisruptionBudget.maxUnavailable=0 -s templates/pdb.yaml | grep -q 'maxUnavailable: 0'
 

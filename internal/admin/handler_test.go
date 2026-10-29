@@ -31,6 +31,11 @@ type mockUsageReader struct {
 	labelUsage           []usage.LabelUsage
 	endpointUsage        []usage.EndpointUsage
 	lastEndpointUsage    usage.UsageQueryParams
+	breakdown            *usage.UsageBreakdown
+	lastBreakdown        usage.UsageBreakdownParams
+	breakdownErr         error
+	invoice              *usage.Invoice
+	lastInvoice          usage.InvoiceParams
 	sessionUsage         *usage.SessionUsageResult
 	usageLog             *usage.UsageLogResult
 	usageByRequestID     map[string][]usage.UsageLogEntry
@@ -128,6 +133,19 @@ func (m *mockUsageReader) GetUsageByEndpoint(_ context.Context, params usage.Usa
 		return nil, m.endpointUsageErr
 	}
 	return m.endpointUsage, nil
+}
+
+func (m *mockUsageReader) GetUsageBreakdown(_ context.Context, params usage.UsageBreakdownParams) (*usage.UsageBreakdown, error) {
+	m.lastBreakdown = params
+	if m.breakdownErr != nil {
+		return nil, m.breakdownErr
+	}
+	return m.breakdown, nil
+}
+
+func (m *mockUsageReader) GetUsageInvoice(_ context.Context, params usage.InvoiceParams) (*usage.Invoice, error) {
+	m.lastInvoice = params
+	return m.invoice, nil
 }
 
 func (m *mockUsageReader) GetUsageBySession(_ context.Context, params usage.SessionUsageParams) (*usage.SessionUsageResult, error) {
@@ -772,12 +790,67 @@ func TestUsageLog_WithFilters(t *testing.T) {
 	c, rec := echotest.Get(t, "/admin/usage/log?model=gpt-4&provider=openai&user_path=/team&label=team-alpha&session_id=scoped-session&auth_key_id=key-a&endpoint=/v1/embeddings&operation=embeddings&search=test&limit=10&offset=5")
 	require.NoError(t, h.UsageLog(c))
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "/team", reader.lastUsageLog.UserPath)
-	assert.Equal(t, "team-alpha", reader.lastUsageLog.Label)
+	assert.Equal(t, []string{"/team"}, reader.lastUsageLog.UserPaths)
+	assert.Equal(t, []string{"gpt-4"}, reader.lastUsageLog.Models)
+	assert.Equal(t, []string{"openai"}, reader.lastUsageLog.Providers)
+	assert.Equal(t, []string{"team-alpha"}, reader.lastUsageLog.Labels)
 	assert.Equal(t, "scoped-session", reader.lastUsageLog.SessionID)
-	assert.Equal(t, "key-a", reader.lastUsageLog.AuthKeyID)
+	assert.Equal(t, []string{"key-a"}, reader.lastUsageLog.AuthKeyIDs)
 	assert.Equal(t, []string{"/v1/embeddings"}, reader.lastUsageLog.Endpoints)
 	assert.Equal(t, []core.Operation{core.OperationEmbeddings}, reader.lastUsageLog.Operations)
+}
+
+func TestParseUsageParams_MultiValueFilters(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		check func(t *testing.T, params usage.UsageQueryParams)
+	}{
+		{
+			name:  "repeated parameters",
+			query: "model=gpt-4&model=claude&provider=openai&provider=anthropic&label=a&label=b&auth_key_id=k1&auth_key_id=k2&endpoint=/v1/messages&endpoint=/v1/embeddings",
+			check: func(t *testing.T, params usage.UsageQueryParams) {
+				assert.Equal(t, []string{"gpt-4", "claude"}, params.Models)
+				assert.Equal(t, []string{"openai", "anthropic"}, params.Providers)
+				assert.Equal(t, []string{"a", "b"}, params.Labels)
+				assert.Equal(t, []string{"k1", "k2"}, params.AuthKeyIDs)
+				assert.Equal(t, []string{"/v1/messages", "/v1/embeddings"}, params.Endpoints)
+			},
+		},
+		{
+			name:  "comma lists split where values cannot hold commas",
+			query: "model=gpt-4,claude&provider=openai,%20anthropic&auth_key_id=k1,k2&endpoint=/v1/messages,/v1/embeddings",
+			check: func(t *testing.T, params usage.UsageQueryParams) {
+				assert.Equal(t, []string{"gpt-4", "claude"}, params.Models)
+				assert.Equal(t, []string{"openai", "anthropic"}, params.Providers)
+				assert.Equal(t, []string{"k1", "k2"}, params.AuthKeyIDs)
+				assert.Equal(t, []string{"/v1/messages", "/v1/embeddings"}, params.Endpoints)
+			},
+		},
+		{
+			name:  "labels keep commas",
+			query: "label=env:dev,local&label=pr",
+			check: func(t *testing.T, params usage.UsageQueryParams) {
+				assert.Equal(t, []string{"env:dev,local", "pr"}, params.Labels)
+			},
+		},
+		{
+			name:  "blanks and duplicates dropped",
+			query: "model=&model=gpt-4&model=gpt-4,&label=%20",
+			check: func(t *testing.T, params usage.UsageQueryParams) {
+				assert.Equal(t, []string{"gpt-4"}, params.Models)
+				assert.Nil(t, params.Labels)
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := echotest.Get(t, "/admin/usage/summary?"+tt.query)
+			params, err := parseUsageParams(c)
+			require.NoError(t, err)
+			tt.check(t, params)
+		})
+	}
 }
 
 func TestUsageBySession_Success(t *testing.T) {
@@ -1800,6 +1873,8 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 		BudgetsEnabled:         "on",
 		RateLimitsEnabled:      "off",
 		QuotaTemplatesEnabled:  "on",
+		InvoiceExportEnabled:   "on",
+		BilledBudgetsEnabled:   "on",
 		GuardrailsEnabled:      "on",
 		PluginsEnabled:         "on",
 		CacheEnabled:           "on",
@@ -1922,7 +1997,7 @@ func TestCacheOverview_ReturnsPayloadWhenEnabled(t *testing.T) {
 	require.Equal(t, 4, body.Summary.TotalHits)
 	require.Len(t, body.Daily, 1)
 	require.Equal(t, 3, body.Daily[0].ExactHits)
-	require.Equal(t, "/team", reader.lastCacheOverview.UserPath)
+	require.Equal(t, []string{"/team"}, reader.lastCacheOverview.UserPaths)
 }
 
 func TestCacheOverview_ReturnsErrorWhenReaderFails(t *testing.T) {

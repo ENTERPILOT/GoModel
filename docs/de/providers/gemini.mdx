@@ -65,10 +65,12 @@ API-Modus.
 
 Im nativen Modus werden Embeddings über `models/{model}:batchEmbedContents`
 bedient. `dimensions` wird auf `outputDimensionality` abgebildet, und
-`encoding_format: "base64"` wird berücksichtigt. Gemini meldet auf keiner der
-beiden API-Schnittstellen eine Token-Nutzung für Embeddings. Embedding-Responses
-enthalten daher Token-Zahlen von null, und die Nutzungszeile wird mit einem
-Vorbehalt zur Kostenberechnung markiert.
+`encoding_format: "base64"` wird berücksichtigt. Der native Modus erfasst die
+Token-Nutzung, die Gemini für neuere Modelle wie `gemini-embedding-2` meldet.
+Ältere Modelle wie `gemini-embedding-001` und die OpenAI-kompatible
+Schnittstelle melden keine. Diese Responses enthalten daher Token-Zahlen von
+null. Wird das Modell pro Token abgerechnet, werden diese Nutzungszeilen ohne
+Token-Zahlen mit einem Vorbehalt zur Kostenberechnung markiert.
 
 ## Bildgenerierung und -bearbeitung
 

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/enterpilot/gomodel/config"
@@ -1027,41 +1028,39 @@ func TestStaleProviderModelsAreNotAdvertised(t *testing.T) {
 // so a recovered provider is picked up within the recheck interval instead of
 // waiting for the next full refresh.
 func TestStartBackgroundRefresh_RechecksFailedProviders(t *testing.T) {
-	registry := NewModelRegistry()
-	flaky := &registryMockProvider{
-		name: "flaky",
-		err:  errors.New("connection refused"),
-		modelsResponse: &core.ModelsResponse{
-			Object: "list",
-			Data:   []core.Model{{ID: "flaky-model", Object: "model", OwnedBy: "flaky"}},
-		},
-	}
-	registry.RegisterProviderWithNameAndType(flaky, "flaky", "flaky")
-
-	// Mark the provider failed while nothing runs concurrently.
-	require.Error(t, registry.Initialize(context.Background()))
-	got := registry.FailedProviderNames()
-	require.Len(t, got, 1)
-	require.Equal(t, "flaky", got[0])
-
-	// The provider recovers before the loop starts (avoids racing the mock).
-	flaky.err = nil
-
-	// Full refresh is an hour away; only the recheck loop can discover the
-	// recovery.
-	stop := registry.StartBackgroundRefresh(time.Hour, 10*time.Millisecond, "")
-	defer stop()
-
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if registry.ModelAvailable("flaky/flaky-model") {
-			break
+	synctest.Test(t, func(t *testing.T) {
+		registry := NewModelRegistry()
+		flaky := &registryMockProvider{
+			name: "flaky",
+			err:  errors.New("connection refused"),
+			modelsResponse: &core.ModelsResponse{
+				Object: "list",
+				Data:   []core.Model{{ID: "flaky-model", Object: "model", OwnedBy: "flaky"}},
+			},
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	require.True(t, registry.ModelAvailable("flaky/flaky-model"))
-	got = registry.FailedProviderNames()
-	require.Empty(t, got)
+		registry.RegisterProviderWithNameAndType(flaky, "flaky", "flaky")
+
+		// Mark the provider failed while nothing runs concurrently.
+		require.Error(t, registry.Initialize(context.Background()))
+		got := registry.FailedProviderNames()
+		require.Len(t, got, 1)
+		require.Equal(t, "flaky", got[0])
+
+		// The provider recovers before the loop starts (avoids racing the mock).
+		flaky.err = nil
+
+		// Full refresh is an hour away; only the recheck loop can discover the
+		// recovery.
+		const recheck = 10 * time.Millisecond
+		stop := registry.StartBackgroundRefresh(time.Hour, recheck, "")
+		defer stop()
+
+		// Polling advances the bubble's clock to the recheck tick.
+		require.Eventually(t, func() bool { return registry.ModelAvailable("flaky/flaky-model") },
+			time.Second, recheck)
+		got = registry.FailedProviderNames()
+		require.Empty(t, got)
+	})
 }
 
 // registerTwoProviderRegistry seeds a registry with two healthy providers and
@@ -1281,36 +1280,38 @@ func TestRefreshProviderModels_AvailabilityFailingPeerIsNotHealthyAlternative(t 
 // budget (a starved provider is recorded as failed and its inventory goes
 // stale — or, on first fetch, is never discovered at all).
 func TestInitialize_SlowProviderDoesNotStarveOthers(t *testing.T) {
-	registry := NewModelRegistry()
-	slow := &registryMockProvider{
-		name:            "slow",
-		listModelsDelay: 5 * time.Second,
-		modelsResponse: &core.ModelsResponse{
-			Object: "list",
-			Data:   []core.Model{{ID: "slow-model", Object: "model", OwnedBy: "slow"}},
-		},
-	}
-	// A small delay makes the fast mock honor context cancellation the way a
-	// real HTTP call would, so sequential starvation is actually observable.
-	fast := &registryMockProvider{
-		name:            "fast",
-		listModelsDelay: time.Millisecond,
-		modelsResponse: &core.ModelsResponse{
-			Object: "list",
-			Data:   []core.Model{{ID: "fast-model", Object: "model", OwnedBy: "fast"}},
-		},
-	}
-	registry.RegisterProviderWithNameAndType(slow, "slow", "slow")
-	registry.RegisterProviderWithNameAndType(fast, "fast", "fast")
+	synctest.Test(t, func(t *testing.T) {
+		registry := NewModelRegistry()
+		slow := &registryMockProvider{
+			name:            "slow",
+			listModelsDelay: 5 * time.Second,
+			modelsResponse: &core.ModelsResponse{
+				Object: "list",
+				Data:   []core.Model{{ID: "slow-model", Object: "model", OwnedBy: "slow"}},
+			},
+		}
+		// A small delay makes the fast mock honor context cancellation the way a
+		// real HTTP call would, so sequential starvation is actually observable.
+		fast := &registryMockProvider{
+			name:            "fast",
+			listModelsDelay: time.Millisecond,
+			modelsResponse: &core.ModelsResponse{
+				Object: "list",
+				Data:   []core.Model{{ID: "fast-model", Object: "model", OwnedBy: "fast"}},
+			},
+		}
+		registry.RegisterProviderWithNameAndType(slow, "slow", "slow")
+		registry.RegisterProviderWithNameAndType(fast, "fast", "fast")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-	defer cancel()
-	err := registry.Initialize(ctx)
-	require.NoError(t, err)
-	provider := registry.GetProvider("fast-model")
-	require.Equal(t, fast, provider)
-	provider = registry.GetProvider("slow-model")
-	require.Nil(t, provider)
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		defer cancel()
+		err := registry.Initialize(ctx)
+		require.NoError(t, err)
+		provider := registry.GetProvider("fast-model")
+		require.Equal(t, fast, provider)
+		provider = registry.GetProvider("slow-model")
+		require.Nil(t, provider)
+	})
 }
 
 func TestInitialize_LogsSingleMetadataSummaryPerCycle(t *testing.T) {
@@ -1662,73 +1663,7 @@ func TestApplyProviderRuntimeUpdates_ClearsStaleErrorOnSuccessfulRefresh(t *test
 
 func TestStartBackgroundRefresh(t *testing.T) {
 	t.Run("RefreshesAtInterval", func(t *testing.T) {
-		var refreshCount atomic.Int32
-		mock := &registryMockProvider{
-			name: "test",
-			modelsResponse: &core.ModelsResponse{
-				Object: "list",
-				Data: []core.Model{
-					{ID: "test-model", Object: "model", OwnedBy: "test"},
-				},
-			},
-		}
-
-		countingMock := &countingRegistryMockProvider{
-			registryMockProvider: mock,
-			listCount:            &refreshCount,
-		}
-
-		registry := NewModelRegistry()
-		registry.RegisterProvider(countingMock)
-		_ = registry.Initialize(context.Background())
-
-		refreshCount.Store(0)
-
-		interval := 50 * time.Millisecond
-		cancel := registry.StartBackgroundRefresh(interval, 0, "")
-		defer cancel()
-
-		time.Sleep(interval*3 + 25*time.Millisecond)
-
-		count := refreshCount.Load()
-		assert.GreaterOrEqual(t, count, int32(2))
-	})
-
-	t.Run("StopsOnCancel", func(t *testing.T) {
-		var refreshCount atomic.Int32
-		mock := &registryMockProvider{
-			name: "test",
-			modelsResponse: &core.ModelsResponse{
-				Object: "list",
-				Data: []core.Model{
-					{ID: "test-model", Object: "model", OwnedBy: "test"},
-				},
-			},
-		}
-
-		countingMock := &countingRegistryMockProvider{
-			registryMockProvider: mock,
-			listCount:            &refreshCount,
-		}
-
-		registry := NewModelRegistry()
-		registry.RegisterProvider(countingMock)
-		_ = registry.Initialize(context.Background())
-
-		refreshCount.Store(0)
-
-		interval := 50 * time.Millisecond
-		cancel := registry.StartBackgroundRefresh(interval, 0, "")
-		cancel()
-
-		time.Sleep(interval * 3)
-
-		count := refreshCount.Load()
-		assert.LessOrEqual(t, count, int32(1))
-	})
-
-	t.Run("CancelWaitsForInFlightRefreshToExit", func(t *testing.T) {
-		t.Run("ListModels", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
 			var refreshCount atomic.Int32
 			mock := &registryMockProvider{
 				name: "test",
@@ -1748,44 +1683,118 @@ func TestStartBackgroundRefresh(t *testing.T) {
 			registry := NewModelRegistry()
 			registry.RegisterProvider(countingMock)
 			_ = registry.Initialize(context.Background())
+
 			refreshCount.Store(0)
-			mock.listModelsDelay = 5 * time.Second
-			mock.listModelsStarted = make(chan struct{}, 1)
-			mock.listModelsBlocked = make(chan struct{}, 1)
-			mock.listModelsRelease = make(chan struct{})
 
-			cancel := registry.StartBackgroundRefresh(10*time.Millisecond, 0, "")
-			select {
-			case <-mock.listModelsStarted:
-			case <-time.After(500 * time.Millisecond):
-				t.Fatal("expected StartBackgroundRefresh to begin ListModels")
+			interval := 50 * time.Millisecond
+			cancel := registry.StartBackgroundRefresh(interval, 0, "")
+			defer cancel()
+
+			// Three ticks of the bubble's clock, then let the last refresh finish.
+			time.Sleep(interval*3 + 25*time.Millisecond)
+			synctest.Wait()
+
+			count := refreshCount.Load()
+			assert.Equal(t, int32(3), count)
+		})
+	})
+
+	t.Run("StopsOnCancel", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			var refreshCount atomic.Int32
+			mock := &registryMockProvider{
+				name: "test",
+				modelsResponse: &core.ModelsResponse{
+					Object: "list",
+					Data: []core.Model{
+						{ID: "test-model", Object: "model", OwnedBy: "test"},
+					},
+				},
 			}
 
-			cancelDone := make(chan struct{})
-			go func() {
-				cancel()
-				close(cancelDone)
-			}()
-
-			select {
-			case <-mock.listModelsBlocked:
-			case <-time.After(500 * time.Millisecond):
-				t.Fatal("expected ListModels to observe cancellation")
+			countingMock := &countingRegistryMockProvider{
+				registryMockProvider: mock,
+				listCount:            &refreshCount,
 			}
 
-			select {
-			case <-cancelDone:
-				t.Fatal("cancel() returned before in-flight ListModels finished")
-			case <-time.After(50 * time.Millisecond):
-			}
+			registry := NewModelRegistry()
+			registry.RegisterProvider(countingMock)
+			_ = registry.Initialize(context.Background())
 
-			close(mock.listModelsRelease)
+			refreshCount.Store(0)
 
-			select {
-			case <-cancelDone:
-			case <-time.After(500 * time.Millisecond):
-				t.Fatal("cancel() did not return after releasing ListModels")
-			}
+			interval := 50 * time.Millisecond
+			cancel := registry.StartBackgroundRefresh(interval, 0, "")
+			cancel()
+
+			// cancel returns once the loop has exited, and the bubble's clock
+			// never reached the first tick, so nothing was refreshed.
+			count := refreshCount.Load()
+			assert.Zero(t, count)
+		})
+	})
+
+	t.Run("CancelWaitsForInFlightRefreshToExit", func(t *testing.T) {
+		t.Run("ListModels", func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				var refreshCount atomic.Int32
+				mock := &registryMockProvider{
+					name: "test",
+					modelsResponse: &core.ModelsResponse{
+						Object: "list",
+						Data: []core.Model{
+							{ID: "test-model", Object: "model", OwnedBy: "test"},
+						},
+					},
+				}
+
+				countingMock := &countingRegistryMockProvider{
+					registryMockProvider: mock,
+					listCount:            &refreshCount,
+				}
+
+				registry := NewModelRegistry()
+				registry.RegisterProvider(countingMock)
+				_ = registry.Initialize(context.Background())
+				refreshCount.Store(0)
+				mock.listModelsDelay = 5 * time.Second
+				mock.listModelsStarted = make(chan struct{}, 1)
+				mock.listModelsBlocked = make(chan struct{}, 1)
+				mock.listModelsRelease = make(chan struct{})
+
+				cancel := registry.StartBackgroundRefresh(10*time.Millisecond, 0, "")
+				select {
+				case <-mock.listModelsStarted:
+				case <-time.After(500 * time.Millisecond):
+					t.Fatal("expected StartBackgroundRefresh to begin ListModels")
+				}
+
+				cancelDone := make(chan struct{})
+				go func() {
+					cancel()
+					close(cancelDone)
+				}()
+
+				select {
+				case <-mock.listModelsBlocked:
+				case <-time.After(500 * time.Millisecond):
+					t.Fatal("expected ListModels to observe cancellation")
+				}
+
+				select {
+				case <-cancelDone:
+					t.Fatal("cancel() returned before in-flight ListModels finished")
+				case <-time.After(50 * time.Millisecond):
+				}
+
+				close(mock.listModelsRelease)
+
+				select {
+				case <-cancelDone:
+				case <-time.After(500 * time.Millisecond):
+					t.Fatal("cancel() did not return after releasing ListModels")
+				}
+			})
 		})
 
 		t.Run("ModelListFetch", func(t *testing.T) {
@@ -1841,41 +1850,45 @@ func TestStartBackgroundRefresh(t *testing.T) {
 	})
 
 	t.Run("HandlesRefreshErrors", func(t *testing.T) {
-		var refreshCount atomic.Int32
-		mock := &registryMockProvider{
-			name: "failing",
-			err:  errors.New("refresh error"),
-		}
+		synctest.Test(t, func(t *testing.T) {
+			var refreshCount atomic.Int32
+			mock := &registryMockProvider{
+				name: "failing",
+				err:  errors.New("refresh error"),
+			}
 
-		countingMock := &countingRegistryMockProvider{
-			registryMockProvider: mock,
-			listCount:            &refreshCount,
-		}
+			countingMock := &countingRegistryMockProvider{
+				registryMockProvider: mock,
+				listCount:            &refreshCount,
+			}
 
-		registry := NewModelRegistry()
-		workingMock := &registryMockProvider{
-			name: "working",
-			modelsResponse: &core.ModelsResponse{
-				Object: "list",
-				Data: []core.Model{
-					{ID: "working-model", Object: "model", OwnedBy: "working"},
+			registry := NewModelRegistry()
+			workingMock := &registryMockProvider{
+				name: "working",
+				modelsResponse: &core.ModelsResponse{
+					Object: "list",
+					Data: []core.Model{
+						{ID: "working-model", Object: "model", OwnedBy: "working"},
+					},
 				},
-			},
-		}
-		registry.RegisterProvider(workingMock)
-		registry.RegisterProvider(countingMock)
-		_ = registry.Initialize(context.Background())
+			}
+			registry.RegisterProvider(workingMock)
+			registry.RegisterProvider(countingMock)
+			_ = registry.Initialize(context.Background())
 
-		refreshCount.Store(0)
+			refreshCount.Store(0)
 
-		interval := 50 * time.Millisecond
-		cancel := registry.StartBackgroundRefresh(interval, 0, "")
-		defer cancel()
+			interval := 50 * time.Millisecond
+			cancel := registry.StartBackgroundRefresh(interval, 0, "")
+			defer cancel()
 
-		time.Sleep(interval*3 + 25*time.Millisecond)
+			// A failing provider is retried on every tick like a healthy one.
+			time.Sleep(interval*3 + 25*time.Millisecond)
+			synctest.Wait()
 
-		count := refreshCount.Load()
-		assert.GreaterOrEqual(t, count, int32(2))
+			count := refreshCount.Load()
+			assert.Equal(t, int32(3), count)
+		})
 	})
 }
 

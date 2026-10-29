@@ -1,91 +1,38 @@
-// Usage page state: page-level facet filters (including the API key and endpoints), filtered
-// summaries backing the stat cards, per-model / per-user-path / per-label / per-request-type /
-// per-session breakdowns, and the
-// request log. The shared window comes from the dateRange store and the
-// shared cache overview lives in usageData (this page passes its filter
-// query through fetchCacheOverview).
+// Usage page state: filtered summaries backing the stat cards, the
+// per-model / per-user-path / per-label / per-request-type / per-session
+// breakdowns, and the request log. The filters live in usageFilters, their
+// dropdown choices in usageFacets, the breakdown in usagePivot, and the API
+// and URL queries are built in usage-view.js. The shared cache overview lives
+// in usageData (this page passes its filter query through fetchCacheOverview).
 
 import { getJSON, isAbortError } from "$lib/api/client.js";
 import { router } from "$lib/stores/router.svelte.js";
-import { dateRange } from "$lib/stores/dateRange.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import { usageData } from "$lib/stores/usageData.svelte.js";
-import { providerDisplayValue } from "$lib/utils/format.js";
 import * as m from "$lib/paraglide/messages.js";
+import { toggleSearchValue } from "$lib/components/molecules/searchSelectLogic.js";
 import { liveLogs } from "../audit-logs/liveLogs.svelte.js";
+import { emptySessionUsage, emptyUsageLog, emptyUsagePageSummary } from "./usage-helpers.js";
 import {
-  authKeyNameMap,
-  authKeyOptionList,
-  emptyUsageLog,
-  emptyUsagePageSummary,
-  emptySessionUsage,
-  facetOptionList,
-  endpointOptionsWithSelection,
   endpointsSelected,
   endpointUsageRows,
   foldEndpointUsageByType,
-  sessionUsageQueryParams,
   toggleEndpointSelection,
-  usageEndpointOptions,
-  usageFilterQueryStr,
-  usageLogQueryParams,
-} from "./usage-helpers.js";
+} from "./usage-endpoints.js";
+import { sessionUsageQueryParams, usageLogQueryParams } from "./usage-query.js";
+import { syncUsageUrl, usageApiQuery, usageFilterQueryStr, usagePivotQuery } from "./usage-view.js";
+import { usageFacets } from "./usageFacets.svelte.js";
+import { usageFilters } from "./usageFilters.svelte.js";
+import { usagePivot } from "./usagePivot.svelte.js";
 
 class UsagePageState {
   usageMode = $state("tokens");
 
-  // Page-level data filters: every widget on the page follows them. They live
-  // on the liveLogs singleton, which uses them as the insert gate for live
-  // request-log previews — delegating keeps the page and the live merge
-  // engine in lockstep by construction.
-  get usageFilterModel() {
-    return liveLogs.usageFilterModel;
-  }
-  set usageFilterModel(value) {
-    liveLogs.usageFilterModel = value;
-  }
-  get usageFilterProvider() {
-    return liveLogs.usageFilterProvider;
-  }
-  set usageFilterProvider(value) {
-    liveLogs.usageFilterProvider = value;
-  }
-  get usageFilterLabel() {
-    return liveLogs.usageFilterLabel;
-  }
-  set usageFilterLabel(value) {
-    liveLogs.usageFilterLabel = value;
-  }
-  get usageFilterUserPath() {
-    return liveLogs.usageFilterUserPath;
-  }
-  set usageFilterUserPath(value) {
-    liveLogs.usageFilterUserPath = value;
-  }
-  get usageFilterSession() {
-    return liveLogs.usageFilterSession;
-  }
-  set usageFilterSession(value) {
-    liveLogs.usageFilterSession = value;
-  }
-  get usageFilterAuthKey() {
-    return liveLogs.usageFilterAuthKey;
-  }
-  set usageFilterAuthKey(value) {
-    liveLogs.usageFilterAuthKey = value;
-  }
-  // Exact request endpoints (e.g. "/v1/messages"); empty means all.
-  get usageFilterEndpoints() {
-    return liveLogs.usageFilterEndpoints;
-  }
-  set usageFilterEndpoints(value) {
-    liveLogs.usageFilterEndpoints = value;
-  }
-  usageFacetOptions = $state({ models: [], providers: [], labels: [], endpoints: [] });
-  // Managed auth key names by id, so the API key filter and log column can
-  // show names instead of ids. Empty when auth keys are unavailable.
-  authKeyNames = $state({});
-
+  // Page-level data filters: every widget on the page follows them, and the
+  // live request-log merge reads them to pause previews while any is set.
+  // Multi-value filters hold the selected values (empty = all): any value
+  // matches within one filter, and every filter applies.
+  filters = usageFilters;
   // Filtered summaries backing the stat cards, fetched in both cache modes:
   // uncached carries real provider spend (cached rows store the avoided
   // cost, which must not inflate the cost card), all carries the row count
@@ -158,54 +105,41 @@ class UsagePageState {
     }
   }
 
-  filterQueryStr(excludeFacet) {
-    return usageFilterQueryStr(
-      {
-        model: this.usageFilterModel,
-        provider: this.usageFilterProvider,
-        label: this.usageFilterLabel,
-        user_path: this.usageFilterUserPath,
-        session_id: this.usageFilterSession,
-        auth_key_id: this.usageFilterAuthKey,
-        endpoint: this.usageFilterEndpoints.join(","),
-      },
-      excludeFacet,
-    );
-  }
-
   onUsageFilterChanged() {
     this.fetchUsagePage();
   }
 
-  // Chip click: filter the whole page by the label, or clear the filter when
-  // the chip's label is already active.
+  // A breakdown setting changed: only that section refetches.
+  onPivotChanged(field, value) {
+    usagePivot.set(field, value);
+    syncUsageUrl();
+    usagePivot.fetch(usagePivotQuery());
+  }
+
+  // Chip click: add the label to the page filter, or remove it when it is
+  // already selected.
   toggleUsageLabelFilter(label) {
-    this.usageFilterLabel = this.usageFilterLabel === label ? "" : label;
+    this.filters.labels = toggleSearchValue(this.filters.labels, label);
     this.onUsageFilterChanged();
   }
 
-  // Chip click: filter the whole page by the API key, or clear the filter
-  // when the chip's key is already active.
+  // Chip click: add the API key to the page filter, or remove it when it is
+  // already selected.
   toggleUsageAuthKeyFilter(authKeyID) {
-    this.usageFilterAuthKey = this.usageFilterAuthKey === authKeyID ? "" : authKeyID;
+    this.filters.authKeys = toggleSearchValue(this.filters.authKeys, authKeyID);
     this.onUsageFilterChanged();
   }
 
   // Chip click: add the row's endpoints (a request type's, or one endpoint)
   // to the endpoint filter, or remove them when all are already selected.
   toggleUsageEndpointsFilter(endpoints) {
-    this.usageFilterEndpoints = toggleEndpointSelection(this.usageFilterEndpoints, endpoints);
+    this.filters.endpoints = toggleEndpointSelection(this.filters.endpoints, endpoints);
     this.onUsageFilterChanged();
   }
 
   filterBySession(sessionID, userPath = "") {
-    this.usageFilterModel = "";
-    this.usageFilterProvider = "";
-    this.usageFilterLabel = "";
-    this.usageFilterAuthKey = "";
-    this.usageFilterEndpoints = [];
-    this.usageFilterUserPath = String(userPath || "").trim();
-    this.usageFilterSession = String(sessionID || "").trim();
+    const path = String(userPath || "").trim();
+    this.filters.set({ userPaths: path ? [path] : [], session: String(sessionID || "").trim() });
     this.usageLogSearch = "";
     this.usageLog.offset = 0;
     this.sessionUsage.offset = 0;
@@ -217,12 +151,12 @@ class UsagePageState {
   }
 
   usageLabelChipTitle(label) {
-    if (this.usageFilterLabel === label) return m.usage_clear_label_filter();
+    if (this.filters.labels.includes(label)) return m.usage_clear_label_filter();
     return m.usage_filter_by_label_value({ label });
   }
 
   usageEndpointsChipTitle(endpoints, label) {
-    if (endpointsSelected(this.usageFilterEndpoints, endpoints)) {
+    if (endpointsSelected(this.filters.endpoints, endpoints)) {
       return m.usage_remove_from_filter({ value: label });
     }
     return m.usage_add_to_filter({ value: label });
@@ -231,6 +165,7 @@ class UsagePageState {
   toggleUsageMode(mode) {
     this.usageMode = mode;
     router.navigate("usage", mode === "costs" ? "costs" : null);
+    syncUsageUrl();
   }
 
   toggleUsageChartView(target, view) {
@@ -241,52 +176,14 @@ class UsagePageState {
     if (target === "session") this.sessionUsageView = view;
   }
 
-  usageFilterModelOptions() {
-    return facetOptionList(this.usageFacetOptions.models, this.usageFilterModel);
-  }
-
-  usageFilterProviderOptions() {
-    return facetOptionList(this.usageFacetOptions.providers, this.usageFilterProvider);
-  }
-
-  usageFilterLabelOptions() {
-    return facetOptionList(this.usageFacetOptions.labels, this.usageFilterLabel);
-  }
-
-  usageFilterAuthKeyOptions() {
-    return authKeyOptionList(this.authKeyNames, this.usageFilterAuthKey);
-  }
-
-  usageFilterEndpointOptions() {
-    return endpointOptionsWithSelection(this.usageFacetOptions.endpoints, this.usageFilterEndpoints);
-  }
-
-  // Key names change rarely, so they load when the page opens rather than on
-  // every filter change. The list is already scoped to the caller.
-  async fetchAuthKeyNames() {
-    const controller = this.#startRequest("authKeys");
-    try {
-      const result = await getJSON("/admin/auth-keys", {
-        label: "usage auth key names",
-        signal: controller.signal,
-      });
-      if (result.stale || controller.signal.aborted) return;
-      this.authKeyNames = result.ok && Array.isArray(result.data) ? authKeyNameMap(result.data) : {};
-    } catch (e) {
-      if (isAbortError(e)) return;
-      console.error("Failed to fetch auth key names:", e);
-      this.authKeyNames = {};
-    } finally {
-      this.#clearRequest("authKeys", controller);
-    }
-  }
-
   // Refetch everything the page shows for the current window + filters.
   async fetchUsagePage() {
+    syncUsageUrl();
     await runtimeConfig.ensureLoaded();
     const requests = [
+      usagePivot.fetch(usagePivotQuery()),
       this.fetchUsagePageSummary(),
-      this.fetchUsageFacetOptions(),
+      usageFacets.fetch(),
       this.fetchModelUsage(),
       this.fetchUserPathUsage(),
       this.fetchLabelUsage(),
@@ -297,7 +194,7 @@ class UsagePageState {
     if (usageData.cacheAnalyticsEnabled()) {
       // The usage page filters its cache cards along with the rest of the
       // page; the overview page stays unfiltered.
-      requests.push(usageData.fetchCacheOverview(this.filterQueryStr()));
+      requests.push(usageData.fetchCacheOverview(usageFilterQueryStr()));
     }
     await Promise.all(requests);
   }
@@ -306,7 +203,7 @@ class UsagePageState {
     const controller = this.#startRequest("summary");
     this.summaryLoading = true;
     try {
-      const baseQs = dateRange.queryStr() + this.filterQueryStr();
+      const baseQs = usageApiQuery();
       const [uncachedResult, allResult] = await Promise.all([
         getJSON("/admin/usage/summary?" + baseQs + "&cache_mode=uncached", {
           label: "usage page summary",
@@ -343,61 +240,12 @@ class UsagePageState {
     }
   }
 
-  // Facet dropdown options follow the faceted-search rule: each facet's
-  // choices honor every active filter except its own, so a selected value
-  // never erases its alternatives.
-  async fetchUsageFacetOptions() {
-    const controller = this.#startRequest("facets");
-    try {
-      const fetchRows = async (endpoint, excludeFacet) => {
-        const result = await getJSON(
-          endpoint + "?" + dateRange.queryStr() + this.filterQueryStr(excludeFacet),
-          { label: "usage facet options", signal: controller.signal },
-        );
-        if (result.stale) return null;
-        if (!result.ok) return [];
-        return Array.isArray(result.data) ? result.data : [];
-      };
-      // Without a model or provider filter, the two by-model queries are
-      // identical; fetch once and reuse.
-      const modelRowsPromise = fetchRows("/admin/usage/models", "model");
-      const sharedByModel = !this.usageFilterModel && !this.usageFilterProvider;
-      const [modelRows, providerRows, labelRows, endpointRows] = await Promise.all([
-        modelRowsPromise,
-        sharedByModel ? modelRowsPromise : fetchRows("/admin/usage/models", "provider"),
-        fetchRows("/admin/usage/labels", "label"),
-        fetchRows("/admin/usage/endpoints", "endpoint"),
-      ]);
-      if (
-        controller.signal.aborted ||
-        modelRows === null ||
-        providerRows === null ||
-        labelRows === null ||
-        endpointRows === null
-      ) {
-        return;
-      }
-      this.usageFacetOptions = {
-        models: modelRows.map((row) => row && row.model).filter(Boolean),
-        providers: providerRows.map((row) => providerDisplayValue(row)).filter(Boolean),
-        labels: labelRows.map((row) => row && row.label).filter(Boolean),
-        endpoints: usageEndpointOptions(endpointRows),
-      };
-    } catch (e) {
-      if (isAbortError(e)) return;
-      console.error("Failed to fetch usage facet options:", e);
-      this.usageFacetOptions = { models: [], providers: [], labels: [], endpoints: [] };
-    } finally {
-      this.#clearRequest("facets", controller);
-    }
-  }
-
   async #fetchBreakdown(key, endpoint, label, assign, setLoading) {
     const controller = this.#startRequest(key);
     setLoading(true);
     try {
       const result = await getJSON(
-        endpoint + "?" + dateRange.queryStr() + this.filterQueryStr(),
+        endpoint + "?" + usageApiQuery(),
         { label, signal: controller.signal },
       );
       if (result.stale) return;
@@ -427,7 +275,7 @@ class UsagePageState {
     setLoading(true);
     try {
       if (resetOffset) pageState.offset = 0;
-      const qs = dateRange.queryStr() + this.filterQueryStr() + queryParams();
+      const qs = usageApiQuery() + queryParams();
       const result = await getJSON(endpoint + "?" + qs, { label, signal: controller.signal });
       if (result.stale || controller.signal.aborted) return;
       if (!result.ok || !result.data || typeof result.data !== "object") {
@@ -547,6 +395,9 @@ export const usagePage = new UsagePageState();
 // Live-stream reset hook: when the stream's replay window is lost, reload the
 // page's data so the request log resyncs. Guarded so usage-page data is only
 // refetched while on the usage page.
+// The live merge pauses usage previews while any usage filter is set.
+liveLogs.usageFilters = usageFilters;
+
 liveLogs.fetchUsage = () => {
   if (router.page === "usage") {
     void usagePage.fetchUsagePage();

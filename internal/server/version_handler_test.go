@@ -60,17 +60,10 @@ func manifestOK(w http.ResponseWriter, _ *http.Request) {
 // manifest request lands after the response.
 func awaitChecks(t *testing.T, calls *atomic.Int64, want int64) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if calls.Load() >= want {
-			// Give a late extra call a chance to show up so "exactly want"
-			// assertions are not merely racing ahead of it.
-			time.Sleep(50 * time.Millisecond)
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatalf("made %d manifest requests, want %d", calls.Load(), want)
+	require.Eventuallyf(t, func() bool { return calls.Load() >= want }, 2*time.Second, 5*time.Millisecond, "waiting for %d manifest requests", want)
+	// Give a late extra call a chance to show up so "exactly want"
+	// assertions are not merely racing ahead of it.
+	time.Sleep(50 * time.Millisecond)
 }
 
 // visitCookie returns the value the response set for the visit cookie.

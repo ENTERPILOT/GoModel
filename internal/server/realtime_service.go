@@ -256,6 +256,7 @@ func (s *realtimeService) proxy(c *echo.Context, ctx context.Context, target *co
 		URL:          target.URL,
 		Headers:      realtimeUpstreamHeaders(ctx, c.Request().Header, target.Headers),
 		Subprotocols: target.Subprotocols,
+		HTTPClient:   target.HTTPClient,
 	}
 
 	slog.Info("realtime session opened", "request_id", route.requestID, "model", route.model, "provider", route.providerType)

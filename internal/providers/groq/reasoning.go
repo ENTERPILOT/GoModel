@@ -10,16 +10,25 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers"
 )
 
-// adaptChatRequest maps GoModel's nested reasoning shape (set by the Messages
-// API's thinking and by clients sending reasoning.effort) onto Groq's flat
-// reasoning_effort, and asks Groq to parse chain of thought out of the answer.
-// Groq rejects "reasoning" outright and accepts reasoning_effort only on
-// reasoning models, with per-family values.
+// maxStopSequences is the longest "stop" list Groq accepts; a longer one is
+// rejected with "maximum number of items is 4".
+const maxStopSequences = 4
+
+// adaptChatRequest fits the canonical chat request to Groq: it truncates an
+// over-long "stop" list, maps GoModel's nested reasoning shape (set by the
+// Messages API's thinking and by clients sending reasoning.effort) onto Groq's
+// flat reasoning_effort, and asks Groq to parse chain of thought out of the
+// answer. Groq rejects "reasoning" outright and accepts reasoning_effort only
+// on reasoning models, with per-family values.
 func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
 	if req == nil {
 		return req, nil
 	}
-	adapted, err := adaptReasoningEffort(req)
+	adapted, err := providers.CapStopSequences(req, maxStopSequences)
+	if err != nil {
+		return nil, err
+	}
+	adapted, err = adaptReasoningEffort(adapted)
 	if err != nil {
 		return nil, err
 	}
