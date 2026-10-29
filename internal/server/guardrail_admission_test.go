@@ -15,6 +15,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/plugins"
+	"github.com/enterpilot/gomodel/internal/providers/jev"
 	"github.com/enterpilot/gomodel/pluginapi"
 )
 
@@ -209,6 +210,37 @@ func TestPassthroughRefusesWhenGuardrailsApply(t *testing.T) {
 			wantRefused:     true,
 			wantErrContains: "passthrough_guardrails_unsupported",
 		},
+		// /v1/systemone and /v1/decisions run the prompt chain, and jev,
+		// openrouter and azure forward the same bodies on passthrough without
+		// naming a GenAI operation.
+		{
+			name:            "System One on jev refuses",
+			chains:          chains,
+			info:            &core.PassthroughRouteInfo{NormalizedEndpoint: "systemone", Model: "kev-latest"},
+			wantRefused:     true,
+			wantErrContains: "passthrough_guardrails_unsupported",
+		},
+		{
+			name:            "System One diagnostics refuse",
+			chains:          chains,
+			info:            &core.PassthroughRouteInfo{NormalizedEndpoint: "systemone/permute", Model: "kev-latest"},
+			wantRefused:     true,
+			wantErrContains: "passthrough_guardrails_unsupported",
+		},
+		{
+			name:            "System One on an Azure resource path refuses",
+			chains:          chains,
+			info:            &core.PassthroughRouteInfo{NormalizedEndpoint: "providers/microsoft/v1/systemone", Model: "Microsoft-Decision-1"},
+			wantRefused:     true,
+			wantErrContains: "passthrough_guardrails_unsupported",
+		},
+		{
+			name:            "Decisions on an Azure resource path refuses",
+			chains:          chains,
+			info:            &core.PassthroughRouteInfo{NormalizedEndpoint: "openai/v1/decisions", Model: "gpt-6-luna"},
+			wantRefused:     true,
+			wantErrContains: "passthrough_guardrails_unsupported",
+		},
 		{
 			name:   "model listing on a provider without semantics allows",
 			chains: chains,
@@ -300,4 +332,15 @@ func TestNativeJSONGuardrailDecisionsAreAdmitted(t *testing.T) {
 		assert.Equal(t, http.StatusOK, doSystemOne(t, handler))
 		assert.Equal(t, http.StatusTooManyRequests, doSystemOne(t, handler))
 	})
+}
+
+// The jev table names System One endpoints without a GenAI operation, so the
+// endpoint path has to classify them as guarded inference.
+func TestJevSystemOnePassthroughRunsGuardedInference(t *testing.T) {
+	for _, endpoint := range []string{"systemone", "systemone/permute", "systemone/separate"} {
+		info := jev.Registration.PassthroughSemanticEnricher.Enrich(nil, nil, &core.PassthroughRouteInfo{Provider: "jev", NormalizedEndpoint: endpoint})
+		require.NotNil(t, info, endpoint)
+		assert.Empty(t, info.GenAIOperation, endpoint)
+		assert.True(t, passthroughRunsTextInference(info), endpoint)
+	}
 }

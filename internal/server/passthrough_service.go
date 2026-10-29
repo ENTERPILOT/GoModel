@@ -89,7 +89,9 @@ const (
 
 // textInferenceEndpointSuffixes are the provider-native endpoint paths that run
 // text inference, matched on the tail of the endpoint so a dialect's version
-// segment (`/v2/chat`, `/beta/completions`) still counts.
+// segment (`/v2/chat`, `/beta/completions`) still counts. System One and
+// Decisions run the prompt chain on /v1 too, and jev, openrouter and azure
+// forward those bodies on passthrough without naming a GenAI operation.
 var textInferenceEndpointSuffixes = []string{
 	"/chat/completions",
 	"/chat",
@@ -100,6 +102,10 @@ var textInferenceEndpointSuffixes = []string{
 	"/converse-stream",
 	":generatecontent",
 	":streamgeneratecontent",
+	"/systemone",
+	"/systemone/permute",
+	"/systemone/separate",
+	"/decisions",
 }
 
 // passthroughRunsTextInference reports whether the passthrough route generates

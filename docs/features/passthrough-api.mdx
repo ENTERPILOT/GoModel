@@ -129,9 +129,9 @@ model read from the provider-native body, and that read is best effort, so an
 inference call whose model GoModel cannot read is refused whenever *any*
 guardrail is configured — an unreadable body must not be a way around a policy.
 
-Only text-generating routes are refused: chat completions, responses, Anthropic
-messages, the legacy completion endpoints, and any provider-native path of the
-same shape. Model lists, token counts, embeddings, files, batches, images, and
+Only routes a guardrail chain runs on are refused: chat completions, responses,
+Anthropic messages, the legacy completion endpoints, System One and Decisions,
+and any provider-native path of the same shape. Model lists, token counts, embeddings, files, batches, images, and
 audio run no guardrail chain on `/v1` either, so passthrough serves them
 unchanged.
 
