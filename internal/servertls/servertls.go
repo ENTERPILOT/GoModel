@@ -56,8 +56,11 @@ type Source struct {
 	settings Settings
 	interval time.Duration
 
-	current   atomic.Pointer[tls.Config]
-	nextCheck atomic.Int64 // unix nanoseconds
+	current atomic.Pointer[tls.Config]
+	// nextCheck is nanoseconds since base. time.Since reads the monotonic
+	// clock, so a wall clock stepped backwards cannot stall the checks.
+	base      time.Time
+	nextCheck atomic.Int64
 
 	mu          sync.Mutex // serializes reloads; guards the fields below
 	stamp       []os.FileInfo
@@ -81,7 +84,7 @@ func New(settings Settings) (*Source, error) {
 	); err != nil {
 		return nil, err
 	}
-	s := &Source{settings: settings, interval: DefaultCheckInterval}
+	s := &Source{settings: settings, interval: DefaultCheckInterval, base: time.Now()}
 	stamp, err := statFiles(settings)
 	if err != nil {
 		return nil, err
@@ -92,7 +95,7 @@ func New(settings Settings) (*Source, error) {
 	}
 	s.stamp = stamp
 	s.current.Store(cfg)
-	s.nextCheck.Store(time.Now().Add(s.interval).UnixNano())
+	s.nextCheck.Store(int64(s.interval))
 	return s, nil
 }
 
@@ -115,7 +118,7 @@ func (s *Source) Leaf() *x509.Certificate {
 }
 
 func (s *Source) configForClient(*tls.ClientHelloInfo) (*tls.Config, error) {
-	now := time.Now().UnixNano()
+	now := int64(time.Since(s.base))
 	next := s.nextCheck.Load()
 	// One handshake per interval claims the check; the others never wait.
 	if now >= next && s.nextCheck.CompareAndSwap(next, now+int64(s.interval)) {
