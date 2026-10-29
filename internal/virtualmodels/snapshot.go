@@ -266,3 +266,23 @@ func (s *snapshot) matchingPolicy(providerName, model string) (VirtualModel, boo
 	}
 	return VirtualModel{}, false
 }
+
+// modelPolicy returns the most specific exact or model-wide policy for
+// providerName and model that sets a per-model value, as reported by sets, and
+// applies to userPath. Only those two scopes carry per-model values such as
+// slowdown and reasoning effort. Unlike matchingPolicy, it passes over a more
+// specific policy that does not set the value, so a provider-wide access rule
+// or an exact policy for another setting does not hide a model-wide value.
+func (s *snapshot) modelPolicy(providerName, model, userPath string, sets func(VirtualModel) bool) (VirtualModel, bool) {
+	if key := modelselectors.ExactMatchKey(providerName, model); key != "" {
+		if policy, ok := s.exact[key]; ok && sets(policy) && userPathAllowed(userPath, policy.UserPaths) {
+			return policy, true
+		}
+	}
+	if model != "" {
+		if policy, ok := s.modelWide[model]; ok && sets(policy) && userPathAllowed(userPath, policy.UserPaths) {
+			return policy, true
+		}
+	}
+	return VirtualModel{}, false
+}
