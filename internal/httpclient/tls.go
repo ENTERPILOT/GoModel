@@ -15,9 +15,11 @@ import (
 	"github.com/enterpilot/gomodel/internal/pemfile"
 )
 
-// TLSSettings is the process-wide client TLS trust configuration for every
-// outbound HTTPS connection the gateway opens: providers, the model catalog,
-// the update check, MCP upstreams, vector stores, and embedding endpoints.
+// TLSSettings is the process-wide client TLS trust configuration for the
+// outbound HTTPS clients built from this package: providers, the model
+// catalog, the update check, MCP upstreams, vector stores, and embedding
+// endpoints. Clients built elsewhere, such as the OTLP exporters and the
+// PostgreSQL, MongoDB, and Redis drivers, keep their own TLS settings.
 //
 // Everything is optional. With the zero value, connections trust the operating
 // system's certificate store, which is what most deployments want.

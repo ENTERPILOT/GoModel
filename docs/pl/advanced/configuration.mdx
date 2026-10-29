@@ -481,11 +481,17 @@ połączenia z upstreamem, chyba że provider ustawia własne
 
 #### Zaufanie TLS dla połączeń wychodzących
 
-Te ustawienia dotyczą każdego wychodzącego połączenia HTTPS: providerów,
+Te ustawienia dotyczą wychodzących klientów HTTPS gatewaya: providerów,
 katalogu modeli, sprawdzania aktualizacji, upstreamów MCP, vector store'ów
 i endpointów embeddingów. Domyślnie ufamy magazynowi certyfikatów systemu
 operacyjnego, co wystarcza, o ile między gatewayem a upstreamami nie stoi
 wewnętrzne CA ani proxy przechwytujące TLS.
+
+Nie obejmują połączeń otwieranych przez inne klienty, które mają własne
+ustawienia: eksport OpenTelemetry czyta `OTEL_EXPORTER_OTLP_CERTIFICATE`,
+PostgreSQL przyjmuje `sslmode` i `sslrootcert` w URL-u (zalecane
+`sslmode=verify-full`), MongoDB przyjmuje `tls=true` i `tlsCAFile` w URL-u,
+a Redis przez `rediss://` ufa magazynowi systemowemu.
 
 | Zmienna                         | Opis                                                               | Wartość domyślna |
 | ------------------------------- | ------------------------------------------------------------------ | ---------------- |

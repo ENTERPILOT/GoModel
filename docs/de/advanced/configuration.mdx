@@ -522,11 +522,17 @@ jede Upstream-Verbindung, sofern ein Provider keinen eigenen
 
 #### Vertrauen für ausgehendes TLS
 
-Diese Einstellungen gelten für jede ausgehende HTTPS-Verbindung: Provider,
-Modellkatalog, Update-Prüfung, MCP-Upstreams, Vector Stores und
+Diese Einstellungen gelten für die ausgehenden HTTPS-Clients des Gateways:
+Provider, Modellkatalog, Update-Prüfung, MCP-Upstreams, Vector Stores und
 Embedding-Endpunkte. Standardmäßig wird dem Zertifikatsspeicher des
 Betriebssystems vertraut. Das passt, solange keine interne CA und kein
 TLS-abfangender Proxy zwischen Gateway und Upstreams sitzt.
+
+Verbindungen anderer Clients betreffen sie nicht; diese haben eigene
+Einstellungen: Der OpenTelemetry-Export liest `OTEL_EXPORTER_OTLP_CERTIFICATE`,
+PostgreSQL nimmt `sslmode` und `sslrootcert` in der URL (empfohlen:
+`sslmode=verify-full`), MongoDB nimmt `tls=true` und `tlsCAFile` in der URL,
+und Redis über `rediss://` vertraut dem Systemspeicher.
 
 | Variable                        | Beschreibung                                                        | Standardwert |
 | ------------------------------- | ------------------------------------------------------------------- | ------------ |
