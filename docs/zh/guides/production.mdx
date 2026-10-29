@@ -174,7 +174,7 @@ readinessProbe:
   httpGet: { path: /health/ready, port: http, scheme: HTTPS }
 ```
 
-kubelet 不会校验 HTTPS 探针的证书。启用 mTLS 时，`/health` 和 `/health/ready` 无需客户端证书仍会响应，因此这些探针无需修改即可工作；其他所有路径在没有经过验证的客户端证书时返回 401。chart 自带的 ServiceMonitor 以纯 HTTP 抓取，因此启用原生 TLS 时请自行定义一个使用 `scheme: https` 的 ServiceMonitor。启用 mTLS 时 `/metrics` 同样需要客户端证书，因此请为该 ServiceMonitor 配置 `tlsConfig`，其中的 `cert` 和 `keySecret` 来自由客户端 CA 签发的证书。设置 `env.SERVER_TLS_CERT_FILE` 后，`helm test` 和安装提示会自动切换到 HTTPS。
+kubelet 不会校验 HTTPS 探针的证书。启用 mTLS 时，`/health` 和 `/health/ready` 无需客户端证书仍会响应，因此这些探针无需修改即可工作；其他所有路径在没有经过验证的客户端证书时返回 401。chart 自带的 ServiceMonitor 以纯 HTTP 抓取，因此启用原生 TLS 时请自行定义一个使用 `scheme: https` 的 ServiceMonitor。启用 mTLS 时 `/metrics` 同样需要客户端证书，因此请为该 ServiceMonitor 配置 `tlsConfig`：`ca` 指向签发网关证书的 CA，`cert` 和 `keySecret` 来自由客户端 CA 签发的证书。设置 `env.SERVER_TLS_CERT_FILE` 后，`helm test` 和安装提示中的 port-forward 地址会自动切换到 HTTPS。
 
 ### 私有 CA 签发的上游证书
 

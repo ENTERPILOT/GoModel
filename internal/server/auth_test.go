@@ -768,7 +768,7 @@ func TestAuthMiddleware_WildcardSkipPaths(t *testing.T) {
 // public path cannot reach a catch-all route without a credential.
 func TestAuthMiddleware_SkipPathsMatchEscapedPath(t *testing.T) {
 	e := echo.New()
-	e.Use(AuthMiddleware("secret-key", []string{"/health", "/admin/static/*"}))
+	e.Use(AuthMiddleware("secret-key", []string{"/health", "/admin/static/*", "/status/été"}))
 	e.GET("/*", func(c *echo.Context) error { return c.String(http.StatusOK, "ok") })
 
 	tests := []struct {
@@ -777,6 +777,7 @@ func TestAuthMiddleware_SkipPathsMatchEscapedPath(t *testing.T) {
 	}{
 		{"/health", http.StatusOK},
 		{"/admin/static/app.js", http.StatusOK},
+		{"/status/%C3%A9t%C3%A9", http.StatusOK},
 		{"/%68ealth", http.StatusUnauthorized},
 		{"/admin/%73tatic/app.js", http.StatusUnauthorized},
 		{"/admin%2Fstatic/app.js", http.StatusUnauthorized},
