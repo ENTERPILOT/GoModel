@@ -86,8 +86,8 @@ func TestResolveSlowdown(t *testing.T) {
 		{
 			name:      "model-wide applies on every provider",
 			rows:      []VirtualModel{wideModel},
-			requested: qualified,
-			resolved:  gpt4o,
+			requested: core.NewRequestedModelSelector("azure/gpt-4o", ""),
+			resolved:  core.ModelSelector{Provider: "azure", Model: "gpt-4o"},
 			ctx:       context.Background(),
 			want:      0.5,
 		},
