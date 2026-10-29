@@ -122,8 +122,11 @@ HTTPRoute paths follow automatically.
 
 For pod-to-pod HTTPS without an ingress, mount a certificate Secret through
 `extraVolumes`/`extraVolumeMounts`, set `env.SERVER_TLS_CERT_FILE` and
-`env.SERVER_TLS_KEY_FILE`, and add `scheme: HTTPS` to both probes. The
-ServiceMonitor scrapes plain HTTP, so define your own with `scheme: https`. See
+`env.SERVER_TLS_KEY_FILE`, and add `scheme: HTTPS` to both probes; `helm test`
+and the install notes switch to HTTPS on their own. The ServiceMonitor scrapes
+plain HTTP, so define your own with `scheme: https`. With mTLS
+(`env.SERVER_TLS_CLIENT_CA_FILE`) `/metrics` needs a client certificate too, so
+give it a `tlsConfig` with `cert` and `keySecret`. See
 [Native TLS](https://gomodel.enterpilot.io/guides/production#native-tls) for a
 cert-manager example.
 
