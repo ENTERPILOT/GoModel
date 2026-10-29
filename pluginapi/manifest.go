@@ -68,6 +68,9 @@ const (
 	InputTextarea Input = "textarea"
 	// InputNumber is a numeric input.
 	InputNumber Input = "number"
+	// InputRange is a slider over a bounded numeric range. The value is stored
+	// as a number, like [InputNumber]; Min, Max and Step bound the control.
+	InputRange Input = "range"
 	// InputSelect is a single-choice dropdown over Field.Options.
 	InputSelect Input = "select"
 	// InputCheckboxes is a multi-choice list over Field.Options.
@@ -121,6 +124,12 @@ type Field struct {
 	Help string
 	// Placeholder is the control's placeholder text.
 	Placeholder string
+	// Min, Max and Step bound an [InputRange] control and are ignored by every
+	// other input. A zero Max falls back to 1 with a 0.01 step, so the common
+	// 0..1 ratio needs no extra fields.
+	Min  float64
+	Max  float64
+	Step float64
 	// Default is used when the key is absent. Must be JSON-serializable.
 	Default any
 	// Options lists the choices of select and checkboxes inputs.
