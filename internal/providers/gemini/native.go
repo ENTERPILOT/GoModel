@@ -33,17 +33,18 @@ type geminiGenerateContentRequest struct {
 }
 
 // chatStore reads the Chat Completions store flag, which has the same meaning
-// as Gemini's: whether the provider may retain the request.
-func chatStore(req *core.ChatRequest) *bool {
+// as Gemini's: whether the provider may retain the request. A value that is
+// not a boolean is an error rather than a dropped opt-out.
+func chatStore(req *core.ChatRequest) (*bool, error) {
 	raw := req.ExtraFields.Lookup("store")
 	if len(raw) == 0 {
-		return nil
+		return nil, nil
 	}
 	var store bool
 	if err := json.Unmarshal(raw, &store); err != nil {
-		return nil
+		return nil, core.NewInvalidRequestError("store must be a boolean", err)
 	}
-	return &store
+	return &store, nil
 }
 
 type geminiContent struct {

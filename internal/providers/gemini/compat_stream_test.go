@@ -81,7 +81,11 @@ func TestRepairCompatChunkLine(t *testing.T) {
 	line, changed := repairCompatChunkLine(`data: {"choices":[{"index":1,"delta":{"tool_calls":[{"index":4,"id":"a"},{"id":"b"}]}}]}`, choices)
 	require.True(t, changed)
 	assert.Contains(t, line, `"index":4`, "an index the upstream set is kept")
-	assert.Contains(t, line, `"index":1`, "the next call takes the per-choice counter")
+	assert.Contains(t, line, `{"id":"b","index":0}`, "the next unindexed call takes the per-choice counter")
+
+	line, changed = repairCompatChunkLine(`data: {"choices":[{"index":1,"delta":{"tool_calls":[{"index":1,"id":"c"},{"id":"d"}]}}]}`, choices)
+	require.True(t, changed)
+	assert.Contains(t, line, `{"id":"d","index":2}`, "an index the upstream used is skipped")
 
 	_, changed = repairCompatChunkLine(`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`, choices)
 	assert.False(t, changed, "choice 0 never saw tool calls")

@@ -57,7 +57,11 @@ func TestChatCompletion_CompatDropsRejectedFieldsAndClampsEffort(t *testing.T) {
 	require.NoError(t, err)
 
 	sent := capture.Last(t).JSON(t)
-	for _, key := range googleCompatRejectedFields {
+	for _, key := range []string{
+		"presence_penalty", "frequency_penalty", "seed", "logprobs", "top_logprobs",
+		"store", "metadata", "logit_bias", "top_k", "prediction", "prompt_cache_key",
+		"safety_identifier", "verbosity", "web_search_options",
+	} {
 		assert.NotContains(t, sent, key)
 	}
 	assert.Equal(t, "low", sent["reasoning_effort"])
@@ -118,27 +122,31 @@ func TestWithCompatThoughtSignatures(t *testing.T) {
 	})
 }
 
-func TestCompatAllowedTools(t *testing.T) {
+func TestChatCompletion_CompatNarrowsAllowedTools(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "false")
 	tools := []map[string]any{
 		{"type": "function", "function": map[string]any{"name": "get_weather"}},
 		{"type": "function", "function": map[string]any{"name": "get_time"}},
 	}
-	allowed := func(mode string) map[string]any {
-		return map[string]any{"type": "allowed_tools", "allowed_tools": map[string]any{
-			"mode":  mode,
-			"tools": []any{map[string]any{"type": "function", "function": map[string]any{"name": "get_time"}}},
-		}}
+	allowed := func(mode string, names ...string) map[string]any {
+		subset := make([]any, 0, len(names))
+		for _, name := range names {
+			subset = append(subset, map[string]any{"type": "function", "function": map[string]any{"name": name}})
+		}
+		return map[string]any{"type": "allowed_tools", "allowed_tools": map[string]any{"mode": mode, "tools": subset}}
 	}
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"id":"x","object":"chat.completion","model":"gemini-4-argon","choices":[]}`)
+	provider := New(providers.ProviderConfig{APIKey: "key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
+	messages := []core.Message{{Role: "user", Content: "time?"}}
 
-	narrowed, choice := compatAllowedTools(tools, allowed("auto"))
-	require.Len(t, narrowed, 1)
-	assert.Equal(t, "get_time", narrowed[0]["function"].(map[string]any)["name"])
-	assert.Equal(t, "auto", choice)
+	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{Model: "gemini-4-argon", Messages: messages, Tools: tools, ToolChoice: allowed("required", "get_time")})
+	require.NoError(t, err)
+	sent := capture.Last(t).JSON(t)
+	assert.Equal(t, "required", sent["tool_choice"])
+	require.Len(t, sent["tools"], 1)
+	assert.Equal(t, "get_time", sent["tools"].([]any)[0].(map[string]any)["function"].(map[string]any)["name"])
 
-	_, choice = compatAllowedTools(tools, allowed("required"))
-	assert.Equal(t, "required", choice)
-
-	same, choice := compatAllowedTools(tools, "none")
-	assert.Len(t, same, 2)
-	assert.Equal(t, "none", choice)
+	_, err = provider.ChatCompletion(context.Background(), &core.ChatRequest{Model: "gemini-4-argon", Messages: messages, Tools: tools, ToolChoice: allowed("auto", "missing")})
+	require.Error(t, err, "a subset naming no declared tool is rejected locally")
+	assert.Equal(t, 1, capture.Count())
 }

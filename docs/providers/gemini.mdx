@@ -131,8 +131,9 @@ Gemini's `thinkingConfig`:
 Thinking cannot be turned off on Gemini 3 or 4, and Pro models, 3.7 and 3.8
 Flash and Gemini 4 (`gemini-4-argon`, ...) reject `minimal`, so GoModel sends
 the lowest level those models accept instead of surfacing Google's 400. An
-explicit `extra_body.google.thinking_config` is always forwarded unchanged.
-The same clamp applies in `openai_compatible` mode, where Google's endpoint
+explicit `extra_body.google.thinking_config` is forwarded unchanged when it
+sets `thinking_budget` or `thinking_level`; otherwise `reasoning_effort` adds
+its level or budget to it. The same clamp applies in `openai_compatible` mode, where Google's endpoint
 forwards `reasoning_effort` as a thinking level and rejects the same values.
 
 On Gemini 4, thinking tokens count against `max_tokens`, and a long answer that
@@ -153,7 +154,7 @@ HTTP 400 "Penalty is not enabled for this model". `max_tokens`, `stop`,
 
 In `openai_compatible` mode GoModel also drops the members Google's endpoint
 rejects as unknown (`seed`, `logprobs`, `top_logprobs`, `store`, `metadata`,
-`logit_bias`, `prediction`, `prompt_cache_key`, `safety_identifier`,
+`logit_bias`, `top_k`, `prediction`, `prompt_cache_key`, `safety_identifier`,
 `verbosity`, `web_search_options`) along with the penalties, and repairs the
 streamed tool calls that endpoint emits without an `index` and finishes with
 `stop` instead of `tool_calls`.

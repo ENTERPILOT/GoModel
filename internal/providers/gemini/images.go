@@ -350,6 +350,10 @@ func (p *Provider) imageResponseFromGenerateContent(resp *geminiGenerateContentR
 	return out, nil
 }
 
+// maxImageFailureTextLen bounds the upstream prose copied into an image
+// failure message so the error stays log-friendly.
+const maxImageFailureTextLen = 240
+
 // imageFailureMessage explains a generateContent response that carried no
 // image: a prompt-feedback block reason when present, else the candidate's
 // non-STOP finish reason and message (IMAGE_RECITATION, IMAGE_SAFETY,
@@ -366,20 +370,22 @@ func imageFailureMessage(resp *geminiGenerateContentResponse, text string) strin
 	}
 	for _, candidate := range resp.Candidates {
 		reason := strings.TrimSpace(candidate.FinishReason)
-		if reason == "" || strings.EqualFold(reason, "STOP") {
+		if reason == "" || strings.EqualFold(reason, "STOP") || strings.EqualFold(reason, "FINISH_REASON_UNSPECIFIED") {
 			continue
 		}
 		message += ": " + reason
 		if finishMessage := strings.TrimSpace(candidate.FinishMessage); finishMessage != "" {
+			if len(finishMessage) > maxImageFailureTextLen {
+				finishMessage = finishMessage[:maxImageFailureTextLen] + "..."
+			}
 			message += " (" + finishMessage + ")"
 		}
 		return message
 	}
 	text = strings.TrimSpace(text)
 	if text != "" {
-		const maxLen = 240
-		if len(text) > maxLen {
-			text = text[:maxLen] + "..."
+		if len(text) > maxImageFailureTextLen {
+			text = text[:maxImageFailureTextLen] + "..."
 		}
 		message += ": " + text
 	}

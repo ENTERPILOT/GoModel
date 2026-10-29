@@ -24,7 +24,31 @@ func newCompatToolCallStream(body io.ReadCloser) io.ReadCloser {
 
 type compatChoiceState struct {
 	nextToolIndex int
+	usedIndexes   map[int]struct{}
 	sawToolCalls  bool
+}
+
+// assignIndex hands out the next index the choice has not used, so a call the
+// upstream did index never collides with one it did not.
+func (s *compatChoiceState) assignIndex() int {
+	if s.usedIndexes == nil {
+		s.usedIndexes = make(map[int]struct{})
+	}
+	for {
+		index := s.nextToolIndex
+		s.nextToolIndex++
+		if _, used := s.usedIndexes[index]; !used {
+			s.usedIndexes[index] = struct{}{}
+			return index
+		}
+	}
+}
+
+func (s *compatChoiceState) markIndex(index int) {
+	if s.usedIndexes == nil {
+		s.usedIndexes = make(map[int]struct{})
+	}
+	s.usedIndexes[index] = struct{}{}
 }
 
 func repairCompatToolCallStream(body io.ReadCloser, out *io.PipeWriter) {
@@ -89,11 +113,12 @@ func repairCompatChunkLine(line string, choices map[int]*compatChoiceState) (str
 					if !ok {
 						continue
 					}
-					if _, has := call["index"]; !has {
-						call["index"] = state.nextToolIndex
-						changed = true
+					if existing, has := call["index"].(float64); has {
+						state.markIndex(int(existing))
+						continue
 					}
-					state.nextToolIndex++
+					call["index"] = state.assignIndex()
+					changed = true
 				}
 			}
 		}

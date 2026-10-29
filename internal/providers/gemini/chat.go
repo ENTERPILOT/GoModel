@@ -34,7 +34,13 @@ func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
 	adapted := *req
 	adapted.ExtraFields = req.ExtraFields.Without(googleCompatRejectedFields...)
 	adapted.Messages = withCompatThoughtSignatures(req.Model, req.Messages)
-	adapted.Tools, adapted.ToolChoice = compatAllowedTools(req.Tools, req.ToolChoice)
+	// Google's endpoint rejects allowed_tools ("Request contains an invalid
+	// argument"), so the subset is applied to the tool list instead.
+	tools, choice, err := core.NarrowToAllowedTools(req.Tools, req.ToolChoice)
+	if err != nil {
+		return nil, err
+	}
+	adapted.Tools, adapted.ToolChoice = tools, choice
 	effort := nativeReasoningEffort(req)
 	if effort == "" {
 		return &adapted, nil
@@ -90,34 +96,6 @@ func withCompatThoughtSignatures(model string, messages []core.Message) []core.M
 		return messages
 	}
 	return out
-}
-
-// compatAllowedTools rewrites an allowed_tools choice, which Google's
-// OpenAI-compatible endpoint rejects ("Request contains an invalid
-// argument"), into the shape it accepts with the same meaning: the declared
-// tools are narrowed to the allowed subset and the choice becomes "required"
-// or "auto". Any other choice, and an empty subset, pass through unchanged.
-func compatAllowedTools(tools []map[string]any, choice any) ([]map[string]any, any) {
-	names, required, ok := core.AllowedToolsChoice(choice)
-	if !ok || len(names) == 0 {
-		return tools, choice
-	}
-	allowed := make(map[string]struct{}, len(names))
-	for _, name := range names {
-		allowed[name] = struct{}{}
-	}
-	narrowed := make([]map[string]any, 0, len(names))
-	for _, tool := range tools {
-		fn, _ := tool["function"].(map[string]any)
-		name, _ := fn["name"].(string)
-		if _, keep := allowed[name]; keep {
-			narrowed = append(narrowed, tool)
-		}
-	}
-	if required {
-		return narrowed, "required"
-	}
-	return narrowed, "auto"
 }
 
 func hasSignedToolCall(calls []core.ToolCall) bool {
@@ -201,11 +179,16 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 // prepareNativeRequest applies the backend-specific members a translated
 // generateContent request gets before it is sent: the AI Studio-only store
 // flag and the cached-content prefix.
-func (p *Provider) prepareNativeRequest(ctx context.Context, req *core.ChatRequest, body *geminiGenerateContentRequest) {
+func (p *Provider) prepareNativeRequest(ctx context.Context, req *core.ChatRequest, body *geminiGenerateContentRequest) error {
 	if p.backend == geminiBackendAIStudio {
-		body.Store = chatStore(req)
+		store, err := chatStore(req)
+		if err != nil {
+			return err
+		}
+		body.Store = store
 	}
 	p.prepareCachedContent(ctx, req, body)
+	return nil
 }
 
 func (p *Provider) nativeChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
@@ -213,7 +196,9 @@ func (p *Provider) nativeChatCompletion(ctx context.Context, req *core.ChatReque
 	if err != nil {
 		return nil, err
 	}
-	p.prepareNativeRequest(ctx, req, body)
+	if err := p.prepareNativeRequest(ctx, req, body); err != nil {
+		return nil, err
+	}
 	var geminiResp geminiGenerateContentResponse
 	err = p.nativeClient.Do(ctx, llmclient.Request{
 		Method:    http.MethodPost,
@@ -266,7 +251,9 @@ func (p *Provider) nativeStreamChatCompletion(ctx context.Context, req *core.Cha
 	if err != nil {
 		return nil, err
 	}
-	p.prepareNativeRequest(ctx, req, body)
+	if err := p.prepareNativeRequest(ctx, req, body); err != nil {
+		return nil, err
+	}
 	stream, err := p.nativeClient.DoStream(ctx, llmclient.Request{
 		Method:    http.MethodPost,
 		Endpoint:  nativeStreamEndpoint(req.Model),
