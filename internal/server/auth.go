@@ -62,12 +62,17 @@ type AuthMiddlewareConfig struct {
 }
 
 // escapedSkipPaths puts configured skip paths in the escaped form requests are
-// compared in, so a non-ASCII entry such as /status/été still matches. Parsing
-// keeps a "/*" suffix and an entry that is already escaped as written.
+// compared in, so a non-ASCII entry such as /status/été still matches.
+// Parsing keeps a "/*" suffix and an entry that is already escaped as written.
+// An entry with a query or fragment stays as written and so matches nothing:
+// parsing would cut /admin?view=public down to /admin and widen the exemption.
 func escapedSkipPaths(paths []string) []string {
 	escaped := make([]string, len(paths))
 	for i, p := range paths {
 		escaped[i] = p
+		if strings.ContainsAny(p, "?#") {
+			continue
+		}
 		if u, err := url.Parse(p); err == nil {
 			escaped[i] = u.EscapedPath()
 		}
