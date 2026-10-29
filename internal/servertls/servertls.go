@@ -5,6 +5,7 @@
 package servertls
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
@@ -222,17 +223,21 @@ func load(settings Settings) (*tls.Config, error) {
 }
 
 // clientCAPool holds only the configured CAs: the system store must not vouch
-// for clients. Unlike AppendCertsFromPEM, it rejects a certificate block that
-// does not parse, so a bundle cannot silently drop one of its CAs.
+// for clients. Unlike AppendCertsFromPEM, it rejects a block that does not
+// parse, so a bundle cannot silently drop one of its CAs. pem.Decode itself
+// skips a block with bad framing or base64, so the decoded blocks are counted
+// against the BEGIN markers.
 func clientCAPool(data []byte) (*x509.CertPool, error) {
+	markers := bytes.Count(data, []byte("-----BEGIN "))
 	pool := x509.NewCertPool()
-	count := 0
+	count, blocks := 0, 0
 	for {
 		var block *pem.Block
 		block, data = pem.Decode(data)
 		if block == nil {
 			break
 		}
+		blocks++
 		if block.Type != "CERTIFICATE" {
 			continue
 		}
@@ -242,6 +247,9 @@ func clientCAPool(data []byte) (*x509.CertPool, error) {
 		}
 		pool.AddCert(cert)
 		count++
+	}
+	if blocks != markers {
+		return nil, fmt.Errorf("%d of %d PEM blocks are malformed", markers-blocks, markers)
 	}
 	if count == 0 {
 		return nil, errors.New("contains no PEM certificates")

@@ -186,22 +186,28 @@ func TestServerTLSPathReferencesResolve(t *testing.T) {
 }
 
 // A reference that resolves to empty must fail instead of quietly serving
-// plain HTTP or half a pair. The built-in schemes already reject empty values;
-// a scheme an extension registers, such as a vault, may not.
+// plain HTTP, half a pair, or HTTPS without the client certificate check. The
+// built-in schemes already reject empty values; a scheme an extension
+// registers, such as a vault, may not.
 func TestServerTLSReferencesResolvingEmptyFail(t *testing.T) {
 	tests := []struct {
-		name    string
-		cert    string
-		wantErr string
+		name      string
+		cert, key string
+		clientCA  string
+		wantErr   string
 	}{
-		{name: "both empty", cert: "${blank:cert}", wantErr: "resolved to empty values"},
-		{name: "key empty", cert: "/etc/tls/tls.crt", wantErr: "must be set together"},
+		{name: "pair empty", cert: "${blank:cert}", key: "${blank:key}", wantErr: "server.tls_cert_file resolved to an empty value"},
+		{name: "key empty", cert: "/etc/tls/tls.crt", key: "${blank:key}", wantErr: "server.tls_key_file resolved to an empty value"},
+		{name: "client CA empty", cert: "/etc/tls/tls.crt", key: "/etc/tls/tls.key", clientCA: "${blank:ca}", wantErr: "server.tls_client_ca_file resolved to an empty value"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			clearAllConfigEnvVars(t)
 			withTempDir(t, func(dir string) {
-				yaml := "server:\n  tls_cert_file: " + tt.cert + "\n  tls_key_file: ${blank:key}\n"
+				yaml := "server:\n  tls_cert_file: " + tt.cert + "\n  tls_key_file: " + tt.key + "\n"
+				if tt.clientCA != "" {
+					yaml += "  tls_client_ca_file: " + tt.clientCA + "\n"
+				}
 				require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0o600))
 
 				result, err := Load()

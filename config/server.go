@@ -273,3 +273,22 @@ func ParseBodySizeLimitBytes(s string) (int64, error) {
 
 	return value, nil
 }
+
+// checkResolvedServerTLS rejects a TLS path whose secret reference resolved
+// to an empty value. Load validated the configured values, so an empty one
+// would otherwise quietly serve plain HTTP, leave half a pair, or drop the
+// client certificate requirement. The built-in schemes already refuse empty
+// values; one an extension registers may not.
+func checkResolvedServerTLS(configured, resolved ServerConfig) error {
+	fields := []struct{ name, configured, resolved string }{
+		{"server.tls_cert_file", configured.TLSCertFile, resolved.TLSCertFile},
+		{"server.tls_key_file", configured.TLSKeyFile, resolved.TLSKeyFile},
+		{"server.tls_client_ca_file", configured.TLSClientCAFile, resolved.TLSClientCAFile},
+	}
+	for _, f := range fields {
+		if strings.TrimSpace(f.configured) != "" && strings.TrimSpace(f.resolved) == "" {
+			return fmt.Errorf("%s resolved to an empty value", f.name)
+		}
+	}
+	return nil
+}
