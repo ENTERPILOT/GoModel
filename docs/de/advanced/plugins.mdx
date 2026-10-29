@@ -613,7 +613,8 @@ Hinweise für Autoren:
   für einen Schalter und `list` für eine offene Liste von Strings (Entitätstypen, eine Allowlist),
   statt diese in einem `select` oder einem `textarea` zu kodieren.
 - `InputRange` rendert einen Schieberegler, der durch `Min`, `Max` und `Step` am Feld begrenzt
-  ist; ein `Max` von null bedeutet 1 mit einer Schrittweite von 0.01. Verwenden Sie ihn für eine
+  ist; ein `Max` von null bedeutet 1, und ein nicht gesetztes oder nicht positives `Step`
+  bedeutet eine Schrittweite von 0.01. Verwenden Sie ihn für eine
   begrenzte Zahl (ein Gewicht, einen Schwellenwert) statt einer Freitext-`number`, die der
   Operator außerhalb des Bereichs setzen kann. Die Grenzen sind nur Hinweise: Der Server
   speichert, was die Konfiguration deklariert, ein in YAML gesetzter Wert wird also nicht

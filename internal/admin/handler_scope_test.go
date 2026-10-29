@@ -366,7 +366,7 @@ func TestUsersScoped(t *testing.T) {
 	assert.NotContains(t, nodes, "/team/beta")
 	assert.NotContains(t, nodes, "/")
 
-	for _, outside := range []string{"/team/beta", "/team/alpha"} {
+	for _, outside := range []string{"/team/beta", "/team/alpha", "/team/alpha/"} {
 		c, rec = scopedRequest(t, http.MethodPut, "/admin/users", `{"user_path":"`+outside+`","allowed_models":["openai/"]}`, scopeAlpha)
 		require.NoError(t, h.UpsertUser(c))
 		assert.Equal(t, http.StatusForbidden, rec.Code, "upsert %s: %s", outside, rec.Body.String())

@@ -637,7 +637,8 @@ Uwagi dla autorów:
   (typy encji, lista dozwolonych) zamiast kodować je w `select` lub
   `textarea`.
 - `InputRange` renderuje suwak ograniczony przez `Min`, `Max` i `Step` na
-  polu; zerowe `Max` oznacza 1 z krokiem 0.01. Używaj go dla liczby z ograniczonym
+  polu; zerowe `Max` oznacza 1, a nieustawiony lub niedodatni `Step` oznacza krok
+  0.01. Używaj go dla liczby z ograniczonym
   zakresem (waga, próg) zamiast dowolnego tekstowego `number`, które operator może
   ustawić poza zakresem. Ograniczenia są orientacyjne: serwer zapisuje to, co
   deklaruje konfiguracja, więc wartość ustawiona w YAML nie jest odrzucana. Dashboard

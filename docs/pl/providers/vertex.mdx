@@ -112,8 +112,9 @@ providers:
       - id: claude-sonnet-5
 ```
 
-Instancja w tym trybie obsługuje wyłącznie czat i Responses dla Claude; dla Gemini
-zachowaj drugą instancję `vertex`. Zliczanie tokenów i batche Anthropic nie są
+Instancja w tym trybie obsługuje czat i Responses dla Claude, a embeddingi nadal
+obsługuje przez natywne API Vertex; dla czatu Gemini zachowaj drugą instancję
+`vertex`. Zliczanie tokenów i batche Anthropic nie są
 obsługiwane.
 
 ## Wejście w postaci obrazów

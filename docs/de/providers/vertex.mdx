@@ -108,8 +108,9 @@ providers:
       - id: claude-sonnet-5
 ```
 
-Eine Instanz in diesem Modus bedient nur Claude-Chat und -Responses; behalten Sie eine zweite
-`vertex`-Instanz für Gemini. Token-Zählung und Anthropic-Batches werden nicht unterstützt.
+Eine Instanz in diesem Modus bedient Claude-Chat und -Responses und weiterhin Embeddings über
+die native Vertex-API; behalten Sie eine zweite `vertex`-Instanz für Gemini-Chat. Token-Zählung
+und Anthropic-Batches werden nicht unterstützt.
 
 ## Bild-Input
 

@@ -125,8 +125,8 @@ type Field struct {
 	// Placeholder is the control's placeholder text.
 	Placeholder string
 	// Min, Max and Step bound an [InputRange] control and are ignored by every
-	// other input. A zero Max falls back to 1 with a 0.01 step, so the common
-	// 0..1 ratio needs no extra fields.
+	// other input. A zero Max falls back to 1 and a Step that is unset or not
+	// positive to 0.01, so the common 0..1 ratio needs no extra fields.
 	Min  float64
 	Max  float64
 	Step float64

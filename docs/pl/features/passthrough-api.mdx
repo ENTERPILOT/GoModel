@@ -186,7 +186,7 @@ Passthrough jest celowo wąski, dopóki API jest w wersji beta.
   na odpowiedzi kompatybilne z OpenAI, więc SDK providerów zgłaszają własne typowane
   błędy. Błędy zgłaszane przez sam GoModel (uwierzytelnianie, limity requestów, budżety,
   niewłączony provider, nieosiągalny upstream) używają kształtu błędów bramki, podobnie
-  jak body błędu upstreamu, które nie jest JSON-em.
+  jak body błędu upstreamu, które nie jest JSON-em lub przekracza 1 MiB.
 - Funkcje zależne od kompatybilnych z OpenAI kształtów requestów lub odpowiedzi mogą nie
   działać dla ruchu passthrough tak samo jak dla ruchu `/v1`.
 
