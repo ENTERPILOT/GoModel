@@ -57,12 +57,17 @@ func TestSetConfiguredTLS_Errors(t *testing.T) {
 	dir := t.TempDir()
 	empty := filepath.Join(dir, "empty.pem")
 	require.NoError(t, os.WriteFile(empty, []byte("not a certificate"), 0o600))
+	// A bundle with one broken block fails as a whole instead of silently
+	// dropping that CA, as AppendCertsFromPEM would.
+	partial := filepath.Join(dir, "partial.pem")
+	tlstest.WriteFile(t, partial, append(tlstest.NewCA(t, "test CA").PEM, "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n"...))
 	tests := []struct {
 		name     string
 		settings TLSSettings
 	}{
 		{"missing ca file", TLSSettings{CAFile: filepath.Join(dir, "missing.pem")}},
 		{"ca file without certificates", TLSSettings{CAFile: empty}},
+		{"ca file with a malformed certificate", TLSSettings{CAFile: partial}},
 		{"client cert without key", TLSSettings{ClientCertFile: empty}},
 		{"client key without cert", TLSSettings{ClientKeyFile: empty}},
 		{"unparseable client pair", TLSSettings{ClientCertFile: empty, ClientKeyFile: empty}},

@@ -5,10 +5,8 @@
 package servertls
 
 import (
-	"bytes"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -221,48 +219,13 @@ func load(settings Settings) (*tls.Config, error) {
 		if err != nil {
 			return nil, fmt.Errorf("server TLS: read client CA: %w", err)
 		}
-		pool, err := clientCAPool(caPEM)
-		if err != nil {
+		// Only the configured CAs: the system store must not vouch for clients.
+		pool := x509.NewCertPool()
+		if err := pemfile.AppendCertificates(pool, caPEM); err != nil {
 			return nil, fmt.Errorf("server TLS: client CA file %s: %w", settings.ClientCAFile, err)
 		}
 		cfg.ClientCAs = pool
 		cfg.ClientAuth = tls.VerifyClientCertIfGiven
 	}
 	return cfg, nil
-}
-
-// clientCAPool holds only the configured CAs: the system store must not vouch
-// for clients. Unlike AppendCertsFromPEM, it rejects a block that does not
-// parse, so a bundle cannot silently drop one of its CAs. pem.Decode itself
-// skips a block with bad framing or base64, so the decoded blocks are counted
-// against the BEGIN markers. Like pem.Decode, only a marker that starts a
-// line counts, so a comment that quotes one does not fail the bundle.
-func clientCAPool(data []byte) (*x509.CertPool, error) {
-	markers := bytes.Count(append([]byte("\n"), data...), []byte("\n-----BEGIN "))
-	pool := x509.NewCertPool()
-	count, blocks := 0, 0
-	for {
-		var block *pem.Block
-		block, data = pem.Decode(data)
-		if block == nil {
-			break
-		}
-		blocks++
-		if block.Type != "CERTIFICATE" {
-			continue
-		}
-		cert, err := x509.ParseCertificate(block.Bytes)
-		if err != nil {
-			return nil, fmt.Errorf("certificate %d: %w", count+1, err)
-		}
-		pool.AddCert(cert)
-		count++
-	}
-	if blocks != markers {
-		return nil, fmt.Errorf("%d of %d PEM blocks are malformed", markers-blocks, markers)
-	}
-	if count == 0 {
-		return nil, errors.New("contains no PEM certificates")
-	}
-	return pool, nil
 }

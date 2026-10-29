@@ -142,8 +142,8 @@ func buildTrustState(settings TLSSettings) (*trustState, error) {
 			return nil, fmt.Errorf("http.tls: read ca_file: %w", err)
 		}
 		pool := systemCertPool()
-		if !pool.AppendCertsFromPEM(caPEM) {
-			return nil, fmt.Errorf("http.tls: ca_file %s contains no PEM certificates", caFile)
+		if err := pemfile.AppendCertificates(pool, caPEM); err != nil {
+			return nil, fmt.Errorf("http.tls: ca_file %s: %w", caFile, err)
 		}
 		cfg.RootCAs = pool
 		writeMaterial(hash, "ca", caFile, caPEM)
