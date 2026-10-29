@@ -101,6 +101,7 @@ func TestNewRejectsUnusableFiles(t *testing.T) {
 		{"missing client CA", Settings{CertFile: certFile, KeyFile: keyFile, ClientCAFile: missing}, "missing.pem"},
 		{"client CA is not PEM", Settings{CertFile: certFile, KeyFile: keyFile, ClientCAFile: garbage}, "no PEM certificates"},
 		{"half configured", Settings{CertFile: certFile}, "both a certificate and a key"},
+		{"certificate is a directory", Settings{CertFile: dir, KeyFile: keyFile}, "not a regular file"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -174,6 +175,27 @@ func TestFailedReloadKeepsLastGoodCertificate(t *testing.T) {
 	assert.Equal(t, second.Cert.SerialNumber, servedLeaf(t, addr, ca.Pool).SerialNumber)
 }
 
+// A fix that leaves the files' stat unchanged, such as restored permissions,
+// must still be picked up: a failed load is retried on the next check.
+func TestRetriesFailedReloadWithoutFileChange(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads files regardless of their permissions")
+	}
+	ca := tlstest.NewCA(t, "test CA")
+	dir := t.TempDir()
+	first := ca.Issue(t, "first")
+	certFile, keyFile := first.Write(t, dir)
+	addr := serve(t, newSource(t, Settings{CertFile: certFile, KeyFile: keyFile}))
+
+	second := ca.Issue(t, "second")
+	second.Write(t, dir)
+	require.NoError(t, os.Chmod(keyFile, 0))
+	assert.Equal(t, first.Cert.SerialNumber, servedLeaf(t, addr, ca.Pool).SerialNumber)
+
+	require.NoError(t, os.Chmod(keyFile, 0o600))
+	assert.Equal(t, second.Cert.SerialNumber, servedLeaf(t, addr, ca.Pool).SerialNumber)
+}
+
 // Between checks a handshake reuses the loaded certificate without touching
 // the file system.
 func TestChecksFilesAtMostOncePerInterval(t *testing.T) {
@@ -206,13 +228,19 @@ func TestMutualTLS(t *testing.T) {
 		require.NoError(t, err)
 		return []tls.Certificate{pair}
 	}
+	// GetClientCertificate sends the certificate even when its issuer is not
+	// among the CAs the server asks for; Go would otherwise withhold it.
 	request := func(certs []tls.Certificate) error {
-		_, err := get(addr, &tls.Config{RootCAs: ca.Pool, Certificates: certs, MinVersion: tls.VersionTLS12})
+		cfg := &tls.Config{RootCAs: ca.Pool, MinVersion: tls.VersionTLS12}
+		if len(certs) > 0 {
+			cfg.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) { return &certs[0], nil }
+		}
+		_, err := get(addr, cfg)
 		return err
 	}
 
 	require.NoError(t, request(clientCert(clientCA)), "a client the CA signed must be accepted")
-	require.Error(t, request(nil), "a client without a certificate must be rejected")
+	require.NoError(t, request(nil), "a client without a certificate is left to the HTTP layer")
 	require.Error(t, request(clientCert(ca)), "a client another CA signed must be rejected")
 
 	// The client CA reloads too.

@@ -251,7 +251,6 @@ spec:
   secretName: gomodel-tls
   dnsNames: [gomodel.ai.svc, gomodel.ai.svc.cluster.local]
   issuerRef: { kind: ClusterIssuer, name: internal-ca }
-  usages: [server auth, client auth]
 ```
 
 Mit dem Helm-Chart in `helm/`:
@@ -271,11 +270,10 @@ readinessProbe:
   httpGet: { path: /health/ready, port: http, scheme: HTTPS }
 ```
 
-Das Kubelet prüft das Zertifikat einer HTTPS-Probe nicht, kann aber auch kein
-Client-Zertifikat vorlegen. Verwenden Sie bei aktivem mTLS stattdessen
-Exec-Probes (`["/gomodel", "--health"]` und `["/gomodel", "--ready"]`): Sie
-legen das Serverzertifikat vor, was gelingt, wenn die Client-CA es auch für
-`client auth` ausgestellt hat. Der ServiceMonitor des Charts scrapt einfaches
+Das Kubelet prüft das Zertifikat einer HTTPS-Probe nicht. Bei aktivem mTLS
+antworten `/health` und `/health/ready` weiterhin ohne Client-Zertifikat, sodass
+diese Probes unverändert funktionieren; jeder andere Pfad antwortet ohne
+verifiziertes Zertifikat mit 401. Der ServiceMonitor des Charts scrapt einfaches
 HTTP; definieren Sie bei nativem TLS einen eigenen mit `scheme: https`.
 
 ### Upstream-Zertifikate hinter einer privaten CA

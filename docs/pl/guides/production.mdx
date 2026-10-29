@@ -224,7 +224,6 @@ spec:
   secretName: gomodel-tls
   dnsNames: [gomodel.ai.svc, gomodel.ai.svc.cluster.local]
   issuerRef: { kind: ClusterIssuer, name: internal-ca }
-  usages: [server auth, client auth]
 ```
 
 Z chartem Helm z katalogu `helm/`:
@@ -244,12 +243,11 @@ readinessProbe:
   httpGet: { path: /health/ready, port: http, scheme: HTTPS }
 ```
 
-Kubelet nie weryfikuje certyfikatu sondy HTTPS, ale nie potrafi też przedstawić
-certyfikatu klienta. Przy włączonym mTLS użyj zamiast tego sond exec
-(`["/gomodel", "--health"]` i `["/gomodel", "--ready"]`): przedstawiają one
-certyfikat serwera, co przechodzi, gdy CA klientów wystawiło go także dla
-`client auth`. ServiceMonitor z chartu scrapuje zwykłe HTTP, więc przy natywnym
-TLS zdefiniuj własny ze `scheme: https`.
+Kubelet nie weryfikuje certyfikatu sondy HTTPS. Przy włączonym mTLS `/health` i
+`/health/ready` nadal odpowiadają bez certyfikatu klienta, więc te sondy
+działają bez zmian; każda inna ścieżka bez zweryfikowanego certyfikatu zwraca
+401. ServiceMonitor z chartu scrapuje zwykłe HTTP, więc przy natywnym TLS
+zdefiniuj własny ze `scheme: https`.
 
 ### Certyfikaty upstreamu za prywatnym CA
 

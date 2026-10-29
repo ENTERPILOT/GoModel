@@ -224,7 +224,6 @@ spec:
   secretName: gomodel-tls
   dnsNames: [gomodel.ai.svc, gomodel.ai.svc.cluster.local]
   issuerRef: { kind: ClusterIssuer, name: internal-ca }
-  usages: [server auth, client auth]
 ```
 
 With the Helm chart in `helm/`:
@@ -244,12 +243,11 @@ readinessProbe:
   httpGet: { path: /health/ready, port: http, scheme: HTTPS }
 ```
 
-The kubelet does not verify the certificate of an HTTPS probe, but it cannot
-present a client certificate either. With mTLS on, use exec probes
-(`["/gomodel", "--health"]` and `["/gomodel", "--ready"]`) instead: they
-present the serving certificate, which passes when the client CA also issued it
-for `client auth`. The chart's ServiceMonitor scrapes plain HTTP, so with native
-TLS define your own with `scheme: https`.
+The kubelet does not verify the certificate of an HTTPS probe. With mTLS on,
+`/health` and `/health/ready` still answer without a client certificate, so
+these probes work unchanged; every other path returns 401 without a verified
+one. The chart's ServiceMonitor scrapes plain HTTP, so with native TLS define
+your own with `scheme: https`.
 
 ### Upstream certificates behind a private CA
 

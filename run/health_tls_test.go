@@ -18,16 +18,18 @@ import (
 
 // The container HEALTHCHECK runs `gomodel --health`, so the probe has to get
 // through the listener whatever TLS it serves: a certificate issued for the
-// service name rather than 127.0.0.1, and client certificates when required.
+// service name rather than 127.0.0.1, and mTLS, where the health endpoints
+// answer without a client certificate. It reads none of the certificate
+// files, so a rotation that fails to load, which the listener survives on its
+// last good certificate, does not fail it either.
 func TestProbeClientReachesTLSListener(t *testing.T) {
 	ca := tlstest.NewCA(t, "test CA")
-	dir := t.TempDir()
-	certFile, keyFile := ca.Issue(t, "gateway.example.svc").Write(t, dir)
-	caFile := filepath.Join(dir, "ca.crt")
+	caFile := filepath.Join(t.TempDir(), "ca.crt")
 	tlstest.WriteFile(t, caFile, ca.PEM)
 
 	for name, clientCA := range map[string]string{"server TLS": "", "mutual TLS": caFile} {
 		t.Run(name, func(t *testing.T) {
+			certFile, keyFile := ca.Issue(t, "gateway.example.svc").Write(t, t.TempDir())
 			settings := config.ServerConfig{TLSCertFile: certFile, TLSKeyFile: keyFile, TLSClientCAFile: clientCA}
 			source, err := servertls.New(servertls.Settings{CertFile: certFile, KeyFile: keyFile, ClientCAFile: clientCA})
 			require.NoError(t, err)
@@ -42,8 +44,10 @@ func TestProbeClientReachesTLSListener(t *testing.T) {
 			go func() { _ = srv.Serve(tls.NewListener(ln, source.ServerConfig())) }()
 			t.Cleanup(func() { _ = srv.Close() })
 
-			client, err := probeClient(settings, 5*time.Second)
-			require.NoError(t, err)
+			client := probeClient(settings, 5*time.Second)
+			require.NoError(t, checkHealthEndpoint(t.Context(), client, "https://"+ln.Addr().String()+"/health"))
+
+			tlstest.WriteFile(t, certFile, []byte("half written"))
 			require.NoError(t, checkHealthEndpoint(t.Context(), client, "https://"+ln.Addr().String()+"/health"))
 		})
 	}

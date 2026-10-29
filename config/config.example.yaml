@@ -38,7 +38,7 @@ server:
   # re-read when they change (checked every 5 seconds), so rotation needs no restart.
   # tls_cert_file: /etc/gomodel/tls/tls.crt # env: SERVER_TLS_CERT_FILE
   # tls_key_file: /etc/gomodel/tls/tls.key # env: SERVER_TLS_KEY_FILE
-  # tls_client_ca_file: /etc/gomodel/tls/ca.crt # env: SERVER_TLS_CLIENT_CA_FILE; require client certificates signed by this CA (mTLS)
+  # tls_client_ca_file: /etc/gomodel/tls/ca.crt # env: SERVER_TLS_CLIENT_CA_FILE; require client certificates signed by this CA, except on /health and /health/ready (mTLS)
   pid_file: "data/gomodel.pid" # env: PID_FILE; where the running gateway records its process id so `gomodel --reload` can find it. Set per instance when several gateways share a host; empty writes no pid file and disables --reload; changing it needs a restart, not a reload
 
 models:

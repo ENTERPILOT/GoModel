@@ -28,8 +28,10 @@ type Settings struct {
 	// intermediates after it) and its private key. Both or neither.
 	CertFile string
 	KeyFile  string
-	// ClientCAFile, when set, requires every client to present a certificate
-	// signed by one of the CAs in this bundle (mTLS).
+	// ClientCAFile, when set, verifies every client certificate presented
+	// against the CAs in this bundle (mTLS). A handshake without one still
+	// completes, so the health probes can get through; the HTTP layer rejects
+	// every other request that lacks a verified certificate.
 	ClientCAFile string
 }
 
@@ -94,7 +96,8 @@ func (s *Source) ServerConfig() *tls.Config {
 	}
 }
 
-// MutualTLS reports whether clients must present a certificate.
+// MutualTLS reports whether requests must carry a verified client
+// certificate.
 func (s *Source) MutualTLS() bool { return s.settings.ClientCAFile != "" }
 
 // Leaf returns the certificate currently served.
@@ -127,14 +130,15 @@ func (s *Source) refresh() {
 	if sameStamp(s.stamp, stamp) {
 		return
 	}
-	// Recorded before loading, so a pair that fails to parse is retried only
-	// once the files change again instead of warning on every check.
-	s.stamp = stamp
+	// The stamp is recorded only once a load succeeds, so a failed one is
+	// retried every interval: a fix that leaves the stat unchanged, such as
+	// restored permissions, is still picked up. warn logs each failure once.
 	cfg, err := load(s.settings)
 	if err != nil {
 		s.warn(err)
 		return
 	}
+	s.stamp = stamp
 	s.lastFailure = ""
 	s.current.Store(cfg)
 	leaf := cfg.Certificates[0].Leaf
@@ -165,6 +169,11 @@ func statFiles(settings Settings) ([]os.FileInfo, error) {
 		info, err := os.Stat(name) // follows symlinks to the file served
 		if err != nil {
 			return nil, fmt.Errorf("server TLS: %w", err)
+		}
+		// Reading a FIFO or device could block the handshake that holds the
+		// reload, or startup, forever.
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("server TLS: %s is not a regular file", name)
 		}
 		stamp[i] = info
 	}
@@ -207,7 +216,7 @@ func load(settings Settings) (*tls.Config, error) {
 			return nil, fmt.Errorf("server TLS: client CA file %s contains no PEM certificates", settings.ClientCAFile)
 		}
 		cfg.ClientCAs = pool
-		cfg.ClientAuth = tls.RequireAndVerifyClientCert
+		cfg.ClientAuth = tls.VerifyClientCertIfGiven
 	}
 	return cfg, nil
 }

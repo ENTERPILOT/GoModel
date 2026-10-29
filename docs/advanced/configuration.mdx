@@ -54,7 +54,7 @@ The most common way to configure GoModel. Set any of the variables below to over
 | `SERVER_TRUSTED_HOPS` | Proxies between the client and the gateway; `0` scans the chain instead | `0` |
 | `SERVER_TLS_CERT_FILE` | PEM certificate the listener serves HTTPS with; set together with the key | _(empty, plain HTTP)_ |
 | `SERVER_TLS_KEY_FILE` | Private key for `SERVER_TLS_CERT_FILE` | _(empty)_ |
-| `SERVER_TLS_CLIENT_CA_FILE` | PEM CA bundle; when set, every client must present a certificate it signed (mTLS) | _(empty)_ |
+| `SERVER_TLS_CLIENT_CA_FILE` | PEM CA bundle; when set, every request except `/health` and `/health/ready` needs a client certificate it signed (mTLS) | _(empty)_ |
 | `SWAGGER_ENABLED`    | Expose [Swagger UI](/advanced/swagger-ui); needs a `-tags=swagger` build | `false`                |
 | `AUTH_VERIFY_ENABLED` | Expose [`GET /v1/auth/verify`](/advanced/api-endpoints#key-verification), which reports whether the API key a request carries is valid | `false`                |
 | `PID_FILE`           | Where the running gateway records its process id for `gomodel --reload`. Changing it needs a restart | `data/gomodel.pid` next to a `./data` directory, otherwise the per-user data directory |

@@ -1,7 +1,6 @@
 package app
 
 import (
-	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"time"
@@ -175,11 +174,14 @@ func (b *bootstrap) initServerConfig() error {
 	if app.mcpGateway != nil {
 		serverCfg.MCPGateway = app.mcpGateway.Service
 	}
-	tlsConfig, err := serverTLSConfig(appCfg.Server)
+	tlsSource, err := serverTLSSource(appCfg.Server)
 	if err != nil {
 		return err
 	}
-	serverCfg.TLSConfig = tlsConfig
+	if tlsSource != nil {
+		serverCfg.TLSConfig = tlsSource.ServerConfig()
+		serverCfg.ClientCertificatesRequired = tlsSource.MutualTLS()
+	}
 
 	// Assigned conditionally so a disabled feature leaves the interface nil
 	// (a typed-nil *ratelimit.Service would defeat the fast nil check).
@@ -211,11 +213,11 @@ func (b *bootstrap) initServerConfig() error {
 	return nil
 }
 
-// serverTLSConfig loads the listener's certificate when server TLS is
+// serverTLSSource loads the listener's certificate when server TLS is
 // configured, and returns nil for plain HTTP. Each generation loads the files
 // afresh, so a configuration reload can change the paths, and a reload whose
 // files are unusable is rejected while the running generation keeps serving.
-func serverTLSConfig(cfg config.ServerConfig) (*tls.Config, error) {
+func serverTLSSource(cfg config.ServerConfig) (*servertls.Source, error) {
 	if !cfg.TLSEnabled() {
 		return nil, nil
 	}
@@ -232,7 +234,7 @@ func serverTLSConfig(cfg config.ServerConfig) (*tls.Config, error) {
 		"subject", leaf.Subject.String(),
 		"not_after", leaf.NotAfter,
 		"client_certificates_required", source.MutualTLS())
-	return source.ServerConfig(), nil
+	return source, nil
 }
 
 // initResponseCache builds the response cache middleware and the internal

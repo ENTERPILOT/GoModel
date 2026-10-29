@@ -134,6 +134,7 @@ type Config struct {
 	SessionDetector                 *session.Detector                      // Optional: client session identification for sticky routing and audit grouping
 	VersionChecker                  *versioncheck.Checker                  // Optional: daily update check backing GET /version
 	TLSConfig                       *tls.Config                            // Optional: serve HTTPS with this configuration; nil serves plain HTTP
+	ClientCertificatesRequired      bool                                   // With TLSConfig: reject requests without a verified client certificate, except the health probes
 }
 
 // effectiveMasterKey returns the master key this gateway accepts as a
@@ -183,6 +184,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	basePath := configuredBasePath(cfg)
 	if basePath != "/" {
 		e.Pre(stripBasePathMiddleware(basePath))
+	}
+	if cfg != nil && cfg.TLSConfig != nil && cfg.ClientCertificatesRequired {
+		e.Pre(requireClientCertificate)
 	}
 	// Keep client IP handling explicit after Echo v5.1.0 changed RealIP defaults.
 	// Direct extraction is the safe baseline unless a caller opts into trusted

@@ -120,9 +120,10 @@ type ServerConfig struct {
 	TLSCertFile string `yaml:"tls_cert_file" env:"SERVER_TLS_CERT_FILE"`
 	TLSKeyFile  string `yaml:"tls_key_file" env:"SERVER_TLS_KEY_FILE"`
 
-	// TLSClientCAFile requires every client to present a certificate signed
-	// by a CA in this PEM bundle (mTLS). Requires TLSCertFile and TLSKeyFile;
-	// reloaded with them.
+	// TLSClientCAFile requires a client certificate signed by a CA in this PEM
+	// bundle on every request except /health and /health/ready, which probes
+	// reach without one (mTLS). Requires TLSCertFile and TLSKeyFile; reloaded
+	// with them.
 	// Default: empty (no client certificate requested)
 	TLSClientCAFile string `yaml:"tls_client_ca_file" env:"SERVER_TLS_CLIENT_CA_FILE"`
 }

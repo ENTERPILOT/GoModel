@@ -54,7 +54,7 @@ Der gängigste Weg, GoModel zu konfigurieren. Setzen Sie eine der folgenden Vari
 | `SERVER_TRUSTED_HOPS` | Anzahl der Proxys zwischen Client und Gateway; `0` durchsucht stattdessen die Kette | `0` |
 | `SERVER_TLS_CERT_FILE` | PEM-Zertifikat, mit dem der Listener HTTPS ausliefert; zusammen mit dem Schlüssel setzen | _(leer, einfaches HTTP)_ |
 | `SERVER_TLS_KEY_FILE` | Privater Schlüssel zu `SERVER_TLS_CERT_FILE` | _(leer)_ |
-| `SERVER_TLS_CLIENT_CA_FILE` | PEM-CA-Bundle; wenn gesetzt, muss jeder Client ein davon signiertes Zertifikat vorlegen (mTLS) | _(leer)_ |
+| `SERVER_TLS_CLIENT_CA_FILE` | PEM-CA-Bundle; wenn gesetzt, braucht jeder Request außer `/health` und `/health/ready` ein davon signiertes Client-Zertifikat (mTLS) | _(leer)_ |
 | `SWAGGER_ENABLED`    | Stellt die [Swagger UI](/de/advanced/swagger-ui) bereit; erfordert einen Build mit `-tags=swagger` | `false`                |
 | `AUTH_VERIFY_ENABLED` | Stellt [`GET /v1/auth/verify`](/de/advanced/api-endpoints#key-verifizierung) bereit, das meldet, ob der API-Key eines Requests gültig ist | `false`                |
 | `PID_FILE`           | Ort, an dem das laufende Gateway seine Prozess-ID für `gomodel --reload` ablegt. Eine Änderung erfordert einen Neustart | `data/gomodel.pid` neben einem `./data`-Verzeichnis, andernfalls das benutzerspezifische Datenverzeichnis |

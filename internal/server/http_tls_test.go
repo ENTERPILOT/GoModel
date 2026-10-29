@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"io"
 	"net"
 	"net/http"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -60,4 +62,54 @@ func TestStartWithListenerServesTLS(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode, "plain HTTP must not be served on a TLS listener")
+}
+
+// Under mTLS only the health probes answer without a verified client
+// certificate, so the kubelet's HTTPS probes and `gomodel --health` work
+// while everything else stays closed.
+func TestClientCertificateRequired(t *testing.T) {
+	ca := tlstest.NewCA(t, "test CA")
+	clientCA := tlstest.NewCA(t, "client CA")
+	dir := t.TempDir()
+	certFile, keyFile := ca.Issue(t, "gateway").Write(t, dir)
+	caFile := filepath.Join(dir, "client-ca.pem")
+	tlstest.WriteFile(t, caFile, clientCA.PEM)
+	source, err := servertls.New(servertls.Settings{CertFile: certFile, KeyFile: keyFile, ClientCAFile: caFile})
+	require.NoError(t, err)
+
+	srv := New(&mockProvider{}, &Config{
+		BasePath:                   "/gw",
+		TLSConfig:                  source.ServerConfig(),
+		ClientCertificatesRequired: source.MutualTLS(),
+	})
+	srv.echo.GET("/private", func(c *echo.Context) error { return c.String(http.StatusOK, "ok") })
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- srv.StartWithListener(ctx, listener) }()
+	t.Cleanup(func() {
+		cancel()
+		require.NoError(t, <-done)
+	})
+	base := "https://" + listener.Addr().String() + "/gw"
+
+	leaf := clientCA.Issue(t, "client", x509.ExtKeyUsageClientAuth)
+	pair, err := tls.X509KeyPair(leaf.CertPEM, leaf.KeyPEM)
+	require.NoError(t, err)
+	status := func(certs []tls.Certificate, path string) int {
+		transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: ca.Pool, Certificates: certs, MinVersion: tls.VersionTLS12}}
+		defer transport.CloseIdleConnections()
+		resp, err := (&http.Client{Transport: transport, Timeout: 5 * time.Second}).Get(base + path)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		return resp.StatusCode
+	}
+
+	assert.Equal(t, http.StatusOK, status(nil, "/health"))
+	assert.NotEqual(t, http.StatusUnauthorized, status(nil, "/health/ready"))
+	assert.Equal(t, http.StatusUnauthorized, status(nil, "/private"))
+	assert.Equal(t, http.StatusUnauthorized, status(nil, "/health/../private"))
+	assert.Equal(t, http.StatusUnauthorized, status(nil, "/health/"))
+	assert.Equal(t, http.StatusOK, status([]tls.Certificate{pair}, "/private"))
 }

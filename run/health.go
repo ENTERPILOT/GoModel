@@ -27,10 +27,7 @@ func runHealthProbe(timeout time.Duration) error {
 		timeout = defaultHealthTimeout
 	}
 
-	client, err := probeClient(result.Config.Server, timeout)
-	if err != nil {
-		return err
-	}
+	client := probeClient(result.Config.Server, timeout)
 	return checkHealthEndpoint(context.Background(), client, endpoint)
 }
 
@@ -45,10 +42,7 @@ func runReadyProbe(timeout time.Duration) error {
 		timeout = defaultReadyTimeout
 	}
 
-	client, err := probeClient(result.Config.Server, timeout)
-	if err != nil {
-		return err
-	}
+	client := probeClient(result.Config.Server, timeout)
 	return checkReadyEndpoint(context.Background(), client, endpoint)
 }
 
@@ -56,37 +50,21 @@ func runReadyProbe(timeout time.Duration) error {
 //
 // Over TLS it does not verify the server certificate: the probe dials its own
 // process on loopback, and a certificate issued for the service name rarely
-// lists 127.0.0.1. When the listener requires client certificates, the probe
-// presents the serving pair, which passes when the same CA issued it for
-// client authentication too. The paths may be ${env:...} or ${file:...}
-// references; other schemes are left to the running gateway.
-func probeClient(server config.ServerConfig, timeout time.Duration) (*http.Client, error) {
+// lists 127.0.0.1. It presents no client certificate, even under mTLS: the
+// health endpoints answer without one, so the probe never reads the
+// certificate files and a failed rotation, which the listener survives on its
+// last good certificate, cannot fail it.
+func probeClient(server config.ServerConfig, timeout time.Duration) *http.Client {
 	client := &http.Client{Timeout: timeout}
 	if !server.TLSEnabled() {
-		return client, nil
+		return client
 	}
 	//nolint:gosec // Loopback probe of this process; see the comment above.
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}
-	if strings.TrimSpace(server.TLSClientCAFile) != "" {
-		builtins := config.NewSecrets()
-		certFile, err := builtins.Resolve(context.Background(), server.TLSCertFile)
-		if err != nil {
-			return nil, fmt.Errorf("resolve server.tls_cert_file: %w", err)
-		}
-		keyFile, err := builtins.Resolve(context.Background(), server.TLSKeyFile)
-		if err != nil {
-			return nil, fmt.Errorf("resolve server.tls_key_file: %w", err)
-		}
-		cert, err := tls.LoadX509KeyPair(strings.TrimSpace(certFile), strings.TrimSpace(keyFile))
-		if err != nil {
-			return nil, fmt.Errorf("load the serving certificate to present as the probe's client certificate: %w", err)
-		}
-		tlsConfig.Certificates = []tls.Certificate{cert}
-	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.TLSClientConfig = tlsConfig
 	client.Transport = transport
-	return client, nil
+	return client
 }
 
 func healthProbeURL(server config.ServerConfig) string {
