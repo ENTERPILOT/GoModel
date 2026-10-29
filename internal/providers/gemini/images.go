@@ -351,8 +351,9 @@ func (p *Provider) imageResponseFromGenerateContent(resp *geminiGenerateContentR
 }
 
 // imageFailureMessage explains a generateContent response that carried no
-// image: a prompt-feedback block reason when present, otherwise the model's
-// own text, trimmed to stay log-friendly.
+// image: a prompt-feedback block reason when present, else the candidate's
+// non-STOP finish reason and message (IMAGE_RECITATION, IMAGE_SAFETY,
+// NO_IMAGE, ...), else the model's own text, trimmed to stay log-friendly.
 func imageFailureMessage(resp *geminiGenerateContentResponse, text string) string {
 	message := "Gemini returned no images"
 	var feedback geminiPromptFeedback
@@ -360,6 +361,17 @@ func imageFailureMessage(resp *geminiGenerateContentResponse, text string) strin
 		message += ": blocked (" + feedback.BlockReason + ")"
 		if feedback.BlockReasonMessage != "" {
 			message += " " + feedback.BlockReasonMessage
+		}
+		return message
+	}
+	for _, candidate := range resp.Candidates {
+		reason := strings.TrimSpace(candidate.FinishReason)
+		if reason == "" || strings.EqualFold(reason, "STOP") {
+			continue
+		}
+		message += ": " + reason
+		if finishMessage := strings.TrimSpace(candidate.FinishMessage); finishMessage != "" {
+			message += " (" + finishMessage + ")"
 		}
 		return message
 	}
