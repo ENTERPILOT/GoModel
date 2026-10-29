@@ -224,6 +224,7 @@ func TestEnforceAdmissionDefersSaturatedRouteToFailover(t *testing.T) {
 	service := newTestRateLimitService(t,
 		rateLimitProviderRule("openai", 1),
 		rateLimitRuleWithRequests("/", 10),
+		rateLimitRuleWithRequests("/team", 10),
 	)
 	checker := &countingBudgetChecker{}
 	route := rateLimitRoute{provider: "openai", model: "openai/gpt-4o"}.withFailovers(1)
@@ -246,7 +247,7 @@ func TestEnforceAdmissionDefersSaturatedRouteToFailover(t *testing.T) {
 	require.ErrorAs(t, second.saturatedRoute, &gatewayErr)
 	require.Equal(t, http.StatusTooManyRequests, gatewayErr.HTTPStatusCode())
 
-	ctx := second.dispatchContext(context.Background())
+	ctx := second.dispatchContext(c2.Request().Context())
 	require.Error(t, core.PrimaryRouteSaturated(ctx))
 
 	// A rejected primary does not consume the deferred request's quota.

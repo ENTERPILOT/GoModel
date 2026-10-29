@@ -16,6 +16,8 @@ type AttemptAdmission interface {
 
 type attemptAdmissionKey struct{}
 
+type attemptAdmissionValue struct{ admission AttemptAdmission }
+
 func stopsFailover(err error) bool {
 	var rejection interface{ StopFailover() bool }
 	return errors.As(err, &rejection) && rejection.StopFailover()
@@ -26,20 +28,20 @@ func routeAdmissionRejected(err error) bool {
 	return errors.As(err, &rejection) && rejection.RouteRejected()
 }
 
-// WithAttemptAdmission installs request-scoped admission for shared execution.
+// WithAttemptAdmission installs request-scoped admission; nil clears inherited admission.
 func WithAttemptAdmission(ctx context.Context, admission AttemptAdmission) context.Context {
-	return context.WithValue(ctx, attemptAdmissionKey{}, admission)
+	return context.WithValue(ctx, attemptAdmissionKey{}, attemptAdmissionValue{admission})
 }
 
 func acquireAttempt(ctx context.Context, provider, model string) (func(), error) {
-	admission, ok := ctx.Value(attemptAdmissionKey{}).(AttemptAdmission)
-	if !ok {
+	value, ok := ctx.Value(attemptAdmissionKey{}).(attemptAdmissionValue)
+	if !ok || value.admission == nil {
 		return func() {}, nil
 	}
 	if err := ctx.Err(); err != nil {
 		return func() {}, err
 	}
-	return admission.Acquire(ctx, provider, model)
+	return value.admission.Acquire(ctx, provider, model)
 }
 
 type admittedStream struct {

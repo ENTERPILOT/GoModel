@@ -28,8 +28,10 @@ while another target has capacity. If admission fails for every target, the
 client gets `429`. Skipping a saturated backup does not replace an error from
 a provider that was actually called, such as the primary's `503`.
 
-Failover counts the consumer once, at the first admitted provider attempt;
-locally rejected routes do not consume its request quota. Each admitted attempt
+Failover counts the consumer once, atomically with the first usable route
+reservation (before dispatch); locally rejected routes consume no request quota.
+Cancellation after admission releases concurrency but does not refund request
+counters, even if dispatch has not started. Each admitted attempt
 counts against its own provider/model limits. Provider/model concurrency slots
 are released between attempts, while consumer concurrency remains reserved for
 the whole request. Streaming attempts retain their slots until the stream ends

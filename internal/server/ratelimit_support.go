@@ -112,6 +112,8 @@ type admission struct {
 func (a admission) dispatchContext(ctx context.Context) context.Context {
 	if a.attempts != nil {
 		ctx = gateway.WithAttemptAdmission(ctx, a.attempts)
+	} else {
+		ctx = gateway.WithAttemptAdmission(ctx, nil)
 	}
 	return core.WithPrimaryRouteSaturated(ctx, a.saturatedRoute)
 }
@@ -285,12 +287,12 @@ func applyRateLimitHeaders(target http.Header, snapshot ratelimit.HeaderSnapshot
 	if snapshot.HasRequests {
 		target.Set(rateLimitLimitRequestsHeader, strconv.FormatInt(snapshot.RequestLimit, 10))
 		target.Set(rateLimitRemainingRequestsHeader, strconv.FormatInt(snapshot.RequestRemaining, 10))
-		target.Set(rateLimitResetRequestsHeader, strconv.FormatInt(retryAfterSeconds(snapshot.RequestResetAfter), 10))
+		target.Set(rateLimitResetRequestsHeader, strconv.FormatInt(max(int64(math.Ceil(snapshot.RequestResetAfter.Seconds())), 0), 10))
 	}
 	if snapshot.HasTokens {
 		target.Set(rateLimitLimitTokensHeader, strconv.FormatInt(snapshot.TokenLimit, 10))
 		target.Set(rateLimitRemainingTokensHeader, strconv.FormatInt(snapshot.TokenRemaining, 10))
-		target.Set(rateLimitResetTokensHeader, strconv.FormatInt(retryAfterSeconds(snapshot.TokenResetAfter), 10))
+		target.Set(rateLimitResetTokensHeader, strconv.FormatInt(max(int64(math.Ceil(snapshot.TokenResetAfter.Seconds())), 0), 10))
 	}
 }
 
