@@ -88,6 +88,8 @@ func TestNewRejectsUnusableFiles(t *testing.T) {
 	garbage := filepath.Join(dir, "garbage.pem")
 	require.NoError(t, os.WriteFile(garbage, []byte("not a certificate"), 0o600))
 	missing := filepath.Join(dir, "missing.pem")
+	noDashes := filepath.Join(dir, "no-dashes-ca.pem")
+	require.NoError(t, os.WriteFile(noDashes, append(append([]byte{}, ca.PEM...), "-----BEGIN CERTIFICATE\nAAAA\n-----END CERTIFICATE-----\n"...), 0o600))
 	badFraming := filepath.Join(dir, "bad-framing-ca.pem")
 	require.NoError(t, os.WriteFile(badFraming, append([]byte("-----BEGIN CERTIFICATE-----\n!!!\n-----END CERTIFICATE-----\n"), ca.PEM...), 0o600))
 	malformedCA := filepath.Join(dir, "malformed-ca.pem")
@@ -106,6 +108,7 @@ func TestNewRejectsUnusableFiles(t *testing.T) {
 		{"client CA is not PEM", Settings{CertFile: certFile, KeyFile: keyFile, ClientCAFile: garbage}, "no PEM certificates"},
 		{"client CA bundle drops a CA", Settings{CertFile: certFile, KeyFile: keyFile, ClientCAFile: malformedCA}, "certificate 2"},
 		{"client CA block with bad base64", Settings{CertFile: certFile, KeyFile: keyFile, ClientCAFile: badFraming}, "1 of 2 PEM blocks are malformed"},
+		{"client CA BEGIN line without dashes", Settings{CertFile: certFile, KeyFile: keyFile, ClientCAFile: noDashes}, "1 of 2 PEM blocks are malformed"},
 		{"half configured", Settings{CertFile: certFile}, "both a certificate and a key"},
 		{"certificate is a directory", Settings{CertFile: dir, KeyFile: keyFile}, "not a regular file"},
 	}
@@ -254,6 +257,20 @@ func TestMutualTLS(t *testing.T) {
 	tlstest.WriteFile(t, caFile, rotated.PEM)
 	require.Error(t, request(clientCert(clientCA)), "the replaced CA must no longer be trusted")
 	require.NoError(t, request(clientCert(rotated)))
+}
+
+// A marker quoted inside a comment line is not a block, as for pem.Decode.
+func TestClientCABundleIgnoresQuotedMarker(t *testing.T) {
+	ca := tlstest.NewCA(t, "test CA")
+	clientCA := tlstest.NewCA(t, "client CA")
+	dir := t.TempDir()
+	certFile, keyFile := ca.Issue(t, "gateway").Write(t, dir)
+	caFile := filepath.Join(dir, "client-ca.pem")
+	tlstest.WriteFile(t, caFile, append([]byte("# paste each CA as -----BEGIN CERTIFICATE----- ... below\n"), clientCA.PEM...))
+
+	src, err := New(Settings{CertFile: certFile, KeyFile: keyFile, ClientCAFile: caFile})
+	require.NoError(t, err)
+	assert.True(t, src.MutualTLS())
 }
 
 // The per-handshake path is one clock read and one atomic load between checks.

@@ -226,9 +226,10 @@ func load(settings Settings) (*tls.Config, error) {
 // for clients. Unlike AppendCertsFromPEM, it rejects a block that does not
 // parse, so a bundle cannot silently drop one of its CAs. pem.Decode itself
 // skips a block with bad framing or base64, so the decoded blocks are counted
-// against the BEGIN markers.
+// against the BEGIN markers. Like pem.Decode, only a marker that starts a
+// line counts, so a comment that quotes one does not fail the bundle.
 func clientCAPool(data []byte) (*x509.CertPool, error) {
-	markers := bytes.Count(data, []byte("-----BEGIN "))
+	markers := bytes.Count(append([]byte("\n"), data...), []byte("\n-----BEGIN "))
 	pool := x509.NewCertPool()
 	count, blocks := 0, 0
 	for {
