@@ -5,6 +5,8 @@ package usage
 import (
 	"context"
 	"time"
+
+	"github.com/enterpilot/gomodel/internal/storage"
 )
 
 // UsageStore defines the interface for usage storage backends.
@@ -117,6 +119,11 @@ type UsageEntry struct {
 	// Prompt-cache changes caused by rewriting are not included
 	// (nil = cost unavailable).
 	RewriteCostSaved *float64 `json:"rewrite_cost_saved,omitempty" bson:"rewrite_cost_saved,omitempty"`
+
+	// Stamp marks the batch write that persisted the entry; other replicas
+	// read it to show the entry in their live log view. The logger sets it
+	// when it flushes, so it is nil until then.
+	Stamp *storage.WriteStamp `json:"-" bson:",inline"`
 }
 
 // Config holds usage tracking configuration

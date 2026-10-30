@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	usageInsertColumnCount = 27
+	usageInsertColumnCount = 29
 
 	// Bind-parameter ceilings per statement: SQLite's default
 	// SQLITE_MAX_VARIABLE_NUMBER and PostgreSQL's wire-protocol limit.
@@ -81,6 +81,8 @@ var usageMigrations = []string{
 	"ALTER TABLE usage ADD COLUMN markup_percent " + sqlx.TypeFloat,
 	"ALTER TABLE usage ADD COLUMN markup_selector TEXT DEFAULT ''",
 	"ALTER TABLE usage ADD COLUMN billed_cost " + sqlx.TypeFloat,
+	"ALTER TABLE usage ADD COLUMN writer_id TEXT",
+	"ALTER TABLE usage ADD COLUMN written_at " + sqlx.TypeInt64,
 }
 
 var usageIndexes = []string{
@@ -173,7 +175,7 @@ const usageInsertPrefix = `
 			endpoint, user_path, session_id, cache_type, labels, input_tokens, output_tokens, total_tokens,
 			rewrite_tokens_saved, rewrite_cost_saved, raw_data,
 			input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat, auth_key_id,
-			markup_percent, markup_selector, billed_cost)
+			markup_percent, markup_selector, billed_cost, writer_id, written_at)
 		VALUES `
 
 const usageInsertSuffix = `
@@ -200,6 +202,7 @@ func buildUsageInsert(dialect sqlx.Dialect, entries []*UsageEntry) (string, []an
 		if rawDataJSON := marshalRawData(entry.RawData, entry.ID); rawDataJSON != nil {
 			rawData = string(rawDataJSON)
 		}
+		writerID, writtenAt := entry.Stamp.SQLValues()
 		args = append(args,
 			entry.ID,
 			entry.RequestID,
@@ -228,6 +231,8 @@ func buildUsageInsert(dialect sqlx.Dialect, entries []*UsageEntry) (string, []an
 			entry.MarkupPercent,
 			entry.MarkupSelector,
 			entry.BilledCost,
+			writerID,
+			writtenAt,
 		)
 	}
 

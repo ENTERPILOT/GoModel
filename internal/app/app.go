@@ -218,6 +218,34 @@ func (a *App) attachLivePublishers() {
 	}
 }
 
+// startRemoteLiveLogs has the live broker also publish the audit and usage
+// entries other replicas persist to the shared database, so a dashboard
+// connected to this replica sees every replica's traffic. The broker polls
+// only while a dashboard is subscribed, and stops when it closes.
+func (a *App) startRemoteLiveLogs() {
+	if a == nil || a.live == nil || !a.live.Enabled() || a.storage == nil {
+		return
+	}
+	cfg := live.RemoteConfig{Writer: storage.WriterID()}
+	if a.config.Logging.Enabled {
+		reader, err := auditlog.NewRecentWriteReader(a.storage)
+		if err != nil {
+			slog.Warn("live logs will not show other replicas' audit entries", "error", err)
+		} else {
+			cfg.Audit = reader
+		}
+	}
+	if a.config.Usage.Enabled {
+		reader, err := usage.NewRecentWriteReader(a.storage)
+		if err != nil {
+			slog.Warn("live logs will not show other replicas' usage entries", "error", err)
+		} else {
+			cfg.Usage = reader
+		}
+	}
+	a.live.StartRemote(cfg)
+}
+
 // Start starts the HTTP server on the given address.
 // This is a blocking call that returns when the server stops.
 func (a *App) Start(ctx context.Context, addr string) error {

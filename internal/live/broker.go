@@ -1,4 +1,6 @@
-// Package live provides in-process realtime dashboard event fan-out.
+// Package live provides realtime dashboard event fan-out: every event this
+// process publishes, plus, in a multi-replica deployment, the audit and usage
+// rows its peers persist (see StartRemote).
 package live
 
 import (
@@ -110,6 +112,17 @@ type Broker struct {
 	subscribers map[uint64]chan Event
 	activeAudit map[string]auditSnapshot
 	activeUsage map[string]Event
+
+	// present is closed while at least one subscriber is connected, and
+	// absent while none is; each is replaced when the state flips. The
+	// remote feed waits on them to poll only while a dashboard watches.
+	present    chan struct{}
+	absent     chan struct{}
+	subscribed bool
+
+	// remote is the feed of other replicas' persisted traffic, nil until
+	// StartRemote. Close stops it.
+	remote *remoteFeed
 }
 
 // auditSnapshot is the accumulated live state of one in-flight request: the
@@ -141,6 +154,8 @@ func NewBroker(cfg Config) *Broker {
 	if cfg.BufferSize > cfg.ReplayLimit+1 {
 		cfg.BufferSize = cfg.ReplayLimit + 1
 	}
+	absent := make(chan struct{})
+	close(absent)
 	return &Broker{
 		enabled:          cfg.Enabled,
 		bufferSize:       cfg.BufferSize,
@@ -150,6 +165,8 @@ func NewBroker(cfg Config) *Broker {
 		subscribers:      make(map[uint64]chan Event),
 		activeAudit:      make(map[string]auditSnapshot),
 		activeUsage:      make(map[string]Event),
+		present:          make(chan struct{}),
+		absent:           absent,
 	}
 }
 
@@ -208,7 +225,7 @@ func (b *Broker) Subscribe(cursor uint64) *Subscription {
 	id := b.nextSubID
 	ch := make(chan Event, b.subscriberBuffer)
 	b.subscribers[id] = ch
-	b.subscriberCount.Store(int64(len(b.subscribers)))
+	b.subscribersChangedLocked()
 
 	return &Subscription{
 		Replay: replay,
@@ -284,8 +301,35 @@ func (b *Broker) unsubscribe(id uint64) {
 		return
 	}
 	delete(b.subscribers, id)
-	b.subscriberCount.Store(int64(len(b.subscribers)))
+	b.subscribersChangedLocked()
 	close(ch)
+}
+
+// subscribersChangedLocked publishes the subscriber count after the map
+// changed, and flips the presence signals when it crossed zero. Caller must
+// hold b.mu.
+func (b *Broker) subscribersChangedLocked() {
+	count := len(b.subscribers)
+	b.subscriberCount.Store(int64(count))
+	if (count > 0) == b.subscribed {
+		return
+	}
+	b.subscribed = count > 0
+	if b.subscribed {
+		close(b.present)
+		b.absent = make(chan struct{})
+	} else {
+		close(b.absent)
+		b.present = make(chan struct{})
+	}
+}
+
+// presence returns the channels closed while some subscriber is connected
+// and while none is, as of now.
+func (b *Broker) presence() (present, absent <-chan struct{}) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.present, b.absent
 }
 
 // Close terminates all active subscribers and prevents future live events.
@@ -301,12 +345,14 @@ func (b *Broker) Close() {
 	b.closed = true
 	subscribers := b.subscribers
 	b.subscribers = make(map[uint64]chan Event)
-	b.subscriberCount.Store(0)
+	b.subscribersChangedLocked()
+	remote := b.remote
 	b.mu.Unlock()
 
 	for _, ch := range subscribers {
 		close(ch)
 	}
+	remote.stop()
 }
 
 func (b *Broker) publish(eventType, entryID, requestID string, timestamp time.Time, payload any) {
@@ -453,7 +499,7 @@ func (b *Broker) bufferAndFanoutLocked(event Event, fanoutData json.RawMessage) 
 			close(ch)
 		}
 	}
-	b.subscriberCount.Store(int64(len(b.subscribers)))
+	b.subscribersChangedLocked()
 }
 
 func (b *Broker) updateUsageSnapshotLocked(event *Event, entryID string) {
@@ -793,6 +839,29 @@ func compactAuditPreviewForRetention(preview auditPreview) auditPreview {
 		ResponseBodyTooBigToHandle: preview.Data.ResponseBodyTooBigToHandle,
 	}
 	return preview
+}
+
+// PublishRemoteAuditEntry publishes an audit entry another replica persisted,
+// as the audit.flushed event that replica's own dashboards received. Its
+// bodies are left out, flagged as captured, so remote traffic costs the stream
+// only the compact preview; the dashboard loads them from the stored entry.
+func (b *Broker) PublishRemoteAuditEntry(entry *auditlog.LogEntry) {
+	if b == nil || !b.enabled || entry == nil {
+		return
+	}
+	retained, _ := stripAuditPreviewBodies(auditPreviewFromEntry(EventAuditFlushed, entry))
+	b.publishAuditPreview(EventAuditFlushed, entry.ID, retained, nil)
+}
+
+// PublishRemoteUsageEntry publishes a usage entry another replica persisted,
+// as the usage.flushed event that replica's own dashboards received.
+func (b *Broker) PublishRemoteUsageEntry(entry usage.UsageLogEntry) {
+	if b == nil || !b.enabled {
+		return
+	}
+	entry.Timestamp = entry.Timestamp.UTC()
+	usage.EnrichUsageLogEntry(&entry)
+	b.publish(EventUsageFlushed, entry.ID, entry.RequestID, entry.Timestamp, entry)
 }
 
 // PublishUsageEvent publishes a compact usage log event. Cached usage entries

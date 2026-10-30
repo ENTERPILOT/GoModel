@@ -316,6 +316,7 @@ func (b *bootstrap) initServer() error {
 
 	if b.livePublishersEnabled {
 		app.attachLivePublishers()
+		app.startRemoteLiveLogs()
 	}
 	app.server = server.New(b.provider, b.serverCfg)
 
