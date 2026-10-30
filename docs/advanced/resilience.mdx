@@ -41,8 +41,9 @@ failovers; this is not a deadline for the whole flow. Existing retry eligibility
 is unchanged. Headers are consumed by GoModel, not forwarded to providers.
 Client cancellation, dial/TLS timeouts, stream idle protection, and external
 proxy/provider limits still apply. Only grant gateway access to callers trusted
-to extend or disable these timeouts. Header-timeout overrides use a request-owned
-transport, so those attempts do not reuse the normal upstream connection pool.
+to extend or disable these timeouts. Header-timeout overrides that differ from
+the configured value use a request-owned transport and do not reuse the normal
+upstream connection pool. Equal-value overrides retain the shared transport and pool.
 The overall override applies to shared LLM-client requests, not native AWS SDK
 calls or realtime WebSocket handshakes. Response-header overrides require GoModel's
 shared transport; arbitrary caller-supplied HTTP transports do not implement them.
