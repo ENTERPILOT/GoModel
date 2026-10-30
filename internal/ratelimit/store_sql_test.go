@@ -266,7 +266,7 @@ func TestSQLStoreCounterRoundTrip(t *testing.T) {
 		runCounterStoreSuite(t, store, func(t *testing.T, snap WindowSnapshot, updatedAt int64) {
 			t.Helper()
 			_, err := store.db.Exec(context.Background(), upsertCounterSQL,
-				snap.Scope, snap.Subject, snap.Partition, snap.PeriodSeconds,
+				snap.Scope, snap.Subject, snap.Partition, snap.PeriodSeconds, snap.Writer, snap.Epoch,
 				snap.RequestsWindowStart, snap.RequestsCurrent, snap.RequestsPrevious,
 				snap.TokensWindowStart, snap.TokensCurrent, snap.TokensPrevious, updatedAt,
 			)
@@ -292,7 +292,7 @@ func TestSQLStoreLoadCountersSkipsMalformedRow(t *testing.T) {
 	err = store.SaveCounters(ctx, []WindowSnapshot{good})
 	require.NoError(t, err)
 	_, err = db.Exec(ctx, upsertCounterSQL,
-		string(ScopeUserPath), "/broken", "", PeriodHourSeconds,
+		string(ScopeUserPath), "/broken", "", PeriodHourSeconds, "w1", "",
 		0, "not-a-number", 0, 0, 0, 0, time.Now().Unix(),
 	)
 	require.NoError(t, err)
@@ -301,4 +301,191 @@ func TestSQLStoreLoadCountersSkipsMalformedRow(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	require.Equal(t, good, got[0])
+}
+
+// legacyCountersSchema is rate_limit_counters as releases before writer IDs
+// created it: one row per window, whichever replica flushed last.
+const legacyCountersSchema = `
+	CREATE TABLE rate_limit_counters (
+		scope TEXT NOT NULL,
+		subject TEXT NOT NULL,
+		partition TEXT NOT NULL DEFAULT '',
+		period_seconds ` + sqlx.TypeInt64 + ` NOT NULL,
+		requests_window_start ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
+		requests_current ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
+		requests_previous ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
+		tokens_window_start ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
+		tokens_current ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
+		tokens_previous ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
+		updated_at ` + sqlx.TypeInt64 + ` NOT NULL,
+		PRIMARY KEY (scope, subject, partition, period_seconds)
+	)`
+
+// legacyUpsertSQL is the write an older replica keeps issuing during a
+// rolling upgrade.
+const legacyUpsertSQL = `
+	INSERT INTO rate_limit_counters (
+		scope, subject, partition, period_seconds,
+		requests_window_start, requests_current, requests_previous,
+		tokens_window_start, tokens_current, tokens_previous, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(scope, subject, partition, period_seconds) DO UPDATE SET
+		requests_current = excluded.requests_current,
+		updated_at = excluded.updated_at
+`
+
+func TestSQLStoreImportsLegacyCounters(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		ctx := context.Background()
+		err := db.Schema(ctx, legacyCountersSchema)
+		require.NoError(t, err)
+		legacy := WindowSnapshot{
+			Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: PeriodHourSeconds,
+			RequestsWindowStart: 1700000000, RequestsCurrent: 3, RequestsPrevious: 1,
+			TokensWindowStart: 1700000000, TokensCurrent: 40, TokensPrevious: 10,
+		}
+		_, err = db.Exec(ctx, legacyUpsertSQL,
+			legacy.Scope, legacy.Subject, legacy.Partition, legacy.PeriodSeconds,
+			legacy.RequestsWindowStart, legacy.RequestsCurrent, legacy.RequestsPrevious,
+			legacy.TokensWindowStart, legacy.TokensCurrent, legacy.TokensPrevious, time.Now().Unix(),
+		)
+		require.NoError(t, err)
+
+		store, err := NewSQLStore(ctx, db)
+		require.NoError(t, err)
+		got, err := store.LoadCounters(ctx)
+		require.NoError(t, err)
+		require.Equal(t, []WindowSnapshot{legacy}, got, "the legacy row loads under the empty writer")
+		var remaining int64
+		err = db.QueryRow(ctx, `SELECT COUNT(*) FROM rate_limit_counters`).Scan(&remaining)
+		require.NoError(t, err)
+		require.Zero(t, remaining, "imported rows leave the legacy table")
+
+		// Re-opening imports nothing new and keeps the imported row.
+		_, err = NewSQLStore(ctx, db)
+		require.NoError(t, err)
+		got, err = store.LoadCounters(ctx)
+		require.NoError(t, err)
+		require.Equal(t, []WindowSnapshot{legacy}, got)
+
+		// Rolling upgrade: an older replica still writes the legacy shape. The
+		// next start imports its newer count over the earlier import.
+		_, err = db.Exec(ctx, legacyUpsertSQL,
+			legacy.Scope, legacy.Subject, legacy.Partition, legacy.PeriodSeconds,
+			legacy.RequestsWindowStart, 7, legacy.RequestsPrevious,
+			legacy.TokensWindowStart, legacy.TokensCurrent, legacy.TokensPrevious, time.Now().Unix(),
+		)
+		require.NoError(t, err)
+		store, err = NewSQLStore(ctx, db)
+		require.NoError(t, err)
+		got, err = store.LoadCounters(ctx)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		require.Equal(t, int64(7), got[0].RequestsCurrent)
+
+		// A reset also clears what an older replica wrote since, so the next
+		// start cannot import it back.
+		_, err = db.Exec(ctx, legacyUpsertSQL,
+			legacy.Scope, legacy.Subject, legacy.Partition, legacy.PeriodSeconds,
+			legacy.RequestsWindowStart, 9, 0, 0, 0, 0, time.Now().Unix(),
+		)
+		require.NoError(t, err)
+		err = store.ResetCounter(ctx, ScopeUserPath, "/team", PeriodHourSeconds)
+		require.NoError(t, err)
+		store, err = NewSQLStore(ctx, db)
+		require.NoError(t, err)
+		got, err = store.LoadCounters(ctx)
+		require.NoError(t, err)
+		require.Empty(t, got)
+	})
+}
+
+// A fresh install has no legacy table, and resets must not need one.
+func TestSQLStoreWithoutLegacyCountersTable(t *testing.T) {
+	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+		require.False(t, store.legacyCounters)
+		require.NoError(t, store.ResetCounter(context.Background(), ScopeUserPath, "/team", PeriodHourSeconds))
+		require.NoError(t, store.ResetAllCounters(context.Background()))
+	})
+}
+
+// A reset that runs while a starting replica imports the legacy table must
+// not have the import write back what it read before the reset. SQLite
+// serializes every write transaction, so only PostgreSQL can interleave them.
+//
+// A third transaction holds a row of the window table locked so the reset
+// stops partway, then the import starts; once the import has finished or is
+// waiting on the reset, the lock is released and both run to completion.
+func TestSQLStoreLegacyImportCannotUndoConcurrentReset(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		if db.Dialect() != sqlx.PostgreSQL {
+			t.Skip("SQLite serializes write transactions")
+		}
+		ctx := context.Background()
+		require.NoError(t, db.Schema(ctx, legacyCountersSchema))
+		store, err := NewSQLStore(ctx, db)
+		require.NoError(t, err)
+		blocker := WindowSnapshot{
+			Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: PeriodHourSeconds,
+			Writer: "blocker", RequestsWindowStart: 1700000000, RequestsCurrent: 1,
+		}
+		require.NoError(t, store.SaveCounters(ctx, []WindowSnapshot{blocker}))
+		_, err = db.Exec(ctx, legacyUpsertSQL,
+			string(ScopeUserPath), "/team", "", PeriodHourSeconds,
+			1700000000, 90, 0, 0, 0, 0, time.Now().Unix(),
+		)
+		require.NoError(t, err)
+
+		blockedBy := func(pid int64) bool {
+			var waiting int64
+			err := db.QueryRow(ctx, `SELECT COUNT(*) FROM pg_stat_activity WHERE ? = ANY(pg_blocking_pids(pid))`, pid).Scan(&waiting)
+			require.NoError(t, err)
+			return waiting > 0
+		}
+		lockerPID := make(chan int64, 1)
+		release := make(chan struct{})
+		lockerDone := make(chan error, 1)
+		go func() {
+			lockerDone <- db.InTx(ctx, func(q sqlx.Querier) error {
+				var pid int64
+				if err := q.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+					return err
+				}
+				if _, err := q.Exec(ctx, `SELECT 1 FROM rate_limit_window_snapshots WHERE writer = 'blocker' FOR UPDATE`); err != nil {
+					return err
+				}
+				lockerPID <- pid
+				<-release
+				return nil
+			})
+		}()
+		locker := <-lockerPID
+
+		resetDone := make(chan error, 1)
+		go func() { resetDone <- store.ResetCounter(ctx, ScopeUserPath, "/team", PeriodHourSeconds) }()
+		var resetPID int64
+		require.Eventually(t, func() bool {
+			err := db.QueryRow(ctx, `SELECT COALESCE(MAX(pid), 0) FROM pg_stat_activity WHERE ? = ANY(pg_blocking_pids(pid))`, locker).Scan(&resetPID)
+			require.NoError(t, err)
+			return resetPID != 0
+		}, 5*time.Second, 10*time.Millisecond, "reset never reached the locked row")
+
+		importDone := make(chan error, 1)
+		go func() {
+			_, err := NewSQLStore(ctx, db)
+			importDone <- err
+		}()
+		require.Eventually(t, func() bool {
+			return len(importDone) > 0 || blockedBy(resetPID)
+		}, 5*time.Second, 10*time.Millisecond, "import neither finished nor waited on the reset")
+
+		close(release)
+		require.NoError(t, <-lockerDone)
+		require.NoError(t, <-resetDone)
+		require.NoError(t, <-importDone)
+
+		got, err := store.LoadCounters(ctx)
+		require.NoError(t, err)
+		require.Empty(t, got, "the import must not bring back the count the reset deleted")
+	})
 }
