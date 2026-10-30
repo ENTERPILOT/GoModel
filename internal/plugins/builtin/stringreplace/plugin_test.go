@@ -258,7 +258,10 @@ func TestOnPromptDecisions(t *testing.T) {
 		{"block default status", `{"rules": "ACME => x", "on_match": "block"}`, pluginapi.ActionBlock, 0, DefaultMessage, map[string]any{"matches": 3, "messages": 2}},
 		{"block custom", `{"rules": "ACME => x", "on_match": "block", "block_status": 446, "message": "nope"}`, pluginapi.ActionBlock, 446, "nope", map[string]any{"matches": 3, "messages": 2}},
 		{"respond", `{"rules": "ACME => x", "on_match": "respond", "message": "I cannot discuss that."}`, pluginapi.ActionRespond, 0, "", map[string]any{"matches": 3, "messages": 2}},
-		{"warn", `{"rules": "ACME => x", "on_match": "warn", "roles": ["system"]}`, pluginapi.ActionWarn, 0, DefaultMessage, map[string]any{"matches": 1, "messages": 1}},
+		{"block empty message falls back", `{"rules": "ACME => x", "on_match": "block", "message": ""}`, pluginapi.ActionBlock, 0, DefaultMessage, map[string]any{"matches": 3, "messages": 2}},
+		{"warn keeps no default note", `{"rules": "ACME => x", "on_match": "warn", "roles": ["system"]}`, pluginapi.ActionWarn, 0, "", map[string]any{"matches": 1, "messages": 1}},
+		{"warn empty message stays empty", `{"rules": "ACME => x", "on_match": "warn", "roles": ["system"], "message": ""}`, pluginapi.ActionWarn, 0, "", map[string]any{"matches": 1, "messages": 1}},
+		{"warn custom note", `{"rules": "ACME => x", "on_match": "warn", "roles": ["system"], "message": "vendor name seen"}`, pluginapi.ActionWarn, 0, "vendor name seen", map[string]any{"matches": 1, "messages": 1}},
 		{"no match allows", `{"rules": "zzz => x", "on_match": "block"}`, pluginapi.ActionAllow, 0, "", nil},
 	}
 	for _, tt := range tests {
@@ -286,6 +289,28 @@ func TestOnPromptDecisions(t *testing.T) {
 			assert.False(t, x.Prompt.Changes().Dirty)
 			got := x.Prompt.Messages[1].Text()
 			assert.Equal(t, "Tell me about ACME and ACME.", got)
+		})
+	}
+}
+
+func TestOnPromptRespondMessage(t *testing.T) {
+	tests := []struct {
+		name  string
+		cfg   string
+		reply string
+	}{
+		{"custom", `{"rules": "ACME => x", "on_match": "respond", "message": "I cannot discuss that."}`, "I cannot discuss that."},
+		{"omitted falls back", `{"rules": "ACME => x", "on_match": "respond"}`, DefaultMessage},
+		{"empty falls back", `{"rules": "ACME => x", "on_match": "respond", "message": ""}`, DefaultMessage},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := newPlugin(t, tt.cfg)
+			d, err := p.OnPrompt(context.Background(), plugintest.Exchange(prompt(), nil))
+			require.NoError(t, err)
+			assert.Equal(t, pluginapi.ActionRespond, d.Action)
+			require.NotNil(t, d.Response)
+			assert.Equal(t, tt.reply, d.Response.Text(0))
 		})
 	}
 }
@@ -445,7 +470,7 @@ func TestStreamEvents(t *testing.T) {
 			}
 			if tt.end == pluginapi.ActionWarn {
 				assert.Equal(t, Code, d.Code)
-				assert.Equal(t, DefaultMessage, d.Message)
+				assert.Empty(t, d.Message, "warn records no default note")
 			}
 		})
 	}

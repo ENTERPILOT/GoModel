@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
@@ -26,7 +27,7 @@ func runHealthProbe(timeout time.Duration) error {
 		timeout = defaultHealthTimeout
 	}
 
-	client := &http.Client{Timeout: timeout}
+	client := probeClient(result.Config.Server, timeout)
 	return checkHealthEndpoint(context.Background(), client, endpoint)
 }
 
@@ -41,8 +42,29 @@ func runReadyProbe(timeout time.Duration) error {
 		timeout = defaultReadyTimeout
 	}
 
-	client := &http.Client{Timeout: timeout}
+	client := probeClient(result.Config.Server, timeout)
 	return checkReadyEndpoint(context.Background(), client, endpoint)
+}
+
+// probeClient returns the client the probes reach the local listener with.
+//
+// Over TLS it does not verify the server certificate: the probe dials its own
+// process on loopback, and a certificate issued for the service name rarely
+// lists 127.0.0.1. It presents no client certificate, even under mTLS: the
+// health endpoints answer without one, so the probe never reads the
+// certificate files and a failed rotation, which the listener survives on its
+// last good certificate, cannot fail it.
+func probeClient(server config.ServerConfig, timeout time.Duration) *http.Client {
+	client := &http.Client{Timeout: timeout}
+	if !server.TLSEnabled() {
+		return client
+	}
+	//nolint:gosec // Loopback probe of this process; see the comment above.
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSClientConfig = tlsConfig
+	client.Transport = transport
+	return client
 }
 
 func healthProbeURL(server config.ServerConfig) string {
@@ -56,7 +78,7 @@ func probeURL(server config.ServerConfig, path string) string {
 	}
 
 	u := url.URL{
-		Scheme: "http",
+		Scheme: server.Scheme(),
 		Host:   net.JoinHostPort("127.0.0.1", port),
 		Path:   config.JoinBasePath(server.BasePath, path),
 	}

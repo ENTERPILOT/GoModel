@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -330,4 +331,205 @@ func TestListModels_AnthropicPaging(t *testing.T) {
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
 	require.Equal(t, "error", body["type"], "Anthropic error envelope")
+}
+
+func TestListModelsMaxModelLenFollowsTheCompatSetting(t *testing.T) {
+	window := 4096
+	provider := func() *mockProvider {
+		return &mockProvider{modelsResponse: &core.ModelsResponse{Object: "list", Data: []core.Model{
+			{ID: "local/custom", Object: "model", OwnedBy: "openai", MaxModelLen: &window},
+		}}}
+	}
+
+	t.Run("off drops the field the provider reported", func(t *testing.T) {
+		mock := provider()
+		srv := New(mock, &Config{})
+		req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		rec := httptest.NewRecorder()
+
+		srv.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.NotContains(t, rec.Body.String(), "max_model_len")
+		require.Contains(t, rec.Body.String(), `"owned_by":"openai"`)
+		require.NotNil(t, mock.modelsResponse.Data[0].MaxModelLen,
+			"the provider's own models are left alone")
+	})
+
+	t.Run("on advertises the field and the vllm owner", func(t *testing.T) {
+		mock := provider()
+		srv := New(mock, &Config{VLLMDiscoveryCompat: true})
+		req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		rec := httptest.NewRecorder()
+
+		srv.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.Contains(t, rec.Body.String(), `"max_model_len":4096`)
+		require.Contains(t, rec.Body.String(), `"owned_by":"vllm"`)
+		require.Equal(t, "openai", mock.modelsResponse.Data[0].OwnedBy,
+			"the rewrite happens on a copy, never on the provider's models")
+		require.NotNil(t, mock.modelsResponse.Data[0].MaxModelLen)
+	})
+
+	t.Run("on advertises the field for a model with no known limit", func(t *testing.T) {
+		srv := New(&mockProvider{modelsResponse: &core.ModelsResponse{Object: "list", Data: []core.Model{
+			{ID: "diffusiongemma-pool", Object: "model", OwnedBy: "nvidia"},
+		}}}, &Config{VLLMDiscoveryCompat: true})
+		req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		rec := httptest.NewRecorder()
+
+		srv.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.Contains(t, rec.Body.String(), `"max_model_len":0`)
+		require.Contains(t, rec.Body.String(), `"owned_by":"vllm"`)
+	})
+}
+
+// vllmDiscoveryModels is the endpoint's own listing shape, so these cases run
+// without a server in the way.
+func TestVLLMDiscoveryModels(t *testing.T) {
+	t.Run("a nil listing answers an empty list", func(t *testing.T) {
+		out := vllmDiscoveryModels(nil)
+
+		require.Equal(t, "list", out.Object)
+		require.Empty(t, out.Data)
+	})
+
+	t.Run("the context window supplies the limit when the provider reported none", func(t *testing.T) {
+		window := 131072
+		resp := &core.ModelsResponse{Object: "list", Data: []core.Model{
+			{
+				ID:       "deepseek-v4.1-flash-pool",
+				Object:   "model",
+				OwnedBy:  "anthropic",
+				Metadata: &core.ModelMetadata{ContextWindow: &window},
+			},
+		}}
+
+		out := vllmDiscoveryModels(resp)
+
+		require.Equal(t, vllmDiscoveryOwner, out.Data[0].OwnedBy)
+		require.Equal(t, window, out.Data[0].MaxModelLen)
+	})
+
+	t.Run("the provider's own limit wins over the catalog window", func(t *testing.T) {
+		reported, catalog := 4096, 131072
+		resp := &core.ModelsResponse{Object: "list", Data: []core.Model{
+			{
+				ID:          "local/custom",
+				Object:      "model",
+				OwnedBy:     "openai",
+				MaxModelLen: &reported,
+				Metadata:    &core.ModelMetadata{ContextWindow: &catalog},
+			},
+		}}
+
+		out := vllmDiscoveryModels(resp)
+
+		require.Equal(t, reported, out.Data[0].MaxModelLen,
+			"a self-hosted runtime knows its own limit better than the catalog")
+	})
+
+	t.Run("a model with no limit advertises zero", func(t *testing.T) {
+		resp := &core.ModelsResponse{Object: "list", Data: []core.Model{
+			{ID: "beam", Object: "model", OwnedBy: "ollama"},
+			{ID: "glm-5.3", Object: "model", OwnedBy: "ollama", Metadata: &core.ModelMetadata{}},
+		}}
+
+		out := vllmDiscoveryModels(resp)
+
+		for _, model := range out.Data {
+			require.Equal(t, vllmDiscoveryOwner, model.OwnedBy)
+			require.Zero(t, model.MaxModelLen, "the limit is unknown")
+		}
+		body, err := json.Marshal(out)
+		require.NoError(t, err)
+		require.Contains(t, string(body), `"max_model_len":0`,
+			"the field is required by the client schema, so it is never omitted")
+	})
+
+	t.Run("a non-positive context window advertises zero", func(t *testing.T) {
+		zero := 0
+		resp := &core.ModelsResponse{Object: "list", Data: []core.Model{
+			{ID: "broken", Object: "model", Metadata: &core.ModelMetadata{ContextWindow: &zero}},
+		}}
+
+		out := vllmDiscoveryModels(resp)
+
+		require.Zero(t, out.Data[0].MaxModelLen)
+		body, err := json.Marshal(out)
+		require.NoError(t, err)
+		require.Contains(t, string(body), `"max_model_len":0`)
+	})
+
+	// A client that decodes the listing against a schema where max_model_len is
+	// required fails the whole response over a single entry missing it, so one
+	// model the catalog does not know must not hide the ones it does.
+	t.Run("an unknown limit does not hide the rest of the listing", func(t *testing.T) {
+		window := 131072
+		resp := &core.ModelsResponse{Object: "list", Data: []core.Model{
+			{ID: "deepseek-v4.1-flash-pool", Object: "model", OwnedBy: "anthropic", Metadata: &core.ModelMetadata{ContextWindow: &window}},
+			{ID: "diffusiongemma-pool", Object: "model", OwnedBy: "nvidia"},
+			{ID: "mimo-v2.6-flash-pool", Object: "model", OwnedBy: "opencode", Metadata: &core.ModelMetadata{}},
+		}}
+
+		out := vllmDiscoveryModels(resp)
+
+		body, err := json.Marshal(out)
+		require.NoError(t, err)
+		for _, model := range out.Data {
+			require.Contains(t, string(body), `"id":"`+model.ID+`"`)
+		}
+		require.Equal(t, 3, strings.Count(string(body), `"max_model_len":`),
+			"every entry carries the field")
+		require.Equal(t, window, out.Data[0].MaxModelLen)
+		require.Zero(t, out.Data[1].MaxModelLen)
+		require.Zero(t, out.Data[2].MaxModelLen)
+	})
+
+	t.Run("the transform keeps the rest of the entry", func(t *testing.T) {
+		resp := &core.ModelsResponse{Object: "list", Data: []core.Model{
+			{ID: "gemini-3.8-flash", Object: "model", Created: 1712361441, OwnedBy: "gemini"},
+		}}
+
+		out := vllmDiscoveryModels(resp)
+
+		require.Equal(t, "list", out.Object)
+		require.Equal(t, "gemini-3.8-flash", out.Data[0].ID)
+		require.Equal(t, int64(1712361441), out.Data[0].Created)
+	})
+
+	t.Run("the source listing is not modified", func(t *testing.T) {
+		reported := 4096
+		source := core.Model{ID: "local/custom", Object: "model", OwnedBy: "openai", MaxModelLen: &reported}
+		resp := &core.ModelsResponse{Object: "list", Data: []core.Model{source}}
+
+		vllmDiscoveryModels(resp)
+
+		require.Equal(t, source, resp.Data[0], "the provider's model comes back unchanged")
+	})
+}
+
+// A retrieve answers the same shape as the list, so a client that checks one
+// model sees the limit the listing advertised.
+func TestRetrieveModel_MaxModelLenFollowsTheCompatSetting(t *testing.T) {
+	window := 4096
+	newServer := func(compat bool) *Server {
+		return New(&mockProvider{modelsResponse: &core.ModelsResponse{Object: "list", Data: []core.Model{
+			{ID: "local/custom", Object: "model", OwnedBy: "openai", MaxModelLen: &window},
+		}}}, &Config{VLLMDiscoveryCompat: compat})
+	}
+
+	rec := httptest.NewRecorder()
+	newServer(false).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/models/local/custom", nil))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotContains(t, rec.Body.String(), "max_model_len")
+
+	rec = httptest.NewRecorder()
+	newServer(true).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/models/local/custom", nil))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), `"max_model_len":4096`)
+	require.Contains(t, rec.Body.String(), `"owned_by":"vllm"`)
 }

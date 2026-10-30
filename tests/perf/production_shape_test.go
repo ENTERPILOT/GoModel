@@ -45,10 +45,10 @@ func (s *benchRateLimitStore) LoadCounters(context.Context) ([]ratelimit.WindowS
 func (s *benchRateLimitStore) SaveCounters(context.Context, []ratelimit.WindowSnapshot) error {
 	return nil
 }
-func (s *benchRateLimitStore) DeleteCounter(context.Context, ratelimit.RuleScope, string, int64) error {
+func (s *benchRateLimitStore) ResetCounter(context.Context, ratelimit.RuleScope, string, int64) error {
 	return nil
 }
-func (s *benchRateLimitStore) DeleteAllCounters(context.Context) error { return nil }
+func (s *benchRateLimitStore) ResetAllCounters(context.Context) error { return nil }
 func (s *benchRateLimitStore) Close() error                            { return nil }
 
 // newBenchRateLimiter builds a real ratelimit.Service with one high user-path

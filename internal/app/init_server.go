@@ -16,9 +16,11 @@ import (
 	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
+	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/server"
+	"github.com/enterpilot/gomodel/internal/servertls"
 	"github.com/enterpilot/gomodel/internal/session"
 	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/usage"
@@ -113,7 +115,7 @@ func (b *bootstrap) initServerDependencies() error {
 	// The update check owns the only outbound connection core makes that is
 	// not a provider call. It is constructed even when disabled so GET
 	// /version keeps reporting the local build.
-	app.versionCheck = newVersionChecker(b.ctx, appCfg.VersionCheck, app.storage)
+	app.versionCheck = newVersionChecker(b.ctx, appCfg.VersionCheck, app.storage, b.cfg.Extensions.UpdateCheckLicense())
 	warnIfDataDirEphemeral(appCfg.Storage.BackendConfig())
 	warnIfMediaDirEphemeral(appCfg)
 	return nil
@@ -152,6 +154,7 @@ func (b *bootstrap) initServerConfig() error {
 		BatchRequestPreparer:            b.batchRequestPreparer,
 		ExposedModelLister:              vm,
 		KeepOnlyAliasesAtModelsEndpoint: appCfg.Models.KeepOnlyAliasesAtModelsEndpoint,
+		VLLMDiscoveryCompat:             appCfg.Models.VLLMDiscoveryCompat,
 		PassthroughSemanticEnrichers:    b.cfg.Factory.PassthroughSemanticEnrichers(),
 		BatchStore:                      app.batch.Store,
 		FileStore:                       app.fileStore.Store,
@@ -175,6 +178,14 @@ func (b *bootstrap) initServerConfig() error {
 	}
 	if app.mcpGateway != nil {
 		serverCfg.MCPGateway = app.mcpGateway.Service
+	}
+	tlsSource, err := serverTLSSource(appCfg.Server)
+	if err != nil {
+		return err
+	}
+	if tlsSource != nil {
+		serverCfg.TLSConfig = tlsSource.ServerConfig()
+		serverCfg.ClientCertificatesRequired = tlsSource.MutualTLS()
 	}
 
 	// Assigned conditionally so a disabled feature leaves the interface nil
@@ -205,6 +216,30 @@ func (b *bootstrap) initServerConfig() error {
 	}
 	b.serverCfg = serverCfg
 	return nil
+}
+
+// serverTLSSource loads the listener's certificate when server TLS is
+// configured, and returns nil for plain HTTP. Each generation loads the files
+// afresh, so a configuration reload can change the paths, and a reload whose
+// files are unusable is rejected while the running generation keeps serving.
+func serverTLSSource(cfg config.ServerConfig) (*servertls.Source, error) {
+	if !cfg.TLSEnabled() {
+		return nil, nil
+	}
+	source, err := servertls.New(servertls.Settings{
+		CertFile:     cfg.TLSCertFile,
+		KeyFile:      cfg.TLSKeyFile,
+		ClientCAFile: cfg.TLSClientCAFile,
+	})
+	if err != nil {
+		return nil, err
+	}
+	leaf := source.Leaf()
+	slog.Info("server TLS enabled",
+		"subject", leaf.Subject.String(),
+		"not_after", leaf.NotAfter,
+		"client_certificates_required", source.MutualTLS())
+	return source, nil
 }
 
 // initResponseCache builds the response cache middleware and the internal
@@ -246,19 +281,38 @@ func (b *bootstrap) initResponseCache() error {
 		ResponseCache:   rcm,
 	}
 	internalGuardrailExecutor := server.NewInternalChatCompletionExecutor(b.provider, internalCfg)
+	decider := pluginDecider{
+		InternalDecisionsExecutor: server.NewInternalDecisionsExecutor(b.provider, internalCfg),
+		router:                    app.providers.Router,
+		virtualModels:             vm,
+	}
 	// Instances pick the executors up on their next call; no rebuild needed.
 	if app.guardrails != nil && app.guardrails.Service != nil {
 		app.guardrails.Service.SetChatCompleter(internalGuardrailExecutor)
-		app.guardrails.Service.SetDecider(pluginDecider{
-			InternalDecisionsExecutor: server.NewInternalDecisionsExecutor(b.provider, internalCfg),
+		app.guardrails.Service.SetDecider(decider)
+	}
+	// Rewriters call models before their request is admitted, so their
+	// executors admit every call themselves.
+	extensionCfg := internalCfg
+	if app.rateLimits.Service != nil {
+		extensionCfg.RateLimiter = app.rateLimits.Service
+	}
+	if app.budgets.Service != nil {
+		extensionCfg.BudgetChecker = app.budgets.Service
+	}
+	b.internalInference = plugins.HostDeps{
+		Chat: server.NewInternalChatCompletionExecutor(b.provider, extensionCfg),
+		Decisions: pluginDecider{
+			InternalDecisionsExecutor: server.NewInternalDecisionsExecutor(b.provider, extensionCfg),
 			router:                    app.providers.Router,
 			virtualModels:             vm,
-		})
+		},
 	}
 	return nil
 }
 
-// initServer creates the HTTP server and binds the extension authenticators.
+// initServer creates the HTTP server and binds the extension authenticators,
+// inference-aware rewriters, and the extension shared store.
 // It is infallible and runs last: everything before it can fail, and a
 // failed replacement generation must not have rebound shared registries.
 func (b *bootstrap) initServer() error {
@@ -274,6 +328,10 @@ func (b *bootstrap) initServer() error {
 	// succeeded: otherwise a failed replacement would leave the still-serving
 	// generation pointing at the replacement's already-closed audit logger.
 	bindAuthenticationEventRecorders(b.cfg.Extensions, auditlog.NewAuthenticationEventRecorder(app.audit.Logger))
+	bindRewriterInference(b.cfg.Extensions, b.internalInference)
+	if app.sharedStore != nil {
+		bindSharedStore(b.cfg.Extensions, app.sharedStore)
+	}
 	return nil
 }
 

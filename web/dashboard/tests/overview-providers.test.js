@@ -33,6 +33,7 @@ import {
   providerHealthModels,
   providerHealthModelStats,
   providerHealthModelTitle,
+  providerLastErrorText,
 } from "../src/pages/overview/providersLogic.js";
 
 function createStorageStub() {
@@ -281,6 +282,29 @@ test("breaker state classes map open and closed states to pill palettes", () => 
 
   assert.equal(providerBreakerStateClass(withState("open")), "is-unhealthy");
   assert.equal(providerBreakerStateClass(withState("closed")), "is-healthy");
+});
+
+test("last error text marks an open breaker after the upstream cause", () => {
+  const withError = (state, error) => ({
+    last_error: error,
+    request_health: { circuit_state: state },
+  });
+  const cause = "glm-5.3-flash: [zai] provider_error: insufficient balance";
+  const rejection =
+    "glm-5.3-flash: [zai] provider_error: circuit breaker is open - provider zai temporarily unavailable";
+
+  const cases = [
+    { name: "open breaker appends marker", provider: withError("open", cause), want: cause + " — circuit breaker open" },
+    { name: "closed breaker shows error as-is", provider: withError("closed", cause), want: cause },
+    { name: "half-open breaker shows error as-is", provider: withError("half-open", cause), want: cause },
+    { name: "no request health shows error as-is", provider: { last_error: cause }, want: cause },
+    { name: "rejection message is not marked twice", provider: withError("open", rejection), want: rejection },
+    { name: "no error yields empty text", provider: withError("open", ""), want: "" },
+    { name: "missing provider yields empty text", provider: null, want: "" },
+  ];
+  for (const { name, provider, want } of cases) {
+    assert.equal(providerLastErrorText(provider), want, name);
+  }
 });
 
 test("per-card override wins over the section-wide default and persists", () => {

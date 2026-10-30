@@ -14,6 +14,7 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/httpclient"
 )
 
 type qdrantStore struct {
@@ -41,7 +42,7 @@ func newQdrantStore(cfg config.QdrantConfig) (*qdrantStore, error) {
 		baseURL:    base,
 		collection: coll,
 		apiKey:     cfg.APIKey,
-		httpClient: &http.Client{Timeout: 60 * time.Second},
+		httpClient: httpclient.NewClientWithTimeout(60 * time.Second),
 	}
 	s.cleanup = startVecCleanup(s)
 	return s, nil

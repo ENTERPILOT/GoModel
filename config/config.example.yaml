@@ -33,11 +33,18 @@ server:
   # trusted_proxies: ["10.42.0.0/16", "loopback"]
   # client_ip_header: "CF-Connecting-IP" # env: SERVER_CLIENT_IP_HEADER; default X-Forwarded-For, resolved hop by hop. Any other header carries one address and is taken verbatim, which is correct behind an edge like Cloudflare. Requires trusted_proxies; RFC 7239 Forwarded is not supported
   # trusted_hops: 1 # env: SERVER_TRUSTED_HOPS; proxies between the client and the gateway. Takes the X-Forwarded-For entry at that depth instead of scanning the chain, for an edge at a fixed depth with addresses you cannot enumerate. Requires trusted_proxies
+  # Native HTTPS on the listener. Unset (default) serves plain HTTP behind a proxy
+  # that terminates TLS. Set both files when clients connect directly; they are
+  # re-read when they change (checked every 5 seconds), so rotation needs no restart.
+  # tls_cert_file: /etc/gomodel/tls/tls.crt # env: SERVER_TLS_CERT_FILE
+  # tls_key_file: /etc/gomodel/tls/tls.key # env: SERVER_TLS_KEY_FILE
+  # tls_client_ca_file: /etc/gomodel/tls/ca.crt # env: SERVER_TLS_CLIENT_CA_FILE; require client certificates signed by this CA, except on /health and /health/ready (mTLS)
   pid_file: "data/gomodel.pid" # env: PID_FILE; where the running gateway records its process id so `gomodel --reload` can find it. Set per instance when several gateways share a host; empty writes no pid file and disables --reload; changing it needs a restart, not a reload
 
 models:
   enabled_by_default: true # env: MODELS_ENABLED_BY_DEFAULT; when false, models stay unavailable until an access override allows one or more user paths
   keep_only_aliases_at_models_endpoint: false # env: KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT; hide provider models from GET /v1/models and expose only enabled virtual models
+  vllm_discovery_compat: false # env: MODELS_VLLM_DISCOVERY_COMPAT; advertise every model the way a vLLM runtime does (owned_by "vllm", max_model_len from the limit the provider reports or else metadata.context_window) so a client whose discovery only understands vLLM picks the gateway up. It is a lie about the owner, so it stays opt-in and only for deployments whose consumers need it
   unqualified_model_ids_at_models_endpoint: false # env: UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT; list bare model IDs (gpt-5) instead of provider-qualified ones (openai/gpt-5). Caveat: when two providers expose the same model ID only the provider an unqualified request routes to (the first registered one) is listed; pin a name with a virtual model (source gpt-5 -> target azure/gpt-5)
   configured_provider_models_mode: "fallback" # env: CONFIGURED_PROVIDER_MODELS_MODE; "fallback" uses configured lists only when upstream /models is unavailable/empty, "allowlist" exposes only configured models and skips upstream /models for configured lists, "merge" adds configured models on top of the upstream inventory (for models a provider serves but does not list)
 
@@ -87,6 +94,7 @@ models:
 #   - source: regular # a plain alias
 #     target: anthropic/claude-sonnet-4-6
 #     slowdown: 0.5 # add 50%; use 0 to disable inherited slowdown (active range: 0.1-10)
+#     # reasoning_effort: medium # force this effort upstream (none | minimal | low | medium | high | xhigh | max); empty keeps the client's value
 #   - source: smart # weighted round-robin load balancer
 #     strategy: round_robin # round_robin (default) | cost | failover | adaptive (uses a routing extension when registered; otherwise falls back to round_robin) | plugin (see smart-router below)
 #     targets:
@@ -291,9 +299,21 @@ pricing:
   #   "/": 15
   #   "openai/": 10
   #   "anthropic/claude-opus-4-1": 25
+  # GoModel Pro (billing entitlement): per-customer markups by user path.
+  # The deepest covering path with a matching selector wins, then pricing.markups.
+  user_path_markups: {}
+  # user_path_markups:
+  #   /acme:
+  #     "/": 30
+  #     "openai/gpt-5": 15
+  #   /acme/internal:
+  #     "/": 0
 
 budgets:
   enabled: true # env: BUDGETS_ENABLED; with no configured budgets this has no effect
+  # GoModel Pro: provider budgets with cost_basis "billed" count billed
+  # response-cache hits; false limits only requests the provider served.
+  provider_billed_cache_hits: true # env: BUDGETS_PROVIDER_BILLED_CACHE_HITS
   user_paths:
     # Env equivalent:
     # SET_BUDGET_USER__PATH__EXAMPLE="daily=10,weekly=50"
@@ -311,6 +331,7 @@ budgets:
       limits:
         - period: "monthly"
           amount: 500.00
+          cost_basis: "provider" # GoModel Pro: "billed" limits billed cost (needs pricing.markups_enabled)
   providers:
     # Caps one provider instance's spend across every user path and label;
     # failover skips a provider whose budget is spent.
@@ -385,6 +406,15 @@ http:
   timeout: 600 # seconds (10 minutes)
   response_header_timeout: 600
   stream_idle_timeout: 300 # seconds of silence allowed mid-stream before a stalled stream fails; 0 disables
+  # Client TLS trust for the gateway's outbound HTTPS clients (providers, model
+  # catalog, update check, MCP upstreams, vector stores). OTLP export and the
+  # database and Redis drivers keep their own TLS settings. All optional; the
+  # default trusts the operating system certificate store.
+  tls:
+    # ca_file: /etc/gomodel/ca.pem            # private CA bundle (PEM), appended to the system store
+    # client_cert_file: /etc/gomodel/tls.crt  # mTLS client certificate; set both files together
+    # client_key_file: /etc/gomodel/tls.key
+    # insecure_skip_verify: false             # lab use only; logs a warning
 
 workflows:
   refresh_interval: 1m
@@ -562,6 +592,18 @@ providers:
   anthropic:
     type: anthropic
     api_key: "sk-ant-..."
+    # Workload identity federation instead of api_key: exchange the platform's
+    # identity token for short-lived access tokens (openai and anthropic only).
+    # An api_key, when set, wins. Equivalent env vars: ANTHROPIC_FEDERATION_RULE_ID,
+    # ANTHROPIC_ORGANIZATION_ID, ANTHROPIC_SERVICE_ACCOUNT_ID,
+    # ANTHROPIC_IDENTITY_TOKEN_FILE, ANTHROPIC_WORKSPACE_ID.
+    # For openai, set identity_provider_id and service_account_id instead.
+    # workload_identity:
+    #   identity_token_file: /var/run/secrets/anthropic.com/token  # re-read on each exchange
+    #   federation_rule_id: fdrl_...
+    #   organization_id: 00000000-0000-0000-0000-000000000000
+    #   service_account_id: svac_...
+    #   workspace_id: wrkspc_...
 
   # ChatGPT subscription (Codex backend). Serves /v1/responses only and is
   # billed against your ChatGPT plan. The key is the access token from
@@ -606,7 +648,7 @@ providers:
     # service_account_file: "/var/run/secrets/google/service-account.json"
     # service_account_json: "${VERTEX_SERVICE_ACCOUNT_JSON}"
     # service_account_json_base64: "${VERTEX_SERVICE_ACCOUNT_JSON_BASE64}"
-    # api_mode: native # or openai_compatible
+    # api_mode: native # or openai_compatible, or anthropic for Claude models
     # models:
     #   - id: "google/gemini-2.5-flash"
 
@@ -628,6 +670,11 @@ providers:
     type: deepinfra
     api_key: "${DEEPINFRA_API_KEY}"
     # base_url defaults to "https://api.deepinfra.com/v1/openai".
+
+  together:
+    type: together
+    api_key: "${TOGETHER_API_KEY}"
+    # base_url defaults to "https://api.together.ai/v1".
 
   chutes:
     type: chutes
@@ -743,6 +790,10 @@ providers:
     base_url: "http://localhost:30000/v1"
     # Optional: set this only when launch_server uses --api-key.
     # api_key: "token-abc123"
+    # Responses API path: auto (default) sends requests with function tools
+    # through chat completions; native always uses /v1/responses;
+    # chat_compatible always uses chat completions.
+    # api_mode: auto
 
   # Custom OpenAI-compatible provider
   # my-provider:

@@ -51,6 +51,9 @@ export function parseRoute(pathname) {
 class Router {
   page = $state("overview");
   sub = $state(null);
+  // Bumped on every back/forward, so pages that keep state in the query
+  // string can restore it even when page and sub stay the same.
+  historyTick = $state(0);
 
   init() {
     const { page, sub } = parseRoute(window.location.pathname);
@@ -60,6 +63,7 @@ class Router {
       const { page: p, sub: s } = parseRoute(window.location.pathname);
       this.page = p;
       this.sub = s;
+      this.historyTick++;
     });
   }
 

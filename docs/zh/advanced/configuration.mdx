@@ -51,6 +51,9 @@ GoModel 会根据常用的环境变量自动发现提供商。
 | `SERVER_TRUSTED_PROXIES` | 您自己的代理所在的网络；启用基于 Header 的客户端地址解析 | _（空）_ |
 | `SERVER_CLIENT_IP_HEADER` | 受信任代理用于传递客户端地址的 Header | `X-Forwarded-For` |
 | `SERVER_TRUSTED_HOPS` | 客户端与网关之间的代理数量；`0` 表示改为扫描整条链 | `0` |
+| `SERVER_TLS_CERT_FILE` | 监听器提供 HTTPS 所用的 PEM 证书；需与私钥一起设置 | _（空，纯 HTTP）_ |
+| `SERVER_TLS_KEY_FILE` | `SERVER_TLS_CERT_FILE` 对应的私钥 | _（空）_ |
+| `SERVER_TLS_CLIENT_CA_FILE` | PEM CA 证书包；设置后，除 `/health` 和 `/health/ready` 外的每个请求都需要由其签发的客户端证书（mTLS） | _（空）_ |
 | `SWAGGER_ENABLED`    | 暴露 [Swagger UI](/zh/advanced/swagger-ui)；需要使用 `-tags=swagger` 构建 | `false`                |
 | `AUTH_VERIFY_ENABLED` | 暴露 [`GET /v1/auth/verify`](/zh/advanced/api-endpoints#密钥验证)，用于报告请求携带的 API 密钥是否有效 | `false`                |
 | `PID_FILE`           | 运行中的网关为 `gomodel --reload` 记录进程 ID 的位置。修改后需要重启 | 存在 `./data` 目录时为其中的 `data/gomodel.pid`，否则为用户级数据目录 |
@@ -100,6 +103,19 @@ MASTER_KEY_DISABLED=true
 GoModel 会在启动时忽略任何已配置的主密钥，因此没有任何地方接受它或基于它派生：它对网关、对 [`GET /v1/auth/verify`](/zh/advanced/api-endpoints#密钥验证) 以及对 `/admin` 都会失败。留在环境变量或 `config.yaml` 中的密钥不会生效，也不会报错，因此您可以在移除它之前安全地打开这个开关。
 
 禁用主密钥与将 `GOMODEL_MASTER_KEY` 留空不同：留空会让网关以免认证方式运行，并开放 `/admin/*`，以便控制台引导创建第一个托管密钥。除非配置了认证扩展，否则即使已存在托管密钥，`/admin/*` 仍保持开放，GoModel 会在启动时记录安全警告；因此一旦签发了第一个具有控制台访问权限的密钥，请立即设置主密钥或将其禁用。禁用主密钥则是失败即拒绝（fail closed）：每个请求都需要凭据，Admin API 只能通过具有控制台访问权限的凭据访问。请在打开开关之前签发该凭据：如果既没有主密钥、也没有托管密钥和认证扩展，网关会拒绝所有请求，并在启动时记录相应警告。
+
+#### 提供 HTTPS 服务
+
+在终止 TLS 的代理后面提供纯 HTTP 服务时，请保持 `SERVER_TLS_*` 设置为空。当客户端直接连接网关时，请设置证书和私钥（YAML 中为 `server.tls_cert_file` 和 `server.tls_key_file`）：
+
+```yaml
+server:
+  tls_cert_file: /etc/gomodel/tls/tls.crt
+  tls_key_file: /etc/gomodel/tls/tls.key
+  # tls_client_ca_file: /etc/gomodel/tls/ca.crt # require client certificates
+```
+
+此时监听器只提供 HTTPS，使用 TLS 1.2 或更高版本以及 HTTP/2。每 5 秒检查一次文件，轮换后的证书无需重启即可生效；无法加载的轮换会保留之前的证书。轮换后的客户端 CA 从下一次 TLS 握手起生效，已打开的连接会保留其已获得的访问权限。只设置证书对中的一个，或启动时文件缺失或无效，都会报错。这些设置接受文件路径而非 PEM 内容，包含 PEM 的值会被拒绝。它们接受 `${env:...}` 引用；`${file:...}` 解析为文件内容，因此仅可用于内容为路径的文件。这些设置仅适用于入站连接；[出站 TLS 信任](#出站-tls-信任)需单独配置。cert-manager 示例请参阅[生产环境指南](/zh/guides/production#原生-tls)。
 
 #### MCP 网关
 
@@ -236,6 +252,7 @@ GoModel 会在启动时忽略任何已配置的主密钥，因此没有任何地
 | 变量                     | 说明                                                                        | 默认值   |
 | ---------------------------- | ---------------------------------------------------------------------------------- | --------- |
 | `BUDGETS_ENABLED`            | 在启用用量追踪时，启用预算管理和工作流预算检查 | `true`    |
+| `BUDGETS_PROVIDER_BILLED_CACHE_HITS` | 在基于计费成本的提供商预算中计入计费的响应缓存命中（GoModel Pro） | `true` |
 | `SET_BUDGET_<PATH>`          | 为用户路径预置预算限额，例如 `daily=10`                             | _（空）_ |
 | `SET_PROVIDER_BUDGET_<NAME>` | 为提供商实例预置预算限额，例如 `daily=100`                    | _（空）_ |
 
@@ -284,6 +301,23 @@ GoModel 会在启动时忽略任何已配置的主密钥，因此没有任何地
 
 静默时间超过 `HTTP_STREAM_IDLE_TIMEOUT` 的流会以 `504` 提供商错误关闭，而不会一直挂起到 `HTTP_TIMEOUT`。等待首个 Token 的时间不计入其中，因此较慢的推理模型不受影响。仅当某个提供商确实会在流中途合理地暂停数分钟时，才需要调大该值。
 
+标准的 `HTTP_PROXY`、`HTTPS_PROXY` 和 `NO_PROXY` 变量适用于所有上游连接，除非某个提供商设置了自己的[出站代理](/zh/providers/outbound-proxy)。
+
+#### 出站 TLS 信任
+
+以下设置适用于网关自身的出站 HTTPS 客户端：提供商、模型目录、更新检查、MCP 上游、向量存储和嵌入端点。默认信任操作系统证书存储；除非网关与上游之间存在内部 CA 或会拦截 TLS 的代理，否则无需更改。
+
+其他客户端建立的连接不受这些设置影响，而是使用各自的设置：OpenTelemetry 导出读取 `OTEL_EXPORTER_OTLP_CERTIFICATE`；PostgreSQL 在 URL 中使用 `sslmode` 和 `sslrootcert`（推荐 `sslmode=verify-full`）；MongoDB 在 URL 中使用 `tls=true` 和 `tlsCAFile`；通过 `rediss://` 连接的 Redis 信任系统证书存储。
+
+| 变量                            | 说明                                                   | 默认值   |
+| ------------------------------- | ------------------------------------------------------ | -------- |
+| `HTTP_TLS_CA_FILE`              | 额外根证书的 PEM 证书包，追加到系统证书存储中          | 未设置   |
+| `HTTP_TLS_CLIENT_CERT_FILE`     | 用于 mTLS 的客户端证书；需与私钥一同设置               | 未设置   |
+| `HTTP_TLS_CLIENT_KEY_FILE`      | 客户端证书对应的私钥                                   | 未设置   |
+| `HTTP_TLS_INSECURE_SKIP_VERIFY` | 禁用证书校验。仅限实验环境使用；会记录一条警告日志     | `false`  |
+
+文件缺失或无法解析会导致启动失败，因此路径中的拼写错误不会悄无声息地退回到不额外信任任何证书的状态。[配置重新加载](/zh/advanced/cli#配置重新加载)时会重新读取这些文件，但不会监视它们，因此轮换后请重新加载或重启。完整示例请参阅[生产环境指南](/zh/guides/production#私有-ca-与代理)。
+
 #### 提供商 API 密钥
 
 设置以下变量即可自动注册提供商，无需 YAML 配置。
@@ -296,6 +330,7 @@ GoModel 会在启动时忽略任何已配置的主密钥，因此没有任何地
 | `GEMINI_API_KEY`     | Google Gemini                                      |
 | `DEEPSEEK_API_KEY`   | DeepSeek                                           |
 | `DEEPINFRA_API_KEY`  | DeepInfra（`DEEPINFRA_BASE_URL` 可选）       |
+| `TOGETHER_API_KEY`   | Together AI（`TOGETHER_BASE_URL` 可选）      |
 | `OPENROUTER_API_KEY` | OpenRouter                                         |
 | `KILO_API_KEY`       | Kilo AI Gateway                                    |
 | `EDENAI_API_KEY`     | Eden AI                                            |
@@ -311,7 +346,7 @@ GoModel 会在启动时忽略任何已配置的主密钥，因此没有任何地
 | `LLAMACPP_BASE_URL`  | llama.cpp llama-server / LM Studio（除非以 `--api-key` 启动，否则无需 API 密钥） |
 | `LLMD_BASE_URL`      | llm-d Router/EPP（除非其 Gateway 要求，否则无需 API 密钥） |
 
-大多数提供商都可以通过 `<PROVIDER>_BASE_URL`（例如 `OPENAI_BASE_URL`）使用自定义 Base URL。Chutes AI 默认为 `https://llm.chutes.ai/v1`，可通过 `CHUTES_BASE_URL` 覆盖。DeepSeek 默认为 `https://api.deepseek.com`；仅在使用兼容代理或其他 DeepSeek 端点时才需设置 `DEEPSEEK_BASE_URL`。OpenRouter 默认为 `https://openrouter.ai/api/v1`，可通过 `OPENROUTER_BASE_URL` 覆盖。Kilo AI 默认为 `https://api.kilo.ai/api/gateway`，可通过 `KILO_BASE_URL` 覆盖。Eden AI 默认为 `https://api.edenai.run/v3`，可通过 `EDENAI_BASE_URL` 覆盖。Z.ai 默认为 `https://api.z.ai/api/paas/v4`；如需使用 GLM Coding Plan 端点，请设置 `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4`。设置了 `SGLANG_API_KEY` 时，SGLang 默认为 `http://localhost:30000/v1`，但无密钥部署应显式设置 `SGLANG_BASE_URL` 才能注册该提供商。vLLM 采用相同的模式，默认地址为 `http://localhost:8000/v1`。llama.cpp 的 `LLAMACPP_BASE_URL` 始终必填（llama-server 的默认端口与 GoModel 自身的 8080 冲突，因此没有默认值）；`LLAMACPP_API_KEY` 为可选。llm-d 没有通用端点，因此 `LLMD_BASE_URL` 始终必填；`LLMD_API_KEY` 为可选。Azure 使用 `AZURE_BASE_URL` 作为其部署的 Base URL，并可通过可选的 `AZURE_API_VERSION` 覆盖 API 版本，否则默认为 `2024-10-21`。Oracle 需要 `ORACLE_BASE_URL`，因为其兼容 OpenAI 的端点因区域而异。
+大多数提供商都可以通过 `<PROVIDER>_BASE_URL`（例如 `OPENAI_BASE_URL`）使用自定义 Base URL。Chutes AI 默认为 `https://llm.chutes.ai/v1`，可通过 `CHUTES_BASE_URL` 覆盖。DeepSeek 默认为 `https://api.deepseek.com`；仅在使用兼容代理或其他 DeepSeek 端点时才需设置 `DEEPSEEK_BASE_URL`。OpenRouter 默认为 `https://openrouter.ai/api/v1`，可通过 `OPENROUTER_BASE_URL` 覆盖。Kilo AI 默认为 `https://api.kilo.ai/api/gateway`，可通过 `KILO_BASE_URL` 覆盖。Eden AI 默认为 `https://api.edenai.run/v3`，可通过 `EDENAI_BASE_URL` 覆盖。Z.ai 默认为 `https://api.z.ai/api/paas/v4`；如需使用 GLM Coding Plan 端点，请设置 `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4`。设置了 `SGLANG_API_KEY` 时，SGLang 默认为 `http://localhost:30000/v1`，但无密钥部署应显式设置 `SGLANG_BASE_URL` 才能注册该提供商。vLLM 采用相同的模式，默认地址为 `http://localhost:8000/v1`。llama.cpp 的 `LLAMACPP_BASE_URL` 始终必填（llama-server 的默认端口与 GoModel 自身的 8080 冲突，因此没有默认值）；`LLAMACPP_API_KEY` 为可选。llm-d 没有通用端点，因此 `LLMD_BASE_URL` 始终必填；`LLMD_API_KEY` 为可选。Azure 使用 `AZURE_BASE_URL` 作为其部署的 Base URL，并可通过可选的 `AZURE_API_VERSION` 覆盖 API 版本，否则部署 URL 默认为 `2024-10-21`，`/openai/v1`（Azure AI Foundry）URL 则不发送版本。Oracle 需要 `ORACLE_BASE_URL`，因为其兼容 OpenAI 的端点因区域而异。
 
 每种提供商类型还接受通过 `<PROVIDER>_MODELS` 配置的逗号分隔模型列表，例如 `OPENROUTER_MODELS`、`ORACLE_MODELS`、`AZURE_MODELS`、`SGLANG_MODELS`、`VLLM_MODELS` 或 `LLMD_MODELS`。默认情况下，`CONFIGURED_PROVIDER_MODELS_MODE=fallback` 仅在上游 `/models` 失败、返回 nil 或返回空列表时使用配置的列表。没有 `/models` 端点（返回 404 或 405）的兼容 OpenAI 提供商会使用其配置的列表提供服务，并被报告为健康，这适用于语音转文字等单一 API 的服务器。设置 `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` 后，对于定义了列表的提供商，只暴露配置的模型，并跳过其上游 `/models` 调用。YAML 中的 `providers.<name>.models` 为命名的提供商块提供相同的模型列表输入。
 
@@ -320,6 +355,29 @@ GoModel 会在启动时忽略任何已配置的主密钥，因此没有任何地
 默认情况下，所有提供商模型都可用。设置 `MODELS_ENABLED_BY_DEFAULT=false`（YAML：`models.enabled_by_default`）后，则需要在[虚拟模型](/zh/features/virtual-models#默认的模型可用性)中显式添加允许条目：对其他模型的请求会以 `400 model_access_denied` 失败，且这些模型不会出现在 `GET /v1/models` 中。如果要在 `GET /v1/models` 中隐藏提供商模型、但仍保留其可路由性，请设置 `KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT=true`（YAML：`models.keep_only_aliases_at_models_endpoint`）；此时该端点只列出已启用的虚拟模型重定向。
 
 如果要缩小某个提供商的模型清单，而不是逐个列出模型，请使用 `<PROVIDER>_MODEL_FILTER_INCLUDE`、`<PROVIDER>_MODEL_FILTER_EXCLUDE` 和 `<PROVIDER>_MODEL_FILTER_MAX_PRICE_PER_MTOK`（YAML：`providers.<name>.model_filter`）。请参阅[过滤提供商的模型](/zh/advanced/config-yaml#过滤提供商的模型)。
+
+当客户端只从 vLLM 运行时发现模型时，请设置 `MODELS_VLLM_DISCOVERY_COMPAT=true`（YAML：`models.vllm_discovery_compat`）。OpenCode 的 `vllm` 提供商就是一个例子：它会探测 `/health` 和 `/v1/models`，并丢弃所有 `owned_by` 不是 `vllm` 或缺少 `max_model_len` 的条目。启用该设置后，`GET /v1/models` 会将 `owned_by` 报告为 `vllm`，并为每个条目填写 `max_model_len`，这样客户端无需手写列表即可识别网关的模型。这样报告的所有者并不真实，因此该设置默认关闭，仅适用于其客户端确实需要它的网关。
+
+上下文限制有两个来源，按以下顺序使用：
+
+1. **提供商自身的报告。** 自行提供模型服务的运行时（vLLM、SGLang、llm-d，以及任何在 `/models` 列表中返回 `max_model_len` 的 OpenAI 兼容服务器）了解其进程的真实限制，因此其值优先。
+2. **`metadata.context_window`。** 目录中的值，仅用于提供商未报告限制的模型。托管模型正是依靠它才能被发现。
+
+两者都没有的模型（目录不认识、其运行时也不报告限制）会以 `owned_by: "vllm"` 和 `max_model_len: 0` 列出。零表示限制未知，而不是条目不完整：该字段从不省略，因为这些客户端会按要求该字段的 schema 解析整个列表，只要有一个条目缺少它，整个响应就会失败，其他所有模型也会随之消失。只在值为正数时才读取它的客户端会保留自己的默认值。要公布真实的上下文窗口，请在模型上声明：
+
+```yaml
+providers:
+  my-custom-llm:
+    type: openai
+    base_url: "https://api.example.com/v1"
+    api_key: "..."
+    models:
+      - id: "my-finetune"
+        metadata:
+          context_window: 32768
+```
+
+条目的其他字段请参阅[模型元数据](/zh/advanced/model-metadata)。
 
 对于 OpenRouter，除非请求已自行设置，否则 GoModel 还会发送默认的归属（attribution）Header。可通过 `OPENROUTER_SITE_URL` 和 `OPENROUTER_APP_NAME` 覆盖这些默认值。
 
@@ -431,6 +489,7 @@ export COHERE_API_KEY="..."           # 注册 "cohere" 提供商
 export GEMINI_API_KEY="..."          # 注册 "gemini" 提供商
 export DEEPSEEK_API_KEY="..."        # 注册 "deepseek" 提供商
 export DEEPINFRA_API_KEY="..."       # 注册 "deepinfra" 提供商
+export TOGETHER_API_KEY="..."        # 注册 "together" 提供商
 export XAI_API_KEY="..."             # 注册 "xai" 提供商
 export GROQ_API_KEY="gsk_..."        # 注册 "groq" 提供商
 export CHUTES_API_KEY="cpk_..."      # 注册 "chutes" 提供商

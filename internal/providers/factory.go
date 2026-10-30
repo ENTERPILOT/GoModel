@@ -14,6 +14,7 @@ import (
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers/workloadidentity"
 )
 
 // ProviderOptions bundles runtime settings passed from the factory to provider constructors.
@@ -81,6 +82,10 @@ type DiscoveryConfig struct {
 	// order. Leave it nil to derive the form from the flags above; the model
 	// list is always appended. See credentialSchema.
 	CredentialFields []CredentialField
+
+	// WorkloadIdentity names the token exchange grant the provider type
+	// supports for workload identity federation; empty when it supports none.
+	WorkloadIdentity workloadidentity.Grant
 }
 
 // Registration contains metadata for registering a provider with the factory.
@@ -192,6 +197,10 @@ func (f *ProviderFactory) create(cfg ProviderConfig, keys *Keyring) (core.Provid
 	// request to the same instance.
 	name := strings.TrimSpace(cfg.Name)
 	httpClient, err := providerHTTPClient(cfg, proxySelector)
+	if err != nil {
+		return nil, err
+	}
+	keys, err = f.federatedKeyring(cfg, keys, httpClient)
 	if err != nil {
 		return nil, err
 	}
