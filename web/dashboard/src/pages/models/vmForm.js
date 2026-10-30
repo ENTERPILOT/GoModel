@@ -76,9 +76,22 @@ export function defaultVirtualModelForm() {
     user_paths: "",
     description: "",
     slowdown: "",
+    reasoning_effort: "",
     enabled: true,
   };
 }
+
+// REASONING_EFFORT_LEVELS are the reasoning effort values a virtual model or
+// model may force upstream; an empty value keeps the client's effort.
+export const REASONING_EFFORT_LEVELS = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
 
 // vmFormPluginStrategy reports whether the form routes through a plugin.
 export function vmFormPluginStrategy(form) {
@@ -409,6 +422,12 @@ export function buildVirtualModelSavePayload(form, originalSource, mode) {
       payload.slowdown = slowdown;
     }
   }
+  const reasoningEffort = String(
+    (form && form.reasoning_effort) || "",
+  ).trim();
+  if (reasoningEffort) {
+    payload.reasoning_effort = reasoningEffort;
+  }
   if (isRename) {
     // Carry the prior key so the backend moves the row instead of leaving an
     // orphan behind under the old source.
@@ -476,6 +495,9 @@ export function buildAliasTogglePayload(alias) {
   if (alias.vision_routing) {
     payload.vision_routing = true;
   }
+  if (alias.reasoning_effort) {
+    payload.reasoning_effort = alias.reasoning_effort;
+  }
   const lbTargets = Array.isArray(alias.targets) ? alias.targets : [];
   if (lbTargets.length > 1) {
     payload.strategy = alias.strategy || "round_robin";
@@ -526,10 +548,17 @@ export function buildModelTogglePayload(selector, existingPolicy, access) {
     hasExistingSlowdown ? existingPolicy.slowdown : 0,
   );
 
+  const existingReasoningEffort = String(
+    (existingPolicy && existingPolicy.reasoning_effort) || "",
+  ).trim();
+
   const preserved = {};
   if (existingDescription) preserved.description = existingDescription;
   if (hasExistingSlowdown && Number.isFinite(existingSlowdown)) {
     preserved.slowdown = existingSlowdown;
+  }
+  if (existingReasoningEffort) {
+    preserved.reasoning_effort = existingReasoningEffort;
   }
 
   let method = "PUT";
@@ -546,6 +575,7 @@ export function buildModelTogglePayload(selector, existingPolicy, access) {
     existingPaths.length === 0 &&
     !existingDescription &&
     !hasExistingSlowdown &&
+    !existingReasoningEffort &&
     safeAccess.default_enabled !== false
   ) {
     // Removing a path-less policy only enables the model when the default is

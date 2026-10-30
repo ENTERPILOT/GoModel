@@ -16,24 +16,22 @@
     providerDisplayValue,
   } from "$lib/utils/format.js";
   import { usagePage } from "./usage.svelte.js";
+  import { usageFacets } from "./usageFacets.svelte.js";
   import SessionIDChip from "./SessionIDChip.svelte";
-  import {
-    authKeyDisplayName,
-    billedCostTitle,
-    cachedCostTitle,
-    costSourceTooltip,
-    entryLabels,
-    formatCostTooltip,
-    hasProviderCache,
-    labelColor,
-    providerCacheLabel,
-    providerCacheTitle,
-    usageEntryCacheLabel,
-    usageEntryCached,
-    usageLogHasAuthKeys,
-    usageLogHasLabels,
-    usesResponseCostPricing,
-  } from "./usage-helpers.js";
+  import { authKeyDisplayName, usageLogHasAuthKeys } from "./usage-filter-options.js";
+import { entryLabels, labelColor, usageLogHasLabels } from "./usage-labels.js";
+import {
+  billedCostTitle,
+  cachedCostTitle,
+  costSourceTooltip,
+  formatCostTooltip,
+  hasProviderCache,
+  providerCacheLabel,
+  providerCacheTitle,
+  usageEntryCached,
+  usageEntryCacheLabel,
+  usesResponseCostPricing,
+} from "./usage-cost-format.js";
   import { CircleDollarSign, DatabaseZap } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
@@ -44,13 +42,13 @@
   const hasLabels = $derived(
     usageLogHasLabels(
       usagePage.labelUsage,
-      usagePage.usageFilterLabel,
+      usagePage.filters.labels,
       usagePage.usageLog.entries,
     ),
   );
 
   const hasAuthKeys = $derived(
-    usageLogHasAuthKeys(usagePage.usageFilterAuthKey, usagePage.usageLog.entries),
+    usageLogHasAuthKeys(usagePage.filters.authKeys, usagePage.usageLog.entries),
   );
 
   const onSearchInput = debounced(() => usagePage.fetchUsageLog(true));
@@ -59,12 +57,12 @@
 
 {#snippet authKeyChip(entry)}
   {#if entry.auth_key_id}
-    {@const name = authKeyDisplayName(entry.auth_key_id, usagePage.authKeyNames)}
+    {@const name = authKeyDisplayName(entry.auth_key_id, usageFacets.authKeyNames)}
     <button
       type="button"
       class="usage-label-chip"
-      class:active={usagePage.usageFilterAuthKey === entry.auth_key_id}
-      title={usagePage.usageFilterAuthKey === entry.auth_key_id
+      class:active={usagePage.filters.authKeys.includes(entry.auth_key_id)}
+      title={usagePage.filters.authKeys.includes(entry.auth_key_id)
         ? m.usage_clear_auth_key_filter()
         : m.usage_filter_by_auth_key({ name, id: entry.auth_key_id })}
       onclick={() => usagePage.toggleUsageAuthKeyFilter(entry.auth_key_id)}
@@ -81,7 +79,7 @@
         <button
           type="button"
           class="usage-label-chip"
-          class:active={usagePage.usageFilterLabel === label}
+          class:active={usagePage.filters.labels.includes(label)}
           style="--label-color: {labelColor(label)}"
           title={usagePage.usageLabelChipTitle(label)}
           onclick={() => usagePage.toggleUsageLabelFilter(label)}
@@ -160,7 +158,7 @@
                 {#if entry.session_id}
                   <SessionIDChip
                     sessionID={entry.session_id}
-                    active={usagePage.usageFilterSession === entry.session_id}
+                    active={usagePage.filters.session === entry.session_id}
                     compact
                     onfilter={(sessionID) => usagePage.filterBySession(sessionID, entry.user_path)}
                   />

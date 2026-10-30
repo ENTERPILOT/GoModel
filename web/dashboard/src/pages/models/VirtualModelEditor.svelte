@@ -15,6 +15,7 @@
     vmFormShowBalancingOptions,
     vmFormStrategyPending,
     vmFormSupportsSlowdown,
+    REASONING_EFFORT_LEVELS,
   } from "./vmForm.js";
   import VmTargetRow from "./VmTargetRow.svelte";
   import { Plus, Save } from "lucide";
@@ -250,6 +251,23 @@
       />
       <span class="form-hint">
         {m.models_slowdown_help()}
+      </span>
+    </FormField>
+
+    <FormField id="virtual-model-reasoning-effort" label={m.models_reasoning_effort_field()}>
+      <select
+        id="virtual-model-reasoning-effort"
+        class="form-select"
+        bind:value={vm.vmForm.reasoning_effort}
+        disabled={vm.vmFormManaged}
+      >
+        <option value="">{m.models_reasoning_effort_client()}</option>
+        {#each REASONING_EFFORT_LEVELS as level (level)}
+          <option value={level}>{level}</option>
+        {/each}
+      </select>
+      <span class="form-hint">
+        {m.models_reasoning_effort_help()}
       </span>
     </FormField>
   {/if}

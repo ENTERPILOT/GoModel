@@ -307,6 +307,7 @@ class VirtualModelEditorStore {
       ).join("\n"),
       description: alias.description || "",
       slowdown: alias.slowdown ?? "",
+      reasoning_effort: alias.reasoning_effort || "",
       enabled: alias.enabled !== false,
     };
   }
@@ -367,6 +368,7 @@ class VirtualModelEditorStore {
       user_paths: userPaths.join("\n"),
       description: override && override.description ? override.description : "",
       slowdown: override && override.slowdown != null ? override.slowdown : "",
+      reasoning_effort: (override && override.reasoning_effort) || "",
       enabled: overrideEnabled,
     };
   }
@@ -396,6 +398,7 @@ class VirtualModelEditorStore {
       user_paths: userPaths.join("\n"),
       description: override && override.description ? override.description : "",
       slowdown: override && override.slowdown != null ? override.slowdown : "",
+      reasoning_effort: (override && override.reasoning_effort) || "",
       enabled: override ? override.enabled !== false : defaultEnabled,
     };
   }

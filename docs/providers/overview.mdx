@@ -44,7 +44,7 @@ support, not every individual model capability exposed by an upstream provider.
 | Provider | Credential | Example Model | Chat | `/responses` | Embed | Files | Batches | Passthru | Guide |
 | -------- | ---------- | ------------- | :--: | :----------: | :---: | :---: | :-----: | :------: | ----- |
 | OpenAI | `OPENAI_API_KEY` | `gpt-5.5` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
-| ChatGPT subscription | `CHATGPT_API_KEY` (Codex sign-in token) | `gpt-5.6-sol` | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | [ChatGPT subscription](/providers/chatgpt) |
+| ChatGPT subscription | `CHATGPT_API_KEY` (Codex sign-in token) | `gpt-5.6-sol` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [ChatGPT subscription](/providers/chatgpt) |
 | GitHub Copilot | `GITHUB_COPILOT_API_KEY` (GitHub OAuth token) | `claude-sonnet-5.5` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [GitHub Copilot](/providers/github-copilot) |
 | Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | [Anthropic](/providers/anthropic) |
 | Cohere | `COHERE_API_KEY` | `command-a-plus-05-2026` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Cohere](/providers/cohere) |
@@ -52,6 +52,7 @@ support, not every individual model capability exposed by an upstream provider.
 | Google Vertex AI | `VERTEX_PROJECT` + `VERTEX_LOCATION` + GCP credentials | `google/gemini-2.5-flash` | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | [Google Vertex AI](/providers/vertex) |
 | DeepSeek | `DEEPSEEK_API_KEY` | `deepseek-v4-pro` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [DeepSeek](/providers/deepseek) |
 | DeepInfra | `DEEPINFRA_API_KEY` (`DEEPINFRA_BASE_URL` optional) | `Qwen/Qwen3-32B` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [DeepInfra](/providers/deepinfra) |
+| Together AI | `TOGETHER_API_KEY` (`TOGETHER_BASE_URL` optional) | `meta-llama/Llama-3.3-70B-Instruct-Turbo` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Together AI](/providers/together) |
 | Groq | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | — |
 | Fireworks AI | `FIREWORKS_API_KEY` (`FIREWORKS_BASE_URL` optional) | `accounts/fireworks/models/gpt-oss-120b` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | — |
 | Chutes AI | `CHUTES_API_KEY` (`CHUTES_BASE_URL` optional) | `Qwen/Qwen3-32B-TEE` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | — |
@@ -179,8 +180,9 @@ support, not every individual model capability exposed by an upstream provider.
   reject requests that omit it (override with
   `OPENCODE_GO_DEFAULT_REASONING_EFFORT`). Set `OPENCODE_GO_API_KEY`; the base
   URL defaults to `https://opencode.ai/zen/go/v1`.
-- **ChatGPT subscription** — serves `/v1/responses` only, billed against the
-  ChatGPT plan's quota rather than API credit. The upstream accepts a strict
+- **ChatGPT subscription** — billed against the ChatGPT plan's quota rather
+  than API credit. The upstream serves `/v1/responses` only; chat completions
+  are translated to Responses calls. The upstream accepts a strict
   parameter allowlist and streams only; GoModel adapts requests and collapses
   the stream for non-streaming callers. Set `CHATGPT_API_KEY` to the access
   token from `codex login`. Reported cost is not real spend: these model IDs
@@ -318,7 +320,7 @@ These are the providers most users hit friction on:
   Default Credentials or a service-account JSON key.
 - **Amazon Bedrock** — no API key of its own; uses the AWS credential chain
   and requires explicit model access in the Bedrock console.
-- **Azure OpenAI** — deployment-scoped base URLs, the `api-version` query
+- **Azure OpenAI** — deployment-scoped or `/openai/v1` base URLs, the `api-version` query
   parameter, and the `api-key` header instead of `Authorization: Bearer`.
 - **Oracle GenAI** — requires an OCI IAM policy for `generativeaiapikey` and a
   region-specific OpenAI-compatible endpoint URL.
@@ -389,6 +391,11 @@ Expand a card (the arrow strip at the bottom, or the section-wide
   10 minutes.
 - **Breaker State** — the provider's live circuit-breaker state
   (see [Resilience](/advanced/resilience#circuit-breaker-and-dashboard-provider-health)).
+  While the breaker is open, the card's error line keeps the upstream error
+  that tripped it, marked `— circuit breaker open`, instead of the fast-fail
+  `circuit breaker is open` rejection. The rejection shows only when no
+  upstream error is known from the last 10 minutes, for example when slow
+  calls tripped the breaker.
 - **Models (Recent Traffic)** — per-model request/error counts. A model with
   at least 3 errors making up half or more of its windowed requests is
   flagged in red — this catches a single broken model on an otherwise

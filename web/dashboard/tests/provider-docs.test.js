@@ -51,6 +51,7 @@ test("providerDocsUrl links every documented provider to its own page", () => {
     "opencode-go",
     "oracle",
     "sglang",
+    "together",
     "vertex",
     "vllm",
     "xai",

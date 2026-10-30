@@ -133,6 +133,18 @@
         {
             "source": "/pl/pro",
             "destination": "/pl/pro/overview"
+        },
+        {
+            "source": "/de/api-reference/:slug*",
+            "destination": "/api-reference/:slug*"
+        },
+        {
+            "source": "/zh/api-reference/:slug*",
+            "destination": "/api-reference/:slug*"
+        },
+        {
+            "source": "/pl/api-reference/:slug*",
+            "destination": "/api-reference/:slug*"
         }
     ],
     "navbar": {
@@ -290,6 +302,7 @@
                         "pages": [
                             "providers/overview",
                             "providers/key-rotation",
+                            "providers/workload-identity",
                             "providers/outbound-proxy",
                             "providers/anthropic",
                             "providers/chatgpt",
@@ -298,6 +311,7 @@
                             "providers/gemini",
                             "providers/deepseek",
                             "providers/deepinfra",
+                            "providers/together",
                             "providers/xai",
                             "providers/bailian",
                             "providers/xiaomi",
@@ -472,6 +486,7 @@
                         "pages": [
                             "de/providers/overview",
                             "de/providers/key-rotation",
+                            "de/providers/workload-identity",
                             "de/providers/outbound-proxy",
                             "de/providers/anthropic",
                             "de/providers/chatgpt",
@@ -480,6 +495,7 @@
                             "de/providers/gemini",
                             "de/providers/deepseek",
                             "de/providers/deepinfra",
+                            "de/providers/together",
                             "de/providers/xai",
                             "de/providers/bailian",
                             "de/providers/xiaomi",
@@ -508,14 +524,6 @@
                                 ]
                             }
                         ]
-                    },
-                    {
-                        "tab": "API-Referenz",
-                        "icon": "braces",
-                        "openapi": {
-                            "source": "openapi.json",
-                            "directory": "de/api-reference"
-                        }
                     }
                 ]
             },
@@ -654,6 +662,7 @@
                         "pages": [
                             "zh/providers/overview",
                             "zh/providers/key-rotation",
+                            "zh/providers/workload-identity",
                             "zh/providers/outbound-proxy",
                             "zh/providers/anthropic",
                             "zh/providers/chatgpt",
@@ -662,6 +671,7 @@
                             "zh/providers/gemini",
                             "zh/providers/deepseek",
                             "zh/providers/deepinfra",
+                            "zh/providers/together",
                             "zh/providers/xai",
                             "zh/providers/bailian",
                             "zh/providers/xiaomi",
@@ -690,14 +700,6 @@
                                 ]
                             }
                         ]
-                    },
-                    {
-                        "tab": "API 参考",
-                        "icon": "braces",
-                        "openapi": {
-                            "source": "openapi.json",
-                            "directory": "zh/api-reference"
-                        }
                     }
                 ]
             },
@@ -836,6 +838,7 @@
                         "pages": [
                             "pl/providers/overview",
                             "pl/providers/key-rotation",
+                            "pl/providers/workload-identity",
                             "pl/providers/outbound-proxy",
                             "pl/providers/anthropic",
                             "pl/providers/chatgpt",
@@ -844,6 +847,7 @@
                             "pl/providers/gemini",
                             "pl/providers/deepseek",
                             "pl/providers/deepinfra",
+                            "pl/providers/together",
                             "pl/providers/xai",
                             "pl/providers/bailian",
                             "pl/providers/xiaomi",
@@ -872,14 +876,6 @@
                                 ]
                             }
                         ]
-                    },
-                    {
-                        "tab": "Dokumentacja API",
-                        "icon": "braces",
-                        "openapi": {
-                            "source": "openapi.json",
-                            "directory": "pl/api-reference"
-                        }
                     }
                 ]
             }

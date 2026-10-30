@@ -55,8 +55,12 @@ func (r *roundRobin) prune(active map[string]*redirectEntry) {
 // unavailable one. A request carrying images through a redirect with vision
 // routing (or through an enclosing one, reported by images) only considers
 // targets that accept image input, when any does. It reports false when no
-// target is available.
-func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry *redirectEntry, sessionID string, images bool) (core.ModelSelector, bool) {
+// target is available. path, when not nil, collects the virtual models the
+// chosen route passes through.
+func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry *redirectEntry, sessionID string, images bool, path *[]string) (core.ModelSelector, bool) {
+	if path != nil {
+		*path = append(*path, entry.vm.Source)
+	}
 	allowed := func(selector core.ModelSelector) bool { return s.allowsIn(ctx, snap, selector) }
 	supported := snap.viableTargets(entry, s.catalog, allowed)
 	images = images || (entry.vm.VisionRouting && core.RequestHasImageInput(ctx))
@@ -69,7 +73,7 @@ func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry 
 		if len(available) == 0 {
 			return core.ModelSelector{}, false
 		}
-		return s.concreteTarget(ctx, snap, entry, available[0], sessionID, images)
+		return s.concreteTarget(ctx, snap, entry, available[0], sessionID, images, path)
 	}
 	if images {
 		supported = s.imageTargets(snap, entry, supported, allowed)
@@ -83,7 +87,7 @@ func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry 
 		// This target is selected only to reach admission and produce the 429.
 		// Do not run affinity resolution: a transient capacity burst must not
 		// discard or replace the target that actually served the session.
-		return s.concreteTarget(ctx, snap, entry, supported[0], sessionID, images)
+		return s.concreteTarget(ctx, snap, entry, supported[0], sessionID, images, path)
 	}
 
 	// selectorChoice consults the route selector, reporting false when there
@@ -160,9 +164,9 @@ func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry 
 		if choice, ok := selectorChoice(pinned); ok {
 			qualified := s.sticky.repin(entry.vm.Source, sessionID, pinned, choice.qualified)
 			if target, found := poolTarget(pool, qualified); found {
-				return s.concreteTarget(ctx, snap, entry, target, sessionID, images)
+				return s.concreteTarget(ctx, snap, entry, target, sessionID, images, path)
 			}
-			return s.concreteTarget(ctx, snap, entry, choice, sessionID, images)
+			return s.concreteTarget(ctx, snap, entry, choice, sessionID, images, path)
 		}
 
 		// No selector answer — a decline, a panic, an answer outside the pool,
@@ -173,7 +177,7 @@ func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry 
 		// the next new session receives.
 		if hasPin {
 			if target, found := poolTarget(pool, pinned); found {
-				return s.concreteTarget(ctx, snap, entry, target, sessionID, images)
+				return s.concreteTarget(ctx, snap, entry, target, sessionID, images, path)
 			}
 		}
 
@@ -185,14 +189,14 @@ func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry 
 			choice.qualified,
 		)
 		if target, ok := poolTarget(pool, qualified); ok {
-			return s.concreteTarget(ctx, snap, entry, target, sessionID, images)
+			return s.concreteTarget(ctx, snap, entry, target, sessionID, images, path)
 		}
-		return s.concreteTarget(ctx, snap, entry, choice, sessionID, images)
+		return s.concreteTarget(ctx, snap, entry, choice, sessionID, images, path)
 	}
 	if choice, ok := selectorChoice(""); ok {
-		return s.concreteTarget(ctx, snap, entry, choice, sessionID, images)
+		return s.concreteTarget(ctx, snap, entry, choice, sessionID, images, path)
 	}
-	return s.concreteTarget(ctx, snap, entry, pick(), sessionID, images)
+	return s.concreteTarget(ctx, snap, entry, pick(), sessionID, images, path)
 }
 
 // concreteTarget turns a chosen target of entry into the concrete model to
@@ -200,8 +204,9 @@ func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry 
 // redirect's own balanced resolution. Chains are acyclic and bounded by
 // construction (see validateChains), so the recursion terminates. images
 // carries an image-routing decision down the chain, so a chained redirect
-// also picks a target that accepts the request's images.
-func (s *Service) concreteTarget(ctx context.Context, snap *snapshot, entry *redirectEntry, target resolvedTarget, sessionID string, images bool) (core.ModelSelector, bool) {
+// also picks a target that accepts the request's images. path, when not nil,
+// collects the virtual models the chosen route passes through.
+func (s *Service) concreteTarget(ctx context.Context, snap *snapshot, entry *redirectEntry, target resolvedTarget, sessionID string, images bool, path *[]string) (core.ModelSelector, bool) {
 	inner, ok := snap.chained(entry.vm.Source, target)
 	if !ok {
 		return target.selector, true
@@ -209,7 +214,7 @@ func (s *Service) concreteTarget(ctx context.Context, snap *snapshot, entry *red
 	if !inner.vm.Enabled {
 		return core.ModelSelector{}, false
 	}
-	return s.balancedResolution(ctx, snap, inner, sessionID, images)
+	return s.balancedResolution(ctx, snap, inner, sessionID, images, path)
 }
 
 // poolTarget finds a qualified model among the viable targets.

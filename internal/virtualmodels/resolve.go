@@ -21,8 +21,18 @@ func (s *Service) resolveRequested(ctx context.Context, requested core.Requested
 	}
 	snap := s.snapshot()
 	if entry, ok := snap.findRedirect(requested.Model, userPath, enforceUserPaths); ok {
-		if resolved, ok := s.balancedResolution(ctx, snap, entry, sessionID, false); ok {
-			return Resolution{Requested: selector, Resolved: resolved, Source: entry.vm.Source}, true, nil
+		// The route is recorded only when a redirect forces a reasoning
+		// effort, the one consumer of it.
+		var path *[]string
+		if snap.redirectReasoningEffort {
+			path = new([]string)
+		}
+		if resolved, ok := s.balancedResolution(ctx, snap, entry, sessionID, false, path); ok {
+			resolution := Resolution{Requested: selector, Resolved: resolved, Source: entry.vm.Source}
+			if path != nil {
+				resolution.Path = *path
+			}
+			return resolution, true, nil
 		}
 	}
 	return Resolution{Requested: selector, Resolved: selector}, false, nil
@@ -43,11 +53,19 @@ func (s *Service) ResolveModel(requested core.RequestedModelSelector) (core.Mode
 // user_paths against the effective request user path. A redirect scoped to
 // user_paths the caller does not match falls through to the literal model name.
 func (s *Service) ResolveModelForUserPath(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+	selector, _, changed, err := s.ResolveModelRouteForUserPath(ctx, requested)
+	return selector, changed, err
+}
+
+// ResolveModelRouteForUserPath is ResolveModelForUserPath that also returns
+// the virtual models the chosen route passed through, outermost first. The
+// route is nil when no redirect applied or none forces a reasoning effort.
+func (s *Service) ResolveModelRouteForUserPath(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, []string, bool, error) {
 	resolution, changed, err := s.resolveRequested(ctx, requested, core.UserPathFromContext(ctx), true, core.SessionIDFromContext(ctx))
 	if err != nil {
-		return core.ModelSelector{}, false, err
+		return core.ModelSelector{}, nil, false, err
 	}
-	return resolution.Resolved, changed, nil
+	return resolution.Resolved, resolution.Path, changed, nil
 }
 
 // RoutesImageInput reports whether any enabled redirect has vision routing,

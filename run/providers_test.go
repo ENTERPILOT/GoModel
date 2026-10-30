@@ -72,10 +72,12 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			required:     []string{"base_url"},
 		},
 		{
-			// SGLang supports both unauthenticated and --api-key deployments.
+			// SGLang supports both unauthenticated and --api-key deployments,
+			// and api_mode picks how Responses requests reach it.
 			providerType: "sglang",
-			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "proxy_url", "models"},
+			fields:       []string{"api_keys", "base_url", "api_mode", "session_sticky_keys", "proxy_url", "models"},
 			required:     nil,
+			options:      map[string][]string{"api_mode": {"auto", "native", "chat_compatible"}},
 		},
 		{
 			// Authenticates through the AWS SDK credential chain, never a key.
@@ -108,7 +110,7 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 		},
 		{
 			// No API key at all; api_mode reaches the Gemini adapter Vertex
-			// delegates translation to (VERTEX_API_MODE).
+			// delegates translation to (VERTEX_API_MODE), except anthropic.
 			providerType: "vertex",
 			fields: []string{
 				"auth_type", "vertex_project", "vertex_location", "service_account_json",
@@ -116,7 +118,7 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 				"api_mode", "gcp_scope", "proxy_url", "models",
 			},
 			absent:  []string{"api_keys"},
-			options: map[string][]string{"api_mode": {"native", "openai_compatible"}},
+			options: map[string][]string{"api_mode": {"native", "openai_compatible", "anthropic"}},
 		},
 	}
 
@@ -170,7 +172,7 @@ func TestDefaultProviderFactoryRegistersAllProviderTypes(t *testing.T) {
 	expected := []string{
 		"anthropic", "audiocpp", "azure", "bailian", "bedrock", "bedrock-mantle", "chatgpt", "chutes", "cohere", "deepinfra", "deepseek", "edenai", "elevenlabs",
 		"fireworks", "gemini", "github-copilot", "groq", "hetzner", "jev", "kilo", "kimicode", "llamacpp", "llmd", "meta", "minimax", "ollama", "openai", "opencode_go",
-		"openrouter", "oracle", "sglang", "vertex", "vllm", "xai", "xiaomi", "zai",
+		"openrouter", "oracle", "sglang", "together", "vertex", "vllm", "xai", "xiaomi", "zai",
 	}
 
 	for _, metricsEnabled := range []bool{false, true} {

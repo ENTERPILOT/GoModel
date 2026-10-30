@@ -1,10 +1,10 @@
 ---
 title: "GoModel Pro"
 sidebarTitle: "Übersicht"
-description: "GoModel Pro erweitert das GoModel Gateway um lizenzierte Prompt-Komprimierung, intelligentes Routing, OIDC SSO und Egress-Proxy-Pools."
+description: "GoModel Pro erweitert das GoModel Gateway um lizenzierte Prompt-Komprimierung, intelligentes Routing, OIDC SSO, Egress-Proxy-Pools und Secret-Manager-Vaults. 21 Tage kostenlos testen."
 icon: "gem"
 tag: "Pro"
-keywords: ["GoModel Pro", "Prompt-Komprimierung", "prompt compression", "intelligentes Routing", "intelligent routing", "OIDC", "SSO", "Quota-Templates", "Egress-Proxy-Pools", "egress proxy pools", "Lizenz", "license"]
+keywords: ["GoModel Pro", "Prompt-Komprimierung", "prompt compression", "intelligentes Routing", "intelligent routing", "OIDC", "SSO", "Quota-Templates", "Egress-Proxy-Pools", "egress proxy pools", "Vaults", "vaults", "Lizenz", "license", "kostenlose Testversion", "free trial"]
 ---
 
 ## Was Pro ist
@@ -13,15 +13,17 @@ GoModel Pro ist die kommerzielle Distribution von GoModel. Sie verwendet
 dasselbe Gateway, dieselbe Konfiguration, dieselben Provider, dasselbe
 Dashboard und dieselben APIs wie das Open-Source-GoModel, ergänzt um
 lizenzierte Erweiterungen für Prompt-Komprimierung, intelligentes Routing,
-OIDC Single Sign-On, Egress-Proxy-Pools und Quota-Templates pro
-untergeordnetem Pfad.
+OIDC Single Sign-On, Egress-Proxy-Pools, Quota-Templates pro
+untergeordnetem Pfad und Secret-Manager-Vaults.
 
 Ohne gültige Lizenz startet das Pro-Binary als Open-Source-Gateway und
-blockiert keinen Traffic. Ausnahmen sind explizit aktiviertes SSO und
-Egress-Pools: Ist ihr Entitlement oder ihre Konfiguration ungültig, schlägt der
-Start geschlossen fehl (fail closed). So kann eine Authentifizierungsgrenze
-nicht unbemerkt verschwinden, und über Proxys geleiteter Traffic verlässt nie
-die eigene Adresse des Gateways.
+blockiert keinen Traffic. Ausnahmen sind explizit aktiviertes SSO,
+Egress-Pools, Quota-Templates pro untergeordnetem Pfad und Vaults: Ist ihr
+Entitlement oder ihre Konfiguration ungültig, schlägt der Start geschlossen
+fehl (fail closed). So kann eine Authentifizierungsgrenze nicht unbemerkt
+verschwinden, über Proxys geleiteter Traffic verlässt nie die eigene Adresse
+des Gateways, Limits werden nicht stillschweigend geteilt, und Secrets bleiben
+nie unaufgelöst.
 
 <CardGroup cols={2}>
   <Card title="Prompt-Komprimierung" icon="package-minus" href="/de/pro/compression">
@@ -55,8 +57,61 @@ Entitlement `quota_templates` bricht `per_child: true` in der Konfiguration den
 Start ab, und Schreibzugriffe über die Admin API werden mit 403
 `quota_templates_not_entitled` abgelehnt.
 
+## Vaults
+
+Vaults ergänzen [Secret-Referenzen](/de/advanced/secret-references) um das
+Schema `vault`, sodass Provider-Keys und andere Secrets aus HashiCorp Vault,
+AWS Secrets Manager, GCP Secret Manager oder Azure Key Vault gelesen werden
+statt aus einfachen Umgebungsvariablen:
+
+```yaml
+extensions:
+  vaults:
+    enabled: true
+    stores:
+      prod:
+        type: hashicorp
+        address: https://vault.internal:8200
+        auth:
+          method: kubernetes
+          role: gomodel
+
+providers:
+  openai:
+    api_key: ${vault:prod/llm#openai}
+```
+
+Secrets werden zwischengespeichert und alle `refresh_interval` (Standard `5m`)
+neu gelesen. Werden Vaults ohne das Entitlement `vaults` aktiviert, bricht der
+Start ab.
+
 ## Lizenzierung
 
 Pro-Features werden über ein offline mit Ed25519 signiertes Token in
 `GOMODEL_PRO_LICENSE` freigeschaltet. Die Validierung benötigt keinen
 Netzwerkzugriff und funktioniert auch in Air-Gapped-Umgebungen.
+
+### Kostenlose Testversion
+
+Testen Sie alle Pro-Features 21 Tage kostenlos, ohne Kreditkarte: Fordern Sie
+unter [gomodel.enterpilot.io/pro/trial](https://gomodel.enterpilot.io/pro/trial)
+eine Testlizenz an, sie kommt per E-Mail. Testlizenzen benötigen GoModel Pro
+0.1.1 oder neuer.
+
+```bash
+docker run -d --restart unless-stopped -p 8080:8080 \
+  -e GOMODEL_PRO_LICENSE="<Lizenz aus der E-Mail>" \
+  -e OPENAI_API_KEY="your-openai-key" \
+  enterpilot/gomodel-pro
+```
+
+Die Startzeile `GoModel Pro: license valid` im Log zeigt `trial=true` und das
+Enddatum. Sieben Tage vor dem Ende kommt eine Erinnerung per E-Mail. Eine
+Testversion hat keine Kulanzfrist: An ihrem letzten Tag beendet sich das
+Gateway einmal, deshalb verwendet das Beispiel eine Restart-Policy. Nach dem
+Neustart läuft es als Open-Source-Gateway, sofern nicht noch SSO, Egress-Pools,
+Quota-Templates pro untergeordnetem Pfad oder Vaults konfiguriert sind;
+entfernen Sie diese oder installieren Sie zuerst eine vollständige Lizenz.
+
+Eine Testversion pro Person. Um Pro nach dem Test weiter zu nutzen,
+[buchen Sie ein 30-minütiges Gespräch](https://cal.com/jakubw/30).

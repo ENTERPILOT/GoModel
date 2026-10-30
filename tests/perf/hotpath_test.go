@@ -455,7 +455,7 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// full catalog several times per request) would blow these limits.
 			name:      "gateway_chat_completion_hot_path_routed",
 			bench:     BenchmarkGatewayHotPathChatCompletionRouted,
-			maxAllocs: 103,   // baseline 100 (see the bare case; plus strings.Cut selector parsing)
+			maxAllocs: 98,    // baseline 95 (see the bare case; plus strings.Cut selector parsing and selector-keyed catalog lookups)
 			maxBytes:  15232, // baseline ~14.2 KB
 		},
 		{
@@ -465,7 +465,7 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// family as the bare routed case.
 			name:      "gateway_chat_completion_hot_path_routed_alias",
 			bench:     BenchmarkGatewayHotPathChatCompletionRoutedAlias,
-			maxAllocs: 104,   // baseline 101 (routed + resolver selector)
+			maxAllocs: 99,    // baseline 96 (routed + resolver selector)
 			maxBytes:  15168, // baseline ~14.2 KB
 		},
 		{
@@ -473,7 +473,7 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// selector index plus the model rewrite the upstream receives.
 			name:      "gateway_chat_completion_hot_path_routed_qualified",
 			bench:     BenchmarkGatewayHotPathChatCompletionRoutedQualified,
-			maxAllocs: 103,   // baseline 100
+			maxAllocs: 98,    // baseline 95
 			maxBytes:  15232, // baseline ~14.3 KB
 		},
 		{
@@ -484,7 +484,7 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// deployments actually run.
 			name:      "gateway_chat_completion_production_shape",
 			bench:     BenchmarkGatewayHotPathProductionShape,
-			maxAllocs: 161,   // baseline 158 (audit bodies kept as raw JSON instead of decoded into maps)
+			maxAllocs: 153,   // baseline 150 (audit bodies kept as raw JSON; selector-keyed lookups and memoized resolved-model strings)
 			maxBytes:  21568, // baseline ~20.1 KB
 		},
 		{
@@ -497,7 +497,7 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// request, and the ceiling is what keeps it from growing back.
 			name:      "gateway_chat_completion_production_shape_live_broker",
 			bench:     BenchmarkGatewayHotPathProductionShapeLiveBroker,
-			maxAllocs: 280,   // baseline 275
+			maxAllocs: 271,   // baseline 266
 			maxBytes:  44032, // baseline ~41.5 KB
 		},
 		{

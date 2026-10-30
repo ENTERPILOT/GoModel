@@ -110,8 +110,8 @@ jobs:
   # tries mirror.gcr.io, then ECR Public, then Docker Hub. Without them
   # GOMODEL_TEST_POSTGRES_URL and MONGO_TEST_DSN are unset, every PostgreSQL
   # and MongoDB subtest skips, and CI stays green while covering only SQLite.
-  # Pull requests run without the race detector; pushes to main run under
-  # -race.
+  # Every run uses the race detector: a race found on main is found after
+  # the merge, when the fix costs a second pull request.
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
@@ -148,7 +148,7 @@ jobs:
 
       - name: Run tests
         run: >-
-          go test ${{ env.GO_TEST_SHORT }} ${{ github.event_name == 'push' && '-race' || '' }}
+          go test ${{ env.GO_TEST_SHORT }} -race
           -tags=contract -coverprofile=coverage.out -timeout=15m
           ./cmd/... ./config/... ./ext/... ./internal/... ./run/... ./tests/contract/...
         env:
