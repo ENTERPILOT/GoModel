@@ -19,6 +19,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/live"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
 	"github.com/enterpilot/gomodel/internal/mediastore"
+	"github.com/enterpilot/gomodel/internal/metadataoverrides"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 	"github.com/enterpilot/gomodel/internal/providers"
@@ -73,6 +74,7 @@ func (b *bootstrap) initAdmin() error {
 			app.users.Service,
 			app.virtualModels.Service,
 			app.pricingOverrides.Service,
+			app.metadataOverrides.Service,
 			app.workflows.Service,
 			guardrailService,
 			app.pluginCatalog,
@@ -142,6 +144,7 @@ func newAdminHandlers(
 	userService *users.Service,
 	virtualModelService *virtualmodels.Service,
 	pricingOverrideService *pricingoverrides.Service,
+	metadataOverrideService *metadataoverrides.Service,
 	workflowService *workflows.Service,
 	guardrailService *guardrails.Service,
 	pluginCatalog *plugins.Catalog,
@@ -214,6 +217,7 @@ func newAdminHandlers(
 		admin.WithUsers(userService),
 		admin.WithVirtualModels(virtualModelService),
 		admin.WithPricingOverrides(pricingOverrideService),
+		admin.WithMetadataOverrides(metadataOverrideService),
 		admin.WithWorkflows(workflowService),
 		admin.WithGuardrailService(guardrailService),
 		admin.WithPluginCatalog(pluginCatalog),
