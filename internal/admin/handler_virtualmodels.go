@@ -40,7 +40,11 @@ type upsertVirtualModelRequest struct {
 	Description string   `json:"description,omitempty"`
 	// Slowdown is an extra-time factor from 0.1 to 10; zero disables it.
 	Slowdown *float64 `json:"slowdown,omitempty"`
-	Enabled  *bool    `json:"enabled,omitempty"`
+	// ReasoningEffort forces the reasoning effort sent upstream ("none",
+	// "minimal", "low", "medium", "high", "xhigh", or "max"); empty keeps the
+	// client's value.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	Enabled         *bool  `json:"enabled,omitempty"`
 }
 
 // virtualModelTargetRequest is one load-balancing destination. Model may be a
@@ -180,6 +184,7 @@ func (h *Handler) buildVirtualModelUpsert(source string, req upsertVirtualModelR
 		UserPaths:       req.UserPaths,
 		Description:     strings.TrimSpace(req.Description),
 		Slowdown:        req.Slowdown,
+		ReasoningEffort: req.ReasoningEffort,
 		Enabled:         h.virtualModels.ResolveUpsertEnabled(source, req.OldSource, req.Enabled),
 	}
 

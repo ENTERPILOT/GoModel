@@ -221,6 +221,14 @@ Stateful note:
   real `gpt-4.1-mini`); it prints `SKIPPED:` when the mock is down, deletes
   its own `$QA_SUFFIX`-scoped guardrail and workflow, and is rerunnable in any
   order
+- `S265`-`S269` cover the changes after v0.1.108: multi-value usage filters
+  and `/admin/usage/breakdown` (`S265` compares gateway-wide totals, so it
+  stays sequential), invoice export and billed budgets refused by the
+  open-source core, Gemini parallel tool calls, reasoning effort override
+  validation on every backend, and effort `none` turning reasoning off on
+  DeepSeek and Anthropic (`S269`, which creates and deletes its own redirect). Per-customer markups, billed budgets, and
+  invoices with a license need a GoModel Pro build, and the SGLang `api_mode`
+  routing an SGLang upstream; both are covered by unit tests
 - `S218` exercises Gemini's native `batchEmbedContents` path (batch input,
   `dimensions`); read-only and rerunnable in any order
 - `S219` asserts the effective resilience configuration on
@@ -2801,21 +2809,31 @@ grep -Eiq '^content-type: *text/plain' "$HEADERS_FILE"
 test "$(wc -c < "$BODY_FILE")" -gt 0
 ```
 
-### S113 Speech without a voice is rejected (negative)
+### S113 Speech without a voice uses the default voice; without input it is rejected
 
-Checks that a text-to-speech request missing the required `voice` field is
-rejected as a `400` OpenAI error envelope before any upstream call.
+`voice` is optional: OpenAI gets `alloy` filled in, so a request without one
+returns audio. A request without `input` is still rejected as a `400` OpenAI
+error envelope before any upstream call.
 
 ```bash
 HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s113.headers.XXXXXX")
 BODY_FILE=$(mktemp "$QA_RUN_DIR/s113.body.XXXXXX")
 curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/audio/speech" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"gpt-4o-mini-tts","input":"missing voice"}'
+  -d '{"model":"gpt-4o-mini-tts","input":"missing voice","response_format":"wav"}'
+sed -n '1,20p' "$HEADERS_FILE"
+grep -Eiq '^HTTP/.* 200 ' "$HEADERS_FILE"
+grep -Eiq '^Content-Type: *audio/wav' "$HEADERS_FILE"
+# RIFF/WAVE magic bytes confirm real audio, not a JSON error body.
+[ "$(head -c 4 "$BODY_FILE")" = "RIFF" ]
+
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/audio/speech" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-4o-mini-tts","voice":"alloy","input":"   "}'
 sed -n '1,20p' "$HEADERS_FILE"
 jq '.' "$BODY_FILE"
 grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
-jq -e '.error.type == "invalid_request_error" and (.error.message | test("voice"))' "$BODY_FILE" >/dev/null
+jq -e '.error.type == "invalid_request_error" and (.error.message | test("input"))' "$BODY_FILE" >/dev/null
 ```
 
 ### S114 Speech on an unknown model is not found (negative)
@@ -8539,4 +8557,221 @@ F="$QA_RUN_DIR/s264.allowed.json"
 CODE=$(judged "qa-judge-allow-$QA_SUFFIX" "$F")
 assert_http_status 200 "$CODE" "$F"
 jq -e '.choices[0].message.content | length > 0' "$F" >/dev/null
+```
+
+## 43. Usage breakdown and multi-value filters
+
+### S265 Multi-value usage filters and `/admin/usage/breakdown` agree with the summary
+
+Sends two requests under `$QA_SUFFIX`-scoped user paths on two models, then
+checks that repeated and comma-separated filters match any of their values,
+that different filters combine with AND, that `user_path_depth` folds paths,
+and that breakdown cells add up to the summary on SQLite, PostgreSQL, and
+MongoDB.
+
+```bash
+ROOT="/qa/breakdown/$QA_SUFFIX"
+USAGE_FILE="$QA_RUN_DIR/s265.usage.json"
+for leg in a:gpt-4.1-mini b:gemini-2.5-flash-lite; do
+  LEAF="$ROOT/${leg%%:*}"
+  RID="qa-breakdown-${leg%%:*}-$QA_SUFFIX"
+  curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+    -H "X-Request-ID: $RID" -H "X-GoModel-User-Path: $LEAF" \
+    -d "{\"model\":\"${leg#*:}\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly OK\"}],\"max_tokens\":8}" >/dev/null
+  wait_release_usage_entry "$BASE_URL" "$RID" "$LEAF" "$USAGE_FILE"
+done
+
+requests() { curl -fsS "$BASE_URL/admin/usage/summary?days=1&$1" | jq -r '.total_requests'; }
+BD_FILE="$QA_RUN_DIR/s265.breakdown.json"
+curl -fsS "$BASE_URL/admin/usage/breakdown?rows=user_path&columns=model&days=1&user_path=$ROOT" > "$BD_FILE"
+jq -c '{rows: [.rows[].key], columns: [.columns[].key], cells: [.cells[] | {row, column, requests}]}' "$BD_FILE"
+jq -e --arg root "$ROOT" '
+  .row_dimension == "user_path" and .column_dimension == "model" and .metric == "cost"
+  and ([.rows[].key] | sort) == [$root + "/a", $root + "/b"]
+  and (.columns | length) == 2
+  and ([.cells[].requests] | add) == 2
+  and all(.cells[]; .total_cost > 0)
+' "$BD_FILE" >/dev/null
+MODEL_A=$(jq -r --arg leaf "$ROOT/a" '.rows as $r | .columns as $c | .cells[] | select($r[.row].key == $leaf) | $c[.column].key' "$BD_FILE")
+MODEL_B=$(jq -r --arg leaf "$ROOT/b" '.rows as $r | .columns as $c | .cells[] | select($r[.row].key == $leaf) | $c[.column].key' "$BD_FILE")
+
+# Repeated values of one filter match any of them; a comma list does the same for models.
+[ "$(requests "user_path=$ROOT/a&user_path=$ROOT/b")" = 2 ]
+[ "$(requests "user_path=$ROOT&model=$MODEL_A&model=$MODEL_B")" = 2 ]
+[ "$(requests "user_path=$ROOT&model=$MODEL_A,$MODEL_B")" = 2 ]
+# Different filters combine with AND, and user paths are never comma-split.
+[ "$(requests "user_path=$ROOT/a&model=$MODEL_B")" = 0 ]
+[ "$(requests "user_path=$ROOT/a,$ROOT/b")" = 0 ]
+
+# user_path_depth folds both leaves into their common parent.
+curl -fsS "$BASE_URL/admin/usage/breakdown?rows=user_path&user_path_depth=3&days=1&user_path=$ROOT" \
+  | jq -e --arg root "$ROOT" '[.rows[].key] == [$root] and .cells[0].requests == 2' >/dev/null
+
+for base in "$BASE_URL" "$PG_BASE_URL" "$MONGO_BASE_URL"; do
+  SUMMARY=$(curl -fsS "$base/admin/usage/summary?days=7" | jq -c '{r: .total_requests, i: .total_input_tokens, o: .total_output_tokens}')
+  for dim in model provider endpoint user_path period; do
+    curl -fsS "$base/admin/usage/breakdown?rows=$dim&limit=50&days=7" \
+      | jq -e --argjson s "$SUMMARY" '{r: ([.cells[].requests] | add // 0), i: ([.cells[].input_tokens] | add // 0), o: ([.cells[].output_tokens] | add // 0)} == $s' >/dev/null \
+      || { echo "error: $base breakdown by $dim does not add up to $SUMMARY" >&2; exit 1; }
+  done
+done
+
+for query in "columns=model" "rows=model&columns=model" "rows=bogus" "rows=model&metric=bogus" "rows=user_path&user_path_depth=17" "rows=model&limit=abc"; do
+  CODE=$(curl -sS -o "$BD_FILE" -w '%{http_code}' "$BASE_URL/admin/usage/breakdown?$query")
+  assert_http_status 400 "$CODE" "$BD_FILE"
+  jq -e '.error.type == "invalid_request_error"' "$BD_FILE" >/dev/null
+done
+```
+
+## 44. GoModel Pro billing without the entitlement
+
+The release binary is the open-source core, so invoice export and budgets on
+billed cost must refuse cleanly. The licensed behavior (per-customer markups,
+billed budgets gating cache hits, invoice totals) needs a GoModel Pro build and
+is covered by unit tests and the Pro repository.
+
+### S266 Invoice export and billed budgets are refused without a Pro license
+
+```bash
+F="$QA_RUN_DIR/s266.json"
+CODE=$(curl -sS -o "$F" -w '%{http_code}' "$BASE_URL/admin/usage/invoice?format=json")
+assert_http_status 403 "$CODE" "$F"
+jq -e '.error.code == "invoice_export_not_entitled"' "$F" >/dev/null
+
+LABEL="QaBilled-$QA_SUFFIX"
+trap 'curl -sS -o /dev/null -X DELETE "$BASE_URL/admin/budgets" -H "Content-Type: application/json" -d "{\"scope\":\"label\",\"subject\":\"$LABEL\",\"budget_key\":{\"period\":\"daily\"}}"' EXIT
+CODE=$(curl -sS -o "$F" -w '%{http_code}' -X PUT "$BASE_URL/admin/budgets" -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"label\",\"subject\":\"$LABEL\",\"cost_basis\":\"billed\",\"budget_key\":{\"period\":\"daily\"},\"amount\":5}")
+assert_http_status 403 "$CODE" "$F"
+jq -e '.error.code == "billed_budgets_not_entitled"' "$F" >/dev/null
+CODE=$(curl -sS -o "$F" -w '%{http_code}' -X PUT "$BASE_URL/admin/budgets" -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"label\",\"subject\":\"$LABEL\",\"cost_basis\":\"invoice\",\"budget_key\":{\"period\":\"daily\"},\"amount\":5}")
+assert_http_status 400 "$CODE" "$F"
+jq -e '.error.message | test("cost_basis")' "$F" >/dev/null
+curl -fsS "$BASE_URL/admin/budgets" | jq -e --arg l "$LABEL" 'all(.budgets[]?; .subject != $l)' >/dev/null
+
+# A provider-basis budget still works and reports its basis.
+curl -fsS -X PUT "$BASE_URL/admin/budgets" -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"label\",\"subject\":\"$LABEL\",\"budget_key\":{\"period\":\"daily\"},\"amount\":5}" \
+  | jq -e --arg l "$LABEL" 'any(.budgets[]; .subject == $l and .cost_basis == "provider")' >/dev/null
+curl -fsS -X DELETE "$BASE_URL/admin/budgets" -H 'Content-Type: application/json' \
+  -d "{\"scope\":\"label\",\"subject\":\"$LABEL\",\"budget_key\":{\"period\":\"daily\"}}" >/dev/null
+```
+
+## 45. Gemini parallel tool calls and reasoning effort overrides
+
+### S267 Gemini parallel tool calls get distinct IDs and indexes and round-trip
+
+```bash
+TOOLS='[{"type":"function","function":{"name":"get_weather","description":"Get the current weather for one city","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}},{"type":"function","function":{"name":"get_time","description":"Get the local time for one city","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}]'
+PROMPT='Call get_weather for Paris, get_weather for Tokyo and get_time for London. Call all three tools in parallel in this single turn.'
+CALL_FILE="$QA_RUN_DIR/s267.call.json"
+STREAM_FILE="$QA_RUN_DIR/s267.stream.txt"
+# Gemini 3 also signs each function call, so the replay below checks the
+# thought signatures survive alongside the parallel results.
+BODY=$(jq -nc --argjson tools "$TOOLS" --arg p "$PROMPT" '{model:"gemini-3.5-flash-lite", tools:$tools, messages:[{role:"user",content:$p}]}')
+
+# Whether the model calls the tools in parallel is its choice and it rarely
+# makes one call instead, so each request gets three attempts.
+for _ in 1 2 3; do
+  curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' -d "$BODY" > "$CALL_FILE"
+  jq -e '(.choices[0].message.tool_calls // []) | length >= 2' "$CALL_FILE" >/dev/null && break
+done
+jq -c '[.choices[0].message.tool_calls[] | {id, name: .function.name, arguments: .function.arguments}]' "$CALL_FILE"
+jq -e '
+  .choices[0].finish_reason == "tool_calls"
+  and (.choices[0].message.tool_calls | length) >= 2
+  and ([.choices[0].message.tool_calls[].id] | length == (unique | length))
+' "$CALL_FILE" >/dev/null
+
+# Every tool result goes back; Gemini needs them in one turn and rejects a turn
+# whose function responses do not match the calls, so a plain answer is the
+# assertion. Its wording is up to the model.
+jq -c --argjson tools "$TOOLS" --arg p "$PROMPT" '{
+    model: "gemini-3.5-flash-lite", tools: $tools,
+    messages: ([{role:"user",content:$p}, .choices[0].message]
+      + [.choices[0].message.tool_calls[] | {role:"tool", tool_call_id:.id, content:(.function.name + " result: 21C 14:05")}])
+  }' "$CALL_FILE" \
+  | curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' -d @- \
+  > "$QA_RUN_DIR/s267.followup.json"
+jq -e '.provider == "gemini" and .choices[0].finish_reason == "stop" and (.choices[0].message.content | length > 0)' \
+  "$QA_RUN_DIR/s267.followup.json" >/dev/null
+
+STREAM_BODY=$(echo "$BODY" | jq -c '. + {stream:true, stream_options:{include_usage:true}}')
+for _ in 1 2 3; do
+  curl -fsSN "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' -d "$STREAM_BODY" > "$STREAM_FILE"
+  grep '^data: {' "$STREAM_FILE" | sed 's/^data: //' \
+    | jq -s -e '[.[] | .choices[]?.delta.tool_calls[]?] | length >= 2' >/dev/null && break
+done
+grep '^data: {' "$STREAM_FILE" | sed 's/^data: //' | jq -s -e '
+  ([.[] | .choices[]?.delta.tool_calls[]?] | length) >= 2
+  and ([.[] | .choices[]?.delta.tool_calls[]? | .index] | . == (unique | sort) and .[0] == 0)
+  and ([.[] | .choices[]?.delta.tool_calls[]? | .id] | length == (unique | length))
+  and ([.[] | .choices[]? | select(.finish_reason != null) | .finish_reason] == ["tool_calls"])
+' >/dev/null
+grep -q '^data: \[DONE\]' "$STREAM_FILE"
+```
+
+### S268 Reasoning effort overrides are validated and stored on every backend
+
+Forcing the effort upstream is asserted against a capturing upstream in the Go
+tests; this scenario covers the admin API on all three storage backends.
+
+```bash
+SOURCE="qa-effort-$QA_SUFFIX"
+F="$QA_RUN_DIR/s268.json"
+cleanup_s268() {
+  for base in "$BASE_URL" "$PG_BASE_URL" "$MONGO_BASE_URL"; do
+    curl -sS -o /dev/null -X DELETE "$base/admin/virtual-models" -H 'Content-Type: application/json' \
+      -d "{\"source\":\"$SOURCE\"}" || true
+  done
+}
+trap cleanup_s268 EXIT
+for base in "$BASE_URL" "$PG_BASE_URL" "$MONGO_BASE_URL"; do
+  CODE=$(curl -sS -o "$F" -w '%{http_code}' -X PUT "$base/admin/virtual-models" -H 'Content-Type: application/json' \
+    -d "{\"source\":\"$SOURCE\",\"target_model\":\"openai/gpt-4.1-mini\",\"reasoning_effort\":\"extreme\"}")
+  assert_http_status 400 "$CODE" "$F"
+  jq -e '.error.message | test("reasoning_effort")' "$F" >/dev/null
+  CODE=$(curl -sS -o "$F" -w '%{http_code}' -X PUT "$base/admin/virtual-models" -H 'Content-Type: application/json' \
+    -d '{"source":"openai/","reasoning_effort":"high"}')
+  assert_http_status 400 "$CODE" "$F"
+
+  curl -fsS -X PUT "$base/admin/virtual-models" -H 'Content-Type: application/json' \
+    -d "{\"source\":\"$SOURCE\",\"target_model\":\"openai/gpt-4.1-mini\",\"reasoning_effort\":\" High \"}" \
+    | jq -e '.reasoning_effort == "high"' >/dev/null
+  curl -fsS "$base/admin/virtual-models" \
+    | jq -e --arg s "$SOURCE" 'any(.[]; .source == $s and .reasoning_effort == "high")' >/dev/null
+  curl -fsS -X PUT "$base/admin/virtual-models" -H 'Content-Type: application/json' \
+    -d "{\"source\":\"$SOURCE\",\"target_model\":\"openai/gpt-4.1-mini\"}" \
+    | jq -e 'has("reasoning_effort") | not' >/dev/null
+  curl -fsS -X DELETE "$base/admin/virtual-models" -H 'Content-Type: application/json' \
+    -d "{\"source\":\"$SOURCE\"}" >/dev/null
+done
+```
+
+### S269 Effort `none` turns reasoning off on DeepSeek and Anthropic
+
+DeepSeek reasons unless it receives `reasoning_effort: "none"`. Claude Haiku
+5.5 thinks unless it receives `thinking: {type: "disabled"}`, which GoModel
+sends for `none`. A `$QA_SUFFIX`-scoped redirect that forces `none` must also
+drop the thinking a `/v1/messages` client asks for.
+
+```bash
+F="$QA_RUN_DIR/s269.json"
+curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"deepseek/deepseek-flash\",\"reasoning\":{\"effort\":\"none\"},\"max_tokens\":200,\"messages\":[{\"role\":\"user\",\"content\":\"What is 17*23? Answer with the number only. $QA_SUFFIX\"}]}" > "$F"
+jq -c '{reasoning_tokens: .usage.completion_tokens_details.reasoning_tokens, answer: .choices[0].message.content}' "$F"
+jq -e '(.usage.completion_tokens_details.reasoning_tokens // 0) == 0 and ((.choices[0].message.reasoning_content // "") == "")' "$F" >/dev/null
+
+SOURCE="qa-no-thinking-$QA_SUFFIX"
+trap 'curl -sS -o /dev/null -X DELETE "$BASE_URL/admin/virtual-models" -H "Content-Type: application/json" -d "{\"source\":\"$SOURCE\"}"' EXIT
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$SOURCE\",\"target_model\":\"anthropic/claude-haiku-5-5\",\"reasoning_effort\":\"none\"}" >/dev/null
+curl -fsS "$BASE_URL/v1/messages" -H 'Content-Type: application/json' -H 'anthropic-version: 2023-06-01' \
+  -d "{\"model\":\"$SOURCE\",\"max_tokens\":3000,\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":2000},\"messages\":[{\"role\":\"user\",\"content\":\"What is 17*23? Think it through. $QA_SUFFIX\"}]}" > "$F"
+jq -c '[.content[].type]' "$F"
+jq -e '.type == "message" and all(.content[]; .type != "thinking") and any(.content[]; .type == "text")' "$F" >/dev/null
+curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$SOURCE\",\"reasoning_effort\":\"high\",\"max_tokens\":3000,\"messages\":[{\"role\":\"user\",\"content\":\"What is 17*23? $QA_SUFFIX\"}]}" > "$F"
+jq -e '(.choices[0].message.reasoning_content // "") == "" and (.choices[0].message.content | length > 0)' "$F" >/dev/null
 ```

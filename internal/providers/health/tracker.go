@@ -49,6 +49,11 @@ type ErrorInfo struct {
 	StatusCode int       `json:"status_code,omitempty"`
 	Message    string    `json:"message,omitempty"`
 	At         time.Time `json:"at"`
+
+	// circuitRejected marks a fast-fail rejection by an open circuit
+	// breaker. Such an error says nothing about why the provider failed, so
+	// it never replaces an upstream failure as the reported cause.
+	circuitRejected bool
 }
 
 // ModelHealth summarizes windowed traffic for one model.
@@ -85,6 +90,9 @@ type event struct {
 type modelState struct {
 	events       []event
 	lastError    *ErrorInfo
+	// lastRejection is the latest circuit-breaker rejection, kept apart so
+	// it can stand in once the upstream failure leaves the window.
+	lastRejection *ErrorInfo
 	lastActivity time.Time
 }
 
@@ -156,11 +164,12 @@ func (t *Tracker) Record(info llmclient.ResponseInfo) {
 	model.events = append(model.events, event{at: now, failed: failed})
 	model.lastActivity = now
 	if failed {
-		model.lastError = &ErrorInfo{
-			StatusCode: info.StatusCode,
-			Message:    errorMessage(info),
-			At:         now,
-		}
+		model.recordError(ErrorInfo{
+			StatusCode:      info.StatusCode,
+			Message:         errorMessage(info),
+			At:              now,
+			circuitRejected: errors.Is(info.Error, llmclient.ErrCircuitOpen),
+		})
 	}
 	model.prune(now)
 }
@@ -231,10 +240,10 @@ func (t *Tracker) Snapshot() map[string]ProviderHealth {
 				Errors:   errors,
 				Flagged:  errors >= flagMinErrors && errors*2 >= requests,
 			}
-			if model.lastError != nil && now.Sub(model.lastError.At) <= Window {
-				lastError := *model.lastError
+			if reported := model.reportedError(now); reported != nil {
+				lastError := *reported
 				row.LastError = &lastError
-				if snapshot.LastError == nil || lastError.At.After(snapshot.LastError.At) {
+				if moreRelevantError(lastError, snapshot.LastError) {
 					snapshot.LastError = &lastError
 					snapshot.LastErrorModel = modelName
 				}
@@ -290,6 +299,42 @@ func (p *providerState) model(name string) *modelState {
 		p.models[name] = model
 	}
 	return model
+}
+
+// recordError stores a failure. Circuit-breaker rejections are kept apart
+// from upstream failures so a rejection never hides why the breaker opened.
+func (m *modelState) recordError(info ErrorInfo) {
+	if info.circuitRejected {
+		m.lastRejection = &info
+		return
+	}
+	m.lastError = &info
+}
+
+// reportedError returns the windowed error to report for the model: the
+// latest upstream failure, or the latest circuit-breaker rejection when no
+// upstream failure remains in the window.
+func (m *modelState) reportedError(now time.Time) *ErrorInfo {
+	if m.lastError != nil && now.Sub(m.lastError.At) <= Window {
+		return m.lastError
+	}
+	if m.lastRejection != nil && now.Sub(m.lastRejection.At) <= Window {
+		return m.lastRejection
+	}
+	return nil
+}
+
+// moreRelevantError reports whether candidate should replace current as the
+// provider-level last error: upstream failures beat circuit-breaker
+// rejections, then the most recent one wins.
+func moreRelevantError(candidate ErrorInfo, current *ErrorInfo) bool {
+	if current == nil {
+		return true
+	}
+	if candidate.circuitRejected != current.circuitRejected {
+		return !candidate.circuitRejected
+	}
+	return candidate.At.After(current.At)
 }
 
 func (m *modelState) prune(now time.Time) {

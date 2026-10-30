@@ -257,7 +257,7 @@ guardrails:
       config:                     # 根据插件的 ConfigSchema 进行校验
         mode: "regex"
         rules: |
-          sk-[A-Za-z0-9]{20,} => [redacted]
+          sk-[A-Za-z0-9_-]{20,} => [redacted]
 ```
 
 `config.yaml` 中的规则会按 `phase` 中的 `order` 写入托管的默认工作流。`type` 可以带有可选的 `plugin:` 前缀。
@@ -476,6 +476,10 @@ func main() {}
 - 字段输入类型 `secret` 和 `model` 分别用于外部分类器的 API 密钥和模型选择器；`secret` 值在所有管理响应中都会被掩码处理。
   开关请使用 `bool`，开放式字符串列表（实体类型、允许列表）请使用 `list`，而不要将它们编码在 `select` 或
   `textarea` 中。
+- `InputRange` 渲染一个由字段上的 `Min`、`Max` 和 `Step` 限定范围的滑块；`Max` 为零时表示 1，`Step` 未设置或不为正数时步长为 0.01。
+  对有界数值（权重、阈值）请使用它，而不是操作员可能设置超出范围的自由文本 `number`。
+  这些边界仅供参考：服务器会按配置声明的内容原样存储，因此在 YAML 中设置的值不会被拒绝。控制台只会钳制滑块显示的内容；
+  超出范围的值会一直保留在配置中，直到操作员移动滑块。
 - 对属于虚拟模型而非实例的字段，请添加 `Scope: pluginapi.ScopeRoute`（仅限路由策略）。
 
 `docs/example_plugins/keywordblock/main.go` 是一个更完整、带注释的示例，包含
@@ -604,7 +608,7 @@ build` 构建的 `.so` 还会报告 `built_with`（Go 和 `pluginapi` 版本）�
 ```
 
 `phases`、`source`、`mutates` 和 `guardrail` 是新增字段（`GET /admin/guardrails` 返回的实例视图同样包含 `guardrail`）；`fields[].input` 现在可以是
-`secret`、`model`、`bool` 或 `list`，`fields[].scope` 为 `""`（实例）或 `"route"`。
+`secret`、`model`、`bool`、`list` 或 `range`（由 `min`、`max` 和 `step` 限定范围的滑块），`fields[].scope` 为 `""`（实例）或 `"route"`。
 
 ### GET, PUT, DELETE /admin/guardrails
 

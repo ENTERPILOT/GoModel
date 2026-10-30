@@ -117,7 +117,7 @@ import {
 </script>
 
 <tr id={rowAnchorID(row) || undefined} class={displayRowClass(row)}>
-  <td>
+  <td class="model-name-col">
     <div class="model-name-cell">
       <div class="model-name-primary">
         {#if detailsAvailable}
@@ -328,6 +328,13 @@ import {
 {/if}
 
 <style>
+  /* Rows sit indented under their provider header so groups and their
+     models read apart at a glance. */
+  .model-name-col {
+    padding-left: calc(var(--space-cell) + 22px);
+  }
+
+
   .model-name-cell {
     display: flex;
     flex-direction: column;
@@ -468,6 +475,11 @@ import {
   }
 
   @media (max-width: 768px) {
+    .model-name-col {
+        padding-left: calc(var(--space-cell) + 16px);
+      }
+
+
     .model-name-primary {
         flex-direction: column;
         align-items: flex-start;
