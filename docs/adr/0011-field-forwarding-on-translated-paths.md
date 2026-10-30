@@ -153,6 +153,33 @@ every other line keeps the upstream bytes. Anything that would force a decode
 of *every* chunk needs the same justification, because the verbatim relay of
 chat SSE is a deliberate hot-path property.
 
+## Request replay and response rendering are separate directions
+
+A translated path moves a request in one direction and an answer in the other.
+The two directions do not carry the same artifacts, and the difference is a
+contract, not a gap.
+
+**Request replay** sends the client's own history to the upstream. An Anthropic
+`thinking` block in that history is the client's artifact: it carries a
+`signature` that Anthropic itself issued for a previous turn. A Responses-only
+upstream stores nothing (`store: false`) and has no concept of a signed
+thinking block, so the block is not replayed. What travels is the text of the
+turn and the tool calls with their IDs and arguments; the tool result travels
+as the output of the call whose ID it carries. A reasoning summary is not a
+signed thinking block and is not replayed as one.
+
+**Response rendering** moves the upstream's answer back to the client. The
+upstream's reasoning arrives as a summary, and the summary is rendered as an
+Anthropic `thinking` block. The signature stays empty, because the upstream
+issued no signature for it.
+
+The consequence for ordering: the canonical chat shape carries the reasoning in
+one member beside the answer text and the tool calls. The buffered response
+therefore renders `thinking` first, then `text`, then `tool_use`, which is what
+the Anthropic contract asks for, and the upstream's interleaving of reasoning
+and tool calls is not representable in that shape. The streaming response can
+keep the upstream order, because it emits the blocks as they arrive.
+
 ## Consequences
 
 - Clients get one predictable answer per field and provider, and a 400 only

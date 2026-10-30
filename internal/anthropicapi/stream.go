@@ -377,9 +377,11 @@ func (sc *streamConverter) handleToolCall(call chatToolCallDelta) {
 	if !seen {
 		// A tool call after another one ends the previous one: its
 		// arguments are complete, so the content held back while they
-		// streamed opens its own blocks now.
+		// streamed opens its own blocks now. The flush may have opened a
+		// block of its own, so it is closed before the tool block opens.
 		sc.closeBlock()
 		sc.flushPending()
+		sc.closeBlock()
 		block := map[string]any{
 			"type":  "tool_use",
 			"id":    call.ID,
@@ -480,10 +482,12 @@ func (sc *streamConverter) finalize() {
 	}
 	sc.finalized = true
 	sc.ensureStarted("", "")
-	sc.closeBlock()
 	// Content held back while a tool call streamed its arguments still
-	// belongs to the turn, so it is rendered before the message ends.
+	// belongs to the turn, so it is rendered before the message ends. It is
+	// flushed BEFORE the block is closed: the flush opens the block of the
+	// held content, and that block needs its own close.
 	sc.flushPending()
+	sc.closeBlock()
 
 	stopReason := sc.stopReason
 	if stopReason == "" {

@@ -502,6 +502,47 @@ func TestStreamConverterHeldReasoningIsRendered(t *testing.T) {
 	assert.Equal(t, "Held thought.", thinking, "the held reasoning must reach the client")
 }
 
+// TestStreamConverterEveryBlockIsClosed pins that every content block the
+// converter opens is also closed.
+//
+// A block that is opened and never closed leaves the client with a dangling
+// index: the Anthropic stream requires exactly one open block at a time, and
+// a block that is never closed is never released. The reasoning held back
+// while a tool call streamed its arguments opens a block of its own when it
+// is flushed, so that block needs its own close before the next block opens
+// and before the message ends.
+func TestStreamConverterEveryBlockIsClosed(t *testing.T) {
+	chatStream := strings.Join([]string{
+		`data: {"id":"chatcmpl-1","model":"gpt","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"get_weather","arguments":"{}"}}]},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"reasoning_content":"Held thought."},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"call_2","function":{"name":"get_weather","arguments":"{}"}}]},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"reasoning_content":"Second thought."},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		`data: [DONE]`,
+		"",
+	}, "\n\n")
+
+	events := drainConverter(t, chatStream)
+
+	open := map[int]bool{}
+	for _, event := range events {
+		switch event["type"] {
+		case "content_block_start":
+			index := int(event["index"].(float64))
+			assert.False(t, open[index], "block %d opened while still open", index)
+			open[index] = true
+		case "content_block_stop":
+			index := int(event["index"].(float64))
+			assert.True(t, open[index], "block %d stopped while not open", index)
+			open[index] = false
+		}
+	}
+	for index, isOpen := range open {
+		assert.False(t, isOpen, "block %d is never closed", index)
+	}
+}
+
 // Providers that name the member "reasoning" instead of "reasoning_content"
 // (Groq, OpenRouter) must still produce thinking deltas.
 func TestStreamConverterVendorReasoningMember(t *testing.T) {
