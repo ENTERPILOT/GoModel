@@ -99,3 +99,52 @@ func TestValidatePricingConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadPricingUserPathMarkupsFromYAML(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(dir string) {
+		yamlConfig := `
+pricing:
+  markups_enabled: true
+  markups:
+    "/": 20
+  user_path_markups:
+    /acme:
+      "/": 30
+      "openai/gpt-5": 15
+    /acme/internal:
+      "/": 0
+`
+		result := loadConfigYAML(t, dir, yamlConfig)
+
+		assert.Equal(t, map[string]map[string]float64{
+			"/acme":          {"/": 30, "openai/gpt-5": 15},
+			"/acme/internal": {"/": 0},
+		}, result.Config.Pricing.UserPathMarkups)
+	})
+}
+
+func TestValidatePricingConfigUserPathMarkups(t *testing.T) {
+	tests := []struct {
+		name            string
+		userPathMarkups map[string]map[string]float64
+		wantErr         string
+	}{
+		{name: "valid", userPathMarkups: map[string]map[string]float64{"/acme": {"/": 0, "openai/": 12.5}}},
+		{name: "negative", userPathMarkups: map[string]map[string]float64{"/acme": {"/": -5}}, wantErr: `pricing.user_path_markups["/acme"]["/"] must be a finite number >= 0`},
+		{name: "NaN", userPathMarkups: map[string]map[string]float64{"/acme": {"/": math.NaN()}}, wantErr: "must be a finite number >= 0"},
+		{name: "blank selector", userPathMarkups: map[string]map[string]float64{"/acme": {" ": 5}}, wantErr: "selector is required"},
+		{name: "blank user path", userPathMarkups: map[string]map[string]float64{" ": {"/": 5}}, wantErr: "user path is required"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validatePricingConfig(&PricingConfig{UserPathMarkups: tt.userPathMarkups})
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			assert.ErrorContains(t, err, tt.wantErr)
+		})
+	}
+}

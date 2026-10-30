@@ -97,7 +97,7 @@ GoModel 使用请求完成时刻生效的费率为每个请求计价，并且无
 
 ## 加价与计费成本
 
-当您转售模型访问权限时（例如按客户使用的 Token 向其收费），可以设置加价。GoModel 会为每个请求记录**计费成本**（用量记录中的 `billed_cost`）：即提供商成本加上加价。提供商成本本身不会改变，因此预算、控制台汇总和节省金额仍然衡量您向上游支付的费用。
+当您转售模型访问权限时（例如按客户使用的 Token 向其收费），可以设置加价。GoModel 会为每个请求记录**计费成本**（用量记录中的 `billed_cost`）：即提供商成本加上加价。提供商成本本身不会改变，因此预算、控制台汇总和节省金额仍然衡量您向上游支付的费用。使用 GoModel Pro 时，预算也可以改为限制计费成本，参见[预算](/zh/features/budgets)。
 
 加价默认关闭。使用 `markups_enabled: true`（env `PRICING_MARKUPS_ENABLED=true`）开启后，在 `config.yaml` 中设置百分比。开启加价但没有规则匹配某个请求时，其计费成本等于提供商成本。关闭加价时，GoModel 不记录计费成本，并忽略 `markups` 和 `bill_cache_hits`；如果设置了 `markups`，启动时会记录一条警告。
 
@@ -118,7 +118,34 @@ pricing:
 
 每条用量记录还会存储其计费时使用的加价（`markup_percent`、`markup_selector`），因此更改加价永远不会改写过去的账单。
 
-开启加价后，用量页面会在提供商成本旁显示计费成本：一张 **Billed** 卡片、按模型、用户路径和标签分类的明细中的一列，以及请求日志中的一列（其提示会显示每条记录计费时使用的加价）。管理 API 通过 `/admin/usage/summary` 中的 `total_billed_cost`，`/admin/usage/models`、`/admin/usage/user-paths` 和 `/admin/usage/labels` 中的 `billed_cost`，以及 `/admin/usage/log` 条目中的 `billed_cost`、`markup_percent` 和 `markup_selector` 提供这些数据。计费汇总包含计费的缓存命中，而其他成本数据不包含它们，因此按用户路径统计的计费成本就是应向每位客户收取的金额。
+开启加价后，仪表盘会在提供商成本旁显示计费成本：概览页和用量页上的一张 **Billed** 卡片、每个用量明细（模型、用户路径、标签、请求类型或端点，以及会话）中的一列，以及请求日志中的一列（其提示会显示每条记录计费时使用的加价）。管理 API 通过 `/admin/usage/summary` 中的 `total_billed_cost`，`/admin/usage/daily`、`/admin/usage/models`、`/admin/usage/user-paths`、`/admin/usage/labels`、`/admin/usage/endpoints` 和 `/admin/usage/sessions` 中的 `billed_cost`，以及 `/admin/usage/log` 条目中的 `billed_cost`、`markup_percent` 和 `markup_selector` 提供这些数据。仅因缓存命中而计费的日期仍会出现在 `/admin/usage/daily` 中，其请求数为零。计费汇总包含计费的缓存命中，而其他成本数据不包含它们，因此按用户路径统计的计费成本就是应向每位客户收取的金额。
+
+### 按客户加价（GoModel Pro）
+
+<Info>
+  按客户加价仅在 GoModel Pro 中提供，并需要 `billing` 许可证权限。
+  没有该权限时，在启用加价的情况下设置 `user_path_markups` 会中止启动——GoModel
+  绝不会悄悄按全局费率向客户计费。
+</Info>
+
+使用 `user_path_markups` 为每个客户（由其 [user path](/zh/features/user-path) 子树标识）设置独立的加价。每个路径接受与 `markups` 相同的选择器：
+
+```yaml
+pricing:
+  markups_enabled: true
+  markups:
+    "/": 20             # 其他所有人
+  user_path_markups:
+    /acme:
+      "/": 30           # /acme 及其下所有路径
+      "openai/gpt-5": 15
+    /acme/internal:
+      "/": 0            # 内部流量按成本计费
+```
+
+GoModel 选取覆盖请求 user path 的最深一级已配置路径（`/acme` 覆盖 `/acme/team`，但不覆盖 `/acmecorp`），并按常规顺序应用其中最具体的选择器。若该路径没有匹配的选择器，则依次尝试更浅一级的路径，最后使用 `markups`。加价从不叠加。在上例中，`/acme/internal/ci` 按 0% 计费，`/acme/team` 对 `openai/gpt-5` 按 15%、其他模型按 30% 计费，`/beta` 按 20% 计费。
+
+默认不设置：没有 `user_path_markups` 时，`markups` 适用于所有人。当 `markups_enabled: false` 时，`user_path_markups` 与 `markups` 一样被忽略，GoModel 会在启动时记录一条警告。来自 `user_path_markups` 的规则会以 `<user path>:<selector>` 的形式记录在 `markup_selector` 中，例如 `/acme:openai/gpt-5`，这样请求日志会显示计费时使用了哪条客户规则。user path 与请求中的规范化方式相同，因此 `acme/` 和 `/acme` 是同一个键；`/` 会被拒绝，因为 `markups` 已经覆盖它。
 
 ## 控制台汇总
 
@@ -127,6 +154,14 @@ pricing:
 - **Billed**：开启加价后显示：提供商成本加上加价，包括计费的缓存命中。
 
 `---` 表示由于没有可用的定价，成本未知，这与 `$0` 不同。
+
+## 筛选和细分支出
+
+用量页面会按模型、提供商、标签、API 密钥、端点、用户路径和会话筛选所有卡片、图表和请求日志。每个下拉框都可以选择多个值：请求只要匹配某个筛选中任意一个已选值即满足该筛选，并且必须满足所有筛选。用户路径选择器以树形结构按前缀分组显示已知路径；选择某个节点会包含其下的所有路径，也可以直接输入未列出的路径。
+
+**细分**区域按两个维度对筛选后的用量进行交叉统计。例如，行选择**用户路径**、列选择**周期**、周期选择**每月**，即可查看每个用户路径的每月成本。可以选择指标（成本、Token 或请求数）；保留前 10 个行和列，其余合并到**其他**。**用户路径分组**按前几段合并路径，因此 `/team/alice/laptop` 会计入 `/team/alice`。可以在堆叠图和表格之间切换，并使用**下载 CSV** 导出包含合计的表格。
+
+筛选条件、日期范围和细分设置都会保存在页面 URL 中，因此复制的链接会打开相同的视图。相同的数据也可以通过 [`GET /admin/usage/breakdown`](/zh/advanced/admin-endpoints#get-adminusagebreakdown) 获取，这些筛选适用于除 `/admin/usage/throughput` 以外的所有用量端点（参见[多值筛选](/zh/advanced/admin-endpoints#多值筛选)）。
 
 ## 重新计算已存储的成本
 
@@ -138,6 +173,31 @@ pricing:
   重新计算会**覆盖**每条匹配记录的成本字段，并**清除**模型已无法解析到定价的记录的成本。
   结果会报告仍然缺少定价的记录数量。Token 数永远不会被修改。
 </Warning>
+
+## 账单导出（GoModel Pro）
+
+<Info>
+  账单导出需要带有 `billing` 授权的 GoModel Pro 许可证，并且需要启用加价（`PRICING_MARKUPS_ENABLED=true`）。
+  没有该授权时，端点返回 403 `invoice_export_not_entitled`；加价关闭时返回 409 `markups_disabled`。
+</Info>
+
+`GET /admin/usage/invoice` 导出某个时间段的计费用量，每个客户一个区块。每个客户是一个用户路径；设置 `parent` 后，该路径的每个直接子路径就是一个客户，与[子路径预算](/zh/features/budgets)的计量方式相同。因此 `parent=/customers` 会把 `/customers/acme/app1` 和 `/customers/acme/app2` 一起计入 `/customers/acme`。直接记录在父路径上的用量仍归父路径所有。不设置 `parent` 时，每个用户路径都是独立的客户。
+
+该端点接受与其他用量端点相同的日期范围和筛选条件，另外支持 `format=csv`（默认，下载为 `gomodel-invoice-<start>-to-<end>.csv`）或 `format=json`。在用量页面上，**导出账单** 会下载所选日期范围和筛选条件下的 CSV。
+
+```bash
+curl -OJ "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=2026-10-01&end_date=2026-10-31" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```csv
+row_type,period_start,period_end,currency,customer,model,provider,requests,input_tokens,output_tokens,provider_cost,billed_cost,effective_markup_percent
+item,2026-10-01,2026-10-31,USD,/customers/acme,gpt-5,openai,1200,950000,210000,3.2875,3.945,20
+subtotal,2026-10-01,2026-10-31,USD,/customers/acme,,,1200,950000,210000,3.2875,3.945,20
+total,2026-10-01,2026-10-31,USD,,,,1200,950000,210000,3.2875,3.945,20
+```
+
+每个明细项是一个模型在一个 provider 实例上的用量。`row_type` 用于区分明细项（`item`）、每个客户的小计（`subtotal`）和总计（`total`），因此在电子表格中求和前请先筛选 `item`。金额为普通的 USD 小数；成本为空表示未知（没有定价）。请求数、token 数和 provider 成本只包含发送给 provider 的请求；计费成本还包含已计费的响应缓存命中，与其他计费视图一致。`effective_markup_percent` 是计费成本除以 provider 成本再减一，因此已计费的缓存命中会提高该值。
 
 ## 合并多个实例的用量
 

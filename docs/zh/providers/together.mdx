@@ -1,0 +1,66 @@
+---
+title: "Together AI"
+description: "在 GoModel 中配置 Together AI，用于开源模型的聊天、Responses 和嵌入。"
+icon: "server"
+tag: "Beta"
+keywords: ["Together AI", "together", "开源模型", "提供商配置", "嵌入", "open models", "provider setup", "embeddings"]
+---
+
+<Warning>
+  Together AI 支持目前处于 Beta 阶段。它已通过针对模拟 API 的自动化测试，但尚未在真实的 Together AI
+  服务上验证。如遇问题，请反馈给我们。
+</Warning>
+
+Together AI 通过位于 `https://api.together.ai/v1` 的兼容 OpenAI 的 API 提供开源模型。GoModel 会将以下端点路由到 Together AI：
+
+| GoModel 端点 | Together AI 模型 |
+| ---------------- | ------------------ |
+| `/v1/chat/completions` | 聊天模型（`meta-llama/Llama-3.3-70B-Instruct-Turbo`、`openai/gpt-oss-120b` 等） |
+| `/v1/responses` | 聊天模型，通过聊天补全转换处理 |
+| `/v1/embeddings` | 嵌入模型（`BAAI/bge-base-en-v1.5` 等） |
+
+## 配置
+
+在 [Together AI 控制台](https://api.together.ai/settings/api-keys)中创建一个 API 密钥，然后设置：
+
+```bash
+TOGETHER_API_KEY=...
+```
+
+或者在 `config.yaml` 中配置：
+
+```yaml
+providers:
+  together:
+    type: together
+    api_key: "${TOGETHER_API_KEY}"
+    # base_url 默认为 "https://api.together.ai/v1"。
+```
+
+仅在需要时覆盖 Base URL 或设置模型列表，例如使用 Together 的区域端点（`https://us-api.together.ai/v1`）：
+
+```bash
+TOGETHER_BASE_URL=https://api.together.ai/v1
+TOGETHER_MODELS=meta-llama/Llama-3.3-70B-Instruct-Turbo,BAAI/bge-base-en-v1.5
+```
+
+`TOGETHER_MODELS` 是备用列表，仅在 `/models` 失败或为空时使用；设置 `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` 后，它将成为唯一的模型列表。
+
+## 模型
+
+GoModel 会读取 Together 实时的 `/models` 列表，包括每个模型的类型、显示名称、上下文长度和按 token 计的价格。图像、音频、视频和重排序模型不会列出，因为 GoModel 不会将这些端点路由到 Together。模型 ID 中包含斜杠；您可以原样使用，也可以加上提供商名称前缀来固定路由：
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "together/meta-llama/Llama-3.3-70B-Instruct-Turbo", "messages": [{"role": "user", "content": "Hello"}]}'
+```
+
+当模型 ID 以另一个已配置提供商的名称开头时，请务必加上前缀：例如配置了 OpenAI 提供商时，`openai/gpt-oss-120b` 会在 OpenAI 中查找并失败，因此请改为发送 `together/openai/gpt-oss-120b`。
+
+## 行为说明
+
+- **Responses 通过聊天补全处理。** Together 原生的 `/responses` 端点是测试版，会拒绝许多 Serverless 模型，因此 GoModel 会将 Responses 请求转换为所有聊天模型都支持的聊天补全。如果配置了 GoModel 响应存储，`previous_response_id` 链可以正常工作：网关会重放已存储的历史记录。
+- **透传需要手动启用。** 将 `together` 添加到 `ENABLED_PASSTHROUGH_PROVIDERS`
+  即可开放 `/p/together/...`，它会使用网关的 Together 密钥，将 Base URL 下的任何路径转发出去。可用于 GoModel 不路由的 Together 端点，例如图像或重排序。

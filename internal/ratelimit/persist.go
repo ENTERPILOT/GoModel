@@ -123,25 +123,29 @@ func (s *Service) flush(ctx context.Context) {
 	}
 	s.persistMu.Lock()
 	defer s.persistMu.Unlock()
-	if err := s.store.SaveCounters(ctx, s.limiter.snapshot(s.Rules())); err != nil {
+	snapshots := s.limiter.snapshot(s.Rules())
+	for i := range snapshots {
+		snapshots[i].Writer = s.writer
+	}
+	if err := s.store.SaveCounters(ctx, snapshots); err != nil {
 		slog.Warn("rate limit counters: flush failed", "error", err)
 	}
 }
 
-func (s *Service) persistDelete(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {
+func (s *Service) persistReset(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {
 	if s == nil || s.store == nil {
 		return nil
 	}
-	// Take the lock before starting the clock: a delete that queued behind a
+	// Take the lock before starting the clock: a reset that queued behind a
 	// slow flush would otherwise spend its whole budget waiting.
 	s.persistMu.Lock()
 	defer s.persistMu.Unlock()
 	writeCtx, cancel := persistContext(ctx)
 	defer cancel()
-	return s.store.DeleteCounter(writeCtx, scope, subject, periodSeconds)
+	return s.store.ResetCounter(writeCtx, scope, subject, periodSeconds)
 }
 
-func (s *Service) persistDeleteAll(ctx context.Context) error {
+func (s *Service) persistResetAll(ctx context.Context) error {
 	if s == nil || s.store == nil {
 		return nil
 	}
@@ -149,5 +153,5 @@ func (s *Service) persistDeleteAll(ctx context.Context) error {
 	defer s.persistMu.Unlock()
 	writeCtx, cancel := persistContext(ctx)
 	defer cancel()
-	return s.store.DeleteAllCounters(writeCtx)
+	return s.store.ResetAllCounters(writeCtx)
 }

@@ -15,6 +15,8 @@ const CONFIG_KEYS = [
   "BUDGETS_ENABLED",
   "RATE_LIMITS_ENABLED",
   "PER_CHILD_QUOTAS_ENABLED",
+  "INVOICE_EXPORT_ENABLED",
+  "BILLED_BUDGETS_ENABLED",
   "GUARDRAILS_ENABLED",
   "PLUGINS_ENABLED",
   "CACHE_ENABLED",
@@ -27,6 +29,12 @@ const CONFIG_KEYS = [
   "MCP_TOOL_DISCOVERY",
   "VIRTUAL_MODEL_STRATEGIES",
   "USER_PATH_HEADER",
+  "LICENSE_BADGE",
+  "LICENSE_TRIAL",
+  "LICENSE_EXPIRES_AT",
+  "LICENSE_VALID_UNTIL",
+  "LICENSE_NOTICE_DAYS",
+  "LICENSE_WARNING_DAYS",
 ];
 
 // Strategies every gateway supports; used when the backend predates the
@@ -110,6 +118,12 @@ class RuntimeConfigStore {
     return this.booleanFlag("PER_CHILD_QUOTAS_ENABLED", false);
   }
 
+  // invoiceExportVisible gates the Usage page's invoice export, which a
+  // GoModel Pro invoice_export entitlement unlocks.
+  invoiceExportVisible() {
+    return this.booleanFlag("INVOICE_EXPORT_ENABLED", false);
+  }
+
   guardrailsVisible() {
     return this.booleanFlag("GUARDRAILS_ENABLED", true);
   }
@@ -128,11 +142,20 @@ class RuntimeConfigStore {
     return this.flag("MCP_TOOL_DISCOVERY") === "search" ? "search" : "off";
   }
 
-  // billedCostVisible gates the billed-cost columns and card: they only add
-  // information once pricing.markups declares at least one rule, and stay
-  // hidden on backends that predate the key.
+  // billedCostVisible gates the billed-cost columns and cards: they show
+  // once markups are enabled, and stay hidden on backends that predate the
+  // key.
   billedCostVisible() {
     return this.booleanFlag("PRICING_MARKUPS_ENABLED", false);
+  }
+
+  // billedBudgetsVisible gates the budget cost-basis control: budgets on
+  // billed cost need the billed_budgets capability and markups enabled.
+  billedBudgetsVisible() {
+    return (
+      this.booleanFlag("BILLED_BUDGETS_ENABLED", false) &&
+      this.billedCostVisible()
+    );
   }
 
   liveLogsVisible() {

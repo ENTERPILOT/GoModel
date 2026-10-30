@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/storage"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -57,7 +58,9 @@ func TestRunUsageImport(t *testing.T) {
 	sourcePath := filepath.Join(t.TempDir(), "other.db")
 	src, err := storage.NewSQLite(storage.SQLiteConfig{Path: sourcePath})
 	require.NoError(t, err)
-	srcStore, err := usage.NewSQLiteStore(src.DB(), 0)
+	srcDB, err := sqlx.NewSQLite(src.DB())
+	require.NoError(t, err)
+	srcStore, err := usage.NewSQLStore(ctx, srcDB, 0)
 	require.NoError(t, err)
 	require.NoError(t, srcStore.WriteBatch(ctx, []*usage.UsageEntry{
 		{ID: "u-1", RequestID: "r-1", Timestamp: time.Now().UTC(), Model: "gpt-4o", Provider: "openai", Endpoint: "/v1/chat/completions"},

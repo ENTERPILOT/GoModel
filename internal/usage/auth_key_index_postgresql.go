@@ -13,7 +13,7 @@ import (
 
 // authKeyIndex serves the auth_key_id filter. It is added to tables that
 // already hold usage history, so it is built CONCURRENTLY off the startup
-// path instead of in ensurePostgreSQLSchema: a large table keeps accepting
+// path instead of in ensureUsageSchema: a large table keeps accepting
 // writes while it builds.
 const authKeyIndex = "idx_usage_auth_key_id"
 

@@ -73,7 +73,7 @@ func ImportSQLiteFile(ctx context.Context, sourcePath string, dst storage.Storag
 	}
 	defer src.Close()
 
-	store, err := createUsageStore(dst, retentionDays)
+	store, err := createUsageStore(ctx, dst, retentionDays)
 	if err != nil {
 		return 0, fmt.Errorf("open destination usage store: %w", err)
 	}

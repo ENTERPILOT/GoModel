@@ -26,7 +26,7 @@ func newImportSQLite(t *testing.T, name string) (string, storage.SQLiteStorage) 
 func TestImportSQLiteFile_CopiesRowsAndSkipsExisting(t *testing.T) {
 	ctx := context.Background()
 	srcPath, src := newImportSQLite(t, "history #1 100%.db")
-	srcStore, err := NewSQLiteStore(src.DB(), 0)
+	srcStore, err := newSQLiteStore(src.DB(), 0)
 	require.NoError(t, err)
 
 	ts := time.Date(2026, 9, 1, 12, 30, 0, 0, time.UTC)
@@ -49,7 +49,7 @@ func TestImportSQLiteFile_CopiesRowsAndSkipsExisting(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 2, n)
 
-	reader, err := NewSQLiteReader(dst.DB())
+	reader, err := newSQLiteReader(dst.DB())
 	require.NoError(t, err)
 	got, err := reader.GetUsageByRequestIDs(ctx, []string{"req-1", "req-2"})
 	require.NoError(t, err)
@@ -94,7 +94,7 @@ func TestImportSQLiteFile_OlderSourceSchema(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, n)
 
-	reader, err := NewSQLiteReader(dst.DB())
+	reader, err := newSQLiteReader(dst.DB())
 	require.NoError(t, err)
 	got, err := reader.GetUsageByRequestIDs(ctx, []string{"req-old"})
 	require.NoError(t, err)

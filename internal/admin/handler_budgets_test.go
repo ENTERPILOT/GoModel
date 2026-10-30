@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/usage"
 )
 
 type adminBudgetStore struct {
@@ -144,6 +146,99 @@ func TestBudgetEndpointsRejectPerChildWithoutEntitlement(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, rec.Code)
 	assert.Contains(t, rec.Body.String(), "quota_templates_not_entitled")
 	assert.Empty(t, store.budgets)
+}
+
+func TestBudgetEndpointsGateBilledCostBasis(t *testing.T) {
+	const billedBody = `{"scope":"label","subject":"acme","cost_basis":"billed","budget_key":{"period":"monthly"},"amount":100}`
+	tests := []struct {
+		name       string
+		body       string
+		entitled   bool
+		markups    bool
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "not entitled", body: billedBody, markups: true, wantStatus: http.StatusForbidden, wantCode: "billed_budgets_not_entitled"},
+		{name: "markups disabled", body: billedBody, entitled: true, wantStatus: http.StatusBadRequest, wantCode: "billed_budgets_markups_disabled"},
+		{name: "unknown basis", body: `{"scope":"label","subject":"acme","cost_basis":"gross","budget_key":{"period":"monthly"},"amount":100}`, entitled: true, markups: true, wantStatus: http.StatusBadRequest, wantCode: ""},
+		{name: "provider basis needs no entitlement", body: `{"scope":"label","subject":"acme","cost_basis":"provider","budget_key":{"period":"monthly"},"amount":100}`, wantStatus: http.StatusOK},
+		{name: "billed accepted", body: billedBody, entitled: true, markups: true, wantStatus: http.StatusOK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &adminBudgetStore{}
+			service, err := budget.NewService(context.Background(), store)
+			require.NoError(t, err)
+			h := NewHandler(nil, nil,
+				WithBudgets(service),
+				WithBilledBudgetsEnabled(tt.entitled),
+				WithBilling(usage.Billing{Enabled: tt.markups}),
+			)
+
+			c, rec := echotest.Request(t, http.MethodPut, "/admin/budgets", tt.body)
+			require.NoError(t, h.UpsertBudget(c))
+			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+			if tt.wantCode != "" {
+				assert.Contains(t, rec.Body.String(), tt.wantCode)
+			}
+			if tt.wantStatus != http.StatusOK {
+				assert.Empty(t, store.budgets)
+				return
+			}
+			body := echotest.Decode[budgetListResponse](t, rec)
+			require.Len(t, body.Budgets, 1)
+			var want struct {
+				CostBasis string `json:"cost_basis"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(tt.body), &want))
+			assert.Equal(t, want.CostBasis, body.Budgets[0].CostBasis)
+		})
+	}
+}
+
+func TestBudgetEndpointsKeepStoredBilledBasisWithoutEntitlement(t *testing.T) {
+	store := &adminBudgetStore{budgets: []budget.Budget{{
+		Scope: budget.ScopeLabel, Subject: "acme", CostBasis: budget.CostBasisBilled,
+		PeriodSeconds: budget.PeriodMonthlySeconds, Amount: 100, Source: budget.SourceManual,
+	}}}
+	service, err := budget.NewService(context.Background(), store, budget.WithBilledBudgets(false))
+	require.NoError(t, err)
+	h := NewHandler(nil, nil, WithBudgets(service))
+
+	// The listing reports the stored basis and the one spend is measured on.
+	c, rec := echotest.Request(t, http.MethodGet, "/admin/budgets", "")
+	require.NoError(t, h.ListBudgets(c))
+	body := echotest.Decode[budgetListResponse](t, rec)
+	require.Len(t, body.Budgets, 1)
+	assert.Equal(t, "billed", body.Budgets[0].CostBasis)
+	assert.Equal(t, "provider", body.Budgets[0].EnforcedCostBasis)
+
+	// Editing the amount, as the dashboard does, keeps the billed basis.
+	c, rec = echotest.Request(t, http.MethodPut, "/admin/budgets", `{"scope":"label","subject":"acme","cost_basis":"billed","budget_key":{"period":"monthly"},"amount":250}`)
+	require.NoError(t, h.UpsertBudget(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	body = echotest.Decode[budgetListResponse](t, rec)
+	require.Len(t, body.Budgets, 1)
+	assert.Equal(t, "billed", body.Budgets[0].CostBasis)
+	assert.Equal(t, "provider", body.Budgets[0].EnforcedCostBasis)
+	assert.InDelta(t, 250.0, body.Budgets[0].Amount, 1e-9)
+
+	// A new billed budget still needs the entitlement.
+	c, rec = echotest.Request(t, http.MethodPut, "/admin/budgets", `{"scope":"label","subject":"beta","cost_basis":"billed","budget_key":{"period":"monthly"},"amount":250}`)
+	require.NoError(t, h.UpsertBudget(c))
+	require.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "billed_budgets_not_entitled")
+}
+
+func TestBudgetEndpointsDefaultCostBasisToProvider(t *testing.T) {
+	store := &adminBudgetStore{}
+	h := newBudgetHandler(t, store)
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/budgets", `{"user_path":"/team","budget_key":{"period":"daily"},"amount":10}`)
+	require.NoError(t, h.UpsertBudget(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	body := echotest.Decode[budgetListResponse](t, rec)
+	require.Len(t, body.Budgets, 1)
+	assert.Equal(t, "provider", body.Budgets[0].CostBasis)
 }
 
 func TestBudgetEndpointsListStatuses(t *testing.T) {

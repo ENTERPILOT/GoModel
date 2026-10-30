@@ -35,9 +35,9 @@ func TestSQLiteUsageAuthKeyIDRoundTripAndFilter(t *testing.T) {
 		VALUES ('legacy', 'r-legacy', 'p-legacy', '2026-08-08T11:00:00Z', 'gpt-5', 'openai', '/v1/chat/completions', 1)`)
 	require.NoError(t, err)
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	cost := func(value float64) *float64 { return &value }

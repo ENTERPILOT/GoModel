@@ -71,19 +71,11 @@ spec:
           {{- end }}
           {{- with .Values.livenessProbe }}
           livenessProbe:
-            {{- $probe := deepCopy . }}
-            {{- if $probe.httpGet }}
-            {{- $_ := set $probe.httpGet "path" (include "gomodel.pathWithBasePath" (dict "root" $ "path" $probe.httpGet.path)) }}
-            {{- end }}
-            {{- toYaml $probe | nindent 12 }}
+            {{- include "gomodel.httpProbe" (dict "root" $ "probe" .) | nindent 12 }}
           {{- end }}
           {{- with .Values.readinessProbe }}
           readinessProbe:
-            {{- $probe := deepCopy . }}
-            {{- if $probe.httpGet }}
-            {{- $_ := set $probe.httpGet "path" (include "gomodel.pathWithBasePath" (dict "root" $ "path" $probe.httpGet.path)) }}
-            {{- end }}
-            {{- toYaml $probe | nindent 12 }}
+            {{- include "gomodel.httpProbe" (dict "root" $ "probe" .) | nindent 12 }}
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
