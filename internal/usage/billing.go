@@ -1,5 +1,10 @@
 package usage
 
+import (
+	"slices"
+	"strings"
+)
+
 // BilledCost returns what the caller is billed for a request that cost
 // totalCost upstream: the cost plus markupPercent, or zero for a response-cache
 // hit that is not billed, even when its cost is unknown. Otherwise a nil
@@ -40,4 +45,27 @@ func billedCacheHitsMode(mode string) string {
 		return CacheModeCached
 	}
 	return ""
+}
+
+// addPeriodBilledCost adds each period's billed cache hits to the daily
+// series, appending a row for a period billed only from the cache, and keeps
+// the series in period order.
+func addPeriodBilledCost(daily []DailyUsage, hits map[string]*float64) []DailyUsage {
+	seen := make(map[string]bool, len(daily))
+	for i := range daily {
+		seen[daily[i].Date] = true
+		daily[i].BilledCost = addCost(daily[i].BilledCost, hits[daily[i].Date])
+	}
+	added := false
+	for period, billed := range hits {
+		if seen[period] || billed == nil || *billed == 0 {
+			continue
+		}
+		daily = append(daily, DailyUsage{Date: period, BilledCost: billed})
+		added = true
+	}
+	if added {
+		slices.SortFunc(daily, func(a, b DailyUsage) int { return strings.Compare(a.Date, b.Date) })
+	}
+	return daily
 }

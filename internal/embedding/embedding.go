@@ -13,6 +13,7 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 )
 
@@ -67,7 +68,7 @@ func NewEmbedder(cfg config.EmbedderConfig, resolvedProviders map[string]config.
 			append([]string{raw.APIKey}, raw.APIKeys...)...,
 		),
 		model:      model,
-		httpClient: &http.Client{Timeout: defaultTimeout},
+		httpClient: httpclient.NewClientWithTimeout(defaultTimeout),
 	}, nil
 }
 

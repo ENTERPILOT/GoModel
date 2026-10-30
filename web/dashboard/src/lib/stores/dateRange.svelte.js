@@ -61,6 +61,31 @@ class DateRangeStore {
     return "days=" + this.days;
   }
 
+  // window describes the current range for URL state: { start, end } date
+  // keys for a custom range, { days } for a preset.
+  window() {
+    if (this.customStartDate && this.customEndDate) {
+      return {
+        start: formatDateParam(this.customStartDate),
+        end: formatDateParam(this.customEndDate),
+      };
+    }
+    return { days: this.days };
+  }
+
+  // applyWindow restores a range parsed from a shared link (see window()).
+  applyWindow(range) {
+    if (!range) return;
+    if (range.start && range.end) {
+      this.selectedPreset = null;
+      this.customStartDate = timezone.dateKeyToDate(range.start);
+      this.customEndDate = timezone.dateKeyToDate(range.end);
+      this.afterCustomChange();
+      return;
+    }
+    if (range.days) this.selectPreset(range.days);
+  }
+
   selectPreset(days) {
     this.selectedPreset = days;
     this.customStartDate = null;

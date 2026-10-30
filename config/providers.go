@@ -43,4 +43,35 @@ type RawProviderConfig struct {
 	// it also narrows models added by `models` in merge or allowlist mode.
 	ModelFilter ModelFilter          `yaml:"model_filter"`
 	Resilience  *RawResilienceConfig `yaml:"resilience"`
+	// WorkloadIdentity authenticates with a short-lived token exchanged for
+	// the workload's platform identity token instead of a static API key.
+	// Supported by the openai and anthropic types. An API key, when also set,
+	// wins, matching the official SDKs.
+	WorkloadIdentity WorkloadIdentityConfig `yaml:"workload_identity"`
+}
+
+// WorkloadIdentityConfig configures workload identity federation: the gateway
+// reads an identity token issued by its platform (Kubernetes, AWS, GCP,
+// Azure, GitHub Actions, SPIFFE) and exchanges it for a short-lived provider
+// access token. Which fields are required depends on the provider type.
+type WorkloadIdentityConfig struct {
+	// IdentityTokenFile is re-read on every exchange, so projected tokens
+	// that rotate on disk stay current. It wins over IdentityToken.
+	IdentityTokenFile string `yaml:"identity_token_file"`
+	IdentityToken     string `yaml:"identity_token"`
+	// TokenEndpoint overrides the provider's default exchange endpoint.
+	TokenEndpoint    string `yaml:"token_endpoint"`
+	ServiceAccountID string `yaml:"service_account_id"`
+	// IdentityProviderID is the OpenAI workload identity provider (openai).
+	IdentityProviderID string `yaml:"identity_provider_id"`
+	// FederationRuleID, OrganizationID and WorkspaceID select the Anthropic
+	// federation rule, organization and workspace (anthropic).
+	FederationRuleID string `yaml:"federation_rule_id"`
+	OrganizationID   string `yaml:"organization_id"`
+	WorkspaceID      string `yaml:"workspace_id"`
+}
+
+// Configured reports whether any workload identity field is set.
+func (w WorkloadIdentityConfig) Configured() bool {
+	return w != WorkloadIdentityConfig{}
 }

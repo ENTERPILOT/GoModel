@@ -5,6 +5,8 @@
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { auditModelDisplay, formatTimestampUTC } from "$lib/utils/format.js";
   import AuditAttemptTrack from "./AuditAttemptTrack.svelte";
+  import { auditList } from "./auditList.svelte.js";
+  import { auditEntryLabels } from "./audit-columns.js";
   import { conversationDrawer } from "./conversationDrawer.svelte.js";
   import {
     auditEntryLiveInProgress,
@@ -13,6 +15,7 @@
     formatTokensPerSecond,
     statusCodeClass,
   } from "./audit-logic.js";
+  import { labelChipStyle } from "$lib/utils/chartTheme.js";
   import { ChartNoAxesColumnIncreasing, ChevronDown, ChevronLeft, ChevronRight } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
@@ -30,6 +33,8 @@
     hidePath = false,
   } = $props();
 
+  const columns = $derived(auditList.auditColumns);
+  const labels = $derived(auditEntryLabels(entry));
   const tokensPerSecond = $derived(
     formatTokensPerSecond(auditOutputTokensPerSecond(entry)),
   );
@@ -118,40 +123,57 @@
         <Icon icon={ChartNoAxesColumnIncreasing} class="audit-session-usage-svg" />
       </button>
     {/if}
-    <span
-      class="audit-status-badge audit-request-badge {statusCodeClass(
-        entry.status_code,
-      )}"
-      title={m.audit_status({
-        status: entry.status_code || "-",
-        method: entry.method || "-",
-      })}
-      aria-label={(entry.status_code || "-") + " " + (entry.method || "-")}
-    >
-      <span class="audit-request-status" aria-hidden="true"
-        >{entry.status_code || "-"}</span
+    {#if columns.status}
+      <span
+        class="audit-status-badge audit-request-badge {statusCodeClass(
+          entry.status_code,
+        )}"
+        title={m.audit_status({
+          status: entry.status_code || "-",
+          method: entry.method || "-",
+        })}
+        aria-label={(entry.status_code || "-") + " " + (entry.method || "-")}
       >
-      <span aria-hidden="true">{entry.method || "-"}</span>
-    </span>
-    {#if entry.requested_model || entry.model}
+        <span class="audit-request-status" aria-hidden="true"
+          >{entry.status_code || "-"}</span
+        >
+        <span aria-hidden="true">{entry.method || "-"}</span>
+      </span>
+    {/if}
+    {#if columns.model && (entry.requested_model || entry.model)}
       <span class="audit-provider-model mono">{auditModelDisplay(entry)}</span>
     {/if}
-    {#if !hidePath}
+    {#if columns.path && !hidePath}
       <span class="audit-path mono">{entry.path || "-"}</span>
+    {/if}
+    {#if columns.labels && labels.length > 0}
+      <span class="usage-label-chips">
+        {#each labels as label (label)}
+          <span class="usage-label-chip audit-label-chip" style={labelChipStyle(label)}
+            >{label}</span
+          >
+        {/each}
+      </span>
     {/if}
   </div>
   <div class="audit-entry-right">
-    <AuditAttemptTrack {entry} />
-    <span
-      class="audit-timestamp mono font-size-md"
-      title={formatTimestampUTC(entry.timestamp)}
-      aria-label={timestamp}
-    >
-      <span class="audit-timestamp-full" aria-hidden="true">{timestamp}</span>
-      <span class="audit-timestamp-time" aria-hidden="true">{timestampTime}</span>
-    </span>
-    <span class="audit-timing mono font-size-md">{formatDurationNs(entry.duration_ns)}</span>
-    {#if tokensPerSecond}
+    {#if columns.attempts}
+      <AuditAttemptTrack {entry} />
+    {/if}
+    {#if columns.time}
+      <span
+        class="audit-timestamp mono font-size-md"
+        title={formatTimestampUTC(entry.timestamp)}
+        aria-label={timestamp}
+      >
+        <span class="audit-timestamp-full" aria-hidden="true">{timestamp}</span>
+        <span class="audit-timestamp-time" aria-hidden="true">{timestampTime}</span>
+      </span>
+    {/if}
+    {#if columns.duration}
+      <span class="audit-timing mono font-size-md">{formatDurationNs(entry.duration_ns)}</span>
+    {/if}
+    {#if columns.tokens && tokensPerSecond}
       <span class="audit-token-rate mono" title={m.audit_tokens_per_second_title()}
         >{tokensPerSecond}</span
       >
@@ -358,6 +380,12 @@
 
   .audit-timestamp-time {
     display: none;
+  }
+
+  /* Request labels are informational here; the shared chip is a filter
+     button on the usage page. */
+  .audit-label-chip {
+    cursor: inherit;
   }
 
   .audit-timing {

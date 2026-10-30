@@ -2,16 +2,22 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
+	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/gateway"
+	"github.com/enterpilot/gomodel/internal/ratelimit"
+	"github.com/enterpilot/gomodel/internal/usage"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
 )
 
@@ -33,9 +39,11 @@ type failoverProvider struct {
 	embeddingResponses map[string]*core.EmbeddingResponse
 	embeddingErrors    map[string]error
 	supportedModels    map[string]string
+	providerNames      map[string]string
 	chatCalls          []string
 	responsesCalls     []string
 	embeddingCalls     []string
+	embeddingRequests  []*core.EmbeddingRequest
 }
 
 func (p *failoverProvider) ChatCompletion(_ context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
@@ -87,6 +95,7 @@ func (p *failoverProvider) StreamResponses(_ context.Context, req *core.Response
 func (p *failoverProvider) Embeddings(_ context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
 	key := requestSelector(req.Model, req.Provider)
 	p.embeddingCalls = append(p.embeddingCalls, key)
+	p.embeddingRequests = append(p.embeddingRequests, req)
 	if err := p.embeddingErrors[key]; err != nil {
 		return nil, err
 	}
@@ -108,6 +117,17 @@ func (p *failoverProvider) GetProviderType(model string) string {
 		model = selector.QualifiedModel()
 	}
 	return p.supportedModels[model]
+}
+
+func (p *failoverProvider) GetProviderName(model string) string {
+	selector, err := core.ParseModelSelector(model, "")
+	if err != nil {
+		return ""
+	}
+	if name := p.providerNames[selector.QualifiedModel()]; name != "" {
+		return name
+	}
+	return selector.Provider
 }
 
 func TestChatCompletion_FallsBackToAlternateModel(t *testing.T) {
@@ -459,20 +479,225 @@ func TestChatCompletion_DoesNotFailoverOnNonModelNotFound(t *testing.T) {
 	require.Equal(t, []string{"gpt-4o"}, provider.chatCalls)
 }
 
-func TestEmbeddings_DoesNotFailover(t *testing.T) {
+func TestEmbeddings_FailoverPolicy(t *testing.T) {
+	primary := "text-embedding-3-small"
+	azure := "azure/text-embedding-3-small"
+	together := "together/text-embedding-3-small"
+	response := func(provider, model string) *core.EmbeddingResponse {
+		return &core.EmbeddingResponse{
+			Object: "list", Model: model, Provider: provider,
+			Data: []core.EmbeddingData{{Object: "embedding", Embedding: []byte(`[0.1,0.2]`)}},
+		}
+	}
+	serviceUnavailable := core.NewProviderError("openai", http.StatusServiceUnavailable, "model temporarily unavailable", nil)
+	tests := []struct {
+		name             string
+		primaryResponse  *core.EmbeddingResponse
+		primaryError     error
+		failoverResponse *core.EmbeddingResponse
+		failoverError    error
+		disableFailover  bool
+		denyFailover     bool
+		attemptCap       int
+		selectors        []core.ModelSelector
+		wantCalls        []string
+		wantStatus       int
+		wantResponse     string
+	}{
+		{
+			name:             "retryable upstream error",
+			primaryError:     serviceUnavailable,
+			failoverResponse: response("azure", "text-embedding-3-small"),
+			selectors:        []core.ModelSelector{{Provider: "azure", Model: "text-embedding-3-small"}},
+			wantCalls:        []string{primary, azure},
+			wantStatus:       http.StatusOK,
+			wantResponse:     "azure",
+		},
+		{
+			name:            "primary success",
+			primaryResponse: response("openai", "text-embedding-3-small"),
+			selectors:       []core.ModelSelector{{Provider: "azure", Model: "text-embedding-3-small"}},
+			wantCalls:       []string{primary},
+			wantStatus:      http.StatusOK,
+			wantResponse:    "openai",
+		},
+		{
+			name:             "workflow policy disables failover",
+			primaryError:     serviceUnavailable,
+			failoverResponse: response("azure", "text-embedding-3-small"),
+			disableFailover:  true,
+			selectors:        []core.ModelSelector{{Provider: "azure", Model: "text-embedding-3-small"}},
+			wantCalls:        []string{primary},
+			wantStatus:       http.StatusServiceUnavailable,
+		},
+		{
+			name:         "nonretryable client error",
+			primaryError: core.NewInvalidRequestError("invalid dimensions", nil),
+			selectors:    []core.ModelSelector{{Provider: "azure", Model: "text-embedding-3-small"}},
+			wantCalls:    []string{primary},
+			wantStatus:   http.StatusBadRequest,
+		},
+		{
+			name:          "all targets fail",
+			primaryError:  serviceUnavailable,
+			failoverError: core.NewProviderError("azure", http.StatusBadGateway, "alternate unavailable", nil),
+			selectors:     []core.ModelSelector{{Provider: "azure", Model: "text-embedding-3-small"}},
+			wantCalls:     []string{primary, azure},
+			wantStatus:    http.StatusBadGateway,
+		},
+		{
+			name:             "nil primary response is a retryable technical error",
+			failoverResponse: response("azure", "text-embedding-3-small"),
+			selectors:        []core.ModelSelector{{Provider: "azure", Model: "text-embedding-3-small"}},
+			wantCalls:        []string{primary, azure},
+			wantStatus:       http.StatusOK,
+			wantResponse:     "azure",
+		},
+		{
+			name:             "disallowed target is skipped",
+			primaryError:     serviceUnavailable,
+			failoverResponse: response("azure", "text-embedding-3-small"),
+			denyFailover:     true,
+			selectors:        []core.ModelSelector{{Provider: "azure", Model: "text-embedding-3-small"}},
+			wantCalls:        []string{primary},
+			wantStatus:       http.StatusServiceUnavailable,
+		},
+		{
+			name:             "attempt cap limits alternate calls",
+			primaryError:     serviceUnavailable,
+			failoverError:    core.NewProviderError("azure", http.StatusServiceUnavailable, "alternate unavailable", nil),
+			failoverResponse: response("together", "text-embedding-3-small"),
+			attemptCap:       1,
+			selectors: []core.ModelSelector{
+				{Provider: "azure", Model: "text-embedding-3-small"},
+				{Provider: "together", Model: "text-embedding-3-small"},
+			},
+			wantCalls:  []string{primary, azure},
+			wantStatus: http.StatusServiceUnavailable,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := &failoverProvider{
+				embeddingResponses: map[string]*core.EmbeddingResponse{},
+				embeddingErrors:    map[string]error{},
+				supportedModels: map[string]string{
+					primary:  "openai",
+					azure:    "azure",
+					together: "together",
+				},
+			}
+			if tt.primaryResponse != nil {
+				provider.embeddingResponses[primary] = tt.primaryResponse
+			}
+			if tt.primaryError != nil {
+				provider.embeddingErrors[primary] = tt.primaryError
+			}
+			if tt.failoverResponse != nil {
+				for _, selector := range tt.selectors {
+					if selector.Provider == "azure" || selector.Provider == "together" {
+						provider.embeddingResponses[selector.QualifiedModel()] = tt.failoverResponse
+					}
+				}
+			}
+			if tt.failoverError != nil {
+				provider.embeddingErrors[azure] = tt.failoverError
+			}
+
+			var policyResolver RequestWorkflowPolicyResolver
+			if tt.disableFailover {
+				policyResolver = requestWorkflowPolicyResolverFunc(func(core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
+					return &core.ResolvedWorkflowPolicy{VersionID: "failover-disabled", Features: core.WorkflowFeatures{Failover: false}}, nil
+				})
+			}
+			var authorizer RequestModelAuthorizer
+			if tt.denyFailover {
+				authorizer = &recordingModelAuthorizer{allow: func(selector core.ModelSelector) bool { return selector.Provider != "azure" }}
+			}
+			handler := newHandlerWithAuthorizer(provider, nil, nil, nil, nil, authorizer, policyResolver, failoverResolverStub{selectors: tt.selectors}, nil)
+			if tt.attemptCap > 0 {
+				handler.failoverPolicy = &gateway.FailoverPolicy{MaxAttempts: tt.attemptCap}
+			}
+
+			c, rec := echotest.Post(t, "/v1/embeddings", `{"model":"text-embedding-3-small","input":"hi"}`)
+			entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+			c.Set(string(auditlog.LogEntryKey), entry)
+			err := handler.Embeddings(c)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+			require.Equal(t, tt.wantCalls, provider.embeddingCalls)
+			if tt.wantResponse != "" {
+				var resp core.EmbeddingResponse
+				require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+				require.Equal(t, tt.wantResponse, resp.Provider)
+			}
+			if len(tt.wantCalls) > 1 && tt.name == "retryable upstream error" {
+				require.True(t, core.GetFailoverUsed(c.Request().Context()))
+				require.NotNil(t, entry.Data.Failover)
+				require.Equal(t, azure, entry.Data.Failover.TargetModel)
+				require.Len(t, entry.Data.Attempts, 2)
+			}
+		})
+	}
+}
+
+func TestEmbeddings_FailoverUsesInstanceMetadataAndForwardsRequest(t *testing.T) {
+	primary := "primary-openai/text-embedding-3-small"
+	backup := "backup-openai/text-embedding-3-small"
 	provider := &failoverProvider{
 		embeddingResponses: map[string]*core.EmbeddingResponse{
-			"azure/text-embedding-3-small": {
-				Object:   "list",
-				Model:    "text-embedding-3-small",
-				Provider: "azure",
-				Data: []core.EmbeddingData{{
-					Object:    "embedding",
-					Embedding: []byte(`[0.1,0.2]`),
-					Index:     0,
-				}},
-			},
+			backup: {Object: "list", Model: "text-embedding-3-small-v2", Provider: "openai"},
 		},
+		embeddingErrors: map[string]error{
+			primary: core.NewProviderError("openai", http.StatusTooManyRequests, "rate limited", nil),
+		},
+		supportedModels: map[string]string{primary: "openai", backup: "openai"},
+		providerNames:   map[string]string{primary: "primary-openai", backup: "backup-openai"},
+	}
+	logger := &usageCaptureLogger{config: usage.Config{Enabled: true}}
+	handler := newHandler(provider, nil, logger, nil, nil, nil, failoverResolverStub{
+		selectors: []core.ModelSelector{{Provider: "backup-openai", Model: "text-embedding-3-small"}},
+	}, nil)
+
+	c, rec := echotest.Post(t, "/v1/embeddings", `{"model":"text-embedding-3-small","provider":"primary-openai","input":["first","second"],"dimensions":256,"encoding_format":"base64","x_meta":{"source":"test"}}`)
+	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+	c.Set(string(auditlog.LogEntryKey), entry)
+	require.NoError(t, handler.Embeddings(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, []string{primary, backup}, provider.embeddingCalls)
+
+	var response core.EmbeddingResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	require.Equal(t, "backup-openai", response.Provider)
+	require.Equal(t, "text-embedding-3-small-v2", response.Model)
+	require.Len(t, provider.embeddingRequests, 2)
+	forwarded := provider.embeddingRequests[1]
+	require.Equal(t, []any{"first", "second"}, forwarded.Input)
+	require.Equal(t, "base64", forwarded.EncodingFormat)
+	require.NotNil(t, forwarded.Dimensions)
+	require.Equal(t, 256, *forwarded.Dimensions)
+	require.JSONEq(t, `{"source":"test"}`, string(forwarded.ExtraFields.Lookup("x_meta")))
+
+	require.True(t, core.GetFailoverUsed(c.Request().Context()))
+	require.NotNil(t, entry.Data.Failover)
+	require.Equal(t, backup, entry.Data.Failover.TargetModel)
+	require.Len(t, entry.Data.Attempts, 2)
+	require.Equal(t, "openai", entry.Data.Attempts[0].ProviderType)
+	require.Equal(t, "primary-openai", entry.Data.Attempts[0].ProviderName)
+	require.Equal(t, "openai", entry.Data.Attempts[1].ProviderType)
+	require.Equal(t, "backup-openai", entry.Data.Attempts[1].ProviderName)
+
+	entries := logger.Entries()
+	require.Len(t, entries, 1)
+	require.Equal(t, "openai", entries[0].Provider)
+	require.Equal(t, "backup-openai", entries[0].ProviderName)
+	require.Equal(t, "text-embedding-3-small-v2", entries[0].Model)
+	require.Equal(t, backup, entries[0].RoutedModel)
+}
+
+func TestEmbeddings_FailoverStopsWhenRequestContextIsCanceled(t *testing.T) {
+	provider := &failoverProvider{
 		embeddingErrors: map[string]error{
 			"text-embedding-3-small": core.NewProviderError("openai", http.StatusServiceUnavailable, "model temporarily unavailable", nil),
 		},
@@ -481,16 +706,147 @@ func TestEmbeddings_DoesNotFailover(t *testing.T) {
 			"azure/text-embedding-3-small": "azure",
 		},
 	}
-
 	handler := newHandler(provider, nil, nil, nil, nil, nil, failoverResolverStub{
 		selectors: []core.ModelSelector{{Provider: "azure", Model: "text-embedding-3-small"}},
 	}, nil)
-
 	c, rec := echotest.Post(t, "/v1/embeddings", `{"model":"text-embedding-3-small","input":"hi"}`)
-	err := handler.Embeddings(c)
-	require.NoError(t, err)
+	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+	c.Set(string(auditlog.LogEntryKey), entry)
+	ctx, cancel := context.WithCancel(c.Request().Context())
+	cancel()
+	c.SetRequest(c.Request().WithContext(ctx))
+
+	require.NoError(t, handler.Embeddings(c))
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
 	require.Equal(t, []string{"text-embedding-3-small"}, provider.embeddingCalls)
+
+	require.Len(t, entry.Data.Attempts, 1)
+	require.Equal(t, auditlog.AttemptKindPrimary, entry.Data.Attempts[0].Kind)
+	require.False(t, entry.Data.Attempts[0].Success)
+	require.Equal(t, http.StatusServiceUnavailable, entry.Data.Attempts[0].StatusCode)
+}
+
+func TestEmbeddings_AdmissionDefersPrimaryRateLimitToFailover(t *testing.T) {
+	primary := "primary-openai/text-embedding-3-small"
+	backup := "backup-openai/text-embedding-3-small"
+	provider := &failoverProvider{
+		embeddingResponses: map[string]*core.EmbeddingResponse{
+			primary: {Object: "list", Model: "text-embedding-3-small", Provider: "openai"},
+			backup:  {Object: "list", Model: "text-embedding-3-small", Provider: "openai"},
+		},
+		supportedModels: map[string]string{primary: "openai", backup: "openai"},
+		providerNames:   map[string]string{primary: "primary-openai", backup: "backup-openai"},
+	}
+	handler := newHandler(provider, nil, nil, nil, nil, nil, failoverResolverStub{
+		selectors: []core.ModelSelector{{Provider: "backup-openai", Model: "text-embedding-3-small"}},
+	}, nil)
+	handler.rateLimiter = newTestRateLimitService(t,
+		ratelimit.Rule{Scope: ratelimit.ScopeProvider, Subject: "primary-openai", PeriodSeconds: ratelimit.PeriodMinuteSeconds, MaxRequests: new(int64(1))},
+		rateLimitRuleWithRequests("/", 10),
+	)
+
+	request := `{"model":"text-embedding-3-small","provider":"primary-openai","input":"hi"}`
+	first, firstRec := echotest.Post(t, "/v1/embeddings", request)
+	require.NoError(t, handler.Embeddings(first))
+	require.Equal(t, http.StatusOK, firstRec.Code, firstRec.Body.String())
+
+	second, secondRec := echotest.Post(t, "/v1/embeddings", request)
+	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+	second.Set(string(auditlog.LogEntryKey), entry)
+	require.NoError(t, handler.Embeddings(second))
+	require.Equal(t, http.StatusOK, secondRec.Code, secondRec.Body.String())
+	require.Equal(t, []string{primary, backup}, provider.embeddingCalls)
+	require.True(t, core.GetFailoverUsed(second.Request().Context()))
+	require.Len(t, entry.Data.Attempts, 2)
+	require.Equal(t, auditlog.AttemptKindPrimary, entry.Data.Attempts[0].Kind, "saturated primary is recorded but not sent upstream")
+	require.Equal(t, auditlog.AttemptKindFailover, entry.Data.Attempts[1].Kind)
+}
+
+func TestEmbeddings_AdmissionDoesNotFailOverConsumerRejections(t *testing.T) {
+	primary := "primary-openai/text-embedding-3-small"
+	backup := "backup-openai/text-embedding-3-small"
+	newProvider := func() *failoverProvider {
+		return &failoverProvider{
+			embeddingResponses: map[string]*core.EmbeddingResponse{
+				primary: {Object: "list", Model: "text-embedding-3-small", Provider: "openai"},
+				backup:  {Object: "list", Model: "text-embedding-3-small", Provider: "openai"},
+			},
+			supportedModels: map[string]string{primary: "openai", backup: "openai"},
+			providerNames:   map[string]string{primary: "primary-openai", backup: "backup-openai"},
+		}
+	}
+	newEmbeddingsHandler := func(provider *failoverProvider) *Handler {
+		return newHandler(provider, nil, nil, nil, nil, nil, failoverResolverStub{
+			selectors: []core.ModelSelector{{Provider: "backup-openai", Model: "text-embedding-3-small"}},
+		}, nil)
+	}
+	request := `{"model":"text-embedding-3-small","provider":"primary-openai","input":"hi"}`
+
+	t.Run("consumer rate limit", func(t *testing.T) {
+		provider := newProvider()
+		handler := newEmbeddingsHandler(provider)
+		handler.rateLimiter = newTestRateLimitService(t, rateLimitRuleWithRequests("/", 1))
+
+		first, firstRec := echotest.Post(t, "/v1/embeddings", request)
+		require.NoError(t, handler.Embeddings(first))
+		require.Equal(t, http.StatusOK, firstRec.Code, firstRec.Body.String())
+
+		second, secondRec := echotest.Post(t, "/v1/embeddings", request)
+		require.NoError(t, handler.Embeddings(second))
+		require.Equal(t, http.StatusTooManyRequests, secondRec.Code, secondRec.Body.String())
+		require.Equal(t, []string{primary}, provider.embeddingCalls, "consumer rejection must not try the alternate")
+	})
+
+	t.Run("consumer budget", func(t *testing.T) {
+		provider := newProvider()
+		handler := newEmbeddingsHandler(provider)
+		handler.budgetChecker = exceededBudgetChecker{scope: budget.ScopeUserPath}
+
+		c, rec := echotest.Post(t, "/v1/embeddings", request)
+		require.NoError(t, handler.Embeddings(c))
+		require.Equal(t, http.StatusTooManyRequests, rec.Code, rec.Body.String())
+		require.Empty(t, provider.embeddingCalls, "consumer budget rejection must not try any provider")
+	})
+}
+
+type embeddingProviderBudgetChecker struct{}
+
+func (embeddingProviderBudgetChecker) Check(_ context.Context, subjects budget.Subjects, _ time.Time) error {
+	if subjects.Provider != "primary-openai" {
+		return nil
+	}
+	return &budget.ExceededError{Result: budget.CheckResult{
+		Budget:    budget.Budget{Scope: budget.ScopeProvider, Subject: subjects.Provider, PeriodSeconds: budget.PeriodDailySeconds, Amount: 1},
+		PeriodEnd: time.Now().UTC().Add(time.Hour),
+		Spent:     2,
+		HasUsage:  true,
+	}}
+}
+
+func (embeddingProviderBudgetChecker) ProviderWithinBudget(_ context.Context, providerName string) bool {
+	return providerName != "primary-openai"
+}
+
+func TestEmbeddings_AdmissionDefersPrimaryProviderBudgetToFailover(t *testing.T) {
+	primary := "primary-openai/text-embedding-3-small"
+	backup := "backup-openai/text-embedding-3-small"
+	provider := &failoverProvider{
+		embeddingResponses: map[string]*core.EmbeddingResponse{
+			backup: {Object: "list", Model: "text-embedding-3-small", Provider: "openai"},
+		},
+		supportedModels: map[string]string{primary: "openai", backup: "openai"},
+		providerNames:   map[string]string{primary: "primary-openai", backup: "backup-openai"},
+	}
+	handler := newHandler(provider, nil, nil, nil, nil, nil, failoverResolverStub{
+		selectors: []core.ModelSelector{{Provider: "backup-openai", Model: "text-embedding-3-small"}},
+	}, nil)
+	handler.budgetChecker = embeddingProviderBudgetChecker{}
+
+	c, rec := echotest.Post(t, "/v1/embeddings", `{"model":"text-embedding-3-small","provider":"primary-openai","input":"hi"}`)
+	require.NoError(t, handler.Embeddings(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, []string{backup}, provider.embeddingCalls, "provider budget fallback skips the exhausted primary")
+	require.True(t, core.GetFailoverUsed(c.Request().Context()))
 }
 
 // TestChatCompletion_SingleTargetAliasKeepsSubtreeFailover pins the

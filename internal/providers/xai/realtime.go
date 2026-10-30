@@ -33,7 +33,7 @@ func (p *Provider) RealtimeTarget(ctx context.Context, req *core.RealtimeRequest
 		return nil, err
 	}
 
-	return &core.RealtimeTarget{URL: endpoint, Headers: p.realtimeAuthHeaders(ctx)}, nil
+	return &core.RealtimeTarget{URL: endpoint, Headers: p.realtimeAuthHeaders(ctx), HTTPClient: p.compat.HTTPClient()}, nil
 }
 
 // RealtimeCallTarget implements core.RealtimeCallProvider for xAI's WebRTC SDP

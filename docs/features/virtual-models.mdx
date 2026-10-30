@@ -30,7 +30,7 @@ policy on the **Source** selector.
 
 GoModel does not persist empty, ineffective access policies, whether saved from
 the dashboard or through the admin API. If a saved policy has no target, user
-paths, description, or slowdown and its enabled state matches the inherited/default
+paths, description, slowdown, or reasoning effort and its enabled state matches the inherited/default
 access state, GoModel removes the stored row. It retains an otherwise empty
 policy when that row still overrides a disabled default or an inherited
 user-path restriction.
@@ -56,6 +56,53 @@ When an alias and its concrete target both have a slowdown, the alias value
 wins. An alias without its own value inherits the selected target model's
 slowdown; set the alias to `0` to override that inheritance. This also applies
 to load-balanced virtual models after a target is selected.
+
+A model's own slowdown can be set exactly (`openai/gpt-4o`) or model-wide
+(`gpt-4o`, on every provider), and the exact value wins. A more specific entry
+that leaves slowdown empty, or whose `user_paths` exclude the caller, does not
+hide a broader one, so a provider-wide access rule never turns a model's
+slowdown off.
+
+## Force a reasoning effort
+
+Set **Reasoning effort override** on a concrete model or redirect to send that
+reasoning effort upstream, whatever the client asked for. Use it when a model
+accepts only some levels (for example a self-hosted model that rejects `high`)
+or to pin cost and latency for a model. Values are `none`, `minimal`, `low`,
+`medium`, `high`, `xhigh`, and `max`; leave it empty (the default) to keep the
+client's value.
+
+```yaml
+virtual_models:
+  - source: hetzner/qwen3.8 # a concrete model
+    reasoning_effort: medium
+  - source: team-model # a load balancer
+    reasoning_effort: high
+    targets:
+      - { model: openai/gpt-5.2 }
+      - { model: hetzner/qwen3.8 }
+```
+
+The override replaces both `reasoning.effort` and the flat `reasoning_effort`
+field, and applies even when the client sent no effort. GoModel then translates
+it to each provider's own reasoning parameter, as it does for client values.
+
+The deepest configured value wins, per attempt. A concrete model's override beats
+any redirect above it, and an inner [chained](#chain-virtual-models) virtual
+model beats an outer one. In the example above, `team-model` sends `high` to
+`openai/gpt-5.2` and `medium` to `hetzner/qwen3.8`, including when either is
+reached through failover. When one model is reachable through several inner
+virtual models, the path routing chose applies; a failover leg uses the first
+declared path to its model. It applies to Chat Completions, the Responses API,
+and the Anthropic Messages API; batches and provider passthrough are not
+rewritten.
+
+Because a concrete model's override beats every alias above it, set it only for
+levels the model cannot accept, and put policy on aliases. For example, `fast`
+and `smart` aliases of the same model can send `low` and `high`; an override on
+that model would make both send its value. This is the reverse of slowdown,
+where the alias wins. As with slowdown, an exact override beats a model-wide
+one, and an entry that sets no effort does not hide a broader one.
 
 The rest of this page covers redirects.
 
@@ -285,7 +332,8 @@ Each entry accepts `source`, a single `target` (shorthand) or a `targets` list,
 [Session Keeping](/features/session-keeping)), `failover` (default `true`; see
 [Failover](/features/failover)), `user_paths`, `description`,
 `slowdown` (`0` disables inherited slowdown; active factors range from `0.1` to
-`10`), and `enabled`.
+`10`), `reasoning_effort` (see [Force a reasoning effort](#force-a-reasoning-effort)),
+and `enabled`.
 A target `model` may name another declared virtual model (see
 [Chain virtual models](#chain-virtual-models)).
 Leave the targets empty to declare an access policy on the `source` selector. An

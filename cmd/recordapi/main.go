@@ -74,7 +74,7 @@ var providerConfigs = map[string]struct {
 		contentType: "application/json",
 	},
 	"kimicode": {
-		baseURL:     "https://api.kimi.com/coding",
+		baseURL:     "https://api.kimi.ai/coding",
 		envKey:      "KIMICODE_API_KEY",
 		authHeader:  "Authorization",
 		contentType: "application/json",

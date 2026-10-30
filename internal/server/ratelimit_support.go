@@ -66,14 +66,34 @@ func enforceRateLimit(c *echo.Context, limiter RateLimiter, route rateLimitRoute
 	if limiter == nil || c == nil || c.Request() == nil {
 		return noopRelease, nil
 	}
-	reservation, err := acquireRateLimitForContext(c.Request().Context(), limiter, route)
+	return reserveRateLimit(c.Request().Context(), limiter, route, rateLimitHeaderSetter(c))
+}
+
+// rateLimitHeaderSetter copies an admitted reservation's x-ratelimit-*
+// headers onto the response.
+func rateLimitHeaderSetter(c *echo.Context) func(*ratelimit.Reservation) {
+	return func(reservation *ratelimit.Reservation) {
+		applyRateLimitHeaders(c.Response().Header(), reservation.Headers())
+	}
+}
+
+// reserveRateLimit admits ctx against matching rate limit rules and passes an
+// admitted reservation to onReserve, when set. It returns the reservation's
+// release function.
+func reserveRateLimit(ctx context.Context, limiter RateLimiter, route rateLimitRoute, onReserve func(*ratelimit.Reservation)) (func(), error) {
+	if limiter == nil {
+		return noopRelease, nil
+	}
+	reservation, err := acquireRateLimitForContext(ctx, limiter, route)
 	if err != nil {
 		return noopRelease, err
 	}
 	if reservation == nil {
 		return noopRelease, nil
 	}
-	applyRateLimitHeaders(c.Response().Header(), reservation.Headers())
+	if onReserve != nil {
+		onReserve(reservation)
+	}
 	return reservation.Release, nil
 }
 
@@ -96,7 +116,16 @@ func (a admission) dispatchContext(ctx context.Context) context.Context {
 // then budget. On a budget rejection the reservation is released here, so
 // callers never hold a concurrency slot for a refused request.
 func enforceAdmission(c *echo.Context, limiter RateLimiter, checker BudgetChecker, route rateLimitRoute) (admission, error) {
-	release, err := enforceRateLimit(c, limiter, route)
+	if c == nil || c.Request() == nil {
+		return admission{release: noopRelease}, nil
+	}
+	return admit(c.Request().Context(), limiter, checker, route, rateLimitHeaderSetter(c))
+}
+
+// admit is enforceAdmission over a context, for callers without an HTTP
+// exchange. onReserve, when set, receives each admitted reservation.
+func admit(ctx context.Context, limiter RateLimiter, checker BudgetChecker, route rateLimitRoute, onReserve func(*ratelimit.Reservation)) (admission, error) {
+	release, err := reserveRateLimit(ctx, limiter, route, onReserve)
 	var saturated error
 	if err != nil {
 		saturated = routeSaturationDeferrableToFailover(err, route)
@@ -105,12 +134,12 @@ func enforceAdmission(c *echo.Context, limiter RateLimiter, checker BudgetChecke
 		}
 		// The saturated route defers to failover, but consumer limits still
 		// gate (and count) the request, which may execute on another target.
-		release, err = enforceRateLimit(c, limiter, rateLimitRoute{})
+		release, err = reserveRateLimit(ctx, limiter, rateLimitRoute{}, onReserve)
 		if err != nil {
 			return admission{release: noopRelease}, err
 		}
 	}
-	if err := enforceBudget(c, checker, route); err != nil {
+	if err := enforceBudgetForContext(ctx, checker, route); err != nil {
 		deferred := providerBudgetDeferrableToFailover(err, route)
 		if deferred == nil {
 			release()
