@@ -399,7 +399,7 @@ prompt 阶段只运行一次，因此故障转移尝试会收到相同的文本�
 | `response_set` | 替换发送给客户端的响应上的某个 Header。 |
 | `response_add` | 向客户端响应 Header 追加一个值，保留已有值。即使实例在两个阶段都运行，每个请求也只应用一次。 |
 | `response_remove` | 从客户端响应中删除某个 Header，包括 GoModel 自身添加的 Header（例如 `X-Request-Id`）。 |
-| `upstream_set` | 用于提供商调用的静态 Header。在此版本中只记录、不转发。 |
+| `upstream_set` | 合并到该请求的每一次提供商调用中的静态 Header（前提是经由网关的 HTTP 客户端发出：包括故障转移尝试、token 计数和压缩调用，Bedrock 除外）。携带凭据的 Header、决定连接或请求体的 Header、`Accept-Encoding` 以及 `anthropic-beta` 会被拒绝；参见[上游请求头](/zh/advanced/plugins)。 |
 
 凭据类 Header（`Authorization`、`X-Api-Key`、`Cookie` 等）永远无法编辑，名称中包含 `secret` 或 `token` 的 Header 也无法设置。
 

@@ -274,7 +274,7 @@ Jeder Hook erhält einen `*pluginapi.Exchange`, in jeder Phase eines Requests da
 | `Prompt` | `*Prompt` | die Konversation (`Messages` mit stabilen IDs und typisierten `Parts`: Text, Bild, Audio, Datei, Tool Call, Tool-Ergebnis, Reasoning, Refusal, opak), `Tools`, `Params`, Roh-Body. Bearbeitung über `SetText`, `SetMedia`, `SetToolArguments`, `SetToolResult`, `Insert`, `Append`, `Remove`, `SetParam`; `TextTargets(roles...)` listet jeden Textteil auf, einschließlich Text in Tool-Ergebnissen, und `SetTargetText` schreibt einen davon zurück |
 | `Response` | `*Completion` | die Response, `nil` bis zur Phase `response`: `Choices` mit demselben `Part`-Modell, `Usage`, Roh-Body. Bearbeitung über `SetText`, `ReplaceText`, `SetFinishReason`, `SetToolArguments`; `TextTargets` und `SetTargetText` funktionieren wie bei `Prompt` |
 | `Stream` | `*StreamState` | bisher angesammelter Text pro Choice und die Anzahl der Events; `nil` bei Requests ohne Streaming |
-| `Headers` | `*Headers` | `Request` (eingehend, Zugangsdaten geschwärzt; Änderungen in der Phase `prompt` gelten für den laufenden Request bei späteren Plugins und beim Request-Logging, nicht für den Provider-Aufruf), `Response` (wird auf die Client-Response angewendet; ein auf den leeren String gesetzter Header wird entfernt, einschließlich solcher, die das Gateway hinzufügt, wie `X-Request-Id`), `Upstream` (wird festgehalten, in diesem Release aber nicht weitergeleitet) |
+| `Headers` | `*Headers` | `Request` (eingehend, Zugangsdaten geschwärzt; Änderungen in der Phase `prompt` gelten für den laufenden Request bei späteren Plugins und beim Request-Logging, nicht für den Provider-Aufruf), `Response` (wird auf die Client-Response angewendet; ein auf den leeren String gesetzter Header wird entfernt, einschließlich solcher, die das Gateway hinzufügt, wie `X-Request-Id`), `Upstream` (wird mit jeder Provider-Anfrage des Requests gesendet, die über den HTTP-Client des Gateways läuft — Bedrock, das das AWS SDK direkt nutzt, ausgenommen —, einschließlich Failover-Versuchen sowie Aufrufen zur Token-Zählung und Kompaktierung; Header mit Zugangsdaten, Header, die die Verbindung oder den Body bestimmen, `Accept-Encoding` und vom Provider ausgehandelte Header werden abgelehnt; Anfragen, die das Gateway für eigene Zwecke stellt, tragen keine dieser Header) |
 | `Values` | `Values` | Request-bezogener Speicher, den alle Hooks des Requests gemeinsam nutzen; stellen Sie Keys den Plugin-Namen voran |
 
 Änderungen erfolgen über Methoden, nicht über Feldzuweisungen, sodass GoModel nur das neu kodiert,
@@ -302,6 +302,66 @@ ruft es selbst ab. Medien innerhalb eines Tool-Ergebnisses werden mit `SetToolRe
 `Meta.Cache.PlannedPrefixMessages` teilt einem Prompt-Plugin mit, wie viele führende Nachrichten
 der Cache-Planer des Providers als gecachtes Präfix markieren wird. Anhängen erhält den Cache;
 Bearbeitungen innerhalb des Präfixes machen ihn für die Session ungültig.
+
+### Upstream-Header
+
+`Headers.Upstream` setzt einen Header auf den Provider-Aufruf selbst: eine
+request-bezogene Routing- oder Abrechnungs-Eigenschaft, die das Upstream erwartet,
+etwa die von Helicone, oder ein organisatorisches Tag, nach dem ein Gateway vor dem
+Provider routet. Zugangsdaten für einen Provider gehören nicht hierher — die Namen,
+die das Gateway als Zugangsdaten behandelt, werden abgelehnt, und jeder andere Wert
+wird an den Provider weitergegeben. Das Host loggt nur, wie viele Header ein Plugin
+gesetzt hat, nie deren Werte. Weisen Sie die Map in einem Hook der Phase `prompt` zu,
+bevor der Provider-Aufruf läuft:
+
+```go
+import "net/http"
+
+func (p *tenantHint) OnPrompt(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+	x.Headers.Upstream = http.Header{
+		"Helicone-Property-Tenant":  {x.Meta.UserPath},
+		"Helicone-Property-Request": {x.Meta.RequestID},
+	}
+	return pluginapi.Allow(), nil
+}
+```
+
+Was das Gateway damit macht:
+
+- Jeder Provider-Versuch des Requests trägt sie, einschließlich Failover auf einen
+  anderen Provider, ebenso die Aufrufe zur Token-Zählung und Kompaktierung, die der
+  Request auslöst. Jeder Versuch sendet sie an das für diesen Versuch gewählte
+  Upstream: Ein Failover kann auf einen anderen Provider und eine andere Base-URL
+  auflösen, und die Header folgen ihm. Jeder Aufruf, der über den HTTP-Client des
+  Gateways läuft, wohlgemerkt; Bedrock, das das AWS SDK direkt aufruft, trägt sie
+  nicht.
+- Inferenz, die das Gateway für eigene Zwecke stellt, trägt sie nicht. Der LLM-Judge
+  einer Guardrail ruft den Provider über das Plugin-`Host` im Request-Kontext auf,
+  und dieser Aufruf verwirft die Header: Sie beschreiben den Provider des Clients,
+  nicht das Modell, das das Gateway für die Guardrail gewählt hat.
+- Diese Namen werden abgelehnt statt zusammengeführt: Header mit Zugangsdaten
+  (`Authorization`, `Proxy-Authorization`, `x-api-key`, `api-key`, `x-goog-api-key`,
+  `x-anthropic-api-key`, `xi-api-key`, `x-auth-token`, `x-access-token`,
+  `x-gomodel-key`, `Cookie`, `Set-Cookie`), die die Verbindung rahmen (`Host`,
+  `Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`,
+  `Proxy-Connection`, `Proxy-Authenticate`, `Te`, `Trailer`, `Upgrade`, `Expect`),
+  die den Body beschreiben, den das Gateway kodiert hat (`Content-Type`,
+  `Content-Encoding`), `Accept-Encoding`, das die Kompression der Antwort aushandelt,
+  und `anthropic-beta`, das Provider-Features auswählt und das Flag
+  `oauth-2025-04-20` behalten muss, das Abo-Zugangsdaten brauchen.
+- Jeder andere Name erreicht die Leitung mit dem Wert des Plugins und ersetzt einen
+  Header des Requests sowie einen, den der Provider selbst gesetzt hat. Nur die oben
+  genannten Namen sind geschützt; die übrigen Header des Providers nicht.
+- Das Host faltet die Header eines Hooks in den Request-State, wenn diese Phase
+  endet; ein Wert, der erst nach dem Provider-Aufruf geschrieben wird — aus einem Hook
+  der Phase `response` —, wirkt nicht mehr. Behandeln Sie die Map, die Sie aus dem
+  Kontext erhalten, als schreibgeschützt.
+
+**Upgrade von einem Release, das diese Header festhielt, ohne sie zu senden.** Ein
+Plugin, das `Headers.Upstream` auf einem solchen Release bereits gesetzt hat, bekam
+seine Werte gespeichert und verworfen. Nach dem Upgrade erreichen sie zum ersten Mal
+den Provider oder den Proxy davor: Prüfen Sie, ob das Upstream sie akzeptiert, bevor
+Sie das Upgrade ausrollen.
 
 ## Konfiguration
 

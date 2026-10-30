@@ -285,7 +285,7 @@ requestu:
 | `Prompt` | `*Prompt` | konwersacja (`Messages` ze stabilnymi ID i typowanymi `Parts`: tekst, obraz, audio, plik, wywołanie narzędzia, wynik narzędzia, reasoning, odmowa, nieprzezroczysta część), `Tools`, `Params`, surowa treść. Edytuj przez `SetText`, `SetMedia`, `SetToolArguments`, `SetToolResult`, `Insert`, `Append`, `Remove`, `SetParam`; `TextTargets(roles...)` wyświetla każdą część tekstową, łącznie z tekstem wyników narzędzi, a `SetTargetText` zapisuje ją z powrotem |
 | `Response` | `*Completion` | odpowiedź, `nil` do fazy response: `Choices` z tym samym modelem `Part`, `Usage`, surowa treść. Edytuj przez `SetText`, `ReplaceText`, `SetFinishReason`, `SetToolArguments`; `TextTargets` i `SetTargetText` działają jak w `Prompt` |
 | `Stream` | `*StreamState` | dotychczas zebrany tekst dla każdego choice i liczba zdarzeń; `nil` dla requestów bez streamingu |
-| `Headers` | `*Headers` | `Request` (przychodzące, z zamaskowanymi danymi uwierzytelniającymi; edycje w fazie prompt dotyczą bieżącego requestu dla kolejnych pluginów i logowania requestu, a nie wywołania providera), `Response` (stosowane do odpowiedzi dla klienta; nagłówek ustawiony na pusty string jest usuwany, łącznie z tymi dodawanymi przez gateway, jak `X-Request-Id`), `Upstream` (zapisywane, w tym release nieprzekazywane dalej) |
+| `Headers` | `*Headers` | `Request` (przychodzące, z zamaskowanymi danymi uwierzytelniającymi; edycje w fazie prompt dotyczą bieżącego requestu dla kolejnych pluginów i logowania requestu, a nie wywołania providera), `Response` (stosowane do odpowiedzi dla klienta; nagłówek ustawiony na pusty string jest usuwany, łącznie z tymi dodawanymi przez gateway, jak `X-Request-Id`), `Upstream` (wysyłane z każdym wywołaniem providera w ramach requestu, które przechodzi przez klienta HTTP gatewaya — z wyjątkiem Bedrocka, który wywołuje SDK AWS bezpośrednio —, łącznie z próbami failover oraz wywołaniami zliczania tokenów i kompakcji; nagłówki z danymi uwierzytelniającymi, nagłówki określające połączenie lub ciało żądania, `Accept-Encoding` oraz nagłówki negocjowane przez providera są odrzucane; requesty, które gateway wykonuje na własne potrzeby, ich nie przenoszą) |
 | `Values` | `Values` | zbiór danych na request współdzielony przez wszystkie hooki requestu; poprzedzaj klucze nazwą pluginu |
 
 Edycje przechodzą przez metody, a nie przypisania pól, więc GoModel ponownie koduje tylko
@@ -315,6 +315,62 @@ zastępuje się przez `SetToolResult`.
 `Meta.Cache.PlannedPrefixMessages` informuje plugin fazy prompt, ile początkowych
 wiadomości planer cache providera oznaczy jako prefiks w cache. Dopisywanie
 zachowuje cache; edycja wewnątrz prefiksu unieważnia go dla sesji.
+
+### Nagłówki upstream
+
+`Headers.Upstream` umieszcza nagłówek w samym wywołaniu providera: właściwość
+routingu lub rozliczeń na poziomie requestu, której oczekuje upstream, taka jak
+w Helicone, albo tag organizacyjny, po którym routuje gateway przed providerem.
+Dane uwierzytelniające providera nie należą tutaj — nazwy, które gateway traktuje
+jako dane uwierzytelniające, są odrzucane, a każda inna wartość jest przekazywana
+do providera. Host loguje tylko, ile nagłówków ustawił plugin, nigdy ich wartości.
+Przypisz mapę w hooku fazy prompt, zanim wykona się wywołanie providera:
+
+```go
+import "net/http"
+
+func (p *tenantHint) OnPrompt(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+	x.Headers.Upstream = http.Header{
+		"Helicone-Property-Tenant":  {x.Meta.UserPath},
+		"Helicone-Property-Request": {x.Meta.RequestID},
+	}
+	return pluginapi.Allow(), nil
+}
+```
+
+Co gateway z nimi robi:
+
+- Każda próba providera w ramach requestu je przenosi, łącznie z failoverem do
+  innego providera, a także wywołania zliczania tokenów i kompakcji, które request
+  wykonuje. Każda próba wysyła je do upstreamu wybranego dla tej próby: failover może
+  rozwiązać się na innego providera i inny base URL, a nagłówki idą za nim. Każde
+  wywołanie, które przechodzi przez klienta HTTP gatewaya — Bedrock, który wywołuje
+  SDK AWS bezpośrednio, ich nie przenosi.
+- Inferencja, którą gateway wykonuje na własne potrzeby, ich nie przenosi. Sędzia
+  LLM guardraila wywołuje providera przez pluginowe `Host` w kontekście requestu,
+  a to wywołanie odrzuca te nagłówki: opisują providera klienta, a nie model, który
+  gateway wybrał dla guardraila.
+- Te nazwy są odrzucane, a nie scalane: nagłówki z danymi uwierzytelniającymi
+  (`Authorization`, `Proxy-Authorization`, `x-api-key`, `api-key`, `x-goog-api-key`,
+  `x-anthropic-api-key`, `xi-api-key`, `x-auth-token`, `x-access-token`,
+  `x-gomodel-key`, `Cookie`, `Set-Cookie`), te, które określają połączenie (`Host`,
+  `Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`,
+  `Proxy-Connection`, `Proxy-Authenticate`, `Te`, `Trailer`, `Upgrade`, `Expect`),
+  te, które opisują ciało zakodowane przez gateway (`Content-Type`,
+  `Content-Encoding`), `Accept-Encoding`, które negocjuje kompresję odpowiedzi,
+  oraz `anthropic-beta`, które wybiera funkcje providera i musi zachować flagę
+  `oauth-2025-04-20` wymaganą przez dane uwierzytelniające subskrypcji.
+- Każda inna nazwa trafia na wire z wartością pluginu, zastępując nagłówek
+  przenoszony przez request oraz ten, który provider ustawił sam. Chronione są tylko
+  nazwy wymienione powyżej; pozostałe nagłówki providera nie.
+- Host scala nagłówki hooka ze stanem requestu, gdy faza się kończy, więc wartość
+  zapisana po wykonaniu wywołania providera — z hooka fazy response — już na nie nie
+  wpływa. Mapę otrzymaną z kontekstu traktuj jako tylko do odczytu.
+
+**Aktualizacja z wydania, które te nagłówki rejestrowało, ale nie wysyłało.** Plugin,
+który ustawił `Headers.Upstream` już na takim wydaniu, miał wartości zapisane
+i odrzucone. Po aktualizacji po raz pierwszy docierają do providera lub proxy przed
+nim: sprawdź, czy upstream je akceptuje, zanim wdrożysz aktualizację.
 
 ## Konfiguracja
 
