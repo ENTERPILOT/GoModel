@@ -326,6 +326,10 @@ func (r *ModelRegistry) fetchAllProviderModels(
 // honest 502/503 instead of "model not found"), while ModelAvailable reports
 // false so virtual-model load balancing skips it — the same routing outcome
 // the old wipe produced, without losing the inventory.
+//
+// A provider registered or replaced after the sweep started keeps its current
+// inventory untouched: the sweep's result for a replaced provider instance is
+// discarded, and must not erase what its replacement inherited.
 func (r *ModelRegistry) applyFetchedInventory(
 	providerTypes map[core.Provider]string,
 	fetched fetchedInventory,
@@ -337,7 +341,7 @@ func (r *ModelRegistry) applyFetchedInventory(
 	r.dropUnregisteredFetchedProvidersLocked(&fetched)
 	stale := make(map[string]bool, len(fetched.runtimeUpdates))
 	carriedForward := 0
-	for name := range fetched.runtimeUpdates {
+	for _, name := range r.providerOrderNamesLocked() {
 		if _, ok := fetched.modelsByProvider[name]; ok {
 			continue // this sweep produced authoritative inventory
 		}
@@ -346,6 +350,11 @@ func (r *ModelRegistry) applyFetchedInventory(
 			continue // nothing to carry forward
 		}
 		fetched.modelsByProvider[name] = previous
+		if _, swept := fetched.runtimeUpdates[name]; !swept {
+			// Registered or replaced after this sweep started, so the sweep
+			// says nothing about it: its current inventory stays as it is.
+			continue
+		}
 		stale[name] = true
 		carriedForward++
 	}

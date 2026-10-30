@@ -431,7 +431,10 @@ This covers budgets (definitions, settings, and resets), rate limit rules and
 counter resets, provider credentials (add, edit, disable, delete), managed API
 keys (including revocation), user policies, virtual models, pricing overrides,
 tagging rules, guardrails, workflows, and MCP servers. A provider added on another replica
-starts routing once its model list has been fetched.
+starts routing once its model list has been fetched. A provider whose credentials
+change keeps routing the models it already served, through the new credentials,
+while its model list is fetched again; models missing from the new list stop
+routing once it arrives, and if the fetch fails the previous list keeps serving.
 
 A replica that fails to apply a change logs a warning once and retries on every
 poll until it applies. One exception: a stored provider that fails to build on a

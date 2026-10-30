@@ -264,6 +264,20 @@ func (r *ModelRegistry) RegisterProviderWithNameAndType(provider core.Provider, 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	providerName, providerType = r.providerIdentityLocked(providerName, providerType)
+	r.providers = append(r.providers, provider)
+	r.providerTypes[provider] = providerType
+	r.providerNames[provider] = providerName
+
+	state := r.providerRuntime[providerName]
+	state.registered = true
+	r.providerRuntime[providerName] = state
+}
+
+// providerIdentityLocked trims a provider's configured name and type and
+// names an unnamed provider after its type, or its registration position when
+// it has no type either. Caller must hold r.mu.
+func (r *ModelRegistry) providerIdentityLocked(providerName, providerType string) (string, string) {
 	providerName = strings.TrimSpace(providerName)
 	providerType = strings.TrimSpace(providerType)
 	if providerName == "" {
@@ -273,14 +287,7 @@ func (r *ModelRegistry) RegisterProviderWithNameAndType(provider core.Provider, 
 			providerName = fmt.Sprintf("provider-%d", len(r.providers)+1)
 		}
 	}
-
-	r.providers = append(r.providers, provider)
-	r.providerTypes[provider] = providerType
-	r.providerNames[provider] = providerName
-
-	state := r.providerRuntime[providerName]
-	state.registered = true
-	r.providerRuntime[providerName] = state
+	return providerName, providerType
 }
 
 // UnregisterProvider removes every provider instance registered under name
