@@ -450,7 +450,7 @@ Every reporting endpoint under `/admin/usage/*` except `throughput`, plus
 
 | Parameter   | Description                                                        |
 | ----------- | ------------------------------------------------------------------ |
-| `endpoint`  | Comma-separated exact request endpoints, e.g. `/v1/chat/completions,/v1/messages` |
+| `endpoint`  | Exact request endpoints, comma-separated or repeated, e.g. `/v1/chat/completions,/v1/messages` |
 | `operation` | Comma-separated operations; a row matches if its endpoint belongs to any of them |
 
 Operations: `chat_completions`, `responses`, `conversations`, `embeddings`,
@@ -476,6 +476,146 @@ curl "http://localhost:8080/admin/usage/summary?endpoint=/v1/chat/completions,/v
 
 `/admin/usage/log` also matches its `search` text against the endpoint.
 
+### Multi-value filters
+
+The data filters `model`, `provider`, `label`, `auth_key_id`, `user_path`, and
+`endpoint` each take several values. Repeat the parameter to pass more than
+one. A request matches a filter when it has any of the values, and it must
+match every filter you set:
+
+```bash
+# gpt-5 or claude-sonnet-4-5, used by /team/alice or /team/bob, labelled env:dev
+curl "http://localhost:8080/admin/usage/summary?model=gpt-5&model=claude-sonnet-4-5&user_path=/team/alice&user_path=/team/bob&label=env:dev" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+- Each `user_path` value matches its whole subtree.
+- `model`, `provider`, `auth_key_id`, and `endpoint` also accept a
+  comma-separated list. `label` and `user_path` do not, because labels and
+  user paths may contain commas.
+- A single value works as before, so existing calls are unaffected.
+- For a [user-path scoped](#scoped-admin-access) credential, every
+  `user_path` must lie inside its subtree; the filters only narrow the scope.
+
+These filters apply to every reporting endpoint under `/admin/usage/*` except
+`throughput`, and to `/admin/cache/overview`.
+
+### GET /admin/usage/breakdown
+
+Pivots the filtered usage by a row dimension and an optional column dimension,
+for questions like "cost per month by user path" or "who uses which model".
+
+| Parameter         | Type   | Description                                                                 | Default   |
+| ----------------- | ------ | --------------------------------------------------------------------------- | --------- |
+| `rows`            | string | Row dimension (required): `model`, `provider`, `user_path`, `label`, `endpoint`, `auth_key`, `period` | — |
+| `columns`         | string | Column dimension, different from `rows`; omit (or `none`) for a single column | —         |
+| `metric`          | string | Ranks keys for the top-N cut: `cost`, `tokens`, `requests`                  | `cost`    |
+| `limit`           | int    | Keys kept per dimension; the rest fold into one "other" key; values above 50 are capped at 50 | `10`      |
+| `interval`        | string | Period size for `period`: `daily`, `weekly`, `monthly`, `yearly`            | `daily`   |
+| `user_path_depth` | int    | Group user paths by their first N segments; `2` counts `/team/alice/laptop` under `/team/alice`. `0` keeps full paths; at most `16`, larger values return `400` | `0` |
+
+It also accepts the date range parameters, `cache_mode`, and every data filter.
+Periods use the time zone from the `X-GoModel-Timezone` header, like
+`/admin/usage/daily`.
+
+```bash
+# Cost per month by team, over the last 90 days
+curl "http://localhost:8080/admin/usage/breakdown?rows=user_path&user_path_depth=1&columns=period&interval=monthly&days=90" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```json
+{
+  "row_dimension": "user_path",
+  "column_dimension": "period",
+  "metric": "cost",
+  "rows": [{ "key": "/team" }, { "key": "/ops" }, { "key": "", "other": true, "folded": 4 }],
+  "columns": [{ "key": "2026-08" }, { "key": "2026-09" }],
+  "cells": [
+    {
+      "row": 0,
+      "column": 1,
+      "requests": 1608,
+      "input_tokens": 17444061,
+      "output_tokens": 3910953,
+      "total_tokens": 21355014,
+      "total_cost": 5.2,
+      "billed_cost": 6.24
+    }
+  ]
+}
+```
+
+- Cells reference `rows` and `columns` by index. Pairs without traffic have no
+  cell.
+- Keys are ordered by the metric, highest first. Keys past `limit` share the
+  trailing key marked `"other": true`, whose `folded` counts them. `period`
+  keys stay in date order and are never folded.
+- An empty `key` groups requests without a value: no label, or no managed API
+  key.
+- A request with several labels counts once per label, so label rows can add up
+  to more than the period total.
+- `total_cost` and `billed_cost` are `null` when no request in the cell had
+  pricing.
+
+### GET /admin/usage/invoice
+
+Exports billed usage for a period as per-customer invoices: model and provider
+line items per customer, each customer's subtotal, and a grand total, in USD.
+Requires a GoModel Pro license with the `billing` entitlement (otherwise `403`
+`invoice_export_not_entitled`) and `PRICING_MARKUPS_ENABLED=true` (otherwise
+`409` `markups_disabled`). See
+[Invoice export](/features/cost-tracking#invoice-export-gomodel-pro).
+
+| Parameter | Type   | Description                                                                 | Default |
+| --------- | ------ | --------------------------------------------------------------------------- | ------- |
+| `format`  | string | `csv` (downloaded as an attachment) or `json`                               | `csv`   |
+| `parent`  | string | Bill each direct child of this user path as one customer; usage on the parent itself stays under the parent. Omit to bill every user path on its own | — |
+
+It also accepts the date range parameters and every data filter. It ignores
+`cache_mode`: requests, tokens, and `provider_cost` cover provider-bound
+requests, while `billed_cost` also includes billed cache hits.
+
+```bash
+curl "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=2026-10-01&end_date=2026-10-31&format=json" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```json
+{
+  "start_date": "2026-10-01",
+  "end_date": "2026-10-31",
+  "currency": "USD",
+  "parent": "/customers",
+  "customers": [
+    {
+      "customer": "/customers/acme",
+      "lines": [
+        {
+          "model": "gpt-5",
+          "provider": "openai",
+          "requests": 1200,
+          "input_tokens": 950000,
+          "output_tokens": 210000,
+          "provider_cost": 3.2875,
+          "billed_cost": 3.945,
+          "effective_markup_percent": 20
+        }
+      ],
+      "subtotal": { "requests": 1200, "input_tokens": 950000, "output_tokens": 210000, "provider_cost": 3.2875, "billed_cost": 3.945, "effective_markup_percent": 20 }
+    }
+  ],
+  "total": { "requests": 1200, "input_tokens": 950000, "output_tokens": 210000, "provider_cost": 3.2875, "billed_cost": 3.945, "effective_markup_percent": 20 }
+}
+```
+
+- Customers are sorted by user path, and lines by model and provider.
+- An invoice holds at most 50,000 lines (customer × model × provider); past
+  that it returns `400`. Narrow the period or filters, or group customers with
+  `parent`.
+- Costs and `effective_markup_percent` are `null` when unknown;
+  `effective_markup_percent` is billed cost over provider cost, minus one.
+
 ### Cache mode
 
 Every [response-cache](/features/cache) hit is recorded as a usage entry, with
@@ -496,7 +636,7 @@ curl "http://localhost:8080/admin/usage/summary?user_path=/team/alpha&cache_mode
 
 Accepted by `/admin/usage/summary`, `/admin/usage/daily`, `/admin/usage/log`,
 `/admin/usage/models`, `/admin/usage/labels`, `/admin/usage/user-paths`,
-`/admin/usage/endpoints`, and
+`/admin/usage/endpoints`, `/admin/usage/breakdown`, and
 `/v1/usage` (see the [usage API](/advanced/usage-api#cache-mode)). Unrecognized
 values fall back to `uncached`. `/admin/usage/sessions` ignores it: session
 request and token totals always include cache hits, while its cost fields stay

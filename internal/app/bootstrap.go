@@ -12,6 +12,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/live"
+	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/providers/health"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/server"
@@ -33,9 +34,12 @@ type bootstrap struct {
 	app    *App
 
 	// Decided in the prologue, read by several phases.
-	quotaTemplatesEnabled bool
-	routeSelector         ext.RouteSelector
-	requestHealth         *health.Tracker
+	quotaTemplatesEnabled  bool
+	customerMarkupsEnabled bool
+	invoiceExportEnabled   bool
+	billedBudgetsEnabled   bool
+	routeSelector          ext.RouteSelector
+	requestHealth          *health.Tracker
 
 	// Produced by the catalog phases for the server phases.
 	managedProviderNames []string
@@ -54,6 +58,9 @@ type bootstrap struct {
 	serverCfg                *server.Config
 	livePublishersEnabled    bool
 	responseCache            *responsecache.ResponseCacheMiddleware
+	// internalInference holds the internal executors extensions call models
+	// through; bound to inference-aware rewriters once the server is built.
+	internalInference plugins.HostDeps
 }
 
 // newBootstrap runs the infallible prologue: process-wide settings that must
@@ -72,6 +79,9 @@ func newBootstrap(ctx context.Context, cfg Config) *bootstrap {
 		}
 		slog.Info("offline mode: update check disabled, remote model catalog download disabled; only configured providers and declared endpoints are contacted",
 			"model_catalog", catalog)
+	}
+	if appCfg.HTTP.TLS.InsecureSkipVerify {
+		slog.Warn("outbound TLS certificate verification is disabled (http.tls.insecure_skip_verify); do not run this in production")
 	}
 	if appCfg.Budgets.Enabled && !appCfg.Usage.Enabled {
 		appCfg.Budgets.Enabled = false
@@ -104,11 +114,14 @@ func newBootstrap(ctx context.Context, cfg Config) *bootstrap {
 	})
 
 	return &bootstrap{
-		ctx:                   ctx,
-		cfg:                   cfg,
-		appCfg:                appCfg,
-		app:                   app,
-		quotaTemplatesEnabled: cfg.Extensions != nil && cfg.Extensions.HasCapability(ext.CapabilityQuotaTemplates),
+		ctx:                    ctx,
+		cfg:                    cfg,
+		appCfg:                 appCfg,
+		app:                    app,
+		quotaTemplatesEnabled:  cfg.Extensions != nil && cfg.Extensions.HasCapability(ext.CapabilityQuotaTemplates),
+		customerMarkupsEnabled: cfg.Extensions != nil && cfg.Extensions.HasCapability(ext.CapabilityCustomerMarkups),
+		invoiceExportEnabled:   cfg.Extensions != nil && cfg.Extensions.HasCapability(ext.CapabilityInvoiceExport),
+		billedBudgetsEnabled:   cfg.Extensions != nil && cfg.Extensions.HasCapability(ext.CapabilityBilledBudgets),
 	}
 }
 
@@ -124,6 +137,7 @@ func (b *bootstrap) phases() []func() error {
 		b.initPricing,
 		b.initWorkflows,
 		b.initServerDependencies,
+		b.initClusterSync,
 		b.initServerConfig,
 		b.initAdmin,
 		b.initResponseCache,

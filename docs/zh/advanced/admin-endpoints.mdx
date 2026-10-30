@@ -393,7 +393,7 @@ curl "http://localhost:8080/admin/usage/summary?auth_key_id=$KEY_ID" \
 
 | 参数        | 说明                                                               |
 | ----------- | ------------------------------------------------------------------ |
-| `endpoint`  | 以逗号分隔的精确请求端点，例如 `/v1/chat/completions,/v1/messages` |
+| `endpoint`  | 精确请求端点，以逗号分隔或重复传入，例如 `/v1/chat/completions,/v1/messages` |
 | `operation` | 以逗号分隔的操作；如果某行的端点属于其中任意一个，即视为匹配       |
 
 操作包括：`chat_completions`、`responses`、`conversations`、`embeddings`、
@@ -419,6 +419,96 @@ curl "http://localhost:8080/admin/usage/summary?endpoint=/v1/chat/completions,/v
 
 `/admin/usage/log` 还会将其 `search` 文本与端点进行匹配。
 
+### 多值筛选
+
+数据筛选参数 `model`、`provider`、`label`、`auth_key_id`、`user_path` 和
+`endpoint` 都可以接受多个值。重复该参数即可传入多个值。请求只要匹配某个筛选中的任意一个值即满足该筛选，并且必须满足所有已设置的筛选：
+
+```bash
+# gpt-5 或 claude-sonnet-4-5，由 /team/alice 或 /team/bob 使用，且带有标签 env:dev
+curl "http://localhost:8080/admin/usage/summary?model=gpt-5&model=claude-sonnet-4-5&user_path=/team/alice&user_path=/team/bob&label=env:dev" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+- 每个 `user_path` 值都匹配其整个子树。
+- `model`、`provider`、`auth_key_id` 和 `endpoint` 也接受逗号分隔的列表。`label` 和 `user_path` 不接受，因为标签和用户路径中可能包含逗号。
+- 单个值的用法保持不变，现有调用不受影响。
+- 对于[作用域受限](/zh/advanced/admin-endpoints#作用域管理访问)的凭据，每个 `user_path` 都必须位于其子树内；筛选只会进一步缩小范围。
+
+这些筛选适用于 `/admin/usage/*` 下除 `throughput` 之外的所有报表端点，以及 `/admin/cache/overview`。
+
+### GET /admin/usage/breakdown
+
+按行维度和可选的列维度对筛选后的用量进行交叉细分，适合回答“各用户路径每月成本”或“谁在使用哪个模型”这类问题。
+
+| 参数              | 类型   | 说明                                                                        | 默认值    |
+| ----------------- | ------ | --------------------------------------------------------------------------- | --------- |
+| `rows`            | string | 行维度（必填）：`model`、`provider`、`user_path`、`label`、`endpoint`、`auth_key`、`period` | — |
+| `columns`         | string | 列维度，须与 `rows` 不同；省略（或设为 `none`）时只有一列| —         |
+| `metric`          | string | 用于选取前 N 个键的排序指标：`cost`、`tokens`、`requests`                   | `cost`    |
+| `limit`           | int    | 每个维度保留的键数；其余合并为一个“other”键；超过 50 时按 50 处理 | `10`      |
+| `interval`        | string | `period` 的周期：`daily`、`weekly`、`monthly`、`yearly`                     | `daily`   |
+| `user_path_depth` | int    | 按前 N 段对用户路径分组；`2` 会把 `/team/alice/laptop` 计入 `/team/alice`。`0` 保留完整路径；最大为 `16`，更大的值返回 `400` | `0` |
+
+它同样接受日期范围参数、`cache_mode` 和所有数据筛选。周期使用 `X-GoModel-Timezone` 请求头中的时区，与 `/admin/usage/daily` 相同。
+
+```bash
+# 最近 90 天按团队统计的每月成本
+curl "http://localhost:8080/admin/usage/breakdown?rows=user_path&user_path_depth=1&columns=period&interval=monthly&days=90" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```json
+{
+  "row_dimension": "user_path",
+  "column_dimension": "period",
+  "metric": "cost",
+  "rows": [{ "key": "/team" }, { "key": "/ops" }, { "key": "", "other": true, "folded": 4 }],
+  "columns": [{ "key": "2026-08" }, { "key": "2026-09" }],
+  "cells": [
+    {
+      "row": 0,
+      "column": 1,
+      "requests": 1608,
+      "input_tokens": 17444061,
+      "output_tokens": 3910953,
+      "total_tokens": 21355014,
+      "total_cost": 5.2,
+      "billed_cost": 6.24
+    }
+  ]
+}
+```
+
+- 单元格通过索引引用 `rows` 和 `columns`。没有流量的组合不会生成单元格。
+- 键按指标从高到低排序。超出 `limit` 的键共用最后一个标记为 `"other": true` 的键，其 `folded` 字段表示被合并的键数。`period` 键始终按日期顺序排列，且不会被合并。
+- 空的 `key` 表示没有该值的请求：没有标签，或没有使用托管 API 密钥。
+- 带有多个标签的请求会按每个标签各计一次，因此标签行的合计可能超过期间总计。
+- 当单元格中没有任何请求具有定价时，`total_cost` 和 `billed_cost` 为 `null`。
+
+### GET /admin/usage/invoice
+
+按客户导出某个时间段的计费用量账单：每个客户按模型和 provider 列出明细项，并给出每个客户的小计和总计，金额单位为 USD。
+需要带有 `billing` 授权的 GoModel Pro 许可证（否则返回 `403` `invoice_export_not_entitled`），并且需要
+`PRICING_MARKUPS_ENABLED=true`（否则返回 `409` `markups_disabled`）。参见[账单导出](/zh/features/cost-tracking)。
+
+| 参数     | 类型   | 说明                                                                         | 默认值 |
+| -------- | ------ | ---------------------------------------------------------------------------- | ------ |
+| `format` | string | `csv`（作为附件下载）或 `json`                                               | `csv`  |
+| `parent` | string | 将该用户路径的每个直接子路径作为一个客户计费；直接记录在父路径上的用量仍归父路径。省略时每个用户路径单独计费 | — |
+
+该端点还接受日期范围参数和所有数据筛选条件。它会忽略 `cache_mode`：请求数、token 数和 `provider_cost`
+只包含发送给 provider 的请求，而 `billed_cost` 还包含已计费的缓存命中。
+
+```bash
+curl "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=2026-10-01&end_date=2026-10-31&format=json" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+- 客户按用户路径排序，明细项按模型和 provider 排序。
+- 一张账单最多包含 50,000 个明细项（客户 × 模型 × provider），超出时返回 `400`。请缩小时间段或筛选条件，或使用 `parent` 归并客户。
+- 成本和 `effective_markup_percent` 未知时为 `null`；`effective_markup_percent` 是计费成本除以 provider 成本再减一。
+
 ### 缓存模式
 
 每次[响应缓存](/zh/features/cache)命中都会被记录为一条用量条目，带有调用方的 `user_path` 以及值为 `exact` 或 `semantic` 的 `cache_type`。用量端点默认不包含这些条目，因此请求数、Token 数和成本都反映的是提供商支出。传入 `cache_mode` 可以改变这一行为：
@@ -436,7 +526,7 @@ curl "http://localhost:8080/admin/usage/summary?user_path=/team/alpha&cache_mode
 
 接受该参数的端点有：`/admin/usage/summary`、`/admin/usage/daily`、`/admin/usage/log`、
 `/admin/usage/models`、`/admin/usage/labels`、`/admin/usage/user-paths`、
-`/admin/usage/endpoints` 以及
+`/admin/usage/endpoints`、`/admin/usage/breakdown` 以及
 `/v1/usage`（参见[用量 API](/zh/advanced/usage-api#缓存模式)）。无法识别的值会回退为 `uncached`。`/admin/usage/sessions` 会忽略该参数：会话的请求数和 Token 总数始终包含缓存命中，而其成本字段只统计提供商部分。
 
 有两个端点按设计忽略该参数：`/admin/cache/overview` 始终只报告缓存命中，`/admin/usage/sessions` 始终包含缓存命中（其成本字段只统计提供商部分）。

@@ -13,6 +13,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/storage/mongotest"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -49,12 +50,12 @@ func TestBilledCost(t *testing.T) {
 	}
 }
 
-func newBillingTestSQLiteStore(t *testing.T) (*SQLiteStore, *sql.DB) {
+func newBillingTestSQLiteStore(t *testing.T) (*SQLStore, *sql.DB) {
 	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 	return store, db
 }
@@ -176,7 +177,9 @@ func TestRecalculatePricingRecomputesBilledCost(t *testing.T) {
 			if pool == nil {
 				return // skipped: no test server configured
 			}
-			store, err := NewPostgreSQLStore(pool, 0)
+			pgDB, err := sqlx.NewPostgreSQL(pool)
+			require.NoError(t, err)
+			store, err := NewSQLStore(context.Background(), pgDB, 0)
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = store.Close() })
 			assertBilledCostRecalculation(t, store, billing, func(id string) (total, billed float64) {

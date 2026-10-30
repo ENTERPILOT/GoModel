@@ -89,7 +89,7 @@ func ResolveRequestModelWithAuthorizer(
 ) (*core.RequestModelResolution, error) {
 	requested = core.NewRequestedModelSelector(requested.Model, requested.ProviderHint)
 
-	resolvedSelector, aliasApplied, err := ResolveExecutionSelector(ctx, provider, resolver, requested)
+	resolvedSelector, route, aliasApplied, err := resolveExecutionRoute(ctx, provider, resolver, requested)
 	refreshed := false
 	if err != nil {
 		var refreshErr error
@@ -100,7 +100,7 @@ func ResolveRequestModelWithAuthorizer(
 		if !refreshed {
 			return nil, resolutionError(err)
 		}
-		resolvedSelector, aliasApplied, err = ResolveExecutionSelector(ctx, provider, resolver, requested)
+		resolvedSelector, route, aliasApplied, err = resolveExecutionRoute(ctx, provider, resolver, requested)
 		if err != nil {
 			return nil, resolutionError(err)
 		}
@@ -121,7 +121,7 @@ func ResolveRequestModelWithAuthorizer(
 				return nil, refreshErr
 			}
 			if refreshed {
-				resolvedSelector, aliasApplied, err = ResolveExecutionSelector(ctx, provider, resolver, requested)
+				resolvedSelector, route, aliasApplied, err = resolveExecutionRoute(ctx, provider, resolver, requested)
 				if err != nil {
 					return nil, resolutionError(err)
 				}
@@ -140,7 +140,7 @@ func ResolveRequestModelWithAuthorizer(
 				return nil, refreshErr
 			}
 			if refreshed {
-				resolvedSelector, aliasApplied, err = ResolveExecutionSelector(ctx, provider, resolver, requested)
+				resolvedSelector, route, aliasApplied, err = resolveExecutionRoute(ctx, provider, resolver, requested)
 				if err != nil {
 					return nil, resolutionError(err)
 				}
@@ -163,10 +163,12 @@ func ResolveRequestModelWithAuthorizer(
 		ProviderType:     strings.TrimSpace(provider.GetProviderType(resolvedModel)),
 		ProviderName:     ResolvedProviderName(provider, resolvedSelector, ""),
 		AliasApplied:     aliasApplied,
+		VirtualModelPath: route,
 	}
 	if slowdownResolver, ok := resolver.(ModelSlowdownResolver); ok {
 		resolution.Slowdown = slowdownResolver.ResolveSlowdown(ctx, requested, resolvedSelector)
 	}
+	resolution.CacheDerivedSelectors()
 	return resolution, nil
 }
 
@@ -228,18 +230,31 @@ func ResolveExecutionSelector(
 	resolver ModelResolver,
 	requested core.RequestedModelSelector,
 ) (core.ModelSelector, bool, error) {
+	selector, _, aliasApplied, err := resolveExecutionRoute(ctx, provider, resolver, requested)
+	return selector, aliasApplied, err
+}
+
+// resolveExecutionRoute is ResolveExecutionSelector that also returns the
+// virtual-model route a RoutedModelResolver reports.
+func resolveExecutionRoute(
+	ctx context.Context,
+	provider core.RoutableProvider,
+	resolver ModelResolver,
+	requested core.RequestedModelSelector,
+) (core.ModelSelector, []string, bool, error) {
 	requested = core.NewRequestedModelSelector(requested.Model, requested.ProviderHint)
 
 	var (
 		resolvedSelector core.ModelSelector
+		route            []string
 		aliasApplied     bool
 		err              error
 	)
 
 	if resolver != nil {
-		resolvedSelector, aliasApplied, err = resolveRequestedModel(ctx, resolver, requested)
+		resolvedSelector, route, aliasApplied, err = resolveRequestedModel(ctx, resolver, requested)
 		if err != nil {
-			return core.ModelSelector{}, false, err
+			return core.ModelSelector{}, nil, false, err
 		}
 		requested = core.NewRequestedModelSelector(resolvedSelector.QualifiedModel(), "")
 	}
@@ -249,27 +264,33 @@ func ResolveExecutionSelector(
 		if err != nil {
 			if resolvedSelector != (core.ModelSelector{}) {
 				// Preserve alias targets so callers can refresh the concrete provider before retrying.
-				return resolvedSelector, aliasApplied, err
+				return resolvedSelector, route, aliasApplied, err
 			}
-			return core.ModelSelector{}, false, err
+			return core.ModelSelector{}, nil, false, err
 		}
-		return providerSelector, aliasApplied || providerChanged, nil
+		return providerSelector, route, aliasApplied || providerChanged, nil
 	}
 
 	if resolvedSelector != (core.ModelSelector{}) {
-		return resolvedSelector, aliasApplied, nil
+		return resolvedSelector, route, aliasApplied, nil
 	}
 
 	resolvedSelector, err = requested.Normalize()
-	return resolvedSelector, aliasApplied, err
+	return resolvedSelector, route, aliasApplied, err
 }
 
-// resolveRequestedModel resolves through a UserPathModelResolver when the
-// resolver implements it (applying user_path-scoped redirects), falling back to
-// the unscoped ModelResolver otherwise.
-func resolveRequestedModel(ctx context.Context, resolver ModelResolver, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
-	if scoped, ok := resolver.(UserPathModelResolver); ok {
-		return scoped.ResolveModelForUserPath(ctx, requested)
+// resolveRequestedModel resolves through a RoutedModelResolver or
+// UserPathModelResolver when the resolver implements one (applying
+// user_path-scoped redirects), falling back to the unscoped ModelResolver
+// otherwise. Only a RoutedModelResolver reports a route.
+func resolveRequestedModel(ctx context.Context, resolver ModelResolver, requested core.RequestedModelSelector) (core.ModelSelector, []string, bool, error) {
+	if routed, ok := resolver.(RoutedModelResolver); ok {
+		return routed.ResolveModelRouteForUserPath(ctx, requested)
 	}
-	return resolver.ResolveModel(requested)
+	if scoped, ok := resolver.(UserPathModelResolver); ok {
+		selector, changed, err := scoped.ResolveModelForUserPath(ctx, requested)
+		return selector, nil, changed, err
+	}
+	selector, changed, err := resolver.ResolveModel(requested)
+	return selector, nil, changed, err
 }

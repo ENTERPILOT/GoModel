@@ -1,0 +1,112 @@
+---
+title: "Workload Identity Federation"
+description: "OpenAI und Anthropic authentifizieren, indem das Identitätstoken Ihrer Plattform gegen kurzlebige Zugriffstokens des Anbieters getauscht wird, statt einen statischen API-Schlüssel zu verwenden."
+icon: "fingerprint"
+tag: "Beta"
+keywords: ["Workload Identity", "Federation", "WIF", "OIDC", "Kubernetes", "Servicekonto", "Token-Austausch", "ohne Schlüssel"]
+---
+
+<Warning>
+  Workload Identity Federation befindet sich in der Beta-Phase. Sie wurde noch
+  nicht auf allen Plattformen geprüft, und ihre Konfiguration kann sich ändern.
+  Statische API-Schlüssel bleiben die stabilste Option.
+</Warning>
+
+Mit Workload Identity Federation authentifiziert sich GoModel ohne langlebigen
+API-Schlüssel bei einem Anbieter. Das Gateway liest ein Identitätstoken, das
+Ihre Plattform bereits ausstellt (ein projiziertes Kubernetes-Servicekonto-Token,
+AWS-, GCP- oder Azure-Workload-Identity, GitHub-Actions-OIDC, ein SPIFFE
+JWT-SVID), und tauscht es gegen ein kurzlebiges Zugriffstoken des Anbieters.
+
+Unterstützte Anbieter: `openai` (RFC-8693-Token-Austausch) und `anthropic`
+(RFC 7523 jwt-bearer). Richten Sie zuerst Identitätsanbieter und Servicekonto
+beim Anbieter ein:
+[OpenAI](https://developers.openai.com/api/docs/guides/workload-identity-federation),
+[Anthropic](https://platform.claude.com/docs/en/manage-claude/workload-identity-federation).
+
+## Konfigurieren
+
+Anthropic liest dieselben Variablen wie die offiziellen SDKs, eine bestehende
+Bereitstellung funktioniert also unverändert:
+
+```bash
+ANTHROPIC_FEDERATION_RULE_ID=fdrl_...
+ANTHROPIC_ORGANIZATION_ID=00000000-0000-0000-0000-000000000000
+ANTHROPIC_SERVICE_ACCOUNT_ID=svac_...
+ANTHROPIC_IDENTITY_TOKEN_FILE=/var/run/secrets/anthropic.com/token
+ANTHROPIC_WORKSPACE_ID=wrkspc_...   # nötig, wenn die Regel mehrere Workspaces umfasst
+```
+
+OpenAI:
+
+```bash
+OPENAI_IDENTITY_PROVIDER_ID=idp_...
+OPENAI_SERVICE_ACCOUNT_ID=sa_...
+OPENAI_IDENTITY_TOKEN_FILE=/var/run/secrets/openai/token
+```
+
+Oder in `config.yaml`:
+
+```yaml
+providers:
+  openai:
+    type: openai
+    workload_identity:
+      identity_token_file: /var/run/secrets/openai/token
+      identity_provider_id: idp_...
+      service_account_id: sa_...
+  anthropic:
+    type: anthropic
+    workload_identity:
+      identity_token_file: /var/run/secrets/anthropic.com/token
+      federation_rule_id: fdrl_...
+      organization_id: 00000000-0000-0000-0000-000000000000
+      service_account_id: svac_...
+      workspace_id: wrkspc_...
+```
+
+Instanzsuffixe funktionieren wie bei jeder anderen Anbietereinstellung, zum
+Beispiel `OPENAI_EU_IDENTITY_TOKEN_FILE` für einen Anbieter namens `openai-eu`.
+
+| Einstellung | Suffix der Umgebungsvariable | Standard |
+| --- | --- | --- |
+| `identity_token_file` | `_IDENTITY_TOKEN_FILE` | keiner |
+| `identity_token` | `_IDENTITY_TOKEN` | keiner; nutzen, wenn die Plattform das JWT als Variable bereitstellt |
+| `token_endpoint` | `_TOKEN_ENDPOINT` | OpenAI: `https://auth.openai.com/oauth/token`; Anthropic: `<base_url>/oauth/token` |
+| `service_account_id` | `_SERVICE_ACCOUNT_ID` | erforderlich |
+| `identity_provider_id` | `_IDENTITY_PROVIDER_ID` | für OpenAI erforderlich |
+| `federation_rule_id`, `organization_id` | `_FEDERATION_RULE_ID`, `_ORGANIZATION_ID` | für Anthropic erforderlich |
+| `workspace_id` | `_WORKSPACE_ID` | nur Anthropic, optional |
+
+## Funktionsweise
+
+- Die erste Anfrage wartet auf den Austausch des Identitätstokens. Das
+  Zugriffstoken wird zwischengespeichert und zwei Minuten vor Ablauf im
+  Hintergrund erneuert (bei sehr kurzlebigen Tokens früher), während Anfragen
+  weiter das zwischengespeicherte Token nutzen. Eine Anfrage wartet nur dann auf
+  einen Austausch, wenn kein nutzbares Token zwischengespeichert ist.
+- `identity_token_file` wird bei jedem Austausch neu gelesen, damit Tokens, die
+  auf der Festplatte rotieren, aktuell bleiben. Sind Datei und `identity_token`
+  gesetzt, gewinnt die Datei.
+- Schlägt eine Erneuerung fehl, wird das zwischengespeicherte Token bis 30
+  Sekunden vor Ablauf weiterverwendet. Nach einem Fehler wartet das Gateway
+  5 Sekunden, bevor es den Austausch erneut versucht.
+- Ist kein gültiges Token verfügbar, geht die Anfrage ohne Token hinaus und der
+  Anbieter lehnt sie ab. Das Gateway-Log nennt den Grund
+  (`workload identity token exchange failed`).
+- Der Austausch nutzt den [ausgehenden Proxy](/de/providers/outbound-proxy) des
+  Anbieters, wenn einer konfiguriert ist.
+- Weder das Identitätstoken noch das Zugriffstoken wird je protokolliert.
+
+## Regeln
+
+- Ein API-Schlüssel hat wie in den offiziellen SDKs Vorrang vor Workload
+  Identity. GoModel protokolliert eine Warnung, wenn beides gesetzt ist.
+  Entfernen Sie `<PROVIDER>_API_KEY` bei der Umstellung.
+- Ein Anbieter aus der Konfiguration mit `workload_identity` übernimmt kein
+  bloßes `<PROVIDER>_API_KEY` aus der Umgebung, außer er ist nach seinem Typ
+  benannt.
+- Fehlt ein Pflichtfeld oder steht `workload_identity` bei einem anderen
+  Anbietertyp, startet dieser Anbieter nicht, und das Log nennt das Feld.
+- Workload Identity wird in `config.yaml` oder über Umgebungsvariablen
+  konfiguriert. Im Anbieter-Editor des Dashboards ist sie noch nicht verfügbar.

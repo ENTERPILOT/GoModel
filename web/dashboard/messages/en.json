@@ -53,7 +53,16 @@
   "playground_meta_status": "HTTP {status}",
   "playground_meta_duration": "{seconds}s",
   "playground_meta_tokens": "{input} in / {output} out",
-  "playground_meta_events": "{count} stream events",
+  "playground_meta_events": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} stream event",
+        "count_plural=*": "{count} stream events"
+      }
+    }
+  ],
   "playground_mode_label": "Mode",
   "playground_mode_chat": "Chat",
   "playground_mode_image": "Image",
@@ -98,7 +107,6 @@
   "usage_filter_provider": "Filter by provider",
   "usage_filter_label": "Filter by label",
   "usage_filter_user_path": "Filter by user path",
-  "usage_filter_user_path_placeholder": "User path /team/alpha",
   "usage_filter_session": "Filter by session ID",
   "usage_filter_session_placeholder": "Session ID",
   "usage_clear_session_filter": "Clear session filter {session}",
@@ -110,6 +118,36 @@
   "usage_filter_endpoint": "Filter by endpoint",
   "usage_all_endpoints": "All Endpoints",
   "usage_search_endpoints": "Search endpoints",
+  "usage_search_models": "Search models",
+  "usage_search_providers": "Search providers",
+  "usage_search_labels": "Search labels",
+  "usage_search_auth_keys": "Search API keys",
+  "usage_all_user_paths": "All User Paths",
+  "usage_search_user_paths": "Search or type a user path",
+  "usage_expand_path": "Expand {path}",
+  "usage_collapse_path": "Collapse {path}",
+  "usage_user_path_subtree": "and below",
+  "usage_pivot_title": "Breakdown",
+  "usage_pivot_loading": "Loading breakdown",
+  "usage_pivot_view": "Breakdown view",
+  "usage_pivot_download_csv": "Download CSV",
+  "usage_invoice_export": "Export invoice",
+  "usage_invoice_export_title": "Download billed usage per customer for the selected period and filters as a CSV invoice",
+  "usage_invoice_export_failed": "Unable to export the invoice.",
+  "usage_pivot_rows": "Rows",
+  "usage_pivot_columns": "Columns",
+  "usage_pivot_no_columns": "None",
+  "usage_pivot_metric": "Metric",
+  "usage_pivot_interval": "Period",
+  "usage_pivot_depth": "User path grouping",
+  "usage_pivot_depth_full": "Full path",
+  "usage_pivot_depth_levels": "First {count} segments",
+  "usage_pivot_period": "Period",
+  "usage_pivot_other": "Other ({count})",
+  "usage_pivot_none": "(none)",
+  "usage_pivot_empty": "No usage matches the filters in this period.",
+  "usage_pivot_failed": "The breakdown could not be loaded.",
+  "usage_pivot_label_note": "A request with several labels counts once per label, so label totals can exceed the period total.",
   "usage_cache_saved": "Cache Saved",
   "usage_pro_saved": "Pro Saved",
   "usage_loading_summary": "Loading usage summary",
@@ -262,6 +300,16 @@
   "audit_summary_sessions": "Showing {start}–{end} of {total} sessions",
   "audit_summary_logs": "Showing {start}–{end} of {total} logs",
   "audit_group_by_session": "Group by session",
+  "audit_columns_menu": "Columns",
+  "audit_columns_label": "Visible columns",
+  "audit_column_status": "Status & method",
+  "audit_column_model": "Model",
+  "audit_column_path": "Path",
+  "audit_column_labels": "Labels",
+  "audit_column_attempts": "Provider attempts",
+  "audit_column_time": "Time",
+  "audit_column_duration": "Duration",
+  "audit_column_tokens_per_second": "Tokens/s",
   "audit_loading": "Loading audit logs",
   "audit_search_placeholder": "Search by request ID, model, provider, path, user path, or error…",
   "audit_search_label": "Search by request ID, model, provider, path, user path, or error",
@@ -463,6 +511,7 @@
   "overview_none_healthy": "None healthy",
   "overview_automatic": "Automatic",
   "overview_last_error": "Last error: {error}",
+  "overview_last_error_breaker_open": "{error} — circuit breaker open",
   "overview_all_mcp_connected": "All MCP servers connected",
   "overview_cache_share": "Share of input tokens over the selected period",
   "overview_no_usage": "No usage in the selected period yet",
@@ -508,7 +557,16 @@
       }
     }
   ],
-  "overview_mcp_attention": "{count} servers need attention",
+  "overview_mcp_attention": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} server needs attention",
+        "count_plural=*": "{count} servers need attention"
+      }
+    }
+  ],
   "overview_mcp_connected": "{connected} of {total} servers connected",
   "overview_calendar_cost_year": "${total} in the last year",
   "overview_calendar_tokens_year": "{total} tokens in the last year",
@@ -622,6 +680,13 @@
   "budgets_per_child_before_subject": "Usage is tracked independently for each direct child of ",
   "budgets_per_child_before_usage": ". Query ",
   "budgets_per_child_after_usage": " as a child to inspect its budget.",
+  "budgets_cost_basis": "Cost basis",
+  "budgets_cost_basis_provider": "Provider cost",
+  "budgets_cost_basis_billed": "Billed cost",
+  "budgets_billed_badge": "billed",
+  "budgets_billed_title": "Limits billed cost: provider cost plus markup, including billed cache hits",
+  "budgets_billed_on_provider_badge": "billed · on provider cost",
+  "budgets_billed_on_provider_title": "Stored as billed, but enforced on provider cost: billed budgets need a GoModel Pro license with the billing entitlement and PRICING_MARKUPS_ENABLED=true. Editing keeps it billed.",
   "models_title": "Models",
   "models_total_count": "{count} models",
   "models_unavailable": "Virtual models feature is unavailable.",
@@ -696,6 +761,9 @@
   "models_slowdown_field": "Slowdown (extra inference time)",
   "models_off": "Off",
   "models_slowdown_help": "Adds a fraction of measured inference time: 0.5 adds 50%. Streaming chunks are buffered and released on the slowed timeline. Use 0 to override inherited slowdown, or leave empty to inherit it; active values are 0.1–10.",
+  "models_reasoning_effort_field": "Reasoning effort override",
+  "models_reasoning_effort_client": "Client's value",
+  "models_reasoning_effort_help": "Every request sent upstream through this virtual model or to this model gets this reasoning effort, whatever the client asked for. A model's own override beats a virtual model's, and an inner virtual model beats an outer one.",
   "models_status_summary": "Default enabled: {default} · Effective now: {effective}",
   "models_yes": "yes",
   "models_no": "no",
@@ -731,7 +799,16 @@
   "api_keys_show_inactive": "Show inactive",
   "api_keys_path_filter_clear": "Clear the user path filter",
   "api_keys_no_match": "No API keys match the current filter.",
-  "api_keys_hidden": "{count} inactive keys are hidden.",
+  "api_keys_hidden": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} inactive key is hidden.",
+        "count_plural=*": "{count} inactive keys are hidden."
+      }
+    }
+  ],
   "api_keys_empty": "No API keys yet. Issue a key to get started.",
   "api_keys_editor": "API key editor",
   "api_keys_done": "Done, I’ve stored it",
@@ -904,7 +981,16 @@
   "workflows_filter_label": "Filter workflows",
   "workflows_empty": "No active workflows found.",
   "workflows_no_match": "No workflows match your filter.",
-  "workflows_active_scopes": "{count} active scopes",
+  "workflows_active_scopes": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} active scope",
+        "count_plural=*": "{count} active scopes"
+      }
+    }
+  ],
   "workflows_copy_id": "Copy workflow ID",
   "workflows_id_copied": "Workflow ID copied",
   "workflows_copy_id_failed": "Unable to copy workflow ID",
@@ -1129,6 +1215,40 @@
   "sidebar_resize_help": "Drag to resize; click to collapse or expand",
   "sidebar_scoped_to": "Scoped to {path}",
   "sidebar_scoped_to_help": "This API key administers only the {path} user path and its descendants.",
+  "sidebar_license_badge_title": "{badge} license active",
+  "sidebar_license_days_short": "{count}d",
+  "sidebar_license_days_over_short": "-{count}d",
+  "sidebar_license_trial_left": [
+    {
+      "declarations": ["input count", "input date", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "Trial ends on {date} - {count} day left",
+        "count_plural=*": "Trial ends on {date} - {count} days left"
+      }
+    }
+  ],
+  "sidebar_license_expires_in": [
+    {
+      "declarations": ["input count", "input date", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "License expires on {date} - {count} day left",
+        "count_plural=*": "License expires on {date} - {count} days left"
+      }
+    }
+  ],
+  "sidebar_license_grace": [
+    {
+      "declarations": ["input count", "input date", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "License expired on {date}. Grace period: {count} day left, then Pro features turn off",
+        "count_plural=*": "License expired on {date}. Grace period: {count} days left, then Pro features turn off"
+      }
+    }
+  ],
+  "sidebar_license_expired": "License expired on {date}",
   "access_scope_path_outside": "User path must be {root} or one of its descendants.",
   "theme_label": "Theme",
   "theme_light": "Light theme",
@@ -1232,7 +1352,16 @@
   "api_keys_effective_models_help": "What a request with this key can actually call: its user path's policies, its own allowed models, and model-side policies combined.",
   "api_keys_effective_all": "All models",
   "api_keys_effective_none": "None",
-  "api_keys_effective_count": "{count} models",
+  "api_keys_effective_count": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} model",
+        "count_plural=*": "{count} models"
+      }
+    }
+  ],
   "api_keys_allowed_models_all": "All",
   "api_keys_edit_allowed_models": "Edit Allowed Models",
   "api_keys_allowed_models_editor": "API key allowed models editor",
@@ -1278,7 +1407,16 @@
   "users_column_effective": "Effective models",
   "users_effective_all": "All models",
   "users_effective_none": "None",
-  "users_effective_count": "{count} models",
+  "users_effective_count": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} model",
+        "count_plural=*": "{count} models"
+      }
+    }
+  ],
   "users_effective_via": "via {path}",
   "users_no_models_warning": "No models would remain available: nothing in this list is allowed by the parent groups.",
   "users_column_keys": "API keys",
@@ -1445,6 +1583,10 @@
   "models_global_pricing": "global model pricing",
   "models_model_settings_for": "model settings for {name}",
   "models_provider_access_for": "provider access for {name}",
+  "models_expand_provider_group": "Expand {name}",
+  "models_collapse_provider_group": "Collapse {name}",
+  "models_expand_all_groups": "Expand all",
+  "models_collapse_all_groups": "Collapse all",
   "models_global_access": "global model access",
   "models_remove_alias": "Remove alias {name}",
   "models_removing_alias": "Removing alias {name}",

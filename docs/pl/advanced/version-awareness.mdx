@@ -67,6 +67,13 @@ Każde sprawdzenie zawiera:
 | `X-GoModel-Install` | UUID        | anonimowy identyfikator wdrożenia, opisany poniżej |
 | `X-GoModel-Source`  | `scheduled` | `scheduled` lub `dashboard`         |
 
+GoModel Pro dodaje dwa kolejne, opisane [poniżej](#licencje-gomodel-pro):
+
+| Nagłówek            | Przykład              | Znaczenie                                                       |
+| ------------------- | --------------------- | --------------------------------------------------------------- |
+| `X-GoModel-License` | `paid`                | `paid`, `trial`, `beta` lub `none`                              |
+| `X-GoModel-Account` | 32 znaki szesnastkowe | skrót nazwy posiadacza licencji; tylko licencje płatne i próbne |
+
 Sprawdzenie wywołane wizytą w dashboardzie przekazuje też **dozwolony** (allowlist) wycinek
 tej wizyty: `User-Agent` przeglądarki, `Accept-Language`, client hints `Sec-CH-UA*`
 oraz wartość ciasteczka wizyty (`X-GoModel-Date`).
@@ -106,6 +113,30 @@ Wcześniejsze release’y w takiej sytuacji wyprowadzały identyfikator z `GOMOD
 Identyfikator zapisany w ten sposób jest zastępowany losowym, zarówno w bazie
 danych, jak i w pliku, przy pierwszym uruchomieniu tej wersji, więc wdrożenie
 jednorazowo zaraportuje się jako nowe.
+
+### Licencje GoModel Pro
+
+Jedna organizacja często uruchamia kilka gatewayów (staging i produkcja, po jednym na
+region), każdy z własną bazą danych, a więc z własnym identyfikatorem instalacji. Aby liczyć
+posiadaczy licencji, a nie tylko wdrożenia, GoModel Pro raportuje rodzaj licencji,
+na której działa, a w przypadku licencji płatnej lub próbnej także **skrót konta**:
+HMAC-SHA256 nazwy organizacji wskazanej w licencji, obcięty do 32 znaków
+szesnastkowych. Każdy gateway działający na licencjach jednego posiadacza raportuje ten sam
+skrót, także po odnowieniu licencji lub gdy licencja próbna staje się płatną na tę samą
+nazwę. Licencja próbna wskazuje firmę podaną przy rejestracji albo adres e-mail,
+jeśli firmy nie podano. Sama nazwa nigdy nie jest wysyłana. Jak każdy skrót nazwy,
+może go zweryfikować ktoś, kto już zna lub zgaduje tę nazwę; my porównujemy go z nazwami
+na wystawionych przez nas licencjach. Buildy beta współdzielą jedną wbudowaną licencję,
+więc raportują `beta` i żadnego skrótu.
+
+### Co rejestrujemy po naszej stronie
+
+Każdy serwer, z którym się łączysz, widzi publiczny adres Twojego gatewaya. Nie
+przechowujemy go. Oprócz powyższych nagłówków host z release’ami rejestruje kraj i
+operatora sieci, z której przyszedł request (numer i nazwę systemu autonomicznego,
+np. dostawcy chmury), oraz hash adresu z kluczem, aby gatewaye za jednym adresem
+można było policzyć jako jeden. Hasha nie da się przekształcić z powrotem w adres
+bez klucza, który posiadamy tylko my, i jest on usuwany po 90 dniach.
 
 ## Wyłączanie, jeśli nie chcesz otrzymywać informacji o aktualizacjach
 

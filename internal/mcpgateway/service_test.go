@@ -147,8 +147,7 @@ func newTestServiceWithOptions(t *testing.T, opts Options) (*Service, string) {
 // status (connected or degraded), so tests do not race the async connect.
 func waitForConnected(t *testing.T, service *Service, servers int) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	require.Eventually(t, func() bool {
 		views := service.Views()
 		settled := 0
 		for _, view := range views {
@@ -156,12 +155,8 @@ func waitForConnected(t *testing.T, service *Service, servers int) {
 				settled++
 			}
 		}
-		if len(views) == servers && settled == servers {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("upstreams did not settle: %+v", service.Views())
+		return len(views) == servers && settled == servers
+	}, 10*time.Second, 20*time.Millisecond, "upstreams did not settle")
 }
 
 func connectClient(t *testing.T, endpoint string, headers map[string]string) *mcp.ClientSession {
@@ -262,10 +257,7 @@ func TestAggregatedEndpointNamespacesAndRelays(t *testing.T) {
 	require.True(t, strings.HasPrefix(text.Text, "echo:"), "CallTool content = %#v, want echo:... text", result.Content[0])
 
 	// The tool call must be attributed in the usage pipeline.
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && len(usageLog.all()) == 0 {
-		time.Sleep(10 * time.Millisecond)
-	}
+	require.Eventually(t, func() bool { return len(usageLog.all()) > 0 }, 2*time.Second, 10*time.Millisecond, "no usage entry was logged")
 	entries := usageLog.all()
 	require.Len(t, entries, 1)
 
@@ -306,10 +298,7 @@ func TestAggregatedEndpointAcceptsUniqueBareToolName(t *testing.T) {
 	require.True(t, strings.HasPrefix(text.Text, "echo:"), "CallTool(echo) content = %#v, want echo:... text", result.Content[0])
 
 	// Usage accounting stays canonical: the entry records the namespaced name.
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && len(usageLog.all()) == 0 {
-		time.Sleep(10 * time.Millisecond)
-	}
+	require.Eventually(t, func() bool { return len(usageLog.all()) > 0 }, 2*time.Second, 10*time.Millisecond, "no usage entry was logged")
 	entries := usageLog.all()
 	require.Len(t, entries, 1)
 	require.Equal(t, "alpha_echo", entries[0].Model)
@@ -745,15 +734,10 @@ func TestDegradedUpstreamRecoversOnReprobe(t *testing.T) {
 	// Resurrect the upstream on the same address; the port was just freed by
 	// this process, so rebinding may need a brief retry.
 	var listener2 net.Listener
-	deadline := time.Now().Add(5 * time.Second)
-	for {
+	require.Eventuallyf(t, func() bool {
 		listener2, err = net.Listen("tcp", addr)
-		if err == nil || time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	require.NoError(t, err, "re-listen on %s: %v", addr, err)
+		return err == nil
+	}, 5*time.Second, 50*time.Millisecond, "re-listen on %s", addr)
 
 	ts2 := &httptest.Server{Listener: listener2, Config: &http.Server{Handler: handler}}
 	ts2.Start()

@@ -36,6 +36,11 @@ func normalizeRedirect(vm VirtualModel) (VirtualModel, []core.ModelSelector, err
 	if err := validateSlowdown(vm.Slowdown); err != nil {
 		return VirtualModel{}, nil, err
 	}
+	effort, err := normalizeReasoningEffort(vm.ReasoningEffort)
+	if err != nil {
+		return VirtualModel{}, nil, err
+	}
+	vm.ReasoningEffort = effort
 
 	if vm.Source == "" {
 		return VirtualModel{}, nil, newValidationError("source is required", nil)
@@ -104,6 +109,11 @@ func normalizePolicyInput(catalog Catalog, vm VirtualModel) (VirtualModel, error
 	if err := validateSlowdown(vm.Slowdown); err != nil {
 		return VirtualModel{}, err
 	}
+	effort, err := normalizeReasoningEffort(vm.ReasoningEffort)
+	if err != nil {
+		return VirtualModel{}, err
+	}
+	vm.ReasoningEffort = effort
 	parts, err := modelselectors.NormalizeInput(catalog, vm.Source)
 	if err != nil {
 		return VirtualModel{}, err
@@ -113,6 +123,9 @@ func normalizePolicyInput(catalog Catalog, vm VirtualModel) (VirtualModel, error
 	vm.Model = parts.Model
 	if vm.Slowdown != nil && parts.Model == "" {
 		return VirtualModel{}, newValidationError("slowdown can only be configured for a model or redirect", nil)
+	}
+	if vm.ReasoningEffort != "" && parts.Model == "" {
+		return VirtualModel{}, newValidationError("reasoning_effort can only be configured for a model or redirect", nil)
 	}
 
 	paths, err := normalizeUserPaths(vm.UserPaths)
@@ -129,6 +142,11 @@ func normalizeStoredPolicy(vm VirtualModel) (VirtualModel, error) {
 	if err := validateSlowdown(vm.Slowdown); err != nil {
 		return VirtualModel{}, err
 	}
+	effort, err := normalizeReasoningEffort(vm.ReasoningEffort)
+	if err != nil {
+		return VirtualModel{}, err
+	}
+	vm.ReasoningEffort = effort
 	parts, err := modelselectors.NormalizeStored(vm.Source, vm.ProviderName, vm.Model)
 	if err != nil {
 		return VirtualModel{}, err
@@ -138,6 +156,9 @@ func normalizeStoredPolicy(vm VirtualModel) (VirtualModel, error) {
 	vm.Model = parts.Model
 	if vm.Slowdown != nil && parts.Model == "" {
 		return VirtualModel{}, newValidationError("slowdown can only be configured for a model or redirect", nil)
+	}
+	if vm.ReasoningEffort != "" && parts.Model == "" {
+		return VirtualModel{}, newValidationError("reasoning_effort can only be configured for a model or redirect", nil)
 	}
 
 	paths, err := normalizeUserPaths(vm.UserPaths)
