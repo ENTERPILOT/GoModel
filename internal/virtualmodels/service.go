@@ -59,6 +59,18 @@ type Service struct {
 	sticky    stickySessions
 	current   atomic.Value // snapshot
 	refreshMu sync.Mutex
+
+	// changed is called after every store write; see SetChangeNotifier.
+	changed func(context.Context)
+}
+
+// SetChangeNotifier installs fn, called after every store write so other
+// gateway instances reload the virtual models. Must be called before serving.
+func (s *Service) SetChangeNotifier(fn func(context.Context)) {
+	if s == nil {
+		return
+	}
+	s.changed = fn
 }
 
 // AccessPolicy narrows model access per request from the subject side.
@@ -737,6 +749,11 @@ func rollbackContext() (context.Context, context.CancelFunc) {
 // state before the write — a nil row means the source did not exist and is
 // deleted on rollback.
 func (s *Service) commitRefresh(ctx context.Context, prior map[string]*VirtualModel) error {
+	// Announced even when the rollback below runs: other instances then
+	// reload whatever the store ends up holding.
+	if s.changed != nil {
+		defer s.changed(ctx)
+	}
 	if err := s.refreshLocked(ctx); err != nil {
 		rollbackCtx, cancel := rollbackContext()
 		defer cancel()

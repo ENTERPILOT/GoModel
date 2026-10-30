@@ -52,6 +52,9 @@ Najczęstszy sposób konfigurowania GoModel. Ustaw dowolną z poniższych zmienn
 | `SERVER_TRUSTED_PROXIES` | Sieci, w których stoją Twoje własne proxy; włącza odczyt adresu klienta z nagłówka | _(pusty)_ |
 | `SERVER_CLIENT_IP_HEADER` | Nagłówek, w którym zaufane proxy przekazuje adres klienta | `X-Forwarded-For` |
 | `SERVER_TRUSTED_HOPS` | Liczba proxy między klientem a gatewayem; `0` oznacza skanowanie łańcucha | `0` |
+| `SERVER_TLS_CERT_FILE` | Certyfikat PEM, którym listener serwuje HTTPS; ustaw razem z kluczem | _(pusty, zwykłe HTTP)_ |
+| `SERVER_TLS_KEY_FILE` | Klucz prywatny do `SERVER_TLS_CERT_FILE` | _(pusty)_ |
+| `SERVER_TLS_CLIENT_CA_FILE` | Pakiet CA w PEM; gdy ustawiony, każde żądanie poza `/health` i `/health/ready` wymaga podpisanego nim certyfikatu klienta (mTLS) | _(pusty)_ |
 | `SWAGGER_ENABLED`    | Udostępnia [Swagger UI](/pl/advanced/swagger-ui); wymaga buildu z `-tags=swagger` | `false`                |
 | `AUTH_VERIFY_ENABLED` | Udostępnia [`GET /v1/auth/verify`](/pl/advanced/api-endpoints#weryfikacja-klucza), który informuje, czy klucz API przesłany w requeście jest ważny | `false`                |
 | `PID_FILE`           | Miejsce, w którym działający gateway zapisuje identyfikator procesu na potrzeby `gomodel --reload`. Zmiana wymaga restartu | `data/gomodel.pid` obok katalogu `./data`, w przeciwnym razie katalog danych użytkownika |
@@ -170,6 +173,34 @@ wymaga danych uwierzytelniających, a Admin API pozostaje dostępne tylko z taki
 dostęp do dashboardu. Wydaj je, zanim włączysz przełącznik – bez master key,
 bez zarządzanego klucza i bez rozszerzenia uwierzytelniania gateway odrzuca każdy
 request i loguje o tym ostrzeżenie przy starcie.
+
+#### Serwowanie HTTPS
+
+Pozostaw ustawienia `SERVER_TLS_*` puste, aby serwować zwykłe HTTP za proxy,
+które terminuje TLS. Ustaw certyfikat i klucz (`server.tls_cert_file` i
+`server.tls_key_file` w YAML), gdy klienci łączą się z gatewayem bezpośrednio:
+
+```yaml
+server:
+  tls_cert_file: /etc/gomodel/tls/tls.crt
+  tls_key_file: /etc/gomodel/tls/tls.key
+  # tls_client_ca_file: /etc/gomodel/tls/ca.crt # require client certificates
+```
+
+Listener serwuje wtedy wyłącznie HTTPS, z TLS 1.2 lub nowszym i HTTP/2. Pliki są
+sprawdzane co 5 sekund, a zrotowany certyfikat jest przejmowany bez restartu;
+rotacja, której nie da się wczytać, zachowuje poprzedni. Zrotowane CA klientów
+obowiązuje od następnego handshake'u TLS, więc otwarte połączenia zachowują
+przyznany dostęp. Ustawienie tylko jednej
+połowy pary albo brakujący lub nieprawidłowy plik przy starcie jest błędem.
+Te ustawienia przyjmują ścieżki do plików, nie zawartość PEM; wartość
+zawierająca PEM jest odrzucana. Akceptują referencje `${env:...}`;
+`${file:...}` zwraca zawartość pliku, więc używaj go tylko dla pliku, który
+zawiera ścieżkę.
+Te ustawienia dotyczą tylko połączeń przychodzących; [zaufanie TLS dla połączeń
+wychodzących](#zaufanie-tls-dla-połączeń-wychodzących) konfiguruje się osobno.
+Przykład z cert-managerem znajdziesz w
+[przewodniku produkcyjnym](/pl/guides/production#natywny-tls).
 
 #### MCP Gateway
 
@@ -373,6 +404,7 @@ startuje z wyłączonym zarządzaniem budżetami i loguje ostrzeżenie.
 | Zmienna                      | Opis                                                                               | Wartość domyślna |
 | ---------------------------- | ---------------------------------------------------------------------------------- | --------- |
 | `BUDGETS_ENABLED`            | Włącza zarządzanie budżetami i sprawdzanie budżetów w workflowach, gdy śledzenie użycia jest włączone | `true`    |
+| `BUDGETS_PROVIDER_BILLED_CACHE_HITS` | Wlicza rozliczone cache hity do budżetów providerów na koszcie rozliczeniowym (GoModel Pro) | `true` |
 | `SET_BUDGET_<PATH>`          | Wstępnie ustawia limity budżetu dla ścieżki użytkownika, np. `daily=10`            | _(pusty)_ |
 | `SET_PROVIDER_BUDGET_<NAME>` | Wstępnie ustawia limity budżetu dla instancji providera, np. `daily=100`           | _(pusty)_ |
 
@@ -443,6 +475,38 @@ z błędem providera `504`, zamiast wisieć do `HTTP_TIMEOUT`. Czas oczekiwania
 na pierwszy token się nie liczy, więc nie dotyczy to wolnych modeli reasoningowych.
 Zwiększ tę wartość tylko dla providera, który w uzasadniony sposób robi kilkuminutowe przerwy w trakcie streamu.
 
+Standardowe zmienne `HTTP_PROXY`, `HTTPS_PROXY` i `NO_PROXY` dotyczą każdego
+połączenia z upstreamem, chyba że provider ustawia własne
+[proxy wychodzące](/pl/providers/outbound-proxy).
+
+#### Zaufanie TLS dla połączeń wychodzących
+
+Te ustawienia dotyczą wychodzących klientów HTTPS gatewaya: providerów,
+katalogu modeli, sprawdzania aktualizacji, upstreamów MCP, vector store'ów
+i endpointów embeddingów. Domyślnie ufamy magazynowi certyfikatów systemu
+operacyjnego, co wystarcza, o ile między gatewayem a upstreamami nie stoi
+wewnętrzne CA ani proxy przechwytujące TLS.
+
+Nie obejmują połączeń otwieranych przez inne klienty, które mają własne
+ustawienia: eksport OpenTelemetry czyta `OTEL_EXPORTER_OTLP_CERTIFICATE`,
+PostgreSQL przyjmuje `sslmode` i `sslrootcert` w URL-u (zalecane
+`sslmode=verify-full`), MongoDB przyjmuje `tls=true` i `tlsCAFile` w URL-u,
+a Redis przez `rediss://` ufa magazynowi systemowemu.
+
+| Zmienna                         | Opis                                                               | Wartość domyślna |
+| ------------------------------- | ------------------------------------------------------------------ | ---------------- |
+| `HTTP_TLS_CA_FILE`              | Pakiet PEM z dodatkowymi certyfikatami głównymi, dołączany do magazynu systemowego | nieustawione |
+| `HTTP_TLS_CLIENT_CERT_FILE`     | Certyfikat klienta dla mTLS; ustaw razem z kluczem                 | nieustawione |
+| `HTTP_TLS_CLIENT_KEY_FILE`      | Klucz prywatny certyfikatu klienta                                 | nieustawione |
+| `HTTP_TLS_INSECURE_SKIP_VERIFY` | Wyłącza weryfikację certyfikatów. Tylko do testów; logowane jako ostrzeżenie | `false` |
+
+Brakujący lub nieparsowalny plik to błąd startu, więc literówka w ścieżce nie
+sprawi po cichu, że nic dodatkowego nie będzie zaufane. Pliki są czytane ponownie
+przy [przeładowaniu konfiguracji](/pl/advanced/cli#przeładowanie-konfiguracji),
+ale nie są obserwowane, więc po ich rotacji wykonaj przeładowanie lub restart.
+Przykład krok po kroku znajdziesz w
+[przewodniku produkcyjnym](/pl/guides/production#prywatne-ca-i-proxy).
+
 #### Klucze API providerów
 
 Ustaw je, żeby automatycznie rejestrować providerów. Konfiguracja YAML nie jest wymagana.
@@ -471,7 +535,7 @@ Ustaw je, żeby automatycznie rejestrować providerów. Konfiguracja YAML nie je
 | `LLAMACPP_BASE_URL`  | llama.cpp llama-server / LM Studio (klucz API niepotrzebny, chyba że serwer uruchomiono z `--api-key`) |
 | `LLMD_BASE_URL`      | llm-d Router/EPP (klucz API niepotrzebny, chyba że wymaga go jego Gateway) |
 
-Większość providerów może korzystać z niestandardowego bazowego URL-a przez `<PROVIDER>_BASE_URL` (na przykład `OPENAI_BASE_URL`). Chutes AI domyślnie używa `https://llm.chutes.ai/v1`; możesz to nadpisać przez `CHUTES_BASE_URL`. DeepSeek domyślnie używa `https://api.deepseek.com`; ustawiaj `DEEPSEEK_BASE_URL` tylko dla kompatybilnego proxy lub alternatywnego endpointu DeepSeek. OpenRouter domyślnie używa `https://openrouter.ai/api/v1`; możesz to nadpisać przez `OPENROUTER_BASE_URL`. Kilo AI domyślnie używa `https://api.kilo.ai/api/gateway`; możesz to nadpisać przez `KILO_BASE_URL`. Eden AI domyślnie używa `https://api.edenai.run/v3`; możesz to nadpisać przez `EDENAI_BASE_URL`. Z.ai domyślnie używa `https://api.z.ai/api/paas/v4`; ustaw `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4` dla endpointu GLM Coding Plan. SGLang domyślnie używa `http://localhost:30000/v1`, gdy ustawiono `SGLANG_API_KEY`, ale wdrożenia bez klucza powinny jawnie ustawić `SGLANG_BASE_URL`, żeby zarejestrować providera. vLLM działa tak samo, z adresem `http://localhost:8000/v1`. `LLAMACPP_BASE_URL` dla llama.cpp jest zawsze wymagany (domyślny port llama-server koliduje z portem 8080 samego GoModel, więc nie ma wartości domyślnej); `LLAMACPP_API_KEY` jest opcjonalny. llm-d nie ma uniwersalnego endpointu, więc `LLMD_BASE_URL` jest zawsze wymagany; `LLMD_API_KEY` jest opcjonalny. Azure używa `AZURE_BASE_URL` jako bazowego URL-a deploymentu i akceptuje opcjonalne nadpisanie `AZURE_API_VERSION`; w przeciwnym razie domyślnie używa `2024-10-21`. Oracle wymaga `ORACLE_BASE_URL`, bo jego endpoint kompatybilny z OpenAI zależy od regionu.
+Większość providerów może korzystać z niestandardowego bazowego URL-a przez `<PROVIDER>_BASE_URL` (na przykład `OPENAI_BASE_URL`). Chutes AI domyślnie używa `https://llm.chutes.ai/v1`; możesz to nadpisać przez `CHUTES_BASE_URL`. DeepSeek domyślnie używa `https://api.deepseek.com`; ustawiaj `DEEPSEEK_BASE_URL` tylko dla kompatybilnego proxy lub alternatywnego endpointu DeepSeek. OpenRouter domyślnie używa `https://openrouter.ai/api/v1`; możesz to nadpisać przez `OPENROUTER_BASE_URL`. Kilo AI domyślnie używa `https://api.kilo.ai/api/gateway`; możesz to nadpisać przez `KILO_BASE_URL`. Eden AI domyślnie używa `https://api.edenai.run/v3`; możesz to nadpisać przez `EDENAI_BASE_URL`. Z.ai domyślnie używa `https://api.z.ai/api/paas/v4`; ustaw `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4` dla endpointu GLM Coding Plan. SGLang domyślnie używa `http://localhost:30000/v1`, gdy ustawiono `SGLANG_API_KEY`, ale wdrożenia bez klucza powinny jawnie ustawić `SGLANG_BASE_URL`, żeby zarejestrować providera. vLLM działa tak samo, z adresem `http://localhost:8000/v1`. `LLAMACPP_BASE_URL` dla llama.cpp jest zawsze wymagany (domyślny port llama-server koliduje z portem 8080 samego GoModel, więc nie ma wartości domyślnej); `LLAMACPP_API_KEY` jest opcjonalny. llm-d nie ma uniwersalnego endpointu, więc `LLMD_BASE_URL` jest zawsze wymagany; `LLMD_API_KEY` jest opcjonalny. Azure używa `AZURE_BASE_URL` jako bazowego URL-a deploymentu i akceptuje opcjonalne nadpisanie `AZURE_API_VERSION`; w przeciwnym razie domyślnie używa `2024-10-21` dla URL-i deploymentu i nie wysyła wersji dla URL-i `/openai/v1` (Azure AI Foundry). Oracle wymaga `ORACLE_BASE_URL`, bo jego endpoint kompatybilny z OpenAI zależy od regionu.
 
 Każdy typ providera akceptuje też rozdzieloną przecinkami listę skonfigurowanych modeli przez
 `<PROVIDER>_MODELS`, na przykład `OPENROUTER_MODELS`, `ORACLE_MODELS`,
@@ -512,6 +576,50 @@ tylko włączone przekierowania modeli wirtualnych.
 `<PROVIDER>_MODEL_FILTER_MAX_PRICE_PER_MTOK` (YAML:
 `providers.<name>.model_filter`). Zobacz
 [Filtrowanie modeli providera](/pl/advanced/config-yaml#filtrowanie-modeli-providera).
+
+Ustaw `MODELS_VLLM_DISCOVERY_COMPAT=true` (YAML:
+`models.vllm_discovery_compat`), gdy klient wykrywa modele tylko z runtime'u
+vLLM. Przykładem jest provider `vllm` w OpenCode: odpytuje `/health` i
+`/v1/models` i odrzuca każdy wpis, którego `owned_by` nie jest `vllm` albo
+któremu brakuje `max_model_len`. Z tym ustawieniem `GET /v1/models` zgłasza
+`owned_by` jako `vllm` i uzupełnia `max_model_len` w każdym wpisie, więc klient
+przejmuje modele gatewaya bez ręcznie spisanej listy. Informacja o właścicielu
+jest wtedy nieprawdziwa, dlatego ustawienie jest domyślnie wyłączone i
+przeznaczone dla gatewayów, których klienci go potrzebują.
+
+Limit ma dwa źródła, w tej kolejności:
+
+1. **Zgłoszenie samego providera.** Runtime, który sam serwuje model (vLLM,
+   SGLang, llm-d i każdy serwer zgodny z OpenAI zwracający `max_model_len` na
+   liście `/models`), zna rzeczywisty limit swojego procesu, więc jego wartość
+   wygrywa.
+2. **`metadata.context_window`.** Wartość z katalogu, używana tylko dla modelu,
+   którego provider nie zgłosił limitu. Dzięki niej modele hostowane są
+   wykrywalne.
+
+Model bez obu źródeł, czyli nieznany katalogowi i serwowany przez runtime,
+który nie zgłasza limitu, jest wymieniony z `owned_by: "vllm"` i
+`max_model_len: 0`. Zero oznacza, że limit jest nieznany, a nie że wpis jest
+niekompletny: pole nigdy nie jest pomijane, bo ci klienci sprawdzają całą listę
+względem schematu, w którym jest wymagane. Brak pola w jednym wpisie psuje całą
+odpowiedź i znikają wszystkie pozostałe modele. Klient, który czyta wartość tylko
+wtedy, gdy jest dodatnia, zachowuje własną wartość domyślną. Aby podać
+rzeczywiste okno, zadeklaruj je przy modelu:
+
+```yaml
+providers:
+  my-custom-llm:
+    type: openai
+    base_url: "https://api.example.com/v1"
+    api_key: "..."
+    models:
+      - id: "my-finetune"
+        metadata:
+          context_window: 32768
+```
+
+Pozostałe pola wpisu opisuje strona
+[Metadane modeli](/pl/advanced/model-metadata).
 
 Dla OpenRoutera GoModel wysyła też domyślne nagłówki atrybucji, chyba że request już je ustawia. Nadpisz te wartości domyślne przez `OPENROUTER_SITE_URL` i `OPENROUTER_APP_NAME`.
 

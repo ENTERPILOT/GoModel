@@ -128,3 +128,29 @@ rendering as no prefix at all.
 {{- end -}}
 {{- printf "%s%s" $base .path -}}
 {{- end }}
+
+{{/*
+URL scheme the gateway serves: https once env.SERVER_TLS_CERT_FILE turns on
+native TLS, http otherwise.
+*/}}
+{{- define "gomodel.scheme" -}}
+{{- if .Values.env.SERVER_TLS_CERT_FILE }}https{{ else }}http{{ end -}}
+{{- end }}
+
+{{/*
+Render a liveness or readiness probe. An httpGet probe gets its path prefixed
+with BASE_PATH and, when the gateway serves native TLS, scheme HTTPS, so the
+kubelet does not probe a TLS listener over plain HTTP (which answers 400 and
+keeps the pod from ever becoming Ready). A scheme set in values wins.
+Usage: include "gomodel.httpProbe" (dict "root" $ "probe" .Values.livenessProbe)
+*/}}
+{{- define "gomodel.httpProbe" -}}
+{{- $probe := deepCopy .probe }}
+{{- if $probe.httpGet }}
+{{- $_ := set $probe.httpGet "path" (include "gomodel.pathWithBasePath" (dict "root" .root "path" $probe.httpGet.path)) }}
+{{- if and (not $probe.httpGet.scheme) (eq (include "gomodel.scheme" .root) "https") }}
+{{- $_ := set $probe.httpGet "scheme" "HTTPS" }}
+{{- end }}
+{{- end }}
+{{- toYaml $probe }}
+{{- end }}

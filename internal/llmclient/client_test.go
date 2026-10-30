@@ -448,12 +448,20 @@ func TestClient_DoPassthrough_ReturnsLastRetryableResponseAfterRetries(t *testin
 	require.Equal(t, int32(3), attempts.Load())
 }
 
+// expireBreakerTimeout ages the breaker's last failure past its timeout, so
+// the next request moves it to half-open without waiting the timeout out.
+func expireBreakerTimeout(cb *circuitBreaker) {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	cb.lastFailure = time.Now().Add(-2 * cb.timeout)
+}
+
 func TestClient_DoPassthrough_HTTPTimeoutDoesNotRetry(t *testing.T) {
 	var attempts atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attempts.Add(1)
-		time.Sleep(200 * time.Millisecond)
+		<-r.Context().Done() // answer only once the client has given up
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{}`))
 	}))
@@ -996,8 +1004,7 @@ func TestCircuitBreaker_ClosesAfterTimeout(t *testing.T) {
 	}, nil)
 	require.Error(t, err)
 
-	// Wait for timeout
-	time.Sleep(100 * time.Millisecond)
+	expireBreakerTimeout(client.circuitBreaker)
 
 	// Now make server succeed
 	shouldSucceed.Store(true)
@@ -1050,8 +1057,7 @@ func TestCircuitBreaker_HalfOpenPreventsThunderingHerd(t *testing.T) {
 	}, nil)
 	failServer.Close()
 
-	// Wait for timeout to transition to half-open
-	time.Sleep(20 * time.Millisecond)
+	expireBreakerTimeout(client.circuitBreaker)
 
 	// Switch to successful server
 	client.SetBaseURL(server.URL)
@@ -1509,7 +1515,7 @@ func TestClient_ContextCancellation(t *testing.T) {
 
 func TestClient_Do_HTTPTimeoutReturnsGatewayTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(200 * time.Millisecond)
+		<-r.Context().Done() // answer only once the client has given up
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{}`))
 	}))
@@ -1537,7 +1543,7 @@ func TestClient_Do_HTTPTimeoutDoesNotRetry(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attempts.Add(1)
-		time.Sleep(200 * time.Millisecond)
+		<-r.Context().Done() // answer only once the client has given up
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{}`))
 	}))
@@ -1632,7 +1638,7 @@ func TestClient_Do_BodyReadTimeoutReturnsGatewayTimeout(t *testing.T) {
 		if flusher, ok := w.(http.Flusher); ok {
 			flusher.Flush()
 		}
-		time.Sleep(200 * time.Millisecond)
+		<-r.Context().Done() // finish the body only once the client has given up
 		_, _ = w.Write([]byte(`done"}`))
 	}))
 	defer server.Close()

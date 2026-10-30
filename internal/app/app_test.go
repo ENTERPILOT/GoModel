@@ -219,6 +219,13 @@ func TestRefreshRuntime_SkipsDisabledVirtualModels(t *testing.T) {
 	mcpStep := runtimeRefreshStepByName(report.Steps, "mcp_servers")
 	require.NotNil(t, mcpStep, "mcp_servers step missing: %+v", report.Steps)
 	require.Equal(t, admin.RuntimeRefreshStatusSkipped, mcpStep.Status)
+
+	// So are budgets and rate limits.
+	for _, name := range []string{"budgets", "rate_limits"} {
+		step := runtimeRefreshStepByName(report.Steps, name)
+		require.NotNil(t, step, "%s step missing: %+v", name, report.Steps)
+		assert.Equal(t, admin.RuntimeRefreshStatusSkipped, step.Status, name)
+	}
 }
 
 func TestRefreshRuntime_ReturnsGatewayErrorWhenContextCanceledBeforeAcquire(t *testing.T) {

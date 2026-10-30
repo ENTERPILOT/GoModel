@@ -31,6 +31,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/awscfg"
 )
 
 const providerName = "bedrock"
@@ -82,17 +83,15 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 	p := &Provider{hooks: opts.Hooks, instanceName: opts.ClientName(providerName)}
 
 	region, endpoint := parseBaseURL(providerCfg.BaseURL)
-	loadOpts := []func(*awsconfig.LoadOptions) error{}
+	var loadOpts []func(*awsconfig.LoadOptions) error
 	if region != "" {
 		loadOpts = append(loadOpts, awsconfig.WithRegion(region))
 	}
-	// The factory supplies a proxy-aware client when the provider has an
-	// outbound proxy; both SDK clients and the credential chain must use it.
-	if opts.HTTPClient != nil {
-		loadOpts = append(loadOpts, awsconfig.WithHTTPClient(opts.HTTPClient))
-	}
 
-	awsCfg, err := awsconfig.LoadDefaultConfig(context.Background(), loadOpts...)
+	// The SDK's own client would ignore the gateway's proxy and TLS trust. The
+	// factory supplies a proxy-aware client when the provider has an outbound
+	// proxy; the SDK clients and the credential chain (except IMDS) use it.
+	awsCfg, err := awscfg.LoadConfig(context.Background(), opts.HTTPClient, loadOpts...)
 	if err != nil {
 		p.configErr = fmt.Errorf("load AWS config: %w", err)
 		return p

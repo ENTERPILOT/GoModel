@@ -69,14 +69,6 @@ func (h *Handler) UpsertBudget(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
 	}
-	if costBasis == budget.CostBasisBilled {
-		if !h.billedBudgets {
-			return handleError(c, billedBudgetsUnavailableError())
-		}
-		if !h.billing.Enabled {
-			return handleError(c, billedBudgetsMarkupsDisabledError())
-		}
-	}
 	scope, subject, periodSeconds, err := budgetRequestKey(req.Scope, req.Subject, req.UserPath, req.BudgetKey)
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
@@ -95,6 +87,16 @@ func (h *Handler) UpsertBudget(c *echo.Context) error {
 	})
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
+	}
+	// A budget already stored as billed keeps its basis while billed budgets
+	// are unavailable, so the dashboard can still edit its amount.
+	if item.CostBasis == budget.CostBasisBilled && !h.budgets.StoredAsBilled(item.Scope, item.Subject, item.PeriodSeconds) {
+		if !h.billedBudgets {
+			return handleError(c, billedBudgetsUnavailableError())
+		}
+		if !h.billing.Enabled {
+			return handleError(c, billedBudgetsMarkupsDisabledError())
+		}
 	}
 	if err := h.budgets.UpsertBudgets(c.Request().Context(), []budget.Budget{item}); err != nil {
 		return handleError(c, budgetServiceError("failed to save budget", err))
@@ -262,26 +264,30 @@ type budgetListResponse struct {
 }
 
 type budgetStatusResponse struct {
-	Scope            string     `json:"scope"`
-	Subject          string     `json:"subject"`
-	PerChild         bool       `json:"per_child"`
-	CostBasis        string     `json:"cost_basis" enums:"provider,billed"`
-	EffectiveSubject string     `json:"effective_subject,omitempty"`
-	UserPath         string     `json:"user_path,omitempty"`
-	PeriodSeconds    int64      `json:"period_seconds"`
-	PeriodLabel      string     `json:"period_label"`
-	Amount           float64    `json:"amount"`
-	Source           string     `json:"source,omitempty"`
-	LastResetAt      *time.Time `json:"last_reset_at,omitempty"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
-	PeriodStart      time.Time  `json:"period_start"`
-	PeriodEnd        time.Time  `json:"period_end"`
-	Spent            float64    `json:"spent"`
-	HasUsage         bool       `json:"has_usage"`
-	Remaining        float64    `json:"remaining"`
-	UsageRatio       float64    `json:"usage_ratio"`
-	PeriodRatio      float64    `json:"period_ratio"`
+	Scope     string `json:"scope"`
+	Subject   string `json:"subject"`
+	PerChild  bool   `json:"per_child"`
+	CostBasis string `json:"cost_basis" enums:"provider,billed"`
+	// EnforcedCostBasis names the spend Spent measures. It is provider for a
+	// billed budget while billed budgets are unavailable (no billing
+	// entitlement or markups disabled); cost_basis keeps the stored basis.
+	EnforcedCostBasis string     `json:"enforced_cost_basis" enums:"provider,billed"`
+	EffectiveSubject  string     `json:"effective_subject,omitempty"`
+	UserPath          string     `json:"user_path,omitempty"`
+	PeriodSeconds     int64      `json:"period_seconds"`
+	PeriodLabel       string     `json:"period_label"`
+	Amount            float64    `json:"amount"`
+	Source            string     `json:"source,omitempty"`
+	LastResetAt       *time.Time `json:"last_reset_at,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
+	PeriodStart       time.Time  `json:"period_start"`
+	PeriodEnd         time.Time  `json:"period_end"`
+	Spent             float64    `json:"spent"`
+	HasUsage          bool       `json:"has_usage"`
+	Remaining         float64    `json:"remaining"`
+	UsageRatio        float64    `json:"usage_ratio"`
+	PeriodRatio       float64    `json:"period_ratio"`
 }
 
 type upsertBudgetRequest struct {
@@ -381,25 +387,26 @@ func budgetStatusResponses(statuses []budget.CheckResult, now time.Time) []budge
 	for _, status := range statuses {
 		item := status.Budget
 		response := budgetStatusResponse{
-			Scope:            string(item.Scope),
-			Subject:          item.Subject,
-			PerChild:         item.PerChild,
-			CostBasis:        string(item.CostBasis),
-			EffectiveSubject: item.EffectiveSubject,
-			PeriodSeconds:    item.PeriodSeconds,
-			PeriodLabel:      budget.PeriodLabel(item.PeriodSeconds),
-			Amount:           item.Amount,
-			Source:           item.Source,
-			LastResetAt:      item.LastResetAt,
-			CreatedAt:        item.CreatedAt,
-			UpdatedAt:        item.UpdatedAt,
-			PeriodStart:      status.PeriodStart,
-			PeriodEnd:        status.PeriodEnd,
-			Spent:            status.Spent,
-			HasUsage:         status.HasUsage,
-			Remaining:        status.Remaining,
-			UsageRatio:       status.UsageRatio(),
-			PeriodRatio:      status.PeriodRatio(now),
+			Scope:             string(item.Scope),
+			Subject:           item.Subject,
+			PerChild:          item.PerChild,
+			CostBasis:         string(item.CostBasis),
+			EnforcedCostBasis: string(item.EnforcedBasis()),
+			EffectiveSubject:  item.EffectiveSubject,
+			PeriodSeconds:     item.PeriodSeconds,
+			PeriodLabel:       budget.PeriodLabel(item.PeriodSeconds),
+			Amount:            item.Amount,
+			Source:            item.Source,
+			LastResetAt:       item.LastResetAt,
+			CreatedAt:         item.CreatedAt,
+			UpdatedAt:         item.UpdatedAt,
+			PeriodStart:       status.PeriodStart,
+			PeriodEnd:         status.PeriodEnd,
+			Spent:             status.Spent,
+			HasUsage:          status.HasUsage,
+			Remaining:         status.Remaining,
+			UsageRatio:        status.UsageRatio(),
+			PeriodRatio:       status.PeriodRatio(now),
 		}
 		// Convenience duplicate: user-path budgets keep the natural spelling.
 		if item.Scope == budget.ScopeUserPath {

@@ -159,6 +159,7 @@ func buildDefaultConfig() *Config {
 		Models: ModelsConfig{
 			EnabledByDefault:                    true,
 			KeepOnlyAliasesAtModelsEndpoint:     false,
+			VLLMDiscoveryCompat:                 false,
 			UnqualifiedModelIDsAtModelsEndpoint: false,
 			ConfiguredProviderModelsMode:        ConfiguredProviderModelsModeFallback,
 		},
@@ -213,7 +214,8 @@ func buildDefaultConfig() *Config {
 			BillCacheHits: true,
 		},
 		Budgets: BudgetsConfig{
-			Enabled: true,
+			Enabled:                 true,
+			ProviderBilledCacheHits: true,
 		},
 		RateLimits: RateLimitsConfig{
 			Enabled:       true,
@@ -405,6 +407,9 @@ func Load() (*LoadResult, error) {
 		return nil, err
 	}
 	if err := ResolveClientIPPolicy(&cfg.Server); err != nil {
+		return nil, err
+	}
+	if err := ValidateServerTLS(cfg.Server); err != nil {
 		return nil, err
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -225,4 +226,105 @@ func TestGetBatchResults_UsesAzureResourceRootForDeploymentScopedBaseURL(t *test
 	for i, sent := range requests {
 		assert.Equal(t, defaultAPIVersion, sent.Query.Get("api-version"), "request %d", i)
 	}
+}
+
+func TestV1BaseURL_SendsNoAPIVersionByDefault(t *testing.T) {
+	tests := []struct {
+		name     string
+		call     func(*Provider) error
+		wantPath string
+		body     string
+	}{
+		{
+			name: "chat",
+			call: func(p *Provider) error {
+				_, err := p.ChatCompletion(context.Background(), &core.ChatRequest{
+					Model:    "gpt-5",
+					Messages: []core.Message{{Role: "user", Content: "hi"}},
+				})
+				return err
+			},
+			wantPath: "/openai/v1/chat/completions",
+			body:     chatCompletionJSON,
+		},
+		{
+			name: "responses",
+			call: func(p *Provider) error {
+				_, err := p.Responses(context.Background(), &core.ResponsesRequest{Model: "gpt-5", Input: "hi"})
+				return err
+			},
+			wantPath: "/openai/v1/responses",
+			body:     `{"id":"resp_1","object":"response","created_at":1677652288,"model":"gpt-5","status":"completed","output":[]}`,
+		},
+		{
+			name: "models",
+			call: func(p *Provider) error {
+				_, err := p.ListModels(context.Background())
+				return err
+			},
+			wantPath: "/openai/v1/models",
+			body:     `{"object":"list","data":[]}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server, capture := providertest.JSONServer(t, http.StatusOK, tt.body)
+			provider := newTestProvider(server.Client(), server.URL+"/openai/v1/")
+
+			require.NoError(t, tt.call(provider))
+
+			sent := capture.Last(t)
+			assert.Equal(t, tt.wantPath, sent.Path)
+			assert.Equal(t, "test-api-key", sent.Header.Get("api-key"))
+			assert.False(t, sent.Query.Has("api-version"))
+		})
+	}
+}
+
+func TestV1BaseURL_SendsConfiguredAPIVersion(t *testing.T) {
+	server, capture := providertest.JSONServer(t, http.StatusOK, chatCompletionJSON)
+	provider := newTestProvider(server.Client(), server.URL+"/openai/v1")
+	provider.SetAPIVersion("preview")
+
+	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "gpt-5",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "preview", capture.Last(t).Query.Get("api-version"))
+}
+
+func TestBatchEndpoints_UseV1PathsForV1BaseURL(t *testing.T) {
+	for _, tt := range batchEndpointCases() {
+		t.Run(tt.name, func(t *testing.T) {
+			server, capture := providertest.JSONServer(t, http.StatusOK, tt.responseBody)
+			provider := newTestProvider(server.Client(), server.URL+"/openai/v1")
+
+			require.NoError(t, tt.call(provider))
+
+			sent := capture.Last(t)
+			assert.Equal(t, strings.Replace(tt.wantPath, "/openai/", "/openai/v1/", 1), sent.Path)
+			assert.Equal(t, tt.wantMethod, sent.Method)
+			assert.False(t, sent.Query.Has("api-version"))
+		})
+	}
+}
+
+func TestGetBatchResults_UsesV1PathsForV1BaseURL(t *testing.T) {
+	server, capture := providertest.RouteServer(t, map[string]http.HandlerFunc{
+		"/openai/v1/batches/batch_1": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id":"batch_1","status":"completed","output_file_id":"file_1","endpoint":"/v1/chat/completions"}`)
+		},
+		"/openai/v1/files/file_1/content": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/jsonl")
+			_, _ = io.WriteString(w, `{"custom_id":"ok-1","response":{"status_code":200,"url":"/v1/chat/completions","body":{"id":"resp-1","model":"gpt-5"}}}`)
+		},
+	})
+	provider := newTestProvider(server.Client(), server.URL+"/openai/v1")
+
+	resp, err := provider.GetBatchResults(context.Background(), "batch_1")
+	require.NoError(t, err)
+	assert.Equal(t, "batch_1", resp.BatchID)
+	assert.Len(t, capture.All(), 2)
 }

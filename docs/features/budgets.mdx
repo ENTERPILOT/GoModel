@@ -246,7 +246,9 @@ a new period for all of its children.
   startup. A billed budget already stored (created in the dashboard, or by an
   earlier configuration) never blocks startup: while the entitlement or markups
   are missing, GoModel logs a warning once and enforces it on provider cost, so
-  the limit stays in force until you change it or restore them.
+  the limit stays in force. It stays stored as billed: editing its amount in
+  the dashboard or with `"cost_basis": "billed"` keeps it billed, and it limits
+  billed cost again once the entitlement and markups are back.
 </Info>
 
 By default a budget limits provider cost: what you pay upstream for uncached
@@ -287,15 +289,22 @@ A billed budget:
   billed user-path or label budget rejects a request before a cached response
   is replayed. Provider-cost budgets never count cache hits, and provider
   budgets do not apply to them, since a hit is not routed to a provider.
+- on a provider, still counts the billed cache hits of that provider's models
+  in its spend. Set `BUDGETS_PROVIDER_BILLED_CACHE_HITS=false`
+  (`budgets.provider_billed_cache_hits`) to limit only what was billed for
+  requests the provider served.
 
 `cost_basis` is `provider` (default) or `billed`. It is an attribute, not part
 of the budget key: one scope, subject, and period holds one budget on either
 basis, and changing the basis keeps the current period. A `PUT` without
 `cost_basis` sets `provider`; existing budgets keep limiting provider cost.
-`GET /admin/budgets` and `GET /v1/usage` report each budget's `cost_basis`,
-with `spent` on that basis. In the dashboard, the budget form shows a **Cost
-basis** selector once the entitlement and markups are on, and billed budgets
-carry a `billed` chip.
+`GET /admin/budgets` and `GET /v1/usage` report each budget's stored
+`cost_basis` and its `enforced_cost_basis`, the basis `spent` is measured on.
+They differ only for a billed budget enforced on provider cost. In the
+dashboard, the budget form shows a **Cost basis** selector once the
+entitlement and markups are on, billed budgets carry a `billed` chip, and a
+billed budget enforced on provider cost carries a `billed · on provider cost`
+chip.
 
 ## Workflow enforcement
 

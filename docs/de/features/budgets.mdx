@@ -258,7 +258,10 @@ Vorlage startet für alle ihre Kinder einen neuen Zeitraum.
   Budget (im Dashboard angelegt oder aus einer früheren Konfiguration) blockiert
   den Start nie: Solange Berechtigung oder Aufschläge fehlen, protokolliert
   GoModel einmalig eine Warnung und setzt es auf Provider-Kosten durch, sodass
-  das Limit gilt, bis Sie es ändern oder beides wiederherstellen.
+  das Limit in Kraft bleibt. Es bleibt als abgerechnet gespeichert: Wenn Sie den
+  Betrag im Dashboard oder mit `"cost_basis": "billed"` ändern, bleibt es
+  abgerechnet, und sobald Berechtigung und Aufschläge zurück sind, begrenzt es
+  wieder abgerechnete Kosten.
 </Info>
 
 Standardmäßig begrenzt ein Budget die Provider-Kosten: was Sie upstream für
@@ -303,16 +306,23 @@ Ein abgerechnetes Budget:
   Request ab, bevor eine gecachte Antwort ausgeliefert wird. Budgets auf
   Provider-Kosten zählen Cache-Treffer nie, und Provider-Budgets gelten nicht
   für sie, da ein Treffer an keinen Provider geht.
+- zählt bei einem Provider die abgerechneten Cache-Treffer seiner Modelle trotzdem
+  zu den Ausgaben. Setzen Sie `BUDGETS_PROVIDER_BILLED_CACHE_HITS=false`
+  (`budgets.provider_billed_cache_hits`), damit ein Provider-Budget nur die
+  abgerechneten Kosten für vom Provider bediente Requests zählt.
 
 `cost_basis` ist `provider` (Standard) oder `billed`. Es ist ein Attribut, kein
 Teil des Budget-Schlüssels: Scope, Subjekt und Periode bilden ein Budget auf
 einer der beiden Basen, und ein Wechsel der Basis behält die laufende Periode
 bei. Ein `PUT` ohne `cost_basis` setzt `provider`; bestehende Budgets begrenzen
 weiterhin Provider-Kosten. `GET /admin/budgets` und `GET /v1/usage` melden für
-jedes Budget `cost_basis`, mit `spent` auf dieser Basis. Im Dashboard zeigt das
-Budget-Formular eine Auswahl **Kostenbasis**, sobald Berechtigung und
-Aufschläge aktiv sind, und abgerechnete Budgets tragen einen Chip
-`abgerechnet`.
+jedes Budget die gespeicherte `cost_basis` und `enforced_cost_basis`, die Basis,
+auf der `spent` gemessen wird. Sie unterscheiden sich nur bei einem
+abgerechneten Budget, das auf Provider-Kosten durchgesetzt wird. Im Dashboard
+zeigt das Budget-Formular eine Auswahl **Kostenbasis**, sobald Berechtigung und
+Aufschläge aktiv sind, abgerechnete Budgets tragen einen Chip `abgerechnet`, und
+ein abgerechnetes Budget auf Provider-Kosten trägt den Chip
+`abgerechnet · auf Anbieterkosten`.
 
 ## Durchsetzung über Workflows
 
