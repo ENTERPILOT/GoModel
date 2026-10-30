@@ -673,9 +673,9 @@ func TestResponsesChatStream_ReasoningDeltas(t *testing.T) {
 	assert.Equal(t, "Answer.", text)
 }
 
-// Summary-index state is per item: a second reasoning item starts its own
-// first part without a separator, and an omitted index forwards the delta
-// without touching the tracked index.
+// Item and index state combine: a second reasoning item gets the item
+// separator, and an omitted index forwards the delta without touching the
+// tracked index.
 func TestResponsesChatStream_ReasoningDeltas_IndexEdges(t *testing.T) {
 	upstream := sse(
 		`{"type":"response.created","response":{"id":"resp_1","model":"gpt-6-astra","status":"in_progress","output":[]}}`,
@@ -696,10 +696,35 @@ func TestResponsesChatStream_ReasoningDeltas_IndexEdges(t *testing.T) {
 			reasoning += r
 		}
 	}
-	// a → b: index advances, separator. b → c: new item, no separator.
-	// c → d: index absent, no separator, tracked index untouched.
-	// d → e: index unchanged from the tracked 1, no separator.
-	assert.Equal(t, "a\n\nbcde", reasoning)
+	// a → b: index advances, separator. b → c: new item, item separator.
+	// c → d: back to rs_1 with no index — item boundary, separator.
+	// d → e: index still tracked as 1, unchanged, no separator.
+	assert.Equal(t, "a\n\nb\n\nc\n\nde", reasoning)
+}
+
+// Empty summary deltas carry no text: they never emit a separator and never
+// advance the tracked index, matching the non-streaming converter, which
+// joins only non-empty parts.
+func TestResponsesChatStream_ReasoningDeltas_EmptyDeltas(t *testing.T) {
+	upstream := sse(
+		`{"type":"response.created","response":{"id":"resp_1","model":"gpt-6-astra","status":"in_progress","output":[]}}`,
+		`{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","summary_index":0,"delta":""}`,
+		`{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","summary_index":1,"delta":"b"}`,
+		`{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","summary_index":1,"delta":""}`,
+		`{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","summary_index":2,"delta":"c"}`,
+		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[]}}`,
+	)
+	chunks, _, err := readChatChunks(t, newResponsesChatStream(io.NopCloser(strings.NewReader(upstream)), "openai", "gpt-6-astra", false))
+	require.NoError(t, err)
+
+	var reasoning string
+	for _, chunk := range chunks {
+		delta := chunk["choices"].([]any)[0].(map[string]any)["delta"].(map[string]any)
+		if r, ok := delta["reasoning_content"].(string); ok {
+			reasoning += r
+		}
+	}
+	assert.Equal(t, "b\n\nc", reasoning)
 }
 
 // A request that asks for reasoning must also ask for the summary: the

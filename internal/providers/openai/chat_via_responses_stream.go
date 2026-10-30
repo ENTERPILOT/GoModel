@@ -199,8 +199,11 @@ type responsesChatStream struct {
 	tools map[string]int
 	// reasoningParts tracks the last summary part index per reasoning item,
 	// so a part boundary emits the separator the non-streaming converter
-	// joins summaries with. The map presence flag marks the first part.
+	// joins summaries with. reasoningItem is the last item that contributed
+	// summary text, so an item boundary emits the item separator. The map
+	// presence flag marks the first part.
 	reasoningParts map[string]int
+	reasoningItem  string
 	finished       bool
 	endErr         error
 }
@@ -272,15 +275,26 @@ func (s *responsesChatStream) handle(data []byte) {
 	case "response.reasoning_summary_text.delta":
 		// Reasoning text rides the reasoning_content extension, which the
 		// chat dialects (anthropicapi, streaming codec) render as thinking.
-		// Summary parts (summary_index) are distinct summaries; emit the
-		// separator the non-streaming converter joins them with when the
-		// index advances. An absent index forwards the delta untouched.
-		if event.SummaryIndex != nil {
+		// Summary parts (summary_index) and items are distinct summaries;
+		// emit the separator the non-streaming converter joins them with
+		// when either advances. Empty deltas carry no text, so they never
+		// introduce a separator and never touch the tracked state. An
+		// absent index forwards the delta without index tracking.
+		if event.Delta == "" {
+			return
+		}
+		if s.reasoningItem != "" && event.ItemID != s.reasoningItem {
+			s.emit(map[string]any{"reasoning_content": "\n\n"}, nil, nil)
+		}
+		if event.SummaryIndex != nil && event.ItemID == s.reasoningItem {
 			if last, seen := s.reasoningParts[event.ItemID]; seen && *event.SummaryIndex != last {
 				s.emit(map[string]any{"reasoning_content": "\n\n"}, nil, nil)
 			}
+		}
+		if event.SummaryIndex != nil {
 			s.reasoningParts[event.ItemID] = *event.SummaryIndex
 		}
+		s.reasoningItem = event.ItemID
 		s.emit(map[string]any{"reasoning_content": event.Delta}, nil, nil)
 	case "response.reasoning_text.delta":
 		s.emit(map[string]any{"reasoning_content": event.Delta}, nil, nil)
