@@ -19,7 +19,7 @@ func chatResponseFromResponses(resp *core.ResponsesResponse, provider string) (*
 	if resp.Status == "failed" {
 		return nil, core.NewProviderError(provider, http.StatusBadGateway, responsesErrorMessage(resp.Error), nil)
 	}
-	var text, refusal strings.Builder
+	var text, refusal, reasoning strings.Builder
 	var calls []core.ToolCall
 	for _, item := range resp.Output {
 		switch item.Type {
@@ -38,6 +38,8 @@ func chatResponseFromResponses(resp *core.ResponsesResponse, provider string) (*
 				Type:     "function",
 				Function: core.FunctionCall{Name: item.Name, Arguments: item.Arguments},
 			})
+		case "reasoning":
+			reasoning.WriteString(reasoningSummaryText(item))
 		}
 	}
 	finishReason, ok := chatFinishReason(resp, len(calls) > 0)
@@ -56,6 +58,15 @@ func chatResponseFromResponses(resp *core.ResponsesResponse, provider string) (*
 			return nil, core.NewProviderError(provider, http.StatusBadGateway, "invalid refusal in response", err)
 		}
 		message.ExtraFields = core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"refusal": raw})
+	}
+	// Reasoning summaries surface as the reasoning_content extension the chat
+	// dialects (anthropicapi, streaming codec) already render as thinking.
+	if reasoning.Len() > 0 {
+		// json.Marshal cannot fail on a string, and the merge on a fresh
+		// single-member map cannot fail either.
+		raw, _ := json.Marshal(reasoning.String())
+		message.ExtraFields, _ = core.MergeUnknownJSONFields(message.ExtraFields,
+			map[string]json.RawMessage{"reasoning_content": raw})
 	}
 	return &core.ChatResponse{
 		ID:      resp.ID,
@@ -117,6 +128,31 @@ func chatUsageFromResponses(usage *core.ResponsesUsage) core.Usage {
 		CompletionTokensDetails: usage.CompletionTokensDetails,
 		RawUsage:                usage.RawUsage,
 	}
+}
+
+// reasoningSummaryText extracts the readable summary text from a reasoning
+// output item. The Responses API carries summaries as
+// {"summary": [{"type": "summary_text", "text": ...}]}; the item's typed
+// fields do not model it, so it lives in ExtraFields.
+func reasoningSummaryText(item core.ResponsesOutputItem) string {
+	raw := item.ExtraFields.Lookup("summary")
+	if len(raw) == 0 {
+		return ""
+	}
+	var parts []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		return ""
+	}
+	texts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part.Type == "summary_text" && part.Text != "" {
+			texts = append(texts, part.Text)
+		}
+	}
+	return strings.Join(texts, "\n\n")
 }
 
 // responsesErrorMessage returns the upstream error message of a failed
@@ -221,6 +257,10 @@ func (s *responsesChatStream) handle(data []byte) {
 		s.emit(map[string]any{"role": "assistant", "content": ""}, nil, nil)
 	case "response.output_text.delta":
 		s.emit(map[string]any{"content": event.Delta}, nil, nil)
+	case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
+		// Reasoning text rides the reasoning_content extension, which the
+		// chat dialects (anthropicapi, streaming codec) render as thinking.
+		s.emit(map[string]any{"reasoning_content": event.Delta}, nil, nil)
 	case "response.refusal.delta":
 		s.emit(map[string]any{"refusal": event.Delta}, nil, nil)
 	case "response.output_item.added":

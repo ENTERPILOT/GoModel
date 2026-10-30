@@ -571,3 +571,89 @@ func TestResponsesChatStream_RefusalFilterAndUnusedEvents(t *testing.T) {
 	assert.Equal(t, "I can't", refusal)
 	assert.Equal(t, "content_filter", finish)
 }
+
+// Reasoning output items surface as the reasoning_content extension, which
+// the chat dialects render as thinking (Anthropic thinking blocks, the
+// streaming codec's reasoning member).
+func TestChatResponseFromResponses_ReasoningBecomesReasoningContent(t *testing.T) {
+	t.Run("summaries join in output order", func(t *testing.T) {
+		var resp core.ResponsesResponse
+		require.NoError(t, json.Unmarshal([]byte(`{"id":"resp_1","status":"completed","output":[
+			{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"First step."}]},
+			{"type":"reasoning","id":"rs_2","summary":[{"type":"summary_text","text":"Second"},{"type":"summary_text","text":"thought."}]},
+			{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"Answer."}]}]}`), &resp))
+		chat, err := chatResponseFromResponses(&resp, "openai")
+		require.NoError(t, err)
+		msg := chat.Choices[0].Message
+		var reasoning string
+		require.NoError(t, json.Unmarshal(msg.ExtraFields.Lookup("reasoning_content"), &reasoning))
+		assert.Equal(t, "First step.Second\n\nthought.", reasoning)
+		assert.Equal(t, "Answer.", msg.Content)
+	})
+	t.Run("no reasoning item, no member", func(t *testing.T) {
+		var resp core.ResponsesResponse
+		require.NoError(t, json.Unmarshal([]byte(`{"id":"resp_1","status":"completed","output":[
+			{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"Answer."}]}]}`), &resp))
+		chat, err := chatResponseFromResponses(&resp, "openai")
+		require.NoError(t, err)
+		assert.Empty(t, chat.Choices[0].Message.ExtraFields.Lookup("reasoning_content"))
+	})
+	t.Run("refusal and reasoning coexist", func(t *testing.T) {
+		var resp core.ResponsesResponse
+		require.NoError(t, json.Unmarshal([]byte(`{"id":"resp_1","status":"completed","output":[
+			{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"Weighing it."}]},
+			{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"refusal","refusal":"No."}]}]}`), &resp))
+		chat, err := chatResponseFromResponses(&resp, "openai")
+		require.NoError(t, err)
+		fields := chat.Choices[0].Message.ExtraFields
+		var reasoning, refusal string
+		require.NoError(t, json.Unmarshal(fields.Lookup("reasoning_content"), &reasoning))
+		require.NoError(t, json.Unmarshal(fields.Lookup("refusal"), &refusal))
+		assert.Equal(t, "Weighing it.", reasoning)
+		assert.Equal(t, "No.", refusal)
+	})
+}
+
+func TestReasoningSummaryText(t *testing.T) {
+	item := func(summary string) core.ResponsesOutputItem {
+		if summary == "" {
+			return core.ResponsesOutputItem{Type: "reasoning"}
+		}
+		fields := core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"summary": json.RawMessage(summary)})
+		return core.ResponsesOutputItem{Type: "reasoning", ExtraFields: fields}
+	}
+	assert.Empty(t, reasoningSummaryText(item("")))
+	assert.Empty(t, reasoningSummaryText(item("null")))
+	assert.Empty(t, reasoningSummaryText(item("123")))
+	assert.Empty(t, reasoningSummaryText(item(`[{"type":"summary_text","text":""},{"type":"other","text":"skip"}]`)))
+	assert.Equal(t, "a\n\nb", reasoningSummaryText(item(`[{"type":"summary_text","text":"a"},{"type":"summary_text","text":"b"}]`)))
+}
+
+// Reasoning summary and reasoning text deltas stream as reasoning_content.
+func TestResponsesChatStream_ReasoningDeltas(t *testing.T) {
+	upstream := sse(
+		`{"type":"response.created","response":{"id":"resp_1","model":"gpt-6-astra","status":"in_progress","output":[]}}`,
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","id":"rs_1","summary":[]}}`,
+		`{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","delta":"Thinking"}`,
+
+		`{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","delta":" hard."}`,
+		`{"type":"response.reasoning_text.delta","item_id":"rs_1","delta":" Raw."}`,
+		`{"type":"response.output_text.delta","item_id":"msg_1","delta":"Answer."}`,
+		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[]}}`,
+	)
+	chunks, _, err := readChatChunks(t, newResponsesChatStream(io.NopCloser(strings.NewReader(upstream)), "openai", "gpt-6-astra", false))
+	require.NoError(t, err)
+
+	var reasoning, text string
+	for _, chunk := range chunks {
+		delta := chunk["choices"].([]any)[0].(map[string]any)["delta"].(map[string]any)
+		if r, ok := delta["reasoning_content"].(string); ok {
+			reasoning += r
+		}
+		if c, ok := delta["content"].(string); ok {
+			text += c
+		}
+	}
+	assert.Equal(t, "Thinking hard. Raw.", reasoning)
+	assert.Equal(t, "Answer.", text)
+}
