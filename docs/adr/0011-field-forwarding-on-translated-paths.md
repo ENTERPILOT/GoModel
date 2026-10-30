@@ -133,6 +133,8 @@ rather than stripped.
 |---|---|---|---|
 | any unknown member | any | 1 | forwarded untouched |
 | `message.reasoning` / `delta.reasoning` | Groq | 3 | returned as `reasoning_content` |
+| reasoning output item `summary` / `response.reasoning_summary_text.delta` | Responses-only upstreams via chat (`ChatViaResponses`) | 3 | returned as `reasoning_content`; summary parts join with `\n\n`, an advancing `summary_index` emits the separator on the stream |
+| `reasoning.summary` | Responses-only upstreams via chat (`ChatViaResponses`) | reserved | set to `auto` by the gateway whenever the request asks for reasoning, so a summary exists to render |
 | `x_groq`, `queue_time`, `prompt_time`, `completion_time` | Groq | 1 | forwarded untouched |
 | `prompt_cache_hit_tokens`, `prompt_cache_miss_tokens` | DeepSeek | 1 | forwarded untouched (`prompt_tokens_details.cached_tokens` carries the same count) |
 
