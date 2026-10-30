@@ -27,6 +27,57 @@ func TestBuildRequestAppliesPluginUpstreamHeaders(t *testing.T) {
 	}
 }
 
+// TestBuildRequestPluginOriginDropsPluginUpstreamHeaders proves that inference a
+// plugin issues through its own Host — a guardrail's LLM judge, for example —
+// does not inherit the headers the prompt phase recorded. Those headers
+// describe the client's provider call, not the model the gateway picks for
+// itself, and the internal call shares the context that carries them.
+func TestBuildRequestPluginOriginDropsPluginUpstreamHeaders(t *testing.T) {
+	client := New(DefaultConfig("test", "http://upstream.test"), func(req *http.Request) {
+		req.Header.Set("Authorization", "Bearer provider")
+	})
+
+	tests := []struct {
+		name       string
+		origin     core.RequestOrigin
+		wantPlugin bool
+	}{
+		{name: "external", origin: core.RequestOriginExternal, wantPlugin: true},
+		{name: "plugin", origin: core.RequestOriginPlugin},
+		{name: "guardrail", origin: core.RequestOriginGuardrail},
+		{name: "unset", wantPlugin: true}, // external traffic is the default
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			if tt.origin != "" {
+				ctx = core.WithRequestOrigin(ctx, tt.origin)
+			}
+			ctx = core.WithPluginUpstreamHeaders(ctx, http.Header{
+				"X-Edge-Proxy-Token": {"edge-token"},
+				"X-Judge-Trace":      {"plugin"},
+			})
+
+			req, err := client.buildRequest(ctx, Request{
+				Method:   http.MethodGet,
+				Endpoint: "/v1/models",
+				Headers:  http.Header{"X-Request-Scoped": {"scoped"}},
+			})
+			require.NoError(t, err)
+
+			if tt.wantPlugin {
+				assert.Equal(t, "edge-token", req.Header.Get("X-Edge-Proxy-Token"))
+				assert.Equal(t, "plugin", req.Header.Get("X-Judge-Trace"))
+			} else {
+				assert.Empty(t, req.Header.Get("X-Edge-Proxy-Token"))
+				assert.Empty(t, req.Header.Get("X-Judge-Trace"), "a plugin's own inference carries no plugin upstream header")
+			}
+			assert.Equal(t, "Bearer provider", req.Header.Get("Authorization"))
+			assert.Equal(t, "scoped", req.Header.Get("X-Request-Scoped"), "request headers are left alone")
+		})
+	}
+}
+
 func TestBuildRequestPluginHeadersCannotOverrideCredentials(t *testing.T) {
 	client := New(DefaultConfig("test", "http://upstream.test"), func(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer provider")

@@ -320,7 +320,17 @@ var pluginTransportHeaders = map[string]struct{}{
 // requestHeadersWithPluginOverrides merges the headers plugins wrote to
 // Exchange.Headers.Upstream into the request headers. It returns reqHeaders
 // unchanged when no plugin set any header.
+//
+// Only external traffic carries them. Gateway-internal inference issued by a
+// plugin — its Host on behalf of an LLM-based guardrail, for example — is built
+// on a context derived from the request that triggered it, so it would
+// otherwise inherit headers chosen for the client's provider and send them to
+// the model the gateway picked for itself. Origin is the same signal the
+// idempotency-key forwarding above uses to tell the two apart.
 func requestHeadersWithPluginOverrides(ctx context.Context, reqHeaders http.Header) http.Header {
+	if core.GetRequestOrigin(ctx) != core.RequestOriginExternal {
+		return reqHeaders
+	}
 	extra := core.PluginUpstreamHeaders(ctx)
 	if len(extra) == 0 {
 		return reqHeaders
