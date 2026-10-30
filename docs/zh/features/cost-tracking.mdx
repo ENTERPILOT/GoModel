@@ -198,3 +198,28 @@ total,2026-10-01,2026-10-31,USD,,,,1200,950000,210000,3.2875,3.945,20
 ```
 
 每个明细项是一个模型在一个 provider 实例上的用量。`row_type` 用于区分明细项（`item`）、每个客户的小计（`subtotal`）和总计（`total`），因此在电子表格中求和前请先筛选 `item`。金额为普通的 USD 小数；成本为空表示未知（没有定价）。请求数、token 数和 provider 成本只包含发送给 provider 的请求；计费成本还包含已计费的响应缓存命中，与其他计费视图一致。`effective_markup_percent` 是计费成本除以 provider 成本再减一，因此已计费的缓存命中会提高该值。
+
+## 合并多个实例的用量
+
+控制台显示其所在实例所用数据库中的用量。共享同一个 PostgreSQL 或 MongoDB 数据库的实例已经会显示合并后的用量；
+参见[运行多个副本](/zh/guides/production#运行多个副本)。这是今后保持分析数据合并的方式。
+
+要合并一个曾使用独立 SQLite 数据库的实例的历史数据，请在目标实例运行的位置、使用相同配置执行：
+
+```bash
+gomodel usage import /path/to/other/gomodel.db
+```
+
+记录保留其 ID，因此重复运行不会重复复制。导入的记录会计入用户路径匹配的[预算](/zh/features/budgets)，
+其托管 API 密钥 ID 只有在该密钥存在于本实例时才能解析。
+
+要将 PostgreSQL 或 MongoDB 实例合并到使用相同后端的实例中，请用数据库自带的工具复制 `usage` 表或集合。
+请先让 GoModel 连接目标数据库启动一次，以便创建该表：
+
+```bash
+pg_dump --data-only --table=usage --column-inserts --on-conflict-do-nothing "$SOURCE_URL" | psql "$DEST_URL"
+mongodump --uri "$SOURCE_URL" --db gomodel --collection usage --archive | mongorestore --uri "$DEST_URL" --archive --nsInclude "gomodel.usage"
+```
+
+`gomodel` 是 MongoDB 的默认数据库名。如果任一实例设置了 `MONGODB_DATABASE` 或在 URL 中指定了其他数据库，
+请改用该名称；两者不同时，用 `--nsFrom "<源>.usage" --nsTo "<目标>.usage"` 进行映射。

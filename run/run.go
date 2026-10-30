@@ -183,6 +183,18 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}
 
+	var usageImportSource string
+	if cliOpts.UsageArgs != nil {
+		usageImportSource, err = parseUsageArgs(opts.ProductName, cliOpts.UsageArgs, opts.Stdout, opts.Stderr)
+		if err != nil {
+			fmt.Fprintln(opts.Stderr, err)
+			return &usageError{err: err}
+		}
+		if usageImportSource == "" {
+			return nil // help
+		}
+	}
+
 	if cliOpts.Version {
 		fmt.Fprintln(opts.Stdout, versionLine(opts.ProductName))
 		return nil
@@ -230,6 +242,13 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	if secretsOpts != nil {
 		if err := runSecretsReencrypt(ctx, opts, *secretsOpts); err != nil {
+			fmt.Fprintln(opts.Stderr, err)
+			return err
+		}
+		return nil
+	}
+	if usageImportSource != "" {
+		if err := runUsageImport(ctx, opts, usageImportSource); err != nil {
 			fmt.Fprintln(opts.Stderr, err)
 			return err
 		}

@@ -206,3 +206,35 @@ total,2026-10-01,2026-10-31,USD,,,,1200,950000,210000,3.2875,3.945,20
 ```
 
 Każda pozycja to jeden model na jednej instancji providera. `row_type` odróżnia pozycje (`item`) od sumy częściowej każdego klienta (`subtotal`) i sumy całkowitej (`total`), więc przed sumowaniem w arkuszu kalkulacyjnym zostaw tylko wiersze `item`. Kwoty to zwykłe liczby dziesiętne w USD; pusty koszt oznacza, że jest nieznany (brak cennika). Requesty, tokeny i koszt providera obejmują requesty wysłane do providerów; rozliczony koszt obejmuje też rozliczone cache hity odpowiedzi tak jak w pozostałych widokach rozliczeń. `effective_markup_percent` to stosunek rozliczonego kosztu do kosztu providera minus jeden, więc rozliczone cache hity go podnoszą.
+
+## Łączenie użycia z kilku instancji
+
+Dashboard pokazuje użycie zapisane w bazie, której używa jego instancja.
+Instancje współdzielące jedną bazę PostgreSQL lub MongoDB już pokazują wspólne
+użycie; zobacz [Uruchamianie więcej niż jednej repliki](/pl/guides/production#uruchamianie-więcej-niż-jednej-repliki).
+Tak zachowasz połączone analizy od teraz.
+
+Aby scalić historię instancji, która miała własną bazę SQLite, uruchom to tam,
+gdzie działa instancja docelowa, z tą samą konfiguracją:
+
+```bash
+gomodel usage import /path/to/other/gomodel.db
+```
+
+Wiersze zachowują swoje ID, więc ponowne uruchomienie niczego nie kopiuje
+dwukrotnie. Zaimportowane wiersze wliczają się do [budżetów](/pl/features/budgets)
+o pasującej ścieżce użytkownika, a ich ID zarządzanych kluczy API rozwiązują się
+tylko wtedy, gdy klucz istnieje na tej instancji.
+
+Aby scalić instancję PostgreSQL lub MongoDB z instancją na tym samym backendzie,
+skopiuj tabelę lub kolekcję `usage` narzędziami samej bazy. Najpierw uruchom
+GoModel raz na bazie docelowej, aby tabela istniała:
+
+```bash
+pg_dump --data-only --table=usage --column-inserts --on-conflict-do-nothing "$SOURCE_URL" | psql "$DEST_URL"
+mongodump --uri "$SOURCE_URL" --db gomodel --collection usage --archive | mongorestore --uri "$DEST_URL" --archive --nsInclude "gomodel.usage"
+```
+
+`gomodel` to domyślna nazwa bazy MongoDB. Jeśli któraś instancja ustawia
+`MONGODB_DATABASE` lub podaje inną bazę w swoim URL, użyj tej nazwy, a gdy nazwy
+się różnią, zmapuj je przez `--nsFrom "<źródło>.usage" --nsTo "<cel>.usage"`.

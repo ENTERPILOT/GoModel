@@ -210,3 +210,38 @@ total,2026-10-01,2026-10-31,USD,,,,1200,950000,210000,3.2875,3.945,20
 ```
 
 Jede Position ist ein Modell auf einer Provider-Instanz. `row_type` unterscheidet Positionen (`item`) von der Zwischensumme jedes Kunden (`subtotal`) und der Gesamtsumme (`total`); filtern Sie also in einer Tabellenkalkulation vor dem Summieren auf `item`. Beträge sind einfache Dezimalzahlen in USD; leere Kosten sind unbekannt (keine Preise). Requests, Tokens und Provider-Kosten umfassen an Provider gesendete Requests; die abgerechneten Kosten enthalten zusätzlich abgerechnete Treffer des Response-Caches, wie in den anderen Abrechnungsansichten. `effective_markup_percent` ist das Verhältnis von abgerechneten Kosten zu Provider-Kosten minus eins, abgerechnete Cache-Treffer erhöhen den Wert also.
+
+## Usage mehrerer Instanzen zusammenführen
+
+Das Dashboard zeigt die Usage aus der Datenbank, die seine Instanz nutzt.
+Instanzen, die sich eine PostgreSQL- oder MongoDB-Datenbank teilen, zeigen
+bereits die gemeinsame Usage; siehe [Mehr als ein Replikat betreiben](/de/guides/production#mehr-als-ein-replikat-betreiben).
+So bleiben die Analysen künftig zusammengeführt.
+
+Um den Verlauf einer Instanz mit eigener SQLite-Datenbank zu übernehmen, führen
+Sie dies dort aus, wo die Zielinstanz läuft, mit derselben Konfiguration:
+
+```bash
+gomodel usage import /path/to/other/gomodel.db
+```
+
+Zeilen behalten ihre IDs, daher kopiert ein erneuter Lauf nichts doppelt.
+Importierte Zeilen zählen zu [Budgets](/de/features/budgets) mit passendem User
+Path, und ihre IDs verwalteter API-Keys lösen sich nur auf, wenn der Key auf
+dieser Instanz existiert.
+
+Um eine PostgreSQL- oder MongoDB-Instanz in eine mit demselben Backend zu
+übernehmen, kopieren Sie die Tabelle bzw. Collection `usage` mit den Werkzeugen
+der Datenbank. Starten Sie GoModel vorher einmal gegen das Ziel, damit die
+Tabelle existiert:
+
+```bash
+pg_dump --data-only --table=usage --column-inserts --on-conflict-do-nothing "$SOURCE_URL" | psql "$DEST_URL"
+mongodump --uri "$SOURCE_URL" --db gomodel --collection usage --archive | mongorestore --uri "$DEST_URL" --archive --nsInclude "gomodel.usage"
+```
+
+`gomodel` ist der Standardname der MongoDB-Datenbank. Wenn eine der Instanzen
+`MONGODB_DATABASE` setzt oder in ihrer URL eine andere Datenbank nennt,
+verwenden Sie diesen Namen und ordnen Sie ihn mit
+`--nsFrom "<quelle>.usage" --nsTo "<ziel>.usage"` zu, wenn sich die Namen
+unterscheiden.

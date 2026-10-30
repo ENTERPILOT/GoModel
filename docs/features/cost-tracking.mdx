@@ -206,3 +206,35 @@ total,2026-10-01,2026-10-31,USD,,,,1200,950000,210000,3.2875,3.945,20
 ```
 
 Each line item is one model on one provider instance. `row_type` tells line items from each customer's `subtotal` and the grand `total`, so filter on `item` before summing in a spreadsheet. Amounts are plain USD decimals; an empty cost means it is unknown (no pricing). Requests, tokens, and provider cost cover requests sent to providers; billed cost also includes billed response-cache hits, as in the other billed views. `effective_markup_percent` is billed cost over provider cost, minus one, so billed cache hits raise it.
+
+## Combining usage from several instances
+
+The dashboard shows the usage stored in the database its instance uses.
+Instances that share one PostgreSQL or MongoDB database already show combined
+usage; see [running more than one replica](/guides/production#running-more-than-one-replica).
+That is the way to keep analytics combined from now on.
+
+To merge the history of an instance that had its own SQLite database, run this
+where the destination instance runs, with the same configuration:
+
+```bash
+gomodel usage import /path/to/other/gomodel.db
+```
+
+Rows keep their IDs, so running it again copies nothing twice. Imported rows
+count toward [budgets](/features/budgets) whose user path matches, and their
+managed API key IDs only resolve if the key exists on this instance.
+
+To merge a PostgreSQL or MongoDB instance into one that uses the same backend,
+copy the `usage` table or collection with the database's own tools. Start
+GoModel against the destination once first so the table exists:
+
+```bash
+pg_dump --data-only --table=usage --column-inserts --on-conflict-do-nothing "$SOURCE_URL" | psql "$DEST_URL"
+mongodump --uri "$SOURCE_URL" --db gomodel --collection usage --archive | mongorestore --uri "$DEST_URL" --archive --nsInclude "gomodel.usage"
+```
+
+`gomodel` is the default MongoDB database name. If either instance sets
+`MONGODB_DATABASE` or names another database in its URL, use that name, and map
+it with `--nsFrom "<source>.usage" --nsTo "<destination>.usage"` when the two
+differ.
