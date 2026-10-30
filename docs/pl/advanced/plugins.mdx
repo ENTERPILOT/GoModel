@@ -342,7 +342,8 @@ Co gateway z nimi robi:
 
 - Każda próba providera w ramach requestu je przenosi, łącznie z failoverem do
   innego providera, a także wywołania zliczania tokenów i kompakcji, które request
-  wykonuje: trafiają do tego samego upstreamu, za tym samym gatewayem. Każde
+  wykonuje. Każda próba wysyła je do upstreamu wybranego dla tej próby: failover może
+  rozwiązać się na innego providera i inny base URL, a nagłówki idą za nim. Każde
   wywołanie, które przechodzi przez klienta HTTP gatewaya — Bedrock, który wywołuje
   SDK AWS bezpośrednio, ich nie przenosi.
 - Inferencja, którą gateway wykonuje na własne potrzeby, ich nie przenosi. Sędzia

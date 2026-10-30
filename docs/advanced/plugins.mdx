@@ -341,9 +341,11 @@ What the gateway does with them:
 
 - Every provider attempt of the request carries them, failover to another
   provider included, and so do the token-counting and compaction calls the
-  request makes: they reach the same upstream, behind the same gateway. Every
-  call that goes through the gateway's HTTP client, that is; Bedrock, which
-  calls the AWS SDK directly, does not carry them.
+  request makes. Each attempt sends them to the upstream selected for that
+  attempt: a failover can resolve to a different provider and a different base
+  URL, and the headers follow it. Every call that goes through the gateway's
+  HTTP client, that is; Bedrock, which calls the AWS SDK directly, does not carry
+  them.
 - Inference the gateway issues for its own work does not. A guardrail's LLM
   judge calls the provider through the plugin `Host` on the request context, and
   that call drops these headers: they describe the client's provider, not the

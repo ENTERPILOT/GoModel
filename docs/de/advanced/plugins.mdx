@@ -330,9 +330,11 @@ Was das Gateway damit macht:
 
 - Jeder Provider-Versuch des Requests trägt sie, einschließlich Failover auf einen
   anderen Provider, ebenso die Aufrufe zur Token-Zählung und Kompaktierung, die der
-  Request auslöst: Sie erreichen dasselbe Upstream hinter demselben Gateway. Jeder
-  Aufruf, der über den HTTP-Client des Gateways läuft, wohlgemerkt; Bedrock, das das
-  AWS SDK direkt aufruft, trägt sie nicht.
+  Request auslöst. Jeder Versuch sendet sie an das für diesen Versuch gewählte
+  Upstream: Ein Failover kann auf einen anderen Provider und eine andere Base-URL
+  auflösen, und die Header folgen ihm. Jeder Aufruf, der über den HTTP-Client des
+  Gateways läuft, wohlgemerkt; Bedrock, das das AWS SDK direkt aufruft, trägt sie
+  nicht.
 - Inferenz, die das Gateway für eigene Zwecke stellt, trägt sie nicht. Der LLM-Judge
   einer Guardrail ruft den Provider über das Plugin-`Host` im Request-Kontext auf,
   und dieser Aufruf verwirft die Header: Sie beschreiben den Provider des Clients,

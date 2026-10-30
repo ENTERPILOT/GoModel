@@ -246,8 +246,9 @@ func (p *tenantHint) OnPrompt(_ context.Context, x *pluginapi.Exchange) (plugina
 
 网关如何处理这些 Header：
 
-- 该请求的每一次提供商尝试都会携带它们，包括故障转移到另一个提供商，以及该请求发起的 token 计数和压缩调用：
-  它们到达同一个网关后面的同一个上游。前提是这些调用经由网关的 HTTP 客户端发出；Bedrock 直接调用 AWS SDK，不携带它们。
+- 该请求的每一次提供商尝试都会携带它们，包括故障转移到另一个提供商，以及该请求发起的 token 计数和压缩调用。
+  每次尝试都会把它们发到为该次尝试选定的上游：故障转移可能解析到另一个提供商和另一个 base URL，这些 Header 会随之而去。
+  前提是这些调用经由网关的 HTTP 客户端发出；Bedrock 直接调用 AWS SDK，不携带它们。
 - 网关为自身工作发起的推理不会携带。guardrail 的 LLM 判定通过插件 `Host` 在请求上下文中调用提供商，
   该调用会丢弃这些 Header：它们描述的是客户端的提供商，而不是网关为 guardrail 选择的模型。
 - 以下名称会被拒绝，而不是被合并：携带凭据的 Header（`Authorization`、`Proxy-Authorization`、`x-api-key`、`api-key`、
