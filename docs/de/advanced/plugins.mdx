@@ -22,6 +22,11 @@ Plugins, ebenso wie eine benutzerdefinierte Routing-Strategie für ein
 Unabhängig vom Weg erscheint ein Plugin-Typ unter seinem Manifest-Namen auf der Seite Guardrails
 im Dashboard, in `GET /admin/plugins` und als `type` in `guardrails.rules`.
 
+Wenn Sie Ihr eigenes Binary kompilieren, ergänzen Sie `godebug multipathtcp=0` in der `go.mod` Ihres
+Moduls. Die Einstellung von GoModel gilt nicht für andere Module; sie entschärft den Linux-Kernel-Fehler
+[CVE-2026-98432](https://groups.google.com/g/golang-announce/c/PCoQcdxoScw).
+Ein gepatchter Kernel bleibt trotzdem erforderlich.
+
 `pluginapi` hängt ausschließlich von der Standardbibliothek ab. Ein Plugin importiert dieses Paket
 und sonst nichts aus GoModel.
 

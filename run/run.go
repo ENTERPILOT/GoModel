@@ -9,6 +9,10 @@
 //			os.Exit(code)
 //		}
 //	}
+//
+// A godebug setting applies only to the module that builds the binary, so
+// GoModel's multipathtcp=0 does not reach external modules. Add
+// "godebug multipathtcp=0" to their go.mod as well; see CVE-2026-98432.
 package run
 
 import (

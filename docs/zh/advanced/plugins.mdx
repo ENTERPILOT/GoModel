@@ -20,6 +20,10 @@ keywords: ["插件", "护栏", "共享对象", "路由策略", "流式传输", "
 无论以哪种方式提供，插件类型都会以其 manifest 名称显示在控制台的 Guardrails 页面、`GET /admin/plugins` 中，
 并可作为 `guardrails.rules` 中的 `type` 使用。
 
+如果您自行编译二进制文件，请在您模块的 `go.mod` 中添加 `godebug multipathtcp=0`。GoModel 自身的设置不会传递给其他模块，
+该设置用于缓解 Linux 内核漏洞 [CVE-2026-98432](https://groups.google.com/g/golang-announce/c/PCoQcdxoScw)。
+您仍需安装已修补的内核。
+
 `pluginapi` 仅依赖标准库。插件只需导入它，无需导入 GoModel 的任何其他内容。
 
 ## 阶段

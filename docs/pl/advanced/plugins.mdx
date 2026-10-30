@@ -24,6 +24,12 @@ Niezależnie od sposobu dostarczenia typ pluginu pojawia się pod nazwą z manif
 stronie Guardrails w dashboardzie, w `GET /admin/plugins` oraz jako `type` w
 `guardrails.rules`.
 
+Jeśli kompilujesz własny plik binarny, dodaj `godebug multipathtcp=0` do `go.mod`
+swojego modułu. Ustawienie GoModel nie przenosi się na inne moduły, a ogranicza
+ryzyko związane z błędem jądra Linuksa
+[CVE-2026-98432](https://groups.google.com/g/golang-announce/c/PCoQcdxoScw).
+Załatane jądro nadal jest konieczne.
+
 `pluginapi` zależy wyłącznie od biblioteki standardowej. Plugin importuje go i
 nic więcej z GoModel.
 
