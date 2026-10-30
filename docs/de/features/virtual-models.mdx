@@ -65,6 +65,12 @@ Zielmodells; setzen Sie den Alias auf `0`, um diese Vererbung zu überschreiben.
 Das gilt auch für per Load Balancing verteilte virtuelle Modelle, nachdem ein
 Ziel ausgewählt wurde.
 
+Das Slowdown eines Modells lässt sich exakt (`openai/gpt-4o`) oder modellweit
+(`gpt-4o`, bei jedem Provider) setzen; der exakte Wert gewinnt. Ein
+spezifischerer Eintrag, der Slowdown leer lässt oder dessen `user_paths` den
+Aufrufer ausschließen, verdeckt keinen allgemeineren Wert. Eine providerweite
+Zugriffsregel schaltet das Slowdown eines Modells also nie ab.
+
 ## Reasoning-Effort erzwingen
 
 Setzen Sie **Reasoning effort override** für ein konkretes Modell oder einen
@@ -100,6 +106,14 @@ wird. Ist ein Modell über mehrere innere virtuelle Modelle erreichbar, gilt der
 Wert auf dem Pfad, den das Routing gewählt hat; ein Failover-Versuch nutzt den
 zuerst deklarierten Pfad zu seinem Modell. Das gilt für Chat Completions, die Responses API und die Anthropic
 Messages API; Batches und Provider-Passthrough werden nicht umgeschrieben.
+
+Da der Override eines konkreten Modells jeden Alias darüber schlägt, setzen Sie
+ihn nur für Stufen, die das Modell nicht akzeptiert, und legen Sie Richtlinien
+auf Aliase. Zum Beispiel können die Aliase `fast` und `smart` desselben Modells
+`low` und `high` senden; ein Override auf diesem Modell würde beide dessen Wert
+senden lassen. Das ist das Gegenteil von Slowdown, wo der Alias gewinnt. Wie
+bei Slowdown schlägt ein exakter Override einen modellweiten, und ein Eintrag
+ohne Effort verdeckt keinen allgemeineren.
 
 Der Rest dieser Seite behandelt Redirects.
 

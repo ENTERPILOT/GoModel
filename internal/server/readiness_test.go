@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -235,34 +236,39 @@ func (b *blockingHealthChecker) CheckHealth(context.Context) ext.HealthStatus {
 }
 
 func TestReadyEndpointBoundsUncooperativeHealthChecks(t *testing.T) {
-	release := make(chan struct{})
-	defer close(release)
-	first := &blockingHealthChecker{name: "first", release: release}
-	second := &blockingHealthChecker{name: "second", release: release}
-	srv := New(&mockProvider{}, &Config{StorageProbe: fakeProbe{}, HealthCheckers: healthCheckers(first, second)})
+	// The probe deadline runs on the bubble's clock, so the stuck checks
+	// cost no real time.
+	synctest.Test(t, func(t *testing.T) {
+		release := make(chan struct{})
+		defer close(release)
+		first := &blockingHealthChecker{name: "first", release: release}
+		second := &blockingHealthChecker{name: "second", release: release}
+		srv := New(&mockProvider{}, &Config{StorageProbe: fakeProbe{}, HealthCheckers: healthCheckers(first, second)})
 
-	ready := func() (time.Duration, readinessResponse) {
-		req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
-		rec := httptest.NewRecorder()
-		start := time.Now()
-		srv.ServeHTTP(rec, req)
-		elapsed := time.Since(start)
-		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-		return elapsed, echotest.Decode[readinessResponse](t, rec)
-	}
+		ready := func() (time.Duration, readinessResponse) {
+			req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+			rec := httptest.NewRecorder()
+			start := time.Now()
+			srv.ServeHTTP(rec, req)
+			elapsed := time.Since(start)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			return elapsed, echotest.Decode[readinessResponse](t, rec)
+		}
 
-	elapsed, body := ready()
-	// Both checks share one deadline instead of adding one each.
-	assert.Less(t, elapsed, readinessProbeTimeout+time.Second)
-	assert.Equal(t, "degraded", body.Status)
-	assert.Equal(t, map[string]string{"storage": "ok", "first": "degraded", "second": "degraded"}, body.Components)
+		elapsed, body := ready()
+		// Both checks share one deadline instead of adding one each.
+		assert.Equal(t, readinessProbeTimeout, elapsed)
+		assert.Equal(t, "degraded", body.Status)
+		assert.Equal(t, map[string]string{"storage": "ok", "first": "degraded", "second": "degraded"}, body.Components)
 
-	// Checks still stuck from the first probe are not started again.
-	elapsed, body = ready()
-	assert.Less(t, elapsed, readinessProbeTimeout)
-	assert.Equal(t, "degraded", body.Status)
-	assert.Equal(t, int32(1), first.calls.Load())
-	assert.Equal(t, int32(1), second.calls.Load())
+		// Checks still stuck from the first probe are not started again, and
+		// nothing waits for them.
+		elapsed, body = ready()
+		assert.Zero(t, elapsed)
+		assert.Equal(t, "degraded", body.Status)
+		assert.Equal(t, int32(1), first.calls.Load())
+		assert.Equal(t, int32(1), second.calls.Load())
+	})
 }
 
 type panickingHealthChecker struct{}

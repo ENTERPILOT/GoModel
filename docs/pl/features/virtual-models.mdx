@@ -57,6 +57,12 @@ aliasu. Alias bez własnej wartości dziedziczy spowolnienie wybranego modelu do
 ustaw w aliasie `0`, aby nadpisać to dziedziczenie. Dotyczy to też
 modeli wirtualnych z load balancingiem po wybraniu celu.
 
+Spowolnienie samego modelu można ustawić dokładnie (`openai/gpt-4o`) albo dla
+całego modelu (`gpt-4o`, u każdego providera); wygrywa wartość dokładna.
+Bardziej szczegółowy wpis, który zostawia spowolnienie puste albo którego
+`user_paths` wykluczają wywołującego, nie przesłania wartości ogólniejszej.
+Reguła dostępu dla całego providera nigdy więc nie wyłącza spowolnienia modelu.
+
 ## Wymuszanie reasoning effort
 
 Ustaw **Reasoning effort override** na konkretnym modelu lub przekierowaniu, aby
@@ -91,6 +97,14 @@ zostanie osiągnięty przez failover. Gdy model jest osiągalny przez kilka
 wewnętrznych modeli wirtualnych, obowiązuje wartość ze ścieżki wybranej przez
 routing; próba failover korzysta z pierwszej zadeklarowanej ścieżki do swojego modelu. Dotyczy to Chat Completions, Responses API
 i Anthropic Messages API; batche i passthrough providera nie są przepisywane.
+
+Ponieważ nadpisanie konkretnego modelu wygrywa z każdym aliasem nad nim, ustawiaj
+je tylko dla poziomów, których model nie akceptuje, a politykę umieszczaj w
+aliasach. Na przykład aliasy `fast` i `smart` tego samego modelu mogą wysyłać
+`low` i `high`; nadpisanie na tym modelu sprawiłoby, że oba wysyłałyby jego
+wartość. To odwrotność spowolnienia, gdzie wygrywa alias. Tak jak przy
+spowolnieniu, dokładne nadpisanie wygrywa z ustawieniem dla całego modelu, a
+wpis bez effort nie przesłania ogólniejszego.
 
 Reszta tej strony dotyczy przekierowań.
 

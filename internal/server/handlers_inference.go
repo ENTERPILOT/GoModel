@@ -81,6 +81,12 @@ func (h *Handler) ListModels(c *echo.Context) error {
 		return c.JSON(http.StatusOK, list)
 	}
 
+	// The compatibility shape is endpoint-owned: the shared core.Model has no
+	// max_model_len field, so only a deployment that asks for it advertises one.
+	if h.vllmDiscoveryCompat {
+		return c.JSON(http.StatusOK, vllmDiscoveryModels(resp))
+	}
+
 	return c.JSON(http.StatusOK, resp)
 }
 

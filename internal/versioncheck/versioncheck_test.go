@@ -336,3 +336,21 @@ func TestLeaksQueryInCleartext(t *testing.T) {
 		})
 	}
 }
+
+// The default client follows a release host that redirects elsewhere, such
+// as to a CDN.
+func TestRefreshFollowsCrossOriginRedirectByDefault(t *testing.T) {
+	cdn := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("0.1.82\n"))
+	}))
+	defer cdn.Close()
+	release := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, cdn.URL+r.URL.Path, http.StatusMovedPermanently)
+	}))
+	defer release.Close()
+
+	checker := New(Config{Enabled: true, URL: release.URL + "/version", App: "GoModel", Version: "0.1.81"})
+	status, err := checker.Refresh(context.Background(), Beacon{})
+	require.NoError(t, err)
+	assert.Equal(t, "0.1.82", status.Latest)
+}

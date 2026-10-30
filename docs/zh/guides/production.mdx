@@ -123,10 +123,58 @@ GCP Secret Manager 或 Azure Key Vault 读取 Secret 的功能由 [GoModel Pro](
 
 ### TLS
 
-GoModel 不负责终止 TLS。它提供纯 HTTP 服务，并期望前面部署反向代理或负载均衡器。对于任何不仅限于回环地址的部署，都请部署一个：
-否则客户端 API 密钥、托管网关密钥和主密钥都会以明文在网络上传输。
+默认情况下，GoModel 提供纯 HTTP 服务，并期望前面部署终止 TLS 的反向代理或负载均衡器。对于任何不仅限于回环地址的部署，请部署一个，或启用[原生 TLS](#原生-tls)：
+两者都没有时，客户端 API 密钥、托管网关密钥和主密钥都会以明文在网络上传输。
 
 此外，GoModel 没有 CORS 中间件，因此其他源上的浏览器客户端无法直接调用网关。如有需要，请在代理上添加相应的响应头。
+
+### 原生 TLS
+
+设置证书和私钥后，监听器会在同一端口上提供 HTTPS 服务，使用 TLS 1.2 或更高版本、Go 的默认密码套件以及 HTTP/2。当客户端直接访问网关时（例如通过 Kubernetes Service 进行 Pod 间通信）请使用它：无需维护 TLS sidecar，网关也能看到真实的客户端地址。
+
+```bash
+SERVER_TLS_CERT_FILE=/etc/gomodel/tls/tls.crt
+SERVER_TLS_KEY_FILE=/etc/gomodel/tls/tls.key
+# Optional: require a client certificate signed by this CA (mTLS)
+SERVER_TLS_CLIENT_CA_FILE=/etc/gomodel/tls/ca.crt
+```
+
+- 最多每 5 秒检查一次文件是否变化。轮换后的证书或客户端 CA 从下一次握手起生效，无需重启或重新加载。
+- 无法加载的轮换（例如只写了一半的证书对）会保留之前的证书并记录警告。启动时文件缺失或无效会报错。
+- 修改路径会在[配置重新加载](/zh/advanced/cli#配置重新加载)时生效。
+- 启用 TLS 后，该端口不再响应纯 HTTP。Docker `HEALTHCHECK` 运行的 `gomodel --health` 和 `gomodel --ready` 会自动切换到 HTTPS。
+
+**Kubernetes 与 cert-manager。** 将证书签发到 Secret 中，并以卷的形式挂载。不要使用 `subPath`：kubelet 不会更新 `subPath` 挂载，续期后的证书将永远无法到达 Pod。
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gomodel-tls
+spec:
+  secretName: gomodel-tls
+  dnsNames: [gomodel.ai.svc, gomodel.ai.svc.cluster.local]
+  issuerRef: { kind: ClusterIssuer, name: internal-ca }
+```
+
+使用仓库 `helm/` 目录中的 Helm chart：
+
+```yaml
+env:
+  SERVER_TLS_CERT_FILE: /etc/gomodel/tls/tls.crt
+  SERVER_TLS_KEY_FILE: /etc/gomodel/tls/tls.key
+extraVolumes:
+  - name: tls
+    secret: { secretName: gomodel-tls }
+extraVolumeMounts:
+  - { name: tls, mountPath: /etc/gomodel/tls, readOnly: true }
+livenessProbe:
+  httpGet: { path: /health, port: http, scheme: HTTPS }
+readinessProbe:
+  httpGet: { path: /health/ready, port: http, scheme: HTTPS }
+```
+
+kubelet 不会校验 HTTPS 探针的证书。启用 mTLS 时，`/health` 和 `/health/ready` 无需客户端证书仍会响应，因此这些探针无需修改即可工作；其他所有路径在没有经过验证的客户端证书时返回 401。chart 自带的 ServiceMonitor 以纯 HTTP 抓取，因此启用原生 TLS 时请自行定义一个使用 `scheme: https` 的 ServiceMonitor。启用 mTLS 时 `/metrics` 同样需要客户端证书，因此请为该 ServiceMonitor 配置 `tlsConfig`：`ca` 指向签发网关证书的 CA，`cert` 和 `keySecret` 来自由客户端 CA 签发的证书。设置 `env.SERVER_TLS_CERT_FILE` 后，`helm test` 和安装提示中的 port-forward 地址会自动切换到 HTTPS。
 
 ### 私有 CA 签发的上游证书
 
@@ -143,6 +191,8 @@ docker run --rm -p 8080:8080 \
 ```
 
 `SSL_CERT_FILE` 同样可用，但它会替换证书包文件而不是向其中追加，因此请将其指向一个同时包含您所需公共根证书的证书包。
+
+在容器之外，或需要同时发送客户端证书时，请改为设置 `HTTP_TLS_CA_FILE`，参见[私有 CA 与代理](#私有-ca-与代理)。
 
 ## 离线隔离与离线部署
 
@@ -195,6 +245,33 @@ GOMODEL_OFFLINE=true
 
 如果配置了 Bedrock 提供商，AWS SDK 还可能探测链路本地实例元数据端点（`169.254.169.254`）以获取凭据。离线隔离安装通常不会配置
 Bedrock，但了解这一点仍有必要。
+
+## 私有 CA 与代理
+
+网关发起的所有出站连接共享同一个 HTTP 传输层，因此代理和信任设置只需配置一次，即可同样适用于提供商、模型目录、更新检查、MCP 上游、向量存储和嵌入端点。
+
+**代理。** 设置标准的 `HTTPS_PROXY` 和 `HTTP_PROXY`（各自覆盖对应协议的上游；大多数部署只与 `https://` 上游通信，但纯 HTTP 的模型服务器会绕过仅通过 `HTTPS_PROXY` 设置的代理），并为本地模型服务器设置 `NO_PROXY`。无需其他配置。如果代理需要凭据，请为其使用 `https://` URL：代理变量中的协议描述的是到代理这一跳的连接，而 `http://` 代理 URL 会以明文发送 `Proxy-Authorization`。如需让某个提供商通过不同的代理，请参阅[出站代理](/zh/providers/outbound-proxy)。
+
+**私有 CA。** 挂载 CA 证书包并让网关指向它：
+
+```bash
+HTTP_TLS_CA_FILE=/etc/gomodel/ca.pem
+```
+
+该证书包会追加到系统证书存储中，因此公共提供商与内部提供商可以同时正常工作。文件缺失或为空会导致启动失败，而不会悄无声息地信任少于您要求的范围。
+
+**双向 TLS。** 当内部模型服务器或出口代理要求客户端证书时：
+
+```bash
+HTTP_TLS_CLIENT_CERT_FILE=/etc/gomodel/tls.crt
+HTTP_TLS_CLIENT_KEY_FILE=/etc/gomodel/tls.key
+```
+
+同一个客户端证书会发送给每个请求客户端证书的上游。
+
+**轮换。** GoModel 在启动时以及每次[配置重新加载](/zh/advanced/cli#配置重新加载)时读取这些文件，但不会监视它们。证书轮换后（例如 cert-manager 续期了挂载的 Secret），请运行 `gomodel --reload`（或发送 `SIGHUP`）或重启。如果轮换后的文件无法加载，此次重新加载会被拒绝，当前运行的配置继续提供服务。
+
+`config.yaml` 中 `http.tls` 下提供相同的设置。不要在实验环境之外使用 `HTTP_TLS_INSECURE_SKIP_VERIFY=true`：它会对所有上游禁用校验，网关会在启动时对此发出警告。
 
 ## 运行多个副本
 
@@ -315,7 +392,7 @@ GoModel 分别提供存活和就绪检查，二进制文件还可以自我探测
 ## 生产环境检查清单
 
 - 将 `GOMODEL_MASTER_KEY` 设置为强密码值。
-- 在网关前面的代理中终止 TLS。
+- 在网关前面的代理中终止 TLS，或启用[原生 TLS](#原生-tls)。
 - 在网络边界限制对 `/admin/*`、控制台和 `/metrics` 的访问。
 - 多于一个副本或使用任何临时文件系统时，请使用 Postgres 或 MongoDB；使用 SQLite 时，请挂载卷并设置 `SQLITE_PATH`。
 - 在环境变量或 `config.yaml` 中声明提供商，其值来自 Secret 管理器。

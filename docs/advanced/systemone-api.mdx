@@ -2,7 +2,7 @@
 title: "System One API"
 description: "Send TypeSafe System One decision requests (Jev, Kev) through GoModel, forwarded natively with virtual models, guardrails, caching, failover, audit, and usage."
 icon: "scale"
-keywords: ["System One", "systemone", "Jev", "Kev", "TypeSafe", "decision model", "noul", "choice", "score", "OpenRouter"]
+keywords: ["System One", "systemone", "Jev", "Kev", "TypeSafe", "decision model", "noul", "choice", "score", "OpenRouter", "Azure", "Microsoft-Decision-1"]
 ---
 
 `POST /v1/systemone` serves TypeSafe's System One API: a request carries a
@@ -14,8 +14,9 @@ shapes, use the [Decisions API](/advanced/decisions-api), which GoModel
 translates to System One.
 
 The endpoint is available once a [`jev` provider](/providers/jev) (hosted Jev
-or a self-hosted Kev server) or an `openrouter` provider is configured. Without
-one, it answers `404`.
+or a self-hosted Kev server), an `openrouter` provider, or an
+[`azure` provider](/providers/azure#decision-models)
+(Microsoft-Decision-1) is configured. Without one, it answers `404`.
 
 ## Request and answer
 
@@ -67,8 +68,8 @@ gateway root (`base_url="http://localhost:8080"`) with your GoModel key; see
 | `POST /v1/systemone/permute` | Kev only: run one Choice question with several option orders (`n_perm`, 1 to 64, default 6) |
 | `POST /v1/systemone/separate` | Kev only: run each question in its own forward pass |
 
-The Kev routes behave like `/v1/systemone`. They are refused for OpenRouter,
-which answers only the evaluation route; a hosted TypeSafe `jev` provider
+The Kev routes behave like `/v1/systemone`. They are refused for OpenRouter
+and Azure, which answer only the evaluation route; a hosted TypeSafe `jev` provider
 returns its own `404` for them.
 
 ## What the gateway does
@@ -98,7 +99,8 @@ kept when it states one, and otherwise comes from the image's bytes. A form
 TypeSafe would reject, such as a part no asset uses, an asset naming a
 missing part, or an image that is not a PNG or JPEG, returns `400`. Send the
 `TypeSafe-Danger-Zone-Images: true` header as TypeSafe requires; the gateway
-forwards it. Kev servers read text only.
+forwards it. Kev servers and Azure's Microsoft-Decision-1 read text only; the
+gateway does not refuse their image requests, and the upstream answers them.
 
 ```bash
 curl -s http://localhost:8080/v1/systemone \
@@ -117,6 +119,7 @@ curl -s http://localhost:8080/v1/systemone \
 | `jev` (hosted) | `jev/jev-latest`, `jev/jev-preview`, and any versioned ID such as `jev/jev-1.13.0` |
 | `jev` (Kev server) | `kev/kev-latest` and the checkpoint's aliases, for a provider named `kev` |
 | `openrouter` | `openrouter/typesafe/jev-1.13`, `openrouter/~typesafe/jev-latest`, and OpenRouter's other decision models, such as `openrouter/jaredpalmer/kev-4b` |
+| `azure` | Your Microsoft-Decision-1 deployment name, such as `azure/ms-decision-1` |
 
 System One models are listed in `GET /v1/models` as utility models with no
 generation mode.
@@ -194,7 +197,7 @@ The endpoint never translates, and it says so when a request cannot work:
 
 | Situation | Result |
 | --- | --- |
-| No `jev` or `openrouter` provider configured | `404` |
+| No `jev`, `openrouter`, or `azure` provider configured | `404` |
 | `model` missing | `400` |
 | Model on a provider without System One, or a chat, embedding, or other generation model (including through a virtual model) | `400 invalid_request_error` explaining why; the gateway logs a warning |
 | A System One model sent to `/v1/chat/completions`, `/v1/responses`, or `/v1/embeddings` | `400 invalid_request_error` pointing at `/v1/decisions` and `/v1/systemone` |

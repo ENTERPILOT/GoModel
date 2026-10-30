@@ -64,7 +64,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 	for _, key := range []string{
 		"CONFIG_STRICT",
 		"PORT", "BASE_PATH", "GOMODEL_MASTER_KEY", "MASTER_KEY_DISABLED", "BODY_SIZE_LIMIT", "STREAM_STALL_TIMEOUT", "SWAGGER_ENABLED", "PPROF_ENABLED", "ENABLE_PASSTHROUGH_ROUTES", "ALLOW_PASSTHROUGH_V1_ALIAS", "USER_PATH_HEADER", "ENABLED_PASSTHROUGH_PROVIDERS",
-		"SERVER_TRUSTED_PROXIES", "SERVER_CLIENT_IP_HEADER", "SERVER_TRUSTED_HOPS",
+		"SERVER_TRUSTED_PROXIES", "SERVER_CLIENT_IP_HEADER", "SERVER_TRUSTED_HOPS", "SERVER_TLS_CERT_FILE", "SERVER_TLS_KEY_FILE", "SERVER_TLS_CLIENT_CA_FILE",
 		"GOMODEL_CACHE_DIR", "CACHE_REFRESH_INTERVAL", "MODEL_LIST_URL", "GOMODEL_OFFLINE", "GOMODEL_VERSION_CHECK_ENABLED",
 		"REDIS_URL", "REDIS_KEY_MODELS", "REDIS_KEY_RESPONSES", "REDIS_TTL_MODELS", "REDIS_TTL_RESPONSES",
 		"RESPONSE_CACHE_SIMPLE_ENABLED",
@@ -93,8 +93,8 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"DASHBOARD_LIVE_LOGS_REPLAY_LIMIT", "DASHBOARD_LIVE_LOGS_HEARTBEAT_SECONDS",
 		"GUARDRAILS_ENABLED", "ENABLE_GUARDRAILS_FOR_BATCH_PROCESSING", "PLUGINS_ENABLED", "PLUGINS_LOAD",
 		"FAILOVER_MODE", "FAILOVER_MANUAL_RULES_PATH", "FAILOVER_ENABLED", "FAILOVER_RULES_JSON", "FAILOVER_DISABLED_MODELS", "FAILOVER_DISABLED_MODELS_JSON",
-		"MODELS_ENABLED_BY_DEFAULT", "KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT", "UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT", "CONFIGURED_PROVIDER_MODELS_MODE",
-		"HTTP_TIMEOUT", "HTTP_RESPONSE_HEADER_TIMEOUT",
+		"MODELS_ENABLED_BY_DEFAULT", "KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT", "MODELS_VLLM_DISCOVERY_COMPAT", "UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT", "CONFIGURED_PROVIDER_MODELS_MODE",
+		"HTTP_TIMEOUT", "HTTP_RESPONSE_HEADER_TIMEOUT", "HTTP_TLS_CA_FILE", "HTTP_TLS_CLIENT_CERT_FILE", "HTTP_TLS_CLIENT_KEY_FILE", "HTTP_TLS_INSECURE_SKIP_VERIFY",
 		"WORKFLOW_REFRESH_INTERVAL",
 		"LITELLM_TAGS_ENABLED",
 	} {
@@ -1910,4 +1910,46 @@ func TestLoadMasterKeyDisabledForgetsTheConfiguredKey(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestLoadHTTPTLSEnvOverrides(t *testing.T) {
+	clearAllConfigEnvVars(t)
+	t.Setenv("HTTP_TLS_CA_FILE", "/etc/gomodel/ca.pem")
+	t.Setenv("HTTP_TLS_CLIENT_CERT_FILE", "/etc/gomodel/client.crt")
+	t.Setenv("HTTP_TLS_CLIENT_KEY_FILE", "/etc/gomodel/client.key")
+	t.Setenv("HTTP_TLS_INSECURE_SKIP_VERIFY", "true")
+
+	result, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, HTTPTLSConfig{
+		CAFile:             "/etc/gomodel/ca.pem",
+		ClientCertFile:     "/etc/gomodel/client.crt",
+		ClientKeyFile:      "/etc/gomodel/client.key",
+		InsecureSkipVerify: true,
+	}, result.Config.HTTP.TLS)
+}
+
+func TestLoadHTTPTLSFromYAML(t *testing.T) {
+	clearAllConfigEnvVars(t)
+	withTempDir(t, func(dir string) {
+		result := loadConfigYAML(t, dir, `
+http:
+  tls:
+    ca_file: /etc/gomodel/ca.pem
+    client_cert_file: /etc/gomodel/tls.crt
+    client_key_file: /etc/gomodel/tls.key
+    insecure_skip_verify: true
+`)
+		assert.Equal(t, HTTPTLSConfig{
+			CAFile:             "/etc/gomodel/ca.pem",
+			ClientCertFile:     "/etc/gomodel/tls.crt",
+			ClientKeyFile:      "/etc/gomodel/tls.key",
+			InsecureSkipVerify: true,
+		}, result.Config.HTTP.TLS)
+	})
+}
+
+func TestDefaultHTTPTLSIsSystemTrust(t *testing.T) {
+	cfg := buildDefaultConfig()
+	assert.Equal(t, HTTPTLSConfig{}, cfg.HTTP.TLS, "expected zero TLS config by default")
 }

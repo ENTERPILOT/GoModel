@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 
 import {
   budgetAmountLabel,
+  budgetBilledOnProviderCost,
   budgetCostBasis,
   budgetCostBasisOptions,
   budgetDeleteBody,
@@ -581,12 +582,71 @@ test("cost basis defaults to provider and round-trips billed", () => {
 
 test("filterAndSortBudgets finds billed budgets by their badge", () => {
   const budgets = [
-    { scope: "label", subject: "acme", period_seconds: 86400, cost_basis: "billed" },
-    { scope: "label", subject: "beta", period_seconds: 86400, cost_basis: "provider" },
+    {
+      scope: "label",
+      subject: "acme",
+      period_seconds: 86400,
+      cost_basis: "billed",
+    },
+    {
+      scope: "label",
+      subject: "beta",
+      period_seconds: 86400,
+      cost_basis: "provider",
+    },
   ];
   const filtered = filterAndSortBudgets(budgets, "billed", "subject");
   assert.deepEqual(
     filtered.map((item) => item.subject),
+    ["acme"],
+  );
+});
+
+test("budgetBilledOnProviderCost flags billed budgets enforced on provider cost", () => {
+  assert.equal(
+    budgetBilledOnProviderCost({
+      cost_basis: "billed",
+      enforced_cost_basis: "provider",
+    }),
+    true,
+  );
+  assert.equal(
+    budgetBilledOnProviderCost({
+      cost_basis: "billed",
+      enforced_cost_basis: "billed",
+    }),
+    false,
+  );
+  assert.equal(budgetBilledOnProviderCost({ cost_basis: "billed" }), false);
+  assert.equal(
+    budgetBilledOnProviderCost({
+      cost_basis: "provider",
+      enforced_cost_basis: "provider",
+    }),
+    false,
+  );
+});
+
+test("the billed on provider cost badge is searchable", () => {
+  const budgets = [
+    {
+      scope: "label",
+      subject: "acme",
+      period_seconds: 86400,
+      cost_basis: "billed",
+      enforced_cost_basis: "provider",
+    },
+    {
+      scope: "label",
+      subject: "beta",
+      period_seconds: 86400,
+      cost_basis: "billed",
+      enforced_cost_basis: "billed",
+    },
+  ];
+  const found = filterAndSortBudgets(budgets, "on provider cost");
+  assert.deepEqual(
+    found.map((item) => item.subject),
     ["acme"],
   );
 });

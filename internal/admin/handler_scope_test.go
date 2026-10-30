@@ -356,7 +356,7 @@ func TestUsersScoped(t *testing.T) {
 		authkeys.AuthKey{ID: "k2", Name: "k2", UserPath: "/team/beta", Enabled: true, SecretHash: "h2", CreatedAt: now, UpdatedAt: now},
 	)
 
-	c, rec := scopedRequest(t, http.MethodPut, "/admin/users", `{"user_path":"/team/alpha","allowed_models":["openai/"]}`, scopeAlpha)
+	c, rec := scopedRequest(t, http.MethodPut, "/admin/users", `{"user_path":"/team/alpha/svc","allowed_models":["openai/"]}`, scopeAlpha)
 	require.NoError(t, h.UpsertUser(c))
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	nodes := decodeUsers(t, rec)
@@ -366,17 +366,19 @@ func TestUsersScoped(t *testing.T) {
 	assert.NotContains(t, nodes, "/team/beta")
 	assert.NotContains(t, nodes, "/")
 
-	c, rec = scopedRequest(t, http.MethodPut, "/admin/users", `{"user_path":"/team/beta","allowed_models":["openai/"]}`, scopeAlpha)
-	require.NoError(t, h.UpsertUser(c))
-	assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
-	assert.Equal(t, codeUserPathOutOfScope, errorCode(t, rec))
+	for _, outside := range []string{"/team/beta", "/team/alpha", "/team/alpha/"} {
+		c, rec = scopedRequest(t, http.MethodPut, "/admin/users", `{"user_path":"`+outside+`","allowed_models":["openai/"]}`, scopeAlpha)
+		require.NoError(t, h.UpsertUser(c))
+		assert.Equal(t, http.StatusForbidden, rec.Code, "upsert %s: %s", outside, rec.Body.String())
+		assert.Equal(t, codeUserPathOutOfScope, errorCode(t, rec))
 
-	c, rec = scopedRequest(t, http.MethodDelete, "/admin/users?user_path=/team/beta", "", scopeAlpha)
-	require.NoError(t, h.DeleteUser(c))
-	assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
-	assert.Equal(t, codeUserPathOutOfScope, errorCode(t, rec))
+		c, rec = scopedRequest(t, http.MethodDelete, "/admin/users?user_path="+outside, "", scopeAlpha)
+		require.NoError(t, h.DeleteUser(c))
+		assert.Equal(t, http.StatusForbidden, rec.Code, "delete %s: %s", outside, rec.Body.String())
+		assert.Equal(t, codeUserPathOutOfScope, errorCode(t, rec))
+	}
 
-	c, rec = scopedRequest(t, http.MethodDelete, "/admin/users?user_path=/team/alpha", "", scopeAlpha)
+	c, rec = scopedRequest(t, http.MethodDelete, "/admin/users?user_path=/team/alpha/svc", "", scopeAlpha)
 	require.NoError(t, h.DeleteUser(c))
 	assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
@@ -423,6 +425,7 @@ func TestBudgetsScoped(t *testing.T) {
 	}{
 		{name: "inside scope", body: `{"user_path":"/team/alpha/new","budget_key":{"period":"daily"},"amount":1}`, wantStatus: http.StatusOK},
 		{name: "outside scope", body: `{"user_path":"/team/beta","budget_key":{"period":"daily"},"amount":1}`, wantStatus: http.StatusForbidden},
+		{name: "scope root", body: `{"user_path":"/team/alpha","budget_key":{"period":"daily"},"amount":1000}`, wantStatus: http.StatusForbidden},
 		{name: "label budget", body: `{"scope":"label","subject":"batch","budget_key":{"period":"daily"},"amount":1}`, wantStatus: http.StatusForbidden},
 	}
 	for _, tt := range writes {
@@ -448,13 +451,15 @@ func TestBudgetsScoped(t *testing.T) {
 		})
 	}
 
-	t.Run("reset-one outside scope", func(t *testing.T) {
-		h := newHandler(t)
-		c, rec := scopedRequest(t, http.MethodPost, "/admin/budgets/reset-one", `{"user_path":"/team/beta","period":"daily"}`, scopeAlpha)
-		require.NoError(t, h.ResetBudget(c))
-		assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
-		assert.Equal(t, codeUserPathOutOfScope, errorCode(t, rec))
-	})
+	for _, subject := range []string{"/team/beta", "/team/alpha"} {
+		t.Run("reset-one "+subject, func(t *testing.T) {
+			h := newHandler(t)
+			c, rec := scopedRequest(t, http.MethodPost, "/admin/budgets/reset-one", `{"user_path":"`+subject+`","period":"daily"}`, scopeAlpha)
+			require.NoError(t, h.ResetBudget(c))
+			assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+			assert.Equal(t, codeUserPathOutOfScope, errorCode(t, rec))
+		})
+	}
 }
 
 func TestRateLimitsScoped(t *testing.T) {
@@ -491,6 +496,7 @@ func TestRateLimitsScoped(t *testing.T) {
 	}{
 		{name: "inside scope", body: `{"user_path":"/team/alpha/new","limit_key":{"period":"minute"},"max_requests":1}`, wantStatus: http.StatusOK},
 		{name: "outside scope", body: `{"user_path":"/team/beta","limit_key":{"period":"minute"},"max_requests":1}`, wantStatus: http.StatusForbidden},
+		{name: "scope root", body: `{"user_path":"/team/alpha","limit_key":{"period":"minute"},"max_requests":1000}`, wantStatus: http.StatusForbidden},
 		{name: "provider rule", body: `{"scope":"provider","subject":"openai","limit_key":{"period":"minute"},"max_requests":1}`, wantStatus: http.StatusForbidden},
 	}
 	for _, tt := range writes {
@@ -516,13 +522,15 @@ func TestRateLimitsScoped(t *testing.T) {
 		})
 	}
 
-	t.Run("reset-one outside scope", func(t *testing.T) {
-		h := newHandler(t)
-		c, rec := scopedRequest(t, http.MethodPost, "/admin/rate-limits/reset-one", `{"user_path":"/team/beta","period":"minute"}`, scopeAlpha)
-		require.NoError(t, h.ResetRateLimit(c))
-		assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
-		assert.Equal(t, codeUserPathOutOfScope, errorCode(t, rec))
-	})
+	for _, subject := range []string{"/team/beta", "/team/alpha"} {
+		t.Run("reset-one "+subject, func(t *testing.T) {
+			h := newHandler(t)
+			c, rec := scopedRequest(t, http.MethodPost, "/admin/rate-limits/reset-one", `{"user_path":"`+subject+`","period":"minute"}`, scopeAlpha)
+			require.NoError(t, h.ResetRateLimit(c))
+			assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+			assert.Equal(t, codeUserPathOutOfScope, errorCode(t, rec))
+		})
+	}
 }
 
 func TestAuditStatsScoped(t *testing.T) {

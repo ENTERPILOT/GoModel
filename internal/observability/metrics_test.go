@@ -46,9 +46,6 @@ func TestRequestMetrics_Success(t *testing.T) {
 	// Start request
 	ctx = hooks.OnRequestStart(ctx, reqInfo)
 
-	// Simulate some work
-	time.Sleep(10 * time.Millisecond)
-
 	// End request successfully
 	respInfo := llmclient.ResponseInfo{
 		Provider:   "openai",

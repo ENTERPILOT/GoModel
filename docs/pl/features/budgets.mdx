@@ -248,7 +248,9 @@ okres dla wszystkich jego potomków.
   budżet rozliczeniowy (utworzony w dashboardzie albo przez wcześniejszą
   konfigurację) nigdy nie blokuje startu: dopóki brakuje uprawnienia lub
   narzutów, GoModel raz loguje ostrzeżenie i egzekwuje go na koszcie providera,
-  więc limit obowiązuje, dopóki go nie zmienisz albo ich nie przywrócisz.
+  więc limit nadal obowiązuje. Pozostaje zapisany jako rozliczeniowy: zmiana
+  kwoty w dashboardzie albo z `"cost_basis": "billed"` go zachowuje, a gdy
+  uprawnienie i narzuty wrócą, znowu ogranicza koszt rozliczony.
 </Info>
 
 Domyślnie budżet ogranicza koszt providera: to, co płacisz upstream za requesty
@@ -301,10 +303,13 @@ Budżet rozliczeniowy:
 nie część klucza budżetu: zakres, podmiot i okres wyznaczają jeden budżet na
 jednej z dwóch podstaw, a zmiana podstawy zachowuje bieżący okres. `PUT` bez
 `cost_basis` ustawia `provider`; istniejące budżety nadal ograniczają koszt
-providera. `GET /admin/budgets` i `GET /v1/usage` zwracają `cost_basis` każdego
-budżetu, a `spent` liczone na tej podstawie. W dashboardzie formularz budżetu
-pokazuje wybór **Podstawa kosztu**, gdy uprawnienie i narzuty są włączone, a
-budżety rozliczeniowe mają chip `rozliczany`.
+providera. `GET /admin/budgets` i `GET /v1/usage` zwracają zapisany `cost_basis` każdego
+budżetu i `enforced_cost_basis`, czyli podstawę, na której liczone jest
+`spent`. Różnią się tylko dla budżetu rozliczeniowego egzekwowanego na koszcie
+providera. W dashboardzie formularz budżetu pokazuje wybór **Podstawa kosztu**,
+gdy uprawnienie i narzuty są włączone, budżety rozliczeniowe mają chip
+`rozliczany`, a budżet rozliczeniowy egzekwowany na koszcie providera ma chip
+`rozliczany · na koszcie dostawcy`.
 
 ## Egzekwowanie w workflow
 

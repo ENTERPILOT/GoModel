@@ -276,7 +276,10 @@ Anthropic, które nie mają kanonicznego odpowiednika, nie są zachowywane od po
   wyjście, ponieważ OpenAI odrzuca dla nich `stop`. Inne modele z rodziny OpenAI
   nie odróżniają w `finish_reason` zatrzymania przez parametr stop od naturalnego
   zakończenia, więc ich odpowiedzi raportują `stop_reason: "end_turn"` (wyjście
-  jest nadal poprawnie przycięte).
+  jest nadal poprawnie przycięte). OpenAI (poza wymienionymi wyżej modelami
+  reasoning), Azure OpenAI i Groq przyjmują co najwyżej cztery sekwencje stop;
+  dłuższa lista jest przycinana do pierwszych czterech (z ostrzeżeniem w logu
+  bramki), zamiast odrzucać request. Anthropic przyjmuje pełną listę.
 - **`output_config`**: `effort` ustawia reasoning effort (ma pierwszeństwo przed
   wartością wyprowadzoną z `thinking`), a `format` (lub starsze pole najwyższego
   poziomu `output_format`) staje się structured output opartym na JSON schema –

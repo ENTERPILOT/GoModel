@@ -77,6 +77,10 @@ type Budget struct {
 	Subject   string    `json:"subject" bson:"subject"`
 	PerChild  bool      `json:"per_child" bson:"per_child"`
 	CostBasis CostBasis `json:"cost_basis" bson:"cost_basis,omitempty"`
+	// EnforcedCostBasis is the basis spend is measured on when it differs
+	// from CostBasis: provider while a stored billed budget cannot be enforced
+	// on billed cost. It is set when budgets are loaded and never persisted.
+	EnforcedCostBasis CostBasis `json:"-" bson:"-"`
 	// EffectiveSubject is populated only while evaluating a per-child budget.
 	// It is not part of the persisted definition or public JSON representation.
 	EffectiveSubject string     `json:"-" bson:"-"`
@@ -86,6 +90,14 @@ type Budget struct {
 	LastResetAt      *time.Time `json:"last_reset_at,omitempty" bson:"last_reset_at,omitempty"`
 	CreatedAt        time.Time  `json:"created_at" bson:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at" bson:"updated_at"`
+}
+
+// EnforcedBasis returns the basis the budget's spend is measured on.
+func (b Budget) EnforcedBasis() CostBasis {
+	if b.EnforcedCostBasis != "" {
+		return b.EnforcedCostBasis
+	}
+	return b.CostBasis
 }
 
 // Subjects identifies the dimensions one request can be budgeted by. UserPath

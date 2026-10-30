@@ -52,6 +52,9 @@ The most common way to configure GoModel. Set any of the variables below to over
 | `SERVER_TRUSTED_PROXIES` | Networks your own proxies sit on; enables header-based client addresses | _(empty)_ |
 | `SERVER_CLIENT_IP_HEADER` | Header a trusted proxy passes the client address in | `X-Forwarded-For` |
 | `SERVER_TRUSTED_HOPS` | Proxies between the client and the gateway; `0` scans the chain instead | `0` |
+| `SERVER_TLS_CERT_FILE` | PEM certificate the listener serves HTTPS with; set together with the key | _(empty, plain HTTP)_ |
+| `SERVER_TLS_KEY_FILE` | Private key for `SERVER_TLS_CERT_FILE` | _(empty)_ |
+| `SERVER_TLS_CLIENT_CA_FILE` | PEM CA bundle; when set, every request except `/health` and `/health/ready` needs a client certificate it signed (mTLS) | _(empty)_ |
 | `SWAGGER_ENABLED`    | Expose [Swagger UI](/advanced/swagger-ui); needs a `-tags=swagger` build | `false`                |
 | `AUTH_VERIFY_ENABLED` | Expose [`GET /v1/auth/verify`](/advanced/api-endpoints#key-verification), which reports whether the API key a request carries is valid | `false`                |
 | `PID_FILE`           | Where the running gateway records its process id for `gomodel --reload`. Changing it needs a restart | `data/gomodel.pid` next to a `./data` directory, otherwise the per-user data directory |
@@ -170,6 +173,32 @@ needs a credential, and the admin API stays behind one carrying dashboard
 access. Issue that credential before flipping the switch — with no master key,
 no managed key, and no authentication extension, the gateway rejects every
 request and logs a warning at startup saying so.
+
+#### Serving HTTPS
+
+Leave the `SERVER_TLS_*` settings unset to serve plain HTTP behind a proxy that
+terminates TLS. Set the certificate and key (`server.tls_cert_file` and
+`server.tls_key_file` in YAML) when clients connect to the gateway directly:
+
+```yaml
+server:
+  tls_cert_file: /etc/gomodel/tls/tls.crt
+  tls_key_file: /etc/gomodel/tls/tls.key
+  # tls_client_ca_file: /etc/gomodel/tls/ca.crt # require client certificates
+```
+
+The listener then serves only HTTPS, with TLS 1.2 or later and HTTP/2. The files
+are checked every 5 seconds and a rotated certificate is picked up without a
+restart; a rotation that fails to load keeps the previous one. A rotated client
+CA applies from the next TLS handshake, so open connections keep the access
+they were granted. Setting only one
+of the pair, or a file that is missing or invalid at startup, is an error. The
+settings take file paths, not PEM contents, and a value holding PEM is
+rejected. They accept `${env:...}` references; `${file:...}` resolves to a
+file's contents, so use it only for a file that holds a path.
+These settings cover inbound connections only; [outbound TLS
+trust](#outbound-tls-trust) is configured separately. See the [production
+guide](/guides/production#native-tls) for a cert-manager example.
 
 #### MCP Gateway
 
@@ -444,6 +473,38 @@ with a `504` provider error instead of hanging until `HTTP_TIMEOUT`. The wait
 for the first token does not count, so slow reasoning models are unaffected.
 Raise it only for a provider that legitimately pauses for minutes mid-stream.
 
+The standard `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` variables apply to
+every upstream connection, unless a provider sets its own
+[outbound proxy](/providers/outbound-proxy).
+
+#### Outbound TLS trust
+
+These apply to the gateway's outbound HTTPS clients: providers, the model
+catalog, the update check, MCP upstreams, vector stores, and embedding
+endpoints. The default trusts the operating system certificate store, which is
+right unless an internal CA or a TLS-intercepting proxy sits between the gateway
+and upstreams.
+
+They do not cover connections that other clients open, which keep their own
+settings: OpenTelemetry export reads `OTEL_EXPORTER_OTLP_CERTIFICATE`,
+PostgreSQL takes `sslmode` and `sslrootcert` in its URL (prefer
+`sslmode=verify-full`), MongoDB takes `tls=true` and `tlsCAFile` in its URL,
+and Redis over `rediss://` trusts the system store.
+
+| Variable                        | Description                                                        | Default |
+| ------------------------------- | ------------------------------------------------------------------ | ------- |
+| `HTTP_TLS_CA_FILE`              | PEM bundle of extra root certificates, appended to the system store | unset   |
+| `HTTP_TLS_CLIENT_CERT_FILE`     | Client certificate for mTLS; set together with the key             | unset   |
+| `HTTP_TLS_CLIENT_KEY_FILE`      | Private key for the client certificate                             | unset   |
+| `HTTP_TLS_INSECURE_SKIP_VERIFY` | Disable certificate verification. Lab use only; logged as a warning | `false` |
+
+A missing or unparseable file is a startup error, so a typo in the path cannot
+silently fall back to trusting nothing extra. The files are re-read on a
+[configuration reload](/advanced/cli#configuration-reload) but not watched, so
+reload or restart after rotating them. See the
+[production guide](/guides/production#private-cas-and-proxies) for a worked
+example.
+
 #### Provider API Keys
 
 Set these to automatically register providers. No YAML configuration required.
@@ -472,7 +533,7 @@ Set these to automatically register providers. No YAML configuration required.
 | `LLAMACPP_BASE_URL`  | llama.cpp llama-server / LM Studio (no API key needed unless started with `--api-key`) |
 | `LLMD_BASE_URL`      | llm-d Router/EPP (no API key needed unless its Gateway requires one) |
 
-Most providers can use a custom base URL via `<PROVIDER>_BASE_URL` (for example `OPENAI_BASE_URL`). Chutes AI defaults to `https://llm.chutes.ai/v1` and can be overridden with `CHUTES_BASE_URL`. DeepSeek defaults to `https://api.deepseek.com`; set `DEEPSEEK_BASE_URL` only for a compatible proxy or alternate DeepSeek endpoint. OpenRouter defaults to `https://openrouter.ai/api/v1` and can be overridden with `OPENROUTER_BASE_URL`. Kilo AI defaults to `https://api.kilo.ai/api/gateway` and can be overridden with `KILO_BASE_URL`. Eden AI defaults to `https://api.edenai.run/v3` and can be overridden with `EDENAI_BASE_URL`. Z.ai defaults to `https://api.z.ai/api/paas/v4`; set `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4` for the GLM Coding Plan endpoint. SGLang defaults to `http://localhost:30000/v1` when `SGLANG_API_KEY` is set, but keyless deployments should set `SGLANG_BASE_URL` explicitly to register the provider. vLLM follows the same pattern at `http://localhost:8000/v1`. llama.cpp's `LLAMACPP_BASE_URL` is always required (llama-server's default port collides with GoModel's own 8080, so there is no default); `LLAMACPP_API_KEY` is optional. llm-d has no universal endpoint, so `LLMD_BASE_URL` is always required; `LLMD_API_KEY` is optional. Azure uses `AZURE_BASE_URL` for its deployment base URL and accepts an optional `AZURE_API_VERSION` override; otherwise it defaults to `2024-10-21`. Oracle requires `ORACLE_BASE_URL` because its OpenAI-compatible endpoint is region-specific.
+Most providers can use a custom base URL via `<PROVIDER>_BASE_URL` (for example `OPENAI_BASE_URL`). Chutes AI defaults to `https://llm.chutes.ai/v1` and can be overridden with `CHUTES_BASE_URL`. DeepSeek defaults to `https://api.deepseek.com`; set `DEEPSEEK_BASE_URL` only for a compatible proxy or alternate DeepSeek endpoint. OpenRouter defaults to `https://openrouter.ai/api/v1` and can be overridden with `OPENROUTER_BASE_URL`. Kilo AI defaults to `https://api.kilo.ai/api/gateway` and can be overridden with `KILO_BASE_URL`. Eden AI defaults to `https://api.edenai.run/v3` and can be overridden with `EDENAI_BASE_URL`. Z.ai defaults to `https://api.z.ai/api/paas/v4`; set `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4` for the GLM Coding Plan endpoint. SGLang defaults to `http://localhost:30000/v1` when `SGLANG_API_KEY` is set, but keyless deployments should set `SGLANG_BASE_URL` explicitly to register the provider. vLLM follows the same pattern at `http://localhost:8000/v1`. llama.cpp's `LLAMACPP_BASE_URL` is always required (llama-server's default port collides with GoModel's own 8080, so there is no default); `LLAMACPP_API_KEY` is optional. llm-d has no universal endpoint, so `LLMD_BASE_URL` is always required; `LLMD_API_KEY` is optional. Azure uses `AZURE_BASE_URL` for its deployment base URL and accepts an optional `AZURE_API_VERSION` override; otherwise it defaults to `2024-10-21` on deployment URLs and sends none on `/openai/v1` (Azure AI Foundry) URLs. Oracle requires `ORACLE_BASE_URL` because its OpenAI-compatible endpoint is region-specific.
 
 Every provider type also accepts a comma-separated configured model list via
 `<PROVIDER>_MODELS`, for example `OPENROUTER_MODELS`, `ORACLE_MODELS`,
@@ -513,6 +574,48 @@ To narrow a provider's inventory instead of listing it model by model, use
 `<PROVIDER>_MODEL_FILTER_MAX_PRICE_PER_MTOK` (YAML:
 `providers.<name>.model_filter`). See
 [Filtering a provider's models](/advanced/config-yaml#filtering-a-providers-models).
+
+Set `MODELS_VLLM_DISCOVERY_COMPAT=true` (YAML:
+`models.vllm_discovery_compat`) when a client discovers models only from a
+vLLM runtime — OpenCode's `vllm` provider is one: it probes `/health` and
+`/v1/models` and drops every entry whose `owned_by` is not `vllm` or that lacks
+`max_model_len`. With the setting on, `GET /v1/models` reports `owned_by` as
+`vllm` and fills `max_model_len` on every entry, so the client picks the
+gateway's models up with no hand-written list. It is a lie about the owner, so
+it stays off by default and is meant for gateways whose consumers need it.
+
+The limit has two sources, in this order:
+
+1. **The provider's own report.** A runtime that serves the model itself — vLLM,
+   SGLang, llm-d, and any OpenAI-compatible server that returns `max_model_len`
+   in its `/models` listing — knows the real limit of the process it is running,
+   so its value wins.
+2. **`metadata.context_window`.** The catalog value, used only for a model whose
+   provider reported no limit. It is what makes a hosted model discoverable.
+
+A model with neither — one the catalog does not know, served by a runtime that
+does not report its limit — is listed with `owned_by: "vllm"` and
+`max_model_len: 0`. Zero means the limit is unknown, not that the entry is
+incomplete: the field is never omitted, because these clients decode the whole
+listing against a schema where it is required, so one entry without it fails the
+response and every other model disappears with it. A client that reads the value
+only when it is positive keeps its own default. To advertise the real window,
+declare it on the model:
+
+```yaml
+providers:
+  my-custom-llm:
+    type: openai
+    base_url: "https://api.example.com/v1"
+    api_key: "..."
+    models:
+      - id: "my-finetune"
+        metadata:
+          context_window: 32768
+```
+
+See [Model metadata](/advanced/model-metadata) for the other fields an entry
+takes.
 
 For OpenRouter, GoModel also sends default attribution headers unless the request already sets them. Override those defaults with `OPENROUTER_SITE_URL` and `OPENROUTER_APP_NAME`.
 

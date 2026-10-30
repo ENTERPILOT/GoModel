@@ -631,6 +631,8 @@
   "budgets_cost_basis_billed": "计费成本",
   "budgets_billed_badge": "计费",
   "budgets_billed_title": "限制计费成本：提供商成本加加价，包括计费的缓存命中",
+  "budgets_billed_on_provider_badge": "计费 · 按提供商成本",
+  "budgets_billed_on_provider_title": "已保存为计费预算，但按提供商成本执行：计费预算需要带有 billing 授权的 GoModel Pro 许可证并设置 PRICING_MARKUPS_ENABLED=true。编辑后仍保持为计费预算。",
   "models_title": "模型",
   "models_total_count": "{count} 个模型",
   "models_unavailable": "虚拟模型功能不可用。",

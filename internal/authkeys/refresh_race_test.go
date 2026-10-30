@@ -13,13 +13,15 @@ import (
 
 // gatedKeyStore holds its next List, once armed, after it read the keys and
 // until release is closed. With listErr set, every List fails instead.
+// deactivated, when set, is closed once a deactivation reached the store.
 type gatedKeyStore struct {
 	*testStore
-	mu      sync.Mutex
-	armed   bool
-	started chan struct{}
-	release chan struct{}
-	listErr error
+	mu          sync.Mutex
+	armed       bool
+	started     chan struct{}
+	release     chan struct{}
+	deactivated chan struct{}
+	listErr     error
 }
 
 func (s *gatedKeyStore) List(ctx context.Context) ([]AuthKey, error) {
@@ -37,6 +39,16 @@ func (s *gatedKeyStore) List(ctx context.Context) ([]AuthKey, error) {
 		<-s.release
 	}
 	return keys, err
+}
+
+func (s *gatedKeyStore) Deactivate(ctx context.Context, id string, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	err := s.testStore.Deactivate(ctx, id, now)
+	if s.deactivated != nil {
+		close(s.deactivated)
+	}
+	return err
 }
 
 func (s *gatedKeyStore) put(key AuthKey) {
@@ -92,6 +104,7 @@ func TestServiceLocalDeactivateIsNotOverwrittenByAnOlderRefresh(t *testing.T) {
 	require.Equal(t, 1, service.ActiveCount())
 
 	store.started, store.release = make(chan struct{}), make(chan struct{})
+	store.deactivated = make(chan struct{})
 	store.armed = true
 	slow := make(chan error, 1)
 	go func() { slow <- service.Refresh(ctx) }()
@@ -99,7 +112,9 @@ func TestServiceLocalDeactivateIsNotOverwrittenByAnOlderRefresh(t *testing.T) {
 
 	deactivate := make(chan error, 1)
 	go func() { deactivate <- service.Deactivate(ctx, key.ID) }()
-	time.Sleep(100 * time.Millisecond)
+	// The deactivation is in the store; applying it locally now queues
+	// behind the refresh that read the key as still active.
+	<-store.deactivated
 	store.mu.Lock()
 	store.listErr = errors.New("database unavailable")
 	store.mu.Unlock()

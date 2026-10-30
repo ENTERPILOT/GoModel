@@ -817,6 +817,28 @@ func TestExtractFromChatResponse_BatchPrefixOvermatchUsesStandardPricing(t *test
 	assert.InDelta(t, 8.0, *entry.TotalCost, 1e-9)
 }
 
+func TestExtractFromEmbeddingResponse_PartialUsage(t *testing.T) {
+	pricing := &core.ModelPricing{InputPerMtok: new(1.0)}
+	tests := []struct {
+		name  string
+		usage core.EmbeddingUsage
+	}{
+		{name: "total only", usage: core.EmbeddingUsage{TotalTokens: 10}},
+		{name: "prompt only", usage: core.EmbeddingUsage{PromptTokens: 10}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := ExtractFromEmbeddingResponse(&core.EmbeddingResponse{Model: "embed", Usage: tt.usage}, "req", "openai", "/v1/embeddings", pricing)
+			require.NotNil(t, entry)
+			assert.Equal(t, 10, entry.InputTokens)
+			assert.Equal(t, 10, entry.TotalTokens)
+			assert.Empty(t, entry.CostsCalculationCaveat)
+			require.NotNil(t, entry.InputCost)
+			assert.InDelta(t, 0.00001, *entry.InputCost, 1e-12)
+		})
+	}
+}
+
 func TestExtractFromEmbeddingResponse_NoUsageCaveat(t *testing.T) {
 	pricing := &core.ModelPricing{InputPerMtok: new(0.15)}
 

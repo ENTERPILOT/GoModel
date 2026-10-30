@@ -25,6 +25,26 @@ type geminiGenerateContentRequest struct {
 	GenerationConfig  map[string]any    `json:"generationConfig,omitempty"`
 	SafetySettings    []map[string]any  `json:"safetySettings,omitempty"`
 	CachedContent     string            `json:"cachedContent,omitempty"`
+	// Store is the Gemini API's per-request opt-out of Google's request
+	// storage, which is on by default for new paid-tier projects since
+	// October 2026. Only the AI Studio backend sets it: Vertex has no such
+	// member and rejects unknown fields.
+	Store *bool `json:"store,omitempty"`
+}
+
+// chatStore reads the Chat Completions store flag, which has the same meaning
+// as Gemini's: whether the provider may retain the request. A value that is
+// not a boolean is an error rather than a dropped opt-out.
+func chatStore(req *core.ChatRequest) (*bool, error) {
+	raw := req.ExtraFields.Lookup("store")
+	if core.IsJSONNull(bytes.TrimSpace(raw)) {
+		return nil, nil
+	}
+	var store bool
+	if err := json.Unmarshal(raw, &store); err != nil {
+		return nil, core.NewInvalidRequestError("store must be a boolean", err)
+	}
+	return &store, nil
 }
 
 type geminiContent struct {
@@ -193,8 +213,11 @@ type geminiPromptFeedback struct {
 }
 
 type geminiCandidate struct {
-	Content       geminiContent   `json:"content"`
-	FinishReason  string          `json:"finishReason,omitempty"`
+	Content      geminiContent `json:"content"`
+	FinishReason string        `json:"finishReason,omitempty"`
+	// FinishMessage explains a non-STOP finish in prose, such as why an image
+	// model produced no image.
+	FinishMessage string          `json:"finishMessage,omitempty"`
 	Index         int             `json:"index,omitempty"`
 	SafetyRatings json.RawMessage `json:"safetyRatings,omitempty"`
 }
@@ -818,8 +841,11 @@ func geminiGenerationConfig(req *core.ChatRequest) map[string]any {
 		copyJSONNumber(req.ExtraFields.Lookup("top_k"), cfg, "topK")
 		copyJSONNumber(req.ExtraFields.Lookup("candidate_count"), cfg, "candidateCount")
 	}
-	copyJSONNumber(req.ExtraFields.Lookup("presence_penalty"), cfg, "presencePenalty")
-	copyJSONNumber(req.ExtraFields.Lookup("frequency_penalty"), cfg, "frequencyPenalty")
+	// presence_penalty and frequency_penalty are never forwarded: every
+	// current generateContent model (Gemini 2.5, 3.x, 4, Gemma 4, the image
+	// models) answers HTTP 400 "Penalty is not enabled for this model", and
+	// Google's Gemini 4 migration guide lists both among the parameters to
+	// remove because they error.
 	copyStopSequences(req.ExtraFields.Lookup("stop"), cfg)
 	copyResponseFormat(req.ExtraFields.Lookup("response_format"), cfg)
 	copyGoogleThinkingConfig(req.ExtraFields.Lookup("extra_body"), cfg)
@@ -1007,6 +1033,9 @@ func normalizeSnakeMapKeys(src map[string]any) map[string]any {
 }
 
 func thinkingConfigForEffort(model, effort string) map[string]any {
+	if isGemmaModel(model) {
+		return nil
+	}
 	effort = strings.ToLower(strings.TrimSpace(effort))
 	if strings.Contains(strings.ToLower(model), "gemini-2.5") {
 		switch effort {
@@ -1032,15 +1061,32 @@ func thinkingConfigForEffort(model, effort string) map[string]any {
 	return map[string]any{"thinkingLevel": effort}
 }
 
+// isGemmaModel reports whether model is one of the Gemma open models Google
+// serves on the Gemini API. Gemma has no thinking knob: generateContent
+// answers HTTP 400 "Thinking level is not supported for this model" to any
+// thinkingLevel or thinkingBudget, so a requested reasoning effort is dropped
+// rather than translated.
+func isGemmaModel(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if idx := strings.LastIndex(model, "/"); idx >= 0 {
+		model = model[idx+1:]
+	}
+	return strings.HasPrefix(model, "gemma-")
+}
+
 // supportsMinimalThinking reports whether the model accepts the "minimal"
-// thinkingLevel. Gemini 3 Pro models never had it, and Gemini 3.7 and 3.8
-// Flash dropped it; Google answers HTTP 400 for those, so the lowest accepted
-// level ("low") is sent instead. Thinking cannot be turned off on Gemini 3,
-// so "none" is clamped the same way. A family matches only as a whole
-// dash-delimited prefix of the model ID (after any "publisher/" prefix), so
-// "gemini-3.8-flash-cyber" matches while "gemini-3.8-pro-preview" or
-// "gemini-3.70-flash" do not.
+// thinkingLevel. Gemini 3 Pro models never had it, Gemini 3.7 and 3.8 Flash
+// dropped it, and Gemini 4 (Argon, and its successors per Google's Gemini 4
+// guide) accepts only low, medium and high; Google answers HTTP 400 for those,
+// so the lowest accepted level ("low") is sent instead. Thinking cannot be
+// turned off on Gemini 3 or 4, so "none" is clamped the same way. A Gemini 3
+// family matches only as a whole dash-delimited prefix of the model ID (after
+// any "publisher/" prefix), so "gemini-3.8-flash-cyber" matches while
+// "gemini-3.8-pro-preview" or "gemini-3.70-flash" do not.
 func supportsMinimalThinking(model string) bool {
+	if major, _, ok := geminiGeneration(model); ok && major >= 4 {
+		return false
+	}
 	model = strings.ToLower(strings.TrimSpace(model))
 	if idx := strings.LastIndex(model, "/"); idx >= 0 {
 		model = model[idx+1:]
@@ -1350,7 +1396,10 @@ func finishReasonFromGemini(reason string, hasToolCalls bool) string {
 		return ""
 	case "STOP":
 		return "stop"
-	case "MAX_TOKENS":
+	case "MAX_TOKENS", "CONTINUATION":
+		// CONTINUATION is Gemini 4's long-decode cut: the per-request output
+		// cap was hit and the candidate carries a continuationToken to resume
+		// with. Chat Completions has no resume, so it is a length stop.
 		return "length"
 	case "SAFETY", "RECITATION", "LANGUAGE", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT", "IMAGE_RECITATION":
 		return "content_filter"
@@ -1394,12 +1443,13 @@ func displayModelIDFromGemini(model, backend string) string {
 }
 
 // isGeminiExposedModel normalizes provider model names and exposes only the
-// model families reachable through Gemini/OpenAI-compatible text endpoints.
-// Families such as imagen-* use different upstream endpoints.
+// model families reachable through the Gemini generateContent and
+// OpenAI-compatible endpoints, including the Gemma open models Google serves
+// there. Families such as imagen-* use different upstream endpoints.
 func isGeminiExposedModel(modelID string) bool {
 	modelID = normalizeGeminiModelID(modelID)
-	return strings.HasPrefix(modelID, "gemini-") || strings.HasPrefix(modelID, "text-embedding-") ||
-		strings.HasPrefix(modelID, "imagen-")
+	return strings.HasPrefix(modelID, "gemini-") || strings.HasPrefix(modelID, "gemma-") ||
+		strings.HasPrefix(modelID, "text-embedding-") || strings.HasPrefix(modelID, "imagen-")
 }
 
 func nativeProviderError(providerName, message string, err error) *core.GatewayError {

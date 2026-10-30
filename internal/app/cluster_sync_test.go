@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -28,6 +29,9 @@ func newReplica(t *testing.T, path string) *App {
 	t.Setenv("USAGE_ENABLED", "true")
 	t.Setenv("BUDGETS_ENABLED", "true")
 	t.Setenv("RATE_LIMITS_ENABLED", "true")
+	// The test runs in a synctest bubble, where a real network call would
+	// stall the fake clock until it returned.
+	t.Setenv("GOMODEL_OFFLINE", "true")
 
 	loaded, err := config.Load()
 	require.NoError(t, err)
@@ -42,10 +46,18 @@ func newReplica(t *testing.T, path string) *App {
 
 // TestClusterSyncAppliesChangesFromAnotherReplica runs two replicas on one
 // SQLite file: budgets and rate limits saved on one are enforced by the other
-// after a sync tick, with no restart and no manual refresh.
+// after a sync tick, with no restart and no manual refresh. The bubble's
+// clock advances to the sync tick as soon as both replicas are idle, so the
+// test does not wait out the real interval.
 func TestClusterSyncAppliesChangesFromAnotherReplica(t *testing.T) {
 	t.Chdir(t.TempDir())
 	path := filepath.Join(t.TempDir(), "shared.db")
+	synctest.Test(t, func(t *testing.T) {
+		testClusterSyncAppliesChangesFromAnotherReplica(t, path)
+	})
+}
+
+func testClusterSyncAppliesChangesFromAnotherReplica(t *testing.T, path string) {
 	first := newReplica(t, path)
 	second := newReplica(t, path)
 	ctx := t.Context()

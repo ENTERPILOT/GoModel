@@ -675,6 +675,8 @@
   "budgets_cost_basis_billed": "Koszt rozliczony",
   "budgets_billed_badge": "rozliczany",
   "budgets_billed_title": "Ogranicza koszt rozliczony: koszt dostawcy plus marża, łącznie z rozliczanymi trafieniami cache",
+  "budgets_billed_on_provider_badge": "rozliczany · na koszcie dostawcy",
+  "budgets_billed_on_provider_title": "Zapisany jako rozliczony, ale egzekwowany na koszcie dostawcy: budżety na koszcie rozliczonym wymagają licencji GoModel Pro z uprawnieniem billing i PRICING_MARKUPS_ENABLED=true. Edycja zachowuje go jako rozliczony.",
   "models_title": "Modele",
   "models_total_count": "Modele: {count}",
   "models_unavailable": "Funkcja modeli wirtualnych jest niedostępna.",

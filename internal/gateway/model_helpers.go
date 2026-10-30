@@ -77,6 +77,18 @@ func CloneResponsesRequestForSelector(req *core.ResponsesRequest, selector core.
 	return &cloned
 }
 
+// CloneEmbeddingRequestForSelector clones an embeddings request for a concrete selector.
+func CloneEmbeddingRequestForSelector(req *core.EmbeddingRequest, selector core.ModelSelector) *core.EmbeddingRequest {
+	if req == nil {
+		return nil
+	}
+	cloned := *req
+	cloned.Model = selector.Model
+	cloned.Provider = selector.Provider
+	cloned.ExtraFields = core.CloneUnknownJSONFields(req.ExtraFields)
+	return &cloned
+}
+
 func cloneToolMaps(tools []map[string]any) []map[string]any {
 	if tools == nil {
 		return nil
