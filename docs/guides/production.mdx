@@ -446,12 +446,6 @@ features already had, from a manual runtime refresh, or on restart.
 guardrails, workflows, MCP servers, budgets, and rate limits on the replica that
 receives it. It does not reload stored provider credentials.
 
-<Warning>
-  **Resetting rate limit counters applies to the replica that handled the
-  request only.** Counters are per instance (see the table above): rule changes
-  propagate, counter resets do not.
-</Warning>
-
 ### Health probes and shutdown
 
 GoModel exposes liveness and readiness separately, and the binary can probe
