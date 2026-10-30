@@ -223,6 +223,11 @@ func (s *translatedInferenceService) CountMessageTokens(c *echo.Context) error {
 	if strings.TrimSpace(req.Model) == "" {
 		return handleError(c, core.NewInvalidRequestError("model is required", nil).WithParam("model"))
 	}
+	// A prompt-phase plugin may have written headers for the provider call
+	// (Exchange.Headers.Upstream). Attach them to the live request before the
+	// count, so the call below reads the context that carries them, as the
+	// inference and the Responses utility paths do.
+	applyPluginRequestHeaders(c)
 	count, ok, err := s.countMessageTokensUpstream(c.Request().Context(), req, body)
 	if err != nil {
 		return handleError(c, err)
