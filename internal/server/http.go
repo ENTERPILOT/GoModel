@@ -419,6 +419,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 
 	// The body is read only once the caller is authenticated: a request
 	// without credentials must not make the gateway decompress or buffer it.
+	e.Use(requestTimeoutOverrides())
 	e.Use(requestDecompression(bodyLimitBytes))
 	e.Use(RequestBodyCapture())
 
