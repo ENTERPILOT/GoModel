@@ -16,6 +16,7 @@ const (
 	syncEntityUsers               = "users"
 	syncEntityVirtualModels       = "virtual_models"
 	syncEntityPricingOverrides    = "pricing_overrides"
+	syncEntityMetadataOverrides   = "metadata_overrides"
 	syncEntityTagging             = "tagging"
 	syncEntityGuardrails          = "guardrails"
 	syncEntityWorkflows           = "workflows"
@@ -35,7 +36,7 @@ type syncedService interface {
 // starts when the generation serves (see startServer).
 //
 // Entities refresh in this order on a tick: provider credentials first,
-// because virtual models, users, and pricing overrides validate against the
+// because virtual models, users, and pricing and metadata overrides validate against the
 // provider catalog.
 func (b *bootstrap) initClusterSync() error {
 	app := b.app
@@ -63,6 +64,7 @@ func (b *bootstrap) initClusterSync() error {
 	wire(syncEntityUsers, app.users.Service, nil)
 	wire(syncEntityVirtualModels, app.virtualModels.Service, nil)
 	wire(syncEntityPricingOverrides, app.pricingOverrides.Service, nil)
+	wire(syncEntityMetadataOverrides, app.metadataOverrides.Service, nil)
 	wire(syncEntityTagging, app.tagging.Service, nil)
 	if app.guardrails != nil && app.guardrails.Service != nil {
 		// Workflows compile against the guardrail instances, so they are

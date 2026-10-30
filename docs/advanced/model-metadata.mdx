@@ -87,7 +87,7 @@ Leave a field empty (or on **Inherit**) to keep the value from the layers
 below. Overrides are stored in the gateway's database, keyed by the exact
 `provider/model` selector, and apply immediately — to the Models page,
 `GET /v1/models`, and everything in the gateway that reads model metadata.
-Other replicas pick them up within about a minute. Automate them with
+Other replicas pick them up within a few seconds. Automate them with
 `PUT /admin/model-metadata-overrides`:
 
 ```bash

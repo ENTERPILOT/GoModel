@@ -149,6 +149,29 @@ func TestServiceDeleteRevertsRegistryLayer(t *testing.T) {
 	assert.ErrorIs(t, service.Delete(context.Background(), "pollinations/flux"), ErrNotFound)
 }
 
+func TestServiceNotifiesOnlyAfterSuccessfulWrites(t *testing.T) {
+	service, store, _ := newTestService(t)
+	notified := 0
+	service.SetChangeNotifier(func(context.Context) { notified++ })
+	ctx := context.Background()
+
+	_, err := service.Upsert(ctx, Override{Selector: "flux", Metadata: Metadata{ContextWindow: new(1)}})
+	require.Error(t, err)
+	assert.Equal(t, 0, notified, "a rejected write must not notify")
+
+	_, err = service.Upsert(ctx, Override{Selector: "pollinations/flux", Metadata: Metadata{ContextWindow: new(1)}})
+	require.NoError(t, err)
+	assert.Equal(t, 1, notified)
+
+	require.NoError(t, service.Delete(ctx, "pollinations/flux"))
+	assert.Equal(t, 2, notified)
+
+	store.listErr = errors.New("storage unavailable")
+	_, err = service.Upsert(ctx, Override{Selector: "pollinations/flux", Metadata: Metadata{ContextWindow: new(2)}})
+	require.Error(t, err)
+	assert.Equal(t, 2, notified, "a rolled-back write must not notify")
+}
+
 func TestServiceWriteRollsBackWhenRefreshFails(t *testing.T) {
 	flux := Override{Selector: "pollinations/flux", ProviderName: "pollinations", Model: "flux", Metadata: Metadata{ContextWindow: new(1000)}}
 	tests := []struct {

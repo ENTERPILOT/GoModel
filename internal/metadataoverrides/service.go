@@ -30,6 +30,23 @@ type Service struct {
 	registry  Registry
 	current   atomic.Pointer[map[string]Override]
 	refreshMu sync.Mutex
+
+	// changed is called after every successful write; see SetChangeNotifier.
+	changed func(context.Context)
+}
+
+// SetChangeNotifier installs fn, called after every successful write so other
+// gateway instances reload the overrides. Call it before serving.
+func (s *Service) SetChangeNotifier(fn func(context.Context)) {
+	if s != nil {
+		s.changed = fn
+	}
+}
+
+func (s *Service) notifyChanged(ctx context.Context) {
+	if s.changed != nil {
+		s.changed(ctx)
+	}
 }
 
 const refreshTimeout = 30 * time.Second
@@ -134,6 +151,7 @@ func (s *Service) Upsert(ctx context.Context, override Override) (Override, erro
 	if !ok {
 		return Override{}, fmt.Errorf("model metadata override %q missing after save", normalized.Selector)
 	}
+	s.notifyChanged(ctx)
 	return cloneOverride(saved), nil
 }
 
@@ -159,6 +177,7 @@ func (s *Service) Delete(ctx context.Context, selector string) error {
 			return s.store.Upsert(ctx, previous)
 		})
 	}
+	s.notifyChanged(ctx)
 	return nil
 }
 
