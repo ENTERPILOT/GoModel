@@ -24,8 +24,8 @@ Whichever way it arrives, a plugin type shows up under its manifest name on
 the dashboard's Guardrails page, in `GET /admin/plugins`, and as a `type` in
 `guardrails.rules`.
 
-If you compile your own binary, add `godebug multipathtcp=0` to your module's
-`go.mod`. GoModel's own setting doesn't carry over to other modules, and it
+If you compile your own binary, add `//go:debug multipathtcp=0` directly before
+`package main`. GoModel's own setting doesn't carry over to other modules, and it
 mitigates the Linux kernel bug
 [CVE-2026-98432](https://groups.google.com/g/golang-announce/c/PCoQcdxoScw).
 You still need a patched kernel.
