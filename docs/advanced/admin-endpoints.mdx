@@ -886,6 +886,11 @@ The persisted audit and usage tables remain the source of truth. If the
 browser's cursor falls outside the replay buffer, the stream sends a reset event
 and the dashboard reloads from the normal REST endpoints.
 
+With more than one replica on a shared database, the stream also carries the
+requests the other replicas served, as `audit.flushed` and `usage.flushed`
+events once those replicas have persisted them, typically within 7 seconds.
+See [live logs across replicas](/guides/production#live-logs-across-replicas).
+
 ## Disabling Admin Features
 
 To disable all admin features:
