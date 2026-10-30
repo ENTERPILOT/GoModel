@@ -36,6 +36,7 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 		"GET /admin/live/logs",
 		"GET /admin/runtime/settings",
 		"PUT /admin/runtime/settings/:key",
+		"GET /admin/config/export",
 
 		"GET /admin/usage/summary",
 		"GET /admin/usage/daily",

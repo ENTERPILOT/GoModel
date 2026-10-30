@@ -200,6 +200,56 @@ Jeśli nowego pliku nie da się załadować, nic się nie zmienia. Wyjątkami s�
 więc przeładowanie loguje ostrzeżenie i zachowuje bieżące wartości do restartu
 gatewaya.
 
+## Eksport efektywnej konfiguracji
+
+**Ustawienia → Eksport konfiguracji → Pobierz config.yaml** w dashboardzie
+pobiera każde obowiązujące ustawienie jako jeden plik `config.yaml`, gotowy do
+przejrzenia, kopii zapasowej lub wczytania w innej instancji. Admin API
+udostępnia ten sam plik:
+
+```bash
+curl -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -o gomodel-config.yaml http://localhost:8080/admin/config/export
+```
+
+Plik łączy wbudowane wartości domyślne, `config.yaml`, zmienne środowiskowe i
+obiekty zarządzane w dashboardzie: providerów, modele wirtualne, użytkowników,
+serwery MCP, budżety, limity zapytań i nagłówki tagowania. Po wczytaniu jako
+`config.yaml` te obiekty stają się w dashboardzie tylko do odczytu, jak każdy
+inny zadeklarowany obiekt.
+
+Żaden sekret nie jest zapisywany. Każdy pojawia się jako jego źródło:
+
+| Skonfigurowany jako | Eksportowany jako |
+| ------------------- | ----------------- |
+| [Referencja do sekretu](/pl/advanced/secret-references) (`${file:/run/secrets/openai}`, `${vault:...}`) | Ta sama referencja |
+| Zmienna środowiskowa (`OPENAI_API_KEY=sk-...`) | `${env:OPENAI_API_KEY}` |
+| Wartość dosłowna (w `config.yaml` lub wpisana w dashboardzie) | `${env:NAZWA}` z komentarzem `# secret not exported: set NAZWA` |
+
+```yaml
+server:
+  master_key: "${env:GOMODEL_MASTER_KEY}"
+providers:
+  groq:
+    type: groq
+    api_key: "${env:GOMODEL_PROVIDERS_GROQ_API_KEY}" # secret not exported: set GOMODEL_PROVIDERS_GROQ_API_KEY
+```
+
+Plik z takim komentarzem nie wystartuje, dopóki nie ustawisz tej zmiennej, więc
+nigdy nie działa z pustym kluczem głównym ani pustym poświadczeniem. Sekrety to
+klucze API, klucz główny i klucz szyfrowania, nagłówki MCP i OpenTelemetry,
+hasła w URL-ach oraz ustawienia pluginów oznaczone przez plugin jako tajne. W
+`extensions:` i ustawieniach pluginów sekretem jest też każdy tekst pod kluczem
+nazywającym poświadczenie (`token`, `api_key`, `password`, ...).
+
+Nie mają formy `config.yaml`, więc nagłówek pliku wymienia je jako
+niewyeksportowane: zarządzane klucze API, workflow, nadpisania cen modeli,
+ustawienia runtime, wyłączeni providerzy z dashboardu oraz guardrails
+utworzone w dashboardzie (działają tylko w workflow, które je wskazują, a
+`guardrails.rules` dodaje każdą regułę do domyślnego workflow).
+
+Eksport wymaga poświadczenia administratora bez zakresu (scope).
+
 ## Docker
 
 GoModel najpierw odczytuje `config/config.yaml`, a potem `config.yaml`.

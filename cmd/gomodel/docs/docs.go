@@ -1054,6 +1054,49 @@ const docTemplate = `{
                 ]
             }
         },
+        "/admin/config/export": {
+            "get": {
+                "description": "Returns every setting in effect, from defaults, config.yaml, environment variables, and objects managed in the dashboard, as a config.yaml document. No secret is included: a secret is written as the reference it was configured with (${env:...}, ${file:...}, ${vault:...}) or as ${env:NAME}, with a comment naming the variable to set.",
+                "produces": [
+                    "application/yaml"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Export the effective configuration as config.yaml",
+                "responses": {
+                    "200": {
+                        "description": "config.yaml document",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/admin/mcp-servers": {
             "get": {
                 "produces": [
