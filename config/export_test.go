@@ -303,6 +303,8 @@ var plainCredentialLookalikes = map[string]bool{
 	"version_check.url":                                 true,
 	"providers.*.service_account_file":                  true,
 	"providers.*.workload_identity.identity_token_file": true,
+	"server.tls_key_file":                               true,
+	"http.tls.client_key_file":                          true,
 }
 
 // TestExportTagsCoverCredentialFields fails when a string setting whose name
