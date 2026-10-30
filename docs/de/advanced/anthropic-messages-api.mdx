@@ -254,8 +254,14 @@ durchgängig erhalten:
   werden in den OpenAI-artigen Content-Teil `file` übersetzt (`file_data` für
   Inline-Inhalte, `file_url` für Remote-URLs, `file_id` für Uploads). Anthropic
   erhält das Dokument nativ mit seinem `title` zurück; Gemini erhält nur
-  Inline-Daten; OpenAI-kompatible Provider erhalten den `file`-Teil unverändert. Bei
-  OpenAI erhält ein PDF ohne Titel einen Dateinamen (`document.pdf`), und
+  Inline-Daten; OpenAI-kompatible Provider erhalten den `file`-Teil unverändert.
+  DeepSeek ist die Ausnahme: Seine Dateieingabe akzeptiert nur Bilder (webp, png,
+  jpeg, gif). Ein Bilddokument wird als `image_url` gesendet und bleibt für das
+  Modell sichtbar, und ein Klartext-Dokument wird als Text gesendet. Jedes andere
+  Dokument, einschließlich einer URL, die kein Bild bezeichnet, wird zu einem
+  kurzen Textvermerk, der immer erscheint und die Datei nur dann nennt, wenn der
+  Request einen Dateinamen mitliefert; sein Inhalt wird nicht gesendet.
+  Bei OpenAI erhält ein PDF ohne Titel einen Dateinamen (`document.pdf`), und
   URL-Dokumente laufen über die Responses API. Ein Klartext-Dokument in einem
   Request, der bei Chat Completions bleibt, wird als Text gesendet (mit seinem
   `title` als Überschrift), weil dort nur PDF-Dateidaten akzeptiert werden; bei
@@ -286,7 +292,11 @@ durchgängig erhalten:
   Ausgabe selbst abschneidet, weil OpenAI `stop` für sie ablehnt. Andere Modelle der
   OpenAI-Familie vermischen Treffer des Stop-Parameters mit natürlichen Stopps in
   `finish_reason`, sodass Completions dort `stop_reason: "end_turn"` melden (die
-  Ausgabe wird trotzdem korrekt abgeschnitten).
+  Ausgabe wird trotzdem korrekt abgeschnitten). OpenAI (außer den oben genannten
+  Reasoning-Modellen), Azure OpenAI und Groq akzeptieren höchstens vier
+  Stop-Sequenzen; eine längere Liste wird auf die ersten vier gekürzt (mit einer
+  Warnung im Gateway-Log), statt den Request scheitern zu lassen. Anthropic
+  akzeptiert die vollständige Liste.
 - **`output_config`**: `effort` legt den Reasoning-Effort fest (mit Vorrang vor dem
   aus `thinking` abgeleiteten), und `format` (oder das ältere `output_format` auf
   oberster Ebene) wird zu Structured Output mit JSON-Schema — strikt, wenn das

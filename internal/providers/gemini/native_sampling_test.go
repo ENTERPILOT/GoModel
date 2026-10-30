@@ -24,6 +24,8 @@ func TestGeminiGeneration(t *testing.T) {
 		{model: "gemini-3-pro-preview", major: 3, minor: 0, wantOK: true, wantDrops: true},
 		{model: "google/gemini-3.7-flash", major: 3, minor: 7, wantOK: true, wantDrops: true},
 		{model: "Gemini-4-Flash", major: 4, minor: 0, wantOK: true, wantDrops: true},
+		{model: "gemini-4-argon", major: 4, minor: 0, wantOK: true, wantDrops: true},
+		{model: "google/gemini-4-carbon", major: 4, minor: 0, wantOK: true, wantDrops: true},
 		{model: "gemini-2.5-flash", major: 2, minor: 5, wantOK: true},
 		{model: "gemini-2.5-flash-image", major: 2, minor: 5, wantOK: true},
 		{model: "gemini-embedding-001"},
@@ -52,6 +54,7 @@ func TestGeminiGenerationConfig_DropsSamplingParametersOnGemini3(t *testing.T) {
 		wantKept bool
 	}{
 		{name: "3.8 flash drops sampling parameters", model: "gemini-3.8-flash"},
+		{name: "4 argon drops sampling parameters", model: "gemini-4-argon"},
 		{name: "3 pro preview drops sampling parameters", model: "gemini-3-pro-preview"},
 		{name: "vertex publisher prefix drops sampling parameters", model: "google/gemini-3.5-flash"},
 		{name: "2.5 flash keeps sampling parameters", model: "gemini-2.5-flash", wantKept: true},
@@ -70,8 +73,26 @@ func TestGeminiGenerationConfig_DropsSamplingParametersOnGemini3(t *testing.T) {
 				assert.Equal(t, tt.wantKept, present, "%s present", key)
 			}
 			assert.Equal(t, 32, cfg["maxOutputTokens"])
-			assert.Contains(t, cfg, "presencePenalty")
+			assert.NotContains(t, cfg, "presencePenalty", "no generateContent model accepts penalties")
 			assert.Contains(t, cfg, "stopSequences")
+		})
+	}
+}
+
+// Every current generateContent model rejects penalties (HTTP 400 "Penalty is
+// not enabled for this model"), so they are dropped for all of them.
+func TestGeminiGenerationConfig_DropsPenalties(t *testing.T) {
+	for _, model := range []string{"gemini-4-argon", "gemini-3.8-flash", "gemini-2.5-flash", "gemma-4-31b-it"} {
+		t.Run(model, func(t *testing.T) {
+			var req core.ChatRequest
+			body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hi"}],"presence_penalty":0.5,"frequency_penalty":0.3,"max_tokens":8}`, model)
+			require.NoError(t, json.Unmarshal([]byte(body), &req))
+
+			cfg := geminiGenerationConfig(&req)
+
+			assert.NotContains(t, cfg, "presencePenalty")
+			assert.NotContains(t, cfg, "frequencyPenalty")
+			assert.Equal(t, 8, cfg["maxOutputTokens"])
 		})
 	}
 }

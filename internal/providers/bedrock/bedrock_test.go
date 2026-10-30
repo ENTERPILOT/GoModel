@@ -576,7 +576,7 @@ func TestRegistration(t *testing.T) {
 }
 
 func TestStreamConverter_FormatChunkContent(t *testing.T) {
-	sc := newOpenAIStream(nil, "test-model")
+	sc := newOpenAIStream(nil, "test-model", providerName)
 	chunk := sc.formatChunk(map[string]any{"content": "Hi"}, nil, nil)
 	require.True(t, strings.HasPrefix(chunk, "data: "))
 	require.True(t, strings.HasSuffix(chunk, "\n\n"), "malformed SSE framing: %q", chunk)
@@ -601,7 +601,7 @@ func TestStreamConverter_FormatChunkContent(t *testing.T) {
 // does not emit a finish chunk; the chunk is emitted on metadata and carries
 // both finish_reason and usage so include_usage callers see token counts.
 func TestStreamConverter_DeferredFinishWithUsage(t *testing.T) {
-	sc := newOpenAIStream(nil, "test-model")
+	sc := newOpenAIStream(nil, "test-model", providerName)
 
 	sc.handleEvent(&brtypes.ConverseStreamOutputMemberMessageStop{
 		Value: brtypes.MessageStopEvent{StopReason: brtypes.StopReasonEndTurn},
@@ -639,7 +639,7 @@ func TestStreamConverter_DeferredFinishWithUsage(t *testing.T) {
 // emit a finish chunk if the stream closes before a metadata event — usage
 // is absent in that case but finish_reason must not be swallowed.
 func TestStreamConverter_DeferredFinishWithoutMetadata(t *testing.T) {
-	sc := newOpenAIStream(nil, "test-model")
+	sc := newOpenAIStream(nil, "test-model", providerName)
 	sc.handleEvent(&brtypes.ConverseStreamOutputMemberMessageStop{
 		Value: brtypes.MessageStopEvent{StopReason: brtypes.StopReasonMaxTokens},
 	})
@@ -660,7 +660,7 @@ func TestStreamConverter_DeferredFinishWithoutMetadata(t *testing.T) {
 }
 
 func TestStreamConverter_FormatChunkUsage(t *testing.T) {
-	sc := newOpenAIStream(nil, "test-model")
+	sc := newOpenAIStream(nil, "test-model", providerName)
 	chunk := sc.formatChunk(map[string]any{}, "stop", &brtypes.TokenUsage{
 		InputTokens:  awssdk.Int32(3),
 		OutputTokens: awssdk.Int32(7),
@@ -735,7 +735,7 @@ func TestStreamConverter_FormatChunkForwardsCacheUsage(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			sc := newOpenAIStream(nil, "test-model")
+			sc := newOpenAIStream(nil, "test-model", providerName)
 			chunk := sc.formatChunk(map[string]any{}, "stop", &brtypes.TokenUsage{
 				InputTokens:           awssdk.Int32(3),
 				OutputTokens:          awssdk.Int32(7),

@@ -335,6 +335,34 @@ func TestUpsertVirtualModelValidatesSlowdown(t *testing.T) {
 	}
 }
 
+func TestUpsertVirtualModelReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		wantStatus int
+		wantEffort string
+	}{
+		{name: "redirect", body: `{"source":"fast","target_model":"openai/gpt-4o","reasoning_effort":"medium"}`, wantStatus: http.StatusOK, wantEffort: "medium"},
+		{name: "model", body: `{"source":"openai/gpt-4o","reasoning_effort":"low"}`, wantStatus: http.StatusOK, wantEffort: "low"},
+		{name: "unknown level", body: `{"source":"fast","target_model":"openai/gpt-4o","reasoning_effort":"extreme"}`, wantStatus: http.StatusBadRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newVMHandler(t)
+			c, rec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", tt.body)
+			err := h.UpsertVirtualModel(c)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+			if tt.wantStatus != http.StatusOK {
+				return
+			}
+			view := echotest.Decode[virtualmodels.View](t, rec)
+			assert.Equal(t, tt.wantEffort, view.ReasoningEffort)
+		})
+	}
+}
+
 func TestUpsertRedirectVirtualModelReplacesAccessPolicy(t *testing.T) {
 	h := newVMHandler(t, virtualmodels.VirtualModel{
 		Source:       "openai/gpt-4o",

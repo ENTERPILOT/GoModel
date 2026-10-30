@@ -56,6 +56,31 @@ func TestCompatibleProvider_ListModels_DefaultsMissingObjectFields(t *testing.T)
 	assert.Equal(t, "model", resp.Data[0].Object)
 }
 
+// A server that reports max_model_len must not put it on the wire: the field is
+// kept on the model for the vLLM discovery listing, and nothing else serializes
+// it, so the default response stays what it was before the setting existed.
+func TestCompatibleProvider_ListModels_KeepsReportedLimitOffTheWire(t *testing.T) {
+	server, _ := providertest.JSONServer(t, http.StatusOK, `{"object":"list","data":[
+		{"id":"local/custom","object":"model","owned_by":"openai","max_model_len":4096}
+	]}`)
+	provider := NewCompatibleProvider(
+		"test-key",
+		providers.ProviderOptions{HTTPClient: server.Client()},
+		CompatibleProviderConfig{ProviderName: "custom", BaseURL: server.URL},
+	)
+
+	resp, err := provider.ListModels(context.Background())
+	require.NoError(t, err)
+	require.Len(t, resp.Data, 1)
+	require.NotNil(t, resp.Data[0].MaxModelLen, "the reported limit is kept for the compatibility listing")
+	assert.Equal(t, 4096, *resp.Data[0].MaxModelLen)
+	assert.Nil(t, resp.Data[0].Metadata, "the plain listing invents no context window")
+
+	body, err := json.Marshal(resp.Data[0])
+	require.NoError(t, err)
+	assert.NotContains(t, string(body), "max_model_len")
+}
+
 func TestCompatibleProvider_ListModels_ReturnsUpstreamError(t *testing.T) {
 	server, _ := providertest.Server(t, http.NotFound)
 	provider := NewCompatibleProvider(

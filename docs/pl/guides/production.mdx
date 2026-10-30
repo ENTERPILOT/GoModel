@@ -175,13 +175,84 @@ wolumen, ograniczaj dostęp i odpowiednio klasyfikuj kopie zapasowe.
 
 ### TLS
 
-GoModel nie terminuje TLS. Serwuje zwykłe HTTP i oczekuje przed sobą reverse proxy
-lub load balancera. Uruchom je w każdym wdrożeniu, które nie jest ograniczone do
-loopbacka: bez niego klucze API klientów, zarządzane klucze gatewaya i klucz
-główny przechodzą przez sieć jawnym tekstem.
+Domyślnie GoModel serwuje zwykłe HTTP i oczekuje przed sobą reverse proxy lub
+load balancera, który terminuje TLS. W każdym wdrożeniu, które nie jest
+ograniczone do loopbacka, użyj go albo włącz [natywny TLS](#natywny-tls): bez
+żadnego z nich klucze API klientów, zarządzane klucze gatewaya i klucz główny
+przechodzą przez sieć jawnym tekstem.
 
 Nie ma też middleware CORS, więc klienci przeglądarkowi z innego originu nie mogą
 wywoływać gatewaya bezpośrednio. Jeśli tego potrzebujesz, dodaj nagłówki w swoim proxy.
+
+### Natywny TLS
+
+Ustaw certyfikat i klucz, a listener zacznie serwować HTTPS na tym samym porcie,
+z TLS 1.2 lub nowszym, domyślnymi zestawami szyfrów Go i HTTP/2. Użyj tego, gdy
+klienci łączą się z gatewayem bezpośrednio, np. pod–pod przez Service
+Kubernetes: nie ma sidecara TLS do utrzymania, a gateway widzi prawdziwy adres
+klienta.
+
+```bash
+SERVER_TLS_CERT_FILE=/etc/gomodel/tls/tls.crt
+SERVER_TLS_KEY_FILE=/etc/gomodel/tls/tls.key
+# Optional: require a client certificate signed by this CA (mTLS)
+SERVER_TLS_CLIENT_CA_FILE=/etc/gomodel/tls/ca.crt
+```
+
+- Pliki są sprawdzane pod kątem zmian najwyżej co 5 sekund. Zrotowany
+  certyfikat lub CA klientów obowiązuje od następnego handshake'u, bez restartu
+  ani przeładowania.
+- Rotacja, której nie da się wczytać, np. para zapisana w połowie, zachowuje
+  poprzedni certyfikat i loguje ostrzeżenie. Brakujący lub nieprawidłowy plik
+  przy starcie jest błędem.
+- Zmiana ścieżek zaczyna obowiązywać po
+  [przeładowaniu konfiguracji](/pl/advanced/cli#przeładowanie-konfiguracji).
+- Po włączeniu TLS port nie odpowiada już na zwykłe HTTP. `gomodel --health` i
+  `gomodel --ready`, które uruchamia dockerowy `HEALTHCHECK`, same przełączają
+  się na HTTPS.
+
+**Kubernetes z cert-managerem.** Wystaw certyfikat do Secretu i zamontuj go jako
+wolumen. Nie używaj `subPath`: kubelet nie aktualizuje montowań `subPath`, więc
+odnowiony certyfikat nigdy nie dotarłby do poda.
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gomodel-tls
+spec:
+  secretName: gomodel-tls
+  dnsNames: [gomodel.ai.svc, gomodel.ai.svc.cluster.local]
+  issuerRef: { kind: ClusterIssuer, name: internal-ca }
+```
+
+Z chartem Helm z katalogu `helm/`:
+
+```yaml
+env:
+  SERVER_TLS_CERT_FILE: /etc/gomodel/tls/tls.crt
+  SERVER_TLS_KEY_FILE: /etc/gomodel/tls/tls.key
+extraVolumes:
+  - name: tls
+    secret: { secretName: gomodel-tls }
+extraVolumeMounts:
+  - { name: tls, mountPath: /etc/gomodel/tls, readOnly: true }
+livenessProbe:
+  httpGet: { path: /health, port: http, scheme: HTTPS }
+readinessProbe:
+  httpGet: { path: /health/ready, port: http, scheme: HTTPS }
+```
+
+Kubelet nie weryfikuje certyfikatu sondy HTTPS. Przy włączonym mTLS `/health` i
+`/health/ready` nadal odpowiadają bez certyfikatu klienta, więc te sondy
+działają bez zmian; każda inna ścieżka bez zweryfikowanego certyfikatu zwraca
+401. ServiceMonitor z chartu scrapuje zwykłe HTTP, więc przy natywnym TLS
+zdefiniuj własny ze `scheme: https`. Przy mTLS `/metrics` także wymaga
+certyfikatu klienta, więc daj temu ServiceMonitorowi `tlsConfig` z `ca`
+wskazującym CA, które wystawiło certyfikat gatewaya, oraz `cert` i `keySecret`
+z certyfikatu podpisanego przez CA klientów. `helm test` i notatki po
+instalacji dla port-forward same przełączają się na HTTPS, gdy ustawione jest
+`env.SERVER_TLS_CERT_FILE`.
 
 ### Certyfikaty upstreamu za prywatnym CA
 
@@ -202,6 +273,9 @@ docker run --rm -p 8080:8080 \
 
 `SSL_CERT_FILE` też działa, ale zastępuje plik pakietu zamiast go uzupełniać,
 więc wskaż w nim pakiet, który zawiera również potrzebne Ci publiczne certyfikaty główne.
+
+Poza kontenerem albo gdy chcesz też wysyłać certyfikat klienta, ustaw zamiast tego
+`HTTP_TLS_CA_FILE`; zobacz [Prywatne CA i proxy](#prywatne-ca-i-proxy).
 
 ## Wdrożenia air-gapped i offline
 
@@ -274,6 +348,54 @@ Jeśli skonfigurowano providera Bedrock, AWS SDK może też odpytywać lokalny d
 endpoint metadanych instancji (`169.254.169.254`) w poszukiwaniu danych uwierzytelniających. Instalacja
 air-gapped raczej nie skonfiguruje Bedrocka, ale warto o tym wiedzieć.
 
+## Prywatne CA i proxy
+
+Wszystkie wychodzące połączenia gatewaya współdzielą jeden transport HTTP,
+więc ustawienia proxy i zaufania konfigurujesz raz, a obowiązują one tak samo
+dla providerów, katalogu modeli, sprawdzania aktualizacji, upstreamów MCP,
+vector store'ów i endpointów embeddingów.
+
+**Proxy.** Ustaw standardowe `HTTPS_PROXY` i `HTTP_PROXY` (każda obejmuje
+upstreamy ze swoim schematem; większość wdrożeń rozmawia tylko z upstreamami
+`https://`, ale serwer modeli po zwykłym HTTP ominie proxy ustawione tylko przez
+`HTTPS_PROXY`) oraz `NO_PROXY` dla lokalnych serwerów modeli. Nic więcej nie jest
+potrzebne. Jeśli proxy wymaga danych uwierzytelniających, podaj URL `https://`:
+schemat w zmiennej proxy opisuje połączenie do samego proxy, a URL proxy
+`http://` wysyła `Proxy-Authorization` otwartym tekstem. Aby skierować jednego
+providera przez inne proxy, zobacz [proxy wychodzące](/pl/providers/outbound-proxy).
+
+**Prywatne CA.** Zamontuj pakiet CA i wskaż go gatewayowi:
+
+```bash
+HTTP_TLS_CA_FILE=/etc/gomodel/ca.pem
+```
+
+Pakiet jest dołączany do magazynu systemowego, więc publiczni providerzy dalej
+działają obok wewnętrznych. Brakujący lub pusty plik przerywa start, zamiast po
+cichu ufać mniej, niż chciałeś.
+
+**Mutual TLS.** Gdy wewnętrzny serwer modeli lub proxy egress wymaga certyfikatu
+klienta:
+
+```bash
+HTTP_TLS_CLIENT_CERT_FILE=/etc/gomodel/tls.crt
+HTTP_TLS_CLIENT_KEY_FILE=/etc/gomodel/tls.key
+```
+
+Ten sam certyfikat klienta jest wysyłany do każdego upstreamu, który o niego
+poprosi.
+
+**Rotacja.** GoModel czyta te pliki przy starcie i przy każdym
+[przeładowaniu konfiguracji](/pl/advanced/cli#przeładowanie-konfiguracji), ale
+ich nie obserwuje. Po rotacji, np. gdy cert-manager odnowi zamontowany secret,
+uruchom `gomodel --reload` (lub wyślij `SIGHUP`) albo zrestartuj gateway. Jeśli
+rotowanego pliku nie da się wczytać, przeładowanie zostaje odrzucone, a działająca
+konfiguracja nadal obsługuje ruch.
+
+Te same ustawienia znajdują się pod `http.tls` w `config.yaml`. Nie używaj
+`HTTP_TLS_INSECURE_SKIP_VERIFY=true` poza środowiskiem testowym: wyłącza ono
+weryfikację dla każdego upstreamu, a gateway ostrzega o tym przy starcie.
+
 ## Uruchamianie więcej niż jednej repliki
 
 Obsługa requestów jest bezstanowa, więc repliki nie potrzebują powiązania (affinity) dla zwykłego
@@ -285,6 +407,7 @@ koordynuje go między instancjami.
 | Egzekwowanie [budżetów](/pl/features/budgets) | Trwały (baza danych) | Poprawne między replikami. Wydatki są odczytywane ze współdzielonej tabeli użycia. |
 | [Rekordy użycia i kosztów](/pl/features/cost-tracking) | Trwały (baza danych) | Agregowane poprawnie. |
 | Logi audytowe | Trwały (baza danych) | Kompletne między replikami. |
+| Wylogowanie [SSO](/pl/pro/sso) (Pro) | Trwały (baza danych) | Wylogowana sesja jest odrzucana na każdej replice w ciągu około 2 sekund. |
 | [Limity żądań](/pl/features/rate-limits) | W pamięci, per instancja | Efektywny limit to około `N x` skonfigurowany limit. Liczniki resetują się przy restarcie. |
 | Circuit breakery | W pamięci, per proces | Każda replika osobno wykrywa awarię, więc upstream widzi do `N x failure_threshold` błędów, zanim otworzy się którykolwiek breaker. |
 | Przypięcia [powiązania sesji](/pl/features/session-keeping) | W pamięci, per instancja | Sesje są przyklejone per replika, a nie globalnie, chyba że load balancer używa sticky sessions. |
@@ -297,30 +420,38 @@ trzy repliki z regułą 100 rpm przepuszczą łącznie do 300 rpm. Dobieraj regu
 per replika, a jako trwałej kontroli między instancjami używaj [budżetów](/pl/features/budgets),
 ponieważ odczytują dane ze współdzielonej bazy danych.
 
-### Zmiany konfiguracji nie propagują się natychmiast
+### Zmiany konfiguracji docierają do wszystkich replik w ciągu kilku sekund
 
-Konfiguracja zarządzana przez administratora jest trwale zapisana w bazie danych, ale serwowana
-ze snapshotu w pamięci na każdej replice. Zmiana zapisana w dashboardzie od razu aktualizuje
-replikę, która obsłużyła request. Pozostałe repliki pobierają ją we własnym
-cyklu odświeżania, a dwa rodzaje danych w ogóle go nie mają.
+Konfiguracja zarządzana przez administratora jest trwale zapisana w bazie danych i serwowana
+ze snapshotu w pamięci na każdej replice. Zmiana zapisana w dashboardzie lub przez Admin API
+obowiązuje od razu na replice, która ją obsłużyła; ta replika zwiększa też rewizję danego
+obszaru we wspólnej tabeli `config_revisions`. Każda replika odpytuje tę tabelę co 2 sekundy
+i przeładowuje to, co się zmieniło, więc zmiana dociera do pozostałych w ciągu kilku sekund.
+Udział bierze tylko wspólna baza danych: bez Redisa, tak samo na PostgreSQL i MongoDB.
 
-| Zmienione w dashboardzie | Dociera do innych replik po |
-| --- | --- |
-| Definicje budżetów | **Tylko po restarcie** |
-| Reguły limitów żądań | **Tylko po restarcie** |
-| Modele wirtualne (w tym łańcuchy failoveru) | Do `CACHE_REFRESH_INTERVAL` (domyślnie 1 godzina) |
-| Zarządzane klucze API | Do 60 sekund |
-| Guardrails, workflowy, nadpisania cen | Około 60 sekund |
+Dotyczy to budżetów (definicji, ustawień i resetów), reguł limitów żądań, poświadczeń
+providerów (dodanie, edycja, wyłączenie, usunięcie), zarządzanych kluczy API (w tym
+unieważnienia), polityk użytkowników, modeli wirtualnych, nadpisań cen, reguł tagowania,
+guardrails, workflowów i serwerów MCP. Provider dodany na innej replice zaczyna obsługiwać
+ruch, gdy tylko zostanie pobrana jego lista modeli.
+
+Replika, która nie zdoła zastosować zmiany, raz loguje ostrzeżenie i ponawia próbę przy każdym
+odpytaniu, aż zmiana zacznie obowiązywać. Jeden wyjątek: zapisany provider, którego nie da się
+zbudować na replice, zachowuje to, co już działało pod jego nazwą, i jest ponawiany przy
+następnej zmianie dowolnego zapisanego providera, bo każda zmiana przeładowuje wszystkie, albo
+po restarcie. Replika, która nie zdoła zapisać zmiany w `config_revisions`, również ponawia
+próbę przy każdym odpytaniu. Dopóki się to nie uda, pozostałe repliki przejmą zmianę przy
+późniejszej zmianie w tym samym obszarze, przy wolniejszym okresowym odświeżaniu, które część
+obszarów już miała, przy ręcznym odświeżeniu runtime albo po restarcie.
+
+`POST /admin/runtime/refresh` przeładowuje na replice, która go odebrała, zarządzane klucze API,
+modele wirtualne, guardrails, workflowy, serwery MCP, budżety i limity żądań. Nie przeładowuje
+zapisanych poświadczeń providerów.
 
 <Warning>
-  Dwie z tych rzeczy mają znaczenie operacyjne. **Unieważnienie zarządzanego klucza API może zacząć
-  obowiązywać na innych replikach dopiero po minucie.** A **budżet lub reguła limitu żądań
-  utworzone w dashboardzie nie docierają do innych replik, dopóki nie zostaną one zrestartowane**,
-  więc przy trzech replikach nowy budżet początkowo obejmuje jedną trzecią Twojego ruchu.
-
-  Jeśli uruchamiasz kilka replik, deklaruj budżety i limity żądań w kodzie, w
-  `config.yaml` lub zmiennych środowiskowych, aby były wczytywane identycznie przy starcie,
-  i restartuj repliki po zmianach w dashboardzie.
+  **Reset liczników limitów żądań obowiązuje tylko na replice, która obsłużyła request.**
+  Liczniki są per instancja (zobacz tabelę powyżej): zmiany reguł się propagują, resety
+  liczników nie.
 </Warning>
 
 ### Sondy health i zamykanie
@@ -438,14 +569,14 @@ wykonuj na nim VACUUM osobno.
 ## Lista kontrolna wdrożenia produkcyjnego
 
 - Ustaw `GOMODEL_MASTER_KEY` na silną wartość.
-- Terminuj TLS w proxy przed gatewayem.
+- Terminuj TLS w proxy przed gatewayem albo włącz
+  [natywny TLS](#natywny-tls).
 - Ogranicz dostęp do `/admin/*`, dashboardu i `/metrics` na perymetrze sieci.
 - Używaj Postgresa lub MongoDB przy więcej niż jednej replice lub dowolnym ulotnym systemie plików;
   przy SQLite zamontuj wolumen i ustaw `SQLITE_PATH`.
 - Deklaruj providerów w zmiennych środowiskowych lub `config.yaml`, z wartościami z
   menedżera sekretów.
-- Przy kilku replikach deklaruj budżety i limity żądań w kodzie i dobieraj
-  reguły limitów żądań per replika.
+- Przy kilku replikach dobieraj reguły limitów żądań per replika.
 - Zdecyduj o `LOGGING_LOG_BODIES` i świadomie ustaw okresy retencji.
 - Skieruj readiness na `/health/ready` i ustaw
   `terminationGracePeriodSeconds` powyżej 30.

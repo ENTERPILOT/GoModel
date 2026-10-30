@@ -6,7 +6,7 @@ keywords: ["DeepSeek", "Reasoning-Aufwand", "reasoning effort", "Provider-Einric
 ---
 
 DeepSeek bietet keine native Responses API, daher übersetzt GoModel `/v1/responses` automatisch in
-`/chat/completions`. Außerdem bildet GoModel Reasoning-Stufen im OpenAI-Stil auf die beiden Stufen
+`/chat/completions`. Außerdem bildet GoModel Reasoning-Stufen im OpenAI-Stil auf die Stufen
 ab, die DeepSeek akzeptiert.
 
 ## Konfiguration
@@ -34,19 +34,22 @@ providers:
 ## Abbildung des Reasoning-Aufwands
 
 Die Reasoning-Modelle von DeepSeek V4 akzeptieren `reasoning_effort` als String auf oberster Ebene
-mit zwei zulässigen Stufen: `high` und `max`.
+mit zwei Reasoning-Stufen, `high` und `max`, sowie `none`, das Reasoning abschaltet.
 
 | Client sendet | DeepSeek erhält |
 | ------------ | ----------------- |
-| `low` / `medium` / `high` | `high` |
+| `none` | `none` (Reasoning aus) |
+| `minimal` / `low` / `medium` / `high` | `high` |
 | `xhigh` / `max` | `max` |
 | alles andere | wird von GoModel durchgereicht und dann von DeepSeek abgelehnt |
 
 GoModel schreibt das OpenAI-förmige `"reasoning": {"effort": "..."}` in das DeepSeek-Feld
 `reasoning_effort` auf oberster Ebene um – eine Änderung am Client ist nicht erforderlich.
 Validieren oder normalisieren Sie benutzerdefinierte Client-Werte auf `high` oder `max`, bevor Sie
-GoModel aufrufen. Um Reasoning zu deaktivieren, lassen Sie das Feld `reasoning` vollständig weg;
-jedes angegebene `reasoning.effort`, auch `low`, wird abgebildet und aktiviert Reasoning.
+GoModel aufrufen. DeepSeek nutzt Reasoning standardmäßig, ein weggelassenes Feld `reasoning` lässt es also an;
+senden Sie `none`, um es zu deaktivieren. Jedes andere `reasoning.effort`, auch `low`, wird abgebildet und aktiviert Reasoning. Ein
+[erzwungener Reasoning-Effort](/de/features/virtual-models#reasoning-effort-erzwingen)
+ersetzt den Wert des Clients in jedem Fall.
 
 ## Tool Calls und Reasoning
 

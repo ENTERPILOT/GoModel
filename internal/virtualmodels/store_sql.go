@@ -29,6 +29,7 @@ var sqlSchema = []string{
 		user_paths TEXT NOT NULL DEFAULT '[]',
 		description TEXT NOT NULL DEFAULT '',
 		slowdown DOUBLE PRECISION DEFAULT NULL,
+		reasoning_effort TEXT NOT NULL DEFAULT '',
 		enabled ` + sqlx.TypeBool + ` NOT NULL DEFAULT TRUE,
 		created_at ` + sqlx.TypeInt64 + ` NOT NULL,
 		updated_at ` + sqlx.TypeInt64 + ` NOT NULL
@@ -46,19 +47,20 @@ var virtualModelMigrations = []string{
 	"ALTER TABLE virtual_models ADD COLUMN failover TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE virtual_models ADD COLUMN strategy_plugin TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE virtual_models ADD COLUMN strategy_config TEXT NOT NULL DEFAULT '{}'",
+	"ALTER TABLE virtual_models ADD COLUMN reasoning_effort TEXT NOT NULL DEFAULT ''",
 }
 
 const selectVirtualModelColumns = `
 	SELECT source, targets, strategy, strategy_plugin, strategy_config, session_affinity, failover, provider_name, model, user_paths,
-		description, slowdown, enabled, created_at, updated_at
+		description, slowdown, reasoning_effort, enabled, created_at, updated_at
 	FROM virtual_models
 `
 
 const upsertVirtualModelSQL = `
 	INSERT INTO virtual_models (
-		source, targets, strategy, strategy_plugin, strategy_config, session_affinity, failover, provider_name, model, user_paths, description, slowdown, enabled, created_at, updated_at
+		source, targets, strategy, strategy_plugin, strategy_config, session_affinity, failover, provider_name, model, user_paths, description, slowdown, reasoning_effort, enabled, created_at, updated_at
 	)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(source) DO UPDATE SET
 		targets = excluded.targets,
 		strategy = excluded.strategy,
@@ -71,6 +73,7 @@ const upsertVirtualModelSQL = `
 		user_paths = excluded.user_paths,
 		description = excluded.description,
 		slowdown = excluded.slowdown,
+		reasoning_effort = excluded.reasoning_effort,
 		enabled = excluded.enabled,
 		updated_at = excluded.updated_at
 `
@@ -172,6 +175,7 @@ func virtualModelUpsertArgs(vm VirtualModel) ([]any, error) {
 		sqlutil.JSONStrings(vm.UserPaths),
 		vm.Description,
 		vm.Slowdown,
+		vm.ReasoningEffort,
 		vm.Enabled,
 		vm.CreatedAt.Unix(),
 		vm.UpdatedAt.Unix(),
@@ -196,6 +200,7 @@ func scanSQLVirtualModel(scanner sqlx.Row) (VirtualModel, error) {
 		&userPaths,
 		&vm.Description,
 		&vm.Slowdown,
+		&vm.ReasoningEffort,
 		&vm.Enabled,
 		&createdAt,
 		&updatedAt,

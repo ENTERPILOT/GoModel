@@ -190,10 +190,41 @@ Zachowaj jawny segment `v1/` dla endpointów SGLang, które go zawierają, takic
 GoModel usuwa autoryzację klienta przed przekazaniem requestu i dołącza
 `SGLANG_API_KEY`, gdy jest skonfigurowany.
 
+## Tryb Responses API
+
+Niektóre buildy SGLang zwracają HTTP 500 z `/v1/responses`, gdy request
+zawiera function tools, co psuje klientów takich jak Codex CLI.
+`/v1/chat/completions` w SGLang obsługuje te narzędzia, więc GoModel może
+przetłumaczyć request Responses na chat completions i zwrócić zwykłą odpowiedź
+Responses. `SGLANG_API_MODE` (lub `api_mode` w `config.yaml`) wybiera ścieżkę:
+
+| Wartość | Zachowanie |
+| --- | --- |
+| `auto` (domyślnie) | Chat completions, gdy request ma function tools; w przeciwnym razie `/v1/responses`. |
+| `native` | Zawsze `/v1/responses`. Użyj, gdy Twój build SGLang obsługuje tam function tools. |
+| `chat_compatible` | Zawsze chat completions, dla jednego spójnego API upstream. |
+
+Domyślna wartość pasuje do większości wdrożeń. Narzędzia hostowane, takie jak
+`web_search_preview`, nie mają odpowiednika w chat: requesty tylko z
+narzędziami hostowanymi zostają w trybie `auto` na `/v1/responses`, a
+tłumaczone requesty je pomijają. Ustaw `native`, jeśli potrzebujesz narzędzi
+hostowanych razem z function tools. `previous_response_id` działa w każdym
+trybie, bo GoModel sam odtwarza zapisaną rozmowę.
+
+```yaml
+providers:
+  sglang:
+    type: sglang
+    base_url: "http://localhost:30000/v1"
+    api_mode: native   # auto (default), native, chat_compatible
+```
+
 ## Uwagi o możliwościach
 
 - Chat completions, streaming, listowanie modeli, Responses i embeddingi używają
-  API SGLang kompatybilnego z OpenAI.
+  API SGLang kompatybilnego z OpenAI. Responses z function tools domyślnie
+  przechodzą przez chat completions; zobacz
+  [Tryb Responses API](#tryb-responses-api).
 - Embeddingi i funkcje specyficzne dla modelu zależą od modelu załadowanego przez SGLang.
 - Natywne interfejsy batchy, plików i cyklu życia zapisanych odpowiedzi nie są jeszcze
   udostępniane jako typowane możliwości providera w GoModel; używaj passthrough tam, gdzie

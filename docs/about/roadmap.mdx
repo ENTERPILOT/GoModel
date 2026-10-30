@@ -7,8 +7,8 @@ keywords: ["roadmap", "milestones", "upcoming features", "releases"]
 
 ## Roadmap to 0.2.0
 
-- [ ] Improving/reinventing the testing strategy
-- [ ] Guardrails hardening: better UI, simpler architecture, easier custom guardrails, and response-side guardrails applied before output reaches the client
+- [x] Improving/reinventing the testing strategy
+- [x] Guardrails hardening: better UI, simpler architecture, easier custom guardrails, and response-side guardrails applied before output reaches the client
 - [x] Writing the customized Code of Conduct
 - [x] Plugins - at least for guardrails
 - [x] OpenTelemetry (OTel) support
@@ -53,10 +53,10 @@ keywords: ["roadmap", "milestones", "upcoming features", "releases"]
 - [x] Context window compression ([GoModel Pro](/pro/compression))
 - [x] OIDC single sign-on ([GoModel Pro](/pro/sso))
 - [x] Egress proxy pools with health checks and failover ([GoModel Pro](/pro/egress), beta; per-provider `proxy_url` is in [core](/providers/outbound-proxy))
+- [x] Secret manager integrations (Vault, AWS Secrets Manager, Azure Key Vault, GCP Secret Manager) ([GoModel Pro](/pro/overview#vaults)); [secret references](/advanced/secret-references) with `env` and `file` are in core
 - [ ] Cluster mode
 - [ ] LDAP integration
 - [ ] Role-based access control (RBAC) for the dashboard and admin API
-- [ ] Secret manager integrations (Vault, AWS Secrets Manager/KMS, Azure Key Vault, GCP Secret Manager) in GoModel Pro; [secret references](/advanced/secret-references) with `env` and `file` are in core
 - [ ] Audit-log export/streaming to object storage and data lakes
 - [ ] IP / CIDR allowlists
 - [ ] LTS channel with signed artifacts, SBOM, and CVE pre-notification

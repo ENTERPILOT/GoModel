@@ -411,3 +411,108 @@ func assertSnapshotsEqual(t *testing.T, got, want map[string]ProviderHealth) {
 		}
 	}
 }
+
+func TestTrackerKeepsUpstreamCauseWhileCircuitOpen(t *testing.T) {
+	start := time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
+	upstream := errors.New("[zai] provider_error: insufficient balance")
+	rejection := fmt.Errorf("[zai] provider_error: circuit breaker is open - provider zai temporarily unavailable: %w", llmclient.ErrCircuitOpen)
+
+	record := func(tracker *Tracker, model string, status int, err error) {
+		tracker.Record(llmclient.ResponseInfo{Provider: "zai", Model: model, StatusCode: status, Error: err, CircuitState: "open"})
+	}
+
+	tests := []struct {
+		name          string
+		record        func(tracker *Tracker, now *time.Time)
+		wantProvider  string
+		wantModel     string
+		wantModelErrs map[string]string
+	}{
+		{
+			name: "rejection keeps the upstream failure of the same model",
+			record: func(tracker *Tracker, now *time.Time) {
+				record(tracker, "glm", 429, upstream)
+				*now = now.Add(time.Second)
+				record(tracker, "glm", 503, rejection)
+			},
+			wantProvider:  "insufficient balance",
+			wantModel:     "glm",
+			wantModelErrs: map[string]string{"glm": "insufficient balance"},
+		},
+		{
+			name: "newer rejection on another model does not hide the cause",
+			record: func(tracker *Tracker, now *time.Time) {
+				record(tracker, "glm", 429, upstream)
+				*now = now.Add(time.Second)
+				record(tracker, "glm-flash", 503, rejection)
+			},
+			wantProvider:  "insufficient balance",
+			wantModel:     "glm",
+			wantModelErrs: map[string]string{"glm": "insufficient balance", "glm-flash": "circuit breaker is open"},
+		},
+		{
+			name: "rejection is reported when no upstream failure is known",
+			record: func(tracker *Tracker, _ *time.Time) {
+				record(tracker, "glm", 503, rejection)
+			},
+			wantProvider:  "circuit breaker is open",
+			wantModel:     "glm",
+			wantModelErrs: map[string]string{"glm": "circuit breaker is open"},
+		},
+		{
+			name: "rejection replaces an upstream failure outside the window",
+			record: func(tracker *Tracker, now *time.Time) {
+				record(tracker, "glm", 429, upstream)
+				*now = now.Add(Window + time.Minute)
+				record(tracker, "glm", 503, rejection)
+			},
+			wantProvider:  "circuit breaker is open",
+			wantModel:     "glm",
+			wantModelErrs: map[string]string{"glm": "circuit breaker is open"},
+		},
+		{
+			name: "kept rejection is reported once the upstream failure expires",
+			record: func(tracker *Tracker, now *time.Time) {
+				record(tracker, "glm", 429, upstream)
+				*now = now.Add(Window - time.Minute)
+				record(tracker, "glm", 503, rejection)
+				// Snapshot after the upstream failure leaves the window,
+				// with no further request recorded.
+				*now = now.Add(2 * time.Minute)
+			},
+			wantProvider:  "circuit breaker is open",
+			wantModel:     "glm",
+			wantModelErrs: map[string]string{"glm": "circuit breaker is open"},
+		},
+		{
+			name: "a new upstream failure replaces the earlier cause",
+			record: func(tracker *Tracker, now *time.Time) {
+				record(tracker, "glm", 429, upstream)
+				*now = now.Add(time.Second)
+				record(tracker, "glm", 503, rejection)
+				*now = now.Add(time.Second)
+				record(tracker, "glm", 500, errors.New("[zai] provider_error: upstream overloaded"))
+			},
+			wantProvider:  "upstream overloaded",
+			wantModel:     "glm",
+			wantModelErrs: map[string]string{"glm": "upstream overloaded"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tracker, now := newTestTracker(start)
+			tt.record(tracker, now)
+
+			snapshot := tracker.Snapshot()["zai"]
+			require.NotNil(t, snapshot.LastError)
+			assert.Contains(t, snapshot.LastError.Message, tt.wantProvider)
+			assert.Equal(t, tt.wantModel, snapshot.LastErrorModel)
+			require.Len(t, snapshot.Models, len(tt.wantModelErrs))
+			for _, row := range snapshot.Models {
+				require.NotNil(t, row.LastError, row.Model)
+				assert.Contains(t, row.LastError.Message, tt.wantModelErrs[row.Model], row.Model)
+			}
+		})
+	}
+}

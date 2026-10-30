@@ -2,7 +2,7 @@
 title: "Playground"
 description: "Testen Sie jedes Modell über das Gateway direkt im Dashboard und prüfen Sie das exakte JSON von Request und Response."
 icon: "flask-conical"
-keywords: ["Playground", "playground", "Dashboard", "Chat Completions", "Responses", "Messages", "Streaming"]
+keywords: ["Playground", "playground", "Dashboard", "Chat Completions", "Responses", "Messages", "Streaming", "Bilder", "images", "Sprachausgabe", "text-to-speech", "Transkription", "transcription"]
 ---
 
 Die Seite **Playground** (`/admin/dashboard/playground`) sendet Requests mit
@@ -18,6 +18,27 @@ bearbeiten), sowie die letzte Response mit Status, Latenz und Token-Nutzung –
 gestreamte Responses werden in dieselbe Form zusammengesetzt, die ein Aufruf
 ohne Streaming zurückgibt. Für Requests gelten dieselben Budgets, Rate-Limits,
 Guardrails und dasselbe Audit-Logging wie für jeden anderen Client des Gateways.
+
+## Bild, Sprachausgabe und Transkription
+
+Mit dem Schalter **Modus** über der Modellauswahl lassen sich auch Medienmodelle
+testen. Jeder Modus ruft den OpenAI-kompatiblen Endpunkt des Gateways auf und
+listet Modelle, deren Metadaten diesen Modus ausweisen, zuerst auf; Sie können
+weiterhin jedes beliebige Modell oder jeden Alias eingeben.
+
+| Modus | Endpunkt | Eingabe | Ergebnis |
+| --- | --- | --- | --- |
+| Chat | wie unter **Endpoint** gewählt | Konversation | Assistant-Nachricht |
+| Bild | `POST /v1/images/generations` | Prompt, Größe, Anzahl der Bilder (1–4) | generierte Bilder (URL oder `b64_json`) |
+| Sprache | `POST /v1/audio/speech` | Text, Stimme, Format (`mp3`, `wav`, `opus`, `aac`, `flac`) | Audioplayer |
+| Transkription | `POST /v1/audio/transcriptions` | Audiodatei, optional Sprache und Prompt | Transkript-Text |
+
+Größe, Anzahl und Format werden nur gesendet, wenn sie vom Standardwert des
+Providers abweichen (`mp3` für Sprache). Das JSON-Panel zeigt den Request-Body;
+eine Transkription wird als `multipart/form-data` gesendet, daher beschreibt
+ihre Vorschau den Datei-Teil, statt die Bytes zu enthalten. Inline-Bilder im
+Format `b64_json` werden im Response-JSON gekürzt, damit es lesbar bleibt, und
+Sprach-Responses werden als ihr Content-Type und ihre Größe zusammengefasst.
 
 ## Eingrenzung per User Path
 
