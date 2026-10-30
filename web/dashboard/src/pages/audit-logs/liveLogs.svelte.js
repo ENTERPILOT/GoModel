@@ -7,9 +7,9 @@
 // ./live-logs-logic.js.
 //
 // The singleton owns the shared live-preview state (auditLog, usageLog and
-// the insert-gate filter fields); the audit/usage pages write their fetched
-// pages into `liveLogs.auditLog` / `liveLogs.usageLog` and keep the filter
-// fields in sync. Cross-module hooks stay optional and duck-typed: pages
+// the audit insert-gate filter fields); the audit/usage pages write their
+// fetched pages into `liveLogs.auditLog` / `liveLogs.usageLog`. The usage
+// gate asks the usage page's filter state (usageFilters) whether it is empty. Cross-module hooks stay optional and duck-typed: pages
 // assign `liveLogs.fetchAuditLog`, `liveLogs.fetchUsage`,
 // `liveLogs.isAuditEntryExpanded`, `liveLogs.noteLiveTokenUsage`; the
 // the conversation drawer reacts to normalized audit-record changes.
@@ -76,13 +76,10 @@ class LiveLogsStore {
   );
   auditThreadChildren = $state({});
   usageLogSearch = $state("");
-  usageFilterModel = $state("");
-  usageFilterProvider = $state("");
-  usageFilterLabel = $state("");
-  usageFilterUserPath = $state("");
-  usageFilterSession = $state("");
-  usageFilterAuthKey = $state("");
-  usageFilterEndpoints = $state([]);
+  // The usage page registers its filter state here (an object with
+  // isEmpty()): live usage previews merge only while no filter is set, since
+  // a preview cannot be matched against them client side.
+  usageFilters = null;
   usageLogHideCached = $state(false);
 
   // True while the stream body is being consumed; drives the audit page's

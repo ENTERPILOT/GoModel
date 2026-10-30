@@ -21,6 +21,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/openai"
 )
 
 // defaultBaseURL is the Codex backend served to ChatGPT subscribers. Override
@@ -169,15 +170,18 @@ func cacheSessionID(ctx context.Context, body *core.ResponsesRequest) string {
 	return key
 }
 
-// ChatCompletion is unsupported: the ChatGPT Codex backend serves only the
-// Responses API. Clients reach these models through /v1/responses.
-func (p *Provider) ChatCompletion(_ context.Context, _ *core.ChatRequest) (*core.ChatResponse, error) {
-	return nil, unsupported("chat completions")
+// ChatCompletion serves a chat request by translating it onto the Responses
+// API. The ChatGPT Codex backend has no chat completions endpoint, so every
+// chat request goes through the OpenAI provider's chat-to-Responses
+// translation, which renders the result back as a chat completion.
+func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
+	return openai.ChatViaResponses(ctx, p, req, "chatgpt")
 }
 
-// StreamChatCompletion is unsupported for the same reason as ChatCompletion.
-func (p *Provider) StreamChatCompletion(_ context.Context, _ *core.ChatRequest) (io.ReadCloser, error) {
-	return nil, unsupported("chat completions")
+// StreamChatCompletion is ChatCompletion for streaming requests: the
+// Responses stream is converted into chat completion chunks.
+func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
+	return openai.StreamChatViaResponses(ctx, p, req, "chatgpt")
 }
 
 // Embeddings is unsupported: the Codex backend exposes no embeddings endpoint.

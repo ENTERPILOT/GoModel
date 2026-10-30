@@ -197,6 +197,13 @@ func (c *Client) SetBaseURL(url string) {
 	c.config.BaseURL = url
 }
 
+// HTTPClient returns the client requests are sent through, so transports
+// that bypass Do, such as a realtime websocket dial, can reuse its proxy and
+// TLS settings.
+func (c *Client) HTTPClient() *http.Client {
+	return c.httpClient
+}
+
 // BaseURL returns the current base URL (thread-safe)
 func (c *Client) BaseURL() string {
 	c.mu.RLock()

@@ -17,7 +17,7 @@ func TestSQLiteReaderGetDailyUsage_GroupsByConfiguredTimeZone(t *testing.T) {
 
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -61,7 +61,7 @@ func TestSQLiteReaderGetDailyUsage_GroupsByConfiguredTimeZone(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	location, err := time.LoadLocation("Europe/Warsaw")

@@ -14,9 +14,10 @@
 // `liveLogs.auditThreadChildren` when the user unfolds it.
 
 import { getJSON } from "$lib/api/client.js";
-import { writeStored } from "$lib/utils/storage.js";
+import { readStored, writeStored } from "$lib/utils/storage.js";
 import { dateRange } from "$lib/stores/dateRange.svelte.js";
 import { liveLogs } from "./liveLogs.svelte.js";
+import { normalizeAuditColumns, parseStoredAuditColumns } from "./audit-columns.js";
 import { normalizeHiddenTypes } from "./audit-operations.js";
 import { auditWorkflows } from "./audit-workflows.svelte.js";
 import {
@@ -43,6 +44,11 @@ function emptyAuditLog() {
 }
 
 class AuditListStore {
+  // Column visibility view preference ({ [column key]: boolean }); persisted
+  // like the session-grouping toggle.
+  auditColumns = $state(
+    parseStoredAuditColumns(readStored("gomodel_audit_columns", "{}")),
+  );
   auditExpandedEntries = $state({});
   auditExpandedThreads = $state({});
   loading = $state(false);
@@ -132,6 +138,16 @@ class AuditListStore {
     this.auditExpandedThreads = {};
     liveLogs.auditThreadChildren = {};
     this.fetchAuditLog(true);
+  }
+
+  // toggleAuditColumn shows or hides one column of the row. Purely visual, so
+  // there is nothing to refetch.
+  toggleAuditColumn(key) {
+    this.auditColumns = normalizeAuditColumns({
+      ...this.auditColumns,
+      [key]: !this.auditColumns[key],
+    });
+    writeStored("gomodel_audit_columns", JSON.stringify(this.auditColumns));
   }
 
   async fetchAuditLog(resetOffset) {
