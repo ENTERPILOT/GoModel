@@ -76,7 +76,13 @@ func (b *bootstrap) initServerDependencies() error {
 
 	// Initialize the MCP gateway (aggregated upstream MCP servers behind /mcp).
 	if appCfg.MCP.Enabled {
-		mcpResult, err := mcpgateway.New(b.ctx, appCfg, app.storage, app.secrets, nil, b.serverUsageLogger, b.cfg.AppConfig.Secrets)
+		// Replicas on one database share MCP sessions through the shared
+		// store; without it each instance keeps its own.
+		var mcpSessions ext.SharedStore
+		if app.sharedStore != nil && mcpSharesSessions(appCfg) {
+			mcpSessions = app.sharedStore
+		}
+		mcpResult, err := mcpgateway.New(b.ctx, appCfg, app.storage, app.secrets, nil, b.serverUsageLogger, b.cfg.AppConfig.Secrets, mcpSessions)
 		if err != nil {
 			return fmt.Errorf("failed to initialize mcp gateway: %w", err)
 		}
