@@ -284,7 +284,7 @@ of a request:
 | `Prompt` | `*Prompt` | the conversation (`Messages` with stable IDs and typed `Parts`: text, image, audio, file, tool call, tool result, reasoning, refusal, opaque), `Tools`, `Params`, raw body. Edit through `SetText`, `SetMedia`, `SetToolArguments`, `SetToolResult`, `Insert`, `Append`, `Remove`, `SetParam`; `TextTargets(roles...)` lists every text part, tool-result text included, and `SetTargetText` writes one back |
 | `Response` | `*Completion` | the response, `nil` until the response phase: `Choices` with the same `Part` model, `Usage`, raw body. Edit through `SetText`, `ReplaceText`, `SetFinishReason`, `SetToolArguments`; `TextTargets` and `SetTargetText` work as on `Prompt` |
 | `Stream` | `*StreamState` | text accumulated so far per choice and the event count; `nil` for non-streaming requests |
-| `Headers` | `*Headers` | `Request` (inbound, credentials redacted; prompt-phase edits apply to the live request for later plugins and request logging, not to the provider call), `Response` (applied to the client response; a header set to the empty string is removed, including ones the gateway adds such as `X-Request-Id`), `Upstream` (sent with every provider call of the request; see [Upstream headers](#upstream-headers)) |
+| `Headers` | `*Headers` | `Request` (inbound, credentials redacted; prompt-phase edits apply to the live request for later plugins and request logging, not to the provider call), `Response` (applied to the client response; a header set to the empty string is removed, including ones the gateway adds such as `X-Request-Id`), `Upstream` (sent with every provider call of the request that goes through the gateway's HTTP client; see [Upstream headers](#upstream-headers)) |
 | `Values` | `Values` | per-request bag shared by every hook of the request; prefix keys with the plugin name |
 
 Edits go through methods, not field assignment, so GoModel re-encodes only
@@ -321,8 +321,9 @@ keeps the cache; editing inside the prefix invalidates it for the session.
 routing or billing property the upstream expects, such as Helicone's, or an
 organizational tag a gateway in front of the provider routes on. A provider
 credential does not belong here — the names the gateway treats as credentials
-are refused, and any other value is forwarded and logged as ordinary metadata.
-Assign the map in a prompt-phase hook, before the provider call runs:
+are refused, and any other value is forwarded to the provider. The host logs
+how many headers a plugin set, never their values. Assign the map in a
+prompt-phase hook, before the provider call runs:
 
 ```go
 import "net/http"
@@ -340,7 +341,9 @@ What the gateway does with them:
 
 - Every provider attempt of the request carries them, failover to another
   provider included, and so do the token-counting and compaction calls the
-  request makes: they reach the same upstream, behind the same gateway.
+  request makes: they reach the same upstream, behind the same gateway. Every
+  call that goes through the gateway's HTTP client, that is; Bedrock, which
+  calls the AWS SDK directly, does not carry them.
 - Inference the gateway issues for its own work does not. A guardrail's LLM
   judge calls the provider through the plugin `Host` on the request context, and
   that call drops these headers: they describe the client's provider, not the

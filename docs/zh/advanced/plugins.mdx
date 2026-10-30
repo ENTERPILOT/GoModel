@@ -204,7 +204,7 @@ keep-alive 注释（15 s）之前完成，针对缓冲响应做出的 `warn` 就
 | `Prompt` | `*Prompt` | 对话（带稳定 ID 和类型化 `Parts` 的 `Messages`：文本、图像、音频、文件、工具调用、工具结果、推理、拒答、不透明内容）、`Tools`、`Params`、原始请求体。通过 `SetText`、`SetMedia`、`SetToolArguments`、`SetToolResult`、`Insert`、`Append`、`Remove`、`SetParam` 进行修改；`TextTargets(roles...)` 列出所有文本部分（包括工具结果中的文本），`SetTargetText` 将修改写回其中之一 |
 | `Response` | `*Completion` | 响应，在 response 阶段之前为 `nil`：使用相同 `Part` 模型的 `Choices`、`Usage`、原始响应体。通过 `SetText`、`ReplaceText`、`SetFinishReason`、`SetToolArguments` 进行修改；`TextTargets` 和 `SetTargetText` 的用法与 `Prompt` 上相同 |
 | `Stream` | `*StreamState` | 每个选项目前为止累积的文本和事件计数；非流式请求为 `nil` |
-| `Headers` | `*Headers` | `Request`（入站请求头，凭据已脱敏；prompt 阶段的修改会作用于实时请求，供后续插件和请求日志使用，但不会作用于提供商调用）、`Response`（应用于客户端响应；设置为空字符串的 Header 会被删除，包括网关添加的 Header，例如 `X-Request-Id`）、`Upstream`（随该请求的每次提供商调用发送，包括故障转移尝试以及 token 计数和压缩调用；携带凭据的 Header、决定连接或请求体的 Header 以及由提供商协商的 Header 会被拒绝；网关为自身发起的调用不携带这些 Header） |
+| `Headers` | `*Headers` | `Request`（入站请求头，凭据已脱敏；prompt 阶段的修改会作用于实时请求，供后续插件和请求日志使用，但不会作用于提供商调用）、`Response`（应用于客户端响应；设置为空字符串的 Header 会被删除，包括网关添加的 Header，例如 `X-Request-Id`）、`Upstream`（随该请求的每次提供商调用发送，前提是经由网关的 HTTP 客户端发出（Bedrock 直接调用 AWS SDK，不在此列），包括故障转移尝试以及 token 计数和压缩调用；携带凭据的 Header、决定连接或请求体的 Header、`Accept-Encoding` 以及由提供商协商的 Header 会被拒绝；网关为自身发起的调用不携带这些 Header） |
 | `Values` | `Values` | 请求内所有 Hook 共享的键值集合；键名请以插件名称作为前缀 |
 
 修改需要通过方法进行，而不是直接给字段赋值，这样 GoModel 只会重新编码发生变化的部分，未被修改的消息会保留所有提供商特定的字段
@@ -224,6 +224,44 @@ keep-alive 注释（15 s）之前完成，针对缓冲响应做出的 `warn` 就
 
 `Meta.Cache.PlannedPrefixMessages` 告诉 prompt 插件，提供商缓存规划器会将开头的多少条消息标记为缓存前缀。
 在末尾追加内容会保留缓存；修改前缀内的内容会使该会话的缓存失效。
+
+### 上游请求头
+
+`Headers.Upstream` 把 Header 放到提供商调用本身：上游期望的、按请求生效的路由或计费属性（例如 Helicone 的），
+或者提供商之前的网关用于路由的组织标签。提供商凭据不属于这里——网关视为凭据的名称会被拒绝，
+其他任何值都会转发给提供商。host 只记录插件设置了多少个 Header，从不记录它们的值。
+在 prompt 阶段的 Hook 中、提供商调用执行之前赋值：
+
+```go
+import "net/http"
+
+func (p *tenantHint) OnPrompt(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+	x.Headers.Upstream = http.Header{
+		"Helicone-Property-Tenant":  {x.Meta.UserPath},
+		"Helicone-Property-Request": {x.Meta.RequestID},
+	}
+	return pluginapi.Allow(), nil
+}
+```
+
+网关如何处理这些 Header：
+
+- 该请求的每一次提供商尝试都会携带它们，包括故障转移到另一个提供商，以及该请求发起的 token 计数和压缩调用：
+  它们到达同一个网关后面的同一个上游。前提是这些调用经由网关的 HTTP 客户端发出；Bedrock 直接调用 AWS SDK，不携带它们。
+- 网关为自身工作发起的推理不会携带。guardrail 的 LLM 判定通过插件 `Host` 在请求上下文中调用提供商，
+  该调用会丢弃这些 Header：它们描述的是客户端的提供商，而不是网关为 guardrail 选择的模型。
+- 以下名称会被拒绝，而不是被合并：携带凭据的 Header（`Authorization`、`Proxy-Authorization`、`x-api-key`、`api-key`、
+  `x-goog-api-key`、`x-anthropic-api-key`、`xi-api-key`、`x-auth-token`、`x-access-token`、`x-gomodel-key`、`Cookie`、`Set-Cookie`）、
+  决定连接的 Header（`Host`、`Content-Length`、`Transfer-Encoding`、`Connection`、`Keep-Alive`、`Proxy-Connection`、
+  `Proxy-Authenticate`、`Te`、`Trailer`、`Upgrade`、`Expect`）、描述网关已编码请求体的 Header（`Content-Type`、`Content-Encoding`）、
+  协商响应压缩的 `Accept-Encoding`，以及选择提供商特性、且必须保留订阅凭据所需的 `oauth-2025-04-20` 标志的 `anthropic-beta`。
+- 其他任何名称都会以插件的值发到线上，替换请求携带的 Header 以及提供商自己设置的 Header。
+  只有上面列出的名称受保护；提供商其余 Header 不受保护。
+- host 在该阶段结束时把 Hook 的 Header 合并进请求状态，因此在提供商调用执行之后写入的值——来自 response 阶段的 Hook——不再影响它。
+  请把从上下文取回的 map 视为只读。
+
+**从记录这些 Header 但不发送的版本升级。** 在此类版本上已经设置过 `Headers.Upstream` 的插件，
+其值被保存后被丢弃。升级之后，它们首次到达提供商或提供商之前的代理：在推广升级之前，请确认上游能够接受它们。
 
 ## 配置
 

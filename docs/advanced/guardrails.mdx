@@ -454,18 +454,21 @@ remove lines are a bare `Name`. Blank lines and `#` comments are ignored.
 | `response_set` | Replace a header on the response sent to the client. |
 | `response_add` | Append a value to a client response header, keeping existing values. Applied once per request even when the instance runs in both phases. |
 | `response_remove` | Drop a header from the client response, including headers GoModel adds itself (for example `X-Request-Id`). |
-| `upstream_set` | Static headers merged into every provider call of the request: failover attempts, token counting and compaction included. Credential headers, the ones that frame the connection or describe the body, and `anthropic-beta` are refused; see [Upstream headers](/advanced/plugins#upstream-headers). |
+| `upstream_set` | Static headers merged into every provider call of the request that goes through the gateway's HTTP client: failover attempts, token counting and compaction included, Bedrock excluded. Credential headers, the ones that frame the connection or describe the body, `Accept-Encoding`, and `anthropic-beta` are refused; see [Upstream headers](/advanced/plugins#upstream-headers). |
 
 Credential headers (`Authorization`, `X-Api-Key`, `Cookie`, ...) can never be
 edited, and names containing `secret` or `token` cannot be set.
 
-`upstream_set` additionally refuses the names that frame the connection
-(`Host`, `Content-Length`, `Transfer-Encoding`, `Connection`, `Te`, `Trailer`,
-`Upgrade`, `Expect`), the ones that describe the body the gateway encoded
-(`Content-Type`, `Accept-Encoding`), and `anthropic-beta`, which selects
-provider features and has to keep the `oauth-2025-04-20` flag subscription
-credentials need. The rest of the provider's own headers are not protected: a
-plugin value replaces them.
+`upstream_set` additionally refuses three groups of names. The ones that frame
+the connection: `Host`, `Content-Length`, `Transfer-Encoding`, `Connection`,
+`Keep-Alive`, `Proxy-Connection`, `Proxy-Authenticate`, `Te`, `Trailer`,
+`Upgrade`, `Expect`. The ones that describe the body the gateway encoded:
+`Content-Type`, `Content-Encoding`. And `Accept-Encoding`, which negotiates
+response compression — setting it turns off the transport's automatic gzip
+decompression, so the gateway would parse compressed bytes. `anthropic-beta` is
+refused on its own: it selects provider features and has to keep the
+`oauth-2025-04-20` flag subscription credentials need. The rest of the
+provider's own headers are not protected: a plugin value replaces them.
 
 #### Example
 
