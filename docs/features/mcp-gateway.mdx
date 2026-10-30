@@ -20,8 +20,9 @@ the same way it already sits between your apps and model providers:
 - **Least-privilege discovery.** A server can be scoped to `user_paths` and
   carved out with `disallowed_user_paths`; hidden callers do not merely get errors — the tools never
   appear in their `tools/list` at all. Operator-level `allowed_tools` /
-  `disallowed_tools` filters trim noisy servers, which keeps agent context
-  small.
+  `disallowed_tools` filters trim noisy servers, and a per-key
+  [MCP allowlist](#limit-what-each-api-key-can-use) gives each client only
+  the servers and tools it needs, which keeps agent context small.
 - **Observability.** Every tool call becomes a usage entry (server, tool,
   duration, sizes, error flag, labels, user path) and MCP requests appear in
   the audit log and request log like any other model traffic — labelled with
@@ -391,6 +392,37 @@ Hidden servers are left out of `tools/list`, and `/mcp/{slug}` returns 404 for
 them. Like tool filters, visibility edits apply without reconnecting to the
 server and are checked on every call, so they also reach MCP sessions that are
 already open.
+
+## Limit what each API key can use
+
+Give a managed API key an MCP allowlist to serve each client only the servers
+and tools it needs. Set it in the dashboard (**API Keys** page, **MCP access**
+when creating a key, or the wrench icon on a key's row) or with `allowed_mcp`
+on the [admin API](/advanced/admin-endpoints):
+
+```bash
+curl -X POST https://your-gateway/admin/auth-keys \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "coding-agent", "allowed_mcp": ["github/*", "exa/web_search_exa"]}'
+```
+
+| Selector | Grants |
+| --- | --- |
+| `github/*` (or `github`) | Every tool, prompt, and resource of `github` |
+| `exa/web_search_exa` | Only that tool; the server's prompts and resources stay hidden |
+
+- **Empty means no key-level restriction** (default), so existing keys keep
+  every server their user path may see.
+- **It only narrows.** User-path scopes, tool filters, virtual servers, and
+  `X-MCP-Servers` still apply. Tool names are the upstream originals, as in
+  `allowed_tools`.
+- Tools outside the allowlist are left out of `tools/list` and search
+  results, calls to them fail, and `/mcp/{slug}` returns 404 for servers the
+  key has no grant on.
+- An edit ends the key's open MCP sessions on their next request. Clients
+  reconnect and get the updated tool list.
+- The master key is never restricted.
 
 ## Inspect a server's catalog
 

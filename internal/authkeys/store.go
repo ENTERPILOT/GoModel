@@ -50,6 +50,7 @@ type Store interface {
 	UpdateImported(ctx context.Context, key AuthKey) error
 	UpdateLabels(ctx context.Context, id string, labels []string, now time.Time) error
 	UpdateAllowedModels(ctx context.Context, id string, allowedModels []string, now time.Time) error
+	UpdateAllowedMCP(ctx context.Context, id string, allowedMCP []string, now time.Time) error
 	UpdateDashboardAccess(ctx context.Context, id string, allowed bool, now time.Time) error
 	UpdatePassthroughAccess(ctx context.Context, id string, allowed bool, now time.Time) error
 	Deactivate(ctx context.Context, id string, now time.Time) error
@@ -79,6 +80,7 @@ func normalizeCreateInput(input CreateInput) (CreateInput, error) {
 	input.UserPath = userPath
 	input.Labels = core.MergeLabels(input.Labels)
 	input.AllowedModels = NormalizeAllowedModels(input.AllowedModels)
+	input.AllowedMCP = NormalizeAllowedModels(input.AllowedMCP)
 	if input.ExpiresAt != nil {
 		expiresAt := input.ExpiresAt.UTC()
 		now := time.Now().UTC()

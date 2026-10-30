@@ -12,6 +12,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/mcpgateway"
 	"github.com/enterpilot/gomodel/internal/users"
 	"github.com/enterpilot/gomodel/internal/validation"
 )
@@ -22,6 +23,7 @@ type createAuthKeyRequest struct {
 	UserPath          string     `json:"user_path,omitempty"`
 	Labels            []string   `json:"labels,omitempty"`
 	AllowedModels     []string   `json:"allowed_models,omitempty"`
+	AllowedMCP        []string   `json:"allowed_mcp,omitempty"`
 	DashboardAccess   bool       `json:"dashboard_access,omitempty"`
 	PassthroughAccess bool       `json:"passthrough_access,omitempty"`
 	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
@@ -125,6 +127,10 @@ func (h *Handler) CreateAuthKey(c *echo.Context) error {
 	if err := requirePassthroughGrantScope(c, req.PassthroughAccess); err != nil {
 		return handleError(c, err)
 	}
+	allowedMCP, err := normalizeAllowedMCP(c, req.AllowedMCP)
+	if err != nil {
+		return handleError(c, err)
+	}
 
 	issued, err := h.authKeys.Create(c.Request().Context(), authkeys.CreateInput{
 		Name:              req.Name,
@@ -132,6 +138,7 @@ func (h *Handler) CreateAuthKey(c *echo.Context) error {
 		UserPath:          userPath,
 		Labels:            req.Labels,
 		AllowedModels:     allowedModels,
+		AllowedMCP:        allowedMCP,
 		DashboardAccess:   req.DashboardAccess,
 		PassthroughAccess: req.PassthroughAccess,
 		ExpiresAt:         req.ExpiresAt,
@@ -181,10 +188,15 @@ func (h *Handler) ImportAuthKey(c *echo.Context) error {
 	}
 	// A disabled import only deactivates an existing key, which any key may
 	// do, itself included. Any other import creates or rewrites a key: it
-	// must stay within the caller's models, and since importing a token again
-	// updates the key stored under its hash, that key must not be the caller.
+	// must stay within the caller's models and MCP access, and since
+	// importing a token again updates the key stored under its hash, that key
+	// must not be the caller.
+	var allowedMCP []string
 	if req.Enabled == nil || *req.Enabled {
 		if err := requireAllowedModelsWithinCaller(c, allowedModels); err != nil {
+			return handleError(c, err)
+		}
+		if allowedMCP, err = normalizeAllowedMCP(c, req.AllowedMCP); err != nil {
 			return handleError(c, err)
 		}
 		if id, ok := h.authKeys.IDBySecretHash(req.SecretHash); ok {
@@ -200,6 +212,7 @@ func (h *Handler) ImportAuthKey(c *echo.Context) error {
 		UserPath:          req.UserPath,
 		Labels:            req.Labels,
 		AllowedModels:     allowedModels,
+		AllowedMCP:        allowedMCP,
 		DashboardAccess:   req.DashboardAccess,
 		PassthroughAccess: req.PassthroughAccess,
 		ExpiresAt:         req.ExpiresAt,
@@ -294,6 +307,58 @@ func (h *Handler) normalizeAllowedModels(raw []string) ([]string, error) {
 		return nil, core.NewInvalidRequestError(err.Error(), err)
 	}
 	return allowed, nil
+}
+
+type updateAuthKeyAllowedMCPRequest struct {
+	// Pointer so an omitted or null value is rejected instead of being
+	// treated as an implicit clear of a restricted key.
+	AllowedMCP *[]string `json:"allowed_mcp"`
+}
+
+// UpdateAuthKeyAllowedMCP handles PUT /admin/auth-keys/:id/allowed-mcp. The
+// request selectors ("server/*" or "server/tool") replace the key's MCP
+// allowlist; an explicit empty list lifts the restriction.
+func (h *Handler) UpdateAuthKeyAllowedMCP(c *echo.Context) error {
+	var req updateAuthKeyAllowedMCPRequest
+	return h.updateAuthKey(c, &req, func(ctx context.Context, id string) (*authkeys.View, error) {
+		if req.AllowedMCP == nil {
+			return nil, validation.NewError("allowed_mcp is required", nil)
+		}
+		allowedMCP, err := normalizeAllowedMCP(c, *req.AllowedMCP)
+		if err != nil {
+			return nil, err
+		}
+		return h.authKeys.UpdateAllowedMCP(ctx, id, allowedMCP)
+	})
+}
+
+// normalizeAllowedMCP canonicalizes MCP selectors and keeps a credential
+// that is itself limited to an MCP allowlist from granting more: every
+// selector must be covered by the caller's own, and an empty list (every
+// server) needs an unrestricted caller.
+func normalizeAllowedMCP(c *echo.Context, raw []string) ([]string, error) {
+	allowedMCP, err := mcpgateway.NormalizeAccessSelectors(raw)
+	if err != nil {
+		return nil, core.NewInvalidRequestError("allowed_mcp: "+err.Error(), err)
+	}
+	callerMCP := core.GetCredentialAllowedMCP(c.Request().Context())
+	if len(callerMCP) == 0 {
+		return allowedMCP, nil
+	}
+	if len(allowedMCP) == 0 {
+		return nil, allowedMCPOutOfScopeError()
+	}
+	for _, selector := range allowedMCP {
+		if !mcpgateway.AccessCovers(callerMCP, selector) {
+			return nil, allowedMCPOutOfScopeError()
+		}
+	}
+	return allowedMCP, nil
+}
+
+func allowedMCPOutOfScopeError() error {
+	return core.NewPermissionError("allowed_mcp must not permit MCP servers or tools outside the credential's own allowed_mcp").
+		WithCode(codeAllowedMCPOutOfScope)
 }
 
 type updateAuthKeyDashboardAccessRequest struct {

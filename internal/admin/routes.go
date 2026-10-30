@@ -100,6 +100,7 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.POST("/auth-keys/import", h.ImportAuthKey, global)
 	g.PUT("/auth-keys/:id/labels", h.UpdateAuthKeyLabels)
 	g.PUT("/auth-keys/:id/allowed-models", h.UpdateAuthKeyAllowedModels)
+	g.PUT("/auth-keys/:id/allowed-mcp", h.UpdateAuthKeyAllowedMCP)
 	g.PUT("/auth-keys/:id/dashboard-access", h.UpdateAuthKeyDashboardAccess)
 	g.PUT("/auth-keys/:id/passthrough-access", h.UpdateAuthKeyPassthroughAccess)
 	g.POST("/auth-keys/:id/deactivate", h.DeactivateAuthKey)

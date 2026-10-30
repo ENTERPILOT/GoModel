@@ -102,6 +102,10 @@ func newTestService(t *testing.T, usageLogger usage.LoggerInterface, specs ...Se
 	})
 }
 
+// testAllowedMCPHeader stands in for a managed key's MCP allowlist, which the
+// auth middleware puts in the request context: comma-separated selectors.
+const testAllowedMCPHeader = "X-Test-Allowed-MCP"
+
 // newTestServiceWithOptions is newTestService for callers that also need
 // stores or virtual servers; the config servers come from opts.
 func newTestServiceWithOptions(t *testing.T, opts Options) (*Service, string) {
@@ -117,6 +121,9 @@ func newTestServiceWithOptions(t *testing.T, opts Options) (*Service, string) {
 		}
 		if userPath := r.Header.Get(core.UserPathHeader); userPath != "" {
 			r = r.WithContext(core.WithEffectiveUserPath(r.Context(), userPath))
+		}
+		if allowed := r.Header.Get(testAllowedMCPHeader); allowed != "" {
+			r = r.WithContext(core.WithCredentialAllowedMCP(r.Context(), strings.Split(allowed, ",")))
 		}
 		pinned := ""
 		if rest, ok := strings.CutPrefix(r.URL.Path, "/mcp/"); ok {
@@ -552,13 +559,13 @@ func TestAuthorizeSessionFailsClosedWithoutBinding(t *testing.T) {
 
 	// A binding removed mid-call (DELETE or expiry) must not be read as a
 	// caller without a user path, which the denylist alone would admit.
-	err := service.authorizeSessionID("deleted-session", "alpha")
+	err := service.authorizeSessionID("deleted-session", "alpha", "")
 	require.ErrorIs(t, err, ErrServerNotVisible)
 
-	service.bindSession("live", "", "/staff", "", false, nil, nil)
-	require.NoError(t, service.authorizeSessionID("live", "alpha"))
-	service.bindSession("contractor", "", "/contractors/acme", "", false, nil, nil)
-	require.ErrorIs(t, service.authorizeSessionID("contractor", "alpha"), ErrServerNotVisible)
+	service.bindSession("live", requestScope{userPath: "/staff"}, nil, nil)
+	require.NoError(t, service.authorizeSessionID("live", "alpha", ""))
+	service.bindSession("contractor", requestScope{userPath: "/contractors/acme"}, nil, nil)
+	require.ErrorIs(t, service.authorizeSessionID("contractor", "alpha", ""), ErrServerNotVisible)
 }
 
 func TestSessionBindingRejectsForeignUserPath(t *testing.T) {

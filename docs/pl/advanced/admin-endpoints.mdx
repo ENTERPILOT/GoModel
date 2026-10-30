@@ -131,6 +131,15 @@ każdego innego opcjonalnego pola przy tworzeniu) lub później przez
 jawnie pusta lista znosi ograniczenie na poziomie klucza; pominięcie pola jest odrzucane). Listami dozwolonych
 modeli na poziomie grup i użytkowników zarządzasz przez [endpointy użytkowników](#endpointy-użytkowników).
 
+Ogranicz, do których serwerów i narzędzi MCP klucz ma dostęp przez
+[MCP gateway](/pl/features/mcp-gateway#ogranicz-dostęp-każdego-klucza-api), za pomocą
+opcjonalnego pola `allowed_mcp` w `POST /admin/auth-keys` lub później przez
+`PUT /admin/auth-keys/<key-id>/allowed-mcp`
+(`{"allowed_mcp": ["github/*", "exa/web_search_exa"]}`). `server/*` daje dostęp do
+całego serwera, a `server/tool` do jednego narzędzia; samo `server` jest zapisywane
+jako `server/*`. Jawnie pusta lista znosi ograniczenie; pominięcie pola jest
+odrzucane.
+
 Dostęp do dashboardu dotyczy wyłącznie `/admin/*`. Endpointy modeli i samoobsługowy endpoint [`GET /v1/usage`](/pl/advanced/usage-api) pozostają dostępne dla każdego zarządzanego klucza, z wyjątkiem tras passthrough do providerów (`/p/{provider}/...`): zarządzane klucze są tworzone bez dostępu do passthrough, a nadajesz go przez `"passthrough_access": true` w `POST /admin/auth-keys` lub `PUT /admin/auth-keys/<key-id>/passthrough-access` (zobacz [Kontrola dostępu do passthrough](/pl/features/passthrough-api#kontrola-dostępu)).
 
 ### Import kluczy z LiteLLM
@@ -153,7 +162,7 @@ curl -X POST http://localhost:8080/admin/auth-keys/import \
 ```
 
 Endpoint przyjmuje te same opcjonalne pola co `POST /admin/auth-keys` (`description`,
-`user_path`, `labels`, `allowed_models`, `dashboard_access`, `expires_at`) i
+`user_path`, `labels`, `allowed_models`, `allowed_mcp`, `dashboard_access`, `expires_at`) i
 odpowiada `201` z kluczem, który potem pokazuje `"imported_from": "litellm"`.
 `redacted_value` to `key_name` z LiteLLM, np. `sk-...k6Hd`, a domyślnie
 `sk-...`. Wpis w `allowed_models` wskazujący model wirtualny jest zastępowany
@@ -162,7 +171,7 @@ a [listy dozwolonych modeli](/pl/features/users#selektory) dopasowują rozwiąza
 rozwiązywana jednorazowo: późniejsza zmiana celu modelu wirtualnego nie zmienia klucza.
 Ponowny import wcześniej zaimportowanego tokenu aktualizuje ten klucz i
 odpowiada `200`: aktualizowane są nazwa, ścieżka, etykiety, dozwolone modele i data wygaśnięcia. Dostęp
-do dashboardu i dezaktywacja pozostają bez zmian. `"enabled": false` oznacza klucz
+do dashboardu, dostęp MCP i dezaktywacja pozostają bez zmian. `"enabled": false` oznacza klucz
 zablokowany w źródle: wcześniej zaimportowany klucz zostaje dezaktywowany i poza tym pozostaje bez zmian,
 a klucz nigdy nieimportowany nie jest tworzony (`204`). Hash należący do klucza wydanego przez GoModel daje odpowiedź `409`
 z kodem `auth_key_exists`.
@@ -211,6 +220,9 @@ Dla administratora zakresowego:
   dozwolonymi modelami może nadawać kluczom, które tworzy lub edytuje, tylko modele,
   które sam ma dozwolone: `openai/*` może nadać `openai/gpt-4o-mini`, ale nie
   `anthropic/*` ani klucza bez ograniczeń (`403 allowed_models_out_of_scope`).
+  Ta sama reguła dotyczy `allowed_mcp`: `github/*` może nadać
+  `github/create_issue`, ale nie `jira/*` ani klucza bez ograniczeń
+  (`403 allowed_mcp_out_of_scope`).
   Te reguły dotyczą również kluczy globalnych, które także nie mogą zaimportować klucza z
   szerszym zestawem modeli ani ponownie zaimportować własnego tokenu, chyba że z
   `"enabled": false`, aby go dezaktywować.
