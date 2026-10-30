@@ -34,6 +34,10 @@ type usageDialect struct {
 	timeExpr string
 	timeArg  func(time.Time) any
 
+	// promptCacheRawData selects the raw_data fields the dashboard folds read
+	// (promptCacheRawKeys); see postgresPromptCacheRawDataSQL.
+	promptCacheRawData string
+
 	// like is the case-insensitive match operator. SQLite's LIKE already
 	// ignores case for ASCII; PostgreSQL's does not, and needs ILIKE.
 	like string
@@ -60,15 +64,18 @@ func usageDialectFor(dialect sqlx.Dialect) usageDialect {
 			idType:            "UUID",
 			maxBindParameters: postgresMaxBindParameters,
 			indexes: []string{
-				"CREATE INDEX IF NOT EXISTS idx_usage_raw_data_gin ON usage USING GIN (raw_data)",
+				// No query filters on raw_data contents, so its GIN index only
+				// slowed inserts; the drop retires it on databases that created it.
+				"DROP INDEX IF EXISTS idx_usage_raw_data_gin",
 			},
-			timeExpr:    "timestamp",
-			timeArg:     func(t time.Time) any { return t.UTC() },
-			like:        "ILIKE",
-			hasLabels:   "jsonb_typeof(labels) = 'array'",
-			labelMatch:  "jsonb_exists(labels, ?)",
-			labelSource: "jsonb_array_elements_text(labels) AS label",
-			labelValue:  "label",
+			timeExpr:           "timestamp",
+			timeArg:            func(t time.Time) any { return t.UTC() },
+			promptCacheRawData: postgresPromptCacheRawDataSQL(),
+			like:               "ILIKE",
+			hasLabels:          "jsonb_typeof(labels) = 'array'",
+			labelMatch:         "jsonb_exists(labels, ?)",
+			labelSource:        "jsonb_array_elements_text(labels) AS label",
+			labelValue:         "label",
 			labelLeftJoin: "LEFT JOIN LATERAL jsonb_array_elements_text(" +
 				"CASE WHEN jsonb_typeof(labels) = 'array' THEN labels ELSE '[]'::jsonb END) AS label ON TRUE",
 			lockRows: " FOR UPDATE",
@@ -82,14 +89,16 @@ func usageDialectFor(dialect sqlx.Dialect) usageDialect {
 			"CREATE INDEX IF NOT EXISTS idx_usage_timestamp_epoch ON usage(" + sqliteTimestampEpochExpr + ")",
 			"CREATE INDEX IF NOT EXISTS idx_usage_auth_key_id ON usage(auth_key_id)",
 		},
-		timeExpr:      sqliteTimestampEpochExpr,
-		timeArg:       func(t time.Time) any { return t.UTC().Unix() },
-		like:          "LIKE",
-		hasLabels:     "labels IS NOT NULL",
-		labelMatch:    "(labels IS NOT NULL AND EXISTS (SELECT 1 FROM json_each(usage.labels) WHERE json_each.value = ?))",
-		labelSource:   "json_each(usage.labels) AS labels_each",
-		labelValue:    "labels_each.value",
-		labelLeftJoin: "LEFT JOIN json_each(usage.labels) AS labels_each",
+		timeExpr: sqliteTimestampEpochExpr,
+		timeArg:  func(t time.Time) any { return t.UTC().Unix() },
+		// SQLite reads raw_data in-process; see postgresPromptCacheRawDataSQL.
+		promptCacheRawData: "raw_data",
+		like:               "LIKE",
+		hasLabels:          "labels IS NOT NULL",
+		labelMatch:         "(labels IS NOT NULL AND EXISTS (SELECT 1 FROM json_each(usage.labels) WHERE json_each.value = ?))",
+		labelSource:        "json_each(usage.labels) AS labels_each",
+		labelValue:         "labels_each.value",
+		labelLeftJoin:      "LEFT JOIN json_each(usage.labels) AS labels_each",
 	}
 }
 
