@@ -97,6 +97,12 @@ func NewMongoDBStore(database *mongo.Database, retentionDays int) (*MongoDBStore
 		{
 			Keys: bson.D{{Key: "cache_type", Value: 1}, {Key: "timestamp", Value: 1}},
 		},
+		// Serves RecentWrites. Sparse, so history written before the write
+		// stamp existed stays out of it.
+		{
+			Keys:    bson.D{{Key: "written_at", Value: 1}},
+			Options: options.Index().SetSparse(true),
+		},
 	}
 
 	// Add timestamp index - use TTL index if retention is configured,

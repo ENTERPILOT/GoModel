@@ -1328,3 +1328,117 @@ test("live guardrail outcomes survive the merge into the audit row", () => {
   assert.equal(flushed.data.guardrails[0].instance, "policy");
   assert.equal(flushed.data.guardrails[0].code, "content_policy");
 });
+
+// --- Other replicas' traffic ---------------------------------------------------
+// A request served by another replica reaches this stream only once that
+// replica persisted it, seconds late, as audit.flushed / usage.flushed.
+
+test("a late live audit entry is placed by its timestamp, not on top", () => {
+  const app = createLiveLogsApp();
+  app.auditLog.entries = [
+    { id: "newest", timestamp: "2026-10-30T12:00:09Z" },
+    { id: "older", timestamp: "2026-10-30T12:00:01Z" },
+  ];
+  app.auditLog.total = 2;
+
+  app.applyLiveLogEvent({
+    seq: 7,
+    type: "audit.flushed",
+    data: { id: "remote", request_id: "req-remote", timestamp: "2026-10-30T12:00:05Z" },
+  });
+
+  assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["newest", "remote", "older"]);
+  assert.equal(app.auditLog.total, 3);
+  assert.equal(app.auditLog.entries[1]._audit_flushed, true);
+
+  // A later event for an entry already listed merges in place.
+  app.applyLiveLogEvent({
+    seq: 8,
+    type: "audit.flushed",
+    data: { id: "remote", request_id: "req-remote", timestamp: "2026-10-30T12:00:05Z", status_code: 200 },
+  });
+  assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["newest", "remote", "older"]);
+  assert.equal(app.auditLog.total, 3);
+  assert.equal(app.auditLog.entries[1].status_code, 200);
+});
+
+test("a late live audit entry older than the whole page only counts", () => {
+  const app = createLiveLogsApp();
+  app.auditLog.limit = 2;
+  app.auditLog.entries = [
+    { id: "a", timestamp: "2026-10-30T12:00:09Z" },
+    { id: "b", timestamp: "2026-10-30T12:00:08Z" },
+  ];
+  app.auditLog.total = 2;
+
+  app.mergeLiveAuditEntry({ id: "remote", timestamp: "2026-10-30T12:00:01Z" }, "audit.flushed");
+
+  assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["a", "b"]);
+  assert.equal(app.auditLog.total, 3);
+});
+
+test("a late live usage entry is placed by its timestamp", () => {
+  const app = createLiveLogsApp({ page: "usage" });
+  app.usageLog.entries = [
+    { id: "u-new", request_id: "req-new", timestamp: "2026-10-30T12:00:09Z" },
+    { id: "u-old", request_id: "req-old", timestamp: "2026-10-30T12:00:01Z" },
+  ];
+  app.usageLog.total = 2;
+
+  app.applyLiveLogEvent({
+    seq: 3,
+    type: "usage.flushed",
+    data: { id: "u-remote", request_id: "req-remote", timestamp: "2026-10-30T12:00:05Z" },
+  });
+
+  assert.deepEqual(app.usageLog.entries.map((entry) => entry.id), ["u-new", "u-remote", "u-old"]);
+  assert.equal(app.usageLog.total, 3);
+  assert.equal(app.usageLog.entries[1]._usage_flushed, true);
+});
+
+test("grouped mode adds a late request older than its thread head as a child", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+  app.auditLog.entries = [
+    { id: "other", session_id: "s-b", session_count: 1, timestamp: "2026-10-30T12:00:09Z" },
+    { id: "head-a", session_id: "s-a", session_count: 2, timestamp: "2026-10-30T12:00:07Z" },
+  ];
+  app.auditLog.total = 2;
+  app.auditThreadChildren = {
+    "s-a": {
+      loading: false,
+      entries: [{ id: "old-child", timestamp: "2026-10-30T12:00:01Z" }],
+      total: 1,
+    },
+  };
+
+  app.mergeLiveAuditEntry(
+    { id: "remote", session_id: "s-a", timestamp: "2026-10-30T12:00:05Z" },
+    "audit.flushed",
+  );
+
+  // The head and the thread's position are kept; only the count moves.
+  assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["other", "head-a"]);
+  assert.equal(app.auditLog.entries[1].session_count, 3);
+  assert.equal(app.auditLog.total, 2);
+  const children = app.auditThreadChildren["s-a"];
+  assert.deepEqual(children.entries.map((entry) => entry.id), ["remote", "old-child"]);
+  assert.equal(children.total, 2);
+});
+
+test("grouped mode places a late new thread head by its timestamp", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+  app.auditLog.entries = [
+    { id: "other", session_id: "s-b", session_count: 1, timestamp: "2026-10-30T12:00:09Z" },
+    { id: "head-a", session_id: "s-a", session_count: 1, timestamp: "2026-10-30T12:00:03Z" },
+  ];
+  app.auditLog.total = 2;
+
+  app.mergeLiveAuditEntry(
+    { id: "remote", session_id: "s-a", timestamp: "2026-10-30T12:00:05Z" },
+    "audit.flushed",
+  );
+
+  assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["other", "remote"]);
+  assert.equal(app.auditLog.entries[1].session_count, 2);
+  assert.deepEqual(app.auditThreadChildren["s-a"].entries.map((entry) => entry.id), ["head-a"]);
+});

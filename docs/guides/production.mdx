@@ -408,7 +408,7 @@ coordinate across instances.
 | [Rate limits](/features/rate-limits) | In-memory, per instance | Effective limit is about `N x` the configured limit. Counters survive a restart, and a reset clears every replica. |
 | Circuit breakers | In-memory, per process | Each replica learns an outage separately, so upstream sees up to `N x failure_threshold` failures before any breaker opens. |
 | [Session affinity](/features/session-keeping) pins | In-memory, per instance | Sessions stick per replica, not globally, unless the load balancer is sticky. |
-| Live log buffer | In-memory, per instance | A connected dashboard sees only that replica's live traffic, roughly `1/N` of it. History still comes from the database. |
+| [Live logs](/advanced/admin-endpoints#admin-dashboard) | Local events in memory, other replicas' from the database | A dashboard sees its own replica's requests instantly and every other replica's within about 7 seconds, once they are persisted. See [live logs across replicas](#live-logs-across-replicas). |
 | MCP downstream sessions | In-memory, per instance | An `Mcp-Session-Id` from one replica returns 404 on another. [MCP](/features/mcp-gateway) clients need sticky sessions. |
 | Provider request health | In-memory, per instance | Dashboard provider status reflects the replica that answered. |
 
@@ -416,6 +416,33 @@ The one that surprises people is rate limits: they are an in-process control, so
 three replicas with a 100 rpm rule admit up to 300 rpm in aggregate. Size rules
 per replica, and use [budgets](/features/budgets) as the durable cross-instance
 control since they read from the shared database.
+
+### Live logs across replicas
+
+A dashboard streams live logs from the replica it is connected to. That
+replica shows its own requests the moment they start, with in-flight and
+streaming previews. While at least one dashboard is connected, it also reads
+the audit and usage rows the other replicas persisted, every 2 seconds, and
+streams them into the same view. It adds no database writes: each replica
+stamps the batches it already writes with its own id, and with no dashboard
+open no replica reads anything.
+
+Requests served by another replica:
+
+- appear only once that replica has flushed them, so after up to
+  `LOGGING_FLUSH_INTERVAL` / `USAGE_FLUSH_INTERVAL` (default 5 seconds) plus
+  the 2-second poll, about 7 seconds at most;
+- appear as completed entries, with status, duration, model, provider, usage
+  and cost, but no in-flight or per-chunk streaming preview; bodies load from
+  the database when you expand the entry;
+- appear only if they were persisted, so a replica with audit logging or usage
+  tracking off contributes nothing to that view;
+- are slotted into the list by request time, below anything newer.
+
+Under heavy traffic, at most 200 audit and 200 usage entries from other
+replicas are streamed per poll, the newest first. The rest are still in the
+list after a refresh. Replica clocks should agree within a few seconds, which
+NTP gives you.
 
 ### Config changes reach every replica within seconds
 
