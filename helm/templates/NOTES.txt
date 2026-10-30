@@ -11,7 +11,7 @@ Reach the gateway:
 {{- end }}
 {{- else }}
   kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "gomodel.fullname" . }} 8080:{{ .Values.service.port }}
-  curl http://127.0.0.1:8080{{ include "gomodel.pathWithBasePath" (dict "root" . "path" "/health/ready") }}
+  curl {{ if eq (include "gomodel.scheme" .) "https" }}--insecure {{ end }}{{ include "gomodel.scheme" . }}://127.0.0.1:8080{{ include "gomodel.pathWithBasePath" (dict "root" . "path" "/health/ready") }}
 {{- end }}
 
 Dashboard: {{ include "gomodel.pathWithBasePath" (dict "root" . "path" "/admin/dashboard") }}

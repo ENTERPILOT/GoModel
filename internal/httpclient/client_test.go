@@ -95,8 +95,7 @@ func TestNewHTTPClient(t *testing.T) {
 
 			require.NotNil(t, client.Transport, "Expected transport to be non-nil")
 
-			transport, ok := client.Transport.(*http.Transport)
-			require.True(t, ok)
+			transport := underlyingTransport(t, client)
 
 			expectedConfig := tt.config
 			if expectedConfig == nil {
@@ -128,8 +127,7 @@ func TestNewDefaultHTTPClient(t *testing.T) {
 
 	require.NotNil(t, client.Transport, "Expected transport to be non-nil")
 
-	transport, ok := client.Transport.(*http.Transport)
-	require.True(t, ok)
+	transport := underlyingTransport(t, client)
 
 	defaultConfig := DefaultConfig()
 
@@ -148,8 +146,8 @@ func TestHTTPClientIsReusable(t *testing.T) {
 	assert.NotSame(t, client2, client1)
 
 	// But they should have the same configuration
-	transport1 := client1.Transport.(*http.Transport)
-	transport2 := client2.Transport.(*http.Transport)
+	transport1 := underlyingTransport(t, client1)
+	transport2 := underlyingTransport(t, client2)
 
 	assert.Equal(t, transport2.MaxIdleConns, transport1.MaxIdleConns)
 	assert.Equal(t, client2.Timeout, client1.Timeout)
@@ -169,7 +167,7 @@ func TestClientConfigZeroValues(t *testing.T) {
 	}
 
 	client := NewHTTPClient(config)
-	transport := client.Transport.(*http.Transport)
+	transport := underlyingTransport(t, client)
 
 	// Zero values should be preserved (not replaced with defaults)
 	assert.Equal(t, 0, transport.MaxIdleConns)
@@ -278,6 +276,14 @@ func TestNewHTTPClientDoesNotFollowCrossOriginRedirects(t *testing.T) {
 			}
 		})
 	}
+}
+
+// underlyingTransport unwraps the *http.Transport a client currently uses.
+func underlyingTransport(t *testing.T, client *http.Client) *http.Transport {
+	t.Helper()
+	transport, ok := CurrentTransport(client)
+	require.True(t, ok, "Transport is %T, want *dynamicTransport", client.Transport)
+	return transport
 }
 
 func TestStopCrossOriginRedirects(t *testing.T) {

@@ -447,6 +447,9 @@ class VirtualModelsStore {
         description: String(alias.description || "").trim(),
         enabled: alias.enabled !== false,
         ...(alias.slowdown != null ? { slowdown: Number(alias.slowdown) } : {}),
+        ...(alias.reasoning_effort
+          ? { reasoning_effort: alias.reasoning_effort }
+          : {}),
       },
       operation: "virtual model redirect",
       failureMessage: m.models_redirect_remove_failed(),

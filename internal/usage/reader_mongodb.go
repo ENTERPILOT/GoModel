@@ -62,6 +62,8 @@ type mongoSessionUsageRow struct {
 	HasInputCost     int     `bson:"has_input_cost"`
 	HasOutputCost    int     `bson:"has_output_cost"`
 	HasTotalCost     int     `bson:"has_total_cost"`
+	BilledCost       float64 `bson:"billed_cost"`
+	HasBilledCost    int     `bson:"has_billed_cost"`
 	ProviderRequests int     `bson:"provider_requests"`
 }
 
@@ -466,12 +468,40 @@ func mongoCanonicalUserPathAddFieldsStage() bson.D {
 	}}}
 }
 
-// mongoCanonicalUserPathMatchStage narrows to the subtree of userPath,
-// mongoCanonicalUserPathMatchStage builds a MongoDB match stage for a user-path subtree on the canonical user-path field.
-func mongoCanonicalUserPathMatchStage(userPath string) bson.D {
-	return bson.D{{Key: "$match", Value: bson.D{{Key: mongoCanonicalUserPathField, Value: bson.D{
-		{Key: "$regex", Value: usageUserPathSubtreeRegex(userPath)},
-	}}}}}
+// mongoCanonicalUserPathMatchStage narrows to the user-path filters of
+// params, matched on the canonical user-path field. It returns nil when no
+// user-path filter is set.
+func mongoCanonicalUserPathMatchStage(params UsageQueryParams) (bson.D, error) {
+	condition, err := mongoUserPathCondition(params)
+	if err != nil || len(condition) == 0 {
+		return nil, err
+	}
+	return bson.D{{Key: "$match", Value: bson.D{{Key: mongoCanonicalUserPathField, Value: condition}}}}, nil
+}
+
+// mongoUserPathCondition builds the field condition for the user-path scope
+// ($regex) and the any-of subtree list ($in of regexes), or nil when neither
+// is set.
+func mongoUserPathCondition(params UsageQueryParams) (bson.D, error) {
+	scope, paths, err := usageUserPathFilters(params)
+	if err != nil {
+		return nil, err
+	}
+	condition := bson.D{}
+	if scope != "" {
+		condition = append(condition, bson.E{Key: "$regex", Value: usageUserPathSubtreeRegex(scope)})
+	}
+	if len(paths) > 0 {
+		patterns := make(bson.A, 0, len(paths))
+		for _, path := range paths {
+			patterns = append(patterns, bson.Regex{Pattern: usageUserPathSubtreeRegex(path)})
+		}
+		condition = append(condition, bson.E{Key: "$in", Value: patterns})
+	}
+	if len(condition) == 0 {
+		return nil, nil
+	}
+	return condition, nil
 }
 
 // mongoUsageCacheStatsPipeline builds the fold's aggregation pipeline. The
@@ -487,7 +517,7 @@ func mongoUsageCacheStatsPipeline(params UsageQueryParams, canonicalUserPath boo
 	params.CacheMode = CacheModeAll
 	matchParams := params
 	if canonicalUserPath {
-		matchParams.UserPath = ""
+		matchParams = withoutUserPathFilters(params)
 	}
 	matchFilters, err := mongoUsageMatchFilters(matchParams)
 	if err != nil {
@@ -498,15 +528,12 @@ func mongoUsageCacheStatsPipeline(params UsageQueryParams, canonicalUserPath boo
 		pipeline = append(pipeline, bson.D{{Key: "$match", Value: matchFilters}})
 	}
 	if canonicalUserPath {
-		userPath, err := normalizeUsageUserPathFilter(params.UserPath)
+		matchStage, err := mongoCanonicalUserPathMatchStage(params)
 		if err != nil {
 			return nil, err
 		}
-		if userPath != "" {
-			pipeline = append(pipeline,
-				mongoCanonicalUserPathAddFieldsStage(),
-				mongoCanonicalUserPathMatchStage(userPath),
-			)
+		if matchStage != nil {
+			pipeline = append(pipeline, mongoCanonicalUserPathAddFieldsStage(), matchStage)
 		}
 	}
 	pipeline = append(pipeline, bson.D{{Key: "$project", Value: bson.D{
@@ -529,9 +556,7 @@ func mongoUsageCacheStatsPipeline(params UsageQueryParams, canonicalUserPath boo
 // GetUsageByUserPath returns token and cost totals grouped by tracked user path.
 func (r *MongoDBReader) GetUsageByUserPath(ctx context.Context, params UsageQueryParams) ([]UserPathUsage, error) {
 	pipeline := bson.A{}
-	matchParams := params
-	matchParams.UserPath = ""
-	matchFilters, err := mongoUsageMatchFilters(matchParams)
+	matchFilters, err := mongoUsageMatchFilters(withoutUserPathFilters(params))
 	if err != nil {
 		return nil, err
 	}
@@ -541,12 +566,12 @@ func (r *MongoDBReader) GetUsageByUserPath(ctx context.Context, params UsageQuer
 
 	pipeline = append(pipeline, mongoCanonicalUserPathAddFieldsStage())
 
-	userPath, err := normalizeUsageUserPathFilter(params.UserPath)
+	matchStage, err := mongoCanonicalUserPathMatchStage(params)
 	if err != nil {
 		return nil, err
 	}
-	if userPath != "" {
-		pipeline = append(pipeline, mongoCanonicalUserPathMatchStage(userPath))
+	if matchStage != nil {
+		pipeline = append(pipeline, matchStage)
 	}
 
 	pipeline = append(pipeline, bson.D{{Key: "$group", Value: bson.D{
@@ -745,6 +770,8 @@ func (r *MongoDBReader) GetUsageByEndpoint(ctx context.Context, params UsageQuer
 			{Key: "has_input_cost", Value: mongoCostPresenceCount("$input_cost")},
 			{Key: "has_output_cost", Value: mongoCostPresenceCount("$output_cost")},
 			{Key: "has_total_cost", Value: mongoCostPresenceCount("$total_cost")},
+			{Key: "billed_cost", Value: mongoCostSum("$billed_cost")},
+			{Key: "has_billed_cost", Value: mongoCostPresenceCount("$billed_cost")},
 		}}},
 		bson.D{{Key: "$sort", Value: bson.D{{Key: "_id", Value: 1}}}},
 	)
@@ -765,6 +792,7 @@ func (r *MongoDBReader) GetUsageByEndpoint(ctx context.Context, params UsageQuer
 			InputCost:    costPtr(row.HasInputCost, row.InputCost),
 			OutputCost:   costPtr(row.HasOutputCost, row.OutputCost),
 			TotalCost:    costPtr(row.HasTotalCost, row.TotalCost),
+			BilledCost:   costPtr(row.HasBilledCost, row.BilledCost),
 		}
 	})
 	if err != nil {
@@ -809,6 +837,7 @@ func (r *MongoDBReader) GetUsageBySession(ctx context.Context, params SessionUsa
 			InputCost:    sessionCostPtr(row.ProviderRequests, row.HasInputCost, row.InputCost),
 			OutputCost:   sessionCostPtr(row.ProviderRequests, row.HasOutputCost, row.OutputCost),
 			TotalCost:    sessionCostPtr(row.ProviderRequests, row.HasTotalCost, row.TotalCost),
+			BilledCost:   costPtr(row.HasBilledCost, row.BilledCost),
 		})
 	}
 	if err := cursor.Err(); err != nil {
@@ -874,6 +903,8 @@ func mongoSessionUsagePipelines(params SessionUsageParams) (bson.A, bson.A, int,
 			{Key: "has_input_cost", Value: mongoProviderCostPresenceCount("$input_cost")},
 			{Key: "has_output_cost", Value: mongoProviderCostPresenceCount("$output_cost")},
 			{Key: "has_total_cost", Value: mongoProviderCostPresenceCount("$total_cost")},
+			{Key: "billed_cost", Value: mongoCostSum("$billed_cost")},
+			{Key: "has_billed_cost", Value: mongoCostPresenceCount("$billed_cost")},
 			{Key: "latest", Value: bson.D{{Key: "$max", Value: "$timestamp"}}},
 		}}},
 	)
@@ -1075,6 +1106,8 @@ func (r *MongoDBReader) GetDailyUsage(ctx context.Context, params UsageQueryPara
 			{Key: "has_input_cost", Value: mongoCostPresenceCount("$input_cost")},
 			{Key: "has_output_cost", Value: mongoCostPresenceCount("$output_cost")},
 			{Key: "has_total_cost", Value: mongoCostPresenceCount("$total_cost")},
+			{Key: "billed_cost", Value: mongoCostSum("$billed_cost")},
+			{Key: "has_billed_cost", Value: mongoCostPresenceCount("$billed_cost")},
 		}}},
 		bson.D{{Key: "$sort", Value: bson.D{{Key: "_id", Value: 1}}}},
 	)
@@ -1095,6 +1128,7 @@ func (r *MongoDBReader) GetDailyUsage(ctx context.Context, params UsageQueryPara
 			InputCost:    costPtr(row.HasInputCost, row.InputCost),
 			OutputCost:   costPtr(row.HasOutputCost, row.OutputCost),
 			TotalCost:    costPtr(row.HasTotalCost, row.TotalCost),
+			BilledCost:   costPtr(row.HasBilledCost, row.BilledCost),
 		}
 	})
 	if err != nil {
@@ -1148,7 +1182,52 @@ func (r *MongoDBReader) GetDailyUsage(ctx context.Context, params UsageQueryPara
 	}
 	applyDailyInputSplit(result, splits)
 
+	if mode := billedCacheHitsMode(params.CacheMode); mode != "" {
+		hits, err := r.periodBilledCost(ctx, params, dateFormat, mode)
+		if err != nil {
+			return nil, err
+		}
+		result = addPeriodBilledCost(result, hits)
+	}
 	return result, nil
+}
+
+// periodBilledCost sums billed_cost per period over the documents params
+// matches in cacheMode, keyed like GetDailyUsage.
+func (r *MongoDBReader) periodBilledCost(ctx context.Context, params UsageQueryParams, dateFormat, cacheMode string) (map[string]*float64, error) {
+	params.CacheMode = cacheMode
+	matchFilters, err := mongoUsageMatchFilters(params)
+	if err != nil {
+		return nil, err
+	}
+	pipeline := bson.A{}
+	if len(matchFilters) > 0 {
+		pipeline = append(pipeline, bson.D{{Key: "$match", Value: matchFilters}})
+	}
+	pipeline = append(pipeline, bson.D{{Key: "$group", Value: bson.D{
+		{Key: "_id", Value: bson.D{{Key: "$dateToString", Value: bson.D{
+			{Key: "format", Value: dateFormat},
+			{Key: "date", Value: "$timestamp"},
+			{Key: "timezone", Value: usageTimeZone(params)},
+		}}}},
+		{Key: "billed_cost", Value: mongoCostSum("$billed_cost")},
+		{Key: "has_billed_cost", Value: mongoCostPresenceCount("$billed_cost")},
+	}}})
+
+	cursor, err := r.collection.Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, fmt.Errorf("failed to aggregate daily billed cost: %w", err)
+	}
+	defer cursor.Close(ctx)
+	rows, err := decodeGroupedUsageRows(ctx, cursor, "daily billed cost", func(row mongoGroupedUsageRow) mongoGroupedUsageRow { return row })
+	if err != nil {
+		return nil, err
+	}
+	billed := make(map[string]*float64, len(rows))
+	for _, row := range rows {
+		billed[row.Key] = costPtr(row.HasBilledCost, row.BilledCost)
+	}
+	return billed, nil
 }
 
 // GetCacheOverview returns cached-only aggregates for the admin dashboard.
@@ -1331,20 +1410,20 @@ func mongoUsageMatchFilters(params UsageQueryParams) (bson.D, error) {
 	if tsFilter := mongoDateRangeFilter(params); tsFilter != nil {
 		matchFilters = append(matchFilters, bson.E{Key: "timestamp", Value: tsFilter})
 	}
-	userPath, err := normalizeUsageUserPathFilter(params.UserPath)
+	userPathCondition, err := mongoUserPathCondition(params)
 	if err != nil {
 		return nil, err
 	}
-	if userPath != "" {
-		matchFilters = append(matchFilters, bson.E{
-			Key: "user_path",
-			Value: bson.D{
-				{Key: "$regex", Value: usageUserPathSubtreeRegex(userPath)},
-			},
-		})
+	if len(userPathCondition) > 0 {
+		matchFilters = append(matchFilters, bson.E{Key: "user_path", Value: userPathCondition})
 	}
 	if params.Model != "" {
 		matchFilters = append(matchFilters, bson.E{Key: "model", Value: params.Model})
+	}
+	if len(params.Models) > 0 {
+		// A field holds one condition document, so the single-value filter
+		// and the any-of list must not both claim the key.
+		matchFilters = mongoAndFilters(matchFilters, bson.D{{Key: "model", Value: bson.D{{Key: "$in", Value: params.Models}}}})
 	}
 	if params.SessionID != "" {
 		matchFilters = append(matchFilters, bson.E{Key: "session_id", Value: params.SessionID})
@@ -1352,10 +1431,18 @@ func mongoUsageMatchFilters(params UsageQueryParams) (bson.D, error) {
 	if params.AuthKeyID != "" {
 		matchFilters = append(matchFilters, bson.E{Key: "auth_key_id", Value: params.AuthKeyID})
 	}
+	if len(params.AuthKeyIDs) > 0 {
+		matchFilters = mongoAndFilters(matchFilters, bson.D{{Key: "auth_key_id", Value: bson.D{{Key: "$in", Value: params.AuthKeyIDs}}}})
+	}
 	if params.Label != "" {
 		// Matching a scalar against an array field matches documents whose
 		// labels array contains the value.
 		matchFilters = append(matchFilters, bson.E{Key: "labels", Value: params.Label})
+	}
+	if len(params.Labels) > 0 {
+		// $in against an array field matches documents whose labels array
+		// contains any of the values.
+		matchFilters = mongoAndFilters(matchFilters, bson.D{{Key: "labels", Value: bson.D{{Key: "$in", Value: params.Labels}}}})
 	}
 	if len(params.Endpoints) > 0 {
 		matchFilters = append(matchFilters, bson.E{Key: "endpoint", Value: bson.D{{Key: "$in", Value: params.Endpoints}}})
@@ -1367,6 +1454,12 @@ func mongoUsageMatchFilters(params UsageQueryParams) (bson.D, error) {
 		matchFilters = mongoAndFilters(matchFilters, bson.D{{Key: "$or", Value: bson.A{
 			bson.D{{Key: "provider", Value: params.Provider}},
 			bson.D{{Key: "provider_name", Value: params.Provider}},
+		}}})
+	}
+	if len(params.Providers) > 0 {
+		matchFilters = mongoAndFilters(matchFilters, bson.D{{Key: "$or", Value: bson.A{
+			bson.D{{Key: "provider", Value: bson.D{{Key: "$in", Value: params.Providers}}}},
+			bson.D{{Key: "provider_name", Value: bson.D{{Key: "$in", Value: params.Providers}}}},
 		}}})
 	}
 	if filter := mongoCacheModeFilter(params.CacheMode); len(filter) > 0 {

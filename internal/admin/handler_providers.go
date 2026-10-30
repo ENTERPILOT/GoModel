@@ -193,12 +193,12 @@ func applyRequestHealth(status, label, reason, lastError string, rh *health.Prov
 	case "open":
 		if status != "unhealthy" {
 			status, label = "unhealthy", "Circuit Open"
-			reason = "circuit breaker is open; recent requests to this provider failed and traffic is paused"
+			reason = "circuit breaker is open; traffic is paused"
 		}
 	case "half-open":
 		if status == "healthy" {
 			status, label = "degraded", "Recovering"
-			reason = "circuit breaker is half-open; probing whether the provider has recovered"
+			reason = "circuit breaker is half-open; probing recovery"
 		}
 	}
 	if len(flagged) > 0 && status == "healthy" {

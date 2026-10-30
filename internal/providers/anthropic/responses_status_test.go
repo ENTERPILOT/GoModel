@@ -85,7 +85,7 @@ event: message_stop
 data: {"type":"message_stop"}
 
 `
-	converter := newResponsesStreamConverter(io.NopCloser(strings.NewReader(stream)), "claude-haiku-4-5")
+	converter := newResponsesStreamConverter(io.NopCloser(strings.NewReader(stream)), "claude-haiku-4-5", "anthropic")
 	raw, err := io.ReadAll(converter)
 	require.NoError(t, err)
 

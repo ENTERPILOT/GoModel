@@ -9,6 +9,7 @@ import { scopedSubjectAllowed } from "$lib/stores/accessScope.js";
 import { router } from "$lib/stores/router.svelte.js";
 import { confirmDialog } from "$lib/stores/confirm.svelte.js";
 import {
+  budgetCostBasis,
   budgetDeleteBody,
   budgetInputUserPath,
   budgetScope,
@@ -60,6 +61,10 @@ class BudgetsStore {
 
   quotaTemplatesEnabled() {
     return runtimeConfig.quotaTemplatesVisible();
+  }
+
+  billedBudgetsEnabled() {
+    return runtimeConfig.billedBudgetsVisible();
   }
 
   filteredBudgets() {
@@ -128,6 +133,7 @@ class BudgetsStore {
         period_seconds: periodSeconds,
         amount: String(item.amount || ""),
         per_child: Boolean(item.per_child),
+        cost_basis: budgetCostBasis(item),
         source: String(item.source || "manual"),
       };
     } else {

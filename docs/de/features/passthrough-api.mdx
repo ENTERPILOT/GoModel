@@ -198,7 +198,11 @@ befindet.
   haben. Gewähren Sie `passthrough_access` nur Keys, denen Sie das gesamte
   Provider-Konto anvertrauen.
 - Provider-native Fehler-Bodys und Statuscodes werden weitergereicht, statt in
-  OpenAI-kompatible Responses umgewandelt zu werden.
+  OpenAI-kompatible Responses umgewandelt zu werden, sodass Provider-SDKs ihre
+  eigenen typisierten Fehler auslösen. Fehler, die GoModel selbst erzeugt
+  (Authentifizierung, Rate-Limits, Budgets, ein nicht aktivierter Provider, ein
+  nicht erreichbarer Upstream), verwenden die Fehlerform des Gateways, ebenso
+  ein Upstream-Fehler-Body, der kein JSON oder größer als 1 MiB ist.
 - Features, die von OpenAI-kompatiblen Request- oder Response-Formen abhängen,
   gelten für Passthrough-Traffic möglicherweise nicht in gleicher Weise wie für
   `/v1`-Traffic.

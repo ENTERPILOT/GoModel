@@ -5,7 +5,7 @@ icon: "code"
 keywords: ["Kimi Code", "Moonshot", "quota", "limit", "provider setup", "konfiguracja providera"]
 ---
 
-Kimi Code to asystent programisty kompatybilny z OpenAI, udostępniany pod `https://api.kimi.com/coding/v1`.
+Kimi Code to asystent programisty kompatybilny z OpenAI, udostępniany pod `https://api.kimi.ai/coding/v1`.
 GoModel kieruje requesty czatu, listowania modeli, embeddingów i passthrough przez wspólny
 adapter OpenAI. Endpoint `/v1/responses` jest przekazywany natywnie do upstreamowego Responses
 API, zamiast być tłumaczonym przez chat completions, a pliki i batche nie są
@@ -31,7 +31,7 @@ Albo w `config.yaml`:
 providers:
   kimicode:
     type: kimicode
-    base_url: "https://api.kimi.com/coding/v1"
+    base_url: "https://api.kimi.ai/coding/v1"
     api_key: "${KIMICODE_API_KEY}"
 ```
 
@@ -44,8 +44,15 @@ providers:
 Możesz też nadpisać bazowy URL i listę modeli za pomocą:
 
 ```bash
-KIMICODE_BASE_URL=https://api.kimi.com/coding/v1
+KIMICODE_BASE_URL=https://api.kimi.ai/coding/v1
 KIMICODE_MODELS=kimi-for-coding,bge_m3_embed
+```
+
+Domyślny bazowy URL to endpoint międzynarodowy. Konta z Chin kontynentalnych korzystają
+zamiast niego z endpointu chińskiego:
+
+```bash
+KIMICODE_BASE_URL=https://api.kimi.com/coding/v1
 ```
 
 ## Modele
@@ -79,7 +86,7 @@ ograniczenia przy skokach ruchu i wybieraj zachowawcze nadpisania retry per prov
 providers:
   kimicode:
     type: kimicode
-    base_url: "https://api.kimi.com/coding/v1"
+    base_url: "https://api.kimi.ai/coding/v1"
     api_key: "${KIMICODE_API_KEY}"
     retries: 3
 ```

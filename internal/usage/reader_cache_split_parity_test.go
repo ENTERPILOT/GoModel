@@ -2,7 +2,6 @@ package usage
 
 import (
 	"context"
-	"database/sql"
 	"maps"
 	"strings"
 	"testing"
@@ -12,9 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/mongo"
-	_ "modernc.org/sqlite"
 
 	"github.com/enterpilot/gomodel/internal/storage/mongotest"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 )
 
@@ -112,26 +111,10 @@ func assertCacheSplitParity(t *testing.T, store UsageStore, reader UsageReader) 
 }
 
 func TestReaderCacheSplitParity(t *testing.T) {
-	t.Run("sqlite", func(t *testing.T) {
-		db, err := sql.Open("sqlite", ":memory:")
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		store, err := NewSQLStore(context.Background(), db, 0)
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = db.Close() })
-		db.SetMaxOpenConns(1)
-		store, err := NewSQLiteStore(db, 0)
-		require.NoError(t, err)
-		reader, err := NewSQLiteReader(db)
-		require.NoError(t, err)
-		assertCacheSplitParity(t, store, reader)
-	})
-
-	t.Run("postgresql", func(t *testing.T) {
-		pool := sqlxtest.NewPostgresPool(t)
-		if pool == nil {
-			return
-		}
-		store, err := NewPostgreSQLStore(pool, 0)
-		require.NoError(t, err)
-		reader, err := NewPostgreSQLReader(pool)
+		reader, err := NewSQLReader(db)
 		require.NoError(t, err)
 		assertCacheSplitParity(t, store, reader)
 	})
