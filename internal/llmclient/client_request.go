@@ -310,23 +310,33 @@ func (c *Client) buildRequest(ctx context.Context, req Request) (*http.Request, 
 	return httpReq, nil
 }
 
-// pluginTransportHeaders control the transport or the framing of the body
-// rather than the provider call, so a plugin must not set them: the HTTP client
-// frames the connection, and the gateway and the provider decide how the body is
-// encoded and compressed. Credential headers are refused separately, by the
-// shared list in core, so the host, the request state and this merge cannot
-// drift apart.
+// pluginTransportHeaders control the transport, the framing of the body, or the
+// compression of the response rather than the provider call, so a plugin must
+// not set them: the HTTP client owns the connection and the gateway owns the
+// body it built and the encoding it negotiates. Credential headers are refused
+// separately, by the shared list in core, so the host, the request state and
+// this merge cannot drift apart.
 var pluginTransportHeaders = map[string]struct{}{
-	"Host":              {},
-	"Content-Length":    {},
-	"Transfer-Encoding": {},
-	"Connection":        {},
-	"Te":                {},
-	"Trailer":           {},
-	"Upgrade":           {},
-	"Expect":            {},
-	"Accept-Encoding":   {},
-	"Content-Type":      {},
+	// Connection framing. The hop-by-hop set of RFC 9110, minus
+	// Proxy-Authorization, which the credential list already refuses.
+	"Host":               {},
+	"Content-Length":     {},
+	"Transfer-Encoding":  {},
+	"Connection":         {},
+	"Keep-Alive":         {},
+	"Proxy-Connection":   {},
+	"Proxy-Authenticate": {},
+	"Te":                 {},
+	"Trailer":            {},
+	"Upgrade":            {},
+	"Expect":             {},
+	// The body itself: the gateway sends the JSON it encoded, uncompressed.
+	"Content-Type":     {},
+	"Content-Encoding": {},
+	// Response compression. The transport decompresses gzip automatically only
+	// while the request carries no Accept-Encoding of its own, so a plugin value
+	// hands the gateway compressed bytes it cannot parse.
+	"Accept-Encoding": {},
 }
 
 // pluginReservedProviderHeaders lists headers a provider negotiates with its

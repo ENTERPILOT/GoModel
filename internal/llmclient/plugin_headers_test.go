@@ -79,22 +79,27 @@ func TestBuildRequestPluginOriginDropsPluginUpstreamHeaders(t *testing.T) {
 	}
 }
 
-// TestBuildRequestDeniesPluginHeaders pins one case per denied header: transport
-// and body-framing headers, provider-negotiated headers, and the credential list.
-// The length checks tie the table to the two lists that live in this package, so
-// a header added to one of them without a case here fails.
+// TestBuildRequestDeniesPluginHeaders pins one case per denied header: the ones
+// that frame the connection, the ones that describe the body and its encoding,
+// the one that negotiates response compression, the provider-negotiated one, and
+// the credential list. The length checks tie the table to the two lists that live
+// in this package, so a header added to one of them without a case here fails.
 func TestBuildRequestDeniesPluginHeaders(t *testing.T) {
 	transport := []string{
 		"Host",
 		"Content-Length",
 		"Transfer-Encoding",
 		"Connection",
+		"Keep-Alive",
+		"Proxy-Connection",
+		"Proxy-Authenticate",
 		"Te",
 		"Trailer",
 		"Upgrade",
 		"Expect",
-		"Accept-Encoding",
 		"Content-Type",
+		"Content-Encoding",
+		"Accept-Encoding",
 	}
 	reserved := []string{
 		"Anthropic-Beta",
