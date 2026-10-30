@@ -42,9 +42,13 @@ type upsertVirtualModelRequest struct {
 	Slowdown *float64 `json:"slowdown,omitempty"`
 	// ContextWindow and MaxOutputTokens set the token limits /v1/models lists
 	// for a redirect. Omitted means the smallest value any target reports.
-	ContextWindow   *int  `json:"context_window,omitempty"`
-	MaxOutputTokens *int  `json:"max_output_tokens,omitempty"`
-	Enabled         *bool `json:"enabled,omitempty"`
+	ContextWindow   *int `json:"context_window,omitempty"`
+	MaxOutputTokens *int `json:"max_output_tokens,omitempty"`
+	// ReasoningEffort forces the reasoning effort sent upstream ("none",
+	// "minimal", "low", "medium", "high", "xhigh", or "max"); empty keeps the
+	// client's value.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	Enabled         *bool  `json:"enabled,omitempty"`
 }
 
 // virtualModelTargetRequest is one load-balancing destination. Model may be a
@@ -186,6 +190,7 @@ func (h *Handler) buildVirtualModelUpsert(source string, req upsertVirtualModelR
 		Slowdown:        req.Slowdown,
 		ContextWindow:   req.ContextWindow,
 		MaxOutputTokens: req.MaxOutputTokens,
+		ReasoningEffort: req.ReasoningEffort,
 		Enabled:         h.virtualModels.ResolveUpsertEnabled(source, req.OldSource, req.Enabled),
 	}
 

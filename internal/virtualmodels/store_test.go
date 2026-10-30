@@ -20,6 +20,7 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 			Targets:         []Target{{Provider: "openai", Model: "gpt-4o"}},
 			Description:     "primary",
 			Slowdown:        new(0.4),
+			ReasoningEffort: "medium",
 			SessionAffinity: new(false),
 			Failover:        new(false),
 			ContextWindow:   new(128000),
@@ -59,6 +60,7 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 		require.Equal(t, "openai", gotRedirect.Targets[0].Provider)
 		require.NotNil(t, gotRedirect.Slowdown)
 		require.Equal(t, 0.4, *gotRedirect.Slowdown)
+		assert.Equal(t, "medium", gotRedirect.ReasoningEffort)
 
 		require.NotNil(t, gotRedirect.SessionAffinity)
 		require.False(t, *gotRedirect.SessionAffinity, "Get(fast).SessionAffinity: want explicit false")
@@ -78,6 +80,7 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 		require.Nil(t, gotPolicy.Failover)
 		assert.Nil(t, gotPolicy.ContextWindow)
 		assert.Nil(t, gotPolicy.MaxOutputTokens)
+		assert.Empty(t, gotPolicy.ReasoningEffort)
 
 		gotDisabled, err := store.Get(ctx, "no-slowdown")
 		require.NoError(t, err)

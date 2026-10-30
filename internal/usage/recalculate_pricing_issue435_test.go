@@ -26,7 +26,7 @@ func TestSQLiteStoreRecalculatePricing_CorrectsStaleCachedCosts(t *testing.T) {
 	db.SetMaxOpenConns(1)
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	ts := time.Date(2026, 6, 16, 10, 0, 0, 0, time.UTC)

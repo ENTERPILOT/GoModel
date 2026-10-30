@@ -1281,3 +1281,36 @@ test("redirect views and toggle payloads round-trip plugin strategy fields", () 
   assert.equal(plain.strategy_plugin, "");
   assert.deepEqual(plain.strategy_config, {});
 });
+
+test("reasoning effort override round-trips through views and payloads", () => {
+  const { aliases, policies } = splitVirtualModelViews([
+    { source: "smart", kind: "redirect", targets: [{ model: "openai/gpt-4o" }], enabled: true, reasoning_effort: "medium" },
+    { source: "openai/gpt-4o", kind: "policy", enabled: true, reasoning_effort: "low" },
+  ]);
+  assert.equal(aliases[0].reasoning_effort, "medium");
+  assert.equal(policies[0].reasoning_effort, "low");
+
+  assert.equal(buildAliasTogglePayload(aliases[0]).reasoning_effort, "medium");
+
+  const { method, payload } = buildModelTogglePayload(
+    "openai/gpt-4o",
+    { selector: "openai/gpt-4o", user_paths: [], enabled: true, reasoning_effort: "low" },
+    { selector: "openai/gpt-4o", default_enabled: true, effective_enabled: false },
+  );
+  assert.equal(method, "PUT");
+  assert.equal(payload.reasoning_effort, "low");
+
+  const forced = buildVirtualModelSavePayload(
+    { source: "smart", target_model: "openai/gpt-4o", targets: [], reasoning_effort: "high", enabled: true },
+    "",
+    "create",
+  );
+  assert.equal(forced.payload.reasoning_effort, "high");
+
+  const inherited = buildVirtualModelSavePayload(
+    { source: "smart", target_model: "openai/gpt-4o", targets: [], reasoning_effort: "", enabled: true },
+    "",
+    "create",
+  );
+  assert.equal(Object.prototype.hasOwnProperty.call(inherited.payload, "reasoning_effort"), false);
+});

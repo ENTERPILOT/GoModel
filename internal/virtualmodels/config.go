@@ -38,6 +38,7 @@ func configModel(entry config.VirtualModelConfig) VirtualModel {
 		Slowdown:        entry.Slowdown,
 		ContextWindow:   entry.ContextWindow,
 		MaxOutputTokens: entry.MaxOutputTokens,
+		ReasoningEffort: entry.ReasoningEffort,
 		Enabled:         enabled,
 		Managed:         true,
 	}

@@ -17,7 +17,7 @@ func TestSQLiteUsageLabelsRoundTrip(t *testing.T) {
 
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -48,7 +48,8 @@ func TestSQLiteUsageLabelsRoundTrip(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	reader := &SQLiteReader{db: db}
+	reader, err := newSQLiteReader(db)
+	require.NoError(t, err)
 	result, err := reader.GetUsageLog(ctx, UsageLogParams{})
 	require.NoError(t, err)
 	require.Len(t, result.Entries, 2)
@@ -63,7 +64,7 @@ func TestSQLiteUsageLabelsRoundTrip(t *testing.T) {
 
 // newLabelledSQLiteReader seeds an in-memory usage table with a mix of
 // labelled and unlabelled entries shared by the by-label and label-filter tests.
-func newLabelledSQLiteReader(t *testing.T) *SQLiteReader {
+func newLabelledSQLiteReader(t *testing.T) *SQLReader {
 	t.Helper()
 
 	db, err := sql.Open("sqlite", ":memory:")
@@ -71,7 +72,7 @@ func newLabelledSQLiteReader(t *testing.T) *SQLiteReader {
 
 	t.Cleanup(func() { db.Close() })
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	cost := func(v float64) *float64 { return &v }
@@ -100,7 +101,9 @@ func newLabelledSQLiteReader(t *testing.T) *SQLiteReader {
 	})
 	require.NoError(t, err)
 
-	return &SQLiteReader{db: db}
+	reader, err := newSQLiteReader(db)
+	require.NoError(t, err)
+	return reader
 }
 
 func TestSQLiteGetUsageByLabel(t *testing.T) {

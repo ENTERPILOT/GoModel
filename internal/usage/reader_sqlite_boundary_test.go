@@ -17,7 +17,7 @@ func TestSQLiteReaderSummary_IncludesFractionalStartBoundaryAndExcludesFractiona
 
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -58,7 +58,7 @@ func TestSQLiteReaderSummary_IncludesFractionalStartBoundaryAndExcludesFractiona
 	})
 	require.NoError(t, err)
 
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	location, err := time.LoadLocation("Europe/Warsaw")
@@ -80,7 +80,7 @@ func TestSQLiteReaderGetDailyUsage_GroupsAcrossDSTTransitionInConfiguredTimeZone
 
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -110,7 +110,7 @@ func TestSQLiteReaderGetDailyUsage_GroupsAcrossDSTTransitionInConfiguredTimeZone
 	})
 	require.NoError(t, err)
 
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	location, err := time.LoadLocation("Europe/Warsaw")
@@ -134,7 +134,7 @@ func TestSQLiteReaderSummary_IncludesSpaceSeparatedBoundaryTimestamp(t *testing.
 	require.NoError(t, err)
 
 	defer db.Close()
-	_, err = NewSQLiteStore(db, 0)
+	_, err = newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -161,7 +161,7 @@ func TestSQLiteReaderSummary_IncludesSpaceSeparatedBoundaryTimestamp(t *testing.
 	)
 	require.NoError(t, err)
 
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	location, err := time.LoadLocation("Europe/Warsaw")
@@ -182,7 +182,7 @@ func TestSQLiteReaderSummary_ExcludesLegacyOffsetTimestampBeforeUTCBoundary(t *t
 	require.NoError(t, err)
 
 	defer db.Close()
-	_, err = NewSQLiteStore(db, 0)
+	_, err = newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -225,7 +225,7 @@ func TestSQLiteReaderSummary_ExcludesLegacyOffsetTimestampBeforeUTCBoundary(t *t
 	)
 	require.NoError(t, err)
 
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	location, err := time.LoadLocation("Europe/Warsaw")
@@ -246,7 +246,7 @@ func TestSQLiteReaderGroupingRange_UsesAbsoluteTimestampExtremaAcrossOffsets(t *
 	require.NoError(t, err)
 
 	defer db.Close()
-	_, err = NewSQLiteStore(db, 0)
+	_, err = newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -304,7 +304,7 @@ func TestSQLiteReaderGroupingRange_UsesAbsoluteTimestampExtremaAcrossOffsets(t *
 	)
 	require.NoError(t, err)
 
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	start, end, ok, err := reader.sqliteGroupingRange(ctx, UsageQueryParams{
@@ -324,7 +324,7 @@ func TestSQLiteReaderGetUsageLog_OrdersMixedTimestampFormatsByAbsoluteTime(t *te
 	require.NoError(t, err)
 
 	defer db.Close()
-	_, err = NewSQLiteStore(db, 0)
+	_, err = newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -382,7 +382,7 @@ func TestSQLiteReaderGetUsageLog_OrdersMixedTimestampFormatsByAbsoluteTime(t *te
 	)
 	require.NoError(t, err)
 
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	log, err := reader.GetUsageLog(ctx, UsageLogParams{
@@ -401,7 +401,7 @@ func TestSQLiteReaderGetUsageByModel_CollapsesBlankProviderNameIntoProviderGroup
 
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -433,7 +433,7 @@ func TestSQLiteReaderGetUsageByModel_CollapsesBlankProviderNameIntoProviderGroup
 	})
 	require.NoError(t, err)
 
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	got, err := reader.GetUsageByModel(ctx, UsageQueryParams{})
@@ -450,7 +450,7 @@ func TestSQLiteReaderGetUsageByUserPath_GroupsByTrackedPath(t *testing.T) {
 
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -510,7 +510,7 @@ func TestSQLiteReaderGetUsageByUserPath_GroupsByTrackedPath(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	got, err := reader.GetUsageByUserPath(ctx, UsageQueryParams{})
@@ -557,7 +557,7 @@ func TestSQLiteStoreCleanup_KeepsNewerLegacyOffsetRows(t *testing.T) {
 	defer db.Close()
 	db.SetMaxOpenConns(1)
 
-	store, err := NewSQLiteStore(db, 1)
+	store, err := newSQLiteStore(db, 1)
 	require.NoError(t, err)
 
 	defer store.Close()
@@ -633,7 +633,7 @@ func TestSQLiteReader_GetUsageLogFiltersByUserPathSubtree(t *testing.T) {
 
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	defer store.Close()
@@ -679,7 +679,7 @@ func TestSQLiteReader_GetUsageLogFiltersByUserPathSubtree(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	log, err := reader.GetUsageLog(ctx, UsageLogParams{
@@ -699,7 +699,7 @@ func TestSQLiteReaderUserPathSubtreeIsCaseSensitive(t *testing.T) {
 
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -718,7 +718,7 @@ func TestSQLiteReaderUserPathSubtreeIsCaseSensitive(t *testing.T) {
 	}
 	require.NoError(t, store.WriteBatch(ctx, entries))
 
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	log, err := reader.GetUsageLog(ctx, UsageLogParams{UserPath: "/acme", Limit: 10})

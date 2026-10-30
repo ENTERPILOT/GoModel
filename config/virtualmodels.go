@@ -67,6 +67,11 @@ type VirtualModelConfig struct {
 	// target reports. Not allowed on access policies.
 	ContextWindow   *int `yaml:"context_window,omitempty" json:"context_window,omitempty"`
 	MaxOutputTokens *int `yaml:"max_output_tokens,omitempty" json:"max_output_tokens,omitempty"`
+	// ReasoningEffort forces the reasoning effort sent upstream for requests
+	// through this redirect or to this model ("none", "minimal", "low",
+	// "medium", "high", "xhigh", or "max"), replacing the client's value.
+	// Empty leaves the client's value untouched.
+	ReasoningEffort string `yaml:"reasoning_effort,omitempty" json:"reasoning_effort,omitempty"`
 
 	// Enabled toggles the entry. It defaults to true when omitted.
 	Enabled *bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`

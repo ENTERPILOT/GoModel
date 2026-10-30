@@ -53,7 +53,16 @@
   "playground_meta_status": "HTTP {status}",
   "playground_meta_duration": "{seconds}s",
   "playground_meta_tokens": "Eingabe {input} / Ausgabe {output}",
-  "playground_meta_events": "{count} Stream-Events",
+  "playground_meta_events": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} Stream-Event",
+        "count_plural=*": "{count} Stream-Events"
+      }
+    }
+  ],
   "playground_mode_label": "Modus",
   "playground_mode_chat": "Chat",
   "playground_mode_image": "Bild",
@@ -98,7 +107,6 @@
   "usage_filter_provider": "Nach Anbieter filtern",
   "usage_filter_label": "Nach Label filtern",
   "usage_filter_user_path": "Nach Nutzerpfad filtern",
-  "usage_filter_user_path_placeholder": "Nutzerpfad /team/alpha",
   "usage_filter_session": "Nach Sitzungs-ID filtern",
   "usage_filter_session_placeholder": "Sitzungs-ID",
   "usage_clear_session_filter": "Sitzungsfilter {session} entfernen",
@@ -110,6 +118,36 @@
   "usage_filter_endpoint": "Nach Endpunkt filtern",
   "usage_all_endpoints": "Alle Endpunkte",
   "usage_search_endpoints": "Endpunkte suchen",
+  "usage_search_models": "Modelle suchen",
+  "usage_search_providers": "Anbieter suchen",
+  "usage_search_labels": "Labels suchen",
+  "usage_search_auth_keys": "API-Schlüssel suchen",
+  "usage_all_user_paths": "Alle Nutzerpfade",
+  "usage_search_user_paths": "Nutzerpfad suchen oder eingeben",
+  "usage_expand_path": "{path} aufklappen",
+  "usage_collapse_path": "{path} zuklappen",
+  "usage_user_path_subtree": "und darunter",
+  "usage_pivot_title": "Aufschlüsselung",
+  "usage_pivot_loading": "Aufschlüsselung wird geladen",
+  "usage_pivot_view": "Ansicht der Aufschlüsselung",
+  "usage_pivot_download_csv": "CSV herunterladen",
+  "usage_invoice_export": "Rechnung exportieren",
+  "usage_invoice_export_title": "Abgerechnete Nutzung pro Kunde für den gewählten Zeitraum und die Filter als CSV-Rechnung herunterladen",
+  "usage_invoice_export_failed": "Die Rechnung konnte nicht exportiert werden.",
+  "usage_pivot_rows": "Zeilen",
+  "usage_pivot_columns": "Spalten",
+  "usage_pivot_no_columns": "Keine",
+  "usage_pivot_metric": "Kennzahl",
+  "usage_pivot_interval": "Zeitraum",
+  "usage_pivot_depth": "Nutzerpfade gruppieren",
+  "usage_pivot_depth_full": "Vollständiger Pfad",
+  "usage_pivot_depth_levels": "Erste {count} Segmente",
+  "usage_pivot_period": "Zeitraum",
+  "usage_pivot_other": "Sonstige ({count})",
+  "usage_pivot_none": "(keine)",
+  "usage_pivot_empty": "In diesem Zeitraum passt keine Nutzung zu den Filtern.",
+  "usage_pivot_failed": "Die Aufschlüsselung konnte nicht geladen werden.",
+  "usage_pivot_label_note": "Eine Anfrage mit mehreren Labels zählt einmal pro Label, daher können Label-Summen die Gesamtsumme übersteigen.",
   "usage_cache_saved": "Durch Cache gespart",
   "usage_pro_saved": "Durch Pro gespart",
   "usage_loading_summary": "Nutzungszusammenfassung wird geladen",
@@ -262,6 +300,16 @@
   "audit_summary_sessions": "{start}–{end} von {total} Sitzungen werden angezeigt",
   "audit_summary_logs": "{start}–{end} von {total} Logs werden angezeigt",
   "audit_group_by_session": "Nach Sitzung gruppieren",
+  "audit_columns_menu": "Spalten",
+  "audit_columns_label": "Sichtbare Spalten",
+  "audit_column_status": "Status & Methode",
+  "audit_column_model": "Modell",
+  "audit_column_path": "Pfad",
+  "audit_column_labels": "Labels",
+  "audit_column_attempts": "Anbieterversuche",
+  "audit_column_time": "Zeit",
+  "audit_column_duration": "Dauer",
+  "audit_column_tokens_per_second": "Tokens/s",
   "audit_loading": "Audit-Logs werden geladen",
   "audit_search_placeholder": "Nach Anfrage-ID, Modell, Anbieter, Pfad, Nutzerpfad oder Fehler suchen…",
   "audit_search_label": "Nach Anfrage-ID, Modell, Anbieter, Pfad, Nutzerpfad oder Fehler suchen",
@@ -463,6 +511,7 @@
   "overview_none_healthy": "Keiner fehlerfrei",
   "overview_automatic": "Automatisch",
   "overview_last_error": "Letzter Fehler: {error}",
+  "overview_last_error_breaker_open": "{error} — Circuit Breaker offen",
   "overview_all_mcp_connected": "Alle MCP-Server verbunden",
   "overview_cache_share": "Anteil der Eingabe-Tokens im gewählten Zeitraum",
   "overview_no_usage": "Noch keine Nutzung im gewählten Zeitraum",
@@ -508,7 +557,16 @@
       }
     }
   ],
-  "overview_mcp_attention": "{count} Server brauchen Aufmerksamkeit",
+  "overview_mcp_attention": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} Server braucht Aufmerksamkeit",
+        "count_plural=*": "{count} Server brauchen Aufmerksamkeit"
+      }
+    }
+  ],
   "overview_mcp_connected": "{connected} von {total} Servern verbunden",
   "overview_calendar_cost_year": "${total} im letzten Jahr",
   "overview_calendar_tokens_year": "{total} Tokens im letzten Jahr",
@@ -622,6 +680,13 @@
   "budgets_per_child_before_subject": "Die Nutzung wird für jedes direkte Kind von ",
   "budgets_per_child_before_usage": " unabhängig erfasst. Frage ",
   "budgets_per_child_after_usage": " als Kind ab, um sein Budget einzusehen.",
+  "budgets_cost_basis": "Kostenbasis",
+  "budgets_cost_basis_provider": "Anbieterkosten",
+  "budgets_cost_basis_billed": "Abgerechnete Kosten",
+  "budgets_billed_badge": "abgerechnet",
+  "budgets_billed_title": "Begrenzt abgerechnete Kosten: Anbieterkosten plus Aufschlag, einschließlich abgerechneter Cache-Treffer",
+  "budgets_billed_on_provider_badge": "abgerechnet · auf Anbieterkosten",
+  "budgets_billed_on_provider_title": "Als abgerechnet gespeichert, aber auf Anbieterkosten durchgesetzt: Budgets auf abgerechneten Kosten brauchen eine GoModel-Pro-Lizenz mit der Billing-Berechtigung und PRICING_MARKUPS_ENABLED=true. Beim Bearbeiten bleibt es abgerechnet.",
   "models_title": "Modelle",
   "models_total_count": "{count} Modelle",
   "models_unavailable": "Die Funktion für virtuelle Modelle ist nicht verfügbar.",
@@ -700,6 +765,9 @@
   "models_max_output_tokens_field": "Max. Ausgabe-Tokens",
   "models_token_limit_from_targets": "Aus den Zielen",
   "models_token_limits_help": "Limits, die für dieses virtuelle Modell in /v1/models gelistet werden und nach denen Clients ihre Prompts bemessen. Leer lassen, um den kleinsten von den Zielen gemeldeten Wert zu verwenden. Ziele ohne gemeldeten Wert werden übersprungen, für sie ist also nicht garantiert, dass eine Anfrage passt.",
+  "models_reasoning_effort_field": "Reasoning-Effort überschreiben",
+  "models_reasoning_effort_client": "Wert des Clients",
+  "models_reasoning_effort_help": "Jede Anfrage, die über dieses virtuelle Modell oder an dieses Modell weitergeleitet wird, erhält diesen Reasoning-Effort, unabhängig davon, was der Client angefragt hat. Die Einstellung eines Modells hat Vorrang vor der eines virtuellen Modells, ein inneres virtuelles Modell vor einem äußeren.",
   "models_status_summary": "Standardmäßig aktiviert: {default} · Derzeit effektiv: {effective}",
   "models_yes": "ja",
   "models_no": "nein",
@@ -735,7 +803,16 @@
   "api_keys_show_inactive": "Inaktive anzeigen",
   "api_keys_path_filter_clear": "Nutzerpfad-Filter entfernen",
   "api_keys_no_match": "Keine API-Schlüssel entsprechen dem aktuellen Filter.",
-  "api_keys_hidden": "{count} inaktive Schlüssel sind ausgeblendet.",
+  "api_keys_hidden": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} inaktiver Schlüssel ist ausgeblendet.",
+        "count_plural=*": "{count} inaktive Schlüssel sind ausgeblendet."
+      }
+    }
+  ],
   "api_keys_empty": "Noch keine API-Schlüssel. Lege einen Schlüssel an, um loszulegen.",
   "api_keys_editor": "API-Schlüssel-Editor",
   "api_keys_done": "Erledigt, ich habe ihn gespeichert",
@@ -908,7 +985,16 @@
   "workflows_filter_label": "Workflows filtern",
   "workflows_empty": "Keine aktiven Workflows gefunden.",
   "workflows_no_match": "Keine Workflows entsprechen deinem Filter.",
-  "workflows_active_scopes": "{count} aktive Geltungsbereiche",
+  "workflows_active_scopes": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} aktiver Geltungsbereich",
+        "count_plural=*": "{count} aktive Geltungsbereiche"
+      }
+    }
+  ],
   "workflows_copy_id": "Workflow-ID kopieren",
   "workflows_id_copied": "Workflow-ID kopiert",
   "workflows_copy_id_failed": "Workflow-ID konnte nicht kopiert werden",
@@ -1133,6 +1219,40 @@
   "sidebar_resize_help": "Ziehen zum Anpassen der Größe; klicken zum Einklappen oder Ausklappen",
   "sidebar_scoped_to": "Eingeschränkt auf {path}",
   "sidebar_scoped_to_help": "Dieser API-Schlüssel verwaltet nur den Nutzerpfad {path} und seine Nachfahren.",
+  "sidebar_license_badge_title": "{badge}-Lizenz aktiv",
+  "sidebar_license_days_short": "{count} T",
+  "sidebar_license_days_over_short": "-{count} T",
+  "sidebar_license_trial_left": [
+    {
+      "declarations": ["input count", "input date", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "Testversion endet am {date} - noch {count} Tag",
+        "count_plural=*": "Testversion endet am {date} - noch {count} Tage"
+      }
+    }
+  ],
+  "sidebar_license_expires_in": [
+    {
+      "declarations": ["input count", "input date", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "Lizenz läuft am {date} ab - noch {count} Tag",
+        "count_plural=*": "Lizenz läuft am {date} ab - noch {count} Tage"
+      }
+    }
+  ],
+  "sidebar_license_grace": [
+    {
+      "declarations": ["input count", "input date", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "Lizenz am {date} abgelaufen. Kulanzfrist: noch {count} Tag, dann werden die Pro-Funktionen deaktiviert",
+        "count_plural=*": "Lizenz am {date} abgelaufen. Kulanzfrist: noch {count} Tage, dann werden die Pro-Funktionen deaktiviert"
+      }
+    }
+  ],
+  "sidebar_license_expired": "Lizenz am {date} abgelaufen",
   "access_scope_path_outside": "Der Nutzerpfad muss {root} oder einer seiner Nachfahren sein.",
   "theme_label": "Design",
   "theme_light": "Helles Design",
@@ -1236,7 +1356,16 @@
   "api_keys_effective_models_help": "Was eine Anfrage mit diesem Schlüssel tatsächlich aufrufen kann: die Richtlinien seines Nutzerpfads, seine eigenen erlaubten Modelle und modellseitige Richtlinien, kombiniert.",
   "api_keys_effective_all": "Alle Modelle",
   "api_keys_effective_none": "Keine",
-  "api_keys_effective_count": "{count} Modelle",
+  "api_keys_effective_count": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} Modell",
+        "count_plural=*": "{count} Modelle"
+      }
+    }
+  ],
   "api_keys_allowed_models_all": "Alle",
   "api_keys_edit_allowed_models": "Erlaubte Modelle bearbeiten",
   "api_keys_allowed_models_editor": "Editor für erlaubte Modelle",
@@ -1267,7 +1396,16 @@
   "users_column_effective": "Effektive Modelle",
   "users_effective_all": "Alle Modelle",
   "users_effective_none": "Keine",
-  "users_effective_count": "{count} Modelle",
+  "users_effective_count": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} Modell",
+        "count_plural=*": "{count} Modelle"
+      }
+    }
+  ],
   "users_effective_via": "über {path}",
   "users_no_models_warning": "Es blieben keine Modelle verfügbar: nichts in dieser Liste wird von den übergeordneten Gruppen erlaubt.",
   "users_column_keys": "API-Schlüssel",
@@ -1434,6 +1572,10 @@
   "models_global_pricing": "globale Modellpreise",
   "models_model_settings_for": "Modelleinstellungen für {name}",
   "models_provider_access_for": "Anbieterzugriff für {name}",
+  "models_expand_provider_group": "{name} ausklappen",
+  "models_collapse_provider_group": "{name} einklappen",
+  "models_expand_all_groups": "Alle aufklappen",
+  "models_collapse_all_groups": "Alle zuklappen",
   "models_global_access": "globaler Modellzugriff",
   "models_remove_alias": "Alias {name} entfernen",
   "models_removing_alias": "Alias {name} wird entfernt",

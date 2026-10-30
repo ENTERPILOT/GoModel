@@ -2,7 +2,7 @@
 title: "Playground"
 description: "Wypróbuj dowolny model przez gateway z poziomu dashboardu i sprawdź dokładny JSON requestu i odpowiedzi."
 icon: "flask-conical"
-keywords: ["playground", "dashboard", "chat completions", "responses", "messages", "streaming"]
+keywords: ["playground", "dashboard", "chat completions", "responses", "messages", "streaming", "images", "obrazy", "text-to-speech", "synteza mowy", "transcription", "transkrypcja"]
 ---
 
 Strona **Playground** (`/admin/dashboard/playground`) wysyła requesty przez
@@ -16,6 +16,26 @@ podczas edycji), oraz ostatnią odpowiedź z jej statusem, opóźnieniem i użyc
 odpowiedzi streamowane są składane do tego samego kształtu, jaki zwraca wywołanie bez streamingu.
 Requesty podlegają tym samym budżetom, limitom żądań, guardrails i logowaniu audytowemu
 co każdy inny klient gatewaya.
+
+## Obrazy, mowa i transkrypcja
+
+Przełącznik **Tryb** nad selektorem modelu pozwala testować także modele multimedialne. Każdy tryb
+wywołuje odpowiedni endpoint gatewaya kompatybilny z OpenAI i wyświetla na początku listy modele,
+których metadane deklarują dany tryb; nadal możesz wpisać dowolny model lub alias.
+
+| Tryb | Endpoint | Wejście | Wynik |
+| --- | --- | --- | --- |
+| Czat | wybrany w polu **Endpoint** | rozmowa | wiadomość asystenta |
+| Obraz | `POST /v1/images/generations` | prompt, rozmiar, liczba obrazów (1–4) | wygenerowane obrazy (URL lub `b64_json`) |
+| Mowa | `POST /v1/audio/speech` | tekst, głos, format (`mp3`, `wav`, `opus`, `aac`, `flac`) | odtwarzacz audio |
+| Transkrypcja | `POST /v1/audio/transcriptions` | plik audio, opcjonalnie język i prompt | tekst transkrypcji |
+
+Rozmiar, liczba i format są wysyłane tylko wtedy, gdy różnią się od wartości domyślnej
+providera (`mp3` dla mowy). Panel JSON pokazuje body requestu; transkrypcja jest
+wysyłana jako `multipart/form-data`, więc jej podgląd opisuje część z plikiem
+zamiast zawierać jego bajty. Obrazy inline w `b64_json` są skracane w JSON-ie
+odpowiedzi, aby pozostał czytelny, a odpowiedzi z mową są podsumowywane jako
+ich typ treści i rozmiar.
 
 ## Ograniczanie do ścieżki użytkownika
 

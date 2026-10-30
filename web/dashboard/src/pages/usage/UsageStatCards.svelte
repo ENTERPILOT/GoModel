@@ -9,14 +9,14 @@
   import { formatCost, formatNumber } from "$lib/utils/format.js";
   import { usagePage } from "./usage.svelte.js";
   import {
-    proSavedPercentText,
-    proSavedTitle,
-    proSavedValueText,
-    rewriteSavingsVisible,
-    usagePageCostTitle,
-    usagePageRequestsTitle,
-    usagePageTotalRequests,
-  } from "./usage-helpers.js";
+  proSavedPercentText,
+  proSavedTitle,
+  proSavedValueText,
+  rewriteSavingsVisible,
+  usagePageCostTitle,
+  usagePageRequestsTitle,
+  usagePageTotalRequests,
+} from "./usage-cost-format.js";
   import CacheOverviewCards from "./CacheOverviewCards.svelte";
   import * as m from "$lib/paraglide/messages.js";
 

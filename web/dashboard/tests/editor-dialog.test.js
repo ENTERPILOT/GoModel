@@ -25,7 +25,7 @@ const confirmStore = readFileSync(
   "utf8",
 );
 const searchSelect = readFileSync(
-  join(SRC, "lib/components/molecules/SearchSelect.svelte"),
+  join(SRC, "lib/components/molecules/SearchPopover.svelte"),
   "utf8",
 );
 const enabledToggle = readFileSync(
@@ -86,7 +86,7 @@ test("every EditorDialog close path goes through the discard confirmation", () =
 });
 
 test("SearchSelect reports selections as change events and keeps its query local", () => {
-  // Selections are programmatic; SearchSelect must dispatch a bubbling
+  // Selections are programmatic; SearchSelect's shell (SearchPopover) must dispatch a bubbling
   // change event so the enclosing form's dirty guard notices them...
   assert.match(
     searchSelect,

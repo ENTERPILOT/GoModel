@@ -183,7 +183,10 @@ Passthrough jest celowo wąski, dopóki API jest w wersji beta.
   do obiektów na nim, takich jak pliki czy batche, utworzonych przez inne klucze. Przyznawaj
   `passthrough_access` tylko kluczom, którym ufasz w zakresie całego konta providera.
 - Natywne body błędów i kody statusu providera są przekazywane dalej, zamiast być konwertowane
-  na odpowiedzi kompatybilne z OpenAI.
+  na odpowiedzi kompatybilne z OpenAI, więc SDK providerów zgłaszają własne typowane
+  błędy. Błędy zgłaszane przez sam GoModel (uwierzytelnianie, limity requestów, budżety,
+  niewłączony provider, nieosiągalny upstream) używają kształtu błędów bramki, podobnie
+  jak body błędu upstreamu, które nie jest JSON-em lub przekracza 1 MiB.
 - Funkcje zależne od kompatybilnych z OpenAI kształtów requestów lub odpowiedzi mogą nie
   działać dla ruchu passthrough tak samo jak dla ruchu `/v1`.
 

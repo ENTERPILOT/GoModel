@@ -48,6 +48,7 @@ func (s *Service) UpsertVirtual(ctx context.Context, virtual ManagedVirtualServe
 	if err := s.persistVirtual(ctx, virtual); err != nil {
 		return VirtualServerView{}, err
 	}
+	defer s.notifyChanged(ctx)
 	if err := s.Reload(ctx); err != nil {
 		return VirtualServerView{}, fmt.Errorf("mcp virtual server %q was saved but not applied: %w", virtual.Name, err)
 	}
@@ -124,6 +125,7 @@ func (s *Service) DeleteVirtual(ctx context.Context, name string) error {
 	if err := s.virtualStore.DeleteVirtual(ctx, name); err != nil {
 		return err
 	}
+	defer s.notifyChanged(ctx)
 	if err := s.Reload(ctx); err != nil {
 		return fmt.Errorf("mcp virtual server %q was deleted but the running set was not updated: %w", name, err)
 	}

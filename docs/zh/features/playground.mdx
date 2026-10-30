@@ -2,7 +2,7 @@
 title: "Playground"
 description: "在控制台中通过网关试用任意模型，并查看确切的请求和响应 JSON。"
 icon: "flask-conical"
-keywords: ["playground", "调试台", "控制台", "dashboard", "chat completions", "responses", "messages", "流式传输", "streaming"]
+keywords: ["playground", "调试台", "控制台", "dashboard", "chat completions", "responses", "messages", "流式传输", "streaming", "图片", "images", "文本转语音", "text-to-speech", "转录", "transcription"]
 ---
 
 **Playground**（调试台）页面（`/admin/dashboard/playground`）使用您的控制台密钥，通过网关的公开 API 发送请求，
@@ -12,6 +12,22 @@ keywords: ["playground", "调试台", "控制台", "dashboard", "chat completion
 右侧的 JSON 面板会显示即将发送的请求体（随编辑实时更新），以及最近一次响应及其状态、延迟和 Token 用量——
 流式响应会被组装成与非流式调用返回结果相同的结构。
 这些请求与网关的任何其他客户端一样，受相同的预算、速率限制、护栏和审计日志约束。
+
+## 图片、语音与转录
+
+模型选择器上方的 **模式** 开关也可以用来测试媒体模型。每种模式都会调用网关兼容 OpenAI 的端点，
+并优先列出元数据中声明支持该模式的模型；您仍然可以输入任意模型或别名。
+
+| 模式 | 端点 | 输入 | 结果 |
+| --- | --- | --- | --- |
+| 聊天 | 在 **端点** 中选择的端点 | 对话 | 助手消息 |
+| 图像 | `POST /v1/images/generations` | 提示词、尺寸、图片数量（1–4） | 生成的图片（URL 或 `b64_json`） |
+| 语音合成 | `POST /v1/audio/speech` | 文本、音色、格式（`mp3`、`wav`、`opus`、`aac`、`flac`） | 音频播放器 |
+| 转录 | `POST /v1/audio/transcriptions` | 音频文件，可选的语言和提示词 | 转录文本 |
+
+只有当尺寸、数量和格式与提供商默认值不同时才会发送这些参数（语音的默认格式为 `mp3`）。JSON 面板会显示请求体；
+转录请求以 `multipart/form-data` 发送，因此其预览描述的是文件部分，而不包含文件字节。为保持可读性，
+响应 JSON 中的内联 `b64_json` 图片会被缩短，语音响应则会汇总显示为其内容类型和大小。
 
 ## 用户路径作用域
 

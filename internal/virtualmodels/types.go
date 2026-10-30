@@ -59,7 +59,11 @@ type VirtualModel struct {
 	// Slowdown is an extra-time factor from 0.1 to 10; zero disables it. Nil
 	// leaves the setting unspecified so an alias can inherit its target model.
 	Slowdown *float64 `json:"slowdown,omitempty" bson:"slowdown,omitempty"`
-	Enabled  bool     `json:"enabled" bson:"enabled"`
+	// ReasoningEffort, when set, replaces the reasoning effort of every
+	// request sent upstream through this redirect or to this model, whatever
+	// the client asked for. Empty leaves the client's value untouched.
+	ReasoningEffort string `json:"reasoning_effort,omitempty" bson:"reasoning_effort,omitempty"`
+	Enabled         bool   `json:"enabled" bson:"enabled"`
 
 	// ContextWindow and MaxOutputTokens are the token limits /v1/models lists
 	// for a redirect. Nil derives each from the targets: the smallest value
@@ -236,6 +240,7 @@ type View struct {
 	// limits; nil means /v1/models derives them from the targets.
 	ContextWindow   *int      `json:"context_window,omitempty"`
 	MaxOutputTokens *int      `json:"max_output_tokens,omitempty"`
+	ReasoningEffort string    `json:"reasoning_effort,omitempty"`
 	Enabled         bool      `json:"enabled"`
 	Managed         bool      `json:"managed,omitempty"`
 	ResolvedModel   string    `json:"resolved_model,omitempty"`
@@ -252,6 +257,9 @@ type Resolution struct {
 	Requested core.ModelSelector
 	Resolved  core.ModelSelector
 	Source    string
+	// Path lists the virtual models routing passed through, outermost first,
+	// when a redirect forces a reasoning effort.
+	Path []string
 }
 
 // EffectiveState is the compiled access decision for one concrete selector.

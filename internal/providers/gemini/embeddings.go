@@ -27,8 +27,11 @@ type geminiBatchEmbedContentsRequest struct {
 	Requests []geminiEmbedContentRequest `json:"requests"`
 }
 
+// UsageMetadata is reported by newer models (gemini-embedding-2) and omitted
+// by older ones (gemini-embedding-001), which leaves the usage block zeroed.
 type geminiBatchEmbedContentsResponse struct {
-	Embeddings []geminiEmbeddingValues `json:"embeddings"`
+	Embeddings    []geminiEmbeddingValues `json:"embeddings"`
+	UsageMetadata geminiUsageMetadata     `json:"usageMetadata"`
 }
 
 type geminiEmbeddingValues struct {
@@ -40,8 +43,7 @@ func nativeBatchEmbedEndpoint(model string) string {
 }
 
 // nativeEmbeddings serves an OpenAI embeddings request through Gemini's native
-// batchEmbedContents API. The native response carries no token usage, so the
-// OpenAI usage block is returned zeroed.
+// batchEmbedContents API, mapping usageMetadata onto the OpenAI usage block.
 func (p *Provider) nativeEmbeddings(ctx context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
 	inputs, err := providers.EmbeddingInputs(req.Input)
 	if err != nil {
@@ -84,6 +86,7 @@ func (p *Provider) nativeEmbeddings(ctx context.Context, req *core.EmbeddingRequ
 		Data:     make([]core.EmbeddingData, 0, len(resp.Embeddings)),
 		Model:    req.Model,
 		Provider: p.responseProviderName(),
+		Usage:    embeddingUsage(resp.UsageMetadata),
 	}
 	for i, embedding := range resp.Embeddings {
 		encoded, err := providers.EncodeEmbeddingValues(embedding.Values, req.EncodingFormat)
@@ -97,4 +100,12 @@ func (p *Provider) nativeEmbeddings(ctx context.Context, req *core.EmbeddingRequ
 		})
 	}
 	return out, nil
+}
+
+func embeddingUsage(meta geminiUsageMetadata) core.EmbeddingUsage {
+	total := meta.TotalTokenCount
+	if total == 0 {
+		total = meta.PromptTokenCount
+	}
+	return core.EmbeddingUsage{PromptTokens: meta.PromptTokenCount, TotalTokens: total}
 }

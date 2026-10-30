@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // ErrUnavailable indicates a rate limit service was used without an initialized store.
@@ -33,15 +35,49 @@ type Service struct {
 
 	mu    sync.RWMutex
 	rules []Rule
+	// refreshMu serializes Refresh from the store read through the swap, so
+	// a slower refresh never installs an older snapshot over a newer one.
+	refreshMu sync.Mutex
 
 	quotaTemplates bool
 
+	// writer keys this generation's window snapshot rows, so replicas
+	// sharing a store never overwrite each other. Every Service draws a new
+	// one, so a restart or reload writes beside its predecessor's rows and
+	// restore merges them (see limiter.restore).
+	writer        string
 	flushInterval time.Duration
 	persistMu     sync.Mutex
 	lifeMu        sync.Mutex
 	persistState  persistState
 	flushStop     chan struct{}
 	flushDone     chan struct{}
+
+	// changed is called after every successful rule write; see
+	// SetChangeNotifier.
+	changed func(context.Context)
+	// onRulesSwapped, when set, runs in Refresh between the swap and the
+	// counter resets it implies. Tests use it.
+	onRulesSwapped func()
+}
+
+// SetChangeNotifier installs fn, called after every successful write of the
+// rules so other gateway instances reload them. Call it before serving;
+// writes made before it was set (startup seeding) are not announced. Counter
+// resets are rule writes too: they give the rule a new counter epoch, and the
+// reload clears every instance's counters for it.
+func (s *Service) SetChangeNotifier(fn func(context.Context)) {
+	if s != nil {
+		s.changed = fn
+	}
+}
+
+// notifyChanged announces a successful rule write. It runs after the local
+// refresh, whether or not that succeeded: the store changed either way.
+func (s *Service) notifyChanged(ctx context.Context) {
+	if s.changed != nil {
+		s.changed(ctx)
+	}
 }
 
 func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Service, error) {
@@ -52,6 +88,7 @@ func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Se
 		store:          store,
 		limiter:        newLimiter(),
 		quotaTemplates: true,
+		writer:         uuid.NewString(),
 	}
 	for _, option := range options {
 		if option != nil {
@@ -101,6 +138,8 @@ func (s *Service) Refresh(ctx context.Context) error {
 	if s == nil || s.store == nil {
 		return ErrUnavailable
 	}
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
 	rules, err := s.store.ListRules(ctx)
 	if err != nil {
 		return err
@@ -117,20 +156,32 @@ func (s *Service) Refresh(ctx context.Context) error {
 		}
 		return rules[i].PeriodSeconds < rules[j].PeriodSeconds
 	})
+	// The swap and the counter resets it implies happen under persistMu, so
+	// a flush never pairs the new rules, and with them a new counter epoch,
+	// with counts the change clears.
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
 	s.mu.Lock()
 	previous := s.rules
 	s.rules = rules
 	s.mu.Unlock()
+	if s.onRulesSwapped != nil {
+		s.onRulesSwapped()
+	}
 
-	// Removed definitions and shared/per-child mode changes must not leave
-	// counters that can reappear if the same key is added again later.
+	// Removed definitions, shared/per-child mode changes, and definitions
+	// reset, or deleted and re-added, elsewhere (a new counter epoch) drop
+	// their in-memory counters. Their saved rows need no delete: they carry the old
+	// epoch, which restore skips (see Rule.CounterEpoch), and the store
+	// collects them once no writer refreshes them. Deleting them here could
+	// also take rows another replica already saved under the new rule.
 	next := make(map[ruleKey]Rule, len(rules))
 	for _, rule := range rules {
 		next[keyForRule(rule)] = rule
 	}
 	for _, old := range previous {
 		newRule, exists := next[keyForRule(old)]
-		if !exists || old.PerChild != newRule.PerChild {
+		if !exists || old.PerChild != newRule.PerChild || old.CounterEpoch != newRule.CounterEpoch {
 			s.limiter.reset(keyForRule(old))
 		}
 	}
@@ -156,6 +207,7 @@ func (s *Service) UpsertRules(ctx context.Context, rules []Rule) error {
 	if err := s.store.UpsertRules(ctx, rules); err != nil {
 		return err
 	}
+	defer s.notifyChanged(ctx)
 	return s.Refresh(ctx)
 }
 
@@ -170,12 +222,13 @@ func (s *Service) DeleteRule(ctx context.Context, scope RuleScope, subject strin
 	if err := s.store.DeleteRule(ctx, scope, subject, periodSeconds); err != nil {
 		return err
 	}
+	defer s.notifyChanged(ctx)
 	s.limiter.reset(ruleKey{scope: scope, subject: subject, periodSeconds: periodSeconds})
 	// The rule is already gone from the store, so the refresh has to happen
 	// either way — dropping it on a snapshot-row failure would leave the
 	// deleted rule enforced in memory, which is worse than the stale row.
 	// The caller still hears about the row.
-	persistErr := s.persistDelete(ctx, scope, subject, periodSeconds)
+	persistErr := s.persistReset(ctx, scope, subject, periodSeconds)
 	if err := s.Refresh(ctx); err != nil {
 		return err
 	}
@@ -192,6 +245,7 @@ func (s *Service) ReplaceConfigRules(ctx context.Context, rules []Rule) error {
 	if err := s.store.ReplaceConfigRules(ctx, rules); err != nil {
 		return err
 	}
+	defer s.notifyChanged(ctx)
 	return s.Refresh(ctx)
 }
 
@@ -367,8 +421,12 @@ func (s *Service) StatusesForUserPath(userPath string, now time.Time) []Status {
 	return statuses
 }
 
-// ResetRule clears the live window counters for one rule.
-func (s *Service) ResetRule(scope RuleScope, subject string, periodSeconds int64) error {
+// ResetRule clears one rule's window counters on every instance: the store
+// gives the rule a new counter epoch, and the reload that the change notifier
+// triggers clears each instance's counters for it (see Refresh). The local
+// counters are cleared first, so the reset holds here even when the store
+// write fails.
+func (s *Service) ResetRule(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {
 	if s == nil {
 		return ErrUnavailable
 	}
@@ -377,16 +435,28 @@ func (s *Service) ResetRule(scope RuleScope, subject string, periodSeconds int64
 		return err
 	}
 	s.limiter.reset(ruleKey{scope: scope, subject: subject, periodSeconds: periodSeconds})
-	return s.persistDelete(context.Background(), scope, subject, periodSeconds)
+	return s.announceReset(ctx, s.persistReset(ctx, scope, subject, periodSeconds))
 }
 
-// ResetAll clears every live window counter.
-func (s *Service) ResetAll() error {
+// ResetAll clears every window counter on every instance, as ResetRule does
+// for one rule.
+func (s *Service) ResetAll(ctx context.Context) error {
 	if s == nil {
 		return ErrUnavailable
 	}
 	s.limiter.resetAll()
-	return s.persistDeleteAll(context.Background())
+	return s.announceReset(ctx, s.persistResetAll(ctx))
+}
+
+// announceReset reloads the rules, with the new epoch, and announces the
+// change. It does so even when the store write failed, as part of it may have
+// landed, and a reload that finds nothing new changes nothing.
+func (s *Service) announceReset(ctx context.Context, resetErr error) error {
+	if s.store == nil {
+		return resetErr
+	}
+	defer s.notifyChanged(ctx)
+	return errors.Join(resetErr, s.Refresh(ctx))
 }
 
 func (s *Service) matchingRules(subjects Subjects) []Rule {

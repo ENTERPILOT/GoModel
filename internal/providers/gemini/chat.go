@@ -4,21 +4,125 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
+
+	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 )
 
-// adaptChatRequest rewrites a ChatRequest for Gemini's OpenAI-compatible endpoint.
-// Gemini uses "reasoning_effort" as a top-level string (e.g. "low", "medium", "high"),
-// not the nested "reasoning": {"effort": "..."} format.
+// googleCompatRejectedFields are Chat Completions members Google's
+// OpenAI-compatible endpoint answers HTTP 400 for, as "Unknown name" or
+// "Penalty is not enabled for this model" (verified October 2026 against
+// gemini-4-argon). None has an equivalent on that surface, so they are dropped
+// rather than failing the request.
+var googleCompatRejectedFields = []string{
+	"presence_penalty", "frequency_penalty", "seed", "logprobs", "top_logprobs",
+	"store", "metadata", "logit_bias", "top_k", "prediction", "prompt_cache_key",
+	"safety_identifier", "verbosity", "web_search_options",
+}
+
+// adaptChatRequest rewrites a ChatRequest for Gemini's OpenAI-compatible
+// endpoint: members it rejects are dropped, unsigned Gemini 3+ tool calls get
+// the validator placeholder, and the reasoning effort becomes the top-level
+// "reasoning_effort" string the endpoint reads (not the nested
+// "reasoning": {"effort": "..."} object), clamped to a level the model has.
 func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
-	if req.Reasoning == nil || req.Reasoning.Effort == "" {
-		return req, nil
+	adapted := *req
+	adapted.ExtraFields = req.ExtraFields.Without(googleCompatRejectedFields...)
+	adapted.Messages = withCompatThoughtSignatures(req.Model, req.Messages)
+	// Google's endpoint rejects allowed_tools ("Request contains an invalid
+	// argument"), so the subset is applied to the tool list instead.
+	tools, choice, err := core.NarrowToAllowedTools(req.Tools, req.ToolChoice)
+	if err != nil {
+		return nil, err
 	}
-	return providers.AdaptReasoningEffortRequest(req, req.Reasoning.Effort)
+	adapted.Tools, adapted.ToolChoice = tools, choice
+	effort := nativeReasoningEffort(req)
+	if effort == "" {
+		return &adapted, nil
+	}
+	if isGemmaModel(req.Model) {
+		// Gemma has no thinking level; the endpoint rejects every value.
+		adapted.ExtraFields = adapted.ExtraFields.Without("reasoning_effort")
+		return providers.DropReasoning(&adapted), nil
+	}
+	return providers.AdaptReasoningEffortRequest(&adapted, compatReasoningEffort(req.Model, effort))
+}
+
+// compatReasoningEffort clamps reasoning_effort the way the native path does.
+// Google's OpenAI-compatible endpoint forwards the value as a thinking level,
+// so "minimal" is HTTP 400 on the models without that level (Gemini 3 Pro,
+// 3.7 and 3.8 Flash, Gemini 4) and "none" cannot turn thinking off on any
+// Gemini 3 or 4 model. Gemini 2.5 keeps the value: there it is a budget and
+// "none" disables thinking. Gemma is handled by the caller: it has no level
+// at all, so the effort is dropped before this runs.
+func compatReasoningEffort(model, effort string) string {
+	normalized := strings.ToLower(strings.TrimSpace(effort))
+	if normalized != "none" && normalized != "minimal" {
+		return effort
+	}
+	if major, _, ok := geminiGeneration(model); !ok || major < 3 {
+		return effort
+	}
+	if supportsMinimalThinking(model) {
+		return "minimal"
+	}
+	return "low"
+}
+
+// withCompatThoughtSignatures gives the unsigned assistant function calls of a
+// Gemini 3+ history the validator-skipping placeholder, as the native path
+// does. Google's OpenAI-compatible endpoint enforces the same rule (HTTP 400
+// "Function call is missing a thought_signature") and accepts the placeholder
+// under extra_content.google.thought_signature. Messages are copied only when
+// a turn needs it.
+func withCompatThoughtSignatures(model string, messages []core.Message) []core.Message {
+	if !requiresThoughtSignature(model) {
+		return messages
+	}
+	var out []core.Message
+	for i, msg := range messages {
+		if strings.TrimSpace(msg.Role) != "assistant" || len(msg.ToolCalls) == 0 || hasSignedToolCall(msg.ToolCalls) {
+			continue
+		}
+		if out == nil {
+			out = slices.Clone(messages)
+		}
+		calls := slices.Clone(msg.ToolCalls)
+		for j := range calls {
+			calls[j].ExtraFields = withPlaceholderSignature(calls[j].ExtraFields)
+		}
+		out[i].ToolCalls = calls
+	}
+	if out == nil {
+		return messages
+	}
+	return out
+}
+
+func hasSignedToolCall(calls []core.ToolCall) bool {
+	for _, call := range calls {
+		if toolCallThoughtSignature(call) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func withPlaceholderSignature(fields core.UnknownJSONFields) core.UnknownJSONFields {
+	encoded, err := json.Marshal(googleExtraContent{ThoughtSignature: skipThoughtSignatureValidator})
+	if err != nil {
+		return fields
+	}
+	signed, err := fields.WithExtraContent(core.ExtraContentVendorGoogle, encoded)
+	if err != nil {
+		return fields
+	}
+	return signed
 }
 
 func (p *Provider) openAICompatibleChatBody(req *core.ChatRequest) (any, error) {
@@ -78,12 +182,29 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 	return &resp, nil
 }
 
+// prepareNativeRequest applies the backend-specific members a translated
+// generateContent request gets before it is sent: the AI Studio-only store
+// flag and the cached-content prefix.
+func (p *Provider) prepareNativeRequest(ctx context.Context, req *core.ChatRequest, body *geminiGenerateContentRequest) error {
+	if p.backend == geminiBackendAIStudio {
+		store, err := chatStore(req)
+		if err != nil {
+			return err
+		}
+		body.Store = store
+	}
+	p.prepareCachedContent(ctx, req, body)
+	return nil
+}
+
 func (p *Provider) nativeChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
 	body, err := convertChatRequestToGemini(req)
 	if err != nil {
 		return nil, err
 	}
-	p.prepareCachedContent(ctx, req, body)
+	if err := p.prepareNativeRequest(ctx, req, body); err != nil {
+		return nil, err
+	}
 	var geminiResp geminiGenerateContentResponse
 	err = p.nativeClient.Do(ctx, llmclient.Request{
 		Method:    http.MethodPost,
@@ -125,8 +246,9 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 		return nil, err
 	}
 
-	// Gemini's OpenAI-compatible endpoint returns OpenAI-format SSE, so we can pass it through directly
-	return stream, nil
+	// Gemini's OpenAI-compatible endpoint returns OpenAI-format SSE; only its
+	// tool-call chunks need repair on the way through.
+	return newCompatToolCallStream(stream), nil
 }
 
 func (p *Provider) nativeStreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
@@ -135,7 +257,9 @@ func (p *Provider) nativeStreamChatCompletion(ctx context.Context, req *core.Cha
 	if err != nil {
 		return nil, err
 	}
-	p.prepareCachedContent(ctx, req, body)
+	if err := p.prepareNativeRequest(ctx, req, body); err != nil {
+		return nil, err
+	}
 	stream, err := p.nativeClient.DoStream(ctx, llmclient.Request{
 		Method:    http.MethodPost,
 		Endpoint:  nativeStreamEndpoint(req.Model),

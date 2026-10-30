@@ -27,6 +27,7 @@ type mongoVirtualModelDocument struct {
 	Slowdown        *float64  `bson:"slowdown,omitempty"`
 	ContextWindow   *int      `bson:"context_window,omitempty"`
 	MaxOutputTokens *int      `bson:"max_output_tokens,omitempty"`
+	ReasoningEffort string    `bson:"reasoning_effort,omitempty"`
 	Enabled         bool      `bson:"enabled"`
 	CreatedAt       time.Time `bson:"created_at"`
 	UpdatedAt       time.Time `bson:"updated_at"`
@@ -113,6 +114,7 @@ func (s *MongoDBStore) Upsert(ctx context.Context, vm VirtualModel) error {
 			"slowdown":          vm.Slowdown,
 			"context_window":    vm.ContextWindow,
 			"max_output_tokens": vm.MaxOutputTokens,
+			"reasoning_effort":  vm.ReasoningEffort,
 			"enabled":           vm.Enabled,
 			"updated_at":        vm.UpdatedAt,
 		},
@@ -156,6 +158,7 @@ func virtualModelFromMongo(doc mongoVirtualModelDocument) VirtualModel {
 		Slowdown:        doc.Slowdown,
 		ContextWindow:   doc.ContextWindow,
 		MaxOutputTokens: doc.MaxOutputTokens,
+		ReasoningEffort: doc.ReasoningEffort,
 		Enabled:         doc.Enabled,
 		CreatedAt:       doc.CreatedAt.UTC(),
 		UpdatedAt:       doc.UpdatedAt.UTC(),

@@ -42,7 +42,7 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
 | Provider | Zugangsdaten | Beispielmodell | Chat | `/responses` | Embed | Files | Batches | Passthru | Leitfaden |
 | -------- | ---------- | ------------- | :--: | :----------: | :---: | :---: | :-----: | :------: | ----- |
 | OpenAI | `OPENAI_API_KEY` | `gpt-5.5` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
-| ChatGPT-Abonnement | `CHATGPT_API_KEY` (Anmelde-Token von Codex) | `gpt-5.6-sol` | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | [ChatGPT-Abonnement](/de/providers/chatgpt) |
+| ChatGPT-Abonnement | `CHATGPT_API_KEY` (Anmelde-Token von Codex) | `gpt-5.6-sol` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [ChatGPT-Abonnement](/de/providers/chatgpt) |
 | GitHub Copilot | `GITHUB_COPILOT_API_KEY` (GitHub-OAuth-Token) | `claude-sonnet-5.5` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [GitHub Copilot](/de/providers/github-copilot) |
 | Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | [Anthropic](/de/providers/anthropic) |
 | Cohere | `COHERE_API_KEY` | `command-a-plus-05-2026` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Cohere](/de/providers/cohere) |
@@ -50,6 +50,7 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
 | Google Vertex AI | `VERTEX_PROJECT` + `VERTEX_LOCATION` + GCP-Zugangsdaten | `google/gemini-2.5-flash` | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | [Google Vertex AI](/de/providers/vertex) |
 | DeepSeek | `DEEPSEEK_API_KEY` | `deepseek-v4-pro` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [DeepSeek](/de/providers/deepseek) |
 | DeepInfra | `DEEPINFRA_API_KEY` (`DEEPINFRA_BASE_URL` optional) | `Qwen/Qwen3-32B` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [DeepInfra](/de/providers/deepinfra) |
+| Together AI | `TOGETHER_API_KEY` (`TOGETHER_BASE_URL` optional) | `meta-llama/Llama-3.3-70B-Instruct-Turbo` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Together AI](/de/providers/together) |
 | Groq | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | — |
 | Fireworks AI | `FIREWORKS_API_KEY` (`FIREWORKS_BASE_URL` optional) | `accounts/fireworks/models/gpt-oss-120b` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | — |
 | Chutes AI | `CHUTES_API_KEY` (`CHUTES_BASE_URL` optional) | `Qwen/Qwen3-32B-TEE` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | — |
@@ -169,8 +170,9 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
   `reasoning_effort: "low"`, weil manche Modelle immer denken und Requests ablehnen, in denen er
   fehlt (überschreibbar mit `OPENCODE_GO_DEFAULT_REASONING_EFFORT`). Setzen Sie
   `OPENCODE_GO_API_KEY`; die Base-URL ist standardmäßig `https://opencode.ai/zen/go/v1`.
-- **ChatGPT-Abonnement** – bedient nur `/v1/responses` und wird über das Kontingent des
-  ChatGPT-Plans abgerechnet statt über API-Guthaben. Der Upstream akzeptiert nur eine strikte
+- **ChatGPT-Abonnement** – wird über das Kontingent des ChatGPT-Plans abgerechnet statt über
+  API-Guthaben. Der Upstream bedient nur `/v1/responses`; Chat Completions werden in
+  Responses-Aufrufe übersetzt. Der Upstream akzeptiert nur eine strikte
   Allowlist von Parametern und ausschließlich Streaming; GoModel passt Requests an und fasst den
   Stream für Aufrufer ohne Streaming zusammen. Setzen Sie `CHATGPT_API_KEY` auf das Access-Token
   aus `codex login`. Die gemeldeten Kosten sind keine tatsächlichen Ausgaben: Diese Modell-IDs gibt
@@ -301,7 +303,7 @@ Bei diesen Providern stoßen die meisten Benutzer auf Schwierigkeiten:
   Credentials oder einen JSON-Key eines Service-Accounts.
 - **Amazon Bedrock** – kein eigener API-Key; verwendet die AWS-Credential-Chain und erfordert einen
   expliziten Modellzugriff in der Bedrock-Konsole.
-- **Azure OpenAI** – Deployment-bezogene Base-URLs, der Query-Parameter `api-version` und der
+- **Azure OpenAI** – Deployment-bezogene oder `/openai/v1`-Base-URLs, der Query-Parameter `api-version` und der
   Header `api-key` statt `Authorization: Bearer`.
 - **Oracle GenAI** – erfordert eine OCI-IAM-Richtlinie für `generativeaiapikey` und eine
   regionsspezifische OpenAI-kompatible Endpunkt-URL.
@@ -369,6 +371,11 @@ Klappen Sie eine Karte auf (über den Pfeilstreifen unten oder den abschnittswei
 - **Recent Requests** – Requests und Fehler über das Gateway in den letzten 10 Minuten.
 - **Breaker State** – der aktuelle Zustand des Circuit Breakers des Providers
   (siehe [Ausfallsicherheit](/de/advanced/resilience#circuit-breaker-und-provider-status-im-dashboard)).
+  Solange der Breaker offen ist, zeigt die Fehlerzeile der Karte weiter den
+  Upstream-Fehler, der ihn ausgelöst hat, markiert mit `— Circuit Breaker offen`,
+  statt der Schnellablehnung `circuit breaker is open`. Die Ablehnung erscheint
+  nur, wenn aus den letzten 10 Minuten kein Upstream-Fehler bekannt ist, etwa
+  wenn langsame Aufrufe den Breaker ausgelöst haben.
 - **Models (Recent Traffic)** – Anzahl der Requests/Fehler pro Modell. Ein Modell mit mindestens
   3 Fehlern, die die Hälfte oder mehr seiner Requests im Zeitfenster ausmachen, wird rot markiert –
   so wird ein einzelnes defektes Modell bei einem ansonsten gesunden Provider erkannt, was die

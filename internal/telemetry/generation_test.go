@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 	"unicode/utf8"
 
@@ -55,30 +56,33 @@ func spanAttribute(span sdktrace.ReadOnlySpan, key string) (attribute.Value, boo
 }
 
 func TestObserverParksTracedBufferedSpanUntilOutcome(t *testing.T) {
-	hooks, recorder, _ := newTestHooks(t)
-	ctx, trace := tracedContext(t, false)
-	call := llmclient.RequestInfo{Provider: "openai", ProviderType: "openai", Model: "gpt-5", Operation: "chat"}
+	synctest.Test(t, func(t *testing.T) {
+		hooks, recorder, _ := newTestHooks(t)
+		ctx, trace := tracedContext(t, false)
+		call := llmclient.RequestInfo{Provider: "openai", ProviderType: "openai", Model: "gpt-5", Operation: "chat"}
 
-	ctx = hooks.OnRequestStart(ctx, call)
-	hooks.OnRequestEnd(ctx, response(call, http.StatusOK, 50*time.Millisecond, nil))
-	require.Empty(t, recorder.Ended(), "the span waits for the decoded outcome")
-	providerDone := time.Now()
+		ctx = hooks.OnRequestStart(ctx, call)
+		hooks.OnRequestEnd(ctx, response(call, http.StatusOK, 50*time.Millisecond, nil))
+		require.Empty(t, recorder.Ended(), "the span waits for the decoded outcome")
+		providerDone := time.Now()
 
-	time.Sleep(5 * time.Millisecond)
-	trace.Finish(chatOutcome())
+		// The outcome is decoded later on the bubble's clock.
+		time.Sleep(5 * time.Millisecond)
+		trace.Finish(chatOutcome())
 
-	spans := recorder.Ended()
-	require.Len(t, spans, 1)
-	assert.False(t, spans[0].EndTime().After(providerDone), "the span keeps the provider call's end time")
-	attrs := attributeMap(spans[0].Attributes())
-	assert.Equal(t, "chatcmpl-1", attrs["gen_ai.response.id"])
-	assert.Equal(t, "gpt-5-2025-08-07", attrs["gen_ai.response.model"])
-	assert.Equal(t, "12", attrs["gen_ai.usage.input_tokens"])
-	assert.Equal(t, "3", attrs["gen_ai.usage.output_tokens"])
-	assert.Equal(t, "200", attrs["http.response.status_code"])
-	reasons, ok := spanAttribute(spans[0], "gen_ai.response.finish_reasons")
-	require.True(t, ok)
-	assert.Equal(t, []string{"stop"}, reasons.AsStringSlice())
+		spans := recorder.Ended()
+		require.Len(t, spans, 1)
+		assert.False(t, spans[0].EndTime().After(providerDone), "the span keeps the provider call's end time")
+		attrs := attributeMap(spans[0].Attributes())
+		assert.Equal(t, "chatcmpl-1", attrs["gen_ai.response.id"])
+		assert.Equal(t, "gpt-5-2025-08-07", attrs["gen_ai.response.model"])
+		assert.Equal(t, "12", attrs["gen_ai.usage.input_tokens"])
+		assert.Equal(t, "3", attrs["gen_ai.usage.output_tokens"])
+		assert.Equal(t, "200", attrs["http.response.status_code"])
+		reasons, ok := spanAttribute(spans[0], "gen_ai.response.finish_reasons")
+		require.True(t, ok)
+		assert.Equal(t, []string{"stop"}, reasons.AsStringSlice())
+	})
 }
 
 func TestObserverNeverExportsContentByDefault(t *testing.T) {
