@@ -21,8 +21,10 @@ import (
 // The move runs in a transaction so a reset on an active replica cannot land
 // between the read and the write and have its deleted counts written back:
 // the reset's delete of a document read here makes the transaction conflict
-// and retry from a fresh read. A standalone server has no transactions and
-// keeps that narrow window; it only exists during the one-time upgrade.
+// and retry from a fresh read. A standalone server has no transactions, so
+// there the counts can be written back, but harmlessly: imported documents
+// carry the empty epoch, and the reset gave its rule a new one, which restore
+// requires (see Rule.CounterEpoch).
 func (s *MongoDBStore) importLegacyCounters(ctx context.Context) error {
 	return s.inTransaction(ctx, "import legacy rate limit counters", s.moveLegacyCounters)
 }
@@ -45,7 +47,7 @@ func (s *MongoDBStore) moveLegacyCounters(ctx context.Context) error {
 			slog.Warn("rate limit counters: skipping malformed legacy snapshot", "error", err)
 			continue
 		}
-		doc.Writer = ""
+		doc.Writer, doc.Epoch = "", ""
 		writes = append(writes, mongo.NewUpdateOneModel().
 			SetFilter(counterIdentityFilter(doc.WindowSnapshot)).
 			SetUpdate(bson.D{{Key: "$set", Value: doc}}).

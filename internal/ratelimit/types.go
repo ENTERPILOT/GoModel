@@ -66,8 +66,8 @@ type Rule struct {
 	CreatedAt        time.Time `json:"created_at" bson:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at" bson:"updated_at"`
 	// CounterEpoch names the counters this rule definition owns. The store
-	// draws a new one when the rule is created or switches between shared
-	// and per-child, and keeps it on any other edit. Saved window rows carry
+	// draws a new one when the rule is created, switches between shared and
+	// per-child, or has its counters reset, and keeps it on any other edit. Saved window rows carry
 	// the epoch they were counted under, and restore skips rows of any other
 	// epoch, so counts a change cleared never come back, whether or not
 	// deleting their rows succeeded. Rules stored before it existed have the

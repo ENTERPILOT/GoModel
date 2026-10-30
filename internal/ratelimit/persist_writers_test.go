@@ -102,17 +102,17 @@ func acquireN(t *testing.T, service *Service, n int, now time.Time) {
 	}
 }
 
-// flakyDeleteStore fails DeleteCounter while err is set.
+// flakyDeleteStore fails ResetCounter while err is set.
 type flakyDeleteStore struct {
 	*memStore
 	err error
 }
 
-func (s *flakyDeleteStore) DeleteCounter(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {
+func (s *flakyDeleteStore) ResetCounter(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {
 	if s.err != nil {
 		return s.err
 	}
-	return s.memStore.DeleteCounter(ctx, scope, subject, periodSeconds)
+	return s.memStore.ResetCounter(ctx, scope, subject, periodSeconds)
 }
 
 // A single instance restarting comes back under a new writer ID each time,
@@ -170,7 +170,7 @@ func TestResetDeletesEveryWritersRows(t *testing.T) {
 	acquireN(t, b, 1, now)
 	b.Close()
 
-	err := a.ResetRule(ScopeUserPath, "/team", PeriodDaySeconds)
+	err := a.ResetRule(context.Background(), ScopeUserPath, "/team", PeriodDaySeconds)
 	require.NoError(t, err)
 	require.Empty(t, store.counters, "a reset on one replica clears every replica's row")
 
@@ -178,6 +178,46 @@ func TestResetDeletesEveryWritersRows(t *testing.T) {
 	a.Close()
 	restarted := startedService(t, store)
 	assert.Equal(t, int64(0), requestsUsed(t, restarted, now))
+}
+
+// A reset on one replica clears every replica, once config sync has them
+// reload the rules. Rows saved under the old epoch before then — another
+// replica's flush in the gap, or legacy rows a starting replica's import
+// writes back on standalone MongoDB — are never restored.
+func TestResetClearsEveryReplica(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	store := teamStore(t)
+	// A rule stored before epochs existed, with a legacy row imported for it.
+	store.rules[0].CounterEpoch = ""
+	imported := WindowSnapshot{
+		Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: PeriodDaySeconds,
+		RequestsWindowStart: now.Unix() - now.Unix()%PeriodDaySeconds, RequestsCurrent: 50,
+	}
+	require.NoError(t, store.SaveCounters(ctx, []WindowSnapshot{imported}))
+
+	a := startedService(t, store)
+	b := startedService(t, store)
+	assert.Equal(t, int64(50), requestsUsed(t, b, now), "the upgrade keeps the imported count")
+	acquireN(t, b, 1, now)
+	a.SetChangeNotifier(func(ctx context.Context) { require.NoError(t, b.Refresh(ctx)) })
+
+	b.flush(ctx)
+	// The notifier fires after the store write, so b can still save its old
+	// count in between; simulate that with a hook on a's local reload.
+	a.onRulesSwapped = func() {
+		a.onRulesSwapped = nil
+		b.flush(ctx)
+		require.NoError(t, store.SaveCounters(ctx, []WindowSnapshot{imported}))
+	}
+	require.NoError(t, a.ResetRule(ctx, ScopeUserPath, "/team", PeriodDaySeconds))
+	assert.Equal(t, int64(0), requestsUsed(t, a, now))
+	assert.Equal(t, int64(0), requestsUsed(t, b, now), "the reset reached the other replica")
+
+	a.Close()
+	b.Close()
+	restarted := startedService(t, store)
+	assert.Equal(t, int64(0), requestsUsed(t, restarted, now), "rows saved under the old epoch are not restored")
 }
 
 func teamRule(perChild bool, maxRequests int64) Rule {
@@ -286,53 +326,30 @@ func TestRefreshDropsCountsOfRuleReaddedElsewhere(t *testing.T) {
 	assert.Equal(t, int64(0), requestsUsed(t, service, now))
 }
 
-// blockingSaveStore holds the next SaveCounters, after it starts, until
-// release is closed.
-type blockingSaveStore struct {
-	*memStore
-	started, release chan struct{}
-}
-
-func (s *blockingSaveStore) SaveCounters(ctx context.Context, snapshots []WindowSnapshot) error {
-	if s.started != nil {
-		close(s.started)
-		s.started = nil
-		<-s.release
-	}
-	return s.memStore.SaveCounters(ctx, snapshots)
-}
-
 // A refresh that clears counts must not interleave with a flush: one that
 // saw the new rule's epoch next to the counts not yet cleared would save them
 // as the new rule's, and a restart would restore them.
 func TestRefreshDoesNotInterleaveWithFlush(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
-	mem := teamStore(t)
-	store := &blockingSaveStore{memStore: mem}
+	store := teamStore(t)
 	service := startedService(t, store)
 	acquireN(t, service, 90, now)
-	oldEpoch := service.Rules()[0].CounterEpoch
 
 	// Deleted and re-added elsewhere: same mode, new epoch.
-	require.NoError(t, mem.DeleteRule(ctx, ScopeUserPath, "/team", PeriodDaySeconds))
-	require.NoError(t, mem.UpsertRules(ctx, []Rule{teamRule(false, 100)}))
+	require.NoError(t, store.DeleteRule(ctx, ScopeUserPath, "/team", PeriodDaySeconds))
+	require.NoError(t, store.UpsertRules(ctx, []Rule{teamRule(false, 100)}))
 
-	store.started, store.release = make(chan struct{}), make(chan struct{})
-	started := store.started
-	flushed := make(chan struct{})
-	go func() {
-		service.flush(ctx)
-		close(flushed)
-	}()
-	<-started
-	refreshed := make(chan error, 1)
-	go func() { refreshed <- service.Refresh(ctx) }()
-	time.Sleep(20 * time.Millisecond)
-	assert.Equal(t, oldEpoch, service.Rules()[0].CounterEpoch, "the rules do not change under a flush in progress")
-	close(store.release)
-	<-flushed
-	require.NoError(t, <-refreshed)
+	// Between the swap and the reset, a flush must not be able to start.
+	swapped := false
+	service.onRulesSwapped = func() {
+		swapped = true
+		if !assert.False(t, service.persistMu.TryLock(), "a flush could run between the swap and the reset") {
+			service.persistMu.Unlock()
+		}
+	}
+	require.NoError(t, service.Refresh(ctx))
+	require.True(t, swapped)
 
 	service.flush(ctx)
 	service.Close()

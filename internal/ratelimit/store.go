@@ -25,9 +25,12 @@ type Store interface {
 	// Nothing is deleted to make room for a write, so a crash mid-save costs at
 	// most the flush interval rather than a whole window.
 	SaveCounters(ctx context.Context, snapshots []WindowSnapshot) error
-	// DeleteCounter and DeleteAllCounters remove the rows of every writer.
-	DeleteCounter(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error
-	DeleteAllCounters(ctx context.Context) error
+	// ResetCounter gives the rule a new counter epoch, so every replica's
+	// next Refresh clears its counts and restore skips every row saved
+	// before, and removes the rows of every writer. ResetAllCounters does
+	// the same for every rule.
+	ResetCounter(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error
+	ResetAllCounters(ctx context.Context) error
 	Close() error
 }
 

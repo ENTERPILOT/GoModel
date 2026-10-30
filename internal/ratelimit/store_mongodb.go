@@ -463,38 +463,51 @@ func counterIdentityFilter(snap WindowSnapshot) bson.D {
 	}
 }
 
-// DeleteCounter removes every writer's rows for the definition, so no other
-// replica's row brings a reset window back on the next start. The legacy
+// ResetCounter draws a new counter epoch for the rule and removes every
+// writer's rows for it, so no replica's row, including one written after the
+// delete under the old epoch, brings a reset window back. The legacy
 // collection is cleared too: an older replica in a rolling upgrade may still
-// write there, and the next start would import it. It goes first, so a
-// concurrent import either conflicts with this delete and retries, or commits
-// before the window collection is cleared (see importLegacyCounters).
-func (s *MongoDBStore) DeleteCounter(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {
+// write there, and the next start would import it. It goes before the window
+// collection, so a concurrent import either conflicts with this delete and
+// retries, or commits before the window collection is cleared (see
+// importLegacyCounters).
+func (s *MongoDBStore) ResetCounter(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {
 	filter := bson.D{
 		{Key: "scope", Value: scope},
 		{Key: "subject", Value: subject},
 		{Key: "period_seconds", Value: periodSeconds},
 	}
-	if err := s.deleteCounters(ctx, filter); err != nil {
-		return fmt.Errorf("delete rate limit counters %s %s/%d: %w", scope, subject, periodSeconds, err)
+	if err := s.resetCounters(ctx, filter); err != nil {
+		return fmt.Errorf("reset rate limit counters %s %s/%d: %w", scope, subject, periodSeconds, err)
 	}
 	return nil
 }
 
-func (s *MongoDBStore) DeleteAllCounters(ctx context.Context) error {
-	if err := s.deleteCounters(ctx, bson.D{}); err != nil {
-		return fmt.Errorf("delete all rate limit counters: %w", err)
+// ResetAllCounters gives every rule the same new epoch: rows are keyed by
+// rule as well, so sharing it is safe.
+func (s *MongoDBStore) ResetAllCounters(ctx context.Context) error {
+	if err := s.resetCounters(ctx, bson.D{}); err != nil {
+		return fmt.Errorf("reset all rate limit counters: %w", err)
 	}
 	return nil
 }
 
-func (s *MongoDBStore) deleteCounters(ctx context.Context, filter bson.D) error {
-	for _, collection := range []*mongo.Collection{s.legacyCounters, s.counters} {
-		if _, err := collection.DeleteMany(ctx, filter); err != nil {
+// resetCounters writes the epoch first: without a transaction, a delete that
+// fails after it still leaves the reset in force.
+func (s *MongoDBStore) resetCounters(ctx context.Context, filter bson.D) error {
+	epoch := uuid.NewString()
+	return s.inTransaction(ctx, "reset rate limit counters", func(ctx context.Context) error {
+		update := bson.D{{Key: "$set", Value: bson.D{{Key: "counter_epoch", Value: epoch}}}}
+		if _, err := s.rules.UpdateMany(ctx, filter, update); err != nil {
 			return err
 		}
-	}
-	return nil
+		for _, collection := range []*mongo.Collection{s.legacyCounters, s.counters} {
+			if _, err := collection.DeleteMany(ctx, filter); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (s *MongoDBStore) Close() error {

@@ -370,7 +370,7 @@ func TestMongoDBStoreImportsLegacyCounters(t *testing.T) {
 		require.Equal(t, int64(7), got[0].RequestsCurrent)
 
 		legacyWrite(t, 9)
-		err = store.DeleteCounter(ctx, ScopeUserPath, "/team", PeriodHourSeconds)
+		err = store.ResetCounter(ctx, ScopeUserPath, "/team", PeriodHourSeconds)
 		require.NoError(t, err)
 		store, err = NewMongoDBStore(ctx, db)
 		require.NoError(t, err)
@@ -380,70 +380,45 @@ func TestMongoDBStoreImportsLegacyCounters(t *testing.T) {
 	})
 }
 
-// TestMongoDBStoreLegacyImportCannotUndoConcurrentReset is the MongoDB half of
-// TestSQLStoreLegacyImportCannotUndoConcurrentReset. A transaction holding an
-// uncommitted copy of the imported document stalls the import's write after
-// its read; a reset runs in that gap, and once the stall lifts the import must
-// not write back the count the reset deleted.
-func TestMongoDBStoreLegacyImportCannotUndoConcurrentReset(t *testing.T) {
+// TestMongoDBStoreLegacyCountsWrittenBackAfterResetAreNotRestored covers a
+// legacy import racing a reset. A standalone server has no transactions, so
+// the import can read a legacy document, the reset delete it, and the import
+// write the old count back. The reset gave the rule a new epoch, though, so a
+// restart does not restore that count.
+func TestMongoDBStoreLegacyCountsWrittenBackAfterResetAreNotRestored(t *testing.T) {
 	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
 		ctx := context.Background()
+		now := time.Now().UTC()
 		store, err := NewMongoDBStore(ctx, db)
 		require.NoError(t, err)
-		legacy := WindowSnapshot{
-			Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: PeriodHourSeconds,
-			RequestsWindowStart: 1700000000, RequestsCurrent: 90,
-		}
-		_, err = store.legacyCounters.InsertOne(ctx, counterDocument{WindowSnapshot: legacy, UpdatedAt: time.Now().Unix()})
+		require.NoError(t, store.UpsertRules(ctx, []Rule{{
+			Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodHourSeconds,
+			MaxRequests: new(int64(100)), Source: SourceManual,
+		}}))
+		// A rule stored before epochs existed.
+		_, err = store.rules.UpdateMany(ctx, bson.D{}, bson.D{{Key: "$unset", Value: bson.D{{Key: "counter_epoch", Value: ""}}}})
 		require.NoError(t, err)
-
-		aborted := func() int64 {
-			var status struct {
-				Transactions struct {
-					TotalAborted int64 `bson:"totalAborted"`
-				} `bson:"transactions"`
-			}
-			err := db.Client().Database("admin").RunCommand(ctx, bson.D{{Key: "serverStatus", Value: 1}}).Decode(&status)
-			require.NoError(t, err)
-			return status.Transactions.TotalAborted
-		}
-		// importWaiting reports a non-transactional import write queued
-		// behind the stalling transaction.
-		importWaiting := func() bool {
-			cursor, err := db.Client().Database("admin").Aggregate(ctx, mongo.Pipeline{
-				{{Key: "$currentOp", Value: bson.D{}}},
-				{{Key: "$match", Value: bson.D{{Key: "ns", Value: db.Name() + ".rate_limit_window_snapshots"}, {Key: "op", Value: "update"}}}},
+		importLegacy := func(t *testing.T) {
+			t.Helper()
+			_, err := store.legacyCounters.InsertOne(ctx, counterDocument{
+				Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: PeriodHourSeconds,
+				RequestsWindowStart: now.Unix() - now.Unix()%PeriodHourSeconds, RequestsCurrent: 90,
+				UpdatedAt: now.Unix(),
 			})
 			require.NoError(t, err)
-			defer cursor.Close(ctx)
-			return cursor.Next(ctx)
+			store, err = NewMongoDBStore(ctx, db)
+			require.NoError(t, err)
+		}
+		restored := func(t *testing.T) int64 {
+			t.Helper()
+			return requestsUsed(t, startedService(t, store), now)
 		}
 
-		session, err := db.Client().StartSession()
-		require.NoError(t, err)
-		defer session.EndSession(ctx)
-		require.NoError(t, session.StartTransaction())
-		stallCtx := mongo.NewSessionContext(ctx, session)
-		_, err = store.counters.InsertOne(stallCtx, counterDocument{WindowSnapshot: legacy})
-		require.NoError(t, err)
-		abortedBefore := aborted()
+		importLegacy(t)
+		require.Equal(t, int64(90), restored(t), "the upgrade keeps the legacy count")
 
-		importDone := make(chan error, 1)
-		go func() {
-			_, err := NewMongoDBStore(ctx, db)
-			importDone <- err
-		}()
-		// A transactional import conflicts and retries; a plain one waits.
-		require.Eventually(t, func() bool {
-			return aborted() > abortedBefore || importWaiting()
-		}, 10*time.Second, 5*time.Millisecond, "import never reached its write")
-
-		require.NoError(t, store.DeleteCounter(ctx, ScopeUserPath, "/team", PeriodHourSeconds))
-		require.NoError(t, session.AbortTransaction(ctx))
-		require.NoError(t, <-importDone)
-
-		got, err := store.LoadCounters(ctx)
-		require.NoError(t, err)
-		require.Empty(t, got, "the import must not bring back the count the reset deleted")
+		require.NoError(t, store.ResetCounter(ctx, ScopeUserPath, "/team", PeriodHourSeconds))
+		importLegacy(t)
+		require.Equal(t, int64(0), restored(t), "a count written back after the reset is not restored")
 	})
 }

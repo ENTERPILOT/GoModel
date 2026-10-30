@@ -59,7 +59,7 @@ const legacyCountersTable = "rate_limit_counters"
 // still reads and writes it, and each later start imports what it wrote since.
 // The copy overwrites an earlier import of the same key, because the legacy
 // row is the newer one. Other writers of the legacy table, an older replica's
-// flush or a reset, wait for the import to commit (see deleteCounters).
+// flush or a reset, wait for the import to commit (see resetCounters).
 func importLegacyCounters(ctx context.Context, db sqlx.DB) (bool, error) {
 	columns, err := tableColumns(ctx, db, legacyCountersTable)
 	if err != nil {

@@ -390,7 +390,7 @@ func TestSQLStoreImportsLegacyCounters(t *testing.T) {
 			legacy.RequestsWindowStart, 9, 0, 0, 0, 0, time.Now().Unix(),
 		)
 		require.NoError(t, err)
-		err = store.DeleteCounter(ctx, ScopeUserPath, "/team", PeriodHourSeconds)
+		err = store.ResetCounter(ctx, ScopeUserPath, "/team", PeriodHourSeconds)
 		require.NoError(t, err)
 		store, err = NewSQLStore(ctx, db)
 		require.NoError(t, err)
@@ -404,8 +404,8 @@ func TestSQLStoreImportsLegacyCounters(t *testing.T) {
 func TestSQLStoreWithoutLegacyCountersTable(t *testing.T) {
 	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
 		require.False(t, store.legacyCounters)
-		require.NoError(t, store.DeleteCounter(context.Background(), ScopeUserPath, "/team", PeriodHourSeconds))
-		require.NoError(t, store.DeleteAllCounters(context.Background()))
+		require.NoError(t, store.ResetCounter(context.Background(), ScopeUserPath, "/team", PeriodHourSeconds))
+		require.NoError(t, store.ResetAllCounters(context.Background()))
 	})
 }
 
@@ -462,7 +462,7 @@ func TestSQLStoreLegacyImportCannotUndoConcurrentReset(t *testing.T) {
 		locker := <-lockerPID
 
 		resetDone := make(chan error, 1)
-		go func() { resetDone <- store.DeleteCounter(ctx, ScopeUserPath, "/team", PeriodHourSeconds) }()
+		go func() { resetDone <- store.ResetCounter(ctx, ScopeUserPath, "/team", PeriodHourSeconds) }()
 		var resetPID int64
 		require.Eventually(t, func() bool {
 			err := db.QueryRow(ctx, `SELECT COALESCE(MAX(pid), 0) FROM pg_stat_activity WHERE ? = ANY(pg_blocking_pids(pid))`, locker).Scan(&resetPID)

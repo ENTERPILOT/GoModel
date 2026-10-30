@@ -277,34 +277,43 @@ const pruneCountersSQL = `
 	WHERE updated_at + 2 * period_seconds < ?
 `
 
-// DeleteCounter removes every writer's rows for the definition, so no other
-// replica's row brings a reset window back on the next start.
-func (s *SQLStore) DeleteCounter(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {
-	err := s.deleteCounters(ctx, ` WHERE scope = ? AND subject = ? AND period_seconds = ?`, scope, subject, periodSeconds)
+// ResetCounter draws a new counter epoch for the rule and removes every
+// writer's rows for it in one transaction, so no replica's row, including one
+// written after the delete under the old epoch, brings a reset window back.
+func (s *SQLStore) ResetCounter(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {
+	err := s.resetCounters(ctx, ` WHERE scope = ? AND subject = ? AND period_seconds = ?`, scope, subject, periodSeconds)
 	if err != nil {
-		return fmt.Errorf("delete rate limit counters %s %s/%d: %w", scope, subject, periodSeconds, err)
+		return fmt.Errorf("reset rate limit counters %s %s/%d: %w", scope, subject, periodSeconds, err)
 	}
 	return nil
 }
 
-func (s *SQLStore) DeleteAllCounters(ctx context.Context) error {
-	if err := s.deleteCounters(ctx, ""); err != nil {
-		return fmt.Errorf("delete all rate limit counters: %w", err)
+// ResetAllCounters gives every rule the same new epoch: rows are keyed by
+// rule as well, so sharing it is safe.
+func (s *SQLStore) ResetAllCounters(ctx context.Context) error {
+	if err := s.resetCounters(ctx, ""); err != nil {
+		return fmt.Errorf("reset all rate limit counters: %w", err)
 	}
 	return nil
 }
 
-// deleteCounters clears the legacy table before the window table. A starting
+// resetCounters clears the legacy table before the window table. A starting
 // replica's import locks the legacy table first (see importLegacyCounters), so
 // in this order a reset either waits for the import to commit and then deletes
-// what it wrote, or deletes first and leaves the import nothing to copy.
-func (s *SQLStore) deleteCounters(ctx context.Context, where string, args ...any) error {
+// what it wrote, or deletes first and leaves the import nothing to copy. Even
+// a row the import writes back carries the empty epoch, which the new one
+// never matches.
+func (s *SQLStore) resetCounters(ctx context.Context, where string, args ...any) error {
 	var tables []string
 	if s.legacyCounters {
 		tables = append(tables, legacyCountersTable)
 	}
 	tables = append(tables, "rate_limit_window_snapshots")
+	epochArgs := append([]any{uuid.NewString()}, args...)
 	return s.db.InTx(ctx, func(q sqlx.Querier) error {
+		if _, err := q.Exec(ctx, `UPDATE rate_limits SET counter_epoch = ?`+where, epochArgs...); err != nil {
+			return err
+		}
 		for _, table := range tables {
 			if _, err := q.Exec(ctx, `DELETE FROM `+table+where, args...); err != nil {
 				return err

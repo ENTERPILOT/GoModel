@@ -56,12 +56,16 @@ type Service struct {
 	// changed is called after every successful rule write; see
 	// SetChangeNotifier.
 	changed func(context.Context)
+	// onRulesSwapped, when set, runs in Refresh between the swap and the
+	// counter resets it implies. Tests use it.
+	onRulesSwapped func()
 }
 
 // SetChangeNotifier installs fn, called after every successful write of the
 // rules so other gateway instances reload them. Call it before serving;
 // writes made before it was set (startup seeding) are not announced. Counter
-// resets are not rule writes: counters live in each instance's memory.
+// resets are rule writes too: they give the rule a new counter epoch, and the
+// reload clears every instance's counters for it.
 func (s *Service) SetChangeNotifier(fn func(context.Context)) {
 	if s != nil {
 		s.changed = fn
@@ -161,10 +165,13 @@ func (s *Service) Refresh(ctx context.Context) error {
 	previous := s.rules
 	s.rules = rules
 	s.mu.Unlock()
+	if s.onRulesSwapped != nil {
+		s.onRulesSwapped()
+	}
 
 	// Removed definitions, shared/per-child mode changes, and definitions
-	// deleted and re-added elsewhere (a new counter epoch) drop their
-	// in-memory counters. Their saved rows need no delete: they carry the old
+	// reset, or deleted and re-added, elsewhere (a new counter epoch) drop
+	// their in-memory counters. Their saved rows need no delete: they carry the old
 	// epoch, which restore skips (see Rule.CounterEpoch), and the store
 	// collects them once no writer refreshes them. Deleting them here could
 	// also take rows another replica already saved under the new rule.
@@ -221,7 +228,7 @@ func (s *Service) DeleteRule(ctx context.Context, scope RuleScope, subject strin
 	// either way — dropping it on a snapshot-row failure would leave the
 	// deleted rule enforced in memory, which is worse than the stale row.
 	// The caller still hears about the row.
-	persistErr := s.persistDelete(ctx, scope, subject, periodSeconds)
+	persistErr := s.persistReset(ctx, scope, subject, periodSeconds)
 	if err := s.Refresh(ctx); err != nil {
 		return err
 	}
@@ -414,8 +421,12 @@ func (s *Service) StatusesForUserPath(userPath string, now time.Time) []Status {
 	return statuses
 }
 
-// ResetRule clears the live window counters for one rule.
-func (s *Service) ResetRule(scope RuleScope, subject string, periodSeconds int64) error {
+// ResetRule clears one rule's window counters on every instance: the store
+// gives the rule a new counter epoch, and the reload that the change notifier
+// triggers clears each instance's counters for it (see Refresh). The local
+// counters are cleared first, so the reset holds here even when the store
+// write fails.
+func (s *Service) ResetRule(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {
 	if s == nil {
 		return ErrUnavailable
 	}
@@ -424,16 +435,28 @@ func (s *Service) ResetRule(scope RuleScope, subject string, periodSeconds int64
 		return err
 	}
 	s.limiter.reset(ruleKey{scope: scope, subject: subject, periodSeconds: periodSeconds})
-	return s.persistDelete(context.Background(), scope, subject, periodSeconds)
+	return s.announceReset(ctx, s.persistReset(ctx, scope, subject, periodSeconds))
 }
 
-// ResetAll clears every live window counter.
-func (s *Service) ResetAll() error {
+// ResetAll clears every window counter on every instance, as ResetRule does
+// for one rule.
+func (s *Service) ResetAll(ctx context.Context) error {
 	if s == nil {
 		return ErrUnavailable
 	}
 	s.limiter.resetAll()
-	return s.persistDeleteAll(context.Background())
+	return s.announceReset(ctx, s.persistResetAll(ctx))
+}
+
+// announceReset reloads the rules, with the new epoch, and announces the
+// change. It does so even when the store write failed, as part of it may have
+// landed, and a reload that finds nothing new changes nothing.
+func (s *Service) announceReset(ctx context.Context, resetErr error) error {
+	if s.store == nil {
+		return resetErr
+	}
+	defer s.notifyChanged(ctx)
+	return errors.Join(resetErr, s.Refresh(ctx))
 }
 
 func (s *Service) matchingRules(subjects Subjects) []Rule {

@@ -77,17 +77,45 @@ func runCounterStoreSuite(t *testing.T, store Store, seedStale func(t *testing.T
 	all, err := store.LoadCounters(ctx)
 	require.NoError(t, err)
 	require.ElementsMatch(t, append(append([]WindowSnapshot(nil), live...), peer...), all)
-	// A reset clears every partition and every writer of the definition.
-	err = store.DeleteCounter(ctx, ScopeUserPath, "/customers", PeriodHourSeconds)
+	// A reset clears every partition and every writer of the definition, and
+	// gives the rule a new counter epoch, leaving other rules alone.
+	err = store.UpsertRules(ctx, []Rule{
+		{Scope: ScopeUserPath, Subject: "/customers", PeriodSeconds: PeriodHourSeconds, MaxRequests: new(int64(10)), Source: SourceManual},
+		{Scope: ScopeUserPath, Subject: "/other", PeriodSeconds: PeriodHourSeconds, MaxRequests: new(int64(10)), Source: SourceManual},
+	})
 	require.NoError(t, err)
-	got = loaded(t, "after delete")
+	before := epochs(t, store)
+	err = store.ResetCounter(ctx, ScopeUserPath, "/customers", PeriodHourSeconds)
+	require.NoError(t, err)
+	got = loaded(t, "after reset")
 	require.Empty(t, got)
+	afterReset := epochs(t, store)
+	require.NotEmpty(t, afterReset["/customers"])
+	require.NotEqual(t, before["/customers"], afterReset["/customers"])
+	require.Equal(t, before["/other"], afterReset["/other"])
+
 	err = store.SaveCounters(ctx, live)
 	require.NoError(t, err)
 	err = store.SaveCounters(ctx, peer)
 	require.NoError(t, err)
-	err = store.DeleteAllCounters(ctx)
+	err = store.ResetAllCounters(ctx)
 	require.NoError(t, err)
-	got = loaded(t, "after delete all")
+	got = loaded(t, "after reset all")
 	require.Empty(t, got)
+	afterResetAll := epochs(t, store)
+	for subject, epoch := range afterReset {
+		require.NotEqual(t, epoch, afterResetAll[subject], subject)
+	}
+}
+
+// epochs returns each stored rule's counter epoch by subject.
+func epochs(t *testing.T, store Store) map[string]string {
+	t.Helper()
+	rules, err := store.ListRules(context.Background())
+	require.NoError(t, err)
+	bySubject := make(map[string]string, len(rules))
+	for _, rule := range rules {
+		bySubject[rule.Subject] = rule.CounterEpoch
+	}
+	return bySubject
 }
