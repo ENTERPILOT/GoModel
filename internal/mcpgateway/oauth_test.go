@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -210,6 +211,8 @@ func TestOAuthSignInFlow(t *testing.T) {
 	serverURL := newProtectedUpstream(t, as)
 	service, store := newOAuthTestService(t, serverURL)
 	ctx := context.Background()
+	var notified atomic.Int32
+	service.SetChangeNotifier(func(context.Context) { notified.Add(1) })
 
 	before := serverView(t, service, "notion")
 	assert.Equal(t, StatusDegraded, before.Status)
@@ -233,6 +236,7 @@ func TestOAuthSignInFlow(t *testing.T) {
 	name, err := service.CompleteOAuth(ctx, authorize(t, as, start.AuthorizationURL, start.Binding))
 	require.NoError(t, err)
 	assert.Equal(t, "notion", name)
+	assert.Equal(t, int32(1), notified.Load(), "a sign-in is announced to other gateway instances")
 
 	view := waitForStatus(t, service, "notion", StatusConnected)
 	assert.False(t, view.AuthRequired)
@@ -258,6 +262,7 @@ func TestOAuthSignInFlow(t *testing.T) {
 	assert.False(t, result.IsError)
 
 	require.NoError(t, service.SignOutOAuth(ctx, "notion"))
+	assert.Equal(t, int32(2), notified.Load(), "a sign-out is announced to other gateway instances")
 	_, err = store.get(ctx, "notion")
 	require.ErrorIs(t, err, ErrNotFound)
 	view = waitForStatus(t, service, "notion", StatusDegraded)

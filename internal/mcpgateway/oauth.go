@@ -302,6 +302,8 @@ func (s *Service) CompleteOAuth(ctx context.Context, callback OAuthCallback) (st
 		return flow.server, err
 	}
 	s.oauth.clearFailure(flow.server)
+	// The sign-in is stored; other gateway instances reload it.
+	defer s.notifyChanged(ctx)
 	if err := s.Reload(ctx); err != nil {
 		return flow.server, fmt.Errorf("signed in, but the server was not reconnected: %w", err)
 	}
@@ -382,6 +384,7 @@ func (s *Service) SignOutOAuth(ctx context.Context, name string) error {
 		return err
 	}
 	s.oauth.clearFailure(name)
+	defer s.notifyChanged(ctx)
 	return s.Reload(ctx)
 }
 
