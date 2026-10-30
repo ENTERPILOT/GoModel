@@ -26,7 +26,7 @@ func TestNewKeepsVirtualServerPersistenceWithEncryption(t *testing.T) {
 	t.Cleanup(func() { _ = shared.Close() })
 	box, _ := encryptiontest.NewBox(t)
 
-	result, err := New(ctx, &config.Config{}, shared, box, nil, nil, nil)
+	result, err := New(ctx, &config.Config{}, shared, box, nil, nil, nil, nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = result.Close() })
 

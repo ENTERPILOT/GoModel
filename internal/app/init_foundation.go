@@ -74,10 +74,11 @@ func (b *bootstrap) initStorage() error {
 		app.register(subsystemRuntimeSettings, ownedByShutdown, app.runtimeSettings.Close)
 	}
 
-	// The extension shared store exists only when a registered component
-	// asks for it, so a gateway without one creates no table. initServer
-	// binds it once the generation has built.
-	if len(sharedStoreAwareComponents(b.cfg.Extensions)) > 0 {
+	// The shared store exists only when a registered component asks for it
+	// or the MCP gateway shares sessions through it, so a gateway without
+	// either creates no table. initServer binds it once the generation has
+	// built.
+	if len(sharedStoreAwareComponents(b.cfg.Extensions)) > 0 || mcpSharesSessions(b.appCfg) {
 		app.sharedStore, err = sharedstore.New(b.ctx, sharedStorage)
 		if err != nil {
 			return fmt.Errorf("failed to initialize extension shared store: %w", err)
@@ -85,6 +86,13 @@ func (b *bootstrap) initStorage() error {
 		app.register(subsystemSharedStore, ownedByShutdown, app.sharedStore.Close)
 	}
 	return nil
+}
+
+// mcpSharesSessions reports whether MCP downstream sessions are shared
+// between replicas. Only a database several replicas can share needs it: a
+// SQLite file belongs to one instance, which keeps its sessions in memory.
+func mcpSharesSessions(cfg *config.Config) bool {
+	return cfg.MCP.Enabled && cfg.Storage.BackendConfig().Type != storage.TypeSQLite
 }
 
 // initProviders composes every upstream client hook, then builds the

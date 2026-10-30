@@ -329,6 +329,37 @@ A last error mentioning `x509: certificate signed by unknown authority` means
 the server's TLS certificate is issued by a CA the container does not trust.
 See [private CA certificates](/guides/production#upstream-certificates-behind-a-private-ca).
 
+## Sessions across replicas
+
+Replicas that share a PostgreSQL or MongoDB database share MCP sessions too, so
+clients need no sticky sessions behind a load balancer. When `initialize`
+succeeds, the replica that answered stores the session's binding in the
+database: the auth key ID, user path, endpoint, `X-MCP-Servers` scope,
+discovery mode, and the client's `initialize` parameters. It is keyed by a
+SHA-256 digest of the `Mcp-Session-Id`, never the ID itself, and holds no
+secrets. A request with that ID on another replica is checked against the
+binding and resumes the session there, without a new `initialize`.
+
+| | Across replicas |
+| --- | --- |
+| Tool calls, listings, prompts, resources | Work on any replica, with the scope and discovery mode the session opened with. |
+| Negotiated protocol version, client info and capabilities | Carried over. |
+| Session binding (auth key, user path, endpoint) | Checked on every replica; a leaked ID under another identity gets 404 everywhere. |
+| `DELETE` | Ends the session on every replica. One that is serving it stops within about 2 seconds. |
+| Deleting a virtual server | Ends its sessions on every replica within about 2 seconds, even if it is recreated under the same name. |
+| Idle timeout | 30 minutes without a request on any replica, to within a minute. |
+| A response stream in flight | Stays on its replica. If that replica stops, the client sees that request fail; the session continues on another. |
+| The `GET` notification stream | Stays open on the replica it was opened on, until the client closes it or that replica ends the session. A client that reconnects it lands on any replica. |
+
+Stream resumption with `Last-Event-ID` is not supported, on one replica or
+several. The gateway sends no sampling, elicitation, or roots requests to
+clients (see [protocol coverage](#protocol-coverage)), so no such request can be
+stranded on another replica.
+
+With SQLite, sessions stay on the instance that opened them, as SQLite serves a
+single replica. If the database cannot be reached when a session opens, that
+session stays on its replica too, and the gateway logs a warning.
+
 ## Choose which tools each server exposes
 
 By default every tool a server reports is exposed. Trim a server's tools to
@@ -443,7 +474,7 @@ endpoint serves them as `{slug}_{name}`.
 - **Sessions are not authentication.** Every request is bearer-authenticated,
   and a session is additionally bound to the managed auth-key identity, user
   path, and pinned endpoint that initialized it; presenting a leaked session
-  ID under another identity returns 404.
+  ID under another identity returns 404, on every replica.
 - Secret header values are shown redacted (`***`) in the admin API and
   dashboard; saving a form with `***` preserves the stored secret.
 
