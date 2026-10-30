@@ -22,6 +22,11 @@ var Registration = providers.Registration{
 	Discovery: providers.DiscoveryConfig{
 		DefaultBaseURL:  defaultBaseURL,
 		AllowAPIKeyless: true,
+		CredentialFields: []providers.CredentialField{
+			{Name: providers.CredentialFieldAPIKeys},
+			{Name: providers.CredentialFieldBaseURL},
+			{Name: providers.CredentialFieldAPIMode, Advanced: true, Options: []string{apiModeAuto, apiModeNative, apiModeChatCompatible}},
+		},
 	},
 }
 
@@ -30,6 +35,8 @@ var Registration = providers.Registration{
 type Provider struct {
 	compatible *openai.CompatibleProvider
 	rootClient *llmclient.Client
+	apiMode    string
+	configErr  error
 }
 
 var _ core.Provider = (*Provider)(nil)
@@ -40,7 +47,13 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 	baseURL := providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL)
 	keys := opts.Keyring(cfg.APIKey)
 	opts.Keys = keys
+	apiMode, err := parseAPIMode(cfg.APIMode)
+	if err != nil {
+		err = configError(err)
+	}
 	return &Provider{
+		apiMode:   apiMode,
+		configErr: err,
 		compatible: openai.NewCompatibleProvider(cfg.APIKey, opts, openai.CompatibleProviderConfig{
 			ProviderName: "sglang",
 			BaseURL:      baseURL,
@@ -74,11 +87,17 @@ func setHeaders(req *http.Request, apiKey string) {
 
 // ChatCompletion sends a chat completion request to SGLang.
 func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
+	if p.configErr != nil {
+		return nil, p.configErr
+	}
 	return p.compatible.ChatCompletion(ctx, req)
 }
 
 // StreamChatCompletion streams a chat completion request from SGLang.
 func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
+	if p.configErr != nil {
+		return nil, p.configErr
+	}
 	return p.compatible.StreamChatCompletion(ctx, req)
 }
 
@@ -86,26 +105,49 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 // ListModels lists the served models, keeping the max_model_len SGLang
 // reports per entry as the context window.
 func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
+	if p.configErr != nil {
+		return nil, p.configErr
+	}
 	return p.compatible.ListModelsWithMaxModelLen(ctx)
 }
 
-// Responses sends an OpenAI Responses API request to SGLang.
+// Responses sends an OpenAI Responses API request to SGLang, through
+// /v1/responses or translated to chat completions as api_mode selects.
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
+	if p.configErr != nil {
+		return nil, p.configErr
+	}
+	if p.responsesViaChat(req) {
+		return providers.ResponsesViaChat(ctx, p, req, "sglang")
+	}
 	return p.compatible.Responses(ctx, req)
 }
 
-// StreamResponses streams an OpenAI Responses API request from SGLang.
+// StreamResponses streams an OpenAI Responses API request from SGLang,
+// through /v1/responses or translated to chat completions as api_mode selects.
 func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
+	if p.configErr != nil {
+		return nil, p.configErr
+	}
+	if p.responsesViaChat(req) {
+		return providers.StreamResponsesViaChat(ctx, p, req, "sglang")
+	}
 	return p.compatible.StreamResponses(ctx, req)
 }
 
 // Embeddings sends an embeddings request to SGLang.
 func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
+	if p.configErr != nil {
+		return nil, p.configErr
+	}
 	return p.compatible.Embeddings(ctx, req)
 }
 
 // Passthrough routes opaque requests to either SGLang's /v1 API or its native root API.
 func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest) (*core.PassthroughResponse, error) {
+	if p.configErr != nil {
+		return nil, p.configErr
+	}
 	if req == nil {
 		return nil, core.NewInvalidRequestError("passthrough request is required", nil)
 	}

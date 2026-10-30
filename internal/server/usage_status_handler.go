@@ -53,15 +53,21 @@ type usageStatusSummary struct {
 }
 
 type usageStatusBudget struct {
-	Scope         string  `json:"scope"`
-	Subject       string  `json:"subject"`
-	PerChild      bool    `json:"per_child"`
-	UserPath      string  `json:"user_path,omitempty"`
-	PeriodSeconds int64   `json:"period_seconds"`
-	PeriodLabel   string  `json:"period_label"`
-	Amount        float64 `json:"amount"`
-	Spent         float64 `json:"spent"`
-	Remaining     float64 `json:"remaining"`
+	Scope    string `json:"scope"`
+	Subject  string `json:"subject"`
+	PerChild bool   `json:"per_child"`
+	// CostBasis is the budget's configured basis: provider cost or billed
+	// cost.
+	CostBasis string `json:"cost_basis" enums:"provider,billed"`
+	// EnforcedCostBasis names the spend Spent and Amount measure. It is
+	// provider for a billed budget while billed budgets are unavailable.
+	EnforcedCostBasis string  `json:"enforced_cost_basis" enums:"provider,billed"`
+	UserPath          string  `json:"user_path,omitempty"`
+	PeriodSeconds     int64   `json:"period_seconds"`
+	PeriodLabel       string  `json:"period_label"`
+	Amount            float64 `json:"amount"`
+	Spent             float64 `json:"spent"`
+	Remaining         float64 `json:"remaining"`
 	// UsageRatio is spent/amount, deliberately unclamped: values above 1
 	// mean the budget is blown through.
 	UsageRatio      float64   `json:"usage_ratio"`
@@ -214,18 +220,20 @@ func usageStatusBudgets(results []budget.CheckResult, now time.Time) []usageStat
 	statuses := make([]usageStatusBudget, 0, len(results))
 	for _, result := range results {
 		status := usageStatusBudget{
-			Scope:           string(result.Budget.Scope),
-			Subject:         result.Budget.Subject,
-			PerChild:        result.Budget.PerChild,
-			PeriodSeconds:   result.Budget.PeriodSeconds,
-			PeriodLabel:     budget.PeriodLabel(result.Budget.PeriodSeconds),
-			Amount:          result.Budget.Amount,
-			Spent:           result.Spent,
-			Remaining:       result.Remaining,
-			UsageRatio:      result.UsageRatio(),
-			PeriodStart:     result.PeriodStart,
-			PeriodEnd:       result.PeriodEnd,
-			ResetsInSeconds: secondsUntil(result.PeriodEnd, now),
+			Scope:             string(result.Budget.Scope),
+			Subject:           result.Budget.Subject,
+			PerChild:          result.Budget.PerChild,
+			CostBasis:         string(result.Budget.CostBasis),
+			EnforcedCostBasis: string(result.Budget.EnforcedBasis()),
+			PeriodSeconds:     result.Budget.PeriodSeconds,
+			PeriodLabel:       budget.PeriodLabel(result.Budget.PeriodSeconds),
+			Amount:            result.Budget.Amount,
+			Spent:             result.Spent,
+			Remaining:         result.Remaining,
+			UsageRatio:        result.UsageRatio(),
+			PeriodStart:       result.PeriodStart,
+			PeriodEnd:         result.PeriodEnd,
+			ResetsInSeconds:   secondsUntil(result.PeriodEnd, now),
 			// Mirrors enforcement: budgets without any usage never block.
 			Exceeded: result.HasUsage && result.Spent >= result.Budget.Amount,
 		}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/platformdir"
 	"github.com/enterpilot/gomodel/internal/runtimesettings"
 	"github.com/enterpilot/gomodel/internal/storage"
@@ -20,12 +21,17 @@ import (
 //
 // The identifier is kept in the deployment's database first and the data
 // directory second (see versioncheck.Identity).
-func newVersionChecker(ctx context.Context, cfg config.VersionCheckConfig, backend storage.Storage) *versioncheck.Checker {
+//
+// license is what a licensed distribution registered about its license; it
+// is empty for core.
+func newVersionChecker(ctx context.Context, cfg config.VersionCheckConfig, backend storage.Storage, license ext.UpdateCheckLicense) *versioncheck.Checker {
 	checkerCfg := versioncheck.Config{
 		Enabled:        cfg.Enabled,
 		URL:            cfg.URL,
 		App:            version.App,
 		Version:        version.Version,
+		License:        license.Kind,
+		Account:        license.Account,
 		Interval:       time.Duration(cfg.IntervalHours) * time.Hour,
 		Timeout:        time.Duration(cfg.TimeoutSeconds) * time.Second,
 		MaxDailyChecks: cfg.MaxDailyChecks,

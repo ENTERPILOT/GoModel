@@ -108,6 +108,14 @@ const (
 	providerEnvFieldModelFilterInclude
 	providerEnvFieldModelFilterExclude
 	providerEnvFieldModelFilterMaxPrice
+	providerEnvFieldIdentityTokenFile
+	providerEnvFieldIdentityToken
+	providerEnvFieldTokenEndpoint
+	providerEnvFieldServiceAccountID
+	providerEnvFieldIdentityProviderID
+	providerEnvFieldFederationRuleID
+	providerEnvFieldOrganizationID
+	providerEnvFieldWorkspaceID
 )
 
 type providerEnvSource struct {
@@ -146,6 +154,7 @@ type providerEnvValues struct {
 	ModelFilterMaxPrice      *float64
 	SessionStickyKeys        *bool
 	FairnessFromUserPath     *bool
+	WorkloadIdentity         config.WorkloadIdentityConfig
 	// pending holds the settings whose value contains "${", unparsed, until
 	// resolveSettings resolves them. A pending field counts as set.
 	pending map[providerEnvField]envVar
@@ -225,8 +234,14 @@ func (v providerEnvValues) hasAPIKey() bool {
 	return false
 }
 
+// hasCredential reports whether this env group authenticates the provider,
+// with an API key or workload identity.
+func (v providerEnvValues) hasCredential() bool {
+	return v.hasAPIKey() || v.WorkloadIdentity.Configured()
+}
+
 func (v providerEnvValues) empty() bool {
-	return !v.hasAPIKey() &&
+	return !v.hasCredential() &&
 		strings.TrimSpace(v.BaseURL) == "" &&
 		strings.TrimSpace(v.APIVersion) == "" &&
 		strings.TrimSpace(v.Backend) == "" &&
@@ -362,6 +377,10 @@ func (v *providerEnvValues) setField(field providerEnvField, index int, key, val
 		if parsed, err := strconv.ParseBool(strings.TrimSpace(value)); err == nil {
 			v.FairnessFromUserPath = &parsed
 		}
+	default:
+		if setting := workloadIdentitySetting(&v.WorkloadIdentity, field); setting != nil {
+			*setting = value
+		}
 	}
 }
 
@@ -439,6 +458,7 @@ func parseProviderEnvKey(prefix, key string, spec DiscoveryConfig) (string, prov
 			{name: "GCP_SCOPE", field: providerEnvFieldGCPScope},
 		}, fields...)
 	}
+	fields = append(workloadIdentityEnvNames(spec.WorkloadIdentity), fields...)
 	if strings.EqualFold(prefix, "LLMD") {
 		fields = append([]struct {
 			name  string
@@ -624,12 +644,13 @@ func (v providerEnvValues) rawConfig(providerType string, spec DiscoveryConfig) 
 		Models:                   rawProviderModelsFromIDs(v.Models),
 		ModelFilter:              v.modelFilter(),
 		SessionStickyKeys:        v.SessionStickyKeys,
+		WorkloadIdentity:         v.WorkloadIdentity,
 	}
 }
 
 func (v providerEnvValues) resolvedBaseURL(spec DiscoveryConfig) string {
 	baseURL := strings.TrimSpace(v.BaseURL)
-	if baseURL == "" && v.hasAPIKey() && spec.DefaultBaseURL != "" {
+	if baseURL == "" && v.hasCredential() && spec.DefaultBaseURL != "" {
 		return spec.DefaultBaseURL
 	}
 	return baseURL
@@ -645,7 +666,7 @@ func overlayProviderEnvValues(existing config.RawProviderConfig, values provider
 	}
 	if values.BaseURL != "" {
 		existing.BaseURL = values.BaseURL
-	} else if normalizeResolvedBaseURL(existing.BaseURL) == "" && values.hasAPIKey() && spec.DefaultBaseURL != "" {
+	} else if normalizeResolvedBaseURL(existing.BaseURL) == "" && values.hasCredential() && spec.DefaultBaseURL != "" {
 		existing.BaseURL = spec.DefaultBaseURL
 	}
 	if values.APIVersion != "" {
@@ -704,6 +725,7 @@ func overlayProviderEnvValues(existing config.RawProviderConfig, values provider
 	if values.ModelFilterMaxPrice != nil {
 		existing.ModelFilter.MaxPricePerMtok = values.ModelFilterMaxPrice
 	}
+	overlayWorkloadIdentity(&existing.WorkloadIdentity, values.WorkloadIdentity)
 	return existing
 }
 
@@ -724,7 +746,10 @@ func (v providerEnvValues) withoutFieldsSetBy(existing config.RawProviderConfig)
 		}
 	}
 
-	drop("api_key", providerEnvFieldAPIKey, v.hasAPIKey(), rawProviderHasAPIKey(existing), func() {
+	// Workload identity in the config provider counts as its credential, so
+	// a stray bare key never shadows it.
+	hasCredential := rawProviderHasAPIKey(existing) || workloadIdentitySet(existing.WorkloadIdentity, providerValueSet)
+	drop("api_key", providerEnvFieldAPIKey, v.hasAPIKey(), hasCredential, func() {
 		v.APIKey, v.APIKeyVar = "", ""
 		v.APIKeysByIndex, v.APIKeyVarsByIndex = nil, nil
 	})
@@ -752,6 +777,11 @@ func (v providerEnvValues) withoutFieldsSetBy(existing config.RawProviderConfig)
 	for _, f := range stringFields {
 		env := f.env
 		drop(f.name, f.field, strings.TrimSpace(*env) != "", providerValueSet(f.cfg), func() { *env = "" })
+	}
+	for _, f := range workloadIdentityEnvFields {
+		env := workloadIdentitySetting(&v.WorkloadIdentity, f.field)
+		cfg := *workloadIdentitySetting(&existing.WorkloadIdentity, f.field)
+		drop("workload_identity."+f.yaml, f.field, strings.TrimSpace(*env) != "", providerValueSet(cfg), func() { *env = "" })
 	}
 
 	drop("session_sticky_keys", providerEnvFieldSessionStickyKeys, v.SessionStickyKeys != nil, existing.SessionStickyKeys != nil, func() { v.SessionStickyKeys = nil })

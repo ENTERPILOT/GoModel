@@ -138,6 +138,12 @@ func (a *App) RefreshRuntime(ctx context.Context) (admin.RuntimeRefreshReport, e
 	if err := a.runRefreshableServiceStep(&report, "mcp_servers", a.mcpGatewayService(), ctx); err != nil {
 		return report, err
 	}
+	if err := a.runRefreshableServiceStep(&report, "budgets", a.budgetService(), ctx); err != nil {
+		return report, err
+	}
+	if err := a.runRefreshableServiceStep(&report, "rate_limits", a.rateLimitService(), ctx); err != nil {
+		return report, err
+	}
 
 	if registry != nil {
 		report.ModelCount = registry.ModelCount()
@@ -323,6 +329,22 @@ func (a *App) guardrailService() refreshableService {
 		return nil
 	}
 	return a.guardrails.Service
+}
+
+// budgetService reloads budgets, budget settings, and reset times.
+func (a *App) budgetService() refreshableService {
+	if a == nil || a.budgets == nil || a.budgets.Service == nil {
+		return nil
+	}
+	return a.budgets.Service
+}
+
+// rateLimitService reloads rate-limit rules. Counters stay as they are.
+func (a *App) rateLimitService() refreshableService {
+	if a == nil || a.rateLimits == nil || a.rateLimits.Service == nil {
+		return nil
+	}
+	return a.rateLimits.Service
 }
 
 func (a *App) workflowService() refreshableService {

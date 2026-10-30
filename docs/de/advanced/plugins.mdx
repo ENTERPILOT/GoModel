@@ -341,7 +341,7 @@ guardrails:
       config:                     # wird gegen das ConfigSchema des Plugins validiert
         mode: "regex"
         rules: |
-          sk-[A-Za-z0-9]{20,} => [redacted]
+          sk-[A-Za-z0-9_-]{20,} => [redacted]
 ```
 
 Regeln aus `config.yaml` werden in den verwalteten Standard-Workflow an der Position `order` in
@@ -612,6 +612,14 @@ Hinweise für Autoren:
   Modellauswahlen; ein `secret`-Wert wird in jeder Admin-Response maskiert. Verwenden Sie `bool`
   für einen Schalter und `list` für eine offene Liste von Strings (Entitätstypen, eine Allowlist),
   statt diese in einem `select` oder einem `textarea` zu kodieren.
+- `InputRange` rendert einen Schieberegler, der durch `Min`, `Max` und `Step` am Feld begrenzt
+  ist; ein `Max` von null bedeutet 1, und ein nicht gesetztes oder nicht positives `Step`
+  bedeutet eine Schrittweite von 0.01. Verwenden Sie ihn für eine
+  begrenzte Zahl (ein Gewicht, einen Schwellenwert) statt einer Freitext-`number`, die der
+  Operator außerhalb des Bereichs setzen kann. Die Grenzen sind nur Hinweise: Der Server
+  speichert, was die Konfiguration deklariert, ein in YAML gesetzter Wert wird also nicht
+  abgelehnt. Das Dashboard begrenzt nur, was der Schieberegler anzeigt; ein Wert außerhalb des
+  Bereichs bleibt in der Konfiguration, bis der Operator den Schieberegler bewegt.
 - Fügen Sie Feldern, die zu einem virtuellen Modell statt zur Instanz gehören,
   `Scope: pluginapi.ScopeRoute` hinzu (nur bei Routing-Strategien).
 
@@ -763,7 +771,8 @@ Form, die der Guardrail-Editor darstellt:
 
 `phases`, `source`, `mutates` und `guardrail` sind neu (auch die Instanzansichten von
 `GET /admin/guardrails` enthalten `guardrail`); `fields[].input` kann jetzt `secret`, `model`,
-`bool` oder `list` sein, und `fields[].scope` ist `""` (Instanz) oder `"route"`.
+`bool`, `list` oder `range` (ein durch `min`, `max` und `step` begrenzter Schieberegler) sein,
+und `fields[].scope` ist `""` (Instanz) oder `"route"`.
 
 ### GET, PUT, DELETE /admin/guardrails
 

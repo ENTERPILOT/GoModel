@@ -36,6 +36,7 @@ func configModel(entry config.VirtualModelConfig) VirtualModel {
 		UserPaths:       entry.UserPaths,
 		Description:     entry.Description,
 		Slowdown:        entry.Slowdown,
+		ReasoningEffort: entry.ReasoningEffort,
 		Enabled:         enabled,
 		Managed:         true,
 	}

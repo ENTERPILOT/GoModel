@@ -2,6 +2,7 @@ package xai
 
 import (
 	"context"
+	"net/http"
 	"net/url"
 	"strings"
 	"testing"
@@ -74,4 +75,16 @@ func TestRealtimeTargetAttachesByCallID(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, target.URL, "call_id=rtc_9")
 	assert.NotContains(t, target.URL, "model=", "sideband attach must not carry a model query")
+}
+
+// The websocket dial must go through the provider's own client so its
+// proxy_url, an extension's proxy selection, and the TLS trust apply.
+func TestRealtimeTargetCarriesProviderHTTPClient(t *testing.T) {
+	client := &http.Client{}
+	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{HTTPClient: client})
+	rp, ok := p.(core.RealtimeProvider)
+	require.True(t, ok)
+	target, err := rp.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "grok-voice-latest"})
+	require.NoError(t, err)
+	assert.Same(t, client, target.HTTPClient)
 }

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/enterpilot/gomodel/config"
@@ -510,121 +511,128 @@ func TestCacheFile(t *testing.T) {
 
 func TestInitializeAsync(t *testing.T) {
 	t.Run("LoadsFromCacheImmediately", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		cacheFile := filepath.Join(tmpDir, "models.json")
+		synctest.Test(t, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			cacheFile := filepath.Join(tmpDir, "models.json")
 
-		// Create a cache file
-		modelCache := modelcache.ModelCache{
-			UpdatedAt: time.Now().UTC(),
-			Providers: map[string]modelcache.CachedProvider{
-				"test": {
-					ProviderType: "test",
-					OwnedBy:      "test",
-					Models: []modelcache.CachedModel{
-						{ID: "cached-model"},
+			// Create a cache file
+			modelCache := modelcache.ModelCache{
+				UpdatedAt: time.Now().UTC(),
+				Providers: map[string]modelcache.CachedProvider{
+					"test": {
+						ProviderType: "test",
+						OwnedBy:      "test",
+						Models: []modelcache.CachedModel{
+							{ID: "cached-model"},
+						},
 					},
 				},
-			},
-		}
-		data, _ := json.Marshal(modelCache)
-		_ = os.WriteFile(cacheFile, data, 0o644)
+			}
+			data, _ := json.Marshal(modelCache)
+			_ = os.WriteFile(cacheFile, data, 0o644)
 
-		// Create registry with slow provider (delay ensures cache check happens before network fetch)
-		registry := NewModelRegistry()
-		localCache := modelcache.NewLocalCache(cacheFile)
-		registry.SetCache(localCache)
+			// Create registry with slow provider (delay ensures cache check happens before network fetch)
+			registry := NewModelRegistry()
+			localCache := modelcache.NewLocalCache(cacheFile)
+			registry.SetCache(localCache)
 
-		mock := &registryMockProvider{
-			name:            "test",
-			listModelsDelay: 50 * time.Millisecond, // delay long enough for assertion to run
-			modelsResponse: &core.ModelsResponse{
-				Object: "list",
-				Data: []core.Model{
-					{ID: "network-model", Object: "model", OwnedBy: "test"},
+			mock := &registryMockProvider{
+				name:            "test",
+				listModelsDelay: 50 * time.Millisecond, // delay long enough for assertion to run
+				modelsResponse: &core.ModelsResponse{
+					Object: "list",
+					Data: []core.Model{
+						{ID: "network-model", Object: "model", OwnedBy: "test"},
+					},
 				},
-			},
-		}
-		registry.RegisterProviderWithNameAndType(mock, "test", "test")
+			}
+			registry.RegisterProviderWithNameAndType(mock, "test", "test")
 
-		// InitializeAsync should return immediately after loading cache
-		registry.InitializeAsync(context.Background())
+			// InitializeAsync should return immediately after loading cache
+			registry.InitializeAsync(context.Background())
 
-		// Cached model should be available immediately (before background fetch completes)
-		assert.True(t, registry.Supports("cached-model"))
+			// Cached model should be available immediately (before background fetch completes)
+			assert.True(t, registry.Supports("cached-model"))
 
-		// Wait for background goroutine to complete (for temp dir cleanup)
-		time.Sleep(100 * time.Millisecond)
+			// Advance the bubble's clock past the fetch delay so the background
+			// goroutine finishes its cache save before the temp dir is removed.
+			time.Sleep(100 * time.Millisecond)
+		})
 	})
 
 	t.Run("RefreshesInBackground", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		cacheFile := filepath.Join(tmpDir, "models.json")
+		synctest.Test(t, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			cacheFile := filepath.Join(tmpDir, "models.json")
 
-		registry := NewModelRegistry()
-		localCache := modelcache.NewLocalCache(cacheFile)
-		registry.SetCache(localCache)
+			registry := NewModelRegistry()
+			localCache := modelcache.NewLocalCache(cacheFile)
+			registry.SetCache(localCache)
 
-		mock := &registryMockProvider{
-			name: "test",
-			modelsResponse: &core.ModelsResponse{
-				Object: "list",
-				Data: []core.Model{
-					{ID: "network-model", Object: "model", OwnedBy: "test"},
+			mock := &registryMockProvider{
+				name: "test",
+				modelsResponse: &core.ModelsResponse{
+					Object: "list",
+					Data: []core.Model{
+						{ID: "network-model", Object: "model", OwnedBy: "test"},
+					},
 				},
-			},
-		}
-		registry.RegisterProviderWithNameAndType(mock, "test", "test")
+			}
+			registry.RegisterProviderWithNameAndType(mock, "test", "test")
 
-		// InitializeAsync should start background fetch
-		registry.InitializeAsync(context.Background())
+			// InitializeAsync should start background fetch
+			registry.InitializeAsync(context.Background())
 
-		// Wait for background initialization
-		time.Sleep(100 * time.Millisecond)
+			// Wait for background initialization
+			synctest.Wait()
 
-		// Network model should be available after background refresh
-		assert.True(t, registry.Supports("network-model"))
+			// Network model should be available after background refresh
+			assert.True(t, registry.Supports("network-model"))
 
-		// Should be marked as initialized
-		assert.True(t, registry.IsInitialized())
+			// Should be marked as initialized
+			assert.True(t, registry.IsInitialized())
+		})
 	})
 
 	t.Run("SavesToCacheAfterRefresh", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		cacheFile := filepath.Join(tmpDir, "models.json")
+		synctest.Test(t, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			cacheFile := filepath.Join(tmpDir, "models.json")
 
-		registry := NewModelRegistry()
-		localCache := modelcache.NewLocalCache(cacheFile)
-		registry.SetCache(localCache)
+			registry := NewModelRegistry()
+			localCache := modelcache.NewLocalCache(cacheFile)
+			registry.SetCache(localCache)
 
-		mock := &registryMockProvider{
-			name: "test",
-			modelsResponse: &core.ModelsResponse{
-				Object: "list",
-				Data: []core.Model{
-					{ID: "new-model", Object: "model", OwnedBy: "test"},
+			mock := &registryMockProvider{
+				name: "test",
+				modelsResponse: &core.ModelsResponse{
+					Object: "list",
+					Data: []core.Model{
+						{ID: "new-model", Object: "model", OwnedBy: "test"},
+					},
 				},
-			},
-		}
-		registry.RegisterProviderWithNameAndType(mock, "test", "test")
+			}
+			registry.RegisterProviderWithNameAndType(mock, "test", "test")
 
-		// InitializeAsync should save to cache after network fetch
-		registry.InitializeAsync(context.Background())
+			// InitializeAsync should save to cache after network fetch
+			registry.InitializeAsync(context.Background())
 
-		// Wait for background initialization and cache save
-		time.Sleep(100 * time.Millisecond)
-		_, err := // Verify cache file was created
-			os.Stat(cacheFile)
-		require.False(t, os.IsNotExist(err))
+			// Wait for background initialization and cache save
+			synctest.Wait()
+			_, err := // Verify cache file was created
+				os.Stat(cacheFile)
+			require.False(t, os.IsNotExist(err))
 
-		// Verify cache contains the network model
-		data, _ := os.ReadFile(cacheFile)
-		var modelCache modelcache.ModelCache
-		_ = json.Unmarshal(data, &modelCache)
+			// Verify cache contains the network model
+			data, _ := os.ReadFile(cacheFile)
+			var modelCache modelcache.ModelCache
+			_ = json.Unmarshal(data, &modelCache)
 
-		p, ok := modelCache.Providers["test"]
-		require.True(t, ok)
-		require.Len(t, p.Models, 1)
-		assert.Equal(t, "new-model", p.Models[0].ID, "expected new-model in cache, got %v", p.Models)
+			p, ok := modelCache.Providers["test"]
+			require.True(t, ok)
+			require.Len(t, p.Models, 1)
+			assert.Equal(t, "new-model", p.Models[0].ID, "expected new-model in cache, got %v", p.Models)
+		})
 	})
 }
 

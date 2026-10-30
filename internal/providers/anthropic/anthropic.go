@@ -17,6 +17,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/workloadidentity"
 	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
@@ -26,7 +27,8 @@ var Registration = providers.Registration{
 	New:                         New,
 	PassthroughSemanticEnricher: passthroughSemanticEnricher,
 	Discovery: providers.DiscoveryConfig{
-		DefaultBaseURL: defaultBaseURL,
+		DefaultBaseURL:   defaultBaseURL,
+		WorkloadIdentity: workloadidentity.JWTBearer,
 	},
 }
 
@@ -63,6 +65,10 @@ type Provider struct {
 	// call; providers that reuse the Anthropic dialect behind another
 	// upstream (OpenCode Go) use it for their identification headers.
 	requestHeaders func(context.Context) http.Header
+	// providerName names this provider in the values clients see, such as the
+	// provider field on streamed events: the configured instance name when the
+	// factory supplied one, the provider type otherwise.
+	providerName string
 
 	batchEndpointsMu sync.RWMutex
 	// batchResultEndpoints keeps endpoint hints by provider batch id and custom_id.
@@ -75,9 +81,10 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 	p := &Provider{
 		keys:                 opts.Keyring(providerCfg.APIKey),
 		batchResultEndpoints: make(map[string]map[string]string),
+		providerName:         opts.ClientName("anthropic"),
 	}
 	clientCfg := llmclient.Config{
-		ProviderName:   opts.ClientName("anthropic"),
+		ProviderName:   p.providerName,
 		BaseURL:        providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL),
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,
@@ -90,6 +97,16 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 // GetBaseURL returns the provider's current API base URL.
 func (p *Provider) GetBaseURL() string {
 	return p.client.BaseURL()
+}
+
+// responseProviderName names this provider in the values clients see: the
+// configured instance name when the factory supplied one, the provider type
+// otherwise.
+func (p *Provider) responseProviderName() string {
+	if p.providerName != "" {
+		return p.providerName
+	}
+	return "anthropic"
 }
 
 // SetBaseURL allows configuring a custom base URL for the provider
@@ -184,10 +201,15 @@ func (p *Provider) setHeaders(req *http.Request) {
 	if !pinned {
 		key = p.keys.NextForContext(req.Context())
 	}
-	if isOAuthToken(key) {
+	switch {
+	case p.keys.Federated():
+		// Workload identity tokens share the subscription-token prefix but
+		// authenticate as a service account: Bearer alone, no oauth beta.
+		req.Header.Set("Authorization", "Bearer "+key)
+	case isOAuthToken(key):
 		req.Header.Set("Authorization", "Bearer "+key)
 		req.Header.Set(anthropicBetaHeader, oauthBetaFlag)
-	} else {
+	default:
 		req.Header.Set("x-api-key", key)
 	}
 	req.Header.Set("anthropic-version", anthropicAPIVersion)
@@ -243,7 +265,7 @@ func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest
 	key := p.keys.NextForContext(ctx)
 	ctx = withPinnedKey(ctx, key)
 	headers := req.Headers
-	if isOAuthToken(key) {
+	if isOAuthToken(key) && !p.keys.Federated() {
 		headers = ensureOAuthBeta(headers)
 	}
 
@@ -310,6 +332,31 @@ var forcedToolChoiceRejectedPrefixes = []string{
 
 func rejectsForcedToolChoice(model string) bool {
 	return matchesModelPrefix(model, forcedToolChoiceRejectedPrefixes)
+}
+
+// defaultThinkingPrefixes lists the model families that think when a request
+// omits thinking and accept thinking {"type": "disabled"} to stop it.
+// disabledThinkingRejectedPrefixes lists the point releases those prefixes
+// would also match that reject "disabled": Opus 5.5 always thinks, and Sonnet
+// 5.5 does not think unless asked. Fable and Mythos always think too. Every
+// other model gets no thinking block, which is off for models that can turn
+// it off and never risks a rejection.
+var (
+	defaultThinkingPrefixes = []string{
+		"claude-opus-5",
+		"claude-sonnet-5",
+		"claude-haiku-5-5",
+	}
+	disabledThinkingRejectedPrefixes = []string{
+		"claude-opus-5-5",
+		"claude-sonnet-5-5",
+	}
+)
+
+// thinksByDefault reports whether model needs thinking {"type": "disabled"}
+// to answer without thinking.
+func thinksByDefault(model string) bool {
+	return matchesModelPrefix(model, defaultThinkingPrefixes) && !matchesModelPrefix(model, disabledThinkingRejectedPrefixes)
 }
 
 // matchesModelPrefix reports whether model is one of the prefixes exactly or

@@ -8,38 +8,39 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestSlowdownStreamDrainsUpstreamBeforeDelayedRelease(t *testing.T) {
-	source := &timedChunkSource{}
-	started := time.Now()
-	stream := NewSlowdownStream(context.Background(), source, 5, started)
-	t.Cleanup(func() { _ = stream.Close() })
+	// The source's latency and the delayed release run on the bubble's clock.
+	synctest.Test(t, func(t *testing.T) {
+		source := &timedChunkSource{}
+		started := time.Now()
+		stream := NewSlowdownStream(t.Context(), source, 5, started)
+		t.Cleanup(func() { _ = stream.Close() })
 
-	result := make(chan string, 1)
-	go func() {
-		body, _ := io.ReadAll(stream)
-		result <- string(body)
-	}()
+		result := make(chan string, 1)
+		go func() {
+			body, _ := io.ReadAll(stream)
+			result <- string(body)
+		}()
 
-	// The first source chunk arrives around 20ms and is due around 120ms with
-	// factor 5. The background drainer must still consume the whole source while
-	// the downstream reader is waiting, proving that delayed data is buffered.
-	time.Sleep(60 * time.Millisecond)
-	reads := source.reads.Load()
-	require.GreaterOrEqual(t, reads, int32(3))
+		// The first source chunk arrives at 20ms and is due at 120ms with
+		// factor 5. The background drainer must still consume the whole source
+		// while the downstream reader is waiting, proving that delayed data is
+		// buffered.
+		time.Sleep(60 * time.Millisecond)
+		reads := source.reads.Load()
+		require.GreaterOrEqual(t, reads, int32(3))
 
-	select {
-	case body := <-result:
+		body := <-result
 		require.Equal(t, "ab", body)
 		elapsed := time.Since(started)
 		require.GreaterOrEqual(t, elapsed, 90*time.Millisecond)
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("timed out waiting for delayed stream")
-	}
+	})
 }
 
 func TestSlowdownStreamReadStopsOnCancellation(t *testing.T) {
