@@ -25,6 +25,8 @@ type mongoVirtualModelDocument struct {
 	UserPaths       []string  `bson:"user_paths,omitempty"`
 	Description     string    `bson:"description,omitempty"`
 	Slowdown        *float64  `bson:"slowdown,omitempty"`
+	ContextWindow   *int      `bson:"context_window,omitempty"`
+	MaxOutputTokens *int      `bson:"max_output_tokens,omitempty"`
 	ReasoningEffort string    `bson:"reasoning_effort,omitempty"`
 	Enabled         bool      `bson:"enabled"`
 	CreatedAt       time.Time `bson:"created_at"`
@@ -99,20 +101,22 @@ func (s *MongoDBStore) Upsert(ctx context.Context, vm VirtualModel) error {
 	stampUpsert(&vm)
 	update := bson.M{
 		"$set": bson.M{
-			"targets":          vm.Targets,
-			"strategy":         vm.Strategy,
-			"strategy_plugin":  vm.StrategyPlugin,
-			"strategy_config":  vm.StrategyConfig,
-			"session_affinity": vm.SessionAffinity,
-			"failover":         vm.Failover,
-			"provider_name":    vm.ProviderName,
-			"model":            vm.Model,
-			"user_paths":       vm.UserPaths,
-			"description":      vm.Description,
-			"slowdown":         vm.Slowdown,
-			"reasoning_effort": vm.ReasoningEffort,
-			"enabled":          vm.Enabled,
-			"updated_at":       vm.UpdatedAt,
+			"targets":           vm.Targets,
+			"strategy":          vm.Strategy,
+			"strategy_plugin":   vm.StrategyPlugin,
+			"strategy_config":   vm.StrategyConfig,
+			"session_affinity":  vm.SessionAffinity,
+			"failover":          vm.Failover,
+			"provider_name":     vm.ProviderName,
+			"model":             vm.Model,
+			"user_paths":        vm.UserPaths,
+			"description":       vm.Description,
+			"slowdown":          vm.Slowdown,
+			"context_window":    vm.ContextWindow,
+			"max_output_tokens": vm.MaxOutputTokens,
+			"reasoning_effort":  vm.ReasoningEffort,
+			"enabled":           vm.Enabled,
+			"updated_at":        vm.UpdatedAt,
 		},
 		"$setOnInsert": bson.M{
 			"created_at": vm.CreatedAt,
@@ -152,6 +156,8 @@ func virtualModelFromMongo(doc mongoVirtualModelDocument) VirtualModel {
 		Model:           doc.Model,
 		Description:     doc.Description,
 		Slowdown:        doc.Slowdown,
+		ContextWindow:   doc.ContextWindow,
+		MaxOutputTokens: doc.MaxOutputTokens,
 		ReasoningEffort: doc.ReasoningEffort,
 		Enabled:         doc.Enabled,
 		CreatedAt:       doc.CreatedAt.UTC(),

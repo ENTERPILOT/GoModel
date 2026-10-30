@@ -23,6 +23,8 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 			ReasoningEffort: "medium",
 			SessionAffinity: new(false),
 			Failover:        new(false),
+			ContextWindow:   new(128000),
+			MaxOutputTokens: new(16000),
 			Enabled:         true,
 		}
 		policy := VirtualModel{
@@ -64,6 +66,8 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 		require.False(t, *gotRedirect.SessionAffinity, "Get(fast).SessionAffinity: want explicit false")
 		require.NotNil(t, gotRedirect.Failover)
 		require.False(t, *gotRedirect.Failover, "Get(fast).Failover: want explicit false")
+		assert.Equal(t, new(128000), gotRedirect.ContextWindow)
+		assert.Equal(t, new(16000), gotRedirect.MaxOutputTokens)
 
 		gotPolicy, err := store.Get(ctx, "openai/gpt-4o")
 		require.NoError(t, err)
@@ -74,6 +78,8 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 		require.Equal(t, 0.2, *gotPolicy.Slowdown)
 		require.Nil(t, gotPolicy.SessionAffinity)
 		require.Nil(t, gotPolicy.Failover)
+		assert.Nil(t, gotPolicy.ContextWindow)
+		assert.Nil(t, gotPolicy.MaxOutputTokens)
 		assert.Empty(t, gotPolicy.ReasoningEffort)
 
 		gotDisabled, err := store.Get(ctx, "no-slowdown")
@@ -148,4 +154,48 @@ func TestSQLStore_ListsRowWithOutOfRangeTimestamp(t *testing.T) {
 	assert.True(t, rows[0].UpdatedAt.IsZero(), "timestamps = %s / %s, want the zero time", rows[0].CreatedAt, rows[0].UpdatedAt)
 	_, err = json.Marshal(rows)
 	require.NoError(t, err)
+}
+
+// A table created before the token limit columns existed must upgrade in place
+// and keep its rows readable.
+func TestSQLStore_UpgradesTableWithoutTokenLimitColumns(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		ctx := context.Background()
+		err := db.Schema(ctx, `CREATE TABLE virtual_models (
+			source TEXT PRIMARY KEY,
+			targets TEXT NOT NULL DEFAULT '[]',
+			strategy TEXT NOT NULL DEFAULT '',
+			strategy_plugin TEXT NOT NULL DEFAULT '',
+			strategy_config TEXT NOT NULL DEFAULT '{}',
+			session_affinity TEXT NOT NULL DEFAULT '',
+			failover TEXT NOT NULL DEFAULT '',
+			provider_name TEXT NOT NULL DEFAULT '',
+			model TEXT NOT NULL DEFAULT '',
+			user_paths TEXT NOT NULL DEFAULT '[]',
+			description TEXT NOT NULL DEFAULT '',
+			slowdown DOUBLE PRECISION DEFAULT NULL,
+			enabled `+sqlx.TypeBool+` NOT NULL DEFAULT TRUE,
+			created_at `+sqlx.TypeInt64+` NOT NULL,
+			updated_at `+sqlx.TypeInt64+` NOT NULL
+		)`)
+		require.NoError(t, err)
+		_, err = db.Exec(ctx, `INSERT INTO virtual_models (source, targets, created_at, updated_at) VALUES (?, ?, 0, 0)`,
+			"fast", `[{"model":"openai/gpt-4o"}]`)
+		require.NoError(t, err)
+
+		store, err := NewSQLStore(ctx, db)
+		require.NoError(t, err)
+
+		got, err := store.Get(ctx, "fast")
+		require.NoError(t, err)
+		assert.Nil(t, got.ContextWindow)
+		assert.Nil(t, got.MaxOutputTokens)
+
+		limit := 128000
+		got.ContextWindow = &limit
+		require.NoError(t, store.Upsert(ctx, *got))
+		got, err = store.Get(ctx, "fast")
+		require.NoError(t, err)
+		assert.Equal(t, &limit, got.ContextWindow)
+	})
 }

@@ -306,6 +306,8 @@ class VirtualModelEditorStore {
       ).join("\n"),
       description: alias.description || "",
       slowdown: alias.slowdown ?? "",
+      context_window: alias.context_window ?? "",
+      max_output_tokens: alias.max_output_tokens ?? "",
       reasoning_effort: alias.reasoning_effort || "",
       enabled: alias.enabled !== false,
     };
@@ -366,6 +368,8 @@ class VirtualModelEditorStore {
       user_paths: userPaths.join("\n"),
       description: override && override.description ? override.description : "",
       slowdown: override && override.slowdown != null ? override.slowdown : "",
+      context_window: (override && override.context_window) ?? "",
+      max_output_tokens: (override && override.max_output_tokens) ?? "",
       reasoning_effort: (override && override.reasoning_effort) || "",
       enabled: overrideEnabled,
     };

@@ -194,6 +194,9 @@ export function mapRedirectView(view) {
     failover: view.failover !== false,
     description: view.description || "",
     slowdown: view.slowdown == null ? null : Number(view.slowdown),
+    context_window: view.context_window == null ? null : Number(view.context_window),
+    max_output_tokens:
+      view.max_output_tokens == null ? null : Number(view.max_output_tokens),
     reasoning_effort: view.reasoning_effort || "",
     enabled: view.enabled !== false,
     managed: Boolean(view.managed),
