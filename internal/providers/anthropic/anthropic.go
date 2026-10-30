@@ -334,6 +334,31 @@ func rejectsForcedToolChoice(model string) bool {
 	return matchesModelPrefix(model, forcedToolChoiceRejectedPrefixes)
 }
 
+// defaultThinkingPrefixes lists the model families that think when a request
+// omits thinking and accept thinking {"type": "disabled"} to stop it.
+// disabledThinkingRejectedPrefixes lists the point releases those prefixes
+// would also match that reject "disabled": Opus 5.5 always thinks, and Sonnet
+// 5.5 does not think unless asked. Fable and Mythos always think too. Every
+// other model gets no thinking block, which is off for models that can turn
+// it off and never risks a rejection.
+var (
+	defaultThinkingPrefixes = []string{
+		"claude-opus-5",
+		"claude-sonnet-5",
+		"claude-haiku-5-5",
+	}
+	disabledThinkingRejectedPrefixes = []string{
+		"claude-opus-5-5",
+		"claude-sonnet-5-5",
+	}
+)
+
+// thinksByDefault reports whether model needs thinking {"type": "disabled"}
+// to answer without thinking.
+func thinksByDefault(model string) bool {
+	return matchesModelPrefix(model, defaultThinkingPrefixes) && !matchesModelPrefix(model, disabledThinkingRejectedPrefixes)
+}
+
 // matchesModelPrefix reports whether model is one of the prefixes exactly or
 // extends one past a dash, which covers dated snapshots ("claude-opus-4-8-20260301")
 // and point releases ("claude-fable-5" matches "claude-fable-5-1"). The trailing

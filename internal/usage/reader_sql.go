@@ -3,6 +3,7 @@ package usage
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -256,7 +257,7 @@ func (r *SQLReader) GetUsageByEndpoint(ctx context.Context, params UsageQueryPar
 	}
 	where := sqlutil.BuildWhereClause(conditions)
 
-	query := `SELECT endpoint, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)` + usageCostColumns + `
+	query := `SELECT endpoint, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)` + usageBilledCostColumns + `
 			FROM usage` + where + ` GROUP BY endpoint ORDER BY endpoint`
 
 	rows, err := r.db.Query(ctx, query, args...)
@@ -268,7 +269,7 @@ func (r *SQLReader) GetUsageByEndpoint(ctx context.Context, params UsageQueryPar
 	result := make([]EndpointUsage, 0)
 	for rows.Next() {
 		var e EndpointUsage
-		if err := rows.Scan(&e.Endpoint, &e.Requests, &e.InputTokens, &e.OutputTokens, &e.TotalTokens, &e.InputCost, &e.OutputCost, &e.TotalCost); err != nil {
+		if err := rows.Scan(&e.Endpoint, &e.Requests, &e.InputTokens, &e.OutputTokens, &e.TotalTokens, &e.InputCost, &e.OutputCost, &e.TotalCost, &e.BilledCost); err != nil {
 			return nil, fmt.Errorf("failed to scan usage by endpoint row: %w", err)
 		}
 		result = append(result, e)
@@ -310,7 +311,7 @@ func (r *SQLReader) GetUsageBySession(ctx context.Context, params SessionUsagePa
 		var session SessionUsage
 		if err := rows.Scan(&session.SessionID, &session.UserPath, &session.Requests,
 			&session.InputTokens, &session.OutputTokens, &session.TotalTokens,
-			&session.InputCost, &session.OutputCost, &session.TotalCost); err != nil {
+			&session.InputCost, &session.OutputCost, &session.TotalCost, &session.BilledCost); err != nil {
 			return nil, fmt.Errorf("failed to scan usage by session row: %w", err)
 		}
 		result = append(result, session)
@@ -340,7 +341,7 @@ func (d usageDialect) sessionUsageQueries(params SessionUsageParams) (countQuery
 		COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0),
 		` + providerSessionCostSQL("input_cost") + `,
 		` + providerSessionCostSQL("output_cost") + `,
-		` + providerSessionCostSQL("total_cost") + `
+		` + providerSessionCostSQL("total_cost") + `, SUM(billed_cost)
 		FROM usage` + where + groupBy + ` ORDER BY MAX(` + d.timeExpr + `) DESC, session_id ASC, user_path ASC LIMIT ? OFFSET ?`
 	dataArgs = append(append([]any(nil), args...), limit, offset)
 	return countQuery, dataQuery, args, dataArgs, limit, offset, nil
@@ -455,10 +456,10 @@ func (r *SQLReader) GetDailyUsage(ctx context.Context, params UsageQueryParams) 
 	// arguments, which a GROUP BY repeating the expression would need twice.
 	query := `WITH usage_periods AS (
 		SELECT ` + groupExpr + ` AS period,
-			input_tokens, output_tokens, total_tokens, input_cost, output_cost, total_cost
+			input_tokens, output_tokens, total_tokens, input_cost, output_cost, total_cost, billed_cost
 		FROM usage` + where + `
 	)
-	SELECT period, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)` + usageCostColumns + `
+	SELECT period, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(total_tokens), 0)` + usageBilledCostColumns + `
 		FROM usage_periods GROUP BY period ORDER BY period`
 
 	queryArgs := append(groupArgs, args...)
@@ -472,7 +473,7 @@ func (r *SQLReader) GetDailyUsage(ctx context.Context, params UsageQueryParams) 
 	result := make([]DailyUsage, 0)
 	for rows.Next() {
 		var d DailyUsage
-		if err := rows.Scan(&d.Date, &d.Requests, &d.InputTokens, &d.OutputTokens, &d.TotalTokens, &d.InputCost, &d.OutputCost, &d.TotalCost); err != nil {
+		if err := rows.Scan(&d.Date, &d.Requests, &d.InputTokens, &d.OutputTokens, &d.TotalTokens, &d.InputCost, &d.OutputCost, &d.TotalCost, &d.BilledCost); err != nil {
 			return nil, fmt.Errorf("failed to scan daily usage row: %w", err)
 		}
 		result = append(result, d)
@@ -497,7 +498,47 @@ func (r *SQLReader) GetDailyUsage(ctx context.Context, params UsageQueryParams) 
 	}
 	applyDailyInputSplit(result, splits)
 
+	if mode := billedCacheHitsMode(params.CacheMode); mode != "" {
+		hits, err := r.periodBilledCost(ctx, params, groupExpr, groupArgs, mode)
+		if err != nil {
+			return nil, err
+		}
+		result = addPeriodBilledCost(result, hits)
+	}
 	return result, nil
+}
+
+// periodBilledCost sums billed_cost per period over the rows params matches
+// in cacheMode, labelling periods with groupExpr like GetDailyUsage.
+func (r *SQLReader) periodBilledCost(ctx context.Context, params UsageQueryParams, groupExpr string, groupArgs []any, cacheMode string) (map[string]*float64, error) {
+	params.CacheMode = cacheMode
+	conditions, args, err := r.dialect.usageConditions(params)
+	if err != nil {
+		return nil, err
+	}
+	query := `WITH usage_periods AS (
+		SELECT ` + groupExpr + ` AS period, billed_cost FROM usage` + sqlutil.BuildWhereClause(conditions) + `
+	)
+	SELECT period, SUM(billed_cost) FROM usage_periods GROUP BY period`
+	rows, err := r.db.Query(ctx, query, append(slices.Clone(groupArgs), args...)...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query daily billed cost: %w", err)
+	}
+	defer rows.Close()
+
+	billed := map[string]*float64{}
+	for rows.Next() {
+		var period string
+		var cost *float64
+		if err := rows.Scan(&period, &cost); err != nil {
+			return nil, fmt.Errorf("failed to scan daily billed cost row: %w", err)
+		}
+		billed[period] = cost
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating daily billed cost rows: %w", err)
+	}
+	return billed, nil
 }
 
 // GetCacheOverview returns cached-only aggregates for the admin dashboard.

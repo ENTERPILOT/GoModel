@@ -13,6 +13,10 @@ type RequestModelResolution struct {
 	// Slowdown is the extra-time factor selected for this request. A value of
 	// 0.5 adds 50% of measured inference time; zero disables slowdown.
 	Slowdown float64
+	// VirtualModelPath lists the virtual models routing passed through to
+	// reach ResolvedSelector, outermost first. It is empty when no virtual
+	// model applied.
+	VirtualModelPath []string
 
 	// resolvedQualified and resolvedRoute memoize the derived selector strings
 	// (see CacheDerivedSelectors). cachedSelector and cachedProviderName record

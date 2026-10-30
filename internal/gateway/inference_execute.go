@@ -112,24 +112,21 @@ func (o *InferenceOrchestrator) ExecuteEmbeddings(ctx context.Context, workflow 
 		return nil, err
 	}
 	started := time.Now()
-	resp, providerType, providerName, err := o.executeEmbeddings(ctx, workflow, req)
+	resp, meta, err := o.executeEmbeddings(ctx, workflow, req)
 	if err != nil {
 		return nil, err
 	}
-	pricingModel := usagePricingModel(workflow, req.Model, "", resp.Model)
-	o.logUsage(ctx, workflow, pricingModel, providerType, providerName, func(pricing *core.ModelPricing) *usage.UsageEntry {
-		return usage.ExtractFromEmbeddingResponse(resp, requestID, providerType, endpoint, pricing)
+	meta.Model = resp.Model
+	pricingModel := usagePricingModel(workflow, req.Model, meta.FailoverModel, meta.Model)
+	o.logUsage(ctx, workflow, pricingModel, meta.ProviderType, meta.ProviderName, func(pricing *core.ModelPricing) *usage.UsageEntry {
+		return usage.ExtractFromEmbeddingResponse(resp, requestID, meta.ProviderType, endpoint, pricing)
 	})
 	if err := waitForInferenceSlowdown(ctx, workflow, time.Since(started)); err != nil {
 		return nil, err
 	}
 	return &EmbeddingResult{
 		Response: resp,
-		Meta: ExecutionMeta{
-			ProviderType: providerType,
-			ProviderName: providerName,
-			Model:        resp.Model,
-		},
+		Meta:     meta,
 	}, nil
 }
 
@@ -143,14 +140,14 @@ func (o *InferenceOrchestrator) DispatchEmbeddings(
 		return nil, "", "", err
 	}
 	started := time.Now()
-	resp, providerType, providerName, err := o.executeEmbeddings(ctx, workflow, req)
+	resp, meta, err := o.executeEmbeddings(ctx, workflow, req)
 	if err != nil {
 		return nil, "", "", err
 	}
 	if err := waitForInferenceSlowdown(ctx, workflow, time.Since(started)); err != nil {
 		return nil, "", "", err
 	}
-	return resp, providerType, providerName, nil
+	return resp, meta.ProviderType, meta.ProviderName, nil
 }
 
 // ResolveChatRoute returns the provider route and the request to send for chat streams.
@@ -186,7 +183,8 @@ func (o *InferenceOrchestrator) executeChatCompletion(
 	if err := o.validateProviderAndRequest(req != nil, "chat request is required"); err != nil {
 		return nil, ExecutionMeta{}, err
 	}
-	return executeTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, CloneChatRequestForSelector, o.chatCompletionProviderCall, chatResponseProvider)
+	call := withReasoningEffort(o, workflow, chatRequestSelectorOf, ChatRequestWithReasoningEffort, chatRequestWithClientReasoning, o.chatCompletionProviderCall)
+	return executeTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, CloneChatRequestForSelector, call, chatResponseProvider)
 }
 
 func (o *InferenceOrchestrator) streamChatCompletion(
@@ -198,7 +196,8 @@ func (o *InferenceOrchestrator) streamChatCompletion(
 	if err := o.validateProviderAndRequest(req != nil, "chat request is required"); err != nil {
 		return nil, ExecutionMeta{}, err
 	}
-	return streamTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, providerType, providerName, usageModel, CloneChatRequestForSelector, o.streamChatCompletionProviderCall)
+	call := withReasoningEffort(o, workflow, chatRequestSelectorOf, ChatRequestWithReasoningEffort, chatRequestWithClientReasoning, o.streamChatCompletionProviderCall)
+	return streamTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, providerType, providerName, usageModel, CloneChatRequestForSelector, call)
 }
 
 func (o *InferenceOrchestrator) executeResponses(
@@ -209,7 +208,8 @@ func (o *InferenceOrchestrator) executeResponses(
 	if err := o.validateProviderAndRequest(req != nil, "responses request is required"); err != nil {
 		return nil, ExecutionMeta{}, err
 	}
-	return executeTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, CloneResponsesRequestForSelector, patchedResponsesCall(o, workflow, o.responsesProviderCall), responsesResponseProvider)
+	call := withReasoningEffort(o, workflow, responsesRequestSelectorOf, ResponsesRequestWithReasoningEffort, responsesRequestWithClientReasoning, patchedResponsesCall(o, workflow, o.responsesProviderCall))
+	return executeTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, CloneResponsesRequestForSelector, call, responsesResponseProvider)
 }
 
 // patchedResponsesCall runs the Responses attempt patcher, when configured,
@@ -240,7 +240,8 @@ func (o *InferenceOrchestrator) streamResponses(
 	if err := o.validateProviderAndRequest(req != nil, "responses request is required"); err != nil {
 		return nil, ExecutionMeta{}, err
 	}
-	return streamTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, providerType, providerName, usageModel, CloneResponsesRequestForSelector, patchedResponsesCall(o, workflow, o.streamResponsesProviderCall))
+	call := withReasoningEffort(o, workflow, responsesRequestSelectorOf, ResponsesRequestWithReasoningEffort, responsesRequestWithClientReasoning, patchedResponsesCall(o, workflow, o.streamResponsesProviderCall))
+	return streamTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, providerType, providerName, usageModel, CloneResponsesRequestForSelector, call)
 }
 
 type translatedExecutionSpec[Req any, Resp any, Result any] struct {
@@ -395,6 +396,10 @@ func nameProviderInstance[Resp any](resp Resp, providerName string) Resp {
 		if typed != nil {
 			typed.Provider = providerName
 		}
+	case *core.EmbeddingResponse:
+		if typed != nil {
+			typed.Provider = providerName
+		}
 	}
 	return resp
 }
@@ -517,6 +522,13 @@ func chatResponseProvider(resp *core.ChatResponse) string {
 	return resp.Provider
 }
 
+func embeddingResponseProvider(resp *core.EmbeddingResponse) string {
+	if resp == nil {
+		return ""
+	}
+	return resp.Provider
+}
+
 func responsesResponseModel(resp *core.ResponsesResponse) string {
 	if resp == nil {
 		return ""
@@ -542,30 +554,21 @@ func (o *InferenceOrchestrator) executeEmbeddings(
 	ctx context.Context,
 	workflow *core.Workflow,
 	req *core.EmbeddingRequest,
-) (*core.EmbeddingResponse, string, string, error) {
+) (*core.EmbeddingResponse, ExecutionMeta, error) {
 	if err := o.validateProviderAndRequest(req != nil, "embeddings request is required"); err != nil {
-		return nil, "", "", err
+		return nil, ExecutionMeta{}, err
 	}
-	providerType := ProviderTypeFromWorkflow(workflow)
-	providerName := ProviderNameFromWorkflow(workflow)
-	resp, err := o.provider.Embeddings(ctx, req)
-	if err == nil {
-		if resp == nil {
-			return nil, "", "", emptyProviderResponseError(providerName)
-		}
-		return resp, ResponseProviderType(providerType, resp.Provider), providerName, nil
-	}
-
-	return o.tryFailoverEmbeddings(ctx, workflow, req, err)
+	return executeTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider,
+		CloneEmbeddingRequestForSelector, o.embeddingsProviderCall, embeddingResponseProvider)
 }
 
-func (o *InferenceOrchestrator) tryFailoverEmbeddings(
-	ctx context.Context,
-	workflow *core.Workflow,
-	req *core.EmbeddingRequest,
-	primaryErr error,
-) (*core.EmbeddingResponse, string, string, error) {
-	// Embeddings failover is intentionally disabled until the shared model
-	// contract can prove vector-size compatibility for alternates.
-	return nil, "", "", primaryErr
+func (o *InferenceOrchestrator) embeddingsProviderCall(ctx context.Context, req *core.EmbeddingRequest, providerName string) (*core.EmbeddingResponse, error) {
+	resp, err := o.provider.Embeddings(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, emptyProviderResponseError(providerName)
+	}
+	return resp, nil
 }

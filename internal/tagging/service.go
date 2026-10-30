@@ -26,6 +26,17 @@ type Service struct {
 
 	current   atomic.Value // snapshot
 	refreshMu sync.Mutex
+
+	// changed is called after every successful save; see SetChangeNotifier.
+	changed func(context.Context)
+}
+
+// SetChangeNotifier installs fn, called after every successful SaveRules so
+// other gateway instances reload the rules. Call it before serving.
+func (s *Service) SetChangeNotifier(fn func(context.Context)) {
+	if s != nil {
+		s.changed = fn
+	}
 }
 
 // NewService creates a tagging service. configRules must already be normalized
@@ -126,6 +137,9 @@ func (s *Service) SaveRules(ctx context.Context, rules []Rule) ([]Rule, error) {
 	}
 	if err := s.store.SaveRules(ctx, rules); err != nil {
 		return nil, fmt.Errorf("save tagging rules: %w", err)
+	}
+	if s.changed != nil {
+		defer s.changed(ctx)
 	}
 	if err := s.Refresh(ctx); err != nil {
 		return nil, err

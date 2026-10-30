@@ -74,6 +74,13 @@ Jede Prüfung enthält:
 | `X-GoModel-Install` | eine UUID   | anonyme ID pro Deployment, siehe unten |
 | `X-GoModel-Source`  | `scheduled` | `scheduled` oder `dashboard`        |
 
+GoModel Pro fügt zwei weitere hinzu, die [unten](#gomodel-pro-lizenzen) beschrieben sind:
+
+| Header              | Beispiel          | Bedeutung                                                         |
+| ------------------- | ----------------- | ----------------------------------------------------------------- |
+| `X-GoModel-License` | `paid`            | `paid`, `trial`, `beta` oder `none`                               |
+| `X-GoModel-Account` | 32 Hex-Zeichen    | Digest des Namens des Lizenznehmers; nur bei `paid` und `trial`   |
+
 Eine durch einen Dashboard-Besuch ausgelöste Prüfung leitet außerdem einen
 Ausschnitt dieses Besuchs weiter, der auf einer **Allowlist** steht: den
 `User-Agent` des Browsers, `Accept-Language`, die Client Hints `Sec-CH-UA*`
@@ -120,6 +127,34 @@ Frühere Releases haben die ID in dieser Situation aus `GOMODEL_MASTER_KEY`
 abgeleitet. Eine so gespeicherte ID wird beim ersten Start dieses Releases
 sowohl in der Datenbank als auch in der Datei durch eine zufällige ersetzt,
 sodass sich das Deployment einmalig als neu meldet.
+
+### GoModel-Pro-Lizenzen
+
+Eine Organisation betreibt oft mehrere Gateways (Staging und Produktion, eines
+pro Region), jedes mit eigener Datenbank und damit eigener Installations-ID. Um
+neben Deployments auch Lizenznehmer zu zählen, meldet GoModel Pro die Art der
+Lizenz, mit der es läuft, und bei einer bezahlten oder Testlizenz einen
+**Account-Digest**: ein HMAC-SHA256 der in der Lizenz genannten Organisation,
+gekürzt auf 32 Hex-Zeichen. Alle Gateways auf den Lizenzen eines Lizenznehmers
+melden denselben Digest, auch nach einer Verlängerung oder wenn aus einer
+Testlizenz unter demselben Namen eine bezahlte Lizenz wird. Eine Testlizenz
+nennt das bei der Registrierung angegebene Unternehmen oder, falls keines
+angegeben wurde, die E-Mail-Adresse. Der Name selbst wird nie gesendet. Wie
+jeder Digest eines Namens lässt er sich von jemandem überprüfen, der den Namen
+bereits vermutet; wir gleichen ihn mit den Namen auf den von uns ausgestellten
+Lizenzen ab. Beta-Builds teilen sich eine eingebaute Lizenz, daher melden sie
+`beta` und keinen Digest.
+
+### Was wir auf unserer Seite erfassen
+
+Jeder Server, mit dem Sie sich verbinden, sieht die öffentliche Adresse Ihres
+Gateways. Wir speichern sie nicht. Zusätzlich zu den obigen Headern erfasst der
+Release-Host das Land und den Netzbetreiber, von dem der Request kam (dessen
+Nummer und Namen des autonomen Systems, etwa ein Cloud-Provider), sowie einen
+schlüsselbasierten Hash der Adresse, damit Gateways hinter einer Adresse einmal
+gezählt werden können. Der Hash lässt sich ohne einen Schlüssel, den nur wir
+besitzen, nicht in die Adresse zurückverwandeln, und er wird nach 90 Tagen
+gelöscht.
 
 ## Deaktivieren, wenn Sie keine Update-Hinweise erhalten möchten
 

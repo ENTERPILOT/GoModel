@@ -40,11 +40,13 @@ type usageDialect struct {
 
 	// hasLabels selects rows whose labels can be expanded. labelMatch tests
 	// for one label bound to its placeholder. labelSource expands each row's
-	// labels into one row per label, read through labelValue.
-	hasLabels   string
-	labelMatch  string
-	labelSource string
-	labelValue  string
+	// labels into one row per label, read through labelValue. labelLeftJoin
+	// does the same but keeps unlabelled rows, with a NULL labelValue.
+	hasLabels     string
+	labelMatch    string
+	labelSource   string
+	labelValue    string
+	labelLeftJoin string
 
 	// lockRows locks rows a pricing recalculation is about to rewrite.
 	// SQLite needs nothing: its write transaction already holds the database.
@@ -67,7 +69,9 @@ func usageDialectFor(dialect sqlx.Dialect) usageDialect {
 			labelMatch:  "jsonb_exists(labels, ?)",
 			labelSource: "jsonb_array_elements_text(labels) AS label",
 			labelValue:  "label",
-			lockRows:    " FOR UPDATE",
+			labelLeftJoin: "LEFT JOIN LATERAL jsonb_array_elements_text(" +
+				"CASE WHEN jsonb_typeof(labels) = 'array' THEN labels ELSE '[]'::jsonb END) AS label ON TRUE",
+			lockRows: " FOR UPDATE",
 		}
 	}
 	return usageDialect{
@@ -78,13 +82,14 @@ func usageDialectFor(dialect sqlx.Dialect) usageDialect {
 			"CREATE INDEX IF NOT EXISTS idx_usage_timestamp_epoch ON usage(" + sqliteTimestampEpochExpr + ")",
 			"CREATE INDEX IF NOT EXISTS idx_usage_auth_key_id ON usage(auth_key_id)",
 		},
-		timeExpr:    sqliteTimestampEpochExpr,
-		timeArg:     func(t time.Time) any { return t.UTC().Unix() },
-		like:        "LIKE",
-		hasLabels:   "labels IS NOT NULL",
-		labelMatch:  "(labels IS NOT NULL AND EXISTS (SELECT 1 FROM json_each(usage.labels) WHERE json_each.value = ?))",
-		labelSource: "json_each(usage.labels) AS labels_each",
-		labelValue:  "labels_each.value",
+		timeExpr:      sqliteTimestampEpochExpr,
+		timeArg:       func(t time.Time) any { return t.UTC().Unix() },
+		like:          "LIKE",
+		hasLabels:     "labels IS NOT NULL",
+		labelMatch:    "(labels IS NOT NULL AND EXISTS (SELECT 1 FROM json_each(usage.labels) WHERE json_each.value = ?))",
+		labelSource:   "json_each(usage.labels) AS labels_each",
+		labelValue:    "labels_each.value",
+		labelLeftJoin: "LEFT JOIN json_each(usage.labels) AS labels_each",
 	}
 }
 

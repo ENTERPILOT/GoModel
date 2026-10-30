@@ -28,19 +28,20 @@ type Provider struct {
 	*openai.CompatibleProvider
 	resourceProvider       *openai.CompatibleProvider
 	openAIResourceProvider *openai.CompatibleProvider
-	apiVersion             string
+	apiVersion             string             // configured api-version; empty selects the surface default
+	resourcePath           string             // "/openai", or "/openai/v1" on the GA v1 surface
 	keys                   *providers.Keyring // retained to inject the api-key header on the realtime target
 }
 
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	baseURL := providers.ResolveBaseURL(providerCfg.BaseURL, "https://example.invalid")
-	apiVersion := providers.ResolveAPIVersion(providerCfg.APIVersion, defaultAPIVersion)
 	// All three clients share opts.Keys, so the rotation is even across them.
-	p := &Provider{apiVersion: apiVersion, keys: opts.Keyring(providerCfg.APIKey)}
+	p := &Provider{apiVersion: strings.TrimSpace(providerCfg.APIVersion), keys: opts.Keyring(providerCfg.APIKey)}
 	clientCfg := openai.CompatibleProviderConfig{
-		ProviderName: "azure",
-		BaseURL:      baseURL,
-		SetHeaders:   setHeaders,
+		ProviderName:     "azure",
+		BaseURL:          baseURL,
+		SetHeaders:       setHeaders,
+		AdaptChatRequest: adaptChatRequest,
 		// The Azure OpenAI v1 API documents the allowed_tools tool_choice.
 		ForwardAllowedTools: true,
 	}
@@ -54,18 +55,26 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 	return p
 }
 
+// SetBaseURL accepts both Azure surfaces: the classic deployment URL
+// (<resource>/openai/deployments/<deployment>) and the GA v1 URL
+// (<resource>/openai/v1/) that Azure AI Foundry hands out.
 func (p *Provider) SetBaseURL(baseURL string) {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	resourceRoot := resourceRootBaseURL(baseURL)
+	p.resourcePath = "/openai"
+	if isV1BaseURL(baseURL) {
+		p.resourcePath = "/openai/v1"
+	}
 	p.CompatibleProvider.SetBaseURL(baseURL)
 	p.resourceProvider.SetBaseURL(resourceRoot)
-	p.openAIResourceProvider.SetBaseURL(resourceRoot + "/openai")
+	p.openAIResourceProvider.SetBaseURL(resourceRoot + p.resourcePath)
 }
 
 func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error) {
 	var resp core.ModelsResponse
 	if err := p.resourceProvider.Do(ctx, llmclient.Request{
 		Method:   http.MethodGet,
-		Endpoint: "/openai/models",
+		Endpoint: p.resourcePath + "/models",
 	}, &resp); err != nil {
 		return nil, err
 	}
@@ -84,7 +93,7 @@ func (p *Provider) CreateBatch(ctx context.Context, req *core.BatchRequest) (*co
 	var resp core.BatchResponse
 	if err := p.resourceProvider.Do(ctx, llmclient.Request{
 		Method:   http.MethodPost,
-		Endpoint: "/openai/batches",
+		Endpoint: p.resourcePath + "/batches",
 		Body:     req,
 	}, &resp); err != nil {
 		return nil, err
@@ -97,7 +106,7 @@ func (p *Provider) GetBatch(ctx context.Context, id string) (*core.BatchResponse
 	var resp core.BatchResponse
 	if err := p.resourceProvider.Do(ctx, llmclient.Request{
 		Method:   http.MethodGet,
-		Endpoint: "/openai/batches/" + url.PathEscape(id),
+		Endpoint: p.resourcePath + "/batches/" + url.PathEscape(id),
 	}, &resp); err != nil {
 		return nil, err
 	}
@@ -106,7 +115,7 @@ func (p *Provider) GetBatch(ctx context.Context, id string) (*core.BatchResponse
 }
 
 func (p *Provider) ListBatches(ctx context.Context, limit int, after string) (*core.BatchListResponse, error) {
-	endpoint := providers.PaginatedEndpoint("/openai/batches", limit, "after", after)
+	endpoint := providers.PaginatedEndpoint(p.resourcePath+"/batches", limit, "after", after)
 
 	var resp core.BatchListResponse
 	if err := p.resourceProvider.Do(ctx, llmclient.Request{
@@ -123,7 +132,7 @@ func (p *Provider) CancelBatch(ctx context.Context, id string) (*core.BatchRespo
 	var resp core.BatchResponse
 	if err := p.resourceProvider.Do(ctx, llmclient.Request{
 		Method:   http.MethodPost,
-		Endpoint: "/openai/batches/" + url.PathEscape(id) + "/cancel",
+		Endpoint: p.resourcePath + "/batches/" + url.PathEscape(id) + "/cancel",
 	}, &resp); err != nil {
 		return nil, err
 	}
@@ -142,15 +151,54 @@ func (p *Provider) SetAPIVersion(version string) {
 	p.apiVersion = version
 }
 
+// requestAPIVersion returns the api-version query value, or "" to send none.
+// The GA v1 surface is unversioned and rejects dated versions, so it only gets
+// one when configured explicitly (e.g. "preview").
+func (p *Provider) requestAPIVersion() string {
+	if p.apiVersion != "" {
+		return p.apiVersion
+	}
+	if p.resourcePath == "/openai/v1" {
+		return ""
+	}
+	return defaultAPIVersion
+}
+
+// mutateRequest adds the api-version query parameter. Foundry's decision
+// endpoints get buffered bodies; System One is unversioned, and the v1
+// Decisions endpoint takes only a configured version.
 func (p *Provider) mutateRequest(req *llmclient.Request) {
+	if strings.HasPrefix(req.Endpoint, systemOnePath) {
+		bufferDecisionBody(req)
+		return
+	}
+	version := p.requestAPIVersion()
+	if strings.HasPrefix(req.Endpoint, openAIDecisionsPath) {
+		bufferDecisionBody(req)
+		version = p.apiVersion
+	}
+	if version == "" {
+		return
+	}
 	endpoint, err := url.Parse(req.Endpoint)
 	if err != nil {
 		return
 	}
 	query := endpoint.Query()
-	query.Set("api-version", p.apiVersion)
+	query.Set("api-version", version)
 	endpoint.RawQuery = query.Encode()
 	req.Endpoint = endpoint.String()
+}
+
+// maxStopSequences is the longest "stop" list Azure OpenAI accepts, the same
+// four-item limit as OpenAI's own chat completions.
+const maxStopSequences = 4
+
+// adaptChatRequest truncates an over-long "stop" list so a request carrying
+// more stop sequences than Azure allows (Anthropic's Messages API accepts
+// more) still reaches the model instead of failing upstream.
+func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
+	return providers.CapStopSequences(req, maxStopSequences)
 }
 
 func setHeaders(req *http.Request, apiKey string) {
@@ -174,6 +222,7 @@ func resourceRootBaseURL(baseURL string) string {
 			break
 		}
 	}
+	path = strings.TrimSuffix(path, "/openai/v1")
 
 	parsed.Path = path
 	parsed.RawPath = ""
@@ -181,4 +230,13 @@ func resourceRootBaseURL(baseURL string) string {
 	parsed.Fragment = ""
 
 	return strings.TrimRight(parsed.String(), "/")
+}
+
+// isV1BaseURL reports whether baseURL targets Azure's GA v1 surface.
+func isV1BaseURL(baseURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return false
+	}
+	return strings.HasSuffix(strings.TrimRight(parsed.Path, "/"), "/openai/v1")
 }
