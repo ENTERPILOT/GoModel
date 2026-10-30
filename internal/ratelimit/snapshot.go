@@ -1,13 +1,17 @@
 package ratelimit
 
-import "time"
-
-// WindowSnapshot is one persisted request/token sliding window.
-// Partition is empty for a shared rule and the child path for a per-child
-// template (Rule.EffectiveSubject). Writer is the random ID of the process
-// that wrote the row, so replicas sharing a store keep separate rows instead
-// of overwriting each other's; rows imported from before writer IDs existed
-// carry an empty writer.
+// WindowSnapshot is one writer's persisted counters for one key: its
+// request/token sliding windows, or for a concurrency rule its in-flight
+// gauge. Partition is empty for a shared rule and the child path for a
+// per-child template (Rule.EffectiveSubject). Writer is the random ID of the
+// process that wrote the row, so replicas sharing a store keep separate rows
+// instead of overwriting each other's; rows imported from before writer IDs
+// existed carry an empty writer.
+//
+// A row holds only what its writer counted itself, never counts it loaded
+// from other rows, so the cluster's count for a key is the sum of its rows
+// (see peerView.sum). A restarted process writes under a new ID, and its
+// earlier run's rows are summed like any other writer's.
 type WindowSnapshot struct {
 	Scope         string `bson:"scope"`
 	Subject       string `bson:"subject"`
@@ -22,162 +26,156 @@ type WindowSnapshot struct {
 	TokensWindowStart   int64  `bson:"tokens_window_start"`
 	TokensCurrent       int64  `bson:"tokens_current"`
 	TokensPrevious      int64  `bson:"tokens_previous"`
+	// InFlight is the writer's in-flight gauge on a concurrency rule
+	// (PeriodConcurrent), whose window fields stay zero.
+	InFlight int64 `bson:"in_flight"`
+	// UpdatedAt is when the writer last saved the row, in unix seconds by
+	// its own clock. Stores stamp it on save, whatever the snapshot holds,
+	// and report it on load.
+	UpdatedAt int64 `bson:"updated_at"`
 }
 
 func definitionKey(scope RuleScope, subject string, periodSeconds int64) ruleKey {
 	return ruleKey{scope: scope, subject: subject, periodSeconds: periodSeconds}
 }
 
+// ruleIndex finds the rule definition a counter key or stored row belongs to.
+type ruleIndex map[ruleKey]Rule
+
+func indexRules(rules []Rule) ruleIndex {
+	index := make(ruleIndex, len(rules))
+	for _, rule := range rules {
+		index[definitionKey(rule.Scope, rule.Subject, rule.PeriodSeconds)] = rule
+	}
+	return index
+}
+
+// lookup returns the rule for key, provided the key's partition fits the
+// rule's mode: a shared rule owns only the empty partition, a per-child rule
+// only child partitions.
+func (index ruleIndex) lookup(key ruleKey) (Rule, bool) {
+	rule, ok := index[definitionKey(key.scope, key.subject, key.periodSeconds)]
+	if !ok || rule.PerChild != (key.partition != "") {
+		return Rule{}, false
+	}
+	return rule, true
+}
+
+func newSnapshot(key ruleKey, rule Rule) WindowSnapshot {
+	return WindowSnapshot{
+		Scope:         string(key.scope),
+		Subject:       key.subject,
+		Partition:     key.partition,
+		PeriodSeconds: key.periodSeconds,
+		Epoch:         rule.CounterEpoch,
+	}
+}
+
+// snapshot returns the rows this writer has to save: one per key whose
+// request or token counter changed since the previous snapshot, and one per
+// concurrency key whose gauge is nonzero, or dropped to zero since the
+// previous snapshot published it. A row of an unchanged key is left as it is:
+// it already holds the same counts, and a reader rolls it forward as admission
+// rolls the counter. In-flight rows are republished every time, so peers can
+// tell a live writer's slots from a crashed one's (see Service.inFlightLiveness).
+//
+// It clears the change marks; a save that fails hands its rows back through
+// unsaved.
 func (l *limiter) snapshot(rules []Rule) []WindowSnapshot {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	defs := make(map[ruleKey]Rule, len(rules))
-	for _, rule := range rules {
-		if rule.PeriodSeconds <= 0 {
-			continue
+	index := indexRules(rules)
+	var changed []ruleKey
+	for _, counters := range []map[ruleKey]*windowCounter{l.requests, l.tokens} {
+		for key, counter := range counters {
+			if !counter.dirty {
+				continue
+			}
+			counter.dirty = false
+			if key.periodSeconds > 0 {
+				changed = append(changed, key)
+			}
 		}
-		defs[definitionKey(rule.Scope, rule.Subject, rule.PeriodSeconds)] = rule
 	}
 
-	byKey := make(map[ruleKey]*WindowSnapshot)
-	add := func(key ruleKey, kind counterKind, counter windowCounter) {
-		rule, ok := defs[definitionKey(key.scope, key.subject, key.periodSeconds)]
-		if !ok {
-			return
+	var out []WindowSnapshot
+	seen := make(map[ruleKey]bool, len(changed))
+	for _, key := range changed {
+		rule, ok := index.lookup(key)
+		if !ok || seen[key] {
+			continue
 		}
-		if rule.PerChild != (key.partition != "") {
-			return
-		}
-		snap := byKey[key]
-		if snap == nil {
-			snap = &WindowSnapshot{
-				Scope:         string(key.scope),
-				Subject:       key.subject,
-				Partition:     key.partition,
-				PeriodSeconds: key.periodSeconds,
-				Epoch:         rule.CounterEpoch,
-			}
-			byKey[key] = snap
-		}
-		switch kind {
-		case requestCounter:
+		seen[key] = true
+		snap := newSnapshot(key, rule)
+		if counter := l.requests[key]; counter != nil {
 			snap.RequestsWindowStart = counter.windowStart
 			snap.RequestsCurrent = counter.current
 			snap.RequestsPrevious = counter.previous
-		case tokenCounter:
+		}
+		if counter := l.tokens[key]; counter != nil {
 			snap.TokensWindowStart = counter.windowStart
 			snap.TokensCurrent = counter.current
 			snap.TokensPrevious = counter.previous
 		}
+		out = append(out, snap)
 	}
 
-	for key, counter := range l.requests {
-		add(key, requestCounter, *counter)
+	for key, inFlight := range l.inFlight {
+		rule, ok := index.lookup(key)
+		if !ok || key.periodSeconds != PeriodConcurrent {
+			continue
+		}
+		snap := newSnapshot(key, rule)
+		snap.InFlight = inFlight
+		out = append(out, snap)
+		l.publishedInFlight[key] = struct{}{}
 	}
-	for key, counter := range l.tokens {
-		add(key, tokenCounter, *counter)
-	}
-
-	out := make([]WindowSnapshot, 0, len(byKey))
-	for _, snap := range byKey {
-		out = append(out, *snap)
+	for key := range l.publishedInFlight {
+		if l.inFlight[key] > 0 {
+			continue
+		}
+		delete(l.publishedInFlight, key)
+		if rule, ok := index.lookup(key); ok {
+			out = append(out, newSnapshot(key, rule))
+		}
 	}
 	return out
 }
 
-// restore loads persisted windows into the limiter. A key can have one row
-// per writer: every replica sharing the store writes its own, and a restarted
-// process comes back under a new writer ID next to the rows of its previous
-// run. Rows for the same key are merged per counter (requests and tokens
-// separately):
-//
-//  1. Each row is rolled forward to the window containing now, exactly as
-//     admission would roll it (windowCounter.advance): a row one period behind
-//     shifts current into previous, an older one drops to zero.
-//  2. The merged counter takes the maximum current and the maximum previous
-//     across those normalized rows.
-//
-// The maximum, not the sum, is deliberate. A single instance restarting gets
-// its own counts back: its last run started from the run before it, so its
-// rows dominate every older one field by field. With N replicas each serving
-// about 1/N of the traffic, the largest peer row approximates this replica's
-// own share, where a sum would charge it for all N.
-func (l *limiter) restore(snapshots []WindowSnapshot, rules []Rule, now time.Time) {
+// unsaved marks the rows of a failed save for the next snapshot again. A
+// counter reset since the snapshot has nothing left to mark.
+func (l *limiter) unsaved(snapshots []WindowSnapshot) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-
-	byDef := make(map[ruleKey]Rule, len(rules))
-	for _, rule := range rules {
-		byDef[definitionKey(rule.Scope, rule.Subject, rule.PeriodSeconds)] = rule
-	}
-
-	nowUnix := now.Unix()
-	requests := make(map[ruleKey]*windowCounter)
-	tokens := make(map[ruleKey]*windowCounter)
 	for _, snap := range snapshots {
-		if snap.PeriodSeconds <= 0 {
-			continue
-		}
-		rule, ok := byDef[definitionKey(RuleScope(snap.Scope), snap.Subject, snap.PeriodSeconds)]
-		if !ok {
-			continue
-		}
-		if rule.PerChild != (snap.Partition != "") {
-			continue
-		}
-		// Counted under an earlier definition of the rule: a mode change or
-		// a delete and re-add cleared these counts.
-		if snap.Epoch != rule.CounterEpoch {
-			continue
-		}
-		latest := max(snap.RequestsWindowStart, snap.TokensWindowStart)
-		if latest > 0 && latest+2*snap.PeriodSeconds < nowUnix {
-			continue
-		}
-
 		key := ruleKey{
 			scope:         RuleScope(snap.Scope),
 			subject:       snap.Subject,
 			partition:     snap.Partition,
 			periodSeconds: snap.PeriodSeconds,
 		}
-		mergeCounter(requests, key, windowCounter{
-			windowStart: snap.RequestsWindowStart,
-			current:     snap.RequestsCurrent,
-			previous:    snap.RequestsPrevious,
-		}, now)
-		mergeCounter(tokens, key, windowCounter{
-			windowStart: snap.TokensWindowStart,
-			current:     snap.TokensCurrent,
-			previous:    snap.TokensPrevious,
-		}, now)
-	}
-	for key, counter := range requests {
-		l.requests[key] = counter
-		l.trackCounterExpiry(requestCounter, key, counter)
-	}
-	for key, counter := range tokens {
-		l.tokens[key] = counter
-		l.trackCounterExpiry(tokenCounter, key, counter)
+		if snap.PeriodSeconds == PeriodConcurrent {
+			// A nonzero gauge goes out with every snapshot anyway; a drop
+			// to zero has to be retried.
+			l.publishedInFlight[key] = struct{}{}
+			continue
+		}
+		if counter := l.requests[key]; counter != nil {
+			counter.dirty = true
+		}
+		if counter := l.tokens[key]; counter != nil {
+			counter.dirty = true
+		}
 	}
 }
 
-// mergeCounter folds one persisted row into the merged counter for key, as
-// described on restore. A row that holds nothing at now leaves no counter.
-func mergeCounter(merged map[ruleKey]*windowCounter, key ruleKey, row windowCounter, now time.Time) {
-	if row.current == 0 && row.previous == 0 {
-		return
-	}
-	row.advance(now, key.periodSeconds)
-	if row.current == 0 && row.previous == 0 {
-		return
-	}
-	existing := merged[key]
-	if existing == nil {
-		merged[key] = &row
-		return
-	}
-	existing.current = max(existing.current, row.current)
-	existing.previous = max(existing.previous, row.previous)
+// setRemote installs the other writers' summed counters, replacing the
+// previous load's.
+func (l *limiter) setRemote(requests, tokens map[ruleKey]windowCounter, inFlight map[ruleKey]int64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.remoteRequests = requests
+	l.remoteTokens = tokens
+	l.remoteInFlight = inFlight
 }

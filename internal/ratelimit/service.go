@@ -43,15 +43,20 @@ type Service struct {
 
 	// writer keys this generation's window snapshot rows, so replicas
 	// sharing a store never overwrite each other. Every Service draws a new
-	// one, so a restart or reload writes beside its predecessor's rows and
-	// restore merges them (see limiter.restore).
+	// one, so a restart or reload writes beside its predecessor's rows, and
+	// counts them as another writer's (see peerView.sum).
 	writer        string
 	flushInterval time.Duration
-	persistMu     sync.Mutex
-	lifeMu        sync.Mutex
-	persistState  persistState
-	flushStop     chan struct{}
-	flushDone     chan struct{}
+	// persistMu serializes saves, resets of saved rows, and installing the
+	// peer view with Refresh's swap; it also guards peers.
+	persistMu    sync.Mutex
+	lifeMu       sync.Mutex
+	persistState persistState
+	flushStop    chan struct{}
+	flushDone    chan struct{}
+	peers        peerView
+	// now is the clock the peer view is kept by. Tests replace it.
+	now func() time.Time
 
 	// changed is called after every successful rule write; see
 	// SetChangeNotifier.
@@ -89,6 +94,7 @@ func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Se
 		limiter:        newLimiter(),
 		quotaTemplates: true,
 		writer:         uuid.NewString(),
+		now:            time.Now,
 	}
 	for _, option := range options {
 		if option != nil {
@@ -101,8 +107,8 @@ func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Se
 	return service, nil
 }
 
-// Close stops the flush loop, writes a final snapshot if this generation
-// was started, and stops the in-memory expiry cleanup worker.
+// Close stops the flush loop, saves what changed since the last flush if this
+// generation was started, and stops the in-memory expiry cleanup worker.
 func (s *Service) Close() {
 	if s == nil {
 		return
@@ -125,9 +131,7 @@ func (s *Service) Close() {
 		<-done
 	}
 	if wasActive {
-		flushCtx, cancel := persistContext(context.Background())
-		s.flush(flushCtx)
-		cancel()
+		s.save(context.Background())
 	}
 	if s.limiter != nil {
 		s.limiter.close()
@@ -158,7 +162,8 @@ func (s *Service) Refresh(ctx context.Context) error {
 	})
 	// The swap and the counter resets it implies happen under persistMu, so
 	// a flush never pairs the new rules, and with them a new counter epoch,
-	// with counts the change clears.
+	// with counts the change clears, and a peer load summed under the old
+	// rules never lands after the resets.
 	s.persistMu.Lock()
 	defer s.persistMu.Unlock()
 	s.mu.Lock()
@@ -171,10 +176,11 @@ func (s *Service) Refresh(ctx context.Context) error {
 
 	// Removed definitions, shared/per-child mode changes, and definitions
 	// reset, or deleted and re-added, elsewhere (a new counter epoch) drop
-	// their in-memory counters. Their saved rows need no delete: they carry the old
-	// epoch, which restore skips (see Rule.CounterEpoch), and the store
-	// collects them once no writer refreshes them. Deleting them here could
-	// also take rows another replica already saved under the new rule.
+	// their in-memory counters, this writer's and the other writers' sums.
+	// Their saved rows need no delete: they carry the old epoch, which the
+	// peer view skips (see Rule.CounterEpoch), and the store collects them
+	// once no writer refreshes them. Deleting them here could also take rows
+	// another replica already saved under the new rule.
 	next := make(map[ruleKey]Rule, len(rules))
 	for _, rule := range rules {
 		next[keyForRule(rule)] = rule

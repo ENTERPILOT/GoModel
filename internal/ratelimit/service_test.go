@@ -15,8 +15,16 @@ import (
 type memStore struct {
 	rules    []Rule
 	counters []WindowSnapshot
-	// written stamps each row the way a real store's updated_at column does.
-	written map[string]int64
+	// now stamps saved rows, as the saving replica's clock does for a real
+	// store; nil means time.Now.
+	now func() time.Time
+}
+
+func (m *memStore) clock() time.Time {
+	if m.now != nil {
+		return m.now()
+	}
+	return time.Now()
 }
 
 func (m *memStore) ListRules(context.Context) ([]Rule, error) {
@@ -86,8 +94,14 @@ func (m *memStore) ReplaceConfigRules(ctx context.Context, rules []Rule) error {
 
 func (m *memStore) Close() error { return nil }
 
-func (m *memStore) LoadCounters(context.Context) ([]WindowSnapshot, error) {
-	return append([]WindowSnapshot(nil), m.counters...), nil
+func (m *memStore) LoadCounters(_ context.Context, since int64) ([]WindowSnapshot, error) {
+	var rows []WindowSnapshot
+	for _, snap := range m.counters {
+		if snap.UpdatedAt >= since {
+			rows = append(rows, snap)
+		}
+	}
+	return rows, nil
 }
 
 // snapshotIdentity is the primary key every store keys a window row by.
@@ -95,15 +109,13 @@ func snapshotIdentity(s WindowSnapshot) string {
 	return s.Scope + "\x00" + s.Subject + "\x00" + s.Partition + "\x00" + strconv.FormatInt(s.PeriodSeconds, 10) + "\x00" + s.Writer
 }
 
-// SaveCounters mirrors the real stores: upsert by identity, then collect rows
-// that went two periods without a write.
+// SaveCounters mirrors the real stores: stamp and upsert by identity, then
+// collect window rows that went two periods without a write and in-flight
+// rows that went inFlightRowRetention.
 func (m *memStore) SaveCounters(_ context.Context, snapshots []WindowSnapshot) error {
-	now := time.Now().Unix()
-	if m.written == nil {
-		m.written = make(map[string]int64)
-	}
+	now := m.clock().Unix()
 	for _, snap := range snapshots {
-		m.written[snapshotIdentity(snap)] = now
+		snap.UpdatedAt = now
 		replaced := false
 		for i, existing := range m.counters {
 			if snapshotIdentity(existing) == snapshotIdentity(snap) {
@@ -118,7 +130,11 @@ func (m *memStore) SaveCounters(_ context.Context, snapshots []WindowSnapshot) e
 	}
 	kept := m.counters[:0]
 	for _, snap := range m.counters {
-		if m.written[snapshotIdentity(snap)]+2*snap.PeriodSeconds >= now {
+		retention := 2 * snap.PeriodSeconds
+		if snap.PeriodSeconds == PeriodConcurrent {
+			retention = inFlightRowRetention
+		}
+		if snap.UpdatedAt+retention >= now {
 			kept = append(kept, snap)
 		}
 	}

@@ -12,6 +12,11 @@ type windowCounter struct {
 	windowStart int64 // unix seconds, aligned to the period
 	current     int64
 	previous    int64
+	// dirty marks a local counter that counted something since its last
+	// snapshot, so a flush writes only the rows that changed (see
+	// limiter.snapshot). Rolling the window forward is not a change: a
+	// reader rolls the saved row forward the same way.
+	dirty bool
 }
 
 // advance rolls the counter forward so windowStart covers now.
@@ -36,6 +41,20 @@ func (w *windowCounter) estimate(now time.Time, periodSeconds int64) int64 {
 	elapsed := min(max(now.Unix()-w.windowStart, 0), periodSeconds)
 	weight := float64(periodSeconds-elapsed) / float64(periodSeconds)
 	return int64(float64(w.previous)*weight) + w.current
+}
+
+// rolledTo returns the counter as it stands in the window containing now.
+// Unlike advance it never discards a counter saved in a later window than
+// now's, as a replica whose clock runs slightly ahead can write: that row's
+// counts are folded into now's window instead, so a boundary crossed a
+// moment early elsewhere does not erase them here.
+func (w windowCounter) rolledTo(now time.Time, periodSeconds int64) windowCounter {
+	start := now.Unix() - now.Unix()%periodSeconds
+	if w.windowStart > start {
+		return windowCounter{windowStart: start, current: w.current + w.previous}
+	}
+	w.advance(now, periodSeconds)
+	return w
 }
 
 // resetAfter returns the time until the current window rolls over.
@@ -81,11 +100,25 @@ func keyForRule(rule Rule) ruleKey {
 // limiter holds all live counters. Ordinary rules own one counter; per-child
 // rules own one counter per active direct child. Expired child partitions are
 // pruned below, and a single mutex keeps admission atomic across all matches.
+//
+// The local counters hold only what this process counted itself. The remote
+// maps hold what every other writer sharing the store counted, summed per key
+// as of the last load (see Service.loadPeers), and admission, status, and the
+// routing probe check the sum of both. They stay empty while no other writer
+// counted anything, so a lone instance pays only for lookups that miss.
 type limiter struct {
 	mu       sync.Mutex
 	requests map[ruleKey]*windowCounter
 	tokens   map[ruleKey]*windowCounter
 	inFlight map[ruleKey]int64
+
+	remoteRequests map[ruleKey]windowCounter
+	remoteTokens   map[ruleKey]windowCounter
+	remoteInFlight map[ruleKey]int64
+	// publishedInFlight records the concurrency keys whose last snapshot
+	// published a nonzero gauge, so the next one publishes their drop to
+	// zero once instead of leaving peers to wait for the row to go stale.
+	publishedInFlight map[ruleKey]struct{}
 
 	expiries        counterExpiryQueue
 	expiryByCounter map[counterExpiryKey]*counterExpiry
@@ -99,10 +132,24 @@ type limiter struct {
 
 func newLimiter() *limiter {
 	return &limiter{
-		requests: make(map[ruleKey]*windowCounter),
-		tokens:   make(map[ruleKey]*windowCounter),
-		inFlight: make(map[ruleKey]int64),
+		requests:          make(map[ruleKey]*windowCounter),
+		tokens:            make(map[ruleKey]*windowCounter),
+		inFlight:          make(map[ruleKey]int64),
+		publishedInFlight: make(map[ruleKey]struct{}),
 	}
+}
+
+// withRemote returns the cluster-wide counter for key at now: the local
+// counter, which the caller has advanced to now, plus every other writer's.
+// The caller must hold l.mu.
+func withRemote(remote map[ruleKey]windowCounter, key ruleKey, local *windowCounter, now time.Time, periodSeconds int64) windowCounter {
+	total := *local
+	if peers, ok := remote[key]; ok {
+		peers = peers.rolledTo(now, periodSeconds)
+		total.current += peers.current
+		total.previous += peers.previous
+	}
+	return total
 }
 
 func (l *limiter) counter(counters map[ruleKey]*windowCounter, key ruleKey) *windowCounter {
@@ -147,7 +194,9 @@ func (l *limiter) admit(rules []Rule, now time.Time) (HeaderSnapshot, []ruleKey,
 		if rule.MaxRequests != nil {
 			counter := l.requests[key]
 			counter.current++
-			remaining := max(*rule.MaxRequests-counter.estimate(now, rule.PeriodSeconds), 0)
+			counter.dirty = true
+			total := withRemote(l.remoteRequests, key, counter, now, rule.PeriodSeconds)
+			remaining := max(*rule.MaxRequests-total.estimate(now, rule.PeriodSeconds), 0)
 			if !headers.HasRequests || remaining < headers.RequestRemaining {
 				headers.HasRequests = true
 				headers.RequestLimit = *rule.MaxRequests
@@ -157,7 +206,8 @@ func (l *limiter) admit(rules []Rule, now time.Time) (HeaderSnapshot, []ruleKey,
 		}
 		if rule.MaxTokens != nil {
 			counter := l.tokens[key]
-			remaining := max(*rule.MaxTokens-counter.estimate(now, rule.PeriodSeconds), 0)
+			total := withRemote(l.remoteTokens, key, counter, now, rule.PeriodSeconds)
+			remaining := max(*rule.MaxTokens-total.estimate(now, rule.PeriodSeconds), 0)
 			if !headers.HasTokens || remaining < headers.TokenRemaining {
 				headers.HasTokens = true
 				headers.TokenLimit = *rule.MaxTokens
@@ -170,15 +220,16 @@ func (l *limiter) admit(rules []Rule, now time.Time) (HeaderSnapshot, []ruleKey,
 }
 
 // breach reports whether one rule currently rejects one more request, without
-// consuming anything. The caller must hold l.mu.
+// consuming anything. It counts every writer sharing the store, not only this
+// one. The caller must hold l.mu.
 func (l *limiter) breach(rule Rule, now time.Time) *ExceededError {
 	key := keyForRule(rule)
 	if rule.PeriodSeconds == PeriodConcurrent {
-		if l.inFlight[key] >= *rule.MaxRequests {
+		if inFlight := l.inFlight[key] + l.remoteInFlight[key]; inFlight >= *rule.MaxRequests {
 			return &ExceededError{
 				Rule:       rule,
 				Scope:      ScopeConcurrency,
-				Observed:   l.inFlight[key],
+				Observed:   inFlight,
 				Limit:      *rule.MaxRequests,
 				RetryAfter: time.Second,
 			}
@@ -189,13 +240,14 @@ func (l *limiter) breach(rule Rule, now time.Time) *ExceededError {
 		counter := l.counter(l.requests, key)
 		counter.advance(now, rule.PeriodSeconds)
 		l.trackCounterExpiry(requestCounter, key, counter)
-		if used := counter.estimate(now, rule.PeriodSeconds); used >= *rule.MaxRequests {
+		total := withRemote(l.remoteRequests, key, counter, now, rule.PeriodSeconds)
+		if used := total.estimate(now, rule.PeriodSeconds); used >= *rule.MaxRequests {
 			return &ExceededError{
 				Rule:       rule,
 				Scope:      ScopeRequests,
 				Observed:   used,
 				Limit:      *rule.MaxRequests,
-				RetryAfter: counter.retryAfter(now, rule.PeriodSeconds, *rule.MaxRequests),
+				RetryAfter: total.retryAfter(now, rule.PeriodSeconds, *rule.MaxRequests),
 			}
 		}
 	}
@@ -203,13 +255,14 @@ func (l *limiter) breach(rule Rule, now time.Time) *ExceededError {
 		counter := l.counter(l.tokens, key)
 		counter.advance(now, rule.PeriodSeconds)
 		l.trackCounterExpiry(tokenCounter, key, counter)
-		if used := counter.estimate(now, rule.PeriodSeconds); used >= *rule.MaxTokens {
+		total := withRemote(l.remoteTokens, key, counter, now, rule.PeriodSeconds)
+		if used := total.estimate(now, rule.PeriodSeconds); used >= *rule.MaxTokens {
 			return &ExceededError{
 				Rule:       rule,
 				Scope:      ScopeTokens,
 				Observed:   used,
 				Limit:      *rule.MaxTokens,
-				RetryAfter: counter.retryAfter(now, rule.PeriodSeconds, *rule.MaxTokens),
+				RetryAfter: total.retryAfter(now, rule.PeriodSeconds, *rule.MaxTokens),
 			}
 		}
 	}
@@ -258,11 +311,13 @@ func (l *limiter) recordTokens(rules []Rule, tokens int64, now time.Time) {
 		counter := l.counter(l.tokens, keyForRule(rule))
 		counter.advance(now, rule.PeriodSeconds)
 		counter.current += tokens
+		counter.dirty = true
 		l.trackCounterExpiry(tokenCounter, keyForRule(rule), counter)
 	}
 }
 
-// status reports the live counter state for one rule.
+// status reports the live counter state for one rule, summed over every
+// writer sharing the store.
 func (l *limiter) status(rule Rule, now time.Time) Status {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -270,7 +325,7 @@ func (l *limiter) status(rule Rule, now time.Time) Status {
 	key := keyForRule(rule)
 	status := Status{Rule: rule}
 	if rule.PeriodSeconds == PeriodConcurrent {
-		status.InFlight = l.inFlight[key]
+		status.InFlight = l.inFlight[key] + l.remoteInFlight[key]
 		if rule.MaxRequests != nil {
 			remaining := max(*rule.MaxRequests-status.InFlight, 0)
 			status.RequestsRemaining = &remaining
@@ -285,7 +340,8 @@ func (l *limiter) status(rule Rule, now time.Time) Status {
 		counter := l.counter(l.requests, key)
 		counter.advance(now, rule.PeriodSeconds)
 		l.trackCounterExpiry(requestCounter, key, counter)
-		status.RequestsUsed = counter.estimate(now, rule.PeriodSeconds)
+		total := withRemote(l.remoteRequests, key, counter, now, rule.PeriodSeconds)
+		status.RequestsUsed = total.estimate(now, rule.PeriodSeconds)
 		remaining := max(*rule.MaxRequests-status.RequestsUsed, 0)
 		status.RequestsRemaining = &remaining
 	}
@@ -293,18 +349,29 @@ func (l *limiter) status(rule Rule, now time.Time) Status {
 		counter := l.counter(l.tokens, key)
 		counter.advance(now, rule.PeriodSeconds)
 		l.trackCounterExpiry(tokenCounter, key, counter)
-		status.TokensUsed = counter.estimate(now, rule.PeriodSeconds)
+		total := withRemote(l.remoteTokens, key, counter, now, rule.PeriodSeconds)
+		status.TokensUsed = total.estimate(now, rule.PeriodSeconds)
 		remaining := max(*rule.MaxTokens-status.TokensUsed, 0)
 		status.TokensRemaining = &remaining
 	}
 	return status
 }
 
-// reset clears the window counters for one rule. In-flight gauges are left
-// alone: they reflect requests that genuinely still hold slots.
+// reset clears the window counters for one rule, this writer's and the
+// other writers' alike: the reset applies to the whole cluster, and the next
+// load sums only rows counted under the rule's new epoch. In-flight gauges
+// are left alone, remote ones too: they reflect requests that genuinely still
+// hold slots.
 func (l *limiter) reset(key ruleKey) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	for _, remote := range []map[ruleKey]windowCounter{l.remoteRequests, l.remoteTokens} {
+		for candidate := range remote {
+			if candidate.sameDefinition(key) {
+				delete(remote, candidate)
+			}
+		}
+	}
 	for candidate := range l.requests {
 		if candidate.sameDefinition(key) {
 			l.removeCounterExpiry(requestCounter, candidate)
@@ -323,11 +390,13 @@ func (k ruleKey) sameDefinition(other ruleKey) bool {
 	return k.scope == other.scope && k.subject == other.subject && k.periodSeconds == other.periodSeconds
 }
 
-// resetAll clears every window counter.
+// resetAll clears every window counter, local and remote.
 func (l *limiter) resetAll() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.requests = make(map[ruleKey]*windowCounter)
 	l.tokens = make(map[ruleKey]*windowCounter)
+	l.remoteRequests = nil
+	l.remoteTokens = nil
 	l.resetCounterExpiries()
 }

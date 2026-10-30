@@ -10,21 +10,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRestoreMergesWritersByMax(t *testing.T) {
+// remoteOf installs rows as another writer's, summed as a load does.
+func remoteOf(l *limiter, rows []WindowSnapshot, rules []Rule, now time.Time) {
+	var view peerView
+	view.merge(rows, "self", true)
+	l.setRemote(view.sum(rules, now, time.Minute))
+}
+
+func TestPeerSumAddsWritersRolledForward(t *testing.T) {
 	period := PeriodHourSeconds
 	start := int64(1_700_000_000) - int64(1_700_000_000)%period
 	now := time.Unix(start+60, 0).UTC()
 	rule := Rule{
 		Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: period,
-		MaxRequests: new(int64(100)), MaxTokens: new(int64(1000)),
+		MaxRequests: new(int64(100)), MaxTokens: new(int64(1000)), CounterEpoch: "e1",
 	}
 	row := func(writer string) WindowSnapshot {
 		return WindowSnapshot{
-			Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: period, Writer: writer,
+			Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: period, Writer: writer, Epoch: "e1",
 		}
 	}
-	// Same window: the larger current and the larger previous win,
-	// independently and per counter kind.
+	// Same window: added field by field, per counter kind.
 	a := row("a")
 	a.RequestsWindowStart, a.RequestsCurrent, a.RequestsPrevious = start, 5, 2
 	a.TokensWindowStart, a.TokensCurrent, a.TokensPrevious = start, 10, 90
@@ -32,37 +38,73 @@ func TestRestoreMergesWritersByMax(t *testing.T) {
 	b.RequestsWindowStart, b.RequestsCurrent, b.RequestsPrevious = start, 3, 7
 	b.TokensWindowStart, b.TokensCurrent, b.TokensPrevious = start, 40, 20
 	// One period behind: rolled forward first, so its current becomes
-	// previous (9 beats 7) and its previous falls out.
+	// previous and its previous falls out.
 	c := row("c")
 	c.RequestsWindowStart, c.RequestsCurrent, c.RequestsPrevious = start-period, 9, 50
-	// Two periods behind: holds nothing at now, whatever it counted.
+	// Two periods behind: holds nothing at now, whatever it counted, and
+	// leaves the cache.
 	d := row("d")
 	d.RequestsWindowStart, d.RequestsCurrent = start-2*period, 80
 	d.TokensWindowStart, d.TokensCurrent = start-2*period, 800
+	// Another epoch: skipped, but kept, as this replica may not have
+	// reloaded the rule yet.
+	e := row("e")
+	e.Epoch = "e0"
+	e.RequestsWindowStart, e.RequestsCurrent = start, 1000
+	// This writer's own row: already counted locally.
+	self := row("self")
+	self.RequestsWindowStart, self.RequestsCurrent = start, 1000
 
-	l := newLimiter()
-	l.restore([]WindowSnapshot{a, b, c, d}, []Rule{rule}, now)
+	var view peerView
+	view.merge([]WindowSnapshot{a, b, c, d, e, self}, "self", true)
+	requests, tokens, inFlight := view.sum([]Rule{rule}, now, time.Minute)
 
 	key := keyForRule(rule)
-	require.Contains(t, l.requests, key)
-	assert.Equal(t, windowCounter{windowStart: start, current: 5, previous: 9}, *l.requests[key])
-	require.Contains(t, l.tokens, key)
-	assert.Equal(t, windowCounter{windowStart: start, current: 40, previous: 90}, *l.tokens[key])
+	assert.Equal(t, map[ruleKey]windowCounter{key: {windowStart: start, current: 8, previous: 18}}, requests)
+	assert.Equal(t, map[ruleKey]windowCounter{key: {windowStart: start, current: 50, previous: 110}}, tokens)
+	assert.Nil(t, inFlight)
+	assert.Len(t, view.rows, 4, "the rolled-out row leaves the cache, the other epoch's stays")
+	assert.NotContains(t, view.rows, identityOf(d))
+
+	// The limiter checks the local count plus the sum.
+	l := newLimiter()
+	l.setRemote(requests, tokens, inFlight)
+	_, _, exceeded := l.admit([]Rule{rule}, now)
+	require.Nil(t, exceeded)
+	assert.Equal(t, int64(9+18*(period-60)/period), l.status(rule, now).RequestsUsed)
 }
 
-func TestRestoreSkipsKeysThatHoldNothing(t *testing.T) {
+func TestPeerSumSkipsKeysThatHoldNothing(t *testing.T) {
 	period := PeriodHourSeconds
 	start := int64(1_700_000_000) - int64(1_700_000_000)%period
 	now := time.Unix(start, 0).UTC()
 	rule := Rule{Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: period, MaxRequests: new(int64(1))}
 
-	l := newLimiter()
-	l.restore([]WindowSnapshot{{
+	var view peerView
+	view.merge([]WindowSnapshot{{
 		Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: period, Writer: "a",
 		RequestsWindowStart: start - 2*period, RequestsCurrent: 5,
-	}}, []Rule{rule}, now)
-	assert.Empty(t, l.requests)
-	assert.Empty(t, l.tokens)
+	}, {
+		Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: period, Writer: "b",
+		RequestsWindowStart: start,
+	}}, "self", true)
+	requests, tokens, inFlight := view.sum([]Rule{rule}, now, time.Minute)
+	assert.Nil(t, requests)
+	assert.Nil(t, tokens)
+	assert.Nil(t, inFlight)
+}
+
+// A replica whose clock runs a little ahead can save a row in the next
+// window before this one reaches it. Its counts are folded into this
+// window rather than dropped.
+func TestRolledToFoldsCounterFromALaterWindow(t *testing.T) {
+	period := PeriodMinuteSeconds
+	start := int64(1_700_000_000) - int64(1_700_000_000)%period
+	now := time.Unix(start+period-1, 0)
+	ahead := windowCounter{windowStart: start + period, current: 2, previous: 5}
+	assert.Equal(t, windowCounter{windowStart: start, current: 7}, ahead.rolledTo(now, period))
+	behind := windowCounter{windowStart: start - period, current: 3, previous: 4}
+	assert.Equal(t, windowCounter{windowStart: start, previous: 3}, behind.rolledTo(now, period))
 }
 
 // startedService builds and starts a service on store, closing it at cleanup
@@ -132,9 +174,21 @@ func TestRestartUnderNewWriterRestoresOwnCounts(t *testing.T) {
 	acquireN(t, second, 1, now)
 	second.Close()
 	require.Len(t, store.counters, 2, "each run keeps its own row")
+	byWriter := make(map[string]int64, len(store.counters))
+	for _, snap := range store.counters {
+		byWriter[snap.Writer] = snap.RequestsCurrent
+	}
+	require.Equal(t, map[string]int64{first.writer: 2, second.writer: 1}, byWriter,
+		"a row holds only what its run counted, never what it loaded")
 
 	third := startedService(t, store)
 	assert.Equal(t, int64(3), requestsUsed(t, third, now))
+	acquireN(t, third, 4, now)
+	third.Close()
+
+	// Each generation is counted once, however many came before it.
+	fourth := startedService(t, store)
+	assert.Equal(t, int64(7), requestsUsed(t, fourth, now))
 }
 
 func TestReplicasDoNotOverwriteEachOther(t *testing.T) {
@@ -154,10 +208,10 @@ func TestReplicasDoNotOverwriteEachOther(t *testing.T) {
 	}
 	require.Equal(t, map[string]int64{a.writer: 4, b.writer: 1}, byWriter)
 
-	// A replica restarting takes the busiest peer's count as its own share
-	// rather than the sum of all of them.
+	// A replica restarting sees what the cluster counted: every replica's
+	// row, each once.
 	restarted := startedService(t, store)
-	assert.Equal(t, int64(4), requestsUsed(t, restarted, now))
+	assert.Equal(t, int64(5), requestsUsed(t, restarted, now))
 }
 
 func TestResetDeletesEveryWritersRows(t *testing.T) {
