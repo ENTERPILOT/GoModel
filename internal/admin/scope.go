@@ -1,6 +1,8 @@
 package admin
 
 import (
+	"strings"
+
 	"github.com/labstack/echo/v5"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -102,16 +104,28 @@ func scopedUserPaths(c *echo.Context, fieldName string, raws []string) (scope st
 }
 
 // requireScopedSubject checks a budget or rate-limit target: scoped
-// credentials may only address user_path rules whose subject lies inside
-// their subtree. Gateway-wide rules (labels, providers, models) are out of
-// reach for them.
+// credentials may only address user_path rules whose subject lies strictly
+// inside their subtree. The rule on the scope root itself is the limit placed
+// on the credential's own tenant, so it stays with global credentials;
+// otherwise a tenant's dashboard key could raise, reset, or delete its own
+// budget. Gateway-wide rules (labels, providers, models) are out of reach too.
 func requireScopedSubject(c *echo.Context, isUserPathScope bool, subject string) error {
 	scope := requestScope(c)
 	if scope.Global() {
 		return nil
 	}
-	if !isUserPathScope || !scope.Allows(subject) {
+	if !isUserPathScope || !scopeAllowsWrite(scope, subject) {
 		return userPathOutOfScopeError("subject")
 	}
 	return nil
+}
+
+// scopeAllowsWrite reports whether a scoped credential may change the rule or
+// node at userPath: a strict descendant of the scope root. Global scopes may
+// write anywhere.
+func scopeAllowsWrite(scope core.AccessScope, userPath string) bool {
+	if scope.Global() {
+		return true
+	}
+	return scope.Allows(userPath) && strings.TrimSpace(userPath) != scope.UserPath
 }

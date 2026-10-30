@@ -210,8 +210,10 @@ ohne Neustart übernommen; eine Rotation, die sich nicht laden lässt, behält d
 bisherige. Eine rotierte Client-CA gilt ab dem nächsten TLS-Handshake; offene
 Verbindungen behalten den Zugriff, den sie erhalten haben. Nur eine Hälfte des
 Paars zu setzen oder eine beim Start fehlende
-oder ungültige Datei ist ein Fehler. Die Pfade akzeptieren `${env:...}`- und
-`${file:...}`-Referenzen wie andere Einstellungen. Diese Einstellungen betreffen
+oder ungültige Datei ist ein Fehler. Die Einstellungen erwarten Dateipfade,
+keine PEM-Inhalte; ein Wert mit PEM wird abgelehnt. Sie akzeptieren
+`${env:...}`-Referenzen; `${file:...}` liefert den Inhalt einer Datei, nutzen Sie
+es also nur für eine Datei, die einen Pfad enthält. Diese Einstellungen betreffen
 nur eingehende Verbindungen; das [Vertrauen für ausgehendes
 TLS](#vertrauen-für-ausgehendes-tls) wird separat konfiguriert. Ein Beispiel mit
 cert-manager finden Sie im [Produktionsleitfaden](/de/guides/production#natives-tls).
@@ -520,11 +522,17 @@ jede Upstream-Verbindung, sofern ein Provider keinen eigenen
 
 #### Vertrauen für ausgehendes TLS
 
-Diese Einstellungen gelten für jede ausgehende HTTPS-Verbindung: Provider,
-Modellkatalog, Update-Prüfung, MCP-Upstreams, Vector Stores und
+Diese Einstellungen gelten für die ausgehenden HTTPS-Clients des Gateways:
+Provider, Modellkatalog, Update-Prüfung, MCP-Upstreams, Vector Stores und
 Embedding-Endpunkte. Standardmäßig wird dem Zertifikatsspeicher des
 Betriebssystems vertraut. Das passt, solange keine interne CA und kein
 TLS-abfangender Proxy zwischen Gateway und Upstreams sitzt.
+
+Verbindungen anderer Clients betreffen sie nicht; diese haben eigene
+Einstellungen: Der OpenTelemetry-Export liest `OTEL_EXPORTER_OTLP_CERTIFICATE`,
+PostgreSQL nimmt `sslmode` und `sslrootcert` in der URL (empfohlen:
+`sslmode=verify-full`), MongoDB nimmt `tls=true` und `tlsCAFile` in der URL,
+und Redis über `rediss://` vertraut dem Systemspeicher.
 
 | Variable                        | Beschreibung                                                        | Standardwert |
 | ------------------------------- | ------------------------------------------------------------------- | ------------ |
@@ -612,6 +620,50 @@ aufzulisten, verwenden Sie `<PROVIDER>_MODEL_FILTER_INCLUDE`,
 `<PROVIDER>_MODEL_FILTER_MAX_PRICE_PER_MTOK` (YAML:
 `providers.<name>.model_filter`). Siehe
 [Modelle eines Providers filtern](/de/advanced/config-yaml#modelle-eines-providers-filtern).
+
+Setzen Sie `MODELS_VLLM_DISCOVERY_COMPAT=true` (YAML:
+`models.vllm_discovery_compat`), wenn ein Client Modelle nur von einer
+vLLM-Runtime erkennt. Der `vllm`-Provider von OpenCode ist ein Beispiel: Er
+fragt `/health` und `/v1/models` ab und verwirft jeden Eintrag, dessen
+`owned_by` nicht `vllm` ist oder dem `max_model_len` fehlt. Mit dieser
+Einstellung meldet `GET /v1/models` `owned_by` als `vllm` und füllt
+`max_model_len` für jeden Eintrag, sodass der Client die Modelle des Gateways
+ohne handgeschriebene Liste übernimmt. Die Angabe zum Eigentümer ist damit
+falsch, deshalb ist die Einstellung standardmäßig aus und für Gateways gedacht,
+deren Clients sie brauchen.
+
+Das Limit hat zwei Quellen, in dieser Reihenfolge:
+
+1. **Die Angabe des Providers selbst.** Eine Runtime, die das Modell selbst
+   ausliefert (vLLM, SGLang, llm-d und jeder OpenAI-kompatible Server, der
+   `max_model_len` in seiner `/models`-Liste zurückgibt), kennt das echte Limit
+   ihres Prozesses, daher hat ihr Wert Vorrang.
+2. **`metadata.context_window`.** Der Katalogwert, nur für ein Modell, dessen
+   Provider kein Limit gemeldet hat. Er macht gehostete Modelle auffindbar.
+
+Ein Modell ohne beides, also eines, das der Katalog nicht kennt und dessen
+Runtime ihr Limit nicht meldet, erscheint mit `owned_by: "vllm"` und
+`max_model_len: 0`. Null bedeutet, dass das Limit unbekannt ist, nicht dass der
+Eintrag unvollständig ist: Das Feld wird nie weggelassen, weil diese Clients die
+ganze Liste gegen ein Schema prüfen, in dem es Pflicht ist. Fehlt es bei einem
+Eintrag, schlägt die Antwort fehl und alle anderen Modelle verschwinden mit. Ein
+Client, der den Wert nur liest, wenn er positiv ist, behält seinen eigenen
+Standard. Um das echte Fenster anzugeben, deklarieren Sie es am Modell:
+
+```yaml
+providers:
+  my-custom-llm:
+    type: openai
+    base_url: "https://api.example.com/v1"
+    api_key: "..."
+    models:
+      - id: "my-finetune"
+        metadata:
+          context_window: 32768
+```
+
+Weitere Felder eines Eintrags finden Sie unter
+[Modellmetadaten](/de/advanced/model-metadata).
 
 Für OpenRouter sendet GoModel außerdem standardmäßige Attribution-Header, sofern der Request sie nicht bereits setzt. Überschreiben Sie diese Standardwerte mit `OPENROUTER_SITE_URL` und `OPENROUTER_APP_NAME`.
 

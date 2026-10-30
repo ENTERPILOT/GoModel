@@ -168,7 +168,7 @@ func TestResetClearsPersistedWindow(t *testing.T) {
 	service.Start(context.Background())
 	_, err = service.Acquire(onPath("/team"), now)
 	require.NoError(t, err)
-	err = service.ResetRule(ScopeUserPath, "/team", PeriodHourSeconds)
+	err = service.ResetRule(context.Background(), ScopeUserPath, "/team", PeriodHourSeconds)
 	require.NoError(t, err)
 
 	service.Close()
@@ -341,7 +341,7 @@ func TestResetRuleReturnsPersistError(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(service.Close)
-	require.Error(t, service.ResetRule(ScopeUserPath, "/team", PeriodHourSeconds))
+	require.Error(t, service.ResetRule(context.Background(), ScopeUserPath, "/team", PeriodHourSeconds))
 }
 
 type recordingStore struct {
@@ -368,7 +368,7 @@ type failDeleteStore struct {
 	err error
 }
 
-func (s *failDeleteStore) DeleteCounter(context.Context, RuleScope, string, int64) error {
+func (s *failDeleteStore) ResetCounter(context.Context, RuleScope, string, int64) error {
 	return s.err
 }
 

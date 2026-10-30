@@ -193,7 +193,9 @@ restart; a rotation that fails to load keeps the previous one. A rotated client
 CA applies from the next TLS handshake, so open connections keep the access
 they were granted. Setting only one
 of the pair, or a file that is missing or invalid at startup, is an error. The
-paths accept `${env:...}` and `${file:...}` references like other settings.
+settings take file paths, not PEM contents, and a value holding PEM is
+rejected. They accept `${env:...}` references; `${file:...}` resolves to a
+file's contents, so use it only for a file that holds a path.
 These settings cover inbound connections only; [outbound TLS
 trust](#outbound-tls-trust) is configured separately. See the [production
 guide](/guides/production#native-tls) for a cert-manager example.
@@ -477,10 +479,17 @@ every upstream connection, unless a provider sets its own
 
 #### Outbound TLS trust
 
-These apply to every outbound HTTPS connection: providers, the model catalog,
-the update check, MCP upstreams, vector stores, and embedding endpoints. The
-default trusts the operating system certificate store, which is right unless an
-internal CA or a TLS-intercepting proxy sits between the gateway and upstreams.
+These apply to the gateway's outbound HTTPS clients: providers, the model
+catalog, the update check, MCP upstreams, vector stores, and embedding
+endpoints. The default trusts the operating system certificate store, which is
+right unless an internal CA or a TLS-intercepting proxy sits between the gateway
+and upstreams.
+
+They do not cover connections that other clients open, which keep their own
+settings: OpenTelemetry export reads `OTEL_EXPORTER_OTLP_CERTIFICATE`,
+PostgreSQL takes `sslmode` and `sslrootcert` in its URL (prefer
+`sslmode=verify-full`), MongoDB takes `tls=true` and `tlsCAFile` in its URL,
+and Redis over `rediss://` trusts the system store.
 
 | Variable                        | Description                                                        | Default |
 | ------------------------------- | ------------------------------------------------------------------ | ------- |
@@ -565,6 +574,48 @@ To narrow a provider's inventory instead of listing it model by model, use
 `<PROVIDER>_MODEL_FILTER_MAX_PRICE_PER_MTOK` (YAML:
 `providers.<name>.model_filter`). See
 [Filtering a provider's models](/advanced/config-yaml#filtering-a-providers-models).
+
+Set `MODELS_VLLM_DISCOVERY_COMPAT=true` (YAML:
+`models.vllm_discovery_compat`) when a client discovers models only from a
+vLLM runtime — OpenCode's `vllm` provider is one: it probes `/health` and
+`/v1/models` and drops every entry whose `owned_by` is not `vllm` or that lacks
+`max_model_len`. With the setting on, `GET /v1/models` reports `owned_by` as
+`vllm` and fills `max_model_len` on every entry, so the client picks the
+gateway's models up with no hand-written list. It is a lie about the owner, so
+it stays off by default and is meant for gateways whose consumers need it.
+
+The limit has two sources, in this order:
+
+1. **The provider's own report.** A runtime that serves the model itself — vLLM,
+   SGLang, llm-d, and any OpenAI-compatible server that returns `max_model_len`
+   in its `/models` listing — knows the real limit of the process it is running,
+   so its value wins.
+2. **`metadata.context_window`.** The catalog value, used only for a model whose
+   provider reported no limit. It is what makes a hosted model discoverable.
+
+A model with neither — one the catalog does not know, served by a runtime that
+does not report its limit — is listed with `owned_by: "vllm"` and
+`max_model_len: 0`. Zero means the limit is unknown, not that the entry is
+incomplete: the field is never omitted, because these clients decode the whole
+listing against a schema where it is required, so one entry without it fails the
+response and every other model disappears with it. A client that reads the value
+only when it is positive keeps its own default. To advertise the real window,
+declare it on the model:
+
+```yaml
+providers:
+  my-custom-llm:
+    type: openai
+    base_url: "https://api.example.com/v1"
+    api_key: "..."
+    models:
+      - id: "my-finetune"
+        metadata:
+          context_window: 32768
+```
+
+See [Model metadata](/advanced/model-metadata) for the other fields an entry
+takes.
 
 For OpenRouter, GoModel also sends default attribution headers unless the request already sets them. Override those defaults with `OPENROUTER_SITE_URL` and `OPENROUTER_APP_NAME`.
 

@@ -4,17 +4,22 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"strings"
 	"sync/atomic"
+
+	"github.com/enterpilot/gomodel/internal/pemfile"
 )
 
-// TLSSettings is the process-wide client TLS trust configuration for every
-// outbound HTTPS connection the gateway opens: providers, the model catalog,
-// the update check, MCP upstreams, vector stores, and embedding endpoints.
+// TLSSettings is the process-wide client TLS trust configuration for the
+// outbound HTTPS clients built from this package: providers, the model
+// catalog, the update check, MCP upstreams, vector stores, and embedding
+// endpoints. Clients built elsewhere, such as the OTLP exporters and the
+// PostgreSQL, MongoDB, and Redis drivers, keep their own TLS settings.
 //
 // Everything is optional. With the zero value, connections trust the operating
 // system's certificate store, which is what most deployments want.
@@ -121,6 +126,13 @@ func buildTrustState(settings TLSSettings) (*trustState, error) {
 	if (certFile == "") != (keyFile == "") {
 		return nil, fmt.Errorf("http.tls: client_cert_file and client_key_file must be set together")
 	}
+	if err := errors.Join(
+		pemfile.CheckPath("http.tls.ca_file", caFile),
+		pemfile.CheckPath("http.tls.client_cert_file", certFile),
+		pemfile.CheckPath("http.tls.client_key_file", keyFile),
+	); err != nil {
+		return nil, err
+	}
 
 	hash := sha256.New()
 	fmt.Fprintf(hash, "insecure=%t\n", settings.InsecureSkipVerify)
@@ -132,8 +144,8 @@ func buildTrustState(settings TLSSettings) (*trustState, error) {
 			return nil, fmt.Errorf("http.tls: read ca_file: %w", err)
 		}
 		pool := systemCertPool()
-		if !pool.AppendCertsFromPEM(caPEM) {
-			return nil, fmt.Errorf("http.tls: ca_file %s contains no PEM certificates", caFile)
+		if err := pemfile.AppendCertificates(pool, caPEM); err != nil {
+			return nil, fmt.Errorf("http.tls: ca_file %s: %w", caFile, err)
 		}
 		cfg.RootCAs = pool
 		writeMaterial(hash, "ca", caFile, caPEM)

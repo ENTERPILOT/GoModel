@@ -247,7 +247,12 @@ Kubelet nie weryfikuje certyfikatu sondy HTTPS. Przy włączonym mTLS `/health` 
 `/health/ready` nadal odpowiadają bez certyfikatu klienta, więc te sondy
 działają bez zmian; każda inna ścieżka bez zweryfikowanego certyfikatu zwraca
 401. ServiceMonitor z chartu scrapuje zwykłe HTTP, więc przy natywnym TLS
-zdefiniuj własny ze `scheme: https`.
+zdefiniuj własny ze `scheme: https`. Przy mTLS `/metrics` także wymaga
+certyfikatu klienta, więc daj temu ServiceMonitorowi `tlsConfig` z `ca`
+wskazującym CA, które wystawiło certyfikat gatewaya, oraz `cert` i `keySecret`
+z certyfikatu podpisanego przez CA klientów. `helm test` i notatki po
+instalacji dla port-forward same przełączają się na HTTPS, gdy ustawione jest
+`env.SERVER_TLS_CERT_FILE`.
 
 ### Certyfikaty upstreamu za prywatnym CA
 

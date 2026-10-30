@@ -45,6 +45,7 @@ server:
 models:
   enabled_by_default: true # env: MODELS_ENABLED_BY_DEFAULT; when false, models stay unavailable until an access override allows one or more user paths
   keep_only_aliases_at_models_endpoint: false # env: KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT; hide provider models from GET /v1/models and expose only enabled virtual models
+  vllm_discovery_compat: false # env: MODELS_VLLM_DISCOVERY_COMPAT; advertise every model the way a vLLM runtime does (owned_by "vllm", max_model_len from the limit the provider reports or else metadata.context_window) so a client whose discovery only understands vLLM picks the gateway up. It is a lie about the owner, so it stays opt-in and only for deployments whose consumers need it
   unqualified_model_ids_at_models_endpoint: false # env: UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT; list bare model IDs (gpt-5) instead of provider-qualified ones (openai/gpt-5). Caveat: when two providers expose the same model ID only the provider an unqualified request routes to (the first registered one) is listed; pin a name with a virtual model (source gpt-5 -> target azure/gpt-5)
   configured_provider_models_mode: "fallback" # env: CONFIGURED_PROVIDER_MODELS_MODE; "fallback" uses configured lists only when upstream /models is unavailable/empty, "allowlist" exposes only configured models and skips upstream /models for configured lists, "merge" adds configured models on top of the upstream inventory (for models a provider serves but does not list)
 
@@ -401,8 +402,9 @@ http:
   timeout: 600 # seconds (10 minutes)
   response_header_timeout: 600
   stream_idle_timeout: 300 # seconds of silence allowed mid-stream before a stalled stream fails; 0 disables
-  # Client TLS trust for every outbound HTTPS connection (providers, model
-  # catalog, update check, MCP upstreams, vector stores). All optional; the
+  # Client TLS trust for the gateway's outbound HTTPS clients (providers, model
+  # catalog, update check, MCP upstreams, vector stores). OTLP export and the
+  # database and Redis drivers keep their own TLS settings. All optional; the
   # default trusts the operating system certificate store.
   tls:
     # ca_file: /etc/gomodel/ca.pem            # private CA bundle (PEM), appended to the system store

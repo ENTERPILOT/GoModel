@@ -30,7 +30,9 @@ providers:
   当未设置按提供商的 `GEMINI_API_MODE` 时，`USE_GOOGLE_GEMINI_NATIVE_API` 仍作为旧版全局开关生效。建议使用 `GEMINI_API_MODE`。
 </Note>
 
-原生 AI Studio 模式还可以将 GoModel 在路由后生成的提示词缓存计划落地为五分钟有效的 Gemini cached-content 对象。复用范围限定在为该会话选定的 API 密钥内；对于使用轮换密钥的无会话流量，会跳过对象创建，以确保资源永远不会在错误的凭据下被复用。目前 Vertex 接收的是原始请求，不带 cached-content 对象。
+原生 AI Studio 模式还可以将 GoModel 在路由后生成的提示词缓存计划落地为五分钟有效的 Gemini cached-content 对象。复用范围限定在为该会话选定的 API 密钥内；对于使用轮换密钥的无会话流量，会跳过对象创建，以确保资源永远不会在错误的凭据下被复用。Gemini 4 模型没有显式缓存（Google 会隐式缓存共享前缀），因此不会为它们创建对象。目前 Vertex 接收的是原始请求，不带 cached-content 对象。
+
+Google 默认会存储新付费层级项目上的 Gemini API 请求。在原生模式下，Chat Completions 的 `store: false` 会作为 Gemini 的按请求退出选项转发；兼容 OpenAI 的端点没有这样的成员。
 
 ## Base URL
 
@@ -47,7 +49,7 @@ GoModel 为原生 Gemini 和兼容 OpenAI 的 API 分别维护内部的 Base URL
 
 ## 图片生成与编辑
 
-在原生模式下，[兼容 OpenAI 的图片端点](/zh/advanced/images-api)可用于 Gemini 图片模型（`gemini-2.5-flash-image` 等，通过 `generateContent`）。Google 已于 2026 年 8 月从 AI Studio API 中下线 Imagen；Imagen 仍可在 [Vertex AI](/zh/providers/vertex) 上使用。图片编辑需要原生模式和 Gemini 图片模型；不支持蒙版。关于参数映射和定价详情，请参阅 [Images API 的提供商说明](/zh/advanced/images-api#google-gemini)。
+在原生模式下，[兼容 OpenAI 的图片端点](/zh/advanced/images-api)可用于 Gemini 图片模型（`gemini-2.5-flash-image`、`gemini-3.1-flash-image`、`gemini-nano-banana-2.1` 等，通过 `generateContent`）。当模型未返回图片时，错误会携带 Gemini 的结束原因和消息（例如 `IMAGE_RECITATION`）。Google 已于 2026 年 8 月从 AI Studio API 中下线 Imagen；Imagen 仍可在 [Vertex AI](/zh/providers/vertex) 上使用。图片编辑需要原生模式和 Gemini 图片模型；不支持蒙版。关于参数映射和定价详情，请参阅 [Images API 的提供商说明](/zh/advanced/images-api#google-gemini)。
 
 ### 聊天响应中的图片
 
@@ -79,17 +81,21 @@ GoModel 为原生 Gemini 和兼容 OpenAI 的 API 分别维护内部的 Base URL
 | ------------ | ------------------ | ------------------------- |
 | Gemini 2.5 | `thinkingBudget` 0 / 1024 | `thinkingBudget` 1024 / 8192 / 24576 |
 | Gemini 3 Flash、3.5、3.6 | `thinkingLevel: minimal` | `thinkingLevel` 按原值 |
-| Gemini 3 Pro、3.1 Pro、3.7 Flash、3.8 Flash | `thinkingLevel: low` | `thinkingLevel` 按原值 |
+| Gemini 3 Pro、3.1 Pro、3.7 Flash、3.8 Flash、Gemini 4 | `thinkingLevel: low` | `thinkingLevel` 按原值 |
 
-Gemini 3 无法关闭思考，并且 Pro 系列以及 3.7 和 3.8 Flash 会拒绝 `minimal`，因此 GoModel 会发送这些模型所接受的最低级别，而不是将 Google 的 400 错误返回给您。显式设置的 `extra_body.google.thinking_config` 始终会原样转发。
+Gemini 3 和 4 无法关闭思考，并且 Pro 系列、3.7 和 3.8 Flash 以及 Gemini 4（`gemini-4-argon` 等）会拒绝 `minimal`，因此 GoModel 会发送这些模型所接受的最低级别，而不是将 Google 的 400 错误返回给您。显式设置的 `extra_body.google.thinking_config` 在设置了 `thinking_budget` 或 `thinking_level` 时会原样转发；否则 `reasoning_effort` 会把其级别或预算添加进去。同样的钳制也适用于 `openai_compatible` 模式，Google 的端点在该模式下会将 `reasoning_effort` 作为思考级别转发，并拒绝相同的取值。
 
-## Gemini 3 上的采样参数
+在 Gemini 4 上，思考 Token 会计入 `max_tokens`，达到按请求输出上限的长回答会以 `length`（Gemini 的 `CONTINUATION`）结束；GoModel 不会续写它。
 
-Google 的 Gemini 3 迁移指南建议从每个请求中移除 `temperature`、`top_p` 和 `top_k`，因为这些模型已针对其默认值调优，并将 `candidate_count` 列为 Gemini 3.x 不支持的参数。因此在原生模式下，GoModel 会为 Gemini 3 及更高版本（`gemini-3-*`、`gemini-3.5-*`、`gemini-3.8-*` 等）丢弃这四个字段，而对 Gemini 2.5、Gemma 和其他模型仍会转发。`max_tokens`、`stop`、惩罚参数、`response_format` 和思考设置不受影响。
+## Gemini 3 和 4 上的采样参数
+
+Google 的 Gemini 3 和 4 迁移指南建议从每个请求中移除 `temperature`、`top_p` 和 `top_k`，因为这些模型已针对其默认值调优（Gemini 4 会忽略它们），并将 `candidate_count` 列为不支持的参数。因此在原生模式下，GoModel 会为 Gemini 3 及更高版本（`gemini-3-*`、`gemini-3.8-*`、`gemini-4-*` 等）丢弃这四个字段，而对 Gemini 2.5、Gemma 和其他模型仍会转发。`presence_penalty` 和 `frequency_penalty` 从不转发：包括 2.5 在内的所有当前 Gemini API 模型都会返回 HTTP 400 "Penalty is not enabled for this model"。`max_tokens`、`stop`、`response_format` 和思考设置不受影响。
+
+在 `openai_compatible` 模式下，GoModel 还会丢弃 Google 端点视为未知而拒绝的成员（`seed`、`logprobs`、`top_logprobs`、`store`、`metadata`、`logit_bias`、`top_k`、`prediction`、`prompt_cache_key`、`safety_identifier`、`verbosity`、`web_search_options`）以及惩罚参数，并修复该端点发出的流式工具调用——它们缺少 `index`，且以 `stop` 而不是 `tool_calls` 结束。
 
 ## 思考签名（Thought signatures）
 
-Gemini 3 会为其发出的函数调用附加一个加密的 `thoughtSignature`；当该调用在历史记录中回传时如果缺少这个签名，后续请求会被拒绝（HTTP 400，"Function call is missing a thought_signature"）。在原生模式下，GoModel 以与 Google 自己的兼容 OpenAI 端点相同的方式暴露该签名，因此原样回传助手消息的客户端可以继续正常工作：
+Gemini 3 和 4 会为其发出的函数调用附加一个加密的 `thoughtSignature`；当该调用在历史记录中回传时如果缺少这个签名，后续请求会被拒绝（HTTP 400，"Function call is missing a thought_signature"）。在原生模式下，GoModel 以与 Google 自己的兼容 OpenAI 端点相同的方式暴露该签名，因此原样回传助手消息的客户端可以继续正常工作：
 
 ```json
 {
@@ -105,7 +111,7 @@ Gemini 3 会为其发出的函数调用附加一个加密的 `thoughtSignature`�
 
 相同的 `extra_content` 成员也会出现在流式的 `tool_calls` 增量、Responses API 的 `function_call` 输出项、Anthropic Messages API 的 `tool_use` 块上，以及（对于纯文本轮次）助手消息本身上。请原样回传；在并行调用批次中，只有第一个调用携带签名。其他提供商永远不会看到它；共享约定请参阅[额外内容、思考块与思考签名](/zh/advanced/extra-content)。工具调用或其 `function` 对象上的扁平 `thought_signature`（或 `thoughtSignature`）也会被接受，因此为其他网关构建的客户端可以继续正常工作。
 
-当 Gemini 3 的历史记录中包含没有任何签名的函数调用时（对话最初在其他模型上开始，或客户端丢弃了该字段），GoModel 会发送 Google 文档中说明的 `skip_thought_signature_validator` 占位符，而不是返回 400 错误。这会降低该轮次的推理连续性，因此建议回传真实的签名。
+当 Gemini 3 或 4 的历史记录中包含没有任何签名的函数调用时（对话最初在其他模型上开始，或客户端丢弃了该字段），GoModel 会发送 Google 文档中说明的 `skip_thought_signature_validator` 占位符，而不是返回 400 错误，原生模式和 `openai_compatible` 模式皆是如此。这会降低该轮次的推理连续性，因此建议回传真实的签名。
 
 ## 图片输入
 

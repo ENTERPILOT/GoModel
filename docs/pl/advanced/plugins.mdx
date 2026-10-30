@@ -636,6 +636,14 @@ Uwagi dla autorów:
   Używaj `bool` dla przełącznika i `list` dla otwartej listy stringów
   (typy encji, lista dozwolonych) zamiast kodować je w `select` lub
   `textarea`.
+- `InputRange` renderuje suwak ograniczony przez `Min`, `Max` i `Step` na
+  polu; zerowe `Max` oznacza 1, a nieustawiony lub niedodatni `Step` oznacza krok
+  0.01. Używaj go dla liczby z ograniczonym
+  zakresem (waga, próg) zamiast dowolnego tekstowego `number`, które operator może
+  ustawić poza zakresem. Ograniczenia są orientacyjne: serwer zapisuje to, co
+  deklaruje konfiguracja, więc wartość ustawiona w YAML nie jest odrzucana. Dashboard
+  przycina tylko to, co pokazuje suwak; wartość spoza zakresu pozostaje w konfiguracji,
+  dopóki operator nie przesunie suwaka.
 - Dodaj `Scope: pluginapi.ScopeRoute` do pól, które należą do modelu wirtualnego,
   a nie do instancji (tylko strategie routingu).
 
@@ -795,8 +803,8 @@ w kształcie renderowanym przez edytor guardrails:
 
 `phases`, `source`, `mutates` i `guardrail` są nowe (widoki instancji z
 `GET /admin/guardrails` również zawierają `guardrail`); `fields[].input` może teraz mieć wartość
-`secret`, `model`, `bool` lub `list`, a `fields[].scope` to `""` (instancja)
-albo `"route"`.
+`secret`, `model`, `bool`, `list` lub `range` (suwak ograniczony przez `min`,
+`max` i `step`), a `fields[].scope` to `""` (instancja) albo `"route"`.
 
 ### GET, PUT, DELETE /admin/guardrails
 
