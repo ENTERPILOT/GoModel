@@ -33,11 +33,18 @@ server:
   # trusted_proxies: ["10.42.0.0/16", "loopback"]
   # client_ip_header: "CF-Connecting-IP" # env: SERVER_CLIENT_IP_HEADER; default X-Forwarded-For, resolved hop by hop. Any other header carries one address and is taken verbatim, which is correct behind an edge like Cloudflare. Requires trusted_proxies; RFC 7239 Forwarded is not supported
   # trusted_hops: 1 # env: SERVER_TRUSTED_HOPS; proxies between the client and the gateway. Takes the X-Forwarded-For entry at that depth instead of scanning the chain, for an edge at a fixed depth with addresses you cannot enumerate. Requires trusted_proxies
+  # Native HTTPS on the listener. Unset (default) serves plain HTTP behind a proxy
+  # that terminates TLS. Set both files when clients connect directly; they are
+  # re-read when they change (checked every 5 seconds), so rotation needs no restart.
+  # tls_cert_file: /etc/gomodel/tls/tls.crt # env: SERVER_TLS_CERT_FILE
+  # tls_key_file: /etc/gomodel/tls/tls.key # env: SERVER_TLS_KEY_FILE
+  # tls_client_ca_file: /etc/gomodel/tls/ca.crt # env: SERVER_TLS_CLIENT_CA_FILE; require client certificates signed by this CA, except on /health and /health/ready (mTLS)
   pid_file: "data/gomodel.pid" # env: PID_FILE; where the running gateway records its process id so `gomodel --reload` can find it. Set per instance when several gateways share a host; empty writes no pid file and disables --reload; changing it needs a restart, not a reload
 
 models:
   enabled_by_default: true # env: MODELS_ENABLED_BY_DEFAULT; when false, models stay unavailable until an access override allows one or more user paths
   keep_only_aliases_at_models_endpoint: false # env: KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT; hide provider models from GET /v1/models and expose only enabled virtual models
+  vllm_discovery_compat: false # env: MODELS_VLLM_DISCOVERY_COMPAT; advertise every model the way a vLLM runtime does (owned_by "vllm", max_model_len from the limit the provider reports or else metadata.context_window) so a client whose discovery only understands vLLM picks the gateway up. It is a lie about the owner, so it stays opt-in and only for deployments whose consumers need it
   unqualified_model_ids_at_models_endpoint: false # env: UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT; list bare model IDs (gpt-5) instead of provider-qualified ones (openai/gpt-5). Caveat: when two providers expose the same model ID only the provider an unqualified request routes to (the first registered one) is listed; pin a name with a virtual model (source gpt-5 -> target azure/gpt-5)
   configured_provider_models_mode: "fallback" # env: CONFIGURED_PROVIDER_MODELS_MODE; "fallback" uses configured lists only when upstream /models is unavailable/empty, "allowlist" exposes only configured models and skips upstream /models for configured lists, "merge" adds configured models on top of the upstream inventory (for models a provider serves but does not list)
 
@@ -394,8 +401,9 @@ http:
   timeout: 600 # seconds (10 minutes)
   response_header_timeout: 600
   stream_idle_timeout: 300 # seconds of silence allowed mid-stream before a stalled stream fails; 0 disables
-  # Client TLS trust for every outbound HTTPS connection (providers, model
-  # catalog, update check, MCP upstreams, vector stores). All optional; the
+  # Client TLS trust for the gateway's outbound HTTPS clients (providers, model
+  # catalog, update check, MCP upstreams, vector stores). OTLP export and the
+  # database and Redis drivers keep their own TLS settings. All optional; the
   # default trusts the operating system certificate store.
   tls:
     # ca_file: /etc/gomodel/ca.pem            # private CA bundle (PEM), appended to the system store

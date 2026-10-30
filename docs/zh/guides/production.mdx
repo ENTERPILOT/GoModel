@@ -123,10 +123,58 @@ GCP Secret Manager 或 Azure Key Vault 读取 Secret 的功能由 [GoModel Pro](
 
 ### TLS
 
-GoModel 不负责终止 TLS。它提供纯 HTTP 服务，并期望前面部署反向代理或负载均衡器。对于任何不仅限于回环地址的部署，都请部署一个：
-否则客户端 API 密钥、托管网关密钥和主密钥都会以明文在网络上传输。
+默认情况下，GoModel 提供纯 HTTP 服务，并期望前面部署终止 TLS 的反向代理或负载均衡器。对于任何不仅限于回环地址的部署，请部署一个，或启用[原生 TLS](#原生-tls)：
+两者都没有时，客户端 API 密钥、托管网关密钥和主密钥都会以明文在网络上传输。
 
 此外，GoModel 没有 CORS 中间件，因此其他源上的浏览器客户端无法直接调用网关。如有需要，请在代理上添加相应的响应头。
+
+### 原生 TLS
+
+设置证书和私钥后，监听器会在同一端口上提供 HTTPS 服务，使用 TLS 1.2 或更高版本、Go 的默认密码套件以及 HTTP/2。当客户端直接访问网关时（例如通过 Kubernetes Service 进行 Pod 间通信）请使用它：无需维护 TLS sidecar，网关也能看到真实的客户端地址。
+
+```bash
+SERVER_TLS_CERT_FILE=/etc/gomodel/tls/tls.crt
+SERVER_TLS_KEY_FILE=/etc/gomodel/tls/tls.key
+# Optional: require a client certificate signed by this CA (mTLS)
+SERVER_TLS_CLIENT_CA_FILE=/etc/gomodel/tls/ca.crt
+```
+
+- 最多每 5 秒检查一次文件是否变化。轮换后的证书或客户端 CA 从下一次握手起生效，无需重启或重新加载。
+- 无法加载的轮换（例如只写了一半的证书对）会保留之前的证书并记录警告。启动时文件缺失或无效会报错。
+- 修改路径会在[配置重新加载](/zh/advanced/cli#配置重新加载)时生效。
+- 启用 TLS 后，该端口不再响应纯 HTTP。Docker `HEALTHCHECK` 运行的 `gomodel --health` 和 `gomodel --ready` 会自动切换到 HTTPS。
+
+**Kubernetes 与 cert-manager。** 将证书签发到 Secret 中，并以卷的形式挂载。不要使用 `subPath`：kubelet 不会更新 `subPath` 挂载，续期后的证书将永远无法到达 Pod。
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gomodel-tls
+spec:
+  secretName: gomodel-tls
+  dnsNames: [gomodel.ai.svc, gomodel.ai.svc.cluster.local]
+  issuerRef: { kind: ClusterIssuer, name: internal-ca }
+```
+
+使用仓库 `helm/` 目录中的 Helm chart：
+
+```yaml
+env:
+  SERVER_TLS_CERT_FILE: /etc/gomodel/tls/tls.crt
+  SERVER_TLS_KEY_FILE: /etc/gomodel/tls/tls.key
+extraVolumes:
+  - name: tls
+    secret: { secretName: gomodel-tls }
+extraVolumeMounts:
+  - { name: tls, mountPath: /etc/gomodel/tls, readOnly: true }
+livenessProbe:
+  httpGet: { path: /health, port: http, scheme: HTTPS }
+readinessProbe:
+  httpGet: { path: /health/ready, port: http, scheme: HTTPS }
+```
+
+kubelet 不会校验 HTTPS 探针的证书。启用 mTLS 时，`/health` 和 `/health/ready` 无需客户端证书仍会响应，因此这些探针无需修改即可工作；其他所有路径在没有经过验证的客户端证书时返回 401。chart 自带的 ServiceMonitor 以纯 HTTP 抓取，因此启用原生 TLS 时请自行定义一个使用 `scheme: https` 的 ServiceMonitor。启用 mTLS 时 `/metrics` 同样需要客户端证书，因此请为该 ServiceMonitor 配置 `tlsConfig`：`ca` 指向签发网关证书的 CA，`cert` 和 `keySecret` 来自由客户端 CA 签发的证书。设置 `env.SERVER_TLS_CERT_FILE` 后，`helm test` 和安装提示中的 port-forward 地址会自动切换到 HTTPS。
 
 ### 私有 CA 签发的上游证书
 
@@ -344,7 +392,7 @@ GoModel 分别提供存活和就绪检查，二进制文件还可以自我探测
 ## 生产环境检查清单
 
 - 将 `GOMODEL_MASTER_KEY` 设置为强密码值。
-- 在网关前面的代理中终止 TLS。
+- 在网关前面的代理中终止 TLS，或启用[原生 TLS](#原生-tls)。
 - 在网络边界限制对 `/admin/*`、控制台和 `/metrics` 的访问。
 - 多于一个副本或使用任何临时文件系统时，请使用 Postgres 或 MongoDB；使用 SQLite 时，请挂载卷并设置 `SQLITE_PATH`。
 - 在环境变量或 `config.yaml` 中声明提供商，其值来自 Secret 管理器。

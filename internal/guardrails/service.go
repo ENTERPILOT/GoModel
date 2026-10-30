@@ -379,7 +379,16 @@ func (s *Service) Upsert(ctx context.Context, definition Definition) error {
 	}
 	if stored != nil && normalizeDefinitionType(stored.Type) == identity.Type {
 		if schema, ok := s.configSchema(identity.Type); ok {
+			masked := plugins.SecretValues(schema, identity.Config)
 			identity.Config = plugins.MergeSecrets(schema, identity.Config, stored.Config)
+			// Secrets the caller sent as the mask were resolved from the stored
+			// row: it cannot read them, so it may not repoint the definition.
+			merged := plugins.SecretValues(schema, identity.Config)
+			for key, value := range masked {
+				if value == plugins.SecretMask {
+					ctx = config.WithKeptSecrets(ctx, merged[key])
+				}
+			}
 		}
 	}
 	normalized, err := s.normalizeDefinition(identity)

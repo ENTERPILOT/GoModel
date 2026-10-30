@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/modelselectors"
 )
 
 // ReasoningEffortLevels are the reasoning effort values an override may force,
@@ -67,27 +66,14 @@ func (s *Service) ResolveReasoningEffort(
 }
 
 // policyReasoningEffort returns the effort a model policy forces on attempt,
-// or "". Only exact and model-wide policies carry an effort, so it checks
-// those two from the most specific, passing over one that sets no effort or
-// does not apply to userPath. Unlike matchingPolicy, a more specific policy
-// for another setting, such as a provider-wide access rule, does not hide a
-// model-wide effort.
+// or "".
 func (s *snapshot) policyReasoningEffort(attempt core.ModelSelector, userPath string) string {
-	if key := modelselectors.ExactMatchKey(attempt.Provider, attempt.Model); key != "" {
-		if policy, ok := s.exact[key]; ok && forcesReasoningEffort(policy, userPath) {
-			return policy.ReasoningEffort
-		}
-	}
-	if attempt.Model != "" {
-		if policy, ok := s.modelWide[attempt.Model]; ok && forcesReasoningEffort(policy, userPath) {
-			return policy.ReasoningEffort
-		}
-	}
-	return ""
+	policy, _ := s.modelPolicy(attempt.Provider, attempt.Model, userPath, setsReasoningEffort)
+	return policy.ReasoningEffort
 }
 
-func forcesReasoningEffort(policy VirtualModel, userPath string) bool {
-	return policy.ReasoningEffort != "" && userPathAllowed(userPath, policy.UserPaths)
+func setsReasoningEffort(policy VirtualModel) bool {
+	return policy.ReasoningEffort != ""
 }
 
 // routeReasoningEffort returns the effort of the deepest virtual model on a

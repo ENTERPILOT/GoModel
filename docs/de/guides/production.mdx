@@ -200,14 +200,87 @@ Volume, beschränken Sie den Zugriff und stufen Sie Backups entsprechend ein.
 
 ### TLS
 
-GoModel terminiert kein TLS. Es liefert einfaches HTTP aus und erwartet einen
-Reverse Proxy oder Load Balancer davor. Betreiben Sie einen solchen bei jedem
-Deployment, das nicht nur auf Loopback läuft: Ohne ihn gehen Client-API-Keys,
-verwaltete Gateway-Keys und der Master-Key im Klartext über das Netzwerk.
+Standardmäßig liefert GoModel einfaches HTTP aus und erwartet einen Reverse
+Proxy oder Load Balancer davor, der TLS terminiert. Nutzen Sie bei jedem
+Deployment, das nicht nur auf Loopback läuft, einen solchen oder schalten Sie
+[natives TLS](#natives-tls) ein: Ohne beides gehen Client-API-Keys, verwaltete
+Gateway-Keys und der Master-Key im Klartext über das Netzwerk.
 
 Es gibt außerdem keine CORS-Middleware, sodass Browser-Clients von einem
 anderen Origin das Gateway nicht direkt aufrufen können. Ergänzen Sie die
 Header bei Bedarf in Ihrem Proxy.
+
+### Natives TLS
+
+Setzen Sie Zertifikat und Schlüssel, und der Listener liefert HTTPS auf demselben
+Port aus, mit TLS 1.2 oder neuer, den Standard-Cipher-Suites von Go und HTTP/2.
+Nutzen Sie das, wenn Clients das Gateway direkt erreichen, etwa Pod zu Pod über
+einen Kubernetes-Service: Es gibt keinen TLS-Sidecar zu pflegen, und das Gateway
+sieht die echte Client-Adresse.
+
+```bash
+SERVER_TLS_CERT_FILE=/etc/gomodel/tls/tls.crt
+SERVER_TLS_KEY_FILE=/etc/gomodel/tls/tls.key
+# Optional: require a client certificate signed by this CA (mTLS)
+SERVER_TLS_CLIENT_CA_FILE=/etc/gomodel/tls/ca.crt
+```
+
+- Die Dateien werden höchstens alle 5 Sekunden auf Änderungen geprüft. Ein
+  rotiertes Zertifikat oder eine rotierte Client-CA gilt ab dem nächsten
+  Handshake, ohne Neustart oder Reload.
+- Eine Rotation, die sich nicht laden lässt, etwa ein halb geschriebenes Paar,
+  behält das bisherige Zertifikat und protokolliert eine Warnung. Eine fehlende
+  oder ungültige Datei beim Start ist ein Fehler.
+- Geänderte Pfade werden bei einem
+  [Reload der Konfiguration](/de/advanced/cli#konfiguration-neu-laden) wirksam.
+- Sobald TLS aktiv ist, beantwortet der Port kein einfaches HTTP mehr.
+  `gomodel --health` und `gomodel --ready`, die der Docker-`HEALTHCHECK`
+  ausführt, wechseln automatisch zu HTTPS.
+
+**Kubernetes mit cert-manager.** Stellen Sie das Zertifikat in ein Secret aus und
+mounten Sie es als Volume. Verwenden Sie kein `subPath`: Das Kubelet aktualisiert
+`subPath`-Mounts nicht, sodass ein erneuertes Zertifikat den Pod nie erreichen
+würde.
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gomodel-tls
+spec:
+  secretName: gomodel-tls
+  dnsNames: [gomodel.ai.svc, gomodel.ai.svc.cluster.local]
+  issuerRef: { kind: ClusterIssuer, name: internal-ca }
+```
+
+Mit dem Helm-Chart in `helm/`:
+
+```yaml
+env:
+  SERVER_TLS_CERT_FILE: /etc/gomodel/tls/tls.crt
+  SERVER_TLS_KEY_FILE: /etc/gomodel/tls/tls.key
+extraVolumes:
+  - name: tls
+    secret: { secretName: gomodel-tls }
+extraVolumeMounts:
+  - { name: tls, mountPath: /etc/gomodel/tls, readOnly: true }
+livenessProbe:
+  httpGet: { path: /health, port: http, scheme: HTTPS }
+readinessProbe:
+  httpGet: { path: /health/ready, port: http, scheme: HTTPS }
+```
+
+Das Kubelet prüft das Zertifikat einer HTTPS-Probe nicht. Bei aktivem mTLS
+antworten `/health` und `/health/ready` weiterhin ohne Client-Zertifikat, sodass
+diese Probes unverändert funktionieren; jeder andere Pfad antwortet ohne
+verifiziertes Zertifikat mit 401. Der ServiceMonitor des Charts scrapt einfaches
+HTTP; definieren Sie bei nativem TLS einen eigenen mit `scheme: https`. Bei
+mTLS braucht auch `/metrics` ein Client-Zertifikat; geben Sie diesem
+ServiceMonitor daher eine `tlsConfig` mit `ca` für die CA, die das
+Gateway-Zertifikat ausgestellt hat, sowie `cert` und `keySecret` aus einem
+Zertifikat, das die Client-CA signiert hat. `helm test` und die
+Port-Forward-Hinweise nach der Installation wechseln automatisch zu HTTPS, sobald
+`env.SERVER_TLS_CERT_FILE` gesetzt ist.
 
 ### Upstream-Zertifikate hinter einer privaten CA
 
@@ -569,7 +642,8 @@ separat ein VACUUM aus, wenn die Dateigröße wichtig ist.
 ## Checkliste für den Produktivbetrieb
 
 - Setzen Sie `GOMODEL_MASTER_KEY` auf einen starken Wert.
-- Terminieren Sie TLS in einem Proxy vor dem Gateway.
+- Terminieren Sie TLS in einem Proxy vor dem Gateway oder schalten Sie
+  [natives TLS](#natives-tls) ein.
 - Beschränken Sie `/admin/*`, das Dashboard und `/metrics` am Netzwerkperimeter.
 - Verwenden Sie Postgres oder MongoDB bei mehr als einem Replikat oder bei
   einem flüchtigen Dateisystem; binden Sie bei SQLite ein Volume ein und setzen

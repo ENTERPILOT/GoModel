@@ -66,6 +66,9 @@ type TypeField struct {
 	Options     []TypeOption `json:"options,omitempty"`
 	Default     any          `json:"default,omitempty"`
 	Scope       string       `json:"scope,omitempty"`
+	Min         float64      `json:"min,omitempty"`
+	Max         float64      `json:"max,omitempty"`
+	Step        float64      `json:"step,omitempty"`
 }
 
 // TypeDefinition describes one supported guardrail type and its config schema.
@@ -101,6 +104,9 @@ func TypeFieldsFromSchema(schema []pluginapi.Field, scope pluginapi.FieldScope) 
 			Placeholder: field.Placeholder,
 			Default:     field.Default,
 			Scope:       string(field.Scope),
+			Min:         field.Min,
+			Max:         field.Max,
+			Step:        field.Step,
 		}
 		for _, option := range field.Options {
 			converted.Options = append(converted.Options, TypeOption{Value: option.Value, Label: option.Label})

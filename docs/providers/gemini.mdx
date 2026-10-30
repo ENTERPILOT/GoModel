@@ -40,7 +40,13 @@ Native AI Studio mode can also materialize GoModel's post-routing prompt-cache
 plans as five-minute Gemini cached-content objects. Reuse is scoped to the API
 key selected for the session; sessionless traffic with rotating keys skips
 object creation so a resource is never reused under the wrong credential.
-Vertex currently receives the original request without cached-content objects.
+Gemini 4 models have no explicit caching (Google caches shared prefixes
+implicitly), so no objects are created for them. Vertex currently receives the
+original request without cached-content objects.
+
+Google stores Gemini API requests by default on new paid-tier projects. In
+native mode a Chat Completions `store: false` is forwarded as Gemini's
+per-request opt-out; the OpenAI-compatible endpoint has no such member.
 
 ## Base URLs
 
@@ -68,8 +74,10 @@ flagged with a cost-calculation caveat.
 ## Image generation and edits
 
 In native mode the [OpenAI-compatible image endpoints](/advanced/images-api)
-work with Gemini image models (`gemini-2.5-flash-image`, ..., via
-`generateContent`). Google retired Imagen from the AI Studio API in August
+work with Gemini image models (`gemini-2.5-flash-image`, `gemini-3.1-flash-image`,
+`gemini-nano-banana-2.1`, ..., via `generateContent`). When the model returns no
+image, the error carries Gemini's finish reason and message (for example
+`IMAGE_RECITATION`). Google retired Imagen from the AI Studio API in August
 2026; Imagen is still served on [Vertex AI](/providers/vertex). Image edits
 require native mode and a Gemini image model; masks are not supported. See the
 [Images API provider notes](/advanced/images-api#google-gemini) for parameter
@@ -118,27 +126,43 @@ Gemini's `thinkingConfig`:
 | ------------ | ------------------ | ------------------------- |
 | Gemini 2.5 | `thinkingBudget` 0 / 1024 | `thinkingBudget` 1024 / 8192 / 24576 |
 | Gemini 3 Flash, 3.5, 3.6 | `thinkingLevel: minimal` | `thinkingLevel` as given |
-| Gemini 3 Pro, 3.1 Pro, 3.7 Flash, 3.8 Flash | `thinkingLevel: low` | `thinkingLevel` as given |
+| Gemini 3 Pro, 3.1 Pro, 3.7 Flash, 3.8 Flash, Gemini 4 | `thinkingLevel: low` | `thinkingLevel` as given |
 
-Thinking cannot be turned off on Gemini 3, and Pro models plus 3.7 and 3.8
-Flash reject `minimal`, so GoModel sends the lowest level those models accept
-instead of surfacing Google's 400. An explicit
-`extra_body.google.thinking_config` is always forwarded unchanged.
+Thinking cannot be turned off on Gemini 3 or 4, and Pro models, 3.7 and 3.8
+Flash and Gemini 4 (`gemini-4-argon`, ...) reject `minimal`, so GoModel sends
+the lowest level those models accept instead of surfacing Google's 400. An
+explicit `extra_body.google.thinking_config` is forwarded unchanged when it
+sets `thinking_budget` or `thinking_level`; otherwise `reasoning_effort` adds
+its level or budget to it. The same clamp applies in `openai_compatible` mode, where Google's endpoint
+forwards `reasoning_effort` as a thinking level and rejects the same values.
 
-## Sampling parameters on Gemini 3
+On Gemini 4, thinking tokens count against `max_tokens`, and a long answer that
+hits the per-request output cap finishes with `length` (Gemini's
+`CONTINUATION`); GoModel does not resume it.
 
-Google's Gemini 3 migration guides say to remove `temperature`, `top_p` and
-`top_k` from every request because the models are tuned for their defaults,
-and list `candidate_count` as unsupported on Gemini 3.x. In native mode GoModel
-therefore drops those four fields for Gemini 3 and later (`gemini-3-*`,
-`gemini-3.5-*`, `gemini-3.8-*`, ...) and still forwards them for Gemini 2.5,
-Gemma and other models. `max_tokens`, `stop`, penalties, `response_format` and
-thinking settings are unaffected.
+## Sampling parameters on Gemini 3 and 4
+
+Google's Gemini 3 and 4 migration guides say to remove `temperature`, `top_p`
+and `top_k` from every request because the models are tuned for their defaults
+(Gemini 4 ignores them), and list `candidate_count` as unsupported. In native
+mode GoModel therefore drops those four fields for Gemini 3 and later
+(`gemini-3-*`, `gemini-3.8-*`, `gemini-4-*`, ...) and still forwards them for
+Gemini 2.5, Gemma and other models. `presence_penalty` and `frequency_penalty`
+are never forwarded: every current Gemini API model, 2.5 included, answers
+HTTP 400 "Penalty is not enabled for this model". `max_tokens`, `stop`,
+`response_format` and thinking settings are unaffected.
+
+In `openai_compatible` mode GoModel also drops the members Google's endpoint
+rejects as unknown (`seed`, `logprobs`, `top_logprobs`, `store`, `metadata`,
+`logit_bias`, `top_k`, `prediction`, `prompt_cache_key`, `safety_identifier`,
+`verbosity`, `web_search_options`) along with the penalties, and repairs the
+streamed tool calls that endpoint emits without an `index` and finishes with
+`stop` instead of `tool_calls`.
 
 ## Thought signatures
 
-Gemini 3 attaches an encrypted `thoughtSignature` to the function calls it
-emits and rejects a follow-up request (HTTP 400, "Function call is missing a
+Gemini 3 and 4 attach an encrypted `thoughtSignature` to the function calls
+they emit and reject a follow-up request (HTTP 400, "Function call is missing a
 thought_signature") when that call comes back in the history without it. In
 native mode GoModel exposes the signature the same way Google's own
 OpenAI-compatible endpoint does, so a client that echoes assistant messages
@@ -165,11 +189,12 @@ signature. Other providers never see it; see
 `thoughtSignature`) on the tool call or its `function` object is accepted too,
 so clients built against other gateways keep working.
 
-When a Gemini 3 history contains a function call without any signature (the
-conversation started on another model, or the client dropped the field),
+When a Gemini 3 or 4 history contains a function call without any signature
+(the conversation started on another model, or the client dropped the field),
 GoModel sends Google's documented `skip_thought_signature_validator`
-placeholder instead of surfacing the 400. Reasoning continuity is reduced for
-that turn, so prefer echoing the real signature.
+placeholder instead of surfacing the 400, in native and `openai_compatible`
+mode alike. Reasoning continuity is reduced for that turn, so prefer echoing
+the real signature.
 
 ## Image input
 

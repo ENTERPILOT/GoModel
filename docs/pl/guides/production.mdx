@@ -175,13 +175,84 @@ wolumen, ograniczaj dostęp i odpowiednio klasyfikuj kopie zapasowe.
 
 ### TLS
 
-GoModel nie terminuje TLS. Serwuje zwykłe HTTP i oczekuje przed sobą reverse proxy
-lub load balancera. Uruchom je w każdym wdrożeniu, które nie jest ograniczone do
-loopbacka: bez niego klucze API klientów, zarządzane klucze gatewaya i klucz
-główny przechodzą przez sieć jawnym tekstem.
+Domyślnie GoModel serwuje zwykłe HTTP i oczekuje przed sobą reverse proxy lub
+load balancera, który terminuje TLS. W każdym wdrożeniu, które nie jest
+ograniczone do loopbacka, użyj go albo włącz [natywny TLS](#natywny-tls): bez
+żadnego z nich klucze API klientów, zarządzane klucze gatewaya i klucz główny
+przechodzą przez sieć jawnym tekstem.
 
 Nie ma też middleware CORS, więc klienci przeglądarkowi z innego originu nie mogą
 wywoływać gatewaya bezpośrednio. Jeśli tego potrzebujesz, dodaj nagłówki w swoim proxy.
+
+### Natywny TLS
+
+Ustaw certyfikat i klucz, a listener zacznie serwować HTTPS na tym samym porcie,
+z TLS 1.2 lub nowszym, domyślnymi zestawami szyfrów Go i HTTP/2. Użyj tego, gdy
+klienci łączą się z gatewayem bezpośrednio, np. pod–pod przez Service
+Kubernetes: nie ma sidecara TLS do utrzymania, a gateway widzi prawdziwy adres
+klienta.
+
+```bash
+SERVER_TLS_CERT_FILE=/etc/gomodel/tls/tls.crt
+SERVER_TLS_KEY_FILE=/etc/gomodel/tls/tls.key
+# Optional: require a client certificate signed by this CA (mTLS)
+SERVER_TLS_CLIENT_CA_FILE=/etc/gomodel/tls/ca.crt
+```
+
+- Pliki są sprawdzane pod kątem zmian najwyżej co 5 sekund. Zrotowany
+  certyfikat lub CA klientów obowiązuje od następnego handshake'u, bez restartu
+  ani przeładowania.
+- Rotacja, której nie da się wczytać, np. para zapisana w połowie, zachowuje
+  poprzedni certyfikat i loguje ostrzeżenie. Brakujący lub nieprawidłowy plik
+  przy starcie jest błędem.
+- Zmiana ścieżek zaczyna obowiązywać po
+  [przeładowaniu konfiguracji](/pl/advanced/cli#przeładowanie-konfiguracji).
+- Po włączeniu TLS port nie odpowiada już na zwykłe HTTP. `gomodel --health` i
+  `gomodel --ready`, które uruchamia dockerowy `HEALTHCHECK`, same przełączają
+  się na HTTPS.
+
+**Kubernetes z cert-managerem.** Wystaw certyfikat do Secretu i zamontuj go jako
+wolumen. Nie używaj `subPath`: kubelet nie aktualizuje montowań `subPath`, więc
+odnowiony certyfikat nigdy nie dotarłby do poda.
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gomodel-tls
+spec:
+  secretName: gomodel-tls
+  dnsNames: [gomodel.ai.svc, gomodel.ai.svc.cluster.local]
+  issuerRef: { kind: ClusterIssuer, name: internal-ca }
+```
+
+Z chartem Helm z katalogu `helm/`:
+
+```yaml
+env:
+  SERVER_TLS_CERT_FILE: /etc/gomodel/tls/tls.crt
+  SERVER_TLS_KEY_FILE: /etc/gomodel/tls/tls.key
+extraVolumes:
+  - name: tls
+    secret: { secretName: gomodel-tls }
+extraVolumeMounts:
+  - { name: tls, mountPath: /etc/gomodel/tls, readOnly: true }
+livenessProbe:
+  httpGet: { path: /health, port: http, scheme: HTTPS }
+readinessProbe:
+  httpGet: { path: /health/ready, port: http, scheme: HTTPS }
+```
+
+Kubelet nie weryfikuje certyfikatu sondy HTTPS. Przy włączonym mTLS `/health` i
+`/health/ready` nadal odpowiadają bez certyfikatu klienta, więc te sondy
+działają bez zmian; każda inna ścieżka bez zweryfikowanego certyfikatu zwraca
+401. ServiceMonitor z chartu scrapuje zwykłe HTTP, więc przy natywnym TLS
+zdefiniuj własny ze `scheme: https`. Przy mTLS `/metrics` także wymaga
+certyfikatu klienta, więc daj temu ServiceMonitorowi `tlsConfig` z `ca`
+wskazującym CA, które wystawiło certyfikat gatewaya, oraz `cert` i `keySecret`
+z certyfikatu podpisanego przez CA klientów. `helm test` i notatki po
+instalacji dla port-forward same przełączają się na HTTPS, gdy ustawione jest
+`env.SERVER_TLS_CERT_FILE`.
 
 ### Certyfikaty upstreamu za prywatnym CA
 
@@ -498,7 +569,8 @@ wykonuj na nim VACUUM osobno.
 ## Lista kontrolna wdrożenia produkcyjnego
 
 - Ustaw `GOMODEL_MASTER_KEY` na silną wartość.
-- Terminuj TLS w proxy przed gatewayem.
+- Terminuj TLS w proxy przed gatewayem albo włącz
+  [natywny TLS](#natywny-tls).
 - Ogranicz dostęp do `/admin/*`, dashboardu i `/metrics` na perymetrze sieci.
 - Używaj Postgresa lub MongoDB przy więcej niż jednej replice lub dowolnym ulotnym systemie plików;
   przy SQLite zamontuj wolumen i ustaw `SQLITE_PATH`.

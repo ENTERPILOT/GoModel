@@ -155,6 +155,7 @@ func buildDefaultConfig() *Config {
 		Models: ModelsConfig{
 			EnabledByDefault:                    true,
 			KeepOnlyAliasesAtModelsEndpoint:     false,
+			VLLMDiscoveryCompat:                 false,
 			UnqualifiedModelIDsAtModelsEndpoint: false,
 			ConfiguredProviderModelsMode:        ConfiguredProviderModelsModeFallback,
 		},
@@ -401,6 +402,9 @@ func Load() (*LoadResult, error) {
 		return nil, err
 	}
 	if err := ResolveClientIPPolicy(&cfg.Server); err != nil {
+		return nil, err
+	}
+	if err := ValidateServerTLS(cfg.Server); err != nil {
 		return nil, err
 	}
 

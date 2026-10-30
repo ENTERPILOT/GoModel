@@ -57,6 +57,12 @@ wins. An alias without its own value inherits the selected target model's
 slowdown; set the alias to `0` to override that inheritance. This also applies
 to load-balanced virtual models after a target is selected.
 
+A model's own slowdown can be set exactly (`openai/gpt-4o`) or model-wide
+(`gpt-4o`, on every provider), and the exact value wins. A more specific entry
+that leaves slowdown empty, or whose `user_paths` exclude the caller, does not
+hide a broader one, so a provider-wide access rule never turns a model's
+slowdown off.
+
 ## Force a reasoning effort
 
 Set **Reasoning effort override** on a concrete model or redirect to send that
@@ -90,6 +96,13 @@ virtual models, the path routing chose applies; a failover leg uses the first
 declared path to its model. It applies to Chat Completions, the Responses API,
 and the Anthropic Messages API; batches and provider passthrough are not
 rewritten.
+
+Because a concrete model's override beats every alias above it, set it only for
+levels the model cannot accept, and put policy on aliases. For example, `fast`
+and `smart` aliases of the same model can send `low` and `high`; an override on
+that model would make both send its value. This is the reverse of slowdown,
+where the alias wins. As with slowdown, an exact override beats a model-wide
+one, and an entry that sets no effort does not hide a broader one.
 
 The rest of this page covers redirects.
 

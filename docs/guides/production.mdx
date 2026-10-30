@@ -175,13 +175,83 @@ volume, restrict access, and classify backups accordingly.
 
 ### TLS
 
-GoModel does not terminate TLS. It serves plain HTTP and expects a reverse proxy
-or load balancer in front of it. Run one for any deployment that is not
-loopback-only: without it, client API keys, managed gateway keys, and the master
-key all cross the network in cleartext.
+By default GoModel serves plain HTTP and expects a reverse proxy or load
+balancer in front of it to terminate TLS. For any deployment that is not
+loopback-only, use one or turn on [native TLS](#native-tls): without either,
+client API keys, managed gateway keys, and the master key all cross the network
+in cleartext.
 
 There is also no CORS middleware, so browser clients on another origin cannot
 call the gateway directly. Add the headers at your proxy if you need that.
+
+### Native TLS
+
+Set a certificate and key and the listener serves HTTPS on the same port, with
+TLS 1.2 or later, Go's default cipher suites, and HTTP/2. Use it when clients
+reach the gateway directly, for example pod to pod through a Kubernetes
+Service: no TLS sidecar to maintain, and the gateway sees the real client
+address.
+
+```bash
+SERVER_TLS_CERT_FILE=/etc/gomodel/tls/tls.crt
+SERVER_TLS_KEY_FILE=/etc/gomodel/tls/tls.key
+# Optional: require a client certificate signed by this CA (mTLS)
+SERVER_TLS_CLIENT_CA_FILE=/etc/gomodel/tls/ca.crt
+```
+
+- The files are checked for changes at most every 5 seconds. A rotated
+  certificate, or client CA, is served from the next handshake on, with no
+  restart or reload.
+- A rotation that fails to load, such as a pair caught half written, keeps the
+  previous certificate and logs a warning. A missing or invalid file at startup
+  is an error.
+- Changing the paths takes effect on a
+  [configuration reload](/advanced/cli#configuration-reload).
+- Once TLS is on, the port no longer answers plain HTTP. `gomodel --health` and
+  `gomodel --ready`, which the Docker `HEALTHCHECK` runs, switch to HTTPS
+  automatically.
+
+**Kubernetes with cert-manager.** Issue the certificate into a Secret and mount
+it as a volume. Do not use `subPath`: the kubelet does not update `subPath`
+mounts, so a renewed certificate would never reach the pod.
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gomodel-tls
+spec:
+  secretName: gomodel-tls
+  dnsNames: [gomodel.ai.svc, gomodel.ai.svc.cluster.local]
+  issuerRef: { kind: ClusterIssuer, name: internal-ca }
+```
+
+With the Helm chart in `helm/`:
+
+```yaml
+env:
+  SERVER_TLS_CERT_FILE: /etc/gomodel/tls/tls.crt
+  SERVER_TLS_KEY_FILE: /etc/gomodel/tls/tls.key
+extraVolumes:
+  - name: tls
+    secret: { secretName: gomodel-tls }
+extraVolumeMounts:
+  - { name: tls, mountPath: /etc/gomodel/tls, readOnly: true }
+livenessProbe:
+  httpGet: { path: /health, port: http, scheme: HTTPS }
+readinessProbe:
+  httpGet: { path: /health/ready, port: http, scheme: HTTPS }
+```
+
+The kubelet does not verify the certificate of an HTTPS probe. With mTLS on,
+`/health` and `/health/ready` still answer without a client certificate, so
+these probes work unchanged; every other path returns 401 without a verified
+one. The chart's ServiceMonitor scrapes plain HTTP, so with native TLS define
+your own with `scheme: https`. Under mTLS `/metrics` needs a client certificate
+too, so give that ServiceMonitor a `tlsConfig` with `ca` set to the CA that
+issued the gateway certificate, plus `cert` and `keySecret` from a certificate
+the client CA signed. `helm test` and the port-forward install notes switch to
+HTTPS on their own when `env.SERVER_TLS_CERT_FILE` is set.
 
 ### Upstream certificates behind a private CA
 
@@ -497,7 +567,8 @@ if the file size matters.
 ## Production checklist
 
 - Set `GOMODEL_MASTER_KEY` to a strong value.
-- Terminate TLS in a proxy in front of the gateway.
+- Terminate TLS in a proxy in front of the gateway, or turn on
+  [native TLS](#native-tls).
 - Restrict `/admin/*`, the dashboard, and `/metrics` at the network perimeter.
 - Use Postgres or MongoDB for more than one replica or any ephemeral filesystem;
   with SQLite, mount a volume and set `SQLITE_PATH`.

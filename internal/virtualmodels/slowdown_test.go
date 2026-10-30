@@ -17,6 +17,9 @@ func TestResolveSlowdown(t *testing.T) {
 		Slowdown:     new(0.2),
 		Enabled:      true,
 	}
+	wideModel := VirtualModel{Source: "gpt-4o", Model: "gpt-4o", Slowdown: new(0.5), Enabled: true}
+	gpt4o := core.ModelSelector{Provider: "openai", Model: "gpt-4o"}
+	qualified := core.NewRequestedModelSelector("openai/gpt-4o", "")
 	tests := []struct {
 		name      string
 		rows      []VirtualModel
@@ -79,6 +82,63 @@ func TestResolveSlowdown(t *testing.T) {
 			resolved:  core.ModelSelector{Provider: "openai", Model: "gpt-4o"},
 			ctx:       core.WithEffectiveUserPath(context.Background(), "/team/beta"),
 			want:      0,
+		},
+		{
+			name:      "model-wide applies on every provider",
+			rows:      []VirtualModel{wideModel},
+			requested: core.NewRequestedModelSelector("azure/gpt-4o", ""),
+			resolved:  core.ModelSelector{Provider: "azure", Model: "gpt-4o"},
+			ctx:       context.Background(),
+			want:      0.5,
+		},
+		{
+			name:      "provider-wide policy does not hide model-wide",
+			rows:      []VirtualModel{wideModel, {Source: "openai/", ProviderName: "openai", Enabled: true}},
+			requested: qualified,
+			resolved:  gpt4o,
+			ctx:       context.Background(),
+			want:      0.5,
+		},
+		{
+			name: "exact policy without slowdown does not hide model-wide",
+			rows: []VirtualModel{
+				wideModel,
+				{Source: "openai/gpt-4o", ProviderName: "openai", Model: "gpt-4o", UserPaths: []string{"/team"}, Enabled: true},
+			},
+			requested: qualified,
+			resolved:  gpt4o,
+			ctx:       core.WithEffectiveUserPath(context.Background(), "/team"),
+			want:      0.5,
+		},
+		{
+			name:      "exact beats model-wide",
+			rows:      []VirtualModel{wideModel, concrete},
+			requested: qualified,
+			resolved:  gpt4o,
+			ctx:       context.Background(),
+			want:      0.2,
+		},
+		{
+			name: "exact zero disables model-wide",
+			rows: []VirtualModel{
+				wideModel,
+				{Source: "openai/gpt-4o", ProviderName: "openai", Model: "gpt-4o", Slowdown: new(0.0), Enabled: true},
+			},
+			requested: qualified,
+			resolved:  gpt4o,
+			ctx:       context.Background(),
+			want:      0,
+		},
+		{
+			name: "exact for another user path falls back to model-wide",
+			rows: []VirtualModel{
+				wideModel,
+				{Source: "openai/gpt-4o", ProviderName: "openai", Model: "gpt-4o", UserPaths: []string{"/team/alpha"}, Slowdown: new(0.3), Enabled: true},
+			},
+			requested: qualified,
+			resolved:  gpt4o,
+			ctx:       core.WithEffectiveUserPath(context.Background(), "/team/beta"),
+			want:      0.5,
 		},
 	}
 
