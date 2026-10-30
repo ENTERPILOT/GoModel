@@ -304,6 +304,40 @@ ENTRYPOINT ["/gomodel"]
 
 Wtedy to Ty odpowiadasz za aktualizacje i poprawki bezpieczeństwa tego obrazu.
 
+## Udostępnij serwery MCP dostawców
+
+Niektórzy dostawcy hostują własne serwery MCP, dostępne z tym samym kluczem API
+co ich modele. Dodaj skonfigurowanego dostawcę do `mcp.provider_servers`, a
+gateway udostępni jego serwery z kluczem tego dostawcy. Nie musisz kopiować
+klucza do `mcp.servers`:
+
+```yaml
+mcp:
+  provider_servers: [zai] # env: MCP_PROVIDER_SERVERS=zai; domyślnie: brak
+```
+
+| Typ dostawcy | Serwery | Narzędzia upstream |
+| --- | --- | --- |
+| `zai` | `zai-web-search`, `zai-web-reader`, `zai-zread` | `webSearchPrime`, `webReader`, `search_doc` / `get_repo_structure` / `read_file` |
+
+Klienci wywołują je jak każdy inny serwer, na przykład
+`zai-web-search_webSearchPrime` na `/mcp`.
+
+- **Opt-in.** Domyślnie nic nie jest udostępniane: każde wywołanie obciąża
+  klucz dostawcy. Z.ai udostępnia te narzędzia tylko kluczom
+  [GLM Coding Plan](https://docs.z.ai/devpack/mcp).
+- **Liczą się nazwy skonfigurowanych dostawców**, nie typy. Dostawca o nazwie
+  `zai-coding` jest udostępniany jako `zai-coding-web-search`.
+- **Ten sam host co modele.** Adres MCP powstaje z `base_url` dostawcy, więc
+  base URL na `open.bigmodel.cn` lub za proxy trafia do odpowiedniego endpointu
+  MCP, a klucz nie trafia na żaden nowy host.
+- **Tylko do odczytu w dashboardzie**, jak serwery zadeklarowane. Aby
+  ograniczyć jeden z nich przez `user_paths` lub przyciąć narzędzia, zadeklaruj
+  w `mcp.servers` serwer o tym samym slugu; zastąpi on serwer dostawcy.
+- Liczą się tylko dostawcy z `config.yaml` lub zmiennych środowiskowych, i
+  używany jest pierwszy klucz API. Nazwa, która nie jest skonfigurowanym
+  dostawcą, jest pomijana z ostrzeżeniem.
+
 ## Stan i cykl życia
 
 Dashboard pokazuje każdy serwer jako **connected**, **degraded**, **connecting**

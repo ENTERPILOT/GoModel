@@ -3,6 +3,8 @@ package app
 import (
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/labstack/echo/v5"
@@ -76,7 +78,8 @@ func (b *bootstrap) initServerDependencies() error {
 
 	// Initialize the MCP gateway (aggregated upstream MCP servers behind /mcp).
 	if appCfg.MCP.Enabled {
-		mcpResult, err := mcpgateway.New(b.ctx, appCfg, app.storage, app.secrets, nil, b.serverUsageLogger, b.cfg.AppConfig.Secrets)
+		providerServers := app.providers.ProviderMCPServers(appCfg.MCP.ProviderServers)
+		mcpResult, err := mcpgateway.New(b.ctx, appCfg, app.storage, app.secrets, nil, b.serverUsageLogger, b.cfg.AppConfig.Secrets, providerServers)
 		if err != nil {
 			return fmt.Errorf("failed to initialize mcp gateway: %w", err)
 		}
@@ -90,7 +93,8 @@ func (b *bootstrap) initServerDependencies() error {
 		app.secretRotation.watchEntities(mcpgateway.ServerSecretEntity+".", mcpResult.Service)
 		slog.Info("mcp gateway enabled",
 			"path", config.JoinBasePath(appCfg.Server.BasePath, "/mcp"),
-			"configured_servers", len(appCfg.MCP.Servers))
+			"configured_servers", len(appCfg.MCP.Servers),
+			"provider_servers", slices.Sorted(maps.Keys(providerServers)))
 	} else {
 		slog.Info("mcp gateway disabled")
 	}

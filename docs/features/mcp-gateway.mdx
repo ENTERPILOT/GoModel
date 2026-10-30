@@ -299,6 +299,40 @@ ENTRYPOINT ["/gomodel"]
 
 You then own that image's updates and security patches.
 
+## Expose provider-hosted MCP servers
+
+Some providers host MCP servers of their own, reachable with the same API key
+as their models. List a configured provider in `mcp.provider_servers` and the
+gateway serves its hosted servers with that provider's key, so you do not copy
+the key into `mcp.servers`:
+
+```yaml
+mcp:
+  provider_servers: [zai] # env: MCP_PROVIDER_SERVERS=zai; default: none
+```
+
+| Provider type | Servers | Upstream tools |
+| --- | --- | --- |
+| `zai` | `zai-web-search`, `zai-web-reader`, `zai-zread` | `webSearchPrime`, `webReader`, `search_doc` / `get_repo_structure` / `read_file` |
+
+Clients call them like any other server, for example
+`zai-web-search_webSearchPrime` on `/mcp`.
+
+- **Opt-in.** Nothing is exposed by default: every call is billed to the
+  provider key. Z.ai serves these tools only to
+  [GLM Coding Plan](https://docs.z.ai/devpack/mcp) keys.
+- **Names are configured provider names**, not types. A provider named
+  `zai-coding` is served as `zai-coding-web-search`.
+- **Same host as the models.** The MCP URL is built from the provider's
+  `base_url`, so a mainland (`open.bigmodel.cn`) or proxied base URL reaches the
+  matching MCP endpoint and the key goes nowhere new.
+- **Read-only in the dashboard**, like declared servers. To scope one with
+  `user_paths` or trim its tools, declare a server with the same slug in
+  `mcp.servers`; it replaces the provider-hosted one.
+- Only providers from `config.yaml` or environment variables qualify, and the
+  first API key is used. A name that is not a configured provider is skipped
+  with a warning.
+
 ## Health and lifecycle
 
 The dashboard shows each server as **connected**, **degraded**, **connecting**,

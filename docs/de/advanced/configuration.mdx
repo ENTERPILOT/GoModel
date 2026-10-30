@@ -228,6 +228,7 @@ Den vollständigen Leitfaden finden Sie unter [MCP Gateway](/de/features/mcp-gat
 | `MCP_SERVERS` | JSON-Objekt mit Upstream-MCP-Servern, das pro Name über die YAML-Map `mcp.servers` gelegt wird (die Einträge sind im Dashboard schreibgeschützt)     | _(keine)_           |
 | `MCP_ALLOWED_ORIGINS` | Kommagetrennte Browser-Origins (`scheme://host[:port]`), die `/mcp` aufrufen dürfen; standardmäßig wird keinem vertraut, was DNS-Rebinding verhindert. `*` deaktiviert die Prüfung | _(keine)_           |
 | `MCP_TOOL_DISCOVERY` | `off` listet jedes Tool auf; `search` stellt stattdessen `search_tools` und `call_tool` bereit, damit große Kataloge nicht mehr den Modellkontext füllen. Clients überschreiben dies pro Session mit `X-MCP-Tool-Discovery` | `off` |
+| `MCP_PROVIDER_SERVERS` | Kommagetrennte Namen konfigurierter Provider, deren eigene MCP-Server mit dem API-Key des Providers bereitgestellt werden (zum Beispiel `zai`). Siehe [MCP-Server von Providern](/de/features/mcp-gateway#mcp-server-von-providern-bereitstellen) | _(keine)_ |
 | `MCP_VIRTUAL_SERVERS` | JSON-Objekt mit virtuellen Servern, das pro Name über die YAML-Map `mcp.virtual_servers` gelegt wird. Jeder stellt eine Teilmenge der MCP-Server unter `/mcp/{name}` bereit | _(keine)_ |
 
 #### Logging
