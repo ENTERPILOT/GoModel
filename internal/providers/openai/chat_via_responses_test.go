@@ -755,6 +755,18 @@ func TestChatToResponsesRequest_DropsEchoedReasoningContent(t *testing.T) {
 	assert.NotContains(t, assistant, "reasoning_content")
 }
 
+func TestChatToResponsesRequest_RejectsUserReasoningContent(t *testing.T) {
+	user := core.Message{
+		Role:    "user",
+		Content: "Continue this reasoning.",
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			"reasoning_content": json.RawMessage(`"user supplied"`),
+		}),
+	}
+	_, err := responsesInput([]core.Message{user})
+	assert.ErrorIs(t, err, errNotTranslatable)
+}
+
 // A request that asks for reasoning must also ask for the summary: the
 // Responses API emits reasoning summaries only when reasoning.summary is set,
 // and the chat rendering has no reasoning text without them. An explicit
