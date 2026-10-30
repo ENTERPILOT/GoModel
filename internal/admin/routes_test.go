@@ -44,6 +44,8 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 		"GET /admin/usage/user-paths",
 		"GET /admin/usage/labels",
 		"GET /admin/usage/endpoints",
+		"GET /admin/usage/breakdown",
+		"GET /admin/usage/invoice",
 		"GET /admin/usage/sessions",
 		"GET /admin/usage/log",
 		"GET /admin/usage/throughput",

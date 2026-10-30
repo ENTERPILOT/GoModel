@@ -60,17 +60,10 @@ func manifestOK(w http.ResponseWriter, _ *http.Request) {
 // manifest request lands after the response.
 func awaitChecks(t *testing.T, calls *atomic.Int64, want int64) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if calls.Load() >= want {
-			// Give a late extra call a chance to show up so "exactly want"
-			// assertions are not merely racing ahead of it.
-			time.Sleep(50 * time.Millisecond)
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatalf("made %d manifest requests, want %d", calls.Load(), want)
+	require.Eventuallyf(t, func() bool { return calls.Load() >= want }, 2*time.Second, 5*time.Millisecond, "waiting for %d manifest requests", want)
+	// Give a late extra call a chance to show up so "exactly want"
+	// assertions are not merely racing ahead of it.
+	time.Sleep(50 * time.Millisecond)
 }
 
 // visitCookie returns the value the response set for the visit cookie.
@@ -112,6 +105,9 @@ func TestVersionEndpointChecksOnFirstVisit(t *testing.T) {
 	assert.Equal(t, "Mozilla/5.0 (X11; Linux x86_64)", headers().Get("User-Agent"))
 
 	date, id := versioncheck.SplitVisit(visitCookie(t, rec))
+	// The visit cookie's day is UTC (versioncheck.NewVisit), so the comparison
+	// must be too: a local date fails for every run made on the other side of
+	// midnight UTC.
 	require.Equal(t, time.Now().UTC().Format(time.DateOnly), date)
 	require.NotEmpty(t, id)
 	assert.Equal(t, headers().Get("X-GoModel-Date"), visitCookie(t, rec))
@@ -150,6 +146,7 @@ func TestVersionEndpointRechecksOnANewDay(t *testing.T) {
 
 	awaitChecks(t, calls, 1)
 	date, id := versioncheck.SplitVisit(visitCookie(t, rec))
+	// The cookie's day is UTC, so today must be read in UTC too.
 	assert.Equal(t, time.Now().UTC().Format(time.DateOnly), date)
 	assert.Equal(t, "3f2504e0-4f89-11d3-9a0c-0305e82c3301", id)
 }

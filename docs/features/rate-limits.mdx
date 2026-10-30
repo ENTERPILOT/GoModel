@@ -232,7 +232,23 @@ Details worth knowing:
 - Request and token windows live in memory for admission and are snapshotted
   to the configured store about once a second (and on shutdown), so they
   survive a restart and `gomodel --reload`. Concurrency gauges are not
-  persisted: after a bounce nothing is in flight. With N replicas the
+  persisted: after a bounce nothing is in flight. Counters are per replica:
+  each instance writes its own snapshot rows, so replicas sharing a database
+  never overwrite each other. On start an instance rolls every stored row
+  forward to the current window and takes, for requests and tokens
+  separately, the largest current and the largest previous bucket. Those can
+  come from different replicas, so the restored count can be a little above
+  any single replica's, but it is never the sum. A reset applies to every
+  replica: the replica that serves it clears its counters at once, and the
+  others within a few seconds, when they
+  [reload the rules](/guides/production#config-changes-reach-every-replica-within-seconds).
+  Switching a rule between shared and per-child, or deleting and re-creating
+  it, starts its counts from zero the same way. Stored rows from before a
+  reset or such a change are never restored, even after a restart or after
+  switching back. Editing a limit keeps the counts. Finish a rolling upgrade
+  from a release before per-replica snapshots before resetting or deleting
+  rules: a reset or delete served by an older replica can come back after a
+  restart. With N replicas the
   effective limit is still about N times the configured value — use budgets
   for durable, cross-instance control. Tune the snapshot interval with
   `RATE_LIMITS_FLUSH_INTERVAL` (seconds; default `1`; `0` skips the periodic
@@ -498,7 +514,9 @@ console.log(deleted);
 
 Reset live counters for one rule (`POST /admin/rate-limits/reset-one` with
 `{"scope": ..., "subject": ..., "period": ...}`) or for all rules
-(`POST /admin/rate-limits/reset` with `{"confirmation": "reset"}`). Editing a
-rule never resets its counters; deleting one does.
+(`POST /admin/rate-limits/reset` with `{"confirmation": "reset"}`), on every
+replica. Editing only a rule's caps never resets its counters; deleting it,
+moving it to a new scope, subject, or period, or switching it between shared
+and per-child does.
 
 See [Admin Endpoints](/advanced/admin-endpoints) for the endpoint list.

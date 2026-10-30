@@ -34,6 +34,17 @@ type Service struct {
 	writeMu   sync.Mutex
 	refreshMu sync.Mutex
 	current   atomic.Pointer[snapshot]
+
+	// changed is called after every successful write; see SetChangeNotifier.
+	changed func(context.Context)
+}
+
+// SetChangeNotifier installs fn, called after every successful policy write
+// so other gateway instances reload the policies. Call it before serving.
+func (s *Service) SetChangeNotifier(fn func(context.Context)) {
+	if s != nil {
+		s.changed = fn
+	}
 }
 
 // NewService creates a user policy service backed by the store and catalog.
@@ -263,9 +274,14 @@ func (s *Service) Delete(ctx context.Context, userPath string) error {
 	return nil
 }
 
+// refreshBestEffort runs after every successful write: it reconciles the
+// snapshot from storage and announces the change to other instances.
 func (s *Service) refreshBestEffort(ctx context.Context, operation string) {
 	if err := s.Refresh(ctx); err != nil {
 		slog.Warn("user policy snapshot reconciliation failed", "operation", operation, "error", err)
+	}
+	if s.changed != nil {
+		s.changed(ctx)
 	}
 }
 

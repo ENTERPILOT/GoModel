@@ -10,6 +10,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/enterpilot/gomodel/internal/storage/mongotest"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -41,6 +42,14 @@ func billedReadEntry(id, model, userPath, label, cacheType string, totalCost, bi
 		TotalTokens:  15,
 		TotalCost:    totalCost,
 		BilledCost:   billedCost,
+	}
+	if id == billedReadHitOnlyID {
+		// A day, endpoint and session served only from the cache.
+		entry.Timestamp = entry.Timestamp.AddDate(0, 0, 1)
+		entry.Endpoint = "/v1/responses"
+		entry.SessionID = "sess-b"
+	} else {
+		entry.SessionID = "sess-a"
 	}
 	if billedCost != nil && totalCost != nil && *billedCost != *totalCost {
 		entry.MarkupPercent = new(20.0)
@@ -124,6 +133,53 @@ func assertBilledCostReads(t *testing.T, store interface {
 		assert.InDelta(t, 0.5, *billed["team-b"], 1e-9)
 	})
 
+	t.Run("daily", func(t *testing.T) {
+		for mode, want := range map[string]map[string]float64{
+			CacheModeUncached: {"2026-04-12": 2.4, "2026-04-13": 0.5},
+			CacheModeCached:   {"2026-04-12": 1.2, "2026-04-13": 0.5},
+			CacheModeAll:      {"2026-04-12": 2.4, "2026-04-13": 0.5},
+		} {
+			rows, err := reader.GetDailyUsage(ctx, UsageQueryParams{CacheMode: mode})
+			require.NoError(t, err, mode)
+			require.Len(t, rows, 2, mode)
+			for _, row := range rows {
+				require.NotNil(t, row.BilledCost, mode+" "+row.Date)
+				assert.InDelta(t, want[row.Date], *row.BilledCost, 1e-9, mode+" "+row.Date)
+			}
+			assert.Equal(t, "2026-04-12", rows[0].Date, "series stays in period order")
+		}
+		rows, err := reader.GetDailyUsage(ctx, UsageQueryParams{})
+		require.NoError(t, err)
+		require.Len(t, rows, 2)
+		assert.Zero(t, rows[1].Requests, "a day billed only from the cache counts no provider requests")
+	})
+
+	t.Run("by endpoint", func(t *testing.T) {
+		rows, err := reader.GetUsageByEndpoint(ctx, UsageQueryParams{})
+		require.NoError(t, err)
+		billed := map[string]*float64{}
+		for _, row := range rows {
+			billed[row.Endpoint] = row.BilledCost
+		}
+		require.NotNil(t, billed["/v1/chat/completions"])
+		assert.InDelta(t, 2.4, *billed["/v1/chat/completions"], 1e-9)
+		require.NotNil(t, billed["/v1/responses"], "endpoint served only from the cache")
+		assert.InDelta(t, 0.5, *billed["/v1/responses"], 1e-9)
+	})
+
+	t.Run("by session", func(t *testing.T) {
+		result, err := reader.GetUsageBySession(ctx, SessionUsageParams{Limit: 10})
+		require.NoError(t, err)
+		billed := map[string]*float64{}
+		for _, row := range result.Entries {
+			billed[row.SessionID] = row.BilledCost
+		}
+		require.NotNil(t, billed["sess-a"])
+		assert.InDelta(t, 2.4, *billed["sess-a"], 1e-9)
+		require.NotNil(t, billed["sess-b"])
+		assert.InDelta(t, 0.5, *billed["sess-b"], 1e-9)
+	})
+
 	t.Run("log", func(t *testing.T) {
 		result, err := reader.GetUsageLog(ctx, UsageLogParams{CacheMode: CacheModeAll, Limit: 10})
 		require.NoError(t, err)
@@ -156,9 +212,9 @@ func TestReadersReportBilledCost(t *testing.T) {
 		db, err := sql.Open("sqlite", ":memory:")
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = db.Close() })
-		store, err := NewSQLiteStore(db, 0)
+		store, err := newSQLiteStore(db, 0)
 		require.NoError(t, err)
-		reader, err := NewSQLiteReader(db)
+		reader, err := newSQLiteReader(db)
 		require.NoError(t, err)
 		assertBilledCostReads(t, store, reader)
 	})
@@ -168,10 +224,12 @@ func TestReadersReportBilledCost(t *testing.T) {
 		if pool == nil {
 			return // skipped: no test server configured
 		}
-		store, err := NewPostgreSQLStore(pool, 0)
+		pgDB, err := sqlx.NewPostgreSQL(pool)
+		require.NoError(t, err)
+		store, err := NewSQLStore(context.Background(), pgDB, 0)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = store.Close() })
-		reader, err := NewPostgreSQLReader(pool)
+		reader, err := NewSQLReader(pgDB)
 		require.NoError(t, err)
 		assertBilledCostReads(t, store, reader)
 	})
@@ -206,6 +264,11 @@ func TestApplyCacheStatsKeepsBilledZeroTokenGroups(t *testing.T) {
 	require.NotNil(t, labels[0].BilledCost)
 	assert.Equal(t, 0.04, *labels[0].BilledCost)
 
+	endpoints := applyEndpointCacheStats(nil, map[string]*GroupCacheStats{"/v1/images/generations": billed()["key"]})
+	require.Len(t, endpoints, 1)
+	require.NotNil(t, endpoints[0].BilledCost)
+	assert.Equal(t, 0.04, *endpoints[0].BilledCost)
+
 	assert.Empty(t, applyModelCacheStats(nil, unbilled), "unbilled zero-token hits add no row")
 }
 
@@ -214,4 +277,25 @@ func TestAddCost(t *testing.T) {
 	assert.Equal(t, 1.5, *addCost(new(1.5), nil))
 	assert.Equal(t, 2.0, *addCost(nil, new(2.0)))
 	assert.Equal(t, 3.5, *addCost(new(1.5), new(2.0)))
+}
+
+func TestAddPeriodBilledCost(t *testing.T) {
+	daily := []DailyUsage{
+		{Date: "2026-04-12", Requests: 2, BilledCost: new(1.0)},
+		{Date: "2026-04-14", Requests: 1},
+	}
+	got := addPeriodBilledCost(daily, map[string]*float64{
+		"2026-04-12": new(0.5),
+		"2026-04-13": new(0.25),
+		"2026-04-15": new(0.0),
+		"2026-04-16": nil,
+	})
+	require.Len(t, got, 3, "zero and unknown hit-only periods add no row")
+	assert.Equal(t, []string{"2026-04-12", "2026-04-13", "2026-04-14"}, []string{got[0].Date, got[1].Date, got[2].Date})
+	require.NotNil(t, got[0].BilledCost)
+	assert.Equal(t, 1.5, *got[0].BilledCost)
+	require.NotNil(t, got[1].BilledCost)
+	assert.Equal(t, 0.25, *got[1].BilledCost)
+	assert.Zero(t, got[1].Requests)
+	assert.Nil(t, got[2].BilledCost)
 }

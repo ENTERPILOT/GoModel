@@ -1,6 +1,8 @@
 package admin
 
 import (
+	"strings"
+
 	"github.com/labstack/echo/v5"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -76,17 +78,54 @@ func scopedUserPath(c *echo.Context, fieldName, raw string) (string, error) {
 	return userPath, nil
 }
 
+// scopedUserPaths resolves several user path filters against the
+// credential's scope. It returns the scope root as scope (empty for global
+// credentials), so storage keeps rows inside it even when no path is named,
+// and the normalized paths, each of which must lie inside the scope.
+func scopedUserPaths(c *echo.Context, fieldName string, raws []string) (scope string, paths []string, err error) {
+	access := requestScope(c)
+	if !access.Global() {
+		scope = access.UserPath
+	}
+	for _, raw := range raws {
+		userPath, err := normalizeUserPathQueryParam(fieldName, raw)
+		if err != nil {
+			return "", nil, err
+		}
+		if userPath == "" {
+			continue
+		}
+		if !access.Global() && !access.Allows(userPath) {
+			return "", nil, userPathOutOfScopeError(fieldName)
+		}
+		paths = append(paths, userPath)
+	}
+	return scope, paths, nil
+}
+
 // requireScopedSubject checks a budget or rate-limit target: scoped
-// credentials may only address user_path rules whose subject lies inside
-// their subtree. Gateway-wide rules (labels, providers, models) are out of
-// reach for them.
+// credentials may only address user_path rules whose subject lies strictly
+// inside their subtree. The rule on the scope root itself is the limit placed
+// on the credential's own tenant, so it stays with global credentials;
+// otherwise a tenant's dashboard key could raise, reset, or delete its own
+// budget. Gateway-wide rules (labels, providers, models) are out of reach too.
 func requireScopedSubject(c *echo.Context, isUserPathScope bool, subject string) error {
 	scope := requestScope(c)
 	if scope.Global() {
 		return nil
 	}
-	if !isUserPathScope || !scope.Allows(subject) {
+	if !isUserPathScope || !scopeAllowsWrite(scope, subject) {
 		return userPathOutOfScopeError("subject")
 	}
 	return nil
+}
+
+// scopeAllowsWrite reports whether a scoped credential may change the rule or
+// node at userPath: a strict descendant of the scope root. Global scopes may
+// write anywhere.
+func scopeAllowsWrite(scope core.AccessScope, userPath string) bool {
+	if scope.Global() {
+		return true
+	}
+	return scope.Allows(userPath) && strings.TrimSpace(userPath) != scope.UserPath
 }

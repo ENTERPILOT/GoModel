@@ -52,8 +52,12 @@ func (r *roundRobin) prune(active map[string]*redirectEntry) {
 // the pinned target is still healthy. The plugin strategy works the same way
 // with the virtual model's named routing-strategy plugin. A target model that
 // is disabled, or that this request may not use, is skipped like an
-// unavailable one. It reports false when no target is available.
-func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry *redirectEntry, sessionID string) (core.ModelSelector, bool) {
+// unavailable one. It reports false when no target is available. path, when
+// not nil, collects the virtual models the chosen route passes through.
+func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry *redirectEntry, sessionID string, path *[]string) (core.ModelSelector, bool) {
+	if path != nil {
+		*path = append(*path, entry.vm.Source)
+	}
 	allowed := func(selector core.ModelSelector) bool { return s.allowsIn(ctx, snap, selector) }
 	supported := snap.viableTargets(entry, s.catalog, allowed)
 	if len(supported) == 0 {
@@ -65,7 +69,7 @@ func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry 
 		if len(available) == 0 {
 			return core.ModelSelector{}, false
 		}
-		return s.concreteTarget(ctx, snap, entry, available[0], sessionID)
+		return s.concreteTarget(ctx, snap, entry, available[0], sessionID, path)
 	}
 	// Prefer targets with live rate-limit capacity. When every live target is
 	// saturated, fall back to the first declared one: the request then reaches
@@ -76,7 +80,7 @@ func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry 
 		// This target is selected only to reach admission and produce the 429.
 		// Do not run affinity resolution: a transient capacity burst must not
 		// discard or replace the target that actually served the session.
-		return s.concreteTarget(ctx, snap, entry, supported[0], sessionID)
+		return s.concreteTarget(ctx, snap, entry, supported[0], sessionID, path)
 	}
 
 	// selectorChoice consults the route selector, reporting false when there
@@ -153,9 +157,9 @@ func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry 
 		if choice, ok := selectorChoice(pinned); ok {
 			qualified := s.sticky.repin(entry.vm.Source, sessionID, pinned, choice.qualified)
 			if target, found := poolTarget(pool, qualified); found {
-				return s.concreteTarget(ctx, snap, entry, target, sessionID)
+				return s.concreteTarget(ctx, snap, entry, target, sessionID, path)
 			}
-			return s.concreteTarget(ctx, snap, entry, choice, sessionID)
+			return s.concreteTarget(ctx, snap, entry, choice, sessionID, path)
 		}
 
 		// No selector answer — a decline, a panic, an answer outside the pool,
@@ -166,7 +170,7 @@ func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry 
 		// the next new session receives.
 		if hasPin {
 			if target, found := poolTarget(pool, pinned); found {
-				return s.concreteTarget(ctx, snap, entry, target, sessionID)
+				return s.concreteTarget(ctx, snap, entry, target, sessionID, path)
 			}
 		}
 
@@ -178,21 +182,21 @@ func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry 
 			choice.qualified,
 		)
 		if target, ok := poolTarget(pool, qualified); ok {
-			return s.concreteTarget(ctx, snap, entry, target, sessionID)
+			return s.concreteTarget(ctx, snap, entry, target, sessionID, path)
 		}
-		return s.concreteTarget(ctx, snap, entry, choice, sessionID)
+		return s.concreteTarget(ctx, snap, entry, choice, sessionID, path)
 	}
 	if choice, ok := selectorChoice(""); ok {
-		return s.concreteTarget(ctx, snap, entry, choice, sessionID)
+		return s.concreteTarget(ctx, snap, entry, choice, sessionID, path)
 	}
-	return s.concreteTarget(ctx, snap, entry, pick(), sessionID)
+	return s.concreteTarget(ctx, snap, entry, pick(), sessionID, path)
 }
 
 // concreteTarget turns a chosen target of entry into the concrete model to
 // execute: the target itself, or — when it names another virtual model — that
 // redirect's own balanced resolution. Chains are acyclic and bounded by
 // construction (see validateChains), so the recursion terminates.
-func (s *Service) concreteTarget(ctx context.Context, snap *snapshot, entry *redirectEntry, target resolvedTarget, sessionID string) (core.ModelSelector, bool) {
+func (s *Service) concreteTarget(ctx context.Context, snap *snapshot, entry *redirectEntry, target resolvedTarget, sessionID string, path *[]string) (core.ModelSelector, bool) {
 	inner, ok := snap.chained(entry.vm.Source, target)
 	if !ok {
 		return target.selector, true
@@ -200,7 +204,7 @@ func (s *Service) concreteTarget(ctx context.Context, snap *snapshot, entry *red
 	if !inner.vm.Enabled {
 		return core.ModelSelector{}, false
 	}
-	return s.balancedResolution(ctx, snap, inner, sessionID)
+	return s.balancedResolution(ctx, snap, inner, sessionID, path)
 }
 
 // poolTarget finds a qualified model among the viable targets.

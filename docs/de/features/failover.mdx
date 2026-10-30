@@ -108,10 +108,18 @@ Failover wird nur versucht, nachdem ein Versuch Folgendes zurückgegeben hat:
   (Aggregator-Provider wie OpenCode Zen können einen vorübergehenden Fehler
   ihres eigenen Upstreams als `400 "Upstream request failed"` melden)
 
-Es gilt für übersetzte Requests an `/v1/chat/completions`, `/v1/responses` und
-`/v1/messages`. Das Request-Log zeigt jeden Versuch, sodass ein ausgeliefertes
-Failover im Audit-Trail sichtbar ist und zum Preis des Modells abgerechnet
-wird, das geantwortet hat.
+Es gilt für übersetzte Requests an `/v1/chat/completions`, `/v1/responses`,
+`/v1/messages` und `/v1/embeddings`. Das Request-Log zeigt jeden Versuch,
+sodass ein ausgeliefertes Failover im Audit-Trail sichtbar ist und zum Preis
+des Modells abgerechnet wird, das geantwortet hat.
+
+Embedding-Requests verwenden dieselbe konfigurierte Failover-Kette und
+dieselben globalen bzw. Workflow-Steuerungen; eine Embedding-spezifische Option
+gibt es nicht. Infrage kommen nur Ziele mit derselben Modell-ID wie das
+aufgelöste Primärmodell (der Provider darf abweichen). Embedding-Failover über
+Modellgrenzen hinweg wird nicht unterstützt. Operatoren müssen weiterhin
+sicherstellen, dass die Provider, die dieses Modell bedienen, kompatible
+Vektoren liefern.
 
 Ein Zielmodell, das deaktiviert ist oder das der API-Key oder `user_path` des
 Requests nicht verwenden darf, wird nie versucht: Es wird sowohl bei der Wahl

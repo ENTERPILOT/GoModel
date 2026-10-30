@@ -2,6 +2,7 @@ package openai
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -189,4 +190,16 @@ func TestSupportsRealtimeIntent(t *testing.T) {
 	for intent, want := range cases {
 		assert.Equal(t, want, p.SupportsRealtimeIntent(intent), "intent %q", intent)
 	}
+}
+
+// The websocket dial must go through the provider's own client so its
+// proxy_url, an extension's proxy selection, and the TLS trust apply.
+func TestRealtimeTargetCarriesProviderHTTPClient(t *testing.T) {
+	client := &http.Client{}
+	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{HTTPClient: client})
+	rp, ok := p.(core.RealtimeProvider)
+	require.True(t, ok)
+	target, err := rp.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-realtime"})
+	require.NoError(t, err)
+	assert.Same(t, client, target.HTTPClient)
 }

@@ -5,6 +5,7 @@ import (
 	"io"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -51,47 +52,51 @@ func (m *slowMockProvider) Supports(model string) bool {
 	return true
 }
 
+// TestRegistry_Concurrency overlaps a refreshing writer with many readers.
+// The bubble's clock drives the delays, so the overlap costs no wall time.
 func TestRegistry_Concurrency(t *testing.T) {
-	registry := NewModelRegistry()
-	// Register a provider that takes 10ms to respond
-	registry.RegisterProvider(&slowMockProvider{delay: 10 * time.Millisecond})
+	synctest.Test(t, func(t *testing.T) {
+		registry := NewModelRegistry()
+		// Register a provider that takes 10ms to respond
+		registry.RegisterProvider(&slowMockProvider{delay: 10 * time.Millisecond})
 
-	var wg sync.WaitGroup
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
+		var wg sync.WaitGroup
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
 
-	// 1. Background Refresher (Writer)
-	wg.Go(func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				_ = registry.Refresh(context.Background())
-				time.Sleep(15 * time.Millisecond)
-			}
-		}
-	})
-
-	// 2. Heavy Readers
-	for range 50 {
+		// 1. Background Refresher (Writer)
 		wg.Go(func() {
 			for {
 				select {
 				case <-ctx.Done():
 					return
 				default:
-					_ = registry.GetProvider("slow-model")
-					_ = registry.ListModels()
-					_ = registry.Supports("slow-model")
-					time.Sleep(1 * time.Millisecond)
+					_ = registry.Refresh(context.Background())
+					time.Sleep(15 * time.Millisecond)
 				}
 			}
 		})
-	}
 
-	// Let the writer and readers overlap for a while.
-	time.Sleep(200 * time.Millisecond)
-	cancel()
-	wg.Wait()
+		// 2. Heavy Readers
+		for range 50 {
+			wg.Go(func() {
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+						_ = registry.GetProvider("slow-model")
+						_ = registry.ListModels()
+						_ = registry.Supports("slow-model")
+						time.Sleep(1 * time.Millisecond)
+					}
+				}
+			})
+		}
+
+		// Let the writer and readers overlap for a while.
+		time.Sleep(200 * time.Millisecond)
+		cancel()
+		wg.Wait()
+	})
 }

@@ -90,7 +90,7 @@ func TestSystemOne_UnavailableWithoutSystemOneProvider(t *testing.T) {
 	require.NoError(t, handler.SystemOne(c))
 
 	assert.Equal(t, http.StatusNotFound, rec.Code)
-	assert.Contains(t, rec.Body.String(), "jev or openrouter provider")
+	assert.Contains(t, rec.Body.String(), "jev, openrouter, or azure provider")
 	assert.Nil(t, provider.lastPassthroughReq)
 }
 
@@ -206,49 +206,58 @@ func (p catalogProvider) LookupModel(model string) (*core.Model, bool) {
 	return &found, ok
 }
 
-// OpenRouter serves chat and decision models from one provider, so the model
-// itself must be a System One model: one catalogued with a generation mode is
-// rejected, while a decision model (a utility model with no mode) is forwarded.
-func TestSystemOne_RejectsOpenRouterChatModels(t *testing.T) {
-	provider := catalogProvider{
-		mockProvider: &mockProvider{
-			supportedModels: []string{"typesafe/jev-1.13", "openai/gpt-4o-mini"},
-			providerTypes: map[string]string{
-				"openrouter/typesafe/jev-1.13":  "openrouter",
-				"openrouter/openai/gpt-4o-mini": "openrouter",
-			},
-			providerNames: map[string]string{
-				"openrouter/typesafe/jev-1.13":  "openrouter",
-				"openrouter/openai/gpt-4o-mini": "openrouter",
-			},
-			passthroughResponse: &core.PassthroughResponse{
-				StatusCode: http.StatusOK,
-				Headers:    map[string][]string{"Content-Type": {"application/json"}},
-				Body:       io.NopCloser(strings.NewReader(systemOneAnswer)),
-			},
-		},
-		models: map[string]core.Model{
-			"openrouter/typesafe/jev-1.13": {ID: "typesafe/jev-1.13", Metadata: &core.ModelMetadata{
-				Categories: []core.ModelCategory{core.CategoryUtility},
-			}},
-			"openrouter/openai/gpt-4o-mini": {ID: "openai/gpt-4o-mini", Metadata: &core.ModelMetadata{
-				Modes: []string{"chat"}, Categories: []core.ModelCategory{core.CategoryTextGeneration},
-			}},
-		},
+// OpenRouter and Azure serve chat and decision models from one provider, so
+// the model itself must be a System One model: one catalogued with a
+// generation mode is rejected, while a decision model (a utility model with no
+// mode) is forwarded.
+func TestSystemOne_RejectsChatModelsOnMixedProviders(t *testing.T) {
+	tests := []struct {
+		providerType  string
+		decisionModel string
+		chatModel     string
+	}{
+		{providerType: "openrouter", decisionModel: "typesafe/jev-1.13", chatModel: "openai/gpt-4o-mini"},
+		{providerType: "azure", decisionModel: "ms-decision-1", chatModel: "gpt-4.1-mini"},
 	}
-	handler := NewHandler(provider, nil, nil, nil)
+	for _, tt := range tests {
+		t.Run(tt.providerType, func(t *testing.T) {
+			decision := tt.providerType + "/" + tt.decisionModel
+			chat := tt.providerType + "/" + tt.chatModel
+			provider := catalogProvider{
+				mockProvider: &mockProvider{
+					supportedModels: []string{tt.decisionModel, tt.chatModel},
+					providerTypes:   map[string]string{decision: tt.providerType, chat: tt.providerType},
+					providerNames:   map[string]string{decision: tt.providerType, chat: tt.providerType},
+					passthroughResponse: &core.PassthroughResponse{
+						StatusCode: http.StatusOK,
+						Headers:    map[string][]string{"Content-Type": {"application/json"}},
+						Body:       io.NopCloser(strings.NewReader(systemOneAnswer)),
+					},
+				},
+				models: map[string]core.Model{
+					decision: {ID: tt.decisionModel, Metadata: &core.ModelMetadata{
+						Categories: []core.ModelCategory{core.CategoryUtility},
+					}},
+					chat: {ID: tt.chatModel, Metadata: &core.ModelMetadata{
+						Modes: []string{"chat"}, Categories: []core.ModelCategory{core.CategoryTextGeneration},
+					}},
+				},
+			}
+			handler := NewHandler(provider, nil, nil, nil)
 
-	c, rec := echotest.Post(t, "/v1/systemone", systemOneBody("openrouter/openai/gpt-4o-mini"))
-	require.NoError(t, handler.SystemOne(c))
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "is a chat model, not a System One model")
-	assert.Contains(t, rec.Body.String(), "does not translate")
-	assert.Nil(t, provider.lastPassthroughReq)
+			c, rec := echotest.Post(t, "/v1/systemone", systemOneBody(chat))
+			require.NoError(t, handler.SystemOne(c))
+			assert.Equal(t, http.StatusBadRequest, rec.Code)
+			assert.Contains(t, rec.Body.String(), "is a chat model, not a System One model")
+			assert.Contains(t, rec.Body.String(), "does not translate")
+			assert.Nil(t, provider.lastPassthroughReq)
 
-	c, rec = echotest.Post(t, "/v1/systemone", systemOneBody("openrouter/typesafe/jev-1.13"))
-	require.NoError(t, handler.SystemOne(c))
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	assert.Equal(t, "openrouter", provider.lastPassthroughProvider)
+			c, rec = echotest.Post(t, "/v1/systemone", systemOneBody(decision))
+			require.NoError(t, handler.SystemOne(c))
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			assert.Equal(t, tt.providerType, provider.lastPassthroughProvider)
+		})
+	}
 }
 
 func TestSystemOne_RequiresModel(t *testing.T) {
@@ -325,7 +334,7 @@ func TestSystemOne_UnavailableBeforeModelResolution(t *testing.T) {
 	for _, body := range []string{`{"state":"hi","questions":{}}`, systemOneBody("no-such-model")} {
 		rec := postJSON(t, srv, "/v1/systemone", body)
 		assert.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
-		assert.Contains(t, rec.Body.String(), "jev or openrouter provider")
+		assert.Contains(t, rec.Body.String(), "jev, openrouter, or azure provider")
 	}
 }
 

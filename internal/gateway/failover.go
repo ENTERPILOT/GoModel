@@ -15,7 +15,17 @@ func (o *InferenceOrchestrator) FailoverSelectors(workflow *core.Workflow) []cor
 	if o.failoverResolver == nil || workflow == nil || workflow.Resolution == nil || !workflow.FailoverEnabled() {
 		return nil
 	}
-	return o.failoverResolver.ResolveFailovers(workflow.Resolution, workflow.Endpoint.Operation)
+	selectors := o.failoverResolver.ResolveFailovers(workflow.Resolution, workflow.Endpoint.Operation)
+	if workflow.Endpoint.Operation != core.OperationEmbeddings {
+		return selectors
+	}
+	var compatible []core.ModelSelector
+	for _, selector := range selectors {
+		if selector.Model == workflow.Resolution.ResolvedSelector.Model {
+			compatible = append(compatible, selector)
+		}
+	}
+	return compatible
 }
 
 // ProviderTypeForSelector returns the provider type for a selector.

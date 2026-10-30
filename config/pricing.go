@@ -24,6 +24,15 @@ type PricingConfig struct {
 	// Default: none (billed cost equals provider cost).
 	Markups map[string]float64 `yaml:"markups"`
 
+	// UserPathMarkups gives a customer (a user-path subtree) its own markups,
+	// keyed by user path and then by the same selectors as Markups. The
+	// deepest configured path covering the request's user path that has a
+	// matching selector wins; otherwise shallower paths, then Markups, apply.
+	// Requires GoModel Pro (the customer_markups capability).
+	// Markups are declared in config.yaml only.
+	// Default: none.
+	UserPathMarkups map[string]map[string]float64 `yaml:"user_path_markups"`
+
 	// BillCacheHits controls whether responses served from the gateway
 	// response cache are billed at what the same call would cost when the hit
 	// is served, plus markup. False bills them at zero. Provider prompt caching
@@ -32,18 +41,33 @@ type PricingConfig struct {
 	BillCacheHits bool `yaml:"bill_cache_hits" env:"PRICING_BILL_CACHE_HITS"`
 }
 
-// validatePricingConfig checks markup values. Selectors are validated against
-// the configured providers when the markup service is built.
+// validatePricingConfig checks markup values. Selectors and user paths are
+// validated against the configured providers when the markup service is built.
 func validatePricingConfig(cfg *PricingConfig) error {
 	if cfg == nil {
 		return nil
 	}
-	for selector, percent := range cfg.Markups {
+	if err := validateMarkupValues("pricing.markups", cfg.Markups); err != nil {
+		return err
+	}
+	for userPath, markups := range cfg.UserPathMarkups {
+		if strings.TrimSpace(userPath) == "" {
+			return fmt.Errorf("pricing.user_path_markups: user path is required")
+		}
+		if err := validateMarkupValues(fmt.Sprintf("pricing.user_path_markups[%q]", userPath), markups); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateMarkupValues(field string, markups map[string]float64) error {
+	for selector, percent := range markups {
 		if strings.TrimSpace(selector) == "" {
-			return fmt.Errorf("pricing.markups: selector is required")
+			return fmt.Errorf("%s: selector is required", field)
 		}
 		if math.IsNaN(percent) || math.IsInf(percent, 0) || percent < 0 {
-			return fmt.Errorf("pricing.markups[%q] must be a finite number >= 0", selector)
+			return fmt.Errorf("%s[%q] must be a finite number >= 0", field, selector)
 		}
 	}
 	return nil

@@ -64,7 +64,7 @@ func TestSQLiteReaderGetTokenThroughput_SplitsAndBuckets(t *testing.T) {
 
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -92,7 +92,7 @@ func TestSQLiteReaderGetTokenThroughput_SplitsAndBuckets(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	gran, _ := ParseThroughputGranularity("minute")
@@ -122,7 +122,7 @@ func TestSQLiteReaderGetTokenThroughput_DayBucketsUseTimezoneOffset(t *testing.T
 
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -136,7 +136,7 @@ func TestSQLiteReaderGetTokenThroughput_DayBucketsUseTimezoneOffset(t *testing.T
 	}})
 	require.NoError(t, err)
 
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	gran, _ := ParseThroughputGranularity("day")

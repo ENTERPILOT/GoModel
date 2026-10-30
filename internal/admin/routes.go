@@ -36,6 +36,8 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.GET("/usage/user-paths", h.UsageByUserPath)
 	g.GET("/usage/labels", h.UsageByLabel)
 	g.GET("/usage/endpoints", h.UsageByEndpoint)
+	g.GET("/usage/breakdown", h.UsageBreakdown)
+	g.GET("/usage/invoice", h.UsageInvoice)
 	g.GET("/usage/sessions", h.UsageBySession)
 	g.GET("/usage/log", h.UsageLog)
 	g.GET("/usage/throughput", h.TokenThroughput, global)
