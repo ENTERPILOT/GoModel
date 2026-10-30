@@ -52,6 +52,13 @@ type MCPConfig struct {
 	// tool namespaces and URL segments, so they are restricted to [a-z0-9_-].
 	Servers map[string]MCPServerConfig `yaml:"servers"`
 
+	// ProviderServers names configured providers whose hosted MCP servers
+	// (for example Z.ai web search) the gateway exposes as servers slugged
+	// "{provider}-{server}", authenticated with that provider's API key.
+	// Empty — the default — exposes none: each provider's tools cost money
+	// on its key, so operators opt in per provider.
+	ProviderServers []string `yaml:"provider_servers" env:"MCP_PROVIDER_SERVERS"`
+
 	// VirtualServers maps names to curated subsets of Servers, each served at
 	// /mcp/{name}. Names share that path with server slugs, so they must not
 	// match one.
@@ -306,6 +313,7 @@ func normalizeMCPSettings(cfg *MCPConfig, pass mcpPass) error {
 			return fmt.Errorf("mcp.tool_discovery must be %q or %q, got %q", MCPToolDiscoveryOff, MCPToolDiscoverySearch, cfg.ToolDiscovery)
 		}
 	}
+	cfg.ProviderServers = normalizeMCPProviderServers(cfg.ProviderServers)
 	if len(cfg.AllowedOrigins) > 0 {
 		normalized := make([]string, 0, len(cfg.AllowedOrigins))
 		for i, raw := range cfg.AllowedOrigins {
@@ -330,6 +338,21 @@ func normalizeMCPSettings(cfg *MCPConfig, pass mcpPass) error {
 		cfg.AllowedOrigins = normalized
 	}
 	return nil
+}
+
+// normalizeMCPProviderServers trims and dedupes provider names, keeping order.
+func normalizeMCPProviderServers(names []string) []string {
+	if len(names) == 0 {
+		return names
+	}
+	normalized := make([]string, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name != "" && !slices.Contains(normalized, name) {
+			normalized = append(normalized, name)
+		}
+	}
+	return normalized
 }
 
 func normalizeMCPServers(cfg *MCPConfig) error {

@@ -234,6 +234,20 @@ func mongoLogMatchFilters(params LogQueryParams) (bson.D, error) {
 			},
 		})
 	}
+	if prefix, err := normalizeAuditPrefix("model_prefix", params.ModelPrefix); err != nil {
+		return nil, err
+	} else if prefix != "" {
+		// Anchored, case-sensitive regexes become index bounds; every $or
+		// branch has its own index, so the planner can union them. Documents
+		// written before the requested/resolved split keep the requested
+		// model in the legacy "model" field.
+		regex := bson.D{{Key: "$regex", Value: auditPrefixRegex(prefix)}}
+		matchFilters = append(matchFilters, bson.E{Key: "$or", Value: bson.A{
+			bson.D{{Key: "requested_model", Value: regex}},
+			bson.D{{Key: "resolved_model", Value: regex}},
+			bson.D{{Key: "model", Value: regex}},
+		}})
+	}
 	if params.Provider != "" {
 		regex := bson.D{
 			{Key: "$regex", Value: regexp.QuoteMeta(params.Provider)},
@@ -265,6 +279,13 @@ func mongoLogMatchFilters(params LogQueryParams) (bson.D, error) {
 			matchFilters = append(matchFilters, mongoUserPathMatchFilter(userPath))
 		}
 	}
+	if prefix, err := normalizeAuditUserPathPrefix(params.UserPathPrefix); err != nil {
+		return nil, err
+	} else if prefix != "" {
+		matchFilters = append(matchFilters, bson.E{Key: "user_path", Value: bson.D{
+			{Key: "$regex", Value: auditPrefixRegex(prefix)},
+		}})
+	}
 	if params.ErrorType != "" {
 		matchFilters = append(matchFilters, bson.E{
 			Key: "error_type",
@@ -276,6 +297,9 @@ func mongoLogMatchFilters(params LogQueryParams) (bson.D, error) {
 	}
 	if params.SessionID != "" {
 		matchFilters = append(matchFilters, bson.E{Key: "session_id", Value: params.SessionID})
+	}
+	if params.RequestID != "" {
+		matchFilters = append(matchFilters, bson.E{Key: "request_id", Value: params.RequestID})
 	}
 	if params.StatusCode != nil {
 		matchFilters = append(matchFilters, bson.E{Key: "status_code", Value: *params.StatusCode})

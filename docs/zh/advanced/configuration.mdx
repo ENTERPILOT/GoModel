@@ -127,6 +127,7 @@ server:
 | `MCP_SERVERS` | 上游 MCP 服务器的 JSON 对象，按名称合并覆盖 YAML 中的 `mcp.servers` 映射（这些条目在控制台中为只读）     | _（无）_           |
 | `MCP_ALLOWED_ORIGINS` | 允许调用 `/mcp` 的浏览器来源（`scheme://host[:port]`），以逗号分隔；默认不信任任何来源，以此阻止 DNS 重绑定。`*` 表示禁用该检查 | _（无）_           |
 | `MCP_TOOL_DISCOVERY` | `off` 列出所有工具；`search` 改为提供 `search_tools` 和 `call_tool`，避免大型工具目录占满模型上下文。客户端可通过 `X-MCP-Tool-Discovery` 按会话覆盖 | `off` |
+| `MCP_PROVIDER_SERVERS` | 以逗号分隔的已配置提供商名称，使用该提供商的 API 密钥公开其托管的 MCP 服务器（例如 `zai`）。参见[提供商托管的 MCP 服务器](/zh/features/mcp-gateway#公开提供商托管的-mcp-服务器) | _（无）_ |
 | `MCP_VIRTUAL_SERVERS` | 虚拟服务器的 JSON 对象，按名称合并覆盖 YAML 中的 `mcp.virtual_servers` 映射。每个虚拟服务器在 `/mcp/{name}` 提供部分 MCP 服务器 | _（无）_ |
 
 #### 日志
@@ -215,6 +216,10 @@ server:
 <Note>
   在 PostgreSQL 上，审计日志的全文搜索使用内置 `pg_trgm` 扩展提供的三元组（trigram）索引。如果数据库角色具有相应权限，GoModel 会在启动时安装该扩展并构建索引；否则搜索仍然可用，但会扫描所选日期范围内的每一条记录。要在受限角色上启用它，请以超级用户身份执行一次 `CREATE EXTENSION pg_trgm;`，然后重启 GoModel。
 </Note>
+
+<Tip>
+  审计表较大时，请在仪表盘审计日志搜索框旁选择具体字段，而不是**所有字段**。**用户路径**和**模型**匹配以输入内容开头的值（区分大小写，因此 `voxina` 可以找到 `/voxinate/events/…`；**模型**同时检查请求的模型和解析后的模型，例如 `openai/gpt-5`）。**请求 ID** 和**会话 ID** 需要完全匹配。这些过滤器在 SQLite、PostgreSQL 和 MongoDB 上都会使用索引。API 参数分别为 `user_path_prefix`、`model_prefix`、`request_id` 和 `session_id`。
+</Tip>
 
 <Warning>
   启用 `LOGGING_LOG_BODIES` 时，请求体和响应体会被完整存储，其中可能包含敏感数据，例如个人身份信息（PII）或嵌入在提示词中的 API 密钥。

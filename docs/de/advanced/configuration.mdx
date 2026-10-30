@@ -228,6 +228,7 @@ Den vollständigen Leitfaden finden Sie unter [MCP Gateway](/de/features/mcp-gat
 | `MCP_SERVERS` | JSON-Objekt mit Upstream-MCP-Servern, das pro Name über die YAML-Map `mcp.servers` gelegt wird (die Einträge sind im Dashboard schreibgeschützt)     | _(keine)_           |
 | `MCP_ALLOWED_ORIGINS` | Kommagetrennte Browser-Origins (`scheme://host[:port]`), die `/mcp` aufrufen dürfen; standardmäßig wird keinem vertraut, was DNS-Rebinding verhindert. `*` deaktiviert die Prüfung | _(keine)_           |
 | `MCP_TOOL_DISCOVERY` | `off` listet jedes Tool auf; `search` stellt stattdessen `search_tools` und `call_tool` bereit, damit große Kataloge nicht mehr den Modellkontext füllen. Clients überschreiben dies pro Session mit `X-MCP-Tool-Discovery` | `off` |
+| `MCP_PROVIDER_SERVERS` | Kommagetrennte Namen konfigurierter Provider, deren eigene MCP-Server mit dem API-Key des Providers bereitgestellt werden (zum Beispiel `zai`). Siehe [MCP-Server von Providern](/de/features/mcp-gateway#mcp-server-von-providern-bereitstellen) | _(keine)_ |
 | `MCP_VIRTUAL_SERVERS` | JSON-Objekt mit virtuellen Servern, das pro Name über die YAML-Map `mcp.virtual_servers` gelegt wird. Jeder stellt eine Teilmenge der MCP-Server unter `/mcp/{name}` bereit | _(keine)_ |
 
 #### Logging
@@ -361,6 +362,17 @@ gespeicherte Logs sichtbar sind.
   aktivieren, führen Sie einmalig `CREATE EXTENSION pg_trgm;` als Superuser aus
   und starten Sie GoModel neu.
 </Note>
+
+<Tip>
+  Wählen Sie bei großen Audit-Tabellen neben dem Suchfeld der Audit-Logs im
+  Dashboard ein Feld statt **Alle Felder**. **Nutzerpfad** und **Modell** finden
+  Werte, die mit der Eingabe beginnen (Groß-/Kleinschreibung zählt, `voxina`
+  findet also `/voxinate/events/…`; **Modell** prüft das angefragte und das
+  aufgelöste Modell, etwa `openai/gpt-5`). **Anfrage-ID** und **Sitzungs-ID**
+  müssen exakt passen. Diese Filter nutzen Indizes auf SQLite, PostgreSQL und
+  MongoDB. Die API nimmt sie als `user_path_prefix`, `model_prefix`,
+  `request_id` und `session_id` entgegen.
+</Tip>
 
 <Warning>
   Wenn `LOGGING_LOG_BODIES` aktiviert ist, werden Request- und Response-Bodys

@@ -17,6 +17,7 @@ var Registration = providers.Registration{
 	Discovery: providers.DiscoveryConfig{
 		DefaultBaseURL: defaultBaseURL,
 	},
+	MCPServers: mcpServers,
 }
 
 // Provider implements the core.Provider interface for Z.ai.

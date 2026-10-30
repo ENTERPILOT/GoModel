@@ -230,6 +230,24 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by user paths starting with this text (case-sensitive, index-served)",
+                        "name": "user_path_prefix",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by requested or resolved model starting with this text (case-sensitive, index-served)",
+                        "name": "model_prefix",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact request id",
+                        "name": "request_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by exact session id",
                         "name": "session_id",
                         "in": "query"
@@ -367,6 +385,30 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Filter by tracked user path subtree",
                         "name": "user_path",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by user paths starting with this text (case-sensitive, index-served)",
+                        "name": "user_path_prefix",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by requested or resolved model starting with this text (case-sensitive, index-served)",
+                        "name": "model_prefix",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact request id",
+                        "name": "request_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact session id",
+                        "name": "session_id",
                         "in": "query"
                     },
                     {

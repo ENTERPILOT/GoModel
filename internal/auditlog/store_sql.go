@@ -113,7 +113,6 @@ var sqlMigrations = []string{
 var sqlIndexes = []string{
 	"CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp)",
 	"DROP INDEX IF EXISTS idx_audit_model",
-	"CREATE INDEX IF NOT EXISTS idx_audit_requested_model ON audit_logs(requested_model)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_status ON audit_logs(status_code)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_provider ON audit_logs(provider)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_provider_name ON audit_logs(provider_name)",
@@ -171,6 +170,9 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 		return nil, err
 	}
 	indexes := append(append(sqlIndexes, userPathIndexes(db.Dialect())...), jsonPathIndexes(db.Dialect())...)
+	if db.Dialect() != sqlx.PostgreSQL {
+		indexes = append(indexes, modelIndexStatements(db.Dialect())...)
+	}
 	for _, statement := range indexes {
 		if _, err := db.Exec(ctx, statement); err != nil {
 			slog.Warn("failed to create index", "error", err)
@@ -182,12 +184,14 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 		retentionDays: retentionDays,
 		stopCleanup:   make(chan struct{}),
 	}
-	// The trigram search index can take minutes to build on a large existing
-	// table, so it is built off the startup path (and CONCURRENTLY, so writes
-	// keep flowing); readers pick it up as soon as it exists.
+	// The PostgreSQL model and trigram search indexes can take minutes to
+	// build on a large existing table, so they are built off the startup path
+	// (and CONCURRENTLY, so writes keep flowing); readers pick them up as soon
+	// as they exist.
 	buildCtx, cancel := context.WithCancel(context.Background())
 	store.cancelIndexBuild = cancel
 	store.indexBuild.Go(func() {
+		ensureModelIndexesConcurrently(buildCtx, db)
 		ensureTrigramSearchIndex(buildCtx, db, postgresErrorMessage)
 	})
 	if retentionDays > 0 {

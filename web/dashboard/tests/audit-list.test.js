@@ -37,6 +37,8 @@ import {
   auditSessionCount,
   auditSessionId,
   auditTabKeydownTarget,
+  AUDIT_SEARCH_FIELDS,
+  auditSearchField,
   buildAuditLogQuery,
   buildAuditSessionQuery,
   pruneThreadMap,
@@ -522,6 +524,50 @@ test("buildAuditLogQuery sends the consolidated audit search and select filters 
   assert.match(qs, /status_code=500/);
   assert.match(qs, /stream=true/);
   assert.doesNotMatch(qs, /[?&](model|provider|path|user_path)=/);
+});
+
+test("buildAuditLogQuery sends a field search to that field's indexed parameter", () => {
+  const cases = [
+    ["", "search=team%2Falpha"],
+    ["user_path", "user_path_prefix=team%2Falpha"],
+    ["model", "model_prefix=team%2Falpha"],
+    ["request_id", "request_id=team%2Falpha"],
+    ["session_id", "session_id=team%2Falpha"],
+    ["provider", "provider=team%2Falpha"],
+    ["error_type", "error_type=team%2Falpha"],
+    ["unknown", "search=team%2Falpha"],
+  ];
+  for (const [searchField, expected] of cases) {
+    const qs = buildAuditLogQuery({
+      dateQuery: "days=30",
+      limit: 25,
+      offset: 0,
+      search: "  team/alpha ",
+      searchField,
+    });
+    assert.equal(qs, "days=30&limit=25&offset=0&" + expected, searchField);
+  }
+});
+
+test("buildAuditLogQuery skips a blank field search", () => {
+  const qs = buildAuditLogQuery({
+    dateQuery: "days=30",
+    limit: 25,
+    offset: 0,
+    search: "   ",
+    searchField: "user_path",
+  });
+  assert.equal(qs, "days=30&limit=25&offset=0");
+});
+
+test("audit search fields default to all fields and have labels", () => {
+  assert.equal(AUDIT_SEARCH_FIELDS[0].key, "");
+  assert.equal(auditSearchField(undefined).param, "search");
+  assert.equal(auditSearchField("model").param, "model_prefix");
+  for (const field of AUDIT_SEARCH_FIELDS) {
+    assert.ok(field.label(), field.key);
+    assert.ok(field.placeholder(), field.key);
+  }
 });
 
 test("buildAuditLogQuery omits unset filters", () => {

@@ -2,6 +2,11 @@ module github.com/enterpilot/gomodel
 
 go 1.27.3
 
+// Keep Multipath TCP off on listeners: Go enables it by default on Linux, which
+// exposes the kernel use-after-free in CVE-2026-98432 to remote code execution.
+// Patching the kernel is the real fix. See go.dev/issue/82717.
+godebug multipathtcp=0
+
 // Unauthenticated access to the aggregated MCP tool surface via browser DNS
 // rebinding: the /mcp endpoint's origin check could not detect a rebind.
 // Fixed in v0.1.80. See GHSA-2qr4-ww3x-mq4g.

@@ -275,3 +275,9 @@ func TestNormalizeMCPToolDiscovery(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeMCPProviderServers(t *testing.T) {
+	cfg := MCPConfig{ProviderServers: []string{" zai ", "", "zai-coding", "zai"}}
+	require.NoError(t, normalizeMCPConfig(&cfg))
+	assert.Equal(t, []string{"zai", "zai-coding"}, cfg.ProviderServers)
+}
