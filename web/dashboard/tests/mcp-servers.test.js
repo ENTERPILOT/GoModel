@@ -45,6 +45,14 @@ import {
   mcpVirtualServerFormFromVirtual,
   toggleMcpVirtualMember,
   normalizeMcpToolDiscovery,
+  buildMcpOAuthStartPayload,
+  mcpOAuthOutcomeMessage,
+  mcpOAuthRedirectURI,
+  mcpServerCanSignIn,
+  mcpServerOAuthClass,
+  mcpServerOAuthState,
+  parseMcpOAuthOutcome,
+  stripMcpOAuthParams,
 } from "../src/pages/mcp-servers/mcp-servers.js";
 
 test("deriveMcpServerSlug normalizes display names and falls back to a hash", () => {
@@ -801,4 +809,61 @@ test("a virtual-server save only closes the editor that submitted it", () => {
   assert.match(submit, /const sameEditor = formSeq === this\.#virtualFormSeq;/);
   assert.match(submit, /if \(sameEditor\) \{\s*\n\s*this\.closeVirtualForm\(\);/, "only the submitting editor is closed");
   assert.equal(/\n      this\.closeVirtualForm\(\);/.test(submit), false, "no unconditional close remains");
+});
+
+test("mcpServerCanSignIn allows HTTP transports only", () => {
+  assert.equal(mcpServerCanSignIn({ transport: "http" }), true);
+  assert.equal(mcpServerCanSignIn({ transport: "sse" }), true);
+  assert.equal(mcpServerCanSignIn({}), true);
+  assert.equal(mcpServerCanSignIn({ transport: "stdio" }), false);
+});
+
+test("mcpServerOAuthState prefers the gateway status, then a 401 hint", () => {
+  assert.equal(mcpServerOAuthState({ oauth: { status: "signed_in" }, auth_required: true }), "signed_in");
+  assert.equal(mcpServerOAuthState({ oauth: { status: "error" } }), "error");
+  assert.equal(mcpServerOAuthState({ auth_required: true }), "required");
+  assert.equal(mcpServerOAuthState({}), "");
+  assert.equal(mcpServerOAuthClass("signed_in"), "status-success");
+  assert.equal(mcpServerOAuthClass("required"), "status-warning");
+  assert.equal(mcpServerOAuthClass(""), "");
+});
+
+test("mcpOAuthRedirectURI joins the origin and the base-path callback", () => {
+  assert.equal(mcpOAuthRedirectURI("https://gw.example.com"), "https://gw.example.com/admin/mcp-oauth/callback");
+  assert.equal(
+    mcpOAuthRedirectURI("https://gw.example.com/", (path) => "/gomodel" + path),
+    "https://gw.example.com/gomodel/admin/mcp-oauth/callback",
+  );
+});
+
+test("buildMcpOAuthStartPayload sends client fields only when filled in", () => {
+  const redirect = "https://gw.example.com/admin/mcp-oauth/callback";
+  assert.deepEqual(buildMcpOAuthStartPayload({ client_id: " ", client_secret: "s" }, redirect), { redirect_uri: redirect });
+  assert.deepEqual(buildMcpOAuthStartPayload({ client_id: " app ", client_secret: "" }, redirect), {
+    redirect_uri: redirect,
+    client_id: "app",
+  });
+  assert.deepEqual(buildMcpOAuthStartPayload({ client_id: "app", client_secret: " s " }, redirect), {
+    redirect_uri: redirect,
+    client_id: "app",
+    client_secret: "s",
+  });
+});
+
+test("parseMcpOAuthOutcome and stripMcpOAuthParams handle the callback redirect", () => {
+  assert.equal(parseMcpOAuthOutcome("?tab=x"), null);
+  assert.deepEqual(parseMcpOAuthOutcome("?mcp_oauth=signed_in&server=notion"), { outcome: "signed_in", server: "notion" });
+  assert.deepEqual(parseMcpOAuthOutcome("?mcp_oauth=expired"), { outcome: "expired", server: "" });
+  assert.equal(
+    stripMcpOAuthParams("https://gw.example.com/admin/dashboard/mcp-servers?mcp_oauth=error&server=notion&tab=x#top"),
+    "/admin/dashboard/mcp-servers?tab=x#top",
+  );
+});
+
+test("mcpOAuthOutcomeMessage picks the flash kind and treats unknown outcomes as failures", () => {
+  assert.equal(mcpOAuthOutcomeMessage({ outcome: "signed_in", server: "notion" }).kind, "success");
+  assert.match(mcpOAuthOutcomeMessage({ outcome: "signed_in", server: "notion" }).text, /notion/);
+  assert.equal(mcpOAuthOutcomeMessage({ outcome: "expired" }).kind, "error");
+  assert.equal(mcpOAuthOutcomeMessage({ outcome: "error", server: "notion" }).kind, "error");
+  assert.equal(mcpOAuthOutcomeMessage({ outcome: "__proto__" }).kind, "error");
 });

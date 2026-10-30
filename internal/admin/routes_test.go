@@ -95,6 +95,8 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 		"DELETE /admin/mcp-servers/:name",
 		"POST /admin/mcp-servers/:name/reconnect",
 		"GET /admin/mcp-servers/:name/catalog",
+		"POST /admin/mcp-servers/:name/oauth/start",
+		"DELETE /admin/mcp-servers/:name/oauth",
 		"GET /admin/mcp-virtual-servers",
 		"PUT /admin/mcp-virtual-servers",
 		"DELETE /admin/mcp-virtual-servers/:name",

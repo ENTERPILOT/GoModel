@@ -349,6 +349,55 @@ das TLS-Zertifikat des Servers von einer CA ausgestellt wurde, der der Container
 nicht vertraut. Siehe
 [Private CA-Zertifikate](/de/guides/production#upstream-zertifikate-hinter-einer-privaten-ca).
 
+## Mit OAuth anmelden
+
+Manche MCP-Server (Notion, Linear, Atlassian, Sentry, ...) verlangen eine
+interaktive OAuth-Anmeldung statt eines statischen Tokens. GoModel meldet sich
+einmal für das ganze Gateway an, direkt im Dashboard:
+
+1. Fügen Sie den Server mit seiner URL und ohne `Authorization`-Header hinzu.
+   Sobald er mit `401 Unauthorized` antwortet, zeigt er **Anmeldung erforderlich**.
+2. Klicken Sie in der Zeile auf das Anmeldesymbol und dann auf **Weiter zur Anmeldung**.
+3. Erteilen Sie auf der Anmeldeseite des Servers den Zugriff. Sie kehren zu
+   **MCP Servers** zurück, und der Server verbindet sich mit dem neuen Token.
+
+GoModel folgt der
+[MCP-Autorisierungsspezifikation](https://modelcontextprotocol.io/specification/latest/basic/authorization):
+Es ermittelt den Autorisierungsserver aus den Protected-Resource-Metadaten des
+Servers, verlangt S256-PKCE, sendet den `resource`-Indikator bei jeder
+Token-Anfrage und prüft `state` und `iss` beim Rücksprung. Es registriert sich
+per dynamischer Client-Registrierung als OAuth-Client. Unterstützt der
+Autorisierungsserver das nicht, registrieren Sie selbst einen Client mit der im
+Dialog angezeigten Redirect-URI (`https://<gateway>/admin/mcp-oauth/callback`)
+und tragen Sie dessen Client-ID (und bei einem vertraulichen Client das Secret)
+unter **Eigenen OAuth-Client verwenden** ein.
+
+Tokens werden in der Gateway-Datenbank gespeichert, mit
+[`GOMODEL_ENCRYPTION_KEY`](/de/advanced/encryption-at-rest) verschlüsselt, wenn
+gesetzt, und nie von der Admin-API zurückgegeben. GoModel erneuert ein
+abgelaufenes Access-Token mit dem Refresh-Token und speichert das rotierte
+Refresh-Token. Die Zeile zeigt **Angemeldet**, **Anmeldung abgelaufen** (kein
+Refresh-Token mehr) oder **Anmeldung prüfen** mit dem Fehler; melden Sie sich in
+den letzten beiden Fällen erneut an. Das Abmeldesymbol löscht die gespeicherten
+Tokens.
+
+Hinweise:
+
+- Die Anmeldung funktioniert für `http`- und `sse`-Server, auch für solche aus
+  `config.yaml`; Tokens sind Laufzeitzustand, keine Konfiguration.
+- Ein angemeldetes Token ersetzt einen konfigurierten `Authorization`-Header und
+  wird nur an den Origin des Servers gesendet. Nach einer URL-Änderung werden
+  die Tokens erst nach einer neuen Anmeldung wieder verwendet.
+- Alle Clients des Gateways teilen sich die eine Anmeldung. Upstream-Tokens pro
+  Benutzer werden noch nicht unterstützt.
+- Bei mehreren Gateway-Instanzen muss der Callback die Instanz erreichen, die
+  die Anmeldung gestartet hat (Sticky Sessions für `/admin`); erneuerte Tokens
+  erreichen die anderen Instanzen über die Datenbank.
+
+Die Admin-API-Entsprechungen sind `POST /admin/mcp-servers/{slug}/oauth/start`
+(Body: `redirect_uri`, optional `client_id`/`client_secret`; liefert
+`authorization_url`) und `DELETE /admin/mcp-servers/{slug}/oauth`.
+
 ## Festlegen, welche Tools ein Server bereitstellt
 
 Standardmäßig wird jedes Tool bereitgestellt, das ein Server meldet. Reduzieren Sie
@@ -429,7 +478,7 @@ stellt sie als `{slug}_{name}` bereit.
 
 - **Grenze für Zugangsdaten.** Die MCP-Spezifikation verbietet das Durchreichen von
   Tokens; GoModel terminiert das Bearer-Token des Clients und fügt
-  serverspezifische Zugangsdaten aus der Konfiguration ein. Client-Keys erreichen
+  serverspezifische Zugangsdaten aus der Konfiguration oder einer OAuth-Anmeldung ein. Client-Keys erreichen
   nie einen Upstream, und konfigurierte Upstream-Header werden bei Cross-Origin-
   Weiterleitungen nicht mitgesendet.
 - **Browser-Origins werden standardmäßig abgelehnt.** MCP-Clients sind keine

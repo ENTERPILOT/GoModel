@@ -329,6 +329,54 @@ A last error mentioning `x509: certificate signed by unknown authority` means
 the server's TLS certificate is issued by a CA the container does not trust.
 See [private CA certificates](/guides/production#upstream-certificates-behind-a-private-ca).
 
+## Sign in with OAuth
+
+Some MCP servers (Notion, Linear, Atlassian, Sentry, ...) require an
+interactive OAuth sign-in instead of a static token. GoModel signs in once
+for the whole gateway, from the dashboard:
+
+1. Add the server with its URL and no `Authorization` header. It shows
+   **Sign-in required** once it answers `401 Unauthorized`.
+2. Click the row's sign-in icon, then **Continue to sign-in**.
+3. Approve access on the server's sign-in page. You return to **MCP Servers**,
+   and the server reconnects with the new token.
+
+GoModel follows the
+[MCP authorization spec](https://modelcontextprotocol.io/specification/latest/basic/authorization):
+it discovers the authorization server from the server's protected resource
+metadata, requires S256 PKCE, sends the `resource` indicator on every token
+request, and checks `state` and `iss` on the way back. It registers itself as
+an OAuth client with dynamic client registration. If the authorization server
+does not support that, register a client yourself with the redirect URI the
+dialog shows (`https://<gateway>/admin/mcp-oauth/callback`) and enter its
+client ID (and secret, for a confidential client) under **Use your own OAuth
+client**.
+
+Tokens are stored in the gateway database, encrypted with
+[`GOMODEL_ENCRYPTION_KEY`](/advanced/encryption-at-rest) when it is set, and
+are never returned by the admin API. GoModel refreshes an expired access token
+with the refresh token and saves the rotated refresh token. The row shows
+**Signed in**, **Sign-in expired** (no refresh token left), or **Sign-in needs
+attention** with the error; sign in again in the last two cases. The sign-out
+icon deletes the stored tokens.
+
+Notes:
+
+- Sign-in works for `http` and `sse` servers, including ones declared in
+  `config.yaml`; tokens are runtime state, not configuration.
+- A signed-in token replaces a configured `Authorization` header, and is only
+  sent to the server's own origin. Changing a server's URL stops using its
+  tokens until you sign in again.
+- Every client of the gateway shares the one sign-in. Per-user upstream
+  tokens are not supported yet.
+- With several gateway instances, the sign-in callback must reach the
+  instance that started it (use sticky sessions for `/admin`); refreshed
+  tokens reach the other instances through the database.
+
+The admin API equivalents are `POST /admin/mcp-servers/{slug}/oauth/start`
+(body: `redirect_uri`, optional `client_id`/`client_secret`; returns
+`authorization_url`) and `DELETE /admin/mcp-servers/{slug}/oauth`.
+
 ## Choose which tools each server exposes
 
 By default every tool a server reports is exposed. Trim a server's tools to
@@ -406,7 +454,7 @@ endpoint serves them as `{slug}_{name}`.
 
 - **Credential boundary.** The MCP spec forbids token passthrough; GoModel
   terminates the client's bearer token and injects per-server credentials
-  from configuration. Client keys never reach an upstream, and configured
+  from configuration or an operator OAuth sign-in. Client keys never reach an upstream, and configured
   upstream headers are not sent across cross-origin redirects.
 - **Browser origins are denied by default.** MCP clients are not web pages, so
   `/mcp` refuses any request carrying browser fetch metadata (`Origin` or

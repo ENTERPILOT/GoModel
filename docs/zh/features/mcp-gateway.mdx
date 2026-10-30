@@ -231,6 +231,27 @@ ENTRYPOINT ["/gomodel"]
 
 如果最近一次错误提到 `x509: certificate signed by unknown authority`，表示该服务器的 TLS 证书由容器不信任的 CA 签发。参阅[私有 CA 证书](/zh/guides/production#私有-ca-签发的上游证书)。
 
+## 使用 OAuth 登录
+
+部分 MCP 服务器（Notion、Linear、Atlassian、Sentry 等）需要交互式 OAuth 登录，而不是静态 Token。GoModel 可以直接在控制台中为整个网关登录一次：
+
+1. 添加服务器，填写其 URL，不要配置 `Authorization` 请求头。服务器返回 `401 Unauthorized` 后会显示**需要登录**。
+2. 点击该行的登录图标，然后点击**继续登录**。
+3. 在服务器的登录页面授权访问。您会回到 **MCP Servers** 页面，服务器会使用新的 Token 重新连接。
+
+GoModel 遵循 [MCP 授权规范](https://modelcontextprotocol.io/specification/latest/basic/authorization)：它从服务器的受保护资源元数据中发现授权服务器，要求 S256 PKCE，在每个 Token 请求中发送 `resource` 指示符，并在回调时校验 `state` 和 `iss`。它通过动态客户端注册将自己注册为 OAuth 客户端。如果授权服务器不支持动态注册，请使用对话框中显示的重定向 URI（`https://<gateway>/admin/mcp-oauth/callback`）自行注册客户端，并在**使用自己的 OAuth 客户端**中填写客户端 ID（机密客户端还需填写密钥）。
+
+Token 存储在网关数据库中，设置 [`GOMODEL_ENCRYPTION_KEY`](/zh/advanced/encryption-at-rest) 后会被加密，且绝不会通过管理 API 返回。GoModel 会使用 Refresh Token 刷新过期的 Access Token，并保存轮换后的 Refresh Token。该行会显示**已登录**、**登录已过期**（没有可用的 Refresh Token）或**登录需要处理**及错误信息；后两种情况请重新登录。退出图标会删除已存储的 Token。
+
+说明：
+
+- 登录适用于 `http` 和 `sse` 服务器，包括在 `config.yaml` 中声明的服务器；Token 属于运行时状态，而不是配置。
+- 登录获得的 Token 会替换已配置的 `Authorization` 请求头，并且只发送到该服务器自己的源。修改服务器 URL 后，需要重新登录才会再次使用 Token。
+- 网关的所有客户端共享同一个登录。暂不支持按用户区分的上游 Token。
+- 部署多个网关实例时，登录回调必须到达发起登录的实例（为 `/admin` 启用会话保持）；刷新后的 Token 会通过数据库同步到其他实例。
+
+对应的管理 API 为 `POST /admin/mcp-servers/{slug}/oauth/start`（请求体：`redirect_uri`，可选 `client_id`/`client_secret`；返回 `authorization_url`）和 `DELETE /admin/mcp-servers/{slug}/oauth`。
+
 ## 选择每个服务器公开哪些工具
 
 默认情况下，服务器报告的每个工具都会被公开。精简服务器的工具可以保持智能体上下文精简，并让删除、合并等有风险的工具远离客户端。
@@ -281,7 +302,7 @@ mcp:
 
 ## 安全说明
 
-- **凭据边界。** MCP 规范禁止 Token 透传；GoModel 会终结客户端的 Bearer Token，并从配置中注入每个服务器的凭据。客户端密钥永远不会到达上游，并且所配置的上游请求头不会在跨源重定向时被发送。
+- **凭据边界。** MCP 规范禁止 Token 透传；GoModel 会终结客户端的 Bearer Token，并从配置或 OAuth 登录中注入每个服务器的凭据。客户端密钥永远不会到达上游，并且所配置的上游请求头不会在跨源重定向时被发送。
 - **默认拒绝浏览器来源。** MCP 客户端不是网页，因此 `/mcp` 会拒绝任何携带浏览器 fetch 元数据（`Origin` 或 `Sec-Fetch-Site`）的请求，除非它来自 `mcp.allowed_origins`（`MCP_ALLOWED_ORIGINS`）中列出的来源。请按浏览器序列化的格式填写条目，例如 `https://console.example.com`，不带末尾斜杠，默认端口可省略。允许列表中的来源可以使用完整会话，包括浏览器在发送时不带 `Origin` 请求头的 `GET` 通知流。这正是阻止基于浏览器的 DNS 重绑定攻击的机制：重绑定只会改变主机名解析到的地址，因此被重绑定页面的 `Origin` 和 `Host` 仍然彼此一致，浏览器也仍会报告 `Sec-Fetch-Site: same-origin`。比较它们无法证明任何事情，只有显式的允许列表才能区分您的来源和攻击者的来源。仅当您从已知来源提供 MCP Web 客户端时才设置 `allowed_origins`；`"*"` 会信任所有来源并禁用该防护，启动时会对此发出警告。
 - **stdio 仅支持声明式配置。** stdio 服务器会在网关主机上启动子进程，因此只能在 `config.yaml` / `MCP_SERVERS` 中声明。Admin API 和控制台会拒绝它们：控制台登录权限绝不能等同于在网关上执行代码的权限。
 - **stdio 子进程只获得最小化的环境。** 只会继承 `PATH`、`HOME`、`TMPDIR`、`USER` 和 `LANG`，绝不会继承网关的提供商 API 密钥或主密钥。其他内容请通过服务器的 `env:` 映射显式传入（值支持 `${VAR}`）。

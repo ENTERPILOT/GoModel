@@ -55,6 +55,8 @@ func seedPlaintextSecrets(t *testing.T, db sqlx.DB) {
 	servers, err := mcpgateway.NewSQLStore(ctx, db)
 	require.NoError(t, err)
 	require.NoError(t, servers.Upsert(ctx, mcpgateway.ManagedServer{Name: "github", URL: "https://mcp.example.com", Transport: "http", Headers: map[string]string{"Authorization": "Bearer plain"}, Enabled: true}))
+	_, err = db.Exec(ctx, `INSERT INTO mcp_server_oauth (name, data, updated_at) VALUES ('github', '{"access_token":"plain"}', 0)`)
+	require.NoError(t, err)
 	defs, err := guardrails.NewSQLStore(ctx, db)
 	require.NoError(t, err)
 	require.NoError(t, defs.Upsert(ctx, guardrails.Definition{Name: "pii", Type: "presidio", Config: []byte(`{"api_key":"pk-plain","language":"en"}`)}))
@@ -96,6 +98,7 @@ func TestReencryptSecrets(t *testing.T) {
 	assert.Equal(t, []encryption.Report{
 		{Entity: "provider_credentials", Rows: 1, Reencrypted: 1},
 		{Entity: "mcp_servers", Rows: 1, Reencrypted: 1},
+		{Entity: "mcp_server_oauth", Rows: 1, Reencrypted: 1},
 		{Entity: "guardrail_definitions", Rows: 1, Reencrypted: 1},
 	}, result.Reports)
 

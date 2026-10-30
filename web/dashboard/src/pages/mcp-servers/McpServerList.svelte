@@ -15,8 +15,12 @@
     mcpServerStatusClass,
     mcpServerStatusTitle,
     mcpServerSubCountsLabel,
+    mcpServerCanSignIn,
+    mcpServerOAuthClass,
+    mcpServerOAuthLabel,
+    mcpServerOAuthState,
   } from "./mcp-servers.js";
-  import { List, Pencil, RefreshCw, X } from "lucide";
+  import { List, LogIn, LogOut, Pencil, RefreshCw, X } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
   function statusTitle(server) {
@@ -60,8 +64,18 @@
               class="audit-status-badge {mcpServerStatusClass(server)}"
               title={statusTitle(server)}>{mcpServerStatusLabel(server)}</span
             >
+            {#if mcpServerOAuthState(server)}
+              <span
+                class="audit-status-badge {mcpServerOAuthClass(mcpServerOAuthState(server))}"
+                title={server.oauth?.last_error || server.oauth?.issuer || ""}
+                >{mcpServerOAuthLabel(mcpServerOAuthState(server))}</span
+              >
+            {/if}
             {#if mcpServerStatus(server) === "degraded" && server.last_error}
-              <div class="mcp-server-sub-counts">{server.last_error}</div>
+              <div class="mcp-server-sub-counts" title={server.last_error}>{server.last_error}</div>
+            {/if}
+            {#if server.oauth?.last_error}
+              <div class="mcp-server-sub-counts" title={server.oauth.last_error}>{server.oauth.last_error}</div>
             {/if}
           </td>
           <td>
@@ -100,6 +114,25 @@
               >
                 <Icon icon={List} class="form-action-icon" />
               </TableActionButton>
+              {#if mcpServerCanSignIn(server)}
+                <TableActionButton
+                  label={m.mcp_oauth_sign_in_action({ name: server.name })}
+                  class="table-icon-btn"
+                  onclick={() => mcpServers.openSignIn(server)}
+                >
+                  <Icon icon={LogIn} class="form-action-icon" />
+                </TableActionButton>
+              {/if}
+              {#if server.oauth?.signed_in_at}
+                <TableActionButton
+                  label={m.mcp_oauth_sign_out_action({ name: server.name })}
+                  class="table-icon-btn"
+                  onclick={() => mcpServers.signOut(server)}
+                  disabled={mcpServers.signingOutName === mcpServerSlug(server)}
+                >
+                  <Icon icon={LogOut} class="form-action-icon" />
+                </TableActionButton>
+              {/if}
               <TableActionButton
                 label={mcpServers.reconnectingName === mcpServerSlug(server)
                   ? m.mcp_reconnecting_action({ name: server.name })

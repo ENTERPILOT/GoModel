@@ -70,6 +70,7 @@ func TestRunSecretsReencrypt(t *testing.T) {
 	assert.Equal(t, 1, setupConfigCalls, "the distribution can register a key wrapper for the command")
 	assert.Equal(t, "provider_credentials: 0 rows, 0 re-encrypted\n"+
 		"mcp_servers: 0 rows, 0 re-encrypted\n"+
+		"mcp_server_oauth: 0 rows, 0 re-encrypted\n"+
 		"guardrail_definitions: 0 rows, 0 re-encrypted\n"+
 		"active data key: 1\n", stdout.String())
 	assert.NotContains(t, stdout.String()+stderr.String(), "cli-test-key")

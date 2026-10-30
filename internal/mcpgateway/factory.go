@@ -78,6 +78,21 @@ func Reencrypt(ctx context.Context, shared storage.Storage, box *encryption.Box)
 	return (&sealedStore{Store: store, box: box, swap: swap}).reencrypt(ctx, swap)
 }
 
+// ReencryptOAuth seals every stored MCP OAuth sign-in that is in plaintext
+// or sealed with a data key other than box's active one.
+func ReencryptOAuth(ctx context.Context, shared storage.Storage, box *encryption.Box) (encryption.Report, error) {
+	store, err := createStore(ctx, shared)
+	if err != nil {
+		return encryption.Report{Entity: "mcp_server_oauth"}, err
+	}
+	defer func() { _ = store.Close() }()
+	oauth := newOAuthStore(store, box)
+	if oauth == nil {
+		return encryption.Report{Entity: "mcp_server_oauth"}, fmt.Errorf("mcp server store %T cannot hold oauth records", store)
+	}
+	return oauth.reencrypt(ctx)
+}
+
 func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storage, box *encryption.Box, httpClient *http.Client, usageLogger usage.LoggerInterface, secrets *config.Secrets) (*Result, error) {
 	rawStore, err := createStore(ctx, storeConn)
 	if err != nil {
@@ -115,6 +130,9 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 		AllowedOrigins:  cfg.MCP.AllowedOrigins,
 		ToolDiscovery:   cfg.MCP.ToolDiscovery,
 		Secrets:         secrets,
+		// OAuth records are sealed as a whole: they hold tokens and client
+		// secrets.
+		oauthStore: newOAuthStore(rawStore, box),
 	})
 	if err != nil {
 		return nil, err

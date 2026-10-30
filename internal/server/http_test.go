@@ -803,6 +803,27 @@ func TestAdminAPI_RequiresAuth(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
+func TestMCPOAuthCallback_SkipsAuth(t *testing.T) {
+	srv := New(&mockProvider{}, &Config{
+		MasterKey:             "test-secret-key",
+		AdminEndpointsEnabled: true,
+		AdminHandler:          admin.NewHandler(nil, nil),
+	})
+
+	// The browser arrives from the authorization server without the bearer
+	// token; the handler answers (here 503: no MCP gateway) instead of 401.
+	req := httptest.NewRequest(http.MethodGet, admin.MCPOAuthCallbackPath+"?state=s&code=c", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
+
+	// Starting a sign-in stays behind admin authentication.
+	req = httptest.NewRequest(http.MethodPost, "/admin/mcp-servers/notion/oauth/start", nil)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+}
+
 func TestAdminAPI_SkipsAuthWithoutMasterKey(t *testing.T) {
 	mock := &mockProvider{}
 	adminHandler := admin.NewHandler(nil, nil)

@@ -59,6 +59,11 @@ type ServerSpec struct {
 	// Managed marks specs declared in config.yaml / MCP_SERVERS. They override
 	// admin-store rows with the same name and are read-only in the dashboard.
 	Managed bool
+
+	// oauth supplies the access token of an operator OAuth sign-in; nil
+	// when the server is not signed in. A new sign-in is a new source, so
+	// the spec changes and the manager redials with it.
+	oauth *oauthSource
 }
 
 // SpecFromConfig converts one declarative config entry into a runtime spec.
@@ -102,7 +107,8 @@ func (s ServerSpec) equal(other ServerSpec) bool {
 		slices.Equal(s.UserPaths, other.UserPaths) &&
 		slices.Equal(s.DisallowedUserPaths, other.DisallowedUserPaths) &&
 		s.ToolTimeout == other.ToolTimeout &&
-		s.Managed == other.Managed
+		s.Managed == other.Managed &&
+		s.oauth == other.oauth
 }
 
 // withoutAccessPolicy clears the gateway-side access policy (tool filters and
@@ -136,4 +142,9 @@ type ServerView struct {
 	// ResourceCount includes resource templates.
 	ResourceCount int
 	ConnectedAt   time.Time
+	// AuthRequired reports that the last connect was answered 401
+	// Unauthorized: the server needs a credential or an OAuth sign-in.
+	AuthRequired bool
+	// OAuth is the operator sign-in state; nil when never signed in.
+	OAuth *OAuthView
 }

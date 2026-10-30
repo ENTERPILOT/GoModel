@@ -334,6 +334,54 @@ Ostatni błąd wspominający `x509: certificate signed by unknown authority` ozn
 że certyfikat TLS serwera został wystawiony przez CA, któremu kontener nie ufa.
 Zobacz [prywatne certyfikaty CA](/pl/guides/production#certyfikaty-upstreamu-za-prywatnym-ca).
 
+## Logowanie przez OAuth
+
+Niektóre serwery MCP (Notion, Linear, Atlassian, Sentry, ...) wymagają
+interaktywnego logowania OAuth zamiast statycznego tokena. GoModel loguje się
+raz dla całego gatewaya, z poziomu dashboardu:
+
+1. Dodaj serwer z jego URL i bez nagłówka `Authorization`. Gdy odpowie
+   `401 Unauthorized`, pokaże **Wymagane logowanie**.
+2. Kliknij ikonę logowania w wierszu, a potem **Przejdź do logowania**.
+3. Zatwierdź dostęp na stronie logowania serwera. Wrócisz do **MCP Servers**,
+   a serwer połączy się ponownie z nowym tokenem.
+
+GoModel stosuje
+[specyfikację autoryzacji MCP](https://modelcontextprotocol.io/specification/latest/basic/authorization):
+odnajduje serwer autoryzacji w metadanych chronionego zasobu (protected
+resource metadata), wymaga PKCE S256, wysyła wskaźnik `resource` w każdym
+żądaniu tokena i sprawdza `state` oraz `iss` przy powrocie. Rejestruje się jako
+klient OAuth przez dynamiczną rejestrację klientów. Jeśli serwer autoryzacji jej
+nie obsługuje, zarejestruj klienta samodzielnie z adresem przekierowania
+widocznym w oknie (`https://<gateway>/admin/mcp-oauth/callback`) i wpisz jego
+identyfikator (oraz sekret dla klienta poufnego) w sekcji **Użyj własnego
+klienta OAuth**.
+
+Tokeny są przechowywane w bazie danych gatewaya, szyfrowane za pomocą
+[`GOMODEL_ENCRYPTION_KEY`](/pl/advanced/encryption-at-rest), jeśli jest
+ustawiony, i nigdy nie są zwracane przez admin API. GoModel odświeża wygasły
+access token za pomocą refresh tokena i zapisuje rotowany refresh token. Wiersz
+pokazuje **Zalogowano**, **Logowanie wygasło** (brak refresh tokena) albo
+**Logowanie wymaga uwagi** z błędem; w dwóch ostatnich przypadkach zaloguj się
+ponownie. Ikona wylogowania usuwa zapisane tokeny.
+
+Uwagi:
+
+- Logowanie działa dla serwerów `http` i `sse`, także tych zadeklarowanych w
+  `config.yaml`; tokeny są stanem w czasie działania, a nie konfiguracją.
+- Token z logowania zastępuje skonfigurowany nagłówek `Authorization` i jest
+  wysyłany tylko do originu serwera. Po zmianie URL serwera tokeny nie są
+  używane, dopóki nie zalogujesz się ponownie.
+- Wszyscy klienci gatewaya współdzielą jedno logowanie. Tokeny upstreamu per
+  użytkownik nie są jeszcze obsługiwane.
+- Przy kilku instancjach gatewaya callback musi trafić do instancji, która
+  rozpoczęła logowanie (sticky sessions dla `/admin`); odświeżone tokeny
+  docierają do pozostałych instancji przez bazę danych.
+
+Odpowiedniki w admin API to `POST /admin/mcp-servers/{slug}/oauth/start`
+(body: `redirect_uri`, opcjonalnie `client_id`/`client_secret`; zwraca
+`authorization_url`) oraz `DELETE /admin/mcp-servers/{slug}/oauth`.
+
 ## Wybierz, które narzędzia udostępnia każdy serwer
 
 Domyślnie udostępniane jest każde narzędzie zgłaszane przez serwer. Przytnij
@@ -411,7 +459,7 @@ oryginalnymi nazwami z upstreamu; zagregowany endpoint `/mcp` udostępnia je jak
 
 - **Granica danych uwierzytelniających.** Specyfikacja MCP zabrania przekazywania
   tokenów dalej; GoModel kończy obsługę bearer tokena klienta i dodaje dane
-  uwierzytelniające danego serwera z konfiguracji. Klucze klientów nigdy nie
+  uwierzytelniające danego serwera z konfiguracji lub z logowania OAuth. Klucze klientów nigdy nie
   docierają do upstreamu, a skonfigurowane nagłówki upstreamu nie są wysyłane
   przy przekierowaniach między originami.
 - **Originy przeglądarek są domyślnie blokowane.** Klienty MCP nie są stronami

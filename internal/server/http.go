@@ -303,6 +303,12 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	if cfg != nil && cfg.effectiveMasterKey() == "" && !cfg.MasterKeyDisabled && !hasRequestAuthenticators(cfg.RequestAuthenticators) && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
 		authSkipPaths = append(authSkipPaths, "/admin/*")
 	}
+	// The MCP OAuth callback is reached by a browser redirect from an
+	// authorization server, without the dashboard's bearer token; its
+	// single-use state and binding cookie authenticate it instead.
+	if cfg != nil && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
+		authSkipPaths = append(authSkipPaths, admin.MCPOAuthCallbackPath)
+	}
 	if cfg != nil && cfg.SwaggerEnabled && SwaggerAvailable() {
 		authSkipPaths = append(authSkipPaths, "/swagger/*")
 	}
@@ -584,6 +590,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 				return strings.HasSuffix(c.Request().URL.Path, "/live/logs")
 			},
 		})
+		e.GET(admin.MCPOAuthCallbackPath, cfg.AdminHandler.MCPOAuthCallback)
 		adminGroup := e.Group("/admin", adminGate, adminGzip)
 		cfg.AdminHandler.RegisterRoutes(adminGroup)
 		// Extension admin routes share the group, so they get exactly the
