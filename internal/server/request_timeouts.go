@@ -10,6 +10,8 @@ import (
 	"github.com/labstack/echo/v5"
 )
 
+const requestTimeoutAuthenticatedKey = "gomodel.requestTimeoutAuthenticated"
+
 // requestTimeoutOverrides consumes gateway-only timeout headers after authentication.
 func requestTimeoutOverrides() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
@@ -38,7 +40,8 @@ func requestTimeoutOverrides() echo.MiddlewareFunc {
 				*field.target = &duration
 				req.Header.Del(field.name)
 			}
-			if overrides.Timeout != nil || overrides.ResponseHeaderTimeout != nil {
+			authenticated, _ := c.Get(requestTimeoutAuthenticatedKey).(bool)
+			if authenticated && (overrides.Timeout != nil || overrides.ResponseHeaderTimeout != nil) {
 				c.SetRequest(req.WithContext(httpclient.WithRequestTimeouts(req.Context(), overrides)))
 			}
 			return next(c)

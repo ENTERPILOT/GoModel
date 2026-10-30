@@ -69,23 +69,36 @@ func TestRequestTimeoutOverridesAcrossFailover_E2E(t *testing.T) {
 		Targets: []virtualmodels.Target{{Model: "primary/model"}, {Model: "backup/model"}},
 	}))
 	gateway := httptest.NewServer(setupE2EServer(t, e2eServerOptions{
-		registry: registry, modelResolver: models, failoverResolver: models,
+		masterKey: testMasterKey, registry: registry, modelResolver: models, failoverResolver: models,
 	}))
 	t.Cleanup(gateway.Close)
+	openGateway := httptest.NewServer(setupE2EServer(t, e2eServerOptions{
+		registry: registry, modelResolver: models, failoverResolver: models,
+	}))
+	t.Cleanup(openGateway.Close)
 	for _, tc := range []struct {
 		name, override string
 		want           int
+		anonymous      bool
 	}{
-		{"inherited", "", http.StatusGatewayTimeout},
+		{"inherited", "", http.StatusGatewayTimeout, false},
 		// Each attempt takes 180ms; the combined flow exceeds the 300ms override.
-		{"fresh budget per fallback", "300", http.StatusOK},
-		{"disabled", "0", http.StatusOK},
-		{"short override", "10", http.StatusGatewayTimeout},
+		{"fresh budget per fallback", "300", http.StatusOK, false},
+		{"disabled", "0", http.StatusOK, false},
+		{"short override", "10", http.StatusGatewayTimeout, false},
+		{"anonymous cannot disable", "0", http.StatusGatewayTimeout, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, gateway.URL+"/v1/chat/completions", strings.NewReader(`{"model":"pool","messages":[{"role":"user","content":"hi"}]}`))
+			url := gateway.URL
+			if tc.anonymous {
+				url = openGateway.URL
+			}
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, url+"/v1/chat/completions", strings.NewReader(`{"model":"pool","messages":[{"role":"user","content":"hi"}]}`))
 			require.NoError(t, err)
 			req.Header.Set("Content-Type", "application/json")
+			if !tc.anonymous {
+				req.Header.Set("Authorization", "Bearer "+testMasterKey)
+			}
 			if tc.override != "" {
 				req.Header.Set("X-GoModel-Request-Timeout-Ms", tc.override)
 				req.Header.Set("X-GoModel-Response-Header-Timeout-Ms", tc.override)

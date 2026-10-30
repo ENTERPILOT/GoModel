@@ -47,7 +47,13 @@ func (t *requestTimeoutTransport) RoundTrip(req *http.Request) (*http.Response, 
 		transport.CloseIdleConnections()
 		return nil, err
 	}
-	resp.Body = &timeoutResponseBody{ReadCloser: resp.Body, transport: transport}
+	body := &timeoutResponseBody{ReadCloser: resp.Body, transport: transport}
+	if writer, ok := resp.Body.(io.Writer); ok {
+		// Switching Protocols bodies must remain writable for WebSocket clients.
+		resp.Body = &timeoutReadWriteBody{timeoutResponseBody: body, Writer: writer}
+	} else {
+		resp.Body = body
+	}
 	return resp, nil
 }
 
@@ -58,6 +64,11 @@ func (t *requestTimeoutTransport) Unwrap() http.RoundTripper { return t.base }
 type timeoutResponseBody struct {
 	io.ReadCloser
 	transport *http.Transport
+}
+
+type timeoutReadWriteBody struct {
+	*timeoutResponseBody
+	io.Writer
 }
 
 func (b *timeoutResponseBody) Close() error {

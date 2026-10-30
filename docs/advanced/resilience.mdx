@@ -32,7 +32,9 @@ headers (non-negative integer milliseconds):
 | `X-GoModel-Response-Header-Timeout-Ms` | `HTTP_RESPONSE_HEADER_TIMEOUT` / `http.response_header_timeout` |
 
 Omitted headers inherit their global values independently; `0` disables that
-timeout. Each upstream attempt starts a fresh timeout, including retries and
+timeout. Anonymous requests (including open mode and auth-skipped paths) have
+these headers consumed but retain the global timeouts. Each upstream attempt
+starts a fresh timeout, including retries and
 failovers; this is not a deadline for the whole flow. Existing retry eligibility
 is unchanged. Headers are consumed by GoModel, not forwarded to providers.
 Client cancellation, dial/TLS timeouts, stream idle protection, and external

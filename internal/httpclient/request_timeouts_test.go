@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -197,4 +199,32 @@ func TestRequestTimeoutOverridesFollowTLSReload(t *testing.T) {
 	request(false)
 	RestoreTLS(before)
 	request(true)
+}
+
+func TestResponseHeaderTimeoutOverridePreservesWebSocket(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if !assert.NoError(t, err) {
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		kind, data, err := conn.Read(r.Context())
+		if assert.NoError(t, err) {
+			assert.NoError(t, conn.Write(r.Context(), kind, data))
+		}
+	}))
+	defer upstream.Close()
+	client := NewDefaultHTTPClient()
+	defer client.CloseIdleConnections()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	zero := time.Duration(0)
+	ctx = WithRequestTimeouts(ctx, RequestTimeouts{ResponseHeaderTimeout: &zero})
+	conn, _, err := websocket.Dial(ctx, upstream.URL, &websocket.DialOptions{HTTPClient: client})
+	require.NoError(t, err)
+	defer func() { _ = conn.CloseNow() }()
+	require.NoError(t, conn.Write(ctx, websocket.MessageText, []byte("ping")))
+	_, data, err := conn.Read(ctx)
+	require.NoError(t, err)
+	require.Equal(t, "ping", string(data))
 }

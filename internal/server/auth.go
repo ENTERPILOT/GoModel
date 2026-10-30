@@ -136,6 +136,7 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
 					return writeGatewayError(c, authErr)
 				}
 				if masterKey != "" && subtle.ConstantTimeCompare([]byte(token), []byte(masterKey)) == 1 {
+					c.Set(requestTimeoutAuthenticatedKey, true)
 					auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodMasterKey)
 					setInteractionContinuationAllowed(c, true)
 					return next(c)
@@ -145,6 +146,7 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
 					auditlog.EnrichEntryWithAuthMethod(c, auditlog.AuthMethodAPIKey)
 					authResult, err := authenticator.Authenticate(c.Request().Context(), token)
 					if err == nil {
+						c.Set(requestTimeoutAuthenticatedKey, true)
 						applyAuthKeyResult(c, authResult, userPathHeaderName)
 						restrictSecretReferences(c, masterKey)
 						return next(c)
@@ -175,6 +177,7 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
 					return writeGatewayError(c, extensionAuthenticationError(c))
 				}
 				restrictSecretReferences(c, masterKey)
+				c.Set(requestTimeoutAuthenticatedKey, true)
 				return next(c)
 			}
 
