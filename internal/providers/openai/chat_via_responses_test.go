@@ -173,7 +173,7 @@ func TestChatToResponsesRequest_TranslatesEveryMember(t *testing.T) {
 		"tools": [{"type": "function", "name": "get_weather", "parameters": {"type": "object"}, "strict": false}],
 		"tool_choice": {"type": "function", "name": "get_weather"},
 		"max_output_tokens": 500,
-		"reasoning": {"effort": "low"},
+		"reasoning": {"effort": "low", "summary": "auto"},
 		"text": {"verbosity": "low", "format": {"type": "json_schema", "name": "p", "strict": true, "schema": {"type": "object"}}},
 		"store": false,
 		"user": "user-1",
