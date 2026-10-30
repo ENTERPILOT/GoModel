@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -76,6 +77,90 @@ func TestBuildRequestPluginOriginDropsPluginUpstreamHeaders(t *testing.T) {
 			assert.Equal(t, "scoped", req.Header.Get("X-Request-Scoped"), "request headers are left alone")
 		})
 	}
+}
+
+// TestBuildRequestDeniesPluginHeaders pins one case per denied header: transport
+// and body-framing headers, provider-negotiated headers, and the credential list.
+// The length checks tie the table to the two lists that live in this package, so
+// a header added to one of them without a case here fails.
+func TestBuildRequestDeniesPluginHeaders(t *testing.T) {
+	transport := []string{
+		"Host",
+		"Content-Length",
+		"Transfer-Encoding",
+		"Connection",
+		"Te",
+		"Trailer",
+		"Upgrade",
+		"Expect",
+		"Accept-Encoding",
+		"Content-Type",
+	}
+	reserved := []string{
+		"Anthropic-Beta",
+	}
+	credentials := []string{
+		"Authorization",
+		"Proxy-Authorization",
+		"Cookie",
+		"Set-Cookie",
+		"X-Api-Key",
+		"Api-Key",
+		"X-Goog-Api-Key",
+		"X-Anthropic-Api-Key",
+		"X-Auth-Token",
+		"X-Access-Token",
+		"X-GoModel-Key",
+		"Xi-Api-Key",
+	}
+	require.Len(t, pluginTransportHeaders, len(transport), "transport list and cases drifted apart")
+	require.Len(t, pluginReservedProviderHeaders, len(reserved), "reserved list and cases drifted apart")
+
+	groups := []struct {
+		name    string
+		headers []string
+	}{
+		{name: "transport", headers: transport},
+		{name: "reserved", headers: reserved},
+		{name: "credential", headers: credentials},
+	}
+	for _, group := range groups {
+		for _, name := range group.headers {
+			t.Run(group.name+"/"+name, func(t *testing.T) {
+				// A setter that claims the header itself proves the plugin value
+				// loses to the provider's, not merely that it was never written.
+				client := New(DefaultConfig("test", "http://upstream.test"), func(req *http.Request) {
+					req.Header.Set(name, "provider-value")
+				})
+				// The plugin spells the name in lower case on purpose: the denial
+				// must survive the canonicalization the merge applies.
+				ctx := core.WithPluginUpstreamHeaders(context.Background(), http.Header{strings.ToLower(name): {"plugin-value"}})
+
+				req, err := client.buildRequest(ctx, Request{Method: http.MethodPost, Endpoint: "/v1/chat/completions", Body: []byte(`{}`)})
+				require.NoError(t, err)
+				assert.NotContains(t, req.Header.Values(name), "plugin-value", "a plugin may not set %s", name)
+				assert.Equal(t, []string{"provider-value"}, req.Header.Values(name), "the provider's %s survives", name)
+			})
+		}
+	}
+}
+
+// TestBuildRequestKeepsProviderOAuthBetaFromPlugins pins the finding the review
+// raised: a plugin that replaced anthropic-beta would drop the oauth-2025-04-20
+// flag the Anthropic provider adds in its own header hook, and subscription
+// credentials need that flag. The merge refuses the header, so the provider's
+// value is what reaches the wire.
+func TestBuildRequestKeepsProviderOAuthBetaFromPlugins(t *testing.T) {
+	client := New(DefaultConfig("test", "http://upstream.test"), func(req *http.Request) {
+		req.Header.Set("Anthropic-Beta", "oauth-2025-04-20")
+	})
+	ctx := core.WithPluginUpstreamHeaders(context.Background(), http.Header{
+		"anthropic-beta": {"prompt-caching-2024-07-31"},
+	})
+
+	req, err := client.buildRequest(ctx, Request{Method: http.MethodPost, Endpoint: "/v1/messages", Body: []byte(`{}`)})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"oauth-2025-04-20"}, req.Header.Values("Anthropic-Beta"))
 }
 
 func TestBuildRequestPluginHeadersCannotOverrideCredentials(t *testing.T) {

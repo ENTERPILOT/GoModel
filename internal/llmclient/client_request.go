@@ -307,14 +307,48 @@ func (c *Client) buildRequest(ctx context.Context, req Request) (*http.Request, 
 	return httpReq, nil
 }
 
-// pluginTransportHeaders control the transport rather than the provider call,
-// so a plugin must not set them. Credential headers are refused separately, by
-// the shared list in core, so the host, the request state and this merge cannot
+// pluginTransportHeaders control the transport or the framing of the body
+// rather than the provider call, so a plugin must not set them: the HTTP client
+// frames the connection, and the gateway and the provider decide how the body is
+// encoded and compressed. Credential headers are refused separately, by the
+// shared list in core, so the host, the request state and this merge cannot
 // drift apart.
 var pluginTransportHeaders = map[string]struct{}{
 	"Host":              {},
 	"Content-Length":    {},
 	"Transfer-Encoding": {},
+	"Connection":        {},
+	"Te":                {},
+	"Trailer":           {},
+	"Upgrade":           {},
+	"Expect":            {},
+	"Accept-Encoding":   {},
+	"Content-Type":      {},
+}
+
+// pluginReservedProviderHeaders lists headers a provider negotiates with its
+// own hook and that a plugin would silently break by replacing.
+//
+// anthropic-beta selects Anthropic features, and subscription credentials must
+// carry oauth-2025-04-20 in it: the Anthropic provider adds that flag in its
+// header hook, which this merge runs after, so a plugin value would drop the
+// flag and the request would be rejected. It is denied here rather than inside
+// the provider because no provider-side code runs after this merge.
+var pluginReservedProviderHeaders = map[string]struct{}{
+	"Anthropic-Beta": {},
+}
+
+// pluginHeaderDenied reports whether the merge must refuse the header: it
+// carries a credential, it controls the transport or the body encoding, or it
+// negotiates provider features the gateway owns.
+func pluginHeaderDenied(name string) bool {
+	if _, denied := pluginTransportHeaders[name]; denied {
+		return true
+	}
+	if _, denied := pluginReservedProviderHeaders[name]; denied {
+		return true
+	}
+	return core.IsCredentialHeader(name)
 }
 
 // requestHeadersWithPluginOverrides merges the headers plugins wrote to
@@ -341,7 +375,7 @@ func requestHeadersWithPluginOverrides(ctx context.Context, reqHeaders http.Head
 	}
 	for key, values := range extra {
 		canonical := http.CanonicalHeaderKey(key)
-		if _, transport := pluginTransportHeaders[canonical]; transport || core.IsCredentialHeader(canonical) {
+		if pluginHeaderDenied(canonical) {
 			continue
 		}
 		merged[canonical] = append([]string(nil), values...)

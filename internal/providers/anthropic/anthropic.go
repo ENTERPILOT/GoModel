@@ -208,6 +208,10 @@ func (p *Provider) setHeaders(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer "+key)
 	case isOAuthToken(key):
 		req.Header.Set("Authorization", "Bearer "+key)
+		// Nothing merges this flag back on the typed path: the plugin header
+		// merge in llmclient runs after this hook, so it denies anthropic-beta
+		// outright (llmclient.pluginReservedProviderHeaders). Keep the two in
+		// step; a plugin that replaced the header would drop the flag.
 		req.Header.Set(anthropicBetaHeader, oauthBetaFlag)
 	default:
 		req.Header.Set("x-api-key", key)
@@ -234,6 +238,11 @@ func (p *Provider) setHeaders(req *http.Request) {
 // by setHeaders, so a client that sends its own beta list would otherwise drop
 // the oauth flag subscription tokens require. Headers without an anthropic-beta
 // entry are returned unchanged: setHeaders' value survives in that case.
+//
+// Only client headers reach this merge: plugins cannot set anthropic-beta (see
+// llmclient.pluginReservedProviderHeaders), and the typed path has no equivalent
+// of this function, so the denial in the shared merge is what protects the flag
+// there.
 func ensureOAuthBeta(headers http.Header) http.Header {
 	for name, values := range headers {
 		if !strings.EqualFold(strings.TrimSpace(name), anthropicBetaHeader) {

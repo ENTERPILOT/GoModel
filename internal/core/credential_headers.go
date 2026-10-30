@@ -17,6 +17,7 @@ var credentialHeaders = map[string]struct{}{
 	"x-auth-token":        {},
 	"x-access-token":      {},
 	"x-gomodel-key":       {},
+	"xi-api-key":          {}, // ElevenLabs credential header
 }
 
 // maxCredentialHeaderLen bounds the lowercase scratch buffer below; every
