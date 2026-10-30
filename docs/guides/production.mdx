@@ -409,7 +409,7 @@ coordinate across instances.
 | Circuit breakers | In-memory, per process | Each replica learns an outage separately, so upstream sees up to `N x failure_threshold` failures before any breaker opens. |
 | [Session affinity](/features/session-keeping) pins | In-memory, per instance | Sessions stick per replica, not globally, unless the load balancer is sticky. |
 | Live log buffer | In-memory, per instance | A connected dashboard sees only that replica's live traffic, roughly `1/N` of it. History still comes from the database. |
-| MCP downstream sessions | In-memory, per instance | An `Mcp-Session-Id` from one replica returns 404 on another. [MCP](/features/mcp-gateway) clients need sticky sessions. |
+| MCP downstream sessions | Durable (database) | A session opened on one replica continues on any other, so [MCP](/features/mcp-gateway#sessions-across-replicas) clients need no sticky sessions. A `DELETE` ends it on every replica within about 2 seconds. A response stream in flight stays on the replica serving it. |
 | Provider request health | In-memory, per instance | Dashboard provider status reflects the replica that answered. |
 
 The one that surprises people is rate limits: they are an in-process control, so
