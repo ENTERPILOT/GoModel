@@ -103,7 +103,10 @@ func runCounterStoreSuite(t *testing.T, store Store, seedStale func(t *testing.T
 	got = loaded(t, "after reset all")
 	require.Empty(t, got)
 	afterResetAll := epochs(t, store)
+	require.Len(t, afterResetAll, len(afterReset), "reset all keeps every rule")
 	for subject, epoch := range afterReset {
+		require.Contains(t, afterResetAll, subject)
+		require.NotEmpty(t, afterResetAll[subject], subject)
 		require.NotEqual(t, epoch, afterResetAll[subject], subject)
 	}
 }
