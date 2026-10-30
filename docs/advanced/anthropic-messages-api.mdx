@@ -295,7 +295,10 @@ features that have no canonical equivalent are not preserved end to end:
   `grok-2` and `grok-3` except `grok-3-mini`) get the request without it
   instead of an error.
   Reasoning comes back as `thinking` blocks whichever member the provider uses
-  for it (`reasoning_content` or `reasoning`).
+  for it (`reasoning_content` or `reasoning`). A provider that streams
+  reasoning in the middle of a tool call's arguments holds the reasoning back
+  until the tool call is complete, so the `tool_use` block never closes
+  before its arguments are done.
 - **`count_tokens`** is exact when the model's provider can count tokens itself:
   Anthropic models are counted by Anthropic's own `count_tokens` endpoint. The
   forwarded request carries the resolved model (an alias is resolved first)

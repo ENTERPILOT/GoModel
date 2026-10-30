@@ -118,6 +118,25 @@ func TestResponsesReasoningEffortOverridePerAttempt(t *testing.T) {
 	}
 }
 
+// An effort override replaces the effort, not a summary the client explicitly
+// requested: reasoning.summary the client sent must survive onto the attempt.
+func TestResponsesReasoningEffortOverrideKeepsClientSummary(t *testing.T) {
+	original := &core.ResponsesRequest{
+		Model:     "gpt-5.5",
+		Input:     "hi",
+		Reasoning: &core.Reasoning{Effort: "high", Summary: "detailed"},
+	}
+
+	overridden := ResponsesRequestWithReasoningEffort(original, "low")
+	require.NotNil(t, overridden.Reasoning)
+	assert.Equal(t, "low", overridden.Reasoning.Effort)
+	assert.Equal(t, "detailed", overridden.Reasoning.Summary)
+
+	without := ResponsesRequestWithReasoningEffort(&core.ResponsesRequest{Model: "gpt-5.5"}, "low")
+	require.NotNil(t, without.Reasoning)
+	assert.Empty(t, without.Reasoning.Summary)
+}
+
 func TestReasoningEffortOverrideAbsentKeepsRequest(t *testing.T) {
 	orchestrator, provider, resolver, workflow := effortFixture()
 	resolver.efforts = nil
