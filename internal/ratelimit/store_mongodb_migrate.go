@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -28,6 +29,9 @@ import (
 func (s *MongoDBStore) importLegacyCounters(ctx context.Context) error {
 	return s.inTransaction(ctx, "import legacy rate limit counters", s.moveLegacyCounters)
 }
+
+// legacyDeleteBatch bounds the ids of one delete of imported documents.
+const legacyDeleteBatch = 10_000
 
 func (s *MongoDBStore) moveLegacyCounters(ctx context.Context) error {
 	cursor, err := s.legacyCounters.Find(ctx, bson.D{})
@@ -67,8 +71,12 @@ func (s *MongoDBStore) moveLegacyCounters(ctx context.Context) error {
 			return fmt.Errorf("import legacy rate limit counters: %w", err)
 		}
 	}
-	if _, err := s.legacyCounters.DeleteMany(ctx, bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: imported}}}}); err != nil {
-		return fmt.Errorf("clear legacy rate limit counters: %w", err)
+	// In batches, so a large collection never sends a command over
+	// MongoDB's 16 MiB document limit.
+	for batch := range slices.Chunk(imported, legacyDeleteBatch) {
+		if _, err := s.legacyCounters.DeleteMany(ctx, bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: batch}}}}); err != nil {
+			return fmt.Errorf("clear legacy rate limit counters: %w", err)
+		}
 	}
 	return nil
 }
