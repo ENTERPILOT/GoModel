@@ -32,7 +32,8 @@ embeddings, audio, passthrough, realtime sessions, and batch submission.
 
 Use rate limits for traffic control and budgets for spend control: budgets cap
 dollars over hours-to-months from durable usage records, rate limits cap
-request and token velocity over seconds-to-a-day with fast in-memory counters.
+request and token velocity over seconds-to-a-day with fast in-memory counters
+that replicas sharing a database keep in step.
 
 ## Enable rate limits
 
@@ -229,30 +230,57 @@ Details worth knowing:
 - A realtime session counts as one request and holds one concurrency slot for
   the whole session. A batch submission counts as one request and holds no
   concurrency slot.
-- Request and token windows live in memory for admission and are snapshotted
-  to the configured store about once a second (and on shutdown), so they
-  survive a restart and `gomodel --reload`. Concurrency gauges are not
-  persisted: after a bounce nothing is in flight. Counters are per replica:
-  each instance writes its own snapshot rows, so replicas sharing a database
-  never overwrite each other. On start an instance rolls every stored row
-  forward to the current window and takes, for requests and tokens
-  separately, the largest current and the largest previous bucket. Those can
-  come from different replicas, so the restored count can be a little above
-  any single replica's, but it is never the sum. A reset applies to every
-  replica: the replica that serves it clears its counters at once, and the
-  others within a few seconds, when they
+- Request and token windows live in memory for admission and are saved to
+  the configured store about once a second (and on shutdown), so they
+  survive a restart and `gomodel --reload`. A restart counts what the
+  previous run counted exactly once. Tune the interval with
+  `RATE_LIMITS_FLUSH_INTERVAL` (seconds; default `1`). `0` skips the
+  periodic write: counts still load on start and save on a clean shutdown,
+  but replicas no longer see each other's traffic after start.
+- A reset applies to every replica: the replica that serves it clears its
+  counters at once, and the others within a few seconds, when they
   [reload the rules](/guides/production#config-changes-reach-every-replica-within-seconds).
-  Switching a rule between shared and per-child, or deleting and re-creating
-  it, starts its counts from zero the same way. Stored rows from before a
-  reset or such a change are never restored, even after a restart or after
-  switching back. Editing a limit keeps the counts. Finish a rolling upgrade
-  from a release before per-replica snapshots before resetting or deleting
-  rules: a reset or delete served by an older replica can come back after a
-  restart. With N replicas the
-  effective limit is still about N times the configured value — use budgets
-  for durable, cross-instance control. Tune the snapshot interval with
-  `RATE_LIMITS_FLUSH_INTERVAL` (seconds; default `1`; `0` skips the periodic
-  write but still loads on start and flushes on a clean shutdown).
+  Switching a rule between shared and per-child, or deleting and
+  re-creating it, starts its counts from zero the same way. Stored counts
+  from before a reset or such a change never come back, even after a
+  restart or after switching back. Editing a limit keeps the counts. Finish
+  a rolling upgrade from a release before per-replica snapshots before
+  resetting or deleting rules: a reset or delete served by an older replica can come back after a
+  restart.
+
+## Several replicas share one limit
+
+Replicas that share a database enforce each rule together: a `100 rpm` rule
+admits about 100 requests per minute across all of them, not 100 per
+replica. Each replica saves what it counted itself, and on every flush reads
+what the others saved since its previous read. Admission checks the
+replica's own live count plus the others' last saved counts, entirely in
+memory: no request waits on the database. Remaining-request headers, the
+admin and dashboard usage, `GET /v1/usage`, and routing around a saturated
+provider or model all report the cluster-wide count.
+
+The limit is approximate, not exact:
+
+- Another replica's requests reach this one within about two flush
+  intervals: one for that replica to save them, one for this replica to
+  read them. Until then each replica admits as if those requests had not
+  happened, so the cluster can overshoot by up to about two seconds of the
+  other replicas' traffic at the default interval. Requests that several
+  replicas admit at the same instant can all take the last slot.
+- Concurrency caps are shared the same way: each replica publishes its
+  in-flight count every flush. A replica that crashes holds its slots until
+  its count goes stale, after three flush intervals and at least 5 seconds,
+  and then they free on every other replica. Freshness compares the time a
+  replica saved its count with the reader's clock, so keep replica clocks
+  synchronized (NTP).
+- A cap that must never be exceeded, such as `concurrent=1` across
+  replicas, needs a per-request check against shared state, which GoModel
+  does not offer yet. Use sticky routing or a single replica for it.
+
+Each flush writes only the counters that changed since the last one, and
+reads only the rows written since its previous read, with a full read once
+a minute. [Budgets](/features/budgets) remain the exact, durable control for
+spend.
 
 ## Client behavior
 

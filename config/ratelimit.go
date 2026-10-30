@@ -15,9 +15,11 @@ type RateLimitsConfig struct {
 	// Default: true. With no rules configured the check is a no-op.
 	Enabled bool `yaml:"enabled" env:"RATE_LIMITS_ENABLED"`
 
-	// FlushInterval is how often live request/token windows are written to
-	// storage, in seconds. Default 1. 0 disables the periodic loop; Start
-	// still loads and Close of an active generation still writes once.
+	// FlushInterval is how often each instance writes its changed counters to
+	// storage and reads the other instances', in seconds. Default 1. 0
+	// disables the periodic loop; Start still loads and Close of an active
+	// generation still writes once, but instances stop seeing each other's
+	// traffic after start.
 	FlushInterval int `yaml:"flush_interval" env:"RATE_LIMITS_FLUSH_INTERVAL"`
 
 	// UserPaths declares rate limit rules by tracked user path.
