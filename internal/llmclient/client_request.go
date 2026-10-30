@@ -285,8 +285,11 @@ func (c *Client) buildRequest(ctx context.Context, req Request) (*http.Request, 
 	}
 
 	// Apply request-specific headers, including the ones prompt-phase plugins
-	// asked to add. Plugin headers may not override provider credentials or
-	// transport-controlled headers: the provider always wins.
+	// asked to add. A plugin may not set a credential header, one that frames the
+	// connection or describes the body, or one the provider negotiates — see
+	// pluginHeaderDenied. For every other name its value replaces both the one the
+	// request carried and the one the provider's header hook set above: the
+	// provider wins only on the denied names.
 	for key, values := range requestHeadersWithPluginOverrides(ctx, req.Headers) {
 		httpReq.Header.Del(key)
 		for _, value := range values {

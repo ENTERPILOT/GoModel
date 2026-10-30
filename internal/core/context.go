@@ -416,7 +416,10 @@ func WithPluginUpstreamHeaders(ctx context.Context, headers http.Header) context
 }
 
 // PluginUpstreamHeaders returns the headers plugins asked to add to provider
-// calls, or nil when no plugin set any.
+// calls, or nil when no plugin set any. The map belongs to the request state and
+// is shared with every reader of the context, so a caller must treat it as
+// read-only: clone it before editing, as WithPluginUpstreamHeaders does on the
+// way in.
 func PluginUpstreamHeaders(ctx context.Context) http.Header {
 	if ctx == nil {
 		return nil

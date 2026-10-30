@@ -284,7 +284,7 @@ of a request:
 | `Prompt` | `*Prompt` | the conversation (`Messages` with stable IDs and typed `Parts`: text, image, audio, file, tool call, tool result, reasoning, refusal, opaque), `Tools`, `Params`, raw body. Edit through `SetText`, `SetMedia`, `SetToolArguments`, `SetToolResult`, `Insert`, `Append`, `Remove`, `SetParam`; `TextTargets(roles...)` lists every text part, tool-result text included, and `SetTargetText` writes one back |
 | `Response` | `*Completion` | the response, `nil` until the response phase: `Choices` with the same `Part` model, `Usage`, raw body. Edit through `SetText`, `ReplaceText`, `SetFinishReason`, `SetToolArguments`; `TextTargets` and `SetTargetText` work as on `Prompt` |
 | `Stream` | `*StreamState` | text accumulated so far per choice and the event count; `nil` for non-streaming requests |
-| `Headers` | `*Headers` | `Request` (inbound, credentials redacted; prompt-phase edits apply to the live request for later plugins and request logging, not to the provider call), `Response` (applied to the client response; a header set to the empty string is removed, including ones the gateway adds such as `X-Request-Id`), `Upstream` (merged into every outgoing provider call of the request, failover attempts included, on token-counting and compaction calls too; credential headers and transport headers such as `Host`, `Content-Length` and `Transfer-Encoding` are refused, and the provider always sets its own credentials last) |
+| `Headers` | `*Headers` | `Request` (inbound, credentials redacted; prompt-phase edits apply to the live request for later plugins and request logging, not to the provider call), `Response` (applied to the client response; a header set to the empty string is removed, including ones the gateway adds such as `X-Request-Id`), `Upstream` (sent with every provider call of the request; see [Upstream headers](#upstream-headers)) |
 | `Values` | `Values` | per-request bag shared by every hook of the request; prefix keys with the plugin name |
 
 Edits go through methods, not field assignment, so GoModel re-encodes only
@@ -314,6 +314,61 @@ result is replaced with `SetToolResult`.
 `Meta.Cache.PlannedPrefixMessages` tells a prompt plugin how many leading
 messages the provider cache planner will mark as the cached prefix. Appending
 keeps the cache; editing inside the prefix invalidates it for the session.
+
+### Upstream headers
+
+`Headers.Upstream` puts a header on the provider call itself: a per-request
+routing or billing property the upstream expects, such as Helicone's, or an
+organizational tag a gateway in front of the provider routes on. A provider
+credential does not belong here — the names the gateway treats as credentials
+are refused, and any other value is forwarded and logged as ordinary metadata.
+Assign the map in a prompt-phase hook, before the provider call runs:
+
+```go
+import "net/http"
+
+func (p *tenantHint) OnPrompt(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+	x.Headers.Upstream = http.Header{
+		"Helicone-Property-Tenant":  {x.Meta.UserPath},
+		"Helicone-Property-Request": {x.Meta.RequestID},
+	}
+	return pluginapi.Allow(), nil
+}
+```
+
+What the gateway does with them:
+
+- Every provider attempt of the request carries them, failover to another
+  provider included, and so do the token-counting and compaction calls the
+  request makes: they reach the same upstream, behind the same gateway.
+- Inference the gateway issues for its own work does not. A guardrail's LLM
+  judge calls the provider through the plugin `Host` on the request context, and
+  that call drops these headers: they describe the client's provider, not the
+  model the gateway picked for the guardrail.
+- These names are refused rather than merged: credential headers
+  (`Authorization`, `Proxy-Authorization`, `x-api-key`, `api-key`,
+  `x-goog-api-key`, `x-anthropic-api-key`, `xi-api-key`, `x-auth-token`,
+  `x-access-token`, `x-gomodel-key`, `Cookie`, `Set-Cookie`), the ones that frame
+  the connection (`Host`, `Content-Length`, `Transfer-Encoding`, `Connection`,
+  `Te`, `Trailer`, `Upgrade`, `Expect`), the ones that describe the body the
+  gateway encoded (`Content-Type`, `Accept-Encoding`), and `anthropic-beta`,
+  which selects provider features and has to keep the `oauth-2025-04-20` flag
+  subscription credentials need.
+- Any other name reaches the wire with the plugin's value, replacing a header
+  the request carried and one the provider set for itself. Only the names above
+  are protected; the rest of the provider's headers are not.
+- The host folds a hook's headers into the request state when that phase
+  finishes, so a value written after the provider call has run — from a
+  response-phase hook — no longer affects it. Treat the map you get back from
+  the context as read-only.
+
+<Note>
+  **Upgrading from a release that recorded these headers without sending them.**
+  A plugin that already set `Headers.Upstream` on such a release had its values
+  stored and dropped. After the upgrade they reach the provider, or the proxy in
+  front of it, for the first time: check the upstream accepts them before
+  rolling the upgrade out.
+</Note>
 
 ## Configuration
 
