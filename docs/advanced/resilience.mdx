@@ -32,7 +32,9 @@ headers (non-negative integer milliseconds):
 | `X-GoModel-Response-Header-Timeout-Ms` | `HTTP_RESPONSE_HEADER_TIMEOUT` / `http.response_header_timeout` |
 
 Omitted headers inherit their global values independently; `0` disables that
-timeout. Anonymous requests (including open mode and auth-skipped paths) have
+timeout. Both global timeouts default to `600s` (10 minutes), unless changed by
+the environment variables or matching `http:` config keys above.
+Anonymous requests (including open mode and auth-skipped paths) have
 these headers consumed but retain the global timeouts. Each upstream attempt
 starts a fresh timeout, including retries and
 failovers; this is not a deadline for the whole flow. Existing retry eligibility
@@ -42,8 +44,8 @@ proxy/provider limits still apply. Only grant gateway access to callers trusted
 to extend or disable these timeouts. Header-timeout overrides use a request-owned
 transport, so those attempts do not reuse the normal upstream connection pool.
 The overall override applies to shared LLM-client requests, not native AWS SDK
-calls. Response-header overrides require GoModel's shared transport; arbitrary
-caller-supplied HTTP transports do not implement them.
+calls or realtime WebSocket handshakes. Response-header overrides require GoModel's
+shared transport; arbitrary caller-supplied HTTP transports do not implement them.
 
 ## Defaults
 
