@@ -752,6 +752,7 @@ func TestChatToResponsesRequest_DropsEchoedReasoningContent(t *testing.T) {
 	assistant, ok := input[1].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "assistant", assistant["role"])
+	assert.Equal(t, []any{map[string]any{"type": "output_text", "text": "The answer is 391."}}, assistant["content"])
 	assert.NotContains(t, assistant, "reasoning_content")
 }
 
