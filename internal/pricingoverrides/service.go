@@ -19,6 +19,23 @@ type Service struct {
 	base      usage.PricingResolver
 	current   atomic.Value
 	refreshMu sync.Mutex
+
+	// changed is called after every successful write; see SetChangeNotifier.
+	changed func(context.Context)
+}
+
+// SetChangeNotifier installs fn, called after every successful write so other
+// gateway instances reload the overrides. Call it before serving.
+func (s *Service) SetChangeNotifier(fn func(context.Context)) {
+	if s != nil {
+		s.changed = fn
+	}
+}
+
+func (s *Service) notifyChanged(ctx context.Context) {
+	if s.changed != nil {
+		s.changed(ctx)
+	}
 }
 
 const refreshTimeout = 30 * time.Second
@@ -156,6 +173,7 @@ func (s *Service) Upsert(ctx context.Context, override Override) error {
 		}
 		return fmt.Errorf("refresh model pricing overrides: %w", err)
 	}
+	s.notifyChanged(ctx)
 	return nil
 }
 
@@ -194,6 +212,7 @@ func (s *Service) Delete(ctx context.Context, selector string) error {
 		}
 		return fmt.Errorf("refresh model pricing overrides: %w", err)
 	}
+	s.notifyChanged(ctx)
 	return nil
 }
 
@@ -251,6 +270,8 @@ func rollbackContext() (context.Context, context.CancelFunc) {
 func (s *Service) reconcileSnapshotAfterRollbackFailureLocked(operation string, refreshErr, rollbackErr error) error {
 	reconcileCtx, cancel := rollbackContext()
 	defer cancel()
+	// The store kept the write the rollback failed to undo.
+	defer s.notifyChanged(reconcileCtx)
 
 	if reconcileErr := s.refreshLocked(reconcileCtx); reconcileErr != nil {
 		slog.Warn(

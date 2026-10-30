@@ -246,28 +246,19 @@ func TestRouteResolver_ReportOutcomeNotBlockedByInit(t *testing.T) {
 // waitForBuild returns once a rebuild holds buildMu, i.e. is inside Init.
 func waitForBuild(t *testing.T, resolver *RouteResolver) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if !resolver.buildMu.TryLock() {
-			return
+	require.Eventually(t, func() bool {
+		if resolver.buildMu.TryLock() {
+			resolver.buildMu.Unlock()
+			return false
 		}
-		resolver.buildMu.Unlock()
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatal("no rebuild started")
+		return true
+	}, 2*time.Second, time.Millisecond, "no rebuild started")
 }
 
 // waitUntil polls cond for up to two seconds.
 func waitUntil(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %s", what)
+	require.Eventuallyf(t, cond, 2*time.Second, time.Millisecond, "timed out waiting for %s", what)
 }
 
 // Close during a rebuild waits for it and closes the instance it publishes;

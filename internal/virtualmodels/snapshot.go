@@ -75,6 +75,13 @@ type snapshot struct {
 	providerWide  map[string]VirtualModel
 	modelWide     map[string]VirtualModel
 	defaultEnable bool
+
+	// reasoningEffort reports whether any row forces a reasoning effort, and
+	// redirectReasoningEffort whether any redirect does. Without the first,
+	// effort resolution has nothing to find; without the second, routing need
+	// not record the route it takes.
+	reasoningEffort         bool
+	redirectReasoningEffort bool
 }
 
 func emptySnapshot(defaultEnable bool) snapshot {
@@ -121,6 +128,10 @@ func buildSnapshot(rows []VirtualModel, defaultEnable bool) (snapshot, error) {
 			}
 			next.order = append(next.order, normalized.Source)
 			next.bySource[normalized.Source] = normalized
+			if normalized.ReasoningEffort != "" {
+				next.reasoningEffort = true
+				next.redirectReasoningEffort = true
+			}
 			continue
 		}
 
@@ -129,6 +140,9 @@ func buildSnapshot(rows []VirtualModel, defaultEnable bool) (snapshot, error) {
 			return snapshot{}, fmt.Errorf("load virtual model %q: %w", row.Source, err)
 		}
 		next.bySource[normalized.Source] = normalized
+		if normalized.ReasoningEffort != "" {
+			next.reasoningEffort = true
+		}
 		switch scopeKindFor(normalized.Source, normalized.ProviderName, normalized.Model) {
 		case modelselectors.ScopeGlobal:
 			next.global = normalized
@@ -249,6 +263,26 @@ func (s *snapshot) matchingPolicy(providerName, model string) (VirtualModel, boo
 	}
 	if s.hasGlobal {
 		return s.global, true
+	}
+	return VirtualModel{}, false
+}
+
+// modelPolicy returns the most specific exact or model-wide policy for
+// providerName and model that sets a per-model value, as reported by sets, and
+// applies to userPath. Only those two scopes carry per-model values such as
+// slowdown and reasoning effort. Unlike matchingPolicy, it passes over a more
+// specific policy that does not set the value, so a provider-wide access rule
+// or an exact policy for another setting does not hide a model-wide value.
+func (s *snapshot) modelPolicy(providerName, model, userPath string, sets func(VirtualModel) bool) (VirtualModel, bool) {
+	if key := modelselectors.ExactMatchKey(providerName, model); key != "" {
+		if policy, ok := s.exact[key]; ok && sets(policy) && userPathAllowed(userPath, policy.UserPaths) {
+			return policy, true
+		}
+	}
+	if model != "" {
+		if policy, ok := s.modelWide[model]; ok && sets(policy) && userPathAllowed(userPath, policy.UserPaths) {
+			return policy, true
+		}
 	}
 	return VirtualModel{}, false
 }

@@ -298,6 +298,21 @@ func TestAdminSecretReferences_DashboardKeyCannotRepointHeldReferences(t *testin
 				rec = putAdmin(t, srv, carrier.path, secretRefDashboard, repoint("sk-literal"))
 				require.Equal(t, http.StatusOK, rec.Code, "a dashboard key repoints an entity without references: %s", rec.Body.String())
 				assert.NotEqual(t, destination, carrier.destination(t))
+
+				// A literal kept behind the mask is one the caller cannot read,
+				// so it pins the destination like a reference does.
+				rec = putAdmin(t, srv, carrier.path, secretRefMasterKey, carrier.body("sk-literal"))
+				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+				destination = carrier.destination(t)
+				rec = putAdmin(t, srv, carrier.path, secretRefDashboard, repoint(carrier.mask))
+				assert.Equal(t, http.StatusForbidden, rec.Code, "a dashboard key repoints behind the mask: %s", rec.Body.String())
+				assert.Contains(t, rec.Body.String(), "secret_reference_requires_master_key")
+				assert.NotContains(t, rec.Body.String(), "sk-literal", "the error never repeats the value")
+				assert.Equal(t, destination, carrier.destination(t), "a refused save leaves the stored entity unchanged")
+				assert.Equal(t, "sk-literal", carrier.stored(t))
+				rec = putAdmin(t, srv, carrier.path, secretRefDashboard, carrier.edit(carrier.mask))
+				require.Equal(t, http.StatusOK, rec.Code, "the mask still edits other fields: %s", rec.Body.String())
+				assert.Equal(t, "sk-literal", carrier.stored(t))
 			})
 		}
 	}

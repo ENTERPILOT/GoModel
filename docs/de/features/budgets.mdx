@@ -246,6 +246,84 @@ Nutzungswert zu erfinden. Verwenden Sie `GET /v1/usage` mit dem effektiven User-
 eines Kindes, um das aufgelöste Budget dieses Kindes einzusehen. Das Zurücksetzen der
 Vorlage startet für alle ihre Kinder einen neuen Zeitraum.
 
+## Budgets auf abgerechnete Kosten (GoModel Pro)
+
+<Info>
+  Budgets auf abgerechnete Kosten erfordern eine GoModel-Pro-Lizenz mit der
+  Berechtigung `billing` und `PRICING_MARKUPS_ENABLED=true`. Fehlt eines davon,
+  lehnt die Admin-API Schreibzugriffe mit `"cost_basis": "billed"` ab (403
+  `billed_budgets_not_entitled` bzw. 400 `billed_budgets_markups_disabled`, wenn
+  Aufschläge deaktiviert sind), und ein abgerechnetes Budget in der aktuellen
+  Konfiguration bricht den Start ab. Ein bereits gespeichertes abgerechnetes
+  Budget (im Dashboard angelegt oder aus einer früheren Konfiguration) blockiert
+  den Start nie: Solange Berechtigung oder Aufschläge fehlen, protokolliert
+  GoModel einmalig eine Warnung und setzt es auf Provider-Kosten durch, sodass
+  das Limit in Kraft bleibt. Es bleibt als abgerechnet gespeichert: Wenn Sie den
+  Betrag im Dashboard oder mit `"cost_basis": "billed"` ändern, bleibt es
+  abgerechnet, und sobald Berechtigung und Aufschläge zurück sind, begrenzt es
+  wieder abgerechnete Kosten.
+</Info>
+
+Standardmäßig begrenzt ein Budget die Provider-Kosten: was Sie upstream für
+nicht gecachte Requests bezahlen. Setzen Sie `cost_basis: billed`, um
+stattdessen zu begrenzen, was dem Aufrufer berechnet wird – Provider-Kosten plus
+[Aufschlag](/de/features/cost-tracking). Nutzen Sie das, wenn ein Budget das
+Kreditlimit eines Kunden ist.
+
+```yaml
+budgets:
+  labels:
+    - label: "customer-acme"
+      limits:
+        - period: "monthly"
+          amount: 500.00
+          cost_basis: "billed"
+```
+
+```bash
+curl -X PUT http://localhost:8080/admin/budgets \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope": "label",
+    "subject": "customer-acme",
+    "cost_basis": "billed",
+    "budget_key": { "period": "monthly" },
+    "amount": 500.00
+  }'
+```
+
+Ein abgerechnetes Budget:
+
+- summiert `billed_cost`, einschließlich abgerechneter Treffer im
+  Response-Cache. Mit `PRICING_BILL_CACHE_HITS=false` werden Cache-Treffer mit
+  `0` abgerechnet und zählen nicht.
+- zählt Nutzung ohne abgerechnete Kosten (erfasst, bevor Aufschläge aktiviert
+  wurden) mit ihren Provider-Kosten, sodass das Aktivieren von Aufschlägen
+  mitten in einer Periode nie zu wenig zählt.
+- greift auch bei Cache-Treffern: Solange Cache-Treffer abgerechnet werden,
+  lehnt ein ausgeschöpftes abgerechnetes User-Path- oder Label-Budget einen
+  Request ab, bevor eine gecachte Antwort ausgeliefert wird. Budgets auf
+  Provider-Kosten zählen Cache-Treffer nie, und Provider-Budgets gelten nicht
+  für sie, da ein Treffer an keinen Provider geht.
+- zählt bei einem Provider die abgerechneten Cache-Treffer seiner Modelle trotzdem
+  zu den Ausgaben. Setzen Sie `BUDGETS_PROVIDER_BILLED_CACHE_HITS=false`
+  (`budgets.provider_billed_cache_hits`), damit ein Provider-Budget nur die
+  abgerechneten Kosten für vom Provider bediente Requests zählt.
+
+`cost_basis` ist `provider` (Standard) oder `billed`. Es ist ein Attribut, kein
+Teil des Budget-Schlüssels: Scope, Subjekt und Periode bilden ein Budget auf
+einer der beiden Basen, und ein Wechsel der Basis behält die laufende Periode
+bei. Ein `PUT` ohne `cost_basis` setzt `provider`; bestehende Budgets begrenzen
+weiterhin Provider-Kosten. `GET /admin/budgets` und `GET /v1/usage` melden für
+jedes Budget die gespeicherte `cost_basis` und `enforced_cost_basis`, die Basis,
+auf der `spent` gemessen wird. Sie unterscheiden sich nur bei einem
+abgerechneten Budget, das auf Provider-Kosten durchgesetzt wird. Im Dashboard
+zeigt das Budget-Formular eine Auswahl **Kostenbasis**, sobald Berechtigung und
+Aufschläge aktiv sind, abgerechnete Budgets tragen einen Chip `abgerechnet`, und
+ein abgerechnetes Budget auf Provider-Kosten trägt den Chip
+`abgerechnet · auf Anbieterkosten`.
+
 ## Durchsetzung über Workflows
 
 Der aktive Workflow steuert, ob für einen Request Budget-Prüfungen laufen.

@@ -40,11 +40,21 @@ a HTTPS jest wymagany z wyjątkiem deweloperskich adresów loopback. Domyślnie
 wymagana jest co najmniej jedna grupa administratorów; ustaw
 `PRO_SSO_ALLOW_ALL_ADMINS=true` tylko dla celowo nieograniczonego klienta OIDC.
 
-<Warning>
-  Unieważnianie sesji SSO działa lokalnie w obrębie procesu. Wdrażaj SSO na
-  dokładnie jednej aktywnej replice GoModel Pro, dopóki nie będzie dostępny
-  współdzielony magazyn sesji lub unieważnień.
-</Warning>
+## Wylogowanie na wszystkich replikach
+
+Wylogowanie natychmiast unieważnia sesję na replice, która je obsłużyła, i
+zapisuje unieważnienie w skonfigurowanym backendzie storage. Każda replika
+odczytuje unieważnienia co 2 sekundy, więc przy storage PostgreSQL lub MongoDB
+wylogowana sesja przestaje działać na wszystkich replikach w ciągu kilku
+sekund. Unieważnienia przetrwają restart i są usuwane, gdy sesja i tak by
+wygasła.
+
+Z SQLite uruchamiaj jedną replikę: każda instancja SQLite ma własną bazę
+danych, więc inne repliki nigdy nie zobaczą unieważnienia, a ponownie użyte
+ciasteczko pozostaje tam ważne do wygaśnięcia. Jeśli backend storage jest
+niedostępny podczas wylogowania, unieważnienie i tak obowiązuje na replice,
+która je obsłużyła, zapisywane jest ostrzeżenie, a ta replika ponawia zapis,
+dopóki pozostałe repliki go nie zobaczą.
 
 ## Audyt i kontrola dostępu
 

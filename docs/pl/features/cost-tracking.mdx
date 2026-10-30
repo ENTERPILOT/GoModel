@@ -100,7 +100,7 @@ Nadpisania dotyczą nowych requestów. Aby ponownie wycenić requesty, które ju
 
 ## Narzuty i koszt rozliczeniowy
 
-Ustaw narzut, gdy odsprzedajesz dostęp do modeli, na przykład żeby refakturować klientom zużyte przez nich tokeny. GoModel zapisuje dla każdego requestu **koszt rozliczeniowy** (`billed_cost` w wierszu użycia): koszt providera plus narzut. Sam koszt providera nigdy się nie zmienia, więc budżety, sumy w dashboardzie i oszczędności nadal mierzą to, co płacisz upstream.
+Ustaw narzut, gdy odsprzedajesz dostęp do modeli, na przykład żeby refakturować klientom zużyte przez nich tokeny. GoModel zapisuje dla każdego requestu **koszt rozliczeniowy** (`billed_cost` w wierszu użycia): koszt providera plus narzut. Sam koszt providera nigdy się nie zmienia, więc budżety, sumy w dashboardzie i oszczędności nadal mierzą to, co płacisz upstream. W GoModel Pro budżet może zamiast tego ograniczać koszt rozliczeniowy; zobacz [Budżety](/pl/features/budgets).
 
 Narzuty są domyślnie wyłączone. Włącz je przez `markups_enabled: true` (env `PRICING_MARKUPS_ENABLED=true`), a następnie ustaw wartości procentowe w `config.yaml`. Gdy narzuty są włączone, ale żadna reguła nie pasuje do requestu, jego koszt rozliczeniowy jest równy kosztowi providera. Gdy są wyłączone, GoModel nie zapisuje kosztu rozliczeniowego i ignoruje `markups` oraz `bill_cache_hits`; jeśli `markups` jest ustawione, przy starcie loguje ostrzeżenie.
 
@@ -121,7 +121,35 @@ Wygrywa najbardziej szczegółowy selektor, w kolejności: provider/model, model
 
 Każdy wiersz użycia zapisuje też narzut, z jakim został rozliczony (`markup_percent`, `markup_selector`), więc zmiana narzutów nigdy nie przepisuje wcześniejszych rozliczeń.
 
-Gdy narzuty są włączone, strona użycia pokazuje koszt rozliczeniowy obok kosztu providera: kartę **Billed**, kolumnę w podziale według modelu, ścieżki użytkownika i labela oraz kolumnę w logu requestów, której podpowiedź podaje narzut każdego wiersza. API administracyjne zwraca go jako `total_billed_cost` w `/admin/usage/summary`, `billed_cost` w `/admin/usage/models`, `/admin/usage/user-paths` i `/admin/usage/labels` oraz `billed_cost`, `markup_percent` i `markup_selector` we wpisach `/admin/usage/log`. Sumy rozliczeniowe obejmują rozliczone cache hity, choć pozostałe koszty je pomijają, więc koszt rozliczeniowy według ścieżki użytkownika to kwota do obciążenia każdego klienta.
+Gdy narzuty są włączone, dashboard pokazuje koszt rozliczeniowy obok kosztu providera: kartę **Billed** na stronie przeglądu i stronie użycia, kolumnę w każdym podziale użycia (model, ścieżka użytkownika, label, typ requestu lub endpoint oraz sesja) oraz kolumnę w logu requestów, której podpowiedź podaje narzut każdego wiersza. API administracyjne zwraca go jako `total_billed_cost` w `/admin/usage/summary`, `billed_cost` w `/admin/usage/daily`, `/admin/usage/models`, `/admin/usage/user-paths`, `/admin/usage/labels`, `/admin/usage/endpoints` i `/admin/usage/sessions` oraz `billed_cost`, `markup_percent` i `markup_selector` we wpisach `/admin/usage/log`. Dzień rozliczony wyłącznie za cache hity nadal pojawia się w `/admin/usage/daily`, z zerową liczbą requestów. Sumy rozliczeniowe obejmują rozliczone cache hity, choć pozostałe koszty je pomijają, więc koszt rozliczeniowy według ścieżki użytkownika to kwota do obciążenia każdego klienta.
+
+### Narzuty dla klientów (GoModel Pro)
+
+<Info>
+  Narzuty dla klientów są dostępne w GoModel Pro i wymagają uprawnienia
+  licencyjnego `billing`. Bez niego `user_path_markups` przy włączonych
+  narzutach przerywa uruchamianie — GoModel nigdy po cichu nie rozlicza klienta
+  według stawki globalnej.
+</Info>
+
+Nadaj każdemu klientowi, identyfikowanemu przez poddrzewo [user path](/pl/features/user-path), własne narzuty w `user_path_markups`. Każda ścieżka przyjmuje te same selektory co `markups`:
+
+```yaml
+pricing:
+  markups_enabled: true
+  markups:
+    "/": 20             # wszyscy pozostali
+  user_path_markups:
+    /acme:
+      "/": 30           # /acme i wszystko poniżej
+      "openai/gpt-5": 15
+    /acme/internal:
+      "/": 0            # ruch wewnętrzny po kosztach
+```
+
+GoModel wybiera najgłębszą skonfigurowaną ścieżkę, która obejmuje user path żądania (`/acme` obejmuje `/acme/team`, ale nie `/acmecorp`), i stosuje w niej najbardziej szczegółowy selektor w zwykłej kolejności. Gdy ta ścieżka nie ma pasującego selektora, GoModel próbuje kolejnej, płytszej ścieżki, a potem `markups`. Narzuty nigdy się nie sumują. W powyższym przykładzie `/acme/internal/ci` jest rozliczane z narzutem 0%, `/acme/team` z 15% dla `openai/gpt-5` i 30% dla pozostałych modeli, a `/beta` z 20%.
+
+Domyślnie nic nie jest ustawione: bez `user_path_markups` dla wszystkich obowiązuje `markups`. Przy `markups_enabled: false` `user_path_markups` jest ignorowane tak jak `markups`, a GoModel zapisuje ostrzeżenie w logu przy uruchomieniu. Reguła z `user_path_markups` jest zapisywana w `markup_selector` jako `<user path>:<selector>`, na przykład `/acme:openai/gpt-5`, dzięki czemu log żądań pokazuje, która reguła klienta została rozliczona. User path jest normalizowany tak jak w żądaniach, więc `acme/` i `/acme` to ten sam klucz; `/` jest odrzucany, bo obejmuje go już `markups`.
 
 ## Sumy w dashboardzie
 
@@ -130,6 +158,14 @@ Gdy narzuty są włączone, strona użycia pokazuje koszt rozliczeniowy obok kos
 - **Billed** – widoczne, gdy narzuty są włączone: koszt providera plus narzut, łącznie z rozliczonymi cache hitami.
 
 Wartość `---` oznacza, że koszt jest nieznany, ponieważ cennik nie był dostępny – to nie to samo co `$0`.
+
+## Filtrowanie i zestawianie wydatków
+
+Strona użycia filtruje każdą kartę, wykres i log requestów według modelu, dostawcy, etykiety, klucza API, endpointu, ścieżki użytkownika i sesji. Każda lista przyjmuje kilka wartości: request spełnia filtr, gdy ma którąkolwiek z wybranych wartości, i musi spełniać każdy filtr. Wybór ścieżki użytkownika pokazuje znane ścieżki jako drzewo pogrupowane według prefiksu; wybrany węzeł obejmuje wszystko poniżej, a ścieżkę spoza listy można wpisać.
+
+Sekcja **Zestawienie** zestawia przefiltrowane użycie według dwóch wymiarów. Na przykład wiersze **Ścieżka użytkownika**, kolumny **Okres** i okres **Miesięcznie** pokazują koszt miesięcznie dla każdej ścieżki. Wybierz miarę (koszt, tokeny lub requesty); zostaje 10 największych wierszy i kolumn, a reszta trafia do **Pozostałe**. **Grupowanie ścieżek** łączy ścieżki po pierwszych segmentach, więc `/team/alice/laptop` liczy się jako `/team/alice`. Przełączaj między wykresem skumulowanym a tabelą, a przyciskiem **Pobierz CSV** wyeksportuj tabelę z sumami.
+
+Filtry, zakres dat i ustawienia zestawienia są zapisane w adresie strony, więc skopiowany link otwiera ten sam widok. Te same dane zwraca [`GET /admin/usage/breakdown`](/pl/advanced/admin-endpoints#get-adminusagebreakdown), a filtry działają na każdym endpoincie użycia poza `/admin/usage/throughput` (zobacz [Filtry wielowartościowe](/pl/advanced/admin-endpoints#filtry-wielowartościowe)).
 
 ## Przeliczanie zapisanych kosztów
 
@@ -143,3 +179,30 @@ Przeliczanie ponownie wycenia koszt rozliczeniowy z narzutem, z jakim rozliczono
   podaje, ile wierszy nadal nie ma cennika. Liczby tokenów nigdy nie są
   modyfikowane.
 </Warning>
+
+## Eksport faktur (GoModel Pro)
+
+<Info>
+  Eksport faktur wymaga licencji GoModel Pro z uprawnieniem `billing` oraz
+  włączonych narzutów (`PRICING_MARKUPS_ENABLED=true`). Bez uprawnienia
+  endpoint zwraca 403 `invoice_export_not_entitled`, a przy wyłączonych
+  narzutach 409 `markups_disabled`.
+</Info>
+
+`GET /admin/usage/invoice` eksportuje rozliczone użycie za okres, po jednym bloku na klienta. Każdy klient to ścieżka użytkownika; z `parent` każdy bezpośredni potomek tej ścieżki jest jednym klientem, tak jak liczą je [budżety dla każdego potomka](/pl/features/budgets). `parent=/customers` rozlicza więc `/customers/acme/app1` i `/customers/acme/app2` razem pod `/customers/acme`. Użycie zapisane bezpośrednio na ścieżce nadrzędnej zostaje przy niej. Bez `parent` każda ścieżka użytkownika jest osobnym klientem.
+
+Endpoint przyjmuje ten sam zakres dat i te same filtry co pozostałe endpointy użycia, a także `format=csv` (domyślnie, pobierany jako `gomodel-invoice-<start>-to-<end>.csv`) lub `format=json`. Na stronie użycia przycisk **Eksportuj fakturę** pobiera CSV dla wybranego zakresu dat i filtrów.
+
+```bash
+curl -OJ "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=2026-10-01&end_date=2026-10-31" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```csv
+row_type,period_start,period_end,currency,customer,model,provider,requests,input_tokens,output_tokens,provider_cost,billed_cost,effective_markup_percent
+item,2026-10-01,2026-10-31,USD,/customers/acme,gpt-5,openai,1200,950000,210000,3.2875,3.945,20
+subtotal,2026-10-01,2026-10-31,USD,/customers/acme,,,1200,950000,210000,3.2875,3.945,20
+total,2026-10-01,2026-10-31,USD,,,,1200,950000,210000,3.2875,3.945,20
+```
+
+Każda pozycja to jeden model na jednej instancji providera. `row_type` odróżnia pozycje (`item`) od sumy częściowej każdego klienta (`subtotal`) i sumy całkowitej (`total`), więc przed sumowaniem w arkuszu kalkulacyjnym zostaw tylko wiersze `item`. Kwoty to zwykłe liczby dziesiętne w USD; pusty koszt oznacza, że jest nieznany (brak cennika). Requesty, tokeny i koszt providera obejmują requesty wysłane do providerów; rozliczony koszt obejmuje też rozliczone cache hity odpowiedzi tak jak w pozostałych widokach rozliczeń. `effective_markup_percent` to stosunek rozliczonego kosztu do kosztu providera minus jeden, więc rozliczone cache hity go podnoszą.

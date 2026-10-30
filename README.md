@@ -11,6 +11,7 @@
   <a href="https://github.com/ENTERPILOT/GoModel/blob/main/go.mod"><img alt="GO Version" src="https://img.shields.io/github/go-mod/go-version/ENTERPILOT/GoModel?label=GO"></a>
   <a href="https://hub.docker.com/r/enterpilot/gomodel"><img alt="Docker Pulls" src="https://img.shields.io/docker/pulls/enterpilot/gomodel?label=Docker%20Pulls"></a>
   <a href="https://discord.gg/gaEB9BQSPH"><img alt="Discord" src="https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white"></a>
+  <a href="https://github.com/sponsors/ENTERPILOT"><img alt="Sponsor GoModel" src="https://img.shields.io/badge/Sponsor-%E2%9D%A4-EA4AAA?logo=githubsponsors&logoColor=white"></a>
 </p>
 
 <p align="center">
@@ -115,6 +116,7 @@ The official SDKs therefore work unchanged. Configure their base URLs as follows
 - DeepSeek
 - Groq
 - Fireworks AI
+- Together AI
 - Meta (Muse Spark)
 - OpenRouter
 - Z.ai
@@ -215,13 +217,20 @@ for the full list of settings.
 
 More in the documentation...
 
+Not ready for Pro? [Sponsor GoModel](https://github.com/sponsors/ENTERPILOT) to keep the open-source gateway moving.
+
 ## Roadmap
 
 See the [roadmap](https://gomodel.enterpilot.io/docs/about/roadmap?utm_source=readme) for GoModel Pro and the upcoming 0.2.0 release.
 
-## Sponsors
+## Featured Sponsors
 
 <a href="https://github.com/Neiko2002"><img src="https://github.com/Neiko2002.png" alt="Neiko2002" width="64"></a>
+<a href="https://github.com/ajboainain"><img src="https://github.com/ajboainain.png" alt="ajboainain" width="64"></a>
+
+**Goal: $1K/month** - [~15% achieved!](https://github.com/sponsors/ENTERPILOT)
+
+If GoModel saves you money or time, [become a sponsor](https://github.com/sponsors/ENTERPILOT) or try [GoModel Pro](https://gomodel.enterpilot.io/docs/pro/overview?utm_source=readme).
 
 ## Community
 

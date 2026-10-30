@@ -96,9 +96,17 @@ Failover jest podejmowany tylko wtedy, gdy próba zwróci:
   tacy jak OpenCode Zen, mogą zgłaszać przejściową awarię własnego upstreamu jako
   `400 "Upstream request failed"`)
 
-Dotyczy requestów `/v1/chat/completions`, `/v1/responses` i `/v1/messages`
-z translacją. Log requestów pokazuje każdą próbę, więc obsłużony failover jest
-widoczny w ścieżce audytu i wyceniany według modelu, który odpowiedział.
+Dotyczy requestów `/v1/chat/completions`, `/v1/responses`, `/v1/messages`
+i `/v1/embeddings` z translacją. Log requestów pokazuje każdą próbę, więc
+obsłużony failover jest widoczny w ścieżce audytu i wyceniany według modelu,
+który odpowiedział.
+
+Requesty embeddingów używają tego samego skonfigurowanego łańcucha failoveru oraz
+globalnych i workflow'owych mechanizmów kontroli; nie ma opcji specyficznej dla
+embeddingów. Kwalifikują się tylko cele o tym samym ID modelu co rozwiązany model
+podstawowy (provider może być inny). Failover embeddingów między różnymi modelami
+nie jest obsługiwany. Operatorzy nadal muszą zadbać o to, by providerzy obsługujący
+ten model zwracali kompatybilne wektory.
 
 Model docelowy, który jest wyłączony albo którego nie może używać klucz API
 lub `user_path` requestu, nigdy nie jest próbowany: jest pomijany zarówno przy wyborze

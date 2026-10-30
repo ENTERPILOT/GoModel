@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/pluginapi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -137,49 +139,53 @@ func TestRunPromptObservedReportsEachEditInOrder(t *testing.T) {
 }
 
 func TestRunReadersConcurrentAndMergeSeverity(t *testing.T) {
-	var inFlight, maxInFlight int32
-	reader := func(name string, d pluginapi.Decision) *Instance {
-		return newTestInstance(&fakePlugin{name: name, onPrompt: func(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
-			n := atomic.AddInt32(&inFlight, 1)
-			for {
-				current := atomic.LoadInt32(&maxInFlight)
-				if n <= current || atomic.CompareAndSwapInt32(&maxInFlight, current, n) {
-					break
+	// Inside the bubble every reader sleeps on the fake clock, so all three
+	// are in flight together before any of them returns.
+	synctest.Test(t, func(t *testing.T) {
+		var inFlight, maxInFlight int32
+		reader := func(name string, d pluginapi.Decision) *Instance {
+			return newTestInstance(&fakePlugin{name: name, onPrompt: func(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+				n := atomic.AddInt32(&inFlight, 1)
+				for {
+					current := atomic.LoadInt32(&maxInFlight)
+					if n <= current || atomic.CompareAndSwapInt32(&maxInFlight, current, n) {
+						break
+					}
 				}
-			}
-			time.Sleep(30 * time.Millisecond)
-			atomic.AddInt32(&inFlight, -1)
-			x.Values.Set(name, true)
-			x.Headers.Response.Add("X-"+name, "1")
-			return d, nil
+				time.Sleep(30 * time.Millisecond)
+				atomic.AddInt32(&inFlight, -1)
+				x.Values.Set(name, true)
+				x.Headers.Response.Add("X-"+name, "1")
+				return d, nil
+			}}, InstanceSpec{})
+		}
+		never := newTestInstance(&fakePlugin{name: "never", onPrompt: func(context.Context, *pluginapi.Exchange) (pluginapi.Decision, error) {
+			t.Error("step after a blocking step must not run")
+			return pluginapi.Allow(), nil
 		}}, InstanceSpec{})
-	}
-	never := newTestInstance(&fakePlugin{name: "never", onPrompt: func(context.Context, *pluginapi.Exchange) (pluginapi.Decision, error) {
-		t.Error("step after a blocking step must not run")
-		return pluginapi.Allow(), nil
-	}}, InstanceSpec{})
-	chain, err := BuildChain(pluginapi.KindPrompt, []Ref{
-		{reader("warn", pluginapi.Warn("w", "", nil)), 10},
-		{reader("respond", pluginapi.Respond("no")), 10},
-		{reader("block", pluginapi.Block(451, "policy", "blocked")), 10},
-		{never, 20},
+		chain, err := BuildChain(pluginapi.KindPrompt, []Ref{
+			{reader("warn", pluginapi.Warn("w", "", nil)), 10},
+			{reader("respond", pluginapi.Respond("no")), 10},
+			{reader("block", pluginapi.Block(451, "policy", "blocked")), 10},
+			{never, 20},
+		})
+		require.NoError(t, err)
+
+		x := withPromptText(newExchange(), "hi")
+		outcome, err := chain.RunPrompt(context.Background(), x)
+		require.NoError(t, err)
+		require.Equal(t, int32(3), atomic.LoadInt32(&maxInFlight), "readers did not run concurrently")
+		require.Equal(t, pluginapi.ActionBlock, outcome.Decision.Action)
+		require.Equal(t, 451, outcome.Decision.Status)
+		require.Equal(t, "block", outcome.Instance)
+
+		for _, name := range []string{"warn", "respond", "block"} {
+			_, ok := x.Values.Get(name)
+			require.True(t, ok, "value %s not merged back", name)
+			require.Equal(t, "1", x.Headers.Response.Get("X-"+name), "header X-%s not merged back", name)
+		}
+		require.Len(t, outcome.Records, 3)
 	})
-	require.NoError(t, err)
-
-	x := withPromptText(newExchange(), "hi")
-	outcome, err := chain.RunPrompt(context.Background(), x)
-	require.NoError(t, err)
-	require.GreaterOrEqual(t, atomic.LoadInt32(&maxInFlight), int32(2), "readers did not run concurrently (max in flight %d)", maxInFlight)
-	require.Equal(t, pluginapi.ActionBlock, outcome.Decision.Action)
-	require.Equal(t, 451, outcome.Decision.Status)
-	require.Equal(t, "block", outcome.Instance)
-
-	for _, name := range []string{"warn", "respond", "block"} {
-		_, ok := x.Values.Get(name)
-		require.True(t, ok, "value %s not merged back", name)
-		require.Equal(t, "1", x.Headers.Response.Get("X-"+name), "header X-%s not merged back", name)
-	}
-	require.Len(t, outcome.Records, 3)
 }
 
 func TestRunFailModesTimeoutsAndPanics(t *testing.T) {
@@ -299,30 +305,34 @@ func TestDecisionHelpers(t *testing.T) {
 }
 
 func TestRunReadersEditRequestHeadersConcurrently(t *testing.T) {
-	reader := func(name string, edit func(http.Header)) *Instance {
-		return newTestInstance(&fakePlugin{name: name, onPrompt: func(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
-			edit(x.Headers.Request)
-			time.Sleep(10 * time.Millisecond)
-			return pluginapi.Allow(), nil
-		}}, InstanceSpec{})
-	}
-	chain, err := BuildChain(pluginapi.KindPrompt, []Ref{
-		{reader("set", func(h http.Header) { h.Set("X-Team", "platform") }), 10},
-		{reader("remove", func(h http.Header) { h.Del("X-Debug") }), 10},
-		{reader("keep", func(h http.Header) { h.Set("X-Keep", h.Get("X-Keep")) }), 10},
-	})
-	require.NoError(t, err)
+	// Inside the bubble every reader edits before any returns, so the
+	// edits overlap for the race detector.
+	synctest.Test(t, func(t *testing.T) {
+		reader := func(name string, edit func(http.Header)) *Instance {
+			return newTestInstance(&fakePlugin{name: name, onPrompt: func(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+				edit(x.Headers.Request)
+				time.Sleep(10 * time.Millisecond)
+				return pluginapi.Allow(), nil
+			}}, InstanceSpec{})
+		}
+		chain, err := BuildChain(pluginapi.KindPrompt, []Ref{
+			{reader("set", func(h http.Header) { h.Set("X-Team", "platform") }), 10},
+			{reader("remove", func(h http.Header) { h.Del("X-Debug") }), 10},
+			{reader("keep", func(h http.Header) { h.Set("X-Keep", h.Get("X-Keep")) }), 10},
+		})
+		require.NoError(t, err)
 
-	x := withPromptText(newExchange(), "hi")
-	x.Headers.Request = http.Header{"X-Debug": {"1"}, "X-Keep": {"same"}}
-	_, err = chain.RunPrompt(context.Background(), x)
-	require.NoError(t, err)
-	got := x.Headers.Request.Get("X-Team")
-	require.Equal(t, "platform", got)
-	_, ok := x.Headers.Request["X-Debug"]
-	require.False(t, ok)
-	got = x.Headers.Request.Get("X-Keep")
-	require.Equal(t, "same", got)
+		x := withPromptText(newExchange(), "hi")
+		x.Headers.Request = http.Header{"X-Debug": {"1"}, "X-Keep": {"same"}}
+		_, err = chain.RunPrompt(context.Background(), x)
+		require.NoError(t, err)
+		got := x.Headers.Request.Get("X-Team")
+		require.Equal(t, "platform", got)
+		_, ok := x.Headers.Request["X-Debug"]
+		require.False(t, ok)
+		got = x.Headers.Request.Get("X-Keep")
+		require.Equal(t, "same", got)
+	})
 }
 
 // A mutator that outlives its timeout keeps writing the request's exchange.
@@ -360,6 +370,48 @@ func TestBlockErrorClampsStatus(t *testing.T) {
 	assert.Equal(t, 400, got.HTTPStatusCode())
 }
 
+// No provider is involved in a plugin decision, so plugin errors must not
+// claim the provider_error type or name a provider.
+func TestPluginErrorsUseInternalErrorType(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      *core.GatewayError
+		wantType core.ErrorType
+		wantCode string
+	}{
+		{
+			name:     "fail closed",
+			err:      FailureError(errFake),
+			wantType: core.ErrorTypeInternal,
+			wantCode: CodePluginFailure,
+		},
+		{
+			name:     "block with a 5xx status",
+			err:      BlockError(pluginapi.Block(0, "", ""), 502),
+			wantType: core.ErrorTypeInternal,
+			wantCode: CodeBlocked,
+		},
+		{
+			name:     "block with a 4xx status",
+			err:      BlockError(pluginapi.Block(0, "", ""), 400),
+			wantType: core.ErrorTypeInvalidRequest,
+			wantCode: CodeBlocked,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.wantType, tt.err.Type)
+			require.NotNil(t, tt.err.Code)
+			assert.Equal(t, tt.wantCode, *tt.err.Code)
+			assert.Empty(t, tt.err.Provider)
+			rendered, ok := tt.err.ToJSON()["error"].(map[string]any)
+			require.True(t, ok)
+			assert.NotContains(t, rendered, "provider", "rendered error names a provider")
+		})
+	}
+}
+
 // A step with one reader takes its own path, which skips the goroutine and
 // the per-reader slices. It must merge back exactly what the concurrent path
 // does: values, response headers, and request headers the reader set,
@@ -394,21 +446,26 @@ func TestRunSingleReaderMergesBackLikeTheConcurrentPath(t *testing.T) {
 // The single-reader path drops an abandoned reader's copy, like the
 // concurrent one: the hook is still writing it after the run returned.
 func TestRunSingleAbandonedReaderCopyIsDropped(t *testing.T) {
-	reader := &fakePlugin{name: "solo", onPrompt: stuckPrompt(100*time.Millisecond, func(x *pluginapi.Exchange) {
-		x.Values.Set("late", true)
-		x.Headers.Response.Add("X-Late", "1")
-	})}
-	chain, err := BuildChain(pluginapi.KindPrompt, []Ref{
-		{newTestInstance(reader, InstanceSpec{Timeout: 20 * time.Millisecond, FailMode: FailOpen}), 10},
+	synctest.Test(t, func(t *testing.T) {
+		const stuck = 100 * time.Millisecond
+		reader := &fakePlugin{name: "solo", onPrompt: stuckPrompt(stuck, func(x *pluginapi.Exchange) {
+			x.Values.Set("late", true)
+			x.Headers.Response.Add("X-Late", "1")
+		})}
+		chain, err := BuildChain(pluginapi.KindPrompt, []Ref{
+			{newTestInstance(reader, InstanceSpec{Timeout: 20 * time.Millisecond, FailMode: FailOpen}), 10},
+		})
+		require.NoError(t, err)
+
+		x := withPromptText(newExchange(), "x")
+		_, err = chain.RunPrompt(context.Background(), x)
+		require.NoError(t, err, "an abandoned reader fails open")
+
+		// Let the abandoned hook finish writing its copy.
+		time.Sleep(stuck)
+		synctest.Wait()
+		_, ok := x.Values.Get("late")
+		assert.False(t, ok, "the abandoned reader's copy must not merge back")
+		assert.Empty(t, x.Headers.Response.Get("X-Late"), "nor its response headers")
 	})
-	require.NoError(t, err)
-
-	x := withPromptText(newExchange(), "x")
-	_, err = chain.RunPrompt(context.Background(), x)
-	require.NoError(t, err, "an abandoned reader fails open")
-
-	time.Sleep(150 * time.Millisecond) // let the abandoned hook finish writing its copy
-	_, ok := x.Values.Get("late")
-	assert.False(t, ok, "the abandoned reader's copy must not merge back")
-	assert.Empty(t, x.Headers.Response.Get("X-Late"), "nor its response headers")
 }

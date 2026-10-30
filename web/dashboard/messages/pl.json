@@ -98,7 +98,6 @@
   "usage_filter_provider": "Filtruj według dostawcy",
   "usage_filter_label": "Filtruj według etykiety",
   "usage_filter_user_path": "Filtruj według User Path",
-  "usage_filter_user_path_placeholder": "User Path /team/alpha",
   "usage_filter_session": "Filtruj według ID sesji",
   "usage_filter_session_placeholder": "ID sesji",
   "usage_clear_session_filter": "Wyczyść filtr sesji {session}",
@@ -110,6 +109,36 @@
   "usage_filter_endpoint": "Filtruj według endpointu",
   "usage_all_endpoints": "Wszystkie endpointy",
   "usage_search_endpoints": "Szukaj endpointów",
+  "usage_search_models": "Szukaj modeli",
+  "usage_search_providers": "Szukaj dostawców",
+  "usage_search_labels": "Szukaj etykiet",
+  "usage_search_auth_keys": "Szukaj kluczy API",
+  "usage_all_user_paths": "Wszystkie ścieżki użytkownika",
+  "usage_search_user_paths": "Szukaj lub wpisz ścieżkę użytkownika",
+  "usage_expand_path": "Rozwiń {path}",
+  "usage_collapse_path": "Zwiń {path}",
+  "usage_user_path_subtree": "i niżej",
+  "usage_pivot_title": "Zestawienie",
+  "usage_pivot_loading": "Ładowanie zestawienia",
+  "usage_pivot_view": "Widok zestawienia",
+  "usage_pivot_download_csv": "Pobierz CSV",
+  "usage_invoice_export": "Eksportuj fakturę",
+  "usage_invoice_export_title": "Pobierz rozliczone użycie dla każdego klienta w wybranym okresie i z wybranymi filtrami jako fakturę CSV",
+  "usage_invoice_export_failed": "Nie udało się wyeksportować faktury.",
+  "usage_pivot_rows": "Wiersze",
+  "usage_pivot_columns": "Kolumny",
+  "usage_pivot_no_columns": "Brak",
+  "usage_pivot_metric": "Miara",
+  "usage_pivot_interval": "Okres",
+  "usage_pivot_depth": "Grupowanie ścieżek",
+  "usage_pivot_depth_full": "Pełna ścieżka",
+  "usage_pivot_depth_levels": "Pierwsze segmenty: {count}",
+  "usage_pivot_period": "Okres",
+  "usage_pivot_other": "Pozostałe ({count})",
+  "usage_pivot_none": "(brak)",
+  "usage_pivot_empty": "Brak użycia pasującego do filtrów w tym okresie.",
+  "usage_pivot_failed": "Nie udało się wczytać zestawienia.",
+  "usage_pivot_label_note": "Żądanie z kilkoma etykietami liczy się raz dla każdej etykiety, więc sumy etykiet mogą przekraczać sumę okresu.",
   "usage_cache_saved": "Oszczędność z cache",
   "usage_pro_saved": "Oszczędność Pro",
   "usage_loading_summary": "Wczytywanie podsumowania zużycia",
@@ -264,6 +293,16 @@
   "audit_summary_sessions": "Wyświetlanie {start}–{end} z {total} sesji",
   "audit_summary_logs": "Wyświetlanie {start}–{end} z {total} logów",
   "audit_group_by_session": "Grupuj według sesji",
+  "audit_columns_menu": "Kolumny",
+  "audit_columns_label": "Widoczne kolumny",
+  "audit_column_status": "Status i metoda",
+  "audit_column_model": "Model",
+  "audit_column_path": "Ścieżka",
+  "audit_column_labels": "Etykiety",
+  "audit_column_attempts": "Próby dostawców",
+  "audit_column_time": "Czas",
+  "audit_column_duration": "Czas trwania",
+  "audit_column_tokens_per_second": "Tokeny/s",
   "audit_loading": "Wczytywanie logów audytowych",
   "audit_search_placeholder": "Szukaj według ID Requestu, modelu, dostawcy, ścieżki, User Path lub błędu…",
   "audit_search_label": "Szukaj według ID Requestu, modelu, dostawcy, ścieżki, User Path lub błędu",
@@ -469,6 +508,7 @@
   "overview_none_healthy": "Żaden nie działa prawidłowo",
   "overview_automatic": "Automatycznie",
   "overview_last_error": "Ostatni błąd: {error}",
+  "overview_last_error_breaker_open": "{error} — circuit breaker otwarty",
   "overview_all_mcp_connected": "Wszystkie serwery MCP są połączone",
   "overview_cache_share": "Udział input tokens w wybranym okresie",
   "overview_no_usage": "Brak danych o zużyciu w wybranym okresie",
@@ -630,6 +670,13 @@
   "budgets_per_child_before_subject": "Zużycie jest śledzone niezależnie dla każdego bezpośredniego potomka ",
   "budgets_per_child_before_usage": ". Odpytaj ",
   "budgets_per_child_after_usage": " jako potomek, aby sprawdzić jego budżet.",
+  "budgets_cost_basis": "Podstawa kosztu",
+  "budgets_cost_basis_provider": "Koszt dostawcy",
+  "budgets_cost_basis_billed": "Koszt rozliczony",
+  "budgets_billed_badge": "rozliczany",
+  "budgets_billed_title": "Ogranicza koszt rozliczony: koszt dostawcy plus marża, łącznie z rozliczanymi trafieniami cache",
+  "budgets_billed_on_provider_badge": "rozliczany · na koszcie dostawcy",
+  "budgets_billed_on_provider_title": "Zapisany jako rozliczony, ale egzekwowany na koszcie dostawcy: budżety na koszcie rozliczonym wymagają licencji GoModel Pro z uprawnieniem billing i PRICING_MARKUPS_ENABLED=true. Edycja zachowuje go jako rozliczony.",
   "models_title": "Modele",
   "models_total_count": "Modele: {count}",
   "models_unavailable": "Funkcja modeli wirtualnych jest niedostępna.",
@@ -704,6 +751,9 @@
   "models_slowdown_field": "Spowolnienie (dodatkowy czas inferencji)",
   "models_off": "Wyłączone",
   "models_slowdown_help": "Dodaje część zmierzonego czasu inferencji: 0,5 dodaje 50%. Fragmenty streamingu są buforowane i zwalniane według spowolnionej osi czasu. Użyj 0, aby nadpisać odziedziczone spowolnienie, albo pozostaw puste, aby je dziedziczyć; aktywne wartości to 0,1–10.",
+  "models_reasoning_effort_field": "Nadpisanie reasoning effort",
+  "models_reasoning_effort_client": "Wartość klienta",
+  "models_reasoning_effort_help": "Każde żądanie wysyłane dalej przez ten model wirtualny lub do tego modelu otrzymuje ten reasoning effort, niezależnie od tego, o co prosił klient. Ustawienie modelu ma pierwszeństwo przed ustawieniem modelu wirtualnego, a wewnętrzny model wirtualny przed zewnętrznym.",
   "models_status_summary": "Domyślnie włączony: {default} · Obecnie aktywny: {effective}",
   "models_yes": "tak",
   "models_no": "nie",
@@ -1145,6 +1195,46 @@
   "sidebar_resize_help": "Przeciągnij, aby zmienić szerokość; kliknij, aby zwinąć lub rozwinąć",
   "sidebar_scoped_to": "Zakres: {path}",
   "sidebar_scoped_to_help": "Ten klucz API zarządza tylko ścieżką użytkownika {path} i jej potomkami.",
+  "sidebar_license_badge_title": "Licencja {badge} aktywna",
+  "sidebar_license_days_short": "{count} dn.",
+  "sidebar_license_days_over_short": "-{count} dn.",
+  "sidebar_license_trial_left": [
+    {
+      "declarations": ["input count", "input date", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "Okres próbny kończy się {date} - został {count} dzień",
+        "count_plural=few": "Okres próbny kończy się {date} - zostały {count} dni",
+        "count_plural=many": "Okres próbny kończy się {date} - zostało {count} dni",
+        "count_plural=*": "Okres próbny kończy się {date} - zostało {count} dnia"
+      }
+    }
+  ],
+  "sidebar_license_expires_in": [
+    {
+      "declarations": ["input count", "input date", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "Licencja wygasa {date} - został {count} dzień",
+        "count_plural=few": "Licencja wygasa {date} - zostały {count} dni",
+        "count_plural=many": "Licencja wygasa {date} - zostało {count} dni",
+        "count_plural=*": "Licencja wygasa {date} - zostało {count} dnia"
+      }
+    }
+  ],
+  "sidebar_license_grace": [
+    {
+      "declarations": ["input count", "input date", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "Licencja wygasła {date}. Okres karencji: został {count} dzień, potem funkcje Pro się wyłączą",
+        "count_plural=few": "Licencja wygasła {date}. Okres karencji: zostały {count} dni, potem funkcje Pro się wyłączą",
+        "count_plural=many": "Licencja wygasła {date}. Okres karencji: zostało {count} dni, potem funkcje Pro się wyłączą",
+        "count_plural=*": "Licencja wygasła {date}. Okres karencji: zostało {count} dnia, potem funkcje Pro się wyłączą"
+      }
+    }
+  ],
+  "sidebar_license_expired": "Licencja wygasła {date}",
   "access_scope_path_outside": "Ścieżka użytkownika musi być równa {root} lub znajdować się w poddrzewie {root}.",
   "theme_label": "Motyw",
   "theme_light": "Jasny motyw",
@@ -1252,7 +1342,18 @@
   "api_keys_effective_models_help": "Co Request z tym kluczem może faktycznie wywołać: polityki jego User Path, jego własne dozwolone modele i polityki po stronie modeli razem.",
   "api_keys_effective_all": "Wszystkie modele",
   "api_keys_effective_none": "Brak",
-  "api_keys_effective_count": "{count} modeli",
+  "api_keys_effective_count": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} model",
+        "count_plural=few": "{count} modele",
+        "count_plural=many": "{count} modeli",
+        "count_plural=*": "{count} modelu"
+      }
+    }
+  ],
   "api_keys_allowed_models_all": "Wszystkie",
   "api_keys_edit_allowed_models": "Edytuj dozwolone modele",
   "api_keys_allowed_models_editor": "Edytor dozwolonych modeli klucza API",
@@ -1283,7 +1384,18 @@
   "users_column_effective": "Efektywne modele",
   "users_effective_all": "Wszystkie modele",
   "users_effective_none": "Brak",
-  "users_effective_count": "{count} modeli",
+  "users_effective_count": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} model",
+        "count_plural=few": "{count} modele",
+        "count_plural=many": "{count} modeli",
+        "count_plural=*": "{count} modelu"
+      }
+    }
+  ],
   "users_effective_via": "przez {path}",
   "users_no_models_warning": "Żaden model nie pozostałby dostępny: nic z tej listy nie jest dozwolone przez grupy nadrzędne.",
   "users_column_keys": "Klucze API",
@@ -1478,6 +1590,10 @@
   "models_global_pricing": "globalne ceny modeli",
   "models_model_settings_for": "ustawienia modelu {name}",
   "models_provider_access_for": "dostęp dostawcy {name}",
+  "models_expand_provider_group": "Rozwiń {name}",
+  "models_collapse_provider_group": "Zwiń {name}",
+  "models_expand_all_groups": "Rozwiń wszystkie",
+  "models_collapse_all_groups": "Zwiń wszystkie",
   "models_global_access": "globalny dostęp do modeli",
   "models_remove_alias": "Usuń alias {name}",
   "models_removing_alias": "Usuwanie aliasu {name}",

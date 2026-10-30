@@ -219,6 +219,13 @@ func TestRefreshRuntime_SkipsDisabledVirtualModels(t *testing.T) {
 	mcpStep := runtimeRefreshStepByName(report.Steps, "mcp_servers")
 	require.NotNil(t, mcpStep, "mcp_servers step missing: %+v", report.Steps)
 	require.Equal(t, admin.RuntimeRefreshStatusSkipped, mcpStep.Status)
+
+	// So are budgets and rate limits.
+	for _, name := range []string{"budgets", "rate_limits"} {
+		step := runtimeRefreshStepByName(report.Steps, name)
+		require.NotNil(t, step, "%s step missing: %+v", name, report.Steps)
+		assert.Equal(t, admin.RuntimeRefreshStatusSkipped, step.Status, name)
+	}
 }
 
 func TestRefreshRuntime_ReturnsGatewayErrorWhenContextCanceledBeforeAcquire(t *testing.T) {
@@ -420,6 +427,49 @@ func TestDashboardRuntimeConfig_ExposesFailoverEnabled(t *testing.T) {
 	values := dashboardRuntimeConfig(cfg, false, false, false)
 	got := values.FailoverEnabled
 	require.Equal(t, "on", got, "dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigFailoverEnabled, got)
+}
+
+func TestSetDashboardLicense(t *testing.T) {
+	expires := time.Date(2026, 11, 15, 0, 0, 0, 0, time.FixedZone("CET", 3600))
+	tests := []struct {
+		name    string
+		license ext.License
+		want    admin.DashboardConfigResponse
+	}{
+		{
+			name: "trial in UTC",
+			license: ext.License{
+				Badge: "PRO", Trial: true, ExpiresAt: expires, ValidUntil: expires,
+				WarningWindow: 7 * 24 * time.Hour,
+			},
+			want: admin.DashboardConfigResponse{
+				LicenseBadge:       "PRO",
+				LicenseTrial:       "on",
+				LicenseExpiresAt:   "2026-11-14T23:00:00Z",
+				LicenseValidUntil:  "2026-11-14T23:00:00Z",
+				LicenseWarningDays: "7",
+			},
+		},
+		{
+			name: "windows round down to whole days",
+			license: ext.License{
+				Badge: "PRO", NoticeWindow: 21*24*time.Hour + 23*time.Hour, WarningWindow: 12 * time.Hour,
+			},
+			want: admin.DashboardConfigResponse{LicenseBadge: "PRO", LicenseNoticeDays: "21"},
+		},
+		{
+			name:    "no expiry leaves the times out",
+			license: ext.License{Badge: "PRO"},
+			want:    admin.DashboardConfigResponse{LicenseBadge: "PRO"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var values admin.DashboardConfigResponse
+			setDashboardLicense(&values, tt.license)
+			assert.Equal(t, tt.want, values)
+		})
+	}
 }
 
 func TestDashboardRuntimeConfig_ExposesDemoMode(t *testing.T) {

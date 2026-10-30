@@ -3,9 +3,12 @@ package app
 import (
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/admin"
 	"github.com/enterpilot/gomodel/internal/admin/dashboard"
 	"github.com/enterpilot/gomodel/internal/auditlog"
@@ -54,6 +57,13 @@ func (b *bootstrap) initAdmin() error {
 		adminRuntimeConfig := dashboardRuntimeConfig(appCfg, usageEnabledForDashboard, b.cfg.DemoMode, b.routeSelector != nil)
 		adminRuntimeConfig.VirtualModelStrategies = dashboardVirtualModelStrategies(b.routeSelector != nil, plugins.RoutePluginNames(app.pluginCatalog))
 		adminRuntimeConfig.QuotaTemplatesEnabled = dashboardEnabledValue(b.quotaTemplatesEnabled)
+		adminRuntimeConfig.InvoiceExportEnabled = dashboardEnabledValue(b.invoiceExportEnabled)
+		adminRuntimeConfig.BilledBudgetsEnabled = dashboardEnabledValue(b.billedBudgetsEnabled)
+		if b.cfg.Extensions != nil {
+			if license, ok := b.cfg.Extensions.License(); ok {
+				setDashboardLicense(&adminRuntimeConfig, license)
+			}
+		}
 		adminHandler, dashHandler, auditReader, adminErr := newAdminHandlers(
 			b.usageReader,
 			app.storage,
@@ -76,6 +86,8 @@ func (b *bootstrap) initAdmin() error {
 			app,
 			adminRuntimeConfig,
 			b.quotaTemplatesEnabled,
+			b.invoiceExportEnabled,
+			b.billedBudgetsEnabled,
 			app.live,
 			b.requestHealth,
 			usagePricingRecalculationConfigured(appCfg),
@@ -97,7 +109,7 @@ func (b *bootstrap) initAdmin() error {
 			if adminCfg.UIEnabled && dashHandler != nil {
 				serverCfg.AdminUIEnabled = true
 				serverCfg.DashboardHandler = dashHandler
-				slog.Info("admin UI enabled", "url", fmt.Sprintf("http://localhost:%s%s", appCfg.Server.Port, config.JoinBasePath(appCfg.Server.BasePath, "/admin/dashboard")))
+				slog.Info("admin UI enabled", "url", fmt.Sprintf("%s://localhost:%s%s", appCfg.Server.Scheme(), appCfg.Server.Port, config.JoinBasePath(appCfg.Server.BasePath, "/admin/dashboard")))
 			}
 		}
 	} else {
@@ -143,6 +155,8 @@ func newAdminHandlers(
 	runtimeRefresher admin.RuntimeRefresher,
 	runtimeConfig admin.DashboardConfigResponse,
 	quotaTemplatesEnabled bool,
+	invoiceExportEnabled bool,
+	billedBudgetsEnabled bool,
 	liveBroker *live.Broker,
 	requestHealth admin.RequestHealthSource,
 	usagePricingRecalculationEnabled bool,
@@ -206,6 +220,8 @@ func newAdminHandlers(
 		admin.WithBudgets(budgetService),
 		admin.WithRateLimits(rateLimitService),
 		admin.WithQuotaTemplatesEnabled(quotaTemplatesEnabled),
+		admin.WithInvoiceExportEnabled(invoiceExportEnabled),
+		admin.WithBilledBudgetsEnabled(billedBudgetsEnabled),
 		admin.WithTagging(taggingService),
 		admin.WithRuntimeSettings(runtimeSettingsService),
 		mcpOption,
@@ -254,6 +270,37 @@ func dashboardRuntimeConfig(cfg *config.Config, usageEnabled, demoMode, adaptive
 		VirtualModelStrategies: dashboardVirtualModelStrategies(adaptiveRouting, nil),
 		UserPathHeader:         dashboardUserPathHeader(cfg),
 	}
+}
+
+// setDashboardLicense copies the license a distribution registered into the
+// dashboard config. A zero time or window is left out: no countdown, or no
+// notice or warning before the end.
+func setDashboardLicense(values *admin.DashboardConfigResponse, license ext.License) {
+	values.LicenseBadge = license.Badge
+	if license.Trial {
+		values.LicenseTrial = "on"
+	}
+	values.LicenseExpiresAt = dashboardTime(license.ExpiresAt)
+	values.LicenseValidUntil = dashboardTime(license.ValidUntil)
+	values.LicenseNoticeDays = dashboardDays(license.NoticeWindow)
+	values.LicenseWarningDays = dashboardDays(license.WarningWindow)
+}
+
+// dashboardDays is a window in whole days, rounded down, since the dashboard
+// counts days; "" for a window shorter than a day.
+func dashboardDays(window time.Duration) string {
+	days := int64(window / (24 * time.Hour))
+	if days <= 0 {
+		return ""
+	}
+	return strconv.FormatInt(days, 10)
+}
+
+func dashboardTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 // dashboardMCPToolDiscovery is the default MCP tool discovery mode. Loaded

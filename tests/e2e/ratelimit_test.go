@@ -101,7 +101,9 @@ func TestRateLimitTokenEnforcement_E2E(t *testing.T) {
 	require.NoError(t, err)
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { db.Close() })
-	usageStore, err := usage.NewSQLiteStore(db, 0)
+	usageDB, err := sqlx.NewSQLite(db)
+	require.NoError(t, err)
+	usageStore, err := usage.NewSQLStore(context.Background(), usageDB, 0)
 	require.NoError(t, err)
 	usageCfg := usage.DefaultConfig()
 	usageCfg.Enabled = true
