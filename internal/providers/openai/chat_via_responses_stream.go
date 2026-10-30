@@ -297,6 +297,11 @@ func (s *responsesChatStream) handle(data []byte) {
 		s.reasoningItem = event.ItemID
 		s.emit(map[string]any{"reasoning_content": event.Delta}, nil, nil)
 	case "response.reasoning_text.delta":
+		// Empty raw deltas carry no reasoning; skip them the same way
+		// the summary handler does.
+		if event.Delta == "" {
+			return
+		}
 		s.emit(map[string]any{"reasoning_content": event.Delta}, nil, nil)
 	case "response.refusal.delta":
 		s.emit(map[string]any{"refusal": event.Delta}, nil, nil)

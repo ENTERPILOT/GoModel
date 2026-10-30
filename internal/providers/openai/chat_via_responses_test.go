@@ -712,6 +712,8 @@ func TestResponsesChatStream_ReasoningDeltas_EmptyDeltas(t *testing.T) {
 		`{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","summary_index":1,"delta":"b"}`,
 		`{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","summary_index":1,"delta":""}`,
 		`{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","summary_index":2,"delta":"c"}`,
+		`{"type":"response.reasoning_text.delta","item_id":"rs_1","delta":""}`,
+		`{"type":"response.reasoning_text.delta","item_id":"rs_1","delta":" raw"}`,
 		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[]}}`,
 	)
 	chunks, _, err := readChatChunks(t, newResponsesChatStream(io.NopCloser(strings.NewReader(upstream)), "openai", "gpt-6-astra", false))
@@ -724,7 +726,33 @@ func TestResponsesChatStream_ReasoningDeltas_EmptyDeltas(t *testing.T) {
 			reasoning += r
 		}
 	}
-	assert.Equal(t, "b\n\nc", reasoning)
+	assert.Equal(t, "b\n\nc raw", reasoning)
+}
+
+// A client that echoes an assistant message carrying reasoning_content back
+// must still translate: reasoning_content is this converter's own output, so
+// it is dropped on the way upstream like extra_content, not treated as a
+// chat-only field.
+func TestChatToResponsesRequest_DropsEchoedReasoningContent(t *testing.T) {
+	msg := core.Message{
+		Role:    "assistant",
+		Content: "The answer is 391.",
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			"reasoning_content": json.RawMessage(`"Let me compute: 17 * 23."`),
+		}),
+	}
+	input, err := responsesInput([]core.Message{
+		{Role: "user", Content: "What is 17 * 23?"},
+		msg,
+		{Role: "user", Content: "Thanks. And 18 * 23?"},
+	})
+	require.NoError(t, err)
+	// Assistant turn survives with its text; the reasoning field is gone.
+	assert.Len(t, input, 3)
+	assistant, ok := input[1].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "assistant", assistant["role"])
+	assert.NotContains(t, assistant, "reasoning_content")
 }
 
 // A request that asks for reasoning must also ask for the summary: the
