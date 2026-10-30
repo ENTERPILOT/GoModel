@@ -117,6 +117,24 @@ func TestInternalDecisions_RoutesImagesToModelsThatReadThem(t *testing.T) {
 }
 
 // A model the caller may not use is refused.
+// Internal decisions mark Azure's System One models as the HTTP route does.
+func TestInternalDecisions_MarksAzureSystemOneModels(t *testing.T) {
+	provider := newScriptedDecisionsProvider(map[string]string{
+		"azure/ms-decision-1": "azure",
+		"azure/gpt-6-luna":    "azure",
+	}, "azure")
+	provider.catalog = map[string]core.Model{
+		"azure/gpt-6-luna": {ID: "gpt-6-luna", Metadata: &core.ModelMetadata{Modes: []string{"chat", "responses"}}},
+	}
+	executor := NewInternalDecisionsExecutor(provider, InternalChatCompletionExecutorConfig{})
+
+	for _, model := range []string{"azure/ms-decision-1", "azure/gpt-6-luna"} {
+		_, err := executor.Decide(pluginContext(), []byte(decisionBody(model)))
+		require.NoError(t, err, model)
+	}
+	assert.Equal(t, []string{core.DecisionsSystemOneEndpoint, "decisions"}, provider.endpoints)
+}
+
 func TestInternalDecisions_ChecksModelAccess(t *testing.T) {
 	provider := newDecisionsTestProvider()
 	executor := NewInternalDecisionsExecutor(provider, InternalChatCompletionExecutorConfig{

@@ -937,26 +937,42 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by exact model name",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact model names; repeat or comma-separate for several",
                         "name": "model",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by provider name or provider type",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by provider names or types; repeat or comma-separate for several",
                         "name": "provider",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by request label (exact match)",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by request labels (exact match); repeat for several",
                         "name": "label",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact request endpoints, e.g. /v1/chat/completions,/v1/messages; repeat or comma-separate for several",
                         "name": "endpoint",
                         "in": "query"
                     },
@@ -973,14 +989,22 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by exact managed auth key ID",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by managed auth key IDs; repeat or comma-separate for several",
                         "name": "auth_key_id",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by tracked user path subtree",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by tracked user path subtrees; repeat for several",
                         "name": "user_path",
                         "in": "query"
                     },
@@ -2432,6 +2456,184 @@ const docTemplate = `{
                 ]
             }
         },
+        "/admin/usage/breakdown": {
+            "get": {
+                "description": "Pivots the filtered usage by a row and an optional column dimension. Keys rank by the metric; those past limit fold into a trailing \"other\" key. Period keys follow interval and are never folded. A request with several labels counts once per label.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get a two-dimension usage breakdown",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Row dimension: model, provider, user_path, label, endpoint, auth_key, period",
+                        "name": "rows",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Column dimension (same values, different from rows); omit or none for one column",
+                        "name": "columns",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Ranking metric for the top-N cut: cost, tokens, requests (default cost)",
+                        "name": "metric",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Keys kept per dimension before the rest fold into other (default 10, max 50)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Group user paths by their first N segments (0 keeps full paths, max 16)",
+                        "name": "user_path_depth",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Number of days (default 30)",
+                        "name": "days",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date (YYYY-MM-DD)",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date (YYYY-MM-DD)",
+                        "name": "end_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Period grouping: daily, weekly, monthly, yearly (default daily)",
+                        "name": "interval",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact model names; repeat or comma-separate for several",
+                        "name": "model",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by provider names or types; repeat or comma-separate for several",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by request labels (exact match); repeat for several",
+                        "name": "label",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact request endpoints, e.g. /v1/chat/completions,/v1/messages; repeat or comma-separate for several",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact detected session ID",
+                        "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by managed auth key IDs; repeat or comma-separate for several",
+                        "name": "auth_key_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by tracked user path subtrees; repeat for several",
+                        "name": "user_path",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Cache mode filter: uncached, cached, all (default uncached)",
+                        "name": "cache_mode",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/usage.UsageBreakdown"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/admin/usage/daily": {
             "get": {
                 "produces": [
@@ -2467,26 +2669,42 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by exact model name",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact model names; repeat or comma-separate for several",
                         "name": "model",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by provider name or provider type",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by provider names or types; repeat or comma-separate for several",
                         "name": "provider",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by request label (exact match)",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by request labels (exact match); repeat for several",
                         "name": "label",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact request endpoints, e.g. /v1/chat/completions,/v1/messages; repeat or comma-separate for several",
                         "name": "endpoint",
                         "in": "query"
                     },
@@ -2503,14 +2721,22 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by exact managed auth key ID",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by managed auth key IDs; repeat or comma-separate for several",
                         "name": "auth_key_id",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by tracked user path subtree",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by tracked user path subtrees; repeat for several",
                         "name": "user_path",
                         "in": "query"
                     },
@@ -2587,26 +2813,42 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by exact model name",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact model names; repeat or comma-separate for several",
                         "name": "model",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by provider name or provider type",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by provider names or types; repeat or comma-separate for several",
                         "name": "provider",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by request label (exact match)",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by request labels (exact match); repeat for several",
                         "name": "label",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact request endpoints, e.g. /v1/chat/completions,/v1/messages; repeat or comma-separate for several",
                         "name": "endpoint",
                         "in": "query"
                     },
@@ -2623,14 +2865,22 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by exact managed auth key ID",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by managed auth key IDs; repeat or comma-separate for several",
                         "name": "auth_key_id",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by tracked user path subtree",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by tracked user path subtrees; repeat for several",
                         "name": "user_path",
                         "in": "query"
                     },
@@ -2677,6 +2927,160 @@ const docTemplate = `{
                 ]
             }
         },
+        "/admin/usage/invoice": {
+            "get": {
+                "description": "Returns billed usage for the period, one block of model/provider line items per customer user path, with subtotals and a grand total. Amounts are USD. With parent, each direct child of that user path is one customer (usage on the parent itself stays under the parent); without it every user path is its own customer. Requests, tokens and provider cost cover provider-served requests; billed cost also includes billed response-cache hits. CSV rows carry row_type item, subtotal or total. Requires a GoModel Pro license with the billing entitlement and pricing.markups_enabled.",
+                "produces": [
+                    "text/csv",
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Export billed usage as per-customer invoices",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Export format: csv (default, as an attachment) or json",
+                        "name": "format",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bill each direct child of this user path as one customer, e.g. /customers",
+                        "name": "parent",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Number of days (default 30)",
+                        "name": "days",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date (YYYY-MM-DD)",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date (YYYY-MM-DD)",
+                        "name": "end_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact model names; repeat or comma-separate for several",
+                        "name": "model",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by provider names or types; repeat or comma-separate for several",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by request labels (exact match); repeat for several",
+                        "name": "label",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact request endpoints, e.g. /v1/chat/completions,/v1/messages; repeat or comma-separate for several",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact detected session ID",
+                        "name": "session_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by managed auth key IDs; repeat or comma-separate for several",
+                        "name": "auth_key_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by tracked user path subtrees; repeat for several",
+                        "name": "user_path",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/usage.Invoice"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/admin/usage/labels": {
             "get": {
                 "description": "Returns per-label token and cost aggregates. Requests carrying\nseveral labels count once per label, so rows overlap and do\nnot sum to the period totals. Unlabelled requests are omitted.",
@@ -2707,26 +3111,42 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by exact model name",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact model names; repeat or comma-separate for several",
                         "name": "model",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by provider name or provider type",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by provider names or types; repeat or comma-separate for several",
                         "name": "provider",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by request label (exact match)",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by request labels (exact match); repeat for several",
                         "name": "label",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact request endpoints, e.g. /v1/chat/completions,/v1/messages; repeat or comma-separate for several",
                         "name": "endpoint",
                         "in": "query"
                     },
@@ -2743,14 +3163,22 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by exact managed auth key ID",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by managed auth key IDs; repeat or comma-separate for several",
                         "name": "auth_key_id",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by tracked user path subtree",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by tracked user path subtrees; repeat for several",
                         "name": "user_path",
                         "in": "query"
                     },
@@ -2826,26 +3254,42 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by exact model name",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact model names; repeat or comma-separate for several",
                         "name": "model",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by provider name or provider type",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by provider names or types; repeat or comma-separate for several",
                         "name": "provider",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by request label (exact match)",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by request labels (exact match); repeat for several",
                         "name": "label",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact request endpoints, e.g. /v1/chat/completions,/v1/messages; repeat or comma-separate for several",
                         "name": "endpoint",
                         "in": "query"
                     },
@@ -2856,8 +3300,12 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by tracked user path subtree",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by tracked user path subtrees; repeat for several",
                         "name": "user_path",
                         "in": "query"
                     },
@@ -2874,8 +3322,12 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by exact managed auth key ID",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by managed auth key IDs; repeat or comma-separate for several",
                         "name": "auth_key_id",
                         "in": "query"
                     },
@@ -2960,26 +3412,42 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by exact model name",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact model names; repeat or comma-separate for several",
                         "name": "model",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by provider name or provider type",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by provider names or types; repeat or comma-separate for several",
                         "name": "provider",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by request label (exact match)",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by request labels (exact match); repeat for several",
                         "name": "label",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact request endpoints, e.g. /v1/chat/completions,/v1/messages; repeat or comma-separate for several",
                         "name": "endpoint",
                         "in": "query"
                     },
@@ -2996,14 +3464,22 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by exact managed auth key ID",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by managed auth key IDs; repeat or comma-separate for several",
                         "name": "auth_key_id",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by tracked user path subtree",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by tracked user path subtrees; repeat for several",
                         "name": "user_path",
                         "in": "query"
                     },
@@ -3148,26 +3624,42 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by exact model name",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact model names; repeat or comma-separate for several",
                         "name": "model",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by provider name or provider type",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by provider names or types; repeat or comma-separate for several",
                         "name": "provider",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by request label (exact match)",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by request labels (exact match); repeat for several",
                         "name": "label",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact request endpoints, e.g. /v1/chat/completions,/v1/messages; repeat or comma-separate for several",
                         "name": "endpoint",
                         "in": "query"
                     },
@@ -3184,14 +3676,22 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by exact managed auth key ID",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by managed auth key IDs; repeat or comma-separate for several",
                         "name": "auth_key_id",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by tracked user path subtree",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by tracked user path subtrees; repeat for several",
                         "name": "user_path",
                         "in": "query"
                     },
@@ -3270,26 +3770,42 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by exact model name",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact model names; repeat or comma-separate for several",
                         "name": "model",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by provider name or provider type",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by provider names or types; repeat or comma-separate for several",
                         "name": "provider",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by request label (exact match)",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by request labels (exact match); repeat for several",
                         "name": "label",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact request endpoints, e.g. /v1/chat/completions,/v1/messages; repeat or comma-separate for several",
                         "name": "endpoint",
                         "in": "query"
                     },
@@ -3306,14 +3822,22 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by exact managed auth key ID",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by managed auth key IDs; repeat or comma-separate for several",
                         "name": "auth_key_id",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by tracked user path subtree",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by tracked user path subtrees; repeat for several",
                         "name": "user_path",
                         "in": "query"
                     },
@@ -3438,26 +3962,42 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by exact model name",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact model names; repeat or comma-separate for several",
                         "name": "model",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by provider name or provider type",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by provider names or types; repeat or comma-separate for several",
                         "name": "provider",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by request label (exact match)",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by request labels (exact match); repeat for several",
                         "name": "label",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by comma-separated exact request endpoints, e.g. /v1/chat/completions,/v1/messages",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact request endpoints, e.g. /v1/chat/completions,/v1/messages; repeat or comma-separate for several",
                         "name": "endpoint",
                         "in": "query"
                     },
@@ -3474,14 +4014,22 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by exact managed auth key ID",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by managed auth key IDs; repeat or comma-separate for several",
                         "name": "auth_key_id",
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by tracked user path subtree",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by tracked user path subtrees; repeat for several",
                         "name": "user_path",
                         "in": "query"
                     },
@@ -8343,6 +8891,10 @@ const docTemplate = `{
         "admin.DashboardConfigResponse": {
             "type": "object",
             "properties": {
+                "BILLED_BUDGETS_ENABLED": {
+                    "description": "BilledBudgetsEnabled reports the billed_budgets capability, so the\ndashboard offers budgets on billed cost only where they are accepted.",
+                    "type": "string"
+                },
                 "BUDGETS_ENABLED": {
                     "type": "string"
                 },
@@ -8359,6 +8911,28 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "GUARDRAILS_ENABLED": {
+                    "type": "string"
+                },
+                "INVOICE_EXPORT_ENABLED": {
+                    "type": "string"
+                },
+                "LICENSE_BADGE": {
+                    "description": "The license a distribution registered (ext.License), so the sidebar\nshows its badge and the days left. Times are RFC 3339 in UTC, windows\nwhole days; all are empty for open-source builds.",
+                    "type": "string"
+                },
+                "LICENSE_EXPIRES_AT": {
+                    "type": "string"
+                },
+                "LICENSE_NOTICE_DAYS": {
+                    "type": "string"
+                },
+                "LICENSE_TRIAL": {
+                    "type": "string"
+                },
+                "LICENSE_VALID_UNTIL": {
+                    "type": "string"
+                },
+                "LICENSE_WARNING_DAYS": {
                     "type": "string"
                 },
                 "LOGGING_ENABLED": {
@@ -8381,7 +8955,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "PRICING_MARKUPS_ENABLED": {
-                    "description": "PricingMarkups is \"on\" when pricing.markups declares at least one rule,\nso the dashboard shows billed cost only where it differs from cost.",
+                    "description": "PricingMarkups mirrors pricing.markups_enabled, so the dashboard shows\nbilled cost only when the markup feature is on.",
                     "type": "string"
                 },
                 "RATE_LIMITS_ENABLED": {
@@ -8618,11 +9192,26 @@ const docTemplate = `{
                 "amount": {
                     "type": "number"
                 },
+                "cost_basis": {
+                    "type": "string",
+                    "enum": [
+                        "provider",
+                        "billed"
+                    ]
+                },
                 "created_at": {
                     "type": "string"
                 },
                 "effective_subject": {
                     "type": "string"
+                },
+                "enforced_cost_basis": {
+                    "description": "EnforcedCostBasis names the spend Spent measures. It is provider for a\nbilled budget while billed budgets are unavailable (no billing\nentitlement or markups disabled); cost_basis keeps the stored basis.",
+                    "type": "string",
+                    "enum": [
+                        "provider",
+                        "billed"
+                    ]
                 },
                 "has_usage": {
                     "type": "boolean"
@@ -9253,6 +9842,14 @@ const docTemplate = `{
                 "budget_key": {
                     "$ref": "#/definitions/admin.budgetKeyRequest"
                 },
+                "cost_basis": {
+                    "description": "CostBasis selects the spend the amount limits: provider (default) or\nbilled (provider cost plus markup, including billed cache hits). billed\nrequires PRICING_MARKUPS_ENABLED and a GoModel Pro license with the\nbilling entitlement.",
+                    "type": "string",
+                    "enum": [
+                        "provider",
+                        "billed"
+                    ]
+                },
                 "per_child": {
                     "type": "boolean"
                 },
@@ -9460,6 +10057,10 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "old_source": {
+                    "type": "string"
+                },
+                "reasoning_effort": {
+                    "description": "ReasoningEffort forces the reasoning effort sent upstream (\"none\",\n\"minimal\", \"low\", \"medium\", \"high\", \"xhigh\", or \"max\"); empty keeps the\nclient's value.",
                     "type": "string"
                 },
                 "session_affinity": {
@@ -12490,6 +13091,22 @@ const docTemplate = `{
                 "amount": {
                     "type": "number"
                 },
+                "cost_basis": {
+                    "description": "CostBasis is the budget's configured basis: provider cost or billed\ncost.",
+                    "type": "string",
+                    "enum": [
+                        "provider",
+                        "billed"
+                    ]
+                },
+                "enforced_cost_basis": {
+                    "description": "EnforcedCostBasis names the spend Spent and Amount measure. It is\nprovider for a billed budget while billed budgets are unavailable.",
+                    "type": "string",
+                    "enum": [
+                        "provider",
+                        "billed"
+                    ]
+                },
                 "exceeded": {
                     "type": "boolean"
                 },
@@ -12696,6 +13313,87 @@ const docTemplate = `{
                 }
             }
         },
+        "usage.BreakdownCell": {
+            "type": "object",
+            "properties": {
+                "billed_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "column": {
+                    "type": "integer"
+                },
+                "input_tokens": {
+                    "type": "integer"
+                },
+                "output_tokens": {
+                    "type": "integer"
+                },
+                "requests": {
+                    "type": "integer"
+                },
+                "row": {
+                    "type": "integer"
+                },
+                "total_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "total_tokens": {
+                    "type": "integer"
+                }
+            }
+        },
+        "usage.BreakdownDimension": {
+            "type": "string",
+            "enum": [
+                "",
+                "model",
+                "provider",
+                "user_path",
+                "label",
+                "endpoint",
+                "auth_key",
+                "period"
+            ],
+            "x-enum-varnames": [
+                "BreakdownNone",
+                "BreakdownModel",
+                "BreakdownProvider",
+                "BreakdownUserPath",
+                "BreakdownLabel",
+                "BreakdownEndpoint",
+                "BreakdownAuthKey",
+                "BreakdownPeriod"
+            ]
+        },
+        "usage.BreakdownKey": {
+            "type": "object",
+            "properties": {
+                "folded": {
+                    "type": "integer"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "other": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "usage.BreakdownMetric": {
+            "type": "string",
+            "enum": [
+                "cost",
+                "tokens",
+                "requests"
+            ],
+            "x-enum-varnames": [
+                "BreakdownMetricCost",
+                "BreakdownMetricTokens",
+                "BreakdownMetricRequests"
+            ]
+        },
         "usage.CacheOverview": {
             "type": "object",
             "properties": {
@@ -12768,6 +13466,11 @@ const docTemplate = `{
         "usage.DailyUsage": {
             "type": "object",
             "properties": {
+                "billed_cost": {
+                    "description": "BilledCost includes the period's billed response-cache hits in every\ncache mode, so a period served only from the cache can appear with no\nrequests.",
+                    "type": "number",
+                    "x-nullable": true
+                },
                 "cache_write_input_tokens": {
                     "type": "integer"
                 },
@@ -12807,6 +13510,10 @@ const docTemplate = `{
         "usage.EndpointUsage": {
             "type": "object",
             "properties": {
+                "billed_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
                 "cache_write_input_tokens": {
                     "type": "integer"
                 },
@@ -12854,6 +13561,107 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "uncached_input_tokens": {
+                    "type": "integer"
+                }
+            }
+        },
+        "usage.Invoice": {
+            "type": "object",
+            "properties": {
+                "currency": {
+                    "type": "string"
+                },
+                "customers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/usage.InvoiceCustomer"
+                    }
+                },
+                "end_date": {
+                    "type": "string"
+                },
+                "parent": {
+                    "type": "string"
+                },
+                "start_date": {
+                    "type": "string"
+                },
+                "total": {
+                    "$ref": "#/definitions/usage.InvoiceAmounts"
+                }
+            }
+        },
+        "usage.InvoiceAmounts": {
+            "type": "object",
+            "properties": {
+                "billed_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "effective_markup_percent": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "input_tokens": {
+                    "type": "integer"
+                },
+                "output_tokens": {
+                    "type": "integer"
+                },
+                "provider_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "requests": {
+                    "type": "integer"
+                }
+            }
+        },
+        "usage.InvoiceCustomer": {
+            "type": "object",
+            "properties": {
+                "customer": {
+                    "type": "string"
+                },
+                "lines": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/usage.InvoiceLine"
+                    }
+                },
+                "subtotal": {
+                    "$ref": "#/definitions/usage.InvoiceAmounts"
+                }
+            }
+        },
+        "usage.InvoiceLine": {
+            "type": "object",
+            "properties": {
+                "billed_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "effective_markup_percent": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "input_tokens": {
+                    "type": "integer"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "output_tokens": {
+                    "type": "integer"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "provider_cost": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "requests": {
                     "type": "integer"
                 }
             }
@@ -13026,6 +13834,11 @@ const docTemplate = `{
         "usage.SessionUsage": {
             "type": "object",
             "properties": {
+                "billed_cost": {
+                    "description": "BilledCost includes the session's billed response-cache hits.",
+                    "type": "number",
+                    "x-nullable": true
+                },
                 "input_cost": {
                     "type": "number",
                     "x-nullable": true
@@ -13112,6 +13925,38 @@ const docTemplate = `{
                 },
                 "granularity": {
                     "type": "string"
+                }
+            }
+        },
+        "usage.UsageBreakdown": {
+            "type": "object",
+            "properties": {
+                "cells": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/usage.BreakdownCell"
+                    }
+                },
+                "column_dimension": {
+                    "$ref": "#/definitions/usage.BreakdownDimension"
+                },
+                "columns": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/usage.BreakdownKey"
+                    }
+                },
+                "metric": {
+                    "$ref": "#/definitions/usage.BreakdownMetric"
+                },
+                "row_dimension": {
+                    "$ref": "#/definitions/usage.BreakdownDimension"
+                },
+                "rows": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/usage.BreakdownKey"
+                    }
                 }
             }
         },
@@ -13403,6 +14248,9 @@ const docTemplate = `{
                 "provider_type": {
                     "type": "string"
                 },
+                "reasoning_effort": {
+                    "type": "string"
+                },
                 "resolved_model": {
                     "type": "string"
                 },
@@ -13473,6 +14321,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "provider_name": {
+                    "type": "string"
+                },
+                "reasoning_effort": {
+                    "description": "ReasoningEffort, when set, replaces the reasoning effort of every\nrequest sent upstream through this redirect or to this model, whatever\nthe client asked for. Empty leaves the client's value untouched.",
                     "type": "string"
                 },
                 "session_affinity": {

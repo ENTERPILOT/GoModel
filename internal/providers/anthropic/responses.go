@@ -121,21 +121,13 @@ func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesReque
 	if err != nil {
 		return nil, err
 	}
-	anthropicReq.Stream = true
-
-	stream, err := p.client.DoStream(ctx, llmclient.Request{
-		Method:    http.MethodPost,
-		Endpoint:  "/messages",
-		Operation: llmclient.OperationChat,
-		Model:     req.Model,
-		Body:      anthropicReq,
-	})
+	stream, err := p.openMessagesStream(ctx, anthropicReq, req.Model)
 	if err != nil {
 		return nil, err
 	}
 
 	// Return a reader that converts Anthropic SSE format to Responses API format
-	return newResponsesStreamConverter(stream, req.Model), nil
+	return newResponsesStreamConverter(stream, req.Model, p.responseProviderName()), nil
 }
 
 // responsesStreamConverter wraps an Anthropic stream and converts it to Responses API format
@@ -143,6 +135,7 @@ type responsesStreamConverter struct {
 	reader               *bufio.Reader
 	body                 io.ReadCloser
 	model                string
+	providerName         string
 	responseID           string
 	createdAt            int64
 	output               *providers.ResponsesOutputEventState
@@ -162,18 +155,19 @@ type responsesStreamConverter struct {
 	hasUsage             bool
 }
 
-func newResponsesStreamConverter(body io.ReadCloser, model string) *responsesStreamConverter {
+func newResponsesStreamConverter(body io.ReadCloser, model, providerName string) *responsesStreamConverter {
 	responseID := "resp_" + uuid.New().String()
 	return &responsesStreamConverter{
-		reader:     bufio.NewReader(body),
-		body:       body,
-		model:      model,
-		responseID: responseID,
-		createdAt:  time.Now().Unix(),
-		output:     providers.NewResponsesOutputEventState(responseID),
-		toolCalls:  make(map[int]*providers.ResponsesOutputToolCallState),
-		thinking:   newThinkingReplayState(),
-		buffer:     streaming.NewStreamBuffer(1024),
+		reader:       bufio.NewReader(body),
+		body:         body,
+		model:        model,
+		providerName: providerName,
+		responseID:   responseID,
+		createdAt:    time.Now().Unix(),
+		output:       providers.NewResponsesOutputEventState(responseID),
+		toolCalls:    make(map[int]*providers.ResponsesOutputToolCallState),
+		thinking:     newThinkingReplayState(),
+		buffer:       streaming.NewStreamBuffer(1024),
 	}
 }
 
@@ -313,7 +307,7 @@ func (sc *responsesStreamConverter) appendTerminalEvents() {
 		"object":     "response",
 		"status":     status,
 		"model":      sc.model,
-		"provider":   "anthropic",
+		"provider":   sc.providerName,
 		"created_at": sc.createdAt,
 		"output":     sc.output.FinalOutputItems(sc.reasoningOutputIndex, sc.assistantOutputIndex, sc.toolCalls, true),
 	}
@@ -340,7 +334,7 @@ func (sc *responsesStreamConverter) startResponse() string {
 		"object":     "response",
 		"status":     "in_progress",
 		"model":      sc.model,
-		"provider":   "anthropic",
+		"provider":   sc.providerName,
 		"created_at": sc.createdAt,
 	})
 }

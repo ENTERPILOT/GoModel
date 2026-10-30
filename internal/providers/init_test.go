@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -270,35 +271,46 @@ func TestInit_NormalizesNilContext(t *testing.T) {
 	}
 
 	cacheFile := filepath.Join(cacheDir, "models.json")
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if result.Registry.IsInitialized() {
-			if _, err := os.Stat(cacheFile); err == nil {
-				if _, err := os.Stat(cacheFile + ".tmp"); os.IsNotExist(err) {
-					return
-				}
-			}
+	require.Eventually(t, func() bool {
+		if !result.Registry.IsInitialized() {
+			return false
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	require.True(t, result.Registry.IsInitialized())
-	_, err = os.Stat(cacheFile)
-	require.NoError(t, err)
-	_, err = os.Stat(cacheFile + ".tmp")
-	require.True(t, os.IsNotExist(err))
+		if _, err := os.Stat(cacheFile); err != nil {
+			return false
+		}
+		_, err := os.Stat(cacheFile + ".tmp")
+		return os.IsNotExist(err)
+	}, 2*time.Second, 10*time.Millisecond, "expected the registry to initialize and write the cache file atomically")
 }
 
-// max_retries=-1 disables go-redis' reconnect backoff (0 means the default of 3): the port refuses instantly
-// and each of these tests would otherwise wait ~1.7s for three retries.
-const unreachableRedisURL = "redis://127.0.0.1:1?max_retries=-1"
+// unreachableRedisURL points at a local listener that closes every connection
+// before the handshake, so connecting fails at once. A port that refuses the
+// dial would do too, but go-redis retries a refused dial five times with a
+// 100 ms backoff that no URL option disables. max_retries=-1 disables the
+// command retries on top of that (0 means the default of 3).
+func unreachableRedisURL(t *testing.T) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			_ = conn.Close()
+		}
+	}()
+	return "redis://" + listener.Addr().String() + "?max_retries=-1"
+}
 
 func TestInitCache_FallsBackToLocalWhenRedisUnreachable(t *testing.T) {
 	cacheDir := t.TempDir()
 	c, err := initCache(&config.Config{
 		Cache: config.CacheConfig{
 			Model: config.ModelCacheConfig{
-				Redis: &config.RedisModelConfig{URL: unreachableRedisURL},
+				Redis: &config.RedisModelConfig{URL: unreachableRedisURL(t)},
 				Local: &config.LocalCacheConfig{CacheDir: cacheDir},
 			},
 		},
@@ -328,7 +340,7 @@ func TestInitCache_FailsWhenRedisUnreachableAndNoLocal(t *testing.T) {
 	c, err := initCache(&config.Config{
 		Cache: config.CacheConfig{
 			Model: config.ModelCacheConfig{
-				Redis: &config.RedisModelConfig{URL: unreachableRedisURL},
+				Redis: &config.RedisModelConfig{URL: unreachableRedisURL(t)},
 			},
 		},
 	})
@@ -346,7 +358,7 @@ func TestInit_SucceedsWhenRedisUnreachableAndLocalConfigured(t *testing.T) {
 			Cache: config.CacheConfig{
 				Model: config.ModelCacheConfig{
 					RefreshInterval: 1,
-					Redis:           &config.RedisModelConfig{URL: unreachableRedisURL},
+					Redis:           &config.RedisModelConfig{URL: unreachableRedisURL(t)},
 					Local:           &config.LocalCacheConfig{CacheDir: t.TempDir()},
 				},
 			},

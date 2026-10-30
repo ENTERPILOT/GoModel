@@ -1,10 +1,10 @@
 ---
 title: "GoModel Pro"
 sidebarTitle: "Overview"
-description: "GoModel Pro adds licensed prompt compression, intelligent routing, OIDC SSO, and egress proxy pools to the GoModel gateway."
+description: "GoModel Pro adds licensed prompt compression, intelligent routing, OIDC SSO, egress proxy pools, and secret manager vaults to the GoModel gateway. Try it free for 21 days."
 icon: "gem"
 tag: "Pro"
-keywords: ["GoModel Pro", "prompt compression", "intelligent routing", "OIDC", "SSO", "quota templates", "egress proxy pools", "license"]
+keywords: ["GoModel Pro", "prompt compression", "intelligent routing", "OIDC", "SSO", "quota templates", "egress proxy pools", "vaults", "license", "free trial"]
 ---
 
 ## What Pro is
@@ -12,13 +12,15 @@ keywords: ["GoModel Pro", "prompt compression", "intelligent routing", "OIDC", "
 GoModel Pro is the commercial distribution of GoModel. It uses the same
 gateway, configuration, providers, dashboard, and APIs as open-source
 GoModel, with licensed extensions for prompt compression, intelligent routing,
-OIDC single sign-on, egress proxy pools, and per-child quota templates.
+OIDC single sign-on, egress proxy pools, per-child quota templates, and
+secret manager vaults.
 
 Without a valid license, the Pro binary starts as the open-source gateway and
-does not block traffic. Explicitly enabled SSO or egress pools are the
-exception: startup fails closed when their entitlement or configuration is
-invalid, so an authentication boundary cannot disappear silently and proxied
-traffic never leaves from the gateway's own address.
+does not block traffic. Explicitly enabled SSO, egress pools, per-child quota
+templates, and vaults are the exception: startup fails closed when their
+entitlement or configuration is invalid, so an authentication boundary cannot
+disappear silently, proxied traffic never leaves from the gateway's own
+address, limits are not quietly shared, and secrets are never left unresolved.
 
 <CardGroup cols={2}>
   <Card title="Prompt compression" icon="package-minus" href="/pro/compression">
@@ -50,8 +52,59 @@ environment-variable examples and matching rules. Without the
 startup and admin API writes are rejected with 403
 `quota_templates_not_entitled`.
 
+## Vaults
+
+Vaults add a `vault` scheme to [secret references](/advanced/secret-references),
+so provider keys and other secrets are read from HashiCorp Vault, AWS Secrets
+Manager, GCP Secret Manager, or Azure Key Vault instead of plain environment
+variables:
+
+```yaml
+extensions:
+  vaults:
+    enabled: true
+    stores:
+      prod:
+        type: hashicorp
+        address: https://vault.internal:8200
+        auth:
+          method: kubernetes
+          role: gomodel
+
+providers:
+  openai:
+    api_key: ${vault:prod/llm#openai}
+```
+
+Secrets are cached and re-read every `refresh_interval` (default `5m`).
+Enabling vaults without the `vaults` entitlement stops startup.
+
 ## Licensing
 
 Pro features are granted by an offline Ed25519-signed token in
 `GOMODEL_PRO_LICENSE`. Validation requires no network access and works in
 air-gapped environments.
+
+### Free trial
+
+Try every Pro feature free for 21 days, no credit card required: request a
+trial license at
+[gomodel.enterpilot.io/pro/trial](https://gomodel.enterpilot.io/pro/trial) and
+it arrives by email. Trial licenses need GoModel Pro 0.1.1 or later.
+
+```bash
+docker run -d --restart unless-stopped -p 8080:8080 \
+  -e GOMODEL_PRO_LICENSE="<license from the email>" \
+  -e OPENAI_API_KEY="your-openai-key" \
+  enterpilot/gomodel-pro
+```
+
+The startup log line `GoModel Pro: license valid` shows `trial=true` and the
+end date. A reminder email arrives seven days before the trial ends. A trial
+has no grace period: on its last day the gateway shuts down once, which is why
+the example uses a restart policy. After the restart it runs as the
+open-source gateway, unless SSO, egress pools, per-child quota templates, or
+vaults are still configured; remove them or install a full license first.
+
+One trial per person. To keep Pro after the trial,
+[book a 30-minute call](https://cal.com/jakubw/30).

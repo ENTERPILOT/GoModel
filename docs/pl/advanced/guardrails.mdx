@@ -13,7 +13,7 @@ nich odwołuje, w jednej z trzech faz:
 
 - **prompt**: po routingu, zanim request dotrze do providera
 - **response**: na kompletnej odpowiedzi, zanim dotrze do klienta
-- **stream**: na każdym streamowanym zdarzeniu (lub na zbuforowanym streamie, zależnie od pluginu)
+- **stream**: na każdym streamowanym zdarzeniu (lub na zbuforowanym streamie, zależnie od pluginu) – tylko dla requestów z `stream: true`; request bez streamingu nigdy nie uruchamia guardraila fazy stream
 
 Guardrail może edytować treść, dodawać nagłówki, odrzucić request z błędem,
 odpowiedzieć na niego bezpieczną wiadomością albo przepuścić go z
@@ -350,9 +350,9 @@ dopasowywany.
 | `case_insensitive` | Nie | `false` | Dopasowuje bez względu na wielkość liter. |
 | `roles` | Nie | `["user"]` | Wiadomości promptu, do których stosowane są reguły: `system` (obejmuje developer), `user`, `assistant`, `tool`. W fazie response celem jest zawsze tekst asystenta. |
 | `on_match` | Nie | `replace` | `replace` podstawia; `block` odrzuca z błędem; `respond` odpowiada treścią `message` jako odpowiedzią asystenta; `warn` kontynuuje i zapisuje dopasowanie. Tylko `replace` edytuje tekst. |
-| `message` | Nie | `Request blocked by policy` | Komunikat błędu dla `block`, odpowiedź asystenta dla `respond`, notatka audytowa dla `warn`. |
+| `message` | Nie | `Request blocked by policy` dla `block` i `respond`, brak dla `warn` | Komunikat błędu dla `block`, odpowiedź asystenta dla `respond`, notatka audytowa dla `warn`. `warn` zapisuje notatkę tylko wtedy, gdy ją ustawisz, więc wynik nie jest oznaczany w dashboardzie jako blokada. |
 | `block_status` | Nie | domyślna dla fazy | Jeden kod statusu HTTP z zakresu 400–599 dla `block`, na przykład `403`. Pusta wartość oznacza 400 przy zablokowaniu promptu i 502 przy zablokowaniu odpowiedzi. |
-| `stream_lookbehind` | Nie | `64` | Liczba znaków streamowanego tekstu wstrzymywanych, aby dopasowanie rozciągające się na dwa chunki nadal zostało przepisane; ustaw co najmniej na długość najdłuższego wyszukiwanego tekstu. Dopasowanie na końcu dotychczas streamowanego tekstu jest wstrzymywane, dopóki przestaje rosnąć, więc otwarty wzorzec, taki jak `sk-[A-Za-z0-9]{20,}`, maskuje całą wartość, o ile nie jest od niej dłuższa. Używane przez `replace` i `warn`. |
+| `stream_lookbehind` | Nie | `64` | Liczba znaków streamowanego tekstu wstrzymywanych, aby dopasowanie rozciągające się na dwa chunki nadal zostało przepisane; ustaw co najmniej na długość najdłuższego wyszukiwanego tekstu. Dopasowanie na końcu dotychczas streamowanego tekstu jest wstrzymywane, dopóki przestaje rosnąć, więc otwarty wzorzec, taki jak `sk-[A-Za-z0-9_-]{20,}`, maskuje całą wartość, o ile nie jest od niej dłuższa – dłuższa wartość zachowuje część wykraczającą poza lookbehind, więc ustaw go powyżej najdłuższego sekretu, jakiego się spodziewasz. Używane przez `replace` i `warn`. |
 
 W fazie stream `replace` i `warn` przekształcają zdarzenia w locie ze
 skonfigurowanym lookbehindem. `block` i `respond` buforują cały stream, aby nic
@@ -650,6 +650,18 @@ nigdy nie zawierają przekazanego mu tekstu. Analizator otrzymuje tekst jawnie,
 więc uruchamiaj go jako sidecar na tym samym hoście albo łącz się z nim przez
 `https://` lub sieć prywatną.
 
+<Warning>
+  Anonimizacja ukrywa wartości przed providerem, a nie przed logiem audytowym.
+  `LOGGING_LOG_BODIES` ma domyślnie wartość `true`, a zapisane `request_body` i
+  `response_body` to te, które klient wysłał i otrzymał, z danymi osobowymi w
+  postaci jawnej – zanonimizowane jest tylko przepisane body przechowywane w
+  `request_revisions`. Ustaw
+  [`LOGGING_LOG_BODIES=false`](/pl/advanced/configuration#logowanie-audytowe),
+  gdy magazyn audytu nie może przechowywać danych osobowych.
+  `LOGGING_LOG_REVISION_BODIES=false` pomija tylko zanonimizowane kopie;
+  oryginalne body nadal są zapisywane.
+</Warning>
+
 <Tip>
   Zacznij od jawnej listy `entities`. Przy włączonych wszystkich typach model
   językowy analizatora raportuje też `DATE_TIME`, `LOCATION`, `NRP` i `URL`,
@@ -659,7 +671,13 @@ więc uruchamiaj go jako sidecar na tym samym hoście albo łącz się z nim prz
   w większości wdrożeń. Niektóre modele, w tym Claude, traktują niewyjaśnione
   tokeny w stylu `<PERSON_1>` podejrzliwie i mogą odmówić ich powtórzenia;
   naprawia to linia w system prompcie, taka jak `Values like <PERSON_1> are privacy placeholders;
-  use them as ordinary values`.
+  use them as ordinary values`. Spany `PERSON` z analizatora mogą też
+  pochłonąć sąsiedni token pisany wielkimi literami (`TOOLESC Katarzyna` jest
+  raportowany jako jeden `PERSON`), więc krok `presidio` uruchamiany przed
+  krokiem `string_replace` może zastąpić właśnie ten tekst, którego szuka
+  późniejsza reguła; gdy reguła musi widzieć oryginalne słowa, nadaj krokowi
+  `string_replace` niższe `order`, aby uruchamiał się pierwszy, albo dodaj te
+  słowa do `allow_list`.
 </Tip>
 
 W fazie stream `anonymize` i `warn` przekształcają zdarzenia w locie w
@@ -686,6 +704,17 @@ razem z podpisem, thinking Anthropic zachowuje placeholdery. Elementy
 reasoningu w wyniku `/v1/responses` (podsumowania i tekst reasoningu) również
 zachowują placeholdery: klienty odtwarzają je w `input` w niezmienionej
 postaci, więc przywrócone wartości trafiłyby do providera w następnej turze.
+
+<Warning>
+  Połącz instancję fazy prompt z instancją fazy **response**. Faza response
+  obsługuje oba rodzaje requestów – streamowany buforuje – a instancja fazy
+  stream działa tylko na streamowanych odpowiedziach. Przy samej instancji fazy
+  stream request bez streamingu zwraca klientowi surowe placeholdery
+  `<PERSON_1>`, a dane osobowe, które model wymyślił sam, docierają do klienta
+  niezamaskowane. Instancja fazy stream jest właściwym wyborem tylko wtedy, gdy
+  każdy request wymagający przywracania jest streamowany, a dostarczanie musi
+  pozostać przyrostowe.
+</Warning>
 
 Instancja fazy prompt potrzebuje `restore`, aby zapisać wartości; instancja
 przywracająca odczytuje `restore_tools` i `restore_tools_exclude`.
@@ -842,17 +871,19 @@ guardrails:
       config:
         mode: "regex"
         rules: |
-          sk-[A-Za-z0-9]{20,} => [redacted]
+          sk-[A-Za-z0-9_-]{20,} => [redacted]
           AKIA[0-9A-Z]{16} => [redacted]
 ```
 
 ### Faza stream: usuwanie w locie i ocena całej odpowiedzi
 
 Do tej samej instancji można się odwołać w kilku fazach. `mask-keys`
-przekształca streamowane chunki w locie (64 znaki lookbehindu, więc klucz
-rozdzielony między dwa chunki nadal zostanie wyłapany). `answer-judge`
-potrzebuje całej odpowiedzi, więc buforuje stream, a klient otrzymuje go po
-wydaniu werdyktu.
+przekształca streamowane chunki w locie; `stream_lookbehind` określa, ile
+tekstu jest wstrzymywane, więc ustaw go powyżej najdłuższego sekretu, jakiego
+się spodziewasz (klucze providerów, takie jak `sk-proj-…` i `sk-ant-…`, są
+dużo dłuższe niż domyślne 64 znaki, a wszystko poza lookbehindem dociera do
+klienta niezamaskowane). `answer-judge` potrzebuje całej odpowiedzi, więc
+buforuje stream, a klient otrzymuje go po wydaniu werdyktu.
 
 ```yaml
 guardrails:
@@ -864,8 +895,9 @@ guardrails:
       order: 10
       config:
         mode: "regex"
+        stream_lookbehind: 256
         rules: |
-          sk-[A-Za-z0-9]{20,} => [redacted]
+          sk-[A-Za-z0-9_-]{20,} => [redacted]
 
     - name: "answer-judge"
       type: "llm_judge"

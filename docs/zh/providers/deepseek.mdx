@@ -6,7 +6,7 @@ keywords: ["DeepSeek", "推理强度", "提供商配置", "reasoning effort", "p
 ---
 
 DeepSeek 不提供原生的 Responses API，因此 GoModel 会自动将
-`/v1/responses` 转换为 `/chat/completions`。它还会将 OpenAI 风格的推理级别重新映射为 DeepSeek 接受的两个级别。
+`/v1/responses` 转换为 `/chat/completions`。它还会将 OpenAI 风格的推理级别重新映射为 DeepSeek 接受的级别。
 
 ## 配置
 
@@ -31,18 +31,19 @@ providers:
 
 ## 推理强度映射
 
-DeepSeek V4 推理模型接受顶层字符串字段 `reasoning_effort`，允许的级别有两个：`high` 和 `max`。
+DeepSeek V4 推理模型接受顶层字符串字段 `reasoning_effort`，有两个推理级别 `high` 和 `max`，以及用于关闭推理的 `none`。
 
 | 客户端发送 | DeepSeek 收到 |
 | ------------ | ----------------- |
-| `low` / `medium` / `high` | `high` |
+| `none` | `none`（关闭推理） |
+| `minimal` / `low` / `medium` / `high` | `high` |
 | `xhigh` / `max` | `max` |
 | 其他任何值 | GoModel 原样透传，随后被 DeepSeek 拒绝 |
 
 GoModel 会将 OpenAI 格式的 `"reasoning": {"effort": "..."}` 改写为
 DeepSeek 的顶层 `reasoning_effort`，客户端无需任何修改。在调用 GoModel 之前，请将自定义的客户端取值校验或规范化为 `high` 或 `max`。
-如需禁用推理，请完全省略 `reasoning` 字段；只要提供了任何
-`reasoning.effort`（包括 `low`），都会被映射并启用推理。
+DeepSeek 默认启用推理，因此省略 `reasoning` 字段不会关闭推理；如需禁用推理，请发送 `none`。提供其他任何
+`reasoning.effort`（包括 `low`），都会被映射并启用推理。[强制推理强度](/zh/features/virtual-models#强制推理强度)无论如何都会替换客户端的值。
 
 ## 工具调用与推理
 

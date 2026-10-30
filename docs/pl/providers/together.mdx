@@ -1,0 +1,82 @@
+---
+title: "Together AI"
+description: "Skonfiguruj Together AI w GoModel do czatu, Responses i embeddingów na otwartych modelach."
+icon: "server"
+tag: "Beta"
+keywords: ["Together AI", "together", "otwarte modele", "open models", "konfiguracja providera", "provider setup", "embeddingi"]
+---
+
+<Warning>
+  Obsługa Together AI jest w wersji beta. Jest objęta automatycznymi testami na
+  symulowanym API, ale nie została jeszcze sprawdzona z prawdziwą usługą
+  Together AI. Zgłaszaj napotkane problemy.
+</Warning>
+
+Together AI udostępnia otwarte modele przez API zgodne z OpenAI pod adresem
+`https://api.together.ai/v1`. GoModel kieruje do niego te endpointy:
+
+| Endpoint GoModel | Modele Together AI |
+| ---------------- | ------------------ |
+| `/v1/chat/completions` | modele czatu (`meta-llama/Llama-3.3-70B-Instruct-Turbo`, `openai/gpt-oss-120b`, ...) |
+| `/v1/responses` | modele czatu, tłumaczone przez chat completions |
+| `/v1/embeddings` | modele embeddingów (`BAAI/bge-base-en-v1.5`, ...) |
+
+## Konfiguracja
+
+Utwórz klucz API w [panelu Together AI](https://api.together.ai/settings/api-keys) i ustaw:
+
+```bash
+TOGETHER_API_KEY=...
+```
+
+Albo w `config.yaml`:
+
+```yaml
+providers:
+  together:
+    type: together
+    api_key: "${TOGETHER_API_KEY}"
+    # base_url domyślnie to "https://api.together.ai/v1".
+```
+
+Nadpisz base URL albo ustaw listę modeli tylko wtedy, gdy jest to potrzebne,
+na przykład żeby użyć regionalnych endpointów Together (`https://us-api.together.ai/v1`):
+
+```bash
+TOGETHER_BASE_URL=https://api.together.ai/v1
+TOGETHER_MODELS=meta-llama/Llama-3.3-70B-Instruct-Turbo,BAAI/bge-base-en-v1.5
+```
+
+`TOGETHER_MODELS` to lista zapasowa, używana tylko wtedy, gdy `/models` zwraca błąd
+lub pustą listę; `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` czyni ją jedyną listą.
+
+## Modele
+
+GoModel odczytuje aktualną listę `/models` z Together, w tym typ każdego modelu,
+nazwę wyświetlaną, długość kontekstu i ceny za tokeny. Modele obrazów, audio,
+wideo i rerankingu są pomijane, bo GoModel nie kieruje tych endpointów do
+Together. Identyfikatory modeli zawierają ukośnik; używaj ich dosłownie albo
+dodaj przed nimi nazwę providera, żeby przypiąć trasę:
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "together/meta-llama/Llama-3.3-70B-Instruct-Turbo", "messages": [{"role": "user", "content": "Hello"}]}'
+```
+
+Używaj prefiksu zawsze, gdy identyfikator zaczyna się od nazwy innego
+skonfigurowanego providera: przy skonfigurowanym providerze OpenAI
+`openai/gpt-oss-120b` jest szukany w OpenAI i kończy się błędem, więc wyślij `together/openai/gpt-oss-120b`.
+
+## Uwagi o działaniu
+
+- **Responses przechodzą przez chat completions.** Natywny endpoint `/responses`
+  w Together to beta, która odrzuca wiele modeli serverless, więc GoModel
+  tłumaczy requesty Responses na chat completions, które obsługuje każdy model
+  czatu. Przy skonfigurowanym magazynie odpowiedzi GoModel łańcuchy
+  `previous_response_id` działają: gateway odtwarza zapisaną historię.
+- **Passthrough trzeba włączyć.** Dodaj `together` do
+  `ENABLED_PASSTHROUGH_PROVIDERS`, żeby udostępnić `/p/together/...`, który
+  przekazuje dowolną ścieżkę pod base URL z kluczem Together gatewaya. Używaj go
+  dla endpointów Together, których GoModel nie routuje, np. obrazów lub rerankingu.

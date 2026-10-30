@@ -21,7 +21,7 @@ import (
 )
 
 func TestStreamConverter_DrainsBufferedDoneMessage(t *testing.T) {
-	stream := newStreamConverter(io.NopCloser(strings.NewReader("")), "claude-sonnet-4-5-20250929")
+	stream := newStreamConverter(io.NopCloser(strings.NewReader("")), "claude-sonnet-4-5-20250929", "anthropic")
 	defer func() { _ = stream.Close() }()
 
 	buf := make([]byte, 4)
@@ -3154,7 +3154,7 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text
 		err: io.ErrUnexpectedEOF,
 	}
 
-	converter := newResponsesStreamConverter(reader, "claude-sonnet-4-5-20250929")
+	converter := newResponsesStreamConverter(reader, "claude-sonnet-4-5-20250929", "anthropic")
 	raw, err := io.ReadAll(converter)
 	require.Equal(t, io.ErrUnexpectedEOF, err)
 
@@ -4134,6 +4134,37 @@ func TestConvertToAnthropicRequest_ReasoningEffort(t *testing.T) {
 			expectedMaxTokens: 25000,
 			expectNilTemp:     true,
 		},
+		{
+			name:              "legacy model - none effort leaves thinking off and keeps temperature",
+			model:             "claude-3-5-sonnet-20241022",
+			reasoning:         &core.Reasoning{Effort: "none"},
+			maxTokens:         new(1000),
+			setTemperature:    true,
+			expectedMaxTokens: 1000,
+			expectedTemp:      new(0.7),
+		},
+		{
+			name:              "4.7 model - none effort leaves thinking off",
+			model:             "claude-opus-4-7",
+			reasoning:         &core.Reasoning{Effort: " None "},
+			maxTokens:         new(4096),
+			expectedMaxTokens: 4096,
+		},
+		{
+			name:              "opus 5 - none effort disables default thinking",
+			model:             "claude-opus-5-20260601",
+			reasoning:         &core.Reasoning{Effort: "none"},
+			maxTokens:         new(4096),
+			expectedThinkType: "disabled",
+			expectedMaxTokens: 4096,
+		},
+		{
+			name:              "opus 5.5 - none effort sends no thinking it would reject",
+			model:             "claude-opus-5-5",
+			reasoning:         &core.Reasoning{Effort: "none"},
+			maxTokens:         new(4096),
+			expectedMaxTokens: 4096,
+		},
 	}
 
 	for _, tt := range tests {
@@ -4169,6 +4200,9 @@ func TestConvertToAnthropicRequest_ReasoningEffort(t *testing.T) {
 				if tt.expectedThinkType == "adaptive" {
 					require.NotNil(t, result.OutputConfig)
 					assert.Equal(t, tt.expectedEffort, result.OutputConfig.Effort)
+				}
+				if tt.expectedThinkType == "disabled" {
+					assert.Nil(t, result.OutputConfig)
 				}
 			}
 
@@ -4343,6 +4377,21 @@ func TestConvertResponsesRequestToAnthropic_ReasoningEffort(t *testing.T) {
 			expectedMaxTokens: 25000,
 			expectNilTemp:     true,
 		},
+		{
+			name:              "legacy model - none effort leaves thinking off",
+			model:             "claude-3-5-sonnet-20241022",
+			reasoning:         &core.Reasoning{Effort: "none"},
+			maxOutputTokens:   new(1000),
+			expectedMaxTokens: 1000,
+		},
+		{
+			name:              "sonnet 5 - none effort disables default thinking",
+			model:             "claude-sonnet-5",
+			reasoning:         &core.Reasoning{Effort: "none"},
+			maxOutputTokens:   new(4096),
+			expectedThinkType: "disabled",
+			expectedMaxTokens: 4096,
+		},
 	}
 
 	for _, tt := range tests {
@@ -4376,6 +4425,9 @@ func TestConvertResponsesRequestToAnthropic_ReasoningEffort(t *testing.T) {
 					require.NotNil(t, result.OutputConfig)
 					assert.Equal(t, tt.expectedEffort, result.OutputConfig.Effort)
 				}
+				if tt.expectedThinkType == "disabled" {
+					assert.Nil(t, result.OutputConfig)
+				}
 			}
 
 			assert.Equal(t, tt.expectedMaxTokens, result.MaxTokens)
@@ -4383,6 +4435,35 @@ func TestConvertResponsesRequestToAnthropic_ReasoningEffort(t *testing.T) {
 			if tt.expectNilTemp {
 				assert.Nil(t, result.Temperature)
 			}
+		})
+	}
+}
+
+func TestThinksByDefault(t *testing.T) {
+	tests := []struct {
+		model    string
+		expected bool
+	}{
+		{"claude-opus-5", true},
+		{"claude-opus-5-20260601", true},
+		{"claude-sonnet-5", true},
+		{"claude-haiku-5-5", true},
+		// Opus 5.5 always thinks and Sonnet 5.5 only thinks when asked; both
+		// reject thinking {"type": "disabled"}.
+		{"claude-opus-5-5", false},
+		{"claude-opus-5-5-20261001", false},
+		{"claude-sonnet-5-5", false},
+		// Fable and Mythos always think and reject "disabled" too.
+		{"claude-fable-5-1", false},
+		{"claude-mythos-5", false},
+		// Older models do not think unless asked.
+		{"claude-opus-4-8", false},
+		{"claude-sonnet-4-6", false},
+		{"claude-haiku-4-5-20251001", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			assert.Equal(t, tt.expected, thinksByDefault(tt.model))
 		})
 	}
 }
@@ -5590,7 +5671,7 @@ func assertAdaptiveHighEffort(t *testing.T, out *anthropicRequest) {
 // object of every emitted chat chunk.
 func chatStreamDeltas(t *testing.T, anthropicSSE string) []map[string]any {
 	t.Helper()
-	conv := newStreamConverter(io.NopCloser(strings.NewReader(anthropicSSE)), "claude-sonnet-4-5")
+	conv := newStreamConverter(io.NopCloser(strings.NewReader(anthropicSSE)), "claude-sonnet-4-5", "anthropic")
 	defer conv.Close() //nolint:errcheck
 
 	out, err := io.ReadAll(conv)
@@ -5615,6 +5696,61 @@ func chatStreamDeltas(t *testing.T, anthropicSSE string) []map[string]any {
 		}
 	}
 	return deltas
+}
+
+// Streamed events name the configured provider instance, as the buffered
+// response does, so two Anthropic instances stay distinguishable.
+func TestAnthropicStreamsNameTheProviderInstance(t *testing.T) {
+	const sse = "event: message_start\n" +
+		`data: {"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-5","usage":{"input_tokens":1,"output_tokens":0}}}` + "\n\n" +
+		"event: content_block_start\n" +
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}` + "\n\n" +
+		"event: content_block_delta\n" +
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}` + "\n\n" +
+		"event: message_stop\n" +
+		`data: {"type":"message_stop"}` + "\n\n"
+
+	tests := []struct {
+		name         string
+		converter    func() io.ReadCloser
+		wantProvider string
+	}{
+		{
+			name: "chat instance name",
+			converter: func() io.ReadCloser {
+				return newStreamConverter(io.NopCloser(strings.NewReader(sse)), "claude-sonnet-4-5", "anthropic-eu")
+			},
+			wantProvider: "anthropic-eu",
+		},
+		{
+			name: "chat without an instance name",
+			converter: func() io.ReadCloser {
+				return newStreamConverter(io.NopCloser(strings.NewReader(sse)), "claude-sonnet-4-5", "anthropic")
+			},
+			wantProvider: "anthropic",
+		},
+		{
+			name: "responses instance name",
+			converter: func() io.ReadCloser {
+				return newResponsesStreamConverter(io.NopCloser(strings.NewReader(sse)), "claude-sonnet-4-5", "anthropic-eu")
+			},
+			wantProvider: "anthropic-eu",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conv := tt.converter()
+			defer conv.Close() //nolint:errcheck
+
+			out, err := io.ReadAll(conv)
+			require.NoError(t, err)
+			assert.Contains(t, string(out), `"provider":"`+tt.wantProvider+`"`)
+			if tt.wantProvider != "anthropic" {
+				assert.NotContains(t, string(out), `"provider":"anthropic"`, "stream still carries the provider type")
+			}
+		})
+	}
 }
 
 // lastExtraContent returns the last extra_content value seen on a delta, which
@@ -5742,7 +5878,7 @@ data: {"type":"message_stop"}
 // dialect and returns the decoded events.
 func responsesStreamEvents(t *testing.T, anthropicSSE string) []map[string]any {
 	t.Helper()
-	conv := newResponsesStreamConverter(io.NopCloser(strings.NewReader(anthropicSSE)), "claude-sonnet-4-5")
+	conv := newResponsesStreamConverter(io.NopCloser(strings.NewReader(anthropicSSE)), "claude-sonnet-4-5", "anthropic")
 	defer conv.Close() //nolint:errcheck
 
 	out, err := io.ReadAll(conv)
@@ -6112,7 +6248,7 @@ event: message_stop
 data: {"type":"message_stop"}
 
 `
-	converter := newResponsesStreamConverter(io.NopCloser(strings.NewReader(stream)), "claude-sonnet-4-5-20250929")
+	converter := newResponsesStreamConverter(io.NopCloser(strings.NewReader(stream)), "claude-sonnet-4-5-20250929", "anthropic")
 	raw, err := io.ReadAll(converter)
 	require.NoError(t, err)
 
@@ -6204,7 +6340,7 @@ event: message_stop
 data: {"type":"message_stop"}
 
 `
-	converter := newResponsesStreamConverter(io.NopCloser(strings.NewReader(stream)), "claude-sonnet-4-5-20250929")
+	converter := newResponsesStreamConverter(io.NopCloser(strings.NewReader(stream)), "claude-sonnet-4-5-20250929", "anthropic")
 	raw, err := io.ReadAll(converter)
 	require.NoError(t, err)
 
@@ -6236,7 +6372,7 @@ data: {"type":"message_stop"}
 // response.created and response.in_progress before response.incomplete, so
 // stream helpers that snapshot the created response can finish cleanly.
 func TestStreamResponses_CutBeforeMessageStartStillOpens(t *testing.T) {
-	converter := newResponsesStreamConverter(io.NopCloser(strings.NewReader("")), "claude-sonnet-4-5-20250929")
+	converter := newResponsesStreamConverter(io.NopCloser(strings.NewReader("")), "claude-sonnet-4-5-20250929", "anthropic")
 	raw, err := io.ReadAll(converter)
 	require.NoError(t, err)
 

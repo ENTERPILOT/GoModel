@@ -34,13 +34,16 @@ var (
 const (
 	jevProviderType        = "jev"
 	openRouterProviderType = "openrouter"
+	azureProviderType      = "azure"
 )
 
 // systemOneProviderTypes are the provider types that serve the System One API
-// natively: jev (TypeSafe's hosted Jev and self-hosted Kev servers) and
+// natively: jev (TypeSafe's hosted Jev and self-hosted Kev servers),
 // OpenRouter, which serves Jev and Kev at the same path with the same request
-// and answer shapes. Configuring either makes /v1/systemone available.
-var systemOneProviderTypes = []string{jevProviderType, openRouterProviderType}
+// and answer shapes, and Azure, whose Foundry resources serve
+// Microsoft-Decision-1 with them too. Configuring any makes /v1/systemone
+// available.
+var systemOneProviderTypes = []string{jevProviderType, openRouterProviderType, azureProviderType}
 
 // SystemOne handles POST /v1/systemone.
 //
@@ -51,7 +54,7 @@ var systemOneProviderTypes = []string{jevProviderType, openRouterProviderType}
 // provider has no System One API is rejected.
 //
 // @Summary      Evaluate a System One decision request (Jev / Kev)
-// @Description  Available when a jev or openrouter provider is configured. The request and answer follow TypeSafe's System One API; models on providers without that API are rejected rather than translated.
+// @Description  Available when a jev, openrouter, or azure provider is configured. The request and answer follow TypeSafe's System One API; models on providers without that API are rejected rather than translated.
 // @Tags         systemone
 // @Accept       json,mpfd
 // @Produce      json
@@ -111,7 +114,7 @@ func (h *Handler) SystemOneSeparate(c *echo.Context) error {
 // serveSystemOne resolves, guards, and forwards one System One request.
 func (s *translatedInferenceService) serveSystemOne(c *echo.Context, route systemOneRoute) error {
 	if !systemOneAvailable(s.provider) {
-		return handleError(c, core.NewNotFoundError("POST "+route.path+" is available only when a jev or openrouter provider is configured"))
+		return handleError(c, core.NewNotFoundError("POST "+route.path+" is available only when a jev, openrouter, or azure provider is configured"))
 	}
 	body, err := requestBodyBytes(c)
 	if err != nil {
@@ -251,8 +254,8 @@ type modelCatalog interface {
 
 // systemOneUnsupportedReason explains why a model cannot answer a request on
 // route, or returns "" when it can. The provider must serve the API, a Kev
-// diagnostic route needs a jev provider, and since OpenRouter also serves
-// chat models, the model must not be catalogued with a generation mode. A
+// diagnostic route needs a jev provider, and since OpenRouter and Azure also
+// serve chat models, the model must not be catalogued with a generation mode. A
 // model the catalog does not describe is given the benefit of the doubt: the
 // upstream reports it if it is wrong.
 func (s *translatedInferenceService) systemOneUnsupportedReason(route systemOneRoute, selector core.ModelSelector, providerType string) string {
@@ -325,7 +328,7 @@ func systemOneUnsupportedModelError(c *echo.Context, route systemOneRoute, resol
 		target += fmt.Sprintf(" (resolved to %q)", resolved)
 	}
 	return core.NewInvalidRequestError(fmt.Sprintf(
-		"model %s %s; %s forwards requests natively and does not translate them to other APIs, so use a System One model such as a jev model or OpenRouter's typesafe/jev-1.13",
+		"model %s %s; %s forwards requests natively and does not translate them to other APIs, so use a System One model such as a jev model, OpenRouter's typesafe/jev-1.13, or an Azure Microsoft-Decision-1 deployment",
 		target, reason, route.path,
 	), nil).WithParam("model")
 }
