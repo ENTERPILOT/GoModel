@@ -76,6 +76,7 @@ func (s *translatedInferenceService) serveDecisions(c *echo.Context) error {
 		return handleError(c, decisionsUnsupportedModelError(requestIDFromContextOrHeader(c.Request()), resolution, reason))
 	}
 
+	defer releaseAdmission(c)
 	body, err = s.guardDecisionInput(c, workflow, &req, body)
 	if err != nil {
 		return handleError(c, err)
