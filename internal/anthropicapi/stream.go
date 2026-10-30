@@ -14,6 +14,17 @@ import (
 	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
+// pendingContent is the content of one chat chunk that arrived while a
+// tool_use block was still streaming its arguments.
+type pendingContent struct {
+	// thinking is the reasoning text of the chunk.
+	thinking string
+	// text is the answer text of the chunk.
+	text string
+	// replay is the Anthropic replay state that came with the chunk.
+	replay json.RawMessage
+}
+
 // chatChunk is the subset of an OpenAI chat.completion.chunk consumed by the
 // stream converter.
 type chatChunk struct {
@@ -100,6 +111,12 @@ type streamConverter struct {
 	toolBlock    map[int]int
 	stopReason   string
 	stopSequence string
+	// pending holds content that arrived while a tool_use block was still
+	// streaming its arguments. Anthropic streams one content block at a time,
+	// so that content cannot open a block of its own yet, and the tool_use
+	// block must not close before its arguments are complete. The pending
+	// content is flushed once the tool call is done.
+	pending []pendingContent
 	// thinkingSeen counts the thinking blocks already rendered from the
 	// cumulative replay state, so a later chunk repeating them adds nothing.
 	thinkingSeen  int
@@ -238,23 +255,8 @@ func (sc *streamConverter) handleChunk(chunk *chatChunk) {
 	for _, choice := range chunk.Choices {
 		// "reasoning_content" wins over "reasoning" (Groq, OpenRouter), the
 		// same precedence the streaming codec applies.
-		if thinking := cmp.Or(choice.Delta.ReasoningContent, choice.Delta.Reasoning); thinking != "" {
-			sc.ensureBlock("thinking")
-			sc.emit("content_block_delta", map[string]any{
-				"type":  "content_block_delta",
-				"index": sc.curIndex,
-				"delta": map[string]any{"type": "thinking_delta", "thinking": thinking},
-			})
-		}
-		sc.handleThinkingReplay(choice.Delta.ExtraContent)
-		if choice.Delta.Content != "" {
-			sc.ensureBlock("text")
-			sc.emit("content_block_delta", map[string]any{
-				"type":  "content_block_delta",
-				"index": sc.curIndex,
-				"delta": map[string]any{"type": "text_delta", "text": choice.Delta.Content},
-			})
-		}
+		thinking := cmp.Or(choice.Delta.ReasoningContent, choice.Delta.Reasoning)
+		sc.addContent(thinking, choice.Delta.Content, choice.Delta.ExtraContent)
 		for _, call := range choice.Delta.ToolCalls {
 			sc.handleToolCall(call)
 		}
@@ -263,7 +265,65 @@ func (sc *streamConverter) handleChunk(chunk *chatChunk) {
 		}
 		if choice.FinishReason != "" {
 			sc.stopReason = stopReasonFromFinish(choice.FinishReason, len(sc.toolBlock) > 0)
+			// The turn ends here, so no further tool arguments arrive
+			// and the content held back while they streamed is
+			// rendered.
+			sc.flushPending()
 		}
+	}
+}
+
+// addContent renders the content of one chat chunk: the reasoning text as an
+// Anthropic thinking block, the replay state as a signature, and the answer
+// text as a text block.
+//
+// While a tool_use block is still streaming its arguments the whole chunk is
+// held back. Anthropic streams one content block at a time, so the chunk
+// cannot open a block of its own yet, and the tool_use block must not close
+// before its arguments are complete: a later argument delta would then land
+// on a stopped block index.
+func (sc *streamConverter) addContent(thinking, text string, replay json.RawMessage) {
+	if sc.blockOpen && sc.blockType == "tool_use" {
+		sc.pending = append(sc.pending, pendingContent{thinking: thinking, text: text, replay: replay})
+		return
+	}
+	sc.renderContent(thinking, text, replay)
+}
+
+// renderContent renders one chunk's content in the order Anthropic expects:
+// the thinking block first, its signature next, the answer text last.
+func (sc *streamConverter) renderContent(thinking, text string, replay json.RawMessage) {
+	if thinking != "" {
+		sc.ensureBlock("thinking")
+		sc.emit("content_block_delta", map[string]any{
+			"type":  "content_block_delta",
+			"index": sc.curIndex,
+			"delta": map[string]any{"type": "thinking_delta", "thinking": thinking},
+		})
+	}
+	sc.handleThinkingReplay(replay)
+	if text != "" {
+		sc.ensureBlock("text")
+		sc.emit("content_block_delta", map[string]any{
+			"type":  "content_block_delta",
+			"index": sc.curIndex,
+			"delta": map[string]any{"type": "text_delta", "text": text},
+		})
+	}
+}
+
+// flushPending renders the content that arrived while a tool_use block was
+// streaming its arguments. It runs once the tool call has no more arguments
+// to deliver, so the tool_use block can close and the held content opens its
+// own blocks.
+func (sc *streamConverter) flushPending() {
+	if len(sc.pending) == 0 {
+		return
+	}
+	pending := sc.pending
+	sc.pending = nil
+	for _, item := range pending {
+		sc.renderContent(item.thinking, item.text, item.replay)
 	}
 }
 
@@ -315,7 +375,11 @@ func (sc *streamConverter) handleThinkingReplay(raw json.RawMessage) {
 func (sc *streamConverter) handleToolCall(call chatToolCallDelta) {
 	index, seen := sc.toolBlock[call.Index]
 	if !seen {
+		// A tool call after another one ends the previous one: its
+		// arguments are complete, so the content held back while they
+		// streamed opens its own blocks now.
 		sc.closeBlock()
+		sc.flushPending()
 		block := map[string]any{
 			"type":  "tool_use",
 			"id":    call.ID,
@@ -417,6 +481,9 @@ func (sc *streamConverter) finalize() {
 	sc.finalized = true
 	sc.ensureStarted("", "")
 	sc.closeBlock()
+	// Content held back while a tool call streamed its arguments still
+	// belongs to the turn, so it is rendered before the message ends.
+	sc.flushPending()
 
 	stopReason := sc.stopReason
 	if stopReason == "" {

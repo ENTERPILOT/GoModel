@@ -135,6 +135,7 @@ rather than stripped.
 | `message.reasoning` / `delta.reasoning` | Groq | 3 | returned as `reasoning_content` |
 | reasoning output item `summary` / `response.reasoning_summary_text.delta` | Responses-only upstreams via chat (`ChatViaResponses`) | 3 | returned as `reasoning_content`; summary parts join with `\n\n`, an advancing `summary_index` emits the separator on the stream |
 | `reasoning.summary` | Responses-only upstreams via chat (`ChatViaResponses`) | reserved | set to `auto` by the gateway whenever the request asks for reasoning with a non-off effort, so a summary exists to render |
+| `delta.reasoning_content` arriving while a `tool_use` block streams its arguments | Anthropic Messages ingress | 3 | held back until the tool call is complete; the reasoning then opens its own thinking block, so the `tool_use` block never closes before its arguments are done |
 | `x_groq`, `queue_time`, `prompt_time`, `completion_time` | Groq | 1 | forwarded untouched |
 | `prompt_cache_hit_tokens`, `prompt_cache_miss_tokens` | DeepSeek | 1 | forwarded untouched (`prompt_tokens_details.cached_tokens` carries the same count) |
 
