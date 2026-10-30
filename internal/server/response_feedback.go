@@ -99,10 +99,11 @@ func cacheUsageFromCore(input int, details *core.PromptTokensDetails, raw map[st
 	usage := responseCacheUsage{input: input, observed: input > 0 || details != nil || raw != nil}
 	if details != nil {
 		usage.read = details.CachedTokens
+		usage.write = details.CacheWriteTokens
 	}
 	read, write := cacheTokensFromMap(raw)
 	usage.read = max(usage.read, read)
-	usage.write = write
+	usage.write = max(usage.write, write)
 	return usage
 }
 
@@ -133,11 +134,11 @@ func (o *responseFeedbackStreamObserver) OnJSONEvent(payload map[string]any) {
 	usage := responseCacheUsage{observed: true,
 		input: firstNumericInt(usageMap, "prompt_tokens", "input_tokens")}
 	usage.read, usage.write = cacheTokensFromMap(usageMap)
-	if details, ok := nestedMap(usageMap["prompt_tokens_details"]); ok {
-		usage.read = max(usage.read, firstNumericInt(details, "cached_tokens"))
-	}
-	if details, ok := nestedMap(usageMap["input_tokens_details"]); ok {
-		usage.read = max(usage.read, firstNumericInt(details, "cached_tokens"))
+	for _, key := range []string{"prompt_tokens_details", "input_tokens_details"} {
+		if details, ok := nestedMap(usageMap[key]); ok {
+			usage.read = max(usage.read, firstNumericInt(details, "cached_tokens"))
+			usage.write = max(usage.write, firstNumericInt(details, "cache_write_tokens"))
+		}
 	}
 	// Merge rather than replace: Anthropic-native streams split usage across
 	// events (input and cache tokens in message_start, output in the final
@@ -187,7 +188,7 @@ func cacheTokensFromMap(raw map[string]any) (read, write int) {
 		return 0, 0
 	}
 	read = firstNumericInt(raw, "cache_read_input_tokens", "prompt_cached_tokens", "cached_tokens")
-	write = firstNumericInt(raw, "cache_creation_input_tokens", "cache_write_input_tokens")
+	write = firstNumericInt(raw, "cache_creation_input_tokens", "cache_write_input_tokens", "prompt_cache_write_tokens")
 	if nested, ok := nestedMap(raw["raw_usage"]); ok {
 		nestedRead, nestedWrite := cacheTokensFromMap(nested)
 		read = max(read, nestedRead)

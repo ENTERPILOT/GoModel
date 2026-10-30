@@ -36,8 +36,9 @@ func TestConvertAnthropicResponseToResponses_EndTurnCompletes(t *testing.T) {
 	assert.Nil(t, resp.IncompleteDetails)
 }
 
-// Cache reads and thinking tokens keep their OpenAI-shaped home; the
-// Anthropic-named counts stay out of the client-visible usage object.
+// Usage takes the OpenAI Responses shape: input_tokens covers the whole
+// prompt, with the cache reads and writes itemized, and thinking tokens are
+// reasoning tokens. The Anthropic-named counts stay out of the usage object.
 func TestBuildAnthropicResponsesUsage_NormalizesDetails(t *testing.T) {
 	usage := buildAnthropicResponsesUsage(anthropicUsage{
 		InputTokens:              100,
@@ -46,11 +47,13 @@ func TestBuildAnthropicResponsesUsage_NormalizesDetails(t *testing.T) {
 		CacheCreationInputTokens: 10,
 		OutputTokensDetails:      anthropicOutputTokensDetails{ThinkingTokens: 12},
 	})
+	assert.Equal(t, 150, usage.InputTokens)
+	assert.Equal(t, 170, usage.TotalTokens)
 	require.NotNil(t, usage.PromptTokensDetails)
 	assert.Equal(t, 40, usage.PromptTokensDetails.CachedTokens)
+	assert.Equal(t, 10, usage.PromptTokensDetails.CacheWriteTokens)
 	require.NotNil(t, usage.CompletionTokensDetails)
 	assert.Equal(t, 12, usage.CompletionTokensDetails.ReasoningTokens)
-	assert.Equal(t, 10, usage.RawUsage["cache_creation_input_tokens"], "Anthropic counts must stay in RawUsage for usage records")
 
 	encoded, err := json.Marshal(usage)
 	require.NoError(t, err)

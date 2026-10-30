@@ -54,18 +54,17 @@ func convertAnthropicResponseToResponses(resp *anthropicResponse, model string) 
 	return converted
 }
 
-// buildAnthropicResponsesUsage creates a ResponsesUsage from anthropicUsage.
-// Cache reads and thinking tokens are reported in the OpenAI Responses shape;
-// the Anthropic-named counts stay in RawUsage, which feeds usage records and
-// cost calculation without reaching the client response.
+// buildAnthropicResponsesUsage creates a ResponsesUsage from anthropicUsage in
+// the OpenAI shape: input_tokens covers the whole prompt, with the cache reads
+// and writes itemized under input_tokens_details, and thinking tokens are
+// reported as reasoning tokens. Thinking tokens also stay in RawUsage, which
+// feeds usage records without reaching the client response.
 func buildAnthropicResponsesUsage(u anthropicUsage) *core.ResponsesUsage {
 	usage := &core.ResponsesUsage{
-		InputTokens:  u.InputTokens,
-		OutputTokens: u.OutputTokens,
-		TotalTokens:  u.InputTokens + u.OutputTokens,
-	}
-	if u.CacheReadInputTokens > 0 {
-		usage.PromptTokensDetails = &core.PromptTokensDetails{CachedTokens: u.CacheReadInputTokens}
+		InputTokens:         u.promptTokens(),
+		OutputTokens:        u.OutputTokens,
+		TotalTokens:         u.promptTokens() + u.OutputTokens,
+		PromptTokensDetails: u.promptDetails(),
 	}
 	if u.OutputTokensDetails.ThinkingTokens > 0 {
 		usage.CompletionTokensDetails = &core.CompletionTokensDetails{ReasoningTokens: u.OutputTokensDetails.ThinkingTokens}
@@ -78,20 +77,19 @@ func buildAnthropicResponsesUsage(u anthropicUsage) *core.ResponsesUsage {
 }
 
 // anthropicResponsesUsagePayload renders the usage object carried by the
-// terminal stream event. It keeps the Anthropic-named cache counts: a stream's
-// usage is recorded by parsing this payload, so dropping them would drop the
-// cache pricing with them.
+// terminal stream event, in the same shape as buildAnthropicResponsesUsage.
+// A stream's usage is recorded by parsing this payload.
 func anthropicResponsesUsagePayload(usage *anthropicUsage) map[string]any {
 	if usage == nil {
 		return nil
 	}
 
 	payload := map[string]any{
-		"input_tokens":  usage.InputTokens,
+		"input_tokens":  usage.promptTokens(),
 		"output_tokens": usage.OutputTokens,
-		"total_tokens":  usage.InputTokens + usage.OutputTokens,
+		"total_tokens":  usage.promptTokens() + usage.OutputTokens,
 	}
-	addAnthropicUsagePayloadDetails(payload, usage, "output_tokens_details")
+	addAnthropicUsagePayloadDetails(payload, usage, "input_tokens_details", "output_tokens_details")
 	return payload
 }
 
