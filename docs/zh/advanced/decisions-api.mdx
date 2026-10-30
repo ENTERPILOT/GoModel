@@ -1,21 +1,22 @@
 ---
 title: "Decisions API"
-description: "通过 GoModel 使用 OpenAI 的 Decisions API 提出类型化的判断、选择和评分问题，由 OpenAI、Jev / Kev 或 OpenRouter 的决策模型作答。"
+description: "通过 GoModel 使用 OpenAI 的 Decisions API 提出类型化的判断、选择和评分问题，由 OpenAI、Jev / Kev、OpenRouter 的决策模型或 Azure 的 gpt-6-luna 和 Microsoft-Decision-1 作答。"
 icon: "list-check"
-keywords: ["Decisions", "decisions API", "决策 API", "gpt-6-luna", "predicate", "判断", "choice", "选择", "score", "评分", "classification", "分类", "Jev", "Kev", "System One", "OpenRouter"]
+keywords: ["Decisions", "decisions API", "决策 API", "gpt-6-luna", "predicate", "判断", "choice", "选择", "score", "评分", "classification", "分类", "Jev", "Kev", "System One", "OpenRouter", "Azure", "Microsoft-Decision-1"]
 ---
 
 `POST /v1/decisions` 提供 [OpenAI 的 Decisions API](https://developers.openai.com/api/docs/guides/decisions)：
 请求包含一个 `input`（文本，或由文本和图像组成的用户消息）以及一组类型化的问题，每个回答都是一个概率、一个选项或一个分数，而不是自由文本。
 
-只要配置了 `openai`、[`jev`](/zh/providers/jev) 或
-`openrouter` 提供商，该端点即可使用。否则，它会返回 `404`。
+只要配置了 `openai`、[`jev`](/zh/providers/jev)、
+`openrouter` 或 [`azure`](/zh/providers/azure#决策模型) 提供商，该端点即可使用。否则，它会返回 `404`。
 
 | 提供商 | 作答方式 |
 | --- | --- |
 | `openai` | 原生支持：请求体按原样发送到 `/v1/decisions` |
 | `jev`（托管版 Jev、自托管 Kev） | 通过 [System One](/zh/advanced/systemone-api)，双向转换；仅托管版 Jev 支持图像 |
 | `openrouter` | 其 System One 决策模型（`openrouter/typesafe/jev-1.13`、`openrouter/~typesafe/jev-latest`、Kev），以相同方式转换；仅支持文本。OpenRouter 的聊天模型不会响应该 API |
+| `azure` | `gpt-6-luna` 部署以原生方式发送到 Foundry 的 `/openai/v1/decisions`；Microsoft-Decision-1 部署通过 Foundry 的 System One 端点，按与 `jev` 相同的方式转换，仅支持文本和 JSON |
 
 无论哪种方式，回答都采用 OpenAI 的格式，因此 OpenAI SDK 无需修改即可使用。
 
@@ -129,7 +130,7 @@ virtual_models:
 
 | 情况 | 结果 |
 | --- | --- |
-| 未配置 `openai`、`jev` 或 `openrouter` 提供商 | `404` |
+| 未配置 `openai`、`jev`、`openrouter` 或 `azure` 提供商 | `404` |
 | OpenRouter 上的聊天模型 | `400 invalid_request_error`：只有其决策模型才能回答 Decisions 请求 |
 | 缺少 `model` | `400` |
 | 模型所在的提供商没有 Decisions API（包括通过虚拟模型的情况） | `400 invalid_request_error`；网关会记录一条警告 |

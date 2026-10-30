@@ -41,11 +41,21 @@ Loopback-URLs für die Entwicklung. Standardmäßig ist mindestens eine
 Administratorgruppe erforderlich; setzen Sie `PRO_SSO_ALLOW_ALL_ADMINS=true`
 nur für einen bewusst uneingeschränkten OIDC-Client.
 
-<Warning>
-  Der Widerruf von SSO-Sessions erfolgt prozesslokal. Betreiben Sie SSO auf
-  genau einer aktiven GoModel-Pro-Replica, bis ein gemeinsamer Session- oder
-  Widerrufsspeicher verfügbar ist.
-</Warning>
+## Abmeldung über Replicas hinweg
+
+Die Abmeldung widerruft die Session sofort auf der Replica, die sie
+bearbeitet hat, und speichert den Widerruf im konfigurierten Storage-Backend.
+Jede Replica liest Widerrufe alle 2 Sekunden neu ein. Mit PostgreSQL- oder
+MongoDB-Storage funktioniert eine abgemeldete Session daher innerhalb weniger
+Sekunden auf keiner Replica mehr. Widerrufe überstehen Neustarts und werden
+gelöscht, sobald die Session ohnehin abgelaufen wäre.
+
+Betreiben Sie mit SQLite nur eine Replica: Jede SQLite-Instanz hat ihre eigene
+Datenbank, andere Replicas sehen den Widerruf also nie, und ein erneut
+gesendetes Cookie bleibt dort bis zu seinem Ablauf gültig. Ist das
+Storage-Backend bei der Abmeldung nicht erreichbar, gilt der Widerruf trotzdem
+auf der bearbeitenden Replica, eine Warnung wird protokolliert, und diese
+Replica versucht es weiter, bis die anderen Replicas den Widerruf sehen.
 
 ## Audit und Zugriffskontrolle
 

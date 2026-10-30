@@ -66,6 +66,13 @@ Every check carries:
 | `X-GoModel-Install` | a UUID      | anonymous per-deployment id, below  |
 | `X-GoModel-Source`  | `scheduled` | `scheduled` or `dashboard`          |
 
+GoModel Pro adds two more, described [below](#gomodel-pro-licenses):
+
+| Header              | Example           | Meaning                                                  |
+| ------------------- | ----------------- | -------------------------------------------------------- |
+| `X-GoModel-License` | `paid`            | `paid`, `trial`, `beta` or `none`                        |
+| `X-GoModel-Account` | 32 hex characters | digest of the license holder's name; paid and trial only |
+
 A check triggered by a dashboard visit also forwards an **allowlisted** slice of
 that visit: the browser's `User-Agent`, `Accept-Language`, `Sec-CH-UA*` client
 hints, and the visit cookie value (`X-GoModel-Date`).
@@ -105,6 +112,30 @@ Earlier releases derived the identifier from `GOMODEL_MASTER_KEY` in that
 situation. An id saved that way is replaced with a random one, in both the
 database and the file, the first time this release starts, so the deployment
 reports as new once.
+
+### GoModel Pro licenses
+
+One organization often runs several gateways (staging and production, one per
+region), each with its own database and so its own install id. To count
+license holders as well as deployments, GoModel Pro reports the kind of license
+it runs on and, for a paid or trial license, an **account digest**: an
+HMAC-SHA256 of the organization named in the license, truncated to 32 hex
+characters. Every gateway on one license holder's licenses reports the same
+digest, including after a renewal or when a trial becomes a paid license under
+the same name. A trial license names the company entered at sign-up, or the
+email address when none was entered. The name itself is never sent. Like any
+digest of a name, it can be checked by someone who already has a guess for
+it; we compare it with the names on the licenses we issued. Beta builds share
+one built-in license, so they report `beta` and no digest.
+
+### What we record on our side
+
+Any server you connect to sees your gateway's public address. We do not store
+it. Alongside the headers above, the release host records the country and the
+network operator the request came from (its autonomous system number and name,
+such as a cloud provider), and a keyed hash of the address, so gateways behind
+one address can be counted once. The hash cannot be turned back into the
+address without a key only we hold, and it is deleted after 90 days.
 
 ## Turning it off if you don't want to get the updates
 

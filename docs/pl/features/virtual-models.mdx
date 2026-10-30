@@ -30,7 +30,7 @@ dostępu dla selektora **Source**.
 
 GoModel nie zapisuje pustych, nieskutecznych polityk dostępu, niezależnie od tego, czy są zapisywane
 z dashboardu, czy przez admin API. Jeśli zapisana polityka nie ma celu, ścieżek
-użytkownika, opisu ani spowolnienia, a jej stan włączenia odpowiada odziedziczonemu/domyślnemu
+użytkownika, opisu, spowolnienia ani reasoning effort, a jej stan włączenia odpowiada odziedziczonemu/domyślnemu
 stanowi dostępu, GoModel usuwa zapisany wiersz. Zachowuje poza tym pustą
 politykę, gdy ten wiersz nadal nadpisuje wyłączoną wartość domyślną lub odziedziczone
 ograniczenie ścieżki użytkownika.
@@ -56,6 +56,55 @@ Gdy zarówno alias, jak i jego konkretny cel mają spowolnienie, wygrywa wartoś
 aliasu. Alias bez własnej wartości dziedziczy spowolnienie wybranego modelu docelowego;
 ustaw w aliasie `0`, aby nadpisać to dziedziczenie. Dotyczy to też
 modeli wirtualnych z load balancingiem po wybraniu celu.
+
+Spowolnienie samego modelu można ustawić dokładnie (`openai/gpt-4o`) albo dla
+całego modelu (`gpt-4o`, u każdego providera); wygrywa wartość dokładna.
+Bardziej szczegółowy wpis, który zostawia spowolnienie puste albo którego
+`user_paths` wykluczają wywołującego, nie przesłania wartości ogólniejszej.
+Reguła dostępu dla całego providera nigdy więc nie wyłącza spowolnienia modelu.
+
+## Wymuszanie reasoning effort
+
+Ustaw **Reasoning effort override** na konkretnym modelu lub przekierowaniu, aby
+wysyłać ten reasoning effort dalej niezależnie od tego, o co prosił klient. Użyj
+go, gdy model akceptuje tylko część poziomów (na przykład model hostowany
+samodzielnie, który odrzuca `high`), albo aby ustalić koszt i opóźnienie modelu.
+Dostępne wartości to `none`, `minimal`, `low`, `medium`, `high`, `xhigh` i
+`max`; pozostaw pole puste (domyślnie), aby zachować wartość klienta.
+
+```yaml
+virtual_models:
+  - source: hetzner/qwen3.8 # konkretny model
+    reasoning_effort: medium
+  - source: team-model # load balancer
+    reasoning_effort: high
+    targets:
+      - { model: openai/gpt-5.2 }
+      - { model: hetzner/qwen3.8 }
+```
+
+Nadpisanie zastępuje zarówno `reasoning.effort`, jak i płaskie pole
+`reasoning_effort`, i działa także wtedy, gdy klient nie wysłał żadnego effort.
+GoModel tłumaczy je następnie na parametr reasoning danego providera, tak samo
+jak wartości klienta.
+
+Dla każdej próby wygrywa wartość skonfigurowana najgłębiej. Nadpisanie
+konkretnego modelu ma pierwszeństwo przed każdym przekierowaniem nad nim, a
+wewnętrzny [połączony w łańcuch](#łączenie-modeli-wirtualnych-w-łańcuchy) model
+wirtualny przed zewnętrznym. W powyższym przykładzie `team-model` wysyła `high`
+do `openai/gpt-5.2` i `medium` do `hetzner/qwen3.8`, także gdy któryś z nich
+zostanie osiągnięty przez failover. Gdy model jest osiągalny przez kilka
+wewnętrznych modeli wirtualnych, obowiązuje wartość ze ścieżki wybranej przez
+routing; próba failover korzysta z pierwszej zadeklarowanej ścieżki do swojego modelu. Dotyczy to Chat Completions, Responses API
+i Anthropic Messages API; batche i passthrough providera nie są przepisywane.
+
+Ponieważ nadpisanie konkretnego modelu wygrywa z każdym aliasem nad nim, ustawiaj
+je tylko dla poziomów, których model nie akceptuje, a politykę umieszczaj w
+aliasach. Na przykład aliasy `fast` i `smart` tego samego modelu mogą wysyłać
+`low` i `high`; nadpisanie na tym modelu sprawiłoby, że oba wysyłałyby jego
+wartość. To odwrotność spowolnienia, gdzie wygrywa alias. Tak jak przy
+spowolnieniu, dokładne nadpisanie wygrywa z ustawieniem dla całego modelu, a
+wpis bez effort nie przesłania ogólniejszego.
 
 Reszta tej strony dotyczy przekierowań.
 
@@ -285,7 +334,8 @@ Każdy wpis przyjmuje `source`, pojedynczy `target` (skrót) lub listę `targets
 [Utrzymywanie sesji](/pl/features/session-keeping)), `failover` (domyślnie `true`; zobacz
 [Failover](/pl/features/failover)), `user_paths`, `description`,
 `slowdown` (`0` wyłącza odziedziczone spowolnienie; aktywne współczynniki mieszczą się w zakresie od `0.1` do
-`10`) oraz `enabled`.
+`10`), `reasoning_effort` (zobacz
+[Wymuszanie reasoning effort](#wymuszanie-reasoning-effort)) oraz `enabled`.
 `model` celu może wskazywać inny zadeklarowany model wirtualny (zobacz
 [Łączenie modeli wirtualnych w łańcuchy](#łączenie-modeli-wirtualnych-w-łańcuchy)).
 Zostaw cele puste, aby zadeklarować politykę dostępu dla selektora `source`.

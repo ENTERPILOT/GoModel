@@ -14,8 +14,34 @@ export function defaultBudgetForm() {
     period_seconds: 86400,
     amount: "",
     per_child: false,
+    cost_basis: "provider",
     source: "manual",
   };
+}
+
+// budgetCostBasis reads which spend a budget limits: "billed" (provider cost
+// plus markup) or "provider", the default for budgets without the field.
+export function budgetCostBasis(item) {
+  return String((item && item.cost_basis) || "").trim() === "billed"
+    ? "billed"
+    : "provider";
+}
+
+// budgetBilledOnProviderCost reports a billed budget that is enforced on
+// provider cost because billed budgets are unavailable (no billing
+// entitlement or markups disabled).
+export function budgetBilledOnProviderCost(item) {
+  return (
+    budgetCostBasis(item) === "billed" &&
+    String((item && item.enforced_cost_basis) || "").trim() === "provider"
+  );
+}
+
+export function budgetCostBasisOptions() {
+  return [
+    { value: "provider", label: m.budgets_cost_basis_provider() },
+    { value: "billed", label: m.budgets_cost_basis_billed() },
+  ];
 }
 
 // One scope metadata table drives the select options, list chips, and the
@@ -213,6 +239,10 @@ function budgetFilterText(item) {
     budgetPeriodLabel(item),
     budgetPeriodFromSeconds(seconds),
     item && item.per_child ? m.budgets_per_child_badge() : "",
+    budgetCostBasis(item) === "billed" ? m.budgets_billed_badge() : "",
+    budgetBilledOnProviderCost(item)
+      ? m.budgets_billed_on_provider_badge()
+      : "",
     seconds ? String(seconds) + "s" : "",
     seconds ? String(seconds) + " seconds" : "",
   ]
@@ -292,6 +322,7 @@ export function buildBudgetFormPayload(form) {
       period_seconds: Math.trunc(periodSeconds),
       amount,
       per_child: scope === "user_path" && Boolean(f.per_child),
+      cost_basis: budgetCostBasis(f),
       source: String(f.source || "manual").trim() || "manual",
     },
     error: "",
@@ -316,6 +347,7 @@ export function budgetPutBody(payload) {
     budget_key: { period_seconds: payload.period_seconds },
     amount: payload.amount,
     per_child: Boolean(payload.per_child),
+    cost_basis: budgetCostBasis(payload),
   };
 }
 
@@ -407,7 +439,9 @@ export function budgetPeriodLabel(item) {
       return m.budgets_period_monthly();
     default: {
       const label = String((item && item.period_label) || "").trim();
-      return m.budgets_custom_period({ period: label || String(seconds || "") + "s" });
+      return m.budgets_custom_period({
+        period: label || String(seconds || "") + "s",
+      });
     }
   }
 }

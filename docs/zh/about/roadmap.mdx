@@ -7,8 +7,8 @@ keywords: ["路线图", "里程碑", "即将推出的功能", "版本发布", "r
 
 ## 0.2.0 路线图
 
-- [ ] 改进/重新设计测试策略
-- [ ] 护栏加固：更好的 UI、更简单的架构、更易实现的自定义护栏，以及在输出到达客户端之前生效的响应侧护栏
+- [x] 改进/重新设计测试策略
+- [x] 护栏加固：更好的 UI、更简单的架构、更易实现的自定义护栏，以及在输出到达客户端之前生效的响应侧护栏
 - [x] 编写定制的行为准则（Code of Conduct）
 - [x] 插件——至少支持护栏
 - [x] OpenTelemetry (OTel) 支持
@@ -53,10 +53,10 @@ keywords: ["路线图", "里程碑", "即将推出的功能", "版本发布", "r
 - [x] 上下文窗口压缩（[GoModel Pro](/zh/pro/compression)）
 - [x] OIDC 单点登录（[GoModel Pro](/zh/pro/sso)）
 - [x] 带健康检查和故障转移的出站代理池（[GoModel Pro](/zh/pro/egress)，Beta；按提供商配置的 `proxy_url` 包含在[核心版](/zh/providers/outbound-proxy)中）
+- [x] Secret 管理器集成（Vault、AWS Secrets Manager、Azure Key Vault、GCP Secret Manager）（[GoModel Pro](/zh/pro/overview#vaults)）；支持 `env` 和 `file` 的 [Secret 引用](/zh/advanced/secret-references)包含在核心版中
 - [ ] 集群模式
 - [ ] LDAP 集成
 - [ ] 控制台和 Admin API 的基于角色的访问控制（RBAC）
-- [ ] GoModel Pro 中的 Secret 管理器集成（Vault、AWS Secrets Manager/KMS、Azure Key Vault、GCP Secret Manager）；支持 `env` 和 `file` 的 [Secret 引用](/zh/advanced/secret-references)包含在核心版中
 - [ ] 将审计日志导出/流式传输到对象存储和数据湖
 - [ ] IP / CIDR 允许列表
 - [ ] LTS 渠道，提供签名产物、SBOM 和 CVE 预先通知

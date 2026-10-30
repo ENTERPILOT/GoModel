@@ -94,7 +94,8 @@ type UsageEntry struct {
 
 	// MarkupPercent is the pricing.markups percentage applied on top of
 	// TotalCost, and MarkupSelector the selector it came from (nil and empty
-	// when no markup rule matched).
+	// when no markup rule matched). A pricing.user_path_markups rule is
+	// recorded as "<user path>:<selector>", for example "/acme:openai/gpt-5".
 	MarkupPercent  *float64 `json:"markup_percent,omitempty" bson:"markup_percent,omitempty"`
 	MarkupSelector string   `json:"markup_selector,omitempty" bson:"markup_selector,omitempty"`
 

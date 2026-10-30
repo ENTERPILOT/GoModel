@@ -26,7 +26,7 @@ func TestApplySelectsMostSpecificMarkup(t *testing.T) {
 		"vendor/model":  50,
 		"openai-eu/o3/": 60,
 	}
-	svc, err := New(config.PricingConfig{Markups: markups, BillCacheHits: true}, testCatalog)
+	svc, err := New(config.PricingConfig{Markups: markups, BillCacheHits: true}, testCatalog, false)
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -90,7 +90,7 @@ func TestApplyBilledCost(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			svc, err := New(config.PricingConfig{Markups: tt.markups, BillCacheHits: tt.billCacheHits}, testCatalog)
+			svc, err := New(config.PricingConfig{Markups: tt.markups, BillCacheHits: tt.billCacheHits}, testCatalog, false)
 			require.NoError(t, err)
 			entry := &usage.UsageEntry{Provider: "openai", Model: "gpt-5", CacheType: tt.cacheType, TotalCost: tt.totalCost}
 
@@ -120,7 +120,7 @@ func TestApplyPrefersRoutedModel(t *testing.T) {
 		"openai/gpt-4o-mini":       20,
 		"gpt-4o-mini-2024-07-18":   30,
 		"openai/gpt-4o-2024-08-06": 40,
-	}}, testCatalog)
+	}}, testCatalog, false)
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -144,7 +144,7 @@ func TestApplyPrefersRoutedModel(t *testing.T) {
 }
 
 func TestApplyResetsMarkupWhenNoRuleMatches(t *testing.T) {
-	svc, err := New(config.PricingConfig{Markups: map[string]float64{"anthropic/": 20}}, testCatalog)
+	svc, err := New(config.PricingConfig{Markups: map[string]float64{"anthropic/": 20}}, testCatalog, false)
 	require.NoError(t, err)
 	entry := &usage.UsageEntry{Provider: "openai", Model: "gpt-5", TotalCost: new(1.0), MarkupPercent: new(99.0), MarkupSelector: "stale"}
 
@@ -168,9 +168,118 @@ func TestNewRejectsInvalidSelectors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := New(config.PricingConfig{Markups: tt.markups}, testCatalog)
+			_, err := New(config.PricingConfig{Markups: tt.markups}, testCatalog, false)
 			require.Error(t, err)
 			assert.ErrorContains(t, err, tt.wantErr)
 		})
 	}
+}
+
+func TestApplyUserPathMarkups(t *testing.T) {
+	svc, err := New(config.PricingConfig{
+		Markups: map[string]float64{"/": 20, "anthropic/": 25},
+		UserPathMarkups: map[string]map[string]float64{
+			"/acme":          {"/": 30, "openai/gpt-5": 15},
+			"acme/internal/": {"/": 0},
+			"/acme/eu":       {"gpt-5": 12},
+			"/beta":          {"openai/": 40},
+		},
+	}, testCatalog, true)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name         string
+		userPath     string
+		provider     string
+		model        string
+		wantPercent  float64
+		wantSelector string
+	}{
+		{name: "customer selector beats customer global", userPath: "/acme", provider: "openai", model: "gpt-5", wantPercent: 15, wantSelector: "/acme:openai/gpt-5"},
+		{name: "customer global beats global provider rule", userPath: "/acme", provider: "anthropic", model: "claude-opus-4-1", wantPercent: 30, wantSelector: "/acme:/"},
+		{name: "descendant inherits customer markups", userPath: "/acme/team/alice", provider: "openai", model: "gpt-4o", wantPercent: 30, wantSelector: "/acme:/"},
+		{name: "deepest path wins", userPath: "/acme/internal/ci", provider: "openai", model: "gpt-5", wantPercent: 0, wantSelector: "/acme/internal:/"},
+		{name: "deeper path without match falls back to shallower path", userPath: "/acme/eu/team", provider: "openai", model: "gpt-4o", wantPercent: 30, wantSelector: "/acme:/"},
+		{name: "deeper path match wins over shallower selector", userPath: "/acme/eu", provider: "openai", model: "gpt-5", wantPercent: 12, wantSelector: "/acme/eu:gpt-5"},
+		{name: "path without match falls back to global markups", userPath: "/beta/team", provider: "anthropic", model: "claude-opus-4-1", wantPercent: 25, wantSelector: "anthropic/"},
+		{name: "path prefix is not a subtree", userPath: "/acmecorp", provider: "openai", model: "gpt-5", wantPercent: 20, wantSelector: "/"},
+		{name: "root user path uses global markups", userPath: "/", provider: "openai", model: "gpt-5", wantPercent: 20, wantSelector: "/"},
+		{name: "missing user path uses global markups", provider: "openai", model: "gpt-5", wantPercent: 20, wantSelector: "/"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := &usage.UsageEntry{UserPath: tt.userPath, ProviderName: tt.provider, Provider: tt.provider, Model: tt.model, TotalCost: new(1.0)}
+			svc.Apply(entry)
+
+			require.NotNil(t, entry.MarkupPercent)
+			assert.Equal(t, tt.wantPercent, *entry.MarkupPercent)
+			assert.Equal(t, tt.wantSelector, entry.MarkupSelector)
+			require.NotNil(t, entry.BilledCost)
+			assert.InDelta(t, 1+tt.wantPercent/100, *entry.BilledCost, 1e-12)
+		})
+	}
+}
+
+func TestApplyUserPathMarkupsWithoutGlobalMarkups(t *testing.T) {
+	svc, err := New(config.PricingConfig{UserPathMarkups: map[string]map[string]float64{"/acme": {"openai/": 10}}}, testCatalog, true)
+	require.NoError(t, err)
+
+	entry := &usage.UsageEntry{UserPath: "/beta", Provider: "openai", Model: "gpt-5", TotalCost: new(1.0)}
+	svc.Apply(entry)
+	assert.Nil(t, entry.MarkupPercent)
+	assert.Empty(t, entry.MarkupSelector)
+	require.NotNil(t, entry.BilledCost)
+	assert.Equal(t, 1.0, *entry.BilledCost)
+}
+
+func TestNewUserPathMarkupsRequireCapability(t *testing.T) {
+	cfg := config.PricingConfig{
+		Markups:         map[string]float64{"/": 20},
+		UserPathMarkups: map[string]map[string]float64{"/acme": {"/": 30}},
+	}
+	_, err := New(cfg, testCatalog, false)
+	require.ErrorIs(t, err, ErrCustomerMarkupsUnavailable)
+
+	cfg.UserPathMarkups = nil
+	svc, err := New(cfg, testCatalog, false)
+	require.NoError(t, err, "global markups need no capability")
+	entry := &usage.UsageEntry{UserPath: "/acme", Provider: "openai", Model: "gpt-5", TotalCost: new(1.0)}
+	svc.Apply(entry)
+	assert.Equal(t, "/", entry.MarkupSelector)
+}
+
+func TestNewRejectsInvalidUserPathMarkups(t *testing.T) {
+	tests := []struct {
+		name            string
+		userPathMarkups map[string]map[string]float64
+		wantErr         string
+	}{
+		{name: "invalid user path", userPathMarkups: map[string]map[string]float64{"/acme/../x": {"/": 10}}, wantErr: `pricing.user_path_markups["/acme/../x"]: user path cannot contain`},
+		{name: "colon in user path", userPathMarkups: map[string]map[string]float64{"/acme:eu": {"/": 10}}, wantErr: "user path cannot contain ':'"},
+		{name: "root user path", userPathMarkups: map[string]map[string]float64{"/": {"/": 10}}, wantErr: "covered by pricing.markups"},
+		{name: "duplicate after normalization", userPathMarkups: map[string]map[string]float64{"/acme": {"/": 10}, "acme/": {"/": 20}}, wantErr: "duplicates user path"},
+		{name: "unknown provider", userPathMarkups: map[string]map[string]float64{"/acme": {"opnai/": 10}}, wantErr: `pricing.user_path_markups["/acme"]["opnai/"]: unknown provider name`},
+		{name: "duplicate selector", userPathMarkups: map[string]map[string]float64{"/acme": {"openai/gpt-5": 10, " openai/gpt-5 ": 20}}, wantErr: "duplicates selector"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := New(config.PricingConfig{UserPathMarkups: tt.userPathMarkups}, testCatalog, true)
+			require.Error(t, err)
+			assert.ErrorContains(t, err, tt.wantErr)
+		})
+	}
+}
+
+func TestApplyUserPathMarkupsDoesNotAllocate(t *testing.T) {
+	svc, err := New(config.PricingConfig{
+		Markups:         map[string]float64{"/": 20},
+		UserPathMarkups: map[string]map[string]float64{"/acme": {"openai/gpt-5": 15}, "/acme/team": {"anthropic/": 5}},
+	}, testCatalog, true)
+	require.NoError(t, err)
+	entry := &usage.UsageEntry{UserPath: "/acme/team/alice", ProviderName: "openai", Provider: "openai", RoutedModel: "gpt-5", Model: "openai/gpt-5-2025-08-07"}
+
+	allocs := testing.AllocsPerRun(100, func() {
+		_, _ = svc.match(entry.UserPath, entryProvider(entry), entry.RoutedModel, entry.Model)
+	})
+	assert.Zero(t, allocs)
 }

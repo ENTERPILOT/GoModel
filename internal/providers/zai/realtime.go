@@ -38,7 +38,7 @@ func (p *Provider) RealtimeTarget(ctx context.Context, req *core.RealtimeRequest
 		headers.Set("Authorization", "Bearer "+apiKey)
 	}
 
-	return &core.RealtimeTarget{URL: endpoint, Headers: headers}, nil
+	return &core.RealtimeTarget{URL: endpoint, Headers: headers, HTTPClient: p.HTTPClient()}, nil
 }
 
 // realtimeURL maps the configured base URL host to the GLM-Realtime endpoint

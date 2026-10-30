@@ -11,6 +11,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/providers"
 )
@@ -253,11 +254,11 @@ func (h *Handler) UpsertProviderCredential(c *echo.Context) error {
 	h.mutationMu.Lock()
 	defer h.mutationMu.Unlock()
 
-	cred, err := h.buildProviderCredentialUpsert(c.Request().Context(), name, req)
+	cred, kept, err := h.buildProviderCredentialUpsert(c.Request().Context(), name, req)
 	if err != nil {
 		return handleError(c, err)
 	}
-	if err := h.providerCredentials.Upsert(c.Request().Context(), cred); err != nil {
+	if err := h.providerCredentials.Upsert(config.WithKeptSecrets(c.Request().Context(), kept...), cred); err != nil {
 		return handleError(c, providerCredentialWriteError(err))
 	}
 
@@ -294,24 +295,42 @@ func (h *Handler) DeleteProviderCredential(c *echo.Context) error {
 // buildProviderCredentialUpsert maps the request onto a validated
 // ManagedProviderCredential, resolving redacted placeholders against the
 // stored row so the dashboard never has to re-submit real secrets on every
-// edit.
-func (h *Handler) buildProviderCredentialUpsert(ctx context.Context, name string, req upsertProviderCredentialRequest) (providers.ManagedProviderCredential, error) {
+// edit. It also returns the secret values that were resolved that way: the
+// caller did not supply them, so the save may not repoint the credential
+// (config.WithKeptSecrets).
+func (h *Handler) buildProviderCredentialUpsert(ctx context.Context, name string, req upsertProviderCredentialRequest) (providers.ManagedProviderCredential, []string, error) {
 	current, err := h.providerCredentials.Get(ctx, name)
 	if err != nil && !errors.Is(err, providers.ErrCredentialNotFound) {
-		return providers.ManagedProviderCredential{}, providerCredentialWriteError(err)
+		return providers.ManagedProviderCredential{}, nil, providerCredentialWriteError(err)
 	}
 
+	var kept []string
 	apiKeys, err := mergeRedactedList(req.APIKeys, currentAPIKeys(current))
 	if err != nil {
-		return providers.ManagedProviderCredential{}, err
+		return providers.ManagedProviderCredential{}, nil, err
+	}
+	for i, value := range req.APIKeys {
+		if isRedactedCredentialValue(value) {
+			kept = append(kept, apiKeys[i])
+		}
 	}
 	serviceAccountJSON, err := mergeRedactedValue(providers.CredentialFieldServiceAccountJSON, req.ServiceAccountJSON, currentField(current, func(c providers.ManagedProviderCredential) string { return c.ServiceAccountJSON }))
 	if err != nil {
-		return providers.ManagedProviderCredential{}, err
+		return providers.ManagedProviderCredential{}, nil, err
+	}
+	if isRedactedCredentialValue(req.ServiceAccountJSON) {
+		kept = append(kept, serviceAccountJSON)
 	}
 	serviceAccountJSONBase64, err := mergeRedactedValue(providers.CredentialFieldServiceAccountJSONBase64, req.ServiceAccountJSONBase64, currentField(current, func(c providers.ManagedProviderCredential) string { return c.ServiceAccountJSONBase64 }))
 	if err != nil {
-		return providers.ManagedProviderCredential{}, err
+		return providers.ManagedProviderCredential{}, nil, err
+	}
+	if isRedactedCredentialValue(req.ServiceAccountJSONBase64) {
+		kept = append(kept, serviceAccountJSONBase64)
+	}
+	proxyURL := mergeRedactedProxyURL(req.ProxyURL, currentField(current, func(c providers.ManagedProviderCredential) string { return c.ProxyURL }))
+	if proxyURL != strings.TrimSpace(req.ProxyURL) {
+		kept = append(kept, proxyURL)
 	}
 
 	enabled := true
@@ -337,7 +356,7 @@ func (h *Handler) buildProviderCredentialUpsert(ctx context.Context, name string
 		ServiceAccountJSON:       serviceAccountJSON,
 		ServiceAccountJSONBase64: serviceAccountJSONBase64,
 		GCPScope:                 strings.TrimSpace(req.GCPScope),
-		ProxyURL:                 mergeRedactedProxyURL(req.ProxyURL, currentField(current, func(c providers.ManagedProviderCredential) string { return c.ProxyURL })),
+		ProxyURL:                 proxyURL,
 		Models:                   req.Models,
 		Enabled:                  enabled,
 	}
@@ -347,7 +366,7 @@ func (h *Handler) buildProviderCredentialUpsert(ctx context.Context, name string
 			cred.SessionStickyKeys = current.SessionStickyKeys
 		}
 	}
-	return cred, nil
+	return cred, kept, nil
 }
 
 func currentAPIKeys(current *providers.ManagedProviderCredential) []string {

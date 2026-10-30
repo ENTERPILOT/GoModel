@@ -1,19 +1,20 @@
 ---
 title: "GoModel Pro"
 sidebarTitle: "概览"
-description: "GoModel Pro 为 GoModel 网关增加了需授权的提示词压缩、智能路由、OIDC SSO 和出站代理池。"
+description: "GoModel Pro 为 GoModel 网关增加了需授权的提示词压缩、智能路由、OIDC SSO、出站代理池和密钥管理器 Vaults。可免费试用 21 天。"
 icon: "gem"
 tag: "Pro"
-keywords: ["GoModel Pro", "提示词压缩", "prompt compression", "智能路由", "intelligent routing", "OIDC", "SSO", "配额模板", "quota templates", "出站代理池", "egress proxy pools", "许可证", "license"]
+keywords: ["GoModel Pro", "提示词压缩", "prompt compression", "智能路由", "intelligent routing", "OIDC", "SSO", "配额模板", "quota templates", "出站代理池", "egress proxy pools", "密钥库", "vaults", "许可证", "license", "免费试用", "free trial"]
 ---
 
 ## Pro 是什么
 
 GoModel Pro 是 GoModel 的商业发行版。它与开源版 GoModel 使用相同的网关、配置、提供商、控制台和 API，并提供需授权的扩展功能：
-提示词压缩、智能路由、OIDC 单点登录、出站代理池以及按子路径的配额模板。
+提示词压缩、智能路由、OIDC 单点登录、出站代理池、按子路径的配额模板以及密钥管理器 Vaults。
 
-没有有效许可证时，Pro 二进制文件会以开源网关的形式启动，且不会阻断流量。显式启用的 SSO 或出站代理池是例外：当其授权或配置无效时，
-启动会失败即拒绝（fail closed），这样认证边界就不会悄无声息地消失，经代理的流量也永远不会从网关自身的地址发出。
+没有有效许可证时，Pro 二进制文件会以开源网关的形式启动，且不会阻断流量。显式启用的 SSO、出站代理池、按子路径的配额模板和 Vaults 是例外：
+当其授权或配置无效时，启动会失败即拒绝（fail closed），这样认证边界就不会悄无声息地消失，经代理的流量永远不会从网关自身的地址发出，
+限额不会被悄悄共享，密钥也不会处于未解析状态。
 
 <CardGroup cols={2}>
   <Card title="提示词压缩" icon="package-minus" href="/zh/pro/compression">
@@ -37,6 +38,48 @@ GoModel Pro 是 GoModel 的商业发行版。它与开源版 GoModel 使用相�
 [预算](/zh/features/budgets#动态的子路径预算)。没有 `quota_templates` 授权时，配置中的 `per_child: true` 会导致启动中止，
 Admin API 写入会被拒绝并返回 403 `quota_templates_not_entitled`。
 
+## Vaults
+
+Vaults 为[密钥引用](/zh/advanced/secret-references)增加了 `vault` 方案，使提供商密钥和其他机密可以从 HashiCorp Vault、
+AWS Secrets Manager、GCP Secret Manager 或 Azure Key Vault 读取，而不是来自普通环境变量：
+
+```yaml
+extensions:
+  vaults:
+    enabled: true
+    stores:
+      prod:
+        type: hashicorp
+        address: https://vault.internal:8200
+        auth:
+          method: kubernetes
+          role: gomodel
+
+providers:
+  openai:
+    api_key: ${vault:prod/llm#openai}
+```
+
+机密会被缓存，并每隔 `refresh_interval`（默认 `5m`）重新读取。在没有 `vaults` 授权的情况下启用 Vaults 会导致启动中止。
+
 ## 许可证
 
 Pro 功能通过 `GOMODEL_PRO_LICENSE` 中的离线 Ed25519 签名令牌授予。校验无需网络访问，可在离线隔离环境中正常工作。
+
+### 免费试用
+
+免费试用全部 Pro 功能 21 天，无需信用卡：在 [gomodel.enterpilot.io/pro/trial](https://gomodel.enterpilot.io/pro/trial)
+申请试用许可证，它会通过电子邮件发送给您。试用许可证需要 GoModel Pro 0.1.1 或更高版本。
+
+```bash
+docker run -d --restart unless-stopped -p 8080:8080 \
+  -e GOMODEL_PRO_LICENSE="<邮件中的许可证>" \
+  -e OPENAI_API_KEY="your-openai-key" \
+  enterpilot/gomodel-pro
+```
+
+启动日志中的 `GoModel Pro: license valid` 一行会显示 `trial=true` 和结束日期。试用结束前七天会收到提醒邮件。试用没有宽限期：
+在最后一天网关会停止一次，因此示例使用了重启策略。重启后它将作为开源网关运行，除非仍配置了 SSO、出站代理池、按子路径的配额模板或 Vaults；
+请先移除它们或安装完整许可证。
+
+每人限试用一次。如需在试用结束后继续使用 Pro，请[预约 30 分钟的通话](https://cal.com/jakubw/30)。

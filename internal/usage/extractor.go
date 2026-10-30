@@ -187,6 +187,17 @@ func ExtractFromEmbeddingResponse(resp *core.EmbeddingResponse, requestID, provi
 		return nil
 	}
 
+	// Embeddings produce no output tokens, so prompt and total tokens are the
+	// same count; providers that report only one of them (e.g. total_tokens
+	// alone) still yield a priced input count.
+	inputTokens, totalTokens := resp.Usage.PromptTokens, resp.Usage.TotalTokens
+	if inputTokens == 0 {
+		inputTokens = totalTokens
+	}
+	if totalTokens == 0 {
+		totalTokens = inputTokens
+	}
+
 	entry := &UsageEntry{
 		ID:          uuid.New().String(),
 		RequestID:   requestID,
@@ -194,8 +205,8 @@ func ExtractFromEmbeddingResponse(resp *core.EmbeddingResponse, requestID, provi
 		Model:       resp.Model,
 		Provider:    provider,
 		Endpoint:    endpoint,
-		InputTokens: resp.Usage.PromptTokens,
-		TotalTokens: resp.Usage.TotalTokens,
+		InputTokens: inputTokens,
+		TotalTokens: totalTokens,
 		// Carry the provider's extra usage members into the cost pipeline, so
 		// an embeddings provider that returns an exact per-request charge is
 		// costed from that figure rather than from token rates. Nil for
@@ -212,7 +223,7 @@ func ExtractFromEmbeddingResponse(resp *core.EmbeddingResponse, requestID, provi
 	// correct and calling it uncalculated would be false, and not when the
 	// cost came from a figure the provider itself reported, which is
 	// authoritative however many tokens it counted.
-	if resp.Usage.PromptTokens == 0 && resp.Usage.TotalTokens == 0 &&
+	if totalTokens == 0 &&
 		!isProviderReportedCostSource(entry.CostSource) &&
 		tokenRatesAffectCost(effectiveEndpointPricing(endpoint, entry.Timestamp, pricing...)) &&
 		entry.CostsCalculationCaveat == "" {

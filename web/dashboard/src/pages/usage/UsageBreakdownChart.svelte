@@ -17,18 +17,16 @@
   } from "$lib/utils/format.js";
   import { usagePage } from "./usage.svelte.js";
   import SessionIDChip from "./SessionIDChip.svelte";
-  import {
-    breakdownHasBilledCost,
-    chartWrapHeight,
-    divergingDataFrom,
-    endpointListSummary,
-    endpointsSelected,
-    isChartView,
-    labelColor,
-    usageRowTotalTokens,
-    usageRowsBySelectedValue,
-    userPathUsageChartVisible,
-  } from "./usage-helpers.js";
+  import { labelColor } from "./usage-labels.js";
+import {
+  chartWrapHeight,
+  divergingDataFrom,
+  isChartView,
+  usageRowsBySelectedValue,
+  usageRowTotalTokens,
+  userPathUsageChartVisible,
+} from "./usage-chart-rows.js";
+import { endpointListSummary, endpointsSelected } from "./usage-endpoints.js";
   import { horizontalUsageChartConfig } from "./usage-chart-config.js";
   import * as m from "$lib/paraglide/messages.js";
 
@@ -122,9 +120,7 @@
             : usagePage.sessionUsageLoading,
   );
   const costs = $derived(usagePage.usageMode === "costs");
-  const showBilled = $derived(
-    breakdownHasBilledCost(kind) && runtimeConfig.billedCostVisible(),
-  );
+  const showBilled = $derived(runtimeConfig.billedCostVisible());
   const visible = $derived(
     kind === "userPath" ? userPathUsageChartVisible(rows) : rows.length > 0,
   );
@@ -291,7 +287,7 @@
                     <button
                       type="button"
                       class="usage-label-chip"
-                      class:active={usagePage.usageFilterLabel === row.label}
+                      class:active={usagePage.filters.labels.includes(row.label)}
                       style="--label-color: {labelColor(row.label)}"
                       title={usagePage.usageLabelChipTitle(row.label)}
                       onclick={() => usagePage.toggleUsageLabelFilter(row.label)}
@@ -305,7 +301,7 @@
                       type="button"
                       class="usage-label-chip"
                       class:mono={byEndpoint}
-                      class:active={endpointsSelected(usagePage.usageFilterEndpoints, endpoints)}
+                      class:active={endpointsSelected(usagePage.filters.endpoints, endpoints)}
                       style="--label-color: {labelColor(row.type)}"
                       title={usagePage.usageEndpointsChipTitle(endpoints, row.label)}
                       onclick={() => usagePage.toggleUsageEndpointsFilter(endpoints)}
@@ -321,7 +317,7 @@
                   <td>
                     <SessionIDChip
                       sessionID={row.session_id}
-                      active={usagePage.usageFilterSession === row.session_id}
+                      active={usagePage.filters.session === row.session_id}
                       onfilter={(sessionID) => usagePage.filterBySession(sessionID, row.user_path)}
                     />
                   </td>
