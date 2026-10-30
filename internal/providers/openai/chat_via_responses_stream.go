@@ -19,7 +19,8 @@ func chatResponseFromResponses(resp *core.ResponsesResponse, provider string) (*
 	if resp.Status == "failed" {
 		return nil, core.NewProviderError(provider, http.StatusBadGateway, responsesErrorMessage(resp.Error), nil)
 	}
-	var text, refusal, reasoning strings.Builder
+	var text, refusal strings.Builder
+	var reasoning []string
 	var calls []core.ToolCall
 	for _, item := range resp.Output {
 		switch item.Type {
@@ -39,7 +40,9 @@ func chatResponseFromResponses(resp *core.ResponsesResponse, provider string) (*
 				Function: core.FunctionCall{Name: item.Name, Arguments: item.Arguments},
 			})
 		case "reasoning":
-			reasoning.WriteString(reasoningSummaryText(item))
+			if summary := reasoningSummaryText(item); summary != "" {
+				reasoning = append(reasoning, summary)
+			}
 		}
 	}
 	finishReason, ok := chatFinishReason(resp, len(calls) > 0)
@@ -61,10 +64,12 @@ func chatResponseFromResponses(resp *core.ResponsesResponse, provider string) (*
 	}
 	// Reasoning summaries surface as the reasoning_content extension the chat
 	// dialects (anthropicapi, streaming codec) already render as thinking.
-	if reasoning.Len() > 0 {
+	// Items join with the same separator reasoningSummaryText uses between a
+	// single item's summary parts.
+	if len(reasoning) > 0 {
 		// json.Marshal cannot fail on a string, and the merge on a fresh
 		// single-member map cannot fail either.
-		raw, _ := json.Marshal(reasoning.String())
+		raw, _ := json.Marshal(strings.Join(reasoning, "\n\n"))
 		message.ExtraFields, _ = core.MergeUnknownJSONFields(message.ExtraFields,
 			map[string]json.RawMessage{"reasoning_content": raw})
 	}
@@ -174,6 +179,8 @@ type responsesEvent struct {
 	Response *core.ResponsesResponse   `json:"response"`
 	Code     string                    `json:"code"`
 	Message  string                    `json:"message"`
+	// SummaryIndex is a pointer so an omitted index stays distinct from 0.
+	SummaryIndex *int `json:"summary_index"`
 }
 
 // responsesChatStream converts a Responses SSE stream into a chat completion
@@ -189,22 +196,27 @@ type responsesChatStream struct {
 	id      string
 	created int64
 	// tools maps a function_call output item id to its chat tool_calls index.
-	tools    map[string]int
-	finished bool
-	endErr   error
+	tools map[string]int
+	// reasoningParts tracks the last summary part index per reasoning item,
+	// so a part boundary emits the separator the non-streaming converter
+	// joins summaries with. The map presence flag marks the first part.
+	reasoningParts map[string]int
+	finished       bool
+	endErr         error
 }
 
 // newResponsesChatStream wraps a Responses SSE body; includeUsage adds the
 // usage object to the final chunk, as stream_options.include_usage requests.
 func newResponsesChatStream(body io.ReadCloser, provider, model string, includeUsage bool) io.ReadCloser {
 	return &responsesChatStream{
-		reader:       bufio.NewReader(body),
-		body:         body,
-		buffer:       streaming.NewStreamBuffer(1024),
-		provider:     provider,
-		model:        model,
-		includeUsage: includeUsage,
-		tools:        make(map[string]int),
+		reader:         bufio.NewReader(body),
+		body:           body,
+		buffer:         streaming.NewStreamBuffer(1024),
+		provider:       provider,
+		model:          model,
+		includeUsage:   includeUsage,
+		tools:          make(map[string]int),
+		reasoningParts: make(map[string]int),
 	}
 }
 
@@ -257,9 +269,20 @@ func (s *responsesChatStream) handle(data []byte) {
 		s.emit(map[string]any{"role": "assistant", "content": ""}, nil, nil)
 	case "response.output_text.delta":
 		s.emit(map[string]any{"content": event.Delta}, nil, nil)
-	case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
+	case "response.reasoning_summary_text.delta":
 		// Reasoning text rides the reasoning_content extension, which the
 		// chat dialects (anthropicapi, streaming codec) render as thinking.
+		// Summary parts (summary_index) are distinct summaries; emit the
+		// separator the non-streaming converter joins them with when the
+		// index advances. An absent index forwards the delta untouched.
+		if event.SummaryIndex != nil {
+			if last, seen := s.reasoningParts[event.ItemID]; seen && *event.SummaryIndex != last {
+				s.emit(map[string]any{"reasoning_content": "\n\n"}, nil, nil)
+			}
+			s.reasoningParts[event.ItemID] = *event.SummaryIndex
+		}
+		s.emit(map[string]any{"reasoning_content": event.Delta}, nil, nil)
+	case "response.reasoning_text.delta":
 		s.emit(map[string]any{"reasoning_content": event.Delta}, nil, nil)
 	case "response.refusal.delta":
 		s.emit(map[string]any{"refusal": event.Delta}, nil, nil)

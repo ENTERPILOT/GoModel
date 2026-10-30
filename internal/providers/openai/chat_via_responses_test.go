@@ -587,7 +587,7 @@ func TestChatResponseFromResponses_ReasoningBecomesReasoningContent(t *testing.T
 		msg := chat.Choices[0].Message
 		var reasoning string
 		require.NoError(t, json.Unmarshal(msg.ExtraFields.Lookup("reasoning_content"), &reasoning))
-		assert.Equal(t, "First step.Second\n\nthought.", reasoning)
+		assert.Equal(t, "First step.\n\nSecond\n\nthought.", reasoning)
 		assert.Equal(t, "Answer.", msg.Content)
 	})
 	t.Run("no reasoning item, no member", func(t *testing.T) {
@@ -597,6 +597,19 @@ func TestChatResponseFromResponses_ReasoningBecomesReasoningContent(t *testing.T
 		chat, err := chatResponseFromResponses(&resp, "openai")
 		require.NoError(t, err)
 		assert.Empty(t, chat.Choices[0].Message.ExtraFields.Lookup("reasoning_content"))
+	})
+	t.Run("empty item between non-empty items adds no separator", func(t *testing.T) {
+		var resp core.ResponsesResponse
+		require.NoError(t, json.Unmarshal([]byte(`{"id":"resp_1","status":"completed","output":[
+			{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"a"}]},
+			{"type":"reasoning","id":"rs_2","summary":[]},
+			{"type":"reasoning","id":"rs_3","summary":[{"type":"summary_text","text":"b"}]},
+			{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"x"}]}]}`), &resp))
+		chat, err := chatResponseFromResponses(&resp, "openai")
+		require.NoError(t, err)
+		var reasoning string
+		require.NoError(t, json.Unmarshal(chat.Choices[0].Message.ExtraFields.Lookup("reasoning_content"), &reasoning))
+		assert.Equal(t, "a\n\nb", reasoning)
 	})
 	t.Run("refusal and reasoning coexist", func(t *testing.T) {
 		var resp core.ResponsesResponse
@@ -630,13 +643,15 @@ func TestReasoningSummaryText(t *testing.T) {
 }
 
 // Reasoning summary and reasoning text deltas stream as reasoning_content.
+// Summary parts (summary_index) are distinct summaries: an advancing index
+// emits the separator the non-streaming converter joins parts with.
 func TestResponsesChatStream_ReasoningDeltas(t *testing.T) {
 	upstream := sse(
 		`{"type":"response.created","response":{"id":"resp_1","model":"gpt-6-astra","status":"in_progress","output":[]}}`,
 		`{"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","id":"rs_1","summary":[]}}`,
-		`{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","delta":"Thinking"}`,
-
-		`{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","delta":" hard."}`,
+		`{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","summary_index":0,"delta":"Thinking"}`,
+		`{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","summary_index":0,"delta":" hard."}`,
+		`{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","summary_index":1,"delta":"Second part."}`,
 		`{"type":"response.reasoning_text.delta","item_id":"rs_1","delta":" Raw."}`,
 		`{"type":"response.output_text.delta","item_id":"msg_1","delta":"Answer."}`,
 		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[]}}`,
@@ -654,6 +669,108 @@ func TestResponsesChatStream_ReasoningDeltas(t *testing.T) {
 			text += c
 		}
 	}
-	assert.Equal(t, "Thinking hard. Raw.", reasoning)
+	assert.Equal(t, "Thinking hard.\n\nSecond part. Raw.", reasoning)
 	assert.Equal(t, "Answer.", text)
+}
+
+// Summary-index state is per item: a second reasoning item starts its own
+// first part without a separator, and an omitted index forwards the delta
+// without touching the tracked index.
+func TestResponsesChatStream_ReasoningDeltas_IndexEdges(t *testing.T) {
+	upstream := sse(
+		`{"type":"response.created","response":{"id":"resp_1","model":"gpt-6-astra","status":"in_progress","output":[]}}`,
+		`{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","summary_index":0,"delta":"a"}`,
+		`{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","summary_index":1,"delta":"b"}`,
+		`{"type":"response.reasoning_summary_text.delta","item_id":"rs_2","summary_index":0,"delta":"c"}`,
+		`{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","delta":"d"}`,
+		`{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","summary_index":1,"delta":"e"}`,
+		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[]}}`,
+	)
+	chunks, _, err := readChatChunks(t, newResponsesChatStream(io.NopCloser(strings.NewReader(upstream)), "openai", "gpt-6-astra", false))
+	require.NoError(t, err)
+
+	var reasoning string
+	for _, chunk := range chunks {
+		delta := chunk["choices"].([]any)[0].(map[string]any)["delta"].(map[string]any)
+		if r, ok := delta["reasoning_content"].(string); ok {
+			reasoning += r
+		}
+	}
+	// a → b: index advances, separator. b → c: new item, no separator.
+	// c → d: index absent, no separator, tracked index untouched.
+	// d → e: index unchanged from the tracked 1, no separator.
+	assert.Equal(t, "a\n\nbcde", reasoning)
+}
+
+// A request that asks for reasoning must also ask for the summary: the
+// Responses API emits reasoning summaries only when reasoning.summary is set,
+// and the chat rendering has no reasoning text without them. An explicit
+// off effort ("none") adds no summary. The serialized request carries exactly
+// one reasoning member.
+func TestChatToResponsesRequest_ReasoningRequestsSummary(t *testing.T) {
+	extra := func(name, raw string) core.UnknownJSONFields {
+		return core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{name: json.RawMessage(raw)})
+	}
+	base := func() core.ChatRequest {
+		// gpt-5.5 supports "none" natively, so an off effort stays "none"
+		// (supportedEffort only maps levels the model lacks).
+		return core.ChatRequest{Model: "gpt-5.5", Messages: []core.Message{{Role: "user", Content: "hi"}}}
+	}
+
+	t.Run("nested reasoning effort", func(t *testing.T) {
+		req := base()
+		req.Reasoning = &core.Reasoning{Effort: "low"}
+		got, err := chatToResponsesRequest(&req)
+		require.NoError(t, err)
+		body, err := json.Marshal(got)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"effort":"low","summary":"auto"}`, string(reasoningMember(t, body)))
+	})
+	t.Run("flat reasoning_effort", func(t *testing.T) {
+		req := base()
+		req.ExtraFields = extra("reasoning_effort", `"high"`)
+		got, err := chatToResponsesRequest(&req)
+		require.NoError(t, err)
+		body, err := json.Marshal(got)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"effort":"high","summary":"auto"}`, string(reasoningMember(t, body)))
+	})
+	t.Run("off effort adds no summary", func(t *testing.T) {
+		req := base()
+		req.Reasoning = &core.Reasoning{Effort: "none"}
+		got, err := chatToResponsesRequest(&req)
+		require.NoError(t, err)
+		body, err := json.Marshal(got)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"effort":"none"}`, string(reasoningMember(t, body)))
+	})
+	t.Run("no reasoning, no member", func(t *testing.T) {
+		req := base()
+		got, err := chatToResponsesRequest(&req)
+		require.NoError(t, err)
+		body, err := json.Marshal(got)
+		require.NoError(t, err)
+		assert.NotContains(t, string(body), `"reasoning"`)
+	})
+	t.Run("passthrough fields keep the summary", func(t *testing.T) {
+		req := base()
+		req.Reasoning = &core.Reasoning{Effort: "low"}
+		req.ExtraFields = extra("prompt_cache_key", `"k"`)
+		got, err := chatToResponsesRequest(&req)
+		require.NoError(t, err)
+		body, err := json.Marshal(got)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"effort":"low","summary":"auto"}`, string(reasoningMember(t, body)))
+		assert.Contains(t, string(body), `"prompt_cache_key"`)
+	})
+}
+
+// reasoningMember extracts the single reasoning member of a serialized
+// request, failing on duplicates.
+func reasoningMember(t *testing.T, body []byte) json.RawMessage {
+	t.Helper()
+	assert.Equal(t, 1, bytes.Count(body, []byte(`"reasoning"`)), "exactly one reasoning member")
+	var sent map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(body, &sent))
+	return sent["reasoning"]
 }

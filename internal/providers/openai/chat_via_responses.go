@@ -249,7 +249,13 @@ func applyMappedChatFields(out *core.ResponsesRequest, req *core.ChatRequest) er
 		out.MaxOutputTokens = &limit
 	}
 	if effort := requestedEffort(req); effort != "" {
-		out.Reasoning = &core.Reasoning{Effort: supportedEffort(req.Model, effort)}
+		reasoning := &core.Reasoning{Effort: supportedEffort(req.Model, effort)}
+		// The Responses API emits reasoning summaries only on request; without
+		// one the chat rendering has no reasoning text to surface.
+		if !reasoningOff(reasoning.Effort) {
+			reasoning.Summary = "auto"
+		}
+		out.Reasoning = reasoning
 	}
 	text := map[string]any{}
 	if raw := req.ExtraFields.Lookup("verbosity"); len(raw) > 0 {
