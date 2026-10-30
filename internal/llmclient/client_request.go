@@ -17,6 +17,7 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/httpclient"
 )
 
 // maxErrorBodyBytes caps how much of an upstream error body is read into
@@ -78,7 +79,7 @@ func (c *Client) doHTTPRequest(ctx context.Context, req Request) (*http.Response
 		return nil, err
 	}
 
-	resp, err := c.httpClient.Do(httpReq)
+	resp, err := httpclient.Do(c.httpClient, httpReq)
 	if err != nil {
 		logTransportError("provider request failed", c.config.ProviderName, req.Endpoint, err)
 		return nil, core.NewProviderError(c.config.ProviderName, providerErrorStatusCode(err), transportErrorMessage(err), err)
@@ -291,6 +292,10 @@ func (c *Client) buildRequest(ctx context.Context, req Request) (*http.Request, 
 			httpReq.Header.Add(key, value)
 		}
 	}
+
+	// Never forward gateway controls, including headers retained in request snapshots.
+	httpReq.Header.Del("X-GoModel-Request-Timeout-Ms")
+	httpReq.Header.Del("X-GoModel-Response-Header-Timeout-Ms")
 
 	// Forward the client's Idempotency-Key so the provider can deduplicate
 	// retries of this request, including this client's own. Gateway-internal
