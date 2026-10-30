@@ -742,20 +742,19 @@ func firstAndAll(keys []string) (string, []string) {
 	return keys[0], keys
 }
 
-// install unregisters whatever is currently registered under name (a no-op
-// if nothing is), registers the built provider in its place, records its
-// effective configuration, and records its secret references for rotation.
+// install registers the built provider under name in place of whatever is
+// currently registered there, records its effective configuration, and
+// records its secret references for rotation. The swap is one registry step
+// that hands the running provider's model inventory to the replacement, so
+// the models it served stay routable while the replacement's own model fetch
+// runs.
 func (s *CredentialsService) install(name string, built builtCredential) {
 	cfg := built.cfg
-	s.registry.UnregisterProvider(name)
-	s.registry.RegisterProviderWithNameAndType(built.provider, name, cfg.Type)
-	if len(cfg.Models) > 0 {
-		s.registry.SetProviderConfiguredModels(name, cfg.Models)
-	}
-	if len(cfg.ModelMetadataOverrides) > 0 {
-		s.registry.SetProviderMetadataOverrides(name, cfg.ModelMetadataOverrides)
-	}
-	s.registry.SetProviderModelFilter(name, cfg.ModelFilter)
+	s.registry.replaceProvider(built.provider, name, cfg.Type, providerSettings{
+		configuredModels:  cfg.Models,
+		metadataOverrides: cfg.ModelMetadataOverrides,
+		modelFilter:       cfg.ModelFilter,
+	})
 
 	s.mu.Lock()
 	s.configs[name] = cfg
