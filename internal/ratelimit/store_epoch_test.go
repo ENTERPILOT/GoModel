@@ -80,6 +80,15 @@ func runCounterEpochSuite(t *testing.T, store Store) {
 	shadow := Rule{Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodDaySeconds, PerChild: true, MaxRequests: new(int64(5))}
 	require.NoError(t, store.ReplaceConfigRules(ctx, []Rule{configRule, shadow}))
 	assert.Equal(t, before, epoch(t), "a config seed shadowed by a manual rule changes nothing")
+	rules, err := store.ListRules(ctx)
+	require.NoError(t, err)
+	for _, rule := range rules {
+		if rule.Subject == "/team" {
+			require.NotNil(t, rule.MaxRequests)
+			assert.Equal(t, int64(200), *rule.MaxRequests, "the manual limit survives the shadowed seed")
+			assert.False(t, rule.PerChild, "the manual mode survives the shadowed seed")
+		}
+	}
 
 	snap := WindowSnapshot{
 		Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: PeriodDaySeconds,
