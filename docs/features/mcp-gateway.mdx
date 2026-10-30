@@ -402,6 +402,14 @@ Tools that the server reports but the filters hide are listed separately under
 `excluded_tools`. Names are the upstream originals; the aggregated `/mcp`
 endpoint serves them as `{slug}_{name}`.
 
+To see every tool at once, click **All tools** on the MCP Servers page. It
+lists the tools of all servers in one searchable list, named as clients call
+them (`{slug}_{name}`), with descriptions, read-only and destructive hints, and
+the owning server. Pick a virtual server to see only its members' tools, and
+turn on **Show tools hidden by filters** to include excluded tools. Servers
+that are not connected, or whose catalog failed to load, are listed above the
+tools, since their tools may be missing.
+
 ## Security notes
 
 - **Credential boundary.** The MCP spec forbids token passthrough; GoModel
