@@ -268,7 +268,7 @@ func TestSQLStoreCounterRoundTrip(t *testing.T) {
 			_, err := store.db.Exec(context.Background(), upsertCounterSQL,
 				snap.Scope, snap.Subject, snap.Partition, snap.PeriodSeconds, snap.Writer, snap.Epoch,
 				snap.RequestsWindowStart, snap.RequestsCurrent, snap.RequestsPrevious,
-				snap.TokensWindowStart, snap.TokensCurrent, snap.TokensPrevious, updatedAt,
+				snap.TokensWindowStart, snap.TokensCurrent, snap.TokensPrevious, snap.InFlight, updatedAt,
 			)
 			require.NoError(t, err)
 		})
@@ -293,14 +293,14 @@ func TestSQLStoreLoadCountersSkipsMalformedRow(t *testing.T) {
 	require.NoError(t, err)
 	_, err = db.Exec(ctx, upsertCounterSQL,
 		string(ScopeUserPath), "/broken", "", PeriodHourSeconds, "w1", "",
-		0, "not-a-number", 0, 0, 0, 0, time.Now().Unix(),
+		0, "not-a-number", 0, 0, 0, 0, 0, time.Now().Unix(),
 	)
 	require.NoError(t, err)
 
-	got, err := store.LoadCounters(ctx)
+	got, err := store.LoadCounters(ctx, 0)
 	require.NoError(t, err)
 	require.Len(t, got, 1)
-	require.Equal(t, good, got[0])
+	require.Equal(t, good, unstamped(got)[0])
 }
 
 // legacyCountersSchema is rate_limit_counters as releases before writer IDs
@@ -353,9 +353,9 @@ func TestSQLStoreImportsLegacyCounters(t *testing.T) {
 
 		store, err := NewSQLStore(ctx, db)
 		require.NoError(t, err)
-		got, err := store.LoadCounters(ctx)
+		got, err := store.LoadCounters(ctx, 0)
 		require.NoError(t, err)
-		require.Equal(t, []WindowSnapshot{legacy}, got, "the legacy row loads under the empty writer")
+		require.Equal(t, []WindowSnapshot{legacy}, unstamped(got), "the legacy row loads under the empty writer")
 		var remaining int64
 		err = db.QueryRow(ctx, `SELECT COUNT(*) FROM rate_limit_counters`).Scan(&remaining)
 		require.NoError(t, err)
@@ -364,9 +364,9 @@ func TestSQLStoreImportsLegacyCounters(t *testing.T) {
 		// Re-opening imports nothing new and keeps the imported row.
 		_, err = NewSQLStore(ctx, db)
 		require.NoError(t, err)
-		got, err = store.LoadCounters(ctx)
+		got, err = store.LoadCounters(ctx, 0)
 		require.NoError(t, err)
-		require.Equal(t, []WindowSnapshot{legacy}, got)
+		require.Equal(t, []WindowSnapshot{legacy}, unstamped(got))
 
 		// Rolling upgrade: an older replica still writes the legacy shape. The
 		// next start imports its newer count over the earlier import.
@@ -378,7 +378,7 @@ func TestSQLStoreImportsLegacyCounters(t *testing.T) {
 		require.NoError(t, err)
 		store, err = NewSQLStore(ctx, db)
 		require.NoError(t, err)
-		got, err = store.LoadCounters(ctx)
+		got, err = store.LoadCounters(ctx, 0)
 		require.NoError(t, err)
 		require.Len(t, got, 1)
 		require.Equal(t, int64(7), got[0].RequestsCurrent)
@@ -394,7 +394,7 @@ func TestSQLStoreImportsLegacyCounters(t *testing.T) {
 		require.NoError(t, err)
 		store, err = NewSQLStore(ctx, db)
 		require.NoError(t, err)
-		got, err = store.LoadCounters(ctx)
+		got, err = store.LoadCounters(ctx, 0)
 		require.NoError(t, err)
 		require.Empty(t, got)
 	})
@@ -484,7 +484,7 @@ func TestSQLStoreLegacyImportCannotUndoConcurrentReset(t *testing.T) {
 		require.NoError(t, <-resetDone)
 		require.NoError(t, <-importDone)
 
-		got, err := store.LoadCounters(ctx)
+		got, err := store.LoadCounters(ctx, 0)
 		require.NoError(t, err)
 		require.Empty(t, got, "the import must not bring back the count the reset deleted")
 	})

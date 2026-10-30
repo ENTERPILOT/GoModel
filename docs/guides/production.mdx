@@ -96,8 +96,8 @@ Redis when several replicas should share discovery results and cache hits.
   Take that into account when ordering service startup.
 </Note>
 
-Redis does not coordinate rate limits or budgets. It is a cache, not a
-distributed lock.
+Redis does not coordinate rate limits or budgets: replicas share both through
+the database. Redis is a cache, not a distributed lock.
 
 ## Provider credentials
 
@@ -405,17 +405,22 @@ coordinate across instances.
 | [Usage and cost records](/features/cost-tracking) | Durable (database) | Aggregated correctly. |
 | Audit logs | Durable (database) | Complete across replicas. |
 | [SSO](/pro/sso) sign-out (Pro) | Durable (database) | A signed-out session is rejected on every replica within about 2 seconds. |
-| [Rate limits](/features/rate-limits) | In-memory, per instance | Effective limit is about `N x` the configured limit. Counters survive a restart, and a reset clears every replica. |
+| [Rate limits](/features/rate-limits) | In memory, shared through the database | Replicas enforce one limit together, approximately: each sees the others' counts within about two flush intervals. Counters survive a restart, and a reset clears every replica. |
 | Circuit breakers | In-memory, per process | Each replica learns an outage separately, so upstream sees up to `N x failure_threshold` failures before any breaker opens. |
 | [Session affinity](/features/session-keeping) pins | In-memory, per instance | Sessions stick per replica, not globally, unless the load balancer is sticky. |
 | Live log buffer | In-memory, per instance | A connected dashboard sees only that replica's live traffic, roughly `1/N` of it. History still comes from the database. |
 | MCP downstream sessions | In-memory, per instance | An `Mcp-Session-Id` from one replica returns 404 on another. [MCP](/features/mcp-gateway) clients need sticky sessions. |
 | Provider request health | In-memory, per instance | Dashboard provider status reflects the replica that answered. |
 
-The one that surprises people is rate limits: they are an in-process control, so
-three replicas with a 100 rpm rule admit up to 300 rpm in aggregate. Size rules
-per replica, and use [budgets](/features/budgets) as the durable cross-instance
-control since they read from the shared database.
+The one that surprises people is rate limits: admission is in memory, so a
+replica learns the others' traffic only when it reads their saved counts, about
+once a second. Three replicas with a 100 rpm rule admit about 100 rpm in
+aggregate, but can overshoot by about two seconds of the other replicas'
+traffic, and a crashed replica's concurrency slots stay taken for a few
+seconds. Do not rely on rate limits for a cap that must never be exceeded, such
+as one concurrent request across replicas, and use
+[budgets](/features/budgets) as the exact cross-instance control for spend. See
+[several replicas share one limit](/features/rate-limits#several-replicas-share-one-limit).
 
 ### Config changes reach every replica within seconds
 
@@ -568,7 +573,7 @@ if the file size matters.
   with SQLite, mount a volume and set `SQLITE_PATH`.
 - Declare providers in environment variables or `config.yaml`, with values from
   a secret manager.
-- Size rate limit rules per replica when running several replicas.
+- Keep replica clocks synchronized (NTP); shared concurrency limits rely on it.
 - Decide on `LOGGING_LOG_BODIES` and set retention windows deliberately.
 - Point readiness at `/health/ready` and set
   `terminationGracePeriodSeconds` above 30.

@@ -55,6 +55,13 @@ func NewMongoDBStore(ctx context.Context, database *mongo.Database) (*MongoDBSto
 	if err != nil {
 		return nil, fmt.Errorf("create rate limit counter indexes: %w", err)
 	}
+	// Every replica's flush loads the rows saved since its previous load.
+	_, err = store.counters.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "updated_at", Value: 1}},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create rate limit counter indexes: %w", err)
+	}
 	if err := store.importLegacyCounters(ctx); err != nil {
 		return nil, err
 	}
@@ -394,8 +401,12 @@ func (s *MongoDBStore) configRulesWithoutManualCollisions(ctx context.Context, r
 	return filtered, nil
 }
 
-func (s *MongoDBStore) LoadCounters(ctx context.Context) ([]WindowSnapshot, error) {
-	cursor, err := s.counters.Find(ctx, bson.D{})
+func (s *MongoDBStore) LoadCounters(ctx context.Context, since int64) ([]WindowSnapshot, error) {
+	filter := bson.D{}
+	if since > 0 {
+		filter = bson.D{{Key: "updated_at", Value: bson.D{{Key: "$gte", Value: since}}}}
+	}
+	cursor, err := s.counters.Find(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("list rate limit counters: %w", err)
 	}
@@ -416,35 +427,30 @@ func (s *MongoDBStore) LoadCounters(ctx context.Context) ([]WindowSnapshot, erro
 	return snapshots, nil
 }
 
-// counterDocument is a window row as stored: the snapshot plus the write
-// stamp that drives staleness collection. The stamp is the store's own
-// bookkeeping, so it stays out of WindowSnapshot.
-type counterDocument struct {
-	WindowSnapshot `bson:",inline"`
-	UpdatedAt      int64 `bson:"updated_at"`
-}
-
 func (s *MongoDBStore) SaveCounters(ctx context.Context, snapshots []WindowSnapshot) error {
 	now := time.Now().Unix()
 	if len(snapshots) > 0 {
 		writes := make([]mongo.WriteModel, 0, len(snapshots))
 		for _, snap := range snapshots {
+			snap.UpdatedAt = now
 			writes = append(writes, mongo.NewUpdateOneModel().
 				SetFilter(counterIdentityFilter(snap)).
-				SetUpdate(bson.D{{Key: "$set", Value: counterDocument{WindowSnapshot: snap, UpdatedAt: now}}}).
+				SetUpdate(bson.D{{Key: "$set", Value: snap}}).
 				SetUpsert(true))
 		}
 		if _, err := s.counters.BulkWrite(ctx, writes, options.BulkWrite().SetOrdered(false)); err != nil {
 			return fmt.Errorf("upsert rate limit counters: %w", err)
 		}
 	}
-	// Collect the rows nobody writes any more, on the same staleness bound
-	// restore applies, so this only ever deletes rows a load would discard.
+	// Collect the rows nobody writes any more, on the bounds the SQL stores
+	// use (see pruneCountersSQL).
+	retention := bson.D{{Key: "$cond", Value: bson.A{
+		bson.D{{Key: "$eq", Value: bson.A{"$period_seconds", PeriodConcurrent}}},
+		inFlightRowRetention,
+		bson.D{{Key: "$multiply", Value: bson.A{2, "$period_seconds"}}},
+	}}}
 	stale := bson.D{{Key: "$expr", Value: bson.D{{Key: "$lt", Value: bson.A{
-		bson.D{{Key: "$add", Value: bson.A{
-			"$updated_at",
-			bson.D{{Key: "$multiply", Value: bson.A{2, "$period_seconds"}}},
-		}}},
+		bson.D{{Key: "$add", Value: bson.A{"$updated_at", retention}}},
 		now,
 	}}}}}
 	if _, err := s.counters.DeleteMany(ctx, stale); err != nil {
