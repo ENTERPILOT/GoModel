@@ -335,6 +335,16 @@ to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
   restart GoModel.
 </Note>
 
+<Tip>
+  On large audit tables, pick a field next to the dashboard's audit search box
+  instead of **All fields**. **User path** and **Model** match values that
+  start with what you type (case-sensitive, so `voxina` finds
+  `/voxinate/events/…`; **Model** checks the requested and the resolved model,
+  for example `openai/gpt-5`). **Request ID** and **Session ID** match exactly.
+  These filters use indexes on SQLite, PostgreSQL, and MongoDB. The API takes
+  them as `user_path_prefix`, `model_prefix`, `request_id`, and `session_id`.
+</Tip>
+
 <Warning>
   When `LOGGING_LOG_BODIES` is enabled, request and response bodies are stored
   in full. These may contain sensitive data such as PII or API keys embedded in

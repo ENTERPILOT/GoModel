@@ -337,6 +337,17 @@ strony. Gdy logowanie audytowe jest włączone, zapisy są asynchroniczne i moż
   zrestartuj GoModel.
 </Note>
 
+<Tip>
+  Przy dużych tabelach audytu wybierz pole obok wyszukiwarki logów audytu w
+  dashboardzie zamiast **Wszystkie pola**. **User Path** i **Model** dopasowują
+  wartości zaczynające się od wpisanego tekstu (z rozróżnieniem wielkości liter,
+  więc `voxina` znajdzie `/voxinate/events/…`; **Model** sprawdza model żądany i
+  rozwiązany, np. `openai/gpt-5`). **ID Requestu** i **ID sesji** muszą pasować
+  dokładnie. Te filtry korzystają z indeksów w SQLite, PostgreSQL i MongoDB. API
+  przyjmuje je jako `user_path_prefix`, `model_prefix`, `request_id` i
+  `session_id`.
+</Tip>
+
 <Warning>
   Gdy `LOGGING_LOG_BODIES` jest włączone, body requestów i odpowiedzi są zapisywane
   w całości. Mogą zawierać dane wrażliwe, takie jak dane osobowe (PII) lub klucze API osadzone w

@@ -148,6 +148,19 @@ func TestScopedUserPathFilter(t *testing.T) {
 	}
 }
 
+// A user path prefix only narrows results: a scoped key keeps its subtree as
+// the UserPath filter, so a prefix outside the scope cannot widen the view.
+func TestAuditLogUserPathPrefixKeepsScope(t *testing.T) {
+	auditReader := &mockAuditReader{logResult: &auditlog.LogListResult{}}
+	h := NewHandler(nil, nil, WithAuditReader(auditReader))
+
+	c, rec := scopedRequest(t, http.MethodGet, "/admin/audit/log?user_path_prefix=/org", "", "/team/alpha")
+	require.NoError(t, h.AuditLog(c))
+	assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, "/team/alpha", auditReader.lastQuery.UserPath)
+	assert.Equal(t, "/org", auditReader.lastQuery.UserPathPrefix)
+}
+
 func TestScopedUsageMultiUserPathFilter(t *testing.T) {
 	tests := []struct {
 		name      string

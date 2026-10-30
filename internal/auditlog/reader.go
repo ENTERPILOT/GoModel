@@ -22,10 +22,20 @@ type LogQueryParams struct {
 	Path           string
 	UserPath       string
 	SessionID      string // exact-match session id filter
-	ErrorType      string
-	Search         string
-	StatusCode     *int
-	Stream         *bool
+	RequestID      string // exact-match request id filter
+	// UserPathPrefix matches user paths that start with this text, so
+	// "/team/al" matches "/team/alpha/bot". Unlike UserPath it does not stop at
+	// segment boundaries, which suits type-ahead filtering. A missing leading
+	// "/" is added. Case-sensitive, so an index serves it.
+	UserPathPrefix string
+	// ModelPrefix matches entries whose requested or resolved model starts
+	// with this text. Resolved models are stored provider-qualified, e.g.
+	// "openai/gpt-5". Case-sensitive, so an index serves it.
+	ModelPrefix string
+	ErrorType   string
+	Search      string
+	StatusCode  *int
+	Stream      *bool
 	// ExcludeOperations drops entries whose path belongs to one of these
 	// operations. Entries outside every operation (e.g. authentication
 	// events) always stay.
