@@ -76,6 +76,10 @@ type snapshot struct {
 	modelWide     map[string]VirtualModel
 	defaultEnable bool
 
+	// visionRouting reports that an enabled redirect routes image requests,
+	// so the request path only inspects bodies when one does.
+	visionRouting bool
+
 	// reasoningEffort reports whether any row forces a reasoning effort, and
 	// redirectReasoningEffort whether any redirect does. Without the first,
 	// effort resolution has nothing to find; without the second, routing need
@@ -128,6 +132,7 @@ func buildSnapshot(rows []VirtualModel, defaultEnable bool) (snapshot, error) {
 			}
 			next.order = append(next.order, normalized.Source)
 			next.bySource[normalized.Source] = normalized
+			next.visionRouting = next.visionRouting || (normalized.Enabled && normalized.VisionRouting)
 			if normalized.ReasoningEffort != "" {
 				next.reasoningEffort = true
 				next.redirectReasoningEffort = true
