@@ -58,9 +58,9 @@ type WorkloadIdentityConfig struct {
 	// IdentityTokenFile is re-read on every exchange, so projected tokens
 	// that rotate on disk stay current. It wins over IdentityToken.
 	IdentityTokenFile string `yaml:"identity_token_file"`
-	IdentityToken     string `yaml:"identity_token"`
+	IdentityToken     string `yaml:"identity_token" export:"secret"`
 	// TokenEndpoint overrides the provider's default exchange endpoint.
-	TokenEndpoint    string `yaml:"token_endpoint"`
+	TokenEndpoint    string `yaml:"token_endpoint" export:"url"`
 	ServiceAccountID string `yaml:"service_account_id"`
 	// IdentityProviderID is the OpenAI workload identity provider (openai).
 	IdentityProviderID string `yaml:"identity_provider_id"`

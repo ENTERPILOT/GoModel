@@ -87,6 +87,10 @@ func TestExportYAMLProviders(t *testing.T) {
 			Type:     "anthropic",
 			APIKey:   "sk-ant-env",
 			ProxyURL: "socks5://user:proxy-pass@10.0.0.1:1080",
+			WorkloadIdentity: WorkloadIdentityConfig{
+				IdentityToken: "wif-literal-token",
+				TokenEndpoint: "https://sts.example.com/token?client_secret=wif-endpoint-secret",
+			},
 		},
 	}
 
@@ -97,7 +101,8 @@ func TestExportYAMLProviders(t *testing.T) {
 	assert.Equal(t, "https://api.openai.com/v1", exportedValue(t, out, "providers", "openai", "base_url"))
 	assert.Equal(t, "${env:ANTHROPIC_API_KEY}", exportedValue(t, out, "providers", "proxied", "api_key"))
 	assert.Equal(t, "${env:GOMODEL_PROVIDERS_PROXIED_PROXY_URL}", exportedValue(t, out, "providers", "proxied", "proxy_url"))
-	for _, secret := range []string{"sk-vault", "sk-literal", "sk-ant-env", "proxy-pass"} {
+	assert.Equal(t, "${env:GOMODEL_PROVIDERS_PROXIED_WORKLOAD_IDENTITY_IDENTITY_TOKEN}", exportedValue(t, out, "providers", "proxied", "workload_identity", "identity_token"))
+	for _, secret := range []string{"sk-vault", "sk-literal", "sk-ant-env", "proxy-pass", "wif-literal-token", "wif-endpoint-secret"} {
 		assert.NotContains(t, out, secret)
 	}
 }
@@ -303,17 +308,20 @@ var credentialFieldName = regexp.MustCompile(`(?i)(key|token|secret|password|cre
 // plainCredentialLookalikes are reviewed settings whose names look like a
 // credential but whose values are not secrets.
 var plainCredentialLookalikes = map[string]bool{
-	"server.user_path_header":          true,
-	"server.client_ip_header":          true,
-	"cache.model.redis.key":            true,
-	"cache.response.simple.redis.key":  true,
-	"metrics.endpoint":                 true,
-	"failover.rules_json":              true,
-	"failover.disabled_models_json":    true,
-	"tagging.headers.header":           true,
-	"session.headers.header":           true,
-	"version_check.url":                true,
-	"providers.*.service_account_file": true,
+	"server.user_path_header":                           true,
+	"server.client_ip_header":                           true,
+	"cache.model.redis.key":                             true,
+	"cache.response.simple.redis.key":                   true,
+	"metrics.endpoint":                                  true,
+	"failover.rules_json":                               true,
+	"failover.disabled_models_json":                     true,
+	"tagging.headers.header":                            true,
+	"session.headers.header":                            true,
+	"version_check.url":                                 true,
+	"providers.*.service_account_file":                  true,
+	"providers.*.workload_identity.identity_token_file": true,
+	"server.tls_key_file":                               true,
+	"http.tls.client_key_file":                          true,
 }
 
 // TestExportTagsCoverCredentialFields fails when a string setting whose name
