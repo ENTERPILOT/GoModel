@@ -42,6 +42,8 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 		BaseURL:          baseURL,
 		SetHeaders:       setHeaders,
 		AdaptChatRequest: adaptChatRequest,
+		// The Azure OpenAI v1 API documents the allowed_tools tool_choice.
+		ForwardAllowedTools: true,
 	}
 	p.CompatibleProvider = openai.NewCompatibleProvider(providerCfg.APIKey, opts, clientCfg)
 	p.resourceProvider = openai.NewCompatibleProvider(providerCfg.APIKey, opts, clientCfg)

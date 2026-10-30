@@ -41,10 +41,11 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 	baseURL := providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL)
 	return &Provider{
 		CompatibleProvider: NewCompatibleProvider(cfg.APIKey, opts, CompatibleProviderConfig{
-			ProviderName:     "openai",
-			BaseURL:          baseURL,
-			SetHeaders:       setHeaders,
-			AdaptChatRequest: adaptChatRequest,
+			ProviderName:        "openai",
+			BaseURL:             baseURL,
+			SetHeaders:          setHeaders,
+			AdaptChatRequest:    adaptChatRequest,
+			ForwardAllowedTools: true,
 		}),
 	}
 }
