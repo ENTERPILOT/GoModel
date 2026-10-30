@@ -10,6 +10,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/workloadidentity"
 )
 
 // Registration provides factory registration for the OpenAI provider.
@@ -18,7 +19,8 @@ var Registration = providers.Registration{
 	New:                         New,
 	PassthroughSemanticEnricher: passthroughSemanticEnricher,
 	Discovery: providers.DiscoveryConfig{
-		DefaultBaseURL: defaultBaseURL,
+		DefaultBaseURL:   defaultBaseURL,
+		WorkloadIdentity: workloadidentity.TokenExchange,
 	},
 }
 
@@ -177,7 +179,14 @@ func isNonReasoningChatModel(model string) bool {
 	return strings.HasPrefix(m, "gpt-3.5") || strings.HasPrefix(m, "gpt-4") || strings.HasPrefix(m, "chatgpt-")
 }
 
-// adaptChatRequest maps GoModel's nested reasoning shape (set by the Messages
+// maxStopSequences is the longest "stop" list OpenAI Chat Completions accepts;
+// a longer one is rejected with "array too long". Reasoning models, whose stop
+// sequences GoModel emulates (see takeStopSequences), never reach this limit.
+const maxStopSequences = 4
+
+// adaptChatRequest fits the canonical chat request to OpenAI Chat Completions.
+// It truncates an over-long "stop" list (clients coming from the Messages API
+// may send more) and maps GoModel's nested reasoning shape (set by the Messages
 // API's thinking and by clients sending reasoning.effort) onto the flat
 // reasoning_effort field: OpenAI Chat Completions rejects "reasoning".
 // Models that cannot reason reject reasoning_effort too, so it is dropped.
@@ -188,6 +197,10 @@ func isNonReasoningChatModel(model string) bool {
 func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
 	if req == nil {
 		return req, nil
+	}
+	req, err := providers.CapStopSequences(req, maxStopSequences)
+	if err != nil {
+		return nil, err
 	}
 	req = adaptInlineFiles(req)
 	effort := ""

@@ -19,15 +19,22 @@ func TestCheckSecretDestinations(t *testing.T) {
 		restricted   bool
 		destinations []SecretDestination
 		values       []string
+		kept         []string
 		wantErr      bool
 	}{
 		{name: "repointed with a reference", restricted: true, destinations: repointed, values: []string{"sk-literal", "${env:KEY}"}, wantErr: true},
 		{name: "repointed with a reference in other text", restricted: true, destinations: repointed, values: []string{"Bearer ${file:/run/secrets/key}"}, wantErr: true},
 		{name: "repointed with literals only", restricted: true, destinations: repointed, values: []string{"sk-literal", "$${env:KEY}", "${LEGACY}"}},
+		{name: "repointed retyping the stored literal", restricted: true, destinations: repointed, values: []string{"sk-stored-KEY"}},
+		{name: "repointed keeping a masked literal", restricted: true, destinations: repointed, values: []string{"sk-stored-KEY"}, kept: []string{"sk-stored-KEY"}, wantErr: true},
+		{name: "repointed keeping one of several masked literals", restricted: true, destinations: repointed, values: []string{"sk-fresh", " sk-stored-KEY "}, kept: []string{"sk-other", "sk-stored-KEY"}, wantErr: true},
 		{name: "repointed with no secrets", restricted: true, destinations: repointed},
+		{name: "repointed after dropping the masked secret", restricted: true, destinations: repointed, values: []string{"sk-fresh"}, kept: []string{"sk-stored-KEY"}},
 		{name: "unchanged destination", restricted: true, destinations: unchanged, values: []string{"${env:KEY}"}},
+		{name: "unchanged destination keeping a masked literal", restricted: true, destinations: unchanged, values: []string{"sk-stored-KEY"}, kept: []string{"sk-stored-KEY"}},
 		{name: "new entity", restricted: true, values: []string{"${env:KEY}"}},
 		{name: "unrestricted", destinations: repointed, values: []string{"${env:KEY}"}},
+		{name: "unrestricted keeping a masked literal", destinations: repointed, values: []string{"sk-stored-KEY"}, kept: []string{"sk-stored-KEY"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -35,6 +42,7 @@ func TestCheckSecretDestinations(t *testing.T) {
 			if tt.restricted {
 				ctx = RestrictSecretReferences(ctx)
 			}
+			ctx = WithKeptSecrets(ctx, tt.kept...)
 			err := CheckSecretDestinations(ctx, "provider_credentials", "acme", tt.destinations, tt.values)
 			if !tt.wantErr {
 				assert.NoError(t, err)

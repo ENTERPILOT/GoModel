@@ -59,6 +59,9 @@ type ProviderConfig struct {
 	// and price cap. Zero value keeps every model.
 	ModelFilter config.ModelFilter
 	Resilience  config.ResilienceConfig
+	// WorkloadIdentity, when configured and no API key is set, authenticates
+	// with tokens exchanged for the workload's platform identity.
+	WorkloadIdentity config.WorkloadIdentityConfig
 }
 
 // resolveProviders applies env var overrides to the raw YAML provider map,
@@ -225,7 +228,7 @@ func filterProviders(raw map[string]config.RawProviderConfig, discovery map[stri
 			result[name] = p
 			continue
 		}
-		if set(p.APIKey) {
+		if set(p.APIKey) || workloadIdentitySet(p.WorkloadIdentity, set) {
 			result[name] = p
 		}
 	}
@@ -318,6 +321,7 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 		ModelMetadataOverrides:   config.ProviderModelMetadataOverrides(raw.Models),
 		ModelFilter:              raw.ModelFilter.Normalize(),
 		Resilience:               global,
+		WorkloadIdentity:         raw.WorkloadIdentity,
 	}
 	if resolved.Type == "llmd" {
 		resolved.InferenceObjective = raw.InferenceObjective

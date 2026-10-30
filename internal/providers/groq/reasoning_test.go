@@ -56,6 +56,27 @@ func TestChatCompletion_MapsReasoningPerModelFamily(t *testing.T) {
 	}
 }
 
+// Groq rejects more than four stop sequences; the Messages API accepts more,
+// so the list is truncated instead of failing the request upstream.
+func TestChatCompletion_CapsStopSequences(t *testing.T) {
+	server, capture := providertest.JSONServer(t, http.StatusOK, minimalChatCompletionJSON)
+	provider := newTestProvider(server.URL)
+
+	extra, err := core.MergeUnknownJSONFields(core.UnknownJSONFields{}, map[string]json.RawMessage{
+		"stop": json.RawMessage(`["a","b","c","d","e","f"]`),
+	})
+	require.NoError(t, err)
+	_, err = provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:       "openai/gpt-oss-20b",
+		Messages:    []core.Message{{Role: "user", Content: "hi"}},
+		ExtraFields: extra,
+	})
+	require.NoError(t, err)
+
+	raw := capture.Last(t).JSON(t)
+	assert.Equal(t, []any{"a", "b", "c", "d"}, raw["stop"], "the first four sequences")
+}
+
 func TestChatCompletion_DefaultsReasoningFormatPerModelFamily(t *testing.T) {
 	tests := []struct {
 		name       string

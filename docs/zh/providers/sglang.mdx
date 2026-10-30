@@ -181,9 +181,37 @@ console.log(generation);
 
 GoModel 在转发前会移除客户端的认证信息，并在已配置时使用 `SGLANG_API_KEY`。
 
+## Responses API 模式
+
+部分 SGLang 版本在请求包含函数工具（function tools）时，`/v1/responses` 会返回
+HTTP 500，导致 Codex CLI 等客户端无法使用。SGLang 的 `/v1/chat/completions`
+可以处理这些工具，因此 GoModel 可以把 Responses 请求转换为 Chat Completions，
+并返回正常的 Responses 响应。`SGLANG_API_MODE`（或 `config.yaml` 中的
+`api_mode`）用于选择路径：
+
+| 值 | 行为 |
+| --- | --- |
+| `auto`（默认） | 请求包含函数工具时使用 Chat Completions；否则使用 `/v1/responses`。 |
+| `native` | 始终使用 `/v1/responses`。适用于已在该端点支持函数工具的 SGLang 版本。 |
+| `chat_compatible` | 始终使用 Chat Completions，保持上游 API 一致。 |
+
+默认值适合大多数部署。`web_search_preview` 等托管工具没有 Chat 等价物：在
+`auto` 模式下，只含托管工具的请求仍走 `/v1/responses`，而经过转换的请求会丢弃
+这些工具。如果需要同时使用托管工具和函数工具，请设置为 `native`。
+`previous_response_id` 在所有模式下都可用，因为 GoModel 会自行回放已存储的对话。
+
+```yaml
+providers:
+  sglang:
+    type: sglang
+    base_url: "http://localhost:30000/v1"
+    api_mode: native   # auto (default), native, chat_compatible
+```
+
 ## 能力说明
 
 - Chat Completions、流式传输、模型列表、Responses 和嵌入使用 SGLang 兼容 OpenAI 的 API。
+  带函数工具的 Responses 请求默认通过 Chat Completions 处理，参见上文“Responses API 模式”。
 - 嵌入和特定于模型的功能取决于 SGLang 加载的模型。
 - 原生的批处理、文件和已存储响应的生命周期接口尚未作为带类型的 GoModel 提供商能力暴露；
   在已安装的 SGLang 版本支持的情况下，请使用透传。

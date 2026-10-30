@@ -76,7 +76,7 @@ func TestNewHTTPClient_UsesConfiguredProxy(t *testing.T) {
 	cfg.Proxy = http.ProxyURL(proxy)
 
 	client := NewHTTPClient(&cfg)
-	transport, ok := client.Transport.(*http.Transport)
+	transport, ok := CurrentTransport(client)
 	require.True(t, ok)
 	require.NotNil(t, transport.Proxy)
 
@@ -89,7 +89,7 @@ func TestNewHTTPClient_UsesConfiguredProxy(t *testing.T) {
 
 func TestNewHTTPClient_KeepsAnEnvironmentProxyByDefault(t *testing.T) {
 	client := NewDefaultHTTPClient()
-	transport, ok := client.Transport.(*http.Transport)
+	transport, ok := CurrentTransport(client)
 	require.True(t, ok)
 	// The environment is read once per process, so only the presence of the
 	// fallback is asserted here; its behaviour is net/http's own.
