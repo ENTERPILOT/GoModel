@@ -176,3 +176,18 @@ func TestSpendCacheSweepsExpiredWindows(t *testing.T) {
 	cache.put([]SpendWindow{{Scope: ScopeUserPath, Subject: "/team/b", Start: time.Unix(100, 0)}}, []Spend{{}}, 0)
 	assert.Len(t, cache.entries, 1)
 }
+
+func TestSpendCacheKeysOnWhatIsSummed(t *testing.T) {
+	base := SpendWindow{Scope: ScopeProvider, Subject: "openai", CostBasis: CostBasisProvider, Start: time.Unix(100, 0)}
+	billed := base
+	billed.CostBasis = CostBasisBilled
+	billedNoCacheHits := billed
+	billedNoCacheHits.ExcludeCacheHits = true
+
+	cache := newSpendCache(time.Minute)
+	cache.put([]SpendWindow{base}, []Spend{{Total: 1, HasUsage: true}}, 0)
+
+	spends, misses, _ := cache.get([]SpendWindow{base, billed, billedNoCacheHits})
+	assert.Equal(t, []int{1, 2}, misses, "a window summing other costs must not reuse the cached spend")
+	assert.InDelta(t, 1.0, spends[0].Total, 0)
+}

@@ -14,11 +14,14 @@ const defaultSpendCacheTTL = 2 * time.Second
 
 // spendKey identifies a budget window. The end is always "now", so it is not
 // part of the key; resets, settings changes and period rollovers move the
-// start and therefore miss the cache on their own.
+// start and therefore miss the cache on their own. The cost basis and the
+// cache-hit exclusion change what is summed, so they are part of the key.
 type spendKey struct {
-	scope   Scope
-	subject string
-	start   int64
+	scope            Scope
+	subject          string
+	costBasis        CostBasis
+	excludeCacheHits bool
+	start            int64
 }
 
 type cachedSpend struct {
@@ -47,7 +50,13 @@ func newSpendCache(ttl time.Duration) *spendCache {
 }
 
 func keyFor(window SpendWindow) spendKey {
-	return spendKey{scope: window.Scope, subject: window.Subject, start: window.Start.UnixNano()}
+	return spendKey{
+		scope:            window.Scope,
+		subject:          window.Subject,
+		costBasis:        window.CostBasis,
+		excludeCacheHits: window.ExcludeCacheHits,
+		start:            window.Start.UnixNano(),
+	}
 }
 
 // get returns the cached spend for every window, the indexes of the windows
