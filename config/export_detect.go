@@ -73,7 +73,8 @@ func urlCredentials(value string) ([]string, bool) {
 		}
 	}
 	// A fragment can carry a query too ("#access_token=...").
-	fragment, _ := url.ParseQuery(u.Fragment)
+	// Escaped, so an encoded delimiter ("%3B") stays inside its value.
+	fragment, _ := url.ParseQuery(u.EscapedFragment())
 	for _, query := range []url.Values{u.Query(), fragment} {
 		for key, values := range query {
 			if credentialKey(key) {
