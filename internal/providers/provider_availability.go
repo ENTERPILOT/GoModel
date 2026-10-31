@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
 )
 
 // availabilityProbeTimeout bounds a single provider availability probe. Callers
@@ -26,7 +27,7 @@ func (r *ModelRegistry) probeAvailability(ctx context.Context, provider core.Pro
 		return nil
 	}
 
-	probeCtx, cancel := context.WithTimeout(ctx, timeout)
+	probeCtx, cancel := context.WithTimeout(llmclient.WithoutCircuitBreaker(ctx), timeout)
 	defer cancel()
 
 	err := checker.CheckAvailability(probeCtx)

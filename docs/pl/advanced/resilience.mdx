@@ -114,6 +114,11 @@ błąd; pojedyncze ponowienia HTTP nie zwiększają licznika breakera. Udana
 sekwencja zapisuje sukces. Anulowanie przez klienta jest ignorowane; lokalne timeouty
 klienta liczą się jako błędy.
 
+**Wykrywanie modeli i sprawdzanie dostępności** omijają breaker. Niedziałający
+endpoint `/models` nie otwiera obwodu, więc awaria listy modeli nie wstrzymuje
+inferencji, a działający go nie zamyka. Strona statusu providera nadal pokazuje
+nieudane pobranie listy.
+
 Ustawiaj `retry.retry_on_statuses` i `circuit_breaker.failure_on_statuses`
 niezależnie. Oba przyjmują dokładne kody i klasy, takie jak `5xx`. Pominięte
 listy używają wartości domyślnych; jawne listy je zastępują; `[]` wyłącza wyzwalacze

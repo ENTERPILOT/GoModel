@@ -123,6 +123,11 @@ Fehler; einzelne HTTP-Retries erhöhen den Zähler des Breakers nicht. Eine
 erfolgreiche Sequenz wird als Erfolg erfasst. Ein Abbruch durch den Client wird
 ignoriert; lokale Client-Timeouts zählen als Fehler.
 
+**Modellerkennung und Verfügbarkeitsprüfungen** umgehen den Breaker. Ein
+fehlerhafter `/models`-Endpunkt öffnet den Circuit nicht, sodass ein Ausfall der
+Modellliste die Inferenz nicht anhält, und ein funktionierender schließt ihn
+nicht. Die Provider-Statusseite meldet die fehlgeschlagene Abfrage weiterhin.
+
 Setzen Sie `retry.retry_on_statuses` und `circuit_breaker.failure_on_statuses`
 unabhängig voneinander. Beide akzeptieren exakte Codes und Klassen wie `5xx`.
 Weggelassene Listen verwenden die Standardwerte; explizite Listen ersetzen sie;
