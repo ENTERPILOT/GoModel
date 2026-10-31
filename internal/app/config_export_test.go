@@ -173,7 +173,8 @@ func TestExportConfig(t *testing.T) {
 	// The amount edited in the dashboard wins over config.yaml's, as at start.
 	assert.Equal(t, []config.BudgetUserPathConfig{{Path: "/team", Limits: []config.BudgetLimitConfig{{Period: "daily", PeriodSeconds: budget.PeriodDailySeconds, Amount: 99, CostBasis: "provider"}}}}, doc.Budgets.UserPaths)
 	assert.True(t, doc.Budgets.ProviderBilledCacheHits, "settings beside the budgets keep their value")
-	assert.Equal(t, []config.BudgetLabelConfig{{Label: "mobile", Limits: []config.BudgetLimitConfig{{PeriodSeconds: 7200, Amount: 3, CostBasis: "billed"}}}}, doc.Budgets.Labels)
+	// Without billed budgets, enforced on provider cost; see TestExportBudgets.
+	assert.Equal(t, []config.BudgetLabelConfig{{Label: "mobile", Limits: []config.BudgetLimitConfig{{PeriodSeconds: 7200, Amount: 3, CostBasis: "provider"}}}}, doc.Budgets.Labels)
 
 	// Loaded as config.yaml, the export runs the same gateway, and the
 	// description reads back as text, not the master key.

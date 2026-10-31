@@ -30,12 +30,15 @@ type writtenScalar struct {
 
 // expandedScalars indexes by path the strings of a config file that
 // environment expansion rewrites, as written. Map keys are indexed expanded,
-// as config.Load reads them. A file that does not parse unexpanded indexes
-// nothing.
-func expandedScalars(data []byte) map[string]writtenScalar {
+// as config.Load reads them. It reports false for a file that does not parse
+// unexpanded.
+func expandedScalars(data []byte) (map[string]writtenScalar, bool) {
 	var root yaml.Node
-	if yaml.Unmarshal(data, &root) != nil || len(root.Content) == 0 {
-		return nil
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return nil, false
+	}
+	if len(root.Content) == 0 {
+		return nil, true
 	}
 	index := make(map[string]writtenScalar)
 	var visit func(path string, node *yaml.Node)
@@ -56,7 +59,7 @@ func expandedScalars(data []byte) map[string]writtenScalar {
 		}
 	}
 	visit("", root.Content[0])
-	return index
+	return index, true
 }
 
 // escapeReferences returns s with each ${ escaped as $${, so no reference

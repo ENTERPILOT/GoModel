@@ -278,15 +278,21 @@ func TestExportYAMLRedactsCredentialsInText(t *testing.T) {
 	cfg := buildDefaultConfig()
 	cfg.Cache.Model.ModelList.URL = "postgres://db/gomodel?sslpassword=ssl-do-not-leak"
 	cfg.OpenTelemetry.ResourceAttributes = map[string]string{"note": "Bearer bearer-do-not-leak", "spaced": "Bearer   spaced-do-not-leak", "plan": "Bearer of good news"}
-	cfg.Users = []UserConfig{{Path: "/a", Description: "token=assigned-do-not-leak"}, {Path: "/b", Description: "max_tokens=5"}}
+	cfg.Users = []UserConfig{
+		{Path: "/a", Description: "token=assigned-do-not-leak"},
+		{Path: "/b", Description: "max_tokens=5"},
+		{Path: "/c", Description: `{"model":"gpt-4o","apiKey":"json-text-do-not-leak"}`},
+		{Path: "/d", Description: `{"model":"gpt-4o"}`},
+	}
 
 	out := exportYAML(t, NewSecrets(), cfg, nil, nil)
 
-	for _, secret := range []string{"ssl-do-not-leak", "bearer-do-not-leak", "spaced-do-not-leak", "assigned-do-not-leak"} {
+	for _, secret := range []string{"ssl-do-not-leak", "bearer-do-not-leak", "spaced-do-not-leak", "assigned-do-not-leak", "json-text-do-not-leak"} {
 		assert.NotContains(t, out, secret)
 	}
 	assert.Equal(t, "Bearer of good news", exportedValue(t, out, "opentelemetry", "resource_attributes", "plan"))
 	assert.Equal(t, "max_tokens=5", exportedValue(t, out, "users", "1", "description"))
+	assert.Equal(t, `{"model":"gpt-4o"}`, exportedValue(t, out, "users", "3", "description"))
 }
 
 func TestExportYAMLOnlyCountsSecretsResolvedIntoSecretSettings(t *testing.T) {
@@ -309,16 +315,22 @@ func TestExportYAMLRedactsCopiesOfSecrets(t *testing.T) {
 	// Supplied by a variable as is, a secret has no reference recording it.
 	cfg := buildDefaultConfig()
 	cfg.Storage.EncryptionKey = "kek-from-env-do-not-leak"
+	cfg.Cache.Model.ModelList.URL = "https://user:url-pass-do-not-leak@models.example.com/m.json"
+	cfg.MCP.Servers = map[string]MCPServerConfig{"linear": {URL: "https://mcp.linear.app/mcp", Headers: map[string]string{"Authorization": "Bearer header-token-do-not-leak"}}}
 	cfg.Users = []UserConfig{
 		{Path: "/a", Description: "kek-from-env-do-not-leak"},
 		{Path: "/b", Description: "the key is kek-from-env-do-not-leak"},
 		{Path: "/c", Description: "short"},
+		{Path: "/d", Description: "url-pass-do-not-leak"},
+		{Path: "/e", Description: "header-token-do-not-leak"},
 	}
 	cfg.Server.MasterKey = "short"
 
 	out := exportYAML(t, NewSecrets(), cfg, nil, []string{"GOMODEL_ENCRYPTION_KEY=kek-from-env-do-not-leak"})
 
-	assert.NotContains(t, out, "kek-from-env-do-not-leak")
+	for _, secret := range []string{"kek-from-env-do-not-leak", "url-pass-do-not-leak", "header-token-do-not-leak"} {
+		assert.NotContains(t, out, secret)
+	}
 	assert.Equal(t, "${env:GOMODEL_ENCRYPTION_KEY}", exportedValue(t, out, "users", "0", "description"))
 	assert.Equal(t, "short", exportedValue(t, out, "users", "2", "description"), "a short secret is not matched in text")
 }
@@ -405,6 +417,16 @@ func TestExportYAMLRoundTripsRandomText(t *testing.T) {
 	}
 }
 
+func TestExportYAMLRefusesFileParsedOnlyExpanded(t *testing.T) {
+	clearAllConfigEnvVars(t)
+	t.Setenv("GOMODEL_TEST_FLOW_VALUE", "1")
+	// Unexpanded, "${...}" ends the flow mapping early.
+	loaded := loadYAML(t, []byte("extensions:\n  demo: {count: ${GOMODEL_TEST_FLOW_VALUE}}\n"))
+
+	_, err := loaded.ExportYAML(ExportDocument{Config: loaded.Config}, nil)
+	require.ErrorContains(t, err, "parses only once environment variables are expanded")
+}
+
 func TestUnaliasedRejectsRecursiveAlias(t *testing.T) {
 	var node yaml.Node
 	require.NoError(t, yaml.Unmarshal([]byte("loop: &x\n  again: *x\n"), &node))
@@ -412,4 +434,14 @@ func TestUnaliasedRejectsRecursiveAlias(t *testing.T) {
 	_, err := unaliased(&node, &budget)
 	require.ErrorContains(t, err, "contains it")
 	assert.Greater(t, budget, maxExportNodes-10, "fails before copying the cycle out")
+}
+
+func TestExportYAMLRedactsPluginSecretFields(t *testing.T) {
+	cfg := buildDefaultConfig()
+	cfg.VirtualModels = []VirtualModelConfig{{Source: "signed", StrategyPlugin: "signed_route", StrategyConfig: map[string]any{"hmac_material": "route-secret-do-not-leak", "weight": 1}}}
+
+	out := exportYAML(t, NewSecrets(), cfg, nil, nil, "virtual_models[0].strategy_config.hmac_material")
+
+	assert.NotContains(t, out, "route-secret-do-not-leak")
+	assert.Equal(t, "${env:GOMODEL_VIRTUAL_MODELS_0_STRATEGY_CONFIG_HMAC_MATERIAL}", exportedValue(t, out, "virtual_models", "0", "strategy_config", "hmac_material"))
 }

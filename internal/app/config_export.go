@@ -83,14 +83,16 @@ func ExportConfig(ctx context.Context, opts ConfigExportOptions) ([]byte, error)
 	cfg.MCP, references = exportMCP(cfg.MCP, stored.mcpServers, stored.mcpVirtual)
 	doc.References = append(doc.References, references...)
 	cfg.Tagging.Headers = exportTaggingHeaders(cfg.Tagging.Headers, stored.tagging)
-	if cfg.Budgets, err = exportBudgets(cfg.Budgets, stored.budgets); err != nil {
+	// As budget.New decides it.
+	billed := opts.Extensions != nil && opts.Extensions.HasCapability(ext.CapabilityBilledBudgets) && cfg.Pricing.MarkupsEnabled
+	if cfg.Budgets, err = exportBudgets(cfg.Budgets, stored.budgets, billed); err != nil {
 		return nil, err
 	}
 	if cfg.RateLimits, err = exportRateLimits(cfg.RateLimits, stored.rateLimits); err != nil {
 		return nil, err
 	}
 	doc.Config = &cfg
-	doc.SecretFields = guardrailSecretFields(cfg.Guardrails.Rules, catalog)
+	doc.SecretFields = append(guardrailSecretFields(cfg.Guardrails.Rules, catalog), routeSecretFields(cfg.VirtualModels, catalog)...)
 	doc.Header = configExportHeader(opts.Now)
 	return loaded.ExportYAML(doc, opts.Environ)
 }
@@ -142,9 +144,10 @@ func readStoredObjects(ctx context.Context, loaded *config.LoadResult) (storedOb
 func configExportHeader(now time.Time) string {
 	return strings.Join([]string{
 		fmt.Sprintf("GoModel configuration exported %s by %s %s.", now.UTC().Format(time.RFC3339), version.App, version.Version),
-		"The settings in effect: defaults, config.yaml, environment variables,",
-		"and objects saved in the dashboard. Load it as config/config.yaml;",
-		"objects saved in the dashboard are then read-only there.",
+		"The settings a gateway started now would run with: defaults, config.yaml,",
+		"environment variables, and objects saved in the dashboard. Load it as",
+		"config/config.yaml; objects saved in the dashboard are then read-only",
+		"there.",
 		"",
 		"Secrets are not included. A secret is written as the reference it was",
 		"configured with (env, file, or vault), or as an env reference with a",

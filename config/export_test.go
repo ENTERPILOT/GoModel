@@ -283,6 +283,7 @@ func TestURLHasLiteralCredential(t *testing.T) {
 		"https://s3.example.com/o?X-Amz-Signature=abc": true,
 		"https://example.com/?api_key=${env:K}":        false,
 		"://bad@url":                                   true,
+		"https://token-as-user:@host/v1":               true,
 	} {
 		assert.Equal(t, want, urlHasLiteralCredential(value), value)
 	}

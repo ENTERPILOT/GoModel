@@ -10,6 +10,7 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/app"
+	"github.com/enterpilot/gomodel/internal/httpclient"
 )
 
 // configCommand is the CLI word that selects the config subcommands.
@@ -92,6 +93,8 @@ func runConfigExport(ctx context.Context, opts Options) error {
 	}
 	// As at gateway start: outbound trust first, so extensions setting up
 	// and secret references resolving (a vault behind a private CA) use it.
+	// It is process-wide, so it is put back for a caller reusing the process.
+	defer httpclient.RestoreTLS(httpclient.SnapshotTLS())
 	if err := app.ApplyOutboundTLSEarly(ctx, result.Config.HTTP.TLS); err != nil {
 		return err
 	}

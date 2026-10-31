@@ -187,9 +187,12 @@ the running values until the gateway is restarted.
 
 ## Exporting the Effective Configuration
 
-`gomodel config export` prints the settings in effect as one `config.yaml`,
-ready to review, commit, or load on another instance. A few objects have no
-`config.yaml` form and are left out; see the end of this section.
+`gomodel config export` prints the settings a gateway started now would run
+with as one `config.yaml`, ready to review, commit, or load on another
+instance. It reads the files, environment, and database afresh, so after a
+rejected reload it shows what the next start would run, not what the running
+gateway holds. A few objects have no `config.yaml` form and are left out; see
+the end of this section.
 
 ```bash
 gomodel config export > gomodel-export.yaml

@@ -86,8 +86,10 @@ type LoadResult struct {
 	Secrets *Secrets
 
 	// expanded holds the config.yaml strings environment expansion rewrote,
-	// as written, for ExportYAML.
-	expanded map[string]writtenScalar
+	// as written, for ExportYAML. expandedUnknown reports that config.yaml
+	// parses only once expanded, so they are not known.
+	expanded        map[string]writtenScalar
+	expandedUnknown bool
 
 	secretsResolved bool
 	secretsErr      error
@@ -414,10 +416,11 @@ func Load() (*LoadResult, error) {
 	}
 
 	return &LoadResult{
-		Config:       cfg,
-		RawProviders: rawProviders,
-		Secrets:      NewSecrets(),
-		expanded:     layer.expanded,
+		Config:          cfg,
+		RawProviders:    rawProviders,
+		Secrets:         NewSecrets(),
+		expanded:        layer.expanded,
+		expandedUnknown: layer.expandedUnknown,
 	}, nil
 }
 
@@ -470,8 +473,10 @@ type yamlLayer struct {
 	// masterKeyUnresolved reports whether server.master_key reads an unset
 	// variable.
 	masterKeyUnresolved bool
-	// expanded holds the strings environment expansion rewrote, as written.
-	expanded map[string]writtenScalar
+	// expanded holds the strings environment expansion rewrote, as written;
+	// expandedUnknown reports that the file does not parse unexpanded.
+	expanded        map[string]writtenScalar
+	expandedUnknown bool
 }
 
 // applyYAML reads an optional config file and overlays it onto cfg.
@@ -521,10 +526,12 @@ func applyYAML(cfg *Config, strict bool) (yamlLayer, error) {
 	if target.RawProviders == nil {
 		target.RawProviders = map[string]RawProviderConfig{}
 	}
+	expanded, ok := expandedScalars(data)
 	return yamlLayer{
 		providers:           target.RawProviders,
 		masterKeyUnresolved: masterKeyReadsUnsetVariable(data, cfg.Server.MasterKey),
-		expanded:            expandedScalars(data),
+		expanded:            expanded,
+		expandedUnknown:     !ok,
 	}, nil
 }
 

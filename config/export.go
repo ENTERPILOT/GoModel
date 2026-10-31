@@ -80,6 +80,11 @@ func (r *LoadResult) ExportYAML(doc ExportDocument, environ []string) ([]byte, e
 	if r == nil || doc.Config == nil {
 		return nil, fmt.Errorf("export configuration: no config")
 	}
+	// Without the file as written, a value an environment variable supplied
+	// through $NAME could be written out in place of $NAME.
+	if r.expandedUnknown {
+		return nil, fmt.Errorf("export configuration: config.yaml parses only once environment variables are expanded, so the export cannot tell which values they supplied; quote the values that hold them")
+	}
 	cfg := *doc.Config
 	if len(cfg.Extensions) > 0 {
 		cfg.Extensions = make(map[string]yaml.Node, len(doc.Config.Extensions))
@@ -374,8 +379,16 @@ func (e *exporter) scalar(path string, node *yaml.Node, class exportClass, envNa
 			e.secretPaths[path] = true
 		}
 		if secret := node.Value; class == exportSecret && prefix <= len(secret) {
-			if secret = secret[prefix:]; len(secret) >= minSecretCopy && !onlyReferences(secret) {
-				e.secretValues[secret] = true
+			secret = secret[prefix:]
+			e.recordSecret(secret)
+			if _, credential, ok := cutAuthScheme(secret); ok {
+				e.recordSecret(strings.TrimLeft(credential, " \t"))
+			}
+		}
+		if class == exportURL {
+			credentials, _ := urlCredentials(node.Value)
+			for _, credential := range credentials {
+				e.recordSecret(credential)
 			}
 		}
 		return
@@ -491,6 +504,14 @@ func setScalar(node *yaml.Node, value string, changed bool) {
 	node.Value = value
 	node.Tag = "!!str"
 	node.Style = yaml.DoubleQuotedStyle
+}
+
+// recordSecret records secret, unless it is too short or a reference, so
+// copies of it elsewhere are redacted.
+func (e *exporter) recordSecret(secret string) {
+	if len(secret) >= minSecretCopy && !onlyReferences(secret) && !strings.Contains(secret, referencePlaceholder) {
+		e.secretValues[secret] = true
+	}
 }
 
 // minSecretCopy is the shortest secret whose copies elsewhere are redacted:

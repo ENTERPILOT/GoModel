@@ -175,7 +175,15 @@ func exportTaggingHeaders(declared []config.TaggingHeaderConfig, stored []taggin
 // exportBudgets lists the declared budgets and the stored ones saved in the
 // dashboard. A budget saved in the dashboard wins over a declared one of the
 // same scope, subject, and period, as it does when the gateway starts.
-func exportBudgets(declared config.BudgetsConfig, stored []budget.Budget) (config.BudgetsConfig, error) {
+// Declared budgets keep their positions, so references config.yaml gave them
+// are kept. Without billed budgets (billed false), a saved budget on billed
+// cost is written on provider cost, as the gateway enforces it: declared on
+// billed cost, it would stop the gateway from starting.
+func exportBudgets(declared config.BudgetsConfig, stored []budget.Budget, billed bool) (config.BudgetsConfig, error) {
+	// Disabled, the section is neither validated nor seeded.
+	if !declared.Enabled {
+		return declared, nil
+	}
 	rows, err := budget.ConfigBudgets(declared)
 	if err != nil {
 		return config.BudgetsConfig{}, err
@@ -185,29 +193,36 @@ func exportBudgets(declared config.BudgetsConfig, stored []budget.Budget) (confi
 		subject string
 		period  int64
 	}
-	saved := make(map[budgetKey]bool)
+	keyOf := func(row budget.Budget) budgetKey { return budgetKey{row.Scope, row.Subject, row.PeriodSeconds} }
+	saved := make(map[budgetKey]budget.Budget)
+	var added []budget.Budget
 	for _, row := range stored {
-		if row.Source != budget.SourceConfig {
-			saved[budgetKey{row.Scope, row.Subject, row.PeriodSeconds}] = true
+		if row.Source == budget.SourceConfig {
+			continue
+		}
+		if !billed && row.CostBasis == budget.CostBasisBilled {
+			row.CostBasis = budget.CostBasisProvider
+		}
+		saved[keyOf(row)] = row
+		added = append(added, row)
+	}
+	for i, row := range rows {
+		if edited, ok := saved[keyOf(row)]; ok {
+			rows[i] = edited
+			delete(saved, keyOf(row))
 		}
 	}
-	rows = slices.DeleteFunc(rows, func(row budget.Budget) bool {
-		return saved[budgetKey{row.Scope, row.Subject, row.PeriodSeconds}]
+	added = slices.DeleteFunc(added, func(row budget.Budget) bool { _, ok := saved[keyOf(row)]; return !ok })
+	sort.SliceStable(added, func(i, j int) bool {
+		if added[i].Scope != added[j].Scope {
+			return added[i].Scope < added[j].Scope
+		}
+		if added[i].Subject != added[j].Subject {
+			return added[i].Subject < added[j].Subject
+		}
+		return added[i].PeriodSeconds < added[j].PeriodSeconds
 	})
-	for _, row := range stored {
-		if row.Source != budget.SourceConfig {
-			rows = append(rows, row)
-		}
-	}
-	sort.SliceStable(rows, func(i, j int) bool {
-		if rows[i].Scope != rows[j].Scope {
-			return rows[i].Scope < rows[j].Scope
-		}
-		if rows[i].Subject != rows[j].Subject {
-			return rows[i].Subject < rows[j].Subject
-		}
-		return rows[i].PeriodSeconds < rows[j].PeriodSeconds
-	})
+	rows = append(rows, added...)
 	result := declared
 	result.UserPaths, result.Labels, result.Providers = nil, nil, nil
 	for _, row := range rows {
@@ -247,8 +262,12 @@ func exportBudgets(declared config.BudgetsConfig, stored []budget.Budget) (confi
 // exportRateLimits lists the declared rate limit rules and the stored ones
 // saved in the dashboard. A rule saved in the dashboard wins over a declared
 // one of the same scope, subject, and period, as it does when the gateway
-// starts.
+// starts. Declared rules keep their positions, as in exportBudgets.
 func exportRateLimits(declared config.RateLimitsConfig, stored []ratelimit.Rule) (config.RateLimitsConfig, error) {
+	// Disabled, the section is neither validated nor seeded.
+	if !declared.Enabled {
+		return declared, nil
+	}
 	rows, err := ratelimit.ConfigRules(declared)
 	if err != nil {
 		return config.RateLimitsConfig{}, err
@@ -258,29 +277,32 @@ func exportRateLimits(declared config.RateLimitsConfig, stored []ratelimit.Rule)
 		subject string
 		period  int64
 	}
-	saved := make(map[ruleKey]bool)
+	keyOf := func(row ratelimit.Rule) ruleKey { return ruleKey{row.Scope, row.Subject, row.PeriodSeconds} }
+	saved := make(map[ruleKey]ratelimit.Rule)
+	var added []ratelimit.Rule
 	for _, row := range stored {
 		if row.Source != ratelimit.SourceConfig {
-			saved[ruleKey{row.Scope, row.Subject, row.PeriodSeconds}] = true
+			saved[keyOf(row)] = row
+			added = append(added, row)
 		}
 	}
-	rows = slices.DeleteFunc(rows, func(row ratelimit.Rule) bool {
-		return saved[ruleKey{row.Scope, row.Subject, row.PeriodSeconds}]
-	})
-	for _, row := range stored {
-		if row.Source != ratelimit.SourceConfig {
-			rows = append(rows, row)
+	for i, row := range rows {
+		if edited, ok := saved[keyOf(row)]; ok {
+			rows[i] = edited
+			delete(saved, keyOf(row))
 		}
 	}
-	sort.SliceStable(rows, func(i, j int) bool {
-		if rows[i].Scope != rows[j].Scope {
-			return rows[i].Scope < rows[j].Scope
+	added = slices.DeleteFunc(added, func(row ratelimit.Rule) bool { _, ok := saved[keyOf(row)]; return !ok })
+	sort.SliceStable(added, func(i, j int) bool {
+		if added[i].Scope != added[j].Scope {
+			return added[i].Scope < added[j].Scope
 		}
-		if rows[i].Subject != rows[j].Subject {
-			return rows[i].Subject < rows[j].Subject
+		if added[i].Subject != added[j].Subject {
+			return added[i].Subject < added[j].Subject
 		}
-		return rows[i].PeriodSeconds < rows[j].PeriodSeconds
+		return added[i].PeriodSeconds < added[j].PeriodSeconds
 	})
+	rows = append(rows, added...)
 	result := declared
 	result.UserPaths, result.Providers, result.Models = nil, nil, nil
 	for _, row := range rows {
@@ -322,6 +344,26 @@ func exportRateLimits(declared config.RateLimitsConfig, stored []ratelimit.Rule)
 		}
 	}
 	return result, nil
+}
+
+// routeSecretFields returns the paths of the secret strategy_config settings
+// of virtual models, by their routing plugin's schema.
+func routeSecretFields(models []config.VirtualModelConfig, catalog *plugins.Catalog) []string {
+	var fields []string
+	for i, model := range models {
+		if model.StrategyPlugin == "" || catalog == nil {
+			continue
+		}
+		entry, ok := catalog.Lookup(model.StrategyPlugin)
+		if !ok {
+			continue
+		}
+		for key := range plugins.SecretKeys(entry.Manifest.ConfigSchema) {
+			fields = append(fields, fmt.Sprintf("virtual_models[%d].strategy_config.%s", i, key))
+		}
+	}
+	slices.Sort(fields)
+	return fields
 }
 
 // guardrailSecretFields returns the paths of the secret settings of the

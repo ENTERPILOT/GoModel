@@ -44,40 +44,60 @@ func literal(s string) bool {
 // username without one, or a query parameter named like a credential, that is
 // not made of secret references alone. A URL that does not parse is assumed to.
 func urlHasLiteralCredential(value string) bool {
+	credentials, parsed := urlCredentials(value)
+	return !parsed || len(credentials) > 0
+}
+
+// urlCredentials returns the credentials a URL carries that are not made of
+// secret references alone, with references in them replaced by
+// referencePlaceholder. It reports false for a URL that does not parse.
+func urlCredentials(value string) ([]string, bool) {
 	if !strings.ContainsAny(value, "@?") {
-		return false
+		return nil, true
 	}
 	u, err := url.Parse(replaceReferences(value, referencePlaceholder))
 	if err != nil {
-		return true
+		return nil, false
 	}
-	// A username without a password is often a token ("TOKEN@host").
+	var credentials []string
+	// A username without a password is often a token ("TOKEN@host", or
+	// "TOKEN:@host").
 	if u.User != nil {
 		credential := u.User.Username()
-		if password, set := u.User.Password(); set {
+		if password, set := u.User.Password(); set && password != "" {
 			credential = password
 		}
 		if literal(credential) {
-			return true
+			credentials = append(credentials, credential)
 		}
 	}
 	for key, values := range u.Query() {
-		if credentialKey(key) && slices.ContainsFunc(values, literal) {
-			return true
+		if credentialKey(key) {
+			credentials = append(credentials, slices.DeleteFunc(values, func(v string) bool { return !literal(v) })...)
 		}
 	}
-	return false
+	return credentials, true
 }
 
 // assignment finds name=value pairs, as in a key=value connection string
 // ("host=db user=gomodel password=...") or a query string.
 var assignment = regexp.MustCompile(`(?:^|[\s;,&?])([A-Za-z][A-Za-z0-9_.\-]*)\s*=\s*('(?:[^'\\]|\\.)*'|[^\s;,&]*)`)
 
+// jsonAssignment finds "name": "value" pairs, as in JSON text.
+var jsonAssignment = regexp.MustCompile(`"([^"\\]+)"\s*:\s*"((?:[^"\\]|\\.)*)"`)
+
 // assignsLiteralCredential reports whether value assigns a name that names a
-// credential a value that is not made of secret references alone.
+// credential a value that is not made of secret references alone, as
+// name=value or as JSON.
 func assignsLiteralCredential(value string) bool {
-	for _, match := range assignment.FindAllStringSubmatch(replaceReferences(value, referencePlaceholder), -1) {
+	text := replaceReferences(value, referencePlaceholder)
+	for _, match := range assignment.FindAllStringSubmatch(text, -1) {
 		if credentialKey(match[1]) && literal(strings.Trim(match[2], "'")) {
+			return true
+		}
+	}
+	for _, match := range jsonAssignment.FindAllStringSubmatch(text, -1) {
+		if credentialKey(match[1]) && literal(match[2]) {
 			return true
 		}
 	}
