@@ -87,6 +87,16 @@ func seedConfiguredRules(ctx context.Context, service *Service, cfg config.RateL
 	if service == nil {
 		return nil
 	}
+	rules, err := ConfigRules(cfg)
+	if err != nil {
+		return err
+	}
+	return service.ReplaceConfigRules(ctx, rules)
+}
+
+// ConfigRules returns the rules cfg declares, as they are seeded into the
+// store.
+func ConfigRules(cfg config.RateLimitsConfig) ([]Rule, error) {
 	rules := make([]Rule, 0)
 	appendRules := func(scope RuleScope, subject string, perChild bool, limits []config.RateLimitRuleConfig) error {
 		normalized, err := NormalizeSubject(scope, subject)
@@ -121,18 +131,30 @@ func seedConfiguredRules(ctx context.Context, service *Service, cfg config.RateL
 	}
 	for _, entry := range cfg.UserPaths {
 		if err := appendRules(ScopeUserPath, entry.Path, entry.PerChild, entry.Limits); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	for _, entry := range cfg.Providers {
 		if err := appendRules(ScopeProvider, entry.Name, false, entry.Limits); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	for _, entry := range cfg.Models {
 		if err := appendRules(ScopeModel, entry.Model, false, entry.Limits); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return service.ReplaceConfigRules(ctx, rules)
+	return rules, nil
+}
+
+// ListStored returns the stored rate limit rules: those saved in the
+// dashboard, and those seeded from the configuration the gateway last
+// started with.
+func ListStored(ctx context.Context, shared storage.Storage) ([]Rule, error) {
+	store, err := createStore(ctx, shared)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = store.Close() }()
+	return store.ListRules(ctx)
 }

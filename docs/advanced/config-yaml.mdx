@@ -185,6 +185,86 @@ new file fails to load. `server.port` and `server.pid_file` are the exceptions:
 both are fixed for the life of the process, so a reload logs a warning and keeps
 the running values until the gateway is restarted.
 
+## Exporting the Effective Configuration
+
+`gomodel config export` prints the settings a gateway started now would run
+with as one `config.yaml`, ready to review, commit, or load on another
+instance. It reads the files, environment, and database afresh, so it shows
+what the next start would run, which after a rejected reload is not what the
+running gateway holds. When the current files no longer load, it fails with
+the same error. A few objects have no `config.yaml` form and are left out; see
+the end of this section.
+
+```bash
+gomodel config export > gomodel-export.yaml
+docker exec my-gateway /gomodel config export > gomodel-export.yaml
+```
+
+<Warning>
+Write the export to a new file, not onto the `config.yaml` the gateway reads:
+the shell empties that file before the command starts, so the original is
+gone. Run locally, the command then refuses to print. Through `docker exec`
+it cannot tell, since its output goes to Docker rather than the file, and it
+exports defaults from the emptied file.
+</Warning>
+
+It reads the same configuration, environment, and database as the gateway, so
+run it where the gateway runs, with the same environment. It is safe while the
+gateway is running. Logs go to stderr; stdout holds only the file. There is no
+HTTP endpoint or dashboard button for it: exporting needs shell access to the
+gateway, not an admin login.
+
+The file merges built-in defaults, `config.yaml`, environment variables, and
+the objects saved in the dashboard: providers, virtual models, users, MCP
+servers, budgets, rate limits, and tagging headers. Loaded as `config.yaml`,
+those dashboard objects become read-only in the dashboard, like any other
+declared object.
+
+Secrets are not written. Each one appears as where it comes from:
+
+| Configured as | Exported as |
+| ------------- | ----------- |
+| A [secret reference](/advanced/secret-references) (`${file:/run/secrets/openai}`, `${vault:...}`) | The same reference |
+| An environment variable (`OPENAI_API_KEY=sk-...`, or `${OPENAI_API_KEY}` in `config.yaml`) | `${env:OPENAI_API_KEY}` |
+| A literal value (in `config.yaml` or typed into the dashboard) | `${env:NAME}`, with a `# secret not exported: set NAME` comment |
+
+```yaml
+server:
+  master_key: "${env:GOMODEL_MASTER_KEY}"
+providers:
+  groq:
+    type: groq
+    api_key: "${env:GOMODEL_PROVIDERS_GROQ_API_KEY}" # secret not exported: set GOMODEL_PROVIDERS_GROQ_API_KEY
+```
+
+A file with such a comment does not start until you set that variable, so it
+never runs with an empty master key or credential. Secrets include API keys,
+the master and encryption keys, MCP `env` values, MCP and OpenTelemetry
+headers, URL passwords, connection-string passwords, the values of credential
+flags in MCP `args` (`--api-key=...`, `--token ...`), and plugin settings the
+plugin marks as secret. Under `extensions:`, plugin settings, and maps such as
+`resource_attributes`, any string under a key naming a credential (`token`,
+`api_key`, `password`, `auth`, ...) counts as one too. So does any other
+text holding a secret's value, a `Bearer` token, or a credential assignment
+such as `password=...`.
+
+<Note>
+Free-form text, such as a description typed into the dashboard, is checked
+for those shapes only. A bare token pasted into one is written as is, so
+review such text before sharing an export.
+</Note>
+
+Other settings keep their `${VAR}` expansions as written in `config.yaml`.
+Text saved in the dashboard is written so it loads back as the same text: a
+`$` in it is escaped (`\x24`), so a description such as
+`${env:GOMODEL_MASTER_KEY}` stays text and never becomes a reference.
+
+These have no `config.yaml` form and are listed as not exported in the file's
+header: managed API keys, workflows, guardrails created in the dashboard (they
+run only in the workflows that name them, while `guardrails.rules` adds each
+rule to the default workflow), model pricing overrides, runtime settings,
+disabled provider credentials, and MCP server display names.
+
 ## Docker
 
 GoModel reads `config/config.yaml` first, then `config.yaml`.

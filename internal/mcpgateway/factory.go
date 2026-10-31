@@ -169,3 +169,26 @@ func virtualStoreOf(store Store) VirtualStore {
 	virtualStore, _ := store.(VirtualStore)
 	return virtualStore
 }
+
+// ListStored returns the MCP servers and virtual servers saved in the
+// dashboard, header secrets unsealed with box and references unresolved.
+func ListStored(ctx context.Context, shared storage.Storage, box *encryption.Box) ([]ManagedServer, []ManagedVirtualServer, error) {
+	rawStore, err := createStore(ctx, shared)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = rawStore.Close() }()
+	servers, err := sealStore(rawStore, box).List(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	virtualStore := virtualStoreOf(rawStore)
+	if virtualStore == nil {
+		return servers, nil, nil
+	}
+	virtual, err := virtualStore.ListVirtual(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return servers, virtual, nil
+}
