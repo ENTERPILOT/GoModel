@@ -284,6 +284,8 @@ func TestURLHasLiteralCredential(t *testing.T) {
 		"https://example.com/?api_key=${env:K}":        false,
 		"://bad@url":                                   true,
 		"https://token-as-user:@host/v1":               true,
+		"https://host/callback#access_token=abc":       true,
+		"https://host/docs#section-2":                  false,
 	} {
 		assert.Equal(t, want, urlHasLiteralCredential(value), value)
 	}

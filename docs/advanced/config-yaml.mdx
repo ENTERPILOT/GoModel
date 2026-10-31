@@ -189,9 +189,10 @@ the running values until the gateway is restarted.
 
 `gomodel config export` prints the settings a gateway started now would run
 with as one `config.yaml`, ready to review, commit, or load on another
-instance. It reads the files, environment, and database afresh, so after a
-rejected reload it shows what the next start would run, not what the running
-gateway holds. A few objects have no `config.yaml` form and are left out; see
+instance. It reads the files, environment, and database afresh, so it shows
+what the next start would run, which after a rejected reload is not what the
+running gateway holds. When the current files no longer load, it fails with
+the same error. A few objects have no `config.yaml` form and are left out; see
 the end of this section.
 
 ```bash

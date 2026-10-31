@@ -2,6 +2,7 @@ package config
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"net/url"
 	"regexp"
 	"slices"
@@ -52,7 +53,7 @@ func urlHasLiteralCredential(value string) bool {
 // secret references alone, with references in them replaced by
 // referencePlaceholder. It reports false for a URL that does not parse.
 func urlCredentials(value string) ([]string, bool) {
-	if !strings.ContainsAny(value, "@?") {
+	if !strings.ContainsAny(value, "@?#") {
 		return nil, true
 	}
 	u, err := url.Parse(replaceReferences(value, referencePlaceholder))
@@ -71,9 +72,13 @@ func urlCredentials(value string) ([]string, bool) {
 			credentials = append(credentials, credential)
 		}
 	}
-	for key, values := range u.Query() {
-		if credentialKey(key) {
-			credentials = append(credentials, slices.DeleteFunc(values, func(v string) bool { return !literal(v) })...)
+	// A fragment can carry a query too ("#access_token=...").
+	fragment, _ := url.ParseQuery(u.Fragment)
+	for _, query := range []url.Values{u.Query(), fragment} {
+		for key, values := range query {
+			if credentialKey(key) {
+				credentials = append(credentials, slices.DeleteFunc(values, func(v string) bool { return !literal(v) })...)
+			}
 		}
 	}
 	return credentials, true
@@ -83,8 +88,9 @@ func urlCredentials(value string) ([]string, bool) {
 // ("host=db user=gomodel password=...") or a query string.
 var assignment = regexp.MustCompile(`(?:^|[\s;,&?])([A-Za-z][A-Za-z0-9_.\-]*)\s*=\s*('(?:[^'\\]|\\.)*'|[^\s;,&]*)`)
 
-// jsonAssignment finds "name": "value" pairs, as in JSON text.
-var jsonAssignment = regexp.MustCompile(`"([^"\\]+)"\s*:\s*"((?:[^"\\]|\\.)*)"`)
+// jsonAssignment finds "name": value pairs, as in JSON text. The value is a
+// string, or the start of any other JSON value.
+var jsonAssignment = regexp.MustCompile(`("(?:[^"\\]|\\.)*")\s*:\s*("(?:[^"\\]|\\.)*"|[^\s,}\]]+|[\[{])`)
 
 // assignsLiteralCredential reports whether value assigns a name that names a
 // credential a value that is not made of secret references alone, as
@@ -97,11 +103,21 @@ func assignsLiteralCredential(value string) bool {
 		}
 	}
 	for _, match := range jsonAssignment.FindAllStringSubmatch(text, -1) {
-		if credentialKey(match[1]) && literal(match[2]) {
+		if credentialKey(jsonText(match[1])) && match[2] != "null" && literal(jsonText(match[2])) {
 			return true
 		}
 	}
 	return false
+}
+
+// jsonText decodes a JSON string, escapes included ("api\u005fkey"); other
+// JSON text, such as a number, is returned as is.
+func jsonText(raw string) string {
+	var s string
+	if json.Unmarshal([]byte(raw), &s) != nil {
+		return raw
+	}
+	return s
 }
 
 // bearerCredential reports whether value is a bearer token

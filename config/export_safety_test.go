@@ -283,16 +283,20 @@ func TestExportYAMLRedactsCredentialsInText(t *testing.T) {
 		{Path: "/b", Description: "max_tokens=5"},
 		{Path: "/c", Description: `{"model":"gpt-4o","apiKey":"json-text-do-not-leak"}`},
 		{Path: "/d", Description: `{"model":"gpt-4o"}`},
+		{Path: "/e", Description: `{"api_key":31415926535}`},
+		{Path: "/f", Description: `{"api\u005fkey":"escaped-key-do-not-leak"}`},
+		{Path: "/g", Description: `{"token":null,"max_tokens":256}`},
 	}
 
 	out := exportYAML(t, NewSecrets(), cfg, nil, nil)
 
-	for _, secret := range []string{"ssl-do-not-leak", "bearer-do-not-leak", "spaced-do-not-leak", "assigned-do-not-leak", "json-text-do-not-leak"} {
+	for _, secret := range []string{"ssl-do-not-leak", "bearer-do-not-leak", "spaced-do-not-leak", "assigned-do-not-leak", "json-text-do-not-leak", "31415926535", "escaped-key-do-not-leak"} {
 		assert.NotContains(t, out, secret)
 	}
 	assert.Equal(t, "Bearer of good news", exportedValue(t, out, "opentelemetry", "resource_attributes", "plan"))
 	assert.Equal(t, "max_tokens=5", exportedValue(t, out, "users", "1", "description"))
 	assert.Equal(t, `{"model":"gpt-4o"}`, exportedValue(t, out, "users", "3", "description"))
+	assert.Equal(t, `{"token":null,"max_tokens":256}`, exportedValue(t, out, "users", "6", "description"))
 }
 
 func TestExportYAMLOnlyCountsSecretsResolvedIntoSecretSettings(t *testing.T) {

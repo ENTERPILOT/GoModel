@@ -35,8 +35,10 @@ func TestExportBudgets(t *testing.T) {
 		assert.True(t, got.ProviderBilledCacheHits)
 		require.Len(t, got.UserPaths, 2)
 		assert.Equal(t, "/b", got.UserPaths[0].Path, "declared budgets keep their positions")
+		require.Len(t, got.UserPaths[1].Limits, 1)
 		assert.Equal(t, 20.0, got.UserPaths[1].Limits[0].Amount, "the dashboard edit wins in place")
 		require.Len(t, got.Labels, 1)
+		require.Len(t, got.Labels[0].Limits, 1)
 		want := "provider"
 		if billed {
 			want = "billed"
