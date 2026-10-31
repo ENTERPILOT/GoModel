@@ -160,9 +160,9 @@ próbę HTTP, bez ponowień.
 
 Circuit breaker działa w pamięci i per proces gatewaya: każdy provider
 dostaje domyślnie własny breaker. Z `scope: model` każdy model w ramach
-instancji providera dostaje niezależny breaker; requesty bez modelu,
-takie jak wykrywanie modeli, używają osobnego breakera providera. Uploady audio multipart
-używają jawnie podanych nazw modeli.
+instancji providera dostaje niezależny breaker; pozostałe requesty bez modelu
+używają osobnego breakera providera, a wykrywanie modeli całkowicie omija breakery.
+Uploady audio multipart używają jawnie podanych nazw modeli.
 
 Każdy provider przechowuje co najwyżej 1 024 breakery modeli. Bezczynne zamknięte wpisy wygasają
 po 10 minutach przy wyszukiwaniu nowego modelu; najstarszy bezczynny zamknięty wpis

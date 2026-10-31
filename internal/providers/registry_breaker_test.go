@@ -40,13 +40,13 @@ func TestFailedDiscoveryDoesNotOpenInferenceCircuitBreaker(t *testing.T) {
 	const rounds = 5
 	tests := []struct {
 		name  string
-		round func(context.Context, *ModelRegistry, *listingClientProvider)
+		round func(*testing.T, *ModelRegistry, *listingClientProvider)
 	}{
-		{"inventory refresh", func(ctx context.Context, registry *ModelRegistry, _ *listingClientProvider) {
-			assert.Error(t, registry.Refresh(ctx))
+		{"inventory refresh", func(t *testing.T, registry *ModelRegistry, _ *listingClientProvider) {
+			assert.Error(t, registry.Refresh(t.Context()))
 		}},
-		{"availability probe", func(ctx context.Context, registry *ModelRegistry, provider *listingClientProvider) {
-			assert.Error(t, registry.probeAvailability(ctx, provider, "test", time.Second))
+		{"availability probe", func(t *testing.T, registry *ModelRegistry, provider *listingClientProvider) {
+			assert.Error(t, registry.probeAvailability(t.Context(), provider, "test", time.Second))
 		}},
 	}
 	for _, tt := range tests {
@@ -73,14 +73,13 @@ func TestFailedDiscoveryDoesNotOpenInferenceCircuitBreaker(t *testing.T) {
 			registry := NewModelRegistry()
 			registry.RegisterProvider(provider)
 
-			ctx := context.Background()
 			for range rounds {
-				tt.round(ctx, registry, provider)
+				tt.round(t, registry, provider)
 			}
 			require.EqualValues(t, rounds, listings.Load())
 
 			var out map[string]any
-			err := provider.client.Do(ctx, llmclient.Request{
+			err := provider.client.Do(t.Context(), llmclient.Request{
 				Method:   http.MethodPost,
 				Endpoint: "/chat/completions",
 				Body:     map[string]any{"model": "m1"},

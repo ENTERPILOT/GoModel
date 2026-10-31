@@ -175,9 +175,9 @@ einen HTTP-Versuch durch, ohne Retries.
 Der Circuit Breaker liegt im Arbeitsspeicher und gilt pro Gateway-Prozess:
 Standardmäßig erhält jeder Provider einen eigenen Breaker. Mit `scope: model`
 erhält jedes Modell innerhalb einer Provider-Instanz einen unabhängigen Breaker;
-Requests ohne Modell, etwa Discovery, verwenden einen separaten
-Provider-Breaker. Multipart-Audio-Uploads verwenden ihre expliziten
-Modellnamen.
+andere Requests ohne Modell verwenden einen separaten Provider-Breaker, und die
+Modellerkennung umgeht Breaker vollständig. Multipart-Audio-Uploads verwenden
+ihre expliziten Modellnamen.
 
 Jeder Provider hält höchstens 1.024 Modell-Breaker vor. Inaktive geschlossene
 Einträge laufen nach 10 Minuten ab, sobald ein neues Modell nachgeschlagen wird;

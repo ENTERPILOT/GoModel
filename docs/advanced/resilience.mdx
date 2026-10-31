@@ -160,9 +160,9 @@ HTTP attempt, without retries.
 
 The circuit breaker is in-memory and per gateway process: each provider
 gets its own breaker by default. With `scope: model`, each model within a
-provider instance gets an independent breaker; requests without a model,
-such as discovery, use a separate provider breaker. Multipart audio uploads
-use their explicit model names.
+provider instance gets an independent breaker; other requests without a model
+use a separate provider breaker, and model discovery bypasses breakers
+entirely. Multipart audio uploads use their explicit model names.
 
 Each provider retains at most 1,024 model breakers. Idle closed entries expire
 after 10 minutes when a new model is looked up; the oldest idle closed entry
