@@ -220,9 +220,9 @@ See [Encryption at Rest](/advanced/encryption-at-rest).
 
 ## Exporting the configuration
 
-`gomodel config export` prints every setting in effect, from defaults,
+`gomodel config export` prints the settings in effect, from defaults,
 `config.yaml`, environment variables, and the dashboard, as a `config.yaml`
-holding no secret.
+with secrets written as references.
 
 ```bash
 gomodel config export > gomodel-export.yaml

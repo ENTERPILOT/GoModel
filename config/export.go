@@ -118,7 +118,7 @@ func (r *LoadResult) ExportYAML(doc ExportDocument, environ []string) ([]byte, e
 	survey.survey, survey.blocks = true, blocks
 	survey.walk("", value, &surveyed, exportPlain, "")
 	e := newExporter(r.Secrets, environ, doc, r.expanded)
-	e.secretPaths, e.blocks = survey.secretPaths, blocks
+	e.secretPaths, e.secretValues, e.blocks = survey.secretPaths, survey.secretValues, blocks
 	e.walk("", value, &root, exportPlain, "")
 	root.HeadComment = doc.Header
 
@@ -153,9 +153,11 @@ type exporter struct {
 	// token starts every placeholder. It is random, so no value can hold one.
 	token string
 	// survey, set on a first pass, only collects secretPaths: the paths of
-	// the settings holding a secret by their schema or name.
-	survey      bool
-	secretPaths map[string]bool
+	// the settings holding a secret by their schema or name, and
+	// secretValues: the secrets they hold, however they were supplied.
+	survey       bool
+	secretPaths  map[string]bool
+	secretValues map[string]bool
 	// suggested maps each variable name suggested for a secret to its path,
 	// so two paths never share one.
 	suggested map[string]string
@@ -165,14 +167,15 @@ type exporter struct {
 
 func newExporter(secrets *Secrets, environ []string, doc ExportDocument, expanded map[string]writtenScalar) *exporter {
 	e := &exporter{
-		secrets:     secrets,
-		env:         make(map[string]string, len(environ)),
-		stored:      make(map[string]bool, len(doc.References)),
-		extra:       make(map[string]bool, len(doc.SecretFields)),
-		expanded:    expanded,
-		token:       "gomodelexport" + rand.Text() + "n",
-		secretPaths: make(map[string]bool),
-		suggested:   make(map[string]string),
+		secrets:      secrets,
+		env:          make(map[string]string, len(environ)),
+		stored:       make(map[string]bool, len(doc.References)),
+		extra:        make(map[string]bool, len(doc.SecretFields)),
+		expanded:     expanded,
+		token:        "gomodelexport" + rand.Text() + "n",
+		secretPaths:  make(map[string]bool),
+		secretValues: make(map[string]bool),
+		suggested:    make(map[string]string),
 	}
 	for _, entry := range environ {
 		name, value, _ := strings.Cut(entry, "=")
@@ -370,6 +373,11 @@ func (e *exporter) scalar(path string, node *yaml.Node, class exportClass, envNa
 		if class == exportSecret || class == exportURL && urlHasLiteralCredential(value) {
 			e.secretPaths[path] = true
 		}
+		if secret := node.Value; class == exportSecret && prefix <= len(secret) {
+			if secret = secret[prefix:]; len(secret) >= minSecretCopy && !onlyReferences(secret) {
+				e.secretValues[secret] = true
+			}
+		}
 		return
 	}
 	switch class {
@@ -485,12 +493,16 @@ func setScalar(node *yaml.Node, value string, changed bool) {
 	node.Style = yaml.DoubleQuotedStyle
 }
 
+// minSecretCopy is the shortest secret whose copies elsewhere are redacted:
+// a shorter one would match ordinary text.
+const minSecretCopy = 8
+
 // leaksSecret reports whether a value of a setting not known to hold a secret
 // is one all the same: a URL carrying user information, an assignment of a
-// credential ("password=..."), a bearer token, or, when resolved is set, what
-// a reference in a secret setting resolved to. It catches a credential the
-// schema, tags, and key names miss, such as one kept in a plugin setting with
-// an unusual name.
+// credential ("password=..."), a bearer token, text holding a secret
+// setting's value, or, when resolved is set, what a reference in a secret
+// setting resolved to. It catches a credential the schema, tags, and key
+// names miss, such as one kept in a plugin setting with an unusual name.
 func (e *exporter) leaksSecret(value string, resolved bool) bool {
 	if value == "" {
 		return false
@@ -500,6 +512,13 @@ func (e *exporter) leaksSecret(value string, resolved bool) bool {
 	}
 	if assignsLiteralCredential(value) || bearerCredential(value) {
 		return true
+	}
+	// A copy of a secret setting's value, such as one an environment
+	// variable supplied, which no reference records.
+	for secret := range e.secretValues {
+		if strings.Contains(value, secret) {
+			return true
+		}
 	}
 	// Only a value resolved into a secret setting is a secret: a tenant can
 	// copy a resolved base URL into a description.

@@ -30,11 +30,23 @@ func encryptionOptions(loaded *config.LoadResult) encryption.Options {
 
 // openSecretBox loads the data keys that seal dashboard-managed secrets.
 func openSecretBox(ctx context.Context, shared storage.Storage, loaded *config.LoadResult) (*encryption.Box, error) {
+	return openSecretBoxWith(ctx, shared, encryptionOptions(loaded))
+}
+
+// readSecretBox is openSecretBox for a command that only reads secrets: it
+// neither creates the first data key nor re-wraps one.
+func readSecretBox(ctx context.Context, shared storage.Storage, loaded *config.LoadResult) (*encryption.Box, error) {
+	opts := encryptionOptions(loaded)
+	opts.ReadOnly = true
+	return openSecretBoxWith(ctx, shared, opts)
+}
+
+func openSecretBoxWith(ctx context.Context, shared storage.Storage, opts encryption.Options) (*encryption.Box, error) {
 	keys, err := encryption.NewKeyStore(ctx, shared)
 	if err != nil {
 		return nil, err
 	}
-	return encryption.Open(ctx, keys, encryptionOptions(loaded))
+	return encryption.Open(ctx, keys, opts)
 }
 
 // ReencryptOptions configures ReencryptSecrets.

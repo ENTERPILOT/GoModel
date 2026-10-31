@@ -124,10 +124,19 @@ const maxExportNodes = 1_000_000
 // unaliased returns a copy of node in which each alias is replaced by a copy
 // of the node it names, without anchors: the encoder writes mapping keys
 // sorted, which can put an alias before its anchor. budget counts down the
-// nodes copied.
+// nodes copied. An alias inside the node it names fails at once.
 func unaliased(node *yaml.Node, budget *int) (*yaml.Node, error) {
+	return unaliasedWithin(node, budget, make(map[*yaml.Node]bool))
+}
+
+// unaliasedWithin is unaliased for node within ancestors, the nodes being
+// copied around it.
+func unaliasedWithin(node *yaml.Node, budget *int, ancestors map[*yaml.Node]bool) (*yaml.Node, error) {
 	for node.Kind == yaml.AliasNode && node.Alias != nil {
 		node = node.Alias
+	}
+	if ancestors[node] {
+		return nil, errors.New("a YAML alias refers to a node that contains it")
 	}
 	if *budget--; *budget < 0 {
 		return nil, errors.New("too many nodes once aliases are expanded")
@@ -138,9 +147,11 @@ func unaliased(node *yaml.Node, budget *int) (*yaml.Node, error) {
 		clone.Style = yaml.DoubleQuotedStyle
 	}
 	if node.Content != nil {
+		ancestors[node] = true
+		defer delete(ancestors, node)
 		clone.Content = make([]*yaml.Node, len(node.Content))
 		for i, child := range node.Content {
-			copied, err := unaliased(child, budget)
+			copied, err := unaliasedWithin(child, budget, ancestors)
 			if err != nil {
 				return nil, err
 			}

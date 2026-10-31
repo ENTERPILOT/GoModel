@@ -260,6 +260,10 @@ func TestCredentialKey(t *testing.T) {
 		"key_prefix":      true,
 		"monkey":          false,
 		"service.secret":  true,
+		"token2":          true,
+		"apiKey2":         true,
+		"password1":       true,
+		"gpt4":            false,
 	} {
 		assert.Equal(t, want, credentialKey(key), key)
 	}

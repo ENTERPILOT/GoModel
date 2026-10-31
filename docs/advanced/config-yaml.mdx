@@ -187,8 +187,9 @@ the running values until the gateway is restarted.
 
 ## Exporting the Effective Configuration
 
-`gomodel config export` prints every setting in effect as one `config.yaml`,
-ready to review, commit, or load on another instance:
+`gomodel config export` prints the settings in effect as one `config.yaml`,
+ready to review, commit, or load on another instance. A few objects have no
+`config.yaml` form and are left out; see the end of this section.
 
 ```bash
 gomodel config export > gomodel-export.yaml
@@ -197,8 +198,10 @@ docker exec my-gateway /gomodel config export > gomodel-export.yaml
 
 <Warning>
 Write the export to a new file, not onto the `config.yaml` the gateway reads:
-the shell empties that file before the command starts. The command then
-refuses to run, but the original file is already gone.
+the shell empties that file before the command starts, so the original is
+gone. Run locally, the command then refuses to print. Through `docker exec`
+it cannot tell, since its output goes to Docker rather than the file, and it
+exports defaults from the emptied file.
 </Warning>
 
 It reads the same configuration, environment, and database as the gateway, so
@@ -213,7 +216,7 @@ servers, budgets, rate limits, and tagging headers. Loaded as `config.yaml`,
 those dashboard objects become read-only in the dashboard, like any other
 declared object.
 
-No secret is ever written. Each one appears as where it comes from:
+Secrets are not written. Each one appears as where it comes from:
 
 | Configured as | Exported as |
 | ------------- | ----------- |
@@ -232,12 +235,20 @@ providers:
 
 A file with such a comment does not start until you set that variable, so it
 never runs with an empty master key or credential. Secrets include API keys,
-the master and encryption keys, MCP and OpenTelemetry headers, URL passwords,
-connection-string passwords, the values of credential flags in MCP `args`
-(`--api-key=...`, `--token ...`), and plugin settings the plugin marks as
-secret. Under `extensions:`, plugin settings, and maps such as
+the master and encryption keys, MCP `env` values, MCP and OpenTelemetry
+headers, URL passwords, connection-string passwords, the values of credential
+flags in MCP `args` (`--api-key=...`, `--token ...`), and plugin settings the
+plugin marks as secret. Under `extensions:`, plugin settings, and maps such as
 `resource_attributes`, any string under a key naming a credential (`token`,
-`api_key`, `password`, `auth`, ...) counts as one too.
+`api_key`, `password`, `auth`, ...) counts as one too. So does any other
+text holding a secret's value, a `Bearer` token, or a credential assignment
+such as `password=...`.
+
+<Note>
+Free-form text, such as a description typed into the dashboard, is checked
+for those shapes only. A bare token pasted into one is written as is, so
+review such text before sharing an export.
+</Note>
 
 Other settings keep their `${VAR}` expansions as written in `config.yaml`.
 Text saved in the dashboard is written so it loads back as the same text: a
@@ -247,8 +258,8 @@ Text saved in the dashboard is written so it loads back as the same text: a
 These have no `config.yaml` form and are listed as not exported in the file's
 header: managed API keys, workflows, guardrails created in the dashboard (they
 run only in the workflows that name them, while `guardrails.rules` adds each
-rule to the default workflow), model pricing overrides, runtime settings, and
-disabled provider credentials.
+rule to the default workflow), model pricing overrides, runtime settings,
+disabled provider credentials, and MCP server display names.
 
 ## Docker
 

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/rand"
 	"net/url"
 	"regexp"
 	"slices"
@@ -29,8 +30,9 @@ func cutAuthScheme(value string) (scheme, credential string, ok bool) {
 }
 
 // referencePlaceholder stands in for a secret reference while a value is
-// parsed: braces are not valid in a URL.
-const referencePlaceholder = "gomodelsecretreference"
+// parsed: braces are not valid in a URL. It is random, so no literal text
+// can pass for a reference.
+var referencePlaceholder = "gomodelref" + strings.ToLower(rand.Text())
 
 // literal reports whether s, with references replaced by
 // referencePlaceholder, holds anything but references.
@@ -86,6 +88,7 @@ func assignsLiteralCredential(value string) bool {
 // ("Bearer abc123"): the scheme and one word that is not a reference.
 func bearerCredential(value string) bool {
 	scheme, credential, ok := cutAuthScheme(value)
+	credential = strings.TrimLeft(credential, " \t")
 	return ok && strings.EqualFold(scheme, "bearer") && !strings.ContainsAny(credential, " \t\n") &&
 		literal(replaceReferences(credential, referencePlaceholder))
 }
@@ -101,10 +104,15 @@ func argCredential(arg string) (prefix int, next bool) {
 	if i := strings.IndexAny(arg, "=:"); i > 0 {
 		name := strings.TrimLeft(arg[:i], "-")
 		if !credentialKey(name) {
-			if inner, _ := argCredential(arg[i+1:]); inner >= 0 {
-				return i + 1 + inner, false
+			inner, _ := argCredential(arg[i+1:])
+			switch {
+			case inner < 0:
+				return -1, false
+			case strings.ContainsFunc(name, structural):
+				// A credential later in structured text: the text starts here.
+				return 0, false
 			}
-			return -1, false
+			return i + 1 + inner, false
 		}
 		if strings.ContainsFunc(name, structural) {
 			return 0, false
@@ -164,12 +172,12 @@ var credentialWords = map[string]bool{
 // credentialKey reports whether a setting name names a credential: one of
 // its words is in credentialWords. Words are split at every character but
 // letters and digits, and where a lower-case letter is followed by an
-// upper-case one.
+// upper-case one; a trailing number is dropped ("token2").
 func credentialKey(key string) bool {
 	var word []rune
 	credential := false
 	flush := func() {
-		if credentialWords[strings.ToLower(string(word))] {
+		if credentialWords[strings.TrimRightFunc(strings.ToLower(string(word)), unicode.IsDigit)] {
 			credential = true
 		}
 		word = word[:0]

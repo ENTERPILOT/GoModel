@@ -17,6 +17,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
+	"github.com/enterpilot/gomodel/internal/ratelimit"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/tagging"
 	"github.com/enterpilot/gomodel/internal/users"
@@ -59,6 +60,22 @@ func loadExportConfig(t *testing.T, data string) *config.LoadResult {
 	loaded, err := config.Load()
 	require.NoError(t, err, data)
 	return loaded
+}
+
+// isolateEnv unsets every environment variable but those the OS and test
+// runner need, so a developer's OPENAI_API_KEY or GOMODEL_MASTER_KEY does
+// not change what the test loads. They are restored when the test ends.
+func isolateEnv(t *testing.T) {
+	t.Helper()
+	keep := map[string]bool{"PATH": true, "HOME": true, "TMPDIR": true, "TMP": true, "TEMP": true, "SYSTEMROOT": true}
+	for _, entry := range os.Environ() {
+		name, value, _ := strings.Cut(entry, "=")
+		if name == "" || keep[strings.ToUpper(name)] {
+			continue
+		}
+		t.Setenv(name, value)
+		require.NoError(t, os.Unsetenv(name))
+	}
 }
 
 func exportTestFactory() *providers.ProviderFactory {
@@ -107,6 +124,7 @@ func seedDashboardObjects(t *testing.T, db sqlx.DB) {
 }
 
 func TestExportConfig(t *testing.T) {
+	isolateEnv(t)
 	t.Setenv("EXPORT_TEST_MASTER_KEY", "mk-do-not-leak")
 	t.Setenv("EXPORT_TEST_OPENAI_KEY", "sk-env-do-not-leak")
 	t.Setenv("GOMODEL_ENCRYPTION_KEY", "export-test-key")
@@ -152,7 +170,9 @@ func TestExportConfig(t *testing.T) {
 	assert.Equal(t, "smart", doc.VirtualModels[0].Source)
 	assert.Equal(t, "high", doc.VirtualModels[0].ReasoningEffort)
 	assert.Equal(t, []config.TaggingHeaderConfig{{Header: "X-Team", Delimiter: ","}, {Header: "X-Cost-Center", Prefix: "cc-", Delimiter: ","}}, doc.Tagging.Headers)
-	assert.Equal(t, []config.BudgetUserPathConfig{{Path: "/team", Limits: []config.BudgetLimitConfig{{Period: "daily", PeriodSeconds: budget.PeriodDailySeconds, Amount: 10, CostBasis: "provider"}}}}, doc.Budgets.UserPaths)
+	// The amount edited in the dashboard wins over config.yaml's, as at start.
+	assert.Equal(t, []config.BudgetUserPathConfig{{Path: "/team", Limits: []config.BudgetLimitConfig{{Period: "daily", PeriodSeconds: budget.PeriodDailySeconds, Amount: 99, CostBasis: "provider"}}}}, doc.Budgets.UserPaths)
+	assert.True(t, doc.Budgets.ProviderBilledCacheHits, "settings beside the budgets keep their value")
 	assert.Equal(t, []config.BudgetLabelConfig{{Label: "mobile", Limits: []config.BudgetLimitConfig{{PeriodSeconds: 7200, Amount: 3, CostBasis: "billed"}}}}, doc.Budgets.Labels)
 
 	// Loaded as config.yaml, the export runs the same gateway, and the
@@ -166,4 +186,31 @@ func TestExportConfig(t *testing.T) {
 	assert.Equal(t, "mk-do-not-leak", reloaded.Config.Server.MasterKey)
 	assert.Equal(t, "${env:EXPORT_TEST_MASTER_KEY}", reloaded.Config.Users[1].Description)
 	assert.Equal(t, "Bearer lin-new", reloaded.Config.MCP.Servers["linear"].Headers["Authorization"])
+}
+
+func TestExportRateLimitsPrefersDashboardEdits(t *testing.T) {
+	ten, five, three := int64(10), int64(5), int64(3)
+	declared := config.RateLimitsConfig{
+		Enabled: true, FlushInterval: 7,
+		UserPaths: []config.RateLimitUserPathConfig{
+			{Path: "/team", Limits: []config.RateLimitRuleConfig{{Period: "minute", MaxRequests: &ten}}},
+			{Path: "/other", Limits: []config.RateLimitRuleConfig{{Period: "minute", MaxRequests: &three}}},
+		},
+	}
+	stored := []ratelimit.Rule{
+		{Scope: ratelimit.ScopeUserPath, Subject: "/team", PeriodSeconds: 60, MaxRequests: &five, Source: ratelimit.SourceManual},
+		{Scope: ratelimit.ScopeUserPath, Subject: "/other", PeriodSeconds: 60, MaxRequests: &ten, Source: ratelimit.SourceConfig},
+	}
+
+	got, err := exportRateLimits(declared, stored)
+	require.NoError(t, err)
+
+	assert.Equal(t, 7, got.FlushInterval)
+	require.Len(t, got.UserPaths, 2)
+	limits := map[string]int64{}
+	for _, entry := range got.UserPaths {
+		require.Len(t, entry.Limits, 1)
+		limits[entry.Path] = *entry.Limits[0].MaxRequests
+	}
+	assert.Equal(t, map[string]int64{"/team": 5, "/other": 3}, limits, "a dashboard edit wins; a stale config row does not")
 }

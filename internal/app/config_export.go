@@ -40,7 +40,7 @@ type ConfigExportOptions struct {
 
 // ExportConfig renders the configuration a gateway started now would run
 // with as a config.yaml holding no secret (see config.LoadResult.ExportYAML):
-// every setting, from defaults, config.yaml, and environment variables, and
+// the settings from defaults, config.yaml, and environment variables, and
 // the objects saved in the dashboard.
 func ExportConfig(ctx context.Context, opts ConfigExportOptions) ([]byte, error) {
 	loaded := opts.Config
@@ -105,7 +105,7 @@ func readStoredObjects(ctx context.Context, loaded *config.LoadResult) (storedOb
 		return stored, fmt.Errorf("failed to open storage: %w", err)
 	}
 	defer func() { _ = shared.Close() }()
-	box, err := openSecretBox(ctx, shared, loaded)
+	box, err := readSecretBox(ctx, shared, loaded)
 	if err != nil {
 		return stored, err
 	}
@@ -142,16 +142,16 @@ func readStoredObjects(ctx context.Context, loaded *config.LoadResult) (storedOb
 func configExportHeader(now time.Time) string {
 	return strings.Join([]string{
 		fmt.Sprintf("GoModel configuration exported %s by %s %s.", now.UTC().Format(time.RFC3339), version.App, version.Version),
-		"Every setting in effect: defaults, config.yaml, environment variables,",
+		"The settings in effect: defaults, config.yaml, environment variables,",
 		"and objects saved in the dashboard. Load it as config/config.yaml;",
 		"objects saved in the dashboard are then read-only there.",
 		"",
-		"No secret is included. A secret is written as the reference it was",
+		"Secrets are not included. A secret is written as the reference it was",
 		"configured with (env, file, or vault), or as an env reference with a",
 		"comment naming the variable to set before loading this file.",
 		"",
 		"Not exported: managed API keys, workflows, guardrails created in the",
-		"dashboard, model pricing overrides, runtime settings, and disabled",
-		"provider credentials.",
+		"dashboard, model pricing overrides, runtime settings, disabled provider",
+		"credentials, and MCP server display names.",
 	}, "\n")
 }

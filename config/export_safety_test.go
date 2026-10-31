@@ -256,13 +256,14 @@ func TestExportYAMLRedactsArgumentForms(t *testing.T) {
 			"Authorization", "Bearer split-do-not-leak",
 			`--config={"apiKey":"json-do-not-leak"}`,
 			`{"token": "bare-json-do-not-leak"}`,
+			`--config={"region":"us","apiKey":"later-json-do-not-leak"}`,
 			"--pat", "pat-do-not-leak",
 		},
 	}}
 
 	out := exportYAML(t, NewSecrets(), cfg, nil, nil)
 
-	for _, secret := range []string{"hdr-do-not-leak", "split-do-not-leak", "json-do-not-leak", "bare-json-do-not-leak", "pat-do-not-leak"} {
+	for _, secret := range []string{"hdr-do-not-leak", "split-do-not-leak", "json-do-not-leak", "bare-json-do-not-leak", "later-json-do-not-leak", "pat-do-not-leak"} {
 		assert.NotContains(t, out, secret)
 	}
 	assert.Equal(t, "mcp-remote", exportedValue(t, out, "mcp", "servers", "remote", "args", "0"))
@@ -270,17 +271,18 @@ func TestExportYAMLRedactsArgumentForms(t *testing.T) {
 	// The variable holds the whole JSON, so the argument stays valid JSON.
 	assert.Equal(t, "--config=${env:GOMODEL_MCP_SERVERS_REMOTE_ARGS_5}", exportedValue(t, out, "mcp", "servers", "remote", "args", "5"))
 	assert.Equal(t, "${env:GOMODEL_MCP_SERVERS_REMOTE_ARGS_6}", exportedValue(t, out, "mcp", "servers", "remote", "args", "6"))
+	assert.Equal(t, "--config=${env:GOMODEL_MCP_SERVERS_REMOTE_ARGS_7}", exportedValue(t, out, "mcp", "servers", "remote", "args", "7"))
 }
 
 func TestExportYAMLRedactsCredentialsInText(t *testing.T) {
 	cfg := buildDefaultConfig()
 	cfg.Cache.Model.ModelList.URL = "postgres://db/gomodel?sslpassword=ssl-do-not-leak"
-	cfg.OpenTelemetry.ResourceAttributes = map[string]string{"note": "Bearer bearer-do-not-leak", "plan": "Bearer of good news"}
+	cfg.OpenTelemetry.ResourceAttributes = map[string]string{"note": "Bearer bearer-do-not-leak", "spaced": "Bearer   spaced-do-not-leak", "plan": "Bearer of good news"}
 	cfg.Users = []UserConfig{{Path: "/a", Description: "token=assigned-do-not-leak"}, {Path: "/b", Description: "max_tokens=5"}}
 
 	out := exportYAML(t, NewSecrets(), cfg, nil, nil)
 
-	for _, secret := range []string{"ssl-do-not-leak", "bearer-do-not-leak", "assigned-do-not-leak"} {
+	for _, secret := range []string{"ssl-do-not-leak", "bearer-do-not-leak", "spaced-do-not-leak", "assigned-do-not-leak"} {
 		assert.NotContains(t, out, secret)
 	}
 	assert.Equal(t, "Bearer of good news", exportedValue(t, out, "opentelemetry", "resource_attributes", "plan"))
@@ -301,6 +303,24 @@ func TestExportYAMLOnlyCountsSecretsResolvedIntoSecretSettings(t *testing.T) {
 	assert.Equal(t, "http://127.0.0.1:1/v1", exportedValue(t, out, "users", "0", "description"))
 	assert.Equal(t, "${vault:url}", exportedValue(t, out, "providers", "ollama", "base_url"))
 	assert.NotContains(t, out, "mk-resolved")
+}
+
+func TestExportYAMLRedactsCopiesOfSecrets(t *testing.T) {
+	// Supplied by a variable as is, a secret has no reference recording it.
+	cfg := buildDefaultConfig()
+	cfg.Storage.EncryptionKey = "kek-from-env-do-not-leak"
+	cfg.Users = []UserConfig{
+		{Path: "/a", Description: "kek-from-env-do-not-leak"},
+		{Path: "/b", Description: "the key is kek-from-env-do-not-leak"},
+		{Path: "/c", Description: "short"},
+	}
+	cfg.Server.MasterKey = "short"
+
+	out := exportYAML(t, NewSecrets(), cfg, nil, []string{"GOMODEL_ENCRYPTION_KEY=kek-from-env-do-not-leak"})
+
+	assert.NotContains(t, out, "kek-from-env-do-not-leak")
+	assert.Equal(t, "${env:GOMODEL_ENCRYPTION_KEY}", exportedValue(t, out, "users", "0", "description"))
+	assert.Equal(t, "short", exportedValue(t, out, "users", "2", "description"), "a short secret is not matched in text")
 }
 
 func TestExportYAMLLoadsBackEdgeCases(t *testing.T) {
@@ -383,4 +403,13 @@ func TestExportYAMLRoundTripsRandomText(t *testing.T) {
 			assert.Equal(t, value, got, "key %q", key)
 		}
 	}
+}
+
+func TestUnaliasedRejectsRecursiveAlias(t *testing.T) {
+	var node yaml.Node
+	require.NoError(t, yaml.Unmarshal([]byte("loop: &x\n  again: *x\n"), &node))
+	budget := maxExportNodes
+	_, err := unaliased(&node, &budget)
+	require.ErrorContains(t, err, "contains it")
+	assert.Greater(t, budget, maxExportNodes-10, "fails before copying the cycle out")
 }

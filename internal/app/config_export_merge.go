@@ -173,8 +173,8 @@ func exportTaggingHeaders(declared []config.TaggingHeaderConfig, stored []taggin
 }
 
 // exportBudgets lists the declared budgets and the stored ones saved in the
-// dashboard. A declared budget replaces a saved one of the same scope,
-// subject, and period, as it does when the gateway starts.
+// dashboard. A budget saved in the dashboard wins over a declared one of the
+// same scope, subject, and period, as it does when the gateway starts.
 func exportBudgets(declared config.BudgetsConfig, stored []budget.Budget) (config.BudgetsConfig, error) {
 	rows, err := budget.ConfigBudgets(declared)
 	if err != nil {
@@ -185,12 +185,17 @@ func exportBudgets(declared config.BudgetsConfig, stored []budget.Budget) (confi
 		subject string
 		period  int64
 	}
-	seeded := make(map[budgetKey]bool, len(rows))
-	for _, row := range rows {
-		seeded[budgetKey{row.Scope, row.Subject, row.PeriodSeconds}] = true
-	}
+	saved := make(map[budgetKey]bool)
 	for _, row := range stored {
-		if row.Source != budget.SourceConfig && !seeded[budgetKey{row.Scope, row.Subject, row.PeriodSeconds}] {
+		if row.Source != budget.SourceConfig {
+			saved[budgetKey{row.Scope, row.Subject, row.PeriodSeconds}] = true
+		}
+	}
+	rows = slices.DeleteFunc(rows, func(row budget.Budget) bool {
+		return saved[budgetKey{row.Scope, row.Subject, row.PeriodSeconds}]
+	})
+	for _, row := range stored {
+		if row.Source != budget.SourceConfig {
 			rows = append(rows, row)
 		}
 	}
@@ -203,7 +208,8 @@ func exportBudgets(declared config.BudgetsConfig, stored []budget.Budget) (confi
 		}
 		return rows[i].PeriodSeconds < rows[j].PeriodSeconds
 	})
-	result := config.BudgetsConfig{Enabled: declared.Enabled}
+	result := declared
+	result.UserPaths, result.Labels, result.Providers = nil, nil, nil
 	for _, row := range rows {
 		limit := config.BudgetLimitConfig{PeriodSeconds: row.PeriodSeconds, Amount: row.Amount, CostBasis: string(row.CostBasis)}
 		if label := budget.PeriodLabel(row.PeriodSeconds); isBudgetPeriodName(label) {
@@ -239,8 +245,9 @@ func exportBudgets(declared config.BudgetsConfig, stored []budget.Budget) (confi
 }
 
 // exportRateLimits lists the declared rate limit rules and the stored ones
-// saved in the dashboard. A declared rule replaces a saved one of the same
-// scope, subject, and period, as it does when the gateway starts.
+// saved in the dashboard. A rule saved in the dashboard wins over a declared
+// one of the same scope, subject, and period, as it does when the gateway
+// starts.
 func exportRateLimits(declared config.RateLimitsConfig, stored []ratelimit.Rule) (config.RateLimitsConfig, error) {
 	rows, err := ratelimit.ConfigRules(declared)
 	if err != nil {
@@ -251,12 +258,17 @@ func exportRateLimits(declared config.RateLimitsConfig, stored []ratelimit.Rule)
 		subject string
 		period  int64
 	}
-	seeded := make(map[ruleKey]bool, len(rows))
-	for _, row := range rows {
-		seeded[ruleKey{row.Scope, row.Subject, row.PeriodSeconds}] = true
-	}
+	saved := make(map[ruleKey]bool)
 	for _, row := range stored {
-		if row.Source != ratelimit.SourceConfig && !seeded[ruleKey{row.Scope, row.Subject, row.PeriodSeconds}] {
+		if row.Source != ratelimit.SourceConfig {
+			saved[ruleKey{row.Scope, row.Subject, row.PeriodSeconds}] = true
+		}
+	}
+	rows = slices.DeleteFunc(rows, func(row ratelimit.Rule) bool {
+		return saved[ruleKey{row.Scope, row.Subject, row.PeriodSeconds}]
+	})
+	for _, row := range stored {
+		if row.Source != ratelimit.SourceConfig {
 			rows = append(rows, row)
 		}
 	}
@@ -269,7 +281,8 @@ func exportRateLimits(declared config.RateLimitsConfig, stored []ratelimit.Rule)
 		}
 		return rows[i].PeriodSeconds < rows[j].PeriodSeconds
 	})
-	result := config.RateLimitsConfig{Enabled: declared.Enabled, FlushInterval: declared.FlushInterval}
+	result := declared
+	result.UserPaths, result.Providers, result.Models = nil, nil, nil
 	for _, row := range rows {
 		limit := config.RateLimitRuleConfig{MaxRequests: row.MaxRequests, MaxTokens: row.MaxTokens}
 		if label := ratelimit.PeriodLabel(row.PeriodSeconds); isRateLimitPeriodName(label) {

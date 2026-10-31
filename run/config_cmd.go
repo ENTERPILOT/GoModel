@@ -20,13 +20,16 @@ func configUsage(productName string) string {
   %[1]s config export > gomodel-export.yaml
 
 Prints the configuration a gateway started now would run with as a
-config.yaml: every setting, from defaults, config.yaml, and environment
+config.yaml: the settings from defaults, config.yaml, and environment
 variables, and the objects saved in the dashboard. Load it as
-config/config.yaml to run the same gateway from a file.
+config/config.yaml to run the same gateway from a file. Objects with no
+config.yaml form are listed in the file's header.
 
-No secret is printed. A secret is written as the reference it was configured
-with (${env:...}, ${file:...}, ${vault:...}), or as ${env:NAME} with a
-comment naming the variable to set.
+Secrets are not printed. A secret is written as the reference it was
+configured with (${env:...}, ${file:...}, ${vault:...}), or as ${env:NAME}
+with a comment naming the variable to set. Free-form text, such as
+descriptions, is checked for credential shapes only: review it before
+sharing the file.
 
 Reads the same configuration, environment, and database as the gateway, and
 is safe to run while it is running. Do not redirect the output onto the
@@ -86,6 +89,11 @@ func runConfigExport(ctx context.Context, opts Options) error {
 	result, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
+	}
+	// As at gateway start: outbound trust first, so extensions setting up
+	// and secret references resolving (a vault behind a private CA) use it.
+	if err := app.ApplyOutboundTLSEarly(ctx, result.Config.HTTP.TLS); err != nil {
+		return err
 	}
 	if err := configHooks(ctx, opts)(result); err != nil {
 		return err
