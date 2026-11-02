@@ -159,8 +159,12 @@ export function filterUserNodes(nodes, query, options = {}) {
   // The matching set is computed once, over the whole list, so the fuzzy
   // fallback stays a list-level decision: it only widens the result when the
   // substring level found nothing at all.
+  // Only the rows the view can show take part in the fallback: an inactive
+  // node that answers by substring must not suppress the fuzzy matches among
+  // the active ones, which are the rows the default view renders.
+  const searchable = showInactive ? list : list.filter((node) => !userNodeInactive(node));
   const matching = needle
-    ? new Set(filterFields(list, needle, userNodeSearchFields).map((node) => node.user_path))
+    ? new Set(filterFields(searchable, needle, userNodeSearchFields).map((node) => node.user_path))
     : null;
 
   // Which inactive nodes should be retained?  An inactive node is retained
