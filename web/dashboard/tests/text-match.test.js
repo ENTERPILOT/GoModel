@@ -248,6 +248,11 @@ test("every token start is considered, so a later one can win", () => {
   assert.equal(fuzzyMatch(text, "abcd").span, 4);
 });
 
+test("either spelling of a final sigma finds the other", () => {
+  assert.equal(filterFields([{ text: "ΟΣ" }], "ος", (row) => [row.text]).length, 1);
+  assert.equal(filterFields([{ text: "ος" }], "ΟΣ", (row) => [row.text]).length, 1);
+});
+
 test("folding is the same on both sides, final sigma included", () => {
   // "ΟΣ".toLowerCase() is "ος" (final sigma) while the per-code-point fold
   // gives "οσ". The two sides must be folded by the same rule or the field
@@ -259,7 +264,9 @@ test("folding is the same on both sides, final sigma included", () => {
 test("the token scan stops at the first start that cannot complete", () => {
   // Failing once means failing everywhere after it; the loop must not rescan
   // the rest of the field for every later candidate.
-  const text = "a".repeat(200) + "-zzz";
+  // Many token starts, and a suffix that cannot complete the needle: without
+  // the break, each of the 200 candidates would scan to the end.
+  const text = "a-".repeat(200) + "zzz";
   const started = Date.now();
   assert.equal(fuzzyMatch(text, "abc"), null);
   assert.ok(Date.now() - started < 250, "the failing path stays linear");

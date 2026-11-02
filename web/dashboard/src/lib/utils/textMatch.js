@@ -59,7 +59,7 @@ function fold(text) {
     const char = String.fromCodePoint(code);
     const end = i + char.length;
     const folded = char.toLowerCase();
-    chars.push(String.fromCodePoint(folded.codePointAt(0)));
+    chars.push(canonicalSigma(String.fromCodePoint(folded.codePointAt(0))));
     starts.push(i);
     ends.push(end);
     i = end;
@@ -74,6 +74,16 @@ function fold(text) {
 // through the fold — otherwise the two sides are folded by different rules and
 // `ΟΣ` stops matching `ΟΣ`.
 const CONTEXT_SENSITIVE = /[\u0130\u0131\u03a3\u03c2]/;
+
+/**
+ * Collapse the two lowercase sigmas into one. Which one `toLowerCase()` picks
+ * depends on where the letter sits, so `ΟΣ` folds to `οσ` while a query typed
+ * as `ος` keeps the final form: canonicalising both to σ makes every spelling
+ * of the same word compare equal.
+ */
+function canonicalSigma(char) {
+  return char === "\u03c2" ? "\u03c3" : char;
+}
 
 /**
  * Whether a native case-insensitive search can answer for this string. It can
