@@ -124,22 +124,23 @@ export const MAX_VISIBLE_OPTIONS = 100;
  * Cut a matched list down to the rows worth rendering. Keeps `pinnedValue`
  * visible when it sits beyond the cut (a single-select trigger already showing
  * a value the first page does not contain), so opening the list and typing do
- * not hide what is selected. Returns the input array untouched when it already
- * fits, keeping identity for callers that compare.
+ * not hide what is selected. `hidden` counts what the caller must announce;
+ * the pinned row is not one of the first `limit`, so it does not subtract.
  *
  * @param {Array<unknown>} options
  * @param {number} limit
  * @param {string} pinnedValue
+ * @returns {{visible: Array<unknown>, hidden: number}}
  */
 export function capSearchOptions(options, limit, pinnedValue = "") {
   const list = Array.isArray(options) ? options : [];
-  if (list.length <= limit) return list;
+  if (list.length <= limit) return { visible: list, hidden: 0 };
   const visible = list.slice(0, limit);
   if (pinnedValue) {
     const pinned = list.slice(limit).find((option) => option && option.value === pinnedValue);
     if (pinned) visible.push(pinned);
   }
-  return visible;
+  return { visible, hidden: list.length - limit };
 }
 
 /**

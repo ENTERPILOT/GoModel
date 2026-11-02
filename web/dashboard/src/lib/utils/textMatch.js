@@ -13,6 +13,12 @@
 // that already works keeps returning the same rows in the same order. Below
 // MIN_FUZZY_LENGTH compacted characters it does not run at all: a two-letter
 // subsequence matches most of a catalog and the list stops being a filter.
+//
+// Every match is reported as ranges in the *original* string, so the caller can
+// mark what it matched. `toLowerCase()` can change the length of a string
+// ("İ" folds to two code points), and an index taken on the folded copy would
+// then point at the wrong character — or past the end. `fold()` keeps the
+// mapping, and both levels resolve their ranges through it.
 
 export const MIN_FUZZY_LENGTH = 3;
 
@@ -27,31 +33,137 @@ export function normalizeQuery(query) {
 }
 
 /**
- * Index of the first contiguous, case-insensitive occurrence of `needle` in
- * `text`, or -1. `needle` is expected to be normalized already.
+ * Lowercase a string while remembering where each folded character came from.
+ *
+ * Returns `chars` (one folded code point per original code point) plus the
+ * `start` and `end` of that code point in the original string. Folding is
+ * capped at one code point per input code point on purpose: a mapping that can
+ * grow cannot be mapped back, which is the whole point of this function.
+ *
+ * The common case — folding preserves the length — skips the per-code-point
+ * walk, because every index is already its own answer.
+ */
+function fold(text) {
+  const source = String(text ?? "");
+  const lower = source.toLowerCase();
+  if (lower.length === source.length) {
+    const starts = new Array(lower.length);
+    for (let i = 0; i < lower.length; i++) starts[i] = i;
+    return { chars: lower, starts, ends: null, source };
+  }
+  let chars = "";
+  const starts = [];
+  const ends = [];
+  for (let i = 0; i < source.length; ) {
+    const code = source.codePointAt(i);
+    const char = String.fromCodePoint(code);
+    const end = i + char.length;
+    const folded = char.toLowerCase();
+    const first = String.fromCodePoint(folded.codePointAt(0));
+    chars += first;
+    starts.push(i);
+    ends.push(end);
+    i = end;
+  }
+  return { chars, starts, ends, source };
+}
+
+/** Code-unit end of the folded character at `index` of a `fold()` result. */
+function charEnd(folded, index) {
+  return folded.ends ? folded.ends[index] : index + 1;
+}
+
+/**
+ * Range of the first contiguous, case-insensitive occurrence of `needle` in
+ * `text`, as code-unit indexes into `text`, or null. Folding usually preserves
+ * the length, and then the native search already answers in code units; only
+ * an expanding fold ("İ") needs the mapping.
+ */
+export function substringRange(text, needle) {
+  if (!needle) return null;
+  const source = String(text ?? "");
+  const wanted = String(needle);
+  const lower = source.toLowerCase();
+  const want = wanted.toLowerCase();
+  if (lower.length === source.length && want.length === wanted.length) {
+    const start = lower.indexOf(want);
+    return start < 0 ? null : { start, end: start + want.length };
+  }
+  const hay = fold(source);
+  const chars = fold(wanted).chars;
+  if (!chars || chars.length > hay.chars.length) return null;
+  const at = hay.chars.indexOf(chars);
+  if (at < 0) return null;
+  return { start: hay.starts[at], end: charEnd(hay, at + chars.length - 1) };
+}
+
+/**
+ * Where the first contiguous, case-insensitive occurrence of `needle` starts,
+ * as a code-unit index into `text`, or -1. A start of 0 means the text begins
+ * with the needle, which is what the prefix tier reads.
  */
 export function substringIndex(text, needle) {
-  if (!needle) return -1;
-  return String(text ?? "").toLowerCase().indexOf(needle);
+  const range = substringRange(text, needle);
+  return range ? range.start : -1;
 }
 
 /**
  * Compact a string for subsequence matching: lowercase, separators removed,
- * plus the index in the original string of each surviving character, so a
- * match can be mapped back for highlighting.
+ * plus where each surviving character sits in the original string, so a match
+ * can be mapped back for highlighting.
  */
 function compact(text) {
   const source = String(text ?? "");
   const lower = source.toLowerCase();
-  let chars = "";
-  const indexes = [];
-  for (let i = 0; i < lower.length; i++) {
-    const char = lower[i];
-    if (SEPARATOR.test(char)) continue;
-    chars += char;
-    indexes.push(i);
+  const chars = [];
+  const starts = [];
+  const ends = [];
+  if (lower.length === source.length) {
+    for (let i = 0; i < lower.length; i++) {
+      const char = lower[i];
+      if (SEPARATOR.test(char)) continue;
+      chars.push(char);
+      starts.push(i);
+      ends.push(i + 1);
+    }
+    return { chars: chars.join(""), starts, ends, source };
   }
-  return { chars, indexes, text: source };
+  const folded = fold(source);
+  for (let i = 0; i < folded.chars.length; i++) {
+    const char = folded.chars[i];
+    if (SEPARATOR.test(char)) continue;
+    chars.push(char);
+    starts.push(folded.starts[i]);
+    ends.push(charEnd(folded, i));
+  }
+  return { chars: chars.join(""), starts, ends, source };
+}
+
+/**
+ * Whether a position in the original string starts a token: the first
+ * character, or the one right after a separator. A match that starts there is
+ * what the user usually meant — `ge25` should prefer `gemini/gemini-2.5-flash`
+ * over `openai/gpt-image-2.5-flare`, where the tighter run sits mid-word
+ * (`ima|ge25|`).
+ */
+function startsToken(text, index) {
+  return index === 0 || SEPARATOR.test(text[index - 1]);
+}
+
+/**
+ * Tightest window that contains `needle` as a subsequence *starting exactly
+ * at* `from`. Forward-greedy from a fixed start is already the tightest
+ * window with that start, so no backward pass is needed. Returns null when the
+ * needle does not match from there.
+ */
+function windowAt(haystack, needle, from) {
+  let j = 0;
+  let i = from;
+  for (; i < haystack.length && j < needle.length; i++) {
+    if (haystack[i] === needle[j]) j++;
+  }
+  if (j < needle.length) return null;
+  return [from, i];
 }
 
 /**
@@ -65,13 +177,9 @@ function shortestWindow(haystack, needle) {
   let best = null;
   let start = 0;
   while (start <= haystack.length - needle.length) {
-    let j = 0;
-    let i = start;
-    for (; i < haystack.length && j < needle.length; i++) {
-      if (haystack[i] === needle[j]) j++;
-    }
-    if (j < needle.length) break;
-    const end = i; // exclusive
+    const window = windowAt(haystack, needle, start);
+    if (!window) break;
+    const end = window[1];
     // Walk back from the end to find the latest start that still matches, so
     // the window shrinks to the shortest one ending here.
     let k = end - 1;
@@ -93,32 +201,6 @@ function shortestWindow(haystack, needle) {
 }
 
 /**
- * Whether a position in the original string starts a token: the first
- * character, or the one right after a separator. A match that starts there is
- * what the user usually meant — `ge25` should prefer `gemini/gemini-2.5-flash`
- * over `openai/gpt-image-2.5-flare`, where the tighter run sits mid-word
- * (`ima|ge25|`).
- */
-function startsToken(text, index) {
-  return index === 0 || SEPARATOR.test(text[index - 1]);
-}
-
-/**
- * Tightest window that contains `needle` as a subsequence *starting exactly
- * at* `from`. Forward-greedy from a fixed start is already the tightest
- * window with that start, so no backward pass is needed.
- */
-function windowAt(haystack, needle, from) {
-  let j = 0;
-  let i = from;
-  for (; i < haystack.length && j < needle.length; i++) {
-    if (haystack[i] === needle[j]) j++;
-  }
-  if (j < needle.length) return null;
-  return [from, i];
-}
-
-/**
  * Tightest window among those that start a token in the original string, or
  * null when the needle only matches mid-word.
  */
@@ -126,12 +208,45 @@ function shortestTokenWindow(hay, wanted) {
   let best = null;
   for (let i = 0; i < hay.chars.length; i++) {
     if (hay.chars[i] !== wanted[0]) continue;
-    if (!startsToken(hay.text, hay.indexes[i])) continue;
+    if (!startsToken(hay.source, hay.starts[i])) continue;
     const window = windowAt(hay.chars, wanted, i);
     if (window && (!best || window[1] - window[0] < best[1] - best[0])) best = window;
     if (best && best[1] - best[0] === wanted.length) break; // cannot be tighter
   }
   return best;
+}
+
+/**
+ * Which characters of `window` matched, preferring a contiguous run at the
+ * window's end: that is what keeps `1017` highlighted as one run instead of
+ * `1` in the middle and `017` at the end. Returns null when the anchored
+ * suffix leaves a prefix that cannot be matched before it.
+ */
+function matchPositions(haystack, wanted, window) {
+  const [windowStart, windowEnd] = window;
+  let suffix = 0;
+  while (
+    suffix < wanted.length &&
+    haystack[windowEnd - 1 - suffix] === wanted[wanted.length - 1 - suffix]
+  ) {
+    suffix++;
+  }
+  const prefixCount = wanted.length - suffix;
+  const prefix = [];
+  if (prefixCount > 0) {
+    let at = windowStart;
+    const prefixEnd = windowEnd - suffix; // exclusive
+    for (let j = 0; j < prefixCount; j++) {
+      while (at < prefixEnd && haystack[at] !== wanted[j]) at++;
+      if (at >= prefixEnd) break;
+      prefix.push(at);
+      at++;
+    }
+    if (prefix.length !== prefixCount) return null;
+  }
+  const positions = prefix;
+  for (let k = 0; k < suffix; k++) positions.push(windowEnd - suffix + k);
+  return positions;
 }
 
 /**
@@ -145,70 +260,33 @@ function shortestTokenWindow(hay, wanted) {
  *            boundary: boolean, start: number}|null}
  */
 export function fuzzyMatch(text, needle) {
-  const wanted = compact(String(needle ?? "")).chars;
+  const wanted = compact(needle).chars;
   if (wanted.length < MIN_FUZZY_LENGTH) return null;
   const hay = compact(text);
   if (hay.chars.length < wanted.length) return null;
 
+  // The token-starting window is the one that ranks, so it is found first and
+  // the general search only runs when there is none.
   const tokenWindow = shortestTokenWindow(hay, wanted);
-  const anyWindow = shortestWindow(hay.chars, wanted);
-  const window = tokenWindow || anyWindow;
+  const window = tokenWindow || shortestWindow(hay.chars, wanted);
   if (!window) return null;
-  const [windowStart, windowEnd] = window;
 
-  // Which characters of the window matched. The longest contiguous run ending
-  // at the window's end is anchored there, and the rest of the needle matches
-  // forward from the window's start: that is what keeps `1017` highlighted as
-  // one run instead of `1` in the middle and `017` at the end.
-  let suffix = 0;
-  while (
-    suffix < wanted.length &&
-    hay.chars[windowEnd - 1 - suffix] === wanted[wanted.length - 1 - suffix]
-  ) {
-    suffix++;
-  }
-  let prefix = [];
-  const prefixCount = wanted.length - suffix;
-  if (prefixCount > 0) {
-    let at = windowStart;
-    const prefixEnd = windowEnd - suffix; // exclusive
-    for (let j = 0; j < prefixCount; j++) {
-      while (at < prefixEnd && hay.chars[at] !== wanted[j]) at++;
-      if (at >= prefixEnd) break;
-      prefix.push(at);
-      at++;
-    }
-    if (prefix.length !== prefixCount) {
-      // The anchored suffix and a prefix match cannot coexist here; drop the
-      // anchoring and match the needle forward from the window's start.
-      suffix = 0;
-      prefix = [];
-      let cursor = windowStart;
-      for (const char of wanted) {
-        while (hay.chars[cursor] !== char) cursor++;
-        prefix.push(cursor);
-        cursor++;
-      }
-    }
-  }
+  const positions = matchPositions(hay.chars, wanted, window);
+  if (!positions) return null;
 
-  const positions = prefix.slice();
-  for (let k = 0; k < suffix; k++) positions.push(windowEnd - suffix + k);
-
-  // Map the window back to the original string, merging neighbours into runs.
   const ranges = [];
   for (const index of positions) {
-    const start = hay.indexes[index];
-    const end = start + 1;
+    const start = hay.starts[index];
+    const end = hay.ends[index];
     const last = ranges[ranges.length - 1];
     if (last && last.end === start) last.end = end;
     else ranges.push({ start, end });
   }
   return {
     ranges,
-    span: windowEnd - windowStart,
+    span: window[1] - window[0],
     boundary: Boolean(tokenWindow),
-    start: hay.indexes[windowStart],
+    start: hay.starts[window[0]],
   };
 }
 
@@ -220,6 +298,16 @@ export function textMatches(text, needle) {
   if (!needle) return true;
   if (substringIndex(text, needle) >= 0) return true;
   return fuzzyMatch(text, needle) !== null;
+}
+
+/**
+ * Whether any of `fields` matches a normalized `needle` at either level. Use
+ * it where the caller filters by a per-item predicate instead of splitting a
+ * list (an inactive-ancestor rule, a tree prune).
+ */
+export function fieldsMatch(fields, needle) {
+  const list = Array.isArray(fields) ? fields : [];
+  return list.some((field) => textMatches(field, needle));
 }
 
 /**
@@ -247,16 +335,6 @@ export function partitionMatches(items, needle, fieldsOf) {
 }
 
 /**
- * Whether any of `fields` matches a normalized `needle` at either level. Use
- * it where the caller filters by a per-item predicate instead of splitting a
- * list (an inactive-ancestor rule, a tree prune).
- */
-export function fieldsMatch(fields, needle) {
-  const list = Array.isArray(fields) ? fields : [];
-  return list.some((field) => textMatches(field, needle));
-}
-
-/**
  * Filter `items` by a free-text query: the substring matches when there are
  * any, the fuzzy ones only when there are none. This is the rule every filter
  * in the dashboard follows, kept in one place so they cannot drift.
@@ -281,14 +359,12 @@ export function matchSegments(text, needle) {
   const whole = value ? [{ text: value, hit: false }] : [];
   if (!query || !value) return whole;
 
-  const index = substringIndex(value, query);
-  if (index >= 0) {
+  const range = substringRange(value, query);
+  if (range) {
     const segments = [];
-    if (index > 0) segments.push({ text: value.slice(0, index), hit: false });
-    segments.push({ text: value.slice(index, index + query.length), hit: true });
-    if (index + query.length < value.length) {
-      segments.push({ text: value.slice(index + query.length), hit: false });
-    }
+    if (range.start > 0) segments.push({ text: value.slice(0, range.start), hit: false });
+    segments.push({ text: value.slice(range.start, range.end), hit: true });
+    if (range.end < value.length) segments.push({ text: value.slice(range.end), hit: false });
     return segments;
   }
 
@@ -296,10 +372,10 @@ export function matchSegments(text, needle) {
   if (!match) return whole;
   const segments = [];
   let at = 0;
-  for (const range of match.ranges) {
-    if (range.start > at) segments.push({ text: value.slice(at, range.start), hit: false });
-    segments.push({ text: value.slice(range.start, range.end), hit: true });
-    at = range.end;
+  for (const hit of match.ranges) {
+    if (hit.start > at) segments.push({ text: value.slice(at, hit.start), hit: false });
+    segments.push({ text: value.slice(hit.start, hit.end), hit: true });
+    at = hit.end;
   }
   if (at < value.length) segments.push({ text: value.slice(at), hit: false });
   return segments;

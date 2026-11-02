@@ -27,6 +27,7 @@
     query = $bindable(""),
     activeIndex = $bindable(-1),
     rowCount = 0,
+    notice = "",
     listID,
     triggerText = "",
     triggerTitle = undefined,
@@ -205,6 +206,12 @@
           onchange={(event) => event.stopPropagation()}
         />
       </div>
+      {#if notice}
+        <!-- Out of the listbox on purpose: a listbox may only contain options
+             and groups, and this line is neither. Live so a screen reader
+             hears the cut when it changes, instead of silently losing rows. -->
+        <p class="search-select-notice" aria-live="polite">{notice}</p>
+      {/if}
       <ul class="search-select-list" id={listID} role="listbox" aria-multiselectable={multiple || undefined}>
         {@render children?.()}
       </ul>
@@ -434,6 +441,13 @@
     flex-shrink: 0;
     width: 14px;
     height: 14px;
+  }
+
+  .search-select-notice {
+    margin: 0;
+    padding: 0 10px 6px;
+    color: var(--text-muted);
+    font-size: 12px;
   }
 
   .search-select :global(.search-select-empty) {

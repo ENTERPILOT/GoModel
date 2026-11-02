@@ -134,9 +134,9 @@ export function filterDisplayModels(rows, modelFilter) {
     row.model && row.model.owned_by,
     row.alias && row.alias.description,
     row.alias && row.alias_state_text,
-    row.model && row.model.metadata && Array.isArray(row.model.metadata.categories)
-      ? row.model.metadata.categories.join(",")
-      : "",
+    ...(row.model && row.model.metadata && Array.isArray(row.model.metadata.categories)
+      ? row.model.metadata.categories
+      : []),
   ]);
 }
 

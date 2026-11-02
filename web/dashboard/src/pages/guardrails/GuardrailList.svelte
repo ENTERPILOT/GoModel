@@ -86,7 +86,7 @@
                       <Icon icon={ShieldCheck} class="form-action-icon" />
                     </span>
                   {/if}
-                  <HighlightText text={store.typeLabel(guardrail.type)} needle={store.filter} />
+                  {store.typeLabel(guardrail.type)}
                 </span>
                 <div class="settings-guardrail-phases" aria-label={m.guardrails_phases()}>
                   {#each store.phases(guardrail) as phase (phase)}

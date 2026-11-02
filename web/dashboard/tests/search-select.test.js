@@ -226,19 +226,24 @@ test("popoverPlacement closes once the trigger leaves the visible area", () => {
 test("capSearchOptions renders one page of matches and keeps the picked value", () => {
   const rows = Array.from({ length: 250 }, (_, index) => ({ value: "m" + index }));
   const page = capSearchOptions(rows, MAX_VISIBLE_OPTIONS);
-  assert.equal(page.length, MAX_VISIBLE_OPTIONS);
-  assert.equal(page[0].value, "m0");
+  assert.equal(page.visible.length, MAX_VISIBLE_OPTIONS);
+  assert.equal(page.visible[0].value, "m0");
+  assert.equal(page.hidden, 250 - MAX_VISIBLE_OPTIONS);
 
   // The trigger may already show a value far down the list; opening the list
   // must still show it, or the highlight has nothing to land on.
   const pinned = capSearchOptions(rows, MAX_VISIBLE_OPTIONS, "m200");
-  assert.equal(pinned.length, MAX_VISIBLE_OPTIONS + 1);
-  assert.equal(pinned[pinned.length - 1].value, "m200");
+  assert.equal(pinned.visible.length, MAX_VISIBLE_OPTIONS + 1);
+  assert.equal(pinned.visible[pinned.visible.length - 1].value, "m200");
+  // The pinned row is not one of the first page, so the announced cut is
+  // unchanged: "the first 100 of 250", not "101 of 250".
+  assert.equal(pinned.hidden, 250 - MAX_VISIBLE_OPTIONS);
 
   // A value already on the page is not appended twice.
-  assert.equal(capSearchOptions(rows, MAX_VISIBLE_OPTIONS, "m3").length, MAX_VISIBLE_OPTIONS);
+  assert.equal(capSearchOptions(rows, MAX_VISIBLE_OPTIONS, "m3").visible.length, MAX_VISIBLE_OPTIONS);
   // Nothing to cut: the same array comes back.
   const small = rows.slice(0, 5);
-  assert.equal(capSearchOptions(small, MAX_VISIBLE_OPTIONS), small);
-  assert.deepEqual(capSearchOptions(undefined, MAX_VISIBLE_OPTIONS), []);
+  assert.equal(capSearchOptions(small, MAX_VISIBLE_OPTIONS).visible, small);
+  assert.equal(capSearchOptions(small, MAX_VISIBLE_OPTIONS).hidden, 0);
+  assert.deepEqual(capSearchOptions(undefined, MAX_VISIBLE_OPTIONS), { visible: [], hidden: 0 });
 });

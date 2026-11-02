@@ -76,7 +76,7 @@ class ModelsStore {
       m.provider_type ?? "",
       m.selector ?? "",
       m.model?.owned_by ?? "",
-      (m.model?.metadata?.categories ?? []).join(","),
+      ...(m.model?.metadata?.categories ?? []),
     ]);
   }
 }

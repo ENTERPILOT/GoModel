@@ -10,6 +10,7 @@ import {
   normalizeQuery,
   partitionMatches,
   substringIndex,
+  substringRange,
   textMatches,
 } from "../src/lib/utils/textMatch.js";
 
@@ -152,4 +153,36 @@ test("matchSegments leaves unmatched text as a single unflagged run", () => {
   assert.deepEqual(matchSegments("openai/gpt-4o", "zzz"), [{ text: "openai/gpt-4o", hit: false }]);
   assert.deepEqual(matchSegments("openai/gpt-4o", ""), [{ text: "openai/gpt-4o", hit: false }]);
   assert.deepEqual(matchSegments("", "gpt"), []);
+});
+
+test("folding that changes the length does not shift the reported ranges", () => {
+  // "İ".toLowerCase() is two code points, so an index taken on the folded copy
+  // would point at the wrong character, or past the end of the string.
+  const text = "İABC";
+  assert.equal(text.length, 4);
+  const range = substringRange(text, "abc");
+  assert.deepEqual(range, { start: 1, end: 4 });
+  assert.equal(text.slice(range.start, range.end), "ABC");
+
+  const match = fuzzyMatch(text, "abc");
+  assert.equal(match.ranges.length, 1);
+  assert.deepEqual(match.ranges[0], { start: 1, end: 4 });
+  assert.deepEqual(hits(text, "abc"), ["ABC"]);
+});
+
+test("a surrogate pair is one character but two code units", () => {
+  const text = "🙂abc";
+  const range = substringRange(text, "abc");
+  assert.deepEqual(range, { start: 2, end: 5 });
+  assert.equal(text.slice(range.start, range.end), "abc");
+  assert.deepEqual(matchSegments(text, "abc"), [
+    { text: "🙂", hit: false },
+    { text: "abc", hit: true },
+  ]);
+});
+
+test("substringIndex reports a character start, so 0 still means a prefix", () => {
+  assert.equal(substringIndex("İstanbul", "stan"), 1);
+  assert.equal(substringIndex("İstanbul", "İ"), 0);
+  assert.equal(substringIndex("anything", "missing"), -1);
 });
