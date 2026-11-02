@@ -157,6 +157,9 @@
       onchange?.(values);
       shell?.notifyChanged();
       query = "";
+      // Clear the deferred copy too: the pick relocates the highlight by
+      // reading the list, and a stale one would place it on an old row.
+      listQuery = "";
       await tick();
       // The pick moves (selected values list first), so the highlight
       // follows it instead of landing on whatever took its old place.

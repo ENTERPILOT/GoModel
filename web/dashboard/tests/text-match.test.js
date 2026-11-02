@@ -72,14 +72,23 @@ test("fuzzyMatch reports the winning window: span, token start and position", ()
 });
 
 test("a match that starts a token beats a tighter one buried mid-word", () => {
-  // `ge25` inside "ima|ge25|" is the tightest run of the three, and the least
-  // likely thing the user meant. It must lose to the one starting "gemini".
+  // One text holding both candidates: `ge`+`25` sits tight inside
+  // "ima|ge25|" and looser across "gemini" and its version. A matcher that
+  // always took the tightest window would report the mid-word one.
+  const text = "gemini-2.5-image25";
+  const match = fuzzyMatch(text, "ge25");
+  assert.ok(match);
+  assert.equal(match.boundary, true);
+  assert.ok(text[match.start] === "g", "the winning window starts the model name");
+
+  // The same two candidates considered separately: the mid-word run is the
+  // tighter one, so tightness alone would have preferred it.
   const tokenStart = fuzzyMatch("gemini/gemini-2.5-flash", "ge25");
   const midWord = fuzzyMatch("openrouter/microsoft/mai-image-2.5", "ge25");
   assert.ok(tokenStart && midWord);
   assert.equal(tokenStart.boundary, true);
   assert.equal(midWord.boundary, false);
-  assert.ok(midWord.span < tokenStart.span, "the mid-word run is the tighter one");
+  assert.ok(midWord.span < tokenStart.span);
 });
 
 test("textMatches keeps the substring level first and falls back to fuzzy", () => {

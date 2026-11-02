@@ -215,12 +215,32 @@ export function filteredRateLimits(rules, filter) {
   if (!needle) {
     return items;
   }
-  return filterFields(items, needle, (item) => [
+  // The page renders one tab per scope, so each tab is its own list: filtering
+  // all scopes together would let a substring hit in one scope suppress the
+  // fuzzy fallback for the others and empty a tab that has matches.
+  const byScope = new Map();
+  for (const item of items) {
+    const scope = rateLimitScope(item);
+    if (!byScope.has(scope)) byScope.set(scope, []);
+    byScope.get(scope).push(item);
+  }
+  const matched = [];
+  for (const scope of byScope.keys()) {
+    matched.push(...filterFields(byScope.get(scope), needle, rateLimitSearchFields));
+  }
+  // Restore the order the sort above established.
+  const order = new Map(items.map((item, index) => [item, index]));
+  return matched.sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+}
+
+// rateLimitSearchFields lists the text a rule is matched against.
+function rateLimitSearchFields(item) {
+  return [
     rateLimitSubject(item),
     rateLimitScopeLabel(item),
     rateLimitPeriodLabel(item),
     item && item.per_child ? m.rate_limits_per_child_badge() : "",
-  ]);
+  ];
 }
 
 export function normalizeRateLimitListPayload(payload) {

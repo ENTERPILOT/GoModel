@@ -150,7 +150,7 @@ import {
       </div>
       {#if row.is_alias}
         <div class="model-name-secondary">
-          {m.models_targets()} <span class="mono font-size-md">{row.secondary_name}</span>
+          {m.models_targets()} <span class="mono font-size-md"><HighlightText text={row.secondary_name} needle={modelsStore.filter} /></span>
         </div>
       {/if}
       {#if !row.is_alias && row.masking_alias}

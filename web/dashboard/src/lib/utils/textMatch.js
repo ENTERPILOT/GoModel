@@ -22,6 +22,11 @@
 
 export const MIN_FUZZY_LENGTH = 3;
 
+// How many token starts the fuzzy level looks at per field. See
+// shortestTokenWindow: the budget bounds the quadratic scan, and the tightest
+// window is almost always found in the first few.
+const MAX_TOKEN_STARTS = 32;
+
 // Separators are dropped before the fuzzy comparison only. Model ids are full
 // of them (`vllm/deepseek-v4.1-flash:1017`), and typing a model name without
 // them is the common case.
@@ -211,9 +216,15 @@ function shortestWindow(haystack, needle) {
  */
 function shortestTokenWindow(hay, wanted) {
   let best = null;
+  let tried = 0;
   for (let i = 0; i < hay.chars.length; i++) {
     if (hay.chars[i] !== wanted[0]) continue;
     if (!startsToken(hay.source, hay.starts[i])) continue;
+    // Each candidate scans forward to the end of the field, so a long,
+    // repetitive text would pay the field length once per token start. The
+    // first few starts decide the winner in practice; the budget keeps the
+    // worst case linear in the field length.
+    if (++tried > MAX_TOKEN_STARTS) break;
     const window = windowAt(hay.chars, wanted, i);
     if (window && (!best || window[1] - window[0] < best[1] - best[0])) best = window;
     if (best && best[1] - best[0] === wanted.length) break; // cannot be tighter
