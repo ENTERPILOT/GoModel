@@ -61,11 +61,24 @@ test("fuzzyMatch returns null below the minimum length and without a match", () 
   assert.ok(fuzzyMatch("deepseek", "dep"));
 });
 
-test("fuzzyMatch scores the tightest window, so a compact match outranks a scattered one", () => {
+test("fuzzyMatch reports the winning window: span, token start and position", () => {
   const compact = fuzzyMatch("openai/gpt-4o-mini", "gpt4");
   const scattered = fuzzyMatch("gemini-pro-tier-4", "gpt4");
   assert.ok(compact && scattered);
-  assert.ok(compact.score < scattered.score);
+  assert.ok(compact.span < scattered.span);
+  assert.equal(compact.boundary, true, "gpt starts a segment");
+  assert.equal(compact.start, 7);
+});
+
+test("a match that starts a token beats a tighter one buried mid-word", () => {
+  // `ge25` inside "ima|ge25|" is the tightest run of the three, and the least
+  // likely thing the user meant. It must lose to the one starting "gemini".
+  const tokenStart = fuzzyMatch("gemini/gemini-2.5-flash", "ge25");
+  const midWord = fuzzyMatch("openrouter/microsoft/mai-image-2.5", "ge25");
+  assert.ok(tokenStart && midWord);
+  assert.equal(tokenStart.boundary, true);
+  assert.equal(midWord.boundary, false);
+  assert.ok(midWord.span < tokenStart.span, "the mid-word run is the tighter one");
 });
 
 test("textMatches keeps the substring level first and falls back to fuzzy", () => {

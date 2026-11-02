@@ -88,6 +88,23 @@ test("filterSearchOptions reaches a model by subsequence when nothing matches co
   );
 });
 
+test("filterSearchOptions ranks a token-starting match above a tighter mid-word one", () => {
+  const ranked = filterSearchOptions(
+    [
+      { value: "openrouter/microsoft/mai-image-2.5" },
+      { value: "openai/gpt-image-2.5-flare" },
+      { value: "gemini/gemini-2.5-flash" },
+    ],
+    "ge25",
+  );
+  // `ge25` is tightest inside "ima|ge25|", then inside "gpt-image25", then
+  // across "gemini" and its version. The intended model comes first anyway.
+  assert.deepEqual(
+    ranked.map((option) => option.value),
+    ["gemini/gemini-2.5-flash", "openai/gpt-image-2.5-flare", "openrouter/microsoft/mai-image-2.5"],
+  );
+});
+
 test("filterSearchOptions ranks fuzzy matches by how tight the match is", () => {
   const ranked = filterSearchOptions(
     [

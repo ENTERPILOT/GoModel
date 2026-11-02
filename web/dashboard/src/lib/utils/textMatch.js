@@ -41,7 +41,8 @@ export function substringIndex(text, needle) {
  * match can be mapped back for highlighting.
  */
 function compact(text) {
-  const lower = String(text ?? "").toLowerCase();
+  const source = String(text ?? "");
+  const lower = source.toLowerCase();
   let chars = "";
   const indexes = [];
   for (let i = 0; i < lower.length; i++) {
@@ -50,7 +51,7 @@ function compact(text) {
     chars += char;
     indexes.push(i);
   }
-  return { chars, indexes };
+  return { chars, indexes, text: source };
 }
 
 /**
@@ -92,20 +93,66 @@ function shortestWindow(haystack, needle) {
 }
 
 /**
+ * Whether a position in the original string starts a token: the first
+ * character, or the one right after a separator. A match that starts there is
+ * what the user usually meant — `ge25` should prefer `gemini/gemini-2.5-flash`
+ * over `openai/gpt-image-2.5-flare`, where the tighter run sits mid-word
+ * (`ima|ge25|`).
+ */
+function startsToken(text, index) {
+  return index === 0 || SEPARATOR.test(text[index - 1]);
+}
+
+/**
+ * Tightest window that contains `needle` as a subsequence *starting exactly
+ * at* `from`. Forward-greedy from a fixed start is already the tightest
+ * window with that start, so no backward pass is needed.
+ */
+function windowAt(haystack, needle, from) {
+  let j = 0;
+  let i = from;
+  for (; i < haystack.length && j < needle.length; i++) {
+    if (haystack[i] === needle[j]) j++;
+  }
+  if (j < needle.length) return null;
+  return [from, i];
+}
+
+/**
+ * Tightest window among those that start a token in the original string, or
+ * null when the needle only matches mid-word.
+ */
+function shortestTokenWindow(hay, wanted) {
+  let best = null;
+  for (let i = 0; i < hay.chars.length; i++) {
+    if (hay.chars[i] !== wanted[0]) continue;
+    if (!startsToken(hay.text, hay.indexes[i])) continue;
+    const window = windowAt(hay.chars, wanted, i);
+    if (window && (!best || window[1] - window[0] < best[1] - best[0])) best = window;
+    if (best && best[1] - best[0] === wanted.length) break; // cannot be tighter
+  }
+  return best;
+}
+
+/**
  * Fuzzy match of a normalized `needle` against `text`, or null.
  *
- * Returns the matched ranges in `text` (for highlighting) and a score: the
- * span of the tightest window, lowercase-is-better, so a caller ranking
- * several candidates can prefer the compact match.
+ * Returns the matched ranges in `text` (for highlighting) and the window that
+ * won: its span, whether it starts a token, and where it starts. Callers rank
+ * with those — a token-starting match outranks a tighter mid-word one.
  *
- * @returns {{ranges: Array<{start: number, end: number}>, score: number}|null}
+ * @returns {{ranges: Array<{start: number, end: number}>, span: number,
+ *            boundary: boolean, start: number}|null}
  */
 export function fuzzyMatch(text, needle) {
   const wanted = compact(String(needle ?? "")).chars;
   if (wanted.length < MIN_FUZZY_LENGTH) return null;
   const hay = compact(text);
   if (hay.chars.length < wanted.length) return null;
-  const window = shortestWindow(hay.chars, wanted);
+
+  const tokenWindow = shortestTokenWindow(hay, wanted);
+  const anyWindow = shortestWindow(hay.chars, wanted);
+  const window = tokenWindow || anyWindow;
   if (!window) return null;
   const [windowStart, windowEnd] = window;
 
@@ -157,7 +204,12 @@ export function fuzzyMatch(text, needle) {
     if (last && last.end === start) last.end = end;
     else ranges.push({ start, end });
   }
-  return { ranges, score: windowEnd - windowStart };
+  return {
+    ranges,
+    span: windowEnd - windowStart,
+    boundary: Boolean(tokenWindow),
+    start: hay.indexes[windowStart],
+  };
 }
 
 /**

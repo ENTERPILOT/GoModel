@@ -62,12 +62,41 @@ export function filterSearchOptions(options, query) {
   for (const option of normalized) {
     let best = null;
     for (const text of [option.value, option.label]) {
-      const match = fuzzyMatch(text, needle);
-      if (match && (!best || match.score < best)) best = match.score;
+      best = betterFuzzyMatch(best, fuzzyMatch(text, needle));
     }
-    if (best !== null) scored.push({ option, score: best });
+    if (best) scored.push({ option, match: best });
   }
-  return scored.sort((a, b) => a.score - b.score).map((entry) => entry.option);
+  // A match that starts a token wins over a tighter one buried mid-word, then
+  // the tighter window, then the earlier one. `ge25` prefers
+  // `gemini/gemini-2.5-flash` over `openai/gpt-image-2.5-flare`, whose best run
+  // is the `ge25` inside "ima|ge25|".
+  return scored
+    .sort((a, b) => {
+      const left = fuzzyRank(a.match);
+      const right = fuzzyRank(b.match);
+      for (let i = 0; i < left.length; i++) {
+        if (left[i] !== right[i]) return left[i] - right[i];
+      }
+      return 0; // equal: the sort keeps the input order
+    })
+    .map((entry) => entry.option);
+}
+
+/** Sort key for a fuzzy match: token start, then tightness, then position. */
+function fuzzyRank(match) {
+  return [match.boundary ? 0 : 1, match.span, match.start];
+}
+
+/**
+ * Rank two fuzzy matches for the same needle: token start first, then the
+ * tighter window, then the earlier one. Returns whichever should rank first.
+ */
+function betterFuzzyMatch(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  if (a.boundary !== b.boundary) return a.boundary ? a : b;
+  if (a.span !== b.span) return a.span < b.span ? a : b;
+  return a.start <= b.start ? a : b;
 }
 
 /**
