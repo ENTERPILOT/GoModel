@@ -186,3 +186,38 @@ test("substringIndex reports a character start, so 0 still means a prefix", () =
   assert.equal(substringIndex("İstanbul", "İ"), 0);
   assert.equal(substringIndex("anything", "missing"), -1);
 });
+
+test("a query with a space still matches across two fields", () => {
+  // Filters used to search one space-joined haystack; splitting the fields
+  // must not drop those rows.
+  const rows = [{ name: "Production", description: "team key" }, { name: "Production", description: "other" }];
+  assert.deepEqual(
+    filterFields(rows, "production team", (row) => [row.name, row.description]).map((row) => row.description),
+    ["team key"],
+  );
+  // The join is substring-only: a subsequence must not be assembled across
+  // the boundary, which is the reason the fields were split in the first place.
+  assert.deepEqual(filterFields([{ a: "Production", b: "team" }], "prducionteam", (row) => [row.a, row.b]), []);
+});
+
+test("a query pasted from the data finds that data even when folding expands", () => {
+  // "İ".toLowerCase() is two code points, so a plain lowercase query carried a
+  // combining dot the text never had: searching the field's own text missed it.
+  const query = normalizeQuery("İstanbul");
+  assert.equal(query, "istanbul");
+  assert.deepEqual(substringRange("İstanbul", query), { start: 0, end: 8 });
+  assert.deepEqual(matchSegments("İstanbul", query), [{ text: "İstanbul", hit: true }]);
+});
+
+test("an expanding fold and an astral character do not shift the range", () => {
+  // Five code points, six code units: "İ" folds to two, the emoji is one code
+  // point made of two units. Indexes counted on the folded string pointed at
+  // the wrong character, or past the end.
+  const text = "İ🙂ABC";
+  assert.deepEqual(substringRange(text, "abc"), { start: 3, end: 6 });
+  assert.equal(text.slice(3, 6), "ABC");
+  const match = fuzzyMatch(text, "abc");
+  assert.ok(match);
+  assert.ok(match.ranges.every((range) => Number.isInteger(range.start) && Number.isInteger(range.end)));
+  assert.equal(text.slice(match.ranges[0].start, match.ranges[0].end), "ABC");
+});

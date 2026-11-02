@@ -27,9 +27,14 @@ export const MIN_FUZZY_LENGTH = 3;
 // them is the common case.
 const SEPARATOR = /[-._:/\s]/;
 
-/** Trim and lowercase a user's query; empty input matches everything. */
+/**
+ * Trim and fold a user's query the way `fold` folds the searched text, so a
+ * query copied out of the data finds that data: `İstanbul` pasted in full
+ * matches `İstanbul` (a plain `toLowerCase` would leave a combining dot the
+ * text never has). Empty input matches everything.
+ */
 export function normalizeQuery(query) {
-  return String(query ?? "").trim().toLowerCase();
+  return fold(String(query ?? "").trim()).chars.join("");
 }
 
 /**
@@ -45,13 +50,7 @@ export function normalizeQuery(query) {
  */
 function fold(text) {
   const source = String(text ?? "");
-  const lower = source.toLowerCase();
-  if (lower.length === source.length) {
-    const starts = new Array(lower.length);
-    for (let i = 0; i < lower.length; i++) starts[i] = i;
-    return { chars: lower, starts, ends: null, source };
-  }
-  let chars = "";
+  const chars = [];
   const starts = [];
   const ends = [];
   for (let i = 0; i < source.length; ) {
@@ -59,8 +58,7 @@ function fold(text) {
     const char = String.fromCodePoint(code);
     const end = i + char.length;
     const folded = char.toLowerCase();
-    const first = String.fromCodePoint(folded.codePointAt(0));
-    chars += first;
+    chars.push(String.fromCodePoint(folded.codePointAt(0)));
     starts.push(i);
     ends.push(end);
     i = end;
@@ -68,9 +66,25 @@ function fold(text) {
   return { chars, starts, ends, source };
 }
 
-/** Code-unit end of the folded character at `index` of a `fold()` result. */
-function charEnd(folded, index) {
-  return folded.ends ? folded.ends[index] : index + 1;
+/**
+ * Whether folding this string leaves every code point in place. When it does,
+ * a native case-insensitive search already answers in the original's indexes.
+ */
+function foldKeepsLength(text) {
+  const source = String(text ?? "");
+  return source.toLowerCase().length === source.length;
+}
+
+/** Index of `needle` (an array of code points) inside `haystack`, or -1. */
+function indexOfChars(haystack, needle) {
+  if (!needle.length || needle.length > haystack.length) return -1;
+  outer: for (let i = 0; i + needle.length <= haystack.length; i++) {
+    for (let j = 0; j < needle.length; j++) {
+      if (haystack[i + j] !== needle[j]) continue outer;
+    }
+    return i;
+  }
+  return -1;
 }
 
 /**
@@ -83,18 +97,21 @@ export function substringRange(text, needle) {
   if (!needle) return null;
   const source = String(text ?? "");
   const wanted = String(needle);
-  const lower = source.toLowerCase();
-  const want = wanted.toLowerCase();
-  if (lower.length === source.length && want.length === wanted.length) {
+  if (foldKeepsLength(source) && foldKeepsLength(wanted)) {
+    const lower = source.toLowerCase();
+    const want = wanted.toLowerCase();
     const start = lower.indexOf(want);
     return start < 0 ? null : { start, end: start + want.length };
   }
+  // A fold that adds or drops code points ("İ" folds to two) means neither
+  // side can be searched with native indexes; compare the folded characters
+  // and report the range through the mapping. Both sides fold the same way, so
+  // a query pasted from the data still finds the data.
   const hay = fold(source);
   const chars = fold(wanted).chars;
-  if (!chars || chars.length > hay.chars.length) return null;
-  const at = hay.chars.indexOf(chars);
+  const at = indexOfChars(hay.chars, chars);
   if (at < 0) return null;
-  return { start: hay.starts[at], end: charEnd(hay, at + chars.length - 1) };
+  return { start: hay.starts[at], end: hay.ends[at + chars.length - 1] };
 }
 
 /**
@@ -113,30 +130,18 @@ export function substringIndex(text, needle) {
  * can be mapped back for highlighting.
  */
 function compact(text) {
-  const source = String(text ?? "");
-  const lower = source.toLowerCase();
+  const folded = fold(text);
   const chars = [];
   const starts = [];
   const ends = [];
-  if (lower.length === source.length) {
-    for (let i = 0; i < lower.length; i++) {
-      const char = lower[i];
-      if (SEPARATOR.test(char)) continue;
-      chars.push(char);
-      starts.push(i);
-      ends.push(i + 1);
-    }
-    return { chars: chars.join(""), starts, ends, source };
-  }
-  const folded = fold(source);
   for (let i = 0; i < folded.chars.length; i++) {
     const char = folded.chars[i];
     if (SEPARATOR.test(char)) continue;
     chars.push(char);
     starts.push(folded.starts[i]);
-    ends.push(charEnd(folded, i));
+    ends.push(folded.ends[i]);
   }
-  return { chars: chars.join(""), starts, ends, source };
+  return { chars, starts, ends, source: folded.source };
 }
 
 /**
@@ -326,10 +331,23 @@ export function partitionMatches(items, needle, fieldsOf) {
   const primary = [];
   const fuzzy = [];
   if (!query) return { primary: list.slice(), fuzzy };
+  // Filters used to search one space-joined haystack, so a query with a space
+  // could start in one field and end in the next ("production team" across a
+  // name and a description). That still has to match; a subsequence across the
+  // boundary would not, so the join is only read by the substring level, and
+  // only when the query can actually span it.
+  const maySpanFields = query.includes(" ");
   for (const item of list) {
-    const fields = fieldsOf(item) || [];
-    if (fields.some((field) => substringIndex(field, query) >= 0)) primary.push(item);
-    else if (fields.some((field) => fuzzyMatch(field, query) !== null)) fuzzy.push(item);
+    const fields = (fieldsOf(item) || []).map((field) => String(field ?? "")).filter(Boolean);
+    if (fields.some((field) => substringIndex(field, query) >= 0)) {
+      primary.push(item);
+      continue;
+    }
+    if (maySpanFields && substringIndex(fields.join(" "), query) >= 0) {
+      primary.push(item);
+      continue;
+    }
+    if (fields.some((field) => fuzzyMatch(field, query) !== null)) fuzzy.push(item);
   }
   return { primary, fuzzy };
 }

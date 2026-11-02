@@ -77,6 +77,9 @@ class ModelsStore {
       m.selector ?? "",
       m.model?.owned_by ?? "",
       ...(m.model?.metadata?.categories ?? []),
+      // The filter used to search the comma-joined list; keep it so a query
+      // spanning two categories still matches.
+      (m.model?.metadata?.categories ?? []).join(","),
     ]);
   }
 }

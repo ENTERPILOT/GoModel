@@ -122,6 +122,12 @@ export function buildDisplayModels({
   });
 }
 
+// rowCategories lists a model's categories, or nothing for an alias.
+function rowCategories(row) {
+  const categories = row && row.model && row.model.metadata && row.model.metadata.categories;
+  return Array.isArray(categories) ? categories : [];
+}
+
 // filterDisplayModels keeps an identity guarantee: with an empty
 // filter the input array is returned untouched.
 export function filterDisplayModels(rows, modelFilter) {
@@ -134,9 +140,8 @@ export function filterDisplayModels(rows, modelFilter) {
     row.model && row.model.owned_by,
     row.alias && row.alias.description,
     row.alias && row.alias_state_text,
-    ...(row.model && row.model.metadata && Array.isArray(row.model.metadata.categories)
-      ? row.model.metadata.categories
-      : []),
+    ...rowCategories(row),
+    rowCategories(row).join(","),
   ]);
 }
 

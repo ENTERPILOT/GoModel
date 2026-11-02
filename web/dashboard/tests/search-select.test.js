@@ -123,10 +123,10 @@ test("filterSearchOptions ranks fuzzy matches by how tight the match is", () => 
 test("filterSearchOptions never mixes fuzzy rows into a contiguous match", () => {
   const options = [
     { value: "openai/gpt-4o", description: "openai" },
-    { value: "dep-gpt-1017" },
+    { value: "dep-gpt-x4o-1017" },
   ];
-  // "gpt4o" is a subsequence of "dep-gpt-1017" as well, but "openai/gpt-4o"
-  // contains it contiguously, so the fuzzy-only row stays out.
+  // "gpt4o" is a subsequence of "dep-gpt-x4o-1017" as well, but
+  // "openai/gpt-4o" contains it contiguously, so the fuzzy-only row stays out.
   assert.deepEqual(
     filterSearchOptions(options, "gpt-4o").map((option) => option.value),
     ["openai/gpt-4o"],
