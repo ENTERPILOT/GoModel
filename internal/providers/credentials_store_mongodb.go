@@ -29,6 +29,7 @@ type mongoCredentialDocument struct {
 	ProxyURL                 string    `bson:"proxy_url,omitempty"`
 	Models                   []string  `bson:"models,omitempty"`
 	SessionStickyKeys        *bool     `bson:"session_sticky_keys,omitempty"`
+	Billable                 *bool     `bson:"billable,omitempty"`
 	Enabled                  bool      `bson:"enabled"`
 	CreatedAt                time.Time `bson:"created_at"`
 	UpdatedAt                time.Time `bson:"updated_at"`
@@ -117,6 +118,7 @@ func (s *MongoDBCredentialStore) Upsert(ctx context.Context, cred ManagedProvide
 			"proxy_url":                   cred.ProxyURL,
 			"models":                      cred.Models,
 			"session_sticky_keys":         sessionStickyKeysEnabled(cred.SessionStickyKeys),
+			"billable":                    enabledByDefault(cred.Billable),
 			"enabled":                     cred.Enabled,
 			"updated_at":                  cred.UpdatedAt,
 		},
@@ -205,6 +207,7 @@ func credentialFromMongo(doc mongoCredentialDocument) ManagedProviderCredential 
 		GCPScope:                 doc.GCPScope,
 		ProxyURL:                 doc.ProxyURL,
 		SessionStickyKeys:        doc.SessionStickyKeys,
+		Billable:                 doc.Billable,
 		Enabled:                  doc.Enabled,
 		CreatedAt:                doc.CreatedAt.UTC(),
 		UpdatedAt:                doc.UpdatedAt.UTC(),

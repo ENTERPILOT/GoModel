@@ -283,3 +283,21 @@ func TestApplyUserPathMarkupsDoesNotAllocate(t *testing.T) {
 	})
 	assert.Zero(t, allocs)
 }
+
+// A request served by a billable: false provider is billed at zero whatever
+// the markup rules say, cache hits included, and carries no markup.
+func TestApplyBillsNonBillableEntriesAtZero(t *testing.T) {
+	svc, err := New(config.PricingConfig{Markups: map[string]float64{"/": 20}, BillCacheHits: true}, testCatalog, false)
+	require.NoError(t, err)
+
+	for _, cacheType := range []string{"", usage.CacheTypeExact} {
+		entry := &usage.UsageEntry{ProviderName: "byok-openai", Provider: "openai", Model: "gpt-5", TotalCost: new(4.0), CacheType: cacheType}
+		entry.MarkNonBillable()
+		svc.Apply(entry)
+		require.NotNil(t, entry.BilledCost)
+		assert.Zero(t, *entry.BilledCost)
+		assert.Nil(t, entry.MarkupPercent)
+		assert.Empty(t, entry.MarkupSelector)
+		assert.NotNil(t, entry.TotalCost, "the provider cost estimate is kept")
+	}
+}

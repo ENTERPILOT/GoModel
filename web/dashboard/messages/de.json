@@ -1970,5 +1970,11 @@
   "audit_guardrail_badge_blocked": "Guardrail: blockiert · {instance}",
   "audit_guardrail_badge_answered": "Guardrail: beantwortet · {instance}",
   "audit_guardrail_badge_failed": "Guardrail: fehlgeschlagen · {instance}",
-  "audit_guardrail_badge_warned": "Guardrail: gewarnt · {instance}"
+  "audit_guardrail_badge_warned": "Guardrail: gewarnt · {instance}",
+  "providers_billable": "Abrechenbar",
+  "providers_billable_hint": "Ausschalten für einen Anbieter, dessen Kosten der Aufrufer Ihnen nicht schuldet, etwa den eigenen API-Schlüssel eines Kunden. Die Nutzung wird weiterhin erfasst und bepreist, aber mit 0 $ abgerechnet, und Budgets für Benutzerpfade und Labels prüfen und zählen sie nicht. Anbieter-Budgets gelten weiterhin.",
+  "providers_not_billable": "Nicht abrechenbar",
+  "providers_not_billable_title": "Nutzung wird erfasst, aber mit 0 $ abgerechnet und nicht auf Benutzerpfad- oder Label-Budgets angerechnet",
+  "usage_not_billable": "nicht abrechenbar",
+  "usage_not_billable_help": "Von einem nicht abrechenbaren Anbieter bedient: erfasst und bepreist, aber mit 0 $ abgerechnet und nicht auf Benutzerpfad- oder Label-Budgets angerechnet"
 }

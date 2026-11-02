@@ -827,6 +827,10 @@ func (embeddingProviderBudgetChecker) ProviderWithinBudget(_ context.Context, pr
 	return providerName != "primary-openai"
 }
 
+func (c embeddingProviderBudgetChecker) FailoverWithinBudget(ctx context.Context, _, target string) bool {
+	return c.ProviderWithinBudget(ctx, target)
+}
+
 func TestEmbeddings_AdmissionDefersPrimaryProviderBudgetToFailover(t *testing.T) {
 	primary := "primary-openai/text-embedding-3-small"
 	backup := "backup-openai/text-embedding-3-small"

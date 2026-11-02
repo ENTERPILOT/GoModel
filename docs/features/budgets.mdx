@@ -203,6 +203,45 @@ submissions and MCP calls, are not checked against provider budgets.
 If multiple budgets match a request, GoModel checks all matching limits in one
 lookup. The request is rejected if any matching limit is exhausted.
 
+### Non-billable providers
+
+A provider configured with `billable: false` serves requests whose cost the
+caller does not owe you, typically a customer's own API key registered as its
+own provider instance. User-path and label budgets neither gate a request
+routed to such a provider nor count its spend, on either cost basis. Provider
+budgets still apply to it and still count it. Usage is tracked and priced as
+usual, and each row records `billable: false`; the flag is stamped when the
+row is written, so changing it later does not rewrite past spend.
+
+For example, a platform lets users bring their own OpenAI key and also offers
+your hosted models. Register the user's key as a provider of its own, mark it
+non-billable, and put the budget on the user's path: the budget then caps the
+hosted models only, while the user's OpenAI usage stays visible in usage
+reports and `GET /v1/usage`.
+
+```bash
+curl -X PUT http://localhost:8080/admin/provider-credentials \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "openai-u123", "type": "openai", "api_keys": ["sk-..."], "billable": false}'
+```
+
+```yaml
+budgets:
+  user_paths:
+    - path: "/users/u123"
+      limits:
+        - period: "monthly"
+          amount: 20.00
+```
+
+Bind the user's API key to `/users/u123`. Requests to `openai-u123/...` are
+not checked against the budget and add nothing to it; requests to your hosted
+provider are. In `config.yaml` the same setting is `providers.<name>.billable:
+false`, or `<PROVIDER>[_SUFFIX]_BILLABLE=false` in the environment; see
+[Cost tracking](/features/cost-tracking#markups-and-billed-cost) for how
+non-billable usage is billed.
+
 ### Provider budgets and failover
 
 When a provider budget is exhausted and the request has
@@ -211,6 +250,12 @@ and tries the failover targets instead of rejecting the request. Failover also
 skips any target whose own provider budget is exhausted. If no target is left,
 the client receives the original `budget_exceeded` error. User-path and label
 budgets always reject: switching providers cannot relieve them.
+
+The one exception is a request admitted on a non-billable provider, for which
+user-path and label budgets were not checked. When it fails over to a billable
+target, failover checks those budgets for that target and skips it if one is
+exhausted, so a customer's own key never opens a way around their budget on
+your providers.
 
 ### Dynamic per-child budgets
 

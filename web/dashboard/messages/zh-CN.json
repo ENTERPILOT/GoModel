@@ -1763,5 +1763,11 @@
   "audit_guardrail_badge_blocked": "护栏：已拦截 · {instance}",
   "audit_guardrail_badge_answered": "护栏：已回复 · {instance}",
   "audit_guardrail_badge_failed": "护栏：失败 · {instance}",
-  "audit_guardrail_badge_warned": "护栏：已警告 · {instance}"
+  "audit_guardrail_badge_warned": "护栏：已警告 · {instance}",
+  "providers_billable": "计费",
+  "providers_billable_hint": "若调用方无需向您支付该供应商的费用（例如客户使用自己的 API 密钥），请关闭。用量仍会被跟踪和计价，但按 $0 计费，用户路径和标签预算既不会拦截也不会计入；供应商预算仍然生效。",
+  "providers_not_billable": "不计费",
+  "providers_not_billable_title": "用量会被跟踪，但按 $0 计费，且不计入用户路径或标签预算",
+  "usage_not_billable": "不计费",
+  "usage_not_billable_help": "由不计费供应商处理：已跟踪并计价，但按 $0 计费，且不计入用户路径或标签预算"
 }

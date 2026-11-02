@@ -35,6 +35,16 @@ configuration on file. The same multi-key rotation env vars support
 [outbound proxy](/providers/outbound-proxy) are available from the dashboard
 form.
 
+Every provider also carries a `billable` setting, on by default. Turn it off
+for a provider whose cost the caller does not owe you, such as a customer's
+own API key registered as its own provider instance: usage is still tracked
+and priced, but it is billed at zero and user-path and label budgets neither
+gate it nor count it. Set it with `providers.<name>.billable: false` in
+`config.yaml`, `<PROVIDER>[_SUFFIX]_BILLABLE=false` in the environment, the
+**Billable** checkbox under the dashboard form's advanced fields, or
+`"billable": false` on `PUT /admin/provider-credentials`. See
+[Budgets](/features/budgets#non-billable-providers).
+
 ## Supported providers
 
 Example model identifiers are illustrative and subject to change; consult

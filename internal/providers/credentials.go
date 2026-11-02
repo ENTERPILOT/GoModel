@@ -37,6 +37,10 @@ type ManagedProviderCredential struct {
 	// SessionStickyKeys is nil for legacy/default rows and therefore means
 	// enabled. A non-nil false value is the explicit dashboard/YAML opt-out.
 	SessionStickyKeys *bool
+	// Billable is nil for legacy/default rows and therefore means billable.
+	// A non-nil false value marks a provider whose cost the caller does not
+	// owe the operator, such as a customer's own key.
+	Billable *bool
 
 	BaseURL                  string
 	APIVersion               string
@@ -73,6 +77,7 @@ func (m ManagedProviderCredential) toRawProviderConfig() config.RawProviderConfi
 		Type:                     m.Type,
 		APIKeys:                  m.APIKeys,
 		SessionStickyKeys:        m.SessionStickyKeys,
+		Billable:                 m.Billable,
 		BaseURL:                  m.BaseURL,
 		APIVersion:               m.APIVersion,
 		Backend:                  m.Backend,
@@ -604,6 +609,8 @@ func comparableCredential(c ManagedProviderCredential) ManagedProviderCredential
 	c.CreatedAt, c.UpdatedAt = time.Time{}, time.Time{}
 	sticky := sessionStickyKeysEnabled(c.SessionStickyKeys)
 	c.SessionStickyKeys = &sticky
+	billable := enabledByDefault(c.Billable)
+	c.Billable = &billable
 	if len(c.APIKeys) == 0 {
 		c.APIKeys = nil
 	}
@@ -756,6 +763,7 @@ func (s *CredentialsService) install(name string, built builtCredential) {
 		s.registry.SetProviderMetadataOverrides(name, cfg.ModelMetadataOverrides)
 	}
 	s.registry.SetProviderModelFilter(name, cfg.ModelFilter)
+	s.registry.SetProviderBillable(name, cfg.Billable)
 
 	s.mu.Lock()
 	s.configs[name] = cfg

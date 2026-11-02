@@ -159,6 +159,15 @@ func TestBuildProviderConfig_CanDisableSessionStickyKeys(t *testing.T) {
 	assert.False(t, got.SessionStickyKeys)
 }
 
+func TestBuildProviderConfig_BillableDefaultsToTrue(t *testing.T) {
+	got := buildProviderConfig(config.RawProviderConfig{Type: "openai", APIKey: "sk-test"}, globalResilience)
+	assert.True(t, got.Billable)
+
+	nonBillable := false
+	got = buildProviderConfig(config.RawProviderConfig{Type: "openai", APIKey: "sk-test", Billable: &nonBillable}, globalResilience)
+	assert.False(t, got.Billable)
+}
+
 func TestBuildProviderConfig_NilResilience(t *testing.T) {
 	raw := config.RawProviderConfig{Type: "openai", APIKey: "sk", Resilience: nil}
 	got := buildProviderConfig(raw, globalResilience)
@@ -563,6 +572,65 @@ func TestApplyProviderEnvVars_SessionStickyKeys(t *testing.T) {
 			}
 			require.NotNil(t, sticky)
 			require.Equal(t, tt.want, *sticky)
+		})
+	}
+}
+
+func TestApplyProviderEnvVars_Billable(t *testing.T) {
+	nonBillable := false
+	tests := []struct {
+		name     string
+		env      map[string]string
+		raw      map[string]config.RawProviderConfig
+		provider string
+		want     bool
+		wantNil  bool
+	}{
+		{
+			name:     "unsuffixed false",
+			env:      map[string]string{"OPENAI_API_KEY": "sk-primary", "OPENAI_BILLABLE": "false"},
+			provider: "openai",
+		},
+		{
+			name:     "suffixed true",
+			env:      map[string]string{"OPENAI_BYOK_API_KEY": "sk-byok", "OPENAI_BYOK_BILLABLE": "true"},
+			provider: "openai-byok",
+			want:     true,
+		},
+		{
+			name:     "environment overrides yaml",
+			env:      map[string]string{"OPENAI_API_KEY": "sk-env", "OPENAI_BILLABLE": "true"},
+			raw:      map[string]config.RawProviderConfig{"openai": {Type: "openai", APIKey: "sk-yaml", Billable: &nonBillable}},
+			provider: "openai",
+			want:     true,
+		},
+		{
+			name:     "unset keeps default unspecified",
+			env:      map[string]string{"OPENAI_API_KEY": "sk-env"},
+			provider: "openai",
+			wantNil:  true,
+		},
+		{
+			name:     "invalid preserves yaml",
+			env:      map[string]string{"OPENAI_API_KEY": "sk-env", "OPENAI_BILLABLE": "maybe"},
+			raw:      map[string]config.RawProviderConfig{"openai": {Type: "openai", APIKey: "sk-yaml", Billable: &nonBillable}},
+			provider: "openai",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for key, value := range tt.env {
+				t.Setenv(key, value)
+			}
+			got, _ := applyEnv(t, tt.raw)
+			billable := got[tt.provider].Billable
+			if tt.wantNil {
+				require.Nil(t, billable)
+				return
+			}
+			require.NotNil(t, billable)
+			require.Equal(t, tt.want, *billable)
 		})
 	}
 }

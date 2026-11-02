@@ -21,6 +21,7 @@ import {
   resetProviderCredentialFields,
   validateProviderCredentialForm,
   buildProviderCredentialPayload,
+  providerRowNonBillable,
   providerRowsHaveActions,
 } from "../src/pages/providers-config/providersConfigLogic.js";
 
@@ -228,6 +229,38 @@ test("providerCredentialFormFields splits a schema into primary and advanced", (
   assert.equal(primary[0].label, "API Keys");
   assert.equal(primary[0].control, "keys");
   assert.equal(advanced[1].control, "checkbox");
+});
+
+test("billable defaults on, maps from the row, and is always sent when advertised", () => {
+  assert.equal(defaultProviderCredentialForm().billable, true);
+  assert.equal(providerCredentialRowToForm({ billable: false }).billable, false);
+  assert.equal(providerCredentialRowToForm({}).billable, true);
+
+  const schema = {
+    ...OPENAI_SCHEMA,
+    fields: [...OPENAI_SCHEMA.fields, { name: "billable", required: false, advanced: true }],
+  };
+  const { advanced } = providerCredentialFormFields(schema);
+  const billable = advanced.find((field) => field.name === "billable");
+  assert.equal(billable.control, "checkbox");
+  assert.equal(billable.label, "Billable");
+
+  const form = {
+    ...defaultProviderCredentialForm(),
+    name: "customer-openai",
+    type: "openai",
+    api_keys: [{ value: "sk-live" }],
+  };
+  assert.equal(buildProviderCredentialPayload(form, schema).billable, true);
+  form.billable = false;
+  assert.equal(buildProviderCredentialPayload(form, schema).billable, false);
+  // A gateway that does not advertise the field never receives it.
+  assert.equal("billable" in buildProviderCredentialPayload(form, OPENAI_SCHEMA), false);
+  assert.equal("billable" in buildProviderCredentialPayload(form, null), false);
+
+  assert.equal(providerRowNonBillable({ billable: false }), true);
+  assert.equal(providerRowNonBillable({ billable: true }), false);
+  assert.equal(providerRowNonBillable({}), false);
 });
 
 test("session stickiness defaults on and can be disabled", () => {
