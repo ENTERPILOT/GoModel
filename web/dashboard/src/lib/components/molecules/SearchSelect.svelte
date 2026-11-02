@@ -18,6 +18,7 @@
   //   values       selected values in multiple mode (bindable)
   //   disabled, mono (monospace option values), class (trigger wrapper)
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import HighlightText from "$lib/components/atoms/HighlightText.svelte";
   import { marqueeOnOverflow } from "$lib/utils/attachments.js";
   import { Check } from "lucide";
   import { tick } from "svelte";
@@ -206,7 +207,7 @@
       onclick={() => choose(option.value)}
     >
       <span class="search-select-option-label search-select-clip" title={option.label} {@attach marqueeOnOverflow()}>
-        <span class="search-select-text">{option.label}</span>
+        <span class="search-select-text"><HighlightText text={option.label} needle={query} /></span>
       </span>
       {#if option.description}
         <span class="search-select-option-description">{option.description}</span>
