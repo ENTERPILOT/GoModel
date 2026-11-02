@@ -69,6 +69,60 @@ test("filterSearchOptions drops options that repeat a value", () => {
   assert.equal(filterSearchOptions(duplicated, "gpt").length, 1);
 });
 
+const models = [
+  { value: "vllm/deepseek-v4.1-flash:1017", description: "vllm" },
+  { value: "openai/gpt-4o", description: "openai" },
+  { value: "ollama/qwen2.5:0.5b", description: "ollama" },
+];
+
+test("filterSearchOptions reaches a model by subsequence when nothing matches contiguously", () => {
+  assert.deepEqual(
+    filterSearchOptions(models, "dep1017").map((option) => option.value),
+    ["vllm/deepseek-v4.1-flash:1017"],
+  );
+  assert.deepEqual(
+    filterSearchOptions(models, "qwen05b").map((option) => option.value),
+    ["ollama/qwen2.5:0.5b"],
+  );
+});
+
+test("filterSearchOptions ranks fuzzy matches by how tight the match is", () => {
+  const ranked = filterSearchOptions(
+    [
+      { value: "vllm/deepseek-v4.1-flash:1017" },
+      { value: "vllm/deepseek-v4.1-flash:1017-replica" },
+    ],
+    "dseek1017",
+  );
+  // Both match; the shorter id holds the same characters in a tighter window.
+  assert.deepEqual(
+    ranked.map((option) => option.value),
+    ["vllm/deepseek-v4.1-flash:1017", "vllm/deepseek-v4.1-flash:1017-replica"],
+  );
+});
+
+test("filterSearchOptions never mixes fuzzy rows into a contiguous match", () => {
+  const options = [
+    { value: "openai/gpt-4o", description: "openai" },
+    { value: "dep-gpt-1017" },
+  ];
+  // "gpt4o" is a subsequence of "dep-gpt-1017" as well, but "openai/gpt-4o"
+  // contains it contiguously, so the fuzzy-only row stays out.
+  assert.deepEqual(
+    filterSearchOptions(options, "gpt-4o").map((option) => option.value),
+    ["openai/gpt-4o"],
+  );
+});
+
+test("filterSearchOptions leaves descriptions out of the fuzzy level", () => {
+  // The description names the provider; a subsequence over it would surface
+  // rows nobody was looking for.
+  assert.deepEqual(
+    filterSearchOptions([{ value: "openai/gpt-4o", description: "provider-1017" }], "pvr1017"),
+    [],
+  );
+});
+
 test("customSearchValue offers typed text only when allowed and new", () => {
   assert.equal(customSearchValue(options, " my-alias ", true), "my-alias");
   assert.equal(customSearchValue(options, "plain", true), "");

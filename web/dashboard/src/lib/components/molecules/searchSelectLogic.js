@@ -1,6 +1,8 @@
 // Pure helpers behind the SearchSelect molecule (no Svelte runtime, relative
 // imports only) so tests/search-select.test.js can load them directly.
 
+import { fuzzyMatch, normalizeQuery, substringIndex } from "../../utils/textMatch.js";
+
 /**
  * Normalize a caller's option into {value, label, description}.
  * Strings become value/label pairs.
@@ -22,9 +24,14 @@ export function normalizeSearchOption(option) {
 /**
  * Filter options by a free-text query, matching value, label and
  * description case-insensitively. Matches that start with the query rank
- * first (stable within each tier). An empty query returns every option.
- * Options sharing a value collapse to the first one, so the keyed list the
- * component renders never sees a duplicate key.
+ * first (stable within each tier), then the ones that contain it. When
+ * neither tier matches anything, the fuzzy level runs and its matches rank
+ * by how tight the match is — `dep1017` reaches
+ * `vllm/deepseek-v4.1-flash:1017`, `sonet` reaches `claude-sonnet`. A query
+ * that already matches contiguously never mixes in fuzzy rows, so today's
+ * results keep their rows and their order. An empty query returns every
+ * option. Options sharing a value collapse to the first one, so the keyed
+ * list the component renders never sees a duplicate key.
  *
  * @param {Array<unknown>} options
  * @param {string} query
@@ -38,16 +45,29 @@ export function filterSearchOptions(options, query) {
       seen.add(option.value);
       return true;
     });
-  const needle = String(query || "").trim().toLowerCase();
+  const needle = normalizeQuery(query);
   if (!needle) return normalized;
   const prefix = [];
   const rest = [];
   for (const option of normalized) {
-    const haystacks = [option.value, option.label, option.description].map((s) => s.toLowerCase());
-    if (haystacks.some((s) => s.startsWith(needle))) prefix.push(option);
-    else if (haystacks.some((s) => s.includes(needle))) rest.push(option);
+    const haystacks = [option.value, option.label, option.description];
+    if (haystacks.some((text) => substringIndex(text, needle) === 0)) prefix.push(option);
+    else if (haystacks.some((text) => substringIndex(text, needle) > 0)) rest.push(option);
   }
-  return prefix.concat(rest);
+  if (prefix.length || rest.length) return prefix.concat(rest);
+
+  // Fuzzy fallback. Descriptions describe the option rather than name it
+  // (a provider name, "this model"), so a subsequence over them is noise.
+  const scored = [];
+  for (const option of normalized) {
+    let best = null;
+    for (const text of [option.value, option.label]) {
+      const match = fuzzyMatch(text, needle);
+      if (match && (!best || match.score < best)) best = match.score;
+    }
+    if (best !== null) scored.push({ option, score: best });
+  }
+  return scored.sort((a, b) => a.score - b.score).map((entry) => entry.option);
 }
 
 /**

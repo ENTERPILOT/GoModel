@@ -4,6 +4,7 @@
 
 import * as m from "../../lib/paraglide/messages.js";
 import { formatNumber } from "../../lib/i18n/locale.js";
+import { filterFields } from "../../lib/utils/textMatch.js";
 
 export function defaultRateLimitForm() {
   return {
@@ -214,18 +215,12 @@ export function filteredRateLimits(rules, filter) {
   if (!needle) {
     return items;
   }
-  return items.filter((item) => {
-    const subject = rateLimitSubject(item).toLowerCase();
-    const scope = rateLimitScopeLabel(item).toLowerCase();
-    const period = rateLimitPeriodLabel(item).toLowerCase();
-    const mode = item && item.per_child ? m.rate_limits_per_child_badge() : "";
-    return (
-      subject.includes(needle) ||
-      scope.includes(needle) ||
-      period.includes(needle) ||
-      mode.includes(needle)
-    );
-  });
+  return filterFields(items, needle, (item) => [
+    rateLimitSubject(item),
+    rateLimitScopeLabel(item),
+    rateLimitPeriodLabel(item),
+    item && item.per_child ? m.rate_limits_per_child_badge() : "",
+  ]);
 }
 
 export function normalizeRateLimitListPayload(payload) {
