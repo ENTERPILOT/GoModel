@@ -229,17 +229,59 @@ function shortestWindow(haystack, needle) {
  * Tightest window among those that start a token in the original string, or
  * null when the needle only matches mid-word.
  */
+/** Where each character occurs in `chars`, ascending. */
+function positionsByChar(chars) {
+  const positions = new Map();
+  for (let i = 0; i < chars.length; i++) {
+    const list = positions.get(chars[i]);
+    if (list) list.push(i);
+    else positions.set(chars[i], [i]);
+  }
+  return positions;
+}
+
+/** First value in the ascending `list` that is >= `from`, or -1. */
+function firstAtOrAfter(list, from) {
+  let low = 0;
+  let high = list.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (list[mid] < from) low = mid + 1;
+    else high = mid;
+  }
+  return low < list.length ? list[low] : -1;
+}
+
+/**
+ * End (exclusive) of the greedy window for `needle` starting at `from`, or -1.
+ *
+ * Jumps through the precomputed positions instead of rescanning the field, so
+ * each start costs the needle's length rather than the field's: a long,
+ * repetitive text would otherwise pay its whole length once per token start.
+ */
+function windowEndAt(positions, needle, from) {
+  let at = from;
+  for (let j = 1; j < needle.length; j++) {
+    const list = positions.get(needle[j]);
+    if (!list) return -1;
+    at = firstAtOrAfter(list, at + 1);
+    if (at < 0) return -1;
+  }
+  return at + 1;
+}
+
 function shortestTokenWindow(hay, wanted) {
   let best = null;
+  let positions = null;
   for (let i = 0; i < hay.chars.length; i++) {
     if (hay.chars[i] !== wanted[0]) continue;
     if (!startsToken(hay.source, hay.starts[i])) continue;
-    const window = windowAt(hay.chars, wanted, i);
+    positions = positions ?? positionsByChar(hay.chars);
+    const end = windowEndAt(positions, wanted, i);
     // A match that fails from one start fails from every later one: the rest of
-    // the field is a shorter suffix, so it cannot hold the needle either. The
-    // failing path therefore costs one scan instead of one per token start.
-    if (!window) break;
-    if (!best || window[1] - window[0] < best[1] - best[0]) best = window;
+    // the field is a shorter suffix, so it cannot hold the needle either.
+    if (end < 0) break;
+    if (!best || end - i < best[1] - best[0]) best = [i, end];
     if (best[1] - best[0] === wanted.length) break; // cannot be tighter
   }
   return best;
