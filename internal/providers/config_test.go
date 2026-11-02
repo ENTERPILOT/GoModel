@@ -640,6 +640,12 @@ func TestApplyProviderEnvVars_BillableRejectsMalformedValue(t *testing.T) {
 	_, _, err := applyProviderEnvVars(t.Context(), nil, raw, testDiscoveryConfigs, os.Environ())
 	require.ErrorContains(t, err, "OPENAI_BILLABLE: value is not a boolean")
 	require.NotContains(t, err.Error(), "maybe", "the value may be a resolved secret")
+
+	// The same when it is the provider's only variable: the group must not be
+	// dropped as empty before the value is checked.
+	t.Setenv("OPENAI_API_KEY", "")
+	_, _, err = applyProviderEnvVars(t.Context(), nil, raw, testDiscoveryConfigs, os.Environ())
+	require.ErrorContains(t, err, "OPENAI_BILLABLE: value is not a boolean")
 }
 
 func TestApplyProviderEnvVars_DiscoversFromBaseURL(t *testing.T) {

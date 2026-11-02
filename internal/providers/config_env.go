@@ -272,7 +272,10 @@ func (v providerEnvValues) empty() bool {
 		v.FairnessFromUserPath == nil &&
 		len(v.Models) == 0 &&
 		v.modelFilter().Empty() &&
-		len(v.pending) == 0
+		len(v.pending) == 0 &&
+		// A malformed value counts as set so the group is not dropped
+		// before apply can fail on it.
+		v.invalid == nil
 }
 
 func providerEnvSources(providerType string, spec DiscoveryConfig) []providerEnvSource {
