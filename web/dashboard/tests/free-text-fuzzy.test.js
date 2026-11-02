@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { filterAuthKeys } from "../src/pages/auth-keys/authKeysLogic.js";
 import { filterAndSortBudgets } from "../src/pages/budgets/budgets-helpers.js";
 import { filterGuardrails } from "../src/pages/guardrails/guardrails-logic.js";
+import { filterDisplayModels } from "../src/pages/models/displayRows.js";
 import { filterMcpServers, mcpToolPickerRows } from "../src/pages/mcp-servers/mcp-servers.js";
 import { filterProviderCredentials } from "../src/pages/providers-config/providersConfigLogic.js";
 import { filteredRateLimits } from "../src/pages/rate-limits/rateLimitsLogic.js";
@@ -163,5 +164,20 @@ test("the user path tree reaches a node by subsequence and keeps its ancestors",
   assert.deepEqual(
     visibleUserPathRows(tree, new Set(), "dk1017").map((row) => row.path),
     ["/team", "/team/" + FUZZY_ID],
+  );
+});
+
+test("the Models page filter reaches a row by subsequence", () => {
+  const rows = [
+    { display_name: "vllm-qa/" + FUZZY_ID },
+    { display_name: "vllm-qa/" + SUBSTRING_ID },
+  ];
+  assert.deepEqual(
+    filterDisplayModels(rows, QUERY).map((row) => row.display_name),
+    ["vllm-qa/" + SUBSTRING_ID],
+  );
+  assert.deepEqual(
+    filterDisplayModels(rows, "dk1017").map((row) => row.display_name),
+    ["vllm-qa/" + FUZZY_ID],
   );
 });

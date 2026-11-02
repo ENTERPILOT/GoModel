@@ -3,6 +3,7 @@
 // relative imports keep it loadable outside Vite.
 
 import * as m from "../../lib/paraglide/messages.js";
+import { filterFields } from "../../lib/utils/textMatch.js";
 import {
   GLOBAL_OVERRIDE_SELECTOR,
   aliasKeys,
@@ -125,26 +126,18 @@ export function buildDisplayModels({
 // filter the input array is returned untouched.
 export function filterDisplayModels(rows, modelFilter) {
   if (!modelFilter) return rows;
-  const filter = String(modelFilter).toLowerCase();
-  return rows.filter((row) => {
-    const fields = [
-      row.display_name,
-      row.secondary_name,
-      row.provider_name,
-      row.provider_type,
-      row.model && row.model.owned_by,
-      row.alias && row.alias.description,
-      row.alias && row.alias_state_text,
-      row.model && row.model.metadata && Array.isArray(row.model.metadata.categories)
-        ? row.model.metadata.categories.join(",")
-        : "",
-    ];
-    return fields.some((value) =>
-      String(value || "")
-        .toLowerCase()
-        .includes(filter),
-    );
-  });
+  return filterFields(rows, modelFilter, (row) => [
+    row.display_name,
+    row.secondary_name,
+    row.provider_name,
+    row.provider_type,
+    row.model && row.model.owned_by,
+    row.alias && row.alias.description,
+    row.alias && row.alias_state_text,
+    row.model && row.model.metadata && Array.isArray(row.model.metadata.categories)
+      ? row.model.metadata.categories.join(",")
+      : "",
+  ]);
 }
 
 // displayRowEnabled reports the state the row's access toggle shows: an alias
