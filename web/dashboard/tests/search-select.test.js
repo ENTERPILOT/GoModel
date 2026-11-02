@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  MAX_VISIBLE_OPTIONS,
+  capSearchOptions,
   customSearchValue,
   filterSearchOptions,
   moveActiveIndex,
@@ -202,4 +204,24 @@ test("popoverPlacement closes once the trigger leaves the visible area", () => {
   assert.equal(popoverPlacement(rect(800), { top: 0, height: 800, width: 390 }), null);
   assert.equal(popoverPlacement(rect(150), { top: 200, height: 400, width: 390 }), null);
   assert.notEqual(popoverPlacement(rect(-20), { top: 0, height: 800, width: 390 }), null);
+});
+
+test("capSearchOptions renders one page of matches and keeps the picked value", () => {
+  const rows = Array.from({ length: 250 }, (_, index) => ({ value: "m" + index }));
+  const page = capSearchOptions(rows, MAX_VISIBLE_OPTIONS);
+  assert.equal(page.length, MAX_VISIBLE_OPTIONS);
+  assert.equal(page[0].value, "m0");
+
+  // The trigger may already show a value far down the list; opening the list
+  // must still show it, or the highlight has nothing to land on.
+  const pinned = capSearchOptions(rows, MAX_VISIBLE_OPTIONS, "m200");
+  assert.equal(pinned.length, MAX_VISIBLE_OPTIONS + 1);
+  assert.equal(pinned[pinned.length - 1].value, "m200");
+
+  // A value already on the page is not appended twice.
+  assert.equal(capSearchOptions(rows, MAX_VISIBLE_OPTIONS, "m3").length, MAX_VISIBLE_OPTIONS);
+  // Nothing to cut: the same array comes back.
+  const small = rows.slice(0, 5);
+  assert.equal(capSearchOptions(small, MAX_VISIBLE_OPTIONS), small);
+  assert.deepEqual(capSearchOptions(undefined, MAX_VISIBLE_OPTIONS), []);
 });

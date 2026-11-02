@@ -25,6 +25,8 @@
   import * as m from "$lib/paraglide/messages.js";
   import SearchPopover from "./SearchPopover.svelte";
   import {
+    MAX_VISIBLE_OPTIONS,
+    capSearchOptions,
     customSearchValue,
     filterSearchOptions,
     normalizeSearchOption,
@@ -54,14 +56,37 @@
 
   let open = $state(false);
   let query = $state("");
+  // What the list filters on. Typing must never wait for the list: `query`
+  // updates with the input so the caret and the text never lag, and the filter
+  // runs on the next frame with its latest value, at most once per frame.
+  // Without this every keystroke filters and rebuilds rows inside the input
+  // handler, and a fast typist's events queue behind that work.
+  let listQuery = $state("");
   let activeIndex = $state(-1);
   let shell = $state(null);
 
+  $effect(() => {
+    const pending = query;
+    if (typeof requestAnimationFrame !== "function") {
+      listQuery = pending;
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      listQuery = pending;
+    });
+    return () => cancelAnimationFrame(frame);
+  });
+
   // Multi-select rows list the current selection first so it can be
   // unchecked without hunting through the list.
-  const filtered = $derived(
-    multiple ? selectedFirst(filterSearchOptions(options, query), values) : filterSearchOptions(options, query),
+  const matched = $derived(
+    multiple ? selectedFirst(filterSearchOptions(options, listQuery), values) : filterSearchOptions(options, listQuery),
   );
+  // Only the first page of matches is rendered: the model picker holds ~1000
+  // options and rebuilding every row per keystroke blocked typing. The
+  // remaining count is shown in a footer row so the cut is never silent.
+  const filtered = $derived(capSearchOptions(matched, MAX_VISIBLE_OPTIONS, multiple ? "" : value));
+  const hiddenCount = $derived(matched.length - filtered.length);
   const customValue = $derived(customSearchValue(options, query, allowCustom));
   // Rows in keyboard order: the custom suggestion first, then matches.
   const rowCount = $derived(filtered.length + (customValue ? 1 : 0));
@@ -175,6 +200,14 @@
   {onopen}
   {onkeydown}
 >
+  {#if hiddenCount > 0}
+    <!-- The list is a suggestion list: the rest of the matches stay reachable
+         by typing. The cut is stated at the top, where it is read before the
+         rows, rather than after a hundred rows nobody scrolls to. -->
+    <li class="search-select-empty search-select-more" role="presentation">
+      {m.search_select_more_results({ shown: filtered.length, total: matched.length })}
+    </li>
+  {/if}
   {#if customValue}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <li

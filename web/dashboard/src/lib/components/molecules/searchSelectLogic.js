@@ -84,6 +84,36 @@ export function customSearchValue(options, query, allowCustom) {
 }
 
 /**
+ * How many rows a search list renders at once. The model picker holds ~1000
+ * options, and rebuilding every row on each keystroke is what made typing feel
+ * queued: one keystroke cost 50-70 ms of main thread, so input events piled up
+ * behind it. Past this many matches the user is expected to keep typing.
+ */
+export const MAX_VISIBLE_OPTIONS = 100;
+
+/**
+ * Cut a matched list down to the rows worth rendering. Keeps `pinnedValue`
+ * visible when it sits beyond the cut (a single-select trigger already showing
+ * a value the first page does not contain), so opening the list and typing do
+ * not hide what is selected. Returns the input array untouched when it already
+ * fits, keeping identity for callers that compare.
+ *
+ * @param {Array<unknown>} options
+ * @param {number} limit
+ * @param {string} pinnedValue
+ */
+export function capSearchOptions(options, limit, pinnedValue = "") {
+  const list = Array.isArray(options) ? options : [];
+  if (list.length <= limit) return list;
+  const visible = list.slice(0, limit);
+  if (pinnedValue) {
+    const pinned = list.slice(limit).find((option) => option && option.value === pinnedValue);
+    if (pinned) visible.push(pinned);
+  }
+  return visible;
+}
+
+/**
  * Move the keyboard highlight by `delta` rows, wrapping around. A -1 index
  * (nothing highlighted) moves to the first/last row. Returns -1 for an
  * empty list.

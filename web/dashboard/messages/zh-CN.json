@@ -21,6 +21,7 @@
   "playground_user_path_help": "作为 {header} 请求头发送。仅提供所选模型允许的路径；可手动输入以覆盖。",
   "search_select_search_placeholder": "搜索…",
   "search_select_no_matches": "无匹配项",
+  "search_select_more_results": "仅显示 {total} 个匹配项中的前 {shown} 个",
   "search_select_use_custom": "使用 “{value}”",
   "playground_stream_label": "流式",
   "playground_add_message": "添加消息",
