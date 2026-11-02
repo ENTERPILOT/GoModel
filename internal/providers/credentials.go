@@ -754,6 +754,10 @@ func firstAndAll(keys []string) (string, []string) {
 // effective configuration, and records its secret references for rotation.
 func (s *CredentialsService) install(name string, built builtCredential) {
 	cfg := built.cfg
+	// The flag goes first and survives the unregister below, so usage written
+	// while the provider is being replaced is marked by the new setting
+	// rather than briefly defaulting to billable.
+	s.registry.SetProviderBillable(name, cfg.Billable)
 	s.registry.UnregisterProvider(name)
 	s.registry.RegisterProviderWithNameAndType(built.provider, name, cfg.Type)
 	if len(cfg.Models) > 0 {
@@ -763,7 +767,6 @@ func (s *CredentialsService) install(name string, built builtCredential) {
 		s.registry.SetProviderMetadataOverrides(name, cfg.ModelMetadataOverrides)
 	}
 	s.registry.SetProviderModelFilter(name, cfg.ModelFilter)
-	s.registry.SetProviderBillable(name, cfg.Billable)
 
 	s.mu.Lock()
 	s.configs[name] = cfg
@@ -778,6 +781,7 @@ func (s *CredentialsService) install(name string, built builtCredential) {
 // configuration and secret references.
 func (s *CredentialsService) remove(name string) {
 	s.registry.UnregisterProvider(name)
+	s.registry.SetProviderBillable(name, true)
 
 	s.mu.Lock()
 	delete(s.configs, name)

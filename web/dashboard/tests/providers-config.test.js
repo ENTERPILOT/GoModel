@@ -302,6 +302,9 @@ test("a missing schema falls back to every known field", () => {
   assert.equal(names.includes("api_keys"), true);
   assert.equal(names.includes("vertex_project"), true);
   assert.deepEqual(primary.map((field) => field.name), ["api_keys"]);
+  // Toggles the payload would not send without a schema are not offered either.
+  assert.equal(names.includes("session_sticky_keys"), false);
+  assert.equal(names.includes("billable"), false);
 });
 
 test("providerCredentialFieldMeta humanizes a field the dashboard has no copy for", () => {

@@ -316,7 +316,10 @@ func (r *ModelRegistry) UnregisterProvider(providerName string) {
 	delete(r.configMetadataOverrides, providerName)
 	delete(r.configuredProviderModels, providerName)
 	delete(r.providerModelFilters, providerName)
-	delete(r.nonBillableProviders, providerName)
+	// nonBillableProviders is kept: a replacement is unregistered and
+	// re-registered in separate steps, and usage written for the outgoing
+	// instance in between must still be marked. SetProviderBillable clears
+	// it when a provider is removed for good.
 	delete(r.discoveredByProvider, providerName)
 	r.publishFilteredInventoryLocked()
 	r.invalidateSortedCaches()

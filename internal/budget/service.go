@@ -454,8 +454,10 @@ func (s *Service) CheckWithResults(ctx context.Context, subjects Subjects, now t
 // CheckCacheHit evaluates the budgets a response-cache hit spends against
 // before the cached response is replayed. Only billed user-path and label
 // budgets qualify, and only while cache hits are billed: provider cost never
-// counts cache hits, and a hit is not routed to any provider. It returns
-// without a store round trip when no such budget exists.
+// counts cache hits, and a hit is not routed to any provider. subjects.Provider
+// names the provider the request resolved to, so a hit of a billable: false
+// provider is admitted like the request itself would be. It returns without a
+// store round trip when no such budget exists.
 func (s *Service) CheckCacheHit(ctx context.Context, subjects Subjects, now time.Time) error {
 	if s == nil || s.store == nil || !s.billedCacheHits {
 		return nil
@@ -466,6 +468,13 @@ func (s *Service) CheckCacheHit(ctx context.Context, subjects Subjects, now time
 	if !billed {
 		return nil
 	}
+	if !s.billable(subjects.Provider) {
+		// Consumer budgets are all a cache hit can spend against, and the
+		// caller owes nothing for this provider, cache hits included.
+		return nil
+	}
+	// Provider budgets never count cache hits; the provider was only needed
+	// for the exemption above.
 	subjects.Provider = ""
 	matching, settings, now, err := s.match(&subjects, now)
 	if err != nil {

@@ -20,9 +20,12 @@ func TestModelRegistry_ProviderBillable(t *testing.T) {
 	registry.SetProviderBillable("byok-openai", true)
 	assert.True(t, registry.ProviderBillable("byok-openai"))
 
-	// Unregistering forgets the flag, so a provider re-added under the same
-	// name starts from the default.
+	// Unregistering keeps the flag: a replacement is unregistered and
+	// re-registered in separate steps, and usage written in between must
+	// still be marked. Removing a provider for good clears it explicitly.
 	registry.SetProviderBillable("byok-openai", false)
 	registry.UnregisterProvider("byok-openai")
+	assert.False(t, registry.ProviderBillable("byok-openai"))
+	registry.SetProviderBillable("byok-openai", true)
 	assert.True(t, registry.ProviderBillable("byok-openai"))
 }

@@ -45,6 +45,12 @@ const PROVIDER_CREDENTIAL_FIELD_NAMES = [
   FIELD_BILLABLE,
 ];
 
+// Capability toggles that only exist when the gateway's credential schema
+// advertises them. The schema-less fallback form neither shows nor sends them:
+// an older gateway would drop the value, and a save that looks successful
+// must not lose a setting.
+const SCHEMA_ONLY_TOGGLES = new Set([FIELD_SESSION_STICKY_KEYS, FIELD_BILLABLE]);
+
 function providerCredentialFields() {
   return {
     [FIELD_API_KEYS]: {
@@ -231,10 +237,12 @@ export function providerCredentialFormFields(schema, defaultBaseURL) {
   const entries =
     schema && Array.isArray(schema.fields) && schema.fields.length > 0
       ? schema.fields
-      : PROVIDER_CREDENTIAL_FIELD_NAMES.map((name) => ({
-          name,
-          advanced: name !== FIELD_API_KEYS,
-        }));
+      : PROVIDER_CREDENTIAL_FIELD_NAMES.filter((name) => !SCHEMA_ONLY_TOGGLES.has(name)).map(
+          (name) => ({
+            name,
+            advanced: name !== FIELD_API_KEYS,
+          }),
+        );
   const fallbackBaseURL = defaultBaseURL || (schema && schema.default_base_url) || "";
 
   const primary = [];
@@ -501,12 +509,9 @@ export function buildProviderCredentialPayload(form, schema) {
   const rendered = new Set();
   for (const field of [...primary, ...advanced]) {
     // A missing schema is the compatibility fallback for gateways that predate
-    // this capability. Do not send the new toggle unless the gateway explicitly
+    // this capability. Do not send a toggle unless the gateway explicitly
     // advertised it.
-    if (
-      !hasAdvertisedFields &&
-      (field.name === FIELD_SESSION_STICKY_KEYS || field.name === FIELD_BILLABLE)
-    ) {
+    if (!hasAdvertisedFields && SCHEMA_ONLY_TOGGLES.has(field.name)) {
       continue;
     }
     rendered.add(field.name);
@@ -519,7 +524,7 @@ export function buildProviderCredentialPayload(form, schema) {
     // This is a provider capability toggle rather than free-form stored data.
     // Do not send it to keyless schemas (or older gateways whose schema does
     // not advertise it), where its default true value would be spurious.
-    if (name === FIELD_SESSION_STICKY_KEYS || name === FIELD_BILLABLE) {
+    if (SCHEMA_ONLY_TOGGLES.has(name)) {
       continue;
     }
     const value = providerCredentialPayloadValue(form, name);

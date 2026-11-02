@@ -579,7 +579,8 @@ providers:
     # session_sticky_keys: false
     # Set false when the caller does not owe this provider's cost (a customer's
     # own key registered as its own provider): usage is still tracked and
-    # priced, but billed at zero, and user-path and label budgets skip it.
+    # priced, user-path and label budgets skip it, and with markups enabled
+    # it is billed at zero.
     # Equivalent env var: OPENAI_BILLABLE=false
     # billable: false
     # Send only this provider's traffic through an HTTP(S) or SOCKS5 proxy.

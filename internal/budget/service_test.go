@@ -683,6 +683,33 @@ func TestServiceCheckSkipsConsumerBudgetsForNonBillableProvider(t *testing.T) {
 	assert.Equal(t, ScopeProvider, exceeded.Result.Budget.Scope)
 }
 
+// A response-cache hit is checked against billed consumer budgets before the
+// provider is called; a hit of a non-billable provider owes nothing and is
+// admitted like the request itself.
+func TestServiceCheckCacheHitSkipsNonBillableProvider(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeStore{
+		budgets: []Budget{
+			{Scope: ScopeUserPath, Subject: "/", CostBasis: CostBasisBilled, PeriodSeconds: PeriodDailySeconds, Amount: 1},
+		},
+		sum: func(SpendWindow) (float64, bool, error) { return 50, true, nil },
+	}
+	service, err := NewService(ctx, store, WithBilledBudgets(true), WithBilledCacheHits(true))
+	require.NoError(t, err)
+	service.SetProviderBillable(func(name string) bool { return name != "byok-openai" })
+	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
+
+	var exceeded *ExceededError
+	err = service.CheckCacheHit(ctx, Subjects{UserPath: "/team", Provider: "openai-prod"}, now)
+	require.ErrorAs(t, err, &exceeded)
+	err = service.CheckCacheHit(ctx, Subjects{UserPath: "/team"}, now)
+	require.ErrorAs(t, err, &exceeded, "an unknown route is billable")
+
+	store.sumCalls = 0
+	require.NoError(t, service.CheckCacheHit(ctx, Subjects{UserPath: "/team", Provider: "byok-openai"}, now))
+	assert.Zero(t, store.sumCalls)
+}
+
 func TestServiceFailoverWithinBudget(t *testing.T) {
 	spent := map[Scope]float64{ScopeProvider: 5, ScopeUserPath: 20, ScopeLabel: 0}
 	store := &fakeStore{

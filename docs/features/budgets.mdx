@@ -209,9 +209,11 @@ A provider configured with `billable: false` serves requests whose cost the
 caller does not owe you, typically a customer's own API key registered as its
 own provider instance. User-path and label budgets neither gate a request
 routed to such a provider nor count its spend, on either cost basis. Provider
-budgets still apply to it and still count it. Usage is tracked and priced as
-usual, and each row records `billable: false`; the flag is stamped when the
-row is written, so changing it later does not rewrite past spend.
+budgets still apply to it: on provider cost they count its usage in full,
+while a billed-cost provider budget sees its billed cost of `0`. Usage is
+tracked and priced as usual, and each row records `billable: false`; the flag
+is stamped when the row is written, so changing it later does not rewrite past
+spend.
 
 For example, a platform lets users bring their own OpenAI key and also offers
 your hosted models. Register the user's key as a provider of its own, mark it
@@ -333,7 +335,9 @@ A billed budget:
 - gates response-cache hits too: while cache hits are billed, an exhausted
   billed user-path or label budget rejects a request before a cached response
   is replayed. Provider-cost budgets never count cache hits, and provider
-  budgets do not apply to them, since a hit is not routed to a provider.
+  budgets do not apply to them, since a hit is not routed to a provider. A
+  hit of a [non-billable provider](#non-billable-providers)'s model is
+  admitted regardless, as the request itself would be.
 - on a provider, still counts the billed cache hits of that provider's models
   in its spend. Set `BUDGETS_PROVIDER_BILLED_CACHE_HITS=false`
   (`budgets.provider_billed_cache_hits`) to limit only what was billed for

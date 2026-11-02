@@ -610,12 +610,6 @@ func TestApplyProviderEnvVars_Billable(t *testing.T) {
 			provider: "openai",
 			wantNil:  true,
 		},
-		{
-			name:     "invalid preserves yaml",
-			env:      map[string]string{"OPENAI_API_KEY": "sk-env", "OPENAI_BILLABLE": "maybe"},
-			raw:      map[string]config.RawProviderConfig{"openai": {Type: "openai", APIKey: "sk-yaml", Billable: &nonBillable}},
-			provider: "openai",
-		},
 	}
 
 	for _, tt := range tests {
@@ -633,6 +627,19 @@ func TestApplyProviderEnvVars_Billable(t *testing.T) {
 			require.Equal(t, tt.want, *billable)
 		})
 	}
+}
+
+// A malformed BILLABLE must fail loading rather than fall back to billable:
+// a typo would otherwise charge a customer for their own key.
+func TestApplyProviderEnvVars_BillableRejectsMalformedValue(t *testing.T) {
+	nonBillable := false
+	t.Setenv("OPENAI_API_KEY", "sk-env")
+	t.Setenv("OPENAI_BILLABLE", "maybe")
+
+	raw := map[string]config.RawProviderConfig{"openai": {Type: "openai", APIKey: "sk-yaml", Billable: &nonBillable}}
+	_, _, err := applyProviderEnvVars(t.Context(), nil, raw, testDiscoveryConfigs, os.Environ())
+	require.ErrorContains(t, err, "OPENAI_BILLABLE")
+	require.ErrorContains(t, err, `"maybe" is not a boolean`)
 }
 
 func TestApplyProviderEnvVars_DiscoversFromBaseURL(t *testing.T) {

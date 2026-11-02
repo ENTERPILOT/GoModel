@@ -298,6 +298,7 @@ func TestApplyBillsNonBillableEntriesAtZero(t *testing.T) {
 		assert.Zero(t, *entry.BilledCost)
 		assert.Nil(t, entry.MarkupPercent)
 		assert.Empty(t, entry.MarkupSelector)
-		assert.NotNil(t, entry.TotalCost, "the provider cost estimate is kept")
+		require.NotNil(t, entry.TotalCost)
+		assert.Equal(t, 4.0, *entry.TotalCost, "the provider cost estimate is kept")
 	}
 }

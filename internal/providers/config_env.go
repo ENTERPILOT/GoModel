@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"maps"
 	"math"
@@ -75,8 +76,14 @@ type providerOverlay struct {
 // supplied, if any.
 func (o *providerOverlay) apply(name string, values providerEnvValues, build func(providerEnvValues) config.RawProviderConfig) error {
 	values, err := values.resolveSettings(o.resolve)
-	if err != nil || values.empty() {
+	if err != nil {
 		return err
+	}
+	if values.invalid != nil {
+		return values.invalid
+	}
+	if values.empty() {
+		return nil
 	}
 	o.providers[name] = build(values)
 	if keys := values.sourcedAPIKeys(); len(keys) > 0 {
@@ -160,6 +167,9 @@ type providerEnvValues struct {
 	// pending holds the settings whose value contains "${", unparsed, until
 	// resolveSettings resolves them. A pending field counts as set.
 	pending map[providerEnvField]envVar
+	// invalid is the first malformed value of a setting that must not fall
+	// back to its default silently; apply fails with it.
+	invalid error
 }
 
 // envVar is one environment variable.
@@ -375,8 +385,12 @@ func (v *providerEnvValues) setField(field providerEnvField, index int, key, val
 			v.SessionStickyKeys = &parsed
 		}
 	case providerEnvFieldBillable:
+		// Billable is a cost control: a typo must not quietly leave the
+		// provider billable and charge a customer for their own key.
 		if parsed, err := strconv.ParseBool(strings.TrimSpace(value)); err == nil {
 			v.Billable = &parsed
+		} else if v.invalid == nil {
+			v.invalid = fmt.Errorf("%s: %q is not a boolean", key, value)
 		}
 	case providerEnvFieldInferenceObjective:
 		v.InferenceObjective = value

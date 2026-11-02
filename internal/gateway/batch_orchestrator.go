@@ -201,6 +201,7 @@ func (o *BatchOrchestrator) Create(ctx context.Context, req *core.BatchRequest, 
 			OriginalInputFileID:       batchPreparation.OriginalInputFileID,
 			RewrittenInputFileID:      batchPreparation.RewrittenInputFileID,
 			RequestID:                 strings.TrimSpace(meta.RequestID),
+			ProviderName:              batchProviderName(o.provider, providerType),
 			UserPath:                  core.UserPathFromContext(ctx),
 			SessionID:                 core.SessionIDFromContext(ctx),
 			AuthKeyID:                 core.GetAuthKeyID(ctx),
@@ -217,6 +218,17 @@ func (o *BatchOrchestrator) Create(ctx context.Context, req *core.BatchRequest, 
 	}
 
 	return &BatchCreateResult{Batch: &resp, Workflow: workflow, ProviderType: providerType}, nil
+}
+
+// batchProviderName names the provider instance a type-routed batch goes to:
+// the first registered instance of the type, which is the one the router
+// picks. It is empty when the router cannot say.
+func batchProviderName(provider core.Provider, providerType string) string {
+	resolver, ok := provider.(core.ProviderTypeNameResolver)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(resolver.GetProviderNameForType(providerType))
 }
 
 func (o *BatchOrchestrator) workflowForBatch(ctx context.Context, meta BatchMeta, selection BatchExecutionSelection) (*core.Workflow, error) {

@@ -151,6 +151,9 @@ import {
               >
               <td>
                 <span class="provider-badge">{providerDisplayValue(entry) || "-"}</span>
+                {#if entry.billable === false}
+                  <span class="alias-kind-badge" title={m.usage_not_billable_help()}>{m.usage_not_billable()}</span>
+                {/if}
               </td>
               <td class="mono font-size-md">{entry.model}</td>
               <td class="mono font-size-md">{entry.user_path || "-"}</td>
@@ -221,9 +224,6 @@ import {
               {#if showBilled}
                 <td class="col-price" title={billedCostTitle(entry)}>
                   {formatCost(entry.billed_cost)}
-                  {#if entry.billable === false}
-                    <span class="alias-kind-badge" title={m.usage_not_billable_help()}>{m.usage_not_billable()}</span>
-                  {/if}
                 </td>
               {/if}
               {#if !costsMode}
