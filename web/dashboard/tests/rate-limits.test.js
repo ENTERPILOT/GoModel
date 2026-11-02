@@ -760,3 +760,12 @@ test("a fuzzy-only rule survives a substring hit in another scope", () => {
     ["zz-provider-hit", "p-r-o-vi-d-e-r"],
   );
 });
+
+test("a unicode query reaches the rule without being flattened first", () => {
+  // Lowercasing before the matcher keeps the combining dot the matcher drops
+  // from the text, so the rule would disappear from its tab.
+  const rules = [
+    { scope: "user_path", subject: "/İstanbul", user_path: "/İstanbul", period_seconds: 60, period_label: "minute" },
+  ];
+  assert.deepEqual(filteredRateLimits(rules, "İstanbul").map((rule) => rule.subject), ["/İstanbul"]);
+});

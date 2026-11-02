@@ -141,8 +141,13 @@ export function filterDisplayModels(rows, modelFilter) {
     row.alias && row.alias.description,
     row.alias && row.alias_state_text,
     ...rowCategories(row),
-    rowCategories(row).join(","),
-  ]);
+  ], (entry) => {
+    // The filter used to read the categories as one comma-joined string; that
+    // haystack is substring-only, so a query cannot be assembled out of two
+    // categories by the subsequence level.
+    const categories = rowCategories(entry);
+    return categories.length ? [categories.join(",")] : [];
+  });
 }
 
 // displayRowEnabled reports the state the row's access toggle shows: an alias

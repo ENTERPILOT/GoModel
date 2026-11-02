@@ -4,7 +4,7 @@
 
 import * as m from "../../lib/paraglide/messages.js";
 import { formatNumber } from "../../lib/i18n/locale.js";
-import { filterFields } from "../../lib/utils/textMatch.js";
+import { filterFields, normalizeQuery } from "../../lib/utils/textMatch.js";
 
 export function defaultRateLimitForm() {
   return {
@@ -192,9 +192,9 @@ export function rateLimitUsagePercent(used, limit) {
 }
 
 export function filteredRateLimits(rules, filter) {
-  const needle = String(filter || "")
-    .trim()
-    .toLowerCase();
+  // Normalized, not lowercased: `toLowerCase` keeps the combining dot that the
+  // matcher drops from the searched text, so `/İstanbul` would answer nothing.
+  const needle = normalizeQuery(filter);
   const items = Array.isArray(rules) ? rules.slice() : [];
   const scopeOrder = { user_path: 0, provider: 1, model: 2 };
   items.sort((a, b) => {

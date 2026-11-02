@@ -2,7 +2,7 @@
 // node:test suite can exercise it directly.
 
 import * as m from "../../lib/paraglide/messages.js";
-import { filterFields } from "../../lib/utils/textMatch.js";
+import { filterFields, normalizeQuery } from "../../lib/utils/textMatch.js";
 
 // Tool filter modes. "exclude" stores disallowed_tools: every tool is exposed
 // except the listed ones, so tools the server adds later appear automatically.
@@ -470,7 +470,7 @@ export function switchMcpToolMode(form, mode, discovered) {
 // tools, or names added before the server connected). query narrows by name
 // or description.
 export function mcpToolPickerRows(form, discovered, query) {
-  const needle = String(query || "").trim().toLowerCase();
+  const needle = normalizeQuery(query);
   const known = new Set((discovered || []).map((tool) => tool.name));
   const rows = (discovered || []).map((tool) => ({
     ...tool,

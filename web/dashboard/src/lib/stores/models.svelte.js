@@ -77,10 +77,12 @@ class ModelsStore {
       m.selector ?? "",
       m.model?.owned_by ?? "",
       ...(m.model?.metadata?.categories ?? []),
-      // The filter used to search the comma-joined list; keep it so a query
-      // spanning two categories still matches.
-      (m.model?.metadata?.categories ?? []).join(","),
-    ]);
+    ], (entry) => {
+      // The old filter read the comma-joined list; that haystack stays
+      // substring-only so a subsequence cannot span two categories.
+      const categories = entry.model?.metadata?.categories ?? [];
+      return categories.length ? [categories.join(",")] : [];
+    });
   }
 }
 

@@ -230,3 +230,20 @@ test("an expanding fold and an astral character do not shift the range", () => {
   assert.ok(match.ranges.every((range) => Number.isInteger(range.start) && Number.isInteger(range.end)));
   assert.equal(text.slice(match.ranges[0].start, match.ranges[0].end), "ABC");
 });
+
+test("a substring-only haystack never feeds the subsequence level", () => {
+  // The old filter read categories as one comma-joined string. That haystack
+  // still answers a contiguous query spanning two of them, but it must not let
+  // the subsequence use characters from both: `abc` is not in `a` or in `bc`.
+  const rows = [{ cats: ["a", "bc"] }];
+  const joined = (row) => [row.cats.join(",")];
+  assert.deepEqual(filterFields(rows, "a,bc", (row) => row.cats, joined).length, 1);
+  assert.deepEqual(filterFields(rows, "abc", (row) => row.cats, joined), []);
+});
+
+test("every token start is considered, so a later one can win", () => {
+  // A budget on the scan cut this case: the tight window starts after 32
+  // candidate starts, and an earlier cut reported a wider span.
+  const text = "a-".repeat(32) + "a-b-c-d";
+  assert.equal(fuzzyMatch(text, "abcd").span, 4);
+});
