@@ -67,13 +67,22 @@ function fold(text) {
   return { chars, starts, ends, source };
 }
 
+// Characters whose lowercase depends on the rest of the string: Greek sigma
+// takes its final form at the end of a word, Turkish dotted/dotless i depends
+// on the locale. `toLowerCase()` on the whole string applies that context, the
+// per-code-point fold does not, so a string holding one of these must go
+// through the fold — otherwise the two sides are folded by different rules and
+// `ΟΣ` stops matching `ΟΣ`.
+const CONTEXT_SENSITIVE = /[\u0130\u0131\u03a3\u03c2]/;
+
 /**
- * Whether folding this string leaves every code point in place. When it does,
- * a native case-insensitive search already answers in the original's indexes.
+ * Whether a native case-insensitive search can answer for this string. It can
+ * when folding leaves every code point in place and the lowercase does not
+ * depend on the position of the character.
  */
 function foldKeepsLength(text) {
   const source = String(text ?? "");
-  return source.toLowerCase().length === source.length;
+  return source.toLowerCase().length === source.length && !CONTEXT_SENSITIVE.test(source);
 }
 
 /** Index of `needle` (an array of code points) inside `haystack`, or -1. */
@@ -216,8 +225,12 @@ function shortestTokenWindow(hay, wanted) {
     if (hay.chars[i] !== wanted[0]) continue;
     if (!startsToken(hay.source, hay.starts[i])) continue;
     const window = windowAt(hay.chars, wanted, i);
-    if (window && (!best || window[1] - window[0] < best[1] - best[0])) best = window;
-    if (best && best[1] - best[0] === wanted.length) break; // cannot be tighter
+    // A match that fails from one start fails from every later one: the rest of
+    // the field is a shorter suffix, so it cannot hold the needle either. The
+    // failing path therefore costs one scan instead of one per token start.
+    if (!window) break;
+    if (!best || window[1] - window[0] < best[1] - best[0]) best = window;
+    if (best[1] - best[0] === wanted.length) break; // cannot be tighter
   }
   return best;
 }
