@@ -144,6 +144,9 @@ func (o *BatchOrchestrator) Create(ctx context.Context, req *core.BatchRequest, 
 		}
 	}
 
+	// Resolved before the call, so the usage rows name the instance that was
+	// selected to serve the batch.
+	providerName := batchProviderName(o.provider, providerType)
 	var (
 		upstream *core.BatchResponse
 		hints    map[string]string
@@ -201,7 +204,7 @@ func (o *BatchOrchestrator) Create(ctx context.Context, req *core.BatchRequest, 
 			OriginalInputFileID:       batchPreparation.OriginalInputFileID,
 			RewrittenInputFileID:      batchPreparation.RewrittenInputFileID,
 			RequestID:                 strings.TrimSpace(meta.RequestID),
-			ProviderName:              batchProviderName(o.provider, providerType),
+			ProviderName:              providerName,
 			UserPath:                  core.UserPathFromContext(ctx),
 			SessionID:                 core.SessionIDFromContext(ctx),
 			AuthKeyID:                 core.GetAuthKeyID(ctx),

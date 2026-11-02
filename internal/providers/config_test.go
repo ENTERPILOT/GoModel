@@ -638,8 +638,8 @@ func TestApplyProviderEnvVars_BillableRejectsMalformedValue(t *testing.T) {
 
 	raw := map[string]config.RawProviderConfig{"openai": {Type: "openai", APIKey: "sk-yaml", Billable: &nonBillable}}
 	_, _, err := applyProviderEnvVars(t.Context(), nil, raw, testDiscoveryConfigs, os.Environ())
-	require.ErrorContains(t, err, "OPENAI_BILLABLE")
-	require.ErrorContains(t, err, `"maybe" is not a boolean`)
+	require.ErrorContains(t, err, "OPENAI_BILLABLE: value is not a boolean")
+	require.NotContains(t, err.Error(), "maybe", "the value may be a resolved secret")
 }
 
 func TestApplyProviderEnvVars_DiscoversFromBaseURL(t *testing.T) {

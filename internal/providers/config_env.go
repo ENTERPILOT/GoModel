@@ -390,7 +390,8 @@ func (v *providerEnvValues) setField(field providerEnvField, index int, key, val
 		if parsed, err := strconv.ParseBool(strings.TrimSpace(value)); err == nil {
 			v.Billable = &parsed
 		} else if v.invalid == nil {
-			v.invalid = fmt.Errorf("%s: %q is not a boolean", key, value)
+			// The value is left out: it may have come from a secret reference.
+			v.invalid = fmt.Errorf("%s: value is not a boolean", key)
 		}
 	case providerEnvFieldInferenceObjective:
 		v.InferenceObjective = value

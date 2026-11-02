@@ -82,6 +82,9 @@ func LogBatchUsageFromBatchResults(
 		}
 
 		provider := FirstNonEmpty(item.Provider, stored.Batch.Provider)
+		// Price by the instance when the batch recorded one, so its pricing
+		// overrides apply, as they do for requests.
+		pricingProvider := effectivePricingProvider(provider, stored.ProviderName)
 		model := FirstNonEmpty(item.Model, stringFromAny(payload["model"]))
 		providerID := FirstNonEmpty(
 			stringFromAny(payload["id"]),
@@ -92,11 +95,11 @@ func LogBatchUsageFromBatchResults(
 
 		var pricing *core.ModelPricing
 		if pricingResolver != nil && model != "" {
-			cacheKey := pricingCacheKey{model: model, provider: provider}
+			cacheKey := pricingCacheKey{model: model, provider: pricingProvider}
 			if cached, ok := pricingCache[cacheKey]; ok {
 				pricing = cached
 			} else {
-				pricing = pricingResolver.ResolvePricing(model, provider)
+				pricing = pricingResolver.ResolvePricing(model, pricingProvider)
 				pricingCache[cacheKey] = pricing
 			}
 		}
