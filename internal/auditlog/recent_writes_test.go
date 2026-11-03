@@ -123,6 +123,12 @@ func TestEntriesByID(t *testing.T) {
 	})
 }
 
+func init() {
+	// Another package's test may hold the index build lock; a store under
+	// test must not wait a minute for it.
+	backgroundIndexRetry = 50 * time.Millisecond
+}
+
 // A table created before the write stamp existed gains its columns on start,
 // and its existing rows stay out of RecentWrites.
 func TestSQLStoreAddsWriteStampColumns(t *testing.T) {

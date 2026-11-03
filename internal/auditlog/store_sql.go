@@ -35,10 +35,10 @@ type SQLStore struct {
 	stopCleanup   chan struct{}
 	closeOnce     sync.Once
 
-	// indexBuild tracks the background trigram search index build, so tests
-	// can wait for it; production never blocks on it. Close cancels a build
-	// still in flight rather than holding shutdown for it — the interrupted
-	// index is dropped and rebuilt on the next start.
+	// indexBuild tracks the background written_at and trigram search index
+	// builds, so tests can wait for them; production never blocks on them.
+	// Close cancels a build still in flight rather than holding shutdown for
+	// it — the interrupted index is dropped and rebuilt on the next start.
 	indexBuild       sync.WaitGroup
 	cancelIndexBuild context.CancelFunc
 }
@@ -193,11 +193,15 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 	// The written_at and trigram search indexes can take minutes to build on
 	// a large existing PostgreSQL table, so they are built off the startup
 	// path (and CONCURRENTLY, so writes keep flowing); readers pick each up as
-	// soon as it exists.
+	// soon as it exists. They are built one after the other, since PostgreSQL
+	// runs one concurrent build per table at a time.
 	buildCtx, cancel := context.WithCancel(context.Background())
 	store.cancelIndexBuild = cancel
 	store.indexBuild.Go(func() {
-		ensureWrittenAtIndex(buildCtx, db)
+		buildWrittenAtIndex(buildCtx, db)
+		if buildCtx.Err() != nil {
+			return
+		}
 		ensureTrigramSearchIndex(buildCtx, db, postgresErrorMessage)
 	})
 	if retentionDays > 0 {

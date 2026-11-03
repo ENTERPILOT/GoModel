@@ -3,9 +3,7 @@ package auditlog
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
-	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -50,7 +48,7 @@ const writtenAtIndex = "idx_audit_written_at"
 const writtenAtIndexDefinition = "audit_logs(written_at) WHERE written_at IS NOT NULL"
 
 // writtenAtIndexes creates the SQLite index inline. PostgreSQL builds it in
-// the background (ensureWrittenAtIndex) because the table it lands on can
+// the background (writtenAtBackgroundIndex) because the table it lands on can
 // already hold years of history.
 func writtenAtIndexes(dialect sqlx.Dialect) []string {
 	if dialect != sqlx.SQLite {
@@ -59,37 +57,31 @@ func writtenAtIndexes(dialect sqlx.Dialect) []string {
 	return []string{"CREATE INDEX IF NOT EXISTS " + writtenAtIndex + " ON " + writtenAtIndexDefinition}
 }
 
-// ensureWrittenAtIndex builds the PostgreSQL index CONCURRENTLY, so writes
-// keep flowing while it scans an existing table. An invalid index left by an
-// interrupted build is dropped and rebuilt.
-func ensureWrittenAtIndex(ctx context.Context, db sqlx.DB) {
-	if db.Dialect() != sqlx.PostgreSQL {
-		return
-	}
-	var valid *bool
-	err := db.QueryRow(ctx, `SELECT i.indisvalid FROM pg_index i WHERE i.indexrelid = to_regclass(?)`, writtenAtIndex).Scan(&valid)
-	if err == nil && valid != nil && *valid {
-		return
-	}
-	if err == nil && valid != nil {
-		slog.Warn("auditlog: rebuilding interrupted written_at index")
-		if _, err := db.Exec(ctx, "DROP INDEX CONCURRENTLY IF EXISTS "+writtenAtIndex); err != nil {
-			logWrittenAtIndexError(ctx, "drop invalid", err)
-			return
-		}
-	}
-	started := time.Now()
-	if _, err := db.Exec(ctx, "CREATE INDEX CONCURRENTLY IF NOT EXISTS "+writtenAtIndex+" ON "+writtenAtIndexDefinition); err != nil {
-		logWrittenAtIndexError(ctx, "create", err)
-		return
-	}
-	slog.Debug("auditlog: built written_at index", "duration", time.Since(started).Round(time.Millisecond))
+// writtenAtBackgroundIndex is the PostgreSQL written_at index, built
+// CONCURRENTLY so writes keep flowing while it scans an existing table.
+var writtenAtBackgroundIndex = storage.BackgroundIndex{
+	Name:   writtenAtIndex,
+	Create: "CREATE INDEX CONCURRENTLY IF NOT EXISTS " + writtenAtIndex + " ON " + writtenAtIndexDefinition,
+	Label:  "audit written_at",
 }
 
-func logWrittenAtIndexError(ctx context.Context, action string, err error) {
-	if ctx.Err() == nil {
-		slog.Warn("auditlog: failed to "+action+" written_at index", "error", err)
+// backgroundIndexLockKey serializes the audit index builds across replicas
+// (see storage.BackgroundIndexBuilder).
+const backgroundIndexLockKey int64 = 0x676d2d6175646974
+
+// backgroundIndexRetry is the pause between build attempts; tests shorten it.
+var backgroundIndexRetry = storage.BackgroundIndexRetry
+
+// buildWrittenAtIndex builds the PostgreSQL written_at index, retrying until
+// it is valid or ctx ends. It does nothing on SQLite, which builds the index
+// inline, or on a DB without a pool to hold the build lock on.
+func buildWrittenAtIndex(ctx context.Context, db sqlx.DB) {
+	pool := sqlx.PostgreSQLPool(db)
+	if pool == nil {
+		return
 	}
+	builder := storage.BackgroundIndexBuilder{Pool: pool, LockKey: backgroundIndexLockKey, Retry: backgroundIndexRetry}
+	builder.Build(ctx, writtenAtBackgroundIndex)
 }
 
 // RecentWrites implements RecentWriteReader.

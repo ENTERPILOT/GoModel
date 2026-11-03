@@ -187,9 +187,12 @@ func TestUsageSQLStoreAddsWriteStampColumns(t *testing.T) {
 		db, err := sqlx.NewPostgreSQL(pool)
 		require.NoError(t, err)
 		check(t, db, func() {
-			for _, index := range backgroundIndexes {
-				require.True(t, tryBuildBackgroundIndex(context.Background(), pool, index), index.name)
-			}
+			// Retried briefly: another package's test may hold the lock.
+			builder := backgroundIndexBuilder(pool)
+			builder.Retry = 50 * time.Millisecond
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			require.True(t, builder.Build(ctx, backgroundIndexes...))
 		})
 	})
 }
