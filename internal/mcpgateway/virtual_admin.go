@@ -126,10 +126,13 @@ func (s *Service) DeleteVirtual(ctx context.Context, name string) error {
 		return err
 	}
 	defer s.notifyChanged(ctx)
+	// Deferred after notifyChanged, so it runs first: the other replicas get
+	// the close mark whether or not this one's Reload succeeds, and before
+	// they are told to reload.
+	defer s.closeSharedEndpoint(ctx, virtualBindingPrefix+name)
 	if err := s.Reload(ctx); err != nil {
 		return fmt.Errorf("mcp virtual server %q was deleted but the running set was not updated: %w", name, err)
 	}
-	s.closeSharedEndpoint(ctx, virtualBindingPrefix+name)
 	s.closeEndpointSessions(virtualBindingPrefix + name)
 	return nil
 }

@@ -2,6 +2,7 @@ package mcpgateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -602,4 +603,39 @@ func TestSweepKeepsSessionsWithACallInFlight(t *testing.T) {
 	a.service.evictIdleBindings()
 	_, bound = a.binding(sessionID)
 	assert.False(t, bound)
+}
+
+// failingListStore is a server store whose List fails while fail is set, so
+// a Reload fails.
+type failingListStore struct {
+	*memoryStore
+	fail atomic.Bool
+}
+
+func (s *failingListStore) List(ctx context.Context) ([]ManagedServer, error) {
+	if s.fail.Load() {
+		return nil, errors.New("store unavailable")
+	}
+	return s.memoryStore.List(ctx)
+}
+
+// A virtual server deleted from the store ends its sessions on the other
+// replicas even when the deleting replica fails to reload afterwards.
+func TestDeleteVirtualClosesSharedSessionsWhenReloadFails(t *testing.T) {
+	store := newMemorySharedStore(time.Now)
+	servers := alphaServers(t)
+	virtualStore := &memoryVirtualStore{rows: map[string]ManagedVirtualServer{
+		"coding": {Name: "coding", Servers: []string{"alpha"}},
+	}}
+	serverStore := &failingListStore{memoryStore: &memoryStore{rows: map[string]ManagedServer{}}}
+	a := newReplica(t, store, Options{ConfigServers: servers, Store: serverStore, VirtualStore: virtualStore}, nil)
+	b := newReplica(t, store, Options{ConfigServers: servers, Store: &memoryStore{rows: map[string]ManagedServer{}}, VirtualStore: virtualStore}, nil)
+	sessionID := initializeRawSession(t, b.url+"/mcp/coding", nil)
+
+	serverStore.fail.Store(true)
+	require.Error(t, a.service.DeleteVirtual(context.Background(), "coding"))
+	_, marked := store.entry(sharedSessionNamespace, endpointCloseKey(virtualBindingPrefix+"coding"))
+	assert.True(t, marked, "the endpoint close mark is written despite the failed reload")
+	b.clock.Advance(sessionRecheckInterval)
+	assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, b.url+"/mcp/coding", listToolsBody, withSession(nil, sessionID)))
 }
