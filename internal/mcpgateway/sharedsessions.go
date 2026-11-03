@@ -211,8 +211,8 @@ func (s *Service) sharedSessionClosed(ctx context.Context, sessionID, endpoint s
 // most requests touch no database. A store error keeps the session: its
 // binding is still checked locally on every request.
 func (s *Service) recheckSharedSession(ctx context.Context, sessionID string, binding sessionBinding) bool {
-	now := s.now()
-	if now.Sub(binding.checkedAt) < sessionRecheckInterval {
+	recheck, touch := s.reserveRecheck(sessionID, binding.server)
+	if !recheck {
 		return true
 	}
 	ctx, cancel := context.WithTimeout(ctx, sharedSessionTimeout)
@@ -223,24 +223,40 @@ func (s *Service) recheckSharedSession(ctx context.Context, sessionID string, bi
 	} else if closed {
 		return false
 	}
-	touch := now.Sub(binding.touchedAt) >= sessionTouchInterval
 	if touch {
 		// A touch racing a DELETE elsewhere may rewrite a deleted record;
 		// the close mark still ends the session, since every read checks it.
-		if err := s.shared.Put(ctx, sharedSessionNamespace, sessionKey(sessionID), binding.record, now.Add(sessionIdleTimeout)); err != nil {
-			slog.Warn("failed to extend mcp session in the shared store", "error", err)
-		}
+		s.extendSharedSession(ctx, sessionID, binding.record)
 	}
-	s.bindMu.Lock()
-	if current, ok := s.bindings[sessionID]; ok && current.server == binding.server {
-		current.checkedAt = now
-		if touch {
-			current.touchedAt = now
-		}
-		s.bindings[sessionID] = current
-	}
-	s.bindMu.Unlock()
 	return true
+}
+
+// reserveRecheck claims the shared-store work a request for a hosted session
+// is due: rereading its close marks (recheck) and extending its shared expiry
+// (touch). Claiming under bindMu sends one of several concurrent requests to
+// the store, not each of them.
+func (s *Service) reserveRecheck(sessionID string, server *mcp.Server) (recheck, touch bool) {
+	now := s.now()
+	s.bindMu.Lock()
+	defer s.bindMu.Unlock()
+	binding, ok := s.bindings[sessionID]
+	if !ok || binding.server != server || !binding.shared || now.Sub(binding.checkedAt) < sessionRecheckInterval {
+		return false, false
+	}
+	binding.checkedAt = now
+	if touch = now.Sub(binding.touchedAt) >= sessionTouchInterval; touch {
+		binding.touchedAt = now
+	}
+	s.bindings[sessionID] = binding
+	return true, touch
+}
+
+// extendSharedSession pushes a session's shared expiry a full idle timeout
+// out from now.
+func (s *Service) extendSharedSession(ctx context.Context, sessionID string, record []byte) {
+	if err := s.shared.Put(ctx, sharedSessionNamespace, sessionKey(sessionID), record, s.now().Add(sessionIdleTimeout)); err != nil {
+		slog.Warn("failed to extend mcp session in the shared store", "error", err)
+	}
 }
 
 // resumeSession rebuilds a session from its shared record and hosts it here.
@@ -272,9 +288,7 @@ func (s *Service) resumeSession(ctx context.Context, sessionID string, record *s
 	// Resuming is activity: extend the expiry now rather than a minute later.
 	now := s.now()
 	putCtx, cancel := context.WithTimeout(ctx, sharedSessionTimeout)
-	if err := s.shared.Put(putCtx, sharedSessionNamespace, sessionKey(sessionID), raw, now.Add(sessionIdleTimeout)); err != nil {
-		slog.Warn("failed to extend mcp session in the shared store", "error", err)
-	}
+	s.extendSharedSession(putCtx, sessionID, raw)
 	cancel()
 
 	s.bindMu.Lock()

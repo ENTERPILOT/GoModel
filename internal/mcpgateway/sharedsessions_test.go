@@ -2,6 +2,7 @@ package mcpgateway
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -423,4 +424,65 @@ func TestDeleteWithUnsupportedProtocolVersionKeepsTheSession(t *testing.T) {
 			assert.Equal(t, http.StatusNoContent, rawMCPDelete(t, host.url+"/mcp", withVersion(owner, sessionID, "2099-01-01")))
 		})
 	}
+}
+
+// countingSharedStore counts the reads and writes that reach a shared store.
+// While gate is set, reads wait for it to close.
+type countingSharedStore struct {
+	ext.SharedStore
+	gate       chan struct{}
+	gets, puts atomic.Int64
+}
+
+func (c *countingSharedStore) Get(ctx context.Context, namespace, key string) ([]byte, bool, error) {
+	c.gets.Add(1)
+	if c.gate != nil {
+		<-c.gate
+	}
+	return c.SharedStore.Get(ctx, namespace, key)
+}
+
+func (c *countingSharedStore) Put(ctx context.Context, namespace, key string, value []byte, expiresAt time.Time) error {
+	c.puts.Add(1)
+	return c.SharedStore.Put(ctx, namespace, key, value, expiresAt)
+}
+
+// Concurrent requests for one session share its due recheck and touch: one
+// reads the close mark and one extends the expiry, not each of them.
+func TestConcurrentRequestsShareOneRecheck(t *testing.T) {
+	const requests = 8
+	clock := &testClock{}
+	store := &countingSharedStore{SharedStore: newMemorySharedStore(clock.Now)}
+	a := newReplica(t, store, Options{ConfigServers: alphaServers(t)}, clock)
+	sessionID := initializeRawSession(t, a.url+"/mcp", nil)
+	clock.Advance(sessionTouchInterval)
+	store.gets.Store(0)
+	store.puts.Store(0)
+	// The store holds the first recheck open; the requests that share it
+	// finish meanwhile.
+	store.gate = make(chan struct{})
+
+	finished := make(chan struct{}, requests)
+	var wg sync.WaitGroup
+	for id := range requests {
+		// Distinct JSON-RPC IDs: the session rejects a duplicate in flight.
+		body := fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"tools/list"}`, 10+id)
+		wg.Go(func() {
+			assert.Equal(t, http.StatusOK, rawMCPStatus(t, a.url+"/mcp", body, withSession(nil, sessionID)))
+			finished <- struct{}{}
+		})
+	}
+	timeout := time.After(5 * time.Second)
+wait:
+	for range requests - 1 {
+		select {
+		case <-finished:
+		case <-timeout:
+			break wait
+		}
+	}
+	close(store.gate)
+	wg.Wait()
+	assert.Equal(t, int64(1), store.gets.Load(), "close-mark reads")
+	assert.Equal(t, int64(1), store.puts.Load(), "expiry extensions")
 }
