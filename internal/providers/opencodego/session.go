@@ -78,6 +78,15 @@ func chatRequestHeaders(fn func(context.Context) http.Header) func(context.Conte
 	}
 }
 
+// responsesRequestHeaders adapts requestHeaders to the ResponsesRequestHeaders
+// hook signature: /responses requires x-opencode-session just like
+// /chat/completions (upstream answers 400 MissingSessionID without it).
+func responsesRequestHeaders(fn func(context.Context) http.Header) func(context.Context, *core.ResponsesRequest) http.Header {
+	return func(ctx context.Context, _ *core.ResponsesRequest) http.Header {
+		return fn(ctx)
+	}
+}
+
 // sessionID resolves the value for x-opencode-session. A client that already
 // speaks OpenCode Zen's dialect (OpenCode itself, pi, …) sends the header and
 // its value is forwarded verbatim; otherwise the session id GoModel detected
