@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 	"testing"
@@ -43,10 +44,17 @@ type fakeTable struct {
 	failLoads   int
 }
 
+// add stores a row whose request time is its write time.
 func (f *fakeTable) add(id, writer string, writtenAt time.Time) {
+	f.addRequest(id, writer, writtenAt, writtenAt)
+}
+
+// addRequest stores a row written at writtenAt for a request made at
+// requestAt.
+func (f *fakeTable) addRequest(id, writer string, writtenAt, requestAt time.Time) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.rows = append(f.rows, fakeRow{id: id, writer: writer, writtenAt: writtenAt.UnixMicro(), timestamp: writtenAt})
+	f.rows = append(f.rows, fakeRow{id: id, writer: writer, writtenAt: writtenAt.UnixMicro(), timestamp: requestAt})
 }
 
 func (f *fakeTable) calls() int {
@@ -83,8 +91,9 @@ func (f *fakeTable) load(ids []string) ([]fakeRow, error) {
 	for _, id := range ids {
 		wanted[id] = true
 	}
+	// Newest stored first, as no order is promised: the feed must sort.
 	var rows []fakeRow
-	for _, row := range f.rows {
+	for _, row := range slices.Backward(f.rows) {
 		if wanted[row.id] {
 			rows = append(rows, row)
 		}
@@ -394,6 +403,26 @@ func TestRemoteFeedPublishesAuditThenUsage(t *testing.T) {
 	require.NoError(t, json.Unmarshal(events[1].Data, &usageData))
 	assert.Equal(t, "req-usage-1", usageData["request_id"])
 	assert.InDelta(t, 15, usageData["total_tokens"], 0)
+}
+
+// Entries go out by request time, whatever the order they were written in,
+// their ids, or the store returns them in.
+func TestRemoteFeedPublishesByRequestTime(t *testing.T) {
+	audit := &fakeAuditTable{}
+	usageTable := &fakeUsageTable{}
+	for _, table := range []*fakeTable{&audit.fakeTable, &usageTable.fakeTable} {
+		// Request order: c, a, b. Write order: a, b, c. Stored order: b, c, a.
+		table.addRequest("b-third", testPeer, testT0.Add(-2*time.Second), testT0.Add(-10*time.Second))
+		table.addRequest("c-first", testPeer, testT0.Add(-1*time.Second), testT0.Add(-30*time.Second))
+		table.addRequest("a-second", testPeer, testT0.Add(-3*time.Second), testT0.Add(-20*time.Second))
+	}
+	h := newTestHarness(t, testSelf, audit, usageTable, &testClock{now: testT0})
+
+	sub := h.subscribe(t)
+	assert.Equal(t, []string{
+		EventAuditFlushed + ":c-first", EventAuditFlushed + ":a-second", EventAuditFlushed + ":b-third",
+		EventUsageFlushed + ":c-first", EventUsageFlushed + ":a-second", EventUsageFlushed + ":b-third",
+	}, eventIDs(t, pendingEvents(sub)))
 }
 
 func TestStartRemoteNeedsAReader(t *testing.T) {
