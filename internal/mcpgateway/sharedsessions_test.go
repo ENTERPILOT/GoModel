@@ -474,16 +474,19 @@ func TestConcurrentRequestsShareOneRecheck(t *testing.T) {
 		})
 	}
 	timeout := time.After(5 * time.Second)
+	early := 0
 wait:
 	for range requests - 1 {
 		select {
 		case <-finished:
+			early++
 		case <-timeout:
 			break wait
 		}
 	}
 	close(store.gate)
 	wg.Wait()
+	assert.Equal(t, requests-1, early, "requests sharing the recheck finish while it is in flight")
 	assert.Equal(t, int64(1), store.gets.Load(), "close-mark reads")
 	assert.Equal(t, int64(1), store.puts.Load(), "expiry extensions")
 }
@@ -526,7 +529,13 @@ func startSlowCall(t *testing.T, endpoint, sessionID string, entered chan struct
 		_ = resp.Body.Close()
 		status <- resp.StatusCode
 	}()
-	<-entered
+	select {
+	case <-entered:
+	case code := <-status:
+		require.FailNowf(t, "slow call returned before the tool started", "status %d", code)
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "timed out waiting for the slow tool to start")
+	}
 	return status
 }
 
