@@ -229,6 +229,63 @@ func TestPeerInFlightCountsWhileFreshAndExpires(t *testing.T) {
 	second.Release()
 }
 
+// failingLoadStore fails LoadCounters while err is set.
+type failingLoadStore struct {
+	*clusterStore
+	err error
+}
+
+func (s *failingLoadStore) LoadCounters(ctx context.Context, since int64) ([]WindowSnapshot, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.clusterStore.LoadCounters(ctx, since)
+}
+
+// A store that stays unreadable must not keep a stopped peer's slots taken:
+// they free once its row goes stale, as they would had the loads succeeded.
+func TestPeerInFlightExpiresWhileLoadsFail(t *testing.T) {
+	ctx := context.Background()
+	shared := newClusterStore(t, Rule{
+		Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodConcurrent,
+		MaxRequests: new(int64(1)), Source: SourceManual,
+	})
+	a := replica(t, shared)
+	store := &failingLoadStore{clusterStore: shared}
+	b, err := NewService(ctx, store, WithFlushInterval(0))
+	require.NoError(t, err)
+	t.Cleanup(b.Close)
+	b.now = shared.clock.Now
+	b.Start(ctx)
+	b.flushInterval = time.Second
+	now := shared.clock.Now
+
+	held, err := a.Acquire(onPath("/team"), now())
+	require.NoError(t, err)
+	defer held.Release()
+	a.flush(ctx)
+	b.flush(ctx)
+	_, err = b.Acquire(onPath("/team"), now())
+	require.Error(t, err, "the peer's slot counts while fresh")
+
+	b.persistMu.Lock()
+	loadedAt, fullAt := b.peers.loadedAt, b.peers.fullAt
+	b.persistMu.Unlock()
+
+	// The peer stops, and the store becomes unreadable.
+	store.err = errors.New("store down")
+	shared.clock.Advance(b.inFlightLiveness() + time.Second)
+	b.flush(ctx)
+	reservation, err := b.Acquire(onPath("/team"), now())
+	require.NoError(t, err, "a stale peer slot frees even though the load failed")
+	reservation.Release()
+
+	b.persistMu.Lock()
+	assert.Equal(t, loadedAt, b.peers.loadedAt, "a failed load does not move the incremental mark")
+	assert.Equal(t, fullAt, b.peers.fullAt)
+	b.persistMu.Unlock()
+}
+
 func TestIncrementalLoadKeepsUnchangedRowsAndDropsRolledOutOnes(t *testing.T) {
 	ctx := context.Background()
 	store := newClusterStore(t, Rule{

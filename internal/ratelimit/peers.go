@@ -180,6 +180,15 @@ func (s *Service) loadPeers(ctx context.Context) error {
 	rows, err := s.store.LoadCounters(loadCtx, since)
 	cancel()
 	if err != nil {
+		// Sum the cached rows again anyway: an in-flight row only counts
+		// while it is fresh, and nothing else ages the installed gauges, so
+		// a store that stays unreadable would otherwise keep a stopped
+		// writer's slots taken for as long as it does. The load marks stay
+		// put, so the next load still reads everything since the last one
+		// that succeeded.
+		s.persistMu.Lock()
+		s.installSums()
+		s.persistMu.Unlock()
 		return err
 	}
 	s.installPeers(rows, startedAt, full)
@@ -197,6 +206,12 @@ func (s *Service) installPeers(rows []WindowSnapshot, loadedAt time.Time, full b
 	if full {
 		s.peers.fullAt = loadedAt
 	}
+	s.installSums()
+}
+
+// installSums sums the cached rows as of now and installs them as the
+// limiter's remote counters. The caller must hold persistMu.
+func (s *Service) installSums() {
 	requests, tokens, inFlight := s.peers.sum(s.Rules(), s.now(), s.inFlightLiveness())
 	s.limiter.setRemote(requests, tokens, inFlight)
 }
