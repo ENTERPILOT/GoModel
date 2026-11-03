@@ -732,3 +732,39 @@ func TestLongCallDoesNotReviveADeletedSession(t *testing.T) {
 	clock.Advance(sessionCloseMarkLifetime)
 	assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, b.url+"/mcp", listToolsBody, withSession(nil, sessionID)))
 }
+
+// failingGetStore is a shared store whose reads fail while fail is set, and
+// which counts its writes.
+type failingGetStore struct {
+	ext.SharedStore
+	fail atomic.Bool
+	puts atomic.Int64
+}
+
+func (s *failingGetStore) Get(ctx context.Context, namespace, key string) ([]byte, bool, error) {
+	if s.fail.Load() {
+		return nil, false, errors.New("store read timed out")
+	}
+	return s.SharedStore.Get(ctx, namespace, key)
+}
+
+func (s *failingGetStore) Put(ctx context.Context, namespace, key string, value []byte, expiresAt time.Time) error {
+	s.puts.Add(1)
+	return s.SharedStore.Put(ctx, namespace, key, value, expiresAt)
+}
+
+// When the close marks cannot be read, the replica hosting a session keeps
+// serving it but does not extend its record: the session may have been
+// closed elsewhere, and an extended record would outlive the close mark.
+func TestUnreadableCloseMarksDoNotExtendTheSession(t *testing.T) {
+	clock := &testClock{}
+	store := &failingGetStore{SharedStore: newMemorySharedStore(clock.Now)}
+	a := newReplica(t, store, Options{ConfigServers: alphaServers(t)}, clock)
+	sessionID := initializeRawSession(t, a.url+"/mcp", nil)
+
+	store.fail.Store(true)
+	store.puts.Store(0)
+	clock.Advance(sessionTouchInterval)
+	assert.Equal(t, http.StatusOK, rawMCPStatus(t, a.url+"/mcp", listToolsBody, withSession(nil, sessionID)))
+	assert.Zero(t, store.puts.Load(), "no expiry extension without a close-mark read")
+}

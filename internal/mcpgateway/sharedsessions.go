@@ -218,8 +218,8 @@ func (s *Service) sharedSessionClosed(ctx context.Context, sessionID, endpoint s
 
 // recheckSharedSession reports whether a hosted session is still open
 // cluster-wide, and extends its shared expiry. Both run at a bounded rate, so
-// most requests touch no database. A store error keeps the session: its
-// binding is still checked locally on every request.
+// most requests touch no database. A failed read keeps the session, whose
+// binding is still checked locally on every request, without extending it.
 func (s *Service) recheckSharedSession(ctx context.Context, sessionID string, binding sessionBinding) bool {
 	recheck, touch := s.reserveRecheck(sessionID, binding.server)
 	if !recheck {
@@ -229,8 +229,13 @@ func (s *Service) recheckSharedSession(ctx context.Context, sessionID string, bi
 	closed, err := s.sharedSessionClosed(readCtx, sessionID, binding.endpoint, binding.openedAt)
 	cancel()
 	if err != nil {
+		// Keep serving, but extend nothing: the session may have been closed
+		// elsewhere, and extending its record past the close mark's lifetime
+		// would let it resume once the mark expires.
 		slog.Warn("failed to recheck mcp session in the shared store", "error", err)
-	} else if closed {
+		return true
+	}
+	if closed {
 		return false
 	}
 	if touch {
