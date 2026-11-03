@@ -408,7 +408,7 @@ coordinate across instances.
 | [Rate limits](/features/rate-limits) | In-memory, per instance | Effective limit is about `N x` the configured limit. Counters survive a restart, and a reset clears every replica. |
 | Circuit breakers | In-memory, per process | Each replica learns an outage separately, so upstream sees up to `N x failure_threshold` failures before any breaker opens. |
 | [Session affinity](/features/session-keeping) pins | In-memory, per instance | Sessions stick per replica, not globally, unless the load balancer is sticky. |
-| [Live logs](/advanced/admin-endpoints#admin-dashboard) | Local events in memory, other replicas' from the database | A dashboard sees its own replica's requests instantly and every other replica's within about 7 seconds, once they are persisted. See [live logs across replicas](#live-logs-across-replicas). |
+| [Live logs](/advanced/admin-endpoints#admin-dashboard) | Local events in memory, other replicas' from the database | A dashboard sees its own replica's requests instantly and every other replica's typically within 7 seconds, once they are persisted. See [live logs across replicas](#live-logs-across-replicas). |
 | MCP downstream sessions | In-memory, per instance | An `Mcp-Session-Id` from one replica returns 404 on another. [MCP](/features/mcp-gateway) clients need sticky sessions. |
 | Provider request health | In-memory, per instance | Dashboard provider status reflects the replica that answered. |
 
@@ -431,7 +431,8 @@ Requests served by another replica:
 
 - appear only once that replica has flushed them, so after up to
   `LOGGING_FLUSH_INTERVAL` / `USAGE_FLUSH_INTERVAL` (default 5 seconds) plus
-  the 2-second poll, about 7 seconds at most;
+  the 2-second poll, typically within 7 seconds; a write the database is slow
+  to finish shows up once it completes, so later than that;
 - appear as completed entries, with status, duration, model, provider, usage
   and cost, but no in-flight or per-chunk streaming preview; bodies load from
   the database when you expand the entry;
@@ -441,8 +442,10 @@ Requests served by another replica:
 
 Under heavy traffic, at most 200 audit and 200 usage entries from other
 replicas are streamed per poll, the newest first. The rest are still in the
-list after a refresh. Replica clocks should agree within a few seconds, which
-NTP gives you.
+list after a refresh. A dashboard that reconnects, or a replica whose reads
+failed for a while, catches up on what the other replicas persisted in the
+meantime, up to 5 minutes back. Replica clocks should agree within a few
+seconds, which NTP gives you.
 
 ### Config changes reach every replica within seconds
 

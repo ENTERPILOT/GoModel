@@ -34,9 +34,18 @@ const (
 	// for stamped entries. It must exceed remoteInterval plus the time a
 	// batch takes to become visible and the clock skew between replicas: an
 	// entry stamped earlier than that by the time it is visible is missed.
-	// Entries already published are remembered for the window, so the
-	// overlap between polls never publishes one twice.
-	remoteWindow = 10 * time.Second
+	// A logger stamps its batch before a write it allows 30 seconds, so the
+	// window covers that with room for skew. Entries already published are
+	// remembered for the window, so the overlap between polls never
+	// publishes one twice.
+	remoteWindow = 40 * time.Second
+
+	// remoteResumeLimit bounds how far back a poll reaches to pick up where
+	// the last complete one left off, after the feed stopped polling for
+	// want of a subscriber or after reads failed. A dashboard that reconnects
+	// with its replay cursor then still gets what its peers persisted
+	// meanwhile.
+	remoteResumeLimit = 5 * time.Minute
 
 	// remoteWriteLimit caps the stamps one poll reads per table, newest
 	// first. Busier traffic than that per window loses its oldest entries.
@@ -93,6 +102,7 @@ type remoteFeed struct {
 	usage    usage.RecentWriteReader
 	interval time.Duration
 	window   time.Duration
+	resume   time.Duration
 
 	// now and newTicker are the clock; tests replace them, and set polled
 	// to learn when a poll has finished.
@@ -117,6 +127,7 @@ func newRemoteFeed(b *Broker, cfg RemoteConfig) *remoteFeed {
 		usage:     cfg.Usage,
 		interval:  remoteInterval,
 		window:    remoteWindow,
+		resume:    remoteResumeLimit,
 		now:       time.Now,
 		newTicker: realTicker,
 		auditSeen: remoteSeen{table: "audit"},
@@ -189,21 +200,21 @@ func (f *remoteFeed) pollWhileSubscribed(ctx context.Context) {
 func (f *remoteFeed) poll(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, remotePollTimeout)
 	defer cancel()
-	since := f.now().Add(-f.window).UnixMicro()
+	span := remoteSpan{now: f.now().UnixMicro(), window: f.window.Microseconds(), resume: f.resume.Microseconds()}
 	// Audit first: a usage event merges into the audit row it belongs to.
 	if f.audit != nil {
-		f.auditSeen.poll(ctx, since, f.writer, f.audit.RecentWrites, f.publishAudit)
+		f.auditSeen.poll(ctx, span, f.writer, f.audit.RecentWrites, f.publishAudit)
 	}
 	if f.usage != nil {
-		f.usageSeen.poll(ctx, since, f.writer, f.usage.RecentWrites, f.publishUsage)
+		f.usageSeen.poll(ctx, span, f.writer, f.usage.RecentWrites, f.publishUsage)
 	}
 	if f.polled != nil {
 		f.polled()
 	}
 }
 
-func (f *remoteFeed) publishAudit(ctx context.Context, ids []string) error {
-	entries, err := f.audit.PreviewsByID(ctx, ids)
+func (f *remoteFeed) publishAudit(ctx context.Context, writes []storage.RecentWrite) error {
+	entries, err := f.audit.PreviewsByID(ctx, recentWriteIDs(writes))
 	if err != nil {
 		return err
 	}
@@ -218,8 +229,8 @@ func (f *remoteFeed) publishAudit(ctx context.Context, ids []string) error {
 	return nil
 }
 
-func (f *remoteFeed) publishUsage(ctx context.Context, ids []string) error {
-	entries, err := f.usage.LogEntriesByID(ctx, ids)
+func (f *remoteFeed) publishUsage(ctx context.Context, writes []storage.RecentWrite) error {
+	entries, err := f.usage.LogEntriesByID(ctx, recentWriteIDs(writes))
 	if err != nil {
 		return err
 	}
@@ -232,21 +243,52 @@ func (f *remoteFeed) publishUsage(ctx context.Context, ids []string) error {
 	return nil
 }
 
+func recentWriteIDs(writes []storage.RecentWrite) []string {
+	ids := make([]string, len(writes))
+	for i, write := range writes {
+		ids[i] = write.ID
+	}
+	return ids
+}
+
+// remoteSpan is one poll's clock: now, the window and the resume limit, all
+// in unix microseconds.
+type remoteSpan struct {
+	now, window, resume int64
+}
+
 // remoteSeen remembers which stamped entries of one table were published,
 // each until its stamp leaves the window.
 type remoteSeen struct {
 	table string
 	ids   map[string]int64
+	// covered is the start of the last complete poll's window: that poll
+	// read and published every stamp from there on that was visible, so the
+	// next poll reads from there, or further back if it fails too.
+	covered int64
 	// failure is the last logged error, so a lasting one is logged once.
 	failure string
 }
 
+// since is where a poll starts reading: the window, extended back to the
+// last complete poll's window so that nothing that became visible in between
+// is missed however long ago that poll was, though never past the resume
+// limit.
+func (s *remoteSeen) since(span remoteSpan) int64 {
+	since := span.now - span.window
+	if s.covered > 0 && s.covered < since {
+		since = max(s.covered, span.now-span.resume)
+	}
+	return since
+}
+
 type recentWritesFunc func(ctx context.Context, since int64, excludeWriter string, limit int) ([]storage.RecentWrite, error)
 
-// poll publishes the entries stamped since that it has not published yet.
-// They are remembered only once published, so a failed load is retried on
-// the next poll while the entries are still in the window.
-func (s *remoteSeen) poll(ctx context.Context, since int64, writer string, recent recentWritesFunc, publish func(context.Context, []string) error) {
+// poll publishes the entries stamped since the start of its span that it has
+// not published yet. They are remembered only once published, so a failed
+// load is retried on the next poll, which reaches back to cover it.
+func (s *remoteSeen) poll(ctx context.Context, span remoteSpan, writer string, recent recentWritesFunc, publish func(context.Context, []storage.RecentWrite) error) {
+	since := s.since(span)
 	writes, err := recent(ctx, since, writer, remoteWriteLimit)
 	if err != nil {
 		s.logFailure(ctx, err)
@@ -275,22 +317,17 @@ func (s *remoteSeen) poll(ctx context.Context, since int64, writer string, recen
 		}
 		fresh = append(fresh, write)
 	}
-	if len(fresh) == 0 {
-		s.clearFailure()
-		return
-	}
-	ids := make([]string, len(fresh))
-	for i, write := range fresh {
-		ids[i] = write.ID
-	}
-	if err := publish(ctx, ids); err != nil {
-		s.logFailure(ctx, err)
-		return
+	if len(fresh) > 0 {
+		if err := publish(ctx, fresh); err != nil {
+			s.logFailure(ctx, err)
+			return
+		}
+		for _, write := range fresh {
+			s.ids[write.ID] = write.WrittenAt
+		}
 	}
 	s.clearFailure()
-	for _, write := range fresh {
-		s.ids[write.ID] = write.WrittenAt
-	}
+	s.covered = span.now - span.window
 }
 
 func (s *remoteSeen) logFailure(ctx context.Context, err error) {

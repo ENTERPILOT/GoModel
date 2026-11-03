@@ -312,7 +312,10 @@ func TestRemoteFeedPublishesEachRemoteEntryOnce(t *testing.T) {
 	assert.Equal(t, []string{EventAuditFlushed + ":remote-late"}, eventIDs(t, pendingEvents(sub)),
 		"an entry that becomes visible late is still published")
 
+	// The first poll past the window still reads from where the last one
+	// started; the next one forgets what left both.
 	clock.Advance(remoteWindow + time.Second)
+	h.tick(t)
 	h.tick(t)
 	assert.Empty(t, pendingEvents(sub))
 	assert.Empty(t, h.feed.auditSeen.ids, "entries that left the window are forgotten")
@@ -423,6 +426,44 @@ func TestRemoteFeedPublishesByRequestTime(t *testing.T) {
 		EventAuditFlushed + ":c-first", EventAuditFlushed + ":a-second", EventAuditFlushed + ":b-third",
 		EventUsageFlushed + ":c-first", EventUsageFlushed + ":a-second", EventUsageFlushed + ":b-third",
 	}, eventIDs(t, pendingEvents(sub)))
+}
+
+// A poll picks up where the last complete one left off, so neither a spell
+// without subscribers nor failed reads leave a gap a reconnecting dashboard
+// would miss; the resume limit bounds how far back it reaches.
+func TestRemoteFeedResumesWhereTheLastPollLeftOff(t *testing.T) {
+	audit := &fakeAuditTable{}
+	clock := &testClock{now: testT0}
+	h := newTestHarness(t, testSelf, audit, nil, clock)
+
+	sub := h.subscribe(t)
+	assert.Empty(t, pendingEvents(sub))
+	h.unsubscribe(t, sub)
+
+	// Persisted while no dashboard watched, and out of the window by the
+	// time one reconnects.
+	audit.add("during-idle", testPeer, testT0.Add(time.Second))
+	clock.Advance(2 * remoteWindow)
+	sub = h.subscribe(t)
+	assert.Equal(t, []string{EventAuditFlushed + ":during-idle"}, eventIDs(t, pendingEvents(sub)))
+
+	// Reads fail for longer than the window, then recover.
+	audit.failLoads = 1
+	audit.add("during-failure", testPeer, clock.Now().Add(time.Second))
+	clock.Advance(2 * time.Second)
+	h.tick(t)
+	assert.Empty(t, pendingEvents(sub))
+	clock.Advance(2 * remoteWindow)
+	h.tick(t)
+	assert.Equal(t, []string{EventAuditFlushed + ":during-failure"}, eventIDs(t, pendingEvents(sub)))
+	h.unsubscribe(t, sub)
+
+	audit.add("too-long-ago", testPeer, clock.Now().Add(time.Second))
+	audit.add("recent", testPeer, clock.Now().Add(remoteResumeLimit+time.Second))
+	clock.Advance(remoteResumeLimit + 2*time.Second)
+	sub = h.subscribe(t)
+	assert.Equal(t, []string{EventAuditFlushed + ":recent"}, eventIDs(t, pendingEvents(sub)),
+		"nothing older than the resume limit")
 }
 
 func TestStartRemoteNeedsAReader(t *testing.T) {
