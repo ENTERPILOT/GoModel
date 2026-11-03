@@ -583,6 +583,12 @@ func TestCallEndExtendsTheSharedSession(t *testing.T) {
 	clock.Advance(sessionIdleTimeout / 2)
 	release()
 	require.Equal(t, http.StatusOK, <-call)
+	// The response reaches the client before the handler returns and ends
+	// the POST, which extends the record.
+	require.Eventually(t, func() bool {
+		entry, ok := store.entry(sharedSessionNamespace, sessionKey(sessionID))
+		return ok && entry.ExpiresAt.After(clock.Now().Add(sessionIdleTimeout-time.Minute))
+	}, 5*time.Second, 5*time.Millisecond, "the end of the call extends the record")
 
 	clock.Advance(sessionIdleTimeout * 3 / 4)
 	assert.Equal(t, http.StatusOK, rawMCPStatus(t, b.url+"/mcp", listToolsBody, withSession(nil, sessionID)))
@@ -605,6 +611,12 @@ func TestSweepKeepsSessionsWithACallInFlight(t *testing.T) {
 
 	release()
 	require.Equal(t, http.StatusOK, <-call)
+	// The response reaches the client before the handler returns and ends
+	// the POST.
+	require.Eventually(t, func() bool {
+		binding, ok := a.binding(sessionID)
+		return ok && binding.posts == 0
+	}, 5*time.Second, 5*time.Millisecond)
 	a.service.evictIdleBindings()
 	_, bound = a.binding(sessionID)
 	assert.True(t, bound, "the idle timeout counts from the end of the call")
