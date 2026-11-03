@@ -713,6 +713,8 @@ func TestLongCallDoesNotReviveADeletedSession(t *testing.T) {
 	b := newReplica(t, store, Options{ConfigServers: servers}, clock)
 	sessionID := initializeRawSession(t, a.url+"/mcp", nil)
 
+	hosted, ok := a.binding(sessionID)
+	require.True(t, ok)
 	startSlowCall(t, a.url+"/mcp", sessionID, entered)
 	require.Equal(t, http.StatusNoContent, rawMCPDelete(t, b.url+"/mcp", withSession(nil, sessionID)))
 	clock.Advance(sessionIdleTimeout / 2)
@@ -722,6 +724,10 @@ func TestLongCallDoesNotReviveADeletedSession(t *testing.T) {
 	}, 5*time.Second, 5*time.Millisecond, "the replica running the call ends the deleted session")
 	_, stored := store.entry(sharedSessionNamespace, sessionKey(sessionID))
 	assert.False(t, stored, "the deleted record is not written back")
+	// Closing waits for the call to drain.
+	release()
+	assert.Eventually(t, func() bool { return !hasSessions(hosted.server) }, 5*time.Second, 5*time.Millisecond,
+		"the hosted session is closed, not only unbound")
 
 	clock.Advance(sessionCloseMarkLifetime)
 	assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, b.url+"/mcp", listToolsBody, withSession(nil, sessionID)))
