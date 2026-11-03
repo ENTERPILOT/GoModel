@@ -110,6 +110,7 @@ Cache dokładny hashuje:
 - łańcuch guardrails, do którego rozwiązuje się request, w fazach promptu,
   odpowiedzi i strumienia
 - końcowe body requestu
+- efektywny `user_path`, tylko gdy `partition_by_user_path` jest włączone (patrz niżej)
 
 Oznacza to, że guardrails i workflow wpływają na klucze cache'u, gdy zmieniają
 rozwiązany workflow lub końcowe body przekazywane do wykonania.
@@ -161,19 +162,57 @@ generuje ostrzeżenie przy starcie.
 
 ## Zachowanie `user_path`
 
-W cache'u dokładnym `user_path` sam w sobie nie jest dodawany do klucza cache'u.
+Domyślnie `user_path` nie jest częścią klucza cache'u w żadnej z dwóch warstw.
 
 To zamierzone. Jeśli dwa requesty mają tę samą ścieżkę, rozwiązany workflow
-i końcowe body requestu, mogą współdzielić ten sam wpis cache'u dokładnego,
-nawet jeśli pochodzą z różnych wartości `user_path`.
+i końcowe body requestu, mogą współdzielić ten sam wpis, nawet jeśli pochodzą
+z różnych wartości `user_path`; w cache'u semantycznym dotyczy to także podobnych
+promptów. Współdzielenie daje najlepszy współczynnik trafień, ale oznacza też, że
+tenant może otrzymać odpowiedź zapisaną dla innego tenanta.
 
-<Note>
-  Jeśli potrzebujesz zachowania cache'u specyficznego dla tenanta lub ścieżki, użyj
-  workflow z zakresem albo w inny sposób spraw, by końcowy request różnił się dla tego
-  zakresu. Sam `user_path` nie jest kluczem partycjonowania cache'u dokładnego.
-</Note>
+### Partycjonowanie cache'u według `user_path`
 
-Typowe wzorce:
+Włącz partycjonowanie, gdy wywołujący nie mogą otrzymywać nawzajem swoich
+odpowiedzi z cache'u, na przykład gdy klucze API powiązane z `user_path` należą do
+różnych tenantów:
+
+```yaml
+cache:
+  response:
+    partition_by_user_path: true # domyślnie: false
+```
+
+Możesz też ustawić `RESPONSE_CACHE_PARTITION_BY_USER_PATH=true`.
+
+Ustawienie obejmuje każdą warstwę cache'u używaną przez powyższe endpointy
+(embeddingi i System One używają tylko cache'u dokładnego), ze streamingiem i bez
+niego:
+
+- Requesty z różnymi efektywnymi wartościami `user_path` nigdy nie współdzielą wpisu.
+  W cache'u dokładnym równoczesne identyczne chybienia czekają tylko na request
+  z tej samej ścieżki.
+- Ścieżki muszą zgadzać się dokładnie. `/team/alpha` nie używa wpisów z `/team` ani
+  z `/team/alpha/bob`.
+- Requesty bez `user_path` tworzą własną partycję, oddzielną od `/`.
+- Każda ścieżka płaci za swój pierwszy request, więc współczynnik trafień spada, gdy
+  tenanci wysyłają te same prompty.
+
+<Warning>
+  Izolacja działa tylko między kluczami API powiązanymi z `user_path`. Klucz główny
+  i klucze zarządzane bez powiązanej ścieżki wybierają ścieżkę przez
+  [nagłówek user path](/pl/features/user-path), więc mogą czytać każdą partycję;
+  to samo dotyczy wszystkich wywołujących, gdy uwierzytelnianie jest wyłączone.
+</Warning>
+
+Zmiana ustawienia powoduje chybienia dla istniejących wpisów: nigdy nie są one
+serwowane między trybami. Nie są też usuwane. Wygasają zgodnie z TTL i będą znów
+serwowane, jeśli wrócisz do poprzedniego trybu wcześniej. Aby wcześniej współdzielone
+wpisy nie wróciły, przed powrotem odczekaj TTL albo wyczyść cache. Wpisy
+semantyczne zapisane z `ttl: 0` nigdy nie wygasają, więc je wyczyść.
+
+### Inne sposoby zawężania cache'u
+
+Jeśli potrzebujesz tylko innego zachowania cache'u dla zakresu, a nie izolacji:
 
 - wyłącz cache w workflow z zakresem
 - używaj różnych workflow z zakresem dla różnych wartości `user_path`

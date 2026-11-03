@@ -13,6 +13,7 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/modeldata"
 )
 
@@ -448,7 +449,7 @@ func fetchProviderInventory(
 		return resp, reason, fetchAt, nil
 	}
 
-	resp, err := provider.ListModels(ctx)
+	resp, err := provider.ListModels(llmclient.WithoutCircuitBreaker(ctx))
 	fetchAt = time.Now().UTC()
 	resp, reason := applyConfiguredProviderModels(
 		providerName,
