@@ -436,8 +436,12 @@ Requests served by another replica:
 - appear as completed entries, with status, duration, model, provider, usage
   and cost, but no in-flight or per-chunk streaming preview; bodies load from
   the database when you expand the entry;
-- appear only if they were persisted, so a replica with audit logging or usage
-  tracking off contributes nothing to that view;
+- appear only if they were persisted. Audit entries and usage entries come
+  from separate features: a replica with audit logging off contributes no
+  audit entries, and one with usage tracking off no usage entries. The
+  replica your dashboard is connected to shows another replica's audit
+  entries only with audit logging on itself, and its usage entries only with
+  usage tracking on;
 - are slotted into the list by request time, below anything newer.
 
 Under heavy traffic, at most 200 audit and 200 usage entries from other
