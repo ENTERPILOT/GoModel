@@ -50,9 +50,9 @@ func (s *translatedInferenceService) canForwardMessagesNatively(ctx context.Cont
 	if len(s.inference().FailoverSelectors(workflow)) > 0 {
 		return false
 	}
-	// A forced reasoning effort rewrites the request, which the verbatim
-	// body cannot carry.
-	if s.inference().ReasoningEffortOverride(ctx, workflow) != "" {
+	// A forced reasoning effort or request parameters rewrite the request,
+	// which the verbatim body cannot carry.
+	if !s.inference().RequestOverrides(ctx, workflow).IsZero() {
 		return false
 	}
 	_, ok := s.provider.(core.RoutablePassthrough)

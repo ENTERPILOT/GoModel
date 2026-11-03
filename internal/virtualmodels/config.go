@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/requestparams"
 )
 
 // ConfigModels converts declarative config.yaml / VIRTUAL_MODELS entries into
@@ -37,9 +38,22 @@ func configModel(entry config.VirtualModelConfig) VirtualModel {
 		Description:     entry.Description,
 		Slowdown:        entry.Slowdown,
 		ReasoningEffort: entry.ReasoningEffort,
+		Params:          configParams(entry.Params),
+		DefaultParams:   configParams(entry.DefaultParams),
 		Enabled:         enabled,
 		Managed:         true,
 	}
+}
+
+// configParams encodes a decoded YAML or JSON object. YAML and JSON values
+// always encode, so the row carries the failure as an invalid parameter and
+// snapshot validation reports it rather than dropping the setting silently.
+func configParams(values map[string]any) requestparams.Set {
+	set, err := requestparams.FromAny(values)
+	if err != nil {
+		set = requestparams.Set{"": nil}
+	}
+	return set
 }
 
 // configTargets maps the explicit targets list, falling back to the single

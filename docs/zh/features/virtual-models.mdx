@@ -66,6 +66,39 @@ virtual_models:
 
 由于具体模型的覆盖优先于其上方的所有别名，请只在模型无法接受某些级别时设置它，并把策略放在别名上。例如，同一模型的 `fast` 和 `smart` 别名可以分别发送 `low` 和 `high`；若在该模型上设置覆盖，两者都会发送该模型的值。这与减速相反，减速以别名为准。与减速一样，精确覆盖优先于按模型的覆盖，未设置推理强度的条目不会遮蔽更宽泛的值。
 
+## 设置请求参数
+
+在重定向或具体模型上设置 **params** 和 **default_params**，即可向上游发送请求参数。`default_params` 只在客户端省略某个键时填入该键；`params` 则替换客户端发送的任何值，`null` 值会从请求中删除该键。对调用方可以自行调整的采样参数使用默认值，对别名必须固定的设置使用 `params`。这两个映射都可以在 `config.yaml`、`VIRTUAL_MODELS` 环境变量、Admin API 和控制台编辑器中设置；模型策略记录（没有目标的条目）同样接受它们。
+
+键使用 OpenAI Chat Completions 的写法（`temperature`、`top_p`、`max_tokens`、`presence_penalty` 等）。提供商特有的键，例如 vLLM 的 `top_k`、`min_p`、`repetition_penalty` 和 `chat_template_kwargs`，会原样透传。提供商适配器转换已配置值的方式与转换客户端值完全相同：在 OpenAI 推理模型上 `max_tokens` 仍会变为 `max_completion_tokens`，在 Responses API 上则设置 `max_output_tokens`。
+
+例如，同一个自托管模型的多个别名使用不同的思考和采样设置：
+
+```yaml
+virtual_models:
+  - source: qwen-thinking-low
+    target: vllm/Qwen3.8-27B
+    reasoning_effort: low
+    params:
+      chat_template_kwargs: { enable_thinking: true, preserve_thinking: true }
+    default_params:
+      temperature: 1.0
+      top_p: 0.95
+      top_k: 20
+      min_p: 0.0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+  - source: qwen-fast
+    target: vllm/Qwen3.8-27B
+    params:
+      chat_template_kwargs: { enable_thinking: false }
+      top_k: null # 删除客户端发送的键
+```
+
+对每个请求，GoModel 依次应用客户端请求体、`default_params`、`params`，最后是[推理强度覆盖](#强制推理强度)，后者仍是独立的类型化字段。对象只合并一层，因此客户端自己的 `chat_template_kwargs` 会保留别名未设置的成员；标量和数组则直接替换。`model`、`provider`、`messages`、`input`、`instructions`、`tools`、`stream`、`stream_options`、`reasoning`、`reasoning_effort`、`previous_response_id`、`conversation` 和 `prompt` 不能配置，同一条记录的两个映射中也不能出现同一个键。值在保存时会被校验（`temperature` 和 `top_p` 必须是数字，`max_tokens` 必须是非负整数，等等），每条记录最多 64 个键、16 KiB。
+
+记录之间的优先级按键逐一确定，并遵循推理强度的规则：具体模型的策略优先于其上方的任何重定向，内层[链式](#链式虚拟模型)虚拟模型优先于外层。故障转移到另一个模型的尝试只会获得该模型的参数，并从客户端请求重新构建；主模型的参数绝不会泄漏到其中。[护栏](/zh/advanced/guardrails)插件先于这些覆盖运行，因此 `params` 会替换插件设置的值，而 `default_params` 会尊重它。参数适用于 Chat Completions、Responses API 和 Anthropic Messages API（当有参数生效时，原生 Messages 直通会改走转换路径）；批处理、`/p/` 下的提供商直通、嵌入和媒体端点不会被改写。[缓存](/zh/features/cache)键包含已应用的参数，因此同一模型的两个参数不同的别名绝不会共用一个缓存条目。
+
 本页其余部分介绍重定向。
 
 ## 使用稳定的名称
@@ -237,7 +270,7 @@ VIRTUAL_MODELS=[{"source":"smart","strategy":"cost","targets":[{"model":"openai/
 每个条目接受 `source`、单个 `target`（简写）或 `targets` 列表、`strategy`（`round_robin`、`cost` 或
 `failover`）、`session_affinity`（默认 `true`；参见[会话保持](/zh/features/session-keeping)）、
 `failover`（默认 `true`；参见[故障转移](/zh/features/failover)）、`user_paths`、`description`、
-`slowdown`（`0` 表示禁用继承的减速；有效系数范围为 `0.1` 到 `10`）、`reasoning_effort`（参见[强制推理强度](#强制推理强度)）以及 `enabled`。
+`slowdown`（`0` 表示禁用继承的减速；有效系数范围为 `0.1` 到 `10`）、`reasoning_effort`（参见[强制推理强度](#强制推理强度)）、`params` 和 `default_params`（参见[设置请求参数](#设置请求参数)）以及 `enabled`。
 目标的 `model` 可以指定另一个已声明的虚拟模型（参见[链式虚拟模型](#链式虚拟模型)）。
 将目标留空即可在 `source` 选择器上声明访问策略。无效的声明（未知策略、缺失或自引用的目标、链中存在循环或链深度
 超过 8 个虚拟模型，或目标的 `provider` 与任何已配置的提供商都不匹配，即拼写错误）会导致启动失败，

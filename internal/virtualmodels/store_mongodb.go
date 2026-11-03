@@ -10,6 +10,8 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+
+	"github.com/enterpilot/gomodel/internal/requestparams"
 )
 
 type mongoVirtualModelDocument struct {
@@ -26,6 +28,8 @@ type mongoVirtualModelDocument struct {
 	Description     string    `bson:"description,omitempty"`
 	Slowdown        *float64  `bson:"slowdown,omitempty"`
 	ReasoningEffort string    `bson:"reasoning_effort,omitempty"`
+	Params          bson.M    `bson:"params,omitempty"`
+	DefaultParams   bson.M    `bson:"default_params,omitempty"`
 	Enabled         bool      `bson:"enabled"`
 	CreatedAt       time.Time `bson:"created_at"`
 	UpdatedAt       time.Time `bson:"updated_at"`
@@ -111,6 +115,8 @@ func (s *MongoDBStore) Upsert(ctx context.Context, vm VirtualModel) error {
 			"description":      vm.Description,
 			"slowdown":         vm.Slowdown,
 			"reasoning_effort": vm.ReasoningEffort,
+			"params":           paramsToBSON(vm.Params),
+			"default_params":   paramsToBSON(vm.DefaultParams),
 			"enabled":          vm.Enabled,
 			"updated_at":       vm.UpdatedAt,
 		},
@@ -153,6 +159,8 @@ func virtualModelFromMongo(doc mongoVirtualModelDocument) VirtualModel {
 		Description:     doc.Description,
 		Slowdown:        doc.Slowdown,
 		ReasoningEffort: doc.ReasoningEffort,
+		Params:          paramsFromBSON(doc.Params),
+		DefaultParams:   paramsFromBSON(doc.DefaultParams),
 		Enabled:         doc.Enabled,
 		CreatedAt:       doc.CreatedAt.UTC(),
 		UpdatedAt:       doc.UpdatedAt.UTC(),
@@ -164,6 +172,30 @@ func virtualModelFromMongo(doc mongoVirtualModelDocument) VirtualModel {
 		vm.UserPaths = append([]string(nil), doc.UserPaths...)
 	}
 	return vm
+}
+
+// paramsToBSON stores a parameter set as a document. A null value, the
+// marker that strips a key, is stored as BSON null.
+func paramsToBSON(set requestparams.Set) bson.M {
+	values := requestparams.ToAny(set)
+	if values == nil {
+		return nil
+	}
+	return bson.M(values)
+}
+
+// paramsFromBSON re-encodes a stored document as raw JSON values; validation
+// at snapshot build re-checks them like any other row.
+func paramsFromBSON(doc bson.M) requestparams.Set {
+	if len(doc) == 0 {
+		return nil
+	}
+	values, _ := plainBSONValue(doc).(map[string]any)
+	set, err := requestparams.FromAny(values)
+	if err != nil {
+		return nil
+	}
+	return set
 }
 
 // strategyConfigFromBSON turns a decoded config into plain maps and slices:

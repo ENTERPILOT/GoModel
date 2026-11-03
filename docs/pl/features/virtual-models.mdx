@@ -106,6 +106,78 @@ wartość. To odwrotność spowolnienia, gdzie wygrywa alias. Tak jak przy
 spowolnieniu, dokładne nadpisanie wygrywa z ustawieniem dla całego modelu, a
 wpis bez effort nie przesłania ogólniejszego.
 
+## Ustawianie parametrów żądania
+
+Ustaw **params** i **default_params** na przekierowaniu lub konkretnym modelu,
+aby wysyłać parametry żądania dalej. `default_params` uzupełnia klucz tylko
+wtedy, gdy klient go pominął; `params` zastępuje to, co wysłał klient, a
+wartość `null` usuwa klucz z żądania. Używaj wartości domyślnych dla
+parametrów samplingu, które wywołujący mogą dostrajać, a `params` dla
+ustawień, które alias musi przypiąć. Obie mapy są dostępne w `config.yaml`, w
+zmiennej środowiskowej `VIRTUAL_MODELS`, w admin API i w edytorze w
+dashboardzie; przyjmuje je także wiersz polityki modelu (wpis bez celów).
+
+Klucze używają pisowni OpenAI Chat Completions (`temperature`, `top_p`,
+`max_tokens`, `presence_penalty`, ...). Klucze specyficzne dla providera, takie
+jak `top_k`, `min_p`, `repetition_penalty` i `chat_template_kwargs` z vLLM,
+przechodzą bez zmian. Adaptery providerów tłumaczą skonfigurowane wartości
+dokładnie tak, jak wartości klienta: `max_tokens` nadal staje się
+`max_completion_tokens` w modelach reasoning OpenAI i `max_output_tokens` w
+Responses API.
+
+Na przykład kilka aliasów jednego modelu hostowanego samodzielnie z różnymi
+ustawieniami myślenia i samplingu:
+
+```yaml
+virtual_models:
+  - source: qwen-thinking-low
+    target: vllm/Qwen3.8-27B
+    reasoning_effort: low
+    params:
+      chat_template_kwargs: { enable_thinking: true, preserve_thinking: true }
+    default_params:
+      temperature: 1.0
+      top_p: 0.95
+      top_k: 20
+      min_p: 0.0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+  - source: qwen-fast
+    target: vllm/Qwen3.8-27B
+    params:
+      chat_template_kwargs: { enable_thinking: false }
+      top_k: null # usuń klucz wysłany przez klienta
+```
+
+Dla każdego żądania GoModel stosuje ciało żądania klienta, następnie
+`default_params`, potem `params`, a na końcu
+[nadpisanie reasoning effort](#wymuszanie-reasoning-effort), które pozostaje
+osobnym typowanym polem. Obiekty są scalane na jednym poziomie głębokości, więc
+własne `chat_template_kwargs` klienta zachowuje składowe, których alias nie
+ustawia; skalary i tablice są zastępowane. Kluczy `model`, `provider`,
+`messages`, `input`, `instructions`, `tools`, `stream`, `stream_options`,
+`reasoning`, `reasoning_effort`, `previous_response_id`, `conversation` i
+`prompt` nie można skonfigurować, a klucz nie może wystąpić w obu mapach
+jednego wiersza. Wartości są walidowane przy zapisie (`temperature` i `top_p`
+muszą być liczbami, `max_tokens` nieujemną liczbą całkowitą itd.), do 64
+kluczy i 16 KiB na wiersz.
+
+Pierwszeństwo między wierszami jest ustalane dla każdego klucza osobno i
+działa według reguły reasoning effort: polityka konkretnego modelu wygrywa z
+każdym przekierowaniem nad nim, a wewnętrzny
+[połączony w łańcuch](#łączenie-modeli-wirtualnych-w-łańcuchy) model wirtualny
+z zewnętrznym. Próba failover do innego modelu otrzymuje wyłącznie parametry
+tego modelu, zbudowane od nowa z żądania klienta; parametry modelu
+podstawowego nigdy do niej nie przeciekają. Wtyczki
+[Guardrails](/pl/advanced/guardrails) działają wcześniej, więc `params`
+zastępuje wartość ustawioną przez wtyczkę, a `default_params` ją respektuje.
+Parametry dotyczą Chat Completions, Responses API i Anthropic Messages API
+(natywny passthrough Messages korzysta ze ścieżki z tłumaczeniem, gdy mają
+zastosowanie parametry); batche, passthrough providera pod `/p/`, embeddingi i
+endpointy mediów nie są przepisywane. Klucze [cache](/pl/features/cache)
+zawierają zastosowane parametry, więc dwa aliasy jednego modelu z różnymi
+parametrami nigdy nie dzielą wpisu.
+
 Reszta tej strony dotyczy przekierowań.
 
 ## Używanie stabilnych nazw
@@ -335,7 +407,9 @@ Każdy wpis przyjmuje `source`, pojedynczy `target` (skrót) lub listę `targets
 [Failover](/pl/features/failover)), `user_paths`, `description`,
 `slowdown` (`0` wyłącza odziedziczone spowolnienie; aktywne współczynniki mieszczą się w zakresie od `0.1` do
 `10`), `reasoning_effort` (zobacz
-[Wymuszanie reasoning effort](#wymuszanie-reasoning-effort)) oraz `enabled`.
+[Wymuszanie reasoning effort](#wymuszanie-reasoning-effort)), `params` i
+`default_params` (zobacz
+[Ustawianie parametrów żądania](#ustawianie-parametrów-żądania)) oraz `enabled`.
 `model` celu może wskazywać inny zadeklarowany model wirtualny (zobacz
 [Łączenie modeli wirtualnych w łańcuchy](#łączenie-modeli-wirtualnych-w-łańcuchy)).
 Zostaw cele puste, aby zadeklarować politykę dostępu dla selektora `source`.

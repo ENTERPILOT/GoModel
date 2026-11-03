@@ -1,0 +1,131 @@
+package requestparams
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/enterpilot/gomodel/internal/validation"
+)
+
+func raw(s string) json.RawMessage { return json.RawMessage(s) }
+
+func TestNormalize(t *testing.T) {
+	long := strings.Repeat("k", MaxKeyLen+1)
+	tests := []struct {
+		name      string
+		set       Set
+		allowNull bool
+		want      Set
+		wantErr   string
+	}{
+		{name: "empty set is nil", set: Set{}, want: nil},
+		{
+			name: "values are compacted",
+			set:  Set{"chat_template_kwargs": raw(`{ "enable_thinking" : true }`), "top_k": raw(" 20 ")},
+			want: Set{"chat_template_kwargs": raw(`{"enable_thinking":true}`), "top_k": raw("20")},
+		},
+		{name: "null allowed in forced params", set: Set{"top_k": nil}, allowNull: true, want: Set{"top_k": nil}},
+		{name: "null literal allowed in forced params", set: Set{"top_k": raw("null")}, allowNull: true, want: Set{"top_k": nil}},
+		{name: "null refused in defaults", set: Set{"top_k": nil}, wantErr: `parameter "top_k" must have a value`},
+		{name: "invalid JSON", set: Set{"top_k": raw("{")}, wantErr: "not valid JSON"},
+		{name: "frozen key", set: Set{"model": raw(`"x"`)}, wantErr: `parameter "model" cannot be configured`},
+		{name: "reasoning effort has its own field", set: Set{"reasoning_effort": raw(`"low"`)}, wantErr: `"reasoning_effort" cannot be configured`},
+		{name: "padded key", set: Set{" top_k": raw("1")}, wantErr: "cannot be empty or padded"},
+		{name: "empty key", set: Set{"": raw("1")}, wantErr: "cannot be empty or padded"},
+		{name: "long key", set: Set{long: raw("1")}, wantErr: "longer than"},
+		{name: "control characters", set: Set{"a\nb": raw("1")}, wantErr: "control characters"},
+		{name: "temperature must be a number", set: Set{"temperature": raw(`"hot"`)}, wantErr: `"temperature" has the wrong type`},
+		{name: "max_tokens must be an integer", set: Set{"max_tokens": raw(`1.5`)}, wantErr: `"max_tokens" has the wrong type`},
+		{name: "max_tokens must not be negative", set: Set{"max_tokens": raw(`-1`)}, wantErr: `"max_tokens" has the wrong type`},
+		{name: "parallel_tool_calls must be a bool", set: Set{"parallel_tool_calls": raw(`1`)}, wantErr: "wrong type"},
+		{name: "user must be a string", set: Set{"user": raw(`1`)}, wantErr: "wrong type"},
+		{name: "tool_choice string or object", set: Set{"tool_choice": raw(`[1]`)}, wantErr: "wrong type"},
+		{name: "tool_choice object ok", set: Set{"tool_choice": raw(`{"type":"function"}`)}, want: Set{"tool_choice": raw(`{"type":"function"}`)}},
+		{name: "metadata must be string map", set: Set{"metadata": raw(`{"a":1}`)}, wantErr: "wrong type"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Normalize("params", tt.set, tt.allowNull)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.True(t, validation.IsError(err), "must be a validation error")
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestNormalizeLimits(t *testing.T) {
+	tooMany := make(Set, MaxKeys+1)
+	for i := range MaxKeys + 1 {
+		tooMany["k"+strings.Repeat("x", i%10)+string(rune('a'+i%26))+strings.Repeat("y", i/26)] = raw("1")
+	}
+	_, err := Normalize("params", tooMany, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "at most")
+
+	big := Set{"blob": raw(`"` + strings.Repeat("x", MaxBytes) + `"`)}
+	_, err = Normalize("params", big, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exceed")
+}
+
+func TestDisjoint(t *testing.T) {
+	require.NoError(t, Disjoint(Set{"a": raw("1")}, Set{"b": raw("2")}))
+	err := Disjoint(Set{"a": raw("1")}, Set{"a": raw("2")})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `"a" cannot be in both`)
+}
+
+func TestMergeAndLayer(t *testing.T) {
+	base := Set{"a": raw("1"), "b": raw("2")}
+	over := Set{"b": raw("3"), "c": raw("4")}
+	merged := Merge(base, over)
+	assert.Equal(t, Set{"a": raw("1"), "b": raw("3"), "c": raw("4")}, merged)
+	assert.Equal(t, Set{"a": raw("1"), "b": raw("2")}, base, "inputs are not mutated")
+	assert.Equal(t, base, Merge(base, nil))
+	assert.Equal(t, over, Merge(nil, over))
+
+	outer := Overrides{ReasoningEffort: "high", Params: Set{"top_k": raw("20")}, Defaults: Set{"temperature": raw("1")}}
+	inner := Overrides{Params: Set{"top_k": raw("5")}, Defaults: Set{"top_p": raw("0.9")}}
+	layered := outer.Layer(inner)
+	assert.Equal(t, "high", layered.ReasoningEffort, "an inner row without an effort keeps the outer one")
+	assert.Equal(t, Set{"top_k": raw("5")}, layered.Params)
+	assert.Equal(t, Set{"temperature": raw("1"), "top_p": raw("0.9")}, layered.Defaults)
+	assert.True(t, Overrides{}.IsZero())
+	assert.False(t, layered.IsZero())
+}
+
+func TestFromAnyAndToAny(t *testing.T) {
+	set, err := FromAny(map[string]any{"temperature": 1.0, "top_k": nil, "chat_template_kwargs": map[string]any{"enable_thinking": true}})
+	require.NoError(t, err)
+	assert.Equal(t, raw("1"), set["temperature"])
+	assert.Nil(t, set["top_k"])
+	assert.JSONEq(t, `{"enable_thinking":true}`, string(set["chat_template_kwargs"]))
+
+	values := ToAny(set)
+	assert.Equal(t, float64(1), values["temperature"])
+	assert.Nil(t, values["top_k"])
+	assert.Equal(t, map[string]any{"enable_thinking": true}, values["chat_template_kwargs"])
+
+	empty, err := FromAny(nil)
+	require.NoError(t, err)
+	assert.Nil(t, empty)
+	assert.Nil(t, ToAny(nil))
+}
+
+func TestClone(t *testing.T) {
+	set := Set{"a": raw("1"), "b": nil}
+	cloned := Clone(set)
+	cloned["a"][0] = '9'
+	assert.Equal(t, raw("1"), set["a"])
+	assert.Nil(t, cloned["b"])
+	assert.Nil(t, Clone(nil))
+}

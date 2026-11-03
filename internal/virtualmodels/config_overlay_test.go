@@ -372,3 +372,35 @@ func TestService_ManagedRedirectToleratesTransientCatalogGapAfterStartup(t *test
 	require.True(t, changed)
 	require.Equal(t, "openai/gpt-4o", sel.QualifiedModel())
 }
+
+func TestConfigModels_Params(t *testing.T) {
+	t.Parallel()
+	got := ConfigModels([]config.VirtualModelConfig{{
+		Source:        "qwen-thinking-low",
+		Target:        "vllm/qwen",
+		Params:        map[string]any{"chat_template_kwargs": map[string]any{"enable_thinking": true}, "top_k": nil},
+		DefaultParams: map[string]any{"temperature": 1.0},
+	}})
+	require.Len(t, got, 1)
+	require.JSONEq(t, `{"enable_thinking":true}`, string(got[0].Params["chat_template_kwargs"]))
+	require.Contains(t, got[0].Params, "top_k")
+	require.Nil(t, got[0].Params["top_k"], "a YAML null is the strip marker")
+	require.JSONEq(t, `1`, string(got[0].DefaultParams["temperature"]))
+	require.True(t, got[0].Managed)
+}
+
+// A declared row with invalid parameters must fail the refresh loudly rather
+// than load without the setting.
+func TestConfigModels_InvalidParamsFailRefresh(t *testing.T) {
+	t.Parallel()
+	svc, err := NewService(newSQLVMStore(t), testCatalog(), true)
+	require.NoError(t, err)
+	svc.SetConfigModels(ConfigModels([]config.VirtualModelConfig{{
+		Source: "bad",
+		Target: "openai/gpt-4o",
+		Params: map[string]any{"model": "x"},
+	}}))
+	err = svc.Refresh(context.Background())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `parameter "model"`)
+}

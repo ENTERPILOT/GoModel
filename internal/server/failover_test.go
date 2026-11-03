@@ -41,6 +41,7 @@ type failoverProvider struct {
 	supportedModels    map[string]string
 	providerNames      map[string]string
 	chatCalls          []string
+	chatRequests       []*core.ChatRequest
 	responsesCalls     []string
 	embeddingCalls     []string
 	embeddingRequests  []*core.EmbeddingRequest
@@ -49,6 +50,7 @@ type failoverProvider struct {
 func (p *failoverProvider) ChatCompletion(_ context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
 	key := requestSelector(req.Model, req.Provider)
 	p.chatCalls = append(p.chatCalls, key)
+	p.chatRequests = append(p.chatRequests, req)
 	if err := p.chatErrors[key]; err != nil {
 		return nil, err
 	}
