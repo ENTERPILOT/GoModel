@@ -178,9 +178,13 @@ zastępuje wartość ustawioną przez wtyczkę, a `default_params` ją respektuj
 Parametry dotyczą Chat Completions, Responses API i Anthropic Messages API
 (natywny passthrough Messages korzysta ze ścieżki z tłumaczeniem, gdy mają
 zastosowanie parametry); batche, passthrough providera pod `/p/`, embeddingi i
-endpointy mediów nie są przepisywane. Klucze [cache](/pl/features/cache)
-zawierają zastosowane parametry, więc dwa aliasy jednego modelu dzielą wpis
-tylko wtedy, gdy wysyłają upstream to samo żądanie.
+endpointy mediów nie są przepisywane. Klucz dokładnego
+[cache](/pl/features/cache) jest budowany z zastosowanego żądania, więc dwa
+aliasy jednego modelu dzielą dokładny wpis tylko wtedy, gdy wysyłają upstream
+to samo żądanie. Cache semantyczny haszuje tylko parametry kształtujące
+odpowiedź (model, temperature, top_p, limit tokenów, reasoning, narzędzia,
+response format), więc aliasy różniące się tylko innymi kluczami, np. `top_k`
+lub `chat_template_kwargs`, mogą dzielić wpis semantyczny.
 
 Reszta tej strony dotyczy przekierowań.
 

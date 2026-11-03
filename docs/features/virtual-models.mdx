@@ -172,9 +172,12 @@ value a plugin set and `default_params` respects it. Parameters apply to Chat
 Completions, the Responses API, and the Anthropic Messages API (native
 Messages passthrough takes the translated path when parameters apply);
 batches, provider passthrough under `/p/`, embeddings, and media endpoints
-are not rewritten. [Cache](/features/cache) keys include the applied
-parameters, so two aliases of one model share an entry only when they send
-the same request upstream.
+are not rewritten. The exact [cache](/features/cache) key is built from the
+applied request, so two aliases of one model share an exact entry only when
+they send the same request upstream. The semantic cache hashes only its
+output-shaping parameters (model, temperature, top_p, max tokens, reasoning,
+tools, response format), so aliases that differ only in other keys, such as
+`top_k` or `chat_template_kwargs`, can share a semantic entry.
 
 The rest of this page covers redirects.
 
