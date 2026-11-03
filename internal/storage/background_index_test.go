@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -49,17 +50,23 @@ func holdLock(t *testing.T, pool *pgxpool.Pool) (release func()) {
 	require.NoError(t, err)
 	_, err = conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, testIndexLockKey)
 	require.NoError(t, err)
-	released := false
+	// Once, because a timer and the test cleanup can both release, and the
+	// cleanup must wait for a release the timer started. The error is
+	// checked in the cleanup, on the test goroutine.
+	var (
+		once      sync.Once
+		unlockErr error
+	)
 	release = func() {
-		if released {
-			return
-		}
-		released = true
-		defer conn.Release()
-		_, err := conn.Exec(ctx, `SELECT pg_advisory_unlock($1)`, testIndexLockKey)
-		require.NoError(t, err)
+		once.Do(func() {
+			defer conn.Release()
+			_, unlockErr = conn.Exec(ctx, `SELECT pg_advisory_unlock($1)`, testIndexLockKey)
+		})
 	}
-	t.Cleanup(release)
+	t.Cleanup(func() {
+		release()
+		require.NoError(t, unlockErr)
+	})
 	return release
 }
 
@@ -153,4 +160,23 @@ func TestBackgroundIndexBuilderStopEndsRetries(t *testing.T) {
 	}
 	exists, _ := indexState(t, pool)
 	assert.False(t, exists)
+}
+
+// An index that keeps failing does not hold up the ones after it.
+func TestBackgroundIndexBuilderBuildsPastAFailingIndex(t *testing.T) {
+	pool := newBackgroundIndexPool(t)
+	if pool == nil {
+		return
+	}
+	broken := BackgroundIndex{
+		Name:   "idx_background_items_missing",
+		Create: `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_background_items_missing ON background_items(missing_column)`,
+		Label:  "broken test",
+	}
+	builder := BackgroundIndexBuilder{Pool: pool, LockKey: testIndexLockKey, Retry: 20 * time.Millisecond}
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	assert.False(t, builder.Build(ctx, broken, testIndex), "the broken index never becomes valid")
+	_, valid := indexState(t, pool)
+	assert.True(t, valid, "the index after it is built anyway")
 }

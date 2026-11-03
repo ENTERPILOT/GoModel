@@ -9,7 +9,7 @@ import (
 // backgroundIndexes are the PostgreSQL usage indexes added to a table that
 // already holds history. They are built CONCURRENTLY off the startup path
 // instead of in ensureUsageSchema, so a large table keeps accepting writes
-// while they build; each is built once the previous one is valid.
+// while they build.
 var backgroundIndexes = []storage.BackgroundIndex{
 	{
 		// Serves the auth_key_id filter.

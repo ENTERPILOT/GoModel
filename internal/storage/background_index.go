@@ -44,9 +44,9 @@ type BackgroundIndexBuilder struct {
 	Retry time.Duration
 }
 
-// Start builds the indexes in the background, in order, each once the
-// previous one is valid. The returned stop cancels the build and waits for it
-// to return; it is safe to call more than once.
+// Start builds the indexes in the background until each is valid. The
+// returned stop cancels the build and waits for it to return; it is safe to
+// call more than once.
 func (b BackgroundIndexBuilder) Start(indexes ...BackgroundIndex) (stop func()) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
@@ -60,23 +60,36 @@ func (b BackgroundIndexBuilder) Start(indexes ...BackgroundIndex) (stop func()) 
 	}
 }
 
-// Build builds the indexes in order, retrying each until it is valid, and
-// reports whether all of them are. It returns false only when ctx ends first.
+// Build tries each index that is not valid yet, one at a time and in order,
+// and repeats every Retry until all of them are valid. An index that keeps
+// failing does not hold up the ones after it. It reports whether all are
+// valid, which is false only when ctx ends first.
 func (b BackgroundIndexBuilder) Build(ctx context.Context, indexes ...BackgroundIndex) bool {
 	retry := b.Retry
 	if retry <= 0 {
 		retry = BackgroundIndexRetry
 	}
-	for _, index := range indexes {
-		for !b.TryBuild(ctx, index) {
-			select {
-			case <-ctx.Done():
+	pending := indexes
+	for {
+		var failed []BackgroundIndex
+		for _, index := range pending {
+			if ctx.Err() != nil {
 				return false
-			case <-time.After(retry):
+			}
+			if !b.TryBuild(ctx, index) {
+				failed = append(failed, index)
 			}
 		}
+		if len(failed) == 0 {
+			return true
+		}
+		pending = failed
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(retry):
+		}
 	}
-	return true
 }
 
 // TryBuild makes one attempt and reports whether the index is valid when it
