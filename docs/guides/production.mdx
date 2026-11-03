@@ -432,9 +432,15 @@ counter resets, provider credentials (add, edit, disable, delete), managed API
 keys (including revocation), user policies, virtual models, pricing overrides,
 tagging rules, guardrails, workflows, and MCP servers. A provider added on another replica
 starts routing once its model list has been fetched. A provider whose credentials
-change keeps routing the models it already served, through the new credentials,
-while its model list is fetched again; models missing from the new list stop
-routing once it arrives, and if the fetch fails the previous list keeps serving.
+change, with its type unchanged, keeps routing the models it already served,
+through the new credentials, while its model list is fetched again. The edit's
+configured models and model filter apply at once, and a model removed from the
+configured list stops routing unless the upstream listed it. Once the new list
+arrives, models it no longer includes stop routing. If the fetch fails or returns
+no models while another provider is healthy, the previous models are kept as
+stale: requests that name them still route to the provider, but model listings
+and virtual-model load balancing leave them out. A provider whose type changes
+starts routing once its new model list has been fetched.
 
 A replica that fails to apply a change logs a warning once and retries on every
 poll until it applies. One exception: a stored provider that fails to build on a
