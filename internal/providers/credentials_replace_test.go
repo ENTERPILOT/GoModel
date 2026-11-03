@@ -285,6 +285,22 @@ func TestModelRegistry_ReplaceProvider(t *testing.T) {
 			assert.Same(t, replacement, registry.GetProvider("swap/listed"))
 		})
 
+		t.Run("allowlist mode replacing every configured model", func(t *testing.T) {
+			registry := NewModelRegistry()
+			registry.SetConfiguredProviderModelsMode(config.ConfiguredProviderModelsModeAllowlist)
+			previous := &registryMockProvider{}
+			registry.RegisterProviderWithNameAndType(previous, "swap", "test")
+			registry.SetProviderConfiguredModels("swap", []string{"removed"})
+			require.NoError(t, registry.Initialize(t.Context()))
+			require.True(t, registry.Supports("swap/removed"))
+
+			replacement := &registryMockProvider{}
+			registry.replaceProvider(replacement, "swap", "test", providerSettings{configuredModels: []string{"added"}})
+
+			assert.False(t, registry.Supports("swap/removed"))
+			assert.Same(t, replacement, registry.GetProvider("swap/added"))
+		})
+
 		t.Run("but keeps them when the upstream listed them", func(t *testing.T) {
 			registry := NewModelRegistry()
 			registry.SetConfiguredProviderModelsMode(config.ConfiguredProviderModelsModeFallback)

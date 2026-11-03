@@ -58,20 +58,24 @@ func (r *ModelRegistry) replaceProvider(provider core.Provider, providerName, pr
 	providerName, providerType = r.providerIdentityLocked(providerName, providerType)
 	previousType, replaced := r.swapProviderLocked(provider, providerName, providerType)
 
-	var previous map[string]*ModelInfo
-	if replaced && previousType == providerType {
-		previous = r.discoveredByProvider[providerName]
-		if !r.inventoryIsListingLocked(providerName) {
-			previous = withoutModels(previous, removedModels(r.configuredProviderModels[providerName], configuredModels))
-		}
+	previous := r.discoveredByProvider[providerName]
+	inherits := replaced && previousType == providerType && len(previous) > 0
+	if inherits && !r.inventoryIsListingLocked(providerName) {
+		previous = withoutModels(previous, removedModels(r.configuredProviderModels[providerName], configuredModels))
 	}
 
 	setOrDelete(&r.configuredProviderModels, providerName, configuredModels, len(configuredModels) > 0)
 	setOrDelete(&r.configMetadataOverrides, providerName, overrides, len(overrides) > 0)
 	setOrDelete(&r.providerModelFilters, providerName, filter, filtered)
 
-	if len(previous) > 0 {
-		r.discoveredByProvider[providerName] = r.reboundInventoryLocked(previous, provider, providerName, providerType)
+	// Rebinding runs even when every inherited model was a removed configured
+	// one, so the edit's new configured models still serve.
+	var inherited map[string]*ModelInfo
+	if inherits {
+		inherited = r.reboundInventoryLocked(previous, provider, providerName, providerType)
+	}
+	if len(inherited) > 0 {
+		r.discoveredByProvider[providerName] = inherited
 		// The runtime state describes the inherited inventory, so it stays
 		// until the replacement's first fetch overwrites it.
 		state := r.providerRuntime[providerName]
