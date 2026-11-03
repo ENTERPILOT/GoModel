@@ -118,6 +118,18 @@ func TestApplyChat(t *testing.T) {
 	}
 }
 
+func TestApplyResponsesDoesNotShareMapsWithClient(t *testing.T) {
+	original := responsesRequest(t, `{"model":"m","input":"hi","metadata":{"a":"1"},"include":["y"],"tools":[{"type":"function"}]}`)
+	got, err := ApplyResponses(original, nil, Set{"metadata": raw(`{"b":"2"}`)})
+	require.NoError(t, err)
+	got.Metadata["c"] = "3"
+	got.Include[0] = "changed"
+	got.Tools[0]["type"] = "changed"
+	assert.Equal(t, map[string]string{"a": "1"}, original.Metadata)
+	assert.Equal(t, []string{"y"}, original.Include)
+	assert.Equal(t, "function", original.Tools[0]["type"])
+}
+
 func TestApplyChatNoopReturnsSameRequest(t *testing.T) {
 	req := chatRequest(t, `{"model":"m","messages":[]}`)
 	got, err := ApplyChat(req, nil, nil)
@@ -172,16 +184,16 @@ func TestApplyResponses(t *testing.T) {
 			want:   `{"model":"m","input":"hi","max_output_tokens":64,"temperature":1,"top_k":20,"store":false,"truncation":"auto"}`,
 		},
 		{
-			name:   "typed fields outside the switch go through the JSON merge",
-			body:   `{"model":"m","input":[{"role":"user","content":"hi"}],"metadata":{"a":"1"}}`,
+			name:   "typed fields outside the switch go through the JSON merge, objects one level deep",
+			body:   `{"model":"m","input":[{"role":"user","content":"hi"}],"metadata":{"a":"1","b":"old"},"include":["y"]}`,
 			params: Set{"metadata": raw(`{"b":"2"}`), "include": raw(`["reasoning.encrypted_content"]`)},
-			want:   `{"model":"m","input":[{"role":"user","content":"hi"}],"metadata":{"b":"2"},"include":["reasoning.encrypted_content"]}`,
+			want:   `{"model":"m","input":[{"role":"user","content":"hi"}],"metadata":{"a":"1","b":"2"},"include":["reasoning.encrypted_content"]}`,
 		},
 		{
-			name:     "defaults on JSON-merged typed fields only fill missing keys",
-			body:     `{"model":"m","input":"hi","metadata":{"a":"1"}}`,
-			defaults: Set{"metadata": raw(`{"b":"2"}`), "include": raw(`["x"]`)},
-			want:     `{"model":"m","input":"hi","metadata":{"a":"1"},"include":["x"]}`,
+			name:     "defaults on JSON-merged typed fields only fill missing members",
+			body:     `{"model":"m","input":"hi","metadata":{"a":"1"},"include":["y"]}`,
+			defaults: Set{"metadata": raw(`{"a":"ignored","b":"2"}`), "include": raw(`["x"]`), "store": raw("true")},
+			want:     `{"model":"m","input":"hi","metadata":{"a":"1","b":"2"},"include":["y"],"store":true}`,
 		},
 		{
 			name:   "null strips a JSON-merged typed field",

@@ -46,6 +46,9 @@ func TestNormalize(t *testing.T) {
 		{name: "tool_choice string or object", set: Set{"tool_choice": raw(`[1]`)}, wantErr: "wrong type"},
 		{name: "tool_choice object ok", set: Set{"tool_choice": raw(`{"type":"function"}`)}, want: Set{"tool_choice": raw(`{"type":"function"}`)}},
 		{name: "metadata must be string map", set: Set{"metadata": raw(`{"a":1}`)}, wantErr: "wrong type"},
+		{name: "metadata members cannot be null", set: Set{"metadata": raw(`{"a":null}`)}, wantErr: `member "a" must be a string`},
+		{name: "include must be a string array", set: Set{"include": raw(`"reasoning"`)}, wantErr: `"include" has the wrong type`},
+		{name: "include array ok", set: Set{"include": raw(`["reasoning.encrypted_content"]`)}, want: Set{"include": raw(`["reasoning.encrypted_content"]`)}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -103,22 +106,33 @@ func TestMergeAndLayer(t *testing.T) {
 	assert.False(t, layered.IsZero())
 }
 
-func TestFromAnyAndToAny(t *testing.T) {
+// A deeper row decides whether a key is forced or a default: its default
+// unforces a shallower row's value and its forced value drops a shallower
+// row's default.
+func TestLayerPrecedenceAcrossSets(t *testing.T) {
+	outer := Overrides{Params: Set{"temperature": raw("1"), "top_k": raw("20")}, Defaults: Set{"top_p": raw("0.9"), "min_p": raw("0")}}
+	inner := Overrides{Defaults: Set{"temperature": raw("0.5")}, Params: Set{"top_p": raw("0.5")}}
+	layered := outer.Layer(inner)
+	assert.Equal(t, Set{"top_k": raw("20"), "top_p": raw("0.5")}, layered.Params)
+	assert.Equal(t, Set{"min_p": raw("0"), "temperature": raw("0.5")}, layered.Defaults)
+	assert.Equal(t, Set{"temperature": raw("1"), "top_k": raw("20")}, outer.Params, "inputs are not mutated")
+
+	flipped := Overrides{Params: Set{"b": raw("1")}}.Layer(Overrides{Defaults: Set{"b": raw("2")}}).Layer(Overrides{Params: Set{"b": raw("3")}})
+	assert.Equal(t, Overrides{Params: Set{"b": raw("3")}}, flipped, "the deepest row decides whether a key is forced")
+	unforced := Overrides{Params: Set{"b": raw("1")}}.Layer(Overrides{Defaults: Set{"b": raw("2")}})
+	assert.Equal(t, Overrides{Defaults: Set{"b": raw("2")}}, unforced)
+}
+
+func TestFromAny(t *testing.T) {
 	set, err := FromAny(map[string]any{"temperature": 1.0, "top_k": nil, "chat_template_kwargs": map[string]any{"enable_thinking": true}})
 	require.NoError(t, err)
 	assert.Equal(t, raw("1"), set["temperature"])
 	assert.Nil(t, set["top_k"])
 	assert.JSONEq(t, `{"enable_thinking":true}`, string(set["chat_template_kwargs"]))
 
-	values := ToAny(set)
-	assert.Equal(t, float64(1), values["temperature"])
-	assert.Nil(t, values["top_k"])
-	assert.Equal(t, map[string]any{"enable_thinking": true}, values["chat_template_kwargs"])
-
 	empty, err := FromAny(nil)
 	require.NoError(t, err)
 	assert.Nil(t, empty)
-	assert.Nil(t, ToAny(nil))
 }
 
 func TestClone(t *testing.T) {

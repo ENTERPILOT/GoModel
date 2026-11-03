@@ -66,14 +66,45 @@ func (o Overrides) IsZero() bool {
 }
 
 // Layer returns o with the deeper over applied on top: a non-empty effort
-// replaces, parameter sets merge per key with over winning.
+// replaces, and parameter sets merge per key with over winning. Precedence
+// holds across the two sets: a key over configures as a default stops being
+// forced by a shallower row, and one it forces stops being a shallower
+// row's default.
 func (o Overrides) Layer(over Overrides) Overrides {
 	if over.ReasoningEffort != "" {
 		o.ReasoningEffort = over.ReasoningEffort
 	}
-	o.Defaults = Merge(o.Defaults, over.Defaults)
-	o.Params = Merge(o.Params, over.Params)
+	o.Defaults = Merge(without(o.Defaults, over.Params), over.Defaults)
+	o.Params = Merge(without(o.Params, over.Defaults), over.Params)
 	return o
+}
+
+// without returns set minus the keys of other, sharing set when nothing is
+// removed.
+func without(set, other Set) Set {
+	if len(set) == 0 || len(other) == 0 {
+		return set
+	}
+	shared := false
+	for key := range other {
+		if _, ok := set[key]; ok {
+			shared = true
+			break
+		}
+	}
+	if !shared {
+		return set
+	}
+	kept := make(Set, len(set))
+	for key, value := range set {
+		if _, drop := other[key]; !drop {
+			kept[key] = value
+		}
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	return kept
 }
 
 // Merge returns base with over's keys added, over winning on conflict. Sets
@@ -126,23 +157,6 @@ func FromAny(values map[string]any) (Set, error) {
 		set[key] = raw
 	}
 	return set, nil
-}
-
-// ToAny decodes a set into plain values for storage drivers and views that
-// do not carry raw JSON.
-func ToAny(set Set) map[string]any {
-	if len(set) == 0 {
-		return nil
-	}
-	values := make(map[string]any, len(set))
-	for key, raw := range set {
-		var value any
-		if len(raw) > 0 {
-			_ = json.Unmarshal(raw, &value)
-		}
-		values[key] = value
-	}
-	return values
 }
 
 // Normalize validates a configured set and returns it in canonical form:
@@ -245,7 +259,17 @@ func validateTyped(field, key string, raw json.RawMessage) error {
 			err = fmt.Errorf("must be a string or an object")
 		}
 	case "metadata":
-		var v map[string]string
+		var v map[string]json.RawMessage
+		if err = json.Unmarshal(raw, &v); err == nil {
+			for name, value := range v {
+				if len(value) == 0 || value[0] != '"' {
+					err = fmt.Errorf("member %q must be a string", name)
+					break
+				}
+			}
+		}
+	case "include":
+		var v []string
 		err = json.Unmarshal(raw, &v)
 	default:
 		return nil

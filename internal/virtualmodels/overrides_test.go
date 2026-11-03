@@ -322,6 +322,29 @@ func TestResolveRequestParams(t *testing.T) {
 			wantDefaults: requestparams.Set{"temperature": rawJSON("1")},
 		},
 		{
+			name: "model-wide and exact policies merge per key with the exact one winning",
+			rows: []VirtualModel{
+				{Source: "qwen", Model: "qwen", Enabled: true, ReasoningEffort: "high", Params: requestparams.Set{"top_k": rawJSON("20"), "min_p": rawJSON("0.1")}, DefaultParams: requestparams.Set{"temperature": rawJSON("1")}},
+				{Source: "vllm/qwen", ProviderName: "vllm", Model: "qwen", Enabled: true, Params: requestparams.Set{"top_k": rawJSON("5")}, DefaultParams: requestparams.Set{"top_p": rawJSON("0.9")}},
+			},
+			requested:    core.NewRequestedModelSelector("vllm/qwen", ""),
+			attempt:      qwen,
+			wantEffort:   "high",
+			wantParams:   requestparams.Set{"top_k": rawJSON("5"), "min_p": rawJSON("0.1")},
+			wantDefaults: requestparams.Set{"temperature": rawJSON("1"), "top_p": rawJSON("0.9")},
+		},
+		{
+			name: "a concrete model's default turns an alias's forced key back into a default",
+			rows: []VirtualModel{
+				{Source: "alias", Targets: []Target{{Provider: "vllm", Model: "qwen"}}, Enabled: true, Params: requestparams.Set{"temperature": rawJSON("1"), "top_k": rawJSON("20")}},
+				{Source: "vllm/qwen", ProviderName: "vllm", Model: "qwen", Enabled: true, DefaultParams: requestparams.Set{"temperature": rawJSON("0.5")}},
+			},
+			requested:    core.NewRequestedModelSelector("alias", ""),
+			attempt:      qwen,
+			wantParams:   requestparams.Set{"top_k": rawJSON("20")},
+			wantDefaults: requestparams.Set{"temperature": rawJSON("0.5")},
+		},
+		{
 			name:      "nothing configured",
 			rows:      []VirtualModel{{Source: "plain", Targets: []Target{{Provider: "vllm", Model: "qwen"}}, Enabled: true}},
 			requested: core.NewRequestedModelSelector("plain", ""),

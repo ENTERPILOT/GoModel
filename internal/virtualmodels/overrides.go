@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/modelselectors"
 	"github.com/enterpilot/gomodel/internal/requestparams"
 )
 
@@ -85,26 +86,25 @@ func (s *snapshot) redirectOverridesFor(resolution *core.RequestModelResolution,
 	return layered
 }
 
-// policyOverrides returns what the model policies force on attempt. Each
-// setting resolves on its own, so an exact policy that sets only parameters
-// does not hide a model-wide effort.
+// policyOverrides returns what the model policies force on attempt: the
+// model-wide policy layered under the exact one, so the exact policy wins
+// per key and an exact policy that sets only parameters does not hide a
+// model-wide effort. Only those two scopes carry per-model values.
 func (s *snapshot) policyOverrides(attempt core.ModelSelector, userPath string) requestparams.Overrides {
 	var resolved requestparams.Overrides
-	if policy, ok := s.modelPolicy(attempt.Provider, attempt.Model, userPath, setsReasoningEffort); ok {
-		resolved.ReasoningEffort = policy.ReasoningEffort
+	model := strings.TrimSpace(attempt.Model)
+	if model != "" {
+		if policy, ok := s.modelWide[model]; ok && userPathAllowed(userPath, policy.UserPaths) {
+			resolved = resolved.Layer(policy.overrides())
+		}
 	}
-	if policy, ok := s.modelPolicy(attempt.Provider, attempt.Model, userPath, setsDefaultParams); ok {
-		resolved.Defaults = policy.DefaultParams
-	}
-	if policy, ok := s.modelPolicy(attempt.Provider, attempt.Model, userPath, setsParams); ok {
-		resolved.Params = policy.Params
+	if key := modelselectors.ExactMatchKey(strings.TrimSpace(attempt.Provider), model); key != "" {
+		if policy, ok := s.exact[key]; ok && userPathAllowed(userPath, policy.UserPaths) {
+			resolved = resolved.Layer(policy.overrides())
+		}
 	}
 	return resolved
 }
-
-func setsReasoningEffort(policy VirtualModel) bool { return policy.ReasoningEffort != "" }
-func setsParams(policy VirtualModel) bool          { return len(policy.Params) > 0 }
-func setsDefaultParams(policy VirtualModel) bool   { return len(policy.DefaultParams) > 0 }
 
 // routeChain returns the redirect entries of a recorded route, outermost
 // first, skipping sources that are no longer redirects.

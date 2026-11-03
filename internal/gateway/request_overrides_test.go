@@ -2,7 +2,9 @@ package gateway
 
 import (
 	"context"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/goccy/go-json"
@@ -52,6 +54,14 @@ func (p *effortCaptureProvider) ChatCompletion(_ context.Context, req *core.Chat
 		return nil, core.NewProviderError("openai", http.StatusInternalServerError, "primary down", nil)
 	}
 	return &core.ChatResponse{Model: req.Model, Choices: []core.Choice{{Message: core.ResponseMessage{Role: "assistant", Content: "ok"}}}}, nil
+}
+
+func (p *effortCaptureProvider) StreamChatCompletion(_ context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
+	p.chats = append(p.chats, req)
+	if req.Model == "primary" {
+		return nil, core.NewProviderError("openai", http.StatusInternalServerError, "primary down", nil)
+	}
+	return io.NopCloser(strings.NewReader("data: [DONE]\n\n")), nil
 }
 
 func (p *effortCaptureProvider) Responses(_ context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
@@ -265,6 +275,55 @@ func TestChatRequestParamsPerAttempt(t *testing.T) {
 
 	assert.Equal(t, 0.2, *original.Temperature, "client request must not be mutated")
 	assert.JSONEq(t, `5`, string(original.ExtraFields.Lookup("top_k")))
+}
+
+func TestChatRequestDefaultsFillOmittedKeysPerAttempt(t *testing.T) {
+	orchestrator, provider, resolver, workflow := effortFixture()
+	resolver.efforts = nil
+	resolver.defaults = map[string]requestparams.Set{
+		"openai/primary": {"temperature": rawJSON("1"), "top_k": rawJSON("20")},
+		"openai/backup":  {"temperature": rawJSON("0.5")},
+	}
+
+	_, _, err := orchestrator.DispatchChatCompletion(context.Background(), workflow, &core.ChatRequest{Model: "primary", Provider: "openai"})
+	require.NoError(t, err)
+
+	require.Len(t, provider.chats, 2)
+	require.NotNil(t, provider.chats[0].Temperature)
+	assert.Equal(t, float64(1), *provider.chats[0].Temperature)
+	assert.JSONEq(t, `20`, string(provider.chats[0].ExtraFields.Lookup("top_k")))
+	require.NotNil(t, provider.chats[1].Temperature)
+	assert.Equal(t, 0.5, *provider.chats[1].Temperature, "the fallback gets its own default")
+	assert.Nil(t, provider.chats[1].ExtraFields.Lookup("top_k"))
+}
+
+// The gateway adds stream_options.include_usage after preparation; a
+// fallback rebuilt from the client's request must keep it.
+func TestRequestParamsFailoverKeepsStreamUsageFlag(t *testing.T) {
+	orchestrator, provider, resolver, workflow := effortFixture()
+	resolver.efforts = nil
+	resolver.params = map[string]requestparams.Set{"openai/primary": {"top_k": rawJSON("20")}}
+	prepared, err := orchestrator.PrepareChatRequest(context.Background(), &core.ChatRequest{
+		Model: "primary", Provider: "openai", Stream: true,
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	}, RequestMeta{Workflow: workflow})
+	require.NoError(t, err)
+	require.Nil(t, prepared.Request.StreamOptions, "the client sent no stream options")
+	// Usage enforcement adds the flag to the prepared request after the
+	// overrides ran, as the server and the stream dispatcher do.
+	prepared.Request.StreamOptions = &core.StreamOptions{IncludeUsage: true}
+
+	result, err := orchestrator.StreamChatCompletion(prepared.Context, prepared.Workflow, prepared.Request)
+	require.NoError(t, err)
+	require.NoError(t, result.Stream.Close())
+
+	require.Len(t, provider.chats, 2)
+	for i, sent := range provider.chats {
+		require.NotNil(t, sent.StreamOptions, "attempt %d", i)
+		assert.True(t, sent.StreamOptions.IncludeUsage, "attempt %d", i)
+		assert.True(t, sent.Stream, "attempt %d", i)
+	}
+	assert.Nil(t, provider.chats[1].ExtraFields.Lookup("top_k"))
 }
 
 func TestRequestParamsFailoverRebuildsFromClientRequest(t *testing.T) {

@@ -40,7 +40,7 @@ func withRequestOverrides[Req any, T any](
 	workflow *core.Workflow,
 	selector func(Req) core.ModelSelector,
 	apply func(Req, requestparams.Overrides) (Req, error),
-	cloneForSelector func(Req, core.ModelSelector) Req,
+	rebuild func(client, attempt Req) Req,
 	call func(context.Context, Req, string) (T, error),
 ) func(context.Context, Req, string) (T, error) {
 	resolver, ok := o.modelResolver.(ModelRequestOverridesResolver)
@@ -54,7 +54,7 @@ func withRequestOverrides[Req any, T any](
 			if attempt.QualifiedModel() == resolution.ResolvedSelector.QualifiedModel() {
 				return call(ctx, req, providerName)
 			}
-			req = cloneForSelector(client, attempt)
+			req = rebuild(client, req)
 		}
 		overrides := resolver.ResolveRequestOverrides(ctx, resolution, attempt)
 		if !overrides.IsZero() {
@@ -78,6 +78,24 @@ func (o *InferenceOrchestrator) RequestOverrides(ctx context.Context, workflow *
 		return requestparams.Overrides{}
 	}
 	return resolver.ResolveRequestOverrides(ctx, workflow.Resolution, workflow.Resolution.ResolvedSelector)
+}
+
+// rebuildChatAttempt returns the client's request re-addressed to attempt's
+// model, keeping the stream settings the gateway added to the attempt after
+// preparation (the usage flag on streamed requests).
+func rebuildChatAttempt(client, attempt *core.ChatRequest) *core.ChatRequest {
+	rebuilt := CloneChatRequestForSelector(client, chatRequestSelectorOf(attempt))
+	rebuilt.Stream = attempt.Stream
+	rebuilt.StreamOptions = attempt.StreamOptions
+	return rebuilt
+}
+
+// rebuildResponsesAttempt is rebuildChatAttempt for Responses.
+func rebuildResponsesAttempt(client, attempt *core.ResponsesRequest) *core.ResponsesRequest {
+	rebuilt := CloneResponsesRequestForSelector(client, responsesRequestSelectorOf(attempt))
+	rebuilt.Stream = attempt.Stream
+	rebuilt.StreamOptions = attempt.StreamOptions
+	return rebuilt
 }
 
 // overridesError reports a configured parameter the request type refused.

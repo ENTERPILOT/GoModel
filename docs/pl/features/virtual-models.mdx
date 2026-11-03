@@ -159,16 +159,19 @@ ustawia; skalary i tablice są zastępowane. Kluczy `model`, `provider`,
 `reasoning`, `reasoning_effort`, `previous_response_id`, `conversation` i
 `prompt` nie można skonfigurować, a klucz nie może wystąpić w obu mapach
 jednego wiersza. Wartości są walidowane przy zapisie (`temperature` i `top_p`
-muszą być liczbami, `max_tokens` nieujemną liczbą całkowitą itd.), do 64
-kluczy i 16 KiB na wiersz.
+muszą być liczbami, `max_tokens` nieujemną liczbą całkowitą itd.); każda mapa
+może mieć do 64 kluczy i 16 KiB.
 
 Pierwszeństwo między wierszami jest ustalane dla każdego klucza osobno i
 działa według reguły reasoning effort: polityka konkretnego modelu wygrywa z
 każdym przekierowaniem nad nim, a wewnętrzny
 [połączony w łańcuch](#łączenie-modeli-wirtualnych-w-łańcuchy) model wirtualny
-z zewnętrznym. Próba failover do innego modelu otrzymuje wyłącznie parametry
-tego modelu, zbudowane od nowa z żądania klienta; parametry modelu
-podstawowego nigdy do niej nie przeciekają. Wtyczki
+z zewnętrznym. Głębszy wiersz decyduje też, czy klucz jest wymuszony, czy
+domyślny: `default_params.temperature` konkretnego modelu zamienia wymuszone
+`temperature` aliasu z powrotem w wartość domyślną. Próba failover jest
+budowana od nowa z żądania klienta i otrzymuje parametry własnej trasy i
+własnego konkretnego modelu; polityka modelu
+podstawowego nigdy do niej nie przecieka. Wtyczki
 [Guardrails](/pl/advanced/guardrails) działają wcześniej, więc `params`
 zastępuje wartość ustawioną przez wtyczkę, a `default_params` ją respektuje.
 Parametry dotyczą Chat Completions, Responses API i Anthropic Messages API

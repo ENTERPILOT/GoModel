@@ -170,15 +170,18 @@ Alias nicht setzt; Skalare und Arrays werden ersetzt. `model`, `provider`,
 `prompt` lassen sich nicht konfigurieren, und ein Schlüssel darf nicht in
 beiden Maps einer Zeile vorkommen. Werte werden beim Speichern validiert
 (`temperature` und `top_p` müssen Zahlen sein, `max_tokens` eine nicht
-negative Ganzzahl und so weiter), bis zu 64 Schlüssel und 16 KiB pro Zeile.
+negative Ganzzahl und so weiter); je Map bis zu 64 Schlüssel und 16 KiB.
 
 Der Vorrang zwischen Zeilen gilt pro Schlüssel und folgt der Regel des
 Reasoning-Efforts: Die Richtlinie eines konkreten Modells schlägt jeden
 Redirect darüber, und ein inneres
 [verkettetes](#virtuelle-modelle-verketten) virtuelles Modell schlägt ein
-äußeres. Ein Failover-Versuch zu einem anderen Modell erhält nur die Parameter
-dieses Modells, neu aufgebaut aus dem Request des Clients; die Parameter des
-primären Modells gelangen nie hinein.
+äußeres. Die tiefere Zeile entscheidet auch, ob ein Schlüssel erzwungen oder
+ein Default ist: `default_params.temperature` eines konkreten Modells macht
+aus dem erzwungenen `temperature` eines Alias wieder einen Default. Ein
+Failover-Versuch wird aus dem Request des Clients neu aufgebaut und erhält die
+Parameter seiner eigenen Route und seines konkreten Modells; die Richtlinie
+des primären Modells gelangt nie hinein.
 [Guardrail](/de/advanced/guardrails)-Plugins laufen zuerst, sodass `params`
 einen von einem Plugin gesetzten Wert ersetzt und `default_params` ihn
 respektiert. Parameter gelten für Chat Completions, die Responses API und die

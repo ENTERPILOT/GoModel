@@ -156,14 +156,17 @@ scalars and arrays replace. `model`, `provider`, `messages`, `input`,
 `reasoning_effort`, `previous_response_id`, `conversation`, and `prompt`
 cannot be configured, and a key cannot appear in both maps of one row. Values
 are validated when saved (`temperature` and `top_p` must be numbers,
-`max_tokens` a non-negative integer, and so on), up to 64 keys and 16 KiB per
-row.
+`max_tokens` a non-negative integer, and so on); each map allows up to 64 keys
+and 16 KiB.
 
 Precedence across rows is per key and follows the reasoning effort rule: a
 concrete model's policy beats any redirect above it, and an inner
-[chained](#chain-virtual-models) virtual model beats an outer one. A failover
-leg to another model gets that model's parameters only, rebuilt from the
-client's request; the primary's never leak into it.
+[chained](#chain-virtual-models) virtual model beats an outer one. The deeper
+row also decides whether a key is forced or a default: a concrete model's
+`default_params.temperature` turns an alias's forced `temperature` back into a
+default. A failover leg is rebuilt from the client's request and gets the
+parameters of its own route and concrete model; the primary model's policy
+never leaks into it.
 [Guardrail](/advanced/guardrails) plugins run first, so `params` replaces a
 value a plugin set and `default_params` respects it. Parameters apply to Chat
 Completions, the Responses API, and the Anthropic Messages API (native

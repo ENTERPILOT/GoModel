@@ -45,7 +45,7 @@ func ApplyChat(req *core.ChatRequest, defaults, params Set) (*core.ChatRequest, 
 	}
 	if a.touchesTyped() {
 		messages, plan := cloned.Messages, cloned.PromptCachePlan
-		if err := a.mergeTyped(&cloned); err != nil {
+		if err := mergeTyped(a, &cloned); err != nil {
 			return nil, err
 		}
 		cloned.Messages, cloned.PromptCachePlan = messages, plan
@@ -101,7 +101,7 @@ func ApplyResponses(req *core.ResponsesRequest, defaults, params Set) (*core.Res
 	}
 	if a.touchesTyped() {
 		input := cloned.Input
-		if err := a.mergeTyped(&cloned); err != nil {
+		if err := mergeTyped(a, &cloned); err != nil {
 			return nil, err
 		}
 		cloned.Input = input
@@ -245,8 +245,10 @@ func (a *applier) touchesTyped() bool {
 
 // mergeTyped applies typed members the switch does not model through a JSON
 // round trip of the request: encode, set or remove the keys, decode again.
-// A default only lands when the encoded request lacks the key.
-func (a *applier) mergeTyped(target any) error {
+// A default only lands when the encoded request lacks the key, and objects
+// merge one level deep like unknown members do. The result is decoded into
+// a fresh value so no map or slice stays shared with the caller's request.
+func mergeTyped[T any](a *applier, target *T) error {
 	encoded, err := json.Marshal(target)
 	if err != nil {
 		return err
@@ -259,18 +261,31 @@ func (a *applier) mergeTyped(target any) error {
 		delete(body, key)
 	}
 	for key, raw := range a.merged {
-		if _, isDefault := a.defaults[key]; isDefault {
-			if _, set := body[key]; set {
-				continue
+		current, set := body[key]
+		_, isDefault := a.defaults[key]
+		switch {
+		case set && isObject(current) && isObject(raw):
+			merged, err := mergeObjects(current, raw, !isDefault)
+			if err != nil {
+				return err
 			}
+			body[key] = merged
+		case set && isDefault:
+			continue
+		default:
+			body[key] = raw
 		}
-		body[key] = raw
 	}
 	merged, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal(merged, target)
+	var fresh T
+	if err := json.Unmarshal(merged, &fresh); err != nil {
+		return err
+	}
+	*target = fresh
+	return nil
 }
 
 func (a *applier) extraFields(base core.UnknownJSONFields) (core.UnknownJSONFields, error) {
