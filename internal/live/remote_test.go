@@ -94,21 +94,20 @@ func (f *fakeTable) load(ids []string) ([]fakeRow, error) {
 
 type fakeAuditTable struct{ fakeTable }
 
-func (f *fakeAuditTable) EntriesByID(_ context.Context, ids []string) ([]auditlog.LogEntry, error) {
+func (f *fakeAuditTable) PreviewsByID(_ context.Context, ids []string) ([]auditlog.EntryPreview, error) {
 	rows, err := f.load(ids)
 	if err != nil {
 		return nil, err
 	}
-	entries := make([]auditlog.LogEntry, len(rows))
+	entries := make([]auditlog.EntryPreview, len(rows))
 	for i, row := range rows {
-		entries[i] = auditlog.LogEntry{
-			ID:         row.id,
-			RequestID:  "req-" + row.id,
-			Timestamp:  row.timestamp,
-			StatusCode: 200,
-			Data: &auditlog.LogData{
-				RequestBody: auditlog.CaptureLoggedBody([]byte(`{"model":"gpt-test"}`)),
-			},
+		entries[i] = auditlog.EntryPreview{
+			ID:                  row.id,
+			RequestID:           "req-" + row.id,
+			Timestamp:           row.timestamp,
+			StatusCode:          200,
+			Data:                &auditlog.LogData{UserAgent: "test-agent"},
+			RequestBodyCaptured: true,
 		}
 	}
 	return entries, nil
@@ -388,6 +387,8 @@ func TestRemoteFeedPublishesAuditThenUsage(t *testing.T) {
 	require.True(t, ok)
 	assert.NotContains(t, data, "request_body", "remote bodies stay in the database")
 	assert.Equal(t, true, data["request_body_captured"])
+	assert.NotContains(t, data, "response_body_captured", "no response body was stored")
+	assert.Equal(t, "test-agent", data["user_agent"])
 
 	var usageData map[string]any
 	require.NoError(t, json.Unmarshal(events[1].Data, &usageData))

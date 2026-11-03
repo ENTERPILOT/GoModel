@@ -175,7 +175,7 @@ func (r *SQLReader) GetLogs(ctx context.Context, params LogQueryParams) (*LogLis
 	rows.Close()
 
 	if !params.OmitAttempts {
-		if err := r.loadAttempts(ctx, entries); err != nil {
+		if err := r.loadAttempts(ctx, entries, true); err != nil {
 			return nil, err
 		}
 	}
@@ -402,14 +402,16 @@ func (r *SQLReader) queryLogEntryWithAttempts(ctx context.Context, query, arg st
 	}
 
 	hydrated := []LogEntry{*entry}
-	if err := r.loadAttempts(ctx, hydrated); err != nil {
+	if err := r.loadAttempts(ctx, hydrated, true); err != nil {
 		return nil, err
 	}
 	*entry = hydrated[0]
 	return entry, nil
 }
 
-func (r *SQLReader) loadAttempts(ctx context.Context, entries []LogEntry) error {
+// loadAttempts hydrates the entries' provider attempts. Without bodies, each
+// attempt's response body and headers stay in the database.
+func (r *SQLReader) loadAttempts(ctx context.Context, entries []LogEntry, bodies bool) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -424,14 +426,18 @@ func (r *SQLReader) loadAttempts(ctx context.Context, entries []LogEntry) error 
 		index[entries[i].ID] = i
 	}
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	responseColumns := "response_body, response_headers"
+	if !bodies {
+		responseColumns = "NULL, NULL"
+	}
 
 	rows, err := r.db.Query(ctx, fmt.Sprintf(`
 		SELECT %s, seq, kind, provider_type, provider_name, model, status_code, success,
-			error_type, error_code, error_message, response_body, response_headers, started_at, duration_ns
+			error_type, error_code, error_message, %s, started_at, duration_ns
 		FROM audit_log_attempts
 		WHERE %s IN (%s)
 		ORDER BY audit_log_id ASC, seq ASC
-	`, r.dialect.attemptIDColumn, r.dialect.attemptIDColumn, placeholders), ids...)
+	`, r.dialect.attemptIDColumn, responseColumns, r.dialect.attemptIDColumn, placeholders), ids...)
 	if err != nil {
 		// A database written before attempts existed has no such table; its
 		// logs simply carry no attempts.

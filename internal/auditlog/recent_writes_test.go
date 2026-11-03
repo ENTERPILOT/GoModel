@@ -86,46 +86,88 @@ func TestRecentWrites(t *testing.T) {
 	})
 }
 
-func TestEntriesByID(t *testing.T) {
+func TestPreviewsByID(t *testing.T) {
 	runReaderSuite(t, func(t *testing.T, store LogStore, reader Reader) {
 		ctx := context.Background()
 		recent, ok := reader.(RecentWriteReader)
 		require.True(t, ok, "%T does not implement RecentWriteReader", reader)
 
-		withAttempt := stampedEntry("with-attempt", "writer-a", 100)
-		withAttempt.Data = &LogData{
-			UserAgent: "test-agent",
+		withBodies := stampedEntry("with-bodies", "writer-a", 100)
+		withBodies.Data = &LogData{
+			UserAgent:       "test-agent",
+			RequestHeaders:  map[string]string{"X-Test": "1"},
+			RequestBody:     CaptureLoggedBody([]byte(`{"model":"gpt-5","messages":[]}`)),
+			ResponseBody:    CaptureLoggedBody([]byte(`{"id":"resp-1"}`)),
+			ErrorMessage:    "upstream slow",
+			ResponseHeaders: map[string]string{"X-Upstream": "a"},
 			Attempts: []AttemptSnapshot{{
-				Seq:          1,
-				Kind:         AttemptKindPrimary,
-				ProviderType: "openai",
-				Model:        "gpt-5",
-				StatusCode:   200,
-				Success:      true,
+				Seq:             1,
+				Kind:            AttemptKindPrimary,
+				ProviderType:    "openai",
+				Model:           "gpt-5",
+				StatusCode:      503,
+				ResponseBody:    map[string]any{"error": "overloaded"},
+				ResponseHeaders: map[string]string{"Retry-After": "1"},
 			}},
 		}
+		requestOnly := stampedEntry("request-only", "writer-a", 100)
+		requestOnly.Data = &LogData{RequestBody: CaptureLoggedBody([]byte(`{"model":"gpt-5"}`))}
 		require.NoError(t, store.WriteBatch(ctx, []*LogEntry{
-			withAttempt,
+			withBodies,
+			requestOnly,
 			stampedEntry("plain", "writer-a", 100),
 			stampedEntry("not-asked", "writer-a", 100),
 		}))
 
-		entries, err := recent.EntriesByID(ctx, []string{"with-attempt", "plain", "missing"})
+		previews, err := recent.PreviewsByID(ctx, []string{"with-bodies", "request-only", "plain", "missing"})
 		require.NoError(t, err)
-		require.Len(t, entries, 2)
-		slices.SortFunc(entries, func(a, b LogEntry) int { return strings.Compare(a.ID, b.ID) })
-		assert.Equal(t, "plain", entries[0].ID)
-		require.Equal(t, "with-attempt", entries[1].ID)
-		assert.Equal(t, "req-with-attempt", entries[1].RequestID)
-		assert.True(t, entries[1].Timestamp.Equal(withAttempt.Timestamp))
-		require.NotNil(t, entries[1].Data)
-		assert.Equal(t, "test-agent", entries[1].Data.UserAgent)
-		require.Len(t, entries[1].Data.Attempts, 1, "provider attempts are hydrated")
-		assert.Equal(t, "openai", entries[1].Data.Attempts[0].ProviderType)
+		require.Len(t, previews, 3)
+		slices.SortFunc(previews, func(a, b EntryPreview) int { return strings.Compare(a.ID, b.ID) })
 
-		entries, err = recent.EntriesByID(ctx, nil)
+		plain := previews[0]
+		assert.Equal(t, "plain", plain.ID)
+		assert.False(t, plain.RequestBodyCaptured)
+		assert.False(t, plain.ResponseBodyCaptured)
+
+		requestOnlyPreview := previews[1]
+		assert.Equal(t, "request-only", requestOnlyPreview.ID)
+		assert.True(t, requestOnlyPreview.RequestBodyCaptured)
+		assert.False(t, requestOnlyPreview.ResponseBodyCaptured)
+		if requestOnlyPreview.Data != nil {
+			assert.Nil(t, requestOnlyPreview.Data.RequestBody)
+		}
+
+		preview := previews[2]
+		assert.Equal(t, "with-bodies", preview.ID)
+		assert.Equal(t, "req-with-bodies", preview.RequestID)
+		assert.True(t, preview.Timestamp.Equal(withBodies.Timestamp))
+		assert.True(t, preview.RequestBodyCaptured)
+		assert.True(t, preview.ResponseBodyCaptured)
+		require.NotNil(t, preview.Data)
+		assert.Nil(t, preview.Data.RequestBody, "the request body stays in the database")
+		assert.Nil(t, preview.Data.ResponseBody, "the response body stays in the database")
+		assert.Equal(t, "test-agent", preview.Data.UserAgent)
+		assert.Equal(t, "upstream slow", preview.Data.ErrorMessage)
+		assert.Equal(t, map[string]string{"X-Test": "1"}, preview.Data.RequestHeaders)
+		require.Len(t, preview.Data.Attempts, 1, "provider attempts are hydrated")
+		attempt := preview.Data.Attempts[0]
+		assert.Equal(t, "openai", attempt.ProviderType)
+		assert.Equal(t, 503, attempt.StatusCode)
+		assert.Nil(t, attempt.ResponseBody, "the attempt's response body stays in the database")
+		assert.Empty(t, attempt.ResponseHeaders, "the attempt's response headers stay in the database")
+
+		// The full entry still holds what the preview left out.
+		full, err := reader.GetLogByID(ctx, "with-bodies")
 		require.NoError(t, err)
-		assert.Empty(t, entries)
+		require.NotNil(t, full.Data)
+		assert.NotNil(t, full.Data.RequestBody)
+		assert.NotNil(t, full.Data.ResponseBody)
+		require.Len(t, full.Data.Attempts, 1)
+		assert.NotNil(t, full.Data.Attempts[0].ResponseBody)
+
+		previews, err = recent.PreviewsByID(ctx, nil)
+		require.NoError(t, err)
+		assert.Empty(t, previews)
 	})
 }
 

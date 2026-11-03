@@ -842,15 +842,25 @@ func compactAuditPreviewForRetention(preview auditPreview) auditPreview {
 }
 
 // PublishRemoteAuditEntry publishes an audit entry another replica persisted,
-// as the audit.flushed event that replica's own dashboards received. Its
-// bodies are left out, flagged as captured, so remote traffic costs the stream
-// only the compact preview; the dashboard loads them from the stored entry.
-func (b *Broker) PublishRemoteAuditEntry(entry *auditlog.LogEntry) {
+// as the audit.flushed event that replica's own dashboards received. The
+// preview carries no bodies, only whether each was captured, so remote
+// traffic costs the stream only the compact preview; the dashboard loads them
+// from the stored entry.
+func (b *Broker) PublishRemoteAuditEntry(entry *auditlog.EntryPreview) {
 	if b == nil || !b.enabled || entry == nil {
 		return
 	}
-	retained, _ := stripAuditPreviewBodies(auditPreviewFromEntry(EventAuditFlushed, entry))
-	b.publishAuditPreview(EventAuditFlushed, entry.ID, retained, nil)
+	preview := auditPreviewFromEntry(EventAuditFlushed, &entry.LogEntry)
+	if entry.RequestBodyCaptured || entry.ResponseBodyCaptured {
+		data := auditPreviewData{}
+		if preview.Data != nil {
+			data = *preview.Data
+		}
+		data.RequestBodyCaptured = entry.RequestBodyCaptured
+		data.ResponseBodyCaptured = entry.ResponseBodyCaptured
+		preview.Data = &data
+	}
+	b.publishAuditPreview(EventAuditFlushed, entry.ID, preview, nil)
 }
 
 // PublishRemoteUsageEntry publishes a usage entry another replica persisted,

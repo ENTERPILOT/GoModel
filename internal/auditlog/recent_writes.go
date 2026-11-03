@@ -22,9 +22,21 @@ type RecentWriteReader interface {
 	// microseconds) by any writer other than excludeWriter, newest first and
 	// at most limit of them; none for a nonpositive limit.
 	RecentWrites(ctx context.Context, since int64, excludeWriter string, limit int) ([]storage.RecentWrite, error)
-	// EntriesByID loads the entries with the given ids, in no particular
-	// order. Ids that match nothing are left out.
-	EntriesByID(ctx context.Context, ids []string) ([]LogEntry, error)
+	// PreviewsByID loads the entries with the given ids, in no particular
+	// order, without their bodies (see EntryPreview). Ids that match nothing
+	// are left out.
+	PreviewsByID(ctx context.Context, ids []string) ([]EntryPreview, error)
+}
+
+// EntryPreview is an entry loaded for a live preview: everything but the
+// request and response bodies and each provider attempt's response body and
+// headers, which the query leaves in the database until the entry is opened.
+type EntryPreview struct {
+	LogEntry
+	// RequestBodyCaptured and ResponseBodyCaptured report that the stored
+	// entry holds that body.
+	RequestBodyCaptured  bool
+	ResponseBodyCaptured bool
 }
 
 // NewRecentWriteReader creates a RecentWriteReader on the storage backend.
@@ -115,9 +127,21 @@ func (r *SQLReader) RecentWrites(ctx context.Context, since int64, excludeWriter
 	return writes, nil
 }
 
-// EntriesByID implements RecentWriteReader. Provider attempts are hydrated,
-// as for a list page.
-func (r *SQLReader) EntriesByID(ctx context.Context, ids []string) ([]LogEntry, error) {
+// previewColumns are logColumns with the bodies cut out of data, followed by
+// whether each body was there.
+func previewColumns(dialect sqlx.Dialect) string {
+	columns := strings.TrimSuffix(logColumns, "data")
+	if dialect == sqlx.PostgreSQL {
+		return columns + `data - 'request_body' - 'response_body',` +
+			` (data -> 'request_body') IS NOT NULL, (data -> 'response_body') IS NOT NULL`
+	}
+	return columns + `json_remove(data, '$.request_body', '$.response_body'),` +
+		` json_type(data, '$.request_body') IS NOT NULL, json_type(data, '$.response_body') IS NOT NULL`
+}
+
+// PreviewsByID implements RecentWriteReader. Provider attempts are hydrated,
+// as for a list page, without their response bodies and headers.
+func (r *SQLReader) PreviewsByID(ctx context.Context, ids []string) ([]EntryPreview, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -127,29 +151,52 @@ func (r *SQLReader) EntriesByID(ctx context.Context, ids []string) ([]LogEntry, 
 	}
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
 	rows, err := r.db.Query(ctx,
-		selectLogColumns+" WHERE "+r.dialect.idColumn+" IN ("+placeholders+")", args...)
+		"SELECT "+previewColumns(r.db.Dialect())+" FROM audit_logs WHERE "+r.dialect.idColumn+" IN ("+placeholders+")", args...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query audit logs by id: %w", err)
+		return nil, fmt.Errorf("failed to query audit log previews by id: %w", err)
 	}
 	defer rows.Close()
 
 	entries := make([]LogEntry, 0, len(ids))
+	type captured struct{ request, response bool }
+	flags := make([]captured, 0, len(ids))
 	for rows.Next() {
-		entry, err := scanSQLLogEntry(rows)
+		var flag captured
+		entry, err := scanSQLLogEntry(extraColumns{row: rows, extra: []any{&flag.request, &flag.response}})
 		if err != nil {
 			return nil, err
 		}
 		entries = append(entries, *entry)
+		flags = append(flags, flag)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating audit log rows: %w", err)
+		return nil, fmt.Errorf("error iterating audit log preview rows: %w", err)
 	}
 	rows.Close()
 
-	if err := r.loadAttempts(ctx, entries); err != nil {
+	if err := r.loadAttempts(ctx, entries, false); err != nil {
 		return nil, err
 	}
-	return entries, nil
+	previews := make([]EntryPreview, len(entries))
+	for i := range entries {
+		previews[i] = EntryPreview{
+			LogEntry:             entries[i],
+			RequestBodyCaptured:  flags[i].request,
+			ResponseBodyCaptured: flags[i].response,
+		}
+	}
+	return previews, nil
+}
+
+// extraColumns scans a row that carries more columns than its scanner
+// expects, into extra after the scanner's own.
+type extraColumns struct {
+	row   sqlx.Row
+	extra []any
+}
+
+func (e extraColumns) Scan(dest ...any) error {
+	return e.row.Scan(append(dest, e.extra...)...)
 }
 
 // RecentWrites implements RecentWriteReader.
@@ -187,24 +234,47 @@ func (r *MongoDBReader) RecentWrites(ctx context.Context, since int64, excludeWr
 	return writes, nil
 }
 
-// EntriesByID implements RecentWriteReader.
-func (r *MongoDBReader) EntriesByID(ctx context.Context, ids []string) ([]LogEntry, error) {
+// PreviewsByID implements RecentWriteReader.
+func (r *MongoDBReader) PreviewsByID(ctx context.Context, ids []string) ([]EntryPreview, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	cursor, err := r.collection.Find(ctx, bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: ids}}}})
+	captured := func(field string) bson.D {
+		return bson.D{{Key: "$ne", Value: bson.A{bson.D{{Key: "$type", Value: field}}, "missing"}}}
+	}
+	cursor, err := r.collection.Aggregate(ctx, mongo.Pipeline{
+		{{Key: "$match", Value: bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: ids}}}}}},
+		{{Key: "$addFields", Value: bson.D{
+			{Key: "_request_body_captured", Value: captured("$data.request_body")},
+			{Key: "_response_body_captured", Value: captured("$data.response_body")},
+		}}},
+		{{Key: "$project", Value: bson.D{
+			{Key: "data.request_body", Value: 0},
+			{Key: "data.response_body", Value: 0},
+			{Key: "data.attempts.response_body", Value: 0},
+			{Key: "data.attempts.response_headers", Value: 0},
+		}}},
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to query audit logs by id: %w", err)
+		return nil, fmt.Errorf("failed to query audit log previews by id: %w", err)
 	}
 	defer cursor.Close(ctx)
 
-	var rows []mongoLogRow
+	var rows []struct {
+		Row                  mongoLogRow `bson:",inline"`
+		RequestBodyCaptured  bool        `bson:"_request_body_captured"`
+		ResponseBodyCaptured bool        `bson:"_response_body_captured"`
+	}
 	if err := cursor.All(ctx, &rows); err != nil {
-		return nil, fmt.Errorf("failed to decode audit logs by id: %w", err)
+		return nil, fmt.Errorf("failed to decode audit log previews by id: %w", err)
 	}
-	entries := make([]LogEntry, 0, len(rows))
+	previews := make([]EntryPreview, 0, len(rows))
 	for _, row := range rows {
-		entries = append(entries, *row.toLogEntry())
+		previews = append(previews, EntryPreview{
+			LogEntry:             *row.Row.toLogEntry(),
+			RequestBodyCaptured:  row.RequestBodyCaptured,
+			ResponseBodyCaptured: row.ResponseBodyCaptured,
+		})
 	}
-	return entries, nil
+	return previews, nil
 }

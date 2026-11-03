@@ -203,13 +203,13 @@ func (f *remoteFeed) poll(ctx context.Context) {
 }
 
 func (f *remoteFeed) publishAudit(ctx context.Context, ids []string) error {
-	entries, err := f.audit.EntriesByID(ctx, ids)
+	entries, err := f.audit.PreviewsByID(ctx, ids)
 	if err != nil {
 		return err
 	}
 	// Oldest first, so the newest request is the last one a dashboard
 	// places, as it would be for local traffic.
-	slices.SortFunc(entries, func(a, b auditlog.LogEntry) int {
+	slices.SortFunc(entries, func(a, b auditlog.EntryPreview) int {
 		return cmp.Or(a.Timestamp.Compare(b.Timestamp), cmp.Compare(a.ID, b.ID))
 	})
 	for i := range entries {

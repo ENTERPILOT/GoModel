@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/goccy/go-json"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -101,6 +102,7 @@ func TestRemoteFeedAcrossReplicasOnOneStore(t *testing.T) {
 			RequestedModel: "gpt-5",
 			Provider:       "openai",
 			StatusCode:     200,
+			Data:           &auditlog.LogData{RequestBody: auditlog.CaptureLoggedBody([]byte(`{"model":"gpt-5"}`))},
 		})
 		usageLogger.Write(&usage.UsageEntry{
 			ID:          usageID,
@@ -132,6 +134,13 @@ func TestRemoteFeedAcrossReplicasOnOneStore(t *testing.T) {
 		if len(events) == 2 {
 			assert.Equal(t, "req-on-a", events[0].RequestID)
 			assert.Equal(t, "req-on-a", events[1].RequestID)
+
+			var audit struct {
+				Data map[string]any `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(events[0].Data, &audit))
+			assert.NotContains(t, audit.Data, "request_body", "the body stays in the database")
+			assert.Equal(t, true, audit.Data["request_body_captured"])
 		}
 
 		b.tick(t)
