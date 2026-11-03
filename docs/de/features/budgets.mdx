@@ -212,6 +212,50 @@ Passen mehrere Budgets auf einen Request, prüft GoModel alle passenden Limits i
 einem einzigen Lookup. Der Request wird abgelehnt, wenn irgendein passendes Limit
 ausgeschöpft ist.
 
+### Nicht abrechenbare Provider
+
+Ein Provider mit `billable: false` bedient Requests, deren Kosten der Aufrufer
+Ihnen nicht schuldet, typischerweise der eigene API-Key eines Kunden, der als
+eigene Provider-Instanz registriert ist. User-Path- und Label-Budgets prüfen
+einen an einen solchen Provider gerouteten Request weder, noch zählen sie seine
+Ausgaben, auf keiner der beiden Kostenbasen. Provider-Budgets gelten weiterhin
+für ihn: Auf Provider-Kosten zählen sie seine Nutzung vollständig, während ein
+Provider-Budget auf abgerechnete Kosten seine abgerechneten Kosten von `0`
+sieht. Die Nutzung wird wie gewohnt erfasst und bepreist, und jede Zeile
+vermerkt `billable: false`; das Flag wird beim Schreiben der Zeile gesetzt,
+sodass eine spätere Änderung vergangene Ausgaben nicht umschreibt.
+
+Ein Beispiel: Eine Plattform lässt Nutzer ihren eigenen OpenAI-Key mitbringen
+und bietet außerdem Ihre gehosteten Modelle an. Registrieren Sie den Key des
+Nutzers als eigenen Provider, markieren Sie ihn als nicht abrechenbar und legen
+Sie das Budget auf den User-Path des Nutzers: Das Budget begrenzt dann nur die
+gehosteten Modelle, während die OpenAI-Nutzung des Nutzers in Nutzungsberichten
+und `GET /v1/usage` sichtbar bleibt.
+
+```bash
+curl -X PUT http://localhost:8080/admin/provider-credentials \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "openai-u123", "type": "openai", "api_keys": ["sk-..."], "billable": false}'
+```
+
+```yaml
+budgets:
+  user_paths:
+    - path: "/users/u123"
+      limits:
+        - period: "monthly"
+          amount: 20.00
+```
+
+Binden Sie den API-Key des Nutzers an `/users/u123`. Requests an
+`openai-u123/...` werden nicht gegen das Budget geprüft und zählen nicht dazu;
+Requests an Ihren gehosteten Provider schon. In `config.yaml` heißt dieselbe
+Einstellung `providers.<name>.billable: false`, in der Umgebung
+`<PROVIDER>[_SUFFIX]_BILLABLE=false`; wie nicht abrechenbare Nutzung
+abgerechnet wird, beschreibt
+[Kostenerfassung](/de/features/cost-tracking#aufschläge-und-abgerechnete-kosten).
+
 ### Provider-Budgets und Failover
 
 Ist ein Provider-Budget ausgeschöpft und hat der Request
@@ -221,6 +265,13 @@ Provider und versucht die Failover-Ziele, statt den Request abzulehnen. Das Fail
 Bleibt kein Ziel übrig, erhält der Client den ursprünglichen Fehler
 `budget_exceeded`. User-Path- und Label-Budgets lehnen immer ab: Ein Wechsel des
 Providers kann sie nicht entlasten.
+
+Die einzige Ausnahme ist ein Request, der auf einem nicht abrechenbaren Provider
+zugelassen wurde und für den User-Path- und Label-Budgets nicht geprüft wurden.
+Fällt er auf ein abrechenbares Ziel über, prüft das Failover diese Budgets für
+dieses Ziel und überspringt es, wenn eines ausgeschöpft ist; der eigene Key
+eines Kunden öffnet also nie einen Weg an seinem Budget auf Ihren Providern
+vorbei.
 
 ### Dynamische Budgets pro Kind
 
@@ -305,7 +356,9 @@ Ein abgerechnetes Budget:
   lehnt ein ausgeschöpftes abgerechnetes User-Path- oder Label-Budget einen
   Request ab, bevor eine gecachte Antwort ausgeliefert wird. Budgets auf
   Provider-Kosten zählen Cache-Treffer nie, und Provider-Budgets gelten nicht
-  für sie, da ein Treffer an keinen Provider geht.
+  für sie, da ein Treffer an keinen Provider geht. Ein Treffer für das Modell
+  eines [nicht abrechenbaren Providers](#nicht-abrechenbare-provider) wird in
+  jedem Fall zugelassen, wie es der Request selbst würde.
 - zählt bei einem Provider die abgerechneten Cache-Treffer seiner Modelle trotzdem
   zu den Ausgaben. Setzen Sie `BUDGETS_PROVIDER_BILLED_CACHE_HITS=false`
   (`budgets.provider_billed_cache_hits`), damit ein Provider-Budget nur die
