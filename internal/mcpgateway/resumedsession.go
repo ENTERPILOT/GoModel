@@ -37,6 +37,11 @@ func newResumedSession(session *mcp.ServerSession, transport *mcp.StreamableServ
 // loopback Host check is left out: originGuard has already run on every bind
 // address.
 func (h *resumedSession) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Before the method switch, as in the SDK handler: a DELETE with an
+	// unsupported version is rejected, not run.
+	if rejectUnsupportedProtocolVersion(w, r) {
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		if _, streamOK := streamableAccepts(r.Header.Values("Accept")); !streamOK {
@@ -59,10 +64,6 @@ func (h *resumedSession) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.Header().Set("Allow", "GET, POST, DELETE")
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if version := r.Header.Get("Mcp-Protocol-Version"); version != "" && !slices.Contains(mcp.SupportedProtocolVersions(), version) {
-		http.Error(w, fmt.Sprintf("Bad Request: Unsupported protocol version (supported versions: %s)", strings.Join(mcp.SupportedProtocolVersions(), ",")), http.StatusBadRequest)
 		return
 	}
 	if r.Body != nil {
@@ -106,6 +107,28 @@ func (h *resumedSession) stopTimer() {
 func (h *resumedSession) close() {
 	h.stopTimer()
 	_ = h.session.Close()
+}
+
+// sessionProtocolVersions are the protocol versions every session server
+// negotiates, and the ones rejectUnsupportedProtocolVersion accepts.
+var sessionProtocolVersions = mcp.SupportedProtocolVersions()
+
+// perRequestProtocolVersion is the first protocol version that carries its
+// version on every request (SEP-2575). The SDK handler passes a version from
+// it on that it does not list to its own handling instead of rejecting it.
+const perRequestProtocolVersion = "2026-07-28"
+
+// rejectUnsupportedProtocolVersion answers 400 to a request whose
+// Mcp-Protocol-Version the session servers do not negotiate, matching the SDK
+// handler's check. It runs before a request touches its session, so a
+// rejected DELETE leaves the session open.
+func rejectUnsupportedProtocolVersion(w http.ResponseWriter, r *http.Request) bool {
+	version := r.Header.Get("Mcp-Protocol-Version")
+	if version == "" || slices.Contains(sessionProtocolVersions, version) || version >= perRequestProtocolVersion {
+		return false
+	}
+	http.Error(w, fmt.Sprintf("Bad Request: Unsupported protocol version (supported versions: %s)", strings.Join(sessionProtocolVersions, ",")), http.StatusBadRequest)
+	return true
 }
 
 // streamableAccepts reports whether Accept admits JSON and an event stream,

@@ -383,3 +383,44 @@ func TestSessionsStayLocalWithoutSharedStore(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, b.url+"/mcp", listToolsBody, withSession(nil, sessionID)))
 	assert.Equal(t, http.StatusOK, rawMCPStatus(t, a.url+"/mcp", listToolsBody, withSession(nil, sessionID)))
 }
+
+// A DELETE with an Mcp-Protocol-Version the gateway does not negotiate is
+// rejected before it reaches the session, wherever the session is hosted: the
+// session stays open, shared, and bound to its principal. A version from the
+// per-request protocol on passes the check, as in the SDK handler.
+func TestDeleteWithUnsupportedProtocolVersionKeepsTheSession(t *testing.T) {
+	store := newMemorySharedStore(time.Now)
+	servers := alphaServers(t)
+	a := newReplica(t, store, Options{ConfigServers: servers}, nil)
+	b := newReplica(t, store, Options{ConfigServers: servers}, nil)
+	owner := map[string]string{"X-Test-Auth-Key-ID": "key-a"}
+	foreign := map[string]string{"X-Test-Auth-Key-ID": "key-b"}
+	withVersion := func(headers map[string]string, sessionID, version string) map[string]string {
+		merged := withSession(headers, sessionID)
+		merged["Mcp-Protocol-Version"] = version
+		return merged
+	}
+
+	for name, resumed := range map[string]bool{"sdk-hosted": false, "resumed": true} {
+		t.Run(name, func(t *testing.T) {
+			sessionID := initializeRawSession(t, a.url+"/mcp", owner)
+			host := a
+			if resumed {
+				host = b
+				require.Equal(t, http.StatusOK, rawMCPStatus(t, b.url+"/mcp", listToolsBody, withSession(owner, sessionID)))
+			}
+
+			assert.Equal(t, http.StatusBadRequest, rawMCPDelete(t, host.url+"/mcp", withVersion(owner, sessionID, "2024-01-01")))
+			_, bound := host.binding(sessionID)
+			assert.True(t, bound, "the binding survives a rejected DELETE")
+			_, stored := store.entry(sharedSessionNamespace, sessionKey(sessionID))
+			assert.True(t, stored, "the shared record survives a rejected DELETE")
+			_, closed := store.entry(sharedSessionNamespace, sessionCloseKey(sessionID))
+			assert.False(t, closed, "a rejected DELETE writes no close mark")
+			assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, host.url+"/mcp", listToolsBody, withSession(foreign, sessionID)))
+			assert.Equal(t, http.StatusOK, rawMCPStatus(t, host.url+"/mcp", listToolsBody, withSession(owner, sessionID)))
+
+			assert.Equal(t, http.StatusNoContent, rawMCPDelete(t, host.url+"/mcp", withVersion(owner, sessionID, "2099-01-01")))
+		})
+	}
+}

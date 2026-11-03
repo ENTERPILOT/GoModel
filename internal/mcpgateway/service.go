@@ -636,6 +636,9 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer
 	if err := s.origins.check(r); err != nil {
 		return err
 	}
+	if rejectUnsupportedProtocolVersion(w, r) {
+		return nil
+	}
 
 	requestCtx, cancel := context.WithCancel(r.Context())
 	s.requestMu.Lock()
@@ -798,7 +801,8 @@ func (s *Service) newSessionServer(scope requestScope) (*mcp.Server, map[string]
 		Title:   "GoModel MCP Gateway",
 		Version: version.Version,
 	}, &mcp.ServerOptions{
-		Instructions: s.composeInstructions(scope, views),
+		Instructions:              s.composeInstructions(scope, views),
+		SupportedProtocolVersions: sessionProtocolVersions,
 		// Advertise the full feature set even when the visible catalog is
 		// currently empty, so list calls return empty lists instead of
 		// method-not-supported errors.
