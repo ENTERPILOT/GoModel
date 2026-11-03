@@ -448,7 +448,7 @@ Under heavy traffic, at most 200 audit and 200 usage entries from other
 replicas are streamed per poll, the newest first. The rest are still in the
 list after a refresh. A dashboard that reconnects, or a replica whose reads
 failed for a while, catches up on what the other replicas persisted in the
-meantime, up to 5 minutes back. Replica clocks should agree within a few
+meantime, up to 5 minutes back and within the same 200-entry limit per poll. Replica clocks should agree within a few
 seconds, which NTP gives you.
 
 ### Config changes reach every replica within seconds
