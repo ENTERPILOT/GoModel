@@ -808,6 +808,35 @@ func TestModelRegistry(t *testing.T) {
 		require.NotNil(t, snapshot.LastModelFetchAt)
 	})
 
+	t.Run("EmptyRefreshNextToAHealthyProviderKeepsInventoryStale", func(t *testing.T) {
+		registry := NewModelRegistry()
+		healthy := &registryMockProvider{modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data:   []core.Model{{ID: "healthy-model", Object: "model", OwnedBy: "test"}},
+		}}
+		emptied := &registryMockProvider{modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data:   []core.Model{{ID: "test-model", Object: "model", OwnedBy: "test"}},
+		}}
+		registry.RegisterProviderWithNameAndType(healthy, "healthy", "test")
+		registry.RegisterProviderWithNameAndType(emptied, "emptied", "test")
+		require.NoError(t, registry.Initialize(context.Background()))
+
+		emptied.modelsResponse = &core.ModelsResponse{Object: "list"}
+		require.NoError(t, registry.Initialize(context.Background()))
+
+		// Direct requests still route, but load balancing skips the provider.
+		require.Same(t, emptied, registry.GetProvider("emptied/test-model"))
+		require.False(t, registry.ModelAvailable("emptied/test-model"))
+		require.True(t, registry.ModelAvailable("healthy/healthy-model"))
+		for _, snapshot := range registry.ProviderRuntimeSnapshots() {
+			if snapshot.Name == "emptied" {
+				require.True(t, snapshot.InventoryStale)
+				require.Contains(t, snapshot.LastModelFetchError, "empty model list")
+			}
+		}
+	})
+
 	t.Run("ListModelsOrdering", func(t *testing.T) {
 		registry := NewModelRegistry()
 		mock := &registryMockProvider{

@@ -321,11 +321,11 @@ func (r *ModelRegistry) fetchAllProviderModels(
 // atomically swaps them onto the registry, marks initialized, and emits the
 // summary log line.
 //
-// A provider that failed this sweep keeps its previous inventory, marked
-// stale: direct requests still resolve (and fail at the provider with an
-// honest 502/503 instead of "model not found"), while ModelAvailable reports
-// false so virtual-model load balancing skips it — the same routing outcome
-// the old wipe produced, without losing the inventory.
+// A provider that failed this sweep, or listed no models, keeps its previous
+// inventory, marked stale: direct requests still resolve (and fail at the
+// provider with an honest 502/503 instead of "model not found"), while
+// ModelAvailable reports false so virtual-model load balancing skips it — the
+// same routing outcome the old wipe produced, without losing the inventory.
 //
 // A provider registered or replaced after the sweep started keeps its current
 // inventory untouched: the sweep's result for a replaced provider instance is
@@ -342,9 +342,11 @@ func (r *ModelRegistry) applyFetchedInventory(
 	stale := make(map[string]bool, len(fetched.runtimeUpdates))
 	carriedForward := 0
 	for _, name := range r.providerOrderNamesLocked() {
-		if _, ok := fetched.modelsByProvider[name]; ok {
+		if len(fetched.modelsByProvider[name]) > 0 {
 			continue // this sweep produced authoritative inventory
 		}
+		// An empty listing is recorded as a failed fetch, so it carries the
+		// previous inventory forward like an error does instead of erasing it.
 		previous := r.discoveredByProvider[name]
 		if len(previous) == 0 {
 			continue // nothing to carry forward
