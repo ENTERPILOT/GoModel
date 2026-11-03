@@ -414,6 +414,7 @@ func TestLoadRejectsReferencesInParsedEnvVars(t *testing.T) {
 		{name: "duration field", key: "RETRY_INITIAL_BACKOFF", value: "${env:X}", wantErr: true},
 		{name: "list field", key: "ENABLED_PASSTHROUGH_PROVIDERS", value: "openai,${env:X}", wantErr: true},
 		{name: "parsed outside the tags", key: "SEMANTIC_CACHE_ENABLED", value: "${file:/x}", wantErr: true},
+		{name: "response cache partition flag", key: "RESPONSE_CACHE_PARTITION_BY_USER_PATH", value: "${env:X}", wantErr: true},
 		{name: "plugin list", key: "PLUGINS_LOAD", value: "${env:X}", wantErr: true},
 		{name: "limit family", key: "SET_BUDGET_TEAM", value: "${env:X}", wantErr: true},
 		{name: "tagging flag", key: "TAGGING_HEADER_1_DONOTPASS", value: "${env:X}", wantErr: true},

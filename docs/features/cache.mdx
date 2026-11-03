@@ -110,6 +110,7 @@ The exact cache hashes:
 - the guardrail chain the request resolves to, across the prompt, response and
   stream phases
 - the final request body
+- the effective `user_path`, only when `partition_by_user_path` is on (see below)
 
 This means guardrails and workflows affect cache keys when they change the
 resolved workflow or the final body sent through execution.
@@ -157,19 +158,54 @@ safe default (`true`) and an invalid value emits a startup warning.
 
 ## `user_path` behavior
 
-For the exact cache, `user_path` is not added to the cache key by itself.
+By default, `user_path` is not part of the cache key in either layer.
 
 That is intentional. If two requests end up with the same path, resolved
-workflow, and final request body, they can share the same exact-cache
-entry even when they originate from different `user_path` values.
+workflow, and final request body, they can share the same entry even when they
+originate from different `user_path` values, and so can similar prompts in the
+semantic cache. Sharing gives the best hit rate, and it also means one tenant
+can be served a response cached for another.
 
-<Note>
-  If you need tenant or path-specific cache behavior, use a scoped workflow or
-  otherwise make the final request differ for that scope. `user_path` alone is
-  not an exact-cache partition key.
-</Note>
+### Partition the cache by `user_path`
 
-Common patterns:
+Enable partitioning when callers must not receive each other's cached
+responses, for example when API keys bound to a `user_path` belong to different
+tenants:
+
+```yaml
+cache:
+  response:
+    partition_by_user_path: true # default: false
+```
+
+Or set `RESPONSE_CACHE_PARTITION_BY_USER_PATH=true`.
+
+The setting covers both cache layers and every endpoint above, streaming or not:
+
+- Requests with different effective `user_path` values never share an entry, and
+  concurrent identical misses only wait for a request from their own path.
+- Paths match exactly. `/team/alpha` does not reuse entries from `/team` or
+  `/team/alpha/bob`.
+- Requests with no `user_path` form their own partition, separate from `/`.
+- Each path pays for its own first request, so hit rates drop when tenants send
+  the same prompts.
+
+<Warning>
+  Isolation only holds between API keys bound to a `user_path`. The master key
+  and managed keys with no bound path choose their path through the
+  [user path header](/features/user-path), so they can read any partition, as can
+  every caller when authentication is off.
+</Warning>
+
+Changing the setting causes cache misses for existing entries: they are never
+served across modes. They are not deleted either. They expire by their TTL, and
+they are served again if you switch back before then. To keep previously shared
+entries from coming back, wait out the TTL or clear the cache before switching
+back.
+
+### Other ways to scope the cache
+
+If you only need different cache behavior per scope, not isolation:
 
 - disable cache in a scoped workflow
 - use different scoped workflows for different `user_path` values

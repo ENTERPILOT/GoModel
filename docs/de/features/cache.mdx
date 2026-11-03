@@ -113,6 +113,7 @@ Der exakte Cache bildet einen Hash über:
 - die Guardrail-Kette, zu der der Request aufgelöst wird, über die Phasen Prompt,
   Response und Stream hinweg
 - den endgültigen Request-Body
+- den effektiven `user_path`, nur wenn `partition_by_user_path` aktiv ist (siehe unten)
 
 Guardrails und Workflows beeinflussen die Cache-Schlüssel also, wenn sie den
 aufgelösten Workflow oder den endgültigen Body ändern, der durch die Ausführung
@@ -167,22 +168,58 @@ erzeugt beim Start eine Warnung.
 
 ## Verhalten von `user_path`
 
-Beim exakten Cache wird `user_path` nicht von sich aus in den Cache-Schlüssel
-aufgenommen.
+Standardmäßig ist `user_path` in keiner der beiden Cache-Ebenen Teil des
+Cache-Schlüssels.
 
 Das ist beabsichtigt. Haben zwei Requests am Ende denselben Pfad, denselben
 aufgelösten Workflow und denselben endgültigen Request-Body, können sie sich
-denselben Eintrag im exakten Cache teilen, selbst wenn sie von unterschiedlichen
-`user_path`-Werten stammen.
+denselben Eintrag teilen, selbst wenn sie von unterschiedlichen
+`user_path`-Werten stammen; im semantischen Cache gilt das auch für ähnliche
+Prompts. Das ergibt die beste Trefferquote, bedeutet aber auch, dass ein Tenant
+eine für einen anderen Tenant gecachte Response erhalten kann.
 
-<Note>
-  Wenn Sie Cache-Verhalten pro Tenant oder Pfad benötigen, verwenden Sie einen
-  Scoped Workflow oder sorgen Sie auf andere Weise dafür, dass sich der endgültige
-  Request für diesen Scope unterscheidet. `user_path` allein ist kein
-  Partitionsschlüssel des exakten Caches.
-</Note>
+### Cache nach `user_path` partitionieren
 
-Gängige Muster:
+Aktivieren Sie die Partitionierung, wenn Aufrufer nicht die gecachten Responses
+der anderen erhalten dürfen, zum Beispiel wenn an einen `user_path` gebundene
+API-Keys unterschiedlichen Tenants gehören:
+
+```yaml
+cache:
+  response:
+    partition_by_user_path: true # Standard: false
+```
+
+Oder setzen Sie `RESPONSE_CACHE_PARTITION_BY_USER_PATH=true`.
+
+Die Einstellung gilt für beide Cache-Ebenen und alle oben genannten Endpunkte,
+mit und ohne Streaming:
+
+- Requests mit unterschiedlichem effektivem `user_path` teilen nie einen Eintrag,
+  und gleichzeitige identische Misses warten nur auf Requests desselben Pfads.
+- Pfade müssen exakt übereinstimmen. `/team/alpha` verwendet keine Einträge von
+  `/team` oder `/team/alpha/bob`.
+- Requests ohne `user_path` bilden eine eigene Partition, getrennt von `/`.
+- Jeder Pfad bezahlt seinen ersten Request selbst, die Trefferquote sinkt also,
+  wenn Tenants dieselben Prompts senden.
+
+<Warning>
+  Die Isolation gilt nur zwischen API-Keys, die an einen `user_path` gebunden sind.
+  Der Master-Key und verwaltete Keys ohne gebundenen Pfad wählen ihren Pfad über den
+  [User-Path-Header](/de/features/user-path) und können daher jede Partition lesen;
+  dasselbe gilt für alle Aufrufer, wenn die Authentifizierung deaktiviert ist.
+</Warning>
+
+Eine Änderung der Einstellung führt bei bestehenden Einträgen zu Cache-Misses: Sie
+werden nie modusübergreifend ausgeliefert. Gelöscht werden sie aber auch nicht. Sie
+laufen mit ihrer TTL ab und werden wieder ausgeliefert, wenn Sie vorher
+zurückschalten. Damit zuvor geteilte Einträge nicht zurückkehren, warten Sie vor dem
+Zurückschalten die TTL ab oder leeren Sie den Cache.
+
+### Andere Wege, den Cache einzugrenzen
+
+Wenn Sie nur unterschiedliches Cache-Verhalten pro Scope brauchen, aber keine
+Isolation:
 
 - den Cache in einem Scoped Workflow deaktivieren
 - unterschiedliche Scoped Workflows für unterschiedliche `user_path`-Werte verwenden
