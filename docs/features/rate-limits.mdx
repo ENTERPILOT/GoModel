@@ -232,8 +232,9 @@ Details worth knowing:
   concurrency slot.
 - Request and token windows live in memory for admission and are saved to
   the configured store about once a second (and on shutdown), so they
-  survive a restart and `gomodel --reload`. A restart counts what the
-  previous run counted exactly once. Tune the interval with
+  survive a restart and `gomodel --reload`. A restart counts the previous
+  run's saved counts once, not twice; a crash loses at most the counts since
+  the last flush. Tune the interval with
   `RATE_LIMITS_FLUSH_INTERVAL` (seconds; default `1`). `0` skips the
   periodic write: counts still load on start and save on a clean shutdown,
   but replicas no longer see each other's traffic after start.
@@ -277,10 +278,12 @@ The limit is approximate, not exact:
   replicas, needs a per-request check against shared state, which GoModel
   does not offer yet. Use sticky routing or a single replica for it.
 
-Each flush writes only the counters that changed since the last one, and
-reads only the rows written since its previous read, with a full read once
-a minute. [Budgets](/features/budgets) remain the exact, durable control for
-spend.
+Each flush writes only the request and token counters that changed since
+the last one, plus every nonzero concurrency gauge, which is rewritten on
+every flush as a heartbeat so other replicas can tell a live replica's slots
+from a crashed one's. It reads only the rows written since its previous
+read, with a full read once a minute. [Budgets](/features/budgets) remain
+the durable control for spend.
 
 ## Client behavior
 

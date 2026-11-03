@@ -414,13 +414,15 @@ coordinate across instances.
 
 The one that surprises people is rate limits: admission is in memory, so a
 replica learns the others' traffic only when it reads their saved counts, about
-once a second. Three replicas with a 100 rpm rule admit about 100 rpm in
-aggregate, but can overshoot by about two seconds of the other replicas'
+once a second by default. Three replicas with a 100 rpm rule admit about 100
+rpm in aggregate, but can overshoot by about two seconds of the other replicas'
 traffic, and a crashed replica's concurrency slots stay taken for a few
 seconds. Do not rely on rate limits for a cap that must never be exceeded, such
 as one concurrent request across replicas, and use
-[budgets](/features/budgets) as the exact cross-instance control for spend. See
+[budgets](/features/budgets) as the durable cross-instance control for spend. See
 [several replicas share one limit](/features/rate-limits#several-replicas-share-one-limit).
+`RATE_LIMITS_FLUSH_INTERVAL=0` stops replicas sharing counts after start, so
+together they can again admit up to about `N x` the limit.
 
 ### Config changes reach every replica within seconds
 
