@@ -342,12 +342,12 @@ binding and resumes the session there, without a new `initialize`.
 
 | | Across replicas |
 | --- | --- |
-| Tool calls, listings, prompts, resources | Work on any replica, with the scope and discovery mode the session opened with. |
+| Tool calls, listings, prompts, resources | Work on any replica, with the scope and discovery mode the session opened with. A replica that resumes a session lists the catalog as it is at the resume, which can differ from an earlier listing. |
 | Negotiated protocol version, client info and capabilities | Carried over. |
 | Session binding (auth key, user path, endpoint) | Checked on every replica; a leaked ID under another identity gets 404 everywhere. |
-| `DELETE` | Ends the session on every replica. One that is serving it stops within about 2 seconds. |
-| Deleting a virtual server | Ends its sessions on every replica within about 2 seconds, even if it is recreated under the same name. |
-| Idle timeout | 30 minutes without a request on any replica, to within a minute. |
+| `DELETE` | Ends the session on every replica: each refuses its requests within about 2 seconds. An open `GET` stream on another replica is not closed early; it ends when the client closes it or at that replica's idle timeout. |
+| Deleting a virtual server | Ends its sessions on every replica, even if it is recreated under the same name: each refuses their requests within about 2 seconds. Open `GET` streams are not closed early. |
+| Idle timeout | 30 minutes without a request on any replica, to within a minute. A call still running counts as activity. |
 | A response stream in flight | Stays on its replica. If that replica stops, the client sees that request fail; the session continues on another. |
 | The `GET` notification stream | Stays open on the replica it was opened on, until the client closes it or that replica ends the session. A client that reconnects it lands on any replica. |
 
@@ -358,7 +358,10 @@ stranded on another replica.
 
 With SQLite, sessions stay on the instance that opened them, as SQLite serves a
 single replica. If the database cannot be reached when a session opens, that
-session stays on its replica too, and the gateway logs a warning.
+session stays on its replica too, and the gateway logs a warning. If it cannot
+be read later, a replica already serving the session keeps serving it but does
+not see a `DELETE` sent elsewhere until the database is back; any other replica
+answers 404, and the client initializes a new session.
 
 ## Choose which tools each server exposes
 

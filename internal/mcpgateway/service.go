@@ -793,7 +793,9 @@ func (s *Service) scopeFromRequest(r *http.Request) requestScope {
 // getServer builds the per-session MCP server for one downstream client: the
 // SDK calls it when a new session initializes. The tool/prompt/resource view
 // is filtered to what this principal may see — clients never discover tools
-// they cannot call — and stays a stable snapshot for the session's lifetime.
+// they cannot call — and stays a snapshot while this replica hosts the
+// session. A replica that resumes the session builds it from the catalog as
+// it is then.
 func (s *Service) getServer(r *http.Request) *mcp.Server {
 	server, _ := s.newSessionServer(s.scopeFromRequest(r))
 	return server
