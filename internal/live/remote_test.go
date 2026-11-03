@@ -42,6 +42,9 @@ type fakeTable struct {
 	rows        []fakeRow
 	recentCalls int
 	failLoads   int
+	// stall makes RecentWrites wait for its context to end, as a read
+	// stuck on the database would.
+	stall bool
 }
 
 // add stores a row whose request time is its write time.
@@ -63,10 +66,16 @@ func (f *fakeTable) calls() int {
 	return f.recentCalls
 }
 
-func (f *fakeTable) RecentWrites(_ context.Context, since int64, excludeWriter string, limit int) ([]storage.RecentWrite, error) {
+func (f *fakeTable) RecentWrites(ctx context.Context, since int64, excludeWriter string, limit int) ([]storage.RecentWrite, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.recentCalls++
+	if f.stall {
+		<-ctx.Done()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var writes []storage.RecentWrite
 	for _, row := range f.rows {
 		if row.writer != "" && row.writer != excludeWriter && row.writtenAt >= since {
@@ -478,4 +487,17 @@ func TestStartRemoteNeedsAReader(t *testing.T) {
 	disabled := NewBroker(Config{})
 	disabled.StartRemote(RemoteConfig{Writer: testSelf, Audit: &fakeAuditTable{}})
 	assert.Nil(t, disabled.remote)
+}
+
+// A stuck audit read uses up only its own budget: usage still publishes.
+func TestRemoteFeedTimesOutEachTableOnItsOwn(t *testing.T) {
+	audit := &fakeAuditTable{}
+	audit.stall = true
+	usageTable := &fakeUsageTable{}
+	usageTable.add("usage-1", testPeer, testT0.Add(-time.Second))
+	h := newTestHarness(t, testSelf, audit, usageTable, &testClock{now: testT0})
+	h.feed.timeout = 50 * time.Millisecond
+
+	sub := h.subscribe(t)
+	assert.Equal(t, []string{EventUsageFlushed + ":usage-1"}, eventIDs(t, pendingEvents(sub)))
 }

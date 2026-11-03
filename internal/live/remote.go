@@ -56,7 +56,7 @@ const (
 	// in history.
 	remoteEntryLimit = 200
 
-	// remotePollTimeout bounds one poll.
+	// remotePollTimeout bounds one poll of one table.
 	remotePollTimeout = 10 * time.Second
 )
 
@@ -103,6 +103,7 @@ type remoteFeed struct {
 	interval time.Duration
 	window   time.Duration
 	resume   time.Duration
+	timeout  time.Duration
 
 	// now and newTicker are the clock; tests replace them, and set polled
 	// to learn when a poll has finished.
@@ -128,6 +129,7 @@ func newRemoteFeed(b *Broker, cfg RemoteConfig) *remoteFeed {
 		interval:  remoteInterval,
 		window:    remoteWindow,
 		resume:    remoteResumeLimit,
+		timeout:   remotePollTimeout,
 		now:       time.Now,
 		newTicker: realTicker,
 		auditSeen: remoteSeen{table: "audit"},
@@ -198,9 +200,7 @@ func (f *remoteFeed) pollWhileSubscribed(ctx context.Context) {
 }
 
 func (f *remoteFeed) poll(ctx context.Context) {
-	ctx, cancel := context.WithTimeout(ctx, remotePollTimeout)
-	defer cancel()
-	span := remoteSpan{now: f.now().UnixMicro(), window: f.window.Microseconds(), resume: f.resume.Microseconds()}
+	span := remoteSpan{now: f.now().UnixMicro(), window: f.window.Microseconds(), resume: f.resume.Microseconds(), timeout: f.timeout}
 	// Audit first: a usage event merges into the audit row it belongs to.
 	if f.audit != nil {
 		f.auditSeen.poll(ctx, span, f.writer, f.audit.RecentWrites, f.publishAudit)
@@ -262,9 +262,10 @@ func recentWriteTimes(writes []storage.RecentWrite) map[string]int64 {
 }
 
 // remoteSpan is one poll's clock: now, the window and the resume limit, all
-// in unix microseconds.
+// in unix microseconds, and the time each table's read may take.
 type remoteSpan struct {
 	now, window, resume int64
+	timeout             time.Duration
 }
 
 // remoteSeen remembers which stamped entries of one table were published,
@@ -298,6 +299,10 @@ type recentWritesFunc func(ctx context.Context, since int64, excludeWriter strin
 // not published yet. They are remembered only once published, so a failed
 // load is retried on the next poll, which reaches back to cover it.
 func (s *remoteSeen) poll(ctx context.Context, span remoteSpan, writer string, recent recentWritesFunc, publish func(context.Context, []storage.RecentWrite) error) {
+	// Each table has its own budget, so a slow audit read cannot starve the
+	// usage one.
+	ctx, cancel := context.WithTimeout(ctx, span.timeout)
+	defer cancel()
 	since := s.since(span)
 	writes, err := recent(ctx, since, writer, remoteWriteLimit)
 	if err != nil {
