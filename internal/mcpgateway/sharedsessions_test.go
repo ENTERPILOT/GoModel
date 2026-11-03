@@ -639,3 +639,41 @@ func TestDeleteVirtualClosesSharedSessionsWhenReloadFails(t *testing.T) {
 	b.clock.Advance(sessionRecheckInterval)
 	assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, b.url+"/mcp/coding", listToolsBody, withSession(nil, sessionID)))
 }
+
+// A virtual server recreated under the same name does not revive the deleted
+// one's sessions, even when the replica that opened them runs ahead of the
+// one that deleted it: its creation time, read from the store, tells the two
+// apart without comparing replica clocks.
+func TestRecreatedVirtualIgnoresReplicaClockSkew(t *testing.T) {
+	store := newMemorySharedStore(time.Now)
+	ctx := context.Background()
+	servers := alphaServers(t)
+	created := time.Now().Add(-time.Hour).UTC()
+	virtualStore := &memoryVirtualStore{rows: map[string]ManagedVirtualServer{
+		"coding": {Name: "coding", Servers: []string{"alpha"}, CreatedAt: created},
+	}}
+	options := func() Options {
+		return Options{ConfigServers: servers, Store: &memoryStore{rows: map[string]ManagedServer{}}, VirtualStore: virtualStore}
+	}
+	ahead := &testClock{}
+	ahead.Advance(time.Minute)
+	a := newReplica(t, store, options(), ahead)
+	b := newReplica(t, store, options(), nil)
+	sessionID := initializeRawSession(t, a.url+"/mcp/coding", nil)
+
+	require.NoError(t, b.service.DeleteVirtual(ctx, "coding"))
+	_, err := b.service.UpsertVirtual(ctx, ManagedVirtualServer{Name: "coding", Servers: []string{"alpha"}, CreatedAt: created.Add(time.Second)})
+	require.NoError(t, err)
+	c := newReplica(t, store, options(), nil)
+	assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, c.url+"/mcp/coding", listToolsBody, withSession(nil, sessionID)),
+		"no replica resumes the deleted virtual server's session")
+	fresh := initializeRawSession(t, b.url+"/mcp/coding", nil)
+	assert.Equal(t, http.StatusOK, rawMCPStatus(t, c.url+"/mcp/coding", listToolsBody, withSession(nil, fresh)),
+		"a session on the recreated virtual server resumes")
+
+	require.NoError(t, a.service.Reload(ctx))
+	assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, a.url+"/mcp/coding", listToolsBody, withSession(nil, sessionID)),
+		"the replica hosting it ends it once it serves the recreated one")
+	_, bound := a.binding(sessionID)
+	assert.False(t, bound)
+}

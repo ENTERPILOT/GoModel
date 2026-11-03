@@ -50,10 +50,12 @@ type sharedSession struct {
 	Scoped    bool     `json:"scoped,omitempty"`
 	Servers   []string `json:"servers,omitempty"`
 	Discovery bool     `json:"discovery,omitempty"`
-	// OpenedAt is in unix nanoseconds.
-	OpenedAt        int64                 `json:"opened_at"`
-	Initialize      *mcp.InitializeParams `json:"initialize"`
-	ProtocolVersion string                `json:"protocol_version"`
+	// OpenedAt and VirtualCreatedAt (see sessionBinding.virtualCreatedAt)
+	// are in unix nanoseconds.
+	OpenedAt         int64                 `json:"opened_at"`
+	VirtualCreatedAt int64                 `json:"virtual_created_at,omitempty"`
+	Initialize       *mcp.InitializeParams `json:"initialize"`
+	ProtocolVersion  string                `json:"protocol_version"`
 }
 
 // scope rebuilds the visibility inputs the session was opened with: later
@@ -117,6 +119,11 @@ func (s *Service) admitSession(ctx context.Context, sessionID, authKeyID, userPa
 	if !binding.boundTo(authKeyID, userPath, endpoint) {
 		return sessionRejected, nil
 	}
+	if s.endpointReplaced(binding.endpoint, binding.virtualCreatedAt) {
+		s.unbind(sessionID, binding.server)
+		closeSessions(binding.server)
+		return sessionRejected, nil
+	}
 	if remove {
 		s.unbind(sessionID, binding.server)
 		if binding.shared {
@@ -146,7 +153,8 @@ func (s *Service) admitSharedSession(ctx context.Context, sessionID, authKeyID, 
 	if record == nil {
 		return sessionAdmitted, nil
 	}
-	if record.AuthKeyID != authKeyID || record.UserPath != userPath || record.Endpoint != endpoint {
+	if record.AuthKeyID != authKeyID || record.UserPath != userPath || record.Endpoint != endpoint ||
+		s.endpointReplaced(record.Endpoint, unixNanoTime(record.VirtualCreatedAt)) {
 		return sessionRejected, nil
 	}
 	if remove {
@@ -186,8 +194,10 @@ func (s *Service) loadSharedSession(ctx context.Context, sessionID string) (*sha
 
 // sharedSessionClosed reports whether a session was closed on any replica:
 // by a DELETE, or by deleting the virtual server it was opened on. The
-// second mark outlives the endpoint, so a virtual server recreated under the
-// same name does not revive sessions of the deleted one.
+// second mark ends the deleted server's sessions on replicas that still
+// serve it until they reload; endpointReplaced keeps a server recreated
+// under the same name from reviving them, which comparing the mark with
+// OpenedAt, stamped by another replica's clock, cannot guarantee.
 func (s *Service) sharedSessionClosed(ctx context.Context, sessionID, endpoint string, openedAt time.Time) (bool, error) {
 	if _, closed, err := s.shared.Get(ctx, sharedSessionNamespace, sessionCloseKey(sessionID)); err != nil || closed {
 		return closed, err
@@ -373,19 +383,20 @@ func (s *Service) resumeSession(ctx context.Context, sessionID string, record *s
 		return nil, errServiceClosed
 	}
 	s.bindings[sessionID] = sessionBinding{
-		authKeyID:   record.AuthKeyID,
-		userPath:    record.UserPath,
-		endpoint:    record.Endpoint,
-		lastSeen:    now,
-		openedAt:    time.Unix(0, record.OpenedAt),
-		discovery:   scope.discovery,
-		toolAliases: aliases,
-		server:      server,
-		resumed:     host,
-		shared:      true,
-		record:      raw,
-		checkedAt:   now,
-		touchedAt:   now,
+		authKeyID:        record.AuthKeyID,
+		userPath:         record.UserPath,
+		endpoint:         record.Endpoint,
+		lastSeen:         now,
+		openedAt:         time.Unix(0, record.OpenedAt),
+		virtualCreatedAt: unixNanoTime(record.VirtualCreatedAt),
+		discovery:        scope.discovery,
+		toolAliases:      aliases,
+		server:           server,
+		resumed:          host,
+		shared:           true,
+		record:           raw,
+		checkedAt:        now,
+		touchedAt:        now,
 	}
 	s.bindMu.Unlock()
 	go s.awaitResumed(sessionID, host)
@@ -456,6 +467,9 @@ func (s *Service) shareSession(ctx context.Context, sessionID string, scope requ
 		Initialize:      params,
 		ProtocolVersion: protocolVersion,
 	}
+	if !binding.virtualCreatedAt.IsZero() {
+		record.VirtualCreatedAt = binding.virtualCreatedAt.UnixNano()
+	}
 	if scope.include != nil {
 		record.Scoped = true
 		record.Servers = slices.Sorted(maps.Keys(scope.include))
@@ -509,6 +523,39 @@ func (s *Service) closeSharedEndpoint(ctx context.Context, endpoint string) {
 	if err := s.shared.Put(ctx, sharedSessionNamespace, endpointCloseKey(endpoint), mark, now.Add(sessionCloseMarkLifetime)); err != nil {
 		slog.Warn("failed to close mcp endpoint sessions in the shared store", "endpoint", endpoint, "error", err)
 	}
+}
+
+// endpointCreatedAt is the CreatedAt of the virtual server endpoint names, as
+// this replica serves it; zero for any other endpoint.
+func (s *Service) endpointCreatedAt(endpoint string) time.Time {
+	virtual, ok := strings.CutPrefix(endpoint, virtualBindingPrefix)
+	if !ok {
+		return time.Time{}
+	}
+	spec, _ := s.virtualSpec(virtual)
+	return spec.CreatedAt
+}
+
+// endpointReplaced reports whether the virtual server a session opened on,
+// created at createdAt, was since deleted and recreated under its name. A
+// virtual server this replica no longer serves is not replaced: ServeHTTP
+// already answers 404 for it.
+func (s *Service) endpointReplaced(endpoint string, createdAt time.Time) bool {
+	virtual, ok := strings.CutPrefix(endpoint, virtualBindingPrefix)
+	if !ok {
+		return false
+	}
+	spec, found := s.virtualSpec(virtual)
+	return found && !spec.CreatedAt.Equal(createdAt)
+}
+
+// unixNanoTime is the inverse of time.Time.UnixNano that keeps zero as the
+// zero time.
+func unixNanoTime(nanos int64) time.Time {
+	if nanos == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, nanos)
 }
 
 // unbind drops a session's binding unless a newer host took its ID.

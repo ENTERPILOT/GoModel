@@ -167,6 +167,9 @@ type sessionBinding struct {
 	endpoint string
 	lastSeen time.Time
 	openedAt time.Time
+	// virtualCreatedAt is the CreatedAt of the virtual server the session
+	// opened on (see endpointReplaced); zero for any other endpoint.
+	virtualCreatedAt time.Time
 	// discovery and toolAliases let request logs name the tool a call runs:
 	// a discovery session's call_tool target, and the namespaced name an
 	// unambiguous bare name resolves to.
@@ -250,8 +253,8 @@ func NewService(ctx context.Context, opts Options) (*Service, error) {
 		now:             time.Now,
 		// Half the idle timeout: the record never lapses mid-call.
 		postTouchInterval: sessionIdleTimeout / 2,
-		requestCancels:  make(map[uint64]context.CancelFunc),
-		stop:            make(chan struct{}),
+		requestCancels:    make(map[uint64]context.CancelFunc),
+		stop:              make(chan struct{}),
 	}
 	s.stopCtx, s.stopCancel = context.WithCancel(context.Background())
 	guard, err := newOriginGuard(opts.AllowedOrigins)
@@ -1156,14 +1159,15 @@ func (s *Service) bindSession(sessionID, authKeyID, userPath, endpoint string, d
 	now := s.now()
 	s.bindMu.Lock()
 	s.bindings[sessionID] = sessionBinding{
-		authKeyID:   authKeyID,
-		userPath:    userPath,
-		endpoint:    endpoint,
-		lastSeen:    now,
-		openedAt:    now,
-		discovery:   discovery,
-		toolAliases: toolAliases,
-		server:      server,
+		authKeyID:        authKeyID,
+		userPath:         userPath,
+		endpoint:         endpoint,
+		lastSeen:         now,
+		openedAt:         now,
+		virtualCreatedAt: s.endpointCreatedAt(endpoint),
+		discovery:        discovery,
+		toolAliases:      toolAliases,
+		server:           server,
 	}
 	s.bindMu.Unlock()
 }

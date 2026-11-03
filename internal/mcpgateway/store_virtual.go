@@ -62,6 +62,7 @@ func (v ManagedVirtualServer) config() config.MCPVirtualServerConfig {
 func (v ManagedVirtualServer) Spec() VirtualServerSpec {
 	spec := VirtualFromConfig(v.Name, v.config())
 	spec.Managed = false
+	spec.CreatedAt = v.CreatedAt
 	return spec
 }
 
