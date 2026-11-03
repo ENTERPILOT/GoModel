@@ -225,9 +225,9 @@ func (s *Service) recheckSharedSession(ctx context.Context, sessionID string, bi
 	if !recheck {
 		return true
 	}
-	ctx, cancel := context.WithTimeout(ctx, sharedSessionTimeout)
-	defer cancel()
-	closed, err := s.sharedSessionClosed(ctx, sessionID, binding.endpoint, binding.openedAt)
+	readCtx, cancel := context.WithTimeout(ctx, sharedSessionTimeout)
+	closed, err := s.sharedSessionClosed(readCtx, sessionID, binding.endpoint, binding.openedAt)
+	cancel()
 	if err != nil {
 		slog.Warn("failed to recheck mcp session in the shared store", "error", err)
 	} else if closed {
@@ -262,8 +262,11 @@ func (s *Service) reserveRecheck(sessionID string, server *mcp.Server) (recheck,
 }
 
 // extendSharedSession pushes a session's shared expiry a full idle timeout
-// out from now.
+// out from now. The write gets its own deadline, so slow reads before it
+// cannot use it up.
 func (s *Service) extendSharedSession(ctx context.Context, sessionID string, record []byte) {
+	ctx, cancel := context.WithTimeout(ctx, sharedSessionTimeout)
+	defer cancel()
 	if err := s.shared.Put(ctx, sharedSessionNamespace, sessionKey(sessionID), record, s.now().Add(sessionIdleTimeout)); err != nil {
 		slog.Warn("failed to extend mcp session in the shared store", "error", err)
 	}
@@ -339,9 +342,9 @@ func (s *Service) touchHostedSession(sessionID string, server *mcp.Server) {
 	if !due {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), sharedSessionTimeout)
-	defer cancel()
-	closed, err := s.sharedSessionClosed(ctx, sessionID, binding.endpoint, binding.openedAt)
+	readCtx, cancel := context.WithTimeout(context.Background(), sharedSessionTimeout)
+	closed, err := s.sharedSessionClosed(readCtx, sessionID, binding.endpoint, binding.openedAt)
+	cancel()
 	if err != nil {
 		slog.Warn("failed to recheck mcp session in the shared store", "error", err)
 		return
@@ -351,7 +354,7 @@ func (s *Service) touchHostedSession(sessionID string, server *mcp.Server) {
 		closeSessions(server)
 		return
 	}
-	s.extendSharedSession(ctx, sessionID, binding.record)
+	s.extendSharedSession(context.Background(), sessionID, binding.record)
 }
 
 // resumeSession rebuilds a session from its shared record and hosts it here.
@@ -382,9 +385,7 @@ func (s *Service) resumeSession(ctx context.Context, sessionID string, record *s
 
 	// Resuming is activity: extend the expiry now rather than a minute later.
 	now := s.now()
-	putCtx, cancel := context.WithTimeout(ctx, sharedSessionTimeout)
-	s.extendSharedSession(putCtx, sessionID, raw)
-	cancel()
+	s.extendSharedSession(ctx, sessionID, raw)
 
 	s.bindMu.Lock()
 	// Checked under bindMu, which closeResumedSessions takes after stopCtx is
