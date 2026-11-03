@@ -180,10 +180,12 @@ cache:
 
 Or set `RESPONSE_CACHE_PARTITION_BY_USER_PATH=true`.
 
-The setting covers both cache layers and every endpoint above, streaming or not:
+The setting covers every cache layer each endpoint above uses (embeddings and
+System One use only the exact cache), streaming or not:
 
-- Requests with different effective `user_path` values never share an entry, and
-  concurrent identical misses only wait for a request from their own path.
+- Requests with different effective `user_path` values never share an entry. In
+  the exact cache, concurrent identical misses only wait for a request from
+  their own path.
 - Paths match exactly. `/team/alpha` does not reuse entries from `/team` or
   `/team/alpha/bob`.
 - Requests with no `user_path` form their own partition, separate from `/`.
@@ -201,7 +203,7 @@ Changing the setting causes cache misses for existing entries: they are never
 served across modes. They are not deleted either. They expire by their TTL, and
 they are served again if you switch back before then. To keep previously shared
 entries from coming back, wait out the TTL or clear the cache before switching
-back.
+back. Semantic entries stored with `ttl: 0` never expire, so clear those.
 
 ### Other ways to scope the cache
 

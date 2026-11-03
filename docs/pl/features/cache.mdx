@@ -184,11 +184,13 @@ cache:
 
 Możesz też ustawić `RESPONSE_CACHE_PARTITION_BY_USER_PATH=true`.
 
-Ustawienie obejmuje obie warstwy cache'u i wszystkie powyższe endpointy, ze
-streamingiem i bez niego:
+Ustawienie obejmuje każdą warstwę cache'u używaną przez powyższe endpointy
+(embeddingi i System One używają tylko cache'u dokładnego), ze streamingiem i bez
+niego:
 
-- Requesty z różnymi efektywnymi wartościami `user_path` nigdy nie współdzielą wpisu,
-  a równoczesne identyczne chybienia czekają tylko na request z tej samej ścieżki.
+- Requesty z różnymi efektywnymi wartościami `user_path` nigdy nie współdzielą wpisu.
+  W cache'u dokładnym równoczesne identyczne chybienia czekają tylko na request
+  z tej samej ścieżki.
 - Ścieżki muszą zgadzać się dokładnie. `/team/alpha` nie używa wpisów z `/team` ani
   z `/team/alpha/bob`.
 - Requesty bez `user_path` tworzą własną partycję, oddzielną od `/`.
@@ -205,7 +207,8 @@ streamingiem i bez niego:
 Zmiana ustawienia powoduje chybienia dla istniejących wpisów: nigdy nie są one
 serwowane między trybami. Nie są też usuwane. Wygasają zgodnie z TTL i będą znów
 serwowane, jeśli wrócisz do poprzedniego trybu wcześniej. Aby wcześniej współdzielone
-wpisy nie wróciły, przed powrotem odczekaj TTL albo wyczyść cache.
+wpisy nie wróciły, przed powrotem odczekaj TTL albo wyczyść cache. Wpisy
+semantyczne zapisane z `ttl: 0` nigdy nie wygasają, więc je wyczyść.
 
 ### Inne sposoby zawężania cache'u
 

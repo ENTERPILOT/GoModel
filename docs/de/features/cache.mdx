@@ -192,11 +192,13 @@ cache:
 
 Oder setzen Sie `RESPONSE_CACHE_PARTITION_BY_USER_PATH=true`.
 
-Die Einstellung gilt für beide Cache-Ebenen und alle oben genannten Endpunkte,
-mit und ohne Streaming:
+Die Einstellung gilt für jede Cache-Ebene, die die oben genannten Endpunkte
+nutzen (Embeddings und System One nutzen nur den exakten Cache), mit und ohne
+Streaming:
 
-- Requests mit unterschiedlichem effektivem `user_path` teilen nie einen Eintrag,
-  und gleichzeitige identische Misses warten nur auf Requests desselben Pfads.
+- Requests mit unterschiedlichem effektivem `user_path` teilen nie einen Eintrag.
+  Im exakten Cache warten gleichzeitige identische Misses nur auf Requests
+  desselben Pfads.
 - Pfade müssen exakt übereinstimmen. `/team/alpha` verwendet keine Einträge von
   `/team` oder `/team/alpha/bob`.
 - Requests ohne `user_path` bilden eine eigene Partition, getrennt von `/`.
@@ -214,7 +216,8 @@ Eine Änderung der Einstellung führt bei bestehenden Einträgen zu Cache-Misses
 werden nie modusübergreifend ausgeliefert. Gelöscht werden sie aber auch nicht. Sie
 laufen mit ihrer TTL ab und werden wieder ausgeliefert, wenn Sie vorher
 zurückschalten. Damit zuvor geteilte Einträge nicht zurückkehren, warten Sie vor dem
-Zurückschalten die TTL ab oder leeren Sie den Cache.
+Zurückschalten die TTL ab oder leeren Sie den Cache. Semantische Einträge mit
+`ttl: 0` laufen nie ab; leeren Sie diese.
 
 ### Andere Wege, den Cache einzugrenzen
 

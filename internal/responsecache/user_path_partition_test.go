@@ -2,8 +2,10 @@ package responsecache
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -306,10 +308,10 @@ func TestVecStoreSearch_FiltersByParamsHashInTheQuery(t *testing.T) {
 	const hash = "partition-params-hash"
 	vec := []float32{1, 0, 0}
 	tests := []struct {
-		name        string
-		respond     string
-		open        func(url string) (VecStore, error)
-		wantInQuery string
+		name         string
+		respond      string
+		open         func(url string) (VecStore, error)
+		assertFilter func(t *testing.T, body []byte)
 	}{
 		{
 			name:    "qdrant",
@@ -317,7 +319,26 @@ func TestVecStoreSearch_FiltersByParamsHashInTheQuery(t *testing.T) {
 			open: func(url string) (VecStore, error) {
 				return newQdrantStore(config.QdrantConfig{URL: url, Collection: "c"})
 			},
-			wantInQuery: `"filter"`,
+			assertFilter: func(t *testing.T, body []byte) {
+				var req struct {
+					Filter struct {
+						Must []struct {
+							Key   string `json:"key"`
+							Match struct {
+								Value string `json:"value"`
+							} `json:"match"`
+						} `json:"must"`
+					} `json:"filter"`
+				}
+				require.NoError(t, json.Unmarshal(body, &req))
+				var matched []string
+				for _, cond := range req.Filter.Must {
+					if cond.Key == "params_hash" {
+						matched = append(matched, cond.Match.Value)
+					}
+				}
+				assert.Equal(t, []string{hash}, matched, "params_hash must be a filter.must match")
+			},
 		},
 		{
 			name:    "pinecone",
@@ -325,7 +346,21 @@ func TestVecStoreSearch_FiltersByParamsHashInTheQuery(t *testing.T) {
 			open: func(url string) (VecStore, error) {
 				return newPineconeStore(config.PineconeConfig{Host: url, APIKey: "k", Dimension: len(vec)})
 			},
-			wantInQuery: `"filter"`,
+			assertFilter: func(t *testing.T, body []byte) {
+				var req struct {
+					Filter struct {
+						And []map[string]json.RawMessage `json:"$and"`
+					} `json:"filter"`
+				}
+				require.NoError(t, json.Unmarshal(body, &req))
+				var matched []string
+				for _, cond := range req.Filter.And {
+					if raw, ok := cond["params_hash"]; ok {
+						matched = append(matched, string(raw))
+					}
+				}
+				assert.Equal(t, []string{`{"$eq":"` + hash + `"}`}, matched, "params_hash must be a filter.$and $eq")
+			},
 		},
 		{
 			name:    "weaviate",
@@ -333,7 +368,16 @@ func TestVecStoreSearch_FiltersByParamsHashInTheQuery(t *testing.T) {
 			open: func(url string) (VecStore, error) {
 				return newWeaviateStore(config.WeaviateConfig{URL: url, Class: "C"})
 			},
-			wantInQuery: `where:`,
+			assertFilter: func(t *testing.T, body []byte) {
+				var req struct {
+					Query string `json:"query"`
+				}
+				require.NoError(t, json.Unmarshal(body, &req))
+				query := strings.Join(strings.Fields(req.Query), " ")
+				assert.Contains(t, query,
+					`where: { operator: And operands: [ { path: ["params_hash"] operator: Equal valueText: "`+hash+`" }`,
+					"params_hash must be an operand of the where And")
+			},
 		},
 	}
 	for _, tt := range tests {
@@ -346,10 +390,7 @@ func TestVecStoreSearch_FiltersByParamsHashInTheQuery(t *testing.T) {
 			_, err = store.Search(context.Background(), vec, hash, 1)
 			require.NoError(t, err)
 
-			query := string(captured.Last(t).Body)
-			assert.Contains(t, query, tt.wantInQuery)
-			assert.Contains(t, query, "params_hash")
-			assert.Contains(t, query, hash)
+			tt.assertFilter(t, captured.Last(t).Body)
 		})
 	}
 }

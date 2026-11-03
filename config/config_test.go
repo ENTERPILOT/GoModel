@@ -1625,9 +1625,7 @@ func TestLoad_ResponseCachePartitionByUserPath(t *testing.T) {
 				if tt.yaml != "" {
 					writeConfigYAML(t, dir, tt.yaml)
 				}
-				if tt.env != "" {
-					t.Setenv("RESPONSE_CACHE_PARTITION_BY_USER_PATH", tt.env)
-				}
+				t.Setenv("RESPONSE_CACHE_PARTITION_BY_USER_PATH", tt.env)
 
 				result, err := Load()
 				require.NoError(t, err)
