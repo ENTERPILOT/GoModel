@@ -75,6 +75,10 @@ function fold(text) {
 // `ΟΣ` stops matching `ΟΣ`.
 const CONTEXT_SENSITIVE = /[\u0130\u0131\u03a3\u03c2]/;
 
+// A surrogate pair is one character in two code units, so a field holding one
+// needs the code-point walk to keep its indexes honest.
+const HAS_SURROGATE = /[\ud800-\udfff]/;
+
 /**
  * Collapse the two lowercase sigmas into one. Which one `toLowerCase()` picks
  * depends on where the letter sits, so `ΟΣ` folds to `οσ` while a query typed
@@ -83,16 +87,6 @@ const CONTEXT_SENSITIVE = /[\u0130\u0131\u03a3\u03c2]/;
  */
 function canonicalSigma(char) {
   return char === "\u03c2" ? "\u03c3" : char;
-}
-
-/**
- * Whether a native case-insensitive search can answer for this string. It can
- * when folding leaves every code point in place and the lowercase does not
- * depend on the position of the character.
- */
-function foldKeepsLength(text) {
-  const source = String(text ?? "");
-  return source.toLowerCase().length === source.length && !CONTEXT_SENSITIVE.test(source);
 }
 
 /** Index of `needle` (an array of code points) inside `haystack`, or -1. */
@@ -117,9 +111,17 @@ export function substringRange(text, needle) {
   if (!needle) return null;
   const source = String(text ?? "");
   const wanted = String(needle);
-  if (foldKeepsLength(source) && foldKeepsLength(wanted)) {
-    const lower = source.toLowerCase();
-    const want = wanted.toLowerCase();
+  // One lowercase per side: the length check and the search read the same
+  // string. This runs three times per option on every keystroke, so the extra
+  // allocation was worth removing.
+  const lower = source.toLowerCase();
+  const want = wanted.toLowerCase();
+  if (
+    lower.length === source.length &&
+    want.length === wanted.length &&
+    !CONTEXT_SENSITIVE.test(source) &&
+    !CONTEXT_SENSITIVE.test(wanted)
+  ) {
     const start = lower.indexOf(want);
     return start < 0 ? null : { start, end: start + want.length };
   }
@@ -150,7 +152,29 @@ export function substringIndex(text, needle) {
  * can be mapped back for highlighting.
  */
 function compact(text) {
-  const folded = fold(text);
+  const source = String(text ?? "");
+  const lower = source.toLowerCase();
+  // Fast path: one character per code unit and no position-dependent
+  // lowercase, so the folded string is the lowercase one and every index maps
+  // to itself. This is the shape of every model id the dashboard searches.
+  if (
+    lower.length === source.length &&
+    !HAS_SURROGATE.test(source) &&
+    !CONTEXT_SENSITIVE.test(source)
+  ) {
+    let chars = "";
+    const starts = [];
+    const ends = [];
+    for (let i = 0; i < lower.length; i++) {
+      const char = lower[i];
+      if (SEPARATOR.test(char)) continue;
+      chars += char;
+      starts.push(i);
+      ends.push(i + 1);
+    }
+    return { chars, starts, ends, source };
+  }
+  const folded = fold(source);
   const chars = [];
   const starts = [];
   const ends = [];
