@@ -209,6 +209,7 @@ cache:
     #   key: "gomodel:models"
     #   ttl: 86400 # 24 hours in seconds
   # response:
+  #   partition_by_user_path: false # env: RESPONSE_CACHE_PARTITION_BY_USER_PATH; true gives each effective user path its own exact and semantic entries. Only keys bound to a user path are isolated from each other; see docs/features/cache.mdx
   #   simple: # omit the whole `simple` key to disable exact-match caching (unless RESPONSE_CACHE_SIMPLE_ENABLED=true)
   #     enabled: true # default when `simple` is present; set false to disable while keeping the block
   #     redis:
