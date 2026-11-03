@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -52,15 +53,17 @@ func (r *Result) Close() error {
 // New creates the MCP gateway subsystem using an existing
 // storage connection. Header values of managed servers are sealed with box;
 // a nil box stores them in plaintext. secrets resolves the secret references
-// admin-managed servers hold.
-func New(ctx context.Context, cfg *config.Config, shared storage.Storage, box *encryption.Box, httpClient *http.Client, usageLogger usage.LoggerInterface, secrets *config.Secrets) (*Result, error) {
+// admin-managed servers hold. providerServers are the provider-hosted servers
+// mcp.provider_servers enables; a server in cfg.MCP.Servers with the same slug
+// replaces one.
+func New(ctx context.Context, cfg *config.Config, shared storage.Storage, box *encryption.Box, httpClient *http.Client, usageLogger usage.LoggerInterface, secrets *config.Secrets, providerServers map[string]config.MCPServerConfig) (*Result, error) {
 	if shared == nil {
 		return nil, fmt.Errorf("shared storage is required")
 	}
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
-	return newResult(ctx, cfg, shared, box, httpClient, usageLogger, secrets)
+	return newResult(ctx, cfg, shared, box, httpClient, usageLogger, secrets, providerServers)
 }
 
 // Reencrypt seals every managed server header that is in plaintext or sealed
@@ -78,7 +81,7 @@ func Reencrypt(ctx context.Context, shared storage.Storage, box *encryption.Box)
 	return (&sealedStore{Store: store, box: box, swap: swap}).reencrypt(ctx, swap)
 }
 
-func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storage, box *encryption.Box, httpClient *http.Client, usageLogger usage.LoggerInterface, secrets *config.Secrets) (*Result, error) {
+func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storage, box *encryption.Box, httpClient *http.Client, usageLogger usage.LoggerInterface, secrets *config.Secrets, providerServers map[string]config.MCPServerConfig) (*Result, error) {
 	rawStore, err := createStore(ctx, storeConn)
 	if err != nil {
 		return nil, err
@@ -88,10 +91,7 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 		httpClient = defaultUpstreamHTTPClient()
 	}
 
-	configSpecs := make(map[string]ServerSpec, len(cfg.MCP.Servers))
-	for name, serverCfg := range cfg.MCP.Servers {
-		configSpecs[name] = SpecFromConfig(name, serverCfg)
-	}
+	configSpecs := configServerSpecs(cfg.MCP.Servers, providerServers)
 
 	virtualSpecs := make(map[string]VirtualServerSpec, len(cfg.MCP.VirtualServers))
 	for name, virtualCfg := range cfg.MCP.VirtualServers {
@@ -124,6 +124,24 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 		Service: service,
 		Store:   store,
 	}, nil
+}
+
+// configServerSpecs merges the declared servers with the provider-hosted ones.
+// Both are read-only in the dashboard; a declared server wins a slug clash, so
+// an operator can replace a provider-hosted server with their own definition.
+func configServerSpecs(declared, providerServers map[string]config.MCPServerConfig) map[string]ServerSpec {
+	specs := make(map[string]ServerSpec, len(declared)+len(providerServers))
+	for name, serverCfg := range declared {
+		specs[name] = SpecFromConfig(name, serverCfg)
+	}
+	for name, serverCfg := range providerServers {
+		if _, clash := specs[name]; clash {
+			slog.Info("mcp server in mcp.servers replaces the provider-hosted server with the same slug", "server", name)
+			continue
+		}
+		specs[name] = SpecFromConfig(name, serverCfg)
+	}
+	return specs
 }
 
 // defaultUpstreamHTTPClient is the shared pooled client for http/sse

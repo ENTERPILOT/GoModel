@@ -117,7 +117,6 @@ var sqlMigrations = []string{
 var sqlIndexes = []string{
 	"CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp)",
 	"DROP INDEX IF EXISTS idx_audit_model",
-	"CREATE INDEX IF NOT EXISTS idx_audit_requested_model ON audit_logs(requested_model)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_status ON audit_logs(status_code)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_provider ON audit_logs(provider)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_provider_name ON audit_logs(provider_name)",
@@ -179,6 +178,9 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 	}
 	indexes := append(append(sqlIndexes, userPathIndexes(db.Dialect())...), jsonPathIndexes(db.Dialect())...)
 	indexes = append(indexes, writtenAtIndexes(db.Dialect())...)
+	if db.Dialect() != sqlx.PostgreSQL {
+		indexes = append(indexes, modelIndexStatements(db.Dialect())...)
+	}
 	for _, statement := range indexes {
 		if _, err := db.Exec(ctx, statement); err != nil {
 			slog.Warn("failed to create index", "error", err)
@@ -190,11 +192,11 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 		retentionDays: retentionDays,
 		stopCleanup:   make(chan struct{}),
 	}
-	// The written_at and trigram search indexes can take minutes to build on
-	// a large existing PostgreSQL table, so they are built off the startup
-	// path (and CONCURRENTLY, so writes keep flowing); readers pick each up as
-	// soon as it exists. They are built one after the other, since PostgreSQL
-	// runs one concurrent build per table at a time.
+	// The written_at, model and trigram search indexes can take minutes to
+	// build on a large existing PostgreSQL table, so they are built off the
+	// startup path (and CONCURRENTLY, so writes keep flowing); readers pick
+	// each up as soon as it exists. They are built one after the other, since
+	// PostgreSQL runs one concurrent build per table at a time.
 	buildCtx, cancel := context.WithCancel(context.Background())
 	store.cancelIndexBuild = cancel
 	store.indexBuild.Go(func() {
@@ -202,6 +204,7 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 		if buildCtx.Err() != nil {
 			return
 		}
+		ensureModelIndexesConcurrently(buildCtx, db)
 		ensureTrigramSearchIndex(buildCtx, db, postgresErrorMessage)
 	})
 	if retentionDays > 0 {

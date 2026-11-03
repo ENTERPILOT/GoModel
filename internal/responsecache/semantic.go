@@ -45,6 +45,8 @@ type semanticCacheMiddleware struct {
 	embedderIdentity string
 	hitRecorder      func(exchange, []byte, string)
 
+	partitionByUserPath bool
+
 	// Vector-store inserts run on a bounded worker pool so a burst of cache
 	// misses cannot spawn unbounded goroutines against the vector store. wg
 	// tracks queued jobs; workers drains them; mu guards closed/close(jobs).
@@ -129,9 +131,10 @@ func (m *semanticCacheMiddleware) Handle(ex exchange, body []byte, next func() e
 		return next()
 	}
 
-	// The header may only tighten matching. Entries are shared across callers,
-	// so a looser client threshold would return answers cached for unrelated
-	// prompts, including other tenants'.
+	// The header may only tighten matching. Entries are shared across callers
+	// (across every caller of one user path when partitioning is on), so a looser
+	// client threshold would return answers cached for unrelated prompts,
+	// including other tenants'.
 	threshold := m.cfg.SimilarityThreshold
 	if v := headerFloat64(ex.RequestHeader, "X-Cache-Semantic-Threshold"); v > threshold {
 		threshold = v
@@ -147,6 +150,13 @@ func (m *semanticCacheMiddleware) Handle(ex exchange, body []byte, next func() e
 	}
 	baseParams := computeParamsHash(body, path, plan, core.GetGuardrailsHash(ctx), m.embedderIdentity)
 	paramsHash := sha256HexOf(baseParams + "\x00" + msgFp)
+	if m.partitionByUserPath {
+		// Every VecStore backend filters Search by exact params_hash inside the
+		// vector query, so this confines matching to the caller's partition. The
+		// cache key below derives from it too, so partitions cannot overwrite
+		// each other's points.
+		paramsHash = userPathPartitionedHash(paramsHash, core.UserPathFromContext(ctx))
+	}
 
 	vec, err := m.embedder.Embed(ctx, embedText)
 	if err != nil {

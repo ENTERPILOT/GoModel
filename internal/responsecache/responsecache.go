@@ -88,7 +88,7 @@ func NewResponseCacheMiddleware(
 			return nil, err
 		}
 		m.simple = newSimpleCacheMiddleware(store, ttl, hitRecorder)
-		slog.Info("response cache (simple/exact) enabled", "ttl_seconds", cfg.Simple.Redis.TTL, "prefix", prefix)
+		slog.Info("response cache (simple/exact) enabled", "ttl_seconds", cfg.Simple.Redis.TTL, "prefix", prefix, "partition_by_user_path", cfg.PartitionByUserPath)
 	}
 
 	sem := cfg.Semantic
@@ -118,10 +118,23 @@ func NewResponseCacheMiddleware(
 			"ttl_seconds", ttlLog,
 			"vector_store", sem.VectorStore.Type,
 			"embedder", sem.Embedder.Provider,
+			"partition_by_user_path", cfg.PartitionByUserPath,
 		)
 	}
 
+	m.setPartitionByUserPath(cfg.PartitionByUserPath)
 	return m, nil
+}
+
+// setPartitionByUserPath applies the partitioning setting to every configured
+// layer. It must run before the middleware serves requests.
+func (m *ResponseCacheMiddleware) setPartitionByUserPath(enabled bool) {
+	if m.simple != nil {
+		m.simple.partitionByUserPath = enabled
+	}
+	if m.semantic != nil {
+		m.semantic.partitionByUserPath = enabled
+	}
 }
 
 // HandleRequest runs the full dual-layer cache check (exact then semantic) for a
@@ -303,6 +316,14 @@ func NewResponseCacheMiddlewareWithStore(store cache.Store, ttl time.Duration) *
 	return &ResponseCacheMiddleware{
 		simple: newSimpleCacheMiddleware(store, ttl, nil),
 	}
+}
+
+// NewResponseCacheMiddlewareWithStoreAndUserPathPartition creates middleware with
+// a custom store whose entries are partitioned by user path (for testing).
+func NewResponseCacheMiddlewareWithStoreAndUserPathPartition(store cache.Store, ttl time.Duration) *ResponseCacheMiddleware {
+	m := NewResponseCacheMiddlewareWithStore(store, ttl)
+	m.setPartitionByUserPath(true)
+	return m
 }
 
 // NewResponseCacheMiddlewareWithStoreAndUsage creates middleware with a custom
