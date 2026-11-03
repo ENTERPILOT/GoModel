@@ -280,3 +280,22 @@ func TestSQLStoreWriteBatchChunksAttemptsBeyondParameterLimit(t *testing.T) {
 func TestSQLStoreAttemptParameterLimitFitsOneChunk(t *testing.T) {
 	require.LessOrEqual(t, maxAttemptsPerBatch*columnsPerAttempt, maxSQLParams)
 }
+
+// A chunk's entries and attempts commit together: when the attempts cannot be
+// written, neither is the entry, so no reader sees it without them.
+func TestSQLStoreWriteBatchCommitsEntriesWithTheirAttempts(t *testing.T) {
+	runSQLStoreTest(t, 0, func(t *testing.T, store *SQLStore, db sqlx.DB) {
+		ctx := context.Background()
+		now := time.Unix(1700000000, 0).UTC()
+		_, err := db.Exec(ctx, `DROP TABLE audit_log_attempts`)
+		require.NoError(t, err)
+
+		withAttempt := testLogEntry("with-attempt", now)
+		withAttempt.Data.Attempts = []AttemptSnapshot{{Seq: 1, Kind: AttemptKindFailover, ProviderType: "openai", StatusCode: 503}}
+		require.Error(t, store.WriteBatch(ctx, []*LogEntry{withAttempt}))
+
+		var count int
+		require.NoError(t, db.QueryRow(ctx, `SELECT COUNT(*) FROM audit_logs`).Scan(&count))
+		assert.Zero(t, count, "the entry is rolled back with its attempts")
+	})
+}

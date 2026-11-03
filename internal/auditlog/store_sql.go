@@ -262,6 +262,8 @@ func jsonPathIndexes(dialect sqlx.Dialect) []string {
 }
 
 // WriteBatch writes log entries, chunked to stay within the parameter limit.
+// Each chunk's entries and their provider attempts commit together, so a
+// reader never sees an entry before its attempts.
 func (s *SQLStore) WriteBatch(ctx context.Context, entries []*LogEntry) error {
 	if len(entries) == 0 {
 		return nil
@@ -279,10 +281,13 @@ func (s *SQLStore) WriteBatch(ctx context.Context, entries []*LogEntry) error {
 		}
 
 		query := insertAuditLogPrefix + strings.Join(placeholders, ",") + ` ON CONFLICT (id) DO NOTHING`
-		if _, err := s.db.Exec(ctx, query, values...); err != nil {
-			return fmt.Errorf("failed to insert audit logs batch %d: %w", i/maxEntriesPerBatch, err)
-		}
-		if err := s.writeAttempts(ctx, chunk); err != nil {
+		err := s.db.InTx(ctx, func(q sqlx.Querier) error {
+			if _, err := q.Exec(ctx, query, values...); err != nil {
+				return fmt.Errorf("failed to insert audit logs batch %d: %w", i/maxEntriesPerBatch, err)
+			}
+			return writeAttempts(ctx, q, dialect, chunk)
+		})
+		if err != nil {
 			return err
 		}
 	}
@@ -351,8 +356,7 @@ func (r attemptRef) String() string {
 // handed to the database as soon as it is full, so the transient cost stays
 // bounded by the chunk size however many attempts (and however large their
 // captured bodies) the batch carries.
-func (s *SQLStore) writeAttempts(ctx context.Context, entries []*LogEntry) error {
-	dialect := s.db.Dialect()
+func writeAttempts(ctx context.Context, q sqlx.Querier, dialect sqlx.Dialect, entries []*LogEntry) error {
 	values := make([]any, 0, maxAttemptsPerBatch*columnsPerAttempt)
 	rows := 0
 	var first, last attemptRef
@@ -363,7 +367,7 @@ func (s *SQLStore) writeAttempts(ctx context.Context, entries []*LogEntry) error
 		}
 		placeholders := strings.TrimSuffix(strings.Repeat(attemptRowPlaceholder+",", rows), ",")
 		query := insertAttemptPrefix + placeholders + insertAttemptSuffix
-		if _, err := s.db.Exec(ctx, query, values...); err != nil {
+		if _, err := q.Exec(ctx, query, values...); err != nil {
 			return fmt.Errorf("failed to insert audit log attempts %s through %s: %w", first, last, err)
 		}
 		values = values[:0]
