@@ -829,12 +829,15 @@ func TestModelRegistry(t *testing.T) {
 		require.Same(t, emptied, registry.GetProvider("emptied/test-model"))
 		require.False(t, registry.ModelAvailable("emptied/test-model"))
 		require.True(t, registry.ModelAvailable("healthy/healthy-model"))
+		foundEmptied := false
 		for _, snapshot := range registry.ProviderRuntimeSnapshots() {
 			if snapshot.Name == "emptied" {
+				foundEmptied = true
 				require.True(t, snapshot.InventoryStale)
 				require.Contains(t, snapshot.LastModelFetchError, "empty model list")
 			}
 		}
+		require.True(t, foundEmptied, "missing emptied provider snapshot")
 	})
 
 	t.Run("ListModelsOrdering", func(t *testing.T) {
