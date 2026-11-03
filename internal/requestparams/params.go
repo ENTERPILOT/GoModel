@@ -273,8 +273,15 @@ func validateTyped(field, key string, raw json.RawMessage) error {
 			}
 		}
 	case "include":
-		var v []string
-		err = json.Unmarshal(raw, &v)
+		var v []json.RawMessage
+		if err = json.Unmarshal(raw, &v); err == nil {
+			for i, value := range v {
+				if len(value) == 0 || value[0] != '"' {
+					err = fmt.Errorf("element %d must be a string", i)
+					break
+				}
+			}
+		}
 	default:
 		return nil
 	}

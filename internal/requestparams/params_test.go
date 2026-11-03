@@ -48,6 +48,7 @@ func TestNormalize(t *testing.T) {
 		{name: "metadata must be string map", set: Set{"metadata": raw(`{"a":1}`)}, wantErr: "wrong type"},
 		{name: "metadata members cannot be null", set: Set{"metadata": raw(`{"a":null}`)}, wantErr: `member "a" must be a string`},
 		{name: "include must be a string array", set: Set{"include": raw(`"reasoning"`)}, wantErr: `"include" has the wrong type`},
+		{name: "include members must be strings", set: Set{"include": raw(`[null]`)}, wantErr: `"include" has the wrong type`},
 		{name: "include array ok", set: Set{"include": raw(`["reasoning.encrypted_content"]`)}, want: Set{"include": raw(`["reasoning.encrypted_content"]`)}},
 	}
 	for _, tt := range tests {
