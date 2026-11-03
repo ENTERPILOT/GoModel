@@ -81,7 +81,7 @@ func (b *bootstrap) initStorage() error {
 	if len(sharedStoreAwareComponents(b.cfg.Extensions)) > 0 || mcpSharesSessions(b.appCfg) {
 		app.sharedStore, err = sharedstore.New(b.ctx, sharedStorage)
 		if err != nil {
-			return fmt.Errorf("failed to initialize extension shared store: %w", err)
+			return fmt.Errorf("failed to initialize shared store: %w", err)
 		}
 		app.register(subsystemSharedStore, ownedByShutdown, app.sharedStore.Close)
 	}
