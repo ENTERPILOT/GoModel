@@ -9,10 +9,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// mustConfigModels converts declared entries, failing the test on an
+// encoding error.
+func mustConfigModels(t *testing.T, entries []config.VirtualModelConfig) []VirtualModel {
+	t.Helper()
+	models, err := ConfigModels(entries)
+	require.NoError(t, err)
+	return models
+}
+
 func TestConfigModels_Conversion(t *testing.T) {
 	t.Parallel()
 	enabled := false
-	got := ConfigModels([]config.VirtualModelConfig{
+	got := mustConfigModels(t, []config.VirtualModelConfig{
 		{Source: "alias", Target: "openai/gpt-4o", Slowdown: new(0.5)},
 		{
 			Source:   "smart",
@@ -52,7 +61,7 @@ func TestConfigModels_PreservesSlowdownPresence(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ConfigModels([]config.VirtualModelConfig{{
+			got := mustConfigModels(t, []config.VirtualModelConfig{{
 				Source: "alias", Target: "openai/gpt-4o", Slowdown: tt.in,
 			}})
 			require.Len(t, got, 1)
@@ -72,7 +81,7 @@ func TestService_ConfigOverlayResolvesAndIsReadOnly(t *testing.T) {
 	svc := newBalancingService(t)
 	ctx := context.Background()
 
-	svc.SetConfigModels(ConfigModels([]config.VirtualModelConfig{{
+	svc.SetConfigModels(mustConfigModels(t, []config.VirtualModelConfig{{
 		Source:   "smart",
 		Strategy: StrategyRoundRobin,
 		Targets: []config.VirtualModelTargetConfig{
@@ -118,7 +127,7 @@ func TestService_ConfigOverlayOverridesStoreRow(t *testing.T) {
 	require.NoError(t, err)
 
 	// Config redefines "smart" to the cheap model; config must win.
-	svc.SetConfigModels(ConfigModels([]config.VirtualModelConfig{{
+	svc.SetConfigModels(mustConfigModels(t, []config.VirtualModelConfig{{
 		Source: "smart",
 		Target: "groq/llama",
 	}}))
@@ -160,7 +169,7 @@ func TestService_ConfigOverlayRejectsInvalidRedirectTargets(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			svc := newBalancingService(t)
-			svc.SetConfigModels(ConfigModels(tt.entries))
+			svc.SetConfigModels(mustConfigModels(t, tt.entries))
 			// Startup mirrors the factory: Refresh builds the snapshot (which
 			// rejects chain cycles), then the managed-config check rejects the
 			// remaining invalid declarations.
@@ -180,7 +189,7 @@ func TestService_ConfigOverlayRejectsInvalidRedirectTargets(t *testing.T) {
 func TestService_ConfigOverlayChainsVirtualModels(t *testing.T) {
 	t.Parallel()
 	svc := newBalancingService(t)
-	svc.SetConfigModels(ConfigModels([]config.VirtualModelConfig{
+	svc.SetConfigModels(mustConfigModels(t, []config.VirtualModelConfig{
 		{Source: "production", Target: "cheap"},
 		{Source: "cheap", Target: "groq/llama"},
 	}))
@@ -244,7 +253,7 @@ func TestService_ValidateManagedConfigTargetProviders(t *testing.T) {
 			svc, err := NewService(newSQLVMStore(t), testCatalog(), true)
 			require.NoError(t, err)
 
-			svc.SetConfigModels(ConfigModels([]config.VirtualModelConfig{{
+			svc.SetConfigModels(mustConfigModels(t, []config.VirtualModelConfig{{
 				Source:  "smart",
 				Targets: tt.targets,
 			}}))
@@ -292,7 +301,7 @@ func TestService_ManagedRedirectToleratesColdCatalogAtStartup(t *testing.T) {
 	ctx := context.Background()
 
 	// Startup against a cold catalog must succeed for a structurally-valid target.
-	svc.SetConfigModels(ConfigModels([]config.VirtualModelConfig{{Source: "smart", Target: "openai/gpt-4o"}}))
+	svc.SetConfigModels(mustConfigModels(t, []config.VirtualModelConfig{{Source: "smart", Target: "openai/gpt-4o"}}))
 	err = svc.Refresh(ctx)
 	require.NoError(t, err)
 	err = svc.ValidateManagedConfig(nil)
@@ -339,7 +348,7 @@ func TestService_ManagedRedirectToleratesTransientCatalogGapAfterStartup(t *test
 	ctx := context.Background()
 
 	// Startup: the managed redirect's target is supported, so validation passes.
-	svc.SetConfigModels(ConfigModels([]config.VirtualModelConfig{{Source: "smart", Target: "openai/gpt-4o"}}))
+	svc.SetConfigModels(mustConfigModels(t, []config.VirtualModelConfig{{Source: "smart", Target: "openai/gpt-4o"}}))
 	err = svc.Refresh(ctx)
 	require.NoError(t, err)
 	err = svc.ValidateManagedConfig(nil)
@@ -375,7 +384,7 @@ func TestService_ManagedRedirectToleratesTransientCatalogGapAfterStartup(t *test
 
 func TestConfigModels_Params(t *testing.T) {
 	t.Parallel()
-	got := ConfigModels([]config.VirtualModelConfig{{
+	got := mustConfigModels(t, []config.VirtualModelConfig{{
 		Source:        "qwen-thinking-low",
 		Target:        "vllm/qwen",
 		Params:        map[string]any{"chat_template_kwargs": map[string]any{"enable_thinking": true}, "top_k": nil},
@@ -395,7 +404,7 @@ func TestConfigModels_InvalidParamsFailRefresh(t *testing.T) {
 	t.Parallel()
 	svc, err := NewService(newSQLVMStore(t), testCatalog(), true)
 	require.NoError(t, err)
-	svc.SetConfigModels(ConfigModels([]config.VirtualModelConfig{{
+	svc.SetConfigModels(mustConfigModels(t, []config.VirtualModelConfig{{
 		Source: "bad",
 		Target: "openai/gpt-4o",
 		Params: map[string]any{"model": "x"},

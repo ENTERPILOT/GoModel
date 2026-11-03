@@ -78,6 +78,11 @@ func TestNormalizeLimits(t *testing.T) {
 	_, err = Normalize("params", big, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "exceed")
+
+	nullKey := Set{strings.Repeat("k", MaxKeyLen): nil, "blob": raw(`"` + strings.Repeat("x", MaxBytes-MaxKeyLen-8) + `"`)}
+	_, err = Normalize("params", nullKey, true)
+	require.Error(t, err, "a stripped key still counts toward the size limit")
+	assert.Contains(t, err.Error(), "exceed")
 }
 
 func TestDisjoint(t *testing.T) {

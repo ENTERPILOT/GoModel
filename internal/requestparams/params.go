@@ -184,6 +184,10 @@ func Normalize(field string, set Set, allowNull bool) (Set, error) {
 			if !allowNull {
 				return nil, validation.NewError(fmt.Sprintf("%s: parameter %q must have a value", field, key), nil)
 			}
+			size += len(key) + len(nullLexeme)
+			if size > MaxBytes {
+				return nil, validation.NewError(fmt.Sprintf("%s: parameters exceed %d bytes", field, MaxBytes), nil)
+			}
 			normalized[key] = nil
 			continue
 		}

@@ -124,8 +124,9 @@ ersetzt, was der Client gesendet hat, und ein `null`-Wert entfernt den
 Schlüssel aus dem Request. Nutzen Sie Defaults für Sampling-Einstellungen, die
 Aufrufer anpassen dürfen, und `params` für Einstellungen, die ein Alias
 festlegen muss. Beide Maps stehen in `config.yaml`, in der Umgebungsvariable
-`VIRTUAL_MODELS`, in der Admin API und im Dashboard-Editor zur Verfügung; auch
-eine Modellrichtlinien-Zeile (ein Eintrag ohne Ziele) akzeptiert sie.
+`VIRTUAL_MODELS`, in der Admin API und im Dashboard-Editor zur Verfügung. Auch
+eine Richtlinien-Zeile für ein konkretes Modell (ein Eintrag ohne Ziele)
+akzeptiert sie; providerweite und globale Zeilen lehnen sie ab.
 
 Schlüssel folgen der Schreibweise von OpenAI Chat Completions (`temperature`,
 `top_p`, `max_tokens`, `presence_penalty`, ...). Providerspezifische Schlüssel
@@ -189,8 +190,8 @@ Anthropic Messages API (der native Messages-Passthrough nimmt den übersetzten
 Pfad, wenn Parameter greifen); Batches, Provider-Passthrough unter `/p/`,
 Embeddings und Medien-Endpunkte werden nicht umgeschrieben.
 [Cache](/de/features/cache)-Schlüssel enthalten die angewendeten Parameter,
-sodass zwei Aliase desselben Modells mit unterschiedlichen Parametern nie
-einen Eintrag teilen.
+sodass zwei Aliase desselben Modells einen Eintrag nur dann teilen, wenn sie
+denselben Request upstream senden.
 
 Der Rest dieser Seite behandelt Redirects.
 

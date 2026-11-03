@@ -112,8 +112,8 @@ the client omitted it; `params` replaces whatever the client sent, and a
 `null` value strips the key from the request. Use defaults for sampling that
 callers may tune and `params` for settings an alias must pin. Both are maps
 in `config.yaml`, in the `VIRTUAL_MODELS` environment variable, in the admin
-API, and in the dashboard editor, and a model policy row (an entry without
-targets) accepts them too.
+API, and in the dashboard editor. A policy row for a concrete model (an entry
+without targets) accepts them too; provider-wide and global rows reject them.
 
 Keys use OpenAI Chat Completions spelling (`temperature`, `top_p`,
 `max_tokens`, `presence_penalty`, ...). Provider-specific keys such as vLLM's
@@ -173,8 +173,8 @@ Completions, the Responses API, and the Anthropic Messages API (native
 Messages passthrough takes the translated path when parameters apply);
 batches, provider passthrough under `/p/`, embeddings, and media endpoints
 are not rewritten. [Cache](/features/cache) keys include the applied
-parameters, so two aliases of one model with different parameters never
-share an entry.
+parameters, so two aliases of one model share an entry only when they send
+the same request upstream.
 
 The rest of this page covers redirects.
 
