@@ -252,6 +252,54 @@ func TestModelRegistry_ReplaceProvider(t *testing.T) {
 		assert.Equal(t, "Model A", info.Model.Metadata.DisplayName)
 	})
 
+	t.Run("drops configured models the edit removes", func(t *testing.T) {
+		t.Run("fallback mode serving the configured list", func(t *testing.T) {
+			registry := NewModelRegistry()
+			registry.SetConfiguredProviderModelsMode(config.ConfiguredProviderModelsModeFallback)
+			previous := &registryMockProvider{err: errors.New("503 models unavailable")}
+			registry.RegisterProviderWithNameAndType(previous, "swap", "test")
+			registry.SetProviderConfiguredModels("swap", []string{"removed", "kept"})
+			require.NoError(t, registry.Initialize(t.Context()))
+			require.True(t, registry.Supports("swap/removed"))
+
+			replacement := &registryMockProvider{err: errors.New("503 models unavailable")}
+			registry.replaceProvider(replacement, "swap", "test", providerSettings{configuredModels: []string{"kept"}})
+
+			assert.False(t, registry.Supports("swap/removed"))
+			assert.Same(t, replacement, registry.GetProvider("swap/kept"))
+		})
+
+		t.Run("merge mode", func(t *testing.T) {
+			registry := NewModelRegistry()
+			registry.SetConfiguredProviderModelsMode(config.ConfiguredProviderModelsModeMerge)
+			previous := &registryMockProvider{modelsResponse: modelsList("listed")}
+			registry.RegisterProviderWithNameAndType(previous, "swap", "test")
+			registry.SetProviderConfiguredModels("swap", []string{"removed"})
+			require.NoError(t, registry.Initialize(t.Context()))
+			require.True(t, registry.Supports("swap/removed"))
+
+			replacement := &registryMockProvider{}
+			registry.replaceProvider(replacement, "swap", "test", providerSettings{})
+
+			assert.False(t, registry.Supports("swap/removed"))
+			assert.Same(t, replacement, registry.GetProvider("swap/listed"))
+		})
+
+		t.Run("but keeps them when the upstream listed them", func(t *testing.T) {
+			registry := NewModelRegistry()
+			registry.SetConfiguredProviderModelsMode(config.ConfiguredProviderModelsModeFallback)
+			previous := &registryMockProvider{modelsResponse: modelsList("listed")}
+			registry.RegisterProviderWithNameAndType(previous, "swap", "test")
+			registry.SetProviderConfiguredModels("swap", []string{"listed"})
+			require.NoError(t, registry.Initialize(t.Context()))
+
+			replacement := &registryMockProvider{}
+			registry.replaceProvider(replacement, "swap", "test", providerSettings{})
+
+			assert.Same(t, replacement, registry.GetProvider("swap/listed"))
+		})
+	})
+
 	t.Run("a provider of another type inherits nothing", func(t *testing.T) {
 		registry := NewModelRegistry()
 		previous := &registryMockProvider{modelsResponse: modelsList("a")}

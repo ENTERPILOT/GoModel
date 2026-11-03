@@ -1,6 +1,8 @@
 package providers
 
 import (
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/enterpilot/gomodel/config"
@@ -28,7 +30,10 @@ type providerSettings struct {
 // same one. When both have the same type, the replacement inherits the
 // previous provider's discovered inventory, rebound to the new adapter and
 // shaped by the new settings: an allowlist keeps only its models and a filter
-// hides the models it excludes. That inventory serves until the
+// hides the models it excludes. A model the edit removes from the configured
+// list is not inherited unless the previous inventory is known to come from
+// the upstream listing alone, since it may exist only because it was
+// configured. That inventory serves until the
 // replacement's own model fetch publishes, which then drops whatever models
 // the new upstream no longer lists; a failed fetch keeps it, marked stale,
 // as for any provider whose refresh fails. A provider of another type starts
@@ -53,12 +58,19 @@ func (r *ModelRegistry) replaceProvider(provider core.Provider, providerName, pr
 	providerName, providerType = r.providerIdentityLocked(providerName, providerType)
 	previousType, replaced := r.swapProviderLocked(provider, providerName, providerType)
 
+	var previous map[string]*ModelInfo
+	if replaced && previousType == providerType {
+		previous = r.discoveredByProvider[providerName]
+		if !r.inventoryIsListingLocked(providerName) {
+			previous = withoutModels(previous, removedModels(r.configuredProviderModels[providerName], configuredModels))
+		}
+	}
+
 	setOrDelete(&r.configuredProviderModels, providerName, configuredModels, len(configuredModels) > 0)
 	setOrDelete(&r.configMetadataOverrides, providerName, overrides, len(overrides) > 0)
 	setOrDelete(&r.providerModelFilters, providerName, filter, filtered)
 
-	previous := r.discoveredByProvider[providerName]
-	if replaced && previousType == providerType && len(previous) > 0 {
+	if len(previous) > 0 {
 		r.discoveredByProvider[providerName] = r.reboundInventoryLocked(previous, provider, providerName, providerType)
 		// The runtime state describes the inherited inventory, so it stays
 		// until the replacement's first fetch overwrites it.
@@ -133,6 +145,50 @@ func (r *ModelRegistry) reboundInventoryLocked(previous map[string]*ModelInfo, p
 	applyConfigMetadataOverrides(r.configMetadataOverrides, rebound, nil)
 	applyInferredModelMetadata(rebound, nil)
 	return rebound[providerName]
+}
+
+// inventoryIsListingLocked reports whether providerName's inventory is
+// exactly what its last /models listing returned: in fallback mode a
+// successful listing is served as is, while every other source (an allowlist,
+// a merge, a fallback after a failed or empty listing, a provider without a
+// listing, the cache) may include configured models the upstream never
+// listed. Caller must hold r.mu.
+func (r *ModelRegistry) inventoryIsListingLocked(providerName string) bool {
+	if config.ResolveConfiguredProviderModelsMode(r.configuredProviderModelsMode) != config.ConfiguredProviderModelsModeFallback {
+		return false
+	}
+	state := r.providerRuntime[providerName]
+	return !state.lastModelFetchAt.IsZero() &&
+		state.lastModelFetchSuccessAt.Equal(state.lastModelFetchAt) &&
+		!state.modelListingUnsupported &&
+		!state.catalogStandIn
+}
+
+// removedModels returns the models in before that after no longer lists.
+func removedModels(before, after []string) []string {
+	var removed []string
+	for _, modelID := range before {
+		if !slices.Contains(after, modelID) {
+			removed = append(removed, modelID)
+		}
+	}
+	return removed
+}
+
+// withoutModels returns inventory without the given models, copying it only
+// when one of them is present.
+func withoutModels(inventory map[string]*ModelInfo, modelIDs []string) map[string]*ModelInfo {
+	out, copied := inventory, false
+	for _, modelID := range modelIDs {
+		if _, ok := out[modelID]; !ok {
+			continue
+		}
+		if !copied {
+			out, copied = maps.Clone(inventory), true
+		}
+		delete(out, modelID)
+	}
+	return out
 }
 
 // setOrDelete stores value under key in *m when keep is true, allocating the
