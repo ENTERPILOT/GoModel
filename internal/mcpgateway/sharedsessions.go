@@ -259,6 +259,79 @@ func (s *Service) extendSharedSession(ctx context.Context, sessionID string, rec
 	}
 }
 
+// trackPOST marks a POST in flight for a session this replica hosts and
+// returns the func that ends it. The session's idle timeout is paused while
+// the POST runs and restarts when it ends, and the shared record follows: it
+// is extended every postTouchInterval during the POST, so a long call does
+// not let it lapse, and once more at the end. A short call costs one timer.
+func (s *Service) trackPOST(sessionID string) func() {
+	s.bindMu.Lock()
+	binding, ok := s.bindings[sessionID]
+	if ok {
+		binding.posts++
+		s.bindings[sessionID] = binding
+	}
+	s.bindMu.Unlock()
+	if !ok {
+		return func() {}
+	}
+
+	server := binding.server
+	var keepAlive *time.Timer
+	done := make(chan struct{})
+	if s.shared != nil {
+		keepAlive = time.AfterFunc(s.postTouchInterval, func() {
+			ticker := time.NewTicker(s.postTouchInterval)
+			defer ticker.Stop()
+			for {
+				s.touchHostedSession(sessionID, server)
+				select {
+				case <-done:
+					return
+				case <-ticker.C:
+				}
+			}
+		})
+	}
+	return func() {
+		if keepAlive != nil {
+			keepAlive.Stop()
+		}
+		close(done)
+		s.bindMu.Lock()
+		if current, ok := s.bindings[sessionID]; ok && current.server == server {
+			current.posts--
+			current.lastSeen = s.now()
+			s.bindings[sessionID] = current
+		}
+		s.bindMu.Unlock()
+		if s.shared != nil {
+			s.touchHostedSession(sessionID, server)
+		}
+	}
+}
+
+// touchHostedSession extends a hosted session's shared expiry unless an
+// extension within the touch interval already did. Like reserveRecheck, it
+// claims the extension under bindMu.
+func (s *Service) touchHostedSession(sessionID string, server *mcp.Server) {
+	now := s.now()
+	s.bindMu.Lock()
+	binding, ok := s.bindings[sessionID]
+	due := ok && binding.server == server && binding.shared && now.Sub(binding.touchedAt) >= sessionTouchInterval
+	if due {
+		binding.touchedAt = now
+		s.bindings[sessionID] = binding
+	}
+	s.bindMu.Unlock()
+	if !due {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), sharedSessionTimeout)
+	defer cancel()
+	s.extendSharedSession(ctx, sessionID, binding.record)
+}
+
 // resumeSession rebuilds a session from its shared record and hosts it here.
 // The SDK restores the negotiated state it carries, so the session continues
 // without a new initialize.

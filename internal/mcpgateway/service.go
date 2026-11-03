@@ -115,6 +115,9 @@ type Service struct {
 	resumes singleflight.Group
 	// now stamps session bindings and their shared records.
 	now func() time.Time
+	// postTouchInterval is how often a POST in flight extends its shared
+	// session's expiry; see trackPOST.
+	postTouchInterval time.Duration
 
 	requestMu      sync.Mutex
 	requestCancels map[uint64]context.CancelFunc
@@ -181,6 +184,9 @@ type sessionBinding struct {
 	record    []byte
 	checkedAt time.Time
 	touchedAt time.Time
+	// posts counts this replica's POSTs in flight for the session, which
+	// pause its idle timeout, so sweepBindings keeps the binding.
+	posts int
 }
 
 // boundTo reports whether a request's identity and endpoint are the ones the
@@ -242,6 +248,8 @@ func NewService(ctx context.Context, opts Options) (*Service, error) {
 		bindings:        make(map[string]sessionBinding),
 		shared:          opts.SharedStore,
 		now:             time.Now,
+		// Half the idle timeout: the record never lapses mid-call.
+		postTouchInterval: sessionIdleTimeout / 2,
 		requestCancels:  make(map[uint64]context.CancelFunc),
 		stop:            make(chan struct{}),
 	}
@@ -681,7 +689,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer
 		bindingEndpoint = virtualBindingPrefix + virtual
 	}
 	var resumed *resumedSession
-	if sessionID := strings.TrimSpace(r.Header.Get("Mcp-Session-Id")); sessionID != "" {
+	sessionID := strings.TrimSpace(r.Header.Get("Mcp-Session-Id"))
+	if sessionID != "" {
 		admission, host := s.admitSession(r.Context(), sessionID, authKeyID, userPath, bindingEndpoint, r.Method == http.MethodDelete)
 		switch admission {
 		case sessionRejected:
@@ -714,6 +723,9 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer
 		ctx = context.WithValue(ctx, pinnedServerKey{}, pinnedServer)
 	}
 	r = r.WithContext(ctx)
+	if sessionID != "" && r.Method == http.MethodPost {
+		defer s.trackPOST(sessionID)()
+	}
 	if resumed != nil {
 		resumed.ServeHTTP(w, r)
 		return nil
@@ -1250,14 +1262,21 @@ func (s *Service) sweepBindings() {
 		case <-s.stop:
 			return
 		case <-ticker.C:
-			cutoff := s.now().Add(-sessionIdleTimeout - time.Minute)
-			s.bindMu.Lock()
-			for id, binding := range s.bindings {
-				if binding.lastSeen.Before(cutoff) {
-					delete(s.bindings, id)
-				}
-			}
-			s.bindMu.Unlock()
+			s.evictIdleBindings()
+		}
+	}
+}
+
+// evictIdleBindings drops the bindings of sessions idle past the idle
+// timeout. A session with a POST in flight is not idle: its timeout is
+// paused until the POST ends.
+func (s *Service) evictIdleBindings() {
+	cutoff := s.now().Add(-sessionIdleTimeout - time.Minute)
+	s.bindMu.Lock()
+	defer s.bindMu.Unlock()
+	for id, binding := range s.bindings {
+		if binding.posts == 0 && binding.lastSeen.Before(cutoff) {
+			delete(s.bindings, id)
 		}
 	}
 }

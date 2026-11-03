@@ -486,3 +486,120 @@ wait:
 	assert.Equal(t, int64(1), store.gets.Load(), "close-mark reads")
 	assert.Equal(t, int64(1), store.puts.Load(), "expiry extensions")
 }
+
+// slowServers is an upstream whose "slow" tool runs until release is called;
+// defer it, as deferred calls run before cleanup closes the servers. It
+// signals entered as each call starts.
+func slowServers(t *testing.T) (servers map[string]ServerSpec, entered chan struct{}, release func()) {
+	t.Helper()
+	entered = make(chan struct{}, 1)
+	released := make(chan struct{})
+	release = sync.OnceFunc(func() { close(released) })
+	upstream := newTestUpstream(t, "alpha", func(server *mcp.Server) {
+		server.AddTool(&mcp.Tool{Name: "slow", InputSchema: map[string]any{"type": "object"}},
+			func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				entered <- struct{}{}
+				<-released
+				return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "done"}}}, nil
+			})
+	})
+	return map[string]ServerSpec{"alpha": testSpec("alpha", upstream, nil)}, entered, release
+}
+
+// startSlowCall starts a tools/call of the slow tool and returns its status.
+func startSlowCall(t *testing.T, endpoint, sessionID string, entered chan struct{}) chan int {
+	t.Helper()
+	status := make(chan int, 1)
+	body := `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"` + NamespacedName("alpha", "slow") + `","arguments":{}}}`
+	req, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("Mcp-Session-Id", sessionID)
+	go func() {
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			status <- 0
+			return
+		}
+		_ = resp.Body.Close()
+		status <- resp.StatusCode
+	}()
+	<-entered
+	return status
+}
+
+// A call that outlasts the idle timeout keeps its session's shared record:
+// the replica running it extends the record while it runs, so the session
+// still continues on another replica.
+func TestLongCallKeepsTheSessionShared(t *testing.T) {
+	clock := &testClock{}
+	store := newMemorySharedStore(clock.Now)
+	servers, entered, release := slowServers(t)
+	defer release()
+	a := newReplica(t, store, Options{ConfigServers: servers}, clock)
+	a.service.postTouchInterval = 10 * time.Millisecond
+	b := newReplica(t, store, Options{ConfigServers: servers}, clock)
+	sessionID := initializeRawSession(t, a.url+"/mcp", nil)
+	expiry := func() time.Time {
+		entry, _ := store.entry(sharedSessionNamespace, sessionKey(sessionID))
+		return entry.ExpiresAt
+	}
+
+	call := startSlowCall(t, a.url+"/mcp", sessionID, entered)
+	clock.Advance(sessionIdleTimeout * 2 / 3)
+	require.Eventually(t, func() bool { return expiry().After(clock.Now().Add(sessionIdleTimeout - time.Minute)) },
+		5*time.Second, 5*time.Millisecond, "the call in flight extends the record")
+	clock.Advance(sessionIdleTimeout * 2 / 3)
+	assert.Equal(t, http.StatusOK, rawMCPStatus(t, b.url+"/mcp", listToolsBody, withSession(nil, sessionID)),
+		"the session continues on another replica during the call")
+
+	release()
+	assert.Equal(t, http.StatusOK, <-call)
+}
+
+// The idle timeout restarts when a call ends, and so does the shared expiry:
+// a session stays resumable for a full idle timeout after its last call.
+func TestCallEndExtendsTheSharedSession(t *testing.T) {
+	clock := &testClock{}
+	store := newMemorySharedStore(clock.Now)
+	servers, entered, release := slowServers(t)
+	defer release()
+	a := newReplica(t, store, Options{ConfigServers: servers}, clock)
+	b := newReplica(t, store, Options{ConfigServers: servers}, clock)
+	sessionID := initializeRawSession(t, a.url+"/mcp", nil)
+
+	call := startSlowCall(t, a.url+"/mcp", sessionID, entered)
+	clock.Advance(sessionIdleTimeout / 2)
+	release()
+	require.Equal(t, http.StatusOK, <-call)
+
+	clock.Advance(sessionIdleTimeout * 3 / 4)
+	assert.Equal(t, http.StatusOK, rawMCPStatus(t, b.url+"/mcp", listToolsBody, withSession(nil, sessionID)))
+}
+
+// The binding sweep keeps a session with a POST in flight, whose idle timeout
+// is paused, and evicts it once it has been idle a timeout after the POST.
+func TestSweepKeepsSessionsWithACallInFlight(t *testing.T) {
+	clock := &testClock{}
+	servers, entered, release := slowServers(t)
+	defer release()
+	a := newReplica(t, nil, Options{ConfigServers: servers}, clock)
+	sessionID := initializeRawSession(t, a.url+"/mcp", nil)
+
+	call := startSlowCall(t, a.url+"/mcp", sessionID, entered)
+	clock.Advance(sessionIdleTimeout + 2*time.Minute)
+	a.service.evictIdleBindings()
+	_, bound := a.binding(sessionID)
+	assert.True(t, bound, "a session with a call in flight is not idle")
+
+	release()
+	require.Equal(t, http.StatusOK, <-call)
+	a.service.evictIdleBindings()
+	_, bound = a.binding(sessionID)
+	assert.True(t, bound, "the idle timeout counts from the end of the call")
+	clock.Advance(sessionIdleTimeout + 2*time.Minute)
+	a.service.evictIdleBindings()
+	_, bound = a.binding(sessionID)
+	assert.False(t, bound)
+}
