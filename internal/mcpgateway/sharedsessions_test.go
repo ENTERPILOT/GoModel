@@ -686,3 +686,31 @@ func TestRecreatedVirtualIgnoresReplicaClockSkew(t *testing.T) {
 	_, bound := a.binding(sessionID)
 	assert.False(t, bound)
 }
+
+// A call still running when another replica deletes its session does not keep
+// the deleted session's record alive: the replica running it reads the close
+// mark before extending the record, and ends the session instead, so the
+// session cannot resume once the mark expires.
+func TestLongCallDoesNotReviveADeletedSession(t *testing.T) {
+	clock := &testClock{}
+	store := newMemorySharedStore(clock.Now)
+	servers, entered, release := slowServers(t)
+	defer release()
+	a := newReplica(t, store, Options{ConfigServers: servers}, clock)
+	a.service.postTouchInterval = 10 * time.Millisecond
+	b := newReplica(t, store, Options{ConfigServers: servers}, clock)
+	sessionID := initializeRawSession(t, a.url+"/mcp", nil)
+
+	startSlowCall(t, a.url+"/mcp", sessionID, entered)
+	require.Equal(t, http.StatusNoContent, rawMCPDelete(t, b.url+"/mcp", withSession(nil, sessionID)))
+	clock.Advance(sessionIdleTimeout / 2)
+	require.Eventually(t, func() bool {
+		_, bound := a.binding(sessionID)
+		return !bound
+	}, 5*time.Second, 5*time.Millisecond, "the replica running the call ends the deleted session")
+	_, stored := store.entry(sharedSessionNamespace, sessionKey(sessionID))
+	assert.False(t, stored, "the deleted record is not written back")
+
+	clock.Advance(sessionCloseMarkLifetime)
+	assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, b.url+"/mcp", listToolsBody, withSession(nil, sessionID)))
+}

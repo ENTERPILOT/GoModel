@@ -323,7 +323,9 @@ func (s *Service) trackPOST(sessionID string) func() {
 
 // touchHostedSession extends a hosted session's shared expiry unless an
 // extension within the touch interval already did. Like reserveRecheck, it
-// claims the extension under bindMu.
+// claims the extension under bindMu. It reads the close marks first: a call
+// can outlast them, and extending a record another replica closed would let
+// the session resume once they expire. A closed session ends here instead.
 func (s *Service) touchHostedSession(sessionID string, server *mcp.Server) {
 	now := s.now()
 	s.bindMu.Lock()
@@ -339,6 +341,16 @@ func (s *Service) touchHostedSession(sessionID string, server *mcp.Server) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), sharedSessionTimeout)
 	defer cancel()
+	closed, err := s.sharedSessionClosed(ctx, sessionID, binding.endpoint, binding.openedAt)
+	if err != nil {
+		slog.Warn("failed to recheck mcp session in the shared store", "error", err)
+		return
+	}
+	if closed {
+		s.unbind(sessionID, server)
+		closeSessions(server)
+		return
+	}
 	s.extendSharedSession(ctx, sessionID, binding.record)
 }
 
