@@ -432,6 +432,11 @@ type UsageLogResult struct {
 	Total   int             `json:"total"`
 	Limit   int             `json:"limit"`
 	Offset  int             `json:"offset"`
+	// AsOf is when the server read the page, in unix microseconds on its
+	// clock; the admin API sets it. A dashboard compares it with the write
+	// stamp of another replica's live entry to tell whether this page
+	// already counted it.
+	AsOf int64 `json:"as_of,omitempty"`
 }
 
 // RequestUsageSummary aggregates usage records that belong to one request ID.

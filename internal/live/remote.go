@@ -223,8 +223,9 @@ func (f *remoteFeed) publishAudit(ctx context.Context, writes []storage.RecentWr
 	slices.SortFunc(entries, func(a, b auditlog.EntryPreview) int {
 		return cmp.Or(a.Timestamp.Compare(b.Timestamp), cmp.Compare(a.ID, b.ID))
 	})
+	writtenAt := recentWriteTimes(writes)
 	for i := range entries {
-		f.broker.PublishRemoteAuditEntry(&entries[i])
+		f.broker.PublishRemoteAuditEntry(&entries[i], writtenAt[entries[i].ID])
 	}
 	return nil
 }
@@ -237,8 +238,9 @@ func (f *remoteFeed) publishUsage(ctx context.Context, writes []storage.RecentWr
 	slices.SortFunc(entries, func(a, b usage.UsageLogEntry) int {
 		return cmp.Or(a.Timestamp.Compare(b.Timestamp), cmp.Compare(a.ID, b.ID))
 	})
+	writtenAt := recentWriteTimes(writes)
 	for _, entry := range entries {
-		f.broker.PublishRemoteUsageEntry(entry)
+		f.broker.PublishRemoteUsageEntry(entry, writtenAt[entry.ID])
 	}
 	return nil
 }
@@ -249,6 +251,14 @@ func recentWriteIDs(writes []storage.RecentWrite) []string {
 		ids[i] = write.ID
 	}
 	return ids
+}
+
+func recentWriteTimes(writes []storage.RecentWrite) map[string]int64 {
+	times := make(map[string]int64, len(writes))
+	for _, write := range writes {
+		times[write.ID] = write.WrittenAt
+	}
+	return times
 }
 
 // remoteSpan is one poll's clock: now, the window and the resume limit, all

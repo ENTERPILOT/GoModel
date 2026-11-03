@@ -401,11 +401,14 @@ func TestRemoteFeedPublishesAuditThenUsage(t *testing.T) {
 	assert.Equal(t, true, data["request_body_captured"])
 	assert.NotContains(t, data, "response_body_captured", "no response body was stored")
 	assert.Equal(t, "test-agent", data["user_agent"])
+	assert.InDelta(t, testT0.Add(-time.Second).UnixMicro(), auditData["_remote_written_at"], 0,
+		"marked as another replica's, with its write stamp")
 
 	var usageData map[string]any
 	require.NoError(t, json.Unmarshal(events[1].Data, &usageData))
 	assert.Equal(t, "req-usage-1", usageData["request_id"])
 	assert.InDelta(t, 15, usageData["total_tokens"], 0)
+	assert.InDelta(t, testT0.Add(-time.Second).UnixMicro(), usageData["_remote_written_at"], 0)
 }
 
 // Entries go out by request time, whatever the order they were written in,

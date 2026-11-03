@@ -842,15 +842,16 @@ func compactAuditPreviewForRetention(preview auditPreview) auditPreview {
 }
 
 // PublishRemoteAuditEntry publishes an audit entry another replica persisted,
-// as the audit.flushed event that replica's own dashboards received. The
-// preview carries no bodies, only whether each was captured, so remote
-// traffic costs the stream only the compact preview; the dashboard loads them
-// from the stored entry.
-func (b *Broker) PublishRemoteAuditEntry(entry *auditlog.EntryPreview) {
+// as the audit.flushed event that replica's own dashboards received, marked
+// with its write stamp. The preview carries no bodies, only whether each was
+// captured, so remote traffic costs the stream only the compact preview; the
+// dashboard loads them from the stored entry.
+func (b *Broker) PublishRemoteAuditEntry(entry *auditlog.EntryPreview, writtenAt int64) {
 	if b == nil || !b.enabled || entry == nil {
 		return
 	}
 	preview := auditPreviewFromEntry(EventAuditFlushed, &entry.LogEntry)
+	preview.RemoteWrittenAt = writtenAt
 	if entry.RequestBodyCaptured || entry.ResponseBodyCaptured {
 		data := auditPreviewData{}
 		if preview.Data != nil {
@@ -863,15 +864,23 @@ func (b *Broker) PublishRemoteAuditEntry(entry *auditlog.EntryPreview) {
 	b.publishAuditPreview(EventAuditFlushed, entry.ID, preview, nil)
 }
 
+// remoteUsagePreview is a usage entry another replica persisted, marked with
+// its write stamp like a remote audit preview (auditPreview.RemoteWrittenAt).
+type remoteUsagePreview struct {
+	usage.UsageLogEntry
+	RemoteWrittenAt int64 `json:"_remote_written_at,omitempty"`
+}
+
 // PublishRemoteUsageEntry publishes a usage entry another replica persisted,
-// as the usage.flushed event that replica's own dashboards received.
-func (b *Broker) PublishRemoteUsageEntry(entry usage.UsageLogEntry) {
+// as the usage.flushed event that replica's own dashboards received, marked
+// with its write stamp.
+func (b *Broker) PublishRemoteUsageEntry(entry usage.UsageLogEntry, writtenAt int64) {
 	if b == nil || !b.enabled {
 		return
 	}
 	entry.Timestamp = entry.Timestamp.UTC()
 	usage.EnrichUsageLogEntry(&entry)
-	b.publish(EventUsageFlushed, entry.ID, entry.RequestID, entry.Timestamp, entry)
+	b.publish(EventUsageFlushed, entry.ID, entry.RequestID, entry.Timestamp, remoteUsagePreview{UsageLogEntry: entry, RemoteWrittenAt: writtenAt})
 }
 
 // PublishUsageEvent publishes a compact usage log event. Cached usage entries
@@ -911,6 +920,11 @@ type auditPreview struct {
 	Data              *auditPreviewData `json:"data,omitempty"`
 	LiveState         string            `json:"_live_state,omitempty"`
 	LivePending       bool              `json:"_live_pending,omitempty"`
+	// RemoteWrittenAt marks an entry another replica persisted with that
+	// replica's write stamp (unix microseconds, its clock). A dashboard
+	// compares it with a fetched page's as_of to tell the rows that page
+	// already counted.
+	RemoteWrittenAt int64 `json:"_remote_written_at,omitempty"`
 }
 
 type auditPreviewData struct {

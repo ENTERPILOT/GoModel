@@ -950,6 +950,8 @@ test("auditLogFromSessions maps thread summaries into head entries", () => {
   assert.equal(mapped.entries[1].session_count, 1);
   assert.equal(mapped.total, 12);
   assert.equal(mapped.offset, 25);
+  assert.equal(mapped.as_of, undefined);
+  assert.equal(auditLogFromSessions({ ...payload, as_of: 1700 }).as_of, 1700, "as_of is kept");
 });
 
 test("mergeAuditThreadChildren drops heads by id and request_id", () => {

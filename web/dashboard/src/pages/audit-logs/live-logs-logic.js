@@ -44,6 +44,18 @@ function insertLive(entries, entry) {
     return next;
 }
 
+// liveEntryCountedBy reports whether a fetched page's counts already include
+// a live entry. Only another replica's entries can be counted in advance:
+// they arrive once persisted, marked with that replica's write stamp
+// (_remote_written_at), and one stamped before the server read the page
+// (as_of, both unix microseconds) was there for its total and thread counts.
+// Local entries reach the page before they are persisted.
+function liveEntryCountedBy(entry, page) {
+    const writtenAt = Number(entry && entry._remote_written_at);
+    const asOf = Number(page && page.as_of);
+    return writtenAt > 0 && asOf > 0 && writtenAt <= asOf;
+}
+
 function liveEntryOlder(entry, than) {
     const time = Date.parse(entry && entry.timestamp);
     const thanTime = Date.parse(than && than.timestamp);
@@ -201,7 +213,9 @@ export function liveLogsMethods() {
             }
             const inserted = this.mergeLiveAuditUsagePatch(patch);
             this.auditLog.entries = insertLive(currentEntries, inserted).slice(0, this.auditLog.limit || 25);
-            this.auditLog.total = Number(this.auditLog.total || 0) + 1;
+            if (!liveEntryCountedBy(patch, this.auditLog)) {
+                this.auditLog.total = Number(this.auditLog.total || 0) + 1;
+            }
             if (!isDetail) this.fetchExpandedAuditDetailIfReady(inserted);
             this.cacheMergedAuditRecord(inserted, eventType);
             return inserted;
@@ -314,7 +328,8 @@ export function liveLogsMethods() {
             if (headIndex < 0) return null;
             const oldHead = entries[headIndex];
             const oldCount = Number(oldHead.session_count);
-            const sessionCount = (Number.isFinite(oldCount) && oldCount > 0 ? oldCount : 1) + 1;
+            const counted = liveEntryCountedBy(patch, this.auditLog);
+            const sessionCount = (Number.isFinite(oldCount) && oldCount > 0 ? oldCount : 1) + (counted ? 0 : 1);
             const next = [...entries];
             if (liveEntryOlder(patch, oldHead)) {
                 next.splice(headIndex, 1, { ...oldHead, session_count: sessionCount });
@@ -341,11 +356,15 @@ export function liveLogsMethods() {
             const list = lists[sessionId];
             const child = { ...entry };
             delete child.session_count;
+            // A fetched children list's total already counts another
+            // replica's entry persisted before the fetch; a partial list's
+            // total is just the entries it holds.
+            const counted = !!(list && list.loaded) && liveEntryCountedBy(child, list);
             const next = list && Array.isArray(list.entries)
                 ? {
                     ...list,
                     entries: insertLive(list.entries, child),
-                    total: Number(list.total || list.entries.length) + 1
+                    total: Number(list.total || list.entries.length) + (counted ? 0 : 1)
                 }
                 : { loading: false, loaded: false, entries: [child], total: 1 };
             this.auditThreadChildren = { ...lists, [sessionId]: next };
@@ -555,7 +574,9 @@ export function liveLogsMethods() {
             }
             this.removeSkippedLiveUsage(liveEntry);
             this.usageLog.entries = insertLive(currentEntries, liveEntry).slice(0, this.usageLog.limit || 50);
-            this.usageLog.total = Number(this.usageLog.total || 0) + 1;
+            if (!liveEntryCountedBy(incoming, this.usageLog)) {
+                this.usageLog.total = Number(this.usageLog.total || 0) + 1;
+            }
         },
 
         mergeLiveUsagePatch(previous, incoming) {

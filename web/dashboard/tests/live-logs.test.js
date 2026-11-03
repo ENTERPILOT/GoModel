@@ -1442,3 +1442,152 @@ test("grouped mode places a late new thread head by its timestamp", () => {
   assert.equal(app.auditLog.entries[1].session_count, 2);
   assert.deepEqual(app.auditThreadChildren["s-a"].entries.map((entry) => entry.id), ["head-a"]);
 });
+
+// Another replica's entries arrive once persisted, marked with that
+// replica's write stamp. A page the server read after the stamp (as_of)
+// already counted them, so they must not be counted again.
+const AS_OF = 1_800_000_000_000_000;
+
+test("a remote entry the grouped page already counted joins its thread without a recount", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+  app.auditLog = {
+    entries: [{ id: "head-a", session_id: "s-a", session_count: 2, timestamp: "2026-10-30T12:00:10Z" }],
+    total: 1,
+    limit: 25,
+    offset: 0,
+    as_of: AS_OF,
+  };
+
+  app.mergeLiveAuditEntry(
+    { id: "child", session_id: "s-a", timestamp: "2026-10-30T12:00:05Z", _remote_written_at: AS_OF - 1 },
+    "audit.flushed",
+  );
+
+  assert.equal(app.auditLog.entries[0].session_count, 2, "the fetched count already holds it");
+  assert.equal(app.auditLog.total, 1);
+  assert.deepEqual(app.auditThreadChildren["s-a"].entries.map((entry) => entry.id), ["child"]);
+});
+
+test("a remote entry persisted after the grouped page was read is counted", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+  app.auditLog = {
+    entries: [{ id: "head-a", session_id: "s-a", session_count: 2, timestamp: "2026-10-30T12:00:10Z" }],
+    total: 1,
+    limit: 25,
+    offset: 0,
+    as_of: AS_OF,
+  };
+
+  app.mergeLiveAuditEntry(
+    { id: "child", session_id: "s-a", timestamp: "2026-10-30T12:00:05Z", _remote_written_at: AS_OF + 1 },
+    "audit.flushed",
+  );
+
+  assert.equal(app.auditLog.entries[0].session_count, 3);
+});
+
+test("a local entry is counted whatever the page's as_of", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+  app.auditLog = {
+    entries: [{ id: "head-a", session_id: "s-a", session_count: 2, timestamp: "2026-10-30T12:00:10Z" }],
+    total: 1,
+    limit: 25,
+    offset: 0,
+    as_of: AS_OF,
+  };
+
+  app.mergeLiveAuditEntry(
+    { id: "live", session_id: "s-a", timestamp: "2026-10-30T12:00:20Z" },
+    "audit.started",
+  );
+
+  assert.equal(app.auditLog.entries[0].id, "live");
+  assert.equal(app.auditLog.entries[0].session_count, 3);
+});
+
+test("a fetched children list does not recount a remote entry it already counted", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+  app.auditLog = {
+    entries: [{ id: "head-a", session_id: "s-a", session_count: 3, timestamp: "2026-10-30T12:00:10Z" }],
+    total: 1,
+    limit: 25,
+    offset: 0,
+    as_of: AS_OF,
+  };
+  app.auditThreadChildren = {
+    "s-a": {
+      loading: false,
+      loaded: true,
+      entries: [{ id: "old-child", timestamp: "2026-10-30T12:00:01Z" }],
+      total: 2,
+      as_of: AS_OF,
+    },
+  };
+
+  app.mergeLiveAuditEntry(
+    { id: "counted", session_id: "s-a", timestamp: "2026-10-30T12:00:05Z", _remote_written_at: AS_OF },
+    "audit.flushed",
+  );
+  assert.equal(app.auditLog.entries[0].session_count, 3);
+  assert.equal(app.auditThreadChildren["s-a"].total, 2);
+
+  app.mergeLiveAuditEntry(
+    { id: "new", session_id: "s-a", timestamp: "2026-10-30T12:00:06Z", _remote_written_at: AS_OF + 5 },
+    "audit.flushed",
+  );
+  assert.equal(app.auditLog.entries[0].session_count, 4);
+  assert.equal(app.auditThreadChildren["s-a"].total, 3);
+  assert.deepEqual(
+    app.auditThreadChildren["s-a"].entries.map((entry) => entry.id),
+    ["new", "counted", "old-child"],
+  );
+});
+
+test("the flat list total counts a remote entry only when the page has not", () => {
+  const app = createLiveLogsApp();
+  app.auditLog = {
+    entries: [
+      { id: "b", timestamp: "2026-10-30T12:00:10Z" },
+      { id: "a", timestamp: "2026-10-30T12:00:09Z" },
+    ],
+    total: 40,
+    limit: 2,
+    offset: 0,
+    as_of: AS_OF,
+  };
+
+  // Below the page: counted in its total, not shown.
+  app.mergeLiveAuditEntry(
+    { id: "older", timestamp: "2026-10-30T12:00:01Z", _remote_written_at: AS_OF - 10 },
+    "audit.flushed",
+  );
+  assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["b", "a"]);
+  assert.equal(app.auditLog.total, 40);
+
+  app.mergeLiveAuditEntry(
+    { id: "newer", timestamp: "2026-10-30T12:00:11Z", _remote_written_at: AS_OF + 10 },
+    "audit.flushed",
+  );
+  assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["newer", "b"]);
+  assert.equal(app.auditLog.total, 41);
+});
+
+test("the usage total counts a remote entry only when the page has not", () => {
+  const app = createLiveLogsApp();
+  app.usageLog = { entries: [], total: 7, limit: 50, offset: 0, as_of: AS_OF };
+
+  app.mergeLiveUsageEntry(
+    { id: "counted", request_id: "req-counted", timestamp: "2026-10-30T12:00:01Z", _remote_written_at: AS_OF },
+    "usage.flushed",
+  );
+  assert.equal(app.usageLog.total, 7);
+
+  app.mergeLiveUsageEntry(
+    { id: "new", request_id: "req-new", timestamp: "2026-10-30T12:00:02Z", _remote_written_at: AS_OF + 1 },
+    "usage.flushed",
+  );
+  assert.equal(app.usageLog.total, 8);
+
+  app.mergeLiveUsageEntry({ id: "local", request_id: "req-local" }, "usage.completed");
+  assert.equal(app.usageLog.total, 9, "local entries are always new to the page");
+});

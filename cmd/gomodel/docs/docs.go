@@ -9113,6 +9113,10 @@ const docTemplate = `{
         "admin.auditLogListResponse": {
             "type": "object",
             "properties": {
+                "as_of": {
+                    "description": "AsOf is when the server read the page, in unix microseconds on its\nclock. A dashboard compares it with the write stamp of another\nreplica's live entry to tell whether this page already counted it.",
+                    "type": "integer"
+                },
                 "entries": {
                     "type": "array",
                     "items": {
@@ -9144,6 +9148,10 @@ const docTemplate = `{
         "admin.auditSessionsListResponse": {
             "type": "object",
             "properties": {
+                "as_of": {
+                    "description": "AsOf: see auditLogListResponse.AsOf.",
+                    "type": "integer"
+                },
                 "limit": {
                     "type": "integer"
                 },
@@ -14065,6 +14073,10 @@ const docTemplate = `{
         "usage.UsageLogResult": {
             "type": "object",
             "properties": {
+                "as_of": {
+                    "description": "AsOf is when the server read the page, in unix microseconds on its\nclock; the admin API sets it. A dashboard compares it with the write\nstamp of another replica's live entry to tell whether this page\nalready counted it.",
+                    "type": "integer"
+                },
                 "entries": {
                     "type": "array",
                     "items": {

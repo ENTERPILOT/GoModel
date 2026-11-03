@@ -136,9 +136,11 @@ func TestRemoteFeedAcrossReplicasOnOneStore(t *testing.T) {
 			assert.Equal(t, "req-on-a", events[1].RequestID)
 
 			var audit struct {
-				Data map[string]any `json:"data"`
+				RemoteWrittenAt int64          `json:"_remote_written_at"`
+				Data            map[string]any `json:"data"`
 			}
 			require.NoError(t, json.Unmarshal(events[0].Data, &audit))
+			assert.Positive(t, audit.RemoteWrittenAt, "marked as another replica's")
 			assert.NotContains(t, audit.Data, "request_body", "the body stays in the database")
 			assert.Equal(t, true, audit.Data["request_body_captured"])
 		}
