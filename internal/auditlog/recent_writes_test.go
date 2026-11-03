@@ -77,6 +77,12 @@ func TestRecentWrites(t *testing.T) {
 		writes, err = recent.RecentWrites(ctx, 0, "writer-c", 2)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"a-new", "b-mid"}, writeIDs(writes), "limit keeps the newest")
+
+		for _, limit := range []int{0, -1} {
+			writes, err = recent.RecentWrites(ctx, 0, "writer-c", limit)
+			require.NoError(t, err)
+			assert.Empty(t, writes, "limit %d returns nothing", limit)
+		}
 	})
 }
 

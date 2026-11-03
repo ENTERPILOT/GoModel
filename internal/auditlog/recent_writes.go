@@ -20,7 +20,7 @@ import (
 type RecentWriteReader interface {
 	// RecentWrites lists the entries stamped at or after since (unix
 	// microseconds) by any writer other than excludeWriter, newest first and
-	// at most limit of them.
+	// at most limit of them; none for a nonpositive limit.
 	RecentWrites(ctx context.Context, since int64, excludeWriter string, limit int) ([]storage.RecentWrite, error)
 	// EntriesByID loads the entries with the given ids, in no particular
 	// order. Ids that match nothing are left out.
@@ -86,6 +86,11 @@ func buildWrittenAtIndex(ctx context.Context, db sqlx.DB) {
 
 // RecentWrites implements RecentWriteReader.
 func (r *SQLReader) RecentWrites(ctx context.Context, since int64, excludeWriter string, limit int) ([]storage.RecentWrite, error) {
+	if limit <= 0 {
+		// Not left to the engines: MongoDB reads a zero limit as no limit,
+		// SQLite a negative one, and PostgreSQL rejects a negative one.
+		return nil, nil
+	}
 	rows, err := r.db.Query(ctx,
 		"SELECT "+r.dialect.idColumn+", written_at FROM audit_logs"+
 			" WHERE written_at IS NOT NULL AND written_at >= ? AND writer_id <> ?"+
@@ -149,6 +154,11 @@ func (r *SQLReader) EntriesByID(ctx context.Context, ids []string) ([]LogEntry, 
 
 // RecentWrites implements RecentWriteReader.
 func (r *MongoDBReader) RecentWrites(ctx context.Context, since int64, excludeWriter string, limit int) ([]storage.RecentWrite, error) {
+	if limit <= 0 {
+		// Not left to the engines: MongoDB reads a zero limit as no limit,
+		// SQLite a negative one, and PostgreSQL rejects a negative one.
+		return nil, nil
+	}
 	filter := bson.D{
 		{Key: "written_at", Value: bson.D{{Key: "$gte", Value: since}}},
 		{Key: "writer_id", Value: bson.D{{Key: "$ne", Value: excludeWriter}}},
