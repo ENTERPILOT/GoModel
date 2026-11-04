@@ -5,10 +5,12 @@
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { timezone } from "$lib/stores/timezone.svelte.js";
+  import HighlightText from "$lib/components/atoms/HighlightText.svelte";
   import { providersConfig } from "./providersConfig.svelte.js";
   import {
     providerCredentialAuthLabel,
     providerCredentialModelsLabel,
+    providerRowNonBillable,
     providerRowsHaveActions,
   } from "./providersConfigLogic.js";
   import { Pencil, X } from "lucide";
@@ -36,16 +38,22 @@
       {#each providersConfig.filteredRows as row (row.name)}
         <tr>
           <td>
-            <span class="font-size-md">{row.name}</span>
+            <span class="font-size-md"><HighlightText text={row.name} needle={providersConfig.filter} /></span>
             {#if row.managed}
               <span
                 class="alias-kind-badge"
                 title={m.providers_managed()}
                 >{m.common_config()}</span>
             {/if}
+            {#if providerRowNonBillable(row)}
+              <span
+                class="alias-kind-badge"
+                title={m.providers_not_billable_title()}
+                >{m.providers_not_billable()}</span>
+            {/if}
           </td>
-          <td><span class="budget-source mono">{row.type}</span></td>
-          <td class="mono font-size-md" title={row.base_url || ""}>{row.base_url || "—"}</td>
+          <td><span class="budget-source mono"><HighlightText text={row.type} needle={providersConfig.filter} /></span></td>
+          <td class="mono font-size-md" title={row.base_url || ""}><HighlightText text={row.base_url || "—"} needle={providersConfig.filter} /></td>
           <td>{providerCredentialAuthLabel(row)}</td>
           <td>{providerCredentialModelsLabel(row)}</td>
           <td>

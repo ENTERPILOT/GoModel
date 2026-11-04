@@ -3,6 +3,7 @@
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { displayModelSelector } from "$lib/utils/modelSelectors.js";
+  import HighlightText from "$lib/components/atoms/HighlightText.svelte";
   import { authKeysStore } from "$pages/auth-keys/authKeys.svelte.js";
   import { usersStore as store } from "./users.svelte.js";
   import { userNodeKind, userPathDepth, userPathLeaf } from "./usersLogic.js";
@@ -37,7 +38,7 @@
                 icon={kind === "user" ? User : Folder}
                 class="table-icon-svg user-kind-icon"
               />
-              <span class="user-path-leaf">{userPathLeaf(node.user_path)}</span>
+              <span class="user-path-leaf"><HighlightText text={userPathLeaf(node.user_path)} needle={store.filter} /></span>
               {#if node.managed}
                 <span class="auth-key-status-badge auth-key-status-inactive">{m.users_managed()}</span>
               {/if}
@@ -54,7 +55,7 @@
             {#if (node.allowed_models || []).length > 0}
               <div class="user-selector-list">
                 {#each node.allowed_models as selector (selector)}
-                  <code class="user-selector">{displayModelSelector(selector)}</code>
+                  <code class="user-selector"><HighlightText text={displayModelSelector(selector)} needle={store.filter} /></code>
                 {/each}
               </div>
             {:else}
@@ -94,7 +95,7 @@
               0
             {/if}
           </td>
-          <td class="user-description">{node.description || "—"}</td>
+          <td class="user-description"><HighlightText text={node.description || "—"} needle={store.filter} /></td>
           <td class="user-actions-cell col-actions">
             <div class="user-row-actions">
               <TableActionButton

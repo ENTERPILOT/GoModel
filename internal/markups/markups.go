@@ -136,6 +136,12 @@ func (s *Service) Apply(entry *usage.UsageEntry) {
 	}
 	entry.MarkupPercent = nil
 	entry.MarkupSelector = ""
+	if !entry.IsBillable() {
+		// The caller does not owe this provider's cost, so nothing is billed,
+		// not even a cache hit of it.
+		entry.BilledCost = new(0.0)
+		return
+	}
 	if r, ok := s.match(entry.UserPath, entryProvider(entry), entry.RoutedModel, entry.Model); ok {
 		percent := r.percent
 		entry.MarkupPercent = &percent

@@ -18,12 +18,15 @@
   //   values       selected values in multiple mode (bindable)
   //   disabled, mono (monospace option values), class (trigger wrapper)
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import HighlightText from "$lib/components/atoms/HighlightText.svelte";
   import { marqueeOnOverflow } from "$lib/utils/attachments.js";
   import { Check } from "lucide";
   import { tick } from "svelte";
   import * as m from "$lib/paraglide/messages.js";
   import SearchPopover from "./SearchPopover.svelte";
   import {
+    MAX_VISIBLE_OPTIONS,
+    capSearchOptions,
     customSearchValue,
     filterSearchOptions,
     normalizeSearchOption,
@@ -53,15 +56,49 @@
 
   let open = $state(false);
   let query = $state("");
+  // What the list filters on. Typing must never wait for the list: `query`
+  // updates with the input so the caret and the text never lag, and the filter
+  // runs on the next frame with its latest value, at most once per frame.
+  // Without this every keystroke filters and rebuilds rows inside the input
+  // handler, and a fast typist's events queue behind that work.
+  let listQuery = $state("");
   let activeIndex = $state(-1);
   let shell = $state(null);
 
+  $effect(() => {
+    const pending = query;
+    if (typeof requestAnimationFrame !== "function") {
+      listQuery = pending;
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      listQuery = pending;
+    });
+    return () => cancelAnimationFrame(frame);
+  });
+
+  // A shrinking list must not leave the highlight past its end, or Enter
+  // would resolve to no row at all.
+  $effect(() => {
+    const count = rowCount;
+    if (activeIndex >= count) activeIndex = count > 0 ? count - 1 : -1;
+  });
+
   // Multi-select rows list the current selection first so it can be
   // unchecked without hunting through the list.
-  const filtered = $derived(
-    multiple ? selectedFirst(filterSearchOptions(options, query), values) : filterSearchOptions(options, query),
+  const matched = $derived(
+    multiple ? selectedFirst(filterSearchOptions(options, listQuery), values) : filterSearchOptions(options, listQuery),
   );
-  const customValue = $derived(customSearchValue(options, query, allowCustom));
+  // Only the first page of matches is rendered: the model picker holds ~1000
+  // options and rebuilding every row per keystroke blocked typing. A multi
+  // select never cuts a chosen row, so its page grows with the selection.
+  const limit = $derived(multiple ? Math.max(MAX_VISIBLE_OPTIONS, values.length) : MAX_VISIBLE_OPTIONS);
+  const page = $derived(capSearchOptions(matched, limit, multiple ? "" : value));
+  const filtered = $derived(page.visible);
+  const hiddenCount = $derived(page.hidden);
+  // Everything the list decides derives from `listQuery`, never from `query`:
+  // mixing the two would let a keypress commit a row from the previous frame.
+  const customValue = $derived(customSearchValue(options, listQuery, allowCustom));
   // Rows in keyboard order: the custom suggestion first, then matches.
   const rowCount = $derived(filtered.length + (customValue ? 1 : 0));
   const selected = $derived(
@@ -103,6 +140,7 @@
 
   // Opening highlights the current single value so Enter keeps it.
   function onopen() {
+    listQuery = query;
     const current = multiple ? -1 : filtered.findIndex((option) => option.value === value);
     activeIndex = current >= 0 ? current : -1;
   }
@@ -119,6 +157,9 @@
       onchange?.(values);
       shell?.notifyChanged();
       query = "";
+      // Clear the deferred copy too: the pick relocates the highlight by
+      // reading the list, and a stale one would place it on an old row.
+      listQuery = "";
       await tick();
       // The pick moves (selected values list first), so the highlight
       // follows it instead of landing on whatever took its old place.
@@ -138,6 +179,11 @@
     switch (event.key) {
       case "Enter":
         event.preventDefault();
+        // The list trails the input by a frame on purpose. Committing from it
+        // without catching up first would pick a row the user already filtered
+        // away — typing an exact id and pressing Enter could select the model
+        // that happened to sit first in the previous list.
+        listQuery = query;
         if (activeIndex >= 0) choose(rowValue(activeIndex));
         else if (rowCount > 0) choose(rowValue(0));
         break;
@@ -160,6 +206,9 @@
   bind:query
   bind:activeIndex
   {rowCount}
+  notice={hiddenCount > 0
+    ? m.search_select_more_results({ shown: Math.min(matched.length, limit), total: matched.length })
+    : ""}
   {listID}
   {triggerText}
   {triggerTitle}
@@ -206,10 +255,10 @@
       onclick={() => choose(option.value)}
     >
       <span class="search-select-option-label search-select-clip" title={option.label} {@attach marqueeOnOverflow()}>
-        <span class="search-select-text">{option.label}</span>
+        <span class="search-select-text"><HighlightText text={option.label} needle={listQuery} /></span>
       </span>
       {#if option.description}
-        <span class="search-select-option-description">{option.description}</span>
+        <span class="search-select-option-description"><HighlightText text={option.description} needle={listQuery} /></span>
       {/if}
       {#if isChosen(option.value)}
         <Icon icon={Check} class="search-select-check" />

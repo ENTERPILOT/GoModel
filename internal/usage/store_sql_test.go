@@ -67,14 +67,15 @@ func TestBuildUsageInsert(t *testing.T) {
 			OutputCost:             nil,
 			TotalCost:              nil,
 			CostsCalculationCaveat: "missing pricing for tool tokens",
+			Billable:               new(false),
 		},
 	})
 
 	normalized := strings.Join(strings.Fields(query), " ")
-	wantQuery := "INSERT INTO usage (id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, session_id, cache_type, labels, input_tokens, output_tokens, total_tokens, rewrite_tokens_saved, rewrite_cost_saved, raw_data, input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat, auth_key_id, markup_percent, markup_selector, billed_cost, writer_id, written_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING"
+	wantQuery := "INSERT INTO usage (id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, session_id, cache_type, labels, input_tokens, output_tokens, total_tokens, rewrite_tokens_saved, rewrite_cost_saved, raw_data, input_cost, output_cost, total_cost, cost_source, costs_calculation_caveat, auth_key_id, markup_percent, markup_selector, billed_cost, billable, writer_id, written_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING"
 	require.Equal(t, wantQuery, normalized)
 
-	require.Len(t, args, 58)
+	require.Len(t, args, 60)
 	require.Equal(t, "usage-1", args[0])
 	require.Equal(t, "primary-openai", args[6])
 	require.Equal(t, CostSourceModelPricing, args[21])
@@ -82,9 +83,10 @@ func TestBuildUsageInsert(t *testing.T) {
 	require.Equal(t, &markupPercent, args[24])
 	require.Equal(t, "/", args[25])
 	require.Equal(t, &billedCost, args[26])
-	require.Equal(t, "writer-1", args[27])
-	require.Equal(t, int64(1_700_000_000_000_000), args[28])
-	require.Equal(t, "usage-2", args[29])
+	require.Equal(t, true, args[27], "billable defaults to true")
+	require.Equal(t, "writer-1", args[28])
+	require.Equal(t, int64(1_700_000_000_000_000), args[29])
+	require.Equal(t, "usage-2", args[30])
 	require.Equal(t, "session-1", args[9])
 	require.Equal(t, CacheTypeExact, args[10])
 	require.Equal(t, `["alpha","prod"]`, args[11])
@@ -92,16 +94,17 @@ func TestBuildUsageInsert(t *testing.T) {
 	require.Equal(t, &rewriteCostSaved, args[16])
 	require.Equal(t, now, args[3])
 	require.JSONEq(t, `{"cached_tokens":3}`, args[17].(string))
-	require.Nil(t, args[39])
 	require.Nil(t, args[40])
-	require.Equal(t, 0, args[44])
-	require.Nil(t, args[45].(*float64), "rewrite_cost_saved")
-	require.Nil(t, args[46], "raw_data")
-	require.Empty(t, args[52], "auth_key_id")
-	require.Nil(t, args[53].(*float64), "markup_percent")
-	require.Nil(t, args[55].(*float64), "billed_cost")
-	require.Nil(t, args[56], "writer_id")
-	require.Nil(t, args[57], "written_at")
+	require.Nil(t, args[41])
+	require.Equal(t, 0, args[45])
+	require.Nil(t, args[46].(*float64), "rewrite_cost_saved")
+	require.Nil(t, args[47], "raw_data")
+	require.Empty(t, args[53], "auth_key_id")
+	require.Nil(t, args[54].(*float64), "markup_percent")
+	require.Nil(t, args[56].(*float64), "billed_cost")
+	require.Equal(t, false, args[57], "billable")
+	require.Nil(t, args[58], "writer_id")
+	require.Nil(t, args[59], "written_at")
 }
 
 func TestBuildUsageInsertWritesSQLiteTimestampsAsRFC3339Text(t *testing.T) {

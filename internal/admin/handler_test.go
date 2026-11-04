@@ -1873,6 +1873,9 @@ func TestBuildProviderStatusItem_ClassifyAndDisplayFallbacks(t *testing.T) {
 			assert.Equal(t, tc.wantRunName, item.Runtime.Name)
 			assert.Equal(t, tc.wantRunTyp, item.Runtime.Type)
 			assert.Equal(t, tc.wantCfgType, item.Type)
+			if tc.cfg.Name == "" {
+				assert.True(t, item.Config.Billable, "a synthesised config keeps the billable default")
+			}
 		})
 	}
 }

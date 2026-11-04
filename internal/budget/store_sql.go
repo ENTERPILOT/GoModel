@@ -360,19 +360,25 @@ func spendSubjectMatch(window SpendWindow, sqlite bool) (string, []any, error) {
 			return "", nil, err
 		}
 		if sqlite {
-			return `(labels IS NOT NULL AND EXISTS (SELECT 1 FROM json_each(usage.labels) WHERE json_each.value = ?))`,
+			return consumerSpendMatch(`labels IS NOT NULL AND EXISTS (SELECT 1 FROM json_each(usage.labels) WHERE json_each.value = ?)`),
 				[]any{subject}, nil
 		}
 		// The function form, not the `?` operator, so the placeholder rewriter
 		// never has to tell the two apart.
-		return `jsonb_exists(labels, ?)`, []any{subject}, nil
+		return consumerSpendMatch(`jsonb_exists(labels, ?)`), []any{subject}, nil
 	}
 	userPath, err := NormalizeUserPath(window.Subject)
 	if err != nil {
 		return "", nil, err
 	}
 	condition, args := sqlutil.UserPathSubtreeCondition(usagePathMatchesBudgetExpr("user_path"), userPath)
-	return condition, args, nil
+	return consumerSpendMatch(condition), args, nil
+}
+
+// consumerSpendMatch wraps a user-path or label predicate so rows served by a
+// non-billable provider, whose cost the caller does not owe, add nothing.
+func consumerSpendMatch(condition string) string {
+	return "(" + condition + " AND billable = TRUE)"
 }
 
 // usagePathMatchesBudgetExpr normalizes a stored user path the way budget
