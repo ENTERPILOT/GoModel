@@ -79,7 +79,10 @@ func New(ctx context.Context, cfg *config.Config, shared storage.Storage, catalo
 	// The declarative virtual models and the failover configuration are handed
 	// to the migration too: both are overlaid on the store below, so a
 	// conversion must not commit a row that only fails to load once they are.
-	declared := ConfigModels(cfg.VirtualModels)
+	declared, err := ConfigModels(cfg.VirtualModels)
+	if err != nil {
+		return nil, err
+	}
 	if err := importLegacyFailoverRules(ctx, store, shared, cfg.Failover, declared); err != nil {
 		return nil, err
 	}

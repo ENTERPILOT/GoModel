@@ -454,6 +454,12 @@ class VirtualModelsStore {
         ...(alias.reasoning_effort
           ? { reasoning_effort: alias.reasoning_effort }
           : {}),
+        ...(alias.params && Object.keys(alias.params).length > 0
+          ? { params: alias.params }
+          : {}),
+        ...(alias.default_params && Object.keys(alias.default_params).length > 0
+          ? { default_params: alias.default_params }
+          : {}),
       },
       operation: "virtual model redirect",
       failureMessage: m.models_redirect_remove_failed(),

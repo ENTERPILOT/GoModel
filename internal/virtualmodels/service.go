@@ -319,6 +319,8 @@ func (s *Service) ListViews() []View {
 			Description:     vm.Description,
 			Slowdown:        vm.Slowdown,
 			ReasoningEffort: vm.ReasoningEffort,
+			Params:          vm.Params,
+			DefaultParams:   vm.DefaultParams,
 			Enabled:         vm.Enabled,
 			Managed:         vm.Managed,
 			CreatedAt:       vm.CreatedAt,
@@ -555,7 +557,7 @@ func (s *Service) policyIsRedundant(policy VirtualModel, fallbackRows []VirtualM
 // policyIsNoop reports whether an otherwise empty policy changes effective
 // access compared with the snapshot that would remain without that policy.
 func policyIsNoop(policy VirtualModel, fallback snapshot) bool {
-	if policy.IsRedirect() || len(policy.UserPaths) > 0 || strings.TrimSpace(policy.Description) != "" || policy.Slowdown != nil || policy.ReasoningEffort != "" {
+	if policy.IsRedirect() || len(policy.UserPaths) > 0 || strings.TrimSpace(policy.Description) != "" || policy.Slowdown != nil || policy.setsOverrides() {
 		return false
 	}
 

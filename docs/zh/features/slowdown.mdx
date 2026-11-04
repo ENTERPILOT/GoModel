@@ -1,0 +1,97 @@
+---
+title: "减速"
+description: "为模型或虚拟模型添加人为延迟，用于测试超时、加载状态以及较慢模型下的行为。"
+icon: "snail"
+keywords: ["减速", "slowdown", "延迟", "latency", "人为延迟", "测试", "超时", "虚拟模型"]
+---
+
+## 概览
+
+减速（Slowdown）让模型的响应比其提供商实际的响应更慢。GoModel 会测量上游调用的耗时，
+并在返回响应前额外等待该耗时的一定比例。
+
+该设置是**额外**时间的系数：
+
+| 系数  | 上游耗时 | 客户端看到 |
+| ----- | -------- | ---------- |
+| `0.5` | 2 秒     | 约 3 秒    |
+| `1`   | 2 秒     | 约 4 秒    |
+| `3`   | 2 秒     | 约 8 秒    |
+
+可用它来测试客户端超时、加载状态和重试逻辑，或者在不切换提供商的情况下体验应用在较慢模型上的表现。
+在生产环境中请不要设置，它在那里没有任何用途。
+
+减速默认关闭。
+
+## 配置减速
+
+在具体模型或重定向（别名）上设置 **Slowdown**。有效系数范围为 `0.1` 到 `10`。
+`0` 会显式禁用减速，包括从目标模型继承的减速。留空则表示不指定该设置。
+
+### 仪表盘
+
+打开 `Models`，编辑某个模型或虚拟模型，填写 **Slowdown (extra inference time)**。
+启用了减速的模型会在其所在行显示该值。
+
+### config.yaml
+
+```yaml
+virtual_models:
+  # 对所有调用方减速某个具体模型。
+  - source: openai/gpt-4o
+    slowdown: 0.5
+
+  # 暴露一个减速的别名，真实模型保持不变。
+  - source: slow-sonnet
+    target: anthropic/claude-sonnet-4-6
+    slowdown: 2
+```
+
+### 环境变量
+
+```env
+VIRTUAL_MODELS=[{"source":"slow-sonnet","target":"anthropic/claude-sonnet-4-6","slowdown":2}]
+```
+
+### 管理 API
+
+```bash
+curl -X PUT http://localhost:8080/admin/virtual-models \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"source":"slow-sonnet","target_model":"anthropic/claude-sonnet-4-6","slowdown":2}'
+```
+
+超出有效范围的值会返回 `400`。减速需要指定模型：`openai/*` 这样的提供商级选择器会被拒绝。
+
+## 优先级
+
+- 别名自身的减速优先于其目标模型的减速。
+- 没有设置值的别名会继承其解析到的目标模型的减速。将别名设置为 `0` 可以退出继承。
+- 对于负载均衡的虚拟模型，继承以该请求所选中的目标为准。
+- 模型自身的减速可以精确设置（`openai/gpt-4o`），也可以按模型设置（`gpt-4o`，适用于所有提供商），精确值优先。
+  更具体的条目若未设置减速，或其 `user_paths` 不包含调用方，不会遮蔽更宽泛的值，因此提供商级的访问规则永远不会关闭模型的减速。
+- 在[链式调用](/zh/features/virtual-models#链式虚拟模型)中，只有**外层**虚拟模型的减速生效。
+- 在带有 `user_paths` 的模型上设置的减速，只对来自这些[用户路径](/zh/features/user-path)的请求生效。
+
+## 哪些请求会被减速
+
+| 端点 | 行为 |
+| ---- | ---- |
+| Chat Completions、Responses | 在上游响应到达后延迟返回。 |
+| 同样的端点且 `stream: true`（SSE） | 每个数据块按缩放后的时间线释放。 |
+| [Anthropic Messages](/zh/advanced/anthropic-messages-api) | 当请求走翻译路径时，与 Chat Completions 一样延迟。[原生转发](/zh/advanced/anthropic-messages-api#原生转发到-anthropic)到 Anthropic 提供商的请求不会被减速。 |
+| Embeddings | 在上游响应到达后延迟返回。 |
+| 图像生成与编辑 | 在上游响应到达后延迟返回。 |
+| [音频](/zh/advanced/audio-api)：语音、转写、翻译 | 延迟返回；[流式传输](/zh/advanced/audio-api#流式传输)时则逐块节奏释放。 |
+
+上游调用失败时会直接返回，不加延迟。延迟会响应请求取消：客户端断开连接后会立即停止等待。
+
+Passthrough 请求、批处理和实时 WebSocket 会话不会被减速。
+
+## 流式传输与内存
+
+对于流式响应，GoModel 会在后台读取上游数据，并在每个数据块缩放后的到达时间将其释放。
+在系数为 `0.5` 时，流开始后第 2 秒到达的数据块会在第 3 秒到达客户端，因此提供商数据块之间的相对时间间隔得以保留。
+
+等待释放的数据块会保存在内存中。在较长或高吞吐的流上，或在较大的音频响应上使用较大的系数，可能会占用大量内存。
