@@ -128,6 +128,24 @@ entry. Concurrent identical misses are also coalesced in-process: one request
 reaches the provider and the waiters replay its response. Failed or otherwise
 non-cacheable responses are never fanned out.
 
+## What the semantic cache keys on
+
+A semantic hit needs a similar last user message and an identical match on
+everything else:
+
+- the request path, resolved provider and model, guardrail chain, and embedder
+- the earlier conversation turns, plus any non-text parts of the last user
+  message
+- every other top-level request field, such as `temperature`, `seed`, `stop`,
+  `n`, `tools`, `tool_choice`, `response_format`, `text`, `reasoning_effort`,
+  `thinking` or `system`, and any field GoModel does not recognize
+
+Only these fields are left out, because they do not change the answer:
+`user`, `metadata`, `safety_identifier`, `prompt_cache_key` and
+`prompt_cache_retention`. With `exclude_system_prompt: true`, system messages
+and a top-level `system` are left out as well; Responses `instructions` always
+count.
+
 ## Provider prompt-cache planning
 
 After routing resolves the concrete provider and model, GoModel adds a cache

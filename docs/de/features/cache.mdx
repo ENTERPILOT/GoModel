@@ -134,6 +134,26 @@ Misses werden zudem prozessintern zusammengeführt: Ein Request erreicht den
 Provider, und die wartenden Requests spielen dessen Response ab. Fehlgeschlagene
 oder anderweitig nicht cachebare Responses werden nie an mehrere Wartende verteilt.
 
+## Woraus der Schlüssel des semantischen Caches besteht
+
+Ein semantischer Treffer braucht eine ähnliche letzte Nutzernachricht und eine
+exakte Übereinstimmung bei allem anderen:
+
+- Request-Pfad, aufgelöster Provider und aufgelöstes Modell, Guardrail-Kette und
+  Embedder
+- die früheren Gesprächsrunden sowie alle Nicht-Text-Teile der letzten
+  Nutzernachricht
+- alle anderen Felder der obersten Ebene des Requests, etwa `temperature`,
+  `seed`, `stop`, `n`, `tools`, `tool_choice`, `response_format`, `text`,
+  `reasoning_effort`, `thinking` oder `system`, sowie jedes Feld, das GoModel
+  nicht kennt
+
+Nur diese Felder bleiben außen vor, weil sie die Antwort nicht verändern:
+`user`, `metadata`, `safety_identifier`, `prompt_cache_key` und
+`prompt_cache_retention`. Mit `exclude_system_prompt: true` bleiben auch
+System-Nachrichten und ein `system` auf oberster Ebene außen vor;
+`instructions` der Responses API zählen immer.
+
 ## Planung des Provider-Prompt-Caches
 
 Nachdem das Routing den konkreten Provider und das Modell aufgelöst hat, fügt

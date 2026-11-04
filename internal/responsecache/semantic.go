@@ -18,8 +18,6 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"github.com/cespare/xxhash/v2"
-
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/embedding"
@@ -148,7 +146,7 @@ func (m *semanticCacheMiddleware) Handle(ex exchange, body []byte, next func() e
 	if !fpOK {
 		return next()
 	}
-	baseParams := computeParamsHash(body, path, plan, core.GetGuardrailsHash(ctx), m.embedderIdentity)
+	baseParams := computeParamsHash(body, path, plan, core.GetGuardrailsHash(ctx), m.embedderIdentity, m.cfg.ExcludeSystemPrompt)
 	paramsHash := sha256HexOf(baseParams + "\x00" + msgFp)
 	if m.partitionByUserPath {
 		// Every VecStore backend filters Search by exact params_hash inside the
@@ -443,29 +441,33 @@ func extractTextFromContent(content any) string {
 	}
 }
 
+// paramsHashIgnoredFields are top-level request fields left out of the semantic
+// params hash. messages and input are the prompt, matched by embedding and by
+// conversationInvariantFingerprint; stream and stream_options are hashed in
+// normalized form below. The rest identify the caller or steer provider-side
+// caching and never change what the model generates. Every other field is
+// hashed, so a field GoModel does not know about causes a miss, never a hit
+// generated under a different value.
+var paramsHashIgnoredFields = map[string]struct{}{
+	"messages":               {},
+	"input":                  {},
+	"stream":                 {},
+	"stream_options":         {},
+	"user":                   {},
+	"metadata":               {},
+	"safety_identifier":      {},
+	"prompt_cache_key":       {},
+	"prompt_cache_retention": {},
+}
+
 // computeParamsHash builds a stable SHA-256 hash of all output-shaping parameters.
 // This ensures semantically similar prompts with different parameters or guardrail
 // policies never share a cache entry. endpointPath is the raw URL path
 // (e.g. "/v1/chat/completions") and isolates entries across distinct endpoints.
-func computeParamsHash(body []byte, endpointPath string, plan *core.Workflow, guardrailsHash, embedderIdentity string) string {
-	var req struct {
-		Model           string              `json:"model"`
-		Temperature     *float64            `json:"temperature"`
-		TopP            *float64            `json:"top_p"`
-		MaxTokens       *int                `json:"max_tokens"`
-		MaxOutputTokens *int                `json:"max_output_tokens"`
-		Tools           []map[string]any    `json:"tools"`
-		ResponseFormat  any                 `json:"response_format"`
-		Stream          bool                `json:"stream,omitempty"`
-		StreamOptions   *core.StreamOptions `json:"stream_options"`
-		Reasoning       json.RawMessage     `json:"reasoning"`
-		Instructions    string              `json:"instructions"`
-	}
-	_ = json.Unmarshal(body, &req)
-
+// excludeSystem leaves out a top-level system prompt (Anthropic Messages), as
+// conversationInvariantFingerprint leaves out system messages.
+func computeParamsHash(body []byte, endpointPath string, plan *core.Workflow, guardrailsHash, embedderIdentity string, excludeSystem bool) string {
 	h := sha256.New()
-	h.Write([]byte(req.Model))
-	h.Write([]byte{0})
 	h.Write([]byte(endpointPath))
 	h.Write([]byte{0})
 
@@ -476,71 +478,97 @@ func computeParamsHash(body []byte, endpointPath string, plan *core.Workflow, gu
 		h.Write([]byte{0})
 	}
 
-	if req.Temperature != nil {
-		h.Write([]byte(strconv.FormatFloat(*req.Temperature, 'f', -1, 64)))
-	}
-	h.Write([]byte{0})
-
-	if req.TopP != nil {
-		h.Write([]byte(strconv.FormatFloat(*req.TopP, 'f', -1, 64)))
-	}
-	h.Write([]byte{0})
-
-	if req.MaxTokens != nil {
-		h.Write([]byte(strconv.Itoa(*req.MaxTokens)))
-	}
-	h.Write([]byte{0})
-
-	if req.MaxOutputTokens != nil {
-		h.Write([]byte(strconv.Itoa(*req.MaxOutputTokens)))
-	}
-	h.Write([]byte{0})
-
-	if len(req.Reasoning) > 0 {
-		var canonical any
-		if err := json.Unmarshal(req.Reasoning, &canonical); err == nil {
-			remarshaled, _ := json.Marshal(canonical)
-			h.Write(remarshaled)
-		} else {
-			h.Write(req.Reasoning)
-		}
-	}
-	h.Write([]byte{0})
-
-	if req.Instructions != "" {
-		h.Write([]byte(req.Instructions))
-	}
-	h.Write([]byte{0})
-
-	if len(req.Tools) > 0 {
-		toolsJSON, _ := json.Marshal(sortedTools(req.Tools))
-		xx := xxhash.Sum64(toolsJSON)
-		h.Write([]byte(strconv.FormatUint(xx, 16)))
-	}
-	h.Write([]byte{0})
-
-	if req.ResponseFormat != nil {
-		rfJSON, _ := json.Marshal(req.ResponseFormat)
-		h.Write(rfJSON)
-	}
-	h.Write([]byte{0})
-
-	if req.Stream {
-		h.Write([]byte("1"))
-	}
-	h.Write([]byte{0})
-
-	if streamOptions := normalizeStreamOptionsForCache(req.StreamOptions); req.Stream && streamOptions != nil {
-		soJSON, _ := json.Marshal(streamOptions)
-		h.Write(soJSON)
-	}
-	h.Write([]byte{0})
+	writeOutputShapingFields(h, body, excludeSystem)
 
 	h.Write([]byte(guardrailsHash))
 	h.Write([]byte{0})
 	h.Write([]byte(embedderIdentity))
 
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// writeOutputShapingFields hashes every top-level field of body that is not in
+// paramsHashIgnoredFields, in sorted key order with canonical JSON values, so
+// member order and whitespace do not matter. A body that is not a JSON object,
+// or that repeats a member name, is hashed verbatim instead: a provider may
+// read a duplicated member differently from the value decoding keeps.
+func writeOutputShapingFields(h hash.Hash, body []byte, excludeSystem bool) {
+	var fields map[string]json.RawMessage
+	if hasDuplicateJSONMemberNames(body) || json.Unmarshal(body, &fields) != nil {
+		h.Write(body)
+		h.Write([]byte{0})
+		return
+	}
+
+	keys := make([]string, 0, len(fields))
+	for key := range fields {
+		if _, ignored := paramsHashIgnoredFields[key]; ignored {
+			continue
+		}
+		if key == "system" && excludeSystem {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		h.Write([]byte(key))
+		h.Write([]byte{0})
+		if key == "tools" {
+			h.Write(canonicalToolsJSON(fields[key]))
+		} else {
+			h.Write(canonicalJSON(fields[key]))
+		}
+		h.Write([]byte{0})
+	}
+
+	var stream struct {
+		Stream        bool                `json:"stream"`
+		StreamOptions *core.StreamOptions `json:"stream_options"`
+	}
+	_ = json.Unmarshal(body, &stream)
+	if stream.Stream {
+		h.Write([]byte("stream"))
+		h.Write([]byte{0})
+		if streamOptions := normalizeStreamOptionsForCache(stream.StreamOptions); streamOptions != nil {
+			soJSON, _ := json.Marshal(streamOptions)
+			h.Write(soJSON)
+		}
+		h.Write([]byte{0})
+	}
+}
+
+// canonicalJSON re-encodes raw with sorted object keys and no insignificant
+// whitespace. Numbers keep their literal text, so large integers such as a
+// seed are never rounded into a colliding value.
+func canonicalJSON(raw json.RawMessage) []byte {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return raw
+	}
+	out, err := json.Marshal(v)
+	if err != nil {
+		return raw
+	}
+	return out
+}
+
+// canonicalToolsJSON is canonicalJSON for a tools array, ordered by function
+// name so the same tool set in a different order shares entries.
+func canonicalToolsJSON(raw json.RawMessage) []byte {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var tools []map[string]any
+	if err := dec.Decode(&tools); err != nil {
+		return canonicalJSON(raw)
+	}
+	out, err := json.Marshal(sortedTools(tools))
+	if err != nil {
+		return canonicalJSON(raw)
+	}
+	return out
 }
 
 func sortedTools(tools []map[string]any) []map[string]any {
