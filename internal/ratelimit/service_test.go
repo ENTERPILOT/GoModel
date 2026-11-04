@@ -143,7 +143,7 @@ func (m *memStore) SaveCounters(_ context.Context, snapshots []WindowSnapshot) e
 }
 
 // ResetCounter mirrors the real stores: a new epoch for the rule, and every
-// writer's rows gone.
+// writer's window rows gone. In-flight rows stay (see Store.ResetCounter).
 func (m *memStore) ResetCounter(_ context.Context, scope RuleScope, subject string, periodSeconds int64) error {
 	key := ruleKey{scope: scope, subject: subject, periodSeconds: periodSeconds}
 	epoch := uuid.NewString()

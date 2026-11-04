@@ -470,8 +470,9 @@ func counterIdentityFilter(snap WindowSnapshot) bson.D {
 }
 
 // ResetCounter draws a new counter epoch for the rule and removes every
-// writer's rows for it, so no replica's row, including one written after the
-// delete under the old epoch, brings a reset window back. The legacy
+// writer's window rows for it, so no replica's row, including one written
+// after the delete under the old epoch, brings a reset window back. In-flight
+// rows stay (see Store.ResetCounter). The legacy
 // collection is cleared too: an older replica in a rolling upgrade may still
 // write there, and the next start would import it. It goes before the window
 // collection, so a concurrent import either conflicts with this delete and

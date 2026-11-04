@@ -293,8 +293,9 @@ const pruneCountersSQL = `
 `
 
 // ResetCounter draws a new counter epoch for the rule and removes every
-// writer's rows for it in one transaction, so no replica's row, including one
-// written after the delete under the old epoch, brings a reset window back.
+// writer's window rows for it in one transaction, so no replica's row,
+// including one written after the delete under the old epoch, brings a reset
+// window back. In-flight rows stay (see Store.ResetCounter).
 func (s *SQLStore) ResetCounter(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {
 	err := s.resetCounters(ctx, ` WHERE scope = ? AND subject = ? AND period_seconds = ?`, scope, subject, periodSeconds)
 	if err != nil {
