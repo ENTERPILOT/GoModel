@@ -350,7 +350,7 @@ func (d usageDialect) sessionUsageQueries(params SessionUsageParams) (countQuery
 const usageLogColumns = `id, request_id, provider_id, timestamp, model, provider, provider_name, endpoint, user_path, session_id, cache_type, labels,
 		input_tokens, output_tokens, total_tokens, input_cost, output_cost, total_cost, COALESCE(cost_source, ''), raw_data, COALESCE(costs_calculation_caveat, ''),
 		COALESCE(rewrite_tokens_saved, 0), rewrite_cost_saved, COALESCE(auth_key_id, ''),
-		markup_percent, COALESCE(markup_selector, ''), billed_cost`
+		markup_percent, COALESCE(markup_selector, ''), billed_cost, billable`
 
 // GetUsageLog returns a paginated list of individual usage log entries.
 func (r *SQLReader) GetUsageLog(ctx context.Context, params UsageLogParams) (*UsageLogResult, error) {

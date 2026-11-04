@@ -14,6 +14,8 @@ GoModel 通过一个网关将兼容 OpenAI 的请求路由到众多 AI 提供商
 
 通过环境变量或 `config.yaml` 声明的提供商始终优先：以任一方式配置的名称在控制台中都是**只读**的（显示 "Config" 徽标），这与 GoModel 对 MCP 服务器、虚拟模型和速率限制采用的规则相同。API 密钥和服务账号 Secret（密钥）保存后会被遮蔽（`***`）：编辑提供商时，所有未修改的内容都会重新提交 `***`，网关会保留已存储的值。禁用提供商（而不是删除）会将其从路由中注销，但保留其配置记录。环境变量支持的多密钥轮换（`api_keys`，有序列表）和按提供商配置的[出站代理](/zh/providers/outbound-proxy)同样可以在控制台表单中配置。
 
+每个提供商还带有一个 `billable` 设置，默认开启。对于成本不由调用方向您支付的提供商（例如客户自己的 API 密钥被注册为一个独立的提供商实例），请将其关闭：用量仍会被追踪和定价，但用户路径和标签预算既不会拦截它，也不会计入它，并且在开启[加价](/zh/features/cost-tracking#加价与计费成本)时按零计费。可以通过 `config.yaml` 中的 `providers.<name>.billable: false`、环境变量 `<PROVIDER>[_SUFFIX]_BILLABLE=false`、控制台表单高级字段下的 **Billable** 复选框，或 `PUT /admin/provider-credentials` 上的 `"billable": false` 来设置。参见[预算](/zh/features/budgets#非计费提供商)。
+
 ## 支持的提供商
 
 示例模型标识符仅作说明，可能会发生变化；当前可用的模型请查阅各提供商的模型目录。功能列反映的是网关的 API 支持情况，而不是上游提供商提供的每个模型的具体能力。

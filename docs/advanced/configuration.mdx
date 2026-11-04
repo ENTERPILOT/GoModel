@@ -237,11 +237,12 @@ bodies, headers), see [Audit Logging](#audit-logging) below.
 | `REDIS_KEY_RESPONSES`  | Redis key for response cache        | `gomodel:response:` |
 | `REDIS_TTL_MODELS`     | TTL in seconds for model cache      | `86400` (24h)    |
 | `REDIS_TTL_RESPONSES`  | TTL in seconds for response cache   | `3600` (1h)      |
+| `RESPONSE_CACHE_PARTITION_BY_USER_PATH` | Give each effective `user_path` its own exact and semantic cache entries | `false` |
 
 <Tip>
   See [Cache](/features/cache) for exact-cache behavior, response headers,
-  analytics endpoints, and the note that `user_path` alone does not partition
-  the exact cache.
+  analytics endpoints, and how partitioning by `user_path` works and where its
+  isolation ends.
 </Tip>
 
 <Note>

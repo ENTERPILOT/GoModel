@@ -159,6 +159,7 @@ func (s *MongoDBStore) recalculatePricingInMongoTransaction(ctx context.Context,
 			Caveat             string         `bson:"costs_calculation_caveat"`
 			CacheType          string         `bson:"cache_type"`
 			MarkupPercent      *float64       `bson:"markup_percent"`
+			Billable           *bool          `bson:"billable"`
 		}
 		if err := cursor.Decode(&row); err != nil {
 			return RecalculatePricingResult{}, fmt.Errorf("scan mongodb usage cost row: %w", err)
@@ -178,6 +179,7 @@ func (s *MongoDBStore) recalculatePricingInMongoTransaction(ctx context.Context,
 			Caveat:             row.Caveat,
 			CacheType:          row.CacheType,
 			MarkupPercent:      row.MarkupPercent,
+			NonBillable:        row.Billable != nil && !*row.Billable,
 			Billing:            billing,
 		}, resolver)
 

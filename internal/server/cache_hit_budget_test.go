@@ -14,6 +14,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/cache"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 )
 
@@ -59,6 +60,12 @@ func TestHandleWithCacheChecksBilledBudgetsBeforeReplay(t *testing.T) {
 			workflow:   &core.Workflow{Policy: &core.ResolvedWorkflowPolicy{VersionID: "v1", Features: budgetOff}},
 			wantStatus: http.StatusOK,
 		},
+		{
+			name:       "the resolved provider reaches the check",
+			workflow:   &core.Workflow{Resolution: &core.RequestModelResolution{ProviderName: "byok"}},
+			wantStatus: http.StatusOK,
+			wantCalls:  1,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -92,8 +99,9 @@ func TestHandleWithCacheChecksBilledBudgetsBeforeReplay(t *testing.T) {
 				assert.Empty(t, rec.Header().Get("X-Cache"))
 			}
 			if tt.wantCalls > 0 {
-				// Cache hits are not routed, so provider budgets stay out.
-				assert.Empty(t, checker.subjects.Provider)
+				// The provider goes along only so a non-billable one is exempt;
+				// the checker itself leaves provider budgets out of a hit.
+				assert.Equal(t, gateway.ProviderNameFromWorkflow(tt.workflow), checker.subjects.Provider)
 				assert.Equal(t, []string{"acme"}, checker.subjects.Labels)
 			}
 		})

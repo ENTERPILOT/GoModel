@@ -256,11 +256,12 @@ unten.
 | `REDIS_KEY_RESPONSES`  | Redis-Key für den Response-Cache        | `gomodel:response:` |
 | `REDIS_TTL_MODELS`     | TTL in Sekunden für den Modell-Cache      | `86400` (24h)    |
 | `REDIS_TTL_RESPONSES`  | TTL in Sekunden für den Response-Cache   | `3600` (1h)      |
+| `RESPONSE_CACHE_PARTITION_BY_USER_PATH` | Gibt jedem effektiven `user_path` eigene Einträge im exakten und semantischen Cache | `false` |
 
 <Tip>
   Unter [Cache](/de/features/cache) finden Sie das Verhalten des exakten Caches,
-  Response-Header, Analytics-Endpunkte und den Hinweis, dass `user_path` allein
-  den exakten Cache nicht partitioniert.
+  Response-Header, Analytics-Endpunkte sowie die Partitionierung nach `user_path`
+  und die Grenzen ihrer Isolation.
 </Tip>
 
 <Note>

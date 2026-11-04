@@ -239,11 +239,12 @@ requestów/odpowiedzi, nagłówki) opisuje sekcja [Logowanie audytowe](#logowani
 | `REDIS_KEY_RESPONSES`  | Klucz Redisa dla cache'u odpowiedzi | `gomodel:response:` |
 | `REDIS_TTL_MODELS`     | TTL cache'u modeli w sekundach      | `86400` (24h)    |
 | `REDIS_TTL_RESPONSES`  | TTL cache'u odpowiedzi w sekundach  | `3600` (1h)      |
+| `RESPONSE_CACHE_PARTITION_BY_USER_PATH` | Daje każdemu efektywnemu `user_path` własne wpisy w exact cache i cache'u semantycznym | `false` |
 
 <Tip>
   W sekcji [Cache](/pl/features/cache) znajdziesz opis działania exact cache, nagłówki odpowiedzi,
-  endpointy analityczne oraz uwagę, że samo `user_path` nie partycjonuje
-  exact cache.
+  endpointy analityczne oraz opis partycjonowania według `user_path` i granic
+  jego izolacji.
 </Tip>
 
 <Note>

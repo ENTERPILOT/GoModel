@@ -9580,6 +9580,9 @@ const docTemplate = `{
                 "base_url": {
                     "type": "string"
                 },
+                "billable": {
+                    "type": "boolean"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -10016,6 +10019,10 @@ const docTemplate = `{
                 },
                 "base_url": {
                     "type": "string"
+                },
+                "billable": {
+                    "description": "Billable false marks a provider whose cost the caller does not owe the\noperator, such as a customer's own key. Omitted keeps the stored value\n(true for a new provider).",
+                    "type": "boolean"
                 },
                 "enabled": {
                     "type": "boolean"
@@ -14014,6 +14021,10 @@ const docTemplate = `{
             "properties": {
                 "auth_key_id": {
                     "type": "string"
+                },
+                "billable": {
+                    "description": "Billable is false for a request served by a provider configured with\nbillable: false; omitted when billable.",
+                    "type": "boolean"
                 },
                 "billed_cost": {
                     "type": "number"

@@ -36,6 +36,18 @@ dashboardu dostępna jest ta sama rotacja wielu kluczy, którą obsługują zmie
 środowiskowe (`api_keys`, uporządkowana lista), oraz
 [proxy wychodzące](/pl/providers/outbound-proxy) per provider.
 
+Każdy provider ma też ustawienie `billable`, domyślnie włączone. Wyłącz je dla
+providera, za którego koszt wywołujący nie jest ci winien, np. własnego klucza
+API klienta zarejestrowanego jako osobna instancja providera: użycie jest nadal
+śledzone i wyceniane, ale budżety ścieżek użytkowników i etykiet ani go nie
+blokują, ani nie liczą, a przy włączonych
+[narzutach](/pl/features/cost-tracking#narzuty-i-koszt-rozliczeniowy) jest
+rozliczane na zero. Ustawisz je przez `providers.<name>.billable: false` w
+`config.yaml`, `<PROVIDER>[_SUFFIX]_BILLABLE=false` w środowisku, pole wyboru
+**Billable** wśród pól zaawansowanych formularza dashboardu albo
+`"billable": false` w `PUT /admin/provider-credentials`. Zobacz
+[Budżety](/pl/features/budgets#providerzy-nierozliczani).
+
 ## Obsługiwani providerzy
 
 Przykładowe identyfikatory modeli są poglądowe i mogą się zmienić; aktualne

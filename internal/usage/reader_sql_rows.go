@@ -146,11 +146,15 @@ func scanUsageLogEntries(rows sqlx.Rows) ([]UsageLogEntry, error) {
 		var e UsageLogEntry
 		var ts usageTimestamp
 		var providerName, userPath, sessionID, cacheType, labelsJSON, rawDataJSON *string
+		var billable bool
 		if err := rows.Scan(&e.ID, &e.RequestID, &e.ProviderID, &ts, &e.Model, &e.Provider, &providerName, &e.Endpoint, &userPath, &sessionID, &cacheType, &labelsJSON,
 			&e.InputTokens, &e.OutputTokens, &e.TotalTokens, &e.InputCost, &e.OutputCost, &e.TotalCost, &e.CostSource, &rawDataJSON, &e.CostsCalculationCaveat,
 			&e.RewriteTokensSaved, &e.RewriteCostSaved, &e.AuthKeyID,
-			&e.MarkupPercent, &e.MarkupSelector, &e.BilledCost); err != nil {
+			&e.MarkupPercent, &e.MarkupSelector, &e.BilledCost, &billable); err != nil {
 			return nil, fmt.Errorf("failed to scan usage log row: %w", err)
+		}
+		if !billable {
+			e.Billable = &billable
 		}
 		if ts.Valid {
 			e.Timestamp = ts.Time
