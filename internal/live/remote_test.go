@@ -139,12 +139,14 @@ func (f *fakeUsageTable) LogEntriesByID(_ context.Context, ids []string) ([]usag
 		return nil, err
 	}
 	entries := make([]usage.UsageLogEntry, len(rows))
+	notBillable := false
 	for i, row := range rows {
 		entries[i] = usage.UsageLogEntry{
 			ID:          row.id,
 			RequestID:   "req-" + row.id,
 			Timestamp:   row.timestamp,
 			TotalTokens: 15,
+			Billable:    &notBillable,
 		}
 	}
 	return entries, nil
@@ -418,6 +420,7 @@ func TestRemoteFeedPublishesAuditThenUsage(t *testing.T) {
 	assert.Equal(t, "req-usage-1", usageData["request_id"])
 	assert.InDelta(t, 15, usageData["total_tokens"], 0)
 	assert.InDelta(t, testT0.Add(-time.Second).UnixMicro(), usageData["_remote_written_at"], 0)
+	assert.Equal(t, false, usageData["billable"], "a peer's non-billable entry stays marked")
 }
 
 // Entries go out by request time, whatever the order they were written in,

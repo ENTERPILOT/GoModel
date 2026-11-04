@@ -123,6 +123,7 @@ func TestUsageLogEntriesByID(t *testing.T) {
 		withCost := stampedUsageEntry(usageIDOld, "writer-a", 100)
 		withCost.TotalCost = &cost
 		withCost.SessionID = "session-1"
+		withCost.MarkNonBillable()
 		require.NoError(t, store.WriteBatch(ctx, []*UsageEntry{
 			withCost,
 			stampedUsageEntry(usageIDMid, "writer-a", 100),
@@ -140,7 +141,10 @@ func TestUsageLogEntriesByID(t *testing.T) {
 		require.NotNil(t, entries[0].TotalCost)
 		assert.InDelta(t, cost, *entries[0].TotalCost, 1e-9)
 		assert.True(t, entries[0].Timestamp.Equal(withCost.Timestamp))
+		require.NotNil(t, entries[0].Billable, "a non-billable entry stays marked")
+		assert.False(t, *entries[0].Billable)
 		assert.Equal(t, usageIDMid, entries[1].ID)
+		assert.Nil(t, entries[1].Billable, "billable is the default")
 
 		entries, err = reader.LogEntriesByID(ctx, nil)
 		require.NoError(t, err)
