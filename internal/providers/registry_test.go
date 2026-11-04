@@ -235,7 +235,7 @@ func TestModelRegistry(t *testing.T) {
 		require.NotNil(t, snapshots[0].LastAvailabilityOKAt)
 	})
 
-	t.Run("TargetedRefreshWithEmptyInventoryClearsStaleProviderModels", func(t *testing.T) {
+	t.Run("TargetedRefreshWithEmptyInventoryKeepsProviderModels", func(t *testing.T) {
 		registry := NewModelRegistry()
 		mock := &registryMockProvider{
 			name: "ollama",
@@ -255,8 +255,10 @@ func TestModelRegistry(t *testing.T) {
 		_, err = registry.RefreshProviderModels(context.Background(), "ollama")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "provider returned no models")
-		require.False(t, registry.Supports("ollama/qwen3:8b"))
-		require.Equal(t, 0, registry.ModelCount())
+		// An empty listing is a failed fetch: the models keep routing. With no
+		// healthy alternative they are not marked stale either.
+		require.True(t, registry.Supports("ollama/qwen3:8b"))
+		require.True(t, registry.ModelAvailable("ollama/qwen3:8b"))
 	})
 
 	t.Run("ConfiguredModelsAllowlistModeSkipsUpstreamAndUsesConfiguredModels", func(t *testing.T) {
@@ -838,6 +840,33 @@ func TestModelRegistry(t *testing.T) {
 			}
 		}
 		require.True(t, foundEmptied, "missing emptied provider snapshot")
+	})
+
+	t.Run("EmptyRecheckKeepsInventoryStale", func(t *testing.T) {
+		registry := NewModelRegistry()
+		healthy := &registryMockProvider{modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data:   []core.Model{{ID: "healthy-model", Object: "model", OwnedBy: "test"}},
+		}}
+		emptied := &registryMockProvider{modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data:   []core.Model{{ID: "test-model", Object: "model", OwnedBy: "test"}},
+		}}
+		registry.RegisterProviderWithNameAndType(healthy, "healthy", "test")
+		registry.RegisterProviderWithNameAndType(emptied, "emptied", "test")
+		require.NoError(t, registry.Initialize(context.Background()))
+
+		emptied.modelsResponse = &core.ModelsResponse{Object: "list"}
+		require.NoError(t, registry.Initialize(context.Background()))
+		require.Equal(t, []string{"emptied"}, registry.FailedProviderNames())
+
+		// The background recheck refreshes the provider on its own and gets
+		// the same empty listing: the carried inventory must survive it.
+		registry.recheckFailedProviders(context.Background())
+
+		require.Same(t, emptied, registry.GetProvider("emptied/test-model"))
+		require.False(t, registry.ModelAvailable("emptied/test-model"))
+		require.Equal(t, []string{"emptied"}, registry.FailedProviderNames())
 	})
 
 	t.Run("ListModelsOrdering", func(t *testing.T) {
