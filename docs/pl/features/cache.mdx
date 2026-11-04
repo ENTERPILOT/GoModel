@@ -142,9 +142,12 @@ i dokładnej zgodności wszystkiego innego:
   `temperature`, `seed`, `stop`, `n`, `tools`, `tool_choice`, `response_format`,
   `text`, `reasoning_effort`, `thinking` czy `system`, a także każdego pola,
   którego GoModel nie zna
+- tego, czy request jest streamowany; `stream_options` liczy się tylko, gdy
+  `stream` ma wartość `true`
 
-Pomijane są tylko te pola, bo nie zmieniają odpowiedzi: `user`, `metadata`,
-`safety_identifier`, `prompt_cache_key` i `prompt_cache_retention`. Przy
+Te pola są pomijane, bo nie zmieniają odpowiedzi: `user`, `metadata`,
+`safety_identifier`, `prompt_cache_key` i `prompt_cache_retention`. Na
+`/v1/responses` liczą się, bo odpowiedź zwraca je wywołującemu. Przy
 `exclude_system_prompt: true` pomijane są też wiadomości systemowe i `system`
 na najwyższym poziomie; `instructions` z Responses API liczą się zawsze.
 

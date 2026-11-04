@@ -139,12 +139,15 @@ everything else:
 - every other top-level request field, such as `temperature`, `seed`, `stop`,
   `n`, `tools`, `tool_choice`, `response_format`, `text`, `reasoning_effort`,
   `thinking` or `system`, and any field GoModel does not recognize
+- whether the request streams; `stream_options` only counts when `stream` is
+  `true`
 
-Only these fields are left out, because they do not change the answer:
-`user`, `metadata`, `safety_identifier`, `prompt_cache_key` and
-`prompt_cache_retention`. With `exclude_system_prompt: true`, system messages
-and a top-level `system` are left out as well; Responses `instructions` always
-count.
+These fields are left out, because they do not change the answer: `user`,
+`metadata`, `safety_identifier`, `prompt_cache_key` and
+`prompt_cache_retention`. On `/v1/responses` they count, because the response
+echoes them back to the caller. With `exclude_system_prompt: true`, system
+messages and a top-level `system` are left out as well; Responses
+`instructions` always count.
 
 ## Provider prompt-cache planning
 

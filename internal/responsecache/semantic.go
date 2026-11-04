@@ -441,24 +441,32 @@ func extractTextFromContent(content any) string {
 	}
 }
 
-// paramsHashIgnoredFields are top-level request fields left out of the semantic
-// params hash. messages and input are the prompt, matched by embedding and by
-// conversationInvariantFingerprint; stream and stream_options are hashed in
-// normalized form below. The rest identify the caller or steer provider-side
-// caching and never change what the model generates. Every other field is
-// hashed, so a field GoModel does not know about causes a miss, never a hit
-// generated under a different value.
-var paramsHashIgnoredFields = map[string]struct{}{
-	"messages":               {},
-	"input":                  {},
-	"stream":                 {},
-	"stream_options":         {},
+// paramsHashPromptFields are top-level request fields never hashed as plain
+// fields: messages and input are the prompt, matched by embedding and by
+// conversationInvariantFingerprint, and stream and stream_options are hashed
+// in normalized form by writeOutputShapingFields. Every field not listed here
+// or in paramsHashCallerFields is hashed, so a field GoModel does not know
+// about causes a miss, never a hit generated under a different value.
+var paramsHashPromptFields = map[string]struct{}{
+	"messages":       {},
+	"input":          {},
+	"stream":         {},
+	"stream_options": {},
+}
+
+// paramsHashCallerFields identify the caller or steer provider-side prompt
+// caching. They never change what the model generates, so they are left out
+// of the hash, except on responsesPath: a Responses object echoes them back,
+// and a hit must not hand one caller's values to another.
+var paramsHashCallerFields = map[string]struct{}{
 	"user":                   {},
 	"metadata":               {},
 	"safety_identifier":      {},
 	"prompt_cache_key":       {},
 	"prompt_cache_retention": {},
 }
+
+const responsesPath = "/v1/responses"
 
 // computeParamsHash builds a stable SHA-256 hash of all output-shaping parameters.
 // This ensures semantically similar prompts with different parameters or guardrail
@@ -478,7 +486,7 @@ func computeParamsHash(body []byte, endpointPath string, plan *core.Workflow, gu
 		h.Write([]byte{0})
 	}
 
-	writeOutputShapingFields(h, body, excludeSystem)
+	writeOutputShapingFields(h, body, endpointPath, excludeSystem)
 
 	h.Write([]byte(guardrailsHash))
 	h.Write([]byte{0})
@@ -487,12 +495,14 @@ func computeParamsHash(body []byte, endpointPath string, plan *core.Workflow, gu
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// writeOutputShapingFields hashes every top-level field of body that is not in
-// paramsHashIgnoredFields, in sorted key order with canonical JSON values, so
-// member order and whitespace do not matter. A body that is not a JSON object,
-// or that repeats a member name, is hashed verbatim instead: a provider may
-// read a duplicated member differently from the value decoding keeps.
-func writeOutputShapingFields(h hash.Hash, body []byte, excludeSystem bool) {
+// writeOutputShapingFields hashes every top-level field of body that is not a
+// prompt field or, outside responsesPath, a caller field, in sorted key order
+// with canonical JSON values, so member order and whitespace do not matter.
+// Keys are written JSON-encoded, so a key containing a NUL byte cannot pass
+// for the separator. A body that is not a JSON object, or that repeats a member
+// name, is hashed verbatim instead: a provider may read a duplicated member
+// differently from the value decoding keeps.
+func writeOutputShapingFields(h hash.Hash, body []byte, endpointPath string, excludeSystem bool) {
 	var fields map[string]json.RawMessage
 	if hasDuplicateJSONMemberNames(body) || json.Unmarshal(body, &fields) != nil {
 		h.Write(body)
@@ -502,7 +512,10 @@ func writeOutputShapingFields(h hash.Hash, body []byte, excludeSystem bool) {
 
 	keys := make([]string, 0, len(fields))
 	for key := range fields {
-		if _, ignored := paramsHashIgnoredFields[key]; ignored {
+		if _, prompt := paramsHashPromptFields[key]; prompt {
+			continue
+		}
+		if _, caller := paramsHashCallerFields[key]; caller && endpointPath != responsesPath {
 			continue
 		}
 		if key == "system" && excludeSystem {
@@ -512,7 +525,8 @@ func writeOutputShapingFields(h hash.Hash, body []byte, excludeSystem bool) {
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		h.Write([]byte(key))
+		encodedKey, _ := json.Marshal(key)
+		h.Write(encodedKey)
 		h.Write([]byte{0})
 		if key == "tools" {
 			h.Write(canonicalToolsJSON(fields[key]))

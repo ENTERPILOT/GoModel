@@ -138,8 +138,8 @@ func TestPartitionOff_KeepsTodaysIdentities(t *testing.T) {
 			require.Len(t, vecStore.entries, 1)
 			// Recomputed when the params hash started covering every output-shaping
 			// field; it still must not vary with the user path while the setting is off.
-			assert.Equal(t, "31f8e1af90083b96ce740db3d20920c57f80a2ce948306a15ceec69319208290", vecStore.entries[0].paramsHash)
-			assert.Equal(t, "10bd5c6a5de1307e811cef7c294c1a964dc524d8b3e606dd49814b8a55ca036b", vecStore.entries[0].key)
+			assert.Equal(t, "3a5b7dc3ad2b549beb609572a75b4ed6c46004c15be579c2b67bf614a924fcc6", vecStore.entries[0].paramsHash)
+			assert.Equal(t, "efd36f887a065acdc1500ef21d3770d0302b05dacb3ecbcd878ce1115b65fd4e", vecStore.entries[0].key)
 		})
 	}
 }
