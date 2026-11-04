@@ -205,9 +205,12 @@ func replaceTopLevelMember(body []byte, key string, value []byte) ([]byte, error
 
 // slowDownNativeMessages applies the resolved slowdown to a natively relayed
 // Messages response, so a slowed model behaves the same on this path as on
-// the translated pipeline. A JSON response waits after the upstream answered;
-// a stream is paced chunk by chunk on the scaled timeline. Upstream errors
-// relay without a delay, like failed translated calls.
+// the translated pipeline. A JSON response is read in full first, as the
+// translated pipeline reads it, so the wait scales the whole upstream time
+// and the body is not left open on the upstream connection meanwhile. A
+// stream is paced chunk by chunk on the scaled timeline; every event in it,
+// an in-stream error included, keeps its relative timing. Upstream HTTP
+// errors relay without a delay, like failed translated calls.
 func slowDownNativeMessages(ctx context.Context, workflow *core.Workflow, stream bool, resp *core.PassthroughResponse, started time.Time) error {
 	factor := workflowSlowdownFactor(workflow)
 	if factor <= 0 || resp == nil || resp.Body == nil || resp.StatusCode >= http.StatusBadRequest {
@@ -217,5 +220,11 @@ func slowDownNativeMessages(ctx context.Context, workflow *core.Workflow, stream
 		resp.Body = streaming.NewSlowdownStream(ctx, resp.Body, factor, started)
 		return nil
 	}
+	body, err := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if err != nil {
+		return core.NewProviderError(anthropicProviderType, http.StatusBadGateway, "failed to read provider response", err)
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(body))
 	return waitForModelSlowdownFactor(ctx, factor, time.Since(started))
 }
