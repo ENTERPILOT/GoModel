@@ -768,3 +768,32 @@ func TestUnreadableCloseMarksDoNotExtendTheSession(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rawMCPStatus(t, a.url+"/mcp", listToolsBody, withSession(nil, sessionID)))
 	assert.Zero(t, store.puts.Load(), "no expiry extension without a close-mark read")
 }
+
+// A virtual server deleted and recreated within one second, which SQL stores
+// record as the same created_at, is still a new incarnation: the deleted
+// one's sessions do not resume on it, wherever the replica clocks stand.
+func TestVirtualRecreatedInTheSameSecondIsANewIncarnation(t *testing.T) {
+	store := newMemorySharedStore(time.Now)
+	ctx := context.Background()
+	servers := alphaServers(t)
+	created := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
+	virtualStore := &memoryVirtualStore{rows: map[string]ManagedVirtualServer{
+		"coding": {Name: "coding", Servers: []string{"alpha"}, CreatedAt: created, Generation: "first"},
+	}}
+	options := func() Options {
+		return Options{ConfigServers: servers, Store: &memoryStore{rows: map[string]ManagedServer{}}, VirtualStore: virtualStore}
+	}
+	ahead := &testClock{}
+	ahead.Advance(time.Minute)
+	a := newReplica(t, store, options(), ahead)
+	b := newReplica(t, store, options(), nil)
+	sessionID := initializeRawSession(t, a.url+"/mcp/coding", nil)
+
+	require.NoError(t, b.service.DeleteVirtual(ctx, "coding"))
+	_, err := b.service.UpsertVirtual(ctx, ManagedVirtualServer{Name: "coding", Servers: []string{"alpha"}, CreatedAt: created})
+	require.NoError(t, err)
+	c := newReplica(t, store, options(), nil)
+	assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, c.url+"/mcp/coding", listToolsBody, withSession(nil, sessionID)))
+	fresh := initializeRawSession(t, b.url+"/mcp/coding", nil)
+	assert.Equal(t, http.StatusOK, rawMCPStatus(t, c.url+"/mcp/coding", listToolsBody, withSession(nil, fresh)))
+}

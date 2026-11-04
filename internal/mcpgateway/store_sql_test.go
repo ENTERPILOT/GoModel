@@ -222,3 +222,67 @@ func TestVirtualStoreRoundTrip(t *testing.T) {
 		require.ErrorIs(t, err, ErrNotFound)
 	})
 }
+
+// Every creation of a virtual server row gets its own generation, which an
+// edit keeps, so a name deleted and recreated within one second (SQL stores
+// created_at in whole seconds) still tells its two incarnations apart.
+func TestVirtualStoreGenerationIdentifiesEachCreation(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
+		ctx := context.Background()
+		virtualStore, ok := store.(VirtualStore)
+		require.True(t, ok)
+		created := time.Now().UTC().Truncate(time.Second)
+		virtual := ManagedVirtualServer{Name: "coding", Servers: []string{"github"}, CreatedAt: created}
+
+		require.NoError(t, virtualStore.UpsertVirtual(ctx, virtual))
+		first, err := virtualStore.GetVirtual(ctx, "coding")
+		require.NoError(t, err)
+		require.NotEmpty(t, first.Generation)
+
+		virtual.Servers = []string{"github", "jira"}
+		require.NoError(t, virtualStore.UpsertVirtual(ctx, virtual))
+		require.NoError(t, virtualStore.UpdateVirtual(ctx, virtual))
+		edited, err := virtualStore.GetVirtual(ctx, "coding")
+		require.NoError(t, err)
+		require.Equal(t, first.Generation, edited.Generation, "edits keep the generation")
+
+		require.NoError(t, virtualStore.DeleteVirtual(ctx, "coding"))
+		require.NoError(t, virtualStore.UpsertVirtual(ctx, virtual))
+		recreated, err := virtualStore.GetVirtual(ctx, "coding")
+		require.NoError(t, err)
+		require.Equal(t, first.CreatedAt.Unix(), recreated.CreatedAt.Unix(), "created in the same second")
+		require.NotEqual(t, first.Generation, recreated.Generation)
+		require.NotEqual(t, first.Spec().Incarnation, recreated.Spec().Incarnation)
+	})
+}
+
+// A virtual server row from before generations gets the column with an
+// empty value, and is identified by its creation time.
+func TestSQLStoreMigratesVirtualGeneration(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		ctx := context.Background()
+		err := db.Schema(ctx, `
+			CREATE TABLE mcp_virtual_servers (
+				name TEXT PRIMARY KEY, description TEXT NOT NULL DEFAULT '',
+				servers TEXT NOT NULL DEFAULT '[]', tool_discovery TEXT NOT NULL DEFAULT '',
+				created_at `+sqlx.TypeInt64+` NOT NULL, updated_at `+sqlx.TypeInt64+` NOT NULL
+			)`)
+		require.NoError(t, err)
+		_, err = db.Exec(ctx,
+			`INSERT INTO mcp_virtual_servers (name, servers, created_at, updated_at) VALUES (?, ?, ?, ?)`, "coding", `["github"]`, 1700000000, 1700000000)
+		require.NoError(t, err)
+
+		store, err := NewSQLStore(ctx, db)
+		require.NoError(t, err)
+		legacy, err := store.GetVirtual(ctx, "coding")
+		require.NoError(t, err)
+		require.Empty(t, legacy.Generation)
+		require.NotEmpty(t, legacy.Spec().Incarnation)
+
+		require.NoError(t, store.DeleteVirtual(ctx, "coding"))
+		require.NoError(t, store.UpsertVirtual(ctx, ManagedVirtualServer{Name: "coding", Servers: []string{"github"}, CreatedAt: legacy.CreatedAt}))
+		recreated, err := store.GetVirtual(ctx, "coding")
+		require.NoError(t, err)
+		require.NotEqual(t, legacy.Spec().Incarnation, recreated.Spec().Incarnation)
+	})
+}

@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"slices"
 	"sort"
-	"time"
 
 	"github.com/enterpilot/gomodel/config"
 )
@@ -26,10 +25,11 @@ type VirtualServerSpec struct {
 	// MCP_VIRTUAL_SERVERS. They override admin-store rows with the same name
 	// and are read-only in the dashboard.
 	Managed bool
-	// CreatedAt is when the admin store created the row; zero for a managed
-	// one. Every replica reads the same value, so it tells a virtual server
-	// from one recreated under its name without comparing replica clocks.
-	CreatedAt time.Time
+	// Incarnation identifies one creation of an admin store row (see
+	// ManagedVirtualServer.incarnation); empty for a managed one. Every
+	// replica reads the same value, so it tells a virtual server from one
+	// recreated under its name without comparing replica clocks.
+	Incarnation string
 }
 
 // VirtualFromConfig converts one declarative entry into a runtime spec.

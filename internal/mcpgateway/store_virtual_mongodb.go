@@ -19,6 +19,7 @@ type mongoMCPVirtualDocument struct {
 	ToolDiscovery string    `bson:"tool_discovery,omitempty"`
 	CreatedAt     time.Time `bson:"created_at"`
 	UpdatedAt     time.Time `bson:"updated_at"`
+	Generation    string    `bson:"generation,omitempty"`
 }
 
 func (s *MongoDBStore) ListVirtual(ctx context.Context) ([]ManagedVirtualServer, error) {
@@ -42,7 +43,7 @@ func (s *MongoDBStore) UpsertVirtual(ctx context.Context, virtual ManagedVirtual
 	stampVirtualUpsert(&virtual)
 	update := bson.M{
 		"$set":         mongoMCPVirtualFields(virtual),
-		"$setOnInsert": bson.M{"created_at": virtual.CreatedAt},
+		"$setOnInsert": bson.M{"created_at": virtual.CreatedAt, "generation": virtual.Generation},
 	}
 	_, err := s.virtuals.UpdateOne(ctx, mongoMCPServerIDFilter{ID: strings.TrimSpace(virtual.Name)}, update, options.UpdateOne().SetUpsert(true))
 	if err != nil {
@@ -95,5 +96,6 @@ func managedVirtualFromMongo(doc mongoMCPVirtualDocument) ManagedVirtualServer {
 		ToolDiscovery: doc.ToolDiscovery,
 		CreatedAt:     doc.CreatedAt.UTC(),
 		UpdatedAt:     doc.UpdatedAt.UTC(),
+		Generation:    doc.Generation,
 	}
 }
