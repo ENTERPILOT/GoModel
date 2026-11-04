@@ -124,10 +124,19 @@ func TestApplyResponsesDoesNotShareMapsWithClient(t *testing.T) {
 	require.NoError(t, err)
 	got.Metadata["c"] = "3"
 	got.Include[0] = "changed"
-	got.Tools[0]["type"] = "changed"
 	assert.Equal(t, map[string]string{"a": "1"}, original.Metadata)
 	assert.Equal(t, []string{"y"}, original.Include)
-	assert.Equal(t, "function", original.Tools[0]["type"])
+	assert.Equal(t, original.Tools, got.Tools, "frozen members stay as the client sent them")
+}
+
+func TestApplyResponsesTypedMergeKeepsFrozenBody(t *testing.T) {
+	body := `{"model":"m","input":[{"role":"user","content":"hi"}],"instructions":"be brief","tools":[{"type":"function","name":"f"}],"prompt":{"id":"p1"},"metadata":{"a":"1"}}`
+	original := responsesRequest(t, body)
+	got, err := ApplyResponses(original, nil, Set{"metadata": raw(`{"b":"2"}`)})
+	require.NoError(t, err)
+	want := `{"model":"m","input":[{"role":"user","content":"hi"}],"instructions":"be brief","tools":[{"type":"function","name":"f"}],"prompt":{"id":"p1"},"metadata":{"a":"1","b":"2"}}`
+	assert.JSONEq(t, want, encode(t, got))
+	assert.JSONEq(t, body, encode(t, original), "the client request must not be mutated")
 }
 
 func TestApplyChatNoopReturnsSameRequest(t *testing.T) {

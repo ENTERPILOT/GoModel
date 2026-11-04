@@ -44,11 +44,13 @@ func ApplyChat(req *core.ChatRequest, defaults, params Set) (*core.ChatRequest, 
 		return nil, err
 	}
 	if a.touchesTyped() {
-		messages, plan := cloned.Messages, cloned.PromptCachePlan
+		// The frozen body never changes, so keep it out of the round trip.
+		messages, tools, plan := cloned.Messages, cloned.Tools, cloned.PromptCachePlan
+		cloned.Messages, cloned.Tools = nil, nil
 		if err := mergeTyped(a, &cloned); err != nil {
 			return nil, err
 		}
-		cloned.Messages, cloned.PromptCachePlan = messages, plan
+		cloned.Messages, cloned.Tools, cloned.PromptCachePlan = messages, tools, plan
 	}
 	fields, err := a.extraFields(req.ExtraFields)
 	if err != nil {
@@ -100,11 +102,13 @@ func ApplyResponses(req *core.ResponsesRequest, defaults, params Set) (*core.Res
 		return nil, err
 	}
 	if a.touchesTyped() {
-		input := cloned.Input
+		// The frozen body never changes, so keep it out of the round trip.
+		input, instructions, tools, prompt := cloned.Input, cloned.Instructions, cloned.Tools, cloned.Prompt
+		cloned.Input, cloned.Instructions, cloned.Tools, cloned.Prompt = nil, "", nil, nil
 		if err := mergeTyped(a, &cloned); err != nil {
 			return nil, err
 		}
-		cloned.Input = input
+		cloned.Input, cloned.Instructions, cloned.Tools, cloned.Prompt = input, instructions, tools, prompt
 	}
 	fields, err := a.extraFields(req.ExtraFields)
 	if err != nil {
