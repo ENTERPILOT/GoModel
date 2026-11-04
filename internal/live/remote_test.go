@@ -504,3 +504,48 @@ func TestRemoteFeedTimesOutEachTableOnItsOwn(t *testing.T) {
 	sub := h.subscribe(t)
 	assert.Equal(t, []string{EventUsageFlushed + ":usage-1"}, eventIDs(t, pendingEvents(sub)))
 }
+
+// Reads that fail from the very first poll keep the window it started with,
+// so recovery still publishes what was persisted from there on, within the
+// resume limit.
+func TestRemoteFeedFirstPollFailureKeepsItsWindow(t *testing.T) {
+	audit := &fakeAuditTable{}
+	audit.failLoads = 1000
+	clock := &testClock{now: testT0}
+	audit.add("before-first-poll", testPeer, testT0.Add(-time.Second))
+	h := newTestHarness(t, testSelf, audit, nil, clock)
+
+	sub := h.subscribe(t)
+	assert.Empty(t, pendingEvents(sub))
+	clock.Advance(2 * remoteWindow)
+	audit.add("during-failure", testPeer, clock.Now().Add(-remoteWindow-time.Second))
+	h.tick(t)
+	assert.Empty(t, pendingEvents(sub))
+
+	audit.mu.Lock()
+	audit.failLoads = 0
+	audit.mu.Unlock()
+	clock.Advance(time.Second)
+	h.tick(t)
+	assert.ElementsMatch(t, []string{EventAuditFlushed + ":before-first-poll", EventAuditFlushed + ":during-failure"},
+		eventIDs(t, pendingEvents(sub)), "nothing persisted since the first attempt is lost")
+}
+
+// The first attempt's window is still bounded by the resume limit.
+func TestRemoteFeedFirstPollFailureStaysWithinTheResumeLimit(t *testing.T) {
+	audit := &fakeAuditTable{}
+	audit.failLoads = 1000
+	clock := &testClock{now: testT0}
+	audit.add("too-long-ago", testPeer, testT0.Add(-time.Second))
+	h := newTestHarness(t, testSelf, audit, nil, clock)
+
+	sub := h.subscribe(t)
+	assert.Empty(t, pendingEvents(sub))
+	clock.Advance(remoteResumeLimit + time.Minute)
+	audit.add("recent", testPeer, clock.Now().Add(-time.Second))
+	audit.mu.Lock()
+	audit.failLoads = 0
+	audit.mu.Unlock()
+	h.tick(t)
+	assert.Equal(t, []string{EventAuditFlushed + ":recent"}, eventIDs(t, pendingEvents(sub)))
+}

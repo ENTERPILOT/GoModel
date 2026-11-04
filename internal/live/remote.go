@@ -273,9 +273,9 @@ type remoteSpan struct {
 type remoteSeen struct {
 	table string
 	ids   map[string]int64
-	// covered is the start of the last complete poll's window: that poll
-	// read and published every stamp from there on that was visible, so the
-	// next poll reads from there, or further back if it fails too.
+	// covered is the start of the last complete poll's window, or of the
+	// first poll's until one completes: everything visible from there on was
+	// published, or is still to be, so the next poll reads from there.
 	covered int64
 	// failure is the last logged error, so a lasting one is logged once.
 	failure string
@@ -287,7 +287,7 @@ type remoteSeen struct {
 // limit.
 func (s *remoteSeen) since(span remoteSpan) int64 {
 	since := span.now - span.window
-	if s.covered > 0 && s.covered < since {
+	if s.covered < since {
 		since = max(s.covered, span.now-span.resume)
 	}
 	return since
@@ -303,6 +303,11 @@ func (s *remoteSeen) poll(ctx context.Context, span remoteSpan, writer string, r
 	// usage one.
 	ctx, cancel := context.WithTimeout(ctx, span.timeout)
 	defer cancel()
+	if s.covered == 0 {
+		// The first poll anchors the catch-up at its own window, so reads
+		// failing from the start lose nothing either.
+		s.covered = span.now - span.window
+	}
 	since := s.since(span)
 	writes, err := recent(ctx, since, writer, remoteWriteLimit)
 	if err != nil {
