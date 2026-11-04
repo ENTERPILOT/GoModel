@@ -20,7 +20,10 @@ type VirtualStore interface {
 	// UpdateVirtual rewrites an existing row and returns ErrNotFound when the
 	// row is gone, so an edit racing a delete cannot recreate it.
 	UpdateVirtual(ctx context.Context, virtual ManagedVirtualServer) error
-	DeleteVirtual(ctx context.Context, name string) error
+	// DeleteVirtual removes a row and returns it as it was deleted, in the
+	// same operation, so a caller learns which incarnation it removed even
+	// when another instance replaced the row just before.
+	DeleteVirtual(ctx context.Context, name string) (*ManagedVirtualServer, error)
 }
 
 // ManagedVirtualServer is one admin-managed virtual server row.

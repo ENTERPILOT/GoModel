@@ -21,7 +21,7 @@ var sqlVirtualTable = `CREATE TABLE IF NOT EXISTS mcp_virtual_servers (
 )`
 
 // sqlVirtualMigrations backfill columns added after the table's first
-// release. Rows from before generation keep ” (see incarnation).
+// release. Rows from before generation keep an empty one (see incarnation).
 var sqlVirtualMigrations = []string{
 	`ALTER TABLE mcp_virtual_servers ADD COLUMN generation TEXT NOT NULL DEFAULT ''`,
 }
@@ -106,15 +106,16 @@ func (s *SQLStore) UpdateVirtual(ctx context.Context, virtual ManagedVirtualServ
 	return nil
 }
 
-func (s *SQLStore) DeleteVirtual(ctx context.Context, name string) error {
-	affected, err := s.db.Exec(ctx, `DELETE FROM mcp_virtual_servers WHERE name = ?`, strings.TrimSpace(name))
+func (s *SQLStore) DeleteVirtual(ctx context.Context, name string) (*ManagedVirtualServer, error) {
+	row := s.db.QueryRow(ctx, `DELETE FROM mcp_virtual_servers WHERE name = ? RETURNING `+selectMCPVirtualColumns, strings.TrimSpace(name))
+	virtual, err := scanSQLMCPVirtual(row)
 	if err != nil {
-		return fmt.Errorf("delete mcp virtual server: %w", err)
+		if errors.Is(err, sqlx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("delete mcp virtual server: %w", err)
 	}
-	if affected == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return &virtual, nil
 }
 
 func scanSQLMCPVirtual(scanner sqlx.Row) (ManagedVirtualServer, error) {

@@ -856,3 +856,33 @@ func TestSlowVirtualDeleteSparesTheRecreatedServer(t *testing.T) {
 		assert.False(t, bound, name)
 	}
 }
+
+// staleGetVirtualStore answers GetVirtual with a row another instance has
+// since replaced, as a read just before the replacement would.
+type staleGetVirtualStore struct {
+	*memoryVirtualStore
+	stale ManagedVirtualServer
+}
+
+func (s staleGetVirtualStore) GetVirtual(context.Context, string) (*ManagedVirtualServer, error) {
+	return &s.stale, nil
+}
+
+// Deleting a virtual server closes the incarnation the store actually
+// removed, even when the row was replaced just before the delete.
+func TestDeleteVirtualClosesTheIncarnationItRemoved(t *testing.T) {
+	store := newMemorySharedStore(time.Now)
+	servers := alphaServers(t)
+	current := &memoryVirtualStore{rows: map[string]ManagedVirtualServer{
+		"coding": {Name: "coding", Servers: []string{"alpha"}, Generation: "second"},
+	}}
+	plainStore := func() *memoryStore { return &memoryStore{rows: map[string]ManagedServer{}} }
+	stale := staleGetVirtualStore{memoryVirtualStore: current, stale: ManagedVirtualServer{Name: "coding", Servers: []string{"alpha"}, Generation: "first"}}
+	a := newReplica(t, store, Options{ConfigServers: servers, Store: plainStore(), VirtualStore: stale}, nil)
+	b := newReplica(t, store, Options{ConfigServers: servers, Store: plainStore(), VirtualStore: current}, &testClock{})
+	sessionID := initializeRawSession(t, b.url+"/mcp/coding", nil)
+
+	require.NoError(t, a.service.DeleteVirtual(context.Background(), "coding"))
+	b.clock.Advance(sessionRecheckInterval)
+	assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, b.url+"/mcp/coding", listToolsBody, withSession(nil, sessionID)))
+}

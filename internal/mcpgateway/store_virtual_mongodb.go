@@ -64,15 +64,17 @@ func (s *MongoDBStore) UpdateVirtual(ctx context.Context, virtual ManagedVirtual
 	return nil
 }
 
-func (s *MongoDBStore) DeleteVirtual(ctx context.Context, name string) error {
-	result, err := s.virtuals.DeleteOne(ctx, mongoMCPServerIDFilter{ID: strings.TrimSpace(name)})
+func (s *MongoDBStore) DeleteVirtual(ctx context.Context, name string) (*ManagedVirtualServer, error) {
+	var doc mongoMCPVirtualDocument
+	err := s.virtuals.FindOneAndDelete(ctx, mongoMCPServerIDFilter{ID: strings.TrimSpace(name)}).Decode(&doc)
 	if err != nil {
-		return fmt.Errorf("delete mcp virtual server: %w", err)
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("delete mcp virtual server: %w", err)
 	}
-	if result.DeletedCount == 0 {
-		return ErrNotFound
-	}
-	return nil
+	virtual := managedVirtualFromMongo(doc)
+	return &virtual, nil
 }
 
 func mongoMCPVirtualFields(virtual ManagedVirtualServer) bson.M {

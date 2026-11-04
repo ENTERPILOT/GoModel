@@ -122,11 +122,8 @@ func (s *Service) DeleteVirtual(ctx context.Context, name string) error {
 	if s.IsManagedVirtual(name) {
 		return invalidVirtual("virtual MCP server %q is managed by config/env and is read-only", name)
 	}
-	deleted, err := s.virtualStore.GetVirtual(ctx, name)
+	deleted, err := s.virtualStore.DeleteVirtual(ctx, name)
 	if err != nil {
-		return err
-	}
-	if err := s.virtualStore.DeleteVirtual(ctx, name); err != nil {
 		return err
 	}
 	// The close mark names the deleted incarnation, so it is written before
