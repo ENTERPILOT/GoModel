@@ -183,6 +183,9 @@ export function cachedCostTitle(entry, baseTitle) {
 // billedCostTitle names the markup rule a request-log row was billed at, or
 // says none matched (billed cost then equals provider cost).
 export function billedCostTitle(entry) {
+  if (entry && entry.billable === false) {
+    return m.usage_not_billable_help();
+  }
   const raw = entry && entry.markup_percent;
   const percent = Number(raw);
   if (raw == null || raw === "" || !Number.isFinite(percent)) {

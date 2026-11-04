@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/enterpilot/gomodel/internal/storage/sqlutil"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
@@ -25,15 +27,22 @@ const sqlRateLimitsSchema = `
 		source TEXT NOT NULL DEFAULT '',
 		created_at ` + sqlx.TypeInt64 + ` NOT NULL,
 		updated_at ` + sqlx.TypeInt64 + ` NOT NULL,
+		counter_epoch TEXT NOT NULL DEFAULT '',
 		PRIMARY KEY (scope, subject, period_seconds)
 	)`
 
-const sqlRateLimitCountersSchema = `
-	CREATE TABLE IF NOT EXISTS rate_limit_counters (
+// sqlRateLimitWindowSnapshotsSchema holds one row per window per writer, so
+// replicas sharing the database keep their own rows instead of overwriting
+// each other's every flush. It replaces rate_limit_counters, whose key had no
+// writer; see importLegacyCounters.
+const sqlRateLimitWindowSnapshotsSchema = `
+	CREATE TABLE IF NOT EXISTS rate_limit_window_snapshots (
 		scope TEXT NOT NULL,
 		subject TEXT NOT NULL,
 		partition TEXT NOT NULL DEFAULT '',
 		period_seconds ` + sqlx.TypeInt64 + ` NOT NULL,
+		writer TEXT NOT NULL DEFAULT '',
+		epoch TEXT NOT NULL DEFAULT '',
 		requests_window_start ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
 		requests_current ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
 		requests_previous ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
@@ -41,21 +50,28 @@ const sqlRateLimitCountersSchema = `
 		tokens_current ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
 		tokens_previous ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
 		updated_at ` + sqlx.TypeInt64 + ` NOT NULL,
-		PRIMARY KEY (scope, subject, partition, period_seconds)
+		PRIMARY KEY (scope, subject, partition, period_seconds, writer)
 	)`
 
 // SQLStore stores rate limit rules in a SQL database.
 type SQLStore struct {
 	db sqlx.DB
+	// legacyCounters records that the pre-writer rate_limit_counters table
+	// exists, so resets clear it too: an older replica still running during
+	// a rolling upgrade keeps writing there, and the next start imports it.
+	legacyCounters bool
 }
 
 // upsertRuleSQL preserves a manually edited rule against a config re-seed:
 // a column is only overwritten when the incoming or stored row is manual, or
-// when both are config-sourced.
+// when both are config-sourced. The counter epoch the insert carries is kept
+// only by a new row or an update that switches per_child; see
+// Rule.CounterEpoch.
 const upsertRuleSQL = `
-	INSERT INTO rate_limits (scope, subject, subject_display, per_child, period_seconds, max_requests, max_tokens, source, created_at, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO rate_limits (scope, subject, subject_display, per_child, period_seconds, max_requests, max_tokens, source, created_at, updated_at, counter_epoch)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(scope, subject, period_seconds) DO UPDATE SET
+		counter_epoch = CASE WHEN (excluded.source = ? OR rate_limits.source = ?) AND excluded.per_child <> rate_limits.per_child THEN excluded.counter_epoch ELSE rate_limits.counter_epoch END,
 		subject_display = CASE WHEN excluded.source = ? OR rate_limits.source = ? THEN excluded.subject_display ELSE rate_limits.subject_display END,
 		per_child = CASE WHEN excluded.source = ? OR rate_limits.source = ? THEN excluded.per_child ELSE rate_limits.per_child END,
 		max_requests = CASE WHEN excluded.source = ? OR rate_limits.source = ? THEN excluded.max_requests ELSE rate_limits.max_requests END,
@@ -79,21 +95,26 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	if err := sqlx.AddColumns(ctx, db,
 		`ALTER TABLE rate_limits ADD COLUMN per_child `+sqlx.TypeBool+` NOT NULL DEFAULT FALSE`,
 		`ALTER TABLE rate_limits ADD COLUMN subject_display TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE rate_limits ADD COLUMN counter_epoch TEXT NOT NULL DEFAULT ''`,
 	); err != nil {
 		return nil, fmt.Errorf("failed to migrate rate_limits table: %w", err)
 	}
 	if err := db.Schema(ctx, `CREATE INDEX IF NOT EXISTS idx_rate_limits_subject ON rate_limits(scope, subject)`); err != nil {
 		return nil, fmt.Errorf("failed to create rate limit index: %w", err)
 	}
-	if err := db.Schema(ctx, sqlRateLimitCountersSchema); err != nil {
-		return nil, fmt.Errorf("failed to create rate_limit_counters table: %w", err)
+	if err := db.Schema(ctx, sqlRateLimitWindowSnapshotsSchema); err != nil {
+		return nil, fmt.Errorf("failed to create rate_limit_window_snapshots table: %w", err)
 	}
-	return &SQLStore{db: db}, nil
+	legacy, err := importLegacyCounters(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	return &SQLStore{db: db, legacyCounters: legacy}, nil
 }
 
 func (s *SQLStore) ListRules(ctx context.Context) ([]Rule, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT scope, subject, subject_display, per_child, period_seconds, max_requests, max_tokens, source, created_at, updated_at
+		SELECT scope, subject, subject_display, per_child, period_seconds, max_requests, max_tokens, source, created_at, updated_at, counter_epoch
 		FROM rate_limits
 		ORDER BY scope ASC, subject ASC, period_seconds ASC
 	`)
@@ -178,10 +199,10 @@ func (s *SQLStore) ReplaceConfigRules(ctx context.Context, rules []Rule) error {
 
 func (s *SQLStore) LoadCounters(ctx context.Context) ([]WindowSnapshot, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT scope, subject, partition, period_seconds,
+		SELECT scope, subject, partition, period_seconds, writer, epoch,
 			requests_window_start, requests_current, requests_previous,
 			tokens_window_start, tokens_current, tokens_previous
-		FROM rate_limit_counters
+		FROM rate_limit_window_snapshots
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("list rate limit counters: %w", err)
@@ -192,7 +213,7 @@ func (s *SQLStore) LoadCounters(ctx context.Context) ([]WindowSnapshot, error) {
 	for rows.Next() {
 		var snap WindowSnapshot
 		if err := rows.Scan(
-			&snap.Scope, &snap.Subject, &snap.Partition, &snap.PeriodSeconds,
+			&snap.Scope, &snap.Subject, &snap.Partition, &snap.PeriodSeconds, &snap.Writer, &snap.Epoch,
 			&snap.RequestsWindowStart, &snap.RequestsCurrent, &snap.RequestsPrevious,
 			&snap.TokensWindowStart, &snap.TokensCurrent, &snap.TokensPrevious,
 		); err != nil {
@@ -211,12 +232,13 @@ func (s *SQLStore) LoadCounters(ctx context.Context) ([]WindowSnapshot, error) {
 }
 
 const upsertCounterSQL = `
-	INSERT INTO rate_limit_counters (
-		scope, subject, partition, period_seconds,
+	INSERT INTO rate_limit_window_snapshots (
+		scope, subject, partition, period_seconds, writer, epoch,
 		requests_window_start, requests_current, requests_previous,
 		tokens_window_start, tokens_current, tokens_previous, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	ON CONFLICT(scope, subject, partition, period_seconds) DO UPDATE SET
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(scope, subject, partition, period_seconds, writer) DO UPDATE SET
+		epoch = excluded.epoch,
 		requests_window_start = excluded.requests_window_start,
 		requests_current = excluded.requests_current,
 		requests_previous = excluded.requests_previous,
@@ -231,7 +253,7 @@ func (s *SQLStore) SaveCounters(ctx context.Context, snapshots []WindowSnapshot)
 	return s.db.InTx(ctx, func(q sqlx.Querier) error {
 		for _, snap := range snapshots {
 			if _, err := q.Exec(ctx, upsertCounterSQL,
-				snap.Scope, snap.Subject, snap.Partition, snap.PeriodSeconds,
+				snap.Scope, snap.Subject, snap.Partition, snap.PeriodSeconds, snap.Writer, snap.Epoch,
 				snap.RequestsWindowStart, snap.RequestsCurrent, snap.RequestsPrevious,
 				snap.TokensWindowStart, snap.TokensCurrent, snap.TokensPrevious, now,
 			); err != nil {
@@ -246,30 +268,59 @@ func (s *SQLStore) SaveCounters(ctx context.Context, snapshots []WindowSnapshot)
 }
 
 // pruneCountersSQL collects the rows nobody writes any more: a rule that was
-// deleted, or a window that fell out of memory. Two periods without a write is
+// deleted, a window that fell out of memory, or a writer that stopped — every
+// restart leaves its predecessor's rows behind. Two periods without a write is
 // the same staleness bound restore applies, so this only ever deletes rows a
 // load would have discarded.
 const pruneCountersSQL = `
-	DELETE FROM rate_limit_counters
+	DELETE FROM rate_limit_window_snapshots
 	WHERE updated_at + 2 * period_seconds < ?
 `
 
-func (s *SQLStore) DeleteCounter(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {
-	_, err := s.db.Exec(ctx, `
-		DELETE FROM rate_limit_counters
-		WHERE scope = ? AND subject = ? AND period_seconds = ?
-	`, scope, subject, periodSeconds)
+// ResetCounter draws a new counter epoch for the rule and removes every
+// writer's rows for it in one transaction, so no replica's row, including one
+// written after the delete under the old epoch, brings a reset window back.
+func (s *SQLStore) ResetCounter(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {
+	err := s.resetCounters(ctx, ` WHERE scope = ? AND subject = ? AND period_seconds = ?`, scope, subject, periodSeconds)
 	if err != nil {
-		return fmt.Errorf("delete rate limit counters %s %s/%d: %w", scope, subject, periodSeconds, err)
+		return fmt.Errorf("reset rate limit counters %s %s/%d: %w", scope, subject, periodSeconds, err)
 	}
 	return nil
 }
 
-func (s *SQLStore) DeleteAllCounters(ctx context.Context) error {
-	if _, err := s.db.Exec(ctx, `DELETE FROM rate_limit_counters`); err != nil {
-		return fmt.Errorf("delete all rate limit counters: %w", err)
+// ResetAllCounters gives every rule the same new epoch: rows are keyed by
+// rule as well, so sharing it is safe.
+func (s *SQLStore) ResetAllCounters(ctx context.Context) error {
+	if err := s.resetCounters(ctx, ""); err != nil {
+		return fmt.Errorf("reset all rate limit counters: %w", err)
 	}
 	return nil
+}
+
+// resetCounters clears the legacy table before the window table. A starting
+// replica's import locks the legacy table first (see importLegacyCounters), so
+// in this order a reset either waits for the import to commit and then deletes
+// what it wrote, or deletes first and leaves the import nothing to copy. Even
+// a row the import writes back carries the empty epoch, which the new one
+// never matches.
+func (s *SQLStore) resetCounters(ctx context.Context, where string, args ...any) error {
+	var tables []string
+	if s.legacyCounters {
+		tables = append(tables, legacyCountersTable)
+	}
+	tables = append(tables, "rate_limit_window_snapshots")
+	epochArgs := append([]any{uuid.NewString()}, args...)
+	return s.db.InTx(ctx, func(q sqlx.Querier) error {
+		if _, err := q.Exec(ctx, `UPDATE rate_limits SET counter_epoch = ?`+where, epochArgs...); err != nil {
+			return err
+		}
+		for _, table := range tables {
+			if _, err := q.Exec(ctx, `DELETE FROM `+table+where, args...); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (s *SQLStore) Close() error {
@@ -289,6 +340,8 @@ func upsertRules(ctx context.Context, q sqlx.Querier, rules []Rule) error {
 			rule.Source,
 			rule.CreatedAt.Unix(),
 			rule.UpdatedAt.Unix(),
+			uuid.NewString(),
+			SourceManual, SourceConfig,
 			SourceManual, SourceConfig,
 			SourceManual, SourceConfig,
 			SourceManual, SourceConfig,
@@ -319,6 +372,7 @@ func scanSQLRule(scanner sqlx.Row) (Rule, error) {
 		&rule.Source,
 		&createdAt,
 		&updatedAt,
+		&rule.CounterEpoch,
 	); err != nil {
 		return Rule{}, fmt.Errorf("scan rate limit rule: %w", err)
 	}

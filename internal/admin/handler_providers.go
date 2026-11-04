@@ -142,7 +142,9 @@ func buildProviderStatusItem(name string, cfg providers.SanitizedProviderConfig,
 
 	// For the response row, fill in display fallbacks from the peer side.
 	if strings.TrimSpace(cfg.Name) == "" {
-		cfg = providers.SanitizedProviderConfig{Name: name, Type: strings.TrimSpace(runtime.Type)}
+		// Billable is true by default; a synthesised zero value would label
+		// the row non-billable.
+		cfg = providers.SanitizedProviderConfig{Name: name, Type: strings.TrimSpace(runtime.Type), Billable: true}
 	}
 	if strings.TrimSpace(runtime.Name) == "" {
 		runtime = providers.ProviderRuntimeSnapshot{Name: name, Type: strings.TrimSpace(cfg.Type)}

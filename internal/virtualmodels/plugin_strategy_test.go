@@ -332,7 +332,8 @@ func TestValidateManagedConfig_PluginStrategy(t *testing.T) {
 
 func TestConfigModels_PluginStrategy(t *testing.T) {
 	t.Parallel()
-	vm := configModel(configEntryWithPlugin())
+	vm, err := configModel(configEntryWithPlugin())
+	require.NoError(t, err)
 	require.Equal(t, StrategyPlugin, vm.Strategy)
 	require.Equal(t, "cheapest_healthy", vm.StrategyPlugin, "configModel() = %+v", vm)
 	require.Equal(t, map[string]any{"prefer": "fastest", "max_error_rate": 0.1}, vm.StrategyConfig)

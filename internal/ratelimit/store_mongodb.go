@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -16,6 +17,10 @@ import (
 type MongoDBStore struct {
 	rules    *mongo.Collection
 	counters *mongo.Collection
+	// legacyCounters is the pre-writer rate_limit_counters collection. It is
+	// only read by the import at construction and cleared by resets; see
+	// importLegacyCounters.
+	legacyCounters *mongo.Collection
 }
 
 func NewMongoDBStore(ctx context.Context, database *mongo.Database) (*MongoDBStore, error) {
@@ -23,8 +28,9 @@ func NewMongoDBStore(ctx context.Context, database *mongo.Database) (*MongoDBSto
 		return nil, fmt.Errorf("database is required")
 	}
 	store := &MongoDBStore{
-		rules:    database.Collection("rate_limits"),
-		counters: database.Collection("rate_limit_counters"),
+		rules:          database.Collection("rate_limits"),
+		counters:       database.Collection("rate_limit_window_snapshots"),
+		legacyCounters: database.Collection(legacyCountersTable),
 	}
 	if err := store.migratePreScopeDocuments(ctx); err != nil {
 		return nil, err
@@ -42,11 +48,15 @@ func NewMongoDBStore(ctx context.Context, database *mongo.Database) (*MongoDBSto
 			{Key: "subject", Value: 1},
 			{Key: "partition", Value: 1},
 			{Key: "period_seconds", Value: 1},
+			{Key: "writer", Value: 1},
 		},
 		Options: options.Index().SetUnique(true),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create rate limit counter indexes: %w", err)
+	}
+	if err := store.importLegacyCounters(ctx); err != nil {
+		return nil, err
 	}
 	return store, nil
 }
@@ -123,19 +133,33 @@ func (s *MongoDBStore) upsertNormalizedRules(ctx context.Context, rules []Rule) 
 		if rule.Source == SourceConfig {
 			filter = append(filter, bson.E{Key: "source", Value: SourceConfig})
 		}
-		update := bson.D{{Key: "$set", Value: bson.D{
-			{Key: "scope", Value: rule.Scope},
-			{Key: "subject", Value: rule.Subject},
-			{Key: "subject_display", Value: rule.SubjectDisplay},
-			{Key: "per_child", Value: rule.PerChild},
-			{Key: "period_seconds", Value: rule.PeriodSeconds},
-			{Key: "max_requests", Value: rule.MaxRequests},
-			{Key: "max_tokens", Value: rule.MaxTokens},
-			{Key: "source", Value: rule.Source},
-			{Key: "updated_at", Value: rule.UpdatedAt},
-		}}, {Key: "$setOnInsert", Value: bson.D{
-			{Key: "created_at", Value: rule.CreatedAt},
+		// A pipeline, so the counter epoch can depend on the stored row in
+		// the same write: a new rule, or one switching per_child, draws a
+		// fresh epoch, and any other edit keeps it (see Rule.CounterEpoch).
+		// Every stage expression sees the row as it was before this write;
+		// on an insert that row has no created_at yet. Values are $literal
+		// so a subject starting with "$" is never read as a field path.
+		existing := bson.D{{Key: "$and", Value: bson.A{
+			bson.D{{Key: "$ne", Value: bson.A{bson.D{{Key: "$type", Value: "$created_at"}}, "missing"}}},
+			bson.D{{Key: "$eq", Value: bson.A{bson.D{{Key: "$ifNull", Value: bson.A{"$per_child", false}}}, literal(rule.PerChild)}}},
 		}}}
+		update := mongo.Pipeline{bson.D{{Key: "$set", Value: bson.D{
+			{Key: "scope", Value: literal(rule.Scope)},
+			{Key: "subject", Value: literal(rule.Subject)},
+			{Key: "subject_display", Value: literal(rule.SubjectDisplay)},
+			{Key: "per_child", Value: literal(rule.PerChild)},
+			{Key: "period_seconds", Value: literal(rule.PeriodSeconds)},
+			{Key: "max_requests", Value: literal(rule.MaxRequests)},
+			{Key: "max_tokens", Value: literal(rule.MaxTokens)},
+			{Key: "source", Value: literal(rule.Source)},
+			{Key: "updated_at", Value: literal(rule.UpdatedAt)},
+			{Key: "created_at", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$created_at", literal(rule.CreatedAt)}}}},
+			{Key: "counter_epoch", Value: bson.D{{Key: "$cond", Value: bson.A{
+				existing,
+				bson.D{{Key: "$ifNull", Value: bson.A{"$counter_epoch", ""}}},
+				literal(uuid.NewString()),
+			}}}},
+		}}}}
 		models = append(models, mongo.NewUpdateOneModel().
 			SetFilter(filter).
 			SetUpdate(update).
@@ -166,6 +190,12 @@ func (s *MongoDBStore) upsertNormalizedRules(ctx context.Context, rules []Rule) 
 }
 
 // bulkWriteOutcome names how a bulk upsert error should be handled.
+// literal keeps an aggregation pipeline from evaluating value as an
+// expression or field path.
+func literal(value any) bson.D {
+	return bson.D{{Key: "$literal", Value: value}}
+}
+
 type bulkWriteOutcome int
 
 const (
@@ -260,14 +290,22 @@ func (s *MongoDBStore) ReplaceConfigRules(ctx context.Context, rules []Rule) err
 		rules[i].Source = SourceConfig
 	}
 
+	return s.inTransaction(ctx, "replace config rate limit rules", func(ctx context.Context) error {
+		return s.replaceConfigRules(ctx, rules)
+	})
+}
+
+// inTransaction runs fn in a transaction, or once without one on a deployment
+// that has no transactions (a standalone server).
+func (s *MongoDBStore) inTransaction(ctx context.Context, what string, fn func(ctx context.Context) error) error {
 	session, err := s.rules.Database().Client().StartSession()
 	if err != nil {
-		return fmt.Errorf("start config rate limit replacement transaction: %w", err)
+		return fmt.Errorf("start %s transaction: %w", what, err)
 	}
 	defer session.EndSession(ctx)
 
 	_, err = session.WithTransaction(ctx, func(txCtx context.Context) (any, error) {
-		if err := s.replaceConfigRules(txCtx, rules); err != nil {
+		if err := fn(txCtx); err != nil {
 			if isMongoTransactionCapabilityError(err) {
 				return nil, &mongoTransactionFallbackError{err: err}
 			}
@@ -280,13 +318,13 @@ func (s *MongoDBStore) ReplaceConfigRules(ctx context.Context, rules []Rule) err
 			if fallbackErr == nil {
 				fallbackErr = err
 			}
-			slog.Warn("MongoDB transactions unavailable for rate limit config replacement; falling back to non-transactional update", "error", fallbackErr)
-			if err := s.replaceConfigRules(ctx, rules); err != nil {
-				return fmt.Errorf("replace config rate limit rules without transaction: %w", errors.Join(fallbackErr, err))
+			slog.Warn("MongoDB transactions unavailable; falling back to a non-transactional write", "operation", what, "error", fallbackErr)
+			if err := fn(ctx); err != nil {
+				return fmt.Errorf("%s without transaction: %w", what, errors.Join(fallbackErr, err))
 			}
 			return nil
 		}
-		return fmt.Errorf("replace config rate limit rules transaction: %w", err)
+		return fmt.Errorf("%s transaction: %w", what, err)
 	}
 	return nil
 }
@@ -421,26 +459,55 @@ func counterIdentityFilter(snap WindowSnapshot) bson.D {
 		{Key: "subject", Value: snap.Subject},
 		{Key: "partition", Value: snap.Partition},
 		{Key: "period_seconds", Value: snap.PeriodSeconds},
+		{Key: "writer", Value: snap.Writer},
 	}
 }
 
-func (s *MongoDBStore) DeleteCounter(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {
-	_, err := s.counters.DeleteMany(ctx, bson.D{
+// ResetCounter draws a new counter epoch for the rule and removes every
+// writer's rows for it, so no replica's row, including one written after the
+// delete under the old epoch, brings a reset window back. The legacy
+// collection is cleared too: an older replica in a rolling upgrade may still
+// write there, and the next start would import it. It goes before the window
+// collection, so a concurrent import either conflicts with this delete and
+// retries, or commits before the window collection is cleared (see
+// importLegacyCounters).
+func (s *MongoDBStore) ResetCounter(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {
+	filter := bson.D{
 		{Key: "scope", Value: scope},
 		{Key: "subject", Value: subject},
 		{Key: "period_seconds", Value: periodSeconds},
-	})
-	if err != nil {
-		return fmt.Errorf("delete rate limit counters %s %s/%d: %w", scope, subject, periodSeconds, err)
+	}
+	if err := s.resetCounters(ctx, filter); err != nil {
+		return fmt.Errorf("reset rate limit counters %s %s/%d: %w", scope, subject, periodSeconds, err)
 	}
 	return nil
 }
 
-func (s *MongoDBStore) DeleteAllCounters(ctx context.Context) error {
-	if _, err := s.counters.DeleteMany(ctx, bson.D{}); err != nil {
-		return fmt.Errorf("delete all rate limit counters: %w", err)
+// ResetAllCounters gives every rule the same new epoch: rows are keyed by
+// rule as well, so sharing it is safe.
+func (s *MongoDBStore) ResetAllCounters(ctx context.Context) error {
+	if err := s.resetCounters(ctx, bson.D{}); err != nil {
+		return fmt.Errorf("reset all rate limit counters: %w", err)
 	}
 	return nil
+}
+
+// resetCounters writes the epoch first: without a transaction, a delete that
+// fails after it still leaves the reset in force.
+func (s *MongoDBStore) resetCounters(ctx context.Context, filter bson.D) error {
+	epoch := uuid.NewString()
+	return s.inTransaction(ctx, "reset rate limit counters", func(ctx context.Context) error {
+		update := bson.D{{Key: "$set", Value: bson.D{{Key: "counter_epoch", Value: epoch}}}}
+		if _, err := s.rules.UpdateMany(ctx, filter, update); err != nil {
+			return err
+		}
+		for _, collection := range []*mongo.Collection{s.legacyCounters, s.counters} {
+			if _, err := collection.DeleteMany(ctx, filter); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (s *MongoDBStore) Close() error {

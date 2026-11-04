@@ -9,6 +9,7 @@
   import {
     providerCredentialAuthLabel,
     providerCredentialModelsLabel,
+    providerRowNonBillable,
     providerRowsHaveActions,
   } from "./providersConfigLogic.js";
   import { Pencil, X } from "lucide";
@@ -42,6 +43,12 @@
                 class="alias-kind-badge"
                 title={m.providers_managed()}
                 >{m.common_config()}</span>
+            {/if}
+            {#if providerRowNonBillable(row)}
+              <span
+                class="alias-kind-badge"
+                title={m.providers_not_billable_title()}
+                >{m.providers_not_billable()}</span>
             {/if}
           </td>
           <td><span class="budget-source mono">{row.type}</span></td>

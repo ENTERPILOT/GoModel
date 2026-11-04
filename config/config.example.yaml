@@ -95,6 +95,17 @@ models:
 #     target: anthropic/claude-sonnet-4-6
 #     slowdown: 0.5 # add 50%; use 0 to disable inherited slowdown (active range: 0.1-10)
 #     # reasoning_effort: medium # force this effort upstream (none | minimal | low | medium | high | xhigh | max); empty keeps the client's value
+#   - source: qwen-thinking-low # one of several aliases of a self-hosted model with its own sampling settings
+#     target: vllm/Qwen3.8-27B
+#     reasoning_effort: low
+#     params: # forced on every request through this alias, replacing the client's value; null strips a key
+#       chat_template_kwargs: { enable_thinking: true, preserve_thinking: true } # objects merge one level deep
+#     default_params: # used only when the client omitted the key (Chat Completions names; provider-specific keys pass through)
+#       temperature: 1.0
+#       top_p: 0.95
+#       top_k: 20
+#       min_p: 0.0
+#       repetition_penalty: 1.0
 #   - source: smart # weighted round-robin load balancer
 #     strategy: round_robin # round_robin (default) | cost | failover | adaptive (uses a routing extension when registered; otherwise falls back to round_robin) | plugin (see smart-router below)
 #     targets:
@@ -160,6 +171,11 @@ models:
 #   # so large catalogs stop costing model context. Clients override it per session
 #   # with the X-MCP-Tool-Discovery header.
 #   tool_discovery: off # env: MCP_TOOL_DISCOVERY
+#   # Configured provider names whose own hosted MCP servers to expose, using the
+#   # provider's API key. Default: none (each call costs on that key). Supported:
+#   # zai -> zai-web-search, zai-web-reader, zai-zread (GLM Coding Plan keys).
+#   # A server in `servers` with the same slug replaces the provider-hosted one.
+#   provider_servers: [] # env: MCP_PROVIDER_SERVERS (comma-separated)
 #   servers:
 #     github:
 #       url: https://api.githubcopilot.com/mcp
@@ -204,6 +220,7 @@ cache:
     #   key: "gomodel:models"
     #   ttl: 86400 # 24 hours in seconds
   # response:
+  #   partition_by_user_path: false # env: RESPONSE_CACHE_PARTITION_BY_USER_PATH; true gives each effective user path its own exact and semantic entries. Only keys bound to a user path are isolated from each other; see docs/features/cache.mdx
   #   simple: # omit the whole `simple` key to disable exact-match caching (unless RESPONSE_CACHE_SIMPLE_ENABLED=true)
   #     enabled: true # default when `simple` is present; set false to disable while keeping the block
   #     redis:
@@ -572,6 +589,12 @@ providers:
     #   - "${OPENAI_API_KEY_3}"
     # Set false for strict per-request round robin (usually worse for prompt caching).
     # session_sticky_keys: false
+    # Set false when the caller does not owe this provider's cost (a customer's
+    # own key registered as its own provider): usage is still tracked and
+    # priced, user-path and label budgets skip it, and with markups enabled
+    # it is billed at zero.
+    # Equivalent env var: OPENAI_BILLABLE=false
+    # billable: false
     # Send only this provider's traffic through an HTTP(S) or SOCKS5 proxy.
     # Providers without one keep the process-wide HTTP_PROXY / HTTPS_PROXY / NO_PROXY.
     # Equivalent env var: OPENAI_PROXY_URL

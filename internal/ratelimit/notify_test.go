@@ -21,7 +21,8 @@ func TestServiceAnnouncesRuleWrites(t *testing.T) {
 	require.NoError(t, service.DeleteRule(ctx, ScopeUserPath, "/team", 60))
 	assert.Equal(t, 3, announced)
 
-	// Counter resets live in this instance's memory: nothing is stored.
-	require.NoError(t, service.ResetAll())
-	assert.Equal(t, 3, announced)
+	// A reset gives rules a new counter epoch, so other instances reload too.
+	require.NoError(t, service.ResetRule(ctx, ScopeUserPath, "/team", 60))
+	require.NoError(t, service.ResetAll(ctx))
+	assert.Equal(t, 5, announced)
 }

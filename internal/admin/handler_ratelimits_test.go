@@ -63,10 +63,10 @@ func (s *adminRateLimitStore) LoadCounters(context.Context) ([]ratelimit.WindowS
 func (s *adminRateLimitStore) SaveCounters(context.Context, []ratelimit.WindowSnapshot) error {
 	return nil
 }
-func (s *adminRateLimitStore) DeleteCounter(context.Context, ratelimit.RuleScope, string, int64) error {
+func (s *adminRateLimitStore) ResetCounter(context.Context, ratelimit.RuleScope, string, int64) error {
 	return nil
 }
-func (s *adminRateLimitStore) DeleteAllCounters(context.Context) error { return nil }
+func (s *adminRateLimitStore) ResetAllCounters(context.Context) error { return nil }
 
 func (s *adminRateLimitStore) Close() error { return nil }
 
