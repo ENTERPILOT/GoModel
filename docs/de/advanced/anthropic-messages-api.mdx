@@ -40,9 +40,11 @@ auch für Nicht-Streaming-Responses.
 
 Die native Weiterleitung erfolgt automatisch. Requests fallen auf die
 Übersetzungs-Pipeline zurück, sobald ein Feature beteiligt ist, das auf dem
-kanonischen Request arbeitet: Request-Patching durch Guardrails, der Response-Cache
-oder Failover-Routing. Requests, die zu einem Nicht-Anthropic-Provider aufgelöst
-werden, werden immer übersetzt.
+kanonischen Request arbeitet: Request-Patching durch Guardrails, der Response-Cache,
+Failover-Routing, ein erzwungener
+[Reasoning-Effort](/de/features/virtual-models#reasoning-effort-erzwingen) oder ein
+[Slowdown](/de/features/slowdown). Requests, die zu einem Nicht-Anthropic-Provider
+aufgelöst werden, werden immer übersetzt.
 
 Da der Body unverändert weitergeleitet wird, gilt auf diesem Weg keine der
 [Einschränkungen der Übersetzung](/de/advanced/anthropic-messages-api#einschränkungen): Server-Tool-Verlauf

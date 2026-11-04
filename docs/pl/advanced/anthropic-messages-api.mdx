@@ -37,8 +37,10 @@ streamingowych, jak i niestreamingowych.
 
 Natywne przekazywanie działa automatycznie. Requesty wracają do pipeline'u
 z tłumaczeniem, gdy w grę wchodzi funkcja działająca na kanonicznym requeście:
-modyfikowanie requestu przez guardrails, cache odpowiedzi lub routing z failoverem.
-Requesty rozwiązywane do providera innego niż Anthropic są zawsze tłumaczone.
+modyfikowanie requestu przez guardrails, cache odpowiedzi, routing z failoverem,
+wymuszony [reasoning effort](/pl/features/virtual-models#wymuszanie-reasoning-effort)
+lub [spowolnienie](/pl/features/slowdown). Requesty rozwiązywane do providera
+innego niż Anthropic są zawsze tłumaczone.
 
 Ponieważ body jest przekazywane bez zmian, na tej ścieżce nie obowiązuje żadne
 z [ograniczeń tłumaczenia](#ograniczenia): historia narzędzi serwerowych

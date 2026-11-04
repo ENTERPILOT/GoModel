@@ -80,7 +80,7 @@ curl -X PUT http://localhost:8080/admin/virtual-models \
 | ---- | ---- |
 | Chat Completions、Responses | 在上游响应到达后延迟返回。 |
 | 同样的端点且 `stream: true`（SSE） | 每个数据块按缩放后的时间线释放。 |
-| [Anthropic Messages](/zh/advanced/anthropic-messages-api) | 当请求走翻译路径时，与 Chat Completions 一样延迟。[原生转发](/zh/advanced/anthropic-messages-api#原生转发到-anthropic)到 Anthropic 提供商的请求不会被减速。 |
+| [Anthropic Messages](/zh/advanced/anthropic-messages-api) | 在上游响应到达后延迟返回；流式传输时逐块释放。被减速的请求会走翻译路径，而不是[原生转发](/zh/advanced/anthropic-messages-api#原生转发到-anthropic)。 |
 | Embeddings | 在上游响应到达后延迟返回。 |
 | 图像生成与编辑 | 在上游响应到达后延迟返回。 |
 | [音频](/zh/advanced/audio-api)：语音、转写、翻译 | 延迟返回；[流式传输](/zh/advanced/audio-api#流式传输)时则逐块节奏释放。 |

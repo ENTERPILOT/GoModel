@@ -28,9 +28,10 @@ const anthropicProviderType = "anthropic"
 // translation cannot round-trip (cache_control breakpoints, thinking block
 // signatures, anthropic-beta headers), which Claude Code clients depend on.
 // Features that operate on the canonical translated request take precedence:
-// requests using guardrails patching, response caching, failover, or a forced
-// reasoning effort stay on the translated pipeline. So does a request replaying an unsigned thinking
-// block, which Anthropic rejects and only the translated pipeline can drop.
+// requests using guardrails patching, response caching, failover, a forced
+// reasoning effort, or a slowdown stay on the translated pipeline. So does a
+// request replaying an unsigned thinking block, which Anthropic rejects and
+// only the translated pipeline can drop.
 func (s *translatedInferenceService) canForwardMessagesNatively(ctx context.Context, workflow *core.Workflow, unsignedThinking bool) bool {
 	if workflow == nil || strings.TrimSpace(workflow.ProviderType) != anthropicProviderType {
 		return false
@@ -48,6 +49,10 @@ func (s *translatedInferenceService) canForwardMessagesNatively(ctx context.Cont
 		return false
 	}
 	if len(s.inference().FailoverSelectors(workflow)) > 0 {
+		return false
+	}
+	// A slowdown delays the translated pipeline; the native relay never waits.
+	if workflow.Resolution != nil && workflow.Resolution.Slowdown > 0 {
 		return false
 	}
 	// A forced reasoning effort rewrites the request, which the verbatim

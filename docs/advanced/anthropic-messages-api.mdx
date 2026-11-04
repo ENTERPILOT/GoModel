@@ -37,8 +37,10 @@ and non-streaming responses.
 
 Native forwarding is automatic. Requests fall back to the translated pipeline
 when a feature that operates on the canonical request is in play: guardrails
-request patching, the response cache, or failover routing. Requests resolving
-to any non-Anthropic provider always translate.
+request patching, the response cache, failover routing, a forced
+[reasoning effort](/features/virtual-models#force-a-reasoning-effort), or a
+[slowdown](/features/slowdown). Requests resolving to any non-Anthropic
+provider always translate.
 
 Because the body is forwarded verbatim, none of the [translation limitations](#limitations)
 apply on this path: server-tool history (`server_tool_use`, `web_search_tool_result`, …),
