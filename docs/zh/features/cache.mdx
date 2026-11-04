@@ -106,6 +106,8 @@ cache:
 - 其他所有顶层请求字段，例如 `temperature`、`seed`、`stop`、`n`、`tools`、`tool_choice`、`response_format`、`text`、`reasoning_effort`、`thinking` 或 `system`，以及 GoModel 无法识别的任何字段
 - 请求是否为流式；仅当 `stream` 为 `true` 时才计入 `stream_options`
 
+名称各不相同的 Chat Completions 函数工具，其顺序不影响匹配；其他任何工具列表的顺序都必须一致。
+
 以下字段不计入，因为它们不会改变回答：`user`、`metadata`、`safety_identifier`、`prompt_cache_key` 和 `prompt_cache_retention`。在 `/v1/responses` 上它们会计入，因为响应会将它们返回给调用方。设置 `exclude_system_prompt: true` 时，系统消息和顶层 `system` 也不计入；Responses API 的 `instructions` 始终计入。
 
 ## 提供商提示词缓存规划

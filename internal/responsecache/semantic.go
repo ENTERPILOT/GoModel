@@ -510,9 +510,20 @@ func writeOutputShapingFields(h hash.Hash, body []byte, endpointPath string, exc
 		return
 	}
 
+	// Embedding and the conversation fingerprint read messages when a body has
+	// both messages and input, while a provider may read input. Hashing both
+	// keeps such a body from sharing entries with one whose other field differs.
+	_, hasMessages := fields["messages"]
+	_, hasInput := fields["input"]
+	bothPrompts := hasMessages && hasInput
+
 	keys := make([]string, 0, len(fields))
 	for key := range fields {
-		if _, prompt := paramsHashPromptFields[key]; prompt {
+		_, prompt := paramsHashPromptFields[key]
+		if bothPrompts && (key == "messages" || key == "input") {
+			prompt = false
+		}
+		if prompt {
 			continue
 		}
 		if _, caller := paramsHashCallerFields[key]; caller && endpointPath != responsesPath {

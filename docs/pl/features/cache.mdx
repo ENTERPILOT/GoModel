@@ -145,6 +145,9 @@ i dokładnej zgodności wszystkiego innego:
 - tego, czy request jest streamowany; `stream_options` liczy się tylko, gdy
   `stream` ma wartość `true`
 
+Kolejność narzędzi funkcyjnych Chat Completions o różnych nazwach nie ma
+znaczenia; każda inna lista narzędzi musi zgadzać się co do kolejności.
+
 Te pola są pomijane, bo nie zmieniają odpowiedzi: `user`, `metadata`,
 `safety_identifier`, `prompt_cache_key` i `prompt_cache_retention`. Na
 `/v1/responses` liczą się, bo odpowiedź zwraca je wywołującemu. Przy

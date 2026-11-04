@@ -150,6 +150,10 @@ exakte Übereinstimmung bei allem anderen:
 - ob der Request streamt; `stream_options` zählt nur, wenn `stream` auf `true`
   steht
 
+Die Reihenfolge von Chat-Completions-Funktionswerkzeugen mit verschiedenen
+Namen spielt keine Rolle; jede andere Werkzeugliste muss in derselben
+Reihenfolge übereinstimmen.
+
 Diese Felder bleiben außen vor, weil sie die Antwort nicht verändern: `user`,
 `metadata`, `safety_identifier`, `prompt_cache_key` und
 `prompt_cache_retention`. Bei `/v1/responses` zählen sie, weil die Response sie

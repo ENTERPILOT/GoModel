@@ -44,6 +44,7 @@ func TestComputeParamsHash_OutputShapingFieldsChangeHash(t *testing.T) {
 		{name: "messages stop_sequences", path: "/v1/messages", base: messagesBase, changed: `{"model":"m","max_tokens":64,"stop_sequences":["END"],"messages":[{"role":"user","content":"same"}]}`},
 		{name: "messages top_k", path: "/v1/messages", base: messagesBase, changed: `{"model":"m","max_tokens":64,"top_k":5,"messages":[{"role":"user","content":"same"}]}`},
 		{name: "seed beyond float64 precision", path: "/v1/chat/completions", base: `{"model":"m","seed":9007199254740992,"messages":[]}`, changed: `{"model":"m","seed":9007199254740993,"messages":[]}`},
+		{name: "input beside messages", path: "/v1/responses", base: `{"model":"m","messages":[{"role":"user","content":"same"}],"input":"first"}`, changed: `{"model":"m","messages":[{"role":"user","content":"same"}],"input":"second"}`},
 		{name: "key holding a NUL is not two members", path: "/v1/chat/completions", base: `{"model":"m","temperature":0.5,"top_p":1,"messages":[]}`, changed: `{"model":"m","temperature\u00000.5\u0000top_p":1,"messages":[]}`},
 		{name: "responses metadata is echoed", path: "/v1/responses", base: responsesBase, changed: `{"model":"m","input":"same","metadata":{"team":"a"}}`},
 		{name: "responses user is echoed", path: "/v1/responses", base: responsesBase, changed: `{"model":"m","input":"same","user":"u1"}`},

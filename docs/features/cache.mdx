@@ -142,6 +142,9 @@ everything else:
 - whether the request streams; `stream_options` only counts when `stream` is
   `true`
 
+The order of Chat Completions function tools with distinct names does not
+matter; any other tool list has to match in order.
+
 These fields are left out, because they do not change the answer: `user`,
 `metadata`, `safety_identifier`, `prompt_cache_key` and
 `prompt_cache_retention`. On `/v1/responses` they count, because the response
