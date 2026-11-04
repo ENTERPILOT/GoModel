@@ -4,10 +4,12 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"errors"
 	"io"
 	"net"
 	"net/http"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,17 +21,25 @@ import (
 	"github.com/enterpilot/gomodel/internal/tlstest"
 )
 
-// acceptRecorder reports every connection its server accepts. Embedding the
-// TCP listener keeps SetDeadline, which quiescing relies on.
+// acceptRecorder reports every connection its server accepts, and when the
+// server stops accepting: the quiesce deadline surfaces here as a timeout
+// before the server sees it. Embedding the TCP listener keeps SetDeadline,
+// which quiescing relies on.
 type acceptRecorder struct {
 	*net.TCPListener
 	accepted chan struct{}
+	parkOnce sync.Once
+	parked   chan struct{}
 }
 
 func (l *acceptRecorder) Accept() (net.Conn, error) {
 	conn, err := l.TCPListener.Accept()
-	if err == nil {
+	var netErr net.Error
+	switch {
+	case err == nil:
 		l.accepted <- struct{}{}
+	case errors.As(err, &netErr) && netErr.Timeout():
+		l.parkOnce.Do(func() { close(l.parked) })
 	}
 	return conn, err
 }
@@ -52,8 +62,12 @@ func serveGeneration(t *testing.T, name string, socket *os.File, cfg *Config) *g
 		return c.String(http.StatusOK, name)
 	})
 	g := &generation{
-		listener: &acceptRecorder{TCPListener: ln.(*net.TCPListener), accepted: make(chan struct{}, 16)},
-		done:     make(chan error, 1),
+		listener: &acceptRecorder{
+			TCPListener: ln.(*net.TCPListener),
+			accepted:    make(chan struct{}, 16),
+			parked:      make(chan struct{}),
+		},
+		done: make(chan error, 1),
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	g.stop = cancel
@@ -83,12 +97,16 @@ func (g *generation) awaitAccept(t *testing.T) {
 
 func (g *generation) accepted() <-chan struct{} { return g.listener.accepted }
 
-// dialUnaccepted opens a connection that the stopping g must leave in the
-// kernel's queue. Waiting out that check also gives a server that was not
-// quiesced the time it needs to begin shutting down, which is what dropped
-// the request of a connection accepted just before.
+// dialUnaccepted waits for the stopping g to stop accepting, then opens a
+// connection it must leave in the kernel's queue. A server that is not
+// quiesced never stops accepting, so it fails here.
 func (g *generation) dialUnaccepted(t *testing.T, addr string) net.Conn {
 	t.Helper()
+	select {
+	case <-g.listener.parked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stopping server never stopped accepting")
+	}
 	conn, err := net.Dial("tcp", addr)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
@@ -184,15 +202,15 @@ func TestQuiesceSettlesTLSConnections(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 	gen.awaitAccept(t)
 
+	// Settled, not waited out: the whole stop ends soon after the request,
+	// far inside QuiesceTimeout. A connection the handler failed to settle
+	// would hold it for the full timeout.
+	start := time.Now()
 	gen.stop()
 	gen.dialUnaccepted(t, addr)
 	assert.Equal(t, "tls", requestGeneration(t, conn))
-
-	// Settled, not waited out: the drain ends with the request, well inside
-	// QuiesceTimeout.
-	start := time.Now()
 	gen.awaitStopped(t)
-	assert.Less(t, time.Since(start), QuiesceTimeout)
+	assert.Less(t, time.Since(start), QuiesceTimeout/2)
 }
 
 // quiesce is bounded: a client that connected and sent nothing does not hold
@@ -235,7 +253,11 @@ func TestQuiesceIsBounded(t *testing.T) {
 			q.quiesce(ln, time.Minute)
 			close(done)
 		}()
-		<-q.parked
+		select {
+		case <-q.parked:
+		case <-time.After(10 * time.Second):
+			t.Fatal("Accept never parked")
+		}
 		_ = conn.Close()
 		select {
 		case <-done:

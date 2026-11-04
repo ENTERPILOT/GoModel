@@ -89,9 +89,12 @@ func (q *quiescer) quiesce(listener net.Listener, timeout time.Duration) {
 	defer timer.Stop()
 
 	// A deadline in the past fails a pending or later Accept without closing
-	// the socket, which a later generation still serves. Without one, Accept
-	// keeps handing out connections and the drain below can only be waited
-	// out to its bound.
+	// the socket, which a later generation still serves. A listener without
+	// SetDeadline cannot be stopped this way, so for it quiesce only waits for
+	// the connections already accepted, and one accepted after that can still
+	// be dropped, as before quiescing existed. Every listener the gateway
+	// serves supports it: run's boundSocket hands out TCP listeners, which
+	// TestBoundSocketListenersStopAcceptingOnDeadline pins.
 	if deadliner, ok := listener.(interface{ SetDeadline(time.Time) error }); ok && deadliner.SetDeadline(time.Unix(1, 0)) == nil {
 		select {
 		case <-q.parked:
