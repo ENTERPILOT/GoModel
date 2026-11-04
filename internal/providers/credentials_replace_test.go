@@ -263,10 +263,11 @@ func TestModelRegistry_ReplaceProvider(t *testing.T) {
 			require.True(t, registry.Supports("swap/removed"))
 
 			replacement := &registryMockProvider{err: errors.New("503 models unavailable")}
-			registry.replaceProvider(replacement, "swap", "test", providerSettings{configuredModels: []string{"kept"}})
+			registry.replaceProvider(replacement, "swap", "test", providerSettings{configuredModels: []string{"kept", "added"}})
 
 			assert.False(t, registry.Supports("swap/removed"))
 			assert.Same(t, replacement, registry.GetProvider("swap/kept"))
+			assert.Same(t, replacement, registry.GetProvider("swap/added"), "the configured list serves in place of the failed listing")
 		})
 
 		t.Run("merge mode", func(t *testing.T) {

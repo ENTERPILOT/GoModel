@@ -60,7 +60,8 @@ func (r *ModelRegistry) replaceProvider(provider core.Provider, providerName, pr
 
 	previous := r.discoveredByProvider[providerName]
 	inherits := replaced && previousType == providerType && len(previous) > 0
-	if inherits && !r.inventoryIsListingLocked(providerName) {
+	listing := inherits && r.inventoryIsListingLocked(providerName)
+	if inherits && !listing {
 		previous = withoutModels(previous, removedModels(r.configuredProviderModels[providerName], configuredModels))
 	}
 
@@ -72,7 +73,7 @@ func (r *ModelRegistry) replaceProvider(provider core.Provider, providerName, pr
 	// one, so the edit's new configured models still serve.
 	var inherited map[string]*ModelInfo
 	if inherits {
-		inherited = r.reboundInventoryLocked(previous, provider, providerName, providerType)
+		inherited = r.reboundInventoryLocked(previous, provider, providerName, providerType, listing)
 	}
 	if len(inherited) > 0 {
 		r.discoveredByProvider[providerName] = inherited
@@ -120,8 +121,12 @@ func (r *ModelRegistry) swapProviderLocked(provider core.Provider, providerName,
 // rebound to provider, with the current configured models applied to it and
 // its metadata enriched again from what the provider reported, so the
 // result matches what a fetch returning the same models would publish.
+// listing reports whether previous is exactly the upstream's last listing; when
+// it is not, a fallback-mode configured list was serving in place of one, so
+// the new configured models are added to what is inherited rather than
+// ignored as they would be next to a successful listing.
 // Caller must hold r.mu for writing.
-func (r *ModelRegistry) reboundInventoryLocked(previous map[string]*ModelInfo, provider core.Provider, providerName, providerType string) map[string]*ModelInfo {
+func (r *ModelRegistry) reboundInventoryLocked(previous map[string]*ModelInfo, provider core.Provider, providerName, providerType string, listing bool) map[string]*ModelInfo {
 	listed := &core.ModelsResponse{Object: "list", Data: make([]core.Model, 0, len(previous))}
 	for _, info := range previous {
 		if info == nil {
@@ -131,10 +136,14 @@ func (r *ModelRegistry) reboundInventoryLocked(previous map[string]*ModelInfo, p
 		model.Metadata = info.Discovered.Clone()
 		listed.Data = append(listed.Data, model)
 	}
+	mode := config.ResolveConfiguredProviderModelsMode(r.configuredProviderModelsMode)
+	if mode == config.ConfiguredProviderModelsModeFallback && !listing {
+		mode = config.ConfiguredProviderModelsModeMerge
+	}
 	resp, _ := applyConfiguredProviderModels(
 		providerName,
 		providerType,
-		r.configuredProviderModelsMode,
+		mode,
 		r.configuredProviderModels[providerName],
 		listed,
 		nil,
