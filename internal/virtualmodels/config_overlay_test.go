@@ -413,3 +413,16 @@ func TestConfigModels_InvalidParamsFailRefresh(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), `parameter "model"`)
 }
+
+// A parameter that cannot be encoded fails the conversion and names both the
+// entry and the parameter, so the operator can find the offending line.
+func TestConfigModels_UnencodableParamNamesTheParameter(t *testing.T) {
+	t.Parallel()
+	_, err := ConfigModels([]config.VirtualModelConfig{{
+		Source: "bad",
+		Target: "vllm/qwen",
+		Params: map[string]any{"chat_template_kwargs": make(chan int)},
+	}})
+	require.ErrorContains(t, err, `virtual model "bad"`)
+	require.ErrorContains(t, err, `params: parameter "chat_template_kwargs"`)
+}
