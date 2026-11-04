@@ -174,9 +174,17 @@ func TestBackgroundIndexBuilderBuildsPastAFailingIndex(t *testing.T) {
 		Label:  "broken test",
 	}
 	builder := BackgroundIndexBuilder{Pool: pool, LockKey: testIndexLockKey, Retry: 20 * time.Millisecond}
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	assert.False(t, builder.Build(ctx, broken, testIndex), "the broken index never becomes valid")
-	_, valid := indexState(t, pool)
-	assert.True(t, valid, "the index after it is built anyway")
+	built := make(chan bool, 1)
+	go func() { built <- builder.Build(ctx, broken, testIndex) }()
+
+	// Waits for the index itself, not a deadline, so a slow server only
+	// makes the test slower.
+	require.Eventually(t, func() bool {
+		_, valid, err := backgroundIndexState(context.Background(), pool, testIndex.Name)
+		return err == nil && valid
+	}, 30*time.Second, 20*time.Millisecond, "the index after the broken one is built anyway")
+	cancel()
+	assert.False(t, <-built, "the broken index never becomes valid")
 }
