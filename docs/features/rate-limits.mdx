@@ -276,7 +276,8 @@ The limit is approximate, not exact:
   synchronized (NTP).
 - A cap that must never be exceeded, such as `concurrent=1` across
   replicas, needs a per-request check against shared state, which GoModel
-  does not offer yet. Use sticky routing or a single replica for it.
+  does not offer yet. Use a single replica for it, or route every request
+  the rule counts to the same replica.
 
 Each flush writes only the request and token counters that changed since
 the last one, plus every nonzero concurrency gauge, which is rewritten on
