@@ -122,17 +122,23 @@ func (s *Service) DeleteVirtual(ctx context.Context, name string) error {
 	if s.IsManagedVirtual(name) {
 		return invalidVirtual("virtual MCP server %q is managed by config/env and is read-only", name)
 	}
+	deleted, err := s.virtualStore.GetVirtual(ctx, name)
+	if err != nil {
+		return err
+	}
 	if err := s.virtualStore.DeleteVirtual(ctx, name); err != nil {
 		return err
 	}
+	// The close mark names the deleted incarnation, so it is written before
+	// Reload, whatever Reload returns: it still covers sessions this replica
+	// opens on that incarnation while reloading, and never closes those of a
+	// server another replica recreates under the name meanwhile.
+	endpoint, incarnation := virtualBindingPrefix+name, deleted.incarnation()
+	s.closeSharedEndpoint(ctx, endpoint, incarnation)
 	defer s.notifyChanged(ctx)
-	// Deferred after notifyChanged, so it runs first: the other replicas get
-	// the close mark whether or not this one's Reload succeeds, and before
-	// they are told to reload.
-	defer s.closeSharedEndpoint(ctx, virtualBindingPrefix+name)
 	if err := s.Reload(ctx); err != nil {
 		return fmt.Errorf("mcp virtual server %q was deleted but the running set was not updated: %w", name, err)
 	}
-	s.closeEndpointSessions(virtualBindingPrefix + name)
+	s.closeIncarnationSessions(endpoint, incarnation)
 	return nil
 }

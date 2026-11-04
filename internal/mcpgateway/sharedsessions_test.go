@@ -646,7 +646,7 @@ func TestDeleteVirtualClosesSharedSessionsWhenReloadFails(t *testing.T) {
 	store := newMemorySharedStore(time.Now)
 	servers := alphaServers(t)
 	virtualStore := &memoryVirtualStore{rows: map[string]ManagedVirtualServer{
-		"coding": {Name: "coding", Servers: []string{"alpha"}},
+		"coding": {Name: "coding", Servers: []string{"alpha"}, Generation: "first"},
 	}}
 	serverStore := &failingListStore{memoryStore: &memoryStore{rows: map[string]ManagedServer{}}}
 	a := newReplica(t, store, Options{ConfigServers: servers, Store: serverStore, VirtualStore: virtualStore}, nil)
@@ -655,7 +655,7 @@ func TestDeleteVirtualClosesSharedSessionsWhenReloadFails(t *testing.T) {
 
 	serverStore.fail.Store(true)
 	require.Error(t, a.service.DeleteVirtual(context.Background(), "coding"))
-	_, marked := store.entry(sharedSessionNamespace, endpointCloseKey(virtualBindingPrefix+"coding"))
+	_, marked := store.entry(sharedSessionNamespace, endpointCloseKey(virtualBindingPrefix+"coding", "first"))
 	assert.True(t, marked, "the endpoint close mark is written despite the failed reload")
 	b.clock.Advance(sessionRecheckInterval)
 	assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, b.url+"/mcp/coding", listToolsBody, withSession(nil, sessionID)))
@@ -796,4 +796,63 @@ func TestVirtualRecreatedInTheSameSecondIsANewIncarnation(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, c.url+"/mcp/coding", listToolsBody, withSession(nil, sessionID)))
 	fresh := initializeRawSession(t, b.url+"/mcp/coding", nil)
 	assert.Equal(t, http.StatusOK, rawMCPStatus(t, c.url+"/mcp/coding", listToolsBody, withSession(nil, fresh)))
+}
+
+// gatedListStore is a server store whose List, and so a Reload, waits on gate
+// while it is set, after signalling entered.
+type gatedListStore struct {
+	*memoryStore
+	gate    atomic.Pointer[chan struct{}]
+	entered chan struct{}
+}
+
+func (s *gatedListStore) List(ctx context.Context) ([]ManagedServer, error) {
+	if gate := s.gate.Load(); gate != nil {
+		s.entered <- struct{}{}
+		<-*gate
+	}
+	return s.memoryStore.List(ctx)
+}
+
+// A delete whose reload is slow closes only the incarnation it deleted: a
+// server another replica recreates under the name meanwhile keeps its
+// sessions, and sessions the deleting replica opens on the deleted
+// incarnation while it reloads end with it.
+func TestSlowVirtualDeleteSparesTheRecreatedServer(t *testing.T) {
+	store := newMemorySharedStore(time.Now)
+	ctx := context.Background()
+	servers := alphaServers(t)
+	virtualStore := &memoryVirtualStore{rows: map[string]ManagedVirtualServer{
+		"coding": {Name: "coding", Servers: []string{"alpha"}, Generation: "first"},
+	}}
+	plainStore := func() *memoryStore { return &memoryStore{rows: map[string]ManagedServer{}} }
+	gated := &gatedListStore{memoryStore: plainStore(), entered: make(chan struct{}, 1)}
+	a := newReplica(t, store, Options{ConfigServers: servers, Store: gated, VirtualStore: virtualStore}, nil)
+	b := newReplica(t, store, Options{ConfigServers: servers, Store: plainStore(), VirtualStore: virtualStore}, &testClock{})
+	before := initializeRawSession(t, a.url+"/mcp/coding", nil)
+
+	gate := make(chan struct{})
+	gated.gate.Store(&gate)
+	deleted := make(chan error, 1)
+	go func() { deleted <- a.service.DeleteVirtual(ctx, "coding") }()
+	<-gated.entered
+	_, err := b.service.UpsertVirtual(ctx, ManagedVirtualServer{Name: "coding", Servers: []string{"alpha"}})
+	require.NoError(t, err)
+	fresh := initializeRawSession(t, b.url+"/mcp/coding", nil)
+	during := initializeRawSession(t, a.url+"/mcp/coding", nil)
+	gated.gate.Store(nil)
+	close(gate)
+	require.NoError(t, <-deleted)
+
+	b.clock.Advance(sessionRecheckInterval)
+	assert.Equal(t, http.StatusOK, rawMCPStatus(t, b.url+"/mcp/coding", listToolsBody, withSession(nil, fresh)),
+		"the recreated server keeps its session on the replica hosting it")
+	c := newReplica(t, store, Options{ConfigServers: servers, Store: plainStore(), VirtualStore: virtualStore}, nil)
+	assert.Equal(t, http.StatusOK, rawMCPStatus(t, c.url+"/mcp/coding", listToolsBody, withSession(nil, fresh)),
+		"and on any other")
+	for name, sessionID := range map[string]string{"opened before the delete": before, "opened while it reloaded": during} {
+		assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, c.url+"/mcp/coding", listToolsBody, withSession(nil, sessionID)), name)
+		_, bound := a.binding(sessionID)
+		assert.False(t, bound, name)
+	}
 }

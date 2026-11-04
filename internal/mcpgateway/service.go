@@ -166,7 +166,6 @@ type sessionBinding struct {
 	// the aggregated endpoint.
 	endpoint string
 	lastSeen time.Time
-	openedAt time.Time
 	// virtualIncarnation is the Incarnation of the virtual server the
 	// session opened on (see endpointReplaced); empty for any other endpoint.
 	virtualIncarnation string
@@ -1165,7 +1164,6 @@ func (s *Service) bindSession(sessionID, authKeyID, userPath, endpoint string, d
 		userPath:           userPath,
 		endpoint:           endpoint,
 		lastSeen:           now,
-		openedAt:           now,
 		virtualIncarnation: s.endpointIncarnation(endpoint),
 		discovery:          discovery,
 		toolAliases:        toolAliases,
@@ -1198,10 +1196,22 @@ func (s *Service) closeStaleVirtualSessions(r *http.Request, name string) {
 // longer exists does not keep idle sessions until the idle timeout. Closing
 // waits for in-flight requests to drain, so it runs in the background.
 func (s *Service) closeEndpointSessions(endpoint string) {
+	s.closeMatchingSessions(func(binding sessionBinding) bool { return binding.endpoint == endpoint })
+}
+
+// closeIncarnationSessions ends the sessions bound to one incarnation of a
+// virtual server endpoint, and not those of a server recreated under its name.
+func (s *Service) closeIncarnationSessions(endpoint, incarnation string) {
+	s.closeMatchingSessions(func(binding sessionBinding) bool {
+		return binding.endpoint == endpoint && binding.virtualIncarnation == incarnation
+	})
+}
+
+func (s *Service) closeMatchingSessions(match func(sessionBinding) bool) {
 	var servers []*mcp.Server
 	s.bindMu.Lock()
 	for id, binding := range s.bindings {
-		if binding.endpoint != endpoint {
+		if !match(binding) {
 			continue
 		}
 		delete(s.bindings, id)

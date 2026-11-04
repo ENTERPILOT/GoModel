@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -50,8 +49,6 @@ type sharedSession struct {
 	Scoped    bool     `json:"scoped,omitempty"`
 	Servers   []string `json:"servers,omitempty"`
 	Discovery bool     `json:"discovery,omitempty"`
-	// OpenedAt is in unix nanoseconds.
-	OpenedAt int64 `json:"opened_at"`
 	// VirtualIncarnation is sessionBinding.virtualIncarnation.
 	VirtualIncarnation string                `json:"virtual_incarnation,omitempty"`
 	Initialize         *mcp.InitializeParams `json:"initialize"`
@@ -87,7 +84,11 @@ func sessionKey(sessionID string) string { return "session." + sessionDigest(ses
 
 func sessionCloseKey(sessionID string) string { return "closed." + sessionDigest(sessionID) }
 
-func endpointCloseKey(endpoint string) string { return "endpoint." + endpoint }
+// endpointCloseKey names one incarnation of a virtual server endpoint: "/"
+// never occurs in a virtual server name.
+func endpointCloseKey(endpoint, incarnation string) string {
+	return "endpoint." + endpoint + "/" + incarnation
+}
 
 type sessionAdmission int
 
@@ -185,7 +186,7 @@ func (s *Service) loadSharedSession(ctx context.Context, sessionID string) (*sha
 	if record.Initialize == nil {
 		return nil, nil, fmt.Errorf("shared mcp session has no initialize parameters")
 	}
-	closed, err := s.sharedSessionClosed(ctx, sessionID, record.Endpoint, time.Unix(0, record.OpenedAt))
+	closed, err := s.sharedSessionClosed(ctx, sessionID, record.Endpoint, record.VirtualIncarnation)
 	if err != nil || closed {
 		return nil, nil, err
 	}
@@ -193,27 +194,21 @@ func (s *Service) loadSharedSession(ctx context.Context, sessionID string) (*sha
 }
 
 // sharedSessionClosed reports whether a session was closed on any replica:
-// by a DELETE, or by deleting the virtual server it was opened on. The
-// second mark ends the deleted server's sessions on replicas that still
-// serve it until they reload; endpointReplaced keeps a server recreated
-// under the same name from reviving them, which comparing the mark with
-// OpenedAt, stamped by another replica's clock, cannot guarantee.
-func (s *Service) sharedSessionClosed(ctx context.Context, sessionID, endpoint string, openedAt time.Time) (bool, error) {
+// by a DELETE, or by deleting the incarnation of the virtual server it was
+// opened on. The second mark ends that incarnation's sessions on replicas
+// that still serve it until they reload, and names the incarnation rather
+// than a time, so it never closes a server recreated under the same name,
+// whenever it lands; endpointReplaced covers the recreated server once the
+// mark expires.
+func (s *Service) sharedSessionClosed(ctx context.Context, sessionID, endpoint, incarnation string) (bool, error) {
 	if _, closed, err := s.shared.Get(ctx, sharedSessionNamespace, sessionCloseKey(sessionID)); err != nil || closed {
 		return closed, err
 	}
 	if !strings.HasPrefix(endpoint, virtualBindingPrefix) {
 		return false, nil
 	}
-	value, found, err := s.shared.Get(ctx, sharedSessionNamespace, endpointCloseKey(endpoint))
-	if err != nil || !found {
-		return false, err
-	}
-	closedAt, err := strconv.ParseInt(string(value), 10, 64)
-	if err != nil {
-		return false, fmt.Errorf("decode mcp endpoint close mark: %w", err)
-	}
-	return !openedAt.After(time.Unix(0, closedAt)), nil
+	_, closed, err := s.shared.Get(ctx, sharedSessionNamespace, endpointCloseKey(endpoint, incarnation))
+	return closed, err
 }
 
 // recheckSharedSession reports whether a hosted session is still open
@@ -226,7 +221,7 @@ func (s *Service) recheckSharedSession(ctx context.Context, sessionID string, bi
 		return true
 	}
 	readCtx, cancel := context.WithTimeout(ctx, sharedSessionTimeout)
-	closed, err := s.sharedSessionClosed(readCtx, sessionID, binding.endpoint, binding.openedAt)
+	closed, err := s.sharedSessionClosed(readCtx, sessionID, binding.endpoint, binding.virtualIncarnation)
 	cancel()
 	if err != nil {
 		// Keep serving, but extend nothing: the session may have been closed
@@ -348,7 +343,7 @@ func (s *Service) touchHostedSession(sessionID string, server *mcp.Server) {
 		return
 	}
 	readCtx, cancel := context.WithTimeout(context.Background(), sharedSessionTimeout)
-	closed, err := s.sharedSessionClosed(readCtx, sessionID, binding.endpoint, binding.openedAt)
+	closed, err := s.sharedSessionClosed(readCtx, sessionID, binding.endpoint, binding.virtualIncarnation)
 	cancel()
 	if err != nil {
 		slog.Warn("failed to recheck mcp session in the shared store", "error", err)
@@ -405,7 +400,6 @@ func (s *Service) resumeSession(ctx context.Context, sessionID string, record *s
 		userPath:           record.UserPath,
 		endpoint:           record.Endpoint,
 		lastSeen:           now,
-		openedAt:           time.Unix(0, record.OpenedAt),
 		virtualIncarnation: record.VirtualIncarnation,
 		discovery:          scope.discovery,
 		toolAliases:        aliases,
@@ -481,7 +475,6 @@ func (s *Service) shareSession(ctx context.Context, sessionID string, scope requ
 		UserPath:        binding.userPath,
 		Endpoint:        binding.endpoint,
 		Discovery:       binding.discovery,
-		OpenedAt:        binding.openedAt.UnixNano(),
 		Initialize:      params,
 		ProtocolVersion: protocolVersion,
 	}
@@ -526,17 +519,16 @@ func (s *Service) closeSharedSession(ctx context.Context, sessionID string) {
 	}
 }
 
-// closeSharedEndpoint ends, on every replica, the sessions opened on endpoint
-// up to now; closeEndpointSessions ends the ones this replica hosts.
-func (s *Service) closeSharedEndpoint(ctx context.Context, endpoint string) {
+// closeSharedEndpoint ends, on every replica, the sessions opened on one
+// incarnation of endpoint; closeIncarnationSessions ends the ones this
+// replica hosts.
+func (s *Service) closeSharedEndpoint(ctx context.Context, endpoint, incarnation string) {
 	if s.shared == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sharedSessionTimeout)
 	defer cancel()
-	now := s.now()
-	mark := []byte(strconv.FormatInt(now.UnixNano(), 10))
-	if err := s.shared.Put(ctx, sharedSessionNamespace, endpointCloseKey(endpoint), mark, now.Add(sessionCloseMarkLifetime)); err != nil {
+	if err := s.shared.Put(ctx, sharedSessionNamespace, endpointCloseKey(endpoint, incarnation), nil, s.now().Add(sessionCloseMarkLifetime)); err != nil {
 		slog.Warn("failed to close mcp endpoint sessions in the shared store", "endpoint", endpoint, "error", err)
 	}
 }
