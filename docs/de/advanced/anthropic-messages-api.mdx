@@ -41,10 +41,11 @@ auch für Nicht-Streaming-Responses.
 Die native Weiterleitung erfolgt automatisch. Requests fallen auf die
 Übersetzungs-Pipeline zurück, sobald ein Feature beteiligt ist, das auf dem
 kanonischen Request arbeitet: Request-Patching durch Guardrails, der Response-Cache,
-Failover-Routing, ein erzwungener
-[Reasoning-Effort](/de/features/virtual-models#reasoning-effort-erzwingen) oder ein
-[Slowdown](/de/features/slowdown). Requests, die zu einem Nicht-Anthropic-Provider
-aufgelöst werden, werden immer übersetzt.
+Failover-Routing oder ein erzwungener
+[Reasoning-Effort](/de/features/virtual-models#reasoning-effort-erzwingen). Ein
+[Slowdown](/de/features/slowdown) verzögert die native Weiterleitung direkt.
+Requests, die zu einem Nicht-Anthropic-Provider aufgelöst werden, werden immer
+übersetzt.
 
 Da der Body unverändert weitergeleitet wird, gilt auf diesem Weg keine der
 [Einschränkungen der Übersetzung](/de/advanced/anthropic-messages-api#einschränkungen): Server-Tool-Verlauf
@@ -200,7 +201,7 @@ den Request tatsächlich bedient hat, und die Nutzung wird unter dem Endpunkt
 
 Diese Einschränkungen gelten für die **übersetzte** Pipeline — Requests, die zu
 einem Nicht-Anthropic-Provider geroutet werden, oder zu Anthropic, wenn Guardrails,
-Response-Cache oder Failover aktiv sind. Requests, die
+Response-Cache, Failover oder ein erzwungener Reasoning-Effort aktiv sind. Requests, die
 [nativ an Anthropic weitergeleitet](/de/advanced/anthropic-messages-api#native-weiterleitung-an-anthropic) werden, bleiben
 Byte für Byte erhalten – abgesehen vom Wert `model`, wenn ein Alias zu einem anderen
 Namen aufgelöst wurde –, und nichts des Folgenden trifft auf sie zu.

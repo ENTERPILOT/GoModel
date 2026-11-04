@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v5"
 
@@ -28,10 +29,9 @@ const anthropicProviderType = "anthropic"
 // translation cannot round-trip (cache_control breakpoints, thinking block
 // signatures, anthropic-beta headers), which Claude Code clients depend on.
 // Features that operate on the canonical translated request take precedence:
-// requests using guardrails patching, response caching, failover, a forced
-// reasoning effort, or a slowdown stay on the translated pipeline. So does a
-// request replaying an unsigned thinking block, which Anthropic rejects and
-// only the translated pipeline can drop.
+// requests using guardrails patching, response caching, failover, or a forced
+// reasoning effort stay on the translated pipeline. So does a request replaying an unsigned thinking
+// block, which Anthropic rejects and only the translated pipeline can drop.
 func (s *translatedInferenceService) canForwardMessagesNatively(ctx context.Context, workflow *core.Workflow, unsignedThinking bool) bool {
 	if workflow == nil || strings.TrimSpace(workflow.ProviderType) != anthropicProviderType {
 		return false
@@ -49,10 +49,6 @@ func (s *translatedInferenceService) canForwardMessagesNatively(ctx context.Cont
 		return false
 	}
 	if len(s.inference().FailoverSelectors(workflow)) > 0 {
-		return false
-	}
-	// A slowdown delays the translated pipeline; the native relay never waits.
-	if workflow.Resolution != nil && workflow.Resolution.Slowdown > 0 {
 		return false
 	}
 	// A forced reasoning effort rewrites the request, which the verbatim
@@ -96,6 +92,7 @@ func (s *translatedInferenceService) dispatchMessagesNative(c *echo.Context, req
 		providerName = workflow.Resolution.ProviderName
 	}
 
+	started := time.Now()
 	resp, err := passthroughProvider.Passthrough(ctx, anthropicProviderType, &core.PassthroughRequest{
 		Method:       http.MethodPost,
 		Endpoint:     "messages",
@@ -107,6 +104,10 @@ func (s *translatedInferenceService) dispatchMessagesNative(c *echo.Context, req
 		ProviderName: providerName,
 	})
 	if err != nil {
+		return handleError(c, err)
+	}
+	if err := slowDownNativeMessages(ctx, workflow, req.Stream, resp, started); err != nil {
+		_ = resp.Body.Close()
 		return handleError(c, err)
 	}
 
@@ -200,4 +201,21 @@ func replaceTopLevelMember(body []byte, key string, value []byte) ([]byte, error
 	rewritten = append(rewritten, value...)
 	rewritten = append(rewritten, body[foundEnd:]...)
 	return rewritten, nil
+}
+
+// slowDownNativeMessages applies the resolved slowdown to a natively relayed
+// Messages response, so a slowed model behaves the same on this path as on
+// the translated pipeline. A JSON response waits after the upstream answered;
+// a stream is paced chunk by chunk on the scaled timeline. Upstream errors
+// relay without a delay, like failed translated calls.
+func slowDownNativeMessages(ctx context.Context, workflow *core.Workflow, stream bool, resp *core.PassthroughResponse, started time.Time) error {
+	factor := workflowSlowdownFactor(workflow)
+	if factor <= 0 || resp == nil || resp.Body == nil || resp.StatusCode >= http.StatusBadRequest {
+		return nil
+	}
+	if stream {
+		resp.Body = streaming.NewSlowdownStream(ctx, resp.Body, factor, started)
+		return nil
+	}
+	return waitForModelSlowdownFactor(ctx, factor, time.Since(started))
 }

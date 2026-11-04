@@ -91,7 +91,7 @@ a provider-wide selector such as `openai/*` is rejected.
 | -------- | -------- |
 | Chat Completions, Responses | Delayed after the upstream response arrives. |
 | The same endpoints with `stream: true` (SSE) | Each chunk is released on the scaled timeline. |
-| [Anthropic Messages](/advanced/anthropic-messages-api) | Delayed after the upstream response arrives, or chunk by chunk when streaming. A slowed request takes the translated path instead of [native forwarding](/advanced/anthropic-messages-api#native-forwarding-to-anthropic). |
+| [Anthropic Messages](/advanced/anthropic-messages-api) | Delayed after the upstream response arrives, or chunk by chunk when streaming, on the translated path and on [native forwarding](/advanced/anthropic-messages-api#native-forwarding-to-anthropic) alike. |
 | Embeddings | Delayed after the upstream response arrives. |
 | Image generations and edits | Delayed after the upstream response arrives. |
 | [Audio](/advanced/audio-api) speech, transcriptions, translations | Delayed, or paced chunk by chunk when [streaming](/advanced/audio-api#streaming). |

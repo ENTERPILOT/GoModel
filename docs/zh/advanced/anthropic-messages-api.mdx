@@ -18,7 +18,7 @@ keywords: ["Anthropic Messages API", "/v1/messages", "count_tokens", "Token 计�
 
 当 `/v1/messages` 请求解析到 **Anthropic** 提供商时，GoModel 会跳过往返转换，原样转发原始请求体（仅当别名解析为不同名称时才改写 `model` 字段），然后原样返回提供商的原生响应或 SSE 流。这样可以保留规范转换无法表示的所有内容，例如 `cache_control` 断点、thinking 块签名、`anthropic-beta` 请求头，而 Claude Code 等编码智能体依赖这些内容。无论流式还是非流式响应，速率限制、预算、审计日志和用量追踪仍然生效。
 
-原生转发是自动进行的。当启用了作用于规范请求的功能时，请求会回退到转换流水线：护栏请求修补、响应缓存、故障转移路由、强制的[推理强度](/zh/features/virtual-models#强制推理强度)或[减速](/zh/features/slowdown)。解析到任何非 Anthropic 提供商的请求始终会进行转换。
+原生转发是自动进行的。当启用了作用于规范请求的功能时，请求会回退到转换流水线：护栏请求修补、响应缓存、故障转移路由或强制的[推理强度](/zh/features/virtual-models#强制推理强度)。[减速](/zh/features/slowdown)会直接延迟原生转发。解析到任何非 Anthropic 提供商的请求始终会进行转换。
 
 由于请求体被原样转发，此路径不受任何[转换限制](#限制)的影响：服务端工具历史（`server_tool_use`、`web_search_tool_result` 等）、容器上传，以及规范请求无法表示的任何其他块，都会原样到达 Anthropic。
 
@@ -142,7 +142,7 @@ console.log(message.content[0].text);
 
 ## 限制
 
-以下限制适用于**转换**流水线，即路由到非 Anthropic 提供商的请求，或启用了护栏、响应缓存或故障转移的 Anthropic 请求。[原生转发到 Anthropic](#原生转发到-anthropic) 的请求会逐字节保留（仅当别名解析为不同名称时改写 `model` 值），以下限制均不适用。
+以下限制适用于**转换**流水线，即路由到非 Anthropic 提供商的请求，或启用了护栏、响应缓存、故障转移或强制推理强度的 Anthropic 请求。[原生转发到 Anthropic](#原生转发到-anthropic) 的请求会逐字节保留（仅当别名解析为不同名称时改写 `model` 值），以下限制均不适用。
 
 `/v1/messages` 通过 GoModel 的规范聊天类型进行转换。没有规范等价物的 Anthropic 特有功能无法端到端保留：
 
