@@ -1972,5 +1972,11 @@
   "audit_guardrail_badge_blocked": "Guardrail: zablokowano · {instance}",
   "audit_guardrail_badge_answered": "Guardrail: odpowiedziano · {instance}",
   "audit_guardrail_badge_failed": "Guardrail: błąd · {instance}",
-  "audit_guardrail_badge_warned": "Guardrail: ostrzeżono · {instance}"
+  "audit_guardrail_badge_warned": "Guardrail: ostrzeżono · {instance}",
+  "providers_billable": "Rozliczany",
+  "providers_billable_hint": "Wyłącz dla dostawcy, za którego koszt klient nie płaci Tobie, np. gdy używa własnego klucza API. Zużycie jest nadal śledzone i wyceniane, ale rozliczane na 0 $, a budżety ścieżek użytkownika i etykiet ani go nie blokują, ani nie zliczają. Budżety dostawców nadal obowiązują.",
+  "providers_not_billable": "Nierozliczany",
+  "providers_not_billable_title": "Zużycie jest śledzone, ale rozliczane na 0 $ i nie wliczane do budżetów ścieżek użytkownika ani etykiet",
+  "usage_not_billable": "nierozliczane",
+  "usage_not_billable_help": "Obsłużone przez nierozliczanego dostawcę: śledzone i wycenione, ale rozliczone na 0 $ i nie wliczone do budżetów ścieżek użytkownika ani etykiet"
 }

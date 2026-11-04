@@ -6436,7 +6436,7 @@ const docTemplate = `{
         },
         "/v1/decisions": {
             "post": {
-                "description": "Available when an openai, jev, or openrouter provider is configured. OpenAI models answer natively; jev models (Jev, Kev) and OpenRouter's decision models answer through System One, translated both ways. Hosted Jev reads images sent as base64 data URLs; Kev and OpenRouter read text only.",
+                "description": "Available when an openai, jev, openrouter, or azure provider is configured. OpenAI models answer natively; Azure gpt-6-luna deployments answer natively too; jev models (Jev, Kev), OpenRouter's decision models, and Azure Microsoft-Decision-1 deployments answer through System One, translated both ways. Hosted Jev reads images sent as base64 data URLs; Kev, OpenRouter, and Microsoft-Decision-1 read text only.",
                 "consumes": [
                     "application/json"
                 ],
@@ -8632,7 +8632,7 @@ const docTemplate = `{
         },
         "/v1/systemone": {
             "post": {
-                "description": "Available when a jev or openrouter provider is configured. The request and answer follow TypeSafe's System One API; models on providers without that API are rejected rather than translated.",
+                "description": "Available when a jev, openrouter, or azure provider is configured. The request and answer follow TypeSafe's System One API; models on providers without that API are rejected rather than translated.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -9580,6 +9580,9 @@ const docTemplate = `{
                 "base_url": {
                     "type": "string"
                 },
+                "billable": {
+                    "type": "boolean"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -10016,6 +10019,10 @@ const docTemplate = `{
                 },
                 "base_url": {
                     "type": "string"
+                },
+                "billable": {
+                    "description": "Billable false marks a provider whose cost the caller does not owe the\noperator, such as a customer's own key. Omitted keeps the stored value\n(true for a new provider).",
+                    "type": "boolean"
                 },
                 "enabled": {
                     "type": "boolean"
@@ -14007,6 +14014,10 @@ const docTemplate = `{
             "properties": {
                 "auth_key_id": {
                     "type": "string"
+                },
+                "billable": {
+                    "description": "Billable is false for a request served by a provider configured with\nbillable: false; omitted when billable.",
+                    "type": "boolean"
                 },
                 "billed_cost": {
                     "type": "number"

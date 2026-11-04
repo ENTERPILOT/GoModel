@@ -1970,5 +1970,11 @@
   "audit_guardrail_badge_blocked": "Guardrail: blocked · {instance}",
   "audit_guardrail_badge_answered": "Guardrail: answered · {instance}",
   "audit_guardrail_badge_failed": "Guardrail: failed · {instance}",
-  "audit_guardrail_badge_warned": "Guardrail: warned · {instance}"
+  "audit_guardrail_badge_warned": "Guardrail: warned · {instance}",
+  "providers_billable": "Billable",
+  "providers_billable_hint": "Turn off for a provider whose cost the caller does not owe you, such as a customer's own API key. Usage is still tracked and priced, but it is billed at $0 and user-path and label budgets neither gate nor count it. Provider budgets still apply.",
+  "providers_not_billable": "Not billable",
+  "providers_not_billable_title": "Usage is tracked but billed at $0 and not counted against user-path or label budgets",
+  "usage_not_billable": "not billable",
+  "usage_not_billable_help": "Served by a non-billable provider: tracked and priced, but billed at $0 and not counted against user-path or label budgets"
 }
