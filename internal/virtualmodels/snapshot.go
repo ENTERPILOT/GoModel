@@ -76,12 +76,12 @@ type snapshot struct {
 	modelWide     map[string]VirtualModel
 	defaultEnable bool
 
-	// reasoningEffort reports whether any row forces a reasoning effort, and
-	// redirectReasoningEffort whether any redirect does. Without the first,
-	// effort resolution has nothing to find; without the second, routing need
-	// not record the route it takes.
-	reasoningEffort         bool
-	redirectReasoningEffort bool
+	// overrides reports whether any row forces a reasoning effort or request
+	// parameters, and redirectOverrides whether any redirect does. Without
+	// the first, override resolution has nothing to find; without the second,
+	// routing need not record the route it takes.
+	overrides         bool
+	redirectOverrides bool
 }
 
 func emptySnapshot(defaultEnable bool) snapshot {
@@ -128,9 +128,9 @@ func buildSnapshot(rows []VirtualModel, defaultEnable bool) (snapshot, error) {
 			}
 			next.order = append(next.order, normalized.Source)
 			next.bySource[normalized.Source] = normalized
-			if normalized.ReasoningEffort != "" {
-				next.reasoningEffort = true
-				next.redirectReasoningEffort = true
+			if normalized.setsOverrides() {
+				next.overrides = true
+				next.redirectOverrides = true
 			}
 			continue
 		}
@@ -140,8 +140,8 @@ func buildSnapshot(rows []VirtualModel, defaultEnable bool) (snapshot, error) {
 			return snapshot{}, fmt.Errorf("load virtual model %q: %w", row.Source, err)
 		}
 		next.bySource[normalized.Source] = normalized
-		if normalized.ReasoningEffort != "" {
-			next.reasoningEffort = true
+		if normalized.setsOverrides() {
+			next.overrides = true
 		}
 		switch scopeKindFor(normalized.Source, normalized.ProviderName, normalized.Model) {
 		case modelselectors.ScopeGlobal:

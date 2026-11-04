@@ -10095,6 +10095,9 @@ const docTemplate = `{
         "admin.upsertVirtualModelRequest": {
             "type": "object",
             "properties": {
+                "default_params": {
+                    "type": "object"
+                },
                 "description": {
                     "type": "string"
                 },
@@ -10107,6 +10110,10 @@ const docTemplate = `{
                 },
                 "old_source": {
                     "type": "string"
+                },
+                "params": {
+                    "description": "Params are forced on every request through this row (null strips a\nkey); DefaultParams fill in keys the client omitted. Keys use Chat\nCompletions spelling.",
+                    "type": "object"
                 },
                 "reasoning_effort": {
                     "description": "ReasoningEffort forces the reasoning effort sent upstream (\"none\",\n\"minimal\", \"low\", \"medium\", \"high\", \"xhigh\", or \"max\"); empty keeps the\nclient's value.",
@@ -14277,6 +14284,9 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "default_params": {
+                    "type": "object"
+                },
                 "description": {
                     "type": "string"
                 },
@@ -14294,6 +14304,9 @@ const docTemplate = `{
                 },
                 "model": {
                     "type": "string"
+                },
+                "params": {
+                    "type": "object"
                 },
                 "provider_name": {
                     "type": "string"
@@ -14356,6 +14369,9 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "default_params": {
+                    "type": "object"
+                },
                 "description": {
                     "type": "string"
                 },
@@ -14372,6 +14388,10 @@ const docTemplate = `{
                 },
                 "model": {
                     "type": "string"
+                },
+                "params": {
+                    "description": "Params are request parameters forced on every request sent upstream\nthrough this redirect or to this model, replacing the client's values;\na null value strips the key. DefaultParams are filled in only when the\nclient omitted the key. Keys use Chat Completions spelling.",
+                    "type": "object"
                 },
                 "provider_name": {
                     "type": "string"

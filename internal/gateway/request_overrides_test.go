@@ -2,7 +2,9 @@ package gateway
 
 import (
 	"context"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/goccy/go-json"
@@ -10,11 +12,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestparams"
 )
 
 // effortResolverStub forces a reasoning effort per concrete attempt model.
 type effortResolverStub struct {
 	efforts   map[string]string
+	params    map[string]requestparams.Set
+	defaults  map[string]requestparams.Set
 	requested []core.RequestedModelSelector
 }
 
@@ -23,9 +28,16 @@ func (r *effortResolverStub) ResolveModel(requested core.RequestedModelSelector)
 	return selector, false, err
 }
 
-func (r *effortResolverStub) ResolveReasoningEffort(_ context.Context, resolution *core.RequestModelResolution, attempt core.ModelSelector) string {
+func (r *effortResolverStub) ResolveRequestOverrides(_ context.Context, resolution *core.RequestModelResolution, attempt core.ModelSelector) requestparams.Overrides {
 	r.requested = append(r.requested, resolution.Requested)
-	return r.efforts[attempt.QualifiedModel()]
+	overrides := requestparams.Overrides{ReasoningEffort: r.efforts[attempt.QualifiedModel()]}
+	if r.params != nil {
+		overrides.Params = r.params[attempt.QualifiedModel()]
+	}
+	if r.defaults != nil {
+		overrides.Defaults = r.defaults[attempt.QualifiedModel()]
+	}
+	return overrides
 }
 
 // effortCaptureProvider fails chat and Responses calls to "openai/primary"
@@ -42,6 +54,14 @@ func (p *effortCaptureProvider) ChatCompletion(_ context.Context, req *core.Chat
 		return nil, core.NewProviderError("openai", http.StatusInternalServerError, "primary down", nil)
 	}
 	return &core.ChatResponse{Model: req.Model, Choices: []core.Choice{{Message: core.ResponseMessage{Role: "assistant", Content: "ok"}}}}, nil
+}
+
+func (p *effortCaptureProvider) StreamChatCompletion(_ context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
+	p.chats = append(p.chats, req)
+	if req.Model == "primary" {
+		return nil, core.NewProviderError("openai", http.StatusInternalServerError, "primary down", nil)
+	}
+	return io.NopCloser(strings.NewReader("data: [DONE]\n\n")), nil
 }
 
 func (p *effortCaptureProvider) Responses(_ context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
@@ -132,12 +152,12 @@ func TestReasoningEffortOverrideAbsentKeepsRequest(t *testing.T) {
 
 func TestReasoningEffortOverrideForPrimary(t *testing.T) {
 	orchestrator, _, _, workflow := effortFixture()
-	assert.Equal(t, "medium", orchestrator.ReasoningEffortOverride(context.Background(), workflow))
+	assert.Equal(t, "medium", orchestrator.RequestOverrides(context.Background(), workflow).ReasoningEffort)
 
 	workflow.Resolution.ResolvedSelector = core.ModelSelector{Provider: "openai", Model: "other"}
-	assert.Empty(t, orchestrator.ReasoningEffortOverride(context.Background(), workflow))
+	assert.True(t, orchestrator.RequestOverrides(context.Background(), workflow).IsZero())
 
-	assert.Empty(t, NewInferenceOrchestrator(InferenceConfig{}).ReasoningEffortOverride(context.Background(), workflow))
+	assert.True(t, NewInferenceOrchestrator(InferenceConfig{}).RequestOverrides(context.Background(), workflow).IsZero())
 }
 
 // The prepared request must carry the forced effort, since the response cache
@@ -214,4 +234,153 @@ func TestReasoningEffortOverrideDropsGoogleThinkingEffort(t *testing.T) {
 			assert.JSONEq(t, tt.extraBody, string(req.ExtraFields.Lookup("extra_body")), "client request must not be mutated")
 		})
 	}
+}
+
+func rawJSON(s string) json.RawMessage { return json.RawMessage(s) }
+
+func TestChatRequestParamsPerAttempt(t *testing.T) {
+	orchestrator, provider, resolver, workflow := effortFixture()
+	resolver.efforts = nil
+	resolver.params = map[string]requestparams.Set{
+		"openai/primary": {"chat_template_kwargs": rawJSON(`{"enable_thinking":true}`), "top_k": rawJSON("20")},
+		"openai/backup":  {"top_k": nil},
+	}
+	resolver.defaults = map[string]requestparams.Set{
+		"openai/primary": {"temperature": rawJSON("1")},
+		"openai/backup":  {"temperature": rawJSON("0.5")},
+	}
+	temperature := 0.2
+	original := &core.ChatRequest{
+		Model:       "primary",
+		Provider:    "openai",
+		Temperature: &temperature,
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"top_k": rawJSON("5"), "seed": rawJSON("7")}),
+	}
+
+	_, _, err := orchestrator.DispatchChatCompletion(context.Background(), workflow, original)
+	require.NoError(t, err)
+
+	require.Len(t, provider.chats, 2)
+	first := provider.chats[0]
+	require.NotNil(t, first.Temperature)
+	assert.Equal(t, 0.2, *first.Temperature, "a default never replaces the client's value")
+	assert.JSONEq(t, `20`, string(first.ExtraFields.Lookup("top_k")))
+	assert.JSONEq(t, `{"enable_thinking":true}`, string(first.ExtraFields.Lookup("chat_template_kwargs")))
+	assert.JSONEq(t, `7`, string(first.ExtraFields.Lookup("seed")))
+
+	second := provider.chats[1]
+	assert.Nil(t, second.ExtraFields.Lookup("top_k"), "the fallback strips top_k")
+	assert.Nil(t, second.ExtraFields.Lookup("chat_template_kwargs"), "the primary's params do not leak into the fallback")
+	assert.JSONEq(t, `7`, string(second.ExtraFields.Lookup("seed")))
+
+	assert.Equal(t, 0.2, *original.Temperature, "client request must not be mutated")
+	assert.JSONEq(t, `5`, string(original.ExtraFields.Lookup("top_k")))
+}
+
+func TestChatRequestDefaultsFillOmittedKeysPerAttempt(t *testing.T) {
+	orchestrator, provider, resolver, workflow := effortFixture()
+	resolver.efforts = nil
+	resolver.defaults = map[string]requestparams.Set{
+		"openai/primary": {"temperature": rawJSON("1"), "top_k": rawJSON("20")},
+		"openai/backup":  {"temperature": rawJSON("0.5")},
+	}
+
+	_, _, err := orchestrator.DispatchChatCompletion(context.Background(), workflow, &core.ChatRequest{Model: "primary", Provider: "openai"})
+	require.NoError(t, err)
+
+	require.Len(t, provider.chats, 2)
+	require.NotNil(t, provider.chats[0].Temperature)
+	assert.Equal(t, float64(1), *provider.chats[0].Temperature)
+	assert.JSONEq(t, `20`, string(provider.chats[0].ExtraFields.Lookup("top_k")))
+	require.NotNil(t, provider.chats[1].Temperature)
+	assert.Equal(t, 0.5, *provider.chats[1].Temperature, "the fallback gets its own default")
+	assert.Nil(t, provider.chats[1].ExtraFields.Lookup("top_k"))
+}
+
+// The gateway adds stream_options.include_usage after preparation; a
+// fallback rebuilt from the client's request must keep it.
+func TestRequestParamsFailoverKeepsStreamUsageFlag(t *testing.T) {
+	orchestrator, provider, resolver, workflow := effortFixture()
+	resolver.efforts = nil
+	resolver.params = map[string]requestparams.Set{"openai/primary": {"top_k": rawJSON("20")}}
+	prepared, err := orchestrator.PrepareChatRequest(context.Background(), &core.ChatRequest{
+		Model: "primary", Provider: "openai", Stream: true,
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	}, RequestMeta{Workflow: workflow})
+	require.NoError(t, err)
+	require.Nil(t, prepared.Request.StreamOptions, "the client sent no stream options")
+	// Usage enforcement adds the flag to the prepared request after the
+	// overrides ran, as the server and the stream dispatcher do.
+	prepared.Request.StreamOptions = &core.StreamOptions{IncludeUsage: true}
+
+	result, err := orchestrator.StreamChatCompletion(prepared.Context, prepared.Workflow, prepared.Request)
+	require.NoError(t, err)
+	require.NoError(t, result.Stream.Close())
+
+	require.Len(t, provider.chats, 2)
+	for i, sent := range provider.chats {
+		require.NotNil(t, sent.StreamOptions, "attempt %d", i)
+		assert.True(t, sent.StreamOptions.IncludeUsage, "attempt %d", i)
+		assert.True(t, sent.Stream, "attempt %d", i)
+	}
+	assert.Nil(t, provider.chats[1].ExtraFields.Lookup("top_k"))
+}
+
+func TestRequestParamsFailoverRebuildsFromClientRequest(t *testing.T) {
+	orchestrator, provider, resolver, workflow := effortFixture()
+	resolver.efforts = nil
+	resolver.params = map[string]requestparams.Set{"openai/primary": {"temperature": rawJSON("1"), "top_k": rawJSON("20")}}
+	temperature := 0.2
+	prepared, err := orchestrator.PrepareChatRequest(context.Background(), &core.ChatRequest{
+		Model:       "primary",
+		Provider:    "openai",
+		Temperature: &temperature,
+		Messages:    []core.Message{{Role: "user", Content: "hi"}},
+	}, RequestMeta{Workflow: workflow})
+	require.NoError(t, err)
+	require.NotNil(t, prepared.Request.Temperature)
+	assert.Equal(t, float64(1), *prepared.Request.Temperature, "the prepared request carries the forced value for the cache key")
+	assert.JSONEq(t, `20`, string(prepared.Request.ExtraFields.Lookup("top_k")))
+
+	_, _, err = orchestrator.DispatchChatCompletion(prepared.Context, prepared.Workflow, prepared.Request)
+	require.NoError(t, err)
+
+	require.Len(t, provider.chats, 2)
+	assert.Same(t, prepared.Request, provider.chats[0], "the prepared primary attempt is sent as is")
+	fallback := provider.chats[1]
+	assert.Equal(t, "backup", fallback.Model)
+	require.NotNil(t, fallback.Temperature)
+	assert.Equal(t, 0.2, *fallback.Temperature, "the fallback keeps the client's temperature")
+	assert.Nil(t, fallback.ExtraFields.Lookup("top_k"))
+	assert.Equal(t, prepared.Request.Messages, fallback.Messages)
+}
+
+func TestResponsesRequestParamsPerAttempt(t *testing.T) {
+	orchestrator, provider, resolver, workflow := effortFixture()
+	workflow.Endpoint = core.DescribeEndpoint("POST", "/v1/responses")
+	resolver.params = map[string]requestparams.Set{"openai/backup": {"max_tokens": rawJSON("64")}}
+
+	_, _, err := orchestrator.DispatchResponses(context.Background(), workflow, &core.ResponsesRequest{Model: "primary", Provider: "openai", Input: "hi"})
+	require.NoError(t, err)
+
+	require.Len(t, provider.responses, 2)
+	assert.Nil(t, provider.responses[0].MaxOutputTokens)
+	assert.Equal(t, "medium", provider.responses[0].Reasoning.Effort)
+	require.NotNil(t, provider.responses[1].MaxOutputTokens)
+	assert.Equal(t, 64, *provider.responses[1].MaxOutputTokens, "max_tokens lands on max_output_tokens")
+	assert.Equal(t, "low", provider.responses[1].Reasoning.Effort, "effort and params apply together")
+}
+
+func TestRequestParamsApplyErrorIsAGatewayFault(t *testing.T) {
+	orchestrator, _, resolver, workflow := effortFixture()
+	resolver.efforts = nil
+	broken := requestparams.Set{"temperature": rawJSON(`"hot"`)}
+	resolver.params = map[string]requestparams.Set{"openai/primary": broken, "openai/backup": broken}
+
+	_, _, err := orchestrator.DispatchChatCompletion(context.Background(), workflow, &core.ChatRequest{Model: "primary", Provider: "openai"})
+	require.Error(t, err)
+	var gatewayErr *core.GatewayError
+	require.ErrorAs(t, err, &gatewayErr)
+	assert.Equal(t, http.StatusInternalServerError, gatewayErr.StatusCode)
+	assert.Equal(t, core.ErrorTypeInternal, gatewayErr.Type)
 }
