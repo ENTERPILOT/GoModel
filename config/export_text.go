@@ -71,11 +71,16 @@ var unsetVariables = regexp.MustCompile(`^(?:\$\{[A-Za-z_][A-Za-z0-9_]*\})+$`)
 var variable = regexp.MustCompile(`\$\{[A-Za-z_][A-Za-z0-9_]*\}`)
 
 // unsetVariableOffsets returns the byte offsets of the ${NAME} variables in s
-// that are unset, as config.Load leaves them.
+// that are unset, as config.Load leaves them. One after an odd run of "$"
+// is escaped text ("$${NAME}"), not a variable.
 func unsetVariableOffsets(s string) map[int]bool {
 	offsets := make(map[int]bool)
 	for _, match := range variable.FindAllStringIndex(s, -1) {
-		if name := s[match[0]:match[1]]; expandString(name) == name {
+		dollars := 0
+		for i := match[0] - 1; i >= 0 && s[i] == '$'; i-- {
+			dollars++
+		}
+		if name := s[match[0]:match[1]]; dollars%2 == 0 && expandString(name) == name {
 			offsets[match[0]] = true
 		}
 	}

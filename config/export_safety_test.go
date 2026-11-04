@@ -449,3 +449,21 @@ func TestExportYAMLRedactsPluginSecretFields(t *testing.T) {
 	assert.NotContains(t, out, "route-secret-do-not-leak")
 	assert.Equal(t, "${env:GOMODEL_VIRTUAL_MODELS_0_STRATEGY_CONFIG_HMAC_MATERIAL}", exportedValue(t, out, "virtual_models", "0", "strategy_config", "hmac_material"))
 }
+
+func TestUnsetVariableOffsetsSkipsEscapedText(t *testing.T) {
+	clearAllConfigEnvVars(t)
+	assert.Equal(t, map[int]bool{0: true}, unsetVariableOffsets("${GOMODEL_TEST_UNSET}"))
+	assert.Empty(t, unsetVariableOffsets("$${GOMODEL_TEST_UNSET}"), "escaped, it is text")
+	assert.Equal(t, map[int]bool{2: true}, unsetVariableOffsets("$$${GOMODEL_TEST_UNSET}"), "an escaped $ then a variable")
+
+	// Written into an unresolved section, escaped text loads back as text even
+	// once the variable is set.
+	loaded := loadYAML(t, []byte("extensions:\n  demo:\n    note: \"$${GOMODEL_TEST_LATER}\"\n"))
+	out, err := loaded.ExportYAML(ExportDocument{Config: loaded.Config}, nil)
+	require.NoError(t, err)
+	t.Setenv("GOMODEL_TEST_LATER", "injected-do-not-leak")
+	reloaded := loadYAML(t, out)
+	got, err := yaml.Marshal(reloaded.Config.Extensions["demo"])
+	require.NoError(t, err)
+	assert.NotContains(t, string(got), "injected-do-not-leak")
+}
