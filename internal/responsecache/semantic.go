@@ -596,19 +596,30 @@ func canonicalToolsJSON(raw json.RawMessage) []byte {
 	return out
 }
 
+// sortedTools orders a list of Chat Completions function tools by name. Any
+// other list, one that mixes in another tool shape or repeats a name, keeps its
+// order: there is no single order to normalize it to.
 func sortedTools(tools []map[string]any) []map[string]any {
-	sorted := make([]map[string]any, len(tools))
-	copy(sorted, tools)
-	sort.Slice(sorted, func(i, j int) bool {
-		ni, _ := sorted[i]["function"].(map[string]any)
-		nj, _ := sorted[j]["function"].(map[string]any)
-		if ni == nil || nj == nil {
-			return false
+	names := make([]string, len(tools))
+	seen := make(map[string]struct{}, len(tools))
+	for i, tool := range tools {
+		function, _ := tool["function"].(map[string]any)
+		name, _ := function["name"].(string)
+		if _, duplicate := seen[name]; name == "" || duplicate {
+			return tools
 		}
-		namei, _ := ni["name"].(string)
-		namej, _ := nj["name"].(string)
-		return namei < namej
-	})
+		seen[name] = struct{}{}
+		names[i] = name
+	}
+	order := make([]int, len(tools))
+	for i := range order {
+		order[i] = i
+	}
+	sort.Slice(order, func(a, b int) bool { return names[order[a]] < names[order[b]] })
+	sorted := make([]map[string]any, len(tools))
+	for i, idx := range order {
+		sorted[i] = tools[idx]
+	}
 	return sorted
 }
 
