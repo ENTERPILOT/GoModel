@@ -452,6 +452,10 @@ func TestExportYAMLRedactsPluginSecretFields(t *testing.T) {
 
 func TestUnsetVariableOffsetsSkipsEscapedText(t *testing.T) {
 	clearAllConfigEnvVars(t)
+	for _, name := range []string{"GOMODEL_TEST_UNSET", "GOMODEL_TEST_LATER"} {
+		t.Setenv(name, "")
+		require.NoError(t, os.Unsetenv(name))
+	}
 	assert.Equal(t, map[int]bool{0: true}, unsetVariableOffsets("${GOMODEL_TEST_UNSET}"))
 	assert.Empty(t, unsetVariableOffsets("$${GOMODEL_TEST_UNSET}"), "escaped, it is text")
 	assert.Equal(t, map[int]bool{2: true}, unsetVariableOffsets("$$${GOMODEL_TEST_UNSET}"), "an escaped $ then a variable")
