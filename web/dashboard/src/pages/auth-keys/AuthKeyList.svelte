@@ -2,6 +2,7 @@
   // API keys table.
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import HighlightText from "$lib/components/atoms/HighlightText.svelte";
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { formatDateUTC, formatTimestampUTC } from "$lib/utils/format.js";
   import { displayModelSelector } from "$lib/utils/modelSelectors.js";
@@ -54,9 +55,9 @@
     <tbody>
       {#each store.visibleKeys as key (key.id)}
         <tr class:auth-key-row-deactivated={authKeyDeactivated(key)}>
-          <td>{key.name}</td>
-          <td class="auth-key-description">{key.description || "—"}</td>
-          <td>{key.user_path || "—"}</td>
+          <td><HighlightText text={key.name} needle={store.filter} /></td>
+          <td class="auth-key-description"><HighlightText text={key.description || "—"} needle={store.filter} /></td>
+          <td><HighlightText text={key.user_path || "—"} needle={store.filter} /></td>
           <td>
             {#if (key.labels || []).length > 0}
               <div class="usage-label-chips">
@@ -64,7 +65,7 @@
                   <span
                     class="usage-label-chip usage-label-chip-static"
                     style={labelChipStyle(label)}
-                  >{label}</span>
+                  ><HighlightText text={label} needle={store.filter} /></span>
                 {/each}
               </div>
             {:else}
@@ -75,7 +76,7 @@
             {#if (key.allowed_models || []).length > 0}
               <div class="auth-key-selector-list">
                 {#each key.allowed_models || [] as selector (selector)}
-                  <code class="auth-key-selector">{displayModelSelector(selector)}</code>
+                  <code class="auth-key-selector"><HighlightText text={displayModelSelector(selector)} needle={store.filter} /></code>
                 {/each}
               </div>
             {:else}
@@ -98,7 +99,7 @@
               </span>
             {/if}
           </td>
-          <td><code class="auth-key-redacted">{key.redacted_value}</code></td>
+          <td><code class="auth-key-redacted"><HighlightText text={key.redacted_value} needle={store.filter} /></code></td>
           <td>
             <span
               class="auth-key-status-badge"

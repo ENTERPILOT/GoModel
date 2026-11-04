@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"testing"
 
+	batchstore "github.com/enterpilot/gomodel/internal/batch"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/stretchr/testify/require"
 )
@@ -84,6 +85,41 @@ func TestBatchOrchestratorCreateEnforcesBudgetAfterWorkflowResolution(t *testing
 	require.Equal(t, "workflow-budget-disabled", budgetWorkflow.Policy.VersionID)
 	require.Equal(t, "req-budget", budgetRequestID)
 	require.Equal(t, 0, provider.createCalls)
+}
+
+// A router that names the instance it submitted to has that name stored with
+// the batch, so its usage rows are attributed to the instance that served it.
+func TestBatchOrchestratorCreateStoresTheSubmittedInstance(t *testing.T) {
+	t.Parallel()
+
+	provider := &batchInstanceProvider{batchBudgetProvider: &batchBudgetProvider{}, instance: "openai-byok"}
+	store := batchstore.NewMemoryStore()
+	orchestrator := NewBatchOrchestrator(BatchConfig{Provider: provider, BatchStore: store})
+
+	result, err := orchestrator.Create(context.Background(), &core.BatchRequest{
+		InputFileID: "file-123",
+		Endpoint:    "/v1/chat/completions",
+		Metadata:    map[string]string{"provider": "openai"},
+	}, BatchMeta{RequestID: "req-instance", Endpoint: core.DescribeEndpoint(http.MethodPost, "/v1/batches")})
+	require.NoError(t, err)
+	require.Equal(t, 1, provider.createCalls)
+
+	stored, err := store.Get(context.Background(), result.Batch.ID)
+	require.NoError(t, err)
+	require.Equal(t, "openai-byok", stored.ProviderName)
+	require.Equal(t, "openai", stored.Batch.Provider)
+}
+
+// batchInstanceProvider is a batchBudgetProvider that also names the instance
+// it submits to.
+type batchInstanceProvider struct {
+	*batchBudgetProvider
+	instance string
+}
+
+func (p *batchInstanceProvider) CreateBatchOnInstance(ctx context.Context, providerType string, req *core.BatchRequest) (*core.BatchResponse, map[string]string, string, error) {
+	resp, err := p.CreateBatch(ctx, providerType, req)
+	return resp, nil, p.instance, err
 }
 
 type batchBudgetProvider struct {

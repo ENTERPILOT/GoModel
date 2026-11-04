@@ -6,6 +6,7 @@
 // runtimeConfig store (see workflows.svelte.js featureCaps()).
 
 import * as m from "../../lib/paraglide/messages.js";
+import { filterFields } from "../../lib/utils/textMatch.js";
 import {
   DEFAULT_PHASE,
   WORKFLOW_PHASES,
@@ -457,25 +458,17 @@ export function shortHash(value) {
 }
 
 export function filterWorkflows(workflows, filter) {
-  const list = Array.isArray(workflows) ? workflows : [];
-  if (!filter) {
-    return list;
-  }
-  const wanted = String(filter).toLowerCase();
-  return list.filter((workflow) => {
-    const fields = [
-      workflow.name,
-      workflow.description,
-      workflow.scope_display,
-      workflow.scope_type,
-      workflowScopeProviderValue(workflow && workflow.scope),
-      workflow.scope && workflow.scope.scope_model,
-      workflow.scope && workflow.scope.scope_user_path,
-      workflow.workflow_hash,
-      ...workflowPayloadSteps(workflow.workflow_payload).map((step) => step.ref),
-    ];
-    return fields.some((value) => String(value || "").toLowerCase().includes(wanted));
-  });
+  return filterFields(workflows, filter, (workflow) => [
+    workflow.name,
+    workflow.description,
+    workflow.scope_display,
+    workflow.scope_type,
+    workflowScopeProviderValue(workflow && workflow.scope),
+    workflow.scope && workflow.scope.scope_model,
+    workflow.scope && workflow.scope.scope_user_path,
+    workflow.workflow_hash,
+    ...workflowPayloadSteps(workflow.workflow_payload).map((step) => step.ref),
+  ]);
 }
 
 // workflowPreview builds the draft workflow card mirrored live in the editor.

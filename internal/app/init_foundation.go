@@ -216,6 +216,11 @@ func (b *bootstrap) initTracking() error {
 	}
 	app.budgets = budgetResult
 	app.register(subsystemBudgets, ownedByShutdown, app.budgets.Close)
+	if app.budgets.Service != nil && app.providers != nil && app.providers.Registry != nil {
+		// A request served by a billable: false provider is checked against
+		// provider budgets only; see providers.ModelRegistry.ProviderBillable.
+		app.budgets.Service.SetProviderBillable(app.providers.Registry.ProviderBillable)
+	}
 
 	var rateLimitResult *ratelimit.Result
 	if appCfg.RateLimits.Enabled {

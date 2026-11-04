@@ -33,6 +33,16 @@ Umgebungsvariablen unterstützte Rotation mehrerer Keys (`api_keys`, eine geordn
 [ausgehende Proxy](/de/providers/outbound-proxy) pro Provider sind ebenfalls im Dashboard-Formular
 verfügbar.
 
+Jeder Provider trägt außerdem eine Einstellung `billable`, die standardmäßig aktiviert ist.
+Deaktivieren Sie sie für einen Provider, dessen Kosten der Aufrufer Ihnen nicht schuldet, etwa den
+eigenen API-Key eines Kunden, der als eigene Provider-Instanz registriert ist: Die Nutzung wird
+weiterhin erfasst und bepreist, aber User-Path- und Label-Budgets prüfen sie weder, noch zählen sie
+sie, und bei aktivierten [Aufschlägen](/de/features/cost-tracking#aufschläge-und-abgerechnete-kosten)
+wird sie mit null abgerechnet. Setzen Sie sie mit `providers.<name>.billable: false` in
+`config.yaml`, `<PROVIDER>[_SUFFIX]_BILLABLE=false` in der Umgebung, dem Kontrollkästchen
+**Billable** unter den erweiterten Feldern des Dashboard-Formulars oder `"billable": false` bei
+`PUT /admin/provider-credentials`. Siehe [Budgets](/de/features/budgets#nicht-abrechenbare-provider).
+
 ## Unterstützte Provider
 
 Die Beispiel-Modellbezeichner dienen der Veranschaulichung und können sich ändern; aktuelle Modelle
@@ -100,6 +110,15 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
   `/v1/responses` und gibt eine normale Chat Completion bzw. einen normalen Chunk-Stream zurück. Ein
   Request mit einem Feld, für das die Responses API keine Entsprechung hat (zum Beispiel `n` oder
   `logprobs`), bleibt bei Chat Completions.
+- **Allowed Tools bei OpenAI-kompatiblen Providern** – ein `tool_choice` vom Typ
+  `allowed_tools` erreicht OpenAI, Azure OpenAI und Fireworks unverändert, da
+  sie ihn beachten. Andere OpenAI-kompatible Provider (xAI, Groq, OpenRouter,
+  vLLM, Ollama und die übrigen) erhalten nur die erlaubten Funktionen, mit
+  `tool_choice: "required"` beim Modus `required` und sonst `"auto"`: Manche
+  von ihnen ignorieren die Auswahl und würden dem Modell jedes deklarierte
+  Tool erlauben. Die eingeschränkte Tool-Liste kann Prompt-Cache-Treffer
+  kosten, wenn sich die Teilmenge zwischen Turns ändert. Eine Teilmenge, die
+  keine deklarierte Funktion nennt, wird mit 400 abgelehnt.
 - **llm-d** – richten Sie `LLMD_BASE_URL` auf den Router/EPP-Service aus und deklarieren Sie
   `LLMD_MODELS`, wenn die Route `/v1/models` nicht bedient. Der dedizierte Provider fügt
   vertrauenswürdige Header für Inference-Objective und User-Path-Fairness ein.

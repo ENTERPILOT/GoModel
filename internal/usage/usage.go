@@ -104,6 +104,13 @@ type UsageEntry struct {
 	// (nil = cost unknown, or the row predates billing).
 	BilledCost *float64 `json:"billed_cost,omitempty" bson:"billed_cost,omitempty"`
 
+	// Billable is false when the provider that served the request is
+	// configured with billable: false, so its cost is not owed by the caller:
+	// the row is billed at zero and user-path and label budgets skip it. nil
+	// means billable, the default, so rows written before the field read as
+	// billable.
+	Billable *bool `json:"billable,omitempty" bson:"billable,omitempty"`
+
 	// RewriteTokensSaved is the prompt tokens that request rewriters (ext
 	// extensions, e.g. token compression) estimate they removed from this
 	// request before it reached the provider. Zero when no rewriter reported
@@ -148,4 +155,18 @@ func DefaultConfig() Config {
 		FlushInterval:             5 * time.Second,
 		RetentionDays:             90,
 	}
+}
+
+// IsBillable reports whether the caller owes the entry's cost; see Billable.
+func (e *UsageEntry) IsBillable() bool {
+	return e == nil || e.Billable == nil || *e.Billable
+}
+
+// MarkNonBillable records that the caller does not owe the entry's cost.
+func (e *UsageEntry) MarkNonBillable() {
+	if e == nil {
+		return
+	}
+	billable := false
+	e.Billable = &billable
 }
