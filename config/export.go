@@ -455,16 +455,16 @@ func (e *exporter) setValue(path string, node *yaml.Node, value string, configur
 		setScalar(node, value, value != node.Value || blockUnsafe(value))
 		return
 	}
-	// config.Load leaves a variable that is unset as written. Kept so in a
-	// section written as config.yaml holds it, it expands once set.
-	if e.isUnresolved(path) && unsetVariables.MatchString(value) && expandString(value) == value {
-		e.setText(node, quoteYAML(value, dollarOffsets(value)))
-		return
-	}
 	if !configured {
 		value = escapeReferences(value)
 	}
-	e.setText(node, quoteText(value))
+	// config.Load leaves a variable that is unset as written. Kept so in a
+	// section written as config.yaml holds it, it expands once set.
+	var keep map[int]bool
+	if e.isUnresolved(path) {
+		keep = unsetVariableOffsets(value)
+	}
+	e.setText(node, quoteTextKeeping(value, keep))
 }
 
 // setSecret writes secret, which follows the text head, as an env reference.

@@ -67,13 +67,16 @@ func expandedScalars(data []byte) (map[string]writtenScalar, bool) {
 // config.Load leaves those that are unset.
 var unsetVariables = regexp.MustCompile(`^(?:\$\{[A-Za-z_][A-Za-z0-9_]*\})+$`)
 
-// dollarOffsets returns the byte offset of every "$" in s, for quoteYAML to
-// keep.
-func dollarOffsets(s string) map[int]bool {
+// variable finds ${NAME} variables.
+var variable = regexp.MustCompile(`\$\{[A-Za-z_][A-Za-z0-9_]*\}`)
+
+// unsetVariableOffsets returns the byte offsets of the ${NAME} variables in s
+// that are unset, as config.Load leaves them.
+func unsetVariableOffsets(s string) map[int]bool {
 	offsets := make(map[int]bool)
-	for i := range len(s) {
-		if s[i] == '$' {
-			offsets[i] = true
+	for _, match := range variable.FindAllStringIndex(s, -1) {
+		if name := s[match[0]:match[1]]; expandString(name) == name {
+			offsets[match[0]] = true
 		}
 	}
 	return offsets
@@ -89,7 +92,16 @@ func escapeReferences(s string) string {
 // config.Load resolves and nothing else: every "$" is escaped but those
 // starting a secret reference.
 func quoteText(s string) string {
-	keep := make(map[int]bool)
+	return quoteTextKeeping(s, nil)
+}
+
+// quoteTextKeeping is quoteText also keeping the "$" at each offset in
+// unset, which start unset variables.
+func quoteTextKeeping(s string, unset map[int]bool) string {
+	keep := make(map[int]bool, len(unset))
+	for i := range unset {
+		keep[i] = true
+	}
 	for i := 0; i+1 < len(s); i++ {
 		if s[i] != '$' || s[i+1] != '{' || (i > 0 && s[i-1] == '$') {
 			continue

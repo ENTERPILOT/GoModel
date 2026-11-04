@@ -226,6 +226,7 @@ providers:
   backup:
     type: openai
     api_key: ${EXPORT_TEST_UNSET_KEY}
+    base_url: https://${EXPORT_TEST_UNSET_HOST}/v1
 users:
   - path: /pasted
     description: sk-env-literal-do-not-leak
@@ -253,4 +254,5 @@ virtual_models:
 	reloaded := loadExportConfig(t, body)
 	assert.Contains(t, reloaded.RawProviders, "backup")
 	assert.Contains(t, body, `api_key: "${EXPORT_TEST_UNSET_KEY}"`, "written as config.yaml held it")
+	assert.Contains(t, body, `base_url: "https://${EXPORT_TEST_UNSET_HOST}/v1"`, "an unset variable inside a value too")
 }
