@@ -951,3 +951,20 @@ func TestUnverifiedLimitCountsFromTheLastRecheck(t *testing.T) {
 	clock.Advance(sessionUnverifiedLimit * 3 / 4)
 	assert.Equal(t, http.StatusOK, rawMCPStatus(t, a.url+"/mcp", listToolsBody, withSession(nil, sessionID)))
 }
+
+// A failed recheck applies the limit to the session's current verification,
+// not the snapshot the request started with: a recheck that succeeded
+// meanwhile keeps the session.
+func TestFailedRecheckSeesAConcurrentVerification(t *testing.T) {
+	clock := &testClock{}
+	unreadable := &failingGetStore{SharedStore: newMemorySharedStore(clock.Now)}
+	a := newReplica(t, unreadable, Options{ConfigServers: alphaServers(t)}, clock)
+	sessionID := initializeRawSession(t, a.url+"/mcp", nil)
+	snapshot, ok := a.binding(sessionID)
+	require.True(t, ok)
+
+	clock.Advance(sessionUnverifiedLimit)
+	a.service.markVerified(sessionID, snapshot.server)
+	unreadable.fail.Store(true)
+	assert.True(t, a.service.recheckSharedSession(context.Background(), sessionID, snapshot))
+}

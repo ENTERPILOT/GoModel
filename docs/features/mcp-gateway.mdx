@@ -397,8 +397,9 @@ be read later, a replica already serving the session keeps serving it for up to
 30 minutes, without seeing a `DELETE` sent elsewhere, and then ends it; any
 other replica answers 404, and the client initializes a new session. A `DELETE`
 sent while the database cannot be written ends the session only on the replica
-that receives it: until the session's record expires, at most 30 minutes later,
-the same client can still resume it on another replica.
+that receives it: until the session's record expires, up to 30 minutes later,
+the same client can still resume it on another replica, and a resumed session
+then continues as usual.
 
 ## Choose which tools each server exposes
 

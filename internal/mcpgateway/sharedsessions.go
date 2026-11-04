@@ -219,7 +219,8 @@ func (s *Service) sharedSessionClosed(ctx context.Context, sessionID, endpoint, 
 // recheckSharedSession reports whether a hosted session is still open
 // cluster-wide, and extends its shared expiry. Both run at a bounded rate, so
 // most requests touch no database. A failed read keeps the session, whose
-// binding is still checked locally on every request, without extending it.
+// binding is still checked locally on every request, without extending it,
+// until the close marks have been unreadable for sessionUnverifiedLimit.
 func (s *Service) recheckSharedSession(ctx context.Context, sessionID string, binding sessionBinding) bool {
 	recheck, touch := s.reserveRecheck(sessionID, binding.server)
 	if !recheck {
@@ -233,7 +234,7 @@ func (s *Service) recheckSharedSession(ctx context.Context, sessionID string, bi
 		// been closed elsewhere, and extending its record past the close
 		// mark's lifetime would let it resume once the mark expires.
 		slog.Warn("failed to recheck mcp session in the shared store", "error", err)
-		return s.now().Sub(binding.verifiedAt) < sessionUnverifiedLimit
+		return !s.unverifiedTooLong(sessionID, binding.server)
 	}
 	if closed {
 		return false
@@ -354,7 +355,7 @@ func (s *Service) touchHostedSession(sessionID string, server *mcp.Server) {
 	if err != nil {
 		slog.Warn("failed to recheck mcp session in the shared store", "error", err)
 	}
-	if closed || (err != nil && now.Sub(binding.verifiedAt) >= sessionUnverifiedLimit) {
+	if closed || (err != nil && s.unverifiedTooLong(sessionID, server)) {
 		s.unbind(sessionID, server)
 		closeSessions(server)
 		return
@@ -364,6 +365,17 @@ func (s *Service) touchHostedSession(sessionID string, server *mcp.Server) {
 	}
 	s.markVerified(sessionID, server)
 	s.extendSharedSession(context.Background(), sessionID, binding.record)
+}
+
+// unverifiedTooLong reports whether a hosted session's close marks have been
+// unreadable for sessionUnverifiedLimit. It reads the current binding, not
+// the caller's snapshot, as a concurrent recheck may have succeeded meanwhile.
+func (s *Service) unverifiedTooLong(sessionID string, server *mcp.Server) bool {
+	now := s.now()
+	s.bindMu.Lock()
+	defer s.bindMu.Unlock()
+	binding, ok := s.bindings[sessionID]
+	return !ok || binding.server != server || now.Sub(binding.verifiedAt) >= sessionUnverifiedLimit
 }
 
 // markVerified records a successful close-mark read for a hosted session.
