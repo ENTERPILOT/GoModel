@@ -229,6 +229,34 @@ func TestPeerInFlightCountsWhileFreshAndExpires(t *testing.T) {
 	second.Release()
 }
 
+// A rule a Refresh brings in counts the other replicas' rows already loaded
+// for it at once, not only after the next load.
+func TestRefreshCountsLoadedPeerRowsOfNewRule(t *testing.T) {
+	ctx := context.Background()
+	store := newClusterStore(t, Rule{
+		Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodHourSeconds,
+		MaxRequests: new(int64(10)), Source: SourceManual,
+	})
+	a := replica(t, store)
+	b := replica(t, store)
+	now := store.clock.Now
+
+	require.NoError(t, store.UpsertRules(ctx, []Rule{{
+		Scope: ScopeUserPath, Subject: "/other", PeriodSeconds: PeriodHourSeconds,
+		MaxRequests: new(int64(10)), Source: SourceManual,
+	}}))
+	require.NoError(t, a.Refresh(ctx))
+	_, err := a.Acquire(onPath("/other"), now())
+	require.NoError(t, err)
+	a.flush(ctx)
+	b.flush(ctx) // loads a's row before b has the rule
+
+	require.NoError(t, b.Refresh(ctx))
+	statuses := b.StatusesForUserPath("/other", now())
+	require.Len(t, statuses, 1)
+	assert.Equal(t, int64(1), statuses[0].RequestsUsed)
+}
+
 // failingLoadStore fails LoadCounters while err is set.
 type failingLoadStore struct {
 	*clusterStore

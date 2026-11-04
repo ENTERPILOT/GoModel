@@ -191,6 +191,11 @@ func (s *Service) Refresh(ctx context.Context) error {
 			s.limiter.reset(keyForRule(old))
 		}
 	}
+	// Sum the loaded peer rows again under the new rules, so a rule added,
+	// or counted under a new epoch, counts what the others already saved for
+	// it now rather than at the next load, which never comes without a
+	// flush loop.
+	s.installSums()
 	return nil
 }
 
