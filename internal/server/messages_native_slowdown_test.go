@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -145,4 +146,21 @@ func TestSlowDownNativeMessages_SkipsErrorsAndUnslowedModels(t *testing.T) {
 			})
 		})
 	}
+}
+
+// failingBody errors on its first read, like an upstream connection that
+// drops after the headers.
+type failingBody struct{}
+
+func (failingBody) Read([]byte) (int, error) { return 0, errors.New("connection reset") }
+func (failingBody) Close() error             { return nil }
+
+func TestSlowDownNativeMessages_ReportsBodyReadFailure(t *testing.T) {
+	workflow := &core.Workflow{Resolution: &core.RequestModelResolution{Slowdown: 1}}
+	resp := &core.PassthroughResponse{StatusCode: http.StatusOK, Body: failingBody{}}
+	err := slowDownNativeMessages(context.Background(), workflow, false, resp, time.Now())
+	require.Error(t, err)
+	var gatewayErr *core.GatewayError
+	require.ErrorAs(t, err, &gatewayErr)
+	assert.Equal(t, http.StatusBadGateway, gatewayErr.StatusCode)
 }
