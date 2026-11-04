@@ -105,6 +105,9 @@ disabled to turn the selector off entirely. Selectors can target:
 - `{provider_name}/{model}` for one model on one provider
 - a model ID without a provider name
 
+`*` is not a wildcard in a policy selector: `openai/*` or `*` returns `400`.
+Use `openai/` for every model of a provider, or `/` for all models.
+
 For example:
 
 - selector: `openai/gpt-5`

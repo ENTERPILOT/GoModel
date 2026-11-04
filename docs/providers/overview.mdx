@@ -43,7 +43,9 @@ with [markups](/features/cost-tracking#markups-and-billed-cost) enabled it is
 billed at zero. Set it with `providers.<name>.billable: false` in
 `config.yaml`, `<PROVIDER>[_SUFFIX]_BILLABLE=false` in the environment, the
 **Billable** checkbox under the dashboard form's advanced fields, or
-`"billable": false` on `PUT /admin/provider-credentials`. See
+`"billable": false` on `PUT /admin/provider-credentials`. A
+`<PROVIDER>_BILLABLE` value that is not a boolean (`true`, `false`, `1`, `0`)
+refuses startup, so a typo never leaves a provider billable by accident. See
 [Budgets](/features/budgets#non-billable-providers).
 
 ## Supported providers

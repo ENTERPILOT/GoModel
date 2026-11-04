@@ -163,7 +163,7 @@ console.log(usage);
 覆盖该路径的每条用户路径[速率限制规则](/zh/features/rate-limits)的实时计数器。`max_tokens`/`tokens_remaining`/`tokens_usage_ratio` 仅出现在带有 Token 限制的规则上；`period_label` 为 `concurrent` 表示并发上限，此时 `in_flight` 为当前并发数（并用于计算 `requests_usage_ratio`）。`*_usage_ratio` 字段为各维度的已用量/限额，不做截断，Token 窗口可能超过 `1`。当任一维度用尽时，`exhausted` 为 `true`；`resets_in_seconds` 以 `server_time` 为基准倒计时至 `window_end`（并发规则没有窗口，因此省略该字段）。提供商和模型作用域的规则不会列出：它们描述的是共享基础设施的容量，而不是调用方。
 
 <Note>
-  速率限制计数器保存在每个网关实例的内存中：重启后会重置，如果有 N 个副本，每个副本各自维护计数器。预算才是持久化的、跨实例的数据。
+  速率限制计数器保存在内存中，并大约每秒一次保存到数据库，因此在重启后依然保留。共享同一数据库的副本报告的是整个集群的计数，可能比其他副本的最新流量滞后约两秒；参阅[多个副本共享同一限制](/zh/features/rate-limits#多个副本共享同一限制)。预算是持久化的数据，根据已存储的用量记录计算。
 </Note>
 
 ## 日期窗口

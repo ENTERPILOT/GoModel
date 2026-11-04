@@ -26,8 +26,8 @@ func ApplyChat(req *core.ChatRequest, defaults, params Set) (*core.ChatRequest, 
 			return setPtr(&cloned.Temperature, raw, force)
 		case "top_p":
 			return setPtr(&cloned.TopP, raw, force)
-		case "max_tokens":
-			return setPtr(&cloned.MaxTokens, raw, force)
+		case "max_tokens", "max_completion_tokens", "max_output_tokens":
+			return a.setTokenLimit(&cloned.MaxTokens, raw, force, "max_completion_tokens", "max_output_tokens")
 		case "parallel_tool_calls":
 			return setPtr(&cloned.ParallelToolCalls, raw, force)
 		case "user":
@@ -37,6 +37,9 @@ func ApplyChat(req *core.ChatRequest, defaults, params Set) (*core.ChatRequest, 
 		case "tool_choice":
 			return setAny(&cloned.ToolChoice, raw, force)
 		default:
+			if _, skip := responsesOnlyKeys[key]; skip {
+				return nil
+			}
 			return a.route(key, raw, force)
 		}
 	}
@@ -61,7 +64,9 @@ func ApplyChat(req *core.ChatRequest, defaults, params Set) (*core.ChatRequest, 
 }
 
 // ApplyResponses is ApplyChat for the Responses API. Keys keep Chat
-// Completions spelling: max_tokens sets max_output_tokens.
+// Completions spelling: any token-limit spelling sets max_output_tokens, and
+// response_format and verbosity land in text. Chat members the Responses API
+// has no counterpart for are skipped.
 func ApplyResponses(req *core.ResponsesRequest, defaults, params Set) (*core.ResponsesRequest, error) {
 	if req == nil || (len(defaults) == 0 && len(params) == 0) {
 		return req, nil
@@ -74,8 +79,12 @@ func ApplyResponses(req *core.ResponsesRequest, defaults, params Set) (*core.Res
 			return setPtr(&cloned.Temperature, raw, force)
 		case "top_p":
 			return setPtr(&cloned.TopP, raw, force)
-		case "max_tokens", "max_output_tokens":
-			return setPtr(&cloned.MaxOutputTokens, raw, force)
+		case "max_tokens", "max_completion_tokens", "max_output_tokens":
+			return a.setTokenLimit(&cloned.MaxOutputTokens, raw, force, "max_tokens", "max_completion_tokens")
+		case "response_format":
+			return setTextMember(&cloned.Text, "format", raw, force)
+		case "verbosity":
+			return setTextMember(&cloned.Text, "verbosity", raw, force)
 		case "top_logprobs":
 			return setPtr(&cloned.TopLogprobs, raw, force)
 		case "parallel_tool_calls":
@@ -95,6 +104,9 @@ func ApplyResponses(req *core.ResponsesRequest, defaults, params Set) (*core.Res
 		case "tool_choice":
 			return setAny(&cloned.ToolChoice, raw, force)
 		default:
+			if _, skip := chatOnlyKeys[key]; skip {
+				return nil
+			}
 			return a.route(key, raw, force)
 		}
 	}
@@ -122,6 +134,102 @@ var (
 	chatTypedKeys      = typedJSONKeys(core.ChatRequest{})
 	responsesTypedKeys = typedJSONKeys(core.ResponsesRequest{})
 )
+
+// One set serves every surface, so a key the target API does not have is
+// skipped there rather than forwarded for the upstream to reject.
+var (
+	// chatOnlyKeys are Chat Completions members the Responses API rejects.
+	// response_format and verbosity are translated instead (see
+	// ApplyResponses).
+	chatOnlyKeys = map[string]struct{}{
+		"seed": {}, "stop": {}, "n": {}, "frequency_penalty": {}, "presence_penalty": {},
+		"logit_bias": {}, "logprobs": {}, "modalities": {}, "audio": {}, "prediction": {},
+		"web_search_options": {},
+	}
+	// responsesOnlyKeys are Responses API members Chat Completions rejects.
+	responsesOnlyKeys = map[string]struct{}{
+		"text": {}, "include": {}, "truncation": {}, "max_tool_calls": {}, "background": {},
+		"context_management": {},
+	}
+)
+
+// setTokenLimit sets the surface's token limit from any of its spellings.
+// The others are one limit to the client too: a forced value strips the ones
+// the client sent, so they cannot outbid it upstream, and a default is only a
+// default while the client sent none of them.
+func (a *applier) setTokenLimit(dst **int, raw json.RawMessage, force bool, others ...string) error {
+	if !force {
+		if *dst != nil {
+			return nil
+		}
+		for _, key := range others {
+			if a.extraValue(key) != nil {
+				return nil
+			}
+		}
+		return setPtr(dst, raw, false)
+	}
+	for _, key := range others {
+		if a.extraValue(key) != nil {
+			if err := a.routeExtra(key, nil, true); err != nil {
+				return err
+			}
+		}
+	}
+	return setPtr(dst, raw, true)
+}
+
+// setTextMember sets one member of the Responses text object: format from a
+// chat response_format, or verbosity. The other members the client sent stay,
+// a default leaves a member the client set alone, and a forced null removes
+// the member. The client's object is copied, never changed in place.
+func setTextMember(text *any, member string, raw json.RawMessage, force bool) error {
+	members := map[string]any{}
+	if *text != nil {
+		encoded, err := json.Marshal(*text)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(encoded, &members); err != nil {
+			return fmt.Errorf("text is not an object: %w", err)
+		}
+	}
+	if _, set := members[member]; set && !force {
+		return nil
+	}
+	switch {
+	case raw == nil:
+		delete(members, member)
+	case member == "format":
+		format, err := core.ResponsesTextFormat(raw)
+		if err != nil {
+			return err
+		}
+		members[member] = format
+	default:
+		var value any
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return err
+		}
+		members[member] = value
+	}
+	if len(members) == 0 {
+		*text = nil
+		return nil
+	}
+	*text = members
+	return nil
+}
+
+// extraValue returns an ExtraFields member as the applier currently sees it:
+// a pending change if there is one, the client's value otherwise. A pending
+// removal reads nil.
+func (a *applier) extraValue(key string) json.RawMessage {
+	if raw, pending := a.extras[key]; pending {
+		return raw
+	}
+	return a.fields.Lookup(key)
+}
 
 // typedJSONKeys lists the JSON member names a request struct models, so the
 // applier knows which keys the explicit switch did not cover but the struct

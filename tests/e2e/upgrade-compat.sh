@@ -69,8 +69,14 @@ build_binaries() {
   if [[ ! -d "$BASELINE_TREE" ]]; then
     git -C "$REPO_ROOT" worktree add --detach "$BASELINE_TREE" "$BASELINE_REF" >/dev/null
   else
-    git -C "$BASELINE_TREE" checkout --detach "$BASELINE_REF" >/dev/null 2>&1 \
-      || die "cannot move the baseline worktree to $BASELINE_REF"
+    # A worktree whose registration was pruned, or that an older run left
+    # half-made, cannot be moved; recreate it instead of giving up.
+    if ! git -C "$BASELINE_TREE" checkout --detach "$BASELINE_REF" >/dev/null 2>&1; then
+      rm -rf "$BASELINE_TREE"
+      git -C "$REPO_ROOT" worktree prune
+      git -C "$REPO_ROOT" worktree add --detach "$BASELINE_TREE" "$BASELINE_REF" >/dev/null \
+        || die "cannot create the baseline worktree at $BASELINE_REF"
+    fi
   fi
   (cd "$BASELINE_TREE" && go build -o "$OLD_BIN" ./cmd/gomodel)
 }
@@ -238,6 +244,36 @@ seed() {
     -F purpose=batch -F "file=@$WORK/batch.jsonl" > "$WORK/file.json"
 }
 
+# The openai provider rule's sliding request count. The seed's calls are its
+# only traffic, and with nothing new counted it can only fall as time passes.
+rate_limit_used() {
+  curl -fsS "$BASE/admin/rate-limits" \
+    | jq -r '[.rate_limits[] | select(.subject == "openai") | .requests_used] | first // 0'
+}
+
+# Drops from an upgraded read every object member the baseline read lacks,
+# recursively, so a field this release adds is not reported as a change.
+# usage: without_added_fields BASELINE_FILE UPGRADED_FILE
+without_added_fields() {
+  jq -S --slurpfile base "$1" '
+    def prune($b):
+      if type == "object" and ($b | type) == "object" then
+        with_entries(select(.key as $k | $b | has($k)) | .key as $k | .value |= prune($b[$k]))
+      elif type == "array" and ($b | type) == "array" then
+        [range(0; length) as $i | .[$i] | prune($b[$i])]
+      else . end;
+    prune($base[0])' "$2"
+}
+
+# Lists the member paths the upgraded read added, for the log.
+# usage: added_fields BASELINE_FILE UPGRADED_FILE
+added_fields() {
+  jq -r --slurpfile base "$1" '
+    [paths(type != "object" and type != "array")] as $all
+    | $all[] | select(. as $p | $base[0] | try (getpath($p) == null and ([paths] | index([$p]) == null)) catch true)
+    | map(tostring) | join(".")' "$2" | sort -u | head -20
+}
+
 # ----------------------------------------------------------------- snapshot --
 
 # snapshot writes one normalized JSON file per domain into $1. Fields that
@@ -351,6 +387,7 @@ stop_gw
 # rather than the store. Restarting makes the baseline snapshot a storage read,
 # so a difference later means storage, not caching.
 start_gw "$OLD_BIN" baseline-reread
+RATE_LIMIT_USED_BEFORE="$(rate_limit_used)"
 snapshot "$WORK/baseline"
 stop_gw
 echo "-- database now holds rows written by $BASELINE_REF"
@@ -366,11 +403,24 @@ else
   report "startup is free of storage errors" 0
 fi
 
+# The baseline restarted once, so its counters sit in two writers' rows. Read
+# as one count they must not grow; read as a sum they double.
+RATE_LIMIT_USED_AFTER="$(rate_limit_used)"
+rc=0
+awk -v before="$RATE_LIMIT_USED_BEFORE" -v after="$RATE_LIMIT_USED_AFTER" \
+  'BEGIN { exit !(before > 0 && after > 0 && after <= before) }' || rc=$?
+report "rate-limit counters carry over once ($RATE_LIMIT_USED_BEFORE before, $RATE_LIMIT_USED_AFTER after)" "$rc"
+
 snapshot "$WORK/upgraded"
+# Every value the baseline read must read back unchanged; members this
+# release adds are listed, not failed.
 for baseline_file in "$WORK/baseline"/*.json; do
   name="$(basename "$baseline_file")"
-  if diff -u "$baseline_file" "$WORK/upgraded/$name" > "$WORK/diff-$name.txt"; then
+  upgraded_file="$WORK/upgraded/$name"
+  if diff -u "$baseline_file" <(without_added_fields "$baseline_file" "$upgraded_file") > "$WORK/diff-$name.txt"; then
     report "reads identical: $name" 0
+    added="$(added_fields "$baseline_file" "$upgraded_file")"
+    [[ -n "$added" ]] && echo "   .. $name gained: $(tr '\n' ' ' <<<"$added")"
   else
     report "reads identical: $name" 1
     head -40 "$WORK/diff-$name.txt"
@@ -383,8 +433,9 @@ done
 if [[ "${SEEDED_FAILOVER:-0}" == 1 ]]; then
   migrated="$(curl -fsS "$BASE/admin/virtual-models" \
     | jq -c '.[] | select(.source == "compat-failover-src") | [.strategy, (.targets | map(.model))]')"
-  [[ "$migrated" == '["failover",["compat-failover-src","groq/openai/gpt-oss-20b","gemini/gemini-2.5-flash-lite"]]' ]]
-  report "failover mapping converted into a failover-strategy virtual model" "$?"
+  rc=0
+  [[ "$migrated" == '["failover",["compat-failover-src","groq/openai/gpt-oss-20b","gemini/gemini-2.5-flash-lite"]]' ]] || rc=$?
+  report "failover mapping converted into a failover-strategy virtual model" "$rc"
 fi
 
 echo "-- exercising writes on the upgraded database"

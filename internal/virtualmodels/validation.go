@@ -115,6 +115,12 @@ func normalizePolicyInput(catalog Catalog, vm VirtualModel) (VirtualModel, error
 	if err != nil {
 		return VirtualModel{}, err
 	}
+	// No model is named "*": a policy on it would be stored and match
+	// nothing. Users' allowed_models do read "openai/*" as a wildcard, so
+	// say what the policy form is instead.
+	if parts.Model == "*" {
+		return VirtualModel{}, newValidationError(fmt.Sprintf("%q is not a wildcard here: use %q for every model of a provider, or %q for all models", vm.Source, wildcardHint(parts.ProviderName), "/"), nil)
+	}
 	vm.Source = parts.Selector
 	vm.ProviderName = parts.ProviderName
 	vm.Model = parts.Model
@@ -132,6 +138,14 @@ func normalizePolicyInput(catalog Catalog, vm VirtualModel) (VirtualModel, error
 	// Empty user_paths is allowed now: a policy with no paths means "all paths".
 	vm.UserPaths = paths
 	return vm, nil
+}
+
+// wildcardHint is the provider-wide selector to suggest for "provider/*".
+func wildcardHint(providerName string) string {
+	if providerName == "" {
+		return "provider/"
+	}
+	return providerName + "/"
 }
 
 // normalizeStoredPolicy normalizes a policy row loaded from storage.

@@ -69,7 +69,8 @@ curl -X PUT http://localhost:8080/admin/virtual-models \
 ```
 
 Ein Wert außerhalb des aktiven Bereichs liefert `400`. Slowdown braucht ein
-Modell: ein providerweiter Selektor wie `openai/*` wird abgelehnt.
+Modell: ein providerweiter Selektor wie `openai/`, das globale `/` oder ein
+`*`-Modell wie `openai/*` wird mit `400` abgelehnt.
 
 ## Vorrang
 

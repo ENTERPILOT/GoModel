@@ -105,6 +105,10 @@ wyłączona, aby całkowicie wyłączyć selektor. Selektory mogą wskazywać:
 - `{provider_name}/{model}` dla jednego modelu u jednego providera
 - ID modelu bez nazwy providera
 
+`*` nie jest symbolem wieloznacznym w selektorze polityki: `openai/*` lub `*`
+zwraca `400`. Użyj `openai/` dla wszystkich modeli providera albo `/` dla
+wszystkich modeli.
+
 Na przykład:
 
 - selektor: `openai/gpt-5`

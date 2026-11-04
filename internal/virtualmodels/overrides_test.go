@@ -380,6 +380,8 @@ func TestUpsertValidatesRequestParams(t *testing.T) {
 		{name: "same key in both sets", vm: redirect(requestparams.Set{"top_k": rawJSON("1")}, requestparams.Set{"top_k": rawJSON("2")}), wantErr: "cannot be in both"},
 		{name: "provider scope", vm: VirtualModel{Source: "openai/", Params: requestparams.Set{"top_k": rawJSON("1")}, Enabled: true}, wantErr: "params can only be configured for a model or redirect"},
 		{name: "global scope defaults", vm: VirtualModel{Source: "/", DefaultParams: requestparams.Set{"top_k": rawJSON("1")}, Enabled: true}, wantErr: "default_params can only be configured for a model or redirect"},
+		{name: "provider wildcard is not a selector", vm: VirtualModel{Source: "openai/*", Params: requestparams.Set{"top_k": rawJSON("1")}, Enabled: true}, wantErr: `use "openai/" for every model of a provider`},
+		{name: "bare wildcard is not a selector", vm: VirtualModel{Source: "*", DefaultParams: requestparams.Set{"top_k": rawJSON("1")}, Enabled: true}, wantErr: `"*" is not a wildcard here`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

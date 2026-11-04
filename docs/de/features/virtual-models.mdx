@@ -129,7 +129,9 @@ Aufrufer anpassen dürfen, und `params` für Einstellungen, die ein Alias
 festlegen muss. Beide Maps stehen in `config.yaml`, in der Umgebungsvariable
 `VIRTUAL_MODELS`, in der Admin API und im Dashboard-Editor zur Verfügung. Auch
 eine Richtlinien-Zeile für ein konkretes Modell (ein Eintrag ohne Ziele)
-akzeptiert sie; providerweite und globale Zeilen lehnen sie ab.
+akzeptiert sie; providerweite (`openai/`) und globale (`/`) Zeilen lehnen sie
+ab, genau wie einen erzwungenen Reasoning-Effort. Eine `*`-Quelle wie
+`openai/*` ist kein Platzhalter und wird für jede Richtlinie abgelehnt.
 
 Schlüssel folgen der Schreibweise von OpenAI Chat Completions (`temperature`,
 `top_p`, `max_tokens`, `presence_penalty`, ...). Providerspezifische Schlüssel
@@ -138,6 +140,20 @@ werden unverändert durchgereicht. Provider-Adapter übersetzen konfigurierte
 Werte genau wie Werte des Clients: `max_tokens` wird bei
 OpenAI-Reasoning-Modellen weiterhin zu `max_completion_tokens` und in der
 Responses API zu `max_output_tokens`.
+
+Ein Token-Limit ist in jeder Schreibweise dasselbe Limit: `max_tokens`,
+`max_completion_tokens` und `max_output_tokens` setzen es alle. Ein Wert in
+`params` ersetzt die Schreibweise, die der Client gesendet hat, und ein Wert in
+`default_params` gilt nur, wenn der Client keine davon gesendet hat.
+
+Ein Parametersatz bedient jede API, daher wird ein Key, den die Ziel-API nicht
+kennt, dort übersprungen. In der Responses API werden die reinen Chat-Keys
+`seed`, `stop`, `n`, `frequency_penalty`, `presence_penalty`, `logit_bias`,
+`logprobs`, `modalities`, `audio`, `prediction` und `web_search_options`
+übersprungen, und `response_format` und `verbosity` werden zu `text.format` und
+`text.verbosity`. In Chat Completions werden die reinen Responses-Keys `text`,
+`include`, `truncation`, `max_tool_calls`, `background` und
+`context_management` übersprungen.
 
 Zum Beispiel mehrere Aliase eines selbst gehosteten Modells mit
 unterschiedlichen Thinking- und Sampling-Einstellungen:

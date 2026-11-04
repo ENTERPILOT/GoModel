@@ -12,6 +12,7 @@ import (
 	"maps"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/goccy/go-json"
 
@@ -232,8 +233,13 @@ func validateKey(field, key string) error {
 		if r < 0x20 || r == 0x7f {
 			return validation.NewError(fmt.Sprintf("%s: parameter name %q contains control characters", field, key), nil)
 		}
+		if unicode.IsSpace(r) {
+			return validation.NewError(fmt.Sprintf("%s: parameter name %q contains whitespace", field, key), nil)
+		}
 	}
-	if _, frozen := frozenKeys[key]; frozen {
+	// Matched case-insensitively: "Model" is no upstream's parameter, and
+	// some upstreams read keys case-insensitively.
+	if _, frozen := frozenKeys[strings.ToLower(key)]; frozen {
 		return validation.NewError(fmt.Sprintf("%s: parameter %q cannot be configured on a virtual model", field, key), nil)
 	}
 	return nil
@@ -247,10 +253,21 @@ func validateTyped(field, key string, raw json.RawMessage) error {
 	case "temperature", "top_p", "presence_penalty", "frequency_penalty":
 		var v float64
 		err = json.Unmarshal(raw, &v)
-	case "max_tokens", "max_output_tokens", "max_completion_tokens", "top_logprobs":
+	case "max_tokens", "max_output_tokens", "max_completion_tokens", "top_logprobs", "n":
 		var v int
 		if err = json.Unmarshal(raw, &v); err == nil && v < 0 {
 			err = fmt.Errorf("must not be negative")
+		}
+	case "seed":
+		var v int64
+		err = json.Unmarshal(raw, &v)
+	case "stop":
+		var one string
+		if json.Unmarshal(raw, &one) != nil {
+			var many []string
+			if json.Unmarshal(raw, &many) != nil {
+				err = fmt.Errorf("must be a string or an array of strings")
+			}
 		}
 	case "parallel_tool_calls", "store", "logprobs":
 		var v bool

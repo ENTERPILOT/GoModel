@@ -188,9 +188,12 @@ oder Modell-Scope werden nicht aufgeführt: Sie beschreiben gemeinsam genutzte
 Infrastrukturkapazität, nicht den Aufrufer.
 
 <Note>
-  Rate-Limit-Zähler liegen pro Gateway-Instanz im Arbeitsspeicher: Sie werden bei einem Neustart
-  zurückgesetzt, und bei N Replikaten führt jedes Replikat seine eigenen Zähler. Budgets sind die
-  dauerhaften, instanzübergreifenden Werte.
+  Rate-Limit-Zähler liegen im Arbeitsspeicher und werden etwa einmal pro Sekunde in der Datenbank
+  gesichert, sodass sie einen Neustart überstehen. Replikate mit gemeinsamer Datenbank melden den
+  clusterweiten Stand, der dem neuesten Traffic der anderen Replikate um etwa zwei Sekunden
+  hinterherhinken kann; siehe
+  [Mehrere Replikate teilen sich ein Limit](/de/features/rate-limits#mehrere-replikate-teilen-sich-ein-limit).
+  Budgets sind die dauerhaften Werte, berechnet aus gespeicherten Nutzungsdaten.
 </Note>
 
 ## Datumsfenster

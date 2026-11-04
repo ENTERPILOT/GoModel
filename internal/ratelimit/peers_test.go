@@ -440,3 +440,43 @@ func TestFailedSaveIsRetried(t *testing.T) {
 	assert.Equal(t, int64(2), byPeriod[PeriodDaySeconds].RequestsCurrent)
 	assert.Equal(t, int64(0), byPeriod[PeriodConcurrent].InFlight, "the released slot is published after all")
 }
+
+// Rows from releases up to v0.2.1 each hold their writer's restored counts
+// too, so an upgrade must merge them by maximum, as those releases did, and
+// only add the rows written since.
+func TestRowsFromOlderReleasesMergeByMaximum(t *testing.T) {
+	ctx := context.Background()
+	store := newClusterStore(t,
+		Rule{Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodDaySeconds, MaxRequests: new(int64(100)), Source: SourceManual},
+	)
+	nowUnix := store.clock.Now().Unix()
+	windowStart := nowUnix - nowUnix%PeriodDaySeconds
+	row := func(writer string, current int64, own bool) WindowSnapshot {
+		return WindowSnapshot{
+			Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: PeriodDaySeconds,
+			Writer: writer, Epoch: store.rules[0].CounterEpoch,
+			RequestsWindowStart: windowStart, RequestsCurrent: current,
+			UpdatedAt: nowUnix, OwnCounts: own,
+		}
+	}
+	// A v0.2.1 run counted 5, restarted, restored those 5 and counted 3
+	// more under a new writer; a replica already on this release counted 2.
+	store.counters = []WindowSnapshot{
+		row("v021-first-run", 5, false),
+		row("v021-second-run", 8, false),
+		row("current-release", 2, true),
+	}
+
+	upgraded := replica(t, store)
+	assert.Equal(t, int64(10), requestsUsedFor(t, upgraded, "/team", store.clock.Now()))
+
+	_, err := upgraded.Acquire(Subjects{UserPath: "/team"}, store.clock.Now())
+	require.NoError(t, err)
+	upgraded.save(ctx)
+	for _, saved := range store.counters {
+		if saved.Writer == upgraded.writer {
+			assert.True(t, saved.OwnCounts)
+			assert.Equal(t, int64(1), saved.RequestsCurrent)
+		}
+	}
+}

@@ -177,8 +177,9 @@ długotrwałego ruchu wygaszaj połączenia na load balancerze, utrzymuj nakład
 wystarczająco długo, by objąć czas generowania, i pozwól klientom ponawiać requesty.
 
 Co jest per instancja, a więc nie jest współdzielone między replikami: stan circuit
-breakera, liczniki rate limitów, okna stanu requestów i sticky
-sessions. [Przewodnik produkcyjny](/pl/guides/production) opisuje, co to oznacza
+breakera, okna stanu requestów i sticky sessions. Liczniki rate limitów są
+współdzielone przez bazę danych, w przybliżeniu: każda replika widzi liczniki
+pozostałych w ciągu około dwóch sekund. [Przewodnik produkcyjny](/pl/guides/production) opisuje, co to oznacza
 dla Twojej topologii.
 
 Jeśli GoModel nie działa, a ruch musi płynąć natychmiast, skieruj

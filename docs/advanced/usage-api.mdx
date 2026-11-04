@@ -189,9 +189,12 @@ which have no window). Provider- and model-scoped rules are not listed: they
 describe shared infrastructure capacity, not the caller.
 
 <Note>
-  Rate limit counters are in-memory per gateway instance: they reset on
-  restart, and with N replicas each replica keeps its own counters. Budgets
-  are the durable, cross-instance numbers.
+  Rate limit counters live in memory and are saved to the database about once
+  a second, so they survive a restart. Replicas sharing a database report the
+  cluster-wide count, which can trail the other replicas' latest traffic by
+  about two seconds; see
+  [several replicas share one limit](/features/rate-limits#several-replicas-share-one-limit).
+  Budgets are the durable numbers, computed from stored usage records.
 </Note>
 
 ## Date window

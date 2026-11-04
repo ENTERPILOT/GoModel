@@ -177,8 +177,9 @@ langlebigem Traffic leeren Sie die Verbindungen am Load Balancer, lassen die Rep
 lange genug überlappen, um eine Generierung abzudecken, und lassen Clients Retries durchführen.
 
 Was pro Instanz gilt und daher nicht zwischen Replikas geteilt wird: der Zustand des Circuit
-Breakers, Rate-Limit-Zähler, Request-Health-Fenster und Sticky
-Sessions. Was das für Ihre Topologie bedeutet, beschreibt der [Produktionsleitfaden](/de/guides/production).
+Breakers, Request-Health-Fenster und Sticky Sessions. Rate-Limit-Zähler werden
+näherungsweise über die Datenbank geteilt: Jedes Replikat sieht die Zählerstände der anderen
+innerhalb von etwa zwei Sekunden. Was das für Ihre Topologie bedeutet, beschreibt der [Produktionsleitfaden](/de/guides/production).
 
 Wenn GoModel ausgefallen ist und Traffic sofort fließen muss, richten Sie
 `base_url` wieder direkt auf den Provider – die API ist in

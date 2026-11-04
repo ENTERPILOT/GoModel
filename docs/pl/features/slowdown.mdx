@@ -67,7 +67,8 @@ curl -X PUT http://localhost:8080/admin/virtual-models \
 ```
 
 Wartość spoza aktywnego zakresu zwraca `400`. Spowolnienie wymaga modelu:
-selektor dla całego providera, taki jak `openai/*`, jest odrzucany.
+selektor dla całego providera, taki jak `openai/`, globalny `/` albo model `*`,
+taki jak `openai/*`, jest odrzucany z kodem `400`.
 
 ## Pierwszeństwo
 
