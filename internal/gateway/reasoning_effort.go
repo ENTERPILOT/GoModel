@@ -94,7 +94,13 @@ func ResponsesRequestWithReasoningEffort(req *core.ResponsesRequest, effort stri
 		return nil
 	}
 	cloned := *req
-	cloned.Reasoning = &core.Reasoning{Effort: effort}
+	reasoning := core.Reasoning{Effort: effort}
+	if req.Reasoning != nil {
+		// An override replaces the effort, not a summary the client
+		// explicitly requested.
+		reasoning.Summary = req.Reasoning.Summary
+	}
+	cloned.Reasoning = &reasoning
 	cloned.ExtraFields = withoutClientEffort(req.ExtraFields)
 	return &cloned
 }

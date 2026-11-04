@@ -434,6 +434,115 @@ func TestStreamConverterThinkingBlocksAroundText(t *testing.T) {
 	require.Equal(t, strings.Join(want, "\n"), strings.Join(got, "\n"))
 }
 
+// Reasoning that arrives while a tool_use block is still streaming its
+// arguments must not open a block of its own: Anthropic streams one content
+// block at a time, and closing the tool_use block early would leave the
+// remaining argument deltas on a stopped block index.
+func TestStreamConverterReasoningDuringToolArguments(t *testing.T) {
+	chatStream := strings.Join([]string{
+		`data: {"id":"chatcmpl-1","model":"gpt","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"get_weather","arguments":""}}]},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"ci"}}]},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"reasoning_content":"Wait."},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"ty\":\"Paris\"}"}}]},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		`data: [DONE]`,
+		"",
+	}, "\n\n")
+
+	events := drainConverter(t, chatStream)
+
+	// No delta may land on a block that is not open: the argument deltas
+	// that follow the reasoning must still find the tool_use block open.
+	open := make(map[int]bool)
+	toolSeen := false
+	for _, event := range events {
+		switch event["type"] {
+		case "content_block_start":
+			index := int(event["index"].(float64))
+			open[index] = true
+			block := event["content_block"].(map[string]any)
+			if block["type"] == "tool_use" {
+				toolSeen = true
+			}
+		case "content_block_stop":
+			open[int(event["index"].(float64))] = false
+		case "content_block_delta":
+			index := int(event["index"].(float64))
+			assert.True(t, open[index], "delta on block %d that is not open: %+v", index, event)
+		}
+	}
+	assert.True(t, toolSeen, "the tool_use block must be rendered")
+}
+
+// The reasoning held back while a tool call streamed its arguments is
+// rendered once the turn ends, so it is not lost.
+func TestStreamConverterHeldReasoningIsRendered(t *testing.T) {
+	chatStream := strings.Join([]string{
+		`data: {"id":"chatcmpl-1","model":"gpt","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"get_weather","arguments":"{}"}}]},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"reasoning_content":"Held thought."},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		`data: [DONE]`,
+		"",
+	}, "\n\n")
+
+	events := drainConverter(t, chatStream)
+
+	var thinking string
+	for _, event := range events {
+		if event["type"] != "content_block_delta" {
+			continue
+		}
+		delta := event["delta"].(map[string]any)
+		if delta["type"] == "thinking_delta" {
+			thinking += delta["thinking"].(string)
+		}
+	}
+	assert.Equal(t, "Held thought.", thinking, "the held reasoning must reach the client")
+}
+
+// TestStreamConverterEveryBlockIsClosed pins that every content block the
+// converter opens is also closed.
+//
+// A block that is opened and never closed leaves the client with a dangling
+// index: the Anthropic stream requires exactly one open block at a time, and
+// a block that is never closed is never released. The reasoning held back
+// while a tool call streamed its arguments opens a block of its own when it
+// is flushed, so that block needs its own close before the next block opens
+// and before the message ends.
+func TestStreamConverterEveryBlockIsClosed(t *testing.T) {
+	chatStream := strings.Join([]string{
+		`data: {"id":"chatcmpl-1","model":"gpt","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"get_weather","arguments":"{}"}}]},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"reasoning_content":"Held thought."},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"call_2","function":{"name":"get_weather","arguments":"{}"}}]},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"reasoning_content":"Second thought."},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+		`data: [DONE]`,
+		"",
+	}, "\n\n")
+
+	events := drainConverter(t, chatStream)
+
+	open := map[int]bool{}
+	for _, event := range events {
+		switch event["type"] {
+		case "content_block_start":
+			index := int(event["index"].(float64))
+			assert.False(t, open[index], "block %d opened while still open", index)
+			open[index] = true
+		case "content_block_stop":
+			index := int(event["index"].(float64))
+			assert.True(t, open[index], "block %d stopped while not open", index)
+			open[index] = false
+		}
+	}
+	for index, isOpen := range open {
+		assert.False(t, isOpen, "block %d is never closed", index)
+	}
+}
+
 // Providers that name the member "reasoning" instead of "reasoning_content"
 // (Groq, OpenRouter) must still produce thinking deltas.
 func TestStreamConverterVendorReasoningMember(t *testing.T) {

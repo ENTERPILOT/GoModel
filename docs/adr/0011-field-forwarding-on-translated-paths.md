@@ -133,6 +133,9 @@ rather than stripped.
 |---|---|---|---|
 | any unknown member | any | 1 | forwarded untouched |
 | `message.reasoning` / `delta.reasoning` | Groq | 3 | returned as `reasoning_content` |
+| reasoning output item `summary` / `response.reasoning_summary_text.delta` | Responses-only upstreams via chat (`ChatViaResponses`) | 3 | returned as `reasoning_content`; summary parts join with `\n\n`, an advancing `summary_index` emits the separator on the stream |
+| `reasoning.summary` | Responses-only upstreams via chat (`ChatViaResponses`) | reserved | set to `auto` by the gateway whenever the request asks for reasoning with a non-off effort, so a summary exists to render |
+| `delta.reasoning_content` arriving while a `tool_use` block streams its arguments | Anthropic Messages ingress | 3 | held back until the tool call is complete; the reasoning then opens its own thinking block, so the `tool_use` block never closes before its arguments are done |
 | `x_groq`, `queue_time`, `prompt_time`, `completion_time` | Groq | 1 | forwarded untouched |
 | `prompt_cache_hit_tokens`, `prompt_cache_miss_tokens` | DeepSeek | 1 | forwarded untouched (`prompt_tokens_details.cached_tokens` carries the same count) |
 
@@ -149,6 +152,33 @@ only the reasoning deltas of a reasoning model are decoded and re-encoded;
 every other line keeps the upstream bytes. Anything that would force a decode
 of *every* chunk needs the same justification, because the verbatim relay of
 chat SSE is a deliberate hot-path property.
+
+## Request replay and response rendering are separate directions
+
+A translated path moves a request in one direction and an answer in the other.
+The two directions do not carry the same artifacts, and the difference is a
+contract, not a gap.
+
+**Request replay** sends the client's own history to the upstream. An Anthropic
+`thinking` block in that history is the client's artifact: it carries a
+`signature` that Anthropic itself issued for a previous turn. A Responses-only
+upstream stores nothing (`store: false`) and has no concept of a signed
+thinking block, so the block is not replayed. What travels is the text of the
+turn and the tool calls with their IDs and arguments; the tool result travels
+as the output of the call whose ID it carries. A reasoning summary is not a
+signed thinking block and is not replayed as one.
+
+**Response rendering** moves the upstream's answer back to the client. The
+upstream's reasoning arrives as a summary, and the summary is rendered as an
+Anthropic `thinking` block. The signature stays empty, because the upstream
+issued no signature for it.
+
+The consequence for ordering: the canonical chat shape carries the reasoning in
+one member beside the answer text and the tool calls. The buffered response
+therefore renders `thinking` first, then `text`, then `tool_use`, which is what
+the Anthropic contract asks for, and the upstream's interleaving of reasoning
+and tool calls is not representable in that shape. The streaming response can
+keep the upstream order, because it emits the blocks as they arrive.
 
 ## Consequences
 
