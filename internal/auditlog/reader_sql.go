@@ -70,6 +70,12 @@ type readerDialect struct {
 	// default collation is locale-aware and must be overridden.
 	userPath string
 
+	// requestedModel and resolvedModel are the model columns under byte-wise
+	// ordering, for the same reason: the model prefix filter is a range the
+	// indexes modelIndexes creates on these expressions can serve.
+	requestedModel string
+	resolvedModel  string
+
 	// errorMessage, responseID and previousResponseID extract JSON fields.
 	// The PostgreSQL spellings match the expressions jsonPathIndexes creates,
 	// which is what lets the planner use those indexes.
@@ -96,6 +102,8 @@ func readerDialectFor(dialect sqlx.Dialect) readerDialect {
 			idColumn:           "id::text",
 			attemptIDColumn:    "audit_log_id::text",
 			userPath:           `user_path COLLATE "C"`,
+			requestedModel:     `requested_model COLLATE "C"`,
+			resolvedModel:      `resolved_model COLLATE "C"`,
 			errorMessage:       postgresErrorMessage,
 			responseID:         `data #>> '{response_body,id}'`,
 			previousResponseID: `data #>> '{request_body,previous_response_id}'`,
@@ -108,6 +116,8 @@ func readerDialectFor(dialect sqlx.Dialect) readerDialect {
 		idColumn:           "id",
 		attemptIDColumn:    "audit_log_id",
 		userPath:           "user_path",
+		requestedModel:     "requested_model",
+		resolvedModel:      "resolved_model",
 		errorMessage:       `json_extract(data, '$.error_message')`,
 		responseID:         `json_extract(data, '$.response_body.id')`,
 		previousResponseID: `json_extract(data, '$.request_body.previous_response_id')`,
@@ -189,6 +199,14 @@ func (r *SQLReader) logFilters(ctx context.Context, params LogQueryParams) ([]st
 	if err != nil {
 		return nil, nil, err
 	}
+	userPathPrefix, err := normalizeAuditUserPathPrefix(params.UserPathPrefix)
+	if err != nil {
+		return nil, nil, err
+	}
+	modelPrefix, err := normalizeAuditPrefix("model_prefix", params.ModelPrefix)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	var conditions []string
 	var args []any
@@ -214,6 +232,11 @@ func (r *SQLReader) logFilters(ctx context.Context, params LogQueryParams) ([]st
 	if params.RequestedModel != "" {
 		add(r.likeClause("requested_model"), contains(params.RequestedModel))
 	}
+	if modelPrefix != "" {
+		requested, requestedArgs := auditPrefixSQLPredicate(r.dialect.requestedModel, modelPrefix)
+		resolved, resolvedArgs := auditPrefixSQLPredicate(r.dialect.resolvedModel, modelPrefix)
+		add("("+requested+" OR "+resolved+")", append(requestedArgs, resolvedArgs...)...)
+	}
 	if params.Provider != "" {
 		add("("+r.likeClause("provider")+" OR "+r.likeClause("provider_name")+")",
 			contains(params.Provider), contains(params.Provider))
@@ -232,11 +255,18 @@ func (r *SQLReader) logFilters(ctx context.Context, params LogQueryParams) ([]st
 			add(auditUserPathSQLPredicate(userPath, r.dialect.userPath), userPath, lower, upper)
 		}
 	}
+	if userPathPrefix != "" {
+		condition, values := auditPrefixSQLPredicate(r.dialect.userPath, userPathPrefix)
+		add(condition, values...)
+	}
 	if params.ErrorType != "" {
 		add(r.likeClause("error_type"), contains(params.ErrorType))
 	}
 	if params.SessionID != "" {
 		add("session_id = ?", params.SessionID)
+	}
+	if params.RequestID != "" {
+		add("request_id = ?", params.RequestID)
 	}
 	if params.StatusCode != nil {
 		add("status_code = ?", *params.StatusCode)

@@ -93,6 +93,10 @@ type ModelRegistry struct {
 	// configured provider instance name. Applied after metadata enrichment;
 	// providers without a filter are absent from the map.
 	providerModelFilters map[string]modelFilter
+	// nonBillableProviders names the providers configured with billable:
+	// false; every other provider is billable. Keyed by provider instance
+	// name, cleared on unregister.
+	nonBillableProviders map[string]struct{}
 
 	// Cached sorted slices, rebuilt lazily after models change.
 	// nil means cache needs rebuilding. Protected by mu.
@@ -319,7 +323,44 @@ func (r *ModelRegistry) UnregisterProvider(providerName string) {
 	delete(r.configMetadataOverrides, providerName)
 	delete(r.configuredProviderModels, providerName)
 	delete(r.providerModelFilters, providerName)
+	// nonBillableProviders is kept: a replacement is unregistered and
+	// re-registered in separate steps, and usage written for the outgoing
+	// instance in between must still be marked. SetProviderBillable clears
+	// it when a provider is removed for good.
 	delete(r.discoveredByProvider, providerName)
 	r.publishFilteredInventoryLocked()
 	r.invalidateSortedCaches()
+}
+
+// SetProviderBillable records whether the provider's cost is owed by the
+// caller. Providers are billable unless set otherwise, so only false is kept.
+func (r *ModelRegistry) SetProviderBillable(providerName string, billable bool) {
+	providerName = strings.TrimSpace(providerName)
+	if providerName == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if billable {
+		delete(r.nonBillableProviders, providerName)
+		return
+	}
+	if r.nonBillableProviders == nil {
+		r.nonBillableProviders = make(map[string]struct{})
+	}
+	r.nonBillableProviders[providerName] = struct{}{}
+}
+
+// ProviderBillable reports whether the named provider's cost is owed by the
+// caller. Unknown and unnamed providers are billable, the default, so a row
+// is only ever exempt by explicit configuration.
+func (r *ModelRegistry) ProviderBillable(providerName string) bool {
+	providerName = strings.TrimSpace(providerName)
+	if r == nil || providerName == "" {
+		return true
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, nonBillable := r.nonBillableProviders[providerName]
+	return !nonBillable
 }

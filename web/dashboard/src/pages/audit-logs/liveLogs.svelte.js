@@ -56,6 +56,9 @@ class LiveLogsStore {
   // here so auditLiveInsertAllowed/usageLiveInsertAllowed pause live inserts
   // while filters/pagination are active.
   auditSearch = $state("");
+  // Which field the search box targets ("" = all fields). A value pauses
+  // live inserts through auditSearch alone, whatever the field.
+  auditSearchField = $state("");
   auditMethod = $state("");
   auditStatusCode = $state("");
   auditStream = $state("");

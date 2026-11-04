@@ -12,6 +12,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/gateway"
 )
 
 type BudgetChecker interface {
@@ -60,7 +61,9 @@ type cacheHitBudgetChecker interface {
 // Provider-cost budgets never count cache hits, so they are left to admission
 // on a miss. A request this rejects would also fail admission on a miss, since
 // the same consumer budgets apply there. The checker returns without a store
-// round trip when no billed budget exists.
+// round trip when no billed budget exists. The provider the request resolved
+// to goes along so a hit of a billable: false provider is exempt from consumer
+// budgets, as the request itself would be.
 func enforceCacheHitBudget(c *echo.Context, checker BudgetChecker, workflow *core.Workflow) error {
 	hitChecker, ok := checker.(cacheHitBudgetChecker)
 	if !ok || c == nil || c.Request() == nil {
@@ -70,7 +73,8 @@ func enforceCacheHitBudget(c *echo.Context, checker BudgetChecker, workflow *cor
 		return nil
 	}
 	ctx := c.Request().Context()
-	if err := hitChecker.CheckCacheHit(ctx, budgetSubjectsFromContext(ctx, rateLimitRoute{}), time.Now().UTC()); err != nil {
+	route := rateLimitRoute{provider: gateway.ProviderNameFromWorkflow(workflow)}
+	if err := hitChecker.CheckCacheHit(ctx, budgetSubjectsFromContext(ctx, route), time.Now().UTC()); err != nil {
 		return budgetCheckError(err)
 	}
 	return nil

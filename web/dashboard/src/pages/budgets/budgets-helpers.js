@@ -3,6 +3,7 @@
 // Vite and plain node).
 
 import { formatCost } from "../../lib/utils/format.js";
+import { filterFields } from "../../lib/utils/textMatch.js";
 import { Calendar, CalendarDays, Clock, Settings2, Sun } from "lucide";
 import * as m from "../../lib/paraglide/messages.js";
 
@@ -231,7 +232,7 @@ export function normalizeBudgetListPayload(payload) {
   return [];
 }
 
-function budgetFilterText(item) {
+function budgetFilterFields(item) {
   const seconds = Number((item && item.period_seconds) || 0);
   return [
     budgetSubject(item),
@@ -245,9 +246,7 @@ function budgetFilterText(item) {
       : "",
     seconds ? String(seconds) + "s" : "",
     seconds ? String(seconds) + " seconds" : "",
-  ]
-    .join(" ")
-    .toLowerCase();
+  ];
 }
 
 const budgetScopeOrder = { user_path: 0, label: 1, provider: 2 };
@@ -272,13 +271,7 @@ function sortBudgets(items, sortBy) {
 }
 
 export function filterAndSortBudgets(budgets, filter, sortBy) {
-  const list = Array.isArray(budgets) ? budgets : [];
-  const needle = String(filter || "")
-    .trim()
-    .toLowerCase();
-  const items = needle
-    ? list.filter((item) => budgetFilterText(item).includes(needle))
-    : list.slice();
+  const items = filterFields(budgets, filter, budgetFilterFields);
   return sortBudgets(items, sortBy);
 }
 
