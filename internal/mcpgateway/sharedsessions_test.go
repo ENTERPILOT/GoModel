@@ -886,3 +886,68 @@ func TestDeleteVirtualClosesTheIncarnationItRemoved(t *testing.T) {
 	b.clock.Advance(sessionRecheckInterval)
 	assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, b.url+"/mcp/coding", listToolsBody, withSession(nil, sessionID)))
 }
+
+// A replica that cannot read the close marks keeps serving a session it
+// hosts only for a bounded time, shorter than a close mark lives. A session
+// deleted elsewhere during a long outage therefore ends on its host, and is
+// not written back once the store is readable again after the mark expired.
+func TestHostEndsASessionItCannotRecheckForLong(t *testing.T) {
+	clock := &testClock{}
+	shared := newMemorySharedStore(clock.Now)
+	unreadable := &failingGetStore{SharedStore: shared}
+	servers := alphaServers(t)
+	a := newReplica(t, unreadable, Options{ConfigServers: servers}, clock)
+	b := newReplica(t, shared, Options{ConfigServers: servers}, clock)
+	sessionID := initializeRawSession(t, a.url+"/mcp", nil)
+
+	unreadable.fail.Store(true)
+	require.Equal(t, http.StatusNoContent, rawMCPDelete(t, b.url+"/mcp", withSession(nil, sessionID)))
+	clock.Advance(sessionUnverifiedLimit / 2)
+	assert.Equal(t, http.StatusOK, rawMCPStatus(t, a.url+"/mcp", listToolsBody, withSession(nil, sessionID)),
+		"a short outage keeps the session on its host")
+	clock.Advance(sessionUnverifiedLimit / 2)
+	assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, a.url+"/mcp", listToolsBody, withSession(nil, sessionID)),
+		"the host ends a session it has not rechecked for the limit")
+
+	clock.Advance(sessionCloseMarkLifetime)
+	unreadable.fail.Store(false)
+	assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, a.url+"/mcp", listToolsBody, withSession(nil, sessionID)))
+	_, stored := shared.entry(sharedSessionNamespace, sessionKey(sessionID))
+	assert.False(t, stored, "the deleted record is not written back after recovery")
+}
+
+// The same bound holds while a call runs: the replica running it ends the
+// session once its close marks have been unreadable for the limit.
+func TestLongCallEndsASessionItCannotRecheckForLong(t *testing.T) {
+	clock := &testClock{}
+	unreadable := &failingGetStore{SharedStore: newMemorySharedStore(clock.Now)}
+	servers, entered, release := slowServers(t)
+	defer release()
+	a := newReplica(t, unreadable, Options{ConfigServers: servers}, clock)
+	a.service.postTouchInterval = 10 * time.Millisecond
+	sessionID := initializeRawSession(t, a.url+"/mcp", nil)
+
+	startSlowCall(t, a.url+"/mcp", sessionID, entered)
+	unreadable.fail.Store(true)
+	clock.Advance(sessionUnverifiedLimit)
+	assert.Eventually(t, func() bool {
+		_, bound := a.binding(sessionID)
+		return !bound
+	}, 5*time.Second, 5*time.Millisecond)
+}
+
+// The bound counts from the last successful recheck, not from when the
+// session opened: an outage that starts late in a long session gets the
+// whole limit.
+func TestUnverifiedLimitCountsFromTheLastRecheck(t *testing.T) {
+	clock := &testClock{}
+	unreadable := &failingGetStore{SharedStore: newMemorySharedStore(clock.Now)}
+	a := newReplica(t, unreadable, Options{ConfigServers: alphaServers(t)}, clock)
+	sessionID := initializeRawSession(t, a.url+"/mcp", nil)
+
+	clock.Advance(sessionUnverifiedLimit * 3 / 4)
+	require.Equal(t, http.StatusOK, rawMCPStatus(t, a.url+"/mcp", listToolsBody, withSession(nil, sessionID)))
+	unreadable.fail.Store(true)
+	clock.Advance(sessionUnverifiedLimit * 3 / 4)
+	assert.Equal(t, http.StatusOK, rawMCPStatus(t, a.url+"/mcp", listToolsBody, withSession(nil, sessionID)))
+}

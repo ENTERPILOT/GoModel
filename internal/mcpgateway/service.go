@@ -186,6 +186,10 @@ type sessionBinding struct {
 	record    []byte
 	checkedAt time.Time
 	touchedAt time.Time
+	// verifiedAt is when this replica last read the close marks
+	// successfully, or opened or resumed the session; see
+	// sessionUnverifiedLimit.
+	verifiedAt time.Time
 	// posts counts this replica's POSTs in flight for the session, which
 	// pause its idle timeout, so sweepBindings keeps the binding.
 	posts int

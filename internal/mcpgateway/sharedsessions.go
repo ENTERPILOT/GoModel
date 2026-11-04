@@ -37,6 +37,11 @@ const (
 	// sessionCloseMarkLifetime keeps close marks past the last expiry a
 	// record they shadow can still have.
 	sessionCloseMarkLifetime = 2 * sessionIdleTimeout
+	// sessionUnverifiedLimit bounds how long a replica keeps serving a hosted
+	// session whose close marks it cannot read. It is shorter than a close
+	// mark lives, so a session closed elsewhere during an outage ends on its
+	// host before its mark expires, and is never extended back to life.
+	sessionUnverifiedLimit = sessionIdleTimeout
 )
 
 // sharedSession is the shared-store record of one session. It holds the
@@ -224,15 +229,16 @@ func (s *Service) recheckSharedSession(ctx context.Context, sessionID string, bi
 	closed, err := s.sharedSessionClosed(readCtx, sessionID, binding.endpoint, binding.virtualIncarnation)
 	cancel()
 	if err != nil {
-		// Keep serving, but extend nothing: the session may have been closed
-		// elsewhere, and extending its record past the close mark's lifetime
-		// would let it resume once the mark expires.
+		// Keep serving for a while, but extend nothing: the session may have
+		// been closed elsewhere, and extending its record past the close
+		// mark's lifetime would let it resume once the mark expires.
 		slog.Warn("failed to recheck mcp session in the shared store", "error", err)
-		return true
+		return s.now().Sub(binding.verifiedAt) < sessionUnverifiedLimit
 	}
 	if closed {
 		return false
 	}
+	s.markVerified(sessionID, binding.server)
 	if touch {
 		// A touch racing a DELETE elsewhere may rewrite a deleted record;
 		// the close mark still ends the session, since every read checks it.
@@ -347,14 +353,28 @@ func (s *Service) touchHostedSession(sessionID string, server *mcp.Server) {
 	cancel()
 	if err != nil {
 		slog.Warn("failed to recheck mcp session in the shared store", "error", err)
-		return
 	}
-	if closed {
+	if closed || (err != nil && now.Sub(binding.verifiedAt) >= sessionUnverifiedLimit) {
 		s.unbind(sessionID, server)
 		closeSessions(server)
 		return
 	}
+	if err != nil {
+		return
+	}
+	s.markVerified(sessionID, server)
 	s.extendSharedSession(context.Background(), sessionID, binding.record)
+}
+
+// markVerified records a successful close-mark read for a hosted session.
+func (s *Service) markVerified(sessionID string, server *mcp.Server) {
+	now := s.now()
+	s.bindMu.Lock()
+	if binding, ok := s.bindings[sessionID]; ok && binding.server == server {
+		binding.verifiedAt = now
+		s.bindings[sessionID] = binding
+	}
+	s.bindMu.Unlock()
 }
 
 // resumeSession rebuilds a session from its shared record and hosts it here.
@@ -408,6 +428,7 @@ func (s *Service) resumeSession(ctx context.Context, sessionID string, record *s
 		shared:             true,
 		record:             raw,
 		checkedAt:          now,
+		verifiedAt:         now,
 		touchedAt:          now,
 	}
 	s.bindMu.Unlock()
@@ -501,6 +522,7 @@ func (s *Service) shareSession(ctx context.Context, sessionID string, scope requ
 		current.record = raw
 		current.checkedAt = now
 		current.touchedAt = now
+		current.verifiedAt = now
 		s.bindings[sessionID] = current
 	}
 	s.bindMu.Unlock()

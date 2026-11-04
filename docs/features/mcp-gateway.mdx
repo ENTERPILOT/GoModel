@@ -393,9 +393,12 @@ stranded on another replica.
 With SQLite, sessions stay on the instance that opened them, as SQLite serves a
 single replica. If the database cannot be reached when a session opens, that
 session stays on its replica too, and the gateway logs a warning. If it cannot
-be read later, a replica already serving the session keeps serving it but does
-not see a `DELETE` sent elsewhere until the database is back; any other replica
-answers 404, and the client initializes a new session.
+be read later, a replica already serving the session keeps serving it for up to
+30 minutes, without seeing a `DELETE` sent elsewhere, and then ends it; any
+other replica answers 404, and the client initializes a new session. A `DELETE`
+sent while the database cannot be written ends the session only on the replica
+that receives it: until the session's record expires, at most 30 minutes later,
+the same client can still resume it on another replica.
 
 ## Choose which tools each server exposes
 
