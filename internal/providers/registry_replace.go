@@ -121,10 +121,11 @@ func (r *ModelRegistry) swapProviderLocked(provider core.Provider, providerName,
 // rebound to provider, with the current configured models applied to it and
 // its metadata enriched again from what the provider reported, so the
 // result matches what a fetch returning the same models would publish.
-// listing reports whether previous is exactly the upstream's last listing; when
-// it is not, a fallback-mode configured list was serving in place of one, so
-// the new configured models are added to what is inherited rather than
-// ignored as they would be next to a successful listing.
+// listing reports whether previous is known to match a successful upstream
+// listing. When it is not (the last listing failed, came back empty, or never
+// ran), fallback mode would serve configured models, so the new configured
+// models are added to what is inherited rather than ignored as they would be
+// next to a successful listing.
 // Caller must hold r.mu for writing.
 func (r *ModelRegistry) reboundInventoryLocked(previous map[string]*ModelInfo, provider core.Provider, providerName, providerType string, listing bool) map[string]*ModelInfo {
 	listed := &core.ModelsResponse{Object: "list", Data: make([]core.Model, 0, len(previous))}
