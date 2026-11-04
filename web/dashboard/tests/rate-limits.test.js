@@ -743,3 +743,29 @@ test("rate-limit deletes route through the typed confirmation dialog", () => {
     "a list path deletes without confirmation",
   );
 });
+
+test("a fuzzy-only rule survives a substring hit in another scope", () => {
+  // The page renders one tab per scope. Filtering all scopes at once let the
+  // scope label "Provider" answer `pro` contiguously on every provider rule,
+  // which suppressed the fuzzy fallback and emptied the Model tab.
+  const rules = [
+    { scope: "provider", subject: "zz-provider-hit", period_seconds: 60, period_label: "minute" },
+    // Substring misses this subject (the separators break the run) but the
+    // subsequence finds it.
+    { scope: "model", subject: "p-r-o-vi-d-e-r", period_seconds: 60, period_label: "minute" },
+  ];
+  const matched = filteredRateLimits(rules, "provider");
+  assert.deepEqual(
+    matched.map((rule) => rule.subject),
+    ["zz-provider-hit", "p-r-o-vi-d-e-r"],
+  );
+});
+
+test("a unicode query reaches the rule without being flattened first", () => {
+  // Lowercasing before the matcher keeps the combining dot the matcher drops
+  // from the text, so the rule would disappear from its tab.
+  const rules = [
+    { scope: "user_path", subject: "/İstanbul", user_path: "/İstanbul", period_seconds: 60, period_label: "minute" },
+  ];
+  assert.deepEqual(filteredRateLimits(rules, "İstanbul").map((rule) => rule.subject), ["/İstanbul"]);
+});

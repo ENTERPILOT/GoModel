@@ -62,10 +62,14 @@ class VirtualModelsStore {
     ),
   );
 
+  // Status first, text second: the text filter decides which bucket answers
+  // for the whole list, so running it before the status filter would let a
+  // substring hit among the hidden rows suppress the fuzzy fallback for the
+  // rows the tab actually shows.
   filteredDisplayModels = $derived(
-    filterDisplayModelsByStatus(
-      filterDisplayModels(this.displayModels, modelsStore.filter),
-      this.statusFilter,
+    filterDisplayModels(
+      filterDisplayModelsByStatus(this.displayModels, this.statusFilter),
+      modelsStore.filter,
     ),
   );
 

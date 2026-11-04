@@ -21,6 +21,7 @@
   "playground_user_path_help": "Wysyłane jako nagłówek {header}. Lista pokazuje tylko ścieżki dozwolone dla wybranego modelu; wpisz własną, aby ją nadpisać.",
   "search_select_search_placeholder": "Szukaj…",
   "search_select_no_matches": "Brak wyników",
+  "search_select_more_results": "Pierwsze {shown} z {total} wyników",
   "search_select_use_custom": "Użyj „{value}”",
   "playground_stream_label": "Stream",
   "playground_add_message": "Dodaj wiadomość",

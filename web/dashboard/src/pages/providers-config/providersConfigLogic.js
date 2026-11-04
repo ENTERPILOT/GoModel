@@ -10,6 +10,7 @@
 
 import { hasSecretReference } from "../../lib/utils/secretReference.js";
 import * as m from "../../lib/paraglide/messages.js";
+import { filterFields } from "../../lib/utils/textMatch.js";
 import { modelRowsToList, modelsToRows } from "./providerModels.js";
 
 // Field names, mirroring internal/providers/credential_schema.go.
@@ -183,22 +184,9 @@ export function defaultProviderCredentialForm() {
   };
 }
 
-// filterProviderCredentials matches rows by name, type, or base URL
-// (case-insensitive substring).
+// filterProviderCredentials matches rows by name, type, or base URL.
 export function filterProviderCredentials(rows, filter) {
-  const list = Array.isArray(rows) ? rows : [];
-  if (!filter) {
-    return list;
-  }
-  const needle = String(filter).toLowerCase();
-  return list.filter((row) => {
-    const fields = [row.name, row.type, row.base_url];
-    return fields.some((value) =>
-      String(value || "")
-        .toLowerCase()
-        .includes(needle),
-    );
-  });
+  return filterFields(rows, filter, (row) => [row.name, row.type, row.base_url]);
 }
 
 // providerCredentialTypeOptions lists the selectable type names, always

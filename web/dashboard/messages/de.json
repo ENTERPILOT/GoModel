@@ -21,6 +21,7 @@
   "playground_user_path_help": "Wird als {header}-Header gesendet. Angeboten werden nur Pfade, die das gewählte Modell erlaubt; zum Überschreiben einfach einen eingeben.",
   "search_select_search_placeholder": "Suchen…",
   "search_select_no_matches": "Keine Treffer",
+  "search_select_more_results": "Die ersten {shown} von {total} Treffern",
   "search_select_use_custom": "„{value}“ verwenden",
   "playground_stream_label": "Stream",
   "playground_add_message": "Nachricht hinzufügen",

@@ -5,6 +5,7 @@
   // deactivate/edit footer. `preview` renders the
   // footer-less live preview card used inside the editor.
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import HighlightText from "$lib/components/atoms/HighlightText.svelte";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { workflowsStore as wf } from "./workflows.svelte.js";
@@ -25,23 +26,25 @@
   const caps = $derived(wf.featureCaps());
   const displayName = $derived(workflowDisplayName(workflow));
   const chart = $derived(workflowChart(workflow, caps, wf.guardrailRefs));
+  // The live editor preview is not a search result, so it never highlights.
+  const needle = $derived(preview ? "" : wf.filter);
 </script>
 
 <article class="workflow-card" class:workflow-preview-card={preview}>
   <div class="workflow-card-head">
     <div class="workflow-card-title">
-      <h3>{displayName}</h3>
+      <h3><HighlightText text={displayName} needle={needle} /></h3>
       <span class="workflow-card-scope-type">{workflowScopeTypeLabel(workflow)}</span>
     </div>
     {#if workflowScopeBadgeVisible(workflow)}
       <div class="workflow-card-badges">
-        <span class="provider-badge">{workflowScopeLabel(workflow)}</span>
+        <span class="provider-badge"><HighlightText text={workflowScopeLabel(workflow)} {needle} /></span>
       </div>
     {/if}
   </div>
 
   {#if workflow.description}
-    <p class="workflow-card-description">{workflow.description}</p>
+    <p class="workflow-card-description"><HighlightText text={workflow.description} {needle} /></p>
   {/if}
 
   <WorkflowChart {chart} />

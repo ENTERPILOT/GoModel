@@ -1266,6 +1266,18 @@ test("reasoning effort override round-trips through views and payloads", () => {
   assert.equal(Object.prototype.hasOwnProperty.call(inherited.payload, "reasoning_effort"), false);
 });
 
+test("a hidden model's substring hit does not hide a shown model's fuzzy match", () => {
+  const rows = [
+    { display_name: "zz-provider-hit", access: { effective_enabled: false } },
+    { display_name: "p-r-o-vi-d-e-r", access: { effective_enabled: true } },
+  ];
+  const shown = filterDisplayModels(
+    filterDisplayModelsByStatus(rows, "enabled"),
+    "provider",
+  );
+  assert.deepEqual(shown.map((row) => row.display_name), ["p-r-o-vi-d-e-r"]);
+});
+
 test("buildVirtualModelSavePayload sends non-empty params and default_params as parsed objects", () => {
   const { payload } = buildVirtualModelSavePayload(
     {

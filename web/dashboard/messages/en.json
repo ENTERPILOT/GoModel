@@ -21,6 +21,7 @@
   "playground_user_path_help": "Sent as the {header} header. Only paths the selected model allows are offered; type one to override.",
   "search_select_search_placeholder": "Search…",
   "search_select_no_matches": "No matches",
+  "search_select_more_results": "Showing the first {shown} of {total} matches",
   "search_select_use_custom": "Use “{value}”",
   "playground_stream_label": "Stream",
   "playground_add_message": "Add message",
