@@ -35,8 +35,10 @@ type Store interface {
 	SaveCounters(ctx context.Context, snapshots []WindowSnapshot) error
 	// ResetCounter gives the rule a new counter epoch, so every replica's
 	// next Refresh clears its counts and loads skip every row saved before,
-	// and removes the rows of every writer. ResetAllCounters does
-	// the same for every rule.
+	// and removes the window rows of every writer. In-flight rows stay: they
+	// hold no counts to reset, only slots live requests still take, which a
+	// reset leaves to them in memory too (see limiter.reset).
+	// ResetAllCounters does the same for every rule.
 	ResetCounter(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error
 	ResetAllCounters(ctx context.Context) error
 	Close() error

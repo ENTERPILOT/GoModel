@@ -48,9 +48,24 @@ func runCounterStoreSuite(t *testing.T, store Store, seedStale func(t *testing.T
 
 		byPartition := make(map[string]WindowSnapshot, len(got))
 		for _, snap := range got {
-			byPartition[snap.Partition] = snap
+			if snap.PeriodSeconds != PeriodConcurrent {
+				byPartition[snap.Partition] = snap
+			}
 		}
 		return byPartition
+	}
+	// gauges returns the in-flight rows, which loaded leaves out.
+	gauges := func(t *testing.T) []WindowSnapshot {
+		t.Helper()
+		rows, err := store.LoadCounters(ctx, 0)
+		require.NoError(t, err)
+		var out []WindowSnapshot
+		for _, row := range rows {
+			if row.PeriodSeconds == PeriodConcurrent {
+				out = append(out, row)
+			}
+		}
+		return unstamped(out)
 	}
 	// Every field survives the round trip, per partition, and the store
 	// stamps the save whatever the snapshot carried.
@@ -106,16 +121,11 @@ func runCounterStoreSuite(t *testing.T, store Store, seedStale func(t *testing.T
 	gone.Writer = "writer-gone"
 	seedStale(t, gone, time.Now().Unix()-inFlightRowRetention-60)
 	require.NoError(t, store.SaveCounters(ctx, live))
-	rows, err := store.LoadCounters(ctx, 0)
-	require.NoError(t, err)
-	var gauges []WindowSnapshot
-	for _, row := range rows {
-		if row.PeriodSeconds == PeriodConcurrent {
-			gauges = append(gauges, row)
-		}
-	}
-	require.ElementsMatch(t, []WindowSnapshot{inFlight, idle}, unstamped(gauges))
+	require.ElementsMatch(t, []WindowSnapshot{inFlight, idle}, gauges(t))
+	// A reset leaves in-flight rows alone: they hold slots live requests
+	// still take, not counts, and the writer keeps them in memory too.
 	require.NoError(t, store.ResetCounter(ctx, ScopeProvider, "openai", PeriodConcurrent))
+	require.ElementsMatch(t, []WindowSnapshot{inFlight, idle}, gauges(t), "a reset keeps in-flight rows")
 
 	// Two periods without a write makes it collectable by the next save.
 	seedStale(t, WindowSnapshot{
@@ -136,9 +146,15 @@ func runCounterStoreSuite(t *testing.T, store Store, seedStale func(t *testing.T
 	}
 	err = store.SaveCounters(ctx, peer)
 	require.NoError(t, err)
-	all, err := store.LoadCounters(ctx, 0)
+	allRows, err := store.LoadCounters(ctx, 0)
 	require.NoError(t, err)
-	require.ElementsMatch(t, append(append([]WindowSnapshot(nil), live...), peer...), unstamped(all))
+	var windows []WindowSnapshot
+	for _, row := range unstamped(allRows) {
+		if row.PeriodSeconds != PeriodConcurrent {
+			windows = append(windows, row)
+		}
+	}
+	require.ElementsMatch(t, append(append([]WindowSnapshot(nil), live...), peer...), windows)
 	// A reset clears every partition and every writer of the definition, and
 	// gives the rule a new counter epoch, leaving other rules alone.
 	err = store.UpsertRules(ctx, []Rule{
@@ -164,6 +180,7 @@ func runCounterStoreSuite(t *testing.T, store Store, seedStale func(t *testing.T
 	require.NoError(t, err)
 	got = loaded(t, "after reset all")
 	require.Empty(t, got)
+	require.ElementsMatch(t, []WindowSnapshot{inFlight, idle}, gauges(t), "reset all keeps in-flight rows")
 	afterResetAll := epochs(t, store)
 	require.Len(t, afterResetAll, len(afterReset), "reset all keeps every rule")
 	for subject, epoch := range afterReset {

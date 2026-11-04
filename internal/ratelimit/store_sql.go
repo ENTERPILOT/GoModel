@@ -319,22 +319,24 @@ func (s *SQLStore) ResetAllCounters(ctx context.Context) error {
 // a row the import writes back carries the empty epoch, which the new one
 // never matches.
 func (s *SQLStore) resetCounters(ctx context.Context, where string, args ...any) error {
-	var tables []string
-	if s.legacyCounters {
-		tables = append(tables, legacyCountersTable)
-	}
-	tables = append(tables, "rate_limit_window_snapshots")
 	epochArgs := append([]any{uuid.NewString()}, args...)
+	// In-flight rows stay (see Store.ResetCounter).
+	windowWhere := " WHERE period_seconds <> ?"
+	if where != "" {
+		windowWhere = where + " AND period_seconds <> ?"
+	}
+	windowArgs := append(append([]any(nil), args...), PeriodConcurrent)
 	return s.db.InTx(ctx, func(q sqlx.Querier) error {
 		if _, err := q.Exec(ctx, `UPDATE rate_limits SET counter_epoch = ?`+where, epochArgs...); err != nil {
 			return err
 		}
-		for _, table := range tables {
-			if _, err := q.Exec(ctx, `DELETE FROM `+table+where, args...); err != nil {
+		if s.legacyCounters {
+			if _, err := q.Exec(ctx, `DELETE FROM `+legacyCountersTable+where, args...); err != nil {
 				return err
 			}
 		}
-		return nil
+		_, err := q.Exec(ctx, `DELETE FROM rate_limit_window_snapshots`+windowWhere, windowArgs...)
+		return err
 	})
 }
 

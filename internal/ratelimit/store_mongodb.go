@@ -507,12 +507,16 @@ func (s *MongoDBStore) resetCounters(ctx context.Context, filter bson.D) error {
 		if _, err := s.rules.UpdateMany(ctx, filter, update); err != nil {
 			return err
 		}
-		for _, collection := range []*mongo.Collection{s.legacyCounters, s.counters} {
-			if _, err := collection.DeleteMany(ctx, filter); err != nil {
-				return err
-			}
+		if _, err := s.legacyCounters.DeleteMany(ctx, filter); err != nil {
+			return err
 		}
-		return nil
+		// In-flight rows stay (see Store.ResetCounter).
+		windows := bson.D{{Key: "$and", Value: bson.A{
+			filter,
+			bson.D{{Key: "period_seconds", Value: bson.D{{Key: "$ne", Value: PeriodConcurrent}}}},
+		}}}
+		_, err := s.counters.DeleteMany(ctx, windows)
+		return err
 	})
 }
 

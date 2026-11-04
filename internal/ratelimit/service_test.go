@@ -154,7 +154,8 @@ func (m *memStore) ResetCounter(_ context.Context, scope RuleScope, subject stri
 	}
 	kept := m.counters[:0]
 	for _, snap := range m.counters {
-		if snap.Scope != string(scope) || snap.Subject != subject || snap.PeriodSeconds != periodSeconds {
+		if snap.Scope != string(scope) || snap.Subject != subject || snap.PeriodSeconds != periodSeconds ||
+			snap.PeriodSeconds == PeriodConcurrent {
 			kept = append(kept, snap)
 		}
 	}
@@ -167,7 +168,13 @@ func (m *memStore) ResetAllCounters(context.Context) error {
 	for i := range m.rules {
 		m.rules[i].CounterEpoch = epoch
 	}
-	m.counters = nil
+	kept := m.counters[:0]
+	for _, snap := range m.counters {
+		if snap.PeriodSeconds == PeriodConcurrent {
+			kept = append(kept, snap)
+		}
+	}
+	m.counters = kept
 	return nil
 }
 
