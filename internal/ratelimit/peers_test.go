@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -227,6 +228,33 @@ func TestPeerInFlightCountsWhileFreshAndExpires(t *testing.T) {
 		require.NoError(t, err)
 	}
 	second.Release()
+}
+
+// The flush loop itself shares counts: replicas started with an interval see
+// each other's requests without anyone calling flush.
+func TestFlushLoopSharesCountsBetweenReplicas(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewSQLStore(ctx, sqlxtest.NewSQLite(t))
+	require.NoError(t, err)
+	require.NoError(t, store.UpsertRules(ctx, []Rule{{
+		Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodHourSeconds,
+		MaxRequests: new(int64(10)), Source: SourceManual,
+	}}))
+	start := func() *Service {
+		service, err := NewService(ctx, store, WithFlushInterval(10*time.Millisecond))
+		require.NoError(t, err)
+		t.Cleanup(service.Close)
+		service.Start(ctx)
+		return service
+	}
+	a, b := start(), start()
+
+	_, err = a.Acquire(onPath("/team"), time.Now())
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		statuses := b.StatusesForUserPath("/team", time.Now())
+		return len(statuses) == 1 && statuses[0].RequestsUsed == 1
+	}, 5*time.Second, 10*time.Millisecond, "b sees a's request through the flush loop")
 }
 
 // A rule a Refresh brings in counts the other replicas' rows already loaded
