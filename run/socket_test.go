@@ -28,6 +28,9 @@ func TestBoundSocketListenersStopAcceptingOnDeadline(t *testing.T) {
 	require.ErrorAs(t, err, &netErr)
 	require.True(t, netErr.Timeout(), "Accept after a past deadline = %v, want a timeout", err)
 
+	if socket.file == nil {
+		t.Skip("this platform cannot duplicate the listening socket; generations rebind instead")
+	}
 	client, err := net.Dial("tcp", first.Addr().String())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Close() })
