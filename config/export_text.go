@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -60,6 +61,22 @@ func expandedScalars(data []byte) (map[string]writtenScalar, bool) {
 	}
 	visit("", root.Content[0])
 	return index, true
+}
+
+// unsetVariables matches a value made of ${NAME} variables alone, as
+// config.Load leaves those that are unset.
+var unsetVariables = regexp.MustCompile(`^(?:\$\{[A-Za-z_][A-Za-z0-9_]*\})+$`)
+
+// dollarOffsets returns the byte offset of every "$" in s, for quoteYAML to
+// keep.
+func dollarOffsets(s string) map[int]bool {
+	offsets := make(map[int]bool)
+	for i := range len(s) {
+		if s[i] == '$' {
+			offsets[i] = true
+		}
+	}
+	return offsets
 }
 
 // escapeReferences returns s with each ${ escaped as $${, so no reference

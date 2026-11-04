@@ -215,3 +215,42 @@ func TestExportRateLimitsPrefersDashboardEdits(t *testing.T) {
 	}
 	assert.Equal(t, map[string]int64{"/team": 5, "/other": 3}, limits, "a dashboard edit wins; a stale config row does not")
 }
+
+func TestExportConfigKeepsInactiveProvidersAndHidesKeyCopies(t *testing.T) {
+	isolateEnv(t)
+	t.Setenv("OPENAI_API_KEY", "sk-env-literal-do-not-leak")
+	loaded := loadExportConfig(t, `
+providers:
+  openai:
+    type: openai
+  backup:
+    type: openai
+    api_key: ${EXPORT_TEST_UNSET_KEY}
+users:
+  - path: /pasted
+    description: sk-env-literal-do-not-leak
+virtual_models:
+  - source: fallback
+    targets:
+      - provider: backup
+        model: gpt-4o-mini
+`)
+	ctx := context.Background()
+
+	out, err := ExportConfig(ctx, ConfigExportOptions{Config: loaded, Factory: exportTestFactory()})
+	require.NoError(t, err)
+	body := string(out)
+
+	assert.NotContains(t, body, "sk-env-literal-do-not-leak", "a copy of a key a variable supplied is redacted too")
+	var doc struct {
+		Providers map[string]config.RawProviderConfig `yaml:"providers"`
+	}
+	require.NoError(t, yaml.Unmarshal(out, &doc), body)
+	assert.Equal(t, "${env:OPENAI_API_KEY}", doc.Providers["openai"].APIKey)
+	assert.Contains(t, doc.Providers, "backup", "a declared provider without credentials stays declared")
+
+	// Loaded back, the virtual model still finds its target provider.
+	reloaded := loadExportConfig(t, body)
+	assert.Contains(t, reloaded.RawProviders, "backup")
+	assert.Contains(t, body, `api_key: "${EXPORT_TEST_UNSET_KEY}"`, "written as config.yaml held it")
+}

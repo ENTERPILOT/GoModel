@@ -29,6 +29,14 @@ type ExportDocument struct {
 	// ("guardrails.rules[0].config.api_key"), for settings whose schema this
 	// package does not know, such as a guardrail plugin's.
 	SecretFields []string
+	// Unresolved names sections, by path ("providers.azure"), written as
+	// config.yaml holds them, secret references unresolved, such as a
+	// declared provider whose credentials are unset.
+	Unresolved []string
+	// Secrets are resolved secret values Config does not hold as such, such
+	// as provider keys written as references: copies of them in other
+	// settings are redacted.
+	Secrets []string
 	// Header is written as comment lines above the document.
 	Header string
 }
@@ -196,6 +204,10 @@ func newExporter(secrets *Secrets, environ []string, doc ExportDocument, expande
 	}
 	for _, field := range doc.SecretFields {
 		e.extra[field] = true
+	}
+	e.unresolved = append(e.unresolved, doc.Unresolved...)
+	for _, secret := range doc.Secrets {
+		e.recordSecret(secret)
 	}
 	return e
 }
@@ -412,7 +424,7 @@ func (e *exporter) scalar(path string, node *yaml.Node, class exportClass, envNa
 	if prefix > 0 && prefix <= len(node.Value) && strings.HasPrefix(value, node.Value[:prefix]) {
 		head, secret = value[:prefix], value[prefix:]
 	}
-	if configured && onlyReferences(secret) {
+	if configured && (onlyReferences(secret) || e.isUnresolved(path) && unsetVariables.MatchString(secret)) {
 		e.setValue(path, node, value, true)
 		return
 	}
@@ -441,6 +453,12 @@ func (e *exporter) setValue(path string, node *yaml.Node, value string, configur
 	}
 	if !strings.Contains(value, "$") {
 		setScalar(node, value, value != node.Value || blockUnsafe(value))
+		return
+	}
+	// config.Load leaves a variable that is unset as written. Kept so in a
+	// section written as config.yaml holds it, it expands once set.
+	if e.isUnresolved(path) && unsetVariables.MatchString(value) && expandString(value) == value {
+		e.setText(node, quoteYAML(value, dollarOffsets(value)))
 		return
 	}
 	if !configured {

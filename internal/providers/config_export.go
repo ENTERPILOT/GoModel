@@ -23,6 +23,14 @@ type ExportedProviders struct {
 	// Declared names every provider config.yaml or environment variables
 	// declare. A stored credential of one of these names is shadowed.
 	Declared []string
+	// Inactive names the providers config.yaml declares that do not
+	// register, such as one whose credentials are unset. They are in
+	// Providers as config.yaml holds them, references unresolved: a virtual
+	// model may still target one.
+	Inactive []string
+	// Secrets are the resolved API keys, for the export to redact copies of
+	// them: Providers holds them as references where it can.
+	Secrets []string
 }
 
 // ExportProviders resolves the providers config.yaml and environment
@@ -40,6 +48,14 @@ func ExportProviders(ctx context.Context, result *config.LoadResult, factory *Pr
 	}
 	providerMap, resolved := finishProviders(sources, result.Config.Resilience, discovery)
 	exported := exportProviders(result.Secrets, providerMap, resolved)
+	for name, raw := range result.RawProviders {
+		if _, ok := exported.Providers[name]; !ok {
+			raw.Models = slices.Clone(raw.Models)
+			exported.Providers[name] = raw
+			exported.Inactive = append(exported.Inactive, name)
+		}
+	}
+	slices.Sort(exported.Inactive)
 	exported.Declared = slices.Sorted(maps.Keys(result.RawProviders))
 	for name := range providerMap {
 		if !slices.Contains(exported.Declared, name) {
@@ -58,6 +74,7 @@ func exportProviders(secrets *config.Secrets, providerMap map[string]ProviderCon
 	for name, p := range resolved {
 		sources := providerMap[name].APIKeySources
 		keys := slices.Clone(p.APIKeys)
+		exported.Secrets = append(exported.Secrets, keys...)
 		for i := range keys {
 			if i >= len(sources) {
 				continue
