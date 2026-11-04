@@ -249,3 +249,30 @@ func hasValidIndex(ctx context.Context, t *testing.T, db sqlx.DB, name string) b
 	require.NoError(t, db.QueryRow(ctx, query, name).Scan(&count))
 	return count == 1
 }
+
+// A written_at index that cannot be built holds up neither the model nor the
+// trigram index after it.
+func TestSQLStoreBuildsOtherIndexesPastAFailingWrittenAtIndex(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		if db.Dialect() != sqlx.PostgreSQL {
+			t.Skip("background index builds are PostgreSQL only")
+		}
+		ctx := context.Background()
+		// Another relation holds the name, so the index is never valid.
+		_, err := db.Exec(ctx, "CREATE TABLE "+writtenAtIndex+" (id INTEGER)")
+		require.NoError(t, err)
+
+		store, err := newSQLStoreForTest(t, db, 0)
+		require.NoError(t, err)
+		modelIndex := modelIndexes(sqlx.PostgreSQL)[0].name
+		require.Eventually(t, func() bool {
+			var count int
+			err := db.QueryRow(ctx, `SELECT COUNT(*) FROM pg_index WHERE indexrelid = to_regclass(?) AND indisvalid`, modelIndex).Scan(&count)
+			return err == nil && count == 1
+		}, 30*time.Second, 20*time.Millisecond, "the model index is built")
+
+		require.NoError(t, store.Close())
+		store.indexBuild.Wait()
+		assert.False(t, hasValidIndex(ctx, t, db, writtenAtIndex))
+	})
+}

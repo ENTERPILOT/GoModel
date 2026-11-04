@@ -84,16 +84,15 @@ const backgroundIndexLockKey int64 = 0x676d2d6175646974
 // backgroundIndexRetry is the pause between build attempts; tests shorten it.
 var backgroundIndexRetry = storage.BackgroundIndexRetry
 
-// buildWrittenAtIndex builds the PostgreSQL written_at index, retrying until
-// it is valid or ctx ends. It does nothing on SQLite, which builds the index
-// inline, or on a DB without a pool to hold the build lock on.
-func buildWrittenAtIndex(ctx context.Context, db sqlx.DB) {
+// writtenAtIndexBuilder returns the builder of the PostgreSQL written_at
+// index. It reports false on SQLite, which builds the index inline, and on a
+// DB without a pool to hold the build lock on.
+func writtenAtIndexBuilder(db sqlx.DB) (storage.BackgroundIndexBuilder, bool) {
 	pool := sqlx.PostgreSQLPool(db)
 	if pool == nil {
-		return
+		return storage.BackgroundIndexBuilder{}, false
 	}
-	builder := storage.BackgroundIndexBuilder{Pool: pool, LockKey: backgroundIndexLockKey, Retry: backgroundIndexRetry}
-	builder.Build(ctx, writtenAtBackgroundIndex)
+	return storage.BackgroundIndexBuilder{Pool: pool, LockKey: backgroundIndexLockKey, Retry: backgroundIndexRetry}, true
 }
 
 // RecentWrites implements RecentWriteReader.

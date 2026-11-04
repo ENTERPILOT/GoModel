@@ -196,16 +196,22 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 	// build on a large existing PostgreSQL table, so they are built off the
 	// startup path (and CONCURRENTLY, so writes keep flowing); readers pick
 	// each up as soon as it exists. They are built one after the other, since
-	// PostgreSQL runs one concurrent build per table at a time.
+	// PostgreSQL runs one concurrent build per table at a time. The written_at
+	// index gets one attempt first and its retries last, so one that keeps
+	// failing holds up neither of the others.
 	buildCtx, cancel := context.WithCancel(context.Background())
 	store.cancelIndexBuild = cancel
 	store.indexBuild.Go(func() {
-		buildWrittenAtIndex(buildCtx, db)
+		writtenAt, ok := writtenAtIndexBuilder(db)
+		built := !ok || writtenAt.TryBuild(buildCtx, writtenAtBackgroundIndex)
 		if buildCtx.Err() != nil {
 			return
 		}
 		ensureModelIndexesConcurrently(buildCtx, db)
 		ensureTrigramSearchIndex(buildCtx, db, postgresErrorMessage)
+		if !built {
+			writtenAt.Build(buildCtx, writtenAtBackgroundIndex)
+		}
 	})
 	if retentionDays > 0 {
 		go storage.RunCleanupLoop(store.stopCleanup, CleanupInterval, store.cleanup)
