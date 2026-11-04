@@ -13,7 +13,12 @@ type RawProviderConfig struct {
 	APIKeys []string `yaml:"api_keys"`
 	// SessionStickyKeys defaults to true. Set false to restore round-robin key
 	// selection for every request, including requests carrying a session ID.
-	SessionStickyKeys        *bool  `yaml:"session_sticky_keys"`
+	SessionStickyKeys *bool `yaml:"session_sticky_keys"`
+	// Billable defaults to true. Set false for a provider whose cost the caller
+	// does not owe the operator, such as a customer's own API key: its usage is
+	// still tracked, but it is billed at zero and user-path and label budgets
+	// neither gate it nor count it.
+	Billable                 *bool  `yaml:"billable"`
 	BaseURL                  string `yaml:"base_url"`
 	APIVersion               string `yaml:"api_version"`
 	Backend                  string `yaml:"backend"`

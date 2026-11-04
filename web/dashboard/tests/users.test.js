@@ -271,3 +271,17 @@ test("filterUserNodes retains inactive ancestor when query matches an active des
   );
   assert.equal(countInactiveUserNodes(nodes, "eng"), 0);
 });
+
+test("an inactive node's substring hit does not hide an active node's fuzzy match", () => {
+  // The default view hides inactive nodes, so the fallback bucket has to be
+  // decided among the rows it can show. Otherwise a hidden node answering by
+  // substring empties the list.
+  const nodes = [
+    { user_path: "/team/zz-provider", active_key_count: 0, key_count: 1 },
+    { user_path: "/team/p-r-o-vi-d-e-r" },
+  ];
+  assert.deepEqual(
+    filterUserNodes(nodes, "provider").map((node) => node.user_path),
+    ["/team/p-r-o-vi-d-e-r"],
+  );
+});

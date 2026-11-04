@@ -4,6 +4,7 @@
 
 import * as m from "../../lib/paraglide/messages.js";
 import { formatNumber } from "../../lib/i18n/locale.js";
+import { filterFields, normalizeQuery } from "../../lib/utils/textMatch.js";
 
 export function defaultRateLimitForm() {
   return {
@@ -191,9 +192,9 @@ export function rateLimitUsagePercent(used, limit) {
 }
 
 export function filteredRateLimits(rules, filter) {
-  const needle = String(filter || "")
-    .trim()
-    .toLowerCase();
+  // Normalized, not lowercased: `toLowerCase` keeps the combining dot that the
+  // matcher drops from the searched text, so `/İstanbul` would answer nothing.
+  const needle = normalizeQuery(filter);
   const items = Array.isArray(rules) ? rules.slice() : [];
   const scopeOrder = { user_path: 0, provider: 1, model: 2 };
   items.sort((a, b) => {
@@ -214,18 +215,32 @@ export function filteredRateLimits(rules, filter) {
   if (!needle) {
     return items;
   }
-  return items.filter((item) => {
-    const subject = rateLimitSubject(item).toLowerCase();
-    const scope = rateLimitScopeLabel(item).toLowerCase();
-    const period = rateLimitPeriodLabel(item).toLowerCase();
-    const mode = item && item.per_child ? m.rate_limits_per_child_badge() : "";
-    return (
-      subject.includes(needle) ||
-      scope.includes(needle) ||
-      period.includes(needle) ||
-      mode.includes(needle)
-    );
-  });
+  // The page renders one tab per scope, so each tab is its own list: filtering
+  // all scopes together would let a substring hit in one scope suppress the
+  // fuzzy fallback for the others and empty a tab that has matches.
+  const byScope = new Map();
+  for (const item of items) {
+    const scope = rateLimitScope(item);
+    if (!byScope.has(scope)) byScope.set(scope, []);
+    byScope.get(scope).push(item);
+  }
+  const matched = [];
+  for (const scope of byScope.keys()) {
+    matched.push(...filterFields(byScope.get(scope), needle, rateLimitSearchFields));
+  }
+  // Restore the order the sort above established.
+  const order = new Map(items.map((item, index) => [item, index]));
+  return matched.sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+}
+
+// rateLimitSearchFields lists the text a rule is matched against.
+function rateLimitSearchFields(item) {
+  return [
+    rateLimitSubject(item),
+    rateLimitScopeLabel(item),
+    rateLimitPeriodLabel(item),
+    item && item.per_child ? m.rate_limits_per_child_badge() : "",
+  ];
 }
 
 export function normalizeRateLimitListPayload(payload) {

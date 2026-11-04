@@ -3,6 +3,7 @@
   // (edit / inspect catalog / reconnect / delete). Managed (config-declared)
   // rows are read-only: no edit or delete buttons.
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
+  import HighlightText from "$lib/components/atoms/HighlightText.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { formatNumber } from "$lib/utils/format.js";
@@ -41,7 +42,7 @@
       {#each mcpServers.filtered as server (mcpServerSlug(server))}
         <tr>
           <td>
-            <span class="font-size-md">{server.name}</span>
+            <span class="font-size-md"><HighlightText text={server.name} needle={mcpServers.filter} /></span>
             {#if server.managed}
               <span
                 class="alias-kind-badge"
@@ -49,11 +50,11 @@
                 >{m.common_config()}</span
               >
             {/if}
-            <div class="mcp-server-sub-counts mono">{mcpServerSlug(server)}</div>
+            <div class="mcp-server-sub-counts mono"><HighlightText text={mcpServerSlug(server)} needle={mcpServers.filter} /></div>
           </td>
-          <td><span class="budget-source mono">{server.transport || "http"}</span></td>
+          <td><span class="budget-source mono"><HighlightText text={server.transport || "http"} needle={mcpServers.filter} /></span></td>
           <td class="mono font-size-md" title={mcpServerEndpointLabel(server)}
-            >{mcpServerEndpointLabel(server)}</td
+            ><HighlightText text={mcpServerEndpointLabel(server)} needle={mcpServers.filter} /></td
           >
           <td>
             <span

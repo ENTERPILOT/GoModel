@@ -3,6 +3,8 @@
 // /team -> /team/alice. Selecting a node filters its whole subtree, the same
 // way the API treats every user_path value. Pure functions for node:test.
 
+import { fuzzyMatch, normalizeQuery, substringIndex } from "../../lib/utils/textMatch.js";
+
 // normalizeUserPath mirrors the gateway's canonical form: leading slash, no
 // empty or trailing segments. Returns "" for blank input.
 export function normalizeUserPath(raw) {
@@ -57,25 +59,29 @@ function sortTree(node) {
 // visibleUserPathRows flattens the tree into the rows the picker shows:
 // { path, name, depth, hasChildren, expanded }. Without a query only
 // expanded nodes open; with one, matching paths and their ancestors show,
-// fully expanded.
+// fully expanded. The query falls back to the fuzzy level only when no path
+// matches by substring, the same rule the flat filters follow.
 export function visibleUserPathRows(tree, expanded, query) {
-  const needle = String(query || "").trim().toLowerCase();
-  const rows = [];
-  const walk = (nodes, depth) => {
-    for (const node of nodes) {
-      if (needle && !subtreeMatches(node, needle)) continue;
-      const hasChildren = node.children.length > 0;
-      const open = hasChildren && (needle ? true : expanded.has(node.path));
-      rows.push({ path: node.path, name: node.name, depth, hasChildren, expanded: open });
-      if (open) walk(node.children, depth + 1);
-    }
+  const needle = normalizeQuery(query);
+  const collect = (matchesPath) => {
+    const rows = [];
+    const keeps = (node) => matchesPath(node.path) || node.children.some(keeps);
+    const walk = (nodes, depth) => {
+      for (const node of nodes) {
+        if (!keeps(node)) continue;
+        const hasChildren = node.children.length > 0;
+        const open = hasChildren && (needle ? true : expanded.has(node.path));
+        rows.push({ path: node.path, name: node.name, depth, hasChildren, expanded: open });
+        if (open) walk(node.children, depth + 1);
+      }
+    };
+    walk(tree || [], 0);
+    return rows;
   };
-  walk(tree || [], 0);
-  return rows;
-}
-
-function subtreeMatches(node, needle) {
-  return node.path.toLowerCase().includes(needle) || node.children.some((child) => subtreeMatches(child, needle));
+  if (!needle) return collect(() => true);
+  const bySubstring = collect((path) => substringIndex(path, needle) >= 0);
+  if (bySubstring.length) return bySubstring;
+  return collect((path) => fuzzyMatch(path, needle) !== null);
 }
 
 // userPathCovered reports whether path is already inside a selected

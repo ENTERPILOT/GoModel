@@ -67,7 +67,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"SERVER_TRUSTED_PROXIES", "SERVER_CLIENT_IP_HEADER", "SERVER_TRUSTED_HOPS", "SERVER_TLS_CERT_FILE", "SERVER_TLS_KEY_FILE", "SERVER_TLS_CLIENT_CA_FILE",
 		"GOMODEL_CACHE_DIR", "CACHE_REFRESH_INTERVAL", "MODEL_LIST_URL", "GOMODEL_OFFLINE", "GOMODEL_VERSION_CHECK_ENABLED",
 		"REDIS_URL", "REDIS_KEY_MODELS", "REDIS_KEY_RESPONSES", "REDIS_TTL_MODELS", "REDIS_TTL_RESPONSES",
-		"RESPONSE_CACHE_SIMPLE_ENABLED",
+		"RESPONSE_CACHE_SIMPLE_ENABLED", "RESPONSE_CACHE_PARTITION_BY_USER_PATH",
 		"SEMANTIC_CACHE_ENABLED", "SEMANTIC_CACHE_THRESHOLD", "SEMANTIC_CACHE_TTL", "SEMANTIC_CACHE_MAX_CONV_MESSAGES",
 		"SEMANTIC_CACHE_EXCLUDE_SYSTEM_PROMPT", "SEMANTIC_CACHE_EMBEDDER_PROVIDER", "SEMANTIC_CACHE_EMBEDDER_MODEL",
 		"SEMANTIC_CACHE_VECTOR_STORE_TYPE",
@@ -1598,6 +1598,61 @@ func TestLoad_ResponseSimpleOptInViaEnvWithoutYAML(t *testing.T) {
 		require.NotNil(t, cfg.Cache.Response.Simple)
 		require.NotNil(t, cfg.Cache.Response.Simple.Redis)
 		assert.Equal(t, "redis://env-host:6379", cfg.Cache.Response.Simple.Redis.URL)
+	})
+}
+
+func TestLoad_ResponseCachePartitionByUserPath(t *testing.T) {
+	const yamlOn = "cache:\n  response:\n    partition_by_user_path: true\n"
+	const yamlOff = "cache:\n  response:\n    partition_by_user_path: false\n"
+	tests := []struct {
+		name string
+		yaml string
+		env  string
+		want bool
+	}{
+		{name: "default is off"},
+		{name: "yaml enables", yaml: yamlOn, want: true},
+		{name: "yaml disables", yaml: yamlOff},
+		{name: "env enables", env: "true", want: true},
+		{name: "env overrides yaml off", yaml: yamlOff, env: "true", want: true},
+		{name: "env overrides yaml on", yaml: yamlOn, env: "false"},
+		{name: "empty env keeps yaml", yaml: yamlOn, env: "", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllConfigEnvVars(t)
+			withTempDir(t, func(dir string) {
+				if tt.yaml != "" {
+					writeConfigYAML(t, dir, tt.yaml)
+				}
+				t.Setenv("RESPONSE_CACHE_PARTITION_BY_USER_PATH", tt.env)
+
+				result, err := Load()
+				require.NoError(t, err)
+
+				response := result.Config.Cache.Response
+				assert.Equal(t, tt.want, response.PartitionByUserPath)
+				assert.Nil(t, response.Simple, "the setting must not enable the exact cache")
+				assert.Nil(t, response.Semantic, "the setting must not enable the semantic cache")
+			})
+		})
+	}
+}
+
+func TestLoad_ResponseCachePartitionSurvivesDisabledLayers(t *testing.T) {
+	clearAllConfigEnvVars(t)
+	withTempDir(t, func(_ string) {
+		t.Setenv("RESPONSE_CACHE_PARTITION_BY_USER_PATH", "true")
+		t.Setenv("RESPONSE_CACHE_SIMPLE_ENABLED", "true")
+		t.Setenv("SEMANTIC_CACHE_ENABLED", "false")
+
+		result, err := Load()
+		require.NoError(t, err)
+
+		response := result.Config.Cache.Response
+		assert.True(t, response.PartitionByUserPath)
+		assert.NotNil(t, response.Simple)
+		assert.Nil(t, response.Semantic)
 	})
 }
 

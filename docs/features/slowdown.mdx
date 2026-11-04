@@ -1,0 +1,112 @@
+---
+title: "Slowdown"
+description: "Add artificial latency to a model or virtual model to test timeouts, loading states, and slower-model behavior."
+icon: "snail"
+keywords: ["slowdown", "latency", "artificial delay", "testing", "timeouts", "virtual models"]
+---
+
+## Overview
+
+Slowdown makes a model respond more slowly than its provider does. GoModel
+measures how long the upstream call took and waits an extra fraction of that
+time before returning the response.
+
+The setting is a factor of **extra** time:
+
+| Factor | Upstream time | Client sees |
+| ------ | ------------- | ----------- |
+| `0.5`  | 2 s           | ~3 s        |
+| `1`    | 2 s           | ~4 s        |
+| `3`    | 2 s           | ~8 s        |
+
+Use it to test client timeouts, loading states, and retry logic, or to see
+how an app feels on a slower model without switching providers. Leave it unset
+in production, where it has no purpose.
+
+Slowdown is off by default.
+
+## Configure a slowdown
+
+Set **Slowdown** on a concrete model or a redirect (alias). Active factors
+range from `0.1` to `10`. `0` explicitly disables slowdown, including one
+inherited from the target model. An empty value leaves the setting unspecified.
+
+### Dashboard
+
+Open `Models`, edit a model or virtual model, and fill **Slowdown (extra
+inference time)**. Models with an active slowdown show it in their row.
+
+### config.yaml
+
+```yaml
+virtual_models:
+  # Slow down a concrete model for every caller.
+  - source: openai/gpt-4o
+    slowdown: 0.5
+
+  # Expose a slowed alias and leave the real model untouched.
+  - source: slow-sonnet
+    target: anthropic/claude-sonnet-4-6
+    slowdown: 2
+```
+
+### Environment variable
+
+```env
+VIRTUAL_MODELS=[{"source":"slow-sonnet","target":"anthropic/claude-sonnet-4-6","slowdown":2}]
+```
+
+### Admin API
+
+```bash
+curl -X PUT http://localhost:8080/admin/virtual-models \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"source":"slow-sonnet","target_model":"anthropic/claude-sonnet-4-6","slowdown":2}'
+```
+
+A value outside the active range returns `400`. Slowdown needs a model:
+a provider-wide selector such as `openai/*` is rejected.
+
+## Precedence
+
+- An alias's own slowdown wins over its target model's slowdown.
+- An alias without a value inherits the slowdown of the target model it
+  resolves to. Set the alias to `0` to opt out.
+- For a load-balanced virtual model, inheritance uses the target chosen for
+  that request.
+- A model's own slowdown can be set exactly (`openai/gpt-4o`) or model-wide
+  (`gpt-4o`, on every provider); the exact value wins. A more specific entry
+  that leaves slowdown empty, or whose `user_paths` exclude the caller, does
+  not hide a broader one, so a provider-wide access rule never turns a
+  model's slowdown off.
+- In a [chain](/features/virtual-models#chain-virtual-models), only the
+  **outer** virtual model's slowdown applies.
+- A slowdown set on a model with `user_paths` applies only to requests from
+  those [user paths](/features/user-path).
+
+## What is slowed
+
+| Endpoint | Behavior |
+| -------- | -------- |
+| Chat Completions, Responses | Delayed after the upstream response arrives. |
+| The same endpoints with `stream: true` (SSE) | Each chunk is released on the scaled timeline. |
+| [Anthropic Messages](/advanced/anthropic-messages-api) | Delayed like Chat Completions when the request takes the translated path. A request [forwarded natively](/advanced/anthropic-messages-api#native-forwarding-to-anthropic) to an Anthropic provider is not slowed. |
+| Embeddings | Delayed after the upstream response arrives. |
+| Image generations and edits | Delayed after the upstream response arrives. |
+| [Audio](/advanced/audio-api) speech, transcriptions, translations | Delayed, or paced chunk by chunk when [streaming](/advanced/audio-api#streaming). |
+
+Failed upstream calls return without a delay. Delays honor request
+cancellation: a client that disconnects stops waiting immediately.
+
+Passthrough requests, batches, and Realtime WebSocket sessions are not slowed.
+
+## Streaming and memory
+
+For a streamed response, GoModel reads the upstream in the background and
+releases each chunk at its scaled arrival time. A chunk that arrived 2 seconds
+into the stream with factor `0.5` reaches the client at 3 seconds, so the
+provider's relative chunk timing is preserved.
+
+Chunks waiting for release are held in memory. A large factor on a long or
+high-volume stream, or on a large audio response, can use substantial memory.

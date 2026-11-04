@@ -234,6 +234,8 @@ func assertSumSpendMatchesSubjects(t *testing.T, usageStore usageWriter, db sqlx
 		usageEntryForProvider("openai-free", "openai", "openai-free", now, 4),
 		// Written before provider_name existed: only the provider type is set.
 		usageEntryForProvider("legacy-openai", "openai", "", now, 3),
+		// Served by a billable: false provider: only its provider budget sees it.
+		usageEntryNonBillable("byok", "/team/app", now, 50, "prod", "iOS"),
 	}
 	err = usageStore.WriteBatch(ctx, entries)
 	require.NoError(t, err)
@@ -252,6 +254,7 @@ func assertSumSpendMatchesSubjects(t *testing.T, usageStore usageWriter, db sqlx
 		{Scope: ScopeProvider, Subject: "openai", Start: start, End: end},
 		{Scope: ScopeProvider, Subject: "test", Start: start, End: end},
 		{Scope: ScopeProvider, Subject: "anthropic", Start: start, End: end},
+		{Scope: ScopeProvider, Subject: "byok-openai", Start: start, End: end},
 	}
 	want := []Spend{
 		{Total: 1.5, HasUsage: true},   // /team subtree, uncached, minus the sibling and /TEAM
@@ -265,6 +268,7 @@ func assertSumSpendMatchesSubjects(t *testing.T, usageStore usageWriter, db sqlx
 		{Total: 3, HasUsage: true},     // openai: only the row without a provider name
 		{Total: 106.5, HasUsage: true}, // test: every uncached in-window user-path row
 		{},                             // no such provider
+		{Total: 50, HasUsage: true},    // byok-openai: the non-billable row, skipped above
 	}
 
 	got, err := store.SumSpend(ctx, windows)
@@ -337,6 +341,16 @@ func usageEntryForProvider(name, providerType, providerName string, ts time.Time
 	entry := usageEntryWithCost(name, "/providers", "", ts, cost)
 	entry.Provider = providerType
 	entry.ProviderName = providerName
+	return entry
+}
+
+// usageEntryNonBillable builds one priced row served by a billable: false
+// provider.
+func usageEntryNonBillable(name, userPath string, ts time.Time, cost float64, labels ...string) *usage.UsageEntry {
+	entry := usageEntryWithCost(name, userPath, "", ts, cost, labels...)
+	entry.Provider = "openai"
+	entry.ProviderName = "byok-openai"
+	entry.MarkNonBillable()
 	return entry
 }
 
