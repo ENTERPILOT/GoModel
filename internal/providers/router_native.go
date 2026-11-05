@@ -22,23 +22,32 @@ func (r *Router) CreateBatch(ctx context.Context, providerType string, req *core
 // CreateBatchWithHints routes native batch creation and returns any provider
 // batch-result shaping hints that need gateway persistence.
 func (r *Router) CreateBatchWithHints(ctx context.Context, providerType string, req *core.BatchRequest) (*core.BatchResponse, map[string]string, error) {
-	type createBatchWithHintsResult struct {
-		resp  *core.BatchResponse
-		hints map[string]string
-	}
+	resp, hints, _, err := r.CreateBatchOnInstance(ctx, providerType, req)
+	return resp, hints, err
+}
+
+// CreateBatchOnInstance implements core.NativeBatchInstanceRoutableProvider:
+// CreateBatchWithHints plus the name of the instance the batch went to,
+// taken from the same resolution as the call.
+func (r *Router) CreateBatchOnInstance(ctx context.Context, providerType string, req *core.BatchRequest) (*core.BatchResponse, map[string]string, string, error) {
 	forwardReq, err := adaptBatchRequest(ctx, req, providerType)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
-	result, err := routeNativeBatchCall(r, ctx, providerType, func(ctx context.Context, bp core.NativeBatchProvider) (createBatchWithHintsResult, error) {
-		if hinted, ok := bp.(core.BatchCreateHintAwareProvider); ok {
-			resp, hints, err := hinted.CreateBatchWithHints(ctx, forwardReq)
-			return createBatchWithHintsResult{resp: resp, hints: hints}, err
-		}
-		resp, err := bp.CreateBatch(ctx, forwardReq)
-		return createBatchWithHintsResult{resp: resp}, err
-	})
-	return stampProvider(result.resp, providerType), result.hints, err
+	bp, providerName, err := r.resolveNativeBatchInstance(providerType)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	var (
+		resp  *core.BatchResponse
+		hints map[string]string
+	)
+	if hinted, ok := bp.(core.BatchCreateHintAwareProvider); ok {
+		resp, hints, err = hinted.CreateBatchWithHints(ctx, forwardReq)
+	} else {
+		resp, err = bp.CreateBatch(ctx, forwardReq)
+	}
+	return stampProvider(resp, providerType), hints, providerName, err
 }
 
 // GetBatch routes native batch lookup to a provider type.

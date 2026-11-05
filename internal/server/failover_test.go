@@ -41,6 +41,7 @@ type failoverProvider struct {
 	supportedModels    map[string]string
 	providerNames      map[string]string
 	chatCalls          []string
+	chatRequests       []*core.ChatRequest
 	responsesCalls     []string
 	embeddingCalls     []string
 	embeddingRequests  []*core.EmbeddingRequest
@@ -49,6 +50,7 @@ type failoverProvider struct {
 func (p *failoverProvider) ChatCompletion(_ context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
 	key := requestSelector(req.Model, req.Provider)
 	p.chatCalls = append(p.chatCalls, key)
+	p.chatRequests = append(p.chatRequests, req)
 	if err := p.chatErrors[key]; err != nil {
 		return nil, err
 	}
@@ -825,6 +827,10 @@ func (embeddingProviderBudgetChecker) Check(_ context.Context, subjects budget.S
 
 func (embeddingProviderBudgetChecker) ProviderWithinBudget(_ context.Context, providerName string) bool {
 	return providerName != "primary-openai"
+}
+
+func (c embeddingProviderBudgetChecker) FailoverWithinBudget(ctx context.Context, _, target string) bool {
+	return c.ProviderWithinBudget(ctx, target)
 }
 
 func TestEmbeddings_AdmissionDefersPrimaryProviderBudgetToFailover(t *testing.T) {

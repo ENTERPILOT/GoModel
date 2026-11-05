@@ -6,6 +6,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/enterpilot/gomodel/internal/storage"
 )
 
 // Logger provides async buffered logging with batch writes.
@@ -22,6 +24,9 @@ type Logger struct {
 	closed        atomic.Bool
 	liveMu        sync.RWMutex
 	livePublisher LiveEventPublisher
+	// writerID is stamped on every entry the logger flushes; see
+	// LogEntry.Stamp.
+	writerID string
 }
 
 // NewLogger creates a new async buffered Logger.
@@ -40,6 +45,7 @@ func NewLogger(store LogStore, cfg Config) *Logger {
 		buffer:        make(chan *LogEntry, cfg.BufferSize),
 		done:          make(chan struct{}),
 		flushInterval: cfg.FlushInterval,
+		writerID:      storage.WriterID(),
 	}
 
 	l.wg.Add(1)
@@ -220,6 +226,13 @@ func (l *Logger) flushBatch(batch []*LogEntry) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	// The batch is one write, so all of it carries one stamp. Other replicas
+	// find it by that stamp to show it in their live log view.
+	stamp := &storage.WriteStamp{WriterID: l.writerID, WrittenAt: time.Now().UnixMicro()}
+	for _, entry := range batch {
+		entry.Stamp = stamp
+	}
 
 	if err := l.store.WriteBatch(ctx, batch); err != nil {
 		slog.Error("failed to write audit log batch",

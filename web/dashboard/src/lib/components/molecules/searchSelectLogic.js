@@ -1,6 +1,8 @@
 // Pure helpers behind the SearchSelect molecule (no Svelte runtime, relative
 // imports only) so tests/search-select.test.js can load them directly.
 
+import { fuzzyMatch, normalizeQuery, substringIndex } from "../../utils/textMatch.js";
+
 /**
  * Normalize a caller's option into {value, label, description}.
  * Strings become value/label pairs.
@@ -22,9 +24,14 @@ export function normalizeSearchOption(option) {
 /**
  * Filter options by a free-text query, matching value, label and
  * description case-insensitively. Matches that start with the query rank
- * first (stable within each tier). An empty query returns every option.
- * Options sharing a value collapse to the first one, so the keyed list the
- * component renders never sees a duplicate key.
+ * first (stable within each tier), then the ones that contain it. When
+ * neither tier matches anything, the fuzzy level runs and its matches rank
+ * by how tight the match is — `dep1017` reaches
+ * `vllm/deepseek-v4.1-flash:1017`, `sonet` reaches `claude-sonnet`. A query
+ * that already matches contiguously never mixes in fuzzy rows, so today's
+ * results keep their rows and their order. An empty query returns every
+ * option. Options sharing a value collapse to the first one, so the keyed
+ * list the component renders never sees a duplicate key.
  *
  * @param {Array<unknown>} options
  * @param {string} query
@@ -38,16 +45,58 @@ export function filterSearchOptions(options, query) {
       seen.add(option.value);
       return true;
     });
-  const needle = String(query || "").trim().toLowerCase();
+  const needle = normalizeQuery(query);
   if (!needle) return normalized;
   const prefix = [];
   const rest = [];
   for (const option of normalized) {
-    const haystacks = [option.value, option.label, option.description].map((s) => s.toLowerCase());
-    if (haystacks.some((s) => s.startsWith(needle))) prefix.push(option);
-    else if (haystacks.some((s) => s.includes(needle))) rest.push(option);
+    const haystacks = [option.value, option.label, option.description];
+    if (haystacks.some((text) => substringIndex(text, needle) === 0)) prefix.push(option);
+    else if (haystacks.some((text) => substringIndex(text, needle) > 0)) rest.push(option);
   }
-  return prefix.concat(rest);
+  if (prefix.length || rest.length) return prefix.concat(rest);
+
+  // Fuzzy fallback. Descriptions describe the option rather than name it
+  // (a provider name, "this model"), so a subsequence over them is noise.
+  const scored = [];
+  for (const option of normalized) {
+    let best = null;
+    for (const text of [option.value, option.label]) {
+      best = betterFuzzyMatch(best, fuzzyMatch(text, needle));
+    }
+    if (best) scored.push({ option, match: best });
+  }
+  // A match that starts a token wins over a tighter one buried mid-word, then
+  // the tighter window, then the earlier one. `ge25` prefers
+  // `gemini/gemini-2.5-flash` over `openai/gpt-image-2.5-flare`, whose best run
+  // is the `ge25` inside "ima|ge25|".
+  return scored
+    .sort((a, b) => {
+      const left = fuzzyRank(a.match);
+      const right = fuzzyRank(b.match);
+      for (let i = 0; i < left.length; i++) {
+        if (left[i] !== right[i]) return left[i] - right[i];
+      }
+      return 0; // equal: the sort keeps the input order
+    })
+    .map((entry) => entry.option);
+}
+
+/** Sort key for a fuzzy match: token start, then tightness, then position. */
+function fuzzyRank(match) {
+  return [match.boundary ? 0 : 1, match.span, match.start];
+}
+
+/**
+ * Rank two fuzzy matches for the same needle: token start first, then the
+ * tighter window, then the earlier one. Returns whichever should rank first.
+ */
+function betterFuzzyMatch(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  if (a.boundary !== b.boundary) return a.boundary ? a : b;
+  if (a.span !== b.span) return a.span < b.span ? a : b;
+  return a.start <= b.start ? a : b;
 }
 
 /**
@@ -61,6 +110,37 @@ export function customSearchValue(options, query, allowCustom) {
     .map(normalizeSearchOption)
     .some((option) => option && option.value === value);
   return exists ? "" : value;
+}
+
+/**
+ * How many rows a search list renders at once. The model picker holds ~1000
+ * options, and rebuilding every row on each keystroke is what made typing feel
+ * queued: one keystroke cost 50-70 ms of main thread, so input events piled up
+ * behind it. Past this many matches the user is expected to keep typing.
+ */
+export const MAX_VISIBLE_OPTIONS = 100;
+
+/**
+ * Cut a matched list down to the rows worth rendering. Keeps `pinnedValue`
+ * visible when it sits beyond the cut (a single-select trigger already showing
+ * a value the first page does not contain), so opening the list and typing do
+ * not hide what is selected. `hidden` counts what the caller must announce;
+ * the pinned row is not one of the first `limit`, so it does not subtract.
+ *
+ * @param {Array<unknown>} options
+ * @param {number} limit
+ * @param {string} pinnedValue
+ * @returns {{visible: Array<unknown>, hidden: number}}
+ */
+export function capSearchOptions(options, limit, pinnedValue = "") {
+  const list = Array.isArray(options) ? options : [];
+  if (list.length <= limit) return { visible: list, hidden: 0 };
+  const visible = list.slice(0, limit);
+  if (pinnedValue) {
+    const pinned = list.slice(limit).find((option) => option && option.value === pinnedValue);
+    if (pinned) visible.push(pinned);
+  }
+  return { visible, hidden: list.length - limit };
 }
 
 /**
