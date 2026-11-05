@@ -134,7 +134,10 @@ Responses API.
 Limit tokenów to jeden limit w każdej pisowni: `max_tokens`,
 `max_completion_tokens` i `max_output_tokens` ustawiają go tak samo. Wartość w
 `params` zastępuje pisownię, którą wysłał klient, a wartość w `default_params`
-obowiązuje tylko wtedy, gdy klient nie wysłał żadnej z nich.
+obowiązuje tylko wtedy, gdy klient nie wysłał żadnej z nich. W łańcuchu modeli
+wirtualnych i polityk wygrywa głębszy wiersz niezależnie od pisowni, a
+`response_format` i `verbosity` są tymi samymi ustawieniami co `text.format` i
+`text.verbosity`.
 
 Jeden zestaw parametrów obsługuje każde API, więc wymienione tu klucze są
 pomijane w API, które ich nie zna, a limit tokenów, `response_format` i

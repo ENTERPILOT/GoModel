@@ -131,7 +131,10 @@ the Responses API.
 A token limit is one limit in any spelling: `max_tokens`,
 `max_completion_tokens`, and `max_output_tokens` all set it. A value in
 `params` replaces whichever spelling the client sent, and a value in
-`default_params` applies only when the client sent none of them.
+`default_params` applies only when the client sent none of them. Across
+chained virtual models and policies the deeper row wins whichever spelling
+either used, and `response_format` and `verbosity` count as the same settings
+as `text.format` and `text.verbosity`.
 
 One parameter set serves every API, so the keys listed here are skipped on
 the API that lacks them, and the token limit, `response_format`, and

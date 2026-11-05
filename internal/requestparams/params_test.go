@@ -52,6 +52,8 @@ func TestNormalize(t *testing.T) {
 		{name: "json_schema format ok", set: Set{"response_format": raw(`{"type":"json_schema","json_schema":{"name":"s"}}`)}, want: Set{"response_format": raw(`{"type":"json_schema","json_schema":{"name":"s"}}`)}},
 		{name: "verbosity must be a string", set: Set{"verbosity": raw("1")}, wantErr: `"verbosity" has the wrong type`},
 		{name: "text must be an object", set: Set{"text": raw(`"low"`)}, wantErr: `"text" has the wrong type`},
+		{name: "response_format and text.format in one set", set: Set{"response_format": raw(`{"type":"json_object"}`), "text": raw(`{"format":{"type":"text"}}`)}, wantErr: `"response_format" and text.format set the same thing`},
+		{name: "verbosity beside a text object without it", set: Set{"verbosity": raw(`"low"`), "text": raw(`{"format":{"type":"text"}}`)}, want: Set{"verbosity": raw(`"low"`), "text": raw(`{"format":{"type":"text"}}`)}},
 		{name: "two spellings of the token limit", set: Set{"max_tokens": raw("1"), "max_output_tokens": raw("2")}, wantErr: `"max_output_tokens" and "max_tokens" set the same token limit`},
 		{name: "temperature must be a number", set: Set{"temperature": raw(`"hot"`)}, wantErr: `"temperature" has the wrong type`},
 		{name: "max_tokens must be an integer", set: Set{"max_tokens": raw(`1.5`)}, wantErr: `"max_tokens" has the wrong type`},
@@ -110,6 +112,24 @@ func TestDisjoint(t *testing.T) {
 	err = Disjoint(Set{"max_tokens": raw("1")}, Set{"max_completion_tokens": raw("2")})
 	require.Error(t, err, "token-limit spellings are one parameter")
 	assert.Contains(t, err.Error(), `"max_tokens" cannot be in both`)
+}
+
+// response_format and verbosity set members of the Responses text object, so
+// rows layer them with text member by member: the deeper row's setting wins
+// whichever spelling either row used.
+func TestLayerTreatsTextMembersAsOneSetting(t *testing.T) {
+	inner := Overrides{Params: Set{"text": raw(`{"format":{"type":"text"}}`)}}
+	outerFormat := Overrides{Params: Set{"response_format": raw(`{"type":"json_object"}`)}}
+	assert.Equal(t, Set{"text": raw(`{"format":{"type":"text"}}`)}, outerFormat.Layer(inner).Params,
+		"an inner text.format replaces an outer response_format")
+
+	outerText := Overrides{Params: Set{"text": raw(`{"format":{"type":"text"},"verbosity":"low"}`)}}
+	layered := outerText.Layer(Overrides{Params: Set{"response_format": raw(`{"type":"json_object"}`)}})
+	assert.Equal(t, Set{"text": raw(`{"verbosity":"low"}`), "response_format": raw(`{"type":"json_object"}`)}, layered.Params,
+		"an inner response_format removes only the outer text.format")
+
+	err := Disjoint(Set{"response_format": raw(`{"type":"json_object"}`)}, Set{"text": raw(`{"format":{"type":"text"}}`)})
+	require.Error(t, err, "a default and a forced value for the same text member")
 }
 
 // The token-limit spellings are one parameter when rows layer: the deeper

@@ -86,27 +86,87 @@ func without(set, other Set) Set {
 	if len(set) == 0 || len(other) == 0 {
 		return set
 	}
-	drop := canonicalKeys(other)
-	shared := false
-	for key := range set {
-		if _, ok := drop[canonicalKey(key)]; ok {
-			shared = true
-			break
-		}
-	}
-	if !shared {
-		return set
-	}
-	kept := make(Set, len(set))
+	var kept Set
 	for key, value := range set {
-		if _, ok := drop[canonicalKey(key)]; !ok {
-			kept[key] = value
+		pruned, keep := withoutOverlap(key, value, other)
+		if keep && bytes.Equal(pruned, value) {
+			continue
 		}
+		if kept == nil {
+			kept = maps.Clone(set)
+		}
+		if keep {
+			kept[key] = pruned
+		} else {
+			delete(kept, key)
+		}
+	}
+	if kept == nil {
+		return set
 	}
 	if len(kept) == 0 {
 		return nil
 	}
 	return kept
+}
+
+// textMemberKeys are the chat keys that set one member of the Responses
+// text object: the same setting as that member, so sets match and layer them
+// as one.
+var textMemberKeys = map[string]string{"response_format": "format", "verbosity": "verbosity"}
+
+// withoutOverlap returns key's value with whatever other also sets removed,
+// and whether anything of it is left. A key other sets in any spelling goes
+// whole; a text object loses only the members other sets through
+// response_format or verbosity.
+func withoutOverlap(key string, value json.RawMessage, other Set) (json.RawMessage, bool) {
+	if _, ok := canonicalKeys(other)[canonicalKey(key)]; ok {
+		return nil, false
+	}
+	if member, ok := textMemberKeys[key]; ok && setsTextMember(other, member) {
+		return nil, false
+	}
+	if key != "text" || value == nil {
+		return value, true
+	}
+	var members map[string]json.RawMessage
+	if json.Unmarshal(value, &members) != nil {
+		return value, true
+	}
+	removed := false
+	for chatKey, member := range textMemberKeys {
+		if _, ok := other[chatKey]; ok {
+			if _, set := members[member]; set {
+				delete(members, member)
+				removed = true
+			}
+		}
+	}
+	if !removed {
+		return value, true
+	}
+	if len(members) == 0 {
+		return nil, false
+	}
+	pruned, err := json.Marshal(members)
+	if err != nil {
+		return value, true
+	}
+	return pruned, true
+}
+
+// setsTextMember reports whether set's text object carries member.
+func setsTextMember(set Set, member string) bool {
+	raw, ok := set["text"]
+	if !ok || raw == nil {
+		return false
+	}
+	var members map[string]json.RawMessage
+	if json.Unmarshal(raw, &members) != nil {
+		return false
+	}
+	_, ok = members[member]
+	return ok
 }
 
 // Merge returns base with over's keys added, over winning on conflict. Sets
@@ -241,15 +301,19 @@ func Normalize(field string, set Set, allowNull bool) (Set, error) {
 		}
 		normalized[key] = compact
 	}
+	for chatKey, member := range textMemberKeys {
+		if _, ok := normalized[chatKey]; ok && setsTextMember(normalized, member) {
+			return nil, validation.NewError(fmt.Sprintf("%s: %q and text.%s set the same thing; keep one", field, chatKey, member), nil)
+		}
+	}
 	return normalized, nil
 }
 
 // Disjoint rejects a key configured in both sets of one row, where the
 // forced value would silently make the default dead.
 func Disjoint(defaults, params Set) error {
-	forced := canonicalKeys(params)
 	for _, key := range sortedKeys(defaults) {
-		if _, both := forced[canonicalKey(key)]; both {
+		if pruned, keep := withoutOverlap(key, defaults[key], params); !keep || !bytes.Equal(pruned, defaults[key]) {
 			return validation.NewError(fmt.Sprintf("parameter %q cannot be in both params and default_params", key), nil)
 		}
 	}
