@@ -60,8 +60,11 @@ type RedisResponseConfig struct {
 
 // ResponseCacheConfig holds configuration for response cache middleware.
 type ResponseCacheConfig struct {
-	Simple   *SimpleCacheConfig   `yaml:"simple"`
-	Semantic *SemanticCacheConfig `yaml:"semantic"`
+	// PartitionByUserPath gives each effective user path its own entries in both
+	// cache layers. Off by default: entries are shared across callers.
+	PartitionByUserPath bool                 `yaml:"partition_by_user_path" env:"RESPONSE_CACHE_PARTITION_BY_USER_PATH"`
+	Simple              *SimpleCacheConfig   `yaml:"simple"`
+	Semantic            *SemanticCacheConfig `yaml:"semantic"`
 }
 
 // SimpleCacheConfig holds configuration for exact-match response caching.

@@ -15,9 +15,10 @@ import (
 // It must not advertise native batch, file, or audio support.
 func TestChatCompatibleContract(t *testing.T) {
 	providertest.AssertChatCompatible(t, providertest.ChatCompatible{
-		Registration:   Registration,
-		Type:           "fireworks",
-		DefaultBaseURL: "https://api.fireworks.ai/inference/v1",
+		Registration:         Registration,
+		Type:                 "fireworks",
+		DefaultBaseURL:       "https://api.fireworks.ai/inference/v1",
+		ForwardsAllowedTools: true,
 		New: func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider {
 			opts := providertest.Options(hooks)
 			opts.HTTPClient = client

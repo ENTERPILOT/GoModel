@@ -2,6 +2,7 @@
 // node:test suite can exercise it directly.
 
 import * as m from "../../lib/paraglide/messages.js";
+import { filterFields, normalizeQuery } from "../../lib/utils/textMatch.js";
 
 // Tool filter modes. "exclude" stores disallowed_tools: every tool is exposed
 // except the listed ones, so tools the server adds later appear automatically.
@@ -177,26 +178,14 @@ export function mcpHeaderRowsToObject(rows) {
 }
 
 export function filterMcpServers(servers, filter) {
-  const list = Array.isArray(servers) ? servers : [];
-  if (!filter) {
-    return list;
-  }
-  const needle = String(filter).toLowerCase();
-  return list.filter((server) => {
-    const fields = [
-      server.name,
-      server.slug,
-      server.url,
-      server.transport,
-      server.description,
-      server.status,
-    ];
-    return fields.some((value) =>
-      String(value || "")
-        .toLowerCase()
-        .includes(needle),
-    );
-  });
+  return filterFields(servers, filter, (server) => [
+    server.name,
+    server.slug,
+    server.url,
+    server.transport,
+    server.description,
+    server.status,
+  ]);
 }
 
 // mcpServerFormFromServer prefills the editor form for an existing row.
@@ -606,7 +595,7 @@ export function switchMcpToolMode(form, mode, discovered) {
 // tools, or names added before the server connected). query narrows by name
 // or description.
 export function mcpToolPickerRows(form, discovered, query) {
-  const needle = String(query || "").trim().toLowerCase();
+  const needle = normalizeQuery(query);
   const known = new Set((discovered || []).map((tool) => tool.name));
   const rows = (discovered || []).map((tool) => ({
     ...tool,
@@ -628,11 +617,7 @@ export function mcpToolPickerRows(form, discovered, query) {
   if (!needle) {
     return rows;
   }
-  return rows.filter(
-    (row) =>
-      row.name.toLowerCase().includes(needle) ||
-      row.description.toLowerCase().includes(needle),
-  );
+  return filterFields(rows, needle, (row) => [row.name, row.description]);
 }
 
 // mcpToolSelectionSummary counts discovered tools only: a listed name the

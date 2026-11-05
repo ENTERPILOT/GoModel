@@ -557,17 +557,27 @@ func mongoSubjectMatch(window SpendWindow) (bson.D, error) {
 		if err != nil {
 			return nil, err
 		}
-		return bson.D{{Key: "$in", Value: bson.A{bson.D{{Key: "$literal", Value: subject}}, bson.D{{Key: "$ifNull", Value: bson.A{"$labels", bson.A{}}}}}}}, nil
+		return mongoConsumerSpendMatch(bson.D{{Key: "$in", Value: bson.A{bson.D{{Key: "$literal", Value: subject}}, bson.D{{Key: "$ifNull", Value: bson.A{"$labels", bson.A{}}}}}}}), nil
 	}
 	userPath, err := NormalizeUserPath(window.Subject)
 	if err != nil {
 		return nil, err
 	}
 	// Missing and blank user paths count as the root, matching the SQL stores.
-	return bson.D{{Key: "$regexMatch", Value: bson.D{
+	return mongoConsumerSpendMatch(bson.D{{Key: "$regexMatch", Value: bson.D{
 		{Key: "input", Value: mongoTrimmedOr("$user_path", "/")},
 		{Key: "regex", Value: usagePathRegex(userPath)},
-	}}}, nil
+	}}}), nil
+}
+
+// mongoConsumerSpendMatch wraps a user-path or label predicate so documents
+// served by a non-billable provider add nothing, matching the SQL stores. A
+// document without the field predates it and is billable.
+func mongoConsumerSpendMatch(condition bson.D) bson.D {
+	return bson.D{{Key: "$and", Value: bson.A{
+		condition,
+		bson.D{{Key: "$ne", Value: bson.A{bson.D{{Key: "$ifNull", Value: bson.A{"$billable", true}}}, false}}},
+	}}}
 }
 
 // mongoTrimmedOr renders a field trimmed of whitespace, or fallback when the

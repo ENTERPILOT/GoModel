@@ -41,7 +41,8 @@ func TestLogBatchUsageFromBatchResultsOnlySetsObservedCostComponents(t *testing.
 			ID:       "batch_cost_components",
 			Provider: "openai",
 		},
-		RequestID: "req-batch-cost-components",
+		ProviderName: "openai-byok",
+		RequestID:    "req-batch-cost-components",
 	}
 	result := &core.BatchResultsResponse{
 		Object:  "list",
@@ -74,6 +75,8 @@ func TestLogBatchUsageFromBatchResultsOnlySetsObservedCostComponents(t *testing.
 	)
 	require.True(t, logged)
 	require.Len(t, logger.entries, 1)
+	assert.Equal(t, "openai-byok", logger.entries[0].ProviderName, "rows name the instance, not just its type")
+	assert.Equal(t, "openai", logger.entries[0].Provider)
 
 	got := stored.Batch.Usage
 	require.NotNil(t, got.InputCost)

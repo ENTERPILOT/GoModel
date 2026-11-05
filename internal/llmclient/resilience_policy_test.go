@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -164,4 +165,52 @@ func TestEmptyStatusPoliciesDisableStatusTriggers(t *testing.T) {
 		require.False(t, client.isRetryable(status))
 		require.False(t, client.shouldTripCircuitBreaker(status), "%d must not trigger anything once the lists are explicitly empty", status)
 	}
+}
+
+func TestWithoutCircuitBreaker(t *testing.T) {
+	bypass := WithoutCircuitBreaker(context.Background())
+	newClient := func(t *testing.T, status *atomic.Int32) *Client {
+		t.Helper()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(int(status.Load()))
+			_, _ = w.Write([]byte(`{}`))
+		}))
+		t.Cleanup(server.Close)
+		cfg := DefaultConfig("test", server.URL)
+		cfg.Retry.MaxRetries = 0
+		cfg.CircuitBreaker.FailureThreshold = 1
+		cfg.CircuitBreaker.Timeout = time.Hour
+		return New(cfg, nil)
+	}
+	request := Request{Method: http.MethodGet, Endpoint: "/models"}
+
+	t.Run("failures do not open the circuit", func(t *testing.T) {
+		var status atomic.Int32
+		status.Store(http.StatusInternalServerError)
+		client := newClient(t, &status)
+
+		for range 3 {
+			_, err := client.DoRaw(bypass, request)
+			require.Error(t, err)
+		}
+		assert.Equal(t, "closed", client.circuitBreaker.State())
+	})
+
+	t.Run("open circuit neither blocks it nor closes on its success", func(t *testing.T) {
+		var status atomic.Int32
+		status.Store(http.StatusInternalServerError)
+		client := newClient(t, &status)
+		_, err := client.DoRaw(context.Background(), request)
+		require.Error(t, err)
+		require.Equal(t, "open", client.circuitBreaker.State())
+
+		status.Store(http.StatusOK)
+		for range 3 {
+			_, err = client.DoRaw(bypass, request)
+			require.NoError(t, err)
+		}
+		assert.Equal(t, "open", client.circuitBreaker.State())
+		_, err = client.DoRaw(context.Background(), request)
+		assert.ErrorIs(t, err, ErrCircuitOpen)
+	})
 }

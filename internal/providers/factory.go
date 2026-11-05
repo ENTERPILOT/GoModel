@@ -94,6 +94,10 @@ type Registration struct {
 	New                         ProviderConstructor
 	PassthroughSemanticEnricher core.PassthroughSemanticEnricher
 	Discovery                   DiscoveryConfig
+	// MCPServers lists the MCP servers the provider hosts, which
+	// mcp.provider_servers can expose through the MCP gateway. Nil for
+	// providers that host none.
+	MCPServers BuiltinMCPServersFunc
 }
 
 // ProviderFactory manages provider registration and creation.
@@ -102,6 +106,7 @@ type ProviderFactory struct {
 	builders             map[string]ProviderConstructor
 	discoveryConfigs     map[string]DiscoveryConfig
 	passthroughEnrichers map[string]core.PassthroughSemanticEnricher
+	mcpServers           map[string]BuiltinMCPServersFunc
 	hooks                llmclient.Hooks
 	proxySelector        ext.ProxySelector
 }
@@ -112,6 +117,7 @@ func NewProviderFactory() *ProviderFactory {
 		builders:             make(map[string]ProviderConstructor),
 		discoveryConfigs:     make(map[string]DiscoveryConfig),
 		passthroughEnrichers: make(map[string]core.PassthroughSemanticEnricher),
+		mcpServers:           make(map[string]BuiltinMCPServersFunc),
 	}
 }
 
@@ -156,6 +162,11 @@ func (f *ProviderFactory) Add(reg Registration) {
 		f.passthroughEnrichers[reg.Type] = reg.PassthroughSemanticEnricher
 	} else {
 		delete(f.passthroughEnrichers, reg.Type)
+	}
+	if reg.MCPServers != nil {
+		f.mcpServers[reg.Type] = reg.MCPServers
+	} else {
+		delete(f.mcpServers, reg.Type)
 	}
 }
 

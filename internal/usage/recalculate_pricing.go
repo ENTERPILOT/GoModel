@@ -66,7 +66,9 @@ type recalculationEntry struct {
 	// billed at, so changed markup rules never rewrite past bills.
 	CacheType     string
 	MarkupPercent *float64
-	Billing       Billing
+	// NonBillable rows stay billed at zero whatever their new cost.
+	NonBillable bool
+	Billing     Billing
 }
 
 type recalculationUpdate struct {
@@ -187,6 +189,9 @@ func recalculatePricingUnavailable(resolver PricingResolver) error {
 func entryBilledCost(entry recalculationEntry, totalCost *float64) *float64 {
 	if !entry.Billing.Enabled {
 		return nil
+	}
+	if entry.NonBillable {
+		return new(0.0)
 	}
 	return BilledCost(totalCost, entry.MarkupPercent, entry.CacheType != "", entry.Billing.BillCacheHits)
 }

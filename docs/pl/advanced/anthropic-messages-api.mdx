@@ -37,7 +37,9 @@ streamingowych, jak i niestreamingowych.
 
 Natywne przekazywanie działa automatycznie. Requesty wracają do pipeline'u
 z tłumaczeniem, gdy w grę wchodzi funkcja działająca na kanonicznym requeście:
-modyfikowanie requestu przez guardrails, cache odpowiedzi lub routing z failoverem.
+modyfikowanie requestu przez guardrails, cache odpowiedzi, routing z failoverem
+lub wymuszony [reasoning effort](/pl/features/virtual-models#wymuszanie-reasoning-effort).
+[Spowolnienie](/pl/features/slowdown) opóźnia natywne przekazywanie bezpośrednio.
 Requesty rozwiązywane do providera innego niż Anthropic są zawsze tłumaczone.
 
 Ponieważ body jest przekazywane bez zmian, na tej ścieżce nie obowiązuje żadne
@@ -192,7 +194,7 @@ w dashboardzie.
 
 Te ograniczenia dotyczą pipeline'u **z tłumaczeniem** – requestów kierowanych do
 providera innego niż Anthropic albo do Anthropic, gdy działają guardrails, cache
-odpowiedzi lub failover. Requesty [natywnie przekazywane do Anthropic](#natywne-przekazywanie-do-anthropic)
+odpowiedzi, failover lub wymuszony reasoning effort. Requesty [natywnie przekazywane do Anthropic](#natywne-przekazywanie-do-anthropic)
 są zachowywane bajt w bajt, z wyjątkiem wartości `model`, gdy alias został
 rozwiązany do innej nazwy, i nic z poniższego ich nie dotyczy.
 
