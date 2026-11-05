@@ -31,13 +31,14 @@ func (c *fakeClock) Advance(d time.Duration) {
 	c.now = c.now.Add(d)
 }
 
-// clusterStore is a memStore on a fake clock, recording the since of every
-// load.
+// clusterStore is a memStore on a fake clock, recording the since and the
+// excluded writer of every load.
 type clusterStore struct {
 	memStore
-	clock *fakeClock
-	loads []int64
-	saves int
+	clock    *fakeClock
+	loads    []int64
+	excludes []string
+	saves    int
 }
 
 func newClusterStore(t *testing.T, rules ...Rule) *clusterStore {
@@ -49,9 +50,10 @@ func newClusterStore(t *testing.T, rules ...Rule) *clusterStore {
 	return store
 }
 
-func (s *clusterStore) LoadCounters(ctx context.Context, since int64) ([]WindowSnapshot, error) {
+func (s *clusterStore) LoadCounters(ctx context.Context, since int64, exclude string) ([]WindowSnapshot, error) {
 	s.loads = append(s.loads, since)
-	return s.memStore.LoadCounters(ctx, since)
+	s.excludes = append(s.excludes, exclude)
+	return s.memStore.LoadCounters(ctx, since, exclude)
 }
 
 func (s *clusterStore) SaveCounters(ctx context.Context, snapshots []WindowSnapshot) error {
@@ -291,11 +293,11 @@ type failingLoadStore struct {
 	err error
 }
 
-func (s *failingLoadStore) LoadCounters(ctx context.Context, since int64) ([]WindowSnapshot, error) {
+func (s *failingLoadStore) LoadCounters(ctx context.Context, since int64, exclude string) ([]WindowSnapshot, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
-	return s.clusterStore.LoadCounters(ctx, since)
+	return s.clusterStore.LoadCounters(ctx, since, exclude)
 }
 
 // A store that stays unreadable must not keep a stopped peer's slots taken:
@@ -357,6 +359,7 @@ func TestIncrementalLoadKeepsUnchangedRowsAndDropsRolledOutOnes(t *testing.T) {
 	a.flush(ctx)
 	b.flush(ctx)
 	require.Equal(t, int64(3), requestsUsed(t, b, now()))
+	assert.Equal(t, []string{a.writer, b.writer, a.writer, b.writer}, store.excludes, "a replica never reads its own rows back")
 	since := store.loads[len(store.loads)-1]
 	assert.Equal(t, now().Add(-peerLoadOverlap).Unix(), since, "a flush loads only rows saved since the last load")
 
@@ -368,7 +371,7 @@ func TestIncrementalLoadKeepsUnchangedRowsAndDropsRolledOutOnes(t *testing.T) {
 	store.clock.Advance(30 * time.Second)
 	b.flush(ctx)
 	b.flush(ctx)
-	rows, err := store.memStore.LoadCounters(ctx, store.loads[len(store.loads)-1])
+	rows, err := store.memStore.LoadCounters(ctx, store.loads[len(store.loads)-1], b.writer)
 	require.NoError(t, err)
 	require.Empty(t, rows)
 	assert.Equal(t, int64(3), requestsUsed(t, b, now()))

@@ -282,9 +282,11 @@ The limit is approximate, not exact:
 Each flush writes only the request and token counters that changed since
 the last one, plus every nonzero concurrency gauge, which is rewritten on
 every flush as a heartbeat so other replicas can tell a live replica's slots
-from a crashed one's. It reads only the rows written since its previous
-read, with a full read once a minute. [Budgets](/features/budgets) remain
-the durable control for spend.
+from a crashed one's. It reads only the rows other replicas wrote since its
+previous read, with a full read once a minute. Rows nobody has saved for two
+of their periods (a day for concurrency gauges) are deleted about once a
+minute per replica; on MongoDB a TTL index on `expires_at` deletes them.
+[Budgets](/features/budgets) remain the durable control for spend.
 
 ## Client behavior
 

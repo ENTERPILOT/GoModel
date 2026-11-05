@@ -94,10 +94,10 @@ func (m *memStore) ReplaceConfigRules(ctx context.Context, rules []Rule) error {
 
 func (m *memStore) Close() error { return nil }
 
-func (m *memStore) LoadCounters(_ context.Context, since int64) ([]WindowSnapshot, error) {
+func (m *memStore) LoadCounters(_ context.Context, since int64, exclude string) ([]WindowSnapshot, error) {
 	var rows []WindowSnapshot
 	for _, snap := range m.counters {
-		if snap.UpdatedAt >= since {
+		if snap.UpdatedAt >= since && (exclude == "" || snap.Writer != exclude) {
 			rows = append(rows, snap)
 		}
 	}
@@ -109,9 +109,7 @@ func snapshotIdentity(s WindowSnapshot) string {
 	return s.Scope + "\x00" + s.Subject + "\x00" + s.Partition + "\x00" + strconv.FormatInt(s.PeriodSeconds, 10) + "\x00" + s.Writer
 }
 
-// SaveCounters mirrors the real stores: stamp and upsert by identity, then
-// collect window rows that went two periods without a write and in-flight
-// rows that went inFlightRowRetention.
+// SaveCounters mirrors the real stores: stamp and upsert by identity.
 func (m *memStore) SaveCounters(_ context.Context, snapshots []WindowSnapshot) error {
 	now := m.clock().Unix()
 	for _, snap := range snapshots {
@@ -128,13 +126,16 @@ func (m *memStore) SaveCounters(_ context.Context, snapshots []WindowSnapshot) e
 			m.counters = append(m.counters, snap)
 		}
 	}
+	return nil
+}
+
+// PruneCounters mirrors the real stores: it collects the rows whose
+// retention since their last save ran out.
+func (m *memStore) PruneCounters(context.Context) error {
+	now := m.clock().Unix()
 	kept := m.counters[:0]
 	for _, snap := range m.counters {
-		retention := 2 * snap.PeriodSeconds
-		if snap.PeriodSeconds == PeriodConcurrent {
-			retention = inFlightRowRetention
-		}
-		if snap.UpdatedAt+retention >= now {
+		if snap.UpdatedAt+counterRetention(snap.PeriodSeconds) >= now {
 			kept = append(kept, snap)
 		}
 	}
