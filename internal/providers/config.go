@@ -30,8 +30,12 @@ type ProviderConfig struct {
 	// paths ("providers.openai.api_keys[1]") or environment variable names
 	// ("OPENAI_API_KEY_2"); more than one when identical keys were collapsed.
 	// Set by configuration resolution; nil elsewhere.
-	APIKeySources            [][]string
-	SessionStickyKeys        bool
+	APIKeySources     [][]string
+	SessionStickyKeys bool
+	// Billable is false for a provider whose cost the caller does not owe the
+	// operator (a customer's own key): its usage is tracked but billed at
+	// zero, and user-path and label budgets ignore it.
+	Billable                 bool
 	BaseURL                  string
 	APIVersion               string
 	Backend                  string
@@ -305,6 +309,7 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 		APIKey:                   raw.APIKey,
 		APIKeys:                  raw.APIKeys,
 		SessionStickyKeys:        sessionStickyKeysEnabled(raw.SessionStickyKeys),
+		Billable:                 enabledByDefault(raw.Billable),
 		BaseURL:                  raw.BaseURL,
 		APIVersion:               raw.APIVersion,
 		Backend:                  raw.Backend,

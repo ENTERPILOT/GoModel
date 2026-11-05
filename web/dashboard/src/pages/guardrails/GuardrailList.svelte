@@ -5,6 +5,7 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import LoadingState from "$lib/components/molecules/LoadingState.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
+  import HighlightText from "$lib/components/atoms/HighlightText.svelte";
   import { auth } from "$lib/stores/auth.svelte.js";
   import { guardrailsStore as store } from "./guardrails.svelte.js";
   import { guardrailDegraded } from "./guardrails-logic.js";
@@ -69,7 +70,7 @@
           {#each store.filtered as guardrail (guardrail.name)}
             <tr>
               <td class="mono font-size-md">
-                {guardrail.name}
+                <HighlightText text={guardrail.name} needle={store.filter} />
                 {#if guardrailDegraded(guardrail)}
                   <span
                     class="settings-guardrail-health is-degraded"
@@ -93,14 +94,14 @@
                   {/each}
                 </div>
               </td>
-              <td class="mono font-size-md">{guardrail.user_path || "—"}</td>
+              <td class="mono font-size-md"><HighlightText text={guardrail.user_path || "—"} needle={store.filter} /></td>
               <td>
                 <div class="settings-guardrail-summary">
-                  {guardrail.summary || guardrail.description || m.guardrails_no_summary()}
+                  <HighlightText text={guardrail.summary || guardrail.description || m.guardrails_no_summary()} needle={store.filter} />
                 </div>
                 {#if guardrail.description}
                   <div class="settings-guardrail-description">
-                    {guardrail.description}
+                    <HighlightText text={guardrail.description} needle={store.filter} />
                   </div>
                 {/if}
               </td>

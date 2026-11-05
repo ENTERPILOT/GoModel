@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestparams"
 )
 
 // Target is one concrete (provider, model) destination of a redirect.
@@ -63,7 +64,13 @@ type VirtualModel struct {
 	// request sent upstream through this redirect or to this model, whatever
 	// the client asked for. Empty leaves the client's value untouched.
 	ReasoningEffort string `json:"reasoning_effort,omitempty" bson:"reasoning_effort,omitempty"`
-	Enabled         bool   `json:"enabled" bson:"enabled"`
+	// Params are request parameters forced on every request sent upstream
+	// through this redirect or to this model, replacing the client's values;
+	// a null value strips the key. DefaultParams are filled in only when the
+	// client omitted the key. Keys use Chat Completions spelling.
+	Params        requestparams.Set `json:"params,omitempty" bson:"params,omitempty" swaggertype:"object"`
+	DefaultParams requestparams.Set `json:"default_params,omitempty" bson:"default_params,omitempty" swaggertype:"object"`
+	Enabled       bool              `json:"enabled" bson:"enabled"`
 
 	// ContextWindow and MaxOutputTokens are the token limits /v1/models lists
 	// for a redirect. Nil derives each from the targets: the smallest value
@@ -159,6 +166,8 @@ func (v VirtualModel) clone() VirtualModel {
 		v.Targets = append([]Target(nil), v.Targets...)
 	}
 	v.StrategyConfig = cloneStrategyConfig(v.StrategyConfig)
+	v.Params = requestparams.Clone(v.Params)
+	v.DefaultParams = requestparams.Clone(v.DefaultParams)
 	if len(v.UserPaths) > 0 {
 		v.UserPaths = append([]string(nil), v.UserPaths...)
 	}
@@ -238,17 +247,19 @@ type View struct {
 	Slowdown *float64 `json:"slowdown,omitempty"`
 	// ContextWindow and MaxOutputTokens are the explicitly configured token
 	// limits; nil means /v1/models derives them from the targets.
-	ContextWindow   *int      `json:"context_window,omitempty"`
-	MaxOutputTokens *int      `json:"max_output_tokens,omitempty"`
-	ReasoningEffort string    `json:"reasoning_effort,omitempty"`
-	Enabled         bool      `json:"enabled"`
-	Managed         bool      `json:"managed,omitempty"`
-	ResolvedModel   string    `json:"resolved_model,omitempty"`
-	ProviderType    string    `json:"provider_type,omitempty"`
-	Valid           bool      `json:"valid,omitempty"`
-	ScopeKind       string    `json:"scope_kind,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ContextWindow   *int              `json:"context_window,omitempty"`
+	MaxOutputTokens *int              `json:"max_output_tokens,omitempty"`
+	ReasoningEffort string            `json:"reasoning_effort,omitempty"`
+	Params          requestparams.Set `json:"params,omitempty" swaggertype:"object"`
+	DefaultParams   requestparams.Set `json:"default_params,omitempty" swaggertype:"object"`
+	Enabled         bool              `json:"enabled"`
+	Managed         bool              `json:"managed,omitempty"`
+	ResolvedModel   string            `json:"resolved_model,omitempty"`
+	ProviderType    string            `json:"provider_type,omitempty"`
+	Valid           bool              `json:"valid,omitempty"`
+	ScopeKind       string            `json:"scope_kind,omitempty"`
+	CreatedAt       time.Time         `json:"created_at"`
+	UpdatedAt       time.Time         `json:"updated_at"`
 }
 
 // Resolution captures the requested selector and the concrete selector chosen
@@ -258,7 +269,7 @@ type Resolution struct {
 	Resolved  core.ModelSelector
 	Source    string
 	// Path lists the virtual models routing passed through, outermost first,
-	// when a redirect forces a reasoning effort.
+	// when a redirect forces a reasoning effort or request parameters.
 	Path []string
 }
 

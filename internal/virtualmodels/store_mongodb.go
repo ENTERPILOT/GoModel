@@ -13,24 +13,28 @@ import (
 )
 
 type mongoVirtualModelDocument struct {
-	ID              string    `bson:"_id"`
-	Targets         []Target  `bson:"targets,omitempty"`
-	Strategy        string    `bson:"strategy,omitempty"`
-	StrategyPlugin  string    `bson:"strategy_plugin,omitempty"`
-	StrategyConfig  bson.M    `bson:"strategy_config,omitempty"`
-	SessionAffinity *bool     `bson:"session_affinity,omitempty"`
-	Failover        *bool     `bson:"failover,omitempty"`
-	ProviderName    string    `bson:"provider_name,omitempty"`
-	Model           string    `bson:"model,omitempty"`
-	UserPaths       []string  `bson:"user_paths,omitempty"`
-	Description     string    `bson:"description,omitempty"`
-	Slowdown        *float64  `bson:"slowdown,omitempty"`
-	ContextWindow   *int      `bson:"context_window,omitempty"`
-	MaxOutputTokens *int      `bson:"max_output_tokens,omitempty"`
-	ReasoningEffort string    `bson:"reasoning_effort,omitempty"`
-	Enabled         bool      `bson:"enabled"`
-	CreatedAt       time.Time `bson:"created_at"`
-	UpdatedAt       time.Time `bson:"updated_at"`
+	ID              string   `bson:"_id"`
+	Targets         []Target `bson:"targets,omitempty"`
+	Strategy        string   `bson:"strategy,omitempty"`
+	StrategyPlugin  string   `bson:"strategy_plugin,omitempty"`
+	StrategyConfig  bson.M   `bson:"strategy_config,omitempty"`
+	SessionAffinity *bool    `bson:"session_affinity,omitempty"`
+	Failover        *bool    `bson:"failover,omitempty"`
+	ProviderName    string   `bson:"provider_name,omitempty"`
+	Model           string   `bson:"model,omitempty"`
+	UserPaths       []string `bson:"user_paths,omitempty"`
+	Description     string   `bson:"description,omitempty"`
+	Slowdown        *float64 `bson:"slowdown,omitempty"`
+	ContextWindow   *int     `bson:"context_window,omitempty"`
+	MaxOutputTokens *int     `bson:"max_output_tokens,omitempty"`
+	ReasoningEffort string   `bson:"reasoning_effort,omitempty"`
+	// Params and DefaultParams are stored as JSON text so numbers keep their
+	// exact configured form; a document would go through float64.
+	Params        string    `bson:"params,omitempty"`
+	DefaultParams string    `bson:"default_params,omitempty"`
+	Enabled       bool      `bson:"enabled"`
+	CreatedAt     time.Time `bson:"created_at"`
+	UpdatedAt     time.Time `bson:"updated_at"`
 }
 
 type mongoVirtualModelIDFilter struct {
@@ -76,7 +80,11 @@ func (s *MongoDBStore) List(ctx context.Context) ([]VirtualModel, error) {
 		if err := cursor.Decode(&doc); err != nil {
 			return nil, fmt.Errorf("decode virtual model: %w", err)
 		}
-		result = append(result, virtualModelFromMongo(doc))
+		vm, err := virtualModelFromMongo(doc)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, vm)
 	}
 	if err := cursor.Err(); err != nil {
 		return nil, fmt.Errorf("iterate virtual models: %w", err)
@@ -93,12 +101,23 @@ func (s *MongoDBStore) Get(ctx context.Context, source string) (*VirtualModel, e
 		}
 		return nil, fmt.Errorf("get virtual model: %w", err)
 	}
-	vm := virtualModelFromMongo(doc)
+	vm, err := virtualModelFromMongo(doc)
+	if err != nil {
+		return nil, err
+	}
 	return &vm, nil
 }
 
 func (s *MongoDBStore) Upsert(ctx context.Context, vm VirtualModel) error {
 	stampUpsert(&vm)
+	paramsJSON, err := encodeParams("params", vm.Params)
+	if err != nil {
+		return err
+	}
+	defaultParamsJSON, err := encodeParams("default_params", vm.DefaultParams)
+	if err != nil {
+		return err
+	}
 	update := bson.M{
 		"$set": bson.M{
 			"targets":           vm.Targets,
@@ -115,6 +134,8 @@ func (s *MongoDBStore) Upsert(ctx context.Context, vm VirtualModel) error {
 			"context_window":    vm.ContextWindow,
 			"max_output_tokens": vm.MaxOutputTokens,
 			"reasoning_effort":  vm.ReasoningEffort,
+			"params":            paramsJSON,
+			"default_params":    defaultParamsJSON,
 			"enabled":           vm.Enabled,
 			"updated_at":        vm.UpdatedAt,
 		},
@@ -122,8 +143,7 @@ func (s *MongoDBStore) Upsert(ctx context.Context, vm VirtualModel) error {
 			"created_at": vm.CreatedAt,
 		},
 	}
-	_, err := s.collection.UpdateOne(ctx, mongoVirtualModelIDFilter{ID: strings.TrimSpace(vm.Source)}, update, options.UpdateOne().SetUpsert(true))
-	if err != nil {
+	if _, err := s.collection.UpdateOne(ctx, mongoVirtualModelIDFilter{ID: strings.TrimSpace(vm.Source)}, update, options.UpdateOne().SetUpsert(true)); err != nil {
 		return fmt.Errorf("upsert virtual model: %w", err)
 	}
 	return nil
@@ -144,7 +164,15 @@ func (s *MongoDBStore) Close() error {
 	return nil
 }
 
-func virtualModelFromMongo(doc mongoVirtualModelDocument) VirtualModel {
+func virtualModelFromMongo(doc mongoVirtualModelDocument) (VirtualModel, error) {
+	params, err := decodeParams("params", []byte(doc.Params))
+	if err != nil {
+		return VirtualModel{}, fmt.Errorf("virtual model %q: %w", doc.ID, err)
+	}
+	defaultParams, err := decodeParams("default_params", []byte(doc.DefaultParams))
+	if err != nil {
+		return VirtualModel{}, fmt.Errorf("virtual model %q: %w", doc.ID, err)
+	}
 	vm := VirtualModel{
 		Source:          doc.ID,
 		Strategy:        doc.Strategy,
@@ -159,6 +187,8 @@ func virtualModelFromMongo(doc mongoVirtualModelDocument) VirtualModel {
 		ContextWindow:   doc.ContextWindow,
 		MaxOutputTokens: doc.MaxOutputTokens,
 		ReasoningEffort: doc.ReasoningEffort,
+		Params:          params,
+		DefaultParams:   defaultParams,
 		Enabled:         doc.Enabled,
 		CreatedAt:       doc.CreatedAt.UTC(),
 		UpdatedAt:       doc.UpdatedAt.UTC(),
@@ -169,7 +199,7 @@ func virtualModelFromMongo(doc mongoVirtualModelDocument) VirtualModel {
 	if len(doc.UserPaths) > 0 {
 		vm.UserPaths = append([]string(nil), doc.UserPaths...)
 	}
-	return vm
+	return vm, nil
 }
 
 // strategyConfigFromBSON turns a decoded config into plain maps and slices:

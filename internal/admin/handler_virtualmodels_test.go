@@ -9,6 +9,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/goccy/go-json"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -410,6 +411,54 @@ func TestUpsertVirtualModelReasoningEffort(t *testing.T) {
 			}
 			view := echotest.Decode[virtualmodels.View](t, rec)
 			assert.Equal(t, tt.wantEffort, view.ReasoningEffort)
+		})
+	}
+}
+
+func TestUpsertVirtualModelRequestParams(t *testing.T) {
+	tests := []struct {
+		name         string
+		body         string
+		wantStatus   int
+		wantParams   string
+		wantDefaults string
+	}{
+		{
+			name:         "redirect",
+			body:         `{"source":"fast","target_model":"openai/gpt-4o","params":{"chat_template_kwargs":{"enable_thinking":true},"top_k":null},"default_params":{"temperature":1.0}}`,
+			wantStatus:   http.StatusOK,
+			wantParams:   `{"chat_template_kwargs":{"enable_thinking":true},"top_k":null}`,
+			wantDefaults: `{"temperature":1.0}`,
+		},
+		{name: "model", body: `{"source":"openai/gpt-4o","default_params":{"top_k":20}}`, wantStatus: http.StatusOK, wantDefaults: `{"top_k":20}`},
+		{name: "frozen key", body: `{"source":"fast","target_model":"openai/gpt-4o","params":{"model":"x"}}`, wantStatus: http.StatusBadRequest},
+		{name: "wrong type", body: `{"source":"fast","target_model":"openai/gpt-4o","default_params":{"temperature":"hot"}}`, wantStatus: http.StatusBadRequest},
+		{name: "null default", body: `{"source":"fast","target_model":"openai/gpt-4o","default_params":{"top_k":null}}`, wantStatus: http.StatusBadRequest},
+		{name: "key in both maps", body: `{"source":"fast","target_model":"openai/gpt-4o","params":{"top_k":1},"default_params":{"top_k":2}}`, wantStatus: http.StatusBadRequest},
+		{name: "provider scope", body: `{"source":"openai/","params":{"top_k":1}}`, wantStatus: http.StatusBadRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newVMHandler(t)
+			c, rec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", tt.body)
+			err := h.UpsertVirtualModel(c)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+			if tt.wantStatus != http.StatusOK {
+				return
+			}
+			view := echotest.Decode[virtualmodels.View](t, rec)
+			if tt.wantParams == "" {
+				assert.Nil(t, view.Params)
+			} else {
+				got, err := json.Marshal(view.Params)
+				require.NoError(t, err)
+				assert.JSONEq(t, tt.wantParams, string(got))
+			}
+			got, err := json.Marshal(view.DefaultParams)
+			require.NoError(t, err)
+			assert.JSONEq(t, tt.wantDefaults, string(got))
 		})
 	}
 }

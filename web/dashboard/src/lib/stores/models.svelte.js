@@ -3,6 +3,7 @@
 // links into filtered views.
 
 import { getJSON, isAbortError } from "$lib/api/client.js";
+import { filterFields } from "$lib/utils/textMatch.js";
 
 class ModelsStore {
   models = $state([]);
@@ -69,19 +70,19 @@ class ModelsStore {
 
   get filteredModels() {
     if (!this.filter) return this.models;
-    const f = this.filter.toLowerCase();
-    return this.models.filter(
-      (m) =>
-        (m.model?.id ?? "").toLowerCase().includes(f) ||
-        (m.provider_name ?? "").toLowerCase().includes(f) ||
-        (m.provider_type ?? "").toLowerCase().includes(f) ||
-        (m.selector ?? "").toLowerCase().includes(f) ||
-        (m.model?.owned_by ?? "").toLowerCase().includes(f) ||
-        (m.model?.metadata?.categories ?? [])
-          .join(",")
-          .toLowerCase()
-          .includes(f),
-    );
+    return filterFields(this.models, this.filter, (m) => [
+      m.model?.id ?? "",
+      m.provider_name ?? "",
+      m.provider_type ?? "",
+      m.selector ?? "",
+      m.model?.owned_by ?? "",
+      ...(m.model?.metadata?.categories ?? []),
+    ], (entry) => {
+      // The old filter read the comma-joined list; that haystack stays
+      // substring-only so a subsequence cannot span two categories.
+      const categories = entry.model?.metadata?.categories ?? [];
+      return categories.length ? [categories.join(",")] : [];
+    });
   }
 }
 

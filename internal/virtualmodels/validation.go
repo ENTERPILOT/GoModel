@@ -8,6 +8,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/modelselectors"
+	"github.com/enterpilot/gomodel/internal/requestparams"
 	"github.com/enterpilot/gomodel/internal/validation"
 )
 
@@ -39,11 +40,9 @@ func normalizeRedirect(vm VirtualModel) (VirtualModel, []core.ModelSelector, err
 	if err := validateTokenLimits(vm); err != nil {
 		return VirtualModel{}, nil, err
 	}
-	effort, err := normalizeReasoningEffort(vm.ReasoningEffort)
-	if err != nil {
+	if err := normalizeOverrides(&vm); err != nil {
 		return VirtualModel{}, nil, err
 	}
-	vm.ReasoningEffort = effort
 
 	if vm.Source == "" {
 		return VirtualModel{}, nil, newValidationError("source is required", nil)
@@ -115,11 +114,9 @@ func normalizePolicyInput(catalog Catalog, vm VirtualModel) (VirtualModel, error
 	if err := rejectPolicyTokenLimits(vm); err != nil {
 		return VirtualModel{}, err
 	}
-	effort, err := normalizeReasoningEffort(vm.ReasoningEffort)
-	if err != nil {
+	if err := normalizeOverrides(&vm); err != nil {
 		return VirtualModel{}, err
 	}
-	vm.ReasoningEffort = effort
 	parts, err := modelselectors.NormalizeInput(catalog, vm.Source)
 	if err != nil {
 		return VirtualModel{}, err
@@ -130,8 +127,8 @@ func normalizePolicyInput(catalog Catalog, vm VirtualModel) (VirtualModel, error
 	if vm.Slowdown != nil && parts.Model == "" {
 		return VirtualModel{}, newValidationError("slowdown can only be configured for a model or redirect", nil)
 	}
-	if vm.ReasoningEffort != "" && parts.Model == "" {
-		return VirtualModel{}, newValidationError("reasoning_effort can only be configured for a model or redirect", nil)
+	if err := validatePolicyOverrideScope(vm, parts.Model); err != nil {
+		return VirtualModel{}, err
 	}
 
 	paths, err := normalizeUserPaths(vm.UserPaths)
@@ -151,11 +148,9 @@ func normalizeStoredPolicy(vm VirtualModel) (VirtualModel, error) {
 	if err := rejectPolicyTokenLimits(vm); err != nil {
 		return VirtualModel{}, err
 	}
-	effort, err := normalizeReasoningEffort(vm.ReasoningEffort)
-	if err != nil {
+	if err := normalizeOverrides(&vm); err != nil {
 		return VirtualModel{}, err
 	}
-	vm.ReasoningEffort = effort
 	parts, err := modelselectors.NormalizeStored(vm.Source, vm.ProviderName, vm.Model)
 	if err != nil {
 		return VirtualModel{}, err
@@ -166,8 +161,8 @@ func normalizeStoredPolicy(vm VirtualModel) (VirtualModel, error) {
 	if vm.Slowdown != nil && parts.Model == "" {
 		return VirtualModel{}, newValidationError("slowdown can only be configured for a model or redirect", nil)
 	}
-	if vm.ReasoningEffort != "" && parts.Model == "" {
-		return VirtualModel{}, newValidationError("reasoning_effort can only be configured for a model or redirect", nil)
+	if err := validatePolicyOverrideScope(vm, parts.Model); err != nil {
+		return VirtualModel{}, err
 	}
 
 	paths, err := normalizeUserPaths(vm.UserPaths)
@@ -176,6 +171,40 @@ func normalizeStoredPolicy(vm VirtualModel) (VirtualModel, error) {
 	}
 	vm.UserPaths = paths
 	return vm, nil
+}
+
+// normalizeOverrides validates the per-request overrides a row may carry:
+// the forced reasoning effort and both parameter sets.
+func normalizeOverrides(vm *VirtualModel) error {
+	effort, err := normalizeReasoningEffort(vm.ReasoningEffort)
+	if err != nil {
+		return err
+	}
+	vm.ReasoningEffort = effort
+	if vm.Params, err = requestparams.Normalize("params", vm.Params, true); err != nil {
+		return err
+	}
+	if vm.DefaultParams, err = requestparams.Normalize("default_params", vm.DefaultParams, false); err != nil {
+		return err
+	}
+	return requestparams.Disjoint(vm.DefaultParams, vm.Params)
+}
+
+// validatePolicyOverrideScope rejects per-request overrides on policies whose
+// selector names no model: only a model or redirect can carry them.
+func validatePolicyOverrideScope(vm VirtualModel, model string) error {
+	if model != "" {
+		return nil
+	}
+	switch {
+	case vm.ReasoningEffort != "":
+		return newValidationError("reasoning_effort can only be configured for a model or redirect", nil)
+	case len(vm.Params) > 0:
+		return newValidationError("params can only be configured for a model or redirect", nil)
+	case len(vm.DefaultParams) > 0:
+		return newValidationError("default_params can only be configured for a model or redirect", nil)
+	}
+	return nil
 }
 
 func validateSlowdown(configured *float64) error {

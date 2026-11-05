@@ -40,6 +40,7 @@ type mongoUsageLogRow struct {
 	MarkupPercent          *float64       `bson:"markup_percent"`
 	MarkupSelector         string         `bson:"markup_selector"`
 	BilledCost             *float64       `bson:"billed_cost"`
+	Billable               *bool          `bson:"billable"`
 	RawData                map[string]any `bson:"raw_data"`
 	CostsCalculationCaveat string         `bson:"costs_calculation_caveat"`
 	RewriteTokensSaved     int64          `bson:"rewrite_tokens_saved"`
@@ -92,6 +93,7 @@ func (row mongoUsageLogRow) toUsageLogEntry() UsageLogEntry {
 		MarkupPercent:          row.MarkupPercent,
 		MarkupSelector:         row.MarkupSelector,
 		BilledCost:             row.BilledCost,
+		Billable:               nonBillableFlag(row.Billable),
 		RawData:                row.RawData,
 		CostsCalculationCaveat: row.CostsCalculationCaveat,
 		RewriteTokensSaved:     row.RewriteTokensSaved,
@@ -1526,4 +1528,14 @@ func mongoCacheModeFilter(mode string) bson.D {
 			bson.D{{Key: "cache_type", Value: ""}},
 		}}}
 	}
+}
+
+// nonBillableFlag keeps a stored billable flag only when it is false, so a
+// billable row (the default, and every row written before the field) is
+// reported without one.
+func nonBillableFlag(billable *bool) *bool {
+	if billable == nil || *billable {
+		return nil
+	}
+	return billable
 }

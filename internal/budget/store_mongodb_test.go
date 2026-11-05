@@ -77,10 +77,10 @@ func TestMongoSubjectMatchUsesLabelMembership(t *testing.T) {
 	got, err := mongoSubjectMatch(SpendWindow{Scope: ScopeLabel, Subject: "iOS"})
 	require.NoError(t, err)
 
-	want := bson.D{{Key: "$in", Value: bson.A{
+	want := mongoConsumerSpendMatch(bson.D{{Key: "$in", Value: bson.A{
 		bson.D{{Key: "$literal", Value: "iOS"}},
 		bson.D{{Key: "$ifNull", Value: bson.A{"$labels", bson.A{}}}},
-	}}}
+	}}})
 
 	require.Equal(t, want, got)
 }
@@ -96,10 +96,10 @@ func TestMongoSubjectMatchTreatsDollarSubjectsAsLiterals(t *testing.T) {
 		{
 			name:   "label",
 			window: SpendWindow{Scope: ScopeLabel, Subject: "$labels"},
-			want: bson.D{{Key: "$in", Value: bson.A{
+			want: mongoConsumerSpendMatch(bson.D{{Key: "$in", Value: bson.A{
 				bson.D{{Key: "$literal", Value: "$labels"}},
 				bson.D{{Key: "$ifNull", Value: bson.A{"$labels", bson.A{}}}},
-			}}},
+			}}}),
 		},
 		{
 			name:   "provider",
@@ -128,7 +128,13 @@ func TestMongoSubjectMatchNormalizesMissingUserPathToRoot(t *testing.T) {
 	got, err := mongoSubjectMatch(SpendWindow{Scope: ScopeUserPath, Subject: "/team"})
 	require.NoError(t, err)
 
-	expression, ok := bsonField(got, "$regexMatch").(bson.D)
+	// A consumer predicate is the path match and the billable guard.
+	conjunction, ok := bsonField(got, "$and").(bson.A)
+	require.True(t, ok, "mongoSubjectMatch(user_path) = %#v, want an $and expression", got)
+	require.Len(t, conjunction, 2)
+	pathMatch, ok := conjunction[0].(bson.D)
+	require.True(t, ok)
+	expression, ok := bsonField(pathMatch, "$regexMatch").(bson.D)
 	require.True(t, ok, "mongoSubjectMatch(user_path) = %#v, want a $regexMatch expression", got)
 	regex := bsonField(expression, "regex")
 	require.Equal(t, usagePathRegex("/team"), regex)
@@ -275,6 +281,38 @@ func TestMongoDBStoreSumSpendMatchesProvider(t *testing.T) {
 			{Total: 2, HasUsage: true}, // case-insensitive, cached row excluded
 			{Total: 3, HasUsage: true}, // only the row without a provider name
 			{},
+		}, got)
+	})
+}
+
+// Rows served by a billable: false provider count against provider budgets
+// only; documents without the field predate it and stay billable.
+func TestMongoDBStoreSumSpendSkipsNonBillableRowsForConsumerBudgets(t *testing.T) {
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		ctx := context.Background()
+		store, err := NewMongoDBStore(ctx, db)
+		require.NoError(t, err)
+
+		now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
+		_, err = db.Collection("usage").InsertMany(ctx, []any{
+			bson.D{{Key: "timestamp", Value: now}, {Key: "user_path", Value: "/team/app"}, {Key: "labels", Value: bson.A{"prod"}}, {Key: "provider_name", Value: "openai-prod"}, {Key: "total_cost", Value: 2.0}, {Key: "billable", Value: true}},
+			bson.D{{Key: "timestamp", Value: now}, {Key: "user_path", Value: "/team/app"}, {Key: "labels", Value: bson.A{"prod"}}, {Key: "provider_name", Value: "byok-openai"}, {Key: "total_cost", Value: 50.0}, {Key: "billable", Value: false}},
+			// Written before the flag existed.
+			bson.D{{Key: "timestamp", Value: now}, {Key: "user_path", Value: "/team/app"}, {Key: "labels", Value: bson.A{"prod"}}, {Key: "provider_name", Value: "openai-prod"}, {Key: "total_cost", Value: 3.0}},
+		})
+		require.NoError(t, err)
+
+		start, end := now.Add(-time.Hour), now.Add(time.Hour)
+		got, err := store.SumSpend(ctx, []SpendWindow{
+			{Scope: ScopeUserPath, Subject: "/team", Start: start, End: end},
+			{Scope: ScopeLabel, Subject: "prod", Start: start, End: end},
+			{Scope: ScopeProvider, Subject: "byok-openai", Start: start, End: end},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, []Spend{
+			{Total: 5, HasUsage: true},
+			{Total: 5, HasUsage: true},
+			{Total: 50, HasUsage: true},
 		}, got)
 	})
 }

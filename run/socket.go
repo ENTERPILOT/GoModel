@@ -14,7 +14,10 @@ import (
 // when it stops; the socket itself survives because boundSocket holds a
 // duplicate descriptor and is the last to let go. Connections that arrive
 // while one generation is draining and the next is starting therefore wait in
-// the kernel's accept queue instead of being refused.
+// the kernel's accept queue instead of being refused. A generation stops
+// accepting before it drains, and gives the connections it had already
+// accepted up to server.QuiesceTimeout to deliver a request, which it then
+// answers; only a client silent for that long is cut off.
 //
 // Duplicating the descriptor is what keeps the socket alive, and not every
 // platform and listener type supports it. Where it fails, the listener is
