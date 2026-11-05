@@ -203,6 +203,18 @@ func TestLayerResolvesTextMembersByDepth(t *testing.T) {
 		})
 	}
 
+	t.Run("deeper members replace an outer forced null text", func(t *testing.T) {
+		layered := none.Layer(Overrides{Params: Set{"text": nil}}).Layer(Overrides{Params: Set{"text": raw(`{"format":{"type":"json_object"}}`)}})
+		_, responses := apply(t, layered, plain())
+		assert.JSONEq(t, `{"model":"m","input":"hi","text":{"format":{"type":"json_object"}}}`, responses)
+	})
+	t.Run("a null text and verbosity in one row apply in order", func(t *testing.T) {
+		client := plain()
+		client.Text = map[string]any{"format": map[string]any{"type": "text"}}
+		layered := none.Layer(Overrides{Params: Set{"text": nil, "verbosity": raw(`"low"`)}})
+		_, responses := apply(t, layered, client)
+		assert.JSONEq(t, `{"model":"m","input":"hi","text":{"verbosity":"low"}}`, responses)
+	})
 	t.Run("a configured key that looks like a member is forwarded as is", func(t *testing.T) {
 		layered := none.Layer(Overrides{Params: Set{"text.custom": raw(`1`)}})
 		_, responses := apply(t, layered, plain())

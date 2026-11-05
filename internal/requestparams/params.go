@@ -109,10 +109,11 @@ func (o Overrides) ResponsesSets() (defaults, params Set) {
 }
 
 // textMemberPrefix marks a key that sets one member of the Responses text
-// object in a set returned by ResponsesSets. It starts with a NUL byte, which
-// validateKey refuses in configured names, so it never collides with a key
-// an operator set, such as a provider's own "text.custom".
-const textMemberPrefix = "\x00text."
+// object in a set returned by ResponsesSets. Its NUL byte, which validateKey
+// refuses in configured names, keeps it apart from any key an operator set,
+// such as a provider's own "text.custom"; and it sorts after "text", so a
+// whole-object null in the same set is applied before the members.
+const textMemberPrefix = "text\x00"
 
 func responsesView(set Set) Set {
 	if len(set) == 0 {
@@ -159,12 +160,26 @@ func without(set, other Set) Set {
 		return set
 	}
 	drop := canonicalKeys(other)
-	// A whole text object in other (a forced null) also covers the text
-	// members a Responses view splits out.
+	// In a Responses view, a whole text object in other (a forced null)
+	// covers the members split out of set, and members in other cover a
+	// whole text object in set, as a deeper text object replaced a
+	// shallower one before the split.
 	_, wholeText := other["text"]
+	otherMembers := false
+	for key := range other {
+		if strings.HasPrefix(key, textMemberPrefix) {
+			otherMembers = true
+			break
+		}
+	}
 	covered := func(key string) bool {
-		_, ok := drop[canonicalKey(key)]
-		return ok || (wholeText && strings.HasPrefix(key, textMemberPrefix))
+		if _, ok := drop[canonicalKey(key)]; ok {
+			return true
+		}
+		if strings.HasPrefix(key, textMemberPrefix) {
+			return wholeText
+		}
+		return key == "text" && otherMembers
 	}
 	shared := false
 	for key := range set {
