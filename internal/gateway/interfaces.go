@@ -5,6 +5,7 @@ import (
 	"context"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestparams"
 )
 
 // ModelResolver resolves raw request selectors into concrete model selectors
@@ -36,12 +37,13 @@ type ModelSlowdownResolver interface {
 	ResolveSlowdown(context.Context, core.RequestedModelSelector, core.ModelSelector) float64
 }
 
-// ModelReasoningEffortResolver optionally resolves an operator-forced
-// reasoning effort for one provider attempt: resolution is the request's model
-// resolution and attempt the concrete model the attempt goes to. An empty
-// result keeps the client's value. The context carries the effective user path.
-type ModelReasoningEffortResolver interface {
-	ResolveReasoningEffort(ctx context.Context, resolution *core.RequestModelResolution, attempt core.ModelSelector) string
+// ModelRequestOverridesResolver optionally resolves the operator-forced
+// reasoning effort and request parameters for one provider attempt:
+// resolution is the request's model resolution and attempt the concrete model
+// the attempt goes to. A zero result keeps the client's request. The context
+// carries the effective user path.
+type ModelRequestOverridesResolver interface {
+	ResolveRequestOverrides(ctx context.Context, resolution *core.RequestModelResolution, attempt core.ModelSelector) requestparams.Overrides
 }
 
 // FailoverResolver resolves alternate concrete model selectors for a translated

@@ -52,6 +52,8 @@ type simpleCacheMiddleware struct {
 	wg    sync.WaitGroup
 	jobs  chan cacheWriteJob
 
+	partitionByUserPath bool
+
 	hitRecorder func(exchange, []byte, string)
 
 	workers sync.WaitGroup
@@ -85,7 +87,7 @@ func (m *simpleCacheMiddleware) TryHit(ex exchange, body []byte) (bool, error) {
 		return false, nil
 	}
 	path := ex.Path()
-	key := exactCacheKey(ex, body)
+	key := m.exactCacheKey(ex, body)
 	cached, err := m.store.Get(ex.Context(), key)
 	if err != nil {
 		return false, nil
@@ -115,7 +117,7 @@ func (m *simpleCacheMiddleware) StoreAfter(ex exchange, body []byte, next func()
 	if m == nil || m.store == nil {
 		return next()
 	}
-	key := exactCacheKey(ex, body)
+	key := m.exactCacheKey(ex, body)
 
 	call, leader := m.joinMiss(key)
 	if leader {
@@ -150,10 +152,15 @@ func (m *simpleCacheMiddleware) StoreAfter(ex exchange, body []byte, next func()
 }
 
 // exactCacheKey derives the exact-cache key for one exchange, scoping the entry
-// to the request's guardrail chain identity.
-func exactCacheKey(ex exchange, body []byte) string {
+// to the request's guardrail chain identity and, when partitioning is on, to its
+// effective user path. Lookups, writes and in-flight coalescing all use this key.
+func (m *simpleCacheMiddleware) exactCacheKey(ex exchange, body []byte) string {
 	ctx := ex.Context()
-	return hashRequest(ex.Path(), body, core.GetWorkflow(ctx), core.GetGuardrailsHash(ctx))
+	key := hashRequest(ex.Path(), body, core.GetWorkflow(ctx), core.GetGuardrailsHash(ctx))
+	if m.partitionByUserPath {
+		return userPathPartitionedHash(key, core.UserPathFromContext(ctx))
+	}
+	return key
 }
 
 // captureAndStore executes one cache miss without joining the coalescing
@@ -295,6 +302,16 @@ func hashRequest(path string, body []byte, plan *core.Workflow, chainHash string
 	h.Write([]byte{0})
 	h.Write(cacheKeyRequestBody(path, body))
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// userPathPartitionedHash scopes a cache identity (an exact-cache key or a
+// semantic params hash) to one effective user path. The result never equals an
+// unpartitioned identity, even for the empty path, so requests without a user
+// path form their own partition and entries written with partitioning off are
+// never reachable with it on, or the reverse. hash has a fixed length, so the
+// encoding is unambiguous for any user path.
+func userPathPartitionedHash(hash, userPath string) string {
+	return sha256HexOf("user_path\x00" + userPath + "\x00" + hash)
 }
 
 type responseCapture struct {

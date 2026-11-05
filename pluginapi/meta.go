@@ -47,8 +47,9 @@ type Meta struct {
 	Attempts []Attempt
 	// Cache describes prompt-cache planning and session affinity.
 	Cache CacheInfo
-	// Origin says who issued the request: "client", "plugin", or another
-	// gateway-internal source.
+	// Origin says who issued the request: "external" for client traffic,
+	// or a gateway-internal source such as "plugin" (inference a plugin
+	// issued through its Host) or "guardrail".
 	Origin string
 }
 

@@ -145,13 +145,20 @@ func (o *BatchOrchestrator) Create(ctx context.Context, req *core.BatchRequest, 
 	}
 
 	var (
-		upstream *core.BatchResponse
-		hints    map[string]string
+		upstream     *core.BatchResponse
+		hints        map[string]string
+		providerName string
 	)
-	if hintedRouter, ok := o.provider.(core.NativeBatchHintRoutableProvider); ok {
-		upstream, hints, err = hintedRouter.CreateBatchWithHints(ctx, providerType, forward)
-	} else {
+	switch router := o.provider.(type) {
+	case core.NativeBatchInstanceRoutableProvider:
+		upstream, hints, providerName, err = router.CreateBatchOnInstance(ctx, providerType, forward)
+	case core.NativeBatchHintRoutableProvider:
+		upstream, hints, err = router.CreateBatchWithHints(ctx, providerType, forward)
+	default:
 		upstream, err = nativeRouter.CreateBatch(ctx, providerType, forward)
+	}
+	if providerName == "" {
+		providerName = batchProviderName(o.provider, providerType)
 	}
 	if err != nil {
 		o.rollbackPreparedBatch(ctx, providerType, batchPreparation, "")
@@ -201,6 +208,7 @@ func (o *BatchOrchestrator) Create(ctx context.Context, req *core.BatchRequest, 
 			OriginalInputFileID:       batchPreparation.OriginalInputFileID,
 			RewrittenInputFileID:      batchPreparation.RewrittenInputFileID,
 			RequestID:                 strings.TrimSpace(meta.RequestID),
+			ProviderName:              providerName,
 			UserPath:                  core.UserPathFromContext(ctx),
 			SessionID:                 core.SessionIDFromContext(ctx),
 			AuthKeyID:                 core.GetAuthKeyID(ctx),
@@ -217,6 +225,17 @@ func (o *BatchOrchestrator) Create(ctx context.Context, req *core.BatchRequest, 
 	}
 
 	return &BatchCreateResult{Batch: &resp, Workflow: workflow, ProviderType: providerType}, nil
+}
+
+// batchProviderName is the fallback for a router that does not name the
+// instance it submitted to: the first registered instance of the type, which
+// is the one type-routed calls pick. It is empty when the router cannot say.
+func batchProviderName(provider core.Provider, providerType string) string {
+	resolver, ok := provider.(core.ProviderTypeNameResolver)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(resolver.GetProviderNameForType(providerType))
 }
 
 func (o *BatchOrchestrator) workflowForBatch(ctx context.Context, meta BatchMeta, selection BatchExecutionSelection) (*core.Workflow, error) {

@@ -41,6 +41,9 @@ deaktivierten Standard oder eine geerbte User-Path-Beschränkung überschreibt.
 
 ## Künstliche Modelllatenz hinzufügen
 
+Die Seite [Slowdown](/de/features/slowdown) ist die vollständige Referenz,
+einschließlich der verzögerten Endpunkte.
+
 Setzen Sie **Slowdown** für ein konkretes Modell oder einen Redirect, um einen
 Anteil der gemessenen Inferenzzeit hinzuzufügen. Aktive Werte reichen von `0.1`
 bis `10`; zum Beispiel fügt `0.5` 50 % hinzu, sodass eine Response, die upstream
@@ -114,6 +117,88 @@ auf Aliase. Zum Beispiel können die Aliase `fast` und `smart` desselben Modells
 senden lassen. Das ist das Gegenteil von Slowdown, wo der Alias gewinnt. Wie
 bei Slowdown schlägt ein exakter Override einen modellweiten, und ein Eintrag
 ohne Effort verdeckt keinen allgemeineren.
+
+## Request-Parameter setzen
+
+Setzen Sie **params** und **default_params** für einen Redirect oder ein
+konkretes Modell, um Request-Parameter upstream zu senden. `default_params`
+ergänzt einen Schlüssel nur, wenn der Client ihn weggelassen hat; `params`
+ersetzt, was der Client gesendet hat, und ein `null`-Wert entfernt den
+Schlüssel aus dem Request. Nutzen Sie Defaults für Sampling-Einstellungen, die
+Aufrufer anpassen dürfen, und `params` für Einstellungen, die ein Alias
+festlegen muss. Beide Maps stehen in `config.yaml`, in der Umgebungsvariable
+`VIRTUAL_MODELS`, in der Admin API und im Dashboard-Editor zur Verfügung. Auch
+eine Richtlinien-Zeile für ein konkretes Modell (ein Eintrag ohne Ziele)
+akzeptiert sie; providerweite und globale Zeilen lehnen sie ab.
+
+Schlüssel folgen der Schreibweise von OpenAI Chat Completions (`temperature`,
+`top_p`, `max_tokens`, `presence_penalty`, ...). Providerspezifische Schlüssel
+wie `top_k`, `min_p`, `repetition_penalty` und `chat_template_kwargs` von vLLM
+werden unverändert durchgereicht. Provider-Adapter übersetzen konfigurierte
+Werte genau wie Werte des Clients: `max_tokens` wird bei
+OpenAI-Reasoning-Modellen weiterhin zu `max_completion_tokens` und in der
+Responses API zu `max_output_tokens`.
+
+Zum Beispiel mehrere Aliase eines selbst gehosteten Modells mit
+unterschiedlichen Thinking- und Sampling-Einstellungen:
+
+```yaml
+virtual_models:
+  - source: qwen-thinking-low
+    target: vllm/Qwen3.8-27B
+    reasoning_effort: low
+    params:
+      chat_template_kwargs: { enable_thinking: true, preserve_thinking: true }
+    default_params:
+      temperature: 1.0
+      top_p: 0.95
+      top_k: 20
+      min_p: 0.0
+      presence_penalty: 0.0
+      repetition_penalty: 1.0
+  - source: qwen-fast
+    target: vllm/Qwen3.8-27B
+    params:
+      chat_template_kwargs: { enable_thinking: false }
+      top_k: null # entfernt den vom Client gesendeten Schlüssel
+```
+
+Pro Request wendet GoModel den Client-Body an, dann `default_params`, dann
+`params` und zuletzt den
+[Reasoning-Effort-Override](#reasoning-effort-erzwingen), der ein eigenes
+typisiertes Feld bleibt. Objekte werden eine Ebene tief zusammengeführt, sodass
+die eigenen `chat_template_kwargs` des Clients die Member behalten, die der
+Alias nicht setzt; Skalare und Arrays werden ersetzt. `model`, `provider`,
+`messages`, `input`, `instructions`, `tools`, `stream`, `stream_options`,
+`reasoning`, `reasoning_effort`, `previous_response_id`, `conversation` und
+`prompt` lassen sich nicht konfigurieren, und ein Schlüssel darf nicht in
+beiden Maps einer Zeile vorkommen. Werte werden beim Speichern validiert
+(`temperature` und `top_p` müssen Zahlen sein, `max_tokens` eine nicht
+negative Ganzzahl und so weiter); je Map bis zu 64 Schlüssel und 16 KiB.
+
+Der Vorrang zwischen Zeilen gilt pro Schlüssel und folgt der Regel des
+Reasoning-Efforts: Die Richtlinie eines konkreten Modells schlägt jeden
+Redirect darüber, und ein inneres
+[verkettetes](#virtuelle-modelle-verketten) virtuelles Modell schlägt ein
+äußeres. Die tiefere Zeile entscheidet auch, ob ein Schlüssel erzwungen oder
+ein Default ist: `default_params.temperature` eines konkreten Modells macht
+aus dem erzwungenen `temperature` eines Alias wieder einen Default. Ein
+Failover-Versuch wird aus dem Request des Clients neu aufgebaut und erhält die
+Parameter seiner eigenen Route und seines konkreten Modells; die Richtlinie
+des primären Modells gelangt nie hinein.
+[Guardrail](/de/advanced/guardrails)-Plugins laufen zuerst, sodass `params`
+einen von einem Plugin gesetzten Wert ersetzt und `default_params` ihn
+respektiert. Parameter gelten für Chat Completions, die Responses API und die
+Anthropic Messages API (der native Messages-Passthrough nimmt den übersetzten
+Pfad, wenn Parameter greifen); Batches, Provider-Passthrough unter `/p/`,
+Embeddings und Medien-Endpunkte werden nicht umgeschrieben.
+Der exakte [Cache](/de/features/cache)-Schlüssel wird aus dem angewendeten
+Request gebildet, sodass zwei Aliase desselben Modells einen exakten Eintrag
+nur dann teilen, wenn sie denselben Request upstream senden. Der semantische
+Cache hasht nur seine ausgabeprägenden Parameter (Modell, temperature, top_p,
+Token-Limit, Reasoning, Tools, Response-Format), sodass Aliase, die sich nur
+in anderen Schlüsseln wie `top_k` oder `chat_template_kwargs` unterscheiden,
+einen semantischen Eintrag teilen können.
 
 Der Rest dieser Seite behandelt Redirects.
 
@@ -365,7 +450,9 @@ Jeder Eintrag akzeptiert `source`, ein einzelnes `target` (Kurzform) oder eine
 `true`; siehe [Failover](/de/features/failover)), `user_paths`, `description`,
 `slowdown` (`0` deaktiviert geerbtes Slowdown; aktive Faktoren reichen von `0.1`
 bis `10`), `reasoning_effort` (siehe
-[Reasoning-Effort erzwingen](#reasoning-effort-erzwingen)) und `enabled`.
+[Reasoning-Effort erzwingen](#reasoning-effort-erzwingen)), `params` und
+`default_params` (siehe
+[Request-Parameter setzen](#request-parameter-setzen)) und `enabled`.
 Ein Ziel-`model` kann ein anderes deklariertes virtuelles Modell nennen (siehe
 [Virtuelle Modelle verketten](/de/features/virtual-models#virtuelle-modelle-verketten)).
 Lassen Sie die Ziele leer, um eine Zugriffsrichtlinie für den `source`-Selektor
