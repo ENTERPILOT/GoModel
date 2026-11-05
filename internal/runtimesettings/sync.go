@@ -10,6 +10,11 @@ import (
 
 const syncInterval = 2 * time.Second
 
+// syncTimeout bounds reading the stored values on one tick, so a database
+// that stops answering fails the tick, which the next one retries, instead of
+// stalling reconciliation and holding a pooled connection indefinitely.
+const syncTimeout = 5 * time.Second
+
 func (s *Service) startSync() {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
@@ -37,10 +42,26 @@ func (s *Service) startSync() {
 }
 
 // sync reconciles extension state with the shared database. It intentionally
-// runs outside request handling and applies only changed values.
+// runs outside request handling and applies only changed values. It reads
+// every value in one query, bounded by syncTimeout, without holding s.mu, so a
+// slow database never blocks Update or List.
 func (s *Service) sync(ctx context.Context) error {
 	s.mu.Lock()
+	updates := s.updates
+	s.mu.Unlock()
+	readCtx, cancel := context.WithTimeout(ctx, syncTimeout)
+	values, err := s.store.GetAll(readCtx)
+	cancel()
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.updates != updates {
+		// An Update ran during the read, so the values may predate it; the
+		// next tick reads them again.
+		return nil
+	}
 	var errs []error
 	for _, key := range s.order {
 		setting := s.settings[key]
@@ -48,11 +69,7 @@ func (s *Service) sync(ctx context.Context) error {
 		if descriptor.Locked {
 			continue
 		}
-		value, found, err := s.store.Get(ctx, key)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("get synchronized runtime setting %q: %w", key, err))
-			continue
-		}
+		value, found := values[key]
 		if !found || value == descriptor.Value {
 			delete(s.rejected, key)
 			continue

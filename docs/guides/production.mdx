@@ -485,7 +485,9 @@ but model listings and virtual-model load balancing leave them out. A provider
 whose type changes starts routing once its new model list has been fetched.
 
 A replica that fails to apply a change logs a warning once and retries on every
-poll until it applies. One exception: a stored provider that fails to build on a
+poll until it applies. A poll waits at most 5 seconds for the revisions and 30
+seconds for each reload, so a database that stops answering fails the poll
+instead of stalling it. One exception: a stored provider that fails to build on a
 replica keeps whatever was already running under its name and is retried on the
 next change to any stored provider, since each change reloads all of them, or on
 restart. A replica that cannot record a change in `config_revisions` also
