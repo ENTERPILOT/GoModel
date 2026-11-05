@@ -1,0 +1,151 @@
+---
+title: "OpenCode Go: bazowy URL i endpoint kompatybilny z OpenAI"
+sidebarTitle: "OpenCode Go"
+description: "Skonfiguruj OpenCode Zen (subskrypcja Go) w GoModel, korzystając z endpointu kompatybilnego z OpenAI."
+icon: "terminal"
+keywords: ["OpenCode Zen", "OpenCode Go", "OPENCODE_GO_BASE_URL", "OpenCode Go endpoint", "endpoint OpenCode Go", "konfiguracja providera", "provider setup"]
+---
+
+[OpenCode Zen](https://opencode.ai/docs/zen/) udostępnia modele swojej subskrypcji
+„Go” przez API kompatybilne z OpenAI. GoModel zawiera natywnego providera
+`opencode_go`, który ma domyślny bazowy URL, więc potrzebujesz tylko klucza API.
+
+## Konfiguracja
+
+```bash
+OPENCODE_GO_API_KEY=sk-...
+# Opcjonalnie: nadpisz domyślny endpoint.
+# OPENCODE_GO_BASE_URL=https://opencode.ai/zen/go/v1
+```
+
+Albo w `config.yaml`:
+
+```yaml
+providers:
+  opencode_go:
+    type: opencode_go
+    api_key: "${OPENCODE_GO_API_KEY}"
+    # Opcjonalnie: nadpisz domyślny endpoint.
+    # base_url: "https://opencode.ai/zen/go/v1"
+```
+
+Domyślny bazowy URL to `https://opencode.ai/zen/go/v1`. Uwierzytelnianie używa
+`Authorization: Bearer <api_key>` z kluczem wygenerowanym w konsoli OpenCode Zen.
+
+## Modele
+
+`GET /v1/models` przekazuje listę modeli OpenCode Zen, udostępniając ID takie jak
+`glm-5.1`, `kimi-k2.7-code`, `deepseek-v4-pro` i `mimo-v2.5-pro`. Jeśli chcesz
+tylko podzbioru, ogranicz udostępniany zestaw skonfigurowaną listą:
+
+```bash
+OPENCODE_GO_MODELS=glm-5.1,kimi-k2.7-code,deepseek-v4-pro
+```
+
+## Endpointy
+
+OpenCode Zen obsługuje większość modeli na `/chat/completions` w stylu OpenAI
+(uwierzytelnianie Bearer), a kilka modeli tylko na natywnym endpoincie Anthropic
+`/messages` (uwierzytelnianie `x-api-key`). GoModel kieruje requesty według modelu:
+
+- **Modele w stylu OpenAI** (GLM, Kimi, DeepSeek, MiMo, MiniMax, większość Qwen)
+  trafiają do `/chat/completions`. `/models` i `/v1/responses` (tłumaczone na chat
+  completions) używają tej samej ścieżki.
+- **Modele dostępne tylko w Anthropic** są tłumaczone na dialekt Anthropic Messages
+  i wysyłane do `/messages`, tak jak GoModel już obsługuje natywne Anthropic.
+  Obie ścieżki są normalizowane do tej samej odpowiedzi kompatybilnej z OpenAI, więc
+  klienty widzą jedną spójną powierzchnię niezależnie od wybranego modelu – czy
+  wywołują `/v1/chat/completions`, czy `/v1/messages`.
+
+Zestaw modeli dostępnych tylko przez `/messages` jest obecnie utrzymywany ręcznie
+(domyślnie: `qwen3.7-max`), ponieważ OpenCode Zen nie udostępnia jeszcze metadanych
+endpointów dla poszczególnych modeli. W razie potrzeby nadpisz go:
+
+```bash
+OPENCODE_GO_MESSAGES_MODELS=qwen3.7-max
+```
+
+<Note>
+  Ten ręczny podział jest tymczasowy i zostanie zastąpiony routingiem opartym na
+  metadanych, gdy upstreamowa lista modeli zacznie rozróżniać endpointy.
+</Note>
+
+## Nagłówek sesji
+
+OpenCode Zen prosi każdego klienta o wysyłanie nagłówka `x-opencode-session`, aby
+mógł kierować jedną rozmowę do tego samego upstreamu i utrzymywać rozgrzany prompt
+cache. Upstream zapowiedział, że requesty bez niego mogą zacząć kończyć się błędem.
+GoModel domyślnie dodaje ten nagłówek do każdego requestu OpenCode Go, zarówno na
+ścieżce `/chat/completions`, jak i `/messages`, używając pierwszej dostępnej wartości:
+
+1. Nagłówek `x-opencode-session` wysłany przez klienta (samo OpenCode, pi i inne
+   narzędzia mówiące dialektem OpenCode Zen) jest przekazywany bez zmian.
+2. W przeciwnym razie sesja wykryta przez GoModel w ramach
+   [utrzymywania sesji](/pl/features/session-keeping): `X-Session-Id` z OpenCode,
+   id sesji Claude Code, pole sesji w body albo id `auto-…` wyprowadzone z treści
+   dla agentów, które nie wysyłają żadnego sygnału.
+
+Request bez wykrywalnej sesji jest wysyłany bez nagłówka. GoModel identyfikuje się
+też nagłówkiem `x-opencode-client` (przekazując własną wartość klienta, jeśli jest
+obecna, a w przeciwnym razie `gomodel`) oraz User-Agentem `gomodel/<version>`, czego
+wymagają upstreamowe
+[zasady użycia](https://opencode.ai/docs/go/#where-can-i-use-it).
+
+Wyłącz przekazywanie sesji tylko wtedy, gdy upstream o to poprosi:
+
+```bash
+OPENCODE_GO_SESSION_HEADER=false
+```
+
+## Reasoning
+
+Niektóre modele OpenCode Zen zawsze myślą i odrzucają requesty, które pomijają
+parametr reasoningu:
+
+```text
+[1210] This model always engages in thinking and cannot be disabled; please use low, high, or max
+```
+
+Dlatego GoModel wysyła `reasoning_effort: "low"` na `/chat/completions`, gdy request
+w ogóle nie zawiera parametru reasoningu. Modele ignorujące ten parametr nie są tym
+objęte. Podnieś wartość domyślną dla danego wdrożenia:
+
+```bash
+OPENCODE_GO_DEFAULT_REASONING_EFFORT=high
+```
+
+Ustaw `none` (lub `off`), aby niczego nie wstrzykiwać i przekazywać requesty bez zmian.
+
+Klienty zachowują kontrolę, gdy same proszą o reasoning: nic nie jest wstrzykiwane
+w miejsce jawnego `reasoning.effort` ani `reasoning_effort` najwyższego poziomu.
+Rozpoznawane przez GoModel poziomy effort są mapowane na najbliższy odpowiednik
+w zestawie low / high / max akceptowanym przez OpenCode Zen:
+
+| Żądany effort            | Wysyłane do upstreamu |
+| ------------------------ | --------------------- |
+| `none`, `minimal`, `low` | `low`                 |
+| `medium`                 | `low`                 |
+| `high`                   | `high`                |
+| `xhigh`, `max`           | `max`                 |
+
+Każda inna wartość (np. `turbo`) jest przekazywana bez zmian do oceny przez upstream.
+`reasoning.effort` to kanoniczne pole GoModel, więc request, który ustawia zarówno je,
+jak i `reasoning_effort` najwyższego poziomu, jest wysyłany ze zmapowanym
+`reasoning.effort` – to ta sama kolejność pierwszeństwa, którą stosuje każdy inny
+provider GoModel.
+
+Modele kierowane do `/messages` używają zamiast tego dialektu thinking Anthropic
+i nie podlegają temu mapowaniu.
+
+## Modele DeepSeek
+
+ID modeli zaczynające się od `deepseek` są obsługiwane tak samo jak w natywnym
+providerze DeepSeek, także gdy kieruje do nich model wirtualny:
+`reasoning_content` jest uzupełniane we wcześniejszych turach asystenta, gdy obecne
+są narzędzia, a structured output `json_schema` działa zgodnie z
+`DEEPSEEK_JSON_SCHEMA_MODE`. Szczegóły znajdziesz na stronie
+[DeepSeek](/pl/providers/deepseek#structured-output).
+
+## Nieobsługiwane
+
+- Embeddingi (zwracają `invalid_request_error`).

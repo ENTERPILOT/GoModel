@@ -1,16 +1,26 @@
 <script>
-  // Audit-log toolbar: consolidated search + method/status/stream selects,
-  // the request-type checklist, and the Clear button.
+  // Audit-log toolbar: field selector + search, method/status/stream
+  // selects, the request-type checklist, and the Clear button.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { debounced } from "$lib/utils/debounce.js";
   import { auditList } from "./auditList.svelte.js";
   import { AUDIT_TYPES } from "./audit-operations.js";
+  import { AUDIT_SEARCH_FIELDS, auditSearchField } from "./audit-logic.js";
   import { X } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
   const onSearchInput = debounced(() => auditList.fetchAuditLog(true));
   $effect(() => onSearchInput.cancel);
+
+  const searchField = $derived(auditSearchField(auditList.auditSearchField));
+
+  // A new field only changes the results when there is a value to match.
+  function onSearchFieldChange() {
+    if (!auditList.auditSearch.trim()) return;
+    onSearchInput.cancel();
+    auditList.fetchAuditLog(true);
+  }
 
   let typeMenu = $state();
   const hiddenCount = $derived(auditList.auditHiddenTypes.length);
@@ -34,10 +44,21 @@
 
 <div class="audit-log-toolbar">
   <div class="audit-filter-row audit-filter-row-search">
+    <select
+      id="audit-filter-search-field"
+      aria-label={m.audit_search_field_label()}
+      class="usage-log-select audit-filter-select audit-search-field"
+      bind:value={auditList.auditSearchField}
+      onchange={onSearchFieldChange}
+    >
+      {#each AUDIT_SEARCH_FIELDS as field (field.key)}
+        <option value={field.key}>{field.label()}</option>
+      {/each}
+    </select>
     <FilterInput
       id="audit-filter-search"
-      placeholder={m.audit_search_placeholder()}
-      label={m.audit_search_label()}
+      placeholder={searchField.placeholder()}
+      label={searchField.key ? searchField.label() : m.audit_search_label()}
       bind:value={auditList.auditSearch}
       oninput={onSearchInput}
       loading={auditList.loading}
@@ -90,14 +111,14 @@
       <option value="false">{m.audit_filter_non_streaming()}</option>
     </select>
     <details class="audit-filter-select audit-type-filter" bind:this={typeMenu}>
-      <summary class="usage-log-select" aria-label={m.audit_filter_type_label()}>
+      <summary class="usage-log-select audit-checklist-summary" aria-label={m.audit_filter_type_label()}>
         {hiddenCount > 0 ? m.audit_filter_types_hidden({ count: hiddenCount }) : m.audit_filter_all_types()}
       </summary>
-      <fieldset class="audit-type-menu">
-        <legend class="audit-type-legend">{m.audit_filter_type_label()}</legend>
+      <fieldset class="audit-checklist-menu">
+        <legend class="audit-checklist-legend">{m.audit_filter_type_label()}</legend>
         {#each AUDIT_TYPES as type (type.key)}
           {@const visible = !auditList.auditHiddenTypes.includes(type.key)}
-          <label class="audit-type-option">
+          <label class="audit-checklist-option">
             <input
               type="checkbox"
               checked={visible}
@@ -138,8 +159,13 @@
     min-width: 0;
   }
 
+  .audit-filter-row-search .audit-search-field {
+    grid-column: span 2;
+  }
+
   .audit-filter-row-search :global(.filter-input-wrap) {
-    grid-column: 1 / -1;
+    grid-column: 3 / -1;
+    min-width: 0;
     max-width: none;
   }
 
@@ -156,59 +182,6 @@
   .audit-filter-row-controls .audit-type-filter {
     position: relative;
     grid-column: span 3;
-  }
-
-  .audit-type-filter summary {
-    display: block;
-    list-style: none;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    cursor: pointer;
-  }
-
-  .audit-type-filter summary::-webkit-details-marker {
-    display: none;
-  }
-
-  .audit-type-menu {
-    position: absolute;
-    z-index: 20;
-    top: calc(100% + 4px);
-    left: 0;
-    min-width: 100%;
-    margin: 0;
-    padding: 6px;
-    display: flex;
-    flex-direction: column;
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: 0 8px 24px rgb(0 0 0 / 25%);
-  }
-
-  .audit-type-legend {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-  }
-
-  .audit-type-option {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 8px;
-    border-radius: 6px;
-    font-size: 13px;
-    white-space: nowrap;
-    cursor: pointer;
-  }
-
-  .audit-type-option:hover {
-    background: var(--bg-surface-hover);
   }
 
   /* Colors come from the shared .btn styles: the stylesheet
@@ -240,6 +213,12 @@
 
     .audit-filter-row :global(.filter-input-wrap), .audit-filter-row :global(.filter-input), .audit-filter-select, .audit-filter-row :global(.btn) {
         grid-column: auto;
+      }
+
+    /* The field selector stacks above the search input. */
+    .audit-filter-row-search .audit-search-field,
+    .audit-filter-row-search :global(.filter-input-wrap) {
+        grid-column: 1 / -1;
       }
   }
 </style>

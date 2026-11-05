@@ -21,6 +21,7 @@
   "playground_user_path_help": "Sent as the {header} header. Only paths the selected model allows are offered; type one to override.",
   "search_select_search_placeholder": "Search…",
   "search_select_no_matches": "No matches",
+  "search_select_more_results": "Showing the first {shown} of {total} matches",
   "search_select_use_custom": "Use “{value}”",
   "playground_stream_label": "Stream",
   "playground_add_message": "Add message",
@@ -53,7 +54,36 @@
   "playground_meta_status": "HTTP {status}",
   "playground_meta_duration": "{seconds}s",
   "playground_meta_tokens": "{input} in / {output} out",
-  "playground_meta_events": "{count} stream events",
+  "playground_meta_events": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} stream event",
+        "count_plural=*": "{count} stream events"
+      }
+    }
+  ],
+  "playground_mode_label": "Mode",
+  "playground_mode_chat": "Chat",
+  "playground_mode_image": "Image",
+  "playground_mode_speech": "Speech",
+  "playground_mode_transcription": "Transcription",
+  "playground_media_prompt_label": "Prompt",
+  "playground_media_image_placeholder": "Describe the image to generate…",
+  "playground_media_size_label": "Size",
+  "playground_media_default_option": "Provider default",
+  "playground_media_count_label": "Images",
+  "playground_media_speech_input_label": "Text",
+  "playground_media_speech_placeholder": "Text to read aloud…",
+  "playground_media_voice_label": "Voice",
+  "playground_media_format_label": "Format",
+  "playground_media_file_label": "Audio file",
+  "playground_media_language_label": "Language",
+  "playground_media_language_placeholder": "Auto-detect (e.g. en)",
+  "playground_media_transcription_prompt_placeholder": "Optional context or spelling hints",
+  "playground_media_empty": "Fill in the form below and send it to see the result here.",
+  "playground_media_empty_response": "The model returned no media. See the Response JSON for the full payload.",
   "navigation_audit_logs": "Audit Logs",
   "navigation_usage": "Usage",
   "navigation_budgets": "Budgets",
@@ -78,7 +108,6 @@
   "usage_filter_provider": "Filter by provider",
   "usage_filter_label": "Filter by label",
   "usage_filter_user_path": "Filter by user path",
-  "usage_filter_user_path_placeholder": "User path /team/alpha",
   "usage_filter_session": "Filter by session ID",
   "usage_filter_session_placeholder": "Session ID",
   "usage_clear_session_filter": "Clear session filter {session}",
@@ -90,6 +119,36 @@
   "usage_filter_endpoint": "Filter by endpoint",
   "usage_all_endpoints": "All Endpoints",
   "usage_search_endpoints": "Search endpoints",
+  "usage_search_models": "Search models",
+  "usage_search_providers": "Search providers",
+  "usage_search_labels": "Search labels",
+  "usage_search_auth_keys": "Search API keys",
+  "usage_all_user_paths": "All User Paths",
+  "usage_search_user_paths": "Search or type a user path",
+  "usage_expand_path": "Expand {path}",
+  "usage_collapse_path": "Collapse {path}",
+  "usage_user_path_subtree": "and below",
+  "usage_pivot_title": "Breakdown",
+  "usage_pivot_loading": "Loading breakdown",
+  "usage_pivot_view": "Breakdown view",
+  "usage_pivot_download_csv": "Download CSV",
+  "usage_invoice_export": "Export invoice",
+  "usage_invoice_export_title": "Download billed usage per customer for the selected period and filters as a CSV invoice",
+  "usage_invoice_export_failed": "Unable to export the invoice.",
+  "usage_pivot_rows": "Rows",
+  "usage_pivot_columns": "Columns",
+  "usage_pivot_no_columns": "None",
+  "usage_pivot_metric": "Metric",
+  "usage_pivot_interval": "Period",
+  "usage_pivot_depth": "User path grouping",
+  "usage_pivot_depth_full": "Full path",
+  "usage_pivot_depth_levels": "First {count} segments",
+  "usage_pivot_period": "Period",
+  "usage_pivot_other": "Other ({count})",
+  "usage_pivot_none": "(none)",
+  "usage_pivot_empty": "No usage matches the filters in this period.",
+  "usage_pivot_failed": "The breakdown could not be loaded.",
+  "usage_pivot_label_note": "A request with several labels counts once per label, so label totals can exceed the period total.",
   "usage_cache_saved": "Cache Saved",
   "usage_pro_saved": "Pro Saved",
   "usage_loading_summary": "Loading usage summary",
@@ -196,6 +255,11 @@
   "usage_cache_exact": "Exact",
   "usage_cache_semantic": "Semantic",
   "usage_cache_not_charged": "Saved by cache — not charged",
+  "usage_billed_cost": "Billed",
+  "usage_billed_cost_help": "Provider cost plus markup, including billed cache hits",
+  "usage_billed_markup_rule": "Markup {percent}% ({selector})",
+  "usage_billed_markup": "Markup {percent}%",
+  "usage_billed_no_markup": "No markup",
   "usage_provider_cache_title": "{cached} cached / {total} input tokens",
   "usage_cache_write": "{count} cache write",
   "usage_cost_input_line": "Input: {cost}",
@@ -237,9 +301,33 @@
   "audit_summary_sessions": "Showing {start}–{end} of {total} sessions",
   "audit_summary_logs": "Showing {start}–{end} of {total} logs",
   "audit_group_by_session": "Group by session",
+  "audit_columns_menu": "Columns",
+  "audit_columns_label": "Visible columns",
+  "audit_column_status": "Status & method",
+  "audit_column_model": "Model",
+  "audit_column_path": "Path",
+  "audit_column_labels": "Labels",
+  "audit_column_attempts": "Provider attempts",
+  "audit_column_time": "Time",
+  "audit_column_duration": "Duration",
+  "audit_column_tokens_per_second": "Tokens/s",
   "audit_loading": "Loading audit logs",
   "audit_search_placeholder": "Search by request ID, model, provider, path, user path, or error…",
   "audit_search_label": "Search by request ID, model, provider, path, user path, or error",
+  "audit_search_field_label": "Search field",
+  "audit_search_field_all": "All fields",
+  "audit_search_field_user_path": "User path",
+  "audit_search_field_model": "Model",
+  "audit_search_field_request_id": "Request ID",
+  "audit_search_field_session_id": "Session ID",
+  "audit_search_field_provider": "Provider",
+  "audit_search_field_error_type": "Error type",
+  "audit_search_placeholder_user_path": "User path starts with, e.g. /team/alpha…",
+  "audit_search_placeholder_model": "Requested or resolved model starts with, e.g. gpt-5 or openai/…",
+  "audit_search_placeholder_request_id": "Exact request ID…",
+  "audit_search_placeholder_session_id": "Exact session ID…",
+  "audit_search_placeholder_provider": "Provider name or type contains…",
+  "audit_search_placeholder_error_type": "Error type contains…",
   "audit_filter_method_label": "HTTP method filter",
   "audit_filter_all_methods": "All Methods",
   "audit_filter_status_label": "Status code filter",
@@ -314,6 +402,8 @@
   "audit_attempt_succeeded": "succeeded",
   "audit_attempt_failed_status": "failed",
   "audit_attempt_not_captured": "No response was captured for this attempt.",
+  "audit_tokens_per_second": "{rate} tok/s",
+  "audit_tokens_per_second_title": "Output tokens divided by the total request duration, including time to first token",
   "audit_request_not_captured": "Request details were not captured.",
   "audit_waiting_request_data": "Waiting for request data…",
   "audit_request_body_too_large": "Request body was too large to capture.",
@@ -436,6 +526,7 @@
   "overview_none_healthy": "None healthy",
   "overview_automatic": "Automatic",
   "overview_last_error": "Last error: {error}",
+  "overview_last_error_breaker_open": "{error} — circuit breaker open",
   "overview_all_mcp_connected": "All MCP servers connected",
   "overview_cache_share": "Share of input tokens over the selected period",
   "overview_no_usage": "No usage in the selected period yet",
@@ -457,7 +548,6 @@
   "overview_more": "More",
   "overview_live_token_throughput": "Live Token Throughput",
   "overview_live_granularity": "Live token throughput granularity",
-  "overview_waiting_live_requests": "Waiting for live requests…",
   "overview_seconds": "Seconds",
   "overview_minutes": "Minutes",
   "overview_hours": "Hours",
@@ -482,7 +572,16 @@
       }
     }
   ],
-  "overview_mcp_attention": "{count} servers need attention",
+  "overview_mcp_attention": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} server needs attention",
+        "count_plural=*": "{count} servers need attention"
+      }
+    }
+  ],
   "overview_mcp_connected": "{connected} of {total} servers connected",
   "overview_calendar_cost_year": "${total} in the last year",
   "overview_calendar_tokens_year": "{total} tokens in the last year",
@@ -596,6 +695,13 @@
   "budgets_per_child_before_subject": "Usage is tracked independently for each direct child of ",
   "budgets_per_child_before_usage": ". Query ",
   "budgets_per_child_after_usage": " as a child to inspect its budget.",
+  "budgets_cost_basis": "Cost basis",
+  "budgets_cost_basis_provider": "Provider cost",
+  "budgets_cost_basis_billed": "Billed cost",
+  "budgets_billed_badge": "billed",
+  "budgets_billed_title": "Limits billed cost: provider cost plus markup, including billed cache hits",
+  "budgets_billed_on_provider_badge": "billed · on provider cost",
+  "budgets_billed_on_provider_title": "Stored as billed, but enforced on provider cost: billed budgets need a GoModel Pro license with the billing entitlement and PRICING_MARKUPS_ENABLED=true. Editing keeps it billed.",
   "models_title": "Models",
   "models_total_count": "{count} models",
   "models_unavailable": "Virtual models feature is unavailable.",
@@ -607,6 +713,8 @@
   "models_empty": "No models registered.",
   "models_empty_category": "No models in this category.",
   "models_no_match": "No models match your filter.",
+  "models_status_all": "All",
+  "models_status_filter_label": "Filter models by status",
   "models_column_model": "Model",
   "models_enabled": "Enabled",
   "models_disabled": "Disabled",
@@ -668,6 +776,15 @@
   "models_slowdown_field": "Slowdown (extra inference time)",
   "models_off": "Off",
   "models_slowdown_help": "Adds a fraction of measured inference time: 0.5 adds 50%. Streaming chunks are buffered and released on the slowed timeline. Use 0 to override inherited slowdown, or leave empty to inherit it; active values are 0.1–10.",
+  "models_reasoning_effort_field": "Reasoning effort override",
+  "models_reasoning_effort_client": "Client's value",
+  "models_reasoning_effort_help": "Every request sent upstream through this virtual model or to this model gets this reasoning effort, whatever the client asked for. A model's own override beats a virtual model's, and an inner virtual model beats an outer one.",
+  "models_params_field": "Request parameters override",
+  "models_params_help": "JSON object keyed by Chat Completions parameter names (temperature, top_p, ...); provider-specific keys such as top_k pass through. Every request sent through this virtual model or to this model gets these values, replacing whatever the client sent. A null value strips the key; objects merge one level deep.",
+  "models_params_invalid": "Request parameters override must be a valid JSON object.",
+  "models_default_params_field": "Request parameter defaults",
+  "models_default_params_help": "JSON object keyed by Chat Completions parameter names; provider-specific keys pass through. Each value is used only when the client omitted that key.",
+  "models_default_params_invalid": "Request parameter defaults must be a valid JSON object.",
   "models_status_summary": "Default enabled: {default} · Effective now: {effective}",
   "models_yes": "yes",
   "models_no": "no",
@@ -703,7 +820,16 @@
   "api_keys_show_inactive": "Show inactive",
   "api_keys_path_filter_clear": "Clear the user path filter",
   "api_keys_no_match": "No API keys match the current filter.",
-  "api_keys_hidden": "{count} inactive keys are hidden.",
+  "api_keys_hidden": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} inactive key is hidden.",
+        "count_plural=*": "{count} inactive keys are hidden."
+      }
+    }
+  ],
   "api_keys_empty": "No API keys yet. Issue a key to get started.",
   "api_keys_editor": "API key editor",
   "api_keys_done": "Done, I’ve stored it",
@@ -876,7 +1002,16 @@
   "workflows_filter_label": "Filter workflows",
   "workflows_empty": "No active workflows found.",
   "workflows_no_match": "No workflows match your filter.",
-  "workflows_active_scopes": "{count} active scopes",
+  "workflows_active_scopes": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} active scope",
+        "count_plural=*": "{count} active scopes"
+      }
+    }
+  ],
   "workflows_copy_id": "Copy workflow ID",
   "workflows_id_copied": "Workflow ID copied",
   "workflows_copy_id_failed": "Unable to copy workflow ID",
@@ -1101,6 +1236,40 @@
   "sidebar_resize_help": "Drag to resize; click to collapse or expand",
   "sidebar_scoped_to": "Scoped to {path}",
   "sidebar_scoped_to_help": "This API key administers only the {path} user path and its descendants.",
+  "sidebar_license_badge_title": "{badge} license active",
+  "sidebar_license_days_short": "{count}d",
+  "sidebar_license_days_over_short": "-{count}d",
+  "sidebar_license_trial_left": [
+    {
+      "declarations": ["input count", "input date", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "Trial ends on {date} - {count} day left",
+        "count_plural=*": "Trial ends on {date} - {count} days left"
+      }
+    }
+  ],
+  "sidebar_license_expires_in": [
+    {
+      "declarations": ["input count", "input date", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "License expires on {date} - {count} day left",
+        "count_plural=*": "License expires on {date} - {count} days left"
+      }
+    }
+  ],
+  "sidebar_license_grace": [
+    {
+      "declarations": ["input count", "input date", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "License expired on {date}. Grace period: {count} day left, then Pro features turn off",
+        "count_plural=*": "License expired on {date}. Grace period: {count} days left, then Pro features turn off"
+      }
+    }
+  ],
+  "sidebar_license_expired": "License expired on {date}",
   "access_scope_path_outside": "User path must be {root} or one of its descendants.",
   "theme_label": "Theme",
   "theme_light": "Light theme",
@@ -1204,7 +1373,16 @@
   "api_keys_effective_models_help": "What a request with this key can actually call: its user path's policies, its own allowed models, and model-side policies combined.",
   "api_keys_effective_all": "All models",
   "api_keys_effective_none": "None",
-  "api_keys_effective_count": "{count} models",
+  "api_keys_effective_count": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} model",
+        "count_plural=*": "{count} models"
+      }
+    }
+  ],
   "api_keys_allowed_models_all": "All",
   "api_keys_edit_allowed_models": "Edit Allowed Models",
   "api_keys_allowed_models_editor": "API key allowed models editor",
@@ -1235,7 +1413,16 @@
   "users_column_effective": "Effective models",
   "users_effective_all": "All models",
   "users_effective_none": "None",
-  "users_effective_count": "{count} models",
+  "users_effective_count": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} model",
+        "count_plural=*": "{count} models"
+      }
+    }
+  ],
   "users_effective_via": "via {path}",
   "users_no_models_warning": "No models would remain available: nothing in this list is allowed by the parent groups.",
   "users_column_keys": "API keys",
@@ -1322,6 +1509,12 @@
   "providers_api_key": "API key {number}",
   "providers_remove_api_key": "Remove API key {number}",
   "providers_add_key": "Add key",
+  "providers_model_entry": "Model {number}",
+  "providers_remove_model": "Remove model {number}",
+  "providers_add_model": "Add model",
+  "providers_models_view": "Models editor view",
+  "providers_models_view_list": "List",
+  "providers_models_view_text": "Text",
   "providers_default": "Provider default",
   "providers_edit_action": "Edit provider {name}",
   "providers_delete_action": "Delete provider {name}",
@@ -1348,7 +1541,7 @@
   "providers_gcp_scope": "GCP Scope",
   "providers_proxy_url": "Outbound proxy URL",
   "providers_proxy_url_hint": "Send this provider's traffic through an HTTP, HTTPS, or SOCKS5 proxy, e.g. socks5://user:pass@host:1080. Leave empty to use the gateway-wide HTTP_PROXY / HTTPS_PROXY settings.",
-  "providers_models_field": "Models (comma-separated)",
+  "providers_models_field": "Models",
   "providers_api_keys_hint": "Identified sessions stay on one key by default, improving provider prompt-cache hits. Saved values are masked; leave the asterisks unchanged to keep the stored key.",
   "providers_session_sticky_hint": "Keep each identified conversation on one API key to preserve provider prompt-cache affinity. Turn off to rotate keys round-robin on every request.",
   "providers_api_version_hint": "Leave empty for the provider default. Realtime endpoints may need a newer version.",
@@ -1396,6 +1589,10 @@
   "models_global_pricing": "global model pricing",
   "models_model_settings_for": "model settings for {name}",
   "models_provider_access_for": "provider access for {name}",
+  "models_expand_provider_group": "Expand {name}",
+  "models_collapse_provider_group": "Collapse {name}",
+  "models_expand_all_groups": "Expand all",
+  "models_collapse_all_groups": "Collapse all",
   "models_global_access": "global model access",
   "models_remove_alias": "Remove alias {name}",
   "models_removing_alias": "Removing alias {name}",
@@ -1780,5 +1977,11 @@
   "audit_guardrail_badge_blocked": "Guardrail: blocked · {instance}",
   "audit_guardrail_badge_answered": "Guardrail: answered · {instance}",
   "audit_guardrail_badge_failed": "Guardrail: failed · {instance}",
-  "audit_guardrail_badge_warned": "Guardrail: warned · {instance}"
+  "audit_guardrail_badge_warned": "Guardrail: warned · {instance}",
+  "providers_billable": "Billable",
+  "providers_billable_hint": "Turn off for a provider whose cost the caller does not owe you, such as a customer's own API key. Usage is still tracked and priced, but it is billed at $0 and user-path and label budgets neither gate nor count it. Provider budgets still apply.",
+  "providers_not_billable": "Not billable",
+  "providers_not_billable_title": "Usage is tracked but billed at $0 and not counted against user-path or label budgets",
+  "usage_not_billable": "not billable",
+  "usage_not_billable_help": "Served by a non-billable provider: tracked and priced, but billed at $0 and not counted against user-path or label budgets"
 }

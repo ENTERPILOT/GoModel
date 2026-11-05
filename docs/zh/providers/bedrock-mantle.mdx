@@ -1,0 +1,191 @@
+---
+title: "Amazon Bedrock Mantle"
+description: "使用 Amazon Bedrock 兼容 OpenAI 的 Mantle 端点，直接路由 Responses API 请求，支持 GPT-5.6 Sol、Terra 和 Luna。"
+icon: "/brand/bedrock.svg"
+keywords: ["Amazon Bedrock Mantle", "Responses API", "兼容 OpenAI 的 Bedrock", "提供商配置", "OpenAI-compatible Bedrock", "provider setup"]
+---
+
+Bedrock Mantle 是 Amazon Bedrock 兼容 OpenAI 的推理端点。
+GoModel 直接调用其 Responses API，因此仅支持 Responses 的模型不会被转换为 Chat Completions 或 Bedrock Converse。
+
+<Note>
+  这是一个独立于 [Amazon Bedrock Runtime](/zh/providers/bedrock) 的提供商类型。
+  兼容 OpenAI 的 Mantle 模型请使用 `bedrock-mantle`，Bedrock Runtime Converse 模型请使用 `bedrock`。两者可以同时配置。
+</Note>
+
+## 前提条件
+
+在您的 AWS 账户中启用模型，并选择一个受支持的 AWS 区域。您可以使用 Amazon Bedrock API 密钥或标准 AWS 凭据链进行认证。
+
+## 配置
+
+<Tabs>
+  <Tab title="Bedrock API 密钥">
+
+```bash
+BEDROCK_MANTLE_API_KEY=ABSK...
+BEDROCK_MANTLE_BASE_URL=us-east-1
+GOMODEL_MASTER_KEY=change-me
+```
+
+  </Tab>
+  <Tab title="AWS 凭据（SigV4）">
+
+```bash
+BEDROCK_MANTLE_BASE_URL=us-east-1
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+# AWS_SESSION_TOKEN=...       # 仅限临时凭据
+GOMODEL_MASTER_KEY=change-me
+```
+
+  </Tab>
+</Tabs>
+
+对于 SigV4，GoModel 使用 AWS SDK 凭据链，包括
+`AWS_PROFILE`、IAM Identity Center 以及容器或实例角色。在生产环境中，请优先使用工作负载凭据，而不是长期有效的访问密钥。
+
+`AWS_BEARER_TOKEN_BEDROCK` 也可作为 Bearer Token 的回退方式。使用它时请同时设置
+`BEDROCK_MANTLE_BASE_URL`，以便提供商发现能够启用 Mantle。
+
+Base URL 可以是 AWS 区域，也可以是完整的端点。推荐使用区域形式：
+
+```bash
+BEDROCK_MANTLE_BASE_URL=us-west-2
+# 等效主机：https://bedrock-mantle.us-west-2.api.aws
+```
+
+对于省略了 Base URL 的 API 密钥或 YAML 配置，GoModel 会依次使用
+`BEDROCK_MANTLE_REGION`、`AWS_REGION`、`AWS_DEFAULT_REGION`，最后使用 `us-east-1`。如果只有 IAM 凭据，请设置
+`BEDROCK_MANTLE_BASE_URL`，以便提供商发现启用 Mantle。
+
+也可以在 `config.yaml` 中配置该提供商：
+
+```yaml
+providers:
+  bedrock-mantle:
+    type: bedrock-mantle
+    base_url: us-east-1
+    api_key: "${BEDROCK_MANTLE_API_KEY}"
+```
+
+## 调用 GPT-5.6
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/v1/responses \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "openai.gpt-5.6-sol",
+    "input": "Explain why idempotency matters in distributed systems."
+  }'
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+response = client.responses.create(
+    model="openai.gpt-5.6-sol",
+    input="Explain why idempotency matters in distributed systems.",
+)
+
+print(response.output_text)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const response = await client.responses.create({
+  model: "openai.gpt-5.6-sol",
+  input: "Explain why idempotency matters in distributed systems.",
+});
+
+console.log(response.output_text);
+```
+
+</CodeGroup>
+
+流式传输使用同一个网关端点，并设置 `"stream": true`。
+`previous_response_id`、工具、推理控制参数以及未知的扩展字段都会被转发给 Mantle，而不会将请求转换为 chat 格式。
+
+### GPT-5.6 可用性
+
+| 模型 | 模型 ID | 上下文 | AWS 区域 |
+| ----- | -------- | ------- | ----------- |
+| Sol | `openai.gpt-5.6-sol` | 272K | `us-east-1`, `us-east-2` |
+| Terra | `openai.gpt-5.6-terra` | 272K | `us-east-1`, `us-east-2`, `us-west-2` |
+| Luna | `openai.gpt-5.6-luna` | 272K | `us-east-1`, `us-east-2`, `us-west-2` |
+
+这些模型支持 Responses API，不支持 Chat Completions、Converse 或
+Invoke。GoModel 会自动将它们发送到 `/openai/v1/responses`，这是 AWS 要求的模型专用路径。其他 Mantle 模型会根据情况使用 `/v1/responses` 或
+`/v1/chat/completions`。
+
+## 端点路径选择
+
+`BEDROCK_MANTLE_API_MODE` 控制 GoModel 使用哪个兼容 OpenAI 的路径：
+
+| 值 | 行为 |
+| ----- | -------- |
+| `auto` | 默认值。对需要 `/openai/v1` 的已知模型家族使用该路径，其他模型使用 `/v1`。 |
+| `openai` | 推理请求强制使用 `/openai/v1`。 |
+| `standard` | 推理请求强制使用 `/v1`。 |
+
+模型目录始终使用 `/v1/models`。如果 AWS 新增了模型而 GoModel 的自动路径列表尚未更新，请使用覆盖设置。
+
+在 YAML 中，使用 `api_mode` 设置相同的选项：
+
+```yaml
+providers:
+  mantle-preview:
+    type: bedrock-mantle
+    base_url: us-east-1
+    api_mode: openai
+    models:
+      - openai.gpt-5.6-sol
+```
+
+## 多个 Mantle 提供商
+
+针对不同的区域或账户，请使用带后缀的环境变量：
+
+```bash
+BEDROCK_MANTLE_EAST_API_KEY=ABSK...
+BEDROCK_MANTLE_EAST_BASE_URL=us-east-1
+
+BEDROCK_MANTLE_WEST_API_KEY=ABSK...
+BEDROCK_MANTLE_WEST_BASE_URL=us-west-2
+```
+
+这会注册 `bedrock-mantle-east` 和 `bedrock-mantle-west`。
+
+## 故障排查
+
+- **GPT-5.6 返回 `404` 或拒绝请求**：请使用
+  `bedrock-mantle` 提供商类型。Bedrock Runtime 提供商使用 Converse，而 GPT-5.6 不支持 Converse。
+- **`403` / 访问被拒绝**：请启用模型访问权限，并确认 API 密钥或 IAM 主体可以在该区域调用 Bedrock Mantle 推理。
+- **使用 `AWS_BEARER_TOKEN_BEDROCK` 或 IAM 角色时未发现提供商**：请设置 `BEDROCK_MANTLE_BASE_URL` 以启用无密钥的提供商。
+- **新发布的模型使用了错误的路径**：请为该提供商实例设置
+  `BEDROCK_MANTLE_API_MODE=openai` 或 `standard`。
+
+## 参考
+
+- [使用 Responses API 进行推理](https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-mantle.html)
+- [GPT-5.6 Sol](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-56-sol.html)
+- [GPT-5.6 Terra](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-56-terra.html)
+- [GPT-5.6 Luna](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-56-luna.html)
+- [各模型的 API 兼容性](https://docs.aws.amazon.com/bedrock/latest/userguide/models-api-compatibility.html)
+- [Bedrock Mantle 配额](https://docs.aws.amazon.com/bedrock/latest/userguide/quotas-mantle.html)

@@ -15,6 +15,8 @@
   import {
     isSecretPlaceholder,
     schemaArrayFieldSelected,
+    schemaFieldRangeBounds,
+    schemaFieldRangeValue,
     schemaFieldValue,
     setSchemaFieldValue,
     toggleSchemaArrayValue,
@@ -94,7 +96,26 @@
           >
         {/snippet}
       </InlineHelpSection>
-      {#if field.input === "select"}
+      {#if field.input === "range"}
+        {@const bounds = schemaFieldRangeBounds(field)}
+        {@const shown = schemaFieldRangeValue(config, field)}
+        <div class="schema-range">
+          <input
+            id={idPrefix + "-" + field.key}
+            type="range"
+            min={bounds.min}
+            max={bounds.max}
+            step={bounds.step}
+            value={shown}
+            aria-describedby={helpId(field)}
+            {disabled}
+            oninput={(event) => set(field, event.currentTarget.value)}
+          />
+          <output class="schema-range-value" for={idPrefix + "-" + field.key}
+            >{shown}</output
+          >
+        </div>
+      {:else if field.input === "select"}
         <select
           class="form-select settings-select"
           id={idPrefix + "-" + field.key}
@@ -223,5 +244,26 @@
   .schema-field-required {
     margin-left: 3px;
     color: var(--danger);
+  }
+
+  .schema-range {
+    align-items: center;
+    display: flex;
+    gap: 12px;
+  }
+
+  .schema-range input[type="range"] {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .schema-range-value {
+    color: var(--text-muted);
+    flex: 0 0 auto;
+    font: inherit;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    min-width: 4ch;
+    text-align: right;
   }
 </style>

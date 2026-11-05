@@ -203,6 +203,47 @@ submissions and MCP calls, are not checked against provider budgets.
 If multiple budgets match a request, GoModel checks all matching limits in one
 lookup. The request is rejected if any matching limit is exhausted.
 
+### Non-billable providers
+
+A provider configured with `billable: false` serves requests whose cost the
+caller does not owe you, typically a customer's own API key registered as its
+own provider instance. User-path and label budgets neither gate a request
+routed to such a provider nor count its spend, on either cost basis. Provider
+budgets still apply to it: on provider cost they count its usage in full,
+while a billed-cost provider budget sees its billed cost of `0`. Usage is
+tracked and priced as usual, and each row records `billable: false`; the flag
+is stamped when the row is written, so changing it later does not rewrite past
+spend.
+
+For example, a platform lets users bring their own OpenAI key and also offers
+your hosted models. Register the user's key as a provider of its own, mark it
+non-billable, and put the budget on the user's path: the budget then caps the
+hosted models only, while the user's OpenAI usage stays visible in usage
+reports and `GET /v1/usage`.
+
+```bash
+curl -X PUT http://localhost:8080/admin/provider-credentials \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "openai-u123", "type": "openai", "api_keys": ["sk-..."], "billable": false}'
+```
+
+```yaml
+budgets:
+  user_paths:
+    - path: "/users/u123"
+      limits:
+        - period: "monthly"
+          amount: 20.00
+```
+
+Bind the user's API key to `/users/u123`. Requests to `openai-u123/...` are
+not checked against the budget and add nothing to it; requests to your hosted
+provider are. In `config.yaml` the same setting is `providers.<name>.billable:
+false`, or `<PROVIDER>[_SUFFIX]_BILLABLE=false` in the environment; see
+[Cost tracking](/features/cost-tracking#markups-and-billed-cost) for how
+non-billable usage is billed.
+
 ### Provider budgets and failover
 
 When a provider budget is exhausted and the request has
@@ -211,6 +252,12 @@ and tries the failover targets instead of rejecting the request. Failover also
 skips any target whose own provider budget is exhausted. If no target is left,
 the client receives the original `budget_exceeded` error. User-path and label
 budgets always reject: switching providers cannot relieve them.
+
+The one exception is a request admitted on a non-billable provider, for which
+user-path and label budgets were not checked. When it fails over to a billable
+target, failover checks those budgets for that target and skips it if one is
+exhausted, so a customer's own key never opens a way around their budget on
+your providers.
 
 ### Dynamic per-child budgets
 
@@ -234,6 +281,79 @@ The dashboard shows the definition as a `per child` template instead of
 inventing an aggregate usage value. Use `GET /v1/usage` with a child's effective
 user path to inspect that child's resolved budget. Resetting the template starts
 a new period for all of its children.
+
+## Budgets on billed cost (GoModel Pro)
+
+<Info>
+  Budgets on billed cost require a GoModel Pro license with the `billing`
+  entitlement and `PRICING_MARKUPS_ENABLED=true`. Without them, admin API
+  writes with `"cost_basis": "billed"` are rejected (403
+  `billed_budgets_not_entitled`, or 400 `billed_budgets_markups_disabled` when
+  markups are off), and a billed budget in the current configuration aborts
+  startup. A billed budget already stored (created in the dashboard, or by an
+  earlier configuration) never blocks startup: while the entitlement or markups
+  are missing, GoModel logs a warning once and enforces it on provider cost, so
+  the limit stays in force. It stays stored as billed: editing its amount in
+  the dashboard or with `"cost_basis": "billed"` keeps it billed, and it limits
+  billed cost again once the entitlement and markups are back.
+</Info>
+
+By default a budget limits provider cost: what you pay upstream for uncached
+requests. Set `cost_basis: billed` to limit what the caller is billed instead —
+provider cost plus its [markup](/features/cost-tracking#markups-and-billed-cost).
+Use it when a budget is a customer's credit limit.
+
+```yaml
+budgets:
+  labels:
+    - label: "customer-acme"
+      limits:
+        - period: "monthly"
+          amount: 500.00
+          cost_basis: "billed"
+```
+
+```bash
+curl -X PUT http://localhost:8080/admin/budgets \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope": "label",
+    "subject": "customer-acme",
+    "cost_basis": "billed",
+    "budget_key": { "period": "monthly" },
+    "amount": 500.00
+  }'
+```
+
+A billed budget:
+
+- sums `billed_cost`, including billed response-cache hits. With
+  `PRICING_BILL_CACHE_HITS=false`, cache hits bill `0` and add nothing.
+- counts usage recorded without a billed cost (before markups were enabled) at
+  its provider cost, so enabling markups mid-period never under-counts.
+- gates response-cache hits too: while cache hits are billed, an exhausted
+  billed user-path or label budget rejects a request before a cached response
+  is replayed. Provider-cost budgets never count cache hits, and provider
+  budgets do not apply to them, since a hit is not routed to a provider. A
+  hit of a [non-billable provider](#non-billable-providers)'s model is
+  admitted regardless, as the request itself would be.
+- on a provider, still counts the billed cache hits of that provider's models
+  in its spend. Set `BUDGETS_PROVIDER_BILLED_CACHE_HITS=false`
+  (`budgets.provider_billed_cache_hits`) to limit only what was billed for
+  requests the provider served.
+
+`cost_basis` is `provider` (default) or `billed`. It is an attribute, not part
+of the budget key: one scope, subject, and period holds one budget on either
+basis, and changing the basis keeps the current period. A `PUT` without
+`cost_basis` sets `provider`; existing budgets keep limiting provider cost.
+`GET /admin/budgets` and `GET /v1/usage` report each budget's stored
+`cost_basis` and its `enforced_cost_basis`, the basis `spent` is measured on.
+They differ only for a billed budget enforced on provider cost. In the
+dashboard, the budget form shows a **Cost basis** selector once the
+entitlement and markups are on, billed budgets carry a `billed` chip, and a
+billed budget enforced on provider cost carries a `billed · on provider cost`
+chip.
 
 ## Workflow enforcement
 

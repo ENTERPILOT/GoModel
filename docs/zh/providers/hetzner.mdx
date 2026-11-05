@@ -1,0 +1,89 @@
+---
+title: "Hetzner"
+description: "在 GoModel 中配置 Hetzner 实验性的兼容 OpenAI 的推理 API。"
+icon: "server"
+keywords: ["Hetzner", "实验性", "推理", "提供商配置", "experimental", "inference", "provider setup"]
+---
+
+<Warning>
+  **实验性**：Hetzner 声明该推理 API 处于实验阶段。可能会出现不兼容的变更，不提供 SLA，
+  也不保证可用性。请不要将其用于生产环境工作负载。在实验期间，Hetzner 可能会在不另行通知的情况下
+  更改模型、限制乃至端点本身。
+</Warning>
+
+Hetzner Inference 是一个兼容 OpenAI 的 REST API，地址为 `https://inference.hetzner.com/api/v1`。
+GoModel 通过共享的 OpenAI 适配器路由聊天、模型列表和透传请求。`/v1/responses` 端点会通过
+Chat Completions 进行转换。不支持文件、批处理和嵌入，因为 Hetzner 没有提供 `/v1/embeddings` 端点。
+嵌入请求会以带类型的 “not supported” 错误快速失败，不会发起任何上游调用。
+
+<Note>
+  透传是一个通用转发器：它会将您提供的任何路径原样发送给 Hetzner。在该 API 处于实验阶段期间，
+  尚未验证 Hetzner 对任意上游路径的容忍程度，`/v1/models`、`/v1/completions` 和
+  `/v1/chat/completions` 以外的路径预计会返回 HTTP 404 或 405。`hetzner` 位于默认的
+  `ENABLED_PASSTHROUGH_PROVIDERS` 允许列表中，因此无需运维人员显式启用，`/p/hetzner/...` 路由即可使用。
+</Note>
+
+## 配置
+
+在 [Hetzner Experiments 控制台](https://experiments.hetzner.com/inference)中创建 API Token，然后设置：
+
+```bash
+HETZNER_API_KEY=...
+```
+
+或在 `config.yaml` 中：
+
+```yaml
+providers:
+  hetzner:
+    type: hetzner
+    base_url: "https://inference.hetzner.com/api/v1"
+    api_key: "${HETZNER_API_KEY}"
+```
+
+您还可以通过以下变量覆盖基础 URL 和模型列表：
+
+```bash
+HETZNER_BASE_URL=https://inference.hetzner.com/api/v1
+HETZNER_MODELS=Qwen/Qwen3.6-35B-A3B-FP8
+```
+
+<Note>
+  上面的模型 ID 是 [Hetzner 官方推理文档](https://docs.hetzner.com/general/company-and-policy/experiments/inference/)
+  中的示例（核对日期为 2026-08-17）。该模型目录处于实验阶段且会发生变化；在复制该示例之前，
+  请先通过 `GET /v1/models` 确认当前的 ID。
+</Note>
+
+## 模型
+
+在实验期间，模型目录会不断变化。请查询实时列表，而不是依赖文档快照：
+
+```bash
+curl -s https://inference.hetzner.com/api/v1/models \
+  -H "Authorization: Bearer $HETZNER_API_KEY"
+```
+
+配置该提供商后，GoModel 也会通过其自身的 `/v1/models` 端点提供此列表。支持视觉的模型
+可以原样接收符合 OpenAI 标准的 `image_url` 内容部分。
+
+## 速率限制
+
+Hetzner 按密钥对输入 Token 和输出 Token 实施速率限制。超出任一限制都会返回 HTTP 429。
+文档中的限制窗口为每 60 秒 3M 输入 Token / 60k 输出 Token，以及每 24 小时 500M 输入 / 5M 输出。
+具体数值在实验期间会发生变化，请查看
+[官方推理文档](https://docs.hetzner.com/general/company-and-policy/experiments/inference/)
+了解当前数值。建议使用保守的重试设置：
+
+```yaml
+providers:
+  hetzner:
+    type: hetzner
+    api_key: "${HETZNER_API_KEY}"
+    retries: 2
+```
+
+## 定价
+
+在该 API 处于实验阶段期间，可免费使用。Hetzner 表示会在开始计费前通过电子邮件通知用户。
+在上游定价公布之前，GoModel 的用量成本追踪会将 Hetzner 请求的 `cost` 报告为零，因此 `cost`
+负载均衡策略无法按价格对该提供商进行排序。

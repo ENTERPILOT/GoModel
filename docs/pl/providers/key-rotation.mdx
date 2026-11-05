@@ -1,0 +1,147 @@
+---
+title: "Rotacja kluczy API"
+description: "Przypisz jednemu providerowi kilka kluczy API, rozłóż na nie sesje i zachowaj powiązanie z prompt cache."
+icon: "key-round"
+keywords: ["rotacja kluczy API", "API key rotation", "wiele kluczy API", "multiple API keys", "round robin", "rate limits", "limity żądań"]
+---
+
+Provider zwykle ma jeden klucz API i każdy request do niego używa tego klucza.
+Skonfiguruj więcej niż jeden, a GoModel rozłoży na nie zidentyfikowane sesje. Każda
+rozmowa domyślnie pozostaje na jednym kluczu, więc może dalej trafiać w prompt cache
+providera, a każdy klucz nadal obsługuje tylko część całego ruchu.
+
+Rotacja jest wyłączona, dopóki nie skonfigurujesz drugiego klucza. Jeden klucz działa dokładnie tak
+jak zawsze.
+
+<Note>
+  Requesty bez wykrytej sesji nadal rotują w trybie round robin. Obsługiwane nagłówki sesji,
+  pola body i automatyczne wykrywanie rozmów opisuje strona
+  [Utrzymywanie sesji](/pl/features/session-keeping).
+</Note>
+
+## Konfiguracja
+
+Dodawaj klucze za pomocą numerowanych zmiennych środowiskowych. `<PROVIDER>_API_KEY` to pierwszy
+klucz; `<PROVIDER>_API_KEY_2`, `_3` i kolejne dodają pozostałe.
+
+```bash
+OPENAI_API_KEY=sk-first
+OPENAI_API_KEY_2=sk-second
+OPENAI_API_KEY_3=sk-third
+```
+
+Trzy klucze, więc różne sesje są deterministycznie rozkładane na te trzy
+klucze; każdy request w ramach jednej sesji wybiera ten sam klucz.
+
+Albo w `config.yaml`:
+
+```yaml
+providers:
+  openai:
+    type: openai
+    api_keys:
+      - "${OPENAI_API_KEY}"
+      - "${OPENAI_API_KEY_2}"
+      - "${OPENAI_API_KEY_3}"
+```
+
+`api_key` i `api_keys` można łączyć; `api_key` jest używany jako pierwszy.
+
+Aby przywrócić ścisły round robin per request, wyłącz tę opcję dla danego providera:
+
+```yaml
+providers:
+  openai:
+    session_sticky_keys: false
+```
+
+Instancje providerów skonfigurowane wyłącznie przez zmienne środowiskowe używają tego samego prefiksu providera
+i opcjonalnego sufiksu co ich klucze API:
+
+```bash
+OPENAI_API_KEY=sk-primary
+OPENAI_API_KEY_2=sk-secondary
+OPENAI_SESSION_STICKY_KEYS=false
+
+OPENAI_EU_API_KEY=sk-eu-primary
+OPENAI_EU_API_KEY_2=sk-eu-secondary
+OPENAI_EU_SESSION_STICKY_KEYS=false
+```
+
+To samo ustawienie to pole wyboru **Session-sticky API keys** w edytorze providera
+w dashboardzie. Jest domyślnie zaznaczone.
+
+Rotować może każdy provider uwierzytelniający się kluczem API — `ANTHROPIC_API_KEY_2`,
+`GEMINI_API_KEY_2`, `GROQ_API_KEY_2` i tak dalej. Providerzy uwierzytelniający się
+w inny sposób (Vertex AI i Bedrock, które używają danych uwierzytelniających Google i AWS) ignorują
+te zmienne.
+
+## Zasady
+
+- Numeracja zaczyna się od `2`, ponieważ `<PROVIDER>_API_KEY` to klucz 1. Zapisanie
+  `<PROVIDER>_API_KEY_1` zamiast formy bez sufiksu również działa.
+- Luki są dozwolone. Ustawienie tylko `_API_KEY` i `_API_KEY_3` daje dwa klucze.
+- Zduplikowane klucze są scalane, więc klucz powtórzony w dwóch zmiennych nie
+  dostaje podwójnego udziału w ruchu.
+- Klucze są używane w skonfigurowanej kolejności: najpierw klucz bez sufiksu, potem
+  rosnąco według numeru.
+- Zmienne środowiskowe zastępują całą listę `api_keys` providera z
+  `config.yaml`, zamiast się z nią scalać.
+- Klucz, którego nie da się rozwiązać — placeholder `${UNSET_VAR}` — jest pomijany.
+  Provider, któremu nie zostanie żaden klucz, nie jest rejestrowany.
+
+<Note>
+  Przy włączonym przyklejaniu sesji ponowienia używają klucza przypiętego do sesji. Przy
+  wyłączonym przyklejaniu każda próba wychodząca uczestniczy w round robin.
+</Note>
+
+## Rotacja u providerów z sufiksem
+
+Zmienne środowiskowe z sufiksem rejestrują *osobnego providera* tego samego typu.
+Oba mechanizmy można łączyć, a rozróżnia je końcowy numer:
+
+```bash
+OPENAI_EU_API_KEY=sk-eu-first
+OPENAI_EU_API_KEY_2=sk-eu-second
+```
+
+To provider `openai-eu` z dwoma kluczami. Końcowe `_2` oznacza klucz.
+
+```bash
+OPENAI_REGION_2_API_KEY=sk-only
+```
+
+To provider `openai-region-2` z jednym kluczem. Tutaj `2` jest częścią
+sufiksu providera, a nie numerem klucza.
+
+## Co obejmuje rotacja
+
+Każde wywołanie, które GoModel wykonuje do providera, używa tej samej polityki wyboru: chat
+completions, responses, embeddingi, audio, obrazy, batche, natywne dla providera
+[trasy passthrough](/pl/features/passthrough-api) i sesje realtime. Zidentyfikowane
+sesje są przyklejone; ruch bez sesji jest rozdzielany w trybie round robin.
+
+Rotacja działa per proces gatewaya. Liczniki są przechowywane w pamięci i resetują się przy restarcie,
+więc `N` replik rotuje niezależnie od siebie — co nie stanowi problemu, ponieważ celem jest
+rozłożenie obciążenia, a nie dokładne ustalenie kolejności.
+
+## Wybór między rotacją a osobnymi providerami
+
+Oba podejścia pozwalają używać kilku kluczy jednego typu providera. Rozwiązują różne problemy.
+
+| | Rotacja kluczy | Providerzy z sufiksem |
+| --- | --- | --- |
+| Konfiguracja | `OPENAI_API_KEY_2` | `OPENAI_EAST_API_KEY` |
+| ID modeli | bez zmian (`gpt-4o`) | z kwalifikatorem providera (`openai-east/gpt-4o`) |
+| Routing | automatyczny, przyklejony do sesji | wybiera wywołujący lub rozkłada [model wirtualny](/pl/features/virtual-models) |
+| Prompt caching | zachowany dla zidentyfikowanych sesji | zachowany per provider |
+| Zastosowanie | podniesienie limitów żądań na jednym koncie | osobne konta, regiony lub bazowe URL-e |
+
+Osobni providerzy nadal są przydatni, gdy klucze wskazują różne konta,
+regiony, bazowe URL-e lub katalogi modeli. Nie są już jednak potrzebni wyłącznie po to, by
+zachować prompt caching przy kilku kluczach.
+
+## Weryfikacja
+
+API nie raportuje rotacji. Aby ją potwierdzić, obserwuj własny dashboard
+użycia providera: ruch powinien rozkładać się mniej więcej równo między klucze.

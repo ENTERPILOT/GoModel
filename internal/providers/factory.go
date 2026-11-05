@@ -14,6 +14,7 @@ import (
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers/workloadidentity"
 )
 
 // ProviderOptions bundles runtime settings passed from the factory to provider constructors.
@@ -81,6 +82,10 @@ type DiscoveryConfig struct {
 	// order. Leave it nil to derive the form from the flags above; the model
 	// list is always appended. See credentialSchema.
 	CredentialFields []CredentialField
+
+	// WorkloadIdentity names the token exchange grant the provider type
+	// supports for workload identity federation; empty when it supports none.
+	WorkloadIdentity workloadidentity.Grant
 }
 
 // Registration contains metadata for registering a provider with the factory.
@@ -89,6 +94,10 @@ type Registration struct {
 	New                         ProviderConstructor
 	PassthroughSemanticEnricher core.PassthroughSemanticEnricher
 	Discovery                   DiscoveryConfig
+	// MCPServers lists the MCP servers the provider hosts, which
+	// mcp.provider_servers can expose through the MCP gateway. Nil for
+	// providers that host none.
+	MCPServers BuiltinMCPServersFunc
 }
 
 // ProviderFactory manages provider registration and creation.
@@ -97,6 +106,7 @@ type ProviderFactory struct {
 	builders             map[string]ProviderConstructor
 	discoveryConfigs     map[string]DiscoveryConfig
 	passthroughEnrichers map[string]core.PassthroughSemanticEnricher
+	mcpServers           map[string]BuiltinMCPServersFunc
 	hooks                llmclient.Hooks
 	proxySelector        ext.ProxySelector
 }
@@ -107,6 +117,7 @@ func NewProviderFactory() *ProviderFactory {
 		builders:             make(map[string]ProviderConstructor),
 		discoveryConfigs:     make(map[string]DiscoveryConfig),
 		passthroughEnrichers: make(map[string]core.PassthroughSemanticEnricher),
+		mcpServers:           make(map[string]BuiltinMCPServersFunc),
 	}
 }
 
@@ -152,6 +163,11 @@ func (f *ProviderFactory) Add(reg Registration) {
 	} else {
 		delete(f.passthroughEnrichers, reg.Type)
 	}
+	if reg.MCPServers != nil {
+		f.mcpServers[reg.Type] = reg.MCPServers
+	} else {
+		delete(f.mcpServers, reg.Type)
+	}
 }
 
 // Create instantiates a provider based on its resolved configuration.
@@ -181,6 +197,10 @@ func (f *ProviderFactory) create(cfg ProviderConfig, keys *Keyring) (core.Provid
 	// request to the same instance.
 	name := strings.TrimSpace(cfg.Name)
 	httpClient, err := providerHTTPClient(cfg, proxySelector)
+	if err != nil {
+		return nil, err
+	}
+	keys, err = f.federatedKeyring(cfg, keys, httpClient)
 	if err != nil {
 		return nil, err
 	}

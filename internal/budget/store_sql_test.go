@@ -201,38 +201,15 @@ func TestSQLStoreMigratesPreScopeTable(t *testing.T) {
 // (json_each on SQLite, jsonb_exists on PostgreSQL), so testing only one of
 // them would leave the other free to silently match nothing.
 func TestSQLStoreSumSpendHonorsSubjectBoundaryAndCacheType(t *testing.T) {
-	t.Run("sqlite", func(t *testing.T) {
-		db, err := sql.Open("sqlite", ":memory:")
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		usageStore, err := usage.NewSQLStore(context.Background(), db, 0)
 		require.NoError(t, err)
 
-		defer db.Close()
-
-		usageStore, err := usage.NewSQLiteStore(db, 0)
-		require.NoError(t, err)
-
-		wrapped, err := sqlx.NewSQLite(db)
-		require.NoError(t, err)
-
-		assertSumSpendMatchesSubjects(t, usageStore, wrapped)
-	})
-
-	t.Run("postgresql", func(t *testing.T) {
-		pool := sqlxtest.NewPostgresPool(t)
-		if pool == nil {
-			return // already skipped
-		}
-		usageStore, err := usage.NewPostgreSQLStore(pool, 0)
-		require.NoError(t, err)
-
-		wrapped, err := sqlx.NewPostgreSQL(pool)
-		require.NoError(t, err)
-
-		assertSumSpendMatchesSubjects(t, usageStore, wrapped)
+		assertSumSpendMatchesSubjects(t, usageStore, db)
 	})
 }
 
-// usageWriter is the slice of a usage store this test needs, satisfied by both
-// backend implementations.
+// usageWriter is the slice of a usage store this test needs.
 type usageWriter interface {
 	WriteBatch(ctx context.Context, entries []*usage.UsageEntry) error
 }
@@ -257,6 +234,8 @@ func assertSumSpendMatchesSubjects(t *testing.T, usageStore usageWriter, db sqlx
 		usageEntryForProvider("openai-free", "openai", "openai-free", now, 4),
 		// Written before provider_name existed: only the provider type is set.
 		usageEntryForProvider("legacy-openai", "openai", "", now, 3),
+		// Served by a billable: false provider: only its provider budget sees it.
+		usageEntryNonBillable("byok", "/team/app", now, 50, "prod", "iOS"),
 	}
 	err = usageStore.WriteBatch(ctx, entries)
 	require.NoError(t, err)
@@ -275,6 +254,7 @@ func assertSumSpendMatchesSubjects(t *testing.T, usageStore usageWriter, db sqlx
 		{Scope: ScopeProvider, Subject: "openai", Start: start, End: end},
 		{Scope: ScopeProvider, Subject: "test", Start: start, End: end},
 		{Scope: ScopeProvider, Subject: "anthropic", Start: start, End: end},
+		{Scope: ScopeProvider, Subject: "byok-openai", Start: start, End: end},
 	}
 	want := []Spend{
 		{Total: 1.5, HasUsage: true},   // /team subtree, uncached, minus the sibling and /TEAM
@@ -288,6 +268,7 @@ func assertSumSpendMatchesSubjects(t *testing.T, usageStore usageWriter, db sqlx
 		{Total: 3, HasUsage: true},     // openai: only the row without a provider name
 		{Total: 106.5, HasUsage: true}, // test: every uncached in-window user-path row
 		{},                             // no such provider
+		{Total: 50, HasUsage: true},    // byok-openai: the non-billable row, skipped above
 	}
 
 	got, err := store.SumSpend(ctx, windows)
@@ -316,10 +297,10 @@ func TestSQLStoreSumSpendChunksLargeBatches(t *testing.T) {
 
 	defer db.Close()
 
-	usageStore, err := usage.NewSQLiteStore(db, 0)
+	wrapped, err := sqlx.NewSQLite(db)
 	require.NoError(t, err)
 
-	wrapped, err := sqlx.NewSQLite(db)
+	usageStore, err := usage.NewSQLStore(ctx, wrapped, 0)
 	require.NoError(t, err)
 
 	store, err := NewSQLStore(ctx, wrapped)
@@ -360,6 +341,16 @@ func usageEntryForProvider(name, providerType, providerName string, ts time.Time
 	entry := usageEntryWithCost(name, "/providers", "", ts, cost)
 	entry.Provider = providerType
 	entry.ProviderName = providerName
+	return entry
+}
+
+// usageEntryNonBillable builds one priced row served by a billable: false
+// provider.
+func usageEntryNonBillable(name, userPath string, ts time.Time, cost float64, labels ...string) *usage.UsageEntry {
+	entry := usageEntryWithCost(name, userPath, "", ts, cost, labels...)
+	entry.Provider = "openai"
+	entry.ProviderName = "byok-openai"
+	entry.MarkNonBillable()
 	return entry
 }
 

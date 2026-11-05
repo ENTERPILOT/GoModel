@@ -1,0 +1,240 @@
+---
+title: "Operacje CLI"
+description: "Flagi wiersza poleceń do sprawdzania binarki GoModel, badania stanu działającego gatewaya i przeładowywania jego konfiguracji."
+icon: "terminal"
+keywords: ["CLI", "flagi wiersza poleceń", "command-line flags", "health check", "sonda wersji", "przeładowanie konfiguracji", "config reload", "SIGHUP"]
+---
+
+## Przegląd
+
+Binarka `gomodel` udostępnia niewielki zestaw flag wiersza poleceń do zadań
+operacyjnych. Flagi przyjmują zarówno formę z jednym myślnikiem (`-flag`), jak
+i z dwoma (`--flag`); w poniższych przykładach używana jest forma długa.
+
+| Flaga              | Opis                                                     | Wartość domyślna |
+| ------------------ | ------------------------------------------------------- | ------- |
+| `--version`        | Wypisuje informacje o wersji i kończy działanie          | —       |
+| `--health`         | Odpytuje lokalny endpoint `/health` (liveness) i kończy działanie | —       |
+| `--health-timeout` | Maksymalny czas oczekiwania na sondę `--health`          | `2s`    |
+| `--ready`          | Odpytuje lokalny endpoint `/health/ready` (readiness) i kończy działanie | — |
+| `--ready-timeout`  | Maksymalny czas oczekiwania na sondę `--ready`           | `4s`    |
+| `--reload`         | Każe działającemu gatewayowi przeładować konfigurację i kończy działanie | —   |
+
+## Wersja
+
+Wypisz wersję buildu i zakończ:
+
+```bash
+gomodel --version
+```
+
+## Sonda health
+
+`--health` sprawia, że binarka działa jako klient health checka: wczytuje tę samą
+konfigurację co serwer, wysyła request do lokalnego endpointu `/health` i kończy działanie.
+
+```bash
+gomodel --health
+```
+
+- Kończy się kodem `0`, gdy endpoint zwraca HTTP `200` z `{"status":"ok"}`.
+- W przeciwnym razie kończy się kodem niezerowym (odmowa połączenia, status inny
+  niż `200` lub dowolna inna wartość statusu).
+
+Sonda zawsze trafia w interfejs loopback (`127.0.0.1`), ponieważ działa
+w tym samym kontenerze co serwer, ale `PORT` i `BASE_PATH` wyznacza
+z konfiguracji, zamiast na sztywno używać `8080` i `/health`. Ogranicz czas
+requestu flagą `--health-timeout`:
+
+```bash
+gomodel --health --health-timeout 5s
+```
+
+### Docker `HEALTHCHECK`
+
+Ponieważ sonda jest wbudowana w binarkę, obrazy kontenerów mogą raportować stan
+bez dołączania `curl` ani `wget` — to przydatne w minimalnych środowiskach
+uruchomieniowych i obrazach distroless. Oficjalny obraz konfiguruje to automatycznie:
+
+```dockerfile
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["/gomodel", "--health"]
+```
+
+Orkiestratory (Docker, Compose, Kubernetes) mogą wtedy wykryć niesprawny
+gateway i go zrestartować.
+
+## Sonda readiness
+
+`--ready` odpytuje `/health/ready`, który informuje, czy instancja powinna
+otrzymywać ruch. W przeciwieństwie do liveness readiness sprawdza zależności,
+za które odpowiada gateway:
+
+- **Storage** jest wymagany. Jeśli backend (SQLite/PostgreSQL/MongoDB) jest
+  nieosiągalny, readiness zgłasza `not_ready` (HTTP `503`).
+- **Redis exact cache** (jeśli jest skonfigurowany) to optymalizacja wydajności. Jeśli
+  jest nieosiągalny, readiness zgłasza `degraded`, ale pozostaje przy HTTP `200` —
+  gateway nadal obsługuje requesty.
+
+Dostępność upstreamowych **providerów** jest celowo pominięta: awaria providera
+nie może wycofać sprawnego gatewaya z rotacji.
+
+```bash
+gomodel --ready
+```
+
+- Kończy się kodem `0`, gdy endpoint zwraca HTTP `200` (`ready` lub `degraded`).
+- Kończy się kodem niezerowym przy `not_ready` (HTTP `503`), odmowie połączenia
+  lub nieoczekiwanej wartości statusu.
+
+```json
+{ "status": "ready", "components": { "storage": "ok", "cache": "ok" } }
+```
+
+## Przeładowanie konfiguracji
+
+`--reload` stosuje zmiany konfiguracji w działającym gatewayu bez jego
+restartu — to ta sama operacja co `nginx -s reload`:
+
+```bash
+gomodel --reload
+```
+
+Polecenie wczytuje tę samą konfigurację co gateway, aby znaleźć plik pid, wysyła
+sygnał do tego procesu i kończy działanie. Dzięki wcześniejszemu wczytaniu
+konfiguracji `config.yaml`, którego binarka nie potrafi sparsować, kończy polecenie
+błędem — niezerowy kod wyjścia, żaden sygnał nie zostaje wysłany — zanim działający
+gateway w ogóle zostanie poproszony o jego odczytanie. Po powodzeniu gateway:
+
+1. Ponownie wczytuje plik `.env`. Nowe i zmienione wartości zostają zastosowane; wartości
+   usunięte z pliku zostają wyczyszczone. Zmienne wyeksportowane do środowiska procesu
+   nadal mają pierwszeństwo przed plikiem, dokładnie tak jak przy starcie — środowisko
+   kontenera nie jest nadpisywane przez plik znajdujący się w jego wnętrzu.
+2. Ponownie wczytuje `config/config.yaml` (lub `config.yaml`) oraz wszystkie zmienne
+   środowiskowe, a następnie odbudowuje się na ich podstawie. Providerzy, modele wirtualne,
+   budżety, limity żądań, guardrails, serwery MCP, cache, logowanie, ustawienia
+   administracyjne — przeładowuje się wszystko, ponieważ reload ponownie wykonuje tę samą
+   ścieżkę startową, a nie ręcznie wybrany podzbiór.
+
+Nowa konfiguracja jest budowana **zanim** działająca zostanie zatrzymana, więc
+konfiguracja, której nie da się wczytać ani zainicjalizować, niczego nie zmienia: gateway
+loguje `reload failed; keeping the running configuration` i dalej obsługuje ruch na tym,
+co już działa.
+
+Nasłuchujący socket jest utrzymywany przez cały czas życia procesu i przekazywany
+kolejno każdej konfiguracji, więc requesty przychodzące w trakcie przeładowania czekają
+na przyjęcie, zamiast zostać odrzucone. Requesty w toku dostają to samo 10-sekundowe
+okno na dokończenie co przy zamykaniu, a streamowane odpowiedzi, które trwają dłużej,
+zostają przerwane, więc reload przy dużym ruchu streamingowym nie jest darmowy — ale
+żadne połączenie nie zostaje zerwane na poziomie socketu.
+
+Ta ostatnia gwarancja zależy od tego, czy system operacyjny pozwala gatewayowi
+zduplikować nasłuchujący socket, co obejmuje każdą platformę, do której w ogóle da się
+wysłać sygnał przeładowania. Tam, gdzie duplikacja jest niedostępna, następna
+konfiguracja ponownie binduje adres, a połączenia są odrzucane na czas podmiany.
+
+Bezpośrednie wysłanie sygnału działa tak samo — z tego może skorzystać menedżer
+procesów lub kontener bez powłoki:
+
+```bash
+kill -HUP "$(cat data/gomodel.pid)"
+```
+
+<Note>
+  Reload to funkcja oparta na sygnałach POSIX i nie jest dostępna w systemie Windows.
+</Note>
+
+### Plik pid
+
+Gateway zapisuje identyfikator swojego procesu w `PID_FILE` / `server.pid_file` przy starcie
+i usuwa go przy zamykaniu. Domyślnie jest to `data/gomodel.pid`, jeśli istnieje katalog
+`./data` (obrazy Docker i istniejące wdrożenia), a w przeciwnym razie standardowy dla
+systemu operacyjnego katalog danych użytkownika — tak samo jak w przypadku bazy
+danych SQLite.
+
+Gdy kilka gatewayów działa na jednym hoście, nadaj każdej instancji osobną ścieżkę,
+ponieważ `--reload` wysyła sygnał do procesu wskazanego w pliku. Aby w ogóle nie
+zapisywać pliku pid, ustaw `server.pid_file: ""` w `config.yaml` — to wyłącza `--reload`,
+choć `kill -HUP` nadal działa. Pusta zmienna środowiskowa `PID_FILE` jest traktowana jak
+nieustawiona i zachowuje wartość domyślną, tak samo jak każde inne ustawienie. Jeśli
+ścieżka nie jest zapisywalna, gateway loguje ostrzeżenie i działa normalnie, tylko bez
+obsługi `--reload`.
+
+Zarówno gateway, jak i `gomodel --reload` wyznaczają ścieżkę z tej samej konfiguracji,
+więc uruchamiaj polecenie z tego samego katalogu roboczego (lub z tym samym
+`PID_FILE`) co gateway:
+
+```bash
+docker exec my-gateway /gomodel --reload
+```
+
+### Czego reload nie zmienia
+
+- **`PORT`** — socket pozostaje zbindowany, więc żadne połączenie nie zostaje odrzucone;
+  zmiana portu wymaga restartu. Gateway loguje ostrzeżenie z oboma portami.
+- **`PID_FILE`** — wskazuje proces, który już działa.
+- **`GOMODEL_DEMO_MODE`** — ostrzeżenia trybu demo są konfigurowane raz, przy starcie.
+- **Stan w pamięci** — powiązanie sesji z modelem wirtualnym (session affinity) i bufory
+  logów na żywo zaczynają od zera, dokładnie tak jak po restarcie. Okna limitów żądań
+  i tokenów są zapisywane przy zamykaniu i przywracane przez następną generację.
+  Wskaźniki współbieżności oraz budżety/użycie zachowują się jak przy restarcie
+  (wskaźniki startują puste; budżety i użycie są przechowywane w bazie danych).
+
+Do odświeżania katalogów modeli providerów i danych zarządzanych przez administratora
+*bez* ponownego wczytywania konfiguracji lżejszą opcją jest odświeżenie runtime
+z dashboardu (`POST /admin/runtime/refresh`).
+
+Liveness (`--health`) to właściwy sygnał dla Docker `HEALTHCHECK` (restart po
+awarii). Readiness (`/health/ready`) to właściwy sygnał dla `readinessProbe`
+w Kubernetes (sterowanie ruchem) — skieruj ją bezpośrednio na endpoint HTTP albo
+uruchamiaj `gomodel --ready` jako sondę exec. Ustaw `--ready-timeout` na wartość
+większą niż wewnętrzny timeout sondy pojedynczej zależności na serwerze (`2s`), aby
+wolny backend zwrócił czyste `not_ready`, zanim klient pierwszy przekroczy timeout.
+
+## Narzędzia do pluginów
+
+`gomodel plugin` buduje i sprawdza pluginy w postaci bibliotek współdzielonych (`.so`)
+za pomocą toolchainu działającej binarki; zobacz [Pluginy](/pl/advanced/plugins#pluginy-shared-object).
+
+```sh
+gomodel plugin build [-o out.so] <dir>   # go build -buildmode=plugin z flagami tej binarki
+gomodel plugin inspect <file.so>         # otwiera plik i wypisuje jego manifest oraz informacje o buildzie
+```
+
+`plugin build` wymusza `CGO_ENABLED=1`, przypina `GOTOOLCHAIN` do wersji Go
+hosta, wpisuje do pluginu zmienną `GoModelBuildInfo` i odrzuca wynik zbudowany
+inną wersją Go. Ładowanie wymaga buildu GoModel z cgo (`make build-plugins` lub
+obraz `gomodel:<version>-plugins`). `gomodel --version` wypisuje wersje Go
+i `pluginapi`, z którymi pluginy muszą być zgodne.
+
+## Szyfrowanie przechowywanych sekretów
+
+`gomodel secrets reencrypt` szyfruje każdy sekret zarządzany z dashboardu, który
+nadal jest zapisany jawnym tekstem, i przenosi wartości zaszyfrowane starszymi kluczami
+danych na klucz aktywny. Wymaga `GOMODEL_ENCRYPTION_KEY`, wypisuje wyłącznie liczniki
+i jest idempotentne.
+
+```bash
+gomodel secrets reencrypt [--rotate-data-key]
+```
+
+Zobacz [Szyfrowanie danych w spoczynku](/pl/advanced/encryption-at-rest).
+
+## Migracja z LiteLLM
+
+`gomodel migrate litellm` konwertuje plik `config.yaml` proxy LiteLLM na plik
+`config.yaml` GoModel, plik `.env` z sekretami, które były wpisane bezpośrednio
+w konfiguracji, oraz raport z migracji. Bez `--out` nie zapisuje żadnych plików.
+
+Odczytuje też klucze, zespoły, użytkowników i budżety z bazy danych LiteLLM, jeśli ma
+jej URL (`--database-url`, `database_url` z konfiguracji lub `DATABASE_URL`), a z
+`--gomodel-url` importuje je do działającej instancji GoModel. Ponowne uruchomienie
+aktualizuje dane w GoModel. `--gomodel-url` na innej maszynie musi używać `https`,
+chyba że przekażesz `--allow-http`. `--skip-database` konwertuje wyłącznie konfigurację.
+
+```sh
+gomodel migrate litellm [--out DIR] [--force] [--database-url URL | --skip-database]
+  [--gomodel-url URL [--allow-http]] <litellm-config.yaml>
+```
+
+Pełny opis krok po kroku znajdziesz w [Migracji z LiteLLM](/pl/guides/migrate-from-litellm).

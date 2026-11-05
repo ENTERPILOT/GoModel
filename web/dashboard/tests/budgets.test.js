@@ -6,6 +6,9 @@ import assert from "node:assert/strict";
 
 import {
   budgetAmountLabel,
+  budgetBilledOnProviderCost,
+  budgetCostBasis,
+  budgetCostBasisOptions,
   budgetDeleteBody,
   budgetInputUserPath,
   budgetKey,
@@ -57,6 +60,7 @@ test("buildBudgetFormPayload normalizes user path and standard periods", () => {
       period_seconds: 604800,
       amount: 12.3456,
       per_child: false,
+      cost_basis: "provider",
       source: "manual",
     }),
   );
@@ -494,6 +498,7 @@ test("request bodies keep the exact /admin/budgets payload shapes", () => {
       budget_key: { period_seconds: 86400 },
       amount: 12.5,
       per_child: false,
+      cost_basis: "provider",
     }),
   );
   assert.equal(
@@ -527,6 +532,7 @@ test("request bodies keep the exact /admin/budgets payload shapes", () => {
       budget_key: { period_seconds: 86400 },
       amount: 5,
       per_child: false,
+      cost_basis: "provider",
     }),
   );
 });
@@ -549,4 +555,98 @@ test("per-child budgets are sent only for user-path scopes", () => {
     per_child: true,
   });
   assert.equal(label.payload.per_child, false);
+});
+
+test("cost basis defaults to provider and round-trips billed", () => {
+  assert.equal(budgetCostBasis({}), "provider");
+  assert.equal(budgetCostBasis({ cost_basis: "provider" }), "provider");
+  assert.equal(budgetCostBasis({ cost_basis: "unknown" }), "provider");
+  assert.equal(budgetCostBasis({ cost_basis: "billed" }), "billed");
+  assert.deepEqual(
+    budgetCostBasisOptions().map((option) => option.value),
+    ["provider", "billed"],
+  );
+
+  assert.equal(defaultBudgetForm().cost_basis, "provider");
+  const billed = buildBudgetFormPayload({
+    ...defaultBudgetForm(),
+    scope: "label",
+    subject: "acme",
+    amount: "50",
+    cost_basis: "billed",
+  });
+  assert.equal(billed.error, "");
+  assert.equal(billed.payload.cost_basis, "billed");
+  assert.equal(budgetPutBody(billed.payload).cost_basis, "billed");
+});
+
+test("filterAndSortBudgets finds billed budgets by their badge", () => {
+  const budgets = [
+    {
+      scope: "label",
+      subject: "acme",
+      period_seconds: 86400,
+      cost_basis: "billed",
+    },
+    {
+      scope: "label",
+      subject: "beta",
+      period_seconds: 86400,
+      cost_basis: "provider",
+    },
+  ];
+  const filtered = filterAndSortBudgets(budgets, "billed", "subject");
+  assert.deepEqual(
+    filtered.map((item) => item.subject),
+    ["acme"],
+  );
+});
+
+test("budgetBilledOnProviderCost flags billed budgets enforced on provider cost", () => {
+  assert.equal(
+    budgetBilledOnProviderCost({
+      cost_basis: "billed",
+      enforced_cost_basis: "provider",
+    }),
+    true,
+  );
+  assert.equal(
+    budgetBilledOnProviderCost({
+      cost_basis: "billed",
+      enforced_cost_basis: "billed",
+    }),
+    false,
+  );
+  assert.equal(budgetBilledOnProviderCost({ cost_basis: "billed" }), false);
+  assert.equal(
+    budgetBilledOnProviderCost({
+      cost_basis: "provider",
+      enforced_cost_basis: "provider",
+    }),
+    false,
+  );
+});
+
+test("the billed on provider cost badge is searchable", () => {
+  const budgets = [
+    {
+      scope: "label",
+      subject: "acme",
+      period_seconds: 86400,
+      cost_basis: "billed",
+      enforced_cost_basis: "provider",
+    },
+    {
+      scope: "label",
+      subject: "beta",
+      period_seconds: 86400,
+      cost_basis: "billed",
+      enforced_cost_basis: "billed",
+    },
+  ];
+  const found = filterAndSortBudgets(budgets, "on provider cost");
+  assert.deepEqual(
+    found.map((item) => item.subject),
+    ["acme"],
+  );
 });

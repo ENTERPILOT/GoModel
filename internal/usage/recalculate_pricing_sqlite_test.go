@@ -24,7 +24,7 @@ func TestSQLiteStoreRecalculatePricingUpdatesFilteredUsageCosts(t *testing.T) {
 
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	oldCost := 99.0
@@ -102,7 +102,7 @@ func TestSQLiteStoreRecalculatePricingFiltersByLabel(t *testing.T) {
 
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	oldCost := 99.0
@@ -159,7 +159,7 @@ func TestSQLiteStoreRecalculatePricingProcessesBatches(t *testing.T) {
 
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	store.recalculationBatchSize = 1

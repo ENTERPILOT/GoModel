@@ -40,10 +40,20 @@ is required except for loopback development URLs. By default, at least one
 administrator group is required; set `PRO_SSO_ALLOW_ALL_ADMINS=true` only for
 an intentionally unrestricted OIDC client.
 
-<Warning>
-  SSO session revocation is process-local. Deploy SSO on exactly one active
-  GoModel Pro replica until a shared session or revocation store is available.
-</Warning>
+## Sign-out across replicas
+
+Signing out revokes the session immediately on the replica that handled it,
+and records the revocation in the configured storage backend. Every replica
+re-reads revocations every 2 seconds, so with PostgreSQL or MongoDB storage a
+signed-out session stops working on all replicas within a couple of seconds.
+Revocations survive restarts and are deleted once the session would have
+expired anyway.
+
+With SQLite, run a single replica: each SQLite instance has its own database,
+so other replicas never see the revocation and a replayed cookie stays valid
+there until it expires. If the storage backend is unreachable during sign-out,
+the revocation still applies on the replica that handled it, a warning is
+logged, and that replica keeps retrying until the other replicas can see it.
 
 ## Audit and access control
 

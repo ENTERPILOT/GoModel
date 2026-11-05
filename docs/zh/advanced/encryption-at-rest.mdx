@@ -1,0 +1,104 @@
+---
+title: "静态数据加密"
+description: "使用 GOMODEL_ENCRYPTION_KEY 加密从控制台保存的提供商凭据、MCP 请求头和护栏 Secret。"
+icon: "lock"
+keywords: ["静态数据加密", "密钥轮换", "Secret", "加密", "encryption at rest", "GOMODEL_ENCRYPTION_KEY", "key rotation", "secrets", "AES-256-GCM", "KMS"]
+---
+
+您通过控制台或 Admin API 保存的 Secret（密钥）存储在 GoModel 的数据库中。
+设置 `GOMODEL_ENCRYPTION_KEY` 后，这些 Secret 会在写入前被加密，因此数据库文件、
+转储、备份或副本中将不再以明文形式保存它们。
+
+加密的字段：
+
+| 表 / 集合               | 字段                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------ |
+| `provider_credentials`  | `api_keys`、`service_account_json`、`service_account_json_base64`、`proxy_url` |
+| `mcp_servers`           | `headers` 的值                                                                 |
+| `guardrail_definitions` | 插件标记为 Secret 的配置字段（例如 Presidio 的 `api_key`）                     |
+
+在环境变量或 `config.yaml` 中声明的凭据永远不会写入数据库，因此不受影响。
+
+默认值：未设置。Secret 以明文存储；当已启用的功能（提供商，以及开启时的 MCP 或护栏）
+加载明文 Secret 时，GoModel 会在启动时记录一条警告。
+
+## 启用
+
+生成一个密钥，并将其传给共享该数据库的每个实例：
+
+```bash
+openssl rand -base64 32
+```
+
+```bash
+GOMODEL_ENCRYPTION_KEY=<generated value>
+```
+
+值为空时不启用加密。任何其他字符串都可以使用，但密钥加密密钥是从该值派生的，
+因此过短或容易猜到的值会削弱加密强度：请像上面那样使用 32 个随机字节。
+请像交付其他 Secret 一样交付它：在运行时从 Secret 管理器获取，而不是来自已提交的文件。
+也可以使用 [Secret 引用](/zh/advanced/secret-references)，例如
+`GOMODEL_ENCRYPTION_KEY=${file:/run/secrets/gomodel-encryption-key}`。
+
+<Warning>
+  丢失该密钥会导致已加密的 Secret 无法恢复。请像保管它所保护的数据库备份一样谨慎地保存它，
+  并与备份分开存放。没有该密钥时，GoModel 会拒绝在包含已加密 Secret 的数据库上启动。
+</Warning>
+
+## 现有的明文 Secret
+
+启用密钥不会重写任何内容。明文值仍可正常使用，并会在每个条目下次保存时被加密。
+如需一次性加密全部内容，请运行：
+
+```bash
+gomodel secrets reencrypt
+```
+
+该命令使用与网关相同的配置和环境，按表打印数量（绝不打印值），可以重复运行，
+也可以在网关运行期间运行。只有当条目的 Secret 仍是命令读取时的值，每次重写才会成功，
+因此运行期间发生的编辑或删除永远不会被覆盖；命令会重新读取该条目。持续变化的条目
+会被报告为已跳过，下次运行时会再处理。
+
+## 轮换密钥
+
+要更换 `GOMODEL_ENCRYPTION_KEY`，请使用新密钥启动，并将旧密钥放在
+`GOMODEL_ENCRYPTION_KEY_PREVIOUS` 中：
+
+```bash
+GOMODEL_ENCRYPTION_KEY=<new value>
+GOMODEL_ENCRYPTION_KEY_PREVIOUS=<old value>
+```
+
+启动时，GoModel 会用新密钥重新封装数据库的数据密钥。已存储的 Secret 不会被重写，
+因此该操作是即时完成的。所有实例都使用新密钥运行后，请移除 `GOMODEL_ENCRYPTION_KEY_PREVIOUS`。
+
+如需替换数据密钥本身（例如怀疑某个数据库副本连同旧密钥一起泄露后），请运行：
+
+```bash
+gomodel secrets reencrypt --rotate-data-key
+```
+
+该命令会创建新的数据密钥，并用它重新加密所有 Secret。在此期间，旧数据密钥加密的值
+始终可读。运行中的网关在保存 Secret 之前会检查当前生效的数据密钥，因此无需重启即可切换到新密钥；
+保存之后还会再检查一次：如果密钥变更时某次保存已在进行中，该保存会用新密钥重新加密自身。
+如果第二次检查无法访问密钥存储，Secret 仍会被保存，但保存操作会返回错误，
+要求您重新保存或运行 `gomodel secrets reencrypt`。
+
+## 工作原理
+
+每个数据库都有一个随机的 256 位数据密钥，仅以封装后的形式存储在 `encryption_keys` 表中。
+用于封装它的密钥是使用 Argon2id 从 `GOMODEL_ENCRYPTION_KEY` 派生的。Secret 值使用
+AES-256-GCM 加密，并以 `enc:v1:<key-id>:<ciphertext>` 的形式存储；行和字段会被绑定到密文中，
+因此复制到其他行或字段的值将无法解密，而不会在那里被使用。
+
+Admin API 保持不变：响应中的 Secret 仍会被遮盖。
+
+静态数据加密保护的是数据库的副本。它无法防范能够读取网关环境或内存的人，
+也不能替代对数据库及其备份的访问限制。
+
+## 自定义发行版
+
+基于 GoModel 构建的发行版可以使用 KMS 而不是 `GOMODEL_ENCRYPTION_KEY` 来封装数据密钥，
+方法是在 `run.Options.SetupConfig` 中使用 `config.KeyWrapper` 调用 `LoadResult.SetKeyWrapper`。
+首次使用新的封装器启动时，请保留一次 `GOMODEL_ENCRYPTION_KEY` 的设置，以便将现有数据密钥迁移过去。
+如需从一个封装器迁移到另一个，请将旧封装器作为先前的封装器传入：`SetKeyWrapper(next, previous)`。

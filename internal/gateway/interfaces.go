@@ -5,6 +5,7 @@ import (
 	"context"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestparams"
 )
 
 // ModelResolver resolves raw request selectors into concrete model selectors
@@ -22,10 +23,27 @@ type UserPathModelResolver interface {
 	ResolveModelForUserPath(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error)
 }
 
+// RoutedModelResolver is an optional UserPathModelResolver that also returns
+// the virtual models the resolution routed through, outermost first, so a
+// per-attempt setting can follow the route routing chose where several lead
+// to the same concrete model. A nil route means none was recorded.
+type RoutedModelResolver interface {
+	ResolveModelRouteForUserPath(ctx context.Context, requested core.RequestedModelSelector) (selector core.ModelSelector, route []string, changed bool, err error)
+}
+
 // ModelSlowdownResolver optionally resolves an extra-time factor for a
 // requested/resolved model pair. The context carries the effective user path.
 type ModelSlowdownResolver interface {
 	ResolveSlowdown(context.Context, core.RequestedModelSelector, core.ModelSelector) float64
+}
+
+// ModelRequestOverridesResolver optionally resolves the operator-forced
+// reasoning effort and request parameters for one provider attempt:
+// resolution is the request's model resolution and attempt the concrete model
+// the attempt goes to. A zero result keeps the client's request. The context
+// carries the effective user path.
+type ModelRequestOverridesResolver interface {
+	ResolveRequestOverrides(ctx context.Context, resolution *core.RequestModelResolution, attempt core.ModelSelector) requestparams.Overrides
 }
 
 // FailoverResolver resolves alternate concrete model selectors for a translated

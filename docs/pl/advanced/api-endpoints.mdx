@@ -1,0 +1,202 @@
+---
+title: "Endpointy API"
+description: "Dokumentacja referencyjna endpointów GoModel kompatybilnych z OpenAI i Anthropic, passthrough do providerów oraz endpointów operacyjnych."
+icon: "list-tree"
+keywords: ["endpointy API", "API endpoints", "API kompatybilne z OpenAI", "OpenAI-compatible API", "trasy", "routes", "passthrough", "dokumentacja referencyjna", "reference"]
+---
+
+GoModel udostępnia API kompatybilne z OpenAI i Anthropic, natywny passthrough
+do providerów oraz zestaw endpointów operacyjnych. Trasy administracyjne i dashboardu
+są opisane osobno w [Endpointach administracyjnych](/pl/advanced/admin-endpoints).
+
+Szczegóły requestów i odpowiedzi znajdziesz w dedykowanych przewodnikach:
+[Responses API](/pl/advanced/responses-api), [Conversations API](/pl/advanced/conversations-api),
+[Anthropic Messages API](/pl/advanced/anthropic-messages-api),
+[Audio API](/pl/advanced/audio-api), [Images API](/pl/advanced/images-api),
+[Decisions API](/pl/advanced/decisions-api), [System One API](/pl/advanced/systemone-api)
+i [Usage API](/pl/advanced/usage-api).
+
+## API kompatybilne z OpenAI
+
+| Endpoint                          | Metoda | Opis                                                                                                         |
+| --------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------ |
+| `/v1/chat/completions`            | POST   | Chat completions (obsługa streamingu)                                                                        |
+| `/v1/responses`                   | POST   | Tworzy odpowiedź OpenAI Responses API                                                                        |
+| `/v1/responses/{id}`              | GET    | Pobiera zapisaną odpowiedź                                                                                   |
+| `/v1/responses/{id}`              | DELETE | Usuwa zapisaną odpowiedź (przekazuje natywne usunięcie tam, gdzie jest obsługiwane)                          |
+| `/v1/responses/{id}/cancel`       | POST   | Anuluje trwającą odpowiedź (natywnie u providera tam, gdzie jest obsługiwane)                                |
+| `/v1/responses/{id}/input_items`  | GET    | Wyświetla elementy wejściowe zapisanej odpowiedzi                                                            |
+| `/v1/responses/input_tokens`      | POST   | Liczy tokeny wejściowe requestu Responses                                                                    |
+| `/v1/responses/compact`           | POST   | Kompaktuje konwersację Responses (natywnie u providera tam, gdzie jest obsługiwane)                          |
+| `/v1/conversations`               | POST   | Tworzy konwersację (zarządzaną przez gateway)                                                                |
+| `/v1/conversations/{id}`          | GET    | Pobiera konwersację                                                                                          |
+| `/v1/conversations/{id}`          | POST   | Scala metadane konwersacji                                                                                   |
+| `/v1/conversations/{id}`          | DELETE | Usuwa konwersację                                                                                            |
+| `/v1/conversations/{id}/items`    | POST   | Dodaje elementy do konwersacji                                                                               |
+| `/v1/conversations/{id}/items`    | GET    | Wyświetla elementy konwersacji z paginacją kursorową                                                         |
+| `/v1/conversations/{id}/items/{item_id}` | GET | Pobiera element konwersacji                                                                          |
+| `/v1/conversations/{id}/items/{item_id}` | DELETE | Usuwa element konwersacji i zwraca konwersację                                                        |
+| `/v1/embeddings`                  | POST   | Embeddingi tekstu                                                                                            |
+| `/v1/models`                      | GET    | Wyświetla dostępne modele                                                                                    |
+| `/v1/models/{model}`              | GET    | Pobiera jeden model po ID (`openai/gpt-4.1-mini`; ukośniki można wysłać bez zmian lub zakodowane procentowo). ID działające przy inferencji, takie jak samo `gpt-4.1-mini`, zwraca model, na który się rozwiązuje |
+| `/v1/audio/speech`                | POST   | Zamiana tekstu na mowę, zwraca binarne audio                                                                 |
+| `/v1/audio/transcriptions`        | POST   | Zamiana mowy na tekst z przesłanego pliku multipart                                                          |
+| `/v1/images/generations`          | POST   | Generowanie obrazów z promptu tekstowego (DALL·E, gpt-image-1, grok-2-image, Imagen, modele obrazów Gemini)                                     |
+| `/v1/images/edits`                | POST   | Edycja obrazów / inpainting z przesłanego pliku multipart (obraz, opcjonalna maska, prompt)                  |
+| `/v1/realtime`                    | GET    | Upgrade do websocketa realtime speech-to-speech; `?call_id=` dołącza do istniejącego połączenia WebRTC/SIP jako kanał poboczny (gdy `REALTIME_ENABLED`) |
+| `/v1/realtime/calls`              | POST   | Wymiana SDP WebRTC dla realtime: oferta `application/sdp` z `?model=` albo pola multipart `sdp` + `session` (gdy `REALTIME_ENABLED`)            |
+| `/v1/realtime/client_secrets`     | POST   | Generuje efemeryczny sekret klienta realtime dla klientów przeglądarkowych, kierowany według `session.model` (gdy `REALTIME_ENABLED`)            |
+| `/v1/realtime/translations`       | GET    | Upgrade do websocketa tłumaczenia mowy w czasie rzeczywistym (np. `gpt-realtime-translate`); to samo co `/v1/realtime?intent=translation` (gdy `REALTIME_ENABLED`) |
+| `/v1/realtime/translations/calls` | POST   | Wymiana SDP WebRTC dla sesji tłumaczenia (gdy `REALTIME_ENABLED`)                                                                                |
+| `/v1/realtime/translations/client_secrets` | POST | Generuje efemeryczny sekret klienta dla sesji tłumaczenia (gdy `REALTIME_ENABLED`)                                                      |
+| `/v1/files`                       | POST   | Przesyła plik (multipart kompatybilny z OpenAI)                                                              |
+| `/v1/files`                       | GET    | Wyświetla pliki                                                                                              |
+| `/v1/files/{id}`                  | GET    | Pobiera metadane pliku                                                                                       |
+| `/v1/files/{id}`                  | DELETE | Usuwa plik                                                                                                   |
+| `/v1/files/{id}/content`          | GET    | Pobiera surową zawartość pliku                                                                               |
+| `/v1/batches`                     | POST   | Tworzy natywny batch providera (schemat kompatybilny z OpenAI; `requests` inline obsługiwane tam, gdzie provider robi to natywnie) |
+| `/v1/batches`                     | GET    | Wyświetla zapisane batche                                                                                    |
+| `/v1/batches/{id}`                | GET    | Pobiera jeden zapisany batch                                                                                 |
+| `/v1/batches/{id}/cancel`         | POST   | Anuluje oczekujący batch                                                                                     |
+| `/v1/batches/{id}/results`        | GET    | Pobiera natywne wyniki batcha, gdy są dostępne                                                               |
+
+### Sesje tłumaczenia w czasie rzeczywistym
+
+Modele tłumaczenia mowy (OpenAI `gpt-realtime-translate`) działają na własnym
+interfejsie sesji, więc gateway go odzwierciedla. Połącz się z `/v1/realtime/translations`
+– albo z `/v1/realtime?intent=translation`, co jest tą samą sesją – i ustaw
+język docelowy po otwarciu socketu:
+
+```bash
+wscat -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  -c "ws://localhost:8080/v1/realtime/translations?model=gpt-realtime-translate"
+```
+
+```json
+{"type": "session.update", "session": {"audio": {"output": {"language": "pl"}}}}
+```
+
+Sesje tłumaczenia używają własnych nazw zdarzeń (`session.input_audio_buffer.append`
+na wejściu, `session.output_audio.delta` i `session.output_transcript.delta` na wyjściu)
+i przyjmują audio PCM16 24 kHz. Ramki są przekazywane dosłownie, więc każdy klient napisany
+pod API tłumaczenia providera działa bez zmian.
+
+Tłumaczenie jest obecnie interfejsem OpenAI. Skierowanie sesji tłumaczenia do
+providera, który go nie obsługuje, kończy się błędem 400, zamiast po cichu otworzyć
+w jej miejsce zwykłą sesję konwersacji.
+
+Te sesje nie raportują zdarzeń użycia, więc gateway wycenia je na podstawie
+przekazanego audio wejściowego, według stawki modelu za sekundę wejścia. Wyjątkiem są
+połączenia tłumaczenia przez WebRTC: ich media nigdy nie przechodzą przez gateway,
+więc nie są mierzone.
+
+### Sesje transkrypcji w czasie rzeczywistym
+
+Sesje transkrypcji (`/v1/realtime?intent=transcription`) wybierają model w
+`session.update`, a nie w URL; parametr zapytania `model` kieruje
+request, a gateway przypina do niego wybór dokonany w sesji.
+
+Większość modeli transkrypcji raportuje użycie w zdarzeniu
+`conversation.item.input_audio_transcription.completed` – w tokenach albo
+w sekundach dla modeli typu whisper – i ten raport służy do wyceny sesji. Model,
+który tam pomija użycie, nie raportuje niczego, więc gateway wraca do przekazanego
+audio wejściowego, według stawki za sekundę wejścia. Ten mechanizm zapasowy działa
+tylko wtedy, gdy sesja nie zaraportowała własnego użycia, więc sesja nigdy nie jest
+rozliczana dwukrotnie. Podobnie jak przy tłumaczeniu, połączenia WebRTC przesyłają
+media poza gatewayem i nie są mierzone.
+
+## API kompatybilne z Anthropic
+
+| Endpoint                    | Metoda | Opis                                                                          |
+| --------------------------- | ------ | ----------------------------------------------------------------------------- |
+| `/v1/messages`              | POST   | Anthropic Messages API z tłumaczonym routingiem modeli (obsługa streamingu)   |
+| `/v1/messages/count_tokens` | POST   | Heurystyczne oszacowanie tokenów wejściowych Anthropic Messages               |
+
+## Decisions API
+
+Dostępne, gdy skonfigurowany jest provider `openai`, `jev` lub `openrouter`; zobacz
+[Decisions API](/pl/advanced/decisions-api).
+
+| Endpoint        | Metoda | Opis                                                                                  |
+| --------------- | ------ | ------------------------------------------------------------------------------------- |
+| `/v1/decisions` | POST   | Odpowiada na typowane pytania o dane wejściowe (OpenAI natywnie, Jev / Kev przez System One) |
+
+## System One API
+
+Dostępne, gdy skonfigurowany jest provider `jev` lub `openrouter`; zobacz
+[System One API](/pl/advanced/systemone-api).
+
+| Endpoint                     | Metoda | Opis                                                                     |
+| ---------------------------- | ------ | ------------------------------------------------------------------------ |
+| `/v1/systemone`              | POST   | Ocenia stan względem typowanych pytań (Jev, Kev), przekazywane natywnie |
+| `/v1/systemone/permute`      | POST   | Tylko Kev: uruchamia jedno pytanie Choice z kilkoma kolejnościami opcji |
+| `/v1/systemone/separate`     | POST   | Tylko Kev: uruchamia każde pytanie w osobnym przebiegu w przód          |
+
+## Rozszerzenia gatewaya
+
+| Endpoint    | Metoda | Opis                                                                                                                                     |
+| ----------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `/v1/usage` | GET    | Samoobsługowy status użycia, budżetu i limitów żądań dla efektywnej ścieżki użytkownika wywołującego – zobacz [Usage API](/pl/advanced/usage-api) |
+| `/v1/auth/verify` | GET | Informuje, czy klucz API przesłany w requeście jest prawidłowy (gdy `AUTH_VERIFY_ENABLED`) |
+
+### Weryfikacja klucza
+
+`GET /v1/auth/verify` pozwala usłudze stojącej przed gatewayem sprawdzić klucz API
+bez przechowywania kopii listy kluczy. Endpoint jest **domyślnie wyłączony**; włącz go
+przez `AUTH_VERIFY_ENABLED=true` (`server.auth_verify_enabled`). Nie jest to trasa
+`/admin`, więc działa także wtedy, gdy Admin API jest wyłączone.
+
+```bash
+curl http://localhost:8080/v1/auth/verify \
+  -H "Authorization: Bearer sk_gom_..."
+```
+
+```json
+{ "valid": true, "method": "api_key", "key_id": "key_01H...", "user_path": "/acme/eng" }
+```
+
+Nieznany, wyłączony lub wygasły klucz jest odrzucany przez standardowe
+uwierzytelnianie gatewaya z kodem `401`, więc `200` oznacza, że klucz się uwierzytelnia.
+`method` wskazuje, który mechanizm go zaakceptował: `api_key` to zarządzany klucz zapisany
+w bazie danych, `master_key` to klucz startowy z `GOMODEL_MASTER_KEY`. `key_id`
+i `user_path` są obecne tylko dla zarządzanych kluczy, które mają je przypisane.
+
+<Note>
+  Tam, gdzie gateway wpuszcza nieuwierzytelnionych wywołujących – gdy uwierzytelnianie
+  nie jest w ogóle skonfigurowane albo gdy rozszerzenie wyłączyło z niego daną trasę – nie ma
+  klucza do potwierdzenia, a endpoint odpowiada `200` z
+  `{"valid": false, "method": "none"}`, zamiast twierdzić, że klucz jest prawidłowy.
+  Konsument kodów statusu, taki jak `forward_auth` w Caddy, traktuje to jako zezwolenie,
+  zgodnie z tym, co sam gateway robi z takimi requestami.
+</Note>
+
+## Passthrough do providera
+
+| Endpoint            | Metoda                                       | Opis                                                       |
+| ------------------- | -------------------------------------------- | ---------------------------------------------------------- |
+| `/p/{provider}/...` | GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS | Natywny passthrough do providera z nieprzetworzonymi odpowiedziami upstreamu |
+
+## MCP Gateway
+
+Endpointy MCP (Model Context Protocol) w trybie Streamable HTTP, agregujące
+skonfigurowane upstreamowe serwery MCP (gdy `MCP_ENABLED`, domyślnie włączone). Zobacz
+[MCP Gateway](/pl/features/mcp-gateway).
+
+| Endpoint        | Metoda            | Opis                                                                            |
+| --------------- | ----------------- | ------------------------------------------------------------------------------- |
+| `/mcp`          | POST, GET, DELETE | Zagregowany endpoint MCP; narzędzia/prompty w przestrzeniach nazw jako `{server}_{name}` |
+| `/mcp/{server}` | POST, GET, DELETE | Pojedynczy skonfigurowany serwer MCP z oryginalnymi nazwami narzędzi            |
+
+## Endpointy administracyjne
+
+Trasy Admin REST i dashboardu (`/admin/*`) są opisane w
+[Endpointach administracyjnych](/pl/advanced/admin-endpoints).
+
+## Endpointy operacyjne
+
+| Endpoint              | Metoda | Opis                                                                               |
+| --------------------- | ------ | ---------------------------------------------------------------------------------- |
+| `/health`             | GET    | Liveness check (zawsze 200, dopóki proces obsługuje ruch)                          |
+| `/health/ready`       | GET    | Readiness check: odpytuje storage (503, jeśli nie działa); niedziałający cache Redis lub brak załadowanych modeli raportują stan degraded (nadal 200). Komponenty rozszerzeń (na przykład vaulty GoModel Pro) pojawiają się pod własną nazwą: `degraded` zachowuje 200, `down` zwraca 503 |
+| `/metrics`            | GET    | Metryki Prometheus (eksperymentalne, gdy włączone)                                 |
+| `/swagger/index.html` | GET    | [Swagger UI](/pl/advanced/swagger-ui) (gdy zbudowane z `-tags=swagger` i włączone) |

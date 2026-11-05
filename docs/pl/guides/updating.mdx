@@ -1,0 +1,226 @@
+---
+title: "Aktualizacja GoModel"
+description: "Zaktualizuj GoModel w Dockerze lub jako samodzielną binarkę, najpierw wykonaj kopię zapasową bazy danych i dowiedz się, co robią automatyczne migracje schematu."
+icon: "refresh-cw"
+keywords: ["aktualizacja", "update", "upgrade", "docker", "migracja", "migration", "kopia zapasowa", "backup", "rollback", "przypinanie wersji", "version pinning"]
+---
+
+Aktualizacja GoModel to pobranie nowej wersji i restart. Migracje schematu są wbudowane w
+binarkę i uruchamiają się automatycznie przy pierwszym starcie nowej wersji, więc
+nie ma osobnego kroku migracji ani okna serwisowego poza samym restartem.
+
+<Warning>
+  **Przed każdą aktualizacją wykonaj kopię zapasową bazy danych.** GoModel jest aktywnie
+  rozwijany i często wydawany, a niektóre aktualizacje przekształcają zapisane dane. Kopia
+  to jedyna rzecz, dzięki której nieudana aktualizacja jest pięciominutowym problemem, a nie
+  utratą ścieżki audytu, historii użycia i zestawu zarządzanych kluczy API.
+</Warning>
+
+## 1. Wykonaj kopię zapasową bazy danych
+
+<Tabs>
+  <Tab title="SQLite (wolumen Docker)">
+    Zatrzymaj gateway, aby plik nie był zapisywany w trakcie kopiowania, a następnie zarchiwizuj
+    wolumen:
+
+    ```bash
+    docker compose stop gomodel
+    docker run --rm \
+      -v gomodel_data:/data -v "$PWD":/backup alpine \
+      tar czf /backup/gomodel-$(date +%F).tar.gz -C /data .
+    ```
+
+    Zastąp `gomodel_data` nazwą swojego wolumenu (`docker volume ls`). Jeśli
+    zamiast tego montujesz katalog hosta (bind mount), wystarczy `cp -a ./data ./data.bak-$(date +%F)`.
+  </Tab>
+  <Tab title="SQLite (binarka)">
+    Zatrzymaj gateway, a następnie skopiuj plik bazy danych wypisany przy starcie jako
+    `storage configured`:
+
+    ```bash
+    cp -a ~/.local/share/gomodel/gomodel.db gomodel-$(date +%F).db   # Linux
+    ```
+
+    W macOS domyślna ścieżka to
+    `~/Library/Application Support/gomodel/gomodel.db`. Zobacz,
+    [gdzie GoModel przechowuje dane](/pl/about/faq#gdzie-gomodel-przechowuje-dane).
+  </Tab>
+  <Tab title="PostgreSQL">
+    ```bash
+    pg_dump "$POSTGRES_URL" > gomodel-$(date +%F).sql
+    ```
+  </Tab>
+  <Tab title="MongoDB">
+    ```bash
+    mongodump --uri="$MONGODB_URL" --out "gomodel-$(date +%F)"
+    ```
+  </Tab>
+</Tabs>
+
+## 2. Zaktualizuj
+
+### Docker Compose
+
+```bash
+docker compose pull gomodel
+docker compose up -d gomodel
+docker compose logs -f gomodel
+```
+
+Logi powinny pokazywać nową wersję w pierwszej linii oraz linię
+`storage configured` ze ścieżką do Twojej bazy danych.
+
+<Warning>
+  **Przed aktualizacją sprawdź, czy baza danych znajduje się na wolumenie.** Obraz
+  nie deklaruje żadnego wolumenu, więc kontener bez montowania w `/app/data` trzyma bazę
+  SQLite we własnym systemie plików kontenera — i traci wszystko w momencie, gdy
+  aktualizacja zastąpi kontener. Zobacz
+  [storage na produkcji](/pl/guides/production#wybór-backendu-storage).
+</Warning>
+
+### docker run
+
+Odtworzenie kontenera usuwa jego flagi, więc najpierw odczytaj je z działającego
+kontenera:
+
+```bash
+docker inspect gomodel --format '{{json .Mounts}} {{.Config.Env}}'
+```
+
+Jeśli w `/app/data` nic nie jest zamontowane, baza danych znajduje się w systemie plików
+kontenera i `docker rm` ją usunie. Skopiuj ją na zewnątrz i zainicjuj nią wolumen, który
+zamierzasz zamontować, dopóki stary kontener jeszcze istnieje — pusty wolumen zasłania
+kopię, a gateway startuje bez kluczy, użycia i logów:
+
+```bash
+docker cp gomodel:/app/data/. ./gomodel-data
+docker run --rm -v gomodel_data:/data -v "$PWD/gomodel-data":/seed alpine \
+  sh -c 'cp -a /seed/. /data/ && chown -R 65532:65532 /data'
+```
+
+`65532` to UID użytkownika nonroot w obrazie — gateway nie może zapisywać na wolumenie należącym
+do kogokolwiek innego.
+
+Następnie zastąp kontener, przekazując ponownie te same flagi montowania i zmiennych środowiskowych:
+
+```bash
+docker pull enterpilot/gomodel
+docker rm -f gomodel
+docker run -d --name gomodel -p 8080:8080 \
+  -v gomodel_data:/app/data \
+  --env-file .env \
+  enterpilot/gomodel
+```
+
+### Binarka
+
+Uruchom ponownie instalator. Pobiera on najnowszy release i podmienia binarkę
+w miejscu:
+
+<Tabs>
+  <Tab title="macOS / Linux">
+    ```bash
+    curl -fsSL https://gomodel.enterpilot.io/install.sh | sh
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    irm https://gomodel.enterpilot.io/install.ps1 | iex
+    ```
+  </Tab>
+</Tabs>
+
+Następnie zrestartuj gateway — nie ma aktualizacji na gorąco w miejscu.
+
+## 3. Sprawdź
+
+```bash
+gomodel --version
+curl -s http://localhost:8080/version
+```
+
+`GET /version` zwraca działającą wersję, najnowszy opublikowany release oraz
+informację, czy dostępna jest aktualizacja:
+
+```json
+{
+  "app": "GoModel",
+  "version": "0.1.60",
+  "latest": "0.1.60",
+  "update_available": false,
+  "enabled": true
+}
+```
+
+Strona **Settings** w dashboardzie pokazuje ten sam wynik. W
+[Świadomości wersji](/pl/advanced/version-awareness) dowiesz się, jak działa to sprawdzanie
+i jak je wyłączyć.
+
+## Co robią migracje
+
+Migracje uruchamiają się przy pierwszym starcie nowej wersji. Nie ma osobnego
+polecenia migracji, a aktualizacja nigdy nie przenosi ani nie usuwa Twojej bazy danych,
+konfiguracji ani cache'u.
+
+Większość z nich ma charakter addytywny: brakujące tabele, indeksy i kolumny są tworzone, a
+częściowo zastosowany schemat można bezpiecznie ponowić przy następnym starcie. Niektóre wydania
+zamiast tego przekształcają storage — gdy budżety i limity żądań zyskały zakresy, ich
+tabele zostały przebudowane, a stare usunięte. Oba rodzaje są bezpieczne przy aktualizacji w przód,
+i właśnie dlatego kierunek odwrotny wymaga ostrożności.
+
+## Przypinanie wersji
+
+Aktualizacje domyślnie instalują najnowszy release. Aby pozostać przy znanej wersji, przypnij ją:
+
+<Tabs>
+  <Tab title="Docker">
+    ```bash
+    docker pull enterpilot/gomodel:X.Y.Z
+    ```
+
+    Użyj tagu wersji w pliku compose zamiast `latest`.
+  </Tab>
+  <Tab title="macOS / Linux">
+    ```bash
+    curl -fsSL https://gomodel.enterpilot.io/install.sh | GOMODEL_VERSION=vX.Y.Z sh
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    $env:GOMODEL_VERSION = "vX.Y.Z"
+    irm https://gomodel.enterpilot.io/install.ps1 | iex
+    ```
+  </Tab>
+</Tabs>
+
+Zastąp `X.Y.Z`
+[opublikowanym releasem](https://github.com/ENTERPILOT/GoModel/releases).
+
+## Wycofywanie aktualizacji
+
+Zainstaluj lub pobierz poprzednią wersję i zrestartuj gateway. To wystarczy tylko wtedy, gdy każda
+migracja pomiędzy wersjami była addytywna; po migracji przekształcającej starsza binarka
+szuka storage, które aktualizacja przebudowała. Z zewnątrz nie da się tych dwóch przypadków
+odróżnić, więc **przywróć kopię zapasową z kroku 1**, chyba że wiadomo, że starsza wersja
+uruchamia się na zmigrowanej bazie danych.
+
+Przywrócenie kopii zapasowej wolumenu SQLite zastępuje zawartość wolumenu, więc najpierw zatrzymaj
+gateway — `docker compose stop gomodel` albo `docker stop gomodel` w przypadku
+samodzielnego kontenera — a następnie rozpakuj archiwum i uruchom go ponownie:
+
+```bash
+docker run --rm -v gomodel_data:/data -v "$PWD":/backup alpine \
+  sh -c 'rm -rf /data/* && tar xzf /backup/gomodel-YYYY-MM-DD.tar.gz -C /data \
+         && chown -R 65532:65532 /data'
+```
+
+## Gdy coś pójdzie nie tak
+
+| Objaw | Przyczyna |
+| --- | --- |
+| Dashboard jest pusty po aktualizacji: brak kluczy, użycia i logów | Baza danych nie była na wolumenie albo `SQLITE_PATH` rozwiązało się do innej lokalizacji. Porównaj ścieżkę `storage configured` sprzed i po aktualizacji. |
+| Gateway nie uruchamia się po aktualizacji | Przeczytaj pierwszą linię błędu. Konfiguracja, która wcześniej była ignorowana, może zacząć podlegać walidacji; informacje o wydaniu wymieniają zmiany niekompatybilne wstecz. |
+| Wersja się nie zmieniła | Stary kontener nadal działa (`docker ps`) albo uruchamiana jest druga binarka `gomodel`, która występuje wcześniej w `PATH`. |
+
+Nadal masz problem? Zapytaj na [Discordzie](https://discord.gg/gaEB9BQSPH) lub otwórz
+[zgłoszenie na GitHubie](https://github.com/ENTERPILOT/GoModel/issues).

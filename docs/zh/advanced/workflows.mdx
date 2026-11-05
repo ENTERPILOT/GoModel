@@ -1,0 +1,245 @@
+---
+title: "工作流"
+description: "工作流匹配的工作原理，包括 user_path 优先的匹配顺序、按提供商名称限定作用域，以及按阶段配置的护栏步骤。"
+icon: "workflow"
+keywords: ["工作流", "workflows", "路由规则", "routing rules", "user_path 优先级", "user_path precedence", "提供商作用域", "provider scoping", "护栏步骤", "guardrail steps"]
+---
+
+## 概览
+
+工作流是存储在网关中、按请求匹配的不可变工作流策略版本。
+
+目前，它们控制由网关负责的行为，例如：
+
+- 缓存
+- 预算
+- 审计日志
+- 用量追踪
+- 护栏：运行哪些 [插件实例](/zh/advanced/guardrails)、在哪个阶段运行、以什么顺序运行
+- 翻译路由的故障转移
+
+每个请求只会匹配一个活动工作流。
+
+## 作用域字段
+
+工作流的作用域由以下字段定义：
+
+- `scope_provider_name`
+- `scope_model`
+- `scope_user_path`
+
+`scope_provider_name` 是已配置的提供商实例名称，而不是提供商类型。
+
+示例：
+
+- 提供商类型：`openai`
+- 提供商名称：`openai_primary`
+
+如果您配置了多个同一类型的提供商，工作流可以按提供商名称分别指定它们。
+
+## 匹配优先级
+
+工作流匹配以用户路径优先。
+
+对于 `user_path=/team/team1/user` 的请求，网关会先从最深层到根路径依次检查限定了路径的候选项：
+
+1. `provider_name + model + /team/team1/user`
+2. `provider_name + /team/team1/user`
+3. `/team/team1/user`
+4. `provider_name + model + /team/team1`
+5. `provider_name + /team/team1`
+6. `/team/team1`
+7. `provider_name + model + /team`
+8. `provider_name + /team`
+9. `/team`
+10. `provider_name + model + /`
+11. `provider_name + /`
+12. `/`
+13. `provider_name + model`
+14. `provider_name`
+15. `global`
+
+实际效果：
+
+- 更深层的 `user_path` 工作流优先于范围更广的仅提供商或提供商+模型工作流
+- 在相同路径深度下，提供商+模型比仅提供商更具体
+- 如果没有匹配的路径作用域工作流，网关会依次回退到提供商+模型、提供商，最后是全局
+
+## 护栏步骤
+
+工作流负载以 `steps` 列出要运行的护栏实例。每个步骤指定一个实例（`ref`）、其运行的阶段以及位置：
+
+```json
+{
+  "schema_version": 2,
+  "features": { "cache": true, "audit": true, "usage": true, "budget": true, "guardrails": true, "failover": true },
+  "steps": [
+    { "ref": "pii-redact",   "phase": "prompt",   "step": 10 },
+    { "ref": "policy-judge", "phase": "prompt",   "step": 10 },
+    { "ref": "safety-prompt","phase": "prompt",   "step": 20 },
+    { "ref": "mask-keys",    "phase": "response", "step": 10 },
+    { "ref": "mask-keys",    "phase": "stream",   "step": 10 }
+  ]
+}
+```
+
+- `phase` 为 `prompt`（省略时的默认值）、`response` 或 `stream`。实例的插件必须实现该阶段；`GET /admin/workflows/guardrails`
+  会列出每个实例及其 `phases`。
+- 在同一阶段内，步骤按 `step`（非负整数）升序运行；
+  `step` 值相同的步骤并行运行。共用同一个 `step` 的内容编辑型实例最多只能有一个。
+- 同一个 `ref` 在每个阶段中最多出现一次。
+- `features.guardrails: false` 会禁用该工作流的所有步骤。
+
+版本 1 的负载（`"schema_version": 1` 加上 `"guardrails": [{"ref", "step"}]`）仍被接受，并编译为 prompt 阶段的步骤。已存储的版本 1
+工作流会原样返回；控制台始终写入版本 2。
+
+工作流视图（`GET /admin/workflows`、`GET /admin/workflows/:id`）以 `chain_hashes`（`{"prompt": "...", "response": "...", "stream": "..."}`）的形式公开每条已编译链的哈希值。
+已编译链的标识是两种响应缓存键的组成部分，因此修改任一阶段中的护栏，都会使在旧规则下产生的缓存回答失效，而链不同的两个工作流也永远不会共享缓存回答。
+
+## 示例
+
+### 路径继承
+
+如果您有：
+
+- 工作流 A：`scope_user_path=/team`
+- 工作流 B：`scope_user_path=/team/team1`
+
+并且 API 密钥使用 `user_path=/team/team1/user`，则工作流 B 胜出。
+
+如果工作流 B 不存在，则工作流 A 胜出。
+
+### 按提供商名称限定作用域
+
+如果您有两个 OpenAI 提供商：
+
+- `openai_primary`
+- `openai_backup`
+
+您可以分别为以下作用域创建工作流：
+
+- `scope_provider_name=openai_primary`
+- `scope_provider_name=openai_backup`
+
+尽管两者的提供商类型都是 `openai`，它们仍属于不同的工作流作用域。
+
+## API 示例
+
+创建一个限定到某个已配置提供商名称、某个模型和某个用户路径子树的工作流：
+
+<CodeGroup>
+
+```bash curl
+curl -X POST http://localhost:8080/admin/workflows \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope_provider_name": "openai_primary",
+    "scope_model": "gpt-5",
+    "scope_user_path": "/team/alpha",
+    "name": "team-alpha-openai-primary",
+    "description": "Disable cache for this tenant on the primary OpenAI provider",
+    "workflow_payload": {
+      "schema_version": 2,
+      "features": {
+        "cache": false,
+        "budget": true,
+        "audit": true,
+        "usage": true,
+        "guardrails": true,
+        "failover": true
+      },
+      "steps": [
+        { "ref": "pii-redact", "phase": "prompt", "step": 10 },
+        { "ref": "mask-keys", "phase": "response", "step": 10 }
+      ]
+    }
+  }'
+```
+
+```python Python
+import os
+
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key=os.environ["GOMODEL_MASTER_KEY"],
+)
+
+workflow = client.post(
+    "/admin/workflows",
+    cast_to=httpx.Response,
+    body={
+        "scope_provider_name": "openai_primary",
+        "scope_model": "gpt-5",
+        "scope_user_path": "/team/alpha",
+        "name": "team-alpha-openai-primary",
+        "description": "Disable cache for this tenant on the primary OpenAI provider",
+        "workflow_payload": {
+            "schema_version": 2,
+            "features": {
+                "cache": False,
+                "budget": True,
+                "audit": True,
+                "usage": True,
+                "guardrails": True,
+                "failover": True,
+            },
+            "steps": [
+                {"ref": "pii-redact", "phase": "prompt", "step": 10},
+                {"ref": "mask-keys", "phase": "response", "step": 10},
+            ],
+        },
+    },
+)
+
+print(workflow.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: process.env.GOMODEL_MASTER_KEY,
+});
+
+const workflow = await client.post("/admin/workflows", {
+  body: {
+    scope_provider_name: "openai_primary",
+    scope_model: "gpt-5",
+    scope_user_path: "/team/alpha",
+    name: "team-alpha-openai-primary",
+    description: "Disable cache for this tenant on the primary OpenAI provider",
+    workflow_payload: {
+      schema_version: 2,
+      features: {
+        cache: false,
+        budget: true,
+        audit: true,
+        usage: true,
+        guardrails: true,
+        failover: true,
+      },
+      steps: [
+        { ref: "pii-redact", phase: "prompt", step: 10 },
+        { ref: "mask-keys", phase: "response", step: 10 },
+      ],
+    },
+  },
+});
+
+console.log(workflow);
+```
+
+</CodeGroup>
+
+## 说明
+
+- `scope_model` 需要同时设置 `scope_provider_name`
+- `scope_user_path` 会被规范化为标准的斜杠形式
+- 托管 API 密钥可以覆盖请求的用户路径请求头；工作流匹配使用的是请求实际生效的用户路径
+- 只有当全局预算功能和所匹配工作流的 `budget` 功能都启用时，才会执行预算控制；参见 [预算](/zh/features/budgets)
+- 每个 `ref` 都必须指向一个已存在的护栏实例；被活动工作流引用的护栏无法删除

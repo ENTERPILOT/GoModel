@@ -1,0 +1,188 @@
+---
+title: "Tryby awarii providerów"
+description: "Co robi GoModel, gdy provider zmienia kształt odpowiedzi, odpowiada 200 bez niczego użytecznego albo pada w trakcie streamu – i które z tych przypadków uruchamiają failover."
+icon: "triangle-alert"
+keywords: ["schema drift", "dryf schematu", "tryby awarii", "failure modes", "pusta odpowiedź", "empty response", "niepoprawna odpowiedź", "malformed response", "przerwany stream", "truncated stream", "blast radius"]
+---
+
+Providerzy psują się na sposoby, które nie są awariami. Pole zmienia typ po
+cichym wdrożeniu, przychodzi `200 OK` bez żadnej treści, stream urywa się w połowie
+wywołania narzędzia. Ta strona to kontrakt dla takich przypadków: co dostaje
+wywołujący, czy GoModel ponawia request lub robi failover i gdzie zdarzenie pojawia
+się w Twoim monitoringu.
+
+Ustawienia sterujące retry i circuit breakerem opisuje strona
+[Odporność na awarie](/pl/advanced/resilience). Wybór modelu zapasowego opisuje strona
+[Failover](/pl/features/failover).
+
+## Schema drift
+
+Zmiana kształtu odpowiedzi przez providera to awaria, o której gatewaye zwykle
+milczą, bo odpowiedź na nią wymaga opinii, jak odpowiedź
+powinna wyglądać. Opinią GoModel jest schemat OpenAI, stosowany
+wyrozumiale: nieznane pola przetrwają, znane pola są normalizowane, a tylko
+odpowiedź, której nie da się w ogóle odczytać, staje się błędem.
+
+| Co się zmieniło | Co dostaje wywołujący | Failover | Sygnał |
+| --- | --- | --- | --- |
+| **Nowe pole, którego nie modelujemy** | Przekazywane bez zmian, w odpowiedzi oraz wewnątrz `choices`, `tool_calls` i `usage` | Nie | Brak – to zaprojektowana ścieżka ([dodatkowa treść](/pl/advanced/extra-content)) |
+| **Znane pole znika** | Odpowiedź z tym polem pustym lub zerowym. Bez błędu | Nie | `gomodel_empty_responses_total{reason="no_usage"}`, gdy utracone jest użycie tokenów |
+| **Pole zmienia typ** | `502` ze wskazaniem providera i błędem dekodowania: `failed to unmarshal response: ...` | Tak | `gomodel_requests_total{status_type="error"}` |
+| **Całe body jest nieparsowalne lub go brak** | `502 provider returned empty response` | Tak | To samo |
+| **Błąd ukryty za `200`** | Prawdziwy błąd: status w `error.code` jest zachowywany, wszystko inne mapuje się na `502` | Tak | To samo |
+
+<Warning>
+  Na wiersz ze znikającym polem warto ustawić alert. To nie jest incydent –
+  to liczba, która po cichu maleje, a nikt jej nie szuka.
+  Zobacz [Wyłapywanie cichych awarii](#wyłapywanie-cichych-awarii) poniżej.
+</Warning>
+
+Endpointy passthrough są z tego wszystkiego wyłączone:
+[`/p/{provider}/...`](/pl/advanced/api-endpoints#passthrough-do-providera) przekazuje
+bajty od providera bez stosowania opinii GoModel, więc klient, który
+woli sam radzić sobie z dryfem schematu, może to zrobić.
+
+## Puste odpowiedzi wyglądające na udane
+
+`200` bez użytecznej treści to awaria przebrana za sukces. Pytanie
+brzmi, czy warto robić na niej failover – a w przypadku chat completions
+odpowiedź brzmi: tak.
+
+| Zachowanie providera | Co dostaje wywołujący | Failover | Sygnał |
+| --- | --- | --- | --- |
+| `200` z pustą tablicą `choices` | `502 provider returned no choices` | Tak | `reason="no_choices"` |
+| `200` z treścią, ale z samymi zerami w `usage` | Odpowiedź, dostarczona normalnie | Nie | `reason="no_usage"` |
+| `200` od providera z natywnym `/v1/responses`, `status: completed`, puste `output` | Odpowiedź, dostarczona normalnie | Nie | `reason="no_output"` |
+| `200` od providera `/v1/responses` adaptowanego z czatu, bez choices | `502 provider returned no choices` | Tak | `reason="no_choices"` |
+
+Każdy wiersz loguje ostrzeżenie ze wskazaniem providera, modelu i przyczyny oraz
+zwiększa `gomodel_empty_responses_total`. Ponieważ `gomodel_requests_total`
+liczy dostarczone wiersze jako sukcesy, ten licznik jest jedynym miejscem, w którym
+pojawiają się wiersze bez błędu.
+
+<Note>
+  Wywołanie `/v1/responses` w tle lub w toku z założenia nie zawiera
+  ani output, ani usage i nigdy nie jest raportowane jako puste.
+</Note>
+
+## Awarie streamingu
+
+Streamu, który już wysłał bajty, nie da się ponowić – klient ma część
+odpowiedzi. Dlatego reguła GoModel brzmi: decyduj przed pierwszym bajtem, tam gdzie
+to możliwe, i jawnie sygnalizuj przerwanie tam, gdzie nie jest.
+
+| Zachowanie providera | Co dostaje wywołujący | Failover | Sygnał |
+| --- | --- | --- | --- |
+| Stream `200`, który kończy się bez wysłania żadnego zdarzenia | `502 provider returned an empty stream`, przed nagłówkami odpowiedzi | Tak | `gomodel_requests_total{status_type="error"}` |
+| Pierwsze zdarzenie to payload `{"error": ...}` | Status przenoszony przez ten payload (`429` w paśmie zachowuje się jak prawdziwy), w przeciwnym razie `502`, przed nagłówkami odpowiedzi | Tak | To samo |
+| Stream zatrzymuje się przed zdarzeniem końcowym | Wszystko, co dotarło, a potem jedno jawne zdarzenie błędu z `"code":"stream_incomplete"` | Nie – bajty zostały już wysłane | Log requestów zapisuje `stream_error` |
+| Stream milknie w trakcie | Wszystko, co dotarło, a potem jedno zdarzenie błędu `"code":"stream_incomplete"` po `HTTP_STREAM_IDLE_TIMEOUT` (domyślnie 300s) | Nie – bajty zostały już wysłane | To samo |
+| Niepoprawny chunk w trakcie streamu | Traktowany jak przerwanie: przekazany, a potem `stream_incomplete` | Nie | To samo |
+
+Oczekiwanie na *pierwszy* bajt nigdy nie wlicza się do idle timeoutu, więc wolny
+model reasoning jest bezpieczny, dopóki provider czegoś nie wyśle. Potem każdy
+bajt uruchamia licznik czasu – łącznie z komentarzem keep-alive – a każdy kolejny bajt
+go restartuje, więc limit ogranicza przerwę między odczytami, a nie długość
+odpowiedzi. Gdy pierwszy bajt zostanie wysłany, odpowiedź jest zatwierdzona jako
+`200`, dlatego zawieszenie od tego momentu można zgłosić tylko w paśmie,
+a nigdy jako status. Szczegóły:
+[zakończenie streamu](/pl/advanced/resilience#co-liczy-się-jako-błąd),
+[idle timeout](/pl/advanced/configuration),
+[failover na starcie streamu](/pl/features/failover).
+
+## Awarie transportu i statusów
+
+Konwencjonalne przypadki, dla kompletności.
+
+| Zachowanie providera | Co dostaje wywołujący | Retry | Błąd dla circuit breakera | Failover |
+| --- | --- | --- | --- | --- |
+| Odmowa połączenia, reset, błąd DNS | `502`/`503` ze wskazaniem providera | Tak | Tak | Tak |
+| `429`, `502`, `503`, `504`, `522`, `524` | Ten status, po wyczerpaniu prób | Tak | Tak (`429` i `5xx`) | Tak |
+| `500` | `500`, natychmiast | Nie | Tak | Tak |
+| `4xx` inny niż `429` | Status i komunikat providera | Nie | Nie | Tylko przy pasującej frazie `retry_on_errors` |
+| Timeout lokalnego klienta HTTP | `504` | Nie | Tak | Tak |
+| Odpowiedź wolniejsza niż `slow_call_threshold` (domyślnie wyłączone) | Odpowiedź providera, bez zmian | Nie | Tak | Gdy obwód się otworzy |
+| Circuit breaker już otwarty | `503 circuit breaker is open - provider <name> temporarily unavailable` | Nie | — | Tak |
+
+Requesty streamingowe nigdy nie są ponawiane po wysłaniu, a requesty passthrough
+tylko wtedy, gdy ponowienie jest bezpieczne (`GET`, `HEAD`, `OPTIONS`, `PUT` lub dowolny
+request z `Idempotency-Key`).
+
+## Wyłapywanie cichych awarii
+
+Wiersze powyżej, które **nie** uruchamiają failoveru, wymagają alertu,
+bo z definicji nic innego nie zgłasza problemu:
+
+```promql
+# Każde puste 200, według providera i przyczyny
+sum(rate(gomodel_empty_responses_total[5m])) by (provider, model, reason) > 0
+```
+
+```promql
+# Raportowanie użycia ustało, choć requesty nadal kończyły się sukcesem –
+# znak, że pole usage zmieniło nazwę lub zostało usunięte
+sum(rate(gomodel_empty_responses_total{reason="no_usage"}[15m])) by (provider) > 0
+```
+
+Oba są eksportowane przez OpenTelemetry jako `gomodel.client.empty_responses`,
+gdzie przyczyna trafia jako `error.type`, a nie `reason`, obok
+`gomodel.provider.name` i `gen_ai.request.model`. Zobacz
+[Metryki Prometheus](/pl/guides/prometheus-metrics) i
+[OpenTelemetry](/pl/guides/opentelemetry).
+
+Dashboard odczytuje te same sygnały: model, którego ostatnie requesty ciągle
+kończą się błędem, oznacza swojego providera jako **Degraded**, nawet gdy wykrywanie modeli nadal
+działa – to właśnie wyłapuje upstream, który poprawnie listuje modele, ale zawodzi
+przy prawdziwych wywołaniach.
+
+## Awarie wykrywania modeli
+
+Lista `/models` providera może przestać działać, podczas gdy inferencja nadal działa. GoModel
+kontynuuje routing, korzystając kolejno z:
+
+1. Ostatniego inwentarza, który pobrał lub załadował ze swojego cache’u.
+2. Skonfigurowanych modeli (`<PROVIDER>_MODELS`, zobacz `CONFIGURED_PROVIDER_MODELS_MODE`).
+3. Dla providera na domyślnym bazowym URL –
+   listy z [katalogu modeli](/pl/advanced/configuration) dla jego typu providera.
+
+Providerzy z błędem są ponownie sprawdzani co `PROVIDER_RECHECK_INTERVAL` sekund
+(domyślnie `60`), a aktualna lista zastępuje zastępczą, gdy tylko listowanie
+się powiedzie. Gdy nie ma czego serwować, requesty zwracają `503`, aby klienci ponowili próbę,
+a `/health/ready` raportuje `degraded` z `"models": "down"`, podczas gdy instancja
+pozostaje w rotacji.
+
+Aby nigdy nie zależeć od wykrywania, wypisz modele samodzielnie i ustaw
+`CONFIGURED_PROVIDER_MODELS_MODE=allowlist`:
+
+```bash
+export OPENAI_MODELS=gpt-6-sol,gpt-6-luna
+export CONFIGURED_PROVIDER_MODELS_MODE=allowlist
+```
+
+## Gdy nie działa sam GoModel
+
+Umieszczenie gatewaya na ścieżce requestu zamienia ryzyko providera na ryzyko gatewaya,
+więc uczciwe liczby są ważniejsze niż zapewnienia.
+
+GoModel zawodzi głośno, a nie po cichu: martwa instancja daje odmowę połączenia
+lub `502` od tego, co stoi przed nią, a nigdy wiarygodnie wyglądającą błędną odpowiedź.
+To jeden statyczny plik binarny z bezstanową ścieżką requestu, probe’ami `/health` i
+`/health/ready` oraz 10-sekundowym łagodnym wygaszaniem (graceful drain) po `SIGTERM`, więc
+restarty kroczące i wiele replik za load balancerem działają już dziś.
+
+To wygaszanie jest odcięciem, a nie gwarancją dokończenia: jest dobrane do
+requestów, które faktycznie mogą się zakończyć w dziesięć sekund, a wszystko, co nadal jest otwarte
+po tym czasie – przede wszystkim trwający stream – ma zrywane połączenie. Dla
+długotrwałego ruchu wygaszaj połączenia na load balancerze, utrzymuj nakładające się repliki
+wystarczająco długo, by objąć czas generowania, i pozwól klientom ponawiać requesty.
+
+Co jest per instancja, a więc nie jest współdzielone między replikami: stan circuit
+breakera, liczniki rate limitów, okna stanu requestów i sticky
+sessions. [Przewodnik produkcyjny](/pl/guides/production) opisuje, co to oznacza
+dla Twojej topologii.
+
+Jeśli GoModel nie działa, a ruch musi płynąć natychmiast, skieruj
+`base_url` z powrotem bezpośrednio na providera – API jest kompatybilne z OpenAI w
+obu kierunkach. Dopóki GoModel nie wróci, tracisz routing, failover i logowanie –
+a ponieważ działają one na ścieżce requestu GoModel, a nie
+providera, jego rate limity i kontrole budżetu przestają cokolwiek blokować.

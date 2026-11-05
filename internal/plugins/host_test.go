@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/pluginapi"
 	"github.com/stretchr/testify/require"
 )
@@ -74,6 +75,17 @@ func TestHostInferenceUserPathFallsBackToRequest(t *testing.T) {
 	require.NoError(t, err)
 	got = core.UserPathFromContext(capturedCtx)
 	require.Equal(t, "/override/guardrails/i", got)
+}
+
+func TestHostInferenceScope(t *testing.T) {
+	var capturedCtx context.Context
+	h := NewHost(HostDeps{Chat: chatFunc(func(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
+		capturedCtx = ctx
+		return &core.ChatResponse{}, nil
+	})}, HostInfo{PluginName: "router", InstanceName: "router", Scope: ScopeExtensions})
+	_, err := h.Inference().Complete(core.WithEffectiveUserPath(context.Background(), "/acme"), pluginapi.InferenceRequest{Model: "m"})
+	require.NoError(t, err)
+	require.Equal(t, "/acme/extensions/router", core.UserPathFromContext(capturedCtx))
 }
 
 func TestHostInferenceUnavailable(t *testing.T) {
@@ -163,7 +175,7 @@ func TestHostHTTPClient(t *testing.T) {
 	require.NotNil(t, client)
 	require.Equal(t, PluginHTTPTimeout, client.Timeout)
 
-	transport, ok := client.Transport.(*http.Transport)
+	transport, ok := httpclient.CurrentTransport(client)
 	require.True(t, ok)
 	require.NotNil(t, transport.Proxy, "default client transport = %T, want an *http.Transport with a proxy function", client.Transport)
 	require.Equal(t, PluginHTTPTimeout, transport.ResponseHeaderTimeout)

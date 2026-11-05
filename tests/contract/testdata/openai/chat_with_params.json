@@ -1,14 +1,14 @@
 {
-  "id": "chatcmpl-D0qOmQKlnUcfmQ1UR9UNvcYikTjhe",
+  "id": "chatcmpl-Ee0mZDFeo7bww0jr5oXkZ3BoRTKZU",
   "object": "chat.completion",
-  "created": 1769093792,
+  "created": 1793204835,
   "model": "gpt-4o-mini-2024-07-18",
   "choices": [
     {
       "index": 0,
       "message": {
         "role": "assistant",
-        "content": "1, 2, 3, 4, ",
+        "content": "Hello, World!",
         "refusal": null,
         "annotations": []
       },
@@ -17,9 +17,9 @@
     }
   ],
   "usage": {
-    "prompt_tokens": 27,
-    "completion_tokens": 13,
-    "total_tokens": 40,
+    "prompt_tokens": 17,
+    "completion_tokens": 4,
+    "total_tokens": 21,
     "prompt_tokens_details": {
       "cached_tokens": 0,
       "audio_tokens": 0
@@ -32,5 +32,5 @@
     }
   },
   "service_tier": "default",
-  "system_fingerprint": "fp_29330a9688"
+  "system_fingerprint": "fp_c5012d6921"
 }

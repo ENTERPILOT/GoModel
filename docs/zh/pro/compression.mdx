@@ -1,0 +1,74 @@
+---
+title: "提示词压缩"
+description: "在推理请求到达提供商之前，减少其中重复和结构性的上下文，且不改变请求的结构。"
+icon: "package-minus"
+tag: "Pro"
+keywords: ["GoModel Pro", "提示词压缩", "节省 Token", "去重", "提示词缓存", "prompt compression", "token savings", "deduplication", "prompt cache"]
+---
+
+<Frame caption="控制台 Usage 页面：七天生产流量中 Pro 节省的费用。">
+  <img src="/pro/pro-saved.webp" alt="Usage Analytics 显示估算成本 $268.63，Pro saved 为 $45.17，减少 14.4%" />
+</Frame>
+
+## 经过生产环境验证
+
+提示词压缩已在智能体编程、聊天和大量使用工具的工作负载中，经过数十亿生产 Token 的检验。
+
+- **无损。** 压缩只会将模型在同一请求中已经看过的内容替换为对它的引用，或以可逆方式重新编码结构化数据。模型接收到的信息完全相同；不会对任何内容进行摘要或丢弃。唯一有损的选项——工具结果裁剪——是一个单独的策略，默认关闭。
+- **不降低提示词缓存效果。** 由于会话中先前发送过的前缀会逐字节重放，只有新消息会被改写，因此提供商的提示词缓存在多轮对话中仍能持续命中。测试者实际观察到提示词缓存命中率*提升*了约 2%，因为更短、更稳定的请求更适合缓存——这在压缩本身之外又带来了额外的节省。
+- **为测试者实际节省 2%–20%** 的输入 Token，具体取决于使用场景。会重复读取文件、重放工具输出或携带长历史记录的智能体处于该区间的上端；简短、不重复的聊天处于下端，此时压缩器只是原样转发请求。
+- **完全可控。** 可按网关或按请求选择级别，通过 glob 排除模型，使用 `new_messages_only` 保护已有历史记录，保持源代码原样，并通过响应头、审计修订记录和指标检查每一次改写。
+
+## 概览
+
+提示词压缩会在受支持的推理请求到达提供商之前对其进行改写。它会减少重复或结构性的上下文，同时保留请求中的非文本结构。
+
+它支持 `POST /v1/chat/completions`、`POST /v1/messages` 和
+`POST /v1/responses`。工具调用参数、非文本部分和未知 JSON
+字段都保持不变。Responses 推理项始终原样重放，因为 Responses API 可能要求它们与函数调用一同出现。
+
+默认的 `high` 策略将连续行去重与规范化结合使用：
+
+- 文件读取结果中的行号栏会变为紧凑的范围标头
+- 在安全的情况下，移除重放的 Chat Completions 推理内容
+- 已知的工具结果封装、搜索结果、日志、JSON 和统一 diff
+  使用内容感知的规范化
+- 能带来收益的同构 JSON 数组和结构化日志使用可逆的、自描述的编码
+
+压缩器是确定性的，并且失败即放行（fail open）。当改写带来的节省低于阈值，或会超出其工作预算时，它会原样转发请求。源代码默认保留；只有当额外节省值得用引用替换完全重复的源代码时，才启用代码去重。
+
+对于检测到的会话，网关会保留它先前发送给上游的确切请求体，并在后续轮次中逐字节重放该前缀。这样既能保护提供商的提示词缓存前缀，又能让新消息引用重复的历史内容。如果网关可能加入一个它未观察到前缀的对话，请使用 `new_messages_only`。
+
+## 配置压缩
+
+| 环境变量 | 默认值 | 用途 |
+| --- | --- | --- |
+| `PRO_COMPRESSION_LEVEL` | `high` | 选择 `none`、`low`、`medium` 或 `high`。显式设置该值后，控制台中的对应设置变为只读。 |
+| `PRO_COMPRESSION_SCOPE` | `full_history` | 使用 `new_messages_only` 保护已有的对话历史。 |
+| `PRO_COMPRESSION_EXCLUDE_MODELS` | — | 以逗号分隔的、要跳过的请求模型 glob，例如 `ollama/*`。 |
+| `PRO_COMPRESSION_MIN_BLOCK_CHARS` | `128` | high 预设下重复连续行的最小大小。 |
+| `PRO_COMPRESSION_MIN_SAVINGS_TOKENS` | `32` | high 预设下估算的最小净节省量。 |
+| `PRO_COMPRESSION_DEDUPLICATE_CODE` | `false` | 允许将重复的源代码段替换为引用。 |
+| `PRO_COMPRESSION_NORMALIZE` | `true` | 启用内容规范化和工具 Schema 稳定化。 |
+| `PRO_COMPRESSION_COMPRESS_JSON_STRUCTURE` | high 预设 | 启用可逆的 JSON 表格编码。 |
+| `PRO_COMPRESSION_COMPRESS_LOG_STRUCTURE` | high 预设 | 启用可逆的结构化日志编码。 |
+
+设置 `PRO_COMPRESSION_LEVEL=none` 可为整个网关禁用压缩。如果只针对单个请求，请发送：
+
+```http
+X-GoModel-Compression: off
+```
+
+按请求关闭和 `none` 级别都会跳过请求体解析，因此请求会被原样转发。
+
+## 检查压缩效果
+
+经过压缩的响应包含估算的节省量以及被替换的重复块数量：
+
+```http
+X-GoModel-Pro-Tokens-Saved: 1843
+X-GoModel-Pro-Compression-Blocks: 12
+```
+
+审计日志会保留原始请求，并为每个改写器保留一条修订记录。修订记录包含其字节大小和压缩详情；当 `LOGGING_LOG_BODIES=true` 时，还会保留改写后的请求体。Prometheus 指标使用
+`gomodel_pro_compression_` 前缀，控制台的 Usage 页面会以 Token 或成本的形式报告 Pro 节省量。

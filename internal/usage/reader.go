@@ -13,21 +13,32 @@ import (
 )
 
 // UsageQueryParams specifies the query parameters for usage data retrieval.
-// The optional filters (UserPath, SessionID, AuthKeyID, Model, Provider, Label,
-// Endpoints, Operations) apply uniformly to
-// every reader method, so summaries, breakdowns, and the request log all
-// describe the same filtered slice of traffic.
+// The optional filters apply uniformly to every reader method, so summaries,
+// breakdowns, and the request log all describe the same filtered slice of
+// traffic. Every set filter narrows the result (AND across filters); a
+// multi-value filter keeps rows matching any of its values (OR within it).
 type UsageQueryParams struct {
 	StartDate time.Time // Inclusive start (day precision)
 	EndDate   time.Time // Inclusive end (day precision)
 	Interval  string    // "daily", "weekly", "monthly", "yearly"
 	TimeZone  string    // IANA timezone used for day-boundary interpretation and grouping
-	UserPath  string    // subtree filter on tracked user path
-	SessionID string    // filter by exact detected session id (optional)
-	AuthKeyID string    // filter by exact managed auth key id (optional)
-	Model     string    // filter by exact model name (optional)
-	Provider  string    // filter by provider name or provider type (optional)
-	Label     string    // filter by request label, exact match (optional)
+	// UserPath keeps rows inside this subtree. The admin API sets it to a
+	// scoped credential's root, so the multi-value filters below can only
+	// narrow that scope.
+	UserPath  string
+	SessionID string // filter by exact detected session id (optional)
+	AuthKeyID string // filter by exact managed auth key id (optional)
+	Model     string // filter by exact model name (optional)
+	Provider  string // filter by provider name or provider type (optional)
+	Label     string // filter by request label, exact match (optional)
+	// UserPaths keeps rows inside any of these subtrees (optional).
+	UserPaths []string
+	// Models, Providers, Labels and AuthKeyIDs keep rows matching any of
+	// their values; Providers matches the provider name or type (optional).
+	Models     []string
+	Providers  []string
+	Labels     []string
+	AuthKeyIDs []string
 	// Endpoints keeps rows whose endpoint equals any of these, e.g.
 	// /v1/messages (optional).
 	Endpoints []string
@@ -58,6 +69,10 @@ type UsageSummary struct {
 	TotalInputCost        *float64 `json:"total_input_cost"`
 	TotalOutputCost       *float64 `json:"total_output_cost"`
 	TotalCost             *float64 `json:"total_cost"`
+	// TotalBilledCost is what the period was billed at: provider cost plus
+	// markup. Unlike the other cost fields it includes billed response-cache
+	// hits in every cache mode, because those are billed to the caller too.
+	TotalBilledCost *float64 `json:"total_billed_cost" extensions:"x-nullable"`
 	// Rewrite savings: prompt tokens request rewriters removed before the
 	// provider call, and the estimated input cost avoided (nil when no
 	// matched row had a priced savings estimate).
@@ -125,6 +140,7 @@ type ModelUsage struct {
 	InputCost    *float64 `json:"input_cost"`
 	OutputCost   *float64 `json:"output_cost"`
 	TotalCost    *float64 `json:"total_cost"`
+	BilledCost   *float64 `json:"billed_cost" extensions:"x-nullable"`
 	GroupCacheFields
 }
 
@@ -137,6 +153,7 @@ type UserPathUsage struct {
 	InputCost    *float64 `json:"input_cost" extensions:"x-nullable"`
 	OutputCost   *float64 `json:"output_cost" extensions:"x-nullable"`
 	TotalCost    *float64 `json:"total_cost" extensions:"x-nullable"`
+	BilledCost   *float64 `json:"billed_cost" extensions:"x-nullable"`
 	GroupCacheFields
 }
 
@@ -152,6 +169,7 @@ type LabelUsage struct {
 	InputCost    *float64 `json:"input_cost" extensions:"x-nullable"`
 	OutputCost   *float64 `json:"output_cost" extensions:"x-nullable"`
 	TotalCost    *float64 `json:"total_cost" extensions:"x-nullable"`
+	BilledCost   *float64 `json:"billed_cost" extensions:"x-nullable"`
 	GroupCacheFields
 }
 
@@ -167,6 +185,8 @@ type SessionUsage struct {
 	InputCost    *float64 `json:"input_cost" extensions:"x-nullable"`
 	OutputCost   *float64 `json:"output_cost" extensions:"x-nullable"`
 	TotalCost    *float64 `json:"total_cost" extensions:"x-nullable"`
+	// BilledCost includes the session's billed response-cache hits.
+	BilledCost *float64 `json:"billed_cost" extensions:"x-nullable"`
 }
 
 // SessionUsageParams specifies filters and pagination for per-session usage.
@@ -257,6 +277,10 @@ type DailyUsage struct {
 	InputCost             *float64 `json:"input_cost"`
 	OutputCost            *float64 `json:"output_cost"`
 	TotalCost             *float64 `json:"total_cost"`
+	// BilledCost includes the period's billed response-cache hits in every
+	// cache mode, so a period served only from the cache can appear with no
+	// requests.
+	BilledCost *float64 `json:"billed_cost" extensions:"x-nullable"`
 }
 
 // periodInputSplit holds the provider prompt-cache split for one time period.
@@ -350,30 +374,36 @@ type UsageLogParams struct {
 // and cached_input_ratio fields are derived from RawData at read time by
 // EnrichUsageLogEntry; storage layers never populate them.
 type UsageLogEntry struct {
-	ID                     string         `json:"id"`
-	RequestID              string         `json:"request_id"`
-	ProviderID             string         `json:"provider_id"`
-	Timestamp              time.Time      `json:"timestamp"`
-	Model                  string         `json:"model"`
-	Provider               string         `json:"provider"`
-	ProviderName           string         `json:"provider_name,omitempty"`
-	Endpoint               string         `json:"endpoint"`
-	UserPath               string         `json:"user_path,omitempty"`
-	SessionID              string         `json:"session_id,omitempty"`
-	AuthKeyID              string         `json:"auth_key_id,omitempty"`
-	CacheType              string         `json:"cache_type,omitempty"`
-	Labels                 []string       `json:"labels,omitempty"`
-	InputTokens            int            `json:"input_tokens"`
-	OutputTokens           int            `json:"output_tokens"`
-	TotalTokens            int            `json:"total_tokens"`
-	UncachedInputTokens    int64          `json:"uncached_input_tokens,omitempty"`
-	CachedInputTokens      int64          `json:"cached_input_tokens,omitempty"`
-	CacheWriteInputTokens  int64          `json:"cache_write_input_tokens,omitempty"`
-	CachedInputRatio       float64        `json:"cached_input_ratio,omitempty"`
-	InputCost              *float64       `json:"input_cost"`
-	OutputCost             *float64       `json:"output_cost"`
-	TotalCost              *float64       `json:"total_cost"`
-	CostSource             string         `json:"cost_source,omitempty"`
+	ID                    string    `json:"id"`
+	RequestID             string    `json:"request_id"`
+	ProviderID            string    `json:"provider_id"`
+	Timestamp             time.Time `json:"timestamp"`
+	Model                 string    `json:"model"`
+	Provider              string    `json:"provider"`
+	ProviderName          string    `json:"provider_name,omitempty"`
+	Endpoint              string    `json:"endpoint"`
+	UserPath              string    `json:"user_path,omitempty"`
+	SessionID             string    `json:"session_id,omitempty"`
+	AuthKeyID             string    `json:"auth_key_id,omitempty"`
+	CacheType             string    `json:"cache_type,omitempty"`
+	Labels                []string  `json:"labels,omitempty"`
+	InputTokens           int       `json:"input_tokens"`
+	OutputTokens          int       `json:"output_tokens"`
+	TotalTokens           int       `json:"total_tokens"`
+	UncachedInputTokens   int64     `json:"uncached_input_tokens,omitempty"`
+	CachedInputTokens     int64     `json:"cached_input_tokens,omitempty"`
+	CacheWriteInputTokens int64     `json:"cache_write_input_tokens,omitempty"`
+	CachedInputRatio      float64   `json:"cached_input_ratio,omitempty"`
+	InputCost             *float64  `json:"input_cost"`
+	OutputCost            *float64  `json:"output_cost"`
+	TotalCost             *float64  `json:"total_cost"`
+	CostSource            string    `json:"cost_source,omitempty"`
+	MarkupPercent         *float64  `json:"markup_percent,omitempty"`
+	MarkupSelector        string    `json:"markup_selector,omitempty"`
+	BilledCost            *float64  `json:"billed_cost,omitempty"`
+	// Billable is false for a request served by a provider configured with
+	// billable: false; omitted when billable.
+	Billable               *bool          `json:"billable,omitempty"`
 	RawData                map[string]any `json:"raw_data,omitempty"`
 	CostsCalculationCaveat string         `json:"costs_calculation_caveat,omitempty"`
 	RewriteTokensSaved     int64          `json:"rewrite_tokens_saved,omitempty"`
@@ -405,6 +435,11 @@ type UsageLogResult struct {
 	Total   int             `json:"total"`
 	Limit   int             `json:"limit"`
 	Offset  int             `json:"offset"`
+	// AsOf is when the server read the page, in unix microseconds on its
+	// clock; the admin API sets it. A dashboard compares it with the write
+	// stamp of another replica's live entry to tell whether this page
+	// already counted it.
+	AsOf int64 `json:"as_of,omitempty"`
 }
 
 // RequestUsageSummary aggregates usage records that belong to one request ID.
@@ -478,6 +513,16 @@ type UsageReader interface {
 	// GetUsageByEndpoint returns per-endpoint token usage aggregates for the
 	// given date range, each tagged with the operation its endpoint belongs to.
 	GetUsageByEndpoint(ctx context.Context, params UsageQueryParams) ([]EndpointUsage, error)
+
+	// GetUsageBreakdown returns a bounded two-dimension pivot (rows by
+	// columns) of the filtered usage; keys beyond the limit fold into an
+	// "other" bucket.
+	GetUsageBreakdown(ctx context.Context, params UsageBreakdownParams) (*UsageBreakdown, error)
+
+	// GetUsageInvoice returns billed usage for the period, one block of
+	// model/provider line items per customer user path, with subtotals and a
+	// grand total. Nothing is folded away.
+	GetUsageInvoice(ctx context.Context, params InvoiceParams) (*Invoice, error)
 
 	// GetUsageBySession returns a bounded page of per-session aggregates.
 	// Usage rows without a detected session are omitted. Request and token

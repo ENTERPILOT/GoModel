@@ -57,6 +57,7 @@ func (p *Provider) RealtimeTarget(ctx context.Context, req *core.RealtimeRequest
 
 	target.URL = endpoint
 	target.Headers = p.realtimeAuthHeaders(ctx)
+	target.HTTPClient = p.HTTPClient()
 	return target, nil
 }
 

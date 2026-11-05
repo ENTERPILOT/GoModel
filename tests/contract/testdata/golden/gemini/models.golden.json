@@ -26,6 +26,18 @@
     },
     {
       "created": 0,
+      "id": "gemma-4-26b-a4b-it",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemma-4-31b-it",
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
       "id": "gemini-flash-latest",
       "object": "model",
       "owned_by": "google"

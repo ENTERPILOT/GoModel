@@ -1,0 +1,250 @@
+---
+title: "oh-my-pi (omp): zmiana effort i własni providerzy"
+sidebarTitle: "oh-my-pi"
+description: "Kieruj agenta do kodowania oh-my-pi (omp) przez GoModel z automatycznie wykrywanymi modelami, działającymi wywołaniami narzędzi i reasoning effort."
+icon: "square-terminal"
+keywords: ["oh-my-pi", "omp", "omp change effort", "zmiana effort w omp", "omp custom provider", "własny provider omp", "models.yml", "agent do kodowania", "coding agent", "reasoning effort", "przewodnik konfiguracji", "setup guide"]
+---
+
+[oh-my-pi](https://github.com/can1357/oh-my-pi) (`omp`) może używać GoModel jako
+własnego providera. Jeden blok providera w pliku `models.yml` omp automatycznie
+wykrywa każdy model udostępniany przez GoModel, więc konfigurujesz gateway raz,
+zamiast definiować każdy model ręcznie.
+
+Przepływ:
+
+`oh-my-pi (omp) -> GoModel -> upstream model providers`
+
+## Zanim zaczniesz
+
+- Zainstaluj [oh-my-pi](https://github.com/can1357/oh-my-pi#install), na przykład
+  poleceniem `curl -fsSL https://omp.sh/install | sh`.
+- Wybierz master key GoModel do administrowania gatewayem, na przykład
+  `change-me`.
+- Upewnij się, że GoModel ma dane uwierzytelniające upstreamu dla modeli, których
+  chcesz używać.
+
+## 1. Uruchom GoModel
+
+Uruchom GoModel z master key i co najmniej jednym providerem upstream. Ten
+przykład używa Anthropic:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e ANTHROPIC_API_KEY="sk-ant-..." \
+  enterpilot/gomodel
+```
+
+`GOMODEL_MASTER_KEY` to startowe i administracyjne dane uwierzytelniające gatewaya.
+Nie umieszczaj go w konfiguracji omp. `ANTHROPIC_API_KEY` należy do GoModel i jest
+używany wyłącznie w requeście do upstreamu.
+
+## 2. Utwórz dedykowany klucz API dla omp
+
+Otwórz dashboard GoModel pod adresem
+[http://localhost:8080/admin/dashboard](http://localhost:8080/admin/dashboard)
+i zaloguj się przy użyciu `GOMODEL_MASTER_KEY`. Przejdź do
+`API Keys -> Create API Key`, a następnie:
+
+1. Nazwij klucz `oh-my-pi`.
+2. Ustaw **User Path** na `/agents/omp`.
+3. Pozostaw **Dashboard access** wyłączone.
+4. Utwórz klucz i skopiuj wartość `sk_gom_...`. Jest wyświetlana tylko raz.
+
+Przypisana ścieżka użytkownika daje omp własny zakres użycia i audytu. Jeśli
+korzystasz z [polityk dostępu do modeli](/pl/features/user-path#dostęp-do-modeli) dla
+całego gatewaya, zezwól na selektory, których omp potrzebuje dla `/agents/omp`.
+
+<Warning>
+  W omp używaj tego zarządzanego klucza, a nie `GOMODEL_MASTER_KEY`. Zarządzany
+  klucz bez dostępu do dashboardu może wywoływać endpointy modeli, ale nie może
+  czytać logów audytowych, tworzyć kluczy ani zmieniać ustawień gatewaya.
+</Warning>
+
+## 3. Skonfiguruj omp
+
+Utwórz lub edytuj `~/.omp/agent/models.yml` i dodaj providera `gomodel`:
+
+```yaml
+providers:
+  gomodel:
+    baseUrl: http://localhost:8080/v1
+    apiKey: sk_gom_...
+    api: openai-completions
+    discovery:
+      type: openai-models-list
+```
+
+Blok `discovery` sprawia, że omp przy starcie pobiera katalog `/v1/models` z
+GoModel, więc każdy model, który GoModel potrafi routować, automatycznie pojawia
+się w omp – razem z oknem kontekstu i limitami wyjścia z metadanych modeli
+GoModel. Nie musisz wymieniać modeli ręcznie.
+
+Ogranicz dostęp do pliku poleceniem `chmod 600 ~/.omp/agent/models.yml`. Jeśli
+wolisz nie przechowywać klucza bezpośrednio w pliku, `apiKey` akceptuje też
+*nazwę* zmiennej środowiskowej (na przykład `apiKey: GOMODEL_API_KEY`) albo
+polecenie poprzedzone `!`, którego stdout jest sekretem (na przykład
+`apiKey: "!op read op://dev/gomodel/api-key"`).
+
+Jeśli GoModel działa na innym hoście, zastąp `localhost:8080` adresem `https://`,
+z TLS terminowanym na reverse proxy lub load balancerze przed GoModel; zwykłego
+HTTP używaj tylko przy developmencie na loopbacku. Zachowaj `/v1` w base URL.
+
+## 4. Wybierz model i uruchom omp
+
+Wyświetl listę modeli wykrytych przez omp za pośrednictwem gatewaya:
+
+```bash
+omp models gomodel
+```
+
+Selektory modeli w omp mają postać `<provider>/<model-id>`. ID modeli w GoModel
+już zawierają prefiks providera (`anthropic/claude-sonnet-5`), więc pełny
+selektor ma dwa prefiksy:
+
+```bash
+omp --model "gomodel/anthropic/claude-sonnet-5"
+```
+
+Albo najpierw sprawdź działanie w trybie headless:
+
+```bash
+omp -p --model "gomodel/anthropic/claude-sonnet-5" \
+  'Reply with exactly ok and no punctuation.'
+```
+
+Oczekiwany wynik to `ok`.
+
+<Note>
+  omp przechowuje wykryte katalogi w lokalnej bazie danych. Po dodaniu modeli lub
+  providerów do GoModel uruchom `omp models refresh`, aby wymusić ponowne pobranie.
+</Note>
+
+## 5. Włącz reasoning effort
+
+Poziomy `--thinking` w omp (`low`, `medium`, `high`, ...) są wysyłane jako
+kompatybilne z OpenAI pole `reasoning_effort`, a GoModel tłumaczy to pole dla
+każdego upstreamu – dla modeli Anthropic staje się ono budżetem thinking, a
+thinking modelu wraca w streamie jako `reasoning_content`, które omp renderuje
+jako bloki myśli.
+
+omp wysyła `reasoning_effort` tylko dla modeli, o których wie, że obsługują
+reasoning, a modele wykryte ze zwykłej listy `/v1/models` nie są tak oznaczone.
+Włącz je przez `modelOverrides`:
+
+```yaml
+providers:
+  gomodel:
+    baseUrl: http://localhost:8080/v1
+    apiKey: sk_gom_...
+    api: openai-completions
+    discovery:
+      type: openai-models-list
+    modelOverrides:
+      anthropic/claude-sonnet-5:
+        reasoning: true
+```
+
+Następnie:
+
+```bash
+omp -p --print-thoughts --thinking high \
+  --model "gomodel/anthropic/claude-sonnet-5" 'What is 17*23?'
+```
+
+Z tym nadpisaniem odpowiedź zawiera thinking modelu; bez niego `--thinking` jest
+po cichu pomijane dla tego modelu.
+
+## Opcjonalnie: użyj endpointu Anthropic Messages w GoModel
+
+omp może też komunikować się z GoModel w formacie Anthropic przez endpoint
+[`/v1/messages`](/pl/advanced/anthropic-messages-api) w GoModel. Na tej ścieżce
+wykrywanie modeli nie jest dostępne, więc zdefiniuj modele jawnie:
+
+```yaml
+providers:
+  gomodel-anthropic:
+    baseUrl: http://localhost:8080/v1
+    apiKey: sk_gom_...
+    api: anthropic-messages
+    models:
+      - id: anthropic/claude-sonnet-5
+        name: Claude Sonnet 5 (GoModel)
+        reasoning: true
+        contextWindow: 1000000
+        maxTokens: 128000
+```
+
+Obie ścieżki przechodzą przez ten sam klucz gatewaya, budżety i ścieżkę audytu.
+Zalecanym domyślnym wyborem jest ścieżka kompatybilna z OpenAI z wykrywaniem
+modeli; formatu Anthropic używaj wtedy, gdy zależy Ci na semantyce Messages API
+end-to-end.
+
+## 6. Sprawdź ruch w GoModel
+
+Otwórz logi audytowe w dashboardzie GoModel:
+
+[http://localhost:8080/admin/dashboard/audit](http://localhost:8080/admin/dashboard/audit)
+
+Potwierdź, że streamowane requesty omp do `POST /v1/chat/completions` pojawiają
+się pod ścieżką użytkownika `/agents/omp` i że GoModel kieruje je do właściwego
+providera. Zaloguj się przy użyciu master key; klucz omp celowo nie może otworzyć
+tej strony.
+
+## Rozwiązywanie problemów
+
+### `401 Unauthorized`
+
+Wartość `apiKey` w `models.yml` musi być zarządzanym kluczem `sk_gom_...`. Jeśli
+zamiast tego podajesz nazwę zmiennej środowiskowej, upewnij się, że ta zmienna jest
+wyeksportowana w powłoce, z której uruchamiasz omp.
+
+### Model nie został znaleziony
+
+Selektory omp wymagają pełnego wykrytego ID łącznie z prefiksem providera z GoModel:
+`gomodel/anthropic/claude-sonnet-5`, a nie `gomodel/claude-sonnet-5`. Skopiuj
+dokładne ID z `omp models gomodel`.
+
+### Nowe modele GoModel się nie pojawiają
+
+Uruchom `omp models refresh`. W przeciwnym razie omp korzysta z katalogu w cache’u.
+
+### `--thinking` nie działa
+
+Dodaj `reasoning: true` dla tego modelu w `modelOverrides`, jak pokazano wyżej.
+Bez tego omp nie wysyła `reasoning_effort`, więc GoModel nigdy nie otrzymuje
+wartości effort do przetłumaczenia.
+
+### Thinking działa w modelach Anthropic, ale nie w innych
+
+GoModel mapuje `reasoning_effort` osobno dla każdego providera. Sprawdź flagę
+`capabilities.reasoning` modelu w metadanych `/v1/models`; modele bez reasoningu
+ignorują lub odrzucają wartości effort.
+
+## Źródła
+
+- oh-my-pi: [Model and provider configuration (`models.yml`)](https://github.com/can1357/oh-my-pi/blob/main/docs/models.md)
+- oh-my-pi: [CLI reference](https://github.com/can1357/oh-my-pi/blob/main/docs/cli-reference.md)
+- GoModel: [Anthropic Messages API](/pl/advanced/anthropic-messages-api)
+
+## Zweryfikowano 31 sierpnia 2026
+
+Ten przewodnik zweryfikowano na:
+
+- lokalnej instancji GoModel pod `http://localhost:8080`
+- oh-my-pi `18.0.11` (`omp`)
+- `anthropic/claude-haiku-4-5-20251001` przez GoModel
+
+Lokalna weryfikacja potwierdziła, że:
+
+- `discovery: openai-models-list` zaimportowało pełny katalog GoModel (955
+  modeli) z oknami kontekstu i limitami wyjścia
+- prompty headless `omp -p` i wywołania narzędzia shell zakończyły się powodzeniem
+  przez `omp -> GoModel -> Anthropic` z dedykowanym zarządzanym kluczem
+- po włączeniu reasoningu przez `modelOverrides` opcja `--thinking high` dawała
+  `reasoning_effort: "high"` w requeście, GoModel tłumaczył to na thinking
+  Anthropic, a omp renderował zwrócone bloki myśli `reasoning_content`; bez tego
+  włączenia omp pomijał to pole
+- wariant providera `api: anthropic-messages` obsłużył te same prompty przez
+  endpoint `/v1/messages` w GoModel

@@ -9,6 +9,11 @@
 //			os.Exit(code)
 //		}
 //	}
+//
+// A godebug setting applies only to the module that builds the binary, so
+// GoModel's multipathtcp=0 does not reach external modules. Add
+// "//go:debug multipathtcp=0" directly before their "package main", which
+// also holds in workspace mode; see CVE-2026-98432.
 package run
 
 import (
@@ -28,6 +33,7 @@ import (
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/app"
+	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/version"
 	"github.com/enterpilot/gomodel/pluginapi"
 )
@@ -279,6 +285,20 @@ func Run(ctx context.Context, opts Options) error {
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to load config: %w", err)
 		}
+		// Outbound trust goes in first, so extensions setting up and secret
+		// references resolving (a vault behind a private CA) already use it.
+		// app.New applies the fully resolved settings again. A rejected
+		// generation puts the serving one's trust back.
+		previousTLS := httpclient.SnapshotTLS()
+		if err := app.ApplyOutboundTLSEarly(ctx, result.Config.HTTP.TLS); err != nil {
+			return nil, nil, err
+		}
+		built := false
+		defer func() {
+			if !built {
+				httpclient.RestoreTLS(previousTLS)
+			}
+		}()
 		result.Secrets.SetNotifier(secretChanges)
 		if err := configure(result); err != nil {
 			return nil, nil, err
@@ -303,6 +323,7 @@ func Run(ctx context.Context, opts Options) error {
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize application: %w", err)
 		}
+		built = true
 		serving = application
 		return application, result.Config, nil
 	}

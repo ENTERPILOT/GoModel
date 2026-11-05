@@ -398,3 +398,27 @@ func TestServiceUpsertRestrictedKeepsTheDestinationOfHeldReferences(t *testing.T
 	edited.Config = json.RawMessage(`{"api_key":"${vault:pii}","threshold":0.9}`)
 	require.NoError(t, service.Upsert(ctx, edited))
 }
+
+// A stored literal kept behind the dashboard's mask pins the destination just
+// like a reference: repointing the definition would send a secret the caller
+// never saw. A save that types the secret in afresh may repoint.
+func TestServiceUpsertRestrictedKeepsTheDestinationOfMaskedLiterals(t *testing.T) {
+	presidio := func(analyzerURL, apiKey string) Definition {
+		return Definition{Name: "pii", Type: "presidio", Config: json.RawMessage(`{"analyzer_url":"` + analyzerURL + `","api_key":"` + apiKey + `"}`)}
+	}
+	store := newTestStore(presidio("http://127.0.0.1:1", "sk-stored-literal"))
+	service, _ := newSecretsService(t, store, &guardrailVault{values: map[string]string{}})
+	ctx := config.RestrictSecretReferences(t.Context())
+
+	err := service.Upsert(ctx, presidio("http://127.0.0.1:2", plugins.SecretMask))
+	require.ErrorIs(t, err, config.ErrSecretDestinationRestricted)
+	assert.Contains(t, err.Error(), "guardrail_definitions.pii.config.analyzer_url")
+	assert.NotContains(t, err.Error(), "sk-stored-literal")
+	assert.Contains(t, string(store.definitions["pii"].Config), "127.0.0.1:1")
+
+	require.NoError(t, service.Upsert(ctx, presidio("http://127.0.0.1:1", plugins.SecretMask)), "the mask still saves when nothing is repointed")
+	assert.Contains(t, string(store.definitions["pii"].Config), "sk-stored-literal")
+
+	require.NoError(t, service.Upsert(ctx, presidio("http://127.0.0.1:2", "sk-callers-own")))
+	assert.Contains(t, string(store.definitions["pii"].Config), "127.0.0.1:2")
+}

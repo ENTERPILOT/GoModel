@@ -34,6 +34,7 @@ type Handler struct {
 	batchRequestPreparer            BatchRequestPreparer
 	exposedModelLister              ExposedModelLister
 	keepOnlyAliasesAtModelsEndpoint bool
+	vllmDiscoveryCompat             bool
 	logger                          auditlog.LoggerInterface
 	usageLogger                     usage.LoggerInterface
 	budgetChecker                   BudgetChecker

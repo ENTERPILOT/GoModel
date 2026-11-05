@@ -29,6 +29,7 @@ type Config struct {
 	Logging       LogConfig           `yaml:"logging"`
 	Media         MediaConfig         `yaml:"media"`
 	Usage         UsageConfig         `yaml:"usage"`
+	Pricing       PricingConfig       `yaml:"pricing"`
 	Budgets       BudgetsConfig       `yaml:"budgets"`
 	RateLimits    RateLimitsConfig    `yaml:"rate_limits"`
 	Metrics       MetricsConfig       `yaml:"metrics"`
@@ -154,6 +155,7 @@ func buildDefaultConfig() *Config {
 		Models: ModelsConfig{
 			EnabledByDefault:                    true,
 			KeepOnlyAliasesAtModelsEndpoint:     false,
+			VLLMDiscoveryCompat:                 false,
 			UnqualifiedModelIDsAtModelsEndpoint: false,
 			ConfiguredProviderModelsMode:        ConfiguredProviderModelsModeFallback,
 		},
@@ -204,8 +206,12 @@ func buildDefaultConfig() *Config {
 			FlushInterval:               5,
 			RetentionDays:               90,
 		},
+		Pricing: PricingConfig{
+			BillCacheHits: true,
+		},
 		Budgets: BudgetsConfig{
-			Enabled: true,
+			Enabled:                 true,
+			ProviderBilledCacheHits: true,
 		},
 		RateLimits: RateLimitsConfig{
 			Enabled:       true,
@@ -322,6 +328,9 @@ func Load() (*LoadResult, error) {
 	if err := normalizeMCPConfig(&cfg.MCP); err != nil {
 		return nil, err
 	}
+	if err := validatePricingConfig(&cfg.Pricing); err != nil {
+		return nil, err
+	}
 	applyBudgetDependencies(cfg)
 	applyPluginDependencies(cfg)
 	if err := applyBudgetEnv(cfg, strict); err != nil {
@@ -393,6 +402,9 @@ func Load() (*LoadResult, error) {
 		return nil, err
 	}
 	if err := ResolveClientIPPolicy(&cfg.Server); err != nil {
+		return nil, err
+	}
+	if err := ValidateServerTLS(cfg.Server); err != nil {
 		return nil, err
 	}
 

@@ -14,9 +14,10 @@
 // `liveLogs.auditThreadChildren` when the user unfolds it.
 
 import { getJSON } from "$lib/api/client.js";
-import { writeStored } from "$lib/utils/storage.js";
+import { readStored, writeStored } from "$lib/utils/storage.js";
 import { dateRange } from "$lib/stores/dateRange.svelte.js";
 import { liveLogs } from "./liveLogs.svelte.js";
+import { normalizeAuditColumns, parseStoredAuditColumns } from "./audit-columns.js";
 import { normalizeHiddenTypes } from "./audit-operations.js";
 import { auditWorkflows } from "./audit-workflows.svelte.js";
 import {
@@ -43,6 +44,11 @@ function emptyAuditLog() {
 }
 
 class AuditListStore {
+  // Column visibility view preference ({ [column key]: boolean }); persisted
+  // like the session-grouping toggle.
+  auditColumns = $state(
+    parseStoredAuditColumns(readStored("gomodel_audit_columns", "{}")),
+  );
   auditExpandedEntries = $state({});
   auditExpandedThreads = $state({});
   loading = $state(false);
@@ -62,6 +68,12 @@ class AuditListStore {
   }
   set auditSearch(value) {
     liveLogs.auditSearch = value;
+  }
+  get auditSearchField() {
+    return liveLogs.auditSearchField;
+  }
+  set auditSearchField(value) {
+    liveLogs.auditSearchField = value;
   }
   get auditMethod() {
     return liveLogs.auditMethod;
@@ -128,6 +140,16 @@ class AuditListStore {
     this.fetchAuditLog(true);
   }
 
+  // toggleAuditColumn shows or hides one column of the row. Purely visual, so
+  // there is nothing to refetch.
+  toggleAuditColumn(key) {
+    this.auditColumns = normalizeAuditColumns({
+      ...this.auditColumns,
+      [key]: !this.auditColumns[key],
+    });
+    writeStored("gomodel_audit_columns", JSON.stringify(this.auditColumns));
+  }
+
   async fetchAuditLog(resetOffset) {
     const requestToken = ++this.auditFetchToken;
     this.loading = true;
@@ -139,6 +161,7 @@ class AuditListStore {
         limit: this.auditLog.limit,
         offset: this.auditLog.offset,
         search: this.auditSearch,
+        searchField: this.auditSearchField,
         method: this.auditMethod,
         statusCode: this.auditStatusCode,
         stream: this.auditStream,
@@ -313,6 +336,9 @@ class AuditListStore {
           loaded: true,
           entries: merged.entries,
           total: Number(result.data.total || 0) + merged.preservedCount,
+          // When the server read the children, so a later live event from
+          // another replica can tell whether total already counts it.
+          as_of: result.data.as_of,
         },
       };
     } catch (e) {
@@ -323,6 +349,7 @@ class AuditListStore {
 
   clearAuditFilters() {
     this.auditSearch = "";
+    this.auditSearchField = "";
     this.auditMethod = "";
     this.auditStatusCode = "";
     this.auditStream = "";

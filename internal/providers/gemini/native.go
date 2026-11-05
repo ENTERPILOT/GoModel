@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"maps"
 	"mime"
 	"net/http"
 	"net/url"
@@ -24,6 +25,26 @@ type geminiGenerateContentRequest struct {
 	GenerationConfig  map[string]any    `json:"generationConfig,omitempty"`
 	SafetySettings    []map[string]any  `json:"safetySettings,omitempty"`
 	CachedContent     string            `json:"cachedContent,omitempty"`
+	// Store is the Gemini API's per-request opt-out of Google's request
+	// storage, which is on by default for new paid-tier projects since
+	// October 2026. Only the AI Studio backend sets it: Vertex has no such
+	// member and rejects unknown fields.
+	Store *bool `json:"store,omitempty"`
+}
+
+// chatStore reads the Chat Completions store flag, which has the same meaning
+// as Gemini's: whether the provider may retain the request. A value that is
+// not a boolean is an error rather than a dropped opt-out.
+func chatStore(req *core.ChatRequest) (*bool, error) {
+	raw := req.ExtraFields.Lookup("store")
+	if core.IsJSONNull(bytes.TrimSpace(raw)) {
+		return nil, nil
+	}
+	var store bool
+	if err := json.Unmarshal(raw, &store); err != nil {
+		return nil, core.NewInvalidRequestError("store must be a boolean", err)
+	}
+	return &store, nil
 }
 
 type geminiContent struct {
@@ -77,7 +98,8 @@ type geminiFileData struct {
 // Thought signatures cross the OpenAI-compatible API the way Google's own
 // OpenAI-compatible endpoint exposes them: a functionCall part's signature as
 // tool_calls[].extra_content.google.thought_signature and a text part's as
-// message.extra_content.google.thought_signature. Gemini 3 rejects (HTTP 400)
+// message.extra_content.google.thought_signature. A generated image's rides on
+// image_url.extra_content.google.thought_signature. Gemini 3 rejects (HTTP 400)
 // any functionCall in the history that comes back without its signature.
 // skipThoughtSignatureValidator is the placeholder Google documents for
 // function calls that never had a signature: a history transferred from
@@ -191,8 +213,11 @@ type geminiPromptFeedback struct {
 }
 
 type geminiCandidate struct {
-	Content       geminiContent   `json:"content"`
-	FinishReason  string          `json:"finishReason,omitempty"`
+	Content      geminiContent `json:"content"`
+	FinishReason string        `json:"finishReason,omitempty"`
+	// FinishMessage explains a non-STOP finish in prose, such as why an image
+	// model produced no image.
+	FinishMessage string          `json:"finishMessage,omitempty"`
 	Index         int             `json:"index,omitempty"`
 	SafetyRatings json.RawMessage `json:"safetyRatings,omitempty"`
 }
@@ -250,6 +275,12 @@ func convertChatRequestToGemini(req *core.ChatRequest) (*geminiGenerateContentRe
 				}
 			}
 		case "tool":
+			// Gemini expects all responses to a parallel function call turn in
+			// one content, so consecutive tool messages share it.
+			if last := len(out.Contents) - 1; last >= 0 && isFunctionResponseContent(out.Contents[last]) {
+				out.Contents[last].Parts = append(out.Contents[last].Parts, parts...)
+				continue
+			}
 			out.Contents = append(out.Contents, geminiContent{Role: "user", Parts: parts})
 		default:
 			out.Contents = append(out.Contents, geminiContent{Role: "user", Parts: parts})
@@ -287,7 +318,16 @@ func geminiPartsFromMessage(msg core.Message, signatureRequired bool) ([]geminiP
 	if err != nil || strings.TrimSpace(msg.Role) != "assistant" {
 		return parts, err
 	}
-	return withThoughtSignature(parts, thoughtSignatureFromExtraFields(msg.ExtraFields)), nil
+	parts = withThoughtSignature(parts, thoughtSignatureFromExtraFields(msg.ExtraFields))
+	images, err := core.ChatImages(msg.ExtraFields)
+	if err != nil {
+		return nil, core.NewInvalidRequestError("invalid assistant images", err)
+	}
+	imageParts, err := geminiPartsFromContentParts(images)
+	if err != nil {
+		return nil, err
+	}
+	return append(parts, imageParts...), nil
 }
 
 func geminiPartsFromToolCallMessage(msg core.Message, signatureRequired bool) []geminiPart {
@@ -327,13 +367,21 @@ func geminiPartsFromToolCallMessage(msg core.Message, signatureRequired bool) []
 	return parts
 }
 
-// withThoughtSignature attaches a text turn's signature to its last part, the
-// position Gemini returned it in.
+// withThoughtSignature attaches a text turn's signature to its last text part,
+// the position Gemini returned it in. Replayed images keep their own signature.
 func withThoughtSignature(parts []geminiPart, signature string) []geminiPart {
 	if signature == "" || len(parts) == 0 {
 		return parts
 	}
-	parts[len(parts)-1].ThoughtSignature = signature
+	for i := len(parts) - 1; i >= 0; i-- {
+		if parts[i].Text != "" {
+			parts[i].ThoughtSignature = signature
+			return parts
+		}
+	}
+	if last := &parts[len(parts)-1]; last.ThoughtSignature == "" {
+		last.ThoughtSignature = signature
+	}
 	return parts
 }
 
@@ -357,6 +405,48 @@ func geminiPartsFromContent(content core.MessageContent) ([]geminiPart, error) {
 		}
 		return geminiPartsFromContentParts(parts)
 	}
+}
+
+// toolCallIDs hands out tool call IDs. Gemini may omit function call IDs, and a
+// client matches tool results to calls by ID, so a missing or repeated ID is
+// replaced with an unused call_<n>.
+type toolCallIDs struct {
+	used map[string]struct{}
+	next int
+}
+
+// assign returns id when it is unused, otherwise a generated ID that avoids
+// both used IDs and the IDs supplied later in the same response.
+func (g *toolCallIDs) assign(id string, supplied map[string]struct{}) string {
+	if g.used == nil {
+		g.used = make(map[string]struct{})
+	}
+	if _, taken := g.used[id]; id != "" && !taken {
+		g.used[id] = struct{}{}
+		return id
+	}
+	for {
+		candidate := "call_" + strconv.Itoa(g.next)
+		g.next++
+		_, taken := g.used[candidate]
+		_, reserved := supplied[candidate]
+		if !taken && !reserved {
+			g.used[candidate] = struct{}{}
+			return candidate
+		}
+	}
+}
+
+func isFunctionResponseContent(content geminiContent) bool {
+	if content.Role != "user" || len(content.Parts) == 0 {
+		return false
+	}
+	for _, part := range content.Parts {
+		if part.FunctionResponse == nil {
+			return false
+		}
+	}
+	return true
 }
 
 func geminiPartsFromToolMessage(msg core.Message, functionName string) ([]geminiPart, error) {
@@ -410,6 +500,12 @@ func geminiPartsFromContentParts(parts []core.ContentPart) ([]geminiPart, error)
 			geminiPart, err := geminiPartFromImageURL(part.ImageURL)
 			if err != nil {
 				return nil, err
+			}
+			// A replayed generated image keeps its own signature, emitted on
+			// image_url so it also survives the Responses API.
+			geminiPart.ThoughtSignature = thoughtSignatureFromExtraFields(part.ImageURL.ExtraFields)
+			if geminiPart.ThoughtSignature == "" {
+				geminiPart.ThoughtSignature = thoughtSignatureFromExtraFields(part.ExtraFields)
 			}
 			out = append(out, geminiPart)
 		case "input_audio":
@@ -745,22 +841,37 @@ func geminiGenerationConfig(req *core.ChatRequest) map[string]any {
 		copyJSONNumber(req.ExtraFields.Lookup("top_k"), cfg, "topK")
 		copyJSONNumber(req.ExtraFields.Lookup("candidate_count"), cfg, "candidateCount")
 	}
-	copyJSONNumber(req.ExtraFields.Lookup("presence_penalty"), cfg, "presencePenalty")
-	copyJSONNumber(req.ExtraFields.Lookup("frequency_penalty"), cfg, "frequencyPenalty")
+	// presence_penalty and frequency_penalty are never forwarded: every
+	// current generateContent model (Gemini 2.5, 3.x, 4, Gemma 4, the image
+	// models) answers HTTP 400 "Penalty is not enabled for this model", and
+	// Google's Gemini 4 migration guide lists both among the parameters to
+	// remove because they error.
 	copyStopSequences(req.ExtraFields.Lookup("stop"), cfg)
 	copyResponseFormat(req.ExtraFields.Lookup("response_format"), cfg)
 	copyGoogleThinkingConfig(req.ExtraFields.Lookup("extra_body"), cfg)
-	if req.Reasoning != nil && strings.TrimSpace(req.Reasoning.Effort) != "" {
-		if _, exists := cfg["thinkingConfig"]; !exists {
-			if thinkingConfig := thinkingConfigForEffort(req.Model, req.Reasoning.Effort); len(thinkingConfig) > 0 {
-				cfg["thinkingConfig"] = thinkingConfig
-			}
-		}
+	if effort := nativeReasoningEffort(req); effort != "" {
+		addEffortThinkingConfig(cfg, req.Model, effort)
 	}
 	if len(cfg) == 0 {
 		return nil
 	}
 	return cfg
+}
+
+// nativeReasoningEffort returns the requested reasoning effort: the
+// reasoning.effort object, or else the flat Chat Completions reasoning_effort
+// string that rides in ExtraFields.
+func nativeReasoningEffort(req *core.ChatRequest) string {
+	if req.Reasoning != nil {
+		if effort := strings.TrimSpace(req.Reasoning.Effort); effort != "" {
+			return effort
+		}
+	}
+	var effort string
+	if raw := req.ExtraFields.Lookup("reasoning_effort"); len(raw) > 0 && json.Unmarshal(raw, &effort) == nil {
+		return strings.TrimSpace(effort)
+	}
+	return ""
 }
 
 // dropsSamplingParameters reports whether temperature, topP, topK and
@@ -884,6 +995,26 @@ func copyGoogleThinkingConfig(raw json.RawMessage, cfg map[string]any) {
 	}
 }
 
+// addEffortThinkingConfig maps effort onto cfg's thinkingConfig. A thinking
+// budget or level the client set in extra_body wins; other client members,
+// such as includeThoughts, are kept next to the effort's.
+func addEffortThinkingConfig(cfg map[string]any, model, effort string) {
+	thinkingConfig := thinkingConfigForEffort(model, effort)
+	if len(thinkingConfig) == 0 {
+		return
+	}
+	if existing, ok := cfg["thinkingConfig"].(map[string]any); ok {
+		if _, hasBudget := existing["thinkingBudget"]; hasBudget {
+			return
+		}
+		if _, hasLevel := existing["thinkingLevel"]; hasLevel {
+			return
+		}
+		maps.Copy(thinkingConfig, existing)
+	}
+	cfg["thinkingConfig"] = thinkingConfig
+}
+
 func normalizeSnakeMapKeys(src map[string]any) map[string]any {
 	out := make(map[string]any, len(src))
 	for key, value := range src {
@@ -902,6 +1033,9 @@ func normalizeSnakeMapKeys(src map[string]any) map[string]any {
 }
 
 func thinkingConfigForEffort(model, effort string) map[string]any {
+	if isGemmaModel(model) {
+		return nil
+	}
 	effort = strings.ToLower(strings.TrimSpace(effort))
 	if strings.Contains(strings.ToLower(model), "gemini-2.5") {
 		switch effort {
@@ -927,15 +1061,32 @@ func thinkingConfigForEffort(model, effort string) map[string]any {
 	return map[string]any{"thinkingLevel": effort}
 }
 
+// isGemmaModel reports whether model is one of the Gemma open models Google
+// serves on the Gemini API. Gemma has no thinking knob: generateContent
+// answers HTTP 400 "Thinking level is not supported for this model" to any
+// thinkingLevel or thinkingBudget, so a requested reasoning effort is dropped
+// rather than translated.
+func isGemmaModel(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if idx := strings.LastIndex(model, "/"); idx >= 0 {
+		model = model[idx+1:]
+	}
+	return strings.HasPrefix(model, "gemma-")
+}
+
 // supportsMinimalThinking reports whether the model accepts the "minimal"
-// thinkingLevel. Gemini 3 Pro models never had it, and Gemini 3.7 and 3.8
-// Flash dropped it; Google answers HTTP 400 for those, so the lowest accepted
-// level ("low") is sent instead. Thinking cannot be turned off on Gemini 3,
-// so "none" is clamped the same way. A family matches only as a whole
-// dash-delimited prefix of the model ID (after any "publisher/" prefix), so
-// "gemini-3.8-flash-cyber" matches while "gemini-3.8-pro-preview" or
-// "gemini-3.70-flash" do not.
+// thinkingLevel. Gemini 3 Pro models never had it, Gemini 3.7 and 3.8 Flash
+// dropped it, and Gemini 4 (Argon, and its successors per Google's Gemini 4
+// guide) accepts only low, medium and high; Google answers HTTP 400 for those,
+// so the lowest accepted level ("low") is sent instead. Thinking cannot be
+// turned off on Gemini 3 or 4, so "none" is clamped the same way. A Gemini 3
+// family matches only as a whole dash-delimited prefix of the model ID (after
+// any "publisher/" prefix), so "gemini-3.8-flash-cyber" matches while
+// "gemini-3.8-pro-preview" or "gemini-3.70-flash" do not.
 func supportsMinimalThinking(model string) bool {
+	if major, _, ok := geminiGeneration(model); ok && major >= 4 {
+		return false
+	}
 	model = strings.ToLower(strings.TrimSpace(model))
 	if idx := strings.LastIndex(model, "/"); idx >= 0 {
 		model = model[idx+1:]
@@ -997,7 +1148,7 @@ func nativeChatResponse(req *core.ChatRequest, geminiResp *geminiGenerateContent
 		if index == 0 && i > 0 {
 			index = i
 		}
-		content, toolCalls, signature := openAIMessageFromGeminiParts(candidate.Content.Parts)
+		content, toolCalls, signature := openAIMessageFromGeminiParts(candidate.Content.Parts, &toolCallIDs{})
 		// A tool-call-only turn carries content: null in OpenAI responses; an
 		// empty string would surface as an empty Responses message item that
 		// clients cannot echo back.
@@ -1005,18 +1156,58 @@ func nativeChatResponse(req *core.ChatRequest, geminiResp *geminiGenerateContent
 		if content == "" && len(toolCalls) > 0 {
 			messageContent = nil
 		}
+		extraFields, err := withGeneratedImages(thoughtSignatureExtraFields(signature), candidate.Content.Parts)
+		if err != nil {
+			return nil, err
+		}
 		resp.Choices = append(resp.Choices, core.Choice{
 			Index: index,
 			Message: core.ResponseMessage{
 				Role:        "assistant",
 				Content:     messageContent,
 				ToolCalls:   toolCalls,
-				ExtraFields: thoughtSignatureExtraFields(signature),
+				ExtraFields: extraFields,
 			},
 			FinishReason: finishReasonFromGemini(candidate.FinishReason, len(toolCalls) > 0),
 		})
 	}
 	return resp, nil
+}
+
+// withGeneratedImages adds a candidate's generated images (inline image blobs)
+// to the message as an OpenRouter-style "images" member, keeping content a
+// string. Each image_url part carries a base64 data URL and the image's thought
+// signature, which Gemini needs back to edit the image in a later turn.
+func withGeneratedImages(fields core.UnknownJSONFields, parts []geminiPart) (core.UnknownJSONFields, error) {
+	var images []core.ContentPart
+	for _, part := range parts {
+		blob := part.inlineData()
+		if blob == nil || blob.Data == "" || part.Thought {
+			continue
+		}
+		mimeType := blob.MimeType
+		if mimeType == "" {
+			mimeType = blob.MimeTypeAlt
+		}
+		if !strings.HasPrefix(mimeType, "image/") {
+			continue
+		}
+		images = append(images, core.ContentPart{
+			Type: "image_url",
+			ImageURL: &core.ImageURLContent{
+				URL:         "data:" + mimeType + ";base64," + blob.Data,
+				ExtraFields: thoughtSignatureExtraFields(part.ThoughtSignature),
+			},
+		})
+	}
+	if len(images) == 0 {
+		return fields, nil
+	}
+	encoded, err := json.Marshal(images)
+	if err != nil {
+		return fields, core.NewProviderError("gemini", http.StatusBadGateway, "failed to encode generated images", err)
+	}
+	return core.MergeUnknownJSONFields(fields, map[string]json.RawMessage{core.ChatImagesField: encoded})
 }
 
 func geminiBlockedPromptError(resp *geminiGenerateContentResponse, providerName string) *core.GatewayError {
@@ -1053,24 +1244,29 @@ func geminiPromptBlockReason(raw json.RawMessage) string {
 // openAIMessageFromGeminiParts flattens candidate parts into OpenAI text and
 // tool calls. A functionCall part's thought signature rides on its tool call;
 // the signature of a text turn (Gemini puts it on the last part) is returned
-// separately for the message.
-func openAIMessageFromGeminiParts(parts []geminiPart) (string, []core.ToolCall, string) {
+// separately for the message. ids keeps tool call IDs unique across calls, so a
+// stream shares one per choice.
+func openAIMessageFromGeminiParts(parts []geminiPart, ids *toolCallIDs) (string, []core.ToolCall, string) {
 	var text strings.Builder
 	var signature string
 	toolCalls := make([]core.ToolCall, 0)
-	for i, part := range parts {
+	supplied := make(map[string]struct{})
+	for _, part := range parts {
+		if call := part.functionCall(); call != nil && call.ID != "" {
+			supplied[call.ID] = struct{}{}
+		}
+	}
+	for _, part := range parts {
 		if part.Text != "" && !part.Thought {
 			text.WriteString(part.Text)
 		}
 		call := part.functionCall()
-		if call == nil && part.ThoughtSignature != "" {
+		// Image signatures ride on their image_url part instead.
+		if call == nil && part.inlineData() == nil && part.ThoughtSignature != "" {
 			signature = part.ThoughtSignature
 		}
 		if call != nil {
-			id := call.ID
-			if id == "" {
-				id = "call_" + strconv.Itoa(i)
-			}
+			id := ids.assign(call.ID, supplied)
 			args := strings.TrimSpace(string(call.Args))
 			if args == "" {
 				args = "{}"
@@ -1200,7 +1396,10 @@ func finishReasonFromGemini(reason string, hasToolCalls bool) string {
 		return ""
 	case "STOP":
 		return "stop"
-	case "MAX_TOKENS":
+	case "MAX_TOKENS", "CONTINUATION":
+		// CONTINUATION is Gemini 4's long-decode cut: the per-request output
+		// cap was hit and the candidate carries a continuationToken to resume
+		// with. Chat Completions has no resume, so it is a length stop.
 		return "length"
 	case "SAFETY", "RECITATION", "LANGUAGE", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT", "IMAGE_RECITATION":
 		return "content_filter"
@@ -1244,12 +1443,13 @@ func displayModelIDFromGemini(model, backend string) string {
 }
 
 // isGeminiExposedModel normalizes provider model names and exposes only the
-// model families reachable through Gemini/OpenAI-compatible text endpoints.
-// Families such as imagen-* use different upstream endpoints.
+// model families reachable through the Gemini generateContent and
+// OpenAI-compatible endpoints, including the Gemma open models Google serves
+// there. Families such as imagen-* use different upstream endpoints.
 func isGeminiExposedModel(modelID string) bool {
 	modelID = normalizeGeminiModelID(modelID)
-	return strings.HasPrefix(modelID, "gemini-") || strings.HasPrefix(modelID, "text-embedding-") ||
-		strings.HasPrefix(modelID, "imagen-")
+	return strings.HasPrefix(modelID, "gemini-") || strings.HasPrefix(modelID, "gemma-") ||
+		strings.HasPrefix(modelID, "text-embedding-") || strings.HasPrefix(modelID, "imagen-")
 }
 
 func nativeProviderError(providerName, message string, err error) *core.GatewayError {

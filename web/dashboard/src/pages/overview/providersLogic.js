@@ -272,6 +272,21 @@ export function providerBreakerState(provider) {
   return requestHealth ? String(requestHealth.circuit_state || "").trim() : "";
 }
 
+// The card's error line. While the breaker is open, the upstream failure that
+// tripped it leads and a short marker notes the breaker; when only the
+// breaker's own rejection is known, it already says so and is shown as-is.
+export function providerLastErrorText(provider) {
+  const error = String((provider && provider.last_error) || "").trim();
+  if (!error) return "";
+  if (
+    providerBreakerState(provider) !== "open" ||
+    error.includes("circuit breaker is open")
+  ) {
+    return error;
+  }
+  return m.overview_last_error_breaker_open({ error });
+}
+
 export function providerBreakerStateLabel(provider) {
   const state = providerBreakerState(provider);
   if (!state) return "";

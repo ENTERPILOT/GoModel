@@ -15,7 +15,7 @@
               "arguments": "{\"location\":\"Paris\"}",
               "name": "get_weather"
             },
-            "id": "call_X8zi23yeE70r4qiZ2lhIuRNK",
+            "id": "call_9BjaLGBCefuWuNzU2FqCBV4U",
             "type": "function"
           }
         ]
@@ -23,12 +23,12 @@
     }
   ],
   "created": 0,
-  "id": "chatcmpl-D0qOd6qK1YftNTsl3IZtKWnHELm8g",
+  "id": "chatcmpl-Ee0mbIALCpy8eKo9I2oKRsV2Cq2zx",
   "model": "gpt-4o-mini-2024-07-18",
   "object": "chat.completion",
   "provider": "",
   "service_tier": "default",
-  "system_fingerprint": "fp_29330a9688",
+  "system_fingerprint": "fp_6548d98151",
   "usage": {
     "completion_tokens": 14,
     "completion_tokens_details": {
@@ -37,13 +37,13 @@
       "reasoning_tokens": 0,
       "rejected_prediction_tokens": 0
     },
-    "prompt_tokens": 47,
+    "prompt_tokens": 56,
     "prompt_tokens_details": {
       "audio_tokens": 0,
       "cached_tokens": 0,
       "image_tokens": 0,
       "text_tokens": 0
     },
-    "total_tokens": 61
+    "total_tokens": 70
   }
 }

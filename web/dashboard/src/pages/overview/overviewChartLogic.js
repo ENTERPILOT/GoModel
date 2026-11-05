@@ -44,6 +44,7 @@ export function fillMissingDays(daily, interval, startDate, endDate) {
         input_cost: null,
         output_cost: null,
         total_cost: null,
+        billed_cost: null,
       },
     );
   }

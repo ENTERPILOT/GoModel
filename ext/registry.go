@@ -17,6 +17,15 @@ const (
 	// CapabilityQuotaTemplates enables per-child user-path templates for
 	// budgets and rate limits.
 	CapabilityQuotaTemplates Capability = "quota_templates"
+	// CapabilityCustomerMarkups enables per-customer markups by user path
+	// (pricing.user_path_markups).
+	CapabilityCustomerMarkups Capability = "customer_markups"
+	// CapabilityInvoiceExport enables the per-customer invoice export of
+	// billed usage.
+	CapabilityInvoiceExport Capability = "invoice_export"
+	// CapabilityBilledBudgets enables budgets enforced on billed cost (provider
+	// cost plus markup) instead of provider cost.
+	CapabilityBilledBudgets Capability = "billed_budgets"
 )
 
 // Registry collects extensions to be consumed by the gateway at startup.
@@ -37,6 +46,9 @@ type Registry struct {
 	authenticators  []RequestAuthenticator
 	capabilities    map[Capability]struct{}
 	plugins         []PluginFactory
+	license         License
+
+	updateCheckLicense UpdateCheckLicense
 
 	logHandlerWrappers []func(slog.Handler) slog.Handler
 }

@@ -1,8 +1,8 @@
 ---
 title: "Decisions API"
-description: "Ask typed predicate, choice, and score questions through GoModel with OpenAI's Decisions API, answered by OpenAI, Jev / Kev, or OpenRouter's decision models."
+description: "Ask typed predicate, choice, and score questions through GoModel with OpenAI's Decisions API, answered by OpenAI, Jev / Kev, OpenRouter's decision models, or Azure's gpt-6-luna and Microsoft-Decision-1."
 icon: "list-check"
-keywords: ["Decisions", "decisions API", "gpt-6-luna", "predicate", "choice", "score", "classification", "Jev", "Kev", "System One", "OpenRouter"]
+keywords: ["Decisions", "decisions API", "gpt-6-luna", "predicate", "choice", "score", "classification", "Jev", "Kev", "System One", "OpenRouter", "Azure", "Microsoft-Decision-1"]
 ---
 
 `POST /v1/decisions` serves [OpenAI's Decisions API](https://developers.openai.com/api/docs/guides/decisions):
@@ -10,14 +10,16 @@ a request carries an `input` (text, or user messages of text and images) and a
 list of typed questions, and each answer is a probability, a choice, or a
 score instead of free text.
 
-The endpoint is available once an `openai`, [`jev`](/providers/jev), or
-`openrouter` provider is configured. Without one, it answers `404`.
+The endpoint is available once an `openai`, [`jev`](/providers/jev),
+`openrouter`, or [`azure`](/providers/azure#decision-models)
+provider is configured. Without one, it answers `404`.
 
 | Provider | How it answers |
 | --- | --- |
 | `openai` | Natively: the body reaches `/v1/decisions` as sent |
 | `jev` (hosted Jev, self-hosted Kev) | Through [System One](/advanced/systemone-api), translated both ways; images on hosted Jev only |
 | `openrouter` | Its System One decision models (`openrouter/typesafe/jev-1.13`, `openrouter/~typesafe/jev-latest`, Kev), translated the same way; text only. OpenRouter's chat models do not answer it |
+| `azure` | `gpt-6-luna` deployments natively, at Foundry's `/openai/v1/decisions`; Microsoft-Decision-1 deployments through Foundry's System One endpoint, translated like `jev`, text and JSON only |
 
 Either way the answer is OpenAI's shape, so the OpenAI SDKs work unchanged.
 
@@ -165,7 +167,7 @@ virtual_models:
 
 | Situation | Result |
 | --- | --- |
-| No `openai`, `jev`, or `openrouter` provider configured | `404` |
+| No `openai`, `jev`, `openrouter`, or `azure` provider configured | `404` |
 | A chat model on OpenRouter | `400 invalid_request_error`: only its decision models answer Decisions |
 | `model` missing | `400` |
 | Model on a provider without a Decisions API (including through a virtual model) | `400 invalid_request_error`; the gateway logs a warning |

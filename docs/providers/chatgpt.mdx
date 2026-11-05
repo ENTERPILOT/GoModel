@@ -64,9 +64,13 @@ provider.
 
 ## Responses API only
 
-The Codex backend serves `/responses` and nothing else, so
-`/v1/chat/completions` and `/v1/embeddings` answer `501` for `chatgpt` models.
-Use `/v1/responses`, which is what Codex sends anyway.
+The Codex backend serves `/responses` and nothing else. `/v1/chat/completions`
+works for `chatgpt` models by translating the request to a Responses call with
+the same translation the OpenAI provider uses for Responses-only models;
+streaming chat is served by converting the Responses event stream back to chat
+completion chunks. A chat request the translation cannot carry exactly is
+rejected with an error pointing at `/v1/responses`. `/v1/embeddings` answers
+`501`.
 
 The backend also validates against a strict parameter allowlist. GoModel
 adapts requests rather than failing them, so callers keep using the standard

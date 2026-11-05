@@ -66,7 +66,7 @@ func TestApplyRequestHealth(t *testing.T) {
 			rh:            &health.ProviderHealth{CircuitState: "open"},
 			wantStatus:    "unhealthy",
 			wantLabel:     "Circuit Open",
-			wantReason:    "circuit breaker is open; recent requests to this provider failed and traffic is paused",
+			wantReason:    "circuit breaker is open; traffic is paused",
 			wantLastError: "",
 		},
 		{
@@ -85,7 +85,7 @@ func TestApplyRequestHealth(t *testing.T) {
 			rh:         &health.ProviderHealth{CircuitState: "half-open"},
 			wantStatus: "degraded",
 			wantLabel:  "Recovering",
-			wantReason: "circuit breaker is half-open; probing whether the provider has recovered",
+			wantReason: "circuit breaker is half-open; probing recovery",
 		},
 		{
 			name:       "half-open breaker keeps degraded base label",
@@ -113,7 +113,7 @@ func TestApplyRequestHealth(t *testing.T) {
 			rh:            &flaggedModelHalfOpen,
 			wantStatus:    "degraded",
 			wantLabel:     "Recovering",
-			wantReason:    "circuit breaker is half-open; probing whether the provider has recovered",
+			wantReason:    "circuit breaker is half-open; probing recovery",
 			wantLastError: "qwen3.7-max: Error from provider",
 		},
 		{

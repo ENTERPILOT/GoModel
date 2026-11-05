@@ -3,6 +3,8 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
+  import HighlightText from "$lib/components/atoms/HighlightText.svelte";
+  import { modelsStore } from "$lib/stores/models.svelte.js";
   import { virtualModels } from "./virtualModels.svelte.js";
   import { virtualModelEditor } from "./virtualModelEditor.svelte.js";
   import { pricingOverrides } from "./pricingOverrides.svelte.js";
@@ -99,7 +101,7 @@ import {
 </script>
 
 <tr id={rowAnchorID(row) || undefined} class={displayRowClass(row)}>
-  <td>
+  <td class="model-name-col">
     <div class="model-name-cell">
       <div class="model-name-primary">
         {#if detailsAvailable}
@@ -115,10 +117,10 @@ import {
             onclick={() => modelDetailsState.toggle(row)}
           >
             <Icon icon={ChevronRight} class="model-details-toggle-icon" />
-            <span class="mono font-size-md">{row.display_name}</span>
+            <span class="mono font-size-md"><HighlightText text={row.display_name} needle={modelsStore.filter} /></span>
           </button>
         {:else}
-          <span class="mono font-size-md">{row.display_name}</span>
+          <span class="mono font-size-md"><HighlightText text={row.display_name} needle={modelsStore.filter} /></span>
         {/if}
         {#if row.is_alias}
           <span class="model-kind-icon" role="img" aria-label={m.models_virtual_model()} title={m.models_virtual_model()}>
@@ -148,7 +150,7 @@ import {
       </div>
       {#if row.is_alias}
         <div class="model-name-secondary">
-          {m.models_targets()} <span class="mono font-size-md">{row.secondary_name}</span>
+          {m.models_targets()} <span class="mono font-size-md"><HighlightText text={row.secondary_name} needle={modelsStore.filter} /></span>
         </div>
       {/if}
       {#if !row.is_alias && row.masking_alias}
@@ -253,6 +255,13 @@ import {
 {/if}
 
 <style>
+  /* Rows sit indented under their provider header so groups and their
+     models read apart at a glance. */
+  .model-name-col {
+    padding-left: calc(var(--space-cell) + 22px);
+  }
+
+
   .model-name-cell {
     display: flex;
     flex-direction: column;
@@ -354,6 +363,11 @@ import {
   }
 
   @media (max-width: 768px) {
+    .model-name-col {
+        padding-left: calc(var(--space-cell) + 16px);
+      }
+
+
     .model-name-primary {
         flex-direction: column;
         align-items: flex-start;

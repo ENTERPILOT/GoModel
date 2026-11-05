@@ -5,6 +5,11 @@
 // a Registry (usually ext.Default) before startup. Core consumes an immutable
 // snapshot at server construction; an empty registry adds zero request
 // overhead.
+//
+// Registered components can also receive core dependencies by implementing
+// an optional interface: AuthenticationEventRecorderAware for the audit
+// trail, and SharedStoreAware for a small key/value store kept in the
+// configured storage backend and shared by every replica on it.
 package ext
 
 import (

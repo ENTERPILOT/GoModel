@@ -233,7 +233,9 @@ func TestMongoUsageCacheStatsPipelineCanonicalUserPath(t *testing.T) {
 
 	// Stages 2-3: identical canonical stages to the aggregate's own.
 	require.Equal(t, mongoCanonicalUserPathAddFieldsStage(), pipeline[1])
-	require.Equal(t, mongoCanonicalUserPathMatchStage("/team/alpha"), pipeline[2])
+	wantMatch, err := mongoCanonicalUserPathMatchStage(UsageQueryParams{UserPath: "/team/alpha"})
+	require.NoError(t, err)
+	require.Equal(t, wantMatch, pipeline[2])
 }
 
 // Model/label folds keep filtering the raw user_path field, matching their

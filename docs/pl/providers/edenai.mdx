@@ -1,0 +1,220 @@
+---
+title: "Eden AI"
+description: "Skonfiguruj w GoModel kompatybilne z OpenAI API Eden AI obsługujące wielu providerów."
+icon: "leaf"
+keywords: ["Eden AI", "edenai", "wielu providerów", "multi-provider", "kompatybilny z OpenAI", "OpenAI-compatible", "konfiguracja providera", "provider setup"]
+---
+
+Eden AI to gateway obsługujący wielu providerów, który udostępnia REST API
+kompatybilne z OpenAI pod `https://api.edenai.run/v3`. GoModel kieruje chat
+completions, streaming, listowanie modeli, embeddingi i passthrough przez wspólny
+adapter OpenAI, więc jeden klucz Eden daje dostęp do modeli OpenAI, Anthropic,
+Google, Mistral, Cohere, DeepInfra i innych.
+
+## Konfiguracja
+
+Utwórz klucz API w [konsoli Eden AI](https://app.edenai.run/) i ustaw:
+
+```bash
+EDENAI_API_KEY=
+```
+
+`EDENAI_BASE_URL` jest opcjonalne – provider domyślnie używa
+`https://api.edenai.run/v3`. Ustaw go tylko wtedy, gdy chcesz korzystać z innego
+endpointu kompatybilnego z Eden:
+
+```bash
+EDENAI_BASE_URL=https://api.edenai.run/v3
+```
+
+<Warning>
+  Używaj endpointu `https://`. GoModel **odmawia** wysłania każdego requestu do
+  Eden, który miałby trafić do niezaszyfrowanego celu, ponieważ body requestu
+  zawiera prompt lub wejście embeddingu, a nie tylko klucz API. Bazowy URL `http://`
+  inny niż loopback kończy się więc jawnym błędem, zamiast cokolwiek przesłać.
+
+  Przekierowania podlegają temu samemu standardowi i realizowane jest tylko
+  przekierowanie, które pozostaje na skonfigurowanym hoście. Przekierowanie na
+  `http://` lub na dowolny inny host – w tym subdomenę, do której Go w przeciwnym
+  razie przekazałby nagłówek `Authorization` – jest odrzucane, a nie realizowane,
+  więc `Location` wybrany przez upstream nie może przenieść Twojego klucza ani
+  promptu w miejsce, którego nie skonfigurowałeś.
+
+  Niezaszyfrowany ruch do `localhost` (lub `127.0.0.1`) jest dozwolony, ponieważ
+  taki ruch nigdy nie trafia do sieci – dzięki temu lokalne proxy kompatybilne
+  z Eden pozostaje użyteczne. Jeśli stawiasz przed Eden proxy na innym hoście,
+  terminuj na nim TLS i ustaw `EDENAI_BASE_URL` na jego adres `https://`.
+</Warning>
+
+Albo w `config.yaml`:
+
+```yaml
+providers:
+  edenai:
+    type: edenai
+    api_key: "${EDENAI_API_KEY}"
+    # base_url: "https://api.edenai.run/v3"
+```
+
+Zamiast zmiennych środowiskowych możesz też dodać dane uwierzytelniające na stronie
+**Providers** w dashboardzie administracyjnym.
+
+## Modele
+
+GoModel wykrywa katalog Eden przez własny endpoint Eden `GET /v3/models` przy starcie
+i przy każdym odświeżeniu rejestru. **Nie ma wbudowanej listy modeli**: model dodany
+przez Eden można routować, gdy tylko katalog się odświeży, bez aktualizacji GoModel
+i bez zmiany konfiguracji.
+
+ID modeli używają notacji `provider/model` i są przekazywane bez zmian:
+
+```json
+{ "model": "openai/gpt-4", "messages": [{ "role": "user", "content": "Hi" }] }
+```
+
+Ponieważ ID zawiera już ukośnik, poprzedź je nazwą providera, gdy inny
+skonfigurowany provider udostępnia to samo surowe ID:
+`edenai/anthropic/claude-sonnet-latest`. GoModel przed przekazaniem usuwa tylko
+zewnętrzny kwalifikator routingu `edenai/`.
+
+Opcjonalnie przypnij skonfigurowany podzbiór:
+
+```bash
+EDENAI_MODELS=openai/gpt-4,anthropic/claude-sonnet-latest
+```
+
+### Wykryte metadane
+
+Każdy wpis katalogu wnosi metadane, które zwraca `GET /v1/models` i z których
+korzystają router, filtry i strategie kosztowe:
+
+| Pole Eden | Metadane GoModel |
+| ---------- | ---------------- |
+| `context_length` | okno kontekstu |
+| `capabilities.supports_*` | możliwości, z usuniętym prefiksem (`reasoning`, `function_calling`, `prompt_caching`, …) |
+| `capabilities.input_modalities` | możliwości `vision` / `audio` / `video` |
+| `capabilities.output_modalities` | tryby i kategorie |
+| `pricing` | cennik dla modelu (zobacz niżej) |
+
+Modalności wyjścia decydują też o tym, co GoModel udostępnia: model, którego jedynym
+wyjściem jest audio lub obrazy, jest pomijany w `/v1/models`, ponieważ Eden obsługuje
+tu tylko czat, embeddingi i passthrough. W praktyce katalog Eden publikuje wyjście
+tekstowe dla każdego modelu, łącznie z nielicznymi, które zwracają też obrazy, więc
+obecnie nic nie jest filtrowane.
+
+## Cennik
+
+Eden publikuje stawki w USD za token dla każdego modelu, a GoModel przelicza je na
+swoją reprezentację za milion tokenów (`input_cost_per_token: 6e-8` → `$0.06 /
+MTok`).
+
+Stawki pochodzą z bloku `pricing` Eden, czyli z kwot faktycznie naliczanych na
+koncie – niezrabatowanego `list_pricing` z już zastosowanym ewentualnym rabatem
+konta. Każda stawka jest rozwiązywana osobno: użyteczna stawka konta zawsze wygrywa,
+a `list_pricing` uzupełnia tylko te pojedyncze stawki, których brakuje w `pricing`.
+Eden obecnie publikuje te same stawki w obu blokach, więc w praktyce wszystko
+pochodzi z `pricing`; fallback dla każdej stawki osobno sprawia, że częściowo
+wyceniony model nie traci brakujących stawek, przez co te typy tokenów byłyby
+rozliczane po $0.
+
+Stawka raportowana przez Eden jako `0` jest traktowana jako faktycznie darmowa,
+a nie brakująca, a stawka, której żaden blok nie publikuje w użytecznej formie,
+pozostaje nieustawiona, zamiast być wymyślana.
+
+Te stawki obejmują wejście, wyjście, odczyty z cache'u i zapisy do cache'u. Stawki
+Eden zależne od długości kontekstu (`input_cost_per_token_above_200k_tokens`), jego
+lista `tiered_pricing` oraz opłaty za zapytania wyszukiwania nie mają odpowiednika
+w GoModel i nie są odczytywane.
+
+Stawki Eden dla reasoningu i audio (`output_cost_per_reasoning_token`,
+`input_cost_per_audio_token`) również nie są odczytywane. GoModel wyceniałby te
+typy tokenów, odejmując stawkę bazową, co zakłada, że liczniki są już częścią
+sum bazowych – a obiekt usage Eden raportuje tylko `prompt_tokens`,
+`completion_tokens` i `total_tokens`, więc nie ma rozbicia, na podstawie którego
+można by to potwierdzić. Te typy tokenów korzystają więc z bazowych stawek
+wejścia/wyjścia.
+
+Cennik jest odczytywany na bieżąco z Eden – nic nie jest zakodowane na sztywno,
+a modele Eden nie muszą znajdować się w centralnym katalogu modeli GoModel. Dzięki
+temu `EDENAI_MODEL_FILTER_MAX_PRICE_PER_MTOK`, load balancing oparty na kosztach
+i wyświetlanie cen działają dla modeli Eden.
+
+Ten wykryty cennik pokazują metadane modeli i to na nim opiera się rozliczanie
+kosztów, gdy odpowiedź nie zawiera dokładnej kwoty. Dokładny koszt requestu zwracany
+przez Eden ma pierwszeństwo zawsze, gdy jest dostępny (zobacz niżej).
+
+## Koszt requestu
+
+Eden zwraca dokładną kwotę w USD za każdy request jako pole `cost` najwyższego
+poziomu – zarówno w chat completions, jak i w embeddingach – a GoModel zapisuje
+tę wartość jako koszt requestu, zamiast wyliczać go ponownie z liczby tokenów.
+Eden automatycznie aktualizuje ceny swoich upstreamów i stosuje rabaty na poziomie
+konta, więc jego własna liczba jest miarodajna w sposób, w jaki rekonstrukcja
+z cennika nie jest.
+
+Dzięki temu wydatki w Eden są widoczne w rekordach użycia, budżetach, dashboardach
+kosztów i narzędziach obserwowalności, a wpis użycia jest oznaczony źródłem kosztu
+`edenai_cost`. Jeśli odpowiedź nie zawiera użytecznego kosztu, GoModel korzysta
+z opisanego wyżej wykrytego cennika dla modelu.
+
+<Note>
+  Pole `provider` zwracane przez Eden (`"openai"`, `"deepinfra"`) wskazuje upstream,
+  do którego Eden skierował request. GoModel raportuje `edenai` jako providera
+  wykonującego – to on został wywołany – i ponownie udostępnia wartość Eden
+  w odpowiedzi jako `edenai_upstream_provider`, dzięki czemu klienty nadal widzą,
+  który upstream obsłużył request.
+</Note>
+
+## Responses API
+
+GoModel obsługuje `/v1/responses` dla Eden, **tłumacząc request na endpoint
+chat completions Eden**.
+
+<Warning>
+  Własna trasa Eden `/v3/responses` **nie jest** OpenAI Responses API. Przyjmuje
+  wejścia specyficzne dla Eden (`routing`, `router_candidates`, `fallbacks`)
+  i zwraca własny obiekt odpowiedzi, więc GoModel nigdy do niej nie przekazuje
+  requestów. Traktuj obsługę `/v1/responses` tutaj jako tłumaczenie na chat
+  completions, a nie natywną kompatybilność.
+</Warning>
+
+## Pola requestu specyficzne dla Eden
+
+Eden akceptuje w chat completions dodatkowe pola najwyższego poziomu – `routing`,
+`fallbacks`, `session_id`, `pre_hooks` i `post_hooks`. GoModel zachowuje nieznane
+pola JSON najwyższego poziomu w requestach czatu, więc trafiają one do Eden bez zmian:
+
+```json
+{
+  "model": "openai/gpt-4",
+  "messages": [{ "role": "user", "content": "Hi" }],
+  "fallbacks": ["anthropic/claude-sonnet-latest"]
+}
+```
+
+## Embeddingi
+
+Trasa `/embeddings` Eden jest kompatybilna z OpenAI i używa tych samych ID
+`provider/model`:
+
+```json
+{ "model": "openai/text-embedding-3-small", "input": "hello" }
+```
+
+Odpowiedzi embeddingów zawierają te same rozszerzenia Eden co chat completions, więc
+dokładny `cost` raportowany przez Eden jest zapisywany także dla nich. Katalog LLM
+Eden (`GET /v3/models`) nie zawiera modeli embeddingów, więc ID embeddingów są
+przekazywane bez wykrytych metadanych; przypnij je w `models:`, jeśli chcesz,
+aby pojawiały się w `/v1/models`.
+
+## Passthrough
+
+`edenai` znajduje się w domyślnej allowliście `ENABLED_PASSTHROUGH_PROVIDERS`, więc
+trasy `/p/edenai/...` działają bez włączania przez operatora. Passthrough to ogólny
+mechanizm przekazywania: wysyła do Eden bez zmian każdą podaną ścieżkę, używając
+danych uwierzytelniających samego gatewaya.
+
+## Nieobsługiwane powierzchnie
+
+Pliki, batche i audio nie są udostępniane dla Eden. Requesty do tych endpointów
+gatewaya nie będą kierowane do tego providera.

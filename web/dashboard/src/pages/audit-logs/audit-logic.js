@@ -5,8 +5,13 @@
 
 import { formatJSON, formatNumber } from "../../lib/utils/format.js";
 import * as m from "../../lib/paraglide/messages.js";
+import { formatNumber as formatLocaleNumber } from "../../lib/i18n/locale.js";
 import { phaseLabel } from "../../lib/utils/pluginPhases.js";
-import { auditEntryTypeVisible, auditExcludeOperationsQuery } from "./audit-operations.js";
+import {
+  auditEntryTypeVisible,
+  auditExcludeOperationsQuery,
+  auditTypeForPath,
+} from "./audit-operations.js";
 import {
   workflowEntryGuardrails,
   workflowGuardrailActionLabel,
@@ -115,14 +120,71 @@ export function auditRetentionHighlight(raw) {
 
 // --- Query building ---------------------------------------------------------
 
+// AUDIT_SEARCH_FIELDS lists the search-box field selector options and the API
+// parameter each one sends. "All fields" (the default) is the free-text
+// search across every column; the others target one column, so the database
+// can answer from that column's index instead of sweeping the whole table.
+export const AUDIT_SEARCH_FIELDS = [
+  {
+    key: "",
+    param: "search",
+    label: () => m.audit_search_field_all(),
+    placeholder: () => m.audit_search_placeholder(),
+  },
+  {
+    key: "user_path",
+    param: "user_path_prefix",
+    label: () => m.audit_search_field_user_path(),
+    placeholder: () => m.audit_search_placeholder_user_path(),
+  },
+  {
+    key: "model",
+    param: "model_prefix",
+    label: () => m.audit_search_field_model(),
+    placeholder: () => m.audit_search_placeholder_model(),
+  },
+  {
+    key: "request_id",
+    param: "request_id",
+    label: () => m.audit_search_field_request_id(),
+    placeholder: () => m.audit_search_placeholder_request_id(),
+  },
+  {
+    key: "session_id",
+    param: "session_id",
+    label: () => m.audit_search_field_session_id(),
+    placeholder: () => m.audit_search_placeholder_session_id(),
+  },
+  {
+    key: "provider",
+    param: "provider",
+    label: () => m.audit_search_field_provider(),
+    placeholder: () => m.audit_search_placeholder_provider(),
+  },
+  {
+    key: "error_type",
+    param: "error_type",
+    label: () => m.audit_search_field_error_type(),
+    placeholder: () => m.audit_search_placeholder_error_type(),
+  },
+];
+
+// auditSearchField returns the selector option for key, falling back to
+// "All fields" for an unknown key.
+export function auditSearchField(key) {
+  return AUDIT_SEARCH_FIELDS.find((field) => field.key === key) || AUDIT_SEARCH_FIELDS[0];
+}
+
 // buildAuditLogQuery renders the GET /admin/audit/log query string: the
 // shared date window first, then paging, then only the consolidated audit
-// filters that are set.
+// filters that are set. The search value goes to the parameter of the
+// selected search field.
 export function buildAuditLogQuery({
   dateQuery,
   limit,
   offset,
   search,
+  searchField,
   method,
   statusCode,
   stream,
@@ -130,7 +192,10 @@ export function buildAuditLogQuery({
 }) {
   let qs = dateQuery;
   qs += "&limit=" + limit + "&offset=" + offset;
-  if (search) qs += "&search=" + encodeURIComponent(search);
+  const term = String(search || "").trim();
+  if (term) {
+    qs += "&" + auditSearchField(searchField).param + "=" + encodeURIComponent(term);
+  }
   if (method) qs += "&method=" + encodeURIComponent(method);
   if (statusCode) qs += "&status_code=" + encodeURIComponent(statusCode);
   if (stream) qs += "&stream=" + encodeURIComponent(stream);
@@ -193,6 +258,7 @@ export function auditLogFromSessions(payload) {
     total: Number((payload && payload.total) || 0),
     limit: Number((payload && payload.limit) || 25),
     offset: Number((payload && payload.offset) || 0),
+    ...(payload && payload.as_of ? { as_of: payload.as_of } : {}),
   };
 }
 
@@ -465,6 +531,53 @@ export function formatDurationNs(ns) {
   if (v < 1000000) return Math.round(v / 1000) + " µs";
   if (v < 1000000000) return (v / 1000000).toFixed(2) + " ms";
   return (v / 1000000000).toFixed(2) + " s";
+}
+
+// Request types whose output tokens are generated text, so output tokens over
+// duration reads as generation speed. Embeddings, images, audio, batches and
+// realtime sessions have no comparable per-request rate.
+const TOKEN_RATE_TYPES = new Set(["chat", "responses"]);
+
+// tokenRateType returns the request type the rate gate checks. A passthrough
+// path (/p/{provider}/{endpoint}) is typed by its provider endpoint, so a
+// passthrough image generation is not shown as text speed.
+function tokenRateType(path) {
+  const type = auditTypeForPath(path);
+  if (type !== "passthrough") return type;
+  const endpoint = String(path).trim().split("?")[0].split("/").slice(3).join("/");
+  return auditTypeForPath("/v1/" + endpoint.replace(/^v1\//, ""));
+}
+
+// auditOutputTokensPerSecond is output tokens over the entry's total duration
+// (time to first token included), or null when either is missing or zero, the
+// request does not generate text, or the reply came from the response cache
+// (its duration is the cache lookup, not generation). Provider attempts carry
+// no usage, so the rate is only known per entry.
+export function auditOutputTokensPerSecond(entry) {
+  if (!entry || !TOKEN_RATE_TYPES.has(tokenRateType(entry.path))) return null;
+  const cacheType = String(entry.cache_type || "").trim().toLowerCase();
+  if (cacheType === "exact" || cacheType === "semantic") return null;
+  const usage = auditUsage(entry);
+  const outputTokens = Number(usage && usage.output_tokens);
+  const durationNs = Number(entry.duration_ns);
+  if (!Number.isFinite(outputTokens) || outputTokens <= 0) return null;
+  if (!Number.isFinite(durationNs) || durationNs <= 0) return null;
+  return outputTokens / (durationNs / 1e9);
+}
+
+// formatTokensPerSecond renders a rate as "42.1 tok/s" in the active locale
+// (whole numbers from 100 up, "<0.1" for slower positive rates), or "" when
+// there is no rate.
+export function formatTokensPerSecond(rate) {
+  const v = Number(rate);
+  if (rate == null || !Number.isFinite(v) || v <= 0) return "";
+  const oneDecimal = { minimumFractionDigits: 1, maximumFractionDigits: 1 };
+  const tenths = Math.round(v * 10) / 10;
+  let text;
+  if (tenths >= 100) text = formatLocaleNumber(Math.round(v), { maximumFractionDigits: 0 });
+  else if (tenths < 0.1) text = "<" + formatLocaleNumber(0.1, oneDecimal);
+  else text = formatLocaleNumber(tenths, oneDecimal);
+  return m.audit_tokens_per_second({ rate: text });
 }
 
 export function statusCodeClass(statusCode) {

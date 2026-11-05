@@ -20,7 +20,7 @@ func TestSQLiteReaderGetDailyUsage_FoldsPromptCacheSplitPerPeriod(t *testing.T) 
 
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -50,7 +50,7 @@ func TestSQLiteReaderGetDailyUsage_FoldsPromptCacheSplitPerPeriod(t *testing.T) 
 	})
 	require.NoError(t, err)
 
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	daily, err := reader.GetDailyUsage(ctx, UsageQueryParams{
@@ -84,7 +84,7 @@ func TestSQLiteReaderGetDailyUsage_SplitExcludesLocalCacheUnderAllMode(t *testin
 
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -102,7 +102,7 @@ func TestSQLiteReaderGetDailyUsage_SplitExcludesLocalCacheUnderAllMode(t *testin
 	})
 	require.NoError(t, err)
 
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	daily, err := reader.GetDailyUsage(ctx, UsageQueryParams{

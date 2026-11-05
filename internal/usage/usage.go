@@ -5,6 +5,8 @@ package usage
 import (
 	"context"
 	"time"
+
+	"github.com/enterpilot/gomodel/internal/storage"
 )
 
 // UsageStore defines the interface for usage storage backends.
@@ -87,6 +89,30 @@ type UsageEntry struct {
 	// Empty means all token types were fully mapped to pricing data.
 	CostsCalculationCaveat string `json:"costs_calculation_caveat,omitempty" bson:"costs_calculation_caveat,omitempty"`
 
+	// RoutedModel is the model the request was routed to when it differs from
+	// the answering Model (e.g. gpt-4o-mini answered as gpt-4o-mini-2024-07-18).
+	// Markup selection prefers it, as pricing does. Not persisted.
+	RoutedModel string `json:"-" bson:"-"`
+
+	// MarkupPercent is the pricing.markups percentage applied on top of
+	// TotalCost, and MarkupSelector the selector it came from (nil and empty
+	// when no markup rule matched). A pricing.user_path_markups rule is
+	// recorded as "<user path>:<selector>", for example "/acme:openai/gpt-5".
+	MarkupPercent  *float64 `json:"markup_percent,omitempty" bson:"markup_percent,omitempty"`
+	MarkupSelector string   `json:"markup_selector,omitempty" bson:"markup_selector,omitempty"`
+
+	// BilledCost is what the caller is billed for this request: TotalCost plus
+	// markup, or zero for a response-cache hit when cache hits are not billed
+	// (nil = cost unknown, or the row predates billing).
+	BilledCost *float64 `json:"billed_cost,omitempty" bson:"billed_cost,omitempty"`
+
+	// Billable is false when the provider that served the request is
+	// configured with billable: false, so its cost is not owed by the caller:
+	// the row is billed at zero and user-path and label budgets skip it. nil
+	// means billable, the default, so rows written before the field read as
+	// billable.
+	Billable *bool `json:"billable,omitempty" bson:"billable,omitempty"`
+
 	// RewriteTokensSaved is the prompt tokens that request rewriters (ext
 	// extensions, e.g. token compression) estimate they removed from this
 	// request before it reached the provider. Zero when no rewriter reported
@@ -100,6 +126,11 @@ type UsageEntry struct {
 	// Prompt-cache changes caused by rewriting are not included
 	// (nil = cost unavailable).
 	RewriteCostSaved *float64 `json:"rewrite_cost_saved,omitempty" bson:"rewrite_cost_saved,omitempty"`
+
+	// Stamp marks the batch write that persisted the entry; other replicas
+	// read it to show the entry in their live log view. The logger sets it
+	// when it flushes, so it is nil until then.
+	Stamp *storage.WriteStamp `json:"-" bson:",inline"`
 }
 
 // Config holds usage tracking configuration
@@ -131,4 +162,18 @@ func DefaultConfig() Config {
 		FlushInterval:             5 * time.Second,
 		RetentionDays:             90,
 	}
+}
+
+// IsBillable reports whether the caller owes the entry's cost; see Billable.
+func (e *UsageEntry) IsBillable() bool {
+	return e == nil || e.Billable == nil || *e.Billable
+}
+
+// MarkNonBillable records that the caller does not owe the entry's cost.
+func (e *UsageEntry) MarkNonBillable() {
+	if e == nil {
+		return
+	}
+	billable := false
+	e.Billable = &billable
 }

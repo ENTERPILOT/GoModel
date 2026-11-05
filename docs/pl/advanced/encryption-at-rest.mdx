@@ -1,0 +1,125 @@
+---
+title: "Szyfrowanie danych w spoczynku"
+description: "Szyfruj dane uwierzytelniające providerów, nagłówki MCP i sekrety guardrails zapisane z dashboardu za pomocą GOMODEL_ENCRYPTION_KEY."
+icon: "lock"
+keywords: ["szyfrowanie danych w spoczynku", "rotacja klucza", "sekrety", "encryption at rest", "GOMODEL_ENCRYPTION_KEY", "key rotation", "secrets", "AES-256-GCM", "KMS"]
+---
+
+Sekrety zapisywane przez dashboard lub admin API są przechowywane w bazie
+danych GoModel. Ustaw `GOMODEL_ENCRYPTION_KEY`, a zostaną zaszyfrowane przed
+zapisem, więc plik bazy danych, dump, backup ani replika nie będą już
+przechowywać ich otwartym tekstem.
+
+Szyfrowane pola:
+
+| Tabela / kolekcja       | Pola                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------ |
+| `provider_credentials`  | `api_keys`, `service_account_json`, `service_account_json_base64`, `proxy_url` |
+| `mcp_servers`           | wartości `headers`                                                             |
+| `guardrail_definitions` | pola konfiguracji, które plugin oznacza jako sekretne (na przykład `api_key` w Presidio) |
+
+Dane uwierzytelniające zadeklarowane w zmiennych środowiskowych lub w `config.yaml`
+nigdy nie są zapisywane w bazie danych, więc ich to nie dotyczy.
+
+Wartość domyślna: nieustawiona. Sekrety są przechowywane otwartym tekstem, a GoModel
+loguje jedno ostrzeżenie przy starcie, gdy włączona funkcja (providery, a także MCP
+lub guardrails, jeśli są włączone) ładuje sekret zapisany otwartym tekstem.
+
+## Włączanie
+
+Wygeneruj klucz i przekaż go każdej instancji, która korzysta z tej samej bazy danych:
+
+```bash
+openssl rand -base64 32
+```
+
+```bash
+GOMODEL_ENCRYPTION_KEY=<generated value>
+```
+
+Pusta wartość pozostawia szyfrowanie wyłączone. Zadziała dowolny inny ciąg znaków,
+ale klucz szyfrujący klucze (key-encryption key) jest z niego wyprowadzany, więc
+krótka lub łatwa do odgadnięcia wartość osłabia szyfrowanie: użyj 32 losowych bajtów
+jak powyżej. Dostarczaj go tak jak inne sekrety – z menedżera sekretów w runtime,
+a nie z pliku w repozytorium. Działa też
+[referencja do sekretu](/pl/advanced/secret-references), na przykład
+`GOMODEL_ENCRYPTION_KEY=${file:/run/secrets/gomodel-encryption-key}`.
+
+<Warning>
+  Utrata klucza sprawia, że zaszyfrowanych sekretów nie da się odzyskać. Przechowuj
+  go równie starannie jak backupy bazy danych, które chroni, i trzymaj go oddzielnie
+  od nich. Bez klucza GoModel odmawia uruchomienia na bazie danych, która
+  zawiera zaszyfrowane sekrety.
+</Warning>
+
+## Istniejące sekrety zapisane otwartym tekstem
+
+Włączenie klucza niczego nie przepisuje. Wartości zapisane otwartym tekstem nadal
+działają i są szyfrowane przy kolejnym zapisie danego wpisu. Aby zaszyfrować
+wszystko naraz, uruchom:
+
+```bash
+gomodel secrets reencrypt
+```
+
+Polecenie używa tej samej konfiguracji i środowiska co gateway, wypisuje liczniki
+per tabela (nigdy wartości) i można je bezpiecznie uruchamiać wielokrotnie, także
+podczas działania gatewaya. Każde przepisanie udaje się tylko wtedy, gdy sekrety
+wpisu są nadal takie, jakie polecenie odczytało, więc edycja lub usunięcie wykonane
+w trakcie nigdy nie zostanie nadpisane; polecenie odczytuje wtedy wpis ponownie.
+Wpis, który ciągle się zmienia, jest raportowany jako pominięty, a kolejne uruchomienie
+go obsłuży.
+
+## Rotacja klucza
+
+Aby zmienić `GOMODEL_ENCRYPTION_KEY`, uruchom gateway z nowym kluczem, a stary
+umieść w `GOMODEL_ENCRYPTION_KEY_PREVIOUS`:
+
+```bash
+GOMODEL_ENCRYPTION_KEY=<new value>
+GOMODEL_ENCRYPTION_KEY_PREVIOUS=<old value>
+```
+
+Przy starcie GoModel ponownie opakowuje klucz danych bazy nowym kluczem. Zapisane
+sekrety nie są przepisywane, więc dzieje się to natychmiast. Gdy wszystkie instancje
+działają już z nowym kluczem, usuń `GOMODEL_ENCRYPTION_KEY_PREVIOUS`.
+
+Aby wymienić sam klucz danych, na przykład po podejrzeniu wycieku kopii bazy danych
+razem ze starym kluczem, uruchom:
+
+```bash
+gomodel secrets reencrypt --rotate-data-key
+```
+
+To polecenie tworzy nowy klucz danych i ponownie szyfruje nim każdy sekret. Wartości
+zaszyfrowane starszymi kluczami danych pozostają przez cały czas czytelne. Działający
+gateway sprawdza, który klucz danych jest aktywny, zanim zapisze sekret, więc przełącza
+się na nowy klucz bez restartu, a po zapisie sprawdza ponownie: zapis, który był już
+w toku w momencie zmiany klucza, sam szyfruje się ponownie nowym kluczem. Jeśli to
+drugie sprawdzenie nie może połączyć się z magazynem kluczy, sekret i tak zostaje
+zapisany, ale zapis zwraca błąd z prośbą o ponowne zapisanie lub uruchomienie
+`gomodel secrets reencrypt`.
+
+## Jak to działa
+
+Każda baza danych dostaje losowy 256-bitowy klucz danych, przechowywany wyłącznie
+w opakowanej postaci w tabeli `encryption_keys`. Klucz, który go opakowuje, jest
+wyprowadzany z `GOMODEL_ENCRYPTION_KEY` za pomocą Argon2id. Wartości sekretów są
+szyfrowane AES-256-GCM i przechowywane jako `enc:v1:<key-id>:<ciphertext>`; wiersz
+i pole są powiązane z szyfrogramem, więc wartość skopiowana do innego wiersza lub
+pola nie da się odszyfrować, zamiast zostać tam użyta.
+
+Admin API się nie zmienia: sekrety są nadal maskowane w odpowiedziach.
+
+Szyfrowanie danych w spoczynku chroni kopie bazy danych. Nie chroni przed kimś,
+kto może odczytać środowisko lub pamięć gatewaya, i nie zastępuje ograniczania
+dostępu do bazy danych i jej backupów.
+
+## Własne dystrybucje
+
+Dystrybucja zbudowana na GoModel może opakowywać klucz danych za pomocą KMS zamiast
+`GOMODEL_ENCRYPTION_KEY`, wywołując `LoadResult.SetKeyWrapper` z
+`config.KeyWrapper` z `run.Options.SetupConfig`. Przy pierwszym starcie z nowym
+wrapperem pozostaw jednorazowo ustawiony `GOMODEL_ENCRYPTION_KEY`, aby istniejący
+klucz danych mógł zostać do niego przeniesiony. Aby przejść z jednego wrappera na
+inny, przekaż stary jako poprzedni wrapper: `SetKeyWrapper(next, previous)`.

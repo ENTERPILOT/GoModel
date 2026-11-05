@@ -13,13 +13,13 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
-func seedEndpointUsageFixture(t *testing.T) (*SQLiteReader, context.Context) {
+func seedEndpointUsageFixture(t *testing.T) (*SQLReader, context.Context) {
 	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	cost := func(value float64) *float64 { return &value }
@@ -48,7 +48,7 @@ func seedEndpointUsageFixture(t *testing.T) (*SQLiteReader, context.Context) {
 		localHit,
 	}))
 
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 	return reader, ctx
 }
@@ -164,14 +164,9 @@ func TestSQLiteUsageLogSearchMatchesEndpoint(t *testing.T) {
 func TestOperationFiltersWithoutPathsMatchNothing(t *testing.T) {
 	unknown := []core.Operation{"unknown"}
 
-	condition, args := sqliteOperationCondition(unknown)
+	condition, args := operationCondition(unknown)
 	assert.Equal(t, "1 = 0", condition)
 	assert.Empty(t, args)
-
-	condition, args, next := pgOperationCondition(unknown, 4)
-	assert.Equal(t, "1 = 0", condition)
-	assert.Empty(t, args)
-	assert.Equal(t, 4, next)
 
 	assert.Equal(t, bson.D{{Key: "endpoint", Value: bson.D{{Key: "$in", Value: bson.A{}}}}}, mongoOperationFilter(unknown))
 
@@ -181,14 +176,13 @@ func TestOperationFiltersWithoutPathsMatchNothing(t *testing.T) {
 	assert.Equal(t, 0, summary.TotalRequests)
 }
 
-func TestPgOperationCondition(t *testing.T) {
-	condition, args, next := pgOperationCondition([]core.Operation{core.OperationEmbeddings, core.OperationBatches}, 3)
+func TestOperationCondition(t *testing.T) {
+	condition, args := operationCondition([]core.Operation{core.OperationEmbeddings, core.OperationBatches})
 
-	assert.Equal(t, `(endpoint = ANY($3) OR endpoint LIKE $4 ESCAPE '\' OR endpoint LIKE $5 ESCAPE '\')`, condition)
+	assert.Equal(t, `(endpoint IN (?,?,?,?) OR endpoint LIKE ? ESCAPE '\' OR endpoint LIKE ? ESCAPE '\')`, condition)
 	assert.Equal(t, []any{
-		[]string{"/v1/embeddings", "/v1/embeddings/", "/v1/batches", "/v1/messages/batches"},
+		"/v1/embeddings", "/v1/embeddings/", "/v1/batches", "/v1/messages/batches",
 		"/v1/batches/%",
 		"/v1/messages/batches/%",
 	}, args)
-	assert.Equal(t, 6, next)
 }

@@ -146,3 +146,29 @@ export function marqueeOnOverflow(pxPerSecond = 60) {
     };
   };
 }
+
+/**
+ * Add `className` while the node's content does not fit its width, so the
+ * owner's CSS can switch to a narrower layout under it (e.g. hide labels).
+ * The fit is measured with the class removed, so the node returns to the
+ * full layout as soon as there is room again. It re-measures whenever the
+ * node resizes; when the content itself changes, re-attach by making the
+ * attach expression depend on it.
+ *
+ * @param {string} className
+ */
+export function classOnOverflow(className) {
+  return (/** @type {HTMLElement} */ node) => {
+    const fit = () => {
+      node.classList.remove(className);
+      if (node.scrollWidth > node.clientWidth + 1) node.classList.add(className);
+    };
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(fit) : null;
+    observer?.observe(node);
+    fit();
+    return () => {
+      observer?.disconnect();
+      node.classList.remove(className);
+    };
+  };
+}

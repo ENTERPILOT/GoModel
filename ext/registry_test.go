@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
@@ -237,4 +238,21 @@ func TestRegistryProxySelectorSingleSlot(t *testing.T) {
 
 	reg.RegisterProxySelector(nil)
 	assert.Nil(t, reg.ProxySelector())
+}
+
+func TestRegistryLicenseDefaultsToNoneAndClearsOnEmptyBadge(t *testing.T) {
+	var reg Registry
+	_, ok := reg.License()
+	assert.False(t, ok)
+
+	expires := time.Date(2026, 11, 15, 0, 0, 0, 0, time.UTC)
+	want := License{Badge: "PRO", Trial: true, ExpiresAt: expires, ValidUntil: expires, WarningWindow: 7 * 24 * time.Hour}
+	reg.SetLicense(want)
+	got, ok := reg.License()
+	require.True(t, ok)
+	assert.Equal(t, want, got)
+
+	reg.SetLicense(License{})
+	_, ok = reg.License()
+	assert.False(t, ok)
 }

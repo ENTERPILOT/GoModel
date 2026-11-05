@@ -134,7 +134,7 @@ func TestClient_DoStream_IdleTimeoutIgnoresSlowConsumers(t *testing.T) {
 	defer stream.Close()
 
 	var got []byte
-	buf := make([]byte, 8)
+	buf := make([]byte, 32)
 	for {
 		n, err := stream.Read(buf)
 		got = append(got, buf[:n]...)
@@ -142,7 +142,7 @@ func TestClient_DoStream_IdleTimeoutIgnoresSlowConsumers(t *testing.T) {
 			break
 		}
 		require.NoError(t, err)
-		time.Sleep(80 * time.Millisecond)
+		time.Sleep(80 * time.Millisecond) // the consumer pauses past the idle timeout
 	}
 	assert.Contains(t, string(got), "data: [DONE]")
 }

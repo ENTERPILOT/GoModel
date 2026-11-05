@@ -1,0 +1,209 @@
+---
+title: "OpenTelemetry"
+description: "通过 OTEL_ENABLED 以 OTLP 导出 GoModel 的 Trace 和指标，使用标准 OTEL_* 变量配置 Collector，并了解会导出哪些 Span 和 GenAI 指标。"
+icon: "network"
+keywords: ["OpenTelemetry", "OTLP", "链路追踪", "指标", "可观测性", "tracing", "traces", "metrics", "observability", "GenAI semantic conventions", "Jaeger", "Grafana Tempo"]
+---
+
+GoModel 会为入站 HTTP 请求（运维类端点除外，见下文）以及每一次出站模型提供商调用导出 OpenTelemetry Trace 和指标。提供商调用遵循 [GenAI 语义约定](https://opentelemetry.io/docs/specs/semconv/gen-ai/)，因此 Jaeger、Grafana Tempo、Honeycomb、Datadog 或任何其他兼容 OTLP 的后端都能显示调用了哪个模型、经由哪个提供商、耗时多久以及是否失败。
+
+凭据和错误消息永远不会被导出。只有在您开启[内容捕获](#提示词与补全内容捕获)时，才会导出提示词和补全内容。关于 Prometheus 抓取，请参阅 [Prometheus 指标](/zh/guides/prometheus-metrics)；两者可以同时运行。
+
+## 快速开始
+
+导出功能**默认关闭**。设置 `OTEL_ENABLED=true`，并将导出器指向您的 Collector：
+
+<CodeGroup>
+
+```bash Docker (.env 文件)
+# 添加到您的 .env 文件中，然后：
+# OTEL_ENABLED=true
+# OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+docker run --rm -p 8080:8080 --env-file .env enterpilot/gomodel
+```
+
+```bash Docker (inline -e)
+docker run --rm -p 8080:8080 \
+  -e OTEL_ENABLED=true \
+  -e OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 \
+  enterpilot/gomodel
+```
+
+```bash Binary
+export OTEL_ENABLED=true
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+./bin/gomodel
+```
+
+</CodeGroup>
+
+GoModel 会在启动时记录 `opentelemetry enabled` 以及所选的导出器。导出器是异步的：即使 Collector 不可用，网关也会正常启动，并在后台重试。
+
+<Note>
+  未设置 `OTEL_EXPORTER_OTLP_ENDPOINT` 时，SDK 会发送到 `http://localhost:4318`（`http/protobuf`）或 `localhost:4317`（`grpc`）。
+</Note>
+
+## 配置
+
+`OTEL_ENABLED` 是唯一一个 GoModel 特有的开关。其他所有设置都遵循标准的 [OpenTelemetry 环境变量](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/)，因此 GoModel 的配置方式与其他任何已接入观测的服务完全相同。常用设置也可以在 [`config.yaml`](/zh/advanced/config-yaml) 的 `opentelemetry:` 下配置；环境变量中设置的值优先于 YAML 中的值。
+
+| 环境变量 | `config.yaml` 键 | 默认值 | 用途 |
+| --- | --- | --- | --- |
+| `OTEL_ENABLED` | `enabled` | `false` | 开启导出。 |
+| `OTEL_SERVICE_NAME` | `service_name` | 产品名称（`gomodel`；Pro 中为 `gomodel-pro`） | `service.name` 资源属性。 |
+| `OTEL_RESOURCE_ATTRIBUTES` | `resource_attributes` | — | 额外的资源属性，例如 `deployment.environment`。 |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `endpoint` | `http://localhost:4318` | Collector 端点。`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` 和 `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` 可按信号类型覆盖它。 |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `protocol` | `http/protobuf` | `http/protobuf` 或 `grpc`；可通过 `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` 和 `OTEL_EXPORTER_OTLP_METRICS_PROTOCOL` 按信号类型覆盖。 |
+| `OTEL_EXPORTER_OTLP_HEADERS` | `headers` | — | 托管后端所需的 Header，例如 `authorization`。 |
+| `OTEL_TRACES_EXPORTER` | `traces_exporter` | `otlp` | `otlp`，或 `none` 以关闭 Trace。 |
+| `OTEL_METRICS_EXPORTER` | `metrics_exporter` | `otlp` | `otlp`，或 `none` 以关闭指标。 |
+| `OTEL_TRACES_SAMPLER` | `sampler` | `parentbased_always_on` | 采样器，例如 `parentbased_traceidratio` 可保留一定比例的新 Trace。 |
+| `OTEL_TRACES_SAMPLER_ARG` | `sampler_arg` | — | 采样器参数，例如 `0.1` 表示 10%。 |
+| `OTEL_PROPAGATORS` | `propagators` | `tracecontext,baggage` | 逗号分隔：`tracecontext`、`baggage`、`b3`、`b3multi`、`jaeger`、`ottrace` 或 `none`。 |
+| `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | `capture_message_content` | `false` | 在提供商调用 Span 上记录提示词和补全内容。请参阅[提示词与补全内容捕获](#提示词与补全内容捕获)。 |
+| `OTEL_METRIC_EXPORT_INTERVAL` | — | `60000` | 指标导出间隔（毫秒）。 |
+
+典型的生产环境配置：
+
+<CodeGroup>
+
+```bash 环境变量
+OTEL_ENABLED=true
+OTEL_SERVICE_NAME=gomodel-production
+OTEL_RESOURCE_ATTRIBUTES=deployment.environment=production
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+OTEL_TRACES_SAMPLER=parentbased_traceidratio
+OTEL_TRACES_SAMPLER_ARG=0.1
+```
+
+```yaml config.yaml
+opentelemetry:
+  enabled: true
+  service_name: gomodel-production
+  resource_attributes:
+    deployment.environment: production
+  endpoint: http://otel-collector:4317
+  protocol: grpc
+  headers:
+    authorization: "Bearer ${OTEL_BACKEND_TOKEN}"
+  sampler: parentbased_traceidratio
+  sampler_arg: "0.1"
+```
+
+</CodeGroup>
+
+采样只影响 Trace，指标始终是完整的。
+
+<Warning>
+  `authorization` 等导出 Header 会随每次导出请求一起发送。只要 Header 中携带凭据，就请使用 `https://` 端点（或启用 TLS 的 gRPC 端点）；仅当 Collector 位于同一主机上时，才可以接受明文传输。如果配置了 Header，而实际生效的端点是明文（`http://`，或设置了 `OTEL_EXPORTER_OTLP_INSECURE=true` 的 gRPC）且不是环回地址，GoModel 会在启动时记录一条警告。
+</Warning>
+
+## 导出的内容
+
+### HTTP 服务端 Span 和指标
+
+每个请求都会生成一个以其路由命名的 `SERVER` Span（例如 `POST /v1/chat/completions`），带有标准的 `http.request.method`、`http.route`、`http.response.status_code` 和 `url.scheme` 属性，并附带 `http.server.request.duration` 直方图以及请求体和响应体大小直方图。
+
+GoModel 会遵循调用方传入的 Trace 上下文：只要客户端发送了 `traceparent`（或 `OTEL_PROPAGATORS` 所选的任何 Header），网关 Span 就会显示为调用方应用 Span 的子 Span。
+
+`/health`、`/health/ready`、Prometheus 端点（`METRICS_ENDPOINT`）和 `/debug/pprof` 被排除在外：它们会被频繁轮询，否则会占据 Trace 的绝大部分。
+
+### 提供商调用 Span 和 GenAI 指标
+
+每一次对模型提供商的逻辑调用都会带有以下观测数据：
+
+| 属性 | 示例 | 说明 |
+| --- | --- | --- |
+| `gen_ai.operation.name` | `chat` | 根据端点不同，也可能是 `embeddings`、`generate_content` 等。 |
+| `gen_ai.request.model` | `gpt-5` | 经过别名和虚拟模型解析后发送到上游的模型。 |
+| `gen_ai.provider.name` | `openai` | 语义化的提供商名称：`openai`、`anthropic`、`aws.bedrock`、`gcp.vertex_ai`、`gcp.gemini`、`azure.ai.openai`、`x_ai`……或 `unknown`。 |
+| `gomodel.provider.name` | `openai-eu` | 您的 GoModel 配置中确切的提供商名称。 |
+| `gen_ai.request.stream` | `true` | 仅在流式调用中出现。 |
+| `error.type` | `429`、`timeout`、`network_error`、`empty_stream` | 仅在失败时出现；`empty_stream` 表示流在第一个数据块之前就结束了。 |
+| `http.response.status_code` | `200` | 上游状态码。 |
+| `gen_ai.response.model` | `gpt-5-2025-08-07` | 提供商报告的模型，通常是带日期的版本。 |
+| `gen_ai.response.id` | `chatcmpl-…` | 提供商的响应 ID。 |
+| `gen_ai.response.finish_reasons` | `["stop"]` | 每个 choice 一个。Responses API 调用在完成时报告 `stop`，否则报告未完成的原因，例如 `max_output_tokens`。 |
+| `gen_ai.usage.input_tokens` | `1200` | 提示词 Token，与 GoModel [用量追踪](/zh/advanced/configuration#token-用量追踪)记录的一致。 |
+| `gen_ai.usage.output_tokens` | `85` | 补全 Token，包括推理 Token。 |
+
+对于 Chat Completions、Responses API 以及经过转换的 `/v1/messages` 调用，无论是缓冲还是流式，网关在解码响应后都会设置响应属性和用量属性。当提供商报告了用量时，才会出现用量属性。对于流式响应，只有在启用用量追踪（默认启用）时，GoModel 才会要求提供商返回用量数据块。GoModel 以原生方式转发给 Anthropic 提供商的 `/v1/messages` 请求，以及其他透传调用，只携带请求属性。
+
+指标为以秒为单位的直方图，携带相同的属性：
+
+| 指标 | 记录对象 |
+| --- | --- |
+| `gen_ai.client.operation.duration` | 每一次缓冲调用，以及每一次在流建立之前失败或在第一个数据块之前结束的流式调用。 |
+| `gen_ai.client.operation.time_to_first_chunk` | 每一次成功的流式调用，计时到收到首批响应字节为止。 |
+
+`gomodel.client.empty_responses` 统计返回 `200` 但没有 choices、没有输出或没有 Token 用量的缓冲 Chat 和 Responses API 调用。这些调用在上述直方图中看起来是成功的，因此请改为基于这个计数器设置告警。其 `error.type` 为 `no_choices`、`no_output`（已完成但没有输出项的 Responses API 调用）或 `no_usage`（有内容但 Token 用量为零）。
+
+缓冲调用会生成一个名为 `<operation> <model>` 的 `CLIENT` Span（例如 `chat gpt-5`），嵌套在 HTTP 服务端 Span 之下。重试和故障转移到其他提供商都是独立的调用，因此也是独立的 Span；发生故障转移的请求会清楚地显示哪个提供商失败、哪个提供商做出了响应。
+
+流式的 Chat Completion、Responses API 或经过转换的 `/v1/messages` 调用会获得一个在流结束时才结束的客户端 Span，因此其时长涵盖整个生成过程。其他流（例如透传调用）不会获得客户端 Span：网关只知道它们何时建立，而一个在响应头处结束的 Span 会错误地反映延迟。它们的 HTTP 服务端 Span 仍然涵盖客户端视角下的完整流生命周期。未能建立的流，或在交付第一个数据块之前就结束的流，始终会生成一个失败 Span，因此错误都会被追踪到。
+
+### 提示词与补全内容捕获
+
+内容捕获**默认关闭**。开启后，您可以在链路追踪后端中查看交换的消息，例如在 [Langfuse](/zh/guides/langfuse) 中显示为生成（generation）的输入和输出：
+
+<CodeGroup>
+
+```bash 环境变量
+OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true
+```
+
+```yaml config.yaml
+opentelemetry:
+  capture_message_content: true
+```
+
+</CodeGroup>
+
+之后，Chat Completions、Responses API 和经过转换的 `/v1/messages` 调用的提供商调用 Span 会以 JSON 形式携带 [GenAI 消息属性](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/)：
+
+| 属性 | 内容 |
+| --- | --- |
+| `gen_ai.input.messages` | 请求消息，包括系统消息、工具调用和工具结果。 |
+| `gen_ai.output.messages` | 响应消息及其结束原因。 |
+| `gen_ai.system_instructions` | Responses API 的 `instructions`。 |
+
+超过 64 KiB 的文本部分会被截断并标记，每个属性最多保留 512 KiB 文本：较长的对话会优先丢弃最早消息的文本。图片、音频和文件只保留其部分类型：二进制数据和 data URL 永远不会被导出。被 Trace 采样器丢弃的请求完全不会被捕获。
+该变量还接受 `SPAN_ONLY` 和 `SPAN_AND_EVENT`，即较新版 OpenTelemetry 观测库使用的模式名称。
+
+<Warning>
+  开启捕获后，每个被采样的提示词和补全内容都会随其 Trace 离开网关。请仅在允许存储此类数据的后端上启用，并考虑使用采样（`OTEL_TRACES_SAMPLER`）来限制数据量。[审计日志](/zh/advanced/configuration#审计日志)则会将内容保存在您自己的存储中。
+</Warning>
+
+## 隐私
+
+导出器的设计目标是：遥测数据可以发送到第三方后端，而不会泄露流经网关的内容：
+
+- 只有在开启[内容捕获](#提示词与补全内容捕获)时，提示词、补全内容和工具调用才会附加到 Span 上，并且永远不会附加到指标上。请求体和响应体永远不会被原样导出。
+- 凭据和上游错误消息永远不会被导出；失败只携带状态码或错误类别。
+- HTTP Span 中会移除 `client.address`、`network.peer.*`、`server.address`、`server.port` 和 `user_agent.original`，HTTP 指标中也会排除基于主机的维度，以防客户端通过 `Host` Header 抬高指标基数。
+
+## 重新加载
+
+`gomodel --reload`（SIGHUP）会使用当前环境重建 OpenTelemetry 管道，因此导出器、采样和传播方面的更改无需重启即可生效。旧管道在丢弃之前会先完成刷写。
+
+## 本地 Collector 示例
+
+一个在 Jaeger 中显示 Trace 的最小 `docker-compose.yml`：
+
+```yaml
+services:
+  gomodel:
+    image: enterpilot/gomodel
+    env_file: .env
+    environment:
+      OTEL_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_METRICS_EXPORTER: none
+    ports: ["8080:8080"]
+  jaeger:
+    image: jaegertracing/jaeger:2.7.0
+    ports: ["16686:16686"]
+```
+
+通过网关发送一个请求，然后打开 `http://localhost:16686`。

@@ -35,6 +35,17 @@ configuration on file. The same multi-key rotation env vars support
 [outbound proxy](/providers/outbound-proxy) are available from the dashboard
 form.
 
+Every provider also carries a `billable` setting, on by default. Turn it off
+for a provider whose cost the caller does not owe you, such as a customer's
+own API key registered as its own provider instance: usage is still tracked
+and priced, but user-path and label budgets neither gate it nor count it, and
+with [markups](/features/cost-tracking#markups-and-billed-cost) enabled it is
+billed at zero. Set it with `providers.<name>.billable: false` in
+`config.yaml`, `<PROVIDER>[_SUFFIX]_BILLABLE=false` in the environment, the
+**Billable** checkbox under the dashboard form's advanced fields, or
+`"billable": false` on `PUT /admin/provider-credentials`. See
+[Budgets](/features/budgets#non-billable-providers).
+
 ## Supported providers
 
 Example model identifiers are illustrative and subject to change; consult
@@ -44,12 +55,15 @@ support, not every individual model capability exposed by an upstream provider.
 | Provider | Credential | Example Model | Chat | `/responses` | Embed | Files | Batches | Passthru | Guide |
 | -------- | ---------- | ------------- | :--: | :----------: | :---: | :---: | :-----: | :------: | ----- |
 | OpenAI | `OPENAI_API_KEY` | `gpt-5.5` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
-| ChatGPT subscription | `CHATGPT_API_KEY` (Codex sign-in token) | `gpt-5.6-sol` | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | [ChatGPT subscription](/providers/chatgpt) |
+| ChatGPT subscription | `CHATGPT_API_KEY` (Codex sign-in token) | `gpt-5.6-sol` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [ChatGPT subscription](/providers/chatgpt) |
+| GitHub Copilot | `GITHUB_COPILOT_API_KEY` (GitHub OAuth token) | `claude-sonnet-5.5` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [GitHub Copilot](/providers/github-copilot) |
 | Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | [Anthropic](/providers/anthropic) |
 | Cohere | `COHERE_API_KEY` | `command-a-plus-05-2026` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Cohere](/providers/cohere) |
 | Google Gemini | `GEMINI_API_KEY` | `gemini-3.7-flash` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | [Google Gemini](/providers/gemini) |
 | Google Vertex AI | `VERTEX_PROJECT` + `VERTEX_LOCATION` + GCP credentials | `google/gemini-2.5-flash` | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | [Google Vertex AI](/providers/vertex) |
 | DeepSeek | `DEEPSEEK_API_KEY` | `deepseek-v4-pro` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [DeepSeek](/providers/deepseek) |
+| DeepInfra | `DEEPINFRA_API_KEY` (`DEEPINFRA_BASE_URL` optional) | `Qwen/Qwen3-32B` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [DeepInfra](/providers/deepinfra) |
+| Together AI | `TOGETHER_API_KEY` (`TOGETHER_BASE_URL` optional) | `meta-llama/Llama-3.3-70B-Instruct-Turbo` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Together AI](/providers/together) |
 | Groq | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | — |
 | Fireworks AI | `FIREWORKS_API_KEY` (`FIREWORKS_BASE_URL` optional) | `accounts/fireworks/models/gpt-oss-120b` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | — |
 | Chutes AI | `CHUTES_API_KEY` (`CHUTES_BASE_URL` optional) | `Qwen/Qwen3-32B-TEE` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | — |
@@ -101,6 +115,15 @@ support, not every individual model capability exposed by an upstream provider.
   `/v1/responses` with `store: false` and returns a normal chat completion or
   chunk stream. A request with a field the Responses API has no equivalent for
   (for example `n` or `logprobs`) stays on Chat Completions.
+- **Allowed tools on OpenAI-compatible providers** — a `tool_choice` of type
+  `allowed_tools` reaches OpenAI, Azure OpenAI, and Fireworks unchanged, since
+  they honor it. Other OpenAI-compatible providers (xAI, Groq, OpenRouter,
+  vLLM, Ollama, and the rest) receive only the allowed functions, with
+  `tool_choice: "required"` when the mode is `required` and `"auto"`
+  otherwise: some of them ignore the choice and would let the model call any
+  declared tool. The narrowed tool list can cost prompt-cache hits when the
+  subset changes between turns. A subset that names no declared function is
+  rejected with a 400.
 - **llm-d** — point `LLMD_BASE_URL` at the Router/EPP service and declare
   `LLMD_MODELS` when the route does not serve `/v1/models`. The dedicated
   provider injects trusted inference-objective and user-path fairness headers.
@@ -177,14 +200,23 @@ support, not every individual model capability exposed by an upstream provider.
   reject requests that omit it (override with
   `OPENCODE_GO_DEFAULT_REASONING_EFFORT`). Set `OPENCODE_GO_API_KEY`; the base
   URL defaults to `https://opencode.ai/zen/go/v1`.
-- **ChatGPT subscription** — serves `/v1/responses` only, billed against the
-  ChatGPT plan's quota rather than API credit. The upstream accepts a strict
+- **ChatGPT subscription** — billed against the ChatGPT plan's quota rather
+  than API credit. The upstream serves `/v1/responses` only; chat completions
+  are translated to Responses calls. The upstream accepts a strict
   parameter allowlist and streams only; GoModel adapts requests and collapses
   the stream for non-streaming callers. Set `CHATGPT_API_KEY` to the access
   token from `codex login`. Reported cost is not real spend: these model IDs
   also exist on the OpenAI Platform, so the registry attaches their per-token
   prices to flat-rate subscription traffic — keep budgets and `cost` load
   balancing off it.
+- **GitHub Copilot** — billed in GitHub AI Credits per token, drawn first from
+  the Copilot plan's monthly allowance.
+  Copilot serves GPT-5 and later only on `/responses` and other models only on
+  `/chat/completions`; GoModel reads each model's endpoints from `/models` and
+  translates, so both APIs work on every model. Set `GITHUB_COPILOT_API_KEY` to
+  a GitHub OAuth token for the account, such as `gh auth token`; the models it
+  can call depend on the Copilot plan. Reported cost is an estimate that ignores
+  the plan's included allowance.
 - **Kimi Code** — no per-token pricing; quota refreshes weekly and is also
   constrained by a rolling 5-hour window. Usage-cost tracking reports zero for
   Kimi Code, so `cost` load-balancing cannot price it; prefer conservative
@@ -308,7 +340,7 @@ These are the providers most users hit friction on:
   Default Credentials or a service-account JSON key.
 - **Amazon Bedrock** — no API key of its own; uses the AWS credential chain
   and requires explicit model access in the Bedrock console.
-- **Azure OpenAI** — deployment-scoped base URLs, the `api-version` query
+- **Azure OpenAI** — deployment-scoped or `/openai/v1` base URLs, the `api-version` query
   parameter, and the `api-key` header instead of `Authorization: Bearer`.
 - **Oracle GenAI** — requires an OCI IAM policy for `generativeaiapikey` and a
   region-specific OpenAI-compatible endpoint URL.
@@ -326,6 +358,8 @@ These are the providers most users hit friction on:
   (the `/messages`-only set is maintained manually, default `qwen3.7-max`).
 - **ChatGPT subscription** — a Responses-only upstream with a strict parameter
   allowlist, used to put GoModel between Codex and a ChatGPT plan.
+- **GitHub Copilot** — getting a token, Business and Enterprise endpoints,
+  and per-model routing between chat completions and Responses.
 
 <Tip>
   Every provider page shows three launch forms in one CodeGroup: Docker with
@@ -377,6 +411,11 @@ Expand a card (the arrow strip at the bottom, or the section-wide
   10 minutes.
 - **Breaker State** — the provider's live circuit-breaker state
   (see [Resilience](/advanced/resilience#circuit-breaker-and-dashboard-provider-health)).
+  While the breaker is open, the card's error line keeps the upstream error
+  that tripped it, marked `— circuit breaker open`, instead of the fast-fail
+  `circuit breaker is open` rejection. The rejection shows only when no
+  upstream error is known from the last 10 minutes, for example when slow
+  calls tripped the breaker.
 - **Models (Recent Traffic)** — per-model request/error counts. A model with
   at least 3 errors making up half or more of its windowed requests is
   flagged in red — this catches a single broken model on an otherwise

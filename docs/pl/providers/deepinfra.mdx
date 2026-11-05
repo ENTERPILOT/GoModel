@@ -1,0 +1,84 @@
+---
+title: "DeepInfra"
+description: "Skonfiguruj DeepInfra w GoModel do obsługi czatu, Responses, embeddingów, obrazów, audio i batchy."
+icon: "server"
+keywords: ["DeepInfra", "otwarte modele", "open models", "konfiguracja providera", "provider setup", "batche", "batches", "obrazy", "images", "audio"]
+---
+
+DeepInfra udostępnia otwarte i proxowane modele przez API kompatybilne z OpenAI pod adresem
+`https://api.deepinfra.com/v1/openai`. GoModel kieruje do niego te endpointy bez zmian:
+
+| Endpoint GoModel | Modele DeepInfra |
+| ---------------- | ---------------- |
+| `/v1/chat/completions` | modele czatowe (`Qwen/Qwen3-32B`, `openai/gpt-oss-120b`, ...) |
+| `/v1/responses` | modele czatowe, obsługiwane przez natywne Responses API DeepInfra |
+| `/v1/embeddings` | modele embeddingów (`Qwen/Qwen3-Embedding-0.6B`, `BAAI/bge-m3`, ...) |
+| `/v1/images/generations`, `/v1/images/edits` | modele obrazów (`black-forest-labs/FLUX-1-schnell`, `Bria/fibo_edit`, ...) |
+| `/v1/audio/speech` | modele TTS (`hexgrad/Kokoro-82M`, ...) |
+| `/v1/audio/transcriptions`, `/v1/audio/translations` | modele STT (`openai/whisper-large-v3-turbo`, ...) |
+| `/v1/files`, `/v1/batches` | batch API DeepInfra |
+
+## Konfiguracja
+
+Utwórz klucz API w [dashboardzie DeepInfra](https://deepinfra.com/dash/api_keys) i ustaw:
+
+```bash
+DEEPINFRA_API_KEY=...
+```
+
+Albo w `config.yaml`:
+
+```yaml
+providers:
+  deepinfra:
+    type: deepinfra
+    api_key: "${DEEPINFRA_API_KEY}"
+    # base_url domyślnie to "https://api.deepinfra.com/v1/openai".
+```
+
+Nadpisz bazowy URL lub przypnij listę modeli tylko wtedy, gdy tego potrzebujesz:
+
+```bash
+DEEPINFRA_BASE_URL=https://api.deepinfra.com/v1/openai
+DEEPINFRA_MODELS=Qwen/Qwen3-32B,Qwen/Qwen3-Embedding-0.6B
+```
+
+## Modele
+
+GoModel odczytuje aktualną listę `/models` z DeepInfra, w tym rodzaj każdego modelu
+(chat, embedding, image, speech, transcription), długość kontekstu, tagi reasoningu
+i vision oraz ceny. Modele generowania wideo są pomijane, bo GoModel nie ma
+endpointu wideo dla DeepInfra. Identyfikatory modeli zawierają ukośnik; używaj ich
+dosłownie albo dodaj przed nimi nazwę providera, żeby przypiąć trasę:
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "deepinfra/Qwen/Qwen3-32B", "messages": [{"role": "user", "content": "Hello"}]}'
+```
+
+Modele reasoningowe DeepInfra honorują zarówno `reasoning_effort`, jak i
+`reasoning: {"effort": ...}`, a `none` wyłącza thinking w modelach hybrydowych,
+takich jak Qwen3.
+
+## Uwagi o działaniu
+
+- **Responses są bezstanowe.** DeepInfra nie przechowuje odpowiedzi, więc `store: true`
+  nie ma żadnego efektu po stronie upstreamu. Przy skonfigurowanym magazynie odpowiedzi
+  GoModel łańcuchy `previous_response_id` nadal działają: gateway odtwarza zapisaną
+  historię przed wysłaniem requestu. Bez magazynu DeepInfra odrzuca `previous_response_id`
+  i `conversation` z błędem nieprawidłowego requestu.
+- **Structured output w Responses przechodzi przez czat.** Natywny endpoint
+  Responses w DeepInfra odrzuca każde ustawienie `text` (`text.format`,
+  `text.verbosity`), więc GoModel obsługuje takie requesty przez chat
+  completions, gdzie `json_schema` i `json_object` działają.
+- **Mowa domyślnie w MP3.** DeepInfra zwraca WAV, gdy pominięto `response_format`;
+  GoModel wysyła zamiast tego wartość domyślną OpenAI (`mp3`). Ustaw
+  `response_format` jawnie, żeby otrzymać inny format.
+- **Ceny obrazów są liczone za jednostkę obrazu.** DeepInfra podaje ceny obrazów za
+  jednostkę obrazu, a GoModel zapisuje tę stawkę jako cenę za obraz. Śledzenie kosztów
+  jest przybliżone dla modeli, które DeepInfra rozlicza według rozmiaru lub liczby kroków.
+- **Passthrough trzeba włączyć.** Dodaj `deepinfra` do `ENABLED_PASSTHROUGH_PROVIDERS`,
+  żeby udostępnić `/p/deepinfra/...`, który przekazuje dowolną ścieżkę pod bazowym URL-em
+  z kluczem DeepInfra gatewaya.

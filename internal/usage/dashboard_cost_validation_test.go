@@ -33,7 +33,7 @@ func TestDashboardCostAggregation_EndToEnd(t *testing.T) {
 	db.SetMaxOpenConns(1)
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	ts := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
@@ -78,7 +78,7 @@ func TestDashboardCostAggregation_EndToEnd(t *testing.T) {
 	err = store.WriteBatch(ctx, []*UsageEntry{live1, live2, hit})
 	require.NoError(t, err)
 
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	params := UsageQueryParams{

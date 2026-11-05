@@ -1,0 +1,262 @@
+---
+title: "CLI-Befehle"
+description: "Kommandozeilen-Flags, mit denen Sie das GoModel-Binary prüfen, den Zustand eines laufenden Gateways abfragen und seine Konfiguration neu laden."
+icon: "terminal"
+keywords: ["CLI", "Kommandozeilen-Flags", "command-line flags", "Health Check", "Versionsabfrage", "Konfiguration neu laden", "config reload", "SIGHUP"]
+---
+
+## Übersicht
+
+Das Binary `gomodel` bietet eine kleine Auswahl an Kommandozeilen-Flags für
+betriebliche Aufgaben. Flags funktionieren sowohl mit einfachem (`-flag`) als
+auch mit doppeltem Bindestrich (`--flag`); die folgenden Beispiele verwenden die
+lange Form.
+
+| Flag               | Beschreibung                                              | Standardwert |
+| ------------------ | ------------------------------------------------------- | ------- |
+| `--version`        | Versionsinformationen ausgeben und beenden               | —       |
+| `--health`         | Den lokalen Endpunkt `/health` (Liveness) abfragen und beenden | —       |
+| `--health-timeout` | Maximale Wartezeit für die `--health`-Abfrage            | `2s`    |
+| `--ready`          | Den lokalen Endpunkt `/health/ready` (Readiness) abfragen und beenden | — |
+| `--ready-timeout`  | Maximale Wartezeit für die `--ready`-Abfrage             | `4s`    |
+| `--reload`         | Das laufende Gateway anweisen, seine Konfiguration neu zu laden, und beenden | —   |
+
+## Version
+
+Build-Version ausgeben und beenden:
+
+```bash
+gomodel --version
+```
+
+## Health-Abfrage
+
+Mit `--health` arbeitet das Binary als Health-Check-Client: Es lädt dieselbe
+Konfiguration wie der Server, fragt den lokalen Endpunkt `/health` ab und
+beendet sich.
+
+```bash
+gomodel --health
+```
+
+- Exit-Code `0`, wenn der Endpunkt HTTP `200` mit `{"status":"ok"}` zurückgibt.
+- Andernfalls ein Exit-Code ungleich null (Verbindung abgelehnt, Status ungleich
+  `200` oder ein anderer Statuswert).
+
+Die Abfrage zielt immer auf das Loopback-Interface (`127.0.0.1`), da sie im
+selben Container wie der Server läuft. `PORT` und `BASE_PATH` leitet sie jedoch
+aus der Konfiguration ab, statt `8080` und `/health` fest zu verdrahten.
+Begrenzen Sie die Dauer des Requests mit `--health-timeout`:
+
+```bash
+gomodel --health --health-timeout 5s
+```
+
+### Docker `HEALTHCHECK`
+
+Da die Abfrage in das Binary eingebaut ist, können Container-Images ihren
+Zustand melden, ohne `curl` oder `wget` mitzuliefern – nützlich für
+minimale/Distroless-Laufzeitumgebungen. Das offizielle Image richtet dies
+automatisch ein:
+
+```dockerfile
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["/gomodel", "--health"]
+```
+
+Orchestratoren (Docker, Compose, Kubernetes) können dann ein fehlerhaftes
+Gateway erkennen und neu starten.
+
+## Readiness-Abfrage
+
+`--ready` fragt `/health/ready` ab. Dieser Endpunkt meldet, ob die Instanz
+Traffic erhalten soll. Anders als Liveness prüft Readiness die Abhängigkeiten,
+für die das Gateway selbst verantwortlich ist:
+
+- **Storage** ist erforderlich. Ist das Backend (SQLite/PostgreSQL/MongoDB)
+  nicht erreichbar, meldet Readiness `not_ready` (HTTP `503`).
+- **Redis Exact Cache** (sofern konfiguriert) ist eine Performance-Optimierung.
+  Ist er nicht erreichbar, meldet Readiness `degraded`, bleibt aber bei HTTP
+  `200` – das Gateway bedient weiterhin Requests.
+
+Die Erreichbarkeit der Upstream-**Provider** wird bewusst nicht geprüft: Ein
+Provider-Ausfall darf ein funktionsfähiges Gateway nicht aus der Rotation
+nehmen.
+
+```bash
+gomodel --ready
+```
+
+- Exit-Code `0`, wenn der Endpunkt HTTP `200` zurückgibt (`ready` oder `degraded`).
+- Exit-Code ungleich null bei `not_ready` (HTTP `503`), abgelehnter Verbindung
+  oder einem unerwarteten Statuswert.
+
+```json
+{ "status": "ready", "components": { "storage": "ok", "cache": "ok" } }
+```
+
+## Konfiguration neu laden
+
+`--reload` übernimmt Konfigurationsänderungen in ein laufendes Gateway, ohne es
+neu zu starten – dieselbe Operation wie `nginx -s reload`:
+
+```bash
+gomodel --reload
+```
+
+Der Befehl lädt dieselbe Konfiguration wie das Gateway, um die PID-Datei zu
+finden, sendet diesem Prozess ein Signal und beendet sich. Weil die
+Konfiguration zuerst geladen wird, schlägt der Befehl bei einer `config.yaml`,
+die das Binary nicht parsen kann, fehl – mit Exit-Code ungleich null und ohne
+gesendetes Signal –, bevor das laufende Gateway sie überhaupt zu sehen bekommt.
+Bei Erfolg geht das Gateway so vor:
+
+1. Es liest die `.env`-Datei erneut ein. Neue und geänderte Werte werden
+   übernommen; aus der Datei entfernte Werte werden zurückgesetzt. Variablen,
+   die in die Prozessumgebung exportiert sind, haben weiterhin Vorrang vor der
+   Datei, genau wie beim Start – die Umgebung eines Containers wird nicht durch
+   eine Datei darin überschrieben.
+2. Es liest `config/config.yaml` (bzw. `config.yaml`) und alle
+   Umgebungsvariablen erneut ein und baut sich aus dem Ergebnis neu auf.
+   Provider, virtuelle Modelle, Budgets, Rate-Limits, Guardrails, MCP-Server,
+   Caching, Logging, Admin-Einstellungen – alles wird neu geladen, weil der
+   Reload denselben Startpfad erneut durchläuft und nicht nur eine handverlesene
+   Teilmenge.
+
+Die neue Konfiguration wird aufgebaut, **bevor** die laufende gestoppt wird.
+Eine Konfiguration, die sich nicht laden oder initialisieren lässt, ändert
+daher nichts: Das Gateway protokolliert
+`reload failed; keeping the running configuration` und arbeitet mit der
+bereits funktionierenden Konfiguration weiter.
+
+Der lauschende Socket bleibt für die gesamte Lebensdauer des Prozesses
+erhalten und wird nacheinander an jede Konfiguration übergeben. Requests, die
+während eines Reloads eintreffen, warten daher auf ihre Annahme, statt
+abgelehnt zu werden. Laufende Requests erhalten dasselbe 10-sekündige
+Drain-Fenster wie beim Herunterfahren, und gestreamte Responses, die länger
+dauern, werden abgebrochen. Ein Reload bei hohem Streaming-Traffic ist also
+nicht kostenlos – aber auf Socket-Ebene geht keine Verbindung verloren.
+
+Diese letzte Garantie setzt voraus, dass das Betriebssystem dem Gateway das
+Duplizieren eines lauschenden Sockets erlaubt. Das gilt für alle Plattformen,
+an die sich überhaupt ein Reload-Signal senden lässt. Wo das Duplizieren nicht
+möglich ist, bindet die nächste Konfiguration die Adresse stattdessen neu, und
+Verbindungen werden für die Dauer des Wechsels abgelehnt.
+
+Das Signal direkt zu senden bewirkt dasselbe. Diesen Weg kann ein
+Prozessmanager oder ein Container ohne Shell nutzen:
+
+```bash
+kill -HUP "$(cat data/gomodel.pid)"
+```
+
+<Note>
+  Reload ist eine Funktion auf Basis von POSIX-Signalen und steht unter Windows nicht zur Verfügung.
+</Note>
+
+### Die PID-Datei
+
+Das Gateway schreibt seine Prozess-ID beim Start nach `PID_FILE` /
+`server.pid_file` und entfernt sie beim Herunterfahren. Standardwert ist
+`data/gomodel.pid`, wenn ein Verzeichnis `./data` existiert (Docker-Images und
+bestehende Deployments), andernfalls das betriebssystemübliche
+benutzerspezifische Datenverzeichnis – dieselbe Auflösung, die auch die
+SQLite-Datenbank verwendet.
+
+Geben Sie jeder Instanz einen eigenen Pfad, wenn sich mehrere Gateways einen
+Host teilen, denn `--reload` sendet das Signal an den Prozess, den die Datei
+nennt. Soll gar keine PID-Datei geschrieben werden, setzen Sie
+`server.pid_file: ""` in `config.yaml` – damit ist `--reload` deaktiviert,
+`kill -HUP` funktioniert aber weiterhin. Eine leere Umgebungsvariable
+`PID_FILE` gilt als nicht gesetzt und behält den Standardwert bei, wie bei
+jeder anderen Einstellung. Ist der Pfad nicht beschreibbar, protokolliert das
+Gateway eine Warnung und arbeitet normal weiter, nur ohne Unterstützung für
+`--reload`.
+
+Sowohl das Gateway als auch `gomodel --reload` ermitteln den Pfad aus
+derselben Konfiguration. Führen Sie den Befehl daher im selben
+Arbeitsverzeichnis (oder mit derselben `PID_FILE`) wie das Gateway aus:
+
+```bash
+docker exec my-gateway /gomodel --reload
+```
+
+### Was ein Reload nicht ändert
+
+- **`PORT`** – der Socket bleibt gebunden, damit keine Verbindung abgelehnt
+  wird; ein Portwechsel erfordert einen Neustart. Das Gateway protokolliert
+  eine Warnung mit beiden Ports.
+- **`PID_FILE`** – sie bezeichnet den bereits laufenden Prozess.
+- **`GOMODEL_DEMO_MODE`** – die Demo-Warnungen werden einmalig beim Start
+  eingerichtet.
+- **In-Memory-Zustand** – die Session-Affinität virtueller Modelle und die
+  Live-Log-Puffer beginnen neu, genau wie nach einem Neustart. Die Fenster der
+  Request- und Token-Rate-Limits werden beim Herunterfahren geschrieben und von
+  der nächsten Generation wiederhergestellt. Concurrency-Zähler sowie
+  Budgets/Nutzung verhalten sich wie bei einem Neustart (Zähler beginnen leer;
+  Budgets und Nutzung liegen in der Datenbank).
+
+Um die Modellkataloge der Provider und vom Admin verwaltete Daten zu
+aktualisieren, *ohne* die Konfiguration neu einzulesen, ist die
+Laufzeitaktualisierung des Dashboards (`POST /admin/runtime/refresh`) die
+leichtgewichtigere Option.
+
+Liveness (`--health`) ist das richtige Signal für einen Docker-`HEALTHCHECK`
+(Neustart bei Absturz). Readiness (`/health/ready`) ist das richtige Signal für
+eine Kubernetes-`readinessProbe` (Traffic steuern) – richten Sie sie direkt auf
+den HTTP-Endpunkt oder führen Sie `gomodel --ready` als Exec-Probe aus. Wählen
+Sie `--ready-timeout` größer als den internen Probe-Timeout des Servers pro
+Abhängigkeit (`2s`), damit ein langsames Backend ein sauberes `not_ready`
+liefert, statt dass zuerst beim Client der Timeout greift.
+
+## Plugin-Werkzeuge
+
+`gomodel plugin` baut und prüft Shared-Object-Plugins (`.so`) mit der Toolchain
+des laufenden Binarys; siehe [Plugins](/de/advanced/plugins#shared-object-plugins).
+
+```sh
+gomodel plugin build [-o out.so] <dir>   # go build -buildmode=plugin mit den Flags dieses Binarys
+gomodel plugin inspect <file.so>         # Datei öffnen und Manifest sowie Build-Informationen ausgeben
+```
+
+`plugin build` erzwingt `CGO_ENABLED=1`, legt `GOTOOLCHAIN` auf die Go-Version
+des Hosts fest, schreibt eine Variable `GoModelBuildInfo` in das Plugin und
+verwirft ein Ergebnis, das mit einer anderen Go-Version gebaut wurde. Zum Laden
+wird ein cgo-Build von GoModel benötigt (`make build-plugins` oder das Image
+`gomodel:<version>-plugins`). `gomodel --version` gibt die Go- und
+`pluginapi`-Versionen aus, zu denen Plugins passen müssen.
+
+## Gespeicherte Secrets verschlüsseln
+
+`gomodel secrets reencrypt` verschlüsselt alle im Dashboard verwalteten
+Secrets, die noch im Klartext vorliegen, und überführt Werte, die mit älteren
+Data Keys verschlüsselt sind, auf den aktiven Schlüssel. Der Befehl benötigt
+`GOMODEL_ENCRYPTION_KEY`, gibt nur Zählerstände aus und ist idempotent.
+
+```bash
+gomodel secrets reencrypt [--rotate-data-key]
+```
+
+Siehe [Verschlüsselung ruhender Daten](/de/advanced/encryption-at-rest).
+
+## Migration von LiteLLM
+
+`gomodel migrate litellm` wandelt eine `config.yaml` des LiteLLM-Proxys in eine
+GoModel-`config.yaml`, eine `.env` mit den bisher inline hinterlegten Secrets
+und einen Migrationsbericht um. Ohne `--out` werden keine Dateien geschrieben.
+
+Außerdem liest der Befehl Keys, Teams, Benutzer und Budgets aus der
+LiteLLM-Datenbank, sofern er eine URL hat (`--database-url`, die
+`database_url` der Konfiguration oder `DATABASE_URL`), und importiert sie mit
+`--gomodel-url` in ein laufendes GoModel. Ein erneuter Aufruf bringt GoModel auf
+den aktuellen Stand. Eine `--gomodel-url` auf einem anderen Rechner muss
+`https` verwenden, sofern Sie nicht `--allow-http` angeben. `--skip-database`
+wandelt nur die Konfiguration um.
+
+```sh
+gomodel migrate litellm [--out DIR] [--force] [--database-url URL | --skip-database]
+  [--gomodel-url URL [--allow-http]] <litellm-config.yaml>
+```
+
+Die vollständige Schritt-für-Schritt-Anleitung finden Sie unter
+[Migration von LiteLLM](/de/guides/migrate-from-litellm).

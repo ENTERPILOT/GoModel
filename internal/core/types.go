@@ -22,6 +22,10 @@ type Reasoning struct {
 	// "xhigh" and "max" are supported by newer models such as Claude Opus 4.8;
 	// providers downgrade unsupported levels to their nearest equivalent.
 	Effort string `json:"effort,omitempty"`
+	// Summary requests a reasoning summary from the model (OpenAI Responses
+	// API: "auto", "concise", "detailed"). Empty asks for no summary; the
+	// Responses API never emits summaries unprompted.
+	Summary string `json:"summary,omitempty"`
 }
 
 // ChatRequest represents the incoming chat completion request
@@ -188,6 +192,12 @@ type Model struct {
 	Object  string `json:"object"`
 	OwnedBy string `json:"owned_by"`
 	Created int64  `json:"created"`
+	// MaxModelLen is the context limit a vLLM-style runtime reported for this
+	// model. It is never serialized: only the vLLM discovery compatibility
+	// response carries it, from a type GET /v1/models owns, so no other
+	// response — /admin/models included — can surface it and the default
+	// listing stays byte-for-byte what it was before the setting existed.
+	MaxModelLen *int `json:"-"`
 	// Metadata holds optional enrichment data (display name, pricing, capabilities, etc.).
 	// May be nil if the model was not found in the external registry.
 	Metadata *ModelMetadata `json:"metadata,omitempty"`

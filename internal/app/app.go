@@ -19,11 +19,13 @@ import (
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/batch"
 	"github.com/enterpilot/gomodel/internal/budget"
+	"github.com/enterpilot/gomodel/internal/clustersync"
 	"github.com/enterpilot/gomodel/internal/conversationstore"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/encryption"
 	"github.com/enterpilot/gomodel/internal/filestore"
 	"github.com/enterpilot/gomodel/internal/guardrails"
+	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/live"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
 	"github.com/enterpilot/gomodel/internal/mediastore"
@@ -34,6 +36,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/responsestore"
 	"github.com/enterpilot/gomodel/internal/runtimesettings"
 	"github.com/enterpilot/gomodel/internal/server"
+	"github.com/enterpilot/gomodel/internal/sharedstore"
 	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/tagging"
 	"github.com/enterpilot/gomodel/internal/telemetry"
@@ -76,6 +79,8 @@ type App struct {
 	storage             storage.Storage
 	secrets             *encryption.Box
 	runtimeSettings     *runtimesettings.Service
+	clusterSync         *clustersync.Syncer
+	sharedStore         *sharedstore.Store // nil unless an extension or MCP session sharing takes it
 	versionCheck        *versioncheck.Checker
 	extensionAuth       bool
 
@@ -149,9 +154,20 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		return nil, fmt.Errorf("factory is required")
 	}
 
+	// Outbound trust must be in place before any provider builds a transport,
+	// and a missing CA file is a startup error rather than a silent fallback.
+	// On a reload the generation that keeps serving must not inherit settings
+	// its replacement was rejected with, so the previous configuration is put
+	// back whenever construction fails after this point.
+	previousTLS := httpclient.SnapshotTLS()
+	if err := ApplyOutboundTLS(cfg.AppConfig.Config.HTTP.TLS); err != nil {
+		return nil, err
+	}
+
 	b := newBootstrap(ctx, cfg)
 	for _, phase := range b.phases() {
 		if err := phase(); err != nil {
+			httpclient.RestoreTLS(previousTLS)
 			return nil, b.fail(err)
 		}
 	}
@@ -200,6 +216,34 @@ func (a *App) attachLivePublishers() {
 			logger.SetLivePublisher(a.live)
 		}
 	}
+}
+
+// startRemoteLiveLogs has the live broker also publish the audit and usage
+// entries other replicas persist to the shared database, so a dashboard
+// connected to this replica sees every replica's traffic. The broker polls
+// only while a dashboard is subscribed, and stops when it closes.
+func (a *App) startRemoteLiveLogs() {
+	if a == nil || a.live == nil || !a.live.Enabled() || a.storage == nil {
+		return
+	}
+	cfg := live.RemoteConfig{Writer: storage.WriterID()}
+	if a.config.Logging.Enabled {
+		reader, err := auditlog.NewRecentWriteReader(a.storage)
+		if err != nil {
+			slog.Warn("live logs will not show other replicas' audit entries", "error", err)
+		} else {
+			cfg.Audit = reader
+		}
+	}
+	if a.config.Usage.Enabled {
+		reader, err := usage.NewRecentWriteReader(a.storage)
+		if err != nil {
+			slog.Warn("live logs will not show other replicas' usage entries", "error", err)
+		} else {
+			cfg.Usage = reader
+		}
+	}
+	a.live.StartRemote(cfg)
 }
 
 // Start starts the HTTP server on the given address.
@@ -251,6 +295,10 @@ func (a *App) startServer(ctx context.Context, address string, start func(contex
 	// Rotated secrets apply only to the generation that serves; see
 	// secretRotation.start.
 	a.secretRotation.start(serverCtx)
+	// So do configuration changes made on other instances: a replacement
+	// still being built has nothing to refresh yet, and its first tick
+	// catches up on everything changed since it was built.
+	a.clusterSync.Start(serverCtx)
 
 	slog.Info("starting server", "address", address)
 	err := start(serverCtx)

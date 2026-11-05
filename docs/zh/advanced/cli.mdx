@@ -1,0 +1,190 @@
+---
+title: "CLI 操作"
+description: "用于查看 GoModel 二进制文件信息、探测运行中网关的健康状态以及重新加载配置的命令行参数。"
+icon: "terminal"
+keywords: ["CLI", "命令行参数", "command-line flags", "健康检查", "health check", "版本探测", "配置重新加载", "config reload", "SIGHUP"]
+---
+
+## 概览
+
+`gomodel` 二进制文件提供了一小组用于运维任务的命令行参数。参数同时支持单横线（`-flag`）和双横线（`--flag`）两种形式；
+以下示例均使用长格式。
+
+| 参数               | 说明                                              | 默认值 |
+| ------------------ | ------------------------------------------------------- | ------- |
+| `--version`        | 打印版本信息后退出                       | —       |
+| `--health`         | 探测本地 `/health`（存活）端点后退出  | —       |
+| `--health-timeout` | `--health` 探测的最长等待时间            | `2s`    |
+| `--ready`          | 探测本地 `/health/ready`（就绪）端点后退出 | — |
+| `--ready-timeout`  | `--ready` 探测的最长等待时间            | `4s`    |
+| `--reload`         | 通知运行中的网关重新加载配置后退出 | —   |
+
+## 版本
+
+打印构建版本后退出：
+
+```bash
+gomodel --version
+```
+
+## 健康探测
+
+`--health` 会让二进制文件充当健康检查客户端：它加载与服务端相同的配置，请求本地 `/health` 端点，然后退出。
+
+```bash
+gomodel --health
+```
+
+- 当端点返回 HTTP `200` 且响应为 `{"status":"ok"}` 时，以 `0` 退出。
+- 其他情况（连接被拒绝、非 `200` 状态码或任何其他 status 值）以非零状态退出。
+
+由于探测与服务端运行在同一个容器内，它始终以回环接口（`127.0.0.1`）为目标，但 `PORT` 和
+`BASE_PATH` 取自配置，而不是硬编码为 `8080` 和 `/health`。可使用 `--health-timeout` 限制请求时长：
+
+```bash
+gomodel --health --health-timeout 5s
+```
+
+### Docker `HEALTHCHECK`
+
+由于探测功能内置于二进制文件中，容器镜像无需附带 `curl` 或 `wget` 即可上报健康状态，这对精简版 / distroless 运行时非常有用。
+官方镜像已自动完成配置：
+
+```dockerfile
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["/gomodel", "--health"]
+```
+
+编排工具（Docker、Compose、Kubernetes）随后即可检测并重启不健康的网关。
+
+## 就绪探测
+
+`--ready` 探测 `/health/ready`，该端点报告实例是否应接收流量。与存活检查不同，就绪检查会检查网关自身负责的依赖项：
+
+- **存储**为必需项。如果后端（SQLite/PostgreSQL/MongoDB）不可达，就绪检查报告 `not_ready`（HTTP `503`）。
+- **Redis 精确缓存**（已配置时）属于性能优化。如果它不可达，就绪检查报告 `degraded`，但仍返回 HTTP `200`——网关依然可以处理请求。
+
+上游**提供商**的可达性被刻意排除在外：提供商故障不应导致健康的网关被移出流量轮转。
+
+```bash
+gomodel --ready
+```
+
+- 当端点返回 HTTP `200`（`ready` 或 `degraded`）时，以 `0` 退出。
+- 在 `not_ready`（HTTP `503`）、连接被拒绝或出现意外 status 值时，以非零状态退出。
+
+```json
+{ "status": "ready", "components": { "storage": "ok", "cache": "ok" } }
+```
+
+## 配置重新加载
+
+`--reload` 可在不重启的情况下将配置变更应用到运行中的网关，与 `nginx -s reload` 的作用相同：
+
+```bash
+gomodel --reload
+```
+
+它会加载与网关相同的配置以找到 pid 文件，向该进程发送信号，然后退出。先加载配置意味着：如果二进制文件无法解析 `config.yaml`，
+命令会直接失败（非零退出，不发送信号），运行中的网关根本不会去读取它。成功时，网关会：
+
+1. 重新读取 `.env` 文件。新增和修改的值会生效；从文件中删除的值会被取消设置。已导出到进程环境中的变量仍优先于文件，
+   与启动时完全一致——容器的环境变量不会被容器内的文件覆盖。
+2. 重新读取 `config/config.yaml`（或 `config.yaml`）以及所有环境变量，然后基于结果重建自身。提供商、虚拟模型、
+   预算、速率限制、护栏、MCP 服务器、缓存、日志、管理设置——全部都会重新加载，因为重新加载执行的是与启动相同的流程，
+   而不是挑选出来的部分功能。
+
+新配置会在停止当前运行的配置**之前**构建完成，因此加载或初始化失败的配置不会造成任何改变：网关会记录
+`reload failed; keeping the running configuration` 日志，并继续使用已正常工作的配置提供服务。
+
+监听套接字在进程的整个生命周期内保持打开，并依次交给每一份配置使用，因此在重新加载期间到达的请求会等待被接受，而不会被拒绝。
+进行中的请求享有与关闭时相同的 10 秒排空窗口，超出该时长的流式响应会被中断，因此在流式流量较大时执行重新加载并非毫无代价——
+但不会有连接在套接字层面被丢弃。
+
+最后这项保证取决于操作系统是否允许网关复制监听套接字，而所有能够接收重新加载信号的平台都支持这一点。
+在无法复制套接字的情况下，下一份配置会重新绑定地址，切换期间的连接会被拒绝。
+
+直接发送信号也能达到相同效果，进程管理器或没有 shell 的容器可以使用这种方式：
+
+```bash
+kill -HUP "$(cat data/gomodel.pid)"
+```
+
+<Note>
+  重新加载基于 POSIX 信号实现，在 Windows 上不可用。
+</Note>
+
+### pid 文件
+
+网关在启动时将其进程 ID 写入 `PID_FILE` / `server.pid_file`，并在关闭时将其删除。如果存在 `./data`
+目录（Docker 镜像和现有部署），默认值为 `data/gomodel.pid`；否则使用操作系统约定的用户数据目录——与
+SQLite 数据库使用的解析规则相同。
+
+当多个网关共享同一台主机时，请为每个实例指定独立的路径，因为 `--reload` 会向文件中记录的那个进程发送信号。
+如果完全不想写入 pid 文件，请在 `config.yaml` 中设置 `server.pid_file: ""`——这会禁用 `--reload`，
+但 `kill -HUP` 仍然有效。与其他所有设置一样，空的 `PID_FILE` 环境变量会被视为未设置，并保留默认值。
+如果路径不可写，网关会记录一条警告并正常提供服务，只是不支持 `--reload`。
+
+网关和 `gomodel --reload` 都基于相同的配置解析该路径，因此请在与网关相同的工作目录下（或使用相同的
+`PID_FILE`）运行该命令：
+
+```bash
+docker exec my-gateway /gomodel --reload
+```
+
+### 重新加载不会改变的内容
+
+- **`PORT`**——套接字保持绑定，因此不会拒绝任何连接；更改端口需要重启。网关会记录一条同时列出两个端口的警告。
+- **`PID_FILE`**——它指向的是已经在运行的进程。
+- **`GOMODEL_DEMO_MODE`**——演示警告只在启动时配置一次。
+- **内存状态**——虚拟模型的会话亲和性和实时日志缓冲区会重新开始，与重启后完全一样。请求和 Token 速率限制窗口
+  会在关闭时写出，并由下一代配置恢复。并发计量和预算/用量的行为与重启时相同（计量从空开始；预算和用量保存在数据库中）。
+
+如果只需刷新提供商模型目录和管理端托管的数据，而*无需*重新读取配置，控制台的运行时刷新（`POST /admin/runtime/refresh`）
+是更轻量的选择。
+
+存活检查（`--health`）适合作为 Docker `HEALTHCHECK` 的信号（崩溃时重启）。就绪检查（`/health/ready`）适合作为 Kubernetes
+`readinessProbe` 的信号（控制流量）——可以直接指向该 HTTP 端点，也可以以 exec 探针方式运行
+`gomodel --ready`。请让 `--ready-timeout` 大于服务端内部针对每个依赖项的探测超时（`2s`），这样后端响应缓慢时会干净地返回
+`not_ready`，而不是客户端先超时。
+
+## 插件工具
+
+`gomodel plugin` 使用运行中二进制文件的工具链构建和检查共享对象插件（`.so`）；请参阅[插件](/zh/advanced/plugins#共享对象插件)。
+
+```sh
+gomodel plugin build [-o out.so] <dir>   # 使用此二进制文件的构建参数执行 go build -buildmode=plugin
+gomodel plugin inspect <file.so>         # 打开文件并打印其清单和构建信息
+```
+
+`plugin build` 会强制设置 `CGO_ENABLED=1`，将 `GOTOOLCHAIN` 固定为主机的 Go
+版本，在插件中写入一个 `GoModelBuildInfo` 变量，并拒绝使用不同 Go 版本构建的输出。加载插件需要启用 cgo 构建的
+GoModel（`make build-plugins` 或 `gomodel:<version>-plugins` 镜像）。
+`gomodel --version` 会打印插件必须匹配的 Go 和 `pluginapi` 版本。
+
+## 加密已存储的 Secret
+
+`gomodel secrets reencrypt` 会加密所有仍以明文存储的控制台托管 Secret（密钥），并将使用旧数据密钥加密的值迁移到当前活动的数据密钥。
+它需要 `GOMODEL_ENCRYPTION_KEY`，仅打印计数，并且是幂等的。
+
+```bash
+gomodel secrets reencrypt [--rotate-data-key]
+```
+
+请参阅[静态数据加密](/zh/advanced/encryption-at-rest)。
+
+## 从 LiteLLM 迁移
+
+`gomodel migrate litellm` 会将 LiteLLM 代理的 `config.yaml` 转换为 GoModel 的
+`config.yaml`、一个包含原本内联 Secret 的 `.env` 文件，以及一份迁移报告。不指定 `--out` 时不会写入任何文件。
+
+当它拿到数据库 URL（`--database-url`、配置中的 `database_url` 或 `DATABASE_URL`）时，还会从 LiteLLM 数据库读取密钥、团队、用户和预算；
+指定 `--gomodel-url` 时，会将它们导入到运行中的 GoModel。重复运行会让 GoModel 同步到最新状态。指向其他机器的 `--gomodel-url` 必须使用 `https`，
+除非您传入 `--allow-http`。`--skip-database` 只转换配置。
+
+```sh
+gomodel migrate litellm [--out DIR] [--force] [--database-url URL | --skip-database]
+  [--gomodel-url URL [--allow-http]] <litellm-config.yaml>
+```
+
+完整的操作步骤请参阅[从 LiteLLM 迁移](/zh/guides/migrate-from-litellm)。

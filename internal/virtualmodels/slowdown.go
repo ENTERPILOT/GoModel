@@ -8,7 +8,8 @@ import (
 
 // ResolveSlowdown returns the request-scoped extra-time factor for a resolved
 // model. A matching alias setting takes precedence over its concrete target;
-// otherwise the normal exact/provider/model/global policy precedence applies.
+// otherwise an exact policy beats a model-wide one. A policy that sets no
+// slowdown, or does not apply to the caller's user path, is passed over.
 // The context makes the lookup ready for user-path-specific settings without
 // changing the request execution interface later.
 func (s *Service) ResolveSlowdown(
@@ -28,9 +29,12 @@ func (s *Service) ResolveSlowdown(
 		}
 	}
 
-	if policy, ok := snap.matchingPolicy(resolved.Provider, resolved.Model); ok &&
-		policy.Slowdown != nil && userPathAllowed(userPath, policy.UserPaths) {
+	if policy, ok := snap.modelPolicy(resolved.Provider, resolved.Model, userPath, setsSlowdown); ok {
 		return *policy.Slowdown
 	}
 	return 0
+}
+
+func setsSlowdown(policy VirtualModel) bool {
+	return policy.Slowdown != nil
 }

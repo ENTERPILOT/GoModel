@@ -1,14 +1,14 @@
 {
-  "id": "chatcmpl-D0qOCYH6prj5BCFQQgEZUHOwVyVpo",
+  "id": "chatcmpl-Ee0nScOInHjRHXg0dZVZ4RGfY220x",
   "object": "chat.completion",
-  "created": 1769093756,
-  "model": "o3-mini-2025-01-31",
+  "created": 1793204890,
+  "model": "gpt-5-mini-2025-08-07",
   "choices": [
     {
       "index": 0,
       "message": {
         "role": "assistant",
-        "content": "2 + 2 equals 4.",
+        "content": "The ball costs $0.05 (five cents).",
         "refusal": null,
         "annotations": []
       },
@@ -16,20 +16,20 @@
     }
   ],
   "usage": {
-    "prompt_tokens": 13,
-    "completion_tokens": 85,
-    "total_tokens": 98,
+    "prompt_tokens": 43,
+    "completion_tokens": 148,
+    "total_tokens": 191,
     "prompt_tokens_details": {
       "cached_tokens": 0,
       "audio_tokens": 0
     },
     "completion_tokens_details": {
-      "reasoning_tokens": 64,
+      "reasoning_tokens": 128,
       "audio_tokens": 0,
       "accepted_prediction_tokens": 0,
       "rejected_prediction_tokens": 0
     }
   },
   "service_tier": "default",
-  "system_fingerprint": "fp_d48b29c73d"
+  "system_fingerprint": null
 }

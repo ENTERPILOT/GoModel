@@ -136,8 +136,9 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 			_, entry.StatusCode = echo.ResolveResponseStatus(c.Response(), err)
 
 			// Request capture is deferred until after next so a later-resolved
-			// Audit=false workflow can skip it entirely.
-			PopulateRequestData(entry, req, cfg)
+			// Audit=false workflow can skip it entirely. It reads the current
+			// request: the body joins the snapshot only after authentication.
+			PopulateRequestData(entry, c.Request(), cfg)
 
 			// Log response headers if enabled
 			if cfg.LogHeaders {

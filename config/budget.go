@@ -34,6 +34,12 @@ type BudgetsConfig struct {
 	// provider budget caps all spend routed to that provider instance;
 	// failover skips a provider whose budget is exhausted.
 	Providers []BudgetProviderConfig `yaml:"providers"`
+
+	// ProviderBilledCacheHits controls whether a provider budget on billed
+	// cost counts the billed response-cache hits of that provider's models.
+	// Default: true. Set false to limit only what was billed for requests the
+	// provider served. Provider-cost budgets never count cache hits.
+	ProviderBilledCacheHits bool `yaml:"provider_billed_cache_hits" env:"BUDGETS_PROVIDER_BILLED_CACHE_HITS"`
 }
 
 // BudgetUserPathConfig declares one or more budget limits for a user path.
@@ -66,8 +72,14 @@ type BudgetLimitConfig struct {
 	// 3600, 86400, 604800, and 2592000.
 	PeriodSeconds int64 `yaml:"period_seconds" json:"period_seconds"`
 
-	// Amount is the maximum allowed tracked provider spend for the period.
+	// Amount is the maximum allowed tracked spend for the period.
 	Amount float64 `yaml:"amount" json:"amount"`
+
+	// CostBasis selects the spend the amount limits: provider (default) for
+	// upstream provider cost, or billed for provider cost plus markup. billed
+	// requires pricing.markups_enabled and a GoModel Pro license with the
+	// billing entitlement.
+	CostBasis string `yaml:"cost_basis" json:"cost_basis,omitempty"`
 
 	// PerChild is accepted only in the JSON-array environment-variable form.
 	// YAML keeps this setting on the enclosing user-path entry.
@@ -240,6 +252,12 @@ func validateBudgetLimits(limits []BudgetLimitConfig, field, scope, subject stri
 			}
 			seconds = parsed
 			limits[limitIdx].PeriodSeconds = seconds
+		}
+		switch basis := strings.ToLower(strings.TrimSpace(limit.CostBasis)); basis {
+		case "", "provider", "billed":
+			limits[limitIdx].CostBasis = basis
+		default:
+			return fmt.Errorf("%s.limits[%d].cost_basis must be one of provider, billed", field, limitIdx)
 		}
 		key := scope + "\x00" + subject + "\x00" + strconv.FormatInt(seconds, 10)
 		if _, ok := seen[key]; ok {

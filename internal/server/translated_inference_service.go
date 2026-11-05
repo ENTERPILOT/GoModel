@@ -203,7 +203,7 @@ func handleTranslatedJSON[Req any](
 ) error {
 	req, err := canonicalJSONRequestFromSemantics[Req](c, decode)
 	if err != nil {
-		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+		return handleError(c, invalidRequestBodyError(c, err))
 	}
 
 	ctx, preparedReq, workflow, err := prepare(s, promptEditCaptureContext(c, s.logger), req, translatedRequestMeta(c))
@@ -317,8 +317,9 @@ func responsesPreparedFields(prepared *gateway.PreparedResponsesRequest) (contex
 
 // handleWithCache routes translated requests through the response cache when
 // enabled. The request has already been resolved and patched by the orchestrator.
-// Cache hits intentionally return before dispatch and budget enforcement because
-// they do not incur provider spend. Cache misses still run dispatch, where
+// Cache hits return before dispatch and provider-cost budget enforcement because
+// they do not incur provider spend; billed budgets are checked first, since a
+// billed hit still adds billed cost. Cache misses still run dispatch, where
 // dispatchChatCompletion and dispatchResponses call enforceBudget before any
 // provider request.
 func handleWithCache[R any](
@@ -335,6 +336,9 @@ func handleWithCache[R any](
 	}
 
 	if s.responseCache != nil && (workflow == nil || workflow.CacheEnabled()) {
+		if err := enforceCacheHitBudget(c, s.budgetChecker, workflow); err != nil {
+			return handleError(c, err)
+		}
 		body, marshalErr := marshalRequestBody(req)
 		if marshalErr != nil {
 			slog.Debug("marshalRequestBody failed", "err", marshalErr)
@@ -576,7 +580,7 @@ func (s *translatedInferenceService) recordResponseSnapshotStoreFailure(rec snap
 func (s *translatedInferenceService) Embeddings(c *echo.Context) error {
 	req, err := canonicalJSONRequestFromSemantics[*core.EmbeddingRequest](c, core.DecodeEmbeddingRequest)
 	if err != nil {
-		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+		return handleError(c, invalidRequestBodyError(c, err))
 	}
 
 	prepared, err := s.inference().PrepareEmbeddingRequest(c.Request().Context(), req, translatedRequestMeta(c))
@@ -589,16 +593,24 @@ func (s *translatedInferenceService) Embeddings(c *echo.Context) error {
 }
 
 func (s *translatedInferenceService) dispatchEmbeddings(c *echo.Context, req *core.EmbeddingRequest, workflow *core.Workflow) error {
-	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker, rateLimitRouteFromWorkflow(workflow))
+	s.observeLiveProviderAttempts(c, workflow)
+	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker,
+		rateLimitRouteFromWorkflow(workflow).withFailovers(len(s.inference().FailoverSelectors(workflow))))
 	if err != nil {
 		return handleError(c, err)
 	}
 	defer adm.release()
 
 	requestID := requestIDFromContextOrHeader(c.Request())
-	result, err := s.inference().ExecuteEmbeddings(c.Request().Context(), workflow, req, requestID, "/v1/embeddings")
+	ctx := adm.dispatchContext(c.Request().Context())
+	result, err := s.inference().ExecuteEmbeddings(ctx, workflow, req, requestID, "/v1/embeddings")
 	if err != nil {
 		return handleError(c, err)
+	}
+	enrichAuditEntryWithProviderAttempts(c)
+	if result.Meta.UsedFailover {
+		markRequestFailoverUsed(c)
+		auditlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)
 	}
 	auditlog.EnrichEntryWithResolvedRoute(
 		c,

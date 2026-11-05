@@ -1,0 +1,77 @@
+---
+title: "Xiaomi MiMo"
+description: "在 GoModel 中配置 Xiaomi MiMo：思考模式、[1m] 上下文后缀，以及 TTS/ASR 如何映射到标准音频端点。"
+icon: "mic"
+keywords: ["Xiaomi MiMo", "小米 MiMo", "思考模式", "thinking mode", "TTS", "ASR", "提供商配置", "provider setup"]
+---
+
+Xiaomi MiMo 提供兼容 OpenAI 的聊天 API，但带有一些方言差异：
+默认开启思考模式，通过模型 ID 后缀选择 1M 上下文，并且 TTS/ASR 通过 Chat Completions 而不是专用音频端点运行。
+GoModel 会为您将标准的 `/v1/audio/speech` 和 `/v1/audio/transcriptions`
+端点翻译为该方言。
+
+## 配置
+
+```bash
+XIAOMI_API_KEY=...
+```
+
+或者在 `config.yaml` 中：
+
+```yaml
+providers:
+  xiaomi:
+    type: xiaomi
+    base_url: "https://api.xiaomimimo.com/v1"
+    api_key: "${XIAOMI_API_KEY}"
+```
+
+## 思考模式
+
+MiMo 模型默认进行思考，这会增加 Token 用量。可以使用 MiMo 的 `thinking` 参数按请求禁用它——GoModel 会原样转发该参数：
+
+```json
+{"model": "xiaomi/mimo-v2.5-pro", "thinking": {"type": "disabled"}, ...}
+```
+
+在多轮工具调用对话中，请在消息历史中按收到时的原样回放助手的
+`reasoning_content` 字段。GoModel 在两个方向上都会保留该字段。
+
+## 1M 上下文
+
+在模型 ID 后追加 `[1m]`（例如 `mimo-v2.5-pro[1m]`）即可启用
+1M Token 上下文。这些变体通常不会出现在 MiMo 的 `/models`
+列表中，因此请将它们添加到已配置的模型列表中，使其可被路由：
+
+```bash
+XIAOMI_MODELS=mimo-v2.5-pro,mimo-v2.5-pro[1m]
+```
+
+## 文本转语音与转录
+
+MiMo 没有原生的 `/audio/*` 端点——TTS（`mimo-v2.5-tts`、
+`mimo-v2.5-tts-voicedesign`、`mimo-v2.5-tts-voiceclone`）和 ASR
+（`mimo-v2.5-asr`）都通过 Chat Completions 运行。GoModel 两种方式都提供：
+
+- **标准音频端点**——`/v1/audio/speech` 和
+  `/v1/audio/transcriptions` 会被自动翻译。语音合成支持
+  `response_format` `wav`（默认）和 `pcm`；`mp3`（OpenAI 文档中的默认值，部分 SDK 会显式发送）会被视为“未指定”，并以 WAV 应答，因此响应的 `Content-Type` 为 `audio/wav`。
+  `instructions` 会成为 MiMo 的风格提示词，`voice` 用于选择预设语音。转录支持
+  `json`（默认）和 `text` 响应格式，`language` 会透传到 MiMo 的 `asr_options`，`temperature` 会转发到聊天请求中。
+- **MiMo 的聊天方言**——直接发送 Chat Completions 请求：语音合成时，将合成文本放在
+  `assistant` 消息中，并使用顶层的 `audio: {format, voice}` 参数；转录时，使用 `data` 为 base64 `data:` URI 的
+  `input_audio` 内容部分。GoModel 会原样转发这些结构。
+
+## Xiaomi MiMo 不支持的功能
+
+以下所有情况都会返回 `invalid_request_error`，而不是静默丢弃该选项：
+
+- 嵌入。
+- `wav`/`pcm`/`mp3` 以外的语音 `response_format` 值（`opus`、`aac`、
+  `flac`），以及非默认的 `speed`（请使用 `instructions` 调整语速）。
+- 转录的 `verbose_json`/`srt`/`vtt` 格式、`prompt` 以及
+  `timestamp_granularities`（MiMo 只返回纯文本转录结果）。
+
+<Note>
+  自 2026 年 6 月 18 日起，MiMo-V2-Flash 和 V2-TTS 请求会自动路由到 V2.5 模型（按 V2.5 定价计费）。
+</Note>

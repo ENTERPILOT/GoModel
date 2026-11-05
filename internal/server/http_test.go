@@ -106,6 +106,7 @@ func TestStartWithListener(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 	done := make(chan error, 1)
 	go func() {
 		done <- srv.StartWithListener(ctx, listener)
@@ -113,30 +114,18 @@ func TestStartWithListener(t *testing.T) {
 
 	client := &http.Client{Timeout: 200 * time.Millisecond}
 	url := "http://" + listener.Addr().String() + "/health"
-	var lastErr error
-	for range 20 {
+	require.Eventually(t, func() bool {
 		resp, err := client.Get(url)
-		if err == nil {
-			_ = resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				cancel()
-				err := <-done
-				require.NoError(t, err)
-
-				return
-			}
-			lastErr = nil
-		} else {
-			lastErr = err
+		if err != nil {
+			return false
 		}
-		time.Sleep(50 * time.Millisecond)
-	}
+		_ = resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	}, 2*time.Second, 10*time.Millisecond, "health check never succeeded")
 
 	cancel()
 	err = <-done
 	require.NoError(t, err)
-
-	t.Fatalf("health check never succeeded, last error: %v", lastErr)
 }
 
 func TestMetricsEndpoint(t *testing.T) {

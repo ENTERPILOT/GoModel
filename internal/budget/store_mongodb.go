@@ -95,6 +95,10 @@ func (s *MongoDBStore) ListBudgets(ctx context.Context) ([]Budget, error) {
 		if err := cursor.Decode(&budget); err != nil {
 			return nil, fmt.Errorf("decode budget: %w", err)
 		}
+		// Documents stored before cost bases existed keep limiting provider cost.
+		if budget.CostBasis == "" {
+			budget.CostBasis = CostBasisProvider
+		}
 		budgets = append(budgets, budget)
 	}
 	if err := cursor.Err(); err != nil {
@@ -122,6 +126,7 @@ func (s *MongoDBStore) upsertNormalizedBudgets(ctx context.Context, budgets []Bu
 			{Key: "scope", Value: budget.Scope},
 			{Key: "subject", Value: budget.Subject},
 			{Key: "per_child", Value: budget.PerChild},
+			{Key: "cost_basis", Value: budget.CostBasis},
 			{Key: "period_seconds", Value: budget.PeriodSeconds},
 			{Key: "amount", Value: budget.Amount},
 			{Key: "source", Value: budget.Source},
@@ -416,7 +421,7 @@ func (s *MongoDBStore) ResetAllBudgets(ctx context.Context, at time.Time) error 
 	return nil
 }
 
-// SumSpend totals uncached spend for every window in one aggregation.
+// SumSpend totals spend for every window in one aggregation.
 //
 // A budget check matches several budgets at once — a user-path subtree plus a
 // budget per request label — so the pipeline matches the union of their windows
@@ -432,14 +437,15 @@ func (s *MongoDBStore) SumSpend(ctx context.Context, windows []SpendWindow) ([]S
 		if err != nil {
 			return nil, err
 		}
+		cost := mongoSpendCost(window)
 		group = append(group,
 			bson.E{Key: spendTotalField(i), Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{
 				condition,
-				bson.D{{Key: "$ifNull", Value: bson.A{"$total_cost", 0}}},
+				bson.D{{Key: "$ifNull", Value: bson.A{cost, 0}}},
 				0,
 			}}}}}},
 			bson.E{Key: spendHasUsageField(i), Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$cond", Value: bson.A{
-				bson.D{{Key: "$and", Value: bson.A{condition, bson.D{{Key: "$gt", Value: bson.A{"$total_cost", nil}}}}}},
+				bson.D{{Key: "$and", Value: bson.A{condition, bson.D{{Key: "$gt", Value: bson.A{cost, nil}}}}}},
 				1,
 				0,
 			}}}}}},
@@ -450,11 +456,6 @@ func (s *MongoDBStore) SumSpend(ctx context.Context, windows []SpendWindow) ([]S
 	pipeline := bson.A{
 		bson.D{{Key: "$match", Value: bson.D{
 			{Key: "timestamp", Value: bson.D{{Key: "$gte", Value: minStart.UTC()}, {Key: "$lt", Value: maxEnd.UTC()}}},
-			{Key: "$or", Value: bson.A{
-				bson.D{{Key: "cache_type", Value: bson.D{{Key: "$exists", Value: false}}}},
-				bson.D{{Key: "cache_type", Value: nil}},
-				bson.D{{Key: "cache_type", Value: ""}},
-			}},
 		}}},
 		bson.D{{Key: "$group", Value: group}},
 	}
@@ -499,6 +500,31 @@ func bsonNumber(value any) (float64, bool) {
 	}
 }
 
+// mongoSpendCost renders the cost one usage document adds to a window, null
+// when it adds nothing, matching the SQL stores: a provider window sums the
+// provider cost of uncached documents, and a billed window sums billed cost
+// with response-cache hits included unless the window excludes them, counting
+// an uncached document without a billed cost at its provider cost.
+func mongoSpendCost(window SpendWindow) bson.D {
+	uncached := bson.D{{Key: "$eq", Value: bson.A{bson.D{{Key: "$ifNull", Value: bson.A{"$cache_type", ""}}}, ""}}}
+	if window.billed() {
+		var cacheHit any
+		if window.billedCacheHits() {
+			cacheHit = bson.D{{Key: "$ifNull", Value: bson.A{"$billed_cost", nil}}}
+		}
+		return bson.D{{Key: "$cond", Value: bson.A{
+			uncached,
+			bson.D{{Key: "$ifNull", Value: bson.A{"$billed_cost", bson.D{{Key: "$ifNull", Value: bson.A{"$total_cost", nil}}}}}},
+			cacheHit,
+		}}}
+	}
+	return bson.D{{Key: "$cond", Value: bson.A{
+		uncached,
+		bson.D{{Key: "$ifNull", Value: bson.A{"$total_cost", nil}}},
+		nil,
+	}}}
+}
+
 // mongoSpendCondition renders the per-document predicate for one window as an
 // aggregation expression: inside the time window and matching the subject.
 func mongoSpendCondition(window SpendWindow) (bson.D, error) {
@@ -531,17 +557,27 @@ func mongoSubjectMatch(window SpendWindow) (bson.D, error) {
 		if err != nil {
 			return nil, err
 		}
-		return bson.D{{Key: "$in", Value: bson.A{bson.D{{Key: "$literal", Value: subject}}, bson.D{{Key: "$ifNull", Value: bson.A{"$labels", bson.A{}}}}}}}, nil
+		return mongoConsumerSpendMatch(bson.D{{Key: "$in", Value: bson.A{bson.D{{Key: "$literal", Value: subject}}, bson.D{{Key: "$ifNull", Value: bson.A{"$labels", bson.A{}}}}}}}), nil
 	}
 	userPath, err := NormalizeUserPath(window.Subject)
 	if err != nil {
 		return nil, err
 	}
 	// Missing and blank user paths count as the root, matching the SQL stores.
-	return bson.D{{Key: "$regexMatch", Value: bson.D{
+	return mongoConsumerSpendMatch(bson.D{{Key: "$regexMatch", Value: bson.D{
 		{Key: "input", Value: mongoTrimmedOr("$user_path", "/")},
 		{Key: "regex", Value: usagePathRegex(userPath)},
-	}}}, nil
+	}}}), nil
+}
+
+// mongoConsumerSpendMatch wraps a user-path or label predicate so documents
+// served by a non-billable provider add nothing, matching the SQL stores. A
+// document without the field predates it and is billable.
+func mongoConsumerSpendMatch(condition bson.D) bson.D {
+	return bson.D{{Key: "$and", Value: bson.A{
+		condition,
+		bson.D{{Key: "$ne", Value: bson.A{bson.D{{Key: "$ifNull", Value: bson.A{"$billable", true}}}, false}}},
+	}}}
 }
 
 // mongoTrimmedOr renders a field trimmed of whitespace, or fallback when the

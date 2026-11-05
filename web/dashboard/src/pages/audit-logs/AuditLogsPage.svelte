@@ -13,6 +13,7 @@
   import Pagination from "$lib/components/molecules/Pagination.svelte";
   import LoadingState from "$lib/components/molecules/LoadingState.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
+  import AuditColumnsMenu from "./AuditColumnsMenu.svelte";
   import AuditFilters from "./AuditFilters.svelte";
   import AuditLiveStatus from "./AuditLiveStatus.svelte";
   import AuditEntryRow from "./AuditEntryRow.svelte";
@@ -132,6 +133,7 @@
           />
           <span>{m.audit_group_by_session()}</span>
         </label>
+        <AuditColumnsMenu />
       </div>
       <AuditLiveStatus />
     </div>

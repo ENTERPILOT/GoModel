@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -183,10 +184,14 @@ func TestBalancer_PluginFallsBackToRoundRobin(t *testing.T) {
 
 			svc.SetRouteResolver(tc.resolver)
 
-			// Weight 5 on the first target: the fallback is weighted round robin.
-			got := resolvedModels(t, svc, "smart", 7)
-			want := []string{"openai/gpt-4o", "openai/gpt-4o", "openai/gpt-4o", "openai/gpt-4o", "openai/gpt-4o", "anthropic/claude", "groq/llama"}
-			require.Equal(t, want, got)
+			// The select timeout runs on the bubble's clock, so a strategy
+			// that times out costs no real time per resolution.
+			synctest.Test(t, func(t *testing.T) {
+				// Weight 5 on the first target: the fallback is weighted round robin.
+				got := resolvedModels(t, svc, "smart", 7)
+				want := []string{"openai/gpt-4o", "openai/gpt-4o", "openai/gpt-4o", "openai/gpt-4o", "openai/gpt-4o", "anthropic/claude", "groq/llama"}
+				require.Equal(t, want, got)
+			})
 		})
 	}
 }
@@ -195,10 +200,11 @@ func TestBalancer_PluginTimeoutDoesNotWaitForStrategy(t *testing.T) {
 	t.Parallel()
 	strategy := &scriptedStrategy{answer: "groq/llama", block: 5 * time.Second}
 	svc := newPluginService(t, &fakeResolver{strategy: strategy}, nil)
-	start := time.Now()
-	resolvedModels(t, svc, "smart", 1)
-	elapsed := time.Since(start)
-	require.LessOrEqual(t, elapsed, 5*pluginSelectTimeout, "resolution took %s, want about the %s select timeout", elapsed, pluginSelectTimeout)
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		resolvedModels(t, svc, "smart", 1)
+		require.Equal(t, pluginSelectTimeout, time.Since(start), "resolution must return at the select timeout, not when the strategy answers")
+	})
 }
 
 func TestBalancer_PluginSingleViableTargetBypassesStrategy(t *testing.T) {
@@ -326,7 +332,8 @@ func TestValidateManagedConfig_PluginStrategy(t *testing.T) {
 
 func TestConfigModels_PluginStrategy(t *testing.T) {
 	t.Parallel()
-	vm := configModel(configEntryWithPlugin())
+	vm, err := configModel(configEntryWithPlugin())
+	require.NoError(t, err)
 	require.Equal(t, StrategyPlugin, vm.Strategy)
 	require.Equal(t, "cheapest_healthy", vm.StrategyPlugin, "configModel() = %+v", vm)
 	require.Equal(t, map[string]any{"prefer": "fastest", "max_error_rate": 0.1}, vm.StrategyConfig)
@@ -386,12 +393,14 @@ func TestBalancer_PluginTimeoutKeepsInstanceHeldUntilSelectReturns(t *testing.T)
 	inst := &plugins.Instance{Name: "lat"}
 	strategy := &scriptedStrategy{answer: "groq/llama", block: 3 * pluginSelectTimeout, ignoreCtx: true}
 	svc := newPluginService(t, &fakeResolver{strategy: strategy, inst: inst}, nil)
-	resolvedModels(t, svc, "smart", 1)
-	require.True(t, inst.Held())
+	synctest.Test(t, func(t *testing.T) {
+		resolvedModels(t, svc, "smart", 1)
+		require.True(t, inst.Held())
 
-	deadline := time.Now().Add(2 * time.Second)
-	for inst.Held() && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
-	require.False(t, inst.Held())
+		// Let the strategy's sleep run out on the bubble's clock; Select
+		// returns and the goroutine releases the hold.
+		time.Sleep(strategy.block)
+		synctest.Wait()
+		require.False(t, inst.Held())
+	})
 }

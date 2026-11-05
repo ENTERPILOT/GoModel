@@ -17,11 +17,11 @@ import {
   providerCredentialKeysToRows,
   providerCredentialKeyRowsToArray,
   suggestProviderCredentialName,
-  splitCommaList,
   providerCredentialRowToForm,
   resetProviderCredentialFields,
   validateProviderCredentialForm,
   buildProviderCredentialPayload,
+  providerRowNonBillable,
   providerRowsHaveActions,
 } from "../src/pages/providers-config/providersConfigLogic.js";
 
@@ -69,7 +69,7 @@ test("buildProviderCredentialPayload sends a normalized PUT payload on create", 
     type: "openai",
     api_keys: [{ value: " sk-live-123 " }],
     base_url: " https://api.openai.com/v1 ",
-    models: " gpt-4o, gpt-4o-mini ,,",
+    models: [{ value: " gpt-4o" }, { value: "" }, { value: "gpt-4o-mini, gpt-4o " }],
     enabled: true,
   };
 
@@ -136,7 +136,7 @@ test("changing type drops the values the new type does not render", () => {
     api_keys: [{ value: "sk-live" }],
     vertex_project: "left-over",
     service_account_json: '{"type":"service_account"}',
-    models: "gpt-4o",
+    models: [{ value: "gpt-4o" }],
   };
 
   const form = resetProviderCredentialFields(
@@ -149,7 +149,7 @@ test("changing type drops the values the new type does not render", () => {
   // Identity and the fields OpenAI does render survive.
   assert.equal(form.name, "my-openai");
   assert.equal(form.type, "openai");
-  assert.equal(form.models, "gpt-4o");
+  assert.deepEqual(form.models, [{ value: "gpt-4o" }]);
   assert.deepEqual(form.api_keys, [{ value: "sk-live" }]);
   assert.equal("vertex_project" in buildProviderCredentialPayload(form, OPENAI_SCHEMA), false);
 });
@@ -231,6 +231,38 @@ test("providerCredentialFormFields splits a schema into primary and advanced", (
   assert.equal(advanced[1].control, "checkbox");
 });
 
+test("billable defaults on, maps from the row, and is always sent when advertised", () => {
+  assert.equal(defaultProviderCredentialForm().billable, true);
+  assert.equal(providerCredentialRowToForm({ billable: false }).billable, false);
+  assert.equal(providerCredentialRowToForm({}).billable, true);
+
+  const schema = {
+    ...OPENAI_SCHEMA,
+    fields: [...OPENAI_SCHEMA.fields, { name: "billable", required: false, advanced: true }],
+  };
+  const { advanced } = providerCredentialFormFields(schema);
+  const billable = advanced.find((field) => field.name === "billable");
+  assert.equal(billable.control, "checkbox");
+  assert.equal(billable.label, "Billable");
+
+  const form = {
+    ...defaultProviderCredentialForm(),
+    name: "customer-openai",
+    type: "openai",
+    api_keys: [{ value: "sk-live" }],
+  };
+  assert.equal(buildProviderCredentialPayload(form, schema).billable, true);
+  form.billable = false;
+  assert.equal(buildProviderCredentialPayload(form, schema).billable, false);
+  // A gateway that does not advertise the field never receives it.
+  assert.equal("billable" in buildProviderCredentialPayload(form, OPENAI_SCHEMA), false);
+  assert.equal("billable" in buildProviderCredentialPayload(form, null), false);
+
+  assert.equal(providerRowNonBillable({ billable: false }), true);
+  assert.equal(providerRowNonBillable({ billable: true }), false);
+  assert.equal(providerRowNonBillable({}), false);
+});
+
 test("session stickiness defaults on and can be disabled", () => {
   assert.equal(defaultProviderCredentialForm().session_sticky_keys, true);
   assert.equal(providerCredentialRowToForm({ session_sticky_keys: false }).session_sticky_keys, false);
@@ -270,6 +302,9 @@ test("a missing schema falls back to every known field", () => {
   assert.equal(names.includes("api_keys"), true);
   assert.equal(names.includes("vertex_project"), true);
   assert.deepEqual(primary.map((field) => field.name), ["api_keys"]);
+  // Toggles the payload would not send without a schema are not offered either.
+  assert.equal(names.includes("session_sticky_keys"), false);
+  assert.equal(names.includes("billable"), false);
 });
 
 test("providerCredentialFieldMeta humanizes a field the dashboard has no copy for", () => {
@@ -486,7 +521,7 @@ test("providerCredentialRowToForm prefills the form from a view row", () => {
   assert.equal(form.name, "my-openai");
   assert.equal(form.type, "openai");
   assert.deepEqual(form.api_keys, [{ value: "***********" }]);
-  assert.equal(form.models, "gpt-4o, gpt-4o-mini");
+  assert.deepEqual(form.models, [{ value: "gpt-4o" }, { value: "gpt-4o-mini" }]);
   assert.equal(form.enabled, false);
 });
 
@@ -551,14 +586,6 @@ test("providerCredentialTypeOptions lists every server-supplied provider type", 
     "llmd",
     "sglang",
   ]);
-});
-
-test("splitCommaList trims and drops empties", () => {
-  assert.deepEqual(
-    splitCommaList(" gpt-4o, gpt-4o-mini ,,"),
-    ["gpt-4o", "gpt-4o-mini"],
-  );
-  assert.deepEqual(splitCommaList(""), []);
 });
 
 test("providerRowsHaveActions is false when every provider is managed", () => {

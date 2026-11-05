@@ -11,6 +11,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/batch"
 	"github.com/enterpilot/gomodel/internal/budget"
+	"github.com/enterpilot/gomodel/internal/clustersync"
 	"github.com/enterpilot/gomodel/internal/conversationstore"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/filestore"
@@ -22,13 +23,15 @@ import (
 	"github.com/enterpilot/gomodel/internal/ratelimit"
 	"github.com/enterpilot/gomodel/internal/responsestore"
 	"github.com/enterpilot/gomodel/internal/runtimesettings"
+	"github.com/enterpilot/gomodel/internal/sharedstore"
 	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/telemetry"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
 // initStorage opens the one storage connection every subsystem shares, then
-// the runtime settings service that reconciles live configuration through it.
+// the runtime settings service that reconciles live configuration through it
+// and the shared store extensions coordinate through.
 func (b *bootstrap) initStorage() error {
 	app := b.app
 
@@ -42,6 +45,15 @@ func (b *bootstrap) initStorage() error {
 	}
 	app.storage = sharedStorage
 	app.register(subsystemStorage, ownedByShutdown, sharedStorage.Close)
+
+	// Opened before any admin-managed snapshot loads: the revisions it
+	// records now are the ones those snapshots include, so a change saved on
+	// another instance from here on is refreshed once this generation serves.
+	app.clusterSync, err = clustersync.New(b.ctx, sharedStorage)
+	if err != nil {
+		return fmt.Errorf("failed to initialize cluster config sync: %w", err)
+	}
+	app.register(subsystemClusterSync, ownedByShutdown, app.clusterSync.Close)
 
 	// Dashboard-managed secrets are sealed with the database's data keys;
 	// every store that holds one is built after this point.
@@ -61,7 +73,26 @@ func (b *bootstrap) initStorage() error {
 	if app.runtimeSettings != nil {
 		app.register(subsystemRuntimeSettings, ownedByShutdown, app.runtimeSettings.Close)
 	}
+
+	// The shared store exists only when a registered component asks for it
+	// or the MCP gateway shares sessions through it, so a gateway without
+	// either creates no table. initServer binds it once the generation has
+	// built.
+	if len(sharedStoreAwareComponents(b.cfg.Extensions)) > 0 || mcpSharesSessions(b.appCfg) {
+		app.sharedStore, err = sharedstore.New(b.ctx, sharedStorage)
+		if err != nil {
+			return fmt.Errorf("failed to initialize shared store: %w", err)
+		}
+		app.register(subsystemSharedStore, ownedByShutdown, app.sharedStore.Close)
+	}
 	return nil
+}
+
+// mcpSharesSessions reports whether MCP downstream sessions are shared
+// between replicas. Only a database several replicas can share needs it: a
+// SQLite file belongs to one instance, which keeps its sessions in memory.
+func mcpSharesSessions(cfg *config.Config) bool {
+	return cfg.MCP.Enabled && cfg.Storage.BackendConfig().Type != storage.TypeSQLite
 }
 
 // initProviders composes every upstream client hook, then builds the
@@ -175,7 +206,7 @@ func (b *bootstrap) initTracking() error {
 
 	var budgetResult *budget.Result
 	if appCfg.Budgets.Enabled {
-		budgetResult, err = budget.New(b.ctx, appCfg, app.storage, b.quotaTemplatesEnabled)
+		budgetResult, err = budget.New(b.ctx, appCfg, app.storage, b.quotaTemplatesEnabled, b.billedBudgetsEnabled)
 		if err != nil {
 			return fmt.Errorf("failed to initialize budgets: %w", err)
 		}
@@ -185,6 +216,11 @@ func (b *bootstrap) initTracking() error {
 	}
 	app.budgets = budgetResult
 	app.register(subsystemBudgets, ownedByShutdown, app.budgets.Close)
+	if app.budgets.Service != nil && app.providers != nil && app.providers.Registry != nil {
+		// A request served by a billable: false provider is checked against
+		// provider budgets only; see providers.ModelRegistry.ProviderBillable.
+		app.budgets.Service.SetProviderBillable(app.providers.Registry.ProviderBillable)
+	}
 
 	var rateLimitResult *ratelimit.Result
 	if appCfg.RateLimits.Enabled {

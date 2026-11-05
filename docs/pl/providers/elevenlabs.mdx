@@ -1,0 +1,116 @@
+---
+title: "ElevenLabs"
+description: "Skonfiguruj ElevenLabs w GoModel: voice_id a nazwane głosy, obsługiwane formaty audio i znaczniki czasu w zamianie mowy na tekst."
+icon: "audio-lines"
+keywords: ["ElevenLabs", "text-to-speech", "zamiana tekstu na mowę", "TTS", "speech-to-text", "zamiana mowy na tekst", "STT", "voice", "głos", "konfiguracja providera", "provider setup"]
+---
+
+ElevenLabs to provider wyłącznie głosowy: udostępnia zamianę tekstu na mowę
+i mowy na tekst za standardowymi endpointami `/v1/audio/speech` i
+`/v1/audio/transcriptions`. Nie ma API czatu, `/responses` ani embeddingów,
+więc te endpointy zwracają `invalid_request_error` dla modeli kierowanych do
+ElevenLabs.
+
+## Konfiguracja
+
+```bash
+ELEVENLABS_API_KEY=...
+```
+
+Albo w `config.yaml`:
+
+```yaml
+providers:
+  elevenlabs:
+    type: elevenlabs
+    api_key: "${ELEVENLABS_API_KEY}"
+    # base_url domyślnie ma wartość "https://api.elevenlabs.io".
+```
+
+## Głosy to identyfikatory, nie nazwy
+
+W odróżnieniu od stałych nazw głosów OpenAI (`alloy`, `verse`, ...) ElevenLabs
+nie ma wbudowanych nazwanych głosów – każdy głos to ID z Twojej biblioteki
+głosów ElevenLabs (wbudowany, sklonowany lub udostępniony). Przekaż to ID w
+polu `voice` kompatybilnym z OpenAI:
+
+```json
+{
+  "model": "eleven_multilingual_v2",
+  "input": "Hello there",
+  "voice": "21m00Tcm4TlvDq8ikWAM"
+}
+```
+
+Listę dostępnych ID głosów znajdziesz w dashboardzie ElevenLabs albo pobierzesz
+przez [passthrough](/pl/features/passthrough-api) (po dodaniu `elevenlabs` do
+`ENABLED_PASSTHROUGH_PROVIDERS`) pod adresem `/p/elevenlabs/v2/voices` – to
+nowszy endpoint wyszukiwania `GET /v2/voices`. `/p/elevenlabs/v1/voices` obecnie
+nie działa: router passthrough providerów w GoModel traktuje początkowy segment
+`v1/` w ścieżce jako alias dla providerów, których bazowy URL już zawiera `/v1`
+(np. OpenAI), i usuwa go przed przekazaniem requestu. Bazowy URL ElevenLabs to
+`https://api.elevenlabs.io` bez `/v1`, więc każde wywołanie passthrough
+`/p/elevenlabs/v1/...` kończy się obecnie błędem 404. Dotyczy to całego
+natywnego API `/v1` ElevenLabs przez passthrough, nie tylko listowania głosów –
+zobacz „Nie zaimplementowano” poniżej.
+
+## Obsługiwane formaty mowy
+
+`response_format` przyjmuje `mp3` (domyślnie), `opus`, `pcm` i `wav`; każdy z
+nich mapuje się na stały `output_format` ElevenLabs (`mp3_44100_128`,
+`opus_48000_128`, `pcm_24000`, `wav_44100`). `aac` i `flac` nie są obsługiwane
+i zwracają `invalid_request_error`. `speed`, jeśli jest ustawione, jest
+przycinane do zakresu ustawienia głosu ElevenLabs `0.7`-`1.2` (OpenAI przyjmuje
+`0.25`-`4.0`); `instructions` nie jest obsługiwane.
+
+## Modele zamiany mowy na tekst i znaczniki czasu
+
+Modele transkrypcji (`scribe_v2`, aktualny; `scribe_v1`, nadal poprawny) to
+osobna rodzina modeli, niezależna od katalogu zamiany tekstu na mowę, i nie są
+zwracane przez listę `/v1/models` ElevenLabs – GoModel sam dodaje je do wyniku
+`/v1/models`. `response_format` przyjmuje `json` (domyślnie), `text` i
+`verbose_json`; `srt`/`vtt` nie są obsługiwane. Zażądanie `verbose_json` albo
+`word` w `timestamp_granularities` prosi ElevenLabs o czasy na poziomie słów,
+które GoModel mapuje na tablicę `words` w formacie OpenAI. `prompt` nie jest
+obsługiwany.
+
+## Funkcje nieobsługiwane przez ElevenLabs
+
+Wszystkie poniższe zwracają `invalid_request_error`, zamiast po cichu pomijać
+opcję:
+
+- Chat completions, `/v1/responses` i embeddingi.
+- `instructions` syntezy mowy oraz wartości `response_format` inne niż
+  `mp3`/`opus`/`pcm`/`wav`.
+- `prompt` transkrypcji oraz wartości `response_format` inne niż
+  `json`/`text`/`verbose_json`.
+
+## Nie zaimplementowano
+
+GoModel implementuje tylko dwie funkcje ElevenLabs, które mapują się na
+endpointy kompatybilne z OpenAI: zamianę tekstu na mowę i mowy na tekst.
+Cała reszta oferty ElevenLabs nie ma dziś typowanej obsługi w GoModel:
+
+- **Speech-to-speech (zmiana głosu)** – `POST /v1/speech-to-speech/{voice_id}`
+  nie ma odpowiednika kompatybilnego z OpenAI, z którego można by tłumaczyć,
+  więc nie ma dla niego typowanego endpointu. W przyszłości mógłby zostać dodany
+  jako natywna trasa passthrough, ale **passthrough dla niego obecnie też nie
+  działa** – zobacz opisane wyżej ograniczenie aliasu `/v1`; speech-to-speech
+  nie ma ścieżki `/v2`, którą dałoby się to obejść, więc w tej chwili jest
+  całkowicie nieosiągalny przez GoModel.
+- **Dubbing, klonowanie/projektowanie głosów, projekty (Studio) i
+  conversational AI (agenci)** – z tego samego powodu: brak struktury
+  kompatybilnej z OpenAI, na którą można by tłumaczyć, a (dla części tych API
+  dostępnych wyłącznie pod `/v1`) obowiązuje to samo ograniczenie passthrough.
+  To rozsądni kandydaci do przyszłej natywnej obsługi passthrough, gdy to
+  ograniczenie zostanie usunięte.
+- **TTS i STT w czasie rzeczywistym/streaming**
+  (`/v1/text-to-speech/{voice_id}/stream`, streaming przez WebSocket) –
+  `/v1/audio/speech` i `/v1/audio/transcriptions` w GoModel działają synchronicznie
+  w modelu request/odpowiedź; dla ElevenLabs nie zaimplementowano wariantu
+  streamingowego.
+
+Nic z tego nie wynika z unikania rozrastania się zakresu specyficznego dla
+ElevenLabs – odzwierciedla to fakt, że powierzchnia audio GoModel jest celowo
+wzorowana na OpenAI, a API ElevenLabs jest znacznie większe niż para TTS/STT
+OpenAI.

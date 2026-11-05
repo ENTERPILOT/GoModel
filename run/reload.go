@@ -140,7 +140,7 @@ func writePIDFile(path string) (func(), error) {
 			return remove, fmt.Errorf("create pid file directory %s: %w", dir, err)
 		}
 	}
-	if err := os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil { //nolint:gosec // PID files are conventionally world-readable.
 		return remove, fmt.Errorf("write pid file %s: %w", path, err)
 	}
 	return func() {

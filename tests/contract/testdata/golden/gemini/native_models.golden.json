@@ -80,6 +80,48 @@
     },
     {
       "created": 0,
+      "id": "gemma-4-26b-a4b-it",
+      "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
+        "categories": [
+          "text_generation"
+        ],
+        "context_window": 262144,
+        "description": "Gemma 4 26B A4B IT",
+        "display_name": "Gemma 4 26B A4B IT",
+        "max_output_tokens": 32768,
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
+      "id": "gemma-4-31b-it",
+      "metadata": {
+        "capabilities": {
+          "reasoning": true
+        },
+        "categories": [
+          "text_generation"
+        ],
+        "context_window": 262144,
+        "description": "Gemma 4 31B IT",
+        "display_name": "Gemma 4 31B IT",
+        "max_output_tokens": 32768,
+        "modes": [
+          "chat"
+        ]
+      },
+      "object": "model",
+      "owned_by": "google"
+    },
+    {
+      "created": 0,
       "id": "gemini-flash-latest",
       "metadata": {
         "capabilities": {

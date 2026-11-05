@@ -6,6 +6,14 @@ import * as m from "../../lib/paraglide/messages.js";
 
 import { normalizedAliasName } from "./modelIdentity.js";
 
+// paramsObject returns a view's `params`/`default_params` map, or an empty
+// object when the field is absent or not a JSON object.
+export function paramsObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
+}
+
 // qualifyTarget renders a {provider, model} target as a single selector. The
 // model name may itself contain slashes (e.g. provider "groq" with model
 // "openai/gpt-oss-120b"), so only skip re-qualifying when the model already
@@ -194,6 +202,9 @@ export function mapRedirectView(view) {
     failover: view.failover !== false,
     description: view.description || "",
     slowdown: view.slowdown == null ? null : Number(view.slowdown),
+    reasoning_effort: view.reasoning_effort || "",
+    params: paramsObject(view.params),
+    default_params: paramsObject(view.default_params),
     enabled: view.enabled !== false,
     managed: Boolean(view.managed),
     valid: Boolean(view.valid),
@@ -223,6 +234,9 @@ export function splitVirtualModelViews(views) {
         user_paths: Array.isArray(view.user_paths) ? view.user_paths : [],
         description: view.description || "",
         slowdown: view.slowdown == null ? null : Number(view.slowdown),
+        reasoning_effort: view.reasoning_effort || "",
+        params: paramsObject(view.params),
+        default_params: paramsObject(view.default_params),
         enabled: view.enabled !== false,
         managed: Boolean(view.managed),
         scope_kind: view.scope_kind || "",

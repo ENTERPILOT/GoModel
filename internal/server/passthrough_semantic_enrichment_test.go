@@ -36,10 +36,10 @@ func TestPassthroughSemanticEnrichment_EnrichesPromptBeforeWorkflowResolution(t 
 	var capturedWorkflow *core.Workflow
 	handler := PassthroughSemanticEnrichment(provider, []core.PassthroughSemanticEnricher{
 		passthroughSemanticEnricherStub{providerType: "openai"},
-	}, true)(WorkflowResolution(provider)(func(c *echo.Context) error {
+	}, true)(RequestBodyCapture()(WorkflowResolution(provider)(func(c *echo.Context) error {
 		capturedWorkflow = core.GetWorkflow(c.Request().Context())
 		return c.String(http.StatusOK, "ok")
-	}))
+	})))
 
 	ctxReq, _ := ensureRequestID(c.Request())
 	c.SetRequest(ctxReq)

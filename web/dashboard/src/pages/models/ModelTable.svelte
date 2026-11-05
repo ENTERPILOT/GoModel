@@ -16,13 +16,23 @@
   import AccessToggle from "./AccessToggle.svelte";
   import ModelGlobalActions from "./ModelGlobalActions.svelte";
   import ModelRow from "./ModelRow.svelte";
+  import { providerGroups } from "./providerGroups.svelte.js";
   import { categoryColumns, categoryColspan } from "./categoryColumns.js";
-  import { CircleDollarSign, Gauge, Pencil } from "lucide";
+  import { ChevronRight, CircleDollarSign, Gauge, Pencil } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
   const category = $derived(modelsStore.activeCategory || "all");
   const columns = $derived(categoryColumns(category));
   const groupColspan = $derived(categoryColspan(category));
+
+  // A click on the header's empty space toggles the group, so the whole row
+  // is a tap target on phones. The row's own controls and text selection keep
+  // their normal behaviour.
+  function onGroupRowClick(event, group) {
+    if (event.target.closest("button, a, input, select, textarea, label")) return;
+    if (window.getSelection?.()?.toString()) return;
+    providerGroups.toggle(group);
+  }
 </script>
 
 <div class="table-wrapper">
@@ -41,13 +51,29 @@
       </tr>
     </thead>
     {#each virtualModels.filteredDisplayModelGroups as group (group.key)}
+      {@const collapsed = providerGroups.isCollapsed(group)}
       <tbody>
-        <tr class="provider-group-row">
+        <!-- The chevron button is the keyboard control; the row click only
+             widens the hit area for touch. -->
+        <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+        <tr class="provider-group-row" onclick={(event) => onGroupRowClick(event, group)}>
           <td colspan={groupColspan}>
             <div class="provider-group-header">
               <div class="provider-group-meta">
                 <div class="provider-group-title">
-                  <span class="mono font-size-md">{group.display_name}</span>
+                  <button
+                    type="button"
+                    class="provider-group-toggle"
+                    class:is-expanded={!collapsed}
+                    aria-expanded={!collapsed}
+                    title={collapsed
+                      ? m.models_expand_provider_group({ name: group.display_name })
+                      : m.models_collapse_provider_group({ name: group.display_name })}
+                    onclick={() => providerGroups.toggle(group)}
+                  >
+                    <Icon icon={ChevronRight} class="provider-group-toggle-icon" />
+                    <span class="mono font-size-md">{group.display_name}</span>
+                  </button>
                   {#if group.type_label}
                     <span class="provider-group-type">{"(" + group.type_label + ")"}</span>
                   {/if}
@@ -94,9 +120,11 @@
             </div>
           </td>
         </tr>
-        {#each group.rows as row (row.key)}
-          <ModelRow {row} {columns} colspan={groupColspan} />
-        {/each}
+        {#if !collapsed}
+          {#each group.rows as row (row.key)}
+            <ModelRow {row} {columns} colspan={groupColspan} />
+          {/each}
+        {/if}
       </tbody>
     {/each}
   </table>
@@ -107,6 +135,10 @@
     background: color-mix(in srgb, var(--accent) 6%, var(--bg));
     padding-top: 12px;
     padding-bottom: 12px;
+  }
+
+  .provider-group-row {
+    cursor: pointer;
   }
 
   .provider-group-row:hover :global(td) {
@@ -132,6 +164,60 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 8px;
+  }
+
+  .provider-group-toggle {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    /* Padding grows the hit area; the negative margin keeps the layout. */
+    margin: -6px -8px;
+    padding: 6px 8px;
+    min-height: 32px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .provider-group-toggle:hover {
+    color: var(--accent);
+  }
+
+  .provider-group-toggle:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 32%, transparent);
+    outline-offset: 0;
+  }
+
+  /* Touch screens get the recommended 44px minimum target. */
+  @media (pointer: coarse) {
+    .provider-group-toggle {
+      min-height: 44px;
+      margin: -12px -8px;
+      padding: 12px 8px;
+    }
+
+    .provider-group-toggle :global(.provider-group-toggle-icon) {
+      width: 18px;
+      height: 18px;
+    }
+  }
+
+  /* The class rides on the Icon child's own <svg>, so it needs :global. */
+  .provider-group-toggle :global(.provider-group-toggle-icon) {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    color: var(--text-muted);
+    transition: transform 0.2s ease;
+  }
+
+  .provider-group-toggle.is-expanded :global(.provider-group-toggle-icon) {
+    transform: rotate(90deg);
   }
 
   .provider-group-type, .provider-group-count, .provider-group-summary {

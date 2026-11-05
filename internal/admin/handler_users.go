@@ -112,8 +112,9 @@ func (h *Handler) DeleteUser(c *echo.Context) error {
 }
 
 // requireUserPathInScope rejects writes to user nodes outside the caller's
-// scope. Unparseable paths pass through so the service reports the usual
-// validation error.
+// scope, and to the scope root itself: the model policy on the root is what
+// the tenant was granted, so only a global credential changes it. Unparseable
+// paths pass through so the service reports the usual validation error.
 func requireUserPathInScope(c *echo.Context, raw string) error {
 	scope := requestScope(c)
 	if scope.Global() {
@@ -123,7 +124,7 @@ func requireUserPathInScope(c *echo.Context, raw string) error {
 	if err != nil {
 		return nil
 	}
-	if !scope.Allows(userPath) {
+	if !scopeAllowsWrite(scope, userPath) {
 		return userPathOutOfScopeError("user_path")
 	}
 	return nil

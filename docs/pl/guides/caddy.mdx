@@ -1,0 +1,148 @@
+---
+title: "GoModel i Caddy"
+description: "Użyj forward_auth z Caddy i endpointu weryfikacji kluczy GoModel, aby odrzucać nieuwierzytelniony ruch na brzegu sieci i chronić inne usługi kluczami API GoModel."
+icon: "shield-check"
+keywords: ["Caddy", "forward_auth", "reverse proxy", "weryfikacja kluczy API", "API key verification", "/v1/auth/verify", "uwierzytelnianie na brzegu", "edge authentication", "blokowanie nieuwierzytelnionego ruchu", "block unauthenticated traffic"]
+---
+
+## Przegląd
+
+[`forward_auth`](https://caddyserver.com/docs/caddyfile/directives/forward_auth) w Caddy
+pyta inną usługę, czy request może zostać przepuszczony. Skieruj go na
+[`GET /v1/auth/verify`](/pl/advanced/api-endpoints#weryfikacja-klucza) w GoModel, a Caddy
+będzie dopuszczać ruch na podstawie kluczy API GoModel – bez kopii tych kluczy gdziekolwiek w
+proxy.
+
+Sprawdza się to w dwóch zastosowaniach:
+
+- **Odrzucanie nieuwierzytelnionego ruchu na brzegu sieci.** Requesty bez prawidłowego klucza
+  nigdy nie docierają do gatewaya, więc skanery i źle skonfigurowani klienci nie otwierają
+  do niego połączeń ani nie trafiają do jego logu audytowego. GoModel nadal uwierzytelnia każdy
+  obsługiwany request; kontrola na brzegu to filtr przed nim, a nie zamiennik.
+- **Ochrona innych usług kluczami GoModel.** Wewnętrzny dashboard, strona z dokumentacją
+  lub endpoint metryk na tym samym hoście mogą wymagać prawidłowego klucza GoModel
+  bez implementowania własnego uwierzytelniania.
+
+`/v1/auth/verify` jest **domyślnie wyłączony**. Włącz go przez
+`AUTH_VERIFY_ENABLED=true` (`server.auth_verify_enabled`). Nie jest to trasa
+`/admin`, więc działa dalej przy `ADMIN_ENDPOINTS_ENABLED=false`.
+
+## Dlaczego to działa
+
+`forward_auth` decyduje wyłącznie na podstawie **kodu statusu**:
+
+| Odpowiedź GoModel | Co robi Caddy |
+| --------------- | ---------- |
+| `200` – klucz został uwierzytelniony | Przekazuje request do upstreamu |
+| `401` – nieznany, wyłączony lub wygasły klucz albo brak danych uwierzytelniających | Kopiuje odpowiedź do klienta i przerywa |
+
+Body odpowiedzi `401` od GoModel to jego zwykła koperta błędu w kształcie OpenAI, więc klient,
+który już rozumie błędy GoModel, widzi znajomy kształt z proxy.
+Body odpowiedzi `200` (`valid`, `method`, `key_id`, `user_path`) jest ignorowane przez Caddy –
+służy skryptom i usługom, które chcą wiedzieć, *który* klucz odpowiedział.
+
+## Ochrona innej usługi kluczami GoModel
+
+Upstreamem jest tu dowolna aplikacja, którą chcesz ukryć za kluczami GoModel.
+
+```caddyfile
+{
+	auto_https off # usuń to na produkcji i użyj prawdziwej nazwy hosta
+}
+
+:8090 {
+	forward_auth 127.0.0.1:8080 {
+		uri /v1/auth/verify
+		copy_headers X-Gomodel-Auth-User
+	}
+
+	reverse_proxy 127.0.0.1:9000
+}
+```
+
+`forward_auth` wysyła do GoModel nagłówki przychodzącego requestu, więc
+sprawdzany jest nagłówek `Authorization: Bearer sk_gom_...` (lub `x-api-key`) wywołującego.
+Nic więcej nie jest potrzebne, aby dane uwierzytelniające dotarły do gatewaya.
+
+`copy_headers X-Gomodel-Auth-User` przekazuje odpowiedź GoModel na pytanie, *kim* jest
+wywołujący: dla zarządzanego klucza przypisanego do [ścieżki użytkownika](/pl/features/user-path)
+upstream otrzymuje tę ścieżkę i może ograniczyć to, co pokazuje. Nagłówek jest pusty
+dla wywołujących z master key i dla kluczy bez przypisanej ścieżki.
+
+Sprawdź to:
+
+```bash
+# Brak danych uwierzytelniających – odrzucone na brzegu, upstream tego nie widzi
+curl -i http://localhost:8090/
+
+# Prawidłowy zarządzany klucz – dociera do upstreamu
+curl -i http://localhost:8090/ -H "Authorization: Bearer sk_gom_..."
+```
+
+## Filtrowanie ruchu przed gatewayem
+
+Aby umieścić tę samą kontrolę przed samym GoModel, weryfikuj względem gatewaya
+i przekazuj do niego ruch przez proxy:
+
+```caddyfile
+api.example.com {
+	forward_auth 127.0.0.1:8080 {
+		uri /v1/auth/verify
+	}
+
+	reverse_proxy 127.0.0.1:8080
+}
+```
+
+Każdy przekazywany request kosztuje teraz jedną dodatkową podróż do gatewaya, a
+gateway uwierzytelnia request po raz drugi, gdy go obsługuje. To cena za
+odrzucanie nieuwierzytelnionego ruchu, zanim dotrze do aplikacji –
+warto ją ponieść na brzegu wystawionym do internetu, ale nie w sieci prywatnej, gdzie
+własne uwierzytelnianie GoModel i tak jest jedyną bramką.
+
+Dwie trasy muszą pozostać dostępne bez klucza, jeśli z nich korzystasz:
+
+```caddyfile
+api.example.com {
+	@public path /health /health/ready /metrics
+	handle @public {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	handle {
+		forward_auth 127.0.0.1:8080 {
+			uri /v1/auth/verify
+		}
+		reverse_proxy 127.0.0.1:8080
+	}
+}
+```
+
+Health checki i scrape’y Prometheusa nie zawierają klucza API, więc bez tego
+zostałyby odrzucone przez bramkę na brzegu, mimo że GoModel obsługuje je
+bez uwierzytelniania.
+
+<Warning>
+  **Bramka jest tylko tak silna jak własne uwierzytelnianie gatewaya.** W
+  instancji GoModel bez master key i bez zarządzanych kluczy – niebezpiecznej
+  domyślnej konfiguracji deweloperskiej – każdy request jest akceptowany, `/v1/auth/verify` odpowiada
+  `200` z `{"valid": false, "method": "none"}`, bo nie ma klucza do
+  potwierdzenia, a `forward_auth` przepuszcza wszystko. Ustaw
+  `GOMODEL_MASTER_KEY` lub wydaj [zarządzane klucze](/pl/features/users), zanim zaczniesz
+  na tym polegać przy blokowaniu czegokolwiek.
+</Warning>
+
+## Uwagi
+
+- Caddy ponownie sprawdza klucz przy każdym requeście. `forward_auth` nie ma cache’u wyników,
+  więc gateway widzi jedno wywołanie weryfikacyjne na każdy przekazywany
+  request; `/v1/auth/verify` nie wykonuje żadnej pracy u providera i odpowiada na podstawie magazynu
+  kluczy.
+- Endpoint odpowiada z `Cache-Control: no-store` – odpowiedź opisuje dane uwierzytelniające
+  jednego wywołującego i nie może być serwowana nikomu innemu.
+- Włączenie endpointu udostępnia wyrocznię kluczy: każdy, kto ma do niego dostęp, może sprawdzić,
+  czy klucz jest prawidłowy. Udostępniaj go tylko tam, gdzie jest potrzebny, i stosuj
+  [rate limity](/pl/features/rate-limits) GoModel wobec niezaufanych wywołujących.
+- Caddy dodaje `X-Forwarded-Method` i `X-Forwarded-Uri` do podrequestu
+  weryfikacyjnego. GoModel ignoruje oba; kontrola dotyczy danych uwierzytelniających, a nie
+  żądanej trasy.

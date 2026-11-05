@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -663,23 +664,27 @@ func TestPatchResponsesAttempt_PendingSnapshotWaitFollowsAccessScope(t *testing.
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := &translatedInferenceService{provider: previousResponseTestProvider(t, "anthropic"), responseStore: responsestore.NewMemoryStore()}
-			done := s.trackPendingSnapshot("resp_t", "/tenant-b")
+			synctest.Test(t, func(t *testing.T) {
+				s := &translatedInferenceService{provider: previousResponseTestProvider(t, "anthropic"), responseStore: responsestore.NewMemoryStore()}
+				done := s.trackPendingSnapshot("resp_t", "/tenant-b")
 
-			finished := make(chan struct{})
-			go func() {
-				defer close(finished)
-				_, _ = s.PatchResponsesAttempt(tt.ctx, &core.ResponsesRequest{Model: "gpt-5-mini", Input: "x", PreviousResponseID: "resp_t"}, "anthropic")
-			}()
-			select {
-			case <-finished:
-				require.False(t, tt.wantWait)
-
-			case <-time.After(200 * time.Millisecond):
-				require.True(t, tt.wantWait)
-			}
-			s.finishPendingSnapshot("resp_t", done)
-			<-finished
+				finished := make(chan struct{})
+				go func() {
+					defer close(finished)
+					_, _ = s.PatchResponsesAttempt(tt.ctx, &core.ResponsesRequest{Model: "gpt-5-mini", Input: "x", PreviousResponseID: "resp_t"}, "anthropic")
+				}()
+				// Once every goroutine is blocked, the attempt has either
+				// returned or is parked on the pending write.
+				synctest.Wait()
+				select {
+				case <-finished:
+					require.False(t, tt.wantWait, "the attempt must wait for the pending write")
+				default:
+					require.True(t, tt.wantWait, "the attempt must not wait for another tenant's write")
+				}
+				s.finishPendingSnapshot("resp_t", done)
+				<-finished
+			})
 		})
 	}
 }

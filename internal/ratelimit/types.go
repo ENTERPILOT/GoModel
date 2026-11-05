@@ -1,8 +1,10 @@
 // Package ratelimit enforces request, token, and concurrency limits for the
 // AI gateway. Rules are scoped to a consumer user-path subtree, a provider, or
-// a model. Rule definitions are persisted. Request and token windows are
-// snapshotted to the same store so they survive restart and reload; live
-// admission stays in memory and per instance.
+// a model. Rule definitions are persisted. Every instance saves what it
+// counted to the same store, so counts survive restart and reload, and reads
+// what the others counted, so instances sharing a store enforce one limit
+// together. Admission itself stays in memory: it checks this instance's live
+// counters plus the others' as of the last load, never the store.
 package ratelimit
 
 import (
@@ -65,6 +67,14 @@ type Rule struct {
 	Source           string    `json:"source,omitempty" bson:"source,omitempty"`
 	CreatedAt        time.Time `json:"created_at" bson:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at" bson:"updated_at"`
+	// CounterEpoch names the counters this rule definition owns. The store
+	// draws a new one when the rule is created, switches between shared and
+	// per-child, or has its counters reset, and keeps it on any other edit. Saved window rows carry
+	// the epoch they were counted under, and loads skip rows of any other
+	// epoch, so counts a change cleared never come back, whether or not
+	// deleting their rows succeeded. Rules stored before it existed have the
+	// empty epoch, as do the rows saved for them.
+	CounterEpoch string `json:"-" bson:"counter_epoch,omitempty"`
 }
 
 // Subjects identifies the dimensions one request can be limited by. UserPath

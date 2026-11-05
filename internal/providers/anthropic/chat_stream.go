@@ -14,27 +14,33 @@ import (
 	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
+// openMessagesStream sends an already-converted Anthropic request to /messages
+// in streaming mode and returns the upstream SSE body; both the chat and the
+// Responses dialect wrap it in their own converter.
+func (p *Provider) openMessagesStream(ctx context.Context, anthropicReq *anthropicRequest, model string) (io.ReadCloser, error) {
+	anthropicReq.Stream = true
+	return p.client.DoStream(ctx, llmclient.Request{
+		Method:    http.MethodPost,
+		Endpoint:  "/messages",
+		Operation: llmclient.OperationChat,
+		Model:     model,
+		Body:      anthropicReq,
+	})
+}
+
 // StreamChatCompletion returns a raw response body for streaming (caller must close)
 func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
 	anthropicReq, err := convertToAnthropicRequest(req)
 	if err != nil {
 		return nil, err
 	}
-	anthropicReq.Stream = true
-
-	stream, err := p.client.DoStream(ctx, llmclient.Request{
-		Method:    http.MethodPost,
-		Endpoint:  "/messages",
-		Operation: llmclient.OperationChat,
-		Model:     req.Model,
-		Body:      anthropicReq,
-	})
+	stream, err := p.openMessagesStream(ctx, anthropicReq, req.Model)
 	if err != nil {
 		return nil, err
 	}
 
 	// Return a reader that converts Anthropic SSE format to OpenAI format
-	return newStreamConverter(stream, req.Model), nil
+	return newStreamConverter(stream, req.Model, p.responseProviderName()), nil
 }
 
 // streamConverter wraps an Anthropic stream and converts it to OpenAI format
@@ -42,6 +48,7 @@ type streamConverter struct {
 	reader            *bufio.Reader
 	body              io.ReadCloser
 	model             string
+	providerName      string
 	msgID             string
 	created           int64
 	nextToolCallIndex int
@@ -65,15 +72,16 @@ type streamToolCallState struct {
 	PlaceholderObject bool
 }
 
-func newStreamConverter(body io.ReadCloser, model string) *streamConverter {
+func newStreamConverter(body io.ReadCloser, model, providerName string) *streamConverter {
 	return &streamConverter{
-		reader:    bufio.NewReader(body),
-		body:      body,
-		model:     model,
-		created:   time.Now().Unix(),
-		toolCalls: make(map[int]*streamToolCallState),
-		thinking:  newThinkingReplayState(),
-		buffer:    streaming.NewStreamBuffer(1024),
+		reader:       bufio.NewReader(body),
+		body:         body,
+		model:        model,
+		providerName: providerName,
+		created:      time.Now().Unix(),
+		toolCalls:    make(map[int]*streamToolCallState),
+		thinking:     newThinkingReplayState(),
+		buffer:       streaming.NewStreamBuffer(1024),
 	}
 }
 
@@ -157,7 +165,7 @@ func (sc *streamConverter) mapStreamStopReason(reason string) string {
 }
 
 func (sc *streamConverter) formatChatChunk(delta map[string]any, finishReason any, usage *anthropicUsage) string {
-	return providers.FormatChatChunkSSE(sc.msgID, sc.created, sc.model, "anthropic", delta, finishReason, anthropicChatUsagePayload(usage))
+	return providers.FormatChatChunkSSE(sc.msgID, sc.created, sc.model, sc.providerName, delta, finishReason, anthropicChatUsagePayload(usage))
 }
 
 func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {

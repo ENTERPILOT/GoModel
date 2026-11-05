@@ -10,6 +10,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/plugins"
+	"github.com/enterpilot/gomodel/internal/requestparams"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
 	"github.com/enterpilot/gomodel/pluginapi"
 )
@@ -40,7 +41,16 @@ type upsertVirtualModelRequest struct {
 	Description string   `json:"description,omitempty"`
 	// Slowdown is an extra-time factor from 0.1 to 10; zero disables it.
 	Slowdown *float64 `json:"slowdown,omitempty"`
-	Enabled  *bool    `json:"enabled,omitempty"`
+	// ReasoningEffort forces the reasoning effort sent upstream ("none",
+	// "minimal", "low", "medium", "high", "xhigh", or "max"); empty keeps the
+	// client's value.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// Params are forced on every request through this row (null strips a
+	// key); DefaultParams fill in keys the client omitted. Keys use Chat
+	// Completions spelling.
+	Params        requestparams.Set `json:"params,omitempty" swaggertype:"object"`
+	DefaultParams requestparams.Set `json:"default_params,omitempty" swaggertype:"object"`
+	Enabled       *bool             `json:"enabled,omitempty"`
 }
 
 // virtualModelTargetRequest is one load-balancing destination. Model may be a
@@ -180,6 +190,9 @@ func (h *Handler) buildVirtualModelUpsert(source string, req upsertVirtualModelR
 		UserPaths:       req.UserPaths,
 		Description:     strings.TrimSpace(req.Description),
 		Slowdown:        req.Slowdown,
+		ReasoningEffort: req.ReasoningEffort,
+		Params:          req.Params,
+		DefaultParams:   req.DefaultParams,
 		Enabled:         h.virtualModels.ResolveUpsertEnabled(source, req.OldSource, req.Enabled),
 	}
 

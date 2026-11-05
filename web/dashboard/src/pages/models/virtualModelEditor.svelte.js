@@ -28,10 +28,13 @@ import {
   aliasFormTargets,
   buildVirtualModelSavePayload,
   defaultVirtualModelForm,
+  formatParamsJSON,
   moveFormTarget,
   normalizeUserPaths,
+  parseParamsJSON,
   removePrimaryTarget as removePrimaryTargetPure,
   virtualModelTargetOptions,
+  vmFormParamsValid,
   vmFormPopulatedTargetCount,
   vmFormTargetCount,
   vmRoutingSummary,
@@ -306,6 +309,9 @@ class VirtualModelEditorStore {
       ).join("\n"),
       description: alias.description || "",
       slowdown: alias.slowdown ?? "",
+      reasoning_effort: alias.reasoning_effort || "",
+      params: formatParamsJSON(alias.params),
+      default_params: formatParamsJSON(alias.default_params),
       enabled: alias.enabled !== false,
     };
   }
@@ -365,6 +371,9 @@ class VirtualModelEditorStore {
       user_paths: userPaths.join("\n"),
       description: override && override.description ? override.description : "",
       slowdown: override && override.slowdown != null ? override.slowdown : "",
+      reasoning_effort: (override && override.reasoning_effort) || "",
+      params: formatParamsJSON(override && override.params),
+      default_params: formatParamsJSON(override && override.default_params),
       enabled: overrideEnabled,
     };
   }
@@ -394,6 +403,9 @@ class VirtualModelEditorStore {
       user_paths: userPaths.join("\n"),
       description: override && override.description ? override.description : "",
       slowdown: override && override.slowdown != null ? override.slowdown : "",
+      reasoning_effort: (override && override.reasoning_effort) || "",
+      params: formatParamsJSON(override && override.params),
+      default_params: formatParamsJSON(override && override.default_params),
       enabled: override ? override.enabled !== false : defaultEnabled,
     };
   }
@@ -421,6 +433,14 @@ class VirtualModelEditorStore {
   async submitVirtualModelForm() {
     if (this.vmFormManaged) {
       this.vmFormError = m.models_managed_cannot_edit();
+      return;
+    }
+
+    if (!vmFormParamsValid(this.vmForm)) {
+      this.vmFormError =
+        parseParamsJSON(this.vmForm.params) === null
+          ? m.models_params_invalid()
+          : m.models_default_params_invalid();
       return;
     }
 

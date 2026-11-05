@@ -3,6 +3,8 @@ package gemini
 import (
 	"bufio"
 	"io"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -76,6 +78,10 @@ func convertGeminiNativeStream(body io.ReadCloser, out *io.PipeWriter, model str
 		_ = out.CloseWithError(err)
 		return
 	}
+	if err := state.writeFinishReasons(out); err != nil {
+		_ = out.CloseWithError(err)
+		return
+	}
 	if err := state.writeFinalUsage(out); err != nil {
 		_ = out.CloseWithError(err)
 		return
@@ -96,8 +102,11 @@ type geminiStreamState struct {
 }
 
 type geminiChoiceStreamState struct {
-	roleSent     bool
-	sawToolCalls bool
+	roleSent      bool
+	sawToolCalls  bool
+	nextToolIndex int
+	toolIDs       toolCallIDs
+	finishReason  string
 }
 
 func (s *geminiStreamState) consumeEvent(out io.Writer, raw string) error {
@@ -146,6 +155,38 @@ func (s *geminiStreamState) consumeEvent(out io.Writer, raw string) error {
 	return nil
 }
 
+// writeFinishReasons emits one final chunk per choice. Gemini may report a
+// finish reason on several events, and parallel function calls can arrive in
+// separate events, so finish_reason is held back until the stream ends.
+func (s *geminiStreamState) writeFinishReasons(out io.Writer) error {
+	if s.stopped {
+		return nil
+	}
+	for _, index := range slices.Sorted(maps.Keys(s.choices)) {
+		state := s.choices[index]
+		finish := finishReasonFromGemini(state.finishReason, state.sawToolCalls)
+		if finish == "" {
+			continue
+		}
+		chunk := map[string]any{
+			"id":       s.responseID,
+			"object":   "chat.completion.chunk",
+			"created":  s.created,
+			"model":    s.model,
+			"provider": s.providerName,
+			"choices": []map[string]any{{
+				"index":         index,
+				"delta":         map[string]any{},
+				"finish_reason": finish,
+			}},
+		}
+		if err := writeOpenAIStreamChunk(out, chunk); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *geminiStreamState) writeFinalUsage(out io.Writer) error {
 	if !s.includeUsage || s.latestUsage == nil || s.stopped {
 		return nil
@@ -172,31 +213,30 @@ func (s *geminiStreamState) chatChunkChoice(candidate geminiCandidate, fallbackI
 		state.roleSent = true
 	}
 
-	content, toolCalls, signature := openAIMessageFromGeminiParts(candidate.Content.Parts)
+	content, toolCalls, signature := openAIMessageFromGeminiParts(candidate.Content.Parts, &state.toolIDs)
 	if content != "" {
 		delta["content"] = content
 	}
 	if len(toolCalls) > 0 {
 		state.sawToolCalls = true
-		delta["tool_calls"] = streamToolCalls(toolCalls)
+		delta["tool_calls"] = streamToolCalls(toolCalls, state.nextToolIndex)
+		state.nextToolIndex += len(toolCalls)
 	}
 	if signature != "" {
 		delta[core.ExtraContentField] = thoughtSignatureExtraFields(signature).Lookup(core.ExtraContentField)
 	}
 
-	finish := finishReasonFromGemini(candidate.FinishReason, state.sawToolCalls)
-	if len(delta) == 0 && finish == "" {
+	if finishReasonFromGemini(candidate.FinishReason, false) != "" {
+		state.finishReason = candidate.FinishReason
+	}
+	if len(delta) == 0 {
 		return nil, false
 	}
-	choice := map[string]any{
+	return map[string]any{
 		"index":         index,
 		"delta":         delta,
 		"finish_reason": nil,
-	}
-	if finish != "" {
-		choice["finish_reason"] = finish
-	}
-	return choice, true
+	}, true
 }
 
 func streamChoiceIndex(candidate geminiCandidate, fallbackIndex int) int {
@@ -219,11 +259,11 @@ func (s *geminiStreamState) choiceState(index int) *geminiChoiceStreamState {
 	return state
 }
 
-func streamToolCalls(toolCalls []core.ToolCall) []map[string]any {
+func streamToolCalls(toolCalls []core.ToolCall, firstIndex int) []map[string]any {
 	out := make([]map[string]any, 0, len(toolCalls))
 	for i, call := range toolCalls {
 		chunk := map[string]any{
-			"index": i,
+			"index": firstIndex + i,
 			"id":    call.ID,
 			"type":  "function",
 			"function": map[string]any{

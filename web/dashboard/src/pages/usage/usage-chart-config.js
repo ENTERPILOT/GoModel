@@ -2,7 +2,7 @@
 // building — the caller supplies theme colors and a CSS color resolver, so
 // node:test can exercise it without a DOM.
 
-import { formatTokensShort } from "../../lib/utils/format.js";
+import { formatCost, formatCostShort, formatTokensShort } from "../../lib/utils/format.js";
 import { chartTickFont, chartTooltip } from "../../lib/utils/chartTheme.js";
 import * as m from "../../lib/paraglide/messages.js";
 
@@ -17,8 +17,8 @@ import * as m from "../../lib/paraglide/messages.js";
 // only when they have data.
 export function horizontalUsageChartConfig(colors, labels, series, options) {
   const { stacked = false, costs = false, resolve = (expr) => expr } = options || {};
-  const fmtShort = (v) => (costs ? "$" + Math.abs(v).toFixed(2) : formatTokensShort(Math.abs(v)));
-  const fmtExact = (v) => (costs ? "$" + Math.abs(v).toFixed(4) : Math.abs(v).toLocaleString());
+  const fmtShort = (v) => (costs ? formatCostShort(Math.abs(v)) : formatTokensShort(Math.abs(v)));
+  const fmtExact = (v) => (costs ? formatCost(Math.abs(v)) : Math.abs(v).toLocaleString());
   const inputSide = (values) => values.map((v) => (stacked ? Math.abs(v) : -Math.abs(v)));
   const bar = (label, data, color) => ({
     label: label,
@@ -53,53 +53,59 @@ export function horizontalUsageChartConfig(colors, labels, series, options) {
       labels: labels,
       datasets: datasets,
     },
-    options: {
-      indexAxis: "y",
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: { duration: 0 },
+    options: stackedBarOptions(colors, {
+      horizontal: true,
+      formatValue: (v) => fmtShort(v),
+      // Emphasize the zero divider between the diverging halves.
+      valueGrid: stacked
+        ? { color: colors.grid }
+        : { color: (ctx) => (ctx.tick && ctx.tick.value === 0 ? colors.text : colors.grid) },
+      categoryTicks: { autoSkip: false },
       layout: { padding: { top: 8 } },
-      scales: {
-        x: {
-          stacked: true,
-          beginAtZero: true,
-          // Emphasize the zero divider between the diverging halves.
-          grid: stacked
-            ? { color: colors.grid }
-            : { color: (ctx) => (ctx.tick && ctx.tick.value === 0 ? colors.text : colors.grid) },
-          border: { display: false },
-          ticks: {
-            color: colors.text,
-            font: chartTickFont(),
-            callback: (v) => fmtShort(v),
-          },
-        },
-        y: {
-          stacked: true,
-          grid: { display: false },
-          border: { display: false },
-          ticks: {
-            color: colors.text,
-            font: chartTickFont(),
-            autoSkip: false,
-          },
+      tooltip: {
+        label: (c) => c.dataset.label + ": " + fmtExact(c.parsed.x),
+        footer: (items) => {
+          let total = 0;
+          items.forEach((it) => {
+            total += Math.abs(Number(it.parsed.x)) || 0;
+          });
+          return m.overview_total_label({ total: fmtExact(total) });
         },
       },
-      plugins: {
-        legend: {
-          labels: { color: colors.text, font: { size: 12 } },
-        },
-        tooltip: chartTooltip(colors, {
-          label: (c) => c.dataset.label + ": " + fmtExact(c.parsed.x),
-          footer: (items) => {
-            let total = 0;
-            items.forEach((it) => {
-              total += Math.abs(Number(it.parsed.x)) || 0;
-            });
-            return m.overview_total_label({ total: fmtExact(total) });
-          },
-        }),
-      },
+    }),
+  };
+}
+
+// stackedBarOptions holds the Chart.js options every usage bar chart shares
+// (the horizontal breakdowns and the pivot): stacked axes, the theme grid and
+// tick font, no axis borders, the legend style and a themed tooltip.
+// horizontal puts the values on the x axis.
+export function stackedBarOptions(colors, options) {
+  const { horizontal = false, formatValue, valueGrid, categoryTicks = {}, legend = true, layout, tooltip } = options;
+  const ticks = { color: colors.text, font: chartTickFont() };
+  const valueAxis = {
+    stacked: true,
+    beginAtZero: true,
+    grid: valueGrid || { color: colors.grid },
+    border: { display: false },
+    ticks: { ...ticks, callback: formatValue },
+  };
+  const categoryAxis = {
+    stacked: true,
+    grid: { display: false },
+    border: { display: false },
+    ticks: { ...ticks, ...categoryTicks },
+  };
+  return {
+    ...(horizontal ? { indexAxis: "y" } : {}),
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 0 },
+    ...(layout ? { layout } : {}),
+    scales: horizontal ? { x: valueAxis, y: categoryAxis } : { x: categoryAxis, y: valueAxis },
+    plugins: {
+      legend: { display: legend, labels: { color: colors.text, font: { size: 12 } } },
+      tooltip: chartTooltip(colors, tooltip),
     },
   };
 }

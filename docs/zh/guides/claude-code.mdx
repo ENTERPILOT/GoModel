@@ -1,0 +1,214 @@
+---
+title: "GoModel 与 Claude Code"
+description: "通过 Anthropic 透传将 Claude Code 路由经过 GoModel 的分步指南。"
+icon: "terminal"
+keywords: ["Claude Code", "Anthropic 透传", "编码智能体", "配置指南", "Anthropic passthrough", "coding agent", "setup guide"]
+---
+
+GoModel 可以部署在 Claude Code 前面，使每个请求都先经过您自己的网关。
+
+流程：
+
+`Claude Code -> GoModel -> Anthropic`
+
+## 开始之前
+
+- 在您的机器上安装 Claude Code。
+- 选择一个 GoModel 主密钥，例如 `change-me`。
+- 确保 GoModel 拥有 Anthropic 上游凭据。
+
+<Note>
+  无论您个人是否使用 Claude Code 订阅，都可以将 Claude Code 路由经过 GoModel。在网关模式下，Claude Code 使用 `ANTHROPIC_BASE_URL` 和 `ANTHROPIC_AUTH_TOKEN` 与 GoModel 通信。GoModel 仍需要自己的 `ANTHROPIC_API_KEY` 来访问 Anthropic 上游，可以是 Console API 密钥，也可以是 Claude 订阅的 OAuth Token。
+</Note>
+
+## 如何获取 `ANTHROPIC_API_KEY`
+
+**方式 A：Console API 密钥（按量付费）：**
+
+1. 打开 Claude Console 并登录您的 API 账号。
+2. 进入 Console 中的账号设置，然后创建一个 API 密钥。
+3. 复制该密钥（只显示一次），并将其设置为 GoModel 的 `ANTHROPIC_API_KEY`。
+
+Anthropic 的 API 文档说明，API 密钥需要在 Console 的账号设置中创建。
+
+<Warning>
+  Claude 付费套餐（Pro、Max、Team、Enterprise）与 Claude API Console 的计费是相互独立的。API 密钥的用量按 API 用量计费。
+</Warning>
+
+**方式 B：Claude 订阅 Token（Pro、Max、Team 或 Enterprise）：**
+
+1. 在已用您的订阅登录 Claude Code 的机器上运行 `claude setup-token`。
+2. 复制生成的 `sk-ant-oat01-...` Token，并将其设置为 GoModel 的 `ANTHROPIC_API_KEY`。
+
+GoModel 会检测 `sk-ant-oat` 前缀，并自动使用 OAuth Bearer 方案向上游认证。用量计入您订阅的额度，而不是按 API 计费。
+
+<Warning>
+  Anthropic 仅授权订阅 Token **用于 Claude Code 流量**。此配置之所以可行，是因为客户端仍然是 Claude Code，并且 GoModel 会原样转发其请求；将其他客户端或工具指向使用同一凭据的网关会被上游拒绝，并且违反 Anthropic 的服务条款。
+</Warning>
+
+## 1. 运行 GoModel
+
+使用主密钥和 Anthropic 提供商密钥启动 GoModel：
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e ANTHROPIC_API_KEY="sk-ant-..." \
+  enterpilot/gomodel
+```
+
+## 2. 确认 Anthropic 透传
+
+检查 Anthropic 透传的模型端点是否有响应：
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/p/anthropic/v1/models \
+  -H "Authorization: Bearer change-me"
+```
+
+```python Python
+import anthropic
+
+client = anthropic.Anthropic(
+    base_url="http://localhost:8080/p/anthropic",
+    api_key="change-me",
+)
+
+for model in client.models.list():
+    print(model.id)
+```
+
+```javascript JavaScript
+import Anthropic from "@anthropic-ai/sdk";
+
+const client = new Anthropic({
+  baseURL: "http://localhost:8080/p/anthropic",
+  apiKey: "change-me",
+});
+
+for await (const model of client.models.list()) {
+  console.log(model.id);
+}
+```
+
+</CodeGroup>
+
+然后发送一条简短的测试消息：
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/p/anthropic/v1/messages \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "claude-3-haiku-20240307",
+    "max_tokens": 16,
+    "messages": [
+      {
+        "role": "user",
+        "content": "Reply with exactly ok"
+      }
+    ]
+  }'
+```
+
+```python Python
+import anthropic
+
+client = anthropic.Anthropic(
+    base_url="http://localhost:8080/p/anthropic",
+    api_key="change-me",
+)
+
+message = client.messages.create(
+    model="claude-3-haiku-20240307",
+    max_tokens=16,
+    messages=[{"role": "user", "content": "Reply with exactly ok"}],
+)
+
+print(message.content[0].text)
+```
+
+```javascript JavaScript
+import Anthropic from "@anthropic-ai/sdk";
+
+const client = new Anthropic({
+  baseURL: "http://localhost:8080/p/anthropic",
+  apiKey: "change-me",
+});
+
+const message = await client.messages.create({
+  model: "claude-3-haiku-20240307",
+  max_tokens: 16,
+  messages: [{ role: "user", content: "Reply with exactly ok" }],
+});
+
+console.log(message.content[0].text);
+```
+
+</CodeGroup>
+
+如果网关连接正确，响应中会包含 `ok`。
+
+## 3. 配置 Claude Code 使用 GoModel
+
+将 Claude Code 指向 GoModel：
+
+```bash
+export ANTHROPIC_BASE_URL=http://localhost:8080
+export ANTHROPIC_AUTH_TOKEN=change-me
+export CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1
+```
+
+托管的基础 URL 通过[原生转发](/zh/advanced/anthropic-messages-api#原生转发到-anthropic)提供 `/v1/messages`：解析到 Anthropic 的请求除模型别名解析外均原样转发（保留 `cache_control`、thinking 签名和 beta 请求头），同时速率限制、预算、审计和用量追踪仍会生效；并且可以通过模型别名或虚拟模型将 Claude Code 路由到其他提供商。另外，也可以使用 `ANTHROPIC_BASE_URL=http://localhost:8080/p/anthropic`，以固定指向 Anthropic 上游的原始透传方式访问。
+
+Claude Code 文档要点：在网关模式下，将 `ANTHROPIC_BASE_URL` 设置为您的网关 URL，将 `ANTHROPIC_AUTH_TOKEN` 设置为您的网关 Token，然后正常运行 Claude Code。参阅官方指南：[Claude Code LLM 网关文档](https://code.claude.com/docs/en/llm-gateway)。
+
+如果 GoModel 没有运行在您的本地机器上，请将 `localhost:8080` 替换为正确的主机和端口。
+
+## 4. 运行 Claude Code 测试提示词
+
+```bash
+claude -p --output-format text --model claude-3-haiku-20240307 \
+  'Reply with exactly ok and no punctuation.'
+```
+
+经验证的结果为：
+
+```text
+ok
+```
+
+## 5. 在 GoModel 中查看流量
+
+打开 GoModel 控制台的审计日志：
+
+[http://localhost:8080/admin/dashboard/audit](http://localhost:8080/admin/dashboard/audit)
+
+这是确认 Claude Code 是否到达 GoModel、以及查看完整请求和响应记录的最简便方式。在同一控制台中，您还可以持续跟踪 GoModel 的流量和用量。
+
+## 参考
+
+- Anthropic Claude Code 网关文档：[LLM gateway](https://code.claude.com/docs/en/llm-gateway)
+- Anthropic Claude Code 设置：[Settings](https://code.claude.com/docs/en/settings)
+- Claude 帮助中心：[Managing API key environment variables in Claude Code](https://support.claude.com/en/articles/12304248-managing-api-key-environment-variables-in-claude-code)
+- Claude 帮助中心：[Paid Claude plans vs API Console billing](https://support.claude.com/en/articles/9876003-i-have-a-paid-claude-subscription-pro-max-team-or-enterprise-plans-why-do-i-have-to-pay-separately-to-use-the-claude-api-and-console)
+- Claude API 文档：[API overview (keys from Console account settings)](https://docs.anthropic.com/en/api/getting-started)
+
+## 于 2026 年 3 月 10 日验证
+
+本指南已在以下环境中验证：
+
+- 运行在 `http://localhost:8080` 上的本地 GoModel 实例
+- 提供 `/p/{provider}/v1/...` 的 GoModel 分支
+- Claude Code `2.1.72`
+
+本地验证确认：
+
+- `GET /p/anthropic/v1/models` 返回 `200 OK`
+- `POST /p/anthropic/v1/messages` 返回 `200 OK`
+- 指向 GoModel 时，`claude` 返回 `ok`

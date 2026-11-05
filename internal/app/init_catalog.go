@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/markups"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 	"github.com/enterpilot/gomodel/internal/providers"
@@ -190,5 +192,32 @@ func (b *bootstrap) initPricing() error {
 	if app.pricingOverrides != nil && app.pricingOverrides.Service != nil {
 		b.pricingResolver = app.pricingOverrides.Service
 	}
+
+	if err := b.wrapUsageLoggerForBilling(registry); err != nil {
+		return err
+	}
+	// Every usage writer takes the logger from here on. The billable tap is
+	// outermost so an entry served by a billable: false provider is marked
+	// before the markup tap bills it, at zero.
+	app.usage.Logger = usage.NewBillableTap(app.usage.Logger, registry.ProviderBillable)
+	return nil
+}
+
+// wrapUsageLoggerForBilling wraps the usage logger so every entry carries its
+// billed cost, response-cache hits included, when markups are enabled.
+func (b *bootstrap) wrapUsageLoggerForBilling(registry *providers.ModelRegistry) error {
+	app := b.app
+	if !b.appCfg.Pricing.MarkupsEnabled {
+		if len(b.appCfg.Pricing.Markups) > 0 || len(b.appCfg.Pricing.UserPathMarkups) > 0 {
+			slog.Warn("pricing markups are set but markups are disabled; no billed cost is recorded",
+				"hint", "set PRICING_MARKUPS_ENABLED=true (pricing.markups_enabled) to apply markups")
+		}
+		return nil
+	}
+	markupService, err := markups.New(b.appCfg.Pricing, registry, b.customerMarkupsEnabled)
+	if err != nil {
+		return fmt.Errorf("failed to initialize pricing markups: %w", err)
+	}
+	app.usage.Logger = markups.NewUsageTap(app.usage.Logger, markupService)
 	return nil
 }

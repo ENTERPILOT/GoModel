@@ -37,6 +37,10 @@ type mongoUsageLogRow struct {
 	OutputCost             *float64       `bson:"output_cost"`
 	TotalCost              *float64       `bson:"total_cost"`
 	CostSource             string         `bson:"cost_source"`
+	MarkupPercent          *float64       `bson:"markup_percent"`
+	MarkupSelector         string         `bson:"markup_selector"`
+	BilledCost             *float64       `bson:"billed_cost"`
+	Billable               *bool          `bson:"billable"`
 	RawData                map[string]any `bson:"raw_data"`
 	CostsCalculationCaveat string         `bson:"costs_calculation_caveat"`
 	RewriteTokensSaved     int64          `bson:"rewrite_tokens_saved"`
@@ -59,6 +63,8 @@ type mongoSessionUsageRow struct {
 	HasInputCost     int     `bson:"has_input_cost"`
 	HasOutputCost    int     `bson:"has_output_cost"`
 	HasTotalCost     int     `bson:"has_total_cost"`
+	BilledCost       float64 `bson:"billed_cost"`
+	HasBilledCost    int     `bson:"has_billed_cost"`
 	ProviderRequests int     `bson:"provider_requests"`
 }
 
@@ -84,6 +90,10 @@ func (row mongoUsageLogRow) toUsageLogEntry() UsageLogEntry {
 		OutputCost:             row.OutputCost,
 		TotalCost:              row.TotalCost,
 		CostSource:             row.CostSource,
+		MarkupPercent:          row.MarkupPercent,
+		MarkupSelector:         row.MarkupSelector,
+		BilledCost:             row.BilledCost,
+		Billable:               nonBillableFlag(row.Billable),
 		RawData:                row.RawData,
 		CostsCalculationCaveat: row.CostsCalculationCaveat,
 		RewriteTokensSaved:     row.RewriteTokensSaved,
@@ -176,6 +186,8 @@ func (r *MongoDBReader) GetSummary(ctx context.Context, params UsageQueryParams)
 		{Key: "has_input_cost", Value: mongoCostPresenceCount("$input_cost")},
 		{Key: "has_output_cost", Value: mongoCostPresenceCount("$output_cost")},
 		{Key: "has_total_cost", Value: mongoCostPresenceCount("$total_cost")},
+		{Key: "billed_cost", Value: mongoCostSum("$billed_cost")},
+		{Key: "has_billed_cost", Value: mongoCostPresenceCount("$billed_cost")},
 		{Key: "rewrite_tokens_saved", Value: bson.D{{Key: "$sum", Value: "$rewrite_tokens_saved"}}},
 		{Key: "rewrite_cost_saved", Value: mongoCostSum("$rewrite_cost_saved")},
 		{Key: "has_rewrite_cost_saved", Value: mongoCostPresenceCount("$rewrite_cost_saved")},
@@ -200,6 +212,8 @@ func (r *MongoDBReader) GetSummary(ctx context.Context, params UsageQueryParams)
 			HasInputCost    int     `bson:"has_input_cost"`
 			HasOutputCost   int     `bson:"has_output_cost"`
 			HasTotalCost    int     `bson:"has_total_cost"`
+			BilledCost      float64 `bson:"billed_cost"`
+			HasBilledCost   int     `bson:"has_billed_cost"`
 
 			RewriteTokensSaved  int64   `bson:"rewrite_tokens_saved"`
 			RewriteCostSaved    float64 `bson:"rewrite_cost_saved"`
@@ -215,6 +229,7 @@ func (r *MongoDBReader) GetSummary(ctx context.Context, params UsageQueryParams)
 		summary.TotalInputCost = costPtr(result.HasInputCost, result.TotalInputCost)
 		summary.TotalOutputCost = costPtr(result.HasOutputCost, result.TotalOutputCost)
 		summary.TotalCost = costPtr(result.HasTotalCost, result.TotalCost)
+		summary.TotalBilledCost = costPtr(result.HasBilledCost, result.BilledCost)
 		summary.RewriteTokensSaved = result.RewriteTokensSaved
 		summary.RewriteCostSaved = costPtr(result.HasRewriteCostSaved, result.RewriteCostSaved)
 	}
@@ -223,11 +238,55 @@ func (r *MongoDBReader) GetSummary(ctx context.Context, params UsageQueryParams)
 		return nil, fmt.Errorf("error iterating usage summary cursor: %w", err)
 	}
 
+	if mode := billedCacheHitsMode(params.CacheMode); mode != "" {
+		hits, err := r.billedCost(ctx, params, mode)
+		if err != nil {
+			return nil, err
+		}
+		summary.TotalBilledCost = addCost(summary.TotalBilledCost, hits)
+	}
+
 	if err := r.accumulateInputSegments(ctx, matchFilters, summary); err != nil {
 		return nil, err
 	}
 
 	return summary, nil
+}
+
+// billedCost sums billed_cost over the documents params matches in cacheMode.
+func (r *MongoDBReader) billedCost(ctx context.Context, params UsageQueryParams, cacheMode string) (*float64, error) {
+	params.CacheMode = cacheMode
+	matchFilters, err := mongoUsageMatchFilters(params)
+	if err != nil {
+		return nil, err
+	}
+	pipeline := bson.A{}
+	if len(matchFilters) > 0 {
+		pipeline = append(pipeline, bson.D{{Key: "$match", Value: matchFilters}})
+	}
+	pipeline = append(pipeline, bson.D{{Key: "$group", Value: bson.D{
+		{Key: "_id", Value: nil},
+		{Key: "billed_cost", Value: mongoCostSum("$billed_cost")},
+		{Key: "has_billed_cost", Value: mongoCostPresenceCount("$billed_cost")},
+	}}})
+	cursor, err := r.collection.Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, fmt.Errorf("failed to aggregate usage billed cost: %w", err)
+	}
+	defer cursor.Close(ctx)
+	var result struct {
+		BilledCost    float64 `bson:"billed_cost"`
+		HasBilledCost int     `bson:"has_billed_cost"`
+	}
+	if cursor.Next(ctx) {
+		if err := cursor.Decode(&result); err != nil {
+			return nil, fmt.Errorf("failed to decode usage billed cost: %w", err)
+		}
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating usage billed cost cursor: %w", err)
+	}
+	return costPtr(result.HasBilledCost, result.BilledCost), nil
 }
 
 // accumulateInputSegments streams the matched documents and folds each row's
@@ -290,6 +349,8 @@ func (r *MongoDBReader) GetUsageByModel(ctx context.Context, params UsageQueryPa
 		{Key: "has_input_cost", Value: mongoCostPresenceCount("$input_cost")},
 		{Key: "has_output_cost", Value: mongoCostPresenceCount("$output_cost")},
 		{Key: "has_total_cost", Value: mongoCostPresenceCount("$total_cost")},
+		{Key: "billed_cost", Value: mongoCostSum("$billed_cost")},
+		{Key: "has_billed_cost", Value: mongoCostPresenceCount("$billed_cost")},
 	}}})
 
 	cursor, err := r.collection.Aggregate(ctx, pipeline)
@@ -314,6 +375,8 @@ func (r *MongoDBReader) GetUsageByModel(ctx context.Context, params UsageQueryPa
 			HasInputCost  int     `bson:"has_input_cost"`
 			HasOutputCost int     `bson:"has_output_cost"`
 			HasTotalCost  int     `bson:"has_total_cost"`
+			BilledCost    float64 `bson:"billed_cost"`
+			HasBilledCost int     `bson:"has_billed_cost"`
 		}
 		if err := cursor.Decode(&row); err != nil {
 			return nil, fmt.Errorf("failed to decode usage by model row: %w", err)
@@ -327,7 +390,8 @@ func (r *MongoDBReader) GetUsageByModel(ctx context.Context, params UsageQueryPa
 
 			InputCost:  costPtr(row.HasInputCost, row.InputCost),
 			OutputCost: costPtr(row.HasOutputCost, row.OutputCost),
-			TotalCost:  costPtr(row.HasTotalCost, row.TotalCost)}
+			TotalCost:  costPtr(row.HasTotalCost, row.TotalCost),
+			BilledCost: costPtr(row.HasBilledCost, row.BilledCost)}
 		result = append(result, m)
 	}
 
@@ -379,6 +443,7 @@ func (r *MongoDBReader) usageCacheStats(ctx context.Context, params UsageQueryPa
 			CacheType    string         `bson:"cache_type"`
 			InputTokens  int            `bson:"input_tokens"`
 			OutputTokens int            `bson:"output_tokens"`
+			BilledCost   *float64       `bson:"billed_cost"`
 			RawData      map[string]any `bson:"raw_data"`
 			Timestamp    time.Time      `bson:"timestamp"`
 		}
@@ -405,12 +470,40 @@ func mongoCanonicalUserPathAddFieldsStage() bson.D {
 	}}}
 }
 
-// mongoCanonicalUserPathMatchStage narrows to the subtree of userPath,
-// mongoCanonicalUserPathMatchStage builds a MongoDB match stage for a user-path subtree on the canonical user-path field.
-func mongoCanonicalUserPathMatchStage(userPath string) bson.D {
-	return bson.D{{Key: "$match", Value: bson.D{{Key: mongoCanonicalUserPathField, Value: bson.D{
-		{Key: "$regex", Value: usageUserPathSubtreeRegex(userPath)},
-	}}}}}
+// mongoCanonicalUserPathMatchStage narrows to the user-path filters of
+// params, matched on the canonical user-path field. It returns nil when no
+// user-path filter is set.
+func mongoCanonicalUserPathMatchStage(params UsageQueryParams) (bson.D, error) {
+	condition, err := mongoUserPathCondition(params)
+	if err != nil || len(condition) == 0 {
+		return nil, err
+	}
+	return bson.D{{Key: "$match", Value: bson.D{{Key: mongoCanonicalUserPathField, Value: condition}}}}, nil
+}
+
+// mongoUserPathCondition builds the field condition for the user-path scope
+// ($regex) and the any-of subtree list ($in of regexes), or nil when neither
+// is set.
+func mongoUserPathCondition(params UsageQueryParams) (bson.D, error) {
+	scope, paths, err := usageUserPathFilters(params)
+	if err != nil {
+		return nil, err
+	}
+	condition := bson.D{}
+	if scope != "" {
+		condition = append(condition, bson.E{Key: "$regex", Value: usageUserPathSubtreeRegex(scope)})
+	}
+	if len(paths) > 0 {
+		patterns := make(bson.A, 0, len(paths))
+		for _, path := range paths {
+			patterns = append(patterns, bson.Regex{Pattern: usageUserPathSubtreeRegex(path)})
+		}
+		condition = append(condition, bson.E{Key: "$in", Value: patterns})
+	}
+	if len(condition) == 0 {
+		return nil, nil
+	}
+	return condition, nil
 }
 
 // mongoUsageCacheStatsPipeline builds the fold's aggregation pipeline. The
@@ -426,7 +519,7 @@ func mongoUsageCacheStatsPipeline(params UsageQueryParams, canonicalUserPath boo
 	params.CacheMode = CacheModeAll
 	matchParams := params
 	if canonicalUserPath {
-		matchParams.UserPath = ""
+		matchParams = withoutUserPathFilters(params)
 	}
 	matchFilters, err := mongoUsageMatchFilters(matchParams)
 	if err != nil {
@@ -437,15 +530,12 @@ func mongoUsageCacheStatsPipeline(params UsageQueryParams, canonicalUserPath boo
 		pipeline = append(pipeline, bson.D{{Key: "$match", Value: matchFilters}})
 	}
 	if canonicalUserPath {
-		userPath, err := normalizeUsageUserPathFilter(params.UserPath)
+		matchStage, err := mongoCanonicalUserPathMatchStage(params)
 		if err != nil {
 			return nil, err
 		}
-		if userPath != "" {
-			pipeline = append(pipeline,
-				mongoCanonicalUserPathAddFieldsStage(),
-				mongoCanonicalUserPathMatchStage(userPath),
-			)
+		if matchStage != nil {
+			pipeline = append(pipeline, mongoCanonicalUserPathAddFieldsStage(), matchStage)
 		}
 	}
 	pipeline = append(pipeline, bson.D{{Key: "$project", Value: bson.D{
@@ -458,6 +548,7 @@ func mongoUsageCacheStatsPipeline(params UsageQueryParams, canonicalUserPath boo
 		{Key: "cache_type", Value: 1},
 		{Key: "input_tokens", Value: 1},
 		{Key: "output_tokens", Value: 1},
+		{Key: "billed_cost", Value: 1},
 		{Key: "raw_data", Value: 1},
 		{Key: "timestamp", Value: 1},
 	}}})
@@ -467,9 +558,7 @@ func mongoUsageCacheStatsPipeline(params UsageQueryParams, canonicalUserPath boo
 // GetUsageByUserPath returns token and cost totals grouped by tracked user path.
 func (r *MongoDBReader) GetUsageByUserPath(ctx context.Context, params UsageQueryParams) ([]UserPathUsage, error) {
 	pipeline := bson.A{}
-	matchParams := params
-	matchParams.UserPath = ""
-	matchFilters, err := mongoUsageMatchFilters(matchParams)
+	matchFilters, err := mongoUsageMatchFilters(withoutUserPathFilters(params))
 	if err != nil {
 		return nil, err
 	}
@@ -479,12 +568,12 @@ func (r *MongoDBReader) GetUsageByUserPath(ctx context.Context, params UsageQuer
 
 	pipeline = append(pipeline, mongoCanonicalUserPathAddFieldsStage())
 
-	userPath, err := normalizeUsageUserPathFilter(params.UserPath)
+	matchStage, err := mongoCanonicalUserPathMatchStage(params)
 	if err != nil {
 		return nil, err
 	}
-	if userPath != "" {
-		pipeline = append(pipeline, mongoCanonicalUserPathMatchStage(userPath))
+	if matchStage != nil {
+		pipeline = append(pipeline, matchStage)
 	}
 
 	pipeline = append(pipeline, bson.D{{Key: "$group", Value: bson.D{
@@ -498,6 +587,8 @@ func (r *MongoDBReader) GetUsageByUserPath(ctx context.Context, params UsageQuer
 		{Key: "has_input_cost", Value: mongoCostPresenceCount("$input_cost")},
 		{Key: "has_output_cost", Value: mongoCostPresenceCount("$output_cost")},
 		{Key: "has_total_cost", Value: mongoCostPresenceCount("$total_cost")},
+		{Key: "billed_cost", Value: mongoCostSum("$billed_cost")},
+		{Key: "has_billed_cost", Value: mongoCostPresenceCount("$billed_cost")},
 	}}})
 
 	cursor, err := r.collection.Aggregate(ctx, pipeline)
@@ -519,6 +610,8 @@ func (r *MongoDBReader) GetUsageByUserPath(ctx context.Context, params UsageQuer
 			HasInputCost  int     `bson:"has_input_cost"`
 			HasOutputCost int     `bson:"has_output_cost"`
 			HasTotalCost  int     `bson:"has_total_cost"`
+			BilledCost    float64 `bson:"billed_cost"`
+			HasBilledCost int     `bson:"has_billed_cost"`
 		}
 		if err := cursor.Decode(&row); err != nil {
 			return nil, fmt.Errorf("failed to decode usage by user path row: %w", err)
@@ -535,6 +628,7 @@ func (r *MongoDBReader) GetUsageByUserPath(ctx context.Context, params UsageQuer
 		u.InputCost = costPtr(row.HasInputCost, row.InputCost)
 		u.OutputCost = costPtr(row.HasOutputCost, row.OutputCost)
 		u.TotalCost = costPtr(row.HasTotalCost, row.TotalCost)
+		u.BilledCost = costPtr(row.HasBilledCost, row.BilledCost)
 		result = append(result, u)
 	}
 
@@ -565,6 +659,8 @@ type mongoGroupedUsageRow struct {
 	HasInputCost  int     `bson:"has_input_cost"`
 	HasOutputCost int     `bson:"has_output_cost"`
 	HasTotalCost  int     `bson:"has_total_cost"`
+	BilledCost    float64 `bson:"billed_cost"`
+	HasBilledCost int     `bson:"has_billed_cost"`
 }
 
 // decodeGroupedUsageRows drains an aggregation cursor of grouped usage
@@ -613,6 +709,8 @@ func (r *MongoDBReader) GetUsageByLabel(ctx context.Context, params UsageQueryPa
 			{Key: "has_input_cost", Value: mongoCostPresenceCount("$input_cost")},
 			{Key: "has_output_cost", Value: mongoCostPresenceCount("$output_cost")},
 			{Key: "has_total_cost", Value: mongoCostPresenceCount("$total_cost")},
+			{Key: "billed_cost", Value: mongoCostSum("$billed_cost")},
+			{Key: "has_billed_cost", Value: mongoCostPresenceCount("$billed_cost")},
 		}}},
 		bson.D{{Key: "$sort", Value: bson.D{{Key: "_id", Value: 1}}}},
 	)
@@ -633,6 +731,7 @@ func (r *MongoDBReader) GetUsageByLabel(ctx context.Context, params UsageQueryPa
 			InputCost:    costPtr(row.HasInputCost, row.InputCost),
 			OutputCost:   costPtr(row.HasOutputCost, row.OutputCost),
 			TotalCost:    costPtr(row.HasTotalCost, row.TotalCost),
+			BilledCost:   costPtr(row.HasBilledCost, row.BilledCost),
 		}
 	})
 	if err != nil {
@@ -673,6 +772,8 @@ func (r *MongoDBReader) GetUsageByEndpoint(ctx context.Context, params UsageQuer
 			{Key: "has_input_cost", Value: mongoCostPresenceCount("$input_cost")},
 			{Key: "has_output_cost", Value: mongoCostPresenceCount("$output_cost")},
 			{Key: "has_total_cost", Value: mongoCostPresenceCount("$total_cost")},
+			{Key: "billed_cost", Value: mongoCostSum("$billed_cost")},
+			{Key: "has_billed_cost", Value: mongoCostPresenceCount("$billed_cost")},
 		}}},
 		bson.D{{Key: "$sort", Value: bson.D{{Key: "_id", Value: 1}}}},
 	)
@@ -693,6 +794,7 @@ func (r *MongoDBReader) GetUsageByEndpoint(ctx context.Context, params UsageQuer
 			InputCost:    costPtr(row.HasInputCost, row.InputCost),
 			OutputCost:   costPtr(row.HasOutputCost, row.OutputCost),
 			TotalCost:    costPtr(row.HasTotalCost, row.TotalCost),
+			BilledCost:   costPtr(row.HasBilledCost, row.BilledCost),
 		}
 	})
 	if err != nil {
@@ -737,6 +839,7 @@ func (r *MongoDBReader) GetUsageBySession(ctx context.Context, params SessionUsa
 			InputCost:    sessionCostPtr(row.ProviderRequests, row.HasInputCost, row.InputCost),
 			OutputCost:   sessionCostPtr(row.ProviderRequests, row.HasOutputCost, row.OutputCost),
 			TotalCost:    sessionCostPtr(row.ProviderRequests, row.HasTotalCost, row.TotalCost),
+			BilledCost:   costPtr(row.HasBilledCost, row.BilledCost),
 		})
 	}
 	if err := cursor.Err(); err != nil {
@@ -802,6 +905,8 @@ func mongoSessionUsagePipelines(params SessionUsageParams) (bson.A, bson.A, int,
 			{Key: "has_input_cost", Value: mongoProviderCostPresenceCount("$input_cost")},
 			{Key: "has_output_cost", Value: mongoProviderCostPresenceCount("$output_cost")},
 			{Key: "has_total_cost", Value: mongoProviderCostPresenceCount("$total_cost")},
+			{Key: "billed_cost", Value: mongoCostSum("$billed_cost")},
+			{Key: "has_billed_cost", Value: mongoCostPresenceCount("$billed_cost")},
 			{Key: "latest", Value: bson.D{{Key: "$max", Value: "$timestamp"}}},
 		}}},
 	)
@@ -1003,6 +1108,8 @@ func (r *MongoDBReader) GetDailyUsage(ctx context.Context, params UsageQueryPara
 			{Key: "has_input_cost", Value: mongoCostPresenceCount("$input_cost")},
 			{Key: "has_output_cost", Value: mongoCostPresenceCount("$output_cost")},
 			{Key: "has_total_cost", Value: mongoCostPresenceCount("$total_cost")},
+			{Key: "billed_cost", Value: mongoCostSum("$billed_cost")},
+			{Key: "has_billed_cost", Value: mongoCostPresenceCount("$billed_cost")},
 		}}},
 		bson.D{{Key: "$sort", Value: bson.D{{Key: "_id", Value: 1}}}},
 	)
@@ -1023,6 +1130,7 @@ func (r *MongoDBReader) GetDailyUsage(ctx context.Context, params UsageQueryPara
 			InputCost:    costPtr(row.HasInputCost, row.InputCost),
 			OutputCost:   costPtr(row.HasOutputCost, row.OutputCost),
 			TotalCost:    costPtr(row.HasTotalCost, row.TotalCost),
+			BilledCost:   costPtr(row.HasBilledCost, row.BilledCost),
 		}
 	})
 	if err != nil {
@@ -1076,7 +1184,52 @@ func (r *MongoDBReader) GetDailyUsage(ctx context.Context, params UsageQueryPara
 	}
 	applyDailyInputSplit(result, splits)
 
+	if mode := billedCacheHitsMode(params.CacheMode); mode != "" {
+		hits, err := r.periodBilledCost(ctx, params, dateFormat, mode)
+		if err != nil {
+			return nil, err
+		}
+		result = addPeriodBilledCost(result, hits)
+	}
 	return result, nil
+}
+
+// periodBilledCost sums billed_cost per period over the documents params
+// matches in cacheMode, keyed like GetDailyUsage.
+func (r *MongoDBReader) periodBilledCost(ctx context.Context, params UsageQueryParams, dateFormat, cacheMode string) (map[string]*float64, error) {
+	params.CacheMode = cacheMode
+	matchFilters, err := mongoUsageMatchFilters(params)
+	if err != nil {
+		return nil, err
+	}
+	pipeline := bson.A{}
+	if len(matchFilters) > 0 {
+		pipeline = append(pipeline, bson.D{{Key: "$match", Value: matchFilters}})
+	}
+	pipeline = append(pipeline, bson.D{{Key: "$group", Value: bson.D{
+		{Key: "_id", Value: bson.D{{Key: "$dateToString", Value: bson.D{
+			{Key: "format", Value: dateFormat},
+			{Key: "date", Value: "$timestamp"},
+			{Key: "timezone", Value: usageTimeZone(params)},
+		}}}},
+		{Key: "billed_cost", Value: mongoCostSum("$billed_cost")},
+		{Key: "has_billed_cost", Value: mongoCostPresenceCount("$billed_cost")},
+	}}})
+
+	cursor, err := r.collection.Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, fmt.Errorf("failed to aggregate daily billed cost: %w", err)
+	}
+	defer cursor.Close(ctx)
+	rows, err := decodeGroupedUsageRows(ctx, cursor, "daily billed cost", func(row mongoGroupedUsageRow) mongoGroupedUsageRow { return row })
+	if err != nil {
+		return nil, err
+	}
+	billed := make(map[string]*float64, len(rows))
+	for _, row := range rows {
+		billed[row.Key] = costPtr(row.HasBilledCost, row.BilledCost)
+	}
+	return billed, nil
 }
 
 // GetCacheOverview returns cached-only aggregates for the admin dashboard.
@@ -1259,20 +1412,20 @@ func mongoUsageMatchFilters(params UsageQueryParams) (bson.D, error) {
 	if tsFilter := mongoDateRangeFilter(params); tsFilter != nil {
 		matchFilters = append(matchFilters, bson.E{Key: "timestamp", Value: tsFilter})
 	}
-	userPath, err := normalizeUsageUserPathFilter(params.UserPath)
+	userPathCondition, err := mongoUserPathCondition(params)
 	if err != nil {
 		return nil, err
 	}
-	if userPath != "" {
-		matchFilters = append(matchFilters, bson.E{
-			Key: "user_path",
-			Value: bson.D{
-				{Key: "$regex", Value: usageUserPathSubtreeRegex(userPath)},
-			},
-		})
+	if len(userPathCondition) > 0 {
+		matchFilters = append(matchFilters, bson.E{Key: "user_path", Value: userPathCondition})
 	}
 	if params.Model != "" {
 		matchFilters = append(matchFilters, bson.E{Key: "model", Value: params.Model})
+	}
+	if len(params.Models) > 0 {
+		// A field holds one condition document, so the single-value filter
+		// and the any-of list must not both claim the key.
+		matchFilters = mongoAndFilters(matchFilters, bson.D{{Key: "model", Value: bson.D{{Key: "$in", Value: params.Models}}}})
 	}
 	if params.SessionID != "" {
 		matchFilters = append(matchFilters, bson.E{Key: "session_id", Value: params.SessionID})
@@ -1280,10 +1433,18 @@ func mongoUsageMatchFilters(params UsageQueryParams) (bson.D, error) {
 	if params.AuthKeyID != "" {
 		matchFilters = append(matchFilters, bson.E{Key: "auth_key_id", Value: params.AuthKeyID})
 	}
+	if len(params.AuthKeyIDs) > 0 {
+		matchFilters = mongoAndFilters(matchFilters, bson.D{{Key: "auth_key_id", Value: bson.D{{Key: "$in", Value: params.AuthKeyIDs}}}})
+	}
 	if params.Label != "" {
 		// Matching a scalar against an array field matches documents whose
 		// labels array contains the value.
 		matchFilters = append(matchFilters, bson.E{Key: "labels", Value: params.Label})
+	}
+	if len(params.Labels) > 0 {
+		// $in against an array field matches documents whose labels array
+		// contains any of the values.
+		matchFilters = mongoAndFilters(matchFilters, bson.D{{Key: "labels", Value: bson.D{{Key: "$in", Value: params.Labels}}}})
 	}
 	if len(params.Endpoints) > 0 {
 		matchFilters = append(matchFilters, bson.E{Key: "endpoint", Value: bson.D{{Key: "$in", Value: params.Endpoints}}})
@@ -1295,6 +1456,12 @@ func mongoUsageMatchFilters(params UsageQueryParams) (bson.D, error) {
 		matchFilters = mongoAndFilters(matchFilters, bson.D{{Key: "$or", Value: bson.A{
 			bson.D{{Key: "provider", Value: params.Provider}},
 			bson.D{{Key: "provider_name", Value: params.Provider}},
+		}}})
+	}
+	if len(params.Providers) > 0 {
+		matchFilters = mongoAndFilters(matchFilters, bson.D{{Key: "$or", Value: bson.A{
+			bson.D{{Key: "provider", Value: bson.D{{Key: "$in", Value: params.Providers}}}},
+			bson.D{{Key: "provider_name", Value: bson.D{{Key: "$in", Value: params.Providers}}}},
 		}}})
 	}
 	if filter := mongoCacheModeFilter(params.CacheMode); len(filter) > 0 {
@@ -1361,4 +1528,14 @@ func mongoCacheModeFilter(mode string) bson.D {
 			bson.D{{Key: "cache_type", Value: ""}},
 		}}}
 	}
+}
+
+// nonBillableFlag keeps a stored billable flag only when it is false, so a
+// billable row (the default, and every row written before the field) is
+// reported without one.
+func nonBillableFlag(billable *bool) *bool {
+	if billable == nil || *billable {
+		return nil
+	}
+	return billable
 }

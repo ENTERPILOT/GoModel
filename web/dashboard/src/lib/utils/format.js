@@ -50,6 +50,15 @@ export function formatCost(v) {
   return "$" + cost.toFixed(4).replace(/(\.\d{2}\d*?)0+$/, "$1");
 }
 
+// formatCostShort renders a cost for chart axis ticks: two decimals, with
+// the same "---" for an unknown cost as formatCost.
+export function formatCostShort(v) {
+  if (v == null) return "---";
+  const cost = Number(v);
+  if (!Number.isFinite(cost)) return "---";
+  return "$" + cost.toFixed(2);
+}
+
 export function formatPrice(v) {
   if (v == null) return "—";
   return "$" + v.toFixed(2);

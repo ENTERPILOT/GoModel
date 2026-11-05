@@ -1,0 +1,154 @@
+---
+title: "Codex CLI：自定义 Base URL 与模型路由"
+sidebarTitle: "Codex"
+description: "在 Codex 与模型之间部署 GoModel：既可以继续使用 ChatGPT 订阅计费，也可以将 Codex 路由到任意其他提供商。"
+icon: "code-xml"
+keywords: ["Codex", "Codex CLI", "OpenAI Codex", "自定义 Base URL", "custom base URL", "ChatGPT 订阅", "ChatGPT subscription", "编程智能体", "coding agent", "配置指南", "setup guide"]
+---
+
+GoModel 非常适合 Codex，因为 Codex 本身就面向 OpenAI Responses API。
+
+`Codex -> GoModel -> upstream`
+
+Codex 使用 GoModel 主密钥与 GoModel 通信，因此每个请求都会显示在控制台中。您唯一需要决定的是由哪个提供商来提供模型，因为这决定了费用由谁承担：
+
+| 提供商 | 上游 | 计费 |
+| -------- | -------- | ------- |
+| [`chatgpt`](/zh/providers/chatgpt) | 您的 ChatGPT 套餐背后的 Codex 后端 | ChatGPT 订阅配额 |
+| `openai`、[`deepseek`](/zh/providers/deepseek)、[`anthropic`](/zh/providers/anthropic)、[其他任意提供商](/zh/providers/overview) | 该提供商的 API | 该提供商的 API 额度 |
+
+无论选择哪种方式，后续步骤都完全相同。
+
+## 开始之前
+
+- 在您的机器上安装 Codex。
+- 选择一个 GoModel 主密钥，例如 `change-me`。
+
+如果要使用 ChatGPT 套餐为 Codex 计费，请先登录一次，让 Codex 写入其 Token 文件，然后将该 Token 交给 GoModel：
+
+```bash
+codex login
+export CHATGPT_API_KEY=$(jq -r .tokens.access_token ~/.codex/auth.json)
+```
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e CHATGPT_API_KEY="$CHATGPT_API_KEY" \
+  enterpilot/gomodel
+```
+
+有关模型列表、该 Token 约 10 天的有效期，以及该后端接受哪些 Responses 参数，请参阅 [ChatGPT 提供商页面](/zh/providers/chatgpt)。
+
+如果要改为使用 API 额度计费，请照常配置其他任意提供商（例如 `-e OPENAI_API_KEY="sk-..."`），并在第 2 步中使用该提供商的模型。
+
+## 1. 确认 Responses API 可用
+
+可选：在接入 Codex 之前，先确认 GoModel 能够响应普通的 Responses 请求。请使用您已配置的提供商实际提供的模型。
+
+```bash
+curl -s http://localhost:8080/v1/responses \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gpt-5.6-sol", "input": "Reply with exactly ok"}'
+```
+
+响应中包含 `ok`。对应的 Python 和 JavaScript 示例，请参阅 [Responses API 参考](/zh/advanced/responses-api)。
+
+## 2. 配置 Codex 使用 GoModel
+
+在 `~/.codex/config.toml` 中添加一个基于 Responses 的提供商：
+
+```toml
+model_provider = "gomodel"
+model = "gpt-5.6-sol"   # 或您的 GoModel 提供的任意模型
+
+[model_providers.gomodel]
+name = "GoModel"
+base_url = "http://localhost:8080/v1"
+env_key = "GOMODEL_API_KEY"
+wire_api = "responses"
+```
+
+然后为该提供商导出 GoModel 主密钥：
+
+```bash
+export GOMODEL_API_KEY=change-me
+```
+
+<Note>
+  即使您已使用 ChatGPT 登录，Codex 也要求设置此变量，且它承载的是 GoModel 主密钥，而不是 OpenAI 密钥。缺少该变量时，提供商将无法启动。
+</Note>
+
+如果想在不修改配置文件的情况下试用，可以内联传入相同的设置：
+
+```bash
+GOMODEL_API_KEY=change-me codex exec \
+  -c model_provider=gomodel \
+  -c 'model_providers.gomodel.name="GoModel"' \
+  -c 'model_providers.gomodel.base_url="http://localhost:8080/v1"' \
+  -c 'model_providers.gomodel.env_key="GOMODEL_API_KEY"' \
+  -c 'model_providers.gomodel.wire_api="responses"' \
+  -m gpt-5.6-sol 'Reply with exactly ok and no punctuation.'
+```
+
+<Note>
+  Codex 会忽略 `OPENAI_BASE_URL`。请使用上面的提供商配置；如果您确实想覆盖内置的 OpenAI 提供商，可以在 Codex 配置中设置 `openai_base_url`。
+</Note>
+
+## 3. 运行 Codex 测试提示词
+
+```bash
+codex exec -m gpt-5.6-sol 'Reply with exactly ok and no punctuation.'
+```
+
+验证结果为：
+
+```text
+ok
+```
+
+<Note>
+  Codex 0.147.0 在启动时会记录 `failed to refresh available models: missing field
+  "models"`。这是因为它会调用自己的模型目录端点，而 GoModel 以标准的 OpenAI `/v1/models` 结构响应。该消息不影响使用：Codex 会自动回退，会话可以正常工作。
+</Note>
+
+## 4. 在 GoModel 中检查流量
+
+打开 GoModel 控制台的审计日志：
+
+[http://localhost:8080/admin/dashboard/audit](http://localhost:8080/admin/dashboard/audit)
+
+您可以在这里确认 Codex 已到达 GoModel，并查看完整的请求和响应记录。在同一个控制台中，您还可以持续跟踪 GoModel 的流量和用量。
+
+## DeepSeek V4
+
+Codex 发送的是 `POST /v1/responses`，而 DeepSeek 并不原生支持该端点。请使用 `type: deepseek` 而不是 `type: openai`：DeepSeek 提供商会将 `/responses` 转换为 `/chat/completions`，而通用的 OpenAI 提供商会将其原样转发到上游。
+
+```yaml
+providers:
+  deepseek:
+    type: deepseek
+    api_key: "${DEEPSEEK_API_KEY}"
+```
+
+然后在第 2 步的 Codex 配置中设置 `model = "deepseek-v4-pro"`。有关推理强度（reasoning effort）的映射，请参阅 [DeepSeek 页面](/zh/providers/deepseek)；有关经 Chat 转换的提供商会丢弃哪些内容（包括 Codex 在每个请求中都会请求的 `reasoning.encrypted_content`），请参阅 [Responses 兼容性](/zh/advanced/responses-compatibility)。
+
+## 当前状态
+
+- 推荐的集成路径是 Codex 自定义提供商 -> 标准的 `http://localhost:8080/v1`
+- Codex 自定义提供商模式以普通 JSON 发送 `POST /v1/responses`，因此不再需要旧的 `--disable enable_request_compression` 变通方案
+
+## 参考
+
+- OpenAI Codex 讨论：[Deprecating `chat/completions` support in Codex](https://github.com/openai/codex/discussions/7782)
+- OpenAI Codex 代码仓库：[openai/codex](https://github.com/openai/codex)
+
+## 2026 年 8 月 20 日验证
+
+本指南已基于本地 GoModel 实例和 Codex CLI `0.147.0` 验证。本地验证确认：
+
+- `codex exec` 通过 `Codex -> GoModel -> ChatGPT subscription` 返回了 `ok`
+- 对于流式和非流式调用方，`POST /v1/responses` 均返回 `200 OK`
+- Codex 发送的是普通 JSON；请求中没有 `Content-Encoding: zstd` 请求头
+- 自定义的 `gomodel` 提供商在缺少 `env_key` 时启动失败，因为即使已使用 ChatGPT 登录，Codex 仍要求设置该变量

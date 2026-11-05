@@ -30,8 +30,12 @@ type ProviderConfig struct {
 	// paths ("providers.openai.api_keys[1]") or environment variable names
 	// ("OPENAI_API_KEY_2"); more than one when identical keys were collapsed.
 	// Set by configuration resolution; nil elsewhere.
-	APIKeySources            [][]string
-	SessionStickyKeys        bool
+	APIKeySources     [][]string
+	SessionStickyKeys bool
+	// Billable is false for a provider whose cost the caller does not owe the
+	// operator (a customer's own key): its usage is tracked but billed at
+	// zero, and user-path and label budgets ignore it.
+	Billable                 bool
 	BaseURL                  string
 	APIVersion               string
 	Backend                  string
@@ -59,6 +63,9 @@ type ProviderConfig struct {
 	// and price cap. Zero value keeps every model.
 	ModelFilter config.ModelFilter
 	Resilience  config.ResilienceConfig
+	// WorkloadIdentity, when configured and no API key is set, authenticates
+	// with tokens exchanged for the workload's platform identity.
+	WorkloadIdentity config.WorkloadIdentityConfig
 }
 
 // resolveProviders applies env var overrides to the raw YAML provider map,
@@ -225,7 +232,7 @@ func filterProviders(raw map[string]config.RawProviderConfig, discovery map[stri
 			result[name] = p
 			continue
 		}
-		if set(p.APIKey) {
+		if set(p.APIKey) || workloadIdentitySet(p.WorkloadIdentity, set) {
 			result[name] = p
 		}
 	}
@@ -302,6 +309,7 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 		APIKey:                   raw.APIKey,
 		APIKeys:                  raw.APIKeys,
 		SessionStickyKeys:        sessionStickyKeysEnabled(raw.SessionStickyKeys),
+		Billable:                 enabledByDefault(raw.Billable),
 		BaseURL:                  raw.BaseURL,
 		APIVersion:               raw.APIVersion,
 		Backend:                  raw.Backend,
@@ -318,6 +326,7 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 		ModelMetadataOverrides:   config.ProviderModelMetadataOverrides(raw.Models),
 		ModelFilter:              raw.ModelFilter.Normalize(),
 		Resilience:               global,
+		WorkloadIdentity:         raw.WorkloadIdentity,
 	}
 	if resolved.Type == "llmd" {
 		resolved.InferenceObjective = raw.InferenceObjective

@@ -11,6 +11,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/providers"
 )
@@ -43,21 +44,25 @@ const redactedCredentialValue = "***********"
 // api_keys or the service-account fields preserves the stored value at that
 // position.
 type upsertProviderCredentialRequest struct {
-	Name                     string   `json:"name"`
-	Type                     string   `json:"type"`
-	APIKeys                  []string `json:"api_keys,omitempty"`
-	SessionStickyKeys        *bool    `json:"session_sticky_keys,omitempty"`
-	BaseURL                  string   `json:"base_url,omitempty"`
-	APIVersion               string   `json:"api_version,omitempty"`
-	Backend                  string   `json:"backend,omitempty"`
-	AuthType                 string   `json:"auth_type,omitempty"`
-	APIMode                  string   `json:"api_mode,omitempty"`
-	VertexProject            string   `json:"vertex_project,omitempty"`
-	VertexLocation           string   `json:"vertex_location,omitempty"`
-	ServiceAccountFile       string   `json:"service_account_file,omitempty"`
-	ServiceAccountJSON       string   `json:"service_account_json,omitempty"`
-	ServiceAccountJSONBase64 string   `json:"service_account_json_base64,omitempty"`
-	GCPScope                 string   `json:"gcp_scope,omitempty"`
+	Name              string   `json:"name"`
+	Type              string   `json:"type"`
+	APIKeys           []string `json:"api_keys,omitempty"`
+	SessionStickyKeys *bool    `json:"session_sticky_keys,omitempty"`
+	// Billable false marks a provider whose cost the caller does not owe the
+	// operator, such as a customer's own key. Omitted keeps the stored value
+	// (true for a new provider).
+	Billable                 *bool  `json:"billable,omitempty"`
+	BaseURL                  string `json:"base_url,omitempty"`
+	APIVersion               string `json:"api_version,omitempty"`
+	Backend                  string `json:"backend,omitempty"`
+	AuthType                 string `json:"auth_type,omitempty"`
+	APIMode                  string `json:"api_mode,omitempty"`
+	VertexProject            string `json:"vertex_project,omitempty"`
+	VertexLocation           string `json:"vertex_location,omitempty"`
+	ServiceAccountFile       string `json:"service_account_file,omitempty"`
+	ServiceAccountJSON       string `json:"service_account_json,omitempty"`
+	ServiceAccountJSONBase64 string `json:"service_account_json_base64,omitempty"`
+	GCPScope                 string `json:"gcp_scope,omitempty"`
 	// ProxyURL may be sent back exactly as the view rendered it (password
 	// masked) to keep the stored proxy credentials.
 	ProxyURL string   `json:"proxy_url,omitempty"`
@@ -97,6 +102,7 @@ type providerCredentialViewResponse struct {
 	Type                     string   `json:"type"`
 	APIKeys                  []string `json:"api_keys,omitempty"`
 	SessionStickyKeys        bool     `json:"session_sticky_keys"`
+	Billable                 bool     `json:"billable"`
 	BaseURL                  string   `json:"base_url,omitempty"`
 	APIVersion               string   `json:"api_version,omitempty"`
 	Backend                  string   `json:"backend,omitempty"`
@@ -253,11 +259,11 @@ func (h *Handler) UpsertProviderCredential(c *echo.Context) error {
 	h.mutationMu.Lock()
 	defer h.mutationMu.Unlock()
 
-	cred, err := h.buildProviderCredentialUpsert(c.Request().Context(), name, req)
+	cred, kept, err := h.buildProviderCredentialUpsert(c.Request().Context(), name, req)
 	if err != nil {
 		return handleError(c, err)
 	}
-	if err := h.providerCredentials.Upsert(c.Request().Context(), cred); err != nil {
+	if err := h.providerCredentials.Upsert(config.WithKeptSecrets(c.Request().Context(), kept...), cred); err != nil {
 		return handleError(c, providerCredentialWriteError(err))
 	}
 
@@ -294,24 +300,42 @@ func (h *Handler) DeleteProviderCredential(c *echo.Context) error {
 // buildProviderCredentialUpsert maps the request onto a validated
 // ManagedProviderCredential, resolving redacted placeholders against the
 // stored row so the dashboard never has to re-submit real secrets on every
-// edit.
-func (h *Handler) buildProviderCredentialUpsert(ctx context.Context, name string, req upsertProviderCredentialRequest) (providers.ManagedProviderCredential, error) {
+// edit. It also returns the secret values that were resolved that way: the
+// caller did not supply them, so the save may not repoint the credential
+// (config.WithKeptSecrets).
+func (h *Handler) buildProviderCredentialUpsert(ctx context.Context, name string, req upsertProviderCredentialRequest) (providers.ManagedProviderCredential, []string, error) {
 	current, err := h.providerCredentials.Get(ctx, name)
 	if err != nil && !errors.Is(err, providers.ErrCredentialNotFound) {
-		return providers.ManagedProviderCredential{}, providerCredentialWriteError(err)
+		return providers.ManagedProviderCredential{}, nil, providerCredentialWriteError(err)
 	}
 
+	var kept []string
 	apiKeys, err := mergeRedactedList(req.APIKeys, currentAPIKeys(current))
 	if err != nil {
-		return providers.ManagedProviderCredential{}, err
+		return providers.ManagedProviderCredential{}, nil, err
+	}
+	for i, value := range req.APIKeys {
+		if isRedactedCredentialValue(value) {
+			kept = append(kept, apiKeys[i])
+		}
 	}
 	serviceAccountJSON, err := mergeRedactedValue(providers.CredentialFieldServiceAccountJSON, req.ServiceAccountJSON, currentField(current, func(c providers.ManagedProviderCredential) string { return c.ServiceAccountJSON }))
 	if err != nil {
-		return providers.ManagedProviderCredential{}, err
+		return providers.ManagedProviderCredential{}, nil, err
+	}
+	if isRedactedCredentialValue(req.ServiceAccountJSON) {
+		kept = append(kept, serviceAccountJSON)
 	}
 	serviceAccountJSONBase64, err := mergeRedactedValue(providers.CredentialFieldServiceAccountJSONBase64, req.ServiceAccountJSONBase64, currentField(current, func(c providers.ManagedProviderCredential) string { return c.ServiceAccountJSONBase64 }))
 	if err != nil {
-		return providers.ManagedProviderCredential{}, err
+		return providers.ManagedProviderCredential{}, nil, err
+	}
+	if isRedactedCredentialValue(req.ServiceAccountJSONBase64) {
+		kept = append(kept, serviceAccountJSONBase64)
+	}
+	proxyURL := mergeRedactedProxyURL(req.ProxyURL, currentField(current, func(c providers.ManagedProviderCredential) string { return c.ProxyURL }))
+	if proxyURL != strings.TrimSpace(req.ProxyURL) {
+		kept = append(kept, proxyURL)
 	}
 
 	enabled := true
@@ -326,6 +350,7 @@ func (h *Handler) buildProviderCredentialUpsert(ctx context.Context, name string
 		Type:                     strings.TrimSpace(req.Type),
 		APIKeys:                  apiKeys,
 		SessionStickyKeys:        req.SessionStickyKeys,
+		Billable:                 req.Billable,
 		BaseURL:                  strings.TrimSpace(req.BaseURL),
 		APIVersion:               strings.TrimSpace(req.APIVersion),
 		Backend:                  strings.TrimSpace(req.Backend),
@@ -337,7 +362,7 @@ func (h *Handler) buildProviderCredentialUpsert(ctx context.Context, name string
 		ServiceAccountJSON:       serviceAccountJSON,
 		ServiceAccountJSONBase64: serviceAccountJSONBase64,
 		GCPScope:                 strings.TrimSpace(req.GCPScope),
-		ProxyURL:                 mergeRedactedProxyURL(req.ProxyURL, currentField(current, func(c providers.ManagedProviderCredential) string { return c.ProxyURL })),
+		ProxyURL:                 proxyURL,
 		Models:                   req.Models,
 		Enabled:                  enabled,
 	}
@@ -346,8 +371,11 @@ func (h *Handler) buildProviderCredentialUpsert(ctx context.Context, name string
 		if req.SessionStickyKeys == nil {
 			cred.SessionStickyKeys = current.SessionStickyKeys
 		}
+		if req.Billable == nil {
+			cred.Billable = current.Billable
+		}
 	}
-	return cred, nil
+	return cred, kept, nil
 }
 
 func currentAPIKeys(current *providers.ManagedProviderCredential) []string {
@@ -427,6 +455,7 @@ func (h *Handler) providerCredentialView(cred providers.ManagedProviderCredentia
 		Type:               cred.Type,
 		APIKeys:            redactList(cred.APIKeys),
 		SessionStickyKeys:  cred.SessionStickyKeys == nil || *cred.SessionStickyKeys,
+		Billable:           cred.Billable == nil || *cred.Billable,
 		BaseURL:            cred.BaseURL,
 		APIVersion:         cred.APIVersion,
 		Backend:            cred.Backend,
@@ -471,6 +500,7 @@ func (h *Handler) declaredProviderCredentialView(cfg providers.SanitizedProvider
 		APIVersion:        cfg.APIVersion,
 		Models:            cfg.Models,
 		SessionStickyKeys: cfg.SessionStickyKeys,
+		Billable:          cfg.Billable,
 		ProxyURL:          cfg.ProxyURL,
 		Enabled:           true,
 		Managed:           true,

@@ -86,3 +86,13 @@ html.dark #navigation-items .nav-anchor[href="https://discord.gg/gaEB9BQSPH"]::b
     rotate: 0deg;
   }
 }
+
+#sidebar li:has(#localization-select-trigger) {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgb(229 231 235 / 0.7);
+}
+
+html.dark #sidebar li:has(#localization-select-trigger) {
+  border-top-color: rgb(255 255 255 / 0.07);
+}

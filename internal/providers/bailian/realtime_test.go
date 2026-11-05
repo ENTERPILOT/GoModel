@@ -2,6 +2,7 @@ package bailian
 
 import (
 	"context"
+	"net/http"
 	"net/url"
 	"strings"
 	"testing"
@@ -72,4 +73,16 @@ func TestRealtimeTargetFollowsSetBaseURL(t *testing.T) {
 	target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "m"})
 	require.NoError(t, err)
 	assert.True(t, strings.HasPrefix(target.URL, "wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime"), "url = %q, want the SetBaseURL region host", target.URL)
+}
+
+// The websocket dial must go through the provider's own client so its
+// proxy_url, an extension's proxy selection, and the TLS trust apply.
+func TestRealtimeTargetCarriesProviderHTTPClient(t *testing.T) {
+	client := &http.Client{}
+	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{HTTPClient: client})
+	rp, ok := p.(core.RealtimeProvider)
+	require.True(t, ok)
+	target, err := rp.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "qwen3-omni-flash-realtime"})
+	require.NoError(t, err)
+	assert.Same(t, client, target.HTTPClient)
 }

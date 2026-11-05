@@ -5,6 +5,7 @@
       "Name": "response.created",
       "Payload": {
         "response": {
+          "access_programs": null,
           "background": false,
           "completed_at": null,
           "created_at": 0,
@@ -17,14 +18,16 @@
           "max_tool_calls": null,
           "metadata": {},
           "model": "gpt-4o-mini-2024-07-18",
+          "moderation": null,
           "object": "response",
           "output": [],
           "parallel_tool_calls": true,
           "presence_penalty": 0,
           "previous_response_id": null,
           "prompt_cache_key": null,
-          "prompt_cache_retention": null,
+          "prompt_cache_retention": "in_memory",
           "reasoning": {
+            "context": null,
             "effort": null,
             "summary": null
           },
@@ -40,6 +43,24 @@
             "verbosity": "medium"
           },
           "tool_choice": "auto",
+          "tool_usage": {
+            "image_gen": {
+              "input_tokens": 0,
+              "input_tokens_details": {
+                "image_tokens": 0,
+                "text_tokens": 0
+              },
+              "output_tokens": 0,
+              "output_tokens_details": {
+                "image_tokens": 0,
+                "text_tokens": 0
+              },
+              "total_tokens": 0
+            },
+            "web_search": {
+              "num_requests": 0
+            }
+          },
           "tools": [],
           "top_logprobs": 0,
           "top_p": 1,
@@ -56,6 +77,7 @@
       "Name": "response.in_progress",
       "Payload": {
         "response": {
+          "access_programs": null,
           "background": false,
           "completed_at": null,
           "created_at": 0,
@@ -68,14 +90,16 @@
           "max_tool_calls": null,
           "metadata": {},
           "model": "gpt-4o-mini-2024-07-18",
+          "moderation": null,
           "object": "response",
           "output": [],
           "parallel_tool_calls": true,
           "presence_penalty": 0,
           "previous_response_id": null,
           "prompt_cache_key": null,
-          "prompt_cache_retention": null,
+          "prompt_cache_retention": "in_memory",
           "reasoning": {
+            "context": null,
             "effort": null,
             "summary": null
           },
@@ -91,6 +115,24 @@
             "verbosity": "medium"
           },
           "tool_choice": "auto",
+          "tool_usage": {
+            "image_gen": {
+              "input_tokens": 0,
+              "input_tokens_details": {
+                "image_tokens": 0,
+                "text_tokens": 0
+              },
+              "output_tokens": 0,
+              "output_tokens_details": {
+                "image_tokens": 0,
+                "text_tokens": 0
+              },
+              "total_tokens": 0
+            },
+            "web_search": {
+              "num_requests": 0
+            }
+          },
           "tools": [],
           "top_logprobs": 0,
           "top_p": 1,
@@ -143,7 +185,7 @@
         "delta": "Hello",
         "item_id": "msg_\u003cgenerated\u003e",
         "logprobs": [],
-        "obfuscation": "fIVBptC5V5x",
+        "obfuscation": "ZTAs9MwOLYT",
         "output_index": 0,
         "sequence_number": 4,
         "type": "response.output_text.delta"
@@ -157,7 +199,7 @@
         "delta": ",",
         "item_id": "msg_\u003cgenerated\u003e",
         "logprobs": [],
-        "obfuscation": "Q8ckTZZrAUj0st5",
+        "obfuscation": "2UwX5fpLLNeo25U",
         "output_index": 0,
         "sequence_number": 5,
         "type": "response.output_text.delta"
@@ -171,7 +213,7 @@
         "delta": " World",
         "item_id": "msg_\u003cgenerated\u003e",
         "logprobs": [],
-        "obfuscation": "jeCuswy13M",
+        "obfuscation": "wl6Z9gJfzm",
         "output_index": 0,
         "sequence_number": 6,
         "type": "response.output_text.delta"
@@ -185,7 +227,7 @@
         "delta": "!",
         "item_id": "msg_\u003cgenerated\u003e",
         "logprobs": [],
-        "obfuscation": "Bu7Lb4JlXbVWWxS",
+        "obfuscation": "xAHvFfY3U6tggdX",
         "output_index": 0,
         "sequence_number": 7,
         "type": "response.output_text.delta"
@@ -249,8 +291,9 @@
       "Name": "response.completed",
       "Payload": {
         "response": {
+          "access_programs": null,
           "background": false,
-          "completed_at": 1772295220,
+          "completed_at": 1793204832,
           "created_at": 0,
           "error": null,
           "frequency_penalty": 0,
@@ -261,6 +304,7 @@
           "max_tool_calls": null,
           "metadata": {},
           "model": "gpt-4o-mini-2024-07-18",
+          "moderation": null,
           "object": "response",
           "output": [
             {
@@ -282,8 +326,9 @@
           "presence_penalty": 0,
           "previous_response_id": null,
           "prompt_cache_key": null,
-          "prompt_cache_retention": null,
+          "prompt_cache_retention": "in_memory",
           "reasoning": {
+            "context": null,
             "effort": null,
             "summary": null
           },
@@ -299,6 +344,24 @@
             "verbosity": "medium"
           },
           "tool_choice": "auto",
+          "tool_usage": {
+            "image_gen": {
+              "input_tokens": 0,
+              "input_tokens_details": {
+                "image_tokens": 0,
+                "text_tokens": 0
+              },
+              "output_tokens": 0,
+              "output_tokens_details": {
+                "image_tokens": 0,
+                "text_tokens": 0
+              },
+              "total_tokens": 0
+            },
+            "web_search": {
+              "num_requests": 0
+            }
+          },
           "tools": [],
           "top_logprobs": 0,
           "top_p": 1,
@@ -306,6 +369,7 @@
           "usage": {
             "input_tokens": 17,
             "input_tokens_details": {
+              "cache_write_tokens": 0,
               "cached_tokens": 0
             },
             "output_tokens": 5,

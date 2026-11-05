@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -134,29 +135,28 @@ func (r *blockingReader) Close() error {
 }
 
 func TestBufferedSSEStream_ContextCancelStopsDrain(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	upstream := newBlockingReader()
-	finisherCalled := false
-	stream := NewBufferedSSEStream(ctx, upstream, ChatCodec(), func([]Event, []byte) ([]byte, error) {
-		finisherCalled = true
-		return nil, nil
-	}, BufferOptions{KeepAliveInterval: -1})
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		upstream := newBlockingReader()
+		finisherCalled := false
+		stream := NewBufferedSSEStream(ctx, upstream, ChatCodec(), func([]Event, []byte) ([]byte, error) {
+			finisherCalled = true
+			return nil, nil
+		}, BufferOptions{KeepAliveInterval: -1})
 
-	go func() {
-		time.Sleep(10 * time.Millisecond)
-		cancel()
-	}()
-	_, err := stream.Read(make([]byte, 16))
-	require.ErrorIs(t, err, context.Canceled)
+		go func() {
+			// Cancel once Read is parked on the drain.
+			synctest.Wait()
+			cancel()
+		}()
+		_, err := stream.Read(make([]byte, 16))
+		require.ErrorIs(t, err, context.Canceled)
 
-	select {
-	case <-upstream.closed:
-	case <-time.After(time.Second):
-		t.Fatal("upstream was not closed after cancellation")
-	}
-	assert.False(t, finisherCalled)
-	err = stream.Close()
-	require.NoError(t, err)
+		<-upstream.closed
+		assert.False(t, finisherCalled)
+		err = stream.Close()
+		require.NoError(t, err)
+	})
 }
 
 func TestBufferedSSEStream_CloseDuringDrain(t *testing.T) {
@@ -218,18 +218,40 @@ func TestBufferedSSEStream_ResponsesReplay(t *testing.T) {
 // Close may run on another goroutine while the first Read, which starts
 // the drain, is in progress; it must see the ticker and context hook it has
 // to stop. Meaningful under -race.
-func TestBufferedSSEStream_CloseRacesFirstRead(t *testing.T) {
-	upstream := newBlockingReader()
-	stream := NewBufferedSSEStream(context.Background(), upstream, ChatCodec(), nil, BufferOptions{KeepAliveInterval: time.Hour})
-	read := make(chan struct{})
-	go func() {
-		defer close(read)
-		_, _ = stream.Read(make([]byte, 64))
-	}()
-	time.Sleep(10 * time.Millisecond)
-	// let Read pass its closed check and start the drain
-	err := stream.Close()
-	require.NoError(t, err)
+// TestBufferedSSEStream_CloseConcurrentWithFirstRead starts Read and Close
+// together, with no ordering between them, so the race detector sees the two
+// overlap wherever the scheduler happens to interleave them. The ordered
+// variant below pins the one interleaving that matters most; this one covers
+// the rest. Meaningful under -race.
+func TestBufferedSSEStream_CloseConcurrentWithFirstRead(t *testing.T) {
+	for range 32 {
+		upstream := newBlockingReader()
+		stream := NewBufferedSSEStream(context.Background(), upstream, ChatCodec(), nil, BufferOptions{KeepAliveInterval: time.Hour})
+		read := make(chan struct{})
+		go func() {
+			defer close(read)
+			_, _ = stream.Read(make([]byte, 64))
+		}()
+		err := stream.Close()
+		require.NoError(t, err)
+		<-read
+	}
+}
 
-	<-read
+func TestBufferedSSEStream_CloseRacesFirstRead(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		upstream := newBlockingReader()
+		stream := NewBufferedSSEStream(context.Background(), upstream, ChatCodec(), nil, BufferOptions{KeepAliveInterval: time.Hour})
+		read := make(chan struct{})
+		go func() {
+			defer close(read)
+			_, _ = stream.Read(make([]byte, 64))
+		}()
+		// Let Read pass its closed check and start the drain.
+		synctest.Wait()
+		err := stream.Close()
+		require.NoError(t, err)
+
+		<-read
+	})
 }

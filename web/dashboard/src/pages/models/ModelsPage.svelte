@@ -11,6 +11,7 @@
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
+  import SegmentedControl from "$lib/components/atoms/SegmentedControl.svelte";
   import { virtualModels } from "./virtualModels.svelte.js";
   import { virtualModelEditor } from "./virtualModelEditor.svelte.js";
   import { pricingOverrides } from "./pricingOverrides.svelte.js";
@@ -21,7 +22,8 @@
   import RateLimitEditor from "$pages/rate-limits/RateLimitEditor.svelte";
   import RateLimitInspector from "$pages/rate-limits/RateLimitInspector.svelte";
   import { rateLimits } from "$pages/rate-limits/rateLimits.svelte.js";
-  import { Plus } from "lucide";
+  import { providerGroups } from "./providerGroups.svelte.js";
+  import { ChevronsDownUp, ChevronsUpDown, Plus } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
   const PAGE = "models";
@@ -73,9 +75,24 @@
     utility: m.models_category_utility,
   };
 
+  const statusOptions = $derived([
+    { value: "all", label: m.models_status_all() },
+    { value: "enabled", label: m.models_enabled() },
+    { value: "disabled", label: m.models_disabled() },
+  ]);
+
   function categoryLabel(category) {
     return categoryLabels[category.category]?.() || category.display_name;
   }
+
+  // One toggle for the groups the table shows (filters apply): it expands
+  // them once all are collapsed, and collapses them otherwise.
+  const allGroupsCollapsed = $derived(
+    providerGroups.allCollapsed(virtualModels.filteredDisplayModelGroups),
+  );
+  const groupToggleLabel = $derived(
+    allGroupsCollapsed ? m.models_expand_all_groups() : m.models_collapse_all_groups(),
+  );
 </script>
 
 <div>
@@ -84,7 +101,7 @@
     {#if virtualModels.displayModels.length > 0}
       <div class="model-count">
         {m.models_total_count({
-          count: modelsStore.filter
+          count: virtualModels.filtersActive()
             ? virtualModels.filteredDisplayModels.length + " / " + virtualModels.displayModels.length
             : virtualModels.displayModels.length,
         })}
@@ -128,7 +145,29 @@
           bind:value={modelsStore.filter}
         />
       </div>
-      <div class="table-toolbar-actions">
+      <SegmentedControl
+        options={statusOptions}
+        value={virtualModels.statusFilter}
+        ariaLabel={m.models_status_filter_label()}
+        onchange={(value) => (virtualModels.statusFilter = value)}
+      />
+      <div class="table-toolbar-actions models-toolbar-actions">
+        {#if virtualModels.filteredDisplayModelGroups.length > 1}
+          <button
+            type="button"
+            class="btn btn-with-icon"
+            aria-label={groupToggleLabel}
+            title={groupToggleLabel}
+            onclick={() =>
+              providerGroups.setAll(virtualModels.filteredDisplayModelGroups, !allGroupsCollapsed)}
+          >
+            <Icon
+              icon={allGroupsCollapsed ? ChevronsUpDown : ChevronsDownUp}
+              class="alias-create-icon"
+            />
+            <span>{groupToggleLabel}</span>
+          </button>
+        {/if}
         {#if virtualModels.virtualModelsAvailable}
           <button
             type="button"
@@ -162,7 +201,7 @@
   {#if virtualModels.displayModels.length === 0 && !modelsStore.loading && !authError && !modelsStore.filter && modelsStore.activeCategory && modelsStore.activeCategory !== "all"}
     <p class="empty-state">{m.models_empty_category()}</p>
   {/if}
-  {#if virtualModels.displayModels.length > 0 && virtualModels.filteredDisplayModels.length === 0 && modelsStore.filter}
+  {#if virtualModels.displayModels.length > 0 && virtualModels.filteredDisplayModels.length === 0 && virtualModels.filtersActive()}
     <p class="empty-state">{m.models_no_match()}</p>
   {/if}
 
@@ -171,6 +210,10 @@
 </div>
 
 <style>
+.models-toolbar-actions {
+    gap: 8px;
+  }
+
 .category-tabs {
     display: flex;
     align-items: center;

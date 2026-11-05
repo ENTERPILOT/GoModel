@@ -405,11 +405,10 @@ func TestWorkflowResolution_PassthroughProviderNameRouteUsesCanonicalProviderNam
 		},
 	}
 
-	middleware := RequestSnapshotCapture()
-	handler := middleware(WorkflowResolutionWithResolverAndPolicy(provider, nil, policyResolver)(func(c *echo.Context) error {
+	handler := RequestSnapshotCapture()(RequestBodyCapture()(WorkflowResolutionWithResolverAndPolicy(provider, nil, policyResolver)(func(c *echo.Context) error {
 		capturedWorkflow = core.GetWorkflow(c.Request().Context())
 		return c.String(http.StatusOK, "ok")
-	}))
+	})))
 
 	c, _ := echotest.Post(t, "/p/openai_test/responses", `{"model":"gpt-5-mini"}`)
 

@@ -1,0 +1,101 @@
+---
+title: "Hetzner"
+description: "Konfigurieren Sie die experimentelle OpenAI-kompatible Inferenz-API von Hetzner in GoModel."
+icon: "server"
+keywords: ["Hetzner", "experimentell", "experimental", "Inferenz", "inference", "Provider-Einrichtung"]
+---
+
+<Warning>
+  **Experimentell**: Hetzner stuft diese Inferenz-API als experimentell ein. Rechnen Sie
+  mit Breaking Changes, ohne SLA und ohne Verfügbarkeitsgarantien. Verwenden Sie sie nicht
+  für produktive Workloads. Hetzner kann Modelle, Limits oder den Endpunkt selbst während
+  des Experiments ohne Vorankündigung ändern.
+</Warning>
+
+Hetzner Inference ist eine OpenAI-kompatible REST-API unter
+`https://inference.hetzner.com/api/v1`. GoModel routet Chat-, Modelllisten- und
+Passthrough-Requests über den gemeinsamen OpenAI-Adapter. Der Endpunkt `/v1/responses`
+wird über Chat Completions übersetzt. Dateien, Batches und Embeddings werden nicht
+unterstützt – Hetzner stellt keinen Endpunkt `/v1/embeddings` bereit. Embedding-Requests
+schlagen sofort mit einem typisierten „not supported“-Fehler fehl; es erfolgt kein
+Upstream-Aufruf.
+
+<Note>
+  Passthrough ist eine generische Weiterleitung: Sie sendet jeden angegebenen Pfad
+  unverändert an Hetzner. Wie tolerant Hetzner gegenüber beliebigen Upstream-Pfaden ist,
+  ist nicht geprüft, solange die API experimentell ist – rechnen Sie bei Pfaden außerhalb
+  von `/v1/models`, `/v1/completions` und `/v1/chat/completions` mit HTTP 404 oder 405.
+  `hetzner` steht in der standardmäßigen Allowlist `ENABLED_PASSTHROUGH_PROVIDERS`, daher
+  funktionieren `/p/hetzner/...`-Routen ohne Freischaltung durch den Betreiber.
+</Note>
+
+## Konfiguration
+
+Erstellen Sie ein API-Token in der
+[Hetzner-Experiments-Konsole](https://experiments.hetzner.com/inference) und setzen Sie:
+
+```bash
+HETZNER_API_KEY=...
+```
+
+Oder in `config.yaml`:
+
+```yaml
+providers:
+  hetzner:
+    type: hetzner
+    base_url: "https://inference.hetzner.com/api/v1"
+    api_key: "${HETZNER_API_KEY}"
+```
+
+Sie können die Basis-URL und die Modellliste auch wie folgt überschreiben:
+
+```bash
+HETZNER_BASE_URL=https://inference.hetzner.com/api/v1
+HETZNER_MODELS=Qwen/Qwen3.6-35B-A3B-FP8
+```
+
+<Note>
+  Die obige Modell-ID ist das Beispiel aus der
+  [offiziellen Hetzner-Inferenz-Dokumentation](https://docs.hetzner.com/general/company-and-policy/experiments/inference/)
+  (Stand: 2026-08-17). Der Katalog ist experimentell und ändert sich; prüfen Sie die
+  aktuellen IDs mit `GET /v1/models`, bevor Sie das Beispiel übernehmen.
+</Note>
+
+## Modelle
+
+Der Modellkatalog ändert sich während des Experiments. Fragen Sie die aktuelle Liste ab,
+statt sich auf Momentaufnahmen in der Dokumentation zu verlassen:
+
+```bash
+curl -s https://inference.hetzner.com/api/v1/models \
+  -H "Authorization: Bearer $HETZNER_API_KEY"
+```
+
+GoModel stellt diese Liste außerdem über seinen eigenen Endpunkt `/v1/models` bereit,
+sobald der Provider konfiguriert ist. Modelle mit Bildverarbeitung akzeptieren
+`image_url`-Content-Parts nach OpenAI-Standard unverändert.
+
+## Rate-Limits
+
+Hetzner erzwingt Rate-Limits pro Key für Input-Token und Output-Token. Bei Überschreitung
+eines der beiden Limits wird HTTP 429 zurückgegeben. Die dokumentierten Zeitfenster sind
+3M Input-Token / 60k Output-Token pro 60 s und 500M Input / 5M Output pro 24 h. Die
+genauen Werte ändern sich während des Experiments; die aktuellen Zahlen finden Sie in der
+[offiziellen Inferenz-Dokumentation](https://docs.hetzner.com/general/company-and-policy/experiments/inference/).
+Bevorzugen Sie konservative Retry-Einstellungen:
+
+```yaml
+providers:
+  hetzner:
+    type: hetzner
+    api_key: "${HETZNER_API_KEY}"
+    retries: 2
+```
+
+## Preise
+
+Die API ist kostenlos, solange sie den experimentellen Status hat. Laut Hetzner werden
+Benutzer per E-Mail benachrichtigt, bevor die Abrechnung beginnt. Die Kostenerfassung von
+GoModel meldet `cost` für Hetzner-Requests als null, bis es Upstream-Preise gibt. Das
+Load Balancing mit `cost` kann diesen Provider daher nicht nach Preis einordnen.

@@ -1,0 +1,115 @@
+---
+title: "Egress-Proxy-Pools"
+sidebarTitle: "Egress-Proxy-Pools"
+description: "Leiten Sie Provider-Traffic über benannte Pools von HTTP- oder SOCKS5-Proxys, mit Health Checks, Failover und Regeln, die Provider den Pools zuordnen."
+icon: "route"
+tag: "Pro"
+keywords: ["GoModel Pro", "Egress", "Proxy-Pool", "SOCKS5", "HTTP-Proxy", "Failover", "statische IP", "Health Check"]
+---
+
+## Übersicht
+
+Das Open-Source-GoModel leitet einen Provider mit
+[`proxy_url`](/de/providers/outbound-proxy) über einen einzelnen Proxy. Das genügt für einen
+einzelnen geografisch eingeschränkten Provider, aber nicht für eine Flotte, die immer über eine
+freigegebene (allowlisted) Egress-IP ausgehen muss: Fällt dieser eine Proxy aus, schlägt jeder
+Request fehl, der über ihn läuft.
+
+Egress-Proxy-Pools ergänzen die fehlenden Bausteine:
+
+- **Pools** aus HTTP-, HTTPS-, SOCKS5- oder SOCKS5h-Proxys, ausgewählt per `failover`
+  (der erste gesunde, in Reihenfolge) oder `round_robin`.
+- **Health Checks**, die jeden Proxy regelmäßig prüfen, fehlschlagende Mitglieder überspringen
+  und sie wieder aufnehmen, sobald sie die Prüfung erneut bestehen.
+- **Regeln**, die Provider anhand eines Namensmusters oder des Provider-Typs Pools zuordnen,
+  sodass ein neuer Provider abgedeckt ist, ohne seine eigene Konfiguration anzufassen.
+
+Die eigene `proxy_url` eines Providers hat weiterhin Vorrang vor jeder Regel. Provider, auf die
+keine Regel zutrifft, behalten das gatewayweite Verhalten von `HTTP_PROXY`, `HTTPS_PROXY` und
+`NO_PROXY`.
+
+<Warning>
+  Wie SSO schlägt auch aktiviertes Egress geschlossen fehl (fail closed): Der Start wird abgebrochen,
+  wenn das `egress`-Entitlement fehlt oder die Konfiguration ungültig ist. Traffic, der über
+  einen Proxy ausgehen sollte, verlässt das Gateway nie stillschweigend über dessen eigene
+  Adresse.
+</Warning>
+
+## Pools konfigurieren
+
+Konfigurieren Sie die Pools unter `extensions.egress` in der zentralen YAML-Konfiguration von
+GoModel:
+
+```yaml
+extensions:
+  egress:
+    enabled: true
+    proxies:
+      eu:
+        urls:
+          - socks5://user:${EU_PROXY_PASSWORD}@10.0.0.1:1080
+          - socks5://user:${EU_PROXY_PASSWORD}@10.0.0.2:1080
+        strategy: failover
+        check_url: https://api.openai.com/v1/models
+      us:
+        urls: [http://egress-us.internal:3128]
+    rules:
+      - providers: ["openai*", "type:anthropic"]
+        proxy: eu
+      - providers: ["*"]
+        proxy: us
+```
+
+Regeln werden der Reihe nach ausgewertet, und der erste Treffer gewinnt. Ein Muster trifft auf
+den Provider-Namen zu (`openai-eu`, `openai*`); mit dem Präfix `type:` trifft es stattdessen auf
+den Provider-Typ zu (`type:gemini`). Bei einem einzigen Pool ohne Regeln verwendet jeder
+Provider diesen Pool.
+
+Dieselben Einstellungen sind auch als Umgebungsvariablen verfügbar, die die YAML-Werte
+überschreiben. Pro `PRO_EGRESS_PROXY_<NAME>` entsteht ein Pool; der Name wird zum Pool-Namen in
+Kleinbuchstaben, mit Bindestrichen statt Unterstrichen (aus `EU_STATIC` wird `eu-static`):
+
+```bash
+PRO_EGRESS_ENABLED=true
+PRO_EGRESS_PROXY_EU=socks5://user:pass@10.0.0.1:1080,socks5://user:pass@10.0.0.2:1080
+PRO_EGRESS_PROXY_EU_STRATEGY=failover
+PRO_EGRESS_PROXY_EU_CHECK_URL=https://api.openai.com/v1/models
+PRO_EGRESS_PROXY_US=http://egress-us.internal:3128
+PRO_EGRESS_RULES=openai*=eu,type:anthropic=eu,*=us
+```
+
+| Einstellung | Standardwert | Ändern, wenn |
+| --- | --- | --- |
+| `strategy` | `failover` | Verwenden Sie `round_robin`, um die Last auf alle Mitglieder zu verteilen, statt das erste zu bevorzugen. |
+| `check_url` | nicht gesetzt (TCP-Verbindung) | Setzen Sie eine URL, um zu prüfen, dass der Proxy tatsächlich das Internet erreicht und nicht nur Verbindungen annimmt. |
+| `health_check_interval` | `30s` | Verringern Sie den Wert, wenn ein ausgefallener Proxy schneller als nach einer halben Minute erkannt werden muss. |
+| `health_check_timeout` | `5s` | Erhöhen Sie den Wert für langsame Proxys, die weit vom Gateway entfernt sind. |
+| `failure_threshold` | `2` | Anzahl aufeinanderfolgender fehlgeschlagener Prüfungen, bevor ein Mitglied übersprungen wird. Erhöhen Sie den Wert bei instabilen Verbindungen. |
+
+## Health Checks und Failover
+
+Jedes Mitglied wird geprüft, bevor das Gateway seinen ersten Request bedient, sodass ein bereits
+ausgefallener Proxy nie Traffic erhält. Ohne `check_url` ist eine Prüfung eine TCP-Verbindung
+zum Proxy-Port. Mit `check_url` ist sie ein `HEAD`-Request über den Proxy; jede weitergeleitete
+Response gilt als gesund, auch `401` oder `404` vom Ziel, während ein `5xx` als Fehler zählt, weil
+Forward-Proxys selbst mit `502`, `503` und `504` antworten, wenn sie das Ziel nicht erreichen.
+
+Nach der ersten Prüfung muss ein Mitglied `failure_threshold` aufeinanderfolgende Fehler
+aufweisen, um übersprungen zu werden, und einen Erfolg, um zurückzukehren. Sind alle Mitglieder
+eines Pools ungesund, wird der Pool trotzdem verwendet, beginnend mit seinem ersten Mitglied,
+und pro Ausfall wird einmal eine Warnung geloggt. Ein zugeordneter Pool fällt nie auf eine
+direkte Verbindung zurück.
+
+## Überwachen
+
+Zustandswechsel werden mit dem Pool-Namen, der Position des Mitglieds und der Proxy-URL (mit
+maskiertem Passwort) geloggt. Prometheus stellt bereit:
+
+- `gomodel_pro_egress_proxy_healthy{pool,member,proxy}`: `1`, solange das Mitglied in der
+  Rotation ist.
+- `gomodel_pro_egress_health_checks_total{pool,member,proxy,result}`: Prüfungen nach Ergebnis.
+- `gomodel_pro_egress_selections_total{pool,member,proxy}`: Requests, für die das jeweilige
+  Mitglied ausgewählt wurde.
+
+Richten Sie einen Alert auf `gomodel_pro_egress_proxy_healthy == 0` ein, um von einem
+ausgefallenen Proxy zu erfahren, bevor dem Pool die Mitglieder ausgehen.

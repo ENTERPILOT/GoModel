@@ -22,6 +22,9 @@ func (*lifecycleRuntimeSetting) Descriptor() ext.SettingDescriptor {
 
 func (*lifecycleRuntimeSetting) Apply(string) error { return nil }
 
+// SetSharedStore makes the extension shared store part of the fully wired app.
+func (*lifecycleRuntimeSetting) SetSharedStore(ext.SharedStore) {}
+
 // newFullyWiredApp builds an App with every optional subsystem enabled, so the
 // coverage tests below see the complete registry rather than the subset a
 // minimal config happens to initialize.

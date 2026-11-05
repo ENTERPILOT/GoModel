@@ -33,3 +33,11 @@ func waitForModelSlowdownFactor(ctx context.Context, factor float64, inferenceTi
 		return ctx.Err()
 	}
 }
+
+// workflowSlowdownFactor returns the slowdown resolved for a workflow, or 0.
+func workflowSlowdownFactor(workflow *core.Workflow) float64 {
+	if workflow == nil || workflow.Resolution == nil || workflow.Resolution.Slowdown <= 0 {
+		return 0
+	}
+	return workflow.Resolution.Slowdown
+}

@@ -143,12 +143,12 @@ func setupBudgetE2EFixture(t *testing.T, budgets []budget.Budget) *budgetE2EFixt
 	require.NoError(t, err)
 	db.SetMaxOpenConns(1)
 
-	usageStore, err := usage.NewSQLiteStore(db, 0)
+	sqliteDB, err := sqlx.NewSQLite(db)
 	require.NoError(t, err)
 
-	budgetDB, err := sqlx.NewSQLite(db)
+	usageStore, err := usage.NewSQLStore(context.Background(), sqliteDB, 0)
 	require.NoError(t, err)
-	budgetStore, err := budget.NewSQLStore(context.Background(), budgetDB)
+	budgetStore, err := budget.NewSQLStore(context.Background(), sqliteDB)
 	require.NoError(t, err)
 
 	service, err := budget.NewService(context.Background(), budgetStore)

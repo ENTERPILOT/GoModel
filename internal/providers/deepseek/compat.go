@@ -2,9 +2,12 @@ package deepseek
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/goccy/go-json"
@@ -62,7 +65,184 @@ func AdaptCompatibility(req *core.ChatRequest, providerName string, mode JSONSch
 	if err != nil {
 		return nil, err
 	}
+	adapted = adaptFileParts(adapted, providerName)
 	return adaptJSONSchemaResponseFormat(adapted, providerName, mode)
+}
+
+// inlineFilePlaceholder names an attachment DeepSeek cannot take. A short
+// stand-in keeps the turn deliverable: the whole tool result, including any
+// text beside the file, would otherwise be rejected upstream.
+const inlineFilePlaceholder = "[Attached file not passed to the model: DeepSeek accepts only image attachments]"
+
+// adaptFileParts rewrites file content parts into something DeepSeek accepts.
+//
+// DeepSeek's file input is images only (webp, png, jpeg, gif; its Files API
+// rejects anything else), and it takes an image as an image_url part. A file
+// part carrying an image becomes one, so the model still sees it. An inline
+// plain-text file becomes a text part carrying its contents, which is all
+// DeepSeek would have read from it. Anything else becomes a text note naming
+// the file: a PDF read by a Claude Code tool arrives this way, and there is no
+// form of it DeepSeek would read, so the note keeps the model aware of the
+// attachment instead of failing the turn.
+func adaptFileParts(req *core.ChatRequest, providerName string) *core.ChatRequest {
+	var adapted *core.ChatRequest
+	for i, message := range req.Messages {
+		parts, ok := message.Content.([]core.ContentPart)
+		if !ok || !slices.ContainsFunc(parts, isFilePart) {
+			continue
+		}
+		rewritten := slices.Clone(parts)
+		for j, part := range rewritten {
+			if isFilePart(part) {
+				// The caller's cache_control breakpoints keep their place, so
+				// the replacement inherits the file part's framing.
+				rewritten[j] = adaptedFilePart(part, message.Role, providerName, req.Model)
+			}
+		}
+		if adapted == nil {
+			clone := *req
+			clone.Messages = slices.Clone(req.Messages)
+			adapted = &clone
+		}
+		adapted.Messages[i].Content = rewritten
+	}
+	if adapted == nil {
+		return req
+	}
+	return adapted
+}
+
+// isFilePart reports whether a content part carries an attachment.
+func isFilePart(part core.ContentPart) bool {
+	return part.Type == "file" && part.File != nil
+}
+
+// adaptedFilePart maps one file part onto the image_url DeepSeek reads images
+// with, onto a text part for an inline text file, or onto a text note for an
+// attachment it cannot take. DeepSeek takes content parts only in user and
+// tool messages, so an attachment on any other role becomes the note, which
+// keeps the message acceptable upstream.
+func adaptedFilePart(part core.ContentPart, role, providerName, model string) core.ContentPart {
+	if role == "user" || role == "tool" {
+		if url, ok := imageFileURL(part.File); ok {
+			return core.ContentPart{
+				Type:        "image_url",
+				ImageURL:    &core.ImageURLContent{URL: url},
+				ExtraFields: part.ExtraFields,
+			}
+		}
+		if text, ok := textFileContent(part.File); ok {
+			return core.ContentPart{
+				Type:        "text",
+				Text:        text,
+				ExtraFields: part.ExtraFields,
+			}
+		}
+	}
+	// The contents are dropped here, so leave a trace of why a later answer
+	// ignored the attachment. The file contents are never logged.
+	slog.Debug("dropped attachment DeepSeek cannot read",
+		"provider", providerName, "model", model, "filename", strings.TrimSpace(part.File.Filename))
+	return core.ContentPart{
+		Type:        "text",
+		Text:        inlineFilePlaceholderText(part.File),
+		ExtraFields: part.ExtraFields,
+	}
+}
+
+// imageFileURL returns the URL of a file part whose payload is an image
+// DeepSeek supports: inline image data, or an http(s) URL whose path names one
+// of the four formats its vision input accepts. An uploaded file_id is not a
+// URL DeepSeek can resolve from a chat request, so it takes the note path.
+func imageFileURL(file *core.FileContent) (string, bool) {
+	if data := strings.TrimSpace(file.FileData); data != "" {
+		if isSupportedImageDataURL(data) {
+			return data, true
+		}
+		return "", false
+	}
+	rawURL := strings.TrimSpace(file.FileURL)
+	if isSupportedImageURL(rawURL) {
+		return rawURL, true
+	}
+	return "", false
+}
+
+// isSupportedImageDataURL reports whether data is a base64 data URL of one of
+// the image formats DeepSeek's vision input accepts. image/jpg is not a
+// registered media type, but clients send it for JPEG images, so it counts.
+func isSupportedImageDataURL(data string) bool {
+	meta, payload, ok := strings.Cut(strings.TrimPrefix(strings.ToLower(data), "data:"), ",")
+	if !ok || payload == "" || !strings.HasSuffix(meta, ";base64") {
+		return false
+	}
+	mediaType, _, _ := strings.Cut(meta, ";")
+	switch mediaType {
+	case "image/webp", "image/png", "image/jpeg", "image/jpg", "image/gif":
+		return true
+	}
+	return false
+}
+
+// isSupportedImageURL reports whether rawURL is an http(s) URL naming an image
+// in one of the formats DeepSeek's vision input accepts. A URL document block
+// is almost always a PDF, and DeepSeek rejects a PDF sent as an image_url, so
+// only URLs that name a supported image are sent as one.
+func isSupportedImageURL(rawURL string) bool {
+	lower := strings.ToLower(rawURL)
+	if !strings.HasPrefix(lower, "https://") && !strings.HasPrefix(lower, "http://") {
+		return false
+	}
+	parsed, err := url.Parse(lower)
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	switch {
+	case strings.HasSuffix(parsed.Path, ".png"),
+		strings.HasSuffix(parsed.Path, ".jpg"),
+		strings.HasSuffix(parsed.Path, ".jpeg"),
+		strings.HasSuffix(parsed.Path, ".gif"),
+		strings.HasSuffix(parsed.Path, ".webp"):
+		return true
+	}
+	return false
+}
+
+// textFileContent returns the contents of an inline plain-text file, headed by
+// its filename when the caller supplied one, as the OpenAI adapter does. The
+// text is all DeepSeek would have read from the file, so it is sent as text
+// rather than dropped.
+func textFileContent(file *core.FileContent) (string, bool) {
+	text, ok := inlineText(file.FileData)
+	if !ok {
+		return "", false
+	}
+	if name := strings.TrimSpace(file.Filename); name != "" {
+		return name + "\n\n" + text, true
+	}
+	return text, true
+}
+
+// inlineText decodes a base64 data URL with a text/* media type.
+func inlineText(fileData string) (string, bool) {
+	header, data, ok := strings.Cut(strings.TrimPrefix(strings.TrimSpace(fileData), "data:"), ",")
+	if !ok || !strings.HasPrefix(strings.ToLower(header), "text/") || !strings.HasSuffix(strings.ToLower(header), ";base64") {
+		return "", false
+	}
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		return "", false
+	}
+	return string(decoded), true
+}
+
+// inlineFilePlaceholderText heads the placeholder with the file's name when
+// the caller supplied one, so the model still learns what was attached.
+func inlineFilePlaceholderText(file *core.FileContent) string {
+	if name := strings.TrimSpace(file.Filename); name != "" {
+		return inlineFilePlaceholder + " (" + name + ")"
+	}
+	return inlineFilePlaceholder
 }
 
 // padMissingReasoningContent satisfies DeepSeek's thinking-mode rule that a

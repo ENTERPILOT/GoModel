@@ -34,6 +34,11 @@ func TestHealthProbeURL(t *testing.T) {
 			server:   config.ServerConfig{BasePath: "/"},
 			expected: "http://127.0.0.1:8080/health",
 		},
+		{
+			name:     "TLS listener",
+			server:   config.ServerConfig{Port: "8443", BasePath: "/", TLSCertFile: "/tls.crt", TLSKeyFile: "/tls.key"},
+			expected: "https://127.0.0.1:8443/health",
+		},
 	}
 
 	for _, tt := range tests {

@@ -1,0 +1,113 @@
+---
+title: "GitHub Copilot"
+description: "Route chat, Responses, and embeddings traffic through a GitHub Copilot subscription."
+icon: "github"
+keywords: ["GitHub Copilot", "Copilot", "subscription", "OAuth", "provider setup"]
+---
+
+The `github-copilot` provider calls the GitHub Copilot API with the models your
+Copilot plan includes (Free, Pro, Pro+, Max, Business, or Enterprise). Usage
+draws on the plan's GitHub AI Credits, not a model vendor's API key.
+
+The type is `github-copilot`, not `copilot`, so it is not confused with
+Microsoft Copilot.
+
+## Configure
+
+The credential is a GitHub OAuth token (`gho_...`) for an account with Copilot
+access:
+
+```bash
+GITHUB_COPILOT_API_KEY=gho_...
+```
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  github-copilot:
+    type: github-copilot
+    api_key: "${GITHUB_COPILOT_API_KEY}"
+```
+
+GoModel sends the token as-is, with no exchange or refresh step.
+
+### Getting a token
+
+Any GitHub OAuth token for the account works, for example:
+
+```bash
+# GitHub CLI
+GITHUB_COPILOT_API_KEY=$(gh auth token)
+
+# A Copilot client sign-in, e.g. after `opencode auth login`
+GITHUB_COPILOT_API_KEY=$(jq -r '."github-copilot".refresh' ~/.local/share/opencode/auth.json)
+```
+
+Which models answer depends on your Copilot plan, not on the token. A model the
+plan does not include answers `model_not_supported`, even when `/models`
+lists it.
+
+### Business and Enterprise
+
+Individual plans (Free, Pro, Pro+, Max) use the default base URL,
+`https://api.githubcopilot.com`. A Business or Enterprise seat may be served
+from another endpoint; set it when requests fail with `401` or
+`model_not_supported`:
+
+```bash
+GITHUB_COPILOT_BASE_URL=https://api.business.githubcopilot.com
+```
+
+Your account's endpoint is `endpoints.api` in the reply of
+`curl -H "Authorization: Bearer $GITHUB_COPILOT_API_KEY" https://api.github.com/copilot_internal/user`.
+
+## Models
+
+GoModel lists models from Copilot's `/models`. Models your plan lists but the
+account has not enabled (policy `disabled`) are left out; enable them in your
+[Copilot settings](https://github.com/settings/copilot/features) and they
+appear on the next model refresh.
+
+To serve only some of them, [filter](/advanced/config-yaml#filtering-a-providers-models)
+the list:
+
+```bash
+GITHUB_COPILOT_MODEL_FILTER_INCLUDE=claude-sonnet-5.5,gpt-5.6-luna,gpt-4.1
+```
+
+`GITHUB_COPILOT_MODELS` is a fallback list, used only when `/models` fails or
+is empty; `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` makes it the only list
+and skips `/models`.
+
+## Chat completions and Responses on every model
+
+Copilot serves GPT-5 and later only on `/responses`, and Claude, Kimi, and
+older GPT models only on `/chat/completions`. GoModel reads each model's
+endpoints from `/models` and serves both APIs on every model:
+
+| Client calls | Model served on | GoModel |
+| ------------ | --------------- | ------- |
+| `/v1/chat/completions` | `/chat/completions` | Forwards |
+| `/v1/chat/completions` | `/responses` only | Translates to Responses and back |
+| `/v1/responses` | `/responses` | Forwards |
+| `/v1/responses` | `/chat/completions` only | Translates to chat completions and back |
+
+Until GoModel has read a model's endpoints, for example while `/models` is
+unreachable, the model is sent to `/chat/completions`.
+
+A chat request to a Responses-only model is rejected with `400` when it carries
+a field the translation cannot map exactly (for example `logit_bias`); send it
+to `/v1/responses` instead.
+
+Embeddings (`text-embedding-3-small`) are supported. Copilot only accepts a list
+as `input`, so a single string is wrapped into a one-element list.
+
+## Cost
+
+Copilot [bills tokens](https://docs.github.com/en/copilot/concepts/billing-and-usage/individuals/billing)
+at each model's listed API rate, in AI credits drawn first from the plan's
+monthly allowance. GoModel prices the same traffic from its model catalog, so
+[cost](/features/cost-tracking) is an estimate of the credits used. It does not
+account for the included allowance or Copilot's discounts, so it can exceed
+what GitHub actually charges.

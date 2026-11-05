@@ -1,0 +1,216 @@
+---
+title: "MiniMax"
+description: "Konfigurieren Sie MiniMax in GoModel: Chat-Modelle, Behandlung von temperature und natives Text-to-Speech über den Standard-Audio-Endpunkt."
+icon: "audio-waveform"
+keywords: ["MiniMax", "Text-to-Speech", "text-to-speech", "TTS", "t2a_v2", "Provider-Einrichtung", "provider setup"]
+---
+
+MiniMax bietet eine OpenAI-kompatible Chat-API, Chat-Modelle funktionieren
+also ohne weitere Anpassung. Text-to-Speech verwendet jedoch MiniMax' eigene
+`t2a_v2`-API – GoModel übersetzt den Standard-Endpunkt `/v1/audio/speech` für
+Sie in dieses Format.
+
+## Konfigurieren
+
+```bash
+MINIMAX_API_KEY=...
+```
+
+Oder in `config.yaml`:
+
+```yaml
+providers:
+  minimax:
+    type: minimax
+    base_url: "https://api.minimax.io/v1"
+    api_key: "${MINIMAX_API_KEY}"
+```
+
+`MINIMAX_BASE_URL` überschreibt den Endpunkt (Standardwert
+`https://api.minimax.io/v1`); Konten auf der chinesischen Plattform sollten
+ihn auf `https://api.minimaxi.com/v1` setzen.
+
+## Videoeingabe
+
+Verwenden Sie `video_url`-Inhaltsteile in Nachrichten mit `MiniMax-M3` für
+Videoeingaben auf `/v1/chat/completions`, auch bei Streaming-Requests:
+
+```json
+{"type":"video_url","video_url":{"url":"mm_file://your-file-id","detail":"high","fps":2}}
+```
+
+Das Gateway behält Video-URLs und Verarbeitungseinstellungen bei. Sie können
+eine URL, eine Base64-Data-URL oder eine bestehende MiniMax-Dateireferenz
+angeben. Laden Sie große Videos zuerst über die Files API von MiniMax hoch; das
+Gateway lädt keine Videos für Sie hoch. Unterstützte Formate und
+Größenbeschränkungen finden Sie in der
+[MiniMax-Referenz zur Videoeingabe](https://platform.minimax.io/docs/api-reference/text-openai-api#multimodal-input).
+
+## Temperature
+
+MiniMax verlangt `temperature` im Bereich `(0.0, 1.0]` und lehnt null ab.
+GoModel setzt eine Temperature von null oder kleiner auf `1.0`, sodass
+OpenAI-Requests, die `temperature: 0` festlegen, weiterhin funktionieren.
+
+## Reasoning
+
+`MiniMax-M3`, `MiniMax-M2.7`, `MiniMax-M2.7-highspeed`, `MiniMax-M2.5`,
+`MiniMax-M2.5-highspeed` und `MiniMax-M2` schreiben ihre Gedankenkette
+getrennt von der Antwort. GoModel setzt bei diesen Requests
+`reasoning_split: true` – nur wenn der Request das Flag nicht bereits enthält,
+sodass ein vom Aufrufer gesetztes `reasoning_split: false` maßgeblich bleibt –,
+und das Thinking kommt nativ in `reasoning_content` an – nicht als eingebettete
+`<think>`-Tags in `content` – und wird unverändert weitergegeben. Bei
+gestreamten Responses sendet MiniMax zusätzlich ein Array
+`reasoning_details`, das jedes `reasoning_content`-Delta dupliziert; das
+Gateway entfernt dieses redundante Element aus `choices[].delta`. Alle anderen
+MiniMax-Modelle werden unverändert durchgereicht.
+
+## Text-to-Speech
+
+`POST /v1/audio/speech` wird in MiniMax' synchrone
+[`t2a_v2`](https://platform.minimax.io/docs/api-reference/speech-t2a-v2)-API
+übersetzt, und das hexadezimal kodierte Audio wird wieder in Binärdaten
+dekodiert:
+
+<CodeGroup>
+
+```bash curl
+curl https://your-gateway/v1/audio/speech \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "speech-2.6-hd",
+    "input": "Hello from GoModel.",
+    "voice": "English_expressive_narrator",
+    "response_format": "mp3"
+  }' \
+  --output speech.mp3
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://your-gateway/v1",
+    api_key=os.environ["GOMODEL_KEY"],
+)
+
+speech = client.audio.speech.create(
+    model="speech-2.6-hd",
+    input="Hello from GoModel.",
+    voice="English_expressive_narrator",
+    response_format="mp3",
+)
+speech.write_to_file("speech.mp3")
+```
+
+```javascript JavaScript
+import { writeFile } from "node:fs/promises";
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "https://your-gateway/v1",
+  apiKey: process.env.GOMODEL_KEY,
+});
+
+const speech = await client.audio.speech.create({
+  model: "speech-2.6-hd",
+  input: "Hello from GoModel.",
+  voice: "English_expressive_narrator",
+  response_format: "mp3",
+});
+
+await writeFile("speech.mp3", Buffer.from(await speech.arrayBuffer()));
+```
+
+</CodeGroup>
+
+- `voice` erwartet eine **MiniMax-Voice-ID** (zum Beispiel
+  `English_expressive_narrator`), keinen OpenAI-Stimmnamen wie `alloy`.
+- `response_format` unterstützt `mp3` (Standard), `wav`, `flac` und `pcm`.
+- `speed` unterstützt `0.5`–`2.0` (Standard `1.0`).
+
+Speech-Modelle werden von MiniMax' `/models`-Auflistung meist nicht
+zurückgegeben. Fügen Sie sie daher der konfigurierten Modellliste hinzu, damit
+sie routbar sind:
+
+```bash
+MINIMAX_MODELS=speech-2.6-hd,speech-2.6-turbo
+```
+
+MiniMax meldet Fehler als HTTP 200 mit einem nativen Statuscode; GoModel
+bildet die gängigen davon auf echte Fehler ab (ungültige Parameter und
+blockierte Inhalte → 400, Authentifizierung → 401, unzureichendes Guthaben →
+402, Rate-Limits → 429), statt sie als undurchsichtige Gateway-Fehler
+weiterzugeben.
+
+## Von MiniMax nicht unterstützt
+
+Alle folgenden Fälle liefern `invalid_request_error`, statt die Option
+stillschweigend zu verwerfen:
+
+- Speech-`instructions` (wählen Sie eine Voice-ID, die zum gewünschten Stil
+  passt).
+- Speech-Werte für `response_format` außer `mp3`/`wav`/`flac`/`pcm` sowie
+  `speed` außerhalb von `0.5`–`2.0`.
+- Speech-to-Text – MiniMax hat keine Transkriptions-API, daher wird
+  `/v1/audio/transcriptions` abgelehnt.
+- Realtime Voice-to-Voice – das Schema von MiniMax für Echtzeit-Konversationen
+  ist nicht OpenAI-kompatibel und wird daher nicht unter `/v1/realtime`
+  bereitgestellt.
+
+## Image-to-Image-Generierung
+
+Senden Sie einen Multipart-Request an `/v1/images/edits` mit `model=image-01`
+oder `model=image-01-live`, einem `prompt` und hochgeladenen `image`-Dateien.
+MiniMax verwendet die Bilder als Referenzporträts für Figuren; maskierte
+Bearbeitungen führt es nicht aus. Verwenden Sie frontal aufgenommene Porträts
+im Format JPEG oder PNG, jeweils kleiner als 10 MB.
+
+Der Adapter sendet die Porträts als Data-URLs in `subject_reference` an
+MiniMax' Endpunkt `/v1/image_generation` und verwendet dabei die konfigurierte
+regionale Base-URL. `size=WIDTHxHEIGHT` wird auf `width` und `height`
+abgebildet. Eigene Abmessungen gelten nur für `image-01`: `size`, `width` und
+`height` werden für `image-01-live` abgelehnt, dessen Größe über
+`aspect_ratio` festgelegt wird. Die nativen Felder `aspect_ratio`, `seed`, `n`
+und `prompt_optimizer` werden ebenfalls unterstützt.
+`response_format=b64_json` wird auf MiniMax' Format `base64` abgebildet und
+liefert `data[].b64_json`; standardmäßig wird `data[].url` geliefert (Links
+verfallen nach 24 Stunden). Masken und nicht unterstützte Bearbeitungsfelder
+führen zu einem Validierungsfehler. Native HTTP-200-Fehler werden auf dieselbe
+Weise wie bei der unten beschriebenen Bildgenerierung auf den passenden
+OpenAI-Fehlerstatus abgebildet.
+
+Modellspezifische Parametergrenzen finden Sie in der
+[Image-to-Image-API von MiniMax](https://platform.minimax.io/docs/api-reference/image-generation-i2i).
+
+## Bildgenerierung
+
+Verwenden Sie `image-01` oder `image-01-live` mit `/v1/images/generations`.
+GoModel übersetzt Requests an MiniMax' nativen Endpunkt `/v1/image_generation`
+mit der konfigurierten Base-URL und liefert die generierten Bilder in `data`.
+
+```json
+{"model":"image-01","provider":"minimax","prompt":"A lighthouse at sunrise","aspect_ratio":"16:9","n":1}
+```
+
+Das Standard-Response-Format ist `url`; URLs verfallen nach 24 Stunden.
+Verwenden Sie `response_format: "b64_json"` für eingebettete Bilder. Natives
+`base64` wird ebenfalls akzeptiert. `size: "1024x1024"` wird auf `width` und
+`height` abgebildet; lassen Sie `size` weg, wenn Sie native Abmessungen oder
+`aspect_ratio` angeben. Native Optionen wie `seed` und `prompt_optimizer`
+werden durchgereicht. `quality` und Streaming werden nicht unterstützt.
+
+MiniMax meldet Fehler bei Bildgenerierung, Bildbearbeitung und Speech als
+HTTP 200 mit einem `base_resp.status_code` ungleich null. GoModel bildet diesen
+Code auf den passenden OpenAI-Fehlerstatus ab – 429 für Rate- und
+Nutzungslimits, 401 für Authentifizierung, 402 für Guthaben, 400 für ungültige
+oder abgelehnte Eingaben, sonst 502 – und hängt MiniMax' eigenes
+`base_resp.status_msg` an die Fehlermeldung an, damit die Diagnose von
+Upstream nicht verloren geht.
+
+Modellspezifische Grenzen finden Sie in der
+[Bild-API-Referenz von MiniMax](https://platform.minimax.io/docs/api-reference/image-generation-t2i).

@@ -21,7 +21,7 @@ import (
 // timeout. The handler here stands in for the provider relay: it pushes bytes
 // until the kernel socket buffers on both ends are full and the write blocks.
 func TestStreamStallTimeout_ReleasesHandlerWhenClientStopsReading(t *testing.T) {
-	const stall = 300 * time.Millisecond
+	const stall = 100 * time.Millisecond
 
 	handlerDone := make(chan error, 1)
 	e := echo.New()
@@ -68,23 +68,26 @@ func TestStreamStallTimeout_ReleasesHandlerWhenClientStopsReading(t *testing.T) 
 }
 
 // The stall deadline is armed per write, so a long gap with nothing to send
-// (a slow provider) must not poison the next write.
+// (a slow provider) must not poison the next write. The gap has to be real
+// time on a real socket, so the deadline is kept short.
 func TestStreamStallTimeout_ToleratesQuietProvider(t *testing.T) {
-	const stall = 100 * time.Millisecond
+	const stall = 50 * time.Millisecond
 
 	e := echo.New()
 	e.Use(modelInteractionWriteDeadlineMiddleware(stall))
 	e.POST("/v1/chat/completions", func(c *echo.Context) error {
 		c.Response().Header().Set("Content-Type", "text/event-stream")
 		c.Response().WriteHeader(http.StatusOK)
-		for _, chunk := range []string{"data: first\n\n", "data: second\n\n"} {
+		for i, chunk := range []string{"data: first\n\n", "data: second\n\n"} {
+			if i > 0 {
+				time.Sleep(3 * stall) // the provider goes quiet past the deadline
+			}
 			if _, err := c.Response().Write([]byte(chunk)); err != nil {
 				return err
 			}
 			if err := http.NewResponseController(c.Response()).Flush(); err != nil {
 				return err
 			}
-			time.Sleep(3 * stall)
 		}
 		return nil
 	})

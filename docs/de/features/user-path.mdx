@@ -1,0 +1,190 @@
+---
+title: "User Path"
+description: "Verwenden Sie user_path, um Keys, Modellzugriff, Modelllisten, Workflows, Nutzung und Audit-Logs einem Bereich zuzuordnen."
+icon: "route"
+keywords: ["user_path", "Mandantenfähigkeit", "multi-tenancy", "Bereichsbeschränkung", "Zugriffskontrolle", "access control", "Team-Isolierung"]
+---
+
+## Übersicht
+
+`user_path` ist eine normalisierte Hierarchie für den Aufrufer, zum Beispiel
+`/team/alpha` oder `/team/alpha/service`.
+
+GoModel verwendet sie, um Modellzugriff, Workflows, Budgets, Nutzung und Audit-Daten
+dem richtigen Team, Tenant, Dienst oder Kunden zuzuordnen.
+
+## API-Keys
+
+Sie können einen User-Path im Admin-Dashboard an einen verwalteten API-Key binden:
+
+`API Keys -> Create API Key -> User Path`
+
+<img
+  src="/features/auth-keys-labels.png"
+  alt="Seite „API Keys“ im GoModel-Dashboard mit einer Spalte „User Path“, die Werte wie /agents/team1, /engineering/ai und /sales/john zeigt"
+  style={{ width: "100%", maxWidth: "1280px", height: "auto" }}
+  className="rounded-lg"
+/>
+
+Die Seite **API Keys** zeigt für jeden Key den gebundenen `user_path` zusammen mit seinen
+Labels, sodass Sie auf einen Blick erkennen, welchem Teilbaum ein Key zugeordnet ist.
+
+Verwendet ein Request diesen Key, behandelt GoModel den `user_path` des Keys als
+effektiven User-Path des Requests.
+
+## HTTP-Header
+
+Clients können einen User-Path auch direkt senden:
+
+```http
+X-GoModel-User-Path: /team/alpha
+```
+
+Der Header-Name lässt sich mit `USER_PATH_HEADER` oder
+`server.user_path_header` in `config.yaml` konfigurieren. Ist nichts gesetzt, verwendet GoModel
+`X-GoModel-User-Path`.
+
+Hat der API-Key einen eigenen `user_path`, hat der Key Vorrang. GoModel überschreibt den
+Header-Wert mit dem an den Key gebundenen Pfad, bevor Workflow-Abgleich, Audit-Logging,
+Nutzungserfassung und Prüfungen des Modellzugriffs laufen.
+
+## Zugriffsbereich
+
+Der an den Key gebundene `user_path` ist zugleich der **Zugriffsbereich** des Keys: der Teilbaum, den er
+lesen und verwalten darf. Ein an `/team/alpha` gebundener Key erreicht `/team/alpha` und
+jeden Nachfahren, aber weder `/team/beta` noch `/team` noch Zeilen, die
+ohne User-Path erfasst wurden. Der Header erweitert den Bereich nie; er wählt nur den
+Pfad, dem ein Request zugeordnet wird.
+
+| Zugangsdaten                            | Bereich                      |
+| --------------------------------------- | ---------------------------- |
+| Master-Key                              | Global                       |
+| Verwalteter Key ohne `user_path` (oder mit `/`) | Global               |
+| An `/team/alpha` gebundener verwalteter Key | `/team/alpha` und Nachfahren |
+| SSO- oder andere Erweiterungsidentität  | Der User-Path ihrer Session, nach derselben Regel |
+
+Die Regel ist für alle Zugangsdaten gleich: Der User-Path ist der Knoten, als der Sie
+handeln, und Sie sehen diesen Knoten und alles darunter. Eine an
+`/users/alice` gebundene SSO-Session verwaltet daher nur diesen Teilbaum. Eine Erweiterung, die
+Gateway-Admins vergeben möchte, bindet diese Sessions an `/` und Team-Admins an die
+Wurzel des Teams, etwa `/team/alpha` – genau so, wie Sie einen API-Key unter
+diesem Pfad erstellen würden.
+
+Der Bereich gilt an zwei Stellen:
+
+- **Admin API und Dashboard.** Ein Key mit Dashboard-Zugriff und einem `user_path`
+  ist ein bereichsbeschränkter Admin dieses Teilbaums. Siehe
+  [Bereichsbeschränkter Admin-Zugriff](/de/advanced/admin-endpoints#bereichsbeschränkter-admin-zugriff).
+- **Objekteigentum** bei `/v1`-Lebenszyklus-Endpunkten, wie im Folgenden beschrieben.
+
+## Objekteigentum
+
+Responses, Conversations, Batches und hochgeladene Dateien merken sich den `user_path`,
+unter dem sie erstellt wurden. Abrufen, Auflisten, Aktualisieren, Abbrechen oder Löschen
+eines solchen Objekts per ID gelingt nur, wenn dieser Pfad im Bereich des Aufrufers liegt;
+andernfalls antwortet das Gateway mit `404`, genau wie bei einer unbekannten ID. Ein
+`/v1/responses`-Aufruf, der auf eine Conversation oder eine
+`previous_response_id` aus einem anderen Teilbaum verweist, schlägt auf dieselbe Weise fehl – auch bei
+Providern, die `previous_response_id` selbst auflösen.
+
+Bereichsbeschränkte Zugangsdaten können nur Objekte ansprechen, die das Gateway nachverfolgt: Eine ID, zu der das
+Gateway keinen Eintrag hat, wird als fehlend gemeldet, und `GET /v1/files` listet die
+nachverfolgten Dateien des Aufrufers aus den eigenen Einträgen des Gateways statt vom
+Provider. Globale Zugangsdaten sehen jedes Objekt, einschließlich älterer Zeilen, die erfasst wurden,
+bevor der Pfad gespeichert wurde, und greifen bei nicht nachverfolgten IDs weiterhin auf den Provider zurück.
+Verwenden Sie einen persistenten Speicher, damit jedes Objekt über Neustarts hinweg nachverfolgt bleibt.
+
+## Modellzugriff
+
+Richtlinien für den Modellzugriff sind standardmäßig aktiviert. Eine Richtlinie ist ein virtuelles Modell
+ohne Ziel; sie kann mit `user_paths` einen Selektor auf einen Teilbaum beschränken oder
+deaktiviert werden, um den Selektor vollständig abzuschalten. Selektoren können Folgendes adressieren:
+
+- `/` für alle Provider und Modelle
+- `{provider_name}/` für einen konfigurierten Provider
+- `{provider_name}/{model}` für ein Modell bei einem Provider
+- eine Modell-ID ohne Provider-Namen
+
+Zum Beispiel:
+
+- Selektor: `openai/gpt-5`
+- `user_paths`: `["/team/alpha"]`
+
+Damit sind `/team/alpha` und seine Nachfahren erlaubt, etwa `/team/alpha/service`.
+
+Verwalten Sie diese Regeln im Dashboard unter `Models -> New virtual model`: Lassen Sie
+**Target model** leer, um eine Zugriffsrichtlinie für den **Source**-Selektor zu erstellen.
+Redirects (Aliase) finden Sie unter [Virtuelle Modelle](/de/features/virtual-models).
+
+Die Seite **Users** beantwortet dieselbe Frage von der anderen Seite: Welche Modelle
+darf eine Gruppe, ein Benutzer oder ein API-Key aufrufen? Jeder User-Path-Knoten und jeder verwaltete API-Key hat eine
+optionale Liste `allowed_models`; die Listen werden den Baum hinab geschnitten, sodass ein Kindknoten
+nur einschränken kann, was seine Gruppe erlaubt. Siehe [Benutzer](/de/features/users).
+
+## Bereitgestellte Modelle
+
+`GET /v1/models` verwendet ebenfalls den effektiven `user_path`.
+
+Zwei API-Keys können daher unterschiedliche Modelllisten sehen, wenn für ihre User-Paths
+unterschiedliche Regeln für den Modellzugriff gelten.
+
+## Workflows
+
+Workflows können auch `scope_user_path` enthalten, sodass verschiedene Teams oder Dienste
+unterschiedliche Einstellungen für Budget, Cache, Audit, Nutzung, Guardrails und Failover verwenden können.
+
+Sie können den User-Path mit Provider- und Modellbereich kombinieren, zum Beispiel:
+
+- `/team/alpha`
+- `openai_primary` + `/team/alpha`
+- `openai_primary` + `gpt-5` + `/team/alpha`
+
+Die vollständige Abgleichsreihenfolge finden Sie unter [Workflows](/de/advanced/workflows).
+
+## Budgets
+
+Auch Budgets sind über `user_path` einem Bereich zugeordnet. Ein Budget für `/team/alpha` gilt für
+`/team/alpha` und Nachfahren wie `/team/alpha/service`, aber nicht für benachbarte
+Pfade wie `/team-alpha`.
+
+Ausgabenlimits und die Durchsetzung über Workflows finden Sie unter [Budgets](/de/features/budgets).
+
+## Self-Service für Nutzung und Limits
+
+Aufrufer können ihren eigenen Verbrauch ohne Admin-Zugriff prüfen:
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/usage \
+  -H "Authorization: Bearer sk_gom_..."
+```
+
+```python Python
+import httpx
+
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080", api_key="sk_gom_...")
+usage = client.get("/v1/usage", cast_to=httpx.Response)
+
+print(usage.json())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080",
+  apiKey: "sk_gom_...",
+});
+
+const usage = await client.get("/v1/usage");
+console.log(usage);
+```
+
+</CodeGroup>
+
+Die Response bezieht sich auf den effektiven User-Path des Aufrufers: die erfasste Nutzung in einem
+Datumsfenster sowie den Status jeder Budget- und Rate-Limit-Regel, die für diesen
+Pfad gilt. Ein vollständiges Beispiel und die Feldreferenz finden Sie in der [Usage API](/de/advanced/usage-api).

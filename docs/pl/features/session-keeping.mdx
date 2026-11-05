@@ -1,0 +1,217 @@
+---
+title: "Utrzymywanie sesji"
+description: "Grupuj requesty z jednej sesji klienta, aby uzyskać sticky load balancing i wątki w logach audytowych"
+icon: "pin"
+---
+
+Agenci kodujący i aplikacje czatowe wysyłają wiele requestów należących do
+jednej logicznej sesji – jednej rozmowy, jednego zadania agenta. GoModel
+wykrywa taką sesję i wykorzystuje ją w całym routingu i obserwowalności:
+
+- **Sticky load balancing** – model wirtualny z load balancingiem kieruje każdy
+  request sesji do targetu, który obsłużył ją jako pierwszy. Dzięki temu
+  prompt cache providera pozostaje rozgrzany, a zachowanie modelu spójne w
+  trakcie rozmowy.
+- **Sticky wybór klucza API** – gdy jeden provider ma kilka kluczy, każdy
+  request w wykrytej sesji używa tego samego klucza, co zachowuje powiązanie z
+  prompt cache providera.
+- **Wątki w logach audytowych** – strona Audit Logs w dashboardzie grupuje
+  requesty sesji w jeden wątek: najnowszy request jest wierszem, a rozwijany
+  element pokazuje pod nim starsze requesty.
+- **Użycie i koszt per sesja** – rekordy użycia niosą to samo ID sesji w danym
+  zakresie, więc dashboard i Admin API mogą raportować requesty, tokeny i
+  wydatki u providera dla jednej rozmowy lub zadania agenta.
+
+Utrzymywanie sesji działa bez żadnej konfiguracji. Wartości domyślne pasują do
+większości wdrożeń; opcje poniżej istnieją na rzadkie przypadki, gdy jest
+inaczej.
+
+## Jak identyfikowana jest sesja
+
+Wygrywa pierwszy pasujący sygnał:
+
+1. **Nagłówki sesji** – wbudowany rejestr obejmuje nagłówki wysyłane przez
+   znane narzędzia oraz konwencje gatewayów:
+
+   | Nagłówek | Wysyłany przez |
+   |---|---|
+   | `X-Session-Id` | OpenCode, Kilo Code, klienty ogólne |
+   | `X-Opencode-Session` | OpenCode, pi i inne klienty używające dialektu OpenCode Zen |
+   | `X-Claude-Code-Session-Id` | Claude Code (udokumentowany dla gatewayów) |
+   | `Session-Id` / `Session_id` | Codex CLI (obecny / starszy), Roo Code |
+   | `X-Litellm-Session-Id` | konwencja LiteLLM |
+   | `Helicone-Session-Id` | konwencja Helicone |
+   | `Agent-Session-Id` | Goose |
+
+2. **Pola body** – dla klientów, które oznaczają sesje w body requestu:
+   Anthropic `metadata.user_id` (Claude Code umieszcza tam UUID swojej sesji;
+   parsowane są zarówno obecny, jak i starszy format), `session_id` (konwencja
+   OpenRouter), `litellm_session_id`, `prompt_cache_key` (Zed i inne klienty
+   OpenAI, które używają jednego klucza cache na rozmowę) oraz referencje
+   `conversation` w `/v1/responses`.
+
+3. **Automatyczne wykrywanie** – requesty chat i responses bez jawnego sygnału
+   są grupowane według początku rozmowy: modelu, kontekstu systemowego,
+   narzędzi i wiadomości aż do pierwszej tury użytkownika. Kolejne requesty
+   wysyłają ten prefiks ponownie bez zmian, więc agent, który po prostu
+   odtwarza swoją historię (Aider, Cline, Continue, …), nadal dostaje stabilne
+   ID sesji (`auto-…`) bez żadnych zmian po stronie klienta.
+
+Sygnały z body i automatyczne wykrywanie odczytują kompletne body JSON
+requestów chat, responses i messages (także requestów chunked), więc długa
+rozmowa zachowuje swoje ID sesji, gdy jej kontekst rośnie. Tylko body
+passthrough providerów są podglądane do 1 MiB; przy większych body passthrough
+używane są wyłącznie sygnały z nagłówków.
+
+ID sesji podawane przez klienta są ograniczane zakresem
+[ścieżki użytkownika](/pl/features/user-path), także wartości w formacie UUID,
+więc jeden tenant nie może kolidować z innym przez ponowne użycie tego samego
+ID.
+
+## Sticky load balancing
+
+Gdy request niesie sesję i jest rozwiązywany przez
+[model wirtualny](/pl/features/virtual-models) z kilkoma targetami, pierwszy
+request wybiera target zgodnie ze strategią przekierowania (`round_robin` lub
+`cost`), a kolejne requesty się go trzymają. Jeśli przypięty target staje się
+niedostępny lub nasycony, strategia wybiera ponownie, a sesja zostaje
+przepięta – sesja nigdy nie jest przyklejona do martwego targetu, a zachowanie
+„uczciwego 429”, gdy wszystkie targety są nasycone, pozostaje bez zmian.
+
+W strategii `adaptive` przypięcie jest przekazywane selektorowi tras, który
+przy każdym requeście decyduje, czy sesja je zachowuje – zawsze, gdy więcej niż
+jeden target jest dostępny. (Przy jednym dostępnym targecie nie ma z czego
+wybierać, więc selektor jest pomijany, a przekierowanie działa jak zwykły
+alias.) „Niedostępny” obejmuje wtedy
+także target, od którego selektor się wycofał – taki, który zwraca 429 lub
+wielokrotnie zawodzi – a który nadal jest na liście targetów i dlatego dla
+powyższych sprawdzeń wygląda na sprawny. Sesja przenosi się na zdrowy target i
+zostaje tam przypięta. Target, który jest jedynie *wolny*, zachowuje swoją
+sesję: przeniesienie jej oznaczałoby utratę prompt cache providera, który
+przypięcie ma chronić. Zobacz
+[Intelligent Routing](/pl/pro/intelligent-routing).
+
+Powiązanie jest domyślnie włączone i można je wyłączyć dla poszczególnych
+przekierowań:
+
+```yaml
+virtual_models:
+  - source: "smart"
+    strategy: round_robin
+    session_affinity: false   # domyślnie: true
+    targets:
+      - model: "openai/gpt-4o"
+      - model: "anthropic/claude-sonnet-5"
+```
+
+Ta sama flaga jest dostępna w edytorze modeli wirtualnych w dashboardzie
+(„Session keeping”) oraz w Admin API (`session_affinity` w
+`PUT /admin/virtual-models`).
+
+Przypięcia są trzymane w pamięci każdej instancji (tak jak liczniki rate
+limitów): po restarcie lub na innej replice następny request sesji po prostu
+przypina się na nowo. Bezczynne sesje wygasają po 6 godzinach.
+
+Powiązanie z kluczem API jest deterministyczne, a nie przechowywane, więc ten
+sam uporządkowany zestaw kluczy wybiera ten sam klucz na wszystkich replikach i
+po restartach. Wyłącz je dla danego providera przez `session_sticky_keys: false`,
+`<PROVIDER>[_SUFFIX]_SESSION_STICKY_KEYS=false` albo checkbox
+**Session-sticky API keys**
+w dashboardzie. Requesty bez wykrytej sesji nadal są obsługiwane round robin.
+
+## Wątki w logach audytowych
+
+Wpisy audytowe zapisują ID sesji (`session_id`), a strona Audit Logs domyślnie
+grupuje je według niego (przełącznik „Group by session”). Każdy wątek pokazuje
+swój najnowszy request z plakietką licznika; rozwijany element po lewej
+pokazuje starsze requesty. Plakietka liczy całą sesję. Filtry określają, które
+sesje są widoczne i który pasujący request reprezentuje każdy wątek.
+`GET /admin/audit/sessions` zwraca dla każdego wątku `request_count` i
+najnowszy pasujący wpis logu audytowego. `GET /admin/audit/log?session_id=…`
+zwraca wszystkie requesty w rozwiniętej sesji.
+
+Każdy zgrupowany wątek ma też akcję wykresu użycia. Otwiera ona Usage Analytics
+z wybraną tą sesją; po rozwinięciu pojedynczego requestu ta sama akcja jest
+dostępna na plakietce jego sesji.
+
+## Użycie i koszt per sesja
+
+Usage Analytics zawiera tabelę na pełną szerokość **Usage by Recent Session**.
+Każdy wiersz reprezentuje jedną wykrytą sesję w zakresie ścieżki użytkownika i
+pokazuje liczbę requestów, tokeny wejściowe/wyjściowe/łącznie oraz koszt
+wejścia/wyjścia/łączny. Etykiety sesji w tej tabeli i w logu requestów
+filtrują całą stronę użycia.
+
+Admin API udostępnia ten sam ograniczony raport:
+
+```bash
+curl -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  "http://localhost:8080/admin/usage/sessions?days=7&limit=50&offset=0"
+```
+
+```json
+{
+  "entries": [
+    {
+      "session_id": "scoped-0123456789abcdef0123456789abcdef",
+      "user_path": "/team/alpha",
+      "requests": 8,
+      "input_tokens": 24000,
+      "output_tokens": 4100,
+      "total_tokens": 28100,
+      "input_cost": 0.42,
+      "output_cost": 0.16,
+      "total_cost": 0.58
+    }
+  ],
+  "total": 1,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+Requesty i tokeny obejmują odpowiedzi serwowane z lokalnego cache’u odpowiedzi
+GoModel. Pola kosztów obejmują wyłącznie requesty wysłane do providera,
+ponieważ koszt zapisany przy trafieniu w lokalny cache to koszt, którego
+uniknięto, a nie faktycznie wydane pieniądze. Wyniki są posortowane według
+ostatniej aktywności sesji; `limit` domyślnie wynosi 50, a maksymalnie 200.
+Obowiązują standardowe filtry użycia (`session_id`, `user_path`, `model`,
+`provider`, `label` i zakres dat).
+
+## Konfiguracja
+
+Wszystko jest domyślnie włączone.
+
+```bash
+# Główny przełącznik identyfikacji sesji
+SESSION_KEEPING_ENABLED=true
+# Wykrywanie na podstawie treści dla requestów bez jawnego sygnału
+SESSION_AUTO_DETECT=true
+# Wbudowany rejestr nagłówków/pól body
+SESSION_BUILTIN_RULES=true
+# Dodatkowe nagłówki sesji (numerowane od 1), łączone z wbudowanymi.
+# Opcjonalna transformacja "session-uuid" wyciąga wartość session_<uuid>.
+SESSION_HEADER_1=X-My-Session
+SESSION_HEADER_1_TRANSFORM=
+```
+
+Albo w `config.yaml`:
+
+```yaml
+session:
+  enabled: true
+  auto_detect: true
+  builtin_rules: true
+  headers:
+    - header: X-My-Session
+```
+
+Nagłówki niosące dane uwierzytelniające (`Authorization`, nagłówki z kluczami
+API, …) są odrzucane jako źródła sesji, ponieważ ID sesji jest utrwalane w
+rekordach audytowych i rekordach użycia.
+
+**Kiedy zmienić wartości domyślne:** ustaw `SESSION_AUTO_DETECT=false`, jeśli
+chcesz grupować wyłącznie jawnie oznaczone sesje; ustaw
+`session_affinity: false` na przekierowaniu, gdy wolisz ścisłe rozkładanie
+obciążenia od powiązania z cache’em (na przykład czysty round-robin
+równoważący pojemność między identycznymi wdrożeniami).

@@ -34,17 +34,17 @@ func (s *staticRuleStore) DeleteRule(context.Context, ratelimit.RuleScope, strin
 func (s *staticRuleStore) ReplaceConfigRules(context.Context, []ratelimit.Rule) error {
 	return nil
 }
-func (s *staticRuleStore) LoadCounters(context.Context) ([]ratelimit.WindowSnapshot, error) {
+func (s *staticRuleStore) LoadCounters(context.Context, int64) ([]ratelimit.WindowSnapshot, error) {
 	return nil, nil
 }
 func (s *staticRuleStore) SaveCounters(context.Context, []ratelimit.WindowSnapshot) error {
 	return nil
 }
-func (s *staticRuleStore) DeleteCounter(context.Context, ratelimit.RuleScope, string, int64) error {
+func (s *staticRuleStore) ResetCounter(context.Context, ratelimit.RuleScope, string, int64) error {
 	return nil
 }
-func (s *staticRuleStore) DeleteAllCounters(context.Context) error { return nil }
-func (s *staticRuleStore) Close() error                            { return nil }
+func (s *staticRuleStore) ResetAllCounters(context.Context) error { return nil }
+func (s *staticRuleStore) Close() error                           { return nil }
 
 func newTestRateLimitService(t *testing.T, rules ...ratelimit.Rule) *ratelimit.Service {
 	t.Helper()

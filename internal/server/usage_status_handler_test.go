@@ -80,11 +80,23 @@ func getUsageStatus(t *testing.T, cfg *Config, target string, headers map[string
 	return rec, body
 }
 
+func TestUsageStatusBudgetsReportEnforcedCostBasis(t *testing.T) {
+	statuses := usageStatusBudgets([]budget.CheckResult{{
+		Budget: budget.Budget{
+			Scope: budget.ScopeLabel, Subject: "acme", CostBasis: budget.CostBasisBilled,
+			EnforcedCostBasis: budget.CostBasisProvider, PeriodSeconds: budget.PeriodDailySeconds, Amount: 10,
+		},
+	}}, time.Now())
+	require.Len(t, statuses, 1)
+	require.Equal(t, "billed", statuses[0].CostBasis)
+	require.Equal(t, "provider", statuses[0].EnforcedCostBasis)
+}
+
 func TestUsageStatusReportsManagedKeyPath(t *testing.T) {
 	requests := int64(7)
 	summarizer := &fakeUsageSummarizer{summary: &usage.UsageSummary{TotalRequests: 7, TotalTokens: 1234}}
 	budgets := &fakeBudgetStatusChecker{results: []budget.CheckResult{{
-		Budget:      budget.Budget{Scope: budget.ScopeUserPath, Subject: "/team", PeriodSeconds: budget.PeriodDailySeconds, Amount: 10},
+		Budget:      budget.Budget{Scope: budget.ScopeUserPath, Subject: "/team", CostBasis: budget.CostBasisBilled, PeriodSeconds: budget.PeriodDailySeconds, Amount: 10},
 		PeriodStart: time.Date(2026, time.July, 6, 0, 0, 0, 0, time.UTC),
 		PeriodEnd:   time.Date(2026, time.July, 7, 0, 0, 0, 0, time.UTC),
 		Spent:       12,
@@ -130,6 +142,8 @@ func TestUsageStatusReportsManagedKeyPath(t *testing.T) {
 	b := body.Budgets[0]
 	require.Equal(t, "/team", b.UserPath)
 	require.Equal(t, "daily", b.PeriodLabel)
+	require.Equal(t, "billed", b.CostBasis)
+	require.Equal(t, "billed", b.EnforcedCostBasis)
 	require.Equal(t, float64(12), b.Spent)
 	require.Equal(t, float64(-2), b.Remaining)
 	require.True(t, b.Exceeded, "daily /team budget should be exceeded: %+v", b)

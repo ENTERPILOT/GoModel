@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -87,6 +88,9 @@ func (s *fakeStore) SumSpend(_ context.Context, windows []SpendWindow) ([]Spend,
 func (s *fakeStore) Close() error {
 	return nil
 }
+
+// allCapabilities enables every optional budget behavior.
+var allCapabilities = capabilities{quotaTemplates: true, billedBudgets: true}
 
 // path builds the Subjects of a request with no labels.
 func path(userPath string) Subjects {
@@ -211,11 +215,7 @@ func TestServiceRefreshSortsBudgetsByScopeSubjectThenLongestPeriod(t *testing.T)
 func TestSeedConfiguredBudgetsReplacesEmptyConfigSet(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeStore{}
-	service, err := NewService(ctx, store)
-	require.NoError(t, err)
-
-	store.replaceCalls = 0
-	err = seedConfiguredBudgets(ctx, service, config.BudgetsConfig{})
+	err := seedConfiguredBudgets(ctx, store, config.BudgetsConfig{}, allCapabilities)
 	require.NoError(t, err)
 	require.Equal(t, 1, store.replaceCalls)
 	require.Empty(t, store.replacedBudgets)
@@ -224,17 +224,14 @@ func TestSeedConfiguredBudgetsReplacesEmptyConfigSet(t *testing.T) {
 func TestSeedConfiguredBudgetsSeedsBothScopes(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeStore{}
-	service, err := NewService(ctx, store)
-	require.NoError(t, err)
-
-	err = seedConfiguredBudgets(ctx, service, config.BudgetsConfig{
+	err := seedConfiguredBudgets(ctx, store, config.BudgetsConfig{
 		UserPaths: []config.BudgetUserPathConfig{
 			{Path: "team", PerChild: true, Limits: []config.BudgetLimitConfig{{Period: "daily", Amount: 10}}},
 		},
 		Labels: []config.BudgetLabelConfig{
 			{Label: "Mobile-App-iOS", Limits: []config.BudgetLimitConfig{{Period: "monthly", Amount: 500}}},
 		},
-	})
+	}, allCapabilities)
 	require.NoError(t, err)
 
 	want := []Budget{
@@ -257,12 +254,7 @@ func TestSeedConfiguredBudgetsSeedsBothScopes(t *testing.T) {
 func TestSeedConfiguredBudgetsRejectsInvalidPeriodBeforeReplacing(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeStore{}
-	service, err := NewService(ctx, store)
-	require.NoError(t, err)
-
-	store.replaceCalls = 0
-
-	err = seedConfiguredBudgets(ctx, service, config.BudgetsConfig{
+	err := seedConfiguredBudgets(ctx, store, config.BudgetsConfig{
 		UserPaths: []config.BudgetUserPathConfig{
 			{
 				Path: "/team",
@@ -271,7 +263,7 @@ func TestSeedConfiguredBudgetsRejectsInvalidPeriodBeforeReplacing(t *testing.T) 
 				},
 			},
 		},
-	})
+	}, allCapabilities)
 
 	require.ErrorContains(t, err, `invalid budget period for user_path "/team" limit 0: "fortnightly"`)
 	require.Equal(t, 0, store.replaceCalls)
@@ -653,4 +645,99 @@ func TestServiceProviderWithinBudget(t *testing.T) {
 		return 0, false, errors.New("store down")
 	}
 	assert.False(t, service.ProviderWithinBudget(ctx, "openai-free"), "a failed spend lookup must not admit the target")
+}
+
+// A request routed to a billable: false provider is gated by provider budgets
+// only: its cost is not owed by the caller. Any other route, including one
+// whose provider is not known yet, keeps every budget.
+func TestServiceCheckSkipsConsumerBudgetsForNonBillableProvider(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeStore{
+		budgets: []Budget{
+			{Scope: ScopeUserPath, Subject: "/", PeriodSeconds: PeriodDailySeconds, Amount: 1},
+			{Scope: ScopeLabel, Subject: "prod", PeriodSeconds: PeriodDailySeconds, Amount: 1},
+			{Scope: ScopeProvider, Subject: "byok-openai", PeriodSeconds: PeriodDailySeconds, Amount: 100},
+		},
+		sum: func(SpendWindow) (float64, bool, error) { return 50, true, nil },
+	}
+	service, err := NewService(ctx, store)
+	require.NoError(t, err)
+	service.SetProviderBillable(func(name string) bool { return name != "byok-openai" })
+	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
+
+	require.NoError(t, service.Check(ctx, Subjects{UserPath: "/team", Labels: []string{"prod"}, Provider: "byok-openai"}, now))
+	require.Len(t, store.lastWindows, 1)
+	assert.Equal(t, ScopeProvider, store.lastWindows[0].Scope)
+
+	var exceeded *ExceededError
+	err = service.Check(ctx, Subjects{UserPath: "/team", Labels: []string{"prod"}, Provider: "openai-prod"}, now)
+	require.ErrorAs(t, err, &exceeded)
+	assert.NotEqual(t, ScopeProvider, exceeded.Result.Budget.Scope, "a billable provider is gated by consumer budgets")
+
+	err = service.Check(ctx, Subjects{UserPath: "/team", Labels: []string{"prod"}}, now)
+	require.ErrorAs(t, err, &exceeded, "an unknown route is billable")
+
+	store.sum = func(SpendWindow) (float64, bool, error) { return 200, true, nil }
+	err = service.Check(ctx, Subjects{UserPath: "/team", Provider: "byok-openai"}, now)
+	require.ErrorAs(t, err, &exceeded, "provider budgets still cap a non-billable provider")
+	assert.Equal(t, ScopeProvider, exceeded.Result.Budget.Scope)
+}
+
+// A response-cache hit is checked against billed consumer budgets before the
+// provider is called; a hit of a non-billable provider owes nothing and is
+// admitted like the request itself.
+func TestServiceCheckCacheHitSkipsNonBillableProvider(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeStore{
+		budgets: []Budget{
+			{Scope: ScopeUserPath, Subject: "/", CostBasis: CostBasisBilled, PeriodSeconds: PeriodDailySeconds, Amount: 1},
+		},
+		sum: func(SpendWindow) (float64, bool, error) { return 50, true, nil },
+	}
+	service, err := NewService(ctx, store, WithBilledBudgets(true), WithBilledCacheHits(true))
+	require.NoError(t, err)
+	service.SetProviderBillable(func(name string) bool { return name != "byok-openai" })
+	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
+
+	var exceeded *ExceededError
+	err = service.CheckCacheHit(ctx, Subjects{UserPath: "/team", Provider: "openai-prod"}, now)
+	require.ErrorAs(t, err, &exceeded)
+	err = service.CheckCacheHit(ctx, Subjects{UserPath: "/team"}, now)
+	require.ErrorAs(t, err, &exceeded, "an unknown route is billable")
+
+	store.sumCalls = 0
+	require.NoError(t, service.CheckCacheHit(ctx, Subjects{UserPath: "/team", Provider: "byok-openai"}, now))
+	assert.Zero(t, store.sumCalls)
+}
+
+func TestServiceFailoverWithinBudget(t *testing.T) {
+	spent := map[Scope]float64{ScopeProvider: 5, ScopeUserPath: 20, ScopeLabel: 0}
+	store := &fakeStore{
+		budgets: []Budget{
+			{Scope: ScopeProvider, Subject: "openai-prod", PeriodSeconds: PeriodDailySeconds, Amount: 100},
+			{Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10},
+			{Scope: ScopeLabel, Subject: "prod", PeriodSeconds: PeriodDailySeconds, Amount: 10},
+		},
+		sum: func(window SpendWindow) (float64, bool, error) { return spent[window.Scope], true, nil },
+	}
+	ctx := core.WithEffectiveUserPath(context.Background(), "/team/app")
+	ctx = core.WithRequestLabels(ctx, []string{"prod"})
+	service, err := NewService(ctx, store)
+	require.NoError(t, err)
+	service.SetProviderBillable(func(name string) bool { return name != "byok" && name != "byok-backup" })
+
+	assert.False(t, service.FailoverWithinBudget(ctx, "byok", "openai-prod"), "the user-path budget admission skipped is spent")
+	assert.True(t, service.FailoverWithinBudget(ctx, "byok", "byok-backup"), "another non-billable target owes nothing")
+	assert.True(t, service.FailoverWithinBudget(ctx, "anthropic", "openai-prod"), "consumer budgets passed at admission after a billable primary")
+
+	spent[ScopeUserPath] = 2
+	assert.True(t, service.FailoverWithinBudget(ctx, "byok", "openai-prod"))
+
+	spent[ScopeProvider] = 200
+	assert.False(t, service.FailoverWithinBudget(ctx, "byok", "openai-prod"), "the target's provider budget still gates")
+	assert.False(t, service.FailoverWithinBudget(ctx, "anthropic", "openai-prod"))
+
+	spent[ScopeProvider] = 5
+	store.sum = func(SpendWindow) (float64, bool, error) { return 0, false, errors.New("store down") }
+	assert.False(t, service.FailoverWithinBudget(ctx, "byok", "openai-prod"), "a failed spend lookup must not admit the target")
 }

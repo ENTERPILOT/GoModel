@@ -10,6 +10,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/anthropicapi"
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
@@ -218,7 +219,7 @@ func (s *translatedInferenceService) CountMessageTokens(c *echo.Context) error {
 	}
 	req, err := anthropicapi.DecodeMessagesRequest(body)
 	if err != nil {
-		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+		return handleError(c, invalidRequestBodyError(c, err))
 	}
 	if strings.TrimSpace(req.Model) == "" {
 		return handleError(c, core.NewInvalidRequestError("model is required", nil).WithParam("model"))
@@ -345,6 +346,14 @@ func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core
 		result.Meta.ProviderType,
 		result.Meta.ProviderName,
 	)
+	notifyChatResponseFeedback(
+		c,
+		ext.Endpoint(c.Request().URL.Path),
+		result.Response,
+		result.Meta.Model,
+		result.Meta.ProviderType,
+		result.Meta.ProviderName,
+	)
 
 	applyPluginResponseHeaders(c)
 	return c.JSON(http.StatusOK, anthropicapi.FromChatResponse(result.Response))
@@ -359,7 +368,7 @@ func decodeMessagesRequest(c *echo.Context) (*anthropicapi.MessagesRequest, erro
 	}
 	req, err := anthropicapi.DecodeMessagesRequest(body)
 	if err != nil {
-		return nil, core.NewInvalidRequestError("invalid request body: "+err.Error(), err)
+		return nil, invalidRequestBodyError(c, err)
 	}
 	return req, nil
 }

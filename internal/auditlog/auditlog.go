@@ -12,6 +12,7 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/storage"
 )
 
 // LogStore defines the interface for audit log storage backends.
@@ -137,6 +138,11 @@ type LogEntry struct {
 
 	// Data contains flexible request/response information as JSON
 	Data *LogData `json:"data,omitempty" bson:"data,omitempty"`
+
+	// Stamp marks the batch write that persisted the entry; other replicas
+	// read it to show the entry in their live log view. The logger sets it
+	// when it flushes, so it is nil until then.
+	Stamp *storage.WriteStamp `json:"-" bson:",inline"`
 }
 
 // LogData contains flexible request/response information.
@@ -541,6 +547,6 @@ type Config struct {
 	RetentionDays int
 
 	// OnlyModelInteractions limits logging to AI model endpoints only
-	// When true, only /v1/chat/completions, /v1/responses, /v1/embeddings, /v1/files, and /v1/batches are logged
+	// When true, only paths matched by core.IsModelInteractionPath are logged
 	OnlyModelInteractions bool
 }

@@ -37,7 +37,11 @@ func (r *LoadResult) resolveSecrets(ctx context.Context) error {
 	if r.Config == nil {
 		return nil
 	}
+	configuredServer := r.Config.Server
 	if err := r.Secrets.ResolveFields(ctx, "", r.Config); err != nil {
+		return err
+	}
+	if err := checkResolvedServerTLS(configuredServer, r.Config.Server); err != nil {
 		return err
 	}
 	return validateResolvedMCP(&r.Config.MCP)

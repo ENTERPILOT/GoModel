@@ -8,12 +8,13 @@ import "sort"
 const (
 	CredentialFieldAPIKeys                  = "api_keys"
 	CredentialFieldSessionStickyKeys        = "session_sticky_keys"
+	CredentialFieldBillable                 = "billable"
 	CredentialFieldBaseURL                  = "base_url"
 	CredentialFieldAPIVersion               = "api_version"
 	CredentialFieldBackend                  = "backend"
 	CredentialFieldAuthType                 = "auth_type"
 	CredentialFieldAPIMode                  = "api_mode"
-	CredentialFieldVertexProject            = "vertex_project"
+	CredentialFieldVertexProject            = "vertex_project" //nolint:gosec // G101: field name, not a credential.
 	CredentialFieldVertexLocation           = "vertex_location"
 	CredentialFieldServiceAccountFile       = "service_account_file"
 	CredentialFieldServiceAccountJSON       = "service_account_json"
@@ -107,7 +108,8 @@ func credentialSchema(providerType string, spec DiscoveryConfig) CredentialSchem
 	}
 	schema.Fields = append(schema.Fields,
 		CredentialField{Name: CredentialFieldProxyURL, Advanced: true},
-		CredentialField{Name: CredentialFieldModels, Advanced: true})
+		CredentialField{Name: CredentialFieldModels, Advanced: true},
+		CredentialField{Name: CredentialFieldBillable, Advanced: true})
 	return schema
 }
 

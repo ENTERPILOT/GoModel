@@ -37,8 +37,10 @@ and non-streaming responses.
 
 Native forwarding is automatic. Requests fall back to the translated pipeline
 when a feature that operates on the canonical request is in play: guardrails
-request patching, the response cache, or failover routing. Requests resolving
-to any non-Anthropic provider always translate.
+request patching, the response cache, failover routing, or a forced
+[reasoning effort](/features/virtual-models#force-a-reasoning-effort). A
+[slowdown](/features/slowdown) delays the native relay in place. Requests
+resolving to any non-Anthropic provider always translate.
 
 Because the body is forwarded verbatim, none of the [translation limitations](#limitations)
 apply on this path: server-tool history (`server_tool_use`, `web_search_tool_result`, …),
@@ -189,8 +191,8 @@ is recorded under the `/v1/messages` endpoint so it can be filtered in the dashb
 ## Limitations
 
 These limitations apply to the **translated** pipeline — requests routed to a
-non-Anthropic provider, or to Anthropic with guardrails, response cache, or
-failover engaged. Requests [natively forwarded to Anthropic](#native-forwarding-to-anthropic)
+non-Anthropic provider, or to Anthropic with guardrails, response cache,
+failover, or a forced reasoning effort engaged. Requests [natively forwarded to Anthropic](#native-forwarding-to-anthropic)
 are preserved byte-for-byte apart from the `model` value when an alias
 resolved to a different name, and none of the below applies.
 
@@ -239,12 +241,19 @@ features that have no canonical equivalent are not preserved end to end:
   translate to the OpenAI-style `file` content part (`file_data` for inline
   content, `file_url` for remote URLs, `file_id` for uploads). Anthropic gets the
   document back natively with its `title`; Gemini receives inline data only;
-  OpenAI-compatible providers receive the `file` part as-is. On OpenAI, an
-  untitled PDF gets a filename (`document.pdf`), and URL documents go through
-  the Responses API. A plain-text document on a request that stays on Chat
-  Completions is sent as text (headed by its `title`), because only PDF file
-  data is accepted there; on a request served through the Responses API, such
-  as one with a text document inside a `tool_result`, it stays a file.
+  OpenAI-compatible providers receive the `file` part as-is. DeepSeek is the
+  exception: its file input is images only (webp, png, jpeg, gif). An image
+  document is sent as `image_url` and stays visible to the model, and a
+  plain-text document is sent as text. Any other document, including a URL that
+  does not name an image, becomes a short text note that always appears and
+  names the file only when the request supplies a filename; its contents are
+  not sent.
+  On OpenAI, an untitled PDF gets a filename (`document.pdf`), and URL
+  documents go through the Responses API. A plain-text document on a request
+  that stays on Chat Completions is sent as text (headed by its `title`),
+  because only PDF file data is accepted there; on a request served through the
+  Responses API, such as one with a text document inside a `tool_result`, it
+  stays a file.
   Citation settings and `context` are dropped. The custom-content variant
   (`source.type: "content"`) degrades to text.
 - **`search_result` blocks** degrade to text (title, source URL, and content);
@@ -269,7 +278,10 @@ features that have no canonical equivalent are not preserved end to end:
   output itself because OpenAI rejects `stop` for them. Other OpenAI-family
   models conflate stop-parameter hits with natural stops in `finish_reason`,
   so completions there report `stop_reason: "end_turn"` (output is still
-  truncated correctly).
+  truncated correctly). OpenAI (other than the reasoning models above), Azure
+  OpenAI, and Groq accept at most four stop sequences; a longer list is
+  truncated to the first four (with a warning in the gateway log) instead of
+  failing the request. Anthropic accepts the full list.
 - **`output_config`**: `effort` sets the reasoning effort (taking precedence
   over the one derived from `thinking`), and `format` (or the older top-level
   `output_format`) becomes JSON-schema structured output — strict when the

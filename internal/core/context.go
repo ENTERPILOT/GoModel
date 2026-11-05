@@ -68,7 +68,7 @@ const (
 
 	// credentialAllowedModelsKey stores the model allowlist bound to the
 	// authenticated credential (a managed auth key). Empty means unrestricted.
-	credentialAllowedModelsKey contextKey = "credential-allowed-models"
+	credentialAllowedModelsKey contextKey = "credential-allowed-models" //nolint:gosec // G101: context key name, not a credential.
 )
 
 // RequestOrigin identifies whether a request came from an external caller or an

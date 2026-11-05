@@ -153,7 +153,7 @@ func (h *Handler) ResetRateLimit(c *echo.Context) error {
 	if err := requireScopedSubject(c, scope == ratelimit.ScopeUserPath, subject); err != nil {
 		return handleError(c, err)
 	}
-	if err := h.rateLimits.ResetRule(scope, subject, periodSeconds); err != nil {
+	if err := h.rateLimits.ResetRule(c.Request().Context(), scope, subject, periodSeconds); err != nil {
 		return handleError(c, rateLimitServiceError("failed to reset rate limit rule", err))
 	}
 	return h.ListRateLimits(c)
@@ -183,7 +183,7 @@ func (h *Handler) ResetRateLimits(c *echo.Context) error {
 	if strings.TrimSpace(strings.ToLower(req.Confirmation)) != "reset" {
 		return handleError(c, core.NewInvalidRequestError("confirmation must be reset", nil))
 	}
-	if err := h.rateLimits.ResetAll(); err != nil {
+	if err := h.rateLimits.ResetAll(c.Request().Context()); err != nil {
 		return handleError(c, rateLimitServiceError("failed to reset rate limits", err))
 	}
 	return c.JSON(http.StatusOK, resetRateLimitsResponse{Status: "ok"})

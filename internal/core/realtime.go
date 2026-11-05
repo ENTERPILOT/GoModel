@@ -51,6 +51,11 @@ type RealtimeTarget struct {
 	URL          string
 	Headers      http.Header
 	Subprotocols []string
+	// HTTPClient is the provider's outbound client. The websocket is dialed
+	// through it so the provider's proxy_url, an extension's proxy selection,
+	// and the gateway's TLS trust apply as they do to its HTTP calls. Nil
+	// dials through the shared default client.
+	HTTPClient *http.Client
 	// PinSessionModel, when non-empty, names the model the gateway must force
 	// into the client's session.update frames. Providers set it when the
 	// upstream URL carries no model — as in OpenAI transcription sessions —

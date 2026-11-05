@@ -259,7 +259,7 @@ func (u *upstream) transport(requests context.Context) (mcp.Transport, *connectP
 			HTTPClient: u.dialClient(probe, requests),
 		}, probe, nil
 	case "stdio":
-		cmd := exec.Command(u.spec.Command, u.spec.Args...)
+		cmd := exec.Command(u.spec.Command, u.spec.Args...) //nolint:gosec // stdio servers come only from startup config.
 		// Start from a minimal environment, not os.Environ(): the gateway
 		// process holds every provider API key and the master key, and a
 		// compromised MCP server binary must not inherit them. Operators pass

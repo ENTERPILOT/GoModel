@@ -10,6 +10,8 @@ import {
   isSecretPlaceholder,
   routeSchemaFields,
   schemaFieldDefaults,
+  schemaFieldRangeBounds,
+  schemaFieldRangeValue,
   schemaFieldValue,
   setSchemaFieldValue,
 } from "../src/lib/utils/schemaFields.js";
@@ -107,4 +109,73 @@ test("modelPickerOptions lists enabled selectors sorted with their provider", ()
     { value: "openai/gpt-4o-mini", label: "openai/gpt-4o-mini", description: "openai" },
   ]);
   assert.deepEqual(modelPickerOptions(undefined), []);
+});
+
+test("range fields read a bounded number and store a number", () => {
+  const field = { key: "weight", input: "range", min: 0, max: 1, step: 0.05, default: 0.35 };
+
+  assert.equal(schemaFieldValue({}, field), 0.35);
+  assert.equal(schemaFieldValue({ weight: 0.7 }, field), 0.7);
+  assert.equal(schemaFieldValue({ weight: "0.7" }, field), 0.7);
+  assert.equal(schemaFieldValue({}, { key: "cut", input: "range", min: 0.2 }), 0.2);
+  assert.deepEqual(setSchemaFieldValue({}, field, "0.5"), { weight: 0.5 });
+  assert.deepEqual(setSchemaFieldValue({ weight: 0.5 }, field, ""), {});
+});
+
+test("a range without a default seeds the value the slider shows", () => {
+  const fields = [{ key: "cut", input: "range", min: 0.2 }];
+  assert.deepEqual(schemaFieldDefaults(fields), { cut: 0.2 });
+  assert.equal(schemaFieldValue(schemaFieldDefaults(fields), fields[0]), 0.2);
+});
+
+test("a range clamps the displayed value and keeps the stored one", () => {
+  const field = { key: "weight", input: "range", min: 0, max: 1, step: 0.05 };
+  const stored = { weight: 2 };
+
+  assert.equal(schemaFieldRangeValue(stored, field), 1, "the slider and its output show the upper bound");
+  assert.equal(stored.weight, 2, "the config keeps the out-of-range value until the operator moves the slider");
+  assert.equal(schemaFieldRangeValue({ weight: -1 }, field), 0);
+  assert.equal(schemaFieldRangeValue({}, field), 0, "an empty range displays its lower bound");
+
+  assert.deepEqual(schemaFieldRangeBounds({ key: "w", input: "range" }), { min: 0, max: 1, step: 0.01 });
+  assert.deepEqual(
+    schemaFieldRangeBounds({ key: "w", input: "range", min: 0.2, max: 0.9, step: 0.05 }),
+    { min: 0.2, max: 0.9, step: 0.05 },
+  );
+});
+
+test("a blank range value falls back to the default instead of zero", () => {
+  const field = { key: "weight", input: "range", min: 0, max: 1, step: 0.05, default: 0.35 };
+
+  assert.equal(schemaFieldValue({ weight: "" }, field), 0.35, "a blank string is an absent value");
+  assert.equal(schemaFieldValue({ weight: "   " }, field), 0.35, "whitespace is blank too");
+  assert.equal(schemaFieldValue({ weight: null }, field), 0.35, "null is an absent value");
+  assert.equal(schemaFieldValue({ weight: 0 }, field), 0, "a stored zero is a real value and stays zero");
+  assert.equal(
+    schemaFieldValue({ weight: null }, { key: "cut", input: "range", min: 0.2 }),
+    0.2,
+    "without a default an absent value falls back to the lower bound",
+  );
+});
+
+test("a range keeps an explicitly negative maximum", () => {
+  const field = { key: "shift", input: "range", min: -10, max: -1, step: 1 };
+
+  assert.deepEqual(schemaFieldRangeBounds(field), { min: -10, max: -1, step: 1 });
+  assert.equal(schemaFieldRangeValue({ shift: 0 }, field), -1, "a value above the maximum clamps to it");
+  assert.equal(schemaFieldRangeValue({ shift: -20 }, field), -10, "a value below the minimum clamps to it");
+  assert.equal(schemaFieldRangeValue({ shift: -3 }, field), -3);
+});
+
+test("a range output snaps to its step so it matches the thumb", () => {
+  const coarse = { key: "weight", input: "range", min: 0, max: 1, step: 0.05 };
+  assert.equal(schemaFieldRangeValue({ weight: 0.33 }, coarse), 0.35, "0.33 snaps to the nearest 0.05 step");
+  assert.equal(schemaFieldRangeValue({ weight: 0.3 }, coarse), 0.3);
+
+  const offset = { key: "cut", input: "range", min: 0.2, max: 1, step: 0.1 };
+  assert.equal(schemaFieldRangeValue({ cut: 0.35 }, offset), 0.3, "the step grid starts at min, not at zero");
+  assert.equal(schemaFieldRangeValue({ cut: 0.96 }, offset), 1, "a value that snaps onto the upper bound stays there");
+
+  const fine = { key: "ratio", input: "range", min: 0, max: 1, step: 1e-12 };
+  assert.equal(schemaFieldRangeValue({ ratio: 3e-12 }, fine), 3e-12, "a fine step is not rounded away to zero");
 });

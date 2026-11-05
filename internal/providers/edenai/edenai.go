@@ -147,13 +147,13 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 // completions. Eden's native /responses route is a different API and is
 // deliberately never called.
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	return providers.ResponsesViaChat(ctx, p, req, providerType)
+	return providers.ResponsesViaChat(ctx, p, req, p.compat.ProviderName())
 }
 
 // StreamResponses translates a streaming Responses request through Eden chat
 // completions, for the same reason as Responses.
 func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
-	return providers.StreamResponsesViaChat(ctx, p, req, providerType)
+	return providers.StreamResponsesViaChat(ctx, p, req, p.compat.ProviderName())
 }
 
 // Embeddings sends an embeddings request to Eden AI. Eden's /embeddings route

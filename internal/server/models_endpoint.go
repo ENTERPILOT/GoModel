@@ -75,6 +75,80 @@ func (h *Handler) visibleModels(c *echo.Context) (*core.ModelsResponse, error) {
 	return resp, nil
 }
 
+// vllmModel is a model entry as a vLLM runtime advertises it: the shared model
+// plus the context field its discovery reads. The type lives here, not on
+// core.Model, so no other response can carry max_model_len and the default
+// listing is untouched by the setting.
+//
+// max_model_len carries no omitempty: every entry has the field, because the
+// clients this mode exists for decode the listing against a schema where it is
+// required.
+type vllmModel struct {
+	core.Model
+	MaxModelLen int `json:"max_model_len"`
+}
+
+// vllmModelsResponse is the model list in vLLM discovery compatibility mode.
+type vllmModelsResponse struct {
+	Object string      `json:"object"`
+	Data   []vllmModel `json:"data"`
+}
+
+// vllmDiscoveryModels rewrites a listing into the shape a vLLM runtime
+// advertises: owned_by "vllm" and a max_model_len on every entry, zero when the
+// limit is unknown.
+//
+// Clients whose model discovery only understands a vLLM runtime (OpenCode
+// probes /health and /v1/models) drop every entry that does not look like one,
+// so a gateway that reports its real owners and no context field stays
+// invisible to them. This keeps that compatibility a per-deployment choice:
+// owned_by is metadata, but claiming to be vLLM is still a lie a deployment may
+// not want to tell.
+//
+// The listing is copied, never rewritten in place: a provider that hands back
+// the same models on every call must not have them changed under it.
+func vllmDiscoveryModels(resp *core.ModelsResponse) vllmModelsResponse {
+	if resp == nil {
+		return vllmModelsResponse{Object: "list"}
+	}
+	out := vllmModelsResponse{
+		Object: resp.Object,
+		Data:   make([]vllmModel, 0, len(resp.Data)),
+	}
+	for _, model := range resp.Data {
+		out.Data = append(out.Data, vllmDiscoveryModel(model))
+	}
+	return out
+}
+
+// vllmDiscoveryModel rewrites one model entry for vLLM discovery.
+func vllmDiscoveryModel(model core.Model) vllmModel {
+	out := vllmModel{Model: model, MaxModelLen: vllmModelLen(model)}
+	out.OwnedBy = vllmDiscoveryOwner
+	return out
+}
+
+// vllmModelLen returns the context limit to advertise for a model: the one the
+// provider reported, and only when it reported none, the model's context
+// window. A self-hosted runtime knows its own limit better than the catalog
+// does. Zero means the limit is unknown, not that the entry is incomplete: the
+// field is still advertised, because a client that decodes the listing against
+// a schema where it is required fails the whole response over one entry missing
+// it and hides every other model behind it.
+func vllmModelLen(model core.Model) int {
+	if model.MaxModelLen != nil && *model.MaxModelLen > 0 {
+		return *model.MaxModelLen
+	}
+	if model.Metadata != nil && model.Metadata.ContextWindow != nil && *model.Metadata.ContextWindow > 0 {
+		return *model.Metadata.ContextWindow
+	}
+	return 0
+}
+
+// vllmDiscoveryOwner is the value a vLLM runtime reports in owned_by and the
+// only one its discovery accepts.
+const vllmDiscoveryOwner = "vllm"
+
 // RetrieveModel handles GET /v1/models/{model}
 //
 // Model IDs carry the provider prefix and may contain several slashes
@@ -131,6 +205,9 @@ func (h *Handler) RetrieveModel(c *echo.Context) error {
 	}
 	if model.Object == "" {
 		model.Object = "model"
+	}
+	if h.vllmDiscoveryCompat {
+		return c.JSON(http.StatusOK, vllmDiscoveryModel(model))
 	}
 	return c.JSON(http.StatusOK, model)
 }

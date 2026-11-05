@@ -4,6 +4,7 @@
   import ChartCanvas from "$lib/components/molecules/ChartCanvas.svelte";
   import Spinner from "$lib/components/atoms/Spinner.svelte";
   import { router } from "$lib/stores/router.svelte.js";
+  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { usageData } from "$lib/stores/usageData.svelte.js";
   import {
     formatNumber,
@@ -44,6 +45,7 @@
   const providerSummary = $derived(providerStatusState.status.summary);
   const loading = $derived(usageData.loading);
   const cacheLoading = $derived(usageData.cacheLoading);
+  const billedVisible = $derived(runtimeConfig.billedCostVisible());
   // Total Requests folds cache hits in when cache analytics is on, so that
   // card must also wait for the cache overview or it briefly shows a total
   // computed from the still-pending cache data.
@@ -152,6 +154,18 @@
       {/if}
     </div>
   </div>
+  {#if billedVisible}
+    <div class="card">
+      <div class="card-label">{m.usage_billed_cost()}</div>
+      <div class="card-value" title={m.usage_billed_cost_help()}>
+        {#if loading}
+          <Spinner size={18} label={m.usage_loading()} />
+        {:else}
+          {formatCost(summary.total_billed_cost)}
+        {/if}
+      </div>
+    </div>
+  {/if}
   {#if cacheEnabled}
     {@render tokenCard(
       m.overview_local_cache(),

@@ -3,6 +3,7 @@
 // relative imports keep it loadable outside Vite.
 
 import * as m from "../../lib/paraglide/messages.js";
+import { filterFields } from "../../lib/utils/textMatch.js";
 import {
   GLOBAL_OVERRIDE_SELECTOR,
   aliasKeys,
@@ -121,30 +122,49 @@ export function buildDisplayModels({
   });
 }
 
+// rowCategories lists a model's categories, or nothing for an alias.
+function rowCategories(row) {
+  const categories = row && row.model && row.model.metadata && row.model.metadata.categories;
+  return Array.isArray(categories) ? categories : [];
+}
+
 // filterDisplayModels keeps an identity guarantee: with an empty
 // filter the input array is returned untouched.
 export function filterDisplayModels(rows, modelFilter) {
   if (!modelFilter) return rows;
-  const filter = String(modelFilter).toLowerCase();
-  return rows.filter((row) => {
-    const fields = [
-      row.display_name,
-      row.secondary_name,
-      row.provider_name,
-      row.provider_type,
-      row.model && row.model.owned_by,
-      row.alias && row.alias.description,
-      row.alias && row.alias_state_text,
-      row.model && row.model.metadata && Array.isArray(row.model.metadata.categories)
-        ? row.model.metadata.categories.join(",")
-        : "",
-    ];
-    return fields.some((value) =>
-      String(value || "")
-        .toLowerCase()
-        .includes(filter),
-    );
+  return filterFields(rows, modelFilter, (row) => [
+    row.display_name,
+    row.secondary_name,
+    row.provider_name,
+    row.provider_type,
+    row.model && row.model.owned_by,
+    row.alias && row.alias.description,
+    row.alias && row.alias_state_text,
+    ...rowCategories(row),
+  ], (entry) => {
+    // The filter used to read the categories as one comma-joined string; that
+    // haystack is substring-only, so a query cannot be assembled out of two
+    // categories by the subsequence level.
+    const categories = rowCategories(entry);
+    return categories.length ? [categories.join(",")] : [];
   });
+}
+
+// displayRowEnabled reports the state the row's access toggle shows: an alias
+// follows its own enabled flag, a model its effective access (restricted
+// models are enabled).
+export function displayRowEnabled(row) {
+  if (!row) return false;
+  if (row.is_alias) return Boolean(row.alias && row.alias.enabled !== false);
+  return Boolean(row.access && row.access.effective_enabled !== false);
+}
+
+// filterDisplayModelsByStatus keeps the same identity guarantee as
+// filterDisplayModels: "all" (or an unknown status) returns the input array.
+export function filterDisplayModelsByStatus(rows, status) {
+  if (status !== "enabled" && status !== "disabled") return rows;
+  const wantEnabled = status === "enabled";
+  return rows.filter((row) => displayRowEnabled(row) === wantEnabled);
 }
 
 // ---- Provider grouping ----

@@ -1,0 +1,115 @@
+---
+title: "Ollama"
+description: "Używaj jednej instancji GoModel z wieloma providerami Ollama dzięki zmiennym środowiskowym z sufiksami i ID modeli kwalifikowanym nazwą providera."
+icon: "network"
+keywords: ["Ollama", "modele lokalne", "local models", "self-hosted", "wielu providerów", "multiple providers"]
+---
+
+GoModel rejestruje Ollamę przez `OLLAMA_BASE_URL`. Aby uruchomić kilka instancji
+Ollamy za jednym gatewayem, użyj zmiennych środowiskowych z sufiksami.
+
+## Konfiguracja
+
+```bash
+OLLAMA_A_BASE_URL=http://host.docker.internal:11434/v1
+OLLAMA_B_BASE_URL=http://host.docker.internal:11435/v1
+GOMODEL_MASTER_KEY=change-me
+```
+
+`OLLAMA_A_BASE_URL` rejestruje providera `ollama-a`; `OLLAMA_B_BASE_URL`
+rejestruje `ollama-b`. Dla każdej instancji użyj innego portu lub nazwy hosta.
+
+<Tip>
+  W Linuksie dodaj `--add-host=host.docker.internal:host-gateway` do polecenia
+  `docker run`, aby kontener mógł połączyć się z Ollamą na hoście.
+</Tip>
+
+## Uruchom GoModel
+
+<CodeGroup>
+
+```bash Docker (plik .env)
+docker run --rm -p 8080:8080 --env-file .env enterpilot/gomodel
+```
+
+```bash Docker (inline -e)
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e OLLAMA_A_BASE_URL="http://host.docker.internal:11434/v1" \
+  -e OLLAMA_B_BASE_URL="http://host.docker.internal:11435/v1" \
+  enterpilot/gomodel
+```
+
+```bash Binary (make build)
+make build
+./bin/gomodel
+```
+
+</CodeGroup>
+
+## Kieruj do konkretnego backendu
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "ollama-a/llama3.2",
+    "messages": [{"role": "user", "content": "Reply with exactly ok."}]
+  }'
+```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="change-me")
+
+completion = client.chat.completions.create(
+    model="ollama-a/llama3.2",
+    messages=[{"role": "user", "content": "Reply with exactly ok."}],
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "change-me",
+});
+
+const completion = await client.chat.completions.create({
+  model: "ollama-a/llama3.2",
+  messages: [{ role: "user", content: "Reply with exactly ok." }],
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
+
+`GET /v1/models` zwraca ID kwalifikowane nazwą providera, takie jak `ollama-a/llama3.2`
+i `ollama-b/llama3.2`. Sama nazwa modelu jest kierowana do tego providera, który
+udostępnia ją jako pierwszy w kolejności rejestracji – użyj formy kwalifikowanej,
+aby wybrać providera jawnie.
+
+## Kiedy YAML nadal się przydaje
+
+Sięgnij po `config.yaml` tylko wtedy, gdy generowane nazwy takie jak `ollama-a` nie
+wystarczają albo gdy chcesz nadpisać ustawienia odporności na awarie dla
+poszczególnych providerów:
+
+```yaml
+providers:
+  local-fast:
+    type: ollama
+    base_url: "http://ollama-fast:11434/v1"
+
+  local-large:
+    type: ollama
+    base_url: "http://ollama-large:11434/v1"
+```

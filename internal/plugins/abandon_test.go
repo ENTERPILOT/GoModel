@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/enterpilot/gomodel/pluginapi"
@@ -68,32 +69,39 @@ func TestRunAbandonedHooks(t *testing.T) {
 	})
 
 	t.Run("abandoned reader fails open and its copy is dropped", func(t *testing.T) {
-		reader := &fakePlugin{name: "reader", onPrompt: stuckPrompt(100*time.Millisecond, late)}
-		quick := &fakePlugin{name: "quick", onPrompt: func(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
-			x.Values.Set("quick", true)
-			return pluginapi.Warn("w", "warned", nil), nil
-		}}
-		chain, err := BuildChain(pluginapi.KindPrompt, []Ref{{newTestInstance(reader, timeout), 10}, {newTestInstance(quick, InstanceSpec{}), 10}})
-		require.NoError(t, err)
+		synctest.Test(t, func(t *testing.T) {
+			const stuck = 100 * time.Millisecond
+			reader := &fakePlugin{name: "reader", onPrompt: stuckPrompt(stuck, late)}
+			quick := &fakePlugin{name: "quick", onPrompt: func(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+				x.Values.Set("quick", true)
+				return pluginapi.Warn("w", "warned", nil), nil
+			}}
+			chain, err := BuildChain(pluginapi.KindPrompt, []Ref{{newTestInstance(reader, timeout), 10}, {newTestInstance(quick, InstanceSpec{}), 10}})
+			require.NoError(t, err)
 
-		x := withPromptText(newExchange(), "x")
-		outcome, err := chain.RunPrompt(context.Background(), x)
-		require.NoError(t, err)
-		require.Equal(t, pluginapi.ActionWarn, outcome.Decision.Action, "decision = %+v, want the quick reader's warn", outcome.Decision)
-		_, ok := x.Values.Get("quick")
-		require.True(t, ok)
+			x := withPromptText(newExchange(), "x")
+			outcome, err := chain.RunPrompt(context.Background(), x)
+			require.NoError(t, err)
+			require.Equal(t, pluginapi.ActionWarn, outcome.Decision.Action, "decision = %+v, want the quick reader's warn", outcome.Decision)
+			_, ok := x.Values.Get("quick")
+			require.True(t, ok)
 
-		time.Sleep(150 * time.Millisecond)
-		_, // let the abandoned reader finish writing its copy
-			ok = x.Values.Get("late")
-		require.False(t, ok)
+			// Let the abandoned reader finish writing its copy.
+			time.Sleep(stuck)
+			synctest.Wait()
+			_, ok = x.Values.Get("late")
+			require.False(t, ok)
+		})
 	})
 }
+
+// stuckInitDelay is how long stuckInit ignores its deadline for.
+const stuckInitDelay = 300 * time.Millisecond
 
 type stuckInit struct{ fakePlugin }
 
 func (*stuckInit) Init(context.Context, json.RawMessage, pluginapi.Host) error {
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(stuckInitDelay)
 	return nil
 }
 
@@ -102,12 +110,18 @@ func TestNewInstanceAbandonsInitAtDeadline(t *testing.T) {
 	initTimeout = 20 * time.Millisecond
 	t.Cleanup(func() { initTimeout = previous })
 
-	entry := Entry{Name: "stuck", Factory: func() pluginapi.Plugin { return &stuckInit{} }}
-	start := time.Now()
-	_, err := NewInstance(context.Background(), entry, InstanceSpec{Name: "i"}, NewHost(HostDeps{}, HostInfo{}))
-	require.LessOrEqual(t, time.Since(start), 200*time.Millisecond)
-	require.ErrorIs(t, err, ErrAbandoned)
-	require.Contains(t, err.Error(), "init deadline")
+	// The bubble keeps the abandoned Init inside the test: it reads
+	// initTimeout when it finally returns, which must happen before the
+	// cleanup above restores it.
+	synctest.Test(t, func(t *testing.T) {
+		entry := Entry{Name: "stuck", Factory: func() pluginapi.Plugin { return &stuckInit{} }}
+		start := time.Now()
+		_, err := NewInstance(context.Background(), entry, InstanceSpec{Name: "i"}, NewHost(HostDeps{}, HostInfo{}))
+		require.Equal(t, initTimeout, time.Since(start))
+		require.ErrorIs(t, err, ErrAbandoned)
+		require.Contains(t, err.Error(), "init deadline")
+		time.Sleep(stuckInitDelay) // let the abandoned Init return and be closed
+	})
 }
 
 // streamOnly implements the stream hook but not the response hook.
@@ -160,16 +174,14 @@ func TestNewInstanceClosesAbandonedInitOnceItReturns(t *testing.T) {
 	initTimeout = 20 * time.Millisecond
 	t.Cleanup(func() { initTimeout = previous })
 
-	plugin := &slowInit{delay: 60 * time.Millisecond, closed: make(chan struct{})}
-	entry := Entry{Name: "slow", Factory: func() pluginapi.Plugin { return plugin }}
-	_, err := NewInstance(context.Background(), entry, InstanceSpec{Name: "i"}, NewHost(HostDeps{}, HostInfo{}))
-	require.ErrorIs(t, err, ErrAbandoned)
+	synctest.Test(t, func(t *testing.T) {
+		plugin := &slowInit{delay: 60 * time.Millisecond, closed: make(chan struct{})}
+		entry := Entry{Name: "slow", Factory: func() pluginapi.Plugin { return plugin }}
+		_, err := NewInstance(context.Background(), entry, InstanceSpec{Name: "i"}, NewHost(HostDeps{}, HostInfo{}))
+		require.ErrorIs(t, err, ErrAbandoned)
 
-	select {
-	case <-plugin.closed:
-	case <-time.After(2 * time.Second):
-		t.Fatal("abandoned plugin was not closed after its Init returned")
-	}
+		<-plugin.closed // Init returns on the bubble's clock and is then closed
+	})
 }
 
 // stuckClose fails Init and then ignores its Close deadline; entered is

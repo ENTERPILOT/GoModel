@@ -405,6 +405,9 @@ func TestLocalPath(t *testing.T) {
 		{"http://example.com/m.json", "", false},
 		{"file:///etc/gomodel/models.json", "/etc/gomodel/models.json", true},
 		{"file://localhost/etc/models.json", "/etc/models.json", true},
+		{"file://LOCALHOST/etc/models.json", "/etc/models.json", true},
+		{"ftp://example.com/m.json", "", false},
+		{"C:/gomodel/models.json", "C:/gomodel/models.json", true},
 		{"/etc/gomodel/models.json", "/etc/gomodel/models.json", true},
 		{"./models.json", "./models.json", true},
 		{"  /tmp/m.json  ", "/tmp/m.json", true},
@@ -414,6 +417,12 @@ func TestLocalPath(t *testing.T) {
 		assert.Equal(t, tt.wantOK, gotOK)
 		assert.Equal(t, tt.wantPath, gotPath, "localPath(%q) = (%q, %v), want (%q, %v)", tt.in, gotPath, gotOK, tt.wantPath, tt.wantOK)
 	}
+}
+
+func TestFetchIfChanged_RejectsUnsupportedScheme(t *testing.T) {
+	_, err := FetchIfChanged(context.Background(), "ftp://example.com/models.json", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported protocol scheme")
 }
 
 func TestFetchIfChanged_LocalFileOversizedIsRejectedBeforeAllocation(t *testing.T) {
@@ -436,4 +445,23 @@ func TestFetchIfChanged_LocalFileOversizedIsRejectedBeforeAllocation(t *testing.
 	require.Contains(t, err.Error(), "too large")
 	allocated := after.TotalAlloc - before.TotalAlloc
 	require.LessOrEqual(t, allocated, uint64(maxBodySize))
+}
+
+// A catalog URL that redirects to another host (http to https, or a separate
+// file host) must still download.
+func TestFetch_FollowsCrossOriginRedirect(t *testing.T) {
+	files := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"version": 1, "updated_at": "2025-01-01T00:00:00Z", "providers": {}, "models": {"gpt-4o": {"display_name": "GPT-4o", "modes": ["chat"]}}, "provider_models": {}}`))
+	}))
+	defer files.Close()
+	catalog := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, files.URL+"/models.json", http.StatusFound)
+	}))
+	defer catalog.Close()
+
+	list, _, err := Fetch(context.Background(), catalog.URL)
+	require.NoError(t, err)
+	require.NotNil(t, list)
+	assert.Contains(t, list.Models, "gpt-4o")
 }

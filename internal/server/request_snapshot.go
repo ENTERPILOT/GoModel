@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"net/textproto"
 	"strings"
 
 	"github.com/google/uuid"
@@ -16,11 +17,15 @@ import (
 const requestSnapshotInlineBodyLimit int64 = 64 * 1024
 
 // RequestSnapshotCapture captures immutable transport-level request data for
-// model-facing endpoints. Known-small JSON bodies are captured once for the
-// hot path; larger or unknown-size bodies only get a bounded selector peek and
-// stay on the live request stream until the handler actually decodes them.
+// model-facing endpoints. It does not read the body: that waits for
+// authentication, in RequestBodyCapture.
 func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 	userPathHeaderName := configuredUserPathHeaderName(userPathHeader...)
+	// Header.Get/Set canonicalize a non-canonical key on every call, and the
+	// default header name keeps its brand casing ("GoModel"), so canonicalize
+	// it once here. userPathHeaderName stays the user-facing spelling for
+	// error messages and context.
+	canonicalUserPathHeader := textproto.CanonicalMIMEHeaderKey(userPathHeaderName)
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			req, requestID := ensureRequestID(c.Request())
@@ -38,12 +43,12 @@ func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 				// managed key's bound path still wins — auth middleware runs
 				// later and its context value shadows this one.
 				if desc.ModelInteraction {
-					userPath, err := core.NormalizeUserPath(req.Header.Get(userPathHeaderName))
+					userPath, err := core.NormalizeUserPath(req.Header.Get(canonicalUserPathHeader))
 					if err != nil {
 						return handleError(c, core.NewInvalidRequestError("invalid "+userPathHeaderName+" header", err))
 					}
 					if userPath != "" {
-						req.Header.Set(userPathHeaderName, userPath)
+						req.Header.Set(canonicalUserPathHeader, userPath)
 						req = req.WithContext(core.WithEffectiveUserPath(req.Context(), userPath))
 					}
 				}
@@ -51,17 +56,12 @@ func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 				return next(c)
 			}
 
-			userPath, err := core.NormalizeUserPath(req.Header.Get(userPathHeaderName))
+			userPath, err := core.NormalizeUserPath(req.Header.Get(canonicalUserPathHeader))
 			if err != nil {
 				return handleError(c, core.NewInvalidRequestError("invalid "+userPathHeaderName+" header", err))
 			}
 			if userPath != "" {
-				req.Header.Set(userPathHeaderName, userPath)
-			}
-
-			bodyBytes, bodyNotCaptured, bodyCaptured, err := captureSmallRequestBodyForSnapshot(req, desc.BodyMode)
-			if err != nil {
-				return handleError(c, core.NewInvalidRequestError("failed to read request body", err))
+				req.Header.Set(canonicalUserPathHeader, userPath)
 			}
 
 			// Query/route/trace maps are freshly built here, so the snapshot can
@@ -73,8 +73,8 @@ func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 				req.URL.Query(),
 				req.Header,
 				req.Header.Get("Content-Type"),
-				bodyBytes,
-				bodyNotCaptured,
+				nil,
+				false,
 				requestID,
 				extractTraceMetadata(req.Header),
 				userPath,
@@ -83,15 +83,49 @@ func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 			ctx := core.WithUserPathHeaderName(req.Context(), userPathHeaderName)
 			ctx = core.WithRequestSnapshot(ctx, snapshot)
 			if semantics := core.DeriveWhiteBoxPrompt(snapshot); semantics != nil {
-				if bodyCaptured {
-					verifyCapturedOpaqueSelectorHints(desc.BodyMode, bodyBytes, semantics)
-				} else if err := seedRequestBodySelectorHints(req, desc.BodyMode, semantics); err != nil {
-					return handleError(c, requestBodyReadError(err))
-				}
 				ctx = core.WithWhiteBoxPrompt(ctx, semantics)
 			}
 			c.SetRequest(req.WithContext(ctx))
 
+			return next(c)
+		}
+	}
+}
+
+// RequestBodyCapture adds the request body to the snapshot and its selector
+// hints to the request semantics. Known-small JSON bodies are captured once
+// for the hot path; larger or unknown-size bodies only get a selector peek
+// and stay on the live request stream until the handler decodes them.
+//
+// It runs after authentication, so a caller without credentials never makes
+// the gateway read, decompress, or buffer a body.
+func RequestBodyCapture() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			req := c.Request()
+			snapshot := core.GetRequestSnapshot(req.Context())
+			if snapshot == nil {
+				return next(c)
+			}
+			bodyMode := core.DescribeEndpoint(req.Method, req.URL.Path).BodyMode
+			bodyBytes, bodyNotCaptured, bodyCaptured, err := captureSmallRequestBodyForSnapshot(req, bodyMode)
+			if err != nil {
+				return handleError(c, core.NewInvalidRequestError("failed to read request body", err))
+			}
+
+			semantics := core.GetWhiteBoxPrompt(req.Context())
+			if bodyCaptured {
+				core.ApplyCapturedBodySelectorHints(semantics, bodyBytes)
+				verifyCapturedOpaqueSelectorHints(bodyMode, bodyBytes, semantics)
+			} else if semantics != nil {
+				if err := seedRequestBodySelectorHints(req, bodyMode, semantics); err != nil {
+					return handleError(c, requestBodyReadError(err))
+				}
+			}
+			if bodyCaptured || bodyNotCaptured {
+				snapshot = snapshot.WithOwnedCapturedBody(bodyBytes, bodyNotCaptured)
+				c.SetRequest(req.WithContext(core.WithRequestSnapshot(req.Context(), snapshot)))
+			}
 			return next(c)
 		}
 	}

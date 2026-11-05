@@ -14,6 +14,22 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
+// ErrCircuitOpen is wrapped by the error returned when an open circuit
+// breaker rejects a request before it reaches the provider, so observers can
+// tell a fast-fail rejection apart from the upstream failure that tripped it.
+var ErrCircuitOpen = errors.New("circuit breaker is open")
+
+type circuitBreakerBypassKey struct{}
+
+// WithoutCircuitBreaker marks ctx so requests made with it neither wait on the
+// circuit breaker nor count toward it. Model discovery and availability probes
+// use it: a failing control-plane endpoint says nothing about inference, so it
+// must not pause inference traffic, and a working one must not close a circuit
+// that inference failures opened.
+func WithoutCircuitBreaker(ctx context.Context) context.Context {
+	return context.WithValue(ctx, circuitBreakerBypassKey{}, true)
+}
+
 type requestScope struct {
 	ctx           context.Context
 	startedAt     time.Time
@@ -44,6 +60,10 @@ func (c *Client) beginRequest(ctx context.Context, req Request, stream bool) (re
 		scope.ctx = c.config.Hooks.OnRequestStart(scope.ctx, scope.requestInfo)
 	}
 
+	if ctx.Value(circuitBreakerBypassKey{}) != nil {
+		return scope, nil
+	}
+
 	scope.breaker = c.breakerForModel(scope.requestInfo.Model)
 	if scope.breaker == nil && c.circuitBreaker != nil {
 		err := core.NewProviderError(c.config.ProviderName, http.StatusServiceUnavailable,
@@ -55,7 +75,7 @@ func (c *Client) beginRequest(ctx context.Context, req Request, stream bool) (re
 		allowed, probe := scope.breaker.acquire()
 		if !allowed {
 			err := core.NewProviderError(c.config.ProviderName, http.StatusServiceUnavailable,
-				"circuit breaker is open - provider "+c.config.ProviderName+" temporarily unavailable", nil)
+				"circuit breaker is open - provider "+c.config.ProviderName+" temporarily unavailable", ErrCircuitOpen)
 			c.finishRequest(scope, http.StatusServiceUnavailable, err)
 			return requestScope{}, err
 		}

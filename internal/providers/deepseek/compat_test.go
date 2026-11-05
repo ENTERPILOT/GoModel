@@ -1,8 +1,10 @@
 package deepseek
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -41,6 +43,228 @@ func TestAdaptCompatibility_PadsEveryAssistantTurnWhenToolsPresent(t *testing.T)
 		assert.Equal(t, want[i], got, "messages[%d] (%s) reasoning_content = %q, want %q", i, message.Role, got, want[i])
 	}
 	require.Nil(t, req.Messages[1].ExtraFields.Lookup("reasoning_content"))
+}
+
+func TestAdaptCompatibility_ReplacesFilePartsWithText(t *testing.T) {
+	// DeepSeek's file input is images only, so a PDF read by a tool (Claude
+	// Code returns one this way) must become text or the whole turn fails
+	// upstream.
+	var req core.ChatRequest
+	err := json.Unmarshal([]byte(`{
+		"model":"deepseek-flash",
+		"messages":[
+			{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"Read","arguments":"{}"}}]},
+			{"role":"tool","tool_call_id":"call_1","content":[
+				{"type":"text","text":"PDF file read: card.pdf"},
+				{"type":"file","file":{"file_data":"data:application/pdf;base64,JVBERi0=","filename":"card.pdf"}}
+			]},
+			{"role":"user","content":[{"type":"file","file":{"file_id":"file-abc"}}]}
+		]
+	}`), &req)
+	require.NoError(t, err)
+
+	adapted, err := AdaptCompatibility(&req, "deepseek", JSONSchemaDowngrade)
+	require.NoError(t, err)
+
+	parts, ok := adapted.Messages[1].Content.([]core.ContentPart)
+	require.True(t, ok, "content = %T", adapted.Messages[1].Content)
+	require.Len(t, parts, 2)
+	assert.Equal(t, "text", parts[0].Type)
+	assert.Equal(t, "PDF file read: card.pdf", parts[0].Text)
+	assert.Equal(t, "text", parts[1].Type)
+	assert.Contains(t, parts[1].Text, "card.pdf")
+	assert.NotContains(t, parts[1].Text, "JVBERi0=")
+
+	// A file_id is not a URL DeepSeek can resolve from a chat request.
+	unnamed, ok := adapted.Messages[2].Content.([]core.ContentPart)
+	require.True(t, ok, "content = %T", adapted.Messages[2].Content)
+	require.Len(t, unnamed, 1)
+	assert.Equal(t, inlineFilePlaceholder, unnamed[0].Text)
+
+	// The caller's request keeps its file parts.
+	original, ok := req.Messages[1].Content.([]core.ContentPart)
+	require.True(t, ok)
+	assert.Equal(t, "file", original[1].Type)
+
+	laterOriginal, ok := req.Messages[2].Content.([]core.ContentPart)
+	require.True(t, ok, "content = %T", req.Messages[2].Content)
+	require.Len(t, laterOriginal, 1)
+	assert.Equal(t, "file", laterOriginal[0].Type)
+}
+
+func TestAdaptFileParts_SendsPlainTextDocumentsAsText(t *testing.T) {
+	// A text document's contents are available, and text is all DeepSeek
+	// would have read from the file, so the model keeps them instead of
+	// seeing a note that the file was dropped.
+	var req core.ChatRequest
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"model":"deepseek-flash",
+		"messages":[{"role":"user","content":[
+			{"type":"file","file":{"file_data":"data:text/plain;base64,SGVsbG8sIHdvcmxk","filename":"notes.txt"}},
+			{"type":"file","file":{"file_data":"data:text/markdown;base64,IyBUaXRsZQ=="}}
+		]}]
+	}`), &req))
+
+	adapted := adaptFileParts(&req, "deepseek")
+	parts, ok := adapted.Messages[0].Content.([]core.ContentPart)
+	require.True(t, ok, "content = %T", adapted.Messages[0].Content)
+	require.Len(t, parts, 2)
+
+	assert.Equal(t, "text", parts[0].Type)
+	assert.Equal(t, "notes.txt\n\nHello, world", parts[0].Text)
+
+	// Without a filename the text is sent as-is.
+	assert.Equal(t, "text", parts[1].Type)
+	assert.Equal(t, "# Title", parts[1].Text)
+}
+
+func TestAdaptFileParts_LogsDroppedAttachments(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	var req core.ChatRequest
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"model":"deepseek-v4-pro",
+		"messages":[{"role":"user","content":[
+			{"type":"file","file":{"file_data":"data:application/pdf;base64,JVBERi0=","filename":"card.pdf"}}
+		]}]
+	}`), &req))
+
+	adaptFileParts(&req, "opencode_go")
+
+	logged := logs.String()
+	assert.Contains(t, logged, "level=DEBUG")
+	assert.Contains(t, logged, "opencode_go")
+	assert.Contains(t, logged, "deepseek-v4-pro")
+	assert.Contains(t, logged, "card.pdf")
+	assert.NotContains(t, logged, "JVBERi0=", "the file contents must not be logged")
+}
+
+func TestAdaptFileParts_KeepsImagesDeepSeekCanRead(t *testing.T) {
+	// DeepSeek's vision input reads an image from an image_url part, so an
+	// image attachment must survive the adaptation rather than being
+	// replaced by a note.
+	var req core.ChatRequest
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"model":"deepseek-flash",
+		"messages":[{"role":"user","content":[
+			{"type":"text","text":"What color?"},
+			{"type":"file","file":{"file_data":"data:image/png;base64,iVBORw0KGgo=","filename":"x.png"}},
+			{"type":"file","file":{"file_url":"https://example.com/a.jpg"}},
+			{"type":"file","file":{"file_data":"data:image/svg+xml;base64,PHN2Zz4=","filename":"x.svg"}},
+			{"type":"file","file":{"file_data":"data:image/png;base64,iVBORw0KGgo=","filename":"x.png","file_id":"file-api-1"}},
+			{"type":"file","file":{"file_url":"https://example.com/report.pdf","filename":"report.pdf"}},
+			{"type":"file","file":{"file_data":"data:image/jpg;base64,/9j/4AAQ","filename":"y.jpg"}},
+			{"type":"file","file":{"file_url":"https://example.com/B.JPEG?token=1"}}
+		]}]
+	}`), &req))
+
+	adapted := adaptFileParts(&req, "deepseek")
+	parts, ok := adapted.Messages[0].Content.([]core.ContentPart)
+	require.True(t, ok, "content = %T", adapted.Messages[0].Content)
+	require.Len(t, parts, 8)
+
+	assert.Equal(t, "image_url", parts[1].Type)
+	require.NotNil(t, parts[1].ImageURL)
+	assert.Equal(t, "data:image/png;base64,iVBORw0KGgo=", parts[1].ImageURL.URL)
+
+	assert.Equal(t, "image_url", parts[2].Type)
+	require.NotNil(t, parts[2].ImageURL)
+	assert.Equal(t, "https://example.com/a.jpg", parts[2].ImageURL.URL)
+
+	// A format the vision input does not accept becomes a note.
+	assert.Equal(t, "text", parts[3].Type)
+	assert.Contains(t, parts[3].Text, "x.svg")
+
+	// Inline image data wins over a file_id, which DeepSeek cannot resolve
+	// from a chat request.
+	assert.Equal(t, "image_url", parts[4].Type)
+
+	// A URL document block is almost always a PDF, which DeepSeek would reject
+	// as an image, so a URL that does not name a supported image becomes a note.
+	assert.Equal(t, "text", parts[5].Type)
+	assert.Contains(t, parts[5].Text, "report.pdf")
+
+	// image/jpg is what clients send for JPEG images.
+	assert.Equal(t, "image_url", parts[6].Type)
+	require.NotNil(t, parts[6].ImageURL)
+	assert.Equal(t, "data:image/jpg;base64,/9j/4AAQ", parts[6].ImageURL.URL)
+
+	// The extension check is case-insensitive and ignores the query string.
+	assert.Equal(t, "image_url", parts[7].Type)
+	require.NotNil(t, parts[7].ImageURL)
+	assert.Equal(t, "https://example.com/B.JPEG?token=1", parts[7].ImageURL.URL)
+}
+
+func TestAdaptFileParts_NotesAttachmentsOutsideUserAndToolMessages(t *testing.T) {
+	// DeepSeek takes content parts only in user and tool messages, so an
+	// attachment on any other role becomes the note rather than an image_url
+	// part the upstream rejects.
+	var req core.ChatRequest
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"model":"deepseek-flash",
+		"messages":[
+			{"role":"assistant","content":[
+				{"type":"file","file":{"file_data":"data:image/png;base64,iVBORw0KGgo=","filename":"x.png"}}
+			]},
+			{"role":"system","content":[
+				{"type":"file","file":{"file_data":"data:text/plain;base64,SGVsbG8=","filename":"notes.txt"}}
+			]}
+		]
+	}`), &req))
+
+	adapted := adaptFileParts(&req, "deepseek")
+
+	assistant, ok := adapted.Messages[0].Content.([]core.ContentPart)
+	require.True(t, ok, "content = %T", adapted.Messages[0].Content)
+	require.Len(t, assistant, 1)
+	assert.Equal(t, "text", assistant[0].Type)
+	assert.Contains(t, assistant[0].Text, "x.png")
+
+	system, ok := adapted.Messages[1].Content.([]core.ContentPart)
+	require.True(t, ok, "content = %T", adapted.Messages[1].Content)
+	require.Len(t, system, 1)
+	assert.Equal(t, "text", system[0].Type)
+	assert.Contains(t, system[0].Text, "notes.txt")
+}
+
+func TestAdaptFileParts_LeavesRequestsWithoutFilesAlone(t *testing.T) {
+	var req core.ChatRequest
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"model":"deepseek-flash",
+		"messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}]
+	}`), &req))
+
+	adapted := adaptFileParts(&req, "deepseek")
+	assert.Same(t, &req, adapted)
+}
+
+func TestAdaptFileParts_AppliesToEveryDeepSeekModel(t *testing.T) {
+	// Every model is covered, including one that may accept the part without
+	// using it: a document the model silently ignores is worse than one it
+	// refuses, because the model then answers as though it read it.
+	for _, model := range []string{"deepseek-flash", "deepseek-chat", "deepseek-reasoner", "deepseek-v4-pro"} {
+		t.Run(model, func(t *testing.T) {
+			var req core.ChatRequest
+			require.NoError(t, json.Unmarshal([]byte(`{
+				"model":"`+model+`",
+				"messages":[{"role":"user","content":[
+					{"type":"file","file":{"file_data":"data:application/pdf;base64,JVBERi0=","filename":"card.pdf"}}
+				]}]
+			}`), &req))
+
+			adapted, err := AdaptCompatibility(&req, "deepseek", JSONSchemaDowngrade)
+			require.NoError(t, err)
+
+			parts, ok := adapted.Messages[0].Content.([]core.ContentPart)
+			require.True(t, ok, "content = %T", adapted.Messages[0].Content)
+			require.Len(t, parts, 1)
+			assert.Equal(t, "text", parts[0].Type)
+			assert.Contains(t, parts[0].Text, "card.pdf")
+		})
+	}
 }
 
 func TestAdaptCompatibility_JSONSchemaResponseFormat(t *testing.T) {

@@ -6,6 +6,8 @@ import (
 	"math"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/enterpilot/gomodel/egress"
 )
 
 // postgresStorage implements Storage for PostgreSQL
@@ -32,6 +34,19 @@ func NewPostgreSQL(ctx context.Context, cfg PostgreSQLConfig) (PostgreSQLStorage
 		poolCfg.MaxConns = int32(maxConns)
 	} else {
 		poolCfg.MaxConns = 10 // default
+	}
+
+	// Every connection the pool opens goes through the egress hook, so a
+	// distribution that polices outbound traffic sees the database too. pgx
+	// resolves the host before it dials, so the lookup is deferred to the
+	// hook as well: with one installed the name reaches it unresolved and
+	// the hook dials the address that passed, and without one pgx's own
+	// resolver answers. Both are decided per connection, so a hook installed
+	// after this pool was built still sees hostnames.
+	poolCfg.ConnConfig.DialFunc = egress.DialContext
+	resolve := poolCfg.ConnConfig.LookupFunc
+	poolCfg.ConnConfig.LookupFunc = func(ctx context.Context, host string) ([]string, error) {
+		return egress.Lookup(ctx, host, resolve)
 	}
 
 	// Create the connection pool

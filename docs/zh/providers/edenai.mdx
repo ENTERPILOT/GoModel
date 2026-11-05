@@ -1,0 +1,138 @@
+---
+title: "Eden AI"
+description: "在 GoModel 中配置 Eden AI 兼容 OpenAI 的多提供商 API。"
+icon: "leaf"
+keywords: ["Eden AI", "edenai", "多提供商", "兼容 OpenAI", "提供商配置", "multi-provider", "OpenAI-compatible", "provider setup"]
+---
+
+Eden AI 是一个多提供商网关，在 `https://api.edenai.run/v3` 上提供兼容 OpenAI 的 REST API。GoModel 通过共享的 OpenAI 适配器路由聊天补全、流式传输、模型列表、嵌入和透传请求，因此一个 Eden 密钥即可访问来自 OpenAI、Anthropic、Google、Mistral、Cohere、DeepInfra 等提供商的模型。
+
+## 配置
+
+在 [Eden AI 控制台](https://app.edenai.run/)中创建一个 API 密钥，然后设置：
+
+```bash
+EDENAI_API_KEY=
+```
+
+`EDENAI_BASE_URL` 为可选项，该提供商默认使用 `https://api.edenai.run/v3`。仅当需要访问其他兼容 Eden 的端点时才设置它：
+
+```bash
+EDENAI_BASE_URL=https://api.edenai.run/v3
+```
+
+<Warning>
+  请使用 `https://` 端点。GoModel 会**拒绝**发送任何目标为明文地址的 Eden 请求，因为请求体中携带的是提示词或嵌入输入，而不仅仅是 API 密钥。因此，非回环地址的 `http://` 基础 URL 会直接返回明确的错误，而不会传输任何内容。
+
+  重定向也遵循同样的标准，只有停留在您所配置主机上的重定向才会被跟随。指向 `http://` 或任何其他主机的重定向（包括子域名，否则 Go 会允许其携带 `Authorization` 请求头）都会被拒绝而不会被跟随，因此上游指定的 `Location` 无法将您的密钥或提示词转移到您未配置的地方。
+
+  允许以明文访问 `localhost`（或 `127.0.0.1`），因为这类流量永远不会进入网络，这也使本地兼容 Eden 的代理可以继续使用。如果您在其他主机上通过代理访问 Eden，请在该代理上终结 TLS，并将 `EDENAI_BASE_URL` 指向其 `https://` 地址。
+</Warning>
+
+或者在 `config.yaml` 中配置：
+
+```yaml
+providers:
+  edenai:
+    type: edenai
+    api_key: "${EDENAI_API_KEY}"
+    # base_url: "https://api.edenai.run/v3"
+```
+
+您也可以在管理控制台的 **Providers** 页面中添加凭据，而不使用环境变量。
+
+## 模型
+
+GoModel 会在启动时以及每次刷新注册表时，通过 Eden 自身的 `GET /v3/models` 发现 Eden 的模型目录。**没有内置的模型列表**：Eden 新增的模型在目录刷新后即可路由，无需升级 GoModel，也无需修改配置。
+
+模型 ID 使用 `provider/model` 格式，并原样转发：
+
+```json
+{ "model": "openai/gpt-4", "messages": [{ "role": "user", "content": "Hi" }] }
+```
+
+由于 ID 本身已经包含斜杠，当另一个已配置的提供商也提供相同的原始 ID 时，请使用提供商名称加以限定：`edenai/anthropic/claude-sonnet-latest`。GoModel 在转发之前只会去除最外层的 `edenai/` 路由限定符。
+
+也可以选择固定一个已配置的子集：
+
+```bash
+EDENAI_MODELS=openai/gpt-4,anthropic/claude-sonnet-latest
+```
+
+### 发现的元数据
+
+每个目录条目都会提供元数据，这些元数据由 `GET /v1/models` 返回，并被路由器、过滤器和成本策略使用：
+
+| Eden 字段 | GoModel 元数据 |
+| ---------- | ---------------- |
+| `context_length` | 上下文窗口 |
+| `capabilities.supports_*` | 能力，去除前缀（`reasoning`、`function_calling`、`prompt_caching` 等） |
+| `capabilities.input_modalities` | `vision` / `audio` / `video` 能力 |
+| `capabilities.output_modalities` | 模式和类别 |
+| `pricing` | 按模型定价（见下文） |
+
+输出模态也决定了 GoModel 对外公布哪些模型：唯一输出为音频或图片的模型不会出现在 `/v1/models` 中，因为此处的 Eden 仅提供聊天、嵌入和透传。实际上，Eden 的目录为每个模型都公布了文本输出（包括少数同时返回图片的模型），因此目前不会过滤掉任何模型。
+
+## 定价
+
+Eden 公布每个模型以美元计的每 Token 价格，GoModel 会将其转换为每百万 Token 的表示形式（`input_cost_per_token: 6e-8` → `$0.06 / MTok`）。
+
+价格取自 Eden 的 `pricing` 块，即账号实际被收取的价格：在未折扣的 `list_pricing` 基础上已应用账号折扣。每项价格单独解析：可用的账号价格始终优先，`list_pricing` 只补充 `pricing` 中缺失的单项价格。Eden 目前在两个块中公布的价格相同，因此实际上所有价格都从 `pricing` 解析；按单项回退的机制可以确保只有部分定价的模型不会丢失其缺少的价格，否则这些 Token 类型将按 $0 计费。
+
+Eden 报告为 `0` 的价格被视为确实免费，而不是缺失；两个块都没有可用值的价格保持未设置，而不会被凭空推算。
+
+这些价格涵盖输入、输出、缓存读取和缓存写入。Eden 按上下文长度分档的价格（`input_cost_per_token_above_200k_tokens`）、其 `tiered_pricing` 列表以及按次计费的搜索费用在 GoModel 中没有对应项，不会被读取。
+
+Eden 的推理和音频价格（`output_cost_per_reasoning_token`、`input_cost_per_audio_token`）也不会被读取。GoModel 会通过减去基础价格来为这些 Token 类型计价，这假定其计数已包含在基础总量中；而 Eden 的 usage 对象只报告 `prompt_tokens`、`completion_tokens` 和 `total_tokens`，没有可用于确认这一点的明细。因此这些 Token 类型会回退为基础的输入/输出价格。
+
+定价是从 Eden 实时读取的：没有任何硬编码，Eden 模型也无需出现在 GoModel 的中央模型目录中。这使得 `EDENAI_MODEL_FILTER_MAX_PRICE_PER_MTOK`、基于成本的负载均衡以及价格显示都能用于 Eden 模型。
+
+模型元数据中显示的就是这些发现的定价；当响应没有携带确切费用时，成本核算也会回退到这些定价。只要 Eden 返回了确切的单次请求成本，就会优先使用该成本（见下文）。
+
+## 请求成本
+
+Eden 会以顶层 `cost` 成员返回每个请求确切的美元费用（聊天补全和嵌入都是如此），GoModel 会将该数值记录为请求成本，而不是根据 Token 数重新计算。Eden 会自动对其上游重新定价并应用账号级折扣，因此它自己的数字具有权威性，这是依据价格表重新推算所做不到的。
+
+这使 Eden 的支出在用量记录、预算、成本控制台和可观测性中可见，并且用量条目会标注成本来源 `edenai_cost`。如果响应没有携带可用的成本，GoModel 会回退到上文所述的按模型发现的定价。
+
+<Note>
+  Eden 返回的 `provider` 成员（`"openai"`、`"deepinfra"`）指的是 Eden 路由到的上游。GoModel 将 `edenai` 报告为执行提供商（这是它实际调用的提供商），并在响应中以 `edenai_upstream_provider` 重新公开 Eden 的值，使客户端仍能看到是哪个上游处理了请求。
+</Note>
+
+## Responses API
+
+GoModel 通过**将请求转换为 Eden 的聊天补全端点**，为 Eden 提供 `/v1/responses`。
+
+<Warning>
+  Eden 自己的 `/v3/responses` 路由**不是** OpenAI Responses API。它接受 Eden 特有的输入（`routing`、`router_candidates`、`fallbacks`），并返回自己的响应对象，因此 GoModel 从不转发到该路由。此处对 `/v1/responses` 的支持应视为聊天补全转换，而不是原生兼容。
+</Warning>
+
+## Eden 特有的请求字段
+
+Eden 在聊天补全上接受额外的顶层字段：`routing`、`fallbacks`、`session_id`、`pre_hooks` 和 `post_hooks`。GoModel 会在聊天请求中保留未知的顶层 JSON 字段，因此这些字段会原样到达 Eden：
+
+```json
+{
+  "model": "openai/gpt-4",
+  "messages": [{ "role": "user", "content": "Hi" }],
+  "fallbacks": ["anthropic/claude-sonnet-latest"]
+}
+```
+
+## 嵌入
+
+Eden 的 `/embeddings` 路由兼容 OpenAI，并使用相同的 `provider/model` ID：
+
+```json
+{ "model": "openai/text-embedding-3-small", "input": "hello" }
+```
+
+嵌入响应携带与聊天补全相同的 Eden 扩展字段，因此 Eden 报告的确切 `cost` 同样会被记录。Eden 的 LLM 目录（`GET /v3/models`）不列出嵌入模型，因此嵌入 ID 会在没有发现元数据的情况下转发；如果希望它们出现在 `/v1/models` 中，请在 `models:` 下固定它们。
+
+## 透传
+
+`edenai` 位于默认的 `ENABLED_PASSTHROUGH_PROVIDERS` 允许列表中，因此 `/p/edenai/...` 路由无需运维人员额外启用即可使用。透传是一个通用转发器：它会使用网关自身的凭据，将您提供的任何路径原样发送给 Eden。
+
+## 不支持的接口
+
+Eden 不提供文件、批处理和音频接口。发往这些网关端点的请求不会路由到该提供商。

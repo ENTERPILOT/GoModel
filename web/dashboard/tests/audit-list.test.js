@@ -37,12 +37,16 @@ import {
   auditSessionCount,
   auditSessionId,
   auditTabKeydownTarget,
+  AUDIT_SEARCH_FIELDS,
+  auditSearchField,
   buildAuditLogQuery,
   buildAuditSessionQuery,
   pruneThreadMap,
   toggleExpandedThread,
+  auditOutputTokensPerSecond,
   formatDurationNs,
   formatJSON,
+  formatTokensPerSecond,
   toggleExpandedEntry,
   mergeAuditThreadChildren,
   pruneExpandedEntries,
@@ -290,6 +294,52 @@ test("formatDurationNs rejects non-finite values", () => {
   assert.equal(formatDurationNs(1230000000), "1.23 s");
 });
 
+test("auditOutputTokensPerSecond divides output tokens by total duration", () => {
+  const entry = (fields) => ({
+    path: "/v1/chat/completions",
+    duration_ns: 2000000000,
+    usage: { output_tokens: 84 },
+    ...fields,
+  });
+  const cases = [
+    { name: "chat", entry: entry({}), want: 42 },
+    { name: "responses", entry: entry({ path: "/v1/responses" }), want: 42 },
+    { name: "anthropic messages", entry: entry({ path: "/v1/messages" }), want: 42 },
+    { name: "passthrough", entry: entry({ path: "/p/openai/chat/completions" }), want: 42 },
+    { name: "passthrough v1 alias", entry: entry({ path: "/p/openai/v1/responses" }), want: 42 },
+    { name: "passthrough messages", entry: entry({ path: "/p/anthropic/messages?beta=true" }), want: 42 },
+    { name: "passthrough images", entry: entry({ path: "/p/openai/images/generations" }), want: null },
+    { name: "passthrough unknown", entry: entry({ path: "/p/openai/models" }), want: null },
+    { name: "exact cache hit", entry: entry({ cache_type: "exact" }), want: null },
+    { name: "semantic cache hit", entry: entry({ cache_type: "Semantic" }), want: null },
+    { name: "string fields", entry: entry({ duration_ns: "500000000", usage: { output_tokens: "10" } }), want: 20 },
+    { name: "embeddings", entry: entry({ path: "/v1/embeddings" }), want: null },
+    { name: "images", entry: entry({ path: "/v1/images/generations" }), want: null },
+    { name: "unknown path", entry: entry({ path: "/admin/x" }), want: null },
+    { name: "no usage", entry: entry({ usage: undefined }), want: null },
+    { name: "zero output tokens", entry: entry({ usage: { output_tokens: 0 } }), want: null },
+    { name: "pending duration", entry: entry({ duration_ns: 0 }), want: null },
+    { name: "missing duration", entry: entry({ duration_ns: undefined }), want: null },
+    { name: "null entry", entry: null, want: null },
+  ];
+  for (const c of cases) {
+    assert.equal(auditOutputTokensPerSecond(c.entry), c.want, c.name);
+  }
+});
+
+test("formatTokensPerSecond keeps one decimal below 100", () => {
+  assert.equal(formatTokensPerSecond(42.06), "42.1 tok/s");
+  assert.equal(formatTokensPerSecond(7), "7.0 tok/s");
+  assert.equal(formatTokensPerSecond(99.96), "100 tok/s");
+  assert.equal(formatTokensPerSecond(123.6), "124 tok/s");
+  assert.equal(formatTokensPerSecond(1234.4), "1,234 tok/s");
+  assert.equal(formatTokensPerSecond(1 / 30), "<0.1 tok/s");
+  assert.equal(formatTokensPerSecond(0.05), "0.1 tok/s");
+  assert.equal(formatTokensPerSecond(null), "");
+  assert.equal(formatTokensPerSecond(0), "");
+  assert.equal(formatTokensPerSecond(Number.NaN), "");
+});
+
 test("auditResponsePane surfaces error message from captured error body", () => {
   const entry = {
     data: {
@@ -474,6 +524,50 @@ test("buildAuditLogQuery sends the consolidated audit search and select filters 
   assert.match(qs, /status_code=500/);
   assert.match(qs, /stream=true/);
   assert.doesNotMatch(qs, /[?&](model|provider|path|user_path)=/);
+});
+
+test("buildAuditLogQuery sends a field search to that field's indexed parameter", () => {
+  const cases = [
+    ["", "search=team%2Falpha"],
+    ["user_path", "user_path_prefix=team%2Falpha"],
+    ["model", "model_prefix=team%2Falpha"],
+    ["request_id", "request_id=team%2Falpha"],
+    ["session_id", "session_id=team%2Falpha"],
+    ["provider", "provider=team%2Falpha"],
+    ["error_type", "error_type=team%2Falpha"],
+    ["unknown", "search=team%2Falpha"],
+  ];
+  for (const [searchField, expected] of cases) {
+    const qs = buildAuditLogQuery({
+      dateQuery: "days=30",
+      limit: 25,
+      offset: 0,
+      search: "  team/alpha ",
+      searchField,
+    });
+    assert.equal(qs, "days=30&limit=25&offset=0&" + expected, searchField);
+  }
+});
+
+test("buildAuditLogQuery skips a blank field search", () => {
+  const qs = buildAuditLogQuery({
+    dateQuery: "days=30",
+    limit: 25,
+    offset: 0,
+    search: "   ",
+    searchField: "user_path",
+  });
+  assert.equal(qs, "days=30&limit=25&offset=0");
+});
+
+test("audit search fields default to all fields and have labels", () => {
+  assert.equal(AUDIT_SEARCH_FIELDS[0].key, "");
+  assert.equal(auditSearchField(undefined).param, "search");
+  assert.equal(auditSearchField("model").param, "model_prefix");
+  for (const field of AUDIT_SEARCH_FIELDS) {
+    assert.ok(field.label(), field.key);
+    assert.ok(field.placeholder(), field.key);
+  }
 });
 
 test("buildAuditLogQuery omits unset filters", () => {
@@ -902,6 +996,8 @@ test("auditLogFromSessions maps thread summaries into head entries", () => {
   assert.equal(mapped.entries[1].session_count, 1);
   assert.equal(mapped.total, 12);
   assert.equal(mapped.offset, 25);
+  assert.equal(mapped.as_of, undefined);
+  assert.equal(auditLogFromSessions({ ...payload, as_of: 1700 }).as_of, 1700, "as_of is kept");
 });
 
 test("mergeAuditThreadChildren drops heads by id and request_id", () => {

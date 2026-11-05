@@ -129,10 +129,12 @@ func TestServeGeneration_StopsWaitingWhenShutdownTimesOut(t *testing.T) {
 
 // The drain window and the shutdown budget live in different packages, so the
 // comment tying them together is only as good as this check: the budget has to
-// cover the drain plus the usage and audit flushes that follow it.
+// cover the quiesce that precedes the drain, the drain, and the usage and audit
+// flushes that follow it.
 func TestGracefulDrainFitsInsideTheShutdownBudget(t *testing.T) {
-	require.Less(t, server.GracefulDrainTimeout, shutdownTimeout)
-	headroom := shutdownTimeout - server.GracefulDrainTimeout
+	stopping := server.QuiesceTimeout + server.GracefulDrainTimeout
+	require.Less(t, stopping, shutdownTimeout)
+	headroom := shutdownTimeout - stopping
 	require.GreaterOrEqual(t, headroom, 5*time.Second)
 }
 

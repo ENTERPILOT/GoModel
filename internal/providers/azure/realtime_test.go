@@ -2,6 +2,7 @@ package azure
 
 import (
 	"context"
+	"net/http"
 	"net/url"
 	"testing"
 
@@ -37,17 +38,42 @@ func TestRealtimeTarget(t *testing.T) {
 
 func TestRealtimeTargetStripsExistingOpenAIPath(t *testing.T) {
 	// A base already rooted at /openai must not yield /openai/openai/realtime.
-	for _, base := range []string{
-		"https://myres.openai.azure.com/openai",
-		"https://myres.openai.azure.com/openai/v1",
-	} {
-		p := New(providers.ProviderConfig{APIKey: "k", BaseURL: base}, providers.ProviderOptions{}).(*Provider)
-		target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "m"})
-		require.NoError(t, err)
+	p := New(providers.ProviderConfig{APIKey: "k", BaseURL: "https://myres.openai.azure.com/openai"}, providers.ProviderOptions{}).(*Provider)
+	target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "m"})
+	require.NoError(t, err)
 
-		u, err := url.Parse(target.URL)
-		require.NoError(t, err, "base %q", base)
-		assert.Equal(t, "/openai/realtime", u.Path, "base %q", base)
+	u, err := url.Parse(target.URL)
+	require.NoError(t, err)
+	assert.Equal(t, "/openai/realtime", u.Path)
+}
+
+func TestRealtimeTargetUsesGASurfaceForV1BaseURL(t *testing.T) {
+	tests := []struct {
+		name        string
+		baseURL     string
+		apiVersion  string
+		wantVersion string
+	}{
+		{name: "foundry", baseURL: "https://proj1-resource.services.ai.azure.com/openai/v1"},
+		{name: "trailing slash", baseURL: "https://myres.openai.azure.com/openai/v1/"},
+		{name: "configured version", baseURL: "https://myres.openai.azure.com/openai/v1", apiVersion: "preview", wantVersion: "preview"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := New(providers.ProviderConfig{APIKey: "k", BaseURL: tt.baseURL, APIVersion: tt.apiVersion}, providers.ProviderOptions{}).(*Provider)
+			target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-realtime"})
+			require.NoError(t, err)
+
+			u, err := url.Parse(target.URL)
+			require.NoError(t, err)
+			assert.Equal(t, "wss", u.Scheme)
+			assert.Equal(t, "/openai/v1/realtime", u.Path)
+			assert.Equal(t, "gpt-realtime", u.Query().Get("model"))
+			assert.False(t, u.Query().Has("deployment"))
+			assert.Equal(t, tt.wantVersion, u.Query().Get("api-version"))
+			assert.Equal(t, tt.wantVersion != "", u.Query().Has("api-version"))
+			assert.Equal(t, "k", target.Headers.Get("api-key"))
+		})
 	}
 }
 
@@ -126,4 +152,16 @@ func TestRealtimeTargetAttachesByCallID(t *testing.T) {
 	// The GA attach surface takes neither api-version nor deployment.
 	assert.False(t, u.Query().Has("api-version"))
 	assert.False(t, u.Query().Has("deployment"), "query = %q, want only call_id", u.RawQuery)
+}
+
+// The websocket dial must go through the provider's own client so its
+// proxy_url, an extension's proxy selection, and the TLS trust apply.
+func TestRealtimeTargetCarriesProviderHTTPClient(t *testing.T) {
+	client := &http.Client{}
+	p := New(providers.ProviderConfig{APIKey: "k", BaseURL: "https://myres.openai.azure.com", APIVersion: "2025-04-01-preview"}, providers.ProviderOptions{HTTPClient: client})
+	rp, ok := p.(core.RealtimeProvider)
+	require.True(t, ok)
+	target, err := rp.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-realtime"})
+	require.NoError(t, err)
+	assert.Same(t, client, target.HTTPClient)
 }

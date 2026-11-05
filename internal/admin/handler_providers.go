@@ -142,7 +142,9 @@ func buildProviderStatusItem(name string, cfg providers.SanitizedProviderConfig,
 
 	// For the response row, fill in display fallbacks from the peer side.
 	if strings.TrimSpace(cfg.Name) == "" {
-		cfg = providers.SanitizedProviderConfig{Name: name, Type: strings.TrimSpace(runtime.Type)}
+		// Billable is true by default; a synthesised zero value would label
+		// the row non-billable.
+		cfg = providers.SanitizedProviderConfig{Name: name, Type: strings.TrimSpace(runtime.Type), Billable: true}
 	}
 	if strings.TrimSpace(runtime.Name) == "" {
 		runtime = providers.ProviderRuntimeSnapshot{Name: name, Type: strings.TrimSpace(cfg.Type)}
@@ -193,12 +195,12 @@ func applyRequestHealth(status, label, reason, lastError string, rh *health.Prov
 	case "open":
 		if status != "unhealthy" {
 			status, label = "unhealthy", "Circuit Open"
-			reason = "circuit breaker is open; recent requests to this provider failed and traffic is paused"
+			reason = "circuit breaker is open; traffic is paused"
 		}
 	case "half-open":
 		if status == "healthy" {
 			status, label = "degraded", "Recovering"
-			reason = "circuit breaker is half-open; probing whether the provider has recovered"
+			reason = "circuit breaker is half-open; probing recovery"
 		}
 	}
 	if len(flagged) > 0 && status == "healthy" {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/providers/workloadidentity"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,10 +24,12 @@ var globalResilience = config.ResilienceConfig{Retry: globalRetry}
 
 var testDiscoveryConfigs = map[string]DiscoveryConfig{
 	"openai": {
-		DefaultBaseURL: "https://api.openai.com/v1",
+		DefaultBaseURL:   "https://api.openai.com/v1",
+		WorkloadIdentity: workloadidentity.TokenExchange,
 	},
 	"anthropic": {
-		DefaultBaseURL: "https://api.anthropic.com/v1",
+		DefaultBaseURL:   "https://api.anthropic.com/v1",
+		WorkloadIdentity: workloadidentity.JWTBearer,
 	},
 	"cohere": {
 		DefaultBaseURL: "https://api.cohere.com",
@@ -40,6 +43,12 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 	},
 	"chutes": {
 		DefaultBaseURL: "https://llm.chutes.ai/v1",
+	},
+	"together": {
+		DefaultBaseURL: "https://api.together.ai/v1",
+	},
+	"deepinfra": {
+		DefaultBaseURL: "https://api.deepinfra.com/v1/openai",
 	},
 	"xai": {
 		DefaultBaseURL: "https://api.x.ai/v1",
@@ -86,7 +95,7 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 		AllowAPIKeyless: true,
 	},
 	"kimicode": {
-		DefaultBaseURL: "https://api.kimi.com/coding/v1",
+		DefaultBaseURL: "https://api.kimi.ai/coding/v1",
 	},
 	"hetzner": {
 		DefaultBaseURL: "https://inference.hetzner.com/api/v1",
@@ -148,6 +157,15 @@ func TestBuildProviderConfig_CanDisableSessionStickyKeys(t *testing.T) {
 		SessionStickyKeys: &disabled,
 	}, globalResilience)
 	assert.False(t, got.SessionStickyKeys)
+}
+
+func TestBuildProviderConfig_BillableDefaultsToTrue(t *testing.T) {
+	got := buildProviderConfig(config.RawProviderConfig{Type: "openai", APIKey: "sk-test"}, globalResilience)
+	assert.True(t, got.Billable)
+
+	nonBillable := false
+	got = buildProviderConfig(config.RawProviderConfig{Type: "openai", APIKey: "sk-test", Billable: &nonBillable}, globalResilience)
+	assert.False(t, got.Billable)
 }
 
 func TestBuildProviderConfig_NilResilience(t *testing.T) {
@@ -558,6 +576,78 @@ func TestApplyProviderEnvVars_SessionStickyKeys(t *testing.T) {
 	}
 }
 
+func TestApplyProviderEnvVars_Billable(t *testing.T) {
+	nonBillable := false
+	tests := []struct {
+		name     string
+		env      map[string]string
+		raw      map[string]config.RawProviderConfig
+		provider string
+		want     bool
+		wantNil  bool
+	}{
+		{
+			name:     "unsuffixed false",
+			env:      map[string]string{"OPENAI_API_KEY": "sk-primary", "OPENAI_BILLABLE": "false"},
+			provider: "openai",
+		},
+		{
+			name:     "suffixed true",
+			env:      map[string]string{"OPENAI_BYOK_API_KEY": "sk-byok", "OPENAI_BYOK_BILLABLE": "true"},
+			provider: "openai-byok",
+			want:     true,
+		},
+		{
+			name:     "environment overrides yaml",
+			env:      map[string]string{"OPENAI_API_KEY": "sk-env", "OPENAI_BILLABLE": "true"},
+			raw:      map[string]config.RawProviderConfig{"openai": {Type: "openai", APIKey: "sk-yaml", Billable: &nonBillable}},
+			provider: "openai",
+			want:     true,
+		},
+		{
+			name:     "unset keeps default unspecified",
+			env:      map[string]string{"OPENAI_API_KEY": "sk-env"},
+			provider: "openai",
+			wantNil:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for key, value := range tt.env {
+				t.Setenv(key, value)
+			}
+			got, _ := applyEnv(t, tt.raw)
+			billable := got[tt.provider].Billable
+			if tt.wantNil {
+				require.Nil(t, billable)
+				return
+			}
+			require.NotNil(t, billable)
+			require.Equal(t, tt.want, *billable)
+		})
+	}
+}
+
+// A malformed BILLABLE must fail loading rather than fall back to billable:
+// a typo would otherwise charge a customer for their own key.
+func TestApplyProviderEnvVars_BillableRejectsMalformedValue(t *testing.T) {
+	nonBillable := false
+	t.Setenv("OPENAI_API_KEY", "sk-env")
+	t.Setenv("OPENAI_BILLABLE", "maybe")
+
+	raw := map[string]config.RawProviderConfig{"openai": {Type: "openai", APIKey: "sk-yaml", Billable: &nonBillable}}
+	_, _, err := applyProviderEnvVars(t.Context(), nil, raw, testDiscoveryConfigs, os.Environ())
+	require.ErrorContains(t, err, "OPENAI_BILLABLE: value is not a boolean")
+	require.NotContains(t, err.Error(), "maybe", "the value may be a resolved secret")
+
+	// The same when it is the provider's only variable: the group must not be
+	// dropped as empty before the value is checked.
+	t.Setenv("OPENAI_API_KEY", "")
+	_, _, err = applyProviderEnvVars(t.Context(), nil, raw, testDiscoveryConfigs, os.Environ())
+	require.ErrorContains(t, err, "OPENAI_BILLABLE: value is not a boolean")
+}
+
 func TestApplyProviderEnvVars_DiscoversFromBaseURL(t *testing.T) {
 	t.Setenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
 
@@ -595,6 +685,8 @@ func TestApplyProviderEnvVars_DiscoversTypeFromAPIKeyWithDefaultBaseURL(t *testi
 		{providerType: "kilo", envVar: "KILO_API_KEY", apiKey: "kilo-key"},
 		{providerType: "deepseek", envVar: "DEEPSEEK_API_KEY", apiKey: "deepseek-key"},
 		{providerType: "chutes", envVar: "CHUTES_API_KEY", apiKey: "cpk_test"},
+		{providerType: "deepinfra", envVar: "DEEPINFRA_API_KEY", apiKey: "deepinfra-key"},
+		{providerType: "together", envVar: "TOGETHER_API_KEY", apiKey: "together-key"},
 		{providerType: "zai", envVar: "ZAI_API_KEY", apiKey: "zai-key"},
 	}
 
@@ -808,6 +900,7 @@ func TestApplyProviderEnvVars_DiscoversSGLang(t *testing.T) {
 		name        string
 		apiKey      string
 		baseURL     string
+		apiMode     string
 		wantAPIKey  string
 		wantBaseURL string
 	}{
@@ -822,6 +915,12 @@ func TestApplyProviderEnvVars_DiscoversSGLang(t *testing.T) {
 			wantAPIKey:  "sglang-key",
 			wantBaseURL: testDiscoveryConfigs["sglang"].DefaultBaseURL,
 		},
+		{
+			name:        "API mode",
+			baseURL:     "http://localhost:30000/v1",
+			apiMode:     "chat_compatible",
+			wantBaseURL: "http://localhost:30000/v1",
+		},
 	}
 
 	for _, tt := range tests {
@@ -830,6 +929,7 @@ func TestApplyProviderEnvVars_DiscoversSGLang(t *testing.T) {
 			// between the keyless and authenticated discovery cases.
 			t.Setenv("SGLANG_API_KEY", tt.apiKey)
 			t.Setenv("SGLANG_BASE_URL", tt.baseURL)
+			t.Setenv("SGLANG_API_MODE", tt.apiMode)
 
 			got, _ := applyEnv(t, map[string]config.RawProviderConfig{})
 			p, exists := got["sglang"]
@@ -837,6 +937,7 @@ func TestApplyProviderEnvVars_DiscoversSGLang(t *testing.T) {
 			require.Equal(t, "sglang", p.Type)
 			require.Equal(t, tt.wantAPIKey, p.APIKey)
 			require.Equal(t, tt.wantBaseURL, p.BaseURL, "sglang config = %+v, want api_key=%q base_url=%q", p, tt.wantAPIKey, tt.wantBaseURL)
+			require.Equal(t, tt.apiMode, p.APIMode)
 		})
 	}
 }

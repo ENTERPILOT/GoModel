@@ -1,0 +1,290 @@
+---
+title: "config.yaml"
+description: "Kiedy używać config.yaml, kiedy nie, i jak współdziała ze zmiennymi środowiskowymi oraz Dockerem."
+icon: "file-cog"
+keywords: ["config.yaml", "YAML configuration", "konfiguracja YAML", "Docker", "environment variables", "zmienne środowiskowe"]
+---
+
+Celem GoModel jest to, by `config.yaml` był w jak największym stopniu
+opcjonalny. W zwykłych wdrożeniach, CI, kontenerach i przy wstrzykiwaniu
+sekretów preferuj zmienne środowiskowe.
+
+Używaj `config.yaml`, gdy potrzebujesz struktury, której zmienne środowiskowe
+nie wyrażą w czytelny sposób, zwłaszcza:
+
+- nadpisań ustawień odporności na awarie dla poszczególnych providerów
+- własnych nazw instancji providerów, które nie pasują do generowanego
+  nazewnictwa zmiennych `<provider-type>-<suffix>`
+- bogatszych, łatwych do przeglądu list modeli providerów, zwłaszcza w trybie
+  allowlist
+- łatwych do przeglądu limitów budżetów według `user_path`
+- większej zagnieżdżonej konfiguracji, którą łatwiej przejrzeć w jednym pliku
+
+Dla wielu instancji providerów zmienne środowiskowe obsługują
+`<PROVIDER>_<SUFFIX>_API_KEY`, `<PROVIDER>_<SUFFIX>_BASE_URL` i
+`<PROVIDER>_<SUFFIX>_MODELS`. Sufiks staje się nazwą providera z myślnikiem:
+`OPENAI_EAST_API_KEY` rejestruje `openai-east`, a
+`OLLAMA_A_BASE_URL` rejestruje `ollama-a`. Azure obsługuje też
+`<PROVIDER>_<SUFFIX>_API_VERSION`.
+
+Google Vertex AI stosuje tę samą regułę zamiany sufiksu na nazwę
+(`VERTEX_US_PROJECT` rejestruje `vertex-us`). Projekt, lokalizacja i pozostałe
+ustawienia Vertex muszą używać tego samego sufiksu dla każdej instancji: na
+przykład łącz `VERTEX_US_PROJECT` z `VERTEX_US_LOCATION`, a nie z ogólnymi
+`VERTEX_PROJECT` czy `VERTEX_LOCATION`. `VERTEX_AUTH_TYPE` domyślnie ma
+wartość `gcp_adc`.
+
+Listy modeli skonfigurowanych providerów mogą pozostać w zmiennych
+środowiskowych w postaci `<PROVIDER>_MODELS`, na przykład `OPENROUTER_MODELS`,
+`ORACLE_MODELS`, `AZURE_MODELS`, `SGLANG_MODELS`, `VLLM_MODELS` lub
+`LLMD_MODELS`. Instancje llm-d przyjmują też ustawienia z sufiksem
+`LLMD_<SUFFIX>_INFERENCE_OBJECTIVE` i
+`LLMD_<SUFFIX>_FAIRNESS_FROM_USER_PATH`.
+Ustaw `CONFIGURED_PROVIDER_MODELS_MODE=fallback` (domyślnie), aby używać tych
+list tylko wtedy, gdy upstream `/models` zawiedzie lub zwróci pustą listę,
+`allowlist`, aby udostępniać wyłącznie skonfigurowane modele dla providerów,
+które definiują listę, i pomijać ich wywołania upstream `/models`, albo
+`merge`, aby dodawać skonfigurowane modele do wykrytego zestawu – przydatne dla
+modeli, które provider obsługuje, ale nie umieszcza na liście `/models`.
+
+## Filtrowanie modeli providera
+
+`model_filter` zawęża zestaw modeli providera do tych, do których faktycznie
+chcesz kierować requesty. Używaj go, gdy katalog providera jest znacznie
+większy niż to, co chcesz udostępnić – na przykład gdy korzystasz z darmowego
+planu OpenRoutera do eksperymentów, a ruch produkcyjny obsługuje osobny
+provider.
+
+```yaml
+providers:
+  openrouter:
+    type: openrouter
+    api_key: "${OPENROUTER_API_KEY}"
+    model_filter:
+      include: ["*:free"]
+      exclude: ["*-preview:free"]
+      max_price_per_mtok: 0
+```
+
+| Pole | Wartość domyślna | Zachowanie |
+| --- | --- | --- |
+| `include` | puste (zachowaj wszystkie) | Zachowuje tylko modele pasujące do co najmniej jednego wzorca. |
+| `exclude` | puste | Usuwa modele pasujące do dowolnego wzorca. Stosowane po `include`. |
+| `max_price_per_mtok` | nieustawione (brak limitu) | Usuwa modele, których najwyższa stawka za milion tokenów – większa ze stawek za wejście i wyjście – przekracza limit. |
+
+Wzorce to globy dopasowywane bez rozróżniania wielkości liter do surowego ID
+modelu providera. `*` dopasowuje dowolny ciąg znaków **łącznie z `/`**, więc
+`*:free` dopasowuje `deepseek/deepseek-r1:free`; `?` dopasowuje dokładnie jeden
+znak.
+
+Model bez znanej ceny jest usuwany, gdy ustawiono `max_price_per_mtok`: limit
+ceny, który przepuszcza modele o nieznanej cenie, nie jest limitem. Ceny
+pochodzą z rejestru modeli i z tego, co raportuje sam provider – OpenRouter
+publikuje własne stawki, więc jego katalog (łącznie z wariantami `:free`) ma
+ceny bez dodatkowej konfiguracji. Lokalni providerzy zwykle w ogóle nie
+raportują cen, więc filtruj ich modele według wzorca, a nie ceny.
+
+`max_price_per_mtok` musi być skończoną liczbą równą 0 lub większą. Ujemny,
+`NaN` lub nieskończony limit powoduje błąd uruchamiania, zamiast po cichu
+odrzucać wszystkie modele lub wyłączać limit; tak samo jest z wartością w
+zmiennej środowiskowej, która w ogóle nie jest liczbą – mechanizm kontroli
+kosztów, który operator uważa za aktywny, nigdy nie może po cichu nie działać.
+
+Filtrowanie dotyczy końcowego zestawu modeli, po rozwiązaniu
+`configured_provider_models_mode`, więc zawęża także modele dodane przez
+`models`. Odfiltrowane modele całkowicie znikają z katalogu routowalnych
+modeli: nie ma ich w `GET /v1/models`, a requesty do nich zwracają
+„model not found”.
+
+Filtrowanie to widok na to, co obsługuje provider, a nie usuwanie. Gateway
+trzyma niefiltrowany zestaw modeli w pamięci i w swoim cache’u modeli, więc
+poluzowanie filtra – albo model, który staniaje na tyle, by zmieścić się w
+limicie – przywraca go przy następnym odświeżeniu metadanych, bez czekania na
+udane wywołanie upstream `/models`.
+
+Te same filtry są dostępne dla poszczególnych providerów w zmiennych
+środowiskowych:
+
+```bash
+OPENROUTER_MODEL_FILTER_INCLUDE="*:free"
+OPENROUTER_MODEL_FILTER_EXCLUDE="*-preview:free"
+OPENROUTER_MODEL_FILTER_MAX_PRICE_PER_MTOK=0
+```
+
+Każda reguła nakłada się niezależnie, więc limit ceny ze zmiennej
+środowiskowej zawęża filtr wzorców z YAML bez powtarzania wzorców. Instancje z
+sufiksem stosują tę samą regułę co inne zmienne środowiskowe providerów:
+`OPENROUTER_EU_MODEL_FILTER_INCLUDE` konfiguruje `openrouter-eu`.
+
+## Kolejność priorytetów
+
+Efektywne pierwszeństwo:
+
+1. zmienne środowiskowe
+2. opcjonalny `config/config.yaml` lub `config.yaml`
+3. wbudowane wartości domyślne z kodu
+
+`.env` nie jest osobną warstwą priorytetu. To tylko wygodny sposób na
+załadowanie zmiennych środowiskowych przed uruchomieniem.
+
+Każda warstwa jest nakładana na poprzednią, więc provider zadeklarowany w
+`config.yaml` i nadpisany zmiennymi środowiskowymi nadal liczy się jako
+pochodzący z pliku.
+
+## Walidacja przy uruchamianiu
+
+Konfiguracja deklaratywna jest parsowana ściśle: nieznany klucz to błąd
+uruchamiania, a nie coś po cichu ignorowanego. Wyłapuje to literówki (`prot:`
+zamiast `port:`) i, co ważniejsze, sekcje ze złymi wcięciami – zobacz pułapkę
+poniżej.
+
+Dotyczy to `config.yaml` oraz zmiennych środowiskowych, które deklarują te same
+struktury jako JSON: `VIRTUAL_MODELS`, `SET_RATE_LIMIT_*` i `SET_BUDGET_*`.
+Ponieważ wpisy ze zmiennych środowiskowych nadpisują wpisy z YAML, literówka w
+jednym z nich w przeciwnym razie po cichu wygrałaby z poprawnym wpisem w YAML.
+
+Tryb ścisły jest domyślny, ponieważ pominięty wpis `providers`, `rate_limits`,
+`budgets` lub `guardrails` po cichu zmienia routing, koszty lub
+bezpieczeństwo – limit kosztów, który nigdy nie obowiązuje, wygląda dokładnie
+tak samo jak taki, który obowiązuje.
+
+Ustaw `CONFIG_STRICT=false`, aby zamienić nieznane klucze na ostrzeżenia i
+uruchomić się bez nich. Służy to do wycofania binarki przy nowszym pliku
+konfiguracyjnym, a nie do codziennego użytku:
+
+```text
+WARN  unknown config key ignored; it has no effect path=config.yaml line=23 field=uranium-geryon-9b
+INFO  providers resolved total=1 from_config_file=0 from_env=1
+```
+
+`CONFIG_STRICT` rozluźnia to, które *klucze* są akceptowane, ale nigdy to, czy
+*wartość* ma sens. Nieprawidłowa wartość (`port: [9999, 8080]`) przerywa
+uruchamianie w obu trybach. Nadal obowiązuje też walidacja na poziomie
+encji: model wirtualny, którego target wskazuje nieistniejącego providera,
+powoduje błąd uruchamiania nawet wtedy, gdy klucz, który zadeklarowałby tego
+providera, został zignorowany z ostrzeżeniem.
+
+Aby potwierdzić, z której warstwy pochodzą Twoi providerzy, GoModel loguje przy
+starcie jedną linię:
+
+```json
+{"msg":"providers resolved","total":5,"from_config_file":4,"from_env":1,
+ "config_file_providers":["plutonium-qwen-dflash","uranium-gemma-embedding"],
+ "env_providers":["opencode-go"]}
+```
+
+`from_config_file: 0` przy załadowanym pliku oznacza, że plik nie dostarczył
+żadnych providerów. GoModel loguje też `config file loaded` z rozwiązaną
+ścieżką albo `no config file found` ze ścieżkami, które przeszukał.
+
+## Aktualny schemat
+
+Aktualne źródło prawdy znajduje się w głównym repozytorium:
+
+- [config/config.go](https://github.com/ENTERPILOT/GoModel/blob/main/config/config.go)
+- [config/config.example.yaml](https://github.com/ENTERPILOT/GoModel/blob/main/config/config.example.yaml)
+
+Dla wdrożeń zamontowanych poniżej katalogu głównego domeny ustaw
+`server.base_path` lub `BASE_PATH`. Na przykład `BASE_PATH=/g` serwuje gateway
+pod `/g/v1/...`, `/g/admin/...` i `/g/health`.
+
+Aby zmienić przychodzący nagłówek ścieżki użytkownika, ustaw
+`server.user_path_header` lub `USER_PATH_HEADER`. Wartość domyślna to nadal
+`X-GoModel-User-Path`.
+
+Zmiany w tym pliku stosujesz w działającym gatewayu poleceniem
+`gomodel --reload`, które ponownie odczytuje plik i środowisko oraz przebudowuje
+gateway w miejscu – zobacz [Operacje CLI](/pl/advanced/cli#przeładowanie-konfiguracji).
+Jeśli nowego pliku nie da się załadować, nic się nie zmienia. Wyjątkami są
+`server.port` i `server.pid_file`: oba są stałe przez cały czas życia procesu,
+więc przeładowanie loguje ostrzeżenie i zachowuje bieżące wartości do restartu
+gatewaya.
+
+## Docker
+
+GoModel najpierw odczytuje `config/config.yaml`, a potem `config.yaml`.
+
+Przy `docker run` możesz trzymać na hoście plik o nazwie `config.yml` i
+zamontować go pod ścieżką w kontenerze, której oczekuje GoModel:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -v "$PWD/config.yml:/app/config/config.yaml:ro" \
+  enterpilot/gomodel:latest
+```
+
+Z Docker Compose:
+
+```yaml
+services:
+  gomodel:
+    image: enterpilot/gomodel:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.yml:/app/config/config.yaml:ro
+```
+
+<Tip>
+  Jeśli zarówno zmienne środowiskowe, jak i YAML definiują to samo ustawienie,
+  wygrywa zmienna środowiskowa.
+</Tip>
+
+Jeśli zamontowana ścieżka istnieje, ale nie da się jej odczytać – najczęściej
+gdy w miejscu oczekiwanego pliku zamontowano katalog – uruchamianie kończy się
+błędem, zamiast po cichu wrócić do wartości domyślnych.
+
+## Pułapki
+
+### Nierozwiązane placeholdery `${VAR}` usuwają providera
+
+Jeśli `${OPENAI_API_KEY}` występuje w YAML, ale zmienna środowiskowa nie jest
+faktycznie ustawiona, wartością klucza API staje się dosłowny string
+`${OPENAI_API_KEY}`. Filtr danych uwierzytelniających wykrywa podciąg `${` i
+całkowicie usuwa providera. Dotyczy to też sytuacji, gdy `${VAR}` występuje w
+środku wartości, np. `prefix-${OPENAI_API_KEY}`. Zawsze sprawdzaj, czy zmienne
+środowiskowe są wyeksportowane przed uruchomieniem procesu, albo podaj wartość
+domyślną: `${OPENAI_API_KEY:-}`. Aby zamiast tego zatrzymać uruchamianie, użyj
+ścisłej [referencji do sekretu](/pl/advanced/secret-references)
+`${env:OPENAI_API_KEY}`.
+
+### Sekcja `providers:` ze złym wcięciem jest odrzucana
+
+YAML odczytuje to jako pustą sekcję `providers:` i dwa niezwiązane klucze
+najwyższego poziomu, a nie jako dwóch providerów:
+
+```yaml
+providers:
+uranium-geryon-9b:          # brak wcięcia pod providers:
+  type: vllm
+  base_url: "http://uranium-geryon-9b:8000/v1"
+uranium-gemma-embedding:    # tak samo
+  type: vllm
+  base_url: "http://uranium-gemma-embedding:8000/v1"
+```
+
+Ścisłe parsowanie odrzuca to przy uruchamianiu, wskazując każdą błędną linię:
+
+```text
+failed to parse config.yaml: line 2: field uranium-geryon-9b not found; line 5: field uranium-gemma-embedding not found
+```
+
+Wcinaj wpisy providerów o dwie spacje pod `providers:`. Przed wprowadzeniem
+ścisłego parsowania taki plik uruchamiał się z zerem providerów z YAML i bez
+błędu. Z `CONFIG_STRICT=false` uruchamia się z zerem providerów z YAML i
+jednym ostrzeżeniem na każdy klucz bez wcięcia.
+
+### Odporność na awarie per provider można ustawić tylko w YAML
+
+Mechanizm nadpisywania przez zmienne środowiskowe pomija pola typu `map`.
+`RETRY_MAX_RETRIES` zmienia globalną wartość domyślną dla wszystkich
+providerów, ale nie może dotyczyć pojedynczego providera. Strojenie per
+provider wymaga bloku `providers.<name>.resilience:` w `config.yaml`.
+
+### Częściowy YAML pozostawia resztę z wartościami domyślnymi
+
+YAML jest deserializowany do struktury, która została już wypełniona
+wbudowanymi wartościami domyślnymi. Zapisywane są tylko pola występujące w
+pliku. Pominięcie `max_backoff` w `resilience.retry` pozostawia jego wbudowaną
+wartość domyślną; nie musisz powtarzać wartości domyślnych, które Ci
+odpowiadają.

@@ -1,9 +1,11 @@
 package mcpgateway
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -438,4 +440,35 @@ func TestServiceVirtualNameIsRefusedBeforeSecretsAreWritten(t *testing.T) {
 
 	require.NoError(t, service.Upsert(ctx, disabledServer("legacy", map[string]string{"Authorization": "typed"})))
 	assert.Equal(t, map[string]string{"Authorization": "${vault:written/legacy/headers.Authorization}"}, store.rows["legacy"].Headers)
+}
+
+// A stored edit whose references do not resolve here is reported by Refresh,
+// so the cluster sync poller retries it until it applies, and a lasting
+// failure is logged once rather than on every retry.
+func TestServiceRefreshReportsUnresolvedReferencesUntilTheyResolve(t *testing.T) {
+	vault := &mapVault{values: map[string]string{"gh": "ghp_1"}}
+	store := newMemStore(disabledServer("github", map[string]string{"Authorization": "Bearer ${vault:gh}"}))
+	service, _ := newSecretsTestService(t, store, vault)
+	ctx := t.Context()
+
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	// Edited on another instance to a reference this one cannot resolve yet.
+	require.NoError(t, store.Upsert(ctx, disabledServer("github", map[string]string{"Authorization": "Bearer ${vault:gh2}"})))
+	for range 3 {
+		err := service.Refresh(ctx)
+		secretErr, ok := errors.AsType[*config.SecretError](err)
+		require.True(t, ok, "%v", err)
+		assert.Equal(t, "mcp_servers.github.headers.Authorization", secretErr.Field)
+		assert.Equal(t, "Bearer ghp_1", viewSpec(t, service, "github").Headers["Authorization"])
+	}
+	assert.Equal(t, 1, strings.Count(logs.String(), "could not be resolved"), logs.String())
+	require.NoError(t, service.Reload(ctx), "an admin save is not failed by another server")
+
+	vault.set("gh2", "ghp_2")
+	require.NoError(t, service.Refresh(ctx))
+	assert.Equal(t, "Bearer ghp_2", viewSpec(t, service, "github").Headers["Authorization"])
 }

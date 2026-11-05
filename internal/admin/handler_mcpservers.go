@@ -147,11 +147,11 @@ func (h *Handler) UpsertMCPServer(c *echo.Context) error {
 		}
 	}
 
-	server, err := h.buildMCPServerUpsert(c.Request().Context(), slug, displayName, req)
+	server, kept, err := h.buildMCPServerUpsert(c.Request().Context(), slug, displayName, req)
 	if err != nil {
 		return handleError(c, err)
 	}
-	if err := h.mcpServers.Upsert(c.Request().Context(), server); err != nil {
+	if err := h.mcpServers.Upsert(config.WithKeptSecrets(c.Request().Context(), kept...), server); err != nil {
 		if errors.Is(err, mcpgateway.ErrVirtualNameTaken) {
 			// The server was deleted while this edit was in flight.
 			return handleError(c, core.NewInvalidRequestError(err.Error(), err))
@@ -249,16 +249,24 @@ func (h *Handler) MCPServerCatalog(c *echo.Context) error {
 }
 
 // buildMCPServerUpsert maps the request onto a validated ManagedServer,
-// resolving "***" header placeholders against the stored row.
-func (h *Handler) buildMCPServerUpsert(ctx context.Context, slug, displayName string, req upsertMCPServerRequest) (mcpgateway.ManagedServer, error) {
+// resolving "***" header placeholders against the stored row. It also returns
+// the header values resolved that way: the caller did not supply them, so the
+// save may not repoint the server (config.WithKeptSecrets).
+func (h *Handler) buildMCPServerUpsert(ctx context.Context, slug, displayName string, req upsertMCPServerRequest) (mcpgateway.ManagedServer, []string, error) {
 	current, err := h.mcpServers.GetManaged(ctx, slug)
 	if err != nil && !errors.Is(err, mcpgateway.ErrNotFound) {
-		return mcpgateway.ManagedServer{}, mcpServerWriteError(err)
+		return mcpgateway.ManagedServer{}, nil, mcpServerWriteError(err)
 	}
 
 	headers, err := mergeRedactedMCPHeaders(req.Headers, current)
 	if err != nil {
-		return mcpgateway.ManagedServer{}, err
+		return mcpgateway.ManagedServer{}, nil, err
+	}
+	var kept []string
+	for name, value := range req.Headers {
+		if value == redactedMCPHeaderValue {
+			kept = append(kept, headers[name])
+		}
 	}
 
 	enabled := true
@@ -286,9 +294,9 @@ func (h *Handler) buildMCPServerUpsert(ctx context.Context, slug, displayName st
 		server.CreatedAt = current.CreatedAt
 	}
 	if err := server.Validate(); err != nil {
-		return mcpgateway.ManagedServer{}, core.NewInvalidRequestError(err.Error(), err)
+		return mcpgateway.ManagedServer{}, nil, core.NewInvalidRequestError(err.Error(), err)
 	}
-	return server, nil
+	return server, kept, nil
 }
 
 // mergeRedactedMCPHeaders resolves "***" placeholders to the stored header

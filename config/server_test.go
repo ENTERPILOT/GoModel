@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -90,6 +91,134 @@ func TestPIDFilePathResolution(t *testing.T) {
 			require.NoError(t, err)
 			got := result.Config.Server.PIDFile
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestLoadServerTLSSettings(t *testing.T) {
+	tests := []struct {
+		name       string
+		env        map[string]string
+		configYAML string
+		wantErr    string
+		want       [3]string // cert, key, client CA
+		wantScheme string
+	}{
+		{
+			name:       "unset serves plain HTTP",
+			wantScheme: "http",
+		},
+		{
+			name: "env vars set the files",
+			env: map[string]string{
+				"SERVER_TLS_CERT_FILE":      "/etc/tls/tls.crt",
+				"SERVER_TLS_KEY_FILE":       "/etc/tls/tls.key",
+				"SERVER_TLS_CLIENT_CA_FILE": "/etc/tls/ca.crt",
+			},
+			want:       [3]string{"/etc/tls/tls.crt", "/etc/tls/tls.key", "/etc/tls/ca.crt"},
+			wantScheme: "https",
+		},
+		{
+			name:       "env vars override YAML",
+			env:        map[string]string{"SERVER_TLS_CERT_FILE": "/env/tls.crt"},
+			configYAML: "server:\n  tls_cert_file: /yaml/tls.crt\n  tls_key_file: /yaml/tls.key\n",
+			want:       [3]string{"/env/tls.crt", "/yaml/tls.key", ""},
+			wantScheme: "https",
+		},
+		{
+			name:    "certificate without key",
+			env:     map[string]string{"SERVER_TLS_CERT_FILE": "/etc/tls/tls.crt"},
+			wantErr: "must be set together",
+		},
+		{
+			name:       "key without certificate",
+			configYAML: "server:\n  tls_key_file: /etc/tls/tls.key\n",
+			wantErr:    "must be set together",
+		},
+		{
+			name:    "client CA without a certificate",
+			env:     map[string]string{"SERVER_TLS_CLIENT_CA_FILE": "/etc/tls/ca.crt"},
+			wantErr: "tls_client_ca_file requires",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllConfigEnvVars(t)
+			for key, value := range tt.env {
+				t.Setenv(key, value)
+			}
+			withTempDir(t, func(dir string) {
+				if tt.configYAML != "" {
+					require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(tt.configYAML), 0o600))
+				}
+				result, err := Load()
+				if tt.wantErr != "" {
+					require.Error(t, err)
+					assert.Contains(t, err.Error(), tt.wantErr)
+					return
+				}
+				require.NoError(t, err)
+				server := result.Config.Server
+				assert.Equal(t, tt.want, [3]string{server.TLSCertFile, server.TLSKeyFile, server.TLSClientCAFile})
+				assert.Equal(t, tt.wantScheme, server.Scheme())
+			})
+		})
+	}
+}
+
+// The paths accept secret references like every other setting; they resolve
+// to the path the listener then reads.
+func TestServerTLSPathReferencesResolve(t *testing.T) {
+	clearAllConfigEnvVars(t)
+	withTempDir(t, func(dir string) {
+		pathFile := filepath.Join(dir, "key-path")
+		require.NoError(t, os.WriteFile(pathFile, []byte("/etc/tls/tls.key\n"), 0o600))
+		t.Setenv("GOMODEL_TEST_TLS_CERT", "/etc/tls/tls.crt")
+		yaml := "server:\n  tls_cert_file: ${env:GOMODEL_TEST_TLS_CERT}\n  tls_key_file: ${file:" + pathFile + "}\n"
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0o600))
+
+		result, err := Load()
+		require.NoError(t, err)
+		require.NoError(t, result.ResolveSecrets(t.Context()))
+		assert.Equal(t, "/etc/tls/tls.crt", result.Config.Server.TLSCertFile)
+		assert.Equal(t, "/etc/tls/tls.key", result.Config.Server.TLSKeyFile)
+	})
+}
+
+// A reference that resolves to empty must fail instead of quietly serving
+// plain HTTP, half a pair, or HTTPS without the client certificate check. The
+// built-in schemes already reject empty values; a scheme an extension
+// registers, such as a vault, may not.
+func TestServerTLSReferencesResolvingEmptyFail(t *testing.T) {
+	tests := []struct {
+		name      string
+		cert, key string
+		clientCA  string
+		wantErr   string
+	}{
+		{name: "pair empty", cert: "${blank:cert}", key: "${blank:key}", wantErr: "server.tls_cert_file resolved to an empty value"},
+		{name: "key empty", cert: "/etc/tls/tls.crt", key: "${blank:key}", wantErr: "server.tls_key_file resolved to an empty value"},
+		{name: "client CA empty", cert: "/etc/tls/tls.crt", key: "/etc/tls/tls.key", clientCA: "${blank:ca}", wantErr: "server.tls_client_ca_file resolved to an empty value"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllConfigEnvVars(t)
+			withTempDir(t, func(dir string) {
+				yaml := "server:\n  tls_cert_file: " + tt.cert + "\n  tls_key_file: " + tt.key + "\n"
+				if tt.clientCA != "" {
+					yaml += "  tls_client_ca_file: " + tt.clientCA + "\n"
+				}
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0o600))
+
+				result, err := Load()
+				require.NoError(t, err)
+				require.NoError(t, result.Secrets.Register("blank", SecretResolverFunc(func(context.Context, string) (string, error) {
+					return "", nil
+				})))
+				err = result.ResolveSecrets(t.Context())
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+			})
 		})
 	}
 }

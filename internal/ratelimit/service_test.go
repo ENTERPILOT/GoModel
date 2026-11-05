@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
@@ -14,8 +15,16 @@ import (
 type memStore struct {
 	rules    []Rule
 	counters []WindowSnapshot
-	// written stamps each row the way a real store's updated_at column does.
-	written map[string]int64
+	// now stamps saved rows, as the saving replica's clock does for a real
+	// store; nil means time.Now.
+	now func() time.Time
+}
+
+func (m *memStore) clock() time.Time {
+	if m.now != nil {
+		return m.now()
+	}
+	return time.Now()
 }
 
 func (m *memStore) ListRules(context.Context) ([]Rule, error) {
@@ -28,9 +37,15 @@ func (m *memStore) UpsertRules(_ context.Context, rules []Rule) error {
 		return err
 	}
 	for _, rule := range normalized {
+		// The counter epoch follows the real stores: kept by an edit, new
+		// for a new rule or a per-child switch.
+		rule.CounterEpoch = uuid.NewString()
 		replaced := false
 		for i, existing := range m.rules {
 			if keyForRule(existing) == keyForRule(rule) {
+				if existing.PerChild == rule.PerChild {
+					rule.CounterEpoch = existing.CounterEpoch
+				}
 				m.rules[i] = rule
 				replaced = true
 				break
@@ -55,9 +70,18 @@ func (m *memStore) DeleteRule(_ context.Context, scope RuleScope, subject string
 }
 
 func (m *memStore) ReplaceConfigRules(ctx context.Context, rules []Rule) error {
+	// Keyed by the normalized rules, as the real stores' delete sees them.
+	rules, err := normalizeRulesForUpsert(rules)
+	if err != nil {
+		return err
+	}
+	declared := make(map[ruleKey]bool, len(rules))
+	for _, rule := range rules {
+		declared[keyForRule(rule)] = true
+	}
 	kept := m.rules[:0]
 	for _, existing := range m.rules {
-		if existing.Source != SourceConfig {
+		if existing.Source != SourceConfig || declared[keyForRule(existing)] {
 			kept = append(kept, existing)
 		}
 	}
@@ -70,24 +94,28 @@ func (m *memStore) ReplaceConfigRules(ctx context.Context, rules []Rule) error {
 
 func (m *memStore) Close() error { return nil }
 
-func (m *memStore) LoadCounters(context.Context) ([]WindowSnapshot, error) {
-	return append([]WindowSnapshot(nil), m.counters...), nil
+func (m *memStore) LoadCounters(_ context.Context, since int64) ([]WindowSnapshot, error) {
+	var rows []WindowSnapshot
+	for _, snap := range m.counters {
+		if snap.UpdatedAt >= since {
+			rows = append(rows, snap)
+		}
+	}
+	return rows, nil
 }
 
 // snapshotIdentity is the primary key every store keys a window row by.
 func snapshotIdentity(s WindowSnapshot) string {
-	return s.Scope + "\x00" + s.Subject + "\x00" + s.Partition + "\x00" + strconv.FormatInt(s.PeriodSeconds, 10)
+	return s.Scope + "\x00" + s.Subject + "\x00" + s.Partition + "\x00" + strconv.FormatInt(s.PeriodSeconds, 10) + "\x00" + s.Writer
 }
 
-// SaveCounters mirrors the real stores: upsert by identity, then collect rows
-// that went two periods without a write.
+// SaveCounters mirrors the real stores: stamp and upsert by identity, then
+// collect window rows that went two periods without a write and in-flight
+// rows that went inFlightRowRetention.
 func (m *memStore) SaveCounters(_ context.Context, snapshots []WindowSnapshot) error {
-	now := time.Now().Unix()
-	if m.written == nil {
-		m.written = make(map[string]int64)
-	}
+	now := m.clock().Unix()
 	for _, snap := range snapshots {
-		m.written[snapshotIdentity(snap)] = now
+		snap.UpdatedAt = now
 		replaced := false
 		for i, existing := range m.counters {
 			if snapshotIdentity(existing) == snapshotIdentity(snap) {
@@ -102,7 +130,11 @@ func (m *memStore) SaveCounters(_ context.Context, snapshots []WindowSnapshot) e
 	}
 	kept := m.counters[:0]
 	for _, snap := range m.counters {
-		if m.written[snapshotIdentity(snap)]+2*snap.PeriodSeconds >= now {
+		retention := 2 * snap.PeriodSeconds
+		if snap.PeriodSeconds == PeriodConcurrent {
+			retention = inFlightRowRetention
+		}
+		if snap.UpdatedAt+retention >= now {
 			kept = append(kept, snap)
 		}
 	}
@@ -110,10 +142,20 @@ func (m *memStore) SaveCounters(_ context.Context, snapshots []WindowSnapshot) e
 	return nil
 }
 
-func (m *memStore) DeleteCounter(_ context.Context, scope RuleScope, subject string, periodSeconds int64) error {
+// ResetCounter mirrors the real stores: a new epoch for the rule, and every
+// writer's window rows gone. In-flight rows stay (see Store.ResetCounter).
+func (m *memStore) ResetCounter(_ context.Context, scope RuleScope, subject string, periodSeconds int64) error {
+	key := ruleKey{scope: scope, subject: subject, periodSeconds: periodSeconds}
+	epoch := uuid.NewString()
+	for i := range m.rules {
+		if keyForRule(m.rules[i]) == key {
+			m.rules[i].CounterEpoch = epoch
+		}
+	}
 	kept := m.counters[:0]
 	for _, snap := range m.counters {
-		if snap.Scope != string(scope) || snap.Subject != subject || snap.PeriodSeconds != periodSeconds {
+		if snap.Scope != string(scope) || snap.Subject != subject || snap.PeriodSeconds != periodSeconds ||
+			snap.PeriodSeconds == PeriodConcurrent {
 			kept = append(kept, snap)
 		}
 	}
@@ -121,8 +163,18 @@ func (m *memStore) DeleteCounter(_ context.Context, scope RuleScope, subject str
 	return nil
 }
 
-func (m *memStore) DeleteAllCounters(context.Context) error {
-	m.counters = nil
+func (m *memStore) ResetAllCounters(context.Context) error {
+	epoch := uuid.NewString()
+	for i := range m.rules {
+		m.rules[i].CounterEpoch = epoch
+	}
+	kept := m.counters[:0]
+	for _, snap := range m.counters {
+		if snap.PeriodSeconds == PeriodConcurrent {
+			kept = append(kept, snap)
+		}
+	}
+	m.counters = kept
 	return nil
 }
 
@@ -344,7 +396,7 @@ func TestPerChildRuleIsolatesDirectChildrenAndSharesDescendants(t *testing.T) {
 	require.Len(t, global, 1)
 	require.Nil(t, global[0].RequestsRemaining)
 	require.Equal(t, int64(0), global[0].RequestsUsed)
-	err = service.ResetRule(ScopeUserPath, "/users", PeriodMinuteSeconds)
+	err = service.ResetRule(context.Background(), ScopeUserPath, "/users", PeriodMinuteSeconds)
 	require.NoError(t, err)
 
 	for _, child := range []string{"/users/alice", "/users/bob"} {
@@ -528,7 +580,7 @@ func TestStatusesAndResets(t *testing.T) {
 	require.Equal(t, int64(60), *status.TokensRemaining)
 	require.False(t, status.WindowStart.IsZero())
 	require.True(t, status.WindowEnd.Equal(status.WindowStart.Add(time.Minute)), "window = %s..%s, want one minute", status.WindowStart, status.WindowEnd)
-	err = service.ResetRule(ScopeUserPath, "/team", PeriodMinuteSeconds)
+	err = service.ResetRule(context.Background(), ScopeUserPath, "/team", PeriodMinuteSeconds)
 	require.NoError(t, err)
 
 	status = service.Statuses(windowBase)[0]
@@ -536,7 +588,7 @@ func TestStatusesAndResets(t *testing.T) {
 	require.Equal(t, int64(0), status.TokensUsed)
 
 	service.RecordTokens(onPath("/team"), 40, windowBase)
-	err = service.ResetAll()
+	err = service.ResetAll(context.Background())
 	require.NoError(t, err)
 	status = service.Statuses(windowBase)[0]
 	require.Equal(t, int64(0), status.TokensUsed)

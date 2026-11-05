@@ -388,8 +388,71 @@ func TestAuthMiddlewareExplicitBearerPrecedesRequestAuthenticator(t *testing.T) 
 	rec.Header().Set(ext.AuthenticationUserHeader, "/users/sso")
 	require.NoError(t, handler(c))
 	assert.Equal(t, http.StatusNoContent, rec.Code)
-	assert.Empty(t, rec.Header().Get(ext.AuthenticationUserHeader))
+	assert.Empty(t, rec.Header().Values(ext.AuthenticationUserHeader))
 	assert.Zero(t, requestAuth.calls)
+}
+
+// An identity-less request must not advertise an empty user path: the header is
+// omitted entirely rather than sent with a blank value.
+func TestAuthMiddlewareOmitsEmptyAuthenticationUserHeader(t *testing.T) {
+	tests := []struct {
+		name          string
+		masterKey     string
+		authenticator BearerTokenAuthenticator
+		token         string
+		wantHeader    string
+	}{
+		{name: "master key", masterKey: "master", token: "master"},
+		{
+			name: "managed key without user path",
+			authenticator: mockAuthenticator{
+				enabled:   true,
+				tokenToID: map[string]string{"managed": "key-1"},
+			},
+			token: "managed",
+		},
+		{
+			name: "managed key with blank user path",
+			authenticator: mockAuthenticator{
+				enabled:   true,
+				tokenToID: map[string]string{"managed": "key-1"},
+				tokenPath: map[string]string{"managed": "   "},
+			},
+			token: "managed",
+		},
+		{
+			name: "managed key with user path",
+			authenticator: mockAuthenticator{
+				enabled:   true,
+				tokenToID: map[string]string{"managed": "key-1"},
+				tokenPath: map[string]string{"managed": "/team/alpha"},
+			},
+			token:      "managed",
+			wantHeader: "/team/alpha",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := AuthMiddlewareWithAuthenticator(tt.masterKey, tt.authenticator, nil)(func(c *echo.Context) error {
+				return c.NoContent(http.StatusNoContent)
+			})
+
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+			req.Header.Set("Authorization", "Bearer "+tt.token)
+			rec := httptest.NewRecorder()
+			require.NoError(t, handler(e.NewContext(req, rec)))
+			assert.Equal(t, http.StatusNoContent, rec.Code)
+
+			values := rec.Header().Values(ext.AuthenticationUserHeader)
+			if tt.wantHeader == "" {
+				assert.Empty(t, values, "expected no %s header", ext.AuthenticationUserHeader)
+				return
+			}
+			assert.Equal(t, []string{tt.wantHeader}, values)
+		})
+	}
 }
 
 func TestAuthMiddleware_InteractionContinuationAccess(t *testing.T) {
@@ -697,6 +760,34 @@ func TestAuthMiddleware_WildcardSkipPaths(t *testing.T) {
 			} else {
 				assert.Equal(t, http.StatusUnauthorized, rec.Code, "expected path %s to require auth", tt.path)
 			}
+		})
+	}
+}
+
+// Skip paths match the escaped path the router uses, so an encoded form of a
+// public path cannot reach a catch-all route without a credential.
+func TestAuthMiddleware_SkipPathsMatchEscapedPath(t *testing.T) {
+	e := echo.New()
+	e.Use(AuthMiddleware("secret-key", []string{"/health", "/admin/static/*", "/status/été", "/private?view=public"}))
+	e.GET("/*", func(c *echo.Context) error { return c.String(http.StatusOK, "ok") })
+
+	tests := []struct {
+		path string
+		want int
+	}{
+		{"/health", http.StatusOK},
+		{"/admin/static/app.js", http.StatusOK},
+		{"/status/%C3%A9t%C3%A9", http.StatusOK},
+		{"/private", http.StatusUnauthorized},
+		{"/%68ealth", http.StatusUnauthorized},
+		{"/admin/%73tatic/app.js", http.StatusUnauthorized},
+		{"/admin%2Fstatic/app.js", http.StatusUnauthorized},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tt.path, nil))
+			assert.Equal(t, tt.want, rec.Code)
 		})
 	}
 }

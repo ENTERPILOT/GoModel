@@ -13,6 +13,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/anthropic"
 	"github.com/enterpilot/gomodel/internal/providers/gemini"
 	"github.com/enterpilot/gomodel/internal/providers/googlecommon"
 )
@@ -25,7 +26,9 @@ var Registration = providers.Registration{
 		// Vertex never takes an API key: it authenticates with Application
 		// Default Credentials or a service account, against either an explicit
 		// base URL or the project/location pair. api_mode is honored through
-		// the Gemini adapter Vertex delegates translation to (VERTEX_API_MODE).
+		// the Gemini adapter Vertex delegates translation to (VERTEX_API_MODE),
+		// except anthropic, which sends chat to Claude on the Anthropic
+		// publisher endpoints.
 		CredentialFields: []providers.CredentialField{
 			{Name: providers.CredentialFieldAuthType, Options: []string{authTypeGCPADC, authTypeServiceAccount}},
 			{Name: providers.CredentialFieldVertexProject},
@@ -34,7 +37,7 @@ var Registration = providers.Registration{
 			{Name: providers.CredentialFieldServiceAccountFile},
 			{Name: providers.CredentialFieldServiceAccountJSONBase64, Advanced: true},
 			{Name: providers.CredentialFieldBaseURL, Advanced: true},
-			{Name: providers.CredentialFieldAPIMode, Advanced: true, Options: []string{apiModeNative, apiModeOpenAICompatible}},
+			{Name: providers.CredentialFieldAPIMode, Advanced: true, Options: []string{apiModeNative, apiModeOpenAICompatible, apiModeAnthropic}},
 			{Name: providers.CredentialFieldGCPScope, Advanced: true},
 		},
 	},
@@ -47,6 +50,9 @@ const (
 	// accepts further spellings of each.
 	apiModeNative           = "native"
 	apiModeOpenAICompatible = "openai_compatible"
+	// apiModeAnthropic serves chat and Responses from Claude through the
+	// Anthropic Messages API on Vertex's rawPredict endpoints.
+	apiModeAnthropic = "anthropic"
 )
 
 // Provider implements Vertex AI through Gemini chat helpers plus Vertex-native
@@ -55,6 +61,11 @@ type Provider struct {
 	gemini       *gemini.Provider
 	nativeClient *llmclient.Client
 	authType     string
+	// messages serves chat and Responses in api_mode anthropic; nil otherwise.
+	messages *anthropic.Provider
+	// providerName is the configured instance name when the factory supplied
+	// one, the provider type otherwise.
+	providerName string
 	configErr    error
 }
 
@@ -73,7 +84,8 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 func newProvider(providerCfg providers.ProviderConfig, opts providers.ProviderOptions, baseHTTPClient *http.Client, preauthenticated bool) *Provider {
 	providerCfg.Backend = "vertex"
 	p := &Provider{
-		authType: normalizeAuthType(providerCfg),
+		authType:     normalizeAuthType(providerCfg),
+		providerName: opts.ClientName("vertex"),
 	}
 	p.validateConfig(providerCfg)
 
@@ -82,9 +94,20 @@ func newProvider(providerCfg providers.ProviderConfig, opts providers.ProviderOp
 		authClient = p.authHTTPClient(providerCfg, baseHTTPClient)
 	}
 	p.gemini = gemini.NewVertexWithHTTPClient(providerCfg, opts, authClient)
+	if useAnthropicAPI(providerCfg.APIMode) {
+		// The Google bearer token is the only credential, so the adapter gets
+		// no API keys of its own. It reports this instance's name, falling
+		// back to "vertex" rather than "anthropic".
+		messagesOpts := opts
+		messagesOpts.Name = p.providerName
+		messagesOpts.Keys = nil
+		messagesOpts.HTTPClient = anthropicHTTPClient(authClient)
+		messages := anthropic.New(providers.ProviderConfig{BaseURL: vertexAnthropicBaseURL(providerCfg)}, messagesOpts)
+		p.messages, _ = messages.(*anthropic.Provider)
+	}
 	nativeBaseURL := vertexNativeBaseURL(providerCfg)
 	nativeCfg := llmclient.Config{
-		ProviderName:   opts.ClientName("vertex"),
+		ProviderName:   p.providerName,
 		BaseURL:        nativeBaseURL,
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,
@@ -185,7 +208,13 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 	if err := p.ready(); err != nil {
 		return nil, err
 	}
-	resp, err := p.gemini.ChatCompletion(ctx, req)
+	var resp *core.ChatResponse
+	var err error
+	if p.messages != nil {
+		resp, err = p.messages.ChatCompletion(ctx, req)
+	} else {
+		resp, err = p.gemini.ChatCompletion(ctx, req)
+	}
 	if resp != nil {
 		resp.Provider = "vertex"
 	}
@@ -196,6 +225,9 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
 	if err := p.ready(); err != nil {
 		return nil, err
+	}
+	if p.messages != nil {
+		return p.messages.StreamChatCompletion(ctx, req)
 	}
 	return p.gemini.StreamChatCompletion(ctx, req)
 }
@@ -224,6 +256,11 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 	if err := p.ready(); err != nil {
 		return nil, err
 	}
+	if p.messages != nil {
+		// Vertex has no project-scoped listing of Claude models; the
+		// configured models list is authoritative.
+		return nil, core.ErrModelListingUnsupported
+	}
 	return p.gemini.ListModels(ctx)
 }
 
@@ -232,7 +269,10 @@ func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*
 	if err := p.ready(); err != nil {
 		return nil, err
 	}
-	return providers.ResponsesViaChat(ctx, p, req, "vertex")
+	if p.messages != nil {
+		return p.messages.Responses(ctx, req)
+	}
+	return providers.ResponsesViaChat(ctx, p, req, p.providerName)
 }
 
 // StreamResponses returns a raw response body for streaming Responses API.
@@ -240,7 +280,10 @@ func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesReque
 	if err := p.ready(); err != nil {
 		return nil, err
 	}
-	return providers.StreamResponsesViaChat(ctx, p, req, "vertex")
+	if p.messages != nil {
+		return p.messages.StreamResponses(ctx, req)
+	}
+	return providers.StreamResponsesViaChat(ctx, p, req, p.providerName)
 }
 
 // Embeddings sends an embedding request through Vertex AI native prediction.

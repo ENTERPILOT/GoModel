@@ -9,7 +9,9 @@ import {
   aliasRowCanRemove,
   buildDisplayModels,
   displayRowClass,
+  displayRowEnabled,
   filterDisplayModels,
+  filterDisplayModelsByStatus,
   groupDisplayModels,
   rowIsManaged,
   rowRedirectCanRemove,
@@ -37,10 +39,13 @@ import {
   buildModelTogglePayload,
   buildVirtualModelSavePayload,
   defaultVirtualModelForm,
+  formatParamsJSON,
+  parseParamsJSON,
   removePrimaryTarget,
   virtualModelTargetOptions,
   vmFormHasPrimaryTarget,
   vmFormIsRedirect,
+  vmFormParamsValid,
   vmFormSelfOnly,
   vmFormShowBalancingOptions,
   vmFormShowWeights,
@@ -81,6 +86,71 @@ test("filterDisplayModels returns stable rows when the filter is empty", () => {
   assert.strictEqual(second, first);
   assert.strictEqual(second[0], first[0]);
   assert.equal(first[0].key, "model:openai/davinci-002");
+});
+
+function statusFilterRows() {
+  const model = (id, access) => ({
+    provider_name: "openai",
+    provider_type: "openai",
+    model: { id, object: "model", owned_by: "openai" },
+    access,
+  });
+  return display(
+    [
+      model("gpt-on", { effective_enabled: true, user_paths: [] }),
+      model("gpt-off", { effective_enabled: false, user_paths: [] }),
+      model("gpt-team", { effective_enabled: true, user_paths: ["/team"] }),
+    ],
+    [
+      { name: "smart", target_model: "gpt-on", enabled: true, valid: true },
+      { name: "retired", target_model: "gpt-on", enabled: false, valid: true },
+      { name: "broken", target_model: "missing", enabled: true, valid: false },
+    ],
+  );
+}
+
+test("displayRowEnabled follows the access toggle state", () => {
+  const cases = [
+    { name: "missing row", row: null, want: false },
+    { name: "enabled model", row: { access: { effective_enabled: true } }, want: true },
+    { name: "disabled model", row: { access: { effective_enabled: false } }, want: false },
+    { name: "model without access", row: { access: null }, want: false },
+    { name: "enabled alias", row: { is_alias: true, alias: { enabled: true } }, want: true },
+    { name: "alias without flag", row: { is_alias: true, alias: {} }, want: true },
+    { name: "disabled alias", row: { is_alias: true, alias: { enabled: false } }, want: false },
+  ];
+  for (const tc of cases) {
+    assert.equal(displayRowEnabled(tc.row), tc.want, tc.name);
+  }
+});
+
+test("filterDisplayModelsByStatus keeps rows matching the status", () => {
+  const rows = statusFilterRows();
+  const cases = [
+    { status: "enabled", want: ["broken", "openai/gpt-on", "openai/gpt-team", "smart"] },
+    { status: "disabled", want: ["openai/gpt-off", "retired"] },
+  ];
+  for (const tc of cases) {
+    const got = filterDisplayModelsByStatus(rows, tc.status)
+      .map((row) => row.display_name)
+      .sort();
+    assert.deepEqual(got, tc.want, tc.status);
+  }
+});
+
+test("filterDisplayModelsByStatus returns the input for all or unknown statuses", () => {
+  const rows = statusFilterRows();
+  for (const status of ["all", "", undefined, "bogus"]) {
+    assert.strictEqual(filterDisplayModelsByStatus(rows, status), rows, String(status));
+  }
+});
+
+test("status filter composes with the text filter", () => {
+  const rows = filterDisplayModels(statusFilterRows(), "openai/gpt");
+  const names = (status) =>
+    filterDisplayModelsByStatus(rows, status).map((row) => row.display_name);
+  assert.deepEqual(names("enabled"), ["openai/gpt-on", "openai/gpt-team"]);
+  assert.deepEqual(names("disabled"), ["openai/gpt-off"]);
 });
 
 test("qualifiedModelName prefers selector when available", () => {
@@ -1161,4 +1231,160 @@ test("redirect views and toggle payloads round-trip plugin strategy fields", () 
   const plain = mapRedirectView({ source: "x", kind: "redirect", targets: [], strategy: "cost" });
   assert.equal(plain.strategy_plugin, "");
   assert.deepEqual(plain.strategy_config, {});
+});
+
+test("reasoning effort override round-trips through views and payloads", () => {
+  const { aliases, policies } = splitVirtualModelViews([
+    { source: "smart", kind: "redirect", targets: [{ model: "openai/gpt-4o" }], enabled: true, reasoning_effort: "medium" },
+    { source: "openai/gpt-4o", kind: "policy", enabled: true, reasoning_effort: "low" },
+  ]);
+  assert.equal(aliases[0].reasoning_effort, "medium");
+  assert.equal(policies[0].reasoning_effort, "low");
+
+  assert.equal(buildAliasTogglePayload(aliases[0]).reasoning_effort, "medium");
+
+  const { method, payload } = buildModelTogglePayload(
+    "openai/gpt-4o",
+    { selector: "openai/gpt-4o", user_paths: [], enabled: true, reasoning_effort: "low" },
+    { selector: "openai/gpt-4o", default_enabled: true, effective_enabled: false },
+  );
+  assert.equal(method, "PUT");
+  assert.equal(payload.reasoning_effort, "low");
+
+  const forced = buildVirtualModelSavePayload(
+    { source: "smart", target_model: "openai/gpt-4o", targets: [], reasoning_effort: "high", enabled: true },
+    "",
+    "create",
+  );
+  assert.equal(forced.payload.reasoning_effort, "high");
+
+  const inherited = buildVirtualModelSavePayload(
+    { source: "smart", target_model: "openai/gpt-4o", targets: [], reasoning_effort: "", enabled: true },
+    "",
+    "create",
+  );
+  assert.equal(Object.prototype.hasOwnProperty.call(inherited.payload, "reasoning_effort"), false);
+});
+
+test("a hidden model's substring hit does not hide a shown model's fuzzy match", () => {
+  const rows = [
+    { display_name: "zz-provider-hit", access: { effective_enabled: false } },
+    { display_name: "p-r-o-vi-d-e-r", access: { effective_enabled: true } },
+  ];
+  const shown = filterDisplayModels(
+    filterDisplayModelsByStatus(rows, "enabled"),
+    "provider",
+  );
+  assert.deepEqual(shown.map((row) => row.display_name), ["p-r-o-vi-d-e-r"]);
+});
+
+test("buildVirtualModelSavePayload sends non-empty params and default_params as parsed objects", () => {
+  const { payload } = buildVirtualModelSavePayload(
+    {
+      source: "smart",
+      target_model: "openai/gpt-4o",
+      targets: [],
+      params: '{\n  "temperature": 0.2,\n  "top_k": null\n}',
+      default_params: '{"top_p": 0.9, "chat_template_kwargs": {"thinking": true}}',
+      enabled: true,
+    },
+    "",
+    "create",
+  );
+  assert.deepEqual(payload.params, { temperature: 0.2, top_k: null });
+  assert.deepEqual(payload.default_params, {
+    top_p: 0.9,
+    chat_template_kwargs: { thinking: true },
+  });
+});
+
+test("buildVirtualModelSavePayload omits empty, whitespace, empty-object and malformed params", () => {
+  for (const text of ["", "   \n\t", "{}", "{ }", "not json", "[1]", '"s"']) {
+    const { payload } = buildVirtualModelSavePayload(
+      {
+        source: "smart",
+        target_model: "openai/gpt-4o",
+        targets: [],
+        params: text,
+        default_params: text,
+        enabled: true,
+      },
+      "",
+      "create",
+    );
+    assert.equal(Object.prototype.hasOwnProperty.call(payload, "params"), false, JSON.stringify(text));
+    assert.equal(Object.prototype.hasOwnProperty.call(payload, "default_params"), false, JSON.stringify(text));
+  }
+});
+
+test("parseParamsJSON and vmFormParamsValid accept blank or object text and reject the rest", () => {
+  assert.deepEqual(parseParamsJSON(""), {});
+  assert.deepEqual(parseParamsJSON("  "), {});
+  assert.deepEqual(parseParamsJSON(undefined), {});
+  assert.deepEqual(parseParamsJSON('{"temperature": 1}'), { temperature: 1 });
+  assert.equal(parseParamsJSON("{"), null);
+  assert.equal(parseParamsJSON("[]"), null);
+  assert.equal(parseParamsJSON("null"), null);
+  assert.equal(parseParamsJSON("42"), null);
+  assert.equal(vmFormParamsValid({ params: "", default_params: "{}" }), true);
+  assert.equal(vmFormParamsValid({ params: "{", default_params: "" }), false);
+  assert.equal(vmFormParamsValid({ params: "", default_params: "oops" }), false);
+});
+
+test("formatParamsJSON pretty-prints a map with a 2-space indent and is empty when absent", () => {
+  assert.equal(formatParamsJSON({ temperature: 0.2, nested: { a: 1 } }), '{\n  "temperature": 0.2,\n  "nested": {\n    "a": 1\n  }\n}');
+  assert.equal(formatParamsJSON({}), "");
+  assert.equal(formatParamsJSON(undefined), "");
+  assert.equal(formatParamsJSON(null), "");
+  assert.equal(formatParamsJSON([1]), "");
+  assert.equal(defaultVirtualModelForm().params, "");
+  assert.equal(defaultVirtualModelForm().default_params, "");
+});
+
+test("params and default_params round-trip through views and toggle payloads", () => {
+  const { aliases, policies } = splitVirtualModelViews([
+    {
+      source: "smart",
+      kind: "redirect",
+      targets: [{ model: "openai/gpt-4o" }],
+      enabled: true,
+      params: { temperature: 0.2 },
+      default_params: { top_p: 0.9 },
+    },
+    { source: "openai/gpt-4o", kind: "policy", enabled: true, params: { min_p: 0.1 } },
+    { source: "plain", kind: "redirect", targets: [{ model: "openai/gpt-4o" }], enabled: true },
+  ]);
+  assert.deepEqual(aliases[0].params, { temperature: 0.2 });
+  assert.deepEqual(aliases[0].default_params, { top_p: 0.9 });
+  assert.deepEqual(policies[0].params, { min_p: 0.1 });
+  assert.deepEqual(policies[0].default_params, {});
+  assert.deepEqual(aliases[1].params, {});
+
+  const aliasToggle = buildAliasTogglePayload(aliases[0]);
+  assert.deepEqual(aliasToggle.params, { temperature: 0.2 });
+  assert.deepEqual(aliasToggle.default_params, { top_p: 0.9 });
+  const plainToggle = buildAliasTogglePayload(aliases[1]);
+  assert.equal(Object.prototype.hasOwnProperty.call(plainToggle, "params"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(plainToggle, "default_params"), false);
+
+  // A policy whose only content is a parameter map must be kept on
+  // re-enable, not deleted as if it were path-less and empty.
+  const enable = buildModelTogglePayload(
+    "openai/gpt-4o",
+    { selector: "openai/gpt-4o", user_paths: [], enabled: false, default_params: { top_p: 0.9 } },
+    { selector: "openai/gpt-4o", default_enabled: true, effective_enabled: false },
+  );
+  assert.equal(enable.method, "PUT");
+  assert.equal(enable.payload.enabled, true);
+  assert.deepEqual(enable.payload.default_params, { top_p: 0.9 });
+  assert.equal(Object.prototype.hasOwnProperty.call(enable.payload, "params"), false);
+
+  const disable = buildModelTogglePayload(
+    "openai/gpt-4o",
+    { selector: "openai/gpt-4o", user_paths: [], enabled: true, params: { min_p: 0.1 } },
+    { selector: "openai/gpt-4o", default_enabled: true, effective_enabled: true },
+  );
+  assert.equal(disable.method, "PUT");
+  assert.equal(disable.payload.enabled, false);
+  assert.deepEqual(disable.payload.params, { min_p: 0.1 });
 });

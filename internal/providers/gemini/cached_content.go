@@ -40,6 +40,9 @@ func (p *Provider) prepareCachedContent(ctx context.Context, req *core.ChatReque
 	if body == nil || body.CachedContent != "" || p.backend != geminiBackendAIStudio || len(body.Contents) == 0 {
 		return
 	}
+	if !supportsExplicitCaching(req.Model) {
+		return
+	}
 	if req.PromptCachePlan == nil || strings.TrimSpace(req.PromptCachePlan.Key) == "" {
 		return
 	}
@@ -102,6 +105,16 @@ func (p *Provider) prepareCachedContent(ctx context.Context, req *core.ChatReque
 	if cached, ok := value.(string); ok && cached != "" {
 		useGeminiCachedPrefix(body, cached)
 	}
+}
+
+// supportsExplicitCaching reports whether the model takes cachedContents
+// objects. Gemini 4 removed explicit caching ("Explicit caching is not
+// supported for models/gemini-4-argon", HTTP 400) in favor of implicit
+// caching, so creating one would only add a failing round trip every backoff
+// window. Models outside the Gemini family keep trying, best-effort.
+func supportsExplicitCaching(model string) bool {
+	major, _, ok := geminiGeneration(model)
+	return !ok || major < 4
 }
 
 func (p *Provider) scopedCachedContentKey(ctx context.Context, planKey string) (string, bool) {

@@ -39,6 +39,7 @@ type Router struct {
 type lookupCaps struct {
 	typeRegistry            providerTypeRegistry
 	nameRegistry            providerNameRegistry
+	instanceNamer           providerInstanceNamer
 	initialized             initializedLookup
 	typeLister              providerTypeLister
 	nameLister              providerNameLister
@@ -47,6 +48,7 @@ type lookupCaps struct {
 	modelsWithProvider      modelWithProviderLister
 	selectorResolver        qualifiedSelectorResolver
 	modelInfo               modelInfoLookup
+	selectorModelInfo       selectorModelInfoLookup
 	refresher               providerModelRefresher
 }
 
@@ -54,6 +56,7 @@ func resolveLookupCaps(lookup core.ModelLookup) lookupCaps {
 	var caps lookupCaps
 	caps.typeRegistry, _ = lookup.(providerTypeRegistry)
 	caps.nameRegistry, _ = lookup.(providerNameRegistry)
+	caps.instanceNamer, _ = lookup.(providerInstanceNamer)
 	caps.initialized, _ = lookup.(initializedLookup)
 	caps.typeLister, _ = lookup.(providerTypeLister)
 	caps.nameLister, _ = lookup.(providerNameLister)
@@ -62,12 +65,19 @@ func resolveLookupCaps(lookup core.ModelLookup) lookupCaps {
 	caps.modelsWithProvider, _ = lookup.(modelWithProviderLister)
 	caps.selectorResolver, _ = lookup.(qualifiedSelectorResolver)
 	caps.modelInfo, _ = lookup.(modelInfoLookup)
+	caps.selectorModelInfo, _ = lookup.(selectorModelInfoLookup)
 	caps.refresher, _ = lookup.(providerModelRefresher)
 	return caps
 }
 
 type providerTypeRegistry interface {
 	ProviderByType(providerType string) core.Provider
+}
+
+// providerInstanceNamer maps a registered provider instance back to its
+// configured name.
+type providerInstanceNamer interface {
+	ProviderInstanceName(provider core.Provider) string
 }
 
 type providerNameRegistry interface {
@@ -111,6 +121,23 @@ type qualifiedSelectorResolver interface {
 // accessor. Lookups without it fall back to GetProvider + GetProviderType.
 type modelInfoLookup interface {
 	GetModel(model string) *ModelInfo
+}
+
+// selectorModelInfoLookup is modelInfoLookup for an already-parsed selector,
+// so the request path does not build the qualified "provider/model" string
+// only for the registry to split it again.
+type selectorModelInfoLookup interface {
+	GetModelForSelector(selector core.ModelSelector) *ModelInfo
+}
+
+// selectorModel returns the registry entry for a resolved selector through
+// the selector fast path. ok is false when the lookup lacks that path; the
+// caller then falls back to the string-keyed core.ModelLookup methods.
+func (r *Router) selectorModel(selector core.ModelSelector) (info *ModelInfo, ok bool) {
+	if r.caps.selectorModelInfo == nil {
+		return nil, false
+	}
+	return r.caps.selectorModelInfo.GetModelForSelector(selector), true
 }
 
 type providerModelRefresher interface {
@@ -302,7 +329,14 @@ type resolvedRoute struct {
 
 // lookupRoute fetches the provider and provider type for an already-resolved
 // selector, taking the registry lock once when the lookup supports it.
-func (r *Router) lookupRoute(model string) (core.Provider, string) {
+func (r *Router) lookupRoute(selector core.ModelSelector) (core.Provider, string) {
+	if info, ok := r.selectorModel(selector); ok {
+		if info == nil || info.Provider == nil {
+			return nil, ""
+		}
+		return info.Provider, info.ProviderType
+	}
+	model := selector.QualifiedModel()
 	if r.caps.modelInfo != nil {
 		info := r.caps.modelInfo.GetModel(model)
 		if info == nil || info.Provider == nil {
@@ -337,8 +371,7 @@ func (r *Router) resolveProvider(ctx context.Context, model, providerHint string
 		}
 	}
 
-	lookupModel := selector.QualifiedModel()
-	p, providerType := r.lookupRoute(lookupModel)
+	p, providerType := r.lookupRoute(selector)
 	if p == nil && !refreshed {
 		var refreshErr error
 		refreshed, refreshErr = r.refreshProviderModelsForRequest(ctx, requested)
@@ -350,12 +383,11 @@ func (r *Router) resolveProvider(ctx context.Context, model, providerHint string
 			if err != nil {
 				return resolvedRoute{}, err
 			}
-			lookupModel = selector.QualifiedModel()
-			p, providerType = r.lookupRoute(lookupModel)
+			p, providerType = r.lookupRoute(selector)
 		}
 	}
 	if p == nil {
-		return resolvedRoute{}, core.NewNotFoundError("model not found: " + lookupModel)
+		return resolvedRoute{}, core.NewNotFoundError("model not found: " + selector.QualifiedModel())
 	}
 	return resolvedRoute{provider: p, selector: selector, providerType: providerType}, nil
 }
@@ -469,6 +501,9 @@ func (r *Router) Supports(model string) bool {
 	selector, _, err := r.ResolveModel(core.NewRequestedModelSelector(model, ""))
 	if err != nil {
 		return false
+	}
+	if info, ok := r.selectorModel(selector); ok {
+		return info != nil
 	}
 	return r.lookup.Supports(selector.QualifiedModel())
 }

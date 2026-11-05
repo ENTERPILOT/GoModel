@@ -1,0 +1,96 @@
+---
+title: "常见问题"
+description: "如何更新、固定版本和卸载 GoModel，网关在哪里存储数据，以及为什么项目有一部分是商业版。"
+icon: "lightbulb"
+keywords: ["常见问题", "更新", "卸载", "数据位置", "版本固定", "开源", "许可证", "faq", "update", "uninstall", "data location", "version pinning", "open source", "license", "pro"]
+---
+
+## 如何更新 GoModel？
+
+请先备份数据库。[更新 GoModel](/zh/guides/updating) 提供了各存储后端的备份命令，以及验证和回滚步骤。然后执行：
+
+<Tabs>
+  <Tab title="Docker">
+    ```bash
+    docker pull enterpilot/gomodel
+    ```
+
+    然后重新创建容器。使用 Docker Compose 时：
+
+    ```bash
+    docker compose pull && docker compose up -d
+    ```
+  </Tab>
+  <Tab title="macOS / Linux">
+    重新运行安装脚本即可。它总是获取最新 Release，并原地替换二进制文件：
+
+    ```bash
+    curl -fsSL https://gomodel.enterpilot.io/install.sh | sh
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    irm https://gomodel.enterpilot.io/install.ps1 | iex
+    ```
+  </Tab>
+</Tabs>
+
+更新后请重启网关；GoModel 不支持原地热升级。
+
+## 如何查看当前运行的版本？
+
+```bash
+gomodel --version
+```
+
+启动日志的第一行也会打印版本号。
+
+## 能否安装指定版本或回滚？
+
+可以。在运行安装脚本前设置 `GOMODEL_VERSION`：
+
+```bash
+curl -fsSL https://gomodel.enterpilot.io/install.sh | GOMODEL_VERSION=vX.Y.Z sh
+```
+
+在 Windows 上，请先设置 `$env:GOMODEL_VERSION`。使用 Docker 时，请使用版本标签（`enterpilot/gomodel:X.Y.Z`）而不是 `latest`。将 `X.Y.Z` 替换为[已发布的 GoModel Release](https://github.com/ENTERPILOT/GoModel/releases)。
+
+## 更新会影响我的数据吗？
+
+更新是安全的。数据库结构会在启动时自动迁移，更新也不会移动或删除您的数据库、配置或缓存。
+
+回滚则需要谨慎。大多数迁移只做增量变更，旧版本二进制文件会忽略它不认识的内容；但有些版本会把存储重建为新的结构（例如作用域预算和速率限制），旧版本二进制文件将找不到预期的数据。此时请改为恢复更新前的备份。GoModel 发布节奏很快，因此请在每次更新前都做一次备份：[更新 GoModel](/zh/guides/updating#1-备份数据库) 提供了相关命令。
+
+## GoModel 在哪里存储数据？
+
+如果启动 GoModel 的目录下存在 `./data` 目录（已有部署、Docker 镜像），数据库仍位于 `./data/gomodel.db`。否则，二进制文件会使用操作系统约定的用户级目录：
+
+| | 数据库 | 模型缓存 |
+| --- | --- | --- |
+| Linux | `~/.local/share/gomodel/` | `~/.cache/gomodel/` |
+| macOS | `~/Library/Application Support/gomodel/` | `~/Library/Caches/gomodel/` |
+| Windows | `%LocalAppData%\gomodel\` | `%LocalAppData%\gomodel\cache\` |
+
+解析后的数据库路径会在启动时打印（`storage configured`）。`SQLITE_PATH` 用于覆盖数据库路径，`GOMODEL_CACHE_DIR` 用于覆盖模型缓存目录。此行为自 v0.1.54 起提供；更早的二进制文件始终使用相对于工作目录的 `./data`。
+
+## 如何卸载？
+
+删除二进制文件；如需彻底清理，再删除数据目录：
+
+```bash
+rm "$(command -v gomodel)"
+rm -rf ~/.local/share/gomodel ~/.cache/gomodel   # Linux
+rm -rf ~/Library/"Application Support"/gomodel ~/Library/Caches/gomodel   # macOS
+```
+
+在 Windows 上，删除 `%LOCALAPPDATA%\Programs\gomodel`（数据位于 `%LOCALAPPDATA%\gomodel`），然后从用户 PATH 中移除该文件夹。使用 Docker 时，按常规方式删除容器和镜像即可。
+
+## 为什么 GoModel 不是 100% 开源？
+
+几乎全部都是开源的。网关采用 MIT 许可证，并将继续保持。一个小型商业发行版 [GoModel Pro](/zh/pro/overview) 即将推出，它增加了 OIDC SSO 和少量其他扩展，约占代码库的 3%。
+
+**它最终仍可能完全开放。** 采用双许可证或类似 BSL 的许可证，既能让整个代码库保持可阅读、可审计、可 Fork，又能在商业上提供保护。开放项目比封闭项目更公平，这也是我们倾向的方向。
+
+**但项目必须能够自给自足。** 经过九个月的开发，GoModel 总共只赚了 90 美元（2026 年 8 月）。这无法维持生计。保留一小部分商业功能，是让那些从完善的 AI 网关中获益的公司为此付费，同时让其他所有人免费使用。这似乎是目前最公平的选择。
+
+**单个功能可以商量。** 如果某个计划纳入 Pro 的功能正是您作为开发者所需要的，而购买 Pro 对您来说并不划算，请告诉我们。我们可以考虑更便宜的个人使用许可证，或者将该功能开源。欢迎在 [Discord](https://discord.gg/gaEB9BQSPH) 或 [GitHub](https://github.com/ENTERPILOT/GoModel/issues) 上提问。

@@ -178,3 +178,22 @@ func TestSchemaDefaultsAndConfigHash(t *testing.T) {
 	require.Len(t, a, 16)
 	require.NotEqual(t, a, ConfigHash(json.RawMessage(`{"a":3}`)))
 }
+
+func TestCoerceFieldRangeStoresNumber(t *testing.T) {
+	field := pluginapi.Field{Key: "weight", Input: pluginapi.InputRange, Min: 0, Max: 1, Step: 0.05, Default: 0.35}
+
+	got, err := coerceField(field, "0.7")
+	require.NoError(t, err)
+	require.Equal(t, 0.7, got, "a range value is stored as a number, not a string")
+
+	_, err = coerceField(field, "heavy")
+	require.Error(t, err, "a range rejects a non-numeric value")
+}
+
+func TestSchemaDefaultsRangeSeedsLowerBound(t *testing.T) {
+	defaults := SchemaDefaults([]pluginapi.Field{{Key: "weight", Input: pluginapi.InputRange, Min: 0.2}})
+	require.Equal(t, `{"weight":0.2}`, string(defaults), "a range without a default starts at its lower bound")
+
+	explicit := SchemaDefaults([]pluginapi.Field{{Key: "weight", Input: pluginapi.InputRange, Min: 0.2, Default: 0.35}})
+	require.Equal(t, `{"weight":0.35}`, string(explicit), "an explicit default wins over the lower bound")
+}

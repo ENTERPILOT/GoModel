@@ -13,6 +13,7 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/httpclient"
 )
 
 // pineconeMetadataValueMax is a conservative limit for a single metadata string (Pinecone ~40KB UTF-8).
@@ -47,7 +48,7 @@ func newPineconeStore(cfg config.PineconeConfig) (*pineconeStore, error) {
 		apiKey:     cfg.APIKey,
 		namespace:  cfg.Namespace,
 		dimension:  cfg.Dimension,
-		httpClient: &http.Client{Timeout: 60 * time.Second},
+		httpClient: httpclient.NewClientWithTimeout(60 * time.Second),
 	}
 	s.cleanup = startVecCleanup(s)
 	return s, nil

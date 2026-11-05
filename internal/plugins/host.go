@@ -67,7 +67,16 @@ type HostInfo struct {
 	// UserPath, when set, scopes the instance's internal inference to that
 	// user path instead of the current request's path.
 	UserPath string
+	// Scope is the user path segment internal inference is attributed under,
+	// before the instance name. Empty selects [ScopeGuardrails].
+	Scope string
 }
+
+// User path segments internal inference is attributed under.
+const (
+	ScopeGuardrails = "guardrails"
+	ScopeExtensions = "extensions"
+)
 
 // ErrInferenceUnavailable is returned when no ChatCompleter is wired.
 var ErrInferenceUnavailable = errors.New("plugins: internal inference is not available")
@@ -110,8 +119,8 @@ func (h *host) Metrics() pluginapi.Metrics {
 }
 
 // Complete runs a chat completion through the gateway with origin "plugin".
-// The call is scoped to "<user path>/guardrails/<instance>" so budgets and
-// audit attribute it to the instance.
+// The call is scoped to "<user path>/<scope>/<instance>" so budgets and audit
+// attribute it to the instance.
 func (h *host) Complete(ctx context.Context, req pluginapi.InferenceRequest) (*pluginapi.Completion, error) {
 	if h.deps.Chat == nil {
 		return nil, ErrInferenceUnavailable
@@ -159,7 +168,11 @@ func (h *host) inferenceUserPath(ctx context.Context, override string) (string, 
 	if base == "" {
 		base = "/"
 	}
-	return appendUserPathSegments(base, "guardrails", h.info.InstanceName)
+	scope := h.info.Scope
+	if scope == "" {
+		scope = ScopeGuardrails
+	}
+	return appendUserPathSegments(base, scope, h.info.InstanceName)
 }
 
 func appendUserPathSegments(basePath string, segments ...string) (string, error) {

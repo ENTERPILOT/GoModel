@@ -1,6 +1,7 @@
 <script>
-  // Expandable details of one provider card: status reason, last error,
-  // request health (breaker state + per-model traffic), and config rows.
+  // Expandable details of one provider card: status reason, last error
+  // (marked when the breaker is open), request health (breaker state +
+  // per-model traffic), and config rows.
   // Props: `provider` (status row), `expanded` (bool, drives the collapse).
   //
   // Split out of ProviderStatusCard.svelte so the breaker-state palette
@@ -13,6 +14,7 @@
     providerBreakerState,
     providerBreakerStateLabel,
     providerBreakerStateClass,
+    providerLastErrorText,
     providerRecentTrafficSummary,
     providerHealthModels,
     providerHealthModelStats,
@@ -55,8 +57,8 @@
 >
   <div class="provider-status-details-inner">
     <p class="provider-status-reason">{provider.status_reason}</p>
-    {#if provider.last_error}
-      <p class="provider-status-error">{provider.last_error}</p>
+    {#if providerLastErrorText(provider)}
+      <p class="provider-status-error">{providerLastErrorText(provider)}</p>
     {/if}
 
     {#if providerRequestHealth(provider)}

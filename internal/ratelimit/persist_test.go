@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -31,14 +32,14 @@ func TestSnapshotRoundTripPreservesEstimate(t *testing.T) {
 	require.Empty(t, snaps[0].Partition)
 
 	dst := newLimiter()
-	dst.restore(snaps, []Rule{rule}, now)
+	remoteOf(dst, snaps, []Rule{rule}, now)
 	got := dst.status(rule, now).RequestsUsed
 	require.Equal(t, wantReq, got)
 	got = dst.status(rule, now).TokensUsed
 	require.Equal(t, wantTok, got)
 }
 
-func TestSnapshotSkipsConcurrentAndExpiredChild(t *testing.T) {
+func TestSnapshotPublishesInFlightAndDropsExpiredChild(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0).UTC()
 	shared := Rule{
 		Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodConcurrent,
@@ -52,10 +53,10 @@ func TestSnapshotSkipsConcurrentAndExpiredChild(t *testing.T) {
 	require.True(t, ok)
 
 	src := newLimiter()
-	_, _, err := src.admit([]Rule{shared, child}, now)
+	_, held, err := src.admit([]Rule{shared, child}, now)
 	require.Nil(t, err)
 
-	// Force the child window into the distant past so restore drops it.
+	// Force the child window into the distant past so the peer view drops it.
 	src.mu.Lock()
 	for _, counter := range src.requests {
 		if counter != nil {
@@ -65,14 +66,24 @@ func TestSnapshotSkipsConcurrentAndExpiredChild(t *testing.T) {
 	src.mu.Unlock()
 
 	snaps := src.snapshot([]Rule{shared, template})
+	var gauges []WindowSnapshot
 	for _, snap := range snaps {
-		require.NotEqual(t, PeriodConcurrent, snap.PeriodSeconds)
+		if snap.PeriodSeconds == PeriodConcurrent {
+			gauges = append(gauges, snap)
+		}
 	}
+	require.Equal(t, []WindowSnapshot{{Scope: string(ScopeUserPath), Subject: "/team", InFlight: 1}}, gauges)
 
 	dst := newLimiter()
-	dst.restore(snaps, []Rule{template}, now)
+	remoteOf(dst, snaps, []Rule{template}, now)
 	got := dst.status(child, now).RequestsUsed
 	require.Equal(t, int64(0), got)
+
+	// Released, the gauge is published once more, as zero, then no longer.
+	src.release(held)
+	snaps = src.snapshot([]Rule{shared, template})
+	require.Equal(t, []WindowSnapshot{{Scope: string(ScopeUserPath), Subject: "/team"}}, snaps)
+	require.Empty(t, src.snapshot([]Rule{shared, template}))
 }
 
 func TestSnapshotIsolatesPerChildPartitions(t *testing.T) {
@@ -94,7 +105,7 @@ func TestSnapshotIsolatesPerChildPartitions(t *testing.T) {
 	require.Len(t, snaps, 2)
 
 	dst := newLimiter()
-	dst.restore(snaps, []Rule{template}, now)
+	remoteOf(dst, snaps, []Rule{template}, now)
 	_, _, err = dst.admit([]Rule{alice}, now)
 	require.NotNil(t, err)
 	_, _, err = dst.admit([]Rule{bob}, now)
@@ -167,7 +178,7 @@ func TestResetClearsPersistedWindow(t *testing.T) {
 	service.Start(context.Background())
 	_, err = service.Acquire(onPath("/team"), now)
 	require.NoError(t, err)
-	err = service.ResetRule(ScopeUserPath, "/team", PeriodHourSeconds)
+	err = service.ResetRule(context.Background(), ScopeUserPath, "/team", PeriodHourSeconds)
 	require.NoError(t, err)
 
 	service.Close()
@@ -181,14 +192,14 @@ func TestResetClearsPersistedWindow(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestRestoreIgnoresSharedRowOnPerChildRule(t *testing.T) {
+func TestPeerSumIgnoresSharedRowOnPerChildRule(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0).UTC()
 	template := Rule{
 		Scope: ScopeUserPath, Subject: "/customers", PerChild: true,
 		PeriodSeconds: PeriodHourSeconds, MaxRequests: new(int64(1)),
 	}
 	dst := newLimiter()
-	dst.restore([]WindowSnapshot{{
+	remoteOf(dst, []WindowSnapshot{{
 		Scope: string(ScopeUserPath), Subject: "/customers", Partition: "",
 		PeriodSeconds: PeriodHourSeconds, RequestsWindowStart: now.Unix(), RequestsCurrent: 1,
 	}}, []Rule{template}, now)
@@ -198,29 +209,33 @@ func TestRestoreIgnoresSharedRowOnPerChildRule(t *testing.T) {
 }
 
 func TestFailedLoadDoesNotReplacePersistedWindows(t *testing.T) {
-	now := time.Now().Unix()
-	store := &failLoadStore{err: errors.New("store down")}
-	store.counters = []WindowSnapshot{{
-		Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: PeriodHourSeconds,
-		RequestsWindowStart: now, RequestsCurrent: 9,
-	}}
-	err := store.UpsertRules(context.Background(), []Rule{{
-		Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodHourSeconds,
-		MaxRequests: new(int64(10)), Source: SourceManual,
-	}})
-	require.NoError(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		now := time.Now().Unix()
+		store := &failLoadStore{err: errors.New("store down")}
+		store.counters = []WindowSnapshot{{
+			Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: PeriodHourSeconds,
+			RequestsWindowStart: now, RequestsCurrent: 9,
+		}}
+		err := store.UpsertRules(context.Background(), []Rule{{
+			Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodHourSeconds,
+			MaxRequests: new(int64(10)), Source: SourceManual,
+		}})
+		require.NoError(t, err)
 
-	service, err := NewService(context.Background(), store, WithFlushInterval(10*time.Millisecond))
-	require.NoError(t, err)
+		const interval = 10 * time.Millisecond
+		service, err := NewService(context.Background(), store, WithFlushInterval(interval))
+		require.NoError(t, err)
 
-	service.Start(context.Background())
-	_, err = service.Acquire(onPath("/team"), time.Now().UTC())
-	require.NoError(t, err)
+		service.Start(context.Background())
+		_, err = service.Acquire(onPath("/team"), time.Now().UTC())
+		require.NoError(t, err)
 
-	service.Close()
-	time.Sleep(30 * time.Millisecond)
-	require.Len(t, store.counters, 1)
-	require.Equal(t, int64(9), store.counters[0].RequestsCurrent)
+		service.Close()
+		// Several flush intervals pass on the bubble's clock without a write.
+		time.Sleep(3 * interval)
+		require.Len(t, store.counters, 1)
+		require.Equal(t, int64(9), store.counters[0].RequestsCurrent)
+	})
 }
 
 func TestStartIsIdempotentAndCloseStopsTheLoop(t *testing.T) {
@@ -230,16 +245,21 @@ func TestStartIsIdempotentAndCloseStopsTheLoop(t *testing.T) {
 	}})
 	require.NoError(t, err)
 
-	service, err := NewService(context.Background(), store, WithFlushInterval(15*time.Millisecond))
-	require.NoError(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		const interval = 15 * time.Millisecond
+		service, err := NewService(context.Background(), store, WithFlushInterval(interval))
+		require.NoError(t, err)
 
-	service.Start(context.Background())
-	service.Start(context.Background())
-	service.Close()
-	afterClose := store.saves.Load()
-	time.Sleep(50 * time.Millisecond)
-	got := store.saves.Load()
-	require.Equal(t, afterClose, got)
+		service.Start(context.Background())
+		service.Start(context.Background())
+		service.Close()
+		afterClose := store.saves.Load()
+		// Several flush intervals pass on the bubble's clock; a loop still
+		// running would write again.
+		time.Sleep(3 * interval)
+		got := store.saves.Load()
+		require.Equal(t, afterClose, got)
+	})
 }
 
 func TestFlushIntervalWritesBeforeClose(t *testing.T) {
@@ -249,19 +269,21 @@ func TestFlushIntervalWritesBeforeClose(t *testing.T) {
 	}})
 	require.NoError(t, err)
 
-	service, err := NewService(context.Background(), store, WithFlushInterval(15*time.Millisecond))
-	require.NoError(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		const interval = 15 * time.Millisecond
+		service, err := NewService(context.Background(), store, WithFlushInterval(interval))
+		require.NoError(t, err)
 
-	t.Cleanup(service.Close)
-	_, err = service.Acquire(onPath("/"), time.Now().UTC())
-	require.NoError(t, err)
+		t.Cleanup(service.Close)
+		_, err = service.Acquire(onPath("/"), time.Now().UTC())
+		require.NoError(t, err)
 
-	service.Start(context.Background())
-	deadline := time.Now().Add(200 * time.Millisecond)
-	for store.saves.Load() == 0 && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
-	require.NotEqual(t, int64(0), store.saves.Load())
+		service.Start(context.Background())
+		// The first tick of the flush loop lands exactly one interval later.
+		time.Sleep(interval)
+		synctest.Wait()
+		require.NotZero(t, store.saves.Load())
+	})
 }
 
 func TestFlushIntervalZeroOnlyWritesOnClose(t *testing.T) {
@@ -271,17 +293,19 @@ func TestFlushIntervalZeroOnlyWritesOnClose(t *testing.T) {
 	}})
 	require.NoError(t, err)
 
-	service, err := NewService(context.Background(), store, WithFlushInterval(0))
-	require.NoError(t, err)
-	_, err = service.Acquire(onPath("/"), time.Now().UTC())
-	require.NoError(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		service, err := NewService(context.Background(), store, WithFlushInterval(0))
+		require.NoError(t, err)
+		_, err = service.Acquire(onPath("/"), time.Now().UTC())
+		require.NoError(t, err)
 
-	service.Start(context.Background())
-	time.Sleep(30 * time.Millisecond)
-	require.Equal(t, int64(0), store.saves.Load())
+		service.Start(context.Background())
+		time.Sleep(time.Second)
+		require.Zero(t, store.saves.Load())
 
-	service.Close()
-	require.Equal(t, int64(1), store.saves.Load())
+		service.Close()
+		require.Equal(t, int64(1), store.saves.Load())
+	})
 }
 
 func TestCloseDuringLoadDoesNotRestore(t *testing.T) {
@@ -327,7 +351,7 @@ func TestResetRuleReturnsPersistError(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(service.Close)
-	require.Error(t, service.ResetRule(ScopeUserPath, "/team", PeriodHourSeconds))
+	require.Error(t, service.ResetRule(context.Background(), ScopeUserPath, "/team", PeriodHourSeconds))
 }
 
 type recordingStore struct {
@@ -345,7 +369,7 @@ type failLoadStore struct {
 	err error
 }
 
-func (s *failLoadStore) LoadCounters(context.Context) ([]WindowSnapshot, error) {
+func (s *failLoadStore) LoadCounters(context.Context, int64) ([]WindowSnapshot, error) {
 	return nil, s.err
 }
 
@@ -354,7 +378,7 @@ type failDeleteStore struct {
 	err error
 }
 
-func (s *failDeleteStore) DeleteCounter(context.Context, RuleScope, string, int64) error {
+func (s *failDeleteStore) ResetCounter(context.Context, RuleScope, string, int64) error {
 	return s.err
 }
 
@@ -364,10 +388,10 @@ type blockingLoadStore struct {
 	release chan struct{}
 }
 
-func (s *blockingLoadStore) LoadCounters(context.Context) ([]WindowSnapshot, error) {
+func (s *blockingLoadStore) LoadCounters(_ context.Context, since int64) ([]WindowSnapshot, error) {
 	close(s.started)
 	<-s.release
-	return s.memStore.LoadCounters(context.Background())
+	return s.memStore.LoadCounters(context.Background(), since)
 }
 
 // TestDeleteRuleStopsEnforcingWhenSnapshotDeleteFails: the rule row is already

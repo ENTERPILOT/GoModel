@@ -157,10 +157,7 @@ func TestSearchDiscoveryServesMetaToolsAndRelaysCalls(t *testing.T) {
 		assert.Equal(t, `echo:{"value":1}`, text.Text)
 	}
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && len(usageLog.all()) < 2 {
-		time.Sleep(10 * time.Millisecond)
-	}
+	require.Eventually(t, func() bool { return len(usageLog.all()) >= 2 }, 2*time.Second, 10*time.Millisecond, "the relayed calls were not logged")
 	entries := usageLog.all()
 	require.Len(t, entries, 2, "only relayed calls are usage entries, not searches")
 	for _, entry := range entries {

@@ -2,7 +2,7 @@
 title: "Cost tracking"
 description: "How GoModel estimates request costs, where pricing comes from, how to override it, and how to recalculate stored costs."
 icon: "calculator"
-keywords: ["cost tracking", "LLM cost", "token pricing", "spend", "pricing override", "cost estimate"]
+keywords: ["cost tracking", "LLM cost", "token pricing", "spend", "pricing override", "cost estimate", "markup", "chargeback", "billed cost"]
 ---
 
 GoModel estimates the cost of every tracked request from model pricing and shows the totals on the dashboard.
@@ -98,16 +98,82 @@ Override pricing when the catalog price is wrong, missing, or differs from your 
 
 Overrides apply to new requests. To re-cost requests that already ran, recalculate them.
 
+## Markups and billed cost
+
+Add a markup when you resell model access, for example to recharge customers for the tokens they use. GoModel records each request's **billed cost** (`billed_cost` on the usage row): the provider cost plus the markup. The provider cost itself never changes, so budgets, dashboard totals, and savings keep measuring what you pay upstream. With GoModel Pro, a budget can limit billed cost instead; see [Budgets on billed cost](/features/budgets#budgets-on-billed-cost-gomodel-pro).
+
+Markups are off by default. Turn them on with `markups_enabled: true` (env `PRICING_MARKUPS_ENABLED=true`), then set percentages in `config.yaml`. With markups on but no rule matching a request, its billed cost equals its provider cost. With markups off, GoModel records no billed cost and ignores `markups` and `bill_cache_hits`, logging a warning at startup if `markups` is set.
+
+```yaml
+pricing:
+  markups_enabled: true # env: PRICING_MARKUPS_ENABLED; default false
+  bill_cache_hits: true # env: PRICING_BILL_CACHE_HITS; default true
+  markups:
+    "/": 15                         # every model
+    "openai/": 10                   # one provider instance
+    "gpt-5": 20                     # a model on any provider
+    "anthropic/claude-opus-4-1": 25 # one model on one provider
+```
+
+The most specific selector wins, in this order: provider/model, model, provider, global. Markups never stack. A provider selector names the configured instance (the key under `providers`), and an unknown provider fails startup. A 20% markup bills $1.20 for $1.00 of provider cost: a 16.7% margin.
+
+`bill_cache_hits` decides how responses served from GoModel's response cache are billed. `true` bills each hit at what the same call would cost when the hit is served — current pricing and time-of-day rates — plus markup; `false` bills them at $0, even when their cost is unknown. Provider prompt caching (cached input tokens) is a real provider cost and is always billed.
+
+Each usage row also stores the markup it was billed at (`markup_percent`, `markup_selector`), so changing markups never rewrites past bills.
+
+A provider configured with `billable: false` (`providers.<name>.billable` in `config.yaml`, `<PROVIDER>[_SUFFIX]_BILLABLE=false`, or the **Billable** checkbox on the Providers page) serves requests whose cost the caller does not owe you, typically a customer's own API key registered as its own provider instance. Its usage is still tracked and priced, so the estimate stays visible whenever the model has a price, and each row records `billable: false`. With markups enabled, such a row is billed at `0` with no markup rule applied, so the Billed column, billed budgets, and the invoice export never charge a customer for their own key: an invoice line for such a provider shows the provider cost with a billed cost of `0`. A response-cache hit of that provider's model is billed at `0` too, and recalculating stored costs keeps these rows at `0`. With markups disabled, no row records a billed cost, non-billable ones included. The flag is stamped when the row is written, like the markup, so changing it later does not rewrite past bills. User-path and label budgets skip non-billable usage whether or not markups are enabled; see [Budgets](/features/budgets#non-billable-providers).
+
+Once markups are enabled, the dashboard shows billed cost next to provider cost: a **Billed** card on the overview and usage pages, a column in every usage breakdown (model, user path, label, request type or endpoint, and session), and a column in the request log whose tooltip names the markup each row was billed at. The admin API reports it as `total_billed_cost` on `/admin/usage/summary`, `billed_cost` on `/admin/usage/daily`, `/admin/usage/models`, `/admin/usage/user-paths`, `/admin/usage/labels`, `/admin/usage/endpoints`, and `/admin/usage/sessions`, and `billed_cost`, `markup_percent`, and `markup_selector` on `/admin/usage/log` entries. A day billed only for cache hits still appears in `/admin/usage/daily`, with zero requests. Billed totals include billed cache hits even though the other cost figures exclude them, so per-user-path billed cost is what to charge each customer.
+
+### Per-customer markups (GoModel Pro)
+
+<Info>
+  Per-customer markups are available in GoModel Pro and require the
+  `billing` license entitlement. Without it, `user_path_markups` with
+  markups enabled aborts startup — GoModel never silently bills a customer at
+  the global rate.
+</Info>
+
+Give each customer, identified by its [user path](/features/user-path) subtree, its own markups with `user_path_markups`. Each path takes the same selectors as `markups`:
+
+```yaml
+pricing:
+  markups_enabled: true
+  markups:
+    "/": 20             # everyone else
+  user_path_markups:
+    /acme:
+      "/": 30           # /acme and everything below it
+      "openai/gpt-5": 15
+    /acme/internal:
+      "/": 0            # internal traffic at cost
+```
+
+GoModel takes the deepest configured path that covers the request's user path (`/acme` covers `/acme/team`, not `/acmecorp`) and applies the most specific selector in it, in the usual order. When that path has no matching selector, it tries the next shallower path, then `markups`. Markups never stack. With the example above, `/acme/internal/ci` is billed at 0%, `/acme/team` at 15% for `openai/gpt-5` and 30% for everything else, and `/beta` at 20%.
+
+The default is none: without `user_path_markups`, `markups` applies to everyone. With `markups_enabled: false`, `user_path_markups` is ignored like `markups`, and GoModel logs a warning at startup. A rule from `user_path_markups` is recorded in `markup_selector` as `<user path>:<selector>`, for example `/acme:openai/gpt-5`, so the request log shows which customer rule was billed. User paths are normalized as on requests, so `acme/` and `/acme` are the same key; `/` is rejected, since `markups` already covers it.
+
 ## Dashboard totals
 
 - **Estimated Cost** — spend on live provider requests; cache hits are excluded.
 - **Saved Cost** — what requests served from the cache would otherwise have cost.
+- **Billed** — shown when markups are enabled: provider cost plus markup, including billed cache hits.
 
 A `---` value means the cost is unknown because no pricing was available, which is not the same as `$0`.
+
+## Filter and break down spend
+
+The usage page filters every card, chart, and the request log by model, provider, label, API key, endpoint, user path, and session. Each dropdown takes several values: a request matches a filter when it has any of the selected values, and it must match every filter. The user path picker lists known paths as a tree grouped by prefix; picking a node includes everything below it, and you can type a path that is not listed.
+
+The **Breakdown** section pivots the filtered usage by two dimensions. For example, rows **User path**, columns **Period** and period **Monthly** show cost per month per user path. Pick the metric (cost, tokens, or requests); the top 10 rows and columns are kept and the rest fold into **Other**. **User path grouping** folds paths by their first segments, so `/team/alice/laptop` counts under `/team/alice`. Switch between the stacked chart and the table, and use **Download CSV** to export the table with its totals.
+
+Filters, the date range, and the breakdown settings are kept in the page URL, so a copied link opens the same view. The same data is available from [`GET /admin/usage/breakdown`](/advanced/admin-endpoints#get-adminusagebreakdown), and the filters from every usage endpoint except `/admin/usage/throughput` (see [Multi-value filters](/advanced/admin-endpoints#multi-value-filters)).
 
 ## Recalculate stored costs
 
 Recalculating recomputes the stored cost of matching usage rows from current pricing. Use it after changing an override, or when pricing was unavailable at the time a request ran. The action is enabled by default (`USAGE_PRICING_RECALCULATION_ENABLED`); on the usage view, choose **Recalculate**, then type `recalculate` to confirm. It is scoped to the selected date range, provider or model, and user path.
+
+Recalculation reprices billed cost with the markup each row was billed at, and bills cache hits according to the current `bill_cache_hits`. Rows recorded before markups existed are billed at their provider cost. While markups are disabled, recalculation leaves billed cost unchanged.
 
 <Warning>
   Recalculation **overwrites** the cost fields of every matching row, and
@@ -115,3 +181,30 @@ Recalculating recomputes the stored cost of matching usage rows from current pri
   result reports how many rows still lack pricing. Token counts are never
   modified.
 </Warning>
+
+## Invoice export (GoModel Pro)
+
+<Info>
+  Invoice export requires a GoModel Pro license with the `billing`
+  entitlement, and markups enabled (`PRICING_MARKUPS_ENABLED=true`). Without
+  the entitlement the endpoint returns 403 `invoice_export_not_entitled`;
+  with markups off it returns 409 `markups_disabled`.
+</Info>
+
+`GET /admin/usage/invoice` exports billed usage for a period, one block per customer. Each customer is a user path; with `parent`, each direct child of that path is one customer, the same way [per-child budgets](/features/budgets#dynamic-per-child-budgets) meter them, so `parent=/customers` bills `/customers/acme/app1` and `/customers/acme/app2` together under `/customers/acme`. Usage recorded on the parent itself stays under the parent. Without `parent`, every user path is its own customer.
+
+It takes the same date range and filters as the other usage endpoints, plus `format=csv` (default, downloaded as `gomodel-invoice-<start>-to-<end>.csv`) or `format=json`. On the usage page, **Export invoice** downloads the CSV for the selected date range and filters.
+
+```bash
+curl -OJ "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=2026-10-01&end_date=2026-10-31" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```csv
+row_type,period_start,period_end,currency,customer,model,provider,requests,input_tokens,output_tokens,provider_cost,billed_cost,effective_markup_percent
+item,2026-10-01,2026-10-31,USD,/customers/acme,gpt-5,openai,1200,950000,210000,3.2875,3.945,20
+subtotal,2026-10-01,2026-10-31,USD,/customers/acme,,,1200,950000,210000,3.2875,3.945,20
+total,2026-10-01,2026-10-31,USD,,,,1200,950000,210000,3.2875,3.945,20
+```
+
+Each line item is one model on one provider instance. `row_type` tells line items from each customer's `subtotal` and the grand `total`, so filter on `item` before summing in a spreadsheet. Amounts are plain USD decimals; an empty cost means it is unknown (no pricing). Requests, tokens, and provider cost cover requests sent to providers; billed cost also includes billed response-cache hits, as in the other billed views. `effective_markup_percent` is billed cost over provider cost, minus one, so billed cache hits raise it.

@@ -9,7 +9,9 @@ import { modelsStore } from "$lib/stores/models.svelte.js";
 import {
   buildDisplayModels,
   buildGlobalScopeRow,
+  displayRowEnabled,
   filterDisplayModels,
+  filterDisplayModelsByStatus,
   findModelOverrideView,
   groupDisplayModels,
   rowAccessSelector,
@@ -38,6 +40,8 @@ class VirtualModelsStore {
   aliasError = $state("");
   rowTogglingKey = $state("");
   rowDeletingKey = $state("");
+  // "all" | "enabled" | "disabled" — composes with modelsStore.filter.
+  statusFilter = $state("all");
 
   // ---- Display rows (derived from the shared model inventory) ----
 
@@ -58,8 +62,15 @@ class VirtualModelsStore {
     ),
   );
 
+  // Status first, text second: the text filter decides which bucket answers
+  // for the whole list, so running it before the status filter would let a
+  // substring hit among the hidden rows suppress the fuzzy fallback for the
+  // rows the tab actually shows.
   filteredDisplayModels = $derived(
-    filterDisplayModels(this.displayModels, modelsStore.filter),
+    filterDisplayModels(
+      filterDisplayModelsByStatus(this.displayModels, this.statusFilter),
+      modelsStore.filter,
+    ),
   );
 
   filteredDisplayModelGroups = $derived.by(() => {
@@ -68,7 +79,7 @@ class VirtualModelsStore {
       0,
       Math.min(Number(this.modelRenderLimit || 0), filtered.length),
     );
-    if (!modelsStore.filter && limit >= this.displayModels.length) {
+    if (!this.filtersActive() && limit >= this.displayModels.length) {
       return this.displayModelGroups;
     }
     return groupDisplayModels(
@@ -84,6 +95,10 @@ class VirtualModelsStore {
   globalScopeRow = $derived(
     buildGlobalScopeRow(modelsStore.models, this.modelOverrideViews),
   );
+
+  filtersActive() {
+    return Boolean(modelsStore.filter) || this.statusFilter !== "all";
+  }
 
   modelsBusy() {
     return Boolean(modelsStore.loading || this.modelsRendering);
@@ -229,10 +244,7 @@ class VirtualModelsStore {
     if (!row) {
       return false;
     }
-    if (row.is_alias) {
-      return row.alias && row.alias.enabled !== false;
-    }
-    return Boolean(row.access && row.access.effective_enabled !== false);
+    return displayRowEnabled(row);
   }
 
   rowToggleLabel(row) {
@@ -439,6 +451,15 @@ class VirtualModelsStore {
         description: String(alias.description || "").trim(),
         enabled: alias.enabled !== false,
         ...(alias.slowdown != null ? { slowdown: Number(alias.slowdown) } : {}),
+        ...(alias.reasoning_effort
+          ? { reasoning_effort: alias.reasoning_effort }
+          : {}),
+        ...(alias.params && Object.keys(alias.params).length > 0
+          ? { params: alias.params }
+          : {}),
+        ...(alias.default_params && Object.keys(alias.default_params).length > 0
+          ? { default_params: alias.default_params }
+          : {}),
       },
       operation: "virtual model redirect",
       failureMessage: m.models_redirect_remove_failed(),

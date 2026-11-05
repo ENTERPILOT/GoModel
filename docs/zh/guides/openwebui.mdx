@@ -1,0 +1,132 @@
+---
+title: "GoModel 与 Open WebUI"
+description: "通过 GoModel 为 Open WebUI 提供一个连接即可访问所有提供商，并为每次对话获得审计日志、按用户的成本追踪和指标。"
+icon: "messages-square"
+keywords: ["Open WebUI", "open-webui", "自托管聊天", "基础 URL", "OpenAI 连接", "按用户成本", "LLM 可观测性", "配置指南", "self-hosted chat", "base URL", "OpenAI connection", "per-user costs", "LLM observability", "setup guide"]
+---
+
+## 概览
+
+Open WebUI 是一个自托管的聊天 UI，但它本身无法告诉您每个用户的对话花了多少钱，也无法为模型流量保留审计记录。将其 OpenAI 连接指向 GoModel 即可解决这些问题：只需一个连接，每次对话都会被记录、计价，并归属到已登录的 Open WebUI 用户。同一个连接还会将 Anthropic、Gemini 以及 GoModel 中配置的所有其他提供商加入 Open WebUI 的模型选择器。
+
+流程：
+
+`Open WebUI chat -> Open WebUI backend -> GoModel -> OpenAI/Anthropic/Gemini/...`
+
+您将获得：
+
+- GoModel 审计日志中每次对话的完整请求体和响应体。
+- 通过转发的用户请求头和[标签](/zh/features/labelling)，获得每个 Open WebUI 用户的成本。
+- 所有提供商都位于同一个 OpenAI 连接之后；无需在 Open WebUI 中逐个配置提供商。
+- 启用相应的导出器后，可获得聊天流量的 Prometheus 指标和 OpenTelemetry Trace（参见[注意事项](#注意事项)）。
+- 在 GoModel 中配置后，故障转移、速率限制、预算和响应缓存都会作用于聊天流量。
+
+## 1. 在 Open WebUI 旁运行 GoModel
+
+将两个服务运行在同一个 Docker 网络中，以便 Open WebUI 通过容器名称访问 GoModel：
+
+```yaml docker-compose.yml
+services:
+  gomodel:
+    image: enterpilot/gomodel
+    environment:
+      GOMODEL_MASTER_KEY: change-me
+      OPENAI_API_KEY: sk-...
+      ANTHROPIC_API_KEY: sk-ant-...
+      TAGGING_HEADER_1: X-OpenWebUI-User-Email
+      TAGGING_HEADER_1_DONOTPASS: "true"
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - gomodel_data:/app/data
+
+  openwebui:
+    image: ghcr.io/open-webui/open-webui:v0.11.3
+    environment:
+      OPENAI_API_BASE_URL: http://gomodel:8080/v1
+      OPENAI_API_KEY: change-me
+      ENABLE_OLLAMA_API: "false"
+      ENABLE_FORWARD_USER_INFO_HEADERS: "true"
+    ports:
+      - "3000:8080"
+    volumes:
+      - openwebui_data:/app/backend/data
+
+volumes:
+  gomodel_data:
+  openwebui_data:
+```
+
+| 变量 | 原因 |
+| --- | --- |
+| `OPENAI_API_BASE_URL` | 将所有 OpenAI API 流量发送到 GoModel。请保留 `/v1` 后缀。 |
+| `OPENAI_API_KEY` | GoModel API 密钥（或 `GOMODEL_MASTER_KEY`），而不是真正的 OpenAI 密钥。 |
+| `ENABLE_OLLAMA_API` | 除非您运行了 Ollama，否则关闭；可避免日志中出现连接错误。 |
+| `ENABLE_FORWARD_USER_INFO_HEADERS` | 在每次模型调用时以请求头形式添加已登录用户的姓名、邮箱、ID 和角色，GoModel 会将其转换为下文所述的标签。 |
+| `TAGGING_HEADER_1` | 让 GoModel 将该请求头的值作为标签记录到每个请求上。 |
+| `TAGGING_HEADER_1_DONOTPASS` | 保留标签，但在转发前移除该请求头，因此在[透传](/zh/features/passthrough-api)路由上，用户邮箱永远不会到达提供商。转换路由从不转发客户端请求头。 |
+
+打开 `http://localhost:3000`，创建第一个（管理员）账户，模型选择器列出的正是 GoModel 公开的模型——包括 Anthropic 和 Gemini 模型以及所有[虚拟模型](/zh/features/virtual-models)。对于已有的安装，可以在运行时通过
+`Admin Panel -> Settings -> Connections -> OpenAI API` 设置相同的连接，而无需使用环境变量。
+
+<Tip>
+  请在 GoModel 控制台中为 Open WebUI 创建专用的 API 密钥
+  （`API Keys -> Create API Key`），而不要使用主密钥。密钥可以附带标签、预算和速率限制，因此聊天支出会在控制台中单独显示。
+</Tip>
+
+## 2. 开始对话，并在 GoModel 中查看每次调用
+
+选择任意模型——`openai/gpt-5-mini`、`anthropic/claude-haiku-4-5-20251001`、
+`gemini/gemini-2.5-flash`——开始对话。流式响应，以及 Open WebUI 在每次对话后执行的标题和标签生成，都会经过 GoModel。每次调用都会出现在审计日志中，包含完整的提示词、响应、Token 数、成本以及标识用户的请求头。
+
+<Note>
+  已在 Open WebUI 0.11.3 上验证：模型列表、流式和非流式对话、标题生成以及按用户的标签，测试对象为通过 GoModel 路由的 OpenAI、Anthropic 和
+  Gemini 模型。
+</Note>
+
+### 按用户的成本追踪
+
+设置第 1 步中的两个变量后，每个请求都会携带
+`X-OpenWebUI-User-Email`（以及 `-Name`、`-Id` 和 `-Role`），GoModel
+会将邮箱记录为标签。随后，控制台的按标签用量视图会显示每个人的请求数、Token 数和成本。添加
+`TAGGING_HEADER_2: X-OpenWebUI-User-Name`（并配合其自身的
+`TAGGING_HEADER_2_DONOTPASS: "true"`）可获得更友好的标签。如果不希望邮箱出现在用量数据中，请在第 1 步中改为设置 `TAGGING_HEADER_1: X-OpenWebUI-User-Id`，并保留 `TAGGING_HEADER_1_DONOTPASS`。请求头名称匹配不区分大小写，因此 Open WebUI 实际发送的 `X-Openwebui-User-Email` 大小写形式也没问题。请保持设置 `TAGGING_HEADER_1_DONOTPASS`：常规路由请求从不转发客户端请求头，但
+[透传](/zh/features/passthrough-api)请求否则会将邮箱请求头带到提供商。关于前缀以及如何防止这些请求头到达上游提供商，请参阅[标签](/zh/features/labelling)。
+
+### 精简模型选择器
+
+GoModel 可能公开数百个模型，而 Open WebUI 会将它们全部列出。为了保持选择器易用：
+
+- 在 `Admin Panel -> Settings -> Models` 下隐藏模型，或将其限制给特定用户组。
+- 设置 `DEFAULT_MODELS`，让新用户从您选定的模型开始。
+- 或者在 GoModel 中公开更少的提供商；选择器的内容取决于 `GET /v1/models`。
+
+### 选择低成本的任务模型
+
+每次对话后，Open WebUI 默认使用与对话相同的模型生成标题和标签——每次会话会额外消耗数百个提示词 Token，现在您可以在审计日志中看到这些明细。在
+`Admin Panel -> Settings -> Interface` 下将一个小模型（例如 `openai/gpt-5-mini`）设置为任务模型，即可降低这部分开销。任务调用同样经过 GoModel，因此也会被记录和计价。
+
+## 嵌入与 RAG
+
+Open WebUI 的文档 RAG 默认使用本地嵌入（Embeddings）模型。如果要改为通过 GoModel 路由嵌入请求，请在
+`Admin Panel -> Settings -> Documents` 下将嵌入引擎设置为 `openai`，并使用与第 1 步相同的基础 URL 和密钥。GoModel 提供 `/v1/embeddings`，并像其他调用一样对嵌入用量计价。切换引擎需要重新索引已有文档；不进行此设置，聊天路由也能正常工作。
+
+## 故障排查
+
+| 现象 | 解决方法 |
+| --- | --- |
+| 验证 OpenAI API 连接时出现连接错误 | Open WebUI 无法解析基础 URL。请使用 Docker 服务名称（`gomodel`），而不是 `localhost`；容器内的 `localhost` 指的是容器自身。 |
+| GoModel 日志中出现 `401 Unauthorized` | 连接密钥与 GoModel API 密钥或 `GOMODEL_MASTER_KEY` 不匹配。 |
+| 模型选择器为空 | GoModel 未配置任何提供商。请检查 `GET /v1/models` 和提供商环境变量，然后在 `Admin Panel -> Settings -> Connections` 下刷新连接。 |
+| 用量中没有按用户的标签 | `ENABLE_FORWARD_USER_INFO_HEADERS` 已关闭，或未在 GoModel 中设置 `TAGGING_HEADER_1`。两者缺一不可。 |
+| 启动时出现 Ollama 连接错误 | 没有运行 Ollama。请设置 `ENABLE_OLLAMA_API: "false"`。 |
+| 相同的提示词重复得到相同的回答 | GoModel 的[响应缓存](/zh/features/cache)会重放相同的请求。这通常正是您想要的；如果不是，请禁用缓存。 |
+
+## 注意事项
+
+- GoModel 的[故障转移](/zh/features/failover)和[预算](/zh/features/budgets)
+  会自动作用于聊天流量；按密钥设置的预算可以限制整个 Open WebUI 实例的支出上限。
+- 图像生成、语音转文本和文本转语音在 Open WebUI 的管理设置中有各自独立的端点，不在本次验证范围内。
+- 关于控制台和告警，请参阅
+  [Prometheus 指标](/zh/guides/prometheus-metrics)和
+  [OpenTelemetry](/zh/guides/opentelemetry)。

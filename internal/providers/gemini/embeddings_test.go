@@ -74,7 +74,23 @@ func TestNativeEmbeddings_BatchEmbedContents(t *testing.T) {
 	assert.Equal(t, []float64{0.3, 0.4}, values)
 	assert.Equal(t, 1, resp.Data[1].Index)
 	assert.Equal(t, "embedding", resp.Data[1].Object)
-	assert.Equal(t, 0, resp.Usage.TotalTokens, "native API reports no usage")
+	assert.Equal(t, 0, resp.Usage.TotalTokens, "gemini-embedding-001 reports no usage")
+}
+
+func TestNativeEmbeddings_MapsUsageMetadata(t *testing.T) {
+	server, _ := providertest.JSONServer(t, http.StatusOK, `{
+		"embeddings": [{"values": [0.1]}, {"values": [0.2]}],
+		"usageMetadata": {"promptTokenCount": 9, "promptTokenDetails": [{"modality": "TEXT", "tokenCount": 9}]}
+	}`)
+
+	p := newNativeTestProvider(t, server)
+	resp, err := p.Embeddings(context.Background(), &core.EmbeddingRequest{
+		Model: "gemini-embedding-2",
+		Input: []any{"first", "second"},
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, core.EmbeddingUsage{PromptTokens: 9, TotalTokens: 9}, resp.Usage)
 }
 
 func TestNativeEmbeddings_Base64EncodingFormat(t *testing.T) {

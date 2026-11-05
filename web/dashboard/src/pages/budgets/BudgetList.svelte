@@ -2,11 +2,14 @@
   // Budget rows with usage/period progress bars.
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import HighlightText from "$lib/components/atoms/HighlightText.svelte";
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { formatCost } from "$lib/utils/format.js";
   import { labelColor } from "$lib/utils/chartTheme.js";
   import { budgetsStore as store } from "./budgets.svelte.js";
   import {
+    budgetBilledOnProviderCost,
+    budgetCostBasis,
     budgetKey,
     budgetPeriodBarClass,
     budgetPeriodClass,
@@ -60,7 +63,7 @@
             {#if budgetScope(item) === "label"}
               <Icon icon={Tag} class="budget-scope-icon" />
             {/if}
-            {budgetSubject(item)}
+            <HighlightText text={budgetSubject(item)} needle={store.filter} />
           </code>
           <div class="budget-row-period">
             {#if item.per_child}
@@ -71,9 +74,18 @@
                 <span>{m.budgets_per_child_badge()}</span>
               </span>
             {/if}
+            {#if budgetBilledOnProviderCost(item)}
+              <span class="budget-period-label" title={m.budgets_billed_on_provider_title()}>
+                <span>{m.budgets_billed_on_provider_badge()}</span>
+              </span>
+            {:else if budgetCostBasis(item) === "billed"}
+              <span class="budget-period-label" title={m.budgets_billed_title()}>
+                <span>{m.budgets_billed_badge()}</span>
+              </span>
+            {/if}
             <span class="budget-period-label {budgetPeriodClass(item)}">
               <Icon icon={budgetPeriodIcon(item)} class="budget-period-icon" />
-              <span>{budgetPeriodLabel(item)}</span>
+              <span><HighlightText text={budgetPeriodLabel(item)} needle={store.filter} /></span>
             </span>
           </div>
           <div class="budget-row-controls">

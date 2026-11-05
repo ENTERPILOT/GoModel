@@ -1,0 +1,119 @@
+---
+title: "GitHub Copilot"
+description: "Leiten Sie Traffic für Chat, Responses und Embeddings über ein GitHub-Copilot-Abonnement."
+icon: "github"
+keywords: ["GitHub Copilot", "Copilot", "Abonnement", "subscription", "OAuth", "Provider-Einrichtung", "provider setup"]
+---
+
+Der Provider `github-copilot` ruft die GitHub-Copilot-API mit den Modellen auf,
+die Ihr Copilot-Plan enthält (Free, Pro, Pro+, Max, Business oder Enterprise).
+Die Nutzung wird mit den GitHub AI Credits des Plans abgerechnet, nicht über
+den API-Key eines Modellanbieters.
+
+Der Typ heißt `github-copilot`, nicht `copilot`, damit er nicht mit Microsoft
+Copilot verwechselt wird.
+
+## Konfiguration
+
+Die Zugangsdaten sind ein GitHub-OAuth-Token (`gho_...`) für ein Konto mit
+Copilot-Zugang:
+
+```bash
+GITHUB_COPILOT_API_KEY=gho_...
+```
+
+Oder in `config.yaml`:
+
+```yaml
+providers:
+  github-copilot:
+    type: github-copilot
+    api_key: "${GITHUB_COPILOT_API_KEY}"
+```
+
+GoModel sendet das Token unverändert, ohne Austausch- oder Refresh-Schritt.
+
+### Ein Token beschaffen
+
+Jedes GitHub-OAuth-Token des Kontos funktioniert, zum Beispiel:
+
+```bash
+# GitHub CLI
+GITHUB_COPILOT_API_KEY=$(gh auth token)
+
+# Anmeldung eines Copilot-Clients, z. B. nach `opencode auth login`
+GITHUB_COPILOT_API_KEY=$(jq -r '."github-copilot".refresh' ~/.local/share/opencode/auth.json)
+```
+
+Welche Modelle antworten, hängt von Ihrem Copilot-Plan ab, nicht vom Token. Ein
+Modell, das der Plan nicht enthält, antwortet mit `model_not_supported`, auch
+wenn `/models` es auflistet.
+
+### Business und Enterprise
+
+Die Einzelpläne (Free, Pro, Pro+, Max) nutzen die Standard-Base-URL
+`https://api.githubcopilot.com`. Ein Business- oder Enterprise-Platz kann über
+einen anderen Endpunkt bedient werden; setzen Sie ihn, wenn Requests mit `401`
+oder `model_not_supported` fehlschlagen:
+
+```bash
+GITHUB_COPILOT_BASE_URL=https://api.business.githubcopilot.com
+```
+
+Den Endpunkt Ihres Kontos finden Sie als `endpoints.api` in der Antwort von
+`curl -H "Authorization: Bearer $GITHUB_COPILOT_API_KEY" https://api.github.com/copilot_internal/user`.
+
+## Modelle
+
+GoModel listet die Modelle aus Copilots `/models`. Modelle, die Ihr Plan
+auflistet, die im Konto aber nicht aktiviert sind (Policy `disabled`), werden
+weggelassen; aktivieren Sie sie in Ihren
+[Copilot-Einstellungen](https://github.com/settings/copilot/features), dann
+erscheinen sie bei der nächsten Aktualisierung der Modelle.
+
+Um nur einen Teil davon anzubieten,
+[filtern](/de/advanced/config-yaml#modelle-eines-providers-filtern) Sie die
+Liste:
+
+```bash
+GITHUB_COPILOT_MODEL_FILTER_INCLUDE=claude-sonnet-5.5,gpt-5.6-luna,gpt-4.1
+```
+
+`GITHUB_COPILOT_MODELS` ist eine Fallback-Liste, die nur verwendet wird, wenn
+`/models` fehlschlägt oder leer ist; `CONFIGURED_PROVIDER_MODELS_MODE=allowlist`
+macht sie zur einzigen Liste und überspringt `/models`.
+
+## Chat Completions und Responses für jedes Modell
+
+Copilot bedient GPT-5 und neuer nur über `/responses`, Claude, Kimi und ältere
+GPT-Modelle nur über `/chat/completions`. GoModel liest die Endpunkte jedes
+Modells aus `/models` und bietet beide APIs für jedes Modell an:
+
+| Client ruft auf | Modell wird bedient über | GoModel |
+| --------------- | ------------------------ | ------- |
+| `/v1/chat/completions` | `/chat/completions` | Leitet weiter |
+| `/v1/chat/completions` | nur `/responses` | Übersetzt nach Responses und zurück |
+| `/v1/responses` | `/responses` | Leitet weiter |
+| `/v1/responses` | nur `/chat/completions` | Übersetzt nach Chat Completions und zurück |
+
+Solange GoModel die Endpunkte eines Modells noch nicht gelesen hat, etwa weil
+`/models` nicht erreichbar ist, wird das Modell an `/chat/completions`
+gesendet.
+
+Ein Chat-Request an ein reines Responses-Modell wird mit `400` abgelehnt, wenn
+er ein Feld enthält, das die Übersetzung nicht exakt abbilden kann (zum
+Beispiel `logit_bias`); senden Sie ihn stattdessen an `/v1/responses`.
+
+Embeddings (`text-embedding-3-small`) werden unterstützt. Copilot akzeptiert
+als `input` nur eine Liste, daher wird ein einzelner String in eine Liste mit
+einem Element verpackt.
+
+## Kosten
+
+Copilot [rechnet Tokens ab](https://docs.github.com/en/copilot/concepts/billing-and-usage/individuals/billing),
+zum gelisteten API-Preis des jeweiligen Modells, in AI Credits, die zuerst aus
+dem monatlichen Kontingent des Plans genommen werden. GoModel bepreist
+denselben Traffic aus seinem Modellkatalog, daher sind die
+[Kosten](/de/features/cost-tracking) eine Schätzung der verbrauchten Credits.
+Sie berücksichtigen weder das enthaltene Kontingent noch Copilots Rabatte und
+können daher höher sein als das, was GitHub tatsächlich berechnet.

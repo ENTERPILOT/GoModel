@@ -15,7 +15,17 @@ func (o *InferenceOrchestrator) FailoverSelectors(workflow *core.Workflow) []cor
 	if o.failoverResolver == nil || workflow == nil || workflow.Resolution == nil || !workflow.FailoverEnabled() {
 		return nil
 	}
-	return o.failoverResolver.ResolveFailovers(workflow.Resolution, workflow.Endpoint.Operation)
+	selectors := o.failoverResolver.ResolveFailovers(workflow.Resolution, workflow.Endpoint.Operation)
+	if workflow.Endpoint.Operation != core.OperationEmbeddings {
+		return selectors
+	}
+	var compatible []core.ModelSelector
+	for _, selector := range selectors {
+		if selector.Model == workflow.Resolution.ResolvedSelector.Model {
+			compatible = append(compatible, selector)
+		}
+	}
+	return compatible
 }
 
 // ProviderTypeForSelector returns the provider type for a selector.
@@ -97,7 +107,7 @@ func tryFailoverResponse[T any](
 			)
 			continue
 		}
-		if o.providerOverBudget(ctx, workflow, providerName) {
+		if o.failoverOverBudget(ctx, workflow, providerName) {
 			slog.Info("skipping over-budget failover target",
 				"request_id", requestID,
 				"to", qualified,
@@ -137,10 +147,13 @@ func tryFailoverResponse[T any](
 	return zero, ExecutionMeta{}, lastErr
 }
 
-// providerOverBudget reports whether a failover target's provider budget is
-// spent. A workflow that disables budgets skips the gate, as admission does.
-func (o *InferenceOrchestrator) providerOverBudget(ctx context.Context, workflow *core.Workflow, providerName string) bool {
-	return o.budgetGate != nil && workflow.BudgetEnabled() && !o.budgetGate.ProviderWithinBudget(ctx, providerName)
+// failoverOverBudget reports whether a failover target is out of budget: its
+// provider budget is spent, or a consumer budget admission skipped for a
+// non-billable primary is. A workflow that disables budgets skips the gate,
+// as admission does.
+func (o *InferenceOrchestrator) failoverOverBudget(ctx context.Context, workflow *core.Workflow, providerName string) bool {
+	return o.budgetGate != nil && workflow.BudgetEnabled() &&
+		!o.budgetGate.FailoverWithinBudget(ctx, ProviderNameFromWorkflow(workflow), providerName)
 }
 
 func executeWithFailoverResponse[T any](
@@ -244,7 +257,7 @@ func tryFailoverStream(
 			)
 			continue
 		}
-		if o.providerOverBudget(ctx, workflow, providerName) {
+		if o.failoverOverBudget(ctx, workflow, providerName) {
 			slog.Info("skipping over-budget failover target",
 				"request_id", requestID,
 				"to", qualified,

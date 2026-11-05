@@ -108,14 +108,13 @@ func (s *audioService) CreateSpeech(c *echo.Context) error {
 
 	req, err := canonicalJSONRequestFromSemantics[*core.AudioSpeechRequest](c, core.DecodeAudioSpeechRequest)
 	if err != nil {
-		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+		return handleError(c, invalidRequestBodyError(c, err))
 	}
 	if strings.TrimSpace(req.Input) == "" {
 		return handleError(c, core.NewInvalidRequestError("input is required", nil))
 	}
-	if strings.TrimSpace(req.Voice) == "" {
-		return handleError(c, core.NewInvalidRequestError("voice is required", nil))
-	}
+	// voice is optional: providers with a default speaker apply it, and those
+	// that need one (OpenAI, ElevenLabs, MiniMax) fill or reject it themselves.
 
 	if s.logBodies && s.logAudioBodies {
 		auditlog.EnrichEntryWithRequestBody(c, audioSpeechAuditInput(req))

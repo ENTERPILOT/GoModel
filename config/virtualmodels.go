@@ -62,6 +62,24 @@ type VirtualModelConfig struct {
 	// nil leaves the setting unspecified.
 	Slowdown *float64 `yaml:"slowdown,omitempty" json:"slowdown,omitempty"`
 
+	// ReasoningEffort forces the reasoning effort sent upstream for requests
+	// through this redirect or to this model ("none", "minimal", "low",
+	// "medium", "high", "xhigh", or "max"), replacing the client's value.
+	// Empty leaves the client's value untouched.
+	ReasoningEffort string `yaml:"reasoning_effort,omitempty" json:"reasoning_effort,omitempty"`
+
+	// Params are request parameters forced on every request sent upstream
+	// through this redirect or to this model, replacing the client's values
+	// (for example chat_template_kwargs for a vLLM thinking alias). A null
+	// value strips the key from the request. Keys use Chat Completions
+	// spelling and may be provider-specific; objects merge one level deep.
+	Params map[string]any `yaml:"params,omitempty" json:"params,omitempty"`
+
+	// DefaultParams are request parameters filled in only when the client
+	// omitted them (for example temperature or top_k), so callers can still
+	// tune them per request. A key cannot be in both maps.
+	DefaultParams map[string]any `yaml:"default_params,omitempty" json:"default_params,omitempty"`
+
 	// Enabled toggles the entry. It defaults to true when omitted.
 	Enabled *bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`
 }

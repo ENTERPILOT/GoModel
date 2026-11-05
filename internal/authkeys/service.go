@@ -45,6 +45,22 @@ type Service struct {
 
 	mu       sync.RWMutex
 	snapshot snapshot
+	// refreshMu serializes Refresh, from the store read through the swap, and
+	// the local applies, so a slower refresh never installs an older snapshot
+	// over a newer one.
+	refreshMu sync.Mutex
+
+	// changed is called after every successful write; see SetChangeNotifier.
+	changed func(context.Context)
+}
+
+// SetChangeNotifier installs fn, called after every successful key write so
+// other gateway instances reload the keys, a revocation included. Call it
+// before serving.
+func (s *Service) SetChangeNotifier(fn func(context.Context)) {
+	if s != nil {
+		s.changed = fn
+	}
 }
 
 // NewService creates a managed auth key service backed by storage.
@@ -65,6 +81,8 @@ func NewService(store Store) (*Service, error) {
 
 // Refresh reloads keys from storage and atomically swaps the in-memory snapshot.
 func (s *Service) Refresh(ctx context.Context) error {
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
 	keys, err := s.store.List(ctx)
 	if err != nil {
 		return fmt.Errorf("list auth keys: %w", err)
@@ -557,9 +575,14 @@ func authenticateKey(key AuthKey, now time.Time) (AuthenticationResult, error) {
 	}, nil
 }
 
+// refreshBestEffort runs after every successful write: it reconciles the
+// snapshot from storage and announces the change to other instances.
 func (s *Service) refreshBestEffort(ctx context.Context, operation string) {
 	if err := s.Refresh(ctx); err != nil {
 		slog.Warn("auth key snapshot reconciliation failed", "operation", operation, "error", err)
+	}
+	if s.changed != nil {
+		s.changed(ctx)
 	}
 }
 
@@ -567,6 +590,8 @@ func (s *Service) applyUpsert(key AuthKey, now time.Time) {
 	if s == nil {
 		return
 	}
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -594,6 +619,8 @@ func (s *Service) applyKeyUpdate(id string, now time.Time, mutate func(*AuthKey)
 	if s == nil {
 		return
 	}
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -617,6 +644,8 @@ func (s *Service) applyDeactivate(id string, now time.Time) {
 	if s == nil {
 		return
 	}
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

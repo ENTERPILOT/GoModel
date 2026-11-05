@@ -1,0 +1,122 @@
+---
+title: "Responses 兼容性"
+description: "了解 GoModel 可以将哪些 Responses API 功能翻译给聊天类提供商、哪些功能需要提供商原生支持，以及这对 Agent SDK 的影响。"
+icon: "route"
+keywords: ["Responses API 兼容性", "Responses API compatibility", "功能支持", "feature support", "Agent SDK", "agent SDK", "翻译限制", "translation limits"]
+---
+
+GoModel 接受兼容 OpenAI 的 `/v1/responses` 请求，并将其路由到选定的模型提供商。部分提供商提供原生兼容 Responses 的接口；其他提供商则提供 Chat Completions 或提供商原生的聊天 API，此时 GoModel 会对请求进行翻译。
+
+兼容性规则遵循 Postel 定律：GoModel 会翻译可移植的模型功能，并接受不熟悉的工具声明，但不会把它们转发给无法执行它们的提供商。如果某些字段无法被安全翻译，而它们又会改变模型输出的含义，则仍会被拒绝。
+
+## 路由模式
+
+| 模式 | 行为 |
+| --- | --- |
+| 原生 Responses 提供商 | GoModel 将 Responses 负载转发到提供商兼容 Responses 的端点。如果提供商支持，提供商原生功能也可能可用。 |
+| 聊天翻译提供商 | GoModel 将 `/v1/responses` 转换为聊天语义，调用提供商的聊天 API，再将结果转换回 Responses 结构。 |
+
+聊天翻译提供商包括 Anthropic 和 Gemini 的原生路由。它们能很好地支持文本、流式传输、目标适配器支持的多模态输入以及函数工具循环，但无法安全地执行 OpenAI 托管的工具。
+
+## 功能行为
+
+| 功能 | 原生 Responses 提供商 | 聊天翻译提供商 |
+| --- | --- | --- |
+| 文本输入和 `instructions` | 转发 | 转换为聊天消息 |
+| 基于 HTTP/SSE 的流式传输 | 转发 | 从聊天流式事件转换为 OpenAI 事件序列：`response.created` 和 `response.in_progress`、输出条目和内容部分的生命周期事件，并在每个事件上带有 `sequence_number` |
+| 函数工具 | 转发 | 转换为提供商的函数/工具声明 |
+| 函数调用输出条目 | 转发 | 转换为聊天工具结果消息 |
+| 回放的输出条目元数据（`id`、`status`、`annotations`、`logprobs`） | 转发 | 在分发前丢弃：聊天类提供商没有承载它们的位置，Groq 和 Fireworks 会直接拒绝它们 |
+| `text.format` 结构化输出 | 转发 | 在提供商支持时转换为 `response_format` |
+| 仅 Responses 支持的工具（`web_search`、`file_search`、`computer_use_preview` 和 `namespace`） | 由提供商决定 | 接受并省略 |
+| `previous_response_id` | 转发；但如果该 ID 是 GoModel 为聊天翻译提供商生成的，或运行了编辑内容的 prompt 护栏，则按右侧方式解析 | 由 GoModel 解析：将已存储的上一个响应的输入条目和输出前置到输入中。上一个响应必须已被存储（`store` 保持开启），否则请求返回 404（参见 [存储的响应](/zh/advanced/responses-api#已存储的响应)） |
+| `conversation` | 由 GoModel 从网关管理的会话中解析 | 由 GoModel 从网关管理的会话中解析 |
+| `include` 注解 | 转发 | 接受并忽略，`message.output_text.logprobs` 除外 |
+| 未知的 Responses 输入条目类型 | 保留 | 拒绝 |
+| Responses WebSocket 传输 | GoModel 未实现 | GoModel 未实现 |
+
+<Note>
+  在 Anthropic 上，`text.format` 由提供商原生的结构化输出（`json_schema`）或系统提示词指令（`json_object`）实现——
+  参见 [Anthropic](/zh/providers/anthropic#结构化输出)。
+  `text.verbosity` 在 Anthropic 中没有对应项，会被丢弃并输出警告。
+</Note>
+
+## `include` 字段
+
+`include` 用于请求响应条目上的额外注解，例如
+`reasoning.encrypted_content` 或 `file_search_call.results`。它从不改变模型的行为，因此聊天翻译提供商会接受它，并返回不含这些注解的响应，与不支持这些注解的原生提供商完全一样。总是附带 `include` 的客户端（例如使用
+`wire_api = "responses"` 的 Codex）无需额外配置即可工作。
+
+唯一的例外是 `message.output_text.logprobs`，它请求的是真实的模型输出而不是注解。GoModel 拒绝它，原因与拒绝 `top_logprobs` 相同。
+
+## 托管工具
+
+托管工具由上游提供商执行，而不仅仅依靠模型的文本补全。它们的负载通常引用提供商拥有的资源和运行时状态：
+
+- `web_search` 及其旧版别名 `web_search_preview` 依赖提供商的搜索实现和事件 schema。
+- `file_search` 引用提供商的向量存储，例如 `vector_store_ids`。
+- `computer_use_preview` 依赖提供商管理的计算机会话、显示环境和安全模型。
+
+GoModel 不会将这些工具翻译为 Anthropic、Gemini 或其他聊天类提供商的工具调用。虚假的翻译会改变工具运行的位置、状态的存储方式以及适用的安全控制。因此，聊天翻译提供商会接受请求，但在分发给提供商之前省略所有非函数工具。
+同一请求中受支持的函数工具仍可正常工作。
+
+`namespace` 工具会作为一个整体被省略，而不是被展开。展开会改变工具名称，破坏客户端的路由约定。选择了被省略工具的 `tool_choice` 也会被省略。如果所有工具都被省略，`parallel_tool_calls` 也会从翻译后的请求中移除。
+
+这是对能力的优雅降级，而不是对托管工具的模拟。尤其要注意，来自聊天翻译提供商的响应并不意味着发生了网页搜索、文件搜索或计算机操作。当结果依赖于这些工具的运行时，请使用原生 Responses 提供商。
+
+## Agent SDK
+
+OpenAI Agents SDK 客户端可以通过 GoModel 与 Anthropic 和 Gemini 模型通信，适用于可移植的流程：
+
+- 普通的 `Runner.run(...)`
+- 基于 HTTP/SSE 的 `Runner.run_streamed(...)`
+- 本地函数工具
+- 由 SDK 管理的本地历史回放
+
+聊天翻译提供商会忽略提供商托管的工具。服务端管理的会话状态和 WebSocket Responses 传输仍依赖于提供商的特定支持。
+
+无状态回放同样可用。将上一轮输出条目作为输入发回的客户端（`store: false`、Codex、SDK 管理的历史）总是会带上 Responses API 返回的条目 `id`。GoModel 在调用聊天类提供商之前，会将该 `id` 连同其他仅 Responses 使用的条目元数据一并丢弃，因此同一份回放请求体可在所有提供商上使用。
+
+对于 Python Agents SDK 客户端，带命名空间的 GoModel 模型 ID（例如
+`anthropic/claude-sonnet-4-20250514` 和 `gemini/gemini-2.0-flash`）需要启用模型 ID 透传模式：
+
+```python
+from agents import MultiProvider, RunConfig
+from openai import AsyncOpenAI
+
+client = AsyncOpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key="change-me",
+)
+
+run_config = RunConfig(
+    model_provider=MultiProvider(
+        openai_client=client,
+        unknown_prefix_mode="model_id",
+        openai_prefix_mode="model_id",
+    )
+)
+```
+
+调用 `Runner.run(...)` 或
+`Runner.run_streamed(...)` 时请使用该 `run_config`。
+
+## 测试兼容性边界
+
+OpenAI Agents SDK 示例包含用于测试经由 GoModel 路由到 Anthropic 的探测脚本：
+
+```bash
+export OPENAI_BASE_URL=http://localhost:8080/v1
+export GOMODEL_MASTER_KEY=change-me
+export OPENAI_MODEL=anthropic/claude-sonnet-4-20250514
+
+python3 docs/examples/openai-agents-sdk/anthropic_responses_probe.py
+python3 docs/examples/openai-agents-sdk/anthropic_agents_probe.py
+```
+
+Responses 探测脚本会同时验证受支持和不受支持的路径：普通 Responses 调用、函数工具、结构化输出拒绝、有状态字段拒绝、未知输入条目拒绝，以及托管工具的优雅省略。
+Agents 探测脚本会验证基本运行、函数工具循环和流式函数工具循环。
+
+## 路线图
+
+未来对托管工具的支持应采用显式的提供商能力映射。也就是说，GoModel 在接受请求之前，应当知道哪个提供商、模型、API 模式和请求结构能够安全地处理每项功能。

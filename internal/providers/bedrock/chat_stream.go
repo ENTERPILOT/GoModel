@@ -44,7 +44,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 	}
 	observation.end(http.StatusOK, nil)
 
-	return observedStream(newOpenAIStream(out, req.Model), observation), nil
+	return observedStream(newOpenAIStream(out, req.Model, p.responseProviderName()), observation), nil
 }
 
 func converseStreamInput(parts converseParts) *bedrockruntime.ConverseStreamInput {
@@ -65,13 +65,14 @@ func converseStreamInput(parts converseParts) *bedrockruntime.ConverseStreamInpu
 // the metadata arrives (so we can include usage) or the event stream closes
 // (so we emit a finish chunk without usage rather than swallow it).
 type streamConverter struct {
-	stream    *bedrockruntime.ConverseStreamOutput
-	model     string
-	id        string
-	created   int64
-	closeOnce sync.Once
-	buf       []byte
-	done      bool
+	stream       *bedrockruntime.ConverseStreamOutput
+	model        string
+	providerName string
+	id           string
+	created      int64
+	closeOnce    sync.Once
+	buf          []byte
+	done         bool
 
 	// per-block tool-use accumulators keyed by content_block index.
 	toolByIndex map[int32]*toolStreamState
@@ -91,14 +92,15 @@ type toolStreamState struct {
 	name        string
 }
 
-func newOpenAIStream(out *bedrockruntime.ConverseStreamOutput, model string) *streamConverter {
+func newOpenAIStream(out *bedrockruntime.ConverseStreamOutput, model, providerName string) *streamConverter {
 	now := time.Now()
 	return &streamConverter{
-		stream:      out,
-		model:       model,
-		id:          "bedrock-" + strconv.FormatInt(now.UnixNano(), 10),
-		created:     now.Unix(),
-		toolByIndex: make(map[int32]*toolStreamState),
+		stream:       out,
+		model:        model,
+		providerName: providerName,
+		id:           "bedrock-" + strconv.FormatInt(now.UnixNano(), 10),
+		created:      now.Unix(),
+		toolByIndex:  make(map[int32]*toolStreamState),
 	}
 }
 
@@ -263,7 +265,7 @@ func (s *streamConverter) formatChunk(delta map[string]any, finishReason any, us
 			usagePayload["cache_creation_input_tokens"] = int(awssdk.ToInt32(usage.CacheWriteInputTokens))
 		}
 	}
-	return providers.FormatChatChunkSSE(s.id, s.created, s.model, providerName, delta, finishReason, usagePayload)
+	return providers.FormatChatChunkSSE(s.id, s.created, s.model, s.providerName, delta, finishReason, usagePayload)
 }
 
 var _ io.ReadCloser = (*streamConverter)(nil)

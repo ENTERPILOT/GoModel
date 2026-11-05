@@ -1285,3 +1285,27 @@ func TestNew_AttributesErrorsToInstanceName(t *testing.T) {
 	require.ErrorAs(t, err, &gwErr)
 	assert.Equal(t, "openai-eu", gwErr.Provider)
 }
+
+// The provider name clients see (the response's provider field, translated
+// Responses output, file objects) is the configured instance name, so two
+// instances of one provider type stay distinguishable.
+func TestCompatibleProviders_ReportInstanceName(t *testing.T) {
+	cfg := CompatibleProviderConfig{ProviderName: "deepseek", BaseURL: "https://example.invalid"}
+
+	tests := []struct {
+		name string
+		opts providers.ProviderOptions
+		want string
+	}{
+		{name: "configured instance name", opts: providers.ProviderOptions{Name: "mockds"}, want: "mockds"},
+		{name: "blank instance name falls back to the type", opts: providers.ProviderOptions{Name: "   "}, want: "deepseek"},
+		{name: "no factory options", want: "deepseek"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, NewCompatibleProvider("k", tt.opts, cfg).ProviderName(), "CompatibleProvider.ProviderName()")
+			assert.Equal(t, tt.want, NewChatCompatible("k", tt.opts, cfg).ProviderName(), "ChatCompatible.ProviderName()")
+		})
+	}
+}

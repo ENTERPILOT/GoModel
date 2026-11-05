@@ -11,6 +11,7 @@ import {
 
 import {
   collectExtraTargets,
+  paramsObject,
   qualifyTarget,
   strategyLabel,
   strategyUsesWeights,
@@ -75,9 +76,87 @@ export function defaultVirtualModelForm() {
     user_paths: "",
     description: "",
     slowdown: "",
+    reasoning_effort: "",
+    // JSON-object text; see parseParamsJSON/formatParamsJSON.
+    params: "",
+    default_params: "",
     enabled: true,
   };
 }
+
+// PARAMS_FIELDS are the request-parameter maps a virtual model or model may
+// carry: `params` is forced on every request, `default_params` fills in keys
+// the client omitted. The editor holds each as JSON text.
+export const PARAMS_FIELDS = ["params", "default_params"];
+
+// formatParamsJSON renders a parameter map as the editor's textarea text:
+// pretty-printed with a 2-space indent, or empty when there is nothing set.
+export function formatParamsJSON(value) {
+  const object = paramsObject(value);
+  return Object.keys(object).length > 0 ? JSON.stringify(object, null, 2) : "";
+}
+
+// parseParamsJSON parses a parameter textarea: blank text is an empty map,
+// a JSON object is returned as-is, and anything else (malformed JSON, an
+// array, a scalar) yields null so the caller can refuse to save.
+export function parseParamsJSON(text) {
+  const trimmed = String(text ?? "").trim();
+  if (!trimmed) {
+    return {};
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  return parsed;
+}
+
+// vmFormParamsValid reports whether the form's parameter maps are all
+// well-formed JSON objects (blank counts as valid).
+export function vmFormParamsValid(form) {
+  return PARAMS_FIELDS.every(
+    (field) => parseParamsJSON(form && form[field]) !== null,
+  );
+}
+
+// assignParamsFromForm copies each non-empty, well-formed parameter map from
+// the form's JSON text onto the payload; blank or malformed text is skipped.
+function assignParamsFromForm(payload, form) {
+  for (const field of PARAMS_FIELDS) {
+    const parsed = parseParamsJSON(form && form[field]);
+    if (parsed && Object.keys(parsed).length > 0) {
+      payload[field] = parsed;
+    }
+  }
+}
+
+// assignParamsFromView copies each non-empty parameter map from an API-shaped
+// alias or policy onto the payload, so a toggle round-trips them.
+function assignParamsFromView(payload, view) {
+  for (const field of PARAMS_FIELDS) {
+    const object = paramsObject(view && view[field]);
+    if (Object.keys(object).length > 0) {
+      payload[field] = object;
+    }
+  }
+}
+
+// REASONING_EFFORT_LEVELS are the reasoning effort values a virtual model or
+// model may force upstream; an empty value keeps the client's effort.
+export const REASONING_EFFORT_LEVELS = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
 
 // vmFormPluginStrategy reports whether the form routes through a plugin.
 export function vmFormPluginStrategy(form) {
@@ -408,6 +487,13 @@ export function buildVirtualModelSavePayload(form, originalSource, mode) {
       payload.slowdown = slowdown;
     }
   }
+  const reasoningEffort = String(
+    (form && form.reasoning_effort) || "",
+  ).trim();
+  if (reasoningEffort) {
+    payload.reasoning_effort = reasoningEffort;
+  }
+  assignParamsFromForm(payload, form);
   if (isRename) {
     // Carry the prior key so the backend moves the row instead of leaving an
     // orphan behind under the old source.
@@ -467,6 +553,10 @@ export function buildAliasTogglePayload(alias) {
       payload.slowdown = slowdown;
     }
   }
+  if (alias.reasoning_effort) {
+    payload.reasoning_effort = alias.reasoning_effort;
+  }
+  assignParamsFromView(payload, alias);
   const lbTargets = Array.isArray(alias.targets) ? alias.targets : [];
   if (lbTargets.length > 1) {
     payload.strategy = alias.strategy || "round_robin";
@@ -517,11 +607,20 @@ export function buildModelTogglePayload(selector, existingPolicy, access) {
     hasExistingSlowdown ? existingPolicy.slowdown : 0,
   );
 
+  const existingReasoningEffort = String(
+    (existingPolicy && existingPolicy.reasoning_effort) || "",
+  ).trim();
+
   const preserved = {};
   if (existingDescription) preserved.description = existingDescription;
   if (hasExistingSlowdown && Number.isFinite(existingSlowdown)) {
     preserved.slowdown = existingSlowdown;
   }
+  if (existingReasoningEffort) {
+    preserved.reasoning_effort = existingReasoningEffort;
+  }
+  assignParamsFromView(preserved, existingPolicy);
+  const hasExistingParams = PARAMS_FIELDS.some((field) => field in preserved);
 
   let method = "PUT";
   let payload;
@@ -537,6 +636,8 @@ export function buildModelTogglePayload(selector, existingPolicy, access) {
     existingPaths.length === 0 &&
     !existingDescription &&
     !hasExistingSlowdown &&
+    !existingReasoningEffort &&
+    !hasExistingParams &&
     safeAccess.default_enabled !== false
   ) {
     // Removing a path-less policy only enables the model when the default is

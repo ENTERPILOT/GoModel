@@ -7,6 +7,7 @@
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { debounced } from "$lib/utils/debounce.js";
   import Pagination from "$lib/components/molecules/Pagination.svelte";
+  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import {
     formatCost,
@@ -15,37 +16,39 @@
     providerDisplayValue,
   } from "$lib/utils/format.js";
   import { usagePage } from "./usage.svelte.js";
+  import { usageFacets } from "./usageFacets.svelte.js";
   import SessionIDChip from "./SessionIDChip.svelte";
-  import {
-    authKeyDisplayName,
-    cachedCostTitle,
-    costSourceTooltip,
-    entryLabels,
-    formatCostTooltip,
-    hasProviderCache,
-    labelColor,
-    providerCacheLabel,
-    providerCacheTitle,
-    usageEntryCacheLabel,
-    usageEntryCached,
-    usageLogHasAuthKeys,
-    usageLogHasLabels,
-    usesResponseCostPricing,
-  } from "./usage-helpers.js";
+  import { authKeyDisplayName, usageLogHasAuthKeys } from "./usage-filter-options.js";
+import { entryLabels, labelColor, usageLogHasLabels } from "./usage-labels.js";
+import {
+  billedCostTitle,
+  cachedCostTitle,
+  costSourceTooltip,
+  formatCostTooltip,
+  hasProviderCache,
+  providerCacheLabel,
+  providerCacheTitle,
+  usageEntryCached,
+  usageEntryCacheLabel,
+  usesResponseCostPricing,
+} from "./usage-cost-format.js";
   import { CircleDollarSign, DatabaseZap } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
   const costsMode = $derived(usagePage.usageMode === "costs");
+  // Billed cost sits next to total cost in the costs view; the tokens view
+  // keeps its single provider-cost column.
+  const showBilled = $derived(costsMode && runtimeConfig.billedCostVisible());
   const hasLabels = $derived(
     usageLogHasLabels(
       usagePage.labelUsage,
-      usagePage.usageFilterLabel,
+      usagePage.filters.labels,
       usagePage.usageLog.entries,
     ),
   );
 
   const hasAuthKeys = $derived(
-    usageLogHasAuthKeys(usagePage.usageFilterAuthKey, usagePage.usageLog.entries),
+    usageLogHasAuthKeys(usagePage.filters.authKeys, usagePage.usageLog.entries),
   );
 
   const onSearchInput = debounced(() => usagePage.fetchUsageLog(true));
@@ -54,12 +57,12 @@
 
 {#snippet authKeyChip(entry)}
   {#if entry.auth_key_id}
-    {@const name = authKeyDisplayName(entry.auth_key_id, usagePage.authKeyNames)}
+    {@const name = authKeyDisplayName(entry.auth_key_id, usageFacets.authKeyNames)}
     <button
       type="button"
       class="usage-label-chip"
-      class:active={usagePage.usageFilterAuthKey === entry.auth_key_id}
-      title={usagePage.usageFilterAuthKey === entry.auth_key_id
+      class:active={usagePage.filters.authKeys.includes(entry.auth_key_id)}
+      title={usagePage.filters.authKeys.includes(entry.auth_key_id)
         ? m.usage_clear_auth_key_filter()
         : m.usage_filter_by_auth_key({ name, id: entry.auth_key_id })}
       onclick={() => usagePage.toggleUsageAuthKeyFilter(entry.auth_key_id)}
@@ -76,7 +79,7 @@
         <button
           type="button"
           class="usage-label-chip"
-          class:active={usagePage.usageFilterLabel === label}
+          class:active={usagePage.filters.labels.includes(label)}
           style="--label-color: {labelColor(label)}"
           title={usagePage.usageLabelChipTitle(label)}
           onclick={() => usagePage.toggleUsageLabelFilter(label)}
@@ -132,6 +135,9 @@
             <th class="col-price">{costsMode ? m.usage_column_input_cost() : m.usage_column_input()}</th>
             <th class="col-price">{costsMode ? m.usage_column_output_cost() : m.usage_column_output()}</th>
             <th class="col-price">{costsMode ? m.usage_column_total_cost() : m.usage_column_total()}</th>
+            {#if showBilled}
+              <th class="col-price" title={m.usage_billed_cost_help()}>{m.usage_billed_cost()}</th>
+            {/if}
             {#if !costsMode}
               <th class="col-price">{m.usage_column_cost()}</th>
             {/if}
@@ -145,6 +151,9 @@
               >
               <td>
                 <span class="provider-badge">{providerDisplayValue(entry) || "-"}</span>
+                {#if entry.billable === false}
+                  <span class="alias-kind-badge" title={m.usage_not_billable_help()}>{m.usage_not_billable()}</span>
+                {/if}
               </td>
               <td class="mono font-size-md">{entry.model}</td>
               <td class="mono font-size-md">{entry.user_path || "-"}</td>
@@ -152,7 +161,7 @@
                 {#if entry.session_id}
                   <SessionIDChip
                     sessionID={entry.session_id}
-                    active={usagePage.usageFilterSession === entry.session_id}
+                    active={usagePage.filters.session === entry.session_id}
                     compact
                     onfilter={(sessionID) => usagePage.filterBySession(sessionID, entry.user_path)}
                   />
@@ -212,6 +221,11 @@
                   <span class="caveat-icon" title={entry.costs_calculation_caveat}>&#9888;</span>
                 {/if}
               </td>
+              {#if showBilled}
+                <td class="col-price" title={billedCostTitle(entry)}>
+                  {formatCost(entry.billed_cost)}
+                </td>
+              {/if}
               {#if !costsMode}
                 <td class="col-price" title={cachedCostTitle(entry, formatCostTooltip(entry))}>
                   <span>{formatCost(entry.total_cost)}</span>

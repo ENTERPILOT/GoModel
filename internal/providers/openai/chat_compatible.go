@@ -23,7 +23,10 @@ import (
 // (re-calling providers.ResponsesViaChat with itself) for the translation to
 // pick up the override.
 type ChatCompatible struct {
-	compatible   *CompatibleProvider
+	compatible *CompatibleProvider
+	// providerName names the provider in translated Responses output and in
+	// the errors that translation raises: the configured instance name when
+	// the factory supplied one, the provider type otherwise.
 	providerName string
 }
 
@@ -33,7 +36,7 @@ func NewChatCompatible(apiKey string, opts providers.ProviderOptions, cfg Compat
 	applyChatCompatibleDefaults(&cfg)
 	return &ChatCompatible{
 		compatible:   NewCompatibleProvider(apiKey, opts, cfg),
-		providerName: cfg.ProviderName,
+		providerName: opts.ClientName(cfg.ProviderName),
 	}
 }
 
@@ -45,6 +48,12 @@ func applyChatCompatibleDefaults(cfg *CompatibleProviderConfig) {
 
 func bearerHeaders(req *http.Request, apiKey string) {
 	providers.SetAuthHeaders(req, apiKey, providers.AuthHeaderConfig{AuthScheme: "Bearer "})
+}
+
+// ProviderName returns the name this provider reports to clients: the
+// configured instance name when there is one, the provider type otherwise.
+func (c *ChatCompatible) ProviderName() string {
+	return c.providerName
 }
 
 // Compatible exposes the underlying OpenAI-compatible adapter, so a provider
@@ -64,6 +73,11 @@ func (c *ChatCompatible) SetBaseURL(url string) {
 // so it reflects SetBaseURL overrides). Used to derive realtime websocket targets.
 func (c *ChatCompatible) GetBaseURL() string {
 	return c.compatible.GetBaseURL()
+}
+
+// HTTPClient returns the client the provider's requests go through.
+func (c *ChatCompatible) HTTPClient() *http.Client {
+	return c.compatible.HTTPClient()
 }
 
 // ChatCompletion sends a chat completion request to the provider.

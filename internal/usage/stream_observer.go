@@ -289,6 +289,7 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]any) *Usage
 	)
 	if entry != nil {
 		entry.ProviderName = o.providerName
+		entry.RoutedModel = strings.TrimSpace(o.model)
 		entry.UserPath = o.userPath
 		entry.SessionID = o.sessionID
 		entry.AuthKeyID = o.authKeyID

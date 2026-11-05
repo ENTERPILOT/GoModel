@@ -31,4 +31,9 @@ spec:
         - --retry
         - "5"
         - --retry-connrefused
-        - {{ printf "http://%s:%d%s" (include "gomodel.fullname" .) (int .Values.service.port) (include "gomodel.pathWithBasePath" (dict "root" . "path" "/health/ready")) | quote }}
+        {{- if eq (include "gomodel.scheme" .) "https" }}
+        # The certificate is issued for the names clients use, not
+        # necessarily the Service name; this only checks that it answers.
+        - --insecure
+        {{- end }}
+        - {{ printf "%s://%s:%d%s" (include "gomodel.scheme" .) (include "gomodel.fullname" .) (int .Values.service.port) (include "gomodel.pathWithBasePath" (dict "root" . "path" "/health/ready")) | quote }}

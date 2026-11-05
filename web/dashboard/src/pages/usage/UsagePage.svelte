@@ -1,29 +1,45 @@
 <script>
   // Usage Analytics page. Route sub "costs" selects the costs mode
   // (deep link /admin/dashboard/usage/costs).
+  import { untrack } from "svelte";
   import DatePicker from "$lib/components/molecules/DatePicker.svelte";
   import SegmentedControl from "$lib/components/atoms/SegmentedControl.svelte";
   import { auth } from "$lib/stores/auth.svelte.js";
+  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { router } from "$lib/stores/router.svelte.js";
   import { liveLogs } from "../audit-logs/liveLogs.svelte.js";
   import { usagePage } from "./usage.svelte.js";
+  import { usageFacets } from "./usageFacets.svelte.js";
+  import { restoreUsageUrl } from "./usage-view.js";
   import FacetFilters from "./FacetFilters.svelte";
   import UsageStatCards from "./UsageStatCards.svelte";
   import UsageBreakdownChart from "./UsageBreakdownChart.svelte";
+  import UsagePivot from "./UsagePivot.svelte";
   import UsageLog from "./UsageLog.svelte";
+  import ExportInvoiceButton from "./ExportInvoiceButton.svelte";
+  import { invoiceExportVisible } from "./usage-invoice.js";
   import * as m from "$lib/paraglide/messages.js";
 
   const PAGE = "usage";
+  let seenHistoryTick = 0;
 
-  // Re-fetch when the page becomes active or the API key changes. Live
+  // Re-fetch when the page becomes active, the API key changes or the user
+  // goes back/forward (the URL then holds another view). Live
   // request-log previews stream in via the shared liveLogs singleton
   // (ensureLiveLogs is a no-op when the stream is already running).
   $effect(() => {
     void auth.refreshTick;
+    const historyTick = router.historyTick;
     if (router.page === PAGE) {
-      usagePage.fetchUsagePage();
-      usagePage.fetchAuthKeyNames();
-      liveLogs.ensureLiveLogs();
+      // untrack: restoring and fetching read the filters, which must not
+      // become dependencies (a filter change would re-run the restore).
+      untrack(() => {
+        restoreUsageUrl({ fromHistory: historyTick !== seenHistoryTick });
+        seenHistoryTick = historyTick;
+        usagePage.fetchUsagePage();
+        usageFacets.fetchAuthKeyNames();
+        liveLogs.ensureLiveLogs();
+      });
     }
   });
 
@@ -52,6 +68,9 @@
       onchange={(mode) => usagePage.toggleUsageMode(mode)}
     />
     <DatePicker onchange={() => usagePage.fetchUsagePage()} />
+    {#if invoiceExportVisible(runtimeConfig)}
+      <ExportInvoiceButton />
+    {/if}
   </div>
 
   <!-- Page-level data filters: every widget below follows them -->
@@ -67,6 +86,9 @@
     <UsageBreakdownChart kind="label" />
     <UsageBreakdownChart kind="type" />
   </div>
+
+  <!-- Two-dimension breakdown (e.g. cost per month by user path). -->
+  <UsagePivot />
 
   <!-- Session cardinality and identifiers need the full page width. -->
   <div class="usage-session-breakdown-wrap">

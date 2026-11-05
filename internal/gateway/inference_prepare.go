@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestparams"
 )
 
 // PrepareChatRequest resolves workflow/model policy and applies translated request patching.
@@ -22,7 +23,7 @@ func (o *InferenceOrchestrator) PrepareEmbeddingRequest(ctx context.Context, req
 	if req == nil {
 		return nil, core.NewInvalidRequestError("embeddings request is required", nil)
 	}
-	ctx = contextWithRequestID(ctx, meta.RequestID)
+	ctx = WithAttemptRecorder(contextWithRequestID(ctx, meta.RequestID))
 	workflow, err := o.ensureTranslatedRequestWorkflow(ctx, meta.Workflow, meta.RequestID, meta.Endpoint, &req.Model, &req.Provider)
 	if err != nil {
 		return nil, err
@@ -38,7 +39,13 @@ type translatedPrepareSpec[Req any, Prepared any] struct {
 	resolve         func(*InferenceOrchestrator) func(context.Context, Req, *core.Workflow) (context.Context, Req, error)
 	patch           func(*InferenceOrchestrator) func(context.Context, Req) (Req, error)
 	valid           func(Req) bool
-	build           func(context.Context, Req, *core.Workflow) Prepared
+	// overrides applies the primary attempt's forced reasoning effort and
+	// request parameters, so the prepared request (and the response cache key
+	// built from it) carries what is actually sent upstream. The client's
+	// request stays in the context so failover attempts are rebuilt from it
+	// with their own overrides.
+	overrides func(Req, requestparams.Overrides) (Req, error)
+	build     func(context.Context, Req, *core.Workflow) Prepared
 }
 
 var chatPrepareSpec = translatedPrepareSpec[*core.ChatRequest, *PreparedChatRequest]{
@@ -47,6 +54,7 @@ var chatPrepareSpec = translatedPrepareSpec[*core.ChatRequest, *PreparedChatRequ
 	selector:        chatRequestSelector,
 	patch:           chatRequestPatch,
 	valid:           validChatRequest,
+	overrides:       ChatRequestWithOverrides,
 	build: func(ctx context.Context, req *core.ChatRequest, workflow *core.Workflow) *PreparedChatRequest {
 		return &PreparedChatRequest{Context: ctx, Request: req, Workflow: workflow}
 	},
@@ -59,6 +67,7 @@ var responsesPrepareSpec = translatedPrepareSpec[*core.ResponsesRequest, *Prepar
 	resolve:         responsesHistoryResolve,
 	patch:           responsesRequestPatch,
 	valid:           validResponsesRequest,
+	overrides:       ResponsesRequestWithOverrides,
 	build: func(ctx context.Context, req *core.ResponsesRequest, workflow *core.Workflow) *PreparedResponsesRequest {
 		return &PreparedResponsesRequest{Context: ctx, Request: req, Workflow: workflow}
 	},
@@ -90,6 +99,14 @@ func prepareTranslated[Req any, Prepared any](
 			return spec.build(ctx, req, workflow), err
 		}
 		return zero, err
+	}
+	if spec.overrides != nil {
+		if overrides := o.RequestOverrides(ctx, workflow); !overrides.IsZero() {
+			ctx = withClientRequest(ctx, req)
+			if req, err = spec.overrides(req, overrides); err != nil {
+				return zero, overridesError(err)
+			}
+		}
 	}
 	return spec.build(ctx, req, workflow), nil
 }

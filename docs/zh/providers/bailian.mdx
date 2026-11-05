@@ -1,0 +1,144 @@
+---
+title: "阿里云百炼（Bailian / DashScope）配置"
+sidebarTitle: "阿里云百炼"
+description: "配置阿里云百炼（Alibaba Cloud Model Studio，也称 DashScope API），包括 Qwen 模型的 max_tokens 兼容适配。"
+icon: "cloud"
+keywords: ["阿里云百炼", "Alibaba Cloud Model Studio", "百炼", "Bailian", "DashScope", "通义千问", "Qwen", "提供商配置", "provider setup"]
+---
+
+阿里云百炼（Alibaba Cloud Model Studio）是阿里云面向 Qwen 系列模型的模型即服务平台。在控制台、SDK 和 API 文档中，该服务也被称为百炼（Bailian）和
+DashScope。GoModel 通过其兼容 OpenAI 的端点（`/compatible-mode/v1`）路由到该服务。
+
+<Note>
+  出于兼容性考虑，GoModel 将提供商 ID、环境变量和透传路径保持为
+  `bailian`、`BAILIAN_*` 和 `/p/bailian/...`。
+</Note>
+
+由于百炼已于 2026 年 4 月弃用 `max_tokens`，改用
+`max_completion_tokens`，GoModel 会在每个请求中自动将标准的
+`max_tokens` 字段映射为 `max_completion_tokens`——客户端无需任何修改。
+
+## 配置
+
+```bash
+BAILIAN_API_KEY=...
+```
+
+或者在 `config.yaml` 中：
+
+```yaml
+providers:
+  bailian:
+    type: bailian
+    api_key: "${BAILIAN_API_KEY}"
+    # base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+```
+
+## Base URL
+
+百炼兼容 OpenAI 的 API 在多个地域提供。设置
+`BAILIAN_BASE_URL` 即可切换：
+
+| 地域 | URL |
+| ------ | --- |
+| 北京（默认） | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| 新加坡 | `https://{workspace-id}.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1` |
+| 法兰克福 | `https://{workspace-id}.eu-central-1.maas.aliyuncs.com/compatible-mode/v1` |
+| 中国香港 | `https://{workspace-id}.cn-hongkong.maas.aliyuncs.com/compatible-mode/v1` |
+
+## 模型 ID
+
+常用的 Qwen 模型标识——最新目录请查看 [百炼模型列表](https://www.alibabacloud.com/help/zh/model-studio/model-list)：
+
+| 模型 | 示例 ID |
+| ----- | ---------- |
+| Qwen 3.7 Max | `qwen3.7-max` |
+| Qwen 3.7 Plus | `qwen3.7-plus` |
+| Qwen 3.6 Flash | `qwen3.6-flash` |
+| Qwen 3 Max | `qwen3-max` |
+| Qwen 3 Plus | `qwen3-plus` |
+| Qwen 3 Flash | `qwen3-flash` |
+| Qwen 3 Coder Plus | `qwen3-coder-plus` |
+| 文本嵌入 | `text-embedding-v3` |
+
+## `max_tokens` 兼容性
+
+百炼于 2026-04-20 弃用了 `max_tokens`（自 2026-05-30 起生效）。
+其兼容模式下的模型现在要求改用 `max_completion_tokens`。
+
+GoModel 会对每个 `bailian` 提供商请求，透明地将标准的 `max_tokens` 参数映射为
+`max_completion_tokens`——您可以像往常一样发送
+`max_tokens`，GoModel 会在转发到百炼之前将其改写。
+
+<CodeGroup>
+
+```bash curl
+# max_tokens=4096 会被自动作为 max_completion_tokens=4096 发送
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen3-max",
+    "messages": [{"role": "user", "content": "Hello"}],
+    "max_tokens": 4096
+  }'
+```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="unused")
+
+# max_tokens=4096 会被自动作为 max_completion_tokens=4096 发送
+completion = client.chat.completions.create(
+    model="qwen3-max",
+    messages=[{"role": "user", "content": "Hello"}],
+    max_tokens=4096,
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "unused",
+});
+
+// max_tokens=4096 会被自动作为 max_completion_tokens=4096 发送
+const completion = await client.chat.completions.create({
+  model: "qwen3-max",
+  messages: [{ role: "user", content: "Hello" }],
+  max_tokens: 4096,
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
+
+## 支持的功能
+
+| 功能 | 是否支持 |
+| ------- | :-------: |
+| Chat Completions | ✅ |
+| 流式聊天 | ✅ |
+| Responses（`/v1/responses`） | ✅（翻译为聊天格式） |
+| 嵌入（Embeddings） | ✅（通过 `BAILIAN_MODELS` 配置模型 ID） |
+| 文件（`/v1/files`） | ✅ |
+| 批处理（`/v1/batches`） | ✅ |
+| 透传（`/p/bailian/...`） | ✅ |
+
+<Note>
+  嵌入模型（`text-embedding-v3`、`text-embedding-v4`）由兼容模式 API 提供，但**不会**从上游
+  `/v1/models` 端点自动发现。请设置 `BAILIAN_MODELS=text-embedding-v3,text-embedding-v4`，
+  或使用 `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` 使其可用。
+</Note>
+
+## 参考
+
+- [百炼文档（英文）](https://www.alibabacloud.com/help/en/model-studio/what-is-model-studio)
+- [百炼文档](https://www.alibabacloud.com/help/zh/model-studio/)
+- [兼容 OpenAI 的 API 参考](https://www.alibabacloud.com/help/zh/model-studio/compatibility-with-openai-responses-api)
+- [Qwen 模型列表](https://www.alibabacloud.com/help/zh/model-studio/model-list)

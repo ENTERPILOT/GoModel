@@ -1,6 +1,7 @@
 <script>
   // Slidable, resizable JSON panel on the right: the request body as it will
-  // be sent (live, as the conversation is edited) and the last response.
+  // be sent (live, as the conversation is edited) and the last response, of
+  // the chat conversation or the active media mode.
   import CopyButton from "$lib/components/atoms/CopyButton.svelte";
   import DialogCloseButton from "$lib/components/atoms/DialogCloseButton.svelte";
   import SegmentedControl from "$lib/components/atoms/SegmentedControl.svelte";
@@ -12,6 +13,7 @@
   import { slide } from "svelte/transition";
   import * as m from "$lib/paraglide/messages.js";
   import { playgroundStore as store } from "./playground.svelte.js";
+  import { playgroundMediaStore } from "./playgroundMedia.svelte.js";
   import {
     DEFAULT_JSON_PANEL_WIDTH,
     JSON_PANEL_FULLSCREEN_MAX_VIEWPORT,
@@ -43,8 +45,12 @@
     { value: "response", label: m.playground_json_response() },
   ]);
 
-  const requestText = $derived(formatJSON(store.requestBody));
-  const responseText = $derived(formatJSON(store.response));
+  // Request/response state lives in the chat store or the media store; panel
+  // state (open, tab) always lives in the chat store.
+  const source = $derived(store.mode === "chat" ? store : playgroundMediaStore);
+  const multipart = $derived(store.mode === "transcription");
+  const requestText = $derived(formatJSON(source.requestBody));
+  const responseText = $derived(formatJSON(source.response));
   const shownText = $derived(store.panelTab === "request" ? requestText : responseText);
 
   function metaParts(meta) {
@@ -230,17 +236,19 @@
       aria-label={store.panelTab === "request" ? m.playground_json_request() : m.playground_json_response()}
     >
       {#if store.panelTab === "request"}
-        <p class="playground-json-meta mono">POST {store.endpointPath}</p>
-        <pre class="playground-json-code mono">{requestText}</pre>
-      {:else if store.sending && store.response === null}
-        <p class="playground-json-placeholder">
-          {store.sendingStream ? m.playground_json_streaming() : m.playground_sending()}
+        <p class="playground-json-meta mono">
+          POST {source.endpointPath}{multipart ? " · multipart/form-data" : ""}
         </p>
-      {:else if store.response === null}
+        <pre class="playground-json-code mono">{requestText}</pre>
+      {:else if source.sending && source.response === null}
+        <p class="playground-json-placeholder">
+          {source === store && store.sendingStream ? m.playground_json_streaming() : m.playground_sending()}
+        </p>
+      {:else if source.response === null}
         <p class="playground-json-placeholder">{m.playground_json_empty_response()}</p>
       {:else}
-        {#if store.responseMeta}
-          <p class="playground-json-meta mono">{metaParts(store.responseMeta).join(" · ")}</p>
+        {#if source.responseMeta}
+          <p class="playground-json-meta mono">{metaParts(source.responseMeta).join(" · ")}</p>
         {/if}
         <pre class="playground-json-code mono">{responseText}</pre>
       {/if}

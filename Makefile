@@ -1,4 +1,4 @@
-.PHONY: all build run demo clean tidy mod-check frontend frontend-check frontend-stub test test-race test-dashboard test-e2e test-integration test-contract test-live test-all lint lint-fix fix fix-check record-api swagger docs-openapi helm-lint install-tools perf-check perf-bench infra image seed-demo-data build-plugins image-plugins example-plugins
+.PHONY: all build run demo clean tidy mod-check frontend frontend-check frontend-stub test test-race test-dashboard test-e2e test-integration test-contract test-live test-all lint lint-fix fix fix-check record-api swagger docs-openapi helm-lint install-tools perf-check perf-bench fuzz infra image seed-demo-data build-plugins image-plugins example-plugins
 
 all: frontend build
 
@@ -174,6 +174,15 @@ perf-check:
 
 perf-bench:
 	go test -bench=. -benchmem ./tests/perf/...
+
+# Run each fuzz target for FUZZTIME. The seed corpora already run as plain
+# tests under `make test`; this explores beyond them and is not part of CI.
+# Usage: make fuzz FUZZTIME=5m
+FUZZTIME ?= 30s
+fuzz:
+	go test -run='^$$' -fuzz='^FuzzRequestDecompression$$' -fuzztime=$(FUZZTIME) ./internal/server
+	go test -run='^$$' -fuzz='^FuzzRewriteBatchSource$$' -fuzztime=$(FUZZTIME) ./internal/core
+	go test -run='^$$' -fuzz='^FuzzUnknownJSONFieldsRoundTrip$$' -fuzztime=$(FUZZTIME) ./internal/core
 
 # Record API responses for contract tests
 # Usage: OPENAI_API_KEY=sk-xxx make record-api

@@ -12,6 +12,9 @@
     sidebarWidthFromPointer,
   } from "$lib/stores/sidebar-sizing.js";
   import { gomodelPath } from "$lib/api/paths.js";
+  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+  import { licenseIndicator } from "$lib/utils/licenseIndicator.js";
+  import { classOnOverflow } from "$lib/utils/attachments.js";
   import * as m from "$lib/paraglide/messages.js";
   import { NAV_ITEMS } from "./navigation.js";
   import { LockKeyhole, LogOut, Route, UserRound } from "lucide";
@@ -21,6 +24,35 @@
   const navItems = $derived(
     NAV_ITEMS.filter((item) => !item.visible || item.visible()),
   );
+
+  // The countdown is in whole days, so an hourly tick keeps a dashboard left
+  // open overnight from showing yesterday's number.
+  let now = $state(Date.now());
+  $effect(() => {
+    const id = setInterval(() => (now = Date.now()), 60 * 60 * 1000);
+    return () => clearInterval(id);
+  });
+
+  const license = $derived(licenseIndicator(runtimeConfig.config, now));
+  const licenseChip = $derived.by(() => {
+    const chip = license?.chip;
+    if (!chip) return null;
+    const over = chip.kind === "grace" || chip.kind === "expired";
+    const text = over
+      ? m.sidebar_license_days_over_short({ count: chip.days })
+      : m.sidebar_license_days_short({ count: chip.days });
+    let title;
+    if (chip.kind === "trial") {
+      title = m.sidebar_license_trial_left({ count: chip.days, date: chip.endDate });
+    } else if (chip.kind === "expiring") {
+      title = m.sidebar_license_expires_in({ count: chip.days, date: chip.endDate });
+    } else if (chip.kind === "grace") {
+      title = m.sidebar_license_grace({ count: chip.graceDays, date: chip.endDate });
+    } else {
+      title = m.sidebar_license_expired({ date: chip.endDate });
+    }
+    return { text, title, tone: chip.tone };
+  });
 
   let resizePointerID = $state(null);
   let resizeStartX = 0;
@@ -84,11 +116,35 @@
   class:sidebar-collapsed={sidebar.collapsed}
   class:sidebar-resizing={resizePointerID !== null}
 >
-  <div class="sidebar-header">
+  <!-- The license labels give way to the dot whenever they do not fit beside
+       the name: at any sidebar width and in any language. -->
+  <div
+    class="sidebar-header"
+    title={licenseChip?.title}
+    {@attach license ? classOnOverflow("license-compact") : undefined}
+  >
     <div class="sidebar-logo">
       <GoModelLogo />
+      {#if licenseChip}
+        <span class="license-dot license-{licenseChip.tone}" aria-hidden="true"
+        ></span>
+      {/if}
     </div>
     <h1>GoModel</h1>
+    {#if license}
+      <span
+        class="license-badge"
+        title={m.sidebar_license_badge_title({ badge: license.badge })}
+        >{license.badge}</span
+      >
+      {#if licenseChip}
+        <span
+          class="license-chip license-{licenseChip.tone}"
+          title={licenseChip.title}
+          aria-label={licenseChip.title}>{licenseChip.text}</span
+        >
+      {/if}
+    {/if}
   </div>
   <nav class="sidebar-nav">
     {#each navItems as item (item.page)}
@@ -226,6 +282,77 @@
 .sidebar-logo :global(svg) {
     width: 100%;
     height: 100%;
+  }
+
+.sidebar-logo {
+    position: relative;
+  }
+
+.license-badge {
+    flex-shrink: 0;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    line-height: 1.4;
+  }
+
+.license-chip {
+    flex-shrink: 0;
+    padding: 1px 6px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text-muted);
+    font-size: 10.5px;
+    font-weight: 700;
+    line-height: 1.4;
+    white-space: nowrap;
+    cursor: default;
+  }
+
+.license-chip.license-warning {
+    border-color: var(--warning);
+    color: var(--warning);
+  }
+
+.license-chip.license-danger {
+    border-color: var(--danger);
+    color: var(--danger);
+  }
+
+/* Stands in for the badge and chip when the header has no room for them;
+   the header's title carries the text. */
+.license-dot {
+    display: none;
+    position: absolute;
+    top: -3px;
+    right: -5px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 2px var(--bg-surface);
+  }
+
+.license-dot.license-warning {
+    background: var(--warning);
+  }
+
+.license-dot.license-danger {
+    background: var(--danger);
+  }
+
+/* Set by classOnOverflow at runtime, so it never carries the scope hash. */
+.sidebar-header:global(.license-compact) .license-badge,
+.sidebar-header:global(.license-compact) .license-chip {
+    display: none;
+  }
+
+.sidebar-header:global(.license-compact) .license-dot {
+    display: block;
   }
 
 .sidebar-header :global(h1) {
@@ -415,8 +542,14 @@
     padding: 16px;
   }
 
-.sidebar.sidebar-collapsed .sidebar-header :global(h1) {
+.sidebar.sidebar-collapsed .sidebar-header :global(h1),
+.sidebar.sidebar-collapsed .license-badge,
+.sidebar.sidebar-collapsed .license-chip {
     display: none;
+  }
+
+.sidebar.sidebar-collapsed .license-dot {
+    display: block;
   }
 
 .sidebar.sidebar-collapsed .sidebar-nav .nav-item {
@@ -451,8 +584,14 @@
           padding: 16px;
         }
 
-  .sidebar-header :global(h1) {
+  .sidebar-header :global(h1),
+  .license-badge,
+  .license-chip {
           display: none;
+        }
+
+  .license-dot {
+          display: block;
         }
 
   .sidebar-nav .nav-item {

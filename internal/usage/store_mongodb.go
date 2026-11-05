@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -48,7 +49,7 @@ type MongoDBStore struct {
 	collection                  *mongo.Collection
 	retentionDays               int
 	startPricingSession         func() (mongoPricingSession, error)
-	recalculatePricingDocuments func(context.Context, bson.D, PricingResolver) (RecalculatePricingResult, error)
+	recalculatePricingDocuments func(context.Context, bson.D, PricingResolver, Billing) (RecalculatePricingResult, error)
 }
 
 // NewMongoDBStore creates a new MongoDB usage store.
@@ -96,13 +97,22 @@ func NewMongoDBStore(database *mongo.Database, retentionDays int) (*MongoDBStore
 		{
 			Keys: bson.D{{Key: "cache_type", Value: 1}, {Key: "timestamp", Value: 1}},
 		},
+		// Serves RecentWrites. Sparse, so history written before the write
+		// stamp existed stays out of it.
+		{
+			Keys:    bson.D{{Key: "written_at", Value: 1}},
+			Options: options.Index().SetSparse(true),
+		},
 	}
 
 	// Add timestamp index - use TTL index if retention is configured,
 	// otherwise use a regular descending index for query performance.
 	// MongoDB doesn't allow multiple indexes on the same field when one is TTL.
 	if retentionDays > 0 {
-		ttlSeconds := int32(int64(retentionDays) * 24 * 60 * 60)
+		// expireAfterSeconds is an int32; clamp so a very long retention cannot
+		// overflow into a negative TTL.
+		const secondsPerDay = 24 * 60 * 60
+		ttlSeconds := int32(min(retentionDays, math.MaxInt32/secondsPerDay) * secondsPerDay)
 		indexes = append(indexes, mongo.IndexModel{
 			Keys:    bson.D{{Key: "timestamp", Value: -1}},
 			Options: options.Index().SetExpireAfterSeconds(ttlSeconds),

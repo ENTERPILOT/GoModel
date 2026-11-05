@@ -27,6 +27,18 @@ const (
 	DefaultStreamLookbehind = 64
 )
 
+// enforcementMessage resolves the configured message. A blank one — unset, or
+// cleared in the dashboard — falls back to the block-phrased default for the
+// outcomes that stop the request, so a block never answers with an empty
+// error; warn keeps no note, since its message is only an audit note and the
+// default would read as a block in the dashboard.
+func enforcementMessage(configured, onMatch string) string {
+	if configured != "" || onMatch == OnMatchWarn {
+		return configured
+	}
+	return DefaultMessage
+}
+
 // settings is the validated configuration.
 type settings struct {
 	rules           []rule
@@ -52,7 +64,7 @@ func decodeConfig(raw json.RawMessage) (settings, error) {
 	}
 	s.enforcement = pluginapi.Enforcement{
 		Action:      pluginapi.Action(s.onMatch),
-		Message:     cfg.String("message", DefaultMessage),
+		Message:     enforcementMessage(cfg.String("message", ""), s.onMatch),
 		BlockStatus: cfg.BlockStatus("block_status"),
 	}
 	ruleLines := cfg.Lines("rules")

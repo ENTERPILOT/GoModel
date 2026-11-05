@@ -76,6 +76,63 @@
   min-width: 0;
 }
 
+/* Checklist dropdown: a <details> whose <summary> carries .usage-log-select
+   (so it matches the native selects) and whose panel lists checkboxes. Shared
+   by the audit request-type filter and the Columns menu; the owner positions
+   the <details> (position: relative). */
+.audit-checklist-summary {
+  display: block;
+  list-style: none;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.audit-checklist-summary::-webkit-details-marker {
+  display: none;
+}
+
+.audit-checklist-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  margin: 0;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 25%);
+}
+
+.audit-checklist-legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.audit-checklist-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.audit-checklist-option:hover {
+  background: var(--bg-surface-hover);
+}
+
 /* Request labels — one deterministic accent per label, shared with the
    by-label chart. labelChipStyle() sets --label-color inline per chip. */
 .usage-label-chips {

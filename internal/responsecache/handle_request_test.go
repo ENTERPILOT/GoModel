@@ -389,6 +389,7 @@ func TestHandleRequest_ExactHitWritesSyntheticUsageEntry(t *testing.T) {
 
 	entry := logger.entries[0]
 	require.Equal(t, usage.CacheTypeExact, entry.CacheType)
+	require.Equal(t, "gpt-4", entry.RoutedModel)
 	require.Equal(t, 11, entry.InputTokens)
 	require.Equal(t, 5, entry.OutputTokens)
 	require.Equal(t, 16, entry.TotalTokens)

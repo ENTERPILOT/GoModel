@@ -253,16 +253,22 @@ func TestAudioSpeech_MissingInput(t *testing.T) {
 	assert.Nil(t, mock.capturedSpeech)
 }
 
-func TestAudioSpeech_MissingVoice(t *testing.T) {
-	mock := &audioMockProvider{mockProvider: &mockProvider{supportedModels: []string{"gpt-4o-mini-tts"}}}
+// TestAudioSpeech_MissingVoiceIsForwarded checks voice is optional at ingress:
+// the provider applies its default speaker or rejects the request itself.
+func TestAudioSpeech_MissingVoiceIsForwarded(t *testing.T) {
+	mock := &audioMockProvider{
+		mockProvider: &mockProvider{supportedModels: []string{"gpt-4o-mini-tts"}},
+		speechResp:   &core.AudioResponse{ContentType: "audio/mpeg", Data: []byte("audio")},
+	}
 	handler := NewHandler(mock, nil, nil, nil)
 
 	body := `{"model":"gpt-4o-mini-tts","input":"hello"}`
 	c, rec := echotest.Post(t, "/v1/audio/speech", body)
 	err := handler.AudioSpeech(c)
 	require.NoError(t, err)
-	require.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Nil(t, mock.capturedSpeech)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, mock.capturedSpeech)
+	assert.Empty(t, mock.capturedSpeech.Voice)
 }
 
 // TestAudioSpeech_AuthorizesResolvedSelector verifies the authorizer receives the

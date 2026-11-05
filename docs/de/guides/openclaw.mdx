@@ -1,0 +1,163 @@
+---
+title: "GoModel & OpenClaw"
+description: "Verwenden Sie GoModel als OpenAI-kompatibles AI-Gateway für OpenClaw, mit empfohlenen OpenAI-Modellen und einer produktionsreifen Einrichtung."
+icon: "paw-print"
+keywords: ["OpenClaw", "OpenAI-kompatibles Gateway", "OpenAI-compatible gateway", "KI-Gateway", "Einrichtungsanleitung"]
+---
+
+## Übersicht
+
+GoModel ist ein OpenAI-kompatibles **AI-Gateway** für OpenClaw. Es bietet Ihnen einen einzigen,
+stabilen API-Endpunkt und routet Requests an OpenAI und andere Provider. Dadurch bleibt die
+OpenClaw-Konfiguration einfach, und der Wechsel zwischen Modellen wird leichter.
+
+Ablauf:
+
+`OpenClaw -> GoModel -> OpenAI/Anthropic/Gemini/...`
+
+## Empfohlene OpenAI-Modelle (Stand: 28. Februar 2026)
+
+Diese OpenAI-Modell-IDs sind derzeit gute Standardwerte für OpenClaw:
+
+| Modell-ID | Am besten geeignet für |
+| --- | --- |
+| `gpt-5-mini` | Standardwahl für ein ausgewogenes Verhältnis von Kosten und Leistung |
+| `gpt-5.2` | Höhere Qualität für komplexe Coding- und agentische Aufgaben |
+| `gpt-5.2-chat-latest` | Auf Chat abgestimmtes Verhalten, angelehnt an ChatGPT |
+| `gpt-5.2-codex` | Fortgeschrittene Coding-Workflows in Codex-ähnlichen Umgebungen (auf die Responses API ausgerichtet) |
+
+<Note>
+  Prüfen Sie zuerst die Verfügbarkeit in Ihrer GoModel-Instanz: `GET /v1/models`. Die
+  Verfügbarkeit von Modellen hängt von der Stufe Ihres OpenAI-Kontos und der verwendeten API ab.
+</Note>
+
+Referenz:
+- Release von OpenAI GPT-5.2: [OpenAI Changelog](https://platform.openai.com/docs/changelog)
+- Modelldokumentation von OpenAI: [Models Overview](https://platform.openai.com/docs/models)
+
+## 1. GoModel starten
+
+Starten Sie GoModel mit mindestens einem Provider und einem Master-Key:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e OPENAI_API_KEY="sk-..." \
+  enterpilot/gomodel
+```
+
+Prüfen Sie Ihre Modellliste:
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/v1/models \
+  -H "Authorization: Bearer change-me"
+```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="change-me")
+
+for model in client.models.list():
+    print(model.id)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "change-me",
+});
+
+for await (const model of client.models.list()) {
+  console.log(model.id);
+}
+```
+
+</CodeGroup>
+
+## 2. GoModel-Provider in OpenClaw hinzufügen
+
+Fügen Sie in Ihrer OpenClaw-Konfiguration einen eigenen Provider hinzu, der OpenAI-kompatible
+Requests verwendet:
+
+```json
+{
+  "env": {
+    "GOMODEL_MASTER_KEY": "change-me"
+  },
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "gomodel": {
+        "baseUrl": "http://localhost:8080/v1",
+        "apiKey": "${GOMODEL_MASTER_KEY}",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "gpt-5-mini",
+            "name": "GoModel gpt-5-mini",
+            "reasoning": false,
+            "input": ["text"],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 128000,
+            "maxTokens": 8192
+          },
+          {
+            "id": "gpt-5.2",
+            "name": "GoModel gpt-5.2",
+            "reasoning": true,
+            "input": ["text"],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 128000,
+            "maxTokens": 8192
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "gomodel/gpt-5-mini"
+      }
+    }
+  }
+}
+```
+
+Ersetzen Sie die Modell-IDs durch die Werte, die GoModel unter `/v1/models` zurückgibt.
+
+<Tip>
+  `gpt-5.2-codex` ist für Coding-Agents sehr relevant, wird von OpenAI derzeit aber als auf die
+  Responses API ausgerichtet positioniert. Wenn Ihre OpenClaw-Einrichtung `openai-completions`
+  verwendet, bevorzugen Sie `gpt-5-mini` oder `gpt-5.2`.
+</Tip>
+
+## 3. Aus OpenClaw heraus validieren
+
+Senden Sie nach dem Neuladen von OpenClaw einen Test-Prompt mit Ihrem konfigurierten
+Standardmodell.
+
+Wenn Sie `401 Unauthorized` erhalten, prüfen Sie, ob OpenClaw denselben Wert wie
+`GOMODEL_MASTER_KEY` sendet.
+
+## Hinweise
+
+- Läuft GoModel in Docker und OpenClaw nicht, ist `http://localhost:8080` in der Regel korrekt.
+- Laufen beide in verschiedenen Containern, verwenden Sie statt `localhost` ein gemeinsames Docker-Netzwerk und den Hostnamen des Containers.
+- Sie können mehrere über GoModel bereitgestellte Modelle verfügbar machen, indem Sie weitere Einträge unter `models.providers.gomodel.models` hinzufügen.
+- Als AI-Gateway bietet Ihnen GoModel außerdem zentrale Authentifizierung, Audit-Logs, Nutzungsanalysen und eine Provider-Abstraktion über einen einzigen OpenAI-kompatiblen Endpunkt.

@@ -209,7 +209,7 @@ func TestSQLiteSummaryAggregatesRewriteSavings(t *testing.T) {
 
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -238,7 +238,7 @@ func TestSQLiteSummaryAggregatesRewriteSavings(t *testing.T) {
 	err = store.WriteBatch(ctx, entries)
 	require.NoError(t, err)
 
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	summary, err := reader.GetSummary(ctx, UsageQueryParams{})
@@ -269,7 +269,7 @@ func TestSQLiteRecalculatePricingRefreshesRewriteCostSaved(t *testing.T) {
 
 	defer db.Close()
 
-	store, err := NewSQLiteStore(db, 0)
+	store, err := newSQLiteStore(db, 0)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -289,7 +289,7 @@ func TestSQLiteRecalculatePricingRefreshesRewriteCostSaved(t *testing.T) {
 	_, err = store.RecalculatePricing(ctx, RecalculatePricingParams{}, resolver)
 	require.NoError(t, err)
 
-	reader, err := NewSQLiteReader(db)
+	reader, err := newSQLiteReader(db)
 	require.NoError(t, err)
 
 	summary, err := reader.GetSummary(ctx, UsageQueryParams{})

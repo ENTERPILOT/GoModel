@@ -9,6 +9,7 @@
   import { access } from "$lib/stores/access.svelte.js";
   import { budgetsStore as store } from "./budgets.svelte.js";
   import {
+    budgetCostBasisOptions,
     budgetOverrideDialogMessage,
     budgetPeriodOptions,
     budgetScopeOptions,
@@ -104,6 +105,19 @@
           >
         </span>
       </label>
+    {/if}
+    {#if store.billedBudgetsEnabled()}
+      <FormField id="budget-cost-basis" label={m.budgets_cost_basis()}>
+        <select
+          id="budget-cost-basis"
+          class="form-select settings-select"
+          bind:value={store.form.cost_basis}
+        >
+          {#each budgetCostBasisOptions() as option (option.value)}
+            <option value={option.value}>{option.label}</option>
+          {/each}
+        </select>
+      </FormField>
     {/if}
     {#if store.form.period === "custom"}
       <FormField id="budget-period-seconds" label={m.budgets_period_seconds()}>

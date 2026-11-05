@@ -304,18 +304,19 @@ export function createStreamAccumulator(endpointID) {
 
 // --- Model picker ------------------------------------------------------------
 
-// /admin/models inventory -> [{id, label, provider}] of text-capable, enabled
-// models, deduplicated by public selector and sorted. `label` drops a
-// "provider/" prefix that merely repeats the provider name, so a picker can
-// show the provider once, as a tag; `id` stays the full selector to send.
-export function playgroundModelOptions(inventory) {
+// /admin/models inventory -> [{id, label, provider}] of enabled models that
+// advertise one of `modes` (text modes by default; models without mode
+// metadata always qualify), deduplicated by public selector and sorted.
+// `label` drops a "provider/" prefix that merely repeats the provider name, so
+// a picker can show the provider once, as a tag; `id` stays the full selector.
+export function playgroundModelOptions(inventory, modes = TEXT_MODES) {
   const seen = new Map();
   for (const entry of Array.isArray(inventory) ? inventory : []) {
     const id = String(entry?.selector || entry?.model?.id || "").trim();
     if (!id || seen.has(id)) continue;
     if (entry?.access && entry.access.effective_enabled === false) continue;
-    const modes = entry?.model?.metadata?.modes;
-    if (Array.isArray(modes) && modes.length && !modes.some((mode) => TEXT_MODES.has(mode))) {
+    const advertised = entry?.model?.metadata?.modes;
+    if (Array.isArray(advertised) && advertised.length && !advertised.some((mode) => modes.has(mode))) {
       continue;
     }
     const provider = String(entry?.provider_name || "");

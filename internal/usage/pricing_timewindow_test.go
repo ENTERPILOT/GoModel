@@ -2,7 +2,6 @@ package usage
 
 import (
 	"context"
-	"database/sql"
 	"os"
 	"testing"
 	"time"
@@ -13,6 +12,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -195,41 +195,20 @@ func assertTimeWindowRecalculation(t *testing.T, store recalculatingStore, readT
 	}
 }
 
-func TestSQLiteStoreRecalculatePricingAppliesTimeWindowsFromStoredTimestamps(t *testing.T) {
-	db, err := sql.Open("sqlite", ":memory:")
-	require.NoError(t, err)
+func TestSQLStoreRecalculatePricingAppliesTimeWindowsFromStoredTimestamps(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		ctx := context.Background()
+		store, err := NewSQLStore(ctx, db, 0)
+		require.NoError(t, err)
 
-	defer db.Close()
+		writeTimeWindowRecalculationEntries(t, store)
+		assertTimeWindowRecalculation(t, store, func(id string) float64 {
+			var total float64
+			err := db.QueryRow(ctx, "SELECT total_cost FROM usage WHERE id = ?", id).Scan(&total)
+			require.NoError(t, err, "read %s", id)
 
-	store, err := NewSQLiteStore(db, 0)
-	require.NoError(t, err)
-
-	writeTimeWindowRecalculationEntries(t, store)
-	assertTimeWindowRecalculation(t, store, func(id string) float64 {
-		var total float64
-		err := db.QueryRowContext(context.Background(), "SELECT total_cost FROM usage WHERE id = ?", id).Scan(&total)
-		require.NoError(t, err, "read %s", id)
-
-		return total
-	})
-}
-
-func TestPostgreSQLStoreRecalculatePricingAppliesTimeWindowsFromStoredTimestamps(t *testing.T) {
-	pool := sqlxtest.NewPostgresPool(t)
-	if pool == nil {
-		return // skipped: no test server configured
-	}
-
-	store, err := NewPostgreSQLStore(pool, 0)
-	require.NoError(t, err)
-
-	writeTimeWindowRecalculationEntries(t, store)
-	assertTimeWindowRecalculation(t, store, func(id string) float64 {
-		var total float64
-		err := pool.QueryRow(context.Background(), "SELECT total_cost FROM usage WHERE id = $1::uuid", id).Scan(&total)
-		require.NoError(t, err, "read %s", id)
-
-		return total
+			return total
+		})
 	})
 }
 
@@ -263,11 +242,13 @@ func TestMongoDBStoreRecalculatePricingAppliesTimeWindowsFromStoredTimestamps(t 
 	})
 }
 
-func TestNewPostgreSQLStoreToleratesConcurrentStartup(t *testing.T) {
+func TestNewSQLStoreToleratesConcurrentPostgreSQLStartup(t *testing.T) {
 	pool := sqlxtest.NewPostgresPool(t)
 	if pool == nil {
 		return // skipped: no test server configured
 	}
+	db, err := sqlx.NewPostgreSQL(pool)
+	require.NoError(t, err)
 
 	// Several replicas construct the store against one fresh database at
 	// once; every DDL statement must serialize instead of failing the
@@ -278,7 +259,7 @@ func TestNewPostgreSQLStoreToleratesConcurrentStartup(t *testing.T) {
 	for range workers {
 		go func() {
 			<-start
-			store, err := NewPostgreSQLStore(pool, 0)
+			store, err := NewSQLStore(context.Background(), db, 0)
 			if err == nil {
 				err = store.Close()
 			}

@@ -1,0 +1,161 @@
+---
+title: "GoModel & n8n"
+description: "只需一个凭据，即可将 n8n 中所有 AI Agent、LLM Chain 和 OpenAI 节点的调用经由 GoModel 路由，并为所有工作流获得审计日志、成本追踪和指标。"
+icon: "workflow"
+keywords: ["n8n", "AI Agent", "OpenAI 凭据", "Base URL", "工作流自动化", "LLM 可观测性", "配置指南", "OpenAI credential", "base URL", "workflow automation", "LLM observability", "setup guide"]
+---
+
+## 概览
+
+n8n 没有内置功能来追踪其 AI 节点发送和接收的内容。将 n8n 指向 GoModel 即可解决这个问题，且无需任何社区节点：
+只需一个使用 GoModel Base URL 的 **OpenAI** 凭据，每个工作流的模型调用都会被记录、计费并导出为指标。
+同一个凭据还能让 n8n 的 OpenAI 节点使用 Anthropic、Gemini 以及 GoModel 中配置的任何其他提供商。
+
+流程：
+
+`n8n workflow -> OpenAI Chat Model / OpenAI node -> GoModel -> OpenAI/Anthropic/Gemini/...`
+
+您将获得：
+
+- GoModel 审计日志中每次 AI 调用的完整请求体和响应体。
+- 按模型、按 API 密钥和按标签统计的 Token 用量和成本。
+- AI 流量的 Prometheus 指标和 OpenTelemetry Trace。
+- 故障转移、缓存、速率限制和预算均应用于 n8n 流量。
+- 无需额外凭据，即可在 n8n 的 OpenAI 节点中使用非 OpenAI 模型。
+
+## 1. 在 n8n 旁运行 GoModel
+
+将两个服务运行在同一个 Docker 网络中，以便 n8n 可以通过容器名称访问 GoModel：
+
+```yaml docker-compose.yml
+services:
+  gomodel:
+    image: enterpilot/gomodel
+    environment:
+      GOMODEL_MASTER_KEY: change-me
+      OPENAI_API_KEY: sk-...
+      ANTHROPIC_API_KEY: sk-ant-...
+    ports:
+      - "8080:8080"
+
+  n8n:
+    image: n8nio/n8n
+    environment:
+      N8N_COMMUNITY_PACKAGES_ENABLED: "false"
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+volumes:
+  n8n_data:
+```
+
+确认 GoModel 能列出您的模型：
+
+```bash
+curl -s http://localhost:8080/v1/models \
+  -H "Authorization: Bearer change-me"
+```
+
+<Tip>
+  请在 GoModel 控制台中为 n8n 创建专用的 API 密钥
+  （`API Keys -> Create API Key`），而不是使用主密钥。密钥可以携带标签、预算和速率限制，因此 n8n 的支出会在控制台中单独显示。
+</Tip>
+
+## 2. 在 n8n 中创建 OpenAI 凭据
+
+在 n8n 中打开 `Settings -> Credentials -> Add credential -> OpenAI`，并填写以下内容：
+
+| 字段 | 值 |
+| --- | --- |
+| API Key | GoModel API 密钥（或 `GOMODEL_MASTER_KEY`） |
+| Organization ID | 留空 |
+| Base URL | `http://gomodel:8080/v1` |
+| Add Custom Header | 可选，请参阅 [使用标签区分工作流](#使用标签区分工作流) |
+
+保存凭据时，n8n 会通过 `GET /v1/models` 测试该凭据。GoModel 提供该端点，因此测试应当通过，
+**OpenAI Chat Model** 节点中的模型选择器会准确列出 GoModel 提供的模型，包括
+Anthropic 和 Gemini 模型以及所有 [虚拟模型](/zh/features/virtual-models)。
+
+<Note>
+  当两者都运行在容器中时，请使用 Docker 服务名称（`gomodel`）。
+  `http://localhost:8080/v1` 仅在 n8n 运行于宿主机上时可用。
+</Note>
+
+## 3. 在工作流中使用
+
+现在，所有接受 OpenAI 凭据的节点都会经过 GoModel：
+
+- 带有 **OpenAI Chat Model** 子节点的 **AI Agent** 和 **Basic LLM Chain**。
+- 用于向量存储的 **Embeddings OpenAI**。
+- 普通的 **OpenAI** 节点（聊天、图像、音频操作）。
+
+将凭据关联到 **OpenAI Chat Model** 子节点并选择模型。
+由于模型列表来自 GoModel，您可以在原本只支持 OpenAI 的同一个节点中选择
+`anthropic/claude-haiku-4-5-20251001` 或 `gemini/gemini-2.5-flash`。选择器中带提供商前缀的 ID 和 `gpt-5-mini` 这样的普通 ID 都可以使用。
+运行工作流，然后打开 GoModel 控制台：该调用会出现在审计日志中，包含完整的提示词、n8n 附加的工具定义、响应、Token 数和成本。
+
+<Note>
+  已在 n8n 2.36（AI Agent 3.1 和 2.2、OpenAI Chat Model 1.3）上验证，
+  使用 Calculator 工具，针对经由 GoModel 路由的 OpenAI、Anthropic 和 Gemini 模型进行了测试。
+</Note>
+
+### Chat Completions 还是 Responses API
+
+**OpenAI Chat Model** 节点有一个 **Use Responses API** 开关。在 n8n 2.x 中，新节点**默认开启**该开关。两种路径都可以通过 GoModel 使用：
+
+| 设置 | GoModel 端点 | 说明 |
+| --- | --- | --- |
+| 开启（n8n 默认） | `/v1/responses` | 对 OpenAI 为原生支持。对 Anthropic 和 Gemini 会进行转换；在这些提供商上无法使用 `conversation_id` 和 OpenAI 托管的工具。 |
+| 关闭 | `/v1/chat/completions` | 适用于所有提供商和所有 GoModel 版本。 |
+
+对于 OpenAI、Anthropic 和 Gemini 模型，工具调用在两种路径上都可以使用。
+如果您希望仅限 Responses 的功能被明确拒绝而不是被转换，或者您运行的 GoModel 版本早于
+[故障排查](#故障排查) 中所述的 `annotations` 修复，请关闭该开关。有关转换后提供商的具体限制，请参阅
+[Responses 兼容性](/zh/advanced/responses-compatibility)。
+
+## 使用标签区分工作流
+
+为了在用量报告中区分不同的工作流，请从 n8n 发送一个标签请求头，并在 GoModel 中声明它：
+
+1. 在 GoModel 中设置 `TAGGING_HEADER_1=X-N8N-Workflow`（或在控制台的
+   `Settings -> Tagging based on headers` 下添加）。
+2. 在 n8n 凭据中启用 **Add Custom Header**，名称为
+   `X-N8N-Workflow`，值例如 `invoice-triage`。
+
+该请求头的值会成为使用该凭据产生的每条用量记录的标签；随后，控制台的按标签用量视图会显示该工作流的请求数、Token 数和成本。
+n8n 会规范化请求头名称的大小写（`X-N8n-Workflow`）；GoModel 匹配时不区分大小写。如需使用不同的标签，
+请为每个工作流或团队分别创建凭据；它们可以共用同一个 GoModel API 密钥。有关前缀、分隔符以及如何防止请求头到达上游提供商，请参阅
+[标签](/zh/features/labelling)。
+
+## n8n 的其他模型节点
+
+n8n 的 **Anthropic Chat Model** 凭据同样有一个 **Base URL** 字段。
+将其指向 `http://gomodel:8080`（不带 `/v1`）并使用 GoModel API 密钥，即可将原生
+`/v1/messages` 流量经由 GoModel 路由；凭据测试和 AI
+Agent 的工具调用都可以正常工作（请参阅
+[Anthropic Messages API](/zh/advanced/anthropic-messages-api)）。在大多数工作流中，
+上述单个 OpenAI 凭据更简单，因为它已经可以访问所有提供商。
+
+## 故障排查
+
+| 现象 | 解决方法 |
+| --- | --- |
+| 凭据测试因连接错误而失败 | n8n 无法解析 Base URL。请检查 Docker 网络，并使用服务名称而不是 `localhost`。 |
+| GoModel 日志中出现 `401 Unauthorized` | n8n 凭据中的密钥与 GoModel API 密钥或 `GOMODEL_MASTER_KEY` 不匹配。 |
+| 模型选择器为空 | GoModel 没有为该模型配置提供商。请检查 `GET /v1/models` 和提供商环境变量。 |
+| 开启 **Use Responses API** 时出现 `Cannot read properties of undefined (reading 'map')` | 在 `annotations` 修复之前的 GoModel 版本会在 `output_text` 部分中省略 `annotations: []`，而 n8n 的 OpenAI 客户端需要该字段。请升级 GoModel，或关闭 **Use Responses API**。 |
+| 刚升级后仍出现相同错误 | GoModel 的响应缓存正在重放升级前存储的响应体。请修改提示词或清除缓存。 |
+| 在 Anthropic 或 Gemini 上出现 Responses API 错误 | 去掉 `conversation_id` 和托管工具；它们无法被转换。 |
+| 模型回答看起来“不对劲” | 请检查 GoModel 护栏；`system_prompt` 护栏会改写 n8n 发送的提示词。 |
+
+## 说明
+
+- GoModel 的 [故障转移](/zh/features/failover) 和 [缓存](/zh/features/cache) 会自动应用于 n8n 流量，
+  无需在 n8n 中做任何更改。开启响应缓存后，重复的相同提示词会返回缓存的回答，这通常正是重试工作流运行时所需要的。
+- 向 n8n 聊天触发器的流式传输不在本次验证范围内；非流式的 Agent 运行已经过验证。
+- 有一些社区节点（例如 `n8n-nodes-openai-litellm`）用于为 n8n 请求添加网关元数据。使用 GoModel 时无需这些节点；
+  内置凭据和标签请求头即可满足相同需求。
+- 关于控制台和告警，请参阅 [Prometheus 指标](/zh/guides/prometheus-metrics)
+  和 [OpenTelemetry](/zh/guides/opentelemetry)。

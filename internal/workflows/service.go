@@ -65,6 +65,25 @@ type Service struct {
 	compiler  Compiler
 	current   atomic.Value
 	refreshMu sync.Mutex
+
+	// changed is called after every successful admin write; see
+	// SetChangeNotifier.
+	changed func(context.Context)
+}
+
+// SetChangeNotifier installs fn, called after every successful Create or
+// Deactivate so other gateway instances reload the workflows. Call it before
+// serving.
+func (s *Service) SetChangeNotifier(fn func(context.Context)) {
+	if s != nil {
+		s.changed = fn
+	}
+}
+
+func (s *Service) notifyChanged(ctx context.Context) {
+	if s.changed != nil {
+		s.changed(ctx)
+	}
 }
 
 // NewService creates a workflow service backed by storage.
@@ -225,6 +244,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*Version, erro
 	if err != nil {
 		return nil, fmt.Errorf("create workflow: %w", err)
 	}
+	defer s.notifyChanged(ctx)
 	if version != nil && version.Active {
 		s.storeActivatedCompiledLocked(compiledWorkflowForVersion(previewCompiled, *version))
 	}
@@ -273,6 +293,7 @@ func (s *Service) Deactivate(ctx context.Context, id string) error {
 		return fmt.Errorf("deactivate workflow %q: %w", version.ID, err)
 	}
 	s.storeDeactivatedVersionLocked(*version)
+	s.notifyChanged(ctx)
 	return nil
 }
 

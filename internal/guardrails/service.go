@@ -85,6 +85,18 @@ type Service struct {
 	retireAfter time.Duration
 	// now is the clock; tests replace it.
 	now func() time.Time
+	// changed is called after every successful write; see
+	// SetChangeNotifier.
+	changed func(context.Context)
+}
+
+// SetChangeNotifier installs fn, called after every successful definition
+// write so other gateway instances reload the guardrails. Call it before
+// serving; writes made before it was set (startup seeding) are not announced.
+func (s *Service) SetChangeNotifier(fn func(context.Context)) {
+	if s != nil {
+		s.changed = fn
+	}
 }
 
 // chatCompleterRef lets the internal executor be swapped after instances are
@@ -367,7 +379,16 @@ func (s *Service) Upsert(ctx context.Context, definition Definition) error {
 	}
 	if stored != nil && normalizeDefinitionType(stored.Type) == identity.Type {
 		if schema, ok := s.configSchema(identity.Type); ok {
+			masked := plugins.SecretValues(schema, identity.Config)
 			identity.Config = plugins.MergeSecrets(schema, identity.Config, stored.Config)
+			// Secrets the caller sent as the mask were resolved from the stored
+			// row: it cannot read them, so it may not repoint the definition.
+			merged := plugins.SecretValues(schema, identity.Config)
+			for key, value := range masked {
+				if value == plugins.SecretMask {
+					ctx = config.WithKeptSecrets(ctx, merged[key])
+				}
+			}
 		}
 	}
 	normalized, err := s.normalizeDefinition(identity)
@@ -448,6 +469,9 @@ func (s *Service) commit(ctx context.Context, mutate func(map[string]Definition)
 		return guardrailServiceError(action, persistErr)
 	}
 	s.swap(ctx, next)
+	if s.changed != nil {
+		s.changed(ctx)
+	}
 	s.probeHealth(ctx, next)
 	return guardrailServiceError(action, persistErr)
 }

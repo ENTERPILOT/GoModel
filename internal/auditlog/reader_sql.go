@@ -70,6 +70,12 @@ type readerDialect struct {
 	// default collation is locale-aware and must be overridden.
 	userPath string
 
+	// requestedModel and resolvedModel are the model columns under byte-wise
+	// ordering, for the same reason: the model prefix filter is a range the
+	// indexes modelIndexes creates on these expressions can serve.
+	requestedModel string
+	resolvedModel  string
+
 	// errorMessage, responseID and previousResponseID extract JSON fields.
 	// The PostgreSQL spellings match the expressions jsonPathIndexes creates,
 	// which is what lets the planner use those indexes.
@@ -111,6 +117,8 @@ func readerDialectFor(dialect sqlx.Dialect) readerDialect {
 			idColumn:           "id::text",
 			attemptIDColumn:    "audit_log_id::text",
 			userPath:           `user_path COLLATE "C"`,
+			requestedModel:     `requested_model COLLATE "C"`,
+			resolvedModel:      `resolved_model COLLATE "C"`,
 			errorMessage:       postgresErrorMessage,
 			responseID:         `data #>> '{response_body,id}'`,
 			previousResponseID: `data #>> '{request_body,previous_response_id}'`,
@@ -123,6 +131,8 @@ func readerDialectFor(dialect sqlx.Dialect) readerDialect {
 		idColumn:           "id",
 		attemptIDColumn:    "audit_log_id",
 		userPath:           "user_path",
+		requestedModel:     "requested_model",
+		resolvedModel:      "resolved_model",
 		errorMessage:       `json_extract(data, '$.error_message')`,
 		responseID:         `json_extract(data, '$.response_body.id')`,
 		previousResponseID: `json_extract(data, '$.request_body.previous_response_id')`,
@@ -190,7 +200,7 @@ func (r *SQLReader) GetLogs(ctx context.Context, params LogQueryParams) (*LogLis
 	rows.Close()
 
 	if !params.OmitAttempts {
-		if err := r.loadAttempts(ctx, entries); err != nil {
+		if err := r.loadAttempts(ctx, entries, true); err != nil {
 			return nil, err
 		}
 	}
@@ -201,6 +211,14 @@ func (r *SQLReader) GetLogs(ctx context.Context, params LogQueryParams) (*LogLis
 // written as `?` throughout; the adapter renumbers them for PostgreSQL.
 func (r *SQLReader) logFilters(ctx context.Context, params LogQueryParams) ([]string, []any, error) {
 	userPath, err := normalizeAuditUserPathFilter(params.UserPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	userPathPrefix, err := normalizeAuditUserPathPrefix(params.UserPathPrefix)
+	if err != nil {
+		return nil, nil, err
+	}
+	modelPrefix, err := normalizeAuditPrefix("model_prefix", params.ModelPrefix)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -229,6 +247,11 @@ func (r *SQLReader) logFilters(ctx context.Context, params LogQueryParams) ([]st
 	if params.RequestedModel != "" {
 		add(r.likeClause("requested_model"), contains(params.RequestedModel))
 	}
+	if modelPrefix != "" {
+		requested, requestedArgs := auditPrefixSQLPredicate(r.dialect.requestedModel, modelPrefix)
+		resolved, resolvedArgs := auditPrefixSQLPredicate(r.dialect.resolvedModel, modelPrefix)
+		add("("+requested+" OR "+resolved+")", append(requestedArgs, resolvedArgs...)...)
+	}
 	if params.Provider != "" {
 		add("("+r.likeClause("provider")+" OR "+r.likeClause("provider_name")+")",
 			contains(params.Provider), contains(params.Provider))
@@ -247,11 +270,18 @@ func (r *SQLReader) logFilters(ctx context.Context, params LogQueryParams) ([]st
 			add(auditUserPathSQLPredicate(userPath, r.dialect.userPath), userPath, lower, upper)
 		}
 	}
+	if userPathPrefix != "" {
+		condition, values := auditPrefixSQLPredicate(r.dialect.userPath, userPathPrefix)
+		add(condition, values...)
+	}
 	if params.ErrorType != "" {
 		add(r.likeClause("error_type"), contains(params.ErrorType))
 	}
 	if params.SessionID != "" {
 		add("session_id = ?", params.SessionID)
+	}
+	if params.RequestID != "" {
+		add("request_id = ?", params.RequestID)
 	}
 	if params.StatusCode != nil {
 		add("status_code = ?", *params.StatusCode)
@@ -417,14 +447,16 @@ func (r *SQLReader) queryLogEntryWithAttempts(ctx context.Context, query, arg st
 	}
 
 	hydrated := []LogEntry{*entry}
-	if err := r.loadAttempts(ctx, hydrated); err != nil {
+	if err := r.loadAttempts(ctx, hydrated, true); err != nil {
 		return nil, err
 	}
 	*entry = hydrated[0]
 	return entry, nil
 }
 
-func (r *SQLReader) loadAttempts(ctx context.Context, entries []LogEntry) error {
+// loadAttempts hydrates the entries' provider attempts. Without bodies, each
+// attempt's response body and headers stay in the database.
+func (r *SQLReader) loadAttempts(ctx context.Context, entries []LogEntry, bodies bool) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -439,14 +471,18 @@ func (r *SQLReader) loadAttempts(ctx context.Context, entries []LogEntry) error 
 		index[entries[i].ID] = i
 	}
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	responseColumns := "response_body, response_headers"
+	if !bodies {
+		responseColumns = "NULL, NULL"
+	}
 
 	rows, err := r.db.Query(ctx, fmt.Sprintf(`
 		SELECT %s, seq, kind, provider_type, provider_name, model, status_code, success,
-			error_type, error_code, error_message, response_body, response_headers, started_at, duration_ns
+			error_type, error_code, error_message, %s, started_at, duration_ns
 		FROM audit_log_attempts
 		WHERE %s IN (%s)
 		ORDER BY audit_log_id ASC, seq ASC
-	`, r.dialect.attemptIDColumn, r.dialect.attemptIDColumn, placeholders), ids...)
+	`, r.dialect.attemptIDColumn, responseColumns, r.dialect.attemptIDColumn, placeholders), ids...)
 	if err != nil {
 		// A database written before attempts existed has no such table; its
 		// logs simply carry no attempts.

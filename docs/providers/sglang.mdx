@@ -190,10 +190,39 @@ Keep the explicit `v1/` segment for SGLang endpoints that include it, such as
 GoModel strips client authorization before forwarding and applies
 `SGLANG_API_KEY` when configured.
 
+## Responses API mode
+
+Some SGLang builds return HTTP 500 from `/v1/responses` when the request
+includes function tools, which breaks clients such as Codex CLI. SGLang's
+`/v1/chat/completions` handles those tools, so GoModel can translate the
+Responses request to chat completions and return a normal Responses reply.
+`SGLANG_API_MODE` (or `api_mode` in `config.yaml`) picks the path:
+
+| Value | Behavior |
+| --- | --- |
+| `auto` (default) | Chat completions when the request has function tools; `/v1/responses` otherwise. |
+| `native` | Always `/v1/responses`. Use it when your SGLang build handles function tools there. |
+| `chat_compatible` | Always chat completions, for one consistent upstream API. |
+
+The default fits most setups. Hosted tools such as `web_search_preview` have
+no chat equivalent: requests with only hosted tools stay on `/v1/responses`
+under `auto`, and translated requests drop them. Set `native` if you need
+hosted tools alongside function tools. `previous_response_id` works in every
+mode, because GoModel replays the stored conversation itself.
+
+```yaml
+providers:
+  sglang:
+    type: sglang
+    base_url: "http://localhost:30000/v1"
+    api_mode: native   # auto (default), native, or chat_compatible
+```
+
 ## Capability notes
 
 - Chat completions, streaming, model listing, Responses, and embeddings use
-  SGLang's OpenAI-compatible API.
+  SGLang's OpenAI-compatible API. Responses with function tools go through
+  chat completions by default; see [Responses API mode](#responses-api-mode).
 - Embeddings and model-specific features depend on the model loaded by SGLang.
 - Native batch, file, and stored-response lifecycle interfaces are not yet
   exposed as typed GoModel provider capabilities; use passthrough where the

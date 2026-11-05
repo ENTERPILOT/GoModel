@@ -1,0 +1,153 @@
+---
+title: "Oracle GenAI"
+description: "在 GoModel 中配置 Oracle GenAI 兼容 OpenAI 的端点，包括所需的 OCI 策略和已配置的模型列表。"
+icon: "/brand/oracle.svg"
+keywords: ["Oracle GenAI", "OCI", "提供商配置", "provider setup"]
+---
+
+GoModel 通过 Oracle 兼容 OpenAI 的推理端点调用 Oracle Generative AI。配置需要一条针对 `generativeaiapikey` 的 OCI IAM 策略、一个特定区域的基础 URL，以及一个已配置的模型列表（在 API 密钥认证方式下，Oracle 的 `/models` 并不总是可用）。
+
+## 1. 添加 OCI 策略
+
+```text
+Allow any-user to use generative-ai-family in tenancy where ALL {request.principal.type='generativeaiapikey'}
+```
+
+这条租户级策略足以用于测试。在生产环境中，请将其范围缩小到某个区间（compartment）、API 密钥或特定模型。
+
+## 2. 配置
+
+```bash
+ORACLE_BASE_URL=https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1
+ORACLE_API_KEY=...
+ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3
+GOMODEL_MASTER_KEY=change-me
+```
+
+`ORACLE_MODELS` 是以逗号分隔的列表（会去除首尾空白）。其行为遵循全局的 `CONFIGURED_PROVIDER_MODELS_MODE`——`fallback`（默认）在 Oracle 的 `/models` 不可用或为空时使用该列表；`allowlist`
+只公开已配置的模型，并跳过对上游的调用。
+
+或在 `config.yaml` 中：
+
+```yaml
+providers:
+  oracle:
+    type: oracle
+    base_url: "${ORACLE_BASE_URL}"
+    api_key: "${ORACLE_API_KEY}"
+    models:
+      - openai.gpt-oss-120b
+```
+
+如果两者都已设置，`ORACLE_MODELS` 会覆盖对应提供商在 YAML 中的 `models:`。
+
+## 3. 运行 GoModel
+
+<CodeGroup>
+
+```bash Docker (.env 文件)
+docker run --rm -p 8080:8080 --env-file .env enterpilot/gomodel
+```
+
+```bash Docker (inline -e)
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e ORACLE_BASE_URL="https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1" \
+  -e ORACLE_API_KEY="..." \
+  -e ORACLE_MODELS="openai.gpt-oss-120b,xai.grok-3" \
+  enterpilot/gomodel
+```
+
+```bash Binary (make build)
+make build
+./bin/gomodel
+```
+
+</CodeGroup>
+
+## 4. 验证
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "openai.gpt-oss-120b",
+    "messages": [{"role": "user", "content": "Reply with the single word ok."}],
+    "max_tokens": 80
+  }'
+```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="change-me")
+
+completion = client.chat.completions.create(
+    model="openai.gpt-oss-120b",
+    messages=[{"role": "user", "content": "Reply with the single word ok."}],
+    max_tokens=80,
+)
+
+print(completion.choices[0].message.content)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "change-me",
+});
+
+const completion = await client.chat.completions.create({
+  model: "openai.gpt-oss-120b",
+  messages: [{ role: "user", content: "Reply with the single word ok." }],
+  max_tokens: 80,
+});
+
+console.log(completion.choices[0].message.content);
+```
+
+</CodeGroup>
+
+`GET /v1/models` 会返回诸如 `openai.gpt-oss-120b` 之类的模型，并带有
+`owned_by: "oracle"`。Responses API 的工作方式相同。
+
+<Note>
+  请使用足够高的 `max_tokens` 预算。某些基于 Oracle 的推理模型可能会在输出最终的助手文本之前，就把较短的补全额度耗费在推理内容上。
+</Note>
+
+## 多个 Oracle 提供商
+
+使用带后缀的环境变量注册第二个 Oracle 实例：
+
+```bash
+ORACLE_US_BASE_URL=https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1
+ORACLE_US_API_KEY=...
+ORACLE_US_MODELS=openai.gpt-oss-120b
+```
+
+这会注册提供商 `oracle-us`。只有当自动生成的名称不合适，或者您需要按提供商覆盖弹性与容错设置时，才需要使用 YAML。
+
+## 尚未集成
+
+- 基于 OCI 原生的模型自动发现（届时将不再需要
+  `ORACLE_MODELS` / YAML `models:`）。
+- 在 API 密钥认证方式下可靠地使用 Oracle 兼容 OpenAI 的 `/models` 端点。
+
+## 故障排查
+
+- **`404 Authorization failed or requested resource not found`**——缺少 OCI
+  策略、区域错误，或该账户无法使用该模型。
+- **`model registry has no models`**——请设置 `ORACLE_MODELS` 或 YAML `models:`。
+- **OCI CLI 可以正常工作，但 Oracle Bearer 请求失败**——两者使用的认证方式不同。
+  OCI CLI 使用 API 签名密钥；Oracle Generative AI 推理使用 Generative AI Bearer API 密钥。
+
+## 参考
+
+- [Oracle API 密钥概览](https://docs.oracle.com/en-us/iaas/Content/generative-ai/api-keys.htm)
+- [Oracle API 密钥权限](https://docs.oracle.com/en-us/iaas/Content/generative-ai/add-api-permission.htm)
+- [Oracle 兼容 OpenAI 的端点](https://docs.oracle.com/en-us/iaas/Content/generative-ai/oci-openai.htm)

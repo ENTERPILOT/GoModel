@@ -1,0 +1,250 @@
+---
+title: "GoModel 与 OpenAI Agents SDK"
+description: "通过 GoModel 兼容 OpenAI 的 Responses API 路由 OpenAI Agents SDK 的模型调用。"
+icon: "bot"
+keywords: ["OpenAI Agents SDK", "Responses API", "agents", "智能体", "Python SDK"]
+---
+
+如果您希望为智能体运行加上网关密钥、预算、审计日志、模型路由和用量追踪，可以将 GoModel 部署在 OpenAI Agents SDK 前面。
+
+流程：
+
+`OpenAI Agents SDK -> GoModel /v1 -> selected provider`
+
+## 开始之前
+
+- 安装 GoModel。
+- 选择一个 GoModel 主密钥，例如 `change-me`。
+- 至少配置一个上游模型提供商。
+- 安装适用于 Python 或 JavaScript 的 OpenAI Agents SDK。
+
+<Note>
+  SDK 默认会将 Trace 导出到 OpenAI。如果 GoModel 是您唯一的 OpenAI 客户端端点，请禁用链路追踪或配置单独的 OpenAI 追踪密钥。
+</Note>
+
+## 1. 运行 GoModel
+
+使用主密钥和上游提供商密钥启动 GoModel。本示例使用 OpenAI 作为上游：
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e GOMODEL_MASTER_KEY="change-me" \
+  -e OPENAI_API_KEY="sk-..." \
+  enterpilot/gomodel
+```
+
+如果您使用其他提供商，请保持相同的 GoModel 基础 URL，并选择您的提供商通过 GoModel 提供的模型。
+
+## 2. 确认 Responses 端点
+
+通过 GoModel 发送一个简单的请求：
+
+<CodeGroup>
+
+```bash curl
+curl -s http://localhost:8080/v1/responses \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-5-mini",
+    "input": "Reply with exactly ok."
+  }'
+```
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="change-me")
+
+response = client.responses.create(
+    model="gpt-5-mini",
+    input="Reply with exactly ok.",
+)
+
+print(response.output_text)
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "change-me",
+});
+
+const response = await client.responses.create({
+  model: "gpt-5-mini",
+  input: "Reply with exactly ok.",
+});
+
+console.log(response.output_text);
+```
+
+</CodeGroup>
+
+如果网关连接正确，响应中会包含 `ok`。
+
+## 3. 配置 SDK
+
+将 SDK 的 OpenAI 客户端指向 GoModel：
+
+<CodeGroup>
+
+```python Python
+import asyncio
+import os
+
+from agents import Agent, Runner, set_default_openai_client, set_tracing_disabled
+from openai import AsyncOpenAI
+
+set_default_openai_client(
+    AsyncOpenAI(
+        base_url=os.getenv("OPENAI_BASE_URL", "http://localhost:8080/v1"),
+        api_key=os.getenv("GOMODEL_MASTER_KEY", "change-me"),
+    ),
+    use_for_tracing=False,
+)
+set_tracing_disabled(True)
+
+agent = Agent(
+    name="Gateway assistant",
+    instructions="Be concise.",
+    model=os.getenv("OPENAI_MODEL", "gpt-5-mini"),
+)
+
+
+async def main():
+    result = await Runner.run(agent, "Reply with exactly ok.")
+    print(result.final_output)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+```javascript JavaScript
+import OpenAI from "openai";
+import {
+  Agent,
+  run,
+  setDefaultOpenAIClient,
+  setOpenAIAPI,
+  setTracingDisabled,
+} from "@openai/agents";
+
+setDefaultOpenAIClient(
+  new OpenAI({
+    baseURL: process.env.OPENAI_BASE_URL ?? "http://localhost:8080/v1",
+    apiKey: process.env.GOMODEL_MASTER_KEY ?? "change-me",
+  }),
+);
+setOpenAIAPI("responses");
+setTracingDisabled(true);
+
+const agent = new Agent({
+  name: "Gateway assistant",
+  instructions: "Be concise.",
+  model: process.env.OPENAI_MODEL ?? "gpt-5-mini",
+});
+
+const result = await run(agent, "Reply with exactly ok.");
+console.log(result.finalOutput);
+```
+
+</CodeGroup>
+
+### 带命名空间的模型 ID
+
+Python SDK 默认会将 `anthropic/claude-sonnet-4-20250514` 和 `gemini/gemini-2.0-flash` 这类字符串视为带提供商前缀的模型名称。
+如果您希望这些带命名空间的 GoModel ID 原样到达网关，请将 SDK 的模型提供商配置为模型 ID 透传模式：
+
+```python
+import asyncio
+import os
+
+from agents import Agent, MultiProvider, RunConfig, Runner
+from openai import AsyncOpenAI
+
+client = AsyncOpenAI(
+    base_url=os.getenv("OPENAI_BASE_URL", "http://localhost:8080/v1"),
+    api_key=os.getenv("GOMODEL_MASTER_KEY", "change-me"),
+)
+
+run_config = RunConfig(
+    model_provider=MultiProvider(
+        openai_client=client,
+        unknown_prefix_mode="model_id",
+        openai_prefix_mode="model_id",
+    )
+)
+
+agent = Agent(
+    name="Gateway assistant",
+    instructions="Be concise.",
+    model=os.getenv("OPENAI_MODEL", "anthropic/claude-sonnet-4-20250514"),
+)
+
+
+async def main():
+    result = await Runner.run(
+        agent,
+        "Reply with exactly ok.",
+        run_config=run_config,
+    )
+    print(result.final_output)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## 支持的 SDK 路径
+
+GoModel 支持 SDK 常规的 HTTP Responses 路径：
+
+- 非流式 `Runner.run(...)`
+- 通过 HTTP/SSE 进行流式传输的 `Runner.run_streamed(...)`
+- 函数工具循环
+- 编译为模型工具调用的 handoff 和 agents-as-tools
+- 重放输入历史的 SDK 托管本地会话
+- 用于服务端托管对话资源的 `/v1/conversations`
+- `/v1/responses/input_tokens`
+- `/v1/responses/compact`
+- 通过 `/v1/responses/{id}` 和 `/v1/responses/{id}/input_items` 检索本地响应
+
+对于原生支持 Responses 的提供商，GoModel 还会保留较新的 Responses 输入项。如果请求需要为未原生实现 Responses 的提供商翻译为
+Chat Completions，GoModel 仅会为支持相应字段的 Chat 提供商将结构化 `text` 输出设置翻译为 Chat Completions 的 `response_format`
+（并透传 `text.verbosity`）；而对于有状态的或提供商原生的 Responses 字段，例如 `previous_response_id`、`conversation`
+和托管工具项，则会返回明确的错误。
+
+完整的功能矩阵请参阅 [Responses 兼容性](/zh/advanced/responses-compatibility)。
+
+## 存储行为
+
+GoModel 会存储本地响应快照，因此即使上游提供商不支持响应检索，生命周期端点也能正常工作。如果 SDK 发送
+`store: false`，GoModel 不会持久化该本地响应快照。
+
+## 当前限制
+
+- 尚未实现 Responses WebSocket 传输。请在 GoModel 上使用 SDK 的 HTTP/SSE 传输。
+- 网页搜索、文件搜索和计算机操作（computer use）等托管工具需要支持相应工具载荷的原生上游提供商。Anthropic 和 Gemini
+  等通过 Chat 翻译的提供商会拒绝这些工具，除非 GoModel 为它们添加了明确的提供商能力映射。
+- 在 Anthropic 上，`text.format` 由 Claude 原生的结构化输出（`json_schema`）或系统提示词指令（`json_object`）实现，
+  而 `text.verbosity` 会被丢弃并给出警告——Anthropic 没有对应功能。
+- `previous_response_id` 会转发给原生支持 Responses 的提供商。对于通过 Chat 翻译的提供商，GoModel 会从其存储的响应中解析它，
+  并重放上一轮的输入和输出，因此上一个响应在创建时必须保持 `store` 开启。对于所有提供商，`conversation`
+  都会从网关托管的对话中解析。
+- 链路追踪与模型路由相互独立。请禁用 SDK 的链路追踪，或配置真实的 OpenAI 追踪密钥。
+
+## 更多示例
+
+请参阅 `docs/examples/openai-agents-sdk/` 中可运行的示例。
+
+## 参考
+
+- OpenAI Agents SDK Python 配置：
+  [https://openai.github.io/openai-agents-python/config/](https://openai.github.io/openai-agents-python/config/)
+- OpenAI Agents SDK JavaScript 配置：
+  [https://openai.github.io/openai-agents-js/guides/config/](https://openai.github.io/openai-agents-js/guides/config/)
+- OpenAI Agents SDK 运行智能体：
+  [https://openai.github.io/openai-agents-python/running_agents/](https://openai.github.io/openai-agents-python/running_agents/)

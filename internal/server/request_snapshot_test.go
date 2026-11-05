@@ -42,6 +42,31 @@ func (r *countingReadCloser) Close() error {
 	return nil
 }
 
+// The snapshot is taken before authentication, so it must not read the body:
+// RequestBodyCapture adds it once the caller has authenticated.
+func TestRequestSnapshotCapture_DoesNotReadTheBody(t *testing.T) {
+	body := &countingReadCloser{reader: strings.NewReader(`{"model":"gpt-5-mini","stream":true}`)}
+	c, _ := echotest.Post(t, "/v1/chat/completions", "")
+	c.Request().Body = body
+	c.Request().ContentLength = int64(body.reader.Len())
+
+	var snapshot *core.RequestSnapshot
+	var env *core.WhiteBoxPrompt
+	err := RequestSnapshotCapture()(func(c *echo.Context) error {
+		snapshot = core.GetRequestSnapshot(c.Request().Context())
+		env = core.GetWhiteBoxPrompt(c.Request().Context())
+		return nil
+	})(c)
+
+	require.NoError(t, err)
+	assert.Zero(t, body.read)
+	require.NotNil(t, snapshot)
+	assert.Nil(t, snapshot.CapturedBody())
+	require.NotNil(t, env)
+	assert.Equal(t, "chat_completions", env.OperationType)
+	assert.False(t, env.JSONBodyParsed)
+}
+
 func TestRequestSnapshotCapture_SetsSnapshotAndSemantics(t *testing.T) {
 	reqBody := `{"model":"gpt-5-mini","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"json_schema"}}`
 	c, _ := echotest.Post(t, "/v1/chat/completions?foo=bar", reqBody, echotest.WithHeader("X-Request-ID", "req-123"), echotest.WithHeader("Traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00"))
@@ -50,14 +75,14 @@ func TestRequestSnapshotCapture_SetsSnapshotAndSemantics(t *testing.T) {
 	var capturedEnv *core.WhiteBoxPrompt
 	var downstreamBody string
 
-	handler := RequestSnapshotCapture()(func(c *echo.Context) error {
+	handler := RequestSnapshotCapture()(RequestBodyCapture()(func(c *echo.Context) error {
 		capturedFrame = core.GetRequestSnapshot(c.Request().Context())
 		capturedEnv = core.GetWhiteBoxPrompt(c.Request().Context())
 		bodyBytes, err := io.ReadAll(c.Request().Body)
 		require.NoError(t, err)
 		downstreamBody = string(bodyBytes)
 		return c.String(http.StatusOK, "ok")
-	})
+	}))
 
 	err := handler(c)
 	require.NoError(t, err)
@@ -393,13 +418,13 @@ func TestRequestSnapshotCapture_SkipsOversizedBodies(t *testing.T) {
 	var capturedFrame *core.RequestSnapshot
 	var downstreamBody string
 
-	handler := RequestSnapshotCapture()(func(c *echo.Context) error {
+	handler := RequestSnapshotCapture()(RequestBodyCapture()(func(c *echo.Context) error {
 		capturedFrame = core.GetRequestSnapshot(c.Request().Context())
 		bodyBytes, err := io.ReadAll(c.Request().Body)
 		require.NoError(t, err)
 		downstreamBody = string(bodyBytes)
 		return c.String(http.StatusOK, "ok")
-	})
+	}))
 
 	err := handler(c)
 	require.NoError(t, err)

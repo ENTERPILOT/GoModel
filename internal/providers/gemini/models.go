@@ -48,8 +48,8 @@ func geminiModelSupportedMethods(modelID string, methods []string) (supportsGene
 	normalized := normalizeGeminiModelID(modelID)
 	if len(methods) == 0 {
 		isEmbedding := strings.HasPrefix(normalized, "text-embedding-") || strings.HasPrefix(normalized, "gemini-embedding-")
-		return strings.HasPrefix(normalized, "gemini-") && !isEmbedding, isEmbedding,
-			strings.HasPrefix(normalized, "imagen-")
+		isGenerate := (strings.HasPrefix(normalized, "gemini-") && !isEmbedding) || strings.HasPrefix(normalized, "gemma-")
+		return isGenerate, isEmbedding, strings.HasPrefix(normalized, "imagen-")
 	}
 	supportsGenerate = slices.Contains(methods, "generateContent") || slices.Contains(methods, "streamGenerateContent")
 	// Imagen models list only the predict method; Gemini image models carry
@@ -62,10 +62,12 @@ func geminiModelSupportedMethods(modelID string, methods []string) (supportsGene
 // isGeminiImageModelID recognizes generateContent models with image output
 // (gemini-2.5-flash-image, gemini-2.0-flash-preview-image-generation,
 // gemini-3-pro-image-preview, ...) by the -image marker Google uses in their
-// IDs. This only seeds discovery metadata; registry enrichment overrides it.
+// IDs, and the Nano Banana line (gemini-nano-banana-2.1, ...) that dropped
+// it. This only seeds discovery metadata; registry enrichment overrides it.
 func isGeminiImageModelID(normalized string) bool {
 	return strings.HasPrefix(normalized, "gemini-") &&
-		(strings.Contains(normalized, "-image-") || strings.HasSuffix(normalized, "-image"))
+		(strings.Contains(normalized, "-image-") || strings.HasSuffix(normalized, "-image") ||
+			strings.Contains(normalized, "nano-banana"))
 }
 
 // geminiDiscoveredMetadata stamps what the native listing says about a model:

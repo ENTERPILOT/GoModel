@@ -1,0 +1,79 @@
+---
+title: "Dlaczego Go"
+description: "Dlaczego GoModel jest napisany w Go, a nie w Pythonie czy Rust: zachowanie w runtime pasujące do gatewaya, język, któremu firmy już ufają, i pula specjalistów, dzięki której projekt pozostaje łatwy w utrzymaniu."
+icon: "code"
+keywords: ["Go", "Golang", "Rust", "Python", "wybór języka", "wydajność", "language choice", "performance"]
+---
+
+GoModel jest napisany w Go. Poważnie rozważaliśmy też Rust. Ta strona wyjaśnia,
+dlaczego wygrało Go, abyś mógł ocenić, czy nasze rozumowanie pasuje do Twoich
+priorytetów.
+
+## Gateway to problem runtime’u
+
+AI gateway wykonuje jedno zadanie tysiące razy na sekundę: przyjmuje request,
+tłumaczy go, streamuje z powrotem odpowiedź providera i nie przeszkadza.
+Język, w którym go napiszesz, decyduje o tym, ile z Twojego budżetu opóźnień
+zjada sam gateway.
+
+Go dobrze pasuje do tego profilu:
+
+- **Gorutyny sprawiają, że streaming jest tani.** Każde otwarte połączenie do
+  providera to lekka gorutyna, więc długotrwałe odpowiedzi streamingowe nie
+  blokują wątków ani nie wymuszają frameworka asynchronicznego na całym kodzie.
+- **Jedna statyczna binarka.** GoModel jest dostarczany jako jeden plik – bez
+  interpretera, bez środowiska wirtualnego i bez drzewa zależności do
+  instalowania przy wdrożeniu. Obraz kontenera jest mały i uruchamia się
+  w znacznie mniej niż sekundę.
+- **Przewidywalne zużycie pamięci.** Garbage collector w Go jest dostrojony pod
+  krótkie pauzy, a gateway przechowuje bardzo mało stanu na request, więc
+  zużycie pamięci pod obciążeniem pozostaje płaskie, zamiast rosnąć wraz
+  z liczbą workerów.
+
+Strona [benchmarków](/pl/about/benchmarks) pokazuje, jak to wygląda w praktyce
+w porównaniu z gatewayami napisanymi w Pythonie i TypeScripcie.
+
+## Dlaczego nie Rust
+
+Rust dałby nam ten sam model wdrożenia, a w niektórych ścieżkach niższy narzut.
+Mimo to wybraliśmy Go – z powodów, które mają niewiele wspólnego z samym językiem:
+
+1. **Go jest znacznie szerzej używany.** W każdej ankiecie wśród programistów
+   i w każdym rankingu języków, które przejrzeliśmy, Go wyraźnie wyprzedza Rust
+   pod względem adopcji. Częściowo wynika to z łagodniejszej krzywej uczenia:
+   inżynier produktywny w innym języku jest w stanie czytać kod w Go i do niego
+   kontrybuować w ciągu kilku dni.
+2. **Łatwiej znaleźć kontrybutorów.** Większa pula inżynierów, którzy już znają
+   Go, oznacza, że więcej osób może przeglądać, rozwijać i utrzymywać GoModel,
+   a koszt zatrudniania do tego pozostaje rozsądny dla firm, które go używają.
+3. **Firmy już przechodzą na Go.** Wiele organizacji, które ustandaryzowały się
+   na Javie dla usług backendowych, traktuje teraz Go jako kolejną
+   rekomendowaną ścieżkę dla nowej infrastruktury. Gateway w Go pasuje do
+   narzędzi, przeglądów bezpieczeństwa i nawyków operacyjnych, które te zespoły
+   już mają.
+4. **Go wciąż rośnie.** Udział nowych projektów infrastrukturalnych pisanych
+   w Go rośnie z roku na rok. Postawienie na język, który przyjmują zespoły
+   platformowe, sprawia, że GoModel pozostanie w długim terminie łatwy
+   w uruchamianiu i łatwy do kontrybuowania.
+
+Rust pozostaje świetnym językiem. W projekcie, którego sukces zależy od
+szerokiej bazy kontrybutorów i operatorów, zasięg Go liczył się bardziej niż
+ostatnie kilka procent przepustowości.
+
+## Dlaczego nie Python
+
+Python jest domyślnym wyborem dla narzędzi AI i większość gatewayów zaczynała
+właśnie od niego. To dobry język do eksperymentów, ale słaby do przeskoku
+sieciowego, który stoi przed każdym wywołaniem modelu. Kompromisy opisujemy
+w [Naszych wartościach](/pl/about/values), a pomiary znajdziesz na stronie
+[benchmarków](/pl/about/benchmarks).
+
+## Co to oznacza dla Ciebie
+
+- **Operatorzy** dostają małą, szybką, statycznie linkowaną usługę, która
+  zachowuje się tak samo w Dockerze, Kubernetesie i na bare metal.
+- **Kontrybutorzy** dostają kod w języku, który najpewniej już znają,
+  ze standardowym toolchainem i bez frameworka, którego trzeba się najpierw
+  nauczyć.
+- **Firmy** dostają gateway napisany w języku, który ich zespoły platformowe
+  i bezpieczeństwa już akceptują i wspierają.

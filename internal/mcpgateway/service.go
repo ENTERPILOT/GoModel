@@ -15,8 +15,10 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/encryption"
 	"github.com/enterpilot/gomodel/internal/usage"
@@ -91,6 +93,10 @@ type Service struct {
 	// skipped holds, by name, why the last full reload left out stored
 	// servers whose references did not resolve. Guarded by reloadMu.
 	skipped map[string]error
+	// unresolved holds, by name, the last logged reason a stored server's
+	// references did not resolve, so a reload retried every few seconds logs
+	// a lasting failure once. Guarded by reloadMu.
+	unresolved map[string]string
 	// searchDiscovery is the default for sessions that do not send
 	// ToolDiscoveryHeader: serve search_tools/call_tool instead of the catalog.
 	searchDiscovery bool
@@ -101,6 +107,18 @@ type Service struct {
 	bindMu   sync.Mutex
 	bindings map[string]sessionBinding
 
+	// shared holds session bindings for the other replicas, so a session
+	// opened on one continues on any; nil keeps sessions on this instance.
+	// See sharedsessions.go.
+	shared ext.SharedStore
+	// resumes collapses concurrent resumes of one session ID.
+	resumes singleflight.Group
+	// now stamps session bindings and their shared records.
+	now func() time.Time
+	// postTouchInterval is how often a POST in flight extends its shared
+	// session's expiry; see trackPOST.
+	postTouchInterval time.Duration
+
 	requestMu      sync.Mutex
 	requestCancels map[uint64]context.CancelFunc
 	nextRequestID  uint64
@@ -108,6 +126,25 @@ type Service struct {
 
 	stopOnce sync.Once
 	stop     chan struct{}
+
+	// changed is called after every successful store write; see
+	// SetChangeNotifier.
+	changed func(context.Context)
+}
+
+// SetChangeNotifier installs fn, called after every successful write of a
+// server or virtual server so other gateway instances reload them. Call it
+// before serving.
+func (s *Service) SetChangeNotifier(fn func(context.Context)) {
+	if s != nil {
+		s.changed = fn
+	}
+}
+
+func (s *Service) notifyChanged(ctx context.Context) {
+	if s.changed != nil {
+		s.changed(ctx)
+	}
 }
 
 // errServiceClosed rejects a reload after Close.
@@ -129,6 +166,9 @@ type sessionBinding struct {
 	// the aggregated endpoint.
 	endpoint string
 	lastSeen time.Time
+	// virtualIncarnation is the Incarnation of the virtual server the
+	// session opened on (see endpointReplaced); empty for any other endpoint.
+	virtualIncarnation string
 	// discovery and toolAliases let request logs name the tool a call runs:
 	// a discovery session's call_tool target, and the namespaced name an
 	// unambiguous bare name resolves to.
@@ -136,6 +176,29 @@ type sessionBinding struct {
 	toolAliases map[string]string
 	// server hosts the session; closeEndpointSessions closes it through it.
 	server *mcp.Server
+	// resumed is set when this replica rebuilt the session from the shared
+	// store and serves it itself; nil when the SDK handler created it.
+	resumed *resumedSession
+	// shared reports that record, the session's encoded shared-store entry,
+	// is stored. checkedAt and touchedAt are when this replica last read the
+	// session's close marks and last extended the entry's expiry.
+	shared    bool
+	record    []byte
+	checkedAt time.Time
+	touchedAt time.Time
+	// verifiedAt is when this replica last read the close marks
+	// successfully, or opened or resumed the session; see
+	// sessionUnverifiedLimit.
+	verifiedAt time.Time
+	// posts counts this replica's POSTs in flight for the session, which
+	// pause its idle timeout, so sweepBindings keeps the binding.
+	posts int
+}
+
+// boundTo reports whether a request's identity and endpoint are the ones the
+// session was opened under.
+func (b sessionBinding) boundTo(authKeyID, userPath, endpoint string) bool {
+	return b.authKeyID == authKeyID && b.userPath == userPath && b.endpoint == endpoint
 }
 
 // Options configures NewService.
@@ -167,6 +230,10 @@ type Options struct {
 	// Secrets resolves secret references in admin-managed header values.
 	// Nil resolves the built-in env and file schemes only.
 	Secrets *config.Secrets
+	// SharedStore shares downstream session bindings between the replicas on
+	// one database, so a session continues on whichever replica a request
+	// reaches. Nil keeps every session on the instance that opened it.
+	SharedStore ext.SharedStore
 }
 
 // NewService builds the gateway service and starts connecting to the merged
@@ -182,10 +249,15 @@ func NewService(ctx context.Context, opts Options) (*Service, error) {
 		virtualStore:    opts.VirtualStore,
 		secrets:         opts.Secrets,
 		recorded:        make(map[string]struct{}),
+		unresolved:      make(map[string]string),
 		searchDiscovery: opts.ToolDiscovery == config.MCPToolDiscoverySearch,
 		bindings:        make(map[string]sessionBinding),
-		requestCancels:  make(map[uint64]context.CancelFunc),
-		stop:            make(chan struct{}),
+		shared:          opts.SharedStore,
+		now:             time.Now,
+		// Half the idle timeout: the record never lapses mid-call.
+		postTouchInterval: sessionIdleTimeout / 2,
+		requestCancels:    make(map[uint64]context.CancelFunc),
+		stop:              make(chan struct{}),
 	}
 	s.stopCtx, s.stopCancel = context.WithCancel(context.Background())
 	guard, err := newOriginGuard(opts.AllowedOrigins)
@@ -206,15 +278,20 @@ func NewService(ctx context.Context, opts Options) (*Service, error) {
 	}
 	go s.sweepBindings()
 	if opts.RefreshInterval > 0 && (s.store != nil || s.virtualStore != nil) {
-		go s.refreshLoop(opts.RefreshInterval)
+		go s.refreshLoop(opts.RefreshInterval) //nolint:gosec // Runs for the service lifetime, not the constructor call.
 	}
 	return s, nil
 }
 
-// Refresh re-reads the stores and reconciles; the admin runtime refresh calls
-// it, as does the background loop.
+// Refresh re-reads the stores and reconciles, like Reload, but also reports
+// the stored servers whose references did not resolve, so the admin runtime
+// refresh shows them and the cluster sync poller retries them.
 func (s *Service) Refresh(ctx context.Context) error {
-	return s.Reload(ctx)
+	unresolved, err := s.reload(ctx, nil)
+	if err != nil {
+		return err
+	}
+	return unresolved
 }
 
 func (s *Service) refreshLoop(interval time.Duration) {
@@ -243,12 +320,15 @@ func (s *Service) refreshLoop(interval time.Duration) {
 // server runs, it keeps its current headers instead, so a secret backend
 // outage never disconnects a working upstream.
 func (s *Service) Reload(ctx context.Context) error {
-	return s.reload(ctx, nil)
+	_, err := s.reload(ctx, nil)
+	return err
 }
 
 // reload is Reload resolving only the rows rotated reports true for; every
 // other running server keeps its current spec. A nil rotated resolves all.
-func (s *Service) reload(ctx context.Context, rotated func(name string) bool) error {
+// It reports the rows whose references did not resolve apart from err, which
+// means nothing was applied.
+func (s *Service) reload(ctx context.Context, rotated func(name string) bool) (unresolved, err error) {
 	// Close cancels every reload, not only background ones: an admin save
 	// or a rotation waiting on a slow store read must not hold shutdown open.
 	ctx, cancel := context.WithCancel(ctx)
@@ -258,7 +338,7 @@ func (s *Service) reload(ctx context.Context, rotated func(name string) bool) er
 	s.reloadMu.Lock()
 	defer s.reloadMu.Unlock()
 	if s.reloadStopped || s.stopCtx.Err() != nil {
-		return errServiceClosed
+		return nil, errServiceClosed
 	}
 
 	specs := make([]ServerSpec, 0, len(s.configSpecs))
@@ -274,7 +354,7 @@ func (s *Service) reload(ctx context.Context, rotated func(name string) bool) er
 	if s.store != nil {
 		rows, err := s.store.List(ctx)
 		if err != nil {
-			return fmt.Errorf("list managed mcp servers: %w", err)
+			return nil, fmt.Errorf("list managed mcp servers: %w", err)
 		}
 		for _, row := range rows {
 			if _, shadowed := seen[row.Name]; shadowed {
@@ -290,22 +370,29 @@ func (s *Service) reload(ctx context.Context, rotated func(name string) bool) er
 			spec, secrets, err := s.resolveServer(ctx, row)
 			if err != nil {
 				errs = append(errs, err)
+				repeated := s.unresolved[row.Name] == err.Error()
+				s.unresolved[row.Name] = err.Error()
 				if running {
-					slog.Warn("mcp server secret references could not be resolved; keeping its current headers", "server", row.Name, "error", err)
+					if !repeated {
+						slog.Warn("mcp server secret references could not be resolved; keeping its current headers", "server", row.Name, "error", err)
+					}
 					specs = append(specs, current)
 				} else {
-					slog.Error("mcp server secret references could not be resolved; server skipped", "server", row.Name, "error", err)
+					if !repeated {
+						slog.Error("mcp server secret references could not be resolved; server skipped", "server", row.Name, "error", err)
+					}
 					skipped[row.Name] = err
 				}
 				continue
 			}
+			delete(s.unresolved, row.Name)
 			specs = append(specs, spec)
 			resolved = append(resolved, secrets)
 		}
 	}
 	virtuals, err := s.mergedVirtualSpecs(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	s.virtualMu.Lock()
 	s.virtualSpecs = virtuals
@@ -322,11 +409,15 @@ func (s *Service) reload(ctx context.Context, rotated func(name string) bool) er
 		}
 	}
 	s.recorded = stored
-	if rotated != nil {
-		return errors.Join(errs...)
+	for name := range s.unresolved {
+		if _, ok := stored[name]; !ok {
+			delete(s.unresolved, name)
+		}
 	}
-	s.skipped = skipped
-	return nil
+	if rotated == nil {
+		s.skipped = skipped
+	}
+	return errors.Join(errs...), nil
 }
 
 // mergedVirtualSpecs merges declarative and store virtual servers. Config
@@ -396,6 +487,7 @@ func (s *Service) Upsert(ctx context.Context, server ManagedServer) error {
 	if saveErr != nil && !errors.Is(saveErr, encryption.ErrSealUnconfirmed) {
 		return saveErr
 	}
+	defer s.notifyChanged(ctx)
 	if err := s.Reload(ctx); err != nil {
 		// The row is persisted; only applying it to the running manager
 		// failed. Say so — a retry or restart picks the row up.
@@ -488,6 +580,7 @@ func (s *Service) Delete(ctx context.Context, name string) error {
 	if err := s.remove(ctx, name); err != nil {
 		return err
 	}
+	defer s.notifyChanged(ctx)
 	if err := s.Reload(ctx); err != nil {
 		return fmt.Errorf("mcp server %q was deleted but the running set was not updated: %w", name, err)
 	}
@@ -541,6 +634,7 @@ func (s *Service) Close() {
 		s.reloadStopped = true
 		s.reloadMu.Unlock()
 
+		s.closeResumedSessions()
 		s.manager.Close()
 	})
 }
@@ -555,6 +649,9 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer
 	// upstream, or the request registry.
 	if err := s.origins.check(r); err != nil {
 		return err
+	}
+	if rejectUnsupportedProtocolVersion(w, r) {
+		return nil
 	}
 
 	requestCtx, cancel := context.WithCancel(r.Context())
@@ -597,13 +694,22 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer
 	if virtual != "" {
 		bindingEndpoint = virtualBindingPrefix + virtual
 	}
-	if sessionID := strings.TrimSpace(r.Header.Get("Mcp-Session-Id")); sessionID != "" {
-		if !s.touchBinding(sessionID, authKeyID, userPath, bindingEndpoint, r.Method == http.MethodDelete) {
-			// A different principal presented this session ID. Report the
-			// session as gone (404 per the transport spec) so the legitimate
-			// client's session stays unaffected and this caller re-initializes.
+	var resumed *resumedSession
+	sessionID := strings.TrimSpace(r.Header.Get("Mcp-Session-Id"))
+	if sessionID != "" {
+		admission, host := s.admitSession(r.Context(), sessionID, authKeyID, userPath, bindingEndpoint, r.Method == http.MethodDelete)
+		switch admission {
+		case sessionRejected:
+			// A different principal presented this session ID, or the session
+			// was closed on another replica. Report the session as gone (404
+			// per the transport spec) so the legitimate client's session stays
+			// unaffected and this caller re-initializes.
 			return core.NewNotFoundError("unknown MCP session")
+		case sessionEnded:
+			w.WriteHeader(http.StatusNoContent)
+			return nil
 		}
+		resumed = host
 	}
 
 	// The labels header is internal: never trust an inbound value.
@@ -623,6 +729,13 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer
 		ctx = context.WithValue(ctx, pinnedServerKey{}, pinnedServer)
 	}
 	r = r.WithContext(ctx)
+	if sessionID != "" && r.Method == http.MethodPost {
+		defer s.trackPOST(sessionID)()
+	}
+	if resumed != nil {
+		resumed.ServeHTTP(w, r)
+		return nil
+	}
 	s.handler.ServeHTTP(w, r)
 	return nil
 }
@@ -683,9 +796,18 @@ func (s *Service) scopeFromRequest(r *http.Request) requestScope {
 // getServer builds the per-session MCP server for one downstream client: the
 // SDK calls it when a new session initializes. The tool/prompt/resource view
 // is filtered to what this principal may see — clients never discover tools
-// they cannot call — and stays a stable snapshot for the session's lifetime.
+// they cannot call — and stays a snapshot while this replica hosts the
+// session. A replica that resumes the session builds it from the catalog as
+// it is then.
 func (s *Service) getServer(r *http.Request) *mcp.Server {
-	scope := s.scopeFromRequest(r)
+	server, _ := s.newSessionServer(s.scopeFromRequest(r))
+	return server
+}
+
+// newSessionServer builds the server for one session scope and returns it
+// with the session's bare tool aliases. A new session binds itself when the
+// SDK asks the server for its ID; the caller binds a resumed one.
+func (s *Service) newSessionServer(scope requestScope) (*mcp.Server, map[string]string) {
 	views := s.visibleServers(scope)
 	// Assigned below; the SDK asks for the session ID only after getServer
 	// returns, so the binding sees the final map.
@@ -699,7 +821,8 @@ func (s *Service) getServer(r *http.Request) *mcp.Server {
 		Title:   "GoModel MCP Gateway",
 		Version: version.Version,
 	}, &mcp.ServerOptions{
-		Instructions: s.composeInstructions(scope, views),
+		Instructions:              s.composeInstructions(scope, views),
+		SupportedProtocolVersions: sessionProtocolVersions,
 		// Advertise the full feature set even when the visible catalog is
 		// currently empty, so list calls return empty lists instead of
 		// method-not-supported errors.
@@ -746,7 +869,10 @@ func (s *Service) getServer(r *http.Request) *mcp.Server {
 	} else if len(aliases) > 0 {
 		server.AddReceivingMiddleware(bareToolCallMiddleware(aliases))
 	}
-	return server
+	if s.shared != nil {
+		server.AddReceivingMiddleware(s.shareOnInitialize(scope))
+	}
+	return server, aliases
 }
 
 // bareToolAliases maps each unambiguous bare tool name to its namespaced
@@ -1035,15 +1161,17 @@ func (s *Service) authorizeSessionID(sessionID, upstreamName string) error {
 
 // bindSession records the principal a new session was initialized under.
 func (s *Service) bindSession(sessionID, authKeyID, userPath, endpoint string, discovery bool, toolAliases map[string]string, server *mcp.Server) {
+	now := s.now()
 	s.bindMu.Lock()
 	s.bindings[sessionID] = sessionBinding{
-		authKeyID:   authKeyID,
-		userPath:    userPath,
-		endpoint:    endpoint,
-		lastSeen:    time.Now(),
-		discovery:   discovery,
-		toolAliases: toolAliases,
-		server:      server,
+		authKeyID:          authKeyID,
+		userPath:           userPath,
+		endpoint:           endpoint,
+		lastSeen:           now,
+		virtualIncarnation: s.endpointIncarnation(endpoint),
+		discovery:          discovery,
+		toolAliases:        toolAliases,
+		server:             server,
 	}
 	s.bindMu.Unlock()
 }
@@ -1072,22 +1200,30 @@ func (s *Service) closeStaleVirtualSessions(r *http.Request, name string) {
 // longer exists does not keep idle sessions until the idle timeout. Closing
 // waits for in-flight requests to drain, so it runs in the background.
 func (s *Service) closeEndpointSessions(endpoint string) {
+	s.closeMatchingSessions(func(binding sessionBinding) bool { return binding.endpoint == endpoint })
+}
+
+// closeIncarnationSessions ends the sessions bound to one incarnation of a
+// virtual server endpoint, and not those of a server recreated under its name.
+func (s *Service) closeIncarnationSessions(endpoint, incarnation string) {
+	s.closeMatchingSessions(func(binding sessionBinding) bool {
+		return binding.endpoint == endpoint && binding.virtualIncarnation == incarnation
+	})
+}
+
+func (s *Service) closeMatchingSessions(match func(sessionBinding) bool) {
 	var servers []*mcp.Server
 	s.bindMu.Lock()
 	for id, binding := range s.bindings {
-		if binding.endpoint != endpoint {
+		if !match(binding) {
 			continue
 		}
 		delete(s.bindings, id)
-		if binding.server != nil {
-			servers = append(servers, binding.server)
-		}
+		servers = append(servers, binding.server)
 	}
 	s.bindMu.Unlock()
 	for _, server := range servers {
-		for session := range server.Sessions() {
-			go func() { _ = session.Close() }()
-		}
+		closeSessions(server)
 	}
 }
 
@@ -1110,27 +1246,30 @@ func (s *Service) ToolCallLabel(sessionID, name, target string) string {
 	return name
 }
 
-// touchBinding refreshes a known session binding and reports whether the
-// caller's authenticated identity, user path, and endpoint pin match it.
-// Unknown session IDs pass through: the SDK rejects them itself, and bindings
-// do not survive restarts.
-func (s *Service) touchBinding(sessionID, authKeyID, userPath, endpoint string, remove bool) bool {
+// liveBinding returns the binding of a session this instance still hosts and
+// refreshes its last-seen time. The binding of an SDK session that already
+// ended (the idle timeout) is dropped, so the shared store can resume it.
+func (s *Service) liveBinding(sessionID string) (sessionBinding, bool) {
 	s.bindMu.Lock()
 	defer s.bindMu.Unlock()
 	binding, ok := s.bindings[sessionID]
 	if !ok {
-		return true
+		return sessionBinding{}, false
 	}
-	if binding.authKeyID != authKeyID || binding.userPath != userPath || binding.endpoint != endpoint {
-		return false
-	}
-	if remove {
+	if binding.resumed == nil && binding.server != nil && !hasSessions(binding.server) {
 		delete(s.bindings, sessionID)
+		return sessionBinding{}, false
+	}
+	binding.lastSeen = s.now()
+	s.bindings[sessionID] = binding
+	return binding, true
+}
+
+func hasSessions(server *mcp.Server) bool {
+	for range server.Sessions() {
 		return true
 	}
-	binding.lastSeen = time.Now()
-	s.bindings[sessionID] = binding
-	return true
+	return false
 }
 
 // sweepBindings evicts bindings whose sessions idled out, tracking the SDK's
@@ -1143,14 +1282,21 @@ func (s *Service) sweepBindings() {
 		case <-s.stop:
 			return
 		case <-ticker.C:
-			cutoff := time.Now().Add(-sessionIdleTimeout - time.Minute)
-			s.bindMu.Lock()
-			for id, binding := range s.bindings {
-				if binding.lastSeen.Before(cutoff) {
-					delete(s.bindings, id)
-				}
-			}
-			s.bindMu.Unlock()
+			s.evictIdleBindings()
+		}
+	}
+}
+
+// evictIdleBindings drops the bindings of sessions idle past the idle
+// timeout. A session with a POST in flight is not idle: its timeout is
+// paused until the POST ends.
+func (s *Service) evictIdleBindings() {
+	cutoff := s.now().Add(-sessionIdleTimeout - time.Minute)
+	s.bindMu.Lock()
+	defer s.bindMu.Unlock()
+	for id, binding := range s.bindings {
+		if binding.posts == 0 && binding.lastSeen.Before(cutoff) {
+			delete(s.bindings, id)
 		}
 	}
 }

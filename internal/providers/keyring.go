@@ -32,6 +32,41 @@ type Keyring struct {
 	keys          atomic.Pointer[[]string]
 	next          atomic.Uint64
 	sessionSticky bool
+	// source, when set, replaces the static keys: every lookup returns the
+	// token it currently holds (see NewTokenSourceKeyring).
+	source TokenSource
+}
+
+// TokenSource supplies a short-lived credential, such as an access token
+// minted by workload identity federation, refreshing it as needed.
+type TokenSource interface {
+	Token(ctx context.Context) (string, error)
+}
+
+// NewTokenSourceKeyring returns a Keyring backed by src instead of static
+// keys. Lookups return src's current token, or "" when none can be had; the
+// source logs why, so the upstream rejects the request as unauthenticated
+// rather than the gateway sending a stale credential. It never rotates and
+// cannot be Replaced.
+func NewTokenSourceKeyring(src TokenSource) *Keyring {
+	if src == nil {
+		return nil
+	}
+	return &Keyring{source: src}
+}
+
+// Federated reports whether the ring hands out tokens from a TokenSource
+// rather than static API keys.
+func (k *Keyring) Federated() bool {
+	return k != nil && k.source != nil
+}
+
+func (k *Keyring) sourceToken(ctx context.Context) string {
+	token, err := k.source.Token(ctx)
+	if err != nil {
+		return ""
+	}
+	return token
 }
 
 // NewKeyring returns a Keyring over keys, preserving order while dropping
@@ -68,7 +103,7 @@ func NewKeyringWithSessionStickiness(sessionSticky bool, keys ...string) *Keyrin
 // key now scores higher for it; with one key replaced, roughly the sessions
 // on the old key, plus a 1/N share taken by the new key, move.
 func (k *Keyring) Replace(keys ...string) bool {
-	if k == nil {
+	if k == nil || k.source != nil {
 		return false
 	}
 	unique := uniqueKeys(keys)
@@ -115,6 +150,9 @@ func (k *Keyring) load() []string {
 // request retried after a 429 is re-sent under the next key rather than
 // hammering the one that was just throttled.
 func (k *Keyring) Next() string {
+	if k.Federated() {
+		return k.sourceToken(context.Background())
+	}
 	keys := k.load()
 	if len(keys) == 0 {
 		return ""
@@ -134,14 +172,21 @@ func (k *Keyring) nextOf(keys []string) string {
 // no session is present, or session stickiness was disabled for this provider,
 // it advances the ordinary round-robin sequence.
 func (k *Keyring) NextForContext(ctx context.Context) string {
+	if k.Federated() {
+		return k.sourceToken(ctx)
+	}
 	return k.NextForSession(core.SessionIDFromContext(ctx))
 }
 
 // StableForContext returns the credential that every request with this context
 // will use without advancing round-robin state. The boolean is false when the
 // context has no stable credential affinity, so callers must not persist
-// credential-scoped provider resources for later reuse.
+// credential-scoped provider resources for later reuse. A federated ring's
+// token is replaced on refresh, so it is never stable.
 func (k *Keyring) StableForContext(ctx context.Context) (string, bool) {
+	if k.Federated() {
+		return "", false
+	}
 	keys := k.load()
 	if len(keys) == 0 {
 		return "", false
@@ -161,6 +206,9 @@ func (k *Keyring) StableForContext(ctx context.Context) (string, bool) {
 // assigned to the changed key, rather than invalidating every warm cache. The
 // digest and credential material remain in-process and are never exposed.
 func (k *Keyring) NextForSession(sessionID string) string {
+	if k.Federated() {
+		return k.sourceToken(context.Background())
+	}
 	keys := k.load()
 	if len(keys) == 0 {
 		return ""
@@ -202,6 +250,9 @@ func rendezvousKeyScore(sessionID, key string) [sha256.Size]byte {
 // It is the key to use where a stable identity matters more than spreading
 // load, and where an empty ring must stay empty.
 func (k *Keyring) Primary() string {
+	if k.Federated() {
+		return k.sourceToken(context.Background())
+	}
 	keys := k.load()
 	if len(keys) == 0 {
 		return ""
@@ -209,8 +260,12 @@ func (k *Keyring) Primary() string {
 	return keys[0]
 }
 
-// Len reports how many distinct keys back the rotation.
+// Len reports how many distinct keys back the rotation; 1 for a federated
+// ring.
 func (k *Keyring) Len() int {
+	if k.Federated() {
+		return 1
+	}
 	return len(k.load())
 }
 

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 	"unicode/utf8"
 
@@ -357,30 +358,33 @@ func (m *mockStore) isClosed() bool {
 }
 
 func TestLogger(t *testing.T) {
-	store := &mockStore{}
-	cfg := Config{
-		Enabled:       true,
-		BufferSize:    10,
-		FlushInterval: 100 * time.Millisecond,
-	}
+	synctest.Test(t, func(t *testing.T) {
+		store := &mockStore{}
+		cfg := Config{
+			Enabled:       true,
+			BufferSize:    10,
+			FlushInterval: 100 * time.Millisecond,
+		}
 
-	logger := NewLogger(store, cfg)
-	defer logger.Close()
+		logger := NewLogger(store, cfg)
+		defer logger.Close()
 
-	// Write some entries
-	for i := range 5 {
-		logger.Write(&LogEntry{
-			ID:             fmt.Sprintf("entry-%d", i),
-			Timestamp:      time.Now(),
-			RequestedModel: "test-model",
-		})
-	}
+		// Write some entries
+		for i := range 5 {
+			logger.Write(&LogEntry{
+				ID:             fmt.Sprintf("entry-%d", i),
+				Timestamp:      time.Now(),
+				RequestedModel: "test-model",
+			})
+		}
 
-	// Wait for flush
-	time.Sleep(200 * time.Millisecond)
+		// The periodic flush fires one interval later on the bubble's clock.
+		time.Sleep(cfg.FlushInterval)
+		synctest.Wait()
 
-	// Verify entries were written
-	assert.Len(t, store.getEntries(), 5)
+		// Verify entries were written
+		assert.Len(t, store.getEntries(), 5)
+	})
 }
 
 func TestLoggerFlushBatchPublishesFailedLiveEvent(t *testing.T) {

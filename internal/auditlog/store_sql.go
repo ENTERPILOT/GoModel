@@ -13,12 +13,12 @@ import (
 )
 
 // SQLite allows 999 bindable parameters per statement
-// (SQLITE_MAX_VARIABLE_NUMBER). At 23 columns per entry that is 43 entries,
+// (SQLITE_MAX_VARIABLE_NUMBER). At 25 columns per entry that is 39 entries,
 // so larger batches are chunked. PostgreSQL's limit is far higher, but one
 // chunk size keeps the write path identical on both.
 const (
 	maxSQLParams       = 999
-	columnsPerEntry    = 23
+	columnsPerEntry    = 25
 	maxEntriesPerBatch = maxSQLParams / columnsPerEntry
 	// Attempt rows are inserted the same way, and a failover-heavy batch can
 	// carry several per entry, so they are chunked on their own column count.
@@ -35,10 +35,10 @@ type SQLStore struct {
 	stopCleanup   chan struct{}
 	closeOnce     sync.Once
 
-	// indexBuild tracks the background trigram search index build, so tests
-	// can wait for it; production never blocks on it. Close cancels a build
-	// still in flight rather than holding shutdown for it — the interrupted
-	// index is dropped and rebuilt on the next start.
+	// indexBuild tracks the background written_at and trigram search index
+	// builds, so tests can wait for them; production never blocks on them.
+	// Close cancels a build still in flight rather than holding shutdown for
+	// it — the interrupted index is dropped and rebuilt on the next start.
 	indexBuild       sync.WaitGroup
 	cancelIndexBuild context.CancelFunc
 }
@@ -67,7 +67,9 @@ var sqlTables = []string{
 		session_id TEXT,
 		stream ` + sqlx.TypeBool + ` DEFAULT FALSE,
 		error_type TEXT,
-		data ` + sqlx.TypeJSON + `
+		data ` + sqlx.TypeJSON + `,
+		writer_id TEXT,
+		written_at ` + sqlx.TypeInt64 + `
 	)`,
 	`CREATE TABLE IF NOT EXISTS audit_log_attempts (
 		id ` + sqlx.TypeSerialPK + `,
@@ -104,6 +106,8 @@ var sqlMigrations = []string{
 	"ALTER TABLE audit_logs ADD COLUMN auth_method TEXT",
 	"ALTER TABLE audit_logs ADD COLUMN user_path TEXT",
 	"ALTER TABLE audit_logs ADD COLUMN session_id TEXT",
+	"ALTER TABLE audit_logs ADD COLUMN writer_id TEXT",
+	"ALTER TABLE audit_logs ADD COLUMN written_at " + sqlx.TypeInt64,
 	"ALTER TABLE audit_log_attempts ADD COLUMN response_body TEXT",
 	"ALTER TABLE audit_log_attempts ADD COLUMN response_headers TEXT",
 }
@@ -113,7 +117,6 @@ var sqlMigrations = []string{
 var sqlIndexes = []string{
 	"CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp)",
 	"DROP INDEX IF EXISTS idx_audit_model",
-	"CREATE INDEX IF NOT EXISTS idx_audit_requested_model ON audit_logs(requested_model)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_status ON audit_logs(status_code)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_provider ON audit_logs(provider)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_provider_name ON audit_logs(provider_name)",
@@ -142,8 +145,11 @@ const insertAuditLogPrefix = `INSERT INTO audit_logs (
 	id, timestamp, duration_ns, requested_model, resolved_model, provider,
 	provider_name, alias_used, workflow_version_id, cache_type, status_code,
 	request_id, principal_id, auth_key_id, auth_method, client_ip, method, path, user_path,
-	session_id, stream, error_type, data
+	session_id, stream, error_type, data, writer_id, written_at
 ) VALUES `
+
+// auditLogRowPlaceholder is one VALUES tuple of columnsPerEntry placeholders.
+var auditLogRowPlaceholder = "(" + strings.TrimSuffix(strings.Repeat("?, ", columnsPerEntry), ", ") + ")"
 
 const insertAttemptPrefix = `INSERT INTO audit_log_attempts (
 	audit_log_id, seq, kind, provider_type, provider_name, model,
@@ -171,6 +177,10 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 		return nil, err
 	}
 	indexes := append(append(sqlIndexes, userPathIndexes(db.Dialect())...), jsonPathIndexes(db.Dialect())...)
+	indexes = append(indexes, writtenAtIndexes(db.Dialect())...)
+	if db.Dialect() != sqlx.PostgreSQL {
+		indexes = append(indexes, modelIndexStatements(db.Dialect())...)
+	}
 	for _, statement := range indexes {
 		if _, err := db.Exec(ctx, statement); err != nil {
 			slog.Warn("failed to create index", "error", err)
@@ -182,13 +192,26 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 		retentionDays: retentionDays,
 		stopCleanup:   make(chan struct{}),
 	}
-	// The trigram search index can take minutes to build on a large existing
-	// table, so it is built off the startup path (and CONCURRENTLY, so writes
-	// keep flowing); readers pick it up as soon as it exists.
+	// The written_at, model and trigram search indexes can take minutes to
+	// build on a large existing PostgreSQL table, so they are built off the
+	// startup path (and CONCURRENTLY, so writes keep flowing); readers pick
+	// each up as soon as it exists. They are built one after the other, since
+	// PostgreSQL runs one concurrent build per table at a time. The written_at
+	// index gets one attempt first and its retries last, so one that keeps
+	// failing holds up neither of the others.
 	buildCtx, cancel := context.WithCancel(context.Background())
 	store.cancelIndexBuild = cancel
 	store.indexBuild.Go(func() {
+		writtenAt, ok := writtenAtIndexBuilder(db)
+		built := !ok || writtenAt.TryBuild(buildCtx, writtenAtBackgroundIndex)
+		if buildCtx.Err() != nil {
+			return
+		}
+		ensureModelIndexesConcurrently(buildCtx, db)
 		ensureTrigramSearchIndex(buildCtx, db, postgresErrorMessage)
+		if !built {
+			writtenAt.Build(buildCtx, writtenAtBackgroundIndex)
+		}
 	})
 	if retentionDays > 0 {
 		go storage.RunCleanupLoop(store.stopCleanup, CleanupInterval, store.cleanup)
@@ -248,6 +271,8 @@ func jsonPathIndexes(dialect sqlx.Dialect) []string {
 }
 
 // WriteBatch writes log entries, chunked to stay within the parameter limit.
+// Each chunk's entries and their provider attempts commit together, so a
+// reader never sees an entry before its attempts.
 func (s *SQLStore) WriteBatch(ctx context.Context, entries []*LogEntry) error {
 	if len(entries) == 0 {
 		return nil
@@ -260,15 +285,18 @@ func (s *SQLStore) WriteBatch(ctx context.Context, entries []*LogEntry) error {
 		placeholders := make([]string, len(chunk))
 		values := make([]any, 0, len(chunk)*columnsPerEntry)
 		for j, e := range chunk {
-			placeholders[j] = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+			placeholders[j] = auditLogRowPlaceholder
 			values = append(values, auditLogValues(dialect, e)...)
 		}
 
 		query := insertAuditLogPrefix + strings.Join(placeholders, ",") + ` ON CONFLICT (id) DO NOTHING`
-		if _, err := s.db.Exec(ctx, query, values...); err != nil {
-			return fmt.Errorf("failed to insert audit logs batch %d: %w", i/maxEntriesPerBatch, err)
-		}
-		if err := s.writeAttempts(ctx, chunk); err != nil {
+		err := s.db.InTx(ctx, func(q sqlx.Querier) error {
+			if _, err := q.Exec(ctx, query, values...); err != nil {
+				return fmt.Errorf("failed to insert audit logs batch %d: %w", i/maxEntriesPerBatch, err)
+			}
+			return writeAttempts(ctx, q, dialect, chunk)
+		})
+		if err != nil {
 			return err
 		}
 	}
@@ -289,6 +317,7 @@ func auditLogValues(dialect sqlx.Dialect, e *LogEntry) []any {
 	if strings.TrimSpace(userPathValue) == "" {
 		userPathValue = "/"
 	}
+	writerID, writtenAt := e.Stamp.SQLValues()
 
 	return []any{
 		e.ID,
@@ -314,6 +343,8 @@ func auditLogValues(dialect sqlx.Dialect, e *LogEntry) []any {
 		e.Stream,
 		e.ErrorType,
 		dataValue,
+		writerID,
+		writtenAt,
 	}
 }
 
@@ -334,8 +365,7 @@ func (r attemptRef) String() string {
 // handed to the database as soon as it is full, so the transient cost stays
 // bounded by the chunk size however many attempts (and however large their
 // captured bodies) the batch carries.
-func (s *SQLStore) writeAttempts(ctx context.Context, entries []*LogEntry) error {
-	dialect := s.db.Dialect()
+func writeAttempts(ctx context.Context, q sqlx.Querier, dialect sqlx.Dialect, entries []*LogEntry) error {
 	values := make([]any, 0, maxAttemptsPerBatch*columnsPerAttempt)
 	rows := 0
 	var first, last attemptRef
@@ -346,7 +376,7 @@ func (s *SQLStore) writeAttempts(ctx context.Context, entries []*LogEntry) error
 		}
 		placeholders := strings.TrimSuffix(strings.Repeat(attemptRowPlaceholder+",", rows), ",")
 		query := insertAttemptPrefix + placeholders + insertAttemptSuffix
-		if _, err := s.db.Exec(ctx, query, values...); err != nil {
+		if _, err := q.Exec(ctx, query, values...); err != nil {
 			return fmt.Errorf("failed to insert audit log attempts %s through %s: %w", first, last, err)
 		}
 		values = values[:0]
