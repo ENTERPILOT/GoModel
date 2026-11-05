@@ -203,6 +203,12 @@ func TestLayerResolvesTextMembersByDepth(t *testing.T) {
 		})
 	}
 
+	t.Run("a configured key that looks like a member is forwarded as is", func(t *testing.T) {
+		layered := none.Layer(Overrides{Params: Set{"text.custom": raw(`1`)}})
+		_, responses := apply(t, layered, plain())
+		assert.JSONEq(t, `{"model":"m","input":"hi","text.custom":1}`, responses)
+	})
+
 	err := Disjoint(Set{"text": raw(`{"format":{"type":"text"}}`)}, Set{"response_format": jsonObject})
 	require.Error(t, err, "a default and a forced value for the same text member")
 	err = Disjoint(Set{"response_format": jsonObject}, Set{"text": raw(`{"format":{"type":"text"}}`)})

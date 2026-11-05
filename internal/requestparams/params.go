@@ -109,8 +109,10 @@ func (o Overrides) ResponsesSets() (defaults, params Set) {
 }
 
 // textMemberPrefix marks a key that sets one member of the Responses text
-// object in a set returned by ResponsesSets.
-const textMemberPrefix = "text."
+// object in a set returned by ResponsesSets. It starts with a NUL byte, which
+// validateKey refuses in configured names, so it never collides with a key
+// an operator set, such as a provider's own "text.custom".
+const textMemberPrefix = "\x00text."
 
 func responsesView(set Set) Set {
 	if len(set) == 0 {
