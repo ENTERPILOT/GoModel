@@ -129,7 +129,7 @@ func sessionDetectionSnapshot(c *echo.Context, snapshot *core.RequestSnapshot) (
 func materializeSessionBody(c *echo.Context, snapshot *core.RequestSnapshot) (*core.RequestSnapshot, error) {
 	req := c.Request()
 	originalBody := req.Body
-	body, err := io.ReadAll(originalBody)
+	body, err := core.ReadAllSized(originalBody, req.ContentLength, requestBodyPreallocLimit)
 	if err != nil {
 		// Preserve the bytes already consumed even though this request will be
 		// rejected, keeping the helper's ownership contract explicit.
