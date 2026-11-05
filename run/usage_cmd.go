@@ -95,9 +95,9 @@ func runUsageImport(ctx context.Context, opts Options, source string) error {
 
 	n, err := usage.ImportSQLiteFile(ctx, source, dst, result.Config.Usage.RetentionDays)
 	if err != nil {
-		return fmt.Errorf("usage import: %w (%d rows copied before the error; run again to resume)", err, n)
+		return fmt.Errorf("usage import: %w (%d rows processed before the error; run again to resume)", err, n)
 	}
-	fmt.Fprintf(opts.Stdout, "imported %d usage rows from %s into %s storage (rows already present were skipped)\n", n, source, backend.Type)
+	fmt.Fprintf(opts.Stdout, "processed %d usage rows from %s into %s storage (rows already present were skipped)\n", n, source, backend.Type)
 	return nil
 }
 

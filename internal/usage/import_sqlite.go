@@ -54,6 +54,7 @@ var importColumns = []struct{ name, fallback string }{
 	{"markup_percent", "NULL"},
 	{"markup_selector", "''"},
 	{"billed_cost", "NULL"},
+	{"billable", "1"},
 }
 
 // ImportSQLiteFile copies every usage row from another GoModel instance's
@@ -179,11 +180,12 @@ func scanImportRow(rows *sql.Rows) (*UsageEntry, error) {
 	var e UsageEntry
 	var ts string
 	var labelsJSON, rawDataJSON *string
+	var billable bool
 	if err := rows.Scan(&e.ID, &e.RequestID, &e.ProviderID, &ts, &e.Model, &e.Provider, &e.ProviderName,
 		&e.Endpoint, &e.UserPath, &e.SessionID, &e.CacheType, &labelsJSON,
 		&e.InputTokens, &e.OutputTokens, &e.TotalTokens, &e.RewriteTokensSaved, &e.RewriteCostSaved, &rawDataJSON,
 		&e.InputCost, &e.OutputCost, &e.TotalCost, &e.CostSource, &e.CostsCalculationCaveat, &e.AuthKeyID,
-		&e.MarkupPercent, &e.MarkupSelector, &e.BilledCost); err != nil {
+		&e.MarkupPercent, &e.MarkupSelector, &e.BilledCost, &billable); err != nil {
 		return nil, fmt.Errorf("read source usage row: %w", err)
 	}
 	if e.ID == "" {
@@ -194,6 +196,9 @@ func scanImportRow(rows *sql.Rows) (*UsageEntry, error) {
 		return nil, fmt.Errorf("usage row %s: unparseable timestamp %q", e.ID, ts)
 	}
 	e.Timestamp = t
+	if !billable {
+		e.MarkNonBillable()
+	}
 	if labelsJSON != nil {
 		e.Labels = sqlutil.StringsFromJSON(*labelsJSON, e.RequestID)
 	}

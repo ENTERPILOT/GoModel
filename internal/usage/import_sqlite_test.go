@@ -42,6 +42,7 @@ func TestImportSQLiteFile_CopiesRowsAndSkipsExisting(t *testing.T) {
 		},
 		{ID: "u-2", RequestID: "req-2", Timestamp: ts.Add(time.Minute), Model: "claude", Provider: "anthropic", Endpoint: "/v1/messages"},
 	}
+	entries[1].MarkNonBillable()
 	require.NoError(t, srcStore.WriteBatch(ctx, entries))
 
 	_, dst := newImportSQLite(t, "destination.db")
@@ -65,15 +66,24 @@ func TestImportSQLiteFile_CopiesRowsAndSkipsExisting(t *testing.T) {
 	assert.Equal(t, float64(4), first.RawData["cached_tokens"])
 	require.NotNil(t, first.BilledCost)
 	assert.InDelta(t, billed, *first.BilledCost, 1e-9)
-	assert.Len(t, got["req-2"], 1)
+	assert.Nil(t, first.Billable, "billable rows read with no flag")
+	require.Len(t, got["req-2"], 1)
+	require.NotNil(t, got["req-2"][0].Billable)
+	assert.False(t, *got["req-2"][0].Billable)
 
-	// A second run adds nothing.
+	// A second run adds nothing and leaves rows already present unchanged.
+	_, err = src.DB().ExecContext(ctx, "UPDATE usage SET user_path = '/team/changed' WHERE id = 'u-1'")
+	require.NoError(t, err)
 	n, err = ImportSQLiteFile(ctx, srcPath, dst, 0)
 	require.NoError(t, err)
 	assert.Equal(t, 2, n)
 	var count int
 	require.NoError(t, dst.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM usage").Scan(&count))
 	assert.Equal(t, 2, count)
+	kept, err := reader.GetUsageByRequestIDs(ctx, []string{"req-1"})
+	require.NoError(t, err)
+	require.Len(t, kept["req-1"], 1)
+	assert.Equal(t, "/team/a", kept["req-1"][0].UserPath)
 }
 
 func TestImportSQLiteFile_OlderSourceSchema(t *testing.T) {
@@ -101,6 +111,7 @@ func TestImportSQLiteFile_OlderSourceSchema(t *testing.T) {
 	require.Len(t, got["req-old"], 1)
 	assert.Equal(t, 7, got["req-old"][0].TotalTokens)
 	assert.Nil(t, got["req-old"][0].TotalCost)
+	assert.Nil(t, got["req-old"][0].Billable, "older schemas import as billable")
 }
 
 func TestImportSQLiteFile_SourceErrors(t *testing.T) {

@@ -77,7 +77,7 @@ func TestRunUsageImport(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	err = Run(ctx, Options{Args: []string{"usage", "import", sourcePath}, Stdout: &stdout, Stderr: &stderr})
 	require.NoError(t, err, stderr.String())
-	assert.Contains(t, stdout.String(), "imported 1 usage rows")
+	assert.Contains(t, stdout.String(), "processed 1 usage rows")
 
 	err = Run(ctx, Options{Args: []string{"usage", "import", destPath}, Stdout: io.Discard, Stderr: &stderr})
 	require.ErrorContains(t, err, "this instance's own database")
