@@ -274,6 +274,17 @@ func (r *ModelRegistry) GetProviderNameForType(providerType string) string {
 	return ""
 }
 
+// ProviderInstanceName returns the configured name of a registered provider
+// instance, or "" when it is not registered.
+func (r *ModelRegistry) ProviderInstanceName(provider core.Provider) string {
+	if provider == nil {
+		return ""
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.providerNames[provider]
+}
+
 // GetProviderTypeForName returns the provider type for the given concrete
 // configured provider instance name.
 func (r *ModelRegistry) GetProviderTypeForName(providerName string) string {

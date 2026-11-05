@@ -151,7 +151,7 @@ func createUsageStore(ctx context.Context, store storage.Storage, retentionDays 
 // returns its stop function; other backends build every index inline.
 func startIndexBuild(store storage.Storage) (stop func()) {
 	if pg, ok := store.(storage.PostgreSQLStorage); ok {
-		return startAuthKeyIndexBuild(pg.Pool())
+		return startBackgroundIndexBuild(pg.Pool())
 	}
 	return nil
 }
