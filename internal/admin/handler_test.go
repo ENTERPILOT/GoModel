@@ -721,6 +721,7 @@ func TestUsageLog_Success(t *testing.T) {
 		},
 	}
 	h := NewHandler(reader, nil)
+	before := time.Now().UnixMicro()
 	c, rec := echotest.Get(t, "/admin/usage/log?days=30&limit=50&offset=0")
 	require.NoError(t, h.UsageLog(c))
 	assert.Equal(t, http.StatusOK, rec.Code)
@@ -728,6 +729,7 @@ func TestUsageLog_Success(t *testing.T) {
 	result := echotest.Decode[usage.UsageLogResult](t, rec)
 	require.Len(t, result.Entries, 2)
 	assert.Equal(t, 2, result.Total)
+	assert.GreaterOrEqual(t, result.AsOf, before, "as_of is when the page was read")
 	assert.Equal(t, "gpt-4", result.Entries[0].Model)
 	require.NotNil(t, result.Entries[0].RawData)
 	ct, ok := result.Entries[0].RawData["cached_tokens"].(float64)
