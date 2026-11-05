@@ -932,6 +932,16 @@ The persisted audit and usage tables remain the source of truth. If the
 browser's cursor falls outside the replay buffer, the stream sends a reset event
 and the dashboard reloads from the normal REST endpoints.
 
+With more than one replica on a shared database, the stream also carries the
+requests the other replicas served, as `audit.flushed` and `usage.flushed`
+events once those replicas have persisted them, typically within 7 seconds.
+Their payload carries `_remote_written_at`, the writing replica's stamp in unix
+microseconds. `GET /admin/audit/log`, `/admin/audit/sessions` and
+`/admin/usage/log` return `as_of`, when the server read the page on the same
+scale, so a client can tell that a remote entry stamped at or before it is
+already in that page's totals.
+See [live logs across replicas](/guides/production#live-logs-across-replicas).
+
 ## Disabling Admin Features
 
 To disable all admin features:

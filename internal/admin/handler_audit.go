@@ -87,6 +87,7 @@ func (h *Handler) AuditLog(c *echo.Context) error {
 		})
 	}
 
+	asOf := time.Now().UnixMicro()
 	result, err := h.auditReader.GetLogs(c.Request().Context(), params)
 	if err != nil {
 		return handleError(c, err)
@@ -107,6 +108,7 @@ func (h *Handler) AuditLog(c *echo.Context) error {
 	for i := range response.Entries {
 		slimAuditListEntry(&response.Entries[i])
 	}
+	response.AsOf = asOf
 	return c.JSON(http.StatusOK, response)
 }
 
@@ -257,6 +259,7 @@ func (h *Handler) AuditSessions(c *echo.Context) error {
 		})
 	}
 
+	asOf := time.Now().UnixMicro()
 	result, err := h.auditReader.GetSessions(c.Request().Context(), params)
 	if err != nil {
 		return handleError(c, err)
@@ -280,6 +283,7 @@ func (h *Handler) AuditSessions(c *echo.Context) error {
 		Total:    result.Total,
 		Limit:    result.Limit,
 		Offset:   result.Offset,
+		AsOf:     asOf,
 	}
 	for i, session := range result.Sessions {
 		// Session heads are list rows too. Keep the default grouped view on the
