@@ -24,9 +24,9 @@ type Reasoning struct {
 	Effort string `json:"effort,omitempty"`
 	// Summary requests a reasoning summary from the model (OpenAI Responses
 	// API: "auto", "concise", "detailed"). The Responses API never emits
-	// summaries unprompted, so empty asks for none there; a chat request the
-	// gateway serves through the Responses API asks for "auto" whenever it
-	// sets a reasoning effort.
+	// summaries unprompted, so empty asks for none there. A chat request the
+	// gateway serves through the Responses API keeps the summary the client
+	// set, and asks for "auto" when it set none and reasoning is on.
 	Summary string `json:"summary,omitempty"`
 }
 

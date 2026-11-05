@@ -16500,7 +16500,7 @@
             "type": "string"
           },
           "summary": {
-            "description": "Summary requests a reasoning summary from the model (OpenAI Responses\nAPI: \"auto\", \"concise\", \"detailed\"). The Responses API never emits\nsummaries unprompted, so empty asks for none there; a chat request the\ngateway serves through the Responses API asks for \"auto\" whenever it\nsets a reasoning effort.",
+            "description": "Summary requests a reasoning summary from the model (OpenAI Responses\nAPI: \"auto\", \"concise\", \"detailed\"). The Responses API never emits\nsummaries unprompted, so empty asks for none there. A chat request the\ngateway serves through the Responses API keeps the summary the client\nset, and asks for \"auto\" when it set none and reasoning is on.",
             "type": "string"
           }
         }

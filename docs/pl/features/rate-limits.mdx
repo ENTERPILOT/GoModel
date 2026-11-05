@@ -297,9 +297,9 @@ scalane przez maksimum, bo każdy z tych wierszy zawiera też to, co jego autor
 przywrócił przy starcie. Dopóki te okna nie wygasną (do dwóch okresów), ruch
 zliczony przez kilka replik v0.2.1 może zostać policzony za nisko, a replika
 v0.2.1 zrestartowana w trakcie wdrażania może policzyć część ruchu podwójnie.
-Jeśli potrzebujesz dokładnych limitów zaraz po aktualizacji, zaktualizuj
-wszystkie repliki naraz albo po wdrożeniu zresetuj liczniki
-(`POST /admin/rate-limits/reset`).
+Gdy te okna wygasną, liczniki znów są dokładne. Aby zacząć od czysta, po
+wdrożeniu zresetuj liczniki (`POST /admin/rate-limits/reset`): każda reguła
+liczy wtedy od zera.
 </Note>
 
 ## Zachowanie klienta

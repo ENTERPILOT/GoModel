@@ -293,9 +293,10 @@ Upgrading from v0.2.1 or earlier: counters those releases saved are merged by
 maximum, since each of those rows also holds what its writer restored at
 start. Until those windows roll out (up to two periods), traffic counted by
 several v0.2.1 replicas can be under-counted, and a v0.2.1 replica restarted
-mid-rollout can count some traffic twice. For exact limits right after
-upgrading, upgrade every replica together, or reset the counters
-(`POST /admin/rate-limits/reset`) after the rollout.
+mid-rollout can count some traffic twice. Counts are exact again once those
+windows roll out. To start clean instead, reset the counters
+(`POST /admin/rate-limits/reset`) after the rollout: every rule then counts
+from zero.
 </Note>
 
 ## Client behavior

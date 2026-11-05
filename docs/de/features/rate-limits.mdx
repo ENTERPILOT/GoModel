@@ -334,9 +334,10 @@ werden per Maximum zusammengeführt, da jede dieser Zeilen auch enthält, was ih
 Schreiber beim Start wiederhergestellt hat. Bis diese Fenster auslaufen (bis zu
 zwei Perioden), kann Traffic, den mehrere v0.2.1-Replikate gezählt haben, zu
 niedrig gezählt werden, und ein v0.2.1-Replikat, das während des Rollouts neu
-startet, kann manchen Traffic doppelt zählen. Für exakte Limits direkt nach dem
-Upgrade aktualisieren Sie alle Replikate gemeinsam oder setzen die Zähler nach
-dem Rollout zurück (`POST /admin/rate-limits/reset`).
+startet, kann manchen Traffic doppelt zählen. Sobald diese Fenster ausgelaufen
+sind, stimmen die Zähler wieder. Für einen sauberen Neustart setzen Sie die
+Zähler nach dem Rollout zurück (`POST /admin/rate-limits/reset`): Jede Regel
+zählt dann ab null.
 </Note>
 
 ## Verhalten gegenüber Clients

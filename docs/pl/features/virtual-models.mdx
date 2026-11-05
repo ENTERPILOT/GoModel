@@ -137,8 +137,9 @@ Limit tokenów to jeden limit w każdej pisowni: `max_tokens`,
 obowiązuje tylko wtedy, gdy klient nie wysłał żadnej z nich.
 
 Jeden zestaw parametrów obsługuje każde API, więc wymienione tu klucze są
-pomijane w API, które ich nie zna; każdy inny klucz jest przekazywany bez zmian
-i upstream może go odrzucić. W Responses API pomijane są klucze dostępne tylko w
+pomijane w API, które ich nie zna. Klucz, który nie jest ani pomijany, ani
+mapowany (jak limit tokenów, `response_format` i `verbosity`), jest
+przekazywany bez zmian i upstream może go odrzucić. W Responses API pomijane są klucze dostępne tylko w
 Chat: `seed`, `stop`, `n`, `frequency_penalty`, `presence_penalty`,
 `logit_bias`, `logprobs`, `modalities`, `audio`, `prediction` i
 `web_search_options`, a `response_format` i `verbosity` stają się
