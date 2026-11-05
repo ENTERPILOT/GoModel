@@ -885,6 +885,7 @@ test("mcpToolCatalogRows filters by scope, hidden tools, and query", () => {
     { name: "query by namespaced name", options: { query: "GITHUB_SEARCH" }, want: ["github:search_code"] },
     { name: "query by server", options: { query: "linear" }, want: ["linear:list_issues"] },
     { name: "query by description", options: { query: "open an" }, want: ["github:create_issue"] },
+    { name: "query by subsequence", options: { query: "ghsearchcode" }, want: ["github:search_code"] },
   ];
   for (const { name, options, want } of cases) {
     assert.deepEqual(

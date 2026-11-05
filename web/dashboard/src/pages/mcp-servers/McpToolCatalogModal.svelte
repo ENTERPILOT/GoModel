@@ -3,6 +3,7 @@
   // list, named as clients call it ({slug}_{name}). It can be narrowed to one
   // virtual server's members and can include the tools filters hide.
   import DialogCloseButton from "$lib/components/atoms/DialogCloseButton.svelte";
+  import HighlightText from "$lib/components/atoms/HighlightText.svelte";
   import Modal from "$lib/components/atoms/Modal.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import LoadingState from "$lib/components/molecules/LoadingState.svelte";
@@ -111,7 +112,9 @@
               class="mcp-all-tools-item"
               class:mcp-all-tools-item-excluded={row.excluded || row.shadowedBy}
             >
-              <code class="mcp-all-tools-name mono">{row.aggregated || row.name}</code>
+              <code class="mcp-all-tools-name mono"
+                ><HighlightText text={row.aggregated || row.name} needle={mcpServers.toolCatalogQuery} /></code
+              >
               {#if row.excluded}
                 <span class="mcp-all-tools-badge" title={m.mcp_catalog_excluded_tools_hint()}
                   >{m.mcp_all_tools_hidden()}</span

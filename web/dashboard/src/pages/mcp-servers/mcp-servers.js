@@ -424,7 +424,6 @@ function mcpToolCatalogOwners(inScope) {
 // description. A tool whose /mcp name another server already serves is
 // marked shadowedBy that server and sorted after the reachable tools.
 export function mcpToolCatalogRows(entries, { members = null, showExcluded = false, query = "" } = {}) {
-  const needle = String(query || "").trim().toLowerCase();
   const inScope = mcpToolCatalogEntriesInScope(entries, members);
   const owners = mcpToolCatalogOwners(inScope);
   const rows = [];
@@ -457,13 +456,12 @@ export function mcpToolCatalogRows(entries, { members = null, showExcluded = fal
       (entry.catalog.excluded_tools || []).forEach(add(true));
     }
   });
-  const filtered = needle
-    ? rows.filter((row) =>
-        [row.aggregated, row.name, row.server, row.description].some((value) =>
-          value.toLowerCase().includes(needle),
-        ),
-      )
-    : rows;
+  const filtered = filterFields(rows, query, (row) => [
+    row.aggregated,
+    row.name,
+    row.server,
+    row.description,
+  ]);
   const rank = (row) => (row.excluded ? 2 : row.shadowedBy ? 1 : 0);
   return filtered.sort(
     (a, b) =>
