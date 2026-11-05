@@ -3,11 +3,15 @@ package mcpgateway
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/enterpilot/gomodel/ext"
 )
 
 func TestNormalizeAccessSelectors(t *testing.T) {
@@ -200,4 +204,46 @@ func TestAuthorizeSessionChecksKeyAllowlist(t *testing.T) {
 	require.ErrorIs(t, service.authorizeSessionID("open", "alpha", "write"), ErrNotAllowedForKey)
 	require.ErrorIs(t, service.authorizeSessionID("open", "alpha", ""), ErrNotAllowedForKey)
 	require.ErrorIs(t, service.authorizeSessionID("open", "beta", "search"), ErrNotAllowedForKey)
+}
+
+// A session resumed on another replica keeps the key's MCP allowlist, and an
+// allowlist edit seen on any replica ends the session on every replica.
+func TestKeyAllowlistHoldsAcrossReplicas(t *testing.T) {
+	runSharedStoreSuite(t, func(t *testing.T, store ext.SharedStore) {
+		servers := map[string]ServerSpec{
+			"alpha": testSpec("alpha", newTestUpstream(t, "alpha", func(server *mcp.Server) {
+				addEchoTool("read")(server)
+				addEchoTool("write")(server)
+			}), nil),
+			"beta": testSpec("beta", newTestUpstream(t, "beta", addEchoTool("search")), nil),
+		}
+		a := newReplica(t, store, Options{ConfigServers: servers}, nil)
+		b := newReplica(t, store, Options{ConfigServers: servers}, nil)
+
+		var target atomic.Pointer[Service]
+		target.Store(a.service)
+		balancer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gatewayHandler(target.Load()).ServeHTTP(w, r)
+		}))
+		t.Cleanup(balancer.Close)
+
+		narrow := map[string]string{"X-Test-Auth-Key-ID": "key-a", testAllowedMCPHeader: "alpha/read"}
+		session := connectClient(t, balancer.URL+"/mcp", narrow)
+		target.Store(b.service)
+
+		assert.Equal(t, []string{"alpha_read"}, listToolNames(t, session), "the resumed session lists only granted tools")
+		_, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "alpha_write"})
+		require.Error(t, err, "a tool outside the allowlist must not be callable on the resuming replica")
+		binding, ok := b.binding(session.ID())
+		require.True(t, ok)
+		require.NotNil(t, binding.resumed)
+		assert.True(t, binding.access.equal(newKeyAccess([]string{"alpha/read"})))
+
+		widened := map[string]string{"X-Test-Auth-Key-ID": "key-a", testAllowedMCPHeader: "alpha/*"}
+		assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, a.url+"/mcp", listToolsBody, withSession(widened, session.ID())),
+			"an allowlist edit ends the session")
+		b.clock.Advance(sessionRecheckInterval)
+		assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, b.url+"/mcp", listToolsBody, withSession(narrow, session.ID())),
+			"the session ends on the other replica too")
+	})
 }
