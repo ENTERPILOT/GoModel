@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -47,9 +46,10 @@ func (h *Handler) LiveLogs(c *echo.Context) error {
 	// broker-global counter can, when an event published after subscribe is
 	// still queued on sub.Events.
 	lastSeq := sub.Latest
+	stream := liveEventWriter{res: res}
 
 	if sub.Reset {
-		if err := writeLiveEvent(res, live.Event{
+		if err := stream.write(live.Event{
 			Seq:  lastSeq,
 			Type: live.EventReset,
 		}); err != nil {
@@ -60,7 +60,7 @@ func (h *Handler) LiveLogs(c *echo.Context) error {
 		if !filter.matches(event.Type) {
 			continue
 		}
-		if err := writeLiveEvent(res, event); err != nil {
+		if err := stream.write(event); err != nil {
 			return err
 		}
 	}
@@ -69,7 +69,7 @@ func (h *Handler) LiveLogs(c *echo.Context) error {
 	// cursor right away; without it nothing reaches the wire until the first
 	// ticker heartbeat, so a freshly opened stream looked pending for up to
 	// the whole heartbeat interval.
-	if err := writeLiveEvent(res, live.Event{
+	if err := stream.write(live.Event{
 		Seq:  lastSeq,
 		Type: live.EventHeartbeat,
 	}); err != nil {
@@ -94,11 +94,11 @@ func (h *Handler) LiveLogs(c *echo.Context) error {
 			if !filter.matches(event.Type) {
 				continue
 			}
-			if err := writeLiveEvent(res, event); err != nil {
+			if err := stream.write(event); err != nil {
 				return err
 			}
 		case <-ticker.C:
-			if err := writeLiveEvent(res, live.Event{
+			if err := stream.write(live.Event{
 				Seq:  lastSeq,
 				Type: live.EventHeartbeat,
 			}); err != nil {
@@ -159,27 +159,83 @@ func (f liveLogTypeFilter) matches(eventType string) bool {
 	return matched
 }
 
-func writeLiveEvent(res http.ResponseWriter, event live.Event) error {
+// liveEventWriter writes live events as SSE frames, reusing one buffer for
+// every frame of the connection.
+type liveEventWriter struct {
+	res http.ResponseWriter
+	buf []byte
+}
+
+func (w *liveEventWriter) write(event live.Event) error {
 	if event.Timestamp.IsZero() {
 		event.Timestamp = time.Now().UTC()
 	}
-	payload, err := json.Marshal(event)
+	buf, err := appendLiveEventFrame(w.buf[:0], event)
 	if err != nil {
 		return err
 	}
-	if event.Seq > 0 {
-		if _, err := fmt.Fprintf(res, "id: %d\n", event.Seq); err != nil {
-			return err
-		}
-	}
-	if _, err := fmt.Fprintf(res, "event: %s\n", event.Type); err != nil {
+	w.buf = buf
+	if _, err := w.res.Write(buf); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(res, "data: %s\n\n", payload); err != nil {
-		return err
-	}
-	if flusher, ok := res.(http.Flusher); ok {
+	if flusher, ok := w.res.(http.Flusher); ok {
 		flusher.Flush()
 	}
 	return nil
+}
+
+// appendLiveEventFrame appends the SSE frame for event to dst. The envelope is
+// encoded by hand, byte for byte what json.Marshal(event) produces: Data is
+// json.Marshal output the broker shares across subscribers, already compact
+// and escaped, which marshaling the envelope per subscriber re-scanned and
+// copied each time.
+func appendLiveEventFrame(dst []byte, event live.Event) ([]byte, error) {
+	if event.Seq > 0 {
+		dst = append(dst, "id: "...)
+		dst = strconv.AppendUint(dst, event.Seq, 10)
+		dst = append(dst, '\n')
+	}
+	dst = append(dst, "event: "...)
+	dst = append(dst, event.Type...)
+	dst = append(dst, "\ndata: {\"seq\":"...)
+	dst = strconv.AppendUint(dst, event.Seq, 10)
+	dst = append(dst, `,"type":`...)
+	dst, err := appendLiveJSONString(dst, event.Type)
+	if err != nil {
+		return dst, err
+	}
+	if event.RequestID != "" {
+		dst = append(dst, `,"request_id":`...)
+		if dst, err = appendLiveJSONString(dst, event.RequestID); err != nil {
+			return dst, err
+		}
+	}
+	dst = append(dst, `,"timestamp":"`...)
+	if dst, err = event.Timestamp.AppendText(dst); err != nil {
+		return dst, err
+	}
+	dst = append(dst, '"')
+	if len(event.Data) > 0 {
+		dst = append(dst, `,"data":`...)
+		dst = append(dst, event.Data...)
+	}
+	return append(dst, "}\n\n"...), nil
+}
+
+// appendLiveJSONString appends s as a JSON string. Event types and request IDs
+// are plain ASCII in practice and are copied as is; anything json.Marshal
+// would escape takes json.Marshal.
+func appendLiveJSONString(dst []byte, s string) ([]byte, error) {
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c < 0x20 || c > 0x7e || c == '"' || c == '\\' || c == '<' || c == '>' || c == '&' {
+			encoded, err := json.Marshal(s)
+			if err != nil {
+				return dst, err
+			}
+			return append(dst, encoded...), nil
+		}
+	}
+	dst = append(dst, '"')
+	dst = append(dst, s...)
+	return append(dst, '"'), nil
 }
