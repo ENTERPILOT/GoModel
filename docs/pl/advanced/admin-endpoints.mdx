@@ -682,6 +682,54 @@ Każda seria `provider_latency` odpowiada indeks po indeksie tablicy `buckets`. 
 cache’u odpowiedzi i nieudane requesty są wykluczone. Jeśli logowanie audytowe jest
 wyłączone, zwraca puste przedziały.
 
+### Dane uwierzytelniające providerów
+
+Strona Providers w dashboardzie zarządza instancjami providerów przez te
+endpointy. Provider zapisany tutaj od razu rejestruje się w działającym
+gatewayu, bez restartu.
+
+| Metoda   | Ścieżka                              | Opis                                                     |
+| -------- | ------------------------------------ | -------------------------------------------------------- |
+| `GET`    | `/admin/provider-credentials`        | Lista wszystkich instancji providerów, z zamaskowanymi sekretami |
+| `GET`    | `/admin/provider-credentials/types`  | Lista typów providerów, które można utworzyć, wraz z ich polami danych uwierzytelniających |
+| `PUT`    | `/admin/provider-credentials`        | Utworzenie lub aktualizacja jednej instancji providera   |
+| `DELETE` | `/admin/provider-credentials/{name}` | Usunięcie jednej instancji providera                     |
+
+`PUT` przyjmuje `name` i `type` (wymagane; `type` musi być jednym z typów
+zwracanych przez `/types`) oraz pola, które dany typ akceptuje: `api_keys`
+(uporządkowany zestaw rotacji), `base_url`, `api_version`, `backend`,
+`auth_type`, `api_mode`, `vertex_project`, `vertex_location`,
+`service_account_file`, `service_account_json`,
+`service_account_json_base64`, `gcp_scope`, `proxy_url`, `models`,
+`session_sticky_keys`, `billable` i `enabled`. `session_sticky_keys`,
+`billable` i `enabled` domyślnie mają wartość `true` dla nowego providera;
+pominięte przy aktualizacji zachowują zapisaną wartość. Wyłączony provider
+pozostaje zapisany, ale jest wyrejestrowany z routingu.
+
+```bash
+curl -X PUT http://localhost:8080/admin/provider-credentials \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "openai-u123", "type": "openai", "api_keys": ["sk-..."], "billable": false}'
+```
+
+- `name` to nazwa instancji providera używana w selektorach `name/model`, więc
+  nie może zawierać `/`.
+- Providerzy zadeklarowani w `config.yaml` lub zmiennych środowiskowych są
+  zwracani z `"managed": true` i są tylko do odczytu: `PUT` lub `DELETE` dla
+  takiej nazwy zwraca `400`. Zapisany wiersz przesłonięty zadeklarowanym
+  providerem o tej samej nazwie nie pojawia się na liście.
+- Odpowiedzi maskują `api_keys`, `service_account_json` i
+  `service_account_json_base64` ciągiem gwiazdek (`***********`) oraz
+  maskują hasło w `proxy_url`. Odesłanie dowolnej wartości złożonej z trzech
+  lub więcej gwiazdek zachowuje zapisaną wartość, więc edycja nigdy nie
+  wymaga powtórzenia sekretu; zamaskowany wpis, za którym nie stoi żadna
+  zapisana wartość, zwraca `400`. Wartość złożona wyłącznie z referencji do
+  sekretów jest pokazywana bez zmian.
+- `billable: false` oznacza providera, za którego koszt wywołujący nie jest
+  ci winien; zobacz [Budżety](/pl/features/budgets#providerzy-nierozliczani).
+- `DELETE` zwraca `204` albo `404` dla nieznanej nazwy.
+
 ### Endpointy budżetów
 
 Budżetami zarządzasz pod `/admin/budgets`. Te endpointy są

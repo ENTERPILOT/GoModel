@@ -2,6 +2,7 @@
 
 import * as m from "../../lib/paraglide/messages.js";
 import { modelSelectorOptions, parseModelSelectors } from "../../lib/utils/modelSelectors.js";
+import { filterFields } from "../../lib/utils/textMatch.js";
 
 export function defaultAuthKeyForm() {
   return {
@@ -175,8 +176,9 @@ export function authKeyActive(key, now = Date.now()) {
   return !authKeyExpired(key, now);
 }
 
-// authKeySearchText builds the haystack the toolbar query matches against.
-function authKeySearchText(key) {
+// authKeySearchFields lists the text the toolbar query matches against, one
+// entry per field so a fuzzy match cannot span two of them.
+function authKeySearchFields(key) {
   return [
     key.name,
     key.description,
@@ -185,10 +187,7 @@ function authKeySearchText(key) {
     ...(key.labels || []),
     ...(key.allowed_models || []),
     ...(key.allowed_mcp || []),
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
+  ].filter(Boolean);
 }
 
 // authKeyUnderPath reports whether a key is bound to `userPath` or to a path
@@ -211,17 +210,11 @@ export function authKeyUnderPath(key, userPath) {
 // only keys bound at or beneath that path.
 export function filterAuthKeys(keys, options = {}) {
   const { query = "", showInactive = false, userPath = "", now = Date.now() } = options;
-  const needle = String(query || "").trim().toLowerCase();
-  const list = Array.isArray(keys) ? keys : [];
-  return list.filter((key) => {
-    if (!showInactive && !authKeyActive(key, now)) {
-      return false;
-    }
-    if (!authKeyUnderPath(key, userPath)) {
-      return false;
-    }
-    return !needle || authKeySearchText(key).includes(needle);
+  const list = (Array.isArray(keys) ? keys : []).filter((key) => {
+    if (!showInactive && !authKeyActive(key, now)) return false;
+    return authKeyUnderPath(key, userPath);
   });
+  return filterFields(list, query, authKeySearchFields);
 }
 
 // authKeyRank groups keys by how usable they are: live keys first, then

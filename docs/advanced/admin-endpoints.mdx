@@ -706,6 +706,52 @@ averages cover only successful (2xx) requests that reached the provider — loca
 response-cache hits and failed requests are excluded. If audit logging is
 disabled, returns empty buckets.
 
+### Provider credentials
+
+The dashboard's Providers page manages provider instances through these
+endpoints. A provider saved here registers into the running gateway at once,
+without a restart.
+
+| Method   | Path                                 | Description                                              |
+| -------- | ------------------------------------ | -------------------------------------------------------- |
+| `GET`    | `/admin/provider-credentials`        | List every provider instance, secrets redacted           |
+| `GET`    | `/admin/provider-credentials/types`  | List constructible provider types and their credential fields |
+| `PUT`    | `/admin/provider-credentials`        | Create or update one provider instance                   |
+| `DELETE` | `/admin/provider-credentials/{name}` | Delete one provider instance                             |
+
+`PUT` takes `name` and `type` (required; `type` must be one of the types
+`/types` lists) plus the fields that type accepts: `api_keys` (ordered
+rotation set), `base_url`, `api_version`, `backend`, `auth_type`, `api_mode`,
+`vertex_project`, `vertex_location`, `service_account_file`,
+`service_account_json`, `service_account_json_base64`, `gcp_scope`,
+`proxy_url`, `models`, `session_sticky_keys`, `billable`, and `enabled`.
+`session_sticky_keys`, `billable`, and `enabled` default to `true` for a new
+provider; when omitted on an update they keep their stored value. A disabled
+provider stays on file but is unregistered from routing.
+
+```bash
+curl -X PUT http://localhost:8080/admin/provider-credentials \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "openai-u123", "type": "openai", "api_keys": ["sk-..."], "billable": false}'
+```
+
+- `name` is the provider instance name used in `name/model` selectors, so it
+  may not contain `/`.
+- Providers declared in `config.yaml` or env vars are listed with
+  `"managed": true` and are read-only: a `PUT` or `DELETE` for such a name
+  returns `400`. A stored row shadowed by a same-named declared provider is
+  not listed.
+- Responses redact `api_keys`, `service_account_json`, and
+  `service_account_json_base64` to a run of asterisks (`***********`), and
+  mask any password in `proxy_url`. Sending back any value of three or more
+  asterisks keeps the stored one, so an edit never has to repeat a secret; a
+  redacted entry with no stored value behind it returns `400`. A value made
+  only of secret references is shown as is.
+- `billable: false` marks a provider whose cost the caller does not owe you;
+  see [Budgets](/features/budgets#non-billable-providers).
+- `DELETE` returns `204`, or `404` for an unknown name.
+
 ### Budget endpoints
 
 Budgets are managed under `/admin/budgets`. These endpoints are
@@ -897,6 +943,16 @@ up after short network drops.
 The persisted audit and usage tables remain the source of truth. If the
 browser's cursor falls outside the replay buffer, the stream sends a reset event
 and the dashboard reloads from the normal REST endpoints.
+
+With more than one replica on a shared database, the stream also carries the
+requests the other replicas served, as `audit.flushed` and `usage.flushed`
+events once those replicas have persisted them, typically within 7 seconds.
+Their payload carries `_remote_written_at`, the writing replica's stamp in unix
+microseconds. `GET /admin/audit/log`, `/admin/audit/sessions` and
+`/admin/usage/log` return `as_of`, when the server read the page on the same
+scale, so a client can tell that a remote entry stamped at or before it is
+already in that page's totals.
+See [live logs across replicas](/guides/production#live-logs-across-replicas).
 
 ## Disabling Admin Features
 

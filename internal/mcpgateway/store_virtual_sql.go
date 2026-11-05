@@ -20,7 +20,13 @@ var sqlVirtualTable = `CREATE TABLE IF NOT EXISTS mcp_virtual_servers (
 	updated_at ` + sqlx.TypeInt64 + ` NOT NULL
 )`
 
-const selectMCPVirtualColumns = `name, description, servers, tool_discovery, created_at, updated_at`
+// sqlVirtualMigrations backfill columns added after the table's first
+// release. Rows from before generation keep an empty one (see incarnation).
+var sqlVirtualMigrations = []string{
+	`ALTER TABLE mcp_virtual_servers ADD COLUMN generation TEXT NOT NULL DEFAULT ''`,
+}
+
+const selectMCPVirtualColumns = `name, description, servers, tool_discovery, created_at, updated_at, generation`
 
 func (s *SQLStore) ListVirtual(ctx context.Context) ([]ManagedVirtualServer, error) {
 	rows, err := s.db.Query(ctx, `SELECT `+selectMCPVirtualColumns+` FROM mcp_virtual_servers ORDER BY name ASC`)
@@ -57,8 +63,8 @@ func (s *SQLStore) GetVirtual(ctx context.Context, name string) (*ManagedVirtual
 func (s *SQLStore) UpsertVirtual(ctx context.Context, virtual ManagedVirtualServer) error {
 	stampVirtualUpsert(&virtual)
 	_, err := s.db.Exec(ctx, `
-		INSERT INTO mcp_virtual_servers (name, description, servers, tool_discovery, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO mcp_virtual_servers (name, description, servers, tool_discovery, created_at, updated_at, generation)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(name) DO UPDATE SET
 			description = excluded.description,
 			servers = excluded.servers,
@@ -71,6 +77,7 @@ func (s *SQLStore) UpsertVirtual(ctx context.Context, virtual ManagedVirtualServ
 		virtual.ToolDiscovery,
 		virtual.CreatedAt.Unix(),
 		virtual.UpdatedAt.Unix(),
+		virtual.Generation,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert mcp virtual server: %w", err)
@@ -99,22 +106,23 @@ func (s *SQLStore) UpdateVirtual(ctx context.Context, virtual ManagedVirtualServ
 	return nil
 }
 
-func (s *SQLStore) DeleteVirtual(ctx context.Context, name string) error {
-	affected, err := s.db.Exec(ctx, `DELETE FROM mcp_virtual_servers WHERE name = ?`, strings.TrimSpace(name))
+func (s *SQLStore) DeleteVirtual(ctx context.Context, name string) (*ManagedVirtualServer, error) {
+	row := s.db.QueryRow(ctx, `DELETE FROM mcp_virtual_servers WHERE name = ? RETURNING `+selectMCPVirtualColumns, strings.TrimSpace(name))
+	virtual, err := scanSQLMCPVirtual(row)
 	if err != nil {
-		return fmt.Errorf("delete mcp virtual server: %w", err)
+		if errors.Is(err, sqlx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("delete mcp virtual server: %w", err)
 	}
-	if affected == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return &virtual, nil
 }
 
 func scanSQLMCPVirtual(scanner sqlx.Row) (ManagedVirtualServer, error) {
 	var virtual ManagedVirtualServer
 	var servers []byte
 	var createdAt, updatedAt int64
-	if err := scanner.Scan(&virtual.Name, &virtual.Description, &servers, &virtual.ToolDiscovery, &createdAt, &updatedAt); err != nil {
+	if err := scanner.Scan(&virtual.Name, &virtual.Description, &servers, &virtual.ToolDiscovery, &createdAt, &updatedAt, &virtual.Generation); err != nil {
 		return ManagedVirtualServer{}, err
 	}
 	var err error

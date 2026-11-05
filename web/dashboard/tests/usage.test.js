@@ -103,6 +103,13 @@ test("usageEntryCached detects exact and semantic cache types and ignores others
   assert.equal(usageEntryCached({ cache_type: "other" }), false);
 });
 
+test("billedCostTitle explains a non-billable row before any markup", () => {
+  assert.equal(
+    billedCostTitle({ billable: false, markup_percent: 20, markup_selector: "openai/" }),
+    "Served by a non-billable provider: tracked and priced, but billed at $0 and not counted against user-path or label budgets",
+  );
+});
+
 test("billedCostTitle names the markup rule a row was billed at", () => {
   assert.equal(
     billedCostTitle({ markup_percent: 20, markup_selector: "openai/" }),
