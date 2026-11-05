@@ -26,6 +26,17 @@ func NewPostgreSQL(pool *pgxpool.Pool) (DB, error) {
 
 func (p *postgresDB) Dialect() Dialect { return PostgreSQL }
 
+// PostgreSQLPool returns the pool behind a DB made by NewPostgreSQL, and nil
+// for any other DB. Store code goes through DB; this is for the rare work that
+// must stay on one session across statements, such as holding a session
+// advisory lock while an index builds.
+func PostgreSQLPool(db DB) *pgxpool.Pool {
+	if p, ok := db.(*postgresDB); ok {
+		return p.pool
+	}
+	return nil
+}
+
 func (p *postgresDB) Exec(ctx context.Context, query string, args ...any) (int64, error) {
 	return pgExec(ctx, p.pool, query, args...)
 }

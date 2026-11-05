@@ -129,7 +129,7 @@ func TestService_RenameRejectsManagedSource(t *testing.T) {
 	svc := newBalancingService(t)
 	ctx := context.Background()
 
-	svc.SetConfigModels(ConfigModels([]config.VirtualModelConfig{{
+	svc.SetConfigModels(mustConfigModels(t, []config.VirtualModelConfig{{
 		Source:   "smart",
 		Strategy: StrategyRoundRobin,
 		Targets: []config.VirtualModelTargetConfig{

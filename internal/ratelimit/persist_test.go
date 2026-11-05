@@ -32,14 +32,14 @@ func TestSnapshotRoundTripPreservesEstimate(t *testing.T) {
 	require.Empty(t, snaps[0].Partition)
 
 	dst := newLimiter()
-	dst.restore(snaps, []Rule{rule}, now)
+	remoteOf(dst, snaps, []Rule{rule}, now)
 	got := dst.status(rule, now).RequestsUsed
 	require.Equal(t, wantReq, got)
 	got = dst.status(rule, now).TokensUsed
 	require.Equal(t, wantTok, got)
 }
 
-func TestSnapshotSkipsConcurrentAndExpiredChild(t *testing.T) {
+func TestSnapshotPublishesInFlightAndDropsExpiredChild(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0).UTC()
 	shared := Rule{
 		Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodConcurrent,
@@ -53,10 +53,10 @@ func TestSnapshotSkipsConcurrentAndExpiredChild(t *testing.T) {
 	require.True(t, ok)
 
 	src := newLimiter()
-	_, _, err := src.admit([]Rule{shared, child}, now)
+	_, held, err := src.admit([]Rule{shared, child}, now)
 	require.Nil(t, err)
 
-	// Force the child window into the distant past so restore drops it.
+	// Force the child window into the distant past so the peer view drops it.
 	src.mu.Lock()
 	for _, counter := range src.requests {
 		if counter != nil {
@@ -66,14 +66,24 @@ func TestSnapshotSkipsConcurrentAndExpiredChild(t *testing.T) {
 	src.mu.Unlock()
 
 	snaps := src.snapshot([]Rule{shared, template})
+	var gauges []WindowSnapshot
 	for _, snap := range snaps {
-		require.NotEqual(t, PeriodConcurrent, snap.PeriodSeconds)
+		if snap.PeriodSeconds == PeriodConcurrent {
+			gauges = append(gauges, snap)
+		}
 	}
+	require.Equal(t, []WindowSnapshot{{Scope: string(ScopeUserPath), Subject: "/team", InFlight: 1}}, gauges)
 
 	dst := newLimiter()
-	dst.restore(snaps, []Rule{template}, now)
+	remoteOf(dst, snaps, []Rule{template}, now)
 	got := dst.status(child, now).RequestsUsed
 	require.Equal(t, int64(0), got)
+
+	// Released, the gauge is published once more, as zero, then no longer.
+	src.release(held)
+	snaps = src.snapshot([]Rule{shared, template})
+	require.Equal(t, []WindowSnapshot{{Scope: string(ScopeUserPath), Subject: "/team"}}, snaps)
+	require.Empty(t, src.snapshot([]Rule{shared, template}))
 }
 
 func TestSnapshotIsolatesPerChildPartitions(t *testing.T) {
@@ -95,7 +105,7 @@ func TestSnapshotIsolatesPerChildPartitions(t *testing.T) {
 	require.Len(t, snaps, 2)
 
 	dst := newLimiter()
-	dst.restore(snaps, []Rule{template}, now)
+	remoteOf(dst, snaps, []Rule{template}, now)
 	_, _, err = dst.admit([]Rule{alice}, now)
 	require.NotNil(t, err)
 	_, _, err = dst.admit([]Rule{bob}, now)
@@ -182,14 +192,14 @@ func TestResetClearsPersistedWindow(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestRestoreIgnoresSharedRowOnPerChildRule(t *testing.T) {
+func TestPeerSumIgnoresSharedRowOnPerChildRule(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0).UTC()
 	template := Rule{
 		Scope: ScopeUserPath, Subject: "/customers", PerChild: true,
 		PeriodSeconds: PeriodHourSeconds, MaxRequests: new(int64(1)),
 	}
 	dst := newLimiter()
-	dst.restore([]WindowSnapshot{{
+	remoteOf(dst, []WindowSnapshot{{
 		Scope: string(ScopeUserPath), Subject: "/customers", Partition: "",
 		PeriodSeconds: PeriodHourSeconds, RequestsWindowStart: now.Unix(), RequestsCurrent: 1,
 	}}, []Rule{template}, now)
@@ -359,7 +369,7 @@ type failLoadStore struct {
 	err error
 }
 
-func (s *failLoadStore) LoadCounters(context.Context) ([]WindowSnapshot, error) {
+func (s *failLoadStore) LoadCounters(context.Context, int64) ([]WindowSnapshot, error) {
 	return nil, s.err
 }
 
@@ -378,10 +388,10 @@ type blockingLoadStore struct {
 	release chan struct{}
 }
 
-func (s *blockingLoadStore) LoadCounters(context.Context) ([]WindowSnapshot, error) {
+func (s *blockingLoadStore) LoadCounters(_ context.Context, since int64) ([]WindowSnapshot, error) {
 	close(s.started)
 	<-s.release
-	return s.memStore.LoadCounters(context.Background())
+	return s.memStore.LoadCounters(context.Background(), since)
 }
 
 // TestDeleteRuleStopsEnforcingWhenSnapshotDeleteFails: the rule row is already

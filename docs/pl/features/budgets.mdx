@@ -205,6 +205,49 @@ providerów.
 Jeśli do requestu pasuje kilka budżetów, GoModel sprawdza wszystkie pasujące limity
 w jednym zapytaniu. Request jest odrzucany, jeśli którykolwiek pasujący limit jest wyczerpany.
 
+### Providerzy nierozliczani
+
+Provider skonfigurowany z `billable: false` obsługuje requesty, za których koszt
+wywołujący nie jest ci winien – zwykle własny klucz API klienta zarejestrowany
+jako osobna instancja providera. Budżety ścieżek użytkowników i etykiet ani nie
+blokują requestu kierowanego do takiego providera, ani nie liczą jego wydatków,
+na żadnej z podstaw kosztu. Budżety providerów nadal go obejmują: na koszcie
+providera liczą jego użycie w całości, a budżet providera na koszcie
+rozliczeniowym widzi jego koszt rozliczeniowy równy `0`. Użycie jest śledzone
+i wyceniane jak zwykle, a każdy wiersz zapisuje `billable: false`; flaga jest
+utrwalana w chwili zapisu wiersza, więc jej późniejsza zmiana nie przepisuje
+wcześniejszych wydatków.
+
+Na przykład platforma pozwala użytkownikom korzystać z własnego klucza OpenAI,
+a jednocześnie oferuje twoje hostowane modele. Zarejestruj klucz użytkownika
+jako osobnego providera, oznacz go jako nierozliczany i nałóż budżet na ścieżkę
+użytkownika: budżet ogranicza wtedy tylko hostowane modele, a użycie OpenAI
+przez użytkownika pozostaje widoczne w raportach użycia i w `GET /v1/usage`.
+
+```bash
+curl -X PUT http://localhost:8080/admin/provider-credentials \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "openai-u123", "type": "openai", "api_keys": ["sk-..."], "billable": false}'
+```
+
+```yaml
+budgets:
+  user_paths:
+    - path: "/users/u123"
+      limits:
+        - period: "monthly"
+          amount: 20.00
+```
+
+Powiąż klucz API użytkownika ze ścieżką `/users/u123`. Requesty do
+`openai-u123/...` nie są sprawdzane względem budżetu i nic do niego nie dodają;
+requesty do twojego hostowanego providera – tak. W `config.yaml` to samo
+ustawienie to `providers.<name>.billable: false`, a w środowisku
+`<PROVIDER>[_SUFFIX]_BILLABLE=false`; zobacz
+[Śledzenie kosztów](/pl/features/cost-tracking#narzuty-i-koszt-rozliczeniowy),
+aby dowiedzieć się, jak rozliczane jest użycie nierozliczane.
+
 ### Budżety providerów i failover
 
 Gdy budżet providera jest wyczerpany, a request ma cele
@@ -213,6 +256,12 @@ i próbuje celów failoveru zamiast odrzucać request. Failover pomija także ka
 cel, którego własny budżet providera jest wyczerpany. Jeśli nie zostaje żaden cel,
 klient otrzymuje pierwotny błąd `budget_exceeded`. Budżety ścieżek użytkowników
 i etykiet zawsze odrzucają request: zmiana providera nie może ich odciążyć.
+
+Jedynym wyjątkiem jest request przyjęty na providerze nierozliczanym, dla
+którego budżety ścieżek użytkowników i etykiet nie były sprawdzane. Gdy
+przechodzi w failoverze na rozliczany cel, failover sprawdza te budżety dla
+tego celu i pomija go, jeśli któryś jest wyczerpany, więc własny klucz klienta
+nigdy nie otwiera drogi do obejścia jego budżetu na twoich providerach.
 
 ### Dynamiczne budżety dla każdego potomka
 
@@ -294,7 +343,9 @@ Budżet rozliczeniowy:
   rozliczeniowy ścieżki użytkownika lub labela odrzuca request, zanim
   odpowiedź z cache zostanie zwrócona. Budżety na koszcie providera nigdy nie
   liczą cache hitów, a budżety providerów ich nie dotyczą, bo hit nie trafia do
-  żadnego providera.
+  żadnego providera. Hit na modelu
+  [providera nierozliczanego](#providerzy-nierozliczani) jest mimo to
+  przyjmowany, tak jak przyjęty zostałby sam request.
 - na providerze nadal wlicza do wydatków rozliczone cache hity jego modeli. Ustaw
   `BUDGETS_PROVIDER_BILLED_CACHE_HITS=false` (`budgets.provider_billed_cache_hits`),
   aby limitować tylko to, co rozliczono za requesty obsłużone przez providera.
