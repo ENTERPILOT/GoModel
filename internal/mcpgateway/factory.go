@@ -12,6 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/encryption"
 	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/storage"
@@ -55,15 +56,16 @@ func (r *Result) Close() error {
 // a nil box stores them in plaintext. secrets resolves the secret references
 // admin-managed servers hold. providerServers are the provider-hosted servers
 // mcp.provider_servers enables; a server in cfg.MCP.Servers with the same slug
-// replaces one.
-func New(ctx context.Context, cfg *config.Config, shared storage.Storage, box *encryption.Box, httpClient *http.Client, usageLogger usage.LoggerInterface, secrets *config.Secrets, providerServers map[string]config.MCPServerConfig) (*Result, error) {
+// replaces one. sessions shares downstream sessions between replicas; nil
+// keeps them on this instance.
+func New(ctx context.Context, cfg *config.Config, shared storage.Storage, box *encryption.Box, httpClient *http.Client, usageLogger usage.LoggerInterface, secrets *config.Secrets, providerServers map[string]config.MCPServerConfig, sessions ext.SharedStore) (*Result, error) {
 	if shared == nil {
 		return nil, fmt.Errorf("shared storage is required")
 	}
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
-	return newResult(ctx, cfg, shared, box, httpClient, usageLogger, secrets, providerServers)
+	return newResult(ctx, cfg, shared, box, httpClient, usageLogger, secrets, providerServers, sessions)
 }
 
 // Reencrypt seals every managed server header that is in plaintext or sealed
@@ -81,7 +83,7 @@ func Reencrypt(ctx context.Context, shared storage.Storage, box *encryption.Box)
 	return (&sealedStore{Store: store, box: box, swap: swap}).reencrypt(ctx, swap)
 }
 
-func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storage, box *encryption.Box, httpClient *http.Client, usageLogger usage.LoggerInterface, secrets *config.Secrets, providerServers map[string]config.MCPServerConfig) (*Result, error) {
+func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storage, box *encryption.Box, httpClient *http.Client, usageLogger usage.LoggerInterface, secrets *config.Secrets, providerServers map[string]config.MCPServerConfig, sessions ext.SharedStore) (*Result, error) {
 	rawStore, err := createStore(ctx, storeConn)
 	if err != nil {
 		return nil, err
@@ -115,6 +117,7 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 		AllowedOrigins:  cfg.MCP.AllowedOrigins,
 		ToolDiscovery:   cfg.MCP.ToolDiscovery,
 		Secrets:         secrets,
+		SharedStore:     sessions,
 	})
 	if err != nil {
 		return nil, err

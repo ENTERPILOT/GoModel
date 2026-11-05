@@ -80,7 +80,7 @@ type App struct {
 	secrets             *encryption.Box
 	runtimeSettings     *runtimesettings.Service
 	clusterSync         *clustersync.Syncer
-	sharedStore         *sharedstore.Store // nil unless an extension takes it
+	sharedStore         *sharedstore.Store // nil unless an extension or MCP session sharing takes it
 	versionCheck        *versioncheck.Checker
 	extensionAuth       bool
 
