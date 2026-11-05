@@ -1,16 +1,26 @@
 <script>
-  // Audit-log toolbar: consolidated search + method/status/stream selects,
-  // the request-type checklist, and the Clear button.
+  // Audit-log toolbar: field selector + search, method/status/stream
+  // selects, the request-type checklist, and the Clear button.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { debounced } from "$lib/utils/debounce.js";
   import { auditList } from "./auditList.svelte.js";
   import { AUDIT_TYPES } from "./audit-operations.js";
+  import { AUDIT_SEARCH_FIELDS, auditSearchField } from "./audit-logic.js";
   import { X } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
   const onSearchInput = debounced(() => auditList.fetchAuditLog(true));
   $effect(() => onSearchInput.cancel);
+
+  const searchField = $derived(auditSearchField(auditList.auditSearchField));
+
+  // A new field only changes the results when there is a value to match.
+  function onSearchFieldChange() {
+    if (!auditList.auditSearch.trim()) return;
+    onSearchInput.cancel();
+    auditList.fetchAuditLog(true);
+  }
 
   let typeMenu = $state();
   const hiddenCount = $derived(auditList.auditHiddenTypes.length);
@@ -34,10 +44,21 @@
 
 <div class="audit-log-toolbar">
   <div class="audit-filter-row audit-filter-row-search">
+    <select
+      id="audit-filter-search-field"
+      aria-label={m.audit_search_field_label()}
+      class="usage-log-select audit-filter-select audit-search-field"
+      bind:value={auditList.auditSearchField}
+      onchange={onSearchFieldChange}
+    >
+      {#each AUDIT_SEARCH_FIELDS as field (field.key)}
+        <option value={field.key}>{field.label()}</option>
+      {/each}
+    </select>
     <FilterInput
       id="audit-filter-search"
-      placeholder={m.audit_search_placeholder()}
-      label={m.audit_search_label()}
+      placeholder={searchField.placeholder()}
+      label={searchField.key ? searchField.label() : m.audit_search_label()}
       bind:value={auditList.auditSearch}
       oninput={onSearchInput}
       loading={auditList.loading}
@@ -138,8 +159,13 @@
     min-width: 0;
   }
 
+  .audit-filter-row-search .audit-search-field {
+    grid-column: span 2;
+  }
+
   .audit-filter-row-search :global(.filter-input-wrap) {
-    grid-column: 1 / -1;
+    grid-column: 3 / -1;
+    min-width: 0;
     max-width: none;
   }
 
@@ -187,6 +213,12 @@
 
     .audit-filter-row :global(.filter-input-wrap), .audit-filter-row :global(.filter-input), .audit-filter-select, .audit-filter-row :global(.btn) {
         grid-column: auto;
+      }
+
+    /* The field selector stacks above the search input. */
+    .audit-filter-row-search .audit-search-field,
+    .audit-filter-row-search :global(.filter-input-wrap) {
+        grid-column: 1 / -1;
       }
   }
 </style>

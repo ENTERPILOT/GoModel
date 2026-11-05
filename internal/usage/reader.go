@@ -375,33 +375,36 @@ type UsageLogParams struct {
 // and cached_input_ratio fields are derived from RawData at read time by
 // EnrichUsageLogEntry; storage layers never populate them.
 type UsageLogEntry struct {
-	ID                     string         `json:"id"`
-	RequestID              string         `json:"request_id"`
-	ProviderID             string         `json:"provider_id"`
-	Timestamp              time.Time      `json:"timestamp"`
-	Model                  string         `json:"model"`
-	Provider               string         `json:"provider"`
-	ProviderName           string         `json:"provider_name,omitempty"`
-	Endpoint               string         `json:"endpoint"`
-	UserPath               string         `json:"user_path,omitempty"`
-	SessionID              string         `json:"session_id,omitempty"`
-	AuthKeyID              string         `json:"auth_key_id,omitempty"`
-	CacheType              string         `json:"cache_type,omitempty"`
-	Labels                 []string       `json:"labels,omitempty"`
-	InputTokens            int            `json:"input_tokens"`
-	OutputTokens           int            `json:"output_tokens"`
-	TotalTokens            int            `json:"total_tokens"`
-	UncachedInputTokens    int64          `json:"uncached_input_tokens,omitempty"`
-	CachedInputTokens      int64          `json:"cached_input_tokens,omitempty"`
-	CacheWriteInputTokens  int64          `json:"cache_write_input_tokens,omitempty"`
-	CachedInputRatio       float64        `json:"cached_input_ratio,omitempty"`
-	InputCost              *float64       `json:"input_cost"`
-	OutputCost             *float64       `json:"output_cost"`
-	TotalCost              *float64       `json:"total_cost"`
-	CostSource             string         `json:"cost_source,omitempty"`
-	MarkupPercent          *float64       `json:"markup_percent,omitempty"`
-	MarkupSelector         string         `json:"markup_selector,omitempty"`
-	BilledCost             *float64       `json:"billed_cost,omitempty"`
+	ID                    string    `json:"id"`
+	RequestID             string    `json:"request_id"`
+	ProviderID            string    `json:"provider_id"`
+	Timestamp             time.Time `json:"timestamp"`
+	Model                 string    `json:"model"`
+	Provider              string    `json:"provider"`
+	ProviderName          string    `json:"provider_name,omitempty"`
+	Endpoint              string    `json:"endpoint"`
+	UserPath              string    `json:"user_path,omitempty"`
+	SessionID             string    `json:"session_id,omitempty"`
+	AuthKeyID             string    `json:"auth_key_id,omitempty"`
+	CacheType             string    `json:"cache_type,omitempty"`
+	Labels                []string  `json:"labels,omitempty"`
+	InputTokens           int       `json:"input_tokens"`
+	OutputTokens          int       `json:"output_tokens"`
+	TotalTokens           int       `json:"total_tokens"`
+	UncachedInputTokens   int64     `json:"uncached_input_tokens,omitempty"`
+	CachedInputTokens     int64     `json:"cached_input_tokens,omitempty"`
+	CacheWriteInputTokens int64     `json:"cache_write_input_tokens,omitempty"`
+	CachedInputRatio      float64   `json:"cached_input_ratio,omitempty"`
+	InputCost             *float64  `json:"input_cost"`
+	OutputCost            *float64  `json:"output_cost"`
+	TotalCost             *float64  `json:"total_cost"`
+	CostSource            string    `json:"cost_source,omitempty"`
+	MarkupPercent         *float64  `json:"markup_percent,omitempty"`
+	MarkupSelector        string    `json:"markup_selector,omitempty"`
+	BilledCost            *float64  `json:"billed_cost,omitempty"`
+	// Billable is false for a request served by a provider configured with
+	// billable: false; omitted when billable.
+	Billable               *bool          `json:"billable,omitempty"`
 	RawData                map[string]any `json:"raw_data,omitempty"`
 	CostsCalculationCaveat string         `json:"costs_calculation_caveat,omitempty"`
 	RewriteTokensSaved     int64          `json:"rewrite_tokens_saved,omitempty"`
@@ -433,6 +436,11 @@ type UsageLogResult struct {
 	Total   int             `json:"total"`
 	Limit   int             `json:"limit"`
 	Offset  int             `json:"offset"`
+	// AsOf is when the server read the page, in unix microseconds on its
+	// clock; the admin API sets it. A dashboard compares it with the write
+	// stamp of another replica's live entry to tell whether this page
+	// already counted it.
+	AsOf int64 `json:"as_of,omitempty"`
 }
 
 // RequestUsageSummary aggregates usage records that belong to one request ID.

@@ -77,7 +77,7 @@ func (s *SQLStore) recalculationEntries(ctx context.Context, q sqlx.Querier, par
 	args = append(args, batchSize)
 
 	rows, err := q.Query(ctx, `
-		SELECT id, timestamp, model, provider, provider_name, endpoint, input_tokens, output_tokens, rewrite_tokens_saved, raw_data, COALESCE(costs_calculation_caveat, ''), COALESCE(cache_type, ''), markup_percent
+		SELECT id, timestamp, model, provider, provider_name, endpoint, input_tokens, output_tokens, rewrite_tokens_saved, raw_data, COALESCE(costs_calculation_caveat, ''), COALESCE(cache_type, ''), markup_percent, billable
 		FROM usage`+sqlutil.BuildWhereClause(conditions)+`
 		ORDER BY id
 		LIMIT ?`+s.dialect.lockRows, args...)
@@ -91,6 +91,7 @@ func (s *SQLStore) recalculationEntries(ctx context.Context, q sqlx.Querier, par
 		entry := recalculationEntry{Billing: params.Billing}
 		var timestamp usageTimestamp
 		var providerName, rawData *string
+		var billable bool
 		if err := rows.Scan(
 			&entry.ID,
 			&timestamp,
@@ -105,9 +106,11 @@ func (s *SQLStore) recalculationEntries(ctx context.Context, q sqlx.Querier, par
 			&entry.Caveat,
 			&entry.CacheType,
 			&entry.MarkupPercent,
+			&billable,
 		); err != nil {
 			return nil, fmt.Errorf("scan usage cost row: %w", err)
 		}
+		entry.NonBillable = !billable
 		if timestamp.Valid {
 			entry.Timestamp = timestamp.Time
 		} else {

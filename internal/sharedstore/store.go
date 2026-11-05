@@ -53,7 +53,7 @@ func New(ctx context.Context, shared storage.Storage) (*Store, error) {
 		func(db *mongo.Database) (backend, error) { return newMongoBackend(ctx, db) },
 	)
 	if err != nil {
-		return nil, fmt.Errorf("create extension shared store: %w", err)
+		return nil, fmt.Errorf("create shared store: %w", err)
 	}
 	store := newStore(b, time.Now)
 	go storage.RunCleanupLoop(store.stop, SweepInterval, store.sweep)

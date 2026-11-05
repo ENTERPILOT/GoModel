@@ -130,3 +130,33 @@ virtual_models:
 	require.Equal(t, "latency_aware", vm.StrategyPlugin)
 	require.Equal(t, map[string]any{"p95_window": "5m"}, vm.StrategyConfig, "env entry = %+v, want env to override plugin fields", vm)
 }
+
+func TestVirtualModelConfig_ParamsFromYAMLAndEnv(t *testing.T) {
+	var cfg Config
+	err := yaml.Unmarshal([]byte(`
+virtual_models:
+  - source: qwen-thinking-low
+    target: vllm/qwen
+    reasoning_effort: low
+    params:
+      chat_template_kwargs: { enable_thinking: true }
+      top_k: null
+    default_params:
+      temperature: 1.0
+      top_p: 0.95
+`), &cfg)
+	require.NoError(t, err)
+	require.Len(t, cfg.VirtualModels, 1)
+
+	vm := cfg.VirtualModels[0]
+	require.Equal(t, map[string]any{"chat_template_kwargs": map[string]any{"enable_thinking": true}, "top_k": nil}, vm.Params)
+	require.Equal(t, map[string]any{"temperature": 1.0, "top_p": 0.95}, vm.DefaultParams)
+
+	t.Setenv(envVirtualModels, `[{"source":"qwen-thinking-low","target":"vllm/qwen","params":{"top_k":20},"default_params":{"temperature":0.5}}]`)
+	err = applyVirtualModelsEnv(&cfg, true)
+	require.NoError(t, err)
+
+	vm = cfg.VirtualModels[0]
+	require.Equal(t, map[string]any{"top_k": float64(20)}, vm.Params, "env entry = %+v, want env to override params", vm)
+	require.Equal(t, map[string]any{"temperature": 0.5}, vm.DefaultParams)
+}
