@@ -69,6 +69,12 @@ class AuditListStore {
   set auditSearch(value) {
     liveLogs.auditSearch = value;
   }
+  get auditSearchField() {
+    return liveLogs.auditSearchField;
+  }
+  set auditSearchField(value) {
+    liveLogs.auditSearchField = value;
+  }
   get auditMethod() {
     return liveLogs.auditMethod;
   }
@@ -155,6 +161,7 @@ class AuditListStore {
         limit: this.auditLog.limit,
         offset: this.auditLog.offset,
         search: this.auditSearch,
+        searchField: this.auditSearchField,
         method: this.auditMethod,
         statusCode: this.auditStatusCode,
         stream: this.auditStream,
@@ -329,6 +336,9 @@ class AuditListStore {
           loaded: true,
           entries: merged.entries,
           total: Number(result.data.total || 0) + merged.preservedCount,
+          // When the server read the children, so a later live event from
+          // another replica can tell whether total already counts it.
+          as_of: result.data.as_of,
         },
       };
     } catch (e) {
@@ -339,6 +349,7 @@ class AuditListStore {
 
   clearAuditFilters() {
     this.auditSearch = "";
+    this.auditSearchField = "";
     this.auditMethod = "";
     this.auditStatusCode = "";
     this.auditStream = "";

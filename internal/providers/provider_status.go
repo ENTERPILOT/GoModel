@@ -44,6 +44,9 @@ type SanitizedProviderConfig struct {
 	APIVersion        string   `json:"api_version,omitempty"`
 	Models            []string `json:"models,omitempty"`
 	SessionStickyKeys bool     `json:"session_sticky_keys"`
+	// Billable is false for a provider whose cost the caller does not owe the
+	// operator; see config.RawProviderConfig.Billable.
+	Billable bool `json:"billable"`
 	// ProxyURL is the provider's outbound proxy with any password masked.
 	ProxyURL   string                    `json:"proxy_url,omitempty"`
 	Resilience SanitizedResilienceConfig `json:"resilience"`
@@ -123,6 +126,7 @@ func SanitizeProviderConfigs(configs map[string]ProviderConfig) []SanitizedProvi
 			APIVersion:        strings.TrimSpace(cfg.APIVersion),
 			Models:            models,
 			SessionStickyKeys: cfg.SessionStickyKeys,
+			Billable:          cfg.Billable,
 			ProxyURL:          httpclient.RedactProxyURL(cfg.ProxyURL),
 			Resilience: SanitizedResilienceConfig{
 				Retry: SanitizedRetryConfig{

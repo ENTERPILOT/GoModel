@@ -579,6 +579,32 @@ curl "http://localhost:8080/admin/usage/summary?user_path=/team/alpha&cache_mode
 每个 `provider_latency` 序列都与 `buckets` 按索引一一对应。如果某个分桶中该提供商没有成功处理任何请求，对应条目为
 `null`；平均值只涵盖到达提供商的成功（2xx）请求——本地响应缓存命中和失败的请求不计入。如果审计日志已禁用，则返回空分桶。
 
+### 提供商凭据
+
+控制台的 Providers 页面通过这些端点管理提供商实例。在此保存的提供商会立即注册到正在运行的网关中，无需重启。
+
+| 方法     | 路径                                 | 说明                                         |
+| -------- | ------------------------------------ | -------------------------------------------- |
+| `GET`    | `/admin/provider-credentials`        | 列出每个提供商实例，Secret 已遮蔽            |
+| `GET`    | `/admin/provider-credentials/types`  | 列出可构建的提供商类型及其凭据字段           |
+| `PUT`    | `/admin/provider-credentials`        | 创建或更新一个提供商实例                     |
+| `DELETE` | `/admin/provider-credentials/{name}` | 删除一个提供商实例                           |
+
+`PUT` 接受 `name` 和 `type`（必填；`type` 必须是 `/types` 列出的类型之一），以及该类型所接受的字段：`api_keys`（有序轮换集合）、`base_url`、`api_version`、`backend`、`auth_type`、`api_mode`、`vertex_project`、`vertex_location`、`service_account_file`、`service_account_json`、`service_account_json_base64`、`gcp_scope`、`proxy_url`、`models`、`session_sticky_keys`、`billable` 和 `enabled`。对于新建的提供商，`session_sticky_keys`、`billable` 和 `enabled` 默认为 `true`；更新时若省略，则保留已存储的值。已禁用的提供商仍保留其配置记录，但会从路由中注销。
+
+```bash
+curl -X PUT http://localhost:8080/admin/provider-credentials \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "openai-u123", "type": "openai", "api_keys": ["sk-..."], "billable": false}'
+```
+
+- `name` 是在 `name/model` 选择器中使用的提供商实例名称，因此不能包含 `/`。
+- 在 `config.yaml` 或环境变量中声明的提供商会以 `"managed": true` 列出，并且是只读的：对此类名称执行 `PUT` 或 `DELETE` 会返回 `400`。被同名已声明提供商遮盖的已存储记录不会被列出。
+- 响应会将 `api_keys`、`service_account_json` 和 `service_account_json_base64` 遮蔽为一串星号（`***********`），并遮蔽 `proxy_url` 中的任何密码。回传任何由三个或更多星号组成的值会保留已存储的值，因此编辑时无需重复提交 Secret；若遮蔽条目背后没有已存储的值，则返回 `400`。完全由 Secret 引用组成的值会按原样显示。
+- `billable: false` 标记的是其成本不由调用方向您支付的提供商；参见[预算](/zh/features/budgets#非计费提供商)。
+- `DELETE` 返回 `204`，名称未知时返回 `404`。
+
 ### 预算端点
 
 预算在 `/admin/budgets` 下管理。这些端点仅在启用预算管理时可用。

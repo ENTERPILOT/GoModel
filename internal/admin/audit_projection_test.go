@@ -73,6 +73,7 @@ func TestAuditLogSlimsListEntries(t *testing.T) {
 		},
 	}
 	h := NewHandler(nil, nil, WithAuditReader(reader))
+	before := time.Now().UnixMicro()
 	c, rec := echotest.Get(t, "/admin/audit/log?days=7")
 	require.NoError(t, h.AuditLog(c))
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -83,9 +84,11 @@ func TestAuditLogSlimsListEntries(t *testing.T) {
 			BodiesOmitted       bool `json:"bodies_omitted"`
 			ConversationPayload bool `json:"conversation_payload"`
 		} `json:"entries"`
+		AsOf int64 `json:"as_of"`
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
 	require.Len(t, result.Entries, 1)
+	assert.GreaterOrEqual(t, result.AsOf, before, "as_of is when the page was read")
 
 	entry := result.Entries[0]
 	d := entry.Data

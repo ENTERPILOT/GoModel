@@ -1,0 +1,116 @@
+---
+title: "Slowdown"
+description: "Dodaj sztuczne opóźnienie do modelu lub modelu wirtualnego, aby testować timeouty, stany ładowania i zachowanie wolniejszych modeli."
+icon: "snail"
+keywords: ["slowdown", "spowolnienie", "opóźnienie", "latency", "sztuczne opóźnienie", "testowanie", "timeouty", "modele wirtualne"]
+---
+
+## Przegląd
+
+Slowdown sprawia, że model odpowiada wolniej niż jego provider. GoModel mierzy,
+ile trwało wywołanie upstreamu, i czeka dodatkowy ułamek tego czasu, zanim
+zwróci odpowiedź.
+
+Ustawienie jest współczynnikiem **dodatkowego** czasu:
+
+| Współczynnik | Czas upstreamu | Klient widzi |
+| ------------ | -------------- | ------------ |
+| `0.5`        | 2 s            | ~3 s         |
+| `1`          | 2 s            | ~4 s         |
+| `3`          | 2 s            | ~8 s         |
+
+Używaj go do testowania timeoutów klienta, stanów ładowania i logiki ponowień
+albo żeby sprawdzić, jak aplikacja zachowuje się z wolniejszym modelem bez
+zmiany providera. Na produkcji, gdzie nie ma to żadnego celu, nie ustawiaj go.
+
+Slowdown jest domyślnie wyłączony.
+
+## Konfiguracja spowolnienia
+
+Ustaw **Slowdown** na konkretnym modelu lub przekierowaniu (aliasie). Aktywne
+współczynniki mieszczą się w zakresie od `0.1` do `10`. `0` jawnie wyłącza
+spowolnienie, w tym odziedziczone z modelu docelowego. Pusta wartość oznacza,
+że ustawienie nie jest określone.
+
+### Dashboard
+
+Otwórz `Models`, edytuj model lub model wirtualny i wypełnij **Slowdown (extra
+inference time)**. Modele z aktywnym spowolnieniem pokazują je w swoim wierszu.
+
+### config.yaml
+
+```yaml
+virtual_models:
+  # Spowolnij konkretny model dla każdego wywołującego.
+  - source: openai/gpt-4o
+    slowdown: 0.5
+
+  # Udostępnij spowolniony alias i zostaw prawdziwy model bez zmian.
+  - source: slow-sonnet
+    target: anthropic/claude-sonnet-4-6
+    slowdown: 2
+```
+
+### Zmienna środowiskowa
+
+```env
+VIRTUAL_MODELS=[{"source":"slow-sonnet","target":"anthropic/claude-sonnet-4-6","slowdown":2}]
+```
+
+### Admin API
+
+```bash
+curl -X PUT http://localhost:8080/admin/virtual-models \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"source":"slow-sonnet","target_model":"anthropic/claude-sonnet-4-6","slowdown":2}'
+```
+
+Wartość spoza aktywnego zakresu zwraca `400`. Spowolnienie wymaga modelu:
+selektor dla całego providera, taki jak `openai/*`, jest odrzucany.
+
+## Pierwszeństwo
+
+- Własne spowolnienie aliasu wygrywa ze spowolnieniem jego modelu docelowego.
+- Alias bez wartości dziedziczy spowolnienie modelu docelowego, do którego się
+  rozwiązuje. Ustaw w aliasie `0`, aby z tego zrezygnować.
+- W modelu wirtualnym z load balancingiem dziedziczenie korzysta z celu
+  wybranego dla danego requestu.
+- Spowolnienie samego modelu można ustawić dokładnie (`openai/gpt-4o`) albo dla
+  całego modelu (`gpt-4o`, u każdego providera); wygrywa wartość dokładna.
+  Bardziej szczegółowy wpis, który zostawia spowolnienie puste albo którego
+  `user_paths` wykluczają wywołującego, nie przesłania wartości ogólniejszej.
+  Reguła dostępu dla całego providera nigdy więc nie wyłącza spowolnienia
+  modelu.
+- W [łańcuchu](/pl/features/virtual-models#łączenie-modeli-wirtualnych-w-łańcuchy)
+  obowiązuje tylko spowolnienie **zewnętrznego** modelu wirtualnego.
+- Spowolnienie ustawione na modelu z `user_paths` dotyczy tylko requestów z tych
+  [ścieżek użytkownika](/pl/features/user-path).
+
+## Co jest spowalniane
+
+| Endpoint | Zachowanie |
+| -------- | ---------- |
+| Chat Completions, Responses | Opóźnione po nadejściu odpowiedzi upstreamu. |
+| Te same endpointy ze `stream: true` (SSE) | Każdy chunk jest zwalniany zgodnie z przeskalowaną osią czasu. |
+| [Anthropic Messages](/pl/advanced/anthropic-messages-api) | Opóźnione po nadejściu odpowiedzi upstreamu albo, przy streamingu, chunk po chunku – zarówno na ścieżce tłumaczonej, jak i przy [natywnym przekazywaniu](/pl/advanced/anthropic-messages-api#natywne-przekazywanie-do-anthropic). |
+| Embeddings | Opóźnione po nadejściu odpowiedzi upstreamu. |
+| Generowanie i edycja obrazów | Opóźnione po nadejściu odpowiedzi upstreamu. |
+| [Audio](/pl/advanced/audio-api): mowa, transkrypcje, tłumaczenia | Opóźnione albo, przy [streamingu](/pl/advanced/audio-api#streaming), dawkowane chunk po chunku. |
+
+Nieudane wywołania upstreamu wracają bez opóźnienia. Opóźnienia respektują
+anulowanie requestu: klient, który się rozłączy, natychmiast przestaje czekać.
+
+Requesty passthrough, batche i sesje Realtime przez WebSocket nie są
+spowalniane.
+
+## Streaming i pamięć
+
+Dla odpowiedzi streamowanej GoModel odczytuje upstream w tle i zwalnia każdy
+chunk w jego przeskalowanym czasie nadejścia. Chunk, który nadszedł 2 sekundy po
+rozpoczęciu streamu, przy współczynniku `0.5` dociera do klienta po 3 sekundach,
+więc względne odstępy czasowe chunków providera są zachowane.
+
+Chunki czekające na zwolnienie są przechowywane w pamięci. Duży współczynnik
+przy długim lub intensywnym streamie albo przy dużej odpowiedzi audio może
+zużywać sporo pamięci.

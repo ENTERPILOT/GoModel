@@ -26,5 +26,7 @@ func TestChatCompatibleContract(t *testing.T) {
 		ModelsPath:      "/openai/models",
 		NativeResponses: true,
 		Embeddings:      true,
+		// The Azure OpenAI v1 API documents the allowed_tools tool_choice.
+		ForwardsAllowedTools: true,
 	})
 }

@@ -204,6 +204,10 @@ type auditLogListResponse struct {
 	Total   int                     `json:"total"`
 	Limit   int                     `json:"limit"`
 	Offset  int                     `json:"offset"`
+	// AsOf is when the server read the page, in unix microseconds on its
+	// clock. A dashboard compares it with the write stamp of another
+	// replica's live entry to tell whether this page already counted it.
+	AsOf int64 `json:"as_of,omitempty"`
 }
 
 type auditConversationResponse struct {
@@ -225,6 +229,8 @@ type auditSessionsListResponse struct {
 	Total    int                    `json:"total"`
 	Limit    int                    `json:"limit"`
 	Offset   int                    `json:"offset"`
+	// AsOf: see auditLogListResponse.AsOf.
+	AsOf int64 `json:"as_of,omitempty"`
 }
 
 const (

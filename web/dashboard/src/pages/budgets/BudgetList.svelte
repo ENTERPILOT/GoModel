@@ -2,6 +2,7 @@
   // Budget rows with usage/period progress bars.
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import HighlightText from "$lib/components/atoms/HighlightText.svelte";
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { formatCost } from "$lib/utils/format.js";
   import { labelColor } from "$lib/utils/chartTheme.js";
@@ -62,7 +63,7 @@
             {#if budgetScope(item) === "label"}
               <Icon icon={Tag} class="budget-scope-icon" />
             {/if}
-            {budgetSubject(item)}
+            <HighlightText text={budgetSubject(item)} needle={store.filter} />
           </code>
           <div class="budget-row-period">
             {#if item.per_child}
@@ -84,7 +85,7 @@
             {/if}
             <span class="budget-period-label {budgetPeriodClass(item)}">
               <Icon icon={budgetPeriodIcon(item)} class="budget-period-icon" />
-              <span>{budgetPeriodLabel(item)}</span>
+              <span><HighlightText text={budgetPeriodLabel(item)} needle={store.filter} /></span>
             </span>
           </div>
           <div class="budget-row-controls">
