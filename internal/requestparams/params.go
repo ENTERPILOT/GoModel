@@ -16,7 +16,6 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/validation"
 )
 
@@ -60,14 +59,7 @@ type Overrides struct {
 	ReasoningEffort string
 	Defaults        Set
 	Params          Set
-
-	// responses holds both sets as the Responses API reads them (see
-	// ResponsesSets), layered alongside the Chat Completions sets, since a
-	// chat key and a text member are one setting there but two on chat.
-	responses *responsesSets
 }
-
-type responsesSets struct{ defaults, params Set }
 
 // IsZero reports whether nothing is configured.
 func (o Overrides) IsZero() bool {
@@ -83,74 +75,9 @@ func (o Overrides) Layer(over Overrides) Overrides {
 	if over.ReasoningEffort != "" {
 		o.ReasoningEffort = over.ReasoningEffort
 	}
-	baseDefaults, baseParams := o.ResponsesSets()
-	overDefaults, overParams := over.ResponsesSets()
 	o.Defaults = Merge(without(o.Defaults, over.Params), over.Defaults)
 	o.Params = Merge(without(o.Params, over.Defaults), over.Params)
-	o.responses = &responsesSets{
-		defaults: Merge(without(baseDefaults, overParams), overDefaults),
-		params:   Merge(without(baseParams, overDefaults), overParams),
-	}
 	return o
-}
-
-// ResponsesSets returns both sets as the Responses API reads them: a chat
-// response_format it can map becomes the text.format member and verbosity
-// the text.verbosity member, and a text object is split into text.<member>
-// keys. Layered this way, a deeper row decides each member whichever spelling
-// either row used, forced or default; on chat, which has no text object, the
-// chat keys layer on their own. A format the Responses API cannot map stays a
-// response_format key, which ApplyResponses skips.
-func (o Overrides) ResponsesSets() (defaults, params Set) {
-	if o.responses != nil {
-		return o.responses.defaults, o.responses.params
-	}
-	return responsesView(o.Defaults), responsesView(o.Params)
-}
-
-// textMemberPrefix marks a key that sets one member of the Responses text
-// object in a set returned by ResponsesSets. Its NUL byte, which validateKey
-// refuses in configured names, keeps it apart from any key an operator set,
-// such as a provider's own "text.custom"; and it sorts after "text", so a
-// whole-object null in the same set is applied before the members.
-const textMemberPrefix = "text\x00"
-
-func responsesView(set Set) Set {
-	if len(set) == 0 {
-		return set
-	}
-	view := make(Set, len(set))
-	for key, raw := range set {
-		switch key {
-		case "response_format":
-			if raw == nil {
-				view[textMemberPrefix+"format"] = nil
-				continue
-			}
-			format, err := core.ResponsesTextFormat(raw)
-			if err != nil {
-				view[key] = raw
-				continue
-			}
-			if encoded, err := json.Marshal(format); err == nil {
-				view[textMemberPrefix+"format"] = encoded
-			}
-		case "verbosity":
-			view[textMemberPrefix+"verbosity"] = raw
-		case "text":
-			var members map[string]json.RawMessage
-			if raw == nil || json.Unmarshal(raw, &members) != nil {
-				view[key] = raw
-				continue
-			}
-			for member, value := range members {
-				view[textMemberPrefix+member] = value
-			}
-		default:
-			view[key] = raw
-		}
-	}
-	return view
 }
 
 // without returns set minus the keys of other, sharing set when nothing is
@@ -160,26 +87,9 @@ func without(set, other Set) Set {
 		return set
 	}
 	drop := canonicalKeys(other)
-	// In a Responses view, a whole text object in other (a forced null)
-	// covers the members split out of set, and members in other cover a
-	// whole text object in set, as a deeper text object replaced a
-	// shallower one before the split.
-	_, wholeText := other["text"]
-	otherMembers := false
-	for key := range other {
-		if strings.HasPrefix(key, textMemberPrefix) {
-			otherMembers = true
-			break
-		}
-	}
 	covered := func(key string) bool {
-		if _, ok := drop[canonicalKey(key)]; ok {
-			return true
-		}
-		if strings.HasPrefix(key, textMemberPrefix) {
-			return wholeText
-		}
-		return key == "text" && otherMembers
+		_, ok := drop[canonicalKey(key)]
+		return ok
 	}
 	shared := false
 	for key := range set {
@@ -201,27 +111,6 @@ func without(set, other Set) Set {
 		return nil
 	}
 	return kept
-}
-
-// textMemberKeys pairs the chat keys that set one member of the Responses
-// text object with that member, in a fixed order so messages are stable.
-var textMemberKeys = []struct{ chatKey, member string }{
-	{"response_format", "format"},
-	{"verbosity", "verbosity"},
-}
-
-// setsTextMember reports whether set's text object carries member.
-func setsTextMember(set Set, member string) bool {
-	raw, ok := set["text"]
-	if !ok || raw == nil {
-		return false
-	}
-	var members map[string]json.RawMessage
-	if json.Unmarshal(raw, &members) != nil {
-		return false
-	}
-	_, ok = members[member]
-	return ok
 }
 
 // Merge returns base with over's keys added, over winning on conflict. Sets
@@ -356,11 +245,6 @@ func Normalize(field string, set Set, allowNull bool) (Set, error) {
 		}
 		normalized[key] = compact
 	}
-	for _, pair := range textMemberKeys {
-		if _, ok := normalized[pair.chatKey]; ok && setsTextMember(normalized, pair.member) {
-			return nil, validation.NewError(fmt.Sprintf("%s: %q and text.%s set the same thing; keep one", field, pair.chatKey, pair.member), nil)
-		}
-	}
 	return normalized, nil
 }
 
@@ -368,17 +252,8 @@ func Normalize(field string, set Set, allowNull bool) (Set, error) {
 // forced value would silently make the default dead.
 func Disjoint(defaults, params Set) error {
 	forced := canonicalKeys(params)
-	forcedOnResponses := canonicalKeys(responsesView(params))
 	for _, key := range sortedKeys(defaults) {
-		_, both := forced[canonicalKey(key)]
-		if !both {
-			for viewKey := range responsesView(Set{key: defaults[key]}) {
-				if _, ok := forcedOnResponses[canonicalKey(viewKey)]; ok {
-					both = true
-				}
-			}
-		}
-		if both {
+		if _, both := forced[canonicalKey(key)]; both {
 			return validation.NewError(fmt.Sprintf("parameter %q cannot be in both params and default_params", key), nil)
 		}
 	}

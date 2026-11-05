@@ -265,11 +265,10 @@ func TestApplyResponses(t *testing.T) {
 			want:   `{"model":"m","input":"hi"}`,
 		},
 		{
-			// Layering leaves both only when text came from the deeper row.
-			name:   "a text object lands on top of response_format",
-			body:   `{"model":"m","input":"hi"}`,
-			params: Set{"text": raw(`{"format":{"type":"text"},"verbosity":"low"}`), "response_format": raw(`{"type":"json_object"}`)},
-			want:   `{"model":"m","input":"hi","text":{"format":{"type":"text"},"verbosity":"low"}}`,
+			name:     "response_format and verbosity are skipped, text sets the format",
+			body:     `{"model":"m","input":"hi"}`,
+			defaults: Set{"text": raw(`{"format":{"type":"text"}}`), "response_format": raw(`{"type":"json_object"}`), "verbosity": raw(`"low"`)},
+			want:     `{"model":"m","input":"hi","text":{"format":{"type":"text"}}}`,
 		},
 		{
 			name:     "a default text object fills only missing members",
@@ -278,27 +277,15 @@ func TestApplyResponses(t *testing.T) {
 			want:     `{"model":"m","input":"hi","text":{"verbosity":"high","format":{"type":"text"}}}`,
 		},
 		{
-			name:     "a response_format type Responses lacks is skipped",
-			body:     `{"model":"m","input":"hi"}`,
-			defaults: Set{"response_format": raw(`{"type":"regex","pattern":"a+"}`)},
-			want:     `{"model":"m","input":"hi"}`,
-		},
-		{
 			name:     "chat-only keys are skipped",
 			body:     `{"model":"m","input":"hi"}`,
 			defaults: Set{"seed": raw("7"), "stop": raw(`["x"]`), "frequency_penalty": raw("0.5"), "top_k": raw("20")},
 			want:     `{"model":"m","input":"hi","top_k":20}`,
 		},
 		{
-			name:     "response_format and verbosity land in text, defaults keeping client members",
-			body:     `{"model":"m","input":"hi","text":{"verbosity":"high"}}`,
-			defaults: Set{"verbosity": raw(`"low"`), "response_format": raw(`{"type":"json_schema","json_schema":{"name":"s","schema":{"type":"object"},"strict":true}}`)},
-			want:     `{"model":"m","input":"hi","text":{"verbosity":"high","format":{"type":"json_schema","name":"s","schema":{"type":"object"},"strict":true}}}`,
-		},
-		{
-			name:   "forced text members replace and null removes",
-			body:   `{"model":"m","input":"hi","text":{"verbosity":"high","format":{"type":"text"}}}`,
-			params: Set{"verbosity": raw(`"low"`), "response_format": nil},
+			name:   "a forced null still strips a client response_format",
+			body:   `{"model":"m","input":"hi","response_format":{"type":"json_object"},"text":{"verbosity":"low"}}`,
+			params: Set{"response_format": nil},
 			want:   `{"model":"m","input":"hi","text":{"verbosity":"low"}}`,
 		},
 	}
