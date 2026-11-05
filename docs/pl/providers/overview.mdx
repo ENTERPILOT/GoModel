@@ -45,8 +45,10 @@ blokują, ani nie liczą, a przy włączonych
 rozliczane na zero. Ustawisz je przez `providers.<name>.billable: false` w
 `config.yaml`, `<PROVIDER>[_SUFFIX]_BILLABLE=false` w środowisku, pole wyboru
 **Billable** wśród pól zaawansowanych formularza dashboardu albo
-`"billable": false` w `PUT /admin/provider-credentials`. Zobacz
-[Budżety](/pl/features/budgets#providerzy-nierozliczani).
+`"billable": false` w `PUT /admin/provider-credentials`. Niepusta wartość
+`<PROVIDER>_BILLABLE`, która nie jest wartością logiczną (np. `true`, `false`,
+`1`, `0`, `t`, `F` lub `TRUE`), blokuje start, więc literówka nigdy nie zostawi
+providera przypadkiem rozliczanego; pusta wartość jest ignorowana. Zobacz [Budżety](/pl/features/budgets#providerzy-nierozliczani).
 
 ## Obsługiwani providerzy
 

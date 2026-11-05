@@ -12206,6 +12206,10 @@ const docTemplate = `{
                 "effort": {
                     "description": "Effort controls how much reasoning effort the model should use.\nValid values are \"low\", \"medium\", \"high\", \"xhigh\", and \"max\".\n\"xhigh\" and \"max\" are supported by newer models such as Claude Opus 4.8;\nproviders downgrade unsupported levels to their nearest equivalent.",
                     "type": "string"
+                },
+                "summary": {
+                    "description": "Summary requests a reasoning summary from the model (OpenAI Responses\nAPI: \"auto\", \"concise\", \"detailed\"). The Responses API never emits\nsummaries unprompted, so empty asks for none there. A chat request the\ngateway serves through the Responses API sends a summary only while\nreasoning is on: the client's, or \"auto\" when it set none. With effort\n\"none\", or without an effort on a model that does not reason, none is\nsent.",
+                    "type": "string"
                 }
             }
         },

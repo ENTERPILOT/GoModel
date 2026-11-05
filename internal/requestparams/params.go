@@ -12,9 +12,11 @@ import (
 	"maps"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/goccy/go-json"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/validation"
 )
 
@@ -58,7 +60,14 @@ type Overrides struct {
 	ReasoningEffort string
 	Defaults        Set
 	Params          Set
+
+	// responses holds both sets as the Responses API reads them (see
+	// ResponsesSets), layered alongside the Chat Completions sets, since a
+	// chat key and a text member are one setting there but two on chat.
+	responses *responsesSets
 }
+
+type responsesSets struct{ defaults, params Set }
 
 // IsZero reports whether nothing is configured.
 func (o Overrides) IsZero() bool {
@@ -74,9 +83,74 @@ func (o Overrides) Layer(over Overrides) Overrides {
 	if over.ReasoningEffort != "" {
 		o.ReasoningEffort = over.ReasoningEffort
 	}
+	baseDefaults, baseParams := o.ResponsesSets()
+	overDefaults, overParams := over.ResponsesSets()
 	o.Defaults = Merge(without(o.Defaults, over.Params), over.Defaults)
 	o.Params = Merge(without(o.Params, over.Defaults), over.Params)
+	o.responses = &responsesSets{
+		defaults: Merge(without(baseDefaults, overParams), overDefaults),
+		params:   Merge(without(baseParams, overDefaults), overParams),
+	}
 	return o
+}
+
+// ResponsesSets returns both sets as the Responses API reads them: a chat
+// response_format it can map becomes the text.format member and verbosity
+// the text.verbosity member, and a text object is split into text.<member>
+// keys. Layered this way, a deeper row decides each member whichever spelling
+// either row used, forced or default; on chat, which has no text object, the
+// chat keys layer on their own. A format the Responses API cannot map stays a
+// response_format key, which ApplyResponses skips.
+func (o Overrides) ResponsesSets() (defaults, params Set) {
+	if o.responses != nil {
+		return o.responses.defaults, o.responses.params
+	}
+	return responsesView(o.Defaults), responsesView(o.Params)
+}
+
+// textMemberPrefix marks a key that sets one member of the Responses text
+// object in a set returned by ResponsesSets. Its NUL byte, which validateKey
+// refuses in configured names, keeps it apart from any key an operator set,
+// such as a provider's own "text.custom"; and it sorts after "text", so a
+// whole-object null in the same set is applied before the members.
+const textMemberPrefix = "text\x00"
+
+func responsesView(set Set) Set {
+	if len(set) == 0 {
+		return set
+	}
+	view := make(Set, len(set))
+	for key, raw := range set {
+		switch key {
+		case "response_format":
+			if raw == nil {
+				view[textMemberPrefix+"format"] = nil
+				continue
+			}
+			format, err := core.ResponsesTextFormat(raw)
+			if err != nil {
+				view[key] = raw
+				continue
+			}
+			if encoded, err := json.Marshal(format); err == nil {
+				view[textMemberPrefix+"format"] = encoded
+			}
+		case "verbosity":
+			view[textMemberPrefix+"verbosity"] = raw
+		case "text":
+			var members map[string]json.RawMessage
+			if raw == nil || json.Unmarshal(raw, &members) != nil {
+				view[key] = raw
+				continue
+			}
+			for member, value := range members {
+				view[textMemberPrefix+member] = value
+			}
+		default:
+			view[key] = raw
+		}
+	}
+	return view
 }
 
 // without returns set minus the keys of other, sharing set when nothing is
@@ -85,9 +159,31 @@ func without(set, other Set) Set {
 	if len(set) == 0 || len(other) == 0 {
 		return set
 	}
-	shared := false
+	drop := canonicalKeys(other)
+	// In a Responses view, a whole text object in other (a forced null)
+	// covers the members split out of set, and members in other cover a
+	// whole text object in set, as a deeper text object replaced a
+	// shallower one before the split.
+	_, wholeText := other["text"]
+	otherMembers := false
 	for key := range other {
-		if _, ok := set[key]; ok {
+		if strings.HasPrefix(key, textMemberPrefix) {
+			otherMembers = true
+			break
+		}
+	}
+	covered := func(key string) bool {
+		if _, ok := drop[canonicalKey(key)]; ok {
+			return true
+		}
+		if strings.HasPrefix(key, textMemberPrefix) {
+			return wholeText
+		}
+		return key == "text" && otherMembers
+	}
+	shared := false
+	for key := range set {
+		if covered(key) {
 			shared = true
 			break
 		}
@@ -97,7 +193,7 @@ func without(set, other Set) Set {
 	}
 	kept := make(Set, len(set))
 	for key, value := range set {
-		if _, drop := other[key]; !drop {
+		if !covered(key) {
 			kept[key] = value
 		}
 	}
@@ -105,6 +201,27 @@ func without(set, other Set) Set {
 		return nil
 	}
 	return kept
+}
+
+// textMemberKeys pairs the chat keys that set one member of the Responses
+// text object with that member, in a fixed order so messages are stable.
+var textMemberKeys = []struct{ chatKey, member string }{
+	{"response_format", "format"},
+	{"verbosity", "verbosity"},
+}
+
+// setsTextMember reports whether set's text object carries member.
+func setsTextMember(set Set, member string) bool {
+	raw, ok := set["text"]
+	if !ok || raw == nil {
+		return false
+	}
+	var members map[string]json.RawMessage
+	if json.Unmarshal(raw, &members) != nil {
+		return false
+	}
+	_, ok = members[member]
+	return ok
 }
 
 // Merge returns base with over's keys added, over winning on conflict. Sets
@@ -117,10 +234,36 @@ func Merge(base, over Set) Set {
 	case len(base) == 0:
 		return over
 	}
+	// A key over sets in another spelling of the same parameter replaces
+	// the base's too.
 	merged := make(Set, len(base)+len(over))
-	maps.Copy(merged, base)
+	maps.Copy(merged, without(base, over))
 	maps.Copy(merged, over)
 	return merged
+}
+
+// tokenLimitKeys are the spellings of one parameter, the output token limit:
+// Chat Completions' max_tokens and max_completion_tokens, and the Responses
+// API's max_output_tokens. Sets match and layer them as one key.
+var tokenLimitKeys = map[string]struct{}{
+	"max_tokens": {}, "max_completion_tokens": {}, "max_output_tokens": {},
+}
+
+// canonicalKey names the parameter a key sets, folding the token-limit
+// spellings into one.
+func canonicalKey(key string) string {
+	if _, ok := tokenLimitKeys[key]; ok {
+		return "max_tokens"
+	}
+	return key
+}
+
+func canonicalKeys(set Set) map[string]struct{} {
+	keys := make(map[string]struct{}, len(set))
+	for key := range set {
+		keys[canonicalKey(key)] = struct{}{}
+	}
+	return keys
 }
 
 // Clone deep-copies a set so stored rows are never shared with callers.
@@ -172,13 +315,19 @@ func Normalize(field string, set Set, allowNull bool) (Set, error) {
 	}
 	normalized := make(Set, len(set))
 	size := 0
-	for key, raw := range set {
+	spelledAs := make(map[string]string, len(set))
+	for _, key := range sortedKeys(set) {
+		raw := set[key]
 		if err := validateKey(field, key); err != nil {
 			return nil, err
 		}
 		if _, dup := normalized[key]; dup {
 			return nil, validation.NewError(fmt.Sprintf("%s: duplicate parameter %q", field, key), nil)
 		}
+		if other, dup := spelledAs[canonicalKey(key)]; dup {
+			return nil, validation.NewError(fmt.Sprintf("%s: %q and %q set the same token limit; keep one", field, other, key), nil)
+		}
+		spelledAs[canonicalKey(key)] = key
 		value := bytes.TrimSpace(raw)
 		if len(value) == 0 || bytes.Equal(value, []byte(nullLexeme)) {
 			if !allowNull {
@@ -207,14 +356,29 @@ func Normalize(field string, set Set, allowNull bool) (Set, error) {
 		}
 		normalized[key] = compact
 	}
+	for _, pair := range textMemberKeys {
+		if _, ok := normalized[pair.chatKey]; ok && setsTextMember(normalized, pair.member) {
+			return nil, validation.NewError(fmt.Sprintf("%s: %q and text.%s set the same thing; keep one", field, pair.chatKey, pair.member), nil)
+		}
+	}
 	return normalized, nil
 }
 
 // Disjoint rejects a key configured in both sets of one row, where the
 // forced value would silently make the default dead.
 func Disjoint(defaults, params Set) error {
-	for key := range params {
-		if _, both := defaults[key]; both {
+	forced := canonicalKeys(params)
+	forcedOnResponses := canonicalKeys(responsesView(params))
+	for _, key := range sortedKeys(defaults) {
+		_, both := forced[canonicalKey(key)]
+		if !both {
+			for viewKey := range responsesView(Set{key: defaults[key]}) {
+				if _, ok := forcedOnResponses[canonicalKey(viewKey)]; ok {
+					both = true
+				}
+			}
+		}
+		if both {
 			return validation.NewError(fmt.Sprintf("parameter %q cannot be in both params and default_params", key), nil)
 		}
 	}
@@ -232,8 +396,13 @@ func validateKey(field, key string) error {
 		if r < 0x20 || r == 0x7f {
 			return validation.NewError(fmt.Sprintf("%s: parameter name %q contains control characters", field, key), nil)
 		}
+		if unicode.IsSpace(r) {
+			return validation.NewError(fmt.Sprintf("%s: parameter name %q contains whitespace", field, key), nil)
+		}
 	}
-	if _, frozen := frozenKeys[key]; frozen {
+	// Matched case-insensitively: "Model" is no upstream's parameter, and
+	// some upstreams read keys case-insensitively.
+	if _, frozen := frozenKeys[strings.ToLower(key)]; frozen {
 		return validation.NewError(fmt.Sprintf("%s: parameter %q cannot be configured on a virtual model", field, key), nil)
 	}
 	return nil
@@ -247,10 +416,31 @@ func validateTyped(field, key string, raw json.RawMessage) error {
 	case "temperature", "top_p", "presence_penalty", "frequency_penalty":
 		var v float64
 		err = json.Unmarshal(raw, &v)
-	case "max_tokens", "max_output_tokens", "max_completion_tokens", "top_logprobs":
+	case "top_logprobs":
 		var v int
 		if err = json.Unmarshal(raw, &v); err == nil && v < 0 {
 			err = fmt.Errorf("must not be negative")
+		}
+	case "max_tokens", "max_output_tokens", "max_completion_tokens", "n":
+		// No upstream accepts a zero token limit or zero choices.
+		var v int
+		if err = json.Unmarshal(raw, &v); err == nil && v < 1 {
+			err = fmt.Errorf("must be at least 1")
+		}
+	case "seed":
+		var v int64
+		err = json.Unmarshal(raw, &v)
+	case "stop":
+		err = stringOrStrings(raw)
+	case "verbosity":
+		var v string
+		err = json.Unmarshal(raw, &v)
+	case "response_format", "text":
+		// response_format is translated into text.format on the Responses
+		// API, which needs its type; text merges member by member.
+		var v map[string]json.RawMessage
+		if err = json.Unmarshal(raw, &v); err == nil && key == "response_format" {
+			err = validateResponseFormat(v)
 		}
 	case "parallel_tool_calls", "store", "logprobs":
 		var v bool
@@ -287,6 +477,44 @@ func validateTyped(field, key string, raw json.RawMessage) error {
 	}
 	if err != nil {
 		return validation.NewError(fmt.Sprintf("%s: parameter %q has the wrong type: %v", field, key, err), nil)
+	}
+	return nil
+}
+
+// validateResponseFormat checks a response_format object: a string type,
+// and for json_schema a json_schema object, so a forced schema cannot be
+// skipped at request time for being malformed.
+func validateResponseFormat(format map[string]json.RawMessage) error {
+	var formatType string
+	if json.Unmarshal(format["type"], &formatType) != nil || formatType == "" {
+		return fmt.Errorf("must be an object with a string type")
+	}
+	if formatType != "json_schema" {
+		return nil
+	}
+	var schema map[string]json.RawMessage
+	if json.Unmarshal(format["json_schema"], &schema) != nil || schema == nil {
+		return fmt.Errorf("json_schema must be an object")
+	}
+	return nil
+}
+
+// stringOrStrings accepts a JSON string or an array of JSON strings. A null
+// element would decode into a Go string without complaint, so each element's
+// lexeme is checked.
+func stringOrStrings(raw json.RawMessage) error {
+	if raw[0] == '"' {
+		var v string
+		return json.Unmarshal(raw, &v)
+	}
+	var elements []json.RawMessage
+	if err := json.Unmarshal(raw, &elements); err != nil {
+		return fmt.Errorf("must be a string or an array of strings")
+	}
+	for i, element := range elements {
+		if len(element) == 0 || element[0] != '"' {
+			return fmt.Errorf("element %d must be a string", i)
+		}
 	}
 	return nil
 }
