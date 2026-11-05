@@ -230,6 +230,24 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by user paths starting with this text (case-sensitive, index-served)",
+                        "name": "user_path_prefix",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by requested or resolved model starting with this text (case-sensitive, index-served)",
+                        "name": "model_prefix",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact request id",
+                        "name": "request_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by exact session id",
                         "name": "session_id",
                         "in": "query"
@@ -367,6 +385,30 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Filter by tracked user path subtree",
                         "name": "user_path",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by user paths starting with this text (case-sensitive, index-served)",
+                        "name": "user_path_prefix",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by requested or resolved model starting with this text (case-sensitive, index-served)",
+                        "name": "model_prefix",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact request id",
+                        "name": "request_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by exact session id",
+                        "name": "session_id",
                         "in": "query"
                     },
                     {
@@ -6394,7 +6436,7 @@ const docTemplate = `{
         },
         "/v1/decisions": {
             "post": {
-                "description": "Available when an openai, jev, or openrouter provider is configured. OpenAI models answer natively; jev models (Jev, Kev) and OpenRouter's decision models answer through System One, translated both ways. Hosted Jev reads images sent as base64 data URLs; Kev and OpenRouter read text only.",
+                "description": "Available when an openai, jev, openrouter, or azure provider is configured. OpenAI models answer natively; Azure gpt-6-luna deployments answer natively too; jev models (Jev, Kev), OpenRouter's decision models, and Azure Microsoft-Decision-1 deployments answer through System One, translated both ways. Hosted Jev reads images sent as base64 data URLs; Kev, OpenRouter, and Microsoft-Decision-1 read text only.",
                 "consumes": [
                     "application/json"
                 ],
@@ -8590,7 +8632,7 @@ const docTemplate = `{
         },
         "/v1/systemone": {
             "post": {
-                "description": "Available when a jev or openrouter provider is configured. The request and answer follow TypeSafe's System One API; models on providers without that API are rejected rather than translated.",
+                "description": "Available when a jev, openrouter, or azure provider is configured. The request and answer follow TypeSafe's System One API; models on providers without that API are rejected rather than translated.",
                 "consumes": [
                     "application/json",
                     "multipart/form-data"
@@ -9113,6 +9155,10 @@ const docTemplate = `{
         "admin.auditLogListResponse": {
             "type": "object",
             "properties": {
+                "as_of": {
+                    "description": "AsOf is when the server read the page, in unix microseconds on its\nclock. A dashboard compares it with the write stamp of another\nreplica's live entry to tell whether this page already counted it.",
+                    "type": "integer"
+                },
                 "entries": {
                     "type": "array",
                     "items": {
@@ -9144,6 +9190,10 @@ const docTemplate = `{
         "admin.auditSessionsListResponse": {
             "type": "object",
             "properties": {
+                "as_of": {
+                    "description": "AsOf: see auditLogListResponse.AsOf.",
+                    "type": "integer"
+                },
                 "limit": {
                     "type": "integer"
                 },
@@ -9537,6 +9587,9 @@ const docTemplate = `{
                 },
                 "base_url": {
                     "type": "string"
+                },
+                "billable": {
+                    "type": "boolean"
                 },
                 "created_at": {
                     "type": "string"
@@ -9975,6 +10028,10 @@ const docTemplate = `{
                 "base_url": {
                     "type": "string"
                 },
+                "billable": {
+                    "description": "Billable false marks a provider whose cost the caller does not owe the\noperator, such as a customer's own key. Omitted keeps the stored value\n(true for a new provider).",
+                    "type": "boolean"
+                },
                 "enabled": {
                     "type": "boolean"
                 },
@@ -10046,6 +10103,9 @@ const docTemplate = `{
         "admin.upsertVirtualModelRequest": {
             "type": "object",
             "properties": {
+                "default_params": {
+                    "type": "object"
+                },
                 "description": {
                     "type": "string"
                 },
@@ -10058,6 +10118,10 @@ const docTemplate = `{
                 },
                 "old_source": {
                     "type": "string"
+                },
+                "params": {
+                    "description": "Params are forced on every request through this row (null strips a\nkey); DefaultParams fill in keys the client omitted. Keys use Chat\nCompletions spelling.",
+                    "type": "object"
                 },
                 "reasoning_effort": {
                     "description": "ReasoningEffort forces the reasoning effort sent upstream (\"none\",\n\"minimal\", \"low\", \"medium\", \"high\", \"xhigh\", or \"max\"); empty keeps the\nclient's value.",
@@ -13966,6 +14030,10 @@ const docTemplate = `{
                 "auth_key_id": {
                     "type": "string"
                 },
+                "billable": {
+                    "description": "Billable is false for a request served by a provider configured with\nbillable: false; omitted when billable.",
+                    "type": "boolean"
+                },
                 "billed_cost": {
                     "type": "number"
                 },
@@ -14065,6 +14133,10 @@ const docTemplate = `{
         "usage.UsageLogResult": {
             "type": "object",
             "properties": {
+                "as_of": {
+                    "description": "AsOf is when the server read the page, in unix microseconds on its\nclock; the admin API sets it. A dashboard compares it with the write\nstamp of another replica's live entry to tell whether this page\nalready counted it.",
+                    "type": "integer"
+                },
                 "entries": {
                     "type": "array",
                     "items": {
@@ -14224,6 +14296,9 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "default_params": {
+                    "type": "object"
+                },
                 "description": {
                     "type": "string"
                 },
@@ -14241,6 +14316,9 @@ const docTemplate = `{
                 },
                 "model": {
                     "type": "string"
+                },
+                "params": {
+                    "type": "object"
                 },
                 "provider_name": {
                     "type": "string"
@@ -14303,6 +14381,9 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "default_params": {
+                    "type": "object"
+                },
                 "description": {
                     "type": "string"
                 },
@@ -14319,6 +14400,10 @@ const docTemplate = `{
                 },
                 "model": {
                     "type": "string"
+                },
+                "params": {
+                    "description": "Params are request parameters forced on every request sent upstream\nthrough this redirect or to this model, replacing the client's values;\na null value strips the key. DefaultParams are filled in only when the\nclient omitted the key. Keys use Chat Completions spelling.",
+                    "type": "object"
                 },
                 "provider_name": {
                     "type": "string"

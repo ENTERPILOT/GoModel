@@ -22,6 +22,11 @@ type RouteGate interface {
 // handler layer stays the authoritative check for the primary route.
 type BudgetGate interface {
 	ProviderWithinBudget(ctx context.Context, providerName string) bool
+	// FailoverWithinBudget reports whether a request admitted on the primary
+	// provider may fail over to target. Besides target's provider budgets it
+	// covers the user-path and label budgets admission skipped when the
+	// primary was not billable.
+	FailoverWithinBudget(ctx context.Context, primary, target string) bool
 }
 
 // InferenceConfig configures translated inference orchestration.

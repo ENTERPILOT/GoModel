@@ -496,6 +496,7 @@ func (h *Handler) UsageLog(c *echo.Context) error {
 		})
 	}
 
+	asOf := time.Now().UnixMicro()
 	result, err := h.usageReader.GetUsageLog(c.Request().Context(), params)
 	if err != nil {
 		return handleError(c, err)
@@ -509,6 +510,7 @@ func (h *Handler) UsageLog(c *echo.Context) error {
 	for i := range result.Entries {
 		usage.EnrichUsageLogEntry(&result.Entries[i])
 	}
+	result.AsOf = asOf
 
 	return c.JSON(http.StatusOK, result)
 }

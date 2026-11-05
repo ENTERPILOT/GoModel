@@ -2,6 +2,7 @@ package mcpgateway
 
 import (
 	"context"
+	"crypto/rand"
 	"io"
 	"net/http"
 	"strings"
@@ -239,8 +240,17 @@ func (m *memoryVirtualStore) GetVirtual(_ context.Context, name string) (*Manage
 	return &row, nil
 }
 
+// UpsertVirtual stamps a generation on insert and keeps the row's own on an
+// edit, like the real stores.
 func (m *memoryVirtualStore) UpsertVirtual(_ context.Context, virtual ManagedVirtualServer) error {
-	m.put(virtual)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if existing, ok := m.rows[virtual.Name]; ok {
+		virtual.Generation = existing.Generation
+	} else if virtual.Generation == "" {
+		virtual.Generation = rand.Text()
+	}
+	m.rows[virtual.Name] = virtual
 	return nil
 }
 
@@ -254,14 +264,15 @@ func (m *memoryVirtualStore) UpdateVirtual(_ context.Context, virtual ManagedVir
 	return nil
 }
 
-func (m *memoryVirtualStore) DeleteVirtual(_ context.Context, name string) error {
+func (m *memoryVirtualStore) DeleteVirtual(_ context.Context, name string) (*ManagedVirtualServer, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.rows[name]; !ok {
-		return ErrNotFound
+	row, ok := m.rows[name]
+	if !ok {
+		return nil, ErrNotFound
 	}
 	delete(m.rows, name)
-	return nil
+	return &row, nil
 }
 
 type unconfirmedStore struct{ *memoryStore }

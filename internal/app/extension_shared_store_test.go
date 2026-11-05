@@ -164,3 +164,22 @@ func TestFailedConstructionDoesNotRebindSharedStore(t *testing.T) {
 	require.Same(t, serving, component.store, "failed construction replaced the serving generation's shared store")
 	assert.Zero(t, component.calls)
 }
+
+// MCP sessions are shared only on a database several replicas can share.
+func TestMCPSharesSessionsOnlyOnSharedDatabases(t *testing.T) {
+	cases := []struct {
+		storage string
+		enabled bool
+		want    bool
+	}{
+		{storage: "postgresql", enabled: true, want: true},
+		{storage: "mongodb", enabled: true, want: true},
+		{storage: "sqlite", enabled: true, want: false},
+		{storage: "", enabled: true, want: false},
+		{storage: "postgresql", enabled: false, want: false},
+	}
+	for _, tc := range cases {
+		cfg := &config.Config{Storage: config.StorageConfig{Type: tc.storage}, MCP: config.MCPConfig{Enabled: tc.enabled}}
+		assert.Equal(t, tc.want, mcpSharesSessions(cfg), "storage %q, mcp enabled %v", tc.storage, tc.enabled)
+	}
+}

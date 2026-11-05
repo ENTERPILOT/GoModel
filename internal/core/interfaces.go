@@ -124,6 +124,16 @@ type NativeBatchHintRoutableProvider interface {
 	ClearBatchResultHints(providerType, batchID string)
 }
 
+// NativeBatchInstanceRoutableProvider is an optional routing extension that
+// also names the configured provider instance a native batch was submitted
+// to. The instance is resolved together with the call, so a provider replaced
+// concurrently cannot leave the batch attributed to an instance that did not
+// serve it. hints are the persisted per-item endpoint hints, nil when the
+// provider returns none.
+type NativeBatchInstanceRoutableProvider interface {
+	CreateBatchOnInstance(ctx context.Context, providerType string, req *BatchRequest) (resp *BatchResponse, hints map[string]string, providerName string, err error)
+}
+
 // NativeFileProvider is implemented by providers that support OpenAI-compatible files APIs.
 type NativeFileProvider interface {
 	CreateFile(ctx context.Context, req *FileCreateRequest) (*FileObject, error)
