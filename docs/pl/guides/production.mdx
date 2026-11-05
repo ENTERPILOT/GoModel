@@ -408,7 +408,7 @@ koordynuje go między instancjami.
 | [Rekordy użycia i kosztów](/pl/features/cost-tracking) | Trwały (baza danych) | Agregowane poprawnie. |
 | Logi audytowe | Trwały (baza danych) | Kompletne między replikami. |
 | Wylogowanie [SSO](/pl/pro/sso) (Pro) | Trwały (baza danych) | Wylogowana sesja jest odrzucana na każdej replice w ciągu około 2 sekund. |
-| [Limity żądań](/pl/features/rate-limits) | W pamięci, współdzielone przez bazę danych | Repliki egzekwują jeden wspólny limit, w przybliżeniu: każda widzi liczniki pozostałych w ciągu około dwóch interwałów flush. Liczniki przetrwają restart, a reset czyści je na każdej replice. |
+| [Limity żądań](/pl/features/rate-limits) | W pamięci, współdzielone przez bazę danych | Repliki egzekwują jeden wspólny limit, w przybliżeniu: każda widzi liczniki pozostałych w ciągu około dwóch interwałów flush. Restart przywraca ostatnio zapisane liczniki requestów i tokenów raz; awaria może stracić to, co zliczono od ostatniego flusha. Reset czyści te okna na każdej replice; zajęte sloty współbieżności pozostają zajęte, dopóki ich requesty się nie zakończą. |
 | Circuit breakery | W pamięci, per proces | Każda replika osobno wykrywa awarię, więc upstream widzi do `N x failure_threshold` błędów, zanim otworzy się którykolwiek breaker. |
 | Przypięcia [powiązania sesji](/pl/features/session-keeping) | W pamięci, per instancja | Sesje są przyklejone per replika, a nie globalnie, chyba że load balancer używa sticky sessions. |
 | Bufor logów na żywo | W pamięci, per instancja | Podłączony dashboard widzi tylko ruch na żywo tej repliki, mniej więcej `1/N` całości. Historia nadal pochodzi z bazy danych. |

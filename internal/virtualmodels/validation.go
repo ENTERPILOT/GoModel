@@ -115,11 +115,8 @@ func normalizePolicyInput(catalog Catalog, vm VirtualModel) (VirtualModel, error
 	if err != nil {
 		return VirtualModel{}, err
 	}
-	// No model is named "*": a policy on it would be stored and match
-	// nothing. Users' allowed_models do read "openai/*" as a wildcard, so
-	// say what the policy form is instead.
-	if parts.Model == "*" {
-		return VirtualModel{}, newValidationError(fmt.Sprintf("%q is not a wildcard here: use %q for every model of a provider, or %q for all models", vm.Source, wildcardHint(parts.ProviderName), "/"), nil)
+	if err := validatePolicyModel(vm.Source, parts.ProviderName, parts.Model); err != nil {
+		return VirtualModel{}, err
 	}
 	vm.Source = parts.Selector
 	vm.ProviderName = parts.ProviderName
@@ -140,12 +137,22 @@ func normalizePolicyInput(catalog Catalog, vm VirtualModel) (VirtualModel, error
 	return vm, nil
 }
 
-// wildcardHint is the provider-wide selector to suggest for "provider/*".
-func wildcardHint(providerName string) string {
-	if providerName == "" {
-		return "provider/"
+// validatePolicyModel rejects a policy whose model is a "*" wildcard, with or
+// without a provider name the catalog knows ("openai/*", "foo/*", "*"). No
+// model is named that way, so the policy would be stored and match nothing;
+// users' allowed_models do read "openai/*" as a wildcard, so the message
+// names the policy forms instead. Rows already stored are left to load.
+func validatePolicyModel(source, providerName, model string) error {
+	if model != "*" && !strings.HasSuffix(model, "/*") {
+		return nil
 	}
-	return providerName + "/"
+	hint := "provider/"
+	if providerName != "" {
+		hint = providerName + "/"
+	} else if prefix, ok := strings.CutSuffix(model, "/*"); ok && !strings.Contains(prefix, "/") {
+		hint = prefix + "/"
+	}
+	return newValidationError(fmt.Sprintf("%q is not a wildcard here: use %q for every model of a provider, or %q for all models", source, hint, "/"), nil)
 }
 
 // normalizeStoredPolicy normalizes a policy row loaded from storage.

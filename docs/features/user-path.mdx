@@ -105,7 +105,9 @@ disabled to turn the selector off entirely. Selectors can target:
 - `{provider_name}/{model}` for one model on one provider
 - a model ID without a provider name
 
-`*` is not a wildcard in a policy selector: `openai/*` or `*` returns `400`.
+`*` is not a wildcard in a policy selector: a selector that is `*` or ends in
+`/*`, such as `openai/*`, returns `400` on the admin API and refuses to load
+from `config.yaml` or `VIRTUAL_MODELS`, whether or not that provider exists.
 Use `openai/` for every model of a provider, or `/` for all models.
 
 For example:

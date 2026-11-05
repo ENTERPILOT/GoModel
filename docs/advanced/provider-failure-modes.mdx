@@ -178,8 +178,10 @@ overlapping long enough to cover a generation, and let clients retry.
 
 What is per-instance and therefore not shared between replicas: circuit
 breaker state, request-health windows, and sticky sessions. Rate-limit
-counters are shared through the database, approximately: each replica sees
-the others' counts within about two seconds. The
+counters are shared through the database, approximately: at the default
+`RATE_LIMITS_FLUSH_INTERVAL=1`, each replica sees the others' counts within
+about two seconds; with `0`, replicas stop seeing each other's new counts
+after startup. The
 [production guide](/guides/production) covers what that means for your
 topology.
 

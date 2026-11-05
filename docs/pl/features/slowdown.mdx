@@ -66,9 +66,10 @@ curl -X PUT http://localhost:8080/admin/virtual-models \
   -d '{"source":"slow-sonnet","target_model":"anthropic/claude-sonnet-4-6","slowdown":2}'
 ```
 
-Wartość spoza aktywnego zakresu zwraca `400`. Spowolnienie wymaga modelu:
-selektor dla całego providera, taki jak `openai/`, globalny `/` albo model `*`,
-taki jak `openai/*`, jest odrzucany z kodem `400`.
+Wartość spoza aktywnego zakresu zwraca `400`. W polityce modelu (bez celu)
+spowolnienie wymaga modelu: selektor dla całego providera, taki jak `openai/`,
+globalny `/` albo model `*`, taki jak `openai/*`, jest odrzucany z kodem `400`.
+Przekierowanie przyjmuje dowolny ciąg źródłowy jako nazwę aliasu.
 
 ## Pierwszeństwo
 

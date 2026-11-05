@@ -849,6 +849,7 @@ func TestChatToResponsesRequest_KeepsClientReasoningSummary(t *testing.T) {
 	}{
 		{name: "client summary kept", reasoning: &core.Reasoning{Effort: "low", Summary: "detailed"}, want: &core.Reasoning{Effort: "low", Summary: "detailed"}},
 		{name: "no summary asks for auto", reasoning: &core.Reasoning{Effort: "low"}, want: &core.Reasoning{Effort: "low", Summary: "auto"}},
+		{name: "a summary without an effort is kept", reasoning: &core.Reasoning{Summary: "detailed"}, want: &core.Reasoning{Summary: "detailed"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

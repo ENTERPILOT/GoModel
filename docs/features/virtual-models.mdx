@@ -133,8 +133,9 @@ A token limit is one limit in any spelling: `max_tokens`,
 `params` replaces whichever spelling the client sent, and a value in
 `default_params` applies only when the client sent none of them.
 
-One parameter set serves every API, so a key the target API lacks is skipped
-there. On the Responses API, the Chat-only keys `seed`, `stop`, `n`,
+One parameter set serves every API, so the keys listed here are skipped on
+the API that lacks them; any other key is forwarded unchanged, and the
+upstream may reject it. On the Responses API, the Chat-only keys `seed`, `stop`, `n`,
 `frequency_penalty`, `presence_penalty`, `logit_bias`, `logprobs`,
 `modalities`, `audio`, `prediction`, and `web_search_options` are skipped, and
 `response_format` and `verbosity` become `text.format` and `text.verbosity`. On

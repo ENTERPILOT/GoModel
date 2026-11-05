@@ -76,7 +76,7 @@ virtual_models:
 
 Token 上限无论使用哪种写法都是同一个限制：`max_tokens`、`max_completion_tokens` 和 `max_output_tokens` 都会设置它。`params` 中的值会替换客户端发送的任意一种写法，`default_params` 中的值仅在客户端未发送其中任何一种时生效。
 
-同一组参数服务于所有 API，因此目标 API 不支持的键会在该 API 上被跳过。在 Responses API 上，仅适用于 Chat 的键 `seed`、`stop`、`n`、`frequency_penalty`、`presence_penalty`、`logit_bias`、`logprobs`、`modalities`、`audio`、`prediction` 和 `web_search_options` 会被跳过，`response_format` 和 `verbosity` 会转换为 `text.format` 和 `text.verbosity`。在 Chat Completions 上，仅适用于 Responses 的键 `text`、`include`、`truncation`、`max_tool_calls`、`background` 和 `context_management` 会被跳过。
+同一组参数服务于所有 API，因此下面列出的键会在不支持它们的 API 上被跳过；其他键会原样转发，上游可能会拒绝它们。在 Responses API 上，仅适用于 Chat 的键 `seed`、`stop`、`n`、`frequency_penalty`、`presence_penalty`、`logit_bias`、`logprobs`、`modalities`、`audio`、`prediction` 和 `web_search_options` 会被跳过，`response_format` 和 `verbosity` 会转换为 `text.format` 和 `text.verbosity`。在 Chat Completions 上，仅适用于 Responses 的键 `text`、`include`、`truncation`、`max_tool_calls`、`background` 和 `context_management` 会被跳过。
 
 例如，同一个自托管模型的多个别名使用不同的思考和采样设置：
 

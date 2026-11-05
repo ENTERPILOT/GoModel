@@ -272,8 +272,9 @@ Wissenswerte Details:
   gespeichert, aber Replikate sehen den Traffic der anderen nach dem Start
   nicht mehr.
 - Ein Reset gilt für alle Replikate: Das Replikat, das ihn verarbeitet, leert
-  seine Zähler sofort, die anderen innerhalb weniger Sekunden, wenn sie
+  seine Request- und Token-Fenster sofort, die anderen innerhalb weniger Sekunden, wenn sie
   [die Regeln neu laden](/de/guides/production#konfigurationsänderungen-erreichen-alle-replikate-in-sekunden).
+  Belegte Concurrency-Slots bleiben belegt, bis ihre Requests abgeschlossen sind.
   Das Umschalten einer Regel zwischen geteilt und `per_child` sowie das
   Löschen und erneute Anlegen startet ihre Zähler auf dieselbe Weise bei null.
   Gespeicherte Zählerstände von vor einem Reset oder einer solchen Änderung
@@ -286,7 +287,8 @@ Wissenswerte Details:
 
 ## Mehrere Replikate teilen sich ein Limit
 
-Replikate mit gemeinsamer Datenbank setzen jede Regel gemeinsam durch: Eine
+Bei einem `RATE_LIMITS_FLUSH_INTERVAL` ungleich null (Standardwert `1`) setzen
+Replikate mit gemeinsamer Datenbank jede Regel gemeinsam durch: Eine
 Regel mit `100 rpm` lässt über alle Replikate hinweg etwa 100 Requests pro
 Minute zu, nicht 100 pro Replikat. Jedes Replikat speichert, was es selbst
 gezählt hat, und liest bei jedem Flush, was die anderen seit seinem letzten
@@ -322,9 +324,20 @@ Jeder Flush schreibt nur die Request- und Token-Zähler, die sich seit dem
 letzten geändert haben, plus jeden Concurrency-Zähler ungleich null, der bei
 jedem Flush als Heartbeat neu geschrieben wird, damit andere Replikate die
 Slots eines laufenden Replikats von denen eines abgestürzten unterscheiden
-können. Er liest nur die Zeilen, die seit dem letzten Lesen geschrieben wurden,
-mit einem vollständigen Lesen einmal pro Minute.
+können. Er liest nur die Zeilen, die seit kurz vor dem letzten Lesen
+geschrieben wurden, mit einem vollständigen Lesen einmal pro Minute.
 [Budgets](/de/features/budgets) bleiben die dauerhafte Kontrolle der Ausgaben.
+
+<Note>
+Upgrade von v0.2.1 oder älter: Zähler, die diese Releases gespeichert haben,
+werden per Maximum zusammengeführt, da jede dieser Zeilen auch enthält, was ihr
+Schreiber beim Start wiederhergestellt hat. Bis diese Fenster auslaufen (bis zu
+zwei Perioden), kann Traffic, den mehrere v0.2.1-Replikate gezählt haben, zu
+niedrig gezählt werden, und ein v0.2.1-Replikat, das während des Rollouts neu
+startet, kann manchen Traffic doppelt zählen. Für exakte Limits direkt nach dem
+Upgrade aktualisieren Sie alle Replikate gemeinsam oder setzen die Zähler nach
+dem Rollout zurück (`POST /admin/rate-limits/reset`).
+</Note>
 
 ## Verhalten gegenüber Clients
 
@@ -585,11 +598,12 @@ console.log(deleted);
 
 </CodeGroup>
 
-Setzen Sie die Live-Zähler für eine einzelne Regel
+Setzen Sie die Request- und Token-Zähler für eine einzelne Regel
 (`POST /admin/rate-limits/reset-one` mit
 `{"scope": ..., "subject": ..., "period": ...}`) oder für alle Regeln
 (`POST /admin/rate-limits/reset` mit `{"confirmation": "reset"}`) zurück, auf
-allen Replikaten. Das reine Bearbeiten der Obergrenzen einer Regel setzt ihre
+allen Replikaten. Belegte Concurrency-Slots bleiben belegt, bis ihre Requests
+abgeschlossen sind. Das reine Bearbeiten der Obergrenzen einer Regel setzt ihre
 Zähler nie zurück; das Löschen, das Verschieben auf einen neuen Scope, ein neues
 Subject oder eine neue Periode und das Umschalten zwischen geteilt und
 `per_child` schon.

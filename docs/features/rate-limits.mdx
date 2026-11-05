@@ -239,8 +239,9 @@ Details worth knowing:
   periodic write: counts still load on start and save on a clean shutdown,
   but replicas no longer see each other's traffic after start.
 - A reset applies to every replica: the replica that serves it clears its
-  counters at once, and the others within a few seconds, when they
+  request and token windows at once, and the others within a few seconds, when they
   [reload the rules](/guides/production#config-changes-reach-every-replica-within-seconds).
+  Active concurrency slots stay held until their requests finish.
   Switching a rule between shared and per-child, or deleting and
   re-creating it, starts its counts from zero the same way. Stored counts
   from before a reset or such a change never come back, even after a
@@ -251,7 +252,8 @@ Details worth knowing:
 
 ## Several replicas share one limit
 
-Replicas that share a database enforce each rule together: a `100 rpm` rule
+With a nonzero `RATE_LIMITS_FLUSH_INTERVAL` (the default is `1`), replicas
+that share a database enforce each rule together: a `100 rpm` rule
 admits about 100 requests per minute across all of them, not 100 per
 replica. Each replica saves what it counted itself, and on every flush reads
 what the others saved since its previous read. Admission checks the
@@ -282,9 +284,19 @@ The limit is approximate, not exact:
 Each flush writes only the request and token counters that changed since
 the last one, plus every nonzero concurrency gauge, which is rewritten on
 every flush as a heartbeat so other replicas can tell a live replica's slots
-from a crashed one's. It reads only the rows written since its previous
-read, with a full read once a minute. [Budgets](/features/budgets) remain
-the durable control for spend.
+from a crashed one's. It reads only the rows written since shortly before its
+previous read, with a full read once a minute. [Budgets](/features/budgets)
+remain the durable control for spend.
+
+<Note>
+Upgrading from v0.2.1 or earlier: counters those releases saved are merged by
+maximum, since each of those rows also holds what its writer restored at
+start. Until those windows roll out (up to two periods), traffic counted by
+several v0.2.1 replicas can be under-counted, and a v0.2.1 replica restarted
+mid-rollout can count some traffic twice. For exact limits right after
+upgrading, upgrade every replica together, or reset the counters
+(`POST /admin/rate-limits/reset`) after the rollout.
+</Note>
 
 ## Client behavior
 
@@ -544,10 +556,11 @@ console.log(deleted);
 
 </CodeGroup>
 
-Reset live counters for one rule (`POST /admin/rate-limits/reset-one` with
+Reset the request and token counters for one rule
+(`POST /admin/rate-limits/reset-one` with
 `{"scope": ..., "subject": ..., "period": ...}`) or for all rules
 (`POST /admin/rate-limits/reset` with `{"confirmation": "reset"}`), on every
-replica. Editing only a rule's caps never resets its counters; deleting it,
+replica. Active concurrency slots stay held until their requests finish. Editing only a rule's caps never resets its counters; deleting it,
 moving it to a new scope, subject, or period, or switching it between shared
 and per-child does.
 

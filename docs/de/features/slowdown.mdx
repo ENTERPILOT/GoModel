@@ -68,9 +68,11 @@ curl -X PUT http://localhost:8080/admin/virtual-models \
   -d '{"source":"slow-sonnet","target_model":"anthropic/claude-sonnet-4-6","slowdown":2}'
 ```
 
-Ein Wert außerhalb des aktiven Bereichs liefert `400`. Slowdown braucht ein
-Modell: ein providerweiter Selektor wie `openai/`, das globale `/` oder ein
-`*`-Modell wie `openai/*` wird mit `400` abgelehnt.
+Ein Wert außerhalb des aktiven Bereichs liefert `400`. Bei einer
+Modellrichtlinie (ohne Ziel) braucht Slowdown ein Modell: ein providerweiter
+Selektor wie `openai/`, das globale `/` oder ein `*`-Modell wie `openai/*` wird
+mit `400` abgelehnt. Eine Weiterleitung akzeptiert jeden Quell-String als
+Alias-Namen.
 
 ## Vorrang
 

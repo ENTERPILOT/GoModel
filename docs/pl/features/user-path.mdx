@@ -105,8 +105,10 @@ wyłączona, aby całkowicie wyłączyć selektor. Selektory mogą wskazywać:
 - `{provider_name}/{model}` dla jednego modelu u jednego providera
 - ID modelu bez nazwy providera
 
-`*` nie jest symbolem wieloznacznym w selektorze polityki: `openai/*` lub `*`
-zwraca `400`. Użyj `openai/` dla wszystkich modeli providera albo `/` dla
+`*` nie jest symbolem wieloznacznym w selektorze polityki: selektor `*` albo
+kończący się na `/*`, np. `openai/*`, zwraca `400` w Admin API i nie zostanie
+wczytany z `config.yaml` ani `VIRTUAL_MODELS`, niezależnie od tego, czy taki
+provider istnieje. Użyj `openai/` dla wszystkich modeli providera albo `/` dla
 wszystkich modeli.
 
 Na przykład:

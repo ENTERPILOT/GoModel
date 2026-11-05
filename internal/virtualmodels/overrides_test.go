@@ -382,6 +382,7 @@ func TestUpsertValidatesRequestParams(t *testing.T) {
 		{name: "global scope defaults", vm: VirtualModel{Source: "/", DefaultParams: requestparams.Set{"top_k": rawJSON("1")}, Enabled: true}, wantErr: "default_params can only be configured for a model or redirect"},
 		{name: "provider wildcard is not a selector", vm: VirtualModel{Source: "openai/*", Params: requestparams.Set{"top_k": rawJSON("1")}, Enabled: true}, wantErr: `use "openai/" for every model of a provider`},
 		{name: "bare wildcard is not a selector", vm: VirtualModel{Source: "*", DefaultParams: requestparams.Set{"top_k": rawJSON("1")}, Enabled: true}, wantErr: `"*" is not a wildcard here`},
+		{name: "unknown provider wildcard is not a selector", vm: VirtualModel{Source: "foo/*", Params: requestparams.Set{"top_k": rawJSON("1")}, Enabled: true}, wantErr: `use "foo/" for every model of a provider`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -421,4 +422,32 @@ func TestVirtualModelCloneDetachesParams(t *testing.T) {
 	delete(cloned.DefaultParams, "temperature")
 	assert.Equal(t, rawJSON("20"), vm.Params["top_k"])
 	assert.Contains(t, vm.DefaultParams, "temperature")
+}
+
+// A "*" model in a declarative policy refuses startup like any other
+// malformed declaration; a redirect may still use any alias name.
+func TestValidateManagedConfigRejectsWildcardPolicies(t *testing.T) {
+	tests := []struct {
+		name    string
+		vm      VirtualModel
+		wantErr string
+	}{
+		{name: "provider wildcard", vm: VirtualModel{Source: "openai/*", Slowdown: new(1.5), Enabled: true}, wantErr: `use "openai/" for every model of a provider`},
+		{name: "unknown provider wildcard", vm: VirtualModel{Source: "foo/*", Params: requestparams.Set{"top_k": rawJSON("1")}, Enabled: true}, wantErr: `use "foo/"`},
+		{name: "bare wildcard", vm: VirtualModel{Source: "*", ReasoningEffort: "low", Enabled: true}, wantErr: `"*" is not a wildcard here`},
+		{name: "a redirect may be named like one", vm: VirtualModel{Source: "openai/*", Targets: []Target{{Provider: "openai", Model: "gpt-4o"}}, Enabled: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service := newSlowdownService(t)
+			service.SetConfigModels([]VirtualModel{tt.vm})
+			require.NoError(t, service.Refresh(context.Background()))
+			err := service.ValidateManagedConfig([]string{"openai"})
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, tt.wantErr)
+		})
+	}
 }

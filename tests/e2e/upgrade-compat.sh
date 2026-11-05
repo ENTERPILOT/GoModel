@@ -69,13 +69,25 @@ build_binaries() {
   if [[ ! -d "$BASELINE_TREE" ]]; then
     git -C "$REPO_ROOT" worktree add --detach "$BASELINE_TREE" "$BASELINE_REF" >/dev/null
   else
-    # A worktree whose registration was pruned, or that an older run left
-    # half-made, cannot be moved; recreate it instead of giving up.
-    if ! git -C "$BASELINE_TREE" checkout --detach "$BASELINE_REF" >/dev/null 2>&1; then
+    # A directory git does not see as a repository at all (its worktree
+    # registration was pruned, or an older run left it half-made) holds
+    # nothing to keep, so it is recreated. This repository's worktree is only
+    # moved: local edits or a missing ref stop the run with git's message.
+    # Anything else is not this script's to touch.
+    local top common
+    top="$(git -C "$BASELINE_TREE" rev-parse --show-toplevel 2>/dev/null || true)"
+    common="$(git -C "$BASELINE_TREE" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+    if [[ -z "$top" ]]; then
       rm -rf "$BASELINE_TREE"
       git -C "$REPO_ROOT" worktree prune
       git -C "$REPO_ROOT" worktree add --detach "$BASELINE_TREE" "$BASELINE_REF" >/dev/null \
         || die "cannot create the baseline worktree at $BASELINE_REF"
+    elif [[ "$(cd "$top" && pwd -P)" == "$(cd "$BASELINE_TREE" && pwd -P)" \
+        && "$common" == "$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-common-dir)" ]]; then
+      git -C "$BASELINE_TREE" checkout --detach "$BASELINE_REF" >/dev/null \
+        || die "cannot move the baseline worktree to $BASELINE_REF"
+    else
+      die "$BASELINE_TREE is inside another git checkout; set UPGRADE_WORK_DIR elsewhere"
     fi
   fi
   (cd "$BASELINE_TREE" && go build -o "$OLD_BIN" ./cmd/gomodel)

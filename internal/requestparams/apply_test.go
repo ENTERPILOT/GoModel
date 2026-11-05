@@ -124,6 +124,24 @@ func TestApplyChat(t *testing.T) {
 			want:   `{"model":"m","messages":[],"max_tokens":70}`,
 		},
 		{
+			name:   "a forced max_completion_tokens keeps its spelling and strips the others",
+			body:   `{"model":"m","messages":[],"max_tokens":10,"max_output_tokens":3000}`,
+			params: Set{"max_completion_tokens": raw("50")},
+			want:   `{"model":"m","messages":[],"max_completion_tokens":50}`,
+		},
+		{
+			name:     "a default max_completion_tokens leaves a client max_tokens alone",
+			body:     `{"model":"m","messages":[],"max_tokens":10}`,
+			defaults: Set{"max_completion_tokens": raw("50")},
+			want:     `{"model":"m","messages":[],"max_tokens":10}`,
+		},
+		{
+			name:   "a forced null still strips a Responses-only key",
+			body:   `{"model":"m","messages":[],"truncation":"auto"}`,
+			params: Set{"truncation": nil},
+			want:   `{"model":"m","messages":[]}`,
+		},
+		{
 			name:     "Responses-only keys are skipped",
 			body:     `{"model":"m","messages":[]}`,
 			defaults: Set{"truncation": raw(`"auto"`), "include": raw(`["x"]`), "text": raw(`{"verbosity":"low"}`), "seed": raw("7")},
@@ -239,6 +257,30 @@ func TestApplyResponses(t *testing.T) {
 			body:   `{"model":"m","input":"hi","max_output_tokens":10,"max_completion_tokens":2000}`,
 			params: Set{"max_completion_tokens": raw("50")},
 			want:   `{"model":"m","input":"hi","max_output_tokens":50}`,
+		},
+		{
+			name:   "a forced null still strips a chat-only key",
+			body:   `{"model":"m","input":"hi","stop":["x"]}`,
+			params: Set{"stop": nil},
+			want:   `{"model":"m","input":"hi"}`,
+		},
+		{
+			name:   "a forced response_format lands on top of a forced text object",
+			body:   `{"model":"m","input":"hi"}`,
+			params: Set{"text": raw(`{"format":{"type":"text"},"verbosity":"low"}`), "response_format": raw(`{"type":"json_object"}`)},
+			want:   `{"model":"m","input":"hi","text":{"format":{"type":"json_object"},"verbosity":"low"}}`,
+		},
+		{
+			name:     "a default text object fills only missing members",
+			body:     `{"model":"m","input":"hi","text":{"verbosity":"high"}}`,
+			defaults: Set{"text": raw(`{"verbosity":"low","format":{"type":"text"}}`)},
+			want:     `{"model":"m","input":"hi","text":{"verbosity":"high","format":{"type":"text"}}}`,
+		},
+		{
+			name:     "a response_format type Responses lacks is skipped",
+			body:     `{"model":"m","input":"hi"}`,
+			defaults: Set{"response_format": raw(`{"type":"regex","pattern":"a+"}`)},
+			want:     `{"model":"m","input":"hi"}`,
 		},
 		{
 			name:     "chat-only keys are skipped",

@@ -12200,7 +12200,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "summary": {
-                    "description": "Summary requests a reasoning summary from the model (OpenAI Responses\nAPI: \"auto\", \"concise\", \"detailed\"). Empty asks for no summary; the\nResponses API never emits summaries unprompted.",
+                    "description": "Summary requests a reasoning summary from the model (OpenAI Responses\nAPI: \"auto\", \"concise\", \"detailed\"). The Responses API never emits\nsummaries unprompted, so empty asks for none there; a chat request the\ngateway serves through the Responses API asks for \"auto\" whenever it\nsets a reasoning effort.",
                     "type": "string"
                 }
             }

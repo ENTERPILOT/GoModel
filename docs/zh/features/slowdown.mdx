@@ -62,7 +62,7 @@ curl -X PUT http://localhost:8080/admin/virtual-models \
   -d '{"source":"slow-sonnet","target_model":"anthropic/claude-sonnet-4-6","slowdown":2}'
 ```
 
-超出有效范围的值会返回 `400`。减速需要指定模型：`openai/` 这样的提供商级选择器、全局的 `/`，以及 `openai/*` 这样的 `*` 模型都会被拒绝并返回 `400`。
+超出有效范围的值会返回 `400`。对于模型策略（没有目标），减速需要指定模型：`openai/` 这样的提供商级选择器、全局的 `/`，以及 `openai/*` 这样的 `*` 模型都会被拒绝并返回 `400`。重定向则接受任意源字符串作为别名。
 
 ## 优先级
 

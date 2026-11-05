@@ -22,8 +22,13 @@ func ResponsesTextFormat(raw json.RawMessage) (map[string]any, error) {
 	case "text", "json_object":
 		return map[string]any{"type": format.Type}, nil
 	case "json_schema":
-		out := map[string]any{"type": "json_schema"}
-		maps.Copy(out, format.JSONSchema)
+		// The discriminator goes last, so a member of the schema object
+		// named type cannot replace it.
+		out := maps.Clone(format.JSONSchema)
+		if out == nil {
+			out = map[string]any{}
+		}
+		out["type"] = "json_schema"
 		return out, nil
 	default:
 		return nil, fmt.Errorf("response_format: unsupported type %q", format.Type)

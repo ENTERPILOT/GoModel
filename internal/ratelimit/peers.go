@@ -82,7 +82,11 @@ func (v *peerView) merge(rows []WindowSnapshot, self string, full bool) {
 //     such rows by maximum, as those releases merged them, and that maximum
 //     is added to the sum once. Each of those rows already includes what its
 //     writer restored at start, so summing them would charge every restart
-//     again.
+//     again. The rows cannot tell restored counts from new ones, so this is
+//     approximate until they roll out, two periods after the last old writer
+//     stops: several old replicas' independent traffic counts as the
+//     largest share, and an old replica restarted mid-rollout restores this
+//     release's rows into its own and counts them a second time.
 //
 // A key nobody else counted gets no entry, and a cluster of one gets nil maps.
 func (v *peerView) sum(rules []Rule, now time.Time, liveness time.Duration) (requests, tokens map[ruleKey]windowCounter, inFlight map[ruleKey]int64) {

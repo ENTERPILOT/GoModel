@@ -41,9 +41,9 @@ sie, und bei aktivierten [Aufschlägen](/de/features/cost-tracking#aufschläge-u
 wird sie mit null abgerechnet. Setzen Sie sie mit `providers.<name>.billable: false` in
 `config.yaml`, `<PROVIDER>[_SUFFIX]_BILLABLE=false` in der Umgebung, dem Kontrollkästchen
 **Billable** unter den erweiterten Feldern des Dashboard-Formulars oder `"billable": false` bei
-`PUT /admin/provider-credentials`. Ein Wert von `<PROVIDER>_BILLABLE`, der kein Boolean
-(`true`, `false`, `1`, `0`) ist, verhindert den Start, damit ein Tippfehler einen Provider nie
-versehentlich abrechenbar lässt. Siehe [Budgets](/de/features/budgets#nicht-abrechenbare-provider).
+`PUT /admin/provider-credentials`. Ein nicht leerer Wert von `<PROVIDER>_BILLABLE`, der kein Boolean
+(etwa `true`, `false`, `1`, `0`, `t`, `F` oder `TRUE`) ist, verhindert den Start, damit ein
+Tippfehler einen Provider nie versehentlich abrechenbar lässt; ein leerer Wert wird ignoriert. Siehe [Budgets](/de/features/budgets#nicht-abrechenbare-provider).
 
 ## Unterstützte Provider
 

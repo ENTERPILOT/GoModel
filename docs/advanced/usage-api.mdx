@@ -190,9 +190,11 @@ describe shared infrastructure capacity, not the caller.
 
 <Note>
   Rate limit counters live in memory and are saved to the database about once
-  a second, so they survive a restart. Replicas sharing a database report the
-  cluster-wide count, which can trail the other replicas' latest traffic by
-  about two seconds; see
+  a second at the default `RATE_LIMITS_FLUSH_INTERVAL=1`. A restart restores
+  the last saved counts once; a crash can lose the counts since the last
+  flush. Replicas sharing a database report the cluster-wide count, which can
+  trail the other replicas' latest traffic by about two seconds (with `0`,
+  replicas stop seeing each other's new counts after startup); see
   [several replicas share one limit](/features/rate-limits#several-replicas-share-one-limit).
   Budgets are the durable numbers, computed from stored usage records.
 </Note>

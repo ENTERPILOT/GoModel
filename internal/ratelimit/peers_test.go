@@ -473,10 +473,13 @@ func TestRowsFromOlderReleasesMergeByMaximum(t *testing.T) {
 	_, err := upgraded.Acquire(Subjects{UserPath: "/team"}, store.clock.Now())
 	require.NoError(t, err)
 	upgraded.save(ctx)
-	for _, saved := range store.counters {
-		if saved.Writer == upgraded.writer {
-			assert.True(t, saved.OwnCounts)
-			assert.Equal(t, int64(1), saved.RequestsCurrent)
+	var saved []WindowSnapshot
+	for _, row := range store.counters {
+		if row.Writer == upgraded.writer {
+			saved = append(saved, row)
 		}
 	}
+	require.Len(t, saved, 1, "the upgraded replica saves its own row")
+	assert.True(t, saved[0].OwnCounts)
+	assert.Equal(t, int64(1), saved[0].RequestsCurrent)
 }

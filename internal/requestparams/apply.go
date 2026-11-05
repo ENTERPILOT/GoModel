@@ -26,8 +26,24 @@ func ApplyChat(req *core.ChatRequest, defaults, params Set) (*core.ChatRequest, 
 			return setPtr(&cloned.Temperature, raw, force)
 		case "top_p":
 			return setPtr(&cloned.TopP, raw, force)
-		case "max_tokens", "max_completion_tokens", "max_output_tokens":
-			return a.setTokenLimit(&cloned.MaxTokens, raw, force, "max_completion_tokens", "max_output_tokens")
+		case "max_tokens", "max_output_tokens":
+			// Chat has no max_output_tokens: it sets max_tokens.
+			if a.keepTokenLimit(cloned.MaxTokens, force, chatTokenLimitExtras...) {
+				return nil
+			}
+			a.stripExtras(force, chatTokenLimitExtras...)
+			return setPtr(&cloned.MaxTokens, raw, force)
+		case "max_completion_tokens":
+			// Kept in the operator's spelling: a reasoning deployment the
+			// adapter does not recognize by name still needs it.
+			if a.keepTokenLimit(cloned.MaxTokens, force, chatTokenLimitExtras...) {
+				return nil
+			}
+			if force {
+				cloned.MaxTokens = nil
+			}
+			a.stripExtras(force, "max_output_tokens")
+			return a.routeExtra(key, raw, force)
 		case "parallel_tool_calls":
 			return setPtr(&cloned.ParallelToolCalls, raw, force)
 		case "user":
@@ -37,7 +53,8 @@ func ApplyChat(req *core.ChatRequest, defaults, params Set) (*core.ChatRequest, 
 		case "tool_choice":
 			return setAny(&cloned.ToolChoice, raw, force)
 		default:
-			if _, skip := responsesOnlyKeys[key]; skip {
+			// A forced null still strips the key the client sent.
+			if _, skip := responsesOnlyKeys[key]; skip && raw != nil {
 				return nil
 			}
 			return a.route(key, raw, force)
@@ -73,6 +90,9 @@ func ApplyResponses(req *core.ResponsesRequest, defaults, params Set) (*core.Res
 	}
 	cloned := *req
 	a := newApplier(responsesTypedKeys, req.ExtraFields)
+	// The whole text object goes first, so a response_format or verbosity
+	// in the same set lands on top of it rather than under it.
+	a.first = "text"
 	apply := func(key string, raw json.RawMessage, force bool) error {
 		switch key {
 		case "temperature":
@@ -80,7 +100,13 @@ func ApplyResponses(req *core.ResponsesRequest, defaults, params Set) (*core.Res
 		case "top_p":
 			return setPtr(&cloned.TopP, raw, force)
 		case "max_tokens", "max_completion_tokens", "max_output_tokens":
-			return a.setTokenLimit(&cloned.MaxOutputTokens, raw, force, "max_tokens", "max_completion_tokens")
+			if a.keepTokenLimit(cloned.MaxOutputTokens, force, responsesTokenLimitExtras...) {
+				return nil
+			}
+			a.stripExtras(force, responsesTokenLimitExtras...)
+			return setPtr(&cloned.MaxOutputTokens, raw, force)
+		case "text":
+			return setTextObject(&cloned.Text, raw, force)
 		case "response_format":
 			return setTextMember(&cloned.Text, "format", raw, force)
 		case "verbosity":
@@ -104,7 +130,8 @@ func ApplyResponses(req *core.ResponsesRequest, defaults, params Set) (*core.Res
 		case "tool_choice":
 			return setAny(&cloned.ToolChoice, raw, force)
 		default:
-			if _, skip := chatOnlyKeys[key]; skip {
+			// A forced null still strips the key the client sent.
+			if _, skip := chatOnlyKeys[key]; skip && raw != nil {
 				return nil
 			}
 			return a.route(key, raw, force)
@@ -153,30 +180,93 @@ var (
 	}
 )
 
-// setTokenLimit sets the surface's token limit from any of its spellings.
-// The others are one limit to the client too: a forced value strips the ones
-// the client sent, so they cannot outbid it upstream, and a default is only a
-// default while the client sent none of them.
-func (a *applier) setTokenLimit(dst **int, raw json.RawMessage, force bool, others ...string) error {
-	if !force {
-		if *dst != nil {
-			return nil
-		}
-		for _, key := range others {
-			if a.extraValue(key) != nil {
-				return nil
-			}
-		}
-		return setPtr(dst, raw, false)
+// The token-limit spellings a surface keeps in ExtraFields rather than in
+// its typed field.
+var (
+	chatTokenLimitExtras      = []string{"max_completion_tokens", "max_output_tokens"}
+	responsesTokenLimitExtras = []string{"max_tokens", "max_completion_tokens"}
+)
+
+// keepTokenLimit reports whether a default token limit must leave the
+// request alone: the token limit is one parameter to the client in any
+// spelling, so a default applies only while none of them is set.
+func (a *applier) keepTokenLimit(typed *int, force bool, extras ...string) bool {
+	if force {
+		return false
 	}
-	for _, key := range others {
+	if typed != nil {
+		return true
+	}
+	for _, key := range extras {
 		if a.extraValue(key) != nil {
-			if err := a.routeExtra(key, nil, true); err != nil {
-				return err
-			}
+			return true
 		}
 	}
-	return setPtr(dst, raw, true)
+	return false
+}
+
+// stripExtras removes, for a forced value, the other spellings of the same
+// parameter the client sent, so they cannot outbid it upstream.
+func (a *applier) stripExtras(force bool, keys ...string) {
+	if !force {
+		return
+	}
+	for _, key := range keys {
+		if a.extraValue(key) != nil {
+			a.extras = ensureExtras(a.extras)
+			a.extras[key] = nil
+		}
+	}
+}
+
+func ensureExtras(extras map[string]json.RawMessage) map[string]json.RawMessage {
+	if extras == nil {
+		return map[string]json.RawMessage{}
+	}
+	return extras
+}
+
+// setTextObject merges a configured Responses text object into the client's
+// one level deep, as other objects merge: a forced set's members win, a
+// default's only fill missing ones, and a forced null removes the object.
+func setTextObject(text *any, raw json.RawMessage, force bool) error {
+	if raw == nil {
+		*text = nil
+		return nil
+	}
+	var configured map[string]any
+	if err := json.Unmarshal(raw, &configured); err != nil {
+		return fmt.Errorf("text is not an object: %w", err)
+	}
+	members, err := textMembers(*text)
+	if err != nil {
+		return err
+	}
+	for member, value := range configured {
+		if _, set := members[member]; set && !force {
+			continue
+		}
+		members[member] = value
+	}
+	*text = members
+	return nil
+}
+
+// textMembers decodes the client's text object into a fresh map, so the
+// client's request is never changed in place.
+func textMembers(text any) (map[string]any, error) {
+	members := map[string]any{}
+	if text == nil {
+		return members, nil
+	}
+	encoded, err := json.Marshal(text)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(encoded, &members); err != nil {
+		return nil, fmt.Errorf("text is not an object: %w", err)
+	}
+	return members, nil
 }
 
 // setTextMember sets one member of the Responses text object: format from a
@@ -184,15 +274,9 @@ func (a *applier) setTokenLimit(dst **int, raw json.RawMessage, force bool, othe
 // a default leaves a member the client set alone, and a forced null removes
 // the member. The client's object is copied, never changed in place.
 func setTextMember(text *any, member string, raw json.RawMessage, force bool) error {
-	members := map[string]any{}
-	if *text != nil {
-		encoded, err := json.Marshal(*text)
-		if err != nil {
-			return err
-		}
-		if err := json.Unmarshal(encoded, &members); err != nil {
-			return fmt.Errorf("text is not an object: %w", err)
-		}
+	members, err := textMembers(*text)
+	if err != nil {
+		return err
 	}
 	if _, set := members[member]; set && !force {
 		return nil
@@ -203,7 +287,9 @@ func setTextMember(text *any, member string, raw json.RawMessage, force bool) er
 	case member == "format":
 		format, err := core.ResponsesTextFormat(raw)
 		if err != nil {
-			return err
+			// A format the Responses API has no counterpart for is a
+			// chat-only setting there.
+			return nil
 		}
 		members[member] = format
 	default:
@@ -269,6 +355,8 @@ type applier struct {
 	// so a forced value layered over a default on the same key sees the
 	// default rather than the client's original.
 	extras map[string]json.RawMessage
+	// first is applied before the other keys of each set.
+	first string
 }
 
 func newApplier(typed map[string]struct{}, fields core.UnknownJSONFields) *applier {
@@ -277,17 +365,30 @@ func newApplier(typed map[string]struct{}, fields core.UnknownJSONFields) *appli
 
 // run applies defaults, then params, through apply in key order.
 func (a *applier) run(defaults, params Set, apply func(string, json.RawMessage, bool) error) error {
-	for _, key := range sortedKeys(defaults) {
+	for _, key := range a.order(defaults) {
 		if err := apply(key, defaults[key], false); err != nil {
 			return fmt.Errorf("requestparams: default %q: %w", key, err)
 		}
 	}
-	for _, key := range sortedKeys(params) {
+	for _, key := range a.order(params) {
 		if err := apply(key, params[key], true); err != nil {
 			return fmt.Errorf("requestparams: param %q: %w", key, err)
 		}
 	}
 	return nil
+}
+
+// order returns a set's keys sorted, with a.first moved to the front.
+func (a *applier) order(set Set) []string {
+	keys := sortedKeys(set)
+	for i, key := range keys {
+		if key == a.first && i > 0 {
+			copy(keys[1:i+1], keys[:i])
+			keys[0] = key
+			break
+		}
+	}
+	return keys
 }
 
 func (a *applier) route(key string, raw json.RawMessage, force bool) error {

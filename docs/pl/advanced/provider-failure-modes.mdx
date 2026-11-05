@@ -178,8 +178,10 @@ wystarczająco długo, by objąć czas generowania, i pozwól klientom ponawiać
 
 Co jest per instancja, a więc nie jest współdzielone między replikami: stan circuit
 breakera, okna stanu requestów i sticky sessions. Liczniki rate limitów są
-współdzielone przez bazę danych, w przybliżeniu: każda replika widzi liczniki
-pozostałych w ciągu około dwóch sekund. [Przewodnik produkcyjny](/pl/guides/production) opisuje, co to oznacza
+współdzielone przez bazę danych, w przybliżeniu: przy domyślnym
+`RATE_LIMITS_FLUSH_INTERVAL=1` każda replika widzi liczniki pozostałych w ciągu
+około dwóch sekund; przy `0` po starcie repliki nie widzą już nowych liczników
+pozostałych. [Przewodnik produkcyjny](/pl/guides/production) opisuje, co to oznacza
 dla Twojej topologii.
 
 Jeśli GoModel nie działa, a ruch musi płynąć natychmiast, skieruj
