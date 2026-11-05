@@ -20,6 +20,10 @@ import (
 
 const responseCachePrefix = "gomodel:response:"
 
+// exactCacheGetTimeout bounds the exact-cache lookup each cacheable request
+// runs. A slower Redis counts as a miss so the request goes to the provider.
+const exactCacheGetTimeout = 250 * time.Millisecond
+
 var internalRequestHeaderAllowlist = map[string]struct{}{
 	http.CanonicalHeaderKey("Accept"):                     {},
 	http.CanonicalHeaderKey("Baggage"):                    {},
@@ -81,8 +85,9 @@ func NewResponseCacheMiddleware(
 		}
 		store, err := cache.NewRedisStore(cache.RedisStoreConfig{
 			URL:    cfg.Simple.Redis.URL,
-			Prefix: prefix,
-			TTL:    ttl,
+			Prefix:     prefix,
+			TTL:        ttl,
+			GetTimeout: exactCacheGetTimeout,
 		})
 		if err != nil {
 			return nil, err
