@@ -86,7 +86,12 @@ type HealthChecker interface {
 // SQLiteStorage exposes a SQLite database handle.
 type SQLiteStorage interface {
 	Storage
+	// DB is the single writer connection.
 	DB() *sql.DB
+	// ReadDB is a read-only connection pool for queries that may see the
+	// database as of a moment before a concurrent write commits. It is DB
+	// itself for an in-memory database.
+	ReadDB() *sql.DB
 }
 
 // PostgreSQLStorage exposes a PostgreSQL connection pool.

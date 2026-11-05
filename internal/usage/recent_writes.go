@@ -32,7 +32,7 @@ func NewRecentWriteReader(store storage.Storage) (RecentWriteReader, error) {
 	if store == nil {
 		return nil, nil
 	}
-	return storage.ResolveSQLBackend[RecentWriteReader](
+	return storage.ResolveSQLReadBackend[RecentWriteReader](
 		context.Background(),
 		store,
 		func(db sqlx.DB) (RecentWriteReader, error) { return NewSQLReader(db) },

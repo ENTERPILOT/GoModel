@@ -86,7 +86,14 @@ func createStore(ctx context.Context, store storage.Storage) (Store, error) {
 	return storage.ResolveSQLBackend[Store](
 		ctx,
 		store,
-		func(db sqlx.DB) (Store, error) { return NewSQLStore(ctx, db) },
+		func(db sqlx.DB) (Store, error) {
+			sqlStore, err := NewSQLStore(ctx, db)
+			if err != nil {
+				return nil, err
+			}
+			sqlStore.reads = storage.ReadSQL(store, db)
+			return sqlStore, nil
+		},
 		func(db *mongo.Database) (Store, error) { return NewMongoDBStore(ctx, db) },
 	)
 }

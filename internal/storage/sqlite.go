@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,9 @@ import (
 // sqliteStorage implements Storage for SQLite
 type sqliteStorage struct {
 	db *sql.DB
+	// readDB is the read-only pool behind ReadDB; it is db itself for an
+	// in-memory database.
+	readDB *sql.DB
 }
 
 // NewSQLite creates a new SQLite storage connection.
@@ -35,10 +39,11 @@ func NewSQLite(cfg SQLiteConfig) (SQLiteStorage, error) {
 		return nil, fmt.Errorf("failed to open SQLite database: %w", err)
 	}
 
-	// Serialize all SQLite access through a single connection.
+	// Serialize all SQLite writes through a single connection.
 	// SQLite only permits one writer at a time. With multiple open connections,
 	// concurrent flush loops (audit log + usage tracking) cause SQLITE_BUSY errors.
 	// A single connection lets database/sql queue callers in Go, eliminating contention.
+	// Read-only stores use the separate pool behind ReadDB instead.
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
@@ -55,7 +60,13 @@ func NewSQLite(cfg SQLiteConfig) (SQLiteStorage, error) {
 		return nil, fmt.Errorf("failed to set busy_timeout pragma: %w", err)
 	}
 
-	return &sqliteStorage{db: db}, nil
+	readDB, err := openSQLiteReader(db)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+
+	return &sqliteStorage{db: db, readDB: readDB}, nil
 }
 
 func (s *sqliteStorage) DB() *sql.DB {
@@ -71,8 +82,12 @@ func (s *sqliteStorage) Ping(ctx context.Context) error {
 }
 
 func (s *sqliteStorage) Close() error {
-	if s.db != nil {
-		return s.db.Close()
+	var errs []error
+	if s.readDB != nil && s.readDB != s.db {
+		errs = append(errs, s.readDB.Close())
 	}
-	return nil
+	if s.db != nil {
+		errs = append(errs, s.db.Close())
+	}
+	return errors.Join(errs...)
 }

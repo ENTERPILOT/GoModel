@@ -1,0 +1,59 @@
+package storage
+
+import (
+	"database/sql"
+	"fmt"
+	"runtime"
+)
+
+// sqliteReaderConns sizes the read-only pool: enough for a few concurrent
+// dashboard scans and budget checks, capped so idle connections stay cheap.
+func sqliteReaderConns() int {
+	return min(max(4, runtime.GOMAXPROCS(0)), 8)
+}
+
+// openSQLiteReader opens a pool of read-only connections to the database the
+// writer has open. In WAL mode readers block neither the writer nor each
+// other, so dashboard scans, budget checks and live-view polls stop queueing
+// the usage and audit flushes behind them on the single writer connection.
+//
+// A reader sees the database as of the start of its query: a commit still in
+// flight on the writer shows up on its next query. Only stores whose reads
+// tolerate that use ReadDB; spend and dashboards already trail requests by the
+// usage flush interval.
+//
+// An in-memory database exists only on the connection that created it, so a
+// second pool would open a different, empty database. It reads through the
+// writer instead.
+func openSQLiteReader(writer *sql.DB) (*sql.DB, error) {
+	var file string
+	if err := writer.QueryRow(`SELECT file FROM pragma_database_list WHERE name = 'main'`).Scan(&file); err != nil {
+		return nil, fmt.Errorf("failed to inspect SQLite database: %w", err)
+	}
+	if file == "" {
+		return writer, nil
+	}
+
+	// query_only rejects every statement that would change the database. The
+	// driver passes mode=ro through only for file: URIs, which would mean
+	// escaping the path, and query_only gives the same guarantee. The writer
+	// already switched the file to WAL, which persists.
+	db, err := sql.Open("sqlite", file+"?_busy_timeout=5000&_pragma=query_only(1)")
+	if err != nil {
+		return nil, fmt.Errorf("failed to open SQLite read pool: %w", err)
+	}
+	conns := sqliteReaderConns()
+	db.SetMaxOpenConns(conns)
+	db.SetMaxIdleConns(conns)
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to ping SQLite read pool: %w", err)
+	}
+	return db, nil
+}
+
+// ReadDB returns the read-only connection pool. Writes and reads that must
+// run in the same transaction as a write use DB.
+func (s *sqliteStorage) ReadDB() *sql.DB {
+	return s.readDB
+}
