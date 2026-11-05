@@ -93,7 +93,7 @@ selektor dla całego providera, taki jak `openai/*`, jest odrzucany.
 | -------- | ---------- |
 | Chat Completions, Responses | Opóźnione po nadejściu odpowiedzi upstreamu. |
 | Te same endpointy ze `stream: true` (SSE) | Każdy chunk jest zwalniany zgodnie z przeskalowaną osią czasu. |
-| [Anthropic Messages](/pl/advanced/anthropic-messages-api) | Opóźnione jak Chat Completions, gdy request idzie ścieżką tłumaczoną. Request [przekazywany natywnie](/pl/advanced/anthropic-messages-api#natywne-przekazywanie-do-anthropic) do providera Anthropic nie jest spowalniany. |
+| [Anthropic Messages](/pl/advanced/anthropic-messages-api) | Opóźnione po nadejściu odpowiedzi upstreamu albo, przy streamingu, chunk po chunku – zarówno na ścieżce tłumaczonej, jak i przy [natywnym przekazywaniu](/pl/advanced/anthropic-messages-api#natywne-przekazywanie-do-anthropic). |
 | Embeddings | Opóźnione po nadejściu odpowiedzi upstreamu. |
 | Generowanie i edycja obrazów | Opóźnione po nadejściu odpowiedzi upstreamu. |
 | [Audio](/pl/advanced/audio-api): mowa, transkrypcje, tłumaczenia | Opóźnione albo, przy [streamingu](/pl/advanced/audio-api#streaming), dawkowane chunk po chunku. |

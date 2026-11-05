@@ -336,6 +336,9 @@ class AuditListStore {
           loaded: true,
           entries: merged.entries,
           total: Number(result.data.total || 0) + merged.preservedCount,
+          // When the server read the children, so a later live event from
+          // another replica can tell whether total already counts it.
+          as_of: result.data.as_of,
         },
       };
     } catch (e) {

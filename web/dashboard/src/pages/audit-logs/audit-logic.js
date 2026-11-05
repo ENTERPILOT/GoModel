@@ -258,6 +258,7 @@ export function auditLogFromSessions(payload) {
     total: Number((payload && payload.total) || 0),
     limit: Number((payload && payload.limit) || 25),
     offset: Number((payload && payload.offset) || 0),
+    ...(payload && payload.as_of ? { as_of: payload.as_of } : {}),
   };
 }
 

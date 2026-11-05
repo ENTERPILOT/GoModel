@@ -57,6 +57,7 @@ func TestAuditSessions_Success(t *testing.T) {
 	}
 
 	h := NewHandler(nil, nil, WithAuditReader(reader))
+	before := time.Now().UnixMicro()
 	c, rec := echotest.Get(t, "/admin/audit/sessions?days=7&user_path=/team")
 	require.NoError(t, h.AuditSessions(c))
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
@@ -67,10 +68,12 @@ func TestAuditSessions_Success(t *testing.T) {
 			RequestCount int                `json:"request_count"`
 			Latest       *auditlog.LogEntry `json:"latest"`
 		} `json:"sessions"`
-		Total int `json:"total"`
+		Total int   `json:"total"`
+		AsOf  int64 `json:"as_of"`
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
 	require.Equal(t, 2, result.Total)
+	assert.GreaterOrEqual(t, result.AsOf, before, "as_of is when the page was read")
 	require.Len(t, result.Sessions, 2)
 	assert.Equal(t, 6, result.Sessions[0].RequestCount)
 	require.NotNil(t, result.Sessions[0].Latest)
