@@ -18,8 +18,6 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"github.com/cespare/xxhash/v2"
-
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/embedding"
@@ -44,6 +42,8 @@ type semanticCacheMiddleware struct {
 	cfg              config.SemanticCacheConfig
 	embedderIdentity string
 	hitRecorder      func(exchange, []byte, string)
+
+	partitionByUserPath bool
 
 	// Vector-store inserts run on a bounded worker pool so a burst of cache
 	// misses cannot spawn unbounded goroutines against the vector store. wg
@@ -129,9 +129,10 @@ func (m *semanticCacheMiddleware) Handle(ex exchange, body []byte, next func() e
 		return next()
 	}
 
-	// The header may only tighten matching. Entries are shared across callers,
-	// so a looser client threshold would return answers cached for unrelated
-	// prompts, including other tenants'.
+	// The header may only tighten matching. Entries are shared across callers
+	// (across every caller of one user path when partitioning is on), so a looser
+	// client threshold would return answers cached for unrelated prompts,
+	// including other tenants'.
 	threshold := m.cfg.SimilarityThreshold
 	if v := headerFloat64(ex.RequestHeader, "X-Cache-Semantic-Threshold"); v > threshold {
 		threshold = v
@@ -145,8 +146,15 @@ func (m *semanticCacheMiddleware) Handle(ex exchange, body []byte, next func() e
 	if !fpOK {
 		return next()
 	}
-	baseParams := computeParamsHash(body, path, plan, core.GetGuardrailsHash(ctx), m.embedderIdentity)
+	baseParams := computeParamsHash(body, path, plan, core.GetGuardrailsHash(ctx), m.embedderIdentity, m.cfg.ExcludeSystemPrompt)
 	paramsHash := sha256HexOf(baseParams + "\x00" + msgFp)
+	if m.partitionByUserPath {
+		// Every VecStore backend filters Search by exact params_hash inside the
+		// vector query, so this confines matching to the caller's partition. The
+		// cache key below derives from it too, so partitions cannot overwrite
+		// each other's points.
+		paramsHash = userPathPartitionedHash(paramsHash, core.UserPathFromContext(ctx))
+	}
 
 	vec, err := m.embedder.Embed(ctx, embedText)
 	if err != nil {
@@ -433,29 +441,41 @@ func extractTextFromContent(content any) string {
 	}
 }
 
+// paramsHashPromptFields are top-level request fields never hashed as plain
+// fields: messages and input are the prompt, matched by embedding and by
+// conversationInvariantFingerprint, and stream and stream_options are hashed
+// in normalized form by writeOutputShapingFields. Every field not listed here
+// or in paramsHashCallerFields is hashed, so a field GoModel does not know
+// about causes a miss, never a hit generated under a different value.
+var paramsHashPromptFields = map[string]struct{}{
+	"messages":       {},
+	"input":          {},
+	"stream":         {},
+	"stream_options": {},
+}
+
+// paramsHashCallerFields identify the caller or steer provider-side prompt
+// caching. They never change what the model generates, so they are left out
+// of the hash, except on responsesPath: a Responses object echoes them back,
+// and a hit must not hand one caller's values to another.
+var paramsHashCallerFields = map[string]struct{}{
+	"user":                   {},
+	"metadata":               {},
+	"safety_identifier":      {},
+	"prompt_cache_key":       {},
+	"prompt_cache_retention": {},
+}
+
+const responsesPath = "/v1/responses"
+
 // computeParamsHash builds a stable SHA-256 hash of all output-shaping parameters.
 // This ensures semantically similar prompts with different parameters or guardrail
 // policies never share a cache entry. endpointPath is the raw URL path
 // (e.g. "/v1/chat/completions") and isolates entries across distinct endpoints.
-func computeParamsHash(body []byte, endpointPath string, plan *core.Workflow, guardrailsHash, embedderIdentity string) string {
-	var req struct {
-		Model           string              `json:"model"`
-		Temperature     *float64            `json:"temperature"`
-		TopP            *float64            `json:"top_p"`
-		MaxTokens       *int                `json:"max_tokens"`
-		MaxOutputTokens *int                `json:"max_output_tokens"`
-		Tools           []map[string]any    `json:"tools"`
-		ResponseFormat  any                 `json:"response_format"`
-		Stream          bool                `json:"stream,omitempty"`
-		StreamOptions   *core.StreamOptions `json:"stream_options"`
-		Reasoning       json.RawMessage     `json:"reasoning"`
-		Instructions    string              `json:"instructions"`
-	}
-	_ = json.Unmarshal(body, &req)
-
+// excludeSystem leaves out a top-level system prompt (Anthropic Messages), as
+// conversationInvariantFingerprint leaves out system messages.
+func computeParamsHash(body []byte, endpointPath string, plan *core.Workflow, guardrailsHash, embedderIdentity string, excludeSystem bool) string {
 	h := sha256.New()
-	h.Write([]byte(req.Model))
-	h.Write([]byte{0})
 	h.Write([]byte(endpointPath))
 	h.Write([]byte{0})
 
@@ -466,65 +486,7 @@ func computeParamsHash(body []byte, endpointPath string, plan *core.Workflow, gu
 		h.Write([]byte{0})
 	}
 
-	if req.Temperature != nil {
-		h.Write([]byte(strconv.FormatFloat(*req.Temperature, 'f', -1, 64)))
-	}
-	h.Write([]byte{0})
-
-	if req.TopP != nil {
-		h.Write([]byte(strconv.FormatFloat(*req.TopP, 'f', -1, 64)))
-	}
-	h.Write([]byte{0})
-
-	if req.MaxTokens != nil {
-		h.Write([]byte(strconv.Itoa(*req.MaxTokens)))
-	}
-	h.Write([]byte{0})
-
-	if req.MaxOutputTokens != nil {
-		h.Write([]byte(strconv.Itoa(*req.MaxOutputTokens)))
-	}
-	h.Write([]byte{0})
-
-	if len(req.Reasoning) > 0 {
-		var canonical any
-		if err := json.Unmarshal(req.Reasoning, &canonical); err == nil {
-			remarshaled, _ := json.Marshal(canonical)
-			h.Write(remarshaled)
-		} else {
-			h.Write(req.Reasoning)
-		}
-	}
-	h.Write([]byte{0})
-
-	if req.Instructions != "" {
-		h.Write([]byte(req.Instructions))
-	}
-	h.Write([]byte{0})
-
-	if len(req.Tools) > 0 {
-		toolsJSON, _ := json.Marshal(sortedTools(req.Tools))
-		xx := xxhash.Sum64(toolsJSON)
-		h.Write([]byte(strconv.FormatUint(xx, 16)))
-	}
-	h.Write([]byte{0})
-
-	if req.ResponseFormat != nil {
-		rfJSON, _ := json.Marshal(req.ResponseFormat)
-		h.Write(rfJSON)
-	}
-	h.Write([]byte{0})
-
-	if req.Stream {
-		h.Write([]byte("1"))
-	}
-	h.Write([]byte{0})
-
-	if streamOptions := normalizeStreamOptionsForCache(req.StreamOptions); req.Stream && streamOptions != nil {
-		soJSON, _ := json.Marshal(streamOptions)
-		h.Write(soJSON)
-	}
-	h.Write([]byte{0})
+	writeOutputShapingFields(h, body, endpointPath, excludeSystem)
 
 	h.Write([]byte(guardrailsHash))
 	h.Write([]byte{0})
@@ -533,19 +495,131 @@ func computeParamsHash(body []byte, endpointPath string, plan *core.Workflow, gu
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func sortedTools(tools []map[string]any) []map[string]any {
-	sorted := make([]map[string]any, len(tools))
-	copy(sorted, tools)
-	sort.Slice(sorted, func(i, j int) bool {
-		ni, _ := sorted[i]["function"].(map[string]any)
-		nj, _ := sorted[j]["function"].(map[string]any)
-		if ni == nil || nj == nil {
-			return false
+// writeOutputShapingFields hashes every top-level field of body that is not a
+// prompt field or, outside responsesPath, a caller field, in sorted key order
+// with canonical JSON values, so member order and whitespace do not matter.
+// Keys are written JSON-encoded, so a key containing a NUL byte cannot pass
+// for the separator. A body that is not a JSON object, or that repeats a member
+// name, is hashed verbatim instead: a provider may read a duplicated member
+// differently from the value decoding keeps.
+func writeOutputShapingFields(h hash.Hash, body []byte, endpointPath string, excludeSystem bool) {
+	var fields map[string]json.RawMessage
+	if hasDuplicateJSONMemberNames(body) || json.Unmarshal(body, &fields) != nil {
+		h.Write(body)
+		h.Write([]byte{0})
+		return
+	}
+
+	// Embedding and the conversation fingerprint read messages when a body has
+	// both messages and input, while a provider may read input. Hashing both
+	// keeps such a body from sharing entries with one whose other field differs.
+	_, hasMessages := fields["messages"]
+	_, hasInput := fields["input"]
+	bothPrompts := hasMessages && hasInput
+
+	keys := make([]string, 0, len(fields))
+	for key := range fields {
+		_, prompt := paramsHashPromptFields[key]
+		if bothPrompts && (key == "messages" || key == "input") {
+			prompt = false
 		}
-		namei, _ := ni["name"].(string)
-		namej, _ := nj["name"].(string)
-		return namei < namej
-	})
+		if prompt {
+			continue
+		}
+		if _, caller := paramsHashCallerFields[key]; caller && endpointPath != responsesPath {
+			continue
+		}
+		if key == "system" && excludeSystem {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		encodedKey, _ := json.Marshal(key)
+		h.Write(encodedKey)
+		h.Write([]byte{0})
+		if key == "tools" {
+			h.Write(canonicalToolsJSON(fields[key]))
+		} else {
+			h.Write(canonicalJSON(fields[key]))
+		}
+		h.Write([]byte{0})
+	}
+
+	var stream struct {
+		Stream        bool                `json:"stream"`
+		StreamOptions *core.StreamOptions `json:"stream_options"`
+	}
+	_ = json.Unmarshal(body, &stream)
+	if stream.Stream {
+		h.Write([]byte("stream"))
+		h.Write([]byte{0})
+		if streamOptions := normalizeStreamOptionsForCache(stream.StreamOptions); streamOptions != nil {
+			soJSON, _ := json.Marshal(streamOptions)
+			h.Write(soJSON)
+		}
+		h.Write([]byte{0})
+	}
+}
+
+// canonicalJSON re-encodes raw with sorted object keys and no insignificant
+// whitespace. Numbers keep their literal text, so large integers such as a
+// seed are never rounded into a colliding value.
+func canonicalJSON(raw json.RawMessage) []byte {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return raw
+	}
+	out, err := json.Marshal(v)
+	if err != nil {
+		return raw
+	}
+	return out
+}
+
+// canonicalToolsJSON is canonicalJSON for a tools array, ordered by function
+// name so the same tool set in a different order shares entries.
+func canonicalToolsJSON(raw json.RawMessage) []byte {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var tools []map[string]any
+	if err := dec.Decode(&tools); err != nil {
+		return canonicalJSON(raw)
+	}
+	out, err := json.Marshal(sortedTools(tools))
+	if err != nil {
+		return canonicalJSON(raw)
+	}
+	return out
+}
+
+// sortedTools orders a list of Chat Completions function tools by name. Any
+// other list, one that mixes in another tool shape or repeats a name, keeps its
+// order: there is no single order to normalize it to.
+func sortedTools(tools []map[string]any) []map[string]any {
+	names := make([]string, len(tools))
+	seen := make(map[string]struct{}, len(tools))
+	for i, tool := range tools {
+		function, _ := tool["function"].(map[string]any)
+		name, _ := function["name"].(string)
+		if _, duplicate := seen[name]; name == "" || duplicate {
+			return tools
+		}
+		seen[name] = struct{}{}
+		names[i] = name
+	}
+	order := make([]int, len(tools))
+	for i := range order {
+		order[i] = i
+	}
+	sort.Slice(order, func(a, b int) bool { return names[order[a]] < names[order[b]] })
+	sorted := make([]map[string]any, len(tools))
+	for i, idx := range order {
+		sorted[i] = tools[idx]
+	}
 	return sorted
 }
 

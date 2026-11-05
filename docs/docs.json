@@ -186,6 +186,7 @@
                                 "icon": "sparkles",
                                 "pages": [
                                     "features/virtual-models",
+                                    "features/slowdown",
                                     "features/playground",
                                     "features/session-keeping",
                                     "features/user-path",
@@ -370,6 +371,7 @@
                                 "icon": "sparkles",
                                 "pages": [
                                     "de/features/virtual-models",
+                                    "de/features/slowdown",
                                     "de/features/playground",
                                     "de/features/session-keeping",
                                     "de/features/user-path",
@@ -546,6 +548,7 @@
                                 "icon": "sparkles",
                                 "pages": [
                                     "zh/features/virtual-models",
+                                    "zh/features/slowdown",
                                     "zh/features/playground",
                                     "zh/features/session-keeping",
                                     "zh/features/user-path",
@@ -722,6 +725,7 @@
                                 "icon": "sparkles",
                                 "pages": [
                                     "pl/features/virtual-models",
+                                    "pl/features/slowdown",
                                     "pl/features/playground",
                                     "pl/features/session-keeping",
                                     "pl/features/user-path",

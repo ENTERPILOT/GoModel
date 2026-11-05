@@ -97,7 +97,7 @@ func runCounterEpochSuite(t *testing.T, store Store) {
 	require.NoError(t, store.SaveCounters(ctx, []WindowSnapshot{snap}))
 	snap.Epoch = "e2"
 	require.NoError(t, store.SaveCounters(ctx, []WindowSnapshot{snap}))
-	rows, err := store.LoadCounters(ctx)
+	rows, err := store.LoadCounters(ctx, 0)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, "e2", rows[0].Epoch, "a save rewrites the row's epoch")

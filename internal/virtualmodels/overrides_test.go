@@ -4,10 +4,12 @@ import (
 	"context"
 	"testing"
 
+	"github.com/goccy/go-json"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestparams"
 )
 
 func TestResolveReasoningEffort(t *testing.T) {
@@ -163,7 +165,7 @@ func TestResolveReasoningEffort(t *testing.T) {
 				ctx = context.Background()
 			}
 			service := newSlowdownService(t, tt.rows...)
-			assert.Equal(t, tt.want, service.ResolveReasoningEffort(ctx, &core.RequestModelResolution{Requested: tt.requested}, tt.attempt))
+			assert.Equal(t, tt.want, service.ResolveRequestOverrides(ctx, &core.RequestModelResolution{Requested: tt.requested}, tt.attempt).ReasoningEffort)
 		})
 	}
 }
@@ -227,7 +229,7 @@ func TestResolveReasoningEffortFollowsRoutedPath(t *testing.T) {
 
 		resolution := &core.RequestModelResolution{Requested: requested, ResolvedSelector: resolved, VirtualModelPath: path}
 		want := map[string]string{"fast": "low", "smart": "high"}[path[1]]
-		assert.Equal(t, want, service.ResolveReasoningEffort(context.Background(), resolution, gpt4o), "route %v", path)
+		assert.Equal(t, want, service.ResolveRequestOverrides(context.Background(), resolution, gpt4o).ReasoningEffort, "route %v", path)
 		seen[path[1]] = true
 	}
 	assert.Len(t, seen, 2, "round robin should route through both legs")
@@ -245,4 +247,176 @@ func TestResolveModelRouteOmitsRouteWithoutEffort(t *testing.T) {
 	require.True(t, changed)
 	assert.Equal(t, core.ModelSelector{Provider: "openai", Model: "gpt-4o"}, resolved)
 	assert.Nil(t, path)
+}
+
+func rawJSON(s string) json.RawMessage { return json.RawMessage(s) }
+
+func TestResolveRequestParams(t *testing.T) {
+	qwen := core.ModelSelector{Provider: "vllm", Model: "qwen"}
+	other := core.ModelSelector{Provider: "vllm", Model: "other"}
+	tests := []struct {
+		name         string
+		rows         []VirtualModel
+		requested    core.RequestedModelSelector
+		attempt      core.ModelSelector
+		wantParams   requestparams.Set
+		wantDefaults requestparams.Set
+		wantEffort   string
+	}{
+		{
+			name: "alias params and defaults",
+			rows: []VirtualModel{{
+				Source: "thinking-low", Targets: []Target{{Provider: "vllm", Model: "qwen"}}, Enabled: true,
+				ReasoningEffort: "low",
+				Params:          requestparams.Set{"chat_template_kwargs": rawJSON(`{"enable_thinking":true}`)},
+				DefaultParams:   requestparams.Set{"temperature": rawJSON("1"), "top_k": rawJSON("20")},
+			}},
+			requested:    core.NewRequestedModelSelector("thinking-low", ""),
+			attempt:      qwen,
+			wantEffort:   "low",
+			wantParams:   requestparams.Set{"chat_template_kwargs": rawJSON(`{"enable_thinking":true}`)},
+			wantDefaults: requestparams.Set{"temperature": rawJSON("1"), "top_k": rawJSON("20")},
+		},
+		{
+			name: "chained virtual models merge per key with the inner one winning",
+			rows: []VirtualModel{
+				{Source: "outer", Targets: []Target{{Model: "inner"}}, Enabled: true, Params: requestparams.Set{"top_k": rawJSON("20"), "min_p": rawJSON("0")}, DefaultParams: requestparams.Set{"temperature": rawJSON("1")}},
+				{Source: "inner", Targets: []Target{{Provider: "vllm", Model: "qwen"}}, Enabled: true, Params: requestparams.Set{"top_k": rawJSON("5")}, DefaultParams: requestparams.Set{"top_p": rawJSON("0.9")}},
+			},
+			requested:    core.NewRequestedModelSelector("outer", ""),
+			attempt:      qwen,
+			wantParams:   requestparams.Set{"top_k": rawJSON("5"), "min_p": rawJSON("0")},
+			wantDefaults: requestparams.Set{"temperature": rawJSON("1"), "top_p": rawJSON("0.9")},
+		},
+		{
+			name: "model policy params beat the alias per key and keep its effort",
+			rows: []VirtualModel{
+				{Source: "alias", Targets: []Target{{Provider: "vllm", Model: "qwen"}}, Enabled: true, ReasoningEffort: "high", Params: requestparams.Set{"top_k": rawJSON("20"), "min_p": rawJSON("0")}},
+				{Source: "vllm/qwen", ProviderName: "vllm", Model: "qwen", Enabled: true, Params: requestparams.Set{"top_k": rawJSON("1")}},
+			},
+			requested:  core.NewRequestedModelSelector("alias", ""),
+			attempt:    qwen,
+			wantEffort: "high",
+			wantParams: requestparams.Set{"top_k": rawJSON("1"), "min_p": rawJSON("0")},
+		},
+		{
+			name: "a failover leg gets its own params only",
+			rows: []VirtualModel{
+				{Source: "team", Targets: []Target{{Model: "a"}, {Model: "b"}}, Enabled: true, DefaultParams: requestparams.Set{"temperature": rawJSON("1")}},
+				{Source: "a", Targets: []Target{{Provider: "vllm", Model: "qwen"}}, Enabled: true, Params: requestparams.Set{"top_k": rawJSON("20")}},
+				{Source: "b", Targets: []Target{{Provider: "vllm", Model: "other"}}, Enabled: true, Params: requestparams.Set{"min_p": rawJSON("0.1")}},
+			},
+			requested:    core.NewRequestedModelSelector("team", ""),
+			attempt:      other,
+			wantParams:   requestparams.Set{"min_p": rawJSON("0.1")},
+			wantDefaults: requestparams.Set{"temperature": rawJSON("1")},
+		},
+		{
+			name: "explicit provider request only sees model policies",
+			rows: []VirtualModel{
+				{Source: "qwen", Targets: []Target{{Provider: "vllm", Model: "qwen"}}, Enabled: true, Params: requestparams.Set{"top_k": rawJSON("20")}},
+				{Source: "vllm/qwen", ProviderName: "vllm", Model: "qwen", Enabled: true, DefaultParams: requestparams.Set{"temperature": rawJSON("1")}},
+			},
+			requested:    core.NewRequestedModelSelector("qwen", "vllm"),
+			attempt:      qwen,
+			wantDefaults: requestparams.Set{"temperature": rawJSON("1")},
+		},
+		{
+			name: "model-wide and exact policies merge per key with the exact one winning",
+			rows: []VirtualModel{
+				{Source: "qwen", Model: "qwen", Enabled: true, ReasoningEffort: "high", Params: requestparams.Set{"top_k": rawJSON("20"), "min_p": rawJSON("0.1")}, DefaultParams: requestparams.Set{"temperature": rawJSON("1")}},
+				{Source: "vllm/qwen", ProviderName: "vllm", Model: "qwen", Enabled: true, Params: requestparams.Set{"top_k": rawJSON("5")}, DefaultParams: requestparams.Set{"top_p": rawJSON("0.9")}},
+			},
+			requested:    core.NewRequestedModelSelector("vllm/qwen", ""),
+			attempt:      qwen,
+			wantEffort:   "high",
+			wantParams:   requestparams.Set{"top_k": rawJSON("5"), "min_p": rawJSON("0.1")},
+			wantDefaults: requestparams.Set{"temperature": rawJSON("1"), "top_p": rawJSON("0.9")},
+		},
+		{
+			name: "a concrete model's default turns an alias's forced key back into a default",
+			rows: []VirtualModel{
+				{Source: "alias", Targets: []Target{{Provider: "vllm", Model: "qwen"}}, Enabled: true, Params: requestparams.Set{"temperature": rawJSON("1"), "top_k": rawJSON("20")}},
+				{Source: "vllm/qwen", ProviderName: "vllm", Model: "qwen", Enabled: true, DefaultParams: requestparams.Set{"temperature": rawJSON("0.5")}},
+			},
+			requested:    core.NewRequestedModelSelector("alias", ""),
+			attempt:      qwen,
+			wantParams:   requestparams.Set{"top_k": rawJSON("20")},
+			wantDefaults: requestparams.Set{"temperature": rawJSON("0.5")},
+		},
+		{
+			name:      "nothing configured",
+			rows:      []VirtualModel{{Source: "plain", Targets: []Target{{Provider: "vllm", Model: "qwen"}}, Enabled: true}},
+			requested: core.NewRequestedModelSelector("plain", ""),
+			attempt:   qwen,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service := newSlowdownService(t, tt.rows...)
+			got := service.ResolveRequestOverrides(context.Background(), &core.RequestModelResolution{Requested: tt.requested}, tt.attempt)
+			assert.Equal(t, tt.wantEffort, got.ReasoningEffort)
+			assert.Equal(t, tt.wantParams, got.Params)
+			assert.Equal(t, tt.wantDefaults, got.Defaults)
+		})
+	}
+}
+
+func TestUpsertValidatesRequestParams(t *testing.T) {
+	redirect := func(params, defaults requestparams.Set) VirtualModel {
+		return VirtualModel{Source: "fast", Targets: []Target{{Provider: "openai", Model: "gpt-4o"}}, Params: params, DefaultParams: defaults, Enabled: true}
+	}
+	tests := []struct {
+		name    string
+		vm      VirtualModel
+		wantErr string
+	}{
+		{name: "valid", vm: redirect(requestparams.Set{"top_k": rawJSON("20"), "stale": nil}, requestparams.Set{"temperature": rawJSON(" 1.0 ")})},
+		{name: "model policy", vm: VirtualModel{Source: "openai/gpt-4o", Params: requestparams.Set{"top_k": rawJSON("20")}, Enabled: true}},
+		{name: "frozen key", vm: redirect(requestparams.Set{"model": rawJSON(`"x"`)}, nil), wantErr: `params: parameter "model"`},
+		{name: "effort belongs to its own field", vm: redirect(nil, requestparams.Set{"reasoning_effort": rawJSON(`"low"`)}), wantErr: `default_params: parameter "reasoning_effort"`},
+		{name: "null default", vm: redirect(nil, requestparams.Set{"top_k": nil}), wantErr: "must have a value"},
+		{name: "wrong type", vm: redirect(requestparams.Set{"temperature": rawJSON(`"hot"`)}, nil), wantErr: "wrong type"},
+		{name: "same key in both sets", vm: redirect(requestparams.Set{"top_k": rawJSON("1")}, requestparams.Set{"top_k": rawJSON("2")}), wantErr: "cannot be in both"},
+		{name: "provider scope", vm: VirtualModel{Source: "openai/", Params: requestparams.Set{"top_k": rawJSON("1")}, Enabled: true}, wantErr: "params can only be configured for a model or redirect"},
+		{name: "global scope defaults", vm: VirtualModel{Source: "/", DefaultParams: requestparams.Set{"top_k": rawJSON("1")}, Enabled: true}, wantErr: "default_params can only be configured for a model or redirect"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service := newSlowdownService(t)
+			err := service.Upsert(context.Background(), tt.vm)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.True(t, IsValidationError(err))
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			got, ok := service.Get(tt.vm.Source)
+			require.True(t, ok)
+			assert.Equal(t, tt.vm.Params, got.Params)
+			if tt.vm.DefaultParams != nil {
+				assert.Equal(t, requestparams.Set{"temperature": rawJSON("1.0")}, got.DefaultParams, "values are stored compact")
+			}
+		})
+	}
+}
+
+func TestRequestParamsRouteRecording(t *testing.T) {
+	service := newSlowdownService(t,
+		VirtualModel{Source: "team", Targets: []Target{{Provider: "openai", Model: "gpt-4o"}}, Enabled: true, DefaultParams: requestparams.Set{"top_k": rawJSON("1")}},
+	)
+	_, path, changed, err := service.ResolveModelRouteForUserPath(context.Background(), core.NewRequestedModelSelector("team", ""))
+	require.NoError(t, err)
+	require.True(t, changed)
+	assert.Equal(t, []string{"team"}, path, "a redirect with params records its route like one with an effort")
+}
+
+func TestVirtualModelCloneDetachesParams(t *testing.T) {
+	vm := VirtualModel{Params: requestparams.Set{"top_k": rawJSON("20")}, DefaultParams: requestparams.Set{"temperature": rawJSON("1")}}
+	cloned := vm.clone()
+	cloned.Params["top_k"][0] = '9'
+	delete(cloned.DefaultParams, "temperature")
+	assert.Equal(t, rawJSON("20"), vm.Params["top_k"])
+	assert.Contains(t, vm.DefaultParams, "temperature")
 }

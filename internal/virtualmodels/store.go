@@ -1,12 +1,15 @@
 package virtualmodels
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/goccy/go-json"
+
+	"github.com/enterpilot/gomodel/internal/requestparams"
 )
 
 // ErrNotFound indicates a requested virtual model was not found.
@@ -59,6 +62,40 @@ func decodeStrategyConfig(data []byte) (map[string]any, error) {
 		return nil, nil
 	}
 	return config, nil
+}
+
+// encodeParams stores a parameter set as a JSON object; nil and empty both
+// persist as "" so rows written before the column existed compare equal.
+func encodeParams(field string, set requestparams.Set) (string, error) {
+	if len(set) == 0 {
+		return "", nil
+	}
+	data, err := json.Marshal(set)
+	if err != nil {
+		return "", fmt.Errorf("encode %s: %w", field, err)
+	}
+	return string(data), nil
+}
+
+func decodeParams(field string, data []byte) (requestparams.Set, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	var set requestparams.Set
+	if err := json.Unmarshal(data, &set); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", field, err)
+	}
+	if len(set) == 0 {
+		return nil, nil
+	}
+	// A stored null decodes as the literal; the set's own marker for a
+	// stripped key is nil, which is what Normalize and the applier expect.
+	for key, raw := range set {
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			set[key] = nil
+		}
+	}
+	return set, nil
 }
 
 func decodeTargets(data []byte) ([]Target, error) {

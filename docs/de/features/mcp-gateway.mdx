@@ -315,6 +315,41 @@ ENTRYPOINT ["/gomodel"]
 
 Für Updates und Sicherheitspatches dieses Images sind Sie dann selbst zuständig.
 
+## MCP-Server von Providern bereitstellen
+
+Manche Provider betreiben eigene MCP-Server, die mit demselben API-Key wie ihre
+Modelle erreichbar sind. Tragen Sie einen konfigurierten Provider in
+`mcp.provider_servers` ein, und das Gateway stellt dessen Server mit dem Key
+dieses Providers bereit. Sie müssen den Key nicht in `mcp.servers` kopieren:
+
+```yaml
+mcp:
+  provider_servers: [zai] # env: MCP_PROVIDER_SERVERS=zai; Standard: keine
+```
+
+| Provider-Typ | Server | Upstream-Tools |
+| --- | --- | --- |
+| `zai` | `zai-web-search`, `zai-web-reader`, `zai-zread` | `webSearchPrime`, `webReader`, `search_doc` / `get_repo_structure` / `read_file` |
+
+Clients rufen sie wie jeden anderen Server auf, zum Beispiel
+`zai-web-search_webSearchPrime` auf `/mcp`.
+
+- **Opt-in.** Standardmäßig wird nichts bereitgestellt: Jeder Aufruf wird über
+  den Provider-Key abgerechnet. Z.ai bietet diese Tools nur für Keys des
+  [GLM Coding Plan](https://docs.z.ai/devpack/mcp) an.
+- **Es zählen die konfigurierten Provider-Namen**, nicht die Typen. Ein
+  Provider namens `zai-coding` wird als `zai-coding-web-search` bereitgestellt.
+- **Derselbe Host wie für die Modelle.** Die MCP-URL wird aus der `base_url`
+  des Providers gebildet. Eine Base-URL auf `open.bigmodel.cn` oder hinter einem
+  Proxy erreicht so den passenden MCP-Endpunkt, und der Key geht an keinen
+  neuen Host.
+- **Im Dashboard schreibgeschützt**, wie deklarierte Server. Um einen davon mit
+  `user_paths` einzuschränken oder Tools zu kürzen, deklarieren Sie in
+  `mcp.servers` einen Server mit demselben Slug; er ersetzt den des Providers.
+- Nur Provider aus `config.yaml` oder Umgebungsvariablen zählen, und der erste
+  API-Key wird verwendet. Ein Name ohne konfigurierten Provider wird mit einer
+  Warnung übersprungen.
+
 ## Zustand und Lebenszyklus
 
 Das Dashboard zeigt jeden Server als **connected**, **degraded**, **connecting** oder
