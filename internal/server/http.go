@@ -60,10 +60,11 @@ const (
 	// for the short requests that can actually finish — a dashboard fetch, a
 	// health check — not for model traffic.
 	//
-	// It must stay below run.shutdownTimeout, which covers this drain plus
-	// those flushes and the database close that follow it. Exported so that
-	// relationship is checked rather than merely asserted here — see
-	// TestGracefulDrainFitsInsideTheShutdownBudget in the run package.
+	// It must stay below run.shutdownTimeout, which covers QuiesceTimeout
+	// before this drain and the flushes and database close that follow it.
+	// Exported so that relationship is checked rather than merely asserted
+	// here — see TestGracefulDrainFitsInsideTheShutdownBudget in the run
+	// package.
 	GracefulDrainTimeout = 10 * time.Second
 )
 
@@ -675,17 +676,44 @@ func (s *Server) Start(ctx context.Context, addr string) error {
 // gateway serves this way in production — the listening socket outlives each
 // configuration a reload installs — and tests use it to reserve a loopback
 // port up front, so it configures the server exactly like Start does: same
-// inbound timeouts, same drain window.
+// inbound timeouts, same drain window. Unlike Start, it quiesces before that
+// drain (see QuiesceTimeout), since the socket it serves outlives it.
 func (s *Server) StartWithListener(ctx context.Context, listener net.Listener) error {
 	if listener == nil {
 		return errors.New("listener is required")
 	}
+	// The listening socket outlives this server, so stopping is quiesced
+	// before Echo shuts down: see QuiesceTimeout.
+	q := newQuiescer()
+	served := q.listen(listener)
 	// Echo wraps only listeners it creates itself, so a pre-bound one is
 	// wrapped here. net/http then negotiates HTTP/2 through ALPN.
 	if s.tlsConfig != nil {
-		listener = tls.NewListener(listener, s.tlsConfig)
+		served = tls.NewListener(served, s.tlsConfig)
 	}
-	return newGatewayStartConfigForListener(listener).Start(ctx, s.echo)
+	sc := newGatewayStartConfigForListener(served)
+	configure := sc.BeforeServeFunc
+	sc.BeforeServeFunc = func(server *http.Server) error {
+		if err := configure(server); err != nil {
+			return err
+		}
+		q.instrument(server)
+		return nil
+	}
+
+	// Echo shuts the server down when its context ends; that happens only
+	// once ctx has ended and the accepted connections have been quiesced.
+	echoCtx, stopEcho := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopEcho()
+	go func() {
+		select {
+		case <-ctx.Done():
+			q.quiesce(listener, QuiesceTimeout)
+			stopEcho()
+		case <-echoCtx.Done():
+		}
+	}()
+	return sc.Start(echoCtx, s.echo)
 }
 
 // Shutdown releases server resources. The HTTP server itself is stopped by

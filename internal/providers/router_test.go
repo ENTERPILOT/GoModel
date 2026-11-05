@@ -783,6 +783,36 @@ func TestRouterChatCompletion_AdaptsAnthropicCacheControlAfterRouting(t *testing
 	}
 }
 
+// A type-routed batch goes to the first registered instance of the type; the
+// router names that instance from the same resolution as the call.
+func TestRouterCreateBatchOnInstance_NamesTheSubmittedInstance(t *testing.T) {
+	first := &mockBatchProvider{name: "openai"}
+	second := &mockBatchProvider{name: "openai"}
+	registry := newTestRegistryWithModels(
+		registryModelEntry{provider: first, providerName: "openai-byok", providerType: "openai", modelID: "gpt-4o"},
+		registryModelEntry{provider: second, providerName: "openai-prod", providerType: "openai", modelID: "gpt-4o"},
+	)
+	router, err := NewRouter(registry)
+	require.NoError(t, err)
+
+	request := &core.BatchRequest{
+		Endpoint: "/v1/chat/completions",
+		Requests: []core.BatchRequestItem{{
+			CustomID: "item-1",
+			Method:   http.MethodPost,
+			URL:      "/v1/chat/completions",
+			Body:     json.RawMessage(`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`),
+		}},
+	}
+	resp, hints, providerName, err := router.CreateBatchOnInstance(context.Background(), "openai", request)
+	require.NoError(t, err)
+	assert.Equal(t, "openai-byok", providerName)
+	assert.Equal(t, "openai", resp.Provider)
+	assert.Nil(t, hints)
+	assert.NotNil(t, first.lastBatchReq, "the first registered instance served the batch")
+	assert.Nil(t, second.lastBatchReq)
+}
+
 func TestRouterCreateBatch_AdaptsAnthropicCacheControlAfterRouting(t *testing.T) {
 	tests := []struct {
 		name            string

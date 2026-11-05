@@ -356,6 +356,7 @@ func initializeProviders(ctx context.Context, providerMap map[string]ProviderCon
 			registry.SetProviderMetadataOverrides(name, pCfg.ModelMetadataOverrides)
 		}
 		registry.SetProviderModelFilter(name, pCfg.ModelFilter)
+		registry.SetProviderBillable(name, pCfg.Billable)
 		keyrings[name] = result.keys
 		count++
 		slog.Info("provider registered", "name", name, "type", pCfg.Type)

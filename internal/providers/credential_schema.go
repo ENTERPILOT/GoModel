@@ -8,6 +8,7 @@ import "sort"
 const (
 	CredentialFieldAPIKeys                  = "api_keys"
 	CredentialFieldSessionStickyKeys        = "session_sticky_keys"
+	CredentialFieldBillable                 = "billable"
 	CredentialFieldBaseURL                  = "base_url"
 	CredentialFieldAPIVersion               = "api_version"
 	CredentialFieldBackend                  = "backend"
@@ -107,7 +108,8 @@ func credentialSchema(providerType string, spec DiscoveryConfig) CredentialSchem
 	}
 	schema.Fields = append(schema.Fields,
 		CredentialField{Name: CredentialFieldProxyURL, Advanced: true},
-		CredentialField{Name: CredentialFieldModels, Advanced: true})
+		CredentialField{Name: CredentialFieldModels, Advanced: true},
+		CredentialField{Name: CredentialFieldBillable, Advanced: true})
 	return schema
 }
 

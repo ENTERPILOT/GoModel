@@ -1,29 +1,45 @@
 package virtualmodels
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/requestparams"
 )
 
 // ConfigModels converts declarative config.yaml / VIRTUAL_MODELS entries into
 // virtual model rows marked as managed. The rows are fully validated when the
-// service builds its snapshot, so an invalid declaration fails startup loudly.
-func ConfigModels(entries []config.VirtualModelConfig) []VirtualModel {
+// service builds its snapshot, so an invalid declaration fails startup loudly;
+// a parameter value that cannot be encoded (a YAML mapping with a non-string
+// key) is reported here, naming the entry and the parameter.
+func ConfigModels(entries []config.VirtualModelConfig) ([]VirtualModel, error) {
 	if len(entries) == 0 {
-		return nil
+		return nil, nil
 	}
 	models := make([]VirtualModel, 0, len(entries))
 	for _, entry := range entries {
-		models = append(models, configModel(entry))
+		model, err := configModel(entry)
+		if err != nil {
+			return nil, fmt.Errorf("virtual model %q: %w", entry.Source, err)
+		}
+		models = append(models, model)
 	}
-	return models
+	return models, nil
 }
 
-func configModel(entry config.VirtualModelConfig) VirtualModel {
+func configModel(entry config.VirtualModelConfig) (VirtualModel, error) {
 	enabled := true
 	if entry.Enabled != nil {
 		enabled = *entry.Enabled
+	}
+	params, err := requestparams.FromAny(entry.Params)
+	if err != nil {
+		return VirtualModel{}, fmt.Errorf("params: %w", err)
+	}
+	defaultParams, err := requestparams.FromAny(entry.DefaultParams)
+	if err != nil {
+		return VirtualModel{}, fmt.Errorf("default_params: %w", err)
 	}
 	return VirtualModel{
 		Source:          entry.Source,
@@ -37,9 +53,11 @@ func configModel(entry config.VirtualModelConfig) VirtualModel {
 		Description:     entry.Description,
 		Slowdown:        entry.Slowdown,
 		ReasoningEffort: entry.ReasoningEffort,
+		Params:          params,
+		DefaultParams:   defaultParams,
 		Enabled:         enabled,
 		Managed:         true,
-	}
+	}, nil
 }
 
 // configTargets maps the explicit targets list, falling back to the single

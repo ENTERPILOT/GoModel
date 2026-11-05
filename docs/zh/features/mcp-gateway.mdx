@@ -221,6 +221,33 @@ ENTRYPOINT ["/gomodel"]
 
 此后，该镜像的更新和安全补丁需要由您自行负责。
 
+## 公开提供商托管的 MCP 服务器
+
+部分提供商自己托管 MCP 服务器，使用与其模型相同的 API 密钥即可访问。在
+`mcp.provider_servers` 中列出已配置的提供商，网关会使用该提供商的密钥提供其托管的服务器，无需把密钥复制到 `mcp.servers`：
+
+```yaml
+mcp:
+  provider_servers: [zai] # env: MCP_PROVIDER_SERVERS=zai；默认：无
+```
+
+| 提供商类型 | 服务器 | 上游工具 |
+| --- | --- | --- |
+| `zai` | `zai-web-search`、`zai-web-reader`、`zai-zread` | `webSearchPrime`、`webReader`、`search_doc` / `get_repo_structure` / `read_file` |
+
+客户端像调用其他服务器一样调用它们，例如在 `/mcp` 上调用
+`zai-web-search_webSearchPrime`。
+
+- **需主动开启。** 默认不公开任何服务器：每次调用都计入提供商密钥的费用。Z.ai
+  仅向 [GLM Coding Plan](https://docs.z.ai/devpack/mcp) 密钥提供这些工具。
+- **使用已配置的提供商名称**，而不是类型。名为 `zai-coding` 的提供商会以
+  `zai-coding-web-search` 提供。
+- **与模型使用同一主机。** MCP 地址由提供商的 `base_url` 构建，因此指向
+  `open.bigmodel.cn` 或代理的 base URL 会访问对应的 MCP 端点，密钥不会发往新的主机。
+- **在控制台中只读**，与声明的服务器相同。如需用 `user_paths` 限定可见范围或裁剪工具，请在
+  `mcp.servers` 中声明同一 slug 的服务器，它会替换提供商托管的服务器。
+- 仅 `config.yaml` 或环境变量中的提供商生效，并使用第一个 API 密钥。不是已配置提供商的名称会被跳过并记录警告。
+
 ## 健康状态与生命周期
 
 控制台会将每个服务器显示为 **connected**、**degraded**、**connecting** 或 **disabled**，并显示工具数量和最近一次错误；只要配置了服务器，Overview 页面就会汇总 MCP 服务器的健康状态。列出工具失败的服务器会保留其之前的目录（标记为 degraded），并每 60 秒重新探测一次；健康的目录每 5 分钟重新列出一次，并在上游发送 `list_changed` 通知时立即刷新。控制台上的 **Reconnect**（或 `POST /admin/mcp-servers/{slug}/reconnect`）会强制重新连接。

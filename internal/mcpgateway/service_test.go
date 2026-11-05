@@ -111,7 +111,18 @@ func newTestServiceWithOptions(t *testing.T, opts Options) (*Service, string) {
 
 	t.Cleanup(service.Close)
 
-	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	gateway := httptest.NewServer(gatewayHandler(service))
+	t.Cleanup(gateway.Close)
+
+	waitForConnected(t, service, len(service.Views()))
+	return service, gateway.URL
+}
+
+// gatewayHandler mimics GoModel's ingress in front of service: bearer auth is
+// assumed done; the auth key and user path are read from test headers into
+// the context, and /mcp/{server} pins a single upstream.
+func gatewayHandler(service *Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		if authKeyID := r.Header.Get("X-Test-Auth-Key-ID"); authKeyID != "" {
 			r = r.WithContext(core.WithAuthKeyID(r.Context(), authKeyID))
 		}
@@ -129,11 +140,7 @@ func newTestServiceWithOptions(t *testing.T, opts Options) (*Service, string) {
 			}
 			http.Error(w, err.Error(), status)
 		}
-	}))
-	t.Cleanup(gateway.Close)
-
-	waitForConnected(t, service, len(service.Views()))
-	return service, gateway.URL
+	}
 }
 
 // waitForConnected waits until every enabled server reports a terminal

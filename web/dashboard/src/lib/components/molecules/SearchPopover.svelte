@@ -27,6 +27,7 @@
     query = $bindable(""),
     activeIndex = $bindable(-1),
     rowCount = 0,
+    notice = "",
     listID,
     triggerText = "",
     triggerTitle = undefined,
@@ -205,6 +206,11 @@
           onchange={(event) => event.stopPropagation()}
         />
       </div>
+      <!-- Out of the listbox on purpose: a listbox may only contain options
+           and groups, and this line is neither. Mounted even when empty: a
+           live region that appears together with its text is not announced,
+           so the element stays and only its text changes. -->
+      <p class="search-select-notice" aria-live="polite">{notice}</p>
       <ul class="search-select-list" id={listID} role="listbox" aria-multiselectable={multiple || undefined}>
         {@render children?.()}
       </ul>
@@ -434,6 +440,18 @@
     flex-shrink: 0;
     width: 14px;
     height: 14px;
+  }
+
+  .search-select-notice {
+    margin: 0;
+    padding: 0 10px 6px;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  /* Empty notices keep their space out of the layout without leaving it. */
+  .search-select-notice:empty {
+    padding: 0;
   }
 
   .search-select :global(.search-select-empty) {
