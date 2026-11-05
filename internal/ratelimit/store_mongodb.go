@@ -62,6 +62,15 @@ func NewMongoDBStore(ctx context.Context, database *mongo.Database) (*MongoDBSto
 	if err != nil {
 		return nil, fmt.Errorf("create rate limit counter indexes: %w", err)
 	}
+	// The server deletes each row once its expires_at passes (see
+	// counterDocument), so no replica has to.
+	_, err = store.counters.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "expires_at", Value: 1}},
+		Options: options.Index().SetExpireAfterSeconds(0),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create rate limit counter indexes: %w", err)
+	}
 	if err := store.importLegacyCounters(ctx); err != nil {
 		return nil, err
 	}
@@ -401,10 +410,13 @@ func (s *MongoDBStore) configRulesWithoutManualCollisions(ctx context.Context, r
 	return filtered, nil
 }
 
-func (s *MongoDBStore) LoadCounters(ctx context.Context, since int64) ([]WindowSnapshot, error) {
+func (s *MongoDBStore) LoadCounters(ctx context.Context, since int64, exclude string) ([]WindowSnapshot, error) {
 	filter := bson.D{}
 	if since > 0 {
-		filter = bson.D{{Key: "updated_at", Value: bson.D{{Key: "$gte", Value: since}}}}
+		filter = append(filter, bson.E{Key: "updated_at", Value: bson.D{{Key: "$gte", Value: since}}})
+	}
+	if exclude != "" {
+		filter = append(filter, bson.E{Key: "writer", Value: bson.D{{Key: "$ne", Value: exclude}}})
 	}
 	cursor, err := s.counters.Find(ctx, filter)
 	if err != nil {
@@ -427,34 +439,55 @@ func (s *MongoDBStore) LoadCounters(ctx context.Context, since int64) ([]WindowS
 	return snapshots, nil
 }
 
+// counterDocument is a WindowSnapshot as MongoDB stores it. ExpiresAt is a
+// date, as the TTL index on it requires, set on every save to when the row
+// expires (see counterRetention).
+type counterDocument struct {
+	WindowSnapshot `bson:",inline"`
+	ExpiresAt      time.Time `bson:"expires_at"`
+}
+
 func (s *MongoDBStore) SaveCounters(ctx context.Context, snapshots []WindowSnapshot) error {
-	now := time.Now().Unix()
-	if len(snapshots) > 0 {
-		writes := make([]mongo.WriteModel, 0, len(snapshots))
-		for _, snap := range snapshots {
-			snap.UpdatedAt = now
-			writes = append(writes, mongo.NewUpdateOneModel().
-				SetFilter(counterIdentityFilter(snap)).
-				SetUpdate(bson.D{{Key: "$set", Value: snap}}).
-				SetUpsert(true))
-		}
-		if _, err := s.counters.BulkWrite(ctx, writes, options.BulkWrite().SetOrdered(false)); err != nil {
-			return fmt.Errorf("upsert rate limit counters: %w", err)
-		}
+	if len(snapshots) == 0 {
+		return nil
 	}
-	// Collect the rows nobody writes any more, on the bounds the SQL stores
-	// use (see pruneCountersSQL).
+	now := time.Now().Unix()
+	writes := make([]mongo.WriteModel, 0, len(snapshots))
+	for _, snap := range snapshots {
+		snap.UpdatedAt = now
+		doc := counterDocument{WindowSnapshot: snap, ExpiresAt: time.Unix(now+counterRetention(snap.PeriodSeconds), 0)}
+		writes = append(writes, mongo.NewUpdateOneModel().
+			SetFilter(counterIdentityFilter(snap)).
+			SetUpdate(bson.D{{Key: "$set", Value: doc}}).
+			SetUpsert(true))
+	}
+	if _, err := s.counters.BulkWrite(ctx, writes, options.BulkWrite().SetOrdered(false)); err != nil {
+		return fmt.Errorf("upsert rate limit counters: %w", err)
+	}
+	return nil
+}
+
+// PruneCounters leaves the rows with an expires_at to the TTL index. It
+// only collects the ones without, on the bounds the SQL stores use (see
+// pruneLegacyCountersSQL): rows saved before expires_at existed, imported
+// from the legacy collection, or written by an older replica during a
+// rolling upgrade. The TTL index finds them by the missing field, so once a
+// cluster is upgraded it reads nothing.
+func (s *MongoDBStore) PruneCounters(ctx context.Context) error {
 	retention := bson.D{{Key: "$cond", Value: bson.A{
 		bson.D{{Key: "$eq", Value: bson.A{"$period_seconds", PeriodConcurrent}}},
 		inFlightRowRetention,
 		bson.D{{Key: "$multiply", Value: bson.A{2, "$period_seconds"}}},
 	}}}
-	stale := bson.D{{Key: "$expr", Value: bson.D{{Key: "$lt", Value: bson.A{
-		bson.D{{Key: "$add", Value: bson.A{"$updated_at", retention}}},
-		now,
-	}}}}}
+	stale := bson.D{
+		{Key: "expires_at", Value: nil},
+		{Key: "$expr", Value: bson.D{{Key: "$lt", Value: bson.A{
+			bson.D{{Key: "$add", Value: bson.A{"$updated_at", retention}}},
+			time.Now().Unix(),
+		}}}},
+	}
 	if _, err := s.counters.DeleteMany(ctx, stale); err != nil {
-		return fmt.Errorf("prune expired rate limit counters: %w", err)
+		return fmt.Errorf("prune expired legacy rate limit counters: %w", err)
 	}
 	return nil
 }

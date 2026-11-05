@@ -132,6 +132,10 @@ func (s *Service) Close() {
 	}
 	if wasActive {
 		s.save(context.Background())
+		if s.flushInterval <= 0 {
+			// Without a flush loop nothing else prunes.
+			s.prune(context.Background())
+		}
 	}
 	if s.limiter != nil {
 		s.limiter.close()

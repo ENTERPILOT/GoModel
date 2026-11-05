@@ -21,9 +21,11 @@ func unstamped(rows []WindowSnapshot) []WindowSnapshot {
 
 // runCounterStoreSuite asserts the counter half of the Store contract. Every
 // backend runs the same body, so a window that round-trips on SQLite has to
-// round-trip on PostgreSQL and MongoDB too. seedStale writes a row directly,
-// bypassing SaveCounters, so the suite can age one without waiting an hour.
-func runCounterStoreSuite(t *testing.T, store Store, seedStale func(t *testing.T, snap WindowSnapshot, updatedAt int64)) {
+// round-trip on PostgreSQL and MongoDB too. seedStale writes a row as a save
+// at updatedAt would, so the suite can age one without waiting an hour.
+// expire collects what expired, as PruneCounters and whatever else the
+// backend relies on (a MongoDB TTL index) do.
+func runCounterStoreSuite(t *testing.T, store Store, seedStale func(t *testing.T, snap WindowSnapshot, updatedAt int64), expire func(t *testing.T)) {
 	t.Helper()
 	ctx := context.Background()
 	saveStart := time.Now().Unix()
@@ -43,7 +45,7 @@ func runCounterStoreSuite(t *testing.T, store Store, seedStale func(t *testing.T
 	}
 	loaded := func(t *testing.T, step string) map[string]WindowSnapshot {
 		t.Helper()
-		got, err := store.LoadCounters(ctx, 0)
+		got, err := store.LoadCounters(ctx, 0, "")
 		require.NoError(t, err, "LoadCounters %s: %v", step, err)
 
 		byPartition := make(map[string]WindowSnapshot, len(got))
@@ -57,7 +59,7 @@ func runCounterStoreSuite(t *testing.T, store Store, seedStale func(t *testing.T
 	// gauges returns the in-flight rows, which loaded leaves out.
 	gauges := func(t *testing.T) []WindowSnapshot {
 		t.Helper()
-		rows, err := store.LoadCounters(ctx, 0)
+		rows, err := store.LoadCounters(ctx, 0, "")
 		require.NoError(t, err)
 		var out []WindowSnapshot
 		for _, row := range rows {
@@ -89,15 +91,23 @@ func runCounterStoreSuite(t *testing.T, store Store, seedStale func(t *testing.T
 		PeriodSeconds: PeriodHourSeconds, Writer: "writer-a",
 		RequestsWindowStart: 1700000000, RequestsCurrent: 5,
 	}, saveStart-60)
-	recent, err := store.LoadCounters(ctx, saveStart)
+	recent, err := store.LoadCounters(ctx, saveStart, "")
 	require.NoError(t, err)
 	require.ElementsMatch(t, live, unstamped(recent))
-	older, err := store.LoadCounters(ctx, saveStart-60)
+	older, err := store.LoadCounters(ctx, saveStart-60, "")
 	require.NoError(t, err)
 	require.Len(t, older, 3)
-	none, err := store.LoadCounters(ctx, time.Now().Unix()+60)
+	none, err := store.LoadCounters(ctx, time.Now().Unix()+60, "")
 	require.NoError(t, err)
 	require.Empty(t, none)
+	// A load leaves out the excluded writer's rows: a replica reads only
+	// the others'.
+	others, err := store.LoadCounters(ctx, 0, "writer-a")
+	require.NoError(t, err)
+	require.Empty(t, others)
+	others, err = store.LoadCounters(ctx, saveStart, "writer-b")
+	require.NoError(t, err)
+	require.ElementsMatch(t, live, unstamped(others))
 	// Omitting a row does not delete it: it stays restorable until it goes
 	// two periods without a write.
 	err = store.SaveCounters(ctx, live[:1])
@@ -121,21 +131,33 @@ func runCounterStoreSuite(t *testing.T, store Store, seedStale func(t *testing.T
 	gone.Writer = "writer-gone"
 	seedStale(t, gone, time.Now().Unix()-inFlightRowRetention-60)
 	require.NoError(t, store.SaveCounters(ctx, live))
+	require.Len(t, gauges(t), 3, "a save deletes nothing")
+	expire(t)
 	require.ElementsMatch(t, []WindowSnapshot{inFlight, idle}, gauges(t))
 	// A reset leaves in-flight rows alone: they hold slots live requests
 	// still take, not counts, and the writer keeps them in memory too.
 	require.NoError(t, store.ResetCounter(ctx, ScopeProvider, "openai", PeriodConcurrent))
 	require.ElementsMatch(t, []WindowSnapshot{inFlight, idle}, gauges(t), "a reset keeps in-flight rows")
 
-	// Two periods without a write makes it collectable by the next save.
+	// Two periods without a write makes a row collectable; one within them
+	// stays.
 	seedStale(t, WindowSnapshot{
-		Scope: string(ScopeUserPath), Subject: "/gone", PeriodSeconds: PeriodHourSeconds,
+		Scope: string(ScopeUserPath), Subject: "/gone", Partition: "/gone/x", PeriodSeconds: PeriodHourSeconds,
 		RequestsCurrent: 4,
 	}, time.Now().Unix()-3*PeriodHourSeconds)
+	seedStale(t, WindowSnapshot{
+		Scope: string(ScopeUserPath), Subject: "/quiet", Partition: "/quiet/x", PeriodSeconds: PeriodHourSeconds,
+		RequestsCurrent: 2,
+	}, time.Now().Unix()-PeriodHourSeconds)
 	err = store.SaveCounters(ctx, live)
 	require.NoError(t, err)
+	require.Len(t, loaded(t, "before collection"), 4, "a save deletes nothing")
+	expire(t)
 	got = loaded(t, "after collection")
-	require.Len(t, got, 2)
+	require.Len(t, got, 3)
+	require.Contains(t, got, "/quiet/x", "a row within its retention stays")
+	require.NotContains(t, got, "/gone/x")
+	require.NoError(t, store.ResetCounter(ctx, ScopeUserPath, "/quiet", PeriodHourSeconds))
 	// A second writer saving the same keys gets rows of its own: neither
 	// replica overwrites the other's.
 	peer := make([]WindowSnapshot, len(live))
@@ -146,7 +168,7 @@ func runCounterStoreSuite(t *testing.T, store Store, seedStale func(t *testing.T
 	}
 	err = store.SaveCounters(ctx, peer)
 	require.NoError(t, err)
-	allRows, err := store.LoadCounters(ctx, 0)
+	allRows, err := store.LoadCounters(ctx, 0, "")
 	require.NoError(t, err)
 	var windows []WindowSnapshot
 	for _, row := range unstamped(allRows) {
@@ -200,4 +222,29 @@ func epochs(t *testing.T, store Store) map[string]string {
 		bySubject[rule.Subject] = rule.CounterEpoch
 	}
 	return bySubject
+}
+
+// counterBatchSizes straddle SQLite's 66 rows per statement, so a save takes
+// one statement, two, and several.
+var counterBatchSizes = []int{1, 70, 500}
+
+// runCounterBatchSuite saves n snapshots in one call, twice, and checks that
+// every row is written and then updated in place.
+func runCounterBatchSuite(t *testing.T, store Store, n int) {
+	t.Helper()
+	ctx := context.Background()
+	snapshots := benchSnapshots("writer-a", n)
+	require.NoError(t, store.SaveCounters(ctx, snapshots))
+	rows, err := store.LoadCounters(ctx, 0, "")
+	require.NoError(t, err)
+	require.ElementsMatch(t, snapshots, unstamped(rows))
+
+	for i := range snapshots {
+		snapshots[i].RequestsCurrent += int64(i)
+		snapshots[i].TokensPrevious = int64(i)
+	}
+	require.NoError(t, store.SaveCounters(ctx, snapshots))
+	rows, err = store.LoadCounters(ctx, 0, "")
+	require.NoError(t, err)
+	require.ElementsMatch(t, snapshots, unstamped(rows))
 }

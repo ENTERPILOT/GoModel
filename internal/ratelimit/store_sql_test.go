@@ -2,11 +2,13 @@ package ratelimit
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -265,13 +267,122 @@ func TestSQLStoreCounterRoundTrip(t *testing.T) {
 	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
 		runCounterStoreSuite(t, store, func(t *testing.T, snap WindowSnapshot, updatedAt int64) {
 			t.Helper()
-			_, err := store.db.Exec(context.Background(), upsertCounterSQL,
-				snap.Scope, snap.Subject, snap.Partition, snap.PeriodSeconds, snap.Writer, snap.Epoch,
-				snap.RequestsWindowStart, snap.RequestsCurrent, snap.RequestsPrevious,
-				snap.TokensWindowStart, snap.TokensCurrent, snap.TokensPrevious, snap.InFlight, updatedAt,
-			)
+			query, args := buildCounterUpsert([]WindowSnapshot{snap}, updatedAt)
+			_, err := store.db.Exec(context.Background(), query, args...)
 			require.NoError(t, err)
+		}, func(t *testing.T) {
+			t.Helper()
+			require.NoError(t, store.PruneCounters(context.Background()))
 		})
+	})
+}
+
+func TestSQLStoreSavesCounterBatches(t *testing.T) {
+	for _, n := range counterBatchSizes {
+		t.Run(strconv.Itoa(n), func(t *testing.T) {
+			runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+				runCounterBatchSuite(t, store, n)
+			})
+		})
+	}
+}
+
+// TestSQLStorePruneUsesExpiresAtIndex keeps the prune that every replica
+// runs off a full table scan.
+func TestSQLStorePruneUsesExpiresAtIndex(t *testing.T) {
+	ctx := context.Background()
+	db := sqlxtest.NewSQLite(t)
+	_, err := NewSQLStore(ctx, db)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name  string
+		query string
+		args  []any
+	}{
+		{"expired", pruneCountersSQL, []any{int64(1700000000)}},
+		{"legacy", pruneLegacyCountersSQL, []any{PeriodConcurrent, inFlightRowRetention, int64(1700000000)}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rows, err := db.Query(ctx, `EXPLAIN QUERY PLAN `+tc.query, tc.args...)
+			require.NoError(t, err)
+			defer rows.Close()
+			var plan []string
+			for rows.Next() {
+				var id, parent, unused int
+				var detail string
+				require.NoError(t, rows.Scan(&id, &parent, &unused, &detail))
+				plan = append(plan, detail)
+			}
+			require.NoError(t, rows.Err())
+			require.Len(t, plan, 1)
+			assert.Contains(t, plan[0], "SEARCH rate_limit_window_snapshots USING")
+			assert.Contains(t, plan[0], "INDEX idx_rate_limit_window_snapshots_expires_at (expires_at")
+		})
+	}
+}
+
+// TestSQLStoreMigratesRowsWithoutExpiresAt starts from a table as releases
+// before expires_at left it, holding rows they saved: the store adds the
+// column and its index, and the prune collects those rows on their old
+// bounds.
+func TestSQLStoreMigratesRowsWithoutExpiresAt(t *testing.T) {
+	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+		ctx := context.Background()
+		_, err := store.db.Exec(ctx, `DROP INDEX idx_rate_limit_window_snapshots_expires_at`)
+		require.NoError(t, err)
+		_, err = store.db.Exec(ctx, `ALTER TABLE rate_limit_window_snapshots DROP COLUMN expires_at`)
+		require.NoError(t, err)
+
+		now := time.Now().Unix()
+		rows := []struct {
+			partition string
+			period    int64
+			updatedAt int64
+			kept      bool
+		}{
+			{"/team/stale", PeriodHourSeconds, now - 3*PeriodHourSeconds, false},
+			{"/team/live", PeriodHourSeconds, now - PeriodHourSeconds, true},
+			{"/team/gone", PeriodConcurrent, now - inFlightRowRetention - 60, false},
+			{"/team/idle", PeriodConcurrent, now - PeriodHourSeconds, true},
+		}
+		var kept []string
+		for _, row := range rows {
+			_, err := store.db.Exec(ctx, `
+				INSERT INTO rate_limit_window_snapshots (scope, subject, partition, period_seconds, writer, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?)
+			`, ScopeUserPath, "/team", row.partition, row.period, "old-replica", row.updatedAt)
+			require.NoError(t, err)
+			if row.kept {
+				kept = append(kept, row.partition)
+			}
+		}
+
+		migrated, err := NewSQLStore(ctx, store.db)
+		require.NoError(t, err)
+		columns, err := tableColumns(ctx, store.db, "rate_limit_window_snapshots")
+		require.NoError(t, err)
+		require.True(t, columns["expires_at"])
+
+		require.NoError(t, migrated.PruneCounters(ctx))
+		loaded, err := migrated.LoadCounters(ctx, 0, "")
+		require.NoError(t, err)
+		var partitions []string
+		for _, row := range loaded {
+			partitions = append(partitions, row.Partition)
+		}
+		assert.ElementsMatch(t, kept, partitions)
+
+		// The next save stamps the row's expiry.
+		snap := WindowSnapshot{Scope: string(ScopeUserPath), Subject: "/team", Partition: "/team/live", PeriodSeconds: PeriodHourSeconds, Writer: "old-replica"}
+		require.NoError(t, migrated.SaveCounters(ctx, []WindowSnapshot{snap}))
+		var updatedAt, expiresAt int64
+		err = store.db.QueryRow(ctx, `
+			SELECT updated_at, expires_at FROM rate_limit_window_snapshots WHERE partition = ?
+		`, "/team/live").Scan(&updatedAt, &expiresAt)
+		require.NoError(t, err)
+		assert.Equal(t, updatedAt+2*PeriodHourSeconds, expiresAt)
 	})
 }
 
@@ -291,13 +402,14 @@ func TestSQLStoreLoadCountersSkipsMalformedRow(t *testing.T) {
 	}
 	err = store.SaveCounters(ctx, []WindowSnapshot{good})
 	require.NoError(t, err)
-	_, err = db.Exec(ctx, upsertCounterSQL,
-		string(ScopeUserPath), "/broken", "", PeriodHourSeconds, "w1", "",
-		0, "not-a-number", 0, 0, 0, 0, 0, time.Now().Unix(),
-	)
+	query, args := buildCounterUpsert([]WindowSnapshot{{
+		Scope: string(ScopeUserPath), Subject: "/broken", PeriodSeconds: PeriodHourSeconds, Writer: "w1",
+	}}, time.Now().Unix())
+	args[7] = "not-a-number" // requests_current
+	_, err = db.Exec(ctx, query, args...)
 	require.NoError(t, err)
 
-	got, err := store.LoadCounters(ctx, 0)
+	got, err := store.LoadCounters(ctx, 0, "")
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	require.Equal(t, good, unstamped(got)[0])
@@ -353,7 +465,7 @@ func TestSQLStoreImportsLegacyCounters(t *testing.T) {
 
 		store, err := NewSQLStore(ctx, db)
 		require.NoError(t, err)
-		got, err := store.LoadCounters(ctx, 0)
+		got, err := store.LoadCounters(ctx, 0, "")
 		require.NoError(t, err)
 		require.Equal(t, []WindowSnapshot{legacy}, unstamped(got), "the legacy row loads under the empty writer")
 		var remaining int64
@@ -364,7 +476,7 @@ func TestSQLStoreImportsLegacyCounters(t *testing.T) {
 		// Re-opening imports nothing new and keeps the imported row.
 		_, err = NewSQLStore(ctx, db)
 		require.NoError(t, err)
-		got, err = store.LoadCounters(ctx, 0)
+		got, err = store.LoadCounters(ctx, 0, "")
 		require.NoError(t, err)
 		require.Equal(t, []WindowSnapshot{legacy}, unstamped(got))
 
@@ -378,7 +490,7 @@ func TestSQLStoreImportsLegacyCounters(t *testing.T) {
 		require.NoError(t, err)
 		store, err = NewSQLStore(ctx, db)
 		require.NoError(t, err)
-		got, err = store.LoadCounters(ctx, 0)
+		got, err = store.LoadCounters(ctx, 0, "")
 		require.NoError(t, err)
 		require.Len(t, got, 1)
 		require.Equal(t, int64(7), got[0].RequestsCurrent)
@@ -394,7 +506,7 @@ func TestSQLStoreImportsLegacyCounters(t *testing.T) {
 		require.NoError(t, err)
 		store, err = NewSQLStore(ctx, db)
 		require.NoError(t, err)
-		got, err = store.LoadCounters(ctx, 0)
+		got, err = store.LoadCounters(ctx, 0, "")
 		require.NoError(t, err)
 		require.Empty(t, got)
 	})
@@ -484,7 +596,7 @@ func TestSQLStoreLegacyImportCannotUndoConcurrentReset(t *testing.T) {
 		require.NoError(t, <-resetDone)
 		require.NoError(t, <-importDone)
 
-		got, err := store.LoadCounters(ctx, 0)
+		got, err := store.LoadCounters(ctx, 0, "")
 		require.NoError(t, err)
 		require.Empty(t, got, "the import must not bring back the count the reset deleted")
 	})
