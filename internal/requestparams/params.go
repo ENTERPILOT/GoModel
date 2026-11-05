@@ -311,8 +311,9 @@ func validateTyped(field, key string, raw json.RawMessage) error {
 		var v string
 		err = json.Unmarshal(raw, &v)
 	case "response_format", "text":
-		// response_format is translated into text.format on the Responses
-		// API, which needs its type; text merges member by member.
+		// Both must be objects. response_format applies on chat only (the
+		// Responses API skips it unless forced null) and needs a type; text
+		// applies on the Responses API as one key, merged one level deep.
 		var v map[string]json.RawMessage
 		if err = json.Unmarshal(raw, &v); err == nil && key == "response_format" {
 			err = validateResponseFormat(v)

@@ -157,7 +157,8 @@ Key verwerfen, den er nicht übersetzt (der Anthropic-Adapter verwirft
 reinen Chat-Keys `seed`, `stop`, `n`, `frequency_penalty`,
 `presence_penalty`, `logit_bias`, `logprobs`, `modalities`, `audio`,
 `prediction`, `web_search_options`, `response_format` und `verbosity`
-übersprungen; ein Ausgabeformat oder die Verbosity setzen Sie dort über
+übersprungen (ein erzwungenes `null` entfernt den Wert des Clients trotzdem);
+ein Ausgabeformat oder die Verbosity setzen Sie dort über
 `text`, etwa `{"format": {"type": "json_object"}}`. In Chat Completions werden
 die reinen Responses-Keys `text`, `include`, `truncation`, `max_tool_calls`,
 `background` und `context_management` übersprungen.

@@ -143,7 +143,7 @@ adapter drops `top_k`), and the upstream may reject one. On the Responses API,
 the Chat-only keys `seed`, `stop`, `n`, `frequency_penalty`,
 `presence_penalty`, `logit_bias`, `logprobs`, `modalities`, `audio`,
 `prediction`, `web_search_options`, `response_format`, and `verbosity` are
-skipped; to set an output format or verbosity there, configure `text`, for
+skipped (a forced `null` still removes the client's value); to set an output format or verbosity there, configure `text`, for
 example `{"format": {"type": "json_object"}}`. On Chat Completions, the
 Responses-only keys `text`, `include`, `truncation`, `max_tool_calls`,
 `background`, and `context_management` are skipped.

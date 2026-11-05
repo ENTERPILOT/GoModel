@@ -145,7 +145,7 @@ tłumaczy (adapter Anthropic pomija `top_k`), a upstream może go odrzucić. W
 Responses API pomijane są klucze dostępne tylko w Chat: `seed`, `stop`, `n`,
 `frequency_penalty`, `presence_penalty`, `logit_bias`, `logprobs`,
 `modalities`, `audio`, `prediction`, `web_search_options`, `response_format` i
-`verbosity`; format wyjścia lub verbosity ustawisz tam przez `text`, np.
+`verbosity` (wymuszone `null` nadal usuwa wartość klienta); format wyjścia lub verbosity ustawisz tam przez `text`, np.
 `{"format": {"type": "json_object"}}`. W Chat Completions pomijane są klucze
 dostępne tylko w Responses: `text`, `include`, `truncation`,
 `max_tool_calls`, `background` i `context_management`.

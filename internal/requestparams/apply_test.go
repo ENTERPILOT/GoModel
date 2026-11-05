@@ -283,6 +283,12 @@ func TestApplyResponses(t *testing.T) {
 			want:     `{"model":"m","input":"hi","top_k":20}`,
 		},
 		{
+			name:   "a forced text object wins over the client's members, chat format keys still skipped",
+			body:   `{"model":"m","input":"hi","text":{"format":{"type":"text"},"verbosity":"high"}}`,
+			params: Set{"text": raw(`{"format":{"type":"json_object"}}`), "response_format": raw(`{"type":"json_schema","json_schema":{"name":"s"}}`), "verbosity": raw(`"low"`)},
+			want:   `{"model":"m","input":"hi","text":{"format":{"type":"json_object"},"verbosity":"high"}}`,
+		},
+		{
 			name:   "a forced null still strips a client response_format",
 			body:   `{"model":"m","input":"hi","response_format":{"type":"json_object"},"text":{"verbosity":"low"}}`,
 			params: Set{"response_format": nil},
