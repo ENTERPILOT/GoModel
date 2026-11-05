@@ -191,8 +191,8 @@ func TestComputeParamsHash_StreamIncludeUsageChangesHash(t *testing.T) {
 		},
 	}
 
-	first := computeParamsHash(base, "/v1/chat/completions", plan, "", "")
-	second := computeParamsHash(withUsage, "/v1/chat/completions", plan, "", "")
+	first := computeParamsHash(base, "/v1/chat/completions", plan, "", "", false)
+	second := computeParamsHash(withUsage, "/v1/chat/completions", plan, "", "", false)
 
 	require.NotEqual(t, second, first)
 }
@@ -208,8 +208,8 @@ func TestComputeParamsHash_StreamModeChangesHash(t *testing.T) {
 		},
 	}
 
-	first := computeParamsHash(base, "/v1/chat/completions", plan, "", "")
-	second := computeParamsHash(streaming, "/v1/chat/completions", plan, "", "")
+	first := computeParamsHash(base, "/v1/chat/completions", plan, "", "", false)
+	second := computeParamsHash(streaming, "/v1/chat/completions", plan, "", "", false)
 
 	require.NotEqual(t, second, first)
 }

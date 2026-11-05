@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
 )
@@ -59,6 +60,37 @@ func TestMessages_NonStreaming(t *testing.T) {
 	require.Len(t, msgs, 2)
 	require.Equal(t, "system", msgs[0].Role)
 	require.Equal(t, "user", msgs[1].Role)
+}
+
+// Extensions that requested response feedback must hear about a translated
+// (non-native) non-streaming response too, as they do on chat completions.
+func TestMessages_TranslatedNonStreamingNotifiesFeedbackObservers(t *testing.T) {
+	provider := &capturingProvider{
+		supportedModels: []string{"claude-test"},
+		response: &core.ChatResponse{
+			ID:      "resp-1",
+			Object:  "chat.completion",
+			Model:   "claude-test",
+			Choices: []core.Choice{{Message: core.ResponseMessage{Role: "assistant", Content: "Hello back"}, FinishReason: "stop"}},
+			Usage: core.Usage{
+				PromptTokens: 9, CompletionTokens: 3, TotalTokens: 12,
+				PromptTokensDetails: &core.PromptTokensDetails{CachedTokens: 6},
+			},
+		},
+	}
+
+	handler := NewHandler(provider, nil, nil, nil)
+
+	c, rec := echotest.Post(t, "/v1/messages", `{"model":"claude-test","max_tokens":64,"messages":[{"role":"user","content":"Hi"}]}`)
+	observer := &recordingFeedbackObserver{}
+	setResponseFeedbackObservers(c, []ext.ResponseFeedbackObserver{observer})
+	require.NoError(t, handler.Messages(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, provider.capturedChatReq, "the request was not translated")
+	require.Equal(t, 1, observer.calls)
+	assert.True(t, observer.observed)
+	assert.Equal(t, 9, observer.input)
+	assert.Equal(t, 6, observer.read)
 }
 
 func TestMessages_Streaming(t *testing.T) {

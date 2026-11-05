@@ -37,6 +37,8 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 		ProviderName:     "fireworks",
 		BaseURL:          providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
 		AdaptChatRequest: adaptChatRequest,
+		// Fireworks documents the allowed_tools tool_choice on chat completions.
+		ForwardAllowedTools: true,
 	})}
 }
 

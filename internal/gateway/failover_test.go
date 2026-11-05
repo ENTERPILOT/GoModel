@@ -162,6 +162,10 @@ func (g overBudgetGate) ProviderWithinBudget(_ context.Context, providerName str
 	return !g.exhausted[providerName]
 }
 
+func (g overBudgetGate) FailoverWithinBudget(ctx context.Context, _, target string) bool {
+	return g.ProviderWithinBudget(ctx, target)
+}
+
 // A failover target whose provider budget is spent is skipped on both sweeps,
 // so failover can never route around an exhausted provider budget.
 func TestTryFailoverSkipsOverBudgetProviders(t *testing.T) {
@@ -208,6 +212,49 @@ func TestTryFailoverSkipsOverBudgetProviders(t *testing.T) {
 		require.Equal(t, []string{"anthropic/claude"}, attempted)
 		require.Equal(t, "anthropic/claude", meta.FailoverModel)
 	})
+}
+
+// consumerBudgetGate refuses a billable target after a non-billable primary,
+// the way the budget service does once the user-path budget is spent.
+type consumerBudgetGate struct {
+	nonBillable map[string]bool
+	asked       [][2]string
+}
+
+func (g *consumerBudgetGate) ProviderWithinBudget(context.Context, string) bool { return true }
+
+func (g *consumerBudgetGate) FailoverWithinBudget(_ context.Context, primary, target string) bool {
+	g.asked = append(g.asked, [2]string{primary, target})
+	return !g.nonBillable[primary] || g.nonBillable[target]
+}
+
+// The failover sweep hands the gate the primary provider, so the consumer
+// budgets admission skipped for a non-billable primary gate the billable
+// targets, while another non-billable target stays open.
+func TestTryFailoverGatesTargetsOnConsumerBudgetsAfterNonBillablePrimary(t *testing.T) {
+	o, workflow := failoverTestFixture()
+	o.failoverResolver = stubFailoverResolver{selectors: []core.ModelSelector{
+		{Provider: "openai", Model: "gpt-5"},
+		{Provider: "byok-backup", Model: "gpt-5"},
+	}}
+	o.provider = namedRouteProvider{}
+	gate := &consumerBudgetGate{nonBillable: map[string]bool{"byok": true, "byok-backup": true}}
+	o.budgetGate = gate
+	workflow.Resolution.ProviderName = "byok"
+
+	primaryErr := core.NewProviderError("byok", http.StatusInternalServerError, "primary boom", nil)
+	var attempted []string
+	call := func(selector core.ModelSelector, _, _ string) (string, string, error) {
+		attempted = append(attempted, selector.QualifiedModel())
+		return "ok", "openai", nil
+	}
+
+	_, meta, err := tryFailoverResponse(context.Background(), o, workflow, "byok/gpt-5", "byok", primaryErr, nil, call)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"byok-backup/gpt-5"}, attempted)
+	require.Equal(t, "byok-backup/gpt-5", meta.FailoverModel)
+	require.Equal(t, [][2]string{{"byok", "openai"}, {"byok", "byok-backup"}}, gate.asked)
 }
 
 // A workflow with budgets disabled skips budget checks at admission, so

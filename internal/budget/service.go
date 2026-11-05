@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // ErrUnavailable indicates a budget service was used without an initialized store.
@@ -101,6 +104,28 @@ type Service struct {
 
 	// changed is called after every successful write; see SetChangeNotifier.
 	changed func(context.Context)
+
+	// providerBillable reports whether a provider's cost is owed by the
+	// caller; see SetProviderBillable. nil treats every provider as billable.
+	providerBillable func(providerName string) bool
+}
+
+// SetProviderBillable installs the lookup that tells a non-billable provider
+// (billable: false) from a billable one. A request routed to a non-billable
+// provider is checked against provider budgets only: its cost is not owed
+// by the caller, so user-path and label budgets neither gate nor count it.
+// Call it before serving.
+func (s *Service) SetProviderBillable(fn func(providerName string) bool) {
+	if s != nil {
+		s.providerBillable = fn
+	}
+}
+
+// billable reports whether the routed provider's cost is owed by the caller.
+// An unknown route (no provider yet) is billable: consumer budgets apply.
+func (s *Service) billable(providerName string) bool {
+	providerName = strings.TrimSpace(providerName)
+	return s.providerBillable == nil || providerName == "" || s.providerBillable(providerName)
 }
 
 // SetChangeNotifier installs fn, called after every successful write of the
@@ -429,8 +454,10 @@ func (s *Service) CheckWithResults(ctx context.Context, subjects Subjects, now t
 // CheckCacheHit evaluates the budgets a response-cache hit spends against
 // before the cached response is replayed. Only billed user-path and label
 // budgets qualify, and only while cache hits are billed: provider cost never
-// counts cache hits, and a hit is not routed to any provider. It returns
-// without a store round trip when no such budget exists.
+// counts cache hits, and a hit is not routed to any provider. subjects.Provider
+// names the provider the request resolved to, so a hit of a billable: false
+// provider is admitted like the request itself would be. It returns without a
+// store round trip when no such budget exists.
 func (s *Service) CheckCacheHit(ctx context.Context, subjects Subjects, now time.Time) error {
 	if s == nil || s.store == nil || !s.billedCacheHits {
 		return nil
@@ -441,6 +468,13 @@ func (s *Service) CheckCacheHit(ctx context.Context, subjects Subjects, now time
 	if !billed {
 		return nil
 	}
+	if !s.billable(subjects.Provider) {
+		// Consumer budgets are all a cache hit can spend against, and the
+		// caller owes nothing for this provider, cache hits included.
+		return nil
+	}
+	// Provider budgets never count cache hits; the provider was only needed
+	// for the exemption above.
 	subjects.Provider = ""
 	matching, settings, now, err := s.match(&subjects, now)
 	if err != nil {
@@ -460,6 +494,45 @@ func (s *Service) CheckCacheHit(ctx context.Context, subjects Subjects, now time
 		}
 	}
 	return nil
+}
+
+// FailoverWithinBudget reports whether a request admitted on the primary
+// provider may fail over to target: no provider budget of target is
+// exhausted and, when the primary was not billable, no user-path or label
+// budget covering the request is either. Admission skips consumer budgets
+// for a non-billable primary, so the first billable target has to pass
+// them; after a billable primary they already passed, and switching targets
+// cannot relieve them, so they are not asked again.
+func (s *Service) FailoverWithinBudget(ctx context.Context, primary, target string) bool {
+	if !s.ProviderWithinBudget(ctx, target) {
+		return false
+	}
+	if s == nil || s.store == nil || s.billable(primary) || !s.billable(target) {
+		return true
+	}
+	userPath := core.UserPathFromContext(ctx)
+	if userPath == "" {
+		userPath = "/"
+	}
+	subjects := Subjects{UserPath: userPath, Labels: core.RequestLabelsFromContext(ctx), Provider: target}
+	matching, settings, now, err := s.match(&subjects, time.Now().UTC())
+	if err != nil {
+		return false
+	}
+	matching = slices.DeleteFunc(matching, func(b Budget) bool { return b.Scope == ScopeProvider })
+	if len(matching) == 0 {
+		return true
+	}
+	results, err := s.evaluate(ctx, matching, now, settings)
+	if err != nil {
+		return false
+	}
+	for _, result := range results {
+		if result.HasUsage && result.Spent >= result.Budget.Amount {
+			return false
+		}
+	}
+	return true
 }
 
 // ProviderWithinBudget reports whether no provider budget for providerName is
@@ -523,9 +596,13 @@ func (s *Service) match(subjects *Subjects, now time.Time) ([]Budget, Settings, 
 		return nil, settings, now, err
 	}
 	resolved := Subjects{UserPath: userPath, Labels: subjects.Labels, Provider: subjects.Provider}
+	consumer := s.billable(resolved.Provider)
 
 	matching := make([]Budget, 0, len(budgets))
 	for _, budget := range budgets {
+		if !consumer && budget.Scope != ScopeProvider {
+			continue
+		}
 		if matched, ok := budget.resolve(resolved); ok {
 			matching = append(matching, matched)
 		}
