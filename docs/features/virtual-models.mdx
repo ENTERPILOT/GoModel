@@ -135,11 +135,15 @@ A token limit is one limit in any spelling: `max_tokens`,
 
 One parameter set serves every API, so the keys listed here are skipped on
 the API that lacks them, and the token limit, `response_format`, and
-`verbosity` are mapped as described below. Every other key is forwarded
-unchanged, and the upstream may reject it. On the Responses API, the Chat-only keys `seed`, `stop`, `n`,
+`verbosity` are mapped as described below. Every other key reaches the
+provider adapter unchanged and is handled like a client's: the adapter may drop
+a key it does not translate (the Anthropic adapter drops `top_k`), and the upstream may reject
+one. On the Responses API, the Chat-only keys `seed`, `stop`, `n`,
 `frequency_penalty`, `presence_penalty`, `logit_bias`, `logprobs`,
 `modalities`, `audio`, `prediction`, and `web_search_options` are skipped, and
-`response_format` and `verbosity` become `text.format` and `text.verbosity`. On
+`response_format` and `verbosity` become `text.format` and `text.verbosity`
+(a `response_format` type the Responses API lacks, such as `regex`, is
+skipped). On
 Chat Completions, the Responses-only keys `text`, `include`, `truncation`,
 `max_tool_calls`, `background`, and `context_management` are skipped.
 

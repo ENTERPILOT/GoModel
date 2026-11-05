@@ -48,6 +48,8 @@ func TestNormalize(t *testing.T) {
 		{name: "stop elements must be strings", set: Set{"stop": raw(`["a",null]`)}, wantErr: "element 1 must be a string"},
 		{name: "n must be at least 1", set: Set{"n": raw("0")}, wantErr: `"n" has the wrong type`},
 		{name: "response_format needs a type", set: Set{"response_format": raw(`{"json_schema":{}}`)}, wantErr: `"response_format" has the wrong type`},
+		{name: "json_schema must be an object", set: Set{"response_format": raw(`{"type":"json_schema","json_schema":"bad"}`)}, wantErr: "json_schema must be an object"},
+		{name: "json_schema format ok", set: Set{"response_format": raw(`{"type":"json_schema","json_schema":{"name":"s"}}`)}, want: Set{"response_format": raw(`{"type":"json_schema","json_schema":{"name":"s"}}`)}},
 		{name: "verbosity must be a string", set: Set{"verbosity": raw("1")}, wantErr: `"verbosity" has the wrong type`},
 		{name: "text must be an object", set: Set{"text": raw(`"low"`)}, wantErr: `"text" has the wrong type`},
 		{name: "two spellings of the token limit", set: Set{"max_tokens": raw("1"), "max_output_tokens": raw("2")}, wantErr: `"max_output_tokens" and "max_tokens" set the same token limit`},

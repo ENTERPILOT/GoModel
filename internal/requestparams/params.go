@@ -311,10 +311,7 @@ func validateTyped(field, key string, raw json.RawMessage) error {
 		// API, which needs its type; text merges member by member.
 		var v map[string]json.RawMessage
 		if err = json.Unmarshal(raw, &v); err == nil && key == "response_format" {
-			var formatType string
-			if json.Unmarshal(v["type"], &formatType) != nil || formatType == "" {
-				err = fmt.Errorf("must be an object with a string type")
-			}
+			err = validateResponseFormat(v)
 		}
 	case "parallel_tool_calls", "store", "logprobs":
 		var v bool
@@ -351,6 +348,24 @@ func validateTyped(field, key string, raw json.RawMessage) error {
 	}
 	if err != nil {
 		return validation.NewError(fmt.Sprintf("%s: parameter %q has the wrong type: %v", field, key, err), nil)
+	}
+	return nil
+}
+
+// validateResponseFormat checks a response_format object: a string type,
+// and for json_schema a json_schema object, so a forced schema cannot be
+// skipped at request time for being malformed.
+func validateResponseFormat(format map[string]json.RawMessage) error {
+	var formatType string
+	if json.Unmarshal(format["type"], &formatType) != nil || formatType == "" {
+		return fmt.Errorf("must be an object with a string type")
+	}
+	if formatType != "json_schema" {
+		return nil
+	}
+	var schema map[string]json.RawMessage
+	if json.Unmarshal(format["json_schema"], &schema) != nil || schema == nil {
+		return fmt.Errorf("json_schema must be an object")
 	}
 	return nil
 }
