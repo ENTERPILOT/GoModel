@@ -32,12 +32,16 @@ type StoredBatch struct {
 	OriginalInputFileID       string              `json:"original_input_file_id,omitempty"`
 	RewrittenInputFileID      string              `json:"rewritten_input_file_id,omitempty"`
 	RequestID                 string              `json:"request_id,omitempty"`
-	UserPath                  string              `json:"user_path,omitempty"`
-	SessionID                 string              `json:"session_id,omitempty"`
-	AuthKeyID                 string              `json:"auth_key_id,omitempty"`
-	WorkflowVersionID         string              `json:"workflow_version_id,omitempty"`
-	UsageEnabled              *bool               `json:"usage_enabled,omitempty"`
-	UsageLoggedAt             *time.Time          `json:"usage_logged_at,omitempty"`
+	// ProviderName is the configured provider instance the batch was sent to.
+	// Batch.Provider only carries its type, which is not enough to apply the
+	// instance's settings (billable, pricing overrides) to its usage rows.
+	ProviderName      string     `json:"provider_name,omitempty"`
+	UserPath          string     `json:"user_path,omitempty"`
+	SessionID         string     `json:"session_id,omitempty"`
+	AuthKeyID         string     `json:"auth_key_id,omitempty"`
+	WorkflowVersionID string     `json:"workflow_version_id,omitempty"`
+	UsageEnabled      *bool      `json:"usage_enabled,omitempty"`
+	UsageLoggedAt     *time.Time `json:"usage_logged_at,omitempty"`
 }
 
 // Store defines persistence operations for batch lifecycle APIs.

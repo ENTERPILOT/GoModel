@@ -263,6 +263,34 @@ func TestCredentialsService_DeleteUnregistersProvider(t *testing.T) {
 	assert.ErrorIs(t, err, ErrCredentialNotFound)
 }
 
+func TestCredentialsService_BillableFlagFollowsTheRow(t *testing.T) {
+	ctx := t.Context()
+	factory := newCredentialsTestFactory(t)
+	registry := NewModelRegistry()
+	store := newFakeCredentialStore()
+
+	svc, err := NewCredentialsService(ctx, factory, registry, store, nil, config.ResilienceConfig{}, nil)
+	require.NoError(t, err)
+
+	cred := ManagedProviderCredential{Name: "byok", Type: "test", APIKeys: []string{"sk-test"}, Enabled: true, Billable: new(false)}
+	require.NoError(t, svc.Upsert(ctx, cred))
+	assert.False(t, registry.ProviderBillable("byok"))
+
+	// An edit that leaves billable alone keeps the flag through the replacement.
+	cred.APIKeys = []string{"sk-rotated"}
+	require.NoError(t, svc.Upsert(ctx, cred))
+	assert.False(t, registry.ProviderBillable("byok"))
+
+	cred.Billable = new(true)
+	require.NoError(t, svc.Upsert(ctx, cred))
+	assert.True(t, registry.ProviderBillable("byok"))
+
+	cred.Billable = new(false)
+	require.NoError(t, svc.Upsert(ctx, cred))
+	require.NoError(t, svc.Delete(ctx, "byok"))
+	assert.True(t, registry.ProviderBillable("byok"), "a deleted provider leaves no flag behind")
+}
+
 func TestCredentialsService_DisablingUnregistersWithoutDeletingTheRow(t *testing.T) {
 	ctx := t.Context()
 	factory := newCredentialsTestFactory(t)

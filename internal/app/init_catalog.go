@@ -205,6 +205,20 @@ func (b *bootstrap) initPricing() error {
 		b.pricingResolver = app.pricingOverrides.Service
 	}
 
+	if err := b.wrapUsageLoggerForBilling(registry); err != nil {
+		return err
+	}
+	// Every usage writer takes the logger from here on. The billable tap is
+	// outermost so an entry served by a billable: false provider is marked
+	// before the markup tap bills it, at zero.
+	app.usage.Logger = usage.NewBillableTap(app.usage.Logger, registry.ProviderBillable)
+	return nil
+}
+
+// wrapUsageLoggerForBilling wraps the usage logger so every entry carries its
+// billed cost, response-cache hits included, when markups are enabled.
+func (b *bootstrap) wrapUsageLoggerForBilling(registry *providers.ModelRegistry) error {
+	app := b.app
 	if !b.appCfg.Pricing.MarkupsEnabled {
 		if len(b.appCfg.Pricing.Markups) > 0 || len(b.appCfg.Pricing.UserPathMarkups) > 0 {
 			slog.Warn("pricing markups are set but markups are disabled; no billed cost is recorded",
@@ -212,9 +226,6 @@ func (b *bootstrap) initPricing() error {
 		}
 		return nil
 	}
-
-	// Every usage writer takes the logger from here on, so wrapping it once
-	// stamps the billed cost on all entries, response-cache hits included.
 	markupService, err := markups.New(b.appCfg.Pricing, registry, b.customerMarkupsEnabled)
 	if err != nil {
 		return fmt.Errorf("failed to initialize pricing markups: %w", err)

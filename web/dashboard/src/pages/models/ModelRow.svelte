@@ -3,6 +3,8 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
+  import HighlightText from "$lib/components/atoms/HighlightText.svelte";
+  import { modelsStore } from "$lib/stores/models.svelte.js";
   import { virtualModels } from "./virtualModels.svelte.js";
   import { virtualModelEditor } from "./virtualModelEditor.svelte.js";
   import { pricingOverrides } from "./pricingOverrides.svelte.js";
@@ -117,10 +119,10 @@ import {
             onclick={() => modelDetailsState.toggle(row)}
           >
             <Icon icon={ChevronRight} class="model-details-toggle-icon" />
-            <span class="mono font-size-md">{row.display_name}</span>
+            <span class="mono font-size-md"><HighlightText text={row.display_name} needle={modelsStore.filter} /></span>
           </button>
         {:else}
-          <span class="mono font-size-md">{row.display_name}</span>
+          <span class="mono font-size-md"><HighlightText text={row.display_name} needle={modelsStore.filter} /></span>
         {/if}
         {#if row.is_alias}
           <span class="model-kind-icon" role="img" aria-label={m.models_virtual_model()} title={m.models_virtual_model()}>
@@ -150,7 +152,7 @@ import {
       </div>
       {#if row.is_alias}
         <div class="model-name-secondary">
-          {m.models_targets()} <span class="mono font-size-md">{row.secondary_name}</span>
+          {m.models_targets()} <span class="mono font-size-md"><HighlightText text={row.secondary_name} needle={modelsStore.filter} /></span>
         </div>
       {/if}
       {#if !row.is_alias && row.masking_alias}

@@ -5,6 +5,7 @@
   // group header now, so this component no longer renders a per-row scope
   // badge.
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import HighlightText from "$lib/components/atoms/HighlightText.svelte";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import { rateLimits } from "./rateLimits.svelte.js";
   import { Activity, Pencil, RotateCcw, Timer, Trash2 } from "lucide";
@@ -24,7 +25,7 @@
                   ": " +
                   rateLimits.rateLimitSubject(item)}
               >
-                {rateLimits.rateLimitSubject(item)}
+                <HighlightText text={rateLimits.rateLimitSubject(item)} needle={rateLimits.rateLimitFilter} />
               </code>
               <div class="budget-row-period">
                 {#if item.per_child}
@@ -42,7 +43,7 @@
                       : Timer}
                     class="budget-period-icon"
                   />
-                  <span>{rateLimits.rateLimitPeriodLabel(item)}</span>
+                  <span><HighlightText text={rateLimits.rateLimitPeriodLabel(item)} needle={rateLimits.rateLimitFilter} /></span>
                 </span>
               </div>
               <div class="budget-row-controls">

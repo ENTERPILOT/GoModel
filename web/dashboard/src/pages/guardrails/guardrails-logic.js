@@ -4,6 +4,7 @@
 // virtual-model editor through $lib/utils/schemaFields.js.
 
 import * as m from "../../lib/paraglide/messages.js";
+import { filterFields } from "../../lib/utils/textMatch.js";
 import {
   cloneSchemaConfig,
   instanceSchemaFields,
@@ -162,24 +163,13 @@ export function guardrailEditForm(types, guardrail) {
 // filterGuardrails applies the free-text list filter across name, type,
 // user_path, description, and summary.
 export function filterGuardrails(guardrails, filter) {
-  if (!filter) {
-    return guardrails || [];
-  }
-  const needle = String(filter).toLowerCase();
-  return (guardrails || []).filter((guardrail) => {
-    const fields = [
-      guardrail.name,
-      guardrail.type,
-      guardrail.user_path,
-      guardrail.description,
-      guardrail.summary,
-    ];
-    return fields.some((value) =>
-      String(value || "")
-        .toLowerCase()
-        .includes(needle),
-    );
-  });
+  return filterFields(guardrails, filter, (guardrail) => [
+    guardrail.name,
+    guardrail.type,
+    guardrail.user_path,
+    guardrail.description,
+    guardrail.summary,
+  ]);
 }
 
 // guardrailTypeLabel returns the human label for a type.

@@ -96,8 +96,8 @@ Redis when several replicas should share discovery results and cache hits.
   Take that into account when ordering service startup.
 </Note>
 
-Redis does not coordinate rate limits or budgets. It is a cache, not a
-distributed lock.
+Redis does not coordinate rate limits or budgets: replicas share both through
+the database. Redis is a cache, not a distributed lock.
 
 ## Provider credentials
 
@@ -405,17 +405,58 @@ coordinate across instances.
 | [Usage and cost records](/features/cost-tracking) | Durable (database) | Aggregated correctly. |
 | Audit logs | Durable (database) | Complete across replicas. |
 | [SSO](/pro/sso) sign-out (Pro) | Durable (database) | A signed-out session is rejected on every replica within about 2 seconds. |
-| [Rate limits](/features/rate-limits) | In-memory, per instance | Effective limit is about `N x` the configured limit. Counters survive a restart, and a reset clears every replica. |
+| [Rate limits](/features/rate-limits) | In memory, shared through the database | Replicas enforce one limit together, approximately: each sees the others' counts within about two flush intervals. Counters survive a restart, and a reset clears every replica. |
 | Circuit breakers | In-memory, per process | Each replica learns an outage separately, so upstream sees up to `N x failure_threshold` failures before any breaker opens. |
 | [Session affinity](/features/session-keeping) pins | In-memory, per instance | Sessions stick per replica, not globally, unless the load balancer is sticky. |
-| Live log buffer | In-memory, per instance | A connected dashboard sees only that replica's live traffic, roughly `1/N` of it. History still comes from the database. |
-| MCP downstream sessions | In-memory, per instance | An `Mcp-Session-Id` from one replica returns 404 on another. [MCP](/features/mcp-gateway) clients need sticky sessions. |
+| [Live logs](/advanced/admin-endpoints#admin-dashboard) | Local events in memory, other replicas' from the database | A dashboard sees its own replica's requests instantly and every other replica's typically within 7 seconds, once they are persisted. See [live logs across replicas](#live-logs-across-replicas). |
+| MCP downstream sessions | Durable (database) | A session opened on one replica continues on any other, so [MCP](/features/mcp-gateway#sessions-across-replicas) clients need no sticky sessions. After a `DELETE`, every replica refuses its requests within about 2 seconds; an open `GET` stream is not closed early. A response stream in flight stays on the replica serving it. |
 | Provider request health | In-memory, per instance | Dashboard provider status reflects the replica that answered. |
 
-The one that surprises people is rate limits: they are an in-process control, so
-three replicas with a 100 rpm rule admit up to 300 rpm in aggregate. Size rules
-per replica, and use [budgets](/features/budgets) as the durable cross-instance
-control since they read from the shared database.
+The one that surprises people is rate limits: admission is in memory, so a
+replica learns the others' traffic only when it reads their saved counts, about
+once a second by default. Three replicas with a 100 rpm rule admit about 100
+rpm in aggregate, but can overshoot by about two seconds of the other replicas'
+traffic, and a crashed replica's concurrency slots stay taken for a few
+seconds. Do not rely on rate limits for a cap that must never be exceeded, such
+as one concurrent request across replicas, and use
+[budgets](/features/budgets) as the durable cross-instance control for spend. See
+[several replicas share one limit](/features/rate-limits#several-replicas-share-one-limit).
+`RATE_LIMITS_FLUSH_INTERVAL=0` stops replicas sharing counts after start, so
+together they can again admit up to about `N x` the limit.
+
+### Live logs across replicas
+
+A dashboard streams live logs from the replica it is connected to. That
+replica shows its own requests the moment they start, with in-flight and
+streaming previews. While at least one dashboard is connected, it also reads
+the audit and usage rows the other replicas persisted, every 2 seconds, and
+streams them into the same view. It adds no database writes: each replica
+stamps the batches it already writes with its own id, and with no dashboard
+open no replica reads anything.
+
+Requests served by another replica:
+
+- appear only once that replica has flushed them, so after up to
+  `LOGGING_FLUSH_INTERVAL` / `USAGE_FLUSH_INTERVAL` (default 5 seconds) plus
+  the 2-second poll, typically within 7 seconds; a write the database is slow
+  to finish shows up once it completes, so later than that;
+- appear as completed entries, with status, duration, model, provider, usage
+  and cost, but no in-flight or per-chunk streaming preview; bodies load from
+  the database when you expand the entry;
+- appear only if they were persisted. Audit entries and usage entries come
+  from separate features: a replica with audit logging off contributes no
+  audit entries, and one with usage tracking off no usage entries. The
+  replica your dashboard is connected to shows another replica's audit
+  entries only with audit logging on itself, and its usage entries only with
+  usage tracking on;
+- are slotted into the list by request time, below anything newer.
+
+Under heavy traffic, at most 200 audit and 200 usage entries from other
+replicas are streamed per poll, the newest first. The rest are still in the
+list after a refresh. A dashboard that reconnects, or a replica whose reads
+failed for a while, catches up on what the other replicas persisted in the
+meantime, up to 5 minutes back and within the same 200-entry limit per poll. Replica clocks should agree within a few
+seconds, which NTP gives you.
 
 ### Config changes reach every replica within seconds
 
@@ -431,7 +472,17 @@ This covers budgets (definitions, settings, and resets), rate limit rules and
 counter resets, provider credentials (add, edit, disable, delete), managed API
 keys (including revocation), user policies, virtual models, pricing and metadata overrides,
 tagging rules, guardrails, workflows, and MCP servers. A provider added on another replica
-starts routing once its model list has been fetched.
+starts routing once its model list has been fetched. A provider whose credentials
+change, with its type unchanged, keeps routing the models it already served,
+through the new credentials, while its model list is fetched again. The edit's
+configured models and model filter apply at once. A model removed from the
+configured list stops routing; if the upstream still lists it, it can be missing
+until the new list arrives. Once the new list arrives, models it no longer
+includes stop routing, except configured models in merge mode. If the fetch
+fails or returns no models while another provider is healthy, the previous
+models are kept as stale: requests that name them still route to the provider,
+but model listings and virtual-model load balancing leave them out. A provider
+whose type changes starts routing once its new model list has been fetched.
 
 A replica that fails to apply a change logs a warning once and retries on every
 poll until it applies. One exception: a stored provider that fails to build on a
@@ -568,7 +619,7 @@ if the file size matters.
   with SQLite, mount a volume and set `SQLITE_PATH`.
 - Declare providers in environment variables or `config.yaml`, with values from
   a secret manager.
-- Size rate limit rules per replica when running several replicas.
+- Keep replica clocks synchronized (NTP); shared concurrency limits rely on it.
 - Decide on `LOGGING_LOG_BODIES` and set retention windows deliberately.
 - Point readiness at `/health/ready` and set
   `terminationGracePeriodSeconds` above 30.
