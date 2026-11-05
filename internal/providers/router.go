@@ -39,6 +39,7 @@ type Router struct {
 type lookupCaps struct {
 	typeRegistry            providerTypeRegistry
 	nameRegistry            providerNameRegistry
+	instanceNamer           providerInstanceNamer
 	initialized             initializedLookup
 	typeLister              providerTypeLister
 	nameLister              providerNameLister
@@ -55,6 +56,7 @@ func resolveLookupCaps(lookup core.ModelLookup) lookupCaps {
 	var caps lookupCaps
 	caps.typeRegistry, _ = lookup.(providerTypeRegistry)
 	caps.nameRegistry, _ = lookup.(providerNameRegistry)
+	caps.instanceNamer, _ = lookup.(providerInstanceNamer)
 	caps.initialized, _ = lookup.(initializedLookup)
 	caps.typeLister, _ = lookup.(providerTypeLister)
 	caps.nameLister, _ = lookup.(providerNameLister)
@@ -70,6 +72,12 @@ func resolveLookupCaps(lookup core.ModelLookup) lookupCaps {
 
 type providerTypeRegistry interface {
 	ProviderByType(providerType string) core.Provider
+}
+
+// providerInstanceNamer maps a registered provider instance back to its
+// configured name.
+type providerInstanceNamer interface {
+	ProviderInstanceName(provider core.Provider) string
 }
 
 type providerNameRegistry interface {

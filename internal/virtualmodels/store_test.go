@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/enterpilot/gomodel/internal/requestparams"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 	"github.com/stretchr/testify/assert"
@@ -21,17 +22,20 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 			Description:     "primary",
 			Slowdown:        new(0.4),
 			ReasoningEffort: "medium",
+			Params:          requestparams.Set{"chat_template_kwargs": json.RawMessage(`{"enable_thinking":true}`), "stale": nil},
+			DefaultParams:   requestparams.Set{"temperature": json.RawMessage(`1`), "stop": json.RawMessage(`["a","b"]`)},
 			SessionAffinity: new(false),
 			Failover:        new(false),
 			Enabled:         true,
 		}
 		policy := VirtualModel{
-			Source:       "openai/gpt-4o",
-			ProviderName: "openai",
-			Model:        "gpt-4o",
-			UserPaths:    []string{"/team"},
-			Slowdown:     new(0.2),
-			Enabled:      true,
+			Source:        "openai/gpt-4o",
+			ProviderName:  "openai",
+			Model:         "gpt-4o",
+			UserPaths:     []string{"/team"},
+			Slowdown:      new(0.2),
+			DefaultParams: requestparams.Set{"top_k": json.RawMessage(`20`)},
+			Enabled:       true,
 		}
 		disabledOverride := VirtualModel{
 			Source:   "no-slowdown",
@@ -59,6 +63,13 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 		require.NotNil(t, gotRedirect.Slowdown)
 		require.Equal(t, 0.4, *gotRedirect.Slowdown)
 		assert.Equal(t, "medium", gotRedirect.ReasoningEffort)
+		require.Len(t, gotRedirect.Params, 2)
+		assert.JSONEq(t, `{"enable_thinking":true}`, string(gotRedirect.Params["chat_template_kwargs"]))
+		assert.Contains(t, gotRedirect.Params, "stale")
+		assert.Nil(t, gotRedirect.Params["stale"], "a null marker survives the round trip")
+		require.Len(t, gotRedirect.DefaultParams, 2)
+		assert.JSONEq(t, `1`, string(gotRedirect.DefaultParams["temperature"]))
+		assert.JSONEq(t, `["a","b"]`, string(gotRedirect.DefaultParams["stop"]))
 
 		require.NotNil(t, gotRedirect.SessionAffinity)
 		require.False(t, *gotRedirect.SessionAffinity, "Get(fast).SessionAffinity: want explicit false")
@@ -75,6 +86,8 @@ func TestStore_RoundTripRedirectAndPolicy(t *testing.T) {
 		require.Nil(t, gotPolicy.SessionAffinity)
 		require.Nil(t, gotPolicy.Failover)
 		assert.Empty(t, gotPolicy.ReasoningEffort)
+		assert.Nil(t, gotPolicy.Params, "an empty set loads as nil")
+		assert.JSONEq(t, `20`, string(gotPolicy.DefaultParams["top_k"]))
 
 		gotDisabled, err := store.Get(ctx, "no-slowdown")
 		require.NoError(t, err)

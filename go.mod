@@ -2,27 +2,32 @@ module github.com/enterpilot/gomodel
 
 go 1.27.3
 
+// Keep Multipath TCP off on listeners: Go enables it by default on Linux, which
+// exposes the kernel use-after-free in CVE-2026-98432 to remote code execution.
+// Patching the kernel is the real fix. See go.dev/issue/82717.
+godebug multipathtcp=0
+
 // Unauthenticated access to the aggregated MCP tool surface via browser DNS
 // rebinding: the /mcp endpoint's origin check could not detect a rebind.
 // Fixed in v0.1.80. See GHSA-2qr4-ww3x-mq4g.
 retract [v0.1.52, v0.1.79]
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.47.4
-	github.com/aws/aws-sdk-go-v2/config v1.33.10
-	github.com/aws/aws-sdk-go-v2/credentials v1.20.10
-	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.20.4
-	github.com/aws/aws-sdk-go-v2/service/bedrock v1.74.1
-	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.63.7
+	github.com/aws/aws-sdk-go-v2 v1.47.5
+	github.com/aws/aws-sdk-go-v2/config v1.33.13
+	github.com/aws/aws-sdk-go-v2/credentials v1.20.13
+	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.20.5
+	github.com/aws/aws-sdk-go-v2/service/bedrock v1.74.3
+	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.63.9
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/coder/websocket v1.8.15
-	github.com/goccy/go-json v0.11.2
+	github.com/goccy/go-json v0.12.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/joho/godotenv v1.5.1
 	github.com/klauspost/compress v1.20.3
 	github.com/labstack/echo-opentelemetry v0.0.4
-	github.com/labstack/echo/v5 v5.4.2
+	github.com/labstack/echo/v5 v5.4.4
 	github.com/lmittmann/tint v1.2.1
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/prometheus/client_golang v1.25.0
@@ -47,7 +52,7 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
 	go.opentelemetry.io/proto/otlp v1.11.1
-	go.yaml.in/yaml/v3 v3.0.5
+	go.yaml.in/yaml/v3 v3.0.6
 	golang.org/x/crypto v0.58.0
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/sync v0.24.0
@@ -60,17 +65,17 @@ require (
 require (
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/KyleBanks/depth v1.2.1 // indirect
-	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.24 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/configsources v1.5.7 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.7 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/v4a v1.5.7 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.22 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.14.7 // indirect
-	github.com/aws/aws-sdk-go-v2/service/signin v1.10.5 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sso v1.38.5 // indirect
-	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.43.5 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sts v1.51.5 // indirect
-	github.com/aws/smithy-go v1.28.6 // indirect
+	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.25 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.5.8 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.8 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/v4a v1.5.8 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.23 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.14.8 // indirect
+	github.com/aws/aws-sdk-go-v2/service/signin v1.12.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sso v1.39.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.44.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sts v1.51.6 // indirect
+	github.com/aws/smithy-go v1.28.7 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect

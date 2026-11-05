@@ -67,6 +67,7 @@ func (r *ModelRegistry) RefreshProviderModels(ctx context.Context, providerSelec
 		configuredProviderModels,
 		configuredProviderModelsMode,
 	)
+	dropEmptyFetchedInventories(&fetched)
 
 	if fetched.totalModels == 0 {
 		if fetched.failedProviders == len(providers) {
@@ -82,6 +83,19 @@ func (r *ModelRegistry) RefreshProviderModels(ctx context.Context, providerSelec
 	r.applyFetchedProviderInventory(providerTypes, fetched)
 	r.markFailedRefreshProvidersStale(fetched)
 	return fetched.totalModels, nil
+}
+
+// dropEmptyFetchedInventories removes the empty inventories that empty
+// listings produced. An empty listing is recorded as a failed fetch, so, as
+// in a full sweep, the provider keeps its previous inventory, and
+// markFailedRefreshProvidersStale marks it stale, instead of the empty result
+// erasing its routes.
+func dropEmptyFetchedInventories(fetched *fetchedInventory) {
+	for providerName, providerModels := range fetched.modelsByProvider {
+		if len(providerModels) == 0 {
+			delete(fetched.modelsByProvider, providerName)
+		}
+	}
 }
 
 // markFailedRefreshProvidersStale marks the carried inventory of providers

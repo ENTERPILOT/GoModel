@@ -19,6 +19,17 @@ import (
 // tell a fast-fail rejection apart from the upstream failure that tripped it.
 var ErrCircuitOpen = errors.New("circuit breaker is open")
 
+type circuitBreakerBypassKey struct{}
+
+// WithoutCircuitBreaker marks ctx so requests made with it neither wait on the
+// circuit breaker nor count toward it. Model discovery and availability probes
+// use it: a failing control-plane endpoint says nothing about inference, so it
+// must not pause inference traffic, and a working one must not close a circuit
+// that inference failures opened.
+func WithoutCircuitBreaker(ctx context.Context) context.Context {
+	return context.WithValue(ctx, circuitBreakerBypassKey{}, true)
+}
+
 type requestScope struct {
 	ctx           context.Context
 	startedAt     time.Time
@@ -47,6 +58,10 @@ func (c *Client) beginRequest(ctx context.Context, req Request, stream bool) (re
 
 	if c.config.Hooks.OnRequestStart != nil {
 		scope.ctx = c.config.Hooks.OnRequestStart(scope.ctx, scope.requestInfo)
+	}
+
+	if ctx.Value(circuitBreakerBypassKey{}) != nil {
+		return scope, nil
 	}
 
 	scope.breaker = c.breakerForModel(scope.requestInfo.Model)
