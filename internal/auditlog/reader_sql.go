@@ -104,6 +104,8 @@ func readerDialectFor(dialect sqlx.Dialect) readerDialect {
 			idColumn:           "id",
 			attemptIDColumn:    "audit_log_id",
 			userPath:           "user_path",
+			requestedModel:     "requested_model",
+			resolvedModel:      "resolved_model",
 			errorMessage:       `data->>'$.error_message'`,
 			responseID:         `data->>'$.response_body.id'`,
 			previousResponseID: `data->>'$.request_body.previous_response_id'`,

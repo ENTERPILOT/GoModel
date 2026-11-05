@@ -134,6 +134,11 @@ func previewColumns(dialect sqlx.Dialect) string {
 		return columns + `data - 'request_body' - 'response_body',` +
 			` (data -> 'request_body') IS NOT NULL, (data -> 'response_body') IS NOT NULL`
 	}
+	if dialect == sqlx.DuckDB {
+		// DuckDB has no json_remove; a merge patch with nulls drops the keys.
+		return columns + `CASE WHEN data IS NULL THEN NULL ELSE json_merge_patch(data, '{"request_body":null,"response_body":null}')::VARCHAR END,` +
+			` json_type(data, '$.request_body') IS NOT NULL, json_type(data, '$.response_body') IS NOT NULL`
+	}
 	return columns + `json_remove(data, '$.request_body', '$.response_body'),` +
 		` json_type(data, '$.request_body') IS NOT NULL, json_type(data, '$.response_body') IS NOT NULL`
 }

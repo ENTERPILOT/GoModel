@@ -80,6 +80,7 @@ var typeExpansions = map[Dialect]*strings.Replacer{
 		TypeJSONText, "VARCHAR",
 		TypeTimestamp, "TIMESTAMPTZ",
 		TypeSerialPK, "BIGINT PRIMARY KEY DEFAULT nextval('"+duckdbSerialSequence+"')",
+		TypeBytes, "BLOB",
 	),
 }
 
