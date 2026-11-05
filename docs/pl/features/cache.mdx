@@ -129,6 +129,31 @@ procesu: jeden request trafia do providera, a oczekujące requesty odtwarzają j
 odpowiedź. Odpowiedzi zakończone błędem lub z innych powodów niecache'owalne nigdy
 nie są rozsyłane do oczekujących.
 
+## Na czym opiera się klucz cache'u semantycznego
+
+Trafienie semantyczne wymaga podobnej ostatniej wiadomości użytkownika
+i dokładnej zgodności wszystkiego innego:
+
+- ścieżki requestu, rozwiązanego providera i modelu, łańcucha guardraili
+  i embeddera
+- wcześniejszych tur rozmowy oraz nietekstowych części ostatniej wiadomości
+  użytkownika
+- wszystkich pozostałych pól najwyższego poziomu requestu, takich jak
+  `temperature`, `seed`, `stop`, `n`, `tools`, `tool_choice`, `response_format`,
+  `text`, `reasoning_effort`, `thinking` czy `system`, a także każdego pola,
+  którego GoModel nie zna
+- tego, czy request jest streamowany; `stream_options` liczy się tylko, gdy
+  `stream` ma wartość `true`
+
+Kolejność narzędzi funkcyjnych Chat Completions o różnych nazwach nie ma
+znaczenia; każda inna lista narzędzi musi zgadzać się co do kolejności.
+
+Te pola są pomijane, bo nie zmieniają odpowiedzi: `user`, `metadata`,
+`safety_identifier`, `prompt_cache_key` i `prompt_cache_retention`. Na
+`/v1/responses` liczą się, bo odpowiedź zwraca je wywołującemu. Przy
+`exclude_system_prompt: true` pomijane są też wiadomości systemowe i `system`
+na najwyższym poziomie; `instructions` z Responses API liczą się zawsze.
+
 ## Planowanie prompt cache u providera
 
 Gdy routing ustali konkretnego providera i model, GoModel dodaje plan cache'owania,
