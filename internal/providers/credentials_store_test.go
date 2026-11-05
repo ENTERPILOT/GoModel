@@ -11,12 +11,14 @@ func TestCredentialStore_RoundTrip(t *testing.T) {
 	runCredentialStoreSuite(t, func(t *testing.T, store CredentialStore) {
 		ctx := context.Background()
 		sessionStickyKeys := false
+		billable := false
 
 		cred := ManagedProviderCredential{
 			Name:                     "my-vertex",
 			Type:                     "gemini",
 			APIKeys:                  []string{"sk-one", "sk-two"},
 			SessionStickyKeys:        &sessionStickyKeys,
+			Billable:                 &billable,
 			BaseURL:                  "https://api.example.com/v1",
 			APIVersion:               "2024-01-01",
 			Backend:                  "vertex",
@@ -43,6 +45,8 @@ func TestCredentialStore_RoundTrip(t *testing.T) {
 		require.Equal(t, cred.ServiceAccountJSONBase64, got.ServiceAccountJSONBase64)
 		require.NotNil(t, got.SessionStickyKeys)
 		require.False(t, *got.SessionStickyKeys)
+		require.NotNil(t, got.Billable)
+		require.False(t, *got.Billable)
 		require.False(t, got.CreatedAt.IsZero())
 		require.False(t, got.UpdatedAt.IsZero(), "Get() timestamps = (%v, %v), want both stamped", got.CreatedAt, got.UpdatedAt)
 

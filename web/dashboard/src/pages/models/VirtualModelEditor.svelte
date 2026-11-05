@@ -15,6 +15,7 @@
     vmFormShowBalancingOptions,
     vmFormStrategyPending,
     vmFormSupportsSlowdown,
+    parseParamsJSON,
     REASONING_EFFORT_LEVELS,
   } from "./vmForm.js";
   import VmTargetRow from "./VmTargetRow.svelte";
@@ -29,6 +30,12 @@
   // Row indices must match the flattened target list the move logic operates
   // on: an empty primary row is not in that list, so extras start at 0 then.
   const hasPrimary = $derived(vmFormHasPrimaryTarget(vm.vmForm));
+  // Parameter maps are edited as JSON text; a malformed map shows its error
+  // inline and the store refuses to save until it parses.
+  const paramsInvalid = $derived(parseParamsJSON(vm.vmForm.params) === null);
+  const defaultParamsInvalid = $derived(
+    parseParamsJSON(vm.vmForm.default_params) === null,
+  );
 
   // The strategy dropdown is server-driven (VIRTUAL_MODEL_STRATEGIES); make
   // sure the runtime config is loaded by the time the editor shows it. The
@@ -268,6 +275,42 @@
       </select>
       <span class="form-hint">
         {m.models_reasoning_effort_help()}
+      </span>
+    </FormField>
+
+    <FormField id="virtual-model-params" label={m.models_params_field()}>
+      <textarea
+        id="virtual-model-params"
+        rows="4"
+        class="mono"
+        placeholder={'{\n  "temperature": 0.2\n}'}
+        bind:value={vm.vmForm.params}
+        disabled={vm.vmFormManaged}
+        aria-invalid={paramsInvalid}
+      ></textarea>
+      {#if paramsInvalid}
+        <span class="form-error" role="alert">{m.models_params_invalid()}</span>
+      {/if}
+      <span class="form-hint">
+        {m.models_params_help()}
+      </span>
+    </FormField>
+
+    <FormField id="virtual-model-default-params" label={m.models_default_params_field()}>
+      <textarea
+        id="virtual-model-default-params"
+        rows="4"
+        class="mono"
+        placeholder={'{\n  "top_p": 0.9\n}'}
+        bind:value={vm.vmForm.default_params}
+        disabled={vm.vmFormManaged}
+        aria-invalid={defaultParamsInvalid}
+      ></textarea>
+      {#if defaultParamsInvalid}
+        <span class="form-error" role="alert">{m.models_default_params_invalid()}</span>
+      {/if}
+      <span class="form-hint">
+        {m.models_default_params_help()}
       </span>
     </FormField>
   {/if}

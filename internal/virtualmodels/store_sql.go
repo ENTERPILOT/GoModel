@@ -31,6 +31,8 @@ var sqlSchema = []string{
 		description TEXT NOT NULL DEFAULT '',
 		slowdown DOUBLE PRECISION DEFAULT NULL,
 		reasoning_effort TEXT NOT NULL DEFAULT '',
+		params TEXT NOT NULL DEFAULT '',
+		default_params TEXT NOT NULL DEFAULT '',
 		enabled ` + sqlx.TypeBool + ` NOT NULL DEFAULT TRUE,
 		created_at ` + sqlx.TypeInt64 + ` NOT NULL,
 		updated_at ` + sqlx.TypeInt64 + ` NOT NULL
@@ -49,20 +51,22 @@ var virtualModelMigrations = []string{
 	"ALTER TABLE virtual_models ADD COLUMN strategy_plugin TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE virtual_models ADD COLUMN strategy_config TEXT NOT NULL DEFAULT '{}'",
 	"ALTER TABLE virtual_models ADD COLUMN reasoning_effort TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE virtual_models ADD COLUMN params TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE virtual_models ADD COLUMN default_params TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE virtual_models ADD COLUMN vision_routing " + sqlx.TypeBool + " NOT NULL DEFAULT FALSE",
 }
 
 const selectVirtualModelColumns = `
 	SELECT source, targets, strategy, strategy_plugin, strategy_config, session_affinity, failover, vision_routing, provider_name, model, user_paths,
-		description, slowdown, reasoning_effort, enabled, created_at, updated_at
+		description, slowdown, reasoning_effort, params, default_params, enabled, created_at, updated_at
 	FROM virtual_models
 `
 
 const upsertVirtualModelSQL = `
 	INSERT INTO virtual_models (
-		source, targets, strategy, strategy_plugin, strategy_config, session_affinity, failover, vision_routing, provider_name, model, user_paths, description, slowdown, reasoning_effort, enabled, created_at, updated_at
+		source, targets, strategy, strategy_plugin, strategy_config, session_affinity, failover, vision_routing, provider_name, model, user_paths, description, slowdown, reasoning_effort, params, default_params, enabled, created_at, updated_at
 	)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(source) DO UPDATE SET
 		targets = excluded.targets,
 		strategy = excluded.strategy,
@@ -77,6 +81,8 @@ const upsertVirtualModelSQL = `
 		description = excluded.description,
 		slowdown = excluded.slowdown,
 		reasoning_effort = excluded.reasoning_effort,
+		params = excluded.params,
+		default_params = excluded.default_params,
 		enabled = excluded.enabled,
 		updated_at = excluded.updated_at
 `
@@ -165,6 +171,14 @@ func virtualModelUpsertArgs(vm VirtualModel) ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	paramsJSON, err := encodeParams("params", vm.Params)
+	if err != nil {
+		return nil, err
+	}
+	defaultParamsJSON, err := encodeParams("default_params", vm.DefaultParams)
+	if err != nil {
+		return nil, err
+	}
 	return []any{
 		strings.TrimSpace(vm.Source),
 		targetsJSON,
@@ -180,6 +194,8 @@ func virtualModelUpsertArgs(vm VirtualModel) ([]any, error) {
 		vm.Description,
 		vm.Slowdown,
 		vm.ReasoningEffort,
+		paramsJSON,
+		defaultParamsJSON,
 		vm.Enabled,
 		vm.CreatedAt.Unix(),
 		vm.UpdatedAt.Unix(),
@@ -188,7 +204,7 @@ func virtualModelUpsertArgs(vm VirtualModel) ([]any, error) {
 
 func scanSQLVirtualModel(scanner sqlx.Row) (VirtualModel, error) {
 	var vm VirtualModel
-	var targets, userPaths, strategyConfig []byte
+	var targets, userPaths, strategyConfig, params, defaultParams []byte
 	var sessionAffinity, failover string
 	var createdAt, updatedAt int64
 	if err := scanner.Scan(
@@ -206,6 +222,8 @@ func scanSQLVirtualModel(scanner sqlx.Row) (VirtualModel, error) {
 		&vm.Description,
 		&vm.Slowdown,
 		&vm.ReasoningEffort,
+		&params,
+		&defaultParams,
 		&vm.Enabled,
 		&createdAt,
 		&updatedAt,
@@ -220,6 +238,12 @@ func scanSQLVirtualModel(scanner sqlx.Row) (VirtualModel, error) {
 		return VirtualModel{}, fmt.Errorf("decode user_paths: %w", err)
 	}
 	if vm.StrategyConfig, err = decodeStrategyConfig(strategyConfig); err != nil {
+		return VirtualModel{}, err
+	}
+	if vm.Params, err = decodeParams("params", params); err != nil {
+		return VirtualModel{}, err
+	}
+	if vm.DefaultParams, err = decodeParams("default_params", defaultParams); err != nil {
 		return VirtualModel{}, err
 	}
 	vm.SessionAffinity = decodeTriStateBool(sessionAffinity)

@@ -25,10 +25,25 @@ func assertProviderCapability[T any](provider core.Provider, err error, unsuppor
 }
 
 func (r *Router) resolveNativeBatchProvider(providerType string) (core.NativeBatchProvider, error) {
+	bp, _, err := r.resolveNativeBatchInstance(providerType)
+	return bp, err
+}
+
+// resolveNativeBatchInstance resolves the batch-capable provider for a type
+// and names the instance it is, from the same resolution.
+func (r *Router) resolveNativeBatchInstance(providerType string) (core.NativeBatchProvider, string, error) {
 	provider, err := r.resolveProviderType(providerType)
-	return assertProviderCapability[core.NativeBatchProvider](provider, err, func() error {
+	bp, err := assertProviderCapability[core.NativeBatchProvider](provider, err, func() error {
 		return core.NewInvalidRequestError(fmt.Sprintf("%s does not support native batch processing", providerType), nil)
 	})
+	if err != nil {
+		return nil, "", err
+	}
+	providerName := ""
+	if r.caps.instanceNamer != nil {
+		providerName = r.caps.instanceNamer.ProviderInstanceName(provider)
+	}
+	return bp, providerName, nil
 }
 
 func (r *Router) resolveNativeFileProvider(providerType string) (core.NativeFileProvider, error) {

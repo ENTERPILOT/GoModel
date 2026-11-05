@@ -114,6 +114,11 @@ failure; individual HTTP retries do not increment the breaker. A successful
 sequence records success. Client cancellation is ignored; local client
 timeouts count as failures.
 
+**Model discovery and availability probes** bypass the breaker. A failing
+`/models` endpoint does not open the circuit, so a listing outage cannot pause
+inference, and a working one does not close it. The provider status page still
+reports the failed listing.
+
 Set `retry.retry_on_statuses` and `circuit_breaker.failure_on_statuses`
 independently. Both accept exact codes and classes such as `5xx`. Omitted
 lists use defaults; explicit lists replace them; `[]` disables status-based
@@ -155,9 +160,9 @@ HTTP attempt, without retries.
 
 The circuit breaker is in-memory and per gateway process: each provider
 gets its own breaker by default. With `scope: model`, each model within a
-provider instance gets an independent breaker; requests without a model,
-such as discovery, use a separate provider breaker. Multipart audio uploads
-use their explicit model names.
+provider instance gets an independent breaker; other requests without a model
+use a separate provider breaker, and model discovery bypasses breakers
+entirely. Multipart audio uploads use their explicit model names.
 
 Each provider retains at most 1,024 model breakers. Idle closed entries expire
 after 10 minutes when a new model is looked up; the oldest idle closed entry
