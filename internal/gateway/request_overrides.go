@@ -122,7 +122,10 @@ func ChatRequestWithOverrides(req *core.ChatRequest, overrides requestparams.Ove
 
 // ResponsesRequestWithOverrides is ChatRequestWithOverrides for Responses.
 func ResponsesRequestWithOverrides(req *core.ResponsesRequest, overrides requestparams.Overrides) (*core.ResponsesRequest, error) {
-	applied, err := requestparams.ApplyResponses(req, overrides.Defaults, overrides.Params)
+	// The Responses view resolves response_format and verbosity against text
+	// members by row depth, which the chat sets cannot (see ResponsesSets).
+	defaults, params := overrides.ResponsesSets()
+	applied, err := requestparams.ApplyResponses(req, defaults, params)
 	if err != nil {
 		return nil, err
 	}

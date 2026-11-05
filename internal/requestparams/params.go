@@ -60,7 +60,14 @@ type Overrides struct {
 	ReasoningEffort string
 	Defaults        Set
 	Params          Set
+
+	// responses holds both sets as the Responses API reads them (see
+	// ResponsesSets), layered alongside the Chat Completions sets, since a
+	// chat key and a text member are one setting there but two on chat.
+	responses *responsesSets
 }
+
+type responsesSets struct{ defaults, params Set }
 
 // IsZero reports whether nothing is configured.
 func (o Overrides) IsZero() bool {
@@ -76,9 +83,71 @@ func (o Overrides) Layer(over Overrides) Overrides {
 	if over.ReasoningEffort != "" {
 		o.ReasoningEffort = over.ReasoningEffort
 	}
+	baseDefaults, baseParams := o.ResponsesSets()
+	overDefaults, overParams := over.ResponsesSets()
 	o.Defaults = Merge(without(o.Defaults, over.Params), over.Defaults)
 	o.Params = Merge(without(o.Params, over.Defaults), over.Params)
+	o.responses = &responsesSets{
+		defaults: Merge(without(baseDefaults, overParams), overDefaults),
+		params:   Merge(without(baseParams, overDefaults), overParams),
+	}
 	return o
+}
+
+// ResponsesSets returns both sets as the Responses API reads them: a chat
+// response_format it can map becomes the text.format member and verbosity
+// the text.verbosity member, and a text object is split into text.<member>
+// keys. Layered this way, a deeper row decides each member whichever spelling
+// either row used, forced or default; on chat, which has no text object, the
+// chat keys layer on their own. A format the Responses API cannot map stays a
+// response_format key, which ApplyResponses skips.
+func (o Overrides) ResponsesSets() (defaults, params Set) {
+	if o.responses != nil {
+		return o.responses.defaults, o.responses.params
+	}
+	return responsesView(o.Defaults), responsesView(o.Params)
+}
+
+// textMemberPrefix marks a key that sets one member of the Responses text
+// object in a set returned by ResponsesSets.
+const textMemberPrefix = "text."
+
+func responsesView(set Set) Set {
+	if len(set) == 0 {
+		return set
+	}
+	view := make(Set, len(set))
+	for key, raw := range set {
+		switch key {
+		case "response_format":
+			if raw == nil {
+				view[textMemberPrefix+"format"] = nil
+				continue
+			}
+			format, err := core.ResponsesTextFormat(raw)
+			if err != nil {
+				view[key] = raw
+				continue
+			}
+			if encoded, err := json.Marshal(format); err == nil {
+				view[textMemberPrefix+"format"] = encoded
+			}
+		case "verbosity":
+			view[textMemberPrefix+"verbosity"] = raw
+		case "text":
+			var members map[string]json.RawMessage
+			if raw == nil || json.Unmarshal(raw, &members) != nil {
+				view[key] = raw
+				continue
+			}
+			for member, value := range members {
+				view[textMemberPrefix+member] = value
+			}
+		default:
+			view[key] = raw
+		}
+	}
+	return view
 }
 
 // without returns set minus the keys of other, sharing set when nothing is
@@ -87,23 +156,29 @@ func without(set, other Set) Set {
 	if len(set) == 0 || len(other) == 0 {
 		return set
 	}
-	var kept Set
-	for key, value := range set {
-		pruned, keep := withoutOverlap(key, value, other)
-		if keep && bytes.Equal(pruned, value) {
-			continue
-		}
-		if kept == nil {
-			kept = maps.Clone(set)
-		}
-		if keep {
-			kept[key] = pruned
-		} else {
-			delete(kept, key)
+	drop := canonicalKeys(other)
+	// A whole text object in other (a forced null) also covers the text
+	// members a Responses view splits out.
+	_, wholeText := other["text"]
+	covered := func(key string) bool {
+		_, ok := drop[canonicalKey(key)]
+		return ok || (wholeText && strings.HasPrefix(key, textMemberPrefix))
+	}
+	shared := false
+	for key := range set {
+		if covered(key) {
+			shared = true
+			break
 		}
 	}
-	if kept == nil {
+	if !shared {
 		return set
+	}
+	kept := make(Set, len(set))
+	for key, value := range set {
+		if !covered(key) {
+			kept[key] = value
+		}
 	}
 	if len(kept) == 0 {
 		return nil
@@ -116,59 +191,6 @@ func without(set, other Set) Set {
 var textMemberKeys = []struct{ chatKey, member string }{
 	{"response_format", "format"},
 	{"verbosity", "verbosity"},
-}
-
-// withoutOverlap returns key's value with whatever other also sets removed,
-// and whether anything of it is left. A key other sets in any spelling goes
-// whole. A text object also loses each member other sets through its chat
-// key, as other is the deeper row; the chat key itself is never dropped for a
-// text member, since only the Responses API reads text (see ApplyResponses,
-// which applies text last so a deeper row's member still wins there).
-func withoutOverlap(key string, value json.RawMessage, other Set) (json.RawMessage, bool) {
-	if _, ok := canonicalKeys(other)[canonicalKey(key)]; ok {
-		return nil, false
-	}
-	if key != "text" || value == nil {
-		return value, true
-	}
-	var members map[string]json.RawMessage
-	if json.Unmarshal(value, &members) != nil {
-		return value, true
-	}
-	removed := false
-	for _, pair := range textMemberKeys {
-		raw, ok := other[pair.chatKey]
-		if !ok || !setsOnResponses(pair.chatKey, raw) {
-			continue
-		}
-		if _, set := members[pair.member]; set {
-			delete(members, pair.member)
-			removed = true
-		}
-	}
-	if !removed {
-		return value, true
-	}
-	if len(members) == 0 {
-		return nil, false
-	}
-	pruned, err := json.Marshal(members)
-	if err != nil {
-		return value, true
-	}
-	return pruned, true
-}
-
-// setsOnResponses reports whether a chat key's value reaches the Responses
-// text object: a response_format whose type Responses lacks is skipped there
-// (see ApplyResponses), so it must not displace a text.format either. A forced
-// null removes the member, so it counts.
-func setsOnResponses(chatKey string, raw json.RawMessage) bool {
-	if chatKey != "response_format" || raw == nil {
-		return true
-	}
-	_, err := core.ResponsesTextFormat(raw)
-	return err == nil
 }
 
 // setsTextMember reports whether set's text object carries member.
@@ -328,8 +350,18 @@ func Normalize(field string, set Set, allowNull bool) (Set, error) {
 // Disjoint rejects a key configured in both sets of one row, where the
 // forced value would silently make the default dead.
 func Disjoint(defaults, params Set) error {
+	forced := canonicalKeys(params)
+	forcedOnResponses := canonicalKeys(responsesView(params))
 	for _, key := range sortedKeys(defaults) {
-		if pruned, keep := withoutOverlap(key, defaults[key], params); !keep || !bytes.Equal(pruned, defaults[key]) {
+		_, both := forced[canonicalKey(key)]
+		if !both {
+			for viewKey := range responsesView(Set{key: defaults[key]}) {
+				if _, ok := forcedOnResponses[canonicalKey(viewKey)]; ok {
+					both = true
+				}
+			}
+		}
+		if both {
 			return validation.NewError(fmt.Sprintf("parameter %q cannot be in both params and default_params", key), nil)
 		}
 	}

@@ -90,11 +90,6 @@ func ApplyResponses(req *core.ResponsesRequest, defaults, params Set) (*core.Res
 	}
 	cloned := *req
 	a := newApplier(responsesTypedKeys, req.ExtraFields)
-	// The whole text object goes last. A row cannot carry both a text member
-	// and its chat key (Normalize), and layering drops a shallower row's text
-	// member under a deeper chat key; so when both reach here, the text member
-	// came from the deeper row and must win.
-	a.last = "text"
 	apply := func(key string, raw json.RawMessage, force bool) error {
 		switch key {
 		case "temperature":
@@ -110,9 +105,9 @@ func ApplyResponses(req *core.ResponsesRequest, defaults, params Set) (*core.Res
 		case "text":
 			return setTextObject(&cloned.Text, raw, force)
 		case "response_format":
-			return setTextMember(&cloned.Text, "format", raw, force)
+			return setTextMember(&cloned.Text, "format", raw, force, true)
 		case "verbosity":
-			return setTextMember(&cloned.Text, "verbosity", raw, force)
+			return setTextMember(&cloned.Text, "verbosity", raw, force, false)
 		case "top_logprobs":
 			return setPtr(&cloned.TopLogprobs, raw, force)
 		case "parallel_tool_calls":
@@ -132,6 +127,10 @@ func ApplyResponses(req *core.ResponsesRequest, defaults, params Set) (*core.Res
 		case "tool_choice":
 			return setAny(&cloned.ToolChoice, raw, force)
 		default:
+			// A text member from a Responses view (Overrides.ResponsesSets).
+			if member, ok := strings.CutPrefix(key, textMemberPrefix); ok {
+				return setTextMember(&cloned.Text, member, raw, force, false)
+			}
 			// A forced null still strips the key the client sent.
 			if _, skip := chatOnlyKeys[key]; skip && raw != nil {
 				return nil
@@ -271,11 +270,12 @@ func textMembers(text any) (map[string]any, error) {
 	return members, nil
 }
 
-// setTextMember sets one member of the Responses text object: format from a
-// chat response_format, or verbosity. The other members the client sent stay,
+// setTextMember sets one member of the Responses text object. convertFormat
+// translates a chat response_format into text.format; a member from a
+// Responses view (Overrides.ResponsesSets) is already in Responses shape. The other members the client sent stay,
 // a default leaves a member the client set alone, and a forced null removes
 // the member. The client's object is copied, never changed in place.
-func setTextMember(text *any, member string, raw json.RawMessage, force bool) error {
+func setTextMember(text *any, member string, raw json.RawMessage, force, convertFormat bool) error {
 	members, err := textMembers(*text)
 	if err != nil {
 		return err
@@ -286,7 +286,7 @@ func setTextMember(text *any, member string, raw json.RawMessage, force bool) er
 	switch {
 	case raw == nil:
 		delete(members, member)
-	case member == "format":
+	case convertFormat:
 		format, err := core.ResponsesTextFormat(raw)
 		if err != nil {
 			// A format the Responses API has no counterpart for is a
@@ -357,8 +357,6 @@ type applier struct {
 	// so a forced value layered over a default on the same key sees the
 	// default rather than the client's original.
 	extras map[string]json.RawMessage
-	// last is applied after the other keys of each set.
-	last string
 }
 
 func newApplier(typed map[string]struct{}, fields core.UnknownJSONFields) *applier {
@@ -367,30 +365,17 @@ func newApplier(typed map[string]struct{}, fields core.UnknownJSONFields) *appli
 
 // run applies defaults, then params, through apply in key order.
 func (a *applier) run(defaults, params Set, apply func(string, json.RawMessage, bool) error) error {
-	for _, key := range a.order(defaults) {
+	for _, key := range sortedKeys(defaults) {
 		if err := apply(key, defaults[key], false); err != nil {
 			return fmt.Errorf("requestparams: default %q: %w", key, err)
 		}
 	}
-	for _, key := range a.order(params) {
+	for _, key := range sortedKeys(params) {
 		if err := apply(key, params[key], true); err != nil {
 			return fmt.Errorf("requestparams: param %q: %w", key, err)
 		}
 	}
 	return nil
-}
-
-// order returns a set's keys sorted, with a.last moved to the end.
-func (a *applier) order(set Set) []string {
-	keys := sortedKeys(set)
-	for i, key := range keys {
-		if key == a.last && i < len(keys)-1 {
-			copy(keys[i:], keys[i+1:])
-			keys[len(keys)-1] = key
-			break
-		}
-	}
-	return keys
 }
 
 func (a *applier) route(key string, raw json.RawMessage, force bool) error {
