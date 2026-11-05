@@ -261,6 +261,26 @@ func TestModelRegistry_ReplaceProvider(t *testing.T) {
 		assert.True(t, registry.Supports("swap/b"))
 	})
 
+	t.Run("a merge-to-fallback edit does not count as a listing for the next edit", func(t *testing.T) {
+		registry := NewModelRegistry()
+		previous := &registryMockProvider{modelsResponse: modelsList("a")}
+		registry.RegisterProviderWithNameAndType(previous, "swap", "test")
+		registry.SetProviderConfiguredModels("swap", []string{"extra"})
+		registry.SetProviderModelsMode("swap", config.ConfiguredProviderModelsModeMerge)
+		require.NoError(t, registry.Initialize(t.Context()))
+		require.True(t, registry.Supports("swap/extra"))
+
+		// Switch to fallback; no fetch runs before the next edit.
+		registry.replaceProvider(&registryMockProvider{}, "swap", "test", providerSettings{configuredModels: []string{"extra"}})
+		require.True(t, registry.Supports("swap/extra"))
+
+		// The next edit removes "extra": the inherited inventory is not a
+		// plain listing, so the removed configured model must go.
+		registry.replaceProvider(&registryMockProvider{}, "swap", "test", providerSettings{})
+		assert.False(t, registry.Supports("swap/extra"))
+		assert.True(t, registry.Supports("swap/a"))
+	})
+
 	t.Run("applies the new metadata overrides to the inherited inventory", func(t *testing.T) {
 		registry := NewModelRegistry()
 		previous := &registryMockProvider{modelsResponse: modelsList("a")}

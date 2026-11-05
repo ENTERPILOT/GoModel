@@ -558,6 +558,9 @@ func (r *ModelRegistry) applyProviderRuntimeUpdatesLocked(updates map[string]pro
 			} else if update.lastModelFetchError == "" {
 				current.catalogStandIn = false
 			}
+			if update.lastModelFetchError == "" {
+				current.inheritedUnlisted = false
+			}
 		}
 		if !update.lastModelFetchSuccessAt.IsZero() {
 			current.lastModelFetchSuccessAt = update.lastModelFetchSuccessAt

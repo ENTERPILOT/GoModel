@@ -95,6 +95,11 @@ type providerRuntimeState struct {
 	// confirmed by the provider, so it is not cached and is replaced as soon
 	// as a listing succeeds.
 	catalogStandIn bool
+	// inheritedUnlisted marks an inventory a replacement inherited that may
+	// hold configured models the upstream never listed (the previous one was
+	// not a plain listing). A later replacement must not mistake it for one,
+	// so it lasts until a fetch succeeds.
+	inheritedUnlisted bool
 }
 
 // SanitizeProviderConfigs converts effective provider configs into a stable,

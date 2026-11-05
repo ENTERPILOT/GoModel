@@ -556,7 +556,8 @@ OpenAI-compatible provider without a `/models` endpoint (404 or 405) is served
 from its configured list and reported healthy, which suits single-API servers
 such as speech-to-text. Set
 `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` to expose only configured models for
-providers that define a list and skip their upstream `/models` calls. YAML
+providers that define a list and skip their upstream `/models` calls, or
+`merge` to add configured models on top of the upstream inventory. YAML
 `providers.<name>.models` provides the same model-list input for named provider
 blocks. To override the mode for one provider only, set
 `<PROVIDER>[_SUFFIX]_MODELS_MODE` (YAML: `providers.<name>.models_mode`), for

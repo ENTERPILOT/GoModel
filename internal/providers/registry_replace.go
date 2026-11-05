@@ -89,6 +89,7 @@ func (r *ModelRegistry) replaceProvider(provider core.Provider, providerName, pr
 		// until the replacement's first fetch overwrites it.
 		state := r.providerRuntime[providerName]
 		state.registered = true
+		state.inheritedUnlisted = state.inheritedUnlisted || !listing
 		r.providerRuntime[providerName] = state
 	} else {
 		delete(r.discoveredByProvider, providerName)
@@ -184,7 +185,8 @@ func (r *ModelRegistry) inventoryIsListingLocked(providerName string, mode confi
 	return !state.lastModelFetchAt.IsZero() &&
 		state.lastModelFetchSuccessAt.Equal(state.lastModelFetchAt) &&
 		!state.modelListingUnsupported &&
-		!state.catalogStandIn
+		!state.catalogStandIn &&
+		!state.inheritedUnlisted
 }
 
 // removedModels returns the models in before that after no longer lists.
