@@ -18,6 +18,11 @@ type HTTPConfig struct {
 	// accepts Go durations such as "2m" as well as seconds.
 	StreamIdleTimeout int `yaml:"stream_idle_timeout"`
 
+	// MaxIdleConnsPerHost is how many idle keep-alive connections each
+	// provider's transport keeps open to its upstream host (default: 512).
+	// Zero or a negative value uses the default.
+	MaxIdleConnsPerHost int `yaml:"max_idle_conns_per_host" env:"HTTP_MAX_IDLE_CONNS_PER_HOST"`
+
 	// TLS configures client-side trust for the gateway's outbound HTTPS
 	// clients; see HTTPTLSConfig for what it covers.
 	TLS HTTPTLSConfig `yaml:"tls"`

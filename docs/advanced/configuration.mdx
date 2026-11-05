@@ -472,18 +472,28 @@ outside the replay window, the dashboard reloads from the normal REST APIs.
 
 #### HTTP Client
 
-These control timeouts for upstream API requests to LLM providers.
+These control timeouts and connection pooling for upstream API requests to LLM providers.
 
 | Variable                       | Description                                  | Default        |
 | ------------------------------ | -------------------------------------------- | -------------- |
 | `HTTP_TIMEOUT`                 | Overall request timeout in seconds           | `600` (10 min) |
 | `HTTP_RESPONSE_HEADER_TIMEOUT` | Time to wait for response headers in seconds | `600` (10 min) |
 | `HTTP_STREAM_IDLE_TIMEOUT`     | Longest silence in seconds a stream may keep once its first bytes arrived; `0` disables | `300` (5 min) |
+| `HTTP_MAX_IDLE_CONNS_PER_HOST` | Idle keep-alive connections each provider keeps open to its upstream | `512` |
 
 A stream that goes quiet for longer than `HTTP_STREAM_IDLE_TIMEOUT` is closed
 with a `504` provider error instead of hanging until `HTTP_TIMEOUT`. The wait
 for the first token does not count, so slow reasoning models are unaffected.
 Raise it only for a provider that legitimately pauses for minutes mid-stream.
+
+`HTTP_MAX_IDLE_CONNS_PER_HOST` matters for HTTP/1.1 upstreams such as self-hosted
+vLLM, Ollama, or llm-d, which use one connection per in-flight request. Past the
+limit, extra connections are closed after each response and reopened on the
+next one. Raise it if a single provider regularly serves more concurrent
+requests than the limit. HTTP/2 providers multiplex requests over a few
+connections and are unaffected; their connections are pinged after 15s of
+silence, so a connection that dies without a close is dropped instead of
+stalling requests.
 
 The standard `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` variables apply to
 every upstream connection, unless a provider sets its own
