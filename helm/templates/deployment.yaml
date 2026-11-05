@@ -65,9 +65,15 @@ spec:
             {{- with .Values.extraEnvFrom }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- with .Values.extraEnv }}
+          {{- $goMemLimitEnv := include "gomodel.goMemLimitEnv" . | trim }}
+          {{- if or $goMemLimitEnv .Values.extraEnv }}
           env:
+            {{- with $goMemLimitEnv }}
+            {{- . | nindent 12 }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
           {{- with .Values.livenessProbe }}
           livenessProbe:

@@ -137,6 +137,24 @@ cert-manager example.
 With the Prometheus Operator, set `metrics.serviceMonitor.enabled: true` and add
 the labels your Prometheus selects on under `metrics.serviceMonitor.labels`.
 
+### Memory limit
+
+The chart sets the Go runtime's soft memory limit, `GOMEMLIMIT`, to
+`resources.limits.memory` through the downward API, so the garbage collector
+works harder near the limit instead of letting the heap overshoot it and the
+pod be OOM-killed. Without a memory limit nothing is set.
+
+Leave headroom for memory outside the Go heap (SQLite, bursts of large
+requests) by setting it explicitly, using Go units (`MiB`, `GiB`):
+
+```yaml
+goMemLimit: 400MiB   # "off" disables it
+```
+
+`GOMEMLIMIT` in `env`, `secretEnv`, or `extraEnv` takes precedence. A value
+loaded through `extraEnvFrom` is overridden by the chart; use `goMemLimit`
+instead.
+
 ### Cloud provider credentials
 
 Give the pod's ServiceAccount a cloud identity for AWS Bedrock or Google Vertex AI:
@@ -176,6 +194,7 @@ serviceAccount:
 | `serviceAccount.create` | `true` | |
 | `serviceAccount.annotations` | `{}` | Cloud IAM bindings. |
 | `resources` | `100m/128Mi` requests, `512Mi` limit | No CPU limit by default. |
+| `goMemLimit` | `""` | Go `GOMEMLIMIT`, e.g. `400MiB`. Empty uses the memory limit; `off` disables. |
 | `autoscaling.enabled` | `false` | HPA on CPU (70%) and optionally memory. |
 | `podDisruptionBudget.enabled` | `true` | Created only when more than one pod can run. |
 | `terminationGracePeriodSeconds` | `45` | Covers GoModel's 30s drain. |
