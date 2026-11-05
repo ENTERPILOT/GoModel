@@ -136,8 +136,10 @@ func TestPartitionOff_KeepsTodaysIdentities(t *testing.T) {
 			serveAs(t, mw, partitionChatPath, []byte(partitionChatBody), false, userPath)
 
 			require.Len(t, vecStore.entries, 1)
-			assert.Equal(t, "c8a146b8760b966847a69de50104562a756090dee6545ac54f753c8c4ec0d880", vecStore.entries[0].paramsHash)
-			assert.Equal(t, "9f7879d037e013c0ed38218d207ef9ae950c4feb8aa7215c8671f4314760fc9d", vecStore.entries[0].key)
+			// Recomputed when the params hash started covering every output-shaping
+			// field; it still must not vary with the user path while the setting is off.
+			assert.Equal(t, "3a5b7dc3ad2b549beb609572a75b4ed6c46004c15be579c2b67bf614a924fcc6", vecStore.entries[0].paramsHash)
+			assert.Equal(t, "efd36f887a065acdc1500ef21d3770d0302b05dacb3ecbcd878ce1115b65fd4e", vecStore.entries[0].key)
 		})
 	}
 }
