@@ -12,11 +12,13 @@ import (
 // providerSettings is the operator configuration that shapes one provider
 // instance's inventory: what RegisterProviderWithNameAndType's callers
 // otherwise apply with SetProviderConfiguredModels,
-// SetProviderMetadataOverrides, and SetProviderModelFilter.
+// SetProviderMetadataOverrides, SetProviderModelFilter, and
+// SetProviderModelsMode.
 type providerSettings struct {
 	configuredModels  []string
 	metadataOverrides map[string]*core.ModelMetadata
 	modelFilter       config.ModelFilter
+	modelsMode        config.ConfiguredProviderModelsMode
 }
 
 // replaceProvider registers provider under providerName in place of whatever
@@ -58,9 +60,15 @@ func (r *ModelRegistry) replaceProvider(provider core.Provider, providerName, pr
 	providerName, providerType = r.providerIdentityLocked(providerName, providerType)
 	previousType, replaced := r.swapProviderLocked(provider, providerName, providerType)
 
+	// The new mode decides what the inherited inventory keeps, so it is in
+	// place before the inheritance below reads it.
+	modelsMode := config.NormalizeConfiguredProviderModelsMode(settings.modelsMode)
+	previousMode := r.providerModelsModeLocked(providerName)
+	setOrDelete(&r.providerModelsModes, providerName, modelsMode, modelsMode != "")
+
 	previous := r.discoveredByProvider[providerName]
 	inherits := replaced && previousType == providerType && len(previous) > 0
-	listing := inherits && r.inventoryIsListingLocked(providerName)
+	listing := inherits && r.inventoryIsListingLocked(providerName, previousMode)
 	if inherits && !listing {
 		previous = withoutModels(previous, removedModels(r.configuredProviderModels[providerName], configuredModels))
 	}
@@ -137,7 +145,7 @@ func (r *ModelRegistry) reboundInventoryLocked(previous map[string]*ModelInfo, p
 		model.Metadata = info.Discovered.Clone()
 		listed.Data = append(listed.Data, model)
 	}
-	mode := config.ResolveConfiguredProviderModelsMode(r.configuredProviderModelsMode)
+	mode := r.providerModelsModeLocked(providerName)
 	if mode == config.ConfiguredProviderModelsModeFallback && !listing {
 		mode = config.ConfiguredProviderModelsModeMerge
 	}
@@ -166,9 +174,10 @@ func (r *ModelRegistry) reboundInventoryLocked(previous map[string]*ModelInfo, p
 // successful listing is served as is, while every other source (an allowlist,
 // a merge, a fallback after a failed or empty listing, a provider without a
 // listing, the cache) may include configured models the upstream never
-// listed. Caller must hold r.mu.
-func (r *ModelRegistry) inventoryIsListingLocked(providerName string) bool {
-	if config.ResolveConfiguredProviderModelsMode(r.configuredProviderModelsMode) != config.ConfiguredProviderModelsModeFallback {
+// listed. mode is the mode the inventory was produced under. Caller must hold
+// r.mu.
+func (r *ModelRegistry) inventoryIsListingLocked(providerName string, mode config.ConfiguredProviderModelsMode) bool {
+	if mode != config.ConfiguredProviderModelsModeFallback {
 		return false
 	}
 	state := r.providerRuntime[providerName]

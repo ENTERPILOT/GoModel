@@ -9609,6 +9609,9 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "models_mode": {
+                    "type": "string"
+                },
                 "name": {
                     "type": "string"
                 },
@@ -10043,6 +10046,10 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "models_mode": {
+                    "description": "ModelsMode overrides the global configured provider models mode for\nthis provider: fallback, allowlist, or merge. Empty uses the global mode.",
+                    "type": "string"
                 },
                 "name": {
                     "type": "string"
@@ -12205,6 +12212,10 @@ const docTemplate = `{
             "properties": {
                 "effort": {
                     "description": "Effort controls how much reasoning effort the model should use.\nValid values are \"low\", \"medium\", \"high\", \"xhigh\", and \"max\".\n\"xhigh\" and \"max\" are supported by newer models such as Claude Opus 4.8;\nproviders downgrade unsupported levels to their nearest equivalent.",
+                    "type": "string"
+                },
+                "summary": {
+                    "description": "Summary requests a reasoning summary from the model (OpenAI Responses\nAPI: \"auto\", \"concise\", \"detailed\"). Empty asks for no summary; the\nResponses API never emits summaries unprompted.",
                     "type": "string"
                 }
             }

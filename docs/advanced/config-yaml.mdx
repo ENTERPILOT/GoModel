@@ -45,6 +45,23 @@ configured models for providers that define a list and skip their upstream
 inventory — useful for models a provider serves but does not include in its
 `/models` listing.
 
+Set `models_mode` on a provider to override the global mode for that provider
+only. Leave it unset to use the global mode. For example, you can expose a single
+OpenRouter model while self-hosted providers keep discovering their own:
+
+```yaml
+providers:
+  openrouter:
+    type: openrouter
+    api_key: "${OPENROUTER_API_KEY}"
+    models:
+      - qwen/qwen3-vl-8b-instruct
+    models_mode: allowlist # env: OPENROUTER_MODELS_MODE
+```
+
+The dashboard's provider dialog exposes the same setting as **Models mode**
+under the advanced options.
+
 ## Filtering a provider's models
 
 `model_filter` narrows a provider's inventory to the models you actually want

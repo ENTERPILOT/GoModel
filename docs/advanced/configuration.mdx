@@ -558,7 +558,9 @@ such as speech-to-text. Set
 `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` to expose only configured models for
 providers that define a list and skip their upstream `/models` calls. YAML
 `providers.<name>.models` provides the same model-list input for named provider
-blocks.
+blocks. To override the mode for one provider only, set
+`<PROVIDER>[_SUFFIX]_MODELS_MODE` (YAML: `providers.<name>.models_mode`), for
+example `OPENROUTER_MODELS_MODE=allowlist`.
 
 `GET /v1/models` lists provider-qualified IDs (`openai/gpt-5`) by default. Set
 `UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT=true` (YAML:
@@ -762,7 +764,8 @@ export ORACLE_BASE_URL="https://inference.generativeai.us-chicago-1.oci.oraclecl
 export ORACLE_MODELS="openai.gpt-oss-120b,xai.grok-3" # Optional configured model list
 export OPENROUTER_MODELS="openai/gpt-oss-120b,anthropic/claude-sonnet-4"
 export KILO_MODELS="anthropic/claude-sonnet-4.5,openai/gpt-5.5"
-export CONFIGURED_PROVIDER_MODELS_MODE="fallback" # fallback or allowlist
+export CONFIGURED_PROVIDER_MODELS_MODE="fallback" # fallback, allowlist, or merge
+# Optional: export OPENROUTER_MODELS_MODE="allowlist" # per-provider override
 export OLLAMA_BASE_URL="http://localhost:11434/v1" # Registers "ollama" provider
 export SGLANG_BASE_URL="http://localhost:30000/v1" # Registers keyless "sglang" provider
 # Optional: export SGLANG_API_KEY="token-abc123"

@@ -236,6 +236,31 @@ func TestModelRegistry_ReplaceProvider(t *testing.T) {
 		assert.Same(t, replacement, registry.GetProvider("swap/d"))
 	})
 
+	t.Run("applies a per-provider allowlist mode to the inherited inventory", func(t *testing.T) {
+		registry := NewModelRegistry()
+		previous := &registryMockProvider{modelsResponse: modelsList("a", "b", "c")}
+		registry.RegisterProviderWithNameAndType(previous, "swap", "test")
+		registry.SetProviderConfiguredModels("swap", []string{"a"})
+		require.NoError(t, registry.Initialize(t.Context()))
+		require.True(t, registry.Supports("swap/b"), "global fallback serves the listing")
+
+		replacement := &registryMockProvider{}
+		registry.replaceProvider(replacement, "swap", "test", providerSettings{
+			configuredModels: []string{"a"},
+			modelsMode:       config.ConfiguredProviderModelsModeAllowlist,
+		})
+
+		assert.Same(t, replacement, registry.GetProvider("swap/a"))
+		assert.False(t, registry.Supports("swap/b"))
+		assert.False(t, registry.Supports("swap/c"))
+
+		// Clearing the override restores the global fallback on the next fetch.
+		replacement.modelsResponse = modelsList("a", "b", "c")
+		registry.replaceProvider(replacement, "swap", "test", providerSettings{configuredModels: []string{"a"}})
+		require.NoError(t, registry.Initialize(t.Context()))
+		assert.True(t, registry.Supports("swap/b"))
+	})
+
 	t.Run("applies the new metadata overrides to the inherited inventory", func(t *testing.T) {
 		registry := NewModelRegistry()
 		previous := &registryMockProvider{modelsResponse: modelsList("a")}

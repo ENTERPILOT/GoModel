@@ -280,6 +280,24 @@ func TestUpsertProviderCredential_CanMarkNonBillable(t *testing.T) {
 	assert.True(t, echotest.Decode[providerCredentialViewResponse](t, rec).Billable)
 }
 
+func TestUpsertProviderCredential_ModelsMode(t *testing.T) {
+	fake := newProviderCredentialsAdminFake()
+	h := newProviderCredentialsHandler(fake)
+
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/provider-credentials", `{"name":"router","type":"openai","api_keys":["sk-real"],"models":["qwen/qwen3-vl-8b-instruct"],"models_mode":" Allowlist "}`)
+	require.NoError(t, h.UpsertProviderCredential(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	assert.Equal(t, "allowlist", fake.rows["router"].ModelsMode)
+	assert.Equal(t, "allowlist", echotest.Decode[providerCredentialViewResponse](t, rec).ModelsMode)
+
+	// Omitting the mode clears the override, so the global mode applies.
+	c, rec = echotest.Request(t, http.MethodPut, "/admin/provider-credentials", `{"name":"router","type":"openai","api_keys":["***"]}`)
+	require.NoError(t, h.UpsertProviderCredential(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Empty(t, fake.rows["router"].ModelsMode)
+}
+
 func TestUpsertProviderCredential_RedactedKeyPreservesStoredValuePositionally(t *testing.T) {
 	fake := newProviderCredentialsAdminFake()
 	fake.rows["multi"] = providers.ManagedProviderCredential{

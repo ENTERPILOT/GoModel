@@ -33,7 +33,7 @@ func (r *ModelRegistry) Initialize(ctx context.Context) error {
 
 func (r *ModelRegistry) initialize(ctx context.Context) error {
 	providers, providerTypes, providerNames := r.snapshotProviders()
-	configuredProviderModels, configuredProviderModelsMode := r.snapshotConfiguredProviderModels()
+	configuredProviderModels, configuredProviderModelsModes := r.snapshotConfiguredProviderModels()
 
 	fetched := r.fetchAllProviderModels(
 		ctx,
@@ -41,7 +41,7 @@ func (r *ModelRegistry) initialize(ctx context.Context) error {
 		providerTypes,
 		providerNames,
 		configuredProviderModels,
-		configuredProviderModelsMode,
+		configuredProviderModelsModes,
 	)
 
 	if len(providers) == 0 {
@@ -109,7 +109,7 @@ func (r *ModelRegistry) fetchAllProviderModels(
 	providerTypes map[core.Provider]string,
 	providerNames map[core.Provider]string,
 	configuredProviderModels map[string][]string,
-	configuredProviderModelsMode config.ConfiguredProviderModelsMode,
+	configuredProviderModelsModes map[string]config.ConfiguredProviderModelsMode,
 ) fetchedInventory {
 	out := fetchedInventory{
 		models:           make(map[string]*ModelInfo),
@@ -154,7 +154,7 @@ func (r *ModelRegistry) fetchAllProviderModels(
 				provider,
 				names[i],
 				providerTypes[provider],
-				configuredProviderModelsMode,
+				configuredProviderModelsModes[names[i]],
 				configuredProviderModels[names[i]],
 				catalogModels[names[i]],
 			)

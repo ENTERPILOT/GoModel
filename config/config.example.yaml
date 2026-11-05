@@ -847,6 +847,9 @@ providers:
   #   models:
   #     - openai/gpt-oss-120b
   #     - anthropic/claude-sonnet-4
+  #   # Override models.configured_provider_models_mode for this provider only
+  #   # (fallback, allowlist, or merge). Env: OPENROUTER_MODELS_MODE.
+  #   models_mode: allowlist
   #   # Narrow the inventory to what should be routable. Patterns are globs
   #   # matched case-insensitively against the raw model ID; `*` also matches `/`,
   #   # so `*:free` matches `deepseek/deepseek-r1:free`.

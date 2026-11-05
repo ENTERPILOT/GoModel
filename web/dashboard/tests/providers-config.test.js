@@ -635,3 +635,35 @@ test("a service-account JSON secret reference is not parsed as JSON", () => {
     "Paste the service account JSON file's contents — this is not valid JSON.",
   );
 });
+
+test("models_mode renders as a select and round-trips through the payload", () => {
+  const schema = {
+    ...OPENAI_SCHEMA,
+    fields: [
+      ...OPENAI_SCHEMA.fields,
+      { name: "models_mode", required: false, advanced: true, options: ["fallback", "allowlist", "merge"] },
+    ],
+  };
+  const { advanced } = providerCredentialFormFields(schema);
+  const field = advanced.find((entry) => entry.name === "models_mode");
+  assert.ok(field);
+  assert.equal(field.control, "select");
+  assert.deepEqual(field.options, ["fallback", "allowlist", "merge"]);
+
+  const form = providerCredentialRowToForm({
+    name: "openrouter",
+    type: "openai",
+    api_keys: ["***********"],
+    models: ["qwen/qwen3-vl-8b-instruct"],
+    models_mode: "allowlist",
+  });
+  assert.equal(form.models_mode, "allowlist");
+  assert.equal(buildProviderCredentialPayload(form, schema).models_mode, "allowlist");
+
+  // Default (empty) means the gateway-wide mode applies.
+  assert.equal(defaultProviderCredentialForm().models_mode, "");
+  assert.equal(
+    buildProviderCredentialPayload({ ...form, models_mode: "" }, schema).models_mode,
+    "",
+  );
+});

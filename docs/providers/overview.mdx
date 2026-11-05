@@ -244,6 +244,8 @@ support, not every individual model capability exposed by an upstream provider.
   `/models` is unavailable or empty. Set
   `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` to expose only configured models
   for providers that define a list, skipping their upstream `/models` calls.
+  Override it for one provider with `<PROVIDER>_MODELS_MODE` (for example
+  `OPENROUTER_MODELS_MODE=allowlist`) or **Models mode** in the dashboard.
 - **Model filters** — narrow a large catalog by glob pattern or price instead of
   listing models one by one: `OPENROUTER_MODEL_FILTER_INCLUDE=*:free` keeps only
   OpenRouter's free tier, and `<PROVIDER>_MODEL_FILTER_MAX_PRICE_PER_MTOK` caps
