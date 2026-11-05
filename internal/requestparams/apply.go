@@ -90,9 +90,11 @@ func ApplyResponses(req *core.ResponsesRequest, defaults, params Set) (*core.Res
 	}
 	cloned := *req
 	a := newApplier(responsesTypedKeys, req.ExtraFields)
-	// The whole text object goes first, so a response_format or verbosity
-	// in the same set lands on top of it rather than under it.
-	a.first = "text"
+	// The whole text object goes last. A row cannot carry both a text member
+	// and its chat key (Normalize), and layering drops a shallower row's text
+	// member under a deeper chat key; so when both reach here, the text member
+	// came from the deeper row and must win.
+	a.last = "text"
 	apply := func(key string, raw json.RawMessage, force bool) error {
 		switch key {
 		case "temperature":
@@ -355,8 +357,8 @@ type applier struct {
 	// so a forced value layered over a default on the same key sees the
 	// default rather than the client's original.
 	extras map[string]json.RawMessage
-	// first is applied before the other keys of each set.
-	first string
+	// last is applied after the other keys of each set.
+	last string
 }
 
 func newApplier(typed map[string]struct{}, fields core.UnknownJSONFields) *applier {
@@ -378,13 +380,13 @@ func (a *applier) run(defaults, params Set, apply func(string, json.RawMessage, 
 	return nil
 }
 
-// order returns a set's keys sorted, with a.first moved to the front.
+// order returns a set's keys sorted, with a.last moved to the end.
 func (a *applier) order(set Set) []string {
 	keys := sortedKeys(set)
 	for i, key := range keys {
-		if key == a.first && i > 0 {
-			copy(keys[1:i+1], keys[:i])
-			keys[0] = key
+		if key == a.last && i < len(keys)-1 {
+			copy(keys[i:], keys[i+1:])
+			keys[len(keys)-1] = key
 			break
 		}
 	}

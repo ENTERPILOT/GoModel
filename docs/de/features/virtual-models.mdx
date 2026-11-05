@@ -146,9 +146,9 @@ Ein Token-Limit ist in jeder Schreibweise dasselbe Limit: `max_tokens`,
 `params` ersetzt die Schreibweise, die der Client gesendet hat, und ein Wert in
 `default_params` gilt nur, wenn der Client keine davon gesendet hat. Über
 verkettete virtuelle Modelle und Policies hinweg gewinnt die tiefere Zeile,
-gleich welche Schreibweise beide verwenden, und `response_format` und
-`verbosity` gelten als dieselben Einstellungen wie `text.format` und
-`text.verbosity`.
+gleich welche Schreibweise beide verwenden; in der Responses API gelten
+`response_format` und `verbosity` als dieselben Einstellungen wie
+`text.format` und `text.verbosity`.
 
 Ein Parametersatz bedient jede API, daher werden die hier genannten Keys in
 der API übersprungen, die sie nicht kennt, und das Token-Limit,

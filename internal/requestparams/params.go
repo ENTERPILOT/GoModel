@@ -16,6 +16,7 @@ import (
 
 	"github.com/goccy/go-json"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/validation"
 )
 
@@ -110,20 +111,21 @@ func without(set, other Set) Set {
 	return kept
 }
 
-// textMemberKeys are the chat keys that set one member of the Responses
-// text object: the same setting as that member, so sets match and layer them
-// as one.
-var textMemberKeys = map[string]string{"response_format": "format", "verbosity": "verbosity"}
+// textMemberKeys pairs the chat keys that set one member of the Responses
+// text object with that member, in a fixed order so messages are stable.
+var textMemberKeys = []struct{ chatKey, member string }{
+	{"response_format", "format"},
+	{"verbosity", "verbosity"},
+}
 
 // withoutOverlap returns key's value with whatever other also sets removed,
 // and whether anything of it is left. A key other sets in any spelling goes
-// whole; a text object loses only the members other sets through
-// response_format or verbosity.
+// whole. A text object also loses each member other sets through its chat
+// key, as other is the deeper row; the chat key itself is never dropped for a
+// text member, since only the Responses API reads text (see ApplyResponses,
+// which applies text last so a deeper row's member still wins there).
 func withoutOverlap(key string, value json.RawMessage, other Set) (json.RawMessage, bool) {
 	if _, ok := canonicalKeys(other)[canonicalKey(key)]; ok {
-		return nil, false
-	}
-	if member, ok := textMemberKeys[key]; ok && setsTextMember(other, member) {
 		return nil, false
 	}
 	if key != "text" || value == nil {
@@ -134,12 +136,14 @@ func withoutOverlap(key string, value json.RawMessage, other Set) (json.RawMessa
 		return value, true
 	}
 	removed := false
-	for chatKey, member := range textMemberKeys {
-		if _, ok := other[chatKey]; ok {
-			if _, set := members[member]; set {
-				delete(members, member)
-				removed = true
-			}
+	for _, pair := range textMemberKeys {
+		raw, ok := other[pair.chatKey]
+		if !ok || !setsOnResponses(pair.chatKey, raw) {
+			continue
+		}
+		if _, set := members[pair.member]; set {
+			delete(members, pair.member)
+			removed = true
 		}
 	}
 	if !removed {
@@ -153,6 +157,18 @@ func withoutOverlap(key string, value json.RawMessage, other Set) (json.RawMessa
 		return value, true
 	}
 	return pruned, true
+}
+
+// setsOnResponses reports whether a chat key's value reaches the Responses
+// text object: a response_format whose type Responses lacks is skipped there
+// (see ApplyResponses), so it must not displace a text.format either. A forced
+// null removes the member, so it counts.
+func setsOnResponses(chatKey string, raw json.RawMessage) bool {
+	if chatKey != "response_format" || raw == nil {
+		return true
+	}
+	_, err := core.ResponsesTextFormat(raw)
+	return err == nil
 }
 
 // setsTextMember reports whether set's text object carries member.
@@ -301,9 +317,9 @@ func Normalize(field string, set Set, allowNull bool) (Set, error) {
 		}
 		normalized[key] = compact
 	}
-	for chatKey, member := range textMemberKeys {
-		if _, ok := normalized[chatKey]; ok && setsTextMember(normalized, member) {
-			return nil, validation.NewError(fmt.Sprintf("%s: %q and text.%s set the same thing; keep one", field, chatKey, member), nil)
+	for _, pair := range textMemberKeys {
+		if _, ok := normalized[pair.chatKey]; ok && setsTextMember(normalized, pair.member) {
+			return nil, validation.NewError(fmt.Sprintf("%s: %q and text.%s set the same thing; keep one", field, pair.chatKey, pair.member), nil)
 		}
 	}
 	return normalized, nil

@@ -265,10 +265,11 @@ func TestApplyResponses(t *testing.T) {
 			want:   `{"model":"m","input":"hi"}`,
 		},
 		{
-			name:   "a forced response_format lands on top of a forced text object",
+			// Layering leaves both only when text came from the deeper row.
+			name:   "a text object lands on top of response_format",
 			body:   `{"model":"m","input":"hi"}`,
 			params: Set{"text": raw(`{"format":{"type":"text"},"verbosity":"low"}`), "response_format": raw(`{"type":"json_object"}`)},
-			want:   `{"model":"m","input":"hi","text":{"format":{"type":"json_object"},"verbosity":"low"}}`,
+			want:   `{"model":"m","input":"hi","text":{"format":{"type":"text"},"verbosity":"low"}}`,
 		},
 		{
 			name:     "a default text object fills only missing members",
