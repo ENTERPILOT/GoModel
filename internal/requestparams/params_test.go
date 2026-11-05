@@ -54,6 +54,7 @@ func TestNormalize(t *testing.T) {
 		{name: "temperature must be a number", set: Set{"temperature": raw(`"hot"`)}, wantErr: `"temperature" has the wrong type`},
 		{name: "max_tokens must be an integer", set: Set{"max_tokens": raw(`1.5`)}, wantErr: `"max_tokens" has the wrong type`},
 		{name: "max_tokens must not be negative", set: Set{"max_tokens": raw(`-1`)}, wantErr: `"max_tokens" has the wrong type`},
+		{name: "a token limit must be at least 1", set: Set{"max_completion_tokens": raw(`0`)}, wantErr: `"max_completion_tokens" has the wrong type: must be at least 1`},
 		{name: "parallel_tool_calls must be a bool", set: Set{"parallel_tool_calls": raw(`1`)}, wantErr: "wrong type"},
 		{name: "user must be a string", set: Set{"user": raw(`1`)}, wantErr: "wrong type"},
 		{name: "tool_choice string or object", set: Set{"tool_choice": raw(`[1]`)}, wantErr: "wrong type"},

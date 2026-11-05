@@ -5305,6 +5305,8 @@ func TestConvertToAnthropicRequest_HonoursDefaultMaxTokensEnv(t *testing.T) {
 }
 
 func TestConvertToAnthropicRequest_ReadsMaxCompletionTokens(t *testing.T) {
+	// The fallback case asserts the built-in default, not a configured one.
+	t.Setenv(defaultMaxTokensEnvVar, "")
 	limit := 64
 	tests := []struct {
 		name      string

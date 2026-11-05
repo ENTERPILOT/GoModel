@@ -287,12 +287,13 @@ func validateTyped(field, key string, raw json.RawMessage) error {
 	case "temperature", "top_p", "presence_penalty", "frequency_penalty":
 		var v float64
 		err = json.Unmarshal(raw, &v)
-	case "max_tokens", "max_output_tokens", "max_completion_tokens", "top_logprobs":
+	case "top_logprobs":
 		var v int
 		if err = json.Unmarshal(raw, &v); err == nil && v < 0 {
 			err = fmt.Errorf("must not be negative")
 		}
-	case "n":
+	case "max_tokens", "max_output_tokens", "max_completion_tokens", "n":
+		// No upstream accepts a zero token limit or zero choices.
 		var v int
 		if err = json.Unmarshal(raw, &v); err == nil && v < 1 {
 			err = fmt.Errorf("must be at least 1")

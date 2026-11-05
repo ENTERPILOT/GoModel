@@ -147,9 +147,10 @@ Ein Token-Limit ist in jeder Schreibweise dasselbe Limit: `max_tokens`,
 `default_params` gilt nur, wenn der Client keine davon gesendet hat.
 
 Ein Parametersatz bedient jede API, daher werden die hier genannten Keys in
-der API übersprungen, die sie nicht kennt. Ein Key, der weder übersprungen
-noch abgebildet wird (wie das Token-Limit, `response_format` und `verbosity`),
-wird unverändert weitergeleitet, und der Upstream kann ihn ablehnen. In der Responses API werden die reinen Chat-Keys
+der API übersprungen, die sie nicht kennt, und das Token-Limit,
+`response_format` und `verbosity` werden wie unten beschrieben abgebildet.
+Jeder andere Key wird unverändert weitergeleitet, und der Upstream kann ihn
+ablehnen. In der Responses API werden die reinen Chat-Keys
 `seed`, `stop`, `n`, `frequency_penalty`, `presence_penalty`, `logit_bias`,
 `logprobs`, `modalities`, `audio`, `prediction` und `web_search_options`
 übersprungen, und `response_format` und `verbosity` werden zu `text.format` und

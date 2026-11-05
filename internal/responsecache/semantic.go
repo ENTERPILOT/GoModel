@@ -449,17 +449,20 @@ func extractTextFromContent(content any) string {
 // (e.g. "/v1/chat/completions") and isolates entries across distinct endpoints.
 func computeParamsHash(body []byte, endpointPath string, plan *core.Workflow, guardrailsHash, embedderIdentity string) string {
 	var req struct {
-		Model           string              `json:"model"`
-		Temperature     *float64            `json:"temperature"`
-		TopP            *float64            `json:"top_p"`
-		MaxTokens       *int                `json:"max_tokens"`
-		MaxOutputTokens *int                `json:"max_output_tokens"`
-		Tools           []map[string]any    `json:"tools"`
-		ResponseFormat  any                 `json:"response_format"`
-		Stream          bool                `json:"stream,omitempty"`
-		StreamOptions   *core.StreamOptions `json:"stream_options"`
-		Reasoning       json.RawMessage     `json:"reasoning"`
-		Instructions    string              `json:"instructions"`
+		Model           string   `json:"model"`
+		Temperature     *float64 `json:"temperature"`
+		TopP            *float64 `json:"top_p"`
+		MaxTokens       *int     `json:"max_tokens"`
+		MaxOutputTokens *int     `json:"max_output_tokens"`
+		// MaxCompletionTokens is Chat Completions' other spelling of the
+		// limit, which reasoning-model clients and virtual-model params use.
+		MaxCompletionTokens *int                `json:"max_completion_tokens"`
+		Tools               []map[string]any    `json:"tools"`
+		ResponseFormat      any                 `json:"response_format"`
+		Stream              bool                `json:"stream,omitempty"`
+		StreamOptions       *core.StreamOptions `json:"stream_options"`
+		Reasoning           json.RawMessage     `json:"reasoning"`
+		Instructions        string              `json:"instructions"`
 	}
 	_ = json.Unmarshal(body, &req)
 
@@ -495,6 +498,12 @@ func computeParamsHash(body []byte, endpointPath string, plan *core.Workflow, gu
 		h.Write([]byte(strconv.Itoa(*req.MaxOutputTokens)))
 	}
 	h.Write([]byte{0})
+
+	// Hashed only when set, so every key without it stays as it was.
+	if req.MaxCompletionTokens != nil {
+		h.Write([]byte("max_completion_tokens:" + strconv.Itoa(*req.MaxCompletionTokens)))
+		h.Write([]byte{0})
+	}
 
 	if len(req.Reasoning) > 0 {
 		var canonical any
