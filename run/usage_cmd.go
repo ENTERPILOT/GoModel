@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/app"
 	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
@@ -70,6 +71,11 @@ func runUsageImport(ctx context.Context, opts Options, source string) error {
 	result, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
+	}
+	// As at gateway start: trust first, so a secret store behind a private CA
+	// is reachable while extensions set up and references resolve.
+	if err := app.ApplyOutboundTLSEarly(ctx, result.Config.HTTP.TLS); err != nil {
+		return err
 	}
 	if err := configHooks(ctx, opts)(result); err != nil {
 		return err
