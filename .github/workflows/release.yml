@@ -188,7 +188,9 @@ jobs:
           fetch-depth: 0 # Required for git history/changelog
 
       # The chart's image tag defaults to appVersion, so a stale one makes
-      # `helm install` deploy an older release. Prerelease tags skip this.
+      # `helm install` deploy an older release. Bump it in the commit you tag;
+      # between releases it names the latest published one. Prerelease tags
+      # skip this.
       - name: Check Helm appVersion matches the tag
         shell: bash
         run: |
