@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/validation"
 )
 
@@ -53,8 +52,6 @@ func TestNormalize(t *testing.T) {
 		{name: "json_schema format ok", set: Set{"response_format": raw(`{"type":"json_schema","json_schema":{"name":"s"}}`)}, want: Set{"response_format": raw(`{"type":"json_schema","json_schema":{"name":"s"}}`)}},
 		{name: "verbosity must be a string", set: Set{"verbosity": raw("1")}, wantErr: `"verbosity" has the wrong type`},
 		{name: "text must be an object", set: Set{"text": raw(`"low"`)}, wantErr: `"text" has the wrong type`},
-		{name: "response_format and text.format in one set", set: Set{"response_format": raw(`{"type":"json_object"}`), "text": raw(`{"format":{"type":"text"}}`)}, wantErr: `"response_format" and text.format set the same thing`},
-		{name: "verbosity beside a text object without it", set: Set{"verbosity": raw(`"low"`), "text": raw(`{"format":{"type":"text"}}`)}, want: Set{"verbosity": raw(`"low"`), "text": raw(`{"format":{"type":"text"}}`)}},
 		{name: "two spellings of the token limit", set: Set{"max_tokens": raw("1"), "max_output_tokens": raw("2")}, wantErr: `"max_output_tokens" and "max_tokens" set the same token limit`},
 		{name: "temperature must be a number", set: Set{"temperature": raw(`"hot"`)}, wantErr: `"temperature" has the wrong type`},
 		{name: "max_tokens must be an integer", set: Set{"max_tokens": raw(`1.5`)}, wantErr: `"max_tokens" has the wrong type`},
@@ -113,118 +110,6 @@ func TestDisjoint(t *testing.T) {
 	err = Disjoint(Set{"max_tokens": raw("1")}, Set{"max_completion_tokens": raw("2")})
 	require.Error(t, err, "token-limit spellings are one parameter")
 	assert.Contains(t, err.Error(), `"max_tokens" cannot be in both`)
-}
-
-// response_format and verbosity set members of the Responses text object, so
-// on that API a deeper row decides each member, forced or default, whichever
-// spelling either row used. Chat has no text object and keeps its chat keys.
-func TestLayerResolvesTextMembersByDepth(t *testing.T) {
-	apply := func(t *testing.T, layered Overrides, client *core.ResponsesRequest) (chat, responses string) {
-		t.Helper()
-		chatReq, err := ApplyChat(&core.ChatRequest{Model: "m"}, layered.Defaults, layered.Params)
-		require.NoError(t, err)
-		defaults, params := layered.ResponsesSets()
-		respReq, err := ApplyResponses(client, defaults, params)
-		require.NoError(t, err)
-		chatJSON, err := json.Marshal(chatReq)
-		require.NoError(t, err)
-		respJSON, err := json.Marshal(respReq)
-		require.NoError(t, err)
-		return string(chatJSON), string(respJSON)
-	}
-	plain := func() *core.ResponsesRequest { return &core.ResponsesRequest{Model: "m", Input: "hi"} }
-	jsonObject := raw(`{"type":"json_object"}`)
-	var none Overrides
-
-	tests := []struct {
-		name          string
-		outer, inner  Overrides
-		client        func() *core.ResponsesRequest
-		wantChat      string
-		wantResponses string
-	}{
-		{
-			name:          "a deeper text.format replaces an outer response_format",
-			outer:         Overrides{Params: Set{"response_format": jsonObject}},
-			inner:         Overrides{Params: Set{"text": raw(`{"format":{"type":"text"}}`)}},
-			wantChat:      `{"model":"m","messages":null,"response_format":{"type":"json_object"}}`,
-			wantResponses: `{"model":"m","input":"hi","text":{"format":{"type":"text"}}}`,
-		},
-		{
-			name:          "a deeper response_format replaces only the outer text.format",
-			outer:         Overrides{Params: Set{"text": raw(`{"format":{"type":"text"},"verbosity":"low"}`)}},
-			inner:         Overrides{Params: Set{"response_format": jsonObject}},
-			wantChat:      `{"model":"m","messages":null,"response_format":{"type":"json_object"}}`,
-			wantResponses: `{"model":"m","input":"hi","text":{"format":{"type":"json_object"},"verbosity":"low"}}`,
-		},
-		{
-			name:          "a deeper default unforces an outer forced format",
-			outer:         Overrides{Params: Set{"response_format": jsonObject}},
-			inner:         Overrides{Defaults: Set{"text": raw(`{"format":{"type":"text"}}`)}},
-			wantChat:      `{"model":"m","messages":null,"response_format":{"type":"json_object"}}`,
-			wantResponses: `{"model":"m","input":"hi","text":{"format":{"type":"text"}}}`,
-		},
-		{
-			name:  "a client format beats that deeper default",
-			outer: Overrides{Params: Set{"response_format": jsonObject}},
-			inner: Overrides{Defaults: Set{"text": raw(`{"format":{"type":"text"}}`)}},
-			client: func() *core.ResponsesRequest {
-				r := plain()
-				r.Text = map[string]any{"verbosity": "high", "format": map[string]any{"type": "json_schema", "name": "c"}}
-				return r
-			},
-			wantChat:      `{"model":"m","messages":null,"response_format":{"type":"json_object"}}`,
-			wantResponses: `{"model":"m","input":"hi","text":{"verbosity":"high","format":{"type":"json_schema","name":"c"}}}`,
-		},
-		{
-			name:          "a deeper format Responses cannot map leaves text.format",
-			outer:         Overrides{Params: Set{"text": raw(`{"format":{"type":"text"}}`)}},
-			inner:         Overrides{Params: Set{"response_format": raw(`{"type":"regex","pattern":"a+"}`)}},
-			wantChat:      `{"model":"m","messages":null,"response_format":{"type":"regex","pattern":"a+"}}`,
-			wantResponses: `{"model":"m","input":"hi","text":{"format":{"type":"text"}}}`,
-		},
-		{
-			name:          "a deeper forced null text removes every outer member",
-			outer:         Overrides{Params: Set{"verbosity": raw(`"low"`), "response_format": jsonObject}},
-			inner:         Overrides{Params: Set{"text": nil}},
-			wantChat:      `{"model":"m","messages":null,"response_format":{"type":"json_object"},"verbosity":"low"}`,
-			wantResponses: `{"model":"m","input":"hi"}`,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			client := plain
-			if tt.client != nil {
-				client = tt.client
-			}
-			chat, responses := apply(t, none.Layer(tt.outer).Layer(tt.inner), client())
-			assert.JSONEq(t, tt.wantChat, chat)
-			assert.JSONEq(t, tt.wantResponses, responses)
-		})
-	}
-
-	t.Run("deeper members replace an outer forced null text", func(t *testing.T) {
-		layered := none.Layer(Overrides{Params: Set{"text": nil}}).Layer(Overrides{Params: Set{"text": raw(`{"format":{"type":"json_object"}}`)}})
-		_, responses := apply(t, layered, plain())
-		assert.JSONEq(t, `{"model":"m","input":"hi","text":{"format":{"type":"json_object"}}}`, responses)
-	})
-	t.Run("a null text and verbosity in one row apply in order", func(t *testing.T) {
-		client := plain()
-		client.Text = map[string]any{"format": map[string]any{"type": "text"}}
-		layered := none.Layer(Overrides{Params: Set{"text": nil, "verbosity": raw(`"low"`)}})
-		_, responses := apply(t, layered, client)
-		assert.JSONEq(t, `{"model":"m","input":"hi","text":{"verbosity":"low"}}`, responses)
-	})
-	t.Run("a configured key that looks like a member is forwarded as is", func(t *testing.T) {
-		layered := none.Layer(Overrides{Params: Set{"text.custom": raw(`1`)}})
-		_, responses := apply(t, layered, plain())
-		assert.JSONEq(t, `{"model":"m","input":"hi","text.custom":1}`, responses)
-	})
-
-	err := Disjoint(Set{"text": raw(`{"format":{"type":"text"}}`)}, Set{"response_format": jsonObject})
-	require.Error(t, err, "a default and a forced value for the same text member")
-	err = Disjoint(Set{"response_format": jsonObject}, Set{"text": raw(`{"format":{"type":"text"}}`)})
-	require.Error(t, err)
 }
 
 // The token-limit spellings are one parameter when rows layer: the deeper

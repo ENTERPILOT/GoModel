@@ -135,22 +135,18 @@ Limit tokenów to jeden limit w każdej pisowni: `max_tokens`,
 `max_completion_tokens` i `max_output_tokens` ustawiają go tak samo. Wartość w
 `params` zastępuje pisownię, którą wysłał klient, a wartość w `default_params`
 obowiązuje tylko wtedy, gdy klient nie wysłał żadnej z nich. W łańcuchu modeli
-wirtualnych i polityk wygrywa głębszy wiersz niezależnie od pisowni; w
-Responses API `verbosity` i `response_format`, który da się zmapować, są tymi
-samymi ustawieniami co `text.verbosity` i `text.format` (typ, którego nie da
-się zmapować, np. `regex`, zostawia odziedziczone `text.format`).
+wirtualnych i polityk wygrywa głębszy wiersz niezależnie od pisowni.
 
 Jeden zestaw parametrów obsługuje każde API, więc wymienione tu klucze są
-pomijane w API, które ich nie zna, a limit tokenów, `response_format` i
-`verbosity` są mapowane tak, jak opisano niżej. Każdy inny klucz trafia do
-adaptera providera bez zmian i jest obsługiwany jak klucz od klienta: adapter
-może pominąć klucz, którego nie tłumaczy (adapter Anthropic pomija `top_k`), a
-upstream może go odrzucić. W Responses API pomijane są klucze dostępne tylko w
-Chat: `seed`, `stop`, `n`, `frequency_penalty`, `presence_penalty`,
-`logit_bias`, `logprobs`, `modalities`, `audio`, `prediction` i
-`web_search_options`, a `response_format` i `verbosity` stają się
-`text.format` i `text.verbosity` (typ `response_format`, którego Responses API
-nie zna, np. `regex`, jest pomijany). W Chat Completions pomijane są klucze
+pomijane w API, które ich nie zna, a limit tokenów jest mapowany tak, jak
+opisano wyżej. Każdy inny klucz trafia do adaptera providera bez zmian i jest
+obsługiwany jak klucz od klienta: adapter może pominąć klucz, którego nie
+tłumaczy (adapter Anthropic pomija `top_k`), a upstream może go odrzucić. W
+Responses API pomijane są klucze dostępne tylko w Chat: `seed`, `stop`, `n`,
+`frequency_penalty`, `presence_penalty`, `logit_bias`, `logprobs`,
+`modalities`, `audio`, `prediction`, `web_search_options`, `response_format` i
+`verbosity` (wymuszone `null` nadal usuwa wartość klienta); format wyjścia lub verbosity ustawisz tam przez `text`, np.
+`{"format": {"type": "json_object"}}`. W Chat Completions pomijane są klucze
 dostępne tylko w Responses: `text`, `include`, `truncation`,
 `max_tool_calls`, `background` i `context_management`.
 

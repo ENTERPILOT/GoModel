@@ -81,9 +81,9 @@ func ApplyChat(req *core.ChatRequest, defaults, params Set) (*core.ChatRequest, 
 }
 
 // ApplyResponses is ApplyChat for the Responses API. Keys keep Chat
-// Completions spelling: any token-limit spelling sets max_output_tokens, and
-// response_format and verbosity land in text. Chat members the Responses API
-// has no counterpart for are skipped.
+// Completions spelling: any token-limit spelling sets max_output_tokens.
+// Chat members the Responses API rejects are skipped, response_format and
+// verbosity included: a format for this API is set through text.
 func ApplyResponses(req *core.ResponsesRequest, defaults, params Set) (*core.ResponsesRequest, error) {
 	if req == nil || (len(defaults) == 0 && len(params) == 0) {
 		return req, nil
@@ -102,12 +102,6 @@ func ApplyResponses(req *core.ResponsesRequest, defaults, params Set) (*core.Res
 			}
 			a.stripExtras(force, responsesTokenLimitExtras...)
 			return setPtr(&cloned.MaxOutputTokens, raw, force)
-		case "text":
-			return setTextObject(&cloned.Text, raw, force)
-		case "response_format":
-			return setTextMember(&cloned.Text, "format", raw, force, true)
-		case "verbosity":
-			return setTextMember(&cloned.Text, "verbosity", raw, force, false)
 		case "top_logprobs":
 			return setPtr(&cloned.TopLogprobs, raw, force)
 		case "parallel_tool_calls":
@@ -127,10 +121,6 @@ func ApplyResponses(req *core.ResponsesRequest, defaults, params Set) (*core.Res
 		case "tool_choice":
 			return setAny(&cloned.ToolChoice, raw, force)
 		default:
-			// A text member from a Responses view (Overrides.ResponsesSets).
-			if member, ok := strings.CutPrefix(key, textMemberPrefix); ok {
-				return setTextMember(&cloned.Text, member, raw, force, false)
-			}
 			// A forced null still strips the key the client sent.
 			if _, skip := chatOnlyKeys[key]; skip && raw != nil {
 				return nil
@@ -167,12 +157,12 @@ var (
 // skipped there rather than forwarded for the upstream to reject.
 var (
 	// chatOnlyKeys are Chat Completions members the Responses API rejects.
-	// response_format and verbosity are translated instead (see
-	// ApplyResponses).
+	// response_format and verbosity are skipped too: the Responses API sets
+	// them in text, which an operator configures directly.
 	chatOnlyKeys = map[string]struct{}{
 		"seed": {}, "stop": {}, "n": {}, "frequency_penalty": {}, "presence_penalty": {},
 		"logit_bias": {}, "logprobs": {}, "modalities": {}, "audio": {}, "prediction": {},
-		"web_search_options": {},
+		"web_search_options": {}, "response_format": {}, "verbosity": {},
 	}
 	// responsesOnlyKeys are Responses API members Chat Completions rejects.
 	responsesOnlyKeys = map[string]struct{}{
@@ -225,88 +215,6 @@ func ensureExtras(extras map[string]json.RawMessage) map[string]json.RawMessage 
 		return map[string]json.RawMessage{}
 	}
 	return extras
-}
-
-// setTextObject merges a configured Responses text object into the client's
-// one level deep, as other objects merge: a forced set's members win, a
-// default's only fill missing ones, and a forced null removes the object.
-func setTextObject(text *any, raw json.RawMessage, force bool) error {
-	if raw == nil {
-		*text = nil
-		return nil
-	}
-	var configured map[string]any
-	if err := json.Unmarshal(raw, &configured); err != nil {
-		return fmt.Errorf("text is not an object: %w", err)
-	}
-	members, err := textMembers(*text)
-	if err != nil {
-		return err
-	}
-	for member, value := range configured {
-		if _, set := members[member]; set && !force {
-			continue
-		}
-		members[member] = value
-	}
-	*text = members
-	return nil
-}
-
-// textMembers decodes the client's text object into a fresh map, so the
-// client's request is never changed in place.
-func textMembers(text any) (map[string]any, error) {
-	members := map[string]any{}
-	if text == nil {
-		return members, nil
-	}
-	encoded, err := json.Marshal(text)
-	if err != nil {
-		return nil, err
-	}
-	if err := json.Unmarshal(encoded, &members); err != nil {
-		return nil, fmt.Errorf("text is not an object: %w", err)
-	}
-	return members, nil
-}
-
-// setTextMember sets one member of the Responses text object. convertFormat
-// translates a chat response_format into text.format; a member from a
-// Responses view (Overrides.ResponsesSets) is already in Responses shape. The other members the client sent stay,
-// a default leaves a member the client set alone, and a forced null removes
-// the member. The client's object is copied, never changed in place.
-func setTextMember(text *any, member string, raw json.RawMessage, force, convertFormat bool) error {
-	members, err := textMembers(*text)
-	if err != nil {
-		return err
-	}
-	if _, set := members[member]; set && !force {
-		return nil
-	}
-	switch {
-	case raw == nil:
-		delete(members, member)
-	case convertFormat:
-		format, err := core.ResponsesTextFormat(raw)
-		if err != nil {
-			// A format the Responses API has no counterpart for is a
-			// chat-only setting there.
-			return nil
-		}
-		members[member] = format
-	default:
-		var value any
-		if err := json.Unmarshal(raw, &value); err != nil {
-			return err
-		}
-		members[member] = value
-	}
-	if len(members) == 0 {
-		*text = nil
-		return nil
-	}
-	*text = members
-	return nil
 }
 
 // extraValue returns an ExtraFields member as the applier currently sees it:
