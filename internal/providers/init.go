@@ -98,6 +98,9 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 	if err := validateProviderModelFilters(providerMap); err != nil {
 		return nil, err
 	}
+	if err := validateProviderModelsModes(providerMap); err != nil {
+		return nil, err
+	}
 	fromFile, fromEnv := providerOrigins(result.RawProviders, providerMap)
 	slog.Info("providers resolved",
 		"total", len(providerMap),
@@ -356,6 +359,7 @@ func initializeProviders(ctx context.Context, providerMap map[string]ProviderCon
 			registry.SetProviderMetadataOverrides(name, pCfg.ModelMetadataOverrides)
 		}
 		registry.SetProviderModelFilter(name, pCfg.ModelFilter)
+		registry.SetProviderModelsMode(name, pCfg.ModelsMode)
 		registry.SetProviderBillable(name, pCfg.Billable)
 		keyrings[name] = result.keys
 		count++
@@ -380,4 +384,28 @@ func validateProviderModelFilters(providerMap map[string]ProviderConfig) error {
 		}
 	}
 	return nil
+}
+
+// validateProviderModelsModes rejects an unknown per-provider models_mode, so
+// a typo cannot silently fall back to the global mode.
+func validateProviderModelsModes(providerMap map[string]ProviderConfig) error {
+	names := make([]string, 0, len(providerMap))
+	for name := range providerMap {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if err := validateModelsMode("providers."+name+".models_mode", providerMap[name].ModelsMode); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateModelsMode accepts an empty mode (use the global one) or a supported value.
+func validateModelsMode(field string, mode config.ConfiguredProviderModelsMode) error {
+	if config.NormalizeConfiguredProviderModelsMode(mode) == "" || mode.Valid() {
+		return nil
+	}
+	return fmt.Errorf("%s must be fallback, allowlist, or merge, got %q", field, mode)
 }

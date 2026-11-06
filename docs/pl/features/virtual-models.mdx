@@ -119,7 +119,9 @@ parametrów samplingu, które wywołujący mogą dostrajać, a `params` dla
 ustawień, które alias musi przypiąć. Obie mapy są dostępne w `config.yaml`, w
 zmiennej środowiskowej `VIRTUAL_MODELS`, w admin API i w edytorze w
 dashboardzie. Przyjmuje je także wiersz polityki konkretnego modelu (wpis bez
-celów); wiersze dla całego providera i globalne je odrzucają.
+celów); wiersze dla całego providera (`openai/`) i globalne (`/`) je odrzucają,
+podobnie jak wymuszony poziom reasoning effort. Źródło `*`, takie jak
+`openai/*`, nie jest symbolem wieloznacznym i jest odrzucane w każdej polityce.
 
 Klucze używają pisowni OpenAI Chat Completions (`temperature`, `top_p`,
 `max_tokens`, `presence_penalty`, ...). Klucze specyficzne dla providera, takie
@@ -128,6 +130,25 @@ przechodzą bez zmian. Adaptery providerów tłumaczą skonfigurowane wartości
 dokładnie tak, jak wartości klienta: `max_tokens` nadal staje się
 `max_completion_tokens` w modelach reasoning OpenAI i `max_output_tokens` w
 Responses API.
+
+Limit tokenów to jeden limit w każdej pisowni: `max_tokens`,
+`max_completion_tokens` i `max_output_tokens` ustawiają go tak samo. Wartość w
+`params` zastępuje pisownię, którą wysłał klient, a wartość w `default_params`
+obowiązuje tylko wtedy, gdy klient nie wysłał żadnej z nich. W łańcuchu modeli
+wirtualnych i polityk wygrywa głębszy wiersz niezależnie od pisowni.
+
+Jeden zestaw parametrów obsługuje każde API, więc wymienione tu klucze są
+pomijane w API, które ich nie zna, a limit tokenów jest mapowany tak, jak
+opisano wyżej. Każdy inny klucz trafia do adaptera providera bez zmian i jest
+obsługiwany jak klucz od klienta: adapter może pominąć klucz, którego nie
+tłumaczy (adapter Anthropic pomija `top_k`), a upstream może go odrzucić. W
+Responses API pomijane są klucze dostępne tylko w Chat: `seed`, `stop`, `n`,
+`frequency_penalty`, `presence_penalty`, `logit_bias`, `logprobs`,
+`modalities`, `audio`, `prediction`, `web_search_options`, `response_format` i
+`verbosity` (wymuszone `null` nadal usuwa wartość klienta); format wyjścia lub verbosity ustawisz tam przez `text`, np.
+`{"format": {"type": "json_object"}}`. W Chat Completions pomijane są klucze
+dostępne tylko w Responses: `text`, `include`, `truncation`,
+`max_tool_calls`, `background` i `context_management`.
 
 Na przykład kilka aliasów jednego modelu hostowanego samodzielnie z różnymi
 ustawieniami myślenia i samplingu:

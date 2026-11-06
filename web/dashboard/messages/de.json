@@ -1603,7 +1603,9 @@
   "providers_service_account_file_hint": "Pfad, der für den Gateway-Prozess lesbar ist.",
   "providers_service_account_json_hint": "Gespeicherte Werte sind maskiert; lasse die Sternchen unverändert, um den gespeicherten Wert zu behalten, oder leere das Feld, um ihn zu entfernen.",
   "providers_service_account_json_base64_hint": "Gespeicherte Werte sind maskiert; lasse die Sternchen unverändert, um den gespeicherten Wert beizubehalten.",
-  "providers_models_hint": "Leer lassen, um Modelle über den /models-Endpoint des Anbieters automatisch zu erkennen, sofern unterstützt.",
+  "providers_models_hint": "Leer lassen, um Modelle über den /models-Endpoint des Anbieters automatisch zu erkennen, sofern unterstützt. Wie eine Liste angewendet wird, bestimmt der Modellmodus; um nur diese Modelle anzubieten, setze ihn auf allowlist.",
+  "providers_models_mode": "Modellmodus",
+  "providers_models_mode_hint": "Wie die Modellliste verwendet wird. fallback: nur wenn der /models-Aufruf des Anbieters fehlschlägt oder nichts liefert. allowlist: nur diese Modelle anbieten und /models überspringen. merge: sie zu den erkannten Modellen hinzufügen. Standard verwendet das gatewayweite CONFIGURED_PROVIDER_MODELS_MODE (fallback, sofern nicht gesetzt).",
   "providers_default_value": "Standard ist {value}",
   "providers_keys_count": [
     {

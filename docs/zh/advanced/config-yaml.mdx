@@ -40,6 +40,20 @@ Google Vertex AI 遵循相同的后缀命名规则（`VERTEX_US_PROJECT`
 `/models` 调用；设置为 `merge` 时，会在发现的模型清单之上追加已配置的模型——适用于提供商实际提供、却未列在其
 `/models` 列表中的模型。
 
+在单个提供商上设置 `models_mode` 可仅为该提供商覆盖全局模式；不设置时使用全局模式。例如，只暴露一个 OpenRouter 模型，而自托管提供商继续自动发现各自的模型：
+
+```yaml
+providers:
+  openrouter:
+    type: openrouter
+    api_key: "${OPENROUTER_API_KEY}"
+    models:
+      - qwen/qwen3-vl-8b-instruct
+    models_mode: allowlist # env: OPENROUTER_MODELS_MODE
+```
+
+控制台的提供商对话框在高级选项中以 **模型模式** 提供同一设置。
+
 ## 过滤提供商的模型
 
 `model_filter` 会将提供商的模型清单收窄到您真正希望可路由的模型。当提供商的模型目录远大于您想暴露的范围时可以使用它——例如使用 OpenRouter 的免费套餐做实验，而由另一个提供商承载生产环境流量。

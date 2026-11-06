@@ -49,6 +49,24 @@ oder `merge`, um konfigurierte Modelle zusätzlich zum erkannten Inventar
 hinzuzufügen – nützlich für Modelle, die ein Provider bereitstellt, aber nicht in
 seiner `/models`-Liste aufführt.
 
+Setzen Sie `models_mode` an einem Provider, um den globalen Modus nur für diesen
+Provider zu überschreiben; ohne Wert gilt der globale Modus. So stellen Sie zum
+Beispiel ein einzelnes OpenRouter-Modell bereit, während selbst gehostete
+Provider ihre Modelle weiterhin erkennen:
+
+```yaml
+providers:
+  openrouter:
+    type: openrouter
+    api_key: "${OPENROUTER_API_KEY}"
+    models:
+      - qwen/qwen3-vl-8b-instruct
+    models_mode: allowlist # env: OPENROUTER_MODELS_MODE
+```
+
+Im Provider-Dialog des Dashboards heißt die Einstellung **Modellmodus** und
+liegt unter den erweiterten Optionen.
+
 ## Modelle eines Providers filtern
 
 `model_filter` grenzt das Inventar eines Providers auf die Modelle ein, die

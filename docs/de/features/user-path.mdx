@@ -105,6 +105,12 @@ deaktiviert werden, um den Selektor vollständig abzuschalten. Selektoren könne
 - `{provider_name}/{model}` für ein Modell bei einem Provider
 - eine Modell-ID ohne Provider-Namen
 
+`*` ist in einem Richtlinien-Selektor kein Platzhalter: Ein Selektor, der `*`
+ist oder auf `/*` endet, etwa `openai/*`, liefert in der Admin-API `400` und
+wird aus `config.yaml` oder `VIRTUAL_MODELS` nicht geladen, unabhängig davon,
+ob dieser Provider existiert. Verwenden Sie `openai/` für alle Modelle eines Providers oder `/`
+für alle Modelle.
+
 Zum Beispiel:
 
 - Selektor: `openai/gpt-5`
