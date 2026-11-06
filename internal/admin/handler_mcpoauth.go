@@ -19,8 +19,14 @@ import (
 const MCPOAuthCallbackPath = mcpgateway.OAuthCallbackPath
 
 // mcpOAuthBindingCookie binds a sign-in to the browser that started it, so a
-// leaked authorization URL cannot be finished by someone else.
+// leaked authorization URL cannot be finished by someone else. Each flow has
+// its own cookie, named after its state, so starting a second sign-in does
+// not break the first one's callback.
 const mcpOAuthBindingCookie = "gomodel_mcp_oauth"
+
+func mcpOAuthBindingCookieName(state string) string {
+	return mcpOAuthBindingCookie + "_" + state
+}
 
 // MCPServerOAuth is the OAuth sign-in surface of *mcpgateway.Service. It is
 // separate from MCPServerAdmin so gateways without it keep working.
@@ -105,7 +111,7 @@ func (h *Handler) StartMCPServerOAuth(c *echo.Context) error {
 	// Secure follows the redirect URI's scheme: a gateway reached over plain
 	// HTTP on localhost needs the cookie too.
 	cookie := &http.Cookie{ //nolint:gosec // Secure is set below from the redirect URI scheme.
-		Name:     mcpOAuthBindingCookie,
+		Name:     mcpOAuthBindingCookieName(start.State),
 		Value:    start.Binding,
 		Path:     mcpgateway.OAuthCallbackPath,
 		MaxAge:   600,
@@ -171,17 +177,17 @@ func (h *Handler) MCPOAuthCallback(c *echo.Context) error {
 		Error:            query.Get("error"),
 		ErrorDescription: query.Get("error_description"),
 	}
-	if cookie, err := c.Cookie(mcpOAuthBindingCookie); err == nil {
+	if cookie, err := c.Cookie(mcpOAuthBindingCookieName(callback.State)); err == nil {
 		callback.Binding = cookie.Value
+		c.SetCookie(&http.Cookie{ //nolint:gosec // Clears the cookie; it carries no value.
+			Name:     cookie.Name,
+			Value:    "",
+			Path:     c.Request().URL.Path,
+			MaxAge:   -1,
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+		})
 	}
-	c.SetCookie(&http.Cookie{ //nolint:gosec // Clears the cookie; it carries no value.
-		Name:     mcpOAuthBindingCookie,
-		Value:    "",
-		Path:     c.Request().URL.Path,
-		MaxAge:   -1,
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	})
 
 	server, err := oauth.CompleteOAuth(c.Request().Context(), callback)
 	outcome := url.Values{}

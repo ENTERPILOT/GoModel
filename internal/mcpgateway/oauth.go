@@ -53,9 +53,11 @@ type OAuthStartRequest struct {
 }
 
 // OAuthStart is a started sign-in: the browser goes to AuthorizationURL with
-// the binding cookie set, which the callback has to present.
+// the binding cookie set, which the callback has to present. State names the
+// flow, so concurrent sign-ins each keep their own cookie.
 type OAuthStart struct {
 	AuthorizationURL string
+	State            string
 	Binding          string
 }
 
@@ -89,7 +91,14 @@ type oauthManager struct {
 	mu       sync.Mutex
 	sources  map[string]*oauthSource
 	pending  map[string]*oauthFlow
-	failures map[string]string
+	failures map[string]oauthFailure
+}
+
+// oauthFailure is the last sign-in failure of a server at url; it is not
+// shown once the server's URL changed.
+type oauthFailure struct {
+	url     string
+	message string
 }
 
 func newOAuthManager(store *oauthStore, httpClient *http.Client) *oauthManager {
@@ -101,7 +110,7 @@ func newOAuthManager(store *oauthStore, httpClient *http.Client) *oauthManager {
 		httpClient: httpClient,
 		sources:    make(map[string]*oauthSource),
 		pending:    make(map[string]*oauthFlow),
-		failures:   make(map[string]string),
+		failures:   make(map[string]oauthFailure),
 	}
 }
 
@@ -120,7 +129,7 @@ func (m *oauthManager) attach(specs []ServerSpec, records map[string]oauthRecord
 	for i := range specs {
 		spec := &specs[i]
 		spec.oauth = nil
-		if !oauthTransport(spec.Transport) {
+		if !oauthTransport(spec.Transport) || !oauthSecureURL(spec.URL) {
 			continue
 		}
 		current := m.sources[spec.Name]
@@ -148,7 +157,10 @@ func (m *oauthManager) view(spec ServerSpec) *OAuthView {
 		return nil
 	}
 	m.mu.Lock()
-	failure := m.failures[spec.Name]
+	var failure string
+	if last, ok := m.failures[spec.Name]; ok && last.url == spec.URL {
+		failure = last.message
+	}
 	m.mu.Unlock()
 	if spec.oauth != nil {
 		view := spec.oauth.view()
@@ -163,9 +175,17 @@ func (m *oauthManager) view(spec ServerSpec) *OAuthView {
 	return nil
 }
 
-func (m *oauthManager) fail(name string, err error) {
+func (m *oauthManager) fail(name, serverURL string, err error) {
 	m.mu.Lock()
-	m.failures[name] = err.Error()
+	m.failures[name] = oauthFailure{url: serverURL, message: err.Error()}
+	m.mu.Unlock()
+}
+
+// drop forgets the token source of name, so a reload that cannot read the
+// store does not keep a signed-out server's tokens.
+func (m *oauthManager) drop(name string) {
+	m.mu.Lock()
+	delete(m.sources, name)
 	m.mu.Unlock()
 }
 
@@ -212,6 +232,22 @@ func oauthTransport(transport string) bool {
 	return transport == "" || transport == "http" || transport == "sse"
 }
 
+// oauthSecureURL reports whether bearer tokens may go to serverURL: https,
+// or plain http on a loopback host for local development (RFC 6750 §5.3).
+func oauthSecureURL(serverURL string) bool {
+	parsed, err := url.Parse(serverURL)
+	if err != nil {
+		return false
+	}
+	switch parsed.Scheme {
+	case "https":
+		return true
+	case "http":
+		return isLoopbackHost(parsed.Hostname())
+	}
+	return false
+}
+
 // StartOAuth runs MCP authorization discovery for server name and returns
 // the authorization URL the operator's browser opens. Config-declared and
 // dashboard-managed HTTP servers can both sign in: tokens are runtime state,
@@ -227,13 +263,16 @@ func (s *Service) StartOAuth(ctx context.Context, name string, req OAuthStartReq
 	if !oauthTransport(spec.Transport) {
 		return OAuthStart{}, fmt.Errorf("%w: OAuth sign-in needs an http or sse server", ErrOAuthInvalidRequest)
 	}
+	if !oauthSecureURL(spec.URL) {
+		return OAuthStart{}, fmt.Errorf("%w: OAuth sign-in needs an https server URL; plain http is only allowed on localhost", ErrOAuthInvalidRequest)
+	}
 	req.RedirectURI = strings.TrimSpace(req.RedirectURI)
 	if err := ValidateOAuthRedirectURI(req.RedirectURI); err != nil {
 		return OAuthStart{}, err
 	}
 	start, err := s.startOAuth(ctx, spec, req)
 	if err != nil {
-		s.oauth.fail(name, err)
+		s.oauth.fail(name, spec.URL, err)
 		return OAuthStart{}, err
 	}
 	return start, nil
@@ -282,7 +321,7 @@ func (s *Service) startOAuth(ctx context.Context, spec ServerSpec, req OAuthStar
 		record:       record,
 		expires:      time.Now().Add(oauthFlowTTL),
 	})
-	return OAuthStart{AuthorizationURL: authURL, Binding: binding}, nil
+	return OAuthStart{AuthorizationURL: authURL, State: state, Binding: binding}, nil
 }
 
 // CompleteOAuth finishes a sign-in from the authorization response: it
@@ -298,7 +337,7 @@ func (s *Service) CompleteOAuth(ctx context.Context, callback OAuthCallback) (st
 		return "", ErrOAuthFlowUnknown
 	}
 	if err := s.completeOAuth(ctx, flow, callback); err != nil {
-		s.oauth.fail(flow.server, err)
+		s.oauth.fail(flow.server, flow.record.ServerURL, err)
 		return flow.server, err
 	}
 	s.oauth.clearFailure(flow.server)
@@ -384,6 +423,7 @@ func (s *Service) SignOutOAuth(ctx context.Context, name string) error {
 		return err
 	}
 	s.oauth.clearFailure(name)
+	s.oauth.drop(name)
 	defer s.notifyChanged(ctx)
 	return s.Reload(ctx)
 }

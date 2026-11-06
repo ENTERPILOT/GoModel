@@ -155,6 +155,9 @@ func (o *oauthSource) adoptStored(ctx context.Context) bool {
 		return false
 	}
 	o.record = *stored
+	// The adopted tokens supersede the failed refresh; a later failure sets
+	// the error again.
+	o.lastErr = ""
 	return true
 }
 
@@ -188,10 +191,14 @@ func (o *oauthSource) serverURL() string {
 }
 
 // refresh runs the refresh-token grant, sending the RFC 8707 resource
-// indicator like the authorization and code exchange requests did.
+// indicator like the authorization and code exchange requests did. It is
+// detached from the caller's cancellation and bounded by oauthRefreshTimeout
+// instead: the authorization server can consume the refresh token before a
+// cancellation reaches it, and dropping the rotated one would force a new
+// sign-in.
 func (o *oauthSource) refresh(ctx context.Context, record oauthRecord) (*oauth2.Token, error) {
 	cfg := record.config("")
-	ctx, cancel := context.WithTimeout(ctx, oauthRefreshTimeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), oauthRefreshTimeout)
 	defer cancel()
 	ctx = context.WithValue(ctx, oauth2.HTTPClient, resourceClient(o.httpClient, record.TokenURL, record.Resource))
 	token, err := cfg.TokenSource(ctx, &oauth2.Token{RefreshToken: record.RefreshToken}).Token()

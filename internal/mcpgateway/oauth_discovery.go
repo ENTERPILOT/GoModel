@@ -147,11 +147,14 @@ func protectedResourceMetadataURLs(metadataURL, serverURL string) []prmCandidate
 	wellKnown := *parsed
 	wellKnown.RawQuery = ""
 	wellKnown.Fragment = ""
-	if path := strings.Trim(parsed.Path, "/"); path != "" {
-		wellKnown.Path = "/.well-known/oauth-protected-resource/" + path
+	// RawPath keeps escaped separators such as %2F in the endpoint's path.
+	if path := strings.Trim(parsed.EscapedPath(), "/"); path != "" {
+		wellKnown.Path = "/.well-known/oauth-protected-resource/" + strings.Trim(parsed.Path, "/")
+		wellKnown.RawPath = "/.well-known/oauth-protected-resource/" + path
 		candidates = append(candidates, prmCandidate{url: wellKnown.String(), resource: serverURL})
 	}
 	wellKnown.Path = "/.well-known/oauth-protected-resource"
+	wellKnown.RawPath = ""
 	root := url.URL{Scheme: parsed.Scheme, Host: parsed.Host}
 	candidates = append(candidates, prmCandidate{url: wellKnown.String(), resource: root.String()})
 	return candidates
@@ -186,13 +189,14 @@ type oauthClient struct {
 // resolveOAuthClient picks the client in the spec's priority order: the
 // pre-registered client the operator entered, the client stored from an
 // earlier sign-in with the same authorization server and redirect URI, then
-// dynamic client registration (RFC 7591).
+// dynamic client registration (RFC 7591). Issuers compare exactly, as RFC
+// 8414 requires, so a stored client never follows a different issuer.
 func resolveOAuthClient(ctx context.Context, client *http.Client, asm *oauthex.AuthServerMeta, req OAuthStartRequest, stored *oauthRecord) (oauthClient, error) {
 	if id := strings.TrimSpace(req.ClientID); id != "" {
 		secret := strings.TrimSpace(req.ClientSecret)
 		return oauthClient{id: id, secret: secret, authStyle: tokenAuthStyle(asm.TokenEndpointAuthMethodsSupported, secret)}, nil
 	}
-	if stored != nil && stored.ClientID != "" && sameIssuer(stored.Issuer, asm.Issuer) && stored.RedirectURI == req.RedirectURI {
+	if stored != nil && stored.ClientID != "" && stored.Issuer == asm.Issuer && stored.RedirectURI == req.RedirectURI {
 		return oauthClient{id: stored.ClientID, secret: stored.ClientSecret, authStyle: oauth2.AuthStyle(stored.AuthStyle), registered: stored.Registered}, nil
 	}
 	if asm.RegistrationEndpoint == "" {
@@ -200,7 +204,7 @@ func resolveOAuthClient(ctx context.Context, client *http.Client, asm *oauthex.A
 	}
 	registered, err := oauthex.RegisterClient(ctx, asm.RegistrationEndpoint, &oauthex.ClientRegistrationMetadata{
 		RedirectURIs:            []string{req.RedirectURI},
-		TokenEndpointAuthMethod: "none",
+		TokenEndpointAuthMethod: registrationAuthMethod(asm.TokenEndpointAuthMethodsSupported),
 		GrantTypes:              []string{"authorization_code", "refresh_token"},
 		ResponseTypes:           []string{"code"},
 		ClientName:              "GoModel",
@@ -234,8 +238,20 @@ func registrationError(err error) error {
 	return errors.New("dynamic client registration failed: the authorization server returned an unexpected response")
 }
 
-func sameIssuer(a, b string) bool {
-	return strings.TrimSuffix(a, "/") == strings.TrimSuffix(b, "/")
+// registrationAuthMethod picks the token endpoint auth method to register
+// with: a public client ("none") when the authorization server allows it or
+// lists nothing, else the first client secret method it lists. The method
+// the server actually assigned is read back from the registration response.
+func registrationAuthMethod(supported []string) string {
+	if len(supported) == 0 || slices.Contains(supported, "none") {
+		return "none"
+	}
+	for _, method := range []string{"client_secret_basic", "client_secret_post"} {
+		if slices.Contains(supported, method) {
+			return method
+		}
+	}
+	return "none"
 }
 
 // applicationType is "native" for a loopback redirect URI and "web"

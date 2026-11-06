@@ -368,7 +368,8 @@ func (b *releasingBody) Close() error {
 // a session ID is the server dropping that session, not a missing endpoint,
 // and stateless servers legitimately answer the standalone SSE GET with 405.
 // A 401 there means the server wants a credential, which the admin view
-// reports as AuthRequired so the dashboard can offer an OAuth sign-in.
+// reports as AuthRequired so the dashboard can offer an OAuth sign-in. A
+// redirect is not an answer: the request it leads to is.
 type connectProbe struct {
 	base    http.RoundTripper
 	method  string
@@ -378,7 +379,7 @@ type connectProbe struct {
 
 func (p *connectProbe) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := p.base.RoundTrip(req)
-	if err != nil || req.Method != p.method || !p.decided.CompareAndSwap(false, true) {
+	if err != nil || req.Method != p.method || isRedirect(resp.StatusCode) || !p.decided.CompareAndSwap(false, true) {
 		return resp, err
 	}
 	switch resp.StatusCode {
@@ -386,6 +387,10 @@ func (p *connectProbe) RoundTrip(req *http.Request) (*http.Response, error) {
 		p.status.Store(int32(resp.StatusCode))
 	}
 	return resp, err
+}
+
+func isRedirect(status int) bool {
+	return status >= 300 && status < 400
 }
 
 // unauthorized reports whether the dial's first handshake request was

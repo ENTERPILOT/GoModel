@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -404,6 +405,14 @@ func TestProtectedResourceMetadataURLs(t *testing.T) {
 			},
 		},
 		{
+			name:      "escaped separator",
+			serverURL: "https://mcp.example.com/a%2Fb/mcp",
+			want: []prmCandidate{
+				{url: "https://mcp.example.com/.well-known/oauth-protected-resource/a%2Fb/mcp", resource: "https://mcp.example.com/a%2Fb/mcp"},
+				{url: "https://mcp.example.com/.well-known/oauth-protected-resource", resource: "https://mcp.example.com"},
+			},
+		},
+		{
 			name:        "challenge first",
 			metadataURL: "https://mcp.example.com/prm",
 			serverURL:   "https://mcp.example.com",
@@ -459,9 +468,9 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
 
 func TestOAuthTokenReplacesStaticAuthorizationHeader(t *testing.T) {
-	var got string
+	got := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got = r.Header.Get("Authorization")
+		got <- r.Header.Get("Authorization")
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	t.Cleanup(server.Close)
@@ -478,7 +487,7 @@ func TestOAuthTokenReplacesStaticAuthorizationHeader(t *testing.T) {
 	resp, err := client.Get(server.URL)
 	require.NoError(t, err)
 	_ = resp.Body.Close()
-	assert.Equal(t, "Bearer access-secret", got)
+	assert.Equal(t, "Bearer access-secret", <-got)
 }
 
 func TestOAuthRefreshNeverUndoesAnotherSignIn(t *testing.T) {
@@ -534,4 +543,166 @@ func TestOAuthAttachDropsKeptSourceWhenURLChanged(t *testing.T) {
 	specs = []ServerSpec{testSpec("notion", "https://other.example.com/mcp", nil)}
 	manager.attach(specs, nil, true)
 	assert.Nil(t, specs[0].oauth, "tokens never follow a server to a new URL")
+}
+
+// expiredRecordFor returns a stored sign-in whose access token expired, with
+// token requests going to as.
+func expiredRecordFor(as *fakeAuthServer) oauthRecord {
+	record := testOAuthRecord()
+	record.TokenURL = as.URL + "/token"
+	record.Expiry = time.Now().Add(-time.Minute)
+	as.mu.Lock()
+	as.resource = record.Resource
+	as.refreshToken = record.RefreshToken
+	as.mu.Unlock()
+	return record
+}
+
+func TestOAuthRefreshOutlivesCanceledRequest(t *testing.T) {
+	as := newFakeAuthServer(t, false)
+	source := newOAuthSource("notion", expiredRecordFor(as), nil, as.Client())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	token, err := source.accessToken(ctx)
+	require.NoError(t, err, "a canceled caller does not lose the rotated refresh token")
+	assert.Equal(t, "access-2", token)
+	assert.Equal(t, "refresh-2", source.record.RefreshToken)
+}
+
+func TestOAuthAdoptedTokenClearsRefreshError(t *testing.T) {
+	as := newFakeAuthServer(t, false)
+	record := expiredRecordFor(as)
+	store, err := NewSQLStore(context.Background(), sqlxtest.NewSQLite(t))
+	require.NoError(t, err)
+	box, _ := encryptiontest.NewBox(t)
+	oauth := newOAuthStore(store, box)
+	ctx := context.Background()
+
+	// Another instance rotated the refresh token and stored a valid token.
+	stored := record
+	stored.AccessToken = "adopted"
+	stored.RefreshToken = "rotated-elsewhere"
+	stored.Expiry = time.Now().Add(time.Hour)
+	require.NoError(t, oauth.put(ctx, "notion", stored))
+	as.mu.Lock()
+	as.refreshToken = "rotated-elsewhere"
+	as.mu.Unlock()
+
+	source := newOAuthSource("notion", record, oauth, as.Client())
+	source.lastErr = "an earlier refresh failed"
+
+	token, err := source.accessToken(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "adopted", token)
+	view := source.view()
+	assert.Equal(t, OAuthStatusSignedIn, view.Status)
+	assert.Empty(t, view.LastError)
+}
+
+func TestRegistrationAuthMethod(t *testing.T) {
+	tests := []struct {
+		name      string
+		supported []string
+		want      string
+	}{
+		{name: "not listed", want: "none"},
+		{name: "public clients allowed", supported: []string{"client_secret_basic", "none"}, want: "none"},
+		{name: "basic only", supported: []string{"client_secret_basic"}, want: "client_secret_basic"},
+		{name: "post only", supported: []string{"client_secret_post"}, want: "client_secret_post"},
+		{name: "unknown methods", supported: []string{"private_key_jwt"}, want: "none"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, registrationAuthMethod(tt.supported))
+		})
+	}
+}
+
+func TestResolveOAuthClientComparesIssuersExactly(t *testing.T) {
+	stored := testOAuthRecord()
+	stored.Issuer = "https://as.example/"
+	stored.RedirectURI = testRedirectURI
+	req := OAuthStartRequest{RedirectURI: testRedirectURI}
+
+	asm := &oauthex.AuthServerMeta{Issuer: "https://as.example/"}
+	client, err := resolveOAuthClient(context.Background(), nil, asm, req, &stored)
+	require.NoError(t, err)
+	assert.Equal(t, stored.ClientID, client.id, "the same issuer reuses the stored client")
+
+	asm = &oauthex.AuthServerMeta{Issuer: "https://as.example"}
+	_, err = resolveOAuthClient(context.Background(), nil, asm, req, &stored)
+	require.ErrorIs(t, err, ErrOAuthClientRequired, "another issuer string never gets the stored client")
+}
+
+func TestOAuthSignOutDropsKeptSource(t *testing.T) {
+	record := testOAuthRecord()
+	manager := newOAuthManager(nil, nil)
+	manager.sources["notion"] = newOAuthSource("notion", record, nil, nil)
+
+	manager.drop("notion")
+	specs := []ServerSpec{testSpec("notion", record.ServerURL, nil)}
+	manager.attach(specs, nil, true)
+	assert.Nil(t, specs[0].oauth, "a reload that cannot read the store keeps no signed-out tokens")
+}
+
+func TestOAuthFailureFollowsServerURL(t *testing.T) {
+	manager := newOAuthManager(nil, nil)
+	manager.fail("notion", "https://old.example.com/mcp", assert.AnError)
+
+	view := manager.view(testSpec("notion", "https://old.example.com/mcp", nil))
+	require.NotNil(t, view)
+	assert.Equal(t, OAuthStatusError, view.Status)
+	assert.Nil(t, manager.view(testSpec("notion", "https://new.example.com/mcp", nil)),
+		"a failure from the previous URL is not shown")
+}
+
+func TestOAuthSecureURL(t *testing.T) {
+	tests := []struct {
+		url  string
+		want bool
+	}{
+		{url: "https://mcp.example.com/mcp", want: true},
+		{url: "http://localhost:8080/mcp", want: true},
+		{url: "http://127.0.0.1:8080/mcp", want: true},
+		{url: "http://[::1]:8080/mcp", want: true},
+		{url: "http://mcp.example.com/mcp"},
+		{url: "http://192.168.1.10/mcp"},
+		{url: "ftp://mcp.example.com/mcp"},
+		{url: "://bad"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.url, func(t *testing.T) {
+			assert.Equal(t, tt.want, oauthSecureURL(tt.url))
+		})
+	}
+}
+
+func TestOAuthAttachSkipsPlainHTTPServers(t *testing.T) {
+	record := testOAuthRecord()
+	record.ServerURL = "http://mcp.example.com/mcp"
+	manager := newOAuthManager(nil, nil)
+
+	specs := []ServerSpec{testSpec("notion", record.ServerURL, nil)}
+	manager.attach(specs, map[string]oauthRecord{"notion": record}, false)
+	assert.Nil(t, specs[0].oauth, "tokens never go to a non-loopback http server")
+}
+
+func TestConnectProbeFollowsRedirectToUnauthorized(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/mcp" {
+			http.Redirect(w, r, "/mcp/", http.StatusTemporaryRedirect)
+			return
+		}
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}))
+	t.Cleanup(server.Close)
+
+	u := newUpstream(testSpec("notion", server.URL+"/mcp", nil), server.Client())
+	probe := &connectProbe{method: http.MethodPost}
+	client := u.dialClient(probe, context.Background())
+	resp, err := client.Post(server.URL+"/mcp", "application/json", strings.NewReader("{}"))
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	assert.True(t, probe.unauthorized(), "the 401 after a redirect counts, not the redirect")
 }

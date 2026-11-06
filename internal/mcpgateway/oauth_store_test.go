@@ -93,3 +93,48 @@ func TestOAuthStoreReencryptsPlaintext(t *testing.T) {
 		assert.Equal(t, 0, report.Reencrypted, "a second pass rewrites nothing")
 	})
 }
+
+// resealingRows re-seals the stored row right before the first swap, the way
+// a concurrent data key rotation does.
+type resealingRows struct {
+	oauthRowStore
+	reseal func() error
+	swaps  int
+}
+
+func (r *resealingRows) swapOAuth(ctx context.Context, name, current, next string) (bool, error) {
+	r.swaps++
+	if r.swaps == 1 {
+		if err := r.reseal(); err != nil {
+			return false, err
+		}
+	}
+	return r.oauthRowStore.swapOAuth(ctx, name, current, next)
+}
+
+func TestOAuthStoreUpdateRetriesAfterReseal(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, raw Store) {
+		ctx := context.Background()
+		box, _ := encryptiontest.NewBox(t)
+		plain := newOAuthStore(raw, box)
+		record := testOAuthRecord()
+		require.NoError(t, plain.put(ctx, "github", record))
+
+		rows := &resealingRows{oauthRowStore: raw.(oauthRowStore)}
+		rows.reseal = func() error { return plain.put(ctx, "github", record) }
+		store := &oauthStore{rows: rows, box: box}
+
+		refreshed := record
+		refreshed.RefreshToken = "rotated"
+		saved, err := store.update(ctx, "github", refreshed, func(stored oauthRecord) bool {
+			return stored.SignedInAt.Equal(record.SignedInAt)
+		})
+		require.NoError(t, err)
+		assert.True(t, saved, "a re-sealed row with the same sign-in is written on retry")
+		assert.Equal(t, 2, rows.swaps)
+
+		got, err := store.get(ctx, "github")
+		require.NoError(t, err)
+		assert.Equal(t, "rotated", got.RefreshToken)
+	})
+}

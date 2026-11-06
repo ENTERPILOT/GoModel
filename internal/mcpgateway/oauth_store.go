@@ -149,33 +149,44 @@ func (s *oauthStore) put(ctx context.Context, name string, record oauthRecord) e
 	return s.confirmKey(ctx, name, record, value)
 }
 
+// oauthUpdateAttempts bounds how often update re-reads a row that changed
+// under it, such as one a data key rotation re-sealed meanwhile.
+const oauthUpdateAttempts = 3
+
 // update replaces the stored record with record only while the stored one
 // still satisfies same, so a refresh from an old sign-in never undoes a
-// sign-out or a newer sign-in. It reports whether it wrote.
+// sign-out or a newer sign-in. A row that changed between the read and the
+// write is read again, so a re-seal by a key rotation does not lose a
+// rotated refresh token. It reports whether it wrote.
 func (s *oauthStore) update(ctx context.Context, name string, record oauthRecord, same func(stored oauthRecord) bool) (bool, error) {
-	current, err := s.rows.getOAuth(ctx, name)
-	if errors.Is(err, ErrNotFound) {
-		return false, nil
+	for range oauthUpdateAttempts {
+		current, err := s.rows.getOAuth(ctx, name)
+		if errors.Is(err, ErrNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		stored, err := s.open(name, current)
+		if err != nil {
+			return false, err
+		}
+		if !same(stored) {
+			return false, nil
+		}
+		next, err := s.seal(name, record)
+		if err != nil {
+			return false, err
+		}
+		swapped, err := s.rows.swapOAuth(ctx, name, current, next)
+		if err != nil {
+			return false, err
+		}
+		if swapped {
+			return true, s.confirmKey(ctx, name, record, next)
+		}
 	}
-	if err != nil {
-		return false, err
-	}
-	stored, err := s.open(name, current)
-	if err != nil {
-		return false, err
-	}
-	if !same(stored) {
-		return false, nil
-	}
-	next, err := s.seal(name, record)
-	if err != nil {
-		return false, err
-	}
-	swapped, err := s.rows.swapOAuth(ctx, name, current, next)
-	if err != nil || !swapped {
-		return false, err
-	}
-	return true, s.confirmKey(ctx, name, record, next)
+	return false, fmt.Errorf("save mcp oauth record for %q: the row kept changing", name)
 }
 
 // confirmKey re-seals a just-written record when a data key rotation

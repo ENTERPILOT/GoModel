@@ -30,7 +30,7 @@ func (f *mcpOAuthFake) StartOAuth(_ context.Context, name string, req mcpgateway
 	if f.startErr != nil {
 		return mcpgateway.OAuthStart{}, f.startErr
 	}
-	return mcpgateway.OAuthStart{AuthorizationURL: "https://auth.example.com/authorize?state=s&client_id=" + name, Binding: "binding-1"}, nil
+	return mcpgateway.OAuthStart{AuthorizationURL: "https://auth.example.com/authorize?state=s&client_id=" + name, State: "s", Binding: "binding-1"}, nil
 }
 
 func (f *mcpOAuthFake) CompleteOAuth(_ context.Context, callback mcpgateway.OAuthCallback) (string, error) {
@@ -65,7 +65,7 @@ func TestStartMCPServerOAuth(t *testing.T) {
 
 		cookies := rec.Result().Cookies()
 		require.Len(t, cookies, 1)
-		assert.Equal(t, mcpOAuthBindingCookie, cookies[0].Name)
+		assert.Equal(t, "gomodel_mcp_oauth_s", cookies[0].Name, "each flow has its own cookie")
 		assert.Equal(t, "binding-1", cookies[0].Value)
 		assert.Equal(t, "/base/admin/mcp-oauth/callback", cookies[0].Path)
 		assert.True(t, cookies[0].HttpOnly)
@@ -137,13 +137,18 @@ func TestMCPOAuthCallbackRedirectsToDashboard(t *testing.T) {
 			fake.completeErr = tt.err
 			h := NewHandler(nil, nil, WithMCPServers(fake))
 			c, rec := echotest.Request(t, http.MethodGet, MCPOAuthCallbackPath+"?state=s1&code=c1&iss=https%3A%2F%2Fas.example",
-				nil, echotest.WithHeader("Cookie", mcpOAuthBindingCookie+"=binding-1"))
+				nil, echotest.WithHeader("Cookie", "gomodel_mcp_oauth_other=binding-2; gomodel_mcp_oauth_s1=binding-1"))
 			require.NoError(t, h.MCPOAuthCallback(c))
 			assert.Equal(t, http.StatusSeeOther, rec.Code)
 			assert.Equal(t, tt.wantLocation, rec.Header().Get("Location"))
 			assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
 			assert.NotContains(t, rec.Header().Get("Location"), "invalid_grant", "failure details stay out of the URL")
-			assert.Equal(t, mcpgateway.OAuthCallback{State: "s1", Code: "c1", Issuer: "https://as.example", Binding: "binding-1"}, fake.callback)
+			assert.Equal(t, mcpgateway.OAuthCallback{State: "s1", Code: "c1", Issuer: "https://as.example", Binding: "binding-1"}, fake.callback,
+				"the callback reads its own flow's cookie")
+			cleared := rec.Result().Cookies()
+			require.Len(t, cleared, 1)
+			assert.Equal(t, "gomodel_mcp_oauth_s1", cleared[0].Name)
+			assert.Equal(t, -1, cleared[0].MaxAge)
 		})
 	}
 }
