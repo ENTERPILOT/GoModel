@@ -112,6 +112,7 @@ func TestClusterSyncWiresEveryAdminManagedSnapshot(t *testing.T) {
 		syncEntityUsers,
 		syncEntityVirtualModels,
 		syncEntityPricingOverrides,
+		syncEntityMetadataOverrides,
 		syncEntityTagging,
 		syncEntityGuardrails,
 		syncEntityWorkflows,
