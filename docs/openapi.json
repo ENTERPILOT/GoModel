@@ -16515,7 +16515,7 @@
             "type": "string"
           },
           "summary": {
-            "description": "Summary requests a reasoning summary from the model (OpenAI Responses\nAPI: \"auto\", \"concise\", \"detailed\"). Empty asks for no summary; the\nResponses API never emits summaries unprompted.",
+            "description": "Summary requests a reasoning summary from the model (OpenAI Responses\nAPI: \"auto\", \"concise\", \"detailed\"). The Responses API never emits\nsummaries unprompted, so empty asks for none there. A chat request the\ngateway serves through the Responses API sends a summary only while\nreasoning is on: the client's, or \"auto\" when it set none. With effort\n\"none\", or without an effort on a model that does not reason, none is\nsent.",
             "type": "string"
           }
         }
