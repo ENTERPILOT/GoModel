@@ -132,10 +132,12 @@ func newOAuthManager(store *oauthStore, httpClient *http.Client) *oauthManager {
 // sign-in gets a new source, so the manager redials with it; tokens another
 // instance refreshed are adopted in place. A server whose URL changed since
 // sign-in does not get the tokens. keepMissing keeps the current source of a
-// server whose record could not be read. The decisions run without m.mu:
-// a source's lock can be held by a token refresh, and admin views must not
-// wait for it.
-func (m *oauthManager) attach(specs []ServerSpec, records map[string]oauthRecord, keepMissing bool) {
+// server whose record could not be read. generations is the sign-out count
+// per server from before records were read: a server signed out since then
+// gets no source, so a stale snapshot never brings its tokens back. The
+// decisions run without m.mu: a source's lock can be held by a token
+// refresh, and admin views must not wait for it.
+func (m *oauthManager) attach(specs []ServerSpec, records map[string]oauthRecord, keepMissing bool, generations map[string]uint64) {
 	if m == nil {
 		return
 	}
@@ -169,8 +171,7 @@ func (m *oauthManager) attach(specs []ServerSpec, records map[string]oauthRecord
 	defer m.mu.Unlock()
 	for i := range specs {
 		spec := &specs[i]
-		// A source signed out while the decisions ran stays dropped.
-		if spec.oauth != nil && spec.oauth == previous[spec.Name] && m.sources[spec.Name] != spec.oauth {
+		if spec.oauth != nil && m.generations[spec.Name] != generations[spec.Name] {
 			delete(sources, spec.Name)
 			spec.oauth = nil
 		}
@@ -223,6 +224,14 @@ func (m *oauthManager) signedOut(name string) {
 			delete(m.pending, state)
 		}
 	}
+}
+
+// generationsSnapshot copies every server's sign-out count, taken before a
+// reload reads the stored records.
+func (m *oauthManager) generationsSnapshot() map[string]uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return maps.Clone(m.generations)
 }
 
 // generation is name's sign-out count, captured when a sign-in starts.
@@ -540,9 +549,10 @@ func (s *Service) attachOAuth(ctx context.Context, specs []ServerSpec) {
 	if s.oauth == nil || s.oauth.store == nil {
 		return
 	}
+	generations := s.oauth.generationsSnapshot()
 	records, err := s.oauth.store.list(ctx)
 	if err != nil {
 		slog.Warn("some mcp oauth sign-ins could not be read; keeping their current tokens", "error", err)
 	}
-	s.oauth.attach(specs, records, err != nil)
+	s.oauth.attach(specs, records, err != nil, generations)
 }

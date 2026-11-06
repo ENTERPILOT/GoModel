@@ -486,11 +486,11 @@ func TestOAuthAttachDropsKeptSourceWhenURLChanged(t *testing.T) {
 	manager.sources["notion"] = current
 
 	specs := []ServerSpec{testSpec("notion", record.ServerURL, nil)}
-	manager.attach(specs, nil, true)
+	manager.attach(specs, nil, true, nil)
 	assert.Same(t, current, specs[0].oauth, "an unreadable record keeps the current tokens")
 
 	specs = []ServerSpec{testSpec("notion", "https://other.example.com/mcp", nil)}
-	manager.attach(specs, nil, true)
+	manager.attach(specs, nil, true, nil)
 	assert.Nil(t, specs[0].oauth, "tokens never follow a server to a new URL")
 }
 
@@ -536,7 +536,7 @@ func TestOAuthSignOutDropsKeptSource(t *testing.T) {
 
 	manager.signedOut("notion")
 	specs := []ServerSpec{testSpec("notion", record.ServerURL, nil)}
-	manager.attach(specs, nil, true)
+	manager.attach(specs, nil, true, nil)
 	assert.Nil(t, specs[0].oauth, "a reload that cannot read the store keeps no signed-out tokens")
 }
 
@@ -579,7 +579,7 @@ func TestOAuthAttachSkipsPlainHTTPServers(t *testing.T) {
 	manager := newOAuthManager(nil, nil)
 
 	specs := []ServerSpec{testSpec("notion", record.ServerURL, nil)}
-	manager.attach(specs, map[string]oauthRecord{"notion": record}, false)
+	manager.attach(specs, map[string]oauthRecord{"notion": record}, false, nil)
 	assert.Nil(t, specs[0].oauth, "tokens never go to a non-loopback http server")
 }
 
@@ -648,7 +648,7 @@ func TestOAuthAttachDoesNotHoldManagerLockOnBusySource(t *testing.T) {
 	busy.mu.Lock() // a token refresh in flight
 	attached := make(chan struct{})
 	go func() {
-		manager.attach([]ServerSpec{testSpec("notion", record.ServerURL, nil)}, map[string]oauthRecord{"notion": record}, false)
+		manager.attach([]ServerSpec{testSpec("notion", record.ServerURL, nil)}, map[string]oauthRecord{"notion": record}, false, nil)
 		close(attached)
 	}()
 	answered := make(chan struct{})
@@ -663,4 +663,21 @@ func TestOAuthAttachDoesNotHoldManagerLockOnBusySource(t *testing.T) {
 	}
 	busy.mu.Unlock()
 	<-attached
+}
+
+func TestOAuthAttachIgnoresRecordsReadBeforeSignOut(t *testing.T) {
+	record := testOAuthRecord()
+	manager := newOAuthManager(nil, nil)
+
+	// A reload read the record, then a sign-out landed before it attached.
+	generations := manager.generationsSnapshot()
+	manager.signedOut("notion")
+	specs := []ServerSpec{testSpec("notion", record.ServerURL, nil)}
+	manager.attach(specs, map[string]oauthRecord{"notion": record}, false, generations)
+	assert.Nil(t, specs[0].oauth, "a stale snapshot never brings signed-out tokens back")
+
+	// The next reload reads after the sign-out and attaches normally.
+	specs = []ServerSpec{testSpec("notion", record.ServerURL, nil)}
+	manager.attach(specs, map[string]oauthRecord{"notion": record}, false, manager.generationsSnapshot())
+	assert.NotNil(t, specs[0].oauth)
 }
