@@ -83,6 +83,7 @@ test("mcpHasAuthorizationHeader ignores an empty value", () => {
   assert.equal(mcpHasAuthorizationHeader([{ name: "Authorization", value: "" }]), false);
   assert.equal(mcpHasAuthorizationHeader([{ name: " AUTHORIZATION ", value: "Bearer x" }]), true);
   assert.equal(mcpHasAuthorizationHeader(undefined), false);
+  assert.equal(mcpHasAuthorizationHeader([null]), false);
 });
 
 test("mcpPresetForURL matches a saved server's URL, ignoring a trailing slash", () => {

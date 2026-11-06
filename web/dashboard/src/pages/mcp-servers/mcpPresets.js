@@ -144,7 +144,7 @@ export function mcpConnectionHeaders(rows, auth, token) {
 export function mcpHasAuthorizationHeader(rows) {
   return (rows || []).some(
     (row) =>
-      String(row.name || "").trim().toLowerCase() === "authorization" &&
-      String(row.value || "").trim() !== "",
+      String(row?.name || "").trim().toLowerCase() === "authorization" &&
+      String(row?.value || "").trim() !== "",
   );
 }
