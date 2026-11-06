@@ -143,16 +143,8 @@ export function mcpConnectionHeaders(rows, auth, token) {
 
 export function mcpHasAuthorizationHeader(rows) {
   return (rows || []).some(
-    (row) => isAuthorizationHeader(row) && String(row.value || "").trim() !== "",
+    (row) =>
+      String(row.name || "").trim().toLowerCase() === "authorization" &&
+      String(row.value || "").trim() !== "",
   );
-}
-
-// mcpWithoutAuthorizationHeaders drops Authorization rows, so a credential
-// typed for one server choice never goes to another.
-export function mcpWithoutAuthorizationHeaders(rows) {
-  return (rows || []).filter((row) => !isAuthorizationHeader(row));
-}
-
-function isAuthorizationHeader(row) {
-  return String(row?.name || "").trim().toLowerCase() === "authorization";
 }

@@ -867,3 +867,14 @@ test("mcpOAuthOutcomeMessage picks the flash kind and treats unknown outcomes as
   assert.equal(mcpOAuthOutcomeMessage({ outcome: "error", server: "notion" }).kind, "error");
   assert.equal(mcpOAuthOutcomeMessage({ outcome: "__proto__" }).kind, "error");
 });
+
+// Regression: switching the server choice kept header rows typed for the
+// previous choice, so one service's credential was sent to another.
+test("changing the server choice drops the previous choice's headers and token", () => {
+  const SRC = fileURLToPath(new URL("../src", import.meta.url));
+  const store = readFileSync(join(SRC, "pages/mcp-servers/mcpServers.svelte.js"), "utf8");
+  const choose = (store.match(/chooseServerKind\(kind\) \{[\s\S]*?\n  \}/) || [""])[0];
+  assert.ok(choose, "chooseServerKind missing");
+  assert.match(choose, /this\.formToken = "";/);
+  assert.match(choose, /if \(this\.formKind !== previousKind\) \{\s*this\.form\.headers = \[\];/);
+});

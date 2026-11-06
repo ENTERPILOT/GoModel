@@ -14,7 +14,6 @@ import {
   mcpPresetForURL,
   mcpPresetHost,
   mcpURLHostName,
-  mcpWithoutAuthorizationHeaders,
 } from "../src/pages/mcp-servers/mcpPresets.js";
 import { buildMcpServerPayload, defaultMcpServerForm } from "../src/pages/mcp-servers/mcp-servers.js";
 
@@ -94,14 +93,4 @@ test("mcpPresetForURL matches a saved server's URL, ignoring a trailing slash", 
   assert.equal(mcpPresetForURL("https://example.com/mcp"), null);
   assert.equal(mcpPresetForURL("/"), null);
   assert.equal(mcpPresetForURL(undefined), null);
-});
-
-test("mcpWithoutAuthorizationHeaders drops only Authorization rows", () => {
-  const rows = [
-    { name: " authorization ", value: "Bearer lin_api_x" },
-    { name: "X-Team", value: "alpha" },
-    { name: "Authorization", value: "" },
-  ];
-  assert.deepEqual(mcpWithoutAuthorizationHeaders(rows), [{ name: "X-Team", value: "alpha" }]);
-  assert.deepEqual(mcpWithoutAuthorizationHeaders(undefined), []);
 });

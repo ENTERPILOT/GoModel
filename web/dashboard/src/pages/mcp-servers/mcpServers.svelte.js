@@ -45,7 +45,6 @@ import {
   mcpFreeSlug,
   mcpPresetById,
   mcpURLHostName,
-  mcpWithoutAuthorizationHeaders,
 } from "./mcpPresets.js";
 
 class McpServersState {
@@ -296,8 +295,8 @@ class McpServersState {
 
   // chooseServerKind switches the create form between presets and a custom
   // server. Fields the operator did not touch follow the choice; the token
-  // and any Authorization header are dropped on a change, so one service's
-  // key never goes to another.
+  // and every header row are dropped on a change, since headers usually
+  // carry credentials and one service's key must never go to another.
   chooseServerKind(kind) {
     const previous = this.formPreset;
     const previousKind = this.formKind;
@@ -307,7 +306,7 @@ class McpServersState {
     this.formToken = "";
     this.error = "";
     if (this.formKind !== previousKind) {
-      this.form.headers = mcpWithoutAuthorizationHeaders(this.form.headers);
+      this.form.headers = [];
     }
     if (preset) {
       this.form.url = preset.url;
