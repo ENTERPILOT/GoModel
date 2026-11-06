@@ -83,7 +83,8 @@ func extractFromImageResponse(resp *core.ImageGenerationResponse, requestID, mod
 	// Zero-token math and an unpriced token count both yield $0 quietly —
 	// indistinguishable from a free call. Flag whichever gap applies, so the row
 	// reads as "we could not price this" rather than as a cheap call.
-	if entry.CostsCalculationCaveat == "" {
+	// A provider-reported cost is exact, so missing catalog rates do not matter.
+	if entry.CostsCalculationCaveat == "" && !isProviderReportedCostSource(entry.CostSource) {
 		entry.CostsCalculationCaveat = imageCostCaveat(
 			effectiveEndpointPricing(endpoint, entry.Timestamp, pricing...), entry.OutputTokens, len(resp.Data))
 	}

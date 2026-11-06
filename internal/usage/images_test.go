@@ -302,3 +302,15 @@ func TestExtractFromImageResponse_ChatNamingPricesImageOutput(t *testing.T) {
 	assert.True(t, costsNearlyEqual(*entry.TotalCost, 0.01992))
 	assert.Empty(t, entry.CostsCalculationCaveat)
 }
+
+func TestExtractFromImageResponse_ProviderCostWithoutCatalogPricingHasNoCaveat(t *testing.T) {
+	var resp core.ImageGenerationResponse
+	require.NoError(t, json.Unmarshal([]byte(`{"data":[{"b64_json":"aGk="}],"usage":{"total_tokens":676,"cost":0.01998}}`), &resp))
+
+	entry := ExtractFromImageResponse(&resp, "req", "openai/gpt-image-1", "openrouter")
+
+	assert.Equal(t, CostSourceOpenRouterCredits, entry.CostSource)
+	require.NotNil(t, entry.TotalCost)
+	assert.True(t, costsNearlyEqual(*entry.TotalCost, 0.01998))
+	assert.Empty(t, entry.CostsCalculationCaveat)
+}
