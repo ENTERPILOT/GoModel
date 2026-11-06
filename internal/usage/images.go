@@ -69,6 +69,15 @@ func extractFromImageResponse(resp *core.ImageGenerationResponse, requestID, mod
 				raw["prompt_image_tokens"] = d.ImageTokens
 			}
 		}
+		// Provider extras (OpenRouter cost, xAI cost_in_usd_ticks, ...) take the
+		// same cost path as chat; gateway-derived keys win on collision.
+		raw = mergeRawUsageMaps(raw, u.RawUsage)
+		// The image count is always the number of returned images, never a
+		// provider usage member of the same name, so per_image pricing cannot
+		// bill images the response did not contain.
+		if len(resp.Data) == 0 {
+			delete(raw, rawKeyImages)
+		}
 	}
 	if len(raw) > 0 {
 		entry.RawData = raw
@@ -78,7 +87,8 @@ func extractFromImageResponse(resp *core.ImageGenerationResponse, requestID, mod
 	// Zero-token math and an unpriced token count both yield $0 quietly —
 	// indistinguishable from a free call. Flag whichever gap applies, so the row
 	// reads as "we could not price this" rather than as a cheap call.
-	if entry.CostsCalculationCaveat == "" {
+	// A provider-reported cost is exact, so missing catalog rates do not matter.
+	if entry.CostsCalculationCaveat == "" && !isProviderReportedCostSource(entry.CostSource) {
 		entry.CostsCalculationCaveat = imageCostCaveat(
 			effectiveEndpointPricing(endpoint, entry.Timestamp, pricing...), entry.OutputTokens, len(resp.Data))
 	}
