@@ -16122,6 +16122,9 @@
           "output_tokens": {
             "type": "integer"
           },
+          "output_tokens_details": {
+            "$ref": "#/components/schemas/core.ImageTokenDetails"
+          },
           "total_tokens": {
             "type": "integer"
           }

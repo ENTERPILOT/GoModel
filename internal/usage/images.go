@@ -70,6 +70,11 @@ func extractFromImageResponse(resp *core.ImageGenerationResponse, requestID, mod
 			}
 		}
 	}
+	if resp.Usage != nil {
+		// Provider extras (OpenRouter cost, xAI cost_in_usd_ticks, ...) take the
+		// same cost path as chat; gateway-derived keys win on collision.
+		raw = mergeRawUsageMaps(raw, resp.Usage.RawUsage)
+	}
 	if len(raw) > 0 {
 		entry.RawData = raw
 	}

@@ -187,6 +187,12 @@ reported usage decides:
   GoModel records the number of returned images (`images` in the raw usage
   data) and prices it with the model's `per_image` rate.
 
+Providers that report an exact per-request cost take precedence over the
+catalog rates, as on chat: OpenRouter's `usage.cost` is recorded with
+`cost_source: "openrouter_credits"`. OpenRouter answers with the Chat naming
+(`prompt_tokens`, `completion_tokens`); GoModel accepts both namings and passes
+the extra usage members (`cost`, `cost_details`) through to the client.
+
 Catalog entries often carry both rates for the same model, because `per_image`
 is the flat equivalent of one typical image's tokens ($0.039 for a 1290-token
 `gemini-2.5-flash-image`). A response that reported generated tokens is priced

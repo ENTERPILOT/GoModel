@@ -11823,6 +11823,9 @@ const docTemplate = `{
                 "output_tokens": {
                     "type": "integer"
                 },
+                "output_tokens_details": {
+                    "$ref": "#/definitions/core.ImageTokenDetails"
+                },
                 "total_tokens": {
                     "type": "integer"
                 }

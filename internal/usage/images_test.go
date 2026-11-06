@@ -3,6 +3,8 @@ package usage
 import (
 	"testing"
 
+	"github.com/goccy/go-json"
+
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -255,4 +257,48 @@ func TestExtractFromImageResponse_NoUsageCaveat(t *testing.T) {
 	}, "req", "gemini-2.5-flash-image", "gemini", pricing)
 	require.Empty(t, withUsage.CostsCalculationCaveat)
 	require.NotNil(t, withUsage.TotalCost)
+}
+
+func TestExtractFromImageResponse_OpenRouterCredits(t *testing.T) {
+	var resp core.ImageGenerationResponse
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"created": 1,
+		"data": [{"b64_json": "aGk="}],
+		"usage": {
+			"prompt_tokens": 12,
+			"completion_tokens": 664,
+			"total_tokens": 676,
+			"completion_tokens_details": {"image_tokens": 664},
+			"cost": 0.01998,
+			"cost_details": {"upstream_inference_prompt_cost": 0.00006, "upstream_inference_completions_cost": 0.01992}
+		}
+	}`), &resp))
+	pricing := &core.ModelPricing{OutputImagePerMtok: new(30.0)}
+
+	entry := ExtractFromImageResponse(&resp, "req", "openai/gpt-image-1", "openrouter", pricing)
+
+	assert.Equal(t, 12, entry.InputTokens)
+	assert.Equal(t, 664, entry.OutputTokens)
+	assert.Equal(t, 676, entry.TotalTokens)
+	assert.Equal(t, 1, entry.RawData[rawKeyImages])
+	assert.Equal(t, CostSourceOpenRouterCredits, entry.CostSource)
+	require.NotNil(t, entry.TotalCost)
+	assert.True(t, costsNearlyEqual(*entry.TotalCost, 0.01998))
+	require.NotNil(t, entry.OutputCost)
+	assert.True(t, costsNearlyEqual(*entry.OutputCost, 0.01992))
+	assert.Empty(t, entry.CostsCalculationCaveat)
+}
+
+func TestExtractFromImageResponse_ChatNamingPricesImageOutput(t *testing.T) {
+	var resp core.ImageGenerationResponse
+	require.NoError(t, json.Unmarshal([]byte(`{"data":[{"b64_json":"aGk="}],"usage":{"prompt_tokens":12,"completion_tokens":664,"total_tokens":676}}`), &resp))
+	pricing := &core.ModelPricing{OutputImagePerMtok: new(30.0)}
+
+	entry := ExtractFromImageResponse(&resp, "req", "openai/gpt-image-1", "openrouter", pricing)
+
+	assert.Equal(t, 664, entry.OutputTokens)
+	require.NotNil(t, entry.TotalCost)
+	// 664 * 30 / 1e6
+	assert.True(t, costsNearlyEqual(*entry.TotalCost, 0.01992))
+	assert.Empty(t, entry.CostsCalculationCaveat)
 }
