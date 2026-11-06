@@ -47,13 +47,17 @@ TOGETHER_BASE_URL=https://api.together.ai/v1
 TOGETHER_MODELS=meta-llama/Llama-3.3-70B-Instruct-Turbo,BAAI/bge-base-en-v1.5
 ```
 
-`TOGETHER_MODELS` is a fallback list, used only when `/models` fails or is
-empty; `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` makes it the only list.
+`TOGETHER_MODELS` is the only list by default (`allowlist` mode);
+`CONFIGURED_PROVIDER_MODELS_MODE=fallback` uses it only when `/models` fails or
+is empty.
 
 ## Models
 
-GoModel reads Together's live `/models` listing, including each model's type,
-display name, context length, and per-token prices. Image, audio, video, and
+When `TOGETHER_MODELS` is unset, or the mode is `fallback` or `merge`, GoModel
+reads Together's live `/models` listing, including each model's type, display
+name, context length, and per-token prices. With a `TOGETHER_MODELS` allowlist
+GoModel does not call Together's `/models`, so context limits and prices come from GoModel's model
+catalog (or a cached listing) and may be unknown for models the catalog lacks. Image, audio, video, and
 rerank models are left out because GoModel does not route those endpoints to
 Together. Model IDs contain a slash; use them verbatim, or prefix the provider
 name to pin the route:

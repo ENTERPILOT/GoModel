@@ -11,6 +11,7 @@
 import { hasSecretReference } from "../../lib/utils/secretReference.js";
 import * as m from "../../lib/paraglide/messages.js";
 import { filterFields } from "../../lib/utils/textMatch.js";
+import { PROVIDER_DOCS_UTM } from "../../lib/utils/providerDocs.js";
 import { modelRowsToList, modelsToRows } from "./providerModels.js";
 
 // Field names, mirroring internal/providers/credential_schema.go.
@@ -26,6 +27,10 @@ export const FIELD_MODELS_MODE = "models_mode";
 // The schema serves them; the schema-less fallback form needs them too, or its
 // select would offer only the default.
 const MODELS_MODE_OPTIONS = ["fallback", "allowlist", "merge"];
+
+// The docs table comparing the models modes, linked from the field's "?".
+export const MODELS_MODE_DOCS_URL =
+  "https://gomodel.enterpilot.io/docs/advanced/config-yaml?" + PROVIDER_DOCS_UTM + "#models-modes";
 
 // Resolve translated metadata on access so locale changes cannot leave stale
 // labels, hints, or placeholders. The metadata describes each credential field:
@@ -143,6 +148,8 @@ function providerCredentialFields() {
       label: m.providers_models_mode(),
       control: "select",
       hint: m.providers_models_mode_hint(),
+      docsUrl: MODELS_MODE_DOCS_URL,
+      docsLabel: m.providers_models_mode_docs(),
     },
     [FIELD_BILLABLE]: {
       label: m.providers_billable(),

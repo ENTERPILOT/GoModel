@@ -40,12 +40,25 @@ Listy modeli skonfigurowanych providerów mogą pozostać w zmiennych
 `LLMD_MODELS`. Instancje llm-d przyjmują też ustawienia z sufiksem
 `LLMD_<SUFFIX>_INFERENCE_OBJECTIVE` i
 `LLMD_<SUFFIX>_FAIRNESS_FROM_USER_PATH`.
-Ustaw `CONFIGURED_PROVIDER_MODELS_MODE=fallback` (domyślnie), aby używać tych
-list tylko wtedy, gdy upstream `/models` zawiedzie lub zwróci pustą listę,
-`allowlist`, aby udostępniać wyłącznie skonfigurowane modele dla providerów,
-które definiują listę, i pomijać ich wywołania upstream `/models`, albo
-`merge`, aby dodawać skonfigurowane modele do wykrytego zestawu – przydatne dla
-modeli, które provider obsługuje, ale nie umieszcza na liście `/models`.
+
+### Tryby modeli
+
+`CONFIGURED_PROVIDER_MODELS_MODE` (YAML: `models.configured_provider_models_mode`) określa, jak skonfigurowana lista providera łączy się z tym, co zwraca jego endpoint `/models`. Ma znaczenie tylko dla providerów, które definiują listę.
+
+| Tryb | Wywołuje upstream `/models` | Udostępnia | Kiedy używać |
+|---|---|---|---|
+| `allowlist` (domyślny) | Nie | Tylko Twoją listę | Chcesz dokładnie tych modeli, np. jednego modelu z OpenRouter |
+| `fallback` | Tak | Listę upstream; Twoją listę tylko, gdy `/models` zawiedzie lub nic nie zwróci | `/models` bywa niedostępny, ale to wykrywanie ma wyznaczać listę |
+| `merge` | Tak | Listę upstream plus Twoje modele, których w niej brak; gdy `/models` zawiedzie, działa jak `fallback` | Provider obsługuje modele, których nie wymienia (wersje preview lub niewymienione ID) |
+
+<Warning>
+**Zmiana niekompatybilna:** wcześniej domyślnym trybem był `fallback`. Provider z
+listą `models:` lub `<PROVIDER>_MODELS` udostępnia teraz tylko te modele, a
+zapytania o inne modele zwracają 404 (model nie znaleziony). Aby przywrócić
+dotychczasowe zachowanie, ustaw `CONFIGURED_PROVIDER_MODELS_MODE=fallback` albo
+nadpisz pojedynczego providera przez `<PROVIDER>[_SUFFIX]_MODELS_MODE` /
+`models_mode`.
+</Warning>
 
 Ustaw `models_mode` dla providera, aby nadpisać globalny tryb tylko dla niego;
 bez wartości obowiązuje tryb globalny. Na przykład możesz udostępnić jeden model

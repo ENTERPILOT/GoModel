@@ -133,9 +133,12 @@ providers:
 ```
 
 Das Verhalten folgt der globalen Einstellung `CONFIGURED_PROVIDER_MODELS_MODE`
-– `fallback` (Standard) verwendet die Liste nur, wenn `ListFoundationModels`
-nicht verfügbar oder leer ist; `allowlist` stellt nur die konfigurierten
-Modelle bereit und überspringt den Upstream-Aufruf.
+– `allowlist` (Standard) stellt nur die konfigurierten Modelle bereit und
+überspringt den Upstream-Aufruf; `fallback` verwendet die Liste nur, wenn
+`ListFoundationModels` nicht verfügbar oder leer ist.
+`merge` fügt die konfigurierten Modelle zu den erkannten hinzu. Um den Modus nur
+für Bedrock zu ändern, setzen Sie `BEDROCK_MODELS_MODE` (YAML:
+`providers.<name>.models_mode`).
 
 ## Mehrere Bedrock-Provider
 

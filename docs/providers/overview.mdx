@@ -243,12 +243,12 @@ support, not every individual model capability exposed by an upstream provider.
   `ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3`. DeepSeek defaults to
   `https://api.deepseek.com`; set `DEEPSEEK_BASE_URL` only when using a
   compatible proxy or alternate DeepSeek endpoint. By default,
-  `CONFIGURED_PROVIDER_MODELS_MODE=fallback` uses those lists only when upstream
-  `/models` is unavailable or empty. Set
-  `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` to expose only configured models
-  for providers that define a list, skipping their upstream `/models` calls.
+  `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` exposes only the configured models
+  for providers that define a list, skipping their upstream `/models` calls. Set
+  `fallback` to use those lists only when upstream `/models` is unavailable or
+  empty, or `merge` to add them to the discovered models.
   Override it for one provider with `<PROVIDER>[_SUFFIX]_MODELS_MODE` (for example
-  `OPENROUTER_MODELS_MODE=allowlist`) or **Models mode** in the dashboard.
+  `OPENROUTER_MODELS_MODE=fallback`) or **Models mode** in the dashboard.
 - **Model filters** — narrow a large catalog by glob pattern or price instead of
   listing models one by one: `OPENROUTER_MODEL_FILTER_INCLUDE=*:free` keeps only
   OpenRouter's free tier, and `<PROVIDER>_MODEL_FILTER_MAX_PRICE_PER_MTOK` caps

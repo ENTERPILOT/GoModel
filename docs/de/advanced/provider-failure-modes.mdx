@@ -145,18 +145,22 @@ routet dann in dieser Reihenfolge weiter mit:
 3. Bei einem Provider mit seiner Standard-Base-URL der Liste aus dem
    [Modellkatalog](/de/advanced/configuration) für seinen Provider-Typ.
 
+Diese Reihenfolge gilt in den Modi `fallback` und `merge`. Im Standardmodus
+`allowlist` ruft ein Provider mit konfigurierter Liste `/models` nie auf; seine
+Liste ist dann der Bestand.
+
 Fehlgeschlagene Provider werden alle `PROVIDER_RECHECK_INTERVAL` Sekunden erneut geprüft
 (Standardwert `60`), und die Live-Liste ersetzt den Ersatz, sobald eine Abfrage
 erfolgreich ist. Gibt es nichts, womit Requests bedient werden können, liefern sie `503`, damit Clients es erneut versuchen, und
 `/health/ready` meldet `degraded` mit `"models": "down"`, während die Instanz
 in der Rotation bleibt.
 
-Um nie von der Modellerkennung abhängig zu sein, listen Sie die Modelle selbst auf und setzen
-`CONFIGURED_PROVIDER_MODELS_MODE=allowlist`:
+Um nie von der Modellerkennung abhängig zu sein, listen Sie die Modelle selbst auf. Der
+Standardwert `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` stellt dann nur diese Liste bereit und
+überspringt `/models`:
 
 ```bash
 export OPENAI_MODELS=gpt-6-sol,gpt-6-luna
-export CONFIGURED_PROVIDER_MODELS_MODE=allowlist
 ```
 
 ## Wenn GoModel selbst ausfällt

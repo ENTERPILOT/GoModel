@@ -238,6 +238,7 @@ func TestModelRegistry_ReplaceProvider(t *testing.T) {
 
 	t.Run("applies a per-provider allowlist mode to the inherited inventory", func(t *testing.T) {
 		registry := NewModelRegistry()
+		registry.SetConfiguredProviderModelsMode(config.ConfiguredProviderModelsModeFallback)
 		previous := &registryMockProvider{modelsResponse: modelsList("a", "b", "c")}
 		registry.RegisterProviderWithNameAndType(previous, "swap", "test")
 		registry.SetProviderConfiguredModels("swap", []string{"a"})
@@ -263,6 +264,7 @@ func TestModelRegistry_ReplaceProvider(t *testing.T) {
 
 	t.Run("a merge-to-fallback edit does not count as a listing for the next edit", func(t *testing.T) {
 		registry := NewModelRegistry()
+		registry.SetConfiguredProviderModelsMode(config.ConfiguredProviderModelsModeFallback)
 		previous := &registryMockProvider{modelsResponse: modelsList("a")}
 		registry.RegisterProviderWithNameAndType(previous, "swap", "test")
 		registry.SetProviderConfiguredModels("swap", []string{"extra"})

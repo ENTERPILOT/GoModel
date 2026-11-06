@@ -35,10 +35,20 @@ Google Vertex AI 遵循相同的后缀命名规则（`VERTEX_US_PROJECT`
 `VLLM_MODELS` 或 `LLMD_MODELS`。llm-d 实例还接受带后缀的
 `LLMD_<SUFFIX>_INFERENCE_OBJECTIVE` 和
 `LLMD_<SUFFIX>_FAIRNESS_FROM_USER_PATH` 控制项。
-设置 `CONFIGURED_PROVIDER_MODELS_MODE=fallback`（默认）时，仅在上游 `/models` 失败或返回为空时使用这些列表；设置为
-`allowlist` 时，对定义了列表的提供商只暴露已配置的模型，并跳过其上游
-`/models` 调用；设置为 `merge` 时，会在发现的模型清单之上追加已配置的模型——适用于提供商实际提供、却未列在其
-`/models` 列表中的模型。
+
+### 模型模式
+
+`CONFIGURED_PROVIDER_MODELS_MODE`（YAML：`models.configured_provider_models_mode`）决定提供商的已配置列表如何与其 `/models` 接口的返回结果结合。仅对定义了列表的提供商生效。
+
+| 模式 | 是否调用上游 `/models` | 暴露的模型 | 适用场景 |
+|---|---|---|---|
+| `allowlist`（默认） | 否 | 仅你的列表 | 只想要这些模型，例如 OpenRouter 中的某一个模型 |
+| `fallback` | 是 | 上游列表；仅当 `/models` 失败或无返回时使用你的列表 | `/models` 偶尔不可用，但仍希望由自动发现决定列表 |
+| `merge` | 是 | 上游列表加上其中缺少的你的模型；`/models` 失败时行为同 `fallback` | 提供商提供但未列出的模型（预览版或未列出的 ID） |
+
+<Warning>
+**不兼容变更：**默认模式以前是 `fallback`。配置了 `models:` 或 `<PROVIDER>_MODELS` 列表的提供商现在只提供这些模型，请求其他模型会返回 404（模型未找到）。如需恢复原有行为，请设置 `CONFIGURED_PROVIDER_MODELS_MODE=fallback`，或通过 `<PROVIDER>[_SUFFIX]_MODELS_MODE` / `models_mode` 单独覆盖某个提供商。
+</Warning>
 
 在单个提供商上设置 `models_mode` 可仅为该提供商覆盖全局模式；不设置时使用全局模式。例如，只暴露一个 OpenRouter 模型，而自托管提供商继续自动发现各自的模型：
 

@@ -64,21 +64,25 @@ Your account's endpoint is `endpoints.api` in the reply of
 
 ## Models
 
-GoModel lists models from Copilot's `/models`. Models your plan lists but the
-account has not enabled (policy `disabled`) are left out; enable them in your
-[Copilot settings](https://github.com/settings/copilot/features) and they
+By default (`allowlist` mode) the model inventory is `GITHUB_COPILOT_MODELS`
+only: add a model there to serve it. To list models from Copilot's `/models`
+instead, set `GITHUB_COPILOT_MODELS_MODE=fallback` or `merge` (or the global
+`CONFIGURED_PROVIDER_MODELS_MODE`). In those modes, models your plan lists but
+the account has not enabled (policy `disabled`) are left out; enable them in
+your [Copilot settings](https://github.com/settings/copilot/features) and they
 appear on the next model refresh.
 
-To serve only some of them, [filter](/advanced/config-yaml#filtering-a-providers-models)
-the list:
+To serve only some of the listed models,
+[filter](/advanced/config-yaml#filtering-a-providers-models) the list:
 
 ```bash
 GITHUB_COPILOT_MODEL_FILTER_INCLUDE=claude-sonnet-5.5,gpt-5.6-luna,gpt-4.1
 ```
 
-`GITHUB_COPILOT_MODELS` is a fallback list, used only when `/models` fails or
-is empty; `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` makes it the only list
-and skips `/models`.
+Separately from the inventory, the provider still reads Copilot's `/models` on
+demand to learn which endpoints each model supports (Responses or chat
+completions), so allowlist mode does not mean no `/models` traffic. If that
+lookup fails, an unknown model is sent to `/chat/completions`.
 
 ## Chat completions and Responses on every model
 

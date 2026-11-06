@@ -1551,9 +1551,10 @@
   "providers_service_account_file_hint": "Path readable by the gateway process.",
   "providers_service_account_json_hint": "Saved values are masked; leave the asterisks unchanged to keep the stored value, or clear it to remove.",
   "providers_service_account_json_base64_hint": "Saved values are masked; leave the asterisks unchanged to keep the stored value.",
-  "providers_models_hint": "Leave empty to auto-discover models from the provider's /models endpoint where supported. How a list is applied depends on Models mode; to expose only these models, set it to allowlist.",
+  "providers_models_hint": "Leave empty to auto-discover models from the provider's /models endpoint where supported. With the default Models mode (allowlist), only these models are exposed; choose fallback or merge to keep auto-discovery.",
   "providers_models_mode": "Models mode",
-  "providers_models_mode_hint": "How the Models list is used. fallback: only when the provider's /models call fails or returns nothing. allowlist: expose only these models and skip /models. merge: add them to the discovered models. Default uses the gateway-wide CONFIGURED_PROVIDER_MODELS_MODE (fallback unless set).",
+  "providers_models_mode_hint": "How the Models list is used. allowlist: expose only these models and skip /models. fallback: only when the provider's /models call fails or returns nothing. merge: add them to the discovered models. Default uses the gateway-wide CONFIGURED_PROVIDER_MODELS_MODE (allowlist unless set).",
+  "providers_models_mode_docs": "Compare the Models mode options in the docs",
   "providers_default_value": "Defaults to {value}",
   "providers_keys_count": [
     {

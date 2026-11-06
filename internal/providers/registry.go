@@ -140,7 +140,7 @@ func NewModelRegistry() *ModelRegistry {
 		providerNames:                make(map[core.Provider]string),
 		providerRuntime:              make(map[string]providerRuntimeState),
 		refreshCh:                    make(chan struct{}, 1),
-		configuredProviderModelsMode: config.ConfiguredProviderModelsModeFallback,
+		configuredProviderModelsMode: config.DefaultConfiguredProviderModelsMode,
 	}
 }
 

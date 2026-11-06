@@ -24,8 +24,8 @@ ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3
 GOMODEL_MASTER_KEY=change-me
 ```
 
-`ORACLE_MODELS` 是以逗号分隔的列表（会去除首尾空白）。其行为遵循全局的 `CONFIGURED_PROVIDER_MODELS_MODE`——`fallback`（默认）在 Oracle 的 `/models` 不可用或为空时使用该列表；`allowlist`
-只公开已配置的模型，并跳过对上游的调用。
+`ORACLE_MODELS` 是以逗号分隔的列表（会去除首尾空白）。其行为遵循全局的 `CONFIGURED_PROVIDER_MODELS_MODE`——`allowlist`（默认）只公开已配置的模型，并跳过对上游的调用；`fallback`
+在 Oracle 的 `/models` 不可用或为空时使用该列表。
 
 或在 `config.yaml` 中：
 

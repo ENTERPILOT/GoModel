@@ -550,18 +550,25 @@ Most providers can use a custom base URL via `<PROVIDER>_BASE_URL` (for example 
 Every provider type also accepts a comma-separated configured model list via
 `<PROVIDER>_MODELS`, for example `OPENROUTER_MODELS`, `ORACLE_MODELS`,
 `AZURE_MODELS`, `SGLANG_MODELS`, `VLLM_MODELS`, or `LLMD_MODELS`. By default,
-`CONFIGURED_PROVIDER_MODELS_MODE=fallback` uses configured lists only when
-upstream `/models` fails, returns nil, or returns an empty list. An
-OpenAI-compatible provider without a `/models` endpoint (404 or 405) is served
-from its configured list and reported healthy, which suits single-API servers
-such as speech-to-text. Set
-`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` to expose only configured models for
-providers that define a list and skip their upstream `/models` calls, or
-`merge` to add configured models on top of the upstream inventory. YAML
+`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` makes a configured list the
+provider's whole inventory and skips its upstream `/models` call. Set
+`fallback` to use the list only when upstream `/models` fails, returns nil, or
+returns an empty list, or `merge` to add configured models on top of the
+upstream inventory. An OpenAI-compatible provider without a `/models` endpoint
+(404 or 405) is served from its configured list and reported healthy, which
+suits single-API servers such as speech-to-text. YAML
 `providers.<name>.models` provides the same model-list input for named provider
 blocks. To override the mode for one provider only, set
 `<PROVIDER>[_SUFFIX]_MODELS_MODE` (YAML: `providers.<name>.models_mode`), for
-example `OPENROUTER_MODELS_MODE=allowlist`.
+example `OPENROUTER_MODELS_MODE=fallback`.
+
+<Warning>
+**Breaking change:** the default used to be `fallback`. A provider with a
+`models:` or `<PROVIDER>_MODELS` list now serves only those models, and requests
+for any other model return 404 (model not found). To restore the old behavior,
+set `CONFIGURED_PROVIDER_MODELS_MODE=fallback`, or override a single provider
+with `<PROVIDER>[_SUFFIX]_MODELS_MODE` / `models_mode`.
+</Warning>
 
 `GET /v1/models` lists provider-qualified IDs (`openai/gpt-5`) by default. Set
 `UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT=true` (YAML:
@@ -765,7 +772,7 @@ export ORACLE_BASE_URL="https://inference.generativeai.us-chicago-1.oci.oraclecl
 export ORACLE_MODELS="openai.gpt-oss-120b,xai.grok-3" # Optional configured model list
 export OPENROUTER_MODELS="openai/gpt-oss-120b,anthropic/claude-sonnet-4"
 export KILO_MODELS="anthropic/claude-sonnet-4.5,openai/gpt-5.5"
-export CONFIGURED_PROVIDER_MODELS_MODE="fallback" # fallback, allowlist, or merge
+export CONFIGURED_PROVIDER_MODELS_MODE="allowlist" # allowlist (default), fallback, or merge
 # Optional: export OPENROUTER_MODELS_MODE="allowlist" # per-provider override
 export OLLAMA_BASE_URL="http://localhost:11434/v1" # Registers "ollama" provider
 export SGLANG_BASE_URL="http://localhost:30000/v1" # Registers keyless "sglang" provider
@@ -821,11 +828,11 @@ settings), use the YAML file:
 
 ```yaml
 models:
-  # fallback is the default. Use allowlist when configured provider model lists
-  # should hide upstream models and skip upstream /models calls, or merge to add
-  # configured models on top of the discovered inventory (models a provider
-  # serves but does not list).
-  configured_provider_models_mode: fallback
+  # allowlist is the default: a configured provider model list is the whole
+  # inventory and upstream /models is skipped. Use fallback to use the list only
+  # when upstream /models fails or is empty, or merge to add configured models on
+  # top of the discovered inventory (models a provider serves but does not list).
+  configured_provider_models_mode: allowlist
   # List bare model IDs (gpt-5) from GET /v1/models instead of provider-qualified
   # ones (openai/gpt-5). When two providers expose the same ID only the provider an
   # unqualified request routes to (the first registered one) is listed; pin a name
