@@ -9609,6 +9609,9 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "models_mode": {
+                    "type": "string"
+                },
                 "name": {
                     "type": "string"
                 },
@@ -10043,6 +10046,10 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "models_mode": {
+                    "description": "ModelsMode overrides the global configured provider models mode for\nthis provider: fallback, allowlist, or merge. Empty uses the global mode.",
+                    "type": "string"
                 },
                 "name": {
                     "type": "string"

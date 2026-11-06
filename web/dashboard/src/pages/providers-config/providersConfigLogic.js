@@ -20,6 +20,12 @@ export const FIELD_BILLABLE = "billable";
 export const FIELD_BASE_URL = "base_url";
 export const FIELD_SERVICE_ACCOUNT_JSON = "service_account_json";
 export const FIELD_MODELS = "models";
+export const FIELD_MODELS_MODE = "models_mode";
+
+// The models_mode values, mirroring internal/providers/credential_schema.go.
+// The schema serves them; the schema-less fallback form needs them too, or its
+// select would offer only the default.
+const MODELS_MODE_OPTIONS = ["fallback", "allowlist", "merge"];
 
 // Resolve translated metadata on access so locale changes cannot leave stale
 // labels, hints, or placeholders. The metadata describes each credential field:
@@ -43,6 +49,7 @@ const PROVIDER_CREDENTIAL_FIELD_NAMES = [
   "gcp_scope",
   "proxy_url",
   FIELD_MODELS,
+  FIELD_MODELS_MODE,
   FIELD_BILLABLE,
 ];
 
@@ -132,6 +139,11 @@ function providerCredentialFields() {
       control: "models",
       hint: m.providers_models_hint(),
     },
+    [FIELD_MODELS_MODE]: {
+      label: m.providers_models_mode(),
+      control: "select",
+      hint: m.providers_models_mode_hint(),
+    },
     [FIELD_BILLABLE]: {
       label: m.providers_billable(),
       control: "checkbox",
@@ -179,6 +191,7 @@ export function defaultProviderCredentialForm() {
     gcp_scope: "",
     proxy_url: "",
     models: [],
+    models_mode: "",
     billable: true,
     enabled: true,
   };
@@ -229,6 +242,7 @@ export function providerCredentialFormFields(schema, defaultBaseURL) {
           (name) => ({
             name,
             advanced: name !== FIELD_API_KEYS,
+            ...(name === FIELD_MODELS_MODE ? { options: MODELS_MODE_OPTIONS } : {}),
           }),
         );
   const fallbackBaseURL = defaultBaseURL || (schema && schema.default_base_url) || "";
@@ -378,6 +392,7 @@ export function providerCredentialRowToForm(row) {
     gcp_scope: String((row && row.gcp_scope) || ""),
     proxy_url: String((row && row.proxy_url) || ""),
     models: modelsToRows(row && row.models),
+    models_mode: String((row && row.models_mode) || ""),
     billable: !row || row.billable !== false,
     enabled: !row || row.enabled !== false,
   };

@@ -13880,6 +13880,9 @@
               "type": "string"
             }
           },
+          "models_mode": {
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
@@ -14325,6 +14328,10 @@
             "items": {
               "type": "string"
             }
+          },
+          "models_mode": {
+            "description": "ModelsMode overrides the global configured provider models mode for\nthis provider: fallback, allowlist, or merge. Empty uses the global mode.",
+            "type": "string"
           },
           "name": {
             "type": "string"

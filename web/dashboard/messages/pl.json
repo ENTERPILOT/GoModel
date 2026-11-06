@@ -1545,7 +1545,9 @@
   "providers_service_account_file_hint": "Ścieżka dostępna do odczytu przez proces gateway.",
   "providers_service_account_json_hint": "Zapisane wartości są zamaskowane; pozostaw gwiazdki bez zmian, aby zachować wartość, lub wyczyść pole, aby ją usunąć.",
   "providers_service_account_json_base64_hint": "Zapisane wartości są zamaskowane; pozostaw gwiazdki bez zmian, aby zachować wartość.",
-  "providers_models_hint": "Pozostaw puste, aby automatycznie wykryć modele z endpointu /models dostawcy, jeśli jest obsługiwany.",
+  "providers_models_hint": "Pozostaw puste, aby automatycznie wykryć modele z endpointu /models dostawcy, jeśli jest obsługiwany. Sposób użycia listy zależy od trybu modeli; aby udostępnić tylko te modele, ustaw go na allowlist.",
+  "providers_models_mode": "Tryb modeli",
+  "providers_models_mode_hint": "Jak używana jest lista modeli. fallback: tylko gdy wywołanie /models dostawcy się nie powiedzie lub nic nie zwróci. allowlist: udostępnij tylko te modele i pomiń /models. merge: dodaj je do wykrytych modeli. Domyślnie używane jest globalne CONFIGURED_PROVIDER_MODELS_MODE (fallback, jeśli nie ustawiono).",
   "providers_default_value": "Domyślnie: {value}",
   "providers_keys_count": [
     {

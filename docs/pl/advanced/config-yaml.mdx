@@ -47,6 +47,23 @@ które definiują listę, i pomijać ich wywołania upstream `/models`, albo
 `merge`, aby dodawać skonfigurowane modele do wykrytego zestawu – przydatne dla
 modeli, które provider obsługuje, ale nie umieszcza na liście `/models`.
 
+Ustaw `models_mode` dla providera, aby nadpisać globalny tryb tylko dla niego;
+bez wartości obowiązuje tryb globalny. Na przykład możesz udostępnić jeden model
+OpenRouter, a providery self-hosted nadal wykrywają własne modele:
+
+```yaml
+providers:
+  openrouter:
+    type: openrouter
+    api_key: "${OPENROUTER_API_KEY}"
+    models:
+      - qwen/qwen3-vl-8b-instruct
+    models_mode: allowlist # env: OPENROUTER_MODELS_MODE
+```
+
+W oknie providera w dashboardzie to samo ustawienie nazywa się **Tryb modeli**
+i znajduje się w opcjach zaawansowanych.
+
 ## Filtrowanie modeli providera
 
 `model_filter` zawęża zestaw modeli providera do tych, do których faktycznie

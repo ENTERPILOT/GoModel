@@ -89,6 +89,9 @@ type ModelRegistry struct {
 	// are fallback-only or an allowlist over the discovered upstream inventory.
 	configuredProviderModels     map[string][]string
 	configuredProviderModelsMode config.ConfiguredProviderModelsMode
+	// providerModelsModes holds per-provider overrides of
+	// configuredProviderModelsMode, keyed by provider instance name.
+	providerModelsModes map[string]config.ConfiguredProviderModelsMode
 	// providerModelFilters holds operator-supplied inventory filters keyed by
 	// configured provider instance name. Applied after metadata enrichment;
 	// providers without a filter are absent from the map.
@@ -202,6 +205,28 @@ func (r *ModelRegistry) SetConfiguredProviderModelsMode(mode config.ConfiguredPr
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.configuredProviderModelsMode = config.ResolveConfiguredProviderModelsMode(mode)
+}
+
+// SetProviderModelsMode overrides the configured provider models mode for one
+// provider instance. An empty mode clears the override, so the global mode applies.
+func (r *ModelRegistry) SetProviderModelsMode(providerName string, mode config.ConfiguredProviderModelsMode) {
+	providerName = strings.TrimSpace(providerName)
+	if providerName == "" {
+		return
+	}
+	mode = config.NormalizeConfiguredProviderModelsMode(mode)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	setOrDelete(&r.providerModelsModes, providerName, mode, mode != "")
+}
+
+// providerModelsModeLocked returns the mode that applies to providerName: its
+// override when set, the global mode otherwise. Caller must hold r.mu.
+func (r *ModelRegistry) providerModelsModeLocked(providerName string) config.ConfiguredProviderModelsMode {
+	if mode, ok := r.providerModelsModes[providerName]; ok {
+		return config.ResolveConfiguredProviderModelsMode(mode)
+	}
+	return config.ResolveConfiguredProviderModelsMode(r.configuredProviderModelsMode)
 }
 
 // SetProviderConfiguredModels records the explicit model inventory declared for
@@ -322,6 +347,7 @@ func (r *ModelRegistry) UnregisterProvider(providerName string) {
 	delete(r.providerRuntime, providerName)
 	delete(r.configMetadataOverrides, providerName)
 	delete(r.configuredProviderModels, providerName)
+	delete(r.providerModelsModes, providerName)
 	delete(r.providerModelFilters, providerName)
 	// nonBillableProviders is kept: a replacement is unregistered and
 	// re-registered in separate steps, and usage written for the outgoing
