@@ -41,13 +41,16 @@ Umgebungsvariablen bleiben, zum Beispiel `OPENROUTER_MODELS`, `ORACLE_MODELS`,
 llm-d-Instanzen akzeptieren außerdem die Steuerungen
 `LLMD_<SUFFIX>_INFERENCE_OBJECTIVE` und
 `LLMD_<SUFFIX>_FAIRNESS_FROM_USER_PATH` mit Suffix.
-Setzen Sie `CONFIGURED_PROVIDER_MODELS_MODE=fallback` (Standard), um diese
-Listen nur zu verwenden, wenn das Upstream-`/models` fehlschlägt oder leer ist;
-`allowlist`, um für Provider, die eine Liste definieren, nur die konfigurierten
-Modelle bereitzustellen und ihre Upstream-Aufrufe von `/models` zu überspringen;
-oder `merge`, um konfigurierte Modelle zusätzlich zum erkannten Inventar
-hinzuzufügen – nützlich für Modelle, die ein Provider bereitstellt, aber nicht in
-seiner `/models`-Liste aufführt.
+
+### Modellmodi
+
+`CONFIGURED_PROVIDER_MODELS_MODE` (YAML: `models.configured_provider_models_mode`) legt fest, wie die konfigurierte Liste eines Providers mit der Antwort seines `/models`-Endpoints kombiniert wird. Er wirkt nur bei Providern, die eine Liste definieren.
+
+| Modus | Ruft Upstream-`/models` auf | Stellt bereit | Geeignet, wenn |
+|---|---|---|---|
+| `fallback` (Standard) | Ja | Die Upstream-Liste; Ihre Liste nur, wenn `/models` fehlschlägt oder nichts liefert | `/models` manchmal nicht verfügbar ist, die Erkennung aber die Liste bestimmen soll |
+| `allowlist` | Nein | Nur Ihre Liste | Sie genau diese Modelle wollen, z. B. ein Modell von OpenRouter |
+| `merge` | Ja | Die Upstream-Liste plus Ihre Modelle, die darin fehlen; verhält sich wie `fallback`, wenn `/models` fehlschlägt | ein Provider Modelle bereitstellt, die er nicht auflistet (Preview- oder nicht gelistete IDs) |
 
 Setzen Sie `models_mode` an einem Provider, um den globalen Modus nur für diesen
 Provider zu überschreiben; ohne Wert gilt der globale Modus. So stellen Sie zum
