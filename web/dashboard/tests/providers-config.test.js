@@ -667,3 +667,11 @@ test("models_mode renders as a select and round-trips through the payload", () =
     "",
   );
 });
+
+test("the schema-less fallback form still offers the models_mode values", () => {
+  const { advanced } = providerCredentialFormFields(null);
+  const field = advanced.find((entry) => entry.name === "models_mode");
+  assert.ok(field);
+  assert.equal(field.control, "select");
+  assert.deepEqual(field.options, ["fallback", "allowlist", "merge"]);
+});

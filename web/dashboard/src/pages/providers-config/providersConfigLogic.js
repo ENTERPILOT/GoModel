@@ -22,6 +22,11 @@ export const FIELD_SERVICE_ACCOUNT_JSON = "service_account_json";
 export const FIELD_MODELS = "models";
 export const FIELD_MODELS_MODE = "models_mode";
 
+// The models_mode values, mirroring internal/providers/credential_schema.go.
+// The schema serves them; the schema-less fallback form needs them too, or its
+// select would offer only the default.
+const MODELS_MODE_OPTIONS = ["fallback", "allowlist", "merge"];
+
 // Resolve translated metadata on access so locale changes cannot leave stale
 // labels, hints, or placeholders. The metadata describes each credential field:
 // what to call it, which control to render, and what to say about it. The
@@ -237,6 +242,7 @@ export function providerCredentialFormFields(schema, defaultBaseURL) {
           (name) => ({
             name,
             advanced: name !== FIELD_API_KEYS,
+            ...(name === FIELD_MODELS_MODE ? { options: MODELS_MODE_OPTIONS } : {}),
           }),
         );
   const fallbackBaseURL = defaultBaseURL || (schema && schema.default_base_url) || "";
