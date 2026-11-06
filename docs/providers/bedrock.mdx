@@ -132,9 +132,10 @@ providers:
       - amazon.nova-lite-v1:0
 ```
 
-Behavior follows the global `CONFIGURED_PROVIDER_MODELS_MODE` — `fallback`
-(default) uses the list only when `ListFoundationModels` is unavailable or
-empty; `allowlist` exposes only configured models and skips the upstream call.
+Behavior follows the global `CONFIGURED_PROVIDER_MODELS_MODE` — `allowlist`
+(default) exposes only configured models and skips the upstream call;
+`fallback` uses the list only when `ListFoundationModels` is unavailable or
+empty.
 
 ## Multiple Bedrock providers
 

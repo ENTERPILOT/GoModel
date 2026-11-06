@@ -77,9 +77,9 @@ Aby udostępniać tylko część z nich,
 GITHUB_COPILOT_MODEL_FILTER_INCLUDE=claude-sonnet-5.5,gpt-5.6-luna,gpt-4.1
 ```
 
-`GITHUB_COPILOT_MODELS` to lista zapasowa, używana tylko wtedy, gdy `/models`
-zawodzi lub zwraca pustą listę; `CONFIGURED_PROVIDER_MODELS_MODE=allowlist`
-czyni ją jedyną listą i pomija `/models`.
+`GITHUB_COPILOT_MODELS` jest domyślnie jedyną listą (tryb `allowlist`), a `/models`
+jest pomijane; `CONFIGURED_PROVIDER_MODELS_MODE=fallback` używa jej tylko wtedy,
+gdy `/models` zawodzi lub zwraca pustą listę.
 
 ## Chat completions i Responses dla każdego modelu
 

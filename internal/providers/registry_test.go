@@ -134,6 +134,7 @@ func TestModelRegistry(t *testing.T) {
 
 	t.Run("ConfiguredModelsFallbackModeKeepsUpstreamWhenAvailable", func(t *testing.T) {
 		registry := NewModelRegistry()
+		registry.SetConfiguredProviderModelsMode(config.ConfiguredProviderModelsModeFallback)
 		mock := &registryMockProvider{
 			name: "test",
 			modelsResponse: &core.ModelsResponse{
@@ -155,6 +156,7 @@ func TestModelRegistry(t *testing.T) {
 
 	t.Run("ConfiguredModelsFallbackModeUsesConfiguredWhenUpstreamFails", func(t *testing.T) {
 		registry := NewModelRegistry()
+		registry.SetConfiguredProviderModelsMode(config.ConfiguredProviderModelsModeFallback)
 		mock := &registryMockProvider{
 			name: "test",
 			err:  errors.New("models unavailable"),
@@ -182,6 +184,7 @@ func TestModelRegistry(t *testing.T) {
 
 	t.Run("ConfiguredModelsWithoutModelsEndpointAreHealthy", func(t *testing.T) {
 		registry := NewModelRegistry()
+		registry.SetConfiguredProviderModelsMode(config.ConfiguredProviderModelsModeFallback)
 		mock := &registryMockProvider{
 			name: "stt",
 			err:  core.MarkModelListingUnsupported(core.ParseProviderError("openai", http.StatusNotFound, []byte("<html>404 Not Found</html>"), nil)),
@@ -1222,6 +1225,7 @@ func (p *availabilityFailingProvider) CheckAvailability(context.Context) error {
 func TestRefreshProviderModels_MissingModelsEndpointPassesAvailabilityGate(t *testing.T) {
 	notFound := core.MarkModelListingUnsupported(core.ParseProviderError("ollama", http.StatusNotFound, []byte("404 page not found"), nil))
 	registry := NewModelRegistry()
+	registry.SetConfiguredProviderModelsMode(config.ConfiguredProviderModelsModeFallback)
 	stt := &availabilityFailingProvider{
 		registryMockProvider: &registryMockProvider{name: "stt", err: notFound},
 		availabilityErr:      notFound,

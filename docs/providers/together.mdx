@@ -47,8 +47,9 @@ TOGETHER_BASE_URL=https://api.together.ai/v1
 TOGETHER_MODELS=meta-llama/Llama-3.3-70B-Instruct-Turbo,BAAI/bge-base-en-v1.5
 ```
 
-`TOGETHER_MODELS` is a fallback list, used only when `/models` fails or is
-empty; `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` makes it the only list.
+`TOGETHER_MODELS` is the only list by default (`allowlist` mode);
+`CONFIGURED_PROVIDER_MODELS_MODE=fallback` uses it only when `/models` fails or
+is empty.
 
 ## Models
 

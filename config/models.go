@@ -36,7 +36,7 @@ type ModelsConfig struct {
 
 	// ConfiguredProviderModelsMode controls how providers.<name>.models and
 	// provider *_MODELS env vars affect the provider model inventory.
-	// Supported values: "fallback", "allowlist", "merge". Default: "fallback".
+	// Supported values: "fallback", "allowlist", "merge". Default: "allowlist".
 	ConfiguredProviderModelsMode ConfiguredProviderModelsMode `yaml:"configured_provider_models_mode" env:"CONFIGURED_PROVIDER_MODELS_MODE"`
 }
 
@@ -57,6 +57,11 @@ const (
 	ConfiguredProviderModelsModeMerge ConfiguredProviderModelsMode = "merge"
 )
 
+// DefaultConfiguredProviderModelsMode applies when no mode is set. A model
+// list an operator writes is what they expect to be served, so it is the whole
+// inventory unless they choose fallback or merge.
+const DefaultConfiguredProviderModelsMode = ConfiguredProviderModelsModeAllowlist
+
 // Valid reports whether mode is one of the supported configured-provider-models modes.
 func (m ConfiguredProviderModelsMode) Valid() bool {
 	switch NormalizeConfiguredProviderModelsMode(m) {
@@ -76,7 +81,7 @@ func NormalizeConfiguredProviderModelsMode(mode ConfiguredProviderModelsMode) Co
 func ResolveConfiguredProviderModelsMode(mode ConfiguredProviderModelsMode) ConfiguredProviderModelsMode {
 	mode = NormalizeConfiguredProviderModelsMode(mode)
 	if mode == "" {
-		return ConfiguredProviderModelsModeFallback
+		return DefaultConfiguredProviderModelsMode
 	}
 	return mode
 }

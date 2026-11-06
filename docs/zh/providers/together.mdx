@@ -44,7 +44,7 @@ TOGETHER_BASE_URL=https://api.together.ai/v1
 TOGETHER_MODELS=meta-llama/Llama-3.3-70B-Instruct-Turbo,BAAI/bge-base-en-v1.5
 ```
 
-`TOGETHER_MODELS` 是备用列表，仅在 `/models` 失败或为空时使用；设置 `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` 后，它将成为唯一的模型列表。
+默认情况下（`allowlist` 模式），`TOGETHER_MODELS` 是唯一的模型列表；设置 `CONFIGURED_PROVIDER_MODELS_MODE=fallback` 后，它仅在 `/models` 失败或为空时使用。
 
 ## 模型
 

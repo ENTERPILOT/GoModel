@@ -64,7 +64,7 @@ GoModel 从 Copilot 的 `/models` 获取模型列表。套餐列出但账号未�
 GITHUB_COPILOT_MODEL_FILTER_INCLUDE=claude-sonnet-5.5,gpt-5.6-luna,gpt-4.1
 ```
 
-`GITHUB_COPILOT_MODELS` 是备用列表，仅在 `/models` 失败或为空时使用；`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` 会使其成为唯一列表并跳过 `/models`。
+默认情况下（`allowlist` 模式），`GITHUB_COPILOT_MODELS` 是唯一列表并跳过 `/models`；`CONFIGURED_PROVIDER_MODELS_MODE=fallback` 会让它仅在 `/models` 失败或为空时使用。
 
 ## 每个模型都支持 Chat Completions 和 Responses
 

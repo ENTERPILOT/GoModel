@@ -56,6 +56,7 @@ func TestProviderModelsModeOverridesGlobalMode(t *testing.T) {
 
 func TestProviderModelsModeOnlyAffectsItsProvider(t *testing.T) {
 	registry := NewModelRegistry()
+	registry.SetConfiguredProviderModelsMode(config.ConfiguredProviderModelsModeFallback)
 	upstream := &core.ModelsResponse{Object: "list", Data: []core.Model{{ID: "listed", Object: "model"}}}
 	for _, name := range []string{"strict", "loose"} {
 		registry.RegisterProviderWithNameAndType(&registryMockProvider{name: name, modelsResponse: upstream}, name, "openai")
@@ -126,4 +127,23 @@ func TestCredentialStoresRoundTripModelsMode(t *testing.T) {
 		assert.Equal(t, "allowlist", got.ModelsMode)
 		assert.Equal(t, config.ConfiguredProviderModelsModeAllowlist, got.toRawProviderConfig().ModelsMode)
 	})
+}
+
+func TestConfiguredModelsDefaultToAllowlist(t *testing.T) {
+	registry := NewModelRegistry()
+	var listCount atomic.Int32
+	mock := &countingRegistryMockProvider{
+		listCount: &listCount,
+		registryMockProvider: &registryMockProvider{name: "router", modelsResponse: &core.ModelsResponse{
+			Object: "list", Data: []core.Model{{ID: "listed", Object: "model"}},
+		}},
+	}
+	registry.RegisterProviderWithNameAndType(mock, "router", "openrouter")
+	registry.SetProviderConfiguredModels("router", []string{"configured"})
+
+	require.NoError(t, registry.Initialize(context.Background()))
+
+	assert.Zero(t, listCount.Load(), "allowlist skips upstream /models")
+	assert.True(t, registry.Supports("router/configured"))
+	assert.False(t, registry.Supports("router/listed"))
 }

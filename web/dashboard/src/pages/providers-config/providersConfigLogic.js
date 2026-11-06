@@ -27,6 +27,10 @@ export const FIELD_MODELS_MODE = "models_mode";
 // select would offer only the default.
 const MODELS_MODE_OPTIONS = ["fallback", "allowlist", "merge"];
 
+// The docs table comparing the models modes, linked from the field's "?".
+export const MODELS_MODE_DOCS_URL =
+  "https://gomodel.enterpilot.io/docs/advanced/config-yaml?utm_source=gomodel_dashboard#models-modes";
+
 // Resolve translated metadata on access so locale changes cannot leave stale
 // labels, hints, or placeholders. The metadata describes each credential field:
 // what to call it, which control to render, and what to say about it. The
@@ -143,6 +147,8 @@ function providerCredentialFields() {
       label: m.providers_models_mode(),
       control: "select",
       hint: m.providers_models_mode_hint(),
+      docsUrl: MODELS_MODE_DOCS_URL,
+      docsLabel: m.providers_models_mode_docs(),
     },
     [FIELD_BILLABLE]: {
       label: m.providers_billable(),

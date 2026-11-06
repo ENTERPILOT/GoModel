@@ -40,6 +40,18 @@
     {field.label}
     {#if field.required}<span class="form-field-required" aria-hidden="true">*</span>{/if}
   </label>
+  {#if field.docsUrl}
+    <a
+      class="inline-help-toggle form-field-docs-help"
+      href={field.docsUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={field.docsLabel}
+      title={field.docsLabel}
+    >
+      <span class="inline-help-toggle-icon" aria-hidden="true">?</span>
+    </a>
+  {/if}
 
   {#if field.control === "keys"}
     <div class="vm-target-list">
@@ -132,3 +144,11 @@
     <small class="form-hint" id={id + "-hint"}>{field.hint}</small>
   {/if}
 </div>
+
+<style>
+  .form-field-docs-help {
+    margin-left: 6px;
+    text-decoration: none;
+    vertical-align: middle;
+  }
+</style>

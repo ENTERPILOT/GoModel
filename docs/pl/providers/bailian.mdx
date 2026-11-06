@@ -142,8 +142,9 @@ console.log(completion.choices[0].message.content);
   Modele embeddingów (`text-embedding-v3`, `text-embedding-v4`) są obsługiwane
   przez API w trybie kompatybilnym, ale **nie** są automatycznie wykrywane z
   endpointu upstream `/v1/models`. Ustaw
-  `BAILIAN_MODELS=text-embedding-v3,text-embedding-v4` albo użyj
-  `CONFIGURED_PROVIDER_MODELS_MODE=allowlist`, aby były dostępne.
+  `BAILIAN_MODELS=text-embedding-v3,text-embedding-v4`, aby były dostępne; w
+  domyślnym trybie `allowlist` udostępniane są tylko te modele, więc ustaw
+  `CONFIGURED_PROVIDER_MODELS_MODE=merge`, aby zachować też wykryte modele czatu.
 </Note>
 
 ## Źródła

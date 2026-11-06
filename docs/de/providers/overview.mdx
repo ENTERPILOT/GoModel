@@ -228,11 +228,11 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
   Beispiel `OPENROUTER_MODELS=openai/gpt-oss-120b,anthropic/claude-sonnet-4` oder
   `ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3`. DeepSeek verwendet standardmäßig
   `https://api.deepseek.com`; setzen Sie `DEEPSEEK_BASE_URL` nur, wenn Sie einen kompatiblen Proxy
-  oder einen alternativen DeepSeek-Endpunkt verwenden. Standardmäßig verwendet
-  `CONFIGURED_PROVIDER_MODELS_MODE=fallback` diese Listen nur, wenn das Upstream-`/models` nicht
-  verfügbar oder leer ist. Setzen Sie `CONFIGURED_PROVIDER_MODELS_MODE=allowlist`, um für Provider
-  mit einer definierten Liste nur die konfigurierten Modelle bereitzustellen und deren
-  Upstream-Aufrufe von `/models` zu überspringen.
+  oder einen alternativen DeepSeek-Endpunkt verwenden. Standardmäßig stellt
+  `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` für Provider mit einer definierten Liste nur die
+  konfigurierten Modelle bereit und überspringt deren Upstream-Aufrufe von `/models`. Setzen Sie
+  `fallback`, um diese Listen nur zu verwenden, wenn das Upstream-`/models` nicht verfügbar oder
+  leer ist, oder `merge`, um sie zu den erkannten Modellen hinzuzufügen.
 - **Modellfilter** – grenzen Sie einen großen Katalog per Glob-Muster oder Preis ein, statt Modelle
   einzeln aufzulisten: `OPENROUTER_MODEL_FILTER_INCLUDE=*:free` behält nur die kostenlose Stufe von
   OpenRouter, und `<PROVIDER>_MODEL_FILTER_MAX_PRICE_PER_MTOK` begrenzt, wohin ein Provider routen

@@ -151,12 +151,12 @@ succeeds. With nothing to serve, requests return `503` so clients retry, and
 `/health/ready` reports `degraded` with `"models": "down"` while the instance
 stays in rotation.
 
-To never depend on discovery, list the models yourself and set
-`CONFIGURED_PROVIDER_MODELS_MODE=allowlist`:
+To never depend on discovery, list the models yourself. The default
+`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` then serves only that list and
+skips `/models`:
 
 ```bash
 export OPENAI_MODELS=gpt-6-sol,gpt-6-luna
-export CONFIGURED_PROVIDER_MODELS_MODE=allowlist
 ```
 
 ## If GoModel itself is down

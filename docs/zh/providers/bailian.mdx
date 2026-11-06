@@ -132,8 +132,9 @@ console.log(completion.choices[0].message.content);
 
 <Note>
   嵌入模型（`text-embedding-v3`、`text-embedding-v4`）由兼容模式 API 提供，但**不会**从上游
-  `/v1/models` 端点自动发现。请设置 `BAILIAN_MODELS=text-embedding-v3,text-embedding-v4`，
-  或使用 `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` 使其可用。
+  `/v1/models` 端点自动发现。请设置 `BAILIAN_MODELS=text-embedding-v3,text-embedding-v4`
+  使其可用；默认的 `allowlist` 模式只提供这些模型，若要同时保留发现的聊天模型，请设置
+  `CONFIGURED_PROVIDER_MODELS_MODE=merge`。
 </Note>
 
 ## 参考

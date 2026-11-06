@@ -76,9 +76,9 @@ the list:
 GITHUB_COPILOT_MODEL_FILTER_INCLUDE=claude-sonnet-5.5,gpt-5.6-luna,gpt-4.1
 ```
 
-`GITHUB_COPILOT_MODELS` is a fallback list, used only when `/models` fails or
-is empty; `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` makes it the only list
-and skips `/models`.
+`GITHUB_COPILOT_MODELS` is the only list by default (`allowlist` mode) and
+`/models` is skipped; `CONFIGURED_PROVIDER_MODELS_MODE=fallback` uses it only
+when `/models` fails or is empty.
 
 ## Chat completions and Responses on every model
 

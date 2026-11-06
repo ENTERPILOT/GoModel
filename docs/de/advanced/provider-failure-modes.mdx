@@ -151,12 +151,12 @@ erfolgreich ist. Gibt es nichts, womit Requests bedient werden können, liefern 
 `/health/ready` meldet `degraded` mit `"models": "down"`, während die Instanz
 in der Rotation bleibt.
 
-Um nie von der Modellerkennung abhängig zu sein, listen Sie die Modelle selbst auf und setzen
-`CONFIGURED_PROVIDER_MODELS_MODE=allowlist`:
+Um nie von der Modellerkennung abhängig zu sein, listen Sie die Modelle selbst auf. Der
+Standardwert `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` stellt dann nur diese Liste bereit und
+überspringt `/models`:
 
 ```bash
 export OPENAI_MODELS=gpt-6-sol,gpt-6-luna
-export CONFIGURED_PROVIDER_MODELS_MODE=allowlist
 ```
 
 ## Wenn GoModel selbst ausfällt

@@ -151,12 +151,11 @@ się powiedzie. Gdy nie ma czego serwować, requesty zwracają `503`, aby klienc
 a `/health/ready` raportuje `degraded` z `"models": "down"`, podczas gdy instancja
 pozostaje w rotacji.
 
-Aby nigdy nie zależeć od wykrywania, wypisz modele samodzielnie i ustaw
-`CONFIGURED_PROVIDER_MODELS_MODE=allowlist`:
+Aby nigdy nie zależeć od wykrywania, wypisz modele samodzielnie. Domyślne
+`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` udostępnia wtedy tylko tę listę i pomija `/models`:
 
 ```bash
 export OPENAI_MODELS=gpt-6-sol,gpt-6-luna
-export CONFIGURED_PROVIDER_MODELS_MODE=allowlist
 ```
 
 ## Gdy nie działa sam GoModel

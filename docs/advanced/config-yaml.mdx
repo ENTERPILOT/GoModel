@@ -45,9 +45,11 @@ example `OPENROUTER_MODELS`, `ORACLE_MODELS`, `AZURE_MODELS`, `SGLANG_MODELS`,
 
 | Mode | Calls upstream `/models` | Exposes | Use when |
 |---|---|---|---|
-| `fallback` (default) | Yes | The upstream list; your list only if `/models` fails or returns nothing | `/models` is sometimes unavailable, but discovery should drive the list |
-| `allowlist` | No | Only your list | You want exactly these models, e.g. one model from OpenRouter |
+| `allowlist` (default) | No | Only your list | You want exactly these models, e.g. one model from OpenRouter |
+| `fallback` | Yes | The upstream list; your list only if `/models` fails or returns nothing | `/models` is sometimes unavailable, but discovery should drive the list |
 | `merge` | Yes | The upstream list plus your models it doesn't include; falls back like `fallback` when `/models` fails | A provider serves models it does not list (preview or unlisted IDs) |
+
+Before this release the default was `fallback`. Set `CONFIGURED_PROVIDER_MODELS_MODE=fallback` to keep the old behavior.
 
 Set `models_mode` on a provider to override the global mode for that provider
 only. Leave it unset to use the global mode. For example, you can expose a single

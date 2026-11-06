@@ -118,12 +118,11 @@ sum(rate(gomodel_empty_responses_total{reason="no_usage"}[15m])) by (provider) >
 失败的提供商每隔 `PROVIDER_RECHECK_INTERVAL` 秒（默认 `60`）重新检查一次，一旦列表获取成功，实时列表就会替换临时列表。如果没有任何可用模型，请求会返回 `503`，以便客户端重试；
 `/health/ready` 会报告 `degraded` 并带有 `"models": "down"`，而实例仍保留在轮转中。
 
-如果要完全不依赖模型发现，请自行列出模型并设置
-`CONFIGURED_PROVIDER_MODELS_MODE=allowlist`：
+如果要完全不依赖模型发现，请自行列出模型。默认的
+`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` 会只提供该列表并跳过 `/models`：
 
 ```bash
 export OPENAI_MODELS=gpt-6-sol,gpt-6-luna
-export CONFIGURED_PROVIDER_MODELS_MODE=allowlist
 ```
 
 ## 如果 GoModel 本身宕机

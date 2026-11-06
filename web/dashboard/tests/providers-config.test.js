@@ -675,3 +675,10 @@ test("the schema-less fallback form still offers the models_mode values", () => 
   assert.equal(field.control, "select");
   assert.deepEqual(field.options, ["fallback", "allowlist", "merge"]);
 });
+
+test("models_mode links to the docs table comparing the modes", () => {
+  const meta = providerCredentialFieldMeta("models_mode");
+  assert.match(meta.docsUrl, /\/docs\/advanced\/config-yaml\?utm_source=gomodel_dashboard#models-modes$/);
+  assert.ok(meta.docsLabel);
+  assert.equal(providerCredentialFieldMeta("proxy_url").docsUrl, undefined);
+});

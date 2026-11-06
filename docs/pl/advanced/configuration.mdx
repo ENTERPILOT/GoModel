@@ -553,13 +553,13 @@ Większość providerów może korzystać z niestandardowego bazowego URL-a prze
 Każdy typ providera akceptuje też rozdzieloną przecinkami listę skonfigurowanych modeli przez
 `<PROVIDER>_MODELS`, na przykład `OPENROUTER_MODELS`, `ORACLE_MODELS`,
 `AZURE_MODELS`, `SGLANG_MODELS`, `VLLM_MODELS` lub `LLMD_MODELS`. Domyślnie
-`CONFIGURED_PROVIDER_MODELS_MODE=fallback` używa skonfigurowanych list tylko wtedy, gdy
-upstreamowe `/models` zwraca błąd, nil lub pustą listę.
+`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` sprawia, że skonfigurowana lista jest całym
+inwentarzem providera, a upstreamowe wywołanie `/models` jest pomijane. Ustaw `fallback`,
+żeby używać listy tylko wtedy, gdy upstreamowe `/models` zwraca błąd, nil lub pustą listę,
+albo `merge`, żeby dodać skonfigurowane modele do inwentarza upstreamu.
 Provider kompatybilny z OpenAI bez endpointu `/models` (404 lub 405) jest obsługiwany
 na podstawie skonfigurowanej listy i raportowany jako sprawny, co pasuje do serwerów z jednym API,
-takich jak speech-to-text. Ustaw
-`CONFIGURED_PROVIDER_MODELS_MODE=allowlist`, żeby udostępniać tylko skonfigurowane modele
-providerów, które definiują listę, i pomijać ich upstreamowe wywołania `/models`. W YAML
+takich jak speech-to-text. W YAML
 `providers.<name>.models` dostarcza tę samą listę modeli dla nazwanych bloków
 providerów.
 
@@ -767,7 +767,7 @@ export ORACLE_BASE_URL="https://inference.generativeai.us-chicago-1.oci.oraclecl
 export ORACLE_MODELS="openai.gpt-oss-120b,xai.grok-3" # Opcjonalna lista skonfigurowanych modeli
 export OPENROUTER_MODELS="openai/gpt-oss-120b,anthropic/claude-sonnet-4"
 export KILO_MODELS="anthropic/claude-sonnet-4.5,openai/gpt-5.5"
-export CONFIGURED_PROVIDER_MODELS_MODE="fallback" # fallback lub allowlist
+export CONFIGURED_PROVIDER_MODELS_MODE="allowlist" # allowlist (domyślnie), fallback lub merge
 export OLLAMA_BASE_URL="http://localhost:11434/v1" # Rejestruje providera "ollama"
 export SGLANG_BASE_URL="http://localhost:30000/v1" # Rejestruje providera "sglang" bez klucza
 # Opcjonalnie: export SGLANG_API_KEY="token-abc123"
@@ -822,11 +822,11 @@ ustrukturyzowane ustawienia), użyj pliku YAML:
 
 ```yaml
 models:
-  # fallback to wartość domyślna. Użyj allowlist, gdy skonfigurowane listy modeli
-  # providerów mają ukrywać modele upstreamu i pomijać wywołania /models, albo merge,
-  # żeby dodać skonfigurowane modele do wykrytego inwentarza (modele, które provider
-  # serwuje, ale ich nie wypisuje).
-  configured_provider_models_mode: fallback
+  # allowlist to wartość domyślna: skonfigurowana lista modeli jest całym
+  # inwentarzem, a wywołania /models są pomijane. Użyj fallback, żeby używać listy
+  # tylko przy błędnym lub pustym /models, albo merge, żeby dodać skonfigurowane
+  # modele do wykrytego inwentarza (modele, które provider serwuje, ale ich nie wypisuje).
+  configured_provider_models_mode: allowlist
   # Zwracaj z GET /v1/models same identyfikatory modeli (gpt-5) zamiast identyfikatorów
   # z prefiksem providera (openai/gpt-5). Gdy dwóch providerów udostępnia ten sam ID, na liście jest
   # tylko provider, do którego trafia request bez prefiksu (pierwszy zarejestrowany); przypnij nazwę

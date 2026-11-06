@@ -594,15 +594,15 @@ Die meisten Provider können über `<PROVIDER>_BASE_URL` (zum Beispiel `OPENAI_B
 Jeder Provider-Typ akzeptiert außerdem über `<PROVIDER>_MODELS` eine
 kommagetrennte Liste konfigurierter Modelle, zum Beispiel
 `OPENROUTER_MODELS`, `ORACLE_MODELS`, `AZURE_MODELS`, `SGLANG_MODELS`,
-`VLLM_MODELS` oder `LLMD_MODELS`. Standardmäßig verwendet
-`CONFIGURED_PROVIDER_MODELS_MODE=fallback` die konfigurierten Listen nur, wenn
-Upstream `/models` fehlschlägt, nil oder eine leere Liste zurückgibt. Ein
-OpenAI-kompatibler Provider ohne `/models`-Endpunkt (404 oder 405) wird aus
-seiner konfigurierten Liste bedient und als gesund gemeldet. Das passt zu
-Servern mit nur einer API, etwa für Speech-to-Text. Setzen Sie
-`CONFIGURED_PROVIDER_MODELS_MODE=allowlist`, um bei Providern mit definierter
-Liste nur die konfigurierten Modelle bereitzustellen und deren
-Upstream-Aufrufe von `/models` zu überspringen. In YAML liefert
+`VLLM_MODELS` oder `LLMD_MODELS`. Standardmäßig macht
+`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` eine konfigurierte Liste zum
+gesamten Modellangebot des Providers und überspringt dessen Upstream-Aufruf von
+`/models`. Setzen Sie `fallback`, um die Liste nur zu verwenden, wenn Upstream
+`/models` fehlschlägt, nil oder eine leere Liste zurückgibt, oder `merge`, um
+konfigurierte Modelle zum Upstream-Angebot hinzuzufügen. Ein OpenAI-kompatibler
+Provider ohne `/models`-Endpunkt (404 oder 405) wird aus seiner konfigurierten
+Liste bedient und als gesund gemeldet. Das passt zu Servern mit nur einer API,
+etwa für Speech-to-Text. In YAML liefert
 `providers.<name>.models` dieselbe Modellliste für benannte Provider-Blöcke.
 
 `GET /v1/models` listet standardmäßig Provider-qualifizierte IDs
@@ -814,7 +814,7 @@ export ORACLE_BASE_URL="https://inference.generativeai.us-chicago-1.oci.oraclecl
 export ORACLE_MODELS="openai.gpt-oss-120b,xai.grok-3" # Optionale konfigurierte Modellliste
 export OPENROUTER_MODELS="openai/gpt-oss-120b,anthropic/claude-sonnet-4"
 export KILO_MODELS="anthropic/claude-sonnet-4.5,openai/gpt-5.5"
-export CONFIGURED_PROVIDER_MODELS_MODE="fallback" # fallback oder allowlist
+export CONFIGURED_PROVIDER_MODELS_MODE="allowlist" # allowlist (Standard), fallback oder merge
 export OLLAMA_BASE_URL="http://localhost:11434/v1" # Registriert den Provider "ollama"
 export SGLANG_BASE_URL="http://localhost:30000/v1" # Registriert den Provider "sglang" ohne Key
 # Optional: export SGLANG_API_KEY="token-abc123"
@@ -872,12 +872,12 @@ strukturierte Einstellungen) verwenden Sie die YAML-Datei:
 
 ```yaml
 models:
-  # fallback ist der Standardwert. Verwenden Sie allowlist, wenn konfigurierte
-  # Modelllisten der Provider Upstream-Modelle ausblenden und Upstream-Aufrufe von
-  # /models überspringen sollen, oder merge, um konfigurierte Modelle zusätzlich
-  # zum erkannten Modellangebot hinzuzufügen (Modelle, die ein Provider bereitstellt,
-  # aber nicht auflistet).
-  configured_provider_models_mode: fallback
+  # allowlist ist der Standardwert: Eine konfigurierte Modellliste ist das gesamte
+  # Modellangebot, Upstream-Aufrufe von /models werden übersprungen. Verwenden Sie
+  # fallback, um die Liste nur bei fehlschlagendem oder leerem /models zu nutzen,
+  # oder merge, um konfigurierte Modelle zusätzlich zum erkannten Modellangebot
+  # hinzuzufügen (Modelle, die ein Provider bereitstellt, aber nicht auflistet).
+  configured_provider_models_mode: allowlist
   # Reine Modell-IDs (gpt-5) statt Provider-qualifizierter IDs (openai/gpt-5) aus
   # GET /v1/models auflisten. Bieten zwei Provider dieselbe ID an, wird nur der
   # Provider aufgelistet, an den ein nicht qualifizierter Request geroutet wird
