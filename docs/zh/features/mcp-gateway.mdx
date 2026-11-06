@@ -262,11 +262,11 @@ mcp:
 
 部分 MCP 服务器（Notion、Linear、GitHub、Sentry 等）需要交互式 OAuth 登录，而不是静态 Token。GoModel 可以直接在控制台中为整个网关登录一次：
 
-1. 点击**添加 MCP 服务器**并选择服务：Linear、Notion、GitHub、Sentry、Stripe、Supabase、Vercel 或 Hugging Face。URL 会自动填写。
+1. 点击**添加 MCP 服务器**，在**服务器**中选择服务：Linear、Notion、GitHub、Sentry、Stripe、Supabase、Vercel 或 Hugging Face。URL 会自动填写。
 2. 保留**使用 ... 登录**（如果服务提供，也可以选择 **API 密钥或令牌**），然后点击**保存并登录**。
 3. 在服务的登录页面授权访问。您会回到 **MCP Servers** 页面，服务器会使用新的 Token 重新连接。
 
-其他服务器请选择**自定义服务器**，填写其 URL，不要配置 `Authorization` 请求头，然后保存。服务器返回 `401 Unauthorized` 后会显示**需要登录**；点击该行的登录图标，然后点击**继续登录**。预设服务器的连接、工具和访问设置位于**高级设置**中。
+其他服务器请选择**自定义服务器**，填写其 URL，不要配置 `Authorization` 请求头，然后保存。服务器返回 `401 Unauthorized` 后会显示**需要登录**；点击该行的登录图标，然后点击**继续登录**。预设服务器的连接和访问设置位于**高级设置**中；之后可编辑服务器来选择工具。
 
 GitHub 不支持动态客户端注册：请使用登录对话框中显示的重定向 URI 注册一次 [GitHub OAuth 应用](https://github.com/settings/applications/new)，然后在对话框中填写其 Client ID 和 Secret。
 

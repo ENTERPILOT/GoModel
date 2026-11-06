@@ -8,12 +8,12 @@ import {
   MCP_AUTH_TOKEN,
   MCP_SERVER_PRESETS,
   mcpConnectionHeaders,
+  mcpFreeSlug,
   mcpHasAuthorizationHeader,
   mcpPresetById,
   mcpPresetForURL,
-  mcpPresetFormFields,
   mcpPresetHost,
-  mcpPresetSlug,
+  mcpURLHostName,
 } from "../src/pages/mcp-servers/mcpPresets.js";
 import { buildMcpServerPayload, defaultMcpServerForm } from "../src/pages/mcp-servers/mcp-servers.js";
 
@@ -36,9 +36,9 @@ test("every preset is a valid HTTPS server with known connection methods", () =>
   }
 });
 
-test("a preset fills a form the server payload accepts", () => {
+test("a preset's URL and slug make a form the server payload accepts", () => {
   const preset = mcpPresetById("linear");
-  const form = { ...defaultMcpServerForm(), ...mcpPresetFormFields(preset) };
+  const form = { ...defaultMcpServerForm(), name: preset.name, slug: preset.id, url: preset.url };
   const built = buildMcpServerPayload(form, "create", []);
   assert.equal(built.error, undefined);
   assert.equal(built.payload.slug, "linear");
@@ -46,14 +46,19 @@ test("a preset fills a form the server payload accepts", () => {
   assert.equal(built.payload.transport, "http");
 });
 
-test("mcpPresetSlug skips slugs servers and virtual servers already use", () => {
-  const preset = mcpPresetById("linear");
-  assert.equal(mcpPresetSlug(preset), "linear");
-  assert.equal(mcpPresetSlug(preset, [{ slug: "linear" }]), "linear-2");
+test("mcpFreeSlug skips slugs servers and virtual servers already use", () => {
+  assert.equal(mcpFreeSlug("linear"), "linear");
+  assert.equal(mcpFreeSlug("linear", [{ slug: "linear" }]), "linear-2");
   assert.equal(
-    mcpPresetSlug(preset, [{ slug: "linear" }, { name: "linear-2" }], [{ name: "linear-3" }]),
+    mcpFreeSlug("linear", [{ slug: "linear" }, { name: "linear-2" }], [{ name: "linear-3" }]),
     "linear-4",
   );
+});
+
+test("mcpURLHostName names a custom server after its URL host", () => {
+  assert.equal(mcpURLHostName(" https://mcp.example.com:8443/mcp "), "mcp.example.com:8443");
+  assert.equal(mcpURLHostName("not a url"), "");
+  assert.equal(mcpURLHostName(""), "");
 });
 
 test("mcpConnectionHeaders adds a bearer token only for the token method", () => {

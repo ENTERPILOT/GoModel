@@ -369,8 +369,9 @@ Some MCP servers (Notion, Linear, GitHub, Sentry, ...) require an
 interactive OAuth sign-in instead of a static token. GoModel signs in once
 for the whole gateway, from the dashboard:
 
-1. Click **Add MCP Server** and pick the service: Linear, Notion, GitHub,
-   Sentry, Stripe, Supabase, Vercel, or Hugging Face. The URL is filled in.
+1. Click **Add MCP Server** and pick the service under **Server**: Linear,
+   Notion, GitHub, Sentry, Stripe, Supabase, Vercel, or Hugging Face. The URL
+   is filled in.
 2. Keep **Sign in with ...** (or pick **API key or token** where the service
    offers it) and click **Save and sign in**.
 3. Approve access on the service's sign-in page. You return to **MCP Servers**,
@@ -379,8 +380,8 @@ for the whole gateway, from the dashboard:
 For any other server, pick **Custom server**, enter its URL with no
 `Authorization` header, and save. It shows **Sign-in required** once it
 answers `401 Unauthorized`; click the row's sign-in icon, then **Continue to
-sign-in**. The connection, tool and access settings of a preset server are
-under **Advanced settings**.
+sign-in**. The connection and access settings of a preset server are under
+**Advanced settings**; choose its tools later by editing the server.
 
 GitHub has no dynamic client registration: register a
 [GitHub OAuth app](https://github.com/settings/applications/new) once with the

@@ -40,8 +40,10 @@ import {
   MCP_AUTH_TOKEN,
   mcpConnectionHeaders,
   mcpHasAuthorizationHeader,
+  MCP_PRESET_CUSTOM,
+  mcpFreeSlug,
   mcpPresetById,
-  mcpPresetFormFields,
+  mcpURLHostName,
 } from "./mcpPresets.js";
 
 class McpServersState {
@@ -71,13 +73,16 @@ class McpServersState {
   slugEdited = $state(false);
   advancedOpen = $state(false);
   form = $state(defaultMcpServerForm());
-  // A chosen preset keeps the editor to a name and a connection method
-  // (sign-in, token, or none) with everything else under Advanced; null is
-  // the full custom-server form.
-  presetPickerOpen = $state(false);
-  formPreset = $state(null);
+  // Adding a server starts with the server choice: a preset id or
+  // MCP_PRESET_CUSTOM, "" until one is picked. A preset keeps the editor to a
+  // name and a connection method (sign-in, token, or none) with everything
+  // else under Advanced. nameEdited stops the name following the choice (or a
+  // custom server's URL) once the operator typed one.
+  formKind = $state("");
   formAuth = $state("");
   formToken = $state("");
+  nameEdited = $state(false);
+  formPreset = $derived(mcpPresetById(this.formKind));
 
   // Editor tool picker: every tool the server reports, exposed or not. A new
   // server, or one that never listed, has none yet.
@@ -276,42 +281,7 @@ class McpServersState {
 
   // --- editor form -------------------------------------------------------
 
-  // Adding a server starts at the preset picker; choosePreset opens the
-  // editor from there.
   openCreate() {
-    this.presetPickerOpen = true;
-  }
-
-  closePresetPicker() {
-    this.presetPickerOpen = false;
-  }
-
-  // choosePreset opens the editor for a preset id, or the full custom form
-  // for any other value.
-  choosePreset(id) {
-    const preset = mcpPresetById(id);
-    this.presetPickerOpen = false;
-    this.#openCreateForm();
-    if (!preset) {
-      return;
-    }
-    this.formPreset = preset;
-    this.formAuth = preset.auth[0];
-    this.form = {
-      ...this.form,
-      ...mcpPresetFormFields(preset, this.servers, this.virtualServers),
-    };
-    // The preset picked a free slug; renaming must not overwrite it.
-    this.slugEdited = true;
-  }
-
-  // changePreset goes back from the editor to the picker.
-  changePreset() {
-    this.closeForm();
-    this.presetPickerOpen = true;
-  }
-
-  #openCreateForm() {
     this.formMode = "create";
     this.slugEdited = false;
     this.advancedOpen = false;
@@ -322,10 +292,48 @@ class McpServersState {
     this.formOpen = true;
   }
 
+  // chooseServerKind switches the create form between presets and a custom
+  // server. Fields the operator did not touch follow the choice; the token
+  // is always dropped so one service's key never goes to another.
+  chooseServerKind(kind) {
+    const previous = this.formPreset;
+    const preset = mcpPresetById(kind);
+    this.formKind = preset ? preset.id : kind === MCP_PRESET_CUSTOM ? kind : "";
+    this.formAuth = preset ? preset.auth[0] : "";
+    this.formToken = "";
+    this.error = "";
+    if (preset) {
+      this.form.url = preset.url;
+      this.form.transport = preset.transport || "http";
+    } else if (previous && this.form.url === previous.url) {
+      this.form.url = "";
+      this.form.transport = "http";
+    }
+    if (!this.nameEdited) {
+      this.form.name = preset ? preset.name : mcpURLHostName(this.form.url);
+    }
+    this.syncSlugFromName();
+  }
+
+  // syncNameFromURL names a custom server after its URL host until the
+  // operator types a name.
+  syncNameFromURL() {
+    if (this.formMode === "create" && !this.formPreset && !this.nameEdited) {
+      this.form.name = mcpURLHostName(this.form.url);
+      this.syncSlugFromName();
+    }
+  }
+
+  markNameEdited() {
+    this.nameEdited = true;
+    this.syncSlugFromName();
+  }
+
   #resetPreset() {
-    this.formPreset = null;
+    this.formKind = "";
     this.formAuth = "";
     this.formToken = "";
+    this.nameEdited = false;
   }
 
   openEdit(server) {
@@ -404,10 +412,15 @@ class McpServersState {
     this.form.tool_names = (this.form.tool_names || []).filter((item) => item !== name);
   }
 
+  // A preset server's slug skips taken ones, so a second Linear becomes
+  // linear-2 instead of an error the preset form keeps out of sight.
   syncSlugFromName() {
-    if (this.formMode === "create" && !this.slugEdited) {
-      this.form.slug = deriveMcpServerSlug(this.form.name);
+    if (this.formMode !== "create" || this.slugEdited) {
+      return;
     }
+    const slug = this.form.name.trim() ? deriveMcpServerSlug(this.form.name) : "";
+    this.form.slug =
+      slug && this.formPreset ? mcpFreeSlug(slug, this.servers, this.virtualServers) : slug;
   }
 
   markSlugEdited() {
@@ -425,6 +438,10 @@ class McpServersState {
   }
 
   async submitForm() {
+    if (this.formMode === "create" && !this.formKind) {
+      this.error = m.mcp_preset_server_required();
+      return;
+    }
     const preset = this.formPreset;
     const auth = preset ? this.formAuth : "";
     const form = preset

@@ -15,7 +15,6 @@
   import McpOAuthDialog from "./McpOAuthDialog.svelte";
   import McpServerEditor from "./McpServerEditor.svelte";
   import McpServerList from "./McpServerList.svelte";
-  import McpServerPresetPicker from "./McpServerPresetPicker.svelte";
   import McpVirtualServerEditor from "./McpVirtualServerEditor.svelte";
   import McpVirtualServerList from "./McpVirtualServerList.svelte";
   import { mcpServers } from "./mcpServers.svelte.js";
@@ -86,7 +85,6 @@
     </div>
   {/if}
 
-  <McpServerPresetPicker />
   <McpServerEditor />
   <McpCatalogModal />
   <McpOAuthDialog />

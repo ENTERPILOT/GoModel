@@ -83,41 +83,36 @@ export function mcpPresetForURL(url) {
 }
 
 export function mcpPresetHost(preset) {
-  try {
-    return new URL(preset.url).host;
-  } catch {
-    return "";
-  }
+  return mcpURLHostName(preset.url);
 }
 
-// mcpPresetSlug picks the preset's id, or id-2, id-3, ... when a server or
-// virtual server already uses it, so adding a second Linear workspace does
-// not stop at a slug clash the operator cannot see in the simple form.
-export function mcpPresetSlug(preset, servers = [], virtualServers = []) {
+// mcpFreeSlug returns base, or base-2, base-3, ... when a server or virtual
+// server already uses it, so adding a second Linear workspace does not stop
+// at a slug clash the operator cannot see in the preset form.
+export function mcpFreeSlug(base, servers = [], virtualServers = []) {
   const taken = new Set([
     ...(servers || []).map((server) => mcpServerSlug(server)),
     ...(virtualServers || []).map((virtual) => String(virtual?.name || "")),
   ]);
-  if (!taken.has(preset.id)) {
-    return preset.id;
+  if (!taken.has(base)) {
+    return base;
   }
   for (let n = 2; ; n++) {
-    const slug = preset.id + "-" + n;
+    const slug = base + "-" + n;
     if (!taken.has(slug)) {
       return slug;
     }
   }
 }
 
-// mcpPresetFormFields returns the server form fields a preset fills in; the
-// caller merges them over the default form.
-export function mcpPresetFormFields(preset, servers = [], virtualServers = []) {
-  return {
-    name: preset.name,
-    slug: mcpPresetSlug(preset, servers, virtualServers),
-    url: preset.url,
-    transport: preset.transport || "http",
-  };
+// mcpURLHostName is the name a custom server gets from its URL until the
+// operator types one.
+export function mcpURLHostName(url) {
+  try {
+    return new URL(String(url || "").trim()).host;
+  } catch {
+    return "";
+  }
 }
 
 // mcpConnectionHeaders adds the token as an Authorization header unless the
