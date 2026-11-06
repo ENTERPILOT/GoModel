@@ -386,16 +386,34 @@ nicht vertraut. Siehe
 
 ## Mit OAuth anmelden
 
-Manche MCP-Server (Notion, Linear, Atlassian, Sentry, ...) verlangen eine
+Manche MCP-Server (Notion, Linear, GitHub, Sentry, ...) verlangen eine
 interaktive OAuth-Anmeldung statt eines statischen Tokens. GoModel meldet sich
 einmal pro Server an, und alle Clients des Gateways teilen sich diese Anmeldung.
 Direkt im Dashboard:
 
-1. Fügen Sie den Server mit seiner URL und ohne `Authorization`-Header hinzu.
-   Sobald er mit `401 Unauthorized` antwortet, zeigt er **Anmeldung erforderlich**.
-2. Klicken Sie in der Zeile auf das Anmeldesymbol und dann auf **Weiter zur Anmeldung**.
-3. Erteilen Sie auf der Anmeldeseite des Servers den Zugriff. Sie kehren zu
-   **MCP Servers** zurück, und der Server verbindet sich mit dem neuen Token.
+1. Klicken Sie auf **MCP-Server hinzufügen** und wählen Sie unter **Server**
+   den Dienst: Linear, Notion, GitHub, Sentry, Stripe, Supabase, Vercel oder
+   Hugging Face. Die URL wird ausgefüllt.
+2. Wählen Sie, wie verbunden wird:
+   - **Mit ... anmelden**: Klicken Sie auf **Speichern und anmelden** und
+     erteilen Sie dann auf der Anmeldeseite des Dienstes den Zugriff. Sie
+     kehren zu **MCP Servers** zurück, und der Server verbindet sich mit dem
+     neuen Token.
+   - **API-Schlüssel oder Token**, wo der Dienst das anbietet: Fügen Sie den
+     Schlüssel ein und speichern Sie. Der Server verbindet sich damit, ohne
+     Anmeldeseite. Hugging Face bietet dies oder **Keine Authentifizierung**.
+
+Für jeden anderen Server wählen Sie **Eigener Server**, geben seine URL ohne
+`Authorization`-Header ein und speichern. Sobald er mit `401 Unauthorized`
+antwortet, zeigt er **Anmeldung erforderlich**; klicken Sie in der Zeile auf das
+Anmeldesymbol und dann auf **Weiter zur Anmeldung**. Die Verbindungs- und
+Zugriffseinstellungen eines vordefinierten Servers liegen unter **Erweiterte
+Einstellungen**; Tools wählen Sie später beim Bearbeiten des Servers.
+
+GitHub bietet keine dynamische Client-Registrierung: Registrieren Sie einmal
+eine [GitHub OAuth App](https://github.com/settings/applications/new) mit der
+im Anmeldedialog angezeigten Redirect-URI und tragen Sie dort deren Client-ID
+und Secret ein.
 
 GoModel folgt der
 [MCP-Autorisierungsspezifikation](https://modelcontextprotocol.io/specification/latest/basic/authorization):
@@ -422,7 +440,8 @@ Hinweise:
 
 - Die Anmeldung funktioniert für `http`- und `sse`-Server, auch für solche aus
   `config.yaml`; Tokens sind Laufzeitzustand, keine Konfiguration. Die
-  Server-URL muss `https` verwenden; einfaches `http` geht nur auf `localhost`.
+  Server-URL muss `https` verwenden; einfaches `http` geht nur auf einem
+  Loopback-Host (`localhost`, `127.0.0.1`, `::1`).
 - Ein angemeldetes Token ersetzt einen konfigurierten `Authorization`-Header und
   wird nur an den Origin des Servers gesendet. Nach einer URL-Änderung werden
   die Tokens erst nach einer neuen Anmeldung wieder verwendet.

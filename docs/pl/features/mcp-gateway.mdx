@@ -420,7 +420,8 @@ Uwagi:
 
 - Logowanie działa dla serwerów `http` i `sse`, także tych zadeklarowanych w
   `config.yaml`; tokeny są stanem w czasie działania, a nie konfiguracją. URL
-  serwera musi używać `https`; zwykłe `http` działa tylko na `localhost`.
+  serwera musi używać `https`; zwykłe `http` działa tylko na adresie loopback
+  (`localhost`, `127.0.0.1`, `::1`).
 - Token z logowania zastępuje skonfigurowany nagłówek `Authorization` i jest
   wysyłany tylko do originu serwera. Po zmianie URL serwera tokeny nie są
   używane, dopóki nie zalogujesz się ponownie.

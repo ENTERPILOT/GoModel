@@ -277,7 +277,7 @@ Token 存储在网关数据库中，设置 [`GOMODEL_ENCRYPTION_KEY`](/zh/advanc
 
 说明：
 
-- 登录适用于 `http` 和 `sse` 服务器，包括在 `config.yaml` 中声明的服务器；Token 属于运行时状态，而不是配置。服务器 URL 必须使用 `https`；普通 `http` 仅适用于 `localhost`。
+- 登录适用于 `http` 和 `sse` 服务器，包括在 `config.yaml` 中声明的服务器；Token 属于运行时状态，而不是配置。服务器 URL 必须使用 `https`；普通 `http` 仅适用于回环地址（`localhost`、`127.0.0.1`、`::1`）。
 - 登录获得的 Token 会替换已配置的 `Authorization` 请求头，并且只发送到该服务器自己的源。修改服务器 URL 后，需要重新登录才会再次使用 Token。
 - 网关的所有客户端共享同一个登录。暂不支持按用户区分的上游 Token。
 - 部署多个网关实例时，登录回调必须到达发起登录的实例（为 `/admin` 启用会话保持）；刷新后的 Token 会通过数据库同步到其他实例。

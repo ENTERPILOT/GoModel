@@ -416,7 +416,8 @@ Notes:
 
 - Sign-in works for `http` and `sse` servers, including ones declared in
   `config.yaml`; tokens are runtime state, not configuration. The server URL
-  must use `https`; plain `http` works only on `localhost`.
+  must use `https`; plain `http` works only on a loopback host (`localhost`,
+  `127.0.0.1`, `::1`).
 - A signed-in token replaces a configured `Authorization` header, and is only
   sent to the server's own origin. Changing a server's URL stops using its
   tokens until you sign in again.
