@@ -622,7 +622,45 @@ func TestOAuthSignOutCancelsPendingSignIn(t *testing.T) {
 	require.True(t, ok)
 	service.oauth.signedOut("notion")
 	err = service.completeOAuth(ctx, flow, OAuthCallback{Code: "code-1", Binding: running.Binding})
-	require.ErrorContains(t, err, "signed out or removed")
+	require.ErrorContains(t, err, "signed out, removed, or changed")
 	_, err = store.get(ctx, "notion")
 	require.ErrorIs(t, err, ErrNotFound, "the late callback does not sign the server back in")
+
+	// A sign-out while discovery ran, before the flow was registered.
+	generation := service.oauth.generation("notion")
+	service.oauth.signedOut("notion")
+	spec, ok := service.manager.spec("notion")
+	require.True(t, ok)
+	early, err := service.startOAuth(ctx, spec, OAuthStartRequest{RedirectURI: testRedirectURI}, generation)
+	require.NoError(t, err)
+	_, err = service.CompleteOAuth(ctx, authorize(t, as, early.AuthorizationURL, early.Binding))
+	require.ErrorContains(t, err, "signed out, removed, or changed")
+	_, err = store.get(ctx, "notion")
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
+func TestOAuthAttachDoesNotHoldManagerLockOnBusySource(t *testing.T) {
+	record := testOAuthRecord()
+	manager := newOAuthManager(nil, nil)
+	busy := newOAuthSource("notion", record, nil, nil)
+	manager.sources["notion"] = busy
+
+	busy.mu.Lock() // a token refresh in flight
+	attached := make(chan struct{})
+	go func() {
+		manager.attach([]ServerSpec{testSpec("notion", record.ServerURL, nil)}, map[string]oauthRecord{"notion": record}, false)
+		close(attached)
+	}()
+	answered := make(chan struct{})
+	go func() {
+		manager.generation("notion")
+		close(answered)
+	}()
+	select {
+	case <-answered:
+	case <-time.After(5 * time.Second):
+		assert.Fail(t, "the manager lock was held while waiting for a busy source")
+	}
+	busy.mu.Unlock()
+	<-attached
 }

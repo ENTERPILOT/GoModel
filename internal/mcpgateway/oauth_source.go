@@ -25,6 +25,10 @@ const (
 // oauthSaveTimeout bounds persisting a refreshed token.
 const oauthSaveTimeout = 10 * time.Second
 
+// oauthLookupTimeout bounds reading the stored record before or after a
+// refresh; it runs under the source's lock, so requests queue behind it.
+const oauthLookupTimeout = 3 * time.Second
+
 // oauthRefreshTimeout bounds one token-endpoint request, so a stalled
 // authorization server cannot hold the source's lock for a whole tool call.
 const oauthRefreshTimeout = 15 * time.Second
@@ -154,12 +158,13 @@ func (o *oauthSource) accessToken(ctx context.Context) (string, error) {
 // adoptStored replaces the in-memory record with the stored one when that
 // holds a different refresh token from the same sign-in and, with newerOnly,
 // was saved after the in-memory one. The read is detached from the caller's
-// cancellation like refresh. mu must be held.
+// cancellation like refresh, and bounded by oauthLookupTimeout. mu must be
+// held.
 func (o *oauthSource) adoptStored(ctx context.Context, newerOnly bool) bool {
 	if o.store == nil {
 		return false
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), oauthSaveTimeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), oauthLookupTimeout)
 	defer cancel()
 	stored, err := o.store.get(ctx, o.name)
 	if err != nil || !stored.SignedInAt.Equal(o.record.SignedInAt) || stored.RefreshToken == o.record.RefreshToken {

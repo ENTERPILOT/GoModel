@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -29,6 +30,14 @@ const oauthFlowTTL = 10 * time.Minute
 
 // maxPendingOAuthFlows caps unfinished sign-ins kept in memory.
 const maxPendingOAuthFlows = 64
+
+// oauthStartTimeout bounds discovery and client registration, and
+// oauthExchangeTimeout the code exchange: the shared upstream client has no
+// whole-request timeout because SSE upstreams stream for hours.
+const (
+	oauthStartTimeout    = 30 * time.Second
+	oauthExchangeTimeout = 15 * time.Second
+)
 
 var (
 	// ErrOAuthUnavailable means the store cannot hold OAuth records.
@@ -110,10 +119,10 @@ func newOAuthManager(store *oauthStore, httpClient *http.Client) *oauthManager {
 		httpClient = http.DefaultClient
 	}
 	return &oauthManager{
-		store:      store,
-		httpClient: httpClient,
-		sources:    make(map[string]*oauthSource),
-		pending:    make(map[string]*oauthFlow),
+		store:       store,
+		httpClient:  httpClient,
+		sources:     make(map[string]*oauthSource),
+		pending:     make(map[string]*oauthFlow),
 		failures:    make(map[string]oauthFailure),
 		generations: make(map[string]uint64),
 	}
@@ -123,13 +132,16 @@ func newOAuthManager(store *oauthStore, httpClient *http.Client) *oauthManager {
 // sign-in gets a new source, so the manager redials with it; tokens another
 // instance refreshed are adopted in place. A server whose URL changed since
 // sign-in does not get the tokens. keepMissing keeps the current source of a
-// server whose record could not be read.
+// server whose record could not be read. The decisions run without m.mu:
+// a source's lock can be held by a token refresh, and admin views must not
+// wait for it.
 func (m *oauthManager) attach(specs []ServerSpec, records map[string]oauthRecord, keepMissing bool) {
 	if m == nil {
 		return
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	previous := maps.Clone(m.sources)
+	m.mu.Unlock()
 	sources := make(map[string]*oauthSource, len(records))
 	for i := range specs {
 		spec := &specs[i]
@@ -137,7 +149,7 @@ func (m *oauthManager) attach(specs []ServerSpec, records map[string]oauthRecord
 		if !oauthTransport(spec.Transport) || !oauthSecureURL(spec.URL) {
 			continue
 		}
-		current := m.sources[spec.Name]
+		current := previous[spec.Name]
 		record, ok := records[spec.Name]
 		switch {
 		case !ok && keepMissing && current != nil && current.serverURL() == spec.URL:
@@ -151,6 +163,16 @@ func (m *oauthManager) attach(specs []ServerSpec, records map[string]oauthRecord
 		}
 		if spec.oauth != nil {
 			sources[spec.Name] = spec.oauth
+		}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range specs {
+		spec := &specs[i]
+		// A source signed out while the decisions ran stays dropped.
+		if spec.oauth != nil && spec.oauth == previous[spec.Name] && m.sources[spec.Name] != spec.oauth {
+			delete(sources, spec.Name)
+			spec.oauth = nil
 		}
 	}
 	m.sources = sources
@@ -203,6 +225,13 @@ func (m *oauthManager) signedOut(name string) {
 	}
 }
 
+// generation is name's sign-out count, captured when a sign-in starts.
+func (m *oauthManager) generation(name string) uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.generations[name]
+}
+
 // current reports whether no sign-out or removal happened since flow
 // started.
 func (m *oauthManager) current(flow *oauthFlow) bool {
@@ -220,7 +249,6 @@ func (m *oauthManager) clearFailure(name string) {
 func (m *oauthManager) addFlow(state string, flow *oauthFlow) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	flow.generation = m.generations[flow.server]
 	now := time.Now()
 	var oldest string
 	for key, pending := range m.pending {
@@ -279,6 +307,8 @@ func (s *Service) StartOAuth(ctx context.Context, name string, req OAuthStartReq
 	if s.oauth == nil || s.oauth.store == nil {
 		return OAuthStart{}, ErrOAuthUnavailable
 	}
+	// Taken first, so a sign-out during discovery makes this flow stale.
+	generation := s.oauth.generation(name)
 	spec, ok := s.manager.spec(name)
 	if !ok {
 		return OAuthStart{}, ErrNotFound
@@ -293,7 +323,9 @@ func (s *Service) StartOAuth(ctx context.Context, name string, req OAuthStartReq
 	if err := ValidateOAuthRedirectURI(req.RedirectURI); err != nil {
 		return OAuthStart{}, err
 	}
-	start, err := s.startOAuth(ctx, spec, req)
+	startCtx, cancel := context.WithTimeout(ctx, oauthStartTimeout)
+	defer cancel()
+	start, err := s.startOAuth(startCtx, spec, req, generation)
 	if err != nil {
 		s.oauth.fail(name, spec.URL, err)
 		return OAuthStart{}, err
@@ -301,7 +333,7 @@ func (s *Service) StartOAuth(ctx context.Context, name string, req OAuthStartReq
 	return start, nil
 }
 
-func (s *Service) startOAuth(ctx context.Context, spec ServerSpec, req OAuthStartRequest) (OAuthStart, error) {
+func (s *Service) startOAuth(ctx context.Context, spec ServerSpec, req OAuthStartRequest, generation uint64) (OAuthStart, error) {
 	discovery, err := discoverOAuth(ctx, s.oauth.httpClient, spec)
 	if err != nil {
 		return OAuthStart{}, err
@@ -343,6 +375,7 @@ func (s *Service) startOAuth(ctx context.Context, spec ServerSpec, req OAuthStar
 		config:       config,
 		record:       record,
 		expires:      time.Now().Add(oauthFlowTTL),
+		generation:   generation,
 	})
 	return OAuthStart{AuthorizationURL: authURL, State: state, Binding: binding}, nil
 }
@@ -388,7 +421,9 @@ func (s *Service) completeOAuth(ctx context.Context, flow *oauthFlow, callback O
 	if callback.Code == "" {
 		return errors.New("the authorization response carried no code")
 	}
-	exchangeCtx := context.WithValue(ctx, oauth2.HTTPClient, s.oauth.httpClient)
+	exchangeCtx, cancel := context.WithTimeout(ctx, oauthExchangeTimeout)
+	defer cancel()
+	exchangeCtx = context.WithValue(exchangeCtx, oauth2.HTTPClient, s.oauth.httpClient)
 	token, err := flow.config.Exchange(exchangeCtx, callback.Code,
 		oauth2.VerifierOption(flow.verifier),
 		oauth2.SetAuthURLParam("resource", flow.record.Resource),
@@ -407,9 +442,13 @@ func (s *Service) completeOAuth(ctx context.Context, flow *oauthFlow, callback O
 	now := time.Now().UTC()
 	record.SignedInAt = now
 	record.UpdatedAt = now
-	// A sign-out or removal while the code exchange ran wins.
-	if _, ok := s.manager.spec(flow.server); !ok || !s.oauth.current(flow) {
-		return errors.New("the server was signed out or removed during the sign-in; start it again")
+	// A sign-out, removal, or URL change while the sign-in ran wins.
+	// mutateMu, which sign-outs and removals hold, keeps one from landing
+	// between the check and the write.
+	s.mutateMu.Lock()
+	defer s.mutateMu.Unlock()
+	if spec, ok := s.manager.spec(flow.server); !ok || spec.URL != record.ServerURL || !s.oauth.current(flow) {
+		return errors.New("the server was signed out, removed, or changed during the sign-in; start it again")
 	}
 	if err := s.oauth.store.put(ctx, flow.server, record); err != nil {
 		if !errors.Is(err, encryption.ErrSealUnconfirmed) {
@@ -446,12 +485,23 @@ func (s *Service) SignOutOAuth(ctx context.Context, name string) error {
 	if _, ok := s.manager.spec(name); !ok {
 		return ErrNotFound
 	}
+	if err := s.signOut(ctx, name); err != nil {
+		return err
+	}
+	defer s.notifyChanged(ctx)
+	return s.Reload(ctx)
+}
+
+// signOut deletes the stored record and forgets the server's sign-in state
+// under mutateMu, so a callback finishing meanwhile cannot store tokens again.
+func (s *Service) signOut(ctx context.Context, name string) error {
+	s.mutateMu.Lock()
+	defer s.mutateMu.Unlock()
 	if err := s.oauth.store.delete(ctx, name); err != nil {
 		return err
 	}
 	s.oauth.signedOut(name)
-	defer s.notifyChanged(ctx)
-	return s.Reload(ctx)
+	return nil
 }
 
 // forgetOAuth deletes a removed server's OAuth record. It is best effort:

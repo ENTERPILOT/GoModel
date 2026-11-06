@@ -10004,6 +10004,9 @@ const docTemplate = `{
         },
         "admin.startMCPOAuthRequest": {
             "type": "object",
+            "required": [
+                "redirect_uri"
+            ],
             "properties": {
                 "client_id": {
                     "type": "string"

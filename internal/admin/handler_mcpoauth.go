@@ -41,7 +41,7 @@ type MCPServerOAuth interface {
 // client_secret are only for authorization servers without dynamic client
 // registration.
 type startMCPOAuthRequest struct {
-	RedirectURI  string `json:"redirect_uri"`
+	RedirectURI  string `json:"redirect_uri" validate:"required"`
 	ClientID     string `json:"client_id,omitempty"`
 	ClientSecret string `json:"client_secret,omitempty"`
 }
