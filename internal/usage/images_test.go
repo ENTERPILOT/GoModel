@@ -314,3 +314,14 @@ func TestExtractFromImageResponse_ProviderCostWithoutCatalogPricingHasNoCaveat(t
 	assert.True(t, costsNearlyEqual(*entry.TotalCost, 0.01998))
 	assert.Empty(t, entry.CostsCalculationCaveat)
 }
+
+func TestExtractFromImageResponse_IgnoresProviderImagesCount(t *testing.T) {
+	var resp core.ImageGenerationResponse
+	require.NoError(t, json.Unmarshal([]byte(`{"data":[],"usage":{"total_tokens":0,"images":3}}`), &resp))
+	pricing := &core.ModelPricing{PerImage: new(0.04)}
+
+	entry := ExtractFromImageResponse(&resp, "req", "dall-e-3", "openai", pricing)
+
+	assert.NotContains(t, entry.RawData, rawKeyImages)
+	assert.Nil(t, entry.OutputCost)
+}

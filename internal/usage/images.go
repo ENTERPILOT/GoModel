@@ -69,11 +69,15 @@ func extractFromImageResponse(resp *core.ImageGenerationResponse, requestID, mod
 				raw["prompt_image_tokens"] = d.ImageTokens
 			}
 		}
-	}
-	if resp.Usage != nil {
 		// Provider extras (OpenRouter cost, xAI cost_in_usd_ticks, ...) take the
 		// same cost path as chat; gateway-derived keys win on collision.
-		raw = mergeRawUsageMaps(raw, resp.Usage.RawUsage)
+		raw = mergeRawUsageMaps(raw, u.RawUsage)
+		// The image count is always the number of returned images, never a
+		// provider usage member of the same name, so per_image pricing cannot
+		// bill images the response did not contain.
+		if len(resp.Data) == 0 {
+			delete(raw, rawKeyImages)
+		}
 	}
 	if len(raw) > 0 {
 		entry.RawData = raw
