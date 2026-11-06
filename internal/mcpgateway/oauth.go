@@ -80,6 +80,9 @@ type oauthFlow struct {
 	config       *oauth2.Config
 	record       oauthRecord
 	expires      time.Time
+	// generation is the server's sign-out count when the flow started; a
+	// later sign-out or removal makes the flow stale.
+	generation uint64
 }
 
 // oauthManager holds the token sources of signed-in servers, the sign-ins in
@@ -88,10 +91,11 @@ type oauthManager struct {
 	store      *oauthStore
 	httpClient *http.Client
 
-	mu       sync.Mutex
-	sources  map[string]*oauthSource
-	pending  map[string]*oauthFlow
-	failures map[string]oauthFailure
+	mu          sync.Mutex
+	sources     map[string]*oauthSource
+	pending     map[string]*oauthFlow
+	failures    map[string]oauthFailure
+	generations map[string]uint64
 }
 
 // oauthFailure is the last sign-in failure of a server at url; it is not
@@ -110,7 +114,8 @@ func newOAuthManager(store *oauthStore, httpClient *http.Client) *oauthManager {
 		httpClient: httpClient,
 		sources:    make(map[string]*oauthSource),
 		pending:    make(map[string]*oauthFlow),
-		failures:   make(map[string]oauthFailure),
+		failures:    make(map[string]oauthFailure),
+		generations: make(map[string]uint64),
 	}
 }
 
@@ -181,12 +186,29 @@ func (m *oauthManager) fail(name, serverURL string, err error) {
 	m.mu.Unlock()
 }
 
-// drop forgets the token source of name, so a reload that cannot read the
-// store does not keep a signed-out server's tokens.
-func (m *oauthManager) drop(name string) {
+// signedOut forgets everything held for name after a sign-out or removal:
+// its token source, so a reload that cannot read the store does not keep
+// the tokens, and its pending sign-ins, so a late callback cannot sign the
+// server back in.
+func (m *oauthManager) signedOut(name string) {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.sources, name)
-	m.mu.Unlock()
+	delete(m.failures, name)
+	m.generations[name]++
+	for state, flow := range m.pending {
+		if flow.server == name {
+			delete(m.pending, state)
+		}
+	}
+}
+
+// current reports whether no sign-out or removal happened since flow
+// started.
+func (m *oauthManager) current(flow *oauthFlow) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return flow.generation == m.generations[flow.server]
 }
 
 func (m *oauthManager) clearFailure(name string) {
@@ -198,6 +220,7 @@ func (m *oauthManager) clearFailure(name string) {
 func (m *oauthManager) addFlow(state string, flow *oauthFlow) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	flow.generation = m.generations[flow.server]
 	now := time.Now()
 	var oldest string
 	for key, pending := range m.pending {
@@ -384,6 +407,10 @@ func (s *Service) completeOAuth(ctx context.Context, flow *oauthFlow, callback O
 	now := time.Now().UTC()
 	record.SignedInAt = now
 	record.UpdatedAt = now
+	// A sign-out or removal while the code exchange ran wins.
+	if _, ok := s.manager.spec(flow.server); !ok || !s.oauth.current(flow) {
+		return errors.New("the server was signed out or removed during the sign-in; start it again")
+	}
 	if err := s.oauth.store.put(ctx, flow.server, record); err != nil {
 		if !errors.Is(err, encryption.ErrSealUnconfirmed) {
 			return err
@@ -422,8 +449,7 @@ func (s *Service) SignOutOAuth(ctx context.Context, name string) error {
 	if err := s.oauth.store.delete(ctx, name); err != nil {
 		return err
 	}
-	s.oauth.clearFailure(name)
-	s.oauth.drop(name)
+	s.oauth.signedOut(name)
 	defer s.notifyChanged(ctx)
 	return s.Reload(ctx)
 }
@@ -437,7 +463,7 @@ func (s *Service) forgetOAuth(ctx context.Context, name string) {
 	if err := s.oauth.store.delete(ctx, name); err != nil {
 		slog.Warn("failed to delete the oauth record of a removed mcp server", "server", name, "error", err)
 	}
-	s.oauth.clearFailure(name)
+	s.oauth.signedOut(name)
 }
 
 // ValidateOAuthRedirectURI accepts an absolute http(s) URL without query or

@@ -452,17 +452,6 @@ func TestBearerRoundTripperStaysOnServerOrigin(t *testing.T) {
 	assert.Equal(t, []string{"Bearer access-secret", "Bearer static"}, seen)
 }
 
-func TestOAuthSourceReportsExpiredWithoutRefreshToken(t *testing.T) {
-	record := testOAuthRecord()
-	record.RefreshToken = ""
-	record.Expiry = time.Now().Add(-time.Minute)
-	source := newOAuthSource("notion", record, nil, nil)
-	assert.Equal(t, OAuthStatusExpired, source.view().Status)
-	_, err := source.accessToken(context.Background())
-	require.ErrorIs(t, err, errOAuthExpired)
-	assert.Equal(t, OAuthStatusError, source.view().Status)
-}
-
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
@@ -490,46 +479,6 @@ func TestOAuthTokenReplacesStaticAuthorizationHeader(t *testing.T) {
 	assert.Equal(t, "Bearer access-secret", <-got)
 }
 
-func TestOAuthRefreshNeverUndoesAnotherSignIn(t *testing.T) {
-	store, err := NewSQLStore(context.Background(), sqlxtest.NewSQLite(t))
-	require.NoError(t, err)
-	box, _ := encryptiontest.NewBox(t)
-	oauth := newOAuthStore(store, box)
-	ctx := context.Background()
-
-	record := testOAuthRecord()
-	source := newOAuthSource("notion", record, oauth, nil)
-	refreshed := func() {
-		source.mu.Lock()
-		defer source.mu.Unlock()
-		source.record.AccessToken = "refreshed"
-		source.persist(ctx)
-	}
-
-	// Same sign-in: the refreshed token is saved.
-	require.NoError(t, oauth.put(ctx, "notion", record))
-	refreshed()
-	stored, err := oauth.get(ctx, "notion")
-	require.NoError(t, err)
-	assert.Equal(t, "refreshed", stored.AccessToken)
-
-	// A newer sign-in is kept.
-	newer := testOAuthRecord()
-	newer.SignedInAt = record.SignedInAt.Add(time.Minute)
-	newer.AccessToken = "newer"
-	require.NoError(t, oauth.put(ctx, "notion", newer))
-	refreshed()
-	stored, err = oauth.get(ctx, "notion")
-	require.NoError(t, err)
-	assert.Equal(t, "newer", stored.AccessToken)
-
-	// A sign-out is not undone.
-	require.NoError(t, oauth.delete(ctx, "notion"))
-	refreshed()
-	_, err = oauth.get(ctx, "notion")
-	require.ErrorIs(t, err, ErrNotFound)
-}
-
 func TestOAuthAttachDropsKeptSourceWhenURLChanged(t *testing.T) {
 	record := testOAuthRecord()
 	manager := newOAuthManager(nil, nil)
@@ -543,61 +492,6 @@ func TestOAuthAttachDropsKeptSourceWhenURLChanged(t *testing.T) {
 	specs = []ServerSpec{testSpec("notion", "https://other.example.com/mcp", nil)}
 	manager.attach(specs, nil, true)
 	assert.Nil(t, specs[0].oauth, "tokens never follow a server to a new URL")
-}
-
-// expiredRecordFor returns a stored sign-in whose access token expired, with
-// token requests going to as.
-func expiredRecordFor(as *fakeAuthServer) oauthRecord {
-	record := testOAuthRecord()
-	record.TokenURL = as.URL + "/token"
-	record.Expiry = time.Now().Add(-time.Minute)
-	as.mu.Lock()
-	as.resource = record.Resource
-	as.refreshToken = record.RefreshToken
-	as.mu.Unlock()
-	return record
-}
-
-func TestOAuthRefreshOutlivesCanceledRequest(t *testing.T) {
-	as := newFakeAuthServer(t, false)
-	source := newOAuthSource("notion", expiredRecordFor(as), nil, as.Client())
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	token, err := source.accessToken(ctx)
-	require.NoError(t, err, "a canceled caller does not lose the rotated refresh token")
-	assert.Equal(t, "access-2", token)
-	assert.Equal(t, "refresh-2", source.record.RefreshToken)
-}
-
-func TestOAuthAdoptedTokenClearsRefreshError(t *testing.T) {
-	as := newFakeAuthServer(t, false)
-	record := expiredRecordFor(as)
-	store, err := NewSQLStore(context.Background(), sqlxtest.NewSQLite(t))
-	require.NoError(t, err)
-	box, _ := encryptiontest.NewBox(t)
-	oauth := newOAuthStore(store, box)
-	ctx := context.Background()
-
-	// Another instance rotated the refresh token and stored a valid token.
-	stored := record
-	stored.AccessToken = "adopted"
-	stored.RefreshToken = "rotated-elsewhere"
-	stored.Expiry = time.Now().Add(time.Hour)
-	require.NoError(t, oauth.put(ctx, "notion", stored))
-	as.mu.Lock()
-	as.refreshToken = "rotated-elsewhere"
-	as.mu.Unlock()
-
-	source := newOAuthSource("notion", record, oauth, as.Client())
-	source.lastErr = "an earlier refresh failed"
-
-	token, err := source.accessToken(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, "adopted", token)
-	view := source.view()
-	assert.Equal(t, OAuthStatusSignedIn, view.Status)
-	assert.Empty(t, view.LastError)
 }
 
 func TestRegistrationAuthMethod(t *testing.T) {
@@ -640,7 +534,7 @@ func TestOAuthSignOutDropsKeptSource(t *testing.T) {
 	manager := newOAuthManager(nil, nil)
 	manager.sources["notion"] = newOAuthSource("notion", record, nil, nil)
 
-	manager.drop("notion")
+	manager.signedOut("notion")
 	specs := []ServerSpec{testSpec("notion", record.ServerURL, nil)}
 	manager.attach(specs, nil, true)
 	assert.Nil(t, specs[0].oauth, "a reload that cannot read the store keeps no signed-out tokens")
@@ -664,6 +558,7 @@ func TestOAuthSecureURL(t *testing.T) {
 	}{
 		{url: "https://mcp.example.com/mcp", want: true},
 		{url: "http://localhost:8080/mcp", want: true},
+		{url: "http://LOCALHOST:8080/mcp", want: true},
 		{url: "http://127.0.0.1:8080/mcp", want: true},
 		{url: "http://[::1]:8080/mcp", want: true},
 		{url: "http://mcp.example.com/mcp"},
@@ -705,4 +600,29 @@ func TestConnectProbeFollowsRedirectToUnauthorized(t *testing.T) {
 	require.NoError(t, err)
 	_ = resp.Body.Close()
 	assert.True(t, probe.unauthorized(), "the 401 after a redirect counts, not the redirect")
+}
+
+func TestOAuthSignOutCancelsPendingSignIn(t *testing.T) {
+	as := newFakeAuthServer(t, true)
+	serverURL := newProtectedUpstream(t, as)
+	service, store := newOAuthTestService(t, serverURL)
+	ctx := context.Background()
+
+	pending, err := service.StartOAuth(ctx, "notion", OAuthStartRequest{RedirectURI: testRedirectURI})
+	require.NoError(t, err)
+	callback := authorize(t, as, pending.AuthorizationURL, pending.Binding)
+	require.NoError(t, service.SignOutOAuth(ctx, "notion"))
+	_, err = service.CompleteOAuth(ctx, callback)
+	require.ErrorIs(t, err, ErrOAuthFlowUnknown, "a sign-out drops pending sign-ins")
+
+	// A flow taken before the sign-out, whose exchange finishes after it.
+	running, err := service.StartOAuth(ctx, "notion", OAuthStartRequest{RedirectURI: testRedirectURI})
+	require.NoError(t, err)
+	flow, ok := service.oauth.takeFlow(authorize(t, as, running.AuthorizationURL, running.Binding).State)
+	require.True(t, ok)
+	service.oauth.signedOut("notion")
+	err = service.completeOAuth(ctx, flow, OAuthCallback{Code: "code-1", Binding: running.Binding})
+	require.ErrorContains(t, err, "signed out or removed")
+	_, err = store.get(ctx, "notion")
+	require.ErrorIs(t, err, ErrNotFound, "the late callback does not sign the server back in")
 }

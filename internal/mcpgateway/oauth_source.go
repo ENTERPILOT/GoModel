@@ -122,12 +122,19 @@ func (o *oauthSource) accessToken(ctx context.Context) (string, error) {
 		o.lastErr = errOAuthExpired.Error()
 		return "", errOAuthExpired
 	}
+	// Another instance may have refreshed already: start from its tokens, so
+	// a refresh token it consumed is never sent again.
+	if o.adoptStored(ctx, true) && o.token().Valid() {
+		return o.record.AccessToken, nil
+	}
+	base := o.record.UpdatedAt
 	fresh, err := o.refresh(ctx, o.record)
-	if err != nil && o.adoptStored(ctx) {
-		// Another instance rotated the refresh token first: use its result.
+	if err != nil && o.adoptStored(ctx, false) {
+		// Another instance rotated the refresh token meanwhile: use its result.
 		if o.token().Valid() {
 			return o.record.AccessToken, nil
 		}
+		base = o.record.UpdatedAt
 		fresh, err = o.refresh(ctx, o.record)
 	}
 	if err != nil {
@@ -140,18 +147,25 @@ func (o *oauthSource) accessToken(ctx context.Context) (string, error) {
 	o.record.Expiry = fresh.Expiry
 	o.record.UpdatedAt = time.Now().UTC()
 	o.lastErr = ""
-	o.persist(ctx)
+	o.persist(ctx, base)
 	return o.record.AccessToken, nil
 }
 
 // adoptStored replaces the in-memory record with the stored one when that
-// holds a different refresh token from the same sign-in; mu must be held.
-func (o *oauthSource) adoptStored(ctx context.Context) bool {
+// holds a different refresh token from the same sign-in and, with newerOnly,
+// was saved after the in-memory one. The read is detached from the caller's
+// cancellation like refresh. mu must be held.
+func (o *oauthSource) adoptStored(ctx context.Context, newerOnly bool) bool {
 	if o.store == nil {
 		return false
 	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), oauthSaveTimeout)
+	defer cancel()
 	stored, err := o.store.get(ctx, o.name)
 	if err != nil || !stored.SignedInAt.Equal(o.record.SignedInAt) || stored.RefreshToken == o.record.RefreshToken {
+		return false
+	}
+	if newerOnly && !stored.UpdatedAt.After(o.record.UpdatedAt) {
 		return false
 	}
 	o.record = *stored
@@ -162,24 +176,26 @@ func (o *oauthSource) adoptStored(ctx context.Context) bool {
 }
 
 // persist saves the refreshed token only while the stored record still
-// belongs to this sign-in: a sign-out or newer sign-in that landed meanwhile,
-// here or on another instance, wins, and the next reload drops this source.
-// mu must be held.
-func (o *oauthSource) persist(ctx context.Context) {
+// belongs to this sign-in and was not saved after base, the record the
+// refresh started from: a sign-out, a newer sign-in, or another instance's
+// refresh that landed meanwhile wins, and the next reload adopts or drops
+// it. mu must be held.
+func (o *oauthSource) persist(ctx context.Context, base time.Time) {
 	if o.store == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), oauthSaveTimeout)
 	defer cancel()
 	saved, err := o.store.update(ctx, o.name, o.record, func(stored oauthRecord) bool {
-		return stored.SignedInAt.Equal(o.record.SignedInAt) && stored.ClientID == o.record.ClientID
+		return stored.SignedInAt.Equal(o.record.SignedInAt) && stored.ClientID == o.record.ClientID &&
+			!stored.UpdatedAt.After(base)
 	})
 	switch {
 	case err != nil && !errors.Is(err, encryption.ErrSealUnconfirmed):
 		// The refreshed token keeps working in memory; only a restart loses it.
 		slog.Warn("failed to save a refreshed mcp oauth token", "server", o.name, "error", err)
 	case !saved && err == nil:
-		slog.Info("mcp oauth sign-in changed while a token refresh ran; keeping the stored one", "server", o.name)
+		slog.Info("mcp oauth sign-in or tokens changed while a token refresh ran; keeping the stored ones", "server", o.name)
 	}
 }
 
