@@ -366,16 +366,20 @@ See [private CA certificates](/guides/production#upstream-certificates-behind-a-
 ## Sign in with OAuth
 
 Some MCP servers (Notion, Linear, GitHub, Sentry, ...) require an
-interactive OAuth sign-in instead of a static token. GoModel signs in once
-for the whole gateway, from the dashboard:
+interactive OAuth sign-in instead of a static token. GoModel signs in to each
+server once, and every client of the gateway shares that sign-in. From the
+dashboard:
 
 1. Click **Add MCP Server** and pick the service under **Server**: Linear,
    Notion, GitHub, Sentry, Stripe, Supabase, Vercel, or Hugging Face. The URL
    is filled in.
-2. Keep **Sign in with ...** (or pick **API key or token** where the service
-   offers it) and click **Save and sign in**.
-3. Approve access on the service's sign-in page. You return to **MCP Servers**,
-   and the server reconnects with the new token.
+2. Choose how to connect:
+   - **Sign in with ...**: click **Save and sign in**, then approve access on
+     the service's sign-in page. You return to **MCP Servers**, and the server
+     reconnects with the new token.
+   - **API key or token**, where the service offers it: paste the key and
+     click **Save**. The server reconnects with it; there is no sign-in page.
+     Hugging Face offers this or **No authentication**.
 
 For any other server, pick **Custom server**, enter its URL with no
 `Authorization` header, and save. It shows **Sign-in required** once it
@@ -403,14 +407,16 @@ Tokens are stored in the gateway database, encrypted with
 [`GOMODEL_ENCRYPTION_KEY`](/advanced/encryption-at-rest) when it is set, and
 are never returned by the admin API. GoModel refreshes an expired access token
 with the refresh token and saves the rotated refresh token. The row shows
-**Signed in**, **Sign-in expired** (no refresh token left), or **Sign-in needs
-attention** with the error; sign in again in the last two cases. The sign-out
-icon deletes the stored tokens.
+**Signed in**, **Sign-in expired** (no refresh token left; sign in again), or
+**Sign-in needs attention** with the error. A failed refresh is retried on the
+next request, so sign in again only if the error persists. The sign-out icon
+deletes the stored tokens.
 
 Notes:
 
 - Sign-in works for `http` and `sse` servers, including ones declared in
-  `config.yaml`; tokens are runtime state, not configuration.
+  `config.yaml`; tokens are runtime state, not configuration. The server URL
+  must use `https`; plain `http` works only on `localhost`.
 - A signed-in token replaces a configured `Authorization` header, and is only
   sent to the server's own origin. Changing a server's URL stops using its
   tokens until you sign in again.

@@ -372,14 +372,18 @@ Zobacz [prywatne certyfikaty CA](/pl/guides/production#certyfikaty-upstreamu-za-
 
 Niektóre serwery MCP (Notion, Linear, GitHub, Sentry, ...) wymagają
 interaktywnego logowania OAuth zamiast statycznego tokena. GoModel loguje się
-raz dla całego gatewaya, z poziomu dashboardu:
+osobno do każdego serwera, a z tego logowania korzystają wszyscy klienci
+gatewaya. W dashboardzie:
 
 1. Kliknij **Dodaj serwer MCP** i wybierz usługę w polu **Serwer**: Linear, Notion, GitHub,
    Sentry, Stripe, Supabase, Vercel lub Hugging Face. URL zostanie uzupełniony.
-2. Zostaw **Zaloguj się przez ...** (albo wybierz **Klucz API lub token**, jeśli
-   usługa go oferuje) i kliknij **Zapisz i zaloguj**.
-3. Zatwierdź dostęp na stronie logowania usługi. Wrócisz do **MCP Servers**,
-   a serwer połączy się ponownie z nowym tokenem.
+2. Wybierz sposób połączenia:
+   - **Zaloguj się przez ...**: kliknij **Zapisz i zaloguj**, a potem zatwierdź
+     dostęp na stronie logowania usługi. Wrócisz do **MCP Servers**, a serwer
+     połączy się ponownie z nowym tokenem.
+   - **Klucz API lub token**, jeśli usługa go oferuje: wklej klucz i zapisz.
+     Serwer połączy się ponownie z tym kluczem, bez strony logowania. Hugging
+     Face oferuje tę opcję albo **Bez uwierzytelniania**.
 
 Dla innego serwera wybierz **Własny serwer**, wpisz jego URL bez nagłówka
 `Authorization` i zapisz. Gdy odpowie `401 Unauthorized`, pokaże **Wymagane
@@ -407,14 +411,16 @@ Tokeny są przechowywane w bazie danych gatewaya, szyfrowane za pomocą
 [`GOMODEL_ENCRYPTION_KEY`](/pl/advanced/encryption-at-rest), jeśli jest
 ustawiony, i nigdy nie są zwracane przez admin API. GoModel odświeża wygasły
 access token za pomocą refresh tokena i zapisuje rotowany refresh token. Wiersz
-pokazuje **Zalogowano**, **Logowanie wygasło** (brak refresh tokena) albo
-**Logowanie wymaga uwagi** z błędem; w dwóch ostatnich przypadkach zaloguj się
-ponownie. Ikona wylogowania usuwa zapisane tokeny.
+pokazuje **Zalogowano**, **Logowanie wygasło** (brak refresh tokena; zaloguj
+się ponownie) albo **Logowanie wymaga uwagi** z błędem. Nieudane odświeżenie
+jest ponawiane przy następnym żądaniu, więc zaloguj się ponownie dopiero, gdy
+błąd się utrzymuje. Ikona wylogowania usuwa zapisane tokeny.
 
 Uwagi:
 
 - Logowanie działa dla serwerów `http` i `sse`, także tych zadeklarowanych w
-  `config.yaml`; tokeny są stanem w czasie działania, a nie konfiguracją.
+  `config.yaml`; tokeny są stanem w czasie działania, a nie konfiguracją. URL
+  serwera musi używać `https`; zwykłe `http` działa tylko na `localhost`.
 - Token z logowania zastępuje skonfigurowany nagłówek `Authorization` i jest
   wysyłany tylko do originu serwera. Po zmianie URL serwera tokeny nie są
   używane, dopóki nie zalogujesz się ponownie.

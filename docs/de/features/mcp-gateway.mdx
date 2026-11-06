@@ -388,7 +388,8 @@ nicht vertraut. Siehe
 
 Manche MCP-Server (Notion, Linear, Atlassian, Sentry, ...) verlangen eine
 interaktive OAuth-Anmeldung statt eines statischen Tokens. GoModel meldet sich
-einmal für das ganze Gateway an, direkt im Dashboard:
+einmal pro Server an, und alle Clients des Gateways teilen sich diese Anmeldung.
+Direkt im Dashboard:
 
 1. Fügen Sie den Server mit seiner URL und ohne `Authorization`-Header hinzu.
    Sobald er mit `401 Unauthorized` antwortet, zeigt er **Anmeldung erforderlich**.
@@ -412,14 +413,16 @@ Tokens werden in der Gateway-Datenbank gespeichert, mit
 gesetzt, und nie von der Admin-API zurückgegeben. GoModel erneuert ein
 abgelaufenes Access-Token mit dem Refresh-Token und speichert das rotierte
 Refresh-Token. Die Zeile zeigt **Angemeldet**, **Anmeldung abgelaufen** (kein
-Refresh-Token mehr) oder **Anmeldung prüfen** mit dem Fehler; melden Sie sich in
-den letzten beiden Fällen erneut an. Das Abmeldesymbol löscht die gespeicherten
+Refresh-Token mehr; melden Sie sich erneut an) oder **Anmeldung prüfen** mit dem
+Fehler. Eine fehlgeschlagene Erneuerung wird bei der nächsten Anfrage
+wiederholt; melden Sie sich nur erneut an, wenn der Fehler bleibt. Das Abmeldesymbol löscht die gespeicherten
 Tokens.
 
 Hinweise:
 
 - Die Anmeldung funktioniert für `http`- und `sse`-Server, auch für solche aus
-  `config.yaml`; Tokens sind Laufzeitzustand, keine Konfiguration.
+  `config.yaml`; Tokens sind Laufzeitzustand, keine Konfiguration. Die
+  Server-URL muss `https` verwenden; einfaches `http` geht nur auf `localhost`.
 - Ein angemeldetes Token ersetzt einen konfigurierten `Authorization`-Header und
   wird nur an den Origin des Servers gesendet. Nach einer URL-Änderung werden
   die Tokens erst nach einer neuen Anmeldung wieder verwendet.

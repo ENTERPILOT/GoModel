@@ -260,11 +260,12 @@ mcp:
 
 ## 使用 OAuth 登录
 
-部分 MCP 服务器（Notion、Linear、GitHub、Sentry 等）需要交互式 OAuth 登录，而不是静态 Token。GoModel 可以直接在控制台中为整个网关登录一次：
+部分 MCP 服务器（Notion、Linear、GitHub、Sentry 等）需要交互式 OAuth 登录，而不是静态 Token。GoModel 为每个服务器单独登录一次，网关的所有客户端共享该登录。在控制台中操作：
 
 1. 点击**添加 MCP 服务器**，在**服务器**中选择服务：Linear、Notion、GitHub、Sentry、Stripe、Supabase、Vercel 或 Hugging Face。URL 会自动填写。
-2. 保留**使用 ... 登录**（如果服务提供，也可以选择 **API 密钥或令牌**），然后点击**保存并登录**。
-3. 在服务的登录页面授权访问。您会回到 **MCP Servers** 页面，服务器会使用新的 Token 重新连接。
+2. 选择连接方式：
+   - **使用 ... 登录**：点击**保存并登录**，然后在服务的登录页面授权访问。您会回到 **MCP Servers** 页面，服务器会使用新的 Token 重新连接。
+   - **API 密钥或令牌**（如果服务提供）：粘贴密钥并保存。服务器会使用该密钥重新连接，无需登录页面。Hugging Face 提供此选项或**无需认证**。
 
 其他服务器请选择**自定义服务器**，填写其 URL，不要配置 `Authorization` 请求头，然后保存。服务器返回 `401 Unauthorized` 后会显示**需要登录**；点击该行的登录图标，然后点击**继续登录**。预设服务器的连接和访问设置位于**高级设置**中；之后可编辑服务器来选择工具。
 
@@ -272,11 +273,11 @@ GitHub 不支持动态客户端注册：请使用登录对话框中显示的重�
 
 GoModel 遵循 [MCP 授权规范](https://modelcontextprotocol.io/specification/latest/basic/authorization)：它从服务器的受保护资源元数据中发现授权服务器，要求 S256 PKCE，在每个 Token 请求中发送 `resource` 指示符，并在回调时校验 `state` 和 `iss`。它通过动态客户端注册将自己注册为 OAuth 客户端。如果授权服务器不支持动态注册，请使用对话框中显示的重定向 URI（`https://<gateway>/admin/mcp-oauth/callback`）自行注册客户端，并在**使用自己的 OAuth 客户端**中填写客户端 ID（机密客户端还需填写密钥）。
 
-Token 存储在网关数据库中，设置 [`GOMODEL_ENCRYPTION_KEY`](/zh/advanced/encryption-at-rest) 后会被加密，且绝不会通过管理 API 返回。GoModel 会使用 Refresh Token 刷新过期的 Access Token，并保存轮换后的 Refresh Token。该行会显示**已登录**、**登录已过期**（没有可用的 Refresh Token）或**登录需要处理**及错误信息；后两种情况请重新登录。退出图标会删除已存储的 Token。
+Token 存储在网关数据库中，设置 [`GOMODEL_ENCRYPTION_KEY`](/zh/advanced/encryption-at-rest) 后会被加密，且绝不会通过管理 API 返回。GoModel 会使用 Refresh Token 刷新过期的 Access Token，并保存轮换后的 Refresh Token。该行会显示**已登录**、**登录已过期**（没有可用的 Refresh Token，请重新登录）或**登录需要处理**及错误信息。刷新失败会在下一次请求时重试，只有错误持续存在时才需要重新登录。退出图标会删除已存储的 Token。
 
 说明：
 
-- 登录适用于 `http` 和 `sse` 服务器，包括在 `config.yaml` 中声明的服务器；Token 属于运行时状态，而不是配置。
+- 登录适用于 `http` 和 `sse` 服务器，包括在 `config.yaml` 中声明的服务器；Token 属于运行时状态，而不是配置。服务器 URL 必须使用 `https`；普通 `http` 仅适用于 `localhost`。
 - 登录获得的 Token 会替换已配置的 `Authorization` 请求头，并且只发送到该服务器自己的源。修改服务器 URL 后，需要重新登录才会再次使用 Token。
 - 网关的所有客户端共享同一个登录。暂不支持按用户区分的上游 Token。
 - 部署多个网关实例时，登录回调必须到达发起登录的实例（为 `/admin` 启用会话保持）；刷新后的 Token 会通过数据库同步到其他实例。
