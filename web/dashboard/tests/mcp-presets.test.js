@@ -1,0 +1,88 @@
+// Pure-logic tests for the MCP server presets offered when adding a server.
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  MCP_AUTH_NONE,
+  MCP_AUTH_OAUTH,
+  MCP_AUTH_TOKEN,
+  MCP_SERVER_PRESETS,
+  mcpConnectionHeaders,
+  mcpHasAuthorizationHeader,
+  mcpPresetById,
+  mcpPresetForURL,
+  mcpPresetFormFields,
+  mcpPresetHost,
+  mcpPresetSlug,
+} from "../src/pages/mcp-servers/mcpPresets.js";
+import { buildMcpServerPayload, defaultMcpServerForm } from "../src/pages/mcp-servers/mcp-servers.js";
+
+test("every preset is a valid HTTPS server with known connection methods", () => {
+  const ids = new Set();
+  for (const preset of MCP_SERVER_PRESETS) {
+    assert.ok(!ids.has(preset.id), `duplicate preset id ${preset.id}`);
+    ids.add(preset.id);
+    assert.match(preset.id, /^[a-z0-9][a-z0-9_-]{0,63}$/);
+    assert.equal(new URL(preset.url).protocol, "https:");
+    assert.ok(mcpPresetHost(preset));
+    assert.ok(preset.auth.length > 0);
+    for (const auth of preset.auth) {
+      assert.ok([MCP_AUTH_OAUTH, MCP_AUTH_TOKEN, MCP_AUTH_NONE].includes(auth), auth);
+    }
+    if (preset.oauthClient === "manual") {
+      assert.ok(preset.auth.includes(MCP_AUTH_OAUTH));
+      assert.equal(new URL(preset.clientURL).protocol, "https:");
+    }
+  }
+});
+
+test("a preset fills a form the server payload accepts", () => {
+  const preset = mcpPresetById("linear");
+  const form = { ...defaultMcpServerForm(), ...mcpPresetFormFields(preset) };
+  const built = buildMcpServerPayload(form, "create", []);
+  assert.equal(built.error, undefined);
+  assert.equal(built.payload.slug, "linear");
+  assert.equal(built.payload.url, "https://mcp.linear.app/mcp");
+  assert.equal(built.payload.transport, "http");
+});
+
+test("mcpPresetSlug skips slugs servers and virtual servers already use", () => {
+  const preset = mcpPresetById("linear");
+  assert.equal(mcpPresetSlug(preset), "linear");
+  assert.equal(mcpPresetSlug(preset, [{ slug: "linear" }]), "linear-2");
+  assert.equal(
+    mcpPresetSlug(preset, [{ slug: "linear" }, { name: "linear-2" }], [{ name: "linear-3" }]),
+    "linear-4",
+  );
+});
+
+test("mcpConnectionHeaders adds a bearer token only for the token method", () => {
+  assert.deepEqual(mcpConnectionHeaders([], MCP_AUTH_TOKEN, " lin_api_x "), [
+    { name: "Authorization", value: "Bearer lin_api_x" },
+  ]);
+  assert.deepEqual(mcpConnectionHeaders([], MCP_AUTH_TOKEN, "Bearer ghp_x"), [
+    { name: "Authorization", value: "Bearer ghp_x" },
+  ]);
+  assert.deepEqual(mcpConnectionHeaders([], MCP_AUTH_OAUTH, "ignored"), []);
+  assert.deepEqual(mcpConnectionHeaders([], MCP_AUTH_TOKEN, "  "), []);
+});
+
+test("mcpConnectionHeaders keeps an Authorization header set under Advanced", () => {
+  const rows = [{ name: "authorization", value: "Token custom" }];
+  const headers = mcpConnectionHeaders(rows, MCP_AUTH_TOKEN, "other");
+  assert.deepEqual(headers, rows);
+  assert.notEqual(headers, rows);
+});
+
+test("mcpHasAuthorizationHeader ignores an empty value", () => {
+  assert.equal(mcpHasAuthorizationHeader([{ name: "Authorization", value: "" }]), false);
+  assert.equal(mcpHasAuthorizationHeader([{ name: " AUTHORIZATION ", value: "Bearer x" }]), true);
+  assert.equal(mcpHasAuthorizationHeader(undefined), false);
+});
+
+test("mcpPresetForURL matches a saved server's exact URL", () => {
+  assert.equal(mcpPresetForURL("https://api.githubcopilot.com/mcp/")?.id, "github");
+  assert.equal(mcpPresetForURL(" https://mcp.notion.com/mcp ")?.id, "notion");
+  assert.equal(mcpPresetForURL("https://example.com/mcp"), null);
+  assert.equal(mcpPresetForURL(undefined), null);
+});

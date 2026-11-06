@@ -7,11 +7,18 @@
   import FormField from "$lib/components/molecules/FormField.svelte";
   import EditorDialog from "$lib/components/organisms/EditorDialog.svelte";
   import { mcpServers } from "./mcpServers.svelte.js";
+  import { mcpPresetForURL } from "./mcpPresets.js";
   import { LogIn } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
   const name = $derived(String(mcpServers.oauthServer?.name || ""));
   const redirectURI = $derived(mcpServers.oauthOpen ? mcpServers.oauthRedirectURI() : "");
+  // A preset whose authorization server has no dynamic client registration
+  // links to the vendor page where the operator registers the OAuth app.
+  const manualPreset = $derived.by(() => {
+    const preset = mcpPresetForURL(mcpServers.oauthServer?.url);
+    return preset?.oauthClient === "manual" ? preset : null;
+  });
 </script>
 
 <EditorDialog
@@ -37,7 +44,16 @@
 
   <details class="form-section" open={mcpServers.oauthClientRequired}>
     <summary class="form-field-label">{m.mcp_oauth_client_section()}</summary>
-    <p class="form-hint">{m.mcp_oauth_client_help()}</p>
+    {#if manualPreset}
+      <p class="form-hint">
+        {m.mcp_preset_oauth_client_steps({ name: manualPreset.name })}
+        <a href={manualPreset.clientURL} target="_blank" rel="noopener noreferrer"
+          >{m.mcp_preset_oauth_manual_link({ name: manualPreset.name })}</a
+        >
+      </p>
+    {:else}
+      <p class="form-hint">{m.mcp_oauth_client_help()}</p>
+    {/if}
     <FormField id="mcp-oauth-client-id" label={m.mcp_oauth_client_id()}>
       <input
         id="mcp-oauth-client-id"

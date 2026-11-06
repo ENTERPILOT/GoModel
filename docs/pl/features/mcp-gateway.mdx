@@ -370,15 +370,27 @@ Zobacz [prywatne certyfikaty CA](/pl/guides/production#certyfikaty-upstreamu-za-
 
 ## Logowanie przez OAuth
 
-Niektóre serwery MCP (Notion, Linear, Atlassian, Sentry, ...) wymagają
+Niektóre serwery MCP (Notion, Linear, GitHub, Sentry, ...) wymagają
 interaktywnego logowania OAuth zamiast statycznego tokena. GoModel loguje się
 raz dla całego gatewaya, z poziomu dashboardu:
 
-1. Dodaj serwer z jego URL i bez nagłówka `Authorization`. Gdy odpowie
-   `401 Unauthorized`, pokaże **Wymagane logowanie**.
-2. Kliknij ikonę logowania w wierszu, a potem **Przejdź do logowania**.
-3. Zatwierdź dostęp na stronie logowania serwera. Wrócisz do **MCP Servers**,
+1. Kliknij **Dodaj serwer MCP** i wybierz usługę: Linear, Notion, GitHub,
+   Sentry, Stripe, Supabase, Vercel lub Hugging Face. URL zostanie uzupełniony.
+2. Zostaw **Zaloguj się przez ...** (albo wybierz **Klucz API lub token**, jeśli
+   usługa go oferuje) i kliknij **Zapisz i zaloguj**.
+3. Zatwierdź dostęp na stronie logowania usługi. Wrócisz do **MCP Servers**,
    a serwer połączy się ponownie z nowym tokenem.
+
+Dla innego serwera wybierz **Własny serwer**, wpisz jego URL bez nagłówka
+`Authorization` i zapisz. Gdy odpowie `401 Unauthorized`, pokaże **Wymagane
+logowanie**; kliknij ikonę logowania w wierszu, a potem **Przejdź do
+logowania**. Ustawienia połączenia, narzędzi i dostępu serwera z listy są w
+**Ustawieniach zaawansowanych**.
+
+GitHub nie obsługuje dynamicznej rejestracji klientów: raz zarejestruj
+[aplikację OAuth GitHub](https://github.com/settings/applications/new) z
+adresem przekierowania widocznym w oknie logowania, a potem wpisz tam jej
+client ID i secret.
 
 GoModel stosuje
 [specyfikację autoryzacji MCP](https://modelcontextprotocol.io/specification/latest/basic/authorization):

@@ -35,6 +35,14 @@ import {
   MCP_SERVERS_POLL_MS,
   MCP_TOOL_MODE_ALLOW,
 } from "./mcp-servers.js";
+import {
+  MCP_AUTH_OAUTH,
+  MCP_AUTH_TOKEN,
+  mcpConnectionHeaders,
+  mcpHasAuthorizationHeader,
+  mcpPresetById,
+  mcpPresetFormFields,
+} from "./mcpPresets.js";
 
 class McpServersState {
   servers = $state([]);
@@ -63,6 +71,13 @@ class McpServersState {
   slugEdited = $state(false);
   advancedOpen = $state(false);
   form = $state(defaultMcpServerForm());
+  // A chosen preset keeps the editor to a name and a connection method
+  // (sign-in, token, or none) with everything else under Advanced; null is
+  // the full custom-server form.
+  presetPickerOpen = $state(false);
+  formPreset = $state(null);
+  formAuth = $state("");
+  formToken = $state("");
 
   // Editor tool picker: every tool the server reports, exposed or not. A new
   // server, or one that never listed, has none yet.
@@ -261,14 +276,56 @@ class McpServersState {
 
   // --- editor form -------------------------------------------------------
 
+  // Adding a server starts at the preset picker; choosePreset opens the
+  // editor from there.
   openCreate() {
+    this.presetPickerOpen = true;
+  }
+
+  closePresetPicker() {
+    this.presetPickerOpen = false;
+  }
+
+  // choosePreset opens the editor for a preset id, or the full custom form
+  // for any other value.
+  choosePreset(id) {
+    const preset = mcpPresetById(id);
+    this.presetPickerOpen = false;
+    this.#openCreateForm();
+    if (!preset) {
+      return;
+    }
+    this.formPreset = preset;
+    this.formAuth = preset.auth[0];
+    this.form = {
+      ...this.form,
+      ...mcpPresetFormFields(preset, this.servers, this.virtualServers),
+    };
+    // The preset picked a free slug; renaming must not overwrite it.
+    this.slugEdited = true;
+  }
+
+  // changePreset goes back from the editor to the picker.
+  changePreset() {
+    this.closeForm();
+    this.presetPickerOpen = true;
+  }
+
+  #openCreateForm() {
     this.formMode = "create";
     this.slugEdited = false;
     this.advancedOpen = false;
     this.error = "";
     this.form = defaultMcpServerForm();
+    this.#resetPreset();
     this.#resetEditorTools();
     this.formOpen = true;
+  }
+
+  #resetPreset() {
+    this.formPreset = null;
+    this.formAuth = "";
+    this.formToken = "";
   }
 
   openEdit(server) {
@@ -280,6 +337,7 @@ class McpServersState {
     this.advancedOpen = false;
     this.error = "";
     this.form = mcpServerFormFromServer(server);
+    this.#resetPreset();
     this.#resetEditorTools();
     this.formOpen = true;
     void this.#loadEditorTools(server);
@@ -292,6 +350,7 @@ class McpServersState {
     this.advancedOpen = false;
     this.error = "";
     this.form = defaultMcpServerForm();
+    this.#resetPreset();
     this.#resetEditorTools();
   }
 
@@ -366,7 +425,16 @@ class McpServersState {
   }
 
   async submitForm() {
-    const built = buildMcpServerPayload(this.form, this.formMode, this.servers, this.virtualServers);
+    const preset = this.formPreset;
+    const auth = preset ? this.formAuth : "";
+    const form = preset
+      ? { ...this.form, headers: mcpConnectionHeaders(this.form.headers, auth, this.formToken) }
+      : this.form;
+    if (auth === MCP_AUTH_TOKEN && !mcpHasAuthorizationHeader(form.headers)) {
+      this.error = m.mcp_preset_token_required();
+      return;
+    }
+    const built = buildMcpServerPayload(form, this.formMode, this.servers, this.virtualServers);
     if (built.error) {
       this.error = built.error;
       return;
@@ -402,6 +470,9 @@ class McpServersState {
       flash.success(m.mcp_saved({ name: built.payload.name }));
       this.closeForm();
       void this.fetchServers();
+      if (auth === MCP_AUTH_OAUTH) {
+        this.#signInAfterSave(built.payload, preset);
+      }
     } finally {
       this.formSubmitting = false;
     }
@@ -588,6 +659,23 @@ class McpServersState {
   }
 
   // --- OAuth sign-in -----------------------------------------------------
+
+  // #signInAfterSave continues a preset save straight into the sign-in. A
+  // server that needs an operator-registered OAuth client stops at the
+  // dialog with the client fields open; the rest go to the sign-in page.
+  #signInAfterSave(payload, preset) {
+    this.openSignIn({
+      name: payload.name,
+      slug: payload.slug,
+      url: payload.url,
+      transport: payload.transport,
+    });
+    if (preset.oauthClient === "manual") {
+      this.oauthClientRequired = true;
+      return;
+    }
+    void this.submitSignIn();
+  }
 
   oauthRedirectURI() {
     return mcpOAuthRedirectURI(window.location.origin, gomodelPath);
