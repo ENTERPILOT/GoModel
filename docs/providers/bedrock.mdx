@@ -136,6 +136,8 @@ Behavior follows the global `CONFIGURED_PROVIDER_MODELS_MODE` — `allowlist`
 (default) exposes only configured models and skips the upstream call;
 `fallback` uses the list only when `ListFoundationModels` is unavailable or
 empty.
+`merge` adds the configured models to the discovered ones. To change the mode
+for Bedrock only, set `BEDROCK_MODELS_MODE` (YAML: `providers.<name>.models_mode`).
 
 ## Multiple Bedrock providers
 

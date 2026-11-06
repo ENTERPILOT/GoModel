@@ -143,8 +143,9 @@ console.log(completion.choices[0].message.content);
   Upstream-Endpunkt `/v1/models` erkannt. Setzen Sie
   `BAILIAN_MODELS=text-embedding-v3,text-embedding-v4`, um sie verfügbar zu
   machen; im Standardmodus `allowlist` werden nur diese Modelle bereitgestellt,
-  setzen Sie daher `CONFIGURED_PROVIDER_MODELS_MODE=merge`, um auch die
-  erkannten Chat-Modelle zu behalten.
+  setzen Sie daher `BAILIAN_MODELS_MODE=merge` (YAML:
+  `providers.bailian.models_mode: merge`), um auch die erkannten Chat-Modelle
+  zu behalten, ohne andere Provider zu ändern.
 </Note>
 
 ## Referenzen

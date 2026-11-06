@@ -55,8 +55,12 @@ fehlschlägt oder leer ist.
 
 ## Modelle
 
-GoModel liest die aktuelle `/models`-Liste von Together, einschließlich Typ,
-Anzeigename, Kontextlänge und Token-Preisen jedes Modells. Bild-, Audio-, Video-
+Wenn `TOGETHER_MODELS` nicht gesetzt ist oder der Modus `fallback` oder `merge`
+lautet, liest GoModel die aktuelle `/models`-Liste von Together, einschließlich
+Typ, Anzeigename, Kontextlänge und Token-Preisen jedes Modells. Mit einer
+`TOGETHER_MODELS`-Allowlist wird diese Liste übersprungen; Kontextlimits und
+Preise stammen dann aus GoModels Modellkatalog (oder einer gecachten Liste) und
+können für Modelle fehlen, die der Katalog nicht kennt. Bild-, Audio-, Video-
 und Rerank-Modelle werden ausgelassen, weil GoModel diese Endpunkte nicht an
 Together weiterleitet. Modell-IDs enthalten einen Schrägstrich; verwenden Sie sie
 unverändert oder stellen Sie den Providernamen voran, um die Route festzulegen:

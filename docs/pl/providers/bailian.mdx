@@ -144,7 +144,8 @@ console.log(completion.choices[0].message.content);
   endpointu upstream `/v1/models`. Ustaw
   `BAILIAN_MODELS=text-embedding-v3,text-embedding-v4`, aby były dostępne; w
   domyślnym trybie `allowlist` udostępniane są tylko te modele, więc ustaw
-  `CONFIGURED_PROVIDER_MODELS_MODE=merge`, aby zachować też wykryte modele czatu.
+  `BAILIAN_MODELS_MODE=merge` (YAML: `providers.bailian.models_mode: merge`),
+  aby zachować też wykryte modele czatu bez zmiany innych providerów.
 </Note>
 
 ## Źródła

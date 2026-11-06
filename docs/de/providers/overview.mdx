@@ -233,6 +233,9 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
   konfigurierten Modelle bereit und überspringt deren Upstream-Aufrufe von `/models`. Setzen Sie
   `fallback`, um diese Listen nur zu verwenden, wenn das Upstream-`/models` nicht verfügbar oder
   leer ist, oder `merge`, um sie zu den erkannten Modellen hinzuzufügen.
+  Für einen einzelnen Provider überschreiben Sie den Modus mit
+  `<PROVIDER>[_SUFFIX]_MODELS_MODE` (zum Beispiel `OPENROUTER_MODELS_MODE=fallback`)
+  oder mit **Modellmodus** im Dashboard.
 - **Modellfilter** – grenzen Sie einen großen Katalog per Glob-Muster oder Preis ein, statt Modelle
   einzeln aufzulisten: `OPENROUTER_MODEL_FILTER_INCLUDE=*:free` behält nur die kostenlose Stufe von
   OpenRouter, und `<PROVIDER>_MODEL_FILTER_MAX_PRICE_PER_MTOK` begrenzt, wohin ein Provider routen

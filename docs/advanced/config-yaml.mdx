@@ -49,7 +49,13 @@ example `OPENROUTER_MODELS`, `ORACLE_MODELS`, `AZURE_MODELS`, `SGLANG_MODELS`,
 | `fallback` | Yes | The upstream list; your list only if `/models` fails or returns nothing | `/models` is sometimes unavailable, but discovery should drive the list |
 | `merge` | Yes | The upstream list plus your models it doesn't include; falls back like `fallback` when `/models` fails | A provider serves models it does not list (preview or unlisted IDs) |
 
-Before this release the default was `fallback`. Set `CONFIGURED_PROVIDER_MODELS_MODE=fallback` to keep the old behavior.
+<Warning>
+**Breaking change:** the default used to be `fallback`. A provider with a
+`models:` or `<PROVIDER>_MODELS` list now serves only those models, and requests
+for any other model return 404 (model not found). To restore the old behavior,
+set `CONFIGURED_PROVIDER_MODELS_MODE=fallback`, or override a single provider
+with `<PROVIDER>[_SUFFIX]_MODELS_MODE` / `models_mode`.
+</Warning>
 
 Set `models_mode` on a provider to override the global mode for that provider
 only. Leave it unset to use the global mode. For example, you can expose a single

@@ -563,6 +563,15 @@ takich jak speech-to-text. W YAML
 `providers.<name>.models` dostarcza tę samą listę modeli dla nazwanych bloków
 providerów.
 
+<Warning>
+**Zmiana niekompatybilna:** wcześniej domyślnym trybem był `fallback`. Provider z
+listą `models:` lub `<PROVIDER>_MODELS` udostępnia teraz tylko te modele, a
+zapytania o inne modele zwracają 404 (model nie znaleziony). Aby przywrócić
+dotychczasowe zachowanie, ustaw `CONFIGURED_PROVIDER_MODELS_MODE=fallback` albo
+nadpisz pojedynczego providera przez `<PROVIDER>[_SUFFIX]_MODELS_MODE` /
+`models_mode`.
+</Warning>
+
 `GET /v1/models` domyślnie zwraca identyfikatory z prefiksem providera (`openai/gpt-5`). Ustaw
 `UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT=true` (YAML:
 `models.unqualified_model_ids_at_models_endpoint`), żeby zwracać same identyfikatory modeli

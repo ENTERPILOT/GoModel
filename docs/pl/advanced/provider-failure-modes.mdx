@@ -145,6 +145,10 @@ kontynuuje routing, korzystając kolejno z:
 3. Dla providera na domyślnym bazowym URL –
    listy z [katalogu modeli](/pl/advanced/configuration) dla jego typu providera.
 
+Ta kolejność dotyczy trybów `fallback` i `merge`. W domyślnym trybie
+`allowlist` provider ze skonfigurowaną listą nigdy nie wywołuje `/models`, więc
+to ta lista jest jego inwentarzem.
+
 Providerzy z błędem są ponownie sprawdzani co `PROVIDER_RECHECK_INTERVAL` sekund
 (domyślnie `60`), a aktualna lista zastępuje zastępczą, gdy tylko listowanie
 się powiedzie. Gdy nie ma czego serwować, requesty zwracają `503`, aby klienci ponowili próbę,

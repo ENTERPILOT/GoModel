@@ -122,6 +122,7 @@ providers:
 ```
 
 其行为遵循全局的 `CONFIGURED_PROVIDER_MODELS_MODE`：`allowlist`（默认）只暴露配置的模型，并跳过上游调用；`fallback` 仅在 `ListFoundationModels` 不可用或返回为空时使用该列表。
+`merge` 会将配置的模型追加到发现的模型中。如只想更改 Bedrock 的模式，请设置 `BEDROCK_MODELS_MODE`（YAML：`providers.<name>.models_mode`）。
 
 ## 多个 Bedrock 提供商
 

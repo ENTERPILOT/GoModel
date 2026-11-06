@@ -560,7 +560,15 @@ suits single-API servers such as speech-to-text. YAML
 `providers.<name>.models` provides the same model-list input for named provider
 blocks. To override the mode for one provider only, set
 `<PROVIDER>[_SUFFIX]_MODELS_MODE` (YAML: `providers.<name>.models_mode`), for
-example `OPENROUTER_MODELS_MODE=allowlist`.
+example `OPENROUTER_MODELS_MODE=fallback`.
+
+<Warning>
+**Breaking change:** the default used to be `fallback`. A provider with a
+`models:` or `<PROVIDER>_MODELS` list now serves only those models, and requests
+for any other model return 404 (model not found). To restore the old behavior,
+set `CONFIGURED_PROVIDER_MODELS_MODE=fallback`, or override a single provider
+with `<PROVIDER>[_SUFFIX]_MODELS_MODE` / `models_mode`.
+</Warning>
 
 `GET /v1/models` lists provider-qualified IDs (`openai/gpt-5`) by default. Set
 `UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT=true` (YAML:

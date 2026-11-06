@@ -11,6 +11,7 @@
 import { hasSecretReference } from "../../lib/utils/secretReference.js";
 import * as m from "../../lib/paraglide/messages.js";
 import { filterFields } from "../../lib/utils/textMatch.js";
+import { PROVIDER_DOCS_UTM } from "../../lib/utils/providerDocs.js";
 import { modelRowsToList, modelsToRows } from "./providerModels.js";
 
 // Field names, mirroring internal/providers/credential_schema.go.
@@ -29,7 +30,7 @@ const MODELS_MODE_OPTIONS = ["fallback", "allowlist", "merge"];
 
 // The docs table comparing the models modes, linked from the field's "?".
 export const MODELS_MODE_DOCS_URL =
-  "https://gomodel.enterpilot.io/docs/advanced/config-yaml?utm_source=gomodel_dashboard#models-modes";
+  "https://gomodel.enterpilot.io/docs/advanced/config-yaml?" + PROVIDER_DOCS_UTM + "#models-modes";
 
 // Resolve translated metadata on access so locale changes cannot leave stale
 // labels, hints, or placeholders. The metadata describes each credential field:

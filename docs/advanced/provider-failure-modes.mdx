@@ -145,6 +145,10 @@ keeps routing with, in order:
 3. For a provider on its default base URL, the
    [model catalog's](/advanced/configuration) list for its provider type.
 
+This ordering applies in `fallback` and `merge` modes. Under the default
+`allowlist`, a provider with a configured list never calls `/models`, so its
+list is the inventory.
+
 Failed providers are rechecked every `PROVIDER_RECHECK_INTERVAL` seconds
 (default `60`), and the live list replaces the stand-in once a listing
 succeeds. With nothing to serve, requests return `503` so clients retry, and

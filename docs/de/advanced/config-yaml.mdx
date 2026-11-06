@@ -52,7 +52,14 @@ llm-d-Instanzen akzeptieren außerdem die Steuerungen
 | `fallback` | Ja | Die Upstream-Liste; Ihre Liste nur, wenn `/models` fehlschlägt oder nichts liefert | `/models` manchmal nicht verfügbar ist, die Erkennung aber die Liste bestimmen soll |
 | `merge` | Ja | Die Upstream-Liste plus Ihre Modelle, die darin fehlen; verhält sich wie `fallback`, wenn `/models` fehlschlägt | ein Provider Modelle bereitstellt, die er nicht auflistet (Preview- oder nicht gelistete IDs) |
 
-Vor diesem Release war `fallback` der Standard. Setzen Sie `CONFIGURED_PROVIDER_MODELS_MODE=fallback`, um das bisherige Verhalten beizubehalten.
+<Warning>
+**Breaking Change:** Früher war `fallback` der Standard. Ein Provider mit einer
+Liste unter `models:` oder `<PROVIDER>_MODELS` bietet jetzt nur diese Modelle an;
+Anfragen für andere Modelle liefern 404 (Modell nicht gefunden). Um das
+bisherige Verhalten wiederherzustellen, setzen Sie
+`CONFIGURED_PROVIDER_MODELS_MODE=fallback` oder überschreiben einen einzelnen
+Provider mit `<PROVIDER>[_SUFFIX]_MODELS_MODE` / `models_mode`.
+</Warning>
 
 Setzen Sie `models_mode` an einem Provider, um den globalen Modus nur für diesen
 Provider zu überschreiben; ohne Wert gilt der globale Modus. So stellen Sie zum

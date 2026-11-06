@@ -605,6 +605,15 @@ Liste bedient und als gesund gemeldet. Das passt zu Servern mit nur einer API,
 etwa für Speech-to-Text. In YAML liefert
 `providers.<name>.models` dieselbe Modellliste für benannte Provider-Blöcke.
 
+<Warning>
+**Breaking Change:** Früher war `fallback` der Standard. Ein Provider mit einer
+Liste unter `models:` oder `<PROVIDER>_MODELS` bietet jetzt nur diese Modelle an;
+Anfragen für andere Modelle liefern 404 (Modell nicht gefunden). Um das
+bisherige Verhalten wiederherzustellen, setzen Sie
+`CONFIGURED_PROVIDER_MODELS_MODE=fallback` oder überschreiben einen einzelnen
+Provider mit `<PROVIDER>[_SUFFIX]_MODELS_MODE` / `models_mode`.
+</Warning>
+
 `GET /v1/models` listet standardmäßig Provider-qualifizierte IDs
 (`openai/gpt-5`). Setzen Sie `UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT=true`
 (YAML: `models.unqualified_model_ids_at_models_endpoint`), um stattdessen

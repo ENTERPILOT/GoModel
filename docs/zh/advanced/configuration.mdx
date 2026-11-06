@@ -355,6 +355,10 @@ server:
 
 每种提供商类型还接受通过 `<PROVIDER>_MODELS` 配置的逗号分隔模型列表，例如 `OPENROUTER_MODELS`、`ORACLE_MODELS`、`AZURE_MODELS`、`SGLANG_MODELS`、`VLLM_MODELS` 或 `LLMD_MODELS`。默认情况下，`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` 会让配置的列表成为该提供商的全部模型清单，并跳过其上游 `/models` 调用。设置为 `fallback` 时，仅在上游 `/models` 失败、返回 nil 或返回空列表时使用配置的列表；设置为 `merge` 时，会在上游模型清单之上追加配置的模型。没有 `/models` 端点（返回 404 或 405）的兼容 OpenAI 提供商会使用其配置的列表提供服务，并被报告为健康，这适用于语音转文字等单一 API 的服务器。YAML 中的 `providers.<name>.models` 为命名的提供商块提供相同的模型列表输入。
 
+<Warning>
+**不兼容变更：**默认模式以前是 `fallback`。配置了 `models:` 或 `<PROVIDER>_MODELS` 列表的提供商现在只提供这些模型，请求其他模型会返回 404（模型未找到）。如需恢复原有行为，请设置 `CONFIGURED_PROVIDER_MODELS_MODE=fallback`，或通过 `<PROVIDER>[_SUFFIX]_MODELS_MODE` / `models_mode` 单独覆盖某个提供商。
+</Warning>
+
 `GET /v1/models` 默认列出带提供商前缀的 ID（`openai/gpt-5`）。设置 `UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT=true`（YAML：`models.unqualified_model_ids_at_models_endpoint`）可改为列出不带前缀的模型 ID（`gpt-5`），适用于会根据列表校验所请求模型、且只认识纯名称的客户端。注意：当两个提供商暴露相同的模型 ID 时，只会列出不带前缀的请求所路由到的那个提供商（最先注册的那个）。可使用[虚拟模型](/zh/features/virtual-models#列出不带前缀的模型-id)将某个名称固定到特定提供商，例如 `source: gpt-5` 配合 `target: azure/gpt-5`。
 
 默认情况下，所有提供商模型都可用。设置 `MODELS_ENABLED_BY_DEFAULT=false`（YAML：`models.enabled_by_default`）后，则需要在[虚拟模型](/zh/features/virtual-models#默认的模型可用性)中显式添加允许条目：对其他模型的请求会以 `400 model_access_denied` 失败，且这些模型不会出现在 `GET /v1/models` 中。如果要在 `GET /v1/models` 中隐藏提供商模型、但仍保留其可路由性，请设置 `KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT=true`（YAML：`models.keep_only_aliases_at_models_endpoint`）；此时该端点只列出已启用的虚拟模型重定向。

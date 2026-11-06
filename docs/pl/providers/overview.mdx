@@ -254,6 +254,9 @@ przez providera upstream.
   w ich upstreamie. Ustaw `fallback`, aby używać tych list tylko wtedy, gdy
   `/models` upstreamu jest niedostępne lub puste, albo `merge`, aby dodać je do
   wykrytych modeli.
+  Dla pojedynczego providera nadpisz tryb przez
+  `<PROVIDER>[_SUFFIX]_MODELS_MODE` (na przykład `OPENROUTER_MODELS_MODE=fallback`)
+  lub **Tryb modeli** w dashboardzie.
 - **Filtry modeli** – zawężaj duży katalog wzorcem glob lub ceną zamiast
   wymieniać modele jeden po drugim: `OPENROUTER_MODEL_FILTER_INCLUDE=*:free`
   zostawia tylko darmowe modele OpenRouter, a
