@@ -129,7 +129,7 @@
                   label={m.mcp_oauth_sign_out_action({ name: server.name })}
                   class="table-icon-btn"
                   onclick={() => mcpServers.signOut(server)}
-                  disabled={mcpServers.signingOutName === mcpServerSlug(server)}
+                  disabled={Boolean(mcpServers.signingOutName)}
                 >
                   <Icon icon={LogOut} class="form-action-icon" />
                 </TableActionButton>

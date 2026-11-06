@@ -8,6 +8,7 @@ import { flash } from "$lib/stores/flash.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import { gomodelPath } from "$lib/api/paths.js";
 import * as m from "$lib/paraglide/messages.js";
+import { tick } from "svelte";
 import {
   buildMcpOAuthStartPayload,
   buildMcpServerPayload,
@@ -44,6 +45,7 @@ import {
   mcpFreeSlug,
   mcpPresetById,
   mcpURLHostName,
+  mcpWithoutAuthorizationHeaders,
 } from "./mcpPresets.js";
 
 class McpServersState {
@@ -294,14 +296,19 @@ class McpServersState {
 
   // chooseServerKind switches the create form between presets and a custom
   // server. Fields the operator did not touch follow the choice; the token
-  // is always dropped so one service's key never goes to another.
+  // and any Authorization header are dropped on a change, so one service's
+  // key never goes to another.
   chooseServerKind(kind) {
     const previous = this.formPreset;
+    const previousKind = this.formKind;
     const preset = mcpPresetById(kind);
     this.formKind = preset ? preset.id : kind === MCP_PRESET_CUSTOM ? kind : "";
     this.formAuth = preset ? preset.auth[0] : "";
     this.formToken = "";
     this.error = "";
+    if (this.formKind !== previousKind) {
+      this.form.headers = mcpWithoutAuthorizationHeaders(this.form.headers);
+    }
     if (preset) {
       this.form.url = preset.url;
       this.form.transport = preset.transport || "http";
@@ -747,6 +754,13 @@ class McpServersState {
         this.oauthError = m.mcp_oauth_start_failed();
         return;
       }
+      if (!this.oauthOpen) {
+        return;
+      }
+      // Close the dialog first, so its unsaved-changes guard is gone before
+      // the browser leaves for the sign-in page.
+      this.closeSignIn();
+      await tick();
       window.location.assign(url);
     } finally {
       this.oauthSubmitting = false;

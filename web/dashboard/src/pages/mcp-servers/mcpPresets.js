@@ -76,10 +76,20 @@ export function mcpPresetById(id) {
 }
 
 // mcpPresetForURL finds the preset a saved server was created from, so the
-// sign-in dialog can link to the vendor's OAuth app page.
+// sign-in dialog can link to the vendor's OAuth app page. A trailing slash
+// does not matter: config.yaml examples often drop it.
 export function mcpPresetForURL(url) {
-  const value = String(url || "").trim();
-  return MCP_SERVER_PRESETS.find((preset) => preset.url === value) || null;
+  const value = withoutTrailingSlash(url);
+  if (!value) {
+    return null;
+  }
+  return MCP_SERVER_PRESETS.find((preset) => withoutTrailingSlash(preset.url) === value) || null;
+}
+
+function withoutTrailingSlash(url) {
+  return String(url || "")
+    .trim()
+    .replace(/\/+$/, "");
 }
 
 export function mcpPresetHost(preset) {
@@ -133,8 +143,16 @@ export function mcpConnectionHeaders(rows, auth, token) {
 
 export function mcpHasAuthorizationHeader(rows) {
   return (rows || []).some(
-    (row) =>
-      String(row.name || "").trim().toLowerCase() === "authorization" &&
-      String(row.value || "").trim() !== "",
+    (row) => isAuthorizationHeader(row) && String(row.value || "").trim() !== "",
   );
+}
+
+// mcpWithoutAuthorizationHeaders drops Authorization rows, so a credential
+// typed for one server choice never goes to another.
+export function mcpWithoutAuthorizationHeaders(rows) {
+  return (rows || []).filter((row) => !isAuthorizationHeader(row));
+}
+
+function isAuthorizationHeader(row) {
+  return String(row?.name || "").trim().toLowerCase() === "authorization";
 }

@@ -29,6 +29,7 @@
   submitLabel={m.mcp_oauth_continue()}
   submittingLabel={m.mcp_oauth_continuing()}
   submitIcon={LogIn}
+  canClose={() => !mcpServers.oauthSubmitting}
   onclose={() => mcpServers.closeSignIn()}
   onsubmit={() => mcpServers.submitSignIn()}
 >
