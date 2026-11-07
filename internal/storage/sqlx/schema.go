@@ -44,8 +44,16 @@ func AddColumns(ctx context.Context, db DB, statements ...string) error {
 
 // addColumnStatement expands type tokens and, on PostgreSQL, turns
 // `ADD COLUMN` into `ADD COLUMN IF NOT EXISTS`.
+//
+// DuckDB cannot ADD COLUMN with constraints and rejects the statement before
+// checking whether the column exists. A DuckDB table is always created from
+// the current schema, so dropping the constraint only affects the
+// duplicate-column no-op.
 func (d Dialect) addColumnStatement(statement string) string {
 	statement = d.ExpandTypes(statement)
+	if d == DuckDB {
+		statement = strings.ReplaceAll(statement, " NOT NULL", "")
+	}
 	if d != PostgreSQL || strings.Contains(statement, "IF NOT EXISTS") {
 		return statement
 	}

@@ -69,6 +69,19 @@ var typeExpansions = map[Dialect]*strings.Replacer{
 		TypeSerialPK, "BIGSERIAL PRIMARY KEY",
 		TypeBytes, "BYTEA",
 	),
+	DuckDB: strings.NewReplacer(
+		TypeInt64, "BIGINT",
+		TypeBool, "BOOLEAN",
+		TypeFloat, "DOUBLE",
+		// VARCHAR, not JSON: the Go driver decodes JSON columns into
+		// []any/map[string]any, which cannot scan into *[]byte. DuckDB's
+		// JSON functions accept VARCHAR, and JSON is a VARCHAR alias anyway.
+		TypeJSON, "VARCHAR",
+		TypeJSONText, "VARCHAR",
+		TypeTimestamp, "TIMESTAMPTZ",
+		TypeSerialPK, "BIGINT PRIMARY KEY DEFAULT nextval('"+duckdbSerialSequence+"')",
+		TypeBytes, "BLOB",
+	),
 }
 
 // ExpandTypes replaces portable type tokens with this dialect's column types.

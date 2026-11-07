@@ -120,7 +120,7 @@ func tableColumns(ctx context.Context, db sqlx.DB, table string) (map[string]boo
 	case sqlx.SQLite:
 		query = `SELECT name FROM pragma_table_info(?)`
 		args = []any{table}
-	case sqlx.PostgreSQL:
+	case sqlx.PostgreSQL, sqlx.DuckDB:
 		query = `SELECT column_name FROM information_schema.columns
 			WHERE table_schema = current_schema() AND table_name = ?`
 		args = []any{table}

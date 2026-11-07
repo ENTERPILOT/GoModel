@@ -23,6 +23,9 @@ func ResolveSQLBackend[T any](
 	sqlStore func(sqlx.DB) (T, error),
 	mongodb func(*mongo.Database) (T, error),
 ) (T, error) {
+	if duck, ok := store.(DuckDBStorage); ok {
+		return withSQL(duck.DuckDB(), sqlx.NewDuckDB, sqlStore)
+	}
 	return ResolveBackend[T](
 		store,
 		func(db *sql.DB) (T, error) {

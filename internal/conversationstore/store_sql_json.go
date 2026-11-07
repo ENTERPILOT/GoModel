@@ -44,6 +44,8 @@ func mutationsFor(dialect sqlx.Dialect) (jsonMutations, error) {
 		return sqliteMutations{}, nil
 	case sqlx.PostgreSQL:
 		return postgresMutations{}, nil
+	case sqlx.DuckDB:
+		return duckdbMutations{}, nil
 	default:
 		return nil, fmt.Errorf("unsupported dialect %q", dialect)
 	}
@@ -162,4 +164,46 @@ func (postgresMutations) deleteItem(id, targetItemID string, now int64) (string,
 		  )
 	`
 	return query, []any{targetItemID, id, now, targetItemID}
+}
+
+// duckdbMutations builds statements against DuckDB's JSON extension, which has
+// no json_set/json_insert/json_remove: documents are rebuilt from lists instead.
+type duckdbMutations struct{}
+
+func (duckdbMutations) mergeMetadata(id string, patch []byte, now int64) (string, []any) {
+	// Null the old metadata first so the outer merge replaces it wholesale,
+	// matching json_set rather than a deep merge.
+	const query = `
+		UPDATE conversation_snapshots SET data = json_merge_patch(
+			json_merge_patch(data, '{"conversation":{"metadata":null}}'),
+			json_object('conversation', json_object('metadata',
+				json_merge_patch(COALESCE(data->'$.conversation.metadata', '{}'), ?::JSON)))
+		)
+		WHERE id = ? AND (expires_at = 0 OR expires_at > ?)
+		AND len(json_keys(json_merge_patch(COALESCE(data->'$.conversation.metadata', '{}'), ?::JSON))) <= ?
+	`
+	return query, []any{string(patch), id, now, string(patch), core.MaxConversationMetadataPairs}
+}
+
+func (duckdbMutations) appendItems(id string, _ []json.RawMessage, encoded []byte, now int64) (string, []any) {
+	const query = `
+		UPDATE conversation_snapshots
+		SET items = to_json(list_concat(items->'$[*]', ?::JSON->'$[*]'))
+		WHERE id = ? AND (expires_at = 0 OR expires_at > ?)
+		AND len(list_intersect(items->>'$[*].id', ?::JSON->>'$[*].id')) = 0
+	`
+	return query, []any{string(encoded), id, now, string(encoded)}
+}
+
+func (duckdbMutations) deleteItem(id, targetItemID string, now int64) (string, []any) {
+	const query = `
+		UPDATE conversation_snapshots
+		SET items = to_json(list_concat(
+			(items->'$[*]')[:list_position(items->>'$[*].id', ?) - 1],
+			(items->'$[*]')[list_position(items->>'$[*].id', ?) + 1:]
+		))
+		WHERE id = ? AND (expires_at = 0 OR expires_at > ?)
+		AND list_contains(items->>'$[*].id', ?)
+	`
+	return query, []any{targetItemID, targetItemID, id, now, targetItemID}
 }
