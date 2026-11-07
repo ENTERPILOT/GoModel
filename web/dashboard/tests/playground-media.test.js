@@ -10,6 +10,7 @@ import {
   buildEmbeddingRequest,
   buildImageRequest,
   buildSpeechRequest,
+  embeddingDimensionsValid,
   embeddingInputs,
   embeddingSummary,
   imageResults,
@@ -222,4 +223,41 @@ test("abbreviateEmbeddingResponse trims long vectors and leaves the rest alone",
   assert.equal(body.data[0].embedding.length, 1536, "the original response is not changed");
   assert.equal(abbreviateEmbeddingResponse(null), null);
   assert.deepEqual(abbreviateEmbeddingResponse({ error: "x" }), { error: "x" });
+});
+
+test("embeddingDimensionsValid accepts a blank field or a positive integer only", () => {
+  for (const ok of ["", "  ", null, undefined, 1, 256, "1536", " 512 "]) {
+    assert.equal(embeddingDimensionsValid(ok), true, String(ok));
+  }
+  for (const bad of [0, -3, 1.5, "abc", "1e400", Infinity, NaN]) {
+    assert.equal(embeddingDimensionsValid(bad), false, String(bad));
+  }
+});
+
+test("embeddingSummary skips items without a vector", () => {
+  for (const item of [{}, { embedding: null }, { embedding: 42 }, { embedding: { a: 1 } }]) {
+    const summary = embeddingSummary({ data: [item] });
+    assert.equal(summary.count, 0, JSON.stringify(item));
+    assert.equal(summary.dimensions, null);
+  }
+  const kept = embeddingSummary({ data: [{}, { index: 3, embedding: [1, 2] }] });
+  assert.equal(kept.count, 1);
+  assert.equal(kept.vectors[0].index, 3);
+});
+
+test("embeddingSummary gives no size for a string that is not whole base64 float32s", () => {
+  for (const bad of ["not base64!!", "AAA=", "AAAAA", "AAAA====", "A@AA"]) {
+    const summary = embeddingSummary({ data: [{ embedding: bad }] });
+    assert.equal(summary.count, 1, bad);
+    assert.equal(summary.vectors[0].length, null, bad);
+    assert.equal(summary.dimensions, null, bad);
+  }
+  // Base64 with line breaks still decodes.
+  const b64 = Buffer.from(new Float32Array([1, 2, 3, 4, 5, 6]).buffer).toString("base64");
+  const wrapped = b64.slice(0, 10) + "\n" + b64.slice(10);
+  assert.equal(embeddingSummary({ data: [{ embedding: wrapped }] }).dimensions, 6);
+  // One unknown size means no shared dimension is claimed.
+  const mixed = embeddingSummary({ data: [{ embedding: b64 }, { embedding: "AAA=" }] });
+  assert.equal(mixed.dimensions, null);
+  assert.deepEqual(mixed.vectors.map((v) => v.length), [6, null]);
 });

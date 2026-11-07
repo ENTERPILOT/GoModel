@@ -14,7 +14,7 @@
   );
 
   function previewText(vector) {
-    if (!vector.preview) return m.playground_embeddings_base64_value();
+    if (vector.base64) return m.playground_embeddings_base64_value();
     const values = vector.preview.join(", ");
     return vector.length > vector.preview.length ? "[" + values + ", …]" : "[" + values + "]";
   }
@@ -57,7 +57,7 @@
           <li>
             <span class="playground-embeddings-index mono">#{vector.index}</span>
             <code class="playground-embeddings-values">{previewText(vector)}</code>
-            {#if media.embeddings.dimensions === null}
+            {#if media.embeddings.dimensions === null && vector.length !== null}
               <span class="playground-embeddings-length">
                 {m.playground_embeddings_dimensions({ count: vector.length })}
               </span>

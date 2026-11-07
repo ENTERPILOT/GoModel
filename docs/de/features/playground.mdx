@@ -32,17 +32,18 @@ weiterhin jedes beliebige Modell oder jeden Alias eingeben.
 | Bild | `POST /v1/images/generations` | Prompt, Größe, Anzahl der Bilder (1–4) | generierte Bilder (URL oder `b64_json`) |
 | Sprache | `POST /v1/audio/speech` | Text, Stimme, Format (`mp3`, `wav`, `opus`, `aac`, `flac`) | Audioplayer |
 | Transkription | `POST /v1/audio/transcriptions` | Audiodatei, optional Sprache und Prompt | Transkript-Text |
-| Embeddings | `POST /v1/embeddings` | Texte (einer pro Zeile), optional Kodierungsformat (`float`, `base64`) und Dimensionen | Anzahl der Vektoren, Dimensionen, Prompt-Tokens und die ersten Werte jedes Vektors |
+| Embeddings | `POST /v1/embeddings` | Texte (einer pro Zeile), optional Kodierungsformat (`float`, `base64`) und Dimensionen | Anzahl der Vektoren, Dimensionen, Prompt-Tokens und die ersten Werte jedes Vektors (`float`) |
 
-Größe, Anzahl, Format und Dimensionen werden nur gesendet, wenn sie vom
-Standardwert des Providers abweichen (`mp3` für Sprache, `float` für
-Embeddings). Das JSON-Panel zeigt den Request-Body;
+Größe, Anzahl und Format werden nur gesendet, wenn sie vom Standardwert des
+Providers abweichen (`mp3` für Sprache, `float` für Embeddings); Dimensionen
+entfallen, solange das Feld leer ist, und werden sonst wie eingegeben gesendet. Das JSON-Panel zeigt den Request-Body;
 eine Transkription wird als `multipart/form-data` gesendet, daher beschreibt
 ihre Vorschau den Datei-Teil, statt die Bytes zu enthalten. Inline-Bilder im
 Format `b64_json` werden im Response-JSON gekürzt, damit es lesbar bleibt,
 Sprach-Responses werden als ihr Content-Type und ihre Größe zusammengefasst, und
-Embedding-Vektoren werden auf ihre ersten Werte gekürzt; **Copy** kopiert
-weiterhin die vollständige Response.
+Embedding-Vektoren werden auf ihre ersten Werte gekürzt (lange
+`base64`-Vektoren auf ihre ersten Zeichen); **Kopieren** kopiert weiterhin die
+vollständige Response.
 
 ## Eingrenzung per User Path
 

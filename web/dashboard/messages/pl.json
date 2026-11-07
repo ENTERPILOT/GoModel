@@ -82,9 +82,42 @@
   "playground_embeddings_dimensions_label": "Wymiary",
   "playground_embeddings_empty_response": "Model nie zwrócił żadnych embeddingów. Pełną odpowiedź znajdziesz w Response JSON.",
   "playground_embeddings_base64_value": "Wektor zakodowany w base64 (zobacz Response JSON)",
-  "playground_embeddings_vectors": "Wektory: {count}",
-  "playground_embeddings_dimensions": "Wymiary: {count}",
-  "playground_embeddings_prompt_tokens": "Tokeny promptu: {count}",
+  "playground_embeddings_vectors": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} wektor",
+        "count_plural=few": "{count} wektory",
+        "count_plural=many": "{count} wektorów",
+        "count_plural=*": "{count} wektora"
+      }
+    }
+  ],
+  "playground_embeddings_dimensions": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} wymiar",
+        "count_plural=few": "{count} wymiary",
+        "count_plural=many": "{count} wymiarów",
+        "count_plural=*": "{count} wymiaru"
+      }
+    }
+  ],
+  "playground_embeddings_prompt_tokens": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} token promptu",
+        "count_plural=few": "{count} tokeny promptu",
+        "count_plural=many": "{count} tokenów promptu",
+        "count_plural=*": "{count} tokena promptu"
+      }
+    }
+  ],
   "navigation_audit_logs": "Logi audytowe",
   "navigation_usage": "Zużycie",
   "navigation_budgets": "Budżety",

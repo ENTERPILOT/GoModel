@@ -103,9 +103,19 @@ export function embeddingInputs(value) {
     .filter(Boolean);
 }
 
+// The dimensions field is optional: blank leaves the size to the provider,
+// anything else must be a positive integer.
+export function embeddingDimensionsValid(value) {
+  const raw = text(value);
+  if (raw === "") return true;
+  const dims = Number(raw);
+  return Number.isInteger(dims) && dims > 0;
+}
+
 // Body for POST /v1/embeddings. One line is sent as a plain string, several as
-// an array. encoding_format and dimensions are sent only when they differ
-// from the provider defaults.
+// an array. encoding_format is sent only when it differs from the provider
+// default (float); dimensions whenever it is a positive integer, and left out
+// when the field is blank.
 export function buildEmbeddingRequest({ model, input, format, dimensions } = {}) {
   const inputs = embeddingInputs(input);
   const body = { model: text(model), input: inputs.length === 1 ? inputs[0] : inputs };
@@ -117,40 +127,45 @@ export function buildEmbeddingRequest({ model, input, format, dimensions } = {})
   return body;
 }
 
-// Number of float32 values in a base64 embedding, from its decoded length.
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+
+// Number of float32 values in a base64 embedding, from its decoded length;
+// null when the string is not base64 or does not decode to whole float32s.
 function base64ValueCount(value) {
   const clean = value.replace(/\s/g, "");
+  if (clean === "" || clean.length % 4 !== 0 || !BASE64.test(clean)) return null;
   const padding = clean.endsWith("==") ? 2 : clean.endsWith("=") ? 1 : 0;
-  return Math.floor(((clean.length * 3) / 4 - padding) / 4);
+  const bytes = (clean.length / 4) * 3 - padding;
+  return bytes % 4 === 0 ? bytes / 4 : null;
 }
 
-function embeddingLength(embedding) {
-  if (Array.isArray(embedding)) return embedding.length;
-  if (typeof embedding === "string") return base64ValueCount(embedding);
-  return 0;
+function isEmbeddingItem(item) {
+  return Boolean(item) && (Array.isArray(item.embedding) || typeof item.embedding === "string");
 }
 
 // What the result shows for an /v1/embeddings response: the vector count,
-// their dimensions (null when they differ or none came back), the prompt
-// tokens, and per vector its index, length and first values.
+// their dimensions (null when they differ, are unknown or none came back), the
+// prompt tokens, and per vector its index, length (null when unknown) and
+// first values. Items without a float array or a base64 string are skipped.
 export function embeddingSummary(body) {
   const data = body && Array.isArray(body.data) ? body.data : [];
-  const vectors = data
-    .filter((item) => item && typeof item === "object")
-    .map((item, position) => {
-      const embedding = item.embedding;
-      return {
-        index: Number.isInteger(item.index) ? item.index : position,
-        length: embeddingLength(embedding),
-        preview: Array.isArray(embedding) ? embedding.slice(0, EMBEDDING_PREVIEW_VALUES) : null,
-        base64: typeof embedding === "string",
-      };
-    });
+  const vectors = data.filter(isEmbeddingItem).map((item, position) => {
+    const embedding = item.embedding;
+    const base64 = typeof embedding === "string";
+    return {
+      index: Number.isInteger(item.index) ? item.index : position,
+      length: base64 ? base64ValueCount(embedding) : embedding.length,
+      preview: base64 ? null : embedding.slice(0, EMBEDDING_PREVIEW_VALUES),
+      base64,
+    };
+  });
   const lengths = new Set(vectors.map((vector) => vector.length));
+  lengths.delete(null);
+  const allKnown = vectors.every((vector) => vector.length !== null);
   const tokens = Number(body?.usage?.prompt_tokens);
   return {
     count: vectors.length,
-    dimensions: lengths.size === 1 ? [...lengths][0] : null,
+    dimensions: allKnown && lengths.size === 1 ? [...lengths][0] : null,
     promptTokens: Number.isFinite(tokens) ? tokens : null,
     vectors,
   };

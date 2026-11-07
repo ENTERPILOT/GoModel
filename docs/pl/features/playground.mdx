@@ -2,7 +2,7 @@
 title: "Playground"
 description: "Wypróbuj dowolny model przez gateway z poziomu dashboardu i sprawdź dokładny JSON requestu i odpowiedzi."
 icon: "flask-conical"
-keywords: ["playground", "dashboard", "chat completions", "responses", "messages", "streaming", "images", "obrazy", "text-to-speech", "synteza mowy", "transcription", "transkrypcja", "embeddings"]
+keywords: ["playground", "dashboard", "chat completions", "responses", "messages", "streaming", "images", "obrazy", "text-to-speech", "synteza mowy", "transcription", "transkrypcja", "embeddings", "embeddingi"]
 ---
 
 Strona **Playground** (`/admin/dashboard/playground`) wysyła requesty przez
@@ -29,15 +29,17 @@ których metadane deklarują dany tryb; nadal możesz wpisać dowolny model lub 
 | Obraz | `POST /v1/images/generations` | prompt, rozmiar, liczba obrazów (1–4) | wygenerowane obrazy (URL lub `b64_json`) |
 | Mowa | `POST /v1/audio/speech` | tekst, głos, format (`mp3`, `wav`, `opus`, `aac`, `flac`) | odtwarzacz audio |
 | Transkrypcja | `POST /v1/audio/transcriptions` | plik audio, opcjonalnie język i prompt | tekst transkrypcji |
-| Embeddingi | `POST /v1/embeddings` | teksty (jeden w wierszu), opcjonalnie format kodowania (`float`, `base64`) i wymiary | liczba wektorów, wymiary, tokeny promptu i pierwsze wartości każdego wektora |
+| Embeddingi | `POST /v1/embeddings` | teksty (jeden w wierszu), opcjonalnie format kodowania (`float`, `base64`) i wymiary | liczba wektorów, wymiary, tokeny promptu i pierwsze wartości każdego wektora (`float`) |
 
-Rozmiar, liczba, format i wymiary są wysyłane tylko wtedy, gdy różnią się od wartości
-domyślnej providera (`mp3` dla mowy, `float` dla embeddingów). Panel JSON pokazuje body requestu; transkrypcja jest
+Rozmiar, liczba i format są wysyłane tylko wtedy, gdy różnią się od wartości
+domyślnej providera (`mp3` dla mowy, `float` dla embeddingów); wymiary są
+pomijane, gdy pole jest puste, a w przeciwnym razie wysyłane tak, jak je wpisano. Panel JSON pokazuje body requestu; transkrypcja jest
 wysyłana jako `multipart/form-data`, więc jej podgląd opisuje część z plikiem
 zamiast zawierać jego bajty. Obrazy inline w `b64_json` są skracane w JSON-ie
 odpowiedzi, aby pozostał czytelny, odpowiedzi z mową są podsumowywane jako
 ich typ treści i rozmiar, a wektory embeddingów są skracane do pierwszych
-wartości; **Copy** nadal kopiuje pełną odpowiedź.
+wartości (długie wektory `base64` do pierwszych znaków); **Kopiuj** nadal
+kopiuje pełną odpowiedź.
 
 ## Ograniczanie do ścieżki użytkownika
 

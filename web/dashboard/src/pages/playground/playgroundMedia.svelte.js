@@ -20,6 +20,7 @@ import {
   buildImageRequest,
   buildSpeechRequest,
   embeddingInputs,
+  embeddingDimensionsValid,
   embeddingSummary,
   imageResults,
   mediaModeById,
@@ -104,7 +105,9 @@ class PlaygroundMediaStore {
       case "transcription":
         return Boolean(this.transcriptionFile);
       case "embeddings":
-        return embeddingInputs(this.embeddingInput).length > 0;
+        return (
+          embeddingInputs(this.embeddingInput).length > 0 && embeddingDimensionsValid(this.embeddingDimensions)
+        );
       default:
         return false;
     }
