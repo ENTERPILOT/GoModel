@@ -383,18 +383,27 @@ func (s *Service) callToolHandler(idx *toolIndex, endpoint string) mcp.ToolHandl
 }
 
 // callableTools drops index entries the session may no longer use: servers
-// hidden from its user path since initialize, and tools excluded by an edited
-// filter. Search must not advertise what call_tool would reject.
+// hidden from its user path since initialize, tools excluded by an edited
+// filter, and tools its API key's MCP allowlist no longer grants. Search must
+// not advertise what call_tool would reject.
 func (s *Service) callableTools(session *mcp.ServerSession, idx *toolIndex) []indexedTool {
+	sessionID := ""
+	if session != nil {
+		sessionID = session.ID()
+	}
+	binding, ok := s.binding(sessionID)
+	if !ok {
+		return nil
+	}
 	allowed := make(map[string]bool)
 	out := make([]indexedTool, 0, len(idx.tools))
 	for _, tool := range idx.tools {
 		visible, checked := allowed[tool.upstream]
 		if !checked {
-			visible = s.authorizeSession(session, tool.upstream) == nil
+			visible = s.authorizeServer(binding, tool.upstream) == nil
 			allowed[tool.upstream] = visible
 		}
-		if !visible {
+		if !visible || binding.access.authorize(tool.upstream, tool.tool.Name) != nil {
 			continue
 		}
 		if u, ok := s.manager.get(tool.upstream); !ok || !u.toolExposed(tool.tool.Name) {
