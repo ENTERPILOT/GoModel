@@ -60,8 +60,9 @@ unless the allowlist metadata call is off (`ALLOWLIST_UPSTREAM_METADATA=false`
 or `GOMODEL_OFFLINE=true`). If that call fails, the metadata from the last
 successful listing is kept; before any listing has succeeded there is no
 upstream metadata, only what the catalog or your own config
-(`models[].metadata`, dashboard pricing overrides) supplies. A configured model Together does not list takes
-them from GoModel's model catalog and may have none. Image, audio, video, and
+(`models[].metadata`, dashboard pricing overrides) supplies. A configured
+model that Together does not list takes its metadata from GoModel's model
+catalog and may have none. Image, audio, video, and
 rerank models are left out because GoModel does not route those endpoints to
 Together. Model IDs contain a slash; use them verbatim, or prefix the provider
 name to pin the route:
