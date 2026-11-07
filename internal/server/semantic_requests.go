@@ -34,6 +34,9 @@ func semanticJSONBody(c *echo.Context) ([]byte, *core.WhiteBoxPrompt, error) {
 	}
 	if refreshed := core.GetWhiteBoxPrompt(c.Request().Context()); refreshed != nil {
 		env = refreshed
+	} else if field := core.DuplicateSelectorField(bodyBytes); field != "" {
+		// Without an ingress envelope nobody has checked the body yet.
+		return nil, nil, core.NewDuplicateSelectorFieldError(field)
 	}
 	return bodyBytes, env, nil
 }
