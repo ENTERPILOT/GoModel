@@ -79,7 +79,8 @@ every phase:
   refusal, opaque), plus `Tools`, `Params`, and the raw body.
 - `Response`: a `Completion` with `Choices` using the same `Part` model.
 - `Stream`: text accumulated so far per choice.
-- `Headers`: inbound (credentials redacted), outbound, and upstream headers.
+- `Headers`: inbound (credentials redacted), outbound, and upstream headers,
+  which the host merges into every provider call of the request.
 - `Values`: a per-request bag shared by every hook of the request.
 
 Edits go through methods (`SetText`, `SetMedia`, `SetToolArguments`,
@@ -359,9 +360,14 @@ Declared in the contract or the spec but not run by this release:
 - `request` and `complete` hook kinds: the interfaces, `Kind` values, and
   load-time validation exist; no runtime calls them. `ext.RequestRewriter`
   remains the request-phase mechanism.
-- `Headers.Upstream` is recorded and logged, not forwarded to providers.
-  Prompt-phase edits to `Headers.Request` apply to the live request (later
+- Prompt-phase edits to `Headers.Request` apply to the live request (later
   plugins, request logging) but are not forwarded to the provider.
+  `Headers.Upstream` was deferred when this ADR was written and no longer is:
+  the host merges it into every provider call of the request — failover
+  attempts, token counting and compaction included — minus the names that
+  carry credentials, frame the connection, describe the body, or select
+  provider features (`#1203`, which updated this section in place). Inference
+  the gateway issues for its own work carries none of them.
 - `RouteRequest.Prompt` is nil; `RouteChoice.Reason` reaches debug logs
   only. Instance-scoped `secret` fields reach a route plugin redacted.
 - `Host.HTTPClient` hands plugins one shared client built from the gateway's

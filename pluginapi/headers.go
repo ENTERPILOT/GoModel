@@ -13,7 +13,11 @@ type Headers struct {
 	// removed from the response instead, including headers the gateway adds
 	// on its own.
 	Response http.Header
-	// Upstream adds headers to the provider call. A host that does not
-	// support it ignores the field.
+	// Upstream adds headers to the provider call: one per request, applied to
+	// every attempt the request makes. Assign a map before the call runs; the
+	// host folds what a hook wrote into the request state when the phase
+	// finishes. A host may refuse headers it owns, such as credentials, the ones
+	// that frame the connection or describe the body, and provider feature
+	// negotiation.
 	Upstream http.Header
 }

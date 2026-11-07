@@ -284,8 +284,13 @@ func (c *Client) buildRequest(ctx context.Context, req Request) (*http.Request, 
 		c.headerSetter(httpReq)
 	}
 
-	// Apply request-specific headers
-	for key, values := range req.Headers {
+	// Apply request-specific headers, including the ones prompt-phase plugins
+	// asked to add. A plugin may not set a credential header, one that frames the
+	// connection or describes the body, or one the provider negotiates — see
+	// pluginHeaderDenied. For every other name its value replaces both the one the
+	// request carried and the one the provider's header hook set above: the
+	// provider wins only on the denied names.
+	for key, values := range requestHeadersWithPluginOverrides(ctx, req.Headers) {
 		httpReq.Header.Del(key)
 		for _, value := range values {
 			httpReq.Header.Add(key, value)
@@ -303,6 +308,92 @@ func (c *Client) buildRequest(ctx context.Context, req Request) (*http.Request, 
 	}
 
 	return httpReq, nil
+}
+
+// pluginTransportHeaders control the transport, the framing of the body, or the
+// compression of the response rather than the provider call, so a plugin must
+// not set them: the HTTP client owns the connection and the gateway owns the
+// body it built and the encoding it negotiates. Credential headers are refused
+// separately, by the shared list in core, so the host, the request state and
+// this merge cannot drift apart.
+var pluginTransportHeaders = map[string]struct{}{
+	// Connection framing. The hop-by-hop set of RFC 9110, minus
+	// Proxy-Authorization, which the credential list already refuses.
+	"Host":               {},
+	"Content-Length":     {},
+	"Transfer-Encoding":  {},
+	"Connection":         {},
+	"Keep-Alive":         {},
+	"Proxy-Connection":   {},
+	"Proxy-Authenticate": {},
+	"Te":                 {},
+	"Trailer":            {},
+	"Upgrade":            {},
+	"Expect":             {},
+	// The body itself: the gateway sends the JSON it encoded, uncompressed.
+	"Content-Type":     {},
+	"Content-Encoding": {},
+	// Response compression. The transport decompresses gzip automatically only
+	// while the request carries no Accept-Encoding of its own, so a plugin value
+	// hands the gateway compressed bytes it cannot parse.
+	"Accept-Encoding": {},
+}
+
+// pluginReservedProviderHeaders lists headers a provider negotiates with its
+// own hook and that a plugin would silently break by replacing.
+//
+// anthropic-beta selects Anthropic features, and subscription credentials must
+// carry oauth-2025-04-20 in it: the Anthropic provider adds that flag in its
+// header hook, which this merge runs after, so a plugin value would drop the
+// flag and the request would be rejected. It is denied here rather than inside
+// the provider because no provider-side code runs after this merge.
+var pluginReservedProviderHeaders = map[string]struct{}{
+	"Anthropic-Beta": {},
+}
+
+// pluginHeaderDenied reports whether the merge must refuse the header: it
+// carries a credential, it controls the transport or the body encoding, or it
+// negotiates provider features the gateway owns.
+func pluginHeaderDenied(name string) bool {
+	if _, denied := pluginTransportHeaders[name]; denied {
+		return true
+	}
+	if _, denied := pluginReservedProviderHeaders[name]; denied {
+		return true
+	}
+	return core.IsCredentialHeader(name)
+}
+
+// requestHeadersWithPluginOverrides merges the headers plugins wrote to
+// Exchange.Headers.Upstream into the request headers. It returns reqHeaders
+// unchanged when no plugin set any header.
+//
+// Only external traffic carries them. Gateway-internal inference issued by a
+// plugin — its Host on behalf of an LLM-based guardrail, for example — is built
+// on a context derived from the request that triggered it, so it would
+// otherwise inherit headers chosen for the client's provider and send them to
+// the model the gateway picked for itself. Origin is the same signal the
+// idempotency-key forwarding above uses to tell the two apart.
+func requestHeadersWithPluginOverrides(ctx context.Context, reqHeaders http.Header) http.Header {
+	if core.GetRequestOrigin(ctx) != core.RequestOriginExternal {
+		return reqHeaders
+	}
+	extra := core.PluginUpstreamHeaders(ctx)
+	if len(extra) == 0 {
+		return reqHeaders
+	}
+	merged := reqHeaders.Clone()
+	if merged == nil {
+		merged = http.Header{}
+	}
+	for key, values := range extra {
+		canonical := http.CanonicalHeaderKey(key)
+		if pluginHeaderDenied(canonical) {
+			continue
+		}
+		merged[canonical] = append([]string(nil), values...)
+	}
+	return merged
 }
 
 func providerErrorStatusCode(err error) int {

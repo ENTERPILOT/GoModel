@@ -466,7 +466,7 @@ remove to sama `Name`. Puste linie i komentarze `#` są ignorowane.
 | `response_set` | Zastępuje nagłówek w odpowiedzi wysyłanej do klienta. |
 | `response_add` | Dopisuje wartość do nagłówka odpowiedzi do klienta, zachowując istniejące wartości. Stosowane raz na request, nawet gdy instancja działa w obu fazach. |
 | `response_remove` | Usuwa nagłówek z odpowiedzi do klienta, także nagłówki dodawane przez sam GoModel (na przykład `X-Request-Id`). |
-| `upstream_set` | Statyczne nagłówki dla wywołania providera. W tym wydaniu zapisywane, ale nieprzekazywane. |
+| `upstream_set` | Statyczne nagłówki wchodzące w każde wywołanie providera w ramach requestu, które przechodzi przez klienta HTTP gatewaya: z próbami failover, zliczaniem tokenów i kompakcją, z wyjątkiem Bedrocka. Nagłówki z danymi uwierzytelniającymi, nagłówki określające połączenie lub ciało żądania, `Accept-Encoding` oraz `anthropic-beta` są odrzucane; zobacz [Nagłówki upstream](/pl/advanced/plugins). |
 
 Nagłówków z danymi uwierzytelniającymi (`Authorization`, `X-Api-Key`,
 `Cookie`, ...) nigdy nie można edytować, a nazw zawierających `secret` lub

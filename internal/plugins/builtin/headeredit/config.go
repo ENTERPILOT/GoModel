@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/pluginapi"
 )
 
@@ -35,19 +36,6 @@ type config struct {
 	ResponseAdd    []string
 	ResponseRemove []string
 	UpstreamSet    []string
-}
-
-// credentialHeaders can never be set, added, or removed by this plugin.
-var credentialHeaders = map[string]bool{
-	"authorization":       true,
-	"proxy-authorization": true,
-	"cookie":              true,
-	"set-cookie":          true,
-	"x-api-key":           true,
-	"api-key":             true,
-	"x-goog-api-key":      true,
-	"x-anthropic-api-key": true,
-	"x-auth-token":        true,
 }
 
 func decodeConfig(raw json.RawMessage) (config, error) {
@@ -112,7 +100,7 @@ func checkName(name string, o op) error {
 		}
 	}
 	lower := strings.ToLower(name)
-	if credentialHeaders[lower] {
+	if core.IsCredentialHeader(lower) {
 		return fmt.Errorf("header %q carries credentials and cannot be edited", name)
 	}
 	if o != opRemove && (strings.Contains(lower, "secret") || strings.Contains(lower, "token")) {
