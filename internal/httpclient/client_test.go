@@ -16,9 +16,11 @@ import (
 func TestDefaultConfig(t *testing.T) {
 	config := DefaultConfig()
 
-	assert.Equal(t, 100, config.MaxIdleConns)
-	assert.Equal(t, 100, config.MaxIdleConnsPerHost)
+	assert.Equal(t, 512, config.MaxIdleConns)
+	assert.Equal(t, 512, config.MaxIdleConnsPerHost)
 	assert.Equal(t, 90*time.Second, config.IdleConnTimeout)
+	assert.Equal(t, 15*time.Second, config.HTTP2SendPingTimeout)
+	assert.Equal(t, 15*time.Second, config.HTTP2PingTimeout)
 
 	// Default timeout is 600s (10 minutes) to match OpenAI/Anthropic SDKs
 	assert.Equal(t, 600*time.Second, config.Timeout)
@@ -83,6 +85,8 @@ func TestNewHTTPClient(t *testing.T) {
 				KeepAlive:             15 * time.Second,
 				TLSHandshakeTimeout:   5 * time.Second,
 				ResponseHeaderTimeout: 5 * time.Second,
+				HTTP2SendPingTimeout:  3 * time.Second,
+				HTTP2PingTimeout:      2 * time.Second,
 			},
 		},
 	}
@@ -113,6 +117,9 @@ func TestNewHTTPClient(t *testing.T) {
 
 			// Verify ForceAttemptHTTP2 is enabled
 			assert.True(t, transport.ForceAttemptHTTP2)
+			require.NotNil(t, transport.HTTP2)
+			assert.Equal(t, expectedConfig.HTTP2SendPingTimeout, transport.HTTP2.SendPingTimeout)
+			assert.Equal(t, expectedConfig.HTTP2PingTimeout, transport.HTTP2.PingTimeout)
 
 			// Verify Proxy is set
 			assert.NotNil(t, transport.Proxy)

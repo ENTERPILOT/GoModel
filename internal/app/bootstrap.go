@@ -72,6 +72,7 @@ func newBootstrap(ctx context.Context, cfg Config) *bootstrap {
 	// transport; env vars still take precedence inside httpclient.
 	httpclient.SetConfiguredTimeouts(appCfg.HTTP.Timeout, appCfg.HTTP.ResponseHeaderTimeout)
 	httpclient.SetConfiguredStreamIdleTimeout(appCfg.HTTP.StreamIdleTimeout)
+	httpclient.SetConfiguredMaxIdleConnsPerHost(appCfg.HTTP.MaxIdleConnsPerHost)
 	if appCfg.Offline {
 		catalog := "disabled"
 		if appCfg.Cache.Model.ModelList.URL != "" {
