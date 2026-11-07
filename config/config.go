@@ -189,6 +189,7 @@ func buildDefaultConfig() *Config {
 		Logging: LogConfig{
 			Enabled:               true,
 			LogBodies:             true,
+			LogEmbeddingBodies:    true,
 			LogImageBodiesScope:   ImageBodyScopeAll,
 			LogRevisionBodies:     true,
 			LogGuardrailSteps:     true,
