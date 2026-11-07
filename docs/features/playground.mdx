@@ -38,10 +38,11 @@ shows the request body; a transcription is sent as `multipart/form-data`, so
 its preview describes the file part instead of carrying the bytes. Inline `b64_json` images are shortened
 in the response JSON to keep it readable, speech responses are summarized
 as their content type and size, and embedding vectors are cut to their first
-values (long `base64` vectors to their first characters); **Copy** still copies
-the full response. Per-token embeddings, such as vLLM's `token_embed`, are cut
-to their first row in the response JSON, and the result shows the number of
-token vectors next to each embedding.
+values (long `base64` vectors to their first characters). Per-token embeddings,
+such as vLLM's `token_embed`, are cut to their first row in the response JSON,
+and the result shows the number of token vectors next to each embedding. For
+embeddings, **Copy** still copies the full response; for images it copies the
+shortened JSON as shown.
 
 ## User path scoping
 
