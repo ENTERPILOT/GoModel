@@ -522,3 +522,48 @@ func TestRequestBodyBytes_AttachesReadBodyToSnapshot(t *testing.T) {
 	require.NotEmpty(t, view)
 	require.Same(t, &view[0], &second[0])
 }
+
+// Body reads size their buffer from Content-Length, but the declared length is
+// only a hint: every read must still return exactly the bytes the client sent.
+func TestRequestBodyReads_IgnoreWrongContentLength(t *testing.T) {
+	small := `{"model":"gpt-5-mini","messages":[{"role":"user","content":"hi"}]}`
+	large := `{"model":"gpt-5-mini","messages":[{"role":"user","content":"` +
+		strings.Repeat("x", int(requestSnapshotInlineBodyLimit)+128) + `"}]}`
+
+	tests := []struct {
+		name          string
+		body          string
+		contentLength int64
+		wantCaptured  bool
+	}{
+		{name: "exact", body: small, contentLength: int64(len(small)), wantCaptured: true},
+		{name: "declared longer", body: small, contentLength: int64(len(small)) + 64, wantCaptured: true},
+		{name: "declared shorter", body: small, contentLength: 8, wantCaptured: true},
+		{name: "declared small, sent past the inline limit", body: large, contentLength: 8},
+		{name: "unknown length", body: large, contentLength: -1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := echotest.Post(t, "/v1/chat/completions", tt.body)
+			c.Request().ContentLength = tt.contentLength
+
+			var captured []byte
+			var handlerBody []byte
+			handler := RequestSnapshotCapture()(RequestBodyCapture()(func(c *echo.Context) error {
+				captured = core.GetRequestSnapshot(c.Request().Context()).CapturedBody()
+				var err error
+				handlerBody, err = requestBodyBytes(c)
+				require.NoError(t, err)
+				return c.String(http.StatusOK, "ok")
+			}))
+
+			require.NoError(t, handler(c))
+			assert.Equal(t, tt.body, string(handlerBody))
+			if tt.wantCaptured {
+				assert.Equal(t, tt.body, string(captured))
+			} else {
+				assert.Nil(t, captured)
+			}
+		})
+	}
+}
