@@ -84,6 +84,7 @@
   "playground_embeddings_base64_value": "base64 编码的向量（见 Response JSON）",
   "playground_embeddings_vectors": "{count} 个向量",
   "playground_embeddings_dimensions": "{count} 维",
+  "playground_embeddings_rows": "{count} 个 token 向量",
   "playground_embeddings_prompt_tokens": "{count} 个提示词 token",
   "navigation_audit_logs": "审计日志",
   "navigation_usage": "用量",

@@ -225,6 +225,67 @@ test("abbreviateEmbeddingResponse trims long vectors and leaves the rest alone",
   assert.deepEqual(abbreviateEmbeddingResponse({ error: "x" }), { error: "x" });
 });
 
+test("embeddingSummary reads per-token embedding matrices", () => {
+  const row = (n) => Array.from({ length: 1024 }, (_, i) => (i + n) / 1000);
+  const summary = embeddingSummary({
+    data: [
+      { index: 0, embedding: [row(1), row(2), row(3)] },
+      { index: 1, embedding: [row(4)] },
+    ],
+    usage: { prompt_tokens: 4 },
+  });
+  assert.equal(summary.count, 2);
+  assert.equal(summary.dimensions, 1024);
+  assert.equal(summary.promptTokens, 4);
+  assert.deepEqual(summary.vectors.map((v) => v.rows), [3, 1]);
+  assert.deepEqual(summary.vectors[0].preview, row(1).slice(0, EMBEDDING_PREVIEW_VALUES));
+
+  const flat = embeddingSummary({ data: [{ embedding: [1, 2] }] });
+  assert.equal(flat.vectors[0].rows, null);
+
+  const mixed = embeddingSummary({ data: [{ embedding: [1, 2, 3] }, { embedding: [[1, 2], [3, 4]] }] });
+  assert.equal(mixed.count, 2);
+  assert.equal(mixed.dimensions, null);
+  assert.deepEqual(mixed.vectors.map((v) => v.length), [3, 2]);
+});
+
+test("embeddingSummary skips matrices that are not per-token float vectors", () => {
+  for (const bad of [
+    [[]],
+    [[1, 2], []],
+    [[1, 2], [3]],
+    [[1, "2"]],
+    [[1, NaN]],
+    [[1, Infinity]],
+    [[1, 2], 3],
+    [1, [2]],
+    [[[1, 2]]],
+    [null],
+  ]) {
+    assert.equal(embeddingSummary({ data: [{ embedding: bad }] }).count, 0, JSON.stringify(bad));
+  }
+});
+
+test("abbreviateEmbeddingResponse trims per-token matrices to their first row", () => {
+  const row = (n) => Array.from({ length: 1024 }, (_, i) => i + n);
+  const body = {
+    data: [
+      { index: 0, embedding: [row(0), row(1), row(2)] },
+      { index: 1, embedding: [row(3)] },
+      { index: 2, embedding: [[0.1, 0.2], [0.3, 0.4]] },
+      { index: 3, embedding: [[0.5, 0.6]] },
+    ],
+  };
+  const short = abbreviateEmbeddingResponse(body);
+  const first = [...row(0).slice(0, EMBEDDING_PREVIEW_VALUES), "… (1024 values)"];
+  assert.deepEqual(short.data[0].embedding, [first, "… (3 × 1024 values)"]);
+  assert.deepEqual(short.data[1].embedding, [[...row(3).slice(0, EMBEDDING_PREVIEW_VALUES), "… (1024 values)"]]);
+  assert.deepEqual(short.data[2].embedding, [[0.1, 0.2], "… (2 × 2 values)"]);
+  assert.deepEqual(short.data[3].embedding, [[0.5, 0.6]]);
+  assert.equal(body.data[0].embedding.length, 3, "the original response is not changed");
+  assert.ok(JSON.stringify(short).length < 1000);
+});
+
 test("embeddingDimensionsValid accepts a blank field or a positive integer only", () => {
   for (const ok of ["", "  ", null, undefined, 1, 256, "1536", " 512 ", "9007199254740991"]) {
     assert.equal(embeddingDimensionsValid(ok), true, String(ok));

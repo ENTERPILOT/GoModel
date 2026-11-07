@@ -57,6 +57,11 @@
           <li>
             <span class="playground-embeddings-index mono">#{vector.index}</span>
             <code class="playground-embeddings-values">{previewText(vector)}</code>
+            {#if vector.rows !== null}
+              <span class="playground-embeddings-length">
+                {m.playground_embeddings_rows({ count: vector.rows })}
+              </span>
+            {/if}
             {#if media.embeddings.dimensions === null && vector.length !== null}
               <span class="playground-embeddings-length">
                 {m.playground_embeddings_dimensions({ count: vector.length })}

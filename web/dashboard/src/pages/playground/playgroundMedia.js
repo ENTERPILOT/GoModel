@@ -151,24 +151,44 @@ function isFloatVector(value) {
   return Array.isArray(value) && value.length > 0 && value.every((n) => typeof n === "number" && Number.isFinite(n));
 }
 
+// Per-token embeddings (vLLM's token_embed) come back as one vector per token:
+// a non-empty list of float vectors that all have the same width.
+function isFloatMatrix(value) {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every(isFloatVector) &&
+    value.every((row) => row.length === value[0].length)
+  );
+}
+
 function isEmbeddingItem(item) {
   const embedding = item?.embedding;
-  return isFloatVector(embedding) || (typeof embedding === "string" && embedding.trim() !== "");
+  return (
+    isFloatVector(embedding) ||
+    isFloatMatrix(embedding) ||
+    (typeof embedding === "string" && embedding.trim() !== "")
+  );
 }
 
 // What the result shows for an /v1/embeddings response: the vector count,
 // their dimensions (null when they differ, are unknown or none came back), the
-// prompt tokens, and per vector its index, length (null when unknown) and
-// first values. Items without a float array or a base64 string are skipped.
+// prompt tokens, and per vector its index, length (null when unknown), first
+// values and, for a per-token matrix, its row count (null otherwise; length is
+// then the width of each row and the preview comes from the first row). Items
+// without a float array, a float matrix or a base64 string are skipped.
 export function embeddingSummary(body) {
   const data = body && Array.isArray(body.data) ? body.data : [];
   const vectors = data.filter(isEmbeddingItem).map((item, position) => {
     const embedding = item.embedding;
     const base64 = typeof embedding === "string";
+    const matrix = !base64 && isFloatMatrix(embedding);
+    const values = matrix ? embedding[0] : embedding;
     return {
       index: Number.isInteger(item.index) ? item.index : position,
-      length: base64 ? base64ValueCount(embedding) : embedding.length,
-      preview: base64 ? null : embedding.slice(0, EMBEDDING_PREVIEW_VALUES),
+      length: base64 ? base64ValueCount(embedding) : values.length,
+      rows: matrix ? embedding.length : null,
+      preview: base64 ? null : values.slice(0, EMBEDDING_PREVIEW_VALUES),
       base64,
     };
   });
@@ -185,13 +205,24 @@ export function embeddingSummary(body) {
 }
 
 // Vectors run to thousands of numbers; the JSON panel shows the first few and
-// a note of how many there are. Copy still gets the full response.
+// a note of how many there are. A per-token matrix shows its first row, trimmed
+// the same way, and a note of its size. Copy still gets the full response.
 export function abbreviateEmbeddingResponse(body) {
   if (!body || typeof body !== "object" || !Array.isArray(body.data)) return body;
   return {
     ...body,
     data: body.data.map((item) => {
       const embedding = item?.embedding;
+      if (isFloatMatrix(embedding)) {
+        const width = embedding[0].length;
+        const first =
+          width > EMBEDDING_PREVIEW_VALUES
+            ? [...embedding[0].slice(0, EMBEDDING_PREVIEW_VALUES), "… (" + width + " values)"]
+            : embedding[0];
+        if (embedding.length === 1 && first === embedding[0]) return item;
+        const rest = embedding.length > 1 ? ["… (" + embedding.length + " × " + width + " values)"] : [];
+        return { ...item, embedding: [first, ...rest] };
+      }
       if (Array.isArray(embedding) && embedding.length > EMBEDDING_PREVIEW_VALUES) {
         return {
           ...item,

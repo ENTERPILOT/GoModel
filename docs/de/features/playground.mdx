@@ -42,7 +42,8 @@ ihre Vorschau den Datei-Teil, statt die Bytes zu enthalten. Inline-Bilder im
 Format `b64_json` werden im Response-JSON gekürzt, damit es lesbar bleibt,
 Sprach-Responses werden als ihr Content-Type und ihre Größe zusammengefasst, und
 Embedding-Vektoren werden auf ihre ersten Werte gekürzt (lange
-`base64`-Vektoren auf ihre ersten Zeichen); **Kopieren** kopiert weiterhin die
+`base64`-Vektoren auf ihre ersten Zeichen, Embeddings pro Token, etwa von vLLMs
+`token_embed`, auf ihre erste Zeile, mit der Anzahl der Token neben jedem Vektor); **Kopieren** kopiert weiterhin die
 vollständige Response.
 
 ## Eingrenzung per User Path

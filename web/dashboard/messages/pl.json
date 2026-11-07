@@ -106,6 +106,18 @@
       }
     }
   ],
+  "playground_embeddings_rows": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} wektor tokenu",
+        "count_plural=few": "{count} wektory tokenów",
+        "count_plural=many": "{count} wektorów tokenów",
+        "count_plural=*": "{count} wektora tokenów"
+      }
+    }
+  ],
   "playground_embeddings_prompt_tokens": [
     {
       "declarations": ["input count", "local count_plural = count: plural"],

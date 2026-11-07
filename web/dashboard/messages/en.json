@@ -111,6 +111,16 @@
       }
     }
   ],
+  "playground_embeddings_rows": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} token vector",
+        "count_plural=*": "{count} token vectors"
+      }
+    }
+  ],
   "playground_embeddings_prompt_tokens": [
     {
       "declarations": ["input count", "local count_plural = count: plural"],
