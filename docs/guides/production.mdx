@@ -300,17 +300,19 @@ GOMODEL_OFFLINE=true
 update check, drops any HTTP catalog URL, and stops providers in `allowlist`
 mode from listing `/models` for metadata. It is applied after every other
 setting, so nothing in `config.yaml` or the environment can re-enable an
-outbound call underneath it. Calls to configured providers and to anything you
-declared yourself, such as an OTLP collector, MCP upstreams, or a vector
+outbound call underneath it. Inference calls to configured providers and to
+anything you declared yourself, such as an OTLP collector, MCP upstreams, or a vector
 store, are untouched. The startup log confirms the mode.
 
-You can also control the two calls individually with
-`GOMODEL_VERSION_CHECK_ENABLED=false` and `MODEL_LIST_URL=off`.
+You can also control these calls individually with
+`GOMODEL_VERSION_CHECK_ENABLED=false`, `MODEL_LIST_URL=off`, and
+`ALLOWLIST_UPSTREAM_METADATA=false`.
 
 The catalog fetch is best-effort. When it is off or fails, the gateway boots
-normally, `/health` and `/health/ready` return `200`, provider discovery still
-works because model lists come from each provider's own `/models` endpoint,
-and requests route normally. What you lose is metadata enrichment.
+normally, `/health` and `/health/ready` return `200`, model lists still come
+from each provider's own `/models` endpoint (or, for `allowlist` providers,
+from their configured list, which needs no upstream discovery), and requests
+route normally. What you lose is metadata enrichment.
 
 <Warning>
   Without metadata enrichment, models have **no pricing**. Cost tracking then

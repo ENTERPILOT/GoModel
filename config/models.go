@@ -41,8 +41,10 @@ type ModelsConfig struct {
 
 	// AllowlistUpstreamMetadata controls whether providers in allowlist mode
 	// call their /models to take metadata (context window, pricing, model
-	// type) for the configured models. It never changes which models are
-	// served. Turn it off to stop that call; offline mode turns it off too.
+	// type) for the configured models. It never adds models, but upstream
+	// prices can decide which configured models pass a provider's
+	// model_filter.max_price_per_mtok cap. Turn it off to stop that call;
+	// offline mode turns it off too.
 	// Default: true.
 	AllowlistUpstreamMetadata bool `yaml:"allowlist_upstream_metadata" env:"ALLOWLIST_UPSTREAM_METADATA"`
 }

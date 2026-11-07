@@ -81,3 +81,39 @@ func TestAllowlistMetadataFetchCanBeTurnedOff(t *testing.T) {
 	assert.Zero(t, listCount.Load(), "a disabled metadata fetch makes no listing call")
 	assert.Equal(t, 2, registry.ModelCount())
 }
+
+func TestAllowlistKeepsLastMetadataWhenListingFails(t *testing.T) {
+	contextWindow := 32768
+	mock := &registryMockProvider{name: "vllm", modelsResponse: &core.ModelsResponse{
+		Object: "list",
+		Data:   []core.Model{{ID: "listed", Object: "model", Metadata: &core.ModelMetadata{ContextWindow: &contextWindow}}},
+	}}
+	registry := allowlistRegistry(t, mock)
+	require.NoError(t, registry.Initialize(context.Background()))
+
+	mock.modelsResponse = nil
+	mock.err = errors.New("503 upstream unavailable")
+	require.NoError(t, registry.Initialize(context.Background()))
+
+	listed := registry.GetModel("vllm/listed")
+	require.NotNil(t, listed)
+	require.NotNil(t, listed.Model.Metadata)
+	require.NotNil(t, listed.Model.Metadata.ContextWindow, "a failed metadata call keeps what the last one reported")
+	assert.Equal(t, contextWindow, *listed.Model.Metadata.ContextWindow)
+	assert.Equal(t, 2, registry.ModelCount())
+}
+
+func TestConfiguredModelsResponseFirstUpstreamDuplicateWins(t *testing.T) {
+	upstream := &core.ModelsResponse{Object: "list", Data: []core.Model{
+		{ID: "dup", OwnedBy: "first"},
+		{ID: " dup ", OwnedBy: "second"},
+	}}
+
+	allowlist := configuredProviderModelsResponse("p", "openai", []string{"dup"}, upstream, 1)
+	merged := mergeConfiguredProviderModelsResponse("p", "openai", []string{"dup"}, upstream, 1)
+
+	require.Len(t, allowlist.Data, 1)
+	require.Len(t, merged.Data, 1)
+	assert.Equal(t, "first", allowlist.Data[0].OwnedBy)
+	assert.Equal(t, "first", merged.Data[0].OwnedBy)
+}

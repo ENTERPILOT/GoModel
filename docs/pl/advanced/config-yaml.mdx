@@ -51,15 +51,15 @@ Listy modeli skonfigurowanych providerów mogą pozostać w zmiennych
 | `fallback` | Listę upstream; Twoją listę tylko, gdy `/models` zawiedzie lub nic nie zwróci | `/models` bywa niedostępny, ale to wykrywanie ma wyznaczać listę |
 | `merge` | Listę upstream plus Twoje modele, których w niej brak; gdy `/models` zawiedzie, działa jak `fallback` | Provider obsługuje modele, których nie wymienia (wersje preview lub niewymienione ID) |
 
-Każdy tryb odczytuje `/models` providera przy każdym odświeżeniu. W trybie `allowlist` służy to wyłącznie do uzupełnienia metadanych (okno kontekstu, ceny, typ modelu) dla Twoich modeli z listy i nigdy nie dodaje modeli; nieudane wywołanie zostawia listę bez zmian. Ustaw `ALLOWLIST_UPSTREAM_METADATA=false` (YAML: `models.allowlist_upstream_metadata`), aby wyłączyć to wywołanie. `GOMODEL_OFFLINE=true` również je wyłącza.
+W trybie `allowlist` udostępniane są tylko skonfigurowane ID: modele, które provider wymienia, ale których nie skonfigurowałeś, nigdy nie są dodawane, a zapytania o inne modele zwracają 404 (model nie znaleziony). Aby listę znów wyznaczało wykrywanie, ustaw `CONFIGURED_PROVIDER_MODELS_MODE=fallback` albo nadpisz jednego providera przez `<PROVIDER>[_SUFFIX]_MODELS_MODE` / `models_mode`.
+
+`fallback` i `merge` odpytują endpoint `/models` providera przy każdym odświeżeniu. `allowlist` odpytuje go tylko po metadane – okno kontekstu, maksymalną liczbę tokenów wyjściowych, ceny, nazwę wyświetlaną i typ modelu – dla Twoich modeli z listy, gdy `ALLOWLIST_UPSTREAM_METADATA` ma wartość `true` (domyślnie; YAML: `models.allowlist_upstream_metadata`), a `GOMODEL_OFFLINE` jest wyłączone. To wywołanie nigdy nie dodaje modeli, ale ceny z upstream mogą zdecydować, które skonfigurowane modele mieszczą się w limicie `model_filter.max_price_per_mtok`. Gdy się nie powiedzie, zostają metadane z ostatniego udanego odczytu.
 
 <Warning>
-**Zmiana niekompatybilna:** wcześniej domyślnym trybem był `fallback`. Provider z
-listą `models:` lub `<PROVIDER>_MODELS` udostępnia teraz tylko te modele, a
-zapytania o inne modele zwracają 404 (model nie znaleziony). Aby przywrócić
-dotychczasowe zachowanie, ustaw `CONFIGURED_PROVIDER_MODELS_MODE=fallback` albo
-nadpisz pojedynczego providera przez `<PROVIDER>[_SUFFIX]_MODELS_MODE` /
-`models_mode`.
+**Zmiana niekompatybilna:** wcześniej domyślnym trybem był `fallback`. Providery
+z listą `models:` lub `<PROVIDER>_MODELS` udostępniają teraz tylko te modele;
+ustaw `CONFIGURED_PROVIDER_MODELS_MODE=fallback`, aby zachować dotychczasowe
+zachowanie.
 </Warning>
 
 Ustaw `models_mode` dla providera, aby nadpisać globalny tryb tylko dla niego;

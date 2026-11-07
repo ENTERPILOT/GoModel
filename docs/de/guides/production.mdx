@@ -336,19 +336,21 @@ GOMODEL_OFFLINE=true
 Update-Prüfung, verwirft jede HTTP-URL für den Katalog und stoppt die
 Metadaten-Abfrage von `/models` bei Providern im Modus `allowlist`. Die Einstellung wird
 nach allen anderen angewendet, sodass nichts in `config.yaml` oder in der
-Umgebung darunter einen ausgehenden Aufruf wieder aktivieren kann. Aufrufe an
-konfigurierte Provider und an alles, was Sie selbst deklariert haben – etwa
+Umgebung darunter einen ausgehenden Aufruf wieder aktivieren kann.
+Inferenz-Aufrufe an konfigurierte Provider und an alles, was Sie selbst deklariert haben – etwa
 einen OTLP-Collector, MCP-Upstreams oder einen Vector Store –, bleiben
 unberührt. Das Startprotokoll bestätigt den Modus.
 
-Sie können die beiden Aufrufe auch einzeln steuern, mit
-`GOMODEL_VERSION_CHECK_ENABLED=false` und `MODEL_LIST_URL=off`.
+Sie können diese Aufrufe auch einzeln steuern, mit
+`GOMODEL_VERSION_CHECK_ENABLED=false`, `MODEL_LIST_URL=off` und
+`ALLOWLIST_UPSTREAM_METADATA=false`.
 
 Der Abruf des Katalogs erfolgt nach dem Best-Effort-Prinzip. Ist er
 abgeschaltet oder schlägt er fehl, startet das Gateway normal, `/health` und
-`/health/ready` liefern `200`, die Provider-Discovery funktioniert weiterhin,
-weil die Modelllisten vom jeweiligen `/models`-Endpunkt des Providers stammen,
-und Requests werden normal geroutet. Was verloren geht, ist die Anreicherung
+`/health/ready` liefern `200`, die Modelllisten stammen weiterhin vom
+jeweiligen `/models`-Endpunkt des Providers (bei `allowlist`-Providern aus der
+konfigurierten Liste, die keine Upstream-Erkennung braucht), und Requests werden
+normal geroutet. Was verloren geht, ist die Anreicherung
 mit Metadaten.
 
 <Warning>

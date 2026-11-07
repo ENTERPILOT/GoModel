@@ -145,9 +145,11 @@ keeps routing with, in order:
 3. For a provider on its default base URL, the
    [model catalog's](/advanced/configuration) list for its provider type.
 
-This ordering applies in `fallback` and `merge` modes. Under the default
-`allowlist`, a provider with a configured list serves exactly that list; its
-`/models` is read only for metadata, and a failed listing changes nothing.
+This ordering, and the rechecks below, apply in `fallback` and `merge` modes.
+Under the default `allowlist`, a provider with a configured list serves exactly
+that list; its `/models` is read only for metadata, and a failed listing keeps
+the last metadata and never degrades the provider's health (see
+[Models modes](/advanced/config-yaml#models-modes)).
 
 Failed providers are rechecked every `PROVIDER_RECHECK_INTERVAL` seconds
 (default `60`), and the live list replaces the stand-in once a listing

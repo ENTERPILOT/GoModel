@@ -16,10 +16,11 @@ const allowlistMetadataTimeout = 10 * time.Second
 
 // fetchAllowlistMetadata lists the provider's models to enrich an allowlist
 // with what the provider reports (context length, pricing, model type). It
-// never decides the inventory, which stays exactly the configured list, and a
-// failure is not a provider failure: the configured models are served as they
-// are and health keeps following the availability check. It returns nil when
-// the listing fails or the provider has no /models endpoint.
+// never adds models: the inventory is the configured list, narrowed only by a
+// model filter (whose price cap can read these prices). A failure is not a
+// provider failure: health keeps following the availability check, and the
+// caller falls back to the last listing. It returns nil when the listing
+// fails or the provider has no /models endpoint.
 func fetchAllowlistMetadata(ctx context.Context, provider core.Provider, providerName string) *core.ModelsResponse {
 	ctx, cancel := context.WithTimeout(llmclient.WithoutCircuitBreaker(ctx), allowlistMetadataTimeout)
 	defer cancel()
@@ -42,11 +43,43 @@ func fetchAllowlistMetadata(ctx context.Context, provider core.Provider, provide
 func (r *ModelRegistry) SetAllowlistUpstreamMetadata(enabled bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.allowlistMetadataDisabled = !enabled
+	r.allowlistMetadata = enabled
 }
 
 func (r *ModelRegistry) allowlistMetadataEnabled() bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return !r.allowlistMetadataDisabled
+	return r.allowlistMetadata
+}
+
+// lastProviderListings rebuilds, for each named provider with a configured
+// list, what it reported in its current inventory, so an allowlist whose
+// metadata call fails keeps the metadata of the last successful one.
+func (r *ModelRegistry) lastProviderListings(names []string, configuredModels map[string][]string) map[string]*core.ModelsResponse {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make(map[string]*core.ModelsResponse)
+	for _, name := range names {
+		if len(configuredModels[name]) == 0 || len(r.discoveredByProvider[name]) == 0 {
+			continue
+		}
+		out[name] = listingFromInventory(r.discoveredByProvider[name])
+	}
+	return out
+}
+
+// listingFromInventory turns an inventory back into the listing the provider
+// reported: each model with the metadata the provider itself supplied, not
+// what enrichment added on top.
+func listingFromInventory(inventory map[string]*ModelInfo) *core.ModelsResponse {
+	listed := &core.ModelsResponse{Object: "list", Data: make([]core.Model, 0, len(inventory))}
+	for _, info := range inventory {
+		if info == nil {
+			continue
+		}
+		model := info.Model
+		model.Metadata = info.Discovered.Clone()
+		listed.Data = append(listed.Data, model)
+	}
+	return listed
 }

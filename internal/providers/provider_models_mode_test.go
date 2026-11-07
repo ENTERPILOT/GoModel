@@ -33,13 +33,20 @@ func TestProviderModelsModeOverridesGlobalMode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			registry := NewModelRegistry()
 			registry.SetConfiguredProviderModelsMode(tt.global)
-			mock := &registryMockProvider{name: "router", modelsResponse: upstream}
+			var listCount atomic.Int32
+			mock := &countingRegistryMockProvider{
+				listCount:            &listCount,
+				registryMockProvider: &registryMockProvider{name: "router", modelsResponse: upstream},
+			}
 			registry.RegisterProviderWithNameAndType(mock, "router", "openrouter")
 			registry.SetProviderConfiguredModels("router", []string{"configured"})
 			registry.SetProviderModelsMode("router", tt.override)
 
 			require.NoError(t, registry.Initialize(context.Background()))
 
+			// Every mode lists upstream once per refresh; allowlist uses it for
+			// metadata only, so the inventory still comes from the list.
+			assert.Equal(t, int32(1), listCount.Load(), "upstream /models calls")
 			assert.Equal(t, len(tt.wantModels), registry.ModelCount())
 			for _, id := range tt.wantModels {
 				assert.True(t, registry.Supports("router/"+id), "router/%s", id)

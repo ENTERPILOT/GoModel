@@ -301,16 +301,18 @@ GOMODEL_OFFLINE=true
 sprawdzanie aktualizacji, pomija każdy URL katalogu HTTP i wyłącza pobieranie
 metadanych z `/models` przez providerów w trybie `allowlist`. Jest stosowane po wszystkich innych
 ustawieniach, więc nic w `config.yaml` ani w zmiennych środowiskowych nie może pod spodem ponownie włączyć
-wywołania wychodzącego. Wywołania do skonfigurowanych providerów i do wszystkiego, co
+wywołania wychodzącego. Wywołania inferencji do skonfigurowanych providerów i do wszystkiego, co
 zadeklarujesz samodzielnie, na przykład kolektora OTLP, upstreamów MCP czy magazynu
 wektorowego, pozostają nietknięte. Log startowy potwierdza tryb.
 
-Oba wywołania możesz też kontrolować osobno za pomocą
-`GOMODEL_VERSION_CHECK_ENABLED=false` i `MODEL_LIST_URL=off`.
+Te wywołania możesz też kontrolować osobno za pomocą
+`GOMODEL_VERSION_CHECK_ENABLED=false`, `MODEL_LIST_URL=off` i
+`ALLOWLIST_UPSTREAM_METADATA=false`.
 
 Pobieranie katalogu działa na zasadzie best-effort. Gdy jest wyłączone lub się nie powiedzie, gateway
-uruchamia się normalnie, `/health` i `/health/ready` zwracają `200`, wykrywanie modeli u providerów nadal
-działa, ponieważ listy modeli pochodzą z własnego endpointu `/models` każdego providera,
+uruchamia się normalnie, `/health` i `/health/ready` zwracają `200`, listy modeli nadal
+pochodzą z własnego endpointu `/models` każdego providera (a u providerów w trybie
+`allowlist` ze skonfigurowanej listy, która nie wymaga wykrywania w upstreamie),
 a requesty są normalnie routowane. Tracisz natomiast wzbogacanie metadanymi.
 
 <Warning>

@@ -143,6 +143,7 @@ func (r *ModelRegistry) fetchAllProviderModels(
 		err              error
 	}
 	allowlistMetadata := r.allowlistMetadataEnabled()
+	lastListings := r.lastProviderListings(names, configuredProviderModels)
 	catalogModels := r.catalogFallbackModels(providers, providerTypes, names, configuredProviderModels)
 	results := make([]fetchResult, len(providers))
 	var wg sync.WaitGroup
@@ -150,16 +151,15 @@ func (r *ModelRegistry) fetchAllProviderModels(
 		wg.Add(1)
 		go func(i int, provider core.Provider) {
 			defer wg.Done()
-			resp, configuredReason, fetchAt, err := fetchProviderInventory(
-				ctx,
-				provider,
-				names[i],
-				providerTypes[provider],
-				configuredProviderModelsModes[names[i]],
-				configuredProviderModels[names[i]],
-				catalogModels[names[i]],
-				allowlistMetadata,
-			)
+			resp, configuredReason, fetchAt, err := fetchProviderInventory(ctx, provider, providerInventoryInput{
+				name:              names[i],
+				providerType:      providerTypes[provider],
+				mode:              configuredProviderModelsModes[names[i]],
+				configuredModels:  configuredProviderModels[names[i]],
+				catalogModels:     catalogModels[names[i]],
+				allowlistMetadata: allowlistMetadata,
+				lastListing:       lastListings[names[i]],
+			})
 			results[i] = fetchResult{resp: resp, configuredReason: configuredReason, fetchAt: fetchAt, err: err}
 		}(i, provider)
 	}
@@ -439,48 +439,41 @@ func (r *ModelRegistry) enrichFetchedProviderModelMaps(
 	return metadataStats
 }
 
-func fetchProviderInventory(
-	ctx context.Context,
-	provider core.Provider,
-	providerName string,
-	providerType string,
-	mode config.ConfiguredProviderModelsMode,
-	configuredModels []string,
-	catalogModels []string,
-	allowlistMetadata bool,
-) (*core.ModelsResponse, configuredProviderModelsApplyReason, time.Time, error) {
+// providerInventoryInput is what one provider's inventory fetch needs to
+// know besides the provider itself.
+type providerInventoryInput struct {
+	name             string
+	providerType     string
+	mode             config.ConfiguredProviderModelsMode
+	configuredModels []string
+	catalogModels    []string
+	// allowlistMetadata enables the metadata-only /models call in allowlist
+	// mode; lastListing is what the provider reported last time, used when
+	// that call fails so a failed refresh keeps the metadata it had.
+	allowlistMetadata bool
+	lastListing       *core.ModelsResponse
+}
+
+func fetchProviderInventory(ctx context.Context, provider core.Provider, in providerInventoryInput) (*core.ModelsResponse, configuredProviderModelsApplyReason, time.Time, error) {
 	fetchAt := time.Now().UTC()
-	if mode == config.ConfiguredProviderModelsModeAllowlist && len(configuredModels) > 0 {
+	if in.mode == config.ConfiguredProviderModelsModeAllowlist && len(in.configuredModels) > 0 {
 		var upstream *core.ModelsResponse
-		if allowlistMetadata {
-			upstream = fetchAllowlistMetadata(ctx, provider, providerName)
+		if in.allowlistMetadata {
+			upstream = fetchAllowlistMetadata(ctx, provider, in.name)
 			fetchAt = time.Now().UTC()
+			if upstream == nil {
+				upstream = in.lastListing
+			}
 		}
-		resp, reason := applyConfiguredProviderModels(
-			providerName,
-			providerType,
-			mode,
-			configuredModels,
-			upstream,
-			nil,
-			fetchAt.Unix(),
-		)
+		resp, reason := applyConfiguredProviderModels(in.name, in.providerType, in.mode, in.configuredModels, upstream, nil, fetchAt.Unix())
 		return resp, reason, fetchAt, nil
 	}
 
 	resp, err := provider.ListModels(llmclient.WithoutCircuitBreaker(ctx))
 	fetchAt = time.Now().UTC()
-	resp, reason := applyConfiguredProviderModels(
-		providerName,
-		providerType,
-		mode,
-		configuredModels,
-		resp,
-		err,
-		fetchAt.Unix(),
-	)
-	if err != nil && reason == configuredProviderModelsNotApplied && len(catalogModels) > 0 {
-		resp = configuredProviderModelsResponse(providerName, providerType, catalogModels, nil, fetchAt.Unix())
+	resp, reason := applyConfiguredProviderModels(in.name, in.providerType, in.mode, in.configuredModels, resp, err, fetchAt.Unix())
+	if err != nil && reason == configuredProviderModelsNotApplied && len(in.catalogModels) > 0 {
+		resp = configuredProviderModelsResponse(in.name, in.providerType, in.catalogModels, nil, fetchAt.Unix())
 		reason = catalogProviderModelsUpstreamError
 	}
 	return resp, reason, fetchAt, err

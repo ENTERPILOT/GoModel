@@ -145,9 +145,11 @@ kontynuuje routing, korzystając kolejno z:
 3. Dla providera na domyślnym bazowym URL –
    listy z [katalogu modeli](/pl/advanced/configuration) dla jego typu providera.
 
-Ta kolejność dotyczy trybów `fallback` i `merge`. W domyślnym trybie
-`allowlist` provider ze skonfigurowaną listą serwuje dokładnie tę listę;
-`/models` służy tylko po metadane, a nieudane listowanie niczego nie zmienia.
+Ta kolejność i opisane niżej ponowne sprawdzanie dotyczą trybów `fallback` i
+`merge`. W domyślnym trybie `allowlist` provider ze skonfigurowaną listą serwuje
+dokładnie tę listę; `/models` służy tylko po metadane, a nieudane listowanie
+zachowuje ostatnie metadane i nigdy nie pogarsza stanu providera (zobacz
+[Tryby modeli](/pl/advanced/config-yaml#tryby-modeli)).
 
 Providerzy z błędem są ponownie sprawdzani co `PROVIDER_RECHECK_INTERVAL` sekund
 (domyślnie `60`), a aktualna lista zastępuje zastępczą, gdy tylko listowanie

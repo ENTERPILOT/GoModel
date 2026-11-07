@@ -44,11 +44,11 @@ TOGETHER_BASE_URL=https://api.together.ai/v1
 TOGETHER_MODELS=meta-llama/Llama-3.3-70B-Instruct-Turbo,BAAI/bge-base-en-v1.5
 ```
 
-默认情况下（`allowlist` 模式），`TOGETHER_MODELS` 是唯一的模型列表；设置 `CONFIGURED_PROVIDER_MODELS_MODE=fallback` 后，它仅在 `/models` 失败或为空时使用。
+设置 `TOGETHER_MODELS` 后，默认只提供这些模型，其他模型返回 404；设置 `TOGETHER_MODELS_MODE=fallback` 可重新由 Together 的列表决定。参见[模型模式](/zh/advanced/config-yaml#模型模式)。
 
 ## 模型
 
-当未设置 `TOGETHER_MODELS`，或模式为 `fallback` 或 `merge` 时，GoModel 会读取 Together 实时的 `/models` 列表，包括每个模型的类型、显示名称、上下文长度和按 token 计的价格。使用 `TOGETHER_MODELS` 白名单时，GoModel 仍会读取该列表，但仅用于获取元数据：所列模型会获得 Together 提供的上下文限制和价格。Together 未列出的配置模型，或在 `GOMODEL_OFFLINE=true` 时的所有模型，则改由 GoModel 的模型目录（或缓存的列表）提供，可能缺少这些信息。图像、音频、视频和重排序模型不会列出，因为 GoModel 不会将这些端点路由到 Together。模型 ID 中包含斜杠；您可以原样使用，也可以加上提供商名称前缀来固定路由：
+GoModel 会读取 Together 实时的 `/models` 列表，包括每个模型的类型、显示名称、上下文长度和按 token 计的价格。使用 `TOGETHER_MODELS` 白名单时，所列模型的这些信息仍来自该列表，除非关闭了白名单元数据调用（`ALLOWLIST_UPSTREAM_METADATA=false` 或 `GOMODEL_OFFLINE=true`）；Together 未列出的配置模型改由 GoModel 的模型目录提供，可能缺少这些信息。图像、音频、视频和重排序模型不会列出，因为 GoModel 不会将这些端点路由到 Together。模型 ID 中包含斜杠；您可以原样使用，也可以加上提供商名称前缀来固定路由：
 
 ```bash
 curl http://localhost:8080/v1/chat/completions \

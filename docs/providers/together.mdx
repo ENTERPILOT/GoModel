@@ -47,19 +47,18 @@ TOGETHER_BASE_URL=https://api.together.ai/v1
 TOGETHER_MODELS=meta-llama/Llama-3.3-70B-Instruct-Turbo,BAAI/bge-base-en-v1.5
 ```
 
-`TOGETHER_MODELS` is the only list by default (`allowlist` mode);
-`CONFIGURED_PROVIDER_MODELS_MODE=fallback` uses it only when `/models` fails or
-is empty.
+With `TOGETHER_MODELS` set, only those models are served by default and other
+models return 404; set `TOGETHER_MODELS_MODE=fallback` to let Together's
+listing drive the list. See [Models modes](/advanced/config-yaml#models-modes).
 
 ## Models
 
-When `TOGETHER_MODELS` is unset, or the mode is `fallback` or `merge`, GoModel
-reads Together's live `/models` listing, including each model's type, display
-name, context length, and per-token prices. With a `TOGETHER_MODELS` allowlist
-GoModel still reads that listing, but only for metadata: listed models get
-Together's context limits and prices. A configured model Together does not list,
-or any model when `GOMODEL_OFFLINE=true`, takes them from GoModel's model
-catalog (or a cached listing) and may have none. Image, audio, video, and
+GoModel reads Together's live `/models` listing, including each model's type,
+display name, context length, and per-token prices. With a `TOGETHER_MODELS`
+allowlist those details still come from that listing for the listed models,
+unless the allowlist metadata call is off (`ALLOWLIST_UPSTREAM_METADATA=false`
+or `GOMODEL_OFFLINE=true`); a configured model Together does not list takes
+them from GoModel's model catalog and may have none. Image, audio, video, and
 rerank models are left out because GoModel does not route those endpoints to
 Together. Model IDs contain a slash; use them verbatim, or prefix the provider
 name to pin the route:

@@ -132,13 +132,10 @@ providers:
       - amazon.nova-lite-v1:0
 ```
 
-Behavior follows the global `CONFIGURED_PROVIDER_MODELS_MODE` — `allowlist`
-(default) exposes only configured models, reading upstream only for their
-metadata;
-`fallback` uses the list only when `ListFoundationModels` is unavailable or
-empty.
-`merge` adds the configured models to the discovered ones. To change the mode
-for Bedrock only, set `BEDROCK_MODELS_MODE` (YAML: `providers.<name>.models_mode`).
+Bedrock's upstream listing is `ListFoundationModels`; how the configured list
+combines with it follows the [models mode](/advanced/config-yaml#models-modes)
+(by default only the configured models are served). To change the mode for
+Bedrock only, set `BEDROCK_MODELS_MODE` (YAML: `providers.<name>.models_mode`).
 
 ## Multiple Bedrock providers
 

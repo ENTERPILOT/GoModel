@@ -115,7 +115,7 @@ sum(rate(gomodel_empty_responses_total{reason="no_usage"}[15m])) by (provider) >
 3. 对于使用默认基础 URL 的提供商，使用
    [模型目录](/zh/advanced/configuration)中该提供商类型的模型列表。
 
-该顺序适用于 `fallback` 和 `merge` 模式。在默认的 `allowlist` 模式下，配置了列表的提供商只提供该列表；`/models` 仅用于获取元数据，获取失败也不会改变任何内容。
+该顺序以及下文的重新检查适用于 `fallback` 和 `merge` 模式。在默认的 `allowlist` 模式下，配置了列表的提供商只提供该列表；`/models` 仅用于获取元数据，获取失败时保留上次的元数据，也绝不会降低提供商的健康状态（参见[模型模式](/zh/advanced/config-yaml#模型模式)）。
 
 失败的提供商每隔 `PROVIDER_RECHECK_INTERVAL` 秒（默认 `60`）重新检查一次，一旦列表获取成功，实时列表就会替换临时列表。如果没有任何可用模型，请求会返回 `503`，以便客户端重试；
 `/health/ready` 会报告 `degraded` 并带有 `"models": "down"`，而实例仍保留在轮转中。

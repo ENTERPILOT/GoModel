@@ -233,8 +233,8 @@ requestów/odpowiedzi, nagłówki) opisuje sekcja [Logowanie audytowe](#logowani
 | `CACHE_REFRESH_INTERVAL` | Liczba sekund między kolejnymi przebiegami ponownego wykrywania modeli providerów | `3600` (1h) |
 | `PROVIDER_RECHECK_INTERVAL` | Liczba sekund między ponownym sprawdzaniem providerów, których ostatnie odświeżenie się nie powiodło (`0` wyłącza) | `60` |
 | `MODEL_LIST_URL`    | Katalog metadanych modeli: URL HTTP, ścieżka do lokalnego pliku (`/etc/gomodel/models.json` lub `file://...`) albo `off` | publiczny katalog na GitHubie |
-| `GOMODEL_OFFLINE`   | Przełącznik dla środowisk air-gapped: wyłącza sprawdzanie aktualizacji, pomija URL-e katalogów HTTP i wyłącza pobieranie metadanych z `/models` przez providerów w trybie allowlist. Nie wpływa na lokalne pliki katalogu ani na requesty do skonfigurowanych providerów | `false` |
-| `ALLOWLIST_UPSTREAM_METADATA` | W trybie `allowlist` odczytuje `/models` providera wyłącznie po metadane dla skonfigurowanych modeli (nigdy nie dodaje modeli). `false` wyłącza to wywołanie; tryb offline wymusza wyłączenie | `true` |
+| `GOMODEL_OFFLINE`   | Przełącznik dla środowisk air-gapped: wyłącza sprawdzanie aktualizacji, pomija URL-e katalogów HTTP i wyłącza pobieranie metadanych z `/models` przez providerów w trybie allowlist. Nie wpływa na lokalne pliki katalogu ani na requesty inferencji do skonfigurowanych providerów | `false` |
+| `ALLOWLIST_UPSTREAM_METADATA` | W trybie `allowlist` odczytuje `/models` providera wyłącznie po metadane (okno kontekstu, maks. tokeny wyjściowe, ceny, nazwa wyświetlana, typ modelu) dla skonfigurowanych modeli; nigdy nie dodaje modeli. `false` wyłącza to wywołanie; tryb offline wymusza wyłączenie | `true` |
 | `REDIS_URL`         | URL połączenia z Redisem          | _(pusty)_        |
 | `REDIS_KEY_MODELS`     | Klucz Redisa dla cache'u modeli     | `gomodel:models`    |
 | `REDIS_KEY_RESPONSES`  | Klucz Redisa dla cache'u odpowiedzi | `gomodel:response:` |
@@ -553,25 +553,20 @@ Większość providerów może korzystać z niestandardowego bazowego URL-a prze
 
 Każdy typ providera akceptuje też rozdzieloną przecinkami listę skonfigurowanych modeli przez
 `<PROVIDER>_MODELS`, na przykład `OPENROUTER_MODELS`, `ORACLE_MODELS`,
-`AZURE_MODELS`, `SGLANG_MODELS`, `VLLM_MODELS` lub `LLMD_MODELS`. Domyślnie
-`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` sprawia, że skonfigurowana lista jest całym
-inwentarzem providera, a upstreamowe `/models` jest odpytywane tylko po metadane (długość
-kontekstu, ceny) wymienionych modeli. Ustaw `fallback`,
-żeby używać listy tylko wtedy, gdy upstreamowe `/models` zwraca błąd, nil lub pustą listę,
-albo `merge`, żeby dodać skonfigurowane modele do inwentarza upstreamu.
-Provider kompatybilny z OpenAI bez endpointu `/models` (404 lub 405) jest obsługiwany
+`AZURE_MODELS`, `SGLANG_MODELS`, `VLLM_MODELS` lub `LLMD_MODELS`. Sposób łączenia listy
+z `/models` providera określa `CONFIGURED_PROVIDER_MODELS_MODE` (domyślnie `allowlist`),
+a dla jednego providera `<PROVIDER>[_SUFFIX]_MODELS_MODE` (YAML:
+`providers.<name>.models_mode`), na przykład `OPENROUTER_MODELS_MODE=fallback`; zobacz
+[Tryby modeli](/pl/advanced/config-yaml#tryby-modeli). Provider kompatybilny z OpenAI bez endpointu `/models` (404 lub 405) jest obsługiwany
 na podstawie skonfigurowanej listy i raportowany jako sprawny, co pasuje do serwerów z jednym API,
 takich jak speech-to-text. W YAML
 `providers.<name>.models` dostarcza tę samą listę modeli dla nazwanych bloków
 providerów.
 
 <Warning>
-**Zmiana niekompatybilna:** wcześniej domyślnym trybem był `fallback`. Provider z
-listą `models:` lub `<PROVIDER>_MODELS` udostępnia teraz tylko te modele, a
-zapytania o inne modele zwracają 404 (model nie znaleziony). Aby przywrócić
-dotychczasowe zachowanie, ustaw `CONFIGURED_PROVIDER_MODELS_MODE=fallback` albo
-nadpisz pojedynczego providera przez `<PROVIDER>[_SUFFIX]_MODELS_MODE` /
-`models_mode`.
+**Zmiana niekompatybilna:** wcześniej domyślnym trybem był `fallback`. Providery
+ze skonfigurowaną listą udostępniają teraz tylko te modele, a inne modele zwracają
+404. W [Tryby modeli](/pl/advanced/config-yaml#tryby-modeli) opisano, jak przywrócić dotychczasowe zachowanie.
 </Warning>
 
 `GET /v1/models` domyślnie zwraca identyfikatory z prefiksem providera (`openai/gpt-5`). Ustaw
@@ -833,10 +828,8 @@ ustrukturyzowane ustawienia), użyj pliku YAML:
 
 ```yaml
 models:
-  # allowlist to wartość domyślna: skonfigurowana lista modeli jest całym
-  # inwentarzem, a /models służy tylko po metadane. Użyj fallback, żeby używać listy
-  # tylko przy błędnym lub pustym /models, albo merge, żeby dodać skonfigurowane
-  # modele do wykrytego inwentarza (modele, które provider serwuje, ale ich nie wypisuje).
+  # Użycie skonfigurowanych list modeli: allowlist (domyślnie), fallback lub
+  # merge. Zobacz tabelę Tryby modeli w przewodniku po config.yaml.
   configured_provider_models_mode: allowlist
   # allowlist czyta upstream /models tylko po metadane; false wyłącza to
   # wywołanie (GOMODEL_OFFLINE=true również).
@@ -890,7 +883,7 @@ providers:
     # api_key jest opcjonalny; ustaw go tylko, gdy launch_server używa --api-key.
     # api_key: "token-abc123"
 
-  # Lista modeli dla trybu fallback lub allowlist
+  # Lista modeli (sposób użycia zależy od trybu modeli)
   gemini:
     type: gemini
     api_key: "..."
@@ -910,9 +903,8 @@ providers:
 ```
 
 <Note>
-  `models:` działa w każdym bloku providera. W trybie fallback to zabezpieczenie
-  na wypadek, gdy upstreamowe `/models` jest niedostępne lub puste. W trybie allowlist staje się
-  udostępnianym inwentarzem tego providera, a upstreamowe `/models` dostarcza tylko metadane wymienionych modeli. Wymaganą politykę OCI
+  `models:` działa w każdym bloku providera; sposób łączenia z upstreamowym `/models`
+  zależy od [trybu modeli](/pl/advanced/config-yaml#tryby-modeli). Wymaganą politykę OCI
   i przetestowaną konfigurację dla Oracle GenAI znajdziesz w [przewodniku po Oracle
   GenAI](/pl/providers/oracle).
 </Note>

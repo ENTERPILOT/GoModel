@@ -92,9 +92,9 @@ type ModelRegistry struct {
 	// providerModelsModes holds per-provider overrides of
 	// configuredProviderModelsMode, keyed by provider instance name.
 	providerModelsModes map[string]config.ConfiguredProviderModelsMode
-	// allowlistMetadataDisabled stops allowlist providers from calling /models
-	// for metadata (offline mode). The zero value keeps the call on.
-	allowlistMetadataDisabled bool
+	// allowlistMetadata lets allowlist providers call /models for metadata
+	// (models.allowlist_upstream_metadata).
+	allowlistMetadata bool
 	// providerModelFilters holds operator-supplied inventory filters keyed by
 	// configured provider instance name. Applied after metadata enrichment;
 	// providers without a filter are absent from the map.
@@ -144,6 +144,7 @@ func NewModelRegistry() *ModelRegistry {
 		providerRuntime:              make(map[string]providerRuntimeState),
 		refreshCh:                    make(chan struct{}, 1),
 		configuredProviderModelsMode: config.DefaultConfiguredProviderModelsMode,
+		allowlistMetadata:            true,
 	}
 }
 
@@ -217,19 +218,27 @@ func (r *ModelRegistry) SetProviderModelsMode(providerName string, mode config.C
 	if providerName == "" {
 		return
 	}
-	mode = config.NormalizeConfiguredProviderModelsMode(mode)
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.setProviderModelsModeLocked(providerName, mode)
+}
+
+// setProviderModelsModeLocked stores providerName's override normalized, or
+// clears it when mode is empty. Caller must hold r.mu for writing.
+func (r *ModelRegistry) setProviderModelsModeLocked(providerName string, mode config.ConfiguredProviderModelsMode) {
+	mode = config.NormalizeConfiguredProviderModelsMode(mode)
 	setOrDelete(&r.providerModelsModes, providerName, mode, mode != "")
 }
 
 // providerModelsModeLocked returns the mode that applies to providerName: its
-// override when set, the global mode otherwise. Caller must hold r.mu.
+// override when set, the global mode otherwise. Both are stored normalized
+// (the global one resolved), so neither needs normalizing here. Caller must
+// hold r.mu.
 func (r *ModelRegistry) providerModelsModeLocked(providerName string) config.ConfiguredProviderModelsMode {
 	if mode, ok := r.providerModelsModes[providerName]; ok {
-		return config.ResolveConfiguredProviderModelsMode(mode)
+		return mode
 	}
-	return config.ResolveConfiguredProviderModelsMode(r.configuredProviderModelsMode)
+	return r.configuredProviderModelsMode
 }
 
 // SetProviderConfiguredModels records the explicit model inventory declared for
