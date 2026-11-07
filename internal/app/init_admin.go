@@ -92,6 +92,11 @@ func (b *bootstrap) initAdmin() error {
 			b.requestHealth,
 			usagePricingRecalculationConfigured(appCfg),
 			usage.Billing{Enabled: appCfg.Pricing.MarkupsEnabled, BillCacheHits: appCfg.Pricing.BillCacheHits},
+			admin.ConfigExportSource{
+				Config:    appCfg,
+				Providers: app.providers.ExportProviders(b.cfg.AppConfig.Secrets),
+				Secrets:   b.cfg.AppConfig.Secrets,
+			},
 			appCfg.Server.BasePath,
 			adminCfg.UIEnabled,
 		)
@@ -161,6 +166,7 @@ func newAdminHandlers(
 	requestHealth admin.RequestHealthSource,
 	usagePricingRecalculationEnabled bool,
 	billing usage.Billing,
+	configExport admin.ConfigExportSource,
 	basePath string,
 	uiEnabled bool,
 ) (*admin.Handler, *dashboard.Handler, auditlog.Reader, error) {
@@ -231,6 +237,7 @@ func newAdminHandlers(
 		admin.WithDashboardRuntimeConfig(runtimeConfig),
 		admin.WithLiveBroker(liveBroker),
 		admin.WithRequestHealth(requestHealth),
+		admin.WithConfigExport(configExport),
 	)
 
 	var dashHandler *dashboard.Handler

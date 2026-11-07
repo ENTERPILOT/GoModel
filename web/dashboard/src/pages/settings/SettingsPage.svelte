@@ -1,8 +1,8 @@
 <script>
   // Settings page: timezone override, budget reset anchors, tagging header
-  // rules, usage pricing recalculation, runtime refresh, and the version
-  // footer. Each section fetches its own data when the page becomes active
-  // or auth.refreshTick changes.
+  // rules, usage pricing recalculation, runtime refresh, configuration
+  // export, and the version footer. Each section fetches its own data when
+  // the page becomes active or auth.refreshTick changes.
   import { router } from "$lib/stores/router.svelte.js";
   import { auth } from "$lib/stores/auth.svelte.js";
   import { timezone } from "$lib/stores/timezone.svelte.js";
@@ -19,6 +19,7 @@
   import PricingRecalculation from "./PricingRecalculation.svelte";
   import RuntimeRefresh from "./RuntimeRefresh.svelte";
   import RuntimeSettings from "./RuntimeSettings.svelte";
+  import ConfigExport from "./ConfigExport.svelte";
 
   const PAGE = "settings";
 
@@ -53,6 +54,7 @@
       <RuntimeSettings />
       <PricingRecalculation />
       <RuntimeRefresh />
+      <ConfigExport />
     {/if}
   </div>
 

@@ -115,6 +115,16 @@ func (s *Service) definitionSecretValues(def Definition) []string {
 	return slices.Collect(maps.Values(plugins.SecretValues(schema, def.Config)))
 }
 
+// SecretConfigKeys returns the keys of the secret settings of the plugin a
+// definition type names, or nil when no loaded plugin has that name.
+func (s *Service) SecretConfigKeys(defType string) map[string]bool {
+	schema, ok := s.configSchema(defType)
+	if !ok {
+		return nil
+	}
+	return plugins.SecretKeys(schema)
+}
+
 // configSchema returns the config schema of the plugin a definition type
 // names, normalizing the type the way a saved definition is ("plugin:"
 // prefix, case, aliases).
