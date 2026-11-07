@@ -60,7 +60,8 @@ nazwę wyświetlaną, długość kontekstu i ceny za tokeny. Przy allowliście
 że wywołanie po metadane jest wyłączone (`ALLOWLIST_UPSTREAM_METADATA=false` lub
 `GOMODEL_OFFLINE=true`). Gdy to wywołanie się nie powiedzie, zostają metadane
 z ostatniej udanej listy; przed pierwszą udaną listą nie ma
-metadanych z upstreamu, są tylko te z katalogu. Skonfigurowany model, którego Together nie wypisuje, bierze
+metadanych z upstreamu, są tylko te z katalogu lub z Twojej
+konfiguracji (`models[].metadata`, nadpisania cen w dashboardzie). Skonfigurowany model, którego Together nie wypisuje, bierze
 je z katalogu modeli GoModel i może ich nie mieć. Modele obrazów, audio,
 wideo i rerankingu są pomijane, bo GoModel nie kieruje tych endpointów do
 Together. Identyfikatory modeli zawierają ukośnik; używaj ich dosłownie albo
