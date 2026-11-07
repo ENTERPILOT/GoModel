@@ -38,9 +38,10 @@ wysyłana jako `multipart/form-data`, więc jej podgląd opisuje część z plik
 zamiast zawierać jego bajty. Obrazy inline w `b64_json` są skracane w JSON-ie
 odpowiedzi, aby pozostał czytelny, odpowiedzi z mową są podsumowywane jako
 ich typ treści i rozmiar, a wektory embeddingów są skracane do pierwszych
-wartości (długie wektory `base64` do pierwszych znaków, a embeddingi na token, np. z
-`token_embed` w vLLM, do pierwszego wiersza, z liczbą tokenów przy każdym wektorze); **Kopiuj** nadal
-kopiuje pełną odpowiedź.
+wartości (długie wektory `base64` do pierwszych znaków); **Kopiuj** nadal
+kopiuje pełną odpowiedź. Embeddingi na token, np. z `token_embed` w vLLM, są
+w JSON-ie odpowiedzi skracane do pierwszego wiersza, a wynik pokazuje przy
+każdym embeddingu liczbę jego wektorów tokenów.
 
 ## Ograniczanie do ścieżki użytkownika
 
