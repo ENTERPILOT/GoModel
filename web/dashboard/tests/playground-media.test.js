@@ -229,7 +229,8 @@ test("embeddingDimensionsValid accepts a blank field or a positive integer only"
   for (const ok of ["", "  ", null, undefined, 1, 256, "1536", " 512 ", "9007199254740991"]) {
     assert.equal(embeddingDimensionsValid(ok), true, String(ok));
   }
-  for (const bad of [0, -3, 1.5, "abc", "1e400", "1e300", "9007199254740993", Infinity, NaN]) {
+  for (const bad of [0, -3, 1.5, "abc", "1e400", "1e300", "9007199254740993", Infinity, NaN,
+    "256.0000000000000001", "1.0000000000000001", "9007199254740991.4", "0x100", "0b11", "1e3", "+5", "-0", "256.0"]) {
     assert.equal(embeddingDimensionsValid(bad), false, String(bad));
   }
 });
@@ -245,6 +246,9 @@ test("embeddingSummary skips items without a vector", () => {
     { embedding: [1, NaN] },
     { embedding: [1, Infinity] },
     { embedding: [true, false] },
+    { embedding: [] },
+    { embedding: "" },
+    { embedding: "   " },
   ]) {
     const summary = embeddingSummary({ data: [item] });
     assert.equal(summary.count, 0, JSON.stringify(item));
@@ -275,4 +279,8 @@ test("embeddingSummary gives no size for a string that is not whole base64 float
 test("buildEmbeddingRequest never sends a rounded dimensions value", () => {
   assert.equal(buildEmbeddingRequest({ model: "m", input: "a", dimensions: "9007199254740993" }).dimensions, undefined);
   assert.equal(buildEmbeddingRequest({ model: "m", input: "a", dimensions: "9007199254740991" }).dimensions, 9007199254740991);
+  for (const typed of ["256.0000000000000001", "0x100", "1e3"]) {
+    assert.equal(buildEmbeddingRequest({ model: "m", input: "a", dimensions: typed }).dimensions, undefined, typed);
+  }
+  assert.equal(buildEmbeddingRequest({ model: "m", input: "a", dimensions: " 0256 " }).dimensions, 256);
 });

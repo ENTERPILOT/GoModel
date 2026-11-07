@@ -103,14 +103,21 @@ export function embeddingInputs(value) {
     .filter(Boolean);
 }
 
-// The dimensions field is optional: blank leaves the size to the provider,
-// anything else must be a positive safe integer (larger ones would be rounded
-// before they are sent).
-export function embeddingDimensionsValid(value) {
+// The dimensions value to send: a positive safe integer written as plain
+// digits, so it goes out exactly as typed (no fractions, exponents or hex that
+// Number() would round or reinterpret); null otherwise.
+function dimensionsValue(value) {
+  if (typeof value === "number") return Number.isSafeInteger(value) && value > 0 ? value : null;
   const raw = text(value);
-  if (raw === "") return true;
+  if (!/^\d+$/.test(raw)) return null;
   const dims = Number(raw);
-  return Number.isSafeInteger(dims) && dims > 0;
+  return Number.isSafeInteger(dims) && dims > 0 ? dims : null;
+}
+
+// The dimensions field is optional: blank leaves the size to the provider,
+// anything else must be a valid dimensionsValue.
+export function embeddingDimensionsValid(value) {
+  return text(value) === "" || dimensionsValue(value) !== null;
 }
 
 // Body for POST /v1/embeddings. One line is sent as a plain string, several as
@@ -123,8 +130,8 @@ export function buildEmbeddingRequest({ model, input, format, dimensions } = {})
   if (EMBEDDING_FORMATS.includes(format) && format !== DEFAULT_EMBEDDING_FORMAT) {
     body.encoding_format = format;
   }
-  const dims = Number(text(dimensions) || NaN);
-  if (Number.isSafeInteger(dims) && dims > 0) body.dimensions = dims;
+  const dims = dimensionsValue(dimensions);
+  if (dims !== null) body.dimensions = dims;
   return body;
 }
 
@@ -141,11 +148,12 @@ function base64ValueCount(value) {
 }
 
 function isFloatVector(value) {
-  return Array.isArray(value) && value.every((n) => typeof n === "number" && Number.isFinite(n));
+  return Array.isArray(value) && value.length > 0 && value.every((n) => typeof n === "number" && Number.isFinite(n));
 }
 
 function isEmbeddingItem(item) {
-  return Boolean(item) && (isFloatVector(item.embedding) || typeof item.embedding === "string");
+  const embedding = item?.embedding;
+  return isFloatVector(embedding) || (typeof embedding === "string" && embedding.trim() !== "");
 }
 
 // What the result shows for an /v1/embeddings response: the vector count,

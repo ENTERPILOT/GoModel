@@ -165,7 +165,13 @@
           min="1"
           step="1"
           placeholder={m.playground_media_default_option()}
-          bind:value={media.embeddingDimensions}
+          value={media.embeddingDimensions}
+          oninput={(event) => {
+            // The raw text, not the parsed number: 256.0000000000000001 must stay
+            // invalid. Text the browser can't parse reads as "", so mark it invalid.
+            const input = event.currentTarget;
+            media.embeddingDimensions = input.validity.badInput ? "NaN" : input.value;
+          }}
           disabled={media.sending}
         />
       </FormField>
