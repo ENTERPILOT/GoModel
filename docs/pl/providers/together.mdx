@@ -58,7 +58,8 @@ GoModel odczytuje aktualną listę `/models` z Together, w tym typ każdego mode
 nazwę wyświetlaną, długość kontekstu i ceny za tokeny. Przy allowliście
 `TOGETHER_MODELS` te dane dla wymienionych modeli nadal pochodzą z tej listy, chyba
 że wywołanie po metadane jest wyłączone (`ALLOWLIST_UPSTREAM_METADATA=false` lub
-`GOMODEL_OFFLINE=true`); skonfigurowany model, którego Together nie wypisuje, bierze
+`GOMODEL_OFFLINE=true`). Gdy to wywołanie się nie powiedzie, zostają metadane
+z ostatniej udanej listy; przed pierwszą udaną listą nie ma żadnych. Skonfigurowany model, którego Together nie wypisuje, bierze
 je z katalogu modeli GoModel i może ich nie mieć. Modele obrazów, audio,
 wideo i rerankingu są pomijane, bo GoModel nie kieruje tych endpointów do
 Together. Identyfikatory modeli zawierają ukośnik; używaj ich dosłownie albo

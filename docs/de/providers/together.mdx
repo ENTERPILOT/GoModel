@@ -59,7 +59,9 @@ GoModel liest die aktuelle `/models`-Liste von Together, einschließlich Typ,
 Anzeigename, Kontextlänge und Token-Preisen jedes Modells. Mit einer
 `TOGETHER_MODELS`-Allowlist kommen diese Angaben für die gelisteten Modelle
 weiterhin aus dieser Liste, außer der Metadaten-Aufruf ist abgeschaltet
-(`ALLOWLIST_UPSTREAM_METADATA=false` oder `GOMODEL_OFFLINE=true`); ein
+(`ALLOWLIST_UPSTREAM_METADATA=false` oder `GOMODEL_OFFLINE=true`). Schlägt
+dieser Aufruf fehl, bleiben die Metadaten der letzten erfolgreichen Liste
+erhalten; vor der ersten erfolgreichen Liste gibt es keine. Ein
 konfiguriertes Modell, das Together nicht listet, bezieht sie aus GoModels
 Modellkatalog und kann ohne sie bleiben. Bild-, Audio-, Video-
 und Rerank-Modelle werden ausgelassen, weil GoModel diese Endpunkte nicht an
