@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"strings"
+	"unsafe"
 
 	"github.com/goccy/go-json"
 	"github.com/tidwall/gjson"
@@ -15,14 +16,48 @@ import (
 // over body rules, which win over content-based auto-detection.
 type Detector struct {
 	headerRules []Rule
-	bodyRules   []Rule
+	bodyRules   []bodyRule
 	autoDetect  bool
+	// fields lists the top-level body members detection reads: the content
+	// anchor members at their fixed indexes, then each body rule's first path
+	// component. One walk over the body collects all of them.
+	fields []string
+	tools  *segmentCache
 }
+
+// bodyRule is a Rule with its path split for the single-walk lookup. field is
+// the index of the path's first component in Detector.fields, or -1 when the
+// path must be resolved with a full gjson query against the body.
+type bodyRule struct {
+	Rule
+	field int
+	rest  string
+}
+
+// Content anchor members, at these indexes of Detector.fields.
+const (
+	fieldModel = iota
+	fieldSystem
+	fieldInstructions
+	fieldTools
+	fieldMessages
+	fieldInput
+)
+
+var contentFields = []string{"model", "system", "instructions", "tools", "messages", "input"}
+
+// maxBodyFields bounds the members collected in one walk so they fit a stack
+// array; rules beyond it fall back to a full gjson query.
+const maxBodyFields = 16
 
 // NewDetector builds a Detector from an ordered rule list. Rules keep their
 // relative order within each source; header rules are always evaluated first.
 func NewDetector(rules []Rule, autoDetect bool) *Detector {
-	d := &Detector{autoDetect: autoDetect}
+	d := &Detector{
+		autoDetect: autoDetect,
+		fields:     append([]string(nil), contentFields...),
+		tools:      newSegmentCache(toolsCacheEntries, toolsCacheBytes),
+	}
 	for _, rule := range rules {
 		switch rule.Source {
 		case SourceHeader:
@@ -31,11 +66,54 @@ func NewDetector(rules []Rule, autoDetect bool) *Detector {
 			}
 		case SourceBody:
 			if rule.BodyPath != "" {
-				d.bodyRules = append(d.bodyRules, rule)
+				d.bodyRules = append(d.bodyRules, d.compileBodyRule(rule))
 			}
 		}
 	}
 	return d
+}
+
+func (d *Detector) compileBodyRule(rule Rule) bodyRule {
+	compiled := bodyRule{Rule: rule, field: -1}
+	if !plainPath(rule.BodyPath) {
+		return compiled
+	}
+	top, rest, _ := strings.Cut(rule.BodyPath, ".")
+	for i, name := range d.fields {
+		if name == top {
+			compiled.field, compiled.rest = i, rest
+			return compiled
+		}
+	}
+	if len(d.fields) < maxBodyFields {
+		d.fields = append(d.fields, top)
+		compiled.field, compiled.rest = len(d.fields)-1, rest
+	}
+	return compiled
+}
+
+// plainPath reports whether a gjson path is only dot-separated literal keys,
+// which resolve the same against a collected member as against the body.
+func plainPath(path string) bool {
+	for part := range strings.SplitSeq(path, ".") {
+		if part == "" {
+			return false
+		}
+		for i := 0; i < len(part); i++ {
+			c := part[i]
+			if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '_' && c != '-' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// bodyMember is the first occurrence of a top-level body member; dup records
+// that the key appears again.
+type bodyMember struct {
+	value gjson.Result
+	dup   bool
 }
 
 // Detect returns the stable session id for the captured request, or "" when
@@ -53,13 +131,49 @@ func (d *Detector) Detect(snapshot *core.RequestSnapshot, userPath string) strin
 	if snapshot.BodyNotCaptured || len(body) == 0 || !gjson.ValidBytes(body) {
 		return ""
 	}
-	if id := d.detectFromBody(body); id != "" {
+	if len(d.bodyRules) == 0 && !d.autoDetect {
+		return ""
+	}
+	// The body is viewed as a string without copying, so every gjson result
+	// below aliases the snapshot's buffer. Nothing derived from it may outlive
+	// this call uncopied: rule matches are cloned before they are returned and
+	// content segments are re-encoded into fresh buffers.
+	raw := unsafe.String(unsafe.SliceData(body), len(body))
+	var storage [maxBodyFields]bodyMember
+	members := storage[:len(d.fields)]
+	isObject := d.collectMembers(raw, members)
+	if id := d.detectFromBody(raw, members, isObject); id != "" {
 		return scopeSessionID(id, userPath)
 	}
-	if d.autoDetect {
-		return contentSessionID(snapshot, body, userPath)
+	if d.autoDetect && isObject {
+		return d.contentSessionID(snapshot, members, userPath)
 	}
 	return ""
+}
+
+// collectMembers walks the top level of the body once, recording the first
+// occurrence of every member in d.fields, the occurrence a gjson query for
+// that key resolves to. It reports false when the body is not a JSON object.
+func (d *Detector) collectMembers(raw string, members []bodyMember) bool {
+	root := gjson.Parse(raw)
+	if !root.IsObject() {
+		return false
+	}
+	root.ForEach(func(key, value gjson.Result) bool {
+		for i, name := range d.fields {
+			if key.Str != name {
+				continue
+			}
+			if members[i].value.Exists() {
+				members[i].dup = true
+			} else {
+				members[i].value = value
+			}
+			break
+		}
+		return true
+	})
+	return true
 }
 
 func (d *Detector) detectFromHeaders(snapshot *core.RequestSnapshot) string {
@@ -82,17 +196,35 @@ func (d *Detector) detectFromHeaders(snapshot *core.RequestSnapshot) string {
 	return ""
 }
 
-func (d *Detector) detectFromBody(body []byte) string {
+func (d *Detector) detectFromBody(raw string, members []bodyMember, isObject bool) string {
 	for _, rule := range d.bodyRules {
-		result := gjson.GetBytes(body, rule.BodyPath)
+		result := bodyRuleResult(raw, members, isObject, rule)
 		if result.Type != gjson.String {
 			continue
 		}
 		if id := cleanSessionID(applyTransform(strings.TrimSpace(result.Str), rule.Transform)); id != "" {
-			return id
+			return strings.Clone(id)
 		}
 	}
 	return ""
+}
+
+// bodyRuleResult resolves a rule path exactly as gjson.Get on the whole body
+// does. A nested path under a duplicated key needs the full query, because
+// gjson moves on to later occurrences when the first lacks the nested key.
+func bodyRuleResult(raw string, members []bodyMember, isObject bool, rule bodyRule) gjson.Result {
+	if !isObject || rule.field < 0 {
+		return gjson.Get(raw, rule.BodyPath)
+	}
+	member := members[rule.field]
+	switch {
+	case rule.rest == "":
+		return member.value
+	case member.dup:
+		return gjson.Get(raw, rule.BodyPath)
+	default:
+		return member.value.Get(rule.rest)
+	}
 }
 
 // scopeSessionID namespaces every client-provided id by user path. UUID syntax
@@ -125,23 +257,22 @@ type contentAnchor struct {
 // contentSessionID derives a session id from the conversation prefix of chat
 // and responses requests (precedent: the xAI provider's generated Grok
 // conversation id). Other operations return "".
-func contentSessionID(snapshot *core.RequestSnapshot, body []byte, userPath string) string {
+func (d *Detector) contentSessionID(snapshot *core.RequestSnapshot, members []bodyMember, userPath string) string {
 	switch core.DescribeEndpoint(snapshot.Method, snapshot.Path).Operation {
 	case core.OperationChatCompletions, core.OperationResponses:
 	default:
 		return ""
 	}
-	root := gjson.ParseBytes(body)
 	anchor := contentAnchor{
 		UserPath:     userPath,
-		Model:        canonicalSegment(root.Get("model")),
-		System:       canonicalSegment(root.Get("system")),
-		Instructions: canonicalSegment(root.Get("instructions")),
-		Tools:        canonicalSegment(root.Get("tools")),
+		Model:        canonicalSegment(members[fieldModel].value),
+		System:       canonicalSegment(members[fieldSystem].value),
+		Instructions: canonicalSegment(members[fieldInstructions].value),
+		Tools:        d.tools.canonical(members[fieldTools].value),
 	}
-	messages := root.Get("messages")
+	messages := members[fieldMessages].value
 	if !messages.Exists() {
-		messages = root.Get("input")
+		messages = members[fieldInput].value
 	}
 	if messages.Type == gjson.String {
 		anchor.Opening = []json.RawMessage{canonicalSegment(messages)}

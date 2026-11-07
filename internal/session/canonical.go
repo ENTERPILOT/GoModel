@@ -31,7 +31,8 @@ func canonicalSegment(result gjson.Result) json.RawMessage {
 	}
 	if gjson.Valid(result.Raw) {
 		buf := make([]byte, 0, len(result.Raw)+8)
-		if buf, ok := appendCanonical(buf, result); ok {
+		var scratch []canonicalMember
+		if buf, ok := appendCanonical(buf, result, &scratch); ok {
 			return buf
 		}
 	}
@@ -76,8 +77,9 @@ func canonicalSegmentDecoded(raw json.RawMessage) json.RawMessage {
 // appendCanonical appends the canonical encoding of a valid gjson value. It
 // reports false when the value contains a string the walker cannot decode
 // exactly like encoding/json (see canonicalStringOK), in which case the
-// caller must use the reference path.
-func appendCanonical(buf []byte, r gjson.Result) ([]byte, bool) {
+// caller must use the reference path. scratch is shared member storage for
+// every object in the value (see appendCanonicalObject).
+func appendCanonical(buf []byte, r gjson.Result, scratch *[]canonicalMember) ([]byte, bool) {
 	switch r.Type {
 	case gjson.Null:
 		return append(buf, "null"...), true
@@ -102,7 +104,7 @@ func appendCanonical(buf []byte, r gjson.Result) ([]byte, bool) {
 				buf = append(buf, ',')
 			}
 			first = false
-			buf, ok = appendCanonical(buf, value)
+			buf, ok = appendCanonical(buf, value, scratch)
 			return ok
 		})
 		if !ok {
@@ -111,7 +113,7 @@ func appendCanonical(buf []byte, r gjson.Result) ([]byte, bool) {
 		return append(buf, ']'), true
 	}
 	if r.IsObject() {
-		return appendCanonicalObject(buf, r)
+		return appendCanonicalObject(buf, r, scratch)
 	}
 	return buf, false
 }
@@ -123,27 +125,35 @@ type canonicalMember struct {
 
 // appendCanonicalObject writes members sorted by decoded key, as encoding/json
 // does for maps. A duplicated key keeps its last value, matching map decoding.
-func appendCanonicalObject(buf []byte, r gjson.Result) ([]byte, bool) {
-	var members []canonicalMember
+//
+// The members are appended to the end of *scratch and truncated off again on
+// return, so one slice serves every object in the value. Nested objects only
+// append past this object's members, so they stay intact, but the slice may
+// be reallocated by a nested call and is therefore re-read by index.
+func appendCanonicalObject(buf []byte, r gjson.Result, scratch *[]canonicalMember) ([]byte, bool) {
+	base := len(*scratch)
+	defer func() { *scratch = (*scratch)[:base] }()
 	ok := true
 	r.ForEach(func(key, value gjson.Result) bool {
 		if !canonicalStringOK(key) {
 			ok = false
 			return false
 		}
-		members = append(members, canonicalMember{key: key.Str, value: value})
+		*scratch = append(*scratch, canonicalMember{key: key.Str, value: value})
 		return true
 	})
 	if !ok {
 		return buf, false
 	}
-	slices.SortStableFunc(members, func(a, b canonicalMember) int {
+	n := len(*scratch) - base
+	slices.SortStableFunc((*scratch)[base:], func(a, b canonicalMember) int {
 		return strings.Compare(a.key, b.key)
 	})
 	buf = append(buf, '{')
 	written := 0
-	for i, member := range members {
-		if i+1 < len(members) && members[i+1].key == member.key {
+	for i := range n {
+		member := (*scratch)[base+i]
+		if i+1 < n && (*scratch)[base+i+1].key == member.key {
 			continue
 		}
 		if written > 0 {
@@ -152,7 +162,7 @@ func appendCanonicalObject(buf []byte, r gjson.Result) ([]byte, bool) {
 		written++
 		buf = appendJSONString(buf, member.key)
 		buf = append(buf, ':')
-		buf, ok = appendCanonical(buf, member.value)
+		buf, ok = appendCanonical(buf, member.value, scratch)
 		if !ok {
 			return buf, false
 		}
