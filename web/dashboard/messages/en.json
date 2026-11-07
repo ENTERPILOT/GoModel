@@ -69,6 +69,7 @@
   "playground_mode_image": "Image",
   "playground_mode_speech": "Speech",
   "playground_mode_transcription": "Transcription",
+  "playground_mode_embeddings": "Embeddings",
   "playground_media_prompt_label": "Prompt",
   "playground_media_image_placeholder": "Describe the image to generate…",
   "playground_media_size_label": "Size",
@@ -84,6 +85,42 @@
   "playground_media_transcription_prompt_placeholder": "Optional context or spelling hints",
   "playground_media_empty": "Fill in the form below and send it to see the result here.",
   "playground_media_empty_response": "The model returned no media. See the Response JSON for the full payload.",
+  "playground_embeddings_input_label": "Texts",
+  "playground_embeddings_input_placeholder": "One text per line; each line becomes its own vector…",
+  "playground_embeddings_format_label": "Encoding format",
+  "playground_embeddings_dimensions_label": "Dimensions",
+  "playground_embeddings_empty_response": "The model returned no embeddings. See the Response JSON for the full payload.",
+  "playground_embeddings_base64_value": "base64-encoded vector (see the Response JSON)",
+  "playground_embeddings_vectors": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} vector",
+        "count_plural=*": "{count} vectors"
+      }
+    }
+  ],
+  "playground_embeddings_dimensions": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} dimension",
+        "count_plural=*": "{count} dimensions"
+      }
+    }
+  ],
+  "playground_embeddings_prompt_tokens": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} prompt token",
+        "count_plural=*": "{count} prompt tokens"
+      }
+    }
+  ],
   "navigation_audit_logs": "Audit Logs",
   "navigation_usage": "Usage",
   "navigation_budgets": "Budgets",

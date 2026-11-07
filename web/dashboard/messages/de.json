@@ -69,6 +69,7 @@
   "playground_mode_image": "Bild",
   "playground_mode_speech": "Sprache",
   "playground_mode_transcription": "Transkription",
+  "playground_mode_embeddings": "Embeddings",
   "playground_media_prompt_label": "Prompt",
   "playground_media_image_placeholder": "Beschreibe das Bild, das erzeugt werden soll…",
   "playground_media_size_label": "Größe",
@@ -84,6 +85,42 @@
   "playground_media_transcription_prompt_placeholder": "Optionaler Kontext oder Schreibhinweise",
   "playground_media_empty": "Fülle das Formular unten aus und sende es ab, um das Ergebnis hier zu sehen.",
   "playground_media_empty_response": "Das Modell hat keine Medien zurückgegeben. Die vollständige Antwort steht im Response-JSON.",
+  "playground_embeddings_input_label": "Texte",
+  "playground_embeddings_input_placeholder": "Ein Text pro Zeile; jede Zeile wird zu einem eigenen Vektor…",
+  "playground_embeddings_format_label": "Kodierungsformat",
+  "playground_embeddings_dimensions_label": "Dimensionen",
+  "playground_embeddings_empty_response": "Das Modell hat keine Embeddings zurückgegeben. Die vollständige Antwort steht im Response-JSON.",
+  "playground_embeddings_base64_value": "Base64-kodierter Vektor (siehe Response-JSON)",
+  "playground_embeddings_vectors": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} Vektor",
+        "count_plural=*": "{count} Vektoren"
+      }
+    }
+  ],
+  "playground_embeddings_dimensions": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} Dimension",
+        "count_plural=*": "{count} Dimensionen"
+      }
+    }
+  ],
+  "playground_embeddings_prompt_tokens": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} Prompt-Token",
+        "count_plural=*": "{count} Prompt-Tokens"
+      }
+    }
+  ],
   "navigation_audit_logs": "Audit-Logs",
   "navigation_usage": "Nutzung",
   "navigation_budgets": "Budgets",

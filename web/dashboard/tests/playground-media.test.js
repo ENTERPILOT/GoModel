@@ -2,11 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  EMBEDDING_PREVIEW_VALUES,
   MAX_IMAGE_COUNT,
   PLAYGROUND_MODES,
+  abbreviateEmbeddingResponse,
   abbreviateImageResponse,
+  buildEmbeddingRequest,
   buildImageRequest,
   buildSpeechRequest,
+  embeddingInputs,
+  embeddingSummary,
   imageResults,
   mediaModeById,
   modeModelOptions,
@@ -17,10 +22,11 @@ import {
 } from "../src/pages/playground/playgroundMedia.js";
 
 test("media modes map to the gateway's public paths", () => {
-  assert.deepEqual(PLAYGROUND_MODES, ["chat", "image", "speech", "transcription"]);
+  assert.deepEqual(PLAYGROUND_MODES, ["chat", "image", "speech", "transcription", "embeddings"]);
   assert.equal(mediaModeById("image").path, "/v1/images/generations");
   assert.equal(mediaModeById("speech").path, "/v1/audio/speech");
   assert.equal(mediaModeById("transcription").path, "/v1/audio/transcriptions");
+  assert.equal(mediaModeById("embeddings").path, "/v1/embeddings");
   assert.equal(mediaModeById("chat"), null);
   assert.equal(normalizeMode("speech"), "speech");
   assert.equal(normalizeMode("video"), "chat");
@@ -33,6 +39,7 @@ test("the model picker lists models advertising the mode first, then unannotated
     { selector: "gpt-image-1", provider_name: "openai", model: { id: "gpt-image-1", metadata: { modes: ["image_generation", "image_edit"] } } },
     { selector: "tts-1", provider_name: "openai", model: { id: "tts-1", metadata: { modes: ["audio_speech"] } } },
     { selector: "whisper-1", provider_name: "openai", model: { id: "whisper-1", metadata: { modes: ["audio_transcription"] } } },
+    { selector: "text-embedding-3-small", provider_name: "openai", model: { id: "text-embedding-3-small", metadata: { modes: ["embedding"] } } },
     { selector: "dall-e-2", provider_name: "openai", model: { id: "dall-e-2" } },
     { selector: "local", provider_name: "ollama", model: { id: "local" } },
   ];
@@ -41,6 +48,7 @@ test("the model picker lists models advertising the mode first, then unannotated
   assert.deepEqual(ids("image"), ["gpt-image-1", "dall-e-2", "local"]);
   assert.deepEqual(ids("speech"), ["tts-1", "dall-e-2", "local"]);
   assert.deepEqual(ids("transcription"), ["whisper-1", "dall-e-2", "local"]);
+  assert.deepEqual(ids("embeddings"), ["text-embedding-3-small", "dall-e-2", "local"]);
   assert.deepEqual(modeModelOptions(undefined, "image"), []);
 });
 
@@ -126,4 +134,92 @@ test("transcriptionText reads JSON and plain-text responses", () => {
   assert.equal(transcriptionText("WEBVTT\n\nhello"), "WEBVTT\n\nhello");
   assert.equal(transcriptionText({}), "");
   assert.equal(transcriptionText(null), "");
+});
+
+test("embeddingInputs takes one trimmed text per non-blank line", () => {
+  assert.deepEqual(embeddingInputs(" first \n\n  \nsecond line\r\n"), ["first", "second line"]);
+  assert.deepEqual(embeddingInputs("héllo 世界 🙂"), ["héllo 世界 🙂"]);
+  assert.deepEqual(embeddingInputs(""), []);
+  assert.deepEqual(embeddingInputs(undefined), []);
+});
+
+test("buildEmbeddingRequest sends one text as a string and several as an array", () => {
+  assert.deepEqual(buildEmbeddingRequest({ model: " text-embedding-3-small ", input: "hello\n" }), {
+    model: "text-embedding-3-small",
+    input: "hello",
+  });
+  assert.deepEqual(buildEmbeddingRequest({ model: "m", input: "a\nb" }).input, ["a", "b"]);
+  assert.deepEqual(buildEmbeddingRequest({ model: "m", input: "" }).input, []);
+});
+
+test("buildEmbeddingRequest sends encoding_format and dimensions only when set", () => {
+  assert.deepEqual(buildEmbeddingRequest({ model: "m", input: "a", format: "float", dimensions: "" }), {
+    model: "m",
+    input: "a",
+  });
+  assert.deepEqual(buildEmbeddingRequest({ model: "m", input: "a", format: "base64", dimensions: 256 }), {
+    model: "m",
+    input: "a",
+    encoding_format: "base64",
+    dimensions: 256,
+  });
+  assert.equal(buildEmbeddingRequest({ model: "m", input: "a", dimensions: "512" }).dimensions, 512);
+  for (const bad of [0, -3, 1.5, "abc", null, undefined, Infinity]) {
+    assert.equal(buildEmbeddingRequest({ model: "m", input: "a", dimensions: bad }).dimensions, undefined);
+  }
+  assert.equal(buildEmbeddingRequest({ model: "m", input: "a", format: "int8" }).encoding_format, undefined);
+});
+
+test("embeddingSummary counts vectors, their dimensions and prompt tokens", () => {
+  const summary = embeddingSummary({
+    data: [
+      { object: "embedding", index: 0, embedding: Array.from({ length: 12 }, (_, i) => i / 10) },
+      { object: "embedding", index: 1, embedding: Array.from({ length: 12 }, () => 0) },
+    ],
+    usage: { prompt_tokens: 7, total_tokens: 7 },
+  });
+  assert.equal(summary.count, 2);
+  assert.equal(summary.dimensions, 12);
+  assert.equal(summary.promptTokens, 7);
+  assert.equal(summary.vectors[0].preview.length, EMBEDDING_PREVIEW_VALUES);
+  assert.deepEqual(summary.vectors.map((v) => v.index), [0, 1]);
+});
+
+test("embeddingSummary reads base64 vector sizes and tolerates odd payloads", () => {
+  // Four float32 values are 16 bytes, 24 base64 characters with padding.
+  const b64 = Buffer.from(new Float32Array([1, 2, 3, 4]).buffer).toString("base64");
+  const summary = embeddingSummary({ data: [{ index: 0, embedding: b64 }] });
+  assert.equal(summary.dimensions, 4);
+  assert.equal(summary.vectors[0].base64, true);
+  assert.equal(summary.vectors[0].preview, null);
+  assert.equal(summary.promptTokens, null);
+
+  const mixed = embeddingSummary({ data: [{ embedding: [1, 2] }, null, { embedding: [1, 2, 3] }] });
+  assert.equal(mixed.count, 2);
+  assert.equal(mixed.dimensions, null);
+  assert.deepEqual(mixed.vectors.map((v) => v.index), [0, 1]);
+
+  assert.equal(embeddingSummary(null).count, 0);
+  assert.equal(embeddingSummary({ data: "nope" }).count, 0);
+});
+
+test("abbreviateEmbeddingResponse trims long vectors and leaves the rest alone", () => {
+  const long = Array.from({ length: 1536 }, (_, i) => i);
+  const body = {
+    object: "list",
+    data: [
+      { index: 0, embedding: long },
+      { index: 1, embedding: [0.1, 0.2] },
+      { index: 2, embedding: "A".repeat(100) },
+    ],
+    usage: { prompt_tokens: 3 },
+  };
+  const short = abbreviateEmbeddingResponse(body);
+  assert.deepEqual(short.data[0].embedding, [...long.slice(0, EMBEDDING_PREVIEW_VALUES), "… (1536 values)"]);
+  assert.deepEqual(short.data[1].embedding, [0.1, 0.2]);
+  assert.equal(short.data[2].embedding, "A".repeat(32) + "… (100 chars)");
+  assert.deepEqual(short.usage, { prompt_tokens: 3 });
+  assert.equal(body.data[0].embedding.length, 1536, "the original response is not changed");
+  assert.equal(abbreviateEmbeddingResponse(null), null);
+  assert.deepEqual(abbreviateEmbeddingResponse({ error: "x" }), { error: "x" });
 });
