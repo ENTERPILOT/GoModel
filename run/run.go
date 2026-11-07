@@ -79,7 +79,8 @@ type Options struct {
 	// gomodel binary passes its build-tagged implementation. Default: no-op.
 	ConfigureSwaggerDocs func(basePath string)
 	// Setup, when set, runs once the process is committed to starting the
-	// gateway — after CLI parsing, --version/--health/--ready
+	// gateway, or to a command that loads its configuration (secrets
+	// reencrypt, usage import) — after CLI parsing, --version/--health/--ready
 	// short-circuits, dotenv loading, and logging configuration, but before
 	// config loading. Register extensions here so operator tooling modes
 	// stay silent; log handler wrappers are the exception and must be
@@ -188,6 +189,18 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}
 
+	var usageImportSource string
+	if cliOpts.UsageArgs != nil {
+		usageImportSource, err = parseUsageArgs(opts.ProductName, cliOpts.UsageArgs, opts.Stdout, opts.Stderr)
+		if err != nil {
+			fmt.Fprintln(opts.Stderr, err)
+			return &usageError{err: err}
+		}
+		if usageImportSource == "" {
+			return nil // help
+		}
+	}
+
 	if cliOpts.Version {
 		fmt.Fprintln(opts.Stdout, versionLine(opts.ProductName))
 		return nil
@@ -235,6 +248,13 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	if secretsOpts != nil {
 		if err := runSecretsReencrypt(ctx, opts, *secretsOpts); err != nil {
+			fmt.Fprintln(opts.Stderr, err)
+			return err
+		}
+		return nil
+	}
+	if usageImportSource != "" {
+		if err := runUsageImport(ctx, opts, usageImportSource); err != nil {
 			fmt.Fprintln(opts.Stderr, err)
 			return err
 		}

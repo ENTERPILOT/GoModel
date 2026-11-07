@@ -218,6 +218,20 @@ gomodel secrets reencrypt [--rotate-data-key]
 
 See [Encryption at Rest](/advanced/encryption-at-rest).
 
+## Importing usage from another instance
+
+`gomodel usage import` copies the usage history of another GoModel instance,
+read from its SQLite database file, into the database this instance uses
+(SQLite, PostgreSQL, or MongoDB). Run it with the same configuration as the
+gateway. The source file is opened read-only, and rows already present are
+skipped, so running it again is safe.
+
+```bash
+gomodel usage import /path/to/other/gomodel.db
+```
+
+See [Combining usage from several instances](/features/cost-tracking#combining-usage-from-several-instances).
+
 ## Migrating from LiteLLM
 
 `gomodel migrate litellm` converts a LiteLLM proxy `config.yaml` into a GoModel
