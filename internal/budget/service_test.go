@@ -677,7 +677,9 @@ func TestServiceCheckSkipsConsumerBudgetsForNonBillableProvider(t *testing.T) {
 	err = service.Check(ctx, Subjects{UserPath: "/team", Labels: []string{"prod"}}, now)
 	require.ErrorAs(t, err, &exceeded, "an unknown route is billable")
 
+	// New spend lands through a usage flush, which drops the cached spends.
 	store.sum = func(SpendWindow) (float64, bool, error) { return 200, true, nil }
+	service.UsageFlushFinished()
 	err = service.Check(ctx, Subjects{UserPath: "/team", Provider: "byok-openai"}, now)
 	require.ErrorAs(t, err, &exceeded, "provider budgets still cap a non-billable provider")
 	assert.Equal(t, ScopeProvider, exceeded.Result.Budget.Scope)

@@ -87,7 +87,7 @@ func (r *SQLReader) billedCost(ctx context.Context, params UsageQueryParams, cac
 // selecting only the columns EntryInputSegments needs. This is the dashboard
 // summary path, not a request hot path.
 func (r *SQLReader) accumulateInputSegments(ctx context.Context, where string, args []any, summary *UsageSummary) error {
-	rows, err := r.db.Query(ctx, `SELECT input_tokens, provider, raw_data FROM usage`+where, args...)
+	rows, err := r.db.Query(ctx, `SELECT input_tokens, provider, `+r.dialect.promptCacheRawData+` FROM usage`+where, args...)
 	if err != nil {
 		return fmt.Errorf("failed to query usage input segments: %w", err)
 	}
@@ -155,7 +155,7 @@ func (r *SQLReader) usageCacheStats(ctx context.Context, params UsageQueryParams
 	conditions = append(conditions, extraConditions...)
 	where := sqlutil.BuildWhereClause(conditions)
 
-	rows, err := r.db.Query(ctx, `SELECT model, provider, provider_name, user_path, endpoint, labels, cache_type, input_tokens, output_tokens, billed_cost, raw_data, timestamp FROM usage`+where, args...)
+	rows, err := r.db.Query(ctx, `SELECT model, provider, provider_name, user_path, endpoint, labels, cache_type, input_tokens, output_tokens, billed_cost, `+r.dialect.promptCacheRawData+`, timestamp FROM usage`+where, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query usage cache stats: %w", err)
 	}
@@ -487,7 +487,7 @@ func (r *SQLReader) GetDailyUsage(ctx context.Context, params UsageQueryParams) 
 	// Second pass: fold the per-period prompt-cache split from raw_data (the
 	// GROUP BY above cannot also return per-row raw_data), reusing the same
 	// group expression so the period keys line up.
-	splitRows, err := r.db.Query(ctx, `SELECT `+groupExpr+` AS period, cache_type, input_tokens, provider, raw_data FROM usage`+where, queryArgs...)
+	splitRows, err := r.db.Query(ctx, `SELECT `+groupExpr+` AS period, cache_type, input_tokens, provider, `+r.dialect.promptCacheRawData+` FROM usage`+where, queryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query daily input segments: %w", err)
 	}
@@ -624,7 +624,7 @@ func (r *SQLReader) GetTokenThroughput(ctx context.Context, gran ThroughputGranu
 	where := sqlutil.BuildWhereClause([]string{r.dialect.timeExpr + " >= ?", r.dialect.timeExpr + " < ?"})
 	args := []any{r.dialect.timeArg(time.Unix(first, 0)), r.dialect.timeArg(time.Unix(upper, 0))}
 
-	query := `SELECT ` + r.dialect.bucketExpr(offset, bucketSeconds) + ` AS bucket, cache_type, input_tokens, output_tokens, total_tokens, provider, raw_data
+	query := `SELECT ` + r.dialect.bucketExpr(offset, bucketSeconds) + ` AS bucket, cache_type, input_tokens, output_tokens, total_tokens, provider, ` + r.dialect.promptCacheRawData + `
 		FROM usage` + where
 
 	rows, err := r.db.Query(ctx, query, args...)

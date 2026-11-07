@@ -24,10 +24,21 @@ type Logger struct {
 	closed        atomic.Bool
 	liveMu        sync.RWMutex
 	livePublisher LiveEventPublisher
+	flushListener atomic.Pointer[flushListenerBox]
 	// writerID is stamped on every entry the logger flushes; see
 	// UsageEntry.Stamp.
 	writerID string
 }
+
+// FlushListener is told when a batch write starts and when it has finished,
+// so readers that cache usage-derived totals (budgets) can stop caching while
+// new rows may already be visible and drop what they cached before.
+type FlushListener interface {
+	UsageFlushStarted()
+	UsageFlushFinished()
+}
+
+type flushListenerBox struct{ listener FlushListener }
 
 // NewLogger creates a new async buffered Logger.
 // The logger starts a background goroutine for flushing entries.
@@ -101,6 +112,14 @@ func (l *Logger) SetLivePublisher(p LiveEventPublisher) {
 	l.liveMu.Lock()
 	defer l.liveMu.Unlock()
 	l.livePublisher = p
+}
+
+// SetFlushListener registers the listener told about every batch write.
+func (l *Logger) SetFlushListener(listener FlushListener) {
+	if l == nil {
+		return
+	}
+	l.flushListener.Store(&flushListenerBox{listener: listener})
 }
 
 func (l *Logger) publishLiveEvent(eventType string, entry *UsageEntry) {
@@ -202,6 +221,11 @@ func (l *Logger) flushLoop() {
 func (l *Logger) flushBatch(batch []*UsageEntry) {
 	if len(batch) == 0 {
 		return
+	}
+
+	if box := l.flushListener.Load(); box != nil && box.listener != nil {
+		box.listener.UsageFlushStarted()
+		defer box.listener.UsageFlushFinished()
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
