@@ -161,17 +161,11 @@
         <input
           id="playground-embeddings-dimensions"
           class="form-input"
-          type="number"
-          min="1"
-          step="1"
+          type="text"
+          inputmode="numeric"
+          autocomplete="off"
           placeholder={m.playground_media_default_option()}
-          value={media.embeddingDimensions}
-          oninput={(event) => {
-            // The raw text, not the parsed number: 256.0000000000000001 must stay
-            // invalid. Text the browser can't parse reads as "", so mark it invalid.
-            const input = event.currentTarget;
-            media.embeddingDimensions = input.validity.badInput ? "NaN" : input.value;
-          }}
+          bind:value={media.embeddingDimensions}
           disabled={media.sending}
         />
       </FormField>
