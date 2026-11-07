@@ -147,7 +147,8 @@ server:
 | `CACHE_REFRESH_INTERVAL` | 两次提供商模型重新发现之间的秒数 | `3600`（1 小时） |
 | `PROVIDER_RECHECK_INTERVAL` | 对上次刷新失败的提供商重新探测的间隔秒数（`0` 表示禁用） | `60` |
 | `MODEL_LIST_URL`    | 模型元数据目录：HTTP URL、本地文件路径（`/etc/gomodel/models.json` 或 `file://...`），或 `off` | GitHub 上的公共目录 |
-| `GOMODEL_OFFLINE`   | 离线（air-gap）开关：禁用更新检查并忽略 HTTP 目录 URL。本地目录文件和已配置的提供商不受影响 | `false` |
+| `GOMODEL_OFFLINE`   | 离线（air-gap）开关：禁用更新检查、忽略 HTTP 目录 URL，并停止 allowlist 提供商为获取元数据而调用 `/models`。本地目录文件和发往已配置提供商的推理请求不受影响 | `false` |
+| `ALLOWLIST_UPSTREAM_METADATA` | 在 `allowlist` 模式下，仅为补充已配置模型的元数据（上下文窗口、输出上限、价格、显示名称、模型类型）读取提供商的 `/models`，绝不新增模型。设为 `false` 可关闭该调用；离线模式会强制关闭 | `true` |
 | `REDIS_URL`         | Redis 连接 URL              | _（空）_        |
 | `REDIS_KEY_MODELS`     | 模型缓存的 Redis 键           | `gomodel:models`    |
 | `REDIS_KEY_RESPONSES`  | 响应缓存的 Redis 键        | `gomodel:response:` |
@@ -353,10 +354,10 @@ server:
 
 大多数提供商都可以通过 `<PROVIDER>_BASE_URL`（例如 `OPENAI_BASE_URL`）使用自定义 Base URL。Chutes AI 默认为 `https://llm.chutes.ai/v1`，可通过 `CHUTES_BASE_URL` 覆盖。DeepSeek 默认为 `https://api.deepseek.com`；仅在使用兼容代理或其他 DeepSeek 端点时才需设置 `DEEPSEEK_BASE_URL`。OpenRouter 默认为 `https://openrouter.ai/api/v1`，可通过 `OPENROUTER_BASE_URL` 覆盖。Kilo AI 默认为 `https://api.kilo.ai/api/gateway`，可通过 `KILO_BASE_URL` 覆盖。Eden AI 默认为 `https://api.edenai.run/v3`，可通过 `EDENAI_BASE_URL` 覆盖。Z.ai 默认为 `https://api.z.ai/api/paas/v4`；如需使用 GLM Coding Plan 端点，请设置 `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4`。设置了 `SGLANG_API_KEY` 时，SGLang 默认为 `http://localhost:30000/v1`，但无密钥部署应显式设置 `SGLANG_BASE_URL` 才能注册该提供商。vLLM 采用相同的模式，默认地址为 `http://localhost:8000/v1`。llama.cpp 的 `LLAMACPP_BASE_URL` 始终必填（llama-server 的默认端口与 GoModel 自身的 8080 冲突，因此没有默认值）；`LLAMACPP_API_KEY` 为可选。llm-d 没有通用端点，因此 `LLMD_BASE_URL` 始终必填；`LLMD_API_KEY` 为可选。Azure 使用 `AZURE_BASE_URL` 作为其部署的 Base URL，并可通过可选的 `AZURE_API_VERSION` 覆盖 API 版本，否则部署 URL 默认为 `2024-10-21`，`/openai/v1`（Azure AI Foundry）URL 则不发送版本。Oracle 需要 `ORACLE_BASE_URL`，因为其兼容 OpenAI 的端点因区域而异。
 
-每种提供商类型还接受通过 `<PROVIDER>_MODELS` 配置的逗号分隔模型列表，例如 `OPENROUTER_MODELS`、`ORACLE_MODELS`、`AZURE_MODELS`、`SGLANG_MODELS`、`VLLM_MODELS` 或 `LLMD_MODELS`。默认情况下，`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` 会让配置的列表成为该提供商的全部模型清单，并跳过其上游 `/models` 调用。设置为 `fallback` 时，仅在上游 `/models` 失败、返回 nil 或返回空列表时使用配置的列表；设置为 `merge` 时，会在上游模型清单之上追加配置的模型。没有 `/models` 端点（返回 404 或 405）的兼容 OpenAI 提供商会使用其配置的列表提供服务，并被报告为健康，这适用于语音转文字等单一 API 的服务器。YAML 中的 `providers.<name>.models` 为命名的提供商块提供相同的模型列表输入。
+每种提供商类型还接受通过 `<PROVIDER>_MODELS` 配置的逗号分隔模型列表，例如 `OPENROUTER_MODELS`、`ORACLE_MODELS`、`AZURE_MODELS`、`SGLANG_MODELS`、`VLLM_MODELS` 或 `LLMD_MODELS`。列表如何与提供商的 `/models` 结合，由 `CONFIGURED_PROVIDER_MODELS_MODE`（默认 `allowlist`）决定，单个提供商可用 `<PROVIDER>[_SUFFIX]_MODELS_MODE`（YAML：`providers.<name>.models_mode`）覆盖，例如 `OPENROUTER_MODELS_MODE=fallback`；参见[模型模式](/zh/advanced/config-yaml#模型模式)。没有 `/models` 端点（返回 404 或 405）的兼容 OpenAI 提供商会使用其配置的列表提供服务，并被报告为健康，这适用于语音转文字等单一 API 的服务器。YAML 中的 `providers.<name>.models` 为命名的提供商块提供相同的模型列表输入。
 
 <Warning>
-**不兼容变更：**默认模式以前是 `fallback`。配置了 `models:` 或 `<PROVIDER>_MODELS` 列表的提供商现在只提供这些模型，请求其他模型会返回 404（模型未找到）。如需恢复原有行为，请设置 `CONFIGURED_PROVIDER_MODELS_MODE=fallback`，或通过 `<PROVIDER>[_SUFFIX]_MODELS_MODE` / `models_mode` 单独覆盖某个提供商。
+**不兼容变更：**默认模式以前是 `fallback`。配置了列表的提供商现在只提供这些模型，其他模型返回 404。恢复原有行为的方法见[模型模式](/zh/advanced/config-yaml#模型模式)。
 </Warning>
 
 `GET /v1/models` 默认列出带提供商前缀的 ID（`openai/gpt-5`）。设置 `UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT=true`（YAML：`models.unqualified_model_ids_at_models_endpoint`）可改为列出不带前缀的模型 ID（`gpt-5`），适用于会根据列表校验所请求模型、且只认识纯名称的客户端。注意：当两个提供商暴露相同的模型 ID 时，只会列出不带前缀的请求所路由到的那个提供商（最先注册的那个）。可使用[虚拟模型](/zh/features/virtual-models#列出不带前缀的模型-id)将某个名称固定到特定提供商，例如 `source: gpt-5` 配合 `target: azure/gpt-5`。
@@ -556,10 +557,12 @@ export VERTEX_US_LOCATION="us-central1" # 注册 "vertex-us"，类型为 "vertex
 
 ```yaml
 models:
-  # allowlist 为默认值：配置的提供商模型列表即全部模型清单，并跳过上游 /models
-  # 调用。若仅在上游 /models 失败或为空时使用该列表，使用 fallback；如果要在发现的
-  # 模型清单之上追加配置的模型（提供商可提供但未列出的模型），使用 merge。
+  # 已配置模型列表的使用方式：allowlist（默认）、fallback 或 merge。
+  # 参见 config.yaml 指南中的“模型模式”表。
   configured_provider_models_mode: allowlist
+  # allowlist 仅为元数据读取上游 /models；设为 false 可关闭该调用
+  #（GOMODEL_OFFLINE=true 也会关闭）。
+  allowlist_upstream_metadata: true
   # 在 GET /v1/models 中列出不带前缀的模型 ID（gpt-5），而不是带提供商前缀的
   # ID（openai/gpt-5）。当两个提供商暴露相同 ID 时，只会列出不带前缀的请求所路由到的
   # 提供商（最先注册的那个）；可使用虚拟模型固定名称（source gpt-5 -> target azure/gpt-5）。
@@ -608,7 +611,7 @@ providers:
     # api_key 为可选项；仅当 launch_server 使用 --api-key 时才需设置。
     # api_key: "token-abc123"
 
-  # 为 fallback 或 allowlist 模式配置模型列表
+  # 配置模型列表（使用方式取决于模型模式）
   gemini:
     type: gemini
     api_key: "..."
@@ -628,7 +631,7 @@ providers:
 ```
 
 <Note>
-  `models:` 适用于所有提供商块。在 fallback 模式下，它是上游 `/models` 不可用或为空时的兜底；在 allowlist 模式下，它成为该提供商对外暴露的模型清单，并跳过上游 `/models`。关于 Oracle GenAI 所需的 OCI 策略和经过测试的配置，请参阅 [Oracle GenAI 指南](/zh/providers/oracle)。
+  `models:` 适用于所有提供商块；它与上游 `/models` 如何结合取决于[模型模式](/zh/advanced/config-yaml#模型模式)。关于 Oracle GenAI 所需的 OCI 策略和经过测试的配置，请参阅 [Oracle GenAI 指南](/zh/providers/oracle)。
 </Note>
 
 ### Ollama（本地模型）

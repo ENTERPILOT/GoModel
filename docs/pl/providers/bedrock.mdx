@@ -112,9 +112,10 @@ Responses API są wewnętrznie mapowane na Converse.
 
 ## Ograniczanie lub rozszerzanie listy modeli
 
-Domyślnie GoModel odpytuje control plane Bedrocka i wypisuje wszystkie modele tekstowe
-on-demand, do których konto ma dostęp. Żeby przypiąć identyfikatory inference profile lub ARN-y
-niestandardowych modeli:
+Bez skonfigurowanej listy GoModel odpytuje control plane Bedrocka i wypisuje wszystkie
+modele tekstowe on-demand, do których konto ma dostęp. Żeby przypiąć identyfikatory
+inference profile lub ARN-y niestandardowych modeli, ustaw listę; w domyślnym trybie
+modeli udostępniane są wtedy tylko te modele:
 
 ```bash
 BEDROCK_MODELS=anthropic.claude-3-5-haiku-20241022-v1:0,amazon.nova-lite-v1:0
@@ -132,10 +133,9 @@ providers:
       - amazon.nova-lite-v1:0
 ```
 
-Zachowanie zależy od globalnego `CONFIGURED_PROVIDER_MODELS_MODE` – `allowlist`
-(domyślnie) udostępnia tylko skonfigurowane modele i pomija wywołanie upstreamu;
-`fallback` używa listy tylko wtedy, gdy `ListFoundationModels` jest niedostępne lub puste.
-`merge` dodaje skonfigurowane modele do wykrytych. Aby zmienić tryb tylko dla
+Listą upstream Bedrocka jest `ListFoundationModels`; sposób łączenia z nią
+skonfigurowanej listy zależy od [trybu modeli](/pl/advanced/config-yaml#tryby-modeli) (domyślnie udostępniane są
+tylko skonfigurowane modele). Aby zmienić tryb tylko dla
 Bedrocka, ustaw `BEDROCK_MODELS_MODE` (YAML: `providers.<name>.models_mode`).
 
 ## Wielu providerów Bedrock

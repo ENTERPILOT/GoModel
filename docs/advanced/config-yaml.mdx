@@ -43,18 +43,22 @@ example `OPENROUTER_MODELS`, `ORACLE_MODELS`, `AZURE_MODELS`, `SGLANG_MODELS`,
 
 `CONFIGURED_PROVIDER_MODELS_MODE` (YAML: `models.configured_provider_models_mode`) decides how a provider's configured list combines with what its `/models` endpoint returns. It only matters for providers that define a list.
 
-| Mode | Calls upstream `/models` | Exposes | Use when |
-|---|---|---|---|
-| `allowlist` (default) | No | Only your list | You want exactly these models, e.g. one model from OpenRouter |
-| `fallback` | Yes | The upstream list; your list only if `/models` fails or returns nothing | `/models` is sometimes unavailable, but discovery should drive the list |
-| `merge` | Yes | The upstream list plus your models it doesn't include; falls back like `fallback` when `/models` fails | A provider serves models it does not list (preview or unlisted IDs) |
+| Mode | Exposes | Use when |
+|---|---|---|
+| `allowlist` (default) | Only your list | You want exactly these models, e.g. one model from OpenRouter |
+| `fallback` | The upstream list; your list only if `/models` fails or returns nothing | `/models` is sometimes unavailable, but discovery should drive the list |
+| `merge` | The upstream list plus your models it doesn't include; falls back like `fallback` when `/models` fails | A provider serves models it does not list (preview or unlisted IDs) |
+
+With `allowlist`, only the configured IDs are served: models the provider lists but you didn't configure are never added, and requests for any other model return 404 (model not found). To let discovery drive the list again, set `CONFIGURED_PROVIDER_MODELS_MODE=fallback`, or override one provider with `<PROVIDER>[_SUFFIX]_MODELS_MODE` / `models_mode`.
+
+`fallback` and `merge` read the provider's `/models` on every refresh. `allowlist` reads it only for metadata — context window, max output tokens, pricing, display name, and model type — for your listed models, while `ALLOWLIST_UPSTREAM_METADATA` is `true` (the default; YAML: `models.allowlist_upstream_metadata`) and `GOMODEL_OFFLINE` is off. That call never adds models, but upstream prices can decide which configured models pass a `model_filter.max_price_per_mtok` cap. If it fails, the metadata from the last successful listing is kept.
 
 <Warning>
-**Breaking change:** the default used to be `fallback`. A provider with a
-`models:` or `<PROVIDER>_MODELS` list now serves only those models, and requests
-for any other model return 404 (model not found). To restore the old behavior,
-set `CONFIGURED_PROVIDER_MODELS_MODE=fallback`, or override a single provider
-with `<PROVIDER>[_SUFFIX]_MODELS_MODE` / `models_mode`.
+**Breaking change:** the default used to be `fallback`. Under the default
+`allowlist` mode, providers with a `models:` or `<PROVIDER>_MODELS` list now
+serve only those models (providers set to `fallback` or `merge` are
+unaffected); set
+`CONFIGURED_PROVIDER_MODELS_MODE=fallback` to keep the old behavior.
 </Warning>
 
 Set `models_mode` on a provider to override the global mode for that provider

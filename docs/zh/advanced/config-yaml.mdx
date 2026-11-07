@@ -40,14 +40,18 @@ Google Vertex AI 遵循相同的后缀命名规则（`VERTEX_US_PROJECT`
 
 `CONFIGURED_PROVIDER_MODELS_MODE`（YAML：`models.configured_provider_models_mode`）决定提供商的已配置列表如何与其 `/models` 接口的返回结果结合。仅对定义了列表的提供商生效。
 
-| 模式 | 是否调用上游 `/models` | 暴露的模型 | 适用场景 |
-|---|---|---|---|
-| `allowlist`（默认） | 否 | 仅你的列表 | 只想要这些模型，例如 OpenRouter 中的某一个模型 |
-| `fallback` | 是 | 上游列表；仅当 `/models` 失败或无返回时使用你的列表 | `/models` 偶尔不可用，但仍希望由自动发现决定列表 |
-| `merge` | 是 | 上游列表加上其中缺少的你的模型；`/models` 失败时行为同 `fallback` | 提供商提供但未列出的模型（预览版或未列出的 ID） |
+| 模式 | 暴露的模型 | 适用场景 |
+|---|---|---|
+| `allowlist`（默认） | 仅你的列表 | 只想要这些模型，例如 OpenRouter 中的某一个模型 |
+| `fallback` | 上游列表；仅当 `/models` 失败或无返回时使用你的列表 | `/models` 偶尔不可用，但仍希望由自动发现决定列表 |
+| `merge` | 上游列表加上其中缺少的你的模型；`/models` 失败时行为同 `fallback` | 提供商提供但未列出的模型（预览版或未列出的 ID） |
+
+在 `allowlist` 模式下只提供已配置的 ID：提供商列出但你未配置的模型绝不会被加入，请求其他模型会返回 404（模型未找到）。如需重新由自动发现决定列表，请设置 `CONFIGURED_PROVIDER_MODELS_MODE=fallback`，或通过 `<PROVIDER>[_SUFFIX]_MODELS_MODE` / `models_mode` 单独覆盖某个提供商。
+
+`fallback` 和 `merge` 每次刷新都会读取提供商的 `/models`。`allowlist` 仅为你列出的模型读取元数据——上下文窗口、输出上限、价格、显示名称和模型类型——前提是 `ALLOWLIST_UPSTREAM_METADATA` 为 `true`（默认；YAML：`models.allowlist_upstream_metadata`）且未开启 `GOMODEL_OFFLINE`。该调用绝不会新增模型，但上游价格可能决定哪些已配置模型能通过 `model_filter.max_price_per_mtok` 上限。调用失败时会保留上一次成功读取的元数据。
 
 <Warning>
-**不兼容变更：**默认模式以前是 `fallback`。配置了 `models:` 或 `<PROVIDER>_MODELS` 列表的提供商现在只提供这些模型，请求其他模型会返回 404（模型未找到）。如需恢复原有行为，请设置 `CONFIGURED_PROVIDER_MODELS_MODE=fallback`，或通过 `<PROVIDER>[_SUFFIX]_MODELS_MODE` / `models_mode` 单独覆盖某个提供商。
+**不兼容变更：**默认模式以前是 `fallback`。在默认的 `allowlist` 模式下，配置了 `models:` 或 `<PROVIDER>_MODELS` 列表的提供商现在只提供这些模型（设为 `fallback` 或 `merge` 的提供商不受影响）；设置 `CONFIGURED_PROVIDER_MODELS_MODE=fallback` 可保留原有行为。
 </Warning>
 
 在单个提供商上设置 `models_mode` 可仅为该提供商覆盖全局模式；不设置时使用全局模式。例如，只暴露一个 OpenRouter 模型，而自托管提供商继续自动发现各自的模型：

@@ -56,7 +56,7 @@ GITHUB_COPILOT_BASE_URL=https://api.business.githubcopilot.com
 
 ## 模型
 
-默认情况下（`allowlist` 模式），模型清单仅由 `GITHUB_COPILOT_MODELS` 构成：将模型加入其中即可提供该模型。若要改为从 Copilot 的 `/models` 列出模型，请设置 `GITHUB_COPILOT_MODELS_MODE=fallback` 或 `merge`（或全局的 `CONFIGURED_PROVIDER_MODELS_MODE`）。在这些模式下，套餐列出但账号未启用的模型（policy 为 `disabled`）会被略去；在 [Copilot 设置](https://github.com/settings/copilot/features)中启用后，它们会在下一次刷新模型时出现。
+设置 `GITHUB_COPILOT_MODELS` 后，默认只提供这些模型（参见[模型模式](/zh/advanced/config-yaml#模型模式)）；将模型加入其中即可提供，或设置 `GITHUB_COPILOT_MODELS_MODE=fallback` 或 `merge` 从 Copilot 的 `/models` 列出模型。该列表会略去套餐列出但账号未启用的模型（policy 为 `disabled`）；在 [Copilot 设置](https://github.com/settings/copilot/features)中启用后，它们会在下一次刷新模型时出现。
 
 如只想提供列出模型中的一部分，请[过滤](/zh/advanced/config-yaml#过滤提供商的模型)列表：
 
@@ -64,7 +64,7 @@ GITHUB_COPILOT_BASE_URL=https://api.business.githubcopilot.com
 GITHUB_COPILOT_MODEL_FILTER_INCLUDE=claude-sonnet-5.5,gpt-5.6-luna,gpt-4.1
 ```
 
-与模型清单无关，该提供商仍会按需读取 Copilot 的 `/models`，以确定每个模型支持哪些端点（Responses 或 chat completions），因此 `allowlist` 模式并不意味着完全不访问 `/models`。若该查询失败，未知模型会被发送到 `/chat/completions`。
+每次列出模型也会刷新每个模型支持的端点。在首次列出之前，或对列表中没有的模型，该提供商会按需读取 `/models`；若读取失败，该模型会被发送到 `/chat/completions`。
 
 ## 每个模型都支持 Chat Completions 和 Responses
 

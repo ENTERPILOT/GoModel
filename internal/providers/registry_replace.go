@@ -62,9 +62,8 @@ func (r *ModelRegistry) replaceProvider(provider core.Provider, providerName, pr
 
 	// The new mode decides what the inherited inventory keeps, so it is in
 	// place before the inheritance below reads it.
-	modelsMode := config.NormalizeConfiguredProviderModelsMode(settings.modelsMode)
 	previousMode := r.providerModelsModeLocked(providerName)
-	setOrDelete(&r.providerModelsModes, providerName, modelsMode, modelsMode != "")
+	r.setProviderModelsModeLocked(providerName, settings.modelsMode)
 
 	previous := r.discoveredByProvider[providerName]
 	inherits := replaced && previousType == providerType && len(previous) > 0
@@ -137,15 +136,7 @@ func (r *ModelRegistry) swapProviderLocked(provider core.Provider, providerName,
 // next to a successful listing.
 // Caller must hold r.mu for writing.
 func (r *ModelRegistry) reboundInventoryLocked(previous map[string]*ModelInfo, provider core.Provider, providerName, providerType string, listing bool) map[string]*ModelInfo {
-	listed := &core.ModelsResponse{Object: "list", Data: make([]core.Model, 0, len(previous))}
-	for _, info := range previous {
-		if info == nil {
-			continue
-		}
-		model := info.Model
-		model.Metadata = info.Discovered.Clone()
-		listed.Data = append(listed.Data, model)
-	}
+	listed := listingFromInventory(previous)
 	mode := r.providerModelsModeLocked(providerName)
 	if mode == config.ConfiguredProviderModelsModeFallback && !listing {
 		mode = config.ConfiguredProviderModelsModeMerge

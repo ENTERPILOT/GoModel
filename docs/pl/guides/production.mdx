@@ -298,22 +298,30 @@ GOMODEL_OFFLINE=true
 | [Katalog modeli](/pl/advanced/model-metadata) pod `MODEL_LIST_URL` | Ceny, okna kontekstu i możliwości modeli, pobierane przy starcie i przy każdym odświeżeniu cache'u | włączone |
 
 `GOMODEL_OFFLINE=true` (lub `offline: true` w `config.yaml`) wyłącza
-sprawdzanie aktualizacji i pomija każdy URL katalogu HTTP. Jest stosowane po wszystkich innych
+sprawdzanie aktualizacji, pomija każdy URL katalogu HTTP i wyłącza pobieranie
+metadanych z `/models` przez providerów w trybie `allowlist`. Jest stosowane po wszystkich innych
 ustawieniach, więc nic w `config.yaml` ani w zmiennych środowiskowych nie może pod spodem ponownie włączyć
-wywołania wychodzącego. Wywołania do skonfigurowanych providerów i do wszystkiego, co
+wywołania wychodzącego. Wywołania inferencji do skonfigurowanych providerów i do wszystkiego, co
 zadeklarujesz samodzielnie, na przykład kolektora OTLP, upstreamów MCP czy magazynu
 wektorowego, pozostają nietknięte. Log startowy potwierdza tryb.
 
-Oba wywołania możesz też kontrolować osobno za pomocą
-`GOMODEL_VERSION_CHECK_ENABLED=false` i `MODEL_LIST_URL=off`.
+Te wywołania możesz też kontrolować osobno za pomocą
+`GOMODEL_VERSION_CHECK_ENABLED=false`, `MODEL_LIST_URL=off` i
+`ALLOWLIST_UPSTREAM_METADATA=false`.
 
 Pobieranie katalogu działa na zasadzie best-effort. Gdy jest wyłączone lub się nie powiedzie, gateway
-uruchamia się normalnie, `/health` i `/health/ready` zwracają `200`, wykrywanie modeli u providerów nadal
-działa, ponieważ listy modeli pochodzą z własnego endpointu `/models` każdego providera,
-a requesty są normalnie routowane. Tracisz natomiast wzbogacanie metadanymi.
+uruchamia się normalnie, `/health` i `/health/ready` zwracają `200`, listy modeli nadal
+pochodzą z własnego endpointu `/models` każdego providera (a u providerów w trybie
+`allowlist` ze skonfigurowanej listy, która nie wymaga wykrywania w upstreamie),
+a requesty są normalnie routowane. Tracisz natomiast wzbogacanie z katalogu;
+metadane, które provider zwraca we własnym `/models` (także przez wywołanie po
+metadane w trybie `allowlist`, o ile nie ustawiono
+`ALLOWLIST_UPSTREAM_METADATA=false`), nadal obowiązują.
 
 <Warning>
-  Bez wzbogacania metadanymi modele **nie mają cen**. Śledzenie kosztów
+  Bez wzbogacania z katalogu model **nie ma cen**, chyba że provider podaje je
+  w `/models` albo zadeklarujesz je sam (`models[].metadata.pricing` w
+  `config.yaml` lub nadpisanie cen w dashboardzie). Śledzenie kosztów
   nie raportuje wtedy żadnych kosztów, a ponieważ [budżety](/pl/features/budgets) odczytują wydatki z rekordów
   kosztów użycia, budżety nie mają czego obciążać i nie będą egzekwować
   limitów wydatków.

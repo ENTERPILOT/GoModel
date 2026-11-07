@@ -64,12 +64,11 @@ Endpoint Twojego konta to `endpoints.api` w odpowiedzi na
 
 ## Modele
 
-Domyślnie (tryb `allowlist`) inwentarz modeli to wyłącznie
-`GITHUB_COPILOT_MODELS`: dodaj tam model, aby go udostępnić. Aby zamiast tego
-pobierać listę z `/models` Copilota, ustaw `GITHUB_COPILOT_MODELS_MODE=fallback`
-lub `merge` (albo globalne `CONFIGURED_PROVIDER_MODELS_MODE`). W tych trybach
-modele, które Twój plan wymienia, ale które nie są włączone na koncie (policy
-`disabled`), są pomijane; włącz je w
+Przy ustawionym `GITHUB_COPILOT_MODELS` domyślnie udostępniane są tylko te modele
+(zobacz [Tryby modeli](/pl/advanced/config-yaml#tryby-modeli)); dodaj tam model, aby go udostępnić, albo ustaw
+`GITHUB_COPILOT_MODELS_MODE=fallback` lub `merge`, aby pobierać listę z `/models`
+Copilota. Ta lista pomija modele, które Twój plan wymienia, ale które nie są
+włączone na koncie (policy `disabled`); włącz je w
 [ustawieniach Copilota](https://github.com/settings/copilot/features), a
 pojawią się przy następnym odświeżeniu modeli.
 
@@ -80,10 +79,10 @@ Aby udostępniać tylko część wymienionych modeli,
 GITHUB_COPILOT_MODEL_FILTER_INCLUDE=claude-sonnet-5.5,gpt-5.6-luna,gpt-4.1
 ```
 
-Niezależnie od inwentarza provider nadal odczytuje `/models` Copilota na
-żądanie, aby ustalić, które endpointy obsługuje dany model (Responses czy chat
-completions), więc tryb `allowlist` nie oznacza braku ruchu do `/models`. Jeśli
-to zapytanie się nie powiedzie, nieznany model trafia do `/chat/completions`.
+Każde listowanie odświeża też, które endpointy obsługuje każdy model. Przed
+pierwszym listowaniem lub dla modelu, którego lista nie zawiera, provider
+odpytuje `/models` na żądanie; jeśli to się nie powiedzie, model trafia do
+`/chat/completions`.
 
 ## Chat completions i Responses dla każdego modelu
 

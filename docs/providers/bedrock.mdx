@@ -112,9 +112,10 @@ Responses API are bridged onto Converse internally.
 
 ## Restrict or extend the model list
 
-By default GoModel queries Bedrock's control plane and lists all on-demand
-text models the account has access to. To pin inference profile IDs or custom
-model ARNs:
+Without a configured list, GoModel queries Bedrock's control plane and lists
+all on-demand text models the account has access to. To pin inference profile
+IDs or custom model ARNs, set a list; with the default models mode only those
+models are then served:
 
 ```bash
 BEDROCK_MODELS=anthropic.claude-3-5-haiku-20241022-v1:0,amazon.nova-lite-v1:0
@@ -132,12 +133,10 @@ providers:
       - amazon.nova-lite-v1:0
 ```
 
-Behavior follows the global `CONFIGURED_PROVIDER_MODELS_MODE` — `allowlist`
-(default) exposes only configured models and skips the upstream call;
-`fallback` uses the list only when `ListFoundationModels` is unavailable or
-empty.
-`merge` adds the configured models to the discovered ones. To change the mode
-for Bedrock only, set `BEDROCK_MODELS_MODE` (YAML: `providers.<name>.models_mode`).
+Bedrock's upstream listing is `ListFoundationModels`; how the configured list
+combines with it follows the [models mode](/advanced/config-yaml#models-modes)
+(by default only the configured models are served). To change the mode for
+Bedrock only, set `BEDROCK_MODELS_MODE` (YAML: `providers.<name>.models_mode`).
 
 ## Multiple Bedrock providers
 

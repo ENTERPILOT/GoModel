@@ -211,17 +211,17 @@ GOMODEL_OFFLINE=true
 | 访问 `GOMODEL_VERSION_CHECK_URL` 的[更新检查](/zh/advanced/version-awareness) | 每天获取最新的发布版本号，附带匿名安装 ID | 开启 |
 | 访问 `MODEL_LIST_URL` 的[模型目录](/zh/advanced/model-metadata) | 定价、上下文窗口和能力信息，在启动时及每次缓存刷新时获取 | 开启 |
 
-`GOMODEL_OFFLINE=true`（或 `config.yaml` 中的 `offline: true`）会禁用更新检查，并丢弃所有 HTTP 目录 URL。它在所有其他设置之后应用，
-因此 `config.yaml` 或环境变量中的任何内容都无法在其之下重新启用出站调用。对已配置提供商的调用，以及对您自行声明的任何服务
+`GOMODEL_OFFLINE=true`（或 `config.yaml` 中的 `offline: true`）会禁用更新检查、丢弃所有 HTTP 目录 URL，并停止 `allowlist` 模式的提供商为获取元数据而调用 `/models`。它在所有其他设置之后应用，
+因此 `config.yaml` 或环境变量中的任何内容都无法在其之下重新启用出站调用。对已配置提供商的推理调用，以及对您自行声明的任何服务
 （例如 OTLP 采集器、MCP 上游或向量存储）的调用不受影响。启动日志会确认该模式。
 
-您也可以通过 `GOMODEL_VERSION_CHECK_ENABLED=false` 和 `MODEL_LIST_URL=off` 分别控制这两种调用。
+您也可以通过 `GOMODEL_VERSION_CHECK_ENABLED=false`、`MODEL_LIST_URL=off` 和 `ALLOWLIST_UPSTREAM_METADATA=false` 分别控制这些调用。
 
-目录获取是尽力而为的。当它被关闭或失败时，网关会正常启动，`/health` 和 `/health/ready` 返回 `200`，提供商模型发现仍然有效，
-因为模型列表来自各提供商自己的 `/models` 端点，请求也会正常路由。您失去的是元数据补充。
+目录获取是尽力而为的。当它被关闭或失败时，网关会正常启动，`/health` 和 `/health/ready` 返回 `200`，模型列表仍来自各提供商自己的 `/models` 端点
+（`allowlist` 提供商则来自已配置列表，无需上游发现），请求也会正常路由。您失去的是来自目录的元数据补充；提供商在其自身 `/models` 中报告的元数据（包括 `allowlist` 模式下的元数据调用，除非设置了 `ALLOWLIST_UPSTREAM_METADATA=false`）仍然生效。
 
 <Warning>
-  没有元数据补充时，模型**没有定价**。此时成本追踪不会报告任何成本；由于[预算](/zh/features/budgets)从用量成本记录中读取支出，
+  没有目录补充时，除非提供商在 `/models` 中报告价格，或你自行声明价格（`config.yaml` 中的 `models[].metadata.pricing`，或控制台中的价格覆盖），否则模型**没有定价**。此时成本追踪不会报告任何成本；由于[预算](/zh/features/budgets)从用量成本记录中读取支出，
   预算将无从扣费，也就无法执行支出限制。
 </Warning>
 
