@@ -52,6 +52,8 @@ func configModel(entry config.VirtualModelConfig) (VirtualModel, error) {
 		UserPaths:       entry.UserPaths,
 		Description:     entry.Description,
 		Slowdown:        entry.Slowdown,
+		ContextWindow:   entry.ContextWindow,
+		MaxOutputTokens: entry.MaxOutputTokens,
 		ReasoningEffort: entry.ReasoningEffort,
 		Params:          params,
 		DefaultParams:   defaultParams,
