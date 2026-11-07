@@ -147,8 +147,9 @@ routet dann in dieser Reihenfolge weiter mit:
 
 Diese Reihenfolge und die folgenden erneuten Prüfungen gelten in den Modi
 `fallback` und `merge`. Im Standardmodus `allowlist` bedient ein Provider mit
-konfigurierter Liste nur Modelle aus dieser Liste (vorbehaltlich `model_filter`); `/models` liefert nur Metadaten, und
-eine fehlgeschlagene Abfrage behält die letzten Metadaten und verschlechtert
+konfigurierter Liste nur Modelle aus dieser Liste (vorbehaltlich `model_filter`); `/models` liefert nur Metadaten, und das
+nur, solange `ALLOWLIST_UPSTREAM_METADATA` aktiv und der Offline-Modus aus ist. Eine
+fehlgeschlagene Abfrage behält die letzten Metadaten und verschlechtert
 nie den Zustand des Providers (siehe [Modellmodi](/de/advanced/config-yaml#modellmodi)).
 
 Fehlgeschlagene Provider werden alle `PROVIDER_RECHECK_INTERVAL` Sekunden erneut geprüft

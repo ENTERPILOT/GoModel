@@ -221,7 +221,7 @@ GOMODEL_OFFLINE=true
 （`allowlist` 提供商则来自已配置列表，无需上游发现），请求也会正常路由。您失去的是来自目录的元数据补充；提供商在其自身 `/models` 中报告的元数据（包括 `allowlist` 模式下的元数据调用，除非设置了 `ALLOWLIST_UPSTREAM_METADATA=false`）仍然生效。
 
 <Warning>
-  没有目录补充时，若提供商未在其 `/models` 中报告价格，模型**没有定价**。此时成本追踪不会报告任何成本；由于[预算](/zh/features/budgets)从用量成本记录中读取支出，
+  没有目录补充时，除非提供商在 `/models` 中报告价格，或你自行声明价格（`config.yaml` 中的 `models[].metadata.pricing`，或控制台中的价格覆盖），否则模型**没有定价**。此时成本追踪不会报告任何成本；由于[预算](/zh/features/budgets)从用量成本记录中读取支出，
   预算将无从扣费，也就无法执行支出限制。
 </Warning>
 

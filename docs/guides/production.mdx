@@ -317,8 +317,9 @@ reports in its own `/models` (including the allowlist metadata call, unless
 `ALLOWLIST_UPSTREAM_METADATA=false`) still applies.
 
 <Warning>
-  Without catalog enrichment, models whose provider does not report prices in
-  its own `/models` have **no pricing**. Cost tracking then
+  Without catalog enrichment, a model has **no pricing** unless its provider
+  reports prices in `/models` or you declare them (`models[].metadata.pricing`
+  in `config.yaml`, or a dashboard pricing override). Cost tracking then
   reports no cost, and since [budgets](/features/budgets) read spend from usage
   cost records, budgets have nothing to charge against and will not enforce
   spend limits.

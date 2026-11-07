@@ -147,7 +147,8 @@ keeps routing with, in order:
 
 This ordering, and the rechecks below, apply in `fallback` and `merge` modes.
 Under the default `allowlist`, a provider with a configured list serves only
-models from that list (subject to `model_filter`); its `/models` is read only for metadata, and a failed listing keeps
+models from that list (subject to `model_filter`); its `/models` is read only for metadata, and only while
+`ALLOWLIST_UPSTREAM_METADATA` is on and offline mode is off. A failed metadata listing keeps
 the last metadata and never degrades the provider's health (see
 [Models modes](/advanced/config-yaml#models-modes)).
 
