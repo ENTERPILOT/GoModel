@@ -75,6 +75,19 @@ class McpServersState {
   catalogError = $state("");
   catalog = $state(defaultMcpCatalog());
 
+  // All-tools view: every server's catalog, fetched together. Each entry is
+  // { server, status, last_error, catalog, error }.
+  toolCatalogOpen = $state(false);
+  toolCatalogLoading = $state(false);
+  toolCatalogEntries = $state([]);
+  toolCatalogQuery = $state("");
+  // "" is the aggregated /mcp endpoint; otherwise a virtual server's name.
+  toolCatalogScope = $state("");
+  toolCatalogShowExcluded = $state(false);
+  // Bumped per open and close, so a load for a view that was closed or
+  // reopened cannot overwrite the current one.
+  #toolCatalogSeq = 0;
+
   filtered = $derived(filterMcpServers(this.servers, this.filter));
 
   #pollTimer = null;
@@ -702,6 +715,48 @@ class McpServersState {
       console.error("Failed to load MCP server catalog:", e);
       return { error: m.mcp_catalog_load_failed() };
     }
+  }
+
+  // openToolCatalog loads every server's catalog in parallel for the
+  // combined view, reusing the per-server endpoint. One failing server is
+  // reported in its entry and does not hide the others.
+  async openToolCatalog() {
+    const seq = ++this.#toolCatalogSeq;
+    const servers = [...(this.servers || [])];
+    this.toolCatalogOpen = true;
+    this.toolCatalogLoading = true;
+    this.toolCatalogEntries = [];
+    this.toolCatalogQuery = "";
+    this.toolCatalogScope = "";
+    this.toolCatalogShowExcluded = false;
+
+    const loaded = await Promise.all(servers.map((server) => this.#fetchCatalog(server)));
+    if (seq !== this.#toolCatalogSeq) {
+      return;
+    }
+    // The API key changed mid-load: these catalogs belong to the old key.
+    if (loaded.some((item) => item.stale)) {
+      this.closeToolCatalog();
+      return;
+    }
+    this.toolCatalogEntries = servers.map((server, index) => ({
+      server: mcpServerSlug(server),
+      status: loaded[index].catalog?.status || mcpServerStatus(server),
+      last_error: String(server.last_error || ""),
+      catalog: loaded[index].catalog || null,
+      error: loaded[index].error || "",
+    }));
+    this.toolCatalogLoading = false;
+  }
+
+  closeToolCatalog() {
+    this.#toolCatalogSeq += 1;
+    this.toolCatalogOpen = false;
+    this.toolCatalogLoading = false;
+    this.toolCatalogEntries = [];
+    this.toolCatalogQuery = "";
+    this.toolCatalogScope = "";
+    this.toolCatalogShowExcluded = false;
   }
 
   closeCatalog() {
