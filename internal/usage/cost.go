@@ -191,34 +191,43 @@ var openAICompatibleTokenCostMappings = []tokenCostMapping{
 	{rawDataKey: "completion_audio_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.AudioOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
 }
 
+// anthropicCacheTokenCostMappings prices Anthropic and Bedrock rows. Their
+// translated usage follows the OpenAI shape: input_tokens covers the whole
+// prompt, with cache reads and writes itemized as prompt_cached_tokens and
+// prompt_cache_write_tokens. Rows recorded before that, and rows from native
+// Anthropic Messages traffic, carry the Anthropic-named counts instead, which
+// come on top of input_tokens. They are listed first so a row carrying both
+// names (older Responses traffic) is priced once, by the Anthropic count.
+var anthropicCacheTokenCostMappings = []tokenCostMapping{
+	{rawDataKey: "cache_read_input_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok},
+	{rawDataKey: "cache_creation_input_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CacheWritePerMtok }, side: sideInput, unit: unitPerMtok},
+	{rawDataKey: "cache_write_input_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CacheWritePerMtok }, side: sideInput, unit: unitPerMtok},
+	{rawDataKey: "prompt_cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
+	{rawDataKey: "prompt_cache_write_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CacheWritePerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
+	// usage.cache_creation splits the cache writes by TTL. 1-hour writes cost
+	// more than the 5-minute writes the total was already priced at, so only
+	// the surcharge is added here.
+	{rawDataKey: "cache_creation_ephemeral_1h_input_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CacheWrite1hPerMtok }, side: sideInput, unit: unitPerMtok, includedIn: func(p *core.ModelPricing) *float64 { return p.CacheWritePerMtok }},
+	{rawDataKey: "reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
+	{rawDataKey: "completion_reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
+	// Native Messages streams report output_tokens_details.thinking_tokens,
+	// which the stream observer records under this name.
+	{rawDataKey: "completion_thinking_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
+}
+
 // providerMappings defines the per-provider RawData key to pricing field
 // mappings. Providers not listed here fall back to
 // openAICompatibleTokenCostMappings (see tokenCostMappingsForProvider): every
 // other registered provider type (xiaomi, deepseek, zai, minimax, bailian,
 // oracle, azure, sglang, vllm, ollama, opencode_go, …) speaks the OpenAI usage schema,
 // so its cached/reasoning/audio token breakdowns must be priced the same way.
-// Only providers whose usage schema differs (anthropic, gemini) or that report
+// Only providers whose usage schema differs (anthropic, bedrock, gemini) or that report
 // extra token types (xai) need an explicit entry.
 var providerMappings = map[string][]tokenCostMapping{
 	"openai":     openAICompatibleTokenCostMappings,
 	"openrouter": openAICompatibleTokenCostMappings,
-	"anthropic": {
-		{rawDataKey: "cache_read_input_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok},
-		// The Responses surface reports cache reads in the OpenAI shape
-		// (input_tokens_details.cached_tokens), which usage extraction turns
-		// into prompt_cached_tokens. Price it like the Anthropic-named count so
-		// a cache hit replayed from a stored response body keeps its rate.
-		{rawDataKey: "prompt_cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok},
-		{rawDataKey: "cache_creation_input_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CacheWritePerMtok }, side: sideInput, unit: unitPerMtok},
-		// usage.cache_creation splits cache_creation_input_tokens by TTL.
-		// 1-hour writes cost more than the 5-minute writes the total was
-		// already priced at, so only the surcharge is added here.
-		{rawDataKey: "cache_creation_ephemeral_1h_input_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CacheWrite1hPerMtok }, side: sideInput, unit: unitPerMtok, includedIn: func(p *core.ModelPricing) *float64 { return p.CacheWritePerMtok }},
-		{rawDataKey: "completion_reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
-		// Native Messages streams report output_tokens_details.thinking_tokens,
-		// which the stream observer records under this name.
-		{rawDataKey: "completion_thinking_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
-	},
+	"anthropic":  anthropicCacheTokenCostMappings,
+	"bedrock":    anthropicCacheTokenCostMappings,
 	"gemini": {
 		{rawDataKey: "cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
 		{rawDataKey: "prompt_cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok, includedInBase: true},
@@ -300,6 +309,10 @@ func CalculateGranularCost(inputTokens, outputTokens int, rawData map[string]any
 	// rawData keys map to the same pricing field (e.g. cached_tokens and prompt_cached_tokens
 	// both map to CachedInputPerMtok).
 	appliedFields := make(map[*float64]bool)
+	// Split the cache counts the way EntryInputSegments does, so the cost and
+	// the input breakdown agree on whether the cache is part of inputTokens.
+	uncachedInput, cachedInput, cacheWriteInput := EntryInputSegments(UsageLogEntry{InputTokens: inputTokens, RawData: rawData})
+	cacheInInput := uncachedInput+cachedInput+cacheWriteInput == int64(inputTokens)
 	for _, m := range tokenCostMappingsForProvider(providerType) {
 		count := extractInt(rawData, m.rawDataKey)
 		if count == 0 {
@@ -318,13 +331,26 @@ func CalculateGranularCost(inputTokens, outputTokens int, rawData map[string]any
 		appliedFields[rate] = true
 
 		effectiveRate := *rate
-		if m.includedInBase && m.unit == unitPerMtok {
+		// A count larger than the input it would be part of cannot be part of
+		// it: a Claude Responses body cached before input_tokens included the
+		// cache reports its cache reads on top of input_tokens.
+		includedInBase := m.includedInBase && (m.side != sideInput || count <= inputTokens)
+		if rate == pricing.CachedInputPerMtok || rate == pricing.CacheWritePerMtok {
+			includedInBase = includedInBase && cacheInInput
+		}
+		if includedInBase && m.unit == unitPerMtok {
 			if baseRate := baseRateForSide(pricing, m.side); baseRate != nil {
 				effectiveRate -= *baseRate
 			}
 		}
 		if m.includedIn != nil {
-			if paidRate := m.includedIn(pricing); paidRate != nil {
+			paidRate := m.includedIn(pricing)
+			// Without their own rate, cache writes inside inputTokens were
+			// already charged at the base input rate.
+			if paidRate == nil && cacheInInput && cacheWriteInput > 0 {
+				paidRate = baseRateForSide(pricing, m.side)
+			}
+			if paidRate != nil {
 				effectiveRate -= *paidRate
 			}
 		}
