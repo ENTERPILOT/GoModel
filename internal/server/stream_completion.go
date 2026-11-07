@@ -166,7 +166,16 @@ func isTerminalPayload(kind streamKind, payload []byte) bool {
 	if bytes.Equal(payload, []byte("[DONE]")) {
 		return true
 	}
-	if len(payload) == 0 || payload[0] != '{' || !gjson.ValidBytes(payload) {
+	if len(payload) == 0 || payload[0] != '{' || !mayBeTerminal(kind, payload) {
+		return false
+	}
+	return isTerminalObject(kind, payload)
+}
+
+// isTerminalObject parses a JSON object payload for an in-band error or the
+// dialect's terminal event.
+func isTerminalObject(kind streamKind, payload []byte) bool {
+	if !gjson.ValidBytes(payload) {
 		return false
 	}
 	if errMember := gjson.GetBytes(payload, "error"); errMember.Exists() && errMember.Type != gjson.Null {
@@ -186,6 +195,90 @@ func isTerminalPayload(kind streamKind, payload []byte) bool {
 		}
 	}
 	return false
+}
+
+// Words mayBeTerminal looks for right after an opening quote. Each starts
+// with a letter rather than the quote, so the search skips ahead on a byte
+// that is rarer than quotes in JSON.
+var (
+	errorWord          = []byte(`error"`)
+	finishReasonWord   = []byte(`finish_reason"`)
+	responseTypePrefix = []byte(`response.`)
+	// responsesTerminalSuffixes complete responseTypePrefix to the terminal
+	// types isTerminalObject checks; "error" is errorWord.
+	responsesTerminalSuffixes = [][]byte{
+		[]byte(`completed"`),
+		[]byte(`incomplete"`),
+		[]byte(`failed"`),
+		[]byte(`done"`),
+	}
+	// escapedASCII opens a \u escape of an ASCII character. gjson unescapes
+	// keys and values before comparing them, so a payload spelling a marker
+	// that way must not be ruled out by a literal match.
+	escapedASCII = []byte(`\u00`)
+)
+
+// mayBeTerminal is a byte scan that rules out most content chunks before
+// isTerminalObject parses them: it reports false only when no quoted
+// "error", non-null "finish_reason" member (chat) or terminal event type
+// (Responses) appears anywhere. A match nested in another object or quoted
+// inside content is a false positive and falls through to the full parse.
+func mayBeTerminal(kind streamKind, payload []byte) bool {
+	if bytes.Contains(payload, escapedASCII) || nextQuoted(payload, errorWord, 0) >= 0 {
+		return true
+	}
+	switch kind {
+	case chatStream:
+		for end := nextQuoted(payload, finishReasonWord, 0); end >= 0; end = nextQuoted(payload, finishReasonWord, end) {
+			if hasNonNullValue(payload[end:]) {
+				return true
+			}
+		}
+	case responsesStream:
+		for end := nextQuoted(payload, responseTypePrefix, 0); end >= 0; end = nextQuoted(payload, responseTypePrefix, end) {
+			for _, suffix := range responsesTerminalSuffixes {
+				if bytes.HasPrefix(payload[end:], suffix) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// nextQuoted returns the end of the first word in s, at or after from, that
+// directly follows a quote, or -1.
+func nextQuoted(s, word []byte, from int) int {
+	for {
+		i := bytes.Index(s[from:], word)
+		if i < 0 {
+			return -1
+		}
+		i += from
+		if i > 0 && s[i-1] == '"' {
+			return i + len(word)
+		}
+		from = i + 1
+	}
+}
+
+// hasNonNullValue reports whether rest, the bytes after a quoted key, holds a
+// member value other than null. gjson renders any other finish_reason value,
+// string or not, as non-empty text.
+func hasNonNullValue(rest []byte) bool {
+	rest = trimJSONSpace(rest)
+	if len(rest) == 0 || rest[0] != ':' {
+		return false
+	}
+	value := trimJSONSpace(rest[1:])
+	return len(value) > 0 && value[0] != 'n'
+}
+
+func trimJSONSpace(b []byte) []byte {
+	for len(b) > 0 && (b[0] == ' ' || b[0] == '\t' || b[0] == '\r' || b[0] == '\n') {
+		b = b[1:]
+	}
+	return b
 }
 
 // isTerminalLongPayload classifies a payload too long to parse from its
