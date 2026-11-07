@@ -145,7 +145,8 @@ keeps routing with, in order:
 3. For a provider on its default base URL, the
    [model catalog's](/advanced/configuration) list for its provider type.
 
-This ordering, and the rechecks below, apply in `fallback` and `merge` modes.
+This ordering, and the rechecks below, apply to every provider without a
+configured model list, and in `fallback` and `merge` modes.
 Under the default `allowlist`, a provider with a configured list serves only
 models from that list (subject to `model_filter`); its `/models` is read only for metadata, and only while
 `ALLOWLIST_UPSTREAM_METADATA` is on and offline mode is off. A failed metadata listing keeps

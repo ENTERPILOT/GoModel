@@ -145,8 +145,8 @@ routet dann in dieser Reihenfolge weiter mit:
 3. Bei einem Provider mit seiner Standard-Base-URL der Liste aus dem
    [Modellkatalog](/de/advanced/configuration) für seinen Provider-Typ.
 
-Diese Reihenfolge und die folgenden erneuten Prüfungen gelten in den Modi
-`fallback` und `merge`. Im Standardmodus `allowlist` bedient ein Provider mit
+Diese Reihenfolge und die folgenden erneuten Prüfungen gelten für jeden Provider
+ohne konfigurierte Modellliste sowie in den Modi `fallback` und `merge`. Im Standardmodus `allowlist` bedient ein Provider mit
 konfigurierter Liste nur Modelle aus dieser Liste (vorbehaltlich `model_filter`); `/models` liefert nur Metadaten, und das
 nur, solange `ALLOWLIST_UPSTREAM_METADATA` aktiv und der Offline-Modus aus ist. Eine
 fehlgeschlagene Abfrage behält die letzten Metadaten und verschlechtert
