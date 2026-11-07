@@ -56,8 +56,10 @@ W trybie `allowlist` udostępniane są tylko skonfigurowane ID: modele, które p
 `fallback` i `merge` odpytują endpoint `/models` providera przy każdym odświeżeniu. `allowlist` odpytuje go tylko po metadane – okno kontekstu, maksymalną liczbę tokenów wyjściowych, ceny, nazwę wyświetlaną i typ modelu – dla Twoich modeli z listy, gdy `ALLOWLIST_UPSTREAM_METADATA` ma wartość `true` (domyślnie; YAML: `models.allowlist_upstream_metadata`), a `GOMODEL_OFFLINE` jest wyłączone. To wywołanie nigdy nie dodaje modeli, ale ceny z upstream mogą zdecydować, które skonfigurowane modele mieszczą się w limicie `model_filter.max_price_per_mtok`. Gdy się nie powiedzie, zostają metadane z ostatniego udanego odczytu.
 
 <Warning>
-**Zmiana niekompatybilna:** wcześniej domyślnym trybem był `fallback`. Providery
-z listą `models:` lub `<PROVIDER>_MODELS` udostępniają teraz tylko te modele;
+**Zmiana niekompatybilna:** wcześniej domyślnym trybem był `fallback`. W domyślnym
+trybie `allowlist` providery z listą `models:` lub `<PROVIDER>_MODELS`
+udostępniają teraz tylko te modele (providery w trybie `fallback` lub `merge`
+nie są objęte zmianą);
 ustaw `CONFIGURED_PROVIDER_MODELS_MODE=fallback`, aby zachować dotychczasowe
 zachowanie.
 </Warning>

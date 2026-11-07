@@ -313,7 +313,10 @@ Pobieranie katalogu działa na zasadzie best-effort. Gdy jest wyłączone lub si
 uruchamia się normalnie, `/health` i `/health/ready` zwracają `200`, listy modeli nadal
 pochodzą z własnego endpointu `/models` każdego providera (a u providerów w trybie
 `allowlist` ze skonfigurowanej listy, która nie wymaga wykrywania w upstreamie),
-a requesty są normalnie routowane. Tracisz natomiast wzbogacanie metadanymi.
+a requesty są normalnie routowane. Tracisz natomiast wzbogacanie z katalogu;
+metadane, które provider zwraca we własnym `/models` (także przez wywołanie po
+metadane w trybie `allowlist`, o ile nie ustawiono
+`ALLOWLIST_UPSTREAM_METADATA=false`), nadal obowiązują.
 
 <Warning>
   Bez wzbogacania metadanymi modele **nie mają cen**. Śledzenie kosztów

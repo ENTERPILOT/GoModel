@@ -54,8 +54,10 @@ With `allowlist`, only the configured IDs are served: models the provider lists 
 `fallback` and `merge` read the provider's `/models` on every refresh. `allowlist` reads it only for metadata — context window, max output tokens, pricing, display name, and model type — for your listed models, while `ALLOWLIST_UPSTREAM_METADATA` is `true` (the default; YAML: `models.allowlist_upstream_metadata`) and `GOMODEL_OFFLINE` is off. That call never adds models, but upstream prices can decide which configured models pass a `model_filter.max_price_per_mtok` cap. If it fails, the metadata from the last successful listing is kept.
 
 <Warning>
-**Breaking change:** the default used to be `fallback`. Providers with a
-`models:` or `<PROVIDER>_MODELS` list now serve only those models; set
+**Breaking change:** the default used to be `fallback`. Under the default
+`allowlist` mode, providers with a `models:` or `<PROVIDER>_MODELS` list now
+serve only those models (providers set to `fallback` or `merge` are
+unaffected); set
 `CONFIGURED_PROVIDER_MODELS_MODE=fallback` to keep the old behavior.
 </Warning>
 

@@ -350,8 +350,10 @@ abgeschaltet oder schlägt er fehl, startet das Gateway normal, `/health` und
 `/health/ready` liefern `200`, die Modelllisten stammen weiterhin vom
 jeweiligen `/models`-Endpunkt des Providers (bei `allowlist`-Providern aus der
 konfigurierten Liste, die keine Upstream-Erkennung braucht), und Requests werden
-normal geroutet. Was verloren geht, ist die Anreicherung
-mit Metadaten.
+normal geroutet. Was verloren geht, ist die Anreicherung aus dem Katalog;
+Metadaten, die ein Provider in seinem eigenen `/models` meldet (auch über den
+Metadatenaufruf im Modus `allowlist`, sofern nicht
+`ALLOWLIST_UPSTREAM_METADATA=false`), gelten weiterhin.
 
 <Warning>
   Ohne Anreicherung mit Metadaten haben Modelle **keine Preise**. Die

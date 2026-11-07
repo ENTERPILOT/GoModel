@@ -112,9 +112,10 @@ ursprünglichen Hersteller gesetzt ist (z. B. `anthropic`, `amazon`). Streaming
 
 ## Die Modellliste einschränken oder erweitern
 
-Standardmäßig fragt GoModel die Control Plane von Bedrock ab und listet alle
-On-Demand-Textmodelle auf, auf die das Konto Zugriff hat. Um IDs von
-Inference-Profilen oder ARNs eigener Modelle festzulegen:
+Ohne konfigurierte Liste fragt GoModel die Control Plane von Bedrock ab und
+listet alle On-Demand-Textmodelle auf, auf die das Konto Zugriff hat. Um IDs von
+Inference-Profilen oder ARNs eigener Modelle festzulegen, setzen Sie eine Liste;
+im Standard-Modellmodus werden dann nur diese Modelle angeboten:
 
 ```bash
 BEDROCK_MODELS=anthropic.claude-3-5-haiku-20241022-v1:0,amazon.nova-lite-v1:0

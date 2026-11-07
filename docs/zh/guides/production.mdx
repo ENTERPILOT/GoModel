@@ -218,7 +218,7 @@ GOMODEL_OFFLINE=true
 您也可以通过 `GOMODEL_VERSION_CHECK_ENABLED=false`、`MODEL_LIST_URL=off` 和 `ALLOWLIST_UPSTREAM_METADATA=false` 分别控制这些调用。
 
 目录获取是尽力而为的。当它被关闭或失败时，网关会正常启动，`/health` 和 `/health/ready` 返回 `200`，模型列表仍来自各提供商自己的 `/models` 端点
-（`allowlist` 提供商则来自已配置列表，无需上游发现），请求也会正常路由。您失去的是元数据补充。
+（`allowlist` 提供商则来自已配置列表，无需上游发现），请求也会正常路由。您失去的是来自目录的元数据补充；提供商在其自身 `/models` 中报告的元数据（包括 `allowlist` 模式下的元数据调用，除非设置了 `ALLOWLIST_UPSTREAM_METADATA=false`）仍然生效。
 
 <Warning>
   没有元数据补充时，模型**没有定价**。此时成本追踪不会报告任何成本；由于[预算](/zh/features/budgets)从用量成本记录中读取支出，

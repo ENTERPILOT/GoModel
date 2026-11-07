@@ -147,7 +147,7 @@ kontynuuje routing, korzystając kolejno z:
 
 Ta kolejność i opisane niżej ponowne sprawdzanie dotyczą trybów `fallback` i
 `merge`. W domyślnym trybie `allowlist` provider ze skonfigurowaną listą serwuje
-dokładnie tę listę; `/models` służy tylko po metadane, a nieudane listowanie
+wyłącznie modele z tej listy (z zastrzeżeniem `model_filter`); `/models` służy tylko po metadane, a nieudane listowanie
 zachowuje ostatnie metadane i nigdy nie pogarsza stanu providera (zobacz
 [Tryby modeli](/pl/advanced/config-yaml#tryby-modeli)).
 

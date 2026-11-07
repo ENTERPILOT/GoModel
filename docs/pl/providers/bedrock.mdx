@@ -112,9 +112,10 @@ Responses API są wewnętrznie mapowane na Converse.
 
 ## Ograniczanie lub rozszerzanie listy modeli
 
-Domyślnie GoModel odpytuje control plane Bedrocka i wypisuje wszystkie modele tekstowe
-on-demand, do których konto ma dostęp. Żeby przypiąć identyfikatory inference profile lub ARN-y
-niestandardowych modeli:
+Bez skonfigurowanej listy GoModel odpytuje control plane Bedrocka i wypisuje wszystkie
+modele tekstowe on-demand, do których konto ma dostęp. Żeby przypiąć identyfikatory
+inference profile lub ARN-y niestandardowych modeli, ustaw listę; w domyślnym trybie
+modeli udostępniane są wtedy tylko te modele:
 
 ```bash
 BEDROCK_MODELS=anthropic.claude-3-5-haiku-20241022-v1:0,amazon.nova-lite-v1:0

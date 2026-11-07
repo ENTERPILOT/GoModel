@@ -51,7 +51,7 @@ Google Vertex AI 遵循相同的后缀命名规则（`VERTEX_US_PROJECT`
 `fallback` 和 `merge` 每次刷新都会读取提供商的 `/models`。`allowlist` 仅为你列出的模型读取元数据——上下文窗口、输出上限、价格、显示名称和模型类型——前提是 `ALLOWLIST_UPSTREAM_METADATA` 为 `true`（默认；YAML：`models.allowlist_upstream_metadata`）且未开启 `GOMODEL_OFFLINE`。该调用绝不会新增模型，但上游价格可能决定哪些已配置模型能通过 `model_filter.max_price_per_mtok` 上限。调用失败时会保留上一次成功读取的元数据。
 
 <Warning>
-**不兼容变更：**默认模式以前是 `fallback`。配置了 `models:` 或 `<PROVIDER>_MODELS` 列表的提供商现在只提供这些模型；设置 `CONFIGURED_PROVIDER_MODELS_MODE=fallback` 可保留原有行为。
+**不兼容变更：**默认模式以前是 `fallback`。在默认的 `allowlist` 模式下，配置了 `models:` 或 `<PROVIDER>_MODELS` 列表的提供商现在只提供这些模型（设为 `fallback` 或 `merge` 的提供商不受影响）；设置 `CONFIGURED_PROVIDER_MODELS_MODE=fallback` 可保留原有行为。
 </Warning>
 
 在单个提供商上设置 `models_mode` 可仅为该提供商覆盖全局模式；不设置时使用全局模式。例如，只暴露一个 OpenRouter 模型，而自托管提供商继续自动发现各自的模型：
