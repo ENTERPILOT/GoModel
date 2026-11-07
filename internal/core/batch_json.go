@@ -1,6 +1,11 @@
 package core
 
-import "github.com/goccy/go-json"
+import (
+	"fmt"
+
+	"github.com/goccy/go-json"
+	"github.com/tidwall/gjson"
+)
 
 func (r *BatchRequest) UnmarshalJSON(data []byte) error {
 	var raw struct {
@@ -42,6 +47,11 @@ func (r BatchRequest) MarshalJSON() ([]byte, error) {
 }
 
 func (r *BatchRequestItem) UnmarshalJSON(data []byte) error {
+	// Decoding keeps one of each repeated key, but the item may be forwarded
+	// as written, where the provider's parser could keep another.
+	if key, repeated := repeatedJSONKey(gjson.ParseBytes(data)); repeated {
+		return fmt.Errorf("key %q is repeated", key)
+	}
 	var raw struct {
 		CustomID string          `json:"custom_id,omitempty"`
 		Method   string          `json:"method,omitempty"`
