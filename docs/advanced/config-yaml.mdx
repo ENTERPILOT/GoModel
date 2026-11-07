@@ -43,11 +43,13 @@ example `OPENROUTER_MODELS`, `ORACLE_MODELS`, `AZURE_MODELS`, `SGLANG_MODELS`,
 
 `CONFIGURED_PROVIDER_MODELS_MODE` (YAML: `models.configured_provider_models_mode`) decides how a provider's configured list combines with what its `/models` endpoint returns. It only matters for providers that define a list.
 
-| Mode | Calls upstream `/models` | Exposes | Use when |
-|---|---|---|---|
-| `allowlist` (default) | For metadata only (off when `GOMODEL_OFFLINE=true`) | Only your list | You want exactly these models, e.g. one model from OpenRouter |
-| `fallback` | Yes | The upstream list; your list only if `/models` fails or returns nothing | `/models` is sometimes unavailable, but discovery should drive the list |
-| `merge` | Yes | The upstream list plus your models it doesn't include; falls back like `fallback` when `/models` fails | A provider serves models it does not list (preview or unlisted IDs) |
+| Mode | Exposes | Use when |
+|---|---|---|
+| `allowlist` (default) | Only your list | You want exactly these models, e.g. one model from OpenRouter |
+| `fallback` | The upstream list; your list only if `/models` fails or returns nothing | `/models` is sometimes unavailable, but discovery should drive the list |
+| `merge` | The upstream list plus your models it doesn't include; falls back like `fallback` when `/models` fails | A provider serves models it does not list (preview or unlisted IDs) |
+
+Every mode reads the provider's `/models` on each refresh. In `allowlist` mode it is used only to fill in metadata (context window, pricing, model type) for your listed models and never adds models; a failed call leaves your list as it is. Set `ALLOWLIST_UPSTREAM_METADATA=false` (YAML: `models.allowlist_upstream_metadata`) to stop that call. `GOMODEL_OFFLINE=true` stops it too.
 
 <Warning>
 **Breaking change:** the default used to be `fallback`. A provider with a

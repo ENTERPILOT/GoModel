@@ -148,6 +148,7 @@ server:
 | `PROVIDER_RECHECK_INTERVAL` | 对上次刷新失败的提供商重新探测的间隔秒数（`0` 表示禁用） | `60` |
 | `MODEL_LIST_URL`    | 模型元数据目录：HTTP URL、本地文件路径（`/etc/gomodel/models.json` 或 `file://...`），或 `off` | GitHub 上的公共目录 |
 | `GOMODEL_OFFLINE`   | 离线（air-gap）开关：禁用更新检查、忽略 HTTP 目录 URL，并停止 allowlist 提供商为获取元数据而调用 `/models`。本地目录文件和发往已配置提供商的请求不受影响 | `false` |
+| `ALLOWLIST_UPSTREAM_METADATA` | 在 `allowlist` 模式下，仅为补充已配置模型的元数据读取提供商的 `/models`（绝不新增模型）。设为 `false` 可关闭该调用；离线模式会强制关闭 | `true` |
 | `REDIS_URL`         | Redis 连接 URL              | _（空）_        |
 | `REDIS_KEY_MODELS`     | 模型缓存的 Redis 键           | `gomodel:models`    |
 | `REDIS_KEY_RESPONSES`  | 响应缓存的 Redis 键        | `gomodel:response:` |
@@ -560,6 +561,9 @@ models:
   # 仅用于获取元数据。若仅在上游 /models 失败或为空时使用该列表，使用 fallback；如果要在发现的
   # 模型清单之上追加配置的模型（提供商可提供但未列出的模型），使用 merge。
   configured_provider_models_mode: allowlist
+  # allowlist 仅为元数据读取上游 /models；设为 false 可关闭该调用
+  #（GOMODEL_OFFLINE=true 也会关闭）。
+  allowlist_upstream_metadata: true
   # 在 GET /v1/models 中列出不带前缀的模型 ID（gpt-5），而不是带提供商前缀的
   # ID（openai/gpt-5）。当两个提供商暴露相同 ID 时，只会列出不带前缀的请求所路由到的
   # 提供商（最先注册的那个）；可使用虚拟模型固定名称（source gpt-5 -> target azure/gpt-5）。

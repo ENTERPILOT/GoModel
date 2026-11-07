@@ -37,9 +37,8 @@ func fetchAllowlistMetadata(ctx context.Context, provider core.Provider, provide
 }
 
 // SetAllowlistUpstreamMetadata controls whether providers in allowlist mode
-// call /models to enrich their configured models. It is on by default and
-// turned off by offline mode, so an air-gapped install makes no listing calls
-// it did not ask for.
+// call /models to enrich their configured models. It follows
+// models.allowlist_upstream_metadata, which offline mode forces off.
 func (r *ModelRegistry) SetAllowlistUpstreamMetadata(enabled bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

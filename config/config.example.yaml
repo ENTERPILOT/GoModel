@@ -47,6 +47,7 @@ models:
   vllm_discovery_compat: false # env: MODELS_VLLM_DISCOVERY_COMPAT; advertise every model the way a vLLM runtime does (owned_by "vllm", max_model_len from the limit the provider reports or else metadata.context_window) so a client whose discovery only understands vLLM picks the gateway up. It is a lie about the owner, so it stays opt-in and only for deployments whose consumers need it
   unqualified_model_ids_at_models_endpoint: false # env: UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT; list bare model IDs (gpt-5) instead of provider-qualified ones (openai/gpt-5). Caveat: when two providers expose the same model ID only the provider an unqualified request routes to (the first registered one) is listed; pin a name with a virtual model (source gpt-5 -> target azure/gpt-5)
   configured_provider_models_mode: "allowlist" # env: CONFIGURED_PROVIDER_MODELS_MODE; "allowlist" (default) exposes only configured models and reads upstream /models only for their metadata, "fallback" uses configured lists only when upstream /models is unavailable/empty, "merge" adds configured models on top of the upstream inventory (for models a provider serves but does not list)
+  allowlist_upstream_metadata: true # env: ALLOWLIST_UPSTREAM_METADATA; in allowlist mode, read upstream /models only to fill in metadata for configured models (never adds models). false stops that call; GOMODEL_OFFLINE=true forces it off
 
 # Tagging based on headers: label every request from the listed headers. Labels
 # are recorded in usage tracking and audit logs. A header value can carry several

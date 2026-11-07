@@ -67,7 +67,7 @@ func TestAllowlistServesConfiguredModelsWhenListingFails(t *testing.T) {
 	}
 }
 
-func TestAllowlistMetadataFetchOffInOfflineMode(t *testing.T) {
+func TestAllowlistMetadataFetchCanBeTurnedOff(t *testing.T) {
 	var listCount atomic.Int32
 	mock := &countingRegistryMockProvider{
 		listCount:            &listCount,
@@ -78,6 +78,6 @@ func TestAllowlistMetadataFetchOffInOfflineMode(t *testing.T) {
 
 	require.NoError(t, registry.Initialize(context.Background()))
 
-	assert.Zero(t, listCount.Load(), "offline mode makes no metadata listing call")
+	assert.Zero(t, listCount.Load(), "a disabled metadata fetch makes no listing call")
 	assert.Equal(t, 2, registry.ModelCount())
 }

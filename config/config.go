@@ -159,6 +159,7 @@ func buildDefaultConfig() *Config {
 			VLLMDiscoveryCompat:                 false,
 			UnqualifiedModelIDsAtModelsEndpoint: false,
 			ConfiguredProviderModelsMode:        DefaultConfiguredProviderModelsMode,
+			AllowlistUpstreamMetadata:           true,
 		},
 		Cache: CacheConfig{
 			Model: ModelCacheConfig{

@@ -251,6 +251,7 @@ unten.
 | `PROVIDER_RECHECK_INTERVAL` | Sekunden zwischen erneuten Prüfungen von Providern, deren letzte Aktualisierung fehlgeschlagen ist (`0` deaktiviert) | `60` |
 | `MODEL_LIST_URL`    | Katalog mit Modell-Metadaten: eine HTTP-URL, ein lokaler Dateipfad (`/etc/gomodel/models.json` oder `file://...`) oder `off` | öffentlicher Katalog auf GitHub |
 | `GOMODEL_OFFLINE`   | Schalter für Air-Gap-Umgebungen: deaktiviert die Update-Prüfung, verwirft HTTP-Katalog-URLs und stoppt die Metadaten-Abfrage von `/models` bei allowlist-Providern. Lokale Katalogdateien und Requests an konfigurierte Provider sind nicht betroffen | `false` |
+| `ALLOWLIST_UPSTREAM_METADATA` | Im Modus `allowlist` das `/models` eines Providers nur lesen, um Metadaten für seine konfigurierten Modelle zu ergänzen (fügt nie Modelle hinzu). `false` schaltet diesen Aufruf ab; der Offline-Modus erzwingt das | `true` |
 | `REDIS_URL`         | Redis-Verbindungs-URL              | _(leer)_        |
 | `REDIS_KEY_MODELS`     | Redis-Key für den Modell-Cache           | `gomodel:models`    |
 | `REDIS_KEY_RESPONSES`  | Redis-Key für den Response-Cache        | `gomodel:response:` |
@@ -887,6 +888,9 @@ models:
   # oder merge, um konfigurierte Modelle zusätzlich zum erkannten Modellangebot
   # hinzuzufügen (Modelle, die ein Provider bereitstellt, aber nicht auflistet).
   configured_provider_models_mode: allowlist
+  # allowlist liest Upstream-/models nur für Metadaten; false schaltet diesen
+  # Aufruf ab (GOMODEL_OFFLINE=true ebenfalls).
+  allowlist_upstream_metadata: true
   # Reine Modell-IDs (gpt-5) statt Provider-qualifizierter IDs (openai/gpt-5) aus
   # GET /v1/models auflisten. Bieten zwei Provider dieselbe ID an, wird nur der
   # Provider aufgelistet, an den ein nicht qualifizierter Request geroutet wird

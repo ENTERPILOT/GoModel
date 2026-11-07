@@ -45,11 +45,13 @@ Listy modeli skonfigurowanych providerów mogą pozostać w zmiennych
 
 `CONFIGURED_PROVIDER_MODELS_MODE` (YAML: `models.configured_provider_models_mode`) określa, jak skonfigurowana lista providera łączy się z tym, co zwraca jego endpoint `/models`. Ma znaczenie tylko dla providerów, które definiują listę.
 
-| Tryb | Wywołuje upstream `/models` | Udostępnia | Kiedy używać |
-|---|---|---|---|
-| `allowlist` (domyślny) | Tylko po metadane (wyłączone przy `GOMODEL_OFFLINE=true`) | Tylko Twoją listę | Chcesz dokładnie tych modeli, np. jednego modelu z OpenRouter |
-| `fallback` | Tak | Listę upstream; Twoją listę tylko, gdy `/models` zawiedzie lub nic nie zwróci | `/models` bywa niedostępny, ale to wykrywanie ma wyznaczać listę |
-| `merge` | Tak | Listę upstream plus Twoje modele, których w niej brak; gdy `/models` zawiedzie, działa jak `fallback` | Provider obsługuje modele, których nie wymienia (wersje preview lub niewymienione ID) |
+| Tryb | Udostępnia | Kiedy używać |
+|---|---|---|
+| `allowlist` (domyślny) | Tylko Twoją listę | Chcesz dokładnie tych modeli, np. jednego modelu z OpenRouter |
+| `fallback` | Listę upstream; Twoją listę tylko, gdy `/models` zawiedzie lub nic nie zwróci | `/models` bywa niedostępny, ale to wykrywanie ma wyznaczać listę |
+| `merge` | Listę upstream plus Twoje modele, których w niej brak; gdy `/models` zawiedzie, działa jak `fallback` | Provider obsługuje modele, których nie wymienia (wersje preview lub niewymienione ID) |
+
+Każdy tryb odczytuje `/models` providera przy każdym odświeżeniu. W trybie `allowlist` służy to wyłącznie do uzupełnienia metadanych (okno kontekstu, ceny, typ modelu) dla Twoich modeli z listy i nigdy nie dodaje modeli; nieudane wywołanie zostawia listę bez zmian. Ustaw `ALLOWLIST_UPSTREAM_METADATA=false` (YAML: `models.allowlist_upstream_metadata`), aby wyłączyć to wywołanie. `GOMODEL_OFFLINE=true` również je wyłącza.
 
 <Warning>
 **Zmiana niekompatybilna:** wcześniej domyślnym trybem był `fallback`. Provider z

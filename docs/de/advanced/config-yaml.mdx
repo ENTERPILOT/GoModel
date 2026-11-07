@@ -46,11 +46,13 @@ llm-d-Instanzen akzeptieren außerdem die Steuerungen
 
 `CONFIGURED_PROVIDER_MODELS_MODE` (YAML: `models.configured_provider_models_mode`) legt fest, wie die konfigurierte Liste eines Providers mit der Antwort seines `/models`-Endpoints kombiniert wird. Er wirkt nur bei Providern, die eine Liste definieren.
 
-| Modus | Ruft Upstream-`/models` auf | Stellt bereit | Geeignet, wenn |
-|---|---|---|---|
-| `allowlist` (Standard) | Nur für Metadaten (aus bei `GOMODEL_OFFLINE=true`) | Nur Ihre Liste | Sie genau diese Modelle wollen, z. B. ein Modell von OpenRouter |
-| `fallback` | Ja | Die Upstream-Liste; Ihre Liste nur, wenn `/models` fehlschlägt oder nichts liefert | `/models` manchmal nicht verfügbar ist, die Erkennung aber die Liste bestimmen soll |
-| `merge` | Ja | Die Upstream-Liste plus Ihre Modelle, die darin fehlen; verhält sich wie `fallback`, wenn `/models` fehlschlägt | ein Provider Modelle bereitstellt, die er nicht auflistet (Preview- oder nicht gelistete IDs) |
+| Modus | Stellt bereit | Geeignet, wenn |
+|---|---|---|
+| `allowlist` (Standard) | Nur Ihre Liste | Sie genau diese Modelle wollen, z. B. ein Modell von OpenRouter |
+| `fallback` | Die Upstream-Liste; Ihre Liste nur, wenn `/models` fehlschlägt oder nichts liefert | `/models` manchmal nicht verfügbar ist, die Erkennung aber die Liste bestimmen soll |
+| `merge` | Die Upstream-Liste plus Ihre Modelle, die darin fehlen; verhält sich wie `fallback`, wenn `/models` fehlschlägt | ein Provider Modelle bereitstellt, die er nicht auflistet (Preview- oder nicht gelistete IDs) |
+
+Jeder Modus liest bei jeder Aktualisierung das `/models` des Providers. Im Modus `allowlist` dient es nur dazu, Metadaten (Kontextfenster, Preise, Modelltyp) für Ihre gelisteten Modelle zu ergänzen, und fügt nie Modelle hinzu; ein fehlgeschlagener Aufruf lässt Ihre Liste unverändert. Setzen Sie `ALLOWLIST_UPSTREAM_METADATA=false` (YAML: `models.allowlist_upstream_metadata`), um diesen Aufruf abzuschalten. `GOMODEL_OFFLINE=true` schaltet ihn ebenfalls ab.
 
 <Warning>
 **Breaking Change:** Früher war `fallback` der Standard. Ein Provider mit einer
