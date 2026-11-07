@@ -104,12 +104,13 @@ export function embeddingInputs(value) {
 }
 
 // The dimensions field is optional: blank leaves the size to the provider,
-// anything else must be a positive integer.
+// anything else must be a positive safe integer (larger ones would be rounded
+// before they are sent).
 export function embeddingDimensionsValid(value) {
   const raw = text(value);
   if (raw === "") return true;
   const dims = Number(raw);
-  return Number.isInteger(dims) && dims > 0;
+  return Number.isSafeInteger(dims) && dims > 0;
 }
 
 // Body for POST /v1/embeddings. One line is sent as a plain string, several as
@@ -123,7 +124,7 @@ export function buildEmbeddingRequest({ model, input, format, dimensions } = {})
     body.encoding_format = format;
   }
   const dims = Number(text(dimensions) || NaN);
-  if (Number.isInteger(dims) && dims > 0) body.dimensions = dims;
+  if (Number.isSafeInteger(dims) && dims > 0) body.dimensions = dims;
   return body;
 }
 
@@ -139,8 +140,12 @@ function base64ValueCount(value) {
   return bytes % 4 === 0 ? bytes / 4 : null;
 }
 
+function isFloatVector(value) {
+  return Array.isArray(value) && value.every((n) => typeof n === "number" && Number.isFinite(n));
+}
+
 function isEmbeddingItem(item) {
-  return Boolean(item) && (Array.isArray(item.embedding) || typeof item.embedding === "string");
+  return Boolean(item) && (isFloatVector(item.embedding) || typeof item.embedding === "string");
 }
 
 // What the result shows for an /v1/embeddings response: the vector count,

@@ -226,16 +226,26 @@ test("abbreviateEmbeddingResponse trims long vectors and leaves the rest alone",
 });
 
 test("embeddingDimensionsValid accepts a blank field or a positive integer only", () => {
-  for (const ok of ["", "  ", null, undefined, 1, 256, "1536", " 512 "]) {
+  for (const ok of ["", "  ", null, undefined, 1, 256, "1536", " 512 ", "9007199254740991"]) {
     assert.equal(embeddingDimensionsValid(ok), true, String(ok));
   }
-  for (const bad of [0, -3, 1.5, "abc", "1e400", Infinity, NaN]) {
+  for (const bad of [0, -3, 1.5, "abc", "1e400", "1e300", "9007199254740993", Infinity, NaN]) {
     assert.equal(embeddingDimensionsValid(bad), false, String(bad));
   }
 });
 
 test("embeddingSummary skips items without a vector", () => {
-  for (const item of [{}, { embedding: null }, { embedding: 42 }, { embedding: { a: 1 } }]) {
+  for (const item of [
+    {},
+    { embedding: null },
+    { embedding: 42 },
+    { embedding: { a: 1 } },
+    { embedding: [null, "x"] },
+    { embedding: [1, "2"] },
+    { embedding: [1, NaN] },
+    { embedding: [1, Infinity] },
+    { embedding: [true, false] },
+  ]) {
     const summary = embeddingSummary({ data: [item] });
     assert.equal(summary.count, 0, JSON.stringify(item));
     assert.equal(summary.dimensions, null);
@@ -260,4 +270,9 @@ test("embeddingSummary gives no size for a string that is not whole base64 float
   const mixed = embeddingSummary({ data: [{ embedding: b64 }, { embedding: "AAA=" }] });
   assert.equal(mixed.dimensions, null);
   assert.deepEqual(mixed.vectors.map((v) => v.length), [6, null]);
+});
+
+test("buildEmbeddingRequest never sends a rounded dimensions value", () => {
+  assert.equal(buildEmbeddingRequest({ model: "m", input: "a", dimensions: "9007199254740993" }).dimensions, undefined);
+  assert.equal(buildEmbeddingRequest({ model: "m", input: "a", dimensions: "9007199254740991" }).dimensions, 9007199254740991);
 });
