@@ -94,6 +94,32 @@ Environment variable that carries the storage connection URL for the selected ba
 {{- end }}
 
 {{/*
+GOMEMLIMIT env entries: goMemLimit when set, otherwise the container memory
+limit read through the downward API (Kubernetes expands $(VAR) from entries
+defined earlier in the list). Empty when GOMEMLIMIT is already set through env,
+secretEnv, or extraEnv, or when the container has no memory limit.
+*/}}
+{{- define "gomodel.goMemLimitEnv" -}}
+{{- $userSet := or (hasKey .Values.env "GOMEMLIMIT") (hasKey .Values.secretEnv "GOMEMLIMIT") }}
+{{- range .Values.extraEnv }}{{ if eq .name "GOMEMLIMIT" }}{{ $userSet = true }}{{ end }}{{ end }}
+{{- $limits := (.Values.resources | default dict).limits | default dict }}
+{{- if not $userSet }}
+{{- if .Values.goMemLimit }}
+- name: GOMEMLIMIT
+  value: {{ .Values.goMemLimit | quote }}
+{{- else if $limits.memory }}
+- name: GOMODEL_MEMORY_LIMIT_MIB
+  valueFrom:
+    resourceFieldRef:
+      resource: limits.memory
+      divisor: 1Mi
+- name: GOMEMLIMIT
+  value: "$(GOMODEL_MEMORY_LIMIT_MIB)MiB"
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
 True when SQLite data is kept on a PersistentVolumeClaim.
 */}}
 {{- define "gomodel.usesPVC" -}}
