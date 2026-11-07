@@ -22,30 +22,24 @@ func TestProviderModelsModeOverridesGlobalMode(t *testing.T) {
 		global     config.ConfiguredProviderModelsMode
 		override   config.ConfiguredProviderModelsMode
 		wantModels []string
-		wantList   bool
 	}{
-		{name: "no override keeps global fallback", global: config.ConfiguredProviderModelsModeFallback, wantModels: []string{"listed-a", "listed-b"}, wantList: true},
+		{name: "no override keeps global fallback", global: config.ConfiguredProviderModelsModeFallback, wantModels: []string{"listed-a", "listed-b"}},
 		{name: "allowlist override under global fallback", global: config.ConfiguredProviderModelsModeFallback, override: config.ConfiguredProviderModelsModeAllowlist, wantModels: []string{"configured"}},
-		{name: "merge override under global fallback", global: config.ConfiguredProviderModelsModeFallback, override: config.ConfiguredProviderModelsModeMerge, wantModels: []string{"configured", "listed-a", "listed-b"}, wantList: true},
-		{name: "fallback override under global allowlist", global: config.ConfiguredProviderModelsModeAllowlist, override: config.ConfiguredProviderModelsModeFallback, wantModels: []string{"listed-a", "listed-b"}, wantList: true},
+		{name: "merge override under global fallback", global: config.ConfiguredProviderModelsModeFallback, override: config.ConfiguredProviderModelsModeMerge, wantModels: []string{"configured", "listed-a", "listed-b"}},
+		{name: "fallback override under global allowlist", global: config.ConfiguredProviderModelsModeAllowlist, override: config.ConfiguredProviderModelsModeFallback, wantModels: []string{"listed-a", "listed-b"}},
 		{name: "override is case-insensitive", global: config.ConfiguredProviderModelsModeFallback, override: " AllowList ", wantModels: []string{"configured"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			registry := NewModelRegistry()
 			registry.SetConfiguredProviderModelsMode(tt.global)
-			var listCount atomic.Int32
-			mock := &countingRegistryMockProvider{
-				listCount:            &listCount,
-				registryMockProvider: &registryMockProvider{name: "router", modelsResponse: upstream},
-			}
+			mock := &registryMockProvider{name: "router", modelsResponse: upstream}
 			registry.RegisterProviderWithNameAndType(mock, "router", "openrouter")
 			registry.SetProviderConfiguredModels("router", []string{"configured"})
 			registry.SetProviderModelsMode("router", tt.override)
 
 			require.NoError(t, registry.Initialize(context.Background()))
 
-			assert.Equal(t, tt.wantList, listCount.Load() > 0, "upstream /models called")
 			assert.Equal(t, len(tt.wantModels), registry.ModelCount())
 			for _, id := range tt.wantModels {
 				assert.True(t, registry.Supports("router/"+id), "router/%s", id)
@@ -143,7 +137,7 @@ func TestConfiguredModelsDefaultToAllowlist(t *testing.T) {
 
 	require.NoError(t, registry.Initialize(context.Background()))
 
-	assert.Zero(t, listCount.Load(), "allowlist skips upstream /models")
+	assert.Equal(t, int32(1), listCount.Load(), "allowlist lists upstream for metadata only")
 	assert.True(t, registry.Supports("router/configured"))
 	assert.False(t, registry.Supports("router/listed"))
 }

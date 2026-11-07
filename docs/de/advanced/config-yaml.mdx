@@ -48,7 +48,7 @@ llm-d-Instanzen akzeptieren außerdem die Steuerungen
 
 | Modus | Ruft Upstream-`/models` auf | Stellt bereit | Geeignet, wenn |
 |---|---|---|---|
-| `allowlist` (Standard) | Nein | Nur Ihre Liste | Sie genau diese Modelle wollen, z. B. ein Modell von OpenRouter |
+| `allowlist` (Standard) | Nur für Metadaten (aus bei `GOMODEL_OFFLINE=true`) | Nur Ihre Liste | Sie genau diese Modelle wollen, z. B. ein Modell von OpenRouter |
 | `fallback` | Ja | Die Upstream-Liste; Ihre Liste nur, wenn `/models` fehlschlägt oder nichts liefert | `/models` manchmal nicht verfügbar ist, die Erkennung aber die Liste bestimmen soll |
 | `merge` | Ja | Die Upstream-Liste plus Ihre Modelle, die darin fehlen; verhält sich wie `fallback`, wenn `/models` fehlschlägt | ein Provider Modelle bereitstellt, die er nicht auflistet (Preview- oder nicht gelistete IDs) |
 

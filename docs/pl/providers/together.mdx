@@ -56,9 +56,11 @@ lub pustą listę.
 Gdy `TOGETHER_MODELS` nie jest ustawione albo tryb to `fallback` lub `merge`,
 GoModel odczytuje aktualną listę `/models` z Together, w tym typ każdego modelu,
 nazwę wyświetlaną, długość kontekstu i ceny za tokeny. Przy allowliście
-`TOGETHER_MODELS` GoModel nie odpytuje `/models` z Together, więc limity kontekstu i ceny pochodzą
-z katalogu modeli GoModel (lub z listy w cache) i mogą być nieznane dla modeli,
-których katalog nie zna. Modele obrazów, audio,
+`TOGETHER_MODELS` GoModel nadal odczytuje tę listę, ale tylko po metadane:
+wymienione modele dostają limity kontekstu i ceny z Together. Skonfigurowany
+model, którego Together nie wypisuje, albo każdy model przy
+`GOMODEL_OFFLINE=true`, bierze je z katalogu modeli GoModel (lub z listy w
+cache) i może ich nie mieć. Modele obrazów, audio,
 wideo i rerankingu są pomijane, bo GoModel nie kieruje tych endpointów do
 Together. Identyfikatory modeli zawierają ukośnik; używaj ich dosłownie albo
 dodaj przed nimi nazwę providera, żeby przypiąć trasę:

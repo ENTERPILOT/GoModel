@@ -146,8 +146,8 @@ keeps routing with, in order:
    [model catalog's](/advanced/configuration) list for its provider type.
 
 This ordering applies in `fallback` and `merge` modes. Under the default
-`allowlist`, a provider with a configured list never calls `/models`, so its
-list is the inventory.
+`allowlist`, a provider with a configured list serves exactly that list; its
+`/models` is read only for metadata, and a failed listing changes nothing.
 
 Failed providers are rechecked every `PROVIDER_RECHECK_INTERVAL` seconds
 (default `60`), and the live list replaces the stand-in once a listing
@@ -156,8 +156,8 @@ succeeds. With nothing to serve, requests return `503` so clients retry, and
 stays in rotation.
 
 To never depend on discovery, list the models yourself. The default
-`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` then serves only that list and
-skips `/models`:
+`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` then serves only that list, using
+`/models` for metadata alone:
 
 ```bash
 export OPENAI_MODELS=gpt-6-sol,gpt-6-luna

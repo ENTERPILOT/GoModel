@@ -42,7 +42,7 @@ Google Vertex AI 遵循相同的后缀命名规则（`VERTEX_US_PROJECT`
 
 | 模式 | 是否调用上游 `/models` | 暴露的模型 | 适用场景 |
 |---|---|---|---|
-| `allowlist`（默认） | 否 | 仅你的列表 | 只想要这些模型，例如 OpenRouter 中的某一个模型 |
+| `allowlist`（默认） | 仅用于获取元数据（`GOMODEL_OFFLINE=true` 时关闭） | 仅你的列表 | 只想要这些模型，例如 OpenRouter 中的某一个模型 |
 | `fallback` | 是 | 上游列表；仅当 `/models` 失败或无返回时使用你的列表 | `/models` 偶尔不可用，但仍希望由自动发现决定列表 |
 | `merge` | 是 | 上游列表加上其中缺少的你的模型；`/models` 失败时行为同 `fallback` | 提供商提供但未列出的模型（预览版或未列出的 ID） |
 

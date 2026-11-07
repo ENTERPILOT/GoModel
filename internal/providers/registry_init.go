@@ -142,6 +142,7 @@ func (r *ModelRegistry) fetchAllProviderModels(
 		fetchAt          time.Time
 		err              error
 	}
+	allowlistMetadata := r.allowlistMetadataEnabled()
 	catalogModels := r.catalogFallbackModels(providers, providerTypes, names, configuredProviderModels)
 	results := make([]fetchResult, len(providers))
 	var wg sync.WaitGroup
@@ -157,6 +158,7 @@ func (r *ModelRegistry) fetchAllProviderModels(
 				configuredProviderModelsModes[names[i]],
 				configuredProviderModels[names[i]],
 				catalogModels[names[i]],
+				allowlistMetadata,
 			)
 			results[i] = fetchResult{resp: resp, configuredReason: configuredReason, fetchAt: fetchAt, err: err}
 		}(i, provider)
@@ -445,15 +447,21 @@ func fetchProviderInventory(
 	mode config.ConfiguredProviderModelsMode,
 	configuredModels []string,
 	catalogModels []string,
+	allowlistMetadata bool,
 ) (*core.ModelsResponse, configuredProviderModelsApplyReason, time.Time, error) {
 	fetchAt := time.Now().UTC()
 	if mode == config.ConfiguredProviderModelsModeAllowlist && len(configuredModels) > 0 {
+		var upstream *core.ModelsResponse
+		if allowlistMetadata {
+			upstream = fetchAllowlistMetadata(ctx, provider, providerName)
+			fetchAt = time.Now().UTC()
+		}
 		resp, reason := applyConfiguredProviderModels(
 			providerName,
 			providerType,
 			mode,
 			configuredModels,
-			nil,
+			upstream,
 			nil,
 			fetchAt.Unix(),
 		)

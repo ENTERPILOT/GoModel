@@ -58,9 +58,11 @@ fehlschlägt oder leer ist.
 Wenn `TOGETHER_MODELS` nicht gesetzt ist oder der Modus `fallback` oder `merge`
 lautet, liest GoModel die aktuelle `/models`-Liste von Together, einschließlich
 Typ, Anzeigename, Kontextlänge und Token-Preisen jedes Modells. Mit einer
-`TOGETHER_MODELS`-Allowlist ruft GoModel `/models` von Together nicht auf; Kontextlimits und
-Preise stammen dann aus GoModels Modellkatalog (oder einer gecachten Liste) und
-können für Modelle fehlen, die der Katalog nicht kennt. Bild-, Audio-, Video-
+`TOGETHER_MODELS`-Allowlist liest GoModel diese Liste nur noch für Metadaten:
+gelistete Modelle erhalten Kontextlimits und Preise von Together. Ein
+konfiguriertes Modell, das Together nicht listet, oder jedes Modell bei
+`GOMODEL_OFFLINE=true`, bezieht sie aus GoModels Modellkatalog (oder einer
+gecachten Liste) und kann ohne sie bleiben. Bild-, Audio-, Video-
 und Rerank-Modelle werden ausgelassen, weil GoModel diese Endpunkte nicht an
 Together weiterleitet. Modell-IDs enthalten einen Schrägstrich; verwenden Sie sie
 unverändert oder stellen Sie den Providernamen voran, um die Route festzulegen:

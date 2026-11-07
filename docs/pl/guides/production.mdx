@@ -298,7 +298,8 @@ GOMODEL_OFFLINE=true
 | [Katalog modeli](/pl/advanced/model-metadata) pod `MODEL_LIST_URL` | Ceny, okna kontekstu i możliwości modeli, pobierane przy starcie i przy każdym odświeżeniu cache'u | włączone |
 
 `GOMODEL_OFFLINE=true` (lub `offline: true` w `config.yaml`) wyłącza
-sprawdzanie aktualizacji i pomija każdy URL katalogu HTTP. Jest stosowane po wszystkich innych
+sprawdzanie aktualizacji, pomija każdy URL katalogu HTTP i wyłącza pobieranie
+metadanych z `/models` przez providerów w trybie `allowlist`. Jest stosowane po wszystkich innych
 ustawieniach, więc nic w `config.yaml` ani w zmiennych środowiskowych nie może pod spodem ponownie włączyć
 wywołania wychodzącego. Wywołania do skonfigurowanych providerów i do wszystkiego, co
 zadeklarujesz samodzielnie, na przykład kolektora OTLP, upstreamów MCP czy magazynu

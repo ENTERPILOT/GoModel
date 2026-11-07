@@ -211,7 +211,7 @@ GOMODEL_OFFLINE=true
 | 访问 `GOMODEL_VERSION_CHECK_URL` 的[更新检查](/zh/advanced/version-awareness) | 每天获取最新的发布版本号，附带匿名安装 ID | 开启 |
 | 访问 `MODEL_LIST_URL` 的[模型目录](/zh/advanced/model-metadata) | 定价、上下文窗口和能力信息，在启动时及每次缓存刷新时获取 | 开启 |
 
-`GOMODEL_OFFLINE=true`（或 `config.yaml` 中的 `offline: true`）会禁用更新检查，并丢弃所有 HTTP 目录 URL。它在所有其他设置之后应用，
+`GOMODEL_OFFLINE=true`（或 `config.yaml` 中的 `offline: true`）会禁用更新检查、丢弃所有 HTTP 目录 URL，并停止 `allowlist` 模式的提供商为获取元数据而调用 `/models`。它在所有其他设置之后应用，
 因此 `config.yaml` 或环境变量中的任何内容都无法在其之下重新启用出站调用。对已配置提供商的调用，以及对您自行声明的任何服务
 （例如 OTLP 采集器、MCP 上游或向量存储）的调用不受影响。启动日志会确认该模式。
 

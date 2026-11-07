@@ -92,6 +92,9 @@ type ModelRegistry struct {
 	// providerModelsModes holds per-provider overrides of
 	// configuredProviderModelsMode, keyed by provider instance name.
 	providerModelsModes map[string]config.ConfiguredProviderModelsMode
+	// allowlistMetadataDisabled stops allowlist providers from calling /models
+	// for metadata (offline mode). The zero value keeps the call on.
+	allowlistMetadataDisabled bool
 	// providerModelFilters holds operator-supplied inventory filters keyed by
 	// configured provider instance name. Applied after metadata enrichment;
 	// providers without a filter are absent from the map.

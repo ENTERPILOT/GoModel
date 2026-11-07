@@ -333,7 +333,8 @@ GOMODEL_OFFLINE=true
 | [Modellkatalog](/de/advanced/model-metadata) unter `MODEL_LIST_URL` | Preise, Kontextfenster und Fähigkeiten, abgerufen beim Start und bei jeder Cache-Aktualisierung | an |
 
 `GOMODEL_OFFLINE=true` (oder `offline: true` in `config.yaml`) deaktiviert die
-Update-Prüfung und verwirft jede HTTP-URL für den Katalog. Die Einstellung wird
+Update-Prüfung, verwirft jede HTTP-URL für den Katalog und stoppt die
+Metadaten-Abfrage von `/models` bei Providern im Modus `allowlist`. Die Einstellung wird
 nach allen anderen angewendet, sodass nichts in `config.yaml` oder in der
 Umgebung darunter einen ausgehenden Aufruf wieder aktivieren kann. Aufrufe an
 konfigurierte Provider und an alles, was Sie selbst deklariert haben – etwa

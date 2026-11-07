@@ -146,8 +146,8 @@ kontynuuje routing, korzystając kolejno z:
    listy z [katalogu modeli](/pl/advanced/configuration) dla jego typu providera.
 
 Ta kolejność dotyczy trybów `fallback` i `merge`. W domyślnym trybie
-`allowlist` provider ze skonfigurowaną listą nigdy nie wywołuje `/models`, więc
-to ta lista jest jego inwentarzem.
+`allowlist` provider ze skonfigurowaną listą serwuje dokładnie tę listę;
+`/models` służy tylko po metadane, a nieudane listowanie niczego nie zmienia.
 
 Providerzy z błędem są ponownie sprawdzani co `PROVIDER_RECHECK_INTERVAL` sekund
 (domyślnie `60`), a aktualna lista zastępuje zastępczą, gdy tylko listowanie
@@ -156,7 +156,7 @@ a `/health/ready` raportuje `degraded` z `"models": "down"`, podczas gdy instanc
 pozostaje w rotacji.
 
 Aby nigdy nie zależeć od wykrywania, wypisz modele samodzielnie. Domyślne
-`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` udostępnia wtedy tylko tę listę i pomija `/models`:
+`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` udostępnia wtedy tylko tę listę, a `/models` służy tylko po metadane:
 
 ```bash
 export OPENAI_MODELS=gpt-6-sol,gpt-6-luna

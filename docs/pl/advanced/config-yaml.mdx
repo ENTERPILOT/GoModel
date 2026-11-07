@@ -47,7 +47,7 @@ Listy modeli skonfigurowanych providerów mogą pozostać w zmiennych
 
 | Tryb | Wywołuje upstream `/models` | Udostępnia | Kiedy używać |
 |---|---|---|---|
-| `allowlist` (domyślny) | Nie | Tylko Twoją listę | Chcesz dokładnie tych modeli, np. jednego modelu z OpenRouter |
+| `allowlist` (domyślny) | Tylko po metadane (wyłączone przy `GOMODEL_OFFLINE=true`) | Tylko Twoją listę | Chcesz dokładnie tych modeli, np. jednego modelu z OpenRouter |
 | `fallback` | Tak | Listę upstream; Twoją listę tylko, gdy `/models` zawiedzie lub nic nie zwróci | `/models` bywa niedostępny, ale to wykrywanie ma wyznaczać listę |
 | `merge` | Tak | Listę upstream plus Twoje modele, których w niej brak; gdy `/models` zawiedzie, działa jak `fallback` | Provider obsługuje modele, których nie wymienia (wersje preview lub niewymienione ID) |
 

@@ -244,7 +244,8 @@ support, not every individual model capability exposed by an upstream provider.
   `https://api.deepseek.com`; set `DEEPSEEK_BASE_URL` only when using a
   compatible proxy or alternate DeepSeek endpoint. By default,
   `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` exposes only the configured models
-  for providers that define a list, skipping their upstream `/models` calls. Set
+  for providers that define a list, reading upstream `/models` only for their
+  metadata. Set
   `fallback` to use those lists only when upstream `/models` is unavailable or
   empty, or `merge` to add them to the discovered models.
   Override it for one provider with `<PROVIDER>[_SUFFIX]_MODELS_MODE` (for example

@@ -230,7 +230,7 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
   `https://api.deepseek.com`; setzen Sie `DEEPSEEK_BASE_URL` nur, wenn Sie einen kompatiblen Proxy
   oder einen alternativen DeepSeek-Endpunkt verwenden. Standardmäßig stellt
   `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` für Provider mit einer definierten Liste nur die
-  konfigurierten Modelle bereit und überspringt deren Upstream-Aufrufe von `/models`. Setzen Sie
+  konfigurierten Modelle bereit und liest Upstream-`/models` nur für deren Metadaten. Setzen Sie
   `fallback`, um diese Listen nur zu verwenden, wenn das Upstream-`/models` nicht verfügbar oder
   leer ist, oder `merge`, um sie zu den erkannten Modellen hinzuzufügen.
   Für einen einzelnen Provider überschreiben Sie den Modus mit

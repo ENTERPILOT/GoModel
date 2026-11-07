@@ -250,7 +250,7 @@ unten.
 | `CACHE_REFRESH_INTERVAL` | Sekunden zwischen zwei Durchläufen der Modellerkennung bei den Providern | `3600` (1h) |
 | `PROVIDER_RECHECK_INTERVAL` | Sekunden zwischen erneuten Prüfungen von Providern, deren letzte Aktualisierung fehlgeschlagen ist (`0` deaktiviert) | `60` |
 | `MODEL_LIST_URL`    | Katalog mit Modell-Metadaten: eine HTTP-URL, ein lokaler Dateipfad (`/etc/gomodel/models.json` oder `file://...`) oder `off` | öffentlicher Katalog auf GitHub |
-| `GOMODEL_OFFLINE`   | Schalter für Air-Gap-Umgebungen: deaktiviert die Update-Prüfung und verwirft HTTP-Katalog-URLs. Lokale Katalogdateien und konfigurierte Provider sind nicht betroffen | `false` |
+| `GOMODEL_OFFLINE`   | Schalter für Air-Gap-Umgebungen: deaktiviert die Update-Prüfung, verwirft HTTP-Katalog-URLs und stoppt die Metadaten-Abfrage von `/models` bei allowlist-Providern. Lokale Katalogdateien und Requests an konfigurierte Provider sind nicht betroffen | `false` |
 | `REDIS_URL`         | Redis-Verbindungs-URL              | _(leer)_        |
 | `REDIS_KEY_MODELS`     | Redis-Key für den Modell-Cache           | `gomodel:models`    |
 | `REDIS_KEY_RESPONSES`  | Redis-Key für den Response-Cache        | `gomodel:response:` |
@@ -596,8 +596,8 @@ kommagetrennte Liste konfigurierter Modelle, zum Beispiel
 `OPENROUTER_MODELS`, `ORACLE_MODELS`, `AZURE_MODELS`, `SGLANG_MODELS`,
 `VLLM_MODELS` oder `LLMD_MODELS`. Standardmäßig macht
 `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` eine konfigurierte Liste zum
-gesamten Modellangebot des Providers und überspringt dessen Upstream-Aufruf von
-`/models`. Setzen Sie `fallback`, um die Liste nur zu verwenden, wenn Upstream
+gesamten Modellangebot des Providers; Upstream-`/models` wird nur abgefragt, um
+Metadaten (Kontextlänge, Preise) für die gelisteten Modelle zu übernehmen. Setzen Sie `fallback`, um die Liste nur zu verwenden, wenn Upstream
 `/models` fehlschlägt, nil oder eine leere Liste zurückgibt, oder `merge`, um
 konfigurierte Modelle zum Upstream-Angebot hinzuzufügen. Ein OpenAI-kompatibler
 Provider ohne `/models`-Endpunkt (404 oder 405) wird aus seiner konfigurierten
@@ -882,7 +882,7 @@ strukturierte Einstellungen) verwenden Sie die YAML-Datei:
 ```yaml
 models:
   # allowlist ist der Standardwert: Eine konfigurierte Modellliste ist das gesamte
-  # Modellangebot, Upstream-Aufrufe von /models werden übersprungen. Verwenden Sie
+  # Modellangebot, Upstream-/models liefert nur Metadaten. Verwenden Sie
   # fallback, um die Liste nur bei fehlschlagendem oder leerem /models zu nutzen,
   # oder merge, um konfigurierte Modelle zusätzlich zum erkannten Modellangebot
   # hinzuzufügen (Modelle, die ein Provider bereitstellt, aber nicht auflistet).
@@ -959,8 +959,8 @@ providers:
 <Note>
   `models:` funktioniert in jedem Provider-Block. Im fallback-Modus dient es als
   Sicherheitsnetz, wenn Upstream `/models` nicht verfügbar oder leer ist. Im
-  allowlist-Modus wird es zum bereitgestellten Modellangebot dieses Providers
-  und überspringt Upstream `/models`. Für Oracle GenAI finden Sie im
+  allowlist-Modus wird es zum bereitgestellten Modellangebot dieses Providers;
+  Upstream `/models` liefert nur Metadaten für die gelisteten Modelle. Für Oracle GenAI finden Sie im
   [Oracle-GenAI-Leitfaden](/de/providers/oracle) die erforderliche OCI-Policy und
   eine getestete Konfiguration.
 </Note>

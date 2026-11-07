@@ -297,7 +297,8 @@ GOMODEL_OFFLINE=true
 | [Model catalog](/advanced/model-metadata) at `MODEL_LIST_URL` | Pricing, context windows, and capabilities, fetched at startup and on each cache refresh | on |
 
 `GOMODEL_OFFLINE=true` (or `offline: true` in `config.yaml`) disables the
-update check and drops any HTTP catalog URL. It is applied after every other
+update check, drops any HTTP catalog URL, and stops providers in `allowlist`
+mode from listing `/models` for metadata. It is applied after every other
 setting, so nothing in `config.yaml` or the environment can re-enable an
 outbound call underneath it. Calls to configured providers and to anything you
 declared yourself, such as an OTLP collector, MCP upstreams, or a vector

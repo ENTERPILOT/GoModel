@@ -30,7 +30,7 @@ GOMODEL_MASTER_KEY=change-me
 
 `ORACLE_MODELS` to lista rozdzielona przecinkami (białe znaki są usuwane). Zachowanie
 wynika z globalnego `CONFIGURED_PROVIDER_MODELS_MODE` – `allowlist` (domyślnie)
-udostępnia tylko skonfigurowane modele i pomija wywołanie upstreamu; `fallback`
+udostępnia tylko skonfigurowane modele, odpytując upstream tylko po ich metadane; `fallback`
 używa listy, gdy `/models` Oracle jest niedostępny lub pusty.
 
 Albo w `config.yaml`:

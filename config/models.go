@@ -49,7 +49,8 @@ const (
 	// upstream /models call fails or returns nothing.
 	ConfiguredProviderModelsModeFallback ConfiguredProviderModelsMode = "fallback"
 	// ConfiguredProviderModelsModeAllowlist exposes only the configured models
-	// and skips the upstream /models call.
+	// and calls the upstream /models only to take metadata for them (see
+	// fetchAllowlistMetadata); offline mode turns that call off.
 	ConfiguredProviderModelsModeAllowlist ConfiguredProviderModelsMode = "allowlist"
 	// ConfiguredProviderModelsModeMerge unions the upstream inventory with the
 	// configured models, so models a provider serves but does not list stay
