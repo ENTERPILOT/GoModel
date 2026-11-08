@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/httpclient"
 )
 
@@ -38,6 +39,9 @@ func validateCredential(cred ManagedProviderCredential, schema CredentialSchema)
 	}
 	if err := validateCredentialProxyURL(cred); err != nil {
 		return err
+	}
+	if err := validateModelsMode(CredentialFieldModelsMode, config.ConfiguredProviderModelsMode(cred.ModelsMode)); err != nil {
+		return credentialFieldError(CredentialFieldModelsMode, "%s", err.Error())
 	}
 	// Google's project/service-account auth replaces the "one required field
 	// per row" shape with a choice between several valid combinations, so it

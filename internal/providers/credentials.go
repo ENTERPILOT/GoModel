@@ -58,6 +58,10 @@ type ManagedProviderCredential struct {
 	// masks it on the way out.
 	ProxyURL string
 	Models   []string
+	// ModelsMode overrides the global configured provider models mode for
+	// this provider: "fallback", "allowlist", or "merge". Empty uses the
+	// global mode.
+	ModelsMode string
 
 	// Enabled controls whether this credential is applied to the running
 	// registry. Disabling one keeps the row (and its keys) on file without
@@ -91,6 +95,7 @@ func (m ManagedProviderCredential) toRawProviderConfig() config.RawProviderConfi
 		GCPScope:                 m.GCPScope,
 		ProxyURL:                 m.ProxyURL,
 		Models:                   rawProviderModelsFromIDs(m.Models),
+		ModelsMode:               config.ConfiguredProviderModelsMode(m.ModelsMode),
 	}
 	if len(m.APIKeys) > 0 {
 		raw.APIKey = m.APIKeys[0]
@@ -764,6 +769,7 @@ func (s *CredentialsService) install(name string, built builtCredential) {
 		configuredModels:  cfg.Models,
 		metadataOverrides: cfg.ModelMetadataOverrides,
 		modelFilter:       cfg.ModelFilter,
+		modelsMode:        cfg.ModelsMode,
 	})
 
 	s.mu.Lock()

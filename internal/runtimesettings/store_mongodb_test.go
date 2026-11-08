@@ -39,5 +39,8 @@ func TestMongoDBStoreRoundTrip(t *testing.T) {
 		stored, err = store.Replace(ctx, "install_id", "first", "third")
 		require.NoError(t, err)
 		require.Equal(t, "second", stored)
+		values, err := store.GetAll(ctx)
+		require.NoError(t, err)
+		require.Equal(t, map[string]string{"pro.compression.level": "high", "install_id": "second"}, values)
 	})
 }

@@ -50,7 +50,8 @@ URLs work the same way. Realtime sessions use the GA
 
 `/openai/v1/models` lists the resource's models, so a deployment named after its
 model (the Foundry default) routes as-is. For custom deployment names, list them
-in `AZURE_MODELS` and set `CONFIGURED_PROVIDER_MODELS_MODE=merge`.
+in `AZURE_MODELS` and set `AZURE_MODELS_MODE=merge` so the listed models stay
+alongside the discovered ones (see [Models modes](/advanced/config-yaml#models-modes)).
 
 ## Run GoModel
 
@@ -154,7 +155,7 @@ GoModel can route it:
 
 ```bash
 AZURE_MODELS=ms-decision-1
-CONFIGURED_PROVIDER_MODELS_MODE=merge
+AZURE_MODELS_MODE=merge
 ```
 
 ```bash
