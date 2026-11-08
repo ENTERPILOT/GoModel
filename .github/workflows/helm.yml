@@ -68,7 +68,9 @@ jobs:
           helm template gomodel helm -s templates/deployment.yaml | grep -A4 'name: GOMEMLIMIT' | tr -d ' \n' \
             | grep -qF 'valueFrom:resourceFieldRef:resource:limits.memorydivisor:"1"'
           ! helm template gomodel helm --set goMemLimit=400Mi >/dev/null 2>&1
-          test "$(helm template gomodel helm --set goMemLimit=400MiB -s templates/deployment.yaml | grep -c -e 'value: "400MiB"' -e resourceFieldRef)" = 1
+          out="$(helm template gomodel helm --set goMemLimit=400MiB -s templates/deployment.yaml)" || exit 1
+          test "$(grep -c 'value: "400MiB"' <<<"$out")" = 1
+          if grep -q resourceFieldRef <<<"$out"; then echo "goMemLimit did not replace the derived limit"; exit 1; fi
           out="$(helm template gomodel helm --set env.GOMEMLIMIT=300MiB -s templates/deployment.yaml)" || exit 1
           if grep -q GOMEMLIMIT <<<"$out"; then echo "chart overrode env.GOMEMLIMIT"; exit 1; fi
           out="$(helm template gomodel helm --set resources.limits=null -s templates/deployment.yaml)" || exit 1
