@@ -19,12 +19,13 @@ func (c Config) ForPath(path string) Config {
 // isEmbeddingsPath reports whether path is an embeddings endpoint: the
 // OpenAI-compatible /v1/embeddings route or a provider passthrough call whose
 // last path segment names an embeddings operation (OpenAI-style "embeddings",
-// Cohere/Ollama "embed", Gemini ":embedContent" and ":batchEmbedContents").
+// llama.cpp's legacy "embedding", Cohere/Ollama "embed", Gemini ":embedContent"
+// and ":batchEmbedContents").
 func isEmbeddingsPath(path string) bool {
 	if _, endpoint, ok := core.ParseProviderPassthroughPath(path); ok {
 		endpoint = strings.Trim(endpoint, "/")
 		last := endpoint[strings.LastIndex(endpoint, "/")+1:]
-		return last == "embeddings" || last == "embed" ||
+		return last == "embeddings" || last == "embedding" || last == "embed" ||
 			strings.HasSuffix(last, ":embedContent") || strings.HasSuffix(last, ":batchEmbedContents")
 	}
 	return core.DescribeEndpointPath(path).Operation == core.OperationEmbeddings

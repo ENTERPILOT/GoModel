@@ -224,7 +224,7 @@ server:
 </Tip>
 
 <Warning>
-  启用 `LOGGING_LOG_BODIES` 时，请求体和响应体会被完整存储，其中可能包含敏感数据，例如个人身份信息（PII）或嵌入在提示词中的 API 密钥。
+  启用 `LOGGING_LOG_BODIES` 时，请求体和响应体会被完整存储（下文按端点的设置会丢弃它们或以占位符替代的情况除外），其中可能包含敏感数据，例如个人身份信息（PII）或嵌入在提示词中的 API 密钥。
 </Warning>
 
 <Note>
@@ -237,7 +237,7 @@ server:
 </Note>
 
 <Note>
-  `LOGGING_LOG_EMBEDDING_BODIES` 是 `LOGGING_LOG_BODIES` 针对 embeddings 的细化设置，只有在启用请求体记录时才生效。它适用于 `/v1/embeddings` 以及对提供商 embeddings 端点的透传调用（`/p/{provider}/.../embeddings`、Cohere 和 Ollama 的 `.../embed`、Gemini 的 `:embedContent` 和 `:batchEmbedContents`）。embedding 输入可能是整篇文档或 base64 图片，响应则是浮点向量，因此批量索引任务会使审计存储快速增长。启用请求体记录但关闭此项时，embedding 条目会保留元数据（模型、提供商、状态、耗时、用户路径、用量），并丢弃请求体和响应体。该设置默认为 `true`，保持原有行为。
+  `LOGGING_LOG_EMBEDDING_BODIES` 是 `LOGGING_LOG_BODIES` 针对 embeddings 的细化设置，只有在启用请求体记录时才生效。它适用于 `/v1/embeddings` 以及对提供商 embeddings 端点的透传调用（`/p/{provider}/.../embeddings`、llama.cpp 的 `/embedding`、Cohere 和 Ollama 的 `.../embed`、Gemini 的 `:embedContent` 和 `:batchEmbedContents`）。embedding 输入可能是整篇文档或 base64 图片，响应则是浮点向量，因此批量索引任务会使审计存储快速增长。启用请求体记录但关闭此项时，embedding 条目会保留元数据（模型、提供商、状态、耗时、用户路径、用量），并丢弃请求体和响应体。该设置默认为 `true`，保持原有行为。
 </Note>
 
 <Note>

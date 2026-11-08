@@ -378,7 +378,9 @@ gespeicherte Logs sichtbar sind.
 
 <Warning>
   Wenn `LOGGING_LOG_BODIES` aktiviert ist, werden Request- und Response-Bodys
-  vollständig gespeichert. Diese können sensible Daten enthalten, etwa
+  vollständig gespeichert, außer wo die endpunktspezifischen Einstellungen
+  unten sie verwerfen oder durch Platzhalter ersetzen. Diese können sensible
+  Daten enthalten, etwa
   personenbezogene Daten (PII) oder in Prompts eingebettete API-Keys.
 </Warning>
 
@@ -419,7 +421,8 @@ gespeicherte Logs sichtbar sind.
   `LOGGING_LOG_EMBEDDING_BODIES` verfeinert `LOGGING_LOG_BODIES` für
   Embeddings – ohne aktiviertes Body-Logging hat es keine Wirkung. Es gilt für
   `/v1/embeddings` und für Provider-Passthrough-Aufrufe an einen
-  Embeddings-Endpunkt (`/p/{provider}/.../embeddings`, Cohere und Ollama
+  Embeddings-Endpunkt (`/p/{provider}/.../embeddings`, llama.cpp
+  `/embedding`, Cohere und Ollama
   `.../embed`, Gemini `:embedContent` und `:batchEmbedContents`).
   Embedding-Eingaben können ganze Dokumente oder Base64-Bilder sein und die
   Responses sind Float-Vektoren, sodass Massen-Indexierungsjobs den

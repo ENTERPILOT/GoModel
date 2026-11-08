@@ -352,7 +352,8 @@ strony. Gdy logowanie audytowe jest włączone, zapisy są asynchroniczne i moż
 
 <Warning>
   Gdy `LOGGING_LOG_BODIES` jest włączone, body requestów i odpowiedzi są zapisywane
-  w całości. Mogą zawierać dane wrażliwe, takie jak dane osobowe (PII) lub klucze API osadzone w
+  w całości, z wyjątkiem miejsc, w których ustawienia dla poszczególnych
+  endpointów poniżej je pomijają lub zastępują placeholderami. Mogą zawierać dane wrażliwe, takie jak dane osobowe (PII) lub klucze API osadzone w
   promptach.
 </Warning>
 
@@ -388,7 +389,8 @@ strony. Gdy logowanie audytowe jest włączone, zapisy są asynchroniczne i moż
   `LOGGING_LOG_EMBEDDING_BODIES` doprecyzowuje `LOGGING_LOG_BODIES` dla embeddingów –
   nie działa, jeśli logowanie body nie jest włączone. Obejmuje `/v1/embeddings`
   oraz wywołania passthrough do endpointu embeddingów u providera
-  (`/p/{provider}/.../embeddings`, Cohere i Ollama `.../embed`, Gemini
+  (`/p/{provider}/.../embeddings`, llama.cpp `/embedding`, Cohere i Ollama
+  `.../embed`, Gemini
   `:embedContent` i `:batchEmbedContents`). Wejścia embeddingów mogą być całymi
   dokumentami lub obrazami base64, a odpowiedzi to wektory liczb, więc masowe
   indeksowanie szybko powiększa magazyn audytowy. Gdy logowanie body jest włączone,

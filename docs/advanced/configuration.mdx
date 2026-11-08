@@ -349,8 +349,9 @@ to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
 
 <Warning>
   When `LOGGING_LOG_BODIES` is enabled, request and response bodies are stored
-  in full. These may contain sensitive data such as PII or API keys embedded in
-  prompts.
+  in full, except where the per-endpoint settings below drop them or replace
+  them with placeholders. These may contain sensitive data such as PII or API
+  keys embedded in prompts.
 </Warning>
 
 <Note>
@@ -385,7 +386,7 @@ to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
   `LOGGING_LOG_EMBEDDING_BODIES` refines `LOGGING_LOG_BODIES` for embeddings —
   it has no effect unless body logging is enabled. It covers `/v1/embeddings`
   and provider passthrough calls to an embeddings endpoint (`/p/{provider}/.../embeddings`,
-  Cohere and Ollama `.../embed`, Gemini `:embedContent` and
+  llama.cpp `/embedding`, Cohere and Ollama `.../embed`, Gemini `:embedContent` and
   `:batchEmbedContents`). Embedding inputs
   can be whole documents or base64 images and the responses are float vectors,
   so bulk indexing jobs grow the audit store quickly. When body logging is on

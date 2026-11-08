@@ -29,6 +29,7 @@ func TestIsEmbeddingsPath(t *testing.T) {
 		{"/p/openai/v1/embeddings", true},
 		{"/p/openai/embeddings", true},
 		{"/p/azure/openai/deployments/emb/embeddings", true},
+		{"/p/llamacpp/embedding", true},
 		{"/p/cohere/v2/embed", true},
 		{"/p/ollama/api/embed", true},
 		{"/p/gemini/v1beta/models/text-embedding-004:embedContent", true},
@@ -141,8 +142,19 @@ func TestEnrichEntryWithAttemptsEmbeddingBodies(t *testing.T) {
 }
 
 func TestStreamLogObserverEmbeddingBodies(t *testing.T) {
-	logger := &captureLiveLogger{cfg: Config{Enabled: true, LogBodies: true}}
-
-	assert.False(t, NewStreamLogObserver(logger, &LogEntry{}, "/p/openai/v1/embeddings").WantsJSONEvent(nil))
-	assert.True(t, NewStreamLogObserver(logger, &LogEntry{}, "/v1/chat/completions").WantsJSONEvent(nil))
+	for _, tc := range []struct {
+		name          string
+		path          string
+		embeddingBody bool
+		want          bool
+	}{
+		{"embeddings off", "/p/openai/v1/embeddings", false, false},
+		{"embeddings on", "/p/openai/v1/embeddings", true, true},
+		{"chat unaffected", "/v1/chat/completions", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logger := &captureLiveLogger{cfg: Config{Enabled: true, LogBodies: true, LogEmbeddingBodies: tc.embeddingBody}}
+			assert.Equal(t, tc.want, NewStreamLogObserver(logger, &LogEntry{}, tc.path).WantsJSONEvent(nil))
+		})
+	}
 }
