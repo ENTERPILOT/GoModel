@@ -21,6 +21,7 @@ var credentialSQLSchema = []string{
 		type TEXT NOT NULL,
 		api_keys TEXT NOT NULL DEFAULT '[]',
 		session_sticky_keys ` + sqlx.TypeBool + ` NOT NULL DEFAULT TRUE,
+		billable ` + sqlx.TypeBool + ` NOT NULL DEFAULT TRUE,
 		base_url TEXT NOT NULL DEFAULT '',
 		api_version TEXT NOT NULL DEFAULT '',
 		backend TEXT NOT NULL DEFAULT '',
@@ -34,6 +35,7 @@ var credentialSQLSchema = []string{
 		gcp_scope TEXT NOT NULL DEFAULT '',
 		proxy_url TEXT NOT NULL DEFAULT '',
 		models TEXT NOT NULL DEFAULT '[]',
+		models_mode TEXT NOT NULL DEFAULT '',
 		enabled ` + sqlx.TypeBool + ` NOT NULL DEFAULT TRUE,
 		created_at ` + sqlx.TypeInt64 + ` NOT NULL,
 		updated_at ` + sqlx.TypeInt64 + ` NOT NULL
@@ -43,7 +45,7 @@ var credentialSQLSchema = []string{
 
 const selectCredentialColumns = `name, type, api_keys, base_url, api_version, backend, auth_type, api_mode, ` +
 	`vertex_project, vertex_location, service_account_file, service_account_json, ` +
-	`service_account_json_base64, gcp_scope, proxy_url, models, session_sticky_keys, enabled, created_at, updated_at`
+	`service_account_json_base64, gcp_scope, proxy_url, models, models_mode, session_sticky_keys, billable, enabled, created_at, updated_at`
 
 // NewSQLCredentialStore creates the provider_credentials table and indexes if
 // needed.
@@ -57,6 +59,8 @@ func NewSQLCredentialStore(ctx context.Context, db sqlx.DB) (*SQLCredentialStore
 	if err := sqlx.AddColumns(ctx, db,
 		`ALTER TABLE provider_credentials ADD COLUMN session_sticky_keys `+sqlx.TypeBool+` NOT NULL DEFAULT TRUE`,
 		`ALTER TABLE provider_credentials ADD COLUMN proxy_url TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE provider_credentials ADD COLUMN billable `+sqlx.TypeBool+` NOT NULL DEFAULT TRUE`,
+		`ALTER TABLE provider_credentials ADD COLUMN models_mode TEXT NOT NULL DEFAULT ''`,
 	); err != nil {
 		return nil, fmt.Errorf("migrate provider_credentials: %w", err)
 	}
@@ -101,9 +105,9 @@ func (s *SQLCredentialStore) Upsert(ctx context.Context, cred ManagedProviderCre
 		INSERT INTO provider_credentials (
 			name, type, api_keys, base_url, api_version, backend, auth_type, api_mode,
 			vertex_project, vertex_location, service_account_file, service_account_json,
-			service_account_json_base64, gcp_scope, proxy_url, models, session_sticky_keys, enabled, created_at, updated_at
+			service_account_json_base64, gcp_scope, proxy_url, models, models_mode, session_sticky_keys, billable, enabled, created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(name) DO UPDATE SET
 			type = excluded.type,
 			api_keys = excluded.api_keys,
@@ -120,7 +124,9 @@ func (s *SQLCredentialStore) Upsert(ctx context.Context, cred ManagedProviderCre
 			gcp_scope = excluded.gcp_scope,
 			proxy_url = excluded.proxy_url,
 			models = excluded.models,
+			models_mode = excluded.models_mode,
 			session_sticky_keys = excluded.session_sticky_keys,
+			billable = excluded.billable,
 			enabled = excluded.enabled,
 			updated_at = excluded.updated_at
 	`,
@@ -140,7 +146,9 @@ func (s *SQLCredentialStore) Upsert(ctx context.Context, cred ManagedProviderCre
 		cred.GCPScope,
 		cred.ProxyURL,
 		modelsJSON,
+		cred.ModelsMode,
 		sessionStickyKeysEnabled(cred.SessionStickyKeys),
+		enabledByDefault(cred.Billable),
 		cred.Enabled,
 		cred.CreatedAt.Unix(),
 		cred.UpdatedAt.Unix(),
@@ -190,7 +198,7 @@ func (s *SQLCredentialStore) Close() error {
 func scanSQLCredential(scanner sqlx.Row) (ManagedProviderCredential, error) {
 	var cred ManagedProviderCredential
 	var apiKeys, models []byte
-	var sessionStickyKeys bool
+	var sessionStickyKeys, billable bool
 	var createdAt, updatedAt int64
 	if err := scanner.Scan(
 		&cred.Name,
@@ -209,7 +217,9 @@ func scanSQLCredential(scanner sqlx.Row) (ManagedProviderCredential, error) {
 		&cred.GCPScope,
 		&cred.ProxyURL,
 		&models,
+		&cred.ModelsMode,
 		&sessionStickyKeys,
+		&billable,
 		&cred.Enabled,
 		&createdAt,
 		&updatedAt,
@@ -217,6 +227,7 @@ func scanSQLCredential(scanner sqlx.Row) (ManagedProviderCredential, error) {
 		return ManagedProviderCredential{}, err
 	}
 	cred.SessionStickyKeys = &sessionStickyKeys
+	cred.Billable = &billable
 	var err error
 	if cred.APIKeys, err = sqlutil.DecodeJSONStrings(apiKeys); err != nil {
 		return ManagedProviderCredential{}, err

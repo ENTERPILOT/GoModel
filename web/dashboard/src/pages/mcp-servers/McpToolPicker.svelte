@@ -9,6 +9,7 @@
   import SegmentedControl from "$lib/components/atoms/SegmentedControl.svelte";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
+  import HighlightText from "$lib/components/atoms/HighlightText.svelte";
   import LoadingState from "$lib/components/molecules/LoadingState.svelte";
   import { mcpServers } from "./mcpServers.svelte.js";
   import {
@@ -106,7 +107,7 @@
         <li class="mcp-tools-row" class:mcp-tools-row-hidden={!row.exposed}>
           {#if row.missing}
             <span class="mcp-tools-copy">
-              <code class="mcp-tools-name mono">{row.name}</code>
+              <code class="mcp-tools-name mono"><HighlightText text={row.name} needle={mcpServers.toolQuery} /></code>
               <span class="mcp-tools-description">{m.mcp_tools_missing()}</span>
             </span>
             <TableActionButton
@@ -127,7 +128,7 @@
               />
               <span class="mcp-tools-copy">
                 <span class="mcp-tools-name-line">
-                  <code class="mcp-tools-name mono">{row.name}</code>
+                  <code class="mcp-tools-name mono"><HighlightText text={row.name} needle={mcpServers.toolQuery} /></code>
                   {#if row.readOnly}
                     <span class="mcp-tools-badge" title={m.mcp_tools_hint_title()}
                       >{m.mcp_tools_read_only()}</span
@@ -141,7 +142,7 @@
                   {/if}
                 </span>
                 {#if row.description}
-                  <span class="mcp-tools-description">{row.description}</span>
+                  <span class="mcp-tools-description"><HighlightText text={row.description} needle={mcpServers.toolQuery} /></span>
                 {/if}
               </span>
             </label>

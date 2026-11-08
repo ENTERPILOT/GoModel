@@ -1,0 +1,122 @@
+---
+title: "Slowdown"
+description: "Fügen Sie einem Modell oder virtuellen Modell künstliche Latenz hinzu, um Timeouts, Ladezustände und das Verhalten langsamerer Modelle zu testen."
+icon: "snail"
+keywords: ["Slowdown", "slowdown", "Latenz", "latency", "künstliche Verzögerung", "Testen", "Timeouts", "virtuelle Modelle"]
+---
+
+## Übersicht
+
+Slowdown lässt ein Modell langsamer antworten, als sein Provider es tut. GoModel
+misst, wie lange der Upstream-Aufruf gedauert hat, und wartet einen zusätzlichen
+Anteil dieser Zeit, bevor es die Response zurückgibt.
+
+Die Einstellung ist ein Faktor für **zusätzliche** Zeit:
+
+| Faktor | Upstream-Zeit | Client sieht |
+| ------ | ------------- | ------------ |
+| `0.5`  | 2 s           | ~3 s         |
+| `1`    | 2 s           | ~4 s         |
+| `3`    | 2 s           | ~8 s         |
+
+Nutzen Sie es, um Client-Timeouts, Ladezustände und Retry-Logik zu testen oder
+um zu sehen, wie sich eine App mit einem langsameren Modell anfühlt, ohne den
+Provider zu wechseln. Lassen Sie es im Produktivbetrieb ungesetzt, wo es keinen
+Zweck erfüllt.
+
+Slowdown ist standardmäßig aus.
+
+## Slowdown konfigurieren
+
+Setzen Sie **Slowdown** für ein konkretes Modell oder einen Redirect (Alias).
+Aktive Faktoren reichen von `0.1` bis `10`. `0` deaktiviert Slowdown explizit,
+auch einen vom Zielmodell geerbten. Ein leerer Wert lässt die Einstellung
+unbestimmt.
+
+### Dashboard
+
+Öffnen Sie `Models`, bearbeiten Sie ein Modell oder virtuelles Modell und füllen
+Sie **Slowdown (extra inference time)** aus. Modelle mit aktivem Slowdown zeigen
+ihn in ihrer Zeile an.
+
+### config.yaml
+
+```yaml
+virtual_models:
+  # Ein konkretes Modell für alle Aufrufer verlangsamen.
+  - source: openai/gpt-4o
+    slowdown: 0.5
+
+  # Einen verlangsamten Alias anbieten und das echte Modell unverändert lassen.
+  - source: slow-sonnet
+    target: anthropic/claude-sonnet-4-6
+    slowdown: 2
+```
+
+### Umgebungsvariable
+
+```env
+VIRTUAL_MODELS=[{"source":"slow-sonnet","target":"anthropic/claude-sonnet-4-6","slowdown":2}]
+```
+
+### Admin-API
+
+```bash
+curl -X PUT http://localhost:8080/admin/virtual-models \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"source":"slow-sonnet","target_model":"anthropic/claude-sonnet-4-6","slowdown":2}'
+```
+
+Ein Wert außerhalb des aktiven Bereichs liefert `400`. Bei einer
+Modellrichtlinie (ohne Ziel) braucht Slowdown ein Modell: ein providerweiter
+Selektor wie `openai/`, das globale `/` oder ein `*`-Modell wie `openai/*` wird
+mit `400` abgelehnt. Eine Weiterleitung akzeptiert jeden Quell-String als
+Alias-Namen.
+
+## Vorrang
+
+- Das eigene Slowdown eines Alias gewinnt gegenüber dem Slowdown seines
+  Zielmodells.
+- Ein Alias ohne Wert erbt das Slowdown des Zielmodells, zu dem er aufgelöst
+  wird. Setzen Sie den Alias auf `0`, um das abzuschalten.
+- Bei einem per Load Balancing verteilten virtuellen Modell richtet sich die
+  Vererbung nach dem für diesen Request gewählten Ziel.
+- Das Slowdown eines Modells lässt sich exakt (`openai/gpt-4o`) oder modellweit
+  (`gpt-4o`, bei jedem Provider) setzen; der exakte Wert gewinnt. Ein
+  spezifischerer Eintrag, der Slowdown leer lässt oder dessen `user_paths` den
+  Aufrufer ausschließen, verdeckt keinen allgemeineren Wert. Eine providerweite
+  Zugriffsregel schaltet das Slowdown eines Modells also nie ab.
+- In einer [Verkettung](/de/features/virtual-models#virtuelle-modelle-verketten)
+  gilt nur das Slowdown des **äußeren** virtuellen Modells.
+- Ein Slowdown auf einem Modell mit `user_paths` gilt nur für Requests aus
+  diesen [User-Paths](/de/features/user-path).
+
+## Was verlangsamt wird
+
+| Endpunkt | Verhalten |
+| -------- | --------- |
+| Chat Completions, Responses | Verzögert, nachdem die Upstream-Response eingetroffen ist. |
+| Dieselben Endpunkte mit `stream: true` (SSE) | Jeder Chunk wird auf der skalierten Zeitachse freigegeben. |
+| [Anthropic Messages](/de/advanced/anthropic-messages-api) | Verzögert, nachdem die Upstream-Response eingetroffen ist, oder beim Streaming Chunk für Chunk – auf dem übersetzten Pfad ebenso wie bei der [nativen Weiterleitung](/de/advanced/anthropic-messages-api#native-weiterleitung-an-anthropic). |
+| Embeddings | Verzögert, nachdem die Upstream-Response eingetroffen ist. |
+| Bildgenerierung und -bearbeitung | Verzögert, nachdem die Upstream-Response eingetroffen ist. |
+| [Audio](/de/advanced/audio-api): Sprache, Transkriptionen, Übersetzungen | Verzögert oder beim [Streaming](/de/advanced/audio-api#streaming) Chunk für Chunk getaktet. |
+
+Fehlgeschlagene Upstream-Aufrufe kehren ohne Verzögerung zurück. Verzögerungen
+berücksichtigen den Abbruch von Requests: ein Client, der die Verbindung trennt,
+wartet sofort nicht mehr.
+
+Passthrough-Requests, Batches und Realtime-WebSocket-Sessions werden nicht
+verlangsamt.
+
+## Streaming und Arbeitsspeicher
+
+Bei einer gestreamten Response liest GoModel den Upstream im Hintergrund und
+gibt jeden Chunk zu seiner skalierten Ankunftszeit frei. Ein Chunk, der 2
+Sekunden nach Stream-Beginn eintraf, erreicht den Client bei Faktor `0.5` nach
+3 Sekunden; das relative Chunk-Timing des Providers bleibt so erhalten.
+
+Chunks, die auf ihre Freigabe warten, werden im Arbeitsspeicher gehalten. Ein
+großer Faktor bei einem langen oder umfangreichen Stream oder bei einer großen
+Audio-Response kann erheblichen Speicher belegen.

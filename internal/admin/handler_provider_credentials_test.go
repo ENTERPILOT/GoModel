@@ -251,6 +251,53 @@ func TestUpsertProviderCredential_CanDisableSessionStickyKeys(t *testing.T) {
 	assert.False(t, response.SessionStickyKeys)
 }
 
+func TestUpsertProviderCredential_CanMarkNonBillable(t *testing.T) {
+	fake := newProviderCredentialsAdminFake()
+	h := newProviderCredentialsHandler(fake)
+
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/provider-credentials", `{"name":"byok-openai","type":"openai","api_keys":["sk-real"],"billable":false}`)
+	require.NoError(t, h.UpsertProviderCredential(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	stored := fake.rows["byok-openai"]
+	require.NotNil(t, stored.Billable)
+	assert.False(t, *stored.Billable)
+	assert.False(t, echotest.Decode[providerCredentialViewResponse](t, rec).Billable)
+
+	// An edit that leaves billable out keeps the stored value.
+	c, rec = echotest.Request(t, http.MethodPut, "/admin/provider-credentials", `{"name":"byok-openai","type":"openai","api_keys":["***"]}`)
+	require.NoError(t, h.UpsertProviderCredential(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	stored = fake.rows["byok-openai"]
+	require.NotNil(t, stored.Billable)
+	assert.False(t, *stored.Billable)
+	assert.False(t, echotest.Decode[providerCredentialViewResponse](t, rec).Billable)
+
+	// A new provider is billable unless said otherwise.
+	c, rec = echotest.Request(t, http.MethodPut, "/admin/provider-credentials", `{"name":"my-openai","type":"openai","api_keys":["sk-real"]}`)
+	require.NoError(t, h.UpsertProviderCredential(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.True(t, echotest.Decode[providerCredentialViewResponse](t, rec).Billable)
+}
+
+func TestUpsertProviderCredential_ModelsMode(t *testing.T) {
+	fake := newProviderCredentialsAdminFake()
+	h := newProviderCredentialsHandler(fake)
+
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/provider-credentials", `{"name":"router","type":"openai","api_keys":["sk-real"],"models":["qwen/qwen3-vl-8b-instruct"],"models_mode":" Allowlist "}`)
+	require.NoError(t, h.UpsertProviderCredential(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	assert.Equal(t, "allowlist", fake.rows["router"].ModelsMode)
+	assert.Equal(t, "allowlist", echotest.Decode[providerCredentialViewResponse](t, rec).ModelsMode)
+
+	// Omitting the mode clears the override, so the global mode applies.
+	c, rec = echotest.Request(t, http.MethodPut, "/admin/provider-credentials", `{"name":"router","type":"openai","api_keys":["***"]}`)
+	require.NoError(t, h.UpsertProviderCredential(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Empty(t, fake.rows["router"].ModelsMode)
+}
+
 func TestUpsertProviderCredential_RedactedKeyPreservesStoredValuePositionally(t *testing.T) {
 	fake := newProviderCredentialsAdminFake()
 	fake.rows["multi"] = providers.ManagedProviderCredential{

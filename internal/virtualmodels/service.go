@@ -211,7 +211,8 @@ func (s *Service) isManagedSource(source string) bool {
 	return false
 }
 
-// ValidateManagedConfig checks that every declarative config redirect satisfies
+// ValidateManagedConfig checks that no declarative policy names a "*" model
+// and that every declarative config redirect satisfies
 // the catalog-independent redirect invariants (valid selector, not solely a
 // self-target, no misspelled target provider), so a malformed IaC entry fails
 // startup loudly.
@@ -233,7 +234,13 @@ func (s *Service) ValidateManagedConfig(declaredProviders []string) error {
 	declared := providerNameSet(declaredProviders)
 	current := s.snapshot()
 	for _, vm := range current.bySource {
-		if !vm.Managed || !vm.IsRedirect() {
+		if !vm.Managed {
+			continue
+		}
+		if !vm.IsRedirect() {
+			if err := validatePolicyModel(vm.Source, vm.ProviderName, vm.Model); err != nil {
+				return fmt.Errorf("load virtual model %q: %w", vm.Source, err)
+			}
 			continue
 		}
 		if err := validateRedirectStructure(vm); err != nil {
@@ -319,6 +326,8 @@ func (s *Service) ListViews() []View {
 			Description:     vm.Description,
 			Slowdown:        vm.Slowdown,
 			ReasoningEffort: vm.ReasoningEffort,
+			Params:          vm.Params,
+			DefaultParams:   vm.DefaultParams,
 			Enabled:         vm.Enabled,
 			Managed:         vm.Managed,
 			CreatedAt:       vm.CreatedAt,
@@ -555,7 +564,7 @@ func (s *Service) policyIsRedundant(policy VirtualModel, fallbackRows []VirtualM
 // policyIsNoop reports whether an otherwise empty policy changes effective
 // access compared with the snapshot that would remain without that policy.
 func policyIsNoop(policy VirtualModel, fallback snapshot) bool {
-	if policy.IsRedirect() || len(policy.UserPaths) > 0 || strings.TrimSpace(policy.Description) != "" || policy.Slowdown != nil || policy.ReasoningEffort != "" {
+	if policy.IsRedirect() || len(policy.UserPaths) > 0 || strings.TrimSpace(policy.Description) != "" || policy.Slowdown != nil || policy.setsOverrides() {
 		return false
 	}
 

@@ -101,6 +101,7 @@ func ReencryptSecrets(ctx context.Context, opts ReencryptOptions) (ReencryptResu
 	passes := []func() (encryption.Report, error){
 		func() (encryption.Report, error) { return providers.ReencryptCredentials(ctx, shared, box) },
 		func() (encryption.Report, error) { return mcpgateway.Reencrypt(ctx, shared, box) },
+		func() (encryption.Report, error) { return mcpgateway.ReencryptOAuth(ctx, shared, box) },
 		func() (encryption.Report, error) { return guardrails.Reencrypt(ctx, shared, box, catalog) },
 	}
 	for _, pass := range passes {

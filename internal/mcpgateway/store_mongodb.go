@@ -39,6 +39,7 @@ type mongoMCPServerIDFilter struct {
 type MongoDBStore struct {
 	collection *mongo.Collection
 	virtuals   *mongo.Collection
+	oauth      *mongo.Collection
 }
 
 // NewMongoDBStore creates collection indexes if needed.
@@ -57,7 +58,11 @@ func NewMongoDBStore(database *mongo.Database) (*MongoDBStore, error) {
 	if _, err := coll.Indexes().CreateMany(ctx, indexes); err != nil {
 		return nil, fmt.Errorf("create mcp_servers indexes: %w", err)
 	}
-	return &MongoDBStore{collection: coll, virtuals: database.Collection("mcp_virtual_servers")}, nil
+	return &MongoDBStore{
+		collection: coll,
+		virtuals:   database.Collection("mcp_virtual_servers"),
+		oauth:      database.Collection("mcp_server_oauth"),
+	}, nil
 }
 
 func (s *MongoDBStore) List(ctx context.Context) ([]ManagedServer, error) {

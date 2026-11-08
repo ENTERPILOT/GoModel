@@ -29,9 +29,9 @@ GOMODEL_MASTER_KEY=change-me
 ```
 
 `ORACLE_MODELS` is a comma-separated list (whitespace trimmed). Behavior
-follows the global `CONFIGURED_PROVIDER_MODELS_MODE` — `fallback` (default)
-uses the list when Oracle's `/models` is unavailable or empty; `allowlist`
-exposes only configured models and skips the upstream call.
+follows the global `CONFIGURED_PROVIDER_MODELS_MODE` — `allowlist` (default)
+exposes only configured models and skips the upstream call; `fallback` uses the
+list when Oracle's `/models` is unavailable or empty.
 
 Or in `config.yaml`:
 

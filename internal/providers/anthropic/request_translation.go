@@ -30,6 +30,23 @@ const fallbackMaxTokens = 4096
 
 var invalidDefaultMaxTokensWarnOnce sync.Once
 
+// resolveMaxTokens reads the output limit in either Chat Completions
+// spelling: max_tokens, or max_completion_tokens, which OpenAI clients send
+// for reasoning models and which virtual-model params keep as written.
+// Anthropic requires a limit, so neither falls back to the default.
+func resolveMaxTokens(req *core.ChatRequest) int {
+	if req.MaxTokens != nil {
+		return *req.MaxTokens
+	}
+	if raw := req.ExtraFields.Lookup("max_completion_tokens"); len(raw) > 0 {
+		var limit int
+		if err := json.Unmarshal(raw, &limit); err == nil && limit > 0 {
+			return limit
+		}
+	}
+	return resolveDefaultMaxTokens()
+}
+
 func resolveDefaultMaxTokens() int {
 	raw := strings.TrimSpace(os.Getenv(defaultMaxTokensEnvVar))
 	if raw == "" {
@@ -424,11 +441,7 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 	}
 	anthropicReq.CacheControl = cacheControl
 
-	if req.MaxTokens != nil {
-		anthropicReq.MaxTokens = *req.MaxTokens
-	} else {
-		anthropicReq.MaxTokens = resolveDefaultMaxTokens()
-	}
+	anthropicReq.MaxTokens = resolveMaxTokens(req)
 
 	dropUnsupportedSamplingParameters(anthropicReq)
 	dropConflictingSamplingParameter(anthropicReq)

@@ -157,7 +157,7 @@ func buildDefaultConfig() *Config {
 			KeepOnlyAliasesAtModelsEndpoint:     false,
 			VLLMDiscoveryCompat:                 false,
 			UnqualifiedModelIDsAtModelsEndpoint: false,
-			ConfiguredProviderModelsMode:        ConfiguredProviderModelsModeFallback,
+			ConfiguredProviderModelsMode:        DefaultConfiguredProviderModelsMode,
 		},
 		Cache: CacheConfig{
 			Model: ModelCacheConfig{
@@ -189,6 +189,7 @@ func buildDefaultConfig() *Config {
 		Logging: LogConfig{
 			Enabled:               true,
 			LogBodies:             true,
+			LogEmbeddingBodies:    true,
 			LogImageBodiesScope:   ImageBodyScopeAll,
 			LogRevisionBodies:     true,
 			LogGuardrailSteps:     true,

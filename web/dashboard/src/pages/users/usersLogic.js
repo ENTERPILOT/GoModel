@@ -3,6 +3,7 @@
 
 import * as m from "../../lib/paraglide/messages.js";
 import { modelSelectorOptions, parseModelSelectors } from "../../lib/utils/modelSelectors.js";
+import { filterFields, normalizeQuery } from "../../lib/utils/textMatch.js";
 
 export function defaultUserForm() {
   return { user_path: "", allowed_models: [], description: "" };
@@ -141,14 +142,30 @@ function inactiveAncestors(nodes, userPath) {
   return result;
 }
 
+// userNodeSearchFields lists the text a node query matches against, one entry
+// per field so a fuzzy match cannot span two of them.
+function userNodeSearchFields(node) {
+  return [node.user_path, node.description, ...(node.allowed_models || [])].filter(Boolean);
+}
+
 // filterUserNodes applies the toolbar query against the path, description,
 // and selectors, and hides nodes whose keys are all inactive unless
 // `showInactive` is set.  An inactive node is retained when at least one of
 // its descendants remains visible so the tree keeps a valid ancestor chain.
 export function filterUserNodes(nodes, query, options = {}) {
   const { showInactive = false } = options;
-  const needle = String(query || "").trim().toLowerCase();
+  const needle = normalizeQuery(query);
   const list = Array.isArray(nodes) ? nodes : [];
+  // The matching set is computed once, over the whole list, so the fuzzy
+  // fallback stays a list-level decision: it only widens the result when the
+  // substring level found nothing at all.
+  // Only the rows the view can show take part in the fallback: an inactive
+  // node that answers by substring must not suppress the fuzzy matches among
+  // the active ones, which are the rows the default view renders.
+  const searchable = showInactive ? list : list.filter((node) => !userNodeInactive(node));
+  const matching = needle
+    ? new Set(filterFields(searchable, needle, userNodeSearchFields).map((node) => node.user_path))
+    : null;
 
   // Which inactive nodes should be retained?  An inactive node is retained
   // only when it is an ancestor of at least one node that is naturally
@@ -166,14 +183,7 @@ export function filterUserNodes(nodes, query, options = {}) {
   for (const node of list) {
     if (userNodeInactive(node)) continue;
     // Only retain inactive ancestors of nodes that match the query.
-    if (
-      needle &&
-      ![node.user_path, node.description, ...(node.allowed_models || [])]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase()
-        .includes(needle)
-    ) {
+    if (matching && !matching.has(node.user_path)) {
       continue;
     }
     for (const anc of inactiveAncestors(list, node.user_path)) {
@@ -185,14 +195,10 @@ export function filterUserNodes(nodes, query, options = {}) {
     if (!showInactive && userNodeInactive(node)) {
       return retainedInactive.has(node.user_path);
     }
-    if (!needle) {
+    if (!matching) {
       return true;
     }
-    return [node.user_path, node.description, ...(node.allowed_models || [])]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase()
-      .includes(needle);
+    return matching.has(node.user_path);
   });
 }
 
@@ -202,7 +208,10 @@ export function filterUserNodes(nodes, query, options = {}) {
 // query are retained — matching filterUserNodes' query-aware scoping.
 export function countInactiveUserNodes(nodes, needle) {
   const list = Array.isArray(nodes) ? nodes : [];
-  const search = String(needle || "").trim().toLowerCase();
+  const search = normalizeQuery(needle);
+  const matching = search
+    ? new Set(filterFields(list, search, userNodeSearchFields).map((node) => node.user_path))
+    : null;
 
   // Recompute the same retained set used by filterUserNodes.
   const inactiveRoots = new Set();
@@ -218,14 +227,7 @@ export function countInactiveUserNodes(nodes, needle) {
   for (const node of list) {
     if (userNodeInactive(node)) continue;
     // Only retain inactive ancestors of query-matching active nodes.
-    if (
-      search &&
-      ![node.user_path, node.description, ...(node.allowed_models || [])]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase()
-        .includes(search)
-    ) {
+    if (matching && !matching.has(node.user_path)) {
       continue;
     }
     for (const anc of inactiveAncestors(list, node.user_path)) {

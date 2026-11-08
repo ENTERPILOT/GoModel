@@ -22,6 +22,14 @@ type Reasoning struct {
 	// "xhigh" and "max" are supported by newer models such as Claude Opus 4.8;
 	// providers downgrade unsupported levels to their nearest equivalent.
 	Effort string `json:"effort,omitempty"`
+	// Summary requests a reasoning summary from the model (OpenAI Responses
+	// API: "auto", "concise", "detailed"). The Responses API never emits
+	// summaries unprompted, so empty asks for none there. A chat request the
+	// gateway serves through the Responses API sends a summary only while
+	// reasoning is on: the client's, or "auto" when it set none. With effort
+	// "none", or without an effort on a model that does not reason, none is
+	// sent.
+	Summary string `json:"summary,omitempty"`
 }
 
 // ChatRequest represents the incoming chat completion request

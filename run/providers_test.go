@@ -33,7 +33,7 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			// The plain shape every API-key provider derives.
 			providerType: "openai",
 			defaultURL:   "https://api.openai.com/v1",
-			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "proxy_url", "models"},
+			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "proxy_url", "models", "models_mode", "billable"},
 			required:     []string{"api_keys"},
 			absent:       []string{"api_version", "vertex_project"},
 		},
@@ -42,53 +42,53 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			// every other type, so the dashboard can offer them immediately.
 			providerType: "chutes",
 			defaultURL:   "https://llm.chutes.ai/v1",
-			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "proxy_url", "models"},
+			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "proxy_url", "models", "models_mode", "billable"},
 			required:     []string{"api_keys"},
 		},
 		{
 			// Voice-only provider (no chat); same plain API-key shape.
 			providerType: "elevenlabs",
 			defaultURL:   "https://api.elevenlabs.io",
-			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "proxy_url", "models"},
+			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "proxy_url", "models", "models_mode", "billable"},
 			required:     []string{"api_keys"},
 		},
 		{
 			// A deployment URL is the provider, so it is required, and Azure
 			// is the one type that takes an API version.
 			providerType: "azure",
-			fields:       []string{"api_keys", "base_url", "api_version", "session_sticky_keys", "proxy_url", "models"},
+			fields:       []string{"api_keys", "base_url", "api_version", "session_sticky_keys", "proxy_url", "models", "models_mode", "billable"},
 			required:     []string{"api_keys", "base_url"},
 		},
 		{
 			// Keyless: the endpoint is the whole configuration.
 			providerType: "ollama",
-			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "proxy_url", "models"},
+			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "proxy_url", "models", "models_mode", "billable"},
 			required:     nil,
 		},
 		{
 			// llm-d can be keyless, but it has no meaningful universal endpoint.
 			providerType: "llmd",
-			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "proxy_url", "models"},
+			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "proxy_url", "models", "models_mode", "billable"},
 			required:     []string{"base_url"},
 		},
 		{
 			// SGLang supports both unauthenticated and --api-key deployments,
 			// and api_mode picks how Responses requests reach it.
 			providerType: "sglang",
-			fields:       []string{"api_keys", "base_url", "api_mode", "session_sticky_keys", "proxy_url", "models"},
+			fields:       []string{"api_keys", "base_url", "api_mode", "session_sticky_keys", "proxy_url", "models", "models_mode", "billable"},
 			required:     nil,
 			options:      map[string][]string{"api_mode": {"auto", "native", "chat_compatible"}},
 		},
 		{
 			// Authenticates through the AWS SDK credential chain, never a key.
 			providerType: "bedrock",
-			fields:       []string{"base_url", "proxy_url", "models"},
+			fields:       []string{"base_url", "proxy_url", "models", "models_mode", "billable"},
 			absent:       []string{"api_keys"},
 		},
 		{
 			// Bearer token or AWS_BEARER_TOKEN_BEDROCK, plus a request shape.
 			providerType: "bedrock-mantle",
-			fields:       []string{"api_keys", "base_url", "api_mode", "session_sticky_keys", "proxy_url", "models"},
+			fields:       []string{"api_keys", "base_url", "api_mode", "session_sticky_keys", "proxy_url", "models", "models_mode", "billable"},
 			required:     nil,
 			options:      map[string][]string{"api_mode": {"auto", "openai", "standard"}},
 		},
@@ -99,7 +99,7 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			fields: []string{
 				"api_keys", "backend", "base_url", "api_mode", "auth_type",
 				"vertex_project", "vertex_location", "service_account_json",
-				"service_account_file", "service_account_json_base64", "gcp_scope", "session_sticky_keys", "proxy_url", "models",
+				"service_account_file", "service_account_json_base64", "gcp_scope", "session_sticky_keys", "proxy_url", "models", "models_mode", "billable",
 			},
 			required: nil,
 			options: map[string][]string{
@@ -115,7 +115,7 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			fields: []string{
 				"auth_type", "vertex_project", "vertex_location", "service_account_json",
 				"service_account_file", "service_account_json_base64", "base_url",
-				"api_mode", "gcp_scope", "proxy_url", "models",
+				"api_mode", "gcp_scope", "proxy_url", "models", "models_mode", "billable",
 			},
 			absent:  []string{"api_keys"},
 			options: map[string][]string{"api_mode": {"native", "openai_compatible", "anthropic"}},
@@ -165,7 +165,7 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 var credentialPayloadFields = []string{
 	"api_keys", "session_sticky_keys", "base_url", "api_version", "backend", "auth_type", "api_mode",
 	"vertex_project", "vertex_location", "service_account_file", "service_account_json",
-	"service_account_json_base64", "gcp_scope", "proxy_url", "models",
+	"service_account_json_base64", "gcp_scope", "proxy_url", "models", "models_mode", "billable",
 }
 
 func TestDefaultProviderFactoryRegistersAllProviderTypes(t *testing.T) {

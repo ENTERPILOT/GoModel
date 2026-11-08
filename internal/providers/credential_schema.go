@@ -1,6 +1,10 @@
 package providers
 
-import "sort"
+import (
+	"sort"
+
+	"github.com/enterpilot/gomodel/config"
+)
 
 // Credential form field names. They match the admin API's upsert payload keys
 // and the ManagedProviderCredential fields they fill, so a schema entry can be
@@ -8,6 +12,7 @@ import "sort"
 const (
 	CredentialFieldAPIKeys                  = "api_keys"
 	CredentialFieldSessionStickyKeys        = "session_sticky_keys"
+	CredentialFieldBillable                 = "billable"
 	CredentialFieldBaseURL                  = "base_url"
 	CredentialFieldAPIVersion               = "api_version"
 	CredentialFieldBackend                  = "backend"
@@ -21,6 +26,7 @@ const (
 	CredentialFieldGCPScope                 = "gcp_scope"
 	CredentialFieldProxyURL                 = "proxy_url"
 	CredentialFieldModels                   = "models"
+	CredentialFieldModelsMode               = "models_mode"
 )
 
 // CredentialField describes one field of a provider type's credential form.
@@ -97,7 +103,7 @@ func credentialSchema(providerType string, spec DiscoveryConfig) CredentialSchem
 		fields = defaultCredentialFields(spec)
 	}
 	schema := CredentialSchema{Type: providerType, DefaultBaseURL: spec.DefaultBaseURL,
-		Fields: make([]CredentialField, 0, len(fields)+3)}
+		Fields: make([]CredentialField, 0, len(fields)+5)}
 	schema.Fields = append(schema.Fields, fields...)
 	for _, field := range fields {
 		if field.Name == CredentialFieldAPIKeys {
@@ -107,7 +113,13 @@ func credentialSchema(providerType string, spec DiscoveryConfig) CredentialSchem
 	}
 	schema.Fields = append(schema.Fields,
 		CredentialField{Name: CredentialFieldProxyURL, Advanced: true},
-		CredentialField{Name: CredentialFieldModels, Advanced: true})
+		CredentialField{Name: CredentialFieldModels, Advanced: true},
+		CredentialField{Name: CredentialFieldModelsMode, Advanced: true, Options: []string{
+			string(config.ConfiguredProviderModelsModeFallback),
+			string(config.ConfiguredProviderModelsModeAllowlist),
+			string(config.ConfiguredProviderModelsModeMerge),
+		}},
+		CredentialField{Name: CredentialFieldBillable, Advanced: true})
 	return schema
 }
 
@@ -167,6 +179,8 @@ func credentialFieldValue(cred ManagedProviderCredential, name string) string {
 			return ""
 		}
 		return cred.Models[0]
+	case CredentialFieldModelsMode:
+		return cred.ModelsMode
 	default:
 		return ""
 	}

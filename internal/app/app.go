@@ -80,7 +80,7 @@ type App struct {
 	secrets             *encryption.Box
 	runtimeSettings     *runtimesettings.Service
 	clusterSync         *clustersync.Syncer
-	sharedStore         *sharedstore.Store // nil unless an extension takes it
+	sharedStore         *sharedstore.Store // nil unless an extension or MCP session sharing takes it
 	versionCheck        *versioncheck.Checker
 	extensionAuth       bool
 
@@ -216,6 +216,34 @@ func (a *App) attachLivePublishers() {
 			logger.SetLivePublisher(a.live)
 		}
 	}
+}
+
+// startRemoteLiveLogs has the live broker also publish the audit and usage
+// entries other replicas persist to the shared database, so a dashboard
+// connected to this replica sees every replica's traffic. The broker polls
+// only while a dashboard is subscribed, and stops when it closes.
+func (a *App) startRemoteLiveLogs() {
+	if a == nil || a.live == nil || !a.live.Enabled() || a.storage == nil {
+		return
+	}
+	cfg := live.RemoteConfig{Writer: storage.WriterID()}
+	if a.config.Logging.Enabled {
+		reader, err := auditlog.NewRecentWriteReader(a.storage)
+		if err != nil {
+			slog.Warn("live logs will not show other replicas' audit entries", "error", err)
+		} else {
+			cfg.Audit = reader
+		}
+	}
+	if a.config.Usage.Enabled {
+		reader, err := usage.NewRecentWriteReader(a.storage)
+		if err != nil {
+			slog.Warn("live logs will not show other replicas' usage entries", "error", err)
+		} else {
+			cfg.Usage = reader
+		}
+	}
+	a.live.StartRemote(cfg)
 }
 
 // Start starts the HTTP server on the given address.
@@ -477,6 +505,7 @@ func (a *App) logStartupInfo() {
 		slog.Info("audit logging enabled",
 			"log_bodies", cfg.Logging.LogBodies,
 			"log_audio_bodies", cfg.Logging.LogAudioBodies,
+			"log_embedding_bodies", cfg.Logging.LogEmbeddingBodies,
 			"log_image_bodies", cfg.Logging.LogImageBodies,
 			"log_image_bodies_scope", cfg.Logging.LogImageBodiesScope,
 			"log_headers", cfg.Logging.LogHeaders,

@@ -44,26 +44,33 @@ const redactedCredentialValue = "***********"
 // api_keys or the service-account fields preserves the stored value at that
 // position.
 type upsertProviderCredentialRequest struct {
-	Name                     string   `json:"name"`
-	Type                     string   `json:"type"`
-	APIKeys                  []string `json:"api_keys,omitempty"`
-	SessionStickyKeys        *bool    `json:"session_sticky_keys,omitempty"`
-	BaseURL                  string   `json:"base_url,omitempty"`
-	APIVersion               string   `json:"api_version,omitempty"`
-	Backend                  string   `json:"backend,omitempty"`
-	AuthType                 string   `json:"auth_type,omitempty"`
-	APIMode                  string   `json:"api_mode,omitempty"`
-	VertexProject            string   `json:"vertex_project,omitempty"`
-	VertexLocation           string   `json:"vertex_location,omitempty"`
-	ServiceAccountFile       string   `json:"service_account_file,omitempty"`
-	ServiceAccountJSON       string   `json:"service_account_json,omitempty"`
-	ServiceAccountJSONBase64 string   `json:"service_account_json_base64,omitempty"`
-	GCPScope                 string   `json:"gcp_scope,omitempty"`
+	Name              string   `json:"name"`
+	Type              string   `json:"type"`
+	APIKeys           []string `json:"api_keys,omitempty"`
+	SessionStickyKeys *bool    `json:"session_sticky_keys,omitempty"`
+	// Billable false marks a provider whose cost the caller does not owe the
+	// operator, such as a customer's own key. Omitted keeps the stored value
+	// (true for a new provider).
+	Billable                 *bool  `json:"billable,omitempty"`
+	BaseURL                  string `json:"base_url,omitempty"`
+	APIVersion               string `json:"api_version,omitempty"`
+	Backend                  string `json:"backend,omitempty"`
+	AuthType                 string `json:"auth_type,omitempty"`
+	APIMode                  string `json:"api_mode,omitempty"`
+	VertexProject            string `json:"vertex_project,omitempty"`
+	VertexLocation           string `json:"vertex_location,omitempty"`
+	ServiceAccountFile       string `json:"service_account_file,omitempty"`
+	ServiceAccountJSON       string `json:"service_account_json,omitempty"`
+	ServiceAccountJSONBase64 string `json:"service_account_json_base64,omitempty"`
+	GCPScope                 string `json:"gcp_scope,omitempty"`
 	// ProxyURL may be sent back exactly as the view rendered it (password
 	// masked) to keep the stored proxy credentials.
 	ProxyURL string   `json:"proxy_url,omitempty"`
 	Models   []string `json:"models,omitempty"`
-	Enabled  *bool    `json:"enabled,omitempty"`
+	// ModelsMode overrides the global configured provider models mode for
+	// this provider: fallback, allowlist, or merge. Empty uses the global mode.
+	ModelsMode string `json:"models_mode,omitempty"`
+	Enabled    *bool  `json:"enabled,omitempty"`
 }
 
 // providerCredentialFieldResponse describes one credential field a provider
@@ -98,6 +105,7 @@ type providerCredentialViewResponse struct {
 	Type                     string   `json:"type"`
 	APIKeys                  []string `json:"api_keys,omitempty"`
 	SessionStickyKeys        bool     `json:"session_sticky_keys"`
+	Billable                 bool     `json:"billable"`
 	BaseURL                  string   `json:"base_url,omitempty"`
 	APIVersion               string   `json:"api_version,omitempty"`
 	Backend                  string   `json:"backend,omitempty"`
@@ -110,12 +118,13 @@ type providerCredentialViewResponse struct {
 	ServiceAccountJSONBase64 string   `json:"service_account_json_base64,omitempty"`
 	GCPScope                 string   `json:"gcp_scope,omitempty"`
 	// ProxyURL is the provider's outbound proxy with any password masked.
-	ProxyURL  string     `json:"proxy_url,omitempty"`
-	Models    []string   `json:"models,omitempty"`
-	Enabled   bool       `json:"enabled"`
-	Managed   bool       `json:"managed"`
-	CreatedAt *time.Time `json:"created_at,omitempty"`
-	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	ProxyURL   string     `json:"proxy_url,omitempty"`
+	Models     []string   `json:"models,omitempty"`
+	ModelsMode string     `json:"models_mode,omitempty"`
+	Enabled    bool       `json:"enabled"`
+	Managed    bool       `json:"managed"`
+	CreatedAt  *time.Time `json:"created_at,omitempty"`
+	UpdatedAt  *time.Time `json:"updated_at,omitempty"`
 }
 
 // ListProviderCredentials handles GET /admin/provider-credentials.
@@ -345,6 +354,7 @@ func (h *Handler) buildProviderCredentialUpsert(ctx context.Context, name string
 		Type:                     strings.TrimSpace(req.Type),
 		APIKeys:                  apiKeys,
 		SessionStickyKeys:        req.SessionStickyKeys,
+		Billable:                 req.Billable,
 		BaseURL:                  strings.TrimSpace(req.BaseURL),
 		APIVersion:               strings.TrimSpace(req.APIVersion),
 		Backend:                  strings.TrimSpace(req.Backend),
@@ -358,12 +368,16 @@ func (h *Handler) buildProviderCredentialUpsert(ctx context.Context, name string
 		GCPScope:                 strings.TrimSpace(req.GCPScope),
 		ProxyURL:                 proxyURL,
 		Models:                   req.Models,
+		ModelsMode:               string(config.NormalizeConfiguredProviderModelsMode(config.ConfiguredProviderModelsMode(req.ModelsMode))),
 		Enabled:                  enabled,
 	}
 	if current != nil {
 		cred.CreatedAt = current.CreatedAt
 		if req.SessionStickyKeys == nil {
 			cred.SessionStickyKeys = current.SessionStickyKeys
+		}
+		if req.Billable == nil {
+			cred.Billable = current.Billable
 		}
 	}
 	return cred, kept, nil
@@ -446,6 +460,7 @@ func (h *Handler) providerCredentialView(cred providers.ManagedProviderCredentia
 		Type:               cred.Type,
 		APIKeys:            redactList(cred.APIKeys),
 		SessionStickyKeys:  cred.SessionStickyKeys == nil || *cred.SessionStickyKeys,
+		Billable:           cred.Billable == nil || *cred.Billable,
 		BaseURL:            cred.BaseURL,
 		APIVersion:         cred.APIVersion,
 		Backend:            cred.Backend,
@@ -457,6 +472,7 @@ func (h *Handler) providerCredentialView(cred providers.ManagedProviderCredentia
 		GCPScope:           cred.GCPScope,
 		ProxyURL:           redactProxyURL(cred.ProxyURL),
 		Models:             cred.Models,
+		ModelsMode:         cred.ModelsMode,
 		Enabled:            cred.Enabled,
 		Managed:            h.providerCredentials.IsManaged(cred.Name),
 		CreatedAt:          nonZeroTime(cred.CreatedAt),
@@ -489,7 +505,9 @@ func (h *Handler) declaredProviderCredentialView(cfg providers.SanitizedProvider
 		BaseURL:           cfg.BaseURL,
 		APIVersion:        cfg.APIVersion,
 		Models:            cfg.Models,
+		ModelsMode:        cfg.ModelsMode,
 		SessionStickyKeys: cfg.SessionStickyKeys,
+		Billable:          cfg.Billable,
 		ProxyURL:          cfg.ProxyURL,
 		Enabled:           true,
 		Managed:           true,

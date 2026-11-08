@@ -13,6 +13,7 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/modeldata"
 )
 
@@ -32,7 +33,7 @@ func (r *ModelRegistry) Initialize(ctx context.Context) error {
 
 func (r *ModelRegistry) initialize(ctx context.Context) error {
 	providers, providerTypes, providerNames := r.snapshotProviders()
-	configuredProviderModels, configuredProviderModelsMode := r.snapshotConfiguredProviderModels()
+	configuredProviderModels, configuredProviderModelsModes := r.snapshotConfiguredProviderModels()
 
 	fetched := r.fetchAllProviderModels(
 		ctx,
@@ -40,7 +41,7 @@ func (r *ModelRegistry) initialize(ctx context.Context) error {
 		providerTypes,
 		providerNames,
 		configuredProviderModels,
-		configuredProviderModelsMode,
+		configuredProviderModelsModes,
 	)
 
 	if len(providers) == 0 {
@@ -108,7 +109,7 @@ func (r *ModelRegistry) fetchAllProviderModels(
 	providerTypes map[core.Provider]string,
 	providerNames map[core.Provider]string,
 	configuredProviderModels map[string][]string,
-	configuredProviderModelsMode config.ConfiguredProviderModelsMode,
+	configuredProviderModelsModes map[string]config.ConfiguredProviderModelsMode,
 ) fetchedInventory {
 	out := fetchedInventory{
 		models:           make(map[string]*ModelInfo),
@@ -153,7 +154,7 @@ func (r *ModelRegistry) fetchAllProviderModels(
 				provider,
 				names[i],
 				providerTypes[provider],
-				configuredProviderModelsMode,
+				configuredProviderModelsModes[names[i]],
 				configuredProviderModels[names[i]],
 				catalogModels[names[i]],
 			)
@@ -321,11 +322,15 @@ func (r *ModelRegistry) fetchAllProviderModels(
 // atomically swaps them onto the registry, marks initialized, and emits the
 // summary log line.
 //
-// A provider that failed this sweep keeps its previous inventory, marked
-// stale: direct requests still resolve (and fail at the provider with an
-// honest 502/503 instead of "model not found"), while ModelAvailable reports
-// false so virtual-model load balancing skips it — the same routing outcome
-// the old wipe produced, without losing the inventory.
+// A provider that failed this sweep, or listed no models, keeps its previous
+// inventory, marked stale: direct requests still resolve (and fail at the
+// provider with an honest 502/503 instead of "model not found"), while
+// ModelAvailable reports false so virtual-model load balancing skips it — the
+// same routing outcome the old wipe produced, without losing the inventory.
+//
+// A provider registered or replaced after the sweep started keeps its current
+// inventory untouched: the sweep's result for a replaced provider instance is
+// discarded, and must not erase what its replacement inherited.
 func (r *ModelRegistry) applyFetchedInventory(
 	providerTypes map[core.Provider]string,
 	fetched fetchedInventory,
@@ -337,15 +342,22 @@ func (r *ModelRegistry) applyFetchedInventory(
 	r.dropUnregisteredFetchedProvidersLocked(&fetched)
 	stale := make(map[string]bool, len(fetched.runtimeUpdates))
 	carriedForward := 0
-	for name := range fetched.runtimeUpdates {
-		if _, ok := fetched.modelsByProvider[name]; ok {
+	for _, name := range r.providerOrderNamesLocked() {
+		if len(fetched.modelsByProvider[name]) > 0 {
 			continue // this sweep produced authoritative inventory
 		}
+		// An empty listing is recorded as a failed fetch, so it carries the
+		// previous inventory forward like an error does instead of erasing it.
 		previous := r.discoveredByProvider[name]
 		if len(previous) == 0 {
 			continue // nothing to carry forward
 		}
 		fetched.modelsByProvider[name] = previous
+		if _, swept := fetched.runtimeUpdates[name]; !swept {
+			// Registered or replaced after this sweep started, so the sweep
+			// says nothing about it: its current inventory stays as it is.
+			continue
+		}
 		stale[name] = true
 		carriedForward++
 	}
@@ -448,7 +460,7 @@ func fetchProviderInventory(
 		return resp, reason, fetchAt, nil
 	}
 
-	resp, err := provider.ListModels(ctx)
+	resp, err := provider.ListModels(llmclient.WithoutCircuitBreaker(ctx))
 	fetchAt = time.Now().UTC()
 	resp, reason := applyConfiguredProviderModels(
 		providerName,
@@ -545,6 +557,9 @@ func (r *ModelRegistry) applyProviderRuntimeUpdatesLocked(updates map[string]pro
 				current.catalogStandIn = true
 			} else if update.lastModelFetchError == "" {
 				current.catalogStandIn = false
+			}
+			if update.lastModelFetchError == "" {
+				current.inheritedUnlisted = false
 			}
 		}
 		if !update.lastModelFetchSuccessAt.IsZero() {

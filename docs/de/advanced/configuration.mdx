@@ -228,6 +228,7 @@ Den vollständigen Leitfaden finden Sie unter [MCP Gateway](/de/features/mcp-gat
 | `MCP_SERVERS` | JSON-Objekt mit Upstream-MCP-Servern, das pro Name über die YAML-Map `mcp.servers` gelegt wird (die Einträge sind im Dashboard schreibgeschützt)     | _(keine)_           |
 | `MCP_ALLOWED_ORIGINS` | Kommagetrennte Browser-Origins (`scheme://host[:port]`), die `/mcp` aufrufen dürfen; standardmäßig wird keinem vertraut, was DNS-Rebinding verhindert. `*` deaktiviert die Prüfung | _(keine)_           |
 | `MCP_TOOL_DISCOVERY` | `off` listet jedes Tool auf; `search` stellt stattdessen `search_tools` und `call_tool` bereit, damit große Kataloge nicht mehr den Modellkontext füllen. Clients überschreiben dies pro Session mit `X-MCP-Tool-Discovery` | `off` |
+| `MCP_PROVIDER_SERVERS` | Kommagetrennte Namen konfigurierter Provider, deren eigene MCP-Server mit dem API-Key des Providers bereitgestellt werden (zum Beispiel `zai`). Siehe [MCP-Server von Providern](/de/features/mcp-gateway#mcp-server-von-providern-bereitstellen) | _(keine)_ |
 | `MCP_VIRTUAL_SERVERS` | JSON-Objekt mit virtuellen Servern, das pro Name über die YAML-Map `mcp.virtual_servers` gelegt wird. Jeder stellt eine Teilmenge der MCP-Server unter `/mcp/{name}` bereit | _(keine)_ |
 
 #### Logging
@@ -255,11 +256,12 @@ unten.
 | `REDIS_KEY_RESPONSES`  | Redis-Key für den Response-Cache        | `gomodel:response:` |
 | `REDIS_TTL_MODELS`     | TTL in Sekunden für den Modell-Cache      | `86400` (24h)    |
 | `REDIS_TTL_RESPONSES`  | TTL in Sekunden für den Response-Cache   | `3600` (1h)      |
+| `RESPONSE_CACHE_PARTITION_BY_USER_PATH` | Gibt jedem effektiven `user_path` eigene Einträge im exakten und semantischen Cache | `false` |
 
 <Tip>
   Unter [Cache](/de/features/cache) finden Sie das Verhalten des exakten Caches,
-  Response-Header, Analytics-Endpunkte und den Hinweis, dass `user_path` allein
-  den exakten Cache nicht partitioniert.
+  Response-Header, Analytics-Endpunkte sowie die Partitionierung nach `user_path`
+  und die Grenzen ihrer Isolation.
 </Tip>
 
 <Note>
@@ -333,6 +335,7 @@ entfernt.
 | `LOGGING_LOG_AUDIO_BODIES`        | Protokolliert Ein- und Ausgaben der Audio-Endpunkte          | `false` |
 | `LOGGING_LOG_IMAGE_BODIES`        | Protokolliert Ein- und Ausgaben der Bild-Endpunkte          | `false` |
 | `LOGGING_LOG_IMAGE_BODIES_SCOPE`  | Welche Bild-Bytes gespeichert werden: `all`, `input`, `output` | `all` |
+| `LOGGING_LOG_EMBEDDING_BODIES`    | Protokolliert Request-/Response-Bodys von Embeddings (aus: nur Metadaten) | `true`  |
 | `LOGGING_LOG_HEADERS`             | Protokolliert Header (sensible werden automatisch geschwärzt) | `true`  |
 | `LOGGING_ONLY_MODEL_INTERACTIONS` | Protokolliert nur Endpunkte von KI-Modellen                | `true`  |
 | `LOGGING_BUFFER_SIZE`             | Puffer im Arbeitsspeicher vor dem Schreiben              | `1000`  |
@@ -362,9 +365,22 @@ gespeicherte Logs sichtbar sind.
   und starten Sie GoModel neu.
 </Note>
 
+<Tip>
+  Wählen Sie bei großen Audit-Tabellen neben dem Suchfeld der Audit-Logs im
+  Dashboard ein Feld statt **Alle Felder**. **Nutzerpfad** und **Modell** finden
+  Werte, die mit der Eingabe beginnen (Groß-/Kleinschreibung zählt, `voxina`
+  findet also `/voxinate/events/…`; **Modell** prüft das angefragte und das
+  aufgelöste Modell, etwa `openai/gpt-5`). **Anfrage-ID** und **Sitzungs-ID**
+  müssen exakt passen. Diese Filter nutzen Indizes auf SQLite, PostgreSQL und
+  MongoDB. Die API nimmt sie als `user_path_prefix`, `model_prefix`,
+  `request_id` und `session_id` entgegen.
+</Tip>
+
 <Warning>
   Wenn `LOGGING_LOG_BODIES` aktiviert ist, werden Request- und Response-Bodys
-  vollständig gespeichert. Diese können sensible Daten enthalten, etwa
+  vollständig gespeichert, außer wo die endpunktspezifischen Einstellungen
+  unten sie verwerfen oder durch Platzhalter ersetzen. Diese können sensible
+  Daten enthalten, etwa
   personenbezogene Daten (PII) oder in Prompts eingebettete API-Keys.
 </Warning>
 
@@ -399,6 +415,21 @@ gespeicherte Logs sichtbar sind.
   Metadaten behält) als schlanker Platzhalter
   `{__audio__, content_type, bytes, stored: false}` erfasst; ist Body-Logging
   deaktiviert, wird überhaupt kein Audio-Body gespeichert.
+</Note>
+
+<Note>
+  `LOGGING_LOG_EMBEDDING_BODIES` verfeinert `LOGGING_LOG_BODIES` für
+  Embeddings – ohne aktiviertes Body-Logging hat es keine Wirkung. Es gilt für
+  `/v1/embeddings` und für Provider-Passthrough-Aufrufe an einen
+  Embeddings-Endpunkt (`/p/{provider}/.../embeddings`, llama.cpp
+  `/embedding`, Cohere und Ollama
+  `.../embed`, Gemini `:embedContent` und `:batchEmbedContents`).
+  Embedding-Eingaben können ganze Dokumente oder Base64-Bilder sein und die
+  Responses sind Float-Vektoren, sodass Massen-Indexierungsjobs den
+  Audit-Speicher schnell wachsen lassen. Ist Body-Logging aktiv, diese Option
+  aber nicht, behalten Embedding-Einträge ihre Metadaten (Modell, Provider,
+  Status, Timing, User-Pfad, Usage) und verwerfen Request- und Response-Body.
+  Der Standardwert ist `true`, was das bisherige Verhalten beibehält.
 </Note>
 
 <Note>
@@ -581,16 +612,25 @@ Die meisten Provider können über `<PROVIDER>_BASE_URL` (zum Beispiel `OPENAI_B
 Jeder Provider-Typ akzeptiert außerdem über `<PROVIDER>_MODELS` eine
 kommagetrennte Liste konfigurierter Modelle, zum Beispiel
 `OPENROUTER_MODELS`, `ORACLE_MODELS`, `AZURE_MODELS`, `SGLANG_MODELS`,
-`VLLM_MODELS` oder `LLMD_MODELS`. Standardmäßig verwendet
-`CONFIGURED_PROVIDER_MODELS_MODE=fallback` die konfigurierten Listen nur, wenn
-Upstream `/models` fehlschlägt, nil oder eine leere Liste zurückgibt. Ein
-OpenAI-kompatibler Provider ohne `/models`-Endpunkt (404 oder 405) wird aus
-seiner konfigurierten Liste bedient und als gesund gemeldet. Das passt zu
-Servern mit nur einer API, etwa für Speech-to-Text. Setzen Sie
-`CONFIGURED_PROVIDER_MODELS_MODE=allowlist`, um bei Providern mit definierter
-Liste nur die konfigurierten Modelle bereitzustellen und deren
-Upstream-Aufrufe von `/models` zu überspringen. In YAML liefert
+`VLLM_MODELS` oder `LLMD_MODELS`. Standardmäßig macht
+`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` eine konfigurierte Liste zum
+gesamten Modellangebot des Providers und überspringt dessen Upstream-Aufruf von
+`/models`. Setzen Sie `fallback`, um die Liste nur zu verwenden, wenn Upstream
+`/models` fehlschlägt, nil oder eine leere Liste zurückgibt, oder `merge`, um
+konfigurierte Modelle zum Upstream-Angebot hinzuzufügen. Ein OpenAI-kompatibler
+Provider ohne `/models`-Endpunkt (404 oder 405) wird aus seiner konfigurierten
+Liste bedient und als gesund gemeldet. Das passt zu Servern mit nur einer API,
+etwa für Speech-to-Text. In YAML liefert
 `providers.<name>.models` dieselbe Modellliste für benannte Provider-Blöcke.
+
+<Warning>
+**Breaking Change:** Früher war `fallback` der Standard. Ein Provider mit einer
+Liste unter `models:` oder `<PROVIDER>_MODELS` bietet jetzt nur diese Modelle an;
+Anfragen für andere Modelle liefern 404 (Modell nicht gefunden). Um das
+bisherige Verhalten wiederherzustellen, setzen Sie
+`CONFIGURED_PROVIDER_MODELS_MODE=fallback` oder überschreiben einen einzelnen
+Provider mit `<PROVIDER>[_SUFFIX]_MODELS_MODE` / `models_mode`.
+</Warning>
 
 `GET /v1/models` listet standardmäßig Provider-qualifizierte IDs
 (`openai/gpt-5`). Setzen Sie `UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT=true`
@@ -801,7 +841,7 @@ export ORACLE_BASE_URL="https://inference.generativeai.us-chicago-1.oci.oraclecl
 export ORACLE_MODELS="openai.gpt-oss-120b,xai.grok-3" # Optionale konfigurierte Modellliste
 export OPENROUTER_MODELS="openai/gpt-oss-120b,anthropic/claude-sonnet-4"
 export KILO_MODELS="anthropic/claude-sonnet-4.5,openai/gpt-5.5"
-export CONFIGURED_PROVIDER_MODELS_MODE="fallback" # fallback oder allowlist
+export CONFIGURED_PROVIDER_MODELS_MODE="allowlist" # allowlist (Standard), fallback oder merge
 export OLLAMA_BASE_URL="http://localhost:11434/v1" # Registriert den Provider "ollama"
 export SGLANG_BASE_URL="http://localhost:30000/v1" # Registriert den Provider "sglang" ohne Key
 # Optional: export SGLANG_API_KEY="token-abc123"
@@ -859,12 +899,12 @@ strukturierte Einstellungen) verwenden Sie die YAML-Datei:
 
 ```yaml
 models:
-  # fallback ist der Standardwert. Verwenden Sie allowlist, wenn konfigurierte
-  # Modelllisten der Provider Upstream-Modelle ausblenden und Upstream-Aufrufe von
-  # /models überspringen sollen, oder merge, um konfigurierte Modelle zusätzlich
-  # zum erkannten Modellangebot hinzuzufügen (Modelle, die ein Provider bereitstellt,
-  # aber nicht auflistet).
-  configured_provider_models_mode: fallback
+  # allowlist ist der Standardwert: Eine konfigurierte Modellliste ist das gesamte
+  # Modellangebot, Upstream-Aufrufe von /models werden übersprungen. Verwenden Sie
+  # fallback, um die Liste nur bei fehlschlagendem oder leerem /models zu nutzen,
+  # oder merge, um konfigurierte Modelle zusätzlich zum erkannten Modellangebot
+  # hinzuzufügen (Modelle, die ein Provider bereitstellt, aber nicht auflistet).
+  configured_provider_models_mode: allowlist
   # Reine Modell-IDs (gpt-5) statt Provider-qualifizierter IDs (openai/gpt-5) aus
   # GET /v1/models auflisten. Bieten zwei Provider dieselbe ID an, wird nur der
   # Provider aufgelistet, an den ein nicht qualifizierter Request geroutet wird

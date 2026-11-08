@@ -145,18 +145,22 @@ keeps routing with, in order:
 3. For a provider on its default base URL, the
    [model catalog's](/advanced/configuration) list for its provider type.
 
+This ordering applies in `fallback` and `merge` modes. Under the default
+`allowlist`, a provider with a configured list never calls `/models`, so its
+list is the inventory.
+
 Failed providers are rechecked every `PROVIDER_RECHECK_INTERVAL` seconds
 (default `60`), and the live list replaces the stand-in once a listing
 succeeds. With nothing to serve, requests return `503` so clients retry, and
 `/health/ready` reports `degraded` with `"models": "down"` while the instance
 stays in rotation.
 
-To never depend on discovery, list the models yourself and set
-`CONFIGURED_PROVIDER_MODELS_MODE=allowlist`:
+To never depend on discovery, list the models yourself. The default
+`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` then serves only that list and
+skips `/models`:
 
 ```bash
 export OPENAI_MODELS=gpt-6-sol,gpt-6-luna
-export CONFIGURED_PROVIDER_MODELS_MODE=allowlist
 ```
 
 ## If GoModel itself is down
@@ -177,9 +181,13 @@ long-lived traffic, drain connections at the load balancer, keep replicas
 overlapping long enough to cover a generation, and let clients retry.
 
 What is per-instance and therefore not shared between replicas: circuit
-breaker state, rate-limit counters, request-health windows, and sticky
-sessions. The [production guide](/guides/production) covers what that means
-for your topology.
+breaker state, request-health windows, and sticky sessions. Rate-limit
+counters are shared through the database, approximately: at the default
+`RATE_LIMITS_FLUSH_INTERVAL=1`, each replica sees the others' counts within
+about two seconds; with `0`, replicas stop seeing each other's new counts
+after startup. The
+[production guide](/guides/production) covers what that means for your
+topology.
 
 If GoModel is down and you need traffic flowing immediately, point
 `base_url` back at the provider directly — the API is OpenAI-compatible in

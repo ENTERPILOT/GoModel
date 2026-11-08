@@ -89,10 +89,17 @@ type ModelRegistry struct {
 	// are fallback-only or an allowlist over the discovered upstream inventory.
 	configuredProviderModels     map[string][]string
 	configuredProviderModelsMode config.ConfiguredProviderModelsMode
+	// providerModelsModes holds per-provider overrides of
+	// configuredProviderModelsMode, keyed by provider instance name.
+	providerModelsModes map[string]config.ConfiguredProviderModelsMode
 	// providerModelFilters holds operator-supplied inventory filters keyed by
 	// configured provider instance name. Applied after metadata enrichment;
 	// providers without a filter are absent from the map.
 	providerModelFilters map[string]modelFilter
+	// nonBillableProviders names the providers configured with billable:
+	// false; every other provider is billable. Keyed by provider instance
+	// name, cleared on unregister.
+	nonBillableProviders map[string]struct{}
 
 	// Cached sorted slices, rebuilt lazily after models change.
 	// nil means cache needs rebuilding. Protected by mu.
@@ -133,7 +140,7 @@ func NewModelRegistry() *ModelRegistry {
 		providerNames:                make(map[core.Provider]string),
 		providerRuntime:              make(map[string]providerRuntimeState),
 		refreshCh:                    make(chan struct{}, 1),
-		configuredProviderModelsMode: config.ConfiguredProviderModelsModeFallback,
+		configuredProviderModelsMode: config.DefaultConfiguredProviderModelsMode,
 	}
 }
 
@@ -200,6 +207,28 @@ func (r *ModelRegistry) SetConfiguredProviderModelsMode(mode config.ConfiguredPr
 	r.configuredProviderModelsMode = config.ResolveConfiguredProviderModelsMode(mode)
 }
 
+// SetProviderModelsMode overrides the configured provider models mode for one
+// provider instance. An empty mode clears the override, so the global mode applies.
+func (r *ModelRegistry) SetProviderModelsMode(providerName string, mode config.ConfiguredProviderModelsMode) {
+	providerName = strings.TrimSpace(providerName)
+	if providerName == "" {
+		return
+	}
+	mode = config.NormalizeConfiguredProviderModelsMode(mode)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	setOrDelete(&r.providerModelsModes, providerName, mode, mode != "")
+}
+
+// providerModelsModeLocked returns the mode that applies to providerName: its
+// override when set, the global mode otherwise. Caller must hold r.mu.
+func (r *ModelRegistry) providerModelsModeLocked(providerName string) config.ConfiguredProviderModelsMode {
+	if mode, ok := r.providerModelsModes[providerName]; ok {
+		return config.ResolveConfiguredProviderModelsMode(mode)
+	}
+	return config.ResolveConfiguredProviderModelsMode(r.configuredProviderModelsMode)
+}
+
 // SetProviderConfiguredModels records the explicit model inventory declared for
 // a configured provider instance. Call with an empty/nil slice to clear it.
 func (r *ModelRegistry) SetProviderConfiguredModels(providerName string, models []string) {
@@ -264,6 +293,20 @@ func (r *ModelRegistry) RegisterProviderWithNameAndType(provider core.Provider, 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	providerName, providerType = r.providerIdentityLocked(providerName, providerType)
+	r.providers = append(r.providers, provider)
+	r.providerTypes[provider] = providerType
+	r.providerNames[provider] = providerName
+
+	state := r.providerRuntime[providerName]
+	state.registered = true
+	r.providerRuntime[providerName] = state
+}
+
+// providerIdentityLocked trims a provider's configured name and type and
+// names an unnamed provider after its type, or its registration position when
+// it has no type either. Caller must hold r.mu.
+func (r *ModelRegistry) providerIdentityLocked(providerName, providerType string) (string, string) {
 	providerName = strings.TrimSpace(providerName)
 	providerType = strings.TrimSpace(providerType)
 	if providerName == "" {
@@ -273,14 +316,7 @@ func (r *ModelRegistry) RegisterProviderWithNameAndType(provider core.Provider, 
 			providerName = fmt.Sprintf("provider-%d", len(r.providers)+1)
 		}
 	}
-
-	r.providers = append(r.providers, provider)
-	r.providerTypes[provider] = providerType
-	r.providerNames[provider] = providerName
-
-	state := r.providerRuntime[providerName]
-	state.registered = true
-	r.providerRuntime[providerName] = state
+	return providerName, providerType
 }
 
 // UnregisterProvider removes every provider instance registered under name
@@ -311,8 +347,46 @@ func (r *ModelRegistry) UnregisterProvider(providerName string) {
 	delete(r.providerRuntime, providerName)
 	delete(r.configMetadataOverrides, providerName)
 	delete(r.configuredProviderModels, providerName)
+	delete(r.providerModelsModes, providerName)
 	delete(r.providerModelFilters, providerName)
+	// nonBillableProviders is kept: a replacement is unregistered and
+	// re-registered in separate steps, and usage written for the outgoing
+	// instance in between must still be marked. SetProviderBillable clears
+	// it when a provider is removed for good.
 	delete(r.discoveredByProvider, providerName)
 	r.publishFilteredInventoryLocked()
 	r.invalidateSortedCaches()
+}
+
+// SetProviderBillable records whether the provider's cost is owed by the
+// caller. Providers are billable unless set otherwise, so only false is kept.
+func (r *ModelRegistry) SetProviderBillable(providerName string, billable bool) {
+	providerName = strings.TrimSpace(providerName)
+	if providerName == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if billable {
+		delete(r.nonBillableProviders, providerName)
+		return
+	}
+	if r.nonBillableProviders == nil {
+		r.nonBillableProviders = make(map[string]struct{})
+	}
+	r.nonBillableProviders[providerName] = struct{}{}
+}
+
+// ProviderBillable reports whether the named provider's cost is owed by the
+// caller. Unknown and unnamed providers are billable, the default, so a row
+// is only ever exempt by explicit configuration.
+func (r *ModelRegistry) ProviderBillable(providerName string) bool {
+	providerName = strings.TrimSpace(providerName)
+	if r == nil || providerName == "" {
+		return true
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, nonBillable := r.nonBillableProviders[providerName]
+	return !nonBillable
 }

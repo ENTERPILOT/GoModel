@@ -3,6 +3,7 @@
   // (edit / inspect catalog / reconnect / delete). Managed (config-declared)
   // rows are read-only: no edit or delete buttons.
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
+  import HighlightText from "$lib/components/atoms/HighlightText.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { formatNumber } from "$lib/utils/format.js";
@@ -15,8 +16,12 @@
     mcpServerStatusClass,
     mcpServerStatusTitle,
     mcpServerSubCountsLabel,
+    mcpServerCanSignIn,
+    mcpServerOAuthClass,
+    mcpServerOAuthLabel,
+    mcpServerOAuthState,
   } from "./mcp-servers.js";
-  import { List, Pencil, RefreshCw, X } from "lucide";
+  import { List, LogIn, LogOut, Pencil, RefreshCw, X } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
   function statusTitle(server) {
@@ -41,7 +46,7 @@
       {#each mcpServers.filtered as server (mcpServerSlug(server))}
         <tr>
           <td>
-            <span class="font-size-md">{server.name}</span>
+            <span class="font-size-md"><HighlightText text={server.name} needle={mcpServers.filter} /></span>
             {#if server.managed}
               <span
                 class="alias-kind-badge"
@@ -49,19 +54,29 @@
                 >{m.common_config()}</span
               >
             {/if}
-            <div class="mcp-server-sub-counts mono">{mcpServerSlug(server)}</div>
+            <div class="mcp-server-sub-counts mono"><HighlightText text={mcpServerSlug(server)} needle={mcpServers.filter} /></div>
           </td>
-          <td><span class="budget-source mono">{server.transport || "http"}</span></td>
+          <td><span class="budget-source mono"><HighlightText text={server.transport || "http"} needle={mcpServers.filter} /></span></td>
           <td class="mono font-size-md" title={mcpServerEndpointLabel(server)}
-            >{mcpServerEndpointLabel(server)}</td
+            ><HighlightText text={mcpServerEndpointLabel(server)} needle={mcpServers.filter} /></td
           >
           <td>
             <span
               class="audit-status-badge {mcpServerStatusClass(server)}"
               title={statusTitle(server)}>{mcpServerStatusLabel(server)}</span
             >
+            {#if mcpServerOAuthState(server)}
+              <span
+                class="audit-status-badge {mcpServerOAuthClass(mcpServerOAuthState(server))}"
+                title={server.oauth?.last_error || server.oauth?.issuer || ""}
+                >{mcpServerOAuthLabel(mcpServerOAuthState(server))}</span
+              >
+            {/if}
             {#if mcpServerStatus(server) === "degraded" && server.last_error}
-              <div class="mcp-server-sub-counts">{server.last_error}</div>
+              <div class="mcp-server-sub-counts" title={server.last_error}>{server.last_error}</div>
+            {/if}
+            {#if server.oauth?.last_error}
+              <div class="mcp-server-sub-counts" title={server.oauth.last_error}>{server.oauth.last_error}</div>
             {/if}
           </td>
           <td>
@@ -100,6 +115,25 @@
               >
                 <Icon icon={List} class="form-action-icon" />
               </TableActionButton>
+              {#if mcpServerCanSignIn(server)}
+                <TableActionButton
+                  label={m.mcp_oauth_sign_in_action({ name: server.name })}
+                  class="table-icon-btn"
+                  onclick={() => mcpServers.openSignIn(server)}
+                >
+                  <Icon icon={LogIn} class="form-action-icon" />
+                </TableActionButton>
+              {/if}
+              {#if server.oauth?.signed_in_at}
+                <TableActionButton
+                  label={m.mcp_oauth_sign_out_action({ name: server.name })}
+                  class="table-icon-btn"
+                  onclick={() => mcpServers.signOut(server)}
+                  disabled={Boolean(mcpServers.signingOutName)}
+                >
+                  <Icon icon={LogOut} class="form-action-icon" />
+                </TableActionButton>
+              {/if}
               <TableActionButton
                 label={mcpServers.reconnectingName === mcpServerSlug(server)
                   ? m.mcp_reconnecting_action({ name: server.name })

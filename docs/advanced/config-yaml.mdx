@@ -38,12 +38,41 @@ example `OPENROUTER_MODELS`, `ORACLE_MODELS`, `AZURE_MODELS`, `SGLANG_MODELS`,
 `VLLM_MODELS`, or `LLMD_MODELS`. llm-d instances also accept suffixed
 `LLMD_<SUFFIX>_INFERENCE_OBJECTIVE` and
 `LLMD_<SUFFIX>_FAIRNESS_FROM_USER_PATH` controls.
-Set `CONFIGURED_PROVIDER_MODELS_MODE=fallback` (default) to use those lists only
-when upstream `/models` fails or is empty, `allowlist` to expose only the
-configured models for providers that define a list and skip their upstream
-`/models` calls, or `merge` to add configured models on top of the discovered
-inventory — useful for models a provider serves but does not include in its
-`/models` listing.
+
+### Models modes
+
+`CONFIGURED_PROVIDER_MODELS_MODE` (YAML: `models.configured_provider_models_mode`) decides how a provider's configured list combines with what its `/models` endpoint returns. It only matters for providers that define a list.
+
+| Mode | Calls upstream `/models` | Exposes | Use when |
+|---|---|---|---|
+| `allowlist` (default) | No | Only your list | You want exactly these models, e.g. one model from OpenRouter |
+| `fallback` | Yes | The upstream list; your list only if `/models` fails or returns nothing | `/models` is sometimes unavailable, but discovery should drive the list |
+| `merge` | Yes | The upstream list plus your models it doesn't include; falls back like `fallback` when `/models` fails | A provider serves models it does not list (preview or unlisted IDs) |
+
+<Warning>
+**Breaking change:** the default used to be `fallback`. A provider with a
+`models:` or `<PROVIDER>_MODELS` list now serves only those models, and requests
+for any other model return 404 (model not found). To restore the old behavior,
+set `CONFIGURED_PROVIDER_MODELS_MODE=fallback`, or override a single provider
+with `<PROVIDER>[_SUFFIX]_MODELS_MODE` / `models_mode`.
+</Warning>
+
+Set `models_mode` on a provider to override the global mode for that provider
+only. Leave it unset to use the global mode. For example, you can expose a single
+OpenRouter model while self-hosted providers keep discovering their own:
+
+```yaml
+providers:
+  openrouter:
+    type: openrouter
+    api_key: "${OPENROUTER_API_KEY}"
+    models:
+      - qwen/qwen3-vl-8b-instruct
+    models_mode: allowlist # env: OPENROUTER_MODELS_MODE
+```
+
+The dashboard's provider dialog exposes the same setting as **Models mode**
+under the advanced options.
 
 ## Filtering a provider's models
 

@@ -142,7 +142,9 @@ func buildProviderStatusItem(name string, cfg providers.SanitizedProviderConfig,
 
 	// For the response row, fill in display fallbacks from the peer side.
 	if strings.TrimSpace(cfg.Name) == "" {
-		cfg = providers.SanitizedProviderConfig{Name: name, Type: strings.TrimSpace(runtime.Type)}
+		// Billable is true by default; a synthesised zero value would label
+		// the row non-billable.
+		cfg = providers.SanitizedProviderConfig{Name: name, Type: strings.TrimSpace(runtime.Type), Billable: true}
 	}
 	if strings.TrimSpace(runtime.Name) == "" {
 		runtime = providers.ProviderRuntimeSnapshot{Name: name, Type: strings.TrimSpace(cfg.Type)}
@@ -264,6 +266,11 @@ func classifyProviderStatus(cfg providers.SanitizedProviderConfig, runtime provi
 		}
 		if runtime.ModelListingUnsupported {
 			return "healthy", "Healthy", "provider does not list models; serving configured models", lastError
+		}
+		// An allowlist inventory comes from configuration, so no model fetch
+		// clears a failed availability probe; only the next probe does.
+		if availabilityError != "" {
+			return "degraded", "Unreachable", "availability check failed; serving configured models", lastError
 		}
 		return "healthy", "Healthy", "configured and model discovery succeeded", lastError
 	case modelFetchError != "" && runtime.DiscoveredModelCount > 0:

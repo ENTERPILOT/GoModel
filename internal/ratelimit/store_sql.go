@@ -49,7 +49,9 @@ const sqlRateLimitWindowSnapshotsSchema = `
 		tokens_window_start ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
 		tokens_current ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
 		tokens_previous ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
+		in_flight ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
 		updated_at ` + sqlx.TypeInt64 + ` NOT NULL,
+		own_counts ` + sqlx.TypeBool + ` NOT NULL DEFAULT FALSE,
 		PRIMARY KEY (scope, subject, partition, period_seconds, writer)
 	)`
 
@@ -104,6 +106,18 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	}
 	if err := db.Schema(ctx, sqlRateLimitWindowSnapshotsSchema); err != nil {
 		return nil, fmt.Errorf("failed to create rate_limit_window_snapshots table: %w", err)
+	}
+	if err := sqlx.AddColumns(ctx, db,
+		`ALTER TABLE rate_limit_window_snapshots ADD COLUMN in_flight `+sqlx.TypeInt64+` NOT NULL DEFAULT 0`,
+		// Older releases never write it, so their rows read false and are
+		// merged by maximum (see WindowSnapshot.OwnCounts).
+		`ALTER TABLE rate_limit_window_snapshots ADD COLUMN own_counts `+sqlx.TypeBool+` NOT NULL DEFAULT FALSE`,
+	); err != nil {
+		return nil, fmt.Errorf("failed to migrate rate_limit_window_snapshots table: %w", err)
+	}
+	// Every replica's flush loads the rows saved since its previous load.
+	if err := db.Schema(ctx, `CREATE INDEX IF NOT EXISTS idx_rate_limit_window_snapshots_updated_at ON rate_limit_window_snapshots(updated_at)`); err != nil {
+		return nil, fmt.Errorf("failed to create rate limit counter index: %w", err)
 	}
 	legacy, err := importLegacyCounters(ctx, db)
 	if err != nil {
@@ -197,13 +211,15 @@ func (s *SQLStore) ReplaceConfigRules(ctx context.Context, rules []Rule) error {
 	})
 }
 
-func (s *SQLStore) LoadCounters(ctx context.Context) ([]WindowSnapshot, error) {
+func (s *SQLStore) LoadCounters(ctx context.Context, since int64) ([]WindowSnapshot, error) {
 	rows, err := s.db.Query(ctx, `
 		SELECT scope, subject, partition, period_seconds, writer, epoch,
 			requests_window_start, requests_current, requests_previous,
-			tokens_window_start, tokens_current, tokens_previous
+			tokens_window_start, tokens_current, tokens_previous,
+			in_flight, updated_at, own_counts
 		FROM rate_limit_window_snapshots
-	`)
+		WHERE updated_at >= ?
+	`, since)
 	if err != nil {
 		return nil, fmt.Errorf("list rate limit counters: %w", err)
 	}
@@ -216,6 +232,7 @@ func (s *SQLStore) LoadCounters(ctx context.Context) ([]WindowSnapshot, error) {
 			&snap.Scope, &snap.Subject, &snap.Partition, &snap.PeriodSeconds, &snap.Writer, &snap.Epoch,
 			&snap.RequestsWindowStart, &snap.RequestsCurrent, &snap.RequestsPrevious,
 			&snap.TokensWindowStart, &snap.TokensCurrent, &snap.TokensPrevious,
+			&snap.InFlight, &snap.UpdatedAt, &snap.OwnCounts,
 		); err != nil {
 			// One unreadable row must not cost every other window its
 			// restore: Start treats a load error as "do not persist this
@@ -235,8 +252,8 @@ const upsertCounterSQL = `
 	INSERT INTO rate_limit_window_snapshots (
 		scope, subject, partition, period_seconds, writer, epoch,
 		requests_window_start, requests_current, requests_previous,
-		tokens_window_start, tokens_current, tokens_previous, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		tokens_window_start, tokens_current, tokens_previous, in_flight, updated_at, own_counts
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(scope, subject, partition, period_seconds, writer) DO UPDATE SET
 		epoch = excluded.epoch,
 		requests_window_start = excluded.requests_window_start,
@@ -245,7 +262,9 @@ const upsertCounterSQL = `
 		tokens_window_start = excluded.tokens_window_start,
 		tokens_current = excluded.tokens_current,
 		tokens_previous = excluded.tokens_previous,
-		updated_at = excluded.updated_at
+		in_flight = excluded.in_flight,
+		updated_at = excluded.updated_at,
+		own_counts = excluded.own_counts
 `
 
 func (s *SQLStore) SaveCounters(ctx context.Context, snapshots []WindowSnapshot) error {
@@ -255,12 +274,12 @@ func (s *SQLStore) SaveCounters(ctx context.Context, snapshots []WindowSnapshot)
 			if _, err := q.Exec(ctx, upsertCounterSQL,
 				snap.Scope, snap.Subject, snap.Partition, snap.PeriodSeconds, snap.Writer, snap.Epoch,
 				snap.RequestsWindowStart, snap.RequestsCurrent, snap.RequestsPrevious,
-				snap.TokensWindowStart, snap.TokensCurrent, snap.TokensPrevious, now,
+				snap.TokensWindowStart, snap.TokensCurrent, snap.TokensPrevious, snap.InFlight, now, snap.OwnCounts,
 			); err != nil {
 				return fmt.Errorf("upsert rate limit counter: %w", err)
 			}
 		}
-		if _, err := q.Exec(ctx, pruneCountersSQL, now); err != nil {
+		if _, err := q.Exec(ctx, pruneCountersSQL, PeriodConcurrent, inFlightRowRetention, now); err != nil {
 			return fmt.Errorf("prune expired rate limit counters: %w", err)
 		}
 		return nil
@@ -268,18 +287,20 @@ func (s *SQLStore) SaveCounters(ctx context.Context, snapshots []WindowSnapshot)
 }
 
 // pruneCountersSQL collects the rows nobody writes any more: a rule that was
-// deleted, a window that fell out of memory, or a writer that stopped — every
-// restart leaves its predecessor's rows behind. Two periods without a write is
-// the same staleness bound restore applies, so this only ever deletes rows a
-// load would have discarded.
+// deleted, a window that went unchanged, or a writer that stopped — every
+// restart leaves its predecessor's rows behind. A window row is saved
+// whenever it counts something, so two periods without a write means every
+// count it holds has rolled out, the same bound a load drops it on. An
+// in-flight row has no window: it is kept for inFlightRowRetention.
 const pruneCountersSQL = `
 	DELETE FROM rate_limit_window_snapshots
-	WHERE updated_at + 2 * period_seconds < ?
+	WHERE updated_at + CASE WHEN period_seconds = ? THEN ? ELSE 2 * period_seconds END < ?
 `
 
 // ResetCounter draws a new counter epoch for the rule and removes every
-// writer's rows for it in one transaction, so no replica's row, including one
-// written after the delete under the old epoch, brings a reset window back.
+// writer's window rows for it in one transaction, so no replica's row,
+// including one written after the delete under the old epoch, brings a reset
+// window back. In-flight rows stay (see Store.ResetCounter).
 func (s *SQLStore) ResetCounter(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error {
 	err := s.resetCounters(ctx, ` WHERE scope = ? AND subject = ? AND period_seconds = ?`, scope, subject, periodSeconds)
 	if err != nil {
@@ -304,22 +325,24 @@ func (s *SQLStore) ResetAllCounters(ctx context.Context) error {
 // a row the import writes back carries the empty epoch, which the new one
 // never matches.
 func (s *SQLStore) resetCounters(ctx context.Context, where string, args ...any) error {
-	var tables []string
-	if s.legacyCounters {
-		tables = append(tables, legacyCountersTable)
-	}
-	tables = append(tables, "rate_limit_window_snapshots")
 	epochArgs := append([]any{uuid.NewString()}, args...)
+	// In-flight rows stay (see Store.ResetCounter).
+	windowWhere := " WHERE period_seconds <> ?"
+	if where != "" {
+		windowWhere = where + " AND period_seconds <> ?"
+	}
+	windowArgs := append(append([]any(nil), args...), PeriodConcurrent)
 	return s.db.InTx(ctx, func(q sqlx.Querier) error {
 		if _, err := q.Exec(ctx, `UPDATE rate_limits SET counter_epoch = ?`+where, epochArgs...); err != nil {
 			return err
 		}
-		for _, table := range tables {
-			if _, err := q.Exec(ctx, `DELETE FROM `+table+where, args...); err != nil {
+		if s.legacyCounters {
+			if _, err := q.Exec(ctx, `DELETE FROM `+legacyCountersTable+where, args...); err != nil {
 				return err
 			}
 		}
-		return nil
+		_, err := q.Exec(ctx, `DELETE FROM rate_limit_window_snapshots`+windowWhere, windowArgs...)
+		return err
 	})
 }
 

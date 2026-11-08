@@ -12,6 +12,7 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/storage"
 )
 
 // LogStore defines the interface for audit log storage backends.
@@ -137,6 +138,11 @@ type LogEntry struct {
 
 	// Data contains flexible request/response information as JSON
 	Data *LogData `json:"data,omitempty" bson:"data,omitempty"`
+
+	// Stamp marks the batch write that persisted the entry; other replicas
+	// read it to show the entry in their live log view. The logger sets it
+	// when it flushes, so it is nil until then.
+	Stamp *storage.WriteStamp `json:"-" bson:",inline"`
 }
 
 // LogData contains flexible request/response information.
@@ -516,6 +522,12 @@ type Config struct {
 	// plus its scope). Image metadata and hosted URLs are always kept.
 	LogImageInputs  bool
 	LogImageOutputs bool
+
+	// LogEmbeddingBodies refines LogBodies for embeddings endpoints, including
+	// provider passthrough calls to one. Requires LogBodies: when LogBodies is
+	// on but this is off, embedding entries keep their metadata and drop the
+	// request and response bodies.
+	LogEmbeddingBodies bool
 
 	// LogRevisionBodies refines LogBodies for the request-revision chain:
 	// only when both are enabled does each rewriter and each prompt

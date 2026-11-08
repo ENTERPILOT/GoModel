@@ -132,9 +132,11 @@ providers:
       - amazon.nova-lite-v1:0
 ```
 
-Zachowanie zależy od globalnego `CONFIGURED_PROVIDER_MODELS_MODE` – `fallback`
-(domyślnie) używa listy tylko wtedy, gdy `ListFoundationModels` jest niedostępne lub
-puste; `allowlist` udostępnia tylko skonfigurowane modele i pomija wywołanie upstreamu.
+Zachowanie zależy od globalnego `CONFIGURED_PROVIDER_MODELS_MODE` – `allowlist`
+(domyślnie) udostępnia tylko skonfigurowane modele i pomija wywołanie upstreamu;
+`fallback` używa listy tylko wtedy, gdy `ListFoundationModels` jest niedostępne lub puste.
+`merge` dodaje skonfigurowane modele do wykrytych. Aby zmienić tryb tylko dla
+Bedrocka, ustaw `BEDROCK_MODELS_MODE` (YAML: `providers.<name>.models_mode`).
 
 ## Wielu providerów Bedrock
 

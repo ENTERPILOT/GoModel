@@ -10,6 +10,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/anthropicapi"
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
@@ -347,6 +348,14 @@ func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core
 	auditlog.EnrichEntryWithResolvedRoute(
 		c,
 		qualifyExecutedModel(workflow, result.Response.Model, result.Meta.ProviderName),
+		result.Meta.ProviderType,
+		result.Meta.ProviderName,
+	)
+	notifyChatResponseFeedback(
+		c,
+		ext.Endpoint(c.Request().URL.Path),
+		result.Response,
+		result.Meta.Model,
 		result.Meta.ProviderType,
 		result.Meta.ProviderName,
 	)

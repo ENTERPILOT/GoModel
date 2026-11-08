@@ -130,7 +130,15 @@ func isOpenAIModelName(model string) bool {
 // members beyond the ones the translation maps (for example a speaker name).
 // Other providers' replay state (extra_content) is removed by the router
 // before the request reaches this provider.
-func carriesChatOnlyFields(fields core.UnknownJSONFields) bool {
+func carriesChatOnlyFields(fields core.UnknownJSONFields, assistantMessage bool) bool {
+	// reasoning_content is exempt only for assistant messages: it is this
+	// converter's own output, so a client echoing it back must not become
+	// untranslatable. User and content-part fields remain unsupported.
+	if assistantMessage {
+		fields = fields.Without("reasoning_content")
+	}
+	// Replay state belongs in extra_content; Codex pins store: false, so
+	// reasoning itself is dropped rather than replayed upstream.
 	return !fields.Without(core.ExtraContentField).IsEmpty()
 }
 
@@ -248,8 +256,25 @@ func applyMappedChatFields(out *core.ResponsesRequest, req *core.ChatRequest) er
 		}
 		out.MaxOutputTokens = &limit
 	}
+	var summary string
+	if req.Reasoning != nil {
+		summary = strings.TrimSpace(req.Reasoning.Summary)
+	}
 	if effort := requestedEffort(req); effort != "" {
-		out.Reasoning = &core.Reasoning{Effort: supportedEffort(req.Model, effort)}
+		reasoning := &core.Reasoning{Effort: supportedEffort(req.Model, effort)}
+		// The Responses API emits reasoning summaries only on request; without
+		// one the chat rendering has no reasoning text to surface. A summary
+		// the client asked for is kept.
+		if !reasoningOff(reasoning.Effort) {
+			reasoning.Summary = "auto"
+			if summary != "" {
+				reasoning.Summary = summary
+			}
+		}
+		out.Reasoning = reasoning
+	} else if summary != "" && isReasoningChatModel(req.Model) {
+		// A summary alone runs at the model's default effort.
+		out.Reasoning = &core.Reasoning{Summary: summary}
 	}
 	text := map[string]any{}
 	if raw := req.ExtraFields.Lookup("verbosity"); len(raw) > 0 {
@@ -260,9 +285,9 @@ func applyMappedChatFields(out *core.ResponsesRequest, req *core.ChatRequest) er
 		text["verbosity"] = verbosity
 	}
 	if raw := req.ExtraFields.Lookup("response_format"); len(raw) > 0 {
-		format, err := responsesTextFormat(raw)
+		format, err := core.ResponsesTextFormat(raw)
 		if err != nil {
-			return err
+			return errNotTranslatable
 		}
 		text["format"] = format
 	}
@@ -272,28 +297,6 @@ func applyMappedChatFields(out *core.ResponsesRequest, req *core.ChatRequest) er
 	return nil
 }
 
-// responsesTextFormat maps a chat response_format onto Responses text.format,
-// which carries the json_schema members flat instead of nested.
-func responsesTextFormat(raw json.RawMessage) (map[string]any, error) {
-	var format struct {
-		Type       string         `json:"type"`
-		JSONSchema map[string]any `json:"json_schema"`
-	}
-	if err := json.Unmarshal(raw, &format); err != nil {
-		return nil, errNotTranslatable
-	}
-	switch format.Type {
-	case "text", "json_object":
-		return map[string]any{"type": format.Type}, nil
-	case "json_schema":
-		out := map[string]any{"type": "json_schema"}
-		maps.Copy(out, format.JSONSchema)
-		return out, nil
-	default:
-		return nil, errNotTranslatable
-	}
-}
-
 // responsesInput translates chat messages into Responses input items. An
 // assistant message becomes its text plus one function_call item per tool
 // call; a tool message becomes a function_call_output item.
@@ -301,7 +304,7 @@ func responsesInput(messages []core.Message) ([]any, error) {
 	input := make([]any, 0, len(messages))
 	for _, msg := range messages {
 		content, err := core.NormalizeMessageContent(msg.Content)
-		if err != nil || carriesChatOnlyFields(msg.ExtraFields) {
+		if err != nil || carriesChatOnlyFields(msg.ExtraFields, msg.Role == "assistant") {
 			return nil, errNotTranslatable
 		}
 		switch msg.Role {
@@ -323,7 +326,7 @@ func responsesInput(messages []core.Message) ([]any, error) {
 			}
 			for _, call := range msg.ToolCalls {
 				if (call.Type != "" && call.Type != "function") ||
-					carriesChatOnlyFields(call.ExtraFields) || carriesChatOnlyFields(call.Function.ExtraFields) {
+					carriesChatOnlyFields(call.ExtraFields, false) || carriesChatOnlyFields(call.Function.ExtraFields, false) {
 					return nil, errNotTranslatable
 				}
 				input = append(input, map[string]any{
@@ -354,7 +357,7 @@ func textOnly(content any) bool {
 		return true
 	}
 	for _, part := range parts {
-		if part.Type != "text" || carriesChatOnlyFields(part.ExtraFields) {
+		if part.Type != "text" || carriesChatOnlyFields(part.ExtraFields, false) {
 			return false
 		}
 	}
@@ -380,14 +383,14 @@ func responsesInputContent(content any) ([]any, error) {
 	parts, _ := content.([]core.ContentPart)
 	out := make([]any, 0, len(parts))
 	for _, part := range parts {
-		if carriesChatOnlyFields(part.ExtraFields) {
+		if carriesChatOnlyFields(part.ExtraFields, false) {
 			return nil, errNotTranslatable
 		}
 		switch part.Type {
 		case "text":
 			out = append(out, map[string]any{"type": "input_text", "text": part.Text})
 		case "image_url":
-			if part.ImageURL == nil || carriesChatOnlyFields(part.ImageURL.ExtraFields) {
+			if part.ImageURL == nil || carriesChatOnlyFields(part.ImageURL.ExtraFields, false) {
 				return nil, errNotTranslatable
 			}
 			detail := part.ImageURL.Detail
@@ -396,7 +399,7 @@ func responsesInputContent(content any) ([]any, error) {
 			}
 			out = append(out, map[string]any{"type": "input_image", "image_url": part.ImageURL.URL, "detail": detail})
 		case "file":
-			if !core.ValidFilePayload(part.File) || carriesChatOnlyFields(part.File.ExtraFields) {
+			if !core.ValidFilePayload(part.File) || carriesChatOnlyFields(part.File.ExtraFields, false) {
 				return nil, errNotTranslatable
 			}
 			file := map[string]any{"type": "input_file"}

@@ -21,6 +21,7 @@ import {
   resetProviderCredentialFields,
   validateProviderCredentialForm,
   buildProviderCredentialPayload,
+  providerRowNonBillable,
   providerRowsHaveActions,
 } from "../src/pages/providers-config/providersConfigLogic.js";
 
@@ -230,6 +231,38 @@ test("providerCredentialFormFields splits a schema into primary and advanced", (
   assert.equal(advanced[1].control, "checkbox");
 });
 
+test("billable defaults on, maps from the row, and is always sent when advertised", () => {
+  assert.equal(defaultProviderCredentialForm().billable, true);
+  assert.equal(providerCredentialRowToForm({ billable: false }).billable, false);
+  assert.equal(providerCredentialRowToForm({}).billable, true);
+
+  const schema = {
+    ...OPENAI_SCHEMA,
+    fields: [...OPENAI_SCHEMA.fields, { name: "billable", required: false, advanced: true }],
+  };
+  const { advanced } = providerCredentialFormFields(schema);
+  const billable = advanced.find((field) => field.name === "billable");
+  assert.equal(billable.control, "checkbox");
+  assert.equal(billable.label, "Billable");
+
+  const form = {
+    ...defaultProviderCredentialForm(),
+    name: "customer-openai",
+    type: "openai",
+    api_keys: [{ value: "sk-live" }],
+  };
+  assert.equal(buildProviderCredentialPayload(form, schema).billable, true);
+  form.billable = false;
+  assert.equal(buildProviderCredentialPayload(form, schema).billable, false);
+  // A gateway that does not advertise the field never receives it.
+  assert.equal("billable" in buildProviderCredentialPayload(form, OPENAI_SCHEMA), false);
+  assert.equal("billable" in buildProviderCredentialPayload(form, null), false);
+
+  assert.equal(providerRowNonBillable({ billable: false }), true);
+  assert.equal(providerRowNonBillable({ billable: true }), false);
+  assert.equal(providerRowNonBillable({}), false);
+});
+
 test("session stickiness defaults on and can be disabled", () => {
   assert.equal(defaultProviderCredentialForm().session_sticky_keys, true);
   assert.equal(providerCredentialRowToForm({ session_sticky_keys: false }).session_sticky_keys, false);
@@ -269,6 +302,9 @@ test("a missing schema falls back to every known field", () => {
   assert.equal(names.includes("api_keys"), true);
   assert.equal(names.includes("vertex_project"), true);
   assert.deepEqual(primary.map((field) => field.name), ["api_keys"]);
+  // Toggles the payload would not send without a schema are not offered either.
+  assert.equal(names.includes("session_sticky_keys"), false);
+  assert.equal(names.includes("billable"), false);
 });
 
 test("providerCredentialFieldMeta humanizes a field the dashboard has no copy for", () => {
@@ -598,4 +634,54 @@ test("a service-account JSON secret reference is not parsed as JSON", () => {
     validateProviderCredentialForm(invalid, "create", [], VERTEX_SCHEMA).service_account_json,
     "Paste the service account JSON file's contents — this is not valid JSON.",
   );
+});
+
+test("models_mode renders as a select and round-trips through the payload", () => {
+  const schema = {
+    ...OPENAI_SCHEMA,
+    fields: [
+      ...OPENAI_SCHEMA.fields,
+      { name: "models_mode", required: false, advanced: true, options: ["fallback", "allowlist", "merge"] },
+    ],
+  };
+  const { advanced } = providerCredentialFormFields(schema);
+  const field = advanced.find((entry) => entry.name === "models_mode");
+  assert.ok(field);
+  assert.equal(field.control, "select");
+  assert.deepEqual(field.options, ["fallback", "allowlist", "merge"]);
+
+  const form = providerCredentialRowToForm({
+    name: "openrouter",
+    type: "openai",
+    api_keys: ["***********"],
+    models: ["qwen/qwen3-vl-8b-instruct"],
+    models_mode: "allowlist",
+  });
+  assert.equal(form.models_mode, "allowlist");
+  assert.equal(buildProviderCredentialPayload(form, schema).models_mode, "allowlist");
+
+  // Default (empty) means the gateway-wide mode applies.
+  assert.equal(defaultProviderCredentialForm().models_mode, "");
+  assert.equal(
+    buildProviderCredentialPayload({ ...form, models_mode: "" }, schema).models_mode,
+    "",
+  );
+});
+
+test("the schema-less fallback form still offers the models_mode values", () => {
+  const { advanced } = providerCredentialFormFields(null);
+  const field = advanced.find((entry) => entry.name === "models_mode");
+  assert.ok(field);
+  assert.equal(field.control, "select");
+  assert.deepEqual(field.options, ["fallback", "allowlist", "merge"]);
+});
+
+test("models_mode links to the docs table comparing the modes", () => {
+  const meta = providerCredentialFieldMeta("models_mode");
+  assert.equal(
+    meta.docsUrl,
+    "https://gomodel.enterpilot.io/docs/advanced/config-yaml?utm_source=gomodel_dashboard#models-modes",
+  );
+  assert.ok(meta.docsLabel);
+  assert.equal(providerCredentialFieldMeta("proxy_url").docsUrl, undefined);
 });

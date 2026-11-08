@@ -30,8 +30,12 @@ type ProviderConfig struct {
 	// paths ("providers.openai.api_keys[1]") or environment variable names
 	// ("OPENAI_API_KEY_2"); more than one when identical keys were collapsed.
 	// Set by configuration resolution; nil elsewhere.
-	APIKeySources            [][]string
-	SessionStickyKeys        bool
+	APIKeySources     [][]string
+	SessionStickyKeys bool
+	// Billable is false for a provider whose cost the caller does not owe the
+	// operator (a customer's own key): its usage is tracked but billed at
+	// zero, and user-path and label budgets ignore it.
+	Billable                 bool
 	BaseURL                  string
 	APIVersion               string
 	Backend                  string
@@ -50,6 +54,9 @@ type ProviderConfig struct {
 	InferenceObjective   string
 	FairnessFromUserPath bool
 	Models               []string
+	// ModelsMode overrides the global configured provider models mode for
+	// this provider. Empty uses the global mode.
+	ModelsMode config.ConfiguredProviderModelsMode
 	// ModelMetadataOverrides holds operator-supplied metadata keyed by raw model
 	// ID (as it appears in the provider's /models response). The registry merges
 	// these onto remote-registry metadata after enrichment; non-zero fields here
@@ -305,6 +312,7 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 		APIKey:                   raw.APIKey,
 		APIKeys:                  raw.APIKeys,
 		SessionStickyKeys:        sessionStickyKeysEnabled(raw.SessionStickyKeys),
+		Billable:                 enabledByDefault(raw.Billable),
 		BaseURL:                  raw.BaseURL,
 		APIVersion:               raw.APIVersion,
 		Backend:                  raw.Backend,
@@ -318,6 +326,7 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 		GCPScope:                 raw.GCPScope,
 		ProxyURL:                 strings.TrimSpace(raw.ProxyURL),
 		Models:                   config.ProviderModelIDs(raw.Models),
+		ModelsMode:               config.NormalizeConfiguredProviderModelsMode(raw.ModelsMode),
 		ModelMetadataOverrides:   config.ProviderModelMetadataOverrides(raw.Models),
 		ModelFilter:              raw.ModelFilter.Normalize(),
 		Resilience:               global,

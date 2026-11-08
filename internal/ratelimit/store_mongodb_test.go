@@ -270,8 +270,8 @@ func TestMongoDBStoreCounterRoundTrip(t *testing.T) {
 
 		runCounterStoreSuite(t, store, func(t *testing.T, snap WindowSnapshot, updatedAt int64) {
 			t.Helper()
-			doc := counterDocument{WindowSnapshot: snap, UpdatedAt: updatedAt}
-			_, err := db.Collection("rate_limit_window_snapshots").InsertOne(context.Background(), doc)
+			snap.UpdatedAt = updatedAt
+			_, err := db.Collection("rate_limit_window_snapshots").InsertOne(context.Background(), snap)
 			require.NoError(t, err)
 		})
 	})
@@ -301,10 +301,10 @@ func TestMongoDBStoreLoadCountersSkipsMalformedDocument(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		got, err := store.LoadCounters(ctx)
+		got, err := store.LoadCounters(ctx, 0)
 		require.NoError(t, err)
 		require.Len(t, got, 1)
-		require.Equal(t, good, got[0])
+		require.Equal(t, good, unstamped(got)[0])
 	})
 }
 
@@ -354,9 +354,9 @@ func TestMongoDBStoreImportsLegacyCounters(t *testing.T) {
 
 		store, err := NewMongoDBStore(ctx, db)
 		require.NoError(t, err)
-		got, err := store.LoadCounters(ctx)
+		got, err := store.LoadCounters(ctx, 0)
 		require.NoError(t, err)
-		require.Equal(t, []WindowSnapshot{legacy}, got, "the legacy document loads under the empty writer")
+		require.Equal(t, []WindowSnapshot{legacy}, unstamped(got), "the legacy document loads under the empty writer")
 		remaining, err := legacyColl.CountDocuments(ctx, bson.D{})
 		require.NoError(t, err)
 		require.Zero(t, remaining, "imported documents leave the legacy collection")
@@ -364,7 +364,7 @@ func TestMongoDBStoreImportsLegacyCounters(t *testing.T) {
 		legacyWrite(t, 7)
 		store, err = NewMongoDBStore(ctx, db)
 		require.NoError(t, err)
-		got, err = store.LoadCounters(ctx)
+		got, err = store.LoadCounters(ctx, 0)
 		require.NoError(t, err)
 		require.Len(t, got, 1)
 		require.Equal(t, int64(7), got[0].RequestsCurrent)
@@ -374,7 +374,7 @@ func TestMongoDBStoreImportsLegacyCounters(t *testing.T) {
 		require.NoError(t, err)
 		store, err = NewMongoDBStore(ctx, db)
 		require.NoError(t, err)
-		got, err = store.LoadCounters(ctx)
+		got, err = store.LoadCounters(ctx, 0)
 		require.NoError(t, err)
 		require.Empty(t, got)
 	})
@@ -400,7 +400,7 @@ func TestMongoDBStoreLegacyCountsWrittenBackAfterResetAreNotRestored(t *testing.
 		require.NoError(t, err)
 		importLegacy := func(t *testing.T) {
 			t.Helper()
-			_, err := store.legacyCounters.InsertOne(ctx, counterDocument{
+			_, err := store.legacyCounters.InsertOne(ctx, WindowSnapshot{
 				Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: PeriodHourSeconds,
 				RequestsWindowStart: now.Unix() - now.Unix()%PeriodHourSeconds, RequestsCurrent: 90,
 				UpdatedAt: now.Unix(),

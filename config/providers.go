@@ -13,7 +13,12 @@ type RawProviderConfig struct {
 	APIKeys []string `yaml:"api_keys"`
 	// SessionStickyKeys defaults to true. Set false to restore round-robin key
 	// selection for every request, including requests carrying a session ID.
-	SessionStickyKeys        *bool  `yaml:"session_sticky_keys"`
+	SessionStickyKeys *bool `yaml:"session_sticky_keys"`
+	// Billable defaults to true. Set false for a provider whose cost the caller
+	// does not owe the operator, such as a customer's own API key: its usage is
+	// still tracked, but it is billed at zero and user-path and label budgets
+	// neither gate it nor count it.
+	Billable                 *bool  `yaml:"billable"`
 	BaseURL                  string `yaml:"base_url"`
 	APIVersion               string `yaml:"api_version"`
 	Backend                  string `yaml:"backend"`
@@ -38,6 +43,10 @@ type RawProviderConfig struct {
 	// defaults to true; nil preserves that default.
 	FairnessFromUserPath *bool              `yaml:"fairness_from_user_path"`
 	Models               []RawProviderModel `yaml:"models"`
+	// ModelsMode overrides the gateway-wide configured_provider_models_mode
+	// for this provider only: "fallback", "allowlist", or "merge". Empty uses
+	// the global mode. Set it via `models_mode:` or `<PROVIDER>_MODELS_MODE`.
+	ModelsMode ConfiguredProviderModelsMode `yaml:"models_mode"`
 	// ModelFilter narrows the provider's model inventory to the models that
 	// match its patterns and price cap. It applies to the final inventory, so
 	// it also narrows models added by `models` in merge or allowlist mode.

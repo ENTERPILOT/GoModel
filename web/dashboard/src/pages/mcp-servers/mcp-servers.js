@@ -2,6 +2,7 @@
 // node:test suite can exercise it directly.
 
 import * as m from "../../lib/paraglide/messages.js";
+import { filterFields, normalizeQuery } from "../../lib/utils/textMatch.js";
 
 // Tool filter modes. "exclude" stores disallowed_tools: every tool is exposed
 // except the listed ones, so tools the server adds later appear automatically.
@@ -177,26 +178,14 @@ export function mcpHeaderRowsToObject(rows) {
 }
 
 export function filterMcpServers(servers, filter) {
-  const list = Array.isArray(servers) ? servers : [];
-  if (!filter) {
-    return list;
-  }
-  const needle = String(filter).toLowerCase();
-  return list.filter((server) => {
-    const fields = [
-      server.name,
-      server.slug,
-      server.url,
-      server.transport,
-      server.description,
-      server.status,
-    ];
-    return fields.some((value) =>
-      String(value || "")
-        .toLowerCase()
-        .includes(needle),
-    );
-  });
+  return filterFields(servers, filter, (server) => [
+    server.name,
+    server.slug,
+    server.url,
+    server.transport,
+    server.description,
+    server.status,
+  ]);
 }
 
 // mcpServerFormFromServer prefills the editor form for an existing row.
@@ -481,7 +470,7 @@ export function switchMcpToolMode(form, mode, discovered) {
 // tools, or names added before the server connected). query narrows by name
 // or description.
 export function mcpToolPickerRows(form, discovered, query) {
-  const needle = String(query || "").trim().toLowerCase();
+  const needle = normalizeQuery(query);
   const known = new Set((discovered || []).map((tool) => tool.name));
   const rows = (discovered || []).map((tool) => ({
     ...tool,
@@ -503,11 +492,7 @@ export function mcpToolPickerRows(form, discovered, query) {
   if (!needle) {
     return rows;
   }
-  return rows.filter(
-    (row) =>
-      row.name.toLowerCase().includes(needle) ||
-      row.description.toLowerCase().includes(needle),
-  );
+  return filterFields(rows, needle, (row) => [row.name, row.description]);
 }
 
 // mcpToolSelectionSummary counts discovered tools only: a listed name the
@@ -659,4 +644,100 @@ export function buildMcpVirtualServerPayload(form, mode, virtualServers, servers
         discovery === MCP_TOOL_DISCOVERY_OFF || discovery === MCP_TOOL_DISCOVERY_SEARCH ? discovery : "",
     },
   };
+}
+
+// --- OAuth sign-in -----------------------------------------------------------
+
+// MCP_OAUTH_CALLBACK_PATH is where authorization servers send the browser
+// back after a sign-in (mcpgateway.OAuthCallbackPath).
+export const MCP_OAUTH_CALLBACK_PATH = "/admin/mcp-oauth/callback";
+
+// mcpServerCanSignIn reports whether the server speaks HTTP, the only
+// transports the MCP authorization spec covers.
+export function mcpServerCanSignIn(server) {
+  const transport = String((server && server.transport) || "http");
+  return transport === "http" || transport === "sse";
+}
+
+// mcpServerOAuthState is the sign-in state shown on a row: the gateway's
+// oauth.status ("signed_in", "expired", "error"), "required" when the
+// server answered 401 and nobody signed in, else "".
+export function mcpServerOAuthState(server) {
+  const status = String((server && server.oauth && server.oauth.status) || "");
+  if (status) {
+    return status;
+  }
+  return server && server.auth_required ? "required" : "";
+}
+
+export function mcpServerOAuthLabel(state) {
+  const labels = {
+    signed_in: m.mcp_oauth_signed_in,
+    expired: m.mcp_oauth_expired,
+    error: m.mcp_oauth_error,
+    required: m.mcp_oauth_required,
+  };
+  return labels[state]?.() || "";
+}
+
+export function mcpServerOAuthClass(state) {
+  return state === "signed_in" ? "status-success" : state ? "status-warning" : "";
+}
+
+// mcpOAuthRedirectURI builds the callback URL as this browser reaches the
+// gateway: the page origin plus the base-path-prefixed callback path.
+export function mcpOAuthRedirectURI(origin, prefixPath = (path) => path) {
+  return String(origin || "").replace(/\/+$/, "") + prefixPath(MCP_OAUTH_CALLBACK_PATH);
+}
+
+// buildMcpOAuthStartPayload maps the sign-in form onto the start request.
+// The client fields are only sent when the operator filled them in.
+export function buildMcpOAuthStartPayload(form, redirectURI) {
+  const payload = { redirect_uri: redirectURI };
+  const clientID = String((form && form.client_id) || "").trim();
+  if (clientID) {
+    payload.client_id = clientID;
+    const secret = String((form && form.client_secret) || "").trim();
+    if (secret) {
+      payload.client_secret = secret;
+    }
+  }
+  return payload;
+}
+
+// parseMcpOAuthOutcome reads the ?mcp_oauth=...&server=... the callback
+// redirects to. It returns null when the page was not opened that way.
+export function parseMcpOAuthOutcome(search) {
+  const params = new URLSearchParams(search || "");
+  const outcome = params.get("mcp_oauth");
+  if (!outcome) {
+    return null;
+  }
+  return { outcome, server: params.get("server") || "" };
+}
+
+// MCP_OAUTH_OUTCOMES maps the callback outcome to the flash it shows. The
+// outcome only picks a message: the sign-in itself already happened on the
+// gateway, and the server list is re-read either way.
+const MCP_OAUTH_FAILED = { kind: "error", text: (name) => m.mcp_oauth_failed_flash({ name }) };
+const MCP_OAUTH_OUTCOMES = new Map([
+  ["signed_in", { kind: "success", text: (name) => m.mcp_oauth_signed_in_flash({ name }) }],
+  ["expired", { kind: "error", text: () => m.mcp_oauth_expired_flash() }],
+  ["error", MCP_OAUTH_FAILED],
+]);
+
+// mcpOAuthOutcomeMessage returns the flash { kind, text } for a parsed
+// callback outcome; unknown outcomes read as a failure.
+export function mcpOAuthOutcomeMessage(result) {
+  const entry = MCP_OAUTH_OUTCOMES.get(String(result?.outcome || "")) ?? MCP_OAUTH_FAILED;
+  return { kind: entry.kind, text: entry.text(String(result?.server || "")) };
+}
+
+// stripMcpOAuthParams removes the callback outcome from a URL so a reload
+// does not repeat the message.
+export function stripMcpOAuthParams(href) {
+  const url = new URL(href);
+  url.searchParams.delete("mcp_oauth");
+  url.searchParams.delete("server");
+  return url.pathname + url.search + url.hash;
 }

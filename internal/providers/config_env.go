@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"maps"
 	"math"
@@ -75,8 +76,14 @@ type providerOverlay struct {
 // supplied, if any.
 func (o *providerOverlay) apply(name string, values providerEnvValues, build func(providerEnvValues) config.RawProviderConfig) error {
 	values, err := values.resolveSettings(o.resolve)
-	if err != nil || values.empty() {
+	if err != nil {
 		return err
+	}
+	if values.invalid != nil {
+		return values.invalid
+	}
+	if values.empty() {
+		return nil
 	}
 	o.providers[name] = build(values)
 	if keys := values.sourcedAPIKeys(); len(keys) > 0 {
@@ -103,11 +110,13 @@ const (
 	providerEnvFieldGCPScope
 	providerEnvFieldProxyURL
 	providerEnvFieldSessionStickyKeys
+	providerEnvFieldBillable
 	providerEnvFieldInferenceObjective
 	providerEnvFieldFairnessFromUserPath
 	providerEnvFieldModelFilterInclude
 	providerEnvFieldModelFilterExclude
 	providerEnvFieldModelFilterMaxPrice
+	providerEnvFieldModelsMode
 	providerEnvFieldIdentityTokenFile
 	providerEnvFieldIdentityToken
 	providerEnvFieldTokenEndpoint
@@ -149,15 +158,20 @@ type providerEnvValues struct {
 	ProxyURL                 string
 	InferenceObjective       string
 	Models                   []string
+	ModelsMode               string
 	ModelFilterInclude       []string
 	ModelFilterExclude       []string
 	ModelFilterMaxPrice      *float64
 	SessionStickyKeys        *bool
+	Billable                 *bool
 	FairnessFromUserPath     *bool
 	WorkloadIdentity         config.WorkloadIdentityConfig
 	// pending holds the settings whose value contains "${", unparsed, until
 	// resolveSettings resolves them. A pending field counts as set.
 	pending map[providerEnvField]envVar
+	// invalid is the first malformed value of a setting that must not fall
+	// back to its default silently; apply fails with it.
+	invalid error
 }
 
 // envVar is one environment variable.
@@ -256,10 +270,15 @@ func (v providerEnvValues) empty() bool {
 		strings.TrimSpace(v.ProxyURL) == "" &&
 		strings.TrimSpace(v.InferenceObjective) == "" &&
 		v.SessionStickyKeys == nil &&
+		v.Billable == nil &&
 		v.FairnessFromUserPath == nil &&
 		len(v.Models) == 0 &&
+		strings.TrimSpace(v.ModelsMode) == "" &&
 		v.modelFilter().Empty() &&
-		len(v.pending) == 0
+		len(v.pending) == 0 &&
+		// A malformed value counts as set so the group is not dropped
+		// before apply can fail on it.
+		v.invalid == nil
 }
 
 func providerEnvSources(providerType string, spec DiscoveryConfig) []providerEnvSource {
@@ -333,6 +352,8 @@ func (v *providerEnvValues) setField(field providerEnvField, index int, key, val
 		v.APIVersion = value
 	case providerEnvFieldModels:
 		v.Models = parseCSVEnvList(value)
+	case providerEnvFieldModelsMode:
+		v.ModelsMode = strings.TrimSpace(value)
 	case providerEnvFieldModelFilterInclude:
 		v.ModelFilterInclude = parseCSVEnvList(value)
 	case providerEnvFieldModelFilterExclude:
@@ -370,6 +391,15 @@ func (v *providerEnvValues) setField(field providerEnvField, index int, key, val
 	case providerEnvFieldSessionStickyKeys:
 		if parsed, err := strconv.ParseBool(strings.TrimSpace(value)); err == nil {
 			v.SessionStickyKeys = &parsed
+		}
+	case providerEnvFieldBillable:
+		// Billable is a cost control: a typo must not quietly leave the
+		// provider billable and charge a customer for their own key.
+		if parsed, err := strconv.ParseBool(strings.TrimSpace(value)); err == nil {
+			v.Billable = &parsed
+		} else if v.invalid == nil {
+			// The value is left out: it may have come from a secret reference.
+			v.invalid = fmt.Errorf("%s: value is not a boolean", key)
 		}
 	case providerEnvFieldInferenceObjective:
 		v.InferenceObjective = value
@@ -431,6 +461,7 @@ func parseProviderEnvKey(prefix, key string, spec DiscoveryConfig) (string, prov
 		field providerEnvField
 	}{
 		{name: "SESSION_STICKY_KEYS", field: providerEnvFieldSessionStickyKeys},
+		{name: "BILLABLE", field: providerEnvFieldBillable},
 		{name: "PROXY_URL", field: providerEnvFieldProxyURL},
 		{name: "API_VERSION", field: providerEnvFieldAPIVersion},
 		{name: "BASE_URL", field: providerEnvFieldBaseURL},
@@ -441,6 +472,7 @@ func parseProviderEnvKey(prefix, key string, spec DiscoveryConfig) (string, prov
 		{name: "MODEL_FILTER_MAX_PRICE_PER_MTOK", field: providerEnvFieldModelFilterMaxPrice},
 		{name: "MODEL_FILTER_INCLUDE", field: providerEnvFieldModelFilterInclude},
 		{name: "MODEL_FILTER_EXCLUDE", field: providerEnvFieldModelFilterExclude},
+		{name: "MODELS_MODE", field: providerEnvFieldModelsMode},
 		{name: "MODELS", field: providerEnvFieldModels},
 	}
 	if strings.EqualFold(prefix, "VERTEX") {
@@ -642,8 +674,10 @@ func (v providerEnvValues) rawConfig(providerType string, spec DiscoveryConfig) 
 		InferenceObjective:       v.InferenceObjective,
 		FairnessFromUserPath:     v.FairnessFromUserPath,
 		Models:                   rawProviderModelsFromIDs(v.Models),
+		ModelsMode:               config.ConfiguredProviderModelsMode(v.ModelsMode),
 		ModelFilter:              v.modelFilter(),
 		SessionStickyKeys:        v.SessionStickyKeys,
+		Billable:                 v.Billable,
 		WorkloadIdentity:         v.WorkloadIdentity,
 	}
 }
@@ -711,8 +745,14 @@ func overlayProviderEnvValues(existing config.RawProviderConfig, values provider
 	if values.SessionStickyKeys != nil {
 		existing.SessionStickyKeys = values.SessionStickyKeys
 	}
+	if values.Billable != nil {
+		existing.Billable = values.Billable
+	}
 	if len(values.Models) > 0 {
 		existing.Models = rawProviderModelsFromIDs(values.Models)
+	}
+	if values.ModelsMode != "" {
+		existing.ModelsMode = config.ConfiguredProviderModelsMode(values.ModelsMode)
 	}
 	// Each filter rule overlays independently, so an env price cap can narrow a
 	// YAML pattern filter (and vice versa) without restating the other rule.
@@ -773,6 +813,7 @@ func (v providerEnvValues) withoutFieldsSetBy(existing config.RawProviderConfig)
 		{"gcp_scope", providerEnvFieldGCPScope, &v.GCPScope, existing.GCPScope},
 		{"proxy_url", providerEnvFieldProxyURL, &v.ProxyURL, existing.ProxyURL},
 		{"inference_objective", providerEnvFieldInferenceObjective, &v.InferenceObjective, existing.InferenceObjective},
+		{"models_mode", providerEnvFieldModelsMode, &v.ModelsMode, string(existing.ModelsMode)},
 	}
 	for _, f := range stringFields {
 		env := f.env
@@ -785,6 +826,7 @@ func (v providerEnvValues) withoutFieldsSetBy(existing config.RawProviderConfig)
 	}
 
 	drop("session_sticky_keys", providerEnvFieldSessionStickyKeys, v.SessionStickyKeys != nil, existing.SessionStickyKeys != nil, func() { v.SessionStickyKeys = nil })
+	drop("billable", providerEnvFieldBillable, v.Billable != nil, existing.Billable != nil, func() { v.Billable = nil })
 	drop("fairness_from_user_path", providerEnvFieldFairnessFromUserPath, v.FairnessFromUserPath != nil, existing.FairnessFromUserPath != nil, func() { v.FairnessFromUserPath = nil })
 	drop("models", providerEnvFieldModels, len(v.Models) > 0, rawProviderHasResolvedModel(existing), func() { v.Models = nil })
 	drop("model_filter.include", providerEnvFieldModelFilterInclude, len(v.ModelFilterInclude) > 0, len(existing.ModelFilter.Include) > 0, func() { v.ModelFilterInclude = nil })
