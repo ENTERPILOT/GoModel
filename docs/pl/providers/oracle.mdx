@@ -28,10 +28,10 @@ ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3
 GOMODEL_MASTER_KEY=change-me
 ```
 
-`ORACLE_MODELS` to lista rozdzielona przecinkami (białe znaki są usuwane). Zachowanie
-wynika z globalnego `CONFIGURED_PROVIDER_MODELS_MODE` – `fallback` (domyślnie)
-używa listy, gdy `/models` Oracle jest niedostępny lub pusty; `allowlist`
-udostępnia tylko skonfigurowane modele i pomija wywołanie upstreamu.
+`ORACLE_MODELS` to lista rozdzielona przecinkami (białe znaki są usuwane). Domyślnie
+udostępniane są tylko te modele, a zapytania o inne modele zwracają 404. Aby listę
+wyznaczało `/models` Oracle, ustaw `ORACLE_MODELS_MODE=fallback` (albo globalne
+`CONFIGURED_PROVIDER_MODELS_MODE`); zobacz [Tryby modeli](/pl/advanced/config-yaml#tryby-modeli).
 
 Albo w `config.yaml`:
 

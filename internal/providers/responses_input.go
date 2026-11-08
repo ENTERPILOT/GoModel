@@ -118,6 +118,15 @@ func convertResponsesInputItems(items []any) ([]core.Message, error) {
 		}
 
 		if msg.Role == "assistant" {
+			if itemType == "message" && pendingAssistant != nil && isEmptyAssistantMessage(msg) {
+				// A message item without text after an image (Gemini's
+				// trailing part that only carries a thought signature)
+				// belongs to the pending turn, not to a new empty one.
+				if err := mergeAssistantExtraContent(pendingAssistant, msg); err != nil {
+					return nil, err
+				}
+				continue
+			}
 			if itemType == "message" && pendingAssistant != nil {
 				if err := flushPendingAssistant(); err != nil {
 					return nil, err
@@ -501,6 +510,30 @@ func mergeAssistantMessage(dst *core.Message, src core.Message) {
 			dst.ContentNull = dst.ContentNull || src.ContentNull
 		}
 	}
+}
+
+// isEmptyAssistantMessage reports an assistant message with neither text nor
+// tool calls, such as a replayed message item whose only part was an empty
+// output_text.
+func isEmptyAssistantMessage(msg core.Message) bool {
+	text, ok := msg.Content.(string)
+	return msg.Role == "assistant" && ok && text == "" && len(msg.ToolCalls) == 0
+}
+
+// mergeAssistantExtraContent moves the replay state of an empty assistant
+// message onto the pending assistant turn, unless that turn already has its
+// own.
+func mergeAssistantExtraContent(dst *core.Message, src core.Message) error {
+	raw := src.ExtraFields.Lookup(core.ExtraContentField)
+	if len(raw) == 0 || len(dst.ExtraFields.Lookup(core.ExtraContentField)) > 0 {
+		return nil
+	}
+	extra, err := core.MergeUnknownJSONFields(dst.ExtraFields, map[string]json.RawMessage{core.ExtraContentField: raw})
+	if err != nil {
+		return err
+	}
+	dst.ExtraFields = extra
+	return nil
 }
 
 func isAssistantToolCallOnlyMessage(msg core.Message) bool {

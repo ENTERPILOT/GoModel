@@ -2,9 +2,9 @@
 // imports — so tests/playground-media.test.js can load it into node --test.
 //
 // Besides the chat conversation, the playground can exercise the gateway's
-// OpenAI-compatible media endpoints: image generation, text-to-speech and
-// speech-to-text. Each mode has one request builder and, where the response
-// is JSON, one reader for what the UI renders.
+// OpenAI-compatible media endpoints: image generation, text-to-speech,
+// speech-to-text and embeddings. Each mode has one request builder and, where
+// the response is JSON, one reader for what the UI renders.
 
 import { playgroundModelOptions } from "./playgroundLogic.js";
 
@@ -16,6 +16,7 @@ export const MEDIA_MODES = [
   { id: "image", path: "/v1/images/generations", modelModes: ["image_generation"] },
   { id: "speech", path: "/v1/audio/speech", modelModes: ["audio_speech"] },
   { id: "transcription", path: "/v1/audio/transcriptions", modelModes: ["audio_transcription"] },
+  { id: "embeddings", path: "/v1/embeddings", modelModes: ["embedding"] },
 ];
 
 export const PLAYGROUND_MODES = [DEFAULT_MODE, ...MEDIA_MODES.map((mode) => mode.id)];
@@ -28,6 +29,11 @@ export const DEFAULT_SPEECH_VOICE = "alloy";
 // Formats an <audio> element can play; pcm is headerless and is left out.
 export const SPEECH_FORMATS = ["mp3", "wav", "opus", "aac", "flac"];
 export const DEFAULT_SPEECH_FORMAT = "mp3";
+// float is the API default; base64 packs each vector as little-endian float32.
+export const EMBEDDING_FORMATS = ["float", "base64"];
+export const DEFAULT_EMBEDDING_FORMAT = "float";
+// How many leading values of each vector the result and the JSON panel show.
+export const EMBEDDING_PREVIEW_VALUES = 8;
 
 export function mediaModeById(id) {
   return MEDIA_MODES.find((mode) => mode.id === id) || null;
@@ -87,6 +93,148 @@ export function buildSpeechRequest({ model, input, voice, format } = {}) {
     body.response_format = format;
   }
   return body;
+}
+
+// Texts to embed: one per non-blank line, trimmed.
+export function embeddingInputs(value) {
+  return String(value ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+// The dimensions value to send: a positive safe integer written as plain
+// digits (no fractions, exponents or hex that Number() would round or
+// reinterpret), sent as a number; null otherwise.
+function dimensionsValue(value) {
+  if (typeof value === "number") return Number.isSafeInteger(value) && value > 0 ? value : null;
+  const raw = text(value);
+  if (!/^\d+$/.test(raw)) return null;
+  const dims = Number(raw);
+  return Number.isSafeInteger(dims) && dims > 0 ? dims : null;
+}
+
+// The dimensions field is optional: blank leaves the size to the provider,
+// anything else must be a valid dimensionsValue.
+export function embeddingDimensionsValid(value) {
+  return text(value) === "" || dimensionsValue(value) !== null;
+}
+
+// Body for POST /v1/embeddings. One line is sent as a plain string, several as
+// an array. encoding_format is sent only when it differs from the provider
+// default (float); dimensions whenever it is a positive integer, and left out
+// when the field is blank.
+export function buildEmbeddingRequest({ model, input, format, dimensions } = {}) {
+  const inputs = embeddingInputs(input);
+  const body = { model: text(model), input: inputs.length === 1 ? inputs[0] : inputs };
+  if (EMBEDDING_FORMATS.includes(format) && format !== DEFAULT_EMBEDDING_FORMAT) {
+    body.encoding_format = format;
+  }
+  const dims = dimensionsValue(dimensions);
+  if (dims !== null) body.dimensions = dims;
+  return body;
+}
+
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+
+// Number of float32 values in a base64 embedding, from its decoded length;
+// null when the string is not base64 or does not decode to whole float32s.
+function base64ValueCount(value) {
+  const clean = value.replace(/\s/g, "");
+  if (clean === "" || clean.length % 4 !== 0 || !BASE64.test(clean)) return null;
+  const padding = clean.endsWith("==") ? 2 : clean.endsWith("=") ? 1 : 0;
+  const bytes = (clean.length / 4) * 3 - padding;
+  return bytes % 4 === 0 ? bytes / 4 : null;
+}
+
+function isFloatVector(value) {
+  return Array.isArray(value) && value.length > 0 && value.every((n) => typeof n === "number" && Number.isFinite(n));
+}
+
+// Per-token embeddings (vLLM's token_embed) come back as one vector per token:
+// a non-empty list of float vectors that all have the same width.
+function isFloatMatrix(value) {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every(isFloatVector) &&
+    value.every((row) => row.length === value[0].length)
+  );
+}
+
+function isEmbeddingItem(item) {
+  const embedding = item?.embedding;
+  return (
+    isFloatVector(embedding) ||
+    isFloatMatrix(embedding) ||
+    (typeof embedding === "string" && embedding.trim() !== "")
+  );
+}
+
+// What the result shows for an /v1/embeddings response: the vector count,
+// their dimensions (null when they differ, are unknown or none came back), the
+// prompt tokens, and per vector its index, length (null when unknown), first
+// values and, for a per-token matrix, its row count (null otherwise; length is
+// then the width of each row and the preview comes from the first row). Items
+// without a float array, a float matrix or a base64 string are skipped.
+export function embeddingSummary(body) {
+  const data = body && Array.isArray(body.data) ? body.data : [];
+  const vectors = data.filter(isEmbeddingItem).map((item, position) => {
+    const embedding = item.embedding;
+    const base64 = typeof embedding === "string";
+    const matrix = !base64 && isFloatMatrix(embedding);
+    const values = matrix ? embedding[0] : embedding;
+    return {
+      index: Number.isInteger(item.index) ? item.index : position,
+      length: base64 ? base64ValueCount(embedding) : values.length,
+      rows: matrix ? embedding.length : null,
+      preview: base64 ? null : values.slice(0, EMBEDDING_PREVIEW_VALUES),
+      base64,
+    };
+  });
+  const lengths = new Set(vectors.map((vector) => vector.length));
+  lengths.delete(null);
+  const allKnown = vectors.every((vector) => vector.length !== null);
+  const tokens = Number(body?.usage?.prompt_tokens);
+  return {
+    count: vectors.length,
+    dimensions: allKnown && lengths.size === 1 ? [...lengths][0] : null,
+    promptTokens: Number.isFinite(tokens) ? tokens : null,
+    vectors,
+  };
+}
+
+// Vectors run to thousands of numbers; the JSON panel shows the first few and
+// a note of how many there are. A per-token matrix shows its first row, trimmed
+// the same way, and a note of its size. Copy still gets the full response.
+export function abbreviateEmbeddingResponse(body) {
+  if (!body || typeof body !== "object" || !Array.isArray(body.data)) return body;
+  return {
+    ...body,
+    data: body.data.map((item) => {
+      const embedding = item?.embedding;
+      if (isFloatMatrix(embedding)) {
+        const width = embedding[0].length;
+        const first =
+          width > EMBEDDING_PREVIEW_VALUES
+            ? [...embedding[0].slice(0, EMBEDDING_PREVIEW_VALUES), "… (" + width + " values)"]
+            : embedding[0];
+        if (embedding.length === 1 && first === embedding[0]) return item;
+        const rest = embedding.length > 1 ? ["… (" + embedding.length + " × " + width + " values)"] : [];
+        return { ...item, embedding: [first, ...rest] };
+      }
+      if (Array.isArray(embedding) && embedding.length > EMBEDDING_PREVIEW_VALUES) {
+        return {
+          ...item,
+          embedding: [...embedding.slice(0, EMBEDDING_PREVIEW_VALUES), "… (" + embedding.length + " values)"],
+        };
+      }
+      if (typeof embedding === "string" && embedding.length > 64) {
+        return { ...item, embedding: embedding.slice(0, 32) + "… (" + embedding.length + " chars)" };
+      }
+      return item;
+    }),
+  };
 }
 
 // Multipart fields for POST /v1/audio/transcriptions, in send order, without
