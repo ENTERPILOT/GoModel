@@ -110,8 +110,8 @@ sollen.
   der Services.
 </Note>
 
-Redis koordiniert weder Rate-Limits noch Budgets. Es ist ein Cache, kein
-verteilter Lock.
+Redis koordiniert weder Rate-Limits noch Budgets: Replikate teilen beides über
+die Datenbank. Redis ist ein Cache, kein verteilter Lock.
 
 ## Provider-Zugangsdaten
 
@@ -333,25 +333,32 @@ GOMODEL_OFFLINE=true
 | [Modellkatalog](/de/advanced/model-metadata) unter `MODEL_LIST_URL` | Preise, Kontextfenster und Fähigkeiten, abgerufen beim Start und bei jeder Cache-Aktualisierung | an |
 
 `GOMODEL_OFFLINE=true` (oder `offline: true` in `config.yaml`) deaktiviert die
-Update-Prüfung und verwirft jede HTTP-URL für den Katalog. Die Einstellung wird
+Update-Prüfung, verwirft jede HTTP-URL für den Katalog und stoppt die
+Metadaten-Abfrage von `/models` bei Providern im Modus `allowlist`. Die Einstellung wird
 nach allen anderen angewendet, sodass nichts in `config.yaml` oder in der
-Umgebung darunter einen ausgehenden Aufruf wieder aktivieren kann. Aufrufe an
-konfigurierte Provider und an alles, was Sie selbst deklariert haben – etwa
+Umgebung darunter einen ausgehenden Aufruf wieder aktivieren kann.
+Inferenz-Aufrufe an konfigurierte Provider und an alles, was Sie selbst deklariert haben – etwa
 einen OTLP-Collector, MCP-Upstreams oder einen Vector Store –, bleiben
 unberührt. Das Startprotokoll bestätigt den Modus.
 
-Sie können die beiden Aufrufe auch einzeln steuern, mit
-`GOMODEL_VERSION_CHECK_ENABLED=false` und `MODEL_LIST_URL=off`.
+Sie können diese Aufrufe auch einzeln steuern, mit
+`GOMODEL_VERSION_CHECK_ENABLED=false`, `MODEL_LIST_URL=off` und
+`ALLOWLIST_UPSTREAM_METADATA=false`.
 
 Der Abruf des Katalogs erfolgt nach dem Best-Effort-Prinzip. Ist er
 abgeschaltet oder schlägt er fehl, startet das Gateway normal, `/health` und
-`/health/ready` liefern `200`, die Provider-Discovery funktioniert weiterhin,
-weil die Modelllisten vom jeweiligen `/models`-Endpunkt des Providers stammen,
-und Requests werden normal geroutet. Was verloren geht, ist die Anreicherung
-mit Metadaten.
+`/health/ready` liefern `200`, die Modelllisten stammen weiterhin vom
+jeweiligen `/models`-Endpunkt des Providers (bei `allowlist`-Providern aus der
+konfigurierten Liste, die keine Upstream-Erkennung braucht), und Requests werden
+normal geroutet. Was verloren geht, ist die Anreicherung aus dem Katalog;
+Metadaten, die ein Provider in seinem eigenen `/models` meldet (auch über den
+Metadatenaufruf im Modus `allowlist`, sofern nicht
+`ALLOWLIST_UPSTREAM_METADATA=false`), gelten weiterhin.
 
 <Warning>
-  Ohne Anreicherung mit Metadaten haben Modelle **keine Preise**. Die
+  Ohne Katalog-Anreicherung hat ein Modell **keine Preise**, es sei denn, sein
+  Provider meldet Preise in `/models` oder Sie hinterlegen sie
+  (`models[].metadata.pricing` in `config.yaml` oder eine Preisüberschreibung im Dashboard). Die
   Kostenerfassung meldet dann keine Kosten, und da
   [Budgets](/de/features/budgets) die Ausgaben aus den Kostendaten der Nutzung
   lesen, haben Budgets nichts, worauf sie Kosten anrechnen können, und setzen
@@ -452,18 +459,28 @@ Prozessspeicher und stimmen sich nicht zwischen Instanzen ab.
 | [Nutzungs- und Kostendaten](/de/features/cost-tracking) | Dauerhaft (Datenbank) | Korrekt aggregiert. |
 | Audit-Logs | Dauerhaft (Datenbank) | Vollständig über alle Replikate. |
 | [SSO](/de/pro/sso)-Abmeldung (Pro) | Dauerhaft (Datenbank) | Eine abgemeldete Session wird innerhalb von etwa 2 Sekunden auf jedem Replikat abgelehnt. |
-| [Rate-Limits](/de/features/rate-limits) | In-Memory, pro Instanz | Das effektive Limit liegt bei etwa dem `N x` des konfigurierten Limits. Zähler werden beim Neustart zurückgesetzt. |
+| [Rate-Limits](/de/features/rate-limits) | In-Memory, über die Datenbank geteilt | Replikate setzen ein Limit gemeinsam durch, näherungsweise: Jedes sieht die Zählerstände der anderen innerhalb von etwa zwei Flush-Intervallen. Ein Neustart stellt die zuletzt gespeicherten Request- und Token-Zähler einmal wieder her; ein Absturz kann die Zählungen seit dem letzten Flush verlieren. Ein Reset leert diese Fenster auf allen Replikaten; belegte Concurrency-Slots bleiben belegt, bis ihre Requests abgeschlossen sind. |
 | Circuit Breaker | In-Memory, pro Prozess | Jedes Replikat erkennt einen Ausfall separat, sodass der Upstream bis zu `N x failure_threshold` Fehler sieht, bevor sich ein Breaker öffnet. |
 | Pins der [Session-Affinität](/de/features/session-keeping) | In-Memory, pro Instanz | Sessions bleiben pro Replikat gebunden, nicht global, sofern der Load Balancer nicht sticky ist. |
 | Live-Log-Puffer | In-Memory, pro Instanz | Ein verbundenes Dashboard sieht nur den Live-Traffic dieses Replikats, also etwa `1/N` davon. Der Verlauf kommt weiterhin aus der Datenbank. |
 | Downstream-Sessions von MCP | In-Memory, pro Instanz | Eine `Mcp-Session-Id` von einem Replikat liefert auf einem anderen 404. [MCP](/de/features/mcp-gateway)-Clients benötigen Sticky Sessions. |
 | Request-Zustand der Provider | In-Memory, pro Instanz | Der Provider-Status im Dashboard spiegelt das Replikat wider, das geantwortet hat. |
 
-Überraschend sind meist die Rate-Limits: Sie sind eine prozessinterne
-Kontrolle, sodass drei Replikate mit einer Regel von 100 rpm insgesamt bis zu
-300 rpm zulassen. Bemessen Sie Regeln pro Replikat und verwenden Sie
-[Budgets](/de/features/budgets) als dauerhafte, instanzübergreifende Kontrolle,
-da sie aus der gemeinsamen Datenbank lesen.
+Überraschend sind meist die Rate-Limits: Die Zulassung geschieht im Speicher,
+daher erfährt ein Replikat vom Traffic der anderen erst, wenn es deren
+gespeicherte Zählerstände liest, standardmäßig etwa einmal pro Sekunde. Drei
+Replikate mit einer Regel von 100 rpm lassen insgesamt etwa 100 rpm zu, können
+das Limit aber um etwa zwei Sekunden Traffic der anderen Replikate
+überschreiten, und die Concurrency-Slots eines abgestürzten Replikats bleiben
+einige Sekunden belegt. Verlassen Sie sich nicht auf Rate-Limits für eine
+Obergrenze, die nie überschritten werden darf, etwa einen gleichzeitigen
+Request über alle Replikate hinweg, und verwenden Sie
+[Budgets](/de/features/budgets) als dauerhafte, instanzübergreifende Kontrolle
+der Ausgaben. Siehe
+[Mehrere Replikate teilen sich ein Limit](/de/features/rate-limits#mehrere-replikate-teilen-sich-ein-limit).
+`RATE_LIMITS_FLUSH_INTERVAL=0` beendet das Teilen der Zählerstände nach dem
+Start, sodass die Replikate zusammen wieder bis zu etwa dem `N x` des Limits
+zulassen.
 
 ### Konfigurationsänderungen erreichen alle Replikate in Sekunden
 
@@ -477,12 +494,24 @@ Tabelle alle 2 Sekunden ab und lädt neu, was sich geändert hat, sodass die
 gemeinsame Datenbank: kein Redis, und es funktioniert auf PostgreSQL und MongoDB
 gleich.
 
-Das umfasst Budgets (Definitionen, Einstellungen und Resets), Rate-Limit-Regeln,
-Provider-Zugangsdaten (Anlegen, Bearbeiten, Deaktivieren, Löschen), verwaltete
+Das umfasst Budgets (Definitionen, Einstellungen und Resets), Rate-Limit-Regeln
+und Zähler-Resets, Provider-Zugangsdaten (Anlegen, Bearbeiten, Deaktivieren, Löschen), verwaltete
 API-Keys (einschließlich Widerruf), Benutzerrichtlinien, virtuelle Modelle,
 Preisüberschreibungen, Tagging-Regeln, Guardrails, Workflows und MCP-Server. Ein
 auf einem anderen Replikat hinzugefügter Provider routet, sobald seine
-Modellliste abgerufen wurde.
+Modellliste abgerufen wurde. Ein Provider, dessen Zugangsdaten sich bei
+unverändertem Typ ändern, routet die bereits bedienten Modelle weiter, nun über
+die neuen Zugangsdaten, während seine Modellliste neu abgerufen wird. Die
+konfigurierten Modelle und der Modellfilter der Änderung gelten sofort. Ein aus
+der konfigurierten Liste entferntes Modell wird nicht mehr geroutet; führt der
+Upstream es noch, kann es fehlen, bis die neue Liste eintrifft. Sobald die neue
+Liste eintrifft, werden Modelle, die sie nicht mehr enthält, nicht mehr
+geroutet, ausgenommen konfigurierte Modelle im `merge`-Modus. Schlägt der Abruf
+fehl oder liefert er keine Modelle, während ein anderer Provider gesund ist,
+bleiben die bisherigen Modelle als veraltet erhalten: Requests, die sie nennen,
+werden weiterhin an den Provider geroutet, aber Modelllisten und das Load
+Balancing virtueller Modelle lassen sie aus. Ein Provider, dessen Typ sich
+ändert, routet, sobald seine neue Modellliste abgerufen wurde.
 
 Ein Replikat, das eine Änderung nicht übernehmen kann, protokolliert einmal eine
 Warnung und versucht es bei jeder Abfrage erneut, bis sie gilt. Eine Ausnahme:
@@ -499,12 +528,6 @@ Runtime-Refresh oder beim Neustart.
 `POST /admin/runtime/refresh` lädt auf dem empfangenden Replikat verwaltete
 API-Keys, virtuelle Modelle, Guardrails, Workflows, MCP-Server, Budgets und
 Rate-Limits neu. Gespeicherte Provider-Zugangsdaten lädt es nicht neu.
-
-<Warning>
-  **Das Zurücksetzen von Rate-Limit-Zählern gilt nur auf dem Replikat, das den
-  Request verarbeitet hat.** Zähler sind pro Instanz (siehe Tabelle oben):
-  Regeländerungen werden verteilt, Zähler-Resets nicht.
-</Warning>
 
 ### Health-Probes und Herunterfahren
 
@@ -650,8 +673,8 @@ separat ein VACUUM aus, wenn die Dateigröße wichtig ist.
   Sie `SQLITE_PATH`.
 - Deklarieren Sie Provider in Umgebungsvariablen oder `config.yaml`, mit
   Werten aus einem Secret-Manager.
-- Bemessen Sie Rate-Limit-Regeln pro Replikat, wenn Sie mehrere Replikate
-  betreiben.
+- Halten Sie die Uhren der Replikate synchron (NTP); geteilte Concurrency-Limits
+  sind darauf angewiesen.
 - Entscheiden Sie sich bewusst für eine Einstellung von `LOGGING_LOG_BODIES`
   und legen Sie die Aufbewahrungsfristen gezielt fest.
 - Richten Sie die Readiness auf `/health/ready` aus und setzen Sie

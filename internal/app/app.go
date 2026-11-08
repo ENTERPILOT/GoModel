@@ -507,6 +507,7 @@ func (a *App) logStartupInfo() {
 		slog.Info("audit logging enabled",
 			"log_bodies", cfg.Logging.LogBodies,
 			"log_audio_bodies", cfg.Logging.LogAudioBodies,
+			"log_embedding_bodies", cfg.Logging.LogEmbeddingBodies,
 			"log_image_bodies", cfg.Logging.LogImageBodies,
 			"log_image_bodies_scope", cfg.Logging.LogImageBodiesScope,
 			"log_headers", cfg.Logging.LogHeaders,

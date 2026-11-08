@@ -116,7 +116,9 @@ the client omitted it; `params` replaces whatever the client sent, and a
 callers may tune and `params` for settings an alias must pin. Both are maps
 in `config.yaml`, in the `VIRTUAL_MODELS` environment variable, in the admin
 API, and in the dashboard editor. A policy row for a concrete model (an entry
-without targets) accepts them too; provider-wide and global rows reject them.
+without targets) accepts them too; provider-wide (`openai/`) and global (`/`)
+rows reject them, as they do a reasoning effort override. A `*` source such as
+`openai/*` is not a wildcard and is rejected for every policy.
 
 Keys use OpenAI Chat Completions spelling (`temperature`, `top_p`,
 `max_tokens`, `presence_penalty`, ...). Provider-specific keys such as vLLM's
@@ -125,6 +127,26 @@ through unchanged. Provider adapters translate configured values exactly as
 they translate client values: `max_tokens` still becomes
 `max_completion_tokens` on OpenAI reasoning models and `max_output_tokens` on
 the Responses API.
+
+A token limit is one limit in any spelling: `max_tokens`,
+`max_completion_tokens`, and `max_output_tokens` all set it. A value in
+`params` replaces whichever spelling the client sent, and a value in
+`default_params` applies only when the client sent none of them. Across
+chained virtual models and policies the deeper row wins whichever spelling
+either used.
+
+One parameter set serves every API, so the keys listed here are skipped on
+the API that lacks them, and the token limit is mapped as described above.
+Every other key reaches the provider adapter unchanged and is handled like a
+client's: the adapter may drop a key it does not translate (the Anthropic
+adapter drops `top_k`), and the upstream may reject one. On the Responses API,
+the Chat-only keys `seed`, `stop`, `n`, `frequency_penalty`,
+`presence_penalty`, `logit_bias`, `logprobs`, `modalities`, `audio`,
+`prediction`, `web_search_options`, `response_format`, and `verbosity` are
+skipped (a forced `null` still removes the client's value); to set an output format or verbosity there, configure `text`, for
+example `{"format": {"type": "json_object"}}`. On Chat Completions, the
+Responses-only keys `text`, `include`, `truncation`, `max_tool_calls`,
+`background`, and `context_management` are skipped.
 
 For example, several aliases of one self-hosted model with different thinking
 and sampling settings:

@@ -10,8 +10,9 @@ import (
 
 // SynthesizeChatStream renders a chat completion as a chat SSE stream: per
 // choice a role chunk, a reasoning chunk (when the message carries
-// reasoning_content or reasoning), a content chunk, one chunk per tool call and a finish
-// chunk; then a usage chunk when includeUsage is set, and [DONE].
+// reasoning_content or reasoning), a content chunk, an images chunk, one
+// chunk per tool call and a finish chunk; then a usage chunk when
+// includeUsage is set, and [DONE].
 func SynthesizeChatStream(resp *core.ChatResponse, includeUsage bool) []byte {
 	var out []byte
 	envelope := chatTerminalChunk{
@@ -61,6 +62,10 @@ func SynthesizeChatStream(resp *core.ChatResponse, includeUsage bool) []byte {
 		}
 		if text := core.ExtractTextContent(choice.Message.Content); text != "" {
 			delta(choice.Index, map[string]any{"content": text})
+		}
+		// Generated images go in a chunk of their own, as providers stream them.
+		if raw := choice.Message.ExtraFields.Lookup(core.ChatImagesField); len(raw) > 0 && !core.IsJSONNull(raw) {
+			delta(choice.Index, map[string]any{core.ChatImagesField: json.RawMessage(raw)})
 		}
 		for pos, call := range choice.Message.ToolCalls {
 			delta(choice.Index, map[string]any{"tool_calls": []map[string]any{{

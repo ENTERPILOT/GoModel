@@ -49,7 +49,7 @@ func (r *ModelRegistry) RefreshProviderModels(ctx context.Context, providerSelec
 		return 0, core.NewProviderError(providerSelector, http.StatusServiceUnavailable, "provider is unavailable", nil)
 	}
 
-	configuredProviderModels, configuredProviderModelsMode := r.snapshotConfiguredProviderModels()
+	configuredProviderModels, configuredProviderModelsModes := r.snapshotConfiguredProviderModels()
 	providers := make([]core.Provider, 0, len(targets))
 	providerTypes := make(map[core.Provider]string, len(targets))
 	providerNames := make(map[core.Provider]string, len(targets))
@@ -65,7 +65,7 @@ func (r *ModelRegistry) RefreshProviderModels(ctx context.Context, providerSelec
 		providerTypes,
 		providerNames,
 		configuredProviderModels,
-		configuredProviderModelsMode,
+		configuredProviderModelsModes,
 	)
 	dropEmptyFetchedInventories(&fetched)
 

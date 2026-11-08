@@ -81,7 +81,7 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 		newModelsByProvider[providerName] = providerModels
 	}
 
-	configuredProviderModels, configuredProviderModelsMode := r.snapshotConfiguredProviderModels()
+	configuredProviderModels, configuredProviderModelsModes := r.snapshotConfiguredProviderModels()
 	if len(configuredProviderModels) > 0 {
 		for providerName, configuredModels := range configuredProviderModels {
 			provider, ok := nameToProvider[providerName]
@@ -94,7 +94,7 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 			}
 			providerModels := newModelsByProvider[providerName]
 			upstream := modelsResponseFromProviderMap(providerModels)
-			resp, reason := applyConfiguredProviderModels(providerName, providerType, configuredProviderModelsMode, configuredModels, upstream, nil, modelCache.UpdatedAt.Unix())
+			resp, reason := applyConfiguredProviderModels(providerName, providerType, configuredProviderModelsModes[providerName], configuredModels, upstream, nil, modelCache.UpdatedAt.Unix())
 			if reason == configuredProviderModelsNotApplied {
 				continue
 			}
