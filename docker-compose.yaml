@@ -25,6 +25,7 @@ services:
       # - STORAGE_TYPE=postgresql
       - STORAGE_TYPE=mongodb
       # Go soft memory limit; set to ~90% of the container memory limit
+      # (460MiB below assumes a 512 MiB limit)
       # - GOMEMLIMIT=460MiB
     volumes:
       # The gateway's own state: the SQLite database when STORAGE_TYPE is

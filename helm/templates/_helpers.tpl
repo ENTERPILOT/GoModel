@@ -94,9 +94,8 @@ Environment variable that carries the storage connection URL for the selected ba
 {{- end }}
 
 {{/*
-GOMEMLIMIT env entries: goMemLimit when set, otherwise the container memory
-limit read through the downward API (Kubernetes expands $(VAR) from entries
-defined earlier in the list). Empty when GOMEMLIMIT is already set through env,
+GOMEMLIMIT env entry: goMemLimit when set, otherwise the container memory
+limit in bytes read through the downward API. Empty when GOMEMLIMIT is already set through env,
 secretEnv, or extraEnv, or when the container has no memory limit.
 */}}
 {{- define "gomodel.goMemLimitEnv" -}}
@@ -108,13 +107,11 @@ secretEnv, or extraEnv, or when the container has no memory limit.
 - name: GOMEMLIMIT
   value: {{ .Values.goMemLimit | quote }}
 {{- else if $limits.memory }}
-- name: GOMODEL_MEMORY_LIMIT_MIB
+- name: GOMEMLIMIT
   valueFrom:
     resourceFieldRef:
       resource: limits.memory
-      divisor: 1Mi
-- name: GOMEMLIMIT
-  value: "$(GOMODEL_MEMORY_LIMIT_MIB)MiB"
+      divisor: "1"
 {{- end }}
 {{- end }}
 {{- end }}
