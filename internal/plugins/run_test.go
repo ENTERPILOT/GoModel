@@ -481,27 +481,43 @@ func TestRunReadersMergeOnlyTheUpstreamHeadersTheyChanged(t *testing.T) {
 
 // A later hook's write wins over an earlier one whatever spelling either used:
 // names are canonicalized after every hook, so a raw "x-tenant" written first
-// is replaced by a later Set("X-Tenant") instead of shadowing it.
+// is replaced by a later Set("X-Tenant") instead of shadowing it. The raw
+// write may come from a mutator, a single reader, or concurrent readers; each
+// takes its own path.
 func TestRunUpstreamHeaderLaterWriteWinsAcrossSpellings(t *testing.T) {
-	writer := func(name string, edit func(http.Header)) *Instance {
-		return newTestInstance(&fakePlugin{name: name, mutates: true, onPrompt: func(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+	hook := func(name string, mutates bool, edit func(http.Header)) *Instance {
+		return newTestInstance(&fakePlugin{name: name, mutates: mutates, onPrompt: func(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
 			edit(x.Headers.Upstream)
 			return pluginapi.Allow(), nil
 		}}, InstanceSpec{})
 	}
-	chain, err := BuildChain(pluginapi.KindPrompt, []Ref{
-		{writer("raw", func(h http.Header) { h["x-tenant"] = []string{"early"} }), 10},
-		{writer("canonical", func(h http.Header) { h.Set("X-Tenant", "late") }), 20},
-	})
-	require.NoError(t, err)
+	raw := func(h http.Header) { h["x-tenant"] = []string{"early"} }
+	idle := func(http.Header) {}
 
-	state := NewRequestState()
-	x := withPromptText(state.NewExchange(context.Background(), pluginapi.Meta{}), "hi")
-	_, err = chain.RunPrompt(context.Background(), x)
-	require.NoError(t, err)
-	state.Finish(x)
+	tests := []struct {
+		name  string
+		early []Ref
+	}{
+		{name: "mutator", early: []Ref{{hook("raw", true, raw), 10}}},
+		{name: "single reader", early: []Ref{{hook("raw", false, raw), 10}}},
+		{name: "concurrent readers", early: []Ref{{hook("raw", false, raw), 10}, {hook("idle", false, idle), 10}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			refs := append(tt.early, Ref{hook("canonical", true, func(h http.Header) { h.Set("X-Tenant", "late") }), 20})
+			chain, err := BuildChain(pluginapi.KindPrompt, refs)
+			require.NoError(t, err)
 
-	assert.Equal(t, http.Header{"X-Tenant": {"late"}}, state.UpstreamHeaders())
+			state := NewRequestState()
+			x := withPromptText(state.NewExchange(context.Background(), pluginapi.Meta{}), "hi")
+			_, err = chain.RunPrompt(context.Background(), x)
+			require.NoError(t, err)
+			state.Finish(x)
+
+			assert.Equal(t, http.Header{"X-Tenant": {"late"}}, x.Headers.Upstream)
+			assert.Equal(t, http.Header{"X-Tenant": {"late"}}, state.UpstreamHeaders())
+		})
+	}
 }
 
 // A reader that adds a header with no value keeps it, as a mutator does: the
