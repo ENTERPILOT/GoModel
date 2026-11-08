@@ -51,6 +51,21 @@ func sseStreamOfSize(size int) [][]byte {
 	return append(events, []byte("data: [DONE]\n\n"))
 }
 
+// sseStreamOfExactSize builds a cacheable chat stream of exactly size bytes,
+// padding it with an SSE comment before the final [DONE] event.
+func sseStreamOfExactSize(t *testing.T, size int) [][]byte {
+	t.Helper()
+	events := sseStreamOfSize(size - 4096)
+	done := events[len(events)-1]
+	events = events[:len(events)-1]
+	padLen := size - len(bytes.Join(events, nil)) - len(done)
+	require.GreaterOrEqual(t, padLen, 4)
+	padding := []byte(": " + strings.Repeat(" ", padLen-4) + "\n\n")
+	events = append(events, padding, done)
+	require.Len(t, bytes.Join(events, nil), size)
+	return events
+}
+
 func TestHandleRequest_CapturedStreamSizeLimit(t *testing.T) {
 	largeJSON := []byte(`{"data":"` + strings.Repeat("x", maxCapturedStreamBytes+1024) + `"}`)
 	tests := []struct {
@@ -60,6 +75,7 @@ func TestHandleRequest_CapturedStreamSizeLimit(t *testing.T) {
 		wantCached bool
 	}{
 		{name: "stream under the limit is cached", stream: true, writes: sseStreamOfSize(maxCapturedStreamBytes - 4096), wantCached: true},
+		{name: "stream at exactly the limit is cached", stream: true, writes: sseStreamOfExactSize(t, maxCapturedStreamBytes), wantCached: true},
 		{name: "stream over the limit is not cached", stream: true, writes: sseStreamOfSize(maxCapturedStreamBytes + 4096)},
 		{name: "non-streaming body over the limit is still cached", writes: [][]byte{largeJSON}, wantCached: true},
 	}
