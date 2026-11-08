@@ -497,8 +497,8 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// request, and the ceiling is what keeps it from growing back.
 			name:      "gateway_chat_completion_production_shape_live_broker",
 			bench:     BenchmarkGatewayHotPathProductionShapeLiveBroker,
-			maxAllocs: 269,   // baseline 241
-			maxBytes:  43584, // baseline ~40.0 KB
+			maxAllocs: 252,   // baseline 240
+			maxBytes:  42880, // baseline ~40.8 KB
 		},
 		{
 			// Typed chunk decoding + reused read buffer keep this converter at a
