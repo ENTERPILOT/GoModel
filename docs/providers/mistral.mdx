@@ -1,0 +1,90 @@
+---
+title: "Mistral AI"
+description: "Configure Mistral AI (La Plateforme) in GoModel, including reasoning models and how thinking output is normalized for chat clients."
+icon: "sparkles"
+keywords: ["Mistral", "La Plateforme", "magistral", "reasoning", "thinking", "provider setup"]
+---
+
+Mistral AI (La Plateforme) is served at `https://api.mistral.ai/v1` with an OpenAI-compatible
+API. GoModel routes chat completions, model listing, embeddings, and passthrough requests
+through the shared OpenAI adapter; the `/v1/responses` endpoint is translated through chat
+completions. Files and batches are not exposed for this provider.
+
+## Reasoning (thinking) output
+
+On reasoning models (for example `mistral-large-latest`, `mistral-small-latest`, and hosted
+reasoning models such as Z.ai GLM), Mistral returns the assistant content as a **list of
+typed chunks** — a `thinking` chunk for the reasoning trace and `text` chunks for the answer —
+in both buffered responses and SSE streams. That shape is not standard OpenAI chat output, and
+clients like SillyTavern render it as gibberish.
+
+GoModel's `mistral` provider converts it to the standard shape automatically:
+
+- the `thinking` chunks are joined into the `reasoning_content` field, and
+- the `text` chunks are joined into a plain string `content`
+
+on both streaming (`choices[].delta`) and non-streaming (`choices[].message`) responses. No
+client-side configuration is needed.
+
+Send effort with the standard nested parameter; GoModel maps it to Mistral's flat
+`reasoning_effort`:
+
+```json
+{
+  "model": "mistral-large-latest",
+  "messages": [{ "role": "user", "content": "What is 17 * 23?" }],
+  "reasoning_effort": "high"
+}
+```
+
+Mistral's API-wide enum is `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and the
+value is passed through unchanged. Which levels a model accepts is model-specific — for
+example Mistral Large 4 takes `low`/`medium`/`high`, while hosted GLM models take
+`low`/`high`/`max` — so an unsupported level for the chosen model is rejected by Mistral
+itself, as with their own SDKs.
+
+When a client replays an earlier assistant turn, GoModel drops its `reasoning_content` member
+before forwarding, because Mistral rejects that unknown member with a 422.
+
+## Configure
+
+```bash
+MISTRAL_API_KEY=...
+```
+
+Or in `config.yaml`:
+
+```yaml
+providers:
+  mistral:
+    type: mistral
+    base_url: "https://api.mistral.ai/v1"
+    api_key: "${MISTRAL_API_KEY}"
+```
+
+<Note>
+  The provider `type` is `mistral`. The config key (`mistral` in the example above) is
+  arbitrary and only identifies this entry inside your config; it may be changed.
+</Note>
+
+You can also override the base URL and model list with:
+
+```bash
+MISTRAL_BASE_URL=https://api.mistral.ai/v1
+MISTRAL_MODELS=mistral-large-latest,mistral-small-latest
+```
+
+## Models
+
+List the models available to your API key with `GET /v1/models`, or call one directly through
+the OpenAI-compatible `/v1/chat/completions` endpoint:
+
+```yaml
+virtual_models:
+  - source: mistral
+    target: mistral/mistral-large-latest
+```
+
+## Embeddings
+
+Mistral's `/v1/embeddings` endpoint (for example `mistral-embed`) is supported.

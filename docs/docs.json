@@ -329,6 +329,7 @@
                             "providers/kimicode",
                             "providers/hetzner",
                             "providers/edenai",
+                            "providers/mistral",
                             {
                                 "group": "Cloud Platforms",
                                 "icon": "cloud",
