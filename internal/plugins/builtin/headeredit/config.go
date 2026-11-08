@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/pluginapi"
 )
 
@@ -37,19 +38,6 @@ type config struct {
 	UpstreamSet    []string
 }
 
-// credentialHeaders can never be set, added, or removed by this plugin.
-var credentialHeaders = map[string]bool{
-	"authorization":       true,
-	"proxy-authorization": true,
-	"cookie":              true,
-	"set-cookie":          true,
-	"x-api-key":           true,
-	"api-key":             true,
-	"x-goog-api-key":      true,
-	"x-anthropic-api-key": true,
-	"x-auth-token":        true,
-}
-
 func decodeConfig(raw json.RawMessage) (config, error) {
 	cfg, err := pluginapi.ParseConfig(Name, New().Manifest().ConfigSchema, raw)
 	if err != nil {
@@ -68,8 +56,10 @@ func decodeConfig(raw json.RawMessage) (config, error) {
 
 // parseEdits turns the lines of one config field into edits. Blank lines and
 // lines starting with # are ignored. Set and add lines look like
-// "Name: value"; remove lines are a bare "Name".
-func parseEdits(field string, entries []string, o op) ([]edit, error) {
+// "Name: value"; remove lines are a bare "Name". An upstream field also refuses
+// the names the provider call merge would drop, so a config that cannot take
+// effect fails to load instead of being ignored per request.
+func parseEdits(field string, entries []string, o op, upstream bool) ([]edit, error) {
 	var out []edit
 	for i, line := range entries {
 		line = strings.TrimSpace(line)
@@ -77,6 +67,9 @@ func parseEdits(field string, entries []string, o op) ([]edit, error) {
 			continue
 		}
 		e, err := parseLine(line, o)
+		if err == nil && upstream && core.IsPluginUpstreamHeaderDenied(e.name) {
+			err = fmt.Errorf("header %q is set by the gateway and cannot be sent upstream", e.name)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("header_edit: %s line %d: %w", field, i+1, err)
 		}
@@ -112,7 +105,7 @@ func checkName(name string, o op) error {
 		}
 	}
 	lower := strings.ToLower(name)
-	if credentialHeaders[lower] {
+	if core.IsCredentialHeader(lower) {
 		return fmt.Errorf("header %q carries credentials and cannot be edited", name)
 	}
 	if o != opRemove && (strings.Contains(lower, "secret") || strings.Contains(lower, "token")) {

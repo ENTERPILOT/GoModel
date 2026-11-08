@@ -291,7 +291,7 @@ requestu:
 | `Prompt` | `*Prompt` | konwersacja (`Messages` ze stabilnymi ID i typowanymi `Parts`: tekst, obraz, audio, plik, wywołanie narzędzia, wynik narzędzia, reasoning, odmowa, nieprzezroczysta część), `Tools`, `Params`, surowa treść. Edytuj przez `SetText`, `SetMedia`, `SetToolArguments`, `SetToolResult`, `Insert`, `Append`, `Remove`, `SetParam`; `TextTargets(roles...)` wyświetla każdą część tekstową, łącznie z tekstem wyników narzędzi, a `SetTargetText` zapisuje ją z powrotem |
 | `Response` | `*Completion` | odpowiedź, `nil` do fazy response: `Choices` z tym samym modelem `Part`, `Usage`, surowa treść. Edytuj przez `SetText`, `ReplaceText`, `SetFinishReason`, `SetToolArguments`; `TextTargets` i `SetTargetText` działają jak w `Prompt` |
 | `Stream` | `*StreamState` | dotychczas zebrany tekst dla każdego choice i liczba zdarzeń; `nil` dla requestów bez streamingu |
-| `Headers` | `*Headers` | `Request` (przychodzące, z zamaskowanymi danymi uwierzytelniającymi; edycje w fazie prompt dotyczą bieżącego requestu dla kolejnych pluginów i logowania requestu, a nie wywołania providera), `Response` (stosowane do odpowiedzi dla klienta; nagłówek ustawiony na pusty string jest usuwany, łącznie z tymi dodawanymi przez gateway, jak `X-Request-Id`), `Upstream` (zapisywane, w tym release nieprzekazywane dalej) |
+| `Headers` | `*Headers` | `Request` (przychodzące, z zamaskowanymi danymi uwierzytelniającymi; edycje w fazie prompt dotyczą bieżącego requestu dla kolejnych pluginów i logowania requestu, a nie wywołania providera), `Response` (stosowane do odpowiedzi dla klienta; nagłówek ustawiony na pusty string jest usuwany, łącznie z tymi dodawanymi przez gateway, jak `X-Request-Id`), `Upstream` (wysyłane z każdym wywołaniem providera w ramach requestu, które przechodzi przez klienta HTTP gatewaya — z wyjątkiem `bedrock` —, łącznie z próbami failover oraz wywołaniami zliczania tokenów i kompakcji; nagłówki z danymi uwierzytelniającymi, nagłówki określające połączenie lub ciało żądania, `Accept-Encoding`, `anthropic-beta` oraz `Idempotency-Key` są odrzucane; requesty, które gateway wykonuje na własne potrzeby, ich nie przenoszą) |
 | `Values` | `Values` | zbiór danych na request współdzielony przez wszystkie hooki requestu; poprzedzaj klucze nazwą pluginu |
 
 Edycje przechodzą przez metody, a nie przypisania pól, więc GoModel ponownie koduje tylko
@@ -321,6 +321,71 @@ zastępuje się przez `SetToolResult`.
 `Meta.Cache.PlannedPrefixMessages` informuje plugin fazy prompt, ile początkowych
 wiadomości planer cache providera oznaczy jako prefiks w cache. Dopisywanie
 zachowuje cache; edycja wewnątrz prefiksu unieważnia go dla sesji.
+
+### Nagłówki upstream
+
+`Headers.Upstream` umieszcza nagłówek w samym wywołaniu providera: właściwość
+routingu lub rozliczeń na poziomie requestu, której oczekuje upstream, taka jak
+w Helicone, albo tag organizacyjny, po którym routuje gateway przed providerem.
+Dane uwierzytelniające providera nie należą tutaj: nagłówki z danymi
+uwierzytelniającymi są odrzucane, podobnie jak pozostałe nazwy należące do gatewaya,
+wymienione poniżej. Host loguje tylko, ile nagłówków ustawił plugin, nigdy ich wartości.
+Ustaw nagłówki w hooku fazy prompt, zanim wykona się wywołanie providera. Mapa
+już istnieje: wywołaj na niej `Set` zamiast przypisywać nową, aby nagłówki zapisane
+pod innymi nazwami przez wcześniejsze pluginy w łańcuchu zostały zachowane:
+
+```go
+func (p *tenantHint) OnPrompt(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+	x.Headers.Upstream.Set("Helicone-Property-Tenant", x.Meta.UserPath)
+	x.Headers.Upstream.Set("Helicone-Property-Request", x.Meta.RequestID)
+	return pluginapi.Allow(), nil
+}
+```
+
+Co gateway z nimi robi:
+
+- Każda próba providera w ramach requestu je przenosi, łącznie z failoverem do
+  innego providera, a także wywołania zliczania tokenów i kompakcji, które request
+  wykonuje. Każda próba wysyła je do upstreamu wybranego dla tej próby: failover może
+  rozwiązać się na innego providera i inny base URL, a nagłówki idą za nim. Każde
+  wywołanie, które przechodzi przez klienta HTTP gatewaya — provider `bedrock`, który
+  wywołuje Bedrock Runtime przez SDK AWS, ich nie przenosi, a `bedrock-mantle` tak.
+  Trafienie w cache odpowiedzi pomija wywołanie inferencji, więc nagłówki upstream
+  nie są wysyłane; wywołanie embeddingu przy wyszukiwaniu w cache semantycznym
+  należy do samego gatewaya i też ich nie przenosi. Nie są też wysyłane nagłówki elementów inline
+  w `/v1/batches`, które przechodzą fazę prompt, gdy
+  `guardrails.enable_for_batch_processing` jest włączone: jedno zgłoszenie batcha
+  obejmuje wiele elementów.
+- Inferencja, którą gateway wykonuje na własne potrzeby, ich nie przenosi. Sędzia
+  LLM guardraila wywołuje providera przez pluginowe `Host` w kontekście requestu,
+  a to wywołanie odrzuca te nagłówki: opisują providera klienta, a nie model, który
+  gateway wybrał dla guardraila.
+- Te nazwy są odrzucane, a nie scalane: nagłówki z danymi uwierzytelniającymi
+  (`Authorization`, `Proxy-Authorization`, `x-api-key`, `api-key`, `x-goog-api-key`,
+  `x-anthropic-api-key`, `xi-api-key`, `x-auth-token`, `x-access-token`,
+  `x-gomodel-key`, `Cookie`, `Set-Cookie`), te, które określają połączenie (`Host`,
+  `Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`,
+  `Proxy-Connection`, `Proxy-Authenticate`, `Te`, `Trailer`, `Upgrade`, `Expect`),
+  te, które opisują ciało zakodowane przez gateway (`Content-Type`,
+  `Content-Encoding`), `Accept-Encoding`, które negocjuje kompresję odpowiedzi,
+  `anthropic-beta`, które wybiera funkcje providera i musi zachować flagę
+  `oauth-2025-04-20` wymaganą przez dane uwierzytelniające subskrypcji, oraz
+  `Idempotency-Key`, który niesie własny klucz klienta.
+- Każda inna nazwa trafia na wire z wartością pluginu, zastępując nagłówek
+  przenoszony przez request oraz ten, który provider ustawił sam. Nazwa bez wartości
+  usuwa ten nagłówek z wywołania; `Set(name, "")` wysyła go pusty. Chronione są tylko
+  nazwy wymienione powyżej; pozostałe nagłówki providera nie. Nazwa lub wartość,
+  która nie jest poprawnym HTTP, na przykład zawierająca znak nowej linii, jest
+  odrzucana z ostrzeżeniem; log nigdy nie zawiera wartości ani nazwy, jeśli to
+  ona jest niepoprawna.
+- Host scala nagłówki hooka ze stanem requestu, gdy faza się kończy, więc wartość
+  zapisana po wykonaniu wywołania providera — z hooka fazy response — już na nie nie
+  wpływa.
+
+**Aktualizacja z wydania, które te nagłówki rejestrowało, ale nie wysyłało.** Plugin,
+który ustawił `Headers.Upstream` już na takim wydaniu, miał wartości zapisane
+i odrzucone. Po aktualizacji po raz pierwszy docierają do providera lub proxy przed
+nim: sprawdź, czy upstream je akceptuje, zanim wdrożysz aktualizację.
 
 ## Konfiguracja
 
