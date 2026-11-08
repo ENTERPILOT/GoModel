@@ -72,7 +72,7 @@ func finishInternalAuditEntry(logger auditlog.LoggerInterface, ctx context.Conte
 	entry.DurationNs = time.Since(x.start).Nanoseconds()
 	auditlog.EnrichLogEntryWithWorkflow(entry, x.workflow)
 	auditlog.EnrichLogEntryWithFailover(entry, x.meta.FailoverModel)
-	auditlog.EnrichLogEntryWithAttempts(entry, auditlog.GateAttemptCapture(auditAttemptsFromGateway(ctx), logger.Config()))
+	auditlog.EnrichLogEntryWithAttempts(entry, auditlog.GateAttemptCapture(auditAttemptsFromGateway(ctx), logger.Config().ForPath(x.path)))
 	auditlog.EnrichLogEntryWithResolvedRoute(entry, qualifyExecutedModel(x.workflow, x.model, x.meta.ProviderName), x.meta.ProviderType, x.meta.ProviderName)
 	auditlog.EnrichLogEntryWithRequestContext(entry, ctx)
 	if x.workflow != nil && !x.workflow.AuditEnabled() {

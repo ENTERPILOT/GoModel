@@ -335,6 +335,7 @@ entfernt.
 | `LOGGING_LOG_AUDIO_BODIES`        | Protokolliert Ein- und Ausgaben der Audio-Endpunkte          | `false` |
 | `LOGGING_LOG_IMAGE_BODIES`        | Protokolliert Ein- und Ausgaben der Bild-Endpunkte          | `false` |
 | `LOGGING_LOG_IMAGE_BODIES_SCOPE`  | Welche Bild-Bytes gespeichert werden: `all`, `input`, `output` | `all` |
+| `LOGGING_LOG_EMBEDDING_BODIES`    | Protokolliert Request-/Response-Bodys von Embeddings (aus: nur Metadaten) | `true`  |
 | `LOGGING_LOG_HEADERS`             | Protokolliert Header (sensible werden automatisch geschwärzt) | `true`  |
 | `LOGGING_ONLY_MODEL_INTERACTIONS` | Protokolliert nur Endpunkte von KI-Modellen                | `true`  |
 | `LOGGING_BUFFER_SIZE`             | Puffer im Arbeitsspeicher vor dem Schreiben              | `1000`  |
@@ -412,6 +413,20 @@ gespeicherte Logs sichtbar sind.
   Metadaten behält) als schlanker Platzhalter
   `{__audio__, content_type, bytes, stored: false}` erfasst; ist Body-Logging
   deaktiviert, wird überhaupt kein Audio-Body gespeichert.
+</Note>
+
+<Note>
+  `LOGGING_LOG_EMBEDDING_BODIES` verfeinert `LOGGING_LOG_BODIES` für
+  Embeddings – ohne aktiviertes Body-Logging hat es keine Wirkung. Es gilt für
+  `/v1/embeddings` und für Provider-Passthrough-Aufrufe an einen
+  Embeddings-Endpunkt (`/p/{provider}/.../embeddings`, Cohere und Ollama
+  `.../embed`, Gemini `:embedContent` und `:batchEmbedContents`).
+  Embedding-Eingaben können ganze Dokumente oder Base64-Bilder sein und die
+  Responses sind Float-Vektoren, sodass Massen-Indexierungsjobs den
+  Audit-Speicher schnell wachsen lassen. Ist Body-Logging aktiv, diese Option
+  aber nicht, behalten Embedding-Einträge ihre Metadaten (Modell, Provider,
+  Status, Timing, User-Pfad, Usage) und verwerfen Request- und Response-Body.
+  Der Standardwert ist `true`, was das bisherige Verhalten beibehält.
 </Note>
 
 <Note>

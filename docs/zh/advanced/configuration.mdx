@@ -204,6 +204,7 @@ server:
 | `LOGGING_LOG_AUDIO_BODIES`        | 记录音频端点的输入/输出          | `false` |
 | `LOGGING_LOG_IMAGE_BODIES`        | 记录图片端点的输入/输出          | `false` |
 | `LOGGING_LOG_IMAGE_BODIES_SCOPE`  | 存储哪些图片字节：`all`、`input`、`output` | `all` |
+| `LOGGING_LOG_EMBEDDING_BODIES`    | 记录 embeddings 的请求/响应体（关闭时仅保留元数据） | `true`  |
 | `LOGGING_LOG_HEADERS`             | 记录 Header（敏感 Header 自动脱敏） | `true`  |
 | `LOGGING_ONLY_MODEL_INTERACTIONS` | 仅记录 AI 模型端点                | `true`  |
 | `LOGGING_BUFFER_SIZE`             | 刷写前的内存缓冲区大小              | `1000`  |
@@ -233,6 +234,10 @@ server:
 
 <Note>
   `LOGGING_LOG_AUDIO_BODIES` 是 `LOGGING_LOG_BODIES` 针对音频端点的细化设置，只有在启用请求体记录时才生效。两者都开启时，`/v1/audio/speech` 会存储其文本输入和生成的音频（base64，上限 8 MB），以便在控制台中回放；`/v1/audio/transcriptions` 会存储上传的音频（base64，上限 8 MB，同样可回放）及其上传元数据。由于音频负载较大且会使审计存储快速增长，该设置默认为 `false`。启用请求体记录但关闭此项时，音频体（语音响应以及保留元数据的转写上传）会记录为一个轻量的 `{__audio__, content_type, bytes, stored: false}` 占位符；关闭请求体记录时，不会存储任何音频体。
+</Note>
+
+<Note>
+  `LOGGING_LOG_EMBEDDING_BODIES` 是 `LOGGING_LOG_BODIES` 针对 embeddings 的细化设置，只有在启用请求体记录时才生效。它适用于 `/v1/embeddings` 以及对提供商 embeddings 端点的透传调用（`/p/{provider}/.../embeddings`、Cohere 和 Ollama 的 `.../embed`、Gemini 的 `:embedContent` 和 `:batchEmbedContents`）。embedding 输入可能是整篇文档或 base64 图片，响应则是浮点向量，因此批量索引任务会使审计存储快速增长。启用请求体记录但关闭此项时，embedding 条目会保留元数据（模型、提供商、状态、耗时、用户路径、用量），并丢弃请求体和响应体。该设置默认为 `true`，保持原有行为。
 </Note>
 
 <Note>

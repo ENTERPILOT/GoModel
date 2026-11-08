@@ -312,6 +312,7 @@ Pliki są przechowywane tak długo jak wpisy audytowe, które się do nich odwo�
 | `LOGGING_LOG_AUDIO_BODIES`        | Loguje wejścia/wyjścia endpointów audio    | `false` |
 | `LOGGING_LOG_IMAGE_BODIES`        | Loguje wejścia/wyjścia endpointów obrazów  | `false` |
 | `LOGGING_LOG_IMAGE_BODIES_SCOPE`  | Które bajty obrazów zapisywać: `all`, `input`, `output` | `all` |
+| `LOGGING_LOG_EMBEDDING_BODIES`    | Loguje body żądań/odpowiedzi embeddingów (wyłączone: tylko metadane) | `true`  |
 | `LOGGING_LOG_HEADERS`             | Loguje nagłówki (wrażliwe są automatycznie maskowane) | `true`  |
 | `LOGGING_ONLY_MODEL_INTERACTIONS` | Loguje tylko endpointy modeli AI           | `true`  |
 | `LOGGING_BUFFER_SIZE`             | Bufor w pamięci przed zapisem              | `1000`  |
@@ -381,6 +382,19 @@ strony. Gdy logowanie audytowe jest włączone, zapisy są asynchroniczne i moż
   body audio (odpowiedź speech i upload do transkrypcji, który zachowuje swoje
   metadane) są zapisywane jako lekki placeholder `{__audio__, content_type, bytes, stored: false}`;
   gdy logowanie body jest wyłączone, body audio nie jest zapisywane wcale.
+</Note>
+
+<Note>
+  `LOGGING_LOG_EMBEDDING_BODIES` doprecyzowuje `LOGGING_LOG_BODIES` dla embeddingów –
+  nie działa, jeśli logowanie body nie jest włączone. Obejmuje `/v1/embeddings`
+  oraz wywołania passthrough do endpointu embeddingów u providera
+  (`/p/{provider}/.../embeddings`, Cohere i Ollama `.../embed`, Gemini
+  `:embedContent` i `:batchEmbedContents`). Wejścia embeddingów mogą być całymi
+  dokumentami lub obrazami base64, a odpowiedzi to wektory liczb, więc masowe
+  indeksowanie szybko powiększa magazyn audytowy. Gdy logowanie body jest włączone,
+  a to ustawienie wyłączone, wpisy embeddingów zachowują metadane (model, provider,
+  status, czasy, ścieżka użytkownika, usage) i pomijają body żądania i odpowiedzi.
+  Domyślnie ma wartość `true`, co zachowuje dotychczasowe działanie.
 </Note>
 
 <Note>

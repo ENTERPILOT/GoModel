@@ -384,8 +384,9 @@ to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
 <Note>
   `LOGGING_LOG_EMBEDDING_BODIES` refines `LOGGING_LOG_BODIES` for embeddings —
   it has no effect unless body logging is enabled. It covers `/v1/embeddings`
-  and provider passthrough calls to an embeddings endpoint
-  (`/p/{provider}/embeddings`, `/p/{provider}/v1/embeddings`). Embedding inputs
+  and provider passthrough calls to an embeddings endpoint (`/p/{provider}/.../embeddings`,
+  Cohere and Ollama `.../embed`, Gemini `:embedContent` and
+  `:batchEmbedContents`). Embedding inputs
   can be whole documents or base64 images and the responses are float vectors,
   so bulk indexing jobs grow the audit store quickly. When body logging is on
   but this is off, embedding entries keep their metadata (model, provider,
