@@ -1,6 +1,7 @@
 package mistral
 
 import (
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -70,7 +71,7 @@ func TestThinkingChunkStream_PropagatesUpstreamError(t *testing.T) {
 	require.NoError(t, stream.Close())
 }
 
-var errBoom = io.ErrUnexpectedEOF
+var errBoom = errors.New("upstream read failed")
 
 type failingReader struct{}
 

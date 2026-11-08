@@ -33,7 +33,7 @@ Send effort with the standard nested parameter; GoModel maps it to Mistral's fla
 {
   "model": "mistral-large-latest",
   "messages": [{ "role": "user", "content": "What is 17 * 23?" }],
-  "reasoning_effort": "high"
+  "reasoning": { "effort": "high" }
 }
 ```
 
@@ -73,6 +73,12 @@ You can also override the base URL and model list with:
 MISTRAL_BASE_URL=https://api.mistral.ai/v1
 MISTRAL_MODELS=mistral-large-latest,mistral-small-latest
 ```
+
+<Note>
+  Setting `MISTRAL_MODELS` limits the models this provider serves to that list under the
+  default `allowlist` mode — requests for other models return 404. See
+  [Models modes](/advanced/config-yaml#models-modes) for `merge`/`fallback` alternatives.
+</Note>
 
 ## Models
 

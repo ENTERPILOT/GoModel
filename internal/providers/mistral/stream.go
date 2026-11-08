@@ -56,6 +56,9 @@ func (s *thinkingChunkStream) Read(p []byte) (int, error) {
 			}
 			return 0, io.EOF
 		}
+		// The pending output is fully consumed; reuse the buffer instead of
+		// retaining the whole response as it streams.
+		s.out, s.outPos = s.out[:0], 0
 		s.pump()
 	}
 	n := copy(p, s.out[s.outPos:])

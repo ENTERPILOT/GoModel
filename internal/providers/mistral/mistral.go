@@ -68,7 +68,7 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	adapted, err = narrowAllowedTools(adapted)
+	adapted, err = openai.NarrowAllowedTools(adapted)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +84,7 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 	}
 	var resp core.ChatResponse
 	if err := json.Unmarshal(flattenThinkingChunks(raw), &resp); err != nil {
-		return nil, core.NewProviderError("mistral", http.StatusBadGateway, "failed to decode Mistral chat completion response", err)
+		return nil, core.NewProviderError(p.ProviderName(), http.StatusBadGateway, "failed to decode Mistral chat completion response", err)
 	}
 	core.EnsureModel(&resp.Model, req.Model)
 	return &resp, nil
@@ -121,23 +121,4 @@ func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*
 // translation, picking up the StreamChatCompletion override.
 func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
 	return providers.StreamResponsesViaChat(ctx, p, req, p.ProviderName())
-}
-
-// narrowAllowedTools mirrors the shared adapter's default policy (see
-// CompatibleProviderConfig.ForwardAllowedTools): an allowed_tools choice is
-// narrowed to the allowed subset because Mistral does not document honoring
-// it. ChatCompletion applies it itself because it bypasses the adapter's own
-// request pipeline to decode the raw body.
-func narrowAllowedTools(req *core.ChatRequest) (*core.ChatRequest, error) {
-	if _, _, ok := core.AllowedToolsChoice(req.ToolChoice); !ok {
-		return req, nil
-	}
-	tools, choice, err := core.NarrowToAllowedTools(req.Tools, req.ToolChoice)
-	if err != nil {
-		return nil, err
-	}
-	narrowed := *req
-	narrowed.Tools = tools
-	narrowed.ToolChoice = choice
-	return &narrowed, nil
 }

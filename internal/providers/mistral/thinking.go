@@ -19,6 +19,11 @@ const (
 	// reasoningContentKey is the standard OpenAI-compatible extension member
 	// chat clients (SillyTavern, Open WebUI, ...) render as the thinking block.
 	reasoningContentKey = "reasoning_content"
+	// unknownChunksKey carries chunk types GoModel does not model (for example
+	// Mistral's "reference" chunk) on the message/delta as a vendor member, so
+	// they survive the round trip without breaking the typed content decode,
+	// which rejects unsupported part types and would fail the whole response.
+	unknownChunksKey = "mistral_content_chunks"
 )
 
 // flattenThinkingChunks rewrites every choices[].message.content /
@@ -49,7 +54,7 @@ func flattenThinkingChunks(data []byte) []byte {
 			if err := json.Unmarshal(msgRaw, &msg); err != nil {
 				continue
 			}
-			content, reasoning, ok := flattenContent(msg["content"])
+			content, reasoning, unknown, ok := flattenContent(msg["content"])
 			if !ok {
 				continue
 			}
@@ -59,6 +64,15 @@ func flattenThinkingChunks(data []byte) []byte {
 					continue
 				}
 				msg[reasoningContentKey] = encoded
+			}
+			if len(unknown) > 0 {
+				encoded, err := json.Marshal(unknown)
+				if err != nil {
+					continue
+				}
+				msg[unknownChunksKey] = encoded
+			} else {
+				delete(msg, unknownChunksKey)
 			}
 			msg["content"] = content
 			encodedMsg, err := json.Marshal(msg)
@@ -88,23 +102,23 @@ func flattenThinkingChunks(data []byte) []byte {
 // (plain string or null, which reasoning_effort "none" produces) is left
 // alone: ok is false. An array is flattened: text chunks join into the
 // returned content string, thinking chunks join into the returned reasoning
-// string, and chunk types GoModel does not model are preserved verbatim in the
-// content array so no upstream data is dropped.
-func flattenContent(raw json.RawMessage) (content json.RawMessage, reasoning string, ok bool) {
+// string, and chunk types GoModel does not model are returned separately so
+// the caller can keep them off the typed content decode (which would reject
+// them and fail the whole response).
+func flattenContent(raw json.RawMessage) (content json.RawMessage, reasoning string, unknown []json.RawMessage, ok bool) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || trimmed[0] != '[' {
-		return nil, "", false
+		return nil, "", nil, false
 	}
 	var chunks []json.RawMessage
 	if err := json.Unmarshal(trimmed, &chunks); err != nil {
-		return nil, "", false
+		return nil, "", nil, false
 	}
 	var text, thinking strings.Builder
-	var rest []json.RawMessage
 	for _, chunkRaw := range chunks {
 		var chunk map[string]json.RawMessage
 		if err := json.Unmarshal(chunkRaw, &chunk); err != nil {
-			rest = append(rest, chunkRaw)
+			unknown = append(unknown, chunkRaw)
 			continue
 		}
 		switch rawString(chunk["type"]) {
@@ -113,32 +127,14 @@ func flattenContent(raw json.RawMessage) (content json.RawMessage, reasoning str
 		case chunkTypeThinking:
 			thinking.WriteString(thinkingText(chunk["thinking"]))
 		default:
-			rest = append(rest, chunkRaw)
+			unknown = append(unknown, chunkRaw)
 		}
 	}
-	content, err := encodeFlattenedContent(text.String(), rest)
+	content, err := json.Marshal(text.String())
 	if err != nil {
-		return nil, "", false
+		return nil, "", nil, false
 	}
-	return content, thinking.String(), true
-}
-
-// encodeFlattenedContent renders the flattened content: a plain string when no
-// unrecognized chunks remain, otherwise an array with the text part first.
-func encodeFlattenedContent(text string, rest []json.RawMessage) (json.RawMessage, error) {
-	if len(rest) == 0 {
-		return json.Marshal(text)
-	}
-	parts := make([]json.RawMessage, 0, len(rest)+1)
-	if text != "" {
-		textPart, err := json.Marshal(map[string]any{"type": chunkTypeText, "text": text})
-		if err != nil {
-			return nil, err
-		}
-		parts = append(parts, textPart)
-	}
-	parts = append(parts, rest...)
-	return json.Marshal(parts)
+	return content, thinking.String(), unknown, true
 }
 
 // thinkingText extracts the reasoning text from a ThinkChunk's thinking member:
@@ -201,11 +197,19 @@ func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
 		return req, nil
 	}
 	adapted := req
-	var err error
-	if req.Reasoning != nil && strings.TrimSpace(req.Reasoning.Effort) != "" {
-		adapted, err = providers.AdaptReasoningEffortRequest(adapted, strings.ToLower(strings.TrimSpace(req.Reasoning.Effort)))
-		if err != nil {
-			return nil, err
+	if req.Reasoning != nil {
+		effort := strings.ToLower(strings.TrimSpace(req.Reasoning.Effort))
+		if effort == "" {
+			// Mistral has no nested reasoning parameter and rejects unknown
+			// members with a 422, so an effort-less object (summary only) is
+			// dropped rather than forwarded.
+			adapted = providers.DropReasoning(adapted)
+		} else {
+			var err error
+			adapted, err = providers.AdaptReasoningEffortRequest(adapted, effort)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	return stripAssistantReasoning(adapted), nil

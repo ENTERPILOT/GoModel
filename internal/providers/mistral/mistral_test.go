@@ -86,6 +86,46 @@ func TestChatCompletion_FlattensThinkingChunks(t *testing.T) {
 	assert.NotContains(t, string(encoded), `"thinking"`)
 }
 
+// A response whose content array also carries a chunk type GoModel does not
+// model (Mistral's "reference") must still decode: the answer text lands in
+// content and the unknown chunk rides along as a vendor member instead of
+// failing the whole completion with a 502.
+func TestChatCompletion_PreservesUnknownChunks(t *testing.T) {
+	const body = `{
+		"id": "cmpl-mistral-2",
+		"object": "chat.completion",
+		"created": 1773842038,
+		"model": "mistral-large-4-0",
+		"choices": [{
+			"index": 0,
+			"message": {
+				"role": "assistant",
+				"content": [
+					{"type": "text", "text": "Paris. "},
+					{"type": "reference", "reference_ids": [3, 7]}
+				]
+			},
+			"finish_reason": "stop"
+		}],
+		"usage": {"prompt_tokens": 9, "completion_tokens": 4, "total_tokens": 13}
+	}`
+	server, _ := providertest.JSONServer(t, http.StatusOK, body)
+	provider := newTestProvider(server)
+
+	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "mistral-large-4-0",
+		Messages: []core.Message{{Role: "user", Content: "Capital of France?"}},
+	})
+	require.NoError(t, err, "an unknown chunk type must not fail the decode")
+	require.Len(t, resp.Choices, 1)
+	assert.Equal(t, "Paris. ", resp.Choices[0].Message.Content)
+
+	encoded, err := json.Marshal(resp.Choices[0].Message)
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), `"content":"Paris. "`)
+	assert.Contains(t, string(encoded), `"mistral_content_chunks":[{"type":"reference","reference_ids":[3,7]}]`)
+}
+
 // A plain string content (reasoning_effort "none") must pass through untouched.
 func TestChatCompletion_StringContentUnchanged(t *testing.T) {
 	server, _ := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)

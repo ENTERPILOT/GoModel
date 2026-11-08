@@ -43,9 +43,9 @@ func TestFlattenThinkingChunks(t *testing.T) {
 			want: `{"choices":[{"index":0,"message":{"role":"assistant","content":null}}]}`,
 		},
 		{
-			name: "unknown chunk types are preserved in the content array",
+			name: "unknown chunk types move to the vendor member, content stays a string",
 			in:   `{"choices":[{"index":0,"message":{"role":"assistant","content":[{"type":"text","text":"see "},{"type":"reference","reference_ids":[7]}]}}]}`,
-			want: `{"choices":[{"index":0,"message":{"role":"assistant","content":[{"type":"text","text":"see "},{"type":"reference","reference_ids":[7]}]}}]}`,
+			want: `{"choices":[{"index":0,"message":{"role":"assistant","content":"see ","mistral_content_chunks":[{"type":"reference","reference_ids":[7]}]}}]}`,
 		},
 		{
 			name: "non-chat payloads are untouched",
@@ -107,6 +107,14 @@ func TestAdaptChatRequest(t *testing.T) {
 		got, err := adaptChatRequest(req)
 		require.NoError(t, err)
 		assert.Same(t, req, got)
+	})
+
+	t.Run("reasoning without effort is dropped, not forwarded", func(t *testing.T) {
+		req := &core.ChatRequest{Model: "m", Reasoning: &core.Reasoning{Summary: "auto"}}
+		got, err := adaptChatRequest(req)
+		require.NoError(t, err)
+		assert.Nil(t, got.Reasoning, "Mistral rejects the unknown nested reasoning member with a 422")
+		assert.Nil(t, got.ExtraFields.Lookup("reasoning_effort"))
 	})
 
 	t.Run("assistant reasoning_content is stripped, other roles untouched", func(t *testing.T) {
