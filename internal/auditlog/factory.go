@@ -74,6 +74,7 @@ func buildLoggerConfig(logCfg config.LogConfig) Config {
 		Enabled:               logCfg.Enabled,
 		LogBodies:             logCfg.LogBodies,
 		LogAudioBodies:        logCfg.LogAudioBodies,
+		LogEmbeddingBodies:    logCfg.LogEmbeddingBodies,
 		LogImageInputs:        logCfg.LogImageBodies && imageScope.Inputs(),
 		LogImageOutputs:       logCfg.LogImageBodies && imageScope.Outputs(),
 		LogRevisionBodies:     logCfg.LogRevisionBodies,

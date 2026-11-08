@@ -45,8 +45,10 @@ blokują, ani nie liczą, a przy włączonych
 rozliczane na zero. Ustawisz je przez `providers.<name>.billable: false` w
 `config.yaml`, `<PROVIDER>[_SUFFIX]_BILLABLE=false` w środowisku, pole wyboru
 **Billable** wśród pól zaawansowanych formularza dashboardu albo
-`"billable": false` w `PUT /admin/provider-credentials`. Zobacz
-[Budżety](/pl/features/budgets#providerzy-nierozliczani).
+`"billable": false` w `PUT /admin/provider-credentials`. Niepusta wartość
+`<PROVIDER>_BILLABLE`, która nie jest wartością logiczną (np. `true`, `false`,
+`1`, `0`, `t`, `F` lub `TRUE`), blokuje start, więc literówka nigdy nie zostawi
+providera przypadkiem rozliczanego; pusta wartość jest ignorowana. Zobacz [Budżety](/pl/features/budgets#providerzy-nierozliczani).
 
 ## Obsługiwani providerzy
 
@@ -247,11 +249,10 @@ przez providera upstream.
   `ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3`. DeepSeek domyślnie używa
   `https://api.deepseek.com`; ustaw `DEEPSEEK_BASE_URL` tylko wtedy, gdy używasz
   kompatybilnego proxy lub alternatywnego endpointu DeepSeek. Domyślnie
-  `CONFIGURED_PROVIDER_MODELS_MODE=fallback` używa tych list tylko wtedy, gdy
-  `/models` upstreamu jest niedostępne lub puste. Ustaw
-  `CONFIGURED_PROVIDER_MODELS_MODE=allowlist`, aby udostępniać tylko
-  skonfigurowane modele dla providerów, które definiują listę, z pominięciem
-  wywołań `/models` w ich upstreamie.
+  udostępniane są tylko skonfigurowane modele, a inne modele zwracają 404. Zmienisz
+  to przez `CONFIGURED_PROVIDER_MODELS_MODE`, dla pojedynczego providera przez
+  `<PROVIDER>[_SUFFIX]_MODELS_MODE` (na przykład `OPENROUTER_MODELS_MODE=fallback`)
+  lub **Tryb modeli** w dashboardzie; zobacz [Tryby modeli](/pl/advanced/config-yaml#tryby-modeli).
 - **Filtry modeli** – zawężaj duży katalog wzorcem glob lub ceną zamiast
   wymieniać modele jeden po drugim: `OPENROUTER_MODEL_FILTER_INCLUDE=*:free`
   zostawia tylko darmowe modele OpenRouter, a

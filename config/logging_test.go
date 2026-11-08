@@ -57,3 +57,18 @@ func TestLoadImageBodyLoggingEnv(t *testing.T) {
 		require.Contains(t, err.Error(), "log_image_bodies_scope")
 	})
 }
+
+func TestLoadEmbeddingBodyLoggingEnv(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(string) {
+		result, err := Load()
+		require.NoError(t, err)
+		require.True(t, result.Config.Logging.LogEmbeddingBodies, "embedding bodies default on")
+
+		t.Setenv("LOGGING_LOG_EMBEDDING_BODIES", "false")
+		result, err = Load()
+		require.NoError(t, err)
+		require.False(t, result.Config.Logging.LogEmbeddingBodies)
+	})
+}
