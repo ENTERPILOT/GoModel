@@ -349,6 +349,13 @@ func requestHeadersWithPluginOverrides(ctx context.Context, reqHeaders http.Head
 			slog.Warn("dropped plugin upstream header with an invalid value", "request_id", core.GetRequestID(ctx), "header", canonical)
 			continue
 		}
+		// The request headers may spell the name differently. Leaving that
+		// copy would let map order decide which value reaches the wire.
+		for existing := range merged {
+			if existing != canonical && strings.EqualFold(existing, canonical) {
+				delete(merged, existing)
+			}
+		}
 		merged[canonical] = append([]string(nil), values...)
 	}
 	return merged

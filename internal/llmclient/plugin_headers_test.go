@@ -273,18 +273,31 @@ func TestDoDropsInvalidPluginHeaders(t *testing.T) {
 }
 
 func TestBuildRequestPluginHeadersOverrideRequestHeaders(t *testing.T) {
-	client := New(DefaultConfig("test", "http://upstream.test"), nil)
+	client := New(DefaultConfig("test", "http://upstream.test"), func(req *http.Request) {
+		req.Header.Set("Helicone-Property-Tenant", "from-provider")
+	})
 	ctx := core.WithPluginUpstreamHeaders(context.Background(), http.Header{
 		"Helicone-Property-Tenant": {"from-plugin"},
 	})
 
-	req, err := client.buildRequest(ctx, Request{
-		Method:   http.MethodGet,
-		Endpoint: "/v1/models",
-		Headers:  http.Header{"Helicone-Property-Tenant": {"from-request"}},
-	})
-	require.NoError(t, err)
-	assert.Equal(t, "from-plugin", req.Header.Get("Helicone-Property-Tenant"))
+	// The request spells the name in lower case, so the plugin value has to
+	// replace it rather than sit next to it.
+	for range 20 {
+		req, err := client.buildRequest(ctx, Request{
+			Method:   http.MethodGet,
+			Endpoint: "/v1/models",
+			Headers:  http.Header{"helicone-property-tenant": {"from-request"}},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, []string{"from-plugin"}, req.Header.Values("Helicone-Property-Tenant"))
+		var names []string
+		for name := range req.Header {
+			if strings.EqualFold(name, "Helicone-Property-Tenant") {
+				names = append(names, name)
+			}
+		}
+		assert.Equal(t, []string{"Helicone-Property-Tenant"}, names, "the header is sent once, under one name")
+	}
 }
 
 func TestBuildRequestWithoutPluginHeadersIsUnchanged(t *testing.T) {
