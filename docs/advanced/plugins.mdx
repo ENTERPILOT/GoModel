@@ -348,8 +348,8 @@ What the gateway does with them:
   request makes. Each attempt sends them to the upstream selected for that
   attempt: a failover can resolve to a different provider and a different base
   URL, and the headers follow it. Every call that goes through the gateway's
-  HTTP client, that is; Bedrock, which calls the AWS SDK directly, does not carry
-  them. A response-cache hit makes no provider call, so no upstream headers are
+  HTTP client, that is; the `bedrock` provider, which calls Bedrock Runtime
+  through the AWS SDK, does not carry them, while `bedrock-mantle` does. A response-cache hit makes no provider call, so no upstream headers are
   sent.
 - Inference the gateway issues for its own work does not. A guardrail's LLM
   judge calls the provider through the plugin `Host` on the request context, and

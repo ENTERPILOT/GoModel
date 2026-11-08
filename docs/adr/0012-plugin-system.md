@@ -81,8 +81,8 @@ every phase:
 - `Stream`: text accumulated so far per choice.
 - `Headers`: inbound (credentials redacted), outbound, and upstream headers,
   which the host merges into every provider call of the request that goes
-  through its HTTP client (Bedrock, which calls the AWS SDK directly, does not
-  carry them).
+  through its HTTP client (the `bedrock` provider, which calls Bedrock Runtime
+  through the AWS SDK, does not carry them; `bedrock-mantle` does).
 - `Values`: a per-request bag shared by every hook of the request.
 
 Edits go through methods (`SetText`, `SetMedia`, `SetToolArguments`,
@@ -367,7 +367,7 @@ Declared in the contract or the spec but not run by this release:
   `Headers.Upstream` was deferred when this ADR was written and no longer is:
   the host merges it into every provider call of the request that goes
   through its HTTP client — failover attempts, token counting and compaction
-  included, Bedrock excluded — minus the names that carry credentials, frame
+  included, the `bedrock` provider excluded — minus the names that carry credentials, frame
   the connection or describe the body, plus `Accept-Encoding`,
   `Anthropic-Beta` and `Idempotency-Key` (`#1203`, which updated this section
   in place). Other provider headers, such as `OpenAI-Beta`, are not refused.

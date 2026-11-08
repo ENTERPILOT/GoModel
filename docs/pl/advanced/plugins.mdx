@@ -291,7 +291,7 @@ requestu:
 | `Prompt` | `*Prompt` | konwersacja (`Messages` ze stabilnymi ID i typowanymi `Parts`: tekst, obraz, audio, plik, wywołanie narzędzia, wynik narzędzia, reasoning, odmowa, nieprzezroczysta część), `Tools`, `Params`, surowa treść. Edytuj przez `SetText`, `SetMedia`, `SetToolArguments`, `SetToolResult`, `Insert`, `Append`, `Remove`, `SetParam`; `TextTargets(roles...)` wyświetla każdą część tekstową, łącznie z tekstem wyników narzędzi, a `SetTargetText` zapisuje ją z powrotem |
 | `Response` | `*Completion` | odpowiedź, `nil` do fazy response: `Choices` z tym samym modelem `Part`, `Usage`, surowa treść. Edytuj przez `SetText`, `ReplaceText`, `SetFinishReason`, `SetToolArguments`; `TextTargets` i `SetTargetText` działają jak w `Prompt` |
 | `Stream` | `*StreamState` | dotychczas zebrany tekst dla każdego choice i liczba zdarzeń; `nil` dla requestów bez streamingu |
-| `Headers` | `*Headers` | `Request` (przychodzące, z zamaskowanymi danymi uwierzytelniającymi; edycje w fazie prompt dotyczą bieżącego requestu dla kolejnych pluginów i logowania requestu, a nie wywołania providera), `Response` (stosowane do odpowiedzi dla klienta; nagłówek ustawiony na pusty string jest usuwany, łącznie z tymi dodawanymi przez gateway, jak `X-Request-Id`), `Upstream` (wysyłane z każdym wywołaniem providera w ramach requestu, które przechodzi przez klienta HTTP gatewaya — z wyjątkiem Bedrocka, który wywołuje SDK AWS bezpośrednio —, łącznie z próbami failover oraz wywołaniami zliczania tokenów i kompakcji; nagłówki z danymi uwierzytelniającymi, nagłówki określające połączenie lub ciało żądania, `Accept-Encoding`, `anthropic-beta` oraz `Idempotency-Key` są odrzucane; requesty, które gateway wykonuje na własne potrzeby, ich nie przenoszą) |
+| `Headers` | `*Headers` | `Request` (przychodzące, z zamaskowanymi danymi uwierzytelniającymi; edycje w fazie prompt dotyczą bieżącego requestu dla kolejnych pluginów i logowania requestu, a nie wywołania providera), `Response` (stosowane do odpowiedzi dla klienta; nagłówek ustawiony na pusty string jest usuwany, łącznie z tymi dodawanymi przez gateway, jak `X-Request-Id`), `Upstream` (wysyłane z każdym wywołaniem providera w ramach requestu, które przechodzi przez klienta HTTP gatewaya — z wyjątkiem `bedrock` —, łącznie z próbami failover oraz wywołaniami zliczania tokenów i kompakcji; nagłówki z danymi uwierzytelniającymi, nagłówki określające połączenie lub ciało żądania, `Accept-Encoding`, `anthropic-beta` oraz `Idempotency-Key` są odrzucane; requesty, które gateway wykonuje na własne potrzeby, ich nie przenoszą) |
 | `Values` | `Values` | zbiór danych na request współdzielony przez wszystkie hooki requestu; poprzedzaj klucze nazwą pluginu |
 
 Edycje przechodzą przez metody, a nie przypisania pól, więc GoModel ponownie koduje tylko
@@ -348,8 +348,8 @@ Co gateway z nimi robi:
   innego providera, a także wywołania zliczania tokenów i kompakcji, które request
   wykonuje. Każda próba wysyła je do upstreamu wybranego dla tej próby: failover może
   rozwiązać się na innego providera i inny base URL, a nagłówki idą za nim. Każde
-  wywołanie, które przechodzi przez klienta HTTP gatewaya — Bedrock, który wywołuje
-  SDK AWS bezpośrednio, ich nie przenosi. Trafienie w cache odpowiedzi nie wykonuje
+  wywołanie, które przechodzi przez klienta HTTP gatewaya — provider `bedrock`, który
+  wywołuje Bedrock Runtime przez SDK AWS, ich nie przenosi, a `bedrock-mantle` tak. Trafienie w cache odpowiedzi nie wykonuje
   wywołania providera, więc nagłówki upstream nie są wysyłane.
 - Inferencja, którą gateway wykonuje na własne potrzeby, ich nie przenosi. Sędzia
   LLM guardraila wywołuje providera przez pluginowe `Host` w kontekście requestu,

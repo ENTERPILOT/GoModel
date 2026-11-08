@@ -23,6 +23,7 @@ type Headers struct {
 	// Anthropic-Beta and Idempotency-Key, and drops invalid names and values.
 	// It sends the rest only on provider calls for client requests that go
 	// through its HTTP client: not on the gateway's own inference, such as a
-	// guardrail judge, and not on Bedrock, which calls the AWS SDK directly.
+	// guardrail judge, and not on the bedrock provider, which calls Bedrock
+	// Runtime through the AWS SDK (bedrock-mantle carries them).
 	Upstream http.Header
 }

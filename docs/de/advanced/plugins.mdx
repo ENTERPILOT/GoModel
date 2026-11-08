@@ -279,7 +279,7 @@ Jeder Hook erhält einen `*pluginapi.Exchange`, in jeder Phase eines Requests da
 | `Prompt` | `*Prompt` | die Konversation (`Messages` mit stabilen IDs und typisierten `Parts`: Text, Bild, Audio, Datei, Tool Call, Tool-Ergebnis, Reasoning, Refusal, opak), `Tools`, `Params`, Roh-Body. Bearbeitung über `SetText`, `SetMedia`, `SetToolArguments`, `SetToolResult`, `Insert`, `Append`, `Remove`, `SetParam`; `TextTargets(roles...)` listet jeden Textteil auf, einschließlich Text in Tool-Ergebnissen, und `SetTargetText` schreibt einen davon zurück |
 | `Response` | `*Completion` | die Response, `nil` bis zur Phase `response`: `Choices` mit demselben `Part`-Modell, `Usage`, Roh-Body. Bearbeitung über `SetText`, `ReplaceText`, `SetFinishReason`, `SetToolArguments`; `TextTargets` und `SetTargetText` funktionieren wie bei `Prompt` |
 | `Stream` | `*StreamState` | bisher angesammelter Text pro Choice und die Anzahl der Events; `nil` bei Requests ohne Streaming |
-| `Headers` | `*Headers` | `Request` (eingehend, Zugangsdaten geschwärzt; Änderungen in der Phase `prompt` gelten für den laufenden Request bei späteren Plugins und beim Request-Logging, nicht für den Provider-Aufruf), `Response` (wird auf die Client-Response angewendet; ein auf den leeren String gesetzter Header wird entfernt, einschließlich solcher, die das Gateway hinzufügt, wie `X-Request-Id`), `Upstream` (wird mit jeder Provider-Anfrage des Requests gesendet, die über den HTTP-Client des Gateways läuft — Bedrock, das das AWS SDK direkt nutzt, ausgenommen —, einschließlich Failover-Versuchen sowie Aufrufen zur Token-Zählung und Kompaktierung; Header mit Zugangsdaten, Header, die die Verbindung oder den Body bestimmen, `Accept-Encoding`, `anthropic-beta` und `Idempotency-Key` werden abgelehnt; Anfragen, die das Gateway für eigene Zwecke stellt, tragen keine dieser Header) |
+| `Headers` | `*Headers` | `Request` (eingehend, Zugangsdaten geschwärzt; Änderungen in der Phase `prompt` gelten für den laufenden Request bei späteren Plugins und beim Request-Logging, nicht für den Provider-Aufruf), `Response` (wird auf die Client-Response angewendet; ein auf den leeren String gesetzter Header wird entfernt, einschließlich solcher, die das Gateway hinzufügt, wie `X-Request-Id`), `Upstream` (wird mit jeder Provider-Anfrage des Requests gesendet, die über den HTTP-Client des Gateways läuft — `bedrock` ausgenommen —, einschließlich Failover-Versuchen sowie Aufrufen zur Token-Zählung und Kompaktierung; Header mit Zugangsdaten, Header, die die Verbindung oder den Body bestimmen, `Accept-Encoding`, `anthropic-beta` und `Idempotency-Key` werden abgelehnt; Anfragen, die das Gateway für eigene Zwecke stellt, tragen keine dieser Header) |
 | `Values` | `Values` | Request-bezogener Speicher, den alle Hooks des Requests gemeinsam nutzen; stellen Sie Keys den Plugin-Namen voran |
 
 Änderungen erfolgen über Methoden, nicht über Feldzuweisungen, sodass GoModel nur das neu kodiert,
@@ -336,8 +336,8 @@ Was das Gateway damit macht:
   Request auslöst. Jeder Versuch sendet sie an das für diesen Versuch gewählte
   Upstream: Ein Failover kann auf einen anderen Provider und eine andere Base-URL
   auflösen, und die Header folgen ihm. Jeder Aufruf, der über den HTTP-Client des
-  Gateways läuft, wohlgemerkt; Bedrock, das das AWS SDK direkt aufruft, trägt sie
-  nicht. Ein Treffer im Response-Cache stellt keinen Provider-Aufruf, also werden
+  Gateways läuft, wohlgemerkt; der Provider `bedrock`, der Bedrock Runtime über das
+  AWS SDK aufruft, trägt sie nicht, `bedrock-mantle` dagegen schon. Ein Treffer im Response-Cache stellt keinen Provider-Aufruf, also werden
   keine Upstream-Header gesendet.
 - Inferenz, die das Gateway für eigene Zwecke stellt, trägt sie nicht. Der LLM-Judge
   einer Guardrail ruft den Provider über das Plugin-`Host` im Request-Kontext auf,
