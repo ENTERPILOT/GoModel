@@ -440,6 +440,45 @@ func TestRunUpstreamHeadersAccumulateAcrossSteps(t *testing.T) {
 	}, x.Headers.Upstream)
 }
 
+// Readers merge back only the upstream headers they changed: a reader that
+// left a header alone must not overwrite, with its stale copy, the value
+// another reader of the same step set, whatever order the copies merge in.
+func TestRunReadersMergeOnlyTheUpstreamHeadersTheyChanged(t *testing.T) {
+	hook := func(name string, mutates bool, edit func(http.Header)) *Instance {
+		return newTestInstance(&fakePlugin{name: name, mutates: mutates, onPrompt: func(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+			edit(x.Headers.Upstream)
+			return pluginapi.Allow(), nil
+		}}, InstanceSpec{})
+	}
+	for _, order := range [][]string{{"setter", "idle"}, {"idle", "setter"}} {
+		t.Run(order[0]+" first", func(t *testing.T) {
+			readers := map[string]*Instance{
+				"setter": hook("setter", false, func(h http.Header) {
+					h.Set("X-Tenant", "acme")
+					h.Del("X-Drop")
+				}),
+				"idle": hook("idle", false, func(http.Header) {}),
+			}
+			defaults := hook("defaults", true, func(h http.Header) {
+				h.Set("X-Tenant", "default")
+				h.Set("X-Drop", "1")
+			})
+			chain, err := BuildChain(pluginapi.KindPrompt, []Ref{
+				{defaults, 10},
+				{readers[order[0]], 20},
+				{readers[order[1]], 20},
+			})
+			require.NoError(t, err)
+
+			x := withPromptText(newExchange(), "hi")
+			_, err = chain.RunPrompt(context.Background(), x)
+			require.NoError(t, err)
+
+			assert.Equal(t, http.Header{"X-Tenant": {"acme"}}, x.Headers.Upstream)
+		})
+	}
+}
+
 // A step with one reader takes its own path, which skips the goroutine and
 // the per-reader slices. It must merge back exactly what the concurrent path
 // does: values, response headers, and request headers the reader set,

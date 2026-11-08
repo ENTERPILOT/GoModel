@@ -163,7 +163,7 @@ func (c *Chain) runReaders(ctx context.Context, readers []*Instance, x *pluginap
 	records := make([]Record, len(readers))
 	errs := make([]error, len(readers))
 	copies := make([]*pluginapi.Exchange, len(readers))
-	original := x.Headers.Request.Clone()
+	original := snapshotHeaders(x)
 	var wg sync.WaitGroup
 	for i, inst := range readers {
 		copies[i] = shallowCopy(x)
@@ -194,7 +194,7 @@ func (c *Chain) runReaders(ctx context.Context, readers []*Instance, x *pluginap
 // nothing, so the goroutine, the WaitGroup and the per-reader slices go.
 // Call still bounds the hook, so the abandonment guarantee is unchanged.
 func (c *Chain) runReader(ctx context.Context, inst *Instance, x *pluginapi.Exchange, call hookCall) ([]Record, error) {
-	original := x.Headers.Request.Clone()
+	original := snapshotHeaders(x)
 	cp := shallowCopy(x)
 	record, err := c.invoke(ctx, inst, cp, call, false)
 	if !errors.Is(record.Err, ErrAbandoned) {
@@ -361,30 +361,42 @@ func shallowCopy(x *pluginapi.Exchange) *pluginapi.Exchange {
 	return &cp
 }
 
-// mergeBack folds a reader's copy into x. Request header edits are applied as
-// differences from original (the headers before the step ran), so a reader
-// that removed a header removes it from x as well.
-func mergeBack(x, cp *pluginapi.Exchange, original http.Header) {
+// stepHeaders are the headers of x before a step's readers ran. Readers'
+// header edits merge back as differences from them, so a reader that left a
+// header alone cannot overwrite another reader's edit with its stale copy.
+type stepHeaders struct {
+	request, upstream http.Header
+}
+
+func snapshotHeaders(x *pluginapi.Exchange) stepHeaders {
+	return stepHeaders{request: x.Headers.Request.Clone(), upstream: x.Headers.Upstream.Clone()}
+}
+
+// mergeBack folds a reader's copy into x. Request and upstream header edits
+// are applied as differences from original, so a reader that removed a
+// header removes it from x as well.
+func mergeBack(x, cp *pluginapi.Exchange, original stepHeaders) {
 	maps.Copy(x.Values, cp.Values)
 	maps.Copy(x.Headers.Response, cp.Headers.Response)
-	for k, v := range cp.Headers.Request {
+	mergeHeaderEdits(&x.Headers.Request, cp.Headers.Request, original.request)
+	mergeHeaderEdits(&x.Headers.Upstream, cp.Headers.Upstream, original.upstream)
+}
+
+// mergeHeaderEdits applies to dst the keys edited set or removed relative to
+// original.
+func mergeHeaderEdits(dst *http.Header, edited, original http.Header) {
+	for k, v := range edited {
 		if slices.Equal(v, original[k]) {
 			continue
 		}
-		if x.Headers.Request == nil {
-			x.Headers.Request = http.Header{}
+		if *dst == nil {
+			*dst = http.Header{}
 		}
-		x.Headers.Request[k] = v
+		(*dst)[k] = v
 	}
 	for k := range original {
-		if _, still := cp.Headers.Request[k]; !still {
-			delete(x.Headers.Request, k)
+		if _, still := edited[k]; !still {
+			delete(*dst, k)
 		}
-	}
-	if len(cp.Headers.Upstream) > 0 {
-		if x.Headers.Upstream == nil {
-			x.Headers.Upstream = http.Header{}
-		}
-		maps.Copy(x.Headers.Upstream, cp.Headers.Upstream)
 	}
 }
