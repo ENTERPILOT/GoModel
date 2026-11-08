@@ -100,6 +100,13 @@ func SetConfiguredMaxIdleConnsPerHost(n int) {
 	configuredMaxIdleConnsPerHost.Store(int64(max(n, 0)))
 }
 
+// ConfiguredMaxIdleConnsPerHost returns the value installed by
+// SetConfiguredMaxIdleConnsPerHost, or 0 when none is, so a caller can put it
+// back after a rejected reload.
+func ConfiguredMaxIdleConnsPerHost() int {
+	return int(configuredMaxIdleConnsPerHost.Load())
+}
+
 func maxIdleConnsPerHost() int {
 	if n := configuredMaxIdleConnsPerHost.Load(); n > 0 {
 		return int(n)

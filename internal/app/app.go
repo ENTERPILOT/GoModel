@@ -158,8 +158,10 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	// and a missing CA file is a startup error rather than a silent fallback.
 	// On a reload the generation that keeps serving must not inherit settings
 	// its replacement was rejected with, so the previous configuration is put
-	// back whenever construction fails after this point.
+	// back whenever construction fails after this point. The idle pool size
+	// newBootstrap installs is restored the same way.
 	previousTLS := httpclient.SnapshotTLS()
+	previousMaxIdleConnsPerHost := httpclient.ConfiguredMaxIdleConnsPerHost()
 	if err := ApplyOutboundTLS(cfg.AppConfig.Config.HTTP.TLS); err != nil {
 		return nil, err
 	}
@@ -168,6 +170,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	for _, phase := range b.phases() {
 		if err := phase(); err != nil {
 			httpclient.RestoreTLS(previousTLS)
+			httpclient.SetConfiguredMaxIdleConnsPerHost(previousMaxIdleConnsPerHost)
 			return nil, b.fail(err)
 		}
 	}
