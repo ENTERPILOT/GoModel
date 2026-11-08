@@ -212,6 +212,29 @@ func TestAppendLiveEventFrameMatchesMarshaledFrame(t *testing.T) {
 	}
 }
 
+func TestLiveEventWriterDropsOversizedFrameBuffer(t *testing.T) {
+	ts := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+	rec := httptest.NewRecorder()
+	w := liveEventWriter{res: rec}
+
+	require.NoError(t, w.write(live.Event{Seq: 1, Type: live.EventHeartbeat, Timestamp: ts}))
+	require.NotNil(t, w.buf, "small frame buffer is kept for reuse")
+	assert.LessOrEqual(t, cap(w.buf), maxReusedLiveFrameBuffer)
+
+	body := `"` + strings.Repeat("x", 2*maxReusedLiveFrameBuffer) + `"`
+	large := live.Event{Seq: 2, Type: live.EventAuditUpdated, Timestamp: ts, Data: json.RawMessage(body)}
+	require.NoError(t, w.write(large))
+	assert.Nil(t, w.buf, "oversized frame buffer is dropped after writing")
+
+	require.NoError(t, w.write(live.Event{Seq: 3, Type: live.EventHeartbeat, Timestamp: ts}))
+	require.NotNil(t, w.buf)
+	assert.LessOrEqual(t, cap(w.buf), maxReusedLiveFrameBuffer)
+
+	written := rec.Body.String()
+	assert.Contains(t, written, body, "large frame is written in full")
+	assert.Equal(t, 3, strings.Count(written, "\n\n"), "every frame is written")
+}
+
 func BenchmarkAppendLiveEventFrame(b *testing.B) {
 	event := live.Event{
 		Seq:       12345,

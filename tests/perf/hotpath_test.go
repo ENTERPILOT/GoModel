@@ -484,8 +484,8 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// deployments actually run.
 			name:      "gateway_chat_completion_production_shape",
 			bench:     BenchmarkGatewayHotPathProductionShape,
-			maxAllocs: 153,   // baseline 150 (audit bodies kept as raw JSON; selector-keyed lookups and memoized resolved-model strings)
-			maxBytes:  21568, // baseline ~20.1 KB
+			maxAllocs: 153,   // baseline 151 (audit bodies kept as raw JSON; selector-keyed lookups and memoized resolved-model strings)
+			maxBytes:  21568, // baseline ~20.7 KB
 		},
 		{
 			// The same shape with live logs on and no dashboard connected,
@@ -497,8 +497,8 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// the ceiling is what keeps it from growing back.
 			name:      "gateway_chat_completion_production_shape_live_broker",
 			bench:     BenchmarkGatewayHotPathProductionShapeLiveBroker,
-			maxAllocs: 210,   // baseline 206 (allocation-free snapshot keys; repeated headers kept, not re-merged)
-			maxBytes:  40960, // baseline ~38.6 KB
+			maxAllocs: 210,   // baseline 205 (allocation-free snapshot keys; repeated headers kept, not re-merged)
+			maxBytes:  40960, // baseline ~37.7 KB
 		},
 		{
 			// Typed chunk decoding + reused read buffer keep this converter at a
