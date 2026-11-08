@@ -141,5 +141,6 @@ func TestSQLiteMaintenanceAfterClose(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, store.Close())
 
-	StartMaintenance(store) // must not start a worker on a closed database
+	// Returns at once without touching the closed database or panicking.
+	assert.NotPanics(t, func() { StartMaintenance(store) })
 }
