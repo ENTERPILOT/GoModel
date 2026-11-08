@@ -350,10 +350,11 @@ What the gateway does with them:
   URL, and the headers follow it. Every call that goes through the gateway's
   HTTP client, that is; the `bedrock` provider, which calls Bedrock Runtime
   through the AWS SDK, does not carry them, while `bedrock-mantle` does. A
-  response-cache hit makes no provider call, so no upstream headers are sent.
-  Neither are those of inline `/v1/batches` items, which run the prompt phase
-  when `guardrails.enable_for_batch_processing` is on: one batch submission
-  carries many items.
+  response-cache hit skips the inference call, so no upstream headers are sent;
+  a semantic-cache lookup's embedding call is the gateway's own and carries none
+  either. Inline `/v1/batches` items, which run the prompt phase when
+  `guardrails.enable_for_batch_processing` is on, send none either: one batch
+  submission carries many items.
 - Inference the gateway issues for its own work does not. A guardrail's LLM
   judge calls the provider through the plugin `Host` on the request context, and
   that call drops these headers: they describe the client's provider, not the

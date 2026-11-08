@@ -350,8 +350,9 @@ Co gateway z nimi robi:
   rozwiązać się na innego providera i inny base URL, a nagłówki idą za nim. Każde
   wywołanie, które przechodzi przez klienta HTTP gatewaya — provider `bedrock`, który
   wywołuje Bedrock Runtime przez SDK AWS, ich nie przenosi, a `bedrock-mantle` tak.
-  Trafienie w cache odpowiedzi nie wykonuje wywołania providera, więc nagłówki
-  upstream nie są wysyłane. Nie są też wysyłane nagłówki elementów inline
+  Trafienie w cache odpowiedzi pomija wywołanie inferencji, więc nagłówki upstream
+  nie są wysyłane; wywołanie embeddingu przy wyszukiwaniu w cache semantycznym
+  należy do samego gatewaya i też ich nie przenosi. Nie są też wysyłane nagłówki elementów inline
   w `/v1/batches`, które przechodzą fazę prompt, gdy
   `guardrails.enable_for_batch_processing` jest włączone: jedno zgłoszenie batcha
   obejmuje wiele elementów.

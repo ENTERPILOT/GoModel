@@ -338,8 +338,9 @@ Was das Gateway damit macht:
   auflösen, und die Header folgen ihm. Jeder Aufruf, der über den HTTP-Client des
   Gateways läuft, wohlgemerkt; der Provider `bedrock`, der Bedrock Runtime über das
   AWS SDK aufruft, trägt sie nicht, `bedrock-mantle` dagegen schon. Ein Treffer im
-  Response-Cache stellt keinen Provider-Aufruf, also werden keine Upstream-Header
-  gesendet. Auch die von Inline-Items in `/v1/batches`, die bei aktiviertem
+  Response-Cache löst keinen Inferenz-Aufruf aus, also werden keine Upstream-Header
+  gesendet; der Embedding-Aufruf eines Semantic-Cache-Lookups gehört dem Gateway
+  selbst und trägt ebenfalls keine. Auch die von Inline-Items in `/v1/batches`, die bei aktiviertem
   `guardrails.enable_for_batch_processing` die Phase `prompt` durchlaufen, werden
   nicht gesendet: Eine Batch-Übermittlung trägt viele Items.
 - Inferenz, die das Gateway für eigene Zwecke stellt, trägt sie nicht. Der LLM-Judge
