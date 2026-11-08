@@ -29,6 +29,7 @@ type OpenAIResponsesStreamConverter struct {
 	toolCalls            map[int]*ResponsesOutputToolCallState
 	assistantOutputIndex int
 	nextOutputIndex      int
+	imageClosedAssistant bool // an image closed the message item; later text opens a new one
 	buffer               streaming.StreamBuffer
 	lineBuffer           streaming.StreamBuffer
 	readBuf              []byte
@@ -121,7 +122,7 @@ func (sc *OpenAIResponsesStreamConverter) reserveReasoningOutput() {
 }
 
 func (sc *OpenAIResponsesStreamConverter) outputAlreadyStarted() bool {
-	if sc.output.AssistantStarted() || sc.output.ImagesStarted() {
+	if sc.output.AssistantStarted() || sc.output.HasClosedItems() {
 		return true
 	}
 	for _, state := range sc.toolCalls {
@@ -432,6 +433,11 @@ func (sc *OpenAIResponsesStreamConverter) appendReasoningDelta(content string) {
 // appendTextDelta records assistant text and emits its output_text.delta event.
 func (sc *OpenAIResponsesStreamConverter) appendTextDelta(content string) {
 	sc.buffer.AppendString(sc.output.CompleteReasoningOutput(reasoningOutputIndex))
+	if sc.imageClosedAssistant {
+		// Text after an image goes in a new message item after the image.
+		sc.imageClosedAssistant = false
+		sc.output.StartNextAssistantMessage(sc.assistantOutputIndex)
+	}
 	sc.reserveAssistantOutput()
 	sc.buffer.AppendString(sc.output.AppendAssistantDelta(sc.assistantOutputIndex, content))
 }
@@ -454,6 +460,10 @@ func (sc *OpenAIResponsesStreamConverter) appendImages(raw json.RawMessage) {
 			continue
 		}
 		sc.buffer.AppendString(sc.output.CompleteReasoningOutput(reasoningOutputIndex))
+		if sc.output.AssistantStarted() && !sc.output.AssistantDone() {
+			sc.buffer.AppendString(sc.output.CompleteAssistantOutput(sc.assistantOutputIndex))
+			sc.imageClosedAssistant = true
+		}
 		index := sc.nextOutputIndex
 		sc.nextOutputIndex++
 		sc.buffer.AppendString(sc.output.AppendImageGenerationCall(index, fields))

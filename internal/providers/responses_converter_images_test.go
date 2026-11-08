@@ -225,3 +225,60 @@ data: [DONE]
 	assert.Equal(t, "image_generation_call", output[0]["type"])
 	assert.Equal(t, "message", output[1]["type"])
 }
+
+func TestOpenAIResponsesStreamConverter_TextImageTextKeepsOrder(t *testing.T) {
+	stream := `data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"Before. "},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{"images":[{"type":"image_url","image_url":{"url":"data:image/png;base64,aW1n"}}]},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{"content":"After."},"finish_reason":"stop"}]}
+
+data: [DONE]
+`
+	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(stream)), "test-model", "gemini")
+	raw, err := io.ReadAll(converter)
+	require.NoError(t, err)
+
+	// Output items open and close one after another: an item may not be
+	// added while a lower one is open, and nothing addresses a closed item.
+	open, closed := map[float64]bool{}, map[float64]bool{}
+	var terminal map[string]any
+	for _, event := range parseTestSSEEvents(t, string(raw)) {
+		if event.Done {
+			continue
+		}
+		if event.Name == "response.completed" {
+			terminal, _ = event.Payload["response"].(map[string]any)
+			continue
+		}
+		index, ok := event.Payload["output_index"].(float64)
+		if !ok {
+			continue
+		}
+		assert.False(t, closed[index], "%s addresses closed item %v", event.Name, index)
+		switch event.Name {
+		case "response.output_item.added":
+			assert.Empty(t, open, "item %v added while %v still open", index, open)
+			open[index] = true
+		case "response.output_item.done":
+			delete(open, index)
+			closed[index] = true
+		}
+	}
+	require.NotNil(t, terminal, "stream %s", raw)
+
+	output := outputItems(t, terminal)
+	require.Len(t, output, 3)
+	assert.Equal(t, "message", output[0]["type"])
+	assert.Equal(t, "image_generation_call", output[1]["type"])
+	assert.Equal(t, "message", output[2]["type"])
+	assert.NotEqual(t, output[0]["id"], output[2]["id"])
+	text := func(item map[string]any) any {
+		content, _ := item["content"].([]any)
+		require.Len(t, content, 1)
+		part, _ := content[0].(map[string]any)
+		return part["text"]
+	}
+	assert.Equal(t, "Before. ", text(output[0]))
+	assert.Equal(t, "After.", text(output[2]))
+}

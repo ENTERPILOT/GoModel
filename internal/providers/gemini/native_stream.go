@@ -14,6 +14,12 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
+// maxNativeStreamLineBytes caps one SSE line of a native stream. A generated
+// image arrives whole as base64 in a single event, and a 2K or 4K image
+// easily passes the usual 4 MiB, so the cap sits well above it while still
+// bounding memory per stream.
+const maxNativeStreamLineBytes = 32 << 20
+
 type geminiNativeStream struct {
 	reader *io.PipeReader
 	body   io.ReadCloser
@@ -42,7 +48,7 @@ func convertGeminiNativeStream(body io.ReadCloser, out *io.PipeWriter, model str
 	defer func() { _ = body.Close() }()
 
 	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxNativeStreamLineBytes)
 
 	state := geminiStreamState{
 		model:        model,

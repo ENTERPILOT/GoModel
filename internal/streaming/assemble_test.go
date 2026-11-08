@@ -335,3 +335,31 @@ func TestSynthesizeChatStream_VendorReasoningMember(t *testing.T) {
 	assert.Equal(t, `"hm"`, string(assembled.Choices[0].Message.ExtraFields.Lookup("reasoning")))
 	assert.Nil(t, assembled.Choices[0].Message.ExtraFields.Lookup("reasoning_content"))
 }
+
+// Generated images arrive as their own deltas and carry thought signatures;
+// a buffered replay must hand all of them back, and a malformed images member
+// must not cost the chunk its text.
+func TestChatStreamRoundTrip_KeepsImages(t *testing.T) {
+	const one = `{"type":"image_url","image_url":{"url":"data:image/png;base64,b25l","extra_content":{"google":{"thought_signature":"sig-a"}}}}`
+	const two = `{"type":"image_url","image_url":{"url":"data:image/png;base64,dHdv"}}`
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl-5","model":"gemini-2.5-flash-image","choices":[{"index":0,"delta":{"role":"assistant","content":"Here: "}}]}`,
+		`data: {"choices":[{"index":0,"delta":{"images":[` + one + `]}}]}`,
+		`data: {"choices":[{"index":0,"delta":{"content":"and ","images":{"not":"a list"}}}]}`,
+		`data: {"choices":[{"index":0,"delta":{"images":[` + two + `]},"finish_reason":"stop"}]}`,
+		"",
+	}, "\n\n")
+
+	resp, err := AssembleChatResponse(decodeChatEvents(t, []byte(stream)))
+	require.NoError(t, err)
+	require.Len(t, resp.Choices, 1)
+	assert.Equal(t, "Here: and ", resp.Choices[0].Message.Content)
+	want := `[` + one + `,` + two + `]`
+	assert.JSONEq(t, want, string(resp.Choices[0].Message.ExtraFields.Lookup(core.ChatImagesField)))
+
+	replayed, err := AssembleChatResponse(decodeChatEvents(t, SynthesizeChatStream(resp, false)))
+	require.NoError(t, err)
+	require.Len(t, replayed.Choices, 1)
+	assert.Equal(t, "Here: and ", replayed.Choices[0].Message.Content)
+	assert.JSONEq(t, want, string(replayed.Choices[0].Message.ExtraFields.Lookup(core.ChatImagesField)))
+}

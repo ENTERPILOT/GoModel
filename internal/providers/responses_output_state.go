@@ -56,9 +56,10 @@ type ResponsesOutputEventState struct {
 	// such as Anthropic thinking-block signatures. Clients echo it back.
 	reasoningExtraContent json.RawMessage
 
-	// images holds the image_generation_call items already finished on the
-	// stream, for the terminal output.
-	images []indexedOutputItem
+	// closedItems holds output items already finished on the stream that the
+	// state no longer tracks (image_generation_call items, and message items
+	// an image closed), for the terminal output.
+	closedItems []indexedOutputItem
 }
 
 // indexedOutputItem is a rendered output item and its output_index.
@@ -482,14 +483,14 @@ func (s *ResponsesOutputEventState) FinishReasoningOutput(outputIndex int, statu
 // event declared, and only tool calls whose output_item.done has been emitted
 // are included — callers must finalize pending tool calls first.
 func (s *ResponsesOutputEventState) FinalOutputItems(reasoningIndex, assistantIndex int, toolCalls map[int]*ResponsesOutputToolCallState, includePlaceholder bool) []map[string]any {
-	items := make([]indexedOutputItem, 0, 2+len(toolCalls)+len(s.images))
+	items := make([]indexedOutputItem, 0, 2+len(toolCalls)+len(s.closedItems))
 	if s.reasoningStarted {
 		items = append(items, indexedOutputItem{reasoningIndex, s.ReasoningItem(finalStatusOrCompleted(s.reasoningFinalStatus), true)})
 	}
 	if s.assistantStarted {
 		items = append(items, indexedOutputItem{assistantIndex, s.AssistantMessageItem(finalStatusOrCompleted(s.assistantFinalStatus), true)})
 	}
-	items = append(items, s.images...)
+	items = append(items, s.closedItems...)
 	for _, state := range toolCalls {
 		if state == nil || !state.Started || !state.Completed {
 			continue
@@ -504,9 +505,24 @@ func (s *ResponsesOutputEventState) FinalOutputItems(reasoningIndex, assistantIn
 	return output
 }
 
-// ImagesStarted reports whether an image_generation_call item has been emitted.
-func (s *ResponsesOutputEventState) ImagesStarted() bool {
-	return len(s.images) > 0
+// HasClosedItems reports whether an image_generation_call item, or a message
+// item an image closed, has been emitted.
+func (s *ResponsesOutputEventState) HasClosedItems() bool {
+	return len(s.closedItems) > 0
+}
+
+// StartNextAssistantMessage sets the finished message item at outputIndex
+// aside for the terminal output and resets the assistant state, so text that
+// follows an image opens a new message item instead of writing into a closed
+// one. Turn-wide replay state stays and rides on the new item.
+func (s *ResponsesOutputEventState) StartNextAssistantMessage(outputIndex int) {
+	if !s.assistantDone {
+		return
+	}
+	s.closedItems = append(s.closedItems, indexedOutputItem{outputIndex, s.AssistantMessageItem(finalStatusOrCompleted(s.assistantFinalStatus), true)})
+	s.assistantReserved, s.assistantStarted, s.assistantPartStarted, s.assistantDone = false, false, false, false
+	s.assistantMessageID, s.assistantFinalStatus = "", ""
+	s.assistantText.Reset()
 }
 
 // AppendImageGenerationCall emits one generated image as a finished
@@ -519,7 +535,7 @@ func (s *ResponsesOutputEventState) AppendImageGenerationCall(outputIndex int, f
 	for name, value := range fields {
 		item[name] = value
 	}
-	s.images = append(s.images, indexedOutputItem{outputIndex, item})
+	s.closedItems = append(s.closedItems, indexedOutputItem{outputIndex, item})
 	return s.WriteEvent("response.output_item.added", map[string]any{
 		"type":         "response.output_item.added",
 		"item":         map[string]any{"id": id, "type": "image_generation_call", "status": "in_progress"},

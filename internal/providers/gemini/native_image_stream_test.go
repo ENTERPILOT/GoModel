@@ -1,8 +1,10 @@
 package gemini
 
 import (
+	"bufio"
 	"context"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -130,4 +132,39 @@ func TestStreamChatCompletion_NativeImagesGetTheirOwnChunk(t *testing.T) {
 	}
 	require.Len(t, imageDeltas, 1, "chunks %#v", chunks)
 	assert.Len(t, imageDeltas[0], 1, "image delta carries only images: %#v", imageDeltas[0])
+}
+
+func TestStreamChatCompletion_NativeStreamsImageAboveFourMiB(t *testing.T) {
+	// A high-resolution image arrives as one SSE line well above bufio's
+	// usual caps; the stream must carry it rather than fail mid-way.
+	data := strings.Repeat("A", 6<<20)
+	chunks := streamNativeChat(t, `data: {"candidates":[{"content":{"role":"model","parts":[{"inlineData":{"mimeType":"image/png","data":"`+data+`"}}]},"finishReason":"STOP"}]}
+
+`)
+
+	images := streamImageDeltas(t, chunks)
+	require.Len(t, images, 1)
+	image, _ := images[0].(map[string]any)["image_url"].(map[string]any)
+	assert.Equal(t, "data:image/png;base64,"+data, image["url"])
+}
+
+func TestStreamChatCompletion_NativeLineAboveCapFailsStream(t *testing.T) {
+	t.Setenv(useNativeAPIEnvVar, "true")
+
+	data := strings.Repeat("A", maxNativeStreamLineBytes)
+	server, _ := providertest.SSEServer(t, `data: {"candidates":[{"content":{"role":"model","parts":[{"inlineData":{"mimeType":"image/png","data":"`+data+`"}}]},"finishReason":"STOP"}]}
+
+`)
+	provider := newTestProvider("test-api-key", nil, llmclient.Hooks{})
+	provider.SetModelsURL(server.URL)
+
+	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "gemini-2.5-flash-image",
+		Messages: []core.Message{{Role: "user", Content: "draw a cat"}},
+	})
+	require.NoError(t, err)
+	defer func() { _ = body.Close() }()
+
+	_, err = io.ReadAll(body)
+	require.ErrorIs(t, err, bufio.ErrTooLong)
 }
