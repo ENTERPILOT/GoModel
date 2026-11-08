@@ -56,6 +56,18 @@ func TestSegmentCacheIsBounded(t *testing.T) {
 	}
 }
 
+func TestSegmentCacheHitPromotesEntry(t *testing.T) {
+	cache := newSegmentCache(2, 1<<20)
+	cache.canonical(gjson.Parse(`["a"]`))
+	cache.canonical(gjson.Parse(`["b"]`))
+	cache.canonical(gjson.Parse(`["a"]`))
+	cache.canonical(gjson.Parse(`["c"]`))
+
+	assert.Contains(t, cache.entries, cache.key(`["a"]`))
+	assert.Contains(t, cache.entries, cache.key(`["c"]`))
+	assert.NotContains(t, cache.entries, cache.key(`["b"]`))
+}
+
 func TestSegmentCacheSkipsOversizedSegments(t *testing.T) {
 	cache := newSegmentCache(8, 4)
 	got := cache.canonical(gjson.Parse(`[{"b":1,"a":2}]`))
