@@ -372,8 +372,7 @@ What the gateway does with them:
   warning that names the header, never its value.
 - The host folds a hook's headers into the request state when that phase
   finishes, so a value written after the provider call has run — from a
-  response-phase hook — no longer affects it. Treat the map you get back from
-  the context as read-only.
+  response-phase hook — no longer affects it.
 
 <Note>
   **Upgrading from a release that recorded these headers without sending them.**

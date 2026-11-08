@@ -262,7 +262,6 @@ func (p *tenantHint) OnPrompt(_ context.Context, x *pluginapi.Exchange) (plugina
   只有上面列出的名称受保护；提供商其余 Header 不受保护。名称或值不是合法 HTTP 的 Header（例如包含换行符）会被丢弃，
   并记录一条警告，警告中只包含 Header 名称，从不包含其值。
 - host 在该阶段结束时把 Hook 的 Header 合并进请求状态，因此在提供商调用执行之后写入的值——来自 response 阶段的 Hook——不再影响它。
-  请把从上下文取回的 map 视为只读。
 
 **从记录这些 Header 但不发送的版本升级。** 在此类版本上已经设置过 `Headers.Upstream` 的插件，
 其值被保存后被丢弃。升级之后，它们首次到达提供商或提供商之前的代理：在推广升级之前，请确认上游能够接受它们。

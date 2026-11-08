@@ -360,8 +360,7 @@ Was das Gateway damit macht:
   Warnung verworfen, die den Header nennt, nie seinen Wert.
 - Das Host faltet die Header eines Hooks in den Request-State, wenn diese Phase
   endet; ein Wert, der erst nach dem Provider-Aufruf geschrieben wird — aus einem Hook
-  der Phase `response` —, wirkt nicht mehr. Behandeln Sie die Map, die Sie aus dem
-  Kontext erhalten, als schreibgeschützt.
+  der Phase `response` —, wirkt nicht mehr.
 
 **Upgrade von einem Release, das diese Header festhielt, ohne sie zu senden.** Ein
 Plugin, das `Headers.Upstream` auf einem solchen Release bereits gesetzt hat, bekam
