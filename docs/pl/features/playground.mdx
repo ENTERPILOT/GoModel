@@ -32,17 +32,19 @@ których metadane deklarują dany tryb; nadal możesz wpisać dowolny model lub 
 | Embeddingi | `POST /v1/embeddings` | teksty (jeden w wierszu), opcjonalnie format kodowania (`float`, `base64`) i wymiary | liczba wektorów, wymiary, tokeny promptu i pierwsze wartości każdego wektora (`float`) |
 
 Rozmiar, liczba i format są wysyłane tylko wtedy, gdy różnią się od wartości
-domyślnej providera (`mp3` dla mowy, `float` dla embeddingów); wymiary są
-pomijane, gdy pole jest puste, a w przeciwnym razie wysyłane tak, jak je wpisano. Panel JSON pokazuje body requestu; transkrypcja jest
-wysyłana jako `multipart/form-data`, więc jej podgląd opisuje część z plikiem
-zamiast zawierać jego bajty. Obrazy inline w `b64_json` są skracane w JSON-ie
-odpowiedzi, aby pozostał czytelny, odpowiedzi z mową są podsumowywane jako
-ich typ treści i rozmiar, a wektory embeddingów są skracane do pierwszych
-wartości (długie wektory `base64` do pierwszych znaków). Embeddingi na token,
-np. z `token_embed` w vLLM, są w JSON-ie odpowiedzi skracane do pierwszego
-wiersza, a wynik pokazuje przy każdym embeddingu liczbę jego wektorów tokenów.
-Dla embeddingów **Kopiuj** nadal kopiuje pełną odpowiedź, a dla obrazów skrócony
-JSON w takiej postaci, w jakiej jest wyświetlany.
+domyślnej providera (`mp3` dla mowy). Panel JSON pokazuje body requestu;
+transkrypcja jest wysyłana jako `multipart/form-data`, więc jej podgląd opisuje
+część z plikiem zamiast zawierać jego bajty. Obrazy inline w `b64_json` są
+skracane w JSON-ie odpowiedzi, aby pozostał czytelny, a **Kopiuj** kopiuje ten
+skrócony JSON. Odpowiedzi z mową są podsumowywane jako ich typ treści i rozmiar.
+
+Dla embeddingów format kodowania jest wysyłany tylko wtedy, gdy nie jest to
+`float`. Wymiary są pomijane, gdy pole jest puste; w przeciwnym razie muszą być
+dodatnią liczbą całkowitą i są wysyłane tak, jak je wpisano. JSON odpowiedzi
+skraca każdy wektor do pierwszych wartości (długie wektory `base64` do
+pierwszych znaków), a embeddingi na token, np. z `token_embed` w vLLM, do
+pierwszego wiersza; wynik pokazuje przy każdym embeddingu liczbę jego wektorów
+tokenów. **Kopiuj** nadal kopiuje pełną odpowiedź.
 
 ## Ograniczanie do ścieżki użytkownika
 

@@ -35,18 +35,20 @@ weiterhin jedes beliebige Modell oder jeden Alias eingeben.
 | Embeddings | `POST /v1/embeddings` | Texte (einer pro Zeile), optional Kodierungsformat (`float`, `base64`) und Dimensionen | Anzahl der Vektoren, Dimensionen, Prompt-Tokens und die ersten Werte jedes Vektors (`float`) |
 
 Größe, Anzahl und Format werden nur gesendet, wenn sie vom Standardwert des
-Providers abweichen (`mp3` für Sprache, `float` für Embeddings); Dimensionen
-entfallen, solange das Feld leer ist, und werden sonst wie eingegeben gesendet. Das JSON-Panel zeigt den Request-Body;
+Providers abweichen (`mp3` für Sprache). Das JSON-Panel zeigt den Request-Body;
 eine Transkription wird als `multipart/form-data` gesendet, daher beschreibt
 ihre Vorschau den Datei-Teil, statt die Bytes zu enthalten. Inline-Bilder im
-Format `b64_json` werden im Response-JSON gekürzt, damit es lesbar bleibt,
-Sprach-Responses werden als ihr Content-Type und ihre Größe zusammengefasst, und
-Embedding-Vektoren werden auf ihre ersten Werte gekürzt (lange
-`base64`-Vektoren auf ihre ersten Zeichen). Embeddings pro Token, etwa von vLLMs
-`token_embed`, werden im Response-JSON auf ihre erste Zeile gekürzt, und das
-Ergebnis zeigt neben jedem Embedding die Anzahl seiner Token-Vektoren. Bei
-Embeddings kopiert **Kopieren** weiterhin die vollständige Response, bei Bildern
-das gekürzte JSON, wie es angezeigt wird.
+Format `b64_json` werden im Response-JSON gekürzt, damit es lesbar bleibt, und
+**Kopieren** kopiert dieses gekürzte JSON. Sprach-Responses werden als ihr
+Content-Type und ihre Größe zusammengefasst.
+
+Bei Embeddings wird das Kodierungsformat nur gesendet, wenn es nicht `float`
+ist. Dimensionen entfallen, solange das Feld leer ist; sonst müssen sie eine
+positive ganze Zahl sein und werden wie eingegeben gesendet. Das Response-JSON
+kürzt jeden Vektor auf seine ersten Werte (lange `base64`-Vektoren auf ihre
+ersten Zeichen) und Embeddings pro Token, etwa von vLLMs `token_embed`, auf ihre
+erste Zeile; das Ergebnis zeigt neben jedem Embedding die Anzahl seiner
+Token-Vektoren. **Kopieren** kopiert weiterhin die vollständige Response.
 
 ## Eingrenzung per User Path
 
