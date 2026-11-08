@@ -3,7 +3,10 @@ package storage
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
+	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // sqliteReaderConns sizes the read-only pool: enough for a few concurrent
@@ -35,10 +38,8 @@ func openSQLiteReader(writer *sql.DB) (*sql.DB, error) {
 	}
 
 	// query_only rejects every statement that would change the database. The
-	// driver passes mode=ro through only for file: URIs, which would mean
-	// escaping the path, and query_only gives the same guarantee. The writer
-	// already switched the file to WAL, which persists.
-	db, err := sql.Open("sqlite", file+"?_busy_timeout=5000&_pragma=query_only(1)")
+	// writer already switched the file to WAL, which persists.
+	db, err := sql.Open("sqlite", sqliteReaderDSN(file))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open SQLite read pool: %w", err)
 	}
@@ -50,6 +51,18 @@ func openSQLiteReader(writer *sql.DB) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to ping SQLite read pool: %w", err)
 	}
 	return db, nil
+}
+
+// sqliteReaderDSN builds a file: URI for the resolved database path. The path
+// is percent-encoded so a '?', '#' or '%' in it stays part of the file name
+// instead of starting the query or fragment, or being decoded by SQLite.
+func sqliteReaderDSN(file string) string {
+	path := filepath.ToSlash(file)
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path // a Windows drive path: file:///C:/...
+	}
+	u := url.URL{Scheme: "file", Path: path, RawQuery: "_busy_timeout=5000&_pragma=query_only(1)"}
+	return u.String()
 }
 
 // ReadDB returns the read-only connection pool. Writes and reads that must

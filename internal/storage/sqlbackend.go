@@ -59,8 +59,8 @@ func ResolveSQLReadBackend[T any](
 	mongodb func(*mongo.Database) (T, error),
 ) (T, error) {
 	if sqlStore == nil {
-		var zero T
-		return zero, fmt.Errorf("sql store constructor is nil")
+		// ResolveSQLBackend errors only when an SQL backend is selected.
+		return ResolveSQLBackend(ctx, store, nil, mongodb)
 	}
 	return ResolveSQLBackend(ctx, store, func(db sqlx.DB) (T, error) {
 		return sqlStore(ReadSQL(store, db))

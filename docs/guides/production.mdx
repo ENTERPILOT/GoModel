@@ -62,8 +62,8 @@ diverge silently. A key created on one pod does not exist on the other.
 SQLite also runs with a single write connection by design, to keep one writer and
 avoid lock contention. Every audit flush, usage flush, and other write
 serializes through it, which is a throughput ceiling under sustained load.
-Dashboard queries, budget checks, and live-view polls use a separate pool of up to
-8 read-only connections, so a slow dashboard query does not hold up the flushes.
+Usage and audit log dashboard queries, budget and rate limit checks, and
+live-view polls use a separate pool of up to 8 read-only connections, so a slow dashboard query does not hold up the flushes.
 A read can miss a write that commits while it runs; the next read sees it.
 
 For Postgres, `POSTGRES_MAX_CONNS` defaults to `10`. Raise it first if you run
