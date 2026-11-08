@@ -26,6 +26,9 @@ const (
 	defaultRedisDialTimeout = 2 * time.Second
 	defaultRedisIOTimeout   = 500 * time.Millisecond
 
+	// redisStartupTimeout bounds the startup Ping, socket timeouts included.
+	redisStartupTimeout = 5 * time.Second
+
 	// redisTimeoutLogInterval limits Get timeout logs to one per interval.
 	redisTimeoutLogInterval = time.Minute
 )
@@ -58,13 +61,10 @@ func NewRedisStore(cfg RedisStoreConfig) (*RedisStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	client := redis.NewClient(opts)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := client.Ping(ctx).Err(); err != nil {
-		_ = client.Close()
+	if err := pingRedis(opts, redisStartupTimeout); err != nil {
 		return nil, fmt.Errorf("failed to connect to redis: %w", err)
 	}
+	client := redis.NewClient(opts)
 	ttl := cfg.TTL
 	if ttl == 0 {
 		ttl = DefaultRedisTTL
@@ -103,6 +103,22 @@ func redisOptions(rawURL string) (*redis.Options, error) {
 	opts.ContextTimeoutEnabled = true
 	opts.Dialer = redisDialer(opts.TLSConfig)
 	return opts, nil
+}
+
+// pingRedis probes Redis once at startup under its own budget. It uses a
+// separate client because the fail-fast socket timeouts meant for runtime
+// lookups would otherwise cap the probe and fail startup against a Redis that
+// is slow but reachable.
+func pingRedis(opts *redis.Options, timeout time.Duration) error {
+	probeOpts := *opts
+	probeOpts.DialTimeout = timeout
+	probeOpts.ReadTimeout = timeout
+	probeOpts.WriteTimeout = timeout
+	probe := redis.NewClient(&probeOpts)
+	defer func() { _ = probe.Close() }()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return probe.Ping(ctx).Err()
 }
 
 // Get retrieves value by key.

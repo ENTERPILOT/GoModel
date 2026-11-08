@@ -84,7 +84,7 @@ func NewResponseCacheMiddleware(
 			prefix = responseCachePrefix
 		}
 		store, err := cache.NewRedisStore(cache.RedisStoreConfig{
-			URL:    cfg.Simple.Redis.URL,
+			URL:        cfg.Simple.Redis.URL,
 			Prefix:     prefix,
 			TTL:        ttl,
 			GetTimeout: exactCacheGetTimeout,
