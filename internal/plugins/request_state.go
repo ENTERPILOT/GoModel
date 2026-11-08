@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"maps"
 	"net/http"
 	"slices"
 	"sync"
@@ -350,11 +351,11 @@ func (s *RequestState) Finish(x *pluginapi.Exchange) {
 	if s.upstreamHeaders == nil {
 		s.upstreamHeaders = http.Header{}
 	}
-	// Canonicalize on the way in: two exchanges writing "x-foo" and "X-Foo"
-	// must replace each other instead of racing on map iteration order when
-	// the provider call is built.
-	for key, values := range x.Headers.Upstream {
-		s.upstreamHeaders[http.CanonicalHeaderKey(key)] = append([]string(nil), values...)
+	// Canonicalize on the way in, in sorted order: "x-foo" and "X-Foo", from
+	// two exchanges or from one that readers merged into, must resolve the
+	// same way on every run instead of following map iteration order.
+	for _, key := range slices.Sorted(maps.Keys(x.Headers.Upstream)) {
+		s.upstreamHeaders[http.CanonicalHeaderKey(key)] = append([]string(nil), x.Headers.Upstream[key]...)
 	}
 	logged := s.upstreamLogged
 	s.upstreamLogged = true

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/pluginapi"
 )
@@ -47,6 +48,19 @@ func TestFinishCanonicalizesUpstreamHeaderNames(t *testing.T) {
 
 	// One canonical key, and the later exchange wins regardless of map order.
 	assert.Equal(t, http.Header{"X-Tenant": {"second"}}, state.UpstreamHeaders())
+}
+
+func TestFinishResolvesCaseVariantsOnOneExchangeDeterministically(t *testing.T) {
+	// Readers merge raw keys back, so one exchange can carry both spellings.
+	// Map iteration order varies between runs; the result must not.
+	for range 50 {
+		state := NewRequestState()
+		x := state.NewExchange(context.Background(), pluginapi.Meta{})
+		x.Headers.Upstream = http.Header{"x-tenant": {"lower"}, "X-Tenant": {"canonical"}}
+		state.Finish(x)
+
+		require.Equal(t, http.Header{"X-Tenant": {"lower"}}, state.UpstreamHeaders())
+	}
 }
 
 func TestUpstreamHeadersNilWithoutPlugins(t *testing.T) {
