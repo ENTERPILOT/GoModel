@@ -49,18 +49,23 @@ TOGETHER_BASE_URL=https://api.together.ai/v1
 TOGETHER_MODELS=meta-llama/Llama-3.3-70B-Instruct-Turbo,BAAI/bge-base-en-v1.5
 ```
 
-`TOGETHER_MODELS` ist standardmäßig die einzige Liste (Modus `allowlist`); mit
-`CONFIGURED_PROVIDER_MODELS_MODE=fallback` wird sie nur verwendet, wenn `/models`
-fehlschlägt oder leer ist.
+Mit gesetztem `TOGETHER_MODELS` werden standardmäßig nur diese Modelle
+bereitgestellt, andere Modelle liefern 404; mit `TOGETHER_MODELS_MODE=fallback`
+bestimmt wieder die Liste von Together das Angebot. Siehe [Modellmodi](/de/advanced/config-yaml#modellmodi).
 
 ## Modelle
 
-Wenn `TOGETHER_MODELS` nicht gesetzt ist oder der Modus `fallback` oder `merge`
-lautet, liest GoModel die aktuelle `/models`-Liste von Together, einschließlich
-Typ, Anzeigename, Kontextlänge und Token-Preisen jedes Modells. Mit einer
-`TOGETHER_MODELS`-Allowlist ruft GoModel `/models` von Together nicht auf; Kontextlimits und
-Preise stammen dann aus GoModels Modellkatalog (oder einer gecachten Liste) und
-können für Modelle fehlen, die der Katalog nicht kennt. Bild-, Audio-, Video-
+GoModel liest die aktuelle `/models`-Liste von Together, einschließlich Typ,
+Anzeigename, Kontextlänge und Token-Preisen jedes Modells. Mit einer
+`TOGETHER_MODELS`-Allowlist kommen diese Angaben für die gelisteten Modelle
+weiterhin aus dieser Liste, außer der Metadaten-Aufruf ist abgeschaltet
+(`ALLOWLIST_UPSTREAM_METADATA=false` oder `GOMODEL_OFFLINE=true`). Schlägt
+dieser Aufruf fehl, bleiben die Metadaten der letzten erfolgreichen Liste
+erhalten; vor der ersten erfolgreichen Liste gibt es keine Upstream-Metadaten,
+nur, was der Katalog oder Ihre eigene Konfiguration
+(`models[].metadata`, Preisüberschreibungen im Dashboard) liefert. Ein
+konfiguriertes Modell, das Together nicht listet, bezieht seine Metadaten aus GoModels
+Modellkatalog und kann ohne sie bleiben. Bild-, Audio-, Video-
 und Rerank-Modelle werden ausgelassen, weil GoModel diese Endpunkte nicht an
 Together weiterleitet. Modell-IDs enthalten einen Schrägstrich; verwenden Sie sie
 unverändert oder stellen Sie den Providernamen voran, um die Route festzulegen:

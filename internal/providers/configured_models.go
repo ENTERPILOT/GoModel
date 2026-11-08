@@ -67,27 +67,27 @@ func applyConfiguredProviderModels(
 		return upstream, configuredProviderModelsNotApplied
 	}
 
+	// Every case but a healthy listing in fallback or merge mode serves the
+	// configured list; they differ only in the reason recorded for it.
+	var reason configuredProviderModelsApplyReason
 	mode = config.ResolveConfiguredProviderModelsMode(mode)
-	if mode == config.ConfiguredProviderModelsModeAllowlist {
-		return configuredProviderModelsResponse(providerName, providerType, configuredModels, upstream, fallbackCreated), configuredProviderModelsAllowlist
-	}
-
-	if modelListingUnsupported(upstreamErr) {
-		return configuredProviderModelsResponse(providerName, providerType, configuredModels, upstream, fallbackCreated), configuredProviderModelsUpstreamUnlisted
-	}
-	if upstreamErr != nil {
-		return configuredProviderModelsResponse(providerName, providerType, configuredModels, upstream, fallbackCreated), configuredProviderModelsUpstreamError
-	}
-	if upstream == nil {
-		return configuredProviderModelsResponse(providerName, providerType, configuredModels, upstream, fallbackCreated), configuredProviderModelsUpstreamNil
-	}
-	if len(upstream.Data) == 0 {
-		return configuredProviderModelsResponse(providerName, providerType, configuredModels, upstream, fallbackCreated), configuredProviderModelsUpstreamEmpty
-	}
-	if mode == config.ConfiguredProviderModelsModeMerge {
+	switch {
+	case mode == config.ConfiguredProviderModelsModeAllowlist:
+		reason = configuredProviderModelsAllowlist
+	case modelListingUnsupported(upstreamErr):
+		reason = configuredProviderModelsUpstreamUnlisted
+	case upstreamErr != nil:
+		reason = configuredProviderModelsUpstreamError
+	case upstream == nil:
+		reason = configuredProviderModelsUpstreamNil
+	case len(upstream.Data) == 0:
+		reason = configuredProviderModelsUpstreamEmpty
+	case mode == config.ConfiguredProviderModelsModeMerge:
 		return mergeConfiguredProviderModelsResponse(providerName, providerType, configuredModels, upstream, fallbackCreated), configuredProviderModelsMerge
+	default:
+		return upstream, configuredProviderModelsNotApplied
 	}
-	return upstream, configuredProviderModelsNotApplied
+	return configuredProviderModelsResponse(providerName, providerType, configuredModels, upstream, fallbackCreated), reason
 }
 
 // modelListingUnsupported reports whether err means the upstream has no model
@@ -128,23 +128,10 @@ func synthesizedConfiguredModel(modelID, owner string, created int64) core.Model
 // models the upstream does not list are appended as synthesized entries, so
 // models a provider serves without listing them remain routable.
 func mergeConfiguredProviderModelsResponse(providerName, providerType string, configuredModels []string, upstream *core.ModelsResponse, fallbackCreated int64) *core.ModelsResponse {
-	seen := make(map[string]struct{}, len(upstream.Data))
-	data := make([]core.Model, 0, len(upstream.Data)+len(configuredModels))
-	for _, model := range upstream.Data {
-		modelID := strings.TrimSpace(model.ID)
-		if modelID == "" {
-			continue
-		}
-		if _, ok := seen[modelID]; ok {
-			// Upstream listings can repeat an ID (also via whitespace
-			// variants that normalize to one); the first entry wins.
-			continue
-		}
-		// Registry lookups trim requested IDs, so the retained entry must be
-		// indexed under the same normalized key it deduplicates by.
-		model.ID = modelID
-		seen[modelID] = struct{}{}
-		data = append(data, model)
+	data := uniqueUpstreamModels(upstream)
+	seen := make(map[string]struct{}, len(data)+len(configuredModels))
+	for _, model := range data {
+		seen[model.ID] = struct{}{}
 	}
 
 	owner := configuredModelOwner(providerName, providerType)
@@ -163,16 +150,36 @@ func mergeConfiguredProviderModelsResponse(providerName, providerType string, co
 	}
 }
 
-func configuredProviderModelsResponse(providerName, providerType string, configuredModels []string, upstream *core.ModelsResponse, fallbackCreated int64) *core.ModelsResponse {
-	byID := make(map[string]core.Model)
-	if upstream != nil {
-		for _, model := range upstream.Data {
-			modelID := strings.TrimSpace(model.ID)
-			if modelID == "" {
-				continue
-			}
-			byID[modelID] = model
+// uniqueUpstreamModels returns the upstream entries with trimmed IDs, in
+// listing order, dropping blank IDs and repeats. Upstream listings can repeat
+// an ID (also via whitespace variants that normalize to one); the first entry
+// wins, and registry lookups trim requested IDs, so each entry is keyed by
+// its trimmed ID.
+func uniqueUpstreamModels(upstream *core.ModelsResponse) []core.Model {
+	if upstream == nil {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(upstream.Data))
+	out := make([]core.Model, 0, len(upstream.Data))
+	for _, model := range upstream.Data {
+		model.ID = strings.TrimSpace(model.ID)
+		if model.ID == "" {
+			continue
 		}
+		if _, ok := seen[model.ID]; ok {
+			continue
+		}
+		seen[model.ID] = struct{}{}
+		out = append(out, model)
+	}
+	return out
+}
+
+func configuredProviderModelsResponse(providerName, providerType string, configuredModels []string, upstream *core.ModelsResponse, fallbackCreated int64) *core.ModelsResponse {
+	listed := uniqueUpstreamModels(upstream)
+	byID := make(map[string]core.Model, len(listed))
+	for _, model := range listed {
+		byID[model.ID] = model
 	}
 
 	owner := configuredModelOwner(providerName, providerType)
@@ -182,21 +189,17 @@ func configuredProviderModelsResponse(providerName, providerType string, configu
 	for _, modelID := range configuredModels {
 		model, ok := byID[modelID]
 		if !ok {
-			model = synthesizedConfiguredModel(modelID, owner, fallbackCreated)
-		} else {
-			model.ID = strings.TrimSpace(model.ID)
-			if model.ID == "" {
-				model.ID = modelID
-			}
-			if strings.TrimSpace(model.Object) == "" {
-				model.Object = "model"
-			}
-			if strings.TrimSpace(model.OwnedBy) == "" {
-				model.OwnedBy = owner
-			}
-			if model.Created == 0 {
-				model.Created = fallbackCreated
-			}
+			data = append(data, synthesizedConfiguredModel(modelID, owner, fallbackCreated))
+			continue
+		}
+		if strings.TrimSpace(model.Object) == "" {
+			model.Object = "model"
+		}
+		if strings.TrimSpace(model.OwnedBy) == "" {
+			model.OwnedBy = owner
+		}
+		if model.Created == 0 {
+			model.Created = fallbackCreated
 		}
 		data = append(data, model)
 	}

@@ -38,6 +38,15 @@ type ModelsConfig struct {
 	// provider *_MODELS env vars affect the provider model inventory.
 	// Supported values: "fallback", "allowlist", "merge". Default: "allowlist".
 	ConfiguredProviderModelsMode ConfiguredProviderModelsMode `yaml:"configured_provider_models_mode" env:"CONFIGURED_PROVIDER_MODELS_MODE"`
+
+	// AllowlistUpstreamMetadata controls whether providers in allowlist mode
+	// call their /models to take metadata (context window, pricing, model
+	// type) for the configured models. It never adds models, but upstream
+	// prices can decide which configured models pass a provider's
+	// model_filter.max_price_per_mtok cap. Turn it off to stop that call;
+	// offline mode turns it off too.
+	// Default: true.
+	AllowlistUpstreamMetadata bool `yaml:"allowlist_upstream_metadata" env:"ALLOWLIST_UPSTREAM_METADATA"`
 }
 
 // ConfiguredProviderModelsMode controls how explicitly configured provider
@@ -49,7 +58,8 @@ const (
 	// upstream /models call fails or returns nothing.
 	ConfiguredProviderModelsModeFallback ConfiguredProviderModelsMode = "fallback"
 	// ConfiguredProviderModelsModeAllowlist exposes only the configured models
-	// and skips the upstream /models call.
+	// and calls the upstream /models only to take metadata for them (see
+	// fetchAllowlistMetadata); offline mode turns that call off.
 	ConfiguredProviderModelsModeAllowlist ConfiguredProviderModelsMode = "allowlist"
 	// ConfiguredProviderModelsModeMerge unions the upstream inventory with the
 	// configured models, so models a provider serves but does not list stay

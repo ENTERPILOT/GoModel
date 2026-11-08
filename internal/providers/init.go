@@ -121,6 +121,7 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 	registry := NewModelRegistry()
 	registry.SetCache(modelCache)
 	registry.SetConfiguredProviderModelsMode(result.Config.Models.ConfiguredProviderModelsMode)
+	registry.SetAllowlistUpstreamMetadata(result.Config.Models.AllowlistUpstreamMetadata)
 
 	count, keyrings, err := initializeProviders(ctx, providerMap, factory, registry)
 	if err != nil {

@@ -28,10 +28,11 @@ ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3
 GOMODEL_MASTER_KEY=change-me
 ```
 
-`ORACLE_MODELS` is a comma-separated list (whitespace trimmed). Behavior
-follows the global `CONFIGURED_PROVIDER_MODELS_MODE` — `allowlist` (default)
-exposes only configured models and skips the upstream call; `fallback` uses the
-list when Oracle's `/models` is unavailable or empty.
+`ORACLE_MODELS` is a comma-separated list (whitespace trimmed). By default only
+these models are served, and requests for other models return 404. To let
+Oracle's `/models` drive the list, set `ORACLE_MODELS_MODE=fallback` (or the
+global `CONFIGURED_PROVIDER_MODELS_MODE`); see
+[Models modes](/advanced/config-yaml#models-modes).
 
 Or in `config.yaml`:
 

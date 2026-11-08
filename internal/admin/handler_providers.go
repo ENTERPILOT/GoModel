@@ -272,7 +272,7 @@ func classifyProviderStatus(cfg providers.SanitizedProviderConfig, runtime provi
 		if availabilityError != "" {
 			return "degraded", "Unreachable", "availability check failed; serving configured models", lastError
 		}
-		return "healthy", "Healthy", "configured and model discovery succeeded", lastError
+		return "healthy", "Healthy", "configured and its models are available", lastError
 	case modelFetchError != "" && runtime.DiscoveredModelCount > 0:
 		// Refresh failed but the inventory was deliberately kept fresh (no
 		// healthy alternative exists, e.g. a total sweep failure), so models

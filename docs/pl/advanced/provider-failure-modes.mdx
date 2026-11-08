@@ -145,9 +145,12 @@ kontynuuje routing, korzystając kolejno z:
 3. Dla providera na domyślnym bazowym URL –
    listy z [katalogu modeli](/pl/advanced/configuration) dla jego typu providera.
 
-Ta kolejność dotyczy trybów `fallback` i `merge`. W domyślnym trybie
-`allowlist` provider ze skonfigurowaną listą nigdy nie wywołuje `/models`, więc
-to ta lista jest jego inwentarzem.
+Ta kolejność i opisane niżej ponowne sprawdzanie dotyczą każdego providera bez
+skonfigurowanej listy modeli oraz trybów `fallback` i `merge`. W domyślnym trybie `allowlist` provider ze skonfigurowaną listą serwuje
+wyłącznie modele z tej listy (z zastrzeżeniem `model_filter`); `/models` służy tylko po metadane i tylko
+wtedy, gdy `ALLOWLIST_UPSTREAM_METADATA` jest włączone, a tryb offline wyłączony. Nieudane listowanie
+zachowuje ostatnie metadane i nigdy nie pogarsza stanu providera (zobacz
+[Tryby modeli](/pl/advanced/config-yaml#tryby-modeli)).
 
 Providerzy z błędem są ponownie sprawdzani co `PROVIDER_RECHECK_INTERVAL` sekund
 (domyślnie `60`), a aktualna lista zastępuje zastępczą, gdy tylko listowanie
@@ -156,7 +159,7 @@ a `/health/ready` raportuje `degraded` z `"models": "down"`, podczas gdy instanc
 pozostaje w rotacji.
 
 Aby nigdy nie zależeć od wykrywania, wypisz modele samodzielnie. Domyślne
-`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` udostępnia wtedy tylko tę listę i pomija `/models`:
+`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` udostępnia wtedy tylko tę listę, a `/models` służy tylko po metadane:
 
 ```bash
 export OPENAI_MODELS=gpt-6-sol,gpt-6-luna
