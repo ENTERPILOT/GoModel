@@ -77,6 +77,12 @@ func (c *segmentCache) canonical(result gjson.Result) json.RawMessage {
 	if len(value) > c.maxBytes {
 		return value
 	}
+	// canonicalSegment sizes its buffer from the raw segment, so whitespace-
+	// padded input leaves a backing array far larger than the canonical bytes.
+	// Store an exact-size copy so the byte budget reflects retained memory.
+	if cap(value) > len(value) {
+		value = append(make(json.RawMessage, 0, len(value)), value...)
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if elem, ok := c.entries[key]; ok {
@@ -84,13 +90,13 @@ func (c *segmentCache) canonical(result gjson.Result) json.RawMessage {
 		return elem.Value.(*segmentEntry).value
 	}
 	c.entries[key] = c.order.PushFront(&segmentEntry{key: key, value: value})
-	c.bytes += len(value)
+	c.bytes += cap(value)
 	for c.order.Len() > c.maxEntries || c.bytes > c.maxBytes {
 		oldest := c.order.Back()
 		entry := oldest.Value.(*segmentEntry)
 		c.order.Remove(oldest)
 		delete(c.entries, entry.key)
-		c.bytes -= len(entry.value)
+		c.bytes -= cap(entry.value)
 	}
 	return value
 }

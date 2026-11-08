@@ -2,6 +2,7 @@ package session
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -61,6 +62,20 @@ func TestSegmentCacheSkipsOversizedSegments(t *testing.T) {
 	assert.JSONEq(t, `[{"a":2,"b":1}]`, string(got))
 	assert.Zero(t, cache.order.Len())
 	assert.Zero(t, cache.bytes)
+}
+
+func TestSegmentCacheDoesNotRetainPaddedBuffers(t *testing.T) {
+	cache := newSegmentCache(8, 1<<20)
+	raw := "[" + strings.Repeat(" ", 1<<20) + "]"
+	got := cache.canonical(gjson.Parse(raw))
+	require.Equal(t, "[]", string(got))
+	assert.LessOrEqual(t, cap(got), 8)
+
+	elem, ok := cache.entries[cache.key(raw)]
+	require.True(t, ok)
+	cached := elem.Value.(*segmentEntry).value
+	assert.LessOrEqual(t, cap(cached), 8)
+	assert.Equal(t, cap(cached), cache.bytes)
 }
 
 func TestSegmentCacheConcurrentUse(t *testing.T) {

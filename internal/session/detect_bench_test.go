@@ -56,7 +56,7 @@ func BenchmarkDetect(b *testing.B) {
 				"POST", "/v1/chat/completions", nil, nil, nil,
 				"application/json", body, false, "req-1", nil,
 			)
-			b.Run(fmt.Sprintf("body=%dKB/tools=%d", size>>10, tools), func(b *testing.B) {
+			b.Run(fmt.Sprintf("body=%dKB/tools=%d", len(body)>>10, tools), func(b *testing.B) {
 				b.ReportAllocs()
 				b.SetBytes(int64(len(body)))
 				for b.Loop() {
