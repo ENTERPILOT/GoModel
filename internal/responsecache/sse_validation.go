@@ -47,7 +47,7 @@ func validateCacheableSSE(raw []byte) bool {
 			raw = remaining[idx+sepLen:]
 		}
 
-		payload, hasData := sseEventPayload(event)
+		payload, hasData := streaming.EventData(event)
 		if sawDone {
 			return false
 		}
@@ -71,20 +71,4 @@ func validateCacheableSSE(raw []byte) bool {
 	}
 
 	return sawJSONPayload && sawDone
-}
-
-func sseEventPayload(event []byte) ([]byte, bool) {
-	lines := bytes.Split(event, []byte("\n"))
-	payloadLines := make([][]byte, 0, len(lines))
-	for _, line := range lines {
-		data, ok := streaming.ParseDataLine(line)
-		if !ok {
-			continue
-		}
-		payloadLines = append(payloadLines, data)
-	}
-	if len(payloadLines) == 0 {
-		return nil, false
-	}
-	return bytes.Join(payloadLines, []byte("\n")), true
 }

@@ -145,18 +145,24 @@ kontynuuje routing, korzystając kolejno z:
 3. Dla providera na domyślnym bazowym URL –
    listy z [katalogu modeli](/pl/advanced/configuration) dla jego typu providera.
 
+Ta kolejność i opisane niżej ponowne sprawdzanie dotyczą każdego providera bez
+skonfigurowanej listy modeli oraz trybów `fallback` i `merge`. W domyślnym trybie `allowlist` provider ze skonfigurowaną listą serwuje
+wyłącznie modele z tej listy (z zastrzeżeniem `model_filter`); `/models` służy tylko po metadane i tylko
+wtedy, gdy `ALLOWLIST_UPSTREAM_METADATA` jest włączone, a tryb offline wyłączony. Nieudane listowanie
+zachowuje ostatnie metadane i nigdy nie pogarsza stanu providera (zobacz
+[Tryby modeli](/pl/advanced/config-yaml#tryby-modeli)).
+
 Providerzy z błędem są ponownie sprawdzani co `PROVIDER_RECHECK_INTERVAL` sekund
 (domyślnie `60`), a aktualna lista zastępuje zastępczą, gdy tylko listowanie
 się powiedzie. Gdy nie ma czego serwować, requesty zwracają `503`, aby klienci ponowili próbę,
 a `/health/ready` raportuje `degraded` z `"models": "down"`, podczas gdy instancja
 pozostaje w rotacji.
 
-Aby nigdy nie zależeć od wykrywania, wypisz modele samodzielnie i ustaw
-`CONFIGURED_PROVIDER_MODELS_MODE=allowlist`:
+Aby nigdy nie zależeć od wykrywania, wypisz modele samodzielnie. Domyślne
+`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` udostępnia wtedy tylko tę listę, a `/models` służy tylko po metadane:
 
 ```bash
 export OPENAI_MODELS=gpt-6-sol,gpt-6-luna
-export CONFIGURED_PROVIDER_MODELS_MODE=allowlist
 ```
 
 ## Gdy nie działa sam GoModel
@@ -177,8 +183,11 @@ długotrwałego ruchu wygaszaj połączenia na load balancerze, utrzymuj nakład
 wystarczająco długo, by objąć czas generowania, i pozwól klientom ponawiać requesty.
 
 Co jest per instancja, a więc nie jest współdzielone między replikami: stan circuit
-breakera, liczniki rate limitów, okna stanu requestów i sticky
-sessions. [Przewodnik produkcyjny](/pl/guides/production) opisuje, co to oznacza
+breakera, okna stanu requestów i sticky sessions. Liczniki rate limitów są
+współdzielone przez bazę danych, w przybliżeniu: przy domyślnym
+`RATE_LIMITS_FLUSH_INTERVAL=1` każda replika widzi liczniki pozostałych w ciągu
+około dwóch sekund; przy `0` po starcie repliki nie widzą już nowych liczników
+pozostałych. [Przewodnik produkcyjny](/pl/guides/production) opisuje, co to oznacza
 dla Twojej topologii.
 
 Jeśli GoModel nie działa, a ruch musi płynąć natychmiast, skieruj

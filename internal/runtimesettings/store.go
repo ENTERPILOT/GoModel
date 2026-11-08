@@ -5,6 +5,8 @@ import "context"
 // Store persists deployment-wide runtime-setting values.
 type Store interface {
 	Get(ctx context.Context, key string) (value string, found bool, err error)
+	// GetAll returns every persisted value by key in one read.
+	GetAll(ctx context.Context) (map[string]string, error)
 	Set(ctx context.Context, key, value string) error
 	// SetDefault stores value only when key has no value yet, and returns
 	// whatever is stored afterwards: value, or the one that was already

@@ -11,7 +11,9 @@ package ratelimit
 // A row holds only what its writer counted itself, never counts it loaded
 // from other rows, so the cluster's count for a key is the sum of its rows
 // (see peerView.sum). A restarted process writes under a new ID, and its
-// earlier run's rows are summed like any other writer's.
+// earlier run's rows are summed like any other writer's. Rows written by
+// releases before that rule (OwnCounts false) are merged the way those
+// releases merged them, by maximum.
 type WindowSnapshot struct {
 	Scope         string `bson:"scope"`
 	Subject       string `bson:"subject"`
@@ -33,6 +35,13 @@ type WindowSnapshot struct {
 	// its own clock. Stores stamp it on save, whatever the snapshot holds,
 	// and report it on load.
 	UpdatedAt int64 `bson:"updated_at"`
+	// OwnCounts marks a row written under the rule above. Releases up to
+	// v0.2.1 wrote rows that also held the counts their writer restored at
+	// start, the maximum of every row, so summing them would count each
+	// restart's predecessor again. They never set this field, so their rows,
+	// and every row written while one of them still runs in a rolling
+	// upgrade, read false.
+	OwnCounts bool `bson:"own_counts"`
 }
 
 func definitionKey(scope RuleScope, subject string, periodSeconds int64) ruleKey {
@@ -68,6 +77,7 @@ func newSnapshot(key ruleKey, rule Rule) WindowSnapshot {
 		Partition:     key.partition,
 		PeriodSeconds: key.periodSeconds,
 		Epoch:         rule.CounterEpoch,
+		OwnCounts:     true,
 	}
 }
 

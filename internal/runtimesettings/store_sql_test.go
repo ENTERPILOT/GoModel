@@ -39,6 +39,20 @@ func TestSQLStoreSetDefaultKeepsFirstValue(t *testing.T) {
 	require.Equal(t, "third", stored)
 }
 
+func TestSQLStoreGetAllReturnsEveryValue(t *testing.T) {
+	ctx := context.Background()
+	store := newSQLiteStore(t)
+	values, err := store.GetAll(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, values)
+
+	require.NoError(t, store.Set(ctx, "pro.compression.level", "high"))
+	require.NoError(t, store.Set(ctx, "install_id", "first"))
+	values, err = store.GetAll(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"pro.compression.level": "high", "install_id": "first"}, values)
+}
+
 func TestSQLStoreSetDefaultConvergesConcurrentWriters(t *testing.T) {
 	ctx := context.Background()
 	store := newSQLiteStore(t)

@@ -43,7 +43,10 @@ with [markups](/features/cost-tracking#markups-and-billed-cost) enabled it is
 billed at zero. Set it with `providers.<name>.billable: false` in
 `config.yaml`, `<PROVIDER>[_SUFFIX]_BILLABLE=false` in the environment, the
 **Billable** checkbox under the dashboard form's advanced fields, or
-`"billable": false` on `PUT /admin/provider-credentials`. See
+`"billable": false` on `PUT /admin/provider-credentials`. A non-empty
+`<PROVIDER>_BILLABLE` value that is not a boolean (such as `true`, `false`,
+`1`, `0`, `t`, `F`, or `TRUE`) refuses startup, so a typo never leaves a
+provider billable by accident; an empty value is ignored. See
 [Budgets](/features/budgets#non-billable-providers).
 
 ## Supported providers
@@ -239,11 +242,12 @@ support, not every individual model capability exposed by an upstream provider.
   `OPENROUTER_MODELS=openai/gpt-oss-120b,anthropic/claude-sonnet-4` or
   `ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3`. DeepSeek defaults to
   `https://api.deepseek.com`; set `DEEPSEEK_BASE_URL` only when using a
-  compatible proxy or alternate DeepSeek endpoint. By default,
-  `CONFIGURED_PROVIDER_MODELS_MODE=fallback` uses those lists only when upstream
-  `/models` is unavailable or empty. Set
-  `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` to expose only configured models
-  for providers that define a list, skipping their upstream `/models` calls.
+  compatible proxy or alternate DeepSeek endpoint. By default only the
+  configured models are served and other models return 404. Change that with
+  `CONFIGURED_PROVIDER_MODELS_MODE`, per provider with
+  `<PROVIDER>[_SUFFIX]_MODELS_MODE` (for example `OPENROUTER_MODELS_MODE=fallback`),
+  or **Models mode** in the dashboard; see
+  [Models modes](/advanced/config-yaml#models-modes).
 - **Model filters** — narrow a large catalog by glob pattern or price instead of
   listing models one by one: `OPENROUTER_MODEL_FILTER_INCLUDE=*:free` keeps only
   OpenRouter's free tier, and `<PROVIDER>_MODEL_FILTER_MAX_PRICE_PER_MTOK` caps

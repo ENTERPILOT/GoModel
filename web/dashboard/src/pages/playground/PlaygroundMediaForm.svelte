@@ -1,6 +1,7 @@
 <script>
   // Inputs of the active media mode (image prompt + size/count, speech text +
-  // voice/format, or an audio file to transcribe) and the Send/Stop button.
+  // voice/format, an audio file to transcribe, or texts to embed +
+  // format/dimensions) and the Send/Stop button.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FormField from "$lib/components/molecules/FormField.svelte";
   import SearchSelect from "$lib/components/molecules/SearchSelect.svelte";
@@ -8,9 +9,18 @@
   import * as m from "$lib/paraglide/messages.js";
   import { playgroundStore as chat } from "./playground.svelte.js";
   import { playgroundMediaStore as media } from "./playgroundMedia.svelte.js";
-  import { IMAGE_SIZES, MAX_IMAGE_COUNT, SPEECH_FORMATS, SPEECH_VOICES } from "./playgroundMedia.js";
+  import {
+    EMBEDDING_FORMATS,
+    IMAGE_SIZES,
+    MAX_IMAGE_COUNT,
+    SPEECH_FORMATS,
+    SPEECH_VOICES,
+    embeddingDimensionsValid,
+  } from "./playgroundMedia.js";
 
   const voiceOptions = SPEECH_VOICES.map((voice) => ({ value: voice, label: voice }));
+  // An invalid Dimensions value disables Send, so say why next to the field.
+  const dimensionsInvalid = $derived(!embeddingDimensionsValid(media.embeddingDimensions));
 
   // Cmd/Ctrl+Enter sends from the prompt textareas; plain Enter adds a line.
   function onKeydown(event) {
@@ -124,6 +134,50 @@
           bind:value={media.transcriptionPrompt}
           disabled={media.sending}
         />
+      </FormField>
+    </div>
+  {:else if chat.mode === "embeddings"}
+    <FormField id="playground-embeddings-input" label={m.playground_embeddings_input_label()}>
+      <textarea
+        id="playground-embeddings-input"
+        rows="3"
+        placeholder={m.playground_embeddings_input_placeholder()}
+        bind:value={media.embeddingInput}
+        onkeydown={onKeydown}
+        disabled={media.sending}
+      ></textarea>
+    </FormField>
+    <div class="playground-media-options">
+      <FormField id="playground-embeddings-format" label={m.playground_embeddings_format_label()}>
+        <select
+          id="playground-embeddings-format"
+          class="form-select"
+          bind:value={media.embeddingFormat}
+          disabled={media.sending}
+        >
+          {#each EMBEDDING_FORMATS as format (format)}
+            <option value={format}>{format}</option>
+          {/each}
+        </select>
+      </FormField>
+      <FormField id="playground-embeddings-dimensions" label={m.playground_embeddings_dimensions_label()}>
+        <input
+          id="playground-embeddings-dimensions"
+          class="form-input"
+          type="text"
+          inputmode="numeric"
+          autocomplete="off"
+          placeholder={m.playground_media_default_option()}
+          bind:value={media.embeddingDimensions}
+          disabled={media.sending}
+          aria-invalid={dimensionsInvalid ? "true" : undefined}
+          aria-describedby={dimensionsInvalid ? "playground-embeddings-dimensions-error" : undefined}
+        />
+        {#if dimensionsInvalid}
+          <small class="form-field-error" id="playground-embeddings-dimensions-error" role="alert">
+            {m.playground_embeddings_dimensions_invalid()}
+          </small>
+        {/if}
       </FormField>
     </div>
   {/if}

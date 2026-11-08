@@ -47,3 +47,12 @@ func TestComputeParamsHash_IncludesReasoning(t *testing.T) {
 	h2 := computeParamsHash(high, "/v1/responses", nil, "", "embed", false)
 	require.NotEqual(t, h2, h1)
 }
+
+// Virtual-model params land in the prepared body the cache hashes; a forced
+// response_format arrives on the Responses API as text.format, so a policy
+// that changes it must change the key.
+func TestComputeParamsHash_ResponsesTextFormatChangesHash(t *testing.T) {
+	plain := computeParamsHash([]byte(`{"model":"m","input":"hi","text":{"format":{"type":"text"}}}`), responsesPath, nil, "", "embed", false)
+	schema := computeParamsHash([]byte(`{"model":"m","input":"hi","text":{"format":{"type":"json_schema","name":"s","schema":{"type":"object"}}}}`), responsesPath, nil, "", "embed", false)
+	require.NotEqual(t, plain, schema)
+}
