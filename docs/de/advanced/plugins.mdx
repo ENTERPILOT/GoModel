@@ -337,8 +337,11 @@ Was das Gateway damit macht:
   Upstream: Ein Failover kann auf einen anderen Provider und eine andere Base-URL
   auflösen, und die Header folgen ihm. Jeder Aufruf, der über den HTTP-Client des
   Gateways läuft, wohlgemerkt; der Provider `bedrock`, der Bedrock Runtime über das
-  AWS SDK aufruft, trägt sie nicht, `bedrock-mantle` dagegen schon. Ein Treffer im Response-Cache stellt keinen Provider-Aufruf, also werden
-  keine Upstream-Header gesendet.
+  AWS SDK aufruft, trägt sie nicht, `bedrock-mantle` dagegen schon. Ein Treffer im
+  Response-Cache stellt keinen Provider-Aufruf, also werden keine Upstream-Header
+  gesendet. Auch die von Inline-Items in `/v1/batches`, die bei aktiviertem
+  `guardrails.enable_for_batch_processing` die Phase `prompt` durchlaufen, werden
+  nicht gesendet: Eine Batch-Übermittlung trägt viele Items.
 - Inferenz, die das Gateway für eigene Zwecke stellt, trägt sie nicht. Der LLM-Judge
   einer Guardrail ruft den Provider über das Plugin-`Host` im Request-Kontext auf,
   und dieser Aufruf verwirft die Header: Sie beschreiben den Provider des Clients,

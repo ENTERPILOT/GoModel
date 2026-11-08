@@ -349,8 +349,12 @@ Co gateway z nimi robi:
   wykonuje. Każda próba wysyła je do upstreamu wybranego dla tej próby: failover może
   rozwiązać się na innego providera i inny base URL, a nagłówki idą za nim. Każde
   wywołanie, które przechodzi przez klienta HTTP gatewaya — provider `bedrock`, który
-  wywołuje Bedrock Runtime przez SDK AWS, ich nie przenosi, a `bedrock-mantle` tak. Trafienie w cache odpowiedzi nie wykonuje
-  wywołania providera, więc nagłówki upstream nie są wysyłane.
+  wywołuje Bedrock Runtime przez SDK AWS, ich nie przenosi, a `bedrock-mantle` tak.
+  Trafienie w cache odpowiedzi nie wykonuje wywołania providera, więc nagłówki
+  upstream nie są wysyłane. Nie są też wysyłane nagłówki elementów inline
+  w `/v1/batches`, które przechodzą fazę prompt, gdy
+  `guardrails.enable_for_batch_processing` jest włączone: jedno zgłoszenie batcha
+  obejmuje wiele elementów.
 - Inferencja, którą gateway wykonuje na własne potrzeby, ich nie przenosi. Sędzia
   LLM guardraila wywołuje providera przez pluginowe `Host` w kontekście requestu,
   a to wywołanie odrzuca te nagłówki: opisują providera klienta, a nie model, który

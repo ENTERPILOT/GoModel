@@ -250,7 +250,8 @@ func (p *tenantHint) OnPrompt(_ context.Context, x *pluginapi.Exchange) (plugina
 - 该请求的每一次提供商尝试都会携带它们，包括故障转移到另一个提供商，以及该请求发起的 token 计数和压缩调用。
   每次尝试都会把它们发到为该次尝试选定的上游：故障转移可能解析到另一个提供商和另一个 base URL，这些 Header 会随之而去。
   前提是这些调用经由网关的 HTTP 客户端发出；`bedrock` 提供商通过 AWS SDK 调用 Bedrock Runtime，不携带它们，`bedrock-mantle` 则会携带。
-  命中响应缓存时不会调用提供商，因此不会发送上游请求头。
+  命中响应缓存时不会调用提供商，因此不会发送上游请求头。开启 `guardrails.enable_for_batch_processing` 时，
+  `/v1/batches` 的内联条目会运行 prompt 阶段，但它们的上游请求头同样不会发送：一次批处理提交包含多个条目。
 - 网关为自身工作发起的推理不会携带。guardrail 的 LLM 判定通过插件 `Host` 在请求上下文中调用提供商，
   该调用会丢弃这些 Header：它们描述的是客户端的提供商，而不是网关为 guardrail 选择的模型。
 - 以下名称会被拒绝，而不是被合并：携带凭据的 Header（`Authorization`、`Proxy-Authorization`、`x-api-key`、`api-key`、
