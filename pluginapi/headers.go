@@ -20,8 +20,9 @@ type Headers struct {
 	// hook wrote into the request state when the phase finishes. A host may
 	// refuse headers it owns. The GoModel host refuses credentials, the ones
 	// that frame the connection or describe the body, Accept-Encoding,
-	// Anthropic-Beta and Idempotency-Key, and sends the rest on every call
-	// through its HTTP client; Bedrock, which calls the AWS SDK directly, does
-	// not carry them.
+	// Anthropic-Beta and Idempotency-Key, and drops invalid names and values.
+	// It sends the rest only on provider calls for client requests that go
+	// through its HTTP client: not on the gateway's own inference, such as a
+	// guardrail judge, and not on Bedrock, which calls the AWS SDK directly.
 	Upstream http.Header
 }
