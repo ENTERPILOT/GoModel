@@ -19,6 +19,8 @@ type Headers struct {
 	// drop headers earlier plugins in the chain wrote. The host folds what a
 	// hook wrote into the request state when the phase finishes. A host may
 	// refuse headers it owns, such as credentials, the ones that frame the
-	// connection or describe the body, and provider feature negotiation.
+	// connection or describe the body, and provider feature negotiation. The
+	// GoModel host sends them on every call through its HTTP client; Bedrock,
+	// which calls the AWS SDK directly, does not carry them.
 	Upstream http.Header
 }

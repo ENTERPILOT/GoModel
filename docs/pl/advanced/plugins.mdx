@@ -327,9 +327,9 @@ zachowuje cache; edycja wewnątrz prefiksu unieważnia go dla sesji.
 `Headers.Upstream` umieszcza nagłówek w samym wywołaniu providera: właściwość
 routingu lub rozliczeń na poziomie requestu, której oczekuje upstream, taka jak
 w Helicone, albo tag organizacyjny, po którym routuje gateway przed providerem.
-Dane uwierzytelniające providera nie należą tutaj — nazwy, które gateway traktuje
-jako dane uwierzytelniające, są odrzucane, a każda inna wartość jest przekazywana
-do providera. Host loguje tylko, ile nagłówków ustawił plugin, nigdy ich wartości.
+Dane uwierzytelniające providera nie należą tutaj: nagłówki z danymi
+uwierzytelniającymi są odrzucane, podobnie jak pozostałe nazwy należące do gatewaya,
+wymienione poniżej. Host loguje tylko, ile nagłówków ustawił plugin, nigdy ich wartości.
 Ustaw nagłówki w hooku fazy prompt, zanim wykona się wywołanie providera. Mapa
 już istnieje: wywołaj na niej `Set` zamiast przypisywać nową, aby nagłówki zapisane
 pod innymi nazwami przez wcześniejsze pluginy w łańcuchu zostały zachowane:
@@ -367,7 +367,9 @@ Co gateway z nimi robi:
   `Idempotency-Key`, który niesie własny klucz klienta.
 - Każda inna nazwa trafia na wire z wartością pluginu, zastępując nagłówek
   przenoszony przez request oraz ten, który provider ustawił sam. Chronione są tylko
-  nazwy wymienione powyżej; pozostałe nagłówki providera nie.
+  nazwy wymienione powyżej; pozostałe nagłówki providera nie. Nazwa lub wartość,
+  która nie jest poprawnym HTTP, na przykład zawierająca znak nowej linii, jest
+  odrzucana z ostrzeżeniem, które podaje nazwę nagłówka, nigdy jego wartość.
 - Host scala nagłówki hooka ze stanem requestu, gdy faza się kończy, więc wartość
   zapisana po wykonaniu wywołania providera — z hooka fazy response — już na nie nie
   wpływa. Mapę otrzymaną z kontekstu traktuj jako tylko do odczytu.

@@ -232,8 +232,8 @@ keep-alive 注释（15 s）之前完成，针对缓冲响应做出的 `warn` 就
 ### 上游请求头
 
 `Headers.Upstream` 把 Header 放到提供商调用本身：上游期望的、按请求生效的路由或计费属性（例如 Helicone 的），
-或者提供商之前的网关用于路由的组织标签。提供商凭据不属于这里——网关视为凭据的名称会被拒绝，
-其他任何值都会转发给提供商。host 只记录插件设置了多少个 Header，从不记录它们的值。
+或者提供商之前的网关用于路由的组织标签。提供商凭据不属于这里：携带凭据的 Header 会被拒绝，
+下文列出的其他归网关所有的名称也会被拒绝。host 只记录插件设置了多少个 Header，从不记录它们的值。
 在 prompt 阶段的 Hook 中、提供商调用执行之前设置这些 Header。该 map 已经存在：请对它调用 `Set`，
 而不是赋值一个新的 map，这样链中更早插件以其他名称写入的 Header 才会保留：
 
@@ -259,7 +259,8 @@ func (p *tenantHint) OnPrompt(_ context.Context, x *pluginapi.Exchange) (plugina
   协商响应压缩的 `Accept-Encoding`、选择提供商特性且必须保留订阅凭据所需的 `oauth-2025-04-20` 标志的 `anthropic-beta`，
   以及携带客户端自身幂等键的 `Idempotency-Key`。
 - 其他任何名称都会以插件的值发到线上，替换请求携带的 Header 以及提供商自己设置的 Header。
-  只有上面列出的名称受保护；提供商其余 Header 不受保护。
+  只有上面列出的名称受保护；提供商其余 Header 不受保护。名称或值不是合法 HTTP 的 Header（例如包含换行符）会被丢弃，
+  并记录一条警告，警告中只包含 Header 名称，从不包含其值。
 - host 在该阶段结束时把 Hook 的 Header 合并进请求状态，因此在提供商调用执行之后写入的值——来自 response 阶段的 Hook——不再影响它。
   请把从上下文取回的 map 视为只读。
 

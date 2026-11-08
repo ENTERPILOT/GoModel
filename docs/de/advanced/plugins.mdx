@@ -313,9 +313,9 @@ Bearbeitungen innerhalb des Präfixes machen ihn für die Session ungültig.
 `Headers.Upstream` setzt einen Header auf den Provider-Aufruf selbst: eine
 request-bezogene Routing- oder Abrechnungs-Eigenschaft, die das Upstream erwartet,
 etwa die von Helicone, oder ein organisatorisches Tag, nach dem ein Gateway vor dem
-Provider routet. Zugangsdaten für einen Provider gehören nicht hierher — die Namen,
-die das Gateway als Zugangsdaten behandelt, werden abgelehnt, und jeder andere Wert
-wird an den Provider weitergegeben. Das Host loggt nur, wie viele Header ein Plugin
+Provider routet. Zugangsdaten für einen Provider gehören nicht hierher: Header mit
+Zugangsdaten werden abgelehnt, ebenso die übrigen Namen, die dem Gateway gehören und
+unten aufgeführt sind. Das Host loggt nur, wie viele Header ein Plugin
 gesetzt hat, nie deren Werte. Setzen Sie die Header in einem Hook der Phase `prompt`,
 bevor der Provider-Aufruf läuft. Die Map ist bereits angelegt: Rufen Sie `Set` darauf
 auf, statt eine neue zuzuweisen, damit Header, die frühere Plugins der Kette unter
@@ -355,7 +355,9 @@ Was das Gateway damit macht:
   `Idempotency-Key`, das den eigenen Schlüssel des Clients trägt.
 - Jeder andere Name erreicht die Leitung mit dem Wert des Plugins und ersetzt einen
   Header des Requests sowie einen, den der Provider selbst gesetzt hat. Nur die oben
-  genannten Namen sind geschützt; die übrigen Header des Providers nicht.
+  genannten Namen sind geschützt; die übrigen Header des Providers nicht. Ein Name
+  oder Wert, der kein gültiges HTTP ist, etwa einer mit Zeilenumbruch, wird mit einer
+  Warnung verworfen, die den Header nennt, nie seinen Wert.
 - Das Host faltet die Header eines Hooks in den Request-State, wenn diese Phase
   endet; ein Wert, der erst nach dem Provider-Aufruf geschrieben wird — aus einem Hook
   der Phase `response` —, wirkt nicht mehr. Behandeln Sie die Map, die Sie aus dem
