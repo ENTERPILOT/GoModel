@@ -328,9 +328,9 @@ type responseCapture struct {
 	overflowed bool
 }
 
-// cachedBody returns the captured bytes without copying: the buffer belongs to
-// this capture alone and is only ever appended to, so the returned slice stays
-// stable.
+// cachedBody returns the captured bytes without copying: the buffer is only
+// ever appended to, so the returned slice stays stable even when both cache
+// layers read the same capture.
 func (r *responseCapture) cachedBody(contentType string) ([]byte, bool) {
 	if r == nil || r.body == nil || r.body.Len() == 0 {
 		return nil, false
@@ -376,11 +376,17 @@ func shouldStoreCapturedResponse(status int) bool {
 }
 
 func captureResponseForCache(c *echo.Context, path, warnMessage string, next func() error) ([]byte, bool, error) {
-	capture := &responseCapture{
-		ResponseWriter: c.Response(),
-		body:           &bytes.Buffer{},
+	// On a full miss with both cache layers on, the exact layer runs inside the
+	// semantic layer's capture. Reuse that untouched outer capture instead of
+	// buffering a second copy of the same response.
+	capture, nested := c.Response().(*responseCapture)
+	if !nested || capture.status != 0 || capture.overflowed || capture.body.Len() > 0 {
+		capture = &responseCapture{
+			ResponseWriter: c.Response(),
+			body:           &bytes.Buffer{},
+		}
+		c.SetResponse(capture)
 	}
-	c.SetResponse(capture)
 	if err := next(); err != nil {
 		return nil, false, err
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/cache"
+	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
 // missStore is a cache.Store that never holds an entry, so every request
@@ -101,6 +102,50 @@ func TestHandleRequest_CapturedStreamSizeLimit(t *testing.T) {
 			}
 			assert.Empty(t, second.Header().Get("X-Cache"))
 			assert.Equal(t, 2, calls)
+		})
+	}
+}
+
+func TestCaptureResponseForCache_NestedCapture(t *testing.T) {
+	tests := []struct {
+		name string
+		// outerFirst writes the status through the outer capture before the
+		// inner capture starts, so the inner one cannot reuse it.
+		outerFirst bool
+		wantShared bool
+	}{
+		{name: "untouched outer capture is reused", wantShared: true},
+		{name: "outer capture already written to gets its own inner capture", outerFirst: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, rec := echotest.Post(t, "/v1/chat/completions", nil)
+			var inner []byte
+			outer, outerOK, err := captureResponseForCache(c, "/v1/chat/completions", "outer", func() error {
+				if tt.outerFirst {
+					c.Response().WriteHeader(http.StatusOK)
+				}
+				var innerOK bool
+				var innerErr error
+				inner, innerOK, innerErr = captureResponseForCache(c, "/v1/chat/completions", "inner", func() error {
+					return c.JSON(http.StatusOK, map[string]string{"result": "ok"})
+				})
+				require.NoError(t, innerErr)
+				require.True(t, innerOK)
+				return nil
+			})
+			require.NoError(t, err)
+			require.True(t, outerOK)
+			require.NotEmpty(t, inner)
+			require.NotEmpty(t, outer)
+
+			assert.Equal(t, rec.Body.Bytes(), inner)
+			assert.Equal(t, rec.Body.Bytes(), outer)
+			if tt.wantShared {
+				assert.Same(t, &outer[0], &inner[0], "both layers read one buffer")
+				return
+			}
+			assert.NotSame(t, &outer[0], &inner[0])
 		})
 	}
 }
