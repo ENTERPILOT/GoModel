@@ -15,9 +15,12 @@
     MAX_IMAGE_COUNT,
     SPEECH_FORMATS,
     SPEECH_VOICES,
+    embeddingDimensionsValid,
   } from "./playgroundMedia.js";
 
   const voiceOptions = SPEECH_VOICES.map((voice) => ({ value: voice, label: voice }));
+  // An invalid Dimensions value disables Send, so say why next to the field.
+  const dimensionsInvalid = $derived(!embeddingDimensionsValid(media.embeddingDimensions));
 
   // Cmd/Ctrl+Enter sends from the prompt textareas; plain Enter adds a line.
   function onKeydown(event) {
@@ -167,7 +170,14 @@
           placeholder={m.playground_media_default_option()}
           bind:value={media.embeddingDimensions}
           disabled={media.sending}
+          aria-invalid={dimensionsInvalid ? "true" : undefined}
+          aria-describedby={dimensionsInvalid ? "playground-embeddings-dimensions-error" : undefined}
         />
+        {#if dimensionsInvalid}
+          <small class="form-field-error" id="playground-embeddings-dimensions-error" role="alert">
+            {m.playground_embeddings_dimensions_invalid()}
+          </small>
+        {/if}
       </FormField>
     </div>
   {/if}

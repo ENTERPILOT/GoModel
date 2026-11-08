@@ -80,6 +80,7 @@
   "playground_embeddings_input_placeholder": "每行一段文本；每行生成一个独立向量…",
   "playground_embeddings_format_label": "编码格式",
   "playground_embeddings_dimensions_label": "维度",
+  "playground_embeddings_dimensions_invalid": "请输入正整数，或留空。",
   "playground_embeddings_empty_response": "模型未返回任何嵌入。完整内容请查看 Response JSON。",
   "playground_embeddings_base64_value": "base64 编码的向量（见 Response JSON）",
   "playground_embeddings_vectors": "{count} 个向量",

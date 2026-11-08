@@ -89,6 +89,7 @@
   "playground_embeddings_input_placeholder": "Ein Text pro Zeile; jede Zeile wird zu einem eigenen Vektor…",
   "playground_embeddings_format_label": "Kodierungsformat",
   "playground_embeddings_dimensions_label": "Dimensionen",
+  "playground_embeddings_dimensions_invalid": "Gib eine positive ganze Zahl ein oder lass das Feld leer.",
   "playground_embeddings_empty_response": "Das Modell hat keine Embeddings zurückgegeben. Die vollständige Antwort steht im Response-JSON.",
   "playground_embeddings_base64_value": "Base64-kodierter Vektor (siehe Response-JSON)",
   "playground_embeddings_vectors": [

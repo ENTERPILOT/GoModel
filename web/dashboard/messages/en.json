@@ -89,6 +89,7 @@
   "playground_embeddings_input_placeholder": "One text per line; each line becomes its own vector…",
   "playground_embeddings_format_label": "Encoding format",
   "playground_embeddings_dimensions_label": "Dimensions",
+  "playground_embeddings_dimensions_invalid": "Enter a positive whole number, or leave blank.",
   "playground_embeddings_empty_response": "The model returned no embeddings. See the Response JSON for the full payload.",
   "playground_embeddings_base64_value": "base64-encoded vector (see the Response JSON)",
   "playground_embeddings_vectors": [

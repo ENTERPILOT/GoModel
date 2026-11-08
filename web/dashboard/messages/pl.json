@@ -80,6 +80,7 @@
   "playground_embeddings_input_placeholder": "Jeden tekst w wierszu; każdy wiersz daje osobny wektor…",
   "playground_embeddings_format_label": "Format kodowania",
   "playground_embeddings_dimensions_label": "Wymiary",
+  "playground_embeddings_dimensions_invalid": "Wpisz dodatnią liczbę całkowitą lub zostaw pole puste.",
   "playground_embeddings_empty_response": "Model nie zwrócił żadnych embeddingów. Pełną odpowiedź znajdziesz w Response JSON.",
   "playground_embeddings_base64_value": "Wektor zakodowany w base64 (zobacz Response JSON)",
   "playground_embeddings_vectors": [
