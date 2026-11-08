@@ -355,7 +355,9 @@ Was das Gateway damit macht:
   `oauth-2025-04-20` behalten muss, das Abo-Zugangsdaten brauchen, und
   `Idempotency-Key`, das den eigenen Schlüssel des Clients trägt.
 - Jeder andere Name erreicht die Leitung mit dem Wert des Plugins und ersetzt einen
-  Header des Requests sowie einen, den der Provider selbst gesetzt hat. Nur die oben
+  Header des Requests sowie einen, den der Provider selbst gesetzt hat. Ein Name
+  ohne Werte entfernt den Header aus dem Aufruf; `Set(name, "")` sendet ihn leer.
+  Nur die oben
   genannten Namen sind geschützt; die übrigen Header des Providers nicht. Ein Name
   oder Wert, der kein gültiges HTTP ist, etwa einer mit Zeilenumbruch, wird mit einer
   Warnung verworfen; das Log enthält nie den Wert und auch nicht den Namen, wenn

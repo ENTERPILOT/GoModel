@@ -367,8 +367,9 @@ What the gateway does with them:
   has to keep the `oauth-2025-04-20` flag subscription credentials need, and
   `Idempotency-Key`, which carries the client's own key.
 - Any other name reaches the wire with the plugin's value, replacing a header
-  the request carried and one the provider set for itself. Only the names above
-  are protected; the rest of the provider's headers are not. A name or value
+  the request carried and one the provider set for itself. A name with no values
+  removes that header from the call; `Set(name, "")` sends it empty. Only the
+  names above are protected; the rest of the provider's headers are not. A name or value
   that is not valid HTTP, such as one with a line break, is dropped with a
   warning; the log never includes the value, or the name when the name is the
   invalid part.

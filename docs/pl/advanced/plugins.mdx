@@ -367,7 +367,8 @@ Co gateway z nimi robi:
   `oauth-2025-04-20` wymaganą przez dane uwierzytelniające subskrypcji, oraz
   `Idempotency-Key`, który niesie własny klucz klienta.
 - Każda inna nazwa trafia na wire z wartością pluginu, zastępując nagłówek
-  przenoszony przez request oraz ten, który provider ustawił sam. Chronione są tylko
+  przenoszony przez request oraz ten, który provider ustawił sam. Nazwa bez wartości
+  usuwa ten nagłówek z wywołania; `Set(name, "")` wysyła go pusty. Chronione są tylko
   nazwy wymienione powyżej; pozostałe nagłówki providera nie. Nazwa lub wartość,
   która nie jest poprawnym HTTP, na przykład zawierająca znak nowej linii, jest
   odrzucana z ostrzeżeniem; log nigdy nie zawiera wartości ani nazwy, jeśli to

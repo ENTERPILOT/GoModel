@@ -260,6 +260,7 @@ func (p *tenantHint) OnPrompt(_ context.Context, x *pluginapi.Exchange) (plugina
   协商响应压缩的 `Accept-Encoding`、选择提供商特性且必须保留订阅凭据所需的 `oauth-2025-04-20` 标志的 `anthropic-beta`，
   以及携带客户端自身幂等键的 `Idempotency-Key`。
 - 其他任何名称都会以插件的值发到线上，替换请求携带的 Header 以及提供商自己设置的 Header。
+  没有任何值的名称会把该 Header 从调用中移除；`Set(name, "")` 则发送一个空值。
   只有上面列出的名称受保护；提供商其余 Header 不受保护。名称或值不是合法 HTTP 的 Header（例如包含换行符）会被丢弃，
   并记录一条警告；日志从不包含其值，名称无效时也不包含名称。
 - host 在该阶段结束时把 Hook 的 Header 合并进请求状态，因此在提供商调用执行之后写入的值——来自 response 阶段的 Hook——不再影响它。

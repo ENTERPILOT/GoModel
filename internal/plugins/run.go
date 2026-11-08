@@ -389,7 +389,9 @@ func mergeBack(x, cp *pluginapi.Exchange, original stepHeaders) {
 // original.
 func mergeHeaderEdits(dst *http.Header, edited, original http.Header) {
 	for k, v := range edited {
-		if slices.Equal(v, original[k]) {
+		// A key the step started without is always an edit, even with an
+		// empty value: slices.Equal treats nil and empty alike.
+		if previous, ok := original[k]; ok && slices.Equal(v, previous) {
 			continue
 		}
 		if *dst == nil {

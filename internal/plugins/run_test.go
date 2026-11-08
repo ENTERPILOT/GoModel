@@ -504,6 +504,28 @@ func TestRunUpstreamHeaderLaterWriteWinsAcrossSpellings(t *testing.T) {
 	assert.Equal(t, http.Header{"X-Tenant": {"late"}}, state.UpstreamHeaders())
 }
 
+// A reader that adds a header with no value keeps it, as a mutator does: the
+// key was absent before the step, so it is an edit even though nil and empty
+// compare equal.
+func TestRunReaderKeepsAnAddedEmptyUpstreamHeader(t *testing.T) {
+	for name, value := range map[string][]string{"nil": nil, "empty": {}} {
+		t.Run(name, func(t *testing.T) {
+			reader := newTestInstance(&fakePlugin{name: "reader", onPrompt: func(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+				x.Headers.Upstream["X-Empty"] = value
+				return pluginapi.Allow(), nil
+			}}, InstanceSpec{})
+			chain, err := BuildChain(pluginapi.KindPrompt, []Ref{{reader, 10}})
+			require.NoError(t, err)
+
+			x := withPromptText(newExchange(), "hi")
+			_, err = chain.RunPrompt(context.Background(), x)
+			require.NoError(t, err)
+
+			assert.Contains(t, x.Headers.Upstream, "X-Empty")
+		})
+	}
+}
+
 // A step with one reader takes its own path, which skips the goroutine and
 // the per-reader slices. It must merge back exactly what the concurrent path
 // does: values, response headers, and request headers the reader set,
