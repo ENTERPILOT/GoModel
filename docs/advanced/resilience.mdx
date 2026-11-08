@@ -310,7 +310,8 @@ Model discovery is re-checked:
   (`provider/model`) that is missing from the registry. Concurrent misses
   for the same `provider` prefix share one fetch, and each prefix is fetched
   this way at most once a minute; misses within that minute get the previous
-  result. A provider's name and its type are separate prefixes.
+  result, including a failed refresh's error. A provider's name and its type
+  are separate prefixes.
 
 ## What happens while a provider is down
 
