@@ -60,6 +60,7 @@
   "playground_mode_image": "Obraz",
   "playground_mode_speech": "Mowa",
   "playground_mode_transcription": "Transkrypcja",
+  "playground_mode_embeddings": "Embeddingi",
   "playground_media_prompt_label": "Prompt",
   "playground_media_image_placeholder": "Opisz obraz do wygenerowania…",
   "playground_media_size_label": "Rozmiar",
@@ -75,6 +76,61 @@
   "playground_media_transcription_prompt_placeholder": "Opcjonalny kontekst lub wskazówki pisowni",
   "playground_media_empty": "Wypełnij formularz poniżej i wyślij go, aby zobaczyć tutaj wynik.",
   "playground_media_empty_response": "Model nie zwrócił żadnych mediów. Pełną odpowiedź znajdziesz w Response JSON.",
+  "playground_embeddings_input_label": "Teksty",
+  "playground_embeddings_input_placeholder": "Jeden tekst w wierszu; każdy wiersz daje osobny wektor…",
+  "playground_embeddings_format_label": "Format kodowania",
+  "playground_embeddings_dimensions_label": "Wymiary",
+  "playground_embeddings_dimensions_invalid": "Wpisz dodatnią liczbę całkowitą lub zostaw pole puste.",
+  "playground_embeddings_empty_response": "Model nie zwrócił żadnych embeddingów. Pełną odpowiedź znajdziesz w Response JSON.",
+  "playground_embeddings_base64_value": "Wektor zakodowany w base64 (zobacz Response JSON)",
+  "playground_embeddings_vectors": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} wektor",
+        "count_plural=few": "{count} wektory",
+        "count_plural=many": "{count} wektorów",
+        "count_plural=*": "{count} wektora"
+      }
+    }
+  ],
+  "playground_embeddings_dimensions": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} wymiar",
+        "count_plural=few": "{count} wymiary",
+        "count_plural=many": "{count} wymiarów",
+        "count_plural=*": "{count} wymiaru"
+      }
+    }
+  ],
+  "playground_embeddings_rows": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} wektor tokenu",
+        "count_plural=few": "{count} wektory tokenów",
+        "count_plural=many": "{count} wektorów tokenów",
+        "count_plural=*": "{count} wektora tokenów"
+      }
+    }
+  ],
+  "playground_embeddings_prompt_tokens": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} token promptu",
+        "count_plural=few": "{count} tokeny promptu",
+        "count_plural=many": "{count} tokenów promptu",
+        "count_plural=*": "{count} tokena promptu"
+      }
+    }
+  ],
   "navigation_audit_logs": "Logi audytowe",
   "navigation_usage": "Zużycie",
   "navigation_budgets": "Budżety",
@@ -1488,6 +1544,58 @@
   "mcp_reconnected": "Ponownie połączono serwer MCP „{name}”.",
   "mcp_reconnect_disabled": "Serwer MCP „{name}” jest wyłączony; nie podjęto próby połączenia.",
   "mcp_reconnect_status": "Podjęto próbę ponownego połączenia, ale status serwera MCP „{name}” to nadal {status}.",
+  "mcp_oauth_signed_in": "Zalogowano",
+  "mcp_oauth_expired": "Logowanie wygasło",
+  "mcp_oauth_error": "Logowanie wymaga uwagi",
+  "mcp_oauth_required": "Wymagane logowanie",
+  "mcp_oauth_sign_in_action": "Zaloguj się do serwera MCP {name}",
+  "mcp_oauth_sign_out_action": "Wyloguj się z serwera MCP {name}",
+  "mcp_oauth_title": "Zaloguj się do {name}",
+  "mcp_oauth_help": "GoModel odnajduje serwer autoryzacji tego serwera i otwiera jego stronę logowania. Po udzieleniu dostępu wrócisz tutaj, a GoModel zapisze tokeny w postaci zaszyfrowanej i będzie je odświeżać, jeśli serwer wyda refresh token.",
+  "mcp_oauth_continue": "Przejdź do logowania",
+  "mcp_oauth_continuing": "Otwieranie logowania...",
+  "mcp_oauth_redirect_uri": "Adres przekierowania (redirect URI)",
+  "mcp_oauth_redirect_uri_help": "Zarejestruj ten adres, jeśli samodzielnie tworzysz klienta OAuth dla tego serwera.",
+  "mcp_oauth_client_section": "Użyj własnego klienta OAuth",
+  "mcp_oauth_client_help": "Potrzebne tylko wtedy, gdy serwer autoryzacji nie obsługuje dynamicznej rejestracji klientów. Pozostaw puste, aby zarejestrować klienta automatycznie.",
+  "mcp_oauth_client_id": "Identyfikator klienta",
+  "mcp_oauth_client_secret": "Sekret klienta",
+  "mcp_oauth_client_secret_help": "Opcjonalnie. Pozostaw puste dla klienta publicznego.",
+  "mcp_oauth_start_failed": "Nie udało się rozpocząć logowania.",
+  "mcp_oauth_signed_in_flash": "Zalogowano do serwera MCP \"{name}\".",
+  "mcp_oauth_failed_flash": "Logowanie do serwera MCP \"{name}\" nie powiodło się. Przyczynę pokazuje wiersz serwera.",
+  "mcp_oauth_expired_flash": "Logowanie wygasło lub zostało już zakończone. Rozpocznij je ponownie.",
+  "mcp_oauth_sign_out_confirm": "Wylogować się z serwera MCP \"{name}\"? GoModel usunie zapisane tokeny.",
+  "mcp_oauth_sign_out_failed": "Nie udało się wylogować z serwera MCP.",
+  "mcp_oauth_signed_out": "Wylogowano z serwera MCP \"{name}\".",
+  "mcp_preset_help": "Wybierz hostowaną usługę, aby połączyć ją przez logowanie lub token, albo dodaj własny serwer.",
+  "mcp_preset_server": "Serwer",
+  "mcp_preset_server_placeholder": "Wybierz serwer",
+  "mcp_preset_server_search": "Szukaj serwerów",
+  "mcp_preset_server_required": "Najpierw wybierz serwer.",
+  "mcp_preset_url_match": "To serwer {name}.",
+  "mcp_preset_url_match_action": "Użyj opcji {name}",
+  "mcp_preset_custom_advanced_summary": "Transport, slug, reguły dostępu i timeout",
+  "mcp_preset_custom": "Własny serwer",
+  "mcp_preset_custom_help": "Dowolny URL serwera MCP, nagłówki i transport",
+  "mcp_preset_auth_oauth": "Logowanie",
+  "mcp_preset_auth_oauth_or_token": "Logowanie lub klucz API",
+  "mcp_preset_auth_token": "Token API",
+  "mcp_preset_method": "Połącz przez",
+  "mcp_preset_method_oauth": "Zaloguj się przez {name}",
+  "mcp_preset_method_token": "Klucz API lub token",
+  "mcp_preset_method_none": "Bez uwierzytelniania",
+  "mcp_preset_oauth_help": "Po zapisaniu zatwierdzasz dostęp na stronie logowania {name} i wracasz tutaj. GoModel przechowuje tokeny zaszyfrowane i odświeża je, jeśli {name} wydaje refresh token.",
+  "mcp_preset_oauth_manual_help": "{name} wymaga aplikacji OAuth, którą rejestrujesz raz. Po zapisaniu wpisz jej client ID i secret, a potem się zaloguj.",
+  "mcp_preset_oauth_manual_link": "Zarejestruj aplikację OAuth w {name}",
+  "mcp_preset_oauth_client_steps": "Zarejestruj w {name} aplikację OAuth z powyższym redirect URI, a potem wpisz jej client ID i secret.",
+  "mcp_preset_token": "Klucz API lub token",
+  "mcp_preset_token_help": "Wysyłany jako nagłówek Authorization: Bearer i przechowywany jak inne sekrety nagłówków.",
+  "mcp_preset_token_link": "Utwórz go w {name}",
+  "mcp_preset_token_required": "Wpisz klucz API lub token albo wybierz inny sposób połączenia.",
+  "mcp_preset_none_help": "GoModel łączy się bez danych uwierzytelniających. Niektóre narzędzia mogą wymagać tokenu.",
+  "mcp_preset_save_sign_in": "Zapisz i zaloguj",
+  "mcp_preset_advanced_summary": "URL, nagłówki, slug, reguły dostępu i timeout",
   "mcp_not_found": "Nie znaleziono serwera MCP „{name}”.",
   "mcp_catalog_load_failed": "Nie udało się wczytać katalogu serwera MCP.",
   "providers_edit": "Edytuj dostawcę",
@@ -1545,7 +1653,10 @@
   "providers_service_account_file_hint": "Ścieżka dostępna do odczytu przez proces gateway.",
   "providers_service_account_json_hint": "Zapisane wartości są zamaskowane; pozostaw gwiazdki bez zmian, aby zachować wartość, lub wyczyść pole, aby ją usunąć.",
   "providers_service_account_json_base64_hint": "Zapisane wartości są zamaskowane; pozostaw gwiazdki bez zmian, aby zachować wartość.",
-  "providers_models_hint": "Pozostaw puste, aby automatycznie wykryć modele z endpointu /models dostawcy, jeśli jest obsługiwany.",
+  "providers_models_hint": "Pozostaw puste, aby automatycznie wykryć modele z endpointu /models dostawcy, jeśli jest obsługiwany. Przy domyślnym trybie modeli (allowlist) udostępniane są tylko te modele; wybierz fallback lub merge, aby zachować automatyczne wykrywanie.",
+  "providers_models_mode": "Tryb modeli",
+  "providers_models_mode_hint": "Jak używana jest lista modeli. allowlist: udostępnij tylko te modele; /models jest czytany tylko dla ich metadanych. fallback: tylko gdy wywołanie /models dostawcy się nie powiedzie lub nic nie zwróci. merge: dodaj je do wykrytych modeli. Domyślnie używane jest globalne CONFIGURED_PROVIDER_MODELS_MODE (allowlist, jeśli nie ustawiono).",
+  "providers_models_mode_docs": "Porównaj tryby modeli w dokumentacji",
   "providers_default_value": "Domyślnie: {value}",
   "providers_keys_count": [
     {

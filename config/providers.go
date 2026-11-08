@@ -43,6 +43,10 @@ type RawProviderConfig struct {
 	// defaults to true; nil preserves that default.
 	FairnessFromUserPath *bool              `yaml:"fairness_from_user_path"`
 	Models               []RawProviderModel `yaml:"models"`
+	// ModelsMode overrides the gateway-wide configured_provider_models_mode
+	// for this provider only: "fallback", "allowlist", or "merge". Empty uses
+	// the global mode. Set it via `models_mode:` or `<PROVIDER>_MODELS_MODE`.
+	ModelsMode ConfiguredProviderModelsMode `yaml:"models_mode"`
 	// ModelFilter narrows the provider's model inventory to the models that
 	// match its patterns and price cap. It applies to the final inventory, so
 	// it also narrows models added by `models` in merge or allowlist mode.

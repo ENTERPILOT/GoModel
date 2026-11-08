@@ -13,6 +13,7 @@ const maxBoundaryTailBytes = 3
 var (
 	lfEventBoundary   = []byte("\n\n")
 	crlfEventBoundary = []byte("\r\n\r\n")
+	crlfLineEnd       = []byte("\r\n")
 	dataPrefix        = []byte("data:")
 	donePayload       = []byte("[DONE]")
 )
@@ -112,38 +113,21 @@ func (s *ObservedSSEStream) processChunk(data []byte) {
 				s.startDiscarding(s.pending, data)
 				return
 			}
-
-			combinedLen := pendingLen + len(data)
-			combined := make([]byte, combinedLen)
-			copy(combined, s.pending)
-			copy(combined[pendingLen:], data)
-			s.pending = combined
+			s.pending = append(s.pending, data...)
 			return
 		}
 
-		if idx > maxPendingEventBytes {
-			s.pending = nil
-			data = data[dataOffsetAfterBoundary(pendingLen, idx, sepLen):]
-		} else if idx < pendingLen {
-			event := append([]byte(nil), s.pending[:idx]...)
-			s.pending = nil
-			s.processEvent(event)
-			data = data[dataOffsetAfterBoundary(pendingLen, idx, sepLen):]
-		} else {
-			dataIdx := idx - pendingLen
-			if pendingLen > maxPendingEventBytes-dataIdx {
-				s.pending = nil
-				data = data[dataIdx+sepLen:]
-			} else {
-				combinedLen := pendingLen + dataIdx
-				event := make([]byte, combinedLen)
-				copy(event, s.pending)
-				copy(event[pendingLen:], data[:dataIdx])
-				s.pending = nil
-				s.processEvent(event)
-				data = data[dataIdx+sepLen:]
+		offset := dataOffsetAfterBoundary(pendingLen, idx, sepLen)
+		if idx <= maxPendingEventBytes {
+			if idx > pendingLen {
+				s.pending = append(s.pending, data[:idx-pendingLen]...)
 			}
+			// Observers receive decoded payloads only, so the event may
+			// alias pending for the duration of this call.
+			s.processEvent(s.pending[:idx])
 		}
+		s.resetPending()
+		data = data[offset:]
 	}
 
 	for len(data) > 0 {
@@ -191,28 +175,9 @@ func (s *ObservedSSEStream) processBufferedEvents(data []byte) {
 }
 
 func (s *ObservedSSEStream) processEvent(event []byte) {
-	// Fast path: a single-line event (the common shape for chat SSE) needs no
-	// line splitting or payload joining.
-	if bytes.IndexByte(event, '\n') == -1 {
-		if jsonData, ok := ParseDataLine(event); ok {
-			s.dispatchPayload(jsonData)
-		}
-		return
+	if jsonData, ok := EventData(event); ok {
+		s.dispatchPayload(jsonData)
 	}
-
-	lines := bytes.Split(event, []byte("\n"))
-	payloadLines := make([][]byte, 0, len(lines))
-	for _, line := range lines {
-		jsonData, ok := ParseDataLine(line)
-		if !ok {
-			continue
-		}
-		payloadLines = append(payloadLines, jsonData)
-	}
-	if len(payloadLines) == 0 {
-		return
-	}
-	s.dispatchPayload(bytes.Join(payloadLines, []byte("\n")))
 }
 
 func (s *ObservedSSEStream) dispatchPayload(jsonData []byte) {
@@ -249,19 +214,22 @@ func (s *ObservedSSEStream) payloadWanted(jsonData []byte) bool {
 // boundary yet. Both the LF and CRLF forms are recognized, and the earlier one
 // wins when both appear.
 func NextEventBoundary(data []byte) (idx int, sepLen int) {
-	lfIdx := bytes.Index(data, lfEventBoundary)
-	crlfIdx := bytes.Index(data, crlfEventBoundary)
-
-	switch {
-	case lfIdx == -1:
-		if crlfIdx == -1 {
+	// Every boundary holds a line feed: "\n\n" starts with one and
+	// "\r\n\r\n" has one at offset 1. Checking the bytes around each line
+	// feed in order finds the earliest boundary in a single pass.
+	for start := 0; ; {
+		i := bytes.IndexByte(data[start:], '\n')
+		if i == -1 {
 			return -1, 0
 		}
-		return crlfIdx, len(crlfEventBoundary)
-	case crlfIdx == -1 || lfIdx < crlfIdx:
-		return lfIdx, len(lfEventBoundary)
-	default:
-		return crlfIdx, len(crlfEventBoundary)
+		i += start
+		if i+1 < len(data) && data[i+1] == '\n' {
+			return i, len(lfEventBoundary)
+		}
+		if i > 0 && data[i-1] == '\r' && bytes.HasPrefix(data[i+1:], crlfLineEnd) {
+			return i - 1, len(crlfEventBoundary)
+		}
+		start = i + 1
 	}
 }
 
@@ -279,6 +247,45 @@ func ParseDataLine(line []byte) ([]byte, bool) {
 		payload = payload[1:]
 	}
 	return payload, true
+}
+
+// EventData returns the payload of one SSE event, its data lines joined with
+// "\n", and reports whether the event had any data line. Other fields and
+// comment lines are ignored. A single data line, the common shape, is returned
+// as a subslice of event without copying.
+func EventData(event []byte) ([]byte, bool) {
+	var payload []byte
+	found, joined := false, false
+	for len(event) > 0 {
+		line := event
+		event = nil
+		if i := bytes.IndexByte(line, '\n'); i != -1 {
+			line, event = line[:i], line[i+1:]
+		}
+		data, ok := ParseDataLine(line)
+		switch {
+		case !ok:
+		case !found:
+			payload, found = data, true
+		case !joined:
+			// payload aliases event, so the first join must copy.
+			payload = append(append(append(make([]byte, 0, len(payload)+1+len(data)), payload...), '\n'), data...)
+			joined = true
+		default:
+			payload = append(append(payload, '\n'), data...)
+		}
+	}
+	return payload, found
+}
+
+// resetPending empties pending for reuse, releasing it instead when one
+// oversized event grew it past the event limit.
+func (s *ObservedSSEStream) resetPending() {
+	if cap(s.pending) > maxPendingEventBytes {
+		s.pending = nil
+		return
+	}
+	s.pending = s.pending[:0]
 }
 
 func (s *ObservedSSEStream) savePending(data []byte) {

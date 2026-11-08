@@ -53,6 +53,7 @@ const sqlRateLimitWindowSnapshotsSchema = `
 		in_flight ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
 		updated_at ` + sqlx.TypeInt64 + ` NOT NULL,
 		expires_at ` + sqlx.TypeInt64 + `,
+		own_counts ` + sqlx.TypeBool + ` NOT NULL DEFAULT FALSE,
 		PRIMARY KEY (scope, subject, partition, period_seconds, writer)
 	)`
 
@@ -112,6 +113,9 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 		`ALTER TABLE rate_limit_window_snapshots ADD COLUMN in_flight `+sqlx.TypeInt64+` NOT NULL DEFAULT 0`,
 		// NULL on rows saved before it existed; see pruneLegacyCountersSQL.
 		`ALTER TABLE rate_limit_window_snapshots ADD COLUMN expires_at `+sqlx.TypeInt64,
+		// Older releases never write it, so their rows read false and are
+		// merged by maximum (see WindowSnapshot.OwnCounts).
+		`ALTER TABLE rate_limit_window_snapshots ADD COLUMN own_counts `+sqlx.TypeBool+` NOT NULL DEFAULT FALSE`,
 	); err != nil {
 		return nil, fmt.Errorf("failed to migrate rate_limit_window_snapshots table: %w", err)
 	}
@@ -220,7 +224,7 @@ func (s *SQLStore) LoadCounters(ctx context.Context, since int64, exclude string
 		SELECT scope, subject, partition, period_seconds, writer, epoch,
 			requests_window_start, requests_current, requests_previous,
 			tokens_window_start, tokens_current, tokens_previous,
-			in_flight, updated_at
+			in_flight, updated_at, own_counts
 		FROM rate_limit_window_snapshots
 		WHERE updated_at >= ?`
 	args := []any{since}
@@ -241,7 +245,7 @@ func (s *SQLStore) LoadCounters(ctx context.Context, since int64, exclude string
 			&snap.Scope, &snap.Subject, &snap.Partition, &snap.PeriodSeconds, &snap.Writer, &snap.Epoch,
 			&snap.RequestsWindowStart, &snap.RequestsCurrent, &snap.RequestsPrevious,
 			&snap.TokensWindowStart, &snap.TokensCurrent, &snap.TokensPrevious,
-			&snap.InFlight, &snap.UpdatedAt,
+			&snap.InFlight, &snap.UpdatedAt, &snap.OwnCounts,
 		); err != nil {
 			// One unreadable row must not cost every other window its
 			// restore: Start treats a load error as "do not persist this
@@ -268,11 +272,12 @@ const upsertCounterPrefix = `
 	INSERT INTO rate_limit_window_snapshots (
 		scope, subject, partition, period_seconds, writer, epoch,
 		requests_window_start, requests_current, requests_previous,
-		tokens_window_start, tokens_current, tokens_previous, in_flight, updated_at, expires_at
+		tokens_window_start, tokens_current, tokens_previous, in_flight, updated_at, expires_at,
+		own_counts
 	) VALUES `
 
 // upsertCounterColumnCount is the number of placeholders of one row.
-const upsertCounterColumnCount = 15
+const upsertCounterColumnCount = 16
 
 var upsertCounterRow = "(" + strings.TrimSuffix(strings.Repeat("?, ", upsertCounterColumnCount), ", ") + ")"
 
@@ -287,7 +292,8 @@ const upsertCounterSuffix = `
 		tokens_previous = excluded.tokens_previous,
 		in_flight = excluded.in_flight,
 		updated_at = excluded.updated_at,
-		expires_at = excluded.expires_at
+		expires_at = excluded.expires_at,
+		own_counts = excluded.own_counts
 `
 
 // buildCounterUpsert returns one statement that upserts every snapshot,
@@ -307,7 +313,7 @@ func buildCounterUpsert(snapshots []WindowSnapshot, now int64) (string, []any) {
 			snap.Scope, snap.Subject, snap.Partition, snap.PeriodSeconds, snap.Writer, snap.Epoch,
 			snap.RequestsWindowStart, snap.RequestsCurrent, snap.RequestsPrevious,
 			snap.TokensWindowStart, snap.TokensCurrent, snap.TokensPrevious, snap.InFlight,
-			now, now+counterRetention(snap.PeriodSeconds),
+			now, now+counterRetention(snap.PeriodSeconds), snap.OwnCounts,
 		)
 	}
 	query.WriteString(upsertCounterSuffix)

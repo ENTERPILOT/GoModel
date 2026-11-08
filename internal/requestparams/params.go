@@ -12,6 +12,7 @@ import (
 	"maps"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/goccy/go-json"
 
@@ -85,9 +86,14 @@ func without(set, other Set) Set {
 	if len(set) == 0 || len(other) == 0 {
 		return set
 	}
+	drop := canonicalKeys(other)
+	covered := func(key string) bool {
+		_, ok := drop[canonicalKey(key)]
+		return ok
+	}
 	shared := false
-	for key := range other {
-		if _, ok := set[key]; ok {
+	for key := range set {
+		if covered(key) {
 			shared = true
 			break
 		}
@@ -97,7 +103,7 @@ func without(set, other Set) Set {
 	}
 	kept := make(Set, len(set))
 	for key, value := range set {
-		if _, drop := other[key]; !drop {
+		if !covered(key) {
 			kept[key] = value
 		}
 	}
@@ -117,10 +123,36 @@ func Merge(base, over Set) Set {
 	case len(base) == 0:
 		return over
 	}
+	// A key over sets in another spelling of the same parameter replaces
+	// the base's too.
 	merged := make(Set, len(base)+len(over))
-	maps.Copy(merged, base)
+	maps.Copy(merged, without(base, over))
 	maps.Copy(merged, over)
 	return merged
+}
+
+// tokenLimitKeys are the spellings of one parameter, the output token limit:
+// Chat Completions' max_tokens and max_completion_tokens, and the Responses
+// API's max_output_tokens. Sets match and layer them as one key.
+var tokenLimitKeys = map[string]struct{}{
+	"max_tokens": {}, "max_completion_tokens": {}, "max_output_tokens": {},
+}
+
+// canonicalKey names the parameter a key sets, folding the token-limit
+// spellings into one.
+func canonicalKey(key string) string {
+	if _, ok := tokenLimitKeys[key]; ok {
+		return "max_tokens"
+	}
+	return key
+}
+
+func canonicalKeys(set Set) map[string]struct{} {
+	keys := make(map[string]struct{}, len(set))
+	for key := range set {
+		keys[canonicalKey(key)] = struct{}{}
+	}
+	return keys
 }
 
 // Clone deep-copies a set so stored rows are never shared with callers.
@@ -172,13 +204,19 @@ func Normalize(field string, set Set, allowNull bool) (Set, error) {
 	}
 	normalized := make(Set, len(set))
 	size := 0
-	for key, raw := range set {
+	spelledAs := make(map[string]string, len(set))
+	for _, key := range sortedKeys(set) {
+		raw := set[key]
 		if err := validateKey(field, key); err != nil {
 			return nil, err
 		}
 		if _, dup := normalized[key]; dup {
 			return nil, validation.NewError(fmt.Sprintf("%s: duplicate parameter %q", field, key), nil)
 		}
+		if other, dup := spelledAs[canonicalKey(key)]; dup {
+			return nil, validation.NewError(fmt.Sprintf("%s: %q and %q set the same token limit; keep one", field, other, key), nil)
+		}
+		spelledAs[canonicalKey(key)] = key
 		value := bytes.TrimSpace(raw)
 		if len(value) == 0 || bytes.Equal(value, []byte(nullLexeme)) {
 			if !allowNull {
@@ -213,8 +251,9 @@ func Normalize(field string, set Set, allowNull bool) (Set, error) {
 // Disjoint rejects a key configured in both sets of one row, where the
 // forced value would silently make the default dead.
 func Disjoint(defaults, params Set) error {
-	for key := range params {
-		if _, both := defaults[key]; both {
+	forced := canonicalKeys(params)
+	for _, key := range sortedKeys(defaults) {
+		if _, both := forced[canonicalKey(key)]; both {
 			return validation.NewError(fmt.Sprintf("parameter %q cannot be in both params and default_params", key), nil)
 		}
 	}
@@ -232,8 +271,13 @@ func validateKey(field, key string) error {
 		if r < 0x20 || r == 0x7f {
 			return validation.NewError(fmt.Sprintf("%s: parameter name %q contains control characters", field, key), nil)
 		}
+		if unicode.IsSpace(r) {
+			return validation.NewError(fmt.Sprintf("%s: parameter name %q contains whitespace", field, key), nil)
+		}
 	}
-	if _, frozen := frozenKeys[key]; frozen {
+	// Matched case-insensitively: "Model" is no upstream's parameter, and
+	// some upstreams read keys case-insensitively.
+	if _, frozen := frozenKeys[strings.ToLower(key)]; frozen {
 		return validation.NewError(fmt.Sprintf("%s: parameter %q cannot be configured on a virtual model", field, key), nil)
 	}
 	return nil
@@ -247,10 +291,32 @@ func validateTyped(field, key string, raw json.RawMessage) error {
 	case "temperature", "top_p", "presence_penalty", "frequency_penalty":
 		var v float64
 		err = json.Unmarshal(raw, &v)
-	case "max_tokens", "max_output_tokens", "max_completion_tokens", "top_logprobs":
+	case "top_logprobs":
 		var v int
 		if err = json.Unmarshal(raw, &v); err == nil && v < 0 {
 			err = fmt.Errorf("must not be negative")
+		}
+	case "max_tokens", "max_output_tokens", "max_completion_tokens", "n":
+		// No upstream accepts a zero token limit or zero choices.
+		var v int
+		if err = json.Unmarshal(raw, &v); err == nil && v < 1 {
+			err = fmt.Errorf("must be at least 1")
+		}
+	case "seed":
+		var v int64
+		err = json.Unmarshal(raw, &v)
+	case "stop":
+		err = stringOrStrings(raw)
+	case "verbosity":
+		var v string
+		err = json.Unmarshal(raw, &v)
+	case "response_format", "text":
+		// Both must be objects. response_format applies on chat only (the
+		// Responses API skips it unless forced null) and needs a type; text
+		// applies on the Responses API as one key, merged one level deep.
+		var v map[string]json.RawMessage
+		if err = json.Unmarshal(raw, &v); err == nil && key == "response_format" {
+			err = validateResponseFormat(v)
 		}
 	case "parallel_tool_calls", "store", "logprobs":
 		var v bool
@@ -287,6 +353,44 @@ func validateTyped(field, key string, raw json.RawMessage) error {
 	}
 	if err != nil {
 		return validation.NewError(fmt.Sprintf("%s: parameter %q has the wrong type: %v", field, key, err), nil)
+	}
+	return nil
+}
+
+// validateResponseFormat checks a response_format object: a string type,
+// and for json_schema a json_schema object, so a forced schema cannot be
+// skipped at request time for being malformed.
+func validateResponseFormat(format map[string]json.RawMessage) error {
+	var formatType string
+	if json.Unmarshal(format["type"], &formatType) != nil || formatType == "" {
+		return fmt.Errorf("must be an object with a string type")
+	}
+	if formatType != "json_schema" {
+		return nil
+	}
+	var schema map[string]json.RawMessage
+	if json.Unmarshal(format["json_schema"], &schema) != nil || schema == nil {
+		return fmt.Errorf("json_schema must be an object")
+	}
+	return nil
+}
+
+// stringOrStrings accepts a JSON string or an array of JSON strings. A null
+// element would decode into a Go string without complaint, so each element's
+// lexeme is checked.
+func stringOrStrings(raw json.RawMessage) error {
+	if raw[0] == '"' {
+		var v string
+		return json.Unmarshal(raw, &v)
+	}
+	var elements []json.RawMessage
+	if err := json.Unmarshal(raw, &elements); err != nil {
+		return fmt.Errorf("must be a string or an array of strings")
+	}
+	for i, element := range elements {
+		if len(element) == 0 || element[0] != '"' {
+			return fmt.Errorf("element %d must be a string", i)
+		}
 	}
 	return nil
 }

@@ -335,3 +335,76 @@ func TestSynthesizeChatStream_VendorReasoningMember(t *testing.T) {
 	assert.Equal(t, `"hm"`, string(assembled.Choices[0].Message.ExtraFields.Lookup("reasoning")))
 	assert.Nil(t, assembled.Choices[0].Message.ExtraFields.Lookup("reasoning_content"))
 }
+
+// Generated images arrive as their own deltas and carry thought signatures;
+// a buffered replay must hand all of them back, and a malformed images member
+// must not cost the chunk its text.
+func TestChatStreamRoundTrip_KeepsImages(t *testing.T) {
+	const one = `{"type":"image_url","image_url":{"url":"data:image/png;base64,b25l","extra_content":{"google":{"thought_signature":"sig-a"}}}}`
+	const two = `{"type":"image_url","image_url":{"url":"data:image/png;base64,dHdv"}}`
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl-5","model":"gemini-2.5-flash-image","choices":[{"index":0,"delta":{"role":"assistant","content":"Here: "}}]}`,
+		`data: {"choices":[{"index":0,"delta":{"images":[` + one + `]}}]}`,
+		`data: {"choices":[{"index":0,"delta":{"content":"and ","images":{"not":"a list"}}}]}`,
+		`data: {"choices":[{"index":0,"delta":{"images":[` + two + `]},"finish_reason":"stop"}]}`,
+		"",
+	}, "\n\n")
+
+	resp, err := AssembleChatResponse(decodeChatEvents(t, []byte(stream)))
+	require.NoError(t, err)
+	require.Len(t, resp.Choices, 1)
+	assert.Equal(t, "Here: and ", resp.Choices[0].Message.Content)
+	want := `[` + one + `,` + two + `]`
+	assert.JSONEq(t, want, string(resp.Choices[0].Message.ExtraFields.Lookup(core.ChatImagesField)))
+
+	replayed, err := AssembleChatResponse(decodeChatEvents(t, SynthesizeChatStream(resp, false)))
+	require.NoError(t, err)
+	require.Len(t, replayed.Choices, 1)
+	assert.Equal(t, "Here: and ", replayed.Choices[0].Message.Content)
+	assert.JSONEq(t, want, string(replayed.Choices[0].Message.ExtraFields.Lookup(core.ChatImagesField)))
+}
+
+// One malformed entry must not cost the turn its valid images: downstream
+// readers decode the images member as a whole, so the assembler keeps only
+// image_url parts with a URL.
+func TestAssembleChatResponse_SkipsMalformedImageEntries(t *testing.T) {
+	const one = `{"type":"image_url","image_url":{"url":"data:image/png;base64,b25l","extra_content":{"google":{"thought_signature":"sig-a"}}}}`
+	const two = `{"type":"image_url","image_url":{"url":"data:image/png;base64,dHdv"}}`
+	malformed := []string{
+		`{"type":"image_url"}`,
+		`{"type":"image_url","image_url":{"url":""}}`,
+		`{"type":"image_url","image_url":42}`,
+		`{"type":"text","text":"not an image"}`,
+		`{"type":"mystery"}`,
+		`42`,
+		`"str"`,
+		`null`,
+	}
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl-6","choices":[{"index":0,"delta":{"role":"assistant","images":[` + one + `,` + strings.Join(malformed, ",") + `,` + two + `]}}]}`,
+		`data: {"choices":[{"index":0,"delta":{"images":[` + strings.Join(malformed, ",") + `]},"finish_reason":"stop"}]}`,
+		"",
+	}, "\n\n")
+
+	resp, err := AssembleChatResponse(decodeChatEvents(t, []byte(stream)))
+	require.NoError(t, err)
+	require.Len(t, resp.Choices, 1)
+	fields := resp.Choices[0].Message.ExtraFields
+	assert.JSONEq(t, `[`+one+`,`+two+`]`, string(fields.Lookup(core.ChatImagesField)))
+	images, err := core.ChatImages(fields)
+	require.NoError(t, err)
+	assert.Len(t, images, 2)
+}
+
+func TestAssembleChatResponse_OnlyMalformedImagesLeavesNoMember(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"choices":[{"index":0,"delta":{"content":"hi","images":[{"type":"image_url"},null]},"finish_reason":"stop"}]}`,
+		"",
+	}, "\n\n")
+
+	resp, err := AssembleChatResponse(decodeChatEvents(t, []byte(stream)))
+	require.NoError(t, err)
+	require.Len(t, resp.Choices, 1)
+	assert.Equal(t, "hi", resp.Choices[0].Message.Content)
+	assert.Nil(t, resp.Choices[0].Message.ExtraFields.Lookup(core.ChatImagesField))
+}

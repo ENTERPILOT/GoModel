@@ -35,6 +35,7 @@ func runCounterStoreSuite(t *testing.T, store Store, seedStale func(t *testing.T
 			PeriodSeconds: PeriodHourSeconds, Writer: "writer-a",
 			RequestsWindowStart: 1700000000, RequestsCurrent: 3, RequestsPrevious: 1,
 			TokensWindowStart: 1700000000, TokensCurrent: 40, TokensPrevious: 10,
+			OwnCounts: true,
 		},
 		{
 			Scope: string(ScopeUserPath), Subject: "/customers", Partition: "/customers/bob",

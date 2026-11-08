@@ -78,11 +78,22 @@ func (v *peerView) merge(rows []WindowSnapshot, self string, full bool) {
 //     slots are free. It is dropped from the cache then, and once it reads
 //     zero. In-flight rows ignore the epoch, as a reset leaves in-flight
 //     gauges alone (see limiter.reset).
+//   - A window row written by a release before rows held only their own
+//     counts (WindowSnapshot.OwnCounts false) is merged with the key's other
+//     such rows by maximum, as those releases merged them, and that maximum
+//     is added to the sum once. Each of those rows already includes what its
+//     writer restored at start, so summing them would charge every restart
+//     again. The rows cannot tell restored counts from new ones, so this is
+//     approximate until they roll out, two periods after the last old writer
+//     stops: several old replicas' independent traffic counts as the
+//     largest share, and an old replica restarted mid-rollout restores this
+//     release's rows into its own and counts them a second time.
 //
 // A key nobody else counted gets no entry, and a cluster of one gets nil maps.
 func (v *peerView) sum(rules []Rule, now time.Time, liveness time.Duration) (requests, tokens map[ruleKey]windowCounter, inFlight map[ruleKey]int64) {
 	index := indexRules(rules)
 	nowUnix := now.Unix()
+	var legacyRequests, legacyTokens map[ruleKey]windowCounter
 	for id, row := range v.rows {
 		key := ruleKey{
 			scope:         RuleScope(row.Scope),
@@ -115,19 +126,57 @@ func (v *peerView) sum(rules []Rule, now time.Time, liveness time.Duration) (req
 			if !ok || row.Epoch != rule.CounterEpoch {
 				continue
 			}
-			requests = addCounter(requests, key, windowCounter{
+			requestRow := windowCounter{
 				windowStart: row.RequestsWindowStart,
 				current:     row.RequestsCurrent,
 				previous:    row.RequestsPrevious,
-			}, now)
-			tokens = addCounter(tokens, key, windowCounter{
+			}
+			tokenRow := windowCounter{
 				windowStart: row.TokensWindowStart,
 				current:     row.TokensCurrent,
 				previous:    row.TokensPrevious,
-			}, now)
+			}
+			if !row.OwnCounts {
+				legacyRequests = maxCounter(legacyRequests, key, requestRow, now)
+				legacyTokens = maxCounter(legacyTokens, key, tokenRow, now)
+				continue
+			}
+			requests = addCounter(requests, key, requestRow, now)
+			tokens = addCounter(tokens, key, tokenRow, now)
 		}
 	}
+	for key, counter := range legacyRequests {
+		requests = addCounter(requests, key, counter, now)
+	}
+	for key, counter := range legacyTokens {
+		tokens = addCounter(tokens, key, counter, now)
+	}
 	return requests, tokens, inFlight
+}
+
+// maxCounter folds one row, rolled to now, into the field-by-field maximum
+// for key: how releases up to v0.2.1 merged the rows they restored. A row that
+// holds nothing at now adds no entry.
+func maxCounter(maxima map[ruleKey]windowCounter, key ruleKey, row windowCounter, now time.Time) map[ruleKey]windowCounter {
+	if row.current == 0 && row.previous == 0 {
+		return maxima
+	}
+	row = row.rolledTo(now, key.periodSeconds)
+	if row.current == 0 && row.previous == 0 {
+		return maxima
+	}
+	if maxima == nil {
+		maxima = make(map[ruleKey]windowCounter)
+	}
+	merged, ok := maxima[key]
+	if !ok {
+		maxima[key] = row
+		return maxima
+	}
+	merged.current = max(merged.current, row.current)
+	merged.previous = max(merged.previous, row.previous)
+	maxima[key] = merged
+	return maxima
 }
 
 // addCounter adds one row's counter, rolled to now, to the sum for key. A row

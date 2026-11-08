@@ -103,7 +103,7 @@ console.log(completion.choices[0].message.content);
 
 ## 限制或扩展模型列表
 
-默认情况下，GoModel 会查询 Bedrock 的控制平面，并列出该账户有权访问的所有按需文本模型。如需固定推理配置文件（inference profile）ID 或自定义模型 ARN：
+未配置模型列表时，GoModel 会查询 Bedrock 的控制平面，并列出该账户有权访问的所有按需文本模型。如需固定推理配置文件（inference profile）ID 或自定义模型 ARN，请配置列表；在默认模型模式下，届时只提供这些模型：
 
 ```bash
 BEDROCK_MODELS=anthropic.claude-3-5-haiku-20241022-v1:0,amazon.nova-lite-v1:0
@@ -121,7 +121,7 @@ providers:
       - amazon.nova-lite-v1:0
 ```
 
-其行为遵循全局的 `CONFIGURED_PROVIDER_MODELS_MODE`：`fallback`（默认）仅在 `ListFoundationModels` 不可用或返回为空时使用该列表；`allowlist` 只暴露配置的模型，并跳过上游调用。
+Bedrock 的上游列表是 `ListFoundationModels`；已配置列表与其如何结合遵循[模型模式](/zh/advanced/config-yaml#模型模式)（默认只提供已配置的模型）。如只想更改 Bedrock 的模式，请设置 `BEDROCK_MODELS_MODE`（YAML：`providers.<name>.models_mode`）。
 
 ## 多个 Bedrock 提供商
 

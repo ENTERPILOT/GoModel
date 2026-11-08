@@ -29,6 +29,7 @@
     { value: "image", label: m.playground_mode_image() },
     { value: "speech", label: m.playground_mode_speech() },
     { value: "transcription", label: m.playground_mode_transcription() },
+    { value: "embeddings", label: m.playground_mode_embeddings() },
   ]);
 
   const endpointOptions = $derived([

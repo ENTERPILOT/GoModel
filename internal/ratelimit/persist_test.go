@@ -73,7 +73,7 @@ func TestSnapshotPublishesInFlightAndDropsExpiredChild(t *testing.T) {
 			gauges = append(gauges, snap)
 		}
 	}
-	require.Equal(t, []WindowSnapshot{{Scope: string(ScopeUserPath), Subject: "/team", InFlight: 1}}, gauges)
+	require.Equal(t, []WindowSnapshot{{Scope: string(ScopeUserPath), Subject: "/team", InFlight: 1, OwnCounts: true}}, gauges)
 
 	dst := newLimiter()
 	remoteOf(dst, snaps, []Rule{template}, now)
@@ -83,7 +83,7 @@ func TestSnapshotPublishesInFlightAndDropsExpiredChild(t *testing.T) {
 	// Released, the gauge is published once more, as zero, then no longer.
 	src.release(held)
 	snaps = src.snapshot([]Rule{shared, template})
-	require.Equal(t, []WindowSnapshot{{Scope: string(ScopeUserPath), Subject: "/team"}}, snaps)
+	require.Equal(t, []WindowSnapshot{{Scope: string(ScopeUserPath), Subject: "/team", OwnCounts: true}}, snaps)
 	require.Empty(t, src.snapshot([]Rule{shared, template}))
 }
 
