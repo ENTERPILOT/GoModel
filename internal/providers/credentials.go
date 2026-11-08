@@ -258,16 +258,17 @@ func (s *CredentialsService) Reload(ctx context.Context) error {
 // gateway instance sharing the database may have changed: it installs new
 // and edited credentials, and unregisters deleted and disabled ones.
 // Unchanged credentials keep their running provider. The model inventory of
-// newly installed providers is fetched in the background, bounded by ctx,
-// even when a later pass fails: the next Refresh sees them as running and
-// would not fetch it again.
+// newly installed providers is fetched in the background, even when a later
+// pass fails: the next Refresh sees them as running and would not fetch it
+// again. The fetch has its own deadline rather than ctx's, since a caller such
+// as the cluster syncer bounds ctx by its poll and the fetch can outlast that.
 func (s *CredentialsService) Refresh(ctx context.Context) error {
 	installed, err := s.reconcile(ctx)
 	if installed {
 		go func() {
-			refreshCtx, cancel := context.WithTimeout(ctx, credentialModelRefreshTimeout)
+			refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), credentialModelRefreshTimeout)
 			defer cancel()
-			if err := s.registry.Refresh(refreshCtx); err != nil && ctx.Err() == nil {
+			if err := s.registry.Refresh(refreshCtx); err != nil {
 				slog.Warn("provider credentials reconciled but the model catalog refresh failed", "error", err)
 			}
 		}()

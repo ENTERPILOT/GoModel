@@ -462,8 +462,9 @@ Prozessspeicher und stimmen sich nicht zwischen Instanzen ab.
 | [Rate-Limits](/de/features/rate-limits) | In-Memory, über die Datenbank geteilt | Replikate setzen ein Limit gemeinsam durch, näherungsweise: Jedes sieht die Zählerstände der anderen innerhalb von etwa zwei Flush-Intervallen. Ein Neustart stellt die zuletzt gespeicherten Request- und Token-Zähler einmal wieder her; ein Absturz kann die Zählungen seit dem letzten Flush verlieren. Ein Reset leert diese Fenster auf allen Replikaten; belegte Concurrency-Slots bleiben belegt, bis ihre Requests abgeschlossen sind. |
 | Circuit Breaker | In-Memory, pro Prozess | Jedes Replikat erkennt einen Ausfall separat, sodass der Upstream bis zu `N x failure_threshold` Fehler sieht, bevor sich ein Breaker öffnet. |
 | Pins der [Session-Affinität](/de/features/session-keeping) | In-Memory, pro Instanz | Sessions bleiben pro Replikat gebunden, nicht global, sofern der Load Balancer nicht sticky ist. |
-| Live-Log-Puffer | In-Memory, pro Instanz | Ein verbundenes Dashboard sieht nur den Live-Traffic dieses Replikats, also etwa `1/N` davon. Der Verlauf kommt weiterhin aus der Datenbank. |
-| Downstream-Sessions von MCP | In-Memory, pro Instanz | Eine `Mcp-Session-Id` von einem Replikat liefert auf einem anderen 404. [MCP](/de/features/mcp-gateway)-Clients benötigen Sticky Sessions. |
+| [Live-Logs](/de/advanced/admin-endpoints#admin-dashboard) | Lokale Ereignisse In-Memory, die anderer Replikate aus der Datenbank | Ein Dashboard sieht die Requests seines eigenen Replikats sofort und die jedes anderen Replikats in der Regel innerhalb von 7 Sekunden, sobald sie gespeichert sind. Siehe [Live-Logs über mehrere Replikate](#live-logs-über-mehrere-replikate). |
+| Downstream-Sessions von MCP | Dauerhaft (Datenbank) | Eine auf einem Replikat geöffnete Session läuft auf jedem anderen weiter, daher benötigen [MCP](/de/features/mcp-gateway#sessions-über-replikate-hinweg)-Clients keine Sticky Sessions. Nach einem `DELETE` lehnt jedes Replikat ihre Requests innerhalb von etwa 2 Sekunden ab; ein offener `GET`-Stream wird nicht vorzeitig geschlossen. Ein laufender Response-Stream bleibt auf dem Replikat, das ihn bedient. |
+| [MCP-OAuth](/de/features/mcp-gateway#mit-oauth-anmelden)-Anmeldung | Laufende Anmeldungen In-Memory, pro Instanz; Tokens dauerhaft (Datenbank) | Der Callback der Dashboard-Anmeldung muss das Replikat erreichen, das sie gestartet hat; routen Sie `/admin` während der Anmeldung daher mit Session-Affinität. Gespeicherte und erneuerte Tokens erhalten alle Replikate über die Datenbank. |
 | Request-Zustand der Provider | In-Memory, pro Instanz | Der Provider-Status im Dashboard spiegelt das Replikat wider, das geantwortet hat. |
 
 Überraschend sind meist die Rate-Limits: Die Zulassung geschieht im Speicher,
@@ -481,6 +482,44 @@ der Ausgaben. Siehe
 `RATE_LIMITS_FLUSH_INTERVAL=0` beendet das Teilen der Zählerstände nach dem
 Start, sodass die Replikate zusammen wieder bis zu etwa dem `N x` des Limits
 zulassen.
+
+### Live-Logs über mehrere Replikate
+
+Ein Dashboard streamt Live-Logs von dem Replikat, mit dem es verbunden ist.
+Dieses Replikat zeigt seine eigenen Requests sofort beim Start, mit Vorschauen
+für laufende und streamende Requests. Solange mindestens ein Dashboard verbunden
+ist, liest es außerdem alle 2 Sekunden die Audit- und Nutzungszeilen, die die
+anderen Replikate gespeichert haben, und streamt sie in dieselbe Ansicht. Dabei
+entstehen keine zusätzlichen Datenbank-Schreibvorgänge: Jedes Replikat versieht
+die Batches, die es ohnehin schreibt, mit seiner eigenen ID, und ohne offenes
+Dashboard liest kein Replikat irgendetwas.
+
+Requests, die ein anderes Replikat bedient hat:
+
+- erscheinen erst, wenn dieses Replikat sie geflusht hat, also nach bis zu
+  `LOGGING_FLUSH_INTERVAL` / `USAGE_FLUSH_INTERVAL` (Standard 5 Sekunden) plus
+  dem 2-Sekunden-Poll, in der Regel innerhalb von 7 Sekunden; ein Schreibvorgang,
+  den die Datenbank nur langsam abschließt, erscheint erst danach, also später;
+- erscheinen als abgeschlossene Einträge mit Status, Dauer, Modell, Provider,
+  Nutzung und Kosten, aber ohne Vorschau für laufende Requests oder einzelne
+  Stream-Chunks; Bodies werden aus der Datenbank geladen, wenn Sie den Eintrag
+  aufklappen;
+- erscheinen nur, wenn sie gespeichert wurden. Audit- und Nutzungseinträge
+  stammen aus getrennten Features: Ein Replikat mit deaktiviertem Audit-Logging
+  liefert keine Audit-Einträge, eines mit deaktiviertem Usage-Tracking keine
+  Nutzungseinträge. Das Replikat, mit dem Ihr Dashboard verbunden ist, zeigt die
+  Audit-Einträge eines anderen Replikats nur, wenn bei ihm selbst Audit-Logging
+  aktiv ist, und dessen Nutzungseinträge nur mit aktivem Usage-Tracking;
+- werden nach Request-Zeit in die Liste einsortiert, unterhalb von allem
+  Neueren.
+
+Bei hohem Traffic werden pro Poll höchstens 200 Audit- und 200 Nutzungseinträge
+anderer Replikate gestreamt, die neuesten zuerst. Die übrigen stehen nach einem
+Neuladen trotzdem in der Liste. Ein Dashboard, das sich neu verbindet, oder ein
+Replikat, dessen Lesezugriffe eine Weile fehlgeschlagen sind, holt nach, was die
+anderen Replikate in der Zwischenzeit gespeichert haben, bis zu 5 Minuten
+zurück und innerhalb desselben Limits von 200 Einträgen pro Poll. Die Uhren der
+Replikate sollten auf wenige Sekunden übereinstimmen, was NTP sicherstellt.
 
 ### Konfigurationsänderungen erreichen alle Replikate in Sekunden
 

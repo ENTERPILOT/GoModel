@@ -7,7 +7,17 @@ import (
 	"github.com/goccy/go-json"
 )
 
+// maxPendingEventBytes is the default event limit for EventScanner, and the
+// pending buffer size an ObservedSSEStream keeps between events.
 const maxPendingEventBytes = 256 * 1024
+
+// maxObservedEventBytes bounds one event an ObservedSSEStream buffers for its
+// observers. It is far above maxPendingEventBytes because a terminal Responses
+// event carries the whole response: a streamed image generation repeats every
+// image's base64 in response.completed, and usage, audit and the stored
+// response all come from that event. Memory is only taken when such an event
+// arrives; a larger one is relayed to the client but not observed.
+const maxObservedEventBytes = 64 << 20
 const maxBoundaryTailBytes = 3
 
 var (
@@ -109,7 +119,7 @@ func (s *ObservedSSEStream) processChunk(data []byte) {
 		pendingLen := len(s.pending)
 		idx, sepLen := nextJoinedEventBoundary(s.pending, data)
 		if idx == -1 {
-			if len(data) > maxPendingEventBytes || pendingLen > maxPendingEventBytes-len(data) {
+			if len(data) > maxObservedEventBytes || pendingLen > maxObservedEventBytes-len(data) {
 				s.startDiscarding(s.pending, data)
 				return
 			}
@@ -118,7 +128,7 @@ func (s *ObservedSSEStream) processChunk(data []byte) {
 		}
 
 		offset := dataOffsetAfterBoundary(pendingLen, idx, sepLen)
-		if idx <= maxPendingEventBytes {
+		if idx <= maxObservedEventBytes {
 			if idx > pendingLen {
 				s.pending = append(s.pending, data[:idx-pendingLen]...)
 			}
@@ -149,7 +159,7 @@ func (s *ObservedSSEStream) processChunk(data []byte) {
 			return
 		}
 
-		if idx > maxPendingEventBytes {
+		if idx > maxObservedEventBytes {
 			data = data[idx+sepLen:]
 			continue
 		}
@@ -278,8 +288,8 @@ func EventData(event []byte) ([]byte, bool) {
 	return payload, found
 }
 
-// resetPending empties pending for reuse, releasing it instead when one
-// oversized event grew it past the event limit.
+// resetPending empties pending for reuse, releasing it instead when one large
+// event grew it past the size kept between events.
 func (s *ObservedSSEStream) resetPending() {
 	if cap(s.pending) > maxPendingEventBytes {
 		s.pending = nil
@@ -292,7 +302,7 @@ func (s *ObservedSSEStream) savePending(data []byte) {
 	if len(data) == 0 {
 		return
 	}
-	if len(data) > maxPendingEventBytes {
+	if len(data) > maxObservedEventBytes {
 		s.startDiscarding(nil, data)
 		return
 	}

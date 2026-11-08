@@ -417,6 +417,7 @@ coordinate across instances.
 | [Session affinity](/features/session-keeping) pins | In-memory, per instance | Sessions stick per replica, not globally, unless the load balancer is sticky. |
 | [Live logs](/advanced/admin-endpoints#admin-dashboard) | Local events in memory, other replicas' from the database | A dashboard sees its own replica's requests instantly and every other replica's typically within 7 seconds, once they are persisted. See [live logs across replicas](#live-logs-across-replicas). |
 | MCP downstream sessions | Durable (database) | A session opened on one replica continues on any other, so [MCP](/features/mcp-gateway#sessions-across-replicas) clients need no sticky sessions. After a `DELETE`, every replica refuses its requests within about 2 seconds; an open `GET` stream is not closed early. A response stream in flight stays on the replica serving it. |
+| [MCP OAuth](/features/mcp-gateway#sign-in-with-oauth) sign-in | Pending sign-ins in memory, per instance; tokens durable (database) | The dashboard sign-in callback must reach the replica that started it, so route `/admin` with session affinity while signing in. Stored and refreshed tokens are shared with every replica through the database. |
 | Provider request health | In-memory, per instance | Dashboard provider status reflects the replica that answered. |
 
 The one that surprises people is rate limits: admission is in memory, so a

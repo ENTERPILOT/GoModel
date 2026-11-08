@@ -51,6 +51,21 @@ type oauthRecord struct {
 	// UpdatedAt changes on every token refresh, so an instance can tell a
 	// newer stored token from its own.
 	UpdatedAt time.Time `json:"updated_at"`
+	// RefreshOwner and RefreshUntil lease the next token refresh to one
+	// gateway instance, so replicas sharing the store never spend the same
+	// refresh token twice (see oauthSource.renew).
+	RefreshOwner string    `json:"refresh_owner,omitempty"`
+	RefreshUntil time.Time `json:"refresh_until"`
+}
+
+// sameSignIn reports whether other comes from the same sign-in as r.
+func (r oauthRecord) sameSignIn(other oauthRecord) bool {
+	return r.SignedInAt.Equal(other.SignedInAt) && r.ClientID == other.ClientID
+}
+
+// leasedElsewhere reports whether another instance holds the refresh lease.
+func (r oauthRecord) leasedElsewhere(owner string, now time.Time) bool {
+	return r.RefreshOwner != "" && r.RefreshOwner != owner && now.Before(r.RefreshUntil)
 }
 
 // oauthRowStore persists sealed OAuth records by server name. Both store

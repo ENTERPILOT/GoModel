@@ -45,11 +45,13 @@ otrzymałeś. GoModel zachowuje je w obu kierunkach.
 
 Dopisz `[1m]` do ID modelu (na przykład `mimo-v2.5-pro[1m]`), aby włączyć
 kontekst 1M tokenów. Te warianty zwykle nie są zwracane przez listę `/models`
-MiMo, więc dodaj je do skonfigurowanej listy modeli, aby dało się do nich
-routować requesty:
+MiMo, więc podaj je w `XIAOMI_MODELS` i ustaw `XIAOMI_MODELS_MODE=merge`, aby
+dało się do nich routować requesty obok wykrytych modeli (zobacz
+[Tryby modeli](/pl/advanced/config-yaml#tryby-modeli)):
 
 ```bash
-XIAOMI_MODELS=mimo-v2.5-pro,mimo-v2.5-pro[1m]
+XIAOMI_MODELS=mimo-v2.5-pro[1m]
+XIAOMI_MODELS_MODE=merge
 ```
 
 ## Zamiana tekstu na mowę i transkrypcja

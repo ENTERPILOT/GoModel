@@ -103,7 +103,7 @@ virtual_models:
 
 对每个请求，GoModel 依次应用客户端请求体、`default_params`、`params`，最后是[推理强度覆盖](#强制推理强度)，后者仍是独立的类型化字段。对象只合并一层，因此客户端自己的 `chat_template_kwargs` 会保留别名未设置的成员；标量和数组则直接替换。`model`、`provider`、`messages`、`input`、`instructions`、`tools`、`stream`、`stream_options`、`reasoning`、`reasoning_effort`、`previous_response_id`、`conversation` 和 `prompt` 不能配置，同一条记录的两个映射中也不能出现同一个键。值在保存时会被校验（`temperature` 和 `top_p` 必须是数字，`max_tokens` 必须是非负整数，等等），每个映射最多 64 个键、16 KiB。
 
-记录之间的优先级按键逐一确定，并遵循推理强度的规则：具体模型的策略优先于其上方的任何重定向，内层[链式](#链式虚拟模型)虚拟模型优先于外层。更深的记录还决定一个键是强制值还是默认值：具体模型的 `default_params.temperature` 会把别名强制的 `temperature` 变回默认值。故障转移尝试会从客户端请求重新构建，并获得其自身路由和具体模型的参数；主模型的策略绝不会泄漏到其中。[护栏](/zh/advanced/guardrails)插件先于这些覆盖运行，因此 `params` 会替换插件设置的值，而 `default_params` 会尊重它。参数适用于 Chat Completions、Responses API 和 Anthropic Messages API（当有参数生效时，原生 Messages 直通会改走转换路径）；批处理、`/p/` 下的提供商直通、嵌入和媒体端点不会被改写。精确[缓存](/zh/features/cache)的键由已应用的请求构建，因此同一模型的两个别名只有在向上游发送相同请求时才会共用一个精确缓存条目。语义缓存只对影响输出的参数（模型、temperature、top_p、token 上限、推理、工具、响应格式）做哈希，因此仅在 `top_k` 或 `chat_template_kwargs` 等其他键上不同的别名可能共用一个语义缓存条目。
+记录之间的优先级按键逐一确定，并遵循推理强度的规则：具体模型的策略优先于其上方的任何重定向，内层[链式](#链式虚拟模型)虚拟模型优先于外层。更深的记录还决定一个键是强制值还是默认值：具体模型的 `default_params.temperature` 会把别名强制的 `temperature` 变回默认值。故障转移尝试会从客户端请求重新构建，并获得其自身路由和具体模型的参数；主模型的策略绝不会泄漏到其中。[护栏](/zh/advanced/guardrails)插件先于这些覆盖运行，因此 `params` 会替换插件设置的值，而 `default_params` 会尊重它。参数适用于 Chat Completions、Responses API 和 Anthropic Messages API（当有参数生效时，原生 Messages 直通会改走转换路径）；批处理、`/p/` 下的提供商直通、嵌入和媒体端点不会被改写。精确[缓存](/zh/features/cache)的键由已应用的请求构建，因此同一模型的两个别名只有在向上游发送相同请求时才会共用一个精确缓存条目。语义缓存会对除 `user`、`metadata` 等调用方标识之外的所有参数做哈希，因此设置了不同值的别名（包括 `top_k` 或 `chat_template_kwargs`）同样不会共用语义缓存条目。
 
 本页其余部分介绍重定向。
 

@@ -256,3 +256,28 @@ func TestCredentialsServiceRefreshFetchesModelsWhenRetryPassFails(t *testing.T) 
 	require.NoError(t, reader.service.Refresh(ctx))
 	assert.True(t, reader.registry.Supports("fresh/test-model"))
 }
+
+// The cluster syncer bounds Refresh by its poll deadline. The background model
+// fetch must not inherit it: when a periodic refresh holds the registry while
+// the deadline passes, the new provider's models must still become routable,
+// since the next poll sees the provider running and never fetches again.
+func TestCredentialsServiceRefreshModelFetchOutlivesCallerDeadline(t *testing.T) {
+	ctx := t.Context()
+	store := newFakeCredentialStore()
+	writer := newCredentialsInstance(t, store)
+	reader := newCredentialsInstance(t, store)
+	require.NoError(t, writer.service.Upsert(ctx, ManagedProviderCredential{Name: "shared", Type: "test", APIKeys: []string{"sk"}, Enabled: true}))
+
+	// Another model refresh is in flight on this instance.
+	sem := reader.registry.refreshSemaphore()
+	sem <- struct{}{}
+
+	pollCtx, release := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer release()
+	require.NoError(t, reader.service.Refresh(pollCtx))
+	require.NotNil(t, reader.registry.ProviderByName("shared"))
+
+	<-pollCtx.Done()
+	<-sem
+	assert.Eventually(t, func() bool { return reader.registry.Supports("shared/test-model") }, 5*time.Second, 5*time.Millisecond)
+}

@@ -199,10 +199,10 @@ Messages passthrough takes the translated path when parameters apply);
 batches, provider passthrough under `/p/`, embeddings, and media endpoints
 are not rewritten. The exact [cache](/features/cache) key is built from the
 applied request, so two aliases of one model share an exact entry only when
-they send the same request upstream. The semantic cache hashes only its
-output-shaping parameters (model, temperature, top_p, max tokens, reasoning,
-tools, response format), so aliases that differ only in other keys, such as
-`top_k` or `chat_template_kwargs`, can share a semantic entry.
+they send the same request upstream. The semantic cache hashes every
+parameter except caller identifiers such as `user` and `metadata`, so aliases
+that apply different values, including `top_k` or `chat_template_kwargs`,
+never share a semantic entry either.
 
 The rest of this page covers redirects.
 

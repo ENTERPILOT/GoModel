@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -459,6 +461,33 @@ func TestResponsesWithPreviousResponseID_StreamedTerminalEventsAreStored(t *test
 			require.Len(t, items, 3)
 		})
 	}
+}
+
+// TestResponsesWithPreviousResponseID_StreamedImageTurnIsStored covers a
+// streamed image generation: its terminal event repeats the image's base64,
+// so it is megabytes long, and must still be stored whole and chainable.
+func TestResponsesWithPreviousResponseID_StreamedImageTurnIsStored(t *testing.T) {
+	image := strings.Repeat("A", 2<<20)
+	provider := previousResponseTestProvider(t, "anthropic")
+	provider.streamData = "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_img\"," +
+		"\"object\":\"response\",\"status\":\"completed\",\"output\":[{\"id\":\"ig_1\",\"type\":\"image_generation_call\"," +
+		"\"status\":\"completed\",\"result\":\"" + image + "\"}],\"usage\":{\"input_tokens\":15,\"output_tokens\":1300,\"total_tokens\":1315}}}\n\n" +
+		"data: [DONE]\n\n"
+	srv := New(provider, nil)
+	store := srv.handler.currentResponseStore()
+
+	rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"draw a square","stream":true}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String()[:min(rec.Body.Len(), 512)])
+
+	waitForStoredResponse(t, store, "resp_img")
+	stored, err := store.Get(context.Background(), "resp_img")
+	require.NoError(t, err)
+	require.Len(t, stored.Response.Output, 1)
+	assert.Equal(t, "image_generation_call", stored.Response.Output[0].Type)
+	assert.JSONEq(t, `"`+image+`"`, string(stored.Response.Output[0].ExtraFields.Lookup("result")))
+
+	rec = postResponses(t, srv, `{"model":"gpt-5-mini","input":"make it blue","previous_response_id":"resp_img"}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 }
 
 func TestResponsesWithPreviousResponseID_StreamedWithStoreFalseIsNotStored(t *testing.T) {
