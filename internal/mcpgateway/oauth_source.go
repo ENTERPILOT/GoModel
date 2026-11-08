@@ -165,6 +165,10 @@ func (o *oauthSource) tokenOtherThan(ctx context.Context, rejected string) (stri
 	record, err := o.renew(ctx, rejected)
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	// A grant that cannot be retried is still the sign-in's current tokens.
+	if record.AccessToken != "" && !o.record.UpdatedAt.After(record.UpdatedAt) {
+		o.record = record
+	}
 	if err != nil {
 		o.lastErr = err.Error()
 		if errors.Is(err, errOAuthExpired) || errors.Is(err, errOAuthRejected) {
@@ -178,8 +182,17 @@ func (o *oauthSource) tokenOtherThan(ctx context.Context, rejected string) (stri
 	if o.record.UpdatedAt.After(record.UpdatedAt) && o.record.usable(rejected) {
 		return o.record.AccessToken, nil
 	}
-	o.record = record
 	return record.AccessToken, nil
+}
+
+// rejected records that the upstream refused token right after a refresh,
+// so the sign-in shows the problem instead of "signed in".
+func (o *oauthSource) rejected(token string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.record.AccessToken == token {
+		o.lastErr = "the mcp server rejected a freshly refreshed access token; check the sign-in's scopes or sign in again from the dashboard"
+	}
 }
 
 // closeIdle drops the idle connections of this source's token-endpoint
@@ -277,7 +290,11 @@ func (t *bearerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 		return resp, nil
 	}
 	_ = resp.Body.Close()
-	return t.base.RoundTrip(withBearer(retry, fresh))
+	resp, err = t.base.RoundTrip(withBearer(retry, fresh))
+	if err == nil && resp.StatusCode == http.StatusUnauthorized {
+		t.source.rejected(fresh)
+	}
+	return resp, err
 }
 
 func withBearer(req *http.Request, token string) *http.Request {

@@ -75,6 +75,7 @@ var responseEventTypes = []string{
 	"response.completed",
 	"response.incomplete",
 	"response.failed",
+	"response.done",
 }
 
 // carriesResponse reads only the payload's type member, so text deltas are
@@ -97,16 +98,18 @@ func (s *chainedResponseStream) appendEvent(out []byte, ev streaming.RawEvent) [
 }
 
 // appendWithData appends the SSE block raw with its data lines replaced by
-// one line carrying data. Every other field (event, id, retry, comments)
-// stays in place, so reconnection metadata survives the rewrite.
+// data, one data line per line of it. Every other field (event, id, retry,
+// comments) stays in place, so reconnection metadata survives the rewrite.
 func appendWithData(out, raw, data []byte) []byte {
 	written := false
 	for line := range bytes.SplitSeq(bytes.TrimRight(raw, "\r\n"), []byte("\n")) {
 		if bytes.HasPrefix(line, []byte("data:")) {
 			if !written {
-				out = append(out, "data: "...)
-				out = append(out, data...)
-				out = append(out, '\n')
+				for part := range bytes.SplitSeq(data, []byte("\n")) {
+					out = append(out, "data: "...)
+					out = append(out, part...)
+					out = append(out, '\n')
+				}
 				written = true
 			}
 			continue

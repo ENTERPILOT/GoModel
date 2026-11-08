@@ -34,10 +34,15 @@ func TestWithPreviousResponseID(t *testing.T) {
 		envelope  = "id: 7\nretry: 1000\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_2\"}}\n\n"
 		comment   = ": keep-alive\n\n"
 		done      = "data: [DONE]\n\n"
+		multiline = "event: response.completed\ndata: {\"type\":\"response.completed\",\ndata: \"response\":{\"id\":\"resp_2\"}}\n\n"
 	)
 	large := func(n int) string {
 		return "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_2\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"" +
 			strings.Repeat("a", n) + "\"}]}]}}\n\n"
+	}
+	largeImage := func(n int) string {
+		return "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_2\",\"output\":[{\"type\":\"image_generation_call\",\"result\":\"" +
+			strings.Repeat("A", n) + "\"}]}}\n\n"
 	}
 	huge := large(streaming.MaxObservedEventBytes + 1)
 	named := func(event string) string {
@@ -63,8 +68,10 @@ func TestWithPreviousResponseID(t *testing.T) {
 			want: []string{"id: 7\nretry: 1000\nevent: response.completed\ndata: {", `"previous_response_id":"resp_1"`, "}\n\n"}},
 		{name: "names a terminal event past the default scanner limit", stream: large(300*1024) + done, id: "resp_1",
 			want: []string{`"previous_response_id":"resp_1"`, done}},
-		{name: "names a terminal event carrying a generated image", stream: large(6<<20) + done, id: "resp_1",
+		{name: "names a terminal event carrying a generated image", stream: largeImage(6<<20) + done, id: "resp_1",
 			want: []string{`"previous_response_id":"resp_1"`, done}},
+		{name: "names a response spread over several data lines", stream: multiline + done, id: "resp_1",
+			want: []string{"data: {\"type\":\"response.completed\",\ndata: \"response\":{\"previous_response_id\":\"resp_1\"", done}},
 		{name: "event past the rewrite limit passes through", stream: huge + done, id: "resp_1", same: true},
 	}
 	for _, tc := range tests {

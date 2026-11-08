@@ -257,6 +257,18 @@ func TestCredentialsServiceRefreshFetchesModelsWhenRetryPassFails(t *testing.T) 
 	assert.True(t, reader.registry.Supports("fresh/test-model"))
 }
 
+// warmInstance is a reader whose startup model fetch has finished, so only a
+// Refresh can fetch models for what it installs afterwards.
+func warmInstance(t *testing.T, store CredentialStore, writer credentialsInstance, lifetime context.Context) (*CredentialsService, *ModelRegistry) {
+	t.Helper()
+	require.NoError(t, writer.service.Upsert(t.Context(), ManagedProviderCredential{Name: "warm", Type: "test", APIKeys: []string{"sk"}, Enabled: true}))
+	registry := NewModelRegistry()
+	service, err := NewCredentialsService(lifetime, newCredentialsTestFactory(t), registry, store, nil, config.ResilienceConfig{}, nil)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return registry.Supports("warm/test-model") }, time.Second, 5*time.Millisecond)
+	return service, registry
+}
+
 // The cluster syncer bounds Refresh by its poll deadline. The background model
 // fetch must not inherit it: when a periodic refresh holds the registry while
 // the deadline passes, the new provider's models must still become routable,
@@ -265,21 +277,21 @@ func TestCredentialsServiceRefreshModelFetchOutlivesCallerDeadline(t *testing.T)
 	ctx := t.Context()
 	store := newFakeCredentialStore()
 	writer := newCredentialsInstance(t, store)
-	reader := newCredentialsInstance(t, store)
-	require.NoError(t, writer.service.Upsert(ctx, ManagedProviderCredential{Name: "shared", Type: "test", APIKeys: []string{"sk"}, Enabled: true}))
+	service, registry := warmInstance(t, store, writer, ctx)
 
 	// Another model refresh is in flight on this instance.
-	sem := reader.registry.refreshSemaphore()
+	sem := registry.refreshSemaphore()
 	sem <- struct{}{}
+	require.NoError(t, writer.service.Upsert(ctx, ManagedProviderCredential{Name: "shared", Type: "test", APIKeys: []string{"sk"}, Enabled: true}))
 
 	pollCtx, release := context.WithTimeout(ctx, 50*time.Millisecond)
 	defer release()
-	require.NoError(t, reader.service.Refresh(pollCtx))
-	require.NotNil(t, reader.registry.ProviderByName("shared"))
+	require.NoError(t, service.Refresh(pollCtx))
+	require.NotNil(t, registry.ProviderByName("shared"))
 
 	<-pollCtx.Done()
 	<-sem
-	assert.Eventually(t, func() bool { return reader.registry.Supports("shared/test-model") }, 5*time.Second, 5*time.Millisecond)
+	assert.Eventually(t, func() bool { return registry.Supports("shared/test-model") }, 5*time.Second, 5*time.Millisecond)
 }
 
 // Shutdown ends the background model fetch: it is bounded by the service's
@@ -287,14 +299,12 @@ func TestCredentialsServiceRefreshModelFetchOutlivesCallerDeadline(t *testing.T)
 func TestCredentialsServiceRefreshModelFetchEndsWithLifetime(t *testing.T) {
 	store := newFakeCredentialStore()
 	writer := newCredentialsInstance(t, store)
-	require.NoError(t, writer.service.Upsert(t.Context(), ManagedProviderCredential{Name: "shared", Type: "test", APIKeys: []string{"sk"}, Enabled: true}))
-
 	lifetime, shutdown := context.WithCancel(t.Context())
-	registry := NewModelRegistry()
-	service, err := NewCredentialsService(lifetime, newCredentialsTestFactory(t), registry, store, nil, config.ResilienceConfig{}, nil)
-	require.NoError(t, err)
+	service, registry := warmInstance(t, store, writer, lifetime)
+
 	sem := registry.refreshSemaphore()
 	sem <- struct{}{}
+	require.NoError(t, writer.service.Upsert(t.Context(), ManagedProviderCredential{Name: "shared", Type: "test", APIKeys: []string{"sk"}, Enabled: true}))
 	require.NoError(t, service.Refresh(t.Context()))
 	require.NotNil(t, registry.ProviderByName("shared"))
 

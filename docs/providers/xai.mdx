@@ -31,7 +31,9 @@ providers:
   (for example `XAI_MODELS=grok-voice-latest`) and set `XAI_MODELS_MODE=merge`
   so the discovered models stay routable alongside them; in `config.yaml`, add
   them under the provider's `models:` list and set `models_mode: merge` (see
-  [Models modes](/advanced/config-yaml#models-modes)).
+  [Models modes](/advanced/config-yaml#models-modes)). With `merge`, if the
+  `/models` request fails or returns no models, only the configured IDs are
+  served.
 </Note>
 
 Image models such as `grok-2-image` are served through the

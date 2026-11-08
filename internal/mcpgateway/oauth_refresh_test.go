@@ -26,9 +26,13 @@ import (
 // waits for the test to close release.
 type rotatingAuthServer struct {
 	*httptest.Server
-	fail     bool
-	release  chan struct{}
-	released sync.Once
+	fail bool
+	// sameAccess hands out the same access token on every refresh while
+	// still rotating the refresh token, as a server does whose access
+	// tokens are long-lived.
+	sameAccess bool
+	release    chan struct{}
+	released   sync.Once
 
 	mu        sync.Mutex
 	current   string
@@ -62,8 +66,12 @@ func newRotatingAuthServer(t *testing.T, hold bool) *rotatingAuthServer {
 		}
 		as.refreshes++
 		as.current = fmt.Sprintf("refresh-%d", as.refreshes+1)
+		access := fmt.Sprintf("access-%d", as.refreshes+1)
+		if as.sameAccess {
+			access = "access-1"
+		}
 		writeTestJSON(w, http.StatusOK, map[string]any{
-			"access_token": fmt.Sprintf("access-%d", as.refreshes+1), "refresh_token": as.current, "token_type": "Bearer", "expires_in": 3600,
+			"access_token": access, "refresh_token": as.current, "token_type": "Bearer", "expires_in": 3600,
 		})
 	}))
 	t.Cleanup(as.Close)
@@ -247,7 +255,7 @@ func TestOAuthSaveAdoptsTokenStoredFirst(t *testing.T) {
 	loser := base
 	loser.AccessToken = "loser"
 	loser.UpdatedAt = time.Now().UTC()
-	assert.Equal(t, "winner", source.save(ctx, base, loser).AccessToken)
+	assert.Equal(t, "winner", source.save(ctx, base, loser, "").AccessToken)
 	stored, err := store.get(ctx, "notion")
 	require.NoError(t, err)
 	assert.Equal(t, "winner", stored.AccessToken, "the losing instance never overwrites the winner")
@@ -264,7 +272,7 @@ func TestBearerRoundTripperRefreshesOnceOnUnauthorized(t *testing.T) {
 		wantState     string
 	}{
 		{name: "revoked token is refreshed and retried", accepts: "Bearer access-2", wantStatus: http.StatusOK, wantUpstream: 2, wantRefreshes: 1, wantState: OAuthStatusSignedIn},
-		{name: "fresh token refused too is not retried again", accepts: "never", wantStatus: http.StatusUnauthorized, wantUpstream: 2, wantRefreshes: 1, wantState: OAuthStatusSignedIn},
+		{name: "fresh token refused too is not retried again, and shows on the sign-in", accepts: "never", wantStatus: http.StatusUnauthorized, wantUpstream: 2, wantRefreshes: 1, wantState: OAuthStatusError},
 		{name: "failed refresh returns the 401 and shows on the sign-in", accepts: "Bearer access-2", refreshFails: true, wantStatus: http.StatusUnauthorized, wantUpstream: 1, wantRefreshes: 0, wantState: OAuthStatusError},
 	}
 	for _, tt := range tests {
@@ -441,4 +449,69 @@ func TestOAuthRenewFailsClosedWhenStoreUnreadable(t *testing.T) {
 	refreshes, _ := as.counts()
 	assert.Zero(t, refreshes, "no refresh token is spent without the store")
 	assert.Equal(t, OAuthStatusError, source.view().Status)
+}
+
+// A refresh that rotates the refresh token but returns the same access token
+// cannot be retried, yet it is the sign-in's current grant: the rotated
+// refresh token is kept in memory and in the store, so the next refresh does
+// not send the spent one.
+func TestOAuthRejectedRefreshKeepsRotatedTokens(t *testing.T) {
+	as := newRotatingAuthServer(t, false)
+	as.sameAccess = true
+	store := newTestOAuthStore(t)
+	ctx := context.Background()
+	record := rotatingRecord(as, time.Now().Add(time.Hour))
+	require.NoError(t, store.put(ctx, "notion", record))
+	source := newOAuthSource("notion", record, store, as.Client())
+
+	_, err := source.tokenOtherThan(ctx, "access-1")
+	require.ErrorIs(t, err, errOAuthRejected)
+	assert.Equal(t, OAuthStatusError, source.view().Status)
+	assert.Equal(t, "refresh-2", source.snapshot().RefreshToken)
+	stored, err := store.get(ctx, "notion")
+	require.NoError(t, err)
+	assert.Equal(t, "refresh-2", stored.RefreshToken)
+
+	// Once that grant expires, the next refresh spends the rotated token.
+	expired := source.snapshot()
+	expired.Expiry = time.Now().Add(-time.Minute)
+	require.NoError(t, store.put(ctx, "notion", expired))
+	source.mu.Lock()
+	source.record = expired
+	source.mu.Unlock()
+	token, err := source.accessToken(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "access-1", token)
+	refreshes, reused := as.counts()
+	assert.Equal(t, 2, refreshes)
+	assert.Zero(t, reused, "the spent refresh token is never sent again")
+}
+
+// A save the store refused is retried, so the stored record catches up with
+// the rotated token before another instance could lease the spent one.
+func TestOAuthSaveIsRetriedAfterStoreError(t *testing.T) {
+	as := newRotatingAuthServer(t, false)
+	store, rows := newFlakyOAuthStore(t)
+	ctx := context.Background()
+	record := rotatingRecord(as, time.Now().Add(-time.Minute))
+	require.NoError(t, store.put(ctx, "notion", record))
+	source := newOAuthSource("notion", record, store, as.Client())
+
+	rows.failWritesFrom.Store(2)
+	token, err := source.accessToken(ctx)
+	require.NoError(t, err)
+	require.Equal(t, "access-2", token)
+	rows.failWritesFrom.Store(0)
+	require.Eventually(t, func() bool {
+		stored, err := store.get(ctx, "notion")
+		return err == nil && stored.RefreshToken == "refresh-2"
+	}, 5*time.Second, 50*time.Millisecond, "the save is retried once the store answers")
+	assert.Empty(t, mustGet(t, store, "notion").RefreshOwner, "the lease is cleared with the saved tokens")
+}
+
+func mustGet(t *testing.T, store *oauthStore, name string) oauthRecord {
+	t.Helper()
+	stored, err := store.get(context.Background(), name)
+	require.NoError(t, err)
+	return *stored
 }

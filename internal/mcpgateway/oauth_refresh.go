@@ -21,6 +21,10 @@ const oauthLeaseTTL = 2*oauthSaveTimeout + oauthRefreshTimeout
 // lease reads the stored record again.
 const oauthLeasePoll = 200 * time.Millisecond
 
+// oauthResaveInterval is how often a save that failed is tried again while
+// the lease it was made under still holds.
+const oauthResaveInterval = time.Second
+
 // errOAuthSignInChanged means the stored sign-in is no longer the one this
 // source holds tokens for: the next reload picks the new one up.
 var errOAuthSignInChanged = errors.New("the OAuth sign-in changed under this request; retry shortly")
@@ -33,10 +37,22 @@ var errOAuthSignInChanged = errors.New("the OAuth sign-in changed under this req
 // a compare-and-swap. A store that cannot be read or leased fails the
 // request rather than risk spending a refresh token twice; without a store
 // at all, the instance refreshes on its own.
+//
+// A record is returned with errOAuthRejected too, when the server handed
+// back the very access token the upstream refused: the grant, and with it a
+// rotated refresh token, is the sign-in's current state even though the
+// request cannot be retried.
 func (o *oauthSource) renew(ctx context.Context, rejected string) (oauthRecord, error) {
 	base := o.snapshot()
 	if o.store == nil {
-		return o.exchange(ctx, base, rejected)
+		if base.RefreshToken == "" {
+			return oauthRecord{}, noRefreshToken(rejected)
+		}
+		next, err := o.exchange(ctx, base)
+		if err != nil {
+			return oauthRecord{}, err
+		}
+		return renewed(next, rejected)
 	}
 	deadline := time.Now().Add(oauthLeaseTTL)
 	retried := false
@@ -51,7 +67,7 @@ func (o *oauthSource) renew(ctx context.Context, rejected string) (oauthRecord, 
 		if stored.UpdatedAt.Before(base.UpdatedAt) {
 			// The store is behind this instance, as after a failed save:
 			// bring it up to date rather than refresh with a spent token.
-			base = o.save(ctx, stored, base)
+			base = o.save(ctx, stored, base, rejected)
 		} else {
 			base = stored
 		}
@@ -74,9 +90,9 @@ func (o *oauthSource) renew(ctx context.Context, rejected string) (oauthRecord, 
 		if !leased {
 			continue
 		}
-		next, err := o.exchange(ctx, base, rejected)
+		next, err := o.exchange(ctx, base)
 		if err == nil {
-			return o.save(ctx, base, next), nil
+			return renewed(o.save(ctx, base, next, rejected), rejected)
 		}
 		o.release(ctx, base)
 		// A lease that lapsed on a slow store lets another instance rotate
@@ -91,13 +107,17 @@ func (o *oauthSource) renew(ctx context.Context, rejected string) (oauthRecord, 
 	}
 }
 
-// exchange runs the refresh grant for base and returns the refreshed record,
-// or errOAuthRejected when the server hands back the very token the upstream
-// refused.
-func (o *oauthSource) exchange(ctx context.Context, base oauthRecord, rejected string) (oauthRecord, error) {
-	if base.RefreshToken == "" {
-		return oauthRecord{}, noRefreshToken(rejected)
+// renewed returns record, with errOAuthRejected when its access token is the
+// one the upstream refused.
+func renewed(record oauthRecord, rejected string) (oauthRecord, error) {
+	if rejected != "" && record.AccessToken == rejected {
+		return record, errOAuthRejected
 	}
+	return record, nil
+}
+
+// exchange runs the refresh grant for base and returns the refreshed record.
+func (o *oauthSource) exchange(ctx context.Context, base oauthRecord) (oauthRecord, error) {
 	fresh, err := o.refresh(ctx, base)
 	if err != nil {
 		return oauthRecord{}, err
@@ -108,9 +128,6 @@ func (o *oauthSource) exchange(ctx context.Context, base oauthRecord, rejected s
 	next.TokenType = fresh.TokenType
 	next.Expiry = fresh.Expiry
 	next.UpdatedAt = time.Now().UTC()
-	if rejected != "" && next.AccessToken == rejected {
-		return oauthRecord{}, errOAuthRejected
-	}
 	return next, nil
 }
 
@@ -189,29 +206,56 @@ func (o *oauthSource) release(ctx context.Context, base oauthRecord) {
 	})
 }
 
-// save stores next, refreshed from base, only while the stored record still
-// belongs to this sign-in and holds base's refresh token: a sign-out, a
-// newer sign-in, or another instance's refresh that landed meanwhile wins.
-// Another instance's lease does not: base's refresh token is spent, so its
-// refresh fails, and it then adopts what was saved here. It returns the
-// record to use: next, or the token another instance stored first.
-func (o *oauthSource) save(ctx context.Context, base, next oauthRecord) oauthRecord {
-	saved, err := o.write(ctx, next, func(stored oauthRecord) bool {
+// supersedes is the predicate under which next, refreshed from base, may
+// replace the stored record: it still belongs to this sign-in and holds
+// base's refresh token, and no newer save landed. Another instance's lease
+// does not block it: base's refresh token is spent, so that refresh fails,
+// and the instance then adopts what was saved here.
+func supersedes(base oauthRecord) func(stored oauthRecord) bool {
+	return func(stored oauthRecord) bool {
 		return stored.sameTokens(base) && !stored.UpdatedAt.After(base.UpdatedAt)
-	})
+	}
+}
+
+// save stores next, refreshed from base, under supersedes(base): a sign-out,
+// a newer sign-in, or another instance's refresh that landed meanwhile wins.
+// It returns the record to use: next, or a usable token other than rejected
+// that another instance stored first. A save the store refused is retried in
+// the background, since base's refresh token is spent and must not be leased
+// by another instance once this one's lease lapses.
+func (o *oauthSource) save(ctx context.Context, base, next oauthRecord, rejected string) oauthRecord {
+	saved, err := o.write(ctx, next, supersedes(base))
 	switch {
 	case err != nil:
-		// The refreshed token keeps working in memory, and the next renew
-		// writes it back once the store answers again.
-		slog.Warn("failed to save a refreshed mcp oauth token", "server", o.name, "error", err)
+		slog.Warn("failed to save a refreshed mcp oauth token; retrying in the background", "server", o.name, "error", err)
+		go o.resave(context.WithoutCancel(ctx), base, next)
 	case !saved:
-		if stored, err := o.lookup(ctx, base); err == nil && stored.usable("") {
+		if stored, err := o.lookup(ctx, base); err == nil && stored.usable(rejected) {
 			slog.Info("another gateway instance refreshed the mcp oauth token first; using its token", "server", o.name)
 			return stored
 		}
 		slog.Info("mcp oauth sign-in or tokens changed while a token refresh ran; keeping the stored ones", "server", o.name)
 	}
 	return next
+}
+
+// resave retries a save the store refused, until it is written, the stored
+// record moved on, or the lease it was made under has lapsed. ctx carries
+// the request's values but not its cancellation.
+func (o *oauthSource) resave(ctx context.Context, base, next oauthRecord) {
+	deadline := time.Now().Add(oauthLeaseTTL)
+	for time.Now().Before(deadline) {
+		time.Sleep(oauthResaveInterval)
+		saved, err := o.write(ctx, next, supersedes(base))
+		if err != nil {
+			continue
+		}
+		if saved {
+			slog.Info("saved the refreshed mcp oauth token once the store answered again", "server", o.name)
+		}
+		return
+	}
+	slog.Warn("gave up saving a refreshed mcp oauth token; it keeps working in memory until the next refresh", "server", o.name)
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) error {

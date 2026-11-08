@@ -106,7 +106,7 @@ func TestOAuthRefreshNeverUndoesAnotherSignIn(t *testing.T) {
 		next := record
 		next.AccessToken = "refreshed"
 		next.UpdatedAt = time.Now().UTC()
-		source.save(ctx, record, next)
+		source.save(ctx, record, next, "")
 	}
 
 	// Same sign-in: the refreshed token is saved.

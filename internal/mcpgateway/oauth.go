@@ -222,6 +222,9 @@ func (m *oauthManager) fail(name, serverURL string, err error) {
 func (m *oauthManager) signedOut(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if source := m.sources[name]; source != nil {
+		source.closeIdle()
+	}
 	delete(m.sources, name)
 	delete(m.failures, name)
 	m.generations[name]++

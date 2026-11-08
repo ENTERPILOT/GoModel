@@ -221,9 +221,9 @@ Request gebildet, sodass zwei Aliase desselben Modells einen exakten Eintrag
 nur dann teilen, wenn sie denselben Request upstream senden. Der Schlüssel des
 semantischen Caches umfasst ebenfalls die angewendeten Request-Parameter (siehe
 [Woraus der Schlüssel des semantischen Caches besteht](/de/features/cache#woraus-der-schlüssel-des-semantischen-caches-besteht)
-für die genauen Felder), sodass Aliase mit unterschiedlichen Werten — auch für
-`top_k` oder `chat_template_kwargs` — ebenfalls nie einen semantischen Eintrag
-teilen.
+für die genauen Felder), sodass Aliase, deren angewendete Werte sich
+unterscheiden — auch für `top_k` oder `chat_template_kwargs` —, ebenfalls nie
+einen semantischen Eintrag teilen.
 
 Der Rest dieser Seite behandelt Redirects.
 
