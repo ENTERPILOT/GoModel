@@ -7,11 +7,12 @@ import (
 	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
-// thinkingStreamMaxEventBytes bounds one SSE event the stream rewrites.
-// A larger event is relayed verbatim (unconverted), same as the passthrough
-// behavior before this wrapper existed. 4 MiB matches the plugin stream
-// transformer's default and far exceeds any real chat delta.
-const thinkingStreamMaxEventBytes = 4 << 20
+// thinkingStreamMaxEventBytes bounds one SSE event the stream rewrites. A
+// larger event is relayed verbatim (unconverted), same as the passthrough
+// behavior before this wrapper existed. Token-sized chat deltas are a few
+// KB; 16 MiB leaves generous headroom for the single-chunk re-emission of a
+// buffered completion.
+const thinkingStreamMaxEventBytes = 16 << 20
 
 // thinkingChunkStream relays an upstream chat SSE stream, rewriting every
 // chunk whose choices[].delta.content is a Mistral chunk array into the

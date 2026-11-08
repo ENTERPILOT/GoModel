@@ -215,12 +215,20 @@ func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
 	return stripAssistantReasoning(adapted), nil
 }
 
-// stripAssistantReasoning returns a copy of req without the reasoning_content
-// member on assistant messages, or req itself when there is nothing to strip.
+// stripAssistantReasoning returns a copy of req without the members of a
+// replayed assistant turn that Mistral rejects with a 422: the flat
+// reasoning_content a client echoes back from an earlier reply, and the
+// mistral_content_chunks vendor member this provider adds to it. The answer
+// text in content is a valid assistant message on its own.
 func stripAssistantReasoning(req *core.ChatRequest) *core.ChatRequest {
 	var adapted *core.ChatRequest
 	for i, message := range req.Messages {
-		if message.Role != "assistant" || message.ExtraFields.Lookup(reasoningContentKey) == nil {
+		if message.Role != "assistant" {
+			continue
+		}
+		reasoning := message.ExtraFields.Lookup(reasoningContentKey)
+		chunks := message.ExtraFields.Lookup(unknownChunksKey)
+		if reasoning == nil && chunks == nil {
 			continue
 		}
 		if adapted == nil {
@@ -228,7 +236,7 @@ func stripAssistantReasoning(req *core.ChatRequest) *core.ChatRequest {
 			copied.Messages = append([]core.Message(nil), req.Messages...)
 			adapted = &copied
 		}
-		adapted.Messages[i].ExtraFields = adapted.Messages[i].ExtraFields.Without(reasoningContentKey)
+		adapted.Messages[i].ExtraFields = adapted.Messages[i].ExtraFields.Without(reasoningContentKey).Without(unknownChunksKey)
 	}
 	if adapted == nil {
 		return req

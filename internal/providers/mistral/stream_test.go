@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/goccy/go-json"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -38,12 +39,45 @@ func TestThinkingChunkStream_FragmentedReads(t *testing.T) {
 	require.NoError(t, stream.Close())
 
 	out := string(body)
-	assert.Contains(t, out, `"reasoning_content":"Let me compute. "`)
-	assert.Contains(t, out, `"reasoning_content":"17*23=391."`)
-	assert.Contains(t, out, `"content":"The answer is "`)
-	assert.Contains(t, out, `"content":"391."`)
 	assert.NotContains(t, out, `"type":"thinking"`)
 	assert.True(t, strings.HasSuffix(out, "data: [DONE]\n\n"), "stream must end with [DONE], got tail %q", out[max(0, len(out)-40):])
+
+	// The exact ordered delta sequence, so a regression that duplicates or
+	// reorders converted events cannot pass.
+	require.Equal(t, []string{
+		`{"choices":[{"delta":{"content":"","reasoning_content":"Let me compute. ","role":"assistant"},"index":0}],"id":"cmpl-mistral-1","model":"mistral-large-4-0","object":"chat.completion.chunk"}`,
+		`{"choices":[{"delta":{"content":"The answer is ","reasoning_content":"17*23=391."},"index":0}],"id":"cmpl-mistral-1","model":"mistral-large-4-0","object":"chat.completion.chunk"}`,
+		`{"choices":[{"delta":{"content":"391."},"index":0}],"id":"cmpl-mistral-1","model":"mistral-large-4-0","object":"chat.completion.chunk"}`,
+		`{"choices":[{"delta":{},"finish_reason":"stop","index":0}],"id":"cmpl-mistral-1","model":"mistral-large-4-0","object":"chat.completion.chunk"}`,
+	}, dataLines(out))
+}
+
+// dataLines returns the JSON payload of every data: line except [DONE].
+func dataLines(s string) []string {
+	var payloads []string
+	for line := range strings.Lines(s) {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data: ") || line == "data: [DONE]" {
+			continue
+		}
+		payloads = append(payloads, mustUnmarshalToCanonicalJSON(strings.TrimPrefix(line, "data: ")))
+	}
+	return payloads
+}
+
+// mustUnmarshalToCanonicalJSON round-trips a JSON value through any, so every
+// object's keys are marshaled in sorted order: key order in the rewritten
+// chunk never breaks the exact-sequence assert.
+func mustUnmarshalToCanonicalJSON(s string) string {
+	var obj any
+	if err := json.Unmarshal([]byte(s), &obj); err != nil {
+		panic(err)
+	}
+	encoded, err := json.Marshal(obj)
+	if err != nil {
+		panic(err)
+	}
+	return string(encoded)
 }
 
 func TestThinkingChunkStream_PassesThroughUnrelatedEvents(t *testing.T) {

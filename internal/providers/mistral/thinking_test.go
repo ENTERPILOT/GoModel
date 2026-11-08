@@ -117,7 +117,7 @@ func TestAdaptChatRequest(t *testing.T) {
 		assert.Nil(t, got.ExtraFields.Lookup("reasoning_effort"))
 	})
 
-	t.Run("assistant reasoning_content is stripped, other roles untouched", func(t *testing.T) {
+	t.Run("assistant reasoning_content and vendor chunks are stripped, other roles untouched", func(t *testing.T) {
 		req := &core.ChatRequest{
 			Model: "m",
 			Messages: []core.Message{
@@ -126,6 +126,7 @@ func TestAdaptChatRequest(t *testing.T) {
 				})},
 				{Role: "assistant", Content: "hello", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 					reasoningContentKey: json.RawMessage(`"drop me"`),
+					unknownChunksKey:    json.RawMessage(`[{"type":"reference"}]`),
 					"other":             json.RawMessage(`1`),
 				})},
 			},
@@ -135,6 +136,7 @@ func TestAdaptChatRequest(t *testing.T) {
 		require.NotSame(t, req, got)
 		assert.NotNil(t, got.Messages[0].ExtraFields.Lookup(reasoningContentKey), "user message keeps its extra")
 		assert.Nil(t, got.Messages[1].ExtraFields.Lookup(reasoningContentKey))
+		assert.Nil(t, got.Messages[1].ExtraFields.Lookup(unknownChunksKey), "Mistral 422s on the echoed vendor member too")
 		assert.Equal(t, json.RawMessage(`1`), got.Messages[1].ExtraFields.Lookup("other"), "other members survive")
 		// The caller's request is not mutated.
 		assert.NotNil(t, req.Messages[1].ExtraFields.Lookup(reasoningContentKey))

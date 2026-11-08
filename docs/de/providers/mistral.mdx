@@ -1,0 +1,98 @@
+---
+title: "Mistral AI"
+description: "Konfigurieren Sie Mistral AI (La Plateforme) in GoModel, inklusive Reasoning-Modellen und wie Thinking-Output für Chat-Clients normalisiert wird."
+icon: "sparkles"
+keywords: ["Mistral", "La Plateforme", "magistral", "reasoning", "thinking", "Provider-Einrichtung"]
+---
+
+Mistral AI (La Plateforme) wird unter `https://api.mistral.ai/v1` mit einer OpenAI-kompatiblen
+API ausgeliefert. GoModel routet Chat-Completions, Modelllisten-, Embedding- und
+Passthrough-Requests über den gemeinsamen OpenAI-Adapter; der Endpunkt `/v1/responses` wird
+über Chat Completions übersetzt. Dateien und Batches werden für diesen Provider nicht angeboten.
+
+## Reasoning- (Thinking-)Output
+
+Auf Reasoning-Modellen (zum Beispiel `mistral-large-latest`, `mistral-small-latest` und
+gehostete Reasoning-Modelle wie Z.ai GLM) liefert Mistral den Assistant-Content als **Liste
+typisierter Chunks** zurück – ein `thinking`-Chunk für den Reasoning-Trace und `text`-Chunks
+für die Antwort – sowohl in gepufferten Responses als auch in SSE-Streams. Diese Form ist
+kein standardmäßiges OpenAI-Chat-Format, und Clients wie SillyTavern rendern sie als Zeichensalat.
+
+Der `mistral`-Provider von GoModel konvertiert sie automatisch in die Standardform:
+
+- die `thinking`-Chunks werden in das Feld `reasoning_content` zusammengeführt, und
+- die `text`-Chunks werden zu einem einfachen String in `content`
+
+– auf Streaming- (`choices[].delta`) genauso wie auf nicht-Streaming-Responses
+(`choices[].message`). Es ist keine Client-seitige Konfiguration nötig.
+
+Senden Sie den Aufwand (Effort) mit dem standardmäßigen verschachtelten Parameter; GoModel
+bildet ihn auf Mistals flaches `reasoning_effort` ab:
+
+```json
+{
+  "model": "mistral-large-latest",
+  "messages": [{ "role": "user", "content": "Was ist 17 * 23?" }],
+  "reasoning": { "effort": "high" }
+}
+```
+
+Mistals API-weites Enum ist `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, und der
+Wert wird unverändert durchgereicht. Welche Stufen ein Modell akzeptiert, ist modellspezifisch –
+Mistral Large 4 akzeptiert etwa `low`/`medium`/`high`, gehostete GLM-Modelle
+`low`/`high`/`max` – eine nicht unterstützte Stufe für das gewählte Modell wird also von
+Mistral selbst abgelehnt, wie mit Mistals eigenen SDKs auch.
+
+Wenn ein Client einen früheren Assistant-Turn zurückspielt, entfernt GoModel dessen
+`reasoning_content`-Member vor der Weiterleitung, weil Mistral dieses unbekannte Member mit
+einem 422 ablehnt.
+
+## Konfiguration
+
+```bash
+MISTRAL_API_KEY=...
+```
+
+Oder in `config.yaml`:
+
+```yaml
+providers:
+  mistral:
+    type: mistral
+    base_url: "https://api.mistral.ai/v1"
+    api_key: "${MISTRAL_API_KEY}"
+```
+
+<Note>
+  Der Provider-`type` ist `mistral`. Der Config-Schlüssel (`mistral` im obigen Beispiel) ist
+  beliebig und identifiziert diesen Eintrag nur innerhalb Ihrer Konfiguration; er kann
+  geändert werden.
+</Note>
+
+Sie können auch die Base-URL und die Modellliste überschreiben:
+
+```bash
+MISTRAL_BASE_URL=https://api.mistral.ai/v1
+MISTRAL_MODELS=mistral-large-latest,mistral-small-latest,mistral-embed
+```
+
+<Note>
+  `MISTRAL_MODELS` beschränkt die vom Provider bedienten Modelle im standardmäßigen
+  `allowlist`-Modus auf diese Liste – Requests für andere Modelle geben 404 zurück. Siehe
+  [Models modes](/advanced/config-yaml#models-modes) für `merge`-/`fallback`-Alternativen.
+</Note>
+
+## Modelle
+
+Listen Sie die für Ihren API-Schlüssel verfügbaren Modelle mit `GET /v1/models` auf oder rufen
+Sie ein Modell direkt über den OpenAI-kompatiblen Endpunkt `/v1/chat/completions` auf:
+
+```yaml
+virtual_models:
+  - source: mistral
+    target: mistral/mistral-large-latest
+```
+
+## Embeddings
+
+Mistals Endpunkt `/v1/embeddings` (zum Beispiel `mistral-embed`) wird unterstützt.
