@@ -45,7 +45,7 @@ func NewStreamLogObserver(logger LoggerInterface, entry *LogEntry, path string) 
 		return nil
 	}
 
-	logBodies := logger.Config().LogBodies
+	logBodies := logger.Config().ForPath(path).LogBodies
 	var builder *streamResponseBuilder
 	if logBodies {
 		builder = &streamResponseBuilder{

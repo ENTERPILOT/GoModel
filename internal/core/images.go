@@ -116,15 +116,22 @@ type ImageData struct {
 }
 
 // ImageUsage is the token usage block returned by token-billed image models
-// (gpt-image-1). DALL·E models omit it entirely.
+// (gpt-image-1). DALL·E models omit it entirely. Providers that answer with the
+// Chat Completions naming (OpenRouter: prompt_tokens, completion_tokens) are
+// accepted too; members without a typed home (OpenRouter's cost, cost_details,
+// is_byok) are kept in RawUsage for cost calculation and passed through to the
+// client, as on chat responses.
 type ImageUsage struct {
-	InputTokens        int                `json:"input_tokens"`
-	OutputTokens       int                `json:"output_tokens"`
-	TotalTokens        int                `json:"total_tokens"`
-	InputTokensDetails *ImageTokenDetails `json:"input_tokens_details,omitempty"`
+	InputTokens         int                `json:"input_tokens"`
+	OutputTokens        int                `json:"output_tokens"`
+	TotalTokens         int                `json:"total_tokens"`
+	InputTokensDetails  *ImageTokenDetails `json:"input_tokens_details,omitempty"`
+	OutputTokensDetails *ImageTokenDetails `json:"output_tokens_details,omitempty"`
+
+	RawUsage map[string]any `json:"-" swaggerignore:"true"`
 }
 
-// ImageTokenDetails splits image input tokens between text and image inputs.
+// ImageTokenDetails splits image tokens between text and image tokens.
 type ImageTokenDetails struct {
 	TextTokens  int `json:"text_tokens"`
 	ImageTokens int `json:"image_tokens"`

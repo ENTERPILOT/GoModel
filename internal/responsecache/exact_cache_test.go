@@ -38,15 +38,22 @@ type blockingMissExchange struct {
 	contextCalls atomic.Int32
 }
 
-// Context deliberately signals on StoreAfter's second Context call: the first
-// reads the workflow and the second occurs after a follower joins the wait.
-// Update this helper if StoreAfter's pre-wait call count changes.
+// Context deliberately signals on the second Context call of storeAfter: the
+// first reads the workflow while deriving the key and the second occurs after
+// a follower joins the wait. Update this helper if that pre-wait call count
+// changes.
 func (e *blockingMissExchange) Context() context.Context {
 	if e.joined != nil && e.contextCalls.Add(1) == 2 {
 		close(e.joined)
 	}
 	return e.ctx
 }
+
+// storeAfter runs StoreAfter under the key handle derives for ex.
+func storeAfter(m *simpleCacheMiddleware, ex exchange, body []byte, next func() error) error {
+	return m.StoreAfter(ex, m.exactCacheKey(ex, body), body, next)
+}
+
 func (e *blockingMissExchange) Path() string                           { return "/v1/chat/completions" }
 func (e *blockingMissExchange) Method() string                         { return http.MethodPost }
 func (e *blockingMissExchange) RequestHeader(string) string            { return "" }
@@ -209,7 +216,7 @@ func TestStoreAfter_CoalescesConcurrentIdenticalMisses(t *testing.T) {
 	errs := make([]error, requests)
 	var wg sync.WaitGroup
 	wg.Go(func() {
-		errs[0] = m.StoreAfter(&blockingMissExchange{
+		errs[0] = storeAfter(m, &blockingMissExchange{
 			ctx: context.Background(), started: started, release: release,
 		}, body, func() error {
 			calls.Add(1)
@@ -222,7 +229,7 @@ func TestStoreAfter_CoalescesConcurrentIdenticalMisses(t *testing.T) {
 	for i := 1; i < requests; i++ {
 		joined[i-1] = make(chan struct{})
 		wg.Go(func() {
-			errs[i] = m.StoreAfter(&blockingMissExchange{
+			errs[i] = storeAfter(m, &blockingMissExchange{
 				ctx: context.Background(), joined: joined[i-1],
 			}, body, func() error {
 				calls.Add(1)
@@ -251,7 +258,7 @@ func TestStoreAfter_CanceledFollowerDoesNotWaitForLeader(t *testing.T) {
 	release := make(chan struct{})
 	leaderDone := make(chan error, 1)
 	go func() {
-		leaderDone <- m.StoreAfter(&blockingMissExchange{
+		leaderDone <- storeAfter(m, &blockingMissExchange{
 			ctx: context.Background(), started: started, release: release,
 		}, body, func() error { return nil })
 	}()
@@ -260,7 +267,7 @@ func TestStoreAfter_CanceledFollowerDoesNotWaitForLeader(t *testing.T) {
 	followerCtx, cancel := context.WithCancel(context.Background())
 	cancel()
 	follower := &blockingMissExchange{ctx: followerCtx}
-	err := m.StoreAfter(follower, body, func() error { return nil })
+	err := storeAfter(m, follower, body, func() error { return nil })
 	require.ErrorIs(t, err, context.Canceled)
 
 	close(release)
@@ -277,7 +284,7 @@ func TestStoreAfter_LeaderErrorIsNotFannedOut(t *testing.T) {
 	leaderErr := errors.New("first provider failed")
 	leaderDone := make(chan error, 1)
 	go func() {
-		leaderDone <- m.StoreAfter(&blockingMissExchange{
+		leaderDone <- storeAfter(m, &blockingMissExchange{
 			ctx: context.Background(), started: started, release: release,
 		}, body, func() error { return leaderErr })
 	}()
@@ -291,7 +298,7 @@ func TestStoreAfter_LeaderErrorIsNotFannedOut(t *testing.T) {
 	for i := range followers {
 		joined[i] = make(chan struct{})
 		wg.Go(func() {
-			errs[i] = m.StoreAfter(&blockingMissExchange{
+			errs[i] = storeAfter(m, &blockingMissExchange{
 				ctx: context.Background(), joined: joined[i],
 			}, body, func() error {
 				followerCalls.Add(1)
@@ -322,7 +329,7 @@ func TestStoreAfter_CacheableFollowerStoresAfterNonCacheableLeader(t *testing.T)
 	release := make(chan struct{})
 	leaderDone := make(chan error, 1)
 	go func() {
-		leaderDone <- m.StoreAfter(&blockingMissExchange{
+		leaderDone <- storeAfter(m, &blockingMissExchange{
 			ctx: context.Background(), started: started, release: release, nonCacheable: true,
 		}, body, func() error { return nil })
 	}()
@@ -331,7 +338,7 @@ func TestStoreAfter_CacheableFollowerStoresAfterNonCacheableLeader(t *testing.T)
 	joined := make(chan struct{})
 	followerDone := make(chan error, 1)
 	go func() {
-		followerDone <- m.StoreAfter(&blockingMissExchange{
+		followerDone <- storeAfter(m, &blockingMissExchange{
 			ctx: context.Background(), joined: joined,
 		}, body, func() error { return nil })
 	}()
@@ -356,7 +363,7 @@ func TestStoreAfter_LeaderPanicReleasesMiss(t *testing.T) {
 	var recovered any
 	func() {
 		defer func() { recovered = recover() }()
-		_ = m.StoreAfter(&blockingMissExchange{ctx: context.Background()}, body, func() error {
+		_ = storeAfter(m, &blockingMissExchange{ctx: context.Background()}, body, func() error {
 			panic("provider panic")
 		})
 	}()
@@ -365,7 +372,7 @@ func TestStoreAfter_LeaderPanicReleasesMiss(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	var calls atomic.Int32
-	err := m.StoreAfter(&blockingMissExchange{ctx: ctx}, body, func() error {
+	err := storeAfter(m, &blockingMissExchange{ctx: ctx}, body, func() error {
 		calls.Add(1)
 		return nil
 	})

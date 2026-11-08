@@ -44,6 +44,27 @@ func (s *SQLStore) Get(ctx context.Context, key string) (string, bool, error) {
 	return value, true, nil
 }
 
+// GetAll returns every persisted value by key.
+func (s *SQLStore) GetAll(ctx context.Context) (map[string]string, error) {
+	rows, err := s.db.Query(ctx, `SELECT key, value FROM runtime_settings`)
+	if err != nil {
+		return nil, fmt.Errorf("list runtime settings: %w", err)
+	}
+	defer rows.Close()
+	values := make(map[string]string)
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return nil, fmt.Errorf("scan runtime setting: %w", err)
+		}
+		values[key] = value
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list runtime settings: %w", err)
+	}
+	return values, nil
+}
+
 // SetDefault inserts value unless key exists, then reads back the winner.
 // ON CONFLICT DO NOTHING is atomic in both SQLite and PostgreSQL, so two
 // instances inserting at once cannot both believe they won.

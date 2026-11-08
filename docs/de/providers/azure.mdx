@@ -52,7 +52,8 @@ Realtime-Sitzungen verwenden den GA-Websocket `/openai/v1/realtime?model=<deploy
 `/openai/v1/models` listet die Modelle der Ressource, daher wird ein Deployment,
 das wie sein Modell heißt (Standard in Foundry), direkt geroutet. Eigene
 Deployment-Namen tragen Sie in `AZURE_MODELS` ein und setzen
-`CONFIGURED_PROVIDER_MODELS_MODE=merge`.
+`AZURE_MODELS_MODE=merge`, damit sie neben den erkannten Modellen bestehen
+bleiben (siehe [Modellmodi](/de/advanced/config-yaml#modellmodi)).
 
 ## GoModel starten
 
@@ -156,7 +157,7 @@ es auf, damit GoModel es routen kann:
 
 ```bash
 AZURE_MODELS=ms-decision-1
-CONFIGURED_PROVIDER_MODELS_MODE=merge
+AZURE_MODELS_MODE=merge
 ```
 
 ```bash

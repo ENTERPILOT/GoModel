@@ -1,9 +1,12 @@
 package clustersync
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"maps"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -21,6 +24,10 @@ type fakeStore struct {
 	readErr   error
 	bumpErr   error
 	bumps     []string
+	// stalled makes Revisions hang until its context ends, like a query on
+	// a connection the database stopped answering.
+	stalled bool
+	reads   int
 }
 
 func newFakeStore(revisions map[string]int64) *fakeStore {
@@ -41,8 +48,14 @@ func (f *fakeStore) Bump(_ context.Context, entity string) error {
 	return nil
 }
 
-func (f *fakeStore) Revisions(context.Context) (map[string]int64, error) {
+func (f *fakeStore) Revisions(ctx context.Context) (map[string]int64, error) {
 	f.mu.Lock()
+	f.reads++
+	if f.stalled {
+		f.mu.Unlock()
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	defer f.mu.Unlock()
 	if f.readErr != nil {
 		return nil, f.readErr
@@ -152,6 +165,97 @@ func TestSyncerSkipsTickWhenRevisionsCannotBeRead(t *testing.T) {
 	store.mu.Unlock()
 	syncer.poll(ctx)
 	assert.Equal(t, 1, budgets.count())
+}
+
+func TestSyncerBoundsStalledRevisionsRead(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	synctest.Test(t, func(t *testing.T) {
+		ctx := context.Background()
+		store := newFakeStore(nil)
+		syncer, err := NewSyncer(ctx, store)
+		require.NoError(t, err)
+		budgets := &countingRefresh{}
+		syncer.Register("budgets", budgets.refresh)
+		syncer.Notifier("budgets")(ctx)
+		store.mu.Lock()
+		store.stalled = true
+		store.mu.Unlock()
+
+		started := time.Now()
+		syncer.poll(ctx)
+		assert.Equal(t, revisionsTimeout, time.Since(started), "a stalled read ends at its deadline")
+
+		syncer.Start(ctx)
+		time.Sleep(3 * (syncer.interval + revisionsTimeout))
+		store.mu.Lock()
+		reads := store.reads
+		store.stalled = false
+		store.mu.Unlock()
+		assert.GreaterOrEqual(t, reads, 3, "the poller keeps ticking while reads stall")
+
+		time.Sleep(revisionsTimeout + 2*syncer.interval)
+		synctest.Wait()
+		assert.Equal(t, 1, budgets.count(), "the change applies once the database answers again")
+		require.NoError(t, syncer.Close())
+	})
+	assert.Equal(t, 1, strings.Count(logs.String(), "failed to read configuration revisions"), "a persistent failure is logged once")
+}
+
+func TestSyncerBoundsStalledRefresh(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx := context.Background()
+		syncer, err := NewSyncer(ctx, newFakeStore(nil))
+		require.NoError(t, err)
+		var providerCalls atomic.Int32
+		syncer.Register("providers", func(ctx context.Context) error {
+			if providerCalls.Add(1) == 1 {
+				<-ctx.Done()
+				return ctx.Err()
+			}
+			return nil
+		})
+		rateLimits := &countingRefresh{}
+		syncer.Register("rate_limits", rateLimits.refresh)
+		syncer.Notifier("providers")(ctx)
+		syncer.Notifier("rate_limits")(ctx)
+
+		started := time.Now()
+		syncer.poll(ctx)
+		assert.Equal(t, refreshTimeout, time.Since(started), "a stalled refresh ends at its deadline")
+		assert.Equal(t, 1, rateLimits.count(), "a stalled refresh does not hold up the others")
+
+		syncer.poll(ctx)
+		assert.Equal(t, int32(2), providerCalls.Load(), "the timed-out refresh is retried on the next tick")
+		syncer.poll(ctx)
+		assert.Equal(t, int32(2), providerCalls.Load(), "a successful retry marks the revision applied")
+	})
+}
+
+// A refresh may hand its context to background work, as provider credentials
+// do to fetch a new provider's models, so returning must not cancel it.
+func TestSyncerRefreshContextOutlivesRefresh(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx := context.Background()
+		syncer, err := NewSyncer(ctx, newFakeStore(nil))
+		require.NoError(t, err)
+		var refreshCtx context.Context
+		syncer.Register("provider_credentials", func(ctx context.Context) error {
+			refreshCtx = ctx
+			return nil
+		})
+		syncer.Notifier("provider_credentials")(ctx)
+
+		syncer.poll(ctx)
+		require.NotNil(t, refreshCtx)
+		require.NoError(t, refreshCtx.Err(), "background work keeps running after refresh returns")
+		time.Sleep(refreshTimeout)
+		synctest.Wait()
+		assert.ErrorIs(t, refreshCtx.Err(), context.DeadlineExceeded, "the deadline still bounds it")
+	})
 }
 
 func TestSyncerIgnoresUnregisteredEntities(t *testing.T) {

@@ -2,7 +2,7 @@
 title: "Playground"
 description: "Testen Sie jedes Modell über das Gateway direkt im Dashboard und prüfen Sie das exakte JSON von Request und Response."
 icon: "flask-conical"
-keywords: ["Playground", "playground", "Dashboard", "Chat Completions", "Responses", "Messages", "Streaming", "Bilder", "images", "Sprachausgabe", "text-to-speech", "Transkription", "transcription"]
+keywords: ["Playground", "playground", "Dashboard", "Chat Completions", "Responses", "Messages", "Streaming", "Bilder", "images", "Sprachausgabe", "text-to-speech", "Transkription", "transcription", "Embeddings", "embeddings"]
 ---
 
 Die Seite **Playground** (`/admin/dashboard/playground`) sendet Requests mit
@@ -19,7 +19,7 @@ gestreamte Responses werden in dieselbe Form zusammengesetzt, die ein Aufruf
 ohne Streaming zurückgibt. Für Requests gelten dieselben Budgets, Rate-Limits,
 Guardrails und dasselbe Audit-Logging wie für jeden anderen Client des Gateways.
 
-## Bild, Sprachausgabe und Transkription
+## Bild, Sprachausgabe, Transkription und Embeddings
 
 Mit dem Schalter **Modus** über der Modellauswahl lassen sich auch Medienmodelle
 testen. Jeder Modus ruft den OpenAI-kompatiblen Endpunkt des Gateways auf und
@@ -32,13 +32,23 @@ weiterhin jedes beliebige Modell oder jeden Alias eingeben.
 | Bild | `POST /v1/images/generations` | Prompt, Größe, Anzahl der Bilder (1–4) | generierte Bilder (URL oder `b64_json`) |
 | Sprache | `POST /v1/audio/speech` | Text, Stimme, Format (`mp3`, `wav`, `opus`, `aac`, `flac`) | Audioplayer |
 | Transkription | `POST /v1/audio/transcriptions` | Audiodatei, optional Sprache und Prompt | Transkript-Text |
+| Embeddings | `POST /v1/embeddings` | Texte (einer pro Zeile), optional Kodierungsformat (`float`, `base64`) und Dimensionen | Anzahl der Vektoren, Dimensionen, Prompt-Tokens und die ersten Werte jedes Vektors (`float`) |
 
 Größe, Anzahl und Format werden nur gesendet, wenn sie vom Standardwert des
 Providers abweichen (`mp3` für Sprache). Das JSON-Panel zeigt den Request-Body;
 eine Transkription wird als `multipart/form-data` gesendet, daher beschreibt
 ihre Vorschau den Datei-Teil, statt die Bytes zu enthalten. Inline-Bilder im
 Format `b64_json` werden im Response-JSON gekürzt, damit es lesbar bleibt, und
-Sprach-Responses werden als ihr Content-Type und ihre Größe zusammengefasst.
+**Kopieren** kopiert dieses gekürzte JSON. Sprach-Responses werden als ihr
+Content-Type und ihre Größe zusammengefasst.
+
+Bei Embeddings wird das Kodierungsformat nur gesendet, wenn es nicht `float`
+ist. Dimensionen entfallen, solange das Feld leer ist; sonst müssen sie eine
+positive ganze Zahl sein und werden als JSON-Ganzzahl gesendet. Das Response-JSON
+kürzt jeden Vektor auf seine ersten Werte (lange `base64`-Vektoren auf ihre
+ersten Zeichen) und Embeddings pro Token, etwa von vLLMs `token_embed`, auf ihre
+erste Zeile; das Ergebnis zeigt neben jedem Embedding die Anzahl seiner
+Token-Vektoren. **Kopieren** kopiert weiterhin die vollständige Response.
 
 ## Eingrenzung per User Path
 

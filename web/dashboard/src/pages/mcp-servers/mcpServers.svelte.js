@@ -6,8 +6,11 @@ import { errorPayloadMessage, getJSON } from "$lib/api/client.js";
 import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+import { gomodelPath } from "$lib/api/paths.js";
 import * as m from "$lib/paraglide/messages.js";
+import { tick } from "svelte";
 import {
+  buildMcpOAuthStartPayload,
   buildMcpServerPayload,
   buildMcpVirtualServerPayload,
   defaultMcpVirtualServerForm,
@@ -18,7 +21,11 @@ import {
   deriveMcpServerSlug,
   filterMcpServers,
   mcpDiscoveredTools,
+  mcpOAuthOutcomeMessage,
+  mcpOAuthRedirectURI,
   mcpServerFormFromServer,
+  parseMcpOAuthOutcome,
+  stripMcpOAuthParams,
   mcpPollShouldRetry,
   mcpServerSlug,
   mcpServersNeedPolling,
@@ -29,6 +36,16 @@ import {
   MCP_SERVERS_POLL_MS,
   MCP_TOOL_MODE_ALLOW,
 } from "./mcp-servers.js";
+import {
+  MCP_AUTH_OAUTH,
+  MCP_AUTH_TOKEN,
+  mcpConnectionHeaders,
+  mcpHasAuthorizationHeader,
+  MCP_PRESET_CUSTOM,
+  mcpFreeSlug,
+  mcpPresetById,
+  mcpURLHostName,
+} from "./mcpPresets.js";
 
 class McpServersState {
   servers = $state([]);
@@ -57,6 +74,16 @@ class McpServersState {
   slugEdited = $state(false);
   advancedOpen = $state(false);
   form = $state(defaultMcpServerForm());
+  // Adding a server starts with the server choice: a preset id or
+  // MCP_PRESET_CUSTOM, "" until one is picked. A preset keeps the editor to a
+  // name and a connection method (sign-in, token, or none) with everything
+  // else under Advanced. nameEdited stops the name following the choice (or a
+  // custom server's URL) once the operator typed one.
+  formKind = $state("");
+  formAuth = $state("");
+  formToken = $state("");
+  nameEdited = $state(false);
+  formPreset = $derived(mcpPresetById(this.formKind));
 
   // Editor tool picker: every tool the server reports, exposed or not. A new
   // server, or one that never listed, has none yet.
@@ -69,6 +96,16 @@ class McpServersState {
 
   deletingName = $state("");
   reconnectingName = $state("");
+
+  // OAuth sign-in dialog. clientRequired is set when the authorization
+  // server has no dynamic client registration, so the client fields open.
+  oauthOpen = $state(false);
+  oauthServer = $state(null);
+  oauthForm = $state({ client_id: "", client_secret: "" });
+  oauthSubmitting = $state(false);
+  oauthError = $state("");
+  oauthClientRequired = $state(false);
+  signingOutName = $state("");
 
   catalogOpen = $state(false);
   catalogLoading = $state(false);
@@ -251,8 +288,58 @@ class McpServersState {
     this.advancedOpen = false;
     this.error = "";
     this.form = defaultMcpServerForm();
+    this.#resetPreset();
     this.#resetEditorTools();
     this.formOpen = true;
+  }
+
+  // chooseServerKind switches the create form between presets and a custom
+  // server. Fields the operator did not touch follow the choice; the token
+  // and every header row are dropped on a change, since headers usually
+  // carry credentials and one service's key must never go to another.
+  chooseServerKind(kind) {
+    const previous = this.formPreset;
+    const previousKind = this.formKind;
+    const preset = mcpPresetById(kind);
+    this.formKind = preset ? preset.id : kind === MCP_PRESET_CUSTOM ? kind : "";
+    this.formAuth = preset ? preset.auth[0] : "";
+    this.formToken = "";
+    this.error = "";
+    if (this.formKind !== previousKind) {
+      this.form.headers = [];
+    }
+    if (preset) {
+      this.form.url = preset.url;
+      this.form.transport = preset.transport || "http";
+    } else if (previous && this.form.url === previous.url) {
+      this.form.url = "";
+      this.form.transport = "http";
+    }
+    if (!this.nameEdited) {
+      this.form.name = preset ? preset.name : mcpURLHostName(this.form.url);
+    }
+    this.syncSlugFromName();
+  }
+
+  // syncNameFromURL names a custom server after its URL host until the
+  // operator types a name.
+  syncNameFromURL() {
+    if (this.formMode === "create" && !this.formPreset && !this.nameEdited) {
+      this.form.name = mcpURLHostName(this.form.url);
+      this.syncSlugFromName();
+    }
+  }
+
+  markNameEdited() {
+    this.nameEdited = true;
+    this.syncSlugFromName();
+  }
+
+  #resetPreset() {
+    this.formKind = "";
+    this.formAuth = "";
+    this.formToken = "";
+    this.nameEdited = false;
   }
 
   openEdit(server) {
@@ -264,6 +351,7 @@ class McpServersState {
     this.advancedOpen = false;
     this.error = "";
     this.form = mcpServerFormFromServer(server);
+    this.#resetPreset();
     this.#resetEditorTools();
     this.formOpen = true;
     void this.#loadEditorTools(server);
@@ -276,6 +364,7 @@ class McpServersState {
     this.advancedOpen = false;
     this.error = "";
     this.form = defaultMcpServerForm();
+    this.#resetPreset();
     this.#resetEditorTools();
   }
 
@@ -329,10 +418,15 @@ class McpServersState {
     this.form.tool_names = (this.form.tool_names || []).filter((item) => item !== name);
   }
 
+  // A preset server's slug skips taken ones, so a second Linear becomes
+  // linear-2 instead of an error the preset form keeps out of sight.
   syncSlugFromName() {
-    if (this.formMode === "create" && !this.slugEdited) {
-      this.form.slug = deriveMcpServerSlug(this.form.name);
+    if (this.formMode !== "create" || this.slugEdited) {
+      return;
     }
+    const slug = this.form.name.trim() ? deriveMcpServerSlug(this.form.name) : "";
+    this.form.slug =
+      slug && this.formPreset ? mcpFreeSlug(slug, this.servers, this.virtualServers) : slug;
   }
 
   markSlugEdited() {
@@ -350,7 +444,20 @@ class McpServersState {
   }
 
   async submitForm() {
-    const built = buildMcpServerPayload(this.form, this.formMode, this.servers, this.virtualServers);
+    if (this.formMode === "create" && !this.formKind) {
+      this.error = m.mcp_preset_server_required();
+      return;
+    }
+    const preset = this.formPreset;
+    const auth = preset ? this.formAuth : "";
+    const form = preset
+      ? { ...this.form, headers: mcpConnectionHeaders(this.form.headers, auth, this.formToken) }
+      : this.form;
+    if (auth === MCP_AUTH_TOKEN && !mcpHasAuthorizationHeader(form.headers)) {
+      this.error = m.mcp_preset_token_required();
+      return;
+    }
+    const built = buildMcpServerPayload(form, this.formMode, this.servers, this.virtualServers);
     if (built.error) {
       this.error = built.error;
       return;
@@ -386,6 +493,9 @@ class McpServersState {
       flash.success(m.mcp_saved({ name: built.payload.name }));
       this.closeForm();
       void this.fetchServers();
+      if (auth === MCP_AUTH_OAUTH) {
+        this.#signInAfterSave(built.payload, preset);
+      }
     } finally {
       this.formSubmitting = false;
     }
@@ -569,6 +679,139 @@ class McpServersState {
     } finally {
       this.deletingName = "";
     }
+  }
+
+  // --- OAuth sign-in -----------------------------------------------------
+
+  // #signInAfterSave continues a preset save straight into the sign-in. A
+  // server that needs an operator-registered OAuth client stops at the
+  // dialog with the client fields open; the rest go to the sign-in page.
+  #signInAfterSave(payload, preset) {
+    this.openSignIn({
+      name: payload.name,
+      slug: payload.slug,
+      url: payload.url,
+      transport: payload.transport,
+    });
+    if (preset.oauthClient === "manual") {
+      this.oauthClientRequired = true;
+      return;
+    }
+    void this.submitSignIn();
+  }
+
+  oauthRedirectURI() {
+    return mcpOAuthRedirectURI(window.location.origin, gomodelPath);
+  }
+
+  openSignIn(server) {
+    this.oauthServer = server;
+    this.oauthForm = { client_id: "", client_secret: "" };
+    this.oauthError = "";
+    this.oauthClientRequired = false;
+    this.oauthOpen = true;
+  }
+
+  closeSignIn() {
+    this.oauthOpen = false;
+    this.oauthServer = null;
+    this.oauthError = "";
+  }
+
+  // submitSignIn starts discovery on the gateway and sends the browser to
+  // the authorization server, which returns it to the callback.
+  async submitSignIn() {
+    const slug = mcpServerSlug(this.oauthServer);
+    if (!slug || this.oauthSubmitting) {
+      return;
+    }
+    this.oauthSubmitting = true;
+    this.oauthError = "";
+    try {
+      const outcome = await sendAdminMutation(
+        "/admin/mcp-servers/" + encodeURIComponent(slug) + "/oauth/start",
+        "POST",
+        buildMcpOAuthStartPayload(this.oauthForm, this.oauthRedirectURI()),
+        {
+          label: "start mcp sign-in",
+          errorFallback: m.mcp_oauth_start_failed(),
+          unavailableMessage: m.mcp_unavailable(),
+        },
+      );
+      if (outcome.status === "stale") {
+        return;
+      }
+      if (outcome.status !== "ok") {
+        this.oauthError = outcome.error;
+        if (outcome.result?.data?.error?.code === "oauth_client_required") {
+          this.oauthClientRequired = true;
+        }
+        return;
+      }
+      const url = outcome.result.data && outcome.result.data.authorization_url;
+      if (!url) {
+        this.oauthError = m.mcp_oauth_start_failed();
+        return;
+      }
+      if (!this.oauthOpen) {
+        return;
+      }
+      // Close the dialog first, so its unsaved-changes guard is gone before
+      // the browser leaves for the sign-in page.
+      this.closeSignIn();
+      await tick();
+      window.location.assign(url);
+    } finally {
+      this.oauthSubmitting = false;
+    }
+  }
+
+  async signOut(server) {
+    const name = String((server && server.name) || "").trim();
+    const slug = mcpServerSlug(server);
+    if (!slug || this.signingOutName) {
+      return;
+    }
+    if (!confirm(m.mcp_oauth_sign_out_confirm({ name }))) {
+      return;
+    }
+    this.signingOutName = slug;
+    try {
+      const outcome = await sendAdminMutation(
+        "/admin/mcp-servers/" + encodeURIComponent(slug) + "/oauth",
+        "DELETE",
+        undefined,
+        {
+          label: "sign out of mcp server",
+          errorFallback: m.mcp_oauth_sign_out_failed(),
+          unavailableMessage: m.mcp_unavailable(),
+        },
+      );
+      if (outcome.status === "stale") {
+        return;
+      }
+      if (outcome.status !== "ok") {
+        flash.error(outcome.error);
+        return;
+      }
+      flash.success(m.mcp_oauth_signed_out({ name }));
+      void this.fetchServers();
+    } finally {
+      this.signingOutName = "";
+    }
+  }
+
+  // showOAuthOutcome flashes the result the sign-in callback redirected
+  // back with, then drops it from the address bar. Failure details are on
+  // the server's row, never in the URL.
+  showOAuthOutcome() {
+    const result = parseMcpOAuthOutcome(window.location.search);
+    if (!result) {
+      return;
+    }
+    history.replaceState(history.state, "", stripMcpOAuthParams(window.location.href));
+    const message = mcpOAuthOutcomeMessage(result);
+    flash[message.kind](message.text);
   }
 
   async reconnectServer(server) {
