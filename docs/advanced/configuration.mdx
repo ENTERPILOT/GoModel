@@ -231,7 +231,8 @@ bodies, headers), see [Audit Logging](#audit-logging) below.
 | `CACHE_REFRESH_INTERVAL` | Seconds between provider model re-discovery runs | `3600` (1h) |
 | `PROVIDER_RECHECK_INTERVAL` | Seconds between re-probes of providers whose last refresh failed (`0` disables) | `60` |
 | `MODEL_LIST_URL`    | Model metadata catalog: an HTTP URL, a local file path (`/etc/gomodel/models.json` or `file://...`), or `off` | public catalog on GitHub |
-| `GOMODEL_OFFLINE`   | Air-gap switch: disables the update check and drops HTTP catalog URLs. Local catalog files and configured providers are unaffected | `false` |
+| `GOMODEL_OFFLINE`   | Air-gap switch: disables the update check, drops HTTP catalog URLs, and stops allowlist providers from listing `/models` for metadata. Local catalog files and inference requests to configured providers are unaffected | `false` |
+| `ALLOWLIST_UPSTREAM_METADATA` | In `allowlist` mode, read a provider's `/models` only to fill in metadata (context window, max output tokens, pricing, display name, model type) for its configured models; never adds models. `false` stops that call; offline mode forces it off | `true` |
 | `REDIS_URL`         | Redis connection URL              | _(empty)_        |
 | `REDIS_KEY_MODELS`     | Redis key for model cache           | `gomodel:models`    |
 | `REDIS_KEY_RESPONSES`  | Redis key for response cache        | `gomodel:response:` |
@@ -310,6 +311,7 @@ Files are retained as long as the audit entries that reference them
 | `LOGGING_LOG_AUDIO_BODIES`        | Log audio endpoint inputs/outputs          | `false` |
 | `LOGGING_LOG_IMAGE_BODIES`        | Log image endpoint inputs/outputs          | `false` |
 | `LOGGING_LOG_IMAGE_BODIES_SCOPE`  | Which image bytes to store: `all`, `input`, `output` | `all` |
+| `LOGGING_LOG_EMBEDDING_BODIES`    | Log embeddings request/response bodies (off: metadata only) | `true`  |
 | `LOGGING_LOG_HEADERS`             | Log headers (sensitive ones auto-redacted) | `true`  |
 | `LOGGING_ONLY_MODEL_INTERACTIONS` | Only log AI model endpoints                | `true`  |
 | `LOGGING_BUFFER_SIZE`             | In-memory buffer before flush              | `1000`  |
@@ -348,8 +350,9 @@ to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
 
 <Warning>
   When `LOGGING_LOG_BODIES` is enabled, request and response bodies are stored
-  in full. These may contain sensitive data such as PII or API keys embedded in
-  prompts.
+  in full, except where the per-endpoint settings below drop them or replace
+  them with placeholders. These may contain sensitive data such as PII or API
+  keys embedded in prompts.
 </Warning>
 
 <Note>
@@ -378,6 +381,19 @@ to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
   audio bodies (the speech response and the transcription upload, which keeps its
   metadata) are recorded as a lightweight `{__audio__, content_type, bytes, stored: false}`
   placeholder; when body logging is off, no audio body is stored at all.
+</Note>
+
+<Note>
+  `LOGGING_LOG_EMBEDDING_BODIES` refines `LOGGING_LOG_BODIES` for embeddings —
+  it has no effect unless body logging is enabled. It covers `/v1/embeddings`
+  and provider passthrough calls to an embeddings endpoint (`/p/{provider}/.../embeddings`,
+  llama.cpp `/embedding`, Cohere and Ollama `.../embed`, Gemini `:embedContent` and
+  `:batchEmbedContents`). Embedding inputs
+  can be whole documents or base64 images and the responses are float vectors,
+  so bulk indexing jobs grow the audit store quickly. When body logging is on
+  but this is off, embedding entries keep their metadata (model, provider,
+  status, timing, user path, usage) and drop the request and response bodies.
+  It defaults to `true`, which keeps the earlier behaviour.
 </Note>
 
 <Note>
@@ -549,16 +565,22 @@ Most providers can use a custom base URL via `<PROVIDER>_BASE_URL` (for example 
 
 Every provider type also accepts a comma-separated configured model list via
 `<PROVIDER>_MODELS`, for example `OPENROUTER_MODELS`, `ORACLE_MODELS`,
-`AZURE_MODELS`, `SGLANG_MODELS`, `VLLM_MODELS`, or `LLMD_MODELS`. By default,
-`CONFIGURED_PROVIDER_MODELS_MODE=fallback` uses configured lists only when
-upstream `/models` fails, returns nil, or returns an empty list. An
-OpenAI-compatible provider without a `/models` endpoint (404 or 405) is served
-from its configured list and reported healthy, which suits single-API servers
-such as speech-to-text. Set
-`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` to expose only configured models for
-providers that define a list and skip their upstream `/models` calls. YAML
+`AZURE_MODELS`, `SGLANG_MODELS`, `VLLM_MODELS`, or `LLMD_MODELS`. YAML
 `providers.<name>.models` provides the same model-list input for named provider
-blocks.
+blocks. How a list combines with the provider's `/models` is set by
+`CONFIGURED_PROVIDER_MODELS_MODE` (default `allowlist`), or for one provider by
+`<PROVIDER>[_SUFFIX]_MODELS_MODE` (YAML: `providers.<name>.models_mode`), for
+example `OPENROUTER_MODELS_MODE=fallback`; see
+[Models modes](/advanced/config-yaml#models-modes). An OpenAI-compatible
+provider without a `/models` endpoint (404 or 405) is served from its
+configured list and reported healthy, which suits single-API servers such as
+speech-to-text.
+
+<Warning>
+**Breaking change:** the default used to be `fallback`. Providers with a
+configured list now serve only those models, and other models return 404. See
+[Models modes](/advanced/config-yaml#models-modes) to restore the old behavior.
+</Warning>
 
 `GET /v1/models` lists provider-qualified IDs (`openai/gpt-5`) by default. Set
 `UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT=true` (YAML:
@@ -762,7 +784,8 @@ export ORACLE_BASE_URL="https://inference.generativeai.us-chicago-1.oci.oraclecl
 export ORACLE_MODELS="openai.gpt-oss-120b,xai.grok-3" # Optional configured model list
 export OPENROUTER_MODELS="openai/gpt-oss-120b,anthropic/claude-sonnet-4"
 export KILO_MODELS="anthropic/claude-sonnet-4.5,openai/gpt-5.5"
-export CONFIGURED_PROVIDER_MODELS_MODE="fallback" # fallback or allowlist
+export CONFIGURED_PROVIDER_MODELS_MODE="allowlist" # allowlist (default), fallback, or merge
+# Optional: export OPENROUTER_MODELS_MODE="fallback" # per-provider override
 export OLLAMA_BASE_URL="http://localhost:11434/v1" # Registers "ollama" provider
 export SGLANG_BASE_URL="http://localhost:30000/v1" # Registers keyless "sglang" provider
 # Optional: export SGLANG_API_KEY="token-abc123"
@@ -817,11 +840,12 @@ settings), use the YAML file:
 
 ```yaml
 models:
-  # fallback is the default. Use allowlist when configured provider model lists
-  # should hide upstream models and skip upstream /models calls, or merge to add
-  # configured models on top of the discovered inventory (models a provider
-  # serves but does not list).
-  configured_provider_models_mode: fallback
+  # How configured provider model lists are used: allowlist (default), fallback,
+  # or merge. See the Models modes table in the config.yaml guide.
+  configured_provider_models_mode: allowlist
+  # allowlist reads upstream /models for metadata only; false stops that call
+  # (GOMODEL_OFFLINE=true stops it too).
+  allowlist_upstream_metadata: true
   # List bare model IDs (gpt-5) from GET /v1/models instead of provider-qualified
   # ones (openai/gpt-5). When two providers expose the same ID only the provider an
   # unqualified request routes to (the first registered one) is listed; pin a name
@@ -871,7 +895,7 @@ providers:
     # api_key is optional; set it only when launch_server uses --api-key.
     # api_key: "token-abc123"
 
-  # Configure a model list for fallback or allowlist mode
+  # Configure a model list (how it is used depends on the models mode)
   gemini:
     type: gemini
     api_key: "..."
@@ -891,9 +915,9 @@ providers:
 ```
 
 <Note>
-  `models:` works for every provider block. In fallback mode it is a safety net
-  when upstream `/models` is unavailable or empty. In allowlist mode it becomes
-  the exposed inventory for that provider and skips upstream `/models`. For Oracle GenAI, see the [Oracle GenAI
+  `models:` works for every provider block; how it combines with upstream
+  `/models` depends on the [models mode](/advanced/config-yaml#models-modes).
+  For Oracle GenAI, see the [Oracle GenAI
   guide](/providers/oracle) for the required OCI policy and a tested configuration.
 </Note>
 

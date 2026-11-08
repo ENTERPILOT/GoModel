@@ -9,6 +9,8 @@ import (
 	"log/slog"
 
 	"github.com/goccy/go-json"
+
+	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
 // persistingStream commits the turn before releasing the provider's terminal
@@ -130,23 +132,10 @@ func (s *conversationPersistingStream) observeEvent(event []byte) {
 }
 
 func conversationSSEPayload(event []byte) (conversationStreamEvent, bool) {
-	lines := bytes.Split(event, []byte("\n"))
-	dataLines := make([][]byte, 0, len(lines))
-	for _, line := range lines {
-		line = bytes.TrimSuffix(line, []byte("\r"))
-		if !bytes.HasPrefix(line, []byte("data:")) {
-			continue
-		}
-		data := line[len("data:"):]
-		if len(data) > 0 && data[0] == ' ' {
-			data = data[1:]
-		}
-		dataLines = append(dataLines, data)
-	}
-	if len(dataLines) == 0 {
+	data, ok := streaming.EventData(event)
+	if !ok {
 		return conversationStreamEvent{}, false
 	}
-	data := bytes.Join(dataLines, []byte("\n"))
 	if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
 		return conversationStreamEvent{}, false
 	}
