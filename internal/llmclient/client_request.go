@@ -15,6 +15,7 @@ import (
 	"syscall"
 
 	"github.com/goccy/go-json"
+	"golang.org/x/net/http/httpguts"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -337,9 +338,29 @@ func requestHeadersWithPluginOverrides(ctx context.Context, reqHeaders http.Head
 		if core.IsPluginUpstreamHeaderDenied(canonical) {
 			continue
 		}
+		// A name or value the transport would refuse fails the whole call, so
+		// a plugin bug would read as a provider outage on every attempt. Drop
+		// the header instead, and never log the value.
+		if !httpguts.ValidHeaderFieldName(canonical) {
+			slog.Warn("dropped plugin upstream header with an invalid name", "request_id", core.GetRequestID(ctx))
+			continue
+		}
+		if !validHeaderValues(values) {
+			slog.Warn("dropped plugin upstream header with an invalid value", "request_id", core.GetRequestID(ctx), "header", canonical)
+			continue
+		}
 		merged[canonical] = append([]string(nil), values...)
 	}
 	return merged
+}
+
+func validHeaderValues(values []string) bool {
+	for _, value := range values {
+		if !httpguts.ValidHeaderFieldValue(value) {
+			return false
+		}
+	}
+	return true
 }
 
 func providerErrorStatusCode(err error) int {

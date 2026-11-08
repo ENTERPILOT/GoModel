@@ -1,7 +1,9 @@
 package llmclient
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -231,6 +233,43 @@ func TestBuildRequestPluginHeadersCannotOverrideCredentials(t *testing.T) {
 	assert.Empty(t, req.Header.Get("Content-Length"))
 	assert.Empty(t, req.Header.Get("Transfer-Encoding"))
 	assert.Equal(t, "allowed", req.Header.Get("X-Allowed-Header"))
+}
+
+// TestDoDropsInvalidPluginHeaders proves a plugin header the
+// transport would refuse is dropped rather than failing the provider call, and
+// that the warning names the header but never logs its value.
+func TestDoDropsInvalidPluginHeaders(t *testing.T) {
+	var logs bytes.Buffer
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(original) })
+
+	// providertest builds on this package, so the fake upstream is a plain
+	// httptest server handing the headers over through a channel.
+	received := make(chan http.Header, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received <- r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+	client := New(DefaultConfig("test", server.URL), nil)
+	ctx := core.WithPluginUpstreamHeaders(context.Background(), http.Header{
+		"Helicone-Property-Tenant": {"acme"},
+		"X-Injected":               {"acme\r\nX-Evil: secret-value"},
+		"Bad Name":                 {"ok"},
+	})
+
+	var result map[string]any
+	require.NoError(t, client.Do(ctx, Request{Method: http.MethodGet, Endpoint: "/v1/models"}, &result))
+
+	sent := <-received
+	assert.Equal(t, "acme", sent.Get("Helicone-Property-Tenant"))
+	assert.Empty(t, sent.Get("X-Injected"))
+	assert.Empty(t, sent.Get("X-Evil"))
+	assert.Contains(t, logs.String(), "header=X-Injected")
+	assert.Contains(t, logs.String(), "invalid name")
+	assert.NotContains(t, logs.String(), "secret-value")
 }
 
 func TestBuildRequestPluginHeadersOverrideRequestHeaders(t *testing.T) {
