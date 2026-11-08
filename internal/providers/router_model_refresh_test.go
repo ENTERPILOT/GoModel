@@ -22,6 +22,7 @@ type countingRefreshProvider struct {
 	mockProvider
 	listModelsCalls atomic.Int32
 	release         chan struct{}
+	listModelsErr   error
 
 	mu     sync.Mutex
 	models []string
@@ -41,6 +42,9 @@ func (p *countingRefreshProvider) ListModels(ctx context.Context) (*core.ModelsR
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
+	}
+	if p.listModelsErr != nil {
+		return nil, p.listModelsErr
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -175,9 +179,46 @@ func TestRouterOnDemandRefresh_CanceledCallerDoesNotFailSharedFetch(t *testing.T
 	})
 }
 
+func TestRouterOnDemandRefresh_FailedRefreshReusedWithinCooldown(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		provider := &countingRefreshProvider{
+			name:          "ollama",
+			listModelsErr: errors.New("upstream unavailable"),
+		}
+		router := newOnDemandRefreshRouter(t, provider)
+
+		for range 3 {
+			_, err := router.RefreshProviderModels(t.Context(), "ollama")
+			require.Error(t, err)
+		}
+		assert.Equal(t, int32(1), provider.listModelsCalls.Load())
+
+		time.Sleep(onDemandRefreshCooldown)
+		_, err := router.RefreshProviderModels(t.Context(), "ollama")
+		require.Error(t, err)
+		assert.Equal(t, int32(2), provider.listModelsCalls.Load())
+	})
+}
+
+func TestRouterOnDemandRefresh_BlockedFetchEndsAtSharedTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		provider := &countingRefreshProvider{
+			name:    "ollama",
+			release: make(chan struct{}),
+		}
+		router := newOnDemandRefreshRouter(t, provider)
+
+		start := time.Now()
+		_, err := router.RefreshProviderModels(context.Background(), "ollama")
+		require.Error(t, err)
+		assert.Equal(t, onDemandRefreshTimeout, time.Since(start))
+		assert.Equal(t, int32(1), provider.listModelsCalls.Load())
+	})
+}
+
 func TestRouterOnDemandRefresh_NilContext(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		provider := &countingRefreshProvider{mockProvider: mockProvider{name: "ollama"}}
+		provider := &countingRefreshProvider{name: "ollama"}
 		provider.setModels("known-model")
 		router := newOnDemandRefreshRouter(t, provider)
 
