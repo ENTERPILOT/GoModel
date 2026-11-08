@@ -481,6 +481,9 @@ type mockProvider struct {
 	embeddingCalls          int
 	lastPassthroughProvider string
 	lastPassthroughReq      *core.PassthroughRequest
+	// lastPassthroughUpstream holds the plugin upstream headers the last
+	// passthrough call's context carried.
+	lastPassthroughUpstream http.Header
 
 	responseGetResponse         *core.ResponsesResponse
 	responseGetHook             func()
@@ -841,9 +844,10 @@ func (m *mockProvider) Embeddings(_ context.Context, _ *core.EmbeddingRequest) (
 	return m.embeddingResponse, nil
 }
 
-func (m *mockProvider) Passthrough(_ context.Context, providerType string, req *core.PassthroughRequest) (*core.PassthroughResponse, error) {
+func (m *mockProvider) Passthrough(ctx context.Context, providerType string, req *core.PassthroughRequest) (*core.PassthroughResponse, error) {
 	m.lastPassthroughProvider = providerType
 	m.lastPassthroughReq = req
+	m.lastPassthroughUpstream = core.PluginUpstreamHeaders(ctx)
 	if m.passthroughErr != nil {
 		return nil, m.passthroughErr
 	}

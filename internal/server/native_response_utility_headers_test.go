@@ -24,11 +24,25 @@ func (upstreamHeaderPatcher) PatchChatRequest(_ context.Context, req *core.ChatR
 }
 
 func (upstreamHeaderPatcher) PatchResponsesRequest(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesRequest, error) {
+	writePluginUpstreamHeader(ctx)
+	return req, nil
+}
+
+func (upstreamHeaderPatcher) PatchDecisionRequest(ctx context.Context, req *core.DecisionRequest) (*core.DecisionRequest, error) {
+	writePluginUpstreamHeader(ctx)
+	return req, nil
+}
+
+func (upstreamHeaderPatcher) PatchSystemOneRequest(ctx context.Context, req *core.SystemOneRequest) (*core.SystemOneRequest, error) {
+	writePluginUpstreamHeader(ctx)
+	return req, nil
+}
+
+func writePluginUpstreamHeader(ctx context.Context) {
 	state := plugins.RequestStateFor(ctx)
 	exchange := state.NewExchange(ctx, pluginapi.Meta{})
 	exchange.Headers.Upstream = http.Header{"Helicone-Property-Tenant": {"acme"}}
 	state.Finish(exchange)
-	return req, nil
 }
 
 // TestResponsesUtilityRoutesCarryPluginUpstreamHeaders proves that token
