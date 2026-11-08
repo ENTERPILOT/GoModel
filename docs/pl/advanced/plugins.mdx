@@ -330,16 +330,14 @@ w Helicone, albo tag organizacyjny, po którym routuje gateway przed providerem.
 Dane uwierzytelniające providera nie należą tutaj — nazwy, które gateway traktuje
 jako dane uwierzytelniające, są odrzucane, a każda inna wartość jest przekazywana
 do providera. Host loguje tylko, ile nagłówków ustawił plugin, nigdy ich wartości.
-Przypisz mapę w hooku fazy prompt, zanim wykona się wywołanie providera:
+Ustaw nagłówki w hooku fazy prompt, zanim wykona się wywołanie providera. Mapa
+już istnieje: wywołaj na niej `Set` zamiast przypisywać nową, aby nagłówki zapisane
+pod innymi nazwami przez wcześniejsze pluginy w łańcuchu zostały zachowane:
 
 ```go
-import "net/http"
-
 func (p *tenantHint) OnPrompt(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
-	x.Headers.Upstream = http.Header{
-		"Helicone-Property-Tenant":  {x.Meta.UserPath},
-		"Helicone-Property-Request": {x.Meta.RequestID},
-	}
+	x.Headers.Upstream.Set("Helicone-Property-Tenant", x.Meta.UserPath)
+	x.Headers.Upstream.Set("Helicone-Property-Request", x.Meta.RequestID)
 	return pluginapi.Allow(), nil
 }
 ```

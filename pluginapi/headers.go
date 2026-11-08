@@ -14,10 +14,11 @@ type Headers struct {
 	// on its own.
 	Response http.Header
 	// Upstream adds headers to the provider call: one per request, applied to
-	// every attempt the request makes. Assign a map before the call runs; the
-	// host folds what a hook wrote into the request state when the phase
-	// finishes. A host may refuse headers it owns, such as credentials, the ones
-	// that frame the connection or describe the body, and provider feature
-	// negotiation.
+	// every attempt the request makes. The host provides the map; call Set on
+	// it before the call runs rather than assigning a new one, which would
+	// drop headers earlier plugins in the chain wrote. The host folds what a
+	// hook wrote into the request state when the phase finishes. A host may
+	// refuse headers it owns, such as credentials, the ones that frame the
+	// connection or describe the body, and provider feature negotiation.
 	Upstream http.Header
 }

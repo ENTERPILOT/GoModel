@@ -328,17 +328,15 @@ routing or billing property the upstream expects, such as Helicone's, or an
 organizational tag a gateway in front of the provider routes on. A provider
 credential does not belong here — the names the gateway treats as credentials
 are refused, and any other value is forwarded to the provider. The host logs
-how many headers a plugin set, never their values. Assign the map in a
-prompt-phase hook, before the provider call runs:
+how many headers a plugin set, never their values. Set them in a prompt-phase
+hook, before the provider call runs. The map is already there: call `Set` on it
+rather than assigning a new one, so headers earlier plugins in the chain wrote
+under other names survive:
 
 ```go
-import "net/http"
-
 func (p *tenantHint) OnPrompt(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
-	x.Headers.Upstream = http.Header{
-		"Helicone-Property-Tenant":  {x.Meta.UserPath},
-		"Helicone-Property-Request": {x.Meta.RequestID},
-	}
+	x.Headers.Upstream.Set("Helicone-Property-Tenant", x.Meta.UserPath)
+	x.Headers.Upstream.Set("Helicone-Property-Request", x.Meta.RequestID)
 	return pluginapi.Allow(), nil
 }
 ```

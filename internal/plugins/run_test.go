@@ -412,6 +412,34 @@ func TestPluginErrorsUseInternalErrorType(t *testing.T) {
 	}
 }
 
+// Every hook can call Headers.Upstream.Set without allocating the map, and a
+// later mutator adds to what an earlier step wrote instead of replacing it.
+func TestRunUpstreamHeadersAccumulateAcrossSteps(t *testing.T) {
+	setter := func(name string, mutates bool, header string) *Instance {
+		return newTestInstance(&fakePlugin{name: name, mutates: mutates, onPrompt: func(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+			x.Headers.Upstream.Set(header, name)
+			return pluginapi.Allow(), nil
+		}}, InstanceSpec{})
+	}
+	chain, err := BuildChain(pluginapi.KindPrompt, []Ref{
+		{setter("first", true, "X-First"), 10},
+		{setter("reader", false, "X-Reader"), 20},
+		{setter("second", true, "X-Second"), 30},
+	})
+	require.NoError(t, err)
+
+	x := withPromptText(newExchange(), "hi")
+	outcome, err := chain.RunPrompt(context.Background(), x)
+	require.NoError(t, err)
+	require.Equal(t, pluginapi.ActionAllow, outcome.Decision.Action, "decision = %+v", outcome.Decision)
+
+	assert.Equal(t, http.Header{
+		"X-First":  {"first"},
+		"X-Reader": {"reader"},
+		"X-Second": {"second"},
+	}, x.Headers.Upstream)
+}
+
 // A step with one reader takes its own path, which skips the goroutine and
 // the per-reader slices. It must merge back exactly what the concurrent path
 // does: values, response headers, and request headers the reader set,

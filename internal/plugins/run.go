@@ -339,6 +339,9 @@ func ensureExchange(x *pluginapi.Exchange) {
 	if x.Headers.Response == nil {
 		x.Headers.Response = http.Header{}
 	}
+	if x.Headers.Upstream == nil {
+		x.Headers.Upstream = http.Header{}
+	}
 }
 
 // shallowCopy gives a concurrent reader its own Values and Headers so two

@@ -234,16 +234,13 @@ keep-alive 注释（15 s）之前完成，针对缓冲响应做出的 `warn` 就
 `Headers.Upstream` 把 Header 放到提供商调用本身：上游期望的、按请求生效的路由或计费属性（例如 Helicone 的），
 或者提供商之前的网关用于路由的组织标签。提供商凭据不属于这里——网关视为凭据的名称会被拒绝，
 其他任何值都会转发给提供商。host 只记录插件设置了多少个 Header，从不记录它们的值。
-在 prompt 阶段的 Hook 中、提供商调用执行之前赋值：
+在 prompt 阶段的 Hook 中、提供商调用执行之前设置这些 Header。该 map 已经存在：请对它调用 `Set`，
+而不是赋值一个新的 map，这样链中更早插件以其他名称写入的 Header 才会保留：
 
 ```go
-import "net/http"
-
 func (p *tenantHint) OnPrompt(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
-	x.Headers.Upstream = http.Header{
-		"Helicone-Property-Tenant":  {x.Meta.UserPath},
-		"Helicone-Property-Request": {x.Meta.RequestID},
-	}
+	x.Headers.Upstream.Set("Helicone-Property-Tenant", x.Meta.UserPath)
+	x.Headers.Upstream.Set("Helicone-Property-Request", x.Meta.RequestID)
 	return pluginapi.Allow(), nil
 }
 ```

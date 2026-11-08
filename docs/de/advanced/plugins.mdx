@@ -316,17 +316,15 @@ etwa die von Helicone, oder ein organisatorisches Tag, nach dem ein Gateway vor 
 Provider routet. Zugangsdaten für einen Provider gehören nicht hierher — die Namen,
 die das Gateway als Zugangsdaten behandelt, werden abgelehnt, und jeder andere Wert
 wird an den Provider weitergegeben. Das Host loggt nur, wie viele Header ein Plugin
-gesetzt hat, nie deren Werte. Weisen Sie die Map in einem Hook der Phase `prompt` zu,
-bevor der Provider-Aufruf läuft:
+gesetzt hat, nie deren Werte. Setzen Sie die Header in einem Hook der Phase `prompt`,
+bevor der Provider-Aufruf läuft. Die Map ist bereits angelegt: Rufen Sie `Set` darauf
+auf, statt eine neue zuzuweisen, damit Header, die frühere Plugins der Kette unter
+anderen Namen geschrieben haben, erhalten bleiben:
 
 ```go
-import "net/http"
-
 func (p *tenantHint) OnPrompt(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
-	x.Headers.Upstream = http.Header{
-		"Helicone-Property-Tenant":  {x.Meta.UserPath},
-		"Helicone-Property-Request": {x.Meta.RequestID},
-	}
+	x.Headers.Upstream.Set("Helicone-Property-Tenant", x.Meta.UserPath)
+	x.Headers.Upstream.Set("Helicone-Property-Request", x.Meta.RequestID)
 	return pluginapi.Allow(), nil
 }
 ```
