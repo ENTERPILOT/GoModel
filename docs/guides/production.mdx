@@ -551,7 +551,7 @@ many concurrent large requests need headroom, since the limit is soft.
 
 Without the chart (docker-compose, Cloud Run, Fargate), set `GOMEMLIMIT` to about
 90% of the container memory limit, for example `GOMEMLIMIT=460MiB` for 512 MiB.
-Go expects `B`, `KiB`, `MiB`, or `GiB` suffixes, not Kubernetes-style `Mi`.
+Go expects `B`, `KiB`, `MiB`, `GiB`, or `TiB` suffixes, not Kubernetes-style `Mi`.
 `GOMAXPROCS` needs no setting: the runtime reads the container's CPU limit.
 
 ## Data retention and disk growth

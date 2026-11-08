@@ -68,8 +68,10 @@ jobs:
           helm template gomodel helm -s templates/deployment.yaml | grep -qF 'value: "$(GOMODEL_MEMORY_LIMIT_MIB)MiB"'
           ! helm template gomodel helm --set goMemLimit=400Mi >/dev/null 2>&1
           test "$(helm template gomodel helm --set goMemLimit=400MiB -s templates/deployment.yaml | grep -c -e 'value: "400MiB"' -e GOMODEL_MEMORY_LIMIT_MIB)" = 1
-          ! helm template gomodel helm --set env.GOMEMLIMIT=300MiB -s templates/deployment.yaml | grep -q GOMEMLIMIT
-          ! helm template gomodel helm --set resources.limits=null -s templates/deployment.yaml | grep -q GOMEMLIMIT
+          out="$(helm template gomodel helm --set env.GOMEMLIMIT=300MiB -s templates/deployment.yaml)" || exit 1
+          if grep -q GOMEMLIMIT <<<"$out"; then echo "chart overrode env.GOMEMLIMIT"; exit 1; fi
+          out="$(helm template gomodel helm --set resources.limits=null -s templates/deployment.yaml)" || exit 1
+          if grep -q GOMEMLIMIT <<<"$out"; then echo "chart set GOMEMLIMIT without a memory limit"; exit 1; fi
 
   install:
     name: Install on kind

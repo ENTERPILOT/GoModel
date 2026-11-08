@@ -141,8 +141,8 @@ the labels your Prometheus selects on under `metrics.serviceMonitor.labels`.
 
 The chart sets the Go runtime's soft memory limit, `GOMEMLIMIT`, to
 `resources.limits.memory` through the downward API, so the garbage collector
-works harder near the limit instead of letting the heap overshoot it and the
-pod be OOM-killed. Without a memory limit nothing is set.
+works harder near the limit, which reduces the risk of the heap overshooting it
+and the pod being OOM-killed. The limit is soft, so it can still be exceeded. Without a memory limit nothing is set.
 
 Leave headroom for memory outside the Go heap (SQLite, bursts of large
 requests) by setting it explicitly, using Go units (`MiB`, `GiB`):
