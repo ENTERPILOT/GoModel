@@ -48,6 +48,9 @@ func (o *onDemandRefresher) refresh(
 	providerSelector string,
 	fetch func(context.Context, string) (int, error),
 ) (int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if result, ok := o.recent(providerSelector); ok {
 		return result.count, result.err
 	}

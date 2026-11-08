@@ -174,3 +174,16 @@ func TestRouterOnDemandRefresh_CanceledCallerDoesNotFailSharedFetch(t *testing.T
 		assert.Equal(t, int32(1), provider.listModelsCalls.Load())
 	})
 }
+
+func TestRouterOnDemandRefresh_NilContext(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		provider := &countingRefreshProvider{mockProvider: mockProvider{name: "ollama"}}
+		provider.setModels("known-model")
+		router := newOnDemandRefreshRouter(t, provider)
+
+		var ctx context.Context
+		count, err := router.RefreshProviderModels(ctx, "ollama")
+		require.NoError(t, err)
+		assert.Equal(t, 1, count)
+	})
+}
