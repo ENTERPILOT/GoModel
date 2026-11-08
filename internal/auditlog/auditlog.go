@@ -523,6 +523,12 @@ type Config struct {
 	LogImageInputs  bool
 	LogImageOutputs bool
 
+	// LogEmbeddingBodies refines LogBodies for embeddings endpoints, including
+	// provider passthrough calls to one. Requires LogBodies: when LogBodies is
+	// on but this is off, embedding entries keep their metadata and drop the
+	// request and response bodies.
+	LogEmbeddingBodies bool
+
 	// LogRevisionBodies refines LogBodies for the request-revision chain:
 	// only when both are enabled does each rewriter and each prompt
 	// guardrail that changed the body store its rewritten copy. Revision

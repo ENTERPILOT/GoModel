@@ -64,21 +64,24 @@ Your account's endpoint is `endpoints.api` in the reply of
 
 ## Models
 
-GoModel lists models from Copilot's `/models`. Models your plan lists but the
-account has not enabled (policy `disabled`) are left out; enable them in your
+With `GITHUB_COPILOT_MODELS` set, only those models are served by default (see
+[Models modes](/advanced/config-yaml#models-modes)); add a model there to serve
+it, or set `GITHUB_COPILOT_MODELS_MODE=fallback` or `merge` to list models from
+Copilot's `/models`. That listing leaves out models your plan lists but the
+account has not enabled (policy `disabled`); enable them in your
 [Copilot settings](https://github.com/settings/copilot/features) and they
 appear on the next model refresh.
 
-To serve only some of them, [filter](/advanced/config-yaml#filtering-a-providers-models)
-the list:
+To serve only some of the listed models,
+[filter](/advanced/config-yaml#filtering-a-providers-models) the list:
 
 ```bash
 GITHUB_COPILOT_MODEL_FILTER_INCLUDE=claude-sonnet-5.5,gpt-5.6-luna,gpt-4.1
 ```
 
-`GITHUB_COPILOT_MODELS` is a fallback list, used only when `/models` fails or
-is empty; `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` makes it the only list
-and skips `/models`.
+Each listing also refreshes which endpoints every model supports. Before the
+first listing, or for a model the listing omits, the provider reads `/models`
+on demand; if that fails, the model is sent to `/chat/completions`.
 
 ## Chat completions and Responses on every model
 

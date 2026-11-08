@@ -38,9 +38,25 @@ func TestNormalize(t *testing.T) {
 		{name: "empty key", set: Set{"": raw("1")}, wantErr: "cannot be empty or padded"},
 		{name: "long key", set: Set{long: raw("1")}, wantErr: "longer than"},
 		{name: "control characters", set: Set{"a\nb": raw("1")}, wantErr: "control characters"},
+		{name: "whitespace in a key", set: Set{"top k": raw("1")}, wantErr: "contains whitespace"},
+		{name: "frozen key in another case", set: Set{"Model": raw(`"x"`)}, wantErr: `parameter "Model" cannot be configured`},
+		{name: "seed must be an integer", set: Set{"seed": raw(`"x"`)}, wantErr: `"seed" has the wrong type`},
+		{name: "n must be an integer", set: Set{"n": raw(`"two"`)}, wantErr: `"n" has the wrong type`},
+		{name: "stop must be text", set: Set{"stop": raw(`5`)}, wantErr: `"stop" has the wrong type`},
+		{name: "stop array ok", set: Set{"stop": raw(`["a","b"]`), "seed": raw("7")}, want: Set{"stop": raw(`["a","b"]`), "seed": raw("7")}},
+		{name: "stop string ok", set: Set{"stop": raw(`"a"`)}, want: Set{"stop": raw(`"a"`)}},
+		{name: "stop elements must be strings", set: Set{"stop": raw(`["a",null]`)}, wantErr: "element 1 must be a string"},
+		{name: "n must be at least 1", set: Set{"n": raw("0")}, wantErr: `"n" has the wrong type`},
+		{name: "response_format needs a type", set: Set{"response_format": raw(`{"json_schema":{}}`)}, wantErr: `"response_format" has the wrong type`},
+		{name: "json_schema must be an object", set: Set{"response_format": raw(`{"type":"json_schema","json_schema":"bad"}`)}, wantErr: "json_schema must be an object"},
+		{name: "json_schema format ok", set: Set{"response_format": raw(`{"type":"json_schema","json_schema":{"name":"s"}}`)}, want: Set{"response_format": raw(`{"type":"json_schema","json_schema":{"name":"s"}}`)}},
+		{name: "verbosity must be a string", set: Set{"verbosity": raw("1")}, wantErr: `"verbosity" has the wrong type`},
+		{name: "text must be an object", set: Set{"text": raw(`"low"`)}, wantErr: `"text" has the wrong type`},
+		{name: "two spellings of the token limit", set: Set{"max_tokens": raw("1"), "max_output_tokens": raw("2")}, wantErr: `"max_output_tokens" and "max_tokens" set the same token limit`},
 		{name: "temperature must be a number", set: Set{"temperature": raw(`"hot"`)}, wantErr: `"temperature" has the wrong type`},
 		{name: "max_tokens must be an integer", set: Set{"max_tokens": raw(`1.5`)}, wantErr: `"max_tokens" has the wrong type`},
 		{name: "max_tokens must not be negative", set: Set{"max_tokens": raw(`-1`)}, wantErr: `"max_tokens" has the wrong type`},
+		{name: "a token limit must be at least 1", set: Set{"max_completion_tokens": raw(`0`)}, wantErr: `"max_completion_tokens" has the wrong type: must be at least 1`},
 		{name: "parallel_tool_calls must be a bool", set: Set{"parallel_tool_calls": raw(`1`)}, wantErr: "wrong type"},
 		{name: "user must be a string", set: Set{"user": raw(`1`)}, wantErr: "wrong type"},
 		{name: "tool_choice string or object", set: Set{"tool_choice": raw(`[1]`)}, wantErr: "wrong type"},
@@ -91,6 +107,21 @@ func TestDisjoint(t *testing.T) {
 	err := Disjoint(Set{"a": raw("1")}, Set{"a": raw("2")})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `"a" cannot be in both`)
+	err = Disjoint(Set{"max_tokens": raw("1")}, Set{"max_completion_tokens": raw("2")})
+	require.Error(t, err, "token-limit spellings are one parameter")
+	assert.Contains(t, err.Error(), `"max_tokens" cannot be in both`)
+}
+
+// The token-limit spellings are one parameter when rows layer: the deeper
+// row's spelling replaces the shallower one's, forced or default.
+func TestLayerTreatsTokenLimitSpellingsAsOneKey(t *testing.T) {
+	outer := Overrides{Params: Set{"max_tokens": raw("100")}}
+	forced := outer.Layer(Overrides{Params: Set{"max_completion_tokens": raw("50")}})
+	assert.Equal(t, Set{"max_completion_tokens": raw("50")}, forced.Params)
+
+	unforced := outer.Layer(Overrides{Defaults: Set{"max_output_tokens": raw("50")}})
+	assert.Empty(t, unforced.Params)
+	assert.Equal(t, Set{"max_output_tokens": raw("50")}, unforced.Defaults)
 }
 
 func TestMergeAndLayer(t *testing.T) {
@@ -124,9 +155,11 @@ func TestLayerPrecedenceAcrossSets(t *testing.T) {
 	assert.Equal(t, Set{"temperature": raw("1"), "top_k": raw("20")}, outer.Params, "inputs are not mutated")
 
 	flipped := Overrides{Params: Set{"b": raw("1")}}.Layer(Overrides{Defaults: Set{"b": raw("2")}}).Layer(Overrides{Params: Set{"b": raw("3")}})
-	assert.Equal(t, Overrides{Params: Set{"b": raw("3")}}, flipped, "the deepest row decides whether a key is forced")
+	assert.Equal(t, Set{"b": raw("3")}, flipped.Params, "the deepest row decides whether a key is forced")
+	assert.Empty(t, flipped.Defaults)
 	unforced := Overrides{Params: Set{"b": raw("1")}}.Layer(Overrides{Defaults: Set{"b": raw("2")}})
-	assert.Equal(t, Overrides{Defaults: Set{"b": raw("2")}}, unforced)
+	assert.Equal(t, Set{"b": raw("2")}, unforced.Defaults)
+	assert.Empty(t, unforced.Params)
 }
 
 func TestFromAny(t *testing.T) {

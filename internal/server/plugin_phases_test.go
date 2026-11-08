@@ -331,6 +331,38 @@ func TestChatCompletion_BufferedStreamKeepsProviderUsage(t *testing.T) {
 	}
 }
 
+// A buffered plugin run assembles the stream and re-synthesizes it after the
+// plugin edits the text; generated images and their thought signatures must
+// come through that round trip.
+func TestChatCompletion_BufferedStreamKeepsImages(t *testing.T) {
+	const image = `{"type":"image_url","image_url":{"url":"data:image/png;base64,aW1n","extra_content":{"google":{"thought_signature":"sig-a"}}}}`
+	tests := []struct {
+		name  string
+		cfg   map[string]string
+		phase pluginapi.Kind
+	}{
+		{"stream phase", map[string]string{"stream": "buffer", "response": "edit", "text": "clean"}, pluginapi.KindStream},
+		{"response phase", map[string]string{"response": "edit", "text": "clean"}, pluginapi.KindResponse},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := phaseProvider()
+			p.streamData = "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-5-nano\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"the secret answer\"}}]}\n\n" +
+				"data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-5-nano\",\"choices\":[{\"index\":0,\"delta\":{\"images\":[" + image + "]}}]}\n\n" +
+				"data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-5-nano\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n"
+			chains := phaseChains(t, tt.cfg, guardrails.StepReference{Ref: "phase", Phase: tt.phase, Step: 1})
+			rec := doChat(t, phaseHandler(t, p, chains), chatStreamBody)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+			body := rec.Body.String()
+			require.Contains(t, body, `"content":"clean"`)
+			require.NotContains(t, body, "secret")
+			require.Contains(t, body, `"images":[`+image+`]`)
+		})
+	}
+}
+
 func TestChatCompletion_TwoBufferedMutatingInstances(t *testing.T) {
 	first, _ := json.Marshal(map[string]string{"stream": "buffer", "response": "edit", "text": "first"})
 	second, _ := json.Marshal(map[string]string{"stream": "buffer", "response": "edit", "text": "second"})

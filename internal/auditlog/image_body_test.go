@@ -71,7 +71,10 @@ func TestBuildImageResponseBody(t *testing.T) {
 		Quality:      "high",
 		Size:         "1024x1024",
 		Provider:     "openai",
-		Usage:        &core.ImageUsage{InputTokens: 10, OutputTokens: 272, TotalTokens: 282},
+		Usage: &core.ImageUsage{
+			InputTokens: 10, OutputTokens: 272, TotalTokens: 282,
+			OutputTokensDetails: &core.ImageTokenDetails{ImageTokens: 272},
+		},
 		Data: []core.ImageData{
 			{B64JSON: base64.StdEncoding.EncodeToString(png), RevisedPrompt: "a fluffy cat"},
 			{URL: "https://img/1.png"},
@@ -105,6 +108,7 @@ func TestBuildImageResponseBody(t *testing.T) {
 		usage, _ := body.Meta["usage"].(map[string]any)
 		require.NotNil(t, usage)
 		assert.Equal(t, 282, usage["total_tokens"])
+		assert.Equal(t, map[string]any{"text_tokens": 0, "image_tokens": 272}, usage["output_tokens_details"])
 		_, present := body.Meta["background"]
 		assert.False(t, present, "empty envelope fields must be omitted: %+v", body.Meta)
 	})
