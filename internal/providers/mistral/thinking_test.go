@@ -170,14 +170,29 @@ func TestAdaptMistralChatBody(t *testing.T) {
 			want: `{"messages":[],"max_tokens":7}`,
 		},
 		{
-			name: "service_tier is normalized",
+			name: "service_tier default asks for standard capacity, not auto",
 			in:   `{"service_tier":"default","messages":[]}`,
-			want: `{"messages":[],"service_tier":"auto"}`,
+			want: `{"messages":[],"service_tier":"standard_only"}`,
 		},
 		{
 			name: "service_tier without a Mistral equivalent is dropped",
 			in:   `{"service_tier":"priority","messages":[]}`,
 			want: `{"messages":[]}`,
+		},
+		{
+			name: "every replayed assistant message is adapted",
+			in:   `{"messages":[{"role":"assistant","content":"one","reasoning_content":"r1"},{"role":"user","content":"between"},{"role":"assistant","content":"two","reasoning_content":"r2"}]}`,
+			want: `{"messages":[{"role":"assistant","content":[{"thinking":[{"text":"r1","type":"text"}],"type":"thinking"},{"text":"one","type":"text"}]},{"content":"between","role":"user"},{"content":[{"thinking":[{"text":"r2","type":"text"}],"type":"thinking"},{"text":"two","type":"text"}],"role":"assistant"}]}`,
+		},
+		{
+			name: "empty reasoning_content member is removed without a chunk",
+			in:   `{"messages":[{"role":"assistant","content":"hello","reasoning_content":""}]}`,
+			want: `{"messages":[{"content":"hello","role":"assistant"}]}`,
+		},
+		{
+			name: "null reasoning_content member is removed",
+			in:   `{"messages":[{"role":"assistant","content":"hello","reasoning_content":null}]}`,
+			want: `{"messages":[{"content":"hello","role":"assistant"}]}`,
 		},
 		{
 			name: "no messages member returns nil",

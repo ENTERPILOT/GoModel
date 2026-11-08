@@ -9,13 +9,14 @@ Mistral AI (La Plateforme) wird unter `https://api.mistral.ai/v1` mit einer Open
 API ausgeliefert. GoModel routet Chat-Completions, Modelllisten-, Embedding- und
 Passthrough-Requests über den gemeinsamen OpenAI-Adapter; der Endpunkt `/v1/responses` wird
 über Chat Completions übersetzt (Mistral bietet auch einen nativen Endpunkt; die Übersetzung
-über Chat sorgt dafür, dass die folgende Reasoning-Normalisierung auf jeder Oberfläche
-greift). Dateien und Batches werden für diesen Provider nicht angeboten.
+über Chat sorgt dafür, dass die folgende Reasoning-Normalisierung auf Chat-, Streaming- und
+`/v1/responses`-Requests greift; `/p/mistral/...`-Passthrough-Requests werden unverändert
+weitergeleitet). Dateien und Batches werden für diesen Provider nicht angeboten.
 
 ## Reasoning- (Thinking-)Output
 
-Auf Reasoning-Modellen (zum Beispiel `mistral-large-4-0` und `mistral-small-2603` sowie
-gehostete Reasoning-Modelle wie `zai-glm-5-3`) liefert Mistral den Assistant-Content als
+Wenn Reasoning aktiviert ist, liefern Modelle wie `mistral-large-4-0` und `mistral-small-2603`
+sowie gehostete Reasoning-Modelle wie `zai-glm-5-3` den Assistant-Content als
 **Liste typisierter Chunks** zurück – ein `thinking`-Chunk für den Reasoning-Trace und `text`-Chunks
 für die Antwort – sowohl in gepufferten Responses als auch in SSE-Streams. Diese Form ist
 kein standardmäßiges OpenAI-Chat-Format, und Clients wie SillyTavern rendern sie als Zeichensalat.
@@ -29,6 +30,7 @@ Der `mistral`-Provider von GoModel konvertiert sie automatisch in die Standardfo
 (`choices[].message`). Es ist keine Client-seitige Konfiguration nötig. Chunk-Typen ohne
 standardäquivalente Chat-Form (auf diesem Endpunkt sind keine bekannt) werden in einem
 Vendor-Member `mistral_content_chunks` erhalten, damit keine Upstream-Daten verloren gehen.
+Nur SSE-Events über 16 MiB werden unverändert weitergeleitet, ohne konvertiert zu werden.
 
 Senden Sie den Aufwand (Effort) mit dem standardmäßigen verschachtelten Parameter; GoModel
 bildet ihn auf das flache `reasoning_effort` von Mistral ab:
@@ -42,7 +44,7 @@ bildet ihn auf das flache `reasoning_effort` von Mistral ab:
 ```
 
 Das API-weite Enum von Mistral ist `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, und der
-Wert wird unverändert durchgereicht. Welche Stufen ein Modell akzeptiert, ist modellspezifisch –
+Wert wird in Kleinschreibung normalisiert und durchgereicht. Welche Stufen ein Modell akzeptiert, ist modellspezifisch –
 Mistral Large 4 akzeptiert etwa `low`/`medium`/`high`, gehostete GLM-Modelle
 `low`/`high`/`max`, und `mistral-small-2603` akzeptiert auch `none` – eine nicht unterstützte
 Stufe für das gewählte Modell wird also von Mistral selbst abgelehnt, wie mit den eigenen SDKs
@@ -95,12 +97,15 @@ MISTRAL_MODELS=mistral-large-4-0,mistral-small-2603,mistral-embed
 
 ## Modelle
 
-Listen Sie die für Ihren API-Schlüssel verfügbaren Modelle mit `GET /v1/models` auf oder rufen
-Sie ein Modell direkt über den OpenAI-kompatiblen Endpunkt `/v1/chat/completions` auf:
+Listen Sie die von diesem Provider bedienten Modelle mit `GET /v1/models` auf — abhängig vom
+konfigurierten Models-Modus kann das eine Teilmenge des Bestands Ihres Mistral-Kontos sein — oder
+rufen Sie ein Modell direkt über den OpenAI-kompatiblen Endpunkt `/v1/chat/completions` auf:
 
 ```yaml
 virtual_models:
   - source: mistral
+    # Das Target-Präfix ist der Providers-Map-Schlüssel, nicht der Provider-Typ;
+    # /p/mistral/...-Routen verwenden den Typ.
     target: mistral/mistral-large-4-0
 ```
 

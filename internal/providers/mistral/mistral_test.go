@@ -300,10 +300,27 @@ func TestStreamResponses_PreservesFlattenedThinking(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, stream.Close())
 
-	out := string(body)
-	assert.Contains(t, out, "response.reasoning", "reasoning must stream as Responses reasoning events")
-	assert.Contains(t, out, "Let me compute. ")
-	assert.Contains(t, out, "17*23=391.")
+	// Parse the frames and assert the thinking strings travel on reasoning
+	// events, not merely somewhere in the stream.
+	var reasoningTexts []string
+	for line := range strings.Lines(string(body)) {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data: ") || line == "data: [DONE]" {
+			continue
+		}
+		var frame struct {
+			Type  string `json:"type"`
+			Delta string `json:"delta"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &frame), "frame: %s", line)
+		switch frame.Type {
+		case "response.reasoning_text.delta":
+			reasoningTexts = append(reasoningTexts, frame.Delta)
+		case "response.output_text.delta":
+			assert.NotContains(t, frame.Delta, "17*", "thinking text must not ride the answer deltas: %q", frame.Delta)
+		}
+	}
+	assert.Equal(t, []string{"Let me compute. ", "17*23=391."}, reasoningTexts)
 }
 
 // A request without reasoning and without replayed thinking must reach the

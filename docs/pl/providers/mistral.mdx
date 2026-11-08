@@ -9,13 +9,15 @@ Mistral AI (La Plateforme) jest obsługiwany pod adresem `https://api.mistral.ai
 zgodnym z OpenAI. GoModel kieruje uzupełnienia czatu, listy modeli, embeddingi i żądania
 passthrough przez współdzielony adapter OpenAI; punkt końcowy `/v1/responses` jest tłumaczony
 przez uzupełnienia czatu (Mistral oferuje też natywny punkt końcowy; tłumaczenie przez czat
-sprawia, że poniższa normalizacja rozumowania działa na każdej powierzchni). Pliki i zadania
+sprawia, że poniższa normalizacja rozumowania działa w czacie, w streamingu i na
+`/v1/responses`; żądania passthrough `/p/mistral/...` są przekazywane bez zmian i bez tej
+normalizacji). Pliki i zadania
 wsadowe nie są udostępniane dla tego dostawcy.
 
 ## Wyjście rozumowania (myślenia)
 
-W modelach rozumujących (na przykład `mistral-large-4-0` i `mistral-small-2603` oraz hostowane
-modele rozumujące, takie jak `zai-glm-5-3`) Mistral zwraca treść asystenta jako
+Gdy rozumowanie jest włączone, modele takie jak `mistral-large-4-0` i `mistral-small-2603` oraz
+hostowane modele rozumujące, takie jak `zai-glm-5-3`, zwracają treść asystenta jako
 **listę typowanych fragmentów** — fragment `thinking` ze śladem rozumowania i fragmenty `text`
 z odpowiedzią — zarówno w odpowiedziach buforowanych, jak i w strumieniach SSE. Ten kształt nie
 jest standardowym wyjściem czatu OpenAI i klienci tacy jak SillyTavern renderują go jako
@@ -30,7 +32,7 @@ Dostawca `mistral` w GoModel konwertuje go na standard automatycznie:
 (`choices[].message`). Nie wymaga to żadnej konfiguracji po stronie klienta. Typy fragmentów
 bez standardowego odpowiednika w czacie (na tym punkcie końcowym nie są znane żadne) są
 zachowywane w członie dostawcy `mistral_content_chunks`, więc żadne dane z upstreamu nie
-giną.
+giną. Tylko zdarzenia SSE powyżej 16 MiB są przekazywane bez konwersji.
 
 Poziom rozumowania wyślij standardowym parametrem zagnieżdżonym; GoModel odwzorowuje go na
 płaskie `reasoning_effort` Mistrala:
@@ -44,7 +46,7 @@ płaskie `reasoning_effort` Mistrala:
 ```
 
 Wyliczenie całego API Mistrala to `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`,
-a wartość jest przekazywana bez zmian. To, które poziomy akceptuje dany model, zależy od
+a wartość jest normalizowana do małych liter i przekazywana. To, które poziomy akceptuje dany model, zależy od
 modelu — przykładowo Mistral Large 4 przyjmuje `low`/`medium`/`high`, hostowane modele GLM
 `low`/`high`/`max`, a `mistral-small-2603` przyjmuje też `none` — więc nieobsługiwany poziom
 dla wybranego modelu odrzuca sam Mistral, tak samo jak w przypadku natywnych SDK Mistrala.
@@ -95,12 +97,15 @@ MISTRAL_MODELS=mistral-large-4-0,mistral-small-2603,mistral-embed
 
 ## Modele
 
-Modele dostępne dla Twojego klucza API wyświetlisz przez `GET /v1/models`, albo wywołaj model
-bezpośrednio przez zgodny z OpenAI punkt końcowy `/v1/chat/completions`:
+Modele obsługiwane przez tego dostawcę wyświetlisz przez `GET /v1/models` — w zależności od
+skonfigurowanego trybu może to być podzbiór inwentarza Twojego konta Mistral — albo wywołaj
+model bezpośrednio przez zgodny z OpenAI punkt końcowy `/v1/chat/completions`:
 
 ```yaml
 virtual_models:
   - source: mistral
+    # Prefiks docelowy to klucz mapy providers, nie typ dostawcy;
+    # trasy /p/mistral/... używają typu.
     target: mistral/mistral-large-4-0
 ```
 

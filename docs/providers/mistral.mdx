@@ -9,13 +9,14 @@ Mistral AI (La Plateforme) is served at `https://api.mistral.ai/v1` with an Open
 API. GoModel routes chat completions, model listing, embeddings, and passthrough requests
 through the shared OpenAI adapter; the `/v1/responses` endpoint is translated through chat
 completions (Mistral also offers a native one, but serving it through chat lets the reasoning
-normalization below apply to every surface). Files and batches are not exposed for this
+normalization below apply to chat completions, streaming, and `/v1/responses`; `/p/mistral/...`
+passthrough requests are forwarded unchanged). Files and batches are not exposed for this
 provider.
 
 ## Reasoning (thinking) output
 
-On reasoning models (for example `mistral-large-4-0` and `mistral-small-2603`, and hosted
-reasoning models such as `zai-glm-5-3`), Mistral returns the assistant content as a **list of
+When reasoning is enabled, models such as `mistral-large-4-0` and `mistral-small-2603`, and
+hosted models such as `zai-glm-5-3`, return the assistant content as a **list of
 typed chunks** — a `thinking` chunk for the reasoning trace and `text` chunks for the answer —
 in both buffered responses and SSE streams. That shape is not standard OpenAI chat output, and
 clients like SillyTavern render it as gibberish.
@@ -28,7 +29,7 @@ GoModel's `mistral` provider converts it to the standard shape automatically:
 on both streaming (`choices[].delta`) and non-streaming (`choices[].message`) responses. No
 client-side configuration is needed. Chunk types with no standard chat equivalent (none are
 known on this endpoint) are preserved in a `mistral_content_chunks` vendor member so no
-upstream data is dropped.
+upstream data is dropped. Only SSE events larger than 16 MiB pass through unconverted.
 
 Send effort with the standard nested parameter; GoModel maps it to Mistral's flat
 `reasoning_effort`:
@@ -42,7 +43,7 @@ Send effort with the standard nested parameter; GoModel maps it to Mistral's fla
 ```
 
 Mistral's API-wide enum is `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and the
-value is passed through unchanged. Which levels a model accepts is model-specific — for
+value is normalized to lowercase and passed through. Which levels a model accepts is model-specific — for
 example Mistral Large 4 takes `low`/`medium`/`high`, hosted GLM models take `low`/`high`/`max`,
 and `mistral-small-2603` also accepts `none` — so an unsupported level for the chosen model is
 rejected by Mistral itself, as with their own SDKs. On `zai-glm-5-3` the response is always a
@@ -93,12 +94,15 @@ MISTRAL_MODELS=mistral-large-4-0,mistral-small-2603,mistral-embed
 
 ## Models
 
-List the models available to your API key with `GET /v1/models`, or call one directly through
+List the models this provider serves with `GET /v1/models` — under the configured models
+mode that can be a subset of your Mistral account's inventory — or call one directly through
 the OpenAI-compatible `/v1/chat/completions` endpoint:
 
 ```yaml
 virtual_models:
   - source: mistral
+    # The target prefix is the providers map key, not the provider type;
+    # /p/mistral/... routes use the type.
     target: mistral/mistral-large-4-0
 ```
 

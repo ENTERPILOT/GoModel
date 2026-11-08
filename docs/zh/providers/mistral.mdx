@@ -7,13 +7,13 @@ keywords: ["Mistral", "La Plateforme", "推理", "思考", "提供商配置"]
 
 Mistral AI（La Plateforme）通过 `https://api.mistral.ai/v1` 提供 OpenAI 兼容 API。GoModel
 通过共享的 OpenAI 适配器路由聊天补全、模型列表、Embedding 与透传请求；`/v1/responses`
-端点通过聊天补全进行翻译（Mistral 也提供原生端点；经由聊天翻译可以保证下文的推理
-标准化在每个接口上都生效）。该提供商不提供文件和批处理。
+端点通过聊天补全进行翻译（Mistral 也提供原生端点；经由聊天翻译可以保证下文的推理标准化在聊天补全、流式
+以及 `/v1/responses` 上都生效；`/p/mistral/...` 透传请求原样转发，不做此转换）。该提供商不提供文件和批处理。
 
 ## 推理（思考）输出
 
-在推理模型上（例如 `mistral-large-4-0`、`mistral-small-2603`，以及托管的推理模型如
-`zai-glm-5-3`），Mistral 将助手内容作为**类型化分块列表**返回——推理轨迹是 `thinking` 分块，
+在启用推理时，例如 `mistral-large-4-0`、`mistral-small-2603` 以及托管的
+`zai-glm-5-3` 等模型会将助手内容作为**类型化分块列表**返回——推理轨迹是 `thinking` 分块，——推理轨迹是 `thinking` 分块，
 回答是 `text` 分块——同时在缓冲响应和 SSE 流中。这种格式不是标准的 OpenAI 聊天输出，
 SillyTavern 等客户端会将其渲染为乱码。
 
@@ -24,7 +24,7 @@ GoModel 的 `mistral` 提供商会自动将其转换为标准格式：
 
 流式（`choices[].delta`）与非流式（`choices[].message`）响应均适用此转换。无需任何客户端配置。
 没有标准聊天对应形式的分块类型（此端点上尚无已知类型）会保留在 `mistral_content_chunks`
-厂商成员中，因此不会丢失任何上游数据。
+厂商成员中，因此不会丢失任何上游数据。仅超过 16 MiB 的 SSE 事件会原样转发而不做转换。
 
 请使用标准的嵌套参数发送推理力度；GoModel 会将其映射为 Mistral 的扁平 `reasoning_effort`：
 
@@ -37,7 +37,7 @@ GoModel 的 `mistral` 提供商会自动将其转换为标准格式：
 ```
 
 Mistral 的 API 级枚举为 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`，
-该值将原样透传。每个模型接受哪些档位因模型而异——例如 Mistral Large 4 接受
+该值会规范化为小写后透传。每个模型接受哪些档位因模型而异——例如 Mistral Large 4 接受
 `low`/`medium`/`high`，托管的 GLM 模型接受 `low`/`high`/`max`，`mistral-small-2603` 还
 接受 `none`——因此为所选模型传入不支持的档位会被 Mistral 自身拒绝，这与使用 Mistral
 自家 SDK 的行为一致。在 `zai-glm-5-3` 上，无论推理力度为何，响应始终是分块列表。
@@ -83,12 +83,14 @@ MISTRAL_MODELS=mistral-large-4-0,mistral-small-2603,mistral-embed
 
 ## 模型
 
-使用 `GET /v1/models` 列出您的 API 密钥可用的模型，或通过 OpenAI 兼容的
-`/v1/chat/completions` 端点直接调用：
+使用 `GET /v1/models` 列出此提供商服务的模型——取决于所配置的模型模式，这可能只是您
+Mistral 账户可用模型的一个子集——或通过 OpenAI 兼容的 `/v1/chat/completions` 端点直接调用：
 
 ```yaml
 virtual_models:
   - source: mistral
+    # target 的前缀是 providers 配置键，而不是 provider type；
+    # /p/mistral/... 路由使用 type。
     target: mistral/mistral-large-4-0
 ```
 

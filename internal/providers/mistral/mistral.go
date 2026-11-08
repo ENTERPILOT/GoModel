@@ -54,9 +54,10 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 	return &Provider{openai.NewChatCompatible(cfg.APIKey, opts, openai.CompatibleProviderConfig{
 		ProviderName: "mistral",
 		BaseURL:      providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
-		// The chat paths that go through the shared adapter (streaming, and
-		// Responses via chat) pick the dialect up there; ChatCompletion applies
-		// the core adaptation itself because it decodes the raw body.
+		// Streaming chat — and streaming Responses via chat — picks the
+		// dialect up through the shared adapter; ChatCompletion (and buffered
+		// Responses through it) applies the core adaptation itself because it
+		// decodes the raw body.
 		AdaptChatRequest: adaptChatRequest,
 		RequestMutator:   adaptChatWire,
 	})}

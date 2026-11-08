@@ -28,8 +28,9 @@ const (
 )
 
 // chunkContentMarker is the cheap pre-check for the chunk flattening: a
-// payload with no "content" member anywhere needs no rewrite, which keeps the
-// plain answer deltas of a stream off the full decode path.
+// payload with no "content" member needs no rewrite. String deltas still
+// carry a content member, so they take the full decode; the pre-check covers
+// finish, usage, and tool-call chunks instead.
 var chunkContentMarker = []byte(`"content"`)
 
 // flattenThinkingChunks rewrites every choices[].message.content /
@@ -233,6 +234,28 @@ func adaptChatWire(r *llmclient.Request) {
 	}
 }
 
+// wirePatchMarkers lists the members adaptMistralChatBody rewrites; a body
+// containing none of them needs no decode.
+var wirePatchMarkers = [][]byte{
+	[]byte(`"reasoning_content"`),
+	[]byte(unknownChunksKey),
+	[]byte(`"stream_options"`),
+	[]byte(`"max_completion_tokens"`),
+	[]byte(`"seed"`),
+	[]byte(`"service_tier"`),
+}
+
+// wireBodyNeedsPatch is the cheap pre-check sparing typical chat bodies (none
+// of the markers present) the full decode/re-encode round trip.
+func wireBodyNeedsPatch(body []byte) bool {
+	for _, marker := range wirePatchMarkers {
+		if bytes.Contains(body, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // adaptMistralChatBody patches one marshaled chat completion body:
 //
 //   - A replayed assistant turn keeps its reasoning: Mistral's guide says to
@@ -251,6 +274,9 @@ func adaptChatWire(r *llmclient.Request) {
 // It returns nil when nothing needed patching, leaving the original typed
 // marshal on the wire.
 func adaptMistralChatBody(body []byte) []byte {
+	if !wireBodyNeedsPatch(body) {
+		return nil
+	}
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(body, &top); err != nil {
 		return nil
@@ -265,7 +291,9 @@ func adaptMistralChatBody(body []byte) []byte {
 	}
 	changed := false
 	for _, message := range messages {
-		changed = changed || adaptReplayedAssistantMessage(message)
+		if adaptReplayedAssistantMessage(message) {
+			changed = true
+		}
 	}
 	changed = adaptTopLevelMembers(top) || changed
 	if !changed {
@@ -285,14 +313,17 @@ func adaptMistralChatBody(body []byte) []byte {
 
 // adaptReplayedAssistantMessage rewrites one message in place and reports
 // whether it changed: a non-assistant message, or an assistant message with
-// nothing to adapt, is left untouched.
+// nothing to adapt, is left untouched. reasoning_content is removed whenever
+// it is present, even empty or null — Mistral's schema forbids the member —
+// but the thinking chunk is only injected for a non-empty trace.
 func adaptReplayedAssistantMessage(message map[string]json.RawMessage) bool {
 	if rawString(message["role"]) != "assistant" {
 		return false
 	}
 	reasoning := rawString(message[reasoningContentKey])
+	_, hasReasoning := message[reasoningContentKey]
 	_, hasVendor := message[unknownChunksKey]
-	if reasoning == "" && !hasVendor {
+	if !hasReasoning && !hasVendor {
 		return false
 	}
 	delete(message, reasoningContentKey)
@@ -375,8 +406,9 @@ func changeKey(top map[string]json.RawMessage, from, to string) bool {
 }
 
 // adaptServiceTier normalizes service_tier to Mistral's enum: auto and
-// standard_only stay, OpenAI's default maps to auto, and any other value is
-// dropped rather than 422ing.
+// standard_only stay, OpenAI's default maps to standard_only (auto may select
+// priority capacity at a 75% surcharge, while default asks for standard
+// behavior), and any other value is dropped rather than 422ing.
 func adaptServiceTier(top map[string]json.RawMessage) bool {
 	raw, ok := top["service_tier"]
 	if !ok {
@@ -386,7 +418,7 @@ func adaptServiceTier(top map[string]json.RawMessage) bool {
 	case "auto", "standard_only":
 		return false
 	case "default":
-		top["service_tier"] = json.RawMessage(`"auto"`)
+		top["service_tier"] = json.RawMessage(`"standard_only"`)
 	default:
 		delete(top, "service_tier")
 	}
