@@ -287,6 +287,25 @@ func TestSQLStoreSavesCounterBatches(t *testing.T) {
 	}
 }
 
+// TestSQLStoreSavesPostgresCounterBatches covers PostgreSQL's own row limit:
+// a save of exactly one maximal statement, and one more row, which takes a
+// second statement in a transaction.
+func TestSQLStoreSavesPostgresCounterBatches(t *testing.T) {
+	rowsPerStatement := postgresMaxBindParameters / upsertCounterColumnCount
+	for _, n := range []int{rowsPerStatement, rowsPerStatement + 1} {
+		t.Run(strconv.Itoa(n), func(t *testing.T) {
+			sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+				if db.Dialect() != sqlx.PostgreSQL {
+					t.Skip("SQLite batches are covered by TestSQLStoreSavesCounterBatches")
+				}
+				store, err := NewSQLStore(context.Background(), db)
+				require.NoError(t, err)
+				runCounterBatchSuite(t, store, n)
+			})
+		})
+	}
+}
+
 // TestSQLStorePruneUsesExpiresAtIndex keeps the prune that every replica
 // runs off a full table scan.
 func TestSQLStorePruneUsesExpiresAtIndex(t *testing.T) {

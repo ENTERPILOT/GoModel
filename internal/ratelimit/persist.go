@@ -20,9 +20,10 @@ const (
 )
 
 // WithFlushInterval sets how often an active generation writes its changed
-// counters and reads the other writers'. Zero disables the periodic loop;
+// counters and reads the other writers'. Zero disables the periodic flush;
 // Start still loads and Close of an active generation still writes once, but
-// nothing counted elsewhere after Start is seen.
+// nothing counted elsewhere after Start is seen. Expired rows are pruned about
+// once a minute either way.
 func WithFlushInterval(interval time.Duration) ServiceOption {
 	return func(service *Service) {
 		if interval < 0 {
@@ -100,10 +101,11 @@ func (s *Service) Start(ctx context.Context) {
 	}
 }
 
+// startFlushLoop starts the generation's background loop: a flush every
+// flushInterval when it is positive, and a prune about once a minute whatever
+// the flush interval, so a long or disabled flush does not let expired rows
+// pile up.
 func (s *Service) startFlushLoop() {
-	if s.flushInterval <= 0 {
-		return
-	}
 	s.flushStop = make(chan struct{})
 	s.flushDone = make(chan struct{})
 	interval := s.flushInterval
@@ -111,19 +113,23 @@ func (s *Service) startFlushLoop() {
 	done := s.flushDone
 	go func() {
 		defer close(done)
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
+		var flushTick <-chan time.Time
+		if interval > 0 {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			flushTick = ticker.C
+		}
 		// The first prune falls anywhere in the first interval, so replicas
 		// started together do not prune together.
-		pruneAt := s.now().Add(rand.N(counterPruneInterval)) //nolint:gosec // Jitter, not a secret.
+		pruneTimer := time.NewTimer(rand.N(counterPruneInterval)) //nolint:gosec // Jitter, not a secret.
+		defer pruneTimer.Stop()
 		for {
 			select {
-			case <-ticker.C:
+			case <-flushTick:
 				s.flush(context.Background())
-				if now := s.now(); !now.Before(pruneAt) {
-					s.prune(context.Background())
-					pruneAt = now.Add(counterPruneInterval + rand.N(counterPruneJitter)) //nolint:gosec // Jitter, not a secret.
-				}
+			case <-pruneTimer.C:
+				s.prune(context.Background())
+				pruneTimer.Reset(counterPruneInterval + rand.N(counterPruneJitter)) //nolint:gosec // Jitter, not a secret.
 			case <-stop:
 				return
 			}

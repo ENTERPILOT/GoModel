@@ -306,8 +306,36 @@ func TestFlushIntervalZeroOnlyWritesOnClose(t *testing.T) {
 
 		service.Close()
 		require.Equal(t, int64(1), store.saves.Load())
-		require.Equal(t, int64(1), store.prunes.Load(), "with no flush loop, Close prunes")
 	})
+}
+
+// TestPruneRunsAboutOnceAMinuteWhateverTheFlushInterval: the prune has its
+// own timer, so neither a disabled nor an hourly flush delays it.
+func TestPruneRunsAboutOnceAMinuteWhateverTheFlushInterval(t *testing.T) {
+	for _, interval := range []time.Duration{0, time.Hour} {
+		t.Run(interval.String(), func(t *testing.T) {
+			store := &recordingStore{}
+			synctest.Test(t, func(t *testing.T) {
+				service, err := NewService(context.Background(), store, WithFlushInterval(interval))
+				require.NoError(t, err)
+				service.Start(context.Background())
+
+				time.Sleep(counterPruneInterval)
+				synctest.Wait()
+				require.Equal(t, int64(1), store.prunes.Load(), "one prune in the first minute")
+				require.Zero(t, store.saves.Load(), "no flush yet")
+
+				time.Sleep(5 * counterPruneInterval)
+				synctest.Wait()
+				assert.GreaterOrEqual(t, store.prunes.Load(), int64(5))
+
+				service.Close()
+				prunes := store.prunes.Load()
+				time.Sleep(10 * counterPruneInterval)
+				assert.Equal(t, prunes, store.prunes.Load(), "Close stops the prune timer")
+			})
+		})
+	}
 }
 
 // TestFlushLoopPrunesAboutOnceAMinute: every flush saves and loads, but the

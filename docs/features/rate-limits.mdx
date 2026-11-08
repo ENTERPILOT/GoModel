@@ -287,9 +287,10 @@ every flush as a heartbeat so other replicas can tell a live replica's slots
 from a crashed one's. It reads only the rows other replicas wrote since
 shortly before its previous read, with a full read once a minute. Rows nobody
 has saved for two of their periods (a day for concurrency gauges) are deleted
-about once a minute per replica; on MongoDB a TTL index on `expires_at`
-deletes them. [Budgets](/features/budgets) remain the durable control for
-spend.
+about once a minute per replica, whatever `RATE_LIMITS_FLUSH_INTERVAL` is, even
+`0`. On MongoDB a TTL index on `expires_at` deletes them instead; the
+once-a-minute cleanup still removes rows saved before that field existed.
+[Budgets](/features/budgets) remain the durable control for spend.
 
 <Note>
 Upgrading from v0.2.1 or earlier: counters those releases saved are merged by
