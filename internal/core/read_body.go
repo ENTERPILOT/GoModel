@@ -10,10 +10,11 @@ const maxInitialReservation = 1 << 20
 
 // ReadAllSized is io.ReadAll for a reader whose length is declared up front,
 // such as an HTTP body with a Content-Length. When size is known (>= 0) and
-// at most maxPrealloc, the buffer is allocated once at size+1 bytes (capped at
-// maxInitialReservation), so a body of the declared length is read with no
-// growth and no final copy; the extra byte lets the terminating EOF be
-// observed without growing.
+// at most maxPrealloc, the buffer is allocated up front at size+1 bytes, capped
+// at maxInitialReservation+1. A body of the declared length up to that cap is
+// read with no growth and no final copy; the extra byte lets the terminating
+// EOF be observed without growing. Larger declared bodies grow past the
+// reservation as they are read.
 //
 // The declared size is only a hint: the reader is still consumed to EOF and
 // the result, including the data returned alongside an error, is exactly what
