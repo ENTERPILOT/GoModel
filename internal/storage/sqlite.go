@@ -16,16 +16,15 @@ import (
 // sqliteTuningPragmas size the connection's caches and bound its files. The
 // modernc driver runs each _pragma on every new connection.
 //   - cache_size: 64 MiB page cache instead of the 2 MiB default.
-//   - temp_store: sorts and temporary indexes stay in memory.
 //   - mmap_size: reads up to 256 MiB of the file through the OS page cache.
-//   - journal_size_limit: truncates the WAL back to 64 MiB after checkpoints,
-//     so it shrinks again after large retention deletes.
+//   - journal_size_limit: truncates the WAL to 64 MiB when it resets, so it
+//     shrinks again after large retention deletes. A long-lived reader can
+//     delay the reset.
 //   - analysis_limit: ANALYZE reads at most 100k entries per index, so it
 //     stays well under a second however large a table grows. A lower limit
 //     caps the estimated rows per key too far: at 1000, a day-range usage
 //     query still chose the model index over the timestamp index.
 const sqliteTuningPragmas = "&_pragma=cache_size(-65536)" +
-	"&_pragma=temp_store(MEMORY)" +
 	"&_pragma=mmap_size(268435456)" +
 	"&_pragma=journal_size_limit(67108864)" +
 	"&_pragma=analysis_limit(100000)"
@@ -33,8 +32,10 @@ const sqliteTuningPragmas = "&_pragma=cache_size(-65536)" +
 const (
 	// sqliteOptimizeInterval is how often the planner statistics are checked.
 	sqliteOptimizeInterval = time.Hour
-	// sqliteOptimizeTimeout bounds one check, which holds the single connection.
-	sqliteOptimizeTimeout = time.Minute
+	// sqliteOptimizeTimeout bounds one check, which holds the single
+	// connection. It stays well under the 30-second usage and audit flush
+	// deadlines and bounds how long the startup check delays serving.
+	sqliteOptimizeTimeout = 10 * time.Second
 	// sqliteOptimize runs ANALYZE (0x02) on every table (0x10000) whose
 	// statistics are missing or whose row count changed tenfold since it was
 	// last analyzed, so it is cheap when nothing changed. It leaves out 0x10,
@@ -50,6 +51,7 @@ type sqliteStorage struct {
 	maintenanceCtx  context.Context
 	stopMaintenance context.CancelFunc
 	maintenanceOnce sync.Once
+	maintenanceMu   sync.Mutex // orders worker registration against Close
 	maintenance     sync.WaitGroup
 }
 
@@ -111,7 +113,9 @@ func (s *sqliteStorage) Ping(ctx context.Context) error {
 
 func (s *sqliteStorage) Close() error {
 	if s.stopMaintenance != nil {
+		s.maintenanceMu.Lock()
 		s.stopMaintenance()
+		s.maintenanceMu.Unlock()
 		s.maintenance.Wait()
 	}
 	if s.db != nil {
@@ -120,18 +124,33 @@ func (s *sqliteStorage) Close() error {
 	return nil
 }
 
-// startMaintenance checks the planner statistics now and then hourly until
-// Close. Only the first call starts it.
+// startMaintenance checks the planner statistics before returning, so the
+// first requests do not queue behind it on the single connection, and then
+// hourly until Close. Only the first call does anything.
 func (s *sqliteStorage) startMaintenance() {
 	s.maintenanceOnce.Do(func() {
 		if s.maintenanceCtx == nil || s.maintenanceCtx.Err() != nil {
 			return
 		}
+		warned := false
+		s.optimize(&warned)
+
+		s.maintenanceMu.Lock()
+		defer s.maintenanceMu.Unlock()
+		if s.maintenanceCtx.Err() != nil {
+			return
+		}
 		s.maintenance.Go(func() {
-			warned := false
-			RunCleanupLoop(s.maintenanceCtx.Done(), sqliteOptimizeInterval, func() {
-				s.optimize(&warned)
-			})
+			ticker := time.NewTicker(sqliteOptimizeInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					s.optimize(&warned)
+				case <-s.maintenanceCtx.Done():
+					return
+				}
+			}
 		})
 	})
 }

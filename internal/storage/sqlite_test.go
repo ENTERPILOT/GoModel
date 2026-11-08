@@ -99,7 +99,6 @@ func TestSQLiteTuningPragmas(t *testing.T) {
 		{pragma: "synchronous", want: "1"},
 		{pragma: "busy_timeout", want: "5000"},
 		{pragma: "cache_size", want: "-65536"},
-		{pragma: "temp_store", want: "2"},
 		{pragma: "mmap_size", want: "268435456"},
 		{pragma: "journal_size_limit", want: "67108864"},
 		{pragma: "analysis_limit", want: "100000"},
@@ -127,13 +126,20 @@ func TestSQLiteMaintenanceAnalyzesTables(t *testing.T) {
 	require.NoError(t, err)
 
 	StartMaintenance(store)
-	StartMaintenance(store) // only the first call starts the loop
+	StartMaintenance(store) // only the first call does anything
 
-	assert.Eventually(t, func() bool {
-		var rows int
-		err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_stat1 WHERE tbl = 'items'`).Scan(&rows)
-		return err == nil && rows > 0
-	}, 5*time.Second, 10*time.Millisecond)
+	// The first check completes before StartMaintenance returns.
+	var rows int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM sqlite_stat1 WHERE tbl = 'items'`).Scan(&rows))
+	assert.Positive(t, rows)
 
 	require.NoError(t, store.Close())
+}
+
+func TestSQLiteMaintenanceAfterClose(t *testing.T) {
+	store, err := NewSQLite(SQLiteConfig{Path: filepath.Join(t.TempDir(), "closed.db")})
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+
+	StartMaintenance(store) // must not start a worker on a closed database
 }

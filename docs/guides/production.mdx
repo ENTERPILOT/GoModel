@@ -573,8 +573,9 @@ Two further points at volume:
   over SQLite, whose single connection makes this the dominant cost.
 
 Retention deletes rows but does not shrink a SQLite file. Vacuum it separately
-if the file size matters. The WAL file is truncated back to 64 MiB after each
-checkpoint.
+if the file size matters. SQLite truncates the WAL file to 64 MiB when it
+resets the WAL; a long-lived reader can delay that reset and leave the file
+larger.
 
 ## Observability
 
