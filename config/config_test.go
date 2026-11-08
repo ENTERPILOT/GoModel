@@ -65,7 +65,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"CONFIG_STRICT",
 		"PORT", "BASE_PATH", "GOMODEL_MASTER_KEY", "MASTER_KEY_DISABLED", "BODY_SIZE_LIMIT", "STREAM_STALL_TIMEOUT", "SWAGGER_ENABLED", "PPROF_ENABLED", "ENABLE_PASSTHROUGH_ROUTES", "ALLOW_PASSTHROUGH_V1_ALIAS", "USER_PATH_HEADER", "ENABLED_PASSTHROUGH_PROVIDERS",
 		"SERVER_TRUSTED_PROXIES", "SERVER_CLIENT_IP_HEADER", "SERVER_TRUSTED_HOPS", "SERVER_TLS_CERT_FILE", "SERVER_TLS_KEY_FILE", "SERVER_TLS_CLIENT_CA_FILE",
-		"GOMODEL_CACHE_DIR", "CACHE_REFRESH_INTERVAL", "MODEL_LIST_URL", "GOMODEL_OFFLINE", "GOMODEL_VERSION_CHECK_ENABLED",
+		"GOMODEL_CACHE_DIR", "CACHE_REFRESH_INTERVAL", "MODEL_LIST_URL", "GOMODEL_OFFLINE", "GOMODEL_VERSION_CHECK_ENABLED", "ALLOWLIST_UPSTREAM_METADATA",
 		"REDIS_URL", "REDIS_KEY_MODELS", "REDIS_KEY_RESPONSES", "REDIS_TTL_MODELS", "REDIS_TTL_RESPONSES",
 		"RESPONSE_CACHE_SIMPLE_ENABLED", "RESPONSE_CACHE_PARTITION_BY_USER_PATH",
 		"SEMANTIC_CACHE_ENABLED", "SEMANTIC_CACHE_THRESHOLD", "SEMANTIC_CACHE_TTL", "SEMANTIC_CACHE_MAX_CONV_MESSAGES",
@@ -79,7 +79,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"MONGODB_URL", "MONGODB_DATABASE", "GOMODEL_ENCRYPTION_KEY", "GOMODEL_ENCRYPTION_KEY_PREVIOUS",
 		"METRICS_ENABLED", "METRICS_ENDPOINT",
 		"LOGGING_ENABLED", "LOGGING_LOG_BODIES", "LOGGING_LOG_REVISION_BODIES", "LOGGING_LOG_GUARDRAIL_STEPS", "LOGGING_LOG_HEADERS",
-		"LOGGING_LOG_AUDIO_BODIES", "LOGGING_LOG_IMAGE_BODIES", "LOGGING_LOG_IMAGE_BODIES_SCOPE",
+		"LOGGING_LOG_AUDIO_BODIES", "LOGGING_LOG_EMBEDDING_BODIES", "LOGGING_LOG_IMAGE_BODIES", "LOGGING_LOG_IMAGE_BODIES_SCOPE",
 		"LOGGING_ONLY_MODEL_INTERACTIONS", "LOGGING_BUFFER_SIZE",
 		"LOGGING_FLUSH_INTERVAL", "LOGGING_RETENTION_DAYS",
 		"USAGE_ENABLED", "ENFORCE_RETURNING_USAGE_DATA",
@@ -136,7 +136,7 @@ func TestBuildDefaultConfig(t *testing.T) {
 	assert.True(t, cfg.Server.EnablePassthroughRoutes)
 	assert.True(t, cfg.Server.AllowPassthroughV1Alias)
 	assert.Equal(t, []string{"openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "edenai", "jev"}, cfg.Server.EnabledPassthroughProviders)
-	assert.Equal(t, ConfiguredProviderModelsModeFallback, cfg.Models.ConfiguredProviderModelsMode)
+	assert.Equal(t, ConfiguredProviderModelsModeAllowlist, cfg.Models.ConfiguredProviderModelsMode)
 	assert.Nil(t, cfg.Cache.Model.Local)
 	assert.Equal(t, 3600, cfg.Cache.Model.RefreshInterval)
 	assert.Equal(t, "sqlite", cfg.Storage.Type)
@@ -1801,9 +1801,21 @@ func TestOfflineModeDisablesEveryUnsolicitedOutboundCall(t *testing.T) {
 				got := result.Config.Cache.Model.ModelList.URL
 				assert.Equal(t, tt.wantList, got)
 				assert.Equal(t, tt.wantVersion, result.Config.VersionCheck.Enabled)
+				assert.False(t, result.Config.Models.AllowlistUpstreamMetadata)
 			})
 		})
 	}
+
+	t.Run("OfflineWinsOverExplicitAllowlistMetadataEnable", func(t *testing.T) {
+		clearAllConfigEnvVars(t)
+		withTempDir(t, func(_ string) {
+			t.Setenv("GOMODEL_OFFLINE", "true")
+			t.Setenv("ALLOWLIST_UPSTREAM_METADATA", "true")
+			result, err := Load()
+			require.NoError(t, err)
+			assert.False(t, result.Config.Models.AllowlistUpstreamMetadata)
+		})
+	})
 
 	t.Run("OfflineWinsOverExplicitVersionCheckEnable", func(t *testing.T) {
 		clearAllConfigEnvVars(t)
@@ -1827,7 +1839,19 @@ func TestOfflineModeDisablesEveryUnsolicitedOutboundCall(t *testing.T) {
 			assert.False(t, result.Config.Offline)
 			assert.True(t, result.Config.VersionCheck.Enabled)
 			assert.NotEmpty(t, result.Config.Cache.Model.ModelList.URL)
+			assert.True(t, result.Config.Models.AllowlistUpstreamMetadata)
 		})
+	})
+}
+
+func TestAllowlistUpstreamMetadataCanBeDisabled(t *testing.T) {
+	clearAllConfigEnvVars(t)
+	withTempDir(t, func(_ string) {
+		t.Setenv("ALLOWLIST_UPSTREAM_METADATA", "false")
+		result, err := Load()
+		require.NoError(t, err)
+		assert.False(t, result.Config.Offline)
+		assert.False(t, result.Config.Models.AllowlistUpstreamMetadata)
 	})
 }
 

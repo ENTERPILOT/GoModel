@@ -105,6 +105,48 @@ func TestApplyChat(t *testing.T) {
 			params: Set{"stop": raw(`["b","c"]`)},
 			want:   `{"model":"m","messages":[],"stop":["b","c"]}`,
 		},
+		{
+			name:   "a forced token limit strips the client's other spellings",
+			body:   `{"model":"m","messages":[],"max_completion_tokens":2000,"max_output_tokens":3000}`,
+			params: Set{"max_tokens": raw("50")},
+			want:   `{"model":"m","messages":[],"max_tokens":50}`,
+		},
+		{
+			name:     "a default token limit leaves any client spelling alone",
+			body:     `{"model":"m","messages":[],"max_completion_tokens":2000}`,
+			defaults: Set{"max_tokens": raw("50")},
+			want:     `{"model":"m","messages":[],"max_completion_tokens":2000}`,
+		},
+		{
+			name:   "every token-limit spelling sets max_tokens",
+			body:   `{"model":"m","messages":[]}`,
+			params: Set{"max_output_tokens": raw("70")},
+			want:   `{"model":"m","messages":[],"max_tokens":70}`,
+		},
+		{
+			name:   "a forced max_completion_tokens keeps its spelling and strips the others",
+			body:   `{"model":"m","messages":[],"max_tokens":10,"max_output_tokens":3000}`,
+			params: Set{"max_completion_tokens": raw("50")},
+			want:   `{"model":"m","messages":[],"max_completion_tokens":50}`,
+		},
+		{
+			name:     "a default max_completion_tokens leaves a client max_tokens alone",
+			body:     `{"model":"m","messages":[],"max_tokens":10}`,
+			defaults: Set{"max_completion_tokens": raw("50")},
+			want:     `{"model":"m","messages":[],"max_tokens":10}`,
+		},
+		{
+			name:   "a forced null still strips a Responses-only key",
+			body:   `{"model":"m","messages":[],"truncation":"auto"}`,
+			params: Set{"truncation": nil},
+			want:   `{"model":"m","messages":[]}`,
+		},
+		{
+			name:     "Responses-only keys are skipped",
+			body:     `{"model":"m","messages":[]}`,
+			defaults: Set{"truncation": raw(`"auto"`), "include": raw(`["x"]`), "text": raw(`{"verbosity":"low"}`), "seed": raw("7")},
+			want:     `{"model":"m","messages":[],"seed":7}`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -209,6 +251,48 @@ func TestApplyResponses(t *testing.T) {
 			body:   `{"model":"m","input":"hi","metadata":{"a":"1"}}`,
 			params: Set{"metadata": nil},
 			want:   `{"model":"m","input":"hi"}`,
+		},
+		{
+			name:   "a forced token limit strips the client's chat spellings",
+			body:   `{"model":"m","input":"hi","max_output_tokens":10,"max_completion_tokens":2000}`,
+			params: Set{"max_completion_tokens": raw("50")},
+			want:   `{"model":"m","input":"hi","max_output_tokens":50}`,
+		},
+		{
+			name:   "a forced null still strips a chat-only key",
+			body:   `{"model":"m","input":"hi","stop":["x"]}`,
+			params: Set{"stop": nil},
+			want:   `{"model":"m","input":"hi"}`,
+		},
+		{
+			name:     "response_format and verbosity are skipped, text sets the format",
+			body:     `{"model":"m","input":"hi"}`,
+			defaults: Set{"text": raw(`{"format":{"type":"text"}}`), "response_format": raw(`{"type":"json_object"}`), "verbosity": raw(`"low"`)},
+			want:     `{"model":"m","input":"hi","text":{"format":{"type":"text"}}}`,
+		},
+		{
+			name:     "a default text object fills only missing members",
+			body:     `{"model":"m","input":"hi","text":{"verbosity":"high"}}`,
+			defaults: Set{"text": raw(`{"verbosity":"low","format":{"type":"text"}}`)},
+			want:     `{"model":"m","input":"hi","text":{"verbosity":"high","format":{"type":"text"}}}`,
+		},
+		{
+			name:     "chat-only keys are skipped",
+			body:     `{"model":"m","input":"hi"}`,
+			defaults: Set{"seed": raw("7"), "stop": raw(`["x"]`), "frequency_penalty": raw("0.5"), "top_k": raw("20")},
+			want:     `{"model":"m","input":"hi","top_k":20}`,
+		},
+		{
+			name:   "a forced text object wins over the client's members, chat format keys still skipped",
+			body:   `{"model":"m","input":"hi","text":{"format":{"type":"text"},"verbosity":"high"}}`,
+			params: Set{"text": raw(`{"format":{"type":"json_object"}}`), "response_format": raw(`{"type":"json_schema","json_schema":{"name":"s"}}`), "verbosity": raw(`"low"`)},
+			want:   `{"model":"m","input":"hi","text":{"format":{"type":"json_object"},"verbosity":"high"}}`,
+		},
+		{
+			name:   "a forced null still strips a client response_format",
+			body:   `{"model":"m","input":"hi","response_format":{"type":"json_object"},"text":{"verbosity":"low"}}`,
+			params: Set{"response_format": nil},
+			want:   `{"model":"m","input":"hi","text":{"verbosity":"low"}}`,
 		},
 	}
 	for _, tt := range tests {

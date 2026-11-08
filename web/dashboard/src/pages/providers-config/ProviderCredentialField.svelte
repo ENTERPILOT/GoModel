@@ -36,10 +36,24 @@
 </script>
 
 <div class="form-field">
-  <label class="form-field-label" for={id}>
-    {field.label}
-    {#if field.required}<span class="form-field-required" aria-hidden="true">*</span>{/if}
-  </label>
+  <div class="form-field-label-row">
+    <label class="form-field-label" for={id}>
+      {field.label}
+      {#if field.required}<span class="form-field-required" aria-hidden="true">*</span>{/if}
+    </label>
+    {#if field.docsUrl}
+      <a
+        class="inline-help-toggle form-field-docs-help"
+        href={field.docsUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={field.docsLabel}
+        title={field.docsLabel}
+      >
+        <span class="inline-help-toggle-icon" aria-hidden="true">?</span>
+      </a>
+    {/if}
+  </div>
 
   {#if field.control === "keys"}
     <div class="vm-target-list">
@@ -132,3 +146,16 @@
     <small class="form-hint" id={id + "-hint"}>{field.hint}</small>
   {/if}
 </div>
+
+<style>
+  /* Keeps the docs "?" beside the label: .form-field stacks its children. */
+  .form-field-label-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .form-field-docs-help {
+    text-decoration: none;
+  }
+</style>

@@ -134,6 +134,7 @@ func TestModelRegistry(t *testing.T) {
 
 	t.Run("ConfiguredModelsFallbackModeKeepsUpstreamWhenAvailable", func(t *testing.T) {
 		registry := NewModelRegistry()
+		registry.SetConfiguredProviderModelsMode(config.ConfiguredProviderModelsModeFallback)
 		mock := &registryMockProvider{
 			name: "test",
 			modelsResponse: &core.ModelsResponse{
@@ -155,6 +156,7 @@ func TestModelRegistry(t *testing.T) {
 
 	t.Run("ConfiguredModelsFallbackModeUsesConfiguredWhenUpstreamFails", func(t *testing.T) {
 		registry := NewModelRegistry()
+		registry.SetConfiguredProviderModelsMode(config.ConfiguredProviderModelsModeFallback)
 		mock := &registryMockProvider{
 			name: "test",
 			err:  errors.New("models unavailable"),
@@ -182,6 +184,7 @@ func TestModelRegistry(t *testing.T) {
 
 	t.Run("ConfiguredModelsWithoutModelsEndpointAreHealthy", func(t *testing.T) {
 		registry := NewModelRegistry()
+		registry.SetConfiguredProviderModelsMode(config.ConfiguredProviderModelsModeFallback)
 		mock := &registryMockProvider{
 			name: "stt",
 			err:  core.MarkModelListingUnsupported(core.ParseProviderError("openai", http.StatusNotFound, []byte("<html>404 Not Found</html>"), nil)),
@@ -261,7 +264,7 @@ func TestModelRegistry(t *testing.T) {
 		require.True(t, registry.ModelAvailable("ollama/qwen3:8b"))
 	})
 
-	t.Run("ConfiguredModelsAllowlistModeSkipsUpstreamAndUsesConfiguredModels", func(t *testing.T) {
+	t.Run("ConfiguredModelsAllowlistModeServesConfiguredModelsWithUpstreamMetadata", func(t *testing.T) {
 		registry := NewModelRegistry()
 		registry.SetConfiguredProviderModelsMode(config.ConfiguredProviderModelsModeAllowlist)
 		var listCount atomic.Int32
@@ -283,14 +286,14 @@ func TestModelRegistry(t *testing.T) {
 
 		err := registry.Initialize(context.Background())
 		require.NoError(t, err)
-		require.Equal(t, int32(0), listCount.Load())
+		require.Equal(t, int32(1), listCount.Load(), "allowlist lists upstream for metadata")
 		require.Equal(t, 2, registry.ModelCount())
-		require.False(t, registry.Supports("upstream-extra"))
+		require.False(t, registry.Supports("upstream-extra"), "upstream never widens an allowlist")
 
 		configured := registry.GetModel("configured-model")
 		require.NotNil(t, configured)
-		require.Positive(t, configured.Model.Created)
-		require.Equal(t, "test-type", configured.Model.OwnedBy)
+		require.Equal(t, int64(123), configured.Model.Created, "upstream entry is used for a configured model")
+		require.Equal(t, "upstream", configured.Model.OwnedBy)
 
 		snapshots := registry.ProviderRuntimeSnapshots()
 		require.Len(t, snapshots, 1)
@@ -1222,6 +1225,7 @@ func (p *availabilityFailingProvider) CheckAvailability(context.Context) error {
 func TestRefreshProviderModels_MissingModelsEndpointPassesAvailabilityGate(t *testing.T) {
 	notFound := core.MarkModelListingUnsupported(core.ParseProviderError("ollama", http.StatusNotFound, []byte("404 page not found"), nil))
 	registry := NewModelRegistry()
+	registry.SetConfiguredProviderModelsMode(config.ConfiguredProviderModelsModeFallback)
 	stt := &availabilityFailingProvider{
 		registryMockProvider: &registryMockProvider{name: "stt", err: notFound},
 		availabilityErr:      notFound,

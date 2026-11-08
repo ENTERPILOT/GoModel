@@ -78,7 +78,7 @@ func newBootstrap(ctx context.Context, cfg Config) *bootstrap {
 		if appCfg.Cache.Model.ModelList.URL != "" {
 			catalog = "local file"
 		}
-		slog.Info("offline mode: update check disabled, remote model catalog download disabled; only configured providers and declared endpoints are contacted",
+		slog.Info("offline mode: update check, remote model catalog download, and allowlist metadata listing disabled; only configured providers and declared endpoints are contacted",
 			"model_catalog", catalog)
 	}
 	if appCfg.HTTP.TLS.InsecureSkipVerify {
