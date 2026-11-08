@@ -31,9 +31,9 @@ providers:
   `XAI_MODELS=grok-voice-latest`) i ustaw `XAI_MODELS_MODE=merge`, aby wykryte
   modele nadal były routowane obok nich; w `config.yaml` dodaj je do listy
   `models:` providera i ustaw `models_mode: merge` (zobacz
-  [Tryby modeli](/pl/advanced/config-yaml#tryby-modeli)). Jeśli przy `merge`
-  request `/models` zawiedzie lub nie zwróci żadnych modeli, udostępniane są
-  tylko skonfigurowane ID.
+  [Tryby modeli](/pl/advanced/config-yaml#tryby-modeli)). Dopóki pierwsze
+  pobranie listy `/models` się nie powiedzie, `merge` udostępnia tylko
+  skonfigurowane ID; nieudane odświeżenie później zachowuje już wykryte modele.
 </Note>
 
 Modele obrazów, takie jak `grok-2-image`, są obsługiwane przez

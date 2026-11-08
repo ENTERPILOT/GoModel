@@ -30,7 +30,7 @@ providers:
   （例如 `XAI_MODELS=grok-voice-latest`），并设置 `XAI_MODELS_MODE=merge`，
   使发现的模型仍可同时路由；在 `config.yaml` 中，则将它们加入该提供商的 `models:`
   列表并设置 `models_mode: merge`（参见[模型模式](/zh/advanced/config-yaml#模型模式)）。
-  使用 `merge` 时，如果 `/models` 请求失败或未返回任何模型，则只提供已配置的 ID。
+  在首次成功获取 `/models` 列表之前，`merge` 只提供已配置的 ID；之后刷新失败时会保留已发现的模型。
 </Note>
 
 `grok-2-image` 等图像模型通过

@@ -54,8 +54,9 @@ XIAOMI_MODELS=mimo-v2.5-pro,mimo-v2.5-pro[1m]
 XIAOMI_MODELS_MODE=merge
 ```
 
-Zostaw na liście także model bazowy: gdy wywołanie `/models` zawiedzie lub nie
-zwróci żadnych modeli, `merge` udostępnia tylko skonfigurowane ID.
+Zostaw na liście także model bazowy: dopóki pierwsze pobranie listy `/models`
+się nie powiedzie, `merge` udostępnia tylko skonfigurowane ID, a nieudane
+odświeżenie później zachowuje już wykryte modele.
 
 ## Zamiana tekstu na mowę i transkrypcja
 

@@ -53,8 +53,9 @@ XIAOMI_MODELS=mimo-v2.5-pro,mimo-v2.5-pro[1m]
 XIAOMI_MODELS_MODE=merge
 ```
 
-Keep the base model in the list too: when the `/models` call fails or returns
-no models, `merge` serves only the configured IDs.
+Keep the base model in the list too: until the first `/models` listing
+succeeds, `merge` serves only the configured IDs, while a failed refresh later
+keeps the models already discovered.
 
 ## Text-to-speech and transcription
 
