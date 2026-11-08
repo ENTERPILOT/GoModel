@@ -1,12 +1,17 @@
 package providers
 
 import (
+	"bufio"
 	"io"
 	"strings"
 	"testing"
+	"testing/iotest"
 
+	"github.com/goccy/go-json"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // convertTestStream runs a chat stream through the Responses converter and
@@ -169,6 +174,82 @@ data: [DONE]
 	}
 }
 
+func TestOpenAIResponsesStreamConverter_MalformedEntryKeepsValidImages(t *testing.T) {
+	images := `[{"type":"image_url","image_url":{"url":"data:image/png;base64,b25l"}},` +
+		`{"type":"image_url"},42,"str",null,{"type":"image_url","image_url":"x"},` +
+		`{"type":"image_url","image_url":{"url":"data:image/jpeg;base64,dHdv"}}]`
+	for _, tolerant := range []bool{false, true} {
+		content := `"hi"`
+		if tolerant {
+			content = `[{"type":"text","text":"hi"}]`
+		}
+		stream := `data: {"choices":[{"index":0,"delta":{"content":` + content + `,"images":` + images + `},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+`
+		_, _, completed := convertTestStream(t, stream)
+
+		var results []any
+		for _, item := range outputItems(t, completed) {
+			if item["type"] == "image_generation_call" {
+				results = append(results, item["result"])
+			}
+		}
+		assert.Equal(t, []any{"b25l", "dHdv"}, results, "tolerant=%v", tolerant)
+	}
+}
+
+// A large image line arrives over many small reads. Lines split at every
+// byte must still be found once each, in order, with nothing lost or merged.
+func TestOpenAIResponsesStreamConverter_LinesSplitAcrossReads(t *testing.T) {
+	img := strings.Repeat("QUJD", 16<<10)
+	stream := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"before\"},\"finish_reason\":null}]}\r\n\r\n" +
+		`data: {"choices":[{"index":0,"delta":{"images":[{"type":"image_url","image_url":{"url":"data:image/png;base64,` + img + `"}}]},"finish_reason":null}]}` + "\n\n" +
+		`data: {"choices":[{"index":0,"delta":{"content":"after"},"finish_reason":"stop"}]}` + "\n\ndata: [DONE]\n\n"
+
+	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(iotest.OneByteReader(strings.NewReader(stream))), "test-model", "gemini")
+	raw, err := io.ReadAll(converter)
+	require.NoError(t, err)
+	var completed map[string]any
+	for _, event := range parseTestSSEEvents(t, string(raw)) {
+		if event.Name == "response.completed" {
+			completed, _ = event.Payload["response"].(map[string]any)
+		}
+	}
+	require.NotNil(t, completed, "stream %s", raw)
+
+	output := outputItems(t, completed)
+	require.Len(t, output, 3)
+	assert.Equal(t, "message", output[0]["type"])
+	assert.Equal(t, "image_generation_call", output[1]["type"])
+	assert.Equal(t, img, output[1]["result"])
+	assert.Equal(t, "message", output[2]["type"])
+}
+
+// Readers such as bufio give up after 100 reads that return nothing, so the
+// converter must not hand back empty reads while a large line is still
+// arriving.
+func TestOpenAIResponsesStreamConverter_LargeLineMakesProgressForBufio(t *testing.T) {
+	img := strings.Repeat("QUJD", 75<<10)
+	stream := `data: {"choices":[{"index":0,"delta":{"images":[{"type":"image_url","image_url":{"url":"data:image/png;base64,` + img + `"}}]},"finish_reason":"stop"}]}` + "\n\ndata: [DONE]\n\n"
+
+	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(stream)), "test-model", "gemini")
+	reader := bufio.NewReader(converter)
+	var raw []byte
+	for {
+		line, err := reader.ReadBytes('\n')
+		raw = append(raw, line...)
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+	}
+	assert.Contains(t, string(raw), `"result":"`+img+`"`)
+	assert.Contains(t, string(raw), "response.completed")
+}
+
 func TestOpenAIResponsesStreamConverter_ImagesOnTolerantPath(t *testing.T) {
 	// The off-spec content array forces the tolerant decode; the image in
 	// the same delta must still come through.
@@ -281,4 +362,178 @@ data: [DONE]
 	}
 	assert.Equal(t, "Before. ", text(output[0]))
 	assert.Equal(t, "After.", text(output[2]))
+}
+
+// A thought signature belongs to the message item whose text it arrived with:
+// text that follows an image opens a new item, and neither item may carry the
+// other's signature.
+func TestOpenAIResponsesStreamConverter_SignatureStaysOnItsMessageAcrossImage(t *testing.T) {
+	const image = `{"choices":[{"index":0,"delta":{"images":[{"type":"image_url","image_url":{"url":"data:image/png;base64,aW1n"}}]},"finish_reason":null}]}`
+	tests := []struct {
+		name         string
+		before       string
+		after        string
+		wantBefore   any
+		wantAfter    any
+		tolerantPath bool
+	}{
+		{
+			name:      "signature after image",
+			before:    `{"choices":[{"index":0,"delta":{"content":"A"},"finish_reason":null}]}`,
+			after:     `{"choices":[{"index":0,"delta":{"content":"B","extra_content":{"google":{"thought_signature":"sig-b"}}},"finish_reason":"stop"}]}`,
+			wantAfter: map[string]any{"google": map[string]any{"thought_signature": "sig-b"}},
+		},
+		{
+			name:       "signature before image",
+			before:     `{"choices":[{"index":0,"delta":{"content":"A","extra_content":{"google":{"thought_signature":"sig-a"}}},"finish_reason":null}]}`,
+			after:      `{"choices":[{"index":0,"delta":{"content":"B"},"finish_reason":"stop"}]}`,
+			wantBefore: map[string]any{"google": map[string]any{"thought_signature": "sig-a"}},
+		},
+		{
+			name:      "signature after image on tolerant path",
+			before:    `{"choices":[{"index":0,"delta":{"content":"A"},"finish_reason":null}]}`,
+			after:     `{"choices":[{"index":0,"delta":{"content":"B","tool_calls":"off-spec","extra_content":{"google":{"thought_signature":"sig-b"}}},"finish_reason":"stop"}]}`,
+			wantAfter: map[string]any{"google": map[string]any{"thought_signature": "sig-b"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stream := "data: " + tt.before + "\n\ndata: " + image + "\n\ndata: " + tt.after + "\n\ndata: [DONE]\n\n"
+			_, done, completed := convertTestStream(t, stream)
+
+			output := outputItems(t, completed)
+			require.Len(t, output, 3)
+			assert.Equal(t, "image_generation_call", output[1]["type"])
+			assert.Equal(t, tt.wantBefore, output[0]["extra_content"], "pre-image message")
+			assert.Equal(t, tt.wantAfter, output[2]["extra_content"], "post-image message")
+			for _, item := range done {
+				if item["id"] == output[0]["id"] {
+					assert.Equal(t, output[0]["extra_content"], item["extra_content"], "terminal item matches its output_item.done")
+				}
+			}
+		})
+	}
+}
+
+// The non-streaming path skips a malformed images entry the same way the
+// stream does, instead of dropping every image of the message.
+func TestBuildResponsesOutputItems_MalformedImageEntryKeepsValidImages(t *testing.T) {
+	images := `[{"type":"image_url","image_url":{"url":"data:image/png;base64,b25l"}},{"type":"image_url"},42,` +
+		`{"type":"image_url","image_url":{"url":"data:image/jpeg;base64,dHdv"}}]`
+	msg := core.ResponseMessage{
+		Role:        "assistant",
+		Content:     "",
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{core.ChatImagesField: json.RawMessage(images)}),
+	}
+
+	var results []string
+	for _, item := range BuildResponsesOutputItems(msg) {
+		if item.Type == "image_generation_call" {
+			var result string
+			require.NoError(t, json.Unmarshal(item.ExtraFields.Lookup("result"), &result))
+			results = append(results, result)
+		}
+	}
+	assert.Equal(t, []string{"b25l", "dHdv"}, results)
+}
+
+// Text after a tool call and an image goes in a new message item after them,
+// even when the tool call, not the image, closed the first message.
+func TestOpenAIResponsesStreamConverter_TextToolImageTextKeepsOrder(t *testing.T) {
+	stream := `data: {"choices":[{"index":0,"delta":{"content":"before"},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"save","arguments":"{}"}}]},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{"images":[{"type":"image_url","image_url":{"url":"data:image/png;base64,aW1n"}}]},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{"content":"after"},"finish_reason":"stop"}]}
+
+data: [DONE]
+`
+	_, done, completed := convertTestStream(t, stream)
+
+	output := outputItems(t, completed)
+	require.Len(t, output, 4)
+	var types []any
+	for _, item := range output {
+		types = append(types, item["type"])
+	}
+	assert.Equal(t, []any{"message", "function_call", "image_generation_call", "message"}, types)
+	assert.Equal(t, "before", output[0]["content"].([]any)[0].(map[string]any)["text"])
+	assert.Equal(t, "after", output[3]["content"].([]any)[0].(map[string]any)["text"])
+	for _, item := range done {
+		if item["type"] == "message" {
+			assert.NotEqual(t, "beforeafter", item["content"].([]any)[0].(map[string]any)["text"])
+		}
+	}
+}
+
+// An image between argument deltas must not complete the tool call early:
+// its later arguments still belong to it.
+func TestOpenAIResponsesStreamConverter_ImageKeepsStreamingToolCallOpen(t *testing.T) {
+	stream := `data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"save","arguments":"{\"a\""}}]},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{"images":[{"type":"image_url","image_url":{"url":"data:image/png;base64,aW1n"}}]},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":":1}"}}]},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+`
+	_, _, completed := convertTestStream(t, stream)
+
+	var arguments []any
+	for _, item := range outputItems(t, completed) {
+		if item["type"] == "function_call" {
+			arguments = append(arguments, item["arguments"])
+		}
+	}
+	assert.Equal(t, []any{`{"a":1}`}, arguments)
+}
+
+// Without an image, text after a tool call keeps its existing handling: no
+// extra message item for any provider.
+func TestOpenAIResponsesStreamConverter_TextAfterToolCallWithoutImageUnchanged(t *testing.T) {
+	stream := `data: {"choices":[{"index":0,"delta":{"content":"A"},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"save","arguments":"{}"}}]},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{"content":"B"},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+`
+	_, _, completed := convertTestStream(t, stream)
+
+	var types []any
+	for _, item := range outputItems(t, completed) {
+		types = append(types, item["type"])
+	}
+	assert.Equal(t, []any{"message", "function_call"}, types)
+}
+
+// Content that arrives after [DONE] must not open a message item after the
+// terminal event.
+func TestOpenAIResponsesStreamConverter_LateTextAfterImageAndDoneOpensNoItem(t *testing.T) {
+	stream := `data: {"choices":[{"index":0,"delta":{"content":"A"},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{"images":[{"type":"image_url","image_url":{"url":"data:image/png;base64,aW1n"}}]},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+data: {"choices":[{"index":0,"delta":{"content":"late"},"finish_reason":null}]}
+`
+	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(stream)), "test-model", "gemini")
+	raw, err := io.ReadAll(converter)
+	require.NoError(t, err)
+
+	terminal := false
+	for _, event := range parseTestSSEEvents(t, string(raw)) {
+		if event.Name == "response.completed" {
+			terminal = true
+			continue
+		}
+		if terminal {
+			assert.NotEqual(t, "response.output_item.added", event.Name, "no item opens after response.completed")
+		}
+	}
+	require.True(t, terminal)
 }

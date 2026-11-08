@@ -2,11 +2,11 @@ package gemini
 
 import (
 	"bufio"
+	"bytes"
 	"io"
 	"maps"
 	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -15,9 +15,11 @@ import (
 )
 
 // maxNativeStreamLineBytes caps one SSE line of a native stream. A generated
-// image arrives whole as base64 in a single event, and a 2K or 4K image
-// easily passes the usual 4 MiB, so the cap sits well above it while still
-// bounding memory per stream.
+// image arrives whole as base64 in a single event: a 4K (16 MP) PNG commonly
+// runs 5-15 MB, about 7-20 MB in base64, past the usual 4 MiB. The cap is a
+// ceiling, not an allocation; the line buffer grows only as far as the
+// largest event. Events are handled as bytes so each one is copied as few
+// times as the decode and re-encode need.
 const maxNativeStreamLineBytes = 32 << 20
 
 type geminiNativeStream struct {
@@ -56,26 +58,26 @@ func convertGeminiNativeStream(body io.ReadCloser, out *io.PipeWriter, model str
 		includeUsage: includeUsage,
 		created:      time.Now().Unix(),
 	}
-	var data strings.Builder
+	var data bytes.Buffer
 	for scanner.Scan() {
-		line := strings.TrimRight(scanner.Text(), "\r")
-		if line == "" {
-			if err := state.consumeEvent(out, data.String()); err != nil {
+		line := bytes.TrimRight(scanner.Bytes(), "\r")
+		if len(line) == 0 {
+			if err := state.consumeEvent(out, data.Bytes()); err != nil {
 				_ = out.CloseWithError(err)
 				return
 			}
 			data.Reset()
 			continue
 		}
-		if strings.HasPrefix(line, "data:") {
+		if payload, ok := bytes.CutPrefix(line, []byte("data:")); ok {
 			if data.Len() > 0 {
 				data.WriteByte('\n')
 			}
-			data.WriteString(strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+			data.Write(bytes.TrimSpace(payload))
 		}
 	}
 	if data.Len() > 0 {
-		if err := state.consumeEvent(out, data.String()); err != nil {
+		if err := state.consumeEvent(out, data.Bytes()); err != nil {
 			_ = out.CloseWithError(err)
 			return
 		}
@@ -115,14 +117,15 @@ type geminiChoiceStreamState struct {
 	finishReason  string
 }
 
-func (s *geminiStreamState) consumeEvent(out io.Writer, raw string) error {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || raw == "[DONE]" || s.stopped {
+// consumeEvent converts one native event. raw is only valid for the call.
+func (s *geminiStreamState) consumeEvent(out io.Writer, raw []byte) error {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || string(raw) == "[DONE]" || s.stopped {
 		return nil
 	}
 
 	var event geminiGenerateContentResponse
-	if err := json.Unmarshal([]byte(raw), &event); err != nil {
+	if err := json.Unmarshal(raw, &event); err != nil {
 		return nativeProviderError(s.providerName, "failed to parse native Gemini stream event", err)
 	}
 	if s.responseID == "" {
@@ -138,22 +141,8 @@ func (s *geminiStreamState) consumeEvent(out io.Writer, raw string) error {
 	}
 
 	for i, candidate := range event.Candidates {
-		if choice, ok := s.chatChunkChoice(candidate, i); ok {
-			if err := s.writeChoiceChunk(out, choice); err != nil {
-				return err
-			}
-		}
-		// Generated images go in a chunk of their own, so stream tools that
-		// split or rewrite text and tool-call deltas pass them through as is.
-		if images := generatedImages(candidate.Content.Parts); len(images) > 0 {
-			choice := map[string]any{
-				"index":         streamChoiceIndex(candidate, i),
-				"delta":         map[string]any{core.ChatImagesField: images},
-				"finish_reason": nil,
-			}
-			if err := s.writeChoiceChunk(out, choice); err != nil {
-				return err
-			}
+		if err := s.writeCandidate(out, candidate, i); err != nil {
+			return err
 		}
 	}
 
@@ -161,6 +150,61 @@ func (s *geminiStreamState) consumeEvent(out io.Writer, raw string) error {
 		s.latestUsage = geminiUsageMap(event.UsageMetadata)
 	}
 	return nil
+}
+
+// writeCandidate streams one candidate of an event in part order. Generated
+// images go in chunks of their own, so stream tools that split or rewrite
+// text and tool-call deltas pass them through as is, and the text and tool
+// calls between them go in chunks of their own too, so an image keeps its
+// place in the turn. The first chunk carries the role and the finish reason
+// is recorded even for an image-only candidate.
+func (s *geminiStreamState) writeCandidate(out io.Writer, candidate geminiCandidate, fallbackIndex int) error {
+	parts := candidate.Content.Parts
+	supplied := suppliedToolCallIDs(parts)
+	start := 0
+	// flush writes the parts before end that no image chunk took. An empty
+	// run is skipped, except the first: it still sends the role and records
+	// the finish reason.
+	flush := func(end int) error {
+		if start == end && start > 0 {
+			return nil
+		}
+		run := candidate
+		run.Content.Parts = parts[start:end]
+		choice, ok := s.chatChunkChoice(run, fallbackIndex, supplied)
+		if !ok {
+			return nil
+		}
+		return s.writeChoiceChunk(out, choice)
+	}
+	for i := 0; i < len(parts); i++ {
+		image, ok := generatedImage(parts[i])
+		if !ok {
+			continue
+		}
+		if err := flush(i); err != nil {
+			return err
+		}
+		images := []core.ContentPart{image}
+		for i+1 < len(parts) {
+			next, ok := generatedImage(parts[i+1])
+			if !ok {
+				break
+			}
+			images = append(images, next)
+			i++
+		}
+		choice := map[string]any{
+			"index":         streamChoiceIndex(candidate, fallbackIndex),
+			"delta":         map[string]any{core.ChatImagesField: images},
+			"finish_reason": nil,
+		}
+		if err := s.writeChoiceChunk(out, choice); err != nil {
+			return err
+		}
+		start = i + 1
+	}
+	return flush(len(parts))
 }
 
 func (s *geminiStreamState) writeChoiceChunk(out io.Writer, choice map[string]any) error {
@@ -187,19 +231,12 @@ func (s *geminiStreamState) writeFinishReasons(out io.Writer) error {
 		if finish == "" {
 			continue
 		}
-		chunk := map[string]any{
-			"id":       s.responseID,
-			"object":   "chat.completion.chunk",
-			"created":  s.created,
-			"model":    s.model,
-			"provider": s.providerName,
-			"choices": []map[string]any{{
-				"index":         index,
-				"delta":         map[string]any{},
-				"finish_reason": finish,
-			}},
+		choice := map[string]any{
+			"index":         index,
+			"delta":         map[string]any{},
+			"finish_reason": finish,
 		}
-		if err := writeOpenAIStreamChunk(out, chunk); err != nil {
+		if err := s.writeChoiceChunk(out, choice); err != nil {
 			return err
 		}
 	}
@@ -222,7 +259,10 @@ func (s *geminiStreamState) writeFinalUsage(out io.Writer) error {
 	return writeOpenAIStreamChunk(out, chunk)
 }
 
-func (s *geminiStreamState) chatChunkChoice(candidate geminiCandidate, fallbackIndex int) (map[string]any, bool) {
+// chatChunkChoice renders the text and tool calls of candidate's parts.
+// supplied holds the tool call IDs of the whole candidate, which may be wider
+// than these parts.
+func (s *geminiStreamState) chatChunkChoice(candidate geminiCandidate, fallbackIndex int, supplied map[string]struct{}) (map[string]any, bool) {
 	index := streamChoiceIndex(candidate, fallbackIndex)
 	state := s.choiceState(index)
 
@@ -232,7 +272,7 @@ func (s *geminiStreamState) chatChunkChoice(candidate geminiCandidate, fallbackI
 		state.roleSent = true
 	}
 
-	content, toolCalls, signature := openAIMessageFromGeminiParts(candidate.Content.Parts, &state.toolIDs)
+	content, toolCalls, signature := openAIMessageFromGeminiParts(candidate.Content.Parts, &state.toolIDs, supplied)
 	if content != "" {
 		delta["content"] = content
 	}
@@ -325,7 +365,12 @@ func writeOpenAIStreamChunk(out io.Writer, chunk map[string]any) error {
 	if err != nil {
 		return err
 	}
-	_, err = out.Write([]byte("data: " + string(body) + "\n\n"))
+	// One buffer for the whole frame: an image chunk is as large as the image.
+	frame := make([]byte, 0, len("data: ")+len(body)+len("\n\n"))
+	frame = append(frame, "data: "...)
+	frame = append(frame, body...)
+	frame = append(frame, "\n\n"...)
+	_, err = out.Write(frame)
 	return err
 }
 

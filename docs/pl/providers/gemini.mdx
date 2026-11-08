@@ -111,7 +111,10 @@ odpowiedziach OpenAI. Aby edytować obraz w kolejnej turze, odeślij wiadomość
 otrzymał thought signature każdego obrazu. Klienci `/v1/messages` (Anthropic Messages API)
 otrzymują tylko tekst. Przy streamingu każdy obraz przychodzi w całości: w Chat
 Completions w `delta.images` chunka, a w Responses API jako gotowy element
-`image_generation_call`.
+`image_generation_call`. Jedno zdarzenie strumienia od Gemini, które niesie cały
+obraz w base64, może mieć do 32 MiB; pluginy strumienia domyślnie mieszczą
+najwyżej 4 MiB, więc większy obraz kończy strumień, który przez nie przechodzi.
+Gdy takie pluginy są włączone, żądaj obrazów 2K i 4K bez streamingu.
 
 Każdy obraz to kilka megabajtów base64. Logi audytowe przechwytują maksymalnie 1 MB
 body odpowiedzi, więc zalogowane body jest obcinane i odpowiednio oznaczane. Cache

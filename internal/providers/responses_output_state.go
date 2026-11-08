@@ -58,7 +58,7 @@ type ResponsesOutputEventState struct {
 
 	// closedItems holds output items already finished on the stream that the
 	// state no longer tracks (image_generation_call items, and message items
-	// an image closed), for the terminal output.
+	// set aside for a new one), for the terminal output.
 	closedItems []indexedOutputItem
 }
 
@@ -506,7 +506,7 @@ func (s *ResponsesOutputEventState) FinalOutputItems(reasoningIndex, assistantIn
 }
 
 // HasClosedItems reports whether an image_generation_call item, or a message
-// item an image closed, has been emitted.
+// item set aside for a new one, has been emitted.
 func (s *ResponsesOutputEventState) HasClosedItems() bool {
 	return len(s.closedItems) > 0
 }
@@ -514,7 +514,8 @@ func (s *ResponsesOutputEventState) HasClosedItems() bool {
 // StartNextAssistantMessage sets the finished message item at outputIndex
 // aside for the terminal output and resets the assistant state, so text that
 // follows an image opens a new message item instead of writing into a closed
-// one. Turn-wide replay state stays and rides on the new item.
+// one. Its replay state stays with it: the new item carries only state that
+// arrives with or after its own text.
 func (s *ResponsesOutputEventState) StartNextAssistantMessage(outputIndex int) {
 	if !s.assistantDone {
 		return
@@ -522,6 +523,7 @@ func (s *ResponsesOutputEventState) StartNextAssistantMessage(outputIndex int) {
 	s.closedItems = append(s.closedItems, indexedOutputItem{outputIndex, s.AssistantMessageItem(finalStatusOrCompleted(s.assistantFinalStatus), true)})
 	s.assistantReserved, s.assistantStarted, s.assistantPartStarted, s.assistantDone = false, false, false, false
 	s.assistantMessageID, s.assistantFinalStatus = "", ""
+	s.assistantExtraContent = nil
 	s.assistantText.Reset()
 }
 

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"io"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -167,4 +168,116 @@ func TestStreamChatCompletion_NativeLineAboveCapFailsStream(t *testing.T) {
 
 	_, err = io.ReadAll(body)
 	require.ErrorIs(t, err, bufio.ErrTooLong)
+}
+
+// streamDeltaKinds lists, per chunk delta, "role", "content:<text>" or
+// "images:<n>" in stream order.
+func streamDeltaKinds(t *testing.T, chunks []map[string]any) []string {
+	t.Helper()
+
+	var kinds []string
+	for _, chunk := range chunks {
+		choices, _ := chunk["choices"].([]any)
+		for _, entry := range choices {
+			choice, ok := entry.(map[string]any)
+			require.True(t, ok, "choice = %#v", entry)
+			delta, _ := choice["delta"].(map[string]any)
+			if _, ok := delta["role"]; ok {
+				kinds = append(kinds, "role")
+			}
+			if text, ok := delta["content"].(string); ok {
+				kinds = append(kinds, "content:"+text)
+			}
+			if list, ok := delta["images"].([]any); ok {
+				kinds = append(kinds, "images:"+strconv.Itoa(len(list)))
+			}
+		}
+	}
+	return kinds
+}
+
+func TestStreamChatCompletion_NativeKeepsPartOrderAroundImages(t *testing.T) {
+	tests := []struct {
+		name  string
+		parts string
+		want  []string
+	}{
+		{
+			name:  "text image text",
+			parts: `{"text":"A"},{"inlineData":{"mimeType":"image/png","data":"aW1n"}},{"text":"B"}`,
+			want:  []string{"role", "content:A", "images:1", "content:B"},
+		},
+		{
+			name:  "image first",
+			parts: `{"inlineData":{"mimeType":"image/png","data":"aW1n"}},{"inlineData":{"mimeType":"image/png","data":"dHdv"}},{"text":"B"}`,
+			want:  []string{"role", "images:2", "content:B"},
+		},
+		{
+			name:  "image only",
+			parts: `{"inlineData":{"mimeType":"image/png","data":"aW1n"}}`,
+			want:  []string{"role", "images:1"},
+		},
+		{
+			name:  "thought image stays with the text around it",
+			parts: `{"text":"A"},{"inlineData":{"mimeType":"image/png","data":"dGg="},"thought":true},{"text":"B"}`,
+			want:  []string{"role", "content:AB"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chunks := streamNativeChat(t, `data: {"candidates":[{"content":{"role":"model","parts":[`+tt.parts+`]},"finishReason":"STOP"}]}
+
+`)
+			kinds := streamDeltaKinds(t, chunks)
+			assert.Equal(t, tt.want, kinds, "chunks %#v", chunks)
+			assert.Equal(t, "stop", lastFinishReason(t, chunks))
+		})
+	}
+}
+
+func lastFinishReason(t *testing.T, chunks []map[string]any) string {
+	t.Helper()
+
+	reason := ""
+	for _, chunk := range chunks {
+		choices, _ := chunk["choices"].([]any)
+		for _, entry := range choices {
+			choice, ok := entry.(map[string]any)
+			require.True(t, ok, "choice = %#v", entry)
+			if value, ok := choice["finish_reason"].(string); ok && value != "" {
+				reason = value
+			}
+		}
+	}
+	return reason
+}
+
+// Splitting a candidate at an image must not let a generated tool call ID
+// take one Gemini supplies later in the same event.
+func TestStreamChatCompletion_NativeImageKeepsSuppliedToolCallIDs(t *testing.T) {
+	chunks := streamNativeChat(t, `data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"first","args":{}}},{"inlineData":{"mimeType":"image/png","data":"aW1n"}},{"functionCall":{"id":"call_0","name":"second","args":{}}}]},"finishReason":"STOP"}]}
+
+`)
+
+	ids := map[string]string{}
+	for _, chunk := range chunks {
+		choices, _ := chunk["choices"].([]any)
+		for _, entry := range choices {
+			choice, ok := entry.(map[string]any)
+			require.True(t, ok, "choice = %#v", entry)
+			delta, _ := choice["delta"].(map[string]any)
+			calls, _ := delta["tool_calls"].([]any)
+			for _, raw := range calls {
+				call, ok := raw.(map[string]any)
+				require.True(t, ok, "tool call = %#v", raw)
+				function, _ := call["function"].(map[string]any)
+				name, _ := function["name"].(string)
+				ids[name], _ = call["id"].(string)
+			}
+		}
+	}
+	assert.Equal(t, "call_0", ids["second"], "Gemini's own ID is kept")
+	assert.NotEqual(t, "call_0", ids["first"])
+	assert.NotEmpty(t, ids["first"])
+	assert.Len(t, streamImageDeltas(t, chunks), 1)
 }

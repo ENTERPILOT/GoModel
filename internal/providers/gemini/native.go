@@ -437,6 +437,17 @@ func (g *toolCallIDs) assign(id string, supplied map[string]struct{}) string {
 	}
 }
 
+// suppliedToolCallIDs returns the tool call IDs Gemini gives in parts.
+func suppliedToolCallIDs(parts []geminiPart) map[string]struct{} {
+	supplied := make(map[string]struct{})
+	for _, part := range parts {
+		if call := part.functionCall(); call != nil && call.ID != "" {
+			supplied[call.ID] = struct{}{}
+		}
+	}
+	return supplied
+}
+
 func isFunctionResponseContent(content geminiContent) bool {
 	if content.Role != "user" || len(content.Parts) == 0 {
 		return false
@@ -1148,7 +1159,7 @@ func nativeChatResponse(req *core.ChatRequest, geminiResp *geminiGenerateContent
 		if index == 0 && i > 0 {
 			index = i
 		}
-		content, toolCalls, signature := openAIMessageFromGeminiParts(candidate.Content.Parts, &toolCallIDs{})
+		content, toolCalls, signature := openAIMessageFromGeminiParts(candidate.Content.Parts, &toolCallIDs{}, suppliedToolCallIDs(candidate.Content.Parts))
 		// A tool-call-only turn carries content: null in OpenAI responses; an
 		// empty string would surface as an empty Responses message item that
 		// clients cannot echo back.
@@ -1195,26 +1206,34 @@ func withGeneratedImages(fields core.UnknownJSONFields, parts []geminiPart) (cor
 func generatedImages(parts []geminiPart) []core.ContentPart {
 	var images []core.ContentPart
 	for _, part := range parts {
-		blob := part.inlineData()
-		if blob == nil || blob.Data == "" || part.Thought {
-			continue
+		if image, ok := generatedImage(part); ok {
+			images = append(images, image)
 		}
-		mimeType := blob.MimeType
-		if mimeType == "" {
-			mimeType = blob.MimeTypeAlt
-		}
-		if !strings.HasPrefix(mimeType, "image/") {
-			continue
-		}
-		images = append(images, core.ContentPart{
-			Type: "image_url",
-			ImageURL: &core.ImageURLContent{
-				URL:         "data:" + mimeType + ";base64," + blob.Data,
-				ExtraFields: thoughtSignatureExtraFields(part.ThoughtSignature),
-			},
-		})
 	}
 	return images
+}
+
+// generatedImage returns the image_url part for a generated image: an inline
+// image blob that is not a thought.
+func generatedImage(part geminiPart) (core.ContentPart, bool) {
+	blob := part.inlineData()
+	if blob == nil || blob.Data == "" || part.Thought {
+		return core.ContentPart{}, false
+	}
+	mimeType := blob.MimeType
+	if mimeType == "" {
+		mimeType = blob.MimeTypeAlt
+	}
+	if !strings.HasPrefix(mimeType, "image/") {
+		return core.ContentPart{}, false
+	}
+	return core.ContentPart{
+		Type: "image_url",
+		ImageURL: &core.ImageURLContent{
+			URL:         "data:" + mimeType + ";base64," + blob.Data,
+			ExtraFields: thoughtSignatureExtraFields(part.ThoughtSignature),
+		},
+	}, true
 }
 
 func geminiBlockedPromptError(resp *geminiGenerateContentResponse, providerName string) *core.GatewayError {
@@ -1252,17 +1271,12 @@ func geminiPromptBlockReason(raw json.RawMessage) string {
 // tool calls. A functionCall part's thought signature rides on its tool call;
 // the signature of a text turn (Gemini puts it on the last part) is returned
 // separately for the message. ids keeps tool call IDs unique across calls, so a
-// stream shares one per choice.
-func openAIMessageFromGeminiParts(parts []geminiPart, ids *toolCallIDs) (string, []core.ToolCall, string) {
+// stream shares one per choice; supplied holds the IDs Gemini gives in the
+// same response, which generated IDs avoid.
+func openAIMessageFromGeminiParts(parts []geminiPart, ids *toolCallIDs, supplied map[string]struct{}) (string, []core.ToolCall, string) {
 	var text strings.Builder
 	var signature string
 	toolCalls := make([]core.ToolCall, 0)
-	supplied := make(map[string]struct{})
-	for _, part := range parts {
-		if call := part.functionCall(); call != nil && call.ID != "" {
-			supplied[call.ID] = struct{}{}
-		}
-	}
 	for _, part := range parts {
 		if part.Text != "" && !part.Thought {
 			text.WriteString(part.Text)

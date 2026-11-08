@@ -117,11 +117,10 @@ func AssembleChatResponse(events []Event) (*core.ChatResponse, error) {
 			if extra := bytes.TrimSpace(delta.ExtraContent); len(extra) > 0 && !core.IsJSONNull(extra) {
 				state.extraContent = extra
 			}
-			// A malformed images member is skipped, not the whole chunk.
-			var images []json.RawMessage
-			if json.Unmarshal(delta.Images, &images) == nil {
-				state.images = append(state.images, images...)
-			}
+			// A malformed images member is skipped, not the whole chunk, and a
+			// malformed entry is skipped, not the whole member.
+			images, _ := core.ChatImageEntries(delta.Images)
+			state.images = append(state.images, images...)
 			for pos, call := range delta.ToolCalls {
 				index := pos
 				if call.Index != nil {

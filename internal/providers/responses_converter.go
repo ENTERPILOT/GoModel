@@ -29,9 +29,10 @@ type OpenAIResponsesStreamConverter struct {
 	toolCalls            map[int]*ResponsesOutputToolCallState
 	assistantOutputIndex int
 	nextOutputIndex      int
-	imageClosedAssistant bool // an image closed the message item; later text opens a new one
+	imageAfterMessage    bool // an image followed the message item; later text opens a new one
 	buffer               streaming.StreamBuffer
 	lineBuffer           streaming.StreamBuffer
+	lineScanned          int // leading unread bytes of lineBuffer known to hold no newline
 	readBuf              []byte
 	closed               bool
 	sentCreate           bool
@@ -194,10 +195,7 @@ func (sc *OpenAIResponsesStreamConverter) finishPendingToolCalls(status string) 
 func (sc *OpenAIResponsesStreamConverter) handleToolCallDeltas(toolCalls []openAIChunkToolCall) string {
 	var out bytes.Buffer
 
-	out.WriteString(sc.output.CompleteReasoningOutput(reasoningOutputIndex))
-	if sc.output.AssistantStarted() && !sc.output.AssistantDone() {
-		out.WriteString(sc.output.CompleteAssistantOutput(sc.assistantOutputIndex))
-	}
+	out.WriteString(sc.closeReasoningAndMessage())
 
 	for _, toolCall := range toolCalls {
 		if toolCall.Index == nil {
@@ -284,7 +282,11 @@ func (sc *OpenAIResponsesStreamConverter) processChunk(data []byte) {
 
 	// Recorded before the text and tool calls of the same delta: a tool call
 	// closes the message item on the spot, and its output_item.done must
-	// already carry the state.
+	// already carry the state. Text after an image opens its new item first,
+	// so the state lands on the item it arrived with.
+	if choice.Delta.Content != "" {
+		sc.openMessageAfterImage()
+	}
 	sc.setMessageExtraContent(choice.Delta.ExtraContent)
 	// "reasoning_content" wins over the vendor "reasoning" member (Groq,
 	// OpenRouter), the same precedence the streaming codec applies.
@@ -345,6 +347,10 @@ func (sc *OpenAIResponsesStreamConverter) processChunkTolerant(data []byte) {
 		return
 	}
 	if delta, ok := choice["delta"].(map[string]any); ok {
+		content, _ := delta["content"].(string)
+		if content != "" {
+			sc.openMessageAfterImage()
+		}
 		if extra, ok := delta["extra_content"]; ok && extra != nil {
 			if raw, err := json.Marshal(extra); err == nil {
 				sc.setMessageExtraContent(raw)
@@ -357,7 +363,7 @@ func (sc *OpenAIResponsesStreamConverter) processChunkTolerant(data []byte) {
 		if reasoning != "" {
 			sc.appendReasoningDelta(reasoning)
 		}
-		if content, ok := delta["content"].(string); ok && content != "" {
+		if content != "" {
 			sc.appendTextDelta(content)
 		}
 		if images, ok := delta[core.ChatImagesField].([]any); ok && len(images) > 0 {
@@ -433,36 +439,47 @@ func (sc *OpenAIResponsesStreamConverter) appendReasoningDelta(content string) {
 // appendTextDelta records assistant text and emits its output_text.delta event.
 func (sc *OpenAIResponsesStreamConverter) appendTextDelta(content string) {
 	sc.buffer.AppendString(sc.output.CompleteReasoningOutput(reasoningOutputIndex))
-	if sc.imageClosedAssistant {
-		// Text after an image goes in a new message item after the image.
-		sc.imageClosedAssistant = false
-		sc.output.StartNextAssistantMessage(sc.assistantOutputIndex)
-	}
 	sc.reserveAssistantOutput()
 	sc.buffer.AppendString(sc.output.AppendAssistantDelta(sc.assistantOutputIndex, content))
 }
 
+// openMessageAfterImage sets aside the message item an image followed, so the
+// text that follows goes in a new message item after the image. Text after a
+// tool call alone keeps its existing handling.
+func (sc *OpenAIResponsesStreamConverter) openMessageAfterImage() {
+	if sc.imageAfterMessage && !sc.sentDone {
+		sc.imageAfterMessage = false
+		sc.output.StartNextAssistantMessage(sc.assistantOutputIndex)
+	}
+}
+
+// closeReasoningAndMessage finishes the reasoning and message items before a
+// new item opens, so item lifecycles never overlap.
+func (sc *OpenAIResponsesStreamConverter) closeReasoningAndMessage() string {
+	out := sc.output.CompleteReasoningOutput(reasoningOutputIndex)
+	if sc.output.AssistantStarted() && !sc.output.AssistantDone() {
+		out += sc.output.CompleteAssistantOutput(sc.assistantOutputIndex)
+	}
+	return out
+}
+
 // appendImages emits the generated images of a delta (the OpenRouter-style
 // "images" member) as image_generation_call items, the shape non-streaming
-// Responses use. Images without a base64 data URL are skipped, and a
-// malformed member is ignored rather than failing the stream.
+// Responses use. Images without a base64 data URL and malformed entries are
+// skipped, and a malformed member is ignored rather than failing the stream.
 func (sc *OpenAIResponsesStreamConverter) appendImages(raw json.RawMessage) {
 	if len(raw) == 0 {
 		return
 	}
-	var images []core.ContentPart
-	if err := json.Unmarshal(raw, &images); err != nil {
-		return
-	}
+	_, images := core.ChatImageEntries(raw)
 	for _, image := range images {
 		fields, ok := imageGenerationCallFields(image)
 		if !ok {
 			continue
 		}
-		sc.buffer.AppendString(sc.output.CompleteReasoningOutput(reasoningOutputIndex))
-		if sc.output.AssistantStarted() && !sc.output.AssistantDone() {
-			sc.buffer.AppendString(sc.output.CompleteAssistantOutput(sc.assistantOutputIndex))
-			sc.imageClosedAssistant = true
+		sc.buffer.AppendString(sc.closeReasoningAndMessage())
+		if sc.output.AssistantStarted() {
+			sc.imageAfterMessage = true
 		}
 		index := sc.nextOutputIndex
 		sc.nextOutputIndex++
@@ -636,65 +653,75 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 		return sc.buffer.Read(p), nil
 	}
 
-	// Read from the underlying stream
-	nr, readErr := sc.reader.Read(sc.readBuf)
-	if nr > 0 {
-		sc.lineBuffer.AppendBytes(sc.readBuf[:nr])
+	// Read from the underlying stream until there is output. A large line
+	// (a multi-MB image) spans many reads; returning an empty read for each
+	// would make readers such as bufio fail with io.ErrNoProgress.
+	for {
+		nr, readErr := sc.reader.Read(sc.readBuf)
+		if nr > 0 {
+			sc.lineBuffer.AppendBytes(sc.readBuf[:nr])
 
-		// Process complete lines
-		for {
-			unread := sc.lineBuffer.Unread()
-			idx := bytes.IndexByte(unread, '\n')
-			if idx == -1 {
-				break
-			}
+			// Process complete lines. A partial line is not rescanned on every
+			// read: a multi-MB image line arrives in many small reads, and
+			// searching it from the start each time is quadratic.
+			for {
+				unread := sc.lineBuffer.Unread()
+				idx := bytes.IndexByte(unread[sc.lineScanned:], '\n')
+				if idx == -1 {
+					sc.lineScanned = len(unread)
+					break
+				}
+				idx += sc.lineScanned
+				sc.lineScanned = 0
 
-			line := unread[:idx]
-			sc.lineBuffer.Consume(idx + 1)
+				line := unread[:idx]
+				sc.lineBuffer.Consume(idx + 1)
 
-			line = bytes.TrimSpace(line)
-			if len(line) == 0 {
-				continue
-			}
-
-			if data, ok := bytes.CutPrefix(line, []byte("data: ")); ok {
-				if bytes.Equal(data, []byte("[DONE]")) {
-					sc.sawFinish = true
-					sc.appendTerminalEvents()
+				line = bytes.TrimSpace(line)
+				if len(line) == 0 {
 					continue
 				}
-				sc.processChunk(data)
+
+				if data, ok := bytes.CutPrefix(line, []byte("data: ")); ok {
+					if bytes.Equal(data, []byte("[DONE]")) {
+						sc.sawFinish = true
+						sc.appendTerminalEvents()
+						continue
+					}
+					sc.processChunk(data)
+				}
 			}
 		}
-	}
 
-	if readErr != nil {
-		// Any upstream read failure — clean EOF, io.ErrUnexpectedEOF from a
-		// chunked body cut mid-transfer, a connection reset — ends the
-		// upstream stream, so emit the terminal events (response.incomplete
-		// unless completion was signalled) before surfacing a non-EOF error.
-		sc.appendTerminalEvents()
+		if readErr != nil {
+			// Any upstream read failure — clean EOF, io.ErrUnexpectedEOF from a
+			// chunked body cut mid-transfer, a connection reset — ends the
+			// upstream stream, so emit the terminal events (response.incomplete
+			// unless completion was signalled) before surfacing a non-EOF error.
+			sc.appendTerminalEvents()
+
+			if sc.buffer.Len() > 0 {
+				sc.pendingErr = readErr
+				return sc.buffer.Read(p), nil
+			}
+
+			sc.closed = true
+			sc.releaseBuffers()
+			_ = sc.reader.Close()
+			if readErr == io.EOF {
+				return 0, io.EOF
+			}
+			return 0, readErr
+		}
 
 		if sc.buffer.Len() > 0 {
-			sc.pendingErr = readErr
 			return sc.buffer.Read(p), nil
 		}
-
-		sc.closed = true
-		sc.releaseBuffers()
-		_ = sc.reader.Close()
-		if readErr == io.EOF {
-			return 0, io.EOF
+		if nr == 0 {
+			// The upstream read returned nothing; let the caller retry.
+			return 0, nil
 		}
-		return 0, readErr
 	}
-
-	if sc.buffer.Len() > 0 {
-		return sc.buffer.Read(p), nil
-	}
-
-	// No data yet, try again
-	return 0, nil
 }
 
 func (sc *OpenAIResponsesStreamConverter) Close() error {
