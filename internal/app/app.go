@@ -156,10 +156,9 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 
 	// Outbound trust must be in place before any provider builds a transport,
 	// and a missing CA file is a startup error rather than a silent fallback.
-	// On a reload the generation that keeps serving must not inherit settings
-	// its replacement was rejected with, so the previous configuration is put
-	// back whenever construction fails after this point. The idle pool size
-	// newBootstrap installs is restored the same way.
+	// On a reload the generation that keeps serving must not inherit the
+	// outbound TLS or idle pool size its replacement was rejected with, so
+	// both are put back whenever construction fails after this point.
 	previousTLS := httpclient.SnapshotTLS()
 	previousMaxIdleConnsPerHost := httpclient.ConfiguredMaxIdleConnsPerHost()
 	if err := ApplyOutboundTLS(cfg.AppConfig.Config.HTTP.TLS); err != nil {
