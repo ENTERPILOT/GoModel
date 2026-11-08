@@ -1179,6 +1179,20 @@ func nativeChatResponse(req *core.ChatRequest, geminiResp *geminiGenerateContent
 // string. Each image_url part carries a base64 data URL and the image's thought
 // signature, which Gemini needs back to edit the image in a later turn.
 func withGeneratedImages(fields core.UnknownJSONFields, parts []geminiPart) (core.UnknownJSONFields, error) {
+	images := generatedImages(parts)
+	if len(images) == 0 {
+		return fields, nil
+	}
+	encoded, err := json.Marshal(images)
+	if err != nil {
+		return fields, core.NewProviderError("gemini", http.StatusBadGateway, "failed to encode generated images", err)
+	}
+	return core.MergeUnknownJSONFields(fields, map[string]json.RawMessage{core.ChatImagesField: encoded})
+}
+
+// generatedImages returns the image_url parts for a candidate's generated
+// images (inline image blobs that are not thoughts).
+func generatedImages(parts []geminiPart) []core.ContentPart {
 	var images []core.ContentPart
 	for _, part := range parts {
 		blob := part.inlineData()
@@ -1200,14 +1214,7 @@ func withGeneratedImages(fields core.UnknownJSONFields, parts []geminiPart) (cor
 			},
 		})
 	}
-	if len(images) == 0 {
-		return fields, nil
-	}
-	encoded, err := json.Marshal(images)
-	if err != nil {
-		return fields, core.NewProviderError("gemini", http.StatusBadGateway, "failed to encode generated images", err)
-	}
-	return core.MergeUnknownJSONFields(fields, map[string]json.RawMessage{core.ChatImagesField: encoded})
+	return images
 }
 
 func geminiBlockedPromptError(resp *geminiGenerateContentResponse, providerName string) *core.GatewayError {

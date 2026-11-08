@@ -110,8 +110,9 @@ item. The base64 image is in `result` and the format in `output_format`, as in
 OpenAI's output. To edit the image in a later turn, send the assistant message
 (with `images`) or the `image_generation_call` item back unchanged, so Gemini
 gets each image's thought signature. `/v1/messages` (Anthropic Messages API)
-clients get only the text. Streaming responses don't include generated images
-yet.
+clients get only the text. When streaming, each image arrives whole: in a
+chunk's `delta.images` on Chat Completions, and as a finished
+`image_generation_call` item on Responses.
 
 Each image is several megabytes of base64. Audit logs capture at most 1 MB of
 a response body, so a logged body is truncated and marked as such. The response

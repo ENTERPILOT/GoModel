@@ -132,20 +132,22 @@ func (s *geminiStreamState) consumeEvent(out io.Writer, raw string) error {
 	}
 
 	for i, candidate := range event.Candidates {
-		choice, ok := s.chatChunkChoice(candidate, i)
-		if !ok {
-			continue
+		if choice, ok := s.chatChunkChoice(candidate, i); ok {
+			if err := s.writeChoiceChunk(out, choice); err != nil {
+				return err
+			}
 		}
-		chunk := map[string]any{
-			"id":       s.responseID,
-			"object":   "chat.completion.chunk",
-			"created":  s.created,
-			"model":    s.model,
-			"provider": s.providerName,
-			"choices":  []map[string]any{choice},
-		}
-		if err := writeOpenAIStreamChunk(out, chunk); err != nil {
-			return err
+		// Generated images go in a chunk of their own, so stream tools that
+		// split or rewrite text and tool-call deltas pass them through as is.
+		if images := generatedImages(candidate.Content.Parts); len(images) > 0 {
+			choice := map[string]any{
+				"index":         streamChoiceIndex(candidate, i),
+				"delta":         map[string]any{core.ChatImagesField: images},
+				"finish_reason": nil,
+			}
+			if err := s.writeChoiceChunk(out, choice); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -153,6 +155,17 @@ func (s *geminiStreamState) consumeEvent(out io.Writer, raw string) error {
 		s.latestUsage = geminiUsageMap(event.UsageMetadata)
 	}
 	return nil
+}
+
+func (s *geminiStreamState) writeChoiceChunk(out io.Writer, choice map[string]any) error {
+	return writeOpenAIStreamChunk(out, map[string]any{
+		"id":       s.responseID,
+		"object":   "chat.completion.chunk",
+		"created":  s.created,
+		"model":    s.model,
+		"provider": s.providerName,
+		"choices":  []map[string]any{choice},
+	})
 }
 
 // writeFinishReasons emits one final chunk per choice. Gemini may report a

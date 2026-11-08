@@ -122,8 +122,9 @@ In der Responses API ist jedes Bild ein eigenes Output-Item
 bearbeiten, senden Sie die Assistant-Nachricht (mit `images`) oder das Item
 `image_generation_call` unverändert zurück, damit Gemini die Thought Signature
 jedes Bildes erhält. Clients von `/v1/messages` (Anthropic Messages API)
-erhalten nur den Text. Gestreamte Responses enthalten generierte Bilder noch
-nicht.
+erhalten nur den Text. Beim Streaming kommt jedes Bild vollständig an: in
+Chat Completions im `delta.images` eines Chunks, in der Responses API als
+fertiges Item `image_generation_call`.
 
 Jedes Bild umfasst mehrere Megabyte Base64. Audit-Logs erfassen höchstens 1 MB
 eines Response-Bodys, sodass ein protokollierter Body gekürzt und entsprechend

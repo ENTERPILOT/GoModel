@@ -198,19 +198,9 @@ func imageGenerationCallItems(fields core.UnknownJSONFields) []core.ResponsesOut
 	}
 	items := make([]core.ResponsesOutputItem, 0, len(images))
 	for _, image := range images {
-		if image.ImageURL == nil {
+		extra, ok := imageGenerationCallFields(image)
+		if !ok {
 			continue
-		}
-		dataURL, isDataURL := strings.CutPrefix(image.ImageURL.URL, "data:")
-		mediaType, data, ok := strings.Cut(dataURL, ";base64,")
-		if !isDataURL || !ok || data == "" {
-			continue
-		}
-		result, _ := json.Marshal(data)
-		format, _ := json.Marshal(strings.TrimPrefix(mediaType, "image/"))
-		extra := map[string]json.RawMessage{"result": result, "output_format": format}
-		if raw := image.ImageURL.ExtraFields.Lookup(core.ExtraContentField); len(raw) > 0 {
-			extra[core.ExtraContentField] = raw
 		}
 		items = append(items, core.ResponsesOutputItem{
 			ID:          "ig_" + uuid.New().String(),
@@ -220,6 +210,27 @@ func imageGenerationCallItems(fields core.UnknownJSONFields) []core.ResponsesOut
 		})
 	}
 	return items
+}
+
+// imageGenerationCallFields returns the result, output_format and
+// extra_content members of the image_generation_call item for one generated
+// image. Only base64 data URLs carry an image the item can hold.
+func imageGenerationCallFields(image core.ContentPart) (map[string]json.RawMessage, bool) {
+	if image.ImageURL == nil {
+		return nil, false
+	}
+	dataURL, isDataURL := strings.CutPrefix(image.ImageURL.URL, "data:")
+	mediaType, data, ok := strings.Cut(dataURL, ";base64,")
+	if !isDataURL || !ok || data == "" {
+		return nil, false
+	}
+	result, _ := json.Marshal(data)
+	format, _ := json.Marshal(strings.TrimPrefix(mediaType, "image/"))
+	fields := map[string]json.RawMessage{"result": result, "output_format": format}
+	if raw := image.ImageURL.ExtraFields.Lookup(core.ExtraContentField); len(raw) > 0 {
+		fields[core.ExtraContentField] = raw
+	}
+	return fields, true
 }
 
 // toolCallExtraContent isolates the extra_content member of a chat tool call

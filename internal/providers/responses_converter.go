@@ -71,6 +71,7 @@ type openAIStreamChunk struct {
 			Reasoning        string                `json:"reasoning"`
 			ToolCalls        []openAIChunkToolCall `json:"tool_calls"`
 			ExtraContent     json.RawMessage       `json:"extra_content"`
+			Images           json.RawMessage       `json:"images"`
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -120,7 +121,7 @@ func (sc *OpenAIResponsesStreamConverter) reserveReasoningOutput() {
 }
 
 func (sc *OpenAIResponsesStreamConverter) outputAlreadyStarted() bool {
-	if sc.output.AssistantStarted() {
+	if sc.output.AssistantStarted() || sc.output.ImagesStarted() {
 		return true
 	}
 	for _, state := range sc.toolCalls {
@@ -292,6 +293,7 @@ func (sc *OpenAIResponsesStreamConverter) processChunk(data []byte) {
 	if choice.Delta.Content != "" {
 		sc.appendTextDelta(choice.Delta.Content)
 	}
+	sc.appendImages(choice.Delta.Images)
 	if len(choice.Delta.ToolCalls) > 0 {
 		sc.buffer.AppendString(sc.handleToolCallDeltas(choice.Delta.ToolCalls))
 	}
@@ -356,6 +358,11 @@ func (sc *OpenAIResponsesStreamConverter) processChunkTolerant(data []byte) {
 		}
 		if content, ok := delta["content"].(string); ok && content != "" {
 			sc.appendTextDelta(content)
+		}
+		if images, ok := delta[core.ChatImagesField].([]any); ok && len(images) > 0 {
+			if raw, err := json.Marshal(images); err == nil {
+				sc.appendImages(raw)
+			}
 		}
 		if toolCalls, ok := delta["tool_calls"].([]any); ok && len(toolCalls) > 0 {
 			sc.buffer.AppendString(sc.handleToolCallDeltas(chunkToolCallsFromAny(toolCalls)))
@@ -427,6 +434,30 @@ func (sc *OpenAIResponsesStreamConverter) appendTextDelta(content string) {
 	sc.buffer.AppendString(sc.output.CompleteReasoningOutput(reasoningOutputIndex))
 	sc.reserveAssistantOutput()
 	sc.buffer.AppendString(sc.output.AppendAssistantDelta(sc.assistantOutputIndex, content))
+}
+
+// appendImages emits the generated images of a delta (the OpenRouter-style
+// "images" member) as image_generation_call items, the shape non-streaming
+// Responses use. Images without a base64 data URL are skipped, and a
+// malformed member is ignored rather than failing the stream.
+func (sc *OpenAIResponsesStreamConverter) appendImages(raw json.RawMessage) {
+	if len(raw) == 0 {
+		return
+	}
+	var images []core.ContentPart
+	if err := json.Unmarshal(raw, &images); err != nil {
+		return
+	}
+	for _, image := range images {
+		fields, ok := imageGenerationCallFields(image)
+		if !ok {
+			continue
+		}
+		sc.buffer.AppendString(sc.output.CompleteReasoningOutput(reasoningOutputIndex))
+		index := sc.nextOutputIndex
+		sc.nextOutputIndex++
+		sc.buffer.AppendString(sc.output.AppendImageGenerationCall(index, fields))
+	}
 }
 
 // recordFinishReason marks the upstream turn finished and keeps the first
