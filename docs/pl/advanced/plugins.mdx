@@ -349,7 +349,8 @@ Co gateway z nimi robi:
   wykonuje. Każda próba wysyła je do upstreamu wybranego dla tej próby: failover może
   rozwiązać się na innego providera i inny base URL, a nagłówki idą za nim. Każde
   wywołanie, które przechodzi przez klienta HTTP gatewaya — Bedrock, który wywołuje
-  SDK AWS bezpośrednio, ich nie przenosi.
+  SDK AWS bezpośrednio, ich nie przenosi. Trafienie w cache odpowiedzi nie wykonuje
+  wywołania providera, więc nagłówki upstream nie są wysyłane.
 - Inferencja, którą gateway wykonuje na własne potrzeby, ich nie przenosi. Sędzia
   LLM guardraila wywołuje providera przez pluginowe `Host` w kontekście requestu,
   a to wywołanie odrzuca te nagłówki: opisują providera klienta, a nie model, który
@@ -369,7 +370,8 @@ Co gateway z nimi robi:
   przenoszony przez request oraz ten, który provider ustawił sam. Chronione są tylko
   nazwy wymienione powyżej; pozostałe nagłówki providera nie. Nazwa lub wartość,
   która nie jest poprawnym HTTP, na przykład zawierająca znak nowej linii, jest
-  odrzucana z ostrzeżeniem, które podaje nazwę nagłówka, nigdy jego wartość.
+  odrzucana z ostrzeżeniem; log nigdy nie zawiera wartości ani nazwy, jeśli to
+  ona jest niepoprawna.
 - Host scala nagłówki hooka ze stanem requestu, gdy faza się kończy, więc wartość
   zapisana po wykonaniu wywołania providera — z hooka fazy response — już na nie nie
   wpływa.

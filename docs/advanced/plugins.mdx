@@ -349,7 +349,8 @@ What the gateway does with them:
   attempt: a failover can resolve to a different provider and a different base
   URL, and the headers follow it. Every call that goes through the gateway's
   HTTP client, that is; Bedrock, which calls the AWS SDK directly, does not carry
-  them.
+  them. A response-cache hit makes no provider call, so no upstream headers are
+  sent.
 - Inference the gateway issues for its own work does not. A guardrail's LLM
   judge calls the provider through the plugin `Host` on the request context, and
   that call drops these headers: they describe the client's provider, not the
@@ -369,7 +370,8 @@ What the gateway does with them:
   the request carried and one the provider set for itself. Only the names above
   are protected; the rest of the provider's headers are not. A name or value
   that is not valid HTTP, such as one with a line break, is dropped with a
-  warning that names the header, never its value.
+  warning; the log never includes the value, or the name when the name is the
+  invalid part.
 - The host folds a hook's headers into the request state when that phase
   finishes, so a value written after the provider call has run — from a
   response-phase hook — no longer affects it.

@@ -337,7 +337,8 @@ Was das Gateway damit macht:
   Upstream: Ein Failover kann auf einen anderen Provider und eine andere Base-URL
   auflösen, und die Header folgen ihm. Jeder Aufruf, der über den HTTP-Client des
   Gateways läuft, wohlgemerkt; Bedrock, das das AWS SDK direkt aufruft, trägt sie
-  nicht.
+  nicht. Ein Treffer im Response-Cache stellt keinen Provider-Aufruf, also werden
+  keine Upstream-Header gesendet.
 - Inferenz, die das Gateway für eigene Zwecke stellt, trägt sie nicht. Der LLM-Judge
   einer Guardrail ruft den Provider über das Plugin-`Host` im Request-Kontext auf,
   und dieser Aufruf verwirft die Header: Sie beschreiben den Provider des Clients,
@@ -357,7 +358,8 @@ Was das Gateway damit macht:
   Header des Requests sowie einen, den der Provider selbst gesetzt hat. Nur die oben
   genannten Namen sind geschützt; die übrigen Header des Providers nicht. Ein Name
   oder Wert, der kein gültiges HTTP ist, etwa einer mit Zeilenumbruch, wird mit einer
-  Warnung verworfen, die den Header nennt, nie seinen Wert.
+  Warnung verworfen; das Log enthält nie den Wert und auch nicht den Namen, wenn
+  dieser ungültig ist.
 - Das Host faltet die Header eines Hooks in den Request-State, wenn diese Phase
   endet; ein Wert, der erst nach dem Provider-Aufruf geschrieben wird — aus einem Hook
   der Phase `response` —, wirkt nicht mehr.
