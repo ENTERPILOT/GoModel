@@ -39,6 +39,11 @@ func semanticCacheablePath(path string) bool {
 const (
 	cacheWriteWorkerCount = 8
 	cacheWriteQueueSize   = 256
+
+	// maxCapturedStreamBytes caps how much of one event stream is buffered for
+	// the cache, matching the 4 MiB limits of internal/streaming. A longer
+	// stream still reaches the client in full; it is just not cached.
+	maxCapturedStreamBytes = 4 * 1024 * 1024
 )
 
 type cacheWriteJob struct {
@@ -80,14 +85,14 @@ func newSimpleCacheMiddleware(store cache.Store, ttl time.Duration, hitRecorder 
 	return m
 }
 
-// TryHit checks the exact-match cache. Returns (true, nil) and replays the
-// cached response if found. Returns (false, nil) on a miss.
-func (m *simpleCacheMiddleware) TryHit(ex exchange, body []byte) (bool, error) {
+// TryHit checks the exact-match cache under key (from exactCacheKey). Returns
+// (true, nil) and replays the cached response if found. Returns (false, nil)
+// on a miss.
+func (m *simpleCacheMiddleware) TryHit(ex exchange, key string, body []byte) (bool, error) {
 	if m == nil || m.store == nil {
 		return false, nil
 	}
 	path := ex.Path()
-	key := m.exactCacheKey(ex, body)
 	cached, err := m.store.Get(ex.Context(), key)
 	if err != nil {
 		return false, nil
@@ -111,13 +116,12 @@ func (m *simpleCacheMiddleware) TryHit(ex exchange, body []byte) (bool, error) {
 	return false, nil
 }
 
-// StoreAfter calls next, captures the response, and asynchronously stores it on
-// a cacheable success response.
-func (m *simpleCacheMiddleware) StoreAfter(ex exchange, body []byte, next func() error) error {
+// StoreAfter calls next, captures the response, and asynchronously stores it
+// under key (from exactCacheKey) on a cacheable success response.
+func (m *simpleCacheMiddleware) StoreAfter(ex exchange, key string, body []byte, next func() error) error {
 	if m == nil || m.store == nil {
 		return next()
 	}
-	key := m.exactCacheKey(ex, body)
 
 	call, leader := m.joinMiss(key)
 	if leader {
@@ -153,7 +157,8 @@ func (m *simpleCacheMiddleware) StoreAfter(ex exchange, body []byte, next func()
 
 // exactCacheKey derives the exact-cache key for one exchange, scoping the entry
 // to the request's guardrail chain identity and, when partitioning is on, to its
-// effective user path. Lookups, writes and in-flight coalescing all use this key.
+// effective user path. Lookups, writes and in-flight coalescing all use this key;
+// it is costly for large bodies, so handle derives it once per request.
 func (m *simpleCacheMiddleware) exactCacheKey(ex exchange, body []byte) string {
 	ctx := ex.Context()
 	key := hashRequest(ex.Path(), body, core.GetWorkflow(ctx), core.GetGuardrailsHash(ctx))
@@ -318,13 +323,19 @@ type responseCapture struct {
 	http.ResponseWriter
 	body   *bytes.Buffer
 	status int
+	// overflowed is set once an event stream outgrows maxCapturedStreamBytes;
+	// capture stops and the response is not cached.
+	overflowed bool
 }
 
+// cachedBody returns the captured bytes without copying: the buffer is only
+// ever appended to, so the returned slice stays stable even when both cache
+// layers read the same capture.
 func (r *responseCapture) cachedBody(contentType string) ([]byte, bool) {
 	if r == nil || r.body == nil || r.body.Len() == 0 {
 		return nil, false
 	}
-	return cacheableResponseBody(bytes.Clone(r.body.Bytes()), contentType)
+	return cacheableResponseBody(r.body.Bytes(), contentType)
 }
 
 // cacheableResponseBody validates that raw is storable: well-formed SSE for
@@ -365,13 +376,23 @@ func shouldStoreCapturedResponse(status int) bool {
 }
 
 func captureResponseForCache(c *echo.Context, path, warnMessage string, next func() error) ([]byte, bool, error) {
-	capture := &responseCapture{
-		ResponseWriter: c.Response(),
-		body:           &bytes.Buffer{},
+	// On a full miss with both cache layers on, the exact layer runs inside the
+	// semantic layer's capture. Reuse that untouched outer capture instead of
+	// buffering a second copy of the same response.
+	capture, nested := c.Response().(*responseCapture)
+	if !nested || capture.status != 0 || capture.overflowed || capture.body.Len() > 0 {
+		capture = &responseCapture{
+			ResponseWriter: c.Response(),
+			body:           &bytes.Buffer{},
+		}
+		c.SetResponse(capture)
 	}
-	c.SetResponse(capture)
 	if err := next(); err != nil {
 		return nil, false, err
+	}
+	if capture.overflowed {
+		slog.Debug("response cache: stream exceeds capture limit, not caching", "path", path, "limit_bytes", maxCapturedStreamBytes)
+		return nil, false, nil
 	}
 	if !shouldStoreCapturedResponse(capture.effectiveStatusCode()) || capture.body.Len() == 0 {
 		return nil, false, nil
@@ -412,8 +433,13 @@ func (r *responseCapture) Write(b []byte) (int, error) {
 		}
 	}
 	n, err := r.ResponseWriter.Write(b)
-	if n > 0 {
-		r.body.Write(b[:n])
+	if n > 0 && !r.overflowed {
+		if r.body.Len()+n > maxCapturedStreamBytes && isEventStreamContentType(r.Header().Get("Content-Type")) {
+			r.overflowed = true
+			*r.body = bytes.Buffer{} // release the partial capture
+		} else {
+			r.body.Write(b[:n])
+		}
 	}
 	return n, err
 }
