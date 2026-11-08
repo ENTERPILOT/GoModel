@@ -93,6 +93,12 @@ func (o *onDemandRefresher) record(providerSelector string, result onDemandRefre
 	if o.last == nil {
 		o.last = make(map[string]onDemandRefreshResult)
 	}
+	// Drop expired results so selectors of removed providers do not linger.
+	for selector, prev := range o.last {
+		if result.at.Sub(prev.at) >= onDemandRefreshCooldown {
+			delete(o.last, selector)
+		}
+	}
 	o.last[providerSelector] = result
 }
 

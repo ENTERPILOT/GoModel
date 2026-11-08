@@ -187,3 +187,15 @@ func TestRouterOnDemandRefresh_NilContext(t *testing.T) {
 		assert.Equal(t, 1, count)
 	})
 }
+
+func TestOnDemandRefresher_RecordPrunesExpiredResults(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var o onDemandRefresher
+		o.record("removed", onDemandRefreshResult{at: time.Now()})
+		time.Sleep(onDemandRefreshCooldown)
+		o.record("ollama", onDemandRefreshResult{at: time.Now()})
+
+		assert.NotContains(t, o.last, "removed")
+		assert.Contains(t, o.last, "ollama")
+	})
+}
