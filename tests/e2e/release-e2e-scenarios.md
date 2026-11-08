@@ -7236,7 +7236,9 @@ curl -fsS -o "$AUDIO_FILE" "$AUTH_BASE_URL/v1/audio/speech" "${AUTH_ARGS[@]}" -H
 RID="qa-mk-path-audio-$QA_SUFFIX"
 curl -fsS "$AUTH_BASE_URL/v1/audio/transcriptions" "${AUTH_ARGS[@]}" -H "X-Request-ID: $RID" \
   -F model=gpt-4o-mini-transcribe -F "file=@$AUDIO_FILE" > "$QA_RUN_DIR/s244.transcription.json"
-jq -e '.text | ascii_downcase | contains("user path")' "$QA_RUN_DIR/s244.transcription.json" >/dev/null
+# The usage row below is what this checks; the words themselves depend on the
+# speech model ("user path" has come back as "user pass").
+jq -e '.text | type == "string" and length > 0' "$QA_RUN_DIR/s244.transcription.json" >/dev/null
 wait_log_entry "$AUTH_BASE_URL" usage "$RID" "$USAGE_FILE" -H "$ADMIN_AUTH_HEADER"
 jq -e --arg rid "$RID" --arg p "$USER_PATH" 'any(.entries[]; .request_id == $rid and .user_path == $p)' "$USAGE_FILE" >/dev/null
 ```

@@ -2,10 +2,12 @@ package streaming
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -330,4 +332,46 @@ func TestObservedSSEStreamDecodesOnlyWantedEventsForFilteredObservers(t *testing
 	require.Equal(t, 1, got)
 	_, ok := selective.lastPayload["usage"]
 	require.True(t, ok, "delivered event = %#v, want the usage payload", selective.lastPayload)
+}
+
+func TestObservedSSEStream_ReassemblesLargeEventSplitAcrossSmallReads(t *testing.T) {
+	payload := `{"type":"response.completed","response":{"output_text":"` + strings.Repeat("0123456789", 20*1024) + `"}}`
+	body := []byte("data: " + payload + "\r\n\r\ndata: {\"id\":\"after\"}\n\n")
+
+	for _, readSize := range []int{1, 7, 4096} {
+		t.Run(fmt.Sprintf("read=%d", readSize), func(t *testing.T) {
+			var raws []string
+			observer := &filteringObserver{wants: func(raw []byte) bool {
+				raws = append(raws, string(raw))
+				return true
+			}}
+			s := &ObservedSSEStream{observers: []Observer{observer}, filters: []EventFilter{observer}}
+			for start := 0; start < len(body); start += readSize {
+				s.processChunk(body[start:min(start+readSize, len(body))])
+			}
+
+			require.Len(t, raws, 2)
+			assert.Equal(t, payload, raws[0])
+			assert.Equal(t, `{"id":"after"}`, raws[1])
+			assert.Equal(t, 2, observer.eventCount)
+			assert.Equal(t, "after", observer.lastID)
+			assert.Empty(t, s.pending)
+			assert.LessOrEqual(t, cap(s.pending), maxPendingEventBytes)
+		})
+	}
+}
+
+func TestObservedSSEStream_ReusesPendingBufferAcrossSplitEvents(t *testing.T) {
+	observer := &trackingObserver{}
+	s := &ObservedSSEStream{observers: []Observer{observer}}
+
+	s.processChunk([]byte(`data: {"id":"one",`))
+	s.processChunk([]byte(`"n":1}` + "\n\n" + `data: {"id":"two",`))
+	buffer := &s.pending[:1][0]
+	s.processChunk([]byte(`"n":2}` + "\n\n"))
+
+	require.Equal(t, 2, observer.eventCount)
+	assert.Equal(t, "two", observer.lastID)
+	require.Empty(t, s.pending)
+	assert.Same(t, buffer, &s.pending[:1][0])
 }

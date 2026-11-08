@@ -219,6 +219,40 @@ func TestCacheFile(t *testing.T) {
 		require.Equal(t, "openrouter", missing.Model.OwnedBy)
 	})
 
+	t.Run("LoadFromCacheAppliesPerProviderModelsModeOverride", func(t *testing.T) {
+		cacheFile := filepath.Join(t.TempDir(), "models.json")
+		modelCache := modelcache.ModelCache{
+			UpdatedAt: time.Now().UTC(),
+			Providers: map[string]modelcache.CachedProvider{
+				"openrouter": {
+					ProviderType: "openrouter",
+					OwnedBy:      "openrouter",
+					Models: []modelcache.CachedModel{
+						{ID: "configured-model", Created: 123},
+						{ID: "cached-extra", Created: 456},
+					},
+				},
+			},
+		}
+		data, err := json.Marshal(modelCache)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(cacheFile, data, 0o644))
+
+		registry := NewModelRegistry()
+		registry.SetCache(modelcache.NewLocalCache(cacheFile))
+		registry.SetConfiguredProviderModelsMode(config.ConfiguredProviderModelsModeFallback)
+		registry.SetProviderConfiguredModels("openrouter", []string{"configured-model"})
+		registry.SetProviderModelsMode("openrouter", config.ConfiguredProviderModelsModeAllowlist)
+		registry.RegisterProviderWithNameAndType(&registryMockProvider{name: "openrouter"}, "openrouter", "openrouter")
+
+		loaded, err := registry.LoadFromCache(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, 1, loaded)
+		require.True(t, registry.Supports("configured-model"))
+		// Under the global fallback mode the cached extra would be served.
+		require.False(t, registry.Supports("cached-extra"))
+	})
+
 	t.Run("LoadFromCacheConfiguredModelsFallbackUsesConfiguredWhenCachedProviderMissing", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		cacheFile := filepath.Join(tmpDir, "models.json")

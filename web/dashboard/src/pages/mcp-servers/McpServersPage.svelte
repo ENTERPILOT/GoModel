@@ -12,6 +12,7 @@
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import McpCatalogModal from "./McpCatalogModal.svelte";
   import McpConnectPanel from "./McpConnectPanel.svelte";
+  import McpOAuthDialog from "./McpOAuthDialog.svelte";
   import McpServerEditor from "./McpServerEditor.svelte";
   import McpServerList from "./McpServerList.svelte";
   import McpVirtualServerEditor from "./McpVirtualServerEditor.svelte";
@@ -28,6 +29,7 @@
   $effect(() => {
     void auth.refreshTick;
     if (router.page !== PAGE) return;
+    mcpServers.showOAuthOutcome();
     mcpServers.fetchServers();
     return () => mcpServers.stopPolling();
   });
@@ -85,6 +87,7 @@
 
   <McpServerEditor />
   <McpCatalogModal />
+  <McpOAuthDialog />
 
   {#if mcpServers.filtered.length > 0 && mcpServers.available && !auth.authError}
     <McpServerList />

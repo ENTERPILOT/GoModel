@@ -554,7 +554,10 @@ export function liveLogsMethods() {
                 const previous = currentEntries[index] || {};
                 const merged = this.mergeLiveUsagePatch(previous, incoming);
                 this.applyLiveUsageToAudit(merged);
-                if (this.liveUsageShouldSkip(merged)) {
+                // A row the server put on this page stays on it: a paused
+                // view (filters, search, a later page) only stops new rows.
+                // It leaves only for a filter the page can check itself.
+                if (this.liveUsageHiddenByFilter(merged)) {
                     currentEntries.splice(index, 1);
                     this.usageLog.entries = [...currentEntries];
                     this.usageLog.total = Math.max(0, Number(this.usageLog.total || 0) - 1);
@@ -593,8 +596,18 @@ export function liveLogsMethods() {
             };
         },
 
+        // liveUsageShouldSkip reports that a live usage entry new to the page
+        // stays off it: hidden by a filter the page checks itself, or live
+        // inserts are paused because the page cannot tell whether it belongs.
         liveUsageShouldSkip(entry) {
-            return !!(this.usageLogHideCached && this.liveUsageEntryCached(entry)) || !this.usageLiveInsertAllowed();
+            return this.liveUsageHiddenByFilter(entry) || !this.usageLiveInsertAllowed();
+        },
+
+        // liveUsageHiddenByFilter reports that the entry fails a filter the
+        // page can evaluate client side: hiding cached requests. The other
+        // filters and search run on the server.
+        liveUsageHiddenByFilter(entry) {
+            return !!(this.usageLogHideCached && this.liveUsageEntryCached(entry));
         },
 
         liveUsageSeedForEntry(entry) {

@@ -47,13 +47,22 @@ TOGETHER_BASE_URL=https://api.together.ai/v1
 TOGETHER_MODELS=meta-llama/Llama-3.3-70B-Instruct-Turbo,BAAI/bge-base-en-v1.5
 ```
 
-`TOGETHER_MODELS` to lista zapasowa, używana tylko wtedy, gdy `/models` zwraca błąd
-lub pustą listę; `CONFIGURED_PROVIDER_MODELS_MODE=allowlist` czyni ją jedyną listą.
+Przy ustawionym `TOGETHER_MODELS` domyślnie udostępniane są tylko te modele, a inne
+modele zwracają 404; ustaw `TOGETHER_MODELS_MODE=fallback` (albo globalne
+`CONFIGURED_PROVIDER_MODELS_MODE=fallback`), aby listę znów wyznaczała lista Together.
+Zobacz [Tryby modeli](/pl/advanced/config-yaml#tryby-modeli).
 
 ## Modele
 
 GoModel odczytuje aktualną listę `/models` z Together, w tym typ każdego modelu,
-nazwę wyświetlaną, długość kontekstu i ceny za tokeny. Modele obrazów, audio,
+nazwę wyświetlaną, długość kontekstu i ceny za tokeny. Przy allowliście
+`TOGETHER_MODELS` te dane dla wymienionych modeli nadal pochodzą z tej listy, chyba
+że wywołanie po metadane jest wyłączone (`ALLOWLIST_UPSTREAM_METADATA=false` lub
+`GOMODEL_OFFLINE=true`). Gdy to wywołanie się nie powiedzie, zostają metadane
+z ostatniej udanej listy; przed pierwszą udaną listą nie ma
+metadanych z upstreamu, są tylko te z katalogu lub z Twojej
+konfiguracji (`models[].metadata`, nadpisania cen w dashboardzie). Skonfigurowany model, którego Together nie wypisuje, bierze
+metadane z katalogu modeli GoModel i może ich nie mieć. Modele obrazów, audio,
 wideo i rerankingu są pomijane, bo GoModel nie kieruje tych endpointów do
 Together. Identyfikatory modeli zawierają ukośnik; używaj ich dosłownie albo
 dodaj przed nimi nazwę providera, żeby przypiąć trasę:

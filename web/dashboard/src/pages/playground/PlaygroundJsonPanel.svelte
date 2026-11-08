@@ -52,6 +52,10 @@
   const requestText = $derived(formatJSON(source.requestBody));
   const responseText = $derived(formatJSON(source.response));
   const shownText = $derived(store.panelTab === "request" ? requestText : responseText);
+  // The panel may show a trimmed response (embedding vectors); Copy takes it whole.
+  const copyText = $derived(
+    store.panelTab === "response" && source.fullResponse ? formatJSON(source.fullResponse) : shownText,
+  );
 
   function metaParts(meta) {
     if (!meta) return [];
@@ -218,7 +222,7 @@
           label={m.playground_copy()}
           copiedLabel={m.common_copied()}
           errorLabel={m.common_copy_failed()}
-          onclick={() => copyState.copy(shownText)}
+          onclick={() => copyState.copy(copyText)}
         />
         <DialogCloseButton
           label={m.playground_json_hide()}
