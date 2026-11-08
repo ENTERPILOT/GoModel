@@ -36,7 +36,7 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 				return next(c)
 			}
 
-			cfg := logger.Config()
+			cfg := logger.Config().ForPath(c.Request().URL.Path)
 
 			// Skip non-model paths if OnlyModelInteractions is enabled
 			if cfg.OnlyModelInteractions && !core.IsModelInteractionPath(c.Request().URL.Path) {

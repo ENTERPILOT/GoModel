@@ -268,7 +268,7 @@ func TestSQLStoreCounterRoundTrip(t *testing.T) {
 			_, err := store.db.Exec(context.Background(), upsertCounterSQL,
 				snap.Scope, snap.Subject, snap.Partition, snap.PeriodSeconds, snap.Writer, snap.Epoch,
 				snap.RequestsWindowStart, snap.RequestsCurrent, snap.RequestsPrevious,
-				snap.TokensWindowStart, snap.TokensCurrent, snap.TokensPrevious, snap.InFlight, updatedAt,
+				snap.TokensWindowStart, snap.TokensCurrent, snap.TokensPrevious, snap.InFlight, updatedAt, snap.OwnCounts,
 			)
 			require.NoError(t, err)
 		})
@@ -293,7 +293,7 @@ func TestSQLStoreLoadCountersSkipsMalformedRow(t *testing.T) {
 	require.NoError(t, err)
 	_, err = db.Exec(ctx, upsertCounterSQL,
 		string(ScopeUserPath), "/broken", "", PeriodHourSeconds, "w1", "",
-		0, "not-a-number", 0, 0, 0, 0, 0, time.Now().Unix(),
+		0, "not-a-number", 0, 0, 0, 0, 0, time.Now().Unix(), false,
 	)
 	require.NoError(t, err)
 

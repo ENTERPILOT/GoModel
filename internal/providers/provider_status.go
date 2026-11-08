@@ -38,12 +38,15 @@ type SanitizedResilienceConfig struct {
 
 // SanitizedProviderConfig is the admin-safe provider configuration view.
 type SanitizedProviderConfig struct {
-	Name              string   `json:"name"`
-	Type              string   `json:"type"`
-	BaseURL           string   `json:"base_url,omitempty"`
-	APIVersion        string   `json:"api_version,omitempty"`
-	Models            []string `json:"models,omitempty"`
-	SessionStickyKeys bool     `json:"session_sticky_keys"`
+	Name       string   `json:"name"`
+	Type       string   `json:"type"`
+	BaseURL    string   `json:"base_url,omitempty"`
+	APIVersion string   `json:"api_version,omitempty"`
+	Models     []string `json:"models,omitempty"`
+	// ModelsMode is the provider's override of the global configured
+	// provider models mode; empty when the global mode applies.
+	ModelsMode        string `json:"models_mode,omitempty"`
+	SessionStickyKeys bool   `json:"session_sticky_keys"`
 	// Billable is false for a provider whose cost the caller does not owe the
 	// operator; see config.RawProviderConfig.Billable.
 	Billable bool `json:"billable"`
@@ -92,6 +95,11 @@ type providerRuntimeState struct {
 	// confirmed by the provider, so it is not cached and is replaced as soon
 	// as a listing succeeds.
 	catalogStandIn bool
+	// inheritedUnlisted marks an inventory a replacement inherited that may
+	// hold configured models the upstream never listed (the previous one was
+	// not a plain listing). A later replacement must not mistake it for one,
+	// so it lasts until a fetch succeeds.
+	inheritedUnlisted bool
 }
 
 // SanitizeProviderConfigs converts effective provider configs into a stable,
@@ -125,6 +133,7 @@ func SanitizeProviderConfigs(configs map[string]ProviderConfig) []SanitizedProvi
 			BaseURL:           strings.TrimSpace(cfg.BaseURL),
 			APIVersion:        strings.TrimSpace(cfg.APIVersion),
 			Models:            models,
+			ModelsMode:        string(cfg.ModelsMode),
 			SessionStickyKeys: cfg.SessionStickyKeys,
 			Billable:          cfg.Billable,
 			ProxyURL:          httpclient.RedactProxyURL(cfg.ProxyURL),

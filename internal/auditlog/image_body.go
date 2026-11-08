@@ -205,6 +205,12 @@ func imageUsageMeta(u *core.ImageUsage) map[string]any {
 			"image_tokens": d.ImageTokens,
 		}
 	}
+	if d := u.OutputTokensDetails; d != nil {
+		usage["output_tokens_details"] = map[string]any{
+			"text_tokens":  d.TextTokens,
+			"image_tokens": d.ImageTokens,
+		}
+	}
 	return usage
 }
 
