@@ -52,9 +52,12 @@ den erkannten Modellen geroutet werden können (siehe
 [Modellmodi](/de/advanced/config-yaml#modellmodi)):
 
 ```bash
-XIAOMI_MODELS=mimo-v2.5-pro[1m]
+XIAOMI_MODELS=mimo-v2.5-pro,mimo-v2.5-pro[1m]
 XIAOMI_MODELS_MODE=merge
 ```
+
+Behalten Sie auch das Basismodell in der Liste: Schlägt der `/models`-Aufruf
+fehl, stellt `merge` nur die konfigurierten IDs bereit.
 
 ## Text-to-Speech und Transkription
 

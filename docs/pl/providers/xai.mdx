@@ -29,7 +29,8 @@ providers:
   Modele głosowe (np. `grok-voice-latest`) nie są zwracane przez endpoint `/models`
   xAI. Aby kierować do nich sesje realtime, podaj je w `XAI_MODELS` (na przykład
   `XAI_MODELS=grok-voice-latest`) i ustaw `XAI_MODELS_MODE=merge`, aby wykryte
-  modele nadal były routowane obok nich (zobacz
+  modele nadal były routowane obok nich; w `config.yaml` dodaj je do listy
+  `models:` providera i ustaw `models_mode: merge` (zobacz
   [Tryby modeli](/pl/advanced/config-yaml#tryby-modeli)).
 </Note>
 

@@ -11,13 +11,14 @@ import (
 // pending buffer size an ObservedSSEStream keeps between events.
 const maxPendingEventBytes = 256 * 1024
 
-// maxObservedEventBytes bounds one event an ObservedSSEStream buffers for its
-// observers. It is far above maxPendingEventBytes because a terminal Responses
-// event carries the whole response: a streamed image generation repeats every
-// image's base64 in response.completed, and usage, audit and the stored
-// response all come from that event. Memory is only taken when such an event
-// arrives; a larger one is relayed to the client but not observed.
-const maxObservedEventBytes = 64 << 20
+// MaxObservedEventBytes bounds one event an ObservedSSEStream buffers for its
+// observers, and the event a stream rewriter holds whole. It is far above
+// maxPendingEventBytes because a terminal Responses event carries the whole
+// response: a streamed image generation repeats every image's base64 in
+// response.completed, and usage, audit and the stored response all come from
+// that event. Memory is only taken when such an event arrives; a larger one
+// is relayed to the client but not observed.
+const MaxObservedEventBytes = 64 << 20
 const maxBoundaryTailBytes = 3
 
 var (
@@ -119,7 +120,7 @@ func (s *ObservedSSEStream) processChunk(data []byte) {
 		pendingLen := len(s.pending)
 		idx, sepLen := nextJoinedEventBoundary(s.pending, data)
 		if idx == -1 {
-			if len(data) > maxObservedEventBytes || pendingLen > maxObservedEventBytes-len(data) {
+			if len(data) > MaxObservedEventBytes || pendingLen > MaxObservedEventBytes-len(data) {
 				s.startDiscarding(s.pending, data)
 				return
 			}
@@ -128,7 +129,7 @@ func (s *ObservedSSEStream) processChunk(data []byte) {
 		}
 
 		offset := dataOffsetAfterBoundary(pendingLen, idx, sepLen)
-		if idx <= maxObservedEventBytes {
+		if idx <= MaxObservedEventBytes {
 			if idx > pendingLen {
 				s.pending = append(s.pending, data[:idx-pendingLen]...)
 			}
@@ -159,7 +160,7 @@ func (s *ObservedSSEStream) processChunk(data []byte) {
 			return
 		}
 
-		if idx > maxObservedEventBytes {
+		if idx > MaxObservedEventBytes {
 			data = data[idx+sepLen:]
 			continue
 		}
@@ -302,7 +303,7 @@ func (s *ObservedSSEStream) savePending(data []byte) {
 	if len(data) == 0 {
 		return
 	}
-	if len(data) > maxObservedEventBytes {
+	if len(data) > MaxObservedEventBytes {
 		s.startDiscarding(nil, data)
 		return
 	}

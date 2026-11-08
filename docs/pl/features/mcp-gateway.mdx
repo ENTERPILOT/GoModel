@@ -412,7 +412,9 @@ Tokeny są przechowywane w bazie danych gatewaya, szyfrowane za pomocą
 ustawiony, i nigdy nie są zwracane przez admin API. GoModel odświeża wygasły
 access token za pomocą refresh tokena i zapisuje rotowany refresh token. Gdy
 serwer odpowie `401 Unauthorized` na token, który jeszcze nie wygasł (na
-przykład unieważniony wcześniej), GoModel odświeża go raz i ponawia żądanie.
+przykład unieważniony wcześniej), GoModel odświeża go raz i ponawia żądanie, o
+ile serwer autoryzacji wydał refresh token; w przeciwnym razie wiersz pokazuje
+**Logowanie wymaga uwagi** i trzeba zalogować się ponownie.
 Wiersz pokazuje **Zalogowano**, **Logowanie wygasło** (brak refresh tokena; zaloguj
 się ponownie) albo **Logowanie wymaga uwagi** z błędem. Nieudane odświeżenie
 jest ponawiane przy następnym żądaniu, więc zaloguj się ponownie dopiero, gdy

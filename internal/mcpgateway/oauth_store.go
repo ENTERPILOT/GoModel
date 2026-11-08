@@ -55,7 +55,7 @@ type oauthRecord struct {
 	// gateway instance, so replicas sharing the store never spend the same
 	// refresh token twice (see oauthSource.renew).
 	RefreshOwner string    `json:"refresh_owner,omitempty"`
-	RefreshUntil time.Time `json:"refresh_until"`
+	RefreshUntil time.Time `json:"refresh_until,omitzero"`
 }
 
 // sameSignIn reports whether other comes from the same sign-in as r.

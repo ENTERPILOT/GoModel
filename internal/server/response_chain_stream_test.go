@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
 func readChained(t *testing.T, stream string, id string, oneByte bool) string {
@@ -37,7 +39,7 @@ func TestWithPreviousResponseID(t *testing.T) {
 		return "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_2\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"" +
 			strings.Repeat("a", n) + "\"}]}]}}\n\n"
 	}
-	huge := large(chainedEventMaxBytes + 1)
+	huge := large(streaming.MaxObservedEventBytes + 1)
 	named := func(event string) string {
 		return "event: " + event + "\ndata: "
 	}
@@ -60,6 +62,8 @@ func TestWithPreviousResponseID(t *testing.T) {
 		{name: "keeps id and retry fields", stream: envelope, id: "resp_1",
 			want: []string{"id: 7\nretry: 1000\nevent: response.completed\ndata: {", `"previous_response_id":"resp_1"`, "}\n\n"}},
 		{name: "names a terminal event past the default scanner limit", stream: large(300*1024) + done, id: "resp_1",
+			want: []string{`"previous_response_id":"resp_1"`, done}},
+		{name: "names a terminal event carrying a generated image", stream: large(6<<20) + done, id: "resp_1",
 			want: []string{`"previous_response_id":"resp_1"`, done}},
 		{name: "event past the rewrite limit passes through", stream: huge + done, id: "resp_1", same: true},
 	}

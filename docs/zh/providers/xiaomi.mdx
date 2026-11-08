@@ -45,9 +45,11 @@ MiMo 模型默认进行思考，这会增加 Token 用量。可以使用 MiMo �
 使其与发现的模型并存并可被路由（参见[模型模式](/zh/advanced/config-yaml#模型模式)）：
 
 ```bash
-XIAOMI_MODELS=mimo-v2.5-pro[1m]
+XIAOMI_MODELS=mimo-v2.5-pro,mimo-v2.5-pro[1m]
 XIAOMI_MODELS_MODE=merge
 ```
+
+请同时在列表中保留基础模型：当 `/models` 调用失败时，`merge` 只提供已配置的 ID。
 
 ## 文本转语音与转录
 

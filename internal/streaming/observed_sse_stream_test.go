@@ -107,9 +107,9 @@ func TestObservedSSEStream_DetectsBoundarySplitAcrossReads(t *testing.T) {
 
 func TestObservedSSEStream_DiscardsOversizedPendingDataWithoutTailCapping(t *testing.T) {
 	s := &ObservedSSEStream{
-		pending: bytes.Repeat([]byte("a"), maxObservedEventBytes),
+		pending: bytes.Repeat([]byte("a"), MaxObservedEventBytes),
 	}
-	data := bytes.Repeat([]byte("b"), maxObservedEventBytes+1024)
+	data := bytes.Repeat([]byte("b"), MaxObservedEventBytes+1024)
 
 	s.processChunk(data)
 	got := len(s.pending)
@@ -123,16 +123,16 @@ func TestObservedSSEStream_DropsOversizedBufferedEventAndResumesWithinSameChunk(
 		observers: []Observer{observer},
 		pending: append(
 			[]byte("data: {\"id\":\"too-big\",\"payload\":\""),
-			bytes.Repeat([]byte("a"), maxObservedEventBytes/2)...,
+			bytes.Repeat([]byte("a"), MaxObservedEventBytes/2)...,
 		),
 	}
 	data := append(
 		append(
 			append(
-				bytes.Repeat([]byte("b"), maxObservedEventBytes/2+1),
+				bytes.Repeat([]byte("b"), MaxObservedEventBytes/2+1),
 				[]byte("\"}\n\ndata: {\"id\":\"fresh\"}\n\n")...,
 			),
-			bytes.Repeat([]byte("c"), maxObservedEventBytes+1)...,
+			bytes.Repeat([]byte("c"), MaxObservedEventBytes+1)...,
 		),
 		[]byte("ignored-trailer")...,
 	)
@@ -152,7 +152,7 @@ func TestObservedSSEStream_ResumesAfterDiscardWhenBoundarySplitsAcrossReads(t *t
 	oversized := append(
 		append(
 			[]byte("data:{\"id\":\"too-big\",\"payload\":\""),
-			bytes.Repeat([]byte("x"), maxObservedEventBytes)...,
+			bytes.Repeat([]byte("x"), MaxObservedEventBytes)...,
 		),
 		[]byte("\"}\r\n\r")...,
 	)
@@ -171,7 +171,7 @@ func TestObservedSSEStream_DropsOversizedPendingPrefixBeforeCombining(t *testing
 		observers: []Observer{observer},
 		pending: append(
 			[]byte("data: {\"id\":\"stale\"}\n\n"),
-			bytes.Repeat([]byte("x"), maxObservedEventBytes)...,
+			bytes.Repeat([]byte("x"), MaxObservedEventBytes)...,
 		),
 	}
 

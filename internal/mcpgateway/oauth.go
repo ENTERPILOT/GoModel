@@ -177,6 +177,12 @@ func (m *oauthManager) attach(specs []ServerSpec, records map[string]oauthRecord
 		}
 	}
 	m.sources = sources
+	// A retired source keeps no idle connections to its token endpoint.
+	for name, old := range previous {
+		if sources[name] != old {
+			old.closeIdle()
+		}
+	}
 }
 
 // view is the sign-in state of name: its source, else its last failure.

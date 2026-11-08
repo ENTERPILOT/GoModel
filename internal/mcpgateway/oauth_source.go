@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"slices"
 	"sync"
@@ -173,12 +172,22 @@ func (o *oauthSource) tokenOtherThan(ctx context.Context, rejected string) (stri
 		}
 		return "", fmt.Errorf("refresh the OAuth token of mcp server %q: %w; sign in again from the dashboard if it persists", o.name, err)
 	}
-	// A reload may have adopted a newer stored token meanwhile.
-	if !o.record.UpdatedAt.After(record.UpdatedAt) {
-		o.record = record
-	}
+	// A reload may have adopted a newer stored token meanwhile; it is the
+	// one to hand out while it works.
 	o.lastErr = ""
+	if o.record.UpdatedAt.After(record.UpdatedAt) && o.record.usable(rejected) {
+		return o.record.AccessToken, nil
+	}
+	o.record = record
 	return record.AccessToken, nil
+}
+
+// closeIdle drops the idle connections of this source's token-endpoint
+// client once the source is retired.
+func (o *oauthSource) closeIdle() {
+	if o.httpClient != nil {
+		o.httpClient.CloseIdleConnections()
+	}
 }
 
 // current returns the in-memory access token when it is usable.
@@ -195,9 +204,7 @@ func (o *oauthSource) current(rejected string) (string, bool) {
 func (o *oauthSource) snapshot() oauthRecord {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	record := o.record
-	record.Scopes = slices.Clone(record.Scopes)
-	return record
+	return o.record
 }
 
 // serverURL is the upstream URL this source's tokens were issued for.
@@ -269,7 +276,6 @@ func (t *bearerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 	if !ok {
 		return resp, nil
 	}
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
 	_ = resp.Body.Close()
 	return t.base.RoundTrip(withBearer(retry, fresh))
 }

@@ -281,3 +281,24 @@ func TestCredentialsServiceRefreshModelFetchOutlivesCallerDeadline(t *testing.T)
 	<-sem
 	assert.Eventually(t, func() bool { return reader.registry.Supports("shared/test-model") }, 5*time.Second, 5*time.Millisecond)
 }
+
+// Shutdown ends the background model fetch: it is bounded by the service's
+// lifetime, not left running against providers that are being closed.
+func TestCredentialsServiceRefreshModelFetchEndsWithLifetime(t *testing.T) {
+	store := newFakeCredentialStore()
+	writer := newCredentialsInstance(t, store)
+	require.NoError(t, writer.service.Upsert(t.Context(), ManagedProviderCredential{Name: "shared", Type: "test", APIKeys: []string{"sk"}, Enabled: true}))
+
+	lifetime, shutdown := context.WithCancel(t.Context())
+	registry := NewModelRegistry()
+	service, err := NewCredentialsService(lifetime, newCredentialsTestFactory(t), registry, store, nil, config.ResilienceConfig{}, nil)
+	require.NoError(t, err)
+	sem := registry.refreshSemaphore()
+	sem <- struct{}{}
+	require.NoError(t, service.Refresh(t.Context()))
+	require.NotNil(t, registry.ProviderByName("shared"))
+
+	shutdown()
+	<-sem
+	assert.Never(t, func() bool { return registry.Supports("shared/test-model") }, 300*time.Millisecond, 10*time.Millisecond)
+}

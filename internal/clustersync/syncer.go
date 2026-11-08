@@ -288,13 +288,9 @@ func (s *Syncer) poll(ctx context.Context) {
 		s.mu.Lock()
 		refresh := s.refreshes[entity]
 		s.mu.Unlock()
-		// The deadline is left to expire instead of being cancelled when
-		// refresh returns: a refresh may hand its context to background
-		// work, such as fetching a new provider's models, which the deadline
-		// then bounds too.
-		refreshCtx, release := context.WithTimeout(ctx, refreshTimeout) //nolint:gosec // G118: released at the deadline, see above.
-		_ = release
+		refreshCtx, release := context.WithTimeout(ctx, refreshTimeout)
 		err = refresh(refreshCtx)
+		release()
 		if err != nil {
 			if ctx.Err() != nil {
 				return

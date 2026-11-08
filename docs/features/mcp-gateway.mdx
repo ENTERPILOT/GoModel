@@ -408,7 +408,9 @@ Tokens are stored in the gateway database, encrypted with
 are never returned by the admin API. GoModel refreshes an expired access token
 with the refresh token and saves the rotated refresh token. When the server
 answers `401 Unauthorized` to a token that has not expired yet (for example one
-revoked early), GoModel refreshes it once and retries the request. The row shows
+revoked early), GoModel refreshes it once and retries the request, if the
+authorization server issued a refresh token; otherwise the row shows **Sign-in
+needs attention** and you sign in again. The row shows
 **Signed in**, **Sign-in expired** (no refresh token left; sign in again), or
 **Sign-in needs attention** with the error. A failed refresh is retried on the
 next request, so sign in again only if the error persists. The sign-out icon

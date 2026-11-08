@@ -3,11 +3,13 @@ package mcpgateway
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,8 +27,8 @@ import (
 type rotatingAuthServer struct {
 	*httptest.Server
 	fail     bool
-	received chan struct{}
 	release  chan struct{}
+	released sync.Once
 
 	mu        sync.Mutex
 	current   string
@@ -37,7 +39,7 @@ type rotatingAuthServer struct {
 
 func newRotatingAuthServer(t *testing.T, hold bool) *rotatingAuthServer {
 	t.Helper()
-	as := &rotatingAuthServer{current: "refresh-1", received: make(chan struct{}, 64)}
+	as := &rotatingAuthServer{current: "refresh-1"}
 	if hold {
 		as.release = make(chan struct{})
 	}
@@ -46,7 +48,6 @@ func newRotatingAuthServer(t *testing.T, hold bool) *rotatingAuthServer {
 		as.mu.Lock()
 		as.requests++
 		as.mu.Unlock()
-		as.received <- struct{}{}
 		if as.release != nil {
 			<-as.release
 		}
@@ -66,20 +67,36 @@ func newRotatingAuthServer(t *testing.T, hold bool) *rotatingAuthServer {
 		})
 	}))
 	t.Cleanup(as.Close)
+	if hold {
+		t.Cleanup(as.releaseHeld) // before Close, which waits for held handlers
+	}
 	return as
+}
+
+// releaseHeld lets held token requests finish.
+func (as *rotatingAuthServer) releaseHeld() {
+	as.released.Do(func() { close(as.release) })
+}
+
+func (as *rotatingAuthServer) requestCount() int {
+	as.mu.Lock()
+	defer as.mu.Unlock()
+	return as.requests
+}
+
+// waitForRequest blocks until the first token request has arrived.
+func (as *rotatingAuthServer) waitForRequest(t *testing.T) {
+	t.Helper()
+	require.Eventually(t, func() bool { return as.requestCount() >= 1 }, time.Second, 10*time.Millisecond, "no token request arrived")
 }
 
 // assertNoSecondRequest checks that no further token request arrives while
 // the first one is held, then lets the held requests finish.
 func (as *rotatingAuthServer) assertNoSecondRequest(t *testing.T) {
 	t.Helper()
-	<-as.received
-	assert.Never(t, func() bool {
-		as.mu.Lock()
-		defer as.mu.Unlock()
-		return as.requests > 1
-	}, 300*time.Millisecond, 10*time.Millisecond, "a second token request was sent while the first was in flight")
-	close(as.release)
+	as.waitForRequest(t)
+	assert.Never(t, func() bool { return as.requestCount() > 1 }, 300*time.Millisecond, 10*time.Millisecond, "a second token request was sent while the first was in flight")
+	as.releaseHeld()
 }
 
 func (as *rotatingAuthServer) counts() (refreshes, reused int) {
@@ -106,24 +123,11 @@ func newTestOAuthStore(t *testing.T) *oauthStore {
 }
 
 func TestOAuthViewDoesNotWaitForStalledRefresh(t *testing.T) {
-	received := make(chan struct{}, 1)
-	release := make(chan struct{})
-	as := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		received <- struct{}{}
-		select {
-		case <-release:
-		case <-r.Context().Done():
-		}
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	t.Cleanup(as.Close)
-	t.Cleanup(func() { close(release) })
-	record := testOAuthRecord()
-	record.TokenURL = as.URL + "/token"
-	record.Expiry = time.Now().Add(-time.Minute)
+	as := newRotatingAuthServer(t, true)
+	record := rotatingRecord(as, time.Now().Add(-time.Minute))
 	source := newOAuthSource("notion", record, nil, as.Client())
 	go func() { _, _ = source.accessToken(context.Background()) }()
-	<-received
+	as.waitForRequest(t)
 
 	answered := make(chan struct{})
 	go func() {
@@ -145,13 +149,13 @@ type tokenResult struct {
 	err   error
 }
 
-// concurrentTokens asks n callers for an access token at once, caller i
-// from source(i), and returns a channel of their results.
-func concurrentTokens(n int, source func(i int) *oauthSource) <-chan tokenResult {
+// concurrentTokens asks n callers for an access token at once, spread over
+// sources in turn, and returns a channel of their results.
+func concurrentTokens(n int, sources ...*oauthSource) <-chan tokenResult {
 	results := make(chan tokenResult, n)
 	for i := range n {
 		go func() {
-			token, err := source(i).accessToken(context.Background())
+			token, err := sources[i%len(sources)].accessToken(context.Background())
 			results <- tokenResult{token, err}
 		}()
 	}
@@ -170,7 +174,7 @@ func assertAllTokens(t *testing.T, results <-chan tokenResult, want string) {
 func TestOAuthConcurrentCallersShareOneRefresh(t *testing.T) {
 	as := newRotatingAuthServer(t, true)
 	source := newOAuthSource("notion", rotatingRecord(as, time.Now().Add(-time.Minute)), nil, as.Client())
-	tokens := concurrentTokens(8, func(int) *oauthSource { return source })
+	tokens := concurrentTokens(8, source)
 	as.assertNoSecondRequest(t)
 	assertAllTokens(t, tokens, "access-2")
 	refreshes, reused := as.counts()
@@ -189,7 +193,7 @@ func TestOAuthReplicasSpendRefreshTokenOnce(t *testing.T) {
 		newOAuthSource("notion", record, store, as.Client()),
 	}
 
-	tokens := concurrentTokens(10, func(i int) *oauthSource { return replicas[i%len(replicas)] })
+	tokens := concurrentTokens(10, replicas...)
 	as.assertNoSecondRequest(t)
 	assertAllTokens(t, tokens, "access-2")
 
@@ -213,7 +217,7 @@ func TestOAuthRefreshWaitsForAnotherInstancesLease(t *testing.T) {
 	require.NoError(t, store.put(ctx, "notion", leased))
 
 	source := newOAuthSource("notion", record, store, as.Client())
-	results := concurrentTokens(1, func(int) *oauthSource { return source })
+	results := concurrentTokens(1, source)
 	assert.Never(t, func() bool { return len(results) > 0 }, 300*time.Millisecond, 10*time.Millisecond, "the refresh waits for the other instance's lease")
 
 	// The other instance finishes its refresh.
@@ -327,4 +331,114 @@ func TestBearerRoundTripperRejectedTokenWithoutRefreshToken(t *testing.T) {
 	view := source.view()
 	assert.Equal(t, OAuthStatusError, view.Status)
 	assert.Equal(t, errOAuthRejected.Error(), view.LastError)
+}
+
+// flakyOAuthRows wraps a row store so a test can fail its reads, or its
+// writes from a given one on, the way an unreachable database would.
+type flakyOAuthRows struct {
+	oauthRowStore
+	failReads      atomic.Bool
+	writes         atomic.Int32
+	failWritesFrom atomic.Int32 // fails every write from the n-th on; 0 fails none
+}
+
+func (f *flakyOAuthRows) getOAuth(ctx context.Context, name string) (string, error) {
+	if f.failReads.Load() {
+		return "", errors.New("store down")
+	}
+	return f.oauthRowStore.getOAuth(ctx, name)
+}
+
+func (f *flakyOAuthRows) swapOAuth(ctx context.Context, name, current, next string) (bool, error) {
+	if n, from := f.writes.Add(1), f.failWritesFrom.Load(); from > 0 && n >= from {
+		return false, errors.New("store down")
+	}
+	return f.oauthRowStore.swapOAuth(ctx, name, current, next)
+}
+
+func newFlakyOAuthStore(t *testing.T) (*oauthStore, *flakyOAuthRows) {
+	t.Helper()
+	store := newTestOAuthStore(t)
+	flaky := &flakyOAuthRows{oauthRowStore: store.rows}
+	store.rows = flaky
+	return store, flaky
+}
+
+// A lease is written only over the exact record the instance read: when
+// another instance refreshed meanwhile without rotating the refresh token,
+// writing the lease would put the old access token back.
+func TestOAuthLeaseRequiresUnchangedStoredRecord(t *testing.T) {
+	store := newTestOAuthStore(t)
+	ctx := context.Background()
+	base := testOAuthRecord()
+	require.NoError(t, store.put(ctx, "notion", base))
+	newer := base
+	newer.AccessToken = "newer"
+	newer.Expiry = time.Now().Add(time.Hour)
+	newer.UpdatedAt = time.Now().UTC()
+	require.NoError(t, store.put(ctx, "notion", newer))
+
+	source := newOAuthSource("notion", base, store, nil)
+	stale := base
+	leased, err := source.lease(ctx, stale)
+	require.NoError(t, err)
+	assert.False(t, leased)
+	stored, err := store.get(ctx, "notion")
+	require.NoError(t, err)
+	assert.Equal(t, "newer", stored.AccessToken, "the newer token stays")
+	assert.Empty(t, stored.RefreshOwner)
+}
+
+// A refresh whose save failed leaves the rotated refresh token in memory
+// only. The next refresh must spend that one, not the spent one still in the
+// store, and bring the store up to date.
+func TestOAuthRenewKeepsNewerTokenWhenStoreIsBehind(t *testing.T) {
+	as := newRotatingAuthServer(t, false)
+	store, rows := newFlakyOAuthStore(t)
+	ctx := context.Background()
+	record := rotatingRecord(as, time.Now().Add(-time.Minute))
+	require.NoError(t, store.put(ctx, "notion", record))
+	source := newOAuthSource("notion", record, store, as.Client())
+
+	// The lease write succeeds, the refresh succeeds, and the save fails.
+	rows.failWritesFrom.Store(2)
+	token, err := source.accessToken(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "access-2", token)
+	stored, err := store.get(ctx, "notion")
+	require.NoError(t, err)
+	require.Equal(t, "refresh-1", stored.RefreshToken, "the store is behind")
+
+	// The store recovers and the access token expires.
+	rows.failWritesFrom.Store(0)
+	source.mu.Lock()
+	source.record.Expiry = time.Now().Add(-time.Minute)
+	source.mu.Unlock()
+	token, err = source.accessToken(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "access-3", token)
+	refreshes, reused := as.counts()
+	assert.Equal(t, 2, refreshes)
+	assert.Zero(t, reused, "the spent refresh token is never sent again")
+	stored, err = store.get(ctx, "notion")
+	require.NoError(t, err)
+	assert.Equal(t, "refresh-3", stored.RefreshToken)
+	assert.Empty(t, stored.RefreshOwner)
+}
+
+// Without the store's coordination a refresh could spend a token another
+// instance is spending too, so an unreadable store fails the request.
+func TestOAuthRenewFailsClosedWhenStoreUnreadable(t *testing.T) {
+	as := newRotatingAuthServer(t, false)
+	store, rows := newFlakyOAuthStore(t)
+	record := rotatingRecord(as, time.Now().Add(-time.Minute))
+	require.NoError(t, store.put(context.Background(), "notion", record))
+	rows.failReads.Store(true)
+	source := newOAuthSource("notion", record, store, as.Client())
+
+	_, err := source.accessToken(context.Background())
+	require.ErrorContains(t, err, "read the stored OAuth tokens")
+	refreshes, _ := as.counts()
+	assert.Zero(t, refreshes, "no refresh token is spent without the store")
+	assert.Equal(t, OAuthStatusError, source.view().Status)
 }

@@ -432,7 +432,9 @@ gesetzt, und nie von der Admin-API zurückgegeben. GoModel erneuert ein
 abgelaufenes Access-Token mit dem Refresh-Token und speichert das rotierte
 Refresh-Token. Antwortet der Server auf ein noch nicht abgelaufenes Token (zum
 Beispiel ein vorzeitig widerrufenes) mit `401 Unauthorized`, erneuert GoModel es
-einmal und wiederholt den Request. Die Zeile zeigt **Angemeldet**, **Anmeldung abgelaufen** (kein
+einmal und wiederholt den Request, sofern der Autorisierungsserver ein
+Refresh-Token ausgestellt hat; andernfalls zeigt die Zeile **Anmeldung prüfen**,
+und Sie melden sich erneut an. Die Zeile zeigt **Angemeldet**, **Anmeldung abgelaufen** (kein
 Refresh-Token mehr; melden Sie sich erneut an) oder **Anmeldung prüfen** mit dem
 Fehler. Eine fehlgeschlagene Erneuerung wird bei der nächsten Anfrage
 wiederholt; melden Sie sich nur erneut an, wenn der Fehler bleibt. Das Abmeldesymbol löscht die gespeicherten

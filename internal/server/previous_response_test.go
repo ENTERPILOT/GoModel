@@ -478,6 +478,7 @@ func TestResponsesWithPreviousResponseID_StreamedImageTurnIsStored(t *testing.T)
 
 	rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"draw a square","stream":true}`)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String()[:min(rec.Body.Len(), 512)])
+	require.Contains(t, rec.Body.String(), `"result":"`+image+`"`, "the client stream carries the image")
 
 	waitForStoredResponse(t, store, "resp_img")
 	stored, err := store.Get(context.Background(), "resp_img")
@@ -486,8 +487,13 @@ func TestResponsesWithPreviousResponseID_StreamedImageTurnIsStored(t *testing.T)
 	assert.Equal(t, "image_generation_call", stored.Response.Output[0].Type)
 	assert.JSONEq(t, `"`+image+`"`, string(stored.Response.Output[0].ExtraFields.Lookup("result")))
 
+	provider.capturedResponsesReq = nil
 	rec = postResponses(t, srv, `{"model":"gpt-5-mini","input":"make it blue","previous_response_id":"resp_img"}`)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	items := forwardedInputItems(t, provider.capturingProvider)
+	require.Len(t, items, 3)
+	assert.Equal(t, "image_generation_call", items[1]["type"])
+	assert.Equal(t, image, items[1]["result"], "the image turn is replayed whole")
 }
 
 func TestResponsesWithPreviousResponseID_StreamedWithStoreFalseIsNotStored(t *testing.T) {

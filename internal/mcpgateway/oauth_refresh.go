@@ -3,6 +3,7 @@ package mcpgateway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -11,158 +12,200 @@ import (
 	"github.com/enterpilot/gomodel/internal/encryption"
 )
 
-// oauthLeaseTTL bounds a stored refresh lease: one token request plus the
-// save. An instance that dies mid-refresh holds up others no longer.
-const oauthLeaseTTL = oauthRefreshTimeout + oauthSaveTimeout
+// oauthLeaseTTL bounds a stored refresh lease: writing the lease, one token
+// request, and the save. An instance that dies mid-refresh holds up others
+// no longer.
+const oauthLeaseTTL = 2*oauthSaveTimeout + oauthRefreshTimeout
 
 // oauthLeasePoll is how often an instance waiting on another's refresh
 // lease reads the stored record again.
 const oauthLeasePoll = 200 * time.Millisecond
+
+// errOAuthSignInChanged means the stored sign-in is no longer the one this
+// source holds tokens for: the next reload picks the new one up.
+var errOAuthSignInChanged = errors.New("the OAuth sign-in changed under this request; retry shortly")
 
 // renew returns a record with a usable access token other than rejected.
 // Gateway instances sharing a store coordinate through the stored record,
 // so a rotating refresh token is spent once: a token another instance
 // already stored is adopted, a refresh another instance is running is
 // waited for, and this instance refreshes only under a lease it wrote with
-// a compare-and-swap. Without a readable store it refreshes on its own.
+// a compare-and-swap. A store that cannot be read or leased fails the
+// request rather than risk spending a refresh token twice; without a store
+// at all, the instance refreshes on its own.
 func (o *oauthSource) renew(ctx context.Context, rejected string) (oauthRecord, error) {
 	base := o.snapshot()
+	if o.store == nil {
+		return o.exchange(ctx, base, rejected)
+	}
 	deadline := time.Now().Add(oauthLeaseTTL)
 	retried := false
 	for {
-		leased := false
-		if stored, ok := o.lookup(ctx, base); ok {
-			if stored.usable(rejected) {
-				return stored, nil
-			}
-			base = stored
-			if stored.leasedElsewhere(o.owner, time.Now()) {
-				if time.Now().After(deadline) {
-					return oauthRecord{}, errors.New("another gateway instance is still refreshing the token")
-				}
-				if err := sleepCtx(ctx, oauthLeasePoll); err != nil {
-					return oauthRecord{}, err
-				}
-				continue
-			}
-			if base.RefreshToken != "" {
-				var conflict bool
-				leased, conflict = o.lease(ctx, &base)
-				if conflict && time.Now().Before(deadline) {
-					continue
-				}
-			}
+		if time.Now().After(deadline) {
+			return oauthRecord{}, errors.New("the stored OAuth token did not settle while this gateway instance waited to refresh it")
 		}
-		if base.RefreshToken == "" {
-			if rejected != "" {
-				return oauthRecord{}, errOAuthRejected
-			}
-			return oauthRecord{}, errOAuthExpired
-		}
-		fresh, err := o.refresh(ctx, base)
+		stored, err := o.lookup(ctx, base)
 		if err != nil {
-			if leased {
-				o.release(ctx, base)
-			}
-			// Another instance may have rotated the refresh token without
-			// a lease, such as while the store was unreachable: retry once
-			// with what it stored.
-			if stored, ok := o.lookup(ctx, base); ok && !retried && stored.RefreshToken != base.RefreshToken {
-				retried = true
-				base = stored
-				continue
-			}
 			return oauthRecord{}, err
 		}
-		next := base
-		next.AccessToken = fresh.AccessToken
-		next.RefreshToken = fresh.RefreshToken
-		next.TokenType = fresh.TokenType
-		next.Expiry = fresh.Expiry
-		next.UpdatedAt = time.Now().UTC()
-		next.RefreshOwner = ""
-		next.RefreshUntil = time.Time{}
-		return o.save(ctx, base, next), nil
+		if stored.UpdatedAt.Before(base.UpdatedAt) {
+			// The store is behind this instance, as after a failed save:
+			// bring it up to date rather than refresh with a spent token.
+			base = o.save(ctx, stored, base)
+		} else {
+			base = stored
+		}
+		if base.usable(rejected) {
+			return base, nil
+		}
+		if base.leasedElsewhere(o.owner, time.Now()) {
+			if err := sleepCtx(ctx, oauthLeasePoll); err != nil {
+				return oauthRecord{}, err
+			}
+			continue
+		}
+		if base.RefreshToken == "" {
+			return oauthRecord{}, noRefreshToken(rejected)
+		}
+		leased, err := o.lease(ctx, base)
+		if err != nil {
+			return oauthRecord{}, err
+		}
+		if !leased {
+			continue
+		}
+		next, err := o.exchange(ctx, base, rejected)
+		if err == nil {
+			return o.save(ctx, base, next), nil
+		}
+		o.release(ctx, base)
+		// A lease that lapsed on a slow store lets another instance rotate
+		// the refresh token meanwhile: try once with what it stored.
+		if retried {
+			return oauthRecord{}, err
+		}
+		if stored, lookupErr := o.lookup(ctx, base); lookupErr != nil || stored.RefreshToken == base.RefreshToken {
+			return oauthRecord{}, err
+		}
+		retried = true
 	}
 }
 
-// lookup reads the stored record of this sign-in. It reports false without
-// a store, on a read error, and when the stored record belongs to another
-// sign-in or none. The read is detached from the caller's cancellation like
-// refresh, and bounded by oauthLookupTimeout.
-func (o *oauthSource) lookup(ctx context.Context, base oauthRecord) (oauthRecord, bool) {
-	if o.store == nil {
-		return oauthRecord{}, false
+// exchange runs the refresh grant for base and returns the refreshed record,
+// or errOAuthRejected when the server hands back the very token the upstream
+// refused.
+func (o *oauthSource) exchange(ctx context.Context, base oauthRecord, rejected string) (oauthRecord, error) {
+	if base.RefreshToken == "" {
+		return oauthRecord{}, noRefreshToken(rejected)
 	}
+	fresh, err := o.refresh(ctx, base)
+	if err != nil {
+		return oauthRecord{}, err
+	}
+	next := base.withLease("", time.Time{})
+	next.AccessToken = fresh.AccessToken
+	next.RefreshToken = fresh.RefreshToken
+	next.TokenType = fresh.TokenType
+	next.Expiry = fresh.Expiry
+	next.UpdatedAt = time.Now().UTC()
+	if rejected != "" && next.AccessToken == rejected {
+		return oauthRecord{}, errOAuthRejected
+	}
+	return next, nil
+}
+
+// noRefreshToken is the error for a token that cannot be renewed.
+func noRefreshToken(rejected string) error {
+	if rejected != "" {
+		return errOAuthRejected
+	}
+	return errOAuthExpired
+}
+
+// sameTokens reports whether other is this sign-in with this refresh token.
+func (r oauthRecord) sameTokens(other oauthRecord) bool {
+	return r.sameSignIn(other) && r.RefreshToken == other.RefreshToken
+}
+
+// withLease returns r leased to owner until until; an empty owner clears
+// the lease.
+func (r oauthRecord) withLease(owner string, until time.Time) oauthRecord {
+	r.RefreshOwner, r.RefreshUntil = owner, until
+	return r
+}
+
+// lookup reads the stored record of this sign-in. The read is detached from
+// the caller's cancellation like refresh, and bounded by oauthLookupTimeout.
+func (o *oauthSource) lookup(ctx context.Context, base oauthRecord) (oauthRecord, error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), oauthLookupTimeout)
 	defer cancel()
 	stored, err := o.store.get(ctx, o.name)
-	if err != nil || !stored.sameSignIn(base) {
-		return oauthRecord{}, false
+	if errors.Is(err, ErrNotFound) {
+		return oauthRecord{}, errOAuthSignInChanged
 	}
-	return *stored, true
+	if err != nil {
+		return oauthRecord{}, fmt.Errorf("read the stored OAuth tokens: %w", err)
+	}
+	if !stored.sameSignIn(base) {
+		return oauthRecord{}, errOAuthSignInChanged
+	}
+	return *stored, nil
+}
+
+// write stores next while the stored record still satisfies same, detached
+// from the caller's cancellation and bounded by oauthSaveTimeout. A record
+// written but not confirmed re-sealed (encryption.ErrSealUnconfirmed) counts
+// as written.
+func (o *oauthSource) write(ctx context.Context, next oauthRecord, same func(stored oauthRecord) bool) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), oauthSaveTimeout)
+	defer cancel()
+	saved, err := o.store.update(ctx, o.name, next, same)
+	if errors.Is(err, encryption.ErrSealUnconfirmed) {
+		err = nil
+	}
+	return saved, err
 }
 
 // lease stores base with this source's refresh lease while the stored
-// record still holds base's refresh token and no other lease. It reports
-// whether it wrote, and conflict when the stored record changed first. A
-// store error leaves the refresh unleased, so a store hiccup never blocks
-// tokens.
-func (o *oauthSource) lease(ctx context.Context, base *oauthRecord) (leased, conflict bool) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), oauthSaveTimeout)
-	defer cancel()
-	next := *base
-	next.RefreshOwner = o.owner
-	next.RefreshUntil = time.Now().Add(oauthLeaseTTL)
-	saved, err := o.store.update(ctx, o.name, next, func(stored oauthRecord) bool {
-		return stored.sameSignIn(*base) && stored.RefreshToken == base.RefreshToken &&
-			!stored.leasedElsewhere(o.owner, time.Now())
+// record is still exactly base: same sign-in, same refresh token, same
+// version, and no other instance's lease. It reports whether it wrote; a
+// stored record that changed first is reported as not leased, so the caller
+// reads it again.
+func (o *oauthSource) lease(ctx context.Context, base oauthRecord) (bool, error) {
+	leased, err := o.write(ctx, base.withLease(o.owner, time.Now().Add(oauthLeaseTTL)), func(stored oauthRecord) bool {
+		return stored.sameTokens(base) && stored.UpdatedAt.Equal(base.UpdatedAt) && !stored.leasedElsewhere(o.owner, time.Now())
 	})
-	if err != nil && !errors.Is(err, encryption.ErrSealUnconfirmed) {
-		slog.Warn("failed to lease an mcp oauth token refresh; refreshing without it", "server", o.name, "error", err)
-		return false, false
+	if err != nil {
+		return false, fmt.Errorf("lease the OAuth token refresh: %w", err)
 	}
-	if !saved {
-		return false, true
-	}
-	*base = next
-	return true, false
+	return leased, nil
 }
 
 // release drops this source's lease after a failed refresh, so other
 // instances retry at once instead of waiting for it to lapse.
 func (o *oauthSource) release(ctx context.Context, base oauthRecord) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), oauthSaveTimeout)
-	defer cancel()
-	next := base
-	next.RefreshOwner = ""
-	next.RefreshUntil = time.Time{}
-	_, _ = o.store.update(ctx, o.name, next, func(stored oauthRecord) bool {
-		return stored.sameSignIn(base) && stored.RefreshToken == base.RefreshToken && stored.RefreshOwner == o.owner
+	_, _ = o.write(ctx, base.withLease("", time.Time{}), func(stored oauthRecord) bool {
+		return stored.sameTokens(base) && stored.RefreshOwner == o.owner
 	})
 }
 
 // save stores next, refreshed from base, only while the stored record still
 // belongs to this sign-in and holds base's refresh token: a sign-out, a
 // newer sign-in, or another instance's refresh that landed meanwhile wins.
-// It returns the record to use: next, or the token another instance stored
-// first.
+// Another instance's lease does not: base's refresh token is spent, so its
+// refresh fails, and it then adopts what was saved here. It returns the
+// record to use: next, or the token another instance stored first.
 func (o *oauthSource) save(ctx context.Context, base, next oauthRecord) oauthRecord {
-	if o.store == nil {
-		return next
-	}
-	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), oauthSaveTimeout)
-	defer cancel()
-	saved, err := o.store.update(saveCtx, o.name, next, func(stored oauthRecord) bool {
-		return stored.sameSignIn(base) && stored.RefreshToken == base.RefreshToken &&
-			!stored.UpdatedAt.After(base.UpdatedAt)
+	saved, err := o.write(ctx, next, func(stored oauthRecord) bool {
+		return stored.sameTokens(base) && !stored.UpdatedAt.After(base.UpdatedAt)
 	})
 	switch {
-	case err != nil && !errors.Is(err, encryption.ErrSealUnconfirmed):
-		// The refreshed token keeps working in memory; only a restart loses it.
+	case err != nil:
+		// The refreshed token keeps working in memory, and the next renew
+		// writes it back once the store answers again.
 		slog.Warn("failed to save a refreshed mcp oauth token", "server", o.name, "error", err)
-	case !saved && err == nil:
-		if stored, ok := o.lookup(ctx, base); ok && stored.usable("") {
+	case !saved:
+		if stored, err := o.lookup(ctx, base); err == nil && stored.usable("") {
 			slog.Info("another gateway instance refreshed the mcp oauth token first; using its token", "server", o.name)
 			return stored
 		}

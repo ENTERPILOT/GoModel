@@ -420,7 +420,7 @@ koordynuje go między instancjami.
 | Circuit breakery | W pamięci, per proces | Każda replika osobno wykrywa awarię, więc upstream widzi do `N x failure_threshold` błędów, zanim otworzy się którykolwiek breaker. |
 | Przypięcia [powiązania sesji](/pl/features/session-keeping) | W pamięci, per instancja | Sesje są przyklejone per replika, a nie globalnie, chyba że load balancer używa sticky sessions. |
 | [Logi na żywo](/pl/advanced/admin-endpoints#admin-dashboard) | Lokalne zdarzenia w pamięci, zdarzenia innych replik z bazy danych | Dashboard widzi requesty swojej repliki natychmiast, a requesty każdej innej repliki zwykle w ciągu 7 sekund, gdy tylko zostaną zapisane. Zobacz [logi na żywo z wielu replik](#logi-na-żywo-z-wielu-replik). |
-| Sesje MCP po stronie klientów | Trwały (baza danych) | Sesja otwarta na jednej replice działa dalej na każdej innej, więc klienci [MCP](/pl/features/mcp-gateway#sesje-między-replikami) nie potrzebują sticky sessions. Po `DELETE` każda replika odrzuca jej requesty w ciągu około 2 sekund; otwarty strumień `GET` nie jest zamykany wcześniej. Trwający strumień odpowiedzi zostaje na replice, która go obsługuje. |
+| Sesje MCP po stronie klientów | Trwały (baza danych) | Sesja otwarta na jednej replice działa dalej na każdej innej, więc klienci [MCP](/pl/features/mcp-gateway#sesje-między-replikami) nie potrzebują sticky sessions. Po `DELETE` każda replika odrzuca jej requesty w ciągu około 2 sekund; otwarty strumień `GET` nie jest zamykany wcześniej. `DELETE`, który dotrze, gdy do bazy nie da się zapisywać, kończy sesję tylko na replice, która go odebrała; inna replika może ją jeszcze wznowić, dopóki jej wpis nie wygaśnie, do 30 minut później. Trwający strumień odpowiedzi zostaje na replice, która go obsługuje. |
 | Logowanie [MCP OAuth](/pl/features/mcp-gateway#logowanie-przez-oauth) | Rozpoczęte logowania w pamięci, per instancja; tokeny trwałe (baza danych) | Callback logowania z dashboardu musi trafić do repliki, która je rozpoczęła, więc na czas logowania kieruj `/admin` z powiązaniem sesji (sticky sessions). Zapisane i odświeżone tokeny trafiają do wszystkich replik przez bazę danych. |
 | Stan zdrowia requestów do providerów | W pamięci, per instancja | Status providera w dashboardzie odzwierciedla replikę, która odpowiedziała. |
 
@@ -467,8 +467,8 @@ Requesty obsłużone przez inną replikę:
 - są wstawiane na listę według czasu requestu, poniżej wszystkiego, co nowsze.
 
 Przy dużym ruchu w jednym pollingu streamowanych jest maksymalnie 200 wpisów
-audytu i 200 wpisów użycia z innych replik, od najnowszych. Pozostałe i tak są
-na liście po odświeżeniu. Dashboard, który połączy się ponownie, albo replika,
+audytu i 200 wpisów użycia z innych replik; gdy jest ich więcej, wybieranych jest
+200 najnowszych. Pozostałe i tak są na liście po odświeżeniu. Dashboard, który połączy się ponownie, albo replika,
 której odczyty przez jakiś czas zawodziły, nadrabia to, co pozostałe repliki
 zapisały w międzyczasie, do 5 minut wstecz i w ramach tego samego limitu 200
 wpisów na polling. Zegary replik powinny zgadzać się co do kilku sekund, co
