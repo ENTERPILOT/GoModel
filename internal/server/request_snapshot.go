@@ -17,10 +17,11 @@ import (
 
 const requestSnapshotInlineBodyLimit int64 = 64 * 1024
 
-// requestBodyPreallocLimit caps the buffer reserved up front from a declared
-// Content-Length. It is the default body size limit, which already rejects any
-// larger declared length; a body above it (a raised limit) reads with growing
-// buffers instead.
+// requestBodyPreallocLimit is the largest declared Content-Length whose read
+// is sized from it. It is the default body size limit, which already rejects
+// any larger declared length; a body above it (a raised limit) reads with
+// growing buffers instead. core.ReadAllSized separately caps the reservation
+// made before any bytes arrive.
 const requestBodyPreallocLimit = config.DefaultBodySizeLimit
 
 // RequestSnapshotCapture captures immutable transport-level request data for

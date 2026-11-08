@@ -32,6 +32,7 @@ func TestReadAllSized(t *testing.T) {
 		{name: "longer than declared", reader: func() io.Reader { return strings.NewReader(body) }, size: 4, maxPrealloc: 1 << 20, want: body},
 		{name: "empty body", reader: func() io.Reader { return strings.NewReader("") }, size: 0, maxPrealloc: 1 << 20, want: ""},
 		{name: "unknown length", reader: func() io.Reader { return strings.NewReader(body) }, size: -1, maxPrealloc: 1 << 20, want: body},
+		{name: "declared above initial reservation", reader: func() io.Reader { return strings.NewReader(body) }, size: 10 << 20, maxPrealloc: 16 << 20, want: body, wantCap: maxInitialReservation + 1},
 		{name: "declared above prealloc cap", reader: func() io.Reader { return strings.NewReader(body) }, size: n, maxPrealloc: n - 1, want: body},
 		{
 			name: "read error keeps the bytes read so far",
@@ -61,10 +62,20 @@ func TestReadAllSized(t *testing.T) {
 			assert.Equal(t, wantAllErr, err, "must match io.ReadAll")
 			assert.NotNil(t, got)
 			if tt.wantCap > 0 {
-				assert.Equal(t, tt.wantCap, cap(got), "a body of the declared length needs no growth")
+				assert.Equal(t, tt.wantCap, cap(got), "reservation must be the declared length, capped at maxInitialReservation")
 			}
 		})
 	}
+}
+
+func TestReadAllSizedGrowsPastInitialReservation(t *testing.T) {
+	body := strings.Repeat("x", maxInitialReservation+4096)
+
+	got, err := ReadAllSized(strings.NewReader(body), int64(len(body)), 16<<20)
+
+	require.NoError(t, err)
+	assert.Len(t, got, len(body))
+	assert.Equal(t, body, string(got))
 }
 
 type wrappedEOF struct{}

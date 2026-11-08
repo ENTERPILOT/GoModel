@@ -24,10 +24,10 @@ import (
 // answers an error status with an endless body must not be buffered whole.
 const maxErrorBodyBytes = 64 * 1024
 
-// maxResponsePreallocBytes caps the buffer reserved up front from an upstream
-// Content-Length, so an upstream cannot make the gateway reserve an arbitrary
-// amount of memory by declaring a length it never sends. Larger responses
-// read with growing buffers.
+// maxResponsePreallocBytes is the largest upstream Content-Length whose read
+// is sized from it; larger responses read with growing buffers.
+// core.ReadAllSized caps the reservation made before any bytes arrive, so an
+// upstream cannot make the gateway reserve memory for a length it never sends.
 const maxResponsePreallocBytes = 16 << 20
 
 // extractModel attempts to extract the model name from a request body
