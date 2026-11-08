@@ -68,7 +68,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 			},
 			{
 				Key: "upstream_set", Label: "Upstream headers to set", Input: pluginapi.InputTextarea, Default: "",
-				Help:        "One \"Name: value\" per line. Adds static headers to every provider call of the request that goes through the gateway's HTTP client, failover attempts, token counting and compaction included; the bedrock provider, which calls Bedrock Runtime through the AWS SDK, does not carry them (bedrock-mantle does). Applies to requests from clients: inference the gateway issues for its own work, such as a guardrail's judge, does not inherit them. Credential, transport, Anthropic-Beta and Idempotency-Key headers are rejected when the config loads.",
+				Help:        "One \"Name: value\" per line. Adds static headers to every provider call of the request that goes through the gateway's HTTP client, failover attempts, token counting and compaction included; the bedrock provider, which calls Bedrock Runtime through the AWS SDK, does not carry them (bedrock-mantle does). Applies to requests from clients: inference the gateway issues for its own work, such as a guardrail's judge, does not inherit them. Credential, transport, Anthropic-Beta and Idempotency-Key headers are rejected when the config loads. Takes effect in the prompt phase only; a response-phase run is after the provider call.",
 				Placeholder: "X-Tenant: acme",
 			},
 		},
