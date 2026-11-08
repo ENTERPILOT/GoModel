@@ -171,8 +171,8 @@ var terminalPayloadCases = []struct {
 	{name: "chat in-band error", kind: chatStream, payload: `{"error":{"message":"boom","type":"server_error"}}`, terminal: true},
 	{name: "chat null error member", kind: chatStream, payload: `{"error":null,"choices":[{"delta":{"content":"hi"}}]}`},
 	{name: "chat nested error member", kind: chatStream, payload: `{"choices":[{"delta":{"content":"hi"},"logprobs":{"error":"x"}}]}`},
-	{name: "chat escaped error key", kind: chatStream, payload: `{"error":{"message":"boom"}}`, terminal: true},
-	{name: "chat escaped finish_reason key", kind: chatStream, payload: `{"choices":[{"finish_reason":"stop"}]}`, terminal: true},
+	{name: "chat escaped error key", kind: chatStream, payload: `{"\u0065rror":{"message":"boom"}}`, terminal: true},
+	{name: "chat escaped finish_reason key", kind: chatStream, payload: `{"choices":[{"finish_\u0072eason":"stop"}]}`, terminal: true},
 	{name: "chat invalid JSON", kind: chatStream, payload: `{"choices":[{"finish_reason":"stop"}]`},
 	{name: "responses delta", kind: responsesStream, payload: `{"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"hi"}`, prefiltered: true},
 	{name: "responses item done", kind: responsesStream, payload: `{"type":"response.output_item.done","item":{"type":"message"}}`, prefiltered: true},
@@ -183,7 +183,7 @@ var terminalPayloadCases = []struct {
 	{name: "responses failed", kind: responsesStream, payload: `{"type":"response.failed","response":{}}`, terminal: true},
 	{name: "responses done", kind: responsesStream, payload: `{"type":"response.done"}`, terminal: true},
 	{name: "responses error event", kind: responsesStream, payload: `{"type":"error","code":"server_error","message":"boom"}`, terminal: true},
-	{name: "responses escaped type", kind: responsesStream, payload: `{"type":"response.completed"}`, terminal: true},
+	{name: "responses escaped type", kind: responsesStream, payload: `{"t\u0079pe":"response.\u0063ompleted"}`, terminal: true},
 	{name: "responses finish_reason is not terminal", kind: responsesStream, payload: `{"type":"response.output_text.delta","finish_reason":"stop"}`, prefiltered: true},
 }
 
