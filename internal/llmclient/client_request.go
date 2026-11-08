@@ -340,15 +340,21 @@ var pluginTransportHeaders = map[string]struct{}{
 }
 
 // pluginReservedProviderHeaders lists headers a provider negotiates with its
-// own hook and that a plugin would silently break by replacing.
+// own hook, or the gateway sets for the client, and that a plugin would
+// silently break by replacing.
 //
 // anthropic-beta selects Anthropic features, and subscription credentials must
 // carry oauth-2025-04-20 in it: the Anthropic provider adds that flag in its
 // header hook, which this merge runs after, so a plugin value would drop the
 // flag and the request would be rejected. It is denied here rather than inside
 // the provider because no provider-side code runs after this merge.
+//
+// Idempotency-Key carries the client's own key, forwarded below. A plugin value
+// would replace it, and a provider that deduplicates on it would treat
+// unrelated requests as retries of one call.
 var pluginReservedProviderHeaders = map[string]struct{}{
-	"Anthropic-Beta": {},
+	"Anthropic-Beta":  {},
+	"Idempotency-Key": {},
 }
 
 // pluginHeaderDenied reports whether the merge must refuse the header: it

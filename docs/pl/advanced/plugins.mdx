@@ -364,8 +364,9 @@ Co gateway z nimi robi:
   `Proxy-Connection`, `Proxy-Authenticate`, `Te`, `Trailer`, `Upgrade`, `Expect`),
   te, które opisują ciało zakodowane przez gateway (`Content-Type`,
   `Content-Encoding`), `Accept-Encoding`, które negocjuje kompresję odpowiedzi,
-  oraz `anthropic-beta`, które wybiera funkcje providera i musi zachować flagę
-  `oauth-2025-04-20` wymaganą przez dane uwierzytelniające subskrypcji.
+  `anthropic-beta`, które wybiera funkcje providera i musi zachować flagę
+  `oauth-2025-04-20` wymaganą przez dane uwierzytelniające subskrypcji, oraz
+  `Idempotency-Key`, który niesie własny klucz klienta.
 - Każda inna nazwa trafia na wire z wartością pluginu, zastępując nagłówek
   przenoszony przez request oraz ten, który provider ustawił sam. Chronione są tylko
   nazwy wymienione powyżej; pozostałe nagłówki providera nie.

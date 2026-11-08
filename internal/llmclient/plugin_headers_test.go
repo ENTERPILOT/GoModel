@@ -103,6 +103,7 @@ func TestBuildRequestDeniesPluginHeaders(t *testing.T) {
 	}
 	reserved := []string{
 		"Anthropic-Beta",
+		"Idempotency-Key",
 	}
 	credentials := []string{
 		"Authorization",
@@ -166,6 +167,35 @@ func TestBuildRequestKeepsProviderOAuthBetaFromPlugins(t *testing.T) {
 	req, err := client.buildRequest(ctx, Request{Method: http.MethodPost, Endpoint: "/v1/messages", Body: []byte(`{}`)})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"oauth-2025-04-20"}, req.Header.Values("Anthropic-Beta"))
+}
+
+// TestBuildRequestKeepsClientIdempotencyKeyFromPlugins proves a plugin cannot
+// replace the client's Idempotency-Key: one shared value would make a provider
+// that deduplicates on it treat unrelated requests as retries of one call.
+func TestBuildRequestKeepsClientIdempotencyKeyFromPlugins(t *testing.T) {
+	client := New(DefaultConfig("test", "http://upstream.test"), nil)
+	plugin := http.Header{"idempotency-key": {"from-plugin"}}
+
+	tests := []struct {
+		name      string
+		clientKey string
+		want      string
+	}{
+		{name: "client key", clientKey: "from-client", want: "from-client"},
+		{name: "no client key"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := core.WithPluginUpstreamHeaders(context.Background(), plugin)
+			if tt.clientKey != "" {
+				ctx = core.WithIdempotencyKey(ctx, tt.clientKey)
+			}
+
+			req, err := client.buildRequest(ctx, Request{Method: http.MethodPost, Endpoint: "/v1/chat/completions", Body: []byte(`{}`)})
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, req.Header.Get("Idempotency-Key"))
+		})
+	}
 }
 
 func TestBuildRequestPluginHeadersCannotOverrideCredentials(t *testing.T) {

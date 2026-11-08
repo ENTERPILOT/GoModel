@@ -365,8 +365,9 @@ Declared in the contract or the spec but not run by this release:
   `Headers.Upstream` was deferred when this ADR was written and no longer is:
   the host merges it into every provider call of the request — failover
   attempts, token counting and compaction included — minus the names that
-  carry credentials, frame the connection, describe the body, or select
-  provider features (`#1203`, which updated this section in place). Inference
+  carry credentials, frame the connection, describe the body, select
+  provider features, or carry the client's idempotency key (`#1203`, which
+  updated this section in place). Inference
   the gateway issues for its own work carries none of them.
 - `RouteRequest.Prompt` is nil; `RouteChoice.Reason` reaches debug logs
   only. Instance-scoped `secret` fields reach a route plugin redacted.

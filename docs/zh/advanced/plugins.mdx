@@ -259,7 +259,8 @@ func (p *tenantHint) OnPrompt(_ context.Context, x *pluginapi.Exchange) (plugina
   `x-goog-api-key`、`x-anthropic-api-key`、`xi-api-key`、`x-auth-token`、`x-access-token`、`x-gomodel-key`、`Cookie`、`Set-Cookie`）、
   决定连接的 Header（`Host`、`Content-Length`、`Transfer-Encoding`、`Connection`、`Keep-Alive`、`Proxy-Connection`、
   `Proxy-Authenticate`、`Te`、`Trailer`、`Upgrade`、`Expect`）、描述网关已编码请求体的 Header（`Content-Type`、`Content-Encoding`）、
-  协商响应压缩的 `Accept-Encoding`，以及选择提供商特性、且必须保留订阅凭据所需的 `oauth-2025-04-20` 标志的 `anthropic-beta`。
+  协商响应压缩的 `Accept-Encoding`、选择提供商特性且必须保留订阅凭据所需的 `oauth-2025-04-20` 标志的 `anthropic-beta`，
+  以及携带客户端自身幂等键的 `Idempotency-Key`。
 - 其他任何名称都会以插件的值发到线上，替换请求携带的 Header 以及提供商自己设置的 Header。
   只有上面列出的名称受保护；提供商其余 Header 不受保护。
 - host 在该阶段结束时把 Hook 的 Header 合并进请求状态，因此在提供商调用执行之后写入的值——来自 response 阶段的 Hook——不再影响它。

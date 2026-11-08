@@ -352,8 +352,9 @@ Was das Gateway damit macht:
   `Proxy-Connection`, `Proxy-Authenticate`, `Te`, `Trailer`, `Upgrade`, `Expect`),
   die den Body beschreiben, den das Gateway kodiert hat (`Content-Type`,
   `Content-Encoding`), `Accept-Encoding`, das die Kompression der Antwort aushandelt,
-  und `anthropic-beta`, das Provider-Features auswählt und das Flag
-  `oauth-2025-04-20` behalten muss, das Abo-Zugangsdaten brauchen.
+  `anthropic-beta`, das Provider-Features auswählt und das Flag
+  `oauth-2025-04-20` behalten muss, das Abo-Zugangsdaten brauchen, und
+  `Idempotency-Key`, das den eigenen Schlüssel des Clients trägt.
 - Jeder andere Name erreicht die Leitung mit dem Wert des Plugins und ersetzt einen
   Header des Requests sowie einen, den der Provider selbst gesetzt hat. Nur die oben
   genannten Namen sind geschützt; die übrigen Header des Providers nicht.
