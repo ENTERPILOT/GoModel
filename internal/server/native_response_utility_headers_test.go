@@ -26,14 +26,14 @@ func (upstreamHeaderPatcher) PatchChatRequest(_ context.Context, req *core.ChatR
 func (upstreamHeaderPatcher) PatchResponsesRequest(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesRequest, error) {
 	state := plugins.RequestStateFor(ctx)
 	exchange := state.NewExchange(ctx, pluginapi.Meta{})
-	exchange.Headers.Upstream = http.Header{"X-Edge-Proxy-Token": {"edge-token"}}
+	exchange.Headers.Upstream = http.Header{"Helicone-Property-Tenant": {"acme"}}
 	state.Finish(exchange)
 	return req, nil
 }
 
 // TestResponsesUtilityRoutesCarryPluginUpstreamHeaders proves that token
-// counting and compaction reach a provider behind an authenticating proxy with
-// the headers a prompt-phase plugin asked for, not only the inference routes.
+// counting and compaction reach the provider with the headers a prompt-phase
+// plugin asked for, not only the inference routes.
 func TestResponsesUtilityRoutesCarryPluginUpstreamHeaders(t *testing.T) {
 	provider := &mockProvider{
 		supportedModels: []string{"gpt-5-mini"},
@@ -58,6 +58,6 @@ func TestResponsesUtilityRoutesCarryPluginUpstreamHeaders(t *testing.T) {
 
 	require.Len(t, provider.capturedUtilityHeaders, 2)
 	for _, headers := range provider.capturedUtilityHeaders {
-		require.Equal(t, "edge-token", headers.Get("X-Edge-Proxy-Token"))
+		require.Equal(t, "acme", headers.Get("Helicone-Property-Tenant"))
 	}
 }

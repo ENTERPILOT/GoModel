@@ -293,8 +293,7 @@ func (s *nativeResponseService) utilityRequest(c *echo.Context) (*core.Responses
 
 	// The prompt chain above may have added headers to the provider call
 	// (Exchange.Headers.Upstream). Attach them to the live request like the
-	// inference paths do, so token counting and compaction reach a provider
-	// behind an authenticating proxy as well.
+	// inference paths do, so token counting and compaction carry them too.
 	applyPluginRequestHeaders(c)
 
 	providerType := ""

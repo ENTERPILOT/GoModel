@@ -14,12 +14,12 @@ func TestFinishKeepsPluginUpstreamHeaders(t *testing.T) {
 	state := NewRequestState()
 	x := state.NewExchange(context.Background(), pluginapi.Meta{})
 	x.Headers.Upstream = http.Header{
-		"X-Edge-Proxy-Token": {"edge-token"},
+		"Helicone-Property-Tenant": {"acme"},
 	}
 
 	state.Finish(x)
 
-	assert.Equal(t, http.Header{"X-Edge-Proxy-Token": {"edge-token"}}, state.UpstreamHeaders())
+	assert.Equal(t, http.Header{"Helicone-Property-Tenant": {"acme"}}, state.UpstreamHeaders())
 }
 
 func TestFinishMergesUpstreamHeadersAcrossExchanges(t *testing.T) {

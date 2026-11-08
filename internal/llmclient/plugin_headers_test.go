@@ -16,14 +16,14 @@ import (
 func TestBuildRequestAppliesPluginUpstreamHeaders(t *testing.T) {
 	client := New(DefaultConfig("test", "http://upstream.test"), nil)
 	ctx := core.WithPluginUpstreamHeaders(context.Background(), http.Header{
-		"X-Edge-Proxy-Token": {"edge-token"},
+		"Helicone-Property-Tenant": {"acme"},
 	})
 
 	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
 		t.Run(method, func(t *testing.T) {
 			req, err := client.buildRequest(ctx, Request{Method: method, Endpoint: "/v1/models"})
 			require.NoError(t, err)
-			assert.Equal(t, "edge-token", req.Header.Get("X-Edge-Proxy-Token"))
+			assert.Equal(t, "acme", req.Header.Get("Helicone-Property-Tenant"))
 		})
 	}
 }
@@ -55,8 +55,8 @@ func TestBuildRequestPluginOriginDropsPluginUpstreamHeaders(t *testing.T) {
 				ctx = core.WithRequestOrigin(ctx, tt.origin)
 			}
 			ctx = core.WithPluginUpstreamHeaders(ctx, http.Header{
-				"X-Edge-Proxy-Token": {"edge-token"},
-				"X-Judge-Trace":      {"plugin"},
+				"Helicone-Property-Tenant": {"acme"},
+				"X-Judge-Trace":            {"plugin"},
 			})
 
 			req, err := client.buildRequest(ctx, Request{
@@ -67,10 +67,10 @@ func TestBuildRequestPluginOriginDropsPluginUpstreamHeaders(t *testing.T) {
 			require.NoError(t, err)
 
 			if tt.wantPlugin {
-				assert.Equal(t, "edge-token", req.Header.Get("X-Edge-Proxy-Token"))
+				assert.Equal(t, "acme", req.Header.Get("Helicone-Property-Tenant"))
 				assert.Equal(t, "plugin", req.Header.Get("X-Judge-Trace"))
 			} else {
-				assert.Empty(t, req.Header.Get("X-Edge-Proxy-Token"))
+				assert.Empty(t, req.Header.Get("Helicone-Property-Tenant"))
 				assert.Empty(t, req.Header.Get("X-Judge-Trace"), "a plugin's own inference carries no plugin upstream header")
 			}
 			assert.Equal(t, "Bearer provider", req.Header.Get("Authorization"))
@@ -210,16 +210,16 @@ func TestBuildRequestPluginHeadersCannotOverrideCredentials(t *testing.T) {
 func TestBuildRequestPluginHeadersOverrideRequestHeaders(t *testing.T) {
 	client := New(DefaultConfig("test", "http://upstream.test"), nil)
 	ctx := core.WithPluginUpstreamHeaders(context.Background(), http.Header{
-		"X-Edge-Proxy-Token": {"from-plugin"},
+		"Helicone-Property-Tenant": {"from-plugin"},
 	})
 
 	req, err := client.buildRequest(ctx, Request{
 		Method:   http.MethodGet,
 		Endpoint: "/v1/models",
-		Headers:  http.Header{"X-Edge-Proxy-Token": {"from-request"}},
+		Headers:  http.Header{"Helicone-Property-Tenant": {"from-request"}},
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "from-plugin", req.Header.Get("X-Edge-Proxy-Token"))
+	assert.Equal(t, "from-plugin", req.Header.Get("Helicone-Property-Tenant"))
 }
 
 func TestBuildRequestWithoutPluginHeadersIsUnchanged(t *testing.T) {
@@ -248,14 +248,14 @@ func TestDoAppliesPluginUpstreamHeaders(t *testing.T) {
 		req.Header.Set("Authorization", "Bearer provider")
 	})
 	ctx := core.WithPluginUpstreamHeaders(context.Background(), http.Header{
-		"X-Edge-Proxy-Token": {"edge-token"},
-		"Authorization":      {"Bearer plugin"},
+		"Helicone-Property-Tenant": {"acme"},
+		"Authorization":            {"Bearer plugin"},
 	})
 
 	var result map[string]any
 	err := client.Do(ctx, Request{Method: http.MethodGet, Endpoint: "/v1/models"}, &result)
 	require.NoError(t, err)
 	got := <-received
-	assert.Equal(t, "edge-token", got.Get("X-Edge-Proxy-Token"))
+	assert.Equal(t, "acme", got.Get("Helicone-Property-Tenant"))
 	assert.Equal(t, "Bearer provider", got.Get("Authorization"))
 }
