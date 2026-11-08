@@ -2,18 +2,20 @@
 title: "Mistral AI"
 description: "Configure Mistral AI (La Plateforme) in GoModel, including reasoning models and how thinking output is normalized for chat clients."
 icon: "sparkles"
-keywords: ["Mistral", "La Plateforme", "magistral", "reasoning", "thinking", "provider setup"]
+keywords: ["Mistral", "La Plateforme", "reasoning", "thinking", "provider setup"]
 ---
 
 Mistral AI (La Plateforme) is served at `https://api.mistral.ai/v1` with an OpenAI-compatible
 API. GoModel routes chat completions, model listing, embeddings, and passthrough requests
 through the shared OpenAI adapter; the `/v1/responses` endpoint is translated through chat
-completions. Files and batches are not exposed for this provider.
+completions (Mistral also offers a native one, but serving it through chat lets the reasoning
+normalization below apply to every surface). Files and batches are not exposed for this
+provider.
 
 ## Reasoning (thinking) output
 
-On reasoning models (for example `mistral-large-latest`, `mistral-small-latest`, and hosted
-reasoning models such as Z.ai GLM), Mistral returns the assistant content as a **list of
+On reasoning models (for example `mistral-large-4-0` and `mistral-small-2603`, and hosted
+reasoning models such as `zai-glm-5-3`), Mistral returns the assistant content as a **list of
 typed chunks** — a `thinking` chunk for the reasoning trace and `text` chunks for the answer —
 in both buffered responses and SSE streams. That shape is not standard OpenAI chat output, and
 clients like SillyTavern render it as gibberish.
@@ -33,7 +35,7 @@ Send effort with the standard nested parameter; GoModel maps it to Mistral's fla
 
 ```json
 {
-  "model": "mistral-large-latest",
+  "model": "mistral-large-4-0",
   "messages": [{ "role": "user", "content": "What is 17 * 23?" }],
   "reasoning": { "effort": "high" }
 }
@@ -41,13 +43,15 @@ Send effort with the standard nested parameter; GoModel maps it to Mistral's fla
 
 Mistral's API-wide enum is `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and the
 value is passed through unchanged. Which levels a model accepts is model-specific — for
-example Mistral Large 4 takes `low`/`medium`/`high`, while hosted GLM models take
-`low`/`high`/`max` — so an unsupported level for the chosen model is rejected by Mistral
-itself, as with their own SDKs.
+example Mistral Large 4 takes `low`/`medium`/`high`, hosted GLM models take `low`/`high`/`max`,
+and `mistral-small-2603` also accepts `none` — so an unsupported level for the chosen model is
+rejected by Mistral itself, as with their own SDKs. On `zai-glm-5-3` the response is always a
+chunk list, whatever the effort value.
 
-When a client replays an earlier assistant turn, GoModel drops its `reasoning_content` and
-`mistral_content_chunks` members before forwarding, because Mistral rejects those unknown
-members with a 422.
+When a client replays an earlier assistant turn, GoModel sends the turn's reasoning back as a
+Mistral `thinking` chunk inside the message content — Mistral's guide warns that stripping the
+trace degrades output — and drops members Mistral cannot parse but the client echoed
+(`mistral_content_chunks`), which Mistral rejects with a 422.
 
 ## Configure
 
@@ -74,7 +78,7 @@ You can also override the base URL and model list with:
 
 ```bash
 MISTRAL_BASE_URL=https://api.mistral.ai/v1
-MISTRAL_MODELS=mistral-large-latest,mistral-small-latest,mistral-embed
+MISTRAL_MODELS=mistral-large-4-0,mistral-small-2603,mistral-embed
 ```
 
 <Note>
@@ -95,7 +99,7 @@ the OpenAI-compatible `/v1/chat/completions` endpoint:
 ```yaml
 virtual_models:
   - source: mistral
-    target: mistral/mistral-large-latest
+    target: mistral/mistral-large-4-0
 ```
 
 ## Embeddings

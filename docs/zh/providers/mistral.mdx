@@ -2,17 +2,18 @@
 title: "Mistral AI"
 description: "在 GoModel 中配置 Mistral AI（La Plateforme），包括推理模型以及思考输出如何为聊天客户端标准化。"
 icon: "sparkles"
-keywords: ["Mistral", "La Plateforme", "magistral", "推理", "思考", "提供商配置"]
+keywords: ["Mistral", "La Plateforme", "推理", "思考", "提供商配置"]
 ---
 
 Mistral AI（La Plateforme）通过 `https://api.mistral.ai/v1` 提供 OpenAI 兼容 API。GoModel
 通过共享的 OpenAI 适配器路由聊天补全、模型列表、Embedding 与透传请求；`/v1/responses`
-端点通过聊天补全进行翻译。该提供商不提供文件和批处理。
+端点通过聊天补全进行翻译（Mistral 也提供原生端点；经由聊天翻译可以保证下文的推理
+标准化在每个接口上都生效）。该提供商不提供文件和批处理。
 
 ## 推理（思考）输出
 
-在推理模型上（例如 `mistral-large-latest`、`mistral-small-latest`，以及托管的推理模型如
-Z.ai GLM），Mistral 将助手内容作为**类型化分块列表**返回——推理轨迹是 `thinking` 分块，
+在推理模型上（例如 `mistral-large-4-0`、`mistral-small-2603`，以及托管的推理模型如
+`zai-glm-5-3`），Mistral 将助手内容作为**类型化分块列表**返回——推理轨迹是 `thinking` 分块，
 回答是 `text` 分块——同时在缓冲响应和 SSE 流中。这种格式不是标准的 OpenAI 聊天输出，
 SillyTavern 等客户端会将其渲染为乱码。
 
@@ -29,7 +30,7 @@ GoModel 的 `mistral` 提供商会自动将其转换为标准格式：
 
 ```json
 {
-  "model": "mistral-large-latest",
+  "model": "mistral-large-4-0",
   "messages": [{ "role": "user", "content": "17 * 23 是多少？" }],
   "reasoning": { "effort": "high" }
 }
@@ -37,11 +38,11 @@ GoModel 的 `mistral` 提供商会自动将其转换为标准格式：
 
 Mistral 的 API 级枚举为 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`，
 该值将原样透传。每个模型接受哪些档位因模型而异——例如 Mistral Large 4 接受
-`low`/`medium`/`high`，托管的 GLM 模型接受 `low`/`high`/`max`——因此为所选模型传入不
-支持的档位会被 Mistral 自身拒绝，这与使用 Mistral 自家 SDK 的行为一致。
+`low`/`medium`/`high`，托管的 GLM 模型接受 `low`/`high`/`max`，`mistral-small-2603` 还
+接受 `none`——因此为所选模型传入不支持的档位会被 Mistral 自身拒绝，这与使用 Mistral
+自家 SDK 的行为一致。在 `zai-glm-5-3` 上，无论推理力度为何，响应始终是分块列表。
 
-当客户端回放先前的助手回合时，GoModel 会在转发前删除其 `reasoning_content` 与
-`mistral_content_chunks` 成员，因为 Mistral 会以 422 拒绝这些未知成员。
+当客户端回放先前的助手回合时，GoModel 会将该回合的推理作为 Mistral `thinking` 分块放回消息内容中——Mistral 的指南警告，删除推理痕迹会降低输出质量——并丢弃 Mistral 无法解析的成员（`mistral_content_chunks`，Mistral 对它们会返回 422）。
 
 ## 配置
 
@@ -68,7 +69,7 @@ providers:
 
 ```bash
 MISTRAL_BASE_URL=https://api.mistral.ai/v1
-MISTRAL_MODELS=mistral-large-latest,mistral-small-latest,mistral-embed
+MISTRAL_MODELS=mistral-large-4-0,mistral-small-2603,mistral-embed
 ```
 
 <Note>
@@ -88,7 +89,7 @@ MISTRAL_MODELS=mistral-large-latest,mistral-small-latest,mistral-embed
 ```yaml
 virtual_models:
   - source: mistral
-    target: mistral/mistral-large-latest
+    target: mistral/mistral-large-4-0
 ```
 
 ## Embedding

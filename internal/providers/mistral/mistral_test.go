@@ -199,8 +199,10 @@ func TestStreamChatCompletion_FlattensThinkingDeltas(t *testing.T) {
 }
 
 // The request dialect: nested reasoning becomes flat reasoning_effort (passed
-// through, e.g. "max" for hosted GLM models), and a replayed assistant turn's
-// reasoning_content is stripped because Mistral rejects it with a 422.
+// through, e.g. "max" for hosted GLM models), a replayed assistant turn's
+// reasoning travels as a Mistral thinking chunk inside content (per Mistral's
+// guide, stripping it degrades output), and members Mistral cannot parse are
+// removed from the wire.
 func TestChatCompletion_AdaptsRequest(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
 	provider := newTestProvider(server)
@@ -211,6 +213,7 @@ func TestChatCompletion_AdaptsRequest(t *testing.T) {
 			{Role: "user", Content: "hi"},
 			{Role: "assistant", Content: "hello", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 				reasoningContentKey: json.RawMessage(`"earlier thoughts"`),
+				unknownChunksKey:    json.RawMessage(`[{"type":"reference"}]`),
 			})},
 			{Role: "user", Content: "again"},
 		},
@@ -225,8 +228,82 @@ func TestChatCompletion_AdaptsRequest(t *testing.T) {
 	require.True(t, ok)
 	assistant, ok := messages[1].(map[string]any)
 	require.True(t, ok)
-	assert.Equal(t, "hello", assistant["content"])
 	assert.NotContains(t, assistant, reasoningContentKey, "Mistral 422s on a replayed reasoning_content member")
+	assert.NotContains(t, assistant, unknownChunksKey, "vendor members are not valid on a request")
+	content, ok := assistant["content"].([]any)
+	require.True(t, ok, "replayed content = %#v, want chunk list", assistant["content"])
+	assert.JSONEq(t, `{"type":"thinking","thinking":[{"type":"text","text":"earlier thoughts"}]}`, string(mustJSON(content[0])))
+	assert.JSONEq(t, `{"type":"text","text":"hello"}`, string(mustJSON(content[1])))
+}
+
+// The same replay adaptation must reach the streaming path, which goes
+// through the shared adapter's own request pipeline.
+func TestStreamChatCompletion_AdaptsRequest(t *testing.T) {
+	server, capture := providertest.SSEServer(t, providertest.ChatChunkSSE)
+	provider := newTestProvider(server)
+
+	stream, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
+		Model: "mistral-large-4-0",
+		Messages: []core.Message{{Role: "assistant", Content: "hello", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			reasoningContentKey: json.RawMessage(`"earlier thoughts"`),
+		})}},
+		Stream: true,
+	})
+	require.NoError(t, err)
+	_, err = io.ReadAll(stream)
+	require.NoError(t, err)
+	require.NoError(t, stream.Close())
+
+	wire := capture.Last(t).JSON(t)
+	messages, ok := wire["messages"].([]any)
+	require.True(t, ok)
+	assistant, ok := messages[0].(map[string]any)
+	require.True(t, ok)
+	content, ok := assistant["content"].([]any)
+	require.True(t, ok, "replayed content = %#v, want chunk list", assistant["content"])
+	assert.JSONEq(t, `{"type":"thinking","thinking":[{"type":"text","text":"earlier thoughts"}]}`, string(mustJSON(content[0])))
+	assert.JSONEq(t, `{"type":"text","text":"hello"}`, string(mustJSON(content[1])))
+}
+
+// The Responses API is served through chat-completions translation, so the
+// reasoning flattened out of Mistral's thinking chunks must surface as a
+// reasoning item (buffered) and reasoning deltas (streamed).
+func TestResponses_PreservesFlattenedThinking(t *testing.T) {
+	server, _ := providertest.JSONServer(t, http.StatusOK, thinkingCompletionJSON)
+	provider := newTestProvider(server)
+
+	resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
+		Model:  "mistral-large-4-0",
+		Input:  "What is 17 * 23?",
+		Stream: false,
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, resp.Output)
+	reasoning := resp.Output[0]
+	assert.Equal(t, "reasoning", reasoning.Type, "the flattened reasoning must lead the output")
+	require.NotEmpty(t, reasoning.Content)
+	assert.Equal(t, "reasoning_text", reasoning.Content[0].Type)
+	assert.Equal(t, "17 * 23 = 391.", reasoning.Content[0].Text)
+}
+
+func TestStreamResponses_PreservesFlattenedThinking(t *testing.T) {
+	server, _ := providertest.SSEServer(t, thinkingChunkSSE)
+	provider := newTestProvider(server)
+
+	stream, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
+		Model:  "mistral-large-4-0",
+		Input:  "What is 17 * 23?",
+		Stream: true,
+	})
+	require.NoError(t, err)
+	body, err := io.ReadAll(stream)
+	require.NoError(t, err)
+	require.NoError(t, stream.Close())
+
+	out := string(body)
+	assert.Contains(t, out, "response.reasoning", "reasoning must stream as Responses reasoning events")
+	assert.Contains(t, out, "Let me compute. ")
+	assert.Contains(t, out, "17*23=391.")
 }
 
 // A request without reasoning and without replayed thinking must reach the
@@ -244,4 +321,5 @@ func TestChatCompletion_AdaptsRequest_Noop(t *testing.T) {
 	wire := capture.Last(t).JSON(t)
 	assert.NotContains(t, wire, "reasoning_effort")
 	assert.NotContains(t, wire, "reasoning")
+	assert.NotContains(t, wire, "stream_options")
 }

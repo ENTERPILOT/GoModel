@@ -54,6 +54,11 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 	return &Provider{openai.NewChatCompatible(cfg.APIKey, opts, openai.CompatibleProviderConfig{
 		ProviderName: "mistral",
 		BaseURL:      providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
+		// The chat paths that go through the shared adapter (streaming, and
+		// Responses via chat) pick the dialect up there; ChatCompletion applies
+		// the core adaptation itself because it decodes the raw body.
+		AdaptChatRequest: adaptChatRequest,
+		RequestMutator:   adaptChatWire,
 	})}
 }
 
@@ -83,7 +88,8 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 		return nil, err
 	}
 	var resp core.ChatResponse
-	if err := json.Unmarshal(flattenThinkingChunks(raw), &resp); err != nil {
+	flattened, _ := flattenThinkingChunks(raw)
+	if err := json.Unmarshal(flattened, &resp); err != nil {
 		return nil, core.NewProviderError(p.ProviderName(), http.StatusBadGateway, "failed to decode Mistral chat completion response", err)
 	}
 	core.EnsureModel(&resp.Model, req.Model)
@@ -92,18 +98,14 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 
 // StreamChatCompletion returns Mistral's SSE stream wrapped so that every
 // chunk whose delta.content is a chunk array is rewritten to the standard
-// content + reasoning_content delta shape.
+// content + reasoning_content delta shape. The embedded adapter applies the
+// request adaptations (adaptChatRequest, allowed_tools narrowing, the wire
+// patch) itself.
 func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
 	if req == nil {
 		return nil, core.NewInvalidRequestError("chat request is required", nil)
 	}
-	adapted, err := adaptChatRequest(req)
-	if err != nil {
-		return nil, err
-	}
-	// The embedded adapter applies the shared allowed_tools narrowing and the
-	// SSE/buffered-JSON normalization; the thinking flattening wraps on top.
-	stream, err := p.ChatCompatible.StreamChatCompletion(ctx, adapted)
+	stream, err := p.ChatCompatible.StreamChatCompletion(ctx, req)
 	if err != nil {
 		return nil, err
 	}

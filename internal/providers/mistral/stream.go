@@ -1,7 +1,6 @@
 package mistral
 
 import (
-	"bytes"
 	"io"
 
 	"github.com/enterpilot/gomodel/internal/streaming"
@@ -99,8 +98,8 @@ func (s *thinkingChunkStream) emit(raw streaming.RawEvent) {
 		s.out = append(s.out, raw.Raw...)
 		return
 	}
-	converted := flattenThinkingChunks(raw.Data)
-	if bytes.Equal(converted, raw.Data) {
+	converted, changed := flattenThinkingChunks(raw.Data)
+	if !changed {
 		s.out = append(s.out, raw.Raw...)
 		return
 	}
