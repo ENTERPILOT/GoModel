@@ -310,6 +310,7 @@ Files are retained as long as the audit entries that reference them
 | `LOGGING_LOG_AUDIO_BODIES`        | Log audio endpoint inputs/outputs          | `false` |
 | `LOGGING_LOG_IMAGE_BODIES`        | Log image endpoint inputs/outputs          | `false` |
 | `LOGGING_LOG_IMAGE_BODIES_SCOPE`  | Which image bytes to store: `all`, `input`, `output` | `all` |
+| `LOGGING_LOG_EMBEDDING_BODIES`    | Log embeddings request/response bodies (off: metadata only) | `true`  |
 | `LOGGING_LOG_HEADERS`             | Log headers (sensitive ones auto-redacted) | `true`  |
 | `LOGGING_ONLY_MODEL_INTERACTIONS` | Only log AI model endpoints                | `true`  |
 | `LOGGING_BUFFER_SIZE`             | In-memory buffer before flush              | `1000`  |
@@ -348,8 +349,9 @@ to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
 
 <Warning>
   When `LOGGING_LOG_BODIES` is enabled, request and response bodies are stored
-  in full. These may contain sensitive data such as PII or API keys embedded in
-  prompts.
+  in full, except where the per-endpoint settings below drop them or replace
+  them with placeholders. These may contain sensitive data such as PII or API
+  keys embedded in prompts.
 </Warning>
 
 <Note>
@@ -378,6 +380,19 @@ to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
   audio bodies (the speech response and the transcription upload, which keeps its
   metadata) are recorded as a lightweight `{__audio__, content_type, bytes, stored: false}`
   placeholder; when body logging is off, no audio body is stored at all.
+</Note>
+
+<Note>
+  `LOGGING_LOG_EMBEDDING_BODIES` refines `LOGGING_LOG_BODIES` for embeddings —
+  it has no effect unless body logging is enabled. It covers `/v1/embeddings`
+  and provider passthrough calls to an embeddings endpoint (`/p/{provider}/.../embeddings`,
+  llama.cpp `/embedding`, Cohere and Ollama `.../embed`, Gemini `:embedContent` and
+  `:batchEmbedContents`). Embedding inputs
+  can be whole documents or base64 images and the responses are float vectors,
+  so bulk indexing jobs grow the audit store quickly. When body logging is on
+  but this is off, embedding entries keep their metadata (model, provider,
+  status, timing, user path, usage) and drop the request and response bodies.
+  It defaults to `true`, which keeps the earlier behaviour.
 </Note>
 
 <Note>

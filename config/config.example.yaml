@@ -284,6 +284,7 @@ logging:
   # log_audio_bodies: false # embed audio bytes for /v1/audio/* entries (needs log_bodies)
   # log_image_bodies: false # embed image bytes for /v1/images/* entries (needs log_bodies)
   # log_image_bodies_scope: all # all | input | output
+  # log_embedding_bodies: true # store /v1/embeddings and /p/{provider}/... embeddings request/response bodies; false keeps metadata only (needs log_bodies)
   log_headers: true
   buffer_size: 1000
   flush_interval: 5 # seconds
