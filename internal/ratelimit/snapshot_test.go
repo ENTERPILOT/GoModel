@@ -3,7 +3,6 @@ package ratelimit
 import (
 	"fmt"
 	"slices"
-	"sync"
 	"testing"
 	"time"
 
@@ -121,47 +120,25 @@ func TestSnapshotSkipsCountersRemovedSinceTheirChange(t *testing.T) {
 	}
 }
 
-// BenchmarkAdmitDuringSnapshot runs one flush's snapshot over 100k idle
-// per-child counters while eight goroutines each admit a few requests, and
-// reports the admits' p99 latency: how long admission stalls behind the
-// snapshot holding the mutex.
+// BenchmarkAdmitDuringSnapshot measures how long one flush's snapshot over
+// 100k per-child counters, one of them changed since the previous flush,
+// holds the admission mutex. snapshot does all its work under l.mu, so this
+// hold time is exactly the stall an admit arriving during the snapshot sees;
+// timing the hold directly avoids racing goroutines for the lock and keeps
+// admit-to-admit contention out of the number.
 func BenchmarkAdmitDuringSnapshot(b *testing.B) {
 	now := time.Unix(1_700_000_000, 0).UTC()
 	l, template, children := childLimiter(b, 100_000, now)
 	rules := []Rule{template}
 
-	const workers, admits = 8, 16
-	latencies := make([][]time.Duration, workers)
+	var held time.Duration
+	i := 0
 	for b.Loop() {
-		start := make(chan struct{})
-		var wg sync.WaitGroup
-		wg.Go(func() {
-			<-start
-			l.snapshot(rules)
-		})
-		for w := range workers {
-			wg.Go(func() {
-				admit := []Rule{children[w]}
-				<-start
-				for range admits {
-					began := time.Now()
-					_, _, _ = l.admit(admit, now)
-					latencies[w] = append(latencies[w], time.Since(began))
-				}
-			})
-		}
-		close(start)
-		wg.Wait()
+		_, _, _ = l.admit([]Rule{children[i%len(children)]}, now)
+		i++
+		began := time.Now()
+		l.snapshot(rules)
+		held += time.Since(began)
 	}
-	b.StopTimer()
-
-	var all []time.Duration
-	for _, worker := range latencies {
-		all = append(all, worker...)
-	}
-	if len(all) == 0 {
-		return
-	}
-	slices.Sort(all)
-	b.ReportMetric(float64(all[len(all)*99/100].Nanoseconds()), "p99-admit-ns")
+	b.ReportMetric(float64(held.Nanoseconds())/float64(i), "lock-hold-ns/op")
 }
