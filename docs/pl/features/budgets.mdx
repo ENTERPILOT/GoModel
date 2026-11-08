@@ -33,6 +33,15 @@ Używaj budżetów, gdy potrzebujesz limitów takich jak:
   gdy globalna funkcja budżetów jest włączona.
 </Info>
 
+Budżety są limitami miękkimi. Request jest dopuszczany na podstawie już
+zarejestrowanych wydatków, a użycie jest zapisywane partiami, co
+`USAGE_FLUSH_INTERVAL` (domyślnie 5 s), więc requesty dopuszczone w tym oknie
+oraz requesty wciąż trwające w chwili osiągnięcia limitu kończą się i są
+naliczane. Spodziewaj się przekroczenia o mniej więcej ruch z jednego interwału
+flush i zostaw zapas, gdy budżet jest limitem kredytowym klienta. Wpisy użycia
+odrzucone, bo bufor (`USAGE_BUFFER_SIZE`) jest pełny, są logowane jako
+ostrzeżenie i nigdy nie są liczone.
+
 ## Włącz budżety
 
 Budżety są domyślnie włączone:

@@ -49,6 +49,7 @@ func NewRedisStore(cfg RedisStoreConfig) (*RedisStore, error) {
 		return nil, fmt.Errorf("invalid redis URL: %w", err)
 	}
 	opts.Dialer = redisDialer(opts.TLSConfig)
+	applyRedisTimeouts(opts)
 	client := redis.NewClient(opts)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -62,6 +63,26 @@ func NewRedisStore(cfg RedisStoreConfig) (*RedisStore, error) {
 	}
 	slog.Info("redis store connected", "prefix", cfg.Prefix, "ttl", ttl)
 	return &RedisStore{client: client, prefix: cfg.Prefix, ttl: ttl}, nil
+}
+
+// redisOpTimeout bounds one Redis read or write when the URL sets no timeout
+// of its own. The store is a cache: a Redis that stops answering should cost
+// a request about this much, not go-redis's 3 s per operation, and must not
+// hold a readiness probe past its own deadline.
+const redisOpTimeout = time.Second
+
+// applyRedisTimeouts makes go-redis honor context deadlines, so a request's
+// or a probe's deadline ends a call to a hung Redis, and shortens the read
+// and write timeouts the URL left at their defaults (read_timeout and
+// write_timeout query parameters still win).
+func applyRedisTimeouts(opts *redis.Options) {
+	opts.ContextTimeoutEnabled = true
+	if opts.ReadTimeout == 0 {
+		opts.ReadTimeout = redisOpTimeout
+	}
+	if opts.WriteTimeout == 0 {
+		opts.WriteTimeout = redisOpTimeout
+	}
 }
 
 // Get retrieves value by key.

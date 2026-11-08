@@ -27,7 +27,7 @@ func sampleInvoice() *usage.Invoice {
 	subtotal := line.InvoiceAmounts
 	subtotal.Requests, subtotal.InputTokens = 3, 300
 	return &usage.Invoice{
-		StartDate: "2026-03-01", EndDate: "2026-03-31", Currency: usage.InvoiceCurrency, Parent: "/customers",
+		StartDate: "2026-03-01", EndDate: "2026-03-31", TimeZone: "UTC", Currency: usage.InvoiceCurrency, Parent: "/customers",
 		Customers: []usage.InvoiceCustomer{{Customer: "/customers/acme", Lines: []usage.InvoiceLine{unpriced, line}, Subtotal: subtotal}},
 		Total:     subtotal,
 	}
@@ -79,11 +79,11 @@ func TestUsageInvoice_CSV(t *testing.T) {
 	records, err := csv.NewReader(strings.NewReader(rec.Body.String())).ReadAll()
 	require.NoError(t, err)
 	assert.Equal(t, [][]string{
-		{"row_type", "period_start", "period_end", "currency", "customer", "model", "provider", "requests", "input_tokens", "output_tokens", "provider_cost", "billed_cost", "effective_markup_percent"},
-		{"item", "2026-03-01", "2026-03-31", "USD", "/customers/acme", "'=cmd()", "anthropic", "1", "100", "0", "", "", ""},
-		{"item", "2026-03-01", "2026-03-31", "USD", "/customers/acme", "gpt-5", "primary", "2", "200", "20", "3", "4.1", "36.6667"},
-		{"subtotal", "2026-03-01", "2026-03-31", "USD", "/customers/acme", "", "", "3", "300", "20", "3", "4.1", "36.6667"},
-		{"total", "2026-03-01", "2026-03-31", "USD", "", "", "", "3", "300", "20", "3", "4.1", "36.6667"},
+		{"row_type", "period_start", "period_end", "currency", "customer", "model", "provider", "requests", "input_tokens", "output_tokens", "provider_cost", "billed_cost", "effective_markup_percent", "time_zone"},
+		{"item", "2026-03-01", "2026-03-31", "USD", "/customers/acme", "'=cmd()", "anthropic", "1", "100", "0", "", "", "", "UTC"},
+		{"item", "2026-03-01", "2026-03-31", "USD", "/customers/acme", "gpt-5", "primary", "2", "200", "20", "3", "4.1", "36.6667", "UTC"},
+		{"subtotal", "2026-03-01", "2026-03-31", "USD", "/customers/acme", "", "", "3", "300", "20", "3", "4.1", "36.6667", "UTC"},
+		{"total", "2026-03-01", "2026-03-31", "USD", "", "", "", "3", "300", "20", "3", "4.1", "36.6667", "UTC"},
 	}, records)
 }
 
@@ -100,8 +100,22 @@ func TestUsageInvoice_DisabledReaderReturnsEmptyInvoice(t *testing.T) {
 	c, rec := echotest.Get(t, "/admin/usage/invoice?format=json&start_date=2026-03-01&end_date=2026-03-31")
 	require.NoError(t, h.UsageInvoice(c))
 	require.Equal(t, http.StatusOK, rec.Code)
-	assert.JSONEq(t, `{"start_date":"2026-03-01","end_date":"2026-03-31","currency":"USD","customers":[],
+	assert.JSONEq(t, `{"start_date":"2026-03-01","end_date":"2026-03-31","time_zone":"UTC","currency":"USD","customers":[],
 		"total":{"requests":0,"input_tokens":0,"output_tokens":0,"provider_cost":null,"billed_cost":null,"effective_markup_percent":null}}`, rec.Body.String())
+}
+
+func TestUsageInvoice_TimeZoneIsReported(t *testing.T) {
+	h := invoiceHandler(nil, true, true)
+	c, rec := echotest.Get(t, "/admin/usage/invoice?start_date=2026-10-01&end_date=2026-10-31")
+	c.Request().Header.Set(dashboardTimeZoneHeader, "America/Los_Angeles")
+	require.NoError(t, h.UsageInvoice(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	assert.Equal(t, `attachment; filename="gomodel-invoice-2026-10-01-to-2026-10-31-America-Los_Angeles.csv"`, rec.Header().Get("Content-Disposition"))
+	records, err := csv.NewReader(strings.NewReader(rec.Body.String())).ReadAll()
+	require.NoError(t, err)
+	require.Len(t, records, 2)
+	assert.Equal(t, "America/Los_Angeles", records[1][len(records[1])-1])
 }
 
 func TestUsageInvoice_Scope(t *testing.T) {

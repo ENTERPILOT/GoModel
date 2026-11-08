@@ -60,6 +60,8 @@ func TestInitErrors(t *testing.T) {
 		{"cookie remove", `{"request_remove": "Cookie"}`, `header "Cookie" carries credentials`},
 		{"set-cookie add", `{"response_add": "Set-Cookie: a=b"}`, `header "Set-Cookie" carries credentials`},
 		{"api key case insensitive", `{"upstream_set": "X-API-KEY: k"}`, `header "X-API-KEY" carries credentials`},
+		{"api key with underscores", `{"upstream_set": "X_Api_Key: k"}`, `header "X_Api_Key" carries credentials`},
+		{"proxy credential", `{"upstream_set": "Helicone-Auth: Bearer k"}`, `header "Helicone-Auth" carries credentials`},
 		{"token-ish set", `{"upstream_set": "X-Session-Token: k"}`, `header "X-Session-Token" looks like a credential`},
 		{"secret-ish add", `{"response_add": "X-Client-Secret: k"}`, `looks like a credential`},
 		{"line number", `{"request_set": "X-A: 1\n\n# comment\nbroken"}`, "request_set line 4"},

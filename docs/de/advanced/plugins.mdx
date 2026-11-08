@@ -279,7 +279,7 @@ Jeder Hook erhält einen `*pluginapi.Exchange`, in jeder Phase eines Requests da
 | `Prompt` | `*Prompt` | die Konversation (`Messages` mit stabilen IDs und typisierten `Parts`: Text, Bild, Audio, Datei, Tool Call, Tool-Ergebnis, Reasoning, Refusal, opak), `Tools`, `Params`, Roh-Body. Bearbeitung über `SetText`, `SetMedia`, `SetToolArguments`, `SetToolResult`, `Insert`, `Append`, `Remove`, `SetParam`; `TextTargets(roles...)` listet jeden Textteil auf, einschließlich Text in Tool-Ergebnissen, und `SetTargetText` schreibt einen davon zurück |
 | `Response` | `*Completion` | die Response, `nil` bis zur Phase `response`: `Choices` mit demselben `Part`-Modell, `Usage`, Roh-Body. Bearbeitung über `SetText`, `ReplaceText`, `SetFinishReason`, `SetToolArguments`; `TextTargets` und `SetTargetText` funktionieren wie bei `Prompt` |
 | `Stream` | `*StreamState` | bisher angesammelter Text pro Choice und die Anzahl der Events; `nil` bei Requests ohne Streaming |
-| `Headers` | `*Headers` | `Request` (eingehend, Zugangsdaten geschwärzt; Änderungen in der Phase `prompt` gelten für den laufenden Request bei späteren Plugins und beim Request-Logging, nicht für den Provider-Aufruf), `Response` (wird auf die Client-Response angewendet; ein auf den leeren String gesetzter Header wird entfernt, einschließlich solcher, die das Gateway hinzufügt, wie `X-Request-Id`), `Upstream` (wird mit jeder Provider-Anfrage des Requests gesendet, die über den HTTP-Client des Gateways läuft — `bedrock` ausgenommen —, einschließlich Failover-Versuchen sowie Aufrufen zur Token-Zählung und Kompaktierung; Header mit Zugangsdaten, Header, die die Verbindung oder den Body bestimmen, `Accept-Encoding`, `anthropic-beta` und `Idempotency-Key` werden abgelehnt; Anfragen, die das Gateway für eigene Zwecke stellt, tragen keine dieser Header) |
+| `Headers` | `*Headers` | `Request` (eingehend, Zugangsdaten geschwärzt; Änderungen in der Phase `prompt` gelten für den laufenden Request bei späteren Plugins und beim Request-Logging, nicht für den Provider-Aufruf), `Response` (wird auf die Client-Response angewendet; ein auf den leeren String gesetzter Header wird entfernt, einschließlich solcher, die das Gateway hinzufügt, wie `X-Request-Id`), `Upstream` (wird mit jeder Provider-Anfrage des Requests gesendet, die über den HTTP-Client des Gateways läuft; siehe [Upstream-Header](#upstream-header)) |
 | `Values` | `Values` | Request-bezogener Speicher, den alle Hooks des Requests gemeinsam nutzen; stellen Sie Keys den Plugin-Namen voran |
 
 Änderungen erfolgen über Methoden, nicht über Feldzuweisungen, sodass GoModel nur das neu kodiert,
@@ -315,8 +315,8 @@ request-bezogene Routing- oder Abrechnungs-Eigenschaft, die das Upstream erwarte
 etwa die von Helicone, oder ein organisatorisches Tag, nach dem ein Gateway vor dem
 Provider routet. Zugangsdaten für einen Provider gehören nicht hierher: Header mit
 Zugangsdaten werden abgelehnt, ebenso die übrigen Namen, die dem Gateway gehören und
-unten aufgeführt sind. Das Host loggt nur, wie viele Header ein Plugin
-gesetzt hat, nie deren Werte. Setzen Sie die Header in einem Hook der Phase `prompt`,
+unten aufgeführt sind. Das Host loggt auf Debug-Level die Anzahl der
+Upstream-Header eines Requests, nie deren Werte. Setzen Sie die Header in einem Hook der Phase `prompt`,
 bevor der Provider-Aufruf läuft. Die Map ist bereits angelegt: Rufen Sie `Set` darauf
 auf, statt eine neue zuzuweisen, damit Header, die frühere Plugins der Kette unter
 anderen Namen geschrieben haben, erhalten bleiben:
@@ -332,8 +332,9 @@ func (p *tenantHint) OnPrompt(_ context.Context, x *pluginapi.Exchange) (plugina
 Was das Gateway damit macht:
 
 - Jeder Provider-Versuch des Requests trägt sie, einschließlich Failover auf einen
-  anderen Provider, ebenso die Aufrufe zur Token-Zählung und Kompaktierung, die der
-  Request auslöst. Jeder Versuch sendet sie an das für diesen Versuch gewählte
+  anderen Provider. Die Responses-Routen `input_tokens` und `compact` durchlaufen
+  die Phase `prompt` selbst, also tragen auch ihre Provider-Aufrufe die Header;
+  `/v1/messages/count_tokens` durchläuft keine Plugin-Phase und trägt keine. Jeder Versuch sendet sie an das für diesen Versuch gewählte
   Upstream: Ein Failover kann auf einen anderen Provider und eine andere Base-URL
   auflösen, und die Header folgen ihm. Jeder Aufruf, der über den HTTP-Client des
   Gateways läuft, wohlgemerkt; der Provider `bedrock`, der Bedrock Runtime über das
@@ -350,14 +351,18 @@ Was das Gateway damit macht:
 - Diese Namen werden abgelehnt statt zusammengeführt: Header mit Zugangsdaten
   (`Authorization`, `Proxy-Authorization`, `x-api-key`, `api-key`, `x-goog-api-key`,
   `x-anthropic-api-key`, `xi-api-key`, `x-auth-token`, `x-access-token`,
-  `x-gomodel-key`, `Cookie`, `Set-Cookie`), die die Verbindung rahmen (`Host`,
+  `x-gomodel-key`, `Cookie`, `Set-Cookie` sowie die Schlüssel der AI-Gateways, auf
+  die eine Base-URL zeigen kann: `Helicone-Auth`, `cf-aig-authorization`,
+  `x-portkey-api-key`, `Ocp-Apim-Subscription-Key`), die die Verbindung rahmen (`Host`,
   `Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`,
   `Proxy-Connection`, `Proxy-Authenticate`, `Te`, `Trailer`, `Upgrade`, `Expect`),
   die den Body beschreiben, den das Gateway kodiert hat (`Content-Type`,
   `Content-Encoding`), `Accept-Encoding`, das die Kompression der Antwort aushandelt,
   `anthropic-beta`, das Provider-Features auswählt und das Flag
   `oauth-2025-04-20` behalten muss, das Abo-Zugangsdaten brauchen, und
-  `Idempotency-Key`, das den eigenen Schlüssel des Clients trägt.
+  `Idempotency-Key`, das den eigenen Schlüssel des Clients trägt. Namen werden ohne
+  Beachtung der Groß-/Kleinschreibung verglichen, wobei `_` als `-` gilt, also wird
+  auch `X_Api_Key` abgelehnt.
 - Jeder andere Name erreicht die Leitung mit dem Wert des Plugins und ersetzt einen
   Header des Requests sowie einen, den der Provider selbst gesetzt hat. Ein Name
   ohne Werte entfernt den Header aus dem Aufruf; `Set(name, "")` sendet ihn leer.

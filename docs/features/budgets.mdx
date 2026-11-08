@@ -33,6 +33,14 @@ Use budgets when you want limits such as:
   when the global budget feature is on.
 </Info>
 
+Budgets are soft limits. A request is admitted on the spend already recorded,
+and usage is written in batches, every `USAGE_FLUSH_INTERVAL` (5 s by default),
+so requests admitted within that window, and requests still running when a
+limit is reached, complete and are charged. Expect an overshoot of about one
+flush interval's traffic, and leave headroom when a budget is a customer's
+credit limit. Usage entries dropped because the buffer (`USAGE_BUFFER_SIZE`) is
+full are logged as a warning and never counted.
+
 ## Enable budgets
 
 Budgets are enabled by default:

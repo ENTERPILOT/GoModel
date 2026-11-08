@@ -399,9 +399,11 @@ prompt 阶段只运行一次，因此故障转移尝试会收到相同的文本�
 | `response_set` | 替换发送给客户端的响应上的某个 Header。 |
 | `response_add` | 向客户端响应 Header 追加一个值，保留已有值。即使实例在两个阶段都运行，每个请求也只应用一次。 |
 | `response_remove` | 从客户端响应中删除某个 Header，包括 GoModel 自身添加的 Header（例如 `X-Request-Id`）。 |
-| `upstream_set` | 合并到该请求的每一次提供商调用中的静态 Header（前提是经由网关的 HTTP 客户端发出：包括故障转移尝试、token 计数和压缩调用，`bedrock` 除外）。携带凭据的 Header、决定连接或请求体的 Header、`Accept-Encoding`、`anthropic-beta` 以及 `Idempotency-Key` 会在加载配置时被拒绝。仅在 prompt 阶段生效；response 阶段的运行发生在提供商调用之后。参见[上游请求头](/zh/advanced/plugins#上游请求头)。 |
+| `upstream_set` | 合并到 Chat Completions、Responses 或 Messages 请求的每一次提供商调用中的静态 Header（前提是经由网关的 HTTP 客户端发出：包括故障转移尝试以及 Responses 的 `input_tokens` 和 `compact` 路由，`bedrock` 除外）。携带凭据的 Header、决定连接或请求体的 Header、`Accept-Encoding`、`anthropic-beta` 以及 `Idempotency-Key` 会在加载配置时被拒绝。仅在 prompt 阶段生效；response 阶段的运行发生在提供商调用之后。参见[上游请求头](/zh/advanced/plugins#上游请求头)。 |
 
-凭据类 Header（`Authorization`、`X-Api-Key`、`Cookie` 等）永远无法编辑，名称中包含 `secret` 或 `token` 的 Header 也无法设置。
+凭据类 Header（`Authorization`、`X-Api-Key`、`Cookie` 等）永远无法编辑，名称中包含 `secret` 或 `token` 的 Header 也无法设置。这也包括提供商前面的 AI 网关的密钥（`Helicone-Auth`、`cf-aig-authorization`、`x-portkey-api-key`、`Ocp-Apim-Subscription-Key`）：故障转移到另一个提供商时会把它们发到那里。名称匹配时 `_` 视同 `-`，因此 `X_Api_Key` 同样会被拒绝。
+
+`upstream_set` 还会在加载配置时拒绝插件不得在提供商调用上设置的名称，因为它们归传输层、网关或提供商所有。决定连接的 Header：`Host`、`Content-Length`、`Transfer-Encoding`、`Connection`、`Keep-Alive`、`Proxy-Connection`、`Proxy-Authenticate`、`Te`、`Trailer`、`Upgrade`、`Expect`。描述网关已编码请求体的 Header：`Content-Type`、`Content-Encoding`。以及协商响应压缩的 `Accept-Encoding`——设置它会关闭传输层的自动 gzip 解压，网关就会去解析压缩后的字节。`anthropic-beta` 被单独拒绝：它选择提供商特性，且必须保留订阅凭据所需的 `oauth-2025-04-20` 标志。`Idempotency-Key` 同样被拒绝：它携带客户端自身的幂等键，一个静态值会让按它去重的提供商把无关的请求当作重试。提供商自身的其余 Header 不受保护：插件的值会替换它们。
 
 #### 示例
 

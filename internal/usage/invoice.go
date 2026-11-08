@@ -26,10 +26,12 @@ type InvoiceParams struct {
 
 // Invoice is billed usage for a period, one block per customer. Requests,
 // tokens and provider cost cover provider-served requests; billed cost also
-// includes billed response-cache hits, like every other billed view.
+// includes billed response-cache hits, like every other billed view. The
+// period's days start and end at midnight in TimeZone.
 type Invoice struct {
 	StartDate string            `json:"start_date,omitempty"`
 	EndDate   string            `json:"end_date,omitempty"`
+	TimeZone  string            `json:"time_zone"`
 	Currency  string            `json:"currency"`
 	Parent    string            `json:"parent,omitempty"`
 	Customers []InvoiceCustomer `json:"customers"`
@@ -233,7 +235,7 @@ func (l invoiceLines) invoice(params InvoiceParams) *Invoice {
 
 // EmptyInvoice returns an invoice for params' period without customers.
 func EmptyInvoice(params InvoiceParams) *Invoice {
-	invoice := &Invoice{Currency: InvoiceCurrency, Parent: params.Parent, Customers: []InvoiceCustomer{}}
+	invoice := &Invoice{Currency: InvoiceCurrency, TimeZone: usageTimeZone(params.UsageQueryParams), Parent: params.Parent, Customers: []InvoiceCustomer{}}
 	if !params.StartDate.IsZero() {
 		invoice.StartDate = params.StartDate.Format("2006-01-02")
 	}

@@ -34,6 +34,16 @@ Verwenden Sie Budgets für Limits wie diese:
   standardmäßig aktiviert, wenn das globale Budget-Feature eingeschaltet ist.
 </Info>
 
+Budgets sind weiche Limits. Ein Request wird anhand der bereits erfassten
+Ausgaben zugelassen, und die Nutzung wird gebündelt geschrieben, alle
+`USAGE_FLUSH_INTERVAL` (standardmäßig 5 s). Requests, die innerhalb dieses
+Fensters zugelassen werden, und Requests, die beim Erreichen eines Limits noch
+laufen, werden daher abgeschlossen und berechnet. Rechnen Sie mit einer
+Überschreitung von etwa dem Traffic eines Flush-Intervalls, und lassen Sie
+Spielraum, wenn ein Budget das Kreditlimit eines Kunden ist. Nutzungseinträge,
+die verworfen werden, weil der Puffer (`USAGE_BUFFER_SIZE`) voll ist, werden als
+Warnung geloggt und nie gezählt.
+
 ## Budgets aktivieren
 
 Budgets sind standardmäßig aktiviert:

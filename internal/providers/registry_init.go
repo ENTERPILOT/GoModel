@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -151,6 +152,15 @@ func (r *ModelRegistry) fetchAllProviderModels(
 		wg.Add(1)
 		go func(i int, provider core.Provider) {
 			defer wg.Done()
+			// A panic on this goroutine would end the process: no request's
+			// recover middleware is above it. A provider whose listing panics
+			// is recorded as failed instead, like one whose listing errors.
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("provider model listing panicked", "provider", names[i], "panic", r, "stack", string(debug.Stack()))
+					results[i] = fetchResult{fetchAt: time.Now().UTC(), err: fmt.Errorf("list models panicked: %v", r)}
+				}
+			}()
 			resp, configuredReason, fetchAt, err := fetchProviderInventory(ctx, provider, providerInventoryInput{
 				name:              names[i],
 				providerType:      providerTypes[provider],

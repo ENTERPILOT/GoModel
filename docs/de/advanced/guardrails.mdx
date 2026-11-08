@@ -482,11 +482,31 @@ Leerzeilen und `#`-Kommentare werden ignoriert.
 | `response_set` | Ersetzt einen Header in der an den Client gesendeten Response. |
 | `response_add` | Hängt einen Wert an einen Header der Client-Response an und behält vorhandene Werte bei. Wird einmal pro Request angewendet, auch wenn die Instanz in beiden Phasen läuft. |
 | `response_remove` | Entfernt einen Header aus der Client-Response, einschließlich Headern, die GoModel selbst hinzufügt (zum Beispiel `X-Request-Id`). |
-| `upstream_set` | Statische Header, die in jede Provider-Anfrage des Requests einfließen, die über den HTTP-Client des Gateways läuft: Failover-Versuche, Token-Zählung und Kompaktierung eingeschlossen, `bedrock` ausgenommen. Header mit Zugangsdaten, Header, die die Verbindung oder den Body bestimmen, `Accept-Encoding`, `anthropic-beta` und `Idempotency-Key` werden beim Laden der Konfiguration abgelehnt. Wirkt nur in der Phase `prompt`; ein Lauf in der Phase `response` kommt nach dem Provider-Aufruf. Siehe [Upstream-Header](/de/advanced/plugins#upstream-header). |
+| `upstream_set` | Statische Header, die in jede Provider-Anfrage eines Requests an Chat Completions, Responses oder Messages einfließen, die über den HTTP-Client des Gateways läuft: Failover-Versuche und die Responses-Routen `input_tokens` und `compact` eingeschlossen, `bedrock` ausgenommen. Header mit Zugangsdaten, Header, die die Verbindung oder den Body bestimmen, `Accept-Encoding`, `anthropic-beta` und `Idempotency-Key` werden beim Laden der Konfiguration abgelehnt. Wirkt nur in der Phase `prompt`; ein Lauf in der Phase `response` kommt nach dem Provider-Aufruf. Siehe [Upstream-Header](/de/advanced/plugins#upstream-header). |
 
 Header mit Zugangsdaten (`Authorization`, `X-Api-Key`, `Cookie`, ...) können nie
 bearbeitet werden, und Namen, die `secret` oder `token` enthalten, können nicht
-gesetzt werden.
+gesetzt werden. Das gilt auch für die Schlüssel von AI-Gateways vor einem Provider
+(`Helicone-Auth`, `cf-aig-authorization`, `x-portkey-api-key`,
+`Ocp-Apim-Subscription-Key`): Ein Failover auf einen anderen Provider würde sie
+dorthin senden. Namen werden verglichen, wobei `_` als `-` gilt, also wird auch
+`X_Api_Key` abgelehnt.
+
+`upstream_set` lehnt beim Laden der Konfiguration außerdem die Namen ab, die ein
+Plugin am Provider-Aufruf nicht setzen darf, weil sie dem Transport, dem Gateway
+oder dem Provider gehören. Die, die die Verbindung rahmen: `Host`,
+`Content-Length`, `Transfer-Encoding`, `Connection`, `Keep-Alive`,
+`Proxy-Connection`, `Proxy-Authenticate`, `Te`, `Trailer`, `Upgrade`, `Expect`.
+Die, die den Body beschreiben, den das Gateway kodiert hat: `Content-Type`,
+`Content-Encoding`. Und `Accept-Encoding`, das die Kompression der Antwort
+aushandelt — wird es gesetzt, schaltet das die automatische gzip-Dekompression
+des Transports ab, sodass das Gateway komprimierte Bytes parsen würde.
+`anthropic-beta` wird eigens abgelehnt: Es wählt Provider-Features aus und muss
+das Flag `oauth-2025-04-20` behalten, das Abo-Zugangsdaten brauchen. Ebenso
+`Idempotency-Key`: Es trägt den eigenen Schlüssel des Clients, und ein statischer
+Wert würde einen Provider, der danach dedupliziert, unabhängige Requests als
+Wiederholungen behandeln lassen. Die übrigen Header des Providers sind nicht
+geschützt: Ein Plugin-Wert ersetzt sie.
 
 #### Beispiel
 
