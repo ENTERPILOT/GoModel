@@ -193,7 +193,7 @@ func BuildResponsesOutputItems(msg core.ResponseMessage) []core.ResponsesOutputI
 // Gemini thought signature) rides on the item so clients replay it. A
 // malformed entry is skipped, not every image of the message.
 func imageGenerationCallItems(fields core.UnknownJSONFields) []core.ResponsesOutputItem {
-	_, images := core.ChatImageEntries(fields.Lookup(core.ChatImagesField))
+	images := core.ChatImageParts(fields.Lookup(core.ChatImagesField))
 	items := make([]core.ResponsesOutputItem, 0, len(images))
 	for _, image := range images {
 		extra, ok := imageGenerationCallFields(image)

@@ -30,6 +30,7 @@ type OpenAIResponsesStreamConverter struct {
 	assistantOutputIndex int
 	nextOutputIndex      int
 	imageAfterMessage    bool // an image followed the message item; later text opens a new one
+	extraAwaitsMessage   bool // replay state that followed an image waits for the next message item
 	buffer               streaming.StreamBuffer
 	lineBuffer           streaming.StreamBuffer
 	lineScanned          int // leading unread bytes of lineBuffer known to hold no newline
@@ -250,6 +251,11 @@ func (sc *OpenAIResponsesStreamConverter) handleToolCallDeltas(toolCalls []openA
 // processChunk translates one chat.completion.chunk payload into Responses
 // API events appended to the output buffer.
 func (sc *OpenAIResponsesStreamConverter) processChunk(data []byte) {
+	// The terminal event already declared the full output; a stray chunk
+	// after it must not emit events the response does not contain.
+	if sc.sentDone {
+		return
+	}
 	var chunk openAIStreamChunk
 	if err := json.Unmarshal(data, &chunk); err != nil {
 		// One off-spec member type aborts the whole typed decode; re-parse
@@ -284,9 +290,7 @@ func (sc *OpenAIResponsesStreamConverter) processChunk(data []byte) {
 	// closes the message item on the spot, and its output_item.done must
 	// already carry the state. Text after an image opens its new item first,
 	// so the state lands on the item it arrived with.
-	if choice.Delta.Content != "" {
-		sc.openMessageAfterImage()
-	}
+	sc.openMessageAfterImage(choice.Delta.Content != "", choice.Delta.ExtraContent)
 	sc.setMessageExtraContent(choice.Delta.ExtraContent)
 	// "reasoning_content" wins over the vendor "reasoning" member (Groq,
 	// OpenRouter), the same precedence the streaming codec applies.
@@ -320,6 +324,9 @@ func (sc *OpenAIResponsesStreamConverter) setMessageExtraContent(raw json.RawMes
 // processChunkTolerant mirrors processChunk with per-field type assertions, so
 // a single off-spec member only skips itself instead of the whole chunk.
 func (sc *OpenAIResponsesStreamConverter) processChunkTolerant(data []byte) {
+	if sc.sentDone {
+		return
+	}
 	var chunk map[string]any
 	if err := json.Unmarshal(data, &chunk); err != nil {
 		return
@@ -348,14 +355,12 @@ func (sc *OpenAIResponsesStreamConverter) processChunkTolerant(data []byte) {
 	}
 	if delta, ok := choice["delta"].(map[string]any); ok {
 		content, _ := delta["content"].(string)
-		if content != "" {
-			sc.openMessageAfterImage()
+		var extra json.RawMessage
+		if value, ok := delta["extra_content"]; ok && value != nil {
+			extra, _ = json.Marshal(value)
 		}
-		if extra, ok := delta["extra_content"]; ok && extra != nil {
-			if raw, err := json.Marshal(extra); err == nil {
-				sc.setMessageExtraContent(raw)
-			}
-		}
+		sc.openMessageAfterImage(content != "", extra)
+		sc.setMessageExtraContent(extra)
 		reasoning, _ := delta["reasoning_content"].(string)
 		if reasoning == "" {
 			reasoning, _ = delta["reasoning"].(string)
@@ -444,13 +449,19 @@ func (sc *OpenAIResponsesStreamConverter) appendTextDelta(content string) {
 }
 
 // openMessageAfterImage sets aside the message item an image followed, so the
-// text that follows goes in a new message item after the image. Text after a
-// tool call alone keeps its existing handling.
-func (sc *OpenAIResponsesStreamConverter) openMessageAfterImage() {
-	if sc.imageAfterMessage && !sc.sentDone {
-		sc.imageAfterMessage = false
-		sc.output.StartNextAssistantMessage(sc.assistantOutputIndex)
+// text or replay state that follows goes in a new message item after the
+// image instead of changing one whose output_item.done is already out. Replay
+// state without text (Gemini's trailing empty part carrying a signature)
+// still gets its message item at the end of the stream. Text after a tool
+// call alone keeps its existing handling.
+func (sc *OpenAIResponsesStreamConverter) openMessageAfterImage(hasText bool, extra json.RawMessage) {
+	hasExtra := !core.IsJSONNull(bytes.TrimSpace(extra))
+	if !sc.imageAfterMessage || (!hasText && !hasExtra) {
+		return
 	}
+	sc.imageAfterMessage = false
+	sc.output.StartNextAssistantMessage(sc.assistantOutputIndex)
+	sc.extraAwaitsMessage = !hasText
 }
 
 // closeReasoningAndMessage finishes the reasoning and message items before a
@@ -471,7 +482,7 @@ func (sc *OpenAIResponsesStreamConverter) appendImages(raw json.RawMessage) {
 	if len(raw) == 0 {
 		return
 	}
-	_, images := core.ChatImageEntries(raw)
+	images := core.ChatImageParts(raw)
 	for _, image := range images {
 		fields, ok := imageGenerationCallFields(image)
 		if !ok {
@@ -519,6 +530,9 @@ func (sc *OpenAIResponsesStreamConverter) appendTerminalEvents() {
 		eventName = "response.incomplete"
 	}
 	sc.buffer.AppendString(sc.output.FinishReasoningOutput(reasoningOutputIndex, status))
+	if sc.extraAwaitsMessage {
+		sc.reserveAssistantOutput()
+	}
 	sc.buffer.AppendString(sc.output.FinishAssistantOutput(sc.assistantOutputIndex, status))
 	sc.buffer.AppendString(sc.finishPendingToolCalls(status))
 	responseData := map[string]any{

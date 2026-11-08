@@ -119,7 +119,7 @@ func AssembleChatResponse(events []Event) (*core.ChatResponse, error) {
 			}
 			// A malformed images member is skipped, not the whole chunk, and a
 			// malformed entry is skipped, not the whole member.
-			images, _ := core.ChatImageEntries(delta.Images)
+			images := core.ChatImageEntries(delta.Images)
 			state.images = append(state.images, images...)
 			for pos, call := range delta.ToolCalls {
 				index := pos

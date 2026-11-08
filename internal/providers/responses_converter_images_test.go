@@ -510,9 +510,9 @@ data: [DONE]
 	assert.Equal(t, []any{"message", "function_call"}, types)
 }
 
-// Content that arrives after [DONE] must not open a message item after the
-// terminal event.
-func TestOpenAIResponsesStreamConverter_LateTextAfterImageAndDoneOpensNoItem(t *testing.T) {
+// Content that arrives after [DONE] must not emit any event after the
+// terminal one: response.completed already declared the full output.
+func TestOpenAIResponsesStreamConverter_LateContentAfterDoneEmitsNothing(t *testing.T) {
 	stream := `data: {"choices":[{"index":0,"delta":{"content":"A"},"finish_reason":null}]}
 
 data: {"choices":[{"index":0,"delta":{"images":[{"type":"image_url","image_url":{"url":"data:image/png;base64,aW1n"}}]},"finish_reason":"stop"}]}
@@ -520,20 +520,66 @@ data: {"choices":[{"index":0,"delta":{"images":[{"type":"image_url","image_url":
 data: [DONE]
 
 data: {"choices":[{"index":0,"delta":{"content":"late"},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{"images":[{"type":"image_url","image_url":{"url":"data:image/png;base64,bGF0ZQ=="}}]},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{"content":"late","tool_calls":"off-spec"},"finish_reason":null}]}
 `
 	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(stream)), "test-model", "gemini")
 	raw, err := io.ReadAll(converter)
 	require.NoError(t, err)
 
-	terminal := false
-	for _, event := range parseTestSSEEvents(t, string(raw)) {
-		if event.Name == "response.completed" {
-			terminal = true
-			continue
-		}
-		if terminal {
-			assert.NotEqual(t, "response.output_item.added", event.Name, "no item opens after response.completed")
-		}
+	events := parseTestSSEEvents(t, string(raw))
+	require.GreaterOrEqual(t, len(events), 2)
+	assert.Equal(t, "response.completed", events[len(events)-2].Name)
+	assert.True(t, events[len(events)-1].Done, "only [DONE] follows response.completed")
+}
+
+// A signature-only delta after an image must not change the message item the
+// image closed, whose output_item.done is already out. It goes on the next
+// message item, or on a trailing empty one when no text follows, mirroring
+// Gemini's trailing empty part that carries the signature.
+func TestOpenAIResponsesStreamConverter_SignatureOnlyDeltaAfterImage(t *testing.T) {
+	const (
+		text      = `{"choices":[{"index":0,"delta":{"content":"A"},"finish_reason":null}]}`
+		image     = `{"choices":[{"index":0,"delta":{"images":[{"type":"image_url","image_url":{"url":"data:image/png;base64,aW1n"}}]},"finish_reason":null}]}`
+		signature = `{"choices":[{"index":0,"delta":{"content":"","extra_content":{"google":{"thought_signature":"sig"}}},"finish_reason":null}]}`
+		tolerant  = `{"choices":[{"index":0,"delta":{"tool_calls":"off-spec","extra_content":{"google":{"thought_signature":"sig"}}},"finish_reason":null}]}`
+		textB     = `{"choices":[{"index":0,"delta":{"content":"B"},"finish_reason":null}]}`
+		stop      = `{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`
+	)
+	tests := []struct {
+		name     string
+		chunks   []string
+		wantLast string
+	}{
+		{name: "text follows", chunks: []string{text, image, signature, textB, stop}, wantLast: "B"},
+		{name: "no text follows", chunks: []string{text, image, signature, stop}, wantLast: ""},
+		{name: "no text follows on tolerant path", chunks: []string{text, image, tolerant, stop}, wantLast: ""},
 	}
-	require.True(t, terminal)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stream := "data: " + strings.Join(tt.chunks, "\n\ndata: ") + "\n\ndata: [DONE]\n\n"
+			_, done, completed := convertTestStream(t, stream)
+
+			output := outputItems(t, completed)
+			require.Len(t, output, 3)
+			assert.Equal(t, []any{"message", "image_generation_call", "message"}, []any{output[0]["type"], output[1]["type"], output[2]["type"]})
+			assert.Nil(t, output[0]["extra_content"], "the closed message keeps what its output_item.done declared")
+			assert.Equal(t, map[string]any{"google": map[string]any{"thought_signature": "sig"}}, output[2]["extra_content"])
+			content, ok := output[2]["content"].([]any)
+			require.True(t, ok)
+			require.Len(t, content, 1)
+			part, ok := content[0].(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, tt.wantLast, part["text"])
+			for _, item := range done {
+				for _, final := range output {
+					if item["id"] == final["id"] {
+						assert.Equal(t, final["extra_content"], item["extra_content"], "terminal item matches its output_item.done")
+					}
+				}
+			}
+		})
+	}
 }

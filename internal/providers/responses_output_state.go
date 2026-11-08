@@ -530,7 +530,8 @@ func (s *ResponsesOutputEventState) StartNextAssistantMessage(outputIndex int) {
 // AppendImageGenerationCall emits one generated image as a finished
 // image_generation_call item: output_item.added, then output_item.done
 // carrying the image. The image arrives whole, so the item opens and closes
-// at once.
+// at once, with no response.image_generation_call.* progress events between:
+// there is no partial image or in-progress state to report.
 func (s *ResponsesOutputEventState) AppendImageGenerationCall(outputIndex int, fields map[string]json.RawMessage) string {
 	id := "ig_" + uuid.New().String()
 	item := map[string]any{"id": id, "type": "image_generation_call", "status": "completed"}
