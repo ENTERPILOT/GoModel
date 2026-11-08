@@ -68,7 +68,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 			},
 			{
 				Key: "upstream_set", Label: "Upstream headers to set", Input: pluginapi.InputTextarea, Default: "",
-				Help:        "One \"Name: value\" per line. Adds static headers to every provider call of the request that goes through the gateway's HTTP client, failover attempts, token counting and compaction included; Bedrock, which calls the AWS SDK directly, does not carry them. Applies to requests from clients: inference the gateway issues for its own work, such as a guardrail's judge, does not inherit them. Credential, transport, Anthropic-Beta and Idempotency-Key headers are refused.",
+				Help:        "One \"Name: value\" per line. Adds static headers to every provider call of the request that goes through the gateway's HTTP client, failover attempts, token counting and compaction included; Bedrock, which calls the AWS SDK directly, does not carry them. Applies to requests from clients: inference the gateway issues for its own work, such as a guardrail's judge, does not inherit them. Credential, transport, Anthropic-Beta and Idempotency-Key headers are rejected when the config loads.",
 				Placeholder: "X-Tenant: acme",
 			},
 		},
@@ -150,20 +150,21 @@ func summarizeEdits(edits []edit) string {
 // removed.
 func compile(cfg config) (request, response, upstream []edit, err error) {
 	groups := []struct {
-		field   string
-		entries []string
-		o       op
-		dst     *[]edit
+		field    string
+		entries  []string
+		o        op
+		upstream bool
+		dst      *[]edit
 	}{
-		{"request_set", cfg.RequestSet, opSet, &request},
-		{"request_remove", cfg.RequestRemove, opRemove, &request},
-		{"response_set", cfg.ResponseSet, opSet, &response},
-		{"response_add", cfg.ResponseAdd, opAdd, &response},
-		{"response_remove", cfg.ResponseRemove, opRemove, &response},
-		{"upstream_set", cfg.UpstreamSet, opSet, &upstream},
+		{"request_set", cfg.RequestSet, opSet, false, &request},
+		{"request_remove", cfg.RequestRemove, opRemove, false, &request},
+		{"response_set", cfg.ResponseSet, opSet, false, &response},
+		{"response_add", cfg.ResponseAdd, opAdd, false, &response},
+		{"response_remove", cfg.ResponseRemove, opRemove, false, &response},
+		{"upstream_set", cfg.UpstreamSet, opSet, true, &upstream},
 	}
 	for _, g := range groups {
-		edits, err := parseEdits(g.field, g.entries, g.o)
+		edits, err := parseEdits(g.field, g.entries, g.o, g.upstream)
 		if err != nil {
 			return nil, nil, nil, err
 		}

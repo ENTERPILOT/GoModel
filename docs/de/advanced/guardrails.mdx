@@ -482,7 +482,7 @@ Leerzeilen und `#`-Kommentare werden ignoriert.
 | `response_set` | Ersetzt einen Header in der an den Client gesendeten Response. |
 | `response_add` | Hängt einen Wert an einen Header der Client-Response an und behält vorhandene Werte bei. Wird einmal pro Request angewendet, auch wenn die Instanz in beiden Phasen läuft. |
 | `response_remove` | Entfernt einen Header aus der Client-Response, einschließlich Headern, die GoModel selbst hinzufügt (zum Beispiel `X-Request-Id`). |
-| `upstream_set` | Statische Header, die in jede Provider-Anfrage des Requests einfließen, die über den HTTP-Client des Gateways läuft: Failover-Versuche, Token-Zählung und Kompaktierung eingeschlossen, Bedrock ausgenommen. Header mit Zugangsdaten, Header, die die Verbindung oder den Body bestimmen, `Accept-Encoding`, `anthropic-beta` und `Idempotency-Key` werden abgelehnt; siehe [Upstream-Header](/de/advanced/plugins). |
+| `upstream_set` | Statische Header, die in jede Provider-Anfrage des Requests einfließen, die über den HTTP-Client des Gateways läuft: Failover-Versuche, Token-Zählung und Kompaktierung eingeschlossen, Bedrock ausgenommen. Header mit Zugangsdaten, Header, die die Verbindung oder den Body bestimmen, `Accept-Encoding`, `anthropic-beta` und `Idempotency-Key` werden beim Laden der Konfiguration abgelehnt; siehe [Upstream-Header](/de/advanced/plugins). |
 
 Header mit Zugangsdaten (`Authorization`, `X-Api-Key`, `Cookie`, ...) können nie
 bearbeitet werden, und Namen, die `secret` oder `token` enthalten, können nicht

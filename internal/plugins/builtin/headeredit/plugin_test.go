@@ -63,6 +63,11 @@ func TestInitErrors(t *testing.T) {
 		{"token-ish set", `{"upstream_set": "X-Session-Token: k"}`, `header "X-Session-Token" looks like a credential`},
 		{"secret-ish add", `{"response_add": "X-Client-Secret: k"}`, `looks like a credential`},
 		{"line number", `{"request_set": "X-A: 1\n\n# comment\nbroken"}`, "request_set line 4"},
+		{"upstream transport", `{"upstream_set": "X-Tenant: acme\nhost: evil.test"}`, `upstream_set line 2: header "Host" is set by the gateway`},
+		{"upstream body", `{"upstream_set": "Content-Type: text/plain"}`, `header "Content-Type" is set by the gateway`},
+		{"upstream encoding", `{"upstream_set": "Accept-Encoding: gzip"}`, `header "Accept-Encoding" is set by the gateway`},
+		{"upstream anthropic beta", `{"upstream_set": "anthropic-beta: x"}`, `header "Anthropic-Beta" is set by the gateway`},
+		{"upstream idempotency key", `{"upstream_set": "Idempotency-Key: x"}`, `header "Idempotency-Key" is set by the gateway`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -84,6 +89,11 @@ func TestInitAccepts(t *testing.T) {
 		{"array form", `{"request_remove": ["X-A", "X-B"]}`},
 		{"token-ish remove allowed", `{"request_remove": "X-Session-Token"}`},
 		{"value with colon", `{"response_set": "X-Time: 12:30"}`},
+		{"upstream metadata", `{"upstream_set": "Helicone-Property-Tenant: acme"}`},
+		// The upstream deny list applies to upstream_set only: the other fields
+		// edit the live request or the client response, not the provider call.
+		{"request content type", `{"request_set": "Content-Type: application/json"}`},
+		{"response content type", `{"response_set": "Content-Type: application/json"}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

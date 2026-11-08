@@ -81,9 +81,8 @@ func TestBuildRequestPluginOriginDropsPluginUpstreamHeaders(t *testing.T) {
 
 // TestBuildRequestDeniesPluginHeaders pins one case per denied header: the ones
 // that frame the connection, the ones that describe the body and its encoding,
-// the one that negotiates response compression, the provider-negotiated one, and
-// the credential list. The length checks tie the table to the two lists that live
-// in this package, so a header added to one of them without a case here fails.
+// the one that negotiates response compression, the reserved ones, and the
+// credential list. The lists live in core, whose tests tie them to their cases.
 func TestBuildRequestDeniesPluginHeaders(t *testing.T) {
 	transport := []string{
 		"Host",
@@ -119,9 +118,6 @@ func TestBuildRequestDeniesPluginHeaders(t *testing.T) {
 		"X-GoModel-Key",
 		"Xi-Api-Key",
 	}
-	require.Len(t, pluginTransportHeaders, len(transport), "transport list and cases drifted apart")
-	require.Len(t, pluginReservedProviderHeaders, len(reserved), "reserved list and cases drifted apart")
-
 	groups := []struct {
 		name    string
 		headers []string
