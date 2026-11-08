@@ -459,8 +459,9 @@ remove lines are a bare `Name`. Blank lines and `#` comments are ignored.
 Credential headers (`Authorization`, `X-Api-Key`, `Cookie`, ...) can never be
 edited, and names containing `secret` or `token` cannot be set.
 
-`upstream_set` also rejects, when the config loads, the names the provider call
-would drop. The ones that frame the connection: `Host`, `Content-Length`,
+`upstream_set` also rejects, when the config loads, the names a plugin may not
+set on the provider call because the transport, the gateway or the provider
+owns them. The ones that frame the connection: `Host`, `Content-Length`,
 `Transfer-Encoding`, `Connection`, `Keep-Alive`, `Proxy-Connection`,
 `Proxy-Authenticate`, `Te`, `Trailer`, `Upgrade`, `Expect`. The ones that
 describe the body the gateway encoded: `Content-Type`, `Content-Encoding`. And
