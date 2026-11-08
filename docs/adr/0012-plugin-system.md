@@ -368,8 +368,9 @@ Declared in the contract or the spec but not run by this release:
   the host merges it into every provider call of the request that goes
   through its HTTP client — failover attempts, token counting and compaction
   included, Bedrock excluded — minus the names that carry credentials, frame
-  the connection, describe the body, select provider features, or carry the
-  client's idempotency key (`#1203`, which updated this section in place).
+  the connection or describe the body, plus `Accept-Encoding`,
+  `Anthropic-Beta` and `Idempotency-Key` (`#1203`, which updated this section
+  in place). Other provider headers, such as `OpenAI-Beta`, are not refused.
   Inference the gateway issues for its own work carries none of them.
 - `RouteRequest.Prompt` is nil; `RouteChoice.Reason` reaches debug logs
   only. Instance-scoped `secret` fields reach a route plugin redacted.
