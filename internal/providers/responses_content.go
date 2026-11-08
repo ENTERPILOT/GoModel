@@ -25,15 +25,26 @@ func ConvertResponsesContentToChatContent(content any) (any, bool) {
 		return convertResponsesContentParts(c)
 	case []core.ContentPart:
 		parts := make([]core.ContentPart, 0, len(c))
+		skippedEmpty := false
 		for _, part := range c {
+			if isEmptyOutputText(part.Type, part.Text) {
+				skippedEmpty = true
+				continue
+			}
 			normalized, ok := normalizeTypedResponsesContentPart(part)
 			if !ok {
 				return nil, false
 			}
 			parts = append(parts, normalized)
 		}
+		if len(parts) == 0 && skippedEmpty {
+			return "", true
+		}
 		return finalizeResponsesChatContent(parts)
 	case core.ContentPart:
+		if isEmptyOutputText(c.Type, c.Text) {
+			return "", true
+		}
 		normalized, ok := normalizeTypedResponsesContentPart(c)
 		if !ok {
 			return nil, false
@@ -62,8 +73,17 @@ func chatExtraFieldsFromResponsesItem(fields core.UnknownJSONFields) core.Unknow
 	return core.CloneUnknownJSONFields(fields.Without(responsesOnlyItemKeys...))
 }
 
+// isEmptyOutputText reports an output_text part without text. Replayed
+// assistant output can carry one (an empty turn, or a message item that only
+// holds a thought signature); it is dropped instead of rejected, since chat
+// providers refuse empty text parts.
+func isEmptyOutputText(partType, text string) bool {
+	return partType == "output_text" && text == ""
+}
+
 func convertResponsesContentParts(parts []any) (any, bool) {
 	typedParts := make([]core.ContentPart, 0, len(parts))
+	skippedEmpty := false
 
 	for _, part := range parts {
 		partMap, ok := part.(map[string]any)
@@ -75,6 +95,10 @@ func convertResponsesContentParts(parts []any) (any, bool) {
 		switch partType {
 		case "text", "input_text", "output_text":
 			text, ok := partMap["text"].(string)
+			if ok && isEmptyOutputText(partType, text) {
+				skippedEmpty = true
+				continue
+			}
 			if !ok || text == "" {
 				return nil, false
 			}
@@ -148,6 +172,9 @@ func convertResponsesContentParts(parts []any) (any, bool) {
 	}
 
 	if len(typedParts) == 0 {
+		if skippedEmpty {
+			return "", true
+		}
 		return nil, false
 	}
 	return finalizeResponsesChatContent(typedParts)

@@ -28,6 +28,7 @@ func TestPeerSumAddsWritersRolledForward(t *testing.T) {
 	row := func(writer string) WindowSnapshot {
 		return WindowSnapshot{
 			Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: period, Writer: writer, Epoch: "e1",
+			OwnCounts: true,
 		}
 	}
 	// Same window: added field by field, per counter kind.
