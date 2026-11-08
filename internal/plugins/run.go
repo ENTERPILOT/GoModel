@@ -126,6 +126,7 @@ func (c *Chain) run(ctx context.Context, x *pluginapi.Exchange, observe EditObse
 			record.Step = step.Order
 			// An abandoned mutator may still be editing x, so x is not read.
 			if !Abandoned(record.Err) {
+				canonicalizeUpstream(x.Headers.Upstream)
 				record.Edited = edits(x) != before
 			}
 			outcome.absorb([]Record{record})
@@ -178,6 +179,7 @@ func (c *Chain) runReaders(ctx context.Context, readers []*Instance, x *pluginap
 		if errors.Is(records[i].Err, ErrAbandoned) {
 			continue
 		}
+		canonicalizeUpstream(xi.Headers.Upstream)
 		mergeBack(x, xi, original)
 	}
 	for _, err := range errs {
@@ -198,6 +200,7 @@ func (c *Chain) runReader(ctx context.Context, inst *Instance, x *pluginapi.Exch
 	cp := shallowCopy(x)
 	record, err := c.invoke(ctx, inst, cp, call, false)
 	if !errors.Is(record.Err, ErrAbandoned) {
+		canonicalizeUpstream(cp.Headers.Upstream)
 		mergeBack(x, cp, original)
 	}
 	return []Record{record}, err
@@ -398,5 +401,21 @@ func mergeHeaderEdits(dst *http.Header, edited, original http.Header) {
 		if _, still := edited[k]; !still {
 			delete(*dst, k)
 		}
+	}
+}
+
+// canonicalizeUpstream folds upstream header names onto their canonical form
+// once a hook has returned. Every earlier hook's names are canonical by then,
+// so a non-canonical key was written by this hook and replaces the canonical
+// one: a later hook's write wins, whichever spelling either used. Variants
+// within one hook resolve in sorted order.
+func canonicalizeUpstream(h http.Header) {
+	for _, key := range slices.Sorted(maps.Keys(h)) {
+		canonical := http.CanonicalHeaderKey(key)
+		if canonical == key {
+			continue
+		}
+		h[canonical] = h[key]
+		delete(h, key)
 	}
 }

@@ -351,9 +351,10 @@ func (s *RequestState) Finish(x *pluginapi.Exchange) {
 	if s.upstreamHeaders == nil {
 		s.upstreamHeaders = http.Header{}
 	}
-	// Canonicalize on the way in, in sorted order: "x-foo" and "X-Foo", from
-	// two exchanges or from one that readers merged into, must resolve the
-	// same way on every run instead of following map iteration order.
+	// Canonicalize on the way in, in sorted order. A chain already folds names
+	// after every hook so the later write wins; an exchange that reaches here
+	// with both "x-foo" and "X-Foo" still resolves the same way on every run
+	// instead of following map iteration order.
 	for _, key := range slices.Sorted(maps.Keys(x.Headers.Upstream)) {
 		s.upstreamHeaders[http.CanonicalHeaderKey(key)] = append([]string(nil), x.Headers.Upstream[key]...)
 	}

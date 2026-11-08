@@ -479,6 +479,31 @@ func TestRunReadersMergeOnlyTheUpstreamHeadersTheyChanged(t *testing.T) {
 	}
 }
 
+// A later hook's write wins over an earlier one whatever spelling either used:
+// names are canonicalized after every hook, so a raw "x-tenant" written first
+// is replaced by a later Set("X-Tenant") instead of shadowing it.
+func TestRunUpstreamHeaderLaterWriteWinsAcrossSpellings(t *testing.T) {
+	writer := func(name string, edit func(http.Header)) *Instance {
+		return newTestInstance(&fakePlugin{name: name, mutates: true, onPrompt: func(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+			edit(x.Headers.Upstream)
+			return pluginapi.Allow(), nil
+		}}, InstanceSpec{})
+	}
+	chain, err := BuildChain(pluginapi.KindPrompt, []Ref{
+		{writer("raw", func(h http.Header) { h["x-tenant"] = []string{"early"} }), 10},
+		{writer("canonical", func(h http.Header) { h.Set("X-Tenant", "late") }), 20},
+	})
+	require.NoError(t, err)
+
+	state := NewRequestState()
+	x := withPromptText(state.NewExchange(context.Background(), pluginapi.Meta{}), "hi")
+	_, err = chain.RunPrompt(context.Background(), x)
+	require.NoError(t, err)
+	state.Finish(x)
+
+	assert.Equal(t, http.Header{"X-Tenant": {"late"}}, state.UpstreamHeaders())
+}
+
 // A step with one reader takes its own path, which skips the goroutine and
 // the per-reader slices. It must merge back exactly what the concurrent path
 // does: values, response headers, and request headers the reader set,
