@@ -54,6 +54,9 @@ type ProviderConfig struct {
 	InferenceObjective   string
 	FairnessFromUserPath bool
 	Models               []string
+	// ModelsMode overrides the global configured provider models mode for
+	// this provider. Empty uses the global mode.
+	ModelsMode config.ConfiguredProviderModelsMode
 	// ModelMetadataOverrides holds operator-supplied metadata keyed by raw model
 	// ID (as it appears in the provider's /models response). The registry merges
 	// these onto remote-registry metadata after enrichment; non-zero fields here
@@ -323,6 +326,7 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 		GCPScope:                 raw.GCPScope,
 		ProxyURL:                 strings.TrimSpace(raw.ProxyURL),
 		Models:                   config.ProviderModelIDs(raw.Models),
+		ModelsMode:               config.NormalizeConfiguredProviderModelsMode(raw.ModelsMode),
 		ModelMetadataOverrides:   config.ProviderModelMetadataOverrides(raw.Models),
 		ModelFilter:              raw.ModelFilter.Normalize(),
 		Resilience:               global,

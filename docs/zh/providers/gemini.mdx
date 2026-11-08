@@ -69,7 +69,7 @@ GoModel 为原生 Gemini 和兼容 OpenAI 的 API 分别维护内部的 Base URL
 }
 ```
 
-在 Responses API 上，每张图片都是一个单独的 `image_generation_call` 输出项。Base64 图片位于 `result` 中，格式位于 `output_format` 中，与 OpenAI 的输出一致。如需在后续轮次中编辑该图片，请原样回传助手消息（包含 `images`）或 `image_generation_call` 输出项，以便 Gemini 获得每张图片的思考签名。`/v1/messages`（Anthropic Messages API）客户端只会收到文本。流式响应目前尚不包含生成的图片。
+在 Responses API 上，每张图片都是一个单独的 `image_generation_call` 输出项。Base64 图片位于 `result` 中，格式位于 `output_format` 中，与 OpenAI 的输出一致。如需在后续轮次中编辑该图片，请原样回传助手消息（包含 `images`）或 `image_generation_call` 输出项，以便 Gemini 获得每张图片的思考签名。`/v1/messages`（Anthropic Messages API）客户端只会收到文本。流式响应中，每张图片都会完整送达：Chat Completions 中位于数据块的 `delta.images`，Responses API 中则是一个已完成的 `image_generation_call` 输出项。携带完整 Base64 图片的单个上游流事件最大可达 32 MiB；流式插件默认最多容纳 4 MiB，因此更大的图片会终止经过这些插件的流。启用此类插件时，请以非流式方式请求 2K 和 4K 图片。
 
 每张图片都是数 MB 的 Base64 数据。审计日志最多捕获 1 MB 的响应体，因此记录的响应体会被截断并标记为已截断。响应缓存会存储完整的响应。
 

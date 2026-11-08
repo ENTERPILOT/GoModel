@@ -65,13 +65,16 @@ Den Endpunkt Ihres Kontos finden Sie als `endpoints.api` in der Antwort von
 
 ## Modelle
 
-GoModel listet die Modelle aus Copilots `/models`. Modelle, die Ihr Plan
-auflistet, die im Konto aber nicht aktiviert sind (Policy `disabled`), werden
-weggelassen; aktivieren Sie sie in Ihren
+Mit gesetztem `GITHUB_COPILOT_MODELS` werden standardmäßig nur diese Modelle
+angeboten (siehe [Modellmodi](/de/advanced/config-yaml#modellmodi)); fügen Sie ein Modell dort hinzu, um es
+anzubieten, oder setzen Sie `GITHUB_COPILOT_MODELS_MODE=fallback` oder `merge`,
+um die Modelle aus Copilots `/models` zu listen. Diese Liste lässt Modelle weg,
+die Ihr Plan auflistet, die im Konto aber nicht aktiviert sind (Policy
+`disabled`); aktivieren Sie sie in Ihren
 [Copilot-Einstellungen](https://github.com/settings/copilot/features), dann
 erscheinen sie bei der nächsten Aktualisierung der Modelle.
 
-Um nur einen Teil davon anzubieten,
+Um nur einen Teil der gelisteten Modelle anzubieten,
 [filtern](/de/advanced/config-yaml#modelle-eines-providers-filtern) Sie die
 Liste:
 
@@ -79,9 +82,10 @@ Liste:
 GITHUB_COPILOT_MODEL_FILTER_INCLUDE=claude-sonnet-5.5,gpt-5.6-luna,gpt-4.1
 ```
 
-`GITHUB_COPILOT_MODELS` ist eine Fallback-Liste, die nur verwendet wird, wenn
-`/models` fehlschlägt oder leer ist; `CONFIGURED_PROVIDER_MODELS_MODE=allowlist`
-macht sie zur einzigen Liste und überspringt `/models`.
+Jede Abfrage der Liste aktualisiert auch, welche Endpoints jedes Modell
+unterstützt. Vor der ersten Abfrage oder für ein Modell, das die Liste nicht
+enthält, liest der Provider `/models` bei Bedarf; schlägt das fehl, wird das
+Modell an `/chat/completions` gesendet.
 
 ## Chat Completions und Responses für jedes Modell
 

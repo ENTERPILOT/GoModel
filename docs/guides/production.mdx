@@ -300,22 +300,29 @@ GOMODEL_OFFLINE=true
 | [Model catalog](/advanced/model-metadata) at `MODEL_LIST_URL` | Pricing, context windows, and capabilities, fetched at startup and on each cache refresh | on |
 
 `GOMODEL_OFFLINE=true` (or `offline: true` in `config.yaml`) disables the
-update check and drops any HTTP catalog URL. It is applied after every other
+update check, drops any HTTP catalog URL, and stops providers in `allowlist`
+mode from listing `/models` for metadata. It is applied after every other
 setting, so nothing in `config.yaml` or the environment can re-enable an
-outbound call underneath it. Calls to configured providers and to anything you
-declared yourself, such as an OTLP collector, MCP upstreams, or a vector
+outbound call underneath it. Inference calls to configured providers and to
+anything you declared yourself, such as an OTLP collector, MCP upstreams, or a vector
 store, are untouched. The startup log confirms the mode.
 
-You can also control the two calls individually with
-`GOMODEL_VERSION_CHECK_ENABLED=false` and `MODEL_LIST_URL=off`.
+You can also control these calls individually with
+`GOMODEL_VERSION_CHECK_ENABLED=false`, `MODEL_LIST_URL=off`, and
+`ALLOWLIST_UPSTREAM_METADATA=false`.
 
 The catalog fetch is best-effort. When it is off or fails, the gateway boots
-normally, `/health` and `/health/ready` return `200`, provider discovery still
-works because model lists come from each provider's own `/models` endpoint,
-and requests route normally. What you lose is metadata enrichment.
+normally, `/health` and `/health/ready` return `200`, model lists still come
+from each provider's own `/models` endpoint (or, for `allowlist` providers,
+from their configured list, which needs no upstream discovery), and requests
+route normally. What you lose is catalog enrichment; metadata a provider
+reports in its own `/models` (including the allowlist metadata call, unless
+`ALLOWLIST_UPSTREAM_METADATA=false`) still applies.
 
 <Warning>
-  Without metadata enrichment, models have **no pricing**. Cost tracking then
+  Without catalog enrichment, a model has **no pricing** unless its provider
+  reports prices in `/models` or you declare them (`models[].metadata.pricing`
+  in `config.yaml`, or a dashboard pricing override). Cost tracking then
   reports no cost, and since [budgets](/features/budgets) read spend from usage
   cost records, budgets have nothing to charge against and will not enforce
   spend limits.
@@ -408,7 +415,7 @@ coordinate across instances.
 | [Usage and cost records](/features/cost-tracking) | Durable (database) | Aggregated correctly. |
 | Audit logs | Durable (database) | Complete across replicas. |
 | [SSO](/pro/sso) sign-out (Pro) | Durable (database) | A signed-out session is rejected on every replica within about 2 seconds. |
-| [Rate limits](/features/rate-limits) | In memory, shared through the database | Replicas enforce one limit together, approximately: each sees the others' counts within about two flush intervals. Counters survive a restart, and a reset clears every replica. |
+| [Rate limits](/features/rate-limits) | In memory, shared through the database | Replicas enforce one limit together, approximately: each sees the others' counts within about two flush intervals. A restart restores the last saved request and token counts once; a crash can lose those since the last flush. A reset clears those windows on every replica; active concurrency slots stay held until their requests finish. |
 | Circuit breakers | In-memory, per process | Each replica learns an outage separately, so upstream sees up to `N x failure_threshold` failures before any breaker opens. |
 | [Session affinity](/features/session-keeping) pins | In-memory, per instance | Sessions stick per replica, not globally, unless the load balancer is sticky. |
 | [Live logs](/advanced/admin-endpoints#admin-dashboard) | Local events in memory, other replicas' from the database | A dashboard sees its own replica's requests instantly and every other replica's typically within 7 seconds, once they are persisted. See [live logs across replicas](#live-logs-across-replicas). |
@@ -488,7 +495,9 @@ but model listings and virtual-model load balancing leave them out. A provider
 whose type changes starts routing once its new model list has been fetched.
 
 A replica that fails to apply a change logs a warning once and retries on every
-poll until it applies. One exception: a stored provider that fails to build on a
+poll until it applies. A poll waits at most 5 seconds for the revisions and 30
+seconds for each reload, so a database that stops answering fails the poll
+instead of stalling it. One exception: a stored provider that fails to build on a
 replica keeps whatever was already running under its name and is retried on the
 next change to any stored provider, since each change reloads all of them, or on
 restart. A replica that cannot record a change in `config_revisions` also

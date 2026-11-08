@@ -263,18 +263,22 @@ func (r *ModelRegistry) snapshotConfigOverrides() map[string]map[string]*core.Mo
 	return out
 }
 
-func (r *ModelRegistry) snapshotConfiguredProviderModels() (map[string][]string, config.ConfiguredProviderModelsMode) {
+// snapshotConfiguredProviderModels copies the configured model lists together
+// with the resolved mode of each provider that has one. A provider without a
+// configured list needs no mode: applyConfiguredProviderModels ignores it.
+func (r *ModelRegistry) snapshotConfiguredProviderModels() (map[string][]string, map[string]config.ConfiguredProviderModelsMode) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	mode := config.ResolveConfiguredProviderModelsMode(r.configuredProviderModelsMode)
 	if len(r.configuredProviderModels) == 0 {
-		return nil, mode
+		return nil, nil
 	}
 	out := make(map[string][]string, len(r.configuredProviderModels))
+	modes := make(map[string]config.ConfiguredProviderModelsMode, len(r.configuredProviderModels))
 	for provider, models := range r.configuredProviderModels {
 		out[provider] = slices.Clone(models)
+		modes[provider] = r.providerModelsModeLocked(provider)
 	}
-	return out, mode
+	return out, modes
 }
 
 // collectionEmpty reports whether a reflect.Value representing a slice, array,
