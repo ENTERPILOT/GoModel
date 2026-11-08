@@ -24,10 +24,12 @@ Der `mistral`-Provider von GoModel konvertiert sie automatisch in die Standardfo
 - die `text`-Chunks werden zu einem einfachen String in `content`
 
 – auf Streaming- (`choices[].delta`) genauso wie auf nicht-Streaming-Responses
-(`choices[].message`). Es ist keine Client-seitige Konfiguration nötig.
+(`choices[].message`). Es ist keine Client-seitige Konfiguration nötig. Chunk-Typen ohne
+standardäquivalente Chat-Form (auf diesem Endpunkt sind keine bekannt) werden in einem
+Vendor-Member `mistral_content_chunks` erhalten, damit keine Upstream-Daten verloren gehen.
 
 Senden Sie den Aufwand (Effort) mit dem standardmäßigen verschachtelten Parameter; GoModel
-bildet ihn auf Mistals flaches `reasoning_effort` ab:
+bildet ihn auf das flache `reasoning_effort` von Mistral ab:
 
 ```json
 {
@@ -37,15 +39,15 @@ bildet ihn auf Mistals flaches `reasoning_effort` ab:
 }
 ```
 
-Mistals API-weites Enum ist `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, und der
+Das API-weite Enum von Mistral ist `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, und der
 Wert wird unverändert durchgereicht. Welche Stufen ein Modell akzeptiert, ist modellspezifisch –
 Mistral Large 4 akzeptiert etwa `low`/`medium`/`high`, gehostete GLM-Modelle
 `low`/`high`/`max` – eine nicht unterstützte Stufe für das gewählte Modell wird also von
-Mistral selbst abgelehnt, wie mit Mistals eigenen SDKs auch.
+Mistral selbst abgelehnt, wie mit den eigenen SDKs von Mistral auch.
 
 Wenn ein Client einen früheren Assistant-Turn zurückspielt, entfernt GoModel dessen
-`reasoning_content`-Member vor der Weiterleitung, weil Mistral dieses unbekannte Member mit
-einem 422 ablehnt.
+`reasoning_content`- und `mistral_content_chunks`-Member vor der Weiterleitung, weil Mistral
+diese unbekannten Member mit einem 422 ablehnt.
 
 ## Konfiguration
 
@@ -80,6 +82,10 @@ MISTRAL_MODELS=mistral-large-latest,mistral-small-latest,mistral-embed
   `MISTRAL_MODELS` beschränkt die vom Provider bedienten Modelle im standardmäßigen
   `allowlist`-Modus auf diese Liste – Requests für andere Modelle geben 404 zurück. Siehe
   [Models modes](/advanced/config-yaml#models-modes) für `merge`-/`fallback`-Alternativen.
+  Die 404 gilt nur für modellbasiertes Routing: Aktiviert der Betreiber Passthrough für
+  diesen Provider (`ENABLED_PASSTHROUGH_PROVIDERS`, siehe
+  [Passthrough](/features/passthrough-api)), erreichen `/p/mistral/...`-Requests den
+  Upstream unabhängig von dieser Liste.
 </Note>
 
 ## Modelle
@@ -95,4 +101,4 @@ virtual_models:
 
 ## Embeddings
 
-Mistals Endpunkt `/v1/embeddings` (zum Beispiel `mistral-embed`) wird unterstützt.
+Der Endpunkt `/v1/embeddings` von Mistral (zum Beispiel `mistral-embed`) wird unterstützt.

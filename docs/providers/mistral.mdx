@@ -24,7 +24,9 @@ GoModel's `mistral` provider converts it to the standard shape automatically:
 - the `text` chunks are joined into a plain string `content`
 
 on both streaming (`choices[].delta`) and non-streaming (`choices[].message`) responses. No
-client-side configuration is needed.
+client-side configuration is needed. Chunk types with no standard chat equivalent (none are
+known on this endpoint) are preserved in a `mistral_content_chunks` vendor member so no
+upstream data is dropped.
 
 Send effort with the standard nested parameter; GoModel maps it to Mistral's flat
 `reasoning_effort`:
@@ -43,8 +45,9 @@ example Mistral Large 4 takes `low`/`medium`/`high`, while hosted GLM models tak
 `low`/`high`/`max` — so an unsupported level for the chosen model is rejected by Mistral
 itself, as with their own SDKs.
 
-When a client replays an earlier assistant turn, GoModel drops its `reasoning_content` member
-before forwarding, because Mistral rejects that unknown member with a 422.
+When a client replays an earlier assistant turn, GoModel drops its `reasoning_content` and
+`mistral_content_chunks` members before forwarding, because Mistral rejects those unknown
+members with a 422.
 
 ## Configure
 
@@ -78,6 +81,10 @@ MISTRAL_MODELS=mistral-large-latest,mistral-small-latest,mistral-embed
   Setting `MISTRAL_MODELS` limits the models this provider serves to that list under the
   default `allowlist` mode — requests for other models return 404. See
   [Models modes](/advanced/config-yaml#models-modes) for `merge`/`fallback` alternatives.
+  The 404 applies to model-based routing only: when the operator enables passthrough for
+  this provider (`ENABLED_PASSTHROUGH_PROVIDERS`, see
+  [Passthrough](/features/passthrough-api)), `/p/mistral/...` requests reach the upstream
+  regardless of this list.
 </Note>
 
 ## Models

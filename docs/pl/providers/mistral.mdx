@@ -25,7 +25,10 @@ Dostawca `mistral` w GoModel konwertuje go na standard automatycznie:
 - fragmenty `text` są łączone w zwykły ciąg `content`
 
 — zarówno w odpowiedziach strumieniowych (`choices[].delta`), jak i buforowanych
-(`choices[].message`). Nie wymaga to żadnej konfiguracji po stronie klienta.
+(`choices[].message`). Nie wymaga to żadnej konfiguracji po stronie klienta. Typy fragmentów
+bez standardowego odpowiednika w czacie (na tym punkcie końcowym nie są znane żadne) są
+zachowywane w członie dostawcy `mistral_content_chunks`, więc żadne dane z upstreamu nie
+giną.
 
 Poziom rozumowania wyślij standardowym parametrem zagnieżdżonym; GoModel odwzorowuje go na
 płaskie `reasoning_effort` Mistrala:
@@ -45,7 +48,8 @@ modelu — przykładowo Mistral Large 4 przyjmuje `low`/`medium`/`high`, a hosto
 tak samo jak w przypadku natywnych SDK Mistrala.
 
 Gdy klient odtwarza wcześniejszą turę asystenta, GoModel przed przekazaniem dalej usuwa jej
-pole `reasoning_content`, ponieważ Mistral odrzuca ten nieznany człon błędem 422.
+pola `reasoning_content` i `mistral_content_chunks`, ponieważ Mistral odrzuca te nieznane
+człony błędem 422.
 
 ## Konfiguracja
 
@@ -79,6 +83,10 @@ MISTRAL_MODELS=mistral-large-latest,mistral-small-latest,mistral-embed
   Ustawienie `MISTRAL_MODELS` ogranicza w domyślnym trybie `allowlist` modele obsługiwane przez
   tego dostawcę do tej listy — żądania dotyczące innych modeli zwracają 404. Zobacz
   [Models modes](/advanced/config-yaml#models-modes) dla alternatyw `merge`/`fallback`.
+  Odpowiedź 404 dotyczy tylko routingu opartego na modelach: gdy operator włączy passthrough
+  dla tego dostawcy (`ENABLED_PASSTHROUGH_PROVIDERS`, zobacz
+  [Passthrough](/features/passthrough-api)), żądania `/p/mistral/...` docierają do upstreamu
+  niezależnie od tej listy.
 </Note>
 
 ## Modele
