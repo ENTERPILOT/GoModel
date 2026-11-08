@@ -13,7 +13,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/storage"
 )
 
-// TestLoggerFlushesWhileSQLiteReadIsOpen holds a slow read open on SQLite for
+// TestLoggerFlushesWhileSQLiteReadIsOpen holds a read open on SQLite for
 // as long as the logger writes. The flushes run on the writer connection, so
 // each one lands within the busy timeout and the buffer never fills: no entry
 // is dropped.
@@ -28,9 +28,14 @@ func TestLoggerFlushesWhileSQLiteReadIsOpen(t *testing.T) {
 	const bufferSize = 10
 	logger := NewLogger(usageStore, Config{Enabled: true, BufferSize: bufferSize, FlushInterval: 5 * time.Millisecond})
 
-	// An unbounded scan, read one row at a time, stands in for a dashboard
-	// query that outlasts many flushes.
-	read, err := sqlite.ReadDB().QueryContext(ctx, `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT i FROM n`)
+	// A scan of a table in main, read one row at a time and left open, holds
+	// a read lock on the database and stands in for a dashboard query that
+	// outlasts many flushes.
+	_, err = sqlite.DB().ExecContext(ctx, `CREATE TABLE held (id INTEGER PRIMARY KEY)`)
+	require.NoError(t, err)
+	_, err = sqlite.DB().ExecContext(ctx, `INSERT INTO held (id) VALUES (1), (2), (3)`)
+	require.NoError(t, err)
+	read, err := sqlite.ReadDB().QueryContext(ctx, `SELECT id FROM held ORDER BY id`)
 	require.NoError(t, err)
 	defer read.Close()
 	require.True(t, read.Next())
