@@ -552,10 +552,13 @@ func TestOpenAIResponsesStreamConverter_SignatureOnlyDeltaAfterImage(t *testing.
 		name     string
 		chunks   []string
 		wantLast string
+		// wantReplay is the text of each assistant message the output
+		// replays as; the last one carries the signature.
+		wantReplay []string
 	}{
-		{name: "text follows", chunks: []string{text, image, signature, textB, stop}, wantLast: "B"},
-		{name: "no text follows", chunks: []string{text, image, signature, stop}, wantLast: ""},
-		{name: "no text follows on tolerant path", chunks: []string{text, image, tolerant, stop}, wantLast: ""},
+		{name: "text follows", chunks: []string{text, image, signature, textB, stop}, wantLast: "B", wantReplay: []string{"A", "B"}},
+		{name: "no text follows", chunks: []string{text, image, signature, stop}, wantLast: "", wantReplay: []string{"A"}},
+		{name: "no text follows on tolerant path", chunks: []string{text, image, tolerant, stop}, wantLast: "", wantReplay: []string{"A"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -580,6 +583,52 @@ func TestOpenAIResponsesStreamConverter_SignatureOnlyDeltaAfterImage(t *testing.
 					}
 				}
 			}
+
+			// Replaying the output as the next request's input keeps the
+			// signature on the turn it belongs to, on both input paths.
+			encoded, err := json.Marshal(completed["output"])
+			require.NoError(t, err)
+			var typed core.ResponsesRequest
+			require.NoError(t, json.Unmarshal([]byte(`{"model":"m","input":`+string(encoded)+`}`), &typed))
+			for name, input := range map[string]any{"map": completed["output"], "typed": typed.Input} {
+				messages, err := ConvertResponsesInputToMessages(input)
+				require.NoError(t, err, name)
+				require.Len(t, messages, len(tt.wantReplay), name)
+				for i, want := range tt.wantReplay {
+					assert.Equal(t, "assistant", messages[i].Role, name)
+					assert.Equal(t, want, messages[i].Content, name)
+				}
+				images, err := core.ChatImages(messages[0].ExtraFields)
+				require.NoError(t, err, name)
+				assert.Len(t, images, 1, name)
+				last := messages[len(messages)-1]
+				assert.JSONEq(t, `{"google":{"thought_signature":"sig"}}`, string(last.ExtraFields.Lookup(core.ExtraContentField)), name)
+			}
+		})
+	}
+}
+
+// Replayed assistant output may hold an output_text without text; it is
+// dropped instead of failing the request. Empty user text stays rejected.
+func TestConvertResponsesContentToChatContent_EmptyOutputText(t *testing.T) {
+	tests := []struct {
+		name    string
+		content any
+		want    any
+		wantOK  bool
+	}{
+		{name: "map only empty", content: []any{map[string]any{"type": "output_text", "text": "", "annotations": []any{}}}, want: "", wantOK: true},
+		{name: "map empty next to text", content: []any{map[string]any{"type": "output_text", "text": ""}, map[string]any{"type": "output_text", "text": "hi"}}, want: "hi", wantOK: true},
+		{name: "typed only empty", content: []core.ContentPart{{Type: "output_text"}}, want: "", wantOK: true},
+		{name: "typed single empty", content: core.ContentPart{Type: "output_text"}, want: "", wantOK: true},
+		{name: "empty input_text", content: []any{map[string]any{"type": "input_text", "text": ""}}, wantOK: false},
+		{name: "typed empty input_text", content: []core.ContentPart{{Type: "input_text"}}, wantOK: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := ConvertResponsesContentToChatContent(tt.content)
+			assert.Equal(t, tt.wantOK, ok)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
