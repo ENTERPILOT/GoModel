@@ -419,8 +419,9 @@ koordynuje go między instancjami.
 | [Limity żądań](/pl/features/rate-limits) | W pamięci, współdzielone przez bazę danych | Repliki egzekwują jeden wspólny limit, w przybliżeniu: każda widzi liczniki pozostałych w ciągu około dwóch interwałów flush. Restart przywraca ostatnio zapisane liczniki requestów i tokenów raz; awaria może stracić to, co zliczono od ostatniego flusha. Reset czyści te okna na każdej replice; zajęte sloty współbieżności pozostają zajęte, dopóki ich requesty się nie zakończą. |
 | Circuit breakery | W pamięci, per proces | Każda replika osobno wykrywa awarię, więc upstream widzi do `N x failure_threshold` błędów, zanim otworzy się którykolwiek breaker. |
 | Przypięcia [powiązania sesji](/pl/features/session-keeping) | W pamięci, per instancja | Sesje są przyklejone per replika, a nie globalnie, chyba że load balancer używa sticky sessions. |
-| Bufor logów na żywo | W pamięci, per instancja | Podłączony dashboard widzi tylko ruch na żywo tej repliki, mniej więcej `1/N` całości. Historia nadal pochodzi z bazy danych. |
-| Sesje MCP po stronie klientów | W pamięci, per instancja | `Mcp-Session-Id` z jednej repliki zwraca 404 na innej. Klienci [MCP](/pl/features/mcp-gateway) potrzebują sticky sessions. |
+| [Logi na żywo](/pl/advanced/admin-endpoints#admin-dashboard) | Lokalne zdarzenia w pamięci, zdarzenia innych replik z bazy danych | Dashboard widzi requesty swojej repliki natychmiast, a requesty każdej innej repliki zwykle w ciągu 7 sekund, gdy tylko zostaną zapisane. Zobacz [logi na żywo z wielu replik](#logi-na-żywo-z-wielu-replik). |
+| Sesje MCP po stronie klientów | Trwały (baza danych) | Sesja otwarta na jednej replice działa dalej na każdej innej, więc klienci [MCP](/pl/features/mcp-gateway#sesje-między-replikami) nie potrzebują sticky sessions. Po `DELETE` każda replika odrzuca jej requesty w ciągu około 2 sekund; otwarty strumień `GET` nie jest zamykany wcześniej. `DELETE`, który dotrze, gdy do bazy nie da się zapisywać, kończy sesję tylko na replice, która go odebrała; dopóki jej wpis nie wygaśnie, do 30 minut później, ten sam klient może ją jeszcze wznowić na innej replice, a wznowiona sesja działa dalej normalnie. Trwający strumień odpowiedzi zostaje na replice, która go obsługuje. |
+| Logowanie [MCP OAuth](/pl/features/mcp-gateway#logowanie-przez-oauth) | Rozpoczęte logowania w pamięci, per instancja; tokeny trwałe (baza danych) | Callback logowania z dashboardu musi trafić do repliki, która je rozpoczęła, więc na czas logowania kieruj `/admin` z powiązaniem sesji (sticky sessions). Zapisane i odświeżone tokeny trafiają do wszystkich replik przez bazę danych. |
 | Stan zdrowia requestów do providerów | W pamięci, per instancja | Status providera w dashboardzie odzwierciedla replikę, która odpowiedziała. |
 
 Najbardziej zaskakują limity żądań: przyjmowanie requestów odbywa się w pamięci,
@@ -435,6 +436,43 @@ wydatków między instancjami używaj [budżetów](/pl/features/budgets). Zobacz
 [Kilka replik współdzieli jeden limit](/pl/features/rate-limits#kilka-replik-współdzieli-jeden-limit).
 `RATE_LIMITS_FLUSH_INTERVAL=0` wyłącza współdzielenie liczników po starcie, więc
 repliki łącznie znów mogą przepuścić do około `N x` limitu.
+
+### Logi na żywo z wielu replik
+
+Dashboard streamuje logi na żywo z repliki, z którą jest połączony. Ta replika
+pokazuje swoje requesty od razu, gdy się zaczynają, z podglądem requestów
+w toku i streamowanych odpowiedzi. Dopóki połączony jest co najmniej jeden
+dashboard, replika co 2 sekundy odczytuje też wiersze audytu i użycia zapisane
+przez pozostałe repliki i streamuje je do tego samego widoku. Nie dodaje to
+żadnych zapisów do bazy: każda replika oznacza swoim ID partie, które i tak
+zapisuje, a gdy żaden dashboard nie jest otwarty, żadna replika niczego nie
+odczytuje.
+
+Requesty obsłużone przez inną replikę:
+
+- pojawiają się dopiero, gdy ta replika je zflushuje, czyli po maksymalnie
+  `LOGGING_FLUSH_INTERVAL` / `USAGE_FLUSH_INTERVAL` (domyślnie 5 sekund) plus
+  2-sekundowy polling, zwykle w ciągu 7 sekund; zapis, który baza kończy
+  powoli, pojawia się dopiero po jego zakończeniu, więc później;
+- pojawiają się jako zakończone wpisy ze statusem, czasem trwania, modelem,
+  providerem, użyciem i kosztem, ale bez podglądu requestu w toku ani
+  poszczególnych chunków streamu; body są ładowane z bazy danych po rozwinięciu
+  wpisu;
+- pojawiają się tylko wtedy, gdy zostały zapisane. Wpisy audytu i wpisy użycia
+  pochodzą z osobnych funkcji: replika z wyłączonymi logami audytowymi nie
+  dostarcza wpisów audytu, a replika z wyłączonym śledzeniem użycia – wpisów
+  użycia. Replika, z którą połączony jest Twój dashboard, pokazuje wpisy audytu
+  innej repliki tylko wtedy, gdy sama ma włączone logi audytowe, a jej wpisy
+  użycia tylko z włączonym śledzeniem użycia;
+- są wstawiane na listę według czasu requestu, poniżej wszystkiego, co nowsze.
+
+Przy dużym ruchu w jednym pollingu streamowanych jest maksymalnie 200 wpisów
+audytu i 200 wpisów użycia z innych replik; gdy jest ich więcej, wybieranych jest
+200 najnowszych. Pozostałe i tak są na liście po odświeżeniu. Dashboard, który połączy się ponownie, albo replika,
+której odczyty przez jakiś czas zawodziły, nadrabia to, co pozostałe repliki
+zapisały w międzyczasie, do 5 minut wstecz i w ramach tego samego limitu 200
+wpisów na polling. Zegary replik powinny zgadzać się co do kilku sekund, co
+zapewnia NTP.
 
 ### Zmiany konfiguracji docierają do wszystkich replik w ciągu kilku sekund
 
