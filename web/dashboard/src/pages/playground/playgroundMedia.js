@@ -104,8 +104,8 @@ export function embeddingInputs(value) {
 }
 
 // The dimensions value to send: a positive safe integer written as plain
-// digits, so it goes out exactly as typed (no fractions, exponents or hex that
-// Number() would round or reinterpret); null otherwise.
+// digits (no fractions, exponents or hex that Number() would round or
+// reinterpret), sent as a number; null otherwise.
 function dimensionsValue(value) {
   if (typeof value === "number") return Number.isSafeInteger(value) && value > 0 ? value : null;
   const raw = text(value);

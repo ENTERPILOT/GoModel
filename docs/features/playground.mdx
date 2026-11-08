@@ -40,7 +40,7 @@ JSON. Speech responses are summarized as their content type and size.
 
 For embeddings, the encoding format is sent only when it is not `float`.
 Dimensions are left out while the field is blank; otherwise they must be a
-positive whole number and are sent as entered. The response JSON cuts each
+positive whole number and are sent as a JSON integer. The response JSON cuts each
 vector to its first values (long `base64` vectors to their first characters),
 and per-token embeddings, such as vLLM's `token_embed`, to their first row; the
 result shows the number of token vectors next to each embedding. **Copy** still

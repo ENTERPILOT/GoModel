@@ -44,7 +44,7 @@ Content-Type und ihre Größe zusammengefasst.
 
 Bei Embeddings wird das Kodierungsformat nur gesendet, wenn es nicht `float`
 ist. Dimensionen entfallen, solange das Feld leer ist; sonst müssen sie eine
-positive ganze Zahl sein und werden wie eingegeben gesendet. Das Response-JSON
+positive ganze Zahl sein und werden als JSON-Ganzzahl gesendet. Das Response-JSON
 kürzt jeden Vektor auf seine ersten Werte (lange `base64`-Vektoren auf ihre
 ersten Zeichen) und Embeddings pro Token, etwa von vLLMs `token_embed`, auf ihre
 erste Zeile; das Ergebnis zeigt neben jedem Embedding die Anzahl seiner

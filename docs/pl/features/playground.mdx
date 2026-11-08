@@ -40,7 +40,7 @@ skrócony JSON. Odpowiedzi z mową są podsumowywane jako ich typ treści i rozm
 
 Dla embeddingów format kodowania jest wysyłany tylko wtedy, gdy nie jest to
 `float`. Wymiary są pomijane, gdy pole jest puste; w przeciwnym razie muszą być
-dodatnią liczbą całkowitą i są wysyłane tak, jak je wpisano. JSON odpowiedzi
+dodatnią liczbą całkowitą i są wysyłane jako liczba całkowita JSON. JSON odpowiedzi
 skraca każdy wektor do pierwszych wartości (długie wektory `base64` do
 pierwszych znaków), a embeddingi na token, np. z `token_embed` w vLLM, do
 pierwszego wiersza; wynik pokazuje przy każdym embeddingu liczbę jego wektorów
