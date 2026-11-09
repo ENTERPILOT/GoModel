@@ -171,6 +171,9 @@ func adaptMessages(messages []core.Message) []core.Message {
 // wins; otherwise an empty or null one is removed and the vendor reasoning
 // spelling is adopted when it carries text.
 func canonicalReplayedReasoning(fields core.UnknownJSONFields) core.UnknownJSONFields {
+	if !fields.HasAny(reasoningContentKey, replayedReasoningKey) {
+		return fields
+	}
 	if rawString(fields.Lookup(reasoningContentKey)) != "" {
 		return fields
 	}
