@@ -1,0 +1,129 @@
+---
+title: "Mistral AI"
+description: "Konfigurieren Sie Mistral AI (La Plateforme) in GoModel, inklusive Reasoning-Modellen und wie Thinking-Output für Chat-Clients normalisiert wird."
+icon: "sparkles"
+keywords: ["Mistral", "La Plateforme", "reasoning", "thinking", "Provider-Einrichtung"]
+---
+
+Mistral AI (La Plateforme) wird unter `https://api.mistral.ai/v1` mit einer OpenAI-kompatiblen
+API ausgeliefert. GoModel routet Chat-Completions, Modelllisten-, Embedding- und
+Passthrough-Requests über den gemeinsamen OpenAI-Adapter; der Endpunkt `/v1/responses` wird
+über Chat Completions übersetzt (Mistral bietet auch einen nativen Endpunkt; die Übersetzung
+über Chat sorgt dafür, dass die folgende Reasoning-Normalisierung auf Chat-, Streaming- und
+`/v1/responses`-Requests greift; `/p/mistral/...`-Passthrough-Requests werden unverändert
+weitergeleitet). Dateien und Batches werden für diesen Provider nicht angeboten.
+
+## Reasoning- (Thinking-)Output
+
+Wenn Reasoning aktiviert ist, liefern Modelle wie `mistral-large-4-0` und `mistral-small-2603`
+sowie gehostete Reasoning-Modelle wie `zai-glm-5-3` den Assistant-Content als
+**Liste typisierter Chunks** zurück – ein `thinking`-Chunk für den Reasoning-Trace und `text`-Chunks
+für die Antwort – sowohl in gepufferten Responses als auch in SSE-Streams. Diese Form ist
+kein standardmäßiges OpenAI-Chat-Format, und Clients wie SillyTavern rendern sie als Zeichensalat.
+
+Der `mistral`-Provider von GoModel konvertiert sie automatisch in die Standardform:
+
+- die `thinking`-Chunks werden in das Feld `reasoning_content` zusammengeführt, und
+- die `text`-Chunks werden zu einem einfachen String in `content`
+
+– auf Streaming- (`choices[].delta`) genauso wie auf nicht-Streaming-Responses
+(`choices[].message`). Es ist keine Client-seitige Konfiguration nötig. Chunk-Typen ohne
+standardäquivalente Chat-Form — etwa Mistral-`reference`-Chunks aus Zitierungen nach Tool-Aufrufen —
+werden in einem Vendor-Member `mistral_content_chunks` erhalten, damit keine Upstream-Daten verloren gehen.
+SSE-Events über 16 MiB werden ebenfalls unverändert weitergeleitet, ohne konvertiert zu werden.
+
+Senden Sie den Aufwand (Effort) mit dem standardmäßigen verschachtelten Parameter; GoModel
+bildet ihn auf das flache `reasoning_effort` von Mistral ab:
+
+```json
+{
+  "model": "mistral-large-4-0",
+  "messages": [{ "role": "user", "content": "Was ist 17 * 23?" }],
+  "reasoning": { "effort": "high" }
+}
+```
+
+Das API-weite Enum von Mistral ist `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, und der
+Wert wird in Kleinschreibung normalisiert und durchgereicht. Welche Stufen ein Modell akzeptiert, ist modellspezifisch –
+Mistral Large 4 akzeptiert etwa `low`/`medium`/`high`, gehostete GLM-Modelle
+`low`/`high`/`max`, und `mistral-small-2603` akzeptiert auch `none` – eine nicht unterstützte
+Stufe für das gewählte Modell wird also von Mistral selbst abgelehnt, wie mit den eigenen SDKs
+von Mistral auch. Auf `zai-glm-5-3` ist die Antwort immer eine Chunk-Liste, unabhängig vom
+Effort-Wert.
+
+Wenn ein Client einen früheren Assistant-Turn zurückspielt, gibt GoModel das Reasoning des
+Turns als Mistral-`thinking`-Chunk innerhalb des Nachrichteninhalts zurück — Mistral warnt, dass
+das Entfernen des Traces die Ausgabe verschlechtert — und verwirft Member, die Mistral nicht
+parsen kann (`mistral_content_chunks`), für die Mistral einen 422 zurückgeben würde. Ein
+zurückgespieltes `reasoning`-Member (die Schreibweise mancher Clients) wird wie
+`reasoning_content` behandelt.
+
+Mistral lehnt Request-Member ab, die sein Schema nicht definiert. GoModel passt deshalb
+gängige OpenAI-Felder an, statt den Request scheitern zu lassen:
+
+- `max_completion_tokens` wird zu `max_tokens`, `seed` wird zu `random_seed`.
+- `service_tier: "default"` wird zu `standard_only`; Tiers, die Mistral nicht anbietet, werden
+  verworfen.
+- `stream_options`, `user`, `logit_bias`, `store`, `verbosity` und `safety_identifier` werden
+  verworfen. Streams melden die Nutzung trotzdem im letzten Chunk.
+- Nachrichten behalten nur die Member, die Mistral für ihre Rolle akzeptiert: `name` bleibt zum
+  Beispiel nur auf Tool-Nachrichten, und auf Assistant-Turns zurückgespielte `refusal`- oder
+  `annotations`-Member werden verworfen.
+
+## Konfiguration
+
+```bash
+MISTRAL_API_KEY=...
+```
+
+Oder in `config.yaml`:
+
+```yaml
+providers:
+  mistral:
+    type: mistral
+    base_url: "https://api.mistral.ai/v1"
+    api_key: "${MISTRAL_API_KEY}"
+```
+
+<Note>
+  Der Provider-`type` ist `mistral`. Der Config-Schlüssel (`mistral` im obigen Beispiel) ist
+  beliebig und identifiziert diesen Eintrag nur innerhalb Ihrer Konfiguration; er kann
+  geändert werden.
+</Note>
+
+Sie können auch die Base-URL und die Modellliste überschreiben:
+
+```bash
+MISTRAL_BASE_URL=https://api.mistral.ai/v1
+MISTRAL_MODELS=mistral-large-4-0,mistral-small-2603,mistral-embed
+```
+
+<Note>
+  `MISTRAL_MODELS` beschränkt die vom Provider bedienten Modelle im standardmäßigen
+  `allowlist`-Modus auf diese Liste – Requests für andere Modelle geben 404 zurück. Siehe
+  [Models modes](/advanced/config-yaml#models-modes) für `merge`-/`fallback`-Alternativen.
+  Die 404 gilt nur für modellbasiertes Routing: Aktiviert der Betreiber Passthrough für
+  diesen Provider (`ENABLED_PASSTHROUGH_PROVIDERS`, siehe
+  [Passthrough](/features/passthrough-api)), erreichen `/p/mistral/...`-Requests den
+  Upstream unabhängig von dieser Liste.
+</Note>
+
+## Modelle
+
+GoModels `GET /v1/models` ist eine Gateway-weite Liste (die sichtbaren Modelle aller
+konfigurierten Provider, nicht nur die dieses). Was dieser Provider bedient, folgt seinem
+Models-Modus, kann also eine Teilmenge des Bestands Ihres Mistral-Kontos sein. Rufen Sie eines
+seiner Modelle direkt über den OpenAI-kompatiblen Endpunkt `/v1/chat/completions` auf:
+
+```yaml
+virtual_models:
+  - source: mistral
+    # Das Target-Präfix ist der Providers-Map-Schlüssel, nicht der Provider-Typ;
+    # /p/mistral/...-Routen verwenden den Typ.
+    target: mistral/mistral-large-4-0
+```
+
+## Embeddings
+
+Der Endpunkt `/v1/embeddings` von Mistral (zum Beispiel `mistral-embed`) wird unterstützt.
