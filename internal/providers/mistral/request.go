@@ -167,26 +167,23 @@ func adaptMessages(messages []core.Message) []core.Message {
 }
 
 // canonicalReplayedReasoning leaves a replayed assistant turn with a
-// non-empty reasoning_content member or none: the vendor reasoning spelling is
-// adopted when reasoning_content is absent, and an empty or null
-// reasoning_content is removed.
+// non-empty reasoning_content member or none. A non-empty reasoning_content
+// wins; otherwise an empty or null one is removed and the vendor reasoning
+// spelling is adopted when it carries text.
 func canonicalReplayedReasoning(fields core.UnknownJSONFields) core.UnknownJSONFields {
-	raw := fields.Lookup(reasoningContentKey)
-	if raw == nil {
-		alt := fields.Lookup(replayedReasoningKey)
-		if rawString(alt) == "" {
-			return fields
-		}
-		merged, err := core.MergeUnknownJSONFields(fields, map[string]json.RawMessage{reasoningContentKey: alt})
-		if err != nil {
-			return fields
-		}
-		return merged
+	if rawString(fields.Lookup(reasoningContentKey)) != "" {
+		return fields
 	}
-	if rawString(raw) == "" {
-		return fields.Without(reasoningContentKey)
+	fields = fields.Without(reasoningContentKey)
+	alt := fields.Lookup(replayedReasoningKey)
+	if rawString(alt) == "" {
+		return fields
 	}
-	return fields
+	merged, err := core.MergeUnknownJSONFields(fields, map[string]json.RawMessage{reasoningContentKey: alt})
+	if err != nil {
+		return fields
+	}
+	return merged
 }
 
 // adaptChatWire is the client RequestMutator that replays reasoning the way

@@ -60,7 +60,7 @@ func TestAdaptChatRequest(t *testing.T) {
 			StreamOptions: &core.StreamOptions{IncludeUsage: true},
 			User:          "user-123",
 			ServiceTier:   "default",
-			ExtraFields:   extras(t, `{"max_completion_tokens":900,"seed":42,"logit_bias":{"1":2},"store":true,"safe_prompt":true}`),
+			ExtraFields:   extras(t, `{"max_completion_tokens":900,"seed":42,"logit_bias":{"1":2},"store":true,"verbosity":"low","safety_identifier":"s1","safe_prompt":true}`),
 		}
 		got, err := adaptChatRequest(req)
 		require.NoError(t, err)
@@ -71,7 +71,7 @@ func TestAdaptChatRequest(t *testing.T) {
 		assert.Equal(t, new(900), got.MaxTokens)
 		assert.Equal(t, json.RawMessage(`42`), got.ExtraFields.Lookup("random_seed"))
 		assert.Equal(t, json.RawMessage(`true`), got.ExtraFields.Lookup("safe_prompt"), "Mistral-native members stay")
-		for _, key := range adaptedRequestFields {
+		for _, key := range []string{"max_completion_tokens", "seed", "logit_bias", "store", "verbosity", "safety_identifier"} {
 			assert.Nil(t, got.ExtraFields.Lookup(key), key)
 		}
 		assert.NotNil(t, req.StreamOptions, "the caller's request must not change")
@@ -83,10 +83,12 @@ func TestAdaptChatRequest(t *testing.T) {
 		assert.Nil(t, got.MaxTokens, "null must not become max_tokens: 0")
 		assert.Nil(t, got.ExtraFields.Lookup("max_completion_tokens"))
 
-		_, err = adaptChatRequest(&core.ChatRequest{Model: "m", ExtraFields: extras(t, `{"max_completion_tokens":"lots"}`)})
-		var gwErr *core.GatewayError
-		require.ErrorAs(t, err, &gwErr)
-		assert.Equal(t, http.StatusBadRequest, gwErr.HTTPStatusCode())
+		for _, invalid := range []string{`"lots"`, `900.5`} {
+			_, err = adaptChatRequest(&core.ChatRequest{Model: "m", ExtraFields: extras(t, `{"max_completion_tokens":`+invalid+`}`)})
+			var gwErr *core.GatewayError
+			require.ErrorAs(t, err, &gwErr, invalid)
+			assert.Equal(t, http.StatusBadRequest, gwErr.HTTPStatusCode(), invalid)
+		}
 	})
 
 	t.Run("Mistral spellings win over the OpenAI ones", func(t *testing.T) {
@@ -135,6 +137,8 @@ func TestAdaptChatRequest(t *testing.T) {
 			{Role: "assistant", Content: "a", ExtraFields: extras(t, `{"reasoning":"vendor spelling"}`)},
 			{Role: "assistant", Content: "b", ExtraFields: extras(t, `{"reasoning_content":""}`)},
 			{Role: "assistant", Content: "c", ExtraFields: extras(t, `{"reasoning_content":null}`)},
+			{Role: "assistant", Content: "d", ExtraFields: extras(t, `{"reasoning_content":"","reasoning":"alias"}`)},
+			{Role: "assistant", Content: "e", ExtraFields: extras(t, `{"reasoning_content":"primary","reasoning":"alias"}`)},
 		}}
 		got, err := adaptChatRequest(req)
 		require.NoError(t, err)
@@ -142,6 +146,8 @@ func TestAdaptChatRequest(t *testing.T) {
 		assert.Nil(t, got.Messages[0].ExtraFields.Lookup("reasoning"))
 		assert.True(t, got.Messages[1].ExtraFields.IsEmpty())
 		assert.True(t, got.Messages[2].ExtraFields.IsEmpty())
+		assert.Equal(t, json.RawMessage(`"alias"`), got.Messages[3].ExtraFields.Lookup(reasoningContentKey), "an empty primary falls back to the alias")
+		assert.Equal(t, json.RawMessage(`"primary"`), got.Messages[4].ExtraFields.Lookup(reasoningContentKey), "a non-empty primary wins")
 	})
 }
 

@@ -95,6 +95,9 @@ func TestUnknownJSONFieldsOnlyKeepsNamedMembers(t *testing.T) {
 	assert.NotNil(t, fields.Lookup("refusal"), "the receiver must not change")
 	assert.True(t, fields.Only().IsEmpty())
 
+	withDuplicates := fields.Only("x")
+	assert.Equal(t, `{"x":1,"x":2}`, string(withDuplicates.raw), "duplicate kept members survive filtering")
+
 	kept := fields.Only("prefix", "refusal", "name", "x")
 	assert.Equal(t, string(fields.raw), string(kept.raw), "nothing dropped keeps the original bytes")
 	assert.True(t, UnknownJSONFields{}.Only("prefix").IsEmpty())
