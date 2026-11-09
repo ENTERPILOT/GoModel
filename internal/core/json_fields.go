@@ -324,6 +324,23 @@ func (fields UnknownJSONFields) Without(keys ...string) UnknownJSONFields {
 	return UnknownJSONFields{raw: buf.Bytes()}
 }
 
+// Only returns the fields restricted to the named members, for upstreams
+// with a closed schema. It returns fields itself when nothing is dropped.
+// Kept members retain their original JSON representation.
+func (fields UnknownJSONFields) Only(keys ...string) UnknownJSONFields {
+	var drop []string
+	fields.forEachMember(func(name string, _ gjson.Result) bool {
+		if !slices.Contains(keys, name) && !slices.Contains(drop, name) {
+			drop = append(drop, name)
+		}
+		return true
+	})
+	if len(drop) == 0 {
+		return fields
+	}
+	return fields.Without(drop...)
+}
+
 // jsonFieldSet answers "is this key a known typed field?" in O(1). Use it via
 // jsonFieldSetOf for the derived struct lists (dozens of fields, checked once
 // per JSON key of every decoded request); the variadic

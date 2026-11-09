@@ -54,7 +54,21 @@ Effort-Wert.
 Wenn ein Client einen früheren Assistant-Turn zurückspielt, gibt GoModel das Reasoning des
 Turns als Mistral-`thinking`-Chunk innerhalb des Nachrichteninhalts zurück — Mistral warnt, dass
 das Entfernen des Traces die Ausgabe verschlechtert — und verwirft Member, die Mistral nicht
-parsen kann (`mistral_content_chunks`), für die Mistral einen 422 zurückgeben würde.
+parsen kann (`mistral_content_chunks`), für die Mistral einen 422 zurückgeben würde. Ein
+zurückgespieltes `reasoning`-Member (die Schreibweise mancher Clients) wird wie
+`reasoning_content` behandelt.
+
+Mistral lehnt Request-Member ab, die sein Schema nicht definiert. GoModel passt deshalb
+gängige OpenAI-Felder an, statt den Request scheitern zu lassen:
+
+- `max_completion_tokens` wird zu `max_tokens`, `seed` wird zu `random_seed`.
+- `service_tier: "default"` wird zu `standard_only`; Tiers, die Mistral nicht anbietet, werden
+  verworfen.
+- `stream_options`, `user`, `logit_bias`, `store`, `verbosity` und `safety_identifier` werden
+  verworfen. Streams melden die Nutzung trotzdem im letzten Chunk.
+- Nachrichten behalten nur die Member, die Mistral für ihre Rolle akzeptiert: `name` bleibt zum
+  Beispiel nur auf Tool-Nachrichten, und auf Assistant-Turns zurückgespielte `refusal`- oder
+  `annotations`-Member werden verworfen.
 
 ## Konfiguration
 

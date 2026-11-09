@@ -312,3 +312,34 @@ func TestCompatibleProvider_CreateBatch_InlineRequests(t *testing.T) {
 		})
 	}
 }
+
+func TestCompatibleProvider_ChatCompletion_NormalizeChatResponse(t *testing.T) {
+	const upstream = `{"id":"c1","object":"chat.completion","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":[{"type":"vendor","text":"hi"}]},"finish_reason":"stop"}]}`
+	newProvider := func(t *testing.T, normalize func([]byte) []byte) *CompatibleProvider {
+		server, _ := providertest.JSONServer(t, http.StatusOK, upstream)
+		return NewCompatibleProvider(
+			"test-key",
+			providers.ProviderOptions{HTTPClient: server.Client()},
+			CompatibleProviderConfig{ProviderName: "vendor", BaseURL: server.URL, NormalizeChatResponse: normalize},
+		)
+	}
+	req := &core.ChatRequest{Model: "m", Messages: []core.Message{{Role: "user", Content: "hi"}}}
+
+	t.Run("the hook rewrites the raw body before the typed decode", func(t *testing.T) {
+		provider := newProvider(t, func(raw []byte) []byte {
+			return []byte(strings.Replace(string(raw), `[{"type":"vendor","text":"hi"}]`, `"hi"`, 1))
+		})
+		resp, err := provider.ChatCompletion(context.Background(), req)
+		require.NoError(t, err)
+		require.Len(t, resp.Choices, 1)
+		assert.Equal(t, "hi", resp.Choices[0].Message.Content)
+	})
+
+	t.Run("an undecodable normalized body is a provider error", func(t *testing.T) {
+		provider := newProvider(t, func(raw []byte) []byte { return raw })
+		_, err := provider.ChatCompletion(context.Background(), req)
+		var gwErr *core.GatewayError
+		require.ErrorAs(t, err, &gwErr)
+		assert.Equal(t, http.StatusBadGateway, gwErr.HTTPStatusCode())
+	})
+}

@@ -83,6 +83,23 @@ func TestUnknownJSONFieldsWithoutRemovesOnlyNamedMembers(t *testing.T) {
 	require.NotNil(t, got)
 }
 
+func TestUnknownJSONFieldsOnlyKeepsNamedMembers(t *testing.T) {
+	fields, err := extractUnknownJSONFields(
+		[]byte(`{"known":true,"prefix":true,"refusal":null,"name":"bot","x":1,"x":2}`),
+		"known",
+	)
+	require.NoError(t, err)
+
+	filtered := fields.Only("prefix", "absent")
+	assert.Equal(t, `{"prefix":true}`, string(filtered.raw))
+	assert.NotNil(t, fields.Lookup("refusal"), "the receiver must not change")
+	assert.True(t, fields.Only().IsEmpty())
+
+	kept := fields.Only("prefix", "refusal", "name", "x")
+	assert.Equal(t, string(fields.raw), string(kept.raw), "nothing dropped keeps the original bytes")
+	assert.True(t, UnknownJSONFields{}.Only("prefix").IsEmpty())
+}
+
 func TestMergeUnknownJSONFields_AddsAndOverrides(t *testing.T) {
 	base := UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 		"keep":     json.RawMessage(`1`),

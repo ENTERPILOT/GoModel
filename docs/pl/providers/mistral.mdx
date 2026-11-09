@@ -55,7 +55,20 @@ Na `zai-glm-5-3` odpowiedź jest zawsze listą fragmentów, niezależnie od wart
 Gdy klient odtwarza wcześniejszą turę asystenta, GoModel odsyła jej rozumowanie jako fragment
 `thinking` Mistrala wewnątrz treści wiadomości — dokumentacja Mistrala ostrzega, że usuwanie
 śladu rozumowania pogarsza wyniki — i porzuca człony, których Mistral nie potrafi sparsować
-(`mistral_content_chunks`), za które Mistral zwróciłby błąd 422.
+(`mistral_content_chunks`), za które Mistral zwróciłby błąd 422. Odtworzony człon `reasoning`
+(pisownia używana przez niektórych klientów) jest traktowany jak `reasoning_content`.
+
+Mistral odrzuca człony żądania, których nie definiuje jego schemat, więc GoModel dostosowuje
+popularne pola OpenAI, zamiast pozwolić, by żądanie się nie powiodło:
+
+- `max_completion_tokens` staje się `max_tokens`, a `seed` staje się `random_seed`.
+- `service_tier: "default"` staje się `standard_only`; poziomy, których Mistral nie oferuje,
+  są pomijane.
+- `stream_options`, `user`, `logit_bias`, `store`, `verbosity` i `safety_identifier` są
+  pomijane. Strumienie nadal raportują zużycie w ostatnim fragmencie.
+- Wiadomości zachowują tylko człony, które Mistral akceptuje dla ich roli: na przykład `name`
+  zostaje tylko w wiadomościach narzędzi, a odesłane w turach asystenta `refusal` czy
+  `annotations` są pomijane.
 
 ## Konfiguracja
 

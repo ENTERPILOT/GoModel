@@ -244,10 +244,19 @@ func TestStreamChatCompletion_AdaptsRequest(t *testing.T) {
 
 	stream, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
 		Model: "mistral-large-4-0",
-		Messages: []core.Message{{Role: "assistant", Content: "hello", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
-			reasoningContentKey: json.RawMessage(`"earlier thoughts"`),
-		})}},
+		Messages: []core.Message{
+			{Role: "assistant", Content: "hello", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				reasoningContentKey: json.RawMessage(`"earlier thoughts"`),
+				"refusal":           json.RawMessage(`null`),
+			})},
+			{Role: "user", Content: "again", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				"name": json.RawMessage(`"alice"`),
+			})},
+		},
 		Stream: true,
+		// The gateway adds stream_options by default to collect usage.
+		StreamOptions: &core.StreamOptions{IncludeUsage: true},
+		User:          "user-123",
 	})
 	require.NoError(t, err)
 	_, err = io.ReadAll(stream)
@@ -255,10 +264,15 @@ func TestStreamChatCompletion_AdaptsRequest(t *testing.T) {
 	require.NoError(t, stream.Close())
 
 	wire := capture.Last(t).JSON(t)
+	assert.NotContains(t, wire, "stream_options", "Mistral's schema has no stream_options")
+	assert.NotContains(t, wire, "user", "Mistral's schema has no user")
 	messages, ok := wire["messages"].([]any)
 	require.True(t, ok)
+	require.Len(t, messages, 2)
+	assert.NotContains(t, messages[1], "name", "Mistral allows name on tool messages only")
 	assistant, ok := messages[0].(map[string]any)
 	require.True(t, ok)
+	assert.NotContains(t, assistant, "refusal")
 	content, ok := assistant["content"].([]any)
 	require.True(t, ok, "replayed content = %#v, want chunk list", assistant["content"])
 	assert.JSONEq(t, `{"type":"thinking","thinking":[{"type":"text","text":"earlier thoughts"}]}`, string(mustJSON(content[0])))

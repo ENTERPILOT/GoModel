@@ -18,12 +18,8 @@ package mistral
 import (
 	"context"
 	"io"
-	"net/http"
-
-	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
 )
@@ -40,9 +36,9 @@ var Registration = providers.Registration{
 }
 
 // Provider implements the core.Provider interface for Mistral AI. Transport
-// goes through the shared chat-centric adapter; ChatCompletion and
-// StreamChatCompletion are overridden only to flatten Mistral's thinking
-// chunk lists into the standard content + reasoning_content shape.
+// and the request dialect go through the shared chat-centric adapter's hooks;
+// StreamChatCompletion is overridden only to wrap the stream that flattens
+// Mistral's thinking chunk lists.
 type Provider struct {
 	*openai.ChatCompatible
 }
@@ -52,56 +48,25 @@ var _ core.Provider = (*Provider)(nil)
 // New creates a new Mistral provider.
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	return &Provider{openai.NewChatCompatible(cfg.APIKey, opts, openai.CompatibleProviderConfig{
-		ProviderName: "mistral",
-		BaseURL:      providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
-		// Streaming chat — and streaming Responses via chat — picks the
-		// dialect up through the shared adapter; ChatCompletion (and buffered
-		// Responses through it) applies the core adaptation itself because it
-		// decodes the raw body.
-		AdaptChatRequest: adaptChatRequest,
-		RequestMutator:   adaptChatWire,
+		ProviderName:          "mistral",
+		BaseURL:               providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
+		AdaptChatRequest:      adaptChatRequest,
+		RequestMutator:        adaptChatWire,
+		NormalizeChatResponse: normalizeChatResponse,
 	})}
 }
 
-// ChatCompletion sends a chat completion request to Mistral. The raw body is
-// flattened (thinking chunks become reasoning_content) before decoding,
-// because the typed core decode rejects Mistral's content chunk arrays.
-func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
-	if req == nil {
-		return nil, core.NewInvalidRequestError("chat request is required", nil)
-	}
-	adapted, err := adaptChatRequest(req)
-	if err != nil {
-		return nil, err
-	}
-	adapted, err = openai.NarrowAllowedTools(adapted)
-	if err != nil {
-		return nil, err
-	}
-	var raw json.RawMessage
-	if err := p.Compatible().Do(ctx, llmclient.Request{
-		Method:    http.MethodPost,
-		Endpoint:  "/chat/completions",
-		Operation: llmclient.OperationChat,
-		Model:     req.Model,
-		Body:      adapted,
-	}, &raw); err != nil {
-		return nil, err
-	}
-	var resp core.ChatResponse
+// normalizeChatResponse flattens a buffered completion's thinking chunks
+// (thinking becomes reasoning_content) before the typed decode, which rejects
+// Mistral's content chunk arrays.
+func normalizeChatResponse(raw []byte) []byte {
 	flattened, _ := flattenThinkingChunks(raw)
-	if err := json.Unmarshal(flattened, &resp); err != nil {
-		return nil, core.NewProviderError(p.ProviderName(), http.StatusBadGateway, "failed to decode Mistral chat completion response", err)
-	}
-	core.EnsureModel(&resp.Model, req.Model)
-	return &resp, nil
+	return flattened
 }
 
 // StreamChatCompletion returns Mistral's SSE stream wrapped so that every
 // chunk whose delta.content is a chunk array is rewritten to the standard
-// content + reasoning_content delta shape. The embedded adapter applies the
-// request adaptations (adaptChatRequest, allowed_tools narrowing, the wire
-// patch) itself.
+// content + reasoning_content delta shape.
 func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
 	if req == nil {
 		return nil, core.NewInvalidRequestError("chat request is required", nil)
@@ -113,15 +78,10 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 	return newThinkingChunkStream(stream), nil
 }
 
-// Responses serves the Responses API through chat-completions translation, so
-// it picks up this provider's ChatCompletion override (and its thinking
-// flattening).
-func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	return providers.ResponsesViaChat(ctx, p, req, p.ProviderName())
-}
-
 // StreamResponses streams a Responses API request through chat-completions
-// translation, picking up the StreamChatCompletion override.
+// translation, picking up the StreamChatCompletion override. Buffered
+// Responses needs no override: the embedded adapter's chat path already
+// applies the response hook.
 func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
 	return providers.StreamResponsesViaChat(ctx, p, req, p.ProviderName())
 }
