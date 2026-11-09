@@ -571,7 +571,9 @@ Dwie dodatkowe kwestie przy dużym wolumenie:
   co oznacza utracone dane o kosztach i zaniżone obciążenie budżetów. Ustaw alert na
   `gomodel_usage_entries_dropped_total` (zobacz
   [Alerty na utracone użycie](/pl/guides/prometheus-metrics#alerty-na-utracone-użycie)),
-  a bez metryk na ostrzeżenie `usage log buffer full` w logach.
+  a bez metryk na komunikaty `usage log buffer full`, `usage logger closed`
+  i `failed to write usage batch` w logach. Utracony wpis audytu zostawia
+  w logach `audit log buffer full`.
 - **Sprawdzenia budżetów odpytują tabelę użycia przy każdym requeście.** Trzymaj
   `USAGE_RETENTION_DAYS` na niskim poziomie, gdy budżety są włączone, i wybieraj Postgresa
   zamiast SQLite, którego pojedyncze połączenie sprawia, że to dominujący koszt.

@@ -565,7 +565,9 @@ Two further points at volume:
   which means lost cost data and under-charged budgets. Alert on
   `gomodel_usage_entries_dropped_total` (see
   [Alerting on Lost Usage](/guides/prometheus-metrics#alerting-on-lost-usage)),
-  or on the `usage log buffer full` warning in the logs without metrics.
+  or, without metrics, on the `usage log buffer full`,
+  `usage logger closed` and `failed to write usage batch` log messages. A
+  dropped audit entry logs `audit log buffer full`.
 - **Budget checks query the usage table on every request.** Keep
   `USAGE_RETENTION_DAYS` tight when budgets are enabled, and prefer Postgres
   over SQLite, whose single connection makes this the dominant cost.

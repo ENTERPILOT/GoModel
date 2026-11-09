@@ -634,7 +634,9 @@ Zwei weitere Punkte bei hohem Volumen:
   gering belasteten Budgets führt. Richten Sie einen Alert auf
   `gomodel_usage_entries_dropped_total` ein (siehe
   [Alerts bei verlorener Nutzung](/de/guides/prometheus-metrics#alerts-bei-verlorener-nutzung))
-  oder ohne Metriken auf die Warnung `usage log buffer full` in den Logs.
+  oder ohne Metriken auf die Log-Meldungen `usage log buffer full`,
+  `usage logger closed` und `failed to write usage batch`. Ein verworfener
+  Audit-Eintrag protokolliert `audit log buffer full`.
 - **Budget-Prüfungen fragen bei jedem Request die Nutzungstabelle ab.** Halten
   Sie `USAGE_RETENTION_DAYS` knapp, wenn Budgets aktiviert sind, und ziehen Sie
   Postgres SQLite vor, bei dem die einzelne Verbindung dies zum dominierenden
