@@ -140,6 +140,7 @@ func TestAdaptChatRequest(t *testing.T) {
 			{Role: "assistant", Content: "d", ExtraFields: extras(t, `{"reasoning_content":"","reasoning":"alias"}`)},
 			{Role: "assistant", Content: "e", ExtraFields: extras(t, `{"reasoning_content":"primary","reasoning":"alias"}`)},
 			{Role: "assistant", Content: "f", ExtraFields: extras(t, `{"reasoning_content":[{"type":"text","text":"parts"}]}`)},
+			{Role: "assistant", Content: "g", ExtraFields: extras(t, `{"reasoning_content":[],"reasoning":"alias"}`)},
 		}}
 		got, err := adaptChatRequest(req)
 		require.NoError(t, err)
@@ -150,6 +151,7 @@ func TestAdaptChatRequest(t *testing.T) {
 		assert.Equal(t, json.RawMessage(`"alias"`), got.Messages[3].ExtraFields.Lookup(reasoningContentKey), "an empty primary falls back to the alias")
 		assert.Equal(t, json.RawMessage(`"primary"`), got.Messages[4].ExtraFields.Lookup(reasoningContentKey), "a non-empty primary wins")
 		assert.JSONEq(t, `[{"type":"text","text":"parts"}]`, string(got.Messages[5].ExtraFields.Lookup(reasoningContentKey)), "a list of text parts is a trace, kept as sent")
+		assert.Equal(t, json.RawMessage(`"alias"`), got.Messages[6].ExtraFields.Lookup(reasoningContentKey), "an empty list falls back to the alias")
 	})
 }
 
@@ -228,6 +230,18 @@ func TestAdaptChatWire(t *testing.T) {
 		raw, ok := r.Body.(json.RawMessage)
 		require.True(t, ok, "body = %#v, want json.RawMessage", r.Body)
 		assert.JSONEq(t, `{"model":"m","messages":[{"role":"assistant","content":[{"type":"thinking","thinking":[{"type":"text","text":"earlier thoughts"}]},{"type":"text","text":"hello"}]}]}`, string(raw))
+	})
+
+	t.Run("replayed reasoning as a list of text parts is patched in", func(t *testing.T) {
+		req := &core.ChatRequest{
+			Model:    "m",
+			Messages: []core.Message{{Role: "assistant", Content: "hello", ExtraFields: extras(t, `{"reasoning_content":[{"type":"text","text":"a"},{"type":"text","text":"b"}]}`)}},
+		}
+		r := &llmclient.Request{Method: "POST", Endpoint: "/chat/completions", Body: req}
+		adaptChatWire(r)
+		raw, ok := r.Body.(json.RawMessage)
+		require.True(t, ok, "body = %#v, want json.RawMessage", r.Body)
+		assert.JSONEq(t, `{"model":"m","messages":[{"role":"assistant","content":[{"type":"thinking","thinking":[{"type":"text","text":"ab"}]},{"type":"text","text":"hello"}]}]}`, string(raw))
 	})
 
 	t.Run("chat body without replayed reasoning is not re-encoded", func(t *testing.T) {
