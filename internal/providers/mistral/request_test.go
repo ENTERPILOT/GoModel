@@ -149,7 +149,7 @@ func TestAdaptChatRequest(t *testing.T) {
 		assert.True(t, got.Messages[2].ExtraFields.IsEmpty())
 		assert.Equal(t, json.RawMessage(`"alias"`), got.Messages[3].ExtraFields.Lookup(reasoningContentKey), "an empty primary falls back to the alias")
 		assert.Equal(t, json.RawMessage(`"primary"`), got.Messages[4].ExtraFields.Lookup(reasoningContentKey), "a non-empty primary wins")
-		assert.NotNil(t, got.Messages[5].ExtraFields.Lookup(reasoningContentKey), "a list of text parts is a trace, not empty")
+		assert.JSONEq(t, `[{"type":"text","text":"parts"}]`, string(got.Messages[5].ExtraFields.Lookup(reasoningContentKey)), "a list of text parts is a trace, kept as sent")
 	})
 }
 
