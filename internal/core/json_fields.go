@@ -330,7 +330,8 @@ func (fields UnknownJSONFields) Without(keys ...string) UnknownJSONFields {
 func (fields UnknownJSONFields) Only(keys ...string) UnknownJSONFields {
 	var drop []string
 	fields.forEachMember(func(name string, _ gjson.Result) bool {
-		if !slices.Contains(keys, name) && !slices.Contains(drop, name) {
+		// Duplicates are fine: Without collapses them into a set.
+		if !slices.Contains(keys, name) {
 			drop = append(drop, name)
 		}
 		return true

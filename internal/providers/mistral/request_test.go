@@ -1,6 +1,7 @@
 package mistral
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 
@@ -74,6 +75,18 @@ func TestAdaptChatRequest(t *testing.T) {
 			assert.Nil(t, got.ExtraFields.Lookup(key), key)
 		}
 		assert.NotNil(t, req.StreamOptions, "the caller's request must not change")
+	})
+
+	t.Run("max_completion_tokens null means no limit, a non-integer is rejected", func(t *testing.T) {
+		got, err := adaptChatRequest(&core.ChatRequest{Model: "m", ExtraFields: extras(t, `{"max_completion_tokens":null}`)})
+		require.NoError(t, err)
+		assert.Nil(t, got.MaxTokens, "null must not become max_tokens: 0")
+		assert.Nil(t, got.ExtraFields.Lookup("max_completion_tokens"))
+
+		_, err = adaptChatRequest(&core.ChatRequest{Model: "m", ExtraFields: extras(t, `{"max_completion_tokens":"lots"}`)})
+		var gwErr *core.GatewayError
+		require.ErrorAs(t, err, &gwErr)
+		assert.Equal(t, http.StatusBadRequest, gwErr.HTTPStatusCode())
 	})
 
 	t.Run("Mistral spellings win over the OpenAI ones", func(t *testing.T) {

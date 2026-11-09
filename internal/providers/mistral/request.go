@@ -103,17 +103,20 @@ func mistralServiceTier(tier string) string {
 }
 
 // adaptTopLevelExtras renames or removes the adaptedRequestFields members. A
-// max_completion_tokens value fills max_tokens when that is unset, and seed
+// max_completion_tokens value fills max_tokens when that is unset (null means
+// no limit; a non-integer is rejected rather than silently lost), and seed
 // becomes random_seed when the client did not send the Mistral spelling too.
 func adaptTopLevelExtras(fields core.UnknownJSONFields, maxTokens *int) (core.UnknownJSONFields, *int, bool, error) {
 	if !fields.HasAny(adaptedRequestFields...) {
 		return fields, maxTokens, false, nil
 	}
 	if raw := fields.Lookup("max_completion_tokens"); raw != nil && maxTokens == nil {
-		var n int
-		if err := json.Unmarshal(raw, &n); err == nil {
-			maxTokens = &n
+		// A pointer keeps null as "no limit" instead of decoding it to 0.
+		var limit *int
+		if err := json.Unmarshal(raw, &limit); err != nil {
+			return fields, maxTokens, false, core.NewInvalidRequestError("max_completion_tokens must be an integer", err)
 		}
+		maxTokens = limit
 	}
 	seed := fields.Lookup("seed")
 	keepRandomSeed := fields.Lookup("random_seed") != nil

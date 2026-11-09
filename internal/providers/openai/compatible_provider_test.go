@@ -336,7 +336,7 @@ func TestCompatibleProvider_ChatCompletion_NormalizeChatResponse(t *testing.T) {
 	})
 
 	t.Run("an undecodable normalized body is a provider error", func(t *testing.T) {
-		provider := newProvider(t, func(raw []byte) []byte { return raw })
+		provider := newProvider(t, func([]byte) []byte { return []byte("{") })
 		_, err := provider.ChatCompletion(context.Background(), req)
 		var gwErr *core.GatewayError
 		require.ErrorAs(t, err, &gwErr)
