@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"log/slog"
@@ -70,16 +71,30 @@ var usageEntriesDropped = func() *prometheus.CounterVec {
 	)
 	// Export every reason from the start, so an increase() alert has a
 	// baseline before the first drop.
-	for _, reason := range []string{"buffer_full", "write_failed", "logger_closed"} {
+	for _, reason := range []string{dropBufferFull, dropWriteFailed, dropLoggerClosed} {
 		c.WithLabelValues(reason)
 	}
 	return c
 }()
 
-// dropClosed records an entry that arrived after the logger shut down.
-func dropClosed(entry *UsageEntry) {
-	usageEntriesDropped.WithLabelValues("logger_closed").Inc()
-	slog.Warn("usage logger closed, dropping entry", "request_id", entry.RequestID, "model", entry.Model)
+// Values of the reason label of usageEntriesDropped.
+const (
+	dropBufferFull   = "buffer_full"
+	dropWriteFailed  = "write_failed"
+	dropLoggerClosed = "logger_closed"
+)
+
+// dropMessages are the warnings logged per reason. Operators alert on these
+// texts, so they stay as they are.
+var dropMessages = map[string]string{
+	dropBufferFull:   "usage log buffer full, dropping entry",
+	dropLoggerClosed: "usage logger closed, dropping entry",
+}
+
+// dropEntry counts and logs one entry Write could not queue.
+func dropEntry(reason string, entry *UsageEntry) {
+	usageEntriesDropped.WithLabelValues(reason).Inc()
+	slog.Warn(dropMessages[reason], "request_id", cmp.Or(entry.RequestID, "unknown"), "model", entry.Model)
 }
 
 // Write queues a usage entry for async writing.
@@ -92,7 +107,7 @@ func (l *Logger) Write(entry *UsageEntry) {
 
 	// Check if logger is shut down to avoid sending on closed channel
 	if l.closed.Load() {
-		dropClosed(entry)
+		dropEntry(dropLoggerClosed, entry)
 		return
 	}
 
@@ -102,7 +117,7 @@ func (l *Logger) Write(entry *UsageEntry) {
 
 	// Double-check after registering - Close() may have set closed between first check and Add(1)
 	if l.closed.Load() {
-		dropClosed(entry)
+		dropEntry(dropLoggerClosed, entry)
 		return
 	}
 
@@ -111,16 +126,7 @@ func (l *Logger) Write(entry *UsageEntry) {
 	case l.buffer <- entry:
 	default:
 		l.publishLiveEvent(LiveEventUsageFailed, entry)
-		// Buffer full - drop entry and log warning
-		requestID := entry.RequestID
-		if requestID == "" {
-			requestID = "unknown"
-		}
-		usageEntriesDropped.WithLabelValues("buffer_full").Inc()
-		slog.Warn("usage log buffer full, dropping entry",
-			"request_id", requestID,
-			"model", entry.Model,
-		)
+		dropEntry(dropBufferFull, entry)
 	}
 }
 
@@ -250,7 +256,7 @@ func (l *Logger) flushBatch(batch []*UsageEntry) {
 		if partial, ok := errors.AsType[*PartialWriteError](err); ok {
 			dropped = partial.FailedCount
 		}
-		usageEntriesDropped.WithLabelValues("write_failed").Add(float64(dropped))
+		usageEntriesDropped.WithLabelValues(dropWriteFailed).Add(float64(dropped))
 		slog.Error("failed to write usage batch",
 			"error", err,
 			"count", len(batch),

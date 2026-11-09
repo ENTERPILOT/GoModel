@@ -2,25 +2,28 @@ package responsecache
 
 import (
 	"bytes"
-	"github.com/enterpilot/gomodel/internal/streaming"
 
 	"github.com/goccy/go-json"
+
+	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
-// responsesEventType returns a payload's Responses event type, or "" for a
-// payload without one. The type field is decoded rather than substring-matched
-// so whitespace or key order in the payload cannot smuggle a terminal event
-// past validation.
-func responsesEventType(payload []byte) string {
+// responsesEventType returns a JSON payload's Responses event type ("" for a
+// payload without one) and whether the payload is valid JSON. The type field
+// is decoded rather than substring-matched so whitespace or key order in the
+// payload cannot smuggle a terminal event past validation.
+//
+// Decoding validates the payload as it goes, so the usual payload, an object,
+// is parsed once; only one the decoder turns down (a non-object, or a type
+// that is not a string) is checked again with json.Valid.
+func responsesEventType(payload []byte) (eventType string, valid bool) {
 	var event struct {
 		Type string `json:"type"`
 	}
 	if err := json.Unmarshal(payload, &event); err != nil {
-		// json.Valid already accepted the payload; a non-object payload
-		// simply has no event type.
-		return ""
+		return "", json.Valid(payload)
 	}
-	return event.Type
+	return event.Type, true
 }
 
 // validateCacheableSSE reports whether raw is a complete, cache-safe SSE body.
@@ -72,10 +75,11 @@ func validateCacheableSSE(raw []byte) bool {
 			sawDone = true
 			continue
 		}
-		if !json.Valid(payload) {
+		eventType, valid := responsesEventType(payload)
+		if !valid {
 			return false
 		}
-		switch responsesEventType(payload) {
+		switch eventType {
 		case "response.incomplete", "response.failed":
 			return false
 		case "response.completed":

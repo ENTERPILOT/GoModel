@@ -631,8 +631,10 @@ Zwei weitere Punkte bei hohem Volumen:
 - **Nutzungs- und Audit-Schreibvorgänge werden gepuffert und bei vollem Puffer
   verworfen, nicht blockiert.** Ein Burst oder eine langsame Datenbank kann
   unbemerkt Nutzungseinträge verlieren, was zu verlorenen Kostendaten und zu
-  gering belasteten Budgets führt. Das einzige Signal ist eine Warnung
-  `usage log buffer full` in den Logs – richten Sie dafür einen Alert ein.
+  gering belasteten Budgets führt. Richten Sie einen Alert auf
+  `gomodel_usage_entries_dropped_total` ein (siehe
+  [Alerts bei verlorener Nutzung](/de/guides/prometheus-metrics#alerts-bei-verlorener-nutzung))
+  oder ohne Metriken auf die Warnung `usage log buffer full` in den Logs.
 - **Budget-Prüfungen fragen bei jedem Request die Nutzungstabelle ab.** Halten
   Sie `USAGE_RETENTION_DAYS` knapp, wenn Budgets aktiviert sind, und ziehen Sie
   Postgres SQLite vor, bei dem die einzelne Verbindung dies zum dominierenden
@@ -719,7 +721,8 @@ separat ein VACUUM aus, wenn die Dateigröße wichtig ist.
 - Richten Sie die Readiness auf `/health/ready` aus und setzen Sie
   `terminationGracePeriodSeconds` auf mehr als 30.
 - Aktivieren Sie Metriken und richten Sie Alerts für
-  `gomodel_circuit_breaker_state` und `usage log buffer full` ein.
+  `gomodel_circuit_breaker_state` und
+  `gomodel_usage_entries_dropped_total` ein.
 - Setzen Sie bei Air-Gapped-Installationen `GOMODEL_OFFLINE=true` und liefern
   Sie dann den Modellkatalog als Datei mit oder deklarieren Sie Modellpreise in
   der Konfiguration, damit Kostenerfassung und Budgets weiter funktionieren.

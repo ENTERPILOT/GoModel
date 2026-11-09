@@ -484,12 +484,7 @@ func fetchProviderInventory(ctx context.Context, provider core.Provider, in prov
 // Listings run on their own goroutines during startup and refreshes, where no
 // request's recover middleware is above them and a panic would end the process.
 func listModels(ctx context.Context, provider core.Provider, providerName string) (resp *core.ModelsResponse, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			slog.Error("provider model listing panicked", append([]any{"provider", providerName}, panicLogAttrs(r)...)...)
-			resp, err = nil, errors.New("list models panicked")
-		}
-	}()
+	defer recoverProviderPanic(&err, "list models", providerName)
 	return provider.ListModels(ctx)
 }
 

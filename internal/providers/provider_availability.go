@@ -55,13 +55,19 @@ func (r *ModelRegistry) hasConfiguredProviderModels(providerName string) bool {
 // checkAvailability runs the probe and turns a panic into an error: startup
 // probes run on their own goroutines, where a panic would end the process.
 func checkAvailability(ctx context.Context, checker core.AvailabilityChecker, providerName string) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			slog.Error("provider availability probe panicked", append([]any{"provider", providerName}, panicLogAttrs(r)...)...)
-			err = errors.New("availability probe panicked")
-		}
-	}()
+	defer recoverProviderPanic(&err, "availability probe", providerName)
 	return checker.CheckAvailability(ctx)
+}
+
+// recoverProviderPanic, deferred around a provider call, logs a panic of that
+// call and reports it through err as "<call> panicked".
+func recoverProviderPanic(err *error, call, providerName string) {
+	r := recover()
+	if r == nil {
+		return
+	}
+	slog.Error("provider "+call+" panicked", append([]any{"provider", providerName}, panicLogAttrs(r)...)...)
+	*err = errors.New(call + " panicked")
 }
 
 // panicLogAttrs describes a recovered panic for the log without its value

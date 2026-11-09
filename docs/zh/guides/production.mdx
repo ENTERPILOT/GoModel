@@ -370,7 +370,7 @@ GoModel 分别提供存活和就绪检查，二进制文件还可以自我探测
 在大流量下还有两点需要注意：
 
 - **当缓冲区写满时，用量和审计写入会被丢弃，而不是阻塞。** 突发流量或缓慢的数据库可能会悄无声息地丢失用量条目，
-  这意味着成本数据丢失和预算扣费不足。唯一的信号是日志中的 `usage log buffer full` 警告，因此请针对它设置告警。
+  这意味着成本数据丢失和预算扣费不足。请针对 `gomodel_usage_entries_dropped_total` 设置告警（参见[针对用量丢失告警](/zh/guides/prometheus-metrics#针对用量丢失告警)）；未启用指标时，请针对日志中的 `usage log buffer full` 警告设置告警。
 - **预算检查会在每个请求上查询用量表。** 启用预算时请将 `USAGE_RETENTION_DAYS` 设置得尽量小，并优先使用 Postgres 而非 SQLite，
   因为 SQLite 的单连接会使这部分成为主要开销。
 
@@ -414,5 +414,5 @@ GoModel 分别提供存活和就绪检查，二进制文件还可以自我探测
 - 保持各副本时钟同步（NTP）；共享的并发限制依赖于此。
 - 明确决定 `LOGGING_LOG_BODIES` 的取值，并有意识地设置数据保留期。
 - 将就绪检查指向 `/health/ready`，并将 `terminationGracePeriodSeconds` 设置为大于 30。
-- 启用指标，并针对 `gomodel_circuit_breaker_state` 和 `usage log buffer full` 设置告警。
+- 启用指标，并针对 `gomodel_circuit_breaker_state` 和 `gomodel_usage_entries_dropped_total` 设置告警。
 - 对于离线隔离安装，请设置 `GOMODEL_OFFLINE=true`，然后以文件形式提供模型目录，或在配置中声明模型定价，以确保成本追踪和预算继续工作。

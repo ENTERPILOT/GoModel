@@ -562,8 +562,10 @@ Two further points at volume:
 
 - **Usage and audit writes are buffered and dropped, not blocked, when the
   buffer fills.** A burst or a slow database can silently lose usage entries,
-  which means lost cost data and under-charged budgets. The only signal is a
-  `usage log buffer full` warning in the logs, so alert on it.
+  which means lost cost data and under-charged budgets. Alert on
+  `gomodel_usage_entries_dropped_total` (see
+  [Alerting on Lost Usage](/guides/prometheus-metrics#alerting-on-lost-usage)),
+  or on the `usage log buffer full` warning in the logs without metrics.
 - **Budget checks query the usage table on every request.** Keep
   `USAGE_RETENTION_DAYS` tight when budgets are enabled, and prefer Postgres
   over SQLite, whose single connection makes this the dominant cost.
@@ -634,7 +636,7 @@ if the file size matters.
 - Point readiness at `/health/ready` and set
   `terminationGracePeriodSeconds` above 30.
 - Enable metrics and alert on `gomodel_circuit_breaker_state` and on
-  `usage log buffer full`.
+  `gomodel_usage_entries_dropped_total`.
 - For air-gapped installs, set `GOMODEL_OFFLINE=true`, then ship the model
   catalog as a file or declare model pricing in config so cost tracking and
   budgets keep working.
