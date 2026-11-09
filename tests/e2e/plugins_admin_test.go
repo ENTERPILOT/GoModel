@@ -163,14 +163,16 @@ func TestPlugins_HeaderEdit_E2E(t *testing.T) {
 		assert.Equal(t, "Mock response to: hello", text)
 	})
 
-	t.Run("request_set of Authorization is rejected", func(t *testing.T) {
+	t.Run("request_set of Authorization is ignored", func(t *testing.T) {
 		t.Cleanup(func() { fx.reset(t) })
+		// A refused header is skipped with a warning, so a saved config that
+		// names one still loads; the instance edits nothing.
 		status, body := fx.putGuardrail(t, guardrailDef("auth", "header_edit", map[string]any{"request_set": "Authorization: Bearer leaked"}, nil))
-		assert.Equal(t, http.StatusBadRequest, status, string(body))
-		assert.Contains(t, string(body), "Authorization")
+		require.Less(t, status, http.StatusBadRequest, string(body))
 
 		var defs []map[string]any
 		fx.adminJSON(t, http.MethodGet, adminGuardrailsPath, nil, http.StatusOK, &defs)
-		assert.Empty(t, defs, "rejected instance must not be stored")
+		require.Len(t, defs, 1)
+		assert.Equal(t, "no header edits", defs[0]["summary"])
 	})
 }
