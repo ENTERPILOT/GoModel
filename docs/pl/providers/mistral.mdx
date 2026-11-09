@@ -1,0 +1,115 @@
+---
+title: "Mistral AI"
+description: "Skonfiguruj Mistral AI (La Plateforme) w GoModel, w tym modele rozumujące oraz sposób normalizacji wyjścia myślenia dla klientów czatu."
+icon: "sparkles"
+keywords: ["Mistral", "La Plateforme", "reasoning", "thinking", "konfiguracja dostawcy"]
+---
+
+Mistral AI (La Plateforme) jest obsługiwany pod adresem `https://api.mistral.ai/v1` w formacie
+zgodnym z OpenAI. GoModel kieruje uzupełnienia czatu, listy modeli, embeddingi i żądania
+passthrough przez współdzielony adapter OpenAI; punkt końcowy `/v1/responses` jest tłumaczony
+przez uzupełnienia czatu (Mistral oferuje też natywny punkt końcowy; tłumaczenie przez czat
+sprawia, że poniższa normalizacja rozumowania działa w czacie, w streamingu i na
+`/v1/responses`; żądania passthrough `/p/mistral/...` są przekazywane bez zmian i bez tej
+normalizacji). Pliki i zadania
+wsadowe nie są udostępniane dla tego dostawcy.
+
+## Wyjście rozumowania (myślenia)
+
+Gdy rozumowanie jest włączone, modele takie jak `mistral-large-4-0` i `mistral-small-2603` oraz
+hostowane modele rozumujące, takie jak `zai-glm-5-3`, zwracają treść asystenta jako
+**listę typowanych fragmentów** — fragment `thinking` ze śladem rozumowania i fragmenty `text`
+z odpowiedzią — zarówno w odpowiedziach buforowanych, jak i w strumieniach SSE. Ten kształt nie
+jest standardowym wyjściem czatu OpenAI i klienci tacy jak SillyTavern renderują go jako
+krzaki.
+
+Dostawca `mistral` w GoModel konwertuje go na standard automatycznie:
+
+- fragmenty `thinking` są łączone w pole `reasoning_content`, a
+- fragmenty `text` są łączone w zwykły ciąg `content`
+
+— zarówno w odpowiedziach strumieniowych (`choices[].delta`), jak i buforowanych
+(`choices[].message`). Nie wymaga to żadnej konfiguracji po stronie klienta. Typy fragmentów
+bez standardowego odpowiednika w czacie — na przykład fragmenty `reference` z cytowań
+Mistrala po wywołaniach narzędzi — są zachowywane w członie dostawcy `mistral_content_chunks`,
+więc żadne dane z upstreamu nie giną. Zdarzenia SSE powyżej 16 MiB są również przekazywane bez konwersji.
+
+Poziom rozumowania wyślij standardowym parametrem zagnieżdżonym; GoModel odwzorowuje go na
+płaskie `reasoning_effort` Mistrala:
+
+```json
+{
+  "model": "mistral-large-4-0",
+  "messages": [{ "role": "user", "content": "Ile to 17 * 23?" }],
+  "reasoning": { "effort": "high" }
+}
+```
+
+Wyliczenie całego API Mistrala to `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`,
+a wartość jest normalizowana do małych liter i przekazywana. To, które poziomy akceptuje dany model, zależy od
+modelu — przykładowo Mistral Large 4 przyjmuje `low`/`medium`/`high`, hostowane modele GLM
+`low`/`high`/`max`, a `mistral-small-2603` przyjmuje też `none` — więc nieobsługiwany poziom
+dla wybranego modelu odrzuca sam Mistral, tak samo jak w przypadku natywnych SDK Mistrala.
+Na `zai-glm-5-3` odpowiedź jest zawsze listą fragmentów, niezależnie od wartości poziomu.
+
+Gdy klient odtwarza wcześniejszą turę asystenta, GoModel odsyła jej rozumowanie jako fragment
+`thinking` Mistrala wewnątrz treści wiadomości — dokumentacja Mistrala ostrzega, że usuwanie
+śladu rozumowania pogarsza wyniki — i porzuca człony, których Mistral nie potrafi sparsować
+(`mistral_content_chunks`), za które Mistral zwróciłby błąd 422.
+
+## Konfiguracja
+
+```bash
+MISTRAL_API_KEY=...
+```
+
+Albo w `config.yaml`:
+
+```yaml
+providers:
+  mistral:
+    type: mistral
+    base_url: "https://api.mistral.ai/v1"
+    api_key: "${MISTRAL_API_KEY}"
+```
+
+<Note>
+  `type` dostawcy to `mistral`. Klucz konfiguracji (`mistral` w powyższym przykładzie) jest
+  dowolny i służy tylko do identyfikacji tego wpisu w konfiguracji; można go zmienić.
+</Note>
+
+Można też nadpisać bazowy adres URL i listę modeli:
+
+```bash
+MISTRAL_BASE_URL=https://api.mistral.ai/v1
+MISTRAL_MODELS=mistral-large-4-0,mistral-small-2603,mistral-embed
+```
+
+<Note>
+  Ustawienie `MISTRAL_MODELS` ogranicza w domyślnym trybie `allowlist` modele obsługiwane przez
+  tego dostawcę do tej listy — żądania dotyczące innych modeli zwracają 404. Zobacz
+  [Models modes](/advanced/config-yaml#models-modes) dla alternatyw `merge`/`fallback`.
+  Odpowiedź 404 dotyczy tylko routingu opartego na modelach: gdy operator włączy passthrough
+  dla tego dostawcy (`ENABLED_PASSTHROUGH_PROVIDERS`, zobacz
+  [Passthrough](/features/passthrough-api)), żądania `/p/mistral/...` docierają do upstreamu
+  niezależnie od tej listy.
+</Note>
+
+## Modele
+
+`GET /v1/models` w GoModel to lista w skali bramy (widoczne modele wszystkich skonfigurowanych
+dostawców, nie tylko tego); to, co obsługuje ten dostawca, wynika z jego trybu modeli, więc
+może to być podzbiór inwentarza Twojego konta Mistral. Wywołaj jeden z jego modeli bezpośrednio
+przez zgodny z OpenAI punkt końcowy `/v1/chat/completions`:
+
+```yaml
+virtual_models:
+  - source: mistral
+    # Prefiks docelowy to klucz mapy providers, nie typ dostawcy;
+    # trasy /p/mistral/... używają typu.
+    target: mistral/mistral-large-4-0
+```
+
+## Embeddingi
+
+Punkt końcowy Mistrala `/v1/embeddings` (na przykład `mistral-embed`) jest obsługiwany.

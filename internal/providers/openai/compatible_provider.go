@@ -241,14 +241,16 @@ func (p *CompatibleProvider) adaptedChatRequest(req *core.ChatRequest) (*core.Ch
 	if p.forwardAllowedTools {
 		return req, nil
 	}
-	return narrowAllowedTools(req)
+	return NarrowAllowedTools(req)
 }
 
-// narrowAllowedTools rewrites an allowed_tools tool_choice for an upstream not
+// NarrowAllowedTools rewrites an allowed_tools tool_choice for an upstream not
 // known to honor it, so it cannot widen the choice to every declared tool. It
 // returns req itself when there is nothing to rewrite and a shallow copy
-// otherwise.
-func narrowAllowedTools(req *core.ChatRequest) (*core.ChatRequest, error) {
+// otherwise. It is exported so providers that bypass the adapter's own
+// request pipeline (to decode a raw response body, say) apply the same
+// policy.
+func NarrowAllowedTools(req *core.ChatRequest) (*core.ChatRequest, error) {
 	if _, _, ok := core.AllowedToolsChoice(req.ToolChoice); !ok {
 		return req, nil
 	}
