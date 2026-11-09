@@ -2,6 +2,7 @@ package headeredit
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -54,12 +55,16 @@ func decodeConfig(raw json.RawMessage) (config, error) {
 	return c, cfg.Err()
 }
 
+// errRefusedHeader marks a well-formed line naming a header the plugin may
+// not edit. Such a line is skipped, not an error: see Plugin.Init.
+var errRefusedHeader = errors.New("refused header")
+
 // parseEdits turns the lines of one config field into edits. Blank lines and
 // lines starting with # are ignored. Set and add lines look like
-// "Name: value"; remove lines are a bare "Name". An upstream field also refuses
-// the names the provider call merge would drop, so a config that cannot take
-// effect fails to load instead of being ignored per request.
-func parseEdits(field string, entries []string, o op, upstream bool) ([]edit, error) {
+// "Name: value"; remove lines are a bare "Name". A line naming a header the
+// plugin may not edit, or for an upstream field one the provider call merge
+// would drop, is skipped and reported to ignored.
+func parseEdits(field string, entries []string, o op, upstream bool, ignored func(field string, line int, err error)) ([]edit, error) {
 	var out []edit
 	for i, line := range entries {
 		line = strings.TrimSpace(line)
@@ -68,7 +73,13 @@ func parseEdits(field string, entries []string, o op, upstream bool) ([]edit, er
 		}
 		e, err := parseLine(line, o)
 		if err == nil && upstream && core.IsPluginUpstreamHeaderDenied(e.name) {
-			err = fmt.Errorf("header %q is set by the gateway and cannot be sent upstream", e.name)
+			err = fmt.Errorf("header %q is set by the gateway and cannot be sent upstream: %w", e.name, errRefusedHeader)
+		}
+		if errors.Is(err, errRefusedHeader) {
+			if ignored != nil {
+				ignored(field, i+1, err)
+			}
+			continue
 		}
 		if err != nil {
 			return nil, fmt.Errorf("header_edit: %s line %d: %w", field, i+1, err)
@@ -106,10 +117,10 @@ func checkName(name string, o op) error {
 	}
 	lower := strings.ToLower(name)
 	if core.IsCredentialHeader(lower) {
-		return fmt.Errorf("header %q carries credentials and cannot be edited", name)
+		return fmt.Errorf("header %q carries credentials and cannot be edited: %w", name, errRefusedHeader)
 	}
 	if o != opRemove && (strings.Contains(lower, "secret") || strings.Contains(lower, "token")) {
-		return fmt.Errorf("header %q looks like a credential and cannot be set", name)
+		return fmt.Errorf("header %q looks like a credential and cannot be set: %w", name, errRefusedHeader)
 	}
 	return nil
 }

@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -68,7 +69,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 			},
 			{
 				Key: "upstream_set", Label: "Upstream headers to set", Input: pluginapi.InputTextarea, Default: "",
-				Help:        "One \"Name: value\" per line. Adds static headers to every provider call of a Chat Completions, Responses or Messages request that goes through the gateway's HTTP client, failover attempts and the Responses input_tokens and compact routes included (/v1/messages/count_tokens carries none); the bedrock provider, which calls Bedrock Runtime through the AWS SDK, does not carry them (bedrock-mantle does). Applies to requests from clients: inference the gateway issues for its own work, such as a guardrail's judge, does not inherit them. Credential, transport, Anthropic-Beta and Idempotency-Key headers are rejected when the config loads. Takes effect in the prompt phase only; a response-phase run is after the provider call.",
+				Help:        "One \"Name: value\" per line. Adds static headers to every provider call of a Chat Completions, Responses or Messages request that goes through the gateway's HTTP client, failover attempts and the Responses input_tokens and compact routes included (/v1/messages/count_tokens carries none); the bedrock provider, which calls Bedrock Runtime through the AWS SDK, does not carry them (bedrock-mantle does). Applies to requests from clients: inference the gateway issues for its own work, such as a guardrail's judge, does not inherit them. Credential, transport, Anthropic-Beta and Idempotency-Key headers are skipped with a warning in the log. Takes effect in the prompt phase only; a response-phase run is after the provider call.",
 				Placeholder: "X-Tenant: acme",
 			},
 		},
@@ -76,13 +77,23 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 }
 
 // Init decodes and validates the instance configuration. Unknown keys and
-// credential header names are rejected.
-func (p *Plugin) Init(_ context.Context, raw json.RawMessage, _ pluginapi.Host) error {
+// malformed lines are rejected. A header the plugin may not edit (a
+// credential, or for upstream_set a name the gateway owns) is ignored with a
+// warning instead: the list of such names grows between releases, and a
+// stored instance naming one must not stop the gateway from starting.
+func (p *Plugin) Init(_ context.Context, raw json.RawMessage, host pluginapi.Host) error {
 	cfg, err := decodeConfig(raw)
 	if err != nil {
 		return err
 	}
-	request, response, upstream, err := compile(cfg)
+	logger := slog.Default()
+	if host != nil && host.Logger() != nil {
+		logger = host.Logger()
+	}
+	request, response, upstream, err := compile(cfg, func(field string, line int, err error) {
+		// err names the header, never its value.
+		logger.Warn("header_edit: ignoring a header it may not edit", "field", field, "line", line, "reason", err.Error())
+	})
 	if err != nil {
 		return err
 	}
@@ -112,7 +123,7 @@ func (p *Plugin) Summarize(raw json.RawMessage) string {
 	if err != nil {
 		return ""
 	}
-	request, response, upstream, err := compile(cfg)
+	request, response, upstream, err := compile(cfg, nil)
 	if err != nil {
 		return ""
 	}
@@ -148,7 +159,9 @@ func summarizeEdits(edits []edit) string {
 // compile parses every config field. Within a header set the order is set,
 // then add, then remove, so a name listed in both set and remove ends up
 // removed.
-func compile(cfg config) (request, response, upstream []edit, err error) {
+// ignored, when set, is told about each line naming a header the plugin may
+// not edit; the line is skipped either way.
+func compile(cfg config, ignored func(field string, line int, err error)) (request, response, upstream []edit, err error) {
 	groups := []struct {
 		field    string
 		entries  []string
@@ -164,7 +177,7 @@ func compile(cfg config) (request, response, upstream []edit, err error) {
 		{"upstream_set", cfg.UpstreamSet, opSet, true, &upstream},
 	}
 	for _, g := range groups {
-		edits, err := parseEdits(g.field, g.entries, g.o, g.upstream)
+		edits, err := parseEdits(g.field, g.entries, g.o, g.upstream, ignored)
 		if err != nil {
 			return nil, nil, nil, err
 		}

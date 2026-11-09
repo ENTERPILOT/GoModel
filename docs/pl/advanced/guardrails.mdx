@@ -466,7 +466,7 @@ remove to sama `Name`. Puste linie i komentarze `#` są ignorowane.
 | `response_set` | Zastępuje nagłówek w odpowiedzi wysyłanej do klienta. |
 | `response_add` | Dopisuje wartość do nagłówka odpowiedzi do klienta, zachowując istniejące wartości. Stosowane raz na request, nawet gdy instancja działa w obu fazach. |
 | `response_remove` | Usuwa nagłówek z odpowiedzi do klienta, także nagłówki dodawane przez sam GoModel (na przykład `X-Request-Id`). |
-| `upstream_set` | Statyczne nagłówki wchodzące w każde wywołanie providera w ramach requestu Chat Completions, Responses lub Messages, które przechodzi przez klienta HTTP gatewaya: z próbami failover oraz trasami Responses `input_tokens` i `compact`, z wyjątkiem `/v1/messages/count_tokens` i `bedrock`. Nagłówki z danymi uwierzytelniającymi, nagłówki określające połączenie lub ciało żądania, `Accept-Encoding`, `anthropic-beta` oraz `Idempotency-Key` są odrzucane przy wczytywaniu konfiguracji. Działa tylko w fazie prompt; uruchomienie w fazie response następuje po wywołaniu providera. Zobacz [Nagłówki upstream](/pl/advanced/plugins#nagłówki-upstream). |
+| `upstream_set` | Statyczne nagłówki wchodzące w każde wywołanie providera w ramach requestu Chat Completions, Responses lub Messages, które przechodzi przez klienta HTTP gatewaya: z próbami failover oraz trasami Responses `input_tokens` i `compact`, z wyjątkiem `/v1/messages/count_tokens` i `bedrock`. Nagłówki z danymi uwierzytelniającymi, nagłówki określające połączenie lub ciało żądania, `Accept-Encoding`, `anthropic-beta` oraz `Idempotency-Key` są pomijane przy wczytywaniu konfiguracji, z ostrzeżeniem w logu. Działa tylko w fazie prompt; uruchomienie w fazie response następuje po wywołaniu providera. Zobacz [Nagłówki upstream](/pl/advanced/plugins#nagłówki-upstream). |
 
 Nagłówków z danymi uwierzytelniającymi (`Authorization`, `X-Api-Key`,
 `Cookie`, ...) nigdy nie można edytować, a nazw zawierających `secret` lub
@@ -474,9 +474,11 @@ Nagłówków z danymi uwierzytelniającymi (`Authorization`, `X-Api-Key`,
 providerem (`Helicone-Auth`, `cf-aig-authorization`, `x-portkey-api-key`,
 `Ocp-Apim-Subscription-Key`): failover do innego providera wysłałby je tam.
 Nazwy są porównywane z `_` traktowanym jak `-`, więc `X_Api_Key` też jest
-odrzucany.
+odrzucany. Linia z odrzuconym nagłówkiem jest pomijana z ostrzeżeniem w logu, a
+reszta konfiguracji się wczytuje: lista rośnie między wydaniami, a zapisany
+guardrail musi nadal się wczytywać po aktualizacji.
 
-`upstream_set` odrzuca też przy wczytywaniu konfiguracji nazwy, których plugin
+`upstream_set` pomija też w ten sam sposób nazwy, których plugin
 nie może ustawić w wywołaniu providera, bo należą do transportu, gatewaya lub
 providera. Te, które określają połączenie: `Host`, `Content-Length`,
 `Transfer-Encoding`, `Connection`, `Keep-Alive`, `Proxy-Connection`,
@@ -484,7 +486,7 @@ providera. Te, które określają połączenie: `Host`, `Content-Length`,
 ciało zakodowane przez gateway: `Content-Type`, `Content-Encoding`. Oraz
 `Accept-Encoding`, które negocjuje kompresję odpowiedzi — jego ustawienie
 wyłącza automatyczną dekompresję gzip w transporcie, więc gateway parsowałby
-skompresowane bajty. `anthropic-beta` jest odrzucane osobno: wybiera funkcje
+skompresowane bajty. `anthropic-beta` jest pomijane osobno: wybiera funkcje
 providera i musi zachować flagę `oauth-2025-04-20` wymaganą przez dane
 uwierzytelniające subskrypcji. Tak samo `Idempotency-Key`: niesie własny klucz
 klienta, a jedna statyczna wartość sprawiłaby, że provider deduplikujący po nim

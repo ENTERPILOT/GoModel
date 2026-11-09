@@ -454,16 +454,19 @@ remove lines are a bare `Name`. Blank lines and `#` comments are ignored.
 | `response_set` | Replace a header on the response sent to the client. |
 | `response_add` | Append a value to a client response header, keeping existing values. Applied once per request even when the instance runs in both phases. |
 | `response_remove` | Drop a header from the client response, including headers GoModel adds itself (for example `X-Request-Id`). |
-| `upstream_set` | Static headers merged into every provider call of a Chat Completions, Responses or Messages request that goes through the gateway's HTTP client: failover attempts and the Responses `input_tokens` and `compact` routes included, `/v1/messages/count_tokens` and `bedrock` excluded. Credential headers, the ones that frame the connection or describe the body, `Accept-Encoding`, `anthropic-beta`, and `Idempotency-Key` are rejected when the config loads. Takes effect in the prompt phase only; a response-phase run is after the provider call. See [Upstream headers](/advanced/plugins#upstream-headers). |
+| `upstream_set` | Static headers merged into every provider call of a Chat Completions, Responses or Messages request that goes through the gateway's HTTP client: failover attempts and the Responses `input_tokens` and `compact` routes included, `/v1/messages/count_tokens` and `bedrock` excluded. Credential headers, the ones that frame the connection or describe the body, `Accept-Encoding`, `anthropic-beta`, and `Idempotency-Key` are skipped, with a warning in the log, when the config loads. Takes effect in the prompt phase only; a response-phase run is after the provider call. See [Upstream headers](/advanced/plugins#upstream-headers). |
 
 Credential headers (`Authorization`, `X-Api-Key`, `Cookie`, ...) can never be
 edited, and names containing `secret` or `token` cannot be set. That includes
 the keys of AI gateways in front of a provider (`Helicone-Auth`,
 `cf-aig-authorization`, `x-portkey-api-key`, `Ocp-Apim-Subscription-Key`): a
 failover to another provider would send them there. Names are matched with `_`
-read as `-`, so `X_Api_Key` is refused too.
+read as `-`, so `X_Api_Key` is refused too. A line naming a refused header is
+skipped with a warning in the log, and the rest of the config loads: the list
+grows between releases, and a saved guardrail must keep loading after an
+upgrade.
 
-`upstream_set` also rejects, when the config loads, the names a plugin may not
+`upstream_set` also skips, the same way, the names a plugin may not
 set on the provider call because the transport, the gateway or the provider
 owns them. The ones that frame the connection: `Host`, `Content-Length`,
 `Transfer-Encoding`, `Connection`, `Keep-Alive`, `Proxy-Connection`,
@@ -471,7 +474,7 @@ owns them. The ones that frame the connection: `Host`, `Content-Length`,
 describe the body the gateway encoded: `Content-Type`, `Content-Encoding`. And
 `Accept-Encoding`, which negotiates response compression — setting it turns off
 the transport's automatic gzip decompression, so the gateway would parse
-compressed bytes. `anthropic-beta` is rejected on its own: it selects provider
+compressed bytes. `anthropic-beta` is skipped on its own: it selects provider
 features and has to keep the `oauth-2025-04-20` flag subscription credentials
 need. So is `Idempotency-Key`: it carries the client's own key, and one static
 value would make a provider that deduplicates on it treat unrelated requests as

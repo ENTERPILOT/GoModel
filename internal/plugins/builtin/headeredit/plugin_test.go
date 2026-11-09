@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"testing"
 
 	"github.com/enterpilot/gomodel/pluginapi"
@@ -56,6 +57,25 @@ func TestInitErrors(t *testing.T) {
 		{"remove with colon", `{"response_remove": "X-Team: a"}`, "response_remove line 1: expected a bare header name"},
 		{"invalid name", `{"response_set": "X Team: a"}`, `invalid header name "X Team"`},
 		{"empty name", `{"response_set": ": a"}`, "empty header name"},
+		{"line number", `{"request_set": "X-A: 1\n\n# comment\nbroken"}`, "request_set line 4"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := New().Init(context.Background(), json.RawMessage(tt.cfg), plugintest.NewHost())
+			require.ErrorContains(t, err, tt.want)
+		})
+	}
+}
+
+// A header the plugin may not edit is skipped with a warning, not an error:
+// the refused names grow between releases, and a stored instance naming one
+// must still load.
+func TestInitIgnoresRefusedHeaders(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  string
+		want string
+	}{
 		{"authorization", `{"request_set": "Authorization: Bearer x"}`, `header "Authorization" carries credentials`},
 		{"cookie remove", `{"request_remove": "Cookie"}`, `header "Cookie" carries credentials`},
 		{"set-cookie add", `{"response_add": "Set-Cookie: a=b"}`, `header "Set-Cookie" carries credentials`},
@@ -64,8 +84,7 @@ func TestInitErrors(t *testing.T) {
 		{"proxy credential", `{"upstream_set": "Helicone-Auth: Bearer k"}`, `header "Helicone-Auth" carries credentials`},
 		{"token-ish set", `{"upstream_set": "X-Session-Token: k"}`, `header "X-Session-Token" looks like a credential`},
 		{"secret-ish add", `{"response_add": "X-Client-Secret: k"}`, `looks like a credential`},
-		{"line number", `{"request_set": "X-A: 1\n\n# comment\nbroken"}`, "request_set line 4"},
-		{"upstream transport", `{"upstream_set": "X-Tenant: acme\nhost: evil.test"}`, `upstream_set line 2: header "Host" is set by the gateway`},
+		{"upstream transport", `{"upstream_set": "X-Tenant: acme\nhost: evil.test"}`, `header "Host" is set by the gateway`},
 		{"upstream body", `{"upstream_set": "Content-Type: text/plain"}`, `header "Content-Type" is set by the gateway`},
 		{"upstream encoding", `{"upstream_set": "Accept-Encoding: gzip"}`, `header "Accept-Encoding" is set by the gateway`},
 		{"upstream anthropic beta", `{"upstream_set": "anthropic-beta: x"}`, `header "Anthropic-Beta" is set by the gateway`},
@@ -73,8 +92,19 @@ func TestInitErrors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := New().Init(context.Background(), json.RawMessage(tt.cfg), plugintest.NewHost())
-			require.ErrorContains(t, err, tt.want)
+			require.NoError(t, New().Init(context.Background(), json.RawMessage(tt.cfg), plugintest.NewHost()))
+
+			cfg, err := decodeConfig(json.RawMessage(tt.cfg))
+			require.NoError(t, err)
+			var reasons []string
+			request, response, upstream, err := compile(cfg, func(_ string, _ int, err error) { reasons = append(reasons, err.Error()) })
+			require.NoError(t, err)
+			require.Len(t, reasons, 1)
+			assert.Contains(t, reasons[0], tt.want)
+			// Only the allowed line of a config keeps its edit.
+			for _, e := range slices.Concat(request, response, upstream) {
+				assert.Equal(t, "X-Tenant", e.name, "a refused header is not edited")
+			}
 		})
 	}
 }
