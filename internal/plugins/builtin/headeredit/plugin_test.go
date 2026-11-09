@@ -118,6 +118,7 @@ func TestInitWarnsWithoutTheHeader(t *testing.T) {
 	cfg := `{"upstream_set": "X-Tenant: acme\nX_Api_Key: sk-secret"}`
 	require.NoError(t, New().Init(context.Background(), json.RawMessage(cfg), host))
 
+	assert.Contains(t, logs.String(), "level=WARN")
 	assert.Contains(t, logs.String(), "field=upstream_set line=2")
 	assert.NotContains(t, logs.String(), "sk-secret")
 	assert.NotContains(t, logs.String(), "X_Api_Key")

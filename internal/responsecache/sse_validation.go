@@ -109,13 +109,14 @@ func commentsOnly(event []byte) bool {
 	return true
 }
 
-// isErrorEvent reports whether an SSE event is named "error".
+// isErrorEvent reports whether an SSE event is named "error". The last event
+// field names the event, as for a client dispatching it.
 func isErrorEvent(event []byte) bool {
+	var name []byte
 	for line := range bytes.Lines(event) {
-		name, ok := bytes.CutPrefix(bytes.TrimRight(line, "\r\n"), []byte("event:"))
-		if ok && string(bytes.TrimSpace(name)) == "error" {
-			return true
+		if field, ok := bytes.CutPrefix(bytes.TrimRight(line, "\r\n"), []byte("event:")); ok {
+			name = field
 		}
 	}
-	return false
+	return string(bytes.TrimSpace(name)) == "error"
 }

@@ -155,6 +155,21 @@ func TestValidateCacheableSSE(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "accepts response.completed followed by done",
+			raw: []byte(
+				"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n" +
+					"data: [DONE]\n\n",
+			),
+			want: true,
+		},
+		{
+			name: "names an event by its last event field",
+			raw: []byte(
+				"event: error\nevent: response.completed\ndata: {\"type\":\"response.completed\"}\n\n",
+			),
+			want: true,
+		},
+		{
 			name: "rejects a partial event after response.completed",
 			raw: []byte(
 				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\"}}\n\n" +
