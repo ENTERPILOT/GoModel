@@ -30,9 +30,9 @@ Dostawca `mistral` w GoModel konwertuje go na standard automatycznie:
 
 — zarówno w odpowiedziach strumieniowych (`choices[].delta`), jak i buforowanych
 (`choices[].message`). Nie wymaga to żadnej konfiguracji po stronie klienta. Typy fragmentów
-bez standardowego odpowiednika w czacie (na tym punkcie końcowym nie są znane żadne) są
-zachowywane w członie dostawcy `mistral_content_chunks`, więc żadne dane z upstreamu nie
-giną. Tylko zdarzenia SSE powyżej 16 MiB są przekazywane bez konwersji.
+bez standardowego odpowiednika w czacie — na przykład fragmenty `reference` z cytowań
+Mistrala po wywołaniach narzędzi — są zachowywane w członie dostawcy `mistral_content_chunks`,
+więc żadne dane z upstreamu nie giną. Zdarzenia SSE powyżej 16 MiB są również przekazywane bez konwersji.
 
 Poziom rozumowania wyślij standardowym parametrem zagnieżdżonym; GoModel odwzorowuje go na
 płaskie `reasoning_effort` Mistrala:
@@ -97,9 +97,10 @@ MISTRAL_MODELS=mistral-large-4-0,mistral-small-2603,mistral-embed
 
 ## Modele
 
-Modele obsługiwane przez tego dostawcę wyświetlisz przez `GET /v1/models` — w zależności od
-skonfigurowanego trybu może to być podzbiór inwentarza Twojego konta Mistral — albo wywołaj
-model bezpośrednio przez zgodny z OpenAI punkt końcowy `/v1/chat/completions`:
+`GET /v1/models` w GoModel to lista w skali bramy (widoczne modele wszystkich skonfigurowanych
+dostawców, nie tylko tego); to, co obsługuje ten dostawca, wynika z jego trybu modeli, więc
+może to być podzbiór inwentarza Twojego konta Mistral. Wywołaj jeden z jego modeli bezpośrednio
+przez zgodny z OpenAI punkt końcowy `/v1/chat/completions`:
 
 ```yaml
 virtual_models:

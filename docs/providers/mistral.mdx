@@ -27,9 +27,9 @@ GoModel's `mistral` provider converts it to the standard shape automatically:
 - the `text` chunks are joined into a plain string `content`
 
 on both streaming (`choices[].delta`) and non-streaming (`choices[].message`) responses. No
-client-side configuration is needed. Chunk types with no standard chat equivalent (none are
-known on this endpoint) are preserved in a `mistral_content_chunks` vendor member so no
-upstream data is dropped. Only SSE events larger than 16 MiB pass through unconverted.
+client-side configuration is needed. Chunk types with no standard chat equivalent — Mistral's citation `reference`
+chunks, for example — are preserved in a `mistral_content_chunks` vendor member so no
+upstream data is dropped. SSE events larger than 16 MiB also pass through unconverted.
 
 Send effort with the standard nested parameter; GoModel maps it to Mistral's flat
 `reasoning_effort`:
@@ -94,9 +94,10 @@ MISTRAL_MODELS=mistral-large-4-0,mistral-small-2603,mistral-embed
 
 ## Models
 
-List the models this provider serves with `GET /v1/models` — under the configured models
-mode that can be a subset of your Mistral account's inventory — or call one directly through
-the OpenAI-compatible `/v1/chat/completions` endpoint:
+GoModel's `GET /v1/models` is a gateway-wide list (every configured provider's visible
+models, not only this one's); what this provider serves follows its models mode, so it can be
+a subset of your Mistral account's inventory. Call one of its models directly through the
+OpenAI-compatible `/v1/chat/completions` endpoint:
 
 ```yaml
 virtual_models:

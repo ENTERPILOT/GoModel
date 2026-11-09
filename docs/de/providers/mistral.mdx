@@ -28,9 +28,9 @@ Der `mistral`-Provider von GoModel konvertiert sie automatisch in die Standardfo
 
 – auf Streaming- (`choices[].delta`) genauso wie auf nicht-Streaming-Responses
 (`choices[].message`). Es ist keine Client-seitige Konfiguration nötig. Chunk-Typen ohne
-standardäquivalente Chat-Form (auf diesem Endpunkt sind keine bekannt) werden in einem
-Vendor-Member `mistral_content_chunks` erhalten, damit keine Upstream-Daten verloren gehen.
-Nur SSE-Events über 16 MiB werden unverändert weitergeleitet, ohne konvertiert zu werden.
+standardäquivalente Chat-Form — etwa Mistral-`reference`-Chunks aus Zitierungen nach Tool-Aufrufen —
+werden in einem Vendor-Member `mistral_content_chunks` erhalten, damit keine Upstream-Daten verloren gehen.
+SSE-Events über 16 MiB werden ebenfalls unverändert weitergeleitet, ohne konvertiert zu werden.
 
 Senden Sie den Aufwand (Effort) mit dem standardmäßigen verschachtelten Parameter; GoModel
 bildet ihn auf das flache `reasoning_effort` von Mistral ab:
@@ -97,9 +97,10 @@ MISTRAL_MODELS=mistral-large-4-0,mistral-small-2603,mistral-embed
 
 ## Modelle
 
-Listen Sie die von diesem Provider bedienten Modelle mit `GET /v1/models` auf — abhängig vom
-konfigurierten Models-Modus kann das eine Teilmenge des Bestands Ihres Mistral-Kontos sein — oder
-rufen Sie ein Modell direkt über den OpenAI-kompatiblen Endpunkt `/v1/chat/completions` auf:
+GoModels `GET /v1/models` ist eine Gateway-weite Liste (die sichtbaren Modelle aller
+konfigurierten Provider, nicht nur die dieses). Was dieser Provider bedient, folgt seinem
+Models-Modus, kann also eine Teilmenge des Bestands Ihres Mistral-Kontos sein. Rufen Sie eines
+seiner Modelle direkt über den OpenAI-kompatiblen Endpunkt `/v1/chat/completions` auf:
 
 ```yaml
 virtual_models:

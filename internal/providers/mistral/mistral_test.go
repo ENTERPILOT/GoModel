@@ -301,8 +301,9 @@ func TestStreamResponses_PreservesFlattenedThinking(t *testing.T) {
 	require.NoError(t, stream.Close())
 
 	// Parse the frames and assert the thinking strings travel on reasoning
-	// events, not merely somewhere in the stream.
-	var reasoningTexts []string
+	// events, and the answer on its own exact delta sequence, not merely
+	// somewhere in the stream.
+	var reasoningTexts, answerTexts []string
 	for line := range strings.Lines(string(body)) {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "data: ") || line == "data: [DONE]" {
@@ -317,10 +318,12 @@ func TestStreamResponses_PreservesFlattenedThinking(t *testing.T) {
 		case "response.reasoning_text.delta":
 			reasoningTexts = append(reasoningTexts, frame.Delta)
 		case "response.output_text.delta":
-			assert.NotContains(t, frame.Delta, "17*", "thinking text must not ride the answer deltas: %q", frame.Delta)
+			answerTexts = append(answerTexts, frame.Delta)
 		}
 	}
 	assert.Equal(t, []string{"Let me compute. ", "17*23=391."}, reasoningTexts)
+	assert.Equal(t, []string{"The answer is ", "391."}, answerTexts,
+		"the answer must stream as its own exact delta sequence")
 }
 
 // A request without reasoning and without replayed thinking must reach the

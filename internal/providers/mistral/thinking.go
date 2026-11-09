@@ -243,6 +243,11 @@ var wirePatchMarkers = [][]byte{
 	[]byte(`"max_completion_tokens"`),
 	[]byte(`"seed"`),
 	[]byte(`"service_tier"`),
+	// A raw member preserved verbatim from a client body may spell a key with
+	// \u escapes ("\u0073eed"), which the plain markers above miss; any JSON
+	// unicode escape contains this byte pair, so such bodies take the full
+	// parse. False positives only cost the decode.
+	[]byte(`\u`),
 }
 
 // wireBodyNeedsPatch is the cheap pre-check sparing typical chat bodies (none
