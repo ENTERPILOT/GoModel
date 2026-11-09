@@ -3114,6 +3114,12 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "description": "IANA time zone the period's days are read in, e.g. Europe/Warsaw (default UTC)",
+                        "name": "X-GoModel-Timezone",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
                         "description": "Export format: csv (default, as an attachment) or json",
                         "name": "format",
                         "in": "query"
@@ -10348,6 +10354,10 @@ const docTemplate = `{
                 },
                 "strategy_plugin": {
                     "description": "StrategyPlugin names the routing-strategy plugin for strategy \"plugin\";\nStrategyConfig holds that plugin's route-scoped settings, validated\nagainst its schema (see GET /admin/plugins, route_fields).",
+                    "type": "string"
+                },
+                "target": {
+                    "description": "Target is the config file's name for target_model, accepted so a body\nwritten after the YAML does not silently become an access policy.",
                     "type": "string"
                 },
                 "target_model": {

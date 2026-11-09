@@ -290,6 +290,20 @@ try {
 sum(rate(gomodel_empty_responses_total[5m])) by (provider, model, reason) > 0
 ```
 
+## 针对用量丢失告警
+
+用量按批写入存储。从未写入存储的记录会在用量视图、[预算](/zh/features/budgets)和账单中缺失，因此 GoModel 会将其计入 `gomodel_usage_entries_dropped_total` 并记录日志。
+
+| 标签     | 取值                                                                         |
+| -------- | ---------------------------------------------------------------------------- |
+| `reason` | `buffer_full`（达到 `USAGE_BUFFER_SIZE`）或 `write_failed`（批量写入失败） |
+
+遇到 `buffer_full` 时请增大 `USAGE_BUFFER_SIZE`；`write_failed` 出现在存储故障之后。
+
+```promql
+sum(increase(gomodel_usage_entries_dropped_total[5m])) by (reason) > 0
+```
+
 ## Prometheus 配置
 
 ### 抓取配置

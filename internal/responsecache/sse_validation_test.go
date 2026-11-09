@@ -87,6 +87,30 @@ func TestValidateCacheableSSE(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "accepts responses stream ending on response.completed without done",
+			raw: []byte(
+				"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n" +
+					"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\"}}\n\n",
+			),
+			want: true,
+		},
+		{
+			name: "rejects responses stream with events after response.completed and no done",
+			raw: []byte(
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\"}}\n\n" +
+					"data: {\"type\":\"response.output_text.delta\",\"delta\":\"late\"}\n\n",
+			),
+			want: false,
+		},
+		{
+			name: "rejects responses stream cut before response.completed",
+			raw: []byte(
+				"data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n" +
+					"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n",
+			),
+			want: false,
+		},
+		{
 			name: "rejects payload after done",
 			raw: []byte(
 				"data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-1\"}}\n\n" +

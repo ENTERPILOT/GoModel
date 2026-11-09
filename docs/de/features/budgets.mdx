@@ -34,15 +34,21 @@ Verwenden Sie Budgets für Limits wie diese:
   standardmäßig aktiviert, wenn das globale Budget-Feature eingeschaltet ist.
 </Info>
 
-Budgets sind weiche Limits. Ein Request wird anhand der bereits erfassten
-Ausgaben zugelassen, und die Nutzung wird gebündelt geschrieben, alle
-`USAGE_FLUSH_INTERVAL` (standardmäßig 5 s). Requests, die innerhalb dieses
-Fensters zugelassen werden, und Requests, die beim Erreichen eines Limits noch
-laufen, werden daher abgeschlossen und berechnet. Rechnen Sie mit einer
-Überschreitung von etwa dem Traffic eines Flush-Intervalls, und lassen Sie
-Spielraum, wenn ein Budget das Kreditlimit eines Kunden ist. Nutzungseinträge,
-die verworfen werden, weil der Puffer (`USAGE_BUFFER_SIZE`) voll ist, werden als
-Warnung geloggt und nie gezählt.
+Budgets sind weiche Limits. Ein Request wird einmal geprüft, beim Start, gegen
+die bereits gespeicherten Ausgaben. Die Nutzung wird gebündelt geschrieben, alle
+`USAGE_FLUSH_INTERVAL` (standardmäßig 5 s) oder alle 100 Einträge, sodass ein
+Budget die Requests des gerade gesammelten Batches noch nicht sieht, ebenso
+wenig noch laufende Requests wie lange Streams. Diese Requests werden
+abgeschlossen, und ihre Ausgaben zählen zum Budget, sobald sie geschrieben sind,
+gemäß der Kostenbasis des Budgets und den Regeln für
+[nicht abrechenbare Provider](#nicht-abrechenbare-provider). Wie weit die
+Ausgaben ein Limit überschreiten können, hängt von Traffic und Request-Dauer ab
+und wächst, solange Schreibvorgänge in den Speicher langsam sind; lassen Sie
+daher Spielraum, wenn ein Budget das Kreditlimit eines Kunden ist.
+Nutzungseinträge, die nie gespeichert werden, weil der Puffer
+(`USAGE_BUFFER_SIZE`) voll ist oder ein Schreibvorgang fehlschlägt, werden
+geloggt und in `gomodel_usage_entries_dropped_total` gezählt und erreichen nie
+ein Budget.
 
 ## Budgets aktivieren
 

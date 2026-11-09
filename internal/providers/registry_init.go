@@ -152,15 +152,6 @@ func (r *ModelRegistry) fetchAllProviderModels(
 		wg.Add(1)
 		go func(i int, provider core.Provider) {
 			defer wg.Done()
-			// A panic on this goroutine would end the process: no request's
-			// recover middleware is above it. A provider whose listing panics
-			// is recorded as failed instead, like one whose listing errors.
-			defer func() {
-				if r := recover(); r != nil {
-					slog.Error("provider model listing panicked", "provider", names[i], "panic", r, "stack", string(debug.Stack()))
-					results[i] = fetchResult{fetchAt: time.Now().UTC(), err: fmt.Errorf("list models panicked: %v", r)}
-				}
-			}()
 			resp, configuredReason, fetchAt, err := fetchProviderInventory(ctx, provider, providerInventoryInput{
 				name:              names[i],
 				providerType:      providerTypes[provider],
@@ -479,7 +470,7 @@ func fetchProviderInventory(ctx context.Context, provider core.Provider, in prov
 		return resp, reason, fetchAt, nil
 	}
 
-	resp, err := provider.ListModels(llmclient.WithoutCircuitBreaker(ctx))
+	resp, err := listModels(llmclient.WithoutCircuitBreaker(ctx), provider, in.name)
 	fetchAt = time.Now().UTC()
 	resp, reason := applyConfiguredProviderModels(in.name, in.providerType, in.mode, in.configuredModels, resp, err, fetchAt.Unix())
 	if err != nil && reason == configuredProviderModelsNotApplied && len(in.catalogModels) > 0 {
@@ -487,6 +478,20 @@ func fetchProviderInventory(ctx context.Context, provider core.Provider, in prov
 		reason = catalogProviderModelsUpstreamError
 	}
 	return resp, reason, fetchAt, err
+}
+
+// listModels calls provider.ListModels and turns a panic into an error, so
+// the configured-model and catalog fallbacks apply as for any failed listing.
+// Listings run on their own goroutines during startup and refreshes, where no
+// request's recover middleware is above them and a panic would end the process.
+func listModels(ctx context.Context, provider core.Provider, providerName string) (resp *core.ModelsResponse, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("provider model listing panicked", "provider", providerName, "panic", r, "stack", string(debug.Stack()))
+			resp, err = nil, errors.New("list models panicked")
+		}
+	}()
+	return provider.ListModels(ctx)
 }
 
 // catalogFallbackModels returns, per provider name, the model catalog's model

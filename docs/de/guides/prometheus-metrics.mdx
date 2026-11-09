@@ -304,6 +304,23 @@ trotzdem zurückgegeben; sie beeinträchtigt nur die Nutzungs- und Kostenerfassu
 sum(rate(gomodel_empty_responses_total[5m])) by (provider, model, reason) > 0
 ```
 
+## Alerts bei verlorener Nutzung
+
+Die Nutzung wird gebündelt in den Speicher geschrieben. Ein Eintrag, der den Speicher nie
+erreicht, fehlt in Nutzungsansichten, [Budgets](/de/features/budgets) und Rechnungen, daher
+zählt GoModel ihn in `gomodel_usage_entries_dropped_total` und loggt ihn.
+
+| Label    | Werte                                                                                                  |
+| -------- | ------------------------------------------------------------------------------------------------------ |
+| `reason` | `buffer_full` (`USAGE_BUFFER_SIZE` erreicht) oder `write_failed` (das Schreiben des Batches schlug fehl) |
+
+Erhöhen Sie `USAGE_BUFFER_SIZE` bei `buffer_full`; `write_failed` folgt auf Ausfälle des
+Speichers.
+
+```promql
+sum(increase(gomodel_usage_entries_dropped_total[5m])) by (reason) > 0
+```
+
 ## Prometheus-Konfiguration
 
 ### Scrape-Konfiguration

@@ -2,10 +2,14 @@ package usage
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/enterpilot/gomodel/internal/storage"
 )
@@ -54,6 +58,16 @@ func NewLogger(store UsageStore, cfg Config) *Logger {
 	return l
 }
 
+// usageEntriesDropped counts usage entries that never reached storage. Spend
+// they carry is missing from usage views, budgets and invoices.
+var usageEntriesDropped = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "gomodel_usage_entries_dropped_total",
+		Help: "Usage entries never stored, by reason: buffer_full (USAGE_BUFFER_SIZE reached) or write_failed (the batch write to storage failed)",
+	},
+	[]string{"reason"},
+)
+
 // Write queues a usage entry for async writing.
 // This method is non-blocking. If the buffer is full or the logger is closed,
 // the entry is dropped and a warning is logged.
@@ -86,6 +100,7 @@ func (l *Logger) Write(entry *UsageEntry) {
 		if requestID == "" {
 			requestID = "unknown"
 		}
+		usageEntriesDropped.WithLabelValues("buffer_full").Inc()
 		slog.Warn("usage log buffer full, dropping entry",
 			"request_id", requestID,
 			"model", entry.Model,
@@ -215,6 +230,11 @@ func (l *Logger) flushBatch(batch []*UsageEntry) {
 	}
 
 	if err := l.store.WriteBatch(ctx, batch); err != nil {
+		dropped := len(batch)
+		if partial, ok := errors.AsType[*PartialWriteError](err); ok {
+			dropped = partial.FailedCount
+		}
+		usageEntriesDropped.WithLabelValues("write_failed").Add(float64(dropped))
 		slog.Error("failed to write usage batch",
 			"error", err,
 			"count", len(batch),

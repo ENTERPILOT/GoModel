@@ -182,12 +182,39 @@ func assertInvoiceReads(t *testing.T, store usageBatchWriter, reader UsageReader
 		assert.Nil(t, invoice.Total.BilledCost)
 	})
 
+	t.Run("reports the time zone it read the period in", func(t *testing.T) {
+		tokyo, err := time.LoadLocation("Asia/Tokyo")
+		require.NoError(t, err)
+		params := period
+		params.TimeZone = tokyo.String()
+		params.StartDate = time.Date(2026, 3, 1, 0, 0, 0, 0, tokyo)
+		params.EndDate = time.Date(2026, 3, 31, 0, 0, 0, 0, tokyo)
+		invoice, err := reader.GetUsageInvoice(ctx, InvoiceParams{UsageQueryParams: params, Parent: "/customers/"})
+		require.NoError(t, err)
+		assert.Equal(t, "Asia/Tokyo", invoice.TimeZone)
+		assert.NotEmpty(t, invoice.Customers)
+	})
+
 	t.Run("a scope outside the parent bills nothing", func(t *testing.T) {
 		invoice, err := reader.GetUsageInvoice(ctx, InvoiceParams{UsageQueryParams: withScope(period, "/internal"), Parent: "/customers"})
 		require.NoError(t, err)
 		assert.Empty(t, invoice.Customers)
 		assert.Equal(t, "/customers", invoice.Parent)
 		assert.Nil(t, invoice.Total.BilledCost)
+	})
+
+	t.Run("a line of cache hits costs the provider 0", func(t *testing.T) {
+		hit := invoiceFixture()[4]
+		hit.ID = "8b3e0000-0000-4000-8000-000000000009"
+		hit.RequestID, hit.ProviderID, hit.UserPath = "req-inv-9", "p-inv-9", "/hits-only"
+		require.NoError(t, store.WriteBatch(ctx, []*UsageEntry{hit}))
+		invoice, err := reader.GetUsageInvoice(ctx, InvoiceParams{UsageQueryParams: withUserPaths(period, "/hits-only")})
+		require.NoError(t, err)
+		assert.Equal(t, []invoiceRow{
+			{"/hits-only", "gpt-5", "primary", 0, 0, new(0.0), new(0.5), nil},
+			{"/hits-only", "", "", 0, 0, new(0.0), new(0.5), nil},
+			{"", "", "", 0, 0, new(0.0), new(0.5), nil},
+		}, flattenInvoice(invoice))
 	})
 
 	t.Run("invalid parent", func(t *testing.T) {

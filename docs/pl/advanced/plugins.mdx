@@ -329,8 +329,8 @@ routingu lub rozliczeń na poziomie requestu, której oczekuje upstream, taka ja
 w Helicone, albo tag organizacyjny, po którym routuje gateway przed providerem.
 Dane uwierzytelniające providera nie należą tutaj: nagłówki z danymi
 uwierzytelniającymi są odrzucane, podobnie jak pozostałe nazwy należące do gatewaya,
-wymienione poniżej. Host loguje na poziomie Debug liczbę nagłówków upstream, które
-niesie request, nigdy ich wartości.
+wymienione poniżej. Raz na request, na poziomie Debug, host loguje, ile nagłówków upstream
+zapisał pierwszy łańcuch, który je ustawia, nigdy ich wartości.
 Ustaw nagłówki w hooku fazy prompt, zanim wykona się wywołanie providera. Mapa
 już istnieje: wywołaj na niej `Set` zamiast przypisywać nową, aby nagłówki zapisane
 pod innymi nazwami przez wcześniejsze pluginy w łańcuchu zostały zachowane:

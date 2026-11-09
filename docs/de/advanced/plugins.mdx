@@ -315,8 +315,8 @@ request-bezogene Routing- oder Abrechnungs-Eigenschaft, die das Upstream erwarte
 etwa die von Helicone, oder ein organisatorisches Tag, nach dem ein Gateway vor dem
 Provider routet. Zugangsdaten für einen Provider gehören nicht hierher: Header mit
 Zugangsdaten werden abgelehnt, ebenso die übrigen Namen, die dem Gateway gehören und
-unten aufgeführt sind. Das Host loggt auf Debug-Level die Anzahl der
-Upstream-Header eines Requests, nie deren Werte. Setzen Sie die Header in einem Hook der Phase `prompt`,
+unten aufgeführt sind. Einmal pro Request loggt das Host auf Debug-Level, wie viele
+Upstream-Header die erste Kette geschrieben hat, die sie setzt, nie deren Werte. Setzen Sie die Header in einem Hook der Phase `prompt`,
 bevor der Provider-Aufruf läuft. Die Map ist bereits angelegt: Rufen Sie `Set` darauf
 auf, statt eine neue zuzuweisen, damit Header, die frühere Plugins der Kette unter
 anderen Namen geschrieben haben, erhalten bleiben:

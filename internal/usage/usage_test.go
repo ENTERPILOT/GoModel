@@ -3,11 +3,13 @@ package usage
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -231,4 +233,27 @@ func TestLoggerBufferFull(t *testing.T) {
 
 	// Some entries may be dropped
 	// Just verify it doesn't panic/deadlock
+}
+
+func TestLoggerCountsEntriesItFailsToStore(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want float64
+	}{
+		{name: "failed batch", err: errors.New("database unavailable"), want: 3},
+		{name: "partial write", err: &PartialWriteError{TotalEntries: 3, FailedCount: 1}, want: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			counter := usageEntriesDropped.WithLabelValues("write_failed")
+			before := testutil.ToFloat64(counter)
+			logger := NewLogger(&mockStore{writeErr: tt.err}, Config{Enabled: true, BufferSize: 100, FlushInterval: time.Hour})
+			for i := range 3 {
+				logger.Write(&UsageEntry{ID: fmt.Sprintf("drop-%d", i)})
+			}
+			require.NoError(t, logger.Close())
+			assert.Equal(t, tt.want, testutil.ToFloat64(counter)-before)
+		})
+	}
 }

@@ -7,28 +7,29 @@ import (
 	"github.com/goccy/go-json"
 )
 
-// isNonCacheableTerminalEvent reports whether a payload is a terminal
-// Responses event that must never be replayed from cache: a response that
-// ended incomplete (interrupted upstream) or failed is not a reusable answer
-// even though it is fully framed and ends with [DONE]. The type field is
-// decoded rather than substring-matched so whitespace or key order in the
-// payload cannot smuggle such an event past validation.
-func isNonCacheableTerminalEvent(payload []byte) bool {
+// responsesEventType returns a payload's Responses event type, or "" for a
+// payload without one. The type field is decoded rather than substring-matched
+// so whitespace or key order in the payload cannot smuggle a terminal event
+// past validation.
+func responsesEventType(payload []byte) string {
 	var event struct {
 		Type string `json:"type"`
 	}
 	if err := json.Unmarshal(payload, &event); err != nil {
 		// json.Valid already accepted the payload; a non-object payload
 		// simply has no event type.
-		return false
+		return ""
 	}
-	return event.Type == "response.incomplete" || event.Type == "response.failed"
+	return event.Type
 }
 
 // validateCacheableSSE reports whether raw is a complete, cache-safe SSE body.
 // Cacheable streams must be fully framed, contain at least one JSON data payload,
-// terminate with a final [DONE] event, and not carry an incomplete or failed
-// terminal Responses event.
+// and terminate with a final [DONE] event or, for a Responses stream from an
+// upstream that sends no [DONE], with response.completed as the last payload.
+// A response that ended incomplete (interrupted upstream) or failed is not a
+// reusable answer even though it is fully framed, so a stream carrying one is
+// never cacheable.
 func validateCacheableSSE(raw []byte) bool {
 	if len(raw) == 0 {
 		return false
@@ -36,6 +37,7 @@ func validateCacheableSSE(raw []byte) bool {
 
 	sawJSONPayload := false
 	sawDone := false
+	endsCompleted := false
 
 	for len(raw) > 0 {
 		remaining := raw
@@ -64,11 +66,16 @@ func validateCacheableSSE(raw []byte) bool {
 		if !json.Valid(payload) {
 			return false
 		}
-		if isNonCacheableTerminalEvent(payload) {
+		switch responsesEventType(payload) {
+		case "response.incomplete", "response.failed":
 			return false
+		case "response.completed":
+			endsCompleted = true
+		default:
+			endsCompleted = false
 		}
 		sawJSONPayload = true
 	}
 
-	return sawJSONPayload && sawDone
+	return sawJSONPayload && (sawDone || endsCompleted)
 }

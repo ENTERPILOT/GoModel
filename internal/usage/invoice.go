@@ -163,6 +163,9 @@ func readUsageInvoice(ctx context.Context, params InvoiceParams, stream breakdow
 		hitParams.CacheMode = mode
 		err := stream(ctx, hitParams, 0, func(hit breakdownGroup) error {
 			if billed, ok := billedHitGroup(hit); ok {
+				// A hit cost the provider nothing: a line made only of
+				// hits reads 0, not an unknown provider cost.
+				billed.TotalCost = new(0.0)
 				return lines.add(billed)
 			}
 			return nil

@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
@@ -116,4 +117,28 @@ func TestConfiguredModelsResponseFirstUpstreamDuplicateWins(t *testing.T) {
 	require.Len(t, merged.Data, 1)
 	assert.Equal(t, "first", allowlist.Data[0].OwnedBy)
 	assert.Equal(t, "first", merged.Data[0].OwnedBy)
+}
+
+type panickingListProvider struct{ *registryMockProvider }
+
+func (p *panickingListProvider) ListModels(context.Context) (*core.ModelsResponse, error) {
+	panic("malformed model list")
+}
+
+func TestPanickingListingKeepsConfiguredModels(t *testing.T) {
+	for _, mode := range []config.ConfiguredProviderModelsMode{
+		config.ConfiguredProviderModelsModeAllowlist,
+		config.ConfiguredProviderModelsModeFallback,
+		config.ConfiguredProviderModelsModeMerge,
+	} {
+		t.Run(string(mode), func(t *testing.T) {
+			registry := allowlistRegistry(t, &panickingListProvider{&registryMockProvider{name: "vllm"}})
+			registry.SetProviderModelsMode("vllm", mode)
+
+			require.NoError(t, registry.Initialize(context.Background()))
+
+			assert.True(t, registry.Supports("vllm/listed"))
+			assert.True(t, registry.Supports("vllm/configured-only"))
+		})
+	}
 }

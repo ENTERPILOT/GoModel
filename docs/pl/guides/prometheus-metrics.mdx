@@ -305,6 +305,23 @@ nadal zwracana; psuje tylko śledzenie użycia i kosztów.
 sum(rate(gomodel_empty_responses_total[5m])) by (provider, model, reason) > 0
 ```
 
+## Alerty na utracone użycie
+
+Użycie jest zapisywane w magazynie partiami. Wpisu, który nigdy nie trafi do magazynu,
+brakuje w widokach użycia, [budżetach](/pl/features/budgets) i fakturach, więc GoModel
+liczy go w `gomodel_usage_entries_dropped_total` i loguje.
+
+| Etykieta | Wartości                                                                                       |
+| -------- | ---------------------------------------------------------------------------------------------- |
+| `reason` | `buffer_full` (osiągnięto `USAGE_BUFFER_SIZE`) lub `write_failed` (zapis partii się nie powiódł) |
+
+Przy `buffer_full` zwiększ `USAGE_BUFFER_SIZE`; `write_failed` pojawia się po awariach
+magazynu.
+
+```promql
+sum(increase(gomodel_usage_entries_dropped_total[5m])) by (reason) > 0
+```
+
 ## Konfiguracja Prometheusa
 
 ### Konfiguracja scrapowania

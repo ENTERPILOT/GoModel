@@ -30,6 +30,7 @@ var invoiceCSVHeader = []string{
 // @Produce      text/csv
 // @Produce      json
 // @Security     BearerAuth
+// @Param        X-GoModel-Timezone  header  string  false  "IANA time zone the period's days are read in, e.g. Europe/Warsaw (default UTC)"
 // @Param        format      query     string  false  "Export format: csv (default, as an attachment) or json"
 // @Param        parent      query     string  false  "Bill each direct child of this user path as one customer, e.g. /customers"
 // @Param        days        query     int     false  "Number of days (default 30)"

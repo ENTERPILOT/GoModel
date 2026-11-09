@@ -327,8 +327,8 @@ keeps the cache; editing inside the prefix invalidates it for the session.
 routing or billing property the upstream expects, such as Helicone's, or an
 organizational tag a gateway in front of the provider routes on. A provider
 credential does not belong here: credential headers are refused, as are the
-other names the gateway owns, listed below. The host logs the number of
-upstream headers a request carries at Debug level, never their values. Set them in a prompt-phase hook, before the
+other names the gateway owns, listed below. Once per request, at Debug level,
+the host logs how many upstream headers the first chain to set them wrote, never their values. Set them in a prompt-phase hook, before the
 provider call runs. The map is already there: call `Set` on it rather than
 assigning a new one, so headers earlier plugins in the chain wrote under other
 names survive:

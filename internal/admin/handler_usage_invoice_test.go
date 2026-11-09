@@ -118,6 +118,16 @@ func TestUsageInvoice_TimeZoneIsReported(t *testing.T) {
 	assert.Equal(t, "America/Los_Angeles", records[1][len(records[1])-1])
 }
 
+func TestUsageInvoice_LocalTimeZoneReadsAsUTC(t *testing.T) {
+	h := invoiceHandler(nil, true, true)
+	c, rec := echotest.Get(t, "/admin/usage/invoice?start_date=2026-10-01&end_date=2026-10-31")
+	c.Request().Header.Set(dashboardTimeZoneHeader, "Local")
+	require.NoError(t, h.UsageInvoice(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	assert.Equal(t, `attachment; filename="gomodel-invoice-2026-10-01-to-2026-10-31.csv"`, rec.Header().Get("Content-Disposition"))
+}
+
 func TestUsageInvoice_Scope(t *testing.T) {
 	tests := []struct {
 		name       string
