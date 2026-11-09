@@ -149,10 +149,10 @@ func csvText(value string) string {
 // when it is not UTC: the same dates read in another zone are another
 // period, and the two files must not look alike.
 func invoiceFilename(invoice *usage.Invoice) string {
-	if invoice.StartDate == "" || invoice.EndDate == "" {
-		return "gomodel-invoice.csv"
+	name := "gomodel-invoice"
+	if invoice.StartDate != "" && invoice.EndDate != "" {
+		name += "-" + invoice.StartDate + "-to-" + invoice.EndDate
 	}
-	name := "gomodel-invoice-" + invoice.StartDate + "-to-" + invoice.EndDate
 	if invoice.TimeZone != "" && invoice.TimeZone != "UTC" {
 		name += "-" + strings.ReplaceAll(invoice.TimeZone, "/", "-")
 	}

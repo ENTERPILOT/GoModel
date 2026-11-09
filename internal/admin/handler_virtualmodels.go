@@ -16,7 +16,7 @@ import (
 )
 
 // upsertVirtualModelRequest is the unified admin upsert contract. Presence of
-// target_model or targets makes the row a redirect; absence makes it an access
+// target_model (or its alias target) or targets makes the row a redirect; absence makes it an access
 // policy. A single target_model is a plain alias; multiple targets are load
 // balanced across by strategy ("round_robin", "cost", "failover", "adaptive",
 // or "plugin" with strategy_plugin naming the routing-strategy plugin).
@@ -235,8 +235,8 @@ func (h *Handler) validateStrategyPlugin(vm virtualmodels.VirtualModel) error {
 }
 
 // buildVirtualModelTargets resolves the redirect targets from the request. The
-// multi-target `targets` form takes precedence; a single `target_model` is the
-// backward-compatible shorthand. An empty result makes the row an access policy.
+// multi-target `targets` form takes precedence; a single `target_model` (or
+// `target`, the config file's key) is the backward-compatible shorthand. An empty result makes the row an access policy.
 //
 // A target given as one name ("openai/gpt-4o", "team/cheap") is stored as
 // written, like a config declaration: the name may belong to a virtual model,

@@ -103,6 +103,35 @@ func TestValidateCacheableSSE(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "accepts keep-alive comments after response.completed",
+			raw: []byte(
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\"}}\n\n" +
+					": keep-alive\n\n",
+			),
+			want: true,
+		},
+		{
+			name: "rejects undispatched response.completed",
+			raw:  []byte("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\"}}\n"),
+			want: false,
+		},
+		{
+			name: "rejects an empty-data event after response.completed",
+			raw: []byte(
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\"}}\n\n" +
+					"event: error\ndata:\n\n",
+			),
+			want: false,
+		},
+		{
+			name: "rejects a partial event after response.completed",
+			raw: []byte(
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\"}}\n\n" +
+					"event: resp",
+			),
+			want: false,
+		},
+		{
 			name: "rejects responses stream cut before response.completed",
 			raw: []byte(
 				"data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n" +

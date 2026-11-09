@@ -311,12 +311,13 @@ Użycie jest zapisywane w magazynie partiami. Wpisu, który nigdy nie trafi do m
 brakuje w widokach użycia, [budżetach](/pl/features/budgets) i fakturach, więc GoModel
 liczy go w `gomodel_usage_entries_dropped_total` i loguje.
 
-| Etykieta | Wartości                                                                                       |
-| -------- | ---------------------------------------------------------------------------------------------- |
-| `reason` | `buffer_full` (osiągnięto `USAGE_BUFFER_SIZE`) lub `write_failed` (zapis partii się nie powiódł) |
+| Etykieta | Wartości                                                                                                                              |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `reason` | `buffer_full` (osiągnięto `USAGE_BUFFER_SIZE`), `write_failed` (zapis partii zwrócił błąd) lub `logger_closed` (zobacz poniżej) |
 
-Przy `buffer_full` zwiększ `USAGE_BUFFER_SIZE`; `write_failed` pojawia się po awariach
-magazynu.
+Przy `buffer_full` zwiększ `USAGE_BUFFER_SIZE`. Przy `write_failed` błąd zapisu znajdziesz
+w logu serwera. `logger_closed` liczy użycie zarejestrowane po zamknięciu loggera użycia,
+na przykład przez request lub sesję wciąż trwające w chwili zamykania.
 
 ```promql
 sum(increase(gomodel_usage_entries_dropped_total[5m])) by (reason) > 0

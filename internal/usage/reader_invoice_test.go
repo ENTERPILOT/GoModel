@@ -182,17 +182,37 @@ func assertInvoiceReads(t *testing.T, store usageBatchWriter, reader UsageReader
 		assert.Nil(t, invoice.Total.BilledCost)
 	})
 
-	t.Run("reports the time zone it read the period in", func(t *testing.T) {
+	t.Run("reads the period in the requested time zone", func(t *testing.T) {
+		// 2026-02-28 16:00 UTC is March 1 in Tokyo; 2026-03-31 16:00 UTC is
+		// April 1 there.
+		early, late := invoiceFixture()[0], invoiceFixture()[3]
+		early.ID, early.RequestID, early.ProviderID = "8b3e0000-0000-4000-8000-000000000012", "req-inv-12", "p-inv-12"
+		late.ID, late.RequestID, late.ProviderID = "8b3e0000-0000-4000-8000-000000000013", "req-inv-13", "p-inv-13"
+		early.UserPath, late.UserPath = "/tokyo", "/tokyo"
+		early.Timestamp = time.Date(2026, 2, 28, 16, 0, 0, 0, time.UTC)
+		late.Timestamp = time.Date(2026, 3, 31, 16, 0, 0, 0, time.UTC)
+		require.NoError(t, store.WriteBatch(ctx, []*UsageEntry{early, late}))
+
 		tokyo, err := time.LoadLocation("Asia/Tokyo")
 		require.NoError(t, err)
-		params := period
+		params := withUserPaths(period, "/tokyo")
 		params.TimeZone = tokyo.String()
 		params.StartDate = time.Date(2026, 3, 1, 0, 0, 0, 0, tokyo)
 		params.EndDate = time.Date(2026, 3, 31, 0, 0, 0, 0, tokyo)
-		invoice, err := reader.GetUsageInvoice(ctx, InvoiceParams{UsageQueryParams: params, Parent: "/customers/"})
+		invoice, err := reader.GetUsageInvoice(ctx, InvoiceParams{UsageQueryParams: params})
 		require.NoError(t, err)
 		assert.Equal(t, "Asia/Tokyo", invoice.TimeZone)
-		assert.NotEmpty(t, invoice.Customers)
+		assert.Equal(t, "2026-03-01", invoice.StartDate)
+		assert.Equal(t, "2026-03-31", invoice.EndDate)
+		require.Len(t, invoice.Customers, 1)
+		require.Len(t, invoice.Customers[0].Lines, 1)
+		assert.Equal(t, "gpt-5", invoice.Customers[0].Lines[0].Model, "only the usage of March in Tokyo")
+
+		utc, err := reader.GetUsageInvoice(ctx, InvoiceParams{UsageQueryParams: withUserPaths(period, "/tokyo")})
+		require.NoError(t, err)
+		require.Len(t, utc.Customers, 1)
+		require.Len(t, utc.Customers[0].Lines, 1)
+		assert.Equal(t, "claude", utc.Customers[0].Lines[0].Model, "only the usage of March in UTC")
 	})
 
 	t.Run("a scope outside the parent bills nothing", func(t *testing.T) {
@@ -215,6 +235,23 @@ func assertInvoiceReads(t *testing.T, store usageBatchWriter, reader UsageReader
 			{"/hits-only", "", "", 0, 0, new(0.0), new(0.5), nil},
 			{"", "", "", 0, 0, new(0.0), new(0.5), nil},
 		}, flattenInvoice(invoice))
+	})
+
+	t.Run("a cache hit keeps an unknown provider cost unknown", func(t *testing.T) {
+		hit := invoiceFixture()[4]
+		hit.ID = "8b3e0000-0000-4000-8000-000000000010"
+		hit.RequestID, hit.ProviderID, hit.UserPath = "req-inv-10", "p-inv-10", "/mixed"
+		unpriced := invoiceFixture()[0]
+		unpriced.ID = "8b3e0000-0000-4000-8000-000000000011"
+		unpriced.RequestID, unpriced.ProviderID, unpriced.UserPath = "req-inv-11", "p-inv-11", "/mixed"
+		unpriced.TotalCost, unpriced.BilledCost = nil, nil
+		require.NoError(t, store.WriteBatch(ctx, []*UsageEntry{hit, unpriced}))
+		invoice, err := reader.GetUsageInvoice(ctx, InvoiceParams{UsageQueryParams: withUserPaths(period, "/mixed")})
+		require.NoError(t, err)
+		require.Len(t, invoice.Customers, 1)
+		require.Len(t, invoice.Customers[0].Lines, 1)
+		assert.Nil(t, invoice.Customers[0].Lines[0].ProviderCost)
+		assert.Equal(t, 1, invoice.Customers[0].Lines[0].Requests)
 	})
 
 	t.Run("invalid parent", func(t *testing.T) {

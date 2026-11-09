@@ -33,8 +33,9 @@ Używaj budżetów, gdy potrzebujesz limitów takich jak:
   gdy globalna funkcja budżetów jest włączona.
 </Info>
 
-Budżety są limitami miękkimi. Request jest sprawdzany raz, na starcie, względem
-już zapisanych wydatków. Użycie jest zapisywane partiami, co
+Budżety są limitami miękkimi. Request jest dopuszczany na starcie na podstawie
+już zapisanych wydatków, a cel failover, który przekroczył swój budżet, jest
+pomijany. Użycie jest zapisywane partiami, co
 `USAGE_FLUSH_INTERVAL` (domyślnie 5 s) albo co 100 wpisów, więc budżet nie widzi
 jeszcze requestów z partii, która jest właśnie zbierana, ani requestów wciąż
 trwających, takich jak długie streamy. Te requesty kończą się, a ich wydatki

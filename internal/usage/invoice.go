@@ -163,9 +163,6 @@ func readUsageInvoice(ctx context.Context, params InvoiceParams, stream breakdow
 		hitParams.CacheMode = mode
 		err := stream(ctx, hitParams, 0, func(hit breakdownGroup) error {
 			if billed, ok := billedHitGroup(hit); ok {
-				// A hit cost the provider nothing: a line made only of
-				// hits reads 0, not an unknown provider cost.
-				billed.TotalCost = new(0.0)
 				return lines.add(billed)
 			}
 			return nil
@@ -223,6 +220,11 @@ func (l invoiceLines) invoice(params InvoiceParams) *Invoice {
 		}
 		customer := &invoice.Customers[len(invoice.Customers)-1]
 		line := InvoiceLine{Model: key.model, Provider: key.provider, InvoiceAmounts: *l.amounts[key]}
+		if line.Requests == 0 && line.ProviderCost == nil {
+			// Only billed cache hits, which cost the provider nothing. A
+			// line with provider requests keeps an unknown cost unknown.
+			line.ProviderCost = new(0.0)
+		}
 		line.setMarkup()
 		customer.Lines = append(customer.Lines, line)
 		customer.Subtotal.add(line.InvoiceAmounts)

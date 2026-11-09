@@ -2,6 +2,9 @@ package providers
 
 import (
 	"context"
+	"errors"
+	"log/slog"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -30,7 +33,7 @@ func (r *ModelRegistry) probeAvailability(ctx context.Context, provider core.Pro
 	probeCtx, cancel := context.WithTimeout(llmclient.WithoutCircuitBreaker(ctx), timeout)
 	defer cancel()
 
-	err := checker.CheckAvailability(probeCtx)
+	err := checkAvailability(probeCtx, checker, providerName)
 	if modelListingUnsupported(err) && r.hasConfiguredProviderModels(providerName) {
 		// Probes that list models (Ollama, Bedrock Mantle) fail on servers
 		// without a /models endpoint. The server answered, and its configured
@@ -45,4 +48,16 @@ func (r *ModelRegistry) hasConfiguredProviderModels(providerName string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return len(r.configuredProviderModels[strings.TrimSpace(providerName)]) > 0
+}
+
+// checkAvailability runs the probe and turns a panic into an error: startup
+// probes run on their own goroutines, where a panic would end the process.
+func checkAvailability(ctx context.Context, checker core.AvailabilityChecker, providerName string) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("provider availability probe panicked", "provider", providerName, "panic", r, "stack", string(debug.Stack()))
+			err = errors.New("availability probe panicked")
+		}
+	}()
+	return checker.CheckAvailability(ctx)
 }

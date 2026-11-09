@@ -34,8 +34,9 @@ Verwenden Sie Budgets für Limits wie diese:
   standardmäßig aktiviert, wenn das globale Budget-Feature eingeschaltet ist.
 </Info>
 
-Budgets sind weiche Limits. Ein Request wird einmal geprüft, beim Start, gegen
-die bereits gespeicherten Ausgaben. Die Nutzung wird gebündelt geschrieben, alle
+Budgets sind weiche Limits. Ein Request wird beim Start anhand der bereits
+gespeicherten Ausgaben zugelassen, und ein Failover-Ziel über seinem Budget wird
+übersprungen. Die Nutzung wird gebündelt geschrieben, alle
 `USAGE_FLUSH_INTERVAL` (standardmäßig 5 s) oder alle 100 Einträge, sodass ein
 Budget die Requests des gerade gesammelten Batches noch nicht sieht, ebenso
 wenig noch laufende Requests wie lange Streams. Diese Requests werden

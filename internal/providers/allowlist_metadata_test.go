@@ -139,6 +139,13 @@ func TestPanickingListingKeepsConfiguredModels(t *testing.T) {
 
 			assert.True(t, registry.Supports("vllm/listed"))
 			assert.True(t, registry.Supports("vllm/configured-only"))
+			snapshots := registry.ProviderRuntimeSnapshots()
+			require.Len(t, snapshots, 1)
+			if mode == config.ConfiguredProviderModelsModeAllowlist {
+				assert.Empty(t, snapshots[0].LastModelFetchError, "in allowlist mode the listing only adds metadata")
+			} else {
+				assert.Equal(t, "list models panicked", snapshots[0].LastModelFetchError)
+			}
 		})
 	}
 }

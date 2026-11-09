@@ -310,12 +310,13 @@ Usage is written to storage in batches. An entry that never reaches storage is
 missing from usage views, [budgets](/features/budgets) and invoices, so GoModel
 counts it in `gomodel_usage_entries_dropped_total` and logs it.
 
-| Label    | Values                                                                                  |
-| -------- | --------------------------------------------------------------------------------------- |
-| `reason` | `buffer_full` (`USAGE_BUFFER_SIZE` reached) or `write_failed` (the batch write failed) |
+| Label    | Values                                                                                                                         |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `reason` | `buffer_full` (`USAGE_BUFFER_SIZE` reached), `write_failed` (the batch write returned an error), or `logger_closed` (see below) |
 
-Raise `USAGE_BUFFER_SIZE` for `buffer_full`; `write_failed` follows storage
-outages.
+Raise `USAGE_BUFFER_SIZE` for `buffer_full`. For `write_failed`, the server log
+has the write error. `logger_closed` counts usage recorded after the usage
+logger shut down, such as by a request or session still running at shutdown.
 
 ```promql
 sum(increase(gomodel_usage_entries_dropped_total[5m])) by (reason) > 0

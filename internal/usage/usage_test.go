@@ -257,3 +257,12 @@ func TestLoggerCountsEntriesItFailsToStore(t *testing.T) {
 		})
 	}
 }
+
+func TestLoggerCountsEntriesWrittenAfterClose(t *testing.T) {
+	counter := usageEntriesDropped.WithLabelValues("logger_closed")
+	before := testutil.ToFloat64(counter)
+	logger := NewLogger(&mockStore{}, Config{Enabled: true, BufferSize: 10, FlushInterval: time.Hour})
+	require.NoError(t, logger.Close())
+	logger.Write(&UsageEntry{ID: "late"})
+	assert.Equal(t, 1.0, testutil.ToFloat64(counter)-before)
+}

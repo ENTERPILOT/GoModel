@@ -89,3 +89,14 @@ func TestProbeAvailability_CallerDeadlineBoundsUntimedProvider(t *testing.T) {
 	got := registry.providerRuntime["untimed"].lastAvailabilityError
 	require.Equal(t, context.DeadlineExceeded.Error(), got)
 }
+
+type panickingProbeProvider struct{ *registryMockProvider }
+
+func (p *panickingProbeProvider) CheckAvailability(context.Context) error { panic("probe bug") }
+
+func TestProbeAvailability_PanicIsAFailedProbe(t *testing.T) {
+	registry := NewModelRegistry()
+	err := registry.probeAvailability(t.Context(), &panickingProbeProvider{&registryMockProvider{}}, "probe-target", availabilityProbeTimeout)
+	require.EqualError(t, err, "availability probe panicked")
+	require.Equal(t, "availability probe panicked", registry.providerRuntime["probe-target"].lastAvailabilityError)
+}

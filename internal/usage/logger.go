@@ -58,15 +58,23 @@ func NewLogger(store UsageStore, cfg Config) *Logger {
 	return l
 }
 
-// usageEntriesDropped counts usage entries that never reached storage. Spend
+// usageEntriesDropped counts usage entries the logger could not store. Spend
 // they carry is missing from usage views, budgets and invoices.
-var usageEntriesDropped = promauto.NewCounterVec(
-	prometheus.CounterOpts{
-		Name: "gomodel_usage_entries_dropped_total",
-		Help: "Usage entries never stored, by reason: buffer_full (USAGE_BUFFER_SIZE reached) or write_failed (the batch write to storage failed)",
-	},
-	[]string{"reason"},
-)
+var usageEntriesDropped = func() *prometheus.CounterVec {
+	c := promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "gomodel_usage_entries_dropped_total",
+			Help: "Usage entries the logger could not store, by reason: buffer_full (USAGE_BUFFER_SIZE reached), write_failed (the batch write returned an error) or logger_closed (recorded after the logger shut down, by a request or session still running at shutdown)",
+		},
+		[]string{"reason"},
+	)
+	// Export every reason from the start, so an increase() alert has a
+	// baseline before the first drop.
+	for _, reason := range []string{"buffer_full", "write_failed", "logger_closed"} {
+		c.WithLabelValues(reason)
+	}
+	return c
+}()
 
 // Write queues a usage entry for async writing.
 // This method is non-blocking. If the buffer is full or the logger is closed,
@@ -78,6 +86,7 @@ func (l *Logger) Write(entry *UsageEntry) {
 
 	// Check if logger is shut down to avoid sending on closed channel
 	if l.closed.Load() {
+		usageEntriesDropped.WithLabelValues("logger_closed").Inc()
 		return
 	}
 
@@ -87,6 +96,7 @@ func (l *Logger) Write(entry *UsageEntry) {
 
 	// Double-check after registering - Close() may have set closed between first check and Add(1)
 	if l.closed.Load() {
+		usageEntriesDropped.WithLabelValues("logger_closed").Inc()
 		return
 	}
 

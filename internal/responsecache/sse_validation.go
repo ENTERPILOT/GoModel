@@ -53,6 +53,11 @@ func validateCacheableSSE(raw []byte) bool {
 		if sawDone {
 			return false
 		}
+		// Only keep-alive comments may follow a final response.completed:
+		// any other event, even one without data, means the stream went on.
+		if endsCompleted && !commentsOnly(event) {
+			endsCompleted = false
+		}
 		if !hasData {
 			continue
 		}
@@ -70,7 +75,9 @@ func validateCacheableSSE(raw []byte) bool {
 		case "response.incomplete", "response.failed":
 			return false
 		case "response.completed":
-			endsCompleted = true
+			// It ends the stream only once dispatched by a blank line: an
+			// event cut before it may still have had more fields.
+			endsCompleted = idx != -1
 		default:
 			endsCompleted = false
 		}
@@ -78,4 +85,16 @@ func validateCacheableSSE(raw []byte) bool {
 	}
 
 	return sawJSONPayload && (sawDone || endsCompleted)
+}
+
+// commentsOnly reports whether every non-blank line of an SSE event is a
+// comment (starts with ':').
+func commentsOnly(event []byte) bool {
+	for line := range bytes.Lines(event) {
+		line = bytes.TrimSpace(line)
+		if len(line) > 0 && line[0] != ':' {
+			return false
+		}
+	}
+	return true
 }
