@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -99,4 +100,18 @@ func TestProbeAvailability_PanicIsAFailedProbe(t *testing.T) {
 	err := registry.probeAvailability(t.Context(), &panickingProbeProvider{&registryMockProvider{}}, "probe-target", availabilityProbeTimeout)
 	require.EqualError(t, err, "availability probe panicked")
 	require.Equal(t, "availability probe panicked", registry.providerRuntime["probe-target"].lastAvailabilityError)
+}
+
+func TestPanicLogAttrsKeepProviderValuesOut(t *testing.T) {
+	attrs := panicLogAttrs("GET https://api.example/?key=sk-secret failed")
+	require.NotContains(t, fmt.Sprint(attrs), "sk-secret")
+	require.Contains(t, fmt.Sprint(attrs), "panic_type string")
+
+	var runtimeErr any
+	func() {
+		defer func() { runtimeErr = recover() }()
+		values := []int{}
+		_ = values[len(values)]
+	}()
+	require.Contains(t, fmt.Sprint(panicLogAttrs(runtimeErr)), "index out of range")
 }

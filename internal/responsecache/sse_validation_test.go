@@ -124,6 +124,23 @@ func TestValidateCacheableSSE(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "rejects an indented field after response.completed",
+			raw: []byte(
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\"}}\n\n" +
+					" event: error\n\n",
+			),
+			want: false,
+		},
+		{
+			name: "rejects a named error event even with done",
+			raw: []byte(
+				"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n" +
+					"event: error\ndata: {\"type\":\"response.completed\"}\n\n" +
+					"data: [DONE]\n\n",
+			),
+			want: false,
+		},
+		{
 			name: "rejects a partial event after response.completed",
 			raw: []byte(
 				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\"}}\n\n" +

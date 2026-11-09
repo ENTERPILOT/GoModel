@@ -317,7 +317,8 @@ liczy go w `gomodel_usage_entries_dropped_total` i loguje.
 
 Przy `buffer_full` zwiększ `USAGE_BUFFER_SIZE`. Przy `write_failed` błąd zapisu znajdziesz
 w logu serwera. `logger_closed` liczy użycie zarejestrowane po zamknięciu loggera użycia,
-na przykład przez request lub sesję wciąż trwające w chwili zamykania.
+na przykład przez request lub sesję wciąż trwające w chwili zamykania;
+proces może się zakończyć, zanim Prometheus odczyta licznik, więc stratę zapisuje log.
 
 ```promql
 sum(increase(gomodel_usage_entries_dropped_total[5m])) by (reason) > 0

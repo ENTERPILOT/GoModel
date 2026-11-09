@@ -316,7 +316,8 @@ zählt GoModel ihn in `gomodel_usage_entries_dropped_total` und loggt ihn.
 
 Erhöhen Sie `USAGE_BUFFER_SIZE` bei `buffer_full`. Bei `write_failed` enthält das Server-Log
 den Schreibfehler. `logger_closed` zählt Nutzung, die erfasst wurde, nachdem der Usage-Logger
-heruntergefahren war, etwa durch einen Request oder eine Session, die beim Herunterfahren noch lief.
+heruntergefahren war, etwa durch einen Request oder eine Session, die beim Herunterfahren noch lief;
+der Prozess kann enden, bevor Prometheus den Wert abruft, daher hält das Log den Verlust fest.
 
 ```promql
 sum(increase(gomodel_usage_entries_dropped_total[5m])) by (reason) > 0

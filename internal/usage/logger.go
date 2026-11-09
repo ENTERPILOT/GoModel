@@ -76,6 +76,12 @@ var usageEntriesDropped = func() *prometheus.CounterVec {
 	return c
 }()
 
+// dropClosed records an entry that arrived after the logger shut down.
+func dropClosed(entry *UsageEntry) {
+	usageEntriesDropped.WithLabelValues("logger_closed").Inc()
+	slog.Warn("usage logger closed, dropping entry", "request_id", entry.RequestID, "model", entry.Model)
+}
+
 // Write queues a usage entry for async writing.
 // This method is non-blocking. If the buffer is full or the logger is closed,
 // the entry is dropped and a warning is logged.
@@ -86,7 +92,7 @@ func (l *Logger) Write(entry *UsageEntry) {
 
 	// Check if logger is shut down to avoid sending on closed channel
 	if l.closed.Load() {
-		usageEntriesDropped.WithLabelValues("logger_closed").Inc()
+		dropClosed(entry)
 		return
 	}
 
@@ -96,7 +102,7 @@ func (l *Logger) Write(entry *UsageEntry) {
 
 	// Double-check after registering - Close() may have set closed between first check and Add(1)
 	if l.closed.Load() {
-		usageEntriesDropped.WithLabelValues("logger_closed").Inc()
+		dropClosed(entry)
 		return
 	}
 

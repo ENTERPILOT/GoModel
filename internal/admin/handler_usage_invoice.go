@@ -154,7 +154,20 @@ func invoiceFilename(invoice *usage.Invoice) string {
 		name += "-" + invoice.StartDate + "-to-" + invoice.EndDate
 	}
 	if invoice.TimeZone != "" && invoice.TimeZone != "UTC" {
-		name += "-" + strings.ReplaceAll(invoice.TimeZone, "/", "-")
+		name += "-" + filenameSafe(invoice.TimeZone)
 	}
 	return name + ".csv"
+}
+
+// filenameSafe keeps letters, digits, "_", "+" and "-" of a time zone name and
+// turns every other byte into "-", so the name is safe in a quoted
+// Content-Disposition filename: Europe/Warsaw becomes Europe-Warsaw.
+func filenameSafe(zone string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '+', r == '-':
+			return r
+		}
+		return '-'
+	}, zone)
 }

@@ -90,9 +90,9 @@ func (p *Plugin) Init(_ context.Context, raw json.RawMessage, host pluginapi.Hos
 	if host != nil && host.Logger() != nil {
 		logger = host.Logger()
 	}
-	request, response, upstream, err := compile(cfg, func(field string, line int, err error) {
-		// err names the header, never its value.
-		logger.Warn("header_edit: ignoring a header it may not edit", "field", field, "line", line, "reason", err.Error())
+	request, response, upstream, err := compile(cfg, func(field string, line int, _ error) {
+		// Field and line only: the line's name or value may hold a secret.
+		logger.Warn("header_edit: ignoring a line naming a header it may not edit", "field", field, "line", line)
 	})
 	if err != nil {
 		return err

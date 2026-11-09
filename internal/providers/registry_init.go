@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
-	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -487,7 +486,7 @@ func fetchProviderInventory(ctx context.Context, provider core.Provider, in prov
 func listModels(ctx context.Context, provider core.Provider, providerName string) (resp *core.ModelsResponse, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			slog.Error("provider model listing panicked", "provider", providerName, "panic", r, "stack", string(debug.Stack()))
+			slog.Error("provider model listing panicked", append([]any{"provider", providerName}, panicLogAttrs(r)...)...)
 			resp, err = nil, errors.New("list models panicked")
 		}
 	}()

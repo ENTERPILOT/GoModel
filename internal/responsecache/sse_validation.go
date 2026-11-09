@@ -53,6 +53,10 @@ func validateCacheableSSE(raw []byte) bool {
 		if sawDone {
 			return false
 		}
+		// A named error event is never a reusable answer, whatever its data.
+		if isErrorEvent(event) {
+			return false
+		}
 		// Only keep-alive comments may follow a final response.completed:
 		// any other event, even one without data, means the stream went on.
 		if endsCompleted && !commentsOnly(event) {
@@ -91,10 +95,23 @@ func validateCacheableSSE(raw []byte) bool {
 // comment (starts with ':').
 func commentsOnly(event []byte) bool {
 	for line := range bytes.Lines(event) {
-		line = bytes.TrimSpace(line)
+		// Only the terminator is stripped: a line starting with a space is
+		// a field line, not a comment.
+		line = bytes.TrimRight(line, "\r\n")
 		if len(line) > 0 && line[0] != ':' {
 			return false
 		}
 	}
 	return true
+}
+
+// isErrorEvent reports whether an SSE event is named "error".
+func isErrorEvent(event []byte) bool {
+	for line := range bytes.Lines(event) {
+		name, ok := bytes.CutPrefix(bytes.TrimRight(line, "\r\n"), []byte("event:"))
+		if ok && string(bytes.TrimSpace(name)) == "error" {
+			return true
+		}
+	}
+	return false
 }

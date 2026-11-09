@@ -298,7 +298,7 @@ sum(rate(gomodel_empty_responses_total[5m])) by (provider, model, reason) > 0
 | -------- | ------------------------------------------------------------------------------------------------------------- |
 | `reason` | `buffer_full`（达到 `USAGE_BUFFER_SIZE`）、`write_failed`（批量写入返回错误）或 `logger_closed`（见下文） |
 
-遇到 `buffer_full` 时请增大 `USAGE_BUFFER_SIZE`。遇到 `write_failed` 时，服务器日志中有写入错误。`logger_closed` 统计的是在用量记录器关闭之后才记录的用量，例如关闭时仍在运行的请求或会话产生的用量。
+遇到 `buffer_full` 时请增大 `USAGE_BUFFER_SIZE`。遇到 `write_failed` 时，服务器日志中有写入错误。`logger_closed` 统计的是在用量记录器关闭之后才记录的用量，例如关闭时仍在运行的请求或会话产生的用量；进程可能在 Prometheus 抓取之前就已退出，因此以日志为准。
 
 ```promql
 sum(increase(gomodel_usage_entries_dropped_total[5m])) by (reason) > 0

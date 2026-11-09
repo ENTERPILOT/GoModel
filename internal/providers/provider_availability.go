@@ -3,7 +3,9 @@ package providers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -55,9 +57,21 @@ func (r *ModelRegistry) hasConfiguredProviderModels(providerName string) bool {
 func checkAvailability(ctx context.Context, checker core.AvailabilityChecker, providerName string) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			slog.Error("provider availability probe panicked", "provider", providerName, "panic", r, "stack", string(debug.Stack()))
+			slog.Error("provider availability probe panicked", append([]any{"provider", providerName}, panicLogAttrs(r)...)...)
 			err = errors.New("availability probe panicked")
 		}
 	}()
 	return checker.CheckAvailability(ctx)
+}
+
+// panicLogAttrs describes a recovered panic for the log without its value
+// unless the Go runtime raised it: a provider's own panic value may carry an
+// upstream URL or a response that holds a credential. The stack holds code
+// locations only.
+func panicLogAttrs(r any) []any {
+	attrs := []any{"panic_type", fmt.Sprintf("%T", r)}
+	if runtimeErr, ok := r.(runtime.Error); ok {
+		attrs = append(attrs, "panic", runtimeErr.Error())
+	}
+	return append(attrs, "stack", string(debug.Stack()))
 }

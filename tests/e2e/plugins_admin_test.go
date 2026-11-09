@@ -168,7 +168,7 @@ func TestPlugins_HeaderEdit_E2E(t *testing.T) {
 		// A refused header is skipped with a warning, so a saved config that
 		// names one still loads; the instance edits nothing.
 		status, body := fx.putGuardrail(t, guardrailDef("auth", "header_edit", map[string]any{"request_set": "Authorization: Bearer leaked"}, nil))
-		require.Less(t, status, http.StatusBadRequest, string(body))
+		require.Equal(t, http.StatusOK, status, string(body))
 
 		var defs []map[string]any
 		fx.adminJSON(t, http.MethodGet, adminGuardrailsPath, nil, http.StatusOK, &defs)
