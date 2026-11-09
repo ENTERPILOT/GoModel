@@ -167,19 +167,20 @@ func adaptMessages(messages []core.Message) []core.Message {
 }
 
 // canonicalReplayedReasoning leaves a replayed assistant turn with a
-// non-empty reasoning_content member or none. A non-empty reasoning_content
+// non-empty reasoning_content member or none. A trace is a string or a list
+// of text parts (thinkingText reads both). A non-empty reasoning_content
 // wins; otherwise an empty or null one is removed and the vendor reasoning
 // spelling is adopted when it carries text.
 func canonicalReplayedReasoning(fields core.UnknownJSONFields) core.UnknownJSONFields {
 	if !fields.HasAny(reasoningContentKey, replayedReasoningKey) {
 		return fields
 	}
-	if rawString(fields.Lookup(reasoningContentKey)) != "" {
+	if thinkingText(fields.Lookup(reasoningContentKey)) != "" {
 		return fields
 	}
 	fields = fields.Without(reasoningContentKey)
 	alt := fields.Lookup(replayedReasoningKey)
-	if rawString(alt) == "" {
+	if thinkingText(alt) == "" {
 		return fields
 	}
 	merged, err := core.MergeUnknownJSONFields(fields, map[string]json.RawMessage{reasoningContentKey: alt})
@@ -241,7 +242,7 @@ func replayReasoningAsThinking(body []byte) []byte {
 			continue
 		}
 		delete(message, reasoningContentKey)
-		if reasoning := rawString(raw); reasoning != "" {
+		if reasoning := thinkingText(raw); reasoning != "" {
 			message["content"] = appendThinkingChunk(message["content"], reasoning)
 		}
 		changed = true

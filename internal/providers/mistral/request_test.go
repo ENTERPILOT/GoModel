@@ -139,6 +139,7 @@ func TestAdaptChatRequest(t *testing.T) {
 			{Role: "assistant", Content: "c", ExtraFields: extras(t, `{"reasoning_content":null}`)},
 			{Role: "assistant", Content: "d", ExtraFields: extras(t, `{"reasoning_content":"","reasoning":"alias"}`)},
 			{Role: "assistant", Content: "e", ExtraFields: extras(t, `{"reasoning_content":"primary","reasoning":"alias"}`)},
+			{Role: "assistant", Content: "f", ExtraFields: extras(t, `{"reasoning_content":[{"type":"text","text":"parts"}]}`)},
 		}}
 		got, err := adaptChatRequest(req)
 		require.NoError(t, err)
@@ -148,6 +149,7 @@ func TestAdaptChatRequest(t *testing.T) {
 		assert.True(t, got.Messages[2].ExtraFields.IsEmpty())
 		assert.Equal(t, json.RawMessage(`"alias"`), got.Messages[3].ExtraFields.Lookup(reasoningContentKey), "an empty primary falls back to the alias")
 		assert.Equal(t, json.RawMessage(`"primary"`), got.Messages[4].ExtraFields.Lookup(reasoningContentKey), "a non-empty primary wins")
+		assert.NotNil(t, got.Messages[5].ExtraFields.Lookup(reasoningContentKey), "a list of text parts is a trace, not empty")
 	})
 }
 
@@ -171,6 +173,11 @@ func TestReplayReasoningAsThinking(t *testing.T) {
 			name: "tool-call turn without text gets the thinking chunk alone",
 			in:   `{"messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"c1"}],"reasoning_content":"plan"}]}`,
 			want: `{"messages":[{"content":[{"thinking":[{"text":"plan","type":"text"}],"type":"thinking"}],"role":"assistant","tool_calls":[{"id":"c1"}]}]}`,
+		},
+		{
+			name: "reasoning sent as a list of text parts is kept",
+			in:   `{"messages":[{"role":"assistant","content":"a","reasoning_content":[{"type":"text","text":"x"},{"type":"text","text":"y"}]}]}`,
+			want: `{"messages":[{"content":[{"thinking":[{"text":"xy","type":"text"}],"type":"thinking"},{"text":"a","type":"text"}],"role":"assistant"}]}`,
 		},
 		{
 			name: "every replayed assistant message is adapted",
