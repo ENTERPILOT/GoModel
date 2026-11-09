@@ -42,7 +42,14 @@ Mistral 的 API 级枚举为 `none`、`minimal`、`low`、`medium`、`high`、`x
 接受 `none`——因此为所选模型传入不支持的档位会被 Mistral 自身拒绝，这与使用 Mistral
 自家 SDK 的行为一致。在 `zai-glm-5-3` 上，无论推理力度为何，响应始终是分块列表。
 
-当客户端回放先前的助手回合时，GoModel 会将该回合的推理作为 Mistral `thinking` 分块放回消息内容中——Mistral 的指南警告，删除推理痕迹会降低输出质量——并丢弃 Mistral 无法解析的成员（`mistral_content_chunks`，Mistral 对它们会返回 422）。
+当客户端回放先前的助手回合时，GoModel 会将该回合的推理作为 Mistral `thinking` 分块放回消息内容中——Mistral 的指南警告，删除推理痕迹会降低输出质量——并丢弃 Mistral 无法解析的成员（`mistral_content_chunks`，Mistral 对它们会返回 422）。回放的 `reasoning` 成员（部分客户端使用的写法）会按 `reasoning_content` 处理。
+
+Mistral 会拒绝其模式未定义的请求成员，因此 GoModel 会调整常见的 OpenAI 字段，而不是让请求失败：
+
+- `max_completion_tokens` 改为 `max_tokens`，`seed` 改为 `random_seed`。
+- `service_tier: "default"` 改为 `standard_only`；Mistral 不提供的层级会被丢弃。
+- `stream_options`、`user`、`logit_bias`、`store`、`verbosity` 和 `safety_identifier` 会被丢弃。流式响应仍会在最后一个分块中报告用量。
+- 消息只保留 Mistral 对其角色接受的成员：例如 `name` 只保留在工具消息上，助手回合中回传的 `refusal` 或 `annotations` 会被丢弃。
 
 ## 配置
 

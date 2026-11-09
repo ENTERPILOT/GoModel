@@ -52,7 +52,18 @@ chunk list, whatever the effort value.
 When a client replays an earlier assistant turn, GoModel sends the turn's reasoning back as a
 Mistral `thinking` chunk inside the message content — Mistral's guide warns that stripping the
 trace degrades output — and drops members Mistral cannot parse but the client echoed
-(`mistral_content_chunks`), which Mistral rejects with a 422.
+(`mistral_content_chunks`), which Mistral rejects with a 422. A replayed `reasoning` member
+(the spelling some clients use) is treated like `reasoning_content`.
+
+Mistral rejects request members its schema does not define, so GoModel adapts common OpenAI
+fields instead of letting the request fail:
+
+- `max_completion_tokens` becomes `max_tokens`, and `seed` becomes `random_seed`.
+- `service_tier: "default"` becomes `standard_only`; tiers Mistral does not offer are dropped.
+- `stream_options`, `user`, `logit_bias`, `store`, `verbosity`, and `safety_identifier` are
+  dropped. Streams still report usage in their final chunk.
+- Messages keep only the members Mistral accepts for their role: for example, `name` stays on
+  tool messages only, and `refusal` or `annotations` echoed on assistant turns are dropped.
 
 ## Configure
 

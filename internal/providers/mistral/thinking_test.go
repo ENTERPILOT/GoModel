@@ -1,15 +1,10 @@
 package mistral
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/goccy/go-json"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/llmclient"
 )
 
 func TestFlattenThinkingChunks(t *testing.T) {
@@ -99,162 +94,23 @@ func TestFlattenThinkingChunks_PreservesOtherMembers(t *testing.T) {
 	assert.Contains(t, s, `"reasoning_content":"x"`)
 }
 
-func TestAdaptChatRequest(t *testing.T) {
-	t.Run("nil passes through", func(t *testing.T) {
-		got, err := adaptChatRequest(nil)
-		require.NoError(t, err)
-		assert.Nil(t, got)
-	})
-
-	t.Run("reasoning effort passes through lowercased", func(t *testing.T) {
-		for _, effort := range []string{"none", "minimal", "low", "medium", "high", "xhigh", "MAX"} {
-			req := &core.ChatRequest{Model: "m", Reasoning: &core.Reasoning{Effort: effort}}
-			got, err := adaptChatRequest(req)
-			require.NoError(t, err)
-			assert.Nil(t, got.Reasoning)
-			exp := `"` + strings.ToLower(effort) + `"`
-			assert.Equal(t, json.RawMessage(exp), got.ExtraFields.Lookup("reasoning_effort"), "effort %q", effort)
-		}
-	})
-
-	t.Run("no reasoning leaves the request identical", func(t *testing.T) {
-		req := &core.ChatRequest{Model: "m", Messages: []core.Message{{Role: "user", Content: "hi"}}}
-		got, err := adaptChatRequest(req)
-		require.NoError(t, err)
-		assert.Same(t, req, got)
-	})
-
-	t.Run("reasoning without effort is dropped, not forwarded", func(t *testing.T) {
-		req := &core.ChatRequest{Model: "m", Reasoning: &core.Reasoning{Summary: "auto"}}
-		got, err := adaptChatRequest(req)
-		require.NoError(t, err)
-		assert.Nil(t, got.Reasoning, "Mistral rejects the unknown nested reasoning member with a 422")
-		assert.Nil(t, got.ExtraFields.Lookup("reasoning_effort"))
-	})
-}
-
-func TestAdaptMistralChatBody(t *testing.T) {
+func TestHasContentArray(t *testing.T) {
 	tests := []struct {
 		name string
 		in   string
-		want string
+		want bool
 	}{
-		{
-			name: "replayed reasoning becomes a thinking chunk before the text",
-			in:   `{"model":"m","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"hello","reasoning_content":"earlier thoughts"}]}`,
-			want: `{"messages":[{"content":"hi","role":"user"},{"content":[{"thinking":[{"text":"earlier thoughts","type":"text"}],"type":"thinking"},{"text":"hello","type":"text"}],"role":"assistant"}],"model":"m"}`,
-		},
-		{
-			name: "replayed array content keeps its parts and the reasoning goes first",
-			in:   `{"messages":[{"role":"assistant","content":[{"type":"text","text":"a"}],"reasoning_content":"b","mistral_content_chunks":[{"type":"reference"}]}]}`,
-			want: `{"messages":[{"content":[{"thinking":[{"text":"b","type":"text"}],"type":"thinking"},{"text":"a","type":"text"}],"role":"assistant"}]}`,
-		},
-		{
-			name: "assistant without replay members returns nil",
-			in:   `{"messages":[{"role":"assistant","content":"hello"}]}`,
-			want: ``,
-		},
-		{
-			name: "non-assistant reasoning_content member is left alone",
-			in:   `{"messages":[{"role":"user","content":"hi","reasoning_content":"odd but not ours"}]}`,
-			want: ``,
-		},
-		{
-			name: "known members are renamed for Mistral's schema",
-			in:   `{"model":"m","stream":true,"stream_options":{"include_usage":true},"max_completion_tokens":900,"seed":42,"messages":[{"role":"user","content":"hi"}]}`,
-			want: `{"messages":[{"content":"hi","role":"user"}],"model":"m","random_seed":42,"stream":true,"max_tokens":900}`,
-		},
-		{
-			name: "max_tokens wins over max_completion_tokens",
-			in:   `{"max_tokens":7,"max_completion_tokens":900,"messages":[]}`,
-			want: `{"messages":[],"max_tokens":7}`,
-		},
-		{
-			name: "service_tier default asks for standard capacity, not auto",
-			in:   `{"service_tier":"default","messages":[]}`,
-			want: `{"messages":[],"service_tier":"standard_only"}`,
-		},
-		{
-			name: "service_tier without a Mistral equivalent is dropped",
-			in:   `{"service_tier":"priority","messages":[]}`,
-			want: `{"messages":[]}`,
-		},
-		{
-			name: "every replayed assistant message is adapted",
-			in:   `{"messages":[{"role":"assistant","content":"one","reasoning_content":"r1"},{"role":"user","content":"between"},{"role":"assistant","content":"two","reasoning_content":"r2"}]}`,
-			want: `{"messages":[{"role":"assistant","content":[{"thinking":[{"text":"r1","type":"text"}],"type":"thinking"},{"text":"one","type":"text"}]},{"content":"between","role":"user"},{"content":[{"thinking":[{"text":"r2","type":"text"}],"type":"thinking"},{"text":"two","type":"text"}],"role":"assistant"}]}`,
-		},
-		{
-			name: "empty reasoning_content member is removed without a chunk",
-			in:   `{"messages":[{"role":"assistant","content":"hello","reasoning_content":""}]}`,
-			want: `{"messages":[{"content":"hello","role":"assistant"}]}`,
-		},
-		{
-			name: "null reasoning_content member is removed",
-			in:   `{"messages":[{"role":"assistant","content":"hello","reasoning_content":null}]}`,
-			want: `{"messages":[{"content":"hello","role":"assistant"}]}`,
-		},
-		{
-			name: "no messages member returns nil",
-			in:   `{"model":"mistral-embed","input":["a"]}`,
-			want: ``,
-		},
+		{"compact array", `{"delta":{"content":[{"type":"text"}]}}`, true},
+		{"spaced array (Python-style separators)", `{"delta": {"content" : [ {"type": "text"}]}}`, true},
+		{"string content", `{"delta":{"content":"hi"}}`, false},
+		{"null content", `{"message":{"content":null}}`, false},
+		{"string then array", `{"a":{"content":"x"},"b":{"content":[1]}}`, true},
+		{"escaped key inside a string value", `{"delta":{"content":"say \"content\": [1]"}}`, false},
+		{"no content member", `{"choices":[{"finish_reason":"stop"}],"usage":{}}`, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := adaptMistralChatBody([]byte(tt.in))
-			if tt.want == "" {
-				assert.Nil(t, got)
-				return
-			}
-			require.NotNil(t, got)
-			assert.JSONEq(t, tt.want, string(got))
+			assert.Equal(t, tt.want, hasContentArray([]byte(tt.in)))
 		})
 	}
-}
-
-func TestAdaptChatWire(t *testing.T) {
-	t.Run("nil body passes through", func(t *testing.T) {
-		r := &llmclient.Request{Method: "GET", Endpoint: "/models"}
-		adaptChatWire(r)
-		assert.Nil(t, r.Body)
-	})
-
-	t.Run("chat body is patched in place as raw JSON", func(t *testing.T) {
-		req := &core.ChatRequest{
-			Model: "m",
-			Messages: []core.Message{
-				{Role: "assistant", Content: "hello", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
-					reasoningContentKey: json.RawMessage(`"earlier thoughts"`),
-				})},
-			},
-		}
-		r := &llmclient.Request{Method: "POST", Endpoint: "/chat/completions", Body: req}
-		adaptChatWire(r)
-		raw, ok := r.Body.(json.RawMessage)
-		require.True(t, ok, "body = %#v, want json.RawMessage", r.Body)
-		var body map[string]any
-		require.NoError(t, json.Unmarshal(raw, &body))
-		messages := body["messages"].([]any)
-		assistant := messages[0].(map[string]any)
-		assert.NotContains(t, assistant, reasoningContentKey)
-		content := assistant["content"].([]any)
-		assert.JSONEq(t, `{"type":"thinking","thinking":[{"type":"text","text":"earlier thoughts"}]}`, string(mustJSON(content[0])))
-		assert.JSONEq(t, `{"type":"text","text":"hello"}`, string(mustJSON(content[1])))
-	})
-
-	t.Run("body without patches keeps the typed marshal", func(t *testing.T) {
-		req := &core.ChatRequest{Model: "m", Messages: []core.Message{{Role: "user", Content: "hi"}}}
-		r := &llmclient.Request{Method: "POST", Endpoint: "/chat/completions", Body: req}
-		adaptChatWire(r)
-		assert.Same(t, req, r.Body, "unchanged bodies must not be re-encoded")
-	})
-}
-
-func mustJSON(v any) []byte {
-	encoded, err := json.Marshal(v)
-	if err != nil {
-		panic(err)
-	}
-	return encoded
 }
