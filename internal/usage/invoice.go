@@ -73,6 +73,15 @@ func (a *InvoiceAmounts) add(other InvoiceAmounts) {
 	a.BilledCost = addCost(a.BilledCost, other.BilledCost)
 }
 
+// zeroCacheOnlyCost sets the provider cost of amounts made of billed cache
+// hits alone to 0: they cost the provider nothing. Amounts with provider
+// requests keep an unknown cost unknown.
+func (a *InvoiceAmounts) zeroCacheOnlyCost() {
+	if a.Requests == 0 && a.ProviderCost == nil {
+		a.ProviderCost = new(0.0)
+	}
+}
+
 func (a *InvoiceAmounts) setMarkup() {
 	a.EffectiveMarkupPercent = nil
 	if a.ProviderCost == nil || a.BilledCost == nil || *a.ProviderCost <= 0 {
@@ -220,18 +229,21 @@ func (l invoiceLines) invoice(params InvoiceParams) *Invoice {
 		}
 		customer := &invoice.Customers[len(invoice.Customers)-1]
 		line := InvoiceLine{Model: key.model, Provider: key.provider, InvoiceAmounts: *l.amounts[key]}
-		if line.Requests == 0 && line.ProviderCost == nil {
-			// Only billed cache hits, which cost the provider nothing. A
-			// line with provider requests keeps an unknown cost unknown.
-			line.ProviderCost = new(0.0)
-		}
+		// Sums take the stored amounts: a cache-only line's 0 must not make
+		// a sibling line's unknown provider cost read as 0 in the subtotal.
+		customer.Subtotal.add(line.InvoiceAmounts)
+		line.zeroCacheOnlyCost()
 		line.setMarkup()
 		customer.Lines = append(customer.Lines, line)
-		customer.Subtotal.add(line.InvoiceAmounts)
 	}
 	for i := range invoice.Customers {
-		invoice.Customers[i].Subtotal.setMarkup()
-		invoice.Total.add(invoice.Customers[i].Subtotal)
+		subtotal := &invoice.Customers[i].Subtotal
+		invoice.Total.add(*subtotal)
+		subtotal.zeroCacheOnlyCost()
+		subtotal.setMarkup()
+	}
+	if len(invoice.Customers) > 0 {
+		invoice.Total.zeroCacheOnlyCost()
 	}
 	invoice.Total.setMarkup()
 	invoice.roundCosts()

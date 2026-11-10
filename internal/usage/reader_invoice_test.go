@@ -254,6 +254,27 @@ func assertInvoiceReads(t *testing.T, store usageBatchWriter, reader UsageReader
 		assert.Equal(t, 1, invoice.Customers[0].Lines[0].Requests)
 	})
 
+	t.Run("a cache-only line leaves an unknown subtotal unknown", func(t *testing.T) {
+		hit := invoiceFixture()[4]
+		hit.ID = "8b3e0000-0000-4000-8000-0000000000a2"
+		hit.RequestID, hit.ProviderID, hit.UserPath, hit.Model = "req-inv-12", "p-inv-12", "/twolines", "cached-model"
+		unpriced := invoiceFixture()[0]
+		unpriced.ID = "8b3e0000-0000-4000-8000-0000000000a3"
+		unpriced.RequestID, unpriced.ProviderID, unpriced.UserPath, unpriced.Model = "req-inv-13", "p-inv-13", "/twolines", "unpriced-model"
+		unpriced.TotalCost, unpriced.BilledCost = nil, nil
+		require.NoError(t, store.WriteBatch(ctx, []*UsageEntry{hit, unpriced}))
+		invoice, err := reader.GetUsageInvoice(ctx, InvoiceParams{UsageQueryParams: withUserPaths(period, "/twolines")})
+		require.NoError(t, err)
+		require.Len(t, invoice.Customers, 1)
+		lines := invoice.Customers[0].Lines
+		require.Len(t, lines, 2)
+		require.NotNil(t, lines[0].ProviderCost, "the cache-only line")
+		assert.Zero(t, *lines[0].ProviderCost)
+		assert.Nil(t, lines[1].ProviderCost, "the unpriced line")
+		assert.Nil(t, invoice.Customers[0].Subtotal.ProviderCost)
+		assert.Nil(t, invoice.Total.ProviderCost)
+	})
+
 	t.Run("invalid parent", func(t *testing.T) {
 		_, err := reader.GetUsageInvoice(ctx, InvoiceParams{UsageQueryParams: period, Parent: "/a/../b"})
 		require.Error(t, err)
