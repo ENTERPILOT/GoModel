@@ -118,7 +118,7 @@ func TestRedisStoreHonorsContextDeadlineWhenRedisHangs(t *testing.T) {
 	_, err = store.Get(context.Background(), "key")
 	require.Error(t, err)
 	// go-redis can retry a timed-out read on a fresh connection, so allow
-	// two read timeouts; the 3 s go-redis default would take twice as long.
+	// two read timeouts; the 5 s go-redis default would take twice as long.
 	assert.Less(t, time.Since(start), 2800*time.Millisecond, "without a deadline the shortened read timeout ends the call")
 }
 
@@ -135,4 +135,9 @@ func TestApplyRedisTimeoutsKeepsURLTimeouts(t *testing.T) {
 	applyRedisTimeouts(opts)
 	assert.Equal(t, redisOpTimeout, opts.ReadTimeout)
 	assert.Equal(t, redisOpTimeout, opts.WriteTimeout)
+
+	opts, err = redis.ParseURL("redis://localhost:6379?read_timeout=10s")
+	require.NoError(t, err)
+	applyRedisTimeouts(opts)
+	assert.Equal(t, 10*time.Second, opts.WriteTimeout, "write follows a read timeout set alone")
 }

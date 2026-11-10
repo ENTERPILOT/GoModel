@@ -67,7 +67,7 @@ func NewRedisStore(cfg RedisStoreConfig) (*RedisStore, error) {
 
 // redisOpTimeout bounds one Redis read or write when the URL sets no timeout
 // of its own. The store is a cache: a Redis that stops answering should cost
-// a request about this much, not go-redis's 3 s per operation, and must not
+// a request about this much, not go-redis's 5 s per operation, and must not
 // hold a readiness probe past its own deadline.
 const redisOpTimeout = time.Second
 
@@ -81,7 +81,8 @@ func applyRedisTimeouts(opts *redis.Options) {
 		opts.ReadTimeout = redisOpTimeout
 	}
 	if opts.WriteTimeout == 0 {
-		opts.WriteTimeout = redisOpTimeout
+		// As in go-redis: a URL that sets only read_timeout sets both.
+		opts.WriteTimeout = opts.ReadTimeout
 	}
 }
 

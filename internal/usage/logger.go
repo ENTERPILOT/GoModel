@@ -84,17 +84,11 @@ const (
 	dropLoggerClosed = "logger_closed"
 )
 
-// dropMessages are the warnings logged per reason. Operators alert on these
-// texts, so they stay as they are.
-var dropMessages = map[string]string{
-	dropBufferFull:   "usage log buffer full, dropping entry",
-	dropLoggerClosed: "usage logger closed, dropping entry",
-}
-
-// dropEntry counts and logs one entry Write could not queue.
-func dropEntry(reason string, entry *UsageEntry) {
+// dropEntry counts and logs one entry Write could not queue. Operators alert
+// on the message texts, so they stay as they are.
+func dropEntry(reason, message string, entry *UsageEntry) {
 	usageEntriesDropped.WithLabelValues(reason).Inc()
-	slog.Warn(dropMessages[reason], "request_id", cmp.Or(entry.RequestID, "unknown"), "model", entry.Model)
+	slog.Warn(message, "request_id", cmp.Or(entry.RequestID, "unknown"), "model", entry.Model)
 }
 
 // Write queues a usage entry for async writing.
@@ -107,7 +101,7 @@ func (l *Logger) Write(entry *UsageEntry) {
 
 	// Check if logger is shut down to avoid sending on closed channel
 	if l.closed.Load() {
-		dropEntry(dropLoggerClosed, entry)
+		dropEntry(dropLoggerClosed, "usage logger closed, dropping entry", entry)
 		return
 	}
 
@@ -117,7 +111,7 @@ func (l *Logger) Write(entry *UsageEntry) {
 
 	// Double-check after registering - Close() may have set closed between first check and Add(1)
 	if l.closed.Load() {
-		dropEntry(dropLoggerClosed, entry)
+		dropEntry(dropLoggerClosed, "usage logger closed, dropping entry", entry)
 		return
 	}
 
@@ -126,7 +120,7 @@ func (l *Logger) Write(entry *UsageEntry) {
 	case l.buffer <- entry:
 	default:
 		l.publishLiveEvent(LiveEventUsageFailed, entry)
-		dropEntry(dropBufferFull, entry)
+		dropEntry(dropBufferFull, "usage log buffer full, dropping entry", entry)
 	}
 }
 
