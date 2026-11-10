@@ -305,6 +305,25 @@ nadal zwracana; psuje tylko śledzenie użycia i kosztów.
 sum(rate(gomodel_empty_responses_total[5m])) by (provider, model, reason) > 0
 ```
 
+## Alerty na utracone użycie
+
+Użycie jest zapisywane w magazynie partiami. Wpisu, który nigdy nie trafi do magazynu,
+brakuje w widokach użycia, [budżetach](/pl/features/budgets) i fakturach, więc GoModel
+liczy go w `gomodel_usage_entries_dropped_total` i loguje.
+
+| Etykieta | Wartości                                                                                                                              |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `reason` | `buffer_full` (osiągnięto `USAGE_BUFFER_SIZE`), `write_failed` (zapis partii zwrócił błąd) lub `logger_closed` (zobacz poniżej) |
+
+Przy `buffer_full` zwiększ `USAGE_BUFFER_SIZE`. Przy `write_failed` błąd zapisu znajdziesz
+w logu serwera. `logger_closed` liczy użycie zarejestrowane po zamknięciu loggera użycia,
+na przykład przez request lub sesję wciąż trwające w chwili zamykania;
+proces może się zakończyć, zanim Prometheus odczyta licznik, więc stratę zapisuje log.
+
+```promql
+sum(increase(gomodel_usage_entries_dropped_total[5m])) by (reason) > 0
+```
+
 ## Konfiguracja Prometheusa
 
 ### Konfiguracja scrapowania

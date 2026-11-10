@@ -18,7 +18,8 @@ auf folgenden Endpunkten mit:
 
 Streaming- und Nicht-Streaming-Varianten desselben Requests werden unabhängig
 voneinander gecacht: Ein Streaming-Miss speichert die rohen SSE-Bytes, und ein
-Streaming-Hit spielt sie unverändert als `text/event-stream` wieder ab.
+Streaming-Hit spielt sie unverändert als `text/event-stream` wieder ab. Ein Stream
+über 4 MiB erreicht den Client trotzdem vollständig, wird aber nicht gecacht.
 
 Der Exact-Match-Cache liefert byte-identische Responses mit:
 

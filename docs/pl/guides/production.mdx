@@ -568,8 +568,12 @@ Dwie dodatkowe kwestie przy dużym wolumenie:
 
 - **Zapisy użycia i audytu są buforowane i odrzucane, a nie blokowane, gdy
   bufor się zapełni.** Skok ruchu lub wolna baza danych mogą po cichu zgubić wpisy użycia,
-  co oznacza utracone dane o kosztach i zaniżone obciążenie budżetów. Jedynym sygnałem jest
-  ostrzeżenie `usage log buffer full` w logach, więc ustaw na nie alert.
+  co oznacza utracone dane o kosztach i zaniżone obciążenie budżetów. Ustaw alert na
+  `gomodel_usage_entries_dropped_total` (zobacz
+  [Alerty na utracone użycie](/pl/guides/prometheus-metrics#alerty-na-utracone-użycie)),
+  a bez metryk na komunikaty `usage log buffer full`, `usage logger closed`
+  i `failed to write usage batch` w logach. Utracony wpis audytu zostawia
+  w logach `audit log buffer full`.
 - **Sprawdzenia budżetów odpytują tabelę użycia przy każdym requeście.** Trzymaj
   `USAGE_RETENTION_DAYS` na niskim poziomie, gdy budżety są włączone, i wybieraj Postgresa
   zamiast SQLite, którego pojedyncze połączenie sprawia, że to dominujący koszt.
@@ -640,7 +644,7 @@ wykonuj na nim VACUUM osobno.
 - Skieruj readiness na `/health/ready` i ustaw
   `terminationGracePeriodSeconds` powyżej 30.
 - Włącz metryki i ustaw alerty na `gomodel_circuit_breaker_state` oraz na
-  `usage log buffer full`.
+  `gomodel_usage_entries_dropped_total`.
 - W instalacjach air-gapped ustaw `GOMODEL_OFFLINE=true`, a następnie dostarcz katalog
   modeli jako plik lub zadeklaruj ceny modeli w konfiguracji, aby śledzenie kosztów i
   budżety nadal działały.
