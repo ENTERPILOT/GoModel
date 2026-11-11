@@ -142,14 +142,16 @@
                 {m.mcp_all_tools_server({ server: row.server, name: row.name })}
               </div>
               {#if row.description}
-                <p class="mcp-all-tools-description">{row.description}</p>
+                <p class="mcp-all-tools-description">
+                  <HighlightText text={row.description} needle={mcpServers.toolCatalogQuery} />
+                </p>
               {/if}
             </li>
           {/each}
         </ul>
       {:else if mcpServers.toolCatalogQuery}
         <p class="empty-state">{m.mcp_all_tools_no_match()}</p>
-      {:else}
+      {:else if issues.length === 0}
         <p class="empty-state">{m.mcp_all_tools_empty()}</p>
       {/if}
     {/if}
