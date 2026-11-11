@@ -905,7 +905,7 @@ It is gateway-wide, so it needs a global admin credential.
 | Parameter        | Type   | Description                                                           | Default |
 | ---------------- | ------ | --------------------------------------------------------------------- | ------- |
 | `format`         | string | `json` or `csv` (downloaded as an attachment)                         | `json`  |
-| `server`         | string | Keep one MCP server, by slug                                          | —       |
+| `server`         | string | Keep the rows of one MCP server, by slug                              | —       |
 | `virtual_server` | string | Keep the members of one virtual server                                | —       |
 | `user_path`      | string | Keep the servers a caller with this user path can see, e.g. `/team/x` | —       |
 
@@ -948,11 +948,19 @@ curl "http://localhost:8080/admin/mcp-servers/catalog?user_path=/team/x" \
 - `exposed` is `false`, and `name` empty, for a tool the server's
   `allowed_tools` / `disallowed_tools` hide. Clients can call a tool only when
   it is exposed and its server is enabled.
+- `shadowed_by` is set when two servers produce the same `/mcp` name, such as
+  server `a` with tool `b_read` and server `a_b` with tool `read`. The gateway
+  keeps the first server in slug order, so the other tool's row has an empty
+  `name` and names that server in `shadowed_by`. Its `exposed` stays `true`:
+  the tool is still callable at `/mcp/{slug}` under `upstream_name`. The owner
+  is decided among the servers that `virtual_server` and `user_path` leave, or
+  among all servers without them; `server` does not change it. JSON omits the
+  field when it is empty.
 - `read_only` and `destructive` are `true` only when the server set the hint;
   `false` means it did not say.
 - `user_path` filters servers by their `user_paths` and
   `disallowed_user_paths` only. It keeps disabled servers and hidden tools,
-  which `enabled` and `exposed` mark.
+  which `enabled` and `exposed` mark. An empty `user_path` does not filter.
 - The export reads the catalogs the gateway already holds, so an unreachable
   server never fails it: the server is listed in `servers` with its status and
   no tools. A `degraded` server that connected before keeps its last catalog.

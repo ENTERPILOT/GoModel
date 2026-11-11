@@ -582,8 +582,11 @@ transport, enabled flag, and status; the tool's client-facing name
 (`{slug}_{name}`), upstream name, description, and read-only and destructive
 hints; whether the server's tool filters expose it; and the server's
 `user_paths` and `disallowed_user_paths`. Tools hidden by filters are included
-with `exposed` set to `false`. A disabled or unreachable server does not fail
-the export: it is listed with its status and no tools.
+with `exposed` set to `false`. When two servers produce the same
+`{slug}_{name}`, the gateway keeps the first in slug order; the other tool has
+no client-facing name and `shadowed_by` names the server that owns it. A
+disabled or unreachable server does not fail the export: it is listed with its
+status and no tools.
 
 To narrow the export, add `server=<slug>`, `virtual_server=<name>`, or
 `user_path=/team/x`, which keeps only the servers a caller with that user path

@@ -885,7 +885,7 @@ Endpunkt ist gatewayweit und erfordert daher globale Admin-Zugangsdaten.
 | Parameter        | Typ    | Beschreibung                                                                    | Standard |
 | ---------------- | ------ | ------------------------------------------------------------------------------- | -------- |
 | `format`         | string | `json` oder `csv` (als Anhang heruntergeladen)                                  | `json`   |
-| `server`         | string | Nur einen MCP-Server behalten, per Slug                                         | —        |
+| `server`         | string | Nur die Zeilen eines MCP-Servers behalten, per Slug                             | —        |
 | `virtual_server` | string | Nur die Mitglieder eines virtuellen Servers behalten                            | —        |
 | `user_path`      | string | Nur die Server behalten, die ein Aufrufer mit diesem User Path sieht, z. B. `/team/x` | —   |
 
@@ -929,11 +929,20 @@ curl "http://localhost:8080/admin/mcp-servers/catalog?user_path=/team/x" \
 - `exposed` ist `false` und `name` leer bei einem Tool, das `allowed_tools` /
   `disallowed_tools` des Servers ausblenden. Clients können ein Tool nur
   aufrufen, wenn es freigegeben und sein Server aktiviert ist.
+- `shadowed_by` ist gesetzt, wenn zwei Server denselben `/mcp`-Namen ergeben,
+  etwa Server `a` mit Tool `b_read` und Server `a_b` mit Tool `read`. Das
+  Gateway behält den ersten Server in Slug-Reihenfolge; die Zeile des anderen
+  Tools hat daher ein leeres `name` und nennt diesen Server in `shadowed_by`.
+  Ihr `exposed` bleibt `true`: Das Tool ist weiterhin unter `/mcp/{slug}` mit
+  `upstream_name` aufrufbar. Der Besitzer wird unter den Servern bestimmt, die
+  `virtual_server` und `user_path` übrig lassen, ohne diese Filter unter allen
+  Servern; `server` ändert ihn nicht. JSON lässt das Feld weg, wenn es leer ist.
 - `read_only` und `destructive` sind nur `true`, wenn der Server den Hinweis
   gesetzt hat; `false` bedeutet, dass er nichts angegeben hat.
 - `user_path` filtert Server nur nach ihren `user_paths` und
   `disallowed_user_paths`. Deaktivierte Server und ausgeblendete Tools bleiben
-  enthalten und sind an `enabled` und `exposed` erkennbar.
+  enthalten und sind an `enabled` und `exposed` erkennbar. Ein leerer
+  `user_path` filtert nicht.
 - Der Export liest die Kataloge, die das Gateway bereits hält, daher lässt ein
   nicht erreichbarer Server ihn nie fehlschlagen: Der Server steht mit seinem
   Status und ohne Tools in `servers`. Ein Server im Status `degraded`, der

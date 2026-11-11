@@ -588,8 +588,11 @@ transport, flaga włączenia i status serwera; nazwa, którą wywołują klienci
 (`{slug}_{name}`), nazwa z serwera upstream, opis oraz wskazówki read-only i
 destructive; informacja, czy filtry narzędzi serwera je udostępniają; a także
 `user_paths` i `disallowed_user_paths` serwera. Narzędzia ukryte przez filtry
-są uwzględnione z `exposed` równym `false`. Wyłączony lub nieosiągalny serwer
-nie przerywa eksportu: jest wymieniony ze swoim statusem i bez narzędzi.
+są uwzględnione z `exposed` równym `false`. Gdy dwa serwery dają to samo
+`{slug}_{name}`, brama zachowuje pierwszy w kolejności slugów; drugie narzędzie
+nie ma nazwy dla klientów, a `shadowed_by` wskazuje serwer, do którego należy
+nazwa. Wyłączony lub nieosiągalny serwer nie przerywa eksportu: jest wymieniony
+ze swoim statusem i bez narzędzi.
 
 Aby zawęzić eksport, dodaj `server=<slug>`, `virtual_server=<name>` lub
 `user_path=/team/x`, który zostawia tylko serwery widoczne dla wywołującego z

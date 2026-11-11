@@ -74,6 +74,18 @@ func NamespacedName(server, name string) string {
 	return server + namespaceSeparator + name
 }
 
+// claimToolName registers server as the owner of an endpoint tool name
+// unless the name is already taken. It returns the owner and whether server
+// just took the name: the first claim wins, so a later server's tool with
+// the same name is shadowed, and so is a repeated name of one server.
+func claimToolName(owners map[string]string, exposed, server string) (string, bool) {
+	if owner, taken := owners[exposed]; taken {
+		return owner, false
+	}
+	owners[exposed] = server
+	return server, true
+}
+
 // discoverTools drops unnamed tools, normalizes schemas, and returns tools in
 // deterministic (sorted) order. Deterministic ordering keeps downstream
 // tools/list stable, which keeps provider prompt caches warm for clients that

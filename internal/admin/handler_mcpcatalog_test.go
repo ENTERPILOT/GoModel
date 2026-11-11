@@ -2,8 +2,10 @@ package admin
 
 import (
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -35,6 +37,9 @@ func TestMCPToolCatalog_Params(t *testing.T) {
 		{name: "by server", query: "server=+github+", wantStatus: http.StatusOK, wantFilter: mcpgateway.ToolCatalogFilter{Server: "github"}},
 		{name: "by virtual server", query: "virtual_server=coding", wantStatus: http.StatusOK, wantFilter: mcpgateway.ToolCatalogFilter{VirtualServer: "coding"}},
 		{name: "as seen by a user path", query: "user_path=team/x/", wantStatus: http.StatusOK, wantFilter: mcpgateway.ToolCatalogFilter{UserPath: "/team/x"}},
+		{name: "as seen by the root path", query: "user_path=/", wantStatus: http.StatusOK, wantFilter: mcpgateway.ToolCatalogFilter{UserPath: "/"}},
+		// A whitespace-only user path is an omitted one: no filter, not "/".
+		{name: "whitespace-only user path does not filter", query: "user_path=%20%09", wantStatus: http.StatusOK},
 		{
 			name: "filters combine", query: "server=github&virtual_server=coding&user_path=/team/x&format=csv", wantStatus: http.StatusOK,
 			wantFilter: mcpgateway.ToolCatalogFilter{Server: "github", VirtualServer: "coding", UserPath: "/team/x"},
@@ -46,6 +51,7 @@ func TestMCPToolCatalog_Params(t *testing.T) {
 			toolErr:    fmt.Errorf("%w: ghost", mcpgateway.ErrNotFound),
 			wantFilter: mcpgateway.ToolCatalogFilter{Server: "ghost"},
 		},
+		{name: "any other service error is a 500", wantStatus: http.StatusInternalServerError, toolErr: errors.New("boom")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -69,6 +75,7 @@ func TestMCPToolCatalog_JSON(t *testing.T) {
 		Servers: []mcpgateway.ToolCatalogServer{github},
 		Tools: []mcpgateway.ToolCatalogTool{
 			{ToolCatalogServer: github, Name: "github_get_issue", UpstreamName: "get_issue", Description: "Get an issue", ReadOnly: true, Exposed: true},
+			{ToolCatalogServer: github, UpstreamName: "hub_read", Exposed: true, ShadowedBy: "git"},
 		},
 	}
 
@@ -85,6 +92,11 @@ func TestMCPToolCatalog_JSON(t *testing.T) {
 			"user_paths": ["/team/x"], "disallowed_user_paths": [],
 			"name": "github_get_issue", "upstream_name": "get_issue", "description": "Get an issue",
 			"read_only": true, "destructive": false, "exposed": true
+		}, {
+			"server": "github", "server_name": "GitHub", "transport": "http", "enabled": true, "status": "connected",
+			"user_paths": ["/team/x"], "disallowed_user_paths": [],
+			"name": "", "upstream_name": "hub_read", "read_only": false, "destructive": false, "exposed": true,
+			"shadowed_by": "git"
 		}]
 	}`, rec.Body.String())
 }
@@ -98,14 +110,20 @@ func TestMCPToolCatalog_CSV(t *testing.T) {
 		Server: "down", ServerName: "down", Transport: "sse", Enabled: true,
 		Status: mcpgateway.StatusDegraded, UserPaths: []string{}, DisallowedUserPaths: []string{},
 	}
+	// Slugs and transports are validated on save; the guard covers them anyway.
+	odd := mcpgateway.ToolCatalogServer{
+		Server: "=srv", ServerName: "+srv", Transport: "@http", Enabled: true,
+		Status: mcpgateway.StatusConnecting, UserPaths: []string{}, DisallowedUserPaths: []string{},
+	}
 	fake := newMCPAdminFake()
 	fake.toolCatalog = mcpgateway.ToolCatalog{
-		Servers: []mcpgateway.ToolCatalogServer{down, github},
+		Servers: []mcpgateway.ToolCatalogServer{odd, down, github},
 		Tools: []mcpgateway.ToolCatalogTool{
 			{ToolCatalogServer: github, Name: "github_get_issue", UpstreamName: "get_issue", Description: "Get an issue, \"quoted\"\nsecond line", ReadOnly: true, Exposed: true},
 			{ToolCatalogServer: github, UpstreamName: "=HYPERLINK(\"http://evil\")", Description: "@SUM(1+1)", Destructive: true},
 			{ToolCatalogServer: github, Name: "github_+1", UpstreamName: "+1", Description: "-2+3", Exposed: true},
 			{ToolCatalogServer: github, Name: "github_tab", UpstreamName: "\tcmd", Description: "\r=1", Exposed: true},
+			{ToolCatalogServer: github, UpstreamName: "hub_read", Exposed: true, ShadowedBy: "-git"},
 		},
 	}
 
@@ -128,15 +146,54 @@ func TestMCPToolCatalog_CSV(t *testing.T) {
 	assert.Equal(t, [][]string{
 		{
 			"server", "server_name", "transport", "enabled", "status",
-			"name", "upstream_name", "description", "read_only", "destructive", "exposed",
+			"name", "upstream_name", "description", "read_only", "destructive", "exposed", "shadowed_by",
 			"user_paths", "disallowed_user_paths",
 		},
-		row("github_get_issue", "get_issue", "Get an issue, \"quoted\"\nsecond line", "true", "false", "true"),
+		row("github_get_issue", "get_issue", "Get an issue, \"quoted\"\nsecond line", "true", "false", "true", ""),
 		// Values a spreadsheet would run as a formula get a leading quote.
-		row("", `'=HYPERLINK("http://evil")`, "'@SUM(1+1)", "false", "true", "false"),
-		row("github_+1", "'+1", "'-2+3", "false", "false", "true"),
-		row("github_tab", "'\tcmd", "'\r=1", "false", "false", "true"),
-		// A server without tools still gets a row, after the tool rows.
-		{"down", "down", "sse", "true", "degraded", "", "", "", "", "", "", "", ""},
+		row("", `'=HYPERLINK("http://evil")`, "'@SUM(1+1)", "false", "true", "false", ""),
+		row("github_+1", "'+1", "'-2+3", "false", "false", "true", ""),
+		row("github_tab", "'\tcmd", "'\r=1", "false", "false", "true", ""),
+		// A shadowed tool has no /mcp name and names the server that owns it.
+		row("", "hub_read", "", "false", "false", "true", "'-git"),
+		// Servers without tools still get a row, after the tool rows.
+		{"'=srv", "'+srv", "'@http", "true", "connecting", "", "", "", "", "", "", "", "", ""},
+		{"down", "down", "sse", "true", "degraded", "", "", "", "", "", "", "", "", ""},
 	}, records)
+}
+
+// A server may have the slug "catalog": the tool catalog route must not take
+// the per-server routes of that server.
+func TestMCPToolCatalog_RouteLeavesServerNamedCatalog(t *testing.T) {
+	fake := newMCPAdminFake()
+	fake.addStored(mcpgateway.ManagedServer{
+		Name: "catalog", URL: "https://mcp.example.com/mcp", Transport: "http", Enabled: true,
+	}, mcpgateway.StatusConnected)
+	fake.catalogs = map[string]mcpgateway.CatalogView{
+		"catalog": {Tools: []mcpgateway.CatalogFeature{{Name: "lookup"}}},
+	}
+	fake.toolCatalog = mcpgateway.ToolCatalog{Servers: []mcpgateway.ToolCatalogServer{}, Tools: []mcpgateway.ToolCatalogTool{}}
+	e := echo.New()
+	newMCPHandler(fake).RegisterRoutes(e.Group("/admin"))
+
+	tests := []struct {
+		name       string
+		method     string
+		path       string
+		wantStatus int
+		wantBody   string
+	}{
+		{name: "tool catalog", method: http.MethodGet, path: "/admin/mcp-servers/catalog", wantStatus: http.StatusOK, wantBody: `{"servers":[],"tools":[]}`},
+		{name: "the server's own catalog", method: http.MethodGet, path: "/admin/mcp-servers/catalog/catalog", wantStatus: http.StatusOK, wantBody: `"tools":[{"name":"lookup"}]`},
+		{name: "reconnect", method: http.MethodPost, path: "/admin/mcp-servers/catalog/reconnect", wantStatus: http.StatusOK, wantBody: `"slug":"catalog"`},
+		{name: "delete", method: http.MethodDelete, path: "/admin/mcp-servers/catalog", wantStatus: http.StatusNoContent},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, httptest.NewRequest(tt.method, tt.path, nil))
+			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+			assert.Contains(t, rec.Body.String(), tt.wantBody)
+		})
+	}
 }

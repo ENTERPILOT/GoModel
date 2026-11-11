@@ -19,20 +19,20 @@ import (
 // readers keep working.
 var mcpToolCatalogCSVHeader = []string{
 	"server", "server_name", "transport", "enabled", "status",
-	"name", "upstream_name", "description", "read_only", "destructive", "exposed",
+	"name", "upstream_name", "description", "read_only", "destructive", "exposed", "shadowed_by",
 	"user_paths", "disallowed_user_paths",
 }
 
 // MCPToolCatalog handles GET /admin/mcp-servers/catalog.
 //
 // @Summary      Export every MCP tool across all servers
-// @Description  Lists every tool the MCP servers report, one row per tool with its server, for security reviews and audits. name is the name clients call on the aggregated /mcp endpoint, empty for a tool the server's allowed_tools / disallowed_tools hide (exposed is false); upstream_name is the server's own name, which /mcp/{server} serves. read_only and destructive are true only when the upstream set the hint. Each row repeats its server's transport, enabled flag, status, and user-path scope. The filters narrow the servers and combine; user_path keeps the servers a caller with that user path can see. The export reads the catalogs the gateway already holds: a disabled or unreachable server is listed under servers with its status and no tools, and a degraded server keeps its last catalog. In CSV, a server without tools is one row with empty tool columns, and user paths are separated by line breaks.
+// @Description  Lists every tool the MCP servers report, one row per tool with its server, for security reviews and audits. name is the name that reaches the tool on the aggregated /mcp endpoint and upstream_name the server's own name, which /mcp/{server} serves. exposed is false for a tool the server's allowed_tools / disallowed_tools hide. shadowed_by names the server that owns the tool's /mcp name when two servers produce the same one: the gateway keeps the first in slug order, so that name reaches the other server's tool, and this one stays callable only on /mcp/{server}. name is empty for a tool that is not exposed or is shadowed. read_only and destructive are true only when the upstream set the hint. Each row repeats its server's transport, enabled flag, status, and user-path scope. virtual_server and user_path describe the endpoint: they narrow the servers, combine, and decide name ownership among the servers left; without them ownership is decided across all servers. An empty user_path does not filter. server only keeps that server's rows. The export reads the catalogs the gateway already holds: a disabled, connecting, or unreachable server is listed under servers with its status and no tools, and a degraded server keeps its last catalog. In CSV, a server without tools is one row with empty tool columns, and user paths are separated by line breaks.
 // @Tags         admin
 // @Produce      json
 // @Produce      text/csv
 // @Security     BearerAuth
 // @Param        format          query     string  false  "Export format: json (default) or csv (as an attachment)"
-// @Param        server          query     string  false  "Keep one MCP server, by slug"
+// @Param        server          query     string  false  "Keep the rows of one MCP server, by slug"
 // @Param        virtual_server  query     string  false  "Keep the members of one virtual MCP server"
 // @Param        user_path       query     string  false  "Keep the servers a caller with this user path can see, e.g. /team/x"
 // @Success      200  {object}  mcpgateway.ToolCatalog
@@ -102,11 +102,12 @@ func mcpToolCatalogCSV(catalog mcpgateway.ToolCatalog) ([]byte, error) {
 // empty. Names and descriptions come from upstream servers, so they pass
 // through csvText; user paths start with "/" and need no guard.
 func mcpToolCatalogRecord(server mcpgateway.ToolCatalogServer, tool *mcpgateway.ToolCatalogTool) []string {
-	toolColumns := make([]string, 6)
+	toolColumns := make([]string, 7)
 	if tool != nil {
 		toolColumns = []string{
 			csvText(tool.Name), csvText(tool.UpstreamName), csvText(tool.Description),
 			strconv.FormatBool(tool.ReadOnly), strconv.FormatBool(tool.Destructive), strconv.FormatBool(tool.Exposed),
+			csvText(tool.ShadowedBy),
 		}
 	}
 	record := []string{

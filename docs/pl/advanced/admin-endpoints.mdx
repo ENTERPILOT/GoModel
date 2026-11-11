@@ -882,7 +882,7 @@ poświadczeń administratora.
 | Parametr         | Typ    | Opis                                                                              | Domyślnie |
 | ---------------- | ------ | --------------------------------------------------------------------------------- | --------- |
 | `format`         | string | `json` lub `csv` (pobierany jako załącznik)                                       | `json`    |
-| `server`         | string | Zostaw jeden serwer MCP, według sluga                                             | —         |
+| `server`         | string | Zostaw wiersze jednego serwera MCP, według sluga                                  | —         |
 | `virtual_server` | string | Zostaw członków jednego serwera wirtualnego                                       | —         |
 | `user_path`      | string | Zostaw serwery widoczne dla wywołującego z tą ścieżką użytkownika, np. `/team/x`  | —         |
 
@@ -926,11 +926,21 @@ curl "http://localhost:8080/admin/mcp-servers/catalog?user_path=/team/x" \
 - `exposed` ma wartość `false`, a `name` jest puste dla narzędzia ukrytego
   przez `allowed_tools` / `disallowed_tools` serwera. Klienci mogą wywołać
   narzędzie tylko wtedy, gdy jest udostępnione, a jego serwer włączony.
+- `shadowed_by` jest ustawione, gdy dwa serwery dają tę samą nazwę na `/mcp`,
+  na przykład serwer `a` z narzędziem `b_read` i serwer `a_b` z narzędziem
+  `read`. Brama zachowuje pierwszy serwer w kolejności slugów, więc wiersz
+  drugiego narzędzia ma puste `name` i wskazuje ten serwer w `shadowed_by`.
+  Jego `exposed` pozostaje `true`: narzędzie nadal można wywołać pod
+  `/mcp/{slug}` nazwą `upstream_name`. Właściciel nazwy jest wyznaczany wśród
+  serwerów, które zostawiają `virtual_server` i `user_path`, a bez nich wśród
+  wszystkich serwerów; `server` go nie zmienia. JSON pomija to pole, gdy jest
+  puste.
 - `read_only` i `destructive` mają wartość `true` tylko wtedy, gdy serwer
   ustawił tę wskazówkę; `false` oznacza, że jej nie podał.
 - `user_path` filtruje serwery wyłącznie według ich `user_paths` i
   `disallowed_user_paths`. Wyłączone serwery i ukryte narzędzia zostają w
-  wyniku, oznaczone przez `enabled` i `exposed`.
+  wyniku, oznaczone przez `enabled` i `exposed`. Pusty `user_path` niczego nie
+  filtruje.
 - Eksport czyta katalogi, które brama już przechowuje, więc nieosiągalny
   serwer nigdy go nie przerywa: serwer jest wymieniony w `servers` ze swoim
   statusem i bez narzędzi. Serwer w stanie `degraded`, który wcześniej się
