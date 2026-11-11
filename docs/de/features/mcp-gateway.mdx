@@ -587,6 +587,19 @@ durch die Filter verborgen werden, sind separat unter `excluded_tools` aufgefüh
 Die Namen sind die ursprünglichen Upstream-Namen; der aggregierte Endpunkt `/mcp`
 stellt sie als `{slug}_{name}` bereit.
 
+Um alle Tools auf einmal zu sehen, klicken Sie auf der Seite MCP-Server auf
+**Alle Tools**. Die Ansicht listet die Tools aller Server in einer durchsuchbaren
+Liste auf, mit Beschreibungen, Read-only- und Destructive-Hinweisen sowie dem
+zugehörigen Server. Bereitgestellte Tools erscheinen unter dem Namen, mit dem
+Clients sie aufrufen (`{slug}_{name}`); ausgeblendete behalten ihren Upstream-Namen.
+Wählen Sie einen virtuellen Server, um nur die Tools seiner Mitglieder zu sehen,
+und aktivieren Sie **Durch Filter ausgeblendete Tools anzeigen**, um
+ausgeschlossene Tools einzubeziehen. Server, die nicht verbunden sind oder deren
+Katalog nicht geladen werden konnte, werden über den Tools aufgeführt, da ihre
+Tools fehlen können. Die Liste zeigt die gatewayweite Sicht: Sie berücksichtigt
+keine `user_paths`-Grenzen eines bestimmten API-Schlüssels, daher sehen manche
+Clients nicht alle aufgeführten Server.
+
 ## Sicherheitshinweise
 
 - **Grenze für Zugangsdaten.** Die MCP-Spezifikation verbietet das Durchreichen von
