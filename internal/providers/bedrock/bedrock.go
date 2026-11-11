@@ -7,9 +7,9 @@
 // response shape across model families, and normalizes the result into
 // OpenAI-compatible chat completions.
 //
-// Authentication relies on the AWS SDK's default credential chain — env vars,
-// shared config/credentials files, IAM Identity Center, container and
-// instance roles. The provider has no API key of its own.
+// Authentication uses a Bedrock API key when one is configured, and the AWS
+// SDK's default credential chain otherwise — env vars, shared
+// config/credentials files, IAM Identity Center, container and instance roles.
 package bedrock
 
 import (
@@ -27,6 +27,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrock"
 	bedrocktypes "github.com/aws/aws-sdk-go-v2/service/bedrock/types"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
+	"github.com/aws/smithy-go/auth/bearer"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
@@ -36,16 +37,19 @@ import (
 
 const providerName = "bedrock"
 
+// bearerAuthScheme is the SDK's scheme ID for Bedrock API keys.
+const bearerAuthScheme = "httpBearerAuth" //nolint:gosec // Auth scheme name, not a credential.
+
 // Registration provides factory registration for the Amazon Bedrock provider.
 var Registration = providers.Registration{
 	Type: providerName,
 	New:  New,
 	Discovery: providers.DiscoveryConfig{
 		AllowAPIKeyless: true,
-		// Bedrock authenticates through the AWS SDK credential chain, never an
-		// API key, so the only thing to configure is which region or endpoint
-		// to call.
+		// An optional Bedrock API key takes precedence over the AWS SDK
+		// credential chain; the region or endpoint is the other setting.
 		CredentialFields: []providers.CredentialField{
+			{Name: providers.CredentialFieldAPIKeys},
 			{Name: providers.CredentialFieldBaseURL},
 		},
 	},
@@ -78,7 +82,8 @@ func (p *Provider) responseProviderName() string {
 //
 // BaseURL is interpreted as either an AWS region ("us-east-1") or a fully
 // qualified endpoint URL. When empty, the region is resolved from the
-// standard AWS environment variables / shared config.
+// standard AWS environment variables / shared config. Configured API keys are
+// sent as Bedrock bearer tokens (rotated per request) instead of SigV4.
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	p := &Provider{hooks: opts.Hooks, instanceName: opts.ClientName(providerName)}
 
@@ -101,14 +106,32 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 	}
 	p.region = region
 
+	// A configured key overrides both the SigV4 chain and the SDK's own
+	// AWS_BEARER_TOKEN_BEDROCK lookup, which still applies when none is set.
+	// The option functions run after that lookup, so they win.
+	var token bearer.TokenProvider
+	if keys := opts.Keyring(providerCfg.APIKey); keys.Len() > 0 {
+		token = bearer.TokenProviderFunc(func(ctx context.Context) (bearer.Token, error) {
+			return bearer.Token{Value: keys.NextForContext(ctx)}, nil
+		})
+	}
+
 	runtimeOpts := func(o *bedrockruntime.Options) {
 		if endpoint != "" {
 			o.BaseEndpoint = awssdk.String(runtimePlaneEndpoint(endpoint))
+		}
+		if token != nil {
+			o.BearerAuthTokenProvider = token
+			o.AuthSchemePreference = []string{bearerAuthScheme}
 		}
 	}
 	controlOpts := func(o *bedrock.Options) {
 		if endpoint != "" {
 			o.BaseEndpoint = awssdk.String(controlPlaneEndpoint(endpoint))
+		}
+		if token != nil {
+			o.BearerAuthTokenProvider = token
+			o.AuthSchemePreference = []string{bearerAuthScheme}
 		}
 	}
 

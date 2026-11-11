@@ -223,6 +223,40 @@ export function providerCredentialTypeOptions(schemas, currentType) {
   return list;
 }
 
+// AWS provider types read Base URL as a region first, and fall back to the
+// gateway host's AWS credentials when no API key is set; their generic
+// "Base URL" wording would hide both.
+const AWS_PROVIDER_TYPES = new Set(["bedrock", "bedrock-mantle"]);
+
+// Type labels for types whose name alone does not say which API they call.
+// The type name stays in the label: it is what config.yaml takes.
+function providerTypeLabels() {
+  return {
+    bedrock: m.providers_type_bedrock(),
+    "bedrock-mantle": m.providers_type_bedrock_mantle(),
+  };
+}
+
+// providerCredentialTypeLabel is the Type dropdown caption for one type.
+export function providerCredentialTypeLabel(type) {
+  return providerTypeLabels()[type] || type;
+}
+
+// awsFieldOverrides re-words the fields whose meaning differs on AWS types.
+function awsFieldOverrides(name) {
+  if (name === FIELD_BASE_URL) {
+    return {
+      label: m.providers_aws_region(),
+      placeholder: "us-east-1",
+      hint: m.providers_aws_region_hint(),
+    };
+  }
+  if (name === FIELD_API_KEYS) {
+    return { hint: m.providers_bedrock_api_key_hint() };
+  }
+  return {};
+}
+
 // providerCredentialSchema returns the credential schema of one type, or null
 // when the schemas haven't loaded (or the type is unknown to this gateway).
 export function providerCredentialSchema(schemas, type) {
@@ -253,6 +287,7 @@ export function providerCredentialFormFields(schema, defaultBaseURL) {
           }),
         );
   const fallbackBaseURL = defaultBaseURL || (schema && schema.default_base_url) || "";
+  const aws = AWS_PROVIDER_TYPES.has(String((schema && schema.type) || "").trim());
 
   const primary = [];
   const advanced = [];
@@ -273,6 +308,9 @@ export function providerCredentialFormFields(schema, defaultBaseURL) {
     if (name === FIELD_BASE_URL && fallbackBaseURL) {
       field.placeholder = fallbackBaseURL;
       field.hint = m.providers_default_value({ value: fallbackBaseURL });
+    }
+    if (aws) {
+      Object.assign(field, awsFieldOverrides(name));
     }
     if (field.options.length > 0) {
       field.control = "select";

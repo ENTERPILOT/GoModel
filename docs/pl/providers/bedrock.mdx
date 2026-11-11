@@ -11,9 +11,9 @@ ConverseStream w Bedrock Runtime, normalizując odpowiedzi różnych rodzin mode
 Amazon Nova, Meta Llama, Mistral, Cohere, AI21 i inne) do
 chat completions kompatybilnych z OpenAI.
 
-Bedrock nie ma własnego klucza API – GoModel ustala dane uwierzytelniające AWS w czasie działania
-przez standardowy łańcuch danych uwierzytelniających AWS (zmienne środowiskowe, `AWS_PROFILE`, IAM Identity
-Center, role instancji/kontenerów).
+Uwierzytelniaj się kluczem API Amazon Bedrock albo danymi uwierzytelniającymi AWS, które
+GoModel ustala w czasie działania przez standardowy łańcuch danych uwierzytelniających AWS
+(zmienne środowiskowe, `AWS_PROFILE`, IAM Identity Center, role instancji/kontenerów).
 
 ## Konfiguracja
 
@@ -28,6 +28,18 @@ GOMODEL_MASTER_KEY=change-me
 Na produkcji wybieraj role instancji, IRSA lub IAM Identity Center zamiast
 długotrwałych kluczy dostępu. Gdy `BEDROCK_BASE_URL` jest pusty, GoModel korzysta z
 `AWS_REGION` / `AWS_DEFAULT_REGION`.
+
+Aby użyć klucza API Amazon Bedrock zamiast danych uwierzytelniających AWS:
+
+```bash
+BEDROCK_BASE_URL=us-east-1
+BEDROCK_API_KEY=ABSK...
+```
+
+Skonfigurowany klucz ma pierwszeństwo przed danymi uwierzytelniającymi AWS i przed
+`AWS_BEARER_TOKEN_BEDROCK`. W dashboardzie dodaj providera typu `bedrock`, ustaw
+**Region lub endpoint** i wklej klucz w **Klucze API**; zostaw puste, aby użyć
+danych uwierzytelniających AWS hosta gatewaya.
 
 ## Uruchomienie GoModel
 

@@ -11,9 +11,9 @@ ConverseStream APIs, normalizing responses across model families (Anthropic,
 Amazon Nova, Meta Llama, Mistral, Cohere, AI21, and others) into
 OpenAI-compatible chat completions.
 
-Bedrock has no API key of its own — GoModel resolves AWS credentials at runtime
-through the standard AWS credential chain (env, `AWS_PROFILE`, IAM Identity
-Center, instance/container roles).
+Authenticate with an Amazon Bedrock API key, or with AWS credentials that
+GoModel resolves at runtime through the standard AWS credential chain (env,
+`AWS_PROFILE`, IAM Identity Center, instance/container roles).
 
 ## Configure
 
@@ -28,6 +28,18 @@ GOMODEL_MASTER_KEY=change-me
 In production, prefer instance roles, IRSA, or IAM Identity Center over
 long-lived access keys. When `BEDROCK_BASE_URL` is empty, GoModel falls back to
 `AWS_REGION` / `AWS_DEFAULT_REGION`.
+
+To use an Amazon Bedrock API key instead of AWS credentials:
+
+```bash
+BEDROCK_BASE_URL=us-east-1
+BEDROCK_API_KEY=ABSK...
+```
+
+A configured key takes precedence over AWS credentials and over
+`AWS_BEARER_TOKEN_BEDROCK`. In the dashboard, add a provider of type `bedrock`,
+set **Region or endpoint**, and paste the key into **API Keys**; leave it empty
+to use the gateway host's AWS credentials.
 
 ## Run GoModel
 

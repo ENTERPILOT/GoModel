@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -567,6 +568,53 @@ func TestNew_BearerTokenOnly(t *testing.T) {
 	assert.Equal(t, "us-east-1", p.region)
 	err := p.ready()
 	assert.NoError(t, err)
+}
+
+// TestNew_AuthScheme pins which credential reaches Bedrock: a configured API
+// key beats both AWS_BEARER_TOKEN_BEDROCK and SigV4, the env token beats
+// SigV4, and SigV4 signs when neither is set.
+func TestNew_AuthScheme(t *testing.T) {
+	tests := []struct {
+		name     string
+		apiKeys  []string
+		envToken string
+		want     string
+	}{
+		{name: "configured key wins over env token", apiKeys: []string{"ABSK-configured"}, envToken: "ABSK-env", want: "Bearer ABSK-configured"},
+		{name: "env token without configured key", envToken: "ABSK-env", want: "Bearer ABSK-env"},
+		{name: "sigv4 without any key", want: "AWS4-HMAC-SHA256"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("AWS_BEARER_TOKEN_BEDROCK", tt.envToken)
+			t.Setenv("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE")
+			t.Setenv("AWS_SECRET_ACCESS_KEY", "secret")
+			t.Setenv("AWS_SESSION_TOKEN", "")
+			t.Setenv("AWS_PROFILE", "")
+			t.Setenv("AWS_REGION", "us-east-1")
+			t.Setenv("AWS_CONFIG_FILE", "/dev/null")
+			t.Setenv("AWS_SHARED_CREDENTIALS_FILE", "/dev/null")
+
+			// Bearer tokens require HTTPS, so this one fake server is TLS.
+			var auth string
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				auth = r.Header.Get("Authorization")
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"modelSummaries":[]}`)
+			}))
+			t.Cleanup(server.Close)
+			opts := providers.ProviderOptions{HTTPClient: server.Client()}
+			if len(tt.apiKeys) > 0 {
+				opts.Keys = providers.NewKeyring(tt.apiKeys...)
+			}
+			p := New(providers.ProviderConfig{BaseURL: server.URL}, opts).(*Provider)
+			require.NoError(t, p.configErr)
+
+			_, err := p.ListModels(context.Background())
+			require.NoError(t, err)
+			assert.True(t, strings.HasPrefix(auth, tt.want), "Authorization = %q", auth)
+		})
+	}
 }
 
 func TestRegistration(t *testing.T) {
