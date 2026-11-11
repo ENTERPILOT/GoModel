@@ -566,6 +566,31 @@ tools, since their tools may be missing. The list is the gateway-wide view: it
 does not apply a given API key's `user_paths` limits, so some clients may not
 see every server listed.
 
+### Export the tool inventory
+
+For a security review, download every tool across all servers as one file.
+Click **Download CSV** or **Download JSON** in **All tools**, or call the admin
+API with a global admin key:
+
+```bash
+curl -OJ "http://localhost:8080/admin/mcp-servers/catalog?format=csv" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+Each row is one tool with its server: the server's slug, display name,
+transport, enabled flag, and status; the tool's client-facing name
+(`{slug}_{name}`), upstream name, description, and read-only and destructive
+hints; whether the server's tool filters expose it; and the server's
+`user_paths` and `disallowed_user_paths`. Tools hidden by filters are included
+with `exposed` set to `false`. A disabled or unreachable server does not fail
+the export: it is listed with its status and no tools.
+
+To narrow the export, add `server=<slug>`, `virtual_server=<name>`, or
+`user_path=/team/x`, which keeps only the servers a caller with that user path
+can see. The dashboard download covers the endpoint selected in **All tools**.
+See [GET /admin/mcp-servers/catalog](/advanced/admin-endpoints#get-adminmcp-serverscatalog)
+for the full schema.
+
 ## Security notes
 
 - **Credential boundary.** The MCP spec forbids token passthrough; GoModel

@@ -25,6 +25,9 @@ type mcpAdminFake struct {
 	managed      map[string]struct{}
 	stored       map[string]mcpgateway.ManagedServer
 	catalogs     map[string]mcpgateway.CatalogView
+	toolCatalog  mcpgateway.ToolCatalog
+	toolFilter   mcpgateway.ToolCatalogFilter
+	toolErr      error
 	virtuals     []mcpgateway.VirtualServerView
 	virtualErr   error
 	upsertErr    error
@@ -135,6 +138,13 @@ func (f *mcpAdminFake) Catalog(name string) (mcpgateway.CatalogView, bool) {
 		catalog.Status = view.Status
 	}
 	return catalog, true
+}
+
+// ToolCatalog records the filter it was asked for and answers the canned
+// catalog; the filtering itself is covered in mcpgateway.
+func (f *mcpAdminFake) ToolCatalog(filter mcpgateway.ToolCatalogFilter) (mcpgateway.ToolCatalog, error) {
+	f.toolFilter = filter
+	return f.toolCatalog, f.toolErr
 }
 
 func (f *mcpAdminFake) IsVirtual(name string) bool {

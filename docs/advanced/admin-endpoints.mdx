@@ -896,6 +896,71 @@ is resolved on demand.
 Returns `400` when a parameter is missing and `404` when the model is not
 registered.
 
+### GET /admin/mcp-servers/catalog
+
+Exports the tool inventory of the [MCP gateway](/features/mcp-gateway): every
+tool across all MCP servers in one response, for security reviews and audits.
+It is gateway-wide, so it needs a global admin credential.
+
+| Parameter        | Type   | Description                                                           | Default |
+| ---------------- | ------ | --------------------------------------------------------------------- | ------- |
+| `format`         | string | `json` or `csv` (downloaded as an attachment)                         | `json`  |
+| `server`         | string | Keep one MCP server, by slug                                          | —       |
+| `virtual_server` | string | Keep the members of one virtual server                                | —       |
+| `user_path`      | string | Keep the servers a caller with this user path can see, e.g. `/team/x` | —       |
+
+The filters narrow the servers and combine. An unknown `server` or
+`virtual_server` returns `404`.
+
+```bash
+curl "http://localhost:8080/admin/mcp-servers/catalog?user_path=/team/x" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```json
+{
+  "servers": [
+    { "server": "github", "server_name": "GitHub", "transport": "http", "enabled": true, "status": "connected", "user_paths": ["/team"], "disallowed_user_paths": [] },
+    { "server": "wiki", "server_name": "Wiki", "transport": "http", "enabled": true, "status": "degraded", "user_paths": [], "disallowed_user_paths": [] }
+  ],
+  "tools": [
+    {
+      "server": "github",
+      "server_name": "GitHub",
+      "transport": "http",
+      "enabled": true,
+      "status": "connected",
+      "user_paths": ["/team"],
+      "disallowed_user_paths": [],
+      "name": "github_create_issue",
+      "upstream_name": "create_issue",
+      "description": "Create an issue",
+      "read_only": false,
+      "destructive": false,
+      "exposed": true
+    }
+  ]
+}
+```
+
+- Each tool row repeats its server's fields. `name` is what clients call on
+  `/mcp`; `upstream_name` is the server's own name, served at `/mcp/{slug}`.
+- `exposed` is `false`, and `name` empty, for a tool the server's
+  `allowed_tools` / `disallowed_tools` hide. Clients can call a tool only when
+  it is exposed and its server is enabled.
+- `read_only` and `destructive` are `true` only when the server set the hint;
+  `false` means it did not say.
+- `user_path` filters servers by their `user_paths` and
+  `disallowed_user_paths` only. It keeps disabled servers and hidden tools,
+  which `enabled` and `exposed` mark.
+- The export reads the catalogs the gateway already holds, so an unreachable
+  server never fails it: the server is listed in `servers` with its status and
+  no tools. A `degraded` server that connected before keeps its last catalog.
+- CSV has one row per tool, with the same fields as columns; a server without
+  tools is one row with empty tool columns. User paths are separated by line
+  breaks. Values that start with `=`, `+`, `-`, or `@` get a leading `'`, so a
+  spreadsheet does not run them as formulas.
+
 ### Plugin, guardrail, and workflow endpoints
 
 | Method | Path | Description |

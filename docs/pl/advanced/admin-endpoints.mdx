@@ -872,6 +872,75 @@ jest rozwiązywany na żądanie.
 Zwraca `400`, gdy brakuje parametru, i `404`, gdy model nie jest
 zarejestrowany.
 
+### GET /admin/mcp-servers/catalog
+
+Eksportuje spis narzędzi [bramy MCP](/pl/features/mcp-gateway): wszystkie
+narzędzia wszystkich serwerów MCP w jednej odpowiedzi, na potrzeby przeglądów
+bezpieczeństwa i audytów. Endpoint dotyczy całej bramy, więc wymaga globalnych
+poświadczeń administratora.
+
+| Parametr         | Typ    | Opis                                                                              | Domyślnie |
+| ---------------- | ------ | --------------------------------------------------------------------------------- | --------- |
+| `format`         | string | `json` lub `csv` (pobierany jako załącznik)                                       | `json`    |
+| `server`         | string | Zostaw jeden serwer MCP, według sluga                                             | —         |
+| `virtual_server` | string | Zostaw członków jednego serwera wirtualnego                                       | —         |
+| `user_path`      | string | Zostaw serwery widoczne dla wywołującego z tą ścieżką użytkownika, np. `/team/x`  | —         |
+
+Filtry zawężają listę serwerów i można je łączyć. Nieznany `server` lub
+`virtual_server` zwraca `404`.
+
+```bash
+curl "http://localhost:8080/admin/mcp-servers/catalog?user_path=/team/x" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```json
+{
+  "servers": [
+    { "server": "github", "server_name": "GitHub", "transport": "http", "enabled": true, "status": "connected", "user_paths": ["/team"], "disallowed_user_paths": [] },
+    { "server": "wiki", "server_name": "Wiki", "transport": "http", "enabled": true, "status": "degraded", "user_paths": [], "disallowed_user_paths": [] }
+  ],
+  "tools": [
+    {
+      "server": "github",
+      "server_name": "GitHub",
+      "transport": "http",
+      "enabled": true,
+      "status": "connected",
+      "user_paths": ["/team"],
+      "disallowed_user_paths": [],
+      "name": "github_create_issue",
+      "upstream_name": "create_issue",
+      "description": "Create an issue",
+      "read_only": false,
+      "destructive": false,
+      "exposed": true
+    }
+  ]
+}
+```
+
+- Każdy wiersz narzędzia powtarza pola swojego serwera. `name` to nazwa, którą
+  klienci wywołują na `/mcp`; `upstream_name` to nazwa nadana przez serwer,
+  udostępniana pod `/mcp/{slug}`.
+- `exposed` ma wartość `false`, a `name` jest puste dla narzędzia ukrytego
+  przez `allowed_tools` / `disallowed_tools` serwera. Klienci mogą wywołać
+  narzędzie tylko wtedy, gdy jest udostępnione, a jego serwer włączony.
+- `read_only` i `destructive` mają wartość `true` tylko wtedy, gdy serwer
+  ustawił tę wskazówkę; `false` oznacza, że jej nie podał.
+- `user_path` filtruje serwery wyłącznie według ich `user_paths` i
+  `disallowed_user_paths`. Wyłączone serwery i ukryte narzędzia zostają w
+  wyniku, oznaczone przez `enabled` i `exposed`.
+- Eksport czyta katalogi, które brama już przechowuje, więc nieosiągalny
+  serwer nigdy go nie przerywa: serwer jest wymieniony w `servers` ze swoim
+  statusem i bez narzędzi. Serwer w stanie `degraded`, który wcześniej się
+  połączył, zachowuje ostatni katalog.
+- CSV ma jeden wiersz na narzędzie, z tymi samymi polami jako kolumnami;
+  serwer bez narzędzi to jeden wiersz z pustymi kolumnami narzędzia. Ścieżki
+  użytkowników są rozdzielone znakami nowej linii. Wartości zaczynające się od
+  `=`, `+`, `-` lub `@` dostają na początku `'`, aby arkusz kalkulacyjny nie
+  wykonał ich jako formuł.
+
 ### Endpointy pluginów, guardrails i workflow
 
 | Metoda | Ścieżka | Opis |

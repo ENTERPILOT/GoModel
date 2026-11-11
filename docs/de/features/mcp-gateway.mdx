@@ -600,6 +600,33 @@ Tools fehlen können. Die Liste zeigt die gatewayweite Sicht: Sie berücksichtig
 keine `user_paths`-Grenzen eines bestimmten API-Schlüssels, daher sehen manche
 Clients nicht alle aufgeführten Server.
 
+### Tool-Inventar exportieren
+
+Für ein Security-Review können Sie alle Tools aller Server als eine Datei
+herunterladen. Klicken Sie in **Alle Tools** auf **CSV herunterladen** oder
+**JSON herunterladen**, oder rufen Sie die Admin-API mit einem globalen
+Admin-Schlüssel auf:
+
+```bash
+curl -OJ "http://localhost:8080/admin/mcp-servers/catalog?format=csv" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+Jede Zeile ist ein Tool mit seinem Server: Slug, Anzeigename, Transport,
+Aktiviert-Flag und Status des Servers; der Name, mit dem Clients das Tool
+aufrufen (`{slug}_{name}`), der Upstream-Name, die Beschreibung sowie Read-only-
+und Destructive-Hinweise; ob die Tool-Filter des Servers es freigeben; und die
+`user_paths` und `disallowed_user_paths` des Servers. Durch Filter ausgeblendete
+Tools sind mit `exposed` gleich `false` enthalten. Ein deaktivierter oder nicht
+erreichbarer Server lässt den Export nicht fehlschlagen: Er wird mit seinem
+Status und ohne Tools aufgeführt.
+
+Um den Export einzuschränken, ergänzen Sie `server=<slug>`,
+`virtual_server=<name>` oder `user_path=/team/x`; Letzteres behält nur die
+Server, die ein Aufrufer mit diesem User Path sieht. Der Download im Dashboard
+umfasst den in **Alle Tools** gewählten Endpunkt. Das vollständige Schema steht
+unter [GET /admin/mcp-servers/catalog](/de/advanced/admin-endpoints#get-adminmcp-serverscatalog).
+
 ## Sicherheitshinweise
 
 - **Grenze für Zugangsdaten.** Die MCP-Spezifikation verbietet das Durchreichen von

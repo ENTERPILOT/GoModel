@@ -25,6 +25,7 @@ type MCPServerAdmin interface {
 	Delete(ctx context.Context, name string) error
 	Reconnect(ctx context.Context, name string) (mcpgateway.ServerView, error)
 	Catalog(name string) (mcpgateway.CatalogView, bool)
+	ToolCatalog(filter mcpgateway.ToolCatalogFilter) (mcpgateway.ToolCatalog, error)
 	IsVirtual(name string) bool
 	IsManagedVirtual(name string) bool
 	VirtualViews() []mcpgateway.VirtualServerView

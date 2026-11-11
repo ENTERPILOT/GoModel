@@ -30,6 +30,7 @@ import {
   normalizeMcpUserPaths,
   mcpDiscoveredTools,
   mcpToolFilterFromServer,
+  mcpToolCatalogExport,
   mcpToolCatalogIssues,
   mcpToolCatalogMembers,
   mcpToolCatalogRows,
@@ -931,6 +932,19 @@ test("mcpToolCatalogRows keeps upstream names and the first of repeated tools", 
     ],
   );
   assert.deepEqual(mcpToolCatalogSummary(entries), { tools: 2, servers: 1 });
+});
+
+test("mcpToolCatalogExport asks the export endpoint for the endpoint in view", () => {
+  const cases = [
+    ["csv", "", "/admin/mcp-servers/catalog?format=csv", "gomodel-mcp-tools.csv"],
+    ["json", "", "/admin/mcp-servers/catalog?format=json", "gomodel-mcp-tools.json"],
+    ["csv", "dev", "/admin/mcp-servers/catalog?format=csv&virtual_server=dev", "gomodel-mcp-tools-dev.csv"],
+    ["json", "a/b c", "/admin/mcp-servers/catalog?format=json&virtual_server=a%2Fb%20c", "gomodel-mcp-tools-a-b-c.json"],
+    ["xml", undefined, "/admin/mcp-servers/catalog?format=csv", "gomodel-mcp-tools.csv"],
+  ];
+  for (const [format, scope, path, filename] of cases) {
+    assert.deepEqual(mcpToolCatalogExport(format, scope), { path, filename }, format + " " + scope);
+  }
 });
 
 test("mcpToolCatalogServedScope drops a virtual server that is no longer served", () => {

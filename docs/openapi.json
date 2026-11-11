@@ -1628,6 +1628,153 @@
         }
       }
     },
+    "/admin/mcp-servers/catalog": {
+      "get": {
+        "description": "Lists every tool the MCP servers report, one row per tool with its server, for security reviews and audits. name is the name clients call on the aggregated /mcp endpoint, empty for a tool the server's allowed_tools / disallowed_tools hide (exposed is false); upstream_name is the server's own name, which /mcp/{server} serves. read_only and destructive are true only when the upstream set the hint. Each row repeats its server's transport, enabled flag, status, and user-path scope. The filters narrow the servers and combine; user_path keeps the servers a caller with that user path can see. The export reads the catalogs the gateway already holds: a disabled or unreachable server is listed under servers with its status and no tools, and a degraded server keeps its last catalog. In CSV, a server without tools is one row with empty tool columns, and user paths are separated by line breaks.",
+        "tags": [
+          "admin"
+        ],
+        "summary": "Export every MCP tool across all servers",
+        "parameters": [
+          {
+            "description": "Export format: json (default) or csv (as an attachment)",
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Keep one MCP server, by slug",
+            "name": "server",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Keep the members of one virtual MCP server",
+            "name": "virtual_server",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Keep the servers a caller with this user path can see, e.g. /team/x",
+            "name": "user_path",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/mcpgateway.ToolCatalog"
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/mcpgateway.ToolCatalog"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/mcp-servers/catalog",
+            "title": "Export every MCP tool across all servers",
+            "description": "GoModel API reference for GET /admin/mcp-servers/catalog: Export every MCP tool across all servers."
+          }
+        }
+      }
+    },
     "/admin/mcp-servers/{name}": {
       "delete": {
         "tags": [
@@ -17545,6 +17692,106 @@
           "StatusConnected",
           "StatusDegraded"
         ]
+      },
+      "mcpgateway.ToolCatalog": {
+        "type": "object",
+        "properties": {
+          "servers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/mcpgateway.ToolCatalogServer"
+            }
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/mcpgateway.ToolCatalogTool"
+            }
+          }
+        }
+      },
+      "mcpgateway.ToolCatalogServer": {
+        "type": "object",
+        "properties": {
+          "disallowed_user_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "server": {
+            "type": "string"
+          },
+          "server_name": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/mcpgateway.ServerStatus"
+          },
+          "transport": {
+            "type": "string"
+          },
+          "user_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "mcpgateway.ToolCatalogTool": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "destructive": {
+            "type": "boolean"
+          },
+          "disallowed_user_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "exposed": {
+            "description": "Exposed is false for a tool the server's allowed_tools /\ndisallowed_tools hide from clients.",
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "server": {
+            "type": "string"
+          },
+          "server_name": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/mcpgateway.ServerStatus"
+          },
+          "transport": {
+            "type": "string"
+          },
+          "upstream_name": {
+            "type": "string"
+          },
+          "user_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
       },
       "pricingoverrides.Pricing": {
         "type": "object",

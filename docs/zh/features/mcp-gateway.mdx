@@ -354,6 +354,19 @@ mcp:
 
 如需一次查看所有工具，请在 MCP 服务器页面点击 **所有工具**。它会在一个可搜索的列表中列出所有服务器的工具，并显示描述、只读和破坏性提示以及所属服务器。公开的工具名称与客户端调用时一致（`{slug}_{name}`）；被隐藏的工具保留上游原始名称。选择一个虚拟服务器可只查看其成员的工具；开启 **显示被过滤器隐藏的工具** 可包含被排除的工具。未连接或目录加载失败的服务器会列在工具上方，因为它们的工具可能缺失。此列表是网关级视图，不应用特定 API 密钥的 `user_paths` 限制，因此某些客户端可能看不到列表中的所有服务器。
 
+### 导出工具清单
+
+进行安全审查时，可以将所有服务器的全部工具下载为一个文件。在 **所有工具** 中点击 **下载 CSV** 或 **下载 JSON**，或者使用全局管理员密钥调用 Admin API：
+
+```bash
+curl -OJ "http://localhost:8080/admin/mcp-servers/catalog?format=csv" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+每一行是一个工具及其所属服务器：服务器的 slug、显示名称、传输方式、启用标志和状态；客户端调用该工具时使用的名称（`{slug}_{name}`）、上游名称、描述以及只读和破坏性提示；服务器的工具过滤器是否公开它；以及服务器的 `user_paths` 和 `disallowed_user_paths`。被过滤器隐藏的工具也会包含在内，其 `exposed` 为 `false`。已禁用或无法访问的服务器不会导致导出失败：它会带着状态列出，且没有工具。
+
+如需缩小导出范围，可添加 `server=<slug>`、`virtual_server=<name>` 或 `user_path=/team/x`，后者只保留使用该用户路径的调用方可见的服务器。控制台下载的文件涵盖 **所有工具** 中所选的端点。完整结构参见 [GET /admin/mcp-servers/catalog](/zh/advanced/admin-endpoints#get-adminmcp-serverscatalog)。
+
 ## 安全说明
 
 - **凭据边界。** MCP 规范禁止 Token 透传；GoModel 会终结客户端的 Bearer Token，并从配置或 OAuth 登录中注入每个服务器的凭据。客户端密钥永远不会到达上游，并且所配置的上游请求头不会在跨源重定向时被发送。

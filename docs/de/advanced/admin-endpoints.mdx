@@ -876,6 +876,74 @@ wird bei Bedarf aufgelöst.
 Gibt `400` zurück, wenn ein Parameter fehlt, und `404`, wenn das Modell nicht
 registriert ist.
 
+### GET /admin/mcp-servers/catalog
+
+Exportiert das Tool-Inventar des [MCP-Gateways](/de/features/mcp-gateway): alle
+Tools aller MCP-Server in einer Antwort, für Security-Reviews und Audits. Der
+Endpunkt ist gatewayweit und erfordert daher globale Admin-Zugangsdaten.
+
+| Parameter        | Typ    | Beschreibung                                                                    | Standard |
+| ---------------- | ------ | ------------------------------------------------------------------------------- | -------- |
+| `format`         | string | `json` oder `csv` (als Anhang heruntergeladen)                                  | `json`   |
+| `server`         | string | Nur einen MCP-Server behalten, per Slug                                         | —        |
+| `virtual_server` | string | Nur die Mitglieder eines virtuellen Servers behalten                            | —        |
+| `user_path`      | string | Nur die Server behalten, die ein Aufrufer mit diesem User Path sieht, z. B. `/team/x` | —   |
+
+Die Filter schränken die Server ein und lassen sich kombinieren. Ein
+unbekannter `server` oder `virtual_server` liefert `404`.
+
+```bash
+curl "http://localhost:8080/admin/mcp-servers/catalog?user_path=/team/x" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```json
+{
+  "servers": [
+    { "server": "github", "server_name": "GitHub", "transport": "http", "enabled": true, "status": "connected", "user_paths": ["/team"], "disallowed_user_paths": [] },
+    { "server": "wiki", "server_name": "Wiki", "transport": "http", "enabled": true, "status": "degraded", "user_paths": [], "disallowed_user_paths": [] }
+  ],
+  "tools": [
+    {
+      "server": "github",
+      "server_name": "GitHub",
+      "transport": "http",
+      "enabled": true,
+      "status": "connected",
+      "user_paths": ["/team"],
+      "disallowed_user_paths": [],
+      "name": "github_create_issue",
+      "upstream_name": "create_issue",
+      "description": "Create an issue",
+      "read_only": false,
+      "destructive": false,
+      "exposed": true
+    }
+  ]
+}
+```
+
+- Jede Tool-Zeile wiederholt die Felder ihres Servers. `name` ist der Name, den
+  Clients auf `/mcp` aufrufen; `upstream_name` ist der Name des Servers selbst,
+  bereitgestellt unter `/mcp/{slug}`.
+- `exposed` ist `false` und `name` leer bei einem Tool, das `allowed_tools` /
+  `disallowed_tools` des Servers ausblenden. Clients können ein Tool nur
+  aufrufen, wenn es freigegeben und sein Server aktiviert ist.
+- `read_only` und `destructive` sind nur `true`, wenn der Server den Hinweis
+  gesetzt hat; `false` bedeutet, dass er nichts angegeben hat.
+- `user_path` filtert Server nur nach ihren `user_paths` und
+  `disallowed_user_paths`. Deaktivierte Server und ausgeblendete Tools bleiben
+  enthalten und sind an `enabled` und `exposed` erkennbar.
+- Der Export liest die Kataloge, die das Gateway bereits hält, daher lässt ein
+  nicht erreichbarer Server ihn nie fehlschlagen: Der Server steht mit seinem
+  Status und ohne Tools in `servers`. Ein Server im Status `degraded`, der
+  zuvor verbunden war, behält seinen letzten Katalog.
+- CSV enthält eine Zeile pro Tool mit denselben Feldern als Spalten; ein Server
+  ohne Tools ist eine Zeile mit leeren Tool-Spalten. User Paths sind durch
+  Zeilenumbrüche getrennt. Werte, die mit `=`, `+`, `-` oder `@` beginnen,
+  erhalten ein vorangestelltes `'`, damit eine Tabellenkalkulation sie nicht
+  als Formel ausführt.
+
 ### Plugin-, Guardrail- und Workflow-Endpunkte
 
 | Methode | Pfad | Beschreibung |
