@@ -1,6 +1,6 @@
 module github.com/enterpilot/gomodel
 
-go 1.27.3
+go 1.27.4
 
 // Keep Multipath TCP off on listeners: Go enables it by default on Linux, which
 // exposes the kernel use-after-free in CVE-2026-98432 to remote code execution.
