@@ -78,6 +78,8 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"STORAGE_TYPE", "SQLITE_PATH", "POSTGRES_URL", "POSTGRES_MAX_CONNS",
 		"MONGODB_URL", "MONGODB_DATABASE", "GOMODEL_ENCRYPTION_KEY", "GOMODEL_ENCRYPTION_KEY_PREVIOUS",
 		"METRICS_ENABLED", "METRICS_ENDPOINT",
+		"METRICS_CALLER_USER_PATH", "METRICS_CALLER_USER_PATH_DEPTH", "METRICS_CALLER_AUTH_KEY",
+		"METRICS_CALLER_REQUEST_LABELS", "METRICS_CALLER_MAX_VALUES",
 		"LOGGING_ENABLED", "LOGGING_LOG_BODIES", "LOGGING_LOG_REVISION_BODIES", "LOGGING_LOG_GUARDRAIL_STEPS", "LOGGING_LOG_HEADERS",
 		"LOGGING_LOG_AUDIO_BODIES", "LOGGING_LOG_EMBEDDING_BODIES", "LOGGING_LOG_IMAGE_BODIES", "LOGGING_LOG_IMAGE_BODIES_SCOPE",
 		"LOGGING_ONLY_MODEL_INTERACTIONS", "LOGGING_BUFFER_SIZE",
@@ -160,6 +162,7 @@ func TestBuildDefaultConfig(t *testing.T) {
 	assert.True(t, cfg.Budgets.ProviderBilledCacheHits)
 	assert.Equal(t, "/metrics", cfg.Metrics.Endpoint)
 	assert.False(t, cfg.Metrics.Enabled)
+	assert.Equal(t, MetricsCallerDimensionsConfig{UserPathDepth: 2, MaxValues: 100}, cfg.Metrics.CallerDimensions)
 	assert.Equal(t, 600, cfg.HTTP.Timeout)
 	assert.Equal(t, 600, cfg.HTTP.ResponseHeaderTimeout)
 	assert.Equal(t, time.Minute, cfg.Workflows.RefreshInterval)

@@ -87,10 +87,15 @@ METRICS_ENDPOINT=/internal/prometheus
 
 ### Via Environment Variables
 
-| Variable           | Default    | Description                       |
-| ------------------ | ---------- | --------------------------------- |
-| `METRICS_ENABLED`  | `false`    | Enable/disable metrics collection |
-| `METRICS_ENDPOINT` | `/metrics` | HTTP path for metrics endpoint    |
+| Variable                         | Default    | Description                                                    |
+| -------------------------------- | ---------- | -------------------------------------------------------------- |
+| `METRICS_ENABLED`                | `false`    | Enable/disable metrics collection                              |
+| `METRICS_ENDPOINT`               | `/metrics` | HTTP path for metrics endpoint                                 |
+| `METRICS_CALLER_USER_PATH`       | `false`    | Add the user path to the [caller metrics](#caller-dimensions)  |
+| `METRICS_CALLER_USER_PATH_DEPTH` | `2`        | Leading user path segments to keep                             |
+| `METRICS_CALLER_AUTH_KEY`        | `false`    | Add the managed API key's name                                 |
+| `METRICS_CALLER_REQUEST_LABELS`  | `false`    | Add the request labels                                         |
+| `METRICS_CALLER_MAX_VALUES`      | `100`      | Distinct values kept per caller dimension                      |
 
 ### Via config.yaml
 
@@ -102,6 +107,15 @@ metrics:
 
   # HTTP endpoint path where metrics are exposed
   endpoint: "/metrics"
+
+  # Who made the request, on the token, cost, and per-caller request metrics.
+  # All off by default; see "Caller Dimensions" below.
+  caller_dimensions:
+    user_path: false
+    user_path_depth: 2
+    auth_key: false
+    request_labels: false
+    max_values: 100
 ```
 
 ## Examples
@@ -322,6 +336,121 @@ the process may exit before Prometheus scrapes it, so the log is the record.
 ```promql
 sum(increase(gomodel_usage_entries_dropped_total[5m])) by (reason) > 0
 ```
+
+## Token and Cost Metrics
+
+GoModel counts the tokens and the cost of every request it records usage for,
+so you can graph and alert on spend without querying the usage database. The
+counters are updated when the response ends; a streaming request is counted
+once, when its stream closes.
+
+| Metric                            | Counts                                                    |
+| --------------------------------- | --------------------------------------------------------- |
+| `gomodel_tokens_total`            | Tokens sent to and returned by providers                  |
+| `gomodel_token_details_total`     | Cached, cache-write, and reasoning tokens                 |
+| `gomodel_provider_cost_usd_total` | What providers charge, in USD                             |
+| `gomodel_billed_cost_usd_total`   | What callers are billed, in USD (provider cost plus markup) |
+
+All four carry `provider` (the provider name from your configuration) and
+`model` (the model that answered), plus the [caller labels](#caller-dimensions).
+The two token metrics add `token_type`:
+
+| Metric                        | `token_type`        | Meaning                                                    |
+| ----------------------------- | ------------------- | ---------------------------------------------------------- |
+| `gomodel_tokens_total`        | `input`             | All prompt tokens: uncached, cached, and cache-write       |
+| `gomodel_tokens_total`        | `output`            | All completion tokens, reasoning included                  |
+| `gomodel_token_details_total` | `input_cached`      | Prompt tokens the provider read from its prompt cache      |
+| `gomodel_token_details_total` | `input_cache_write` | Prompt tokens the provider wrote to its prompt cache       |
+| `gomodel_token_details_total` | `output_reasoning`  | Reasoning ("thinking") tokens                              |
+
+The details are **parts** of `gomodel_tokens_total`, not additions to it, which
+is why they are a separate metric: `sum(gomodel_tokens_total)` is the token
+total, and no sum over one metric counts a token twice. The same holds for the
+two cost metrics. Providers report cached and reasoning tokens differently
+(Anthropic reports cache reads on top of input, xAI reports reasoning on top
+of output); GoModel normalizes them, so `input` and `output` mean the same for
+every provider.
+
+```promql
+# Tokens per minute by model and direction
+sum(rate(gomodel_tokens_total[5m])) by (model, token_type) * 60
+
+# Share of prompt tokens served from the provider's prompt cache
+sum(rate(gomodel_token_details_total{token_type="input_cached"}[5m]))
+  / sum(rate(gomodel_tokens_total{token_type="input"}[5m]))
+
+# Provider spend per hour by provider
+sum(increase(gomodel_provider_cost_usd_total[1h])) by (provider)
+```
+
+What is and is not counted:
+
+- **Usage tracking must be on** (`USAGE_ENABLED=true`, the default). The
+  metrics are derived from the same entries the usage dashboard shows.
+- **Cost needs pricing.** A request for a model without a known price adds
+  tokens but no cost. `gomodel_billed_cost_usd_total` is recorded only when
+  [pricing markups](/features/cost-tracking) are enabled.
+- **Response-cache hits** never reach a provider, so they add no tokens and no
+  provider cost. A billed cache hit (`pricing.bill_cache_hits`) still adds to
+  `gomodel_billed_cost_usd_total`.
+- **MCP tool calls** record neither tokens nor cost, so they add nothing.
+- A series appears once it has a non-zero value.
+
+## Caller Dimensions
+
+By default the metrics say nothing about who made a request. Three opt-in
+dimensions add it:
+
+| Setting                         | Label            | Value                                                                |
+| ------------------------------- | ---------------- | -------------------------------------------------------------------- |
+| `METRICS_CALLER_USER_PATH`      | `user_path`      | The [user path](/features/user-path), cut to `METRICS_CALLER_USER_PATH_DEPTH` segments |
+| `METRICS_CALLER_AUTH_KEY`       | `auth_key`       | The name of the managed API key. Empty for the master key            |
+| `METRICS_CALLER_REQUEST_LABELS` | `request_labels` | The request's labels, sorted and comma-separated (`prod,team-a`)     |
+
+```bash
+METRICS_ENABLED=true
+METRICS_CALLER_AUTH_KEY=true
+```
+
+```promql
+# Tokens per minute by API key
+sum(rate(gomodel_tokens_total[5m])) by (auth_key) * 60
+
+# Error rate by API key
+sum(rate(gomodel_caller_requests_total{status_type="error"}[5m])) by (auth_key)
+  / sum(rate(gomodel_caller_requests_total[5m])) by (auth_key)
+
+# Billed cost today for one team label, whatever other labels a request has
+sum(increase(gomodel_billed_cost_usd_total{request_labels=~"(.*,)?team-a(,.*)?"}[24h]))
+```
+
+The labels are on the four token and cost metrics and on
+`gomodel_caller_requests_total`, a request counter with `provider`, `model`,
+and `status_type` that exists only while a caller dimension is enabled. They
+are **not** added to `gomodel_requests_total`, to the
+`gomodel_request_duration_seconds` histogram, or to the in-flight gauge: every
+caller value would multiply each of their series, and a histogram has one
+series per bucket.
+
+A dimension that is off, or has no value for a request, is exported as an
+empty label, which Prometheus treats as absent. The API key's secret and ID
+are never exported; a key that no longer exists is reported as `{unknown}`.
+
+### Keeping Cardinality Bounded
+
+Each enabled dimension multiplies the number of series, so turn on only what
+you query.
+
+- **User path depth.** With the default depth of 2, `/team/alice/laptop` is
+  reported as `/team/alice`. Lower it to group more, raise it only if the
+  deeper levels are few.
+- **Value cap.** Each dimension keeps the first `METRICS_CALLER_MAX_VALUES`
+  (default 100) distinct values it sees. Later values share one series:
+  `{other}` (`/{other}` for user paths). Admitted values keep their own
+  series until GoModel restarts.
+- **Request labels are one value per label set.** `prod,team-a` and `team-a`
+  are different series. If clients send free-form labels, leave this dimension
+  off.
 
 ## Prometheus Configuration
 

@@ -468,6 +468,11 @@ workflow enforcement.
 | ------------------ | ---------------------------------------- | ---------- |
 | `METRICS_ENABLED`  | Enable Prometheus metrics (experimental) | `false`    |
 | `METRICS_ENDPOINT` | HTTP path for metrics                    | `/metrics` |
+| `METRICS_CALLER_USER_PATH` | Add the user path to token, cost, and per-caller request metrics, Prometheus and OpenTelemetry alike (see [Caller dimensions](/guides/prometheus-metrics#caller-dimensions)) | `false` |
+| `METRICS_CALLER_USER_PATH_DEPTH` | Leading user path segments kept on metrics | `2` |
+| `METRICS_CALLER_AUTH_KEY` | Add the managed API key's name to those metrics | `false` |
+| `METRICS_CALLER_REQUEST_LABELS` | Add the request labels to those metrics | `false` |
+| `METRICS_CALLER_MAX_VALUES` | Distinct values kept per caller dimension; later ones are reported as `{other}` | `100` |
 | `OTEL_ENABLED`     | Export OpenTelemetry traces and metrics over OTLP (see [OpenTelemetry](/guides/opentelemetry)) | `false`    |
 
 #### Admin

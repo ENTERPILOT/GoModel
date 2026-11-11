@@ -14,6 +14,46 @@ type MetricsConfig struct {
 	// Endpoint is the HTTP path where metrics are exposed
 	// Default: "/metrics"
 	Endpoint string `yaml:"endpoint" env:"METRICS_ENDPOINT"`
+
+	// CallerDimensions adds who made the request to the token, cost, and
+	// per-caller request metrics. It applies to the Prometheus metrics and
+	// to the OpenTelemetry metrics alike, whichever pipeline is enabled.
+	CallerDimensions MetricsCallerDimensionsConfig `yaml:"caller_dimensions"`
+}
+
+// Defaults for MetricsCallerDimensionsConfig, also applied to values below 1.
+const (
+	DefaultMetricsUserPathDepth   = 2
+	DefaultMetricsCallerMaxValues = 100
+)
+
+// MetricsCallerDimensionsConfig selects the caller dimensions on metrics.
+// Every dimension is off by default: each one multiplies the number of
+// exported series by its number of distinct values.
+type MetricsCallerDimensionsConfig struct {
+	// UserPath adds the request's user path, cut to UserPathDepth segments.
+	// Default: false
+	UserPath bool `yaml:"user_path" env:"METRICS_CALLER_USER_PATH"`
+
+	// UserPathDepth is how many leading user path segments are kept:
+	// with 2, "/team/alice/laptop" is reported as "/team/alice".
+	// Default: 2
+	UserPathDepth int `yaml:"user_path_depth" env:"METRICS_CALLER_USER_PATH_DEPTH"`
+
+	// AuthKey adds the name of the managed API key that authenticated the
+	// request. The key's secret and ID are never exported.
+	// Default: false
+	AuthKey bool `yaml:"auth_key" env:"METRICS_CALLER_AUTH_KEY"`
+
+	// RequestLabels adds the request's labels (API key labels and tagging
+	// headers) as one sorted, comma-separated value.
+	// Default: false
+	RequestLabels bool `yaml:"request_labels" env:"METRICS_CALLER_REQUEST_LABELS"`
+
+	// MaxValues caps the distinct values of each dimension. Values seen after
+	// the cap is reached are reported as "{other}".
+	// Default: 100
+	MaxValues int `yaml:"max_values" env:"METRICS_CALLER_MAX_VALUES"`
 }
 
 // reservedMetricsPrefixes are the authenticated route trees the metrics

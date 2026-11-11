@@ -194,6 +194,62 @@ cały czas życia streamu widziany przez klienta. Stream, którego nie udało si
 lub który zakończył się przed dostarczeniem pierwszego chunka, zawsze dostaje span błędu, więc
 błędy są śledzone.
 
+### Metryki użycia tokenów i kosztów
+
+GoModel eksportuje tokeny i koszt każdego requestu, dla którego zapisuje
+użycie. Metryki są aktualizowane po zakończeniu odpowiedzi; request
+streamowany jest eksportowany raz, w chwili zamknięcia streamu.
+
+| Metryka | Typ | Jednostka | Zapisuje |
+| --- | --- | --- | --- |
+| `gen_ai.client.token.usage` | Histogram | `{token}` | Tokeny wejściowe i wyjściowe na wywołanie, w podziale według `gen_ai.token.type` (`input` lub `output`), tak jak definiują to konwencje semantyczne GenAI. |
+| `gomodel.client.token.usage.details` | Licznik | `{token}` | Części tych tokenów, w podziale według `gomodel.token.type`: `input_cached`, `input_cache_write`, `output_reasoning`. |
+| `gomodel.client.provider_cost` | Licznik | `{USD}` | Ile naliczają providerzy. |
+| `gomodel.client.billed_cost` | Licznik | `{USD}` | Ile naliczono wywołującym: koszt providera plus narzut. |
+
+`input` obejmuje każdy token promptu (bez cache, z cache i zapisy do cache),
+a `output` każdy token odpowiedzi (łącznie z reasoningiem), dla każdego
+providera. Szczegóły są **częściami** tych sum, więc są osobną metryką: żadna
+suma po jednej metryce nie liczy tokenu ani dolara dwa razy. Konwencje
+semantyczne nie definiują metryki dla szczegółów ani dla kosztu, stąd nazwy
+`gomodel.*`.
+
+Wszystkie cztery mają atrybuty `gen_ai.provider.name`,
+`gomodel.provider.name`, `gen_ai.request.model` (gdy jest znany),
+`gen_ai.response.model` oraz, dla endpointów chat i embeddings,
+`gen_ai.operation.name`.
+
+- **Śledzenie użycia musi być włączone** (`USAGE_ENABLED=true`, wartość
+  domyślna).
+- **Koszt wymaga cennika.** Model bez znanej ceny dodaje tokeny, ale nie
+  koszt. `gomodel.client.billed_cost` jest eksportowana tylko wtedy, gdy
+  włączone są [narzuty cenowe](/pl/features/cost-tracking).
+- **Trafienia w cache odpowiedzi** nigdy nie docierają do providera: nie
+  dodają tokenów ani kosztu providera, tylko swój naliczony koszt, jeśli
+  trafienia w cache są naliczane.
+- **Wywołania narzędzi MCP** nie zapisują tokenów ani kosztu, więc niczego nie
+  dodają.
+- `OTEL_METRICS_EXPORTER=none` wyłącza te metryki razem z pozostałymi.
+
+#### Atrybuty wywołującego
+
+Trzy opcjonalne ustawienia dodają do tych czterech metryk informację o tym,
+kto wysłał request. Są wspólne z
+[metrykami Prometheusa](/pl/guides/prometheus-metrics#wymiary-wywołującego),
+gdzie szczegółowo opisano limity kardynalności.
+
+| Ustawienie | Atrybut | Wartość |
+| --- | --- | --- |
+| `METRICS_CALLER_USER_PATH` | `gomodel.user_path` | [User path](/pl/features/user-path), przycięty do `METRICS_CALLER_USER_PATH_DEPTH` (domyślnie 2) segmentów. |
+| `METRICS_CALLER_AUTH_KEY` | `gomodel.auth_key.name` | Nazwa zarządzanego klucza API; brak dla klucza master. Nigdy sekret ani ID klucza. |
+| `METRICS_CALLER_REQUEST_LABELS` | `gomodel.request.labels` | Etykiety requestu, posortowane i rozdzielone przecinkami (`prod,team-a`). |
+
+Każdy wymiar zachowuje pierwsze `METRICS_CALLER_MAX_VALUES` (domyślnie 100)
+różnych wartości; kolejne są eksportowane jako `{other}` (`/{other}` dla user
+path). Histogramy czasu trwania i spany nigdy nie mają atrybutów
+wywołującego. Liczba wywołań na wywołującego to count metryki
+`gen_ai.client.token.usage`.
+
 ### Przechwytywanie promptów i odpowiedzi
 
 Przechwytywanie treści jest **domyślnie wyłączone**. Włącz je, żeby widzieć wymieniane
@@ -254,6 +310,10 @@ bez ujawniania tego, co przepływa przez gateway:
   `user_agent.original` są usuwane ze spanów HTTP, a wymiary zależne od hosta
   są wykluczone z metryk HTTP, żeby klient nie mógł zawyżać kardynalności
   metryk przez nagłówek `Host`.
+- User path, nazwy kluczy API i etykiety requestów są eksportowane tylko na
+  metrykach tokenów i kosztów, i tylko wtedy, gdy włączysz odpowiedni
+  [atrybut wywołującego](#atrybuty-wywołującego). Sekrety i ID kluczy API
+  nigdy nie są eksportowane.
 
 ## Przeładowywanie
 
