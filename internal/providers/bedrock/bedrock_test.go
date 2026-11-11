@@ -639,12 +639,23 @@ mfa_serial = arn:aws:iam::123456789012:mfa/example
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
 	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
 
+	t.Setenv("AWS_REGION", "us-east-1")
+
 	keyless := New(providers.ProviderConfig{BaseURL: "us-east-1"}, providers.ProviderOptions{}).(*Provider)
 	require.Error(t, keyless.configErr, "precondition: the MFA profile fails the SigV4 chain")
 
-	withKey := New(providers.ProviderConfig{BaseURL: "us-east-1"},
-		providers.ProviderOptions{Keys: providers.NewKeyring("ABSK-configured")}).(*Provider)
-	assert.NoError(t, withKey.configErr)
+	server, capture := providertest.TLSServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"modelSummaries":[]}`)
+	})
+	withKey := New(providers.ProviderConfig{BaseURL: server.URL}, providers.ProviderOptions{
+		Keys:       providers.NewKeyring("ABSK-configured"),
+		HTTPClient: server.Client(),
+	}).(*Provider)
+	require.NoError(t, withKey.configErr)
+	_, err := withKey.ListModels(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer ABSK-configured", capture.Last(t).Header.Get("Authorization"))
 }
 
 func TestRegistration(t *testing.T) {
