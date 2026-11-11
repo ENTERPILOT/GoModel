@@ -702,6 +702,13 @@ providers:
     # base_url defaults to "https://llm.chutes.ai/v1".
     # Set base_url when using a different compatible endpoint.
 
+  mistral:
+    type: mistral
+    api_key: "${MISTRAL_API_KEY}"
+    # base_url defaults to "https://api.mistral.ai/v1".
+    # Reasoning models return thinking as reasoning_content; replayed
+    # assistant reasoning is sent back as Mistral thinking chunks.
+
   edenai:
     type: edenai
     api_key: "${EDENAI_API_KEY}"

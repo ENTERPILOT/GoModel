@@ -183,7 +183,8 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
 - **Xiaomi MiMo** – TTS (`mimo-v2.5-tts*`) und ASR (`mimo-v2.5-asr`) werden über
   `/v1/audio/speech` und `/v1/audio/transcriptions` (übersetzt in MiMos Audio-Dialekt für Chat
   Completions) sowie direkt über Chat Completions bedient; für einen Kontext von 1M hängen Sie
-  `[1m]` an die Modell-ID an und führen sie in `XIAOMI_MODELS` auf.
+  `[1m]` an die Modell-ID an, führen sie in `XIAOMI_MODELS` auf und setzen
+  `XIAOMI_MODELS_MODE=merge`.
 - **OpenCode Go (OpenCode Zen)** – routet pro Modell: Die meisten Modelle verwenden
   `/chat/completions` im OpenAI-Stil, während reine `/messages`-Modelle (standardmäßig
   `qwen3.7-max`, überschreibbar mit `OPENCODE_GO_MESSAGES_MODELS`) an den Anthropic-nativen

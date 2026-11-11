@@ -18,7 +18,8 @@ requests on:
 
 Streaming and non-streaming variants of the same request are cached
 independently: a streaming miss stores the raw SSE bytes and a streaming hit
-replays them verbatim as `text/event-stream`.
+replays them verbatim as `text/event-stream`. A stream longer than 4 MiB still
+reaches the client in full but is not cached.
 
 Exact-match cache returns byte-identical responses with:
 

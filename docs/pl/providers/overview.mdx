@@ -198,7 +198,8 @@ przez providera upstream.
 - **Xiaomi MiMo** – TTS (`mimo-v2.5-tts*`) i ASR (`mimo-v2.5-asr`) są obsługiwane
   przez `/v1/audio/speech` i `/v1/audio/transcriptions` (tłumaczone na dialekt
   audio chat-completions MiMo), a także bezpośrednio przez chat completions; aby
-  uzyskać kontekst 1M, dopisz `[1m]` do ID modelu i dodaj je do `XIAOMI_MODELS`.
+  uzyskać kontekst 1M, dopisz `[1m]` do ID modelu, dodaj je do `XIAOMI_MODELS`
+  i ustaw `XIAOMI_MODELS_MODE=merge`.
 - **OpenCode Go (OpenCode Zen)** – routing per model: większość modeli używa
   `/chat/completions` w stylu OpenAI, a modele obsługujące wyłącznie `/messages`
   (domyślnie `qwen3.7-max`, nadpisz przez `OPENCODE_GO_MESSAGES_MODELS`) są

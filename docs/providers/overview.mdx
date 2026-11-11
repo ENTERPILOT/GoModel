@@ -78,6 +78,7 @@ support, not every individual model capability exposed by an upstream provider.
 | xAI (Grok) | `XAI_API_KEY` | `grok-4.6` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | [xAI (Grok)](/providers/xai) |
 | Alibaba Cloud Model Studio (Bailian) | `BAILIAN_API_KEY` (`BAILIAN_BASE_URL` optional) | `qwen3-max` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Alibaba Cloud Model Studio](/providers/bailian) |
 | MiniMax | `MINIMAX_API_KEY` (`MINIMAX_BASE_URL` optional) | `MiniMax-M3` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [MiniMax](/providers/minimax) |
+| Mistral AI | `MISTRAL_API_KEY` (`MISTRAL_BASE_URL` optional) | `mistral-large-latest` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Mistral AI](/providers/mistral) |
 | Xiaomi MiMo | `XIAOMI_API_KEY` (`XIAOMI_BASE_URL` optional) | `mimo-v2.5-pro` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [Xiaomi MiMo](/providers/xiaomi) |
 | ElevenLabs (voice only) | `ELEVENLABS_API_KEY` (`ELEVENLABS_BASE_URL` optional) | `eleven_multilingual_v2` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [ElevenLabs](/providers/elevenlabs) |
 | audio.cpp (audio only) | `AUDIOCPP_BASE_URL` (`AUDIOCPP_API_KEY` optional) | `pocket-tts` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [audio.cpp](/providers/audiocpp) |
@@ -193,8 +194,8 @@ support, not every individual model capability exposed by an upstream provider.
 - **Xiaomi MiMo** — TTS (`mimo-v2.5-tts*`) and ASR (`mimo-v2.5-asr`) are served
   through `/v1/audio/speech` and `/v1/audio/transcriptions` (translated to
   MiMo's chat-completions audio dialect) as well as directly via chat
-  completions; for 1M context append `[1m]` to the model ID and list it in
-  `XIAOMI_MODELS`.
+  completions; for 1M context append `[1m]` to the model ID, list it in
+  `XIAOMI_MODELS`, and set `XIAOMI_MODELS_MODE=merge`.
 - **OpenCode Go (OpenCode Zen)** — routes per model: most models use
   OpenAI-style `/chat/completions`, while `/messages`-only models (default
   `qwen3.7-max`, override with `OPENCODE_GO_MESSAGES_MODELS`) are sent to the

@@ -410,8 +410,12 @@ klienta OAuth**.
 Tokeny są przechowywane w bazie danych gatewaya, szyfrowane za pomocą
 [`GOMODEL_ENCRYPTION_KEY`](/pl/advanced/encryption-at-rest), jeśli jest
 ustawiony, i nigdy nie są zwracane przez admin API. GoModel odświeża wygasły
-access token za pomocą refresh tokena i zapisuje rotowany refresh token. Wiersz
-pokazuje **Zalogowano**, **Logowanie wygasło** (brak refresh tokena; zaloguj
+access token za pomocą refresh tokena i zapisuje rotowany refresh token. Gdy
+serwer odpowie `401 Unauthorized` na token, który jeszcze nie wygasł (na
+przykład unieważniony wcześniej), GoModel odświeża go raz i ponawia żądanie, o
+ile serwer autoryzacji wydał refresh token; w przeciwnym razie wiersz pokazuje
+**Logowanie wymaga uwagi** i trzeba zalogować się ponownie.
+Wiersz pokazuje **Zalogowano**, **Logowanie wygasło** (brak refresh tokena; zaloguj
 się ponownie) albo **Logowanie wymaga uwagi** z błędem. Nieudane odświeżenie
 jest ponawiane przy następnym żądaniu, więc zaloguj się ponownie dopiero, gdy
 błąd się utrzymuje. Ikona wylogowania usuwa zapisane tokeny.
@@ -425,15 +429,62 @@ Uwagi:
 - Token z logowania zastępuje skonfigurowany nagłówek `Authorization` i jest
   wysyłany tylko do originu serwera. Po zmianie URL serwera tokeny nie są
   używane, dopóki nie zalogujesz się ponownie.
+- Discovery, rejestracja klienta i żądania tokenów łączą się tylko z adresami
+  publicznymi, więc publiczny serwer nie może skierować gatewaya na usługi
+  wewnętrzne. Wyjątki to własny host serwera MCP; sieci prywatne (`10.x`,
+  `192.168.x` i podobne), gdy serwer MCP też jest w sieci prywatnej, np.
+  wewnętrzny serwer logujący się przez wewnętrznego dostawcę tożsamości; oraz
+  loopback, gdy sam URL serwera wskazuje na loopback. Adresy link-local, w tym
+  endpointy metadanych chmury, są zawsze odrzucane.
 - Wszyscy klienci gatewaya współdzielą jedno logowanie. Tokeny upstreamu per
   użytkownik nie są jeszcze obsługiwane.
 - Przy kilku instancjach gatewaya callback musi trafić do instancji, która
-  rozpoczęła logowanie (sticky sessions dla `/admin`); odświeżone tokeny
-  docierają do pozostałych instancji przez bazę danych.
+  rozpoczęła logowanie (sticky sessions dla `/admin`). Instancje współdzielące
+  bazę danych odświeżają token po kolei, więc rotowany refresh token jest
+  użyty tylko raz; pozostałe pobierają odświeżony token z bazy danych.
 
 Odpowiedniki w admin API to `POST /admin/mcp-servers/{slug}/oauth/start`
 (body: `redirect_uri`, opcjonalnie `client_id`/`client_secret`; zwraca
 `authorization_url`) oraz `DELETE /admin/mcp-servers/{slug}/oauth`.
+
+## Sesje między replikami
+
+Repliki korzystające ze wspólnej bazy PostgreSQL lub MongoDB współdzielą też
+sesje MCP, więc klienci za load balancerem nie potrzebują sticky sessions. Gdy
+`initialize` się powiedzie, replika, która odpowiedziała, zapisuje w bazie
+danych powiązanie sesji: ID klucza uwierzytelniającego, ścieżkę użytkownika,
+endpoint, zakres `X-MCP-Servers`, tryb discovery oraz parametry `initialize`
+klienta. Kluczem jest skrót SHA-256 `Mcp-Session-Id`, nigdy samo ID, a wpis nie
+zawiera sekretów. Request z tym ID na innej replice jest sprawdzany względem
+powiązania i wznawia tam sesję, bez nowego `initialize`.
+
+| | Między replikami |
+| --- | --- |
+| Wywołania narzędzi, listowanie, prompty, zasoby | Działają na każdej replice, z zakresem i trybem discovery, z którymi otwarto sesję. Replika, która wznawia sesję, listuje katalog w stanie z chwili wznowienia, który może różnić się od wcześniejszej listy. |
+| Wynegocjowana wersja protokołu, informacje o kliencie i capabilities | Są przenoszone. |
+| Powiązanie sesji (klucz, ścieżka użytkownika, endpoint) | Sprawdzane na każdej replice; wykradzione ID pod inną tożsamością dostaje 404 wszędzie. |
+| `DELETE` | Kończy sesję na każdej replice: każda odrzuca jej requesty w ciągu około 2 sekund. Otwarty strumień `GET` na innej replice nie jest zamykany wcześniej; kończy się, gdy klient go zamknie, albo po limicie bezczynności tej repliki. |
+| Usunięcie serwera wirtualnego | Kończy jego sesje na każdej replice, nawet jeśli zostanie odtworzony pod tą samą nazwą: każda odrzuca ich requesty w ciągu około 2 sekund. Otwarte strumienie `GET` nie są zamykane wcześniej. |
+| Limit bezczynności | 30 minut bez requestu na którejkolwiek replice, z dokładnością do minuty. Wywołanie, które wciąż trwa, liczy się jako aktywność. |
+| Trwający strumień odpowiedzi | Zostaje na swojej replice. Jeśli ta replika się zatrzyma, klient zobaczy błąd tego requestu; sesja trwa dalej na innej. |
+| Strumień powiadomień `GET` | Pozostaje otwarty na replice, na której go otwarto, dopóki klient go nie zamknie albo ta replika nie zakończy sesji. Klient, który go ponownie połączy, trafia na dowolną replikę. |
+
+Wznawianie strumieni przez `Last-Event-ID` nie jest obsługiwane, ani na jednej
+replice, ani na kilku. Gateway nie wysyła do klientów requestów sampling,
+elicitation ani roots (zobacz
+[zakres obsługi protokołu](#zakres-obsługi-protokołu)), więc żaden taki request
+nie może utknąć na innej replice.
+
+Z SQLite sesje zostają na instancji, która je otworzyła, bo SQLite obsługuje
+jedną replikę. Jeśli baza danych jest nieosiągalna w chwili otwierania sesji,
+ta sesja też zostaje na swojej replice, a gateway loguje ostrzeżenie. Jeśli
+później nie da się jej odczytać, replika, która już obsługuje sesję, obsługuje
+ją dalej przez maksymalnie 30 minut, nie widząc `DELETE` wysłanego gdzie
+indziej, a potem ją kończy; każda inna replika odpowiada 404, a klient
+inicjalizuje nową sesję. `DELETE` wysłany, gdy do bazy nie da się zapisywać,
+kończy sesję tylko na replice, która go odebrała: dopóki wpis sesji nie
+wygaśnie, do 30 minut później, ten sam klient może ją jeszcze wznowić na innej
+replice, a wznowiona sesja działa dalej normalnie.
 
 ## Wybierz, które narzędzia udostępnia każdy serwer
 
@@ -561,7 +612,7 @@ nad listą, ponieważ może brakować ich narzędzi.
 - **Sesje to nie uwierzytelnianie.** Każdy request jest uwierzytelniany bearer
   tokenem, a sesja jest dodatkowo powiązana z tożsamością zarządzanego klucza,
   ścieżką użytkownika i przypiętym endpointem, które ją zainicjowały; przedstawienie
-  wykradzionego ID sesji pod inną tożsamością zwraca 404.
+  wykradzionego ID sesji pod inną tożsamością zwraca 404 na każdej replice.
 - Wartości nagłówków z sekretami są wyświetlane zamaskowane (`***`) w Admin API
   i dashboardzie; zapisanie formularza z `***` zachowuje zapisany sekret.
 
