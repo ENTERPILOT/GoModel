@@ -457,6 +457,7 @@ gespeicherte Logs sichtbar sind.
 | `USAGE_ENABLED`                | Aktiviert die Erfassung der Token-Nutzung                    | `true`  |
 | `USAGE_PRICING_RECALCULATION_ENABLED` | Aktiviert die Admin-Aktion zur Neuberechnung der Nutzungspreise, sofern unterstützt | `true` |
 | `ENFORCE_RETURNING_USAGE_DATA` | Ergänzt Streaming-Requests automatisch um `include_usage` | `true`  |
+| `USAGE_RESPONSE_COST_ENABLED`  | Gibt die berechneten Kosten jedes Requests an den Aufrufer zurück: Header `X-GoModel-Cost`, `usage.gomodel_cost` in Streams. Siehe [Kostenerfassung](/de/features/cost-tracking#kosten-in-der-antwort) | `false` |
 | `USAGE_BUFFER_SIZE`            | Puffer im Arbeitsspeicher vor dem Schreiben                  | `1000`  |
 | `USAGE_FLUSH_INTERVAL`         | Schreibintervall in Sekunden                      | `5`     |
 | `USAGE_RETENTION_DAYS`         | Automatisches Löschen nach N Tagen (0 = nie)         | `90`    |

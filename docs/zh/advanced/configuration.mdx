@@ -252,6 +252,7 @@ server:
 | `USAGE_ENABLED`                | 启用 Token 用量追踪                    | `true`  |
 | `USAGE_PRICING_RECALCULATION_ENABLED` | 在支持时启用管理端的用量定价重新计算操作 | `true` |
 | `ENFORCE_RETURNING_USAGE_DATA` | 自动为流式请求添加 `include_usage` | `true`  |
+| `USAGE_RESPONSE_COST_ENABLED`  | 把每个请求计算出的成本返回给调用方：`X-GoModel-Cost` 响应头，流式响应中的 `usage.gomodel_cost`。参见[成本追踪](/zh/features/cost-tracking) | `false` |
 | `USAGE_BUFFER_SIZE`            | 刷写前的内存缓冲区大小                  | `1000`  |
 | `USAGE_FLUSH_INTERVAL`         | 刷写间隔（秒）                      | `5`     |
 | `USAGE_RETENTION_DAYS`         | N 天后自动删除（0 = 永久保留）         | `90`    |

@@ -23,6 +23,7 @@ type StreamUsageObserver struct {
 	authKeyID       string
 	labels          []string
 	rewriteSaved    int
+	costReport      *CostReport
 	closed          bool
 }
 
@@ -93,6 +94,16 @@ func (o *StreamUsageObserver) SetRewriteTokensSaved(tokensSaved int) {
 	o.rewriteSaved = tokensSaved
 }
 
+// SetCostReport makes the observer report the cost of the usage it has seen
+// so far each time an event adds to it, so a stream can carry its cost in the
+// event that carries its final usage.
+func (o *StreamUsageObserver) SetCostReport(report *CostReport) {
+	if o == nil {
+		return
+	}
+	o.costReport = report
+}
+
 var usageKeyLiteral = []byte(`"usage"`)
 
 // HasUsageObject reports whether a raw SSE JSON payload contains a "usage"
@@ -135,6 +146,7 @@ func (o *StreamUsageObserver) OnJSONEvent(chunk map[string]any) {
 		return
 	}
 	o.cachedEntry = o.mergeWithCachedEntry(entry)
+	o.costReport.Record(o.logger, o.cachedEntry)
 }
 
 // mergeWithCachedEntry folds usage from an earlier event into the latest one.

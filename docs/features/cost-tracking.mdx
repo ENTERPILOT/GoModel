@@ -153,6 +153,64 @@ GoModel takes the deepest configured path that covers the request's user path (`
 
 The default is none: without `user_path_markups`, `markups` applies to everyone. With `markups_enabled: false`, `user_path_markups` is ignored like `markups`, and GoModel logs a warning at startup. A rule from `user_path_markups` is recorded in `markup_selector` as `<user path>:<selector>`, for example `/acme:openai/gpt-5`, so the request log shows which customer rule was billed. User paths are normalized as on requests, so `acme/` and `/acme` are the same key; `/` is rejected, since `markups` already covers it.
 
+## Return the cost with each response
+
+GoModel can return the cost it calculated for a request to the client that made it. It is off by default. Turn it on when clients account for their own spend per request — for example an application that holds an inference-only key and attributes cost to its own users — so they need neither an admin key nor a later lookup in `/admin/usage/log`.
+
+```yaml
+usage:
+  response_cost_enabled: true # env: USAGE_RESPONSE_COST_ENABLED; default false
+```
+
+It needs usage tracking (`USAGE_ENABLED`, on by default): a request without a usage row has no cost to return.
+
+**Which cost.** With [markups](#markups-and-billed-cost) enabled, the client gets the request's billed cost and nothing else: the provider cost and the markup never leave the gateway. With markups off, it gets the provider cost (`total_cost`), also for a provider marked `billable: false`. Either way it is the value stored on the request's usage row, in USD, and an estimate like every other cost on this page.
+
+**Buffered responses** carry the cost in two response headers. The body is not touched, so a strictly typed SDK or parser cannot be affected:
+
+```http
+X-GoModel-Cost: 0.00000542
+X-GoModel-Cost-Currency: USD
+```
+
+The amount is a plain decimal with every digit of the calculation, never rounded and never in exponent notation.
+
+**Streamed responses** send their headers before the cost is known, so the cost rides in the stream: `gomodel_cost` is added to the usage object of the event that carries the final token counts.
+
+```text
+data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":271,"completion_tokens":12,"total_tokens":283,"gomodel_cost":{"amount":0.00000542,"currency":"USD"}}}
+```
+
+| Endpoint               | Event                                          | Member                        |
+| ---------------------- | ---------------------------------------------- | ----------------------------- |
+| `/v1/chat/completions` | the usage chunk                                | `usage.gomodel_cost`          |
+| `/v1/responses`        | `response.completed` or `response.incomplete`  | `response.usage.gomodel_cost` |
+| `/v1/messages`         | `message_delta`                                | `usage.gomodel_cost`          |
+
+Every other event passes through unchanged. The member is an addition the OpenAI and Anthropic SDKs ignore; leave the setting off for a client that rejects unknown members. A provider that repeats usage on several chunks gets the cost so far on each of them, and the last one is final. A stream without usage carries no cost: GoModel asks providers for usage by default (`ENFORCE_RETURNING_USAGE_DATA`).
+
+**Unknown is not zero.** A model without pricing has an unknown cost, and the response carries no header and no member. `0` always means a known cost of zero.
+
+**Response-cache hits** (`X-Cache: HIT`) call no provider, so their provider cost is `0`. With markups enabled a hit returns what it is billed at: its billed cost with `bill_cache_hits` on, `0` with it off. The cost of a hit is known before the replay starts, so a cached stream carries it in the headers as well.
+
+**Provider-reported costs** such as OpenRouter's `usage.cost` keep passing through as they are; GoModel adds its own figure beside them and never renames or replaces them. The `X-GoModel-Cost` headers and the `gomodel_cost` member belong to this gateway: with the setting on, a value relayed from another GoModel upstream is replaced by this gateway's cost, or removed when that is unknown.
+
+| Endpoint | Buffered | Streamed |
+| -------- | -------- | -------- |
+| `/v1/chat/completions`, `/v1/responses`, `/v1/messages` | headers | `gomodel_cost` |
+| `/v1/embeddings`, `/v1/images/generations`, `/v1/images/edits`, `/v1/decisions`, `/v1/systemone` | headers | — |
+| `/v1/audio/*` | headers | none: a relayed audio stream or streamed transcript is priced after it was sent |
+| `/p/{provider}/...` | headers, for JSON answers GoModel can price | `gomodel_cost`, for events with OpenAI or Anthropic usage |
+
+Not covered: realtime sessions (many responses per connection), batches (their cost is in the batch's `usage`), and MCP tool calls. Model calls the gateway makes itself while serving a request, such as an LLM guardrail, are recorded as their own usage rows and are not part of the returned cost. A workflow with usage tracking turned off returns none.
+
+<Note>
+  To put the cost in the headers, GoModel reads a JSON answer it relays in the
+  provider's own dialect (`/p/{provider}/...`, `/v1/decisions`, a natively
+  forwarded `/v1/messages`) in full before sending it, instead of relaying it
+  as it arrives. Streams are never held back.
+</Note>
+
 ## Dashboard totals
 
 - **Estimated Cost** — spend on live provider requests; cache hits are excluded.

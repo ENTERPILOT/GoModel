@@ -422,6 +422,7 @@ strony. Gdy logowanie audytowe jest włączone, zapisy są asynchroniczne i moż
 | `USAGE_ENABLED`                | Włącza śledzenie użycia tokenów                | `true`  |
 | `USAGE_PRICING_RECALCULATION_ENABLED` | Włącza w panelu administracyjnym akcję przeliczania cen użycia, jeśli jest obsługiwana | `true` |
 | `ENFORCE_RETURNING_USAGE_DATA` | Automatycznie dodaje `include_usage` do requestów streamingowych | `true`  |
+| `USAGE_RESPONSE_COST_ENABLED`  | Zwraca wywołującemu wyliczony koszt każdego requestu: nagłówki `X-GoModel-Cost`, `usage.gomodel_cost` w streamach. Zobacz [Śledzenie kosztów](/pl/features/cost-tracking#koszt-w-odpowiedzi) | `false` |
 | `USAGE_BUFFER_SIZE`            | Bufor w pamięci przed zapisem                  | `1000`  |
 | `USAGE_FLUSH_INTERVAL`         | Interwał zapisu w sekundach                    | `5`     |
 | `USAGE_RETENTION_DAYS`         | Automatyczne usuwanie po N dniach (0 = nigdy)  | `90`    |

@@ -187,6 +187,15 @@ skonfigurowane upstreamowe serwery MCP (gdy `MCP_ENABLED`, domyślnie włączone
 | `/mcp`          | POST, GET, DELETE | Zagregowany endpoint MCP; narzędzia/prompty w przestrzeniach nazw jako `{server}_{name}` |
 | `/mcp/{server}` | POST, GET, DELETE | Pojedynczy skonfigurowany serwer MCP z oryginalnymi nazwami narzędzi            |
 
+## Koszt w odpowiedzi
+
+Przy `USAGE_RESPONSE_COST_ENABLED=true` (domyślnie `false`) endpointy modeli
+zwracają koszt, który GoModel wyliczył dla requestu: odpowiedzi buforowane w
+nagłówkach `X-GoModel-Cost` i `X-GoModel-Cost-Currency`, odpowiedzi streamowane
+jako `gomodel_cost` w obiekcie usage eventu z końcowymi liczbami tokenów.
+W [Śledzeniu kosztów](/pl/features/cost-tracking#koszt-w-odpowiedzi) opisano,
+które endpointy są objęte i co zwraca cache hit.
+
 ## Endpointy administracyjne
 
 Trasy Admin REST i dashboardu (`/admin/*`) są opisane w

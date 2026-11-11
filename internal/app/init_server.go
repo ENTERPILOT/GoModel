@@ -148,6 +148,8 @@ func (b *bootstrap) initServerConfig() error {
 		PprofEnabled:                    appCfg.Server.PprofEnabled,
 		AuditLogger:                     app.audit.Logger,
 		UsageLogger:                     b.serverUsageLogger,
+		ResponseCostEnabled:             appCfg.Usage.ResponseCostEnabled,
+		ResponseCostBilled:              appCfg.Pricing.MarkupsEnabled,
 		BudgetChecker:                   app.budgets.Service,
 		PricingResolver:                 b.pricingResolver,
 		ModelResolver:                   vm,

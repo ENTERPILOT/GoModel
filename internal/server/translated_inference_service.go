@@ -714,6 +714,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 			usageObserver.SetAuthKeyID(core.GetAuthKeyID(c.Request().Context()))
 			usageObserver.SetLabels(core.RequestLabelsFromContext(c.Request().Context()))
 			usageObserver.SetRewriteTokensSaved(core.RewriteTokensSavedFromContext(c.Request().Context()))
+			usageObserver.SetCostReport(usage.CostReportFromContext(c.Request().Context()))
 			observers = append(observers, usageObserver)
 		}
 	}

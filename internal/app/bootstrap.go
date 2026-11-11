@@ -91,6 +91,13 @@ func newBootstrap(ctx context.Context, cfg Config) *bootstrap {
 			"hint", "enable usage tracking to use budgets, or set BUDGETS_ENABLED=false to silence this warning",
 		)
 	}
+	if appCfg.Usage.ResponseCostEnabled && !appCfg.Usage.Enabled {
+		appCfg.Usage.ResponseCostEnabled = false
+		slog.Warn("response costs disabled because usage tracking is disabled",
+			"usage_enabled", false,
+			"hint", "enable usage tracking to return request costs, or set USAGE_RESPONSE_COST_ENABLED=false to silence this warning",
+		)
+	}
 
 	app := &App{
 		config:        appCfg,

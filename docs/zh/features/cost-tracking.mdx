@@ -149,6 +149,63 @@ GoModel 选取覆盖请求 user path 的最深一级已配置路径（`/acme` �
 
 默认不设置：没有 `user_path_markups` 时，`markups` 适用于所有人。当 `markups_enabled: false` 时，`user_path_markups` 与 `markups` 一样被忽略，GoModel 会在启动时记录一条警告。来自 `user_path_markups` 的规则会以 `<user path>:<selector>` 的形式记录在 `markup_selector` 中，例如 `/acme:openai/gpt-5`，这样请求日志会显示计费时使用了哪条客户规则。user path 与请求中的规范化方式相同，因此 `acme/` 和 `/acme` 是同一个键；`/` 会被拒绝，因为 `markups` 已经覆盖它。
 
+## 随响应返回成本
+
+GoModel 可以把为某个请求计算出的成本返回给发起该请求的客户端。此功能默认关闭。当客户端需要自行按请求核算支出时开启它——例如某个应用只持有推理密钥，并把成本归属到自己的用户——这样它既不需要管理员密钥，也不需要事后查询 `/admin/usage/log`。
+
+```yaml
+usage:
+  response_cost_enabled: true # env: USAGE_RESPONSE_COST_ENABLED; default false
+```
+
+此功能依赖用量追踪（`USAGE_ENABLED`，默认开启）：没有用量记录的请求没有可返回的成本。
+
+**返回哪种成本。** 开启加价时，客户端只会得到该请求的计费成本：提供商成本和加价不会离开网关。关闭加价时，客户端得到提供商成本（`total_cost`），标记为 `billable: false` 的提供商也是如此。两种情况下返回的都是该请求用量记录中存储的值，以 USD 计，并且与本页的其他成本一样是估算值。
+
+**非流式响应**通过两个响应头携带成本。响应体不会被改动，因此严格类型化的 SDK 或解析器不会受到影响：
+
+```http
+X-GoModel-Cost: 0.00000542
+X-GoModel-Cost-Currency: USD
+```
+
+金额是普通的十进制小数，保留计算得到的全部位数，不四舍五入，也不使用指数表示法。
+
+**流式响应**在成本确定之前就已发送响应头，因此成本随流返回：`gomodel_cost` 会被添加到携带最终 Token 数的事件的 usage 对象中。
+
+```text
+data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":271,"completion_tokens":12,"total_tokens":283,"gomodel_cost":{"amount":0.00000542,"currency":"USD"}}}
+```
+
+| 端点                   | 事件                                            | 字段                          |
+| ---------------------- | ----------------------------------------------- | ----------------------------- |
+| `/v1/chat/completions` | usage 数据块                                    | `usage.gomodel_cost`          |
+| `/v1/responses`        | `response.completed` 或 `response.incomplete`   | `response.usage.gomodel_cost` |
+| `/v1/messages`         | `message_delta`                                 | `usage.gomodel_cost`          |
+
+其他事件全部原样透传。该字段是一个新增成员，OpenAI 和 Anthropic 的 SDK 会忽略它；如果客户端会拒绝未知成员，请保持此设置关闭。如果提供商在多个数据块中重复返回 usage，每个数据块都会携带截至当时的成本，最后一个为最终值。没有 usage 的流不携带成本：GoModel 默认会向提供商请求 usage（`ENFORCE_RETURNING_USAGE_DATA`）。
+
+**未知不等于零。** 没有定价的模型成本未知，响应中既没有响应头也没有该字段。`0` 始终表示已知的零成本。
+
+**响应缓存命中**（`X-Cache: HIT`）不会调用提供商，因此其提供商成本为 `0`。开启加价时，命中返回的是它被计费的金额：`bill_cache_hits` 开启时为其计费成本，关闭时为 `0`。命中的成本在重放开始前就已确定，因此缓存的流也会在响应头中携带它。
+
+**提供商自行报告的成本**（例如 OpenRouter 的 `usage.cost`）继续原样透传；GoModel 只在旁边添加自己的数值，绝不重命名或替换它们。`X-GoModel-Cost` 响应头和 `gomodel_cost` 字段属于本网关：开启此设置后，从上游另一个 GoModel 透传来的值会被本网关的成本替换，在成本未知时则被移除。
+
+| 端点 | 非流式 | 流式 |
+| ---- | ------ | ---- |
+| `/v1/chat/completions`、`/v1/responses`、`/v1/messages` | 响应头 | `gomodel_cost` |
+| `/v1/embeddings`、`/v1/images/generations`、`/v1/images/edits`、`/v1/decisions`、`/v1/systemone` | 响应头 | — |
+| `/v1/audio/*` | 响应头 | 无：转发的音频流或流式转录在发送之后才计价 |
+| `/p/{provider}/...` | 响应头，适用于 GoModel 能够计价的 JSON 响应 | `gomodel_cost`，适用于带有 OpenAI 或 Anthropic 格式 usage 的事件 |
+
+不包括：实时会话（一个连接上有多个响应）、批处理（其成本在批处理的 `usage` 中）以及 MCP 工具调用。网关在处理请求时自行发起的模型调用（例如基于 LLM 的护栏）会记录为独立的用量记录，不计入返回的成本。关闭了用量追踪的工作流不返回成本。
+
+<Note>
+  为了把成本放进响应头，GoModel 会先完整读取以提供商原生格式转发的 JSON
+  响应（`/p/{provider}/...`、`/v1/decisions`、原生转发的 `/v1/messages`），
+  然后再发送，而不是边收边转发。流式响应不会被延迟。
+</Note>
+
 ## 控制台汇总
 
 - **Estimated Cost**：实时提供商请求的支出；不包括缓存命中。

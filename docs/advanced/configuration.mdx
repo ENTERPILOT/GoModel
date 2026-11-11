@@ -418,6 +418,7 @@ to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
 | `USAGE_ENABLED`                | Enable token usage tracking                    | `true`  |
 | `USAGE_PRICING_RECALCULATION_ENABLED` | Enable the admin usage pricing recalculation action when supported | `true` |
 | `ENFORCE_RETURNING_USAGE_DATA` | Auto-add `include_usage` to streaming requests | `true`  |
+| `USAGE_RESPONSE_COST_ENABLED`  | Return each request's calculated cost to its caller: `X-GoModel-Cost` headers, `usage.gomodel_cost` in streams. See [Cost tracking](/features/cost-tracking#return-the-cost-with-each-response) | `false` |
 | `USAGE_BUFFER_SIZE`            | In-memory buffer before flush                  | `1000`  |
 | `USAGE_FLUSH_INTERVAL`         | Flush interval in seconds                      | `5`     |
 | `USAGE_RETENTION_DAYS`         | Auto-delete after N days (0 = forever)         | `90`    |

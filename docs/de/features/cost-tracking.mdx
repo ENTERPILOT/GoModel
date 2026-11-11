@@ -156,6 +156,65 @@ GoModel nimmt den tiefsten konfigurierten Pfad, der den User-Path des Requests a
 
 Standardmäßig ist nichts gesetzt: Ohne `user_path_markups` gilt `markups` für alle. Bei `markups_enabled: false` wird `user_path_markups` wie `markups` ignoriert, und GoModel protokolliert beim Start eine Warnung. Eine Regel aus `user_path_markups` wird in `markup_selector` als `<user path>:<selector>` gespeichert, zum Beispiel `/acme:openai/gpt-5`, sodass das Request-Log zeigt, welche Kundenregel abgerechnet wurde. User-Paths werden wie bei Requests normalisiert, sodass `acme/` und `/acme` derselbe Schlüssel sind; `/` wird abgelehnt, da `markups` ihn bereits abdeckt.
 
+## Kosten in der Antwort
+
+GoModel kann die für einen Request berechneten Kosten an den Client zurückgeben, der ihn gesendet hat. Das ist standardmäßig deaktiviert. Aktivieren Sie es, wenn Clients ihre Ausgaben pro Request selbst verbuchen – zum Beispiel eine Anwendung mit einem reinen Inferenz-Schlüssel, die Kosten ihren eigenen Nutzern zuordnet –, sodass sie weder einen Admin-Schlüssel noch eine spätere Abfrage von `/admin/usage/log` brauchen.
+
+```yaml
+usage:
+  response_cost_enabled: true # env: USAGE_RESPONSE_COST_ENABLED; default false
+```
+
+Voraussetzung ist die Nutzungserfassung (`USAGE_ENABLED`, standardmäßig aktiv): Ein Request ohne Nutzungszeile hat keine Kosten, die zurückgegeben werden könnten.
+
+**Welche Kosten.** Sind Aufschläge aktiviert, erhält der Client die abgerechneten Kosten des Requests und nichts anderes: Provider-Kosten und Aufschlag verlassen das Gateway nie. Sind Aufschläge deaktiviert, erhält er die Provider-Kosten (`total_cost`), auch bei einem Provider mit `billable: false`. In beiden Fällen ist es der Wert aus der Nutzungszeile des Requests, in USD, und eine Schätzung wie alle anderen Kosten auf dieser Seite.
+
+**Gepufferte Antworten** tragen die Kosten in zwei Response-Headern. Der Body bleibt unverändert, sodass streng typisierte SDKs und Parser nicht betroffen sind:
+
+```http
+X-GoModel-Cost: 0.00000542
+X-GoModel-Cost-Currency: USD
+```
+
+Der Betrag ist eine einfache Dezimalzahl mit allen Stellen der Berechnung, nie gerundet und nie in Exponentialschreibweise.
+
+**Gestreamte Antworten** senden ihre Header, bevor die Kosten bekannt sind. Die Kosten stehen deshalb im Stream: `gomodel_cost` wird dem Usage-Objekt des Events hinzugefügt, das die endgültigen Token-Zahlen enthält.
+
+```text
+data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":271,"completion_tokens":12,"total_tokens":283,"gomodel_cost":{"amount":0.00000542,"currency":"USD"}}}
+```
+
+| Endpunkt               | Event                                            | Feld                          |
+| ---------------------- | ------------------------------------------------ | ----------------------------- |
+| `/v1/chat/completions` | der Usage-Chunk                                  | `usage.gomodel_cost`          |
+| `/v1/responses`        | `response.completed` oder `response.incomplete`  | `response.usage.gomodel_cost` |
+| `/v1/messages`         | `message_delta`                                  | `usage.gomodel_cost`          |
+
+Alle anderen Events werden unverändert durchgereicht. Das Feld ist eine Ergänzung, die die SDKs von OpenAI und Anthropic ignorieren; lassen Sie die Einstellung für Clients deaktiviert, die unbekannte Felder ablehnen. Wiederholt ein Provider die Usage in mehreren Chunks, trägt jeder davon die bis dahin angefallenen Kosten, und der letzte ist endgültig. Ein Stream ohne Usage trägt keine Kosten: GoModel fordert die Usage standardmäßig beim Provider an (`ENFORCE_RETURNING_USAGE_DATA`).
+
+**Unbekannt ist nicht null.** Ein Modell ohne Preise hat unbekannte Kosten, und die Antwort enthält weder Header noch Feld. `0` bedeutet immer bekannte Kosten von null.
+
+**Treffer im Response-Cache** (`X-Cache: HIT`) rufen keinen Provider auf, ihre Provider-Kosten sind daher `0`. Sind Aufschläge aktiviert, gibt ein Treffer zurück, was für ihn abgerechnet wird: seine abgerechneten Kosten mit `bill_cache_hits`, sonst `0`. Die Kosten eines Treffers stehen fest, bevor die Wiedergabe beginnt; ein gecachter Stream trägt sie deshalb zusätzlich in den Headern.
+
+**Vom Provider gemeldete Kosten** wie `usage.cost` von OpenRouter werden weiterhin unverändert durchgereicht; GoModel stellt den eigenen Wert daneben und benennt oder ersetzt sie nie. Die Header `X-GoModel-Cost` und das Feld `gomodel_cost` gehören diesem Gateway: Ist die Einstellung aktiv, wird ein von einem vorgelagerten GoModel durchgereichter Wert durch die Kosten dieses Gateways ersetzt oder entfernt, wenn diese unbekannt sind.
+
+| Endpunkt | Gepuffert | Gestreamt |
+| -------- | --------- | --------- |
+| `/v1/chat/completions`, `/v1/responses`, `/v1/messages` | Header | `gomodel_cost` |
+| `/v1/embeddings`, `/v1/images/generations`, `/v1/images/edits`, `/v1/decisions`, `/v1/systemone` | Header | – |
+| `/v1/audio/*` | Header | keine: Ein durchgereichter Audio-Stream oder ein gestreamtes Transkript wird erst nach dem Senden bepreist |
+| `/p/{provider}/...` | Header, für JSON-Antworten, die GoModel bepreisen kann | `gomodel_cost`, für Events mit Usage im OpenAI- oder Anthropic-Format |
+
+Nicht abgedeckt: Realtime-Sitzungen (viele Antworten pro Verbindung), Batches (ihre Kosten stehen in der `usage` des Batches) und MCP-Tool-Aufrufe. Modellaufrufe, die das Gateway beim Bearbeiten eines Requests selbst ausführt, etwa ein LLM-Guardrail, werden als eigene Nutzungszeilen erfasst und sind nicht Teil der zurückgegebenen Kosten. Ein Workflow mit deaktivierter Nutzungserfassung gibt keine zurück.
+
+<Note>
+  Damit die Kosten in den Headern stehen können, liest GoModel eine JSON-Antwort,
+  die es im Dialekt des Providers weiterreicht (`/p/{provider}/...`,
+  `/v1/decisions`, ein nativ weitergeleitetes `/v1/messages`), vollständig ein,
+  bevor es sie sendet, statt sie fortlaufend durchzureichen. Streams werden nie
+  zurückgehalten.
+</Note>
+
 ## Summen im Dashboard
 
 - **Estimated Cost** – Ausgaben für Live-Requests an Provider; Cache-Treffer sind ausgenommen.

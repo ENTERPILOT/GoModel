@@ -24,6 +24,12 @@ func (t *UsageTap) Write(entry *usage.UsageEntry) {
 	t.inner.Write(entry)
 }
 
+// StampBilling implements usage.BillingStamper.
+func (t *UsageTap) StampBilling(entry *usage.UsageEntry) {
+	t.service.Apply(entry)
+	usage.StampBilling(t.inner, entry)
+}
+
 // SetLivePublisher forwards the dashboard publisher to the wrapped logger, so
 // wrapping it never silences live usage events.
 func (t *UsageTap) SetLivePublisher(p usage.LiveEventPublisher) {

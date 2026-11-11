@@ -59,7 +59,7 @@ type simpleCacheMiddleware struct {
 
 	partitionByUserPath bool
 
-	hitRecorder func(exchange, []byte, string)
+	hitRecorder hitRecorder
 
 	workers sync.WaitGroup
 	mu      sync.RWMutex
@@ -74,7 +74,7 @@ type exactMissCall struct {
 	err  error
 }
 
-func newSimpleCacheMiddleware(store cache.Store, ttl time.Duration, hitRecorder func(exchange, []byte, string)) *simpleCacheMiddleware {
+func newSimpleCacheMiddleware(store cache.Store, ttl time.Duration, hitRecorder hitRecorder) *simpleCacheMiddleware {
 	m := &simpleCacheMiddleware{
 		store:       store,
 		ttl:         ttl,
@@ -98,15 +98,14 @@ func (m *simpleCacheMiddleware) TryHit(ex exchange, key string, body []byte) (bo
 		return false, nil
 	}
 	if len(cached) > 0 {
+		recordHit := m.hitRecorder.prepare(ex, cached, CacheTypeExact)
 		err := ex.ReplayHit(body, cached, CacheTypeExact)
 		if err != nil && !replayCommitted(err) {
 			slog.Warn("response cache replay failed", "path", path, "cache_type", CacheTypeExact, "err", err)
 			return false, nil
 		}
 		ex.MarkHit(CacheTypeExact)
-		if m.hitRecorder != nil {
-			m.hitRecorder(ex, cached, CacheTypeExact)
-		}
+		recordHit()
 		slog.Info("response cache hit (exact)",
 			"path", path,
 			"request_id", core.GetRequestID(ex.Context()),
@@ -144,14 +143,13 @@ func (m *simpleCacheMiddleware) StoreAfter(ex exchange, key string, body []byte,
 		_, err := m.captureAndStore(ex, key, next)
 		return err
 	}
+	recordHit := m.hitRecorder.prepare(ex, call.data, CacheTypeExact)
 	err := ex.ReplayHit(body, call.data, CacheTypeExact)
 	if err != nil && !replayCommitted(err) {
 		return next()
 	}
 	ex.MarkHit(CacheTypeExact)
-	if m.hitRecorder != nil {
-		m.hitRecorder(ex, call.data, CacheTypeExact)
-	}
+	recordHit()
 	return err
 }
 

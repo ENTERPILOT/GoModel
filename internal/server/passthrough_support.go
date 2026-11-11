@@ -373,6 +373,10 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 		return nil
 	}
 
+	if usage.CostReportFromContext(c.Request().Context()) != nil {
+		return relayJSONAfterObservers(c, providerType, resp, observers)
+	}
+
 	capture := newCappedCaptureBuffer(maxObservedJSONResponseBytes)
 	c.Response().WriteHeader(resp.StatusCode)
 	if _, err := io.Copy(c.Response(), io.TeeReader(resp.Body, capture)); err != nil {
@@ -384,6 +388,35 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 	}
 	if body, ok := capture.Captured(); ok {
 		notifyObserversWithJSONBody(body, observers)
+	}
+	return nil
+}
+
+// relayJSONAfterObservers reads a JSON answer before relaying it, so its usage
+// is priced in time for the response headers to carry the cost. Only requests
+// that return their cost take this path: the answer is complete either way,
+// but the default path relays it as it arrives and accounts for it afterwards.
+// An answer too large to observe is relayed without a cost, as it is there.
+func relayJSONAfterObservers(c *echo.Context, providerType string, resp *core.PassthroughResponse, observers []streaming.Observer) error {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxObservedJSONResponseBytes+1))
+	if err != nil {
+		return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "failed to read provider response", err))
+	}
+	observed := len(body) <= maxObservedJSONResponseBytes
+	if observed {
+		notifyObserversWithJSONBody(body, observers)
+	}
+	c.Response().WriteHeader(resp.StatusCode)
+	if _, err := c.Response().Write(body); err != nil {
+		return err
+	}
+	if !observed {
+		if _, err := io.Copy(c.Response(), resp.Body); err != nil {
+			return err
+		}
+	}
+	if f, ok := c.Response().(http.Flusher); ok {
+		f.Flush()
 	}
 	return nil
 }
@@ -534,6 +567,7 @@ func passthroughUsageObserver(c *echo.Context, usageLogger usage.LoggerInterface
 	observer.SetAuthKeyID(core.GetAuthKeyID(c.Request().Context()))
 	observer.SetLabels(core.RequestLabelsFromContext(c.Request().Context()))
 	observer.SetRewriteTokensSaved(core.RewriteTokensSavedFromContext(c.Request().Context()))
+	observer.SetCostReport(usage.CostReportFromContext(c.Request().Context()))
 	return observer
 }
 

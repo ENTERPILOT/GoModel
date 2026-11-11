@@ -184,6 +184,15 @@ bündeln (wenn `MCP_ENABLED`, standardmäßig aktiviert). Siehe [MCP Gateway](/d
 | `/mcp`          | POST, GET, DELETE | Gebündelter MCP-Endpunkt; Tools/Prompts mit Namensraum als `{server}_{name}`          |
 | `/mcp/{server}` | POST, GET, DELETE | Ein einzelner konfigurierter MCP-Server mit den ursprünglichen Tool-Namen                           |
 
+## Kosten in der Antwort
+
+Mit `USAGE_RESPONSE_COST_ENABLED=true` (Standard `false`) geben Modell-Endpunkte
+die Kosten zurück, die GoModel für den Request berechnet hat: gepufferte
+Antworten in den Headern `X-GoModel-Cost` und `X-GoModel-Cost-Currency`,
+gestreamte Antworten als `gomodel_cost` im Usage-Objekt des Events mit den
+endgültigen Token-Zahlen. Unter [Kostenerfassung](/de/features/cost-tracking#kosten-in-der-antwort)
+steht, welche Endpunkte abgedeckt sind und was ein Cache-Treffer zurückgibt.
+
 ## Admin-Endpunkte
 
 Admin-REST- und Dashboard-Routen (`/admin/*`) werden unter
