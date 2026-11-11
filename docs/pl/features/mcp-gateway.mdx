@@ -561,12 +561,15 @@ oryginalnymi nazwami z upstreamu; zagregowany endpoint `/mcp` udostępnia je jak
 
 Aby zobaczyć wszystkie narzędzia naraz, kliknij **Wszystkie narzędzia** na
 stronie serwerów MCP. Widok pokazuje narzędzia wszystkich serwerów na jednej
-liście z wyszukiwarką, pod nazwami, których używają klienci (`{slug}_{name}`),
-wraz z opisami, wskazówkami read-only i destructive oraz serwerem źródłowym.
+liście z wyszukiwarką, wraz z opisami, wskazówkami read-only i destructive oraz
+serwerem źródłowym. Udostępnione narzędzia mają nazwy, których używają klienci
+(`{slug}_{name}`); ukryte zachowują nazwę z serwera upstream.
 Wybierz serwer wirtualny, aby zobaczyć tylko narzędzia jego członków, i włącz
 **Pokaż narzędzia ukryte przez filtry**, aby uwzględnić narzędzia wykluczone.
 Serwery, które nie są połączone lub których katalog nie wczytał się, są wymienione
-nad listą, ponieważ może brakować ich narzędzi.
+nad listą, ponieważ może brakować ich narzędzi. Lista pokazuje widok całej
+bramy: nie uwzględnia limitów `user_paths` danego klucza API, więc niektórzy
+klienci mogą nie widzieć wszystkich wymienionych serwerów.
 
 ## Uwagi dotyczące bezpieczeństwa
 
