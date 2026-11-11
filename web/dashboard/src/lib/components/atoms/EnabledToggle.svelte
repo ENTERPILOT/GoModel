@@ -10,6 +10,7 @@
   //   restricted — the "enabled but user-path-scoped" amber state
   //   onclick    — toggle handler
   //   text       — visible caption override; defaults to Enabled/Disabled
+  //   ...rest    — extra button attributes (id, aria-describedby)
   let {
     enabled = false,
     label = "",
@@ -17,6 +18,7 @@
     restricted = false,
     onclick,
     text,
+    ...rest
   } = $props();
 
   function onToggle(event) {
@@ -29,6 +31,7 @@
 </script>
 
 <button
+  {...rest}
   type="button"
   class="alias-toggle"
   class:enabled

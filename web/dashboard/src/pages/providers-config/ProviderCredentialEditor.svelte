@@ -152,7 +152,7 @@
 
       <div class="mcp-server-advanced-fields">
         {#each fields.advanced as field (field.name)}
-          <ProviderCredentialField {field} />
+          <ProviderCredentialField {field} collapsed />
         {/each}
       </div>
     </details>

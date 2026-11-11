@@ -3,7 +3,9 @@
   // gateway serves for the selected provider type: label and hint from the
   // field's presentation, control from its shape (key list, enumeration,
   // multi-line secret, model list, plain text), and an inline message when it
-  // is at fault.
+  // is at fault. `collapsed` (the Advanced section) folds the hint and docs
+  // link behind a "?" toggle beside the label so the section stays scannable.
+  import EnabledToggle from "$lib/components/atoms/EnabledToggle.svelte";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import ProviderModelsControl from "./ProviderModelsControl.svelte";
@@ -11,11 +13,17 @@
   import { Plus, Trash2 } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
-  let { field } = $props();
+  let { field, collapsed = false } = $props();
+
+  let helpOpen = $state(false);
 
   const id = $derived("provider-credential-" + field.name);
   const error = $derived(providersConfig.fieldErrors[field.name] || "");
-  const describedBy = $derived(error ? id + "-error" : field.hint ? id + "-hint" : undefined);
+  const hasHelp = $derived(Boolean(field.hint || field.docsUrl));
+  const showHelp = $derived(hasHelp && (!collapsed || helpOpen));
+  const describedBy = $derived(
+    error ? id + "-error" : showHelp && field.hint ? id + "-hint" : undefined,
+  );
 
   // The schema lists a field's canonical values, not every value its provider
   // accepts (`openai_compatible` and `compat` mean the same thing to Gemini).
@@ -41,7 +49,19 @@
       {field.label}
       {#if field.required}<span class="form-field-required" aria-hidden="true">*</span>{/if}
     </label>
-    {#if field.docsUrl}
+    {#if collapsed && hasHelp}
+      <button
+        type="button"
+        class="inline-help-toggle"
+        class:is-open={helpOpen}
+        aria-label={(helpOpen ? "Hide " : "Show ") + field.label + " help"}
+        aria-expanded={helpOpen}
+        aria-controls={id + "-hint"}
+        onclick={() => (helpOpen = !helpOpen)}
+      >
+        <span class="inline-help-toggle-icon" aria-hidden="true">?</span>
+      </button>
+    {:else if field.docsUrl}
       <a
         class="inline-help-toggle form-field-docs-help"
         href={field.docsUrl}
@@ -108,14 +128,18 @@
       {/each}
     </select>
   {:else if field.control === "checkbox"}
-    <input
-      {id}
-      type="checkbox"
-      aria-invalid={error ? "true" : undefined}
-      aria-describedby={describedBy}
-      bind:checked={providersConfig.form[field.name]}
-      onchange={onInput}
-    />
+    <div class="form-field-switch">
+      <EnabledToggle
+        {id}
+        enabled={Boolean(providersConfig.form[field.name])}
+        label={field.label}
+        aria-describedby={describedBy}
+        onclick={() => {
+          providersConfig.form[field.name] = !providersConfig.form[field.name];
+          onInput();
+        }}
+      />
+    </div>
   {:else if field.control === "textarea"}
     <textarea
       {id}
@@ -142,8 +166,13 @@
 
   {#if error}
     <small class="form-field-error" id={id + "-error"} role="alert">{error}</small>
-  {:else if field.hint}
-    <small class="form-hint" id={id + "-hint"}>{field.hint}</small>
+  {:else if showHelp}
+    <small class="form-hint" id={id + "-hint"}>
+      {field.hint}
+      {#if collapsed && field.docsUrl}
+        <a href={field.docsUrl} target="_blank" rel="noopener noreferrer">{field.docsLabel}</a>
+      {/if}
+    </small>
   {/if}
 </div>
 
@@ -153,6 +182,19 @@
     display: flex;
     align-items: center;
     gap: 6px;
+  }
+
+  /* .form-field stretches its children; keep the switch at its own width. */
+  .form-field-switch {
+    display: flex;
+  }
+
+  .inline-help-toggle.is-open {
+    color: var(--text);
+  }
+
+  .inline-help-toggle.is-open :global(.inline-help-toggle-icon) {
+    transform: rotate(540deg);
   }
 
   .form-field-docs-help {
