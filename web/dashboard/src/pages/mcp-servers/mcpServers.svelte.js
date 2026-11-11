@@ -30,6 +30,7 @@ import {
   mcpServerSlug,
   mcpServersNeedPolling,
   mcpServerStatus,
+  mcpToolCatalogServedScope,
   normalizeMcpCatalog,
   setMcpToolsExposed,
   switchMcpToolMode,
@@ -249,6 +250,7 @@ class McpServersState {
     }
     this.virtualError = "";
     this.virtualServers = outcome.status === "ok" ? outcome.items : [];
+    this.toolCatalogScope = mcpToolCatalogServedScope(this.virtualServers, this.toolCatalogScope);
   }
 
   // Clearing also retires a virtual-list request in flight, so its response
@@ -257,6 +259,7 @@ class McpServersState {
     this.#virtualSeq += 1;
     this.virtualServers = [];
     this.virtualError = "";
+    this.toolCatalogScope = "";
   }
 
   // --- connect poll ------------------------------------------------------

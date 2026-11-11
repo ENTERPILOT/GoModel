@@ -387,6 +387,13 @@ export function mcpToolCatalogMembers(virtualServers, scope) {
   return virtual ? [...(virtual.servers || [])] : [];
 }
 
+// mcpToolCatalogServedScope keeps a virtual-server scope only while that
+// virtual server is still served, falling back to every server ("").
+export function mcpToolCatalogServedScope(virtualServers, scope) {
+  const name = String(scope || "");
+  return mcpServedVirtualServers(virtualServers).some((item) => item.name === name) ? name : "";
+}
+
 function mcpToolCatalogEntriesInScope(entries, members) {
   const scope = Array.isArray(members) ? new Set(members) : null;
   return (Array.isArray(entries) ? entries : []).filter(
@@ -407,7 +414,7 @@ function mcpToolCatalogOwners(inScope) {
     .forEach((server) => {
       const entry = inScope.find((item) => String(item.server) === server);
       (entry.catalog.tools || []).forEach((item) => {
-        const name = String(item?.name || "").trim();
+        const name = String(item?.name || "");
         const aggregated = mcpNamespacedName({ server }, name);
         if (name && !owners.has(aggregated)) {
           owners.set(aggregated, server);
@@ -432,11 +439,15 @@ export function mcpToolCatalogRows(entries, { members = null, showExcluded = fal
     if (!entry.catalog) {
       return;
     }
+    // Names stay as the upstream reports them, since clients call them so.
+    // A repeated name keeps its first entry, as the gateway registers it.
+    const seen = new Set();
     const add = (excluded) => (item) => {
-      const name = String(item?.name || "").trim();
-      if (!name) {
+      const name = String(item?.name || "");
+      if (!name || seen.has(name)) {
         return;
       }
+      seen.add(name);
       const aggregated = excluded ? "" : mcpNamespacedName({ server }, name);
       const owner = aggregated ? owners.get(aggregated) : server;
       rows.push({

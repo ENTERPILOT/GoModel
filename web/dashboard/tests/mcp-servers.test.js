@@ -33,6 +33,7 @@ import {
   mcpToolCatalogIssues,
   mcpToolCatalogMembers,
   mcpToolCatalogRows,
+  mcpToolCatalogServedScope,
   mcpToolCatalogSummary,
   mcpToolModeSwitchable,
   mcpToolPickerRows,
@@ -905,6 +906,48 @@ test("mcpToolCatalogRows filters by scope, hidden tools, and query", () => {
   const hidden = mcpToolCatalogRows(entries, { showExcluded: true }).find((row) => row.excluded);
   assert.equal(hidden.aggregated, "");
   assert.equal(hidden.destructive, true);
+});
+
+test("mcpToolCatalogRows keeps upstream names and the first of repeated tools", () => {
+  const entries = [
+    {
+      server: "docs",
+      status: "connected",
+      catalog: normalizeMcpCatalog("docs", {
+        tools: [
+          { name: "search", description: "first" },
+          { name: "search", description: "second" },
+          { name: " padded " },
+        ],
+      }),
+    },
+  ];
+  const rows = mcpToolCatalogRows(entries);
+  assert.deepEqual(
+    rows.map((row) => [row.key, row.aggregated, row.description]),
+    [
+      ["docs: padded ", "docs_ padded ", ""],
+      ["docs:search", "docs_search", "first"],
+    ],
+  );
+  assert.deepEqual(mcpToolCatalogSummary(entries), { tools: 2, servers: 1 });
+});
+
+test("mcpToolCatalogServedScope drops a virtual server that is no longer served", () => {
+  const virtualServers = [
+    { name: "dev", servers: ["github"] },
+    { name: "github", servers: ["github"], conflict: "a server holds this name" },
+  ];
+  const cases = [
+    { scope: "", want: "" },
+    { scope: "dev", want: "dev" },
+    { scope: "gone", want: "" },
+    { scope: "github", want: "" },
+  ];
+  for (const { scope, want } of cases) {
+    assert.equal(mcpToolCatalogServedScope(virtualServers, scope), want, scope);
+  }
+  assert.equal(mcpToolCatalogServedScope(undefined, "dev"), "");
 });
 
 test("mcpToolCatalogMembers resolves the scope to member slugs", () => {
