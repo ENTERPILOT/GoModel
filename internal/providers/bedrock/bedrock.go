@@ -93,6 +93,19 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 		loadOpts = append(loadOpts, awsconfig.WithRegion(region))
 	}
 
+	// A configured key overrides both the SigV4 chain and the SDK's own
+	// AWS_BEARER_TOKEN_BEDROCK lookup, which still applies when none is set.
+	// The client option functions below run after that lookup, so they win.
+	// The SigV4 chain is skipped too: with a key it is never used, and a
+	// profile it cannot resolve (an MFA assume-role) must not fail the load.
+	var token bearer.TokenProvider
+	if keys := opts.Keyring(providerCfg.APIKey); keys.Len() > 0 {
+		token = bearer.TokenProviderFunc(func(ctx context.Context) (bearer.Token, error) {
+			return bearer.Token{Value: keys.NextForContext(ctx)}, nil
+		})
+		loadOpts = append(loadOpts, awsconfig.WithCredentialsProvider(awssdk.AnonymousCredentials{}))
+	}
+
 	// The SDK's own client would ignore the gateway's proxy and TLS trust. The
 	// factory supplies a proxy-aware client when the provider has an outbound
 	// proxy; the SDK clients and the credential chain (except IMDS) use it.
@@ -105,16 +118,6 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 		region = awsCfg.Region
 	}
 	p.region = region
-
-	// A configured key overrides both the SigV4 chain and the SDK's own
-	// AWS_BEARER_TOKEN_BEDROCK lookup, which still applies when none is set.
-	// The option functions run after that lookup, so they win.
-	var token bearer.TokenProvider
-	if keys := opts.Keyring(providerCfg.APIKey); keys.Len() > 0 {
-		token = bearer.TokenProviderFunc(func(ctx context.Context) (bearer.Token, error) {
-			return bearer.Token{Value: keys.NextForContext(ctx)}, nil
-		})
-	}
 
 	runtimeOpts := func(o *bedrockruntime.Options) {
 		if endpoint != "" {

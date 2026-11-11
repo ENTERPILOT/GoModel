@@ -29,7 +29,7 @@ BEDROCK_BASE_URL=us-east-1
 BEDROCK_API_KEY=ABSK...
 ```
 
-已配置的密钥优先于 AWS 凭据和 `AWS_BEARER_TOKEN_BEDROCK`。在控制台中添加类型为 `bedrock` 的提供商，设置**区域或端点**，并将密钥粘贴到 **API 密钥**；留空则使用网关主机的 AWS 凭据。
+已配置的密钥优先于 AWS 凭据和 `AWS_BEARER_TOKEN_BEDROCK`。在控制台中添加类型为 `bedrock` 的提供商，设置**区域或端点**，并将密钥粘贴到 **API 密钥**；留空时，如果网关主机设置了 `AWS_BEARER_TOKEN_BEDROCK`，则使用该令牌，否则使用主机的 AWS 凭据链。
 
 ## 运行 GoModel
 

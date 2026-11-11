@@ -38,8 +38,9 @@ BEDROCK_API_KEY=ABSK...
 
 Skonfigurowany klucz ma pierwszeństwo przed danymi uwierzytelniającymi AWS i przed
 `AWS_BEARER_TOKEN_BEDROCK`. W dashboardzie dodaj providera typu `bedrock`, ustaw
-**Region lub endpoint** i wklej klucz w **Klucze API**; zostaw puste, aby użyć
-danych uwierzytelniających AWS hosta gatewaya.
+**Region lub endpoint** i wklej klucz w **Klucze API**. Gdy pole jest puste, gateway
+używa `AWS_BEARER_TOKEN_BEDROCK` ze swojego hosta, jeśli jest ustawiony, a w
+przeciwnym razie łańcucha danych uwierzytelniających AWS hosta.
 
 ## Uruchomienie GoModel
 

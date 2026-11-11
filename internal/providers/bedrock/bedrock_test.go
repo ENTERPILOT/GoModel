@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
 func TestCallObservationCoversBedrockSDKAndFirstChunk(t *testing.T) {
@@ -595,14 +597,11 @@ func TestNew_AuthScheme(t *testing.T) {
 			t.Setenv("AWS_CONFIG_FILE", "/dev/null")
 			t.Setenv("AWS_SHARED_CREDENTIALS_FILE", "/dev/null")
 
-			// Bearer tokens require HTTPS, so this one fake server is TLS.
-			var auth string
-			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				auth = r.Header.Get("Authorization")
+			// Bearer tokens require HTTPS.
+			server, capture := providertest.TLSServer(t, func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = io.WriteString(w, `{"modelSummaries":[]}`)
-			}))
-			t.Cleanup(server.Close)
+			})
 			opts := providers.ProviderOptions{HTTPClient: server.Client()}
 			if len(tt.apiKeys) > 0 {
 				opts.Keys = providers.NewKeyring(tt.apiKeys...)
@@ -612,9 +611,40 @@ func TestNew_AuthScheme(t *testing.T) {
 
 			_, err := p.ListModels(context.Background())
 			require.NoError(t, err)
+			auth := capture.Last(t).Header.Get("Authorization")
 			assert.True(t, strings.HasPrefix(auth, tt.want), "Authorization = %q", auth)
 		})
 	}
+}
+
+// TestNew_APIKeySkipsUnresolvableProfile keeps a configured key usable when
+// AWS_PROFILE names an assume-role profile the SDK cannot resolve without an
+// MFA token provider: bearer auth never needs that profile.
+func TestNew_APIKeySkipsUnresolvableProfile(t *testing.T) {
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "config")
+	require.NoError(t, os.WriteFile(configFile, []byte(`[profile base]
+aws_access_key_id = AKIDEXAMPLE
+aws_secret_access_key = secret
+
+[profile mfa]
+role_arn = arn:aws:iam::123456789012:role/example
+source_profile = base
+mfa_serial = arn:aws:iam::123456789012:mfa/example
+`), 0o600))
+	t.Setenv("AWS_CONFIG_FILE", configFile)
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", filepath.Join(dir, "missing"))
+	t.Setenv("AWS_PROFILE", "mfa")
+	t.Setenv("AWS_ACCESS_KEY_ID", "")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
+
+	keyless := New(providers.ProviderConfig{BaseURL: "us-east-1"}, providers.ProviderOptions{}).(*Provider)
+	require.Error(t, keyless.configErr, "precondition: the MFA profile fails the SigV4 chain")
+
+	withKey := New(providers.ProviderConfig{BaseURL: "us-east-1"},
+		providers.ProviderOptions{Keys: providers.NewKeyring("ABSK-configured")}).(*Provider)
+	assert.NoError(t, withKey.configErr)
 }
 
 func TestRegistration(t *testing.T) {

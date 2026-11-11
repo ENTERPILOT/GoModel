@@ -40,8 +40,8 @@ BEDROCK_API_KEY=ABSK...
 Ein konfigurierter Key hat Vorrang vor AWS-Zugangsdaten und vor
 `AWS_BEARER_TOKEN_BEDROCK`. Legen Sie im Dashboard einen Provider vom Typ
 `bedrock` an, setzen Sie **Region oder Endpunkt** und fügen Sie den Key unter
-**API-Schlüssel** ein; leer gelassen, nutzt das Gateway die AWS-Zugangsdaten seines
-Hosts.
+**API-Schlüssel** ein. Leer gelassen, nutzt das Gateway `AWS_BEARER_TOKEN_BEDROCK`
+seines Hosts, falls gesetzt, und sonst die AWS-Credential-Chain des Hosts.
 
 ## GoModel starten
 

@@ -245,11 +245,9 @@ export function providerCredentialTypeLabel(type) {
 // awsFieldOverrides re-words the fields whose meaning differs on AWS types.
 function awsFieldOverrides(name) {
   if (name === FIELD_BASE_URL) {
-    return {
-      label: m.providers_aws_region(),
-      placeholder: "us-east-1",
-      hint: m.providers_aws_region_hint(),
-    };
+    // No placeholder: the empty-value default comes from the host's AWS
+    // region settings, so any fixed value here could be the wrong one.
+    return { label: m.providers_aws_region(), placeholder: "", hint: m.providers_aws_region_hint() };
   }
   if (name === FIELD_API_KEYS) {
     return { hint: m.providers_bedrock_api_key_hint() };

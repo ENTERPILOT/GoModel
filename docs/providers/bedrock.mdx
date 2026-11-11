@@ -38,8 +38,9 @@ BEDROCK_API_KEY=ABSK...
 
 A configured key takes precedence over AWS credentials and over
 `AWS_BEARER_TOKEN_BEDROCK`. In the dashboard, add a provider of type `bedrock`,
-set **Region or endpoint**, and paste the key into **API Keys**; leave it empty
-to use the gateway host's AWS credentials.
+set **Region or endpoint**, and paste the key into **API Keys**. Left empty, the
+gateway uses `AWS_BEARER_TOKEN_BEDROCK` from its host when set, and the host's
+AWS credential chain otherwise.
 
 ## Run GoModel
 

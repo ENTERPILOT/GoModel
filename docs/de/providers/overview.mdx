@@ -323,7 +323,7 @@ Bei diesen Providern stoßen die meisten Benutzer auf Schwierigkeiten:
 
 - **Google Vertex AI** – benötigt ein GCP-Projekt, eine Region und entweder Application Default
   Credentials oder einen JSON-Key eines Service-Accounts.
-- **Amazon Bedrock** – kein eigener API-Key; verwendet die AWS-Credential-Chain und erfordert einen
+- **Amazon Bedrock** – ein Bedrock-API-Key oder die AWS-Credential-Chain; erfordert einen
   expliziten Modellzugriff in der Bedrock-Konsole.
 - **Azure OpenAI** – Deployment-bezogene oder `/openai/v1`-Base-URLs, der Query-Parameter `api-version` und der
   Header `api-key` statt `Authorization: Bearer`.

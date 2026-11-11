@@ -6,6 +6,7 @@
   // is at fault. `collapsed` (the Advanced section) folds the hint and docs
   // link behind a "?" toggle beside the label so the section stays scannable.
   import EnabledToggle from "$lib/components/atoms/EnabledToggle.svelte";
+  import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import ProviderModelsControl from "./ProviderModelsControl.svelte";
@@ -50,17 +51,12 @@
       {#if field.required}<span class="form-field-required" aria-hidden="true">*</span>{/if}
     </label>
     {#if collapsed && hasHelp}
-      <button
-        type="button"
-        class="inline-help-toggle"
-        class:is-open={helpOpen}
-        aria-label={(helpOpen ? "Hide " : "Show ") + field.label + " help"}
-        aria-expanded={helpOpen}
-        aria-controls={id + "-hint"}
-        onclick={() => (helpOpen = !helpOpen)}
-      >
-        <span class="inline-help-toggle-icon" aria-hidden="true">?</span>
-      </button>
+      <InlineHelpSection
+        copyId={id + "-hint"}
+        label={field.label + " help"}
+        external
+        bind:open={helpOpen}
+      />
     {:else if field.docsUrl}
       <a
         class="inline-help-toggle form-field-docs-help"
@@ -133,6 +129,7 @@
         {id}
         enabled={Boolean(providersConfig.form[field.name])}
         label={field.label}
+        text={providersConfig.form[field.name] ? m.common_enabled() : m.common_disabled()}
         aria-describedby={describedBy}
         onclick={() => {
           providersConfig.form[field.name] = !providersConfig.form[field.name];
@@ -166,8 +163,11 @@
 
   {#if error}
     <small class="form-field-error" id={id + "-error"} role="alert">{error}</small>
-  {:else if showHelp}
-    <small class="form-hint" id={id + "-hint"}>
+  {/if}
+  <!-- Collapsed help stays in the DOM (hidden) so the toggle's aria-controls
+       resolves, and an opened toggle shows it even beside an error. -->
+  {#if hasHelp && (collapsed || !error)}
+    <small class="form-hint" id={id + "-hint"} hidden={!showHelp}>
       {field.hint}
       {#if collapsed && field.docsUrl}
         <a href={field.docsUrl} target="_blank" rel="noopener noreferrer">{field.docsLabel}</a>
@@ -187,14 +187,6 @@
   /* .form-field stretches its children; keep the switch at its own width. */
   .form-field-switch {
     display: flex;
-  }
-
-  .inline-help-toggle.is-open {
-    color: var(--text);
-  }
-
-  .inline-help-toggle.is-open :global(.inline-help-toggle-icon) {
-    transform: rotate(540deg);
   }
 
   .form-field-docs-help {

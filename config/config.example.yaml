@@ -905,8 +905,9 @@ providers:
   #   api_key: "${DEEPSEEK_API_KEY}"
 
   # Example: Amazon Bedrock. Authenticate with an Amazon Bedrock API key, or
-  # omit api_key to use the standard AWS credential chain (env vars,
-  # AWS_PROFILE, IAM Identity Center, container/instance roles). Set base_url
+  # omit api_key to use AWS_BEARER_TOKEN_BEDROCK when set, and otherwise the
+  # standard AWS credential chain (env vars, AWS_PROFILE, IAM Identity Center,
+  # container/instance roles). Set base_url
   # to either an AWS region ("us-east-1") or a full https endpoint to enable
   # the provider; without it gomodel falls back to AWS_REGION /
   # AWS_DEFAULT_REGION.
