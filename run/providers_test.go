@@ -80,10 +80,10 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			options:      map[string][]string{"api_mode": {"auto", "native", "chat_compatible"}},
 		},
 		{
-			// Authenticates through the AWS SDK credential chain, never a key.
+			// An optional Bedrock API key, else the AWS SDK credential chain.
 			providerType: "bedrock",
-			fields:       []string{"base_url", "proxy_url", "models", "models_mode", "billable"},
-			absent:       []string{"api_keys"},
+			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "proxy_url", "models", "models_mode", "billable"},
+			required:     nil,
 		},
 		{
 			// Bearer token or AWS_BEARER_TOKEN_BEDROCK, plus a request shape.
