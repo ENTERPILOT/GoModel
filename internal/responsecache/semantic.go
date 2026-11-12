@@ -147,7 +147,7 @@ func (m *semanticCacheMiddleware) Handle(ex exchange, body []byte, next func() e
 		return next()
 	}
 	baseParams := computeParamsHash(body, path, plan, core.GetGuardrailsHash(ctx), m.embedderIdentity, m.cfg.ExcludeSystemPrompt)
-	paramsHash := sha256HexOf(baseParams + "\x00" + msgFp)
+	paramsHash := requestCeilingsScopedHash(sha256HexOf(baseParams+"\x00"+msgFp), core.RequestCeilingsFromContext(ctx))
 	if m.partitionByUserPath {
 		// Every VecStore backend filters Search by exact params_hash inside the
 		// vector query, so this confines matching to the caller's partition. The

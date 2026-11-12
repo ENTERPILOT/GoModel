@@ -333,7 +333,9 @@ export function buildUpsertUserPayload(form) {
   }
   const tokensText = String(source.max_output_tokens ?? "").trim();
   const maxOutputTokens = tokensText ? Number(tokensText) : 0;
-  if (!Number.isInteger(maxOutputTokens) || maxOutputTokens < 0) {
+  // An empty field clears the ceiling; a typed 0 would clear it silently and
+  // an integer past the safe range would not survive the JSON round trip.
+  if (tokensText && (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens < 1)) {
     return { error: m.users_max_output_tokens_invalid() };
   }
   const trimmed = String(source.user_path || "").trim();

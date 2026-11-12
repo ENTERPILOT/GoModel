@@ -102,7 +102,7 @@ func appendControlEffort(efforts []string, raw json.RawMessage) []string {
 		return efforts
 	}
 	switch {
-	case bytes.Equal(raw, []byte("false")), bytes.Equal(raw, []byte("0")):
+	case bytes.Equal(raw, []byte("false")), isZero(raw):
 		return append(efforts, "none")
 	case raw[0] == '"':
 		return append(efforts, stringOrUnranked(raw))
@@ -117,19 +117,28 @@ func appendControlEffort(efforts []string, raw json.RawMessage) []string {
 	return append(efforts, unrankedEffort)
 }
 
-// withoutClientEffort drops the effort spellings a forced effort replaces:
-// the flat reasoning_effort and Gemini's thinking budget and level, so no
-// provider reads them instead of the forced reasoning.effort. Provider
-// controls such as chat_template_kwargs stay, since a virtual model's own
-// params may set them next to its effort.
+// isZero reports whether raw is the number zero in any JSON spelling: 0, -0,
+// 0.0, 0e0.
+func isZero(raw json.RawMessage) bool {
+	var number float64
+	return (raw[0] == '-' || (raw[0] >= '0' && raw[0] <= '9')) && json.Unmarshal(raw, &number) == nil && number == 0
+}
+
+// withoutClientEffort drops the effort spellings a forced effort replaces
+// once the parameter sets are applied: the flat reasoning_effort and Gemini's
+// thinking budget and level, so no provider reads them instead of the forced
+// reasoning.effort. Provider controls such as chat_template_kwargs stay:
+// the client's are already gone (see withoutReasoningControls), so the ones
+// left are those a virtual model's own params set next to its effort.
 func withoutClientEffort(fields core.UnknownJSONFields) core.UnknownJSONFields {
 	fields = fields.Without(flatReasoningEffortField)
 	return rewriteMember(fields, "extra_body", withoutGoogleThinkingEffort)
 }
 
-// withoutReasoningControls drops every reasoning control a request carries,
-// for an effort ceiling: what is left upstream is the ceiling the gateway
-// writes to reasoning.effort. Other members, such as Gemini's
+// withoutReasoningControls drops every reasoning control a request carries:
+// under an effort ceiling, where what is left upstream is the ceiling the
+// gateway writes to reasoning.effort, and from the client's request before a
+// forced effort and its parameter sets apply. Other members, such as Gemini's
 // include_thoughts or unrelated chat template switches, stay.
 func withoutReasoningControls(fields core.UnknownJSONFields) core.UnknownJSONFields {
 	fields = fields.Without(append([]string{flatReasoningEffortField}, reasoningControlFields...)...)

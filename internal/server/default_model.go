@@ -40,17 +40,14 @@ func modelOrPathDefault(c *echo.Context, resolver RequestModelResolver, model, p
 }
 
 // fillMessagesDefaultModel gives a Messages request that names no model the
-// default workflow resolution chose for it, and reports whether it did. The
-// Messages translation requires a model, unlike the OpenAI-dialect requests,
-// whose model is filled in from the resolution during preparation.
-func fillMessagesDefaultModel(c *echo.Context, req *anthropicapi.MessagesRequest) bool {
+// default workflow resolution chose for it. The Messages translation requires
+// a model, unlike the OpenAI-dialect requests, whose model is filled in from
+// the resolution during preparation.
+func fillMessagesDefaultModel(c *echo.Context, req *anthropicapi.MessagesRequest) {
 	if req == nil || strings.TrimSpace(req.Model) != "" {
-		return false
+		return
 	}
-	resolution := currentRequestModelResolution(c)
-	if resolution == nil || resolution.Requested.Model == "" {
-		return false
+	if resolution := currentRequestModelResolution(c); resolution != nil {
+		req.Model = resolution.Requested.Model
 	}
-	req.Model = resolution.Requested.Model
-	return true
 }

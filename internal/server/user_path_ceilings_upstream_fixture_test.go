@@ -132,6 +132,8 @@ type upstreamFixture struct {
 	upstreams map[string]*providertest.Capture
 	handler   *Handler
 	resolve   echo.MiddlewareFunc
+	// setRows replaces the user rows, as an operator editing them would.
+	setRows func(t *testing.T, rows []users.User)
 }
 
 // newUpstreamFixture wires the user rows and virtual models the way the app
@@ -147,12 +149,18 @@ func newUpstreamFixture(t *testing.T, rows []users.User, models []virtualmodels.
 	vmService, err := virtualmodels.NewService(newAliasesTestStore(models...), catalog, true)
 	require.NoError(t, err)
 	require.NoError(t, vmService.Refresh(ctx))
-	userService, err := users.NewService(&policyTestUserStore{rows: rows}, catalog)
+	userStore := &policyTestUserStore{rows: rows}
+	userService, err := users.NewService(userStore, catalog)
 	require.NoError(t, err)
 	require.NoError(t, userService.Refresh(ctx))
 	vmService.SetAccessPolicy(userService)
 
 	f := &upstreamFixture{upstreams: map[string]*providertest.Capture{}}
+	f.setRows = func(t *testing.T, rows []users.User) {
+		t.Helper()
+		userStore.rows = rows
+		require.NoError(t, userService.Refresh(ctx))
+	}
 	server := func(name, body string) string {
 		down := slices.Contains(failing, name)
 		srv, capture := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {

@@ -118,6 +118,48 @@ func TestCapChatTokens(t *testing.T) {
 			wantTokens: new(100),
 			absent:     []string{"max_completion_tokens"},
 		},
+		{
+			name:       "a null spelling next to a set one is dropped",
+			maxTokens:  new(50),
+			extras:     map[string]json.RawMessage{"max_completion_tokens": json.RawMessage(`null`)},
+			limit:      100,
+			wantTokens: new(50),
+			absent:     []string{"max_completion_tokens"},
+		},
+		{
+			name:       "max_output_tokens alone becomes max_tokens, which adapters read",
+			extras:     map[string]json.RawMessage{"max_output_tokens": json.RawMessage(`64`)},
+			limit:      100,
+			wantTokens: new(64),
+			absent:     []string{"max_output_tokens"},
+		},
+		{
+			name:       "max_output_tokens alone above the ceiling becomes the ceiling",
+			extras:     map[string]json.RawMessage{"max_output_tokens": json.RawMessage(`9000`)},
+			limit:      100,
+			wantTokens: new(100),
+			absent:     []string{"max_output_tokens"},
+		},
+		{name: "a zero limit is replaced by the ceiling", maxTokens: new(0), limit: 100, wantTokens: new(100)},
+		{name: "a negative limit is replaced by the ceiling", maxTokens: new(-1), limit: 100, wantTokens: new(100)},
+		{
+			name:       "a negative max_completion_tokens is replaced by the ceiling",
+			extras:     map[string]json.RawMessage{"max_completion_tokens": json.RawMessage(`-1`)},
+			limit:      100,
+			wantExtras: map[string]string{"max_completion_tokens": `100`},
+		},
+		{
+			name:       "a zero max_completion_tokens is replaced by the ceiling",
+			extras:     map[string]json.RawMessage{"max_completion_tokens": json.RawMessage(`0`)},
+			limit:      100,
+			wantExtras: map[string]string{"max_completion_tokens": `100`},
+		},
+		{
+			name:       "a fractional limit is replaced by the ceiling",
+			extras:     map[string]json.RawMessage{"max_completion_tokens": json.RawMessage(`64.5`)},
+			limit:      100,
+			wantExtras: map[string]string{"max_completion_tokens": `100`},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -167,10 +209,28 @@ func TestCapResponsesTokens(t *testing.T) {
 		{name: "higher client limit is lowered", maxTokens: new(4000), limit: 100, wantTokens: new(100)},
 		{
 			name:       "chat spellings are lowered too",
+			maxTokens:  new(50),
 			extras:     map[string]json.RawMessage{"max_tokens": json.RawMessage(`9000`), "max_completion_tokens": json.RawMessage(`10`)},
 			limit:      100,
+			wantTokens: new(50),
 			wantExtras: map[string]string{"max_tokens": `100`, "max_completion_tokens": `10`},
 		},
+		{
+			name:       "chat spellings alone become max_output_tokens, the lowest winning",
+			extras:     map[string]json.RawMessage{"max_tokens": json.RawMessage(`9000`), "max_completion_tokens": json.RawMessage(`10`)},
+			limit:      100,
+			wantTokens: new(10),
+			absent:     []string{"max_tokens", "max_completion_tokens"},
+		},
+		{
+			name:       "a chat spelling alone above the ceiling becomes the ceiling",
+			extras:     map[string]json.RawMessage{"max_tokens": json.RawMessage(`9000`)},
+			limit:      100,
+			wantTokens: new(100),
+			absent:     []string{"max_tokens"},
+		},
+		{name: "a zero limit is replaced by the ceiling", maxTokens: new(0), limit: 100, wantTokens: new(100)},
+		{name: "a negative limit is replaced by the ceiling", maxTokens: new(-1), limit: 100, wantTokens: new(100)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -202,4 +262,42 @@ func clonePtr(value *int) *int {
 		return nil
 	}
 	return new(*value)
+}
+
+// A body may repeat a member, and decoders differ on which occurrence they
+// keep, so one occurrence outside the cap rewrites them all.
+func TestCapChatTokensBoundsEveryOccurrenceOfARepeatedMember(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"one above the ceiling", `{"model":"m","max_completion_tokens":5,"max_completion_tokens":9000}`, `5`},
+		{"none within the ceiling", `{"model":"m","max_completion_tokens":-1,"max_completion_tokens":9000}`, `100`},
+		{"a null next to a limit", `{"model":"m","max_completion_tokens":null,"max_completion_tokens":64}`, `64`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var req core.ChatRequest
+			require.NoError(t, json.Unmarshal([]byte(tt.body), &req))
+
+			capped, err := CapChatTokens(&req, 100)
+			require.NoError(t, err)
+
+			values := capped.ExtraFields.LookupAll("max_completion_tokens")
+			require.Len(t, values, 1)
+			assert.JSONEq(t, tt.want, string(values[0]))
+			assert.Nil(t, capped.MaxTokens)
+		})
+	}
+}
+
+func TestReasoningEffortLevelsCannotBeChangedFromOutside(t *testing.T) {
+	levels := ReasoningEffortLevels()
+	require.Equal(t, []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}, levels)
+
+	levels[0], levels[6] = "max", "none"
+	assert.Equal(t, 0, EffortRank("none"))
+	assert.Equal(t, 6, EffortRank("max"))
+	assert.Equal(t, "none", ReasoningEffortLevels()[0])
 }

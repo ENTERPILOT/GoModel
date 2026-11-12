@@ -84,7 +84,7 @@ func applyReasoning(req *anthropicRequest, model, effort string) {
 			BudgetTokens: budget,
 		}
 		if req.MaxTokens <= budget {
-			adjusted := budget + 1024
+			adjusted := budget + thinkingAnswerRoom
 			slog.Info("MaxTokens adjusted for extended thinking",
 				"original", req.MaxTokens, "adjusted", adjusted)
 			req.MaxTokens = adjusted

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -83,7 +84,9 @@ func (s *translatedInferenceService) dispatchMessagesNative(c *echo.Context, req
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	body, err = rewriteMessagesModel(body, req.Model)
+	// A request served by its user path's default model may name no model
+	// at all, so the resolved one is added where there is none to replace.
+	body, err = setMessagesModel(body, req.Model)
 	if err != nil {
 		return handleError(c, invalidRequestBodyError(c, err))
 	}
@@ -167,10 +170,29 @@ func rewriteMessagesModel(body []byte, model string) ([]byte, error) {
 	return replaceTopLevelMember(body, "model", encoded)
 }
 
+// setMessagesModel is rewriteMessagesModel for a body that may have no model
+// member: the member is then added at the start of the object.
+func setMessagesModel(body []byte, model string) ([]byte, error) {
+	if strings.TrimSpace(model) == "" {
+		return body, nil
+	}
+	encoded, err := json.Marshal(model)
+	if err != nil {
+		return nil, err
+	}
+	return spliceTopLevelMember(body, "model", encoded, true)
+}
+
 // replaceTopLevelMember returns body with the value of its top-level key
 // member replaced by value, splicing only those bytes. The body is returned
 // unchanged when the member is absent or already holds value.
 func replaceTopLevelMember(body []byte, key string, value []byte) ([]byte, error) {
+	return spliceTopLevelMember(body, key, value, false)
+}
+
+// spliceTopLevelMember is replaceTopLevelMember that, when add is set, puts
+// an absent member first in the object instead of leaving the body as it is.
+func spliceTopLevelMember(body []byte, key string, value []byte, add bool) ([]byte, error) {
 	dec := json.NewDecoder(bytes.NewReader(body))
 	tok, err := dec.Token()
 	if err != nil {
@@ -184,6 +206,7 @@ func replaceTopLevelMember(body []byte, key string, value []byte) ([]byte, error
 	// gateway read and the one to rewrite.
 	var found json.RawMessage
 	var foundEnd int64
+	open, empty := dec.InputOffset(), !dec.More()
 	for dec.More() {
 		keyTok, err := dec.Token()
 		if err != nil {
@@ -199,6 +222,17 @@ func replaceTopLevelMember(body []byte, key string, value []byte) ([]byte, error
 		}
 		found = raw
 		foundEnd = dec.InputOffset()
+	}
+	if found == nil && add {
+		member, err := json.Marshal(key)
+		if err != nil {
+			return nil, err
+		}
+		member = append(append(member, ':'), value...)
+		if !empty {
+			member = append(member, ',')
+		}
+		return slices.Concat(body[:open], member, body[open:]), nil
 	}
 	if found == nil || bytes.Equal(found, value) {
 		return body, nil

@@ -3,7 +3,6 @@ package users
 import (
 	"context"
 	"log/slog"
-	"strconv"
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -100,8 +99,8 @@ func failSafeEffortCeiling(userPath, effort string) string {
 		return normalized
 	}
 	slog.Warn("user policy has an unknown max_reasoning_effort; enforcing \"none\"",
-		"user_path", userPath, "max_reasoning_effort", strconv.Quote(effort))
-	return requestparams.ReasoningEffortLevels[0]
+		"user_path", core.LogText(userPath), "max_reasoning_effort", core.LogText(effort))
+	return requestparams.ReasoningEffortLevels()[0]
 }
 
 // hasRequestPolicy reports whether the row sets any request policy.

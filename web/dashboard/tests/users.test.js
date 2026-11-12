@@ -185,7 +185,8 @@ test("buildUpsertUserPayload carries the request policy and rejects a bad token 
   assert.equal(payload.max_output_tokens, 4096);
   // A number input hands back a number, not a string.
   assert.equal(buildUpsertUserPayload({ ...defaultUserForm(), user_path: "/acme", max_output_tokens: 512 }).payload.max_output_tokens, 512);
-  for (const bad of ["-1", "1.5", "many"]) {
+  assert.equal(buildUpsertUserPayload({ ...defaultUserForm(), user_path: "/acme", max_output_tokens: " " }).payload.max_output_tokens, undefined, "an empty field clears the ceiling");
+  for (const bad of ["-1", "1.5", "many", "0", 0, "1e20", "9007199254740992"]) {
     assert.ok(buildUpsertUserPayload({ ...defaultUserForm(), user_path: "/acme", max_output_tokens: bad }).error, bad);
   }
 });

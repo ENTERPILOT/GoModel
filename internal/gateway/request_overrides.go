@@ -70,6 +70,13 @@ func withCeilingsContext(ctx context.Context, ceilings requestparams.Ceilings) c
 	return core.WithRequestCeilings(ctx, core.RequestCeilings{ReasoningEffort: ceilings.ReasoningEffort, OutputTokens: ceilings.OutputTokens})
 }
 
+// WithRequestCeilings attaches the ceilings of workflow's primary attempt to
+// ctx, for a caller that reaches the response cache without preparing the
+// request: the cache scopes its entries to them.
+func (o *InferenceOrchestrator) WithRequestCeilings(ctx context.Context, workflow *core.Workflow) context.Context {
+	return withCeilingsContext(ctx, o.RequestOverrides(ctx, workflow).Ceilings)
+}
+
 // RequestOverrides returns what the operator forces on the primary attempt of
 // workflow, or a zero value when nothing is configured. Paths that forward
 // the client's body verbatim use it to fall back to the translated pipeline,
@@ -111,9 +118,12 @@ func overridesError(err error) error {
 // parameters applied, then the reasoning effort forced, then the ceilings.
 // The effort goes after the parameters so the typed override keeps winning
 // over anything the parameter sets carry; the ceilings go last so they bound
-// a forced or defaulted value as they bound the client's.
+// a forced or defaulted value as they bound the client's. A forced effort
+// replaces every reasoning control the client sent, so those are dropped
+// before the parameters apply: a control the operator configures next to the
+// effort stays.
 func ChatRequestWithOverrides(req *core.ChatRequest, overrides requestparams.Overrides) (*core.ChatRequest, error) {
-	applied, err := requestparams.ApplyChat(req, overrides.Defaults, overrides.Params)
+	applied, err := requestparams.ApplyChat(chatRequestForEffort(req, overrides.ReasoningEffort), overrides.Defaults, overrides.Params)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +135,7 @@ func ChatRequestWithOverrides(req *core.ChatRequest, overrides requestparams.Ove
 
 // ResponsesRequestWithOverrides is ChatRequestWithOverrides for Responses.
 func ResponsesRequestWithOverrides(req *core.ResponsesRequest, overrides requestparams.Overrides) (*core.ResponsesRequest, error) {
-	applied, err := requestparams.ApplyResponses(req, overrides.Defaults, overrides.Params)
+	applied, err := requestparams.ApplyResponses(responsesRequestForEffort(req, overrides.ReasoningEffort), overrides.Defaults, overrides.Params)
 	if err != nil {
 		return nil, err
 	}
@@ -133,6 +143,28 @@ func ResponsesRequestWithOverrides(req *core.ResponsesRequest, overrides request
 		applied = ResponsesRequestWithReasoningEffort(applied, overrides.ReasoningEffort)
 	}
 	return ResponsesRequestWithCeilings(applied, overrides.Ceilings)
+}
+
+// chatRequestForEffort returns the client's request as a forced effort takes
+// it: without its reasoning controls. It is req itself when no effort is
+// forced or it carries no extra fields.
+func chatRequestForEffort(req *core.ChatRequest, effort string) *core.ChatRequest {
+	if req == nil || effort == "" || req.ExtraFields.IsEmpty() {
+		return req
+	}
+	cloned := *req
+	cloned.ExtraFields = withoutReasoningControls(req.ExtraFields)
+	return &cloned
+}
+
+// responsesRequestForEffort is chatRequestForEffort for Responses.
+func responsesRequestForEffort(req *core.ResponsesRequest, effort string) *core.ResponsesRequest {
+	if req == nil || effort == "" || req.ExtraFields.IsEmpty() {
+		return req
+	}
+	cloned := *req
+	cloned.ExtraFields = withoutReasoningControls(req.ExtraFields)
+	return &cloned
 }
 
 func chatRequestSelectorOf(req *core.ChatRequest) core.ModelSelector {
@@ -144,7 +176,7 @@ func responsesRequestSelectorOf(req *core.ResponsesRequest) core.ModelSelector {
 }
 
 // ChatRequestWithReasoningEffort returns a shallow copy of req whose reasoning
-// effort is effort. The client's own effort settings (a flat reasoning_effort,
+// effort is effort. The effort settings left on it (a flat reasoning_effort,
 // a Gemini thinking budget or level) are dropped so no provider reads them
 // instead.
 func ChatRequestWithReasoningEffort(req *core.ChatRequest, effort string) *core.ChatRequest {
@@ -164,7 +196,7 @@ func chatRequestWithEffort(req *core.ChatRequest, effort string, strip func(core
 		return nil
 	}
 	cloned := *req
-	cloned.Reasoning = &core.Reasoning{Effort: effort}
+	cloned.Reasoning = reasoningWithEffort(req.Reasoning, effort)
 	cloned.ExtraFields = strip(req.ExtraFields)
 	return &cloned
 }
@@ -175,13 +207,18 @@ func responsesRequestWithEffort(req *core.ResponsesRequest, effort string, strip
 		return nil
 	}
 	cloned := *req
-	reasoning := core.Reasoning{Effort: effort}
-	if req.Reasoning != nil {
-		// An override replaces the effort, not a summary the client
-		// explicitly requested.
-		reasoning.Summary = req.Reasoning.Summary
-	}
-	cloned.Reasoning = &reasoning
+	cloned.Reasoning = reasoningWithEffort(req.Reasoning, effort)
 	cloned.ExtraFields = strip(req.ExtraFields)
 	return &cloned
+}
+
+// reasoningWithEffort returns reasoning with its effort replaced. An override
+// or a ceiling replaces the effort, not a summary the client explicitly
+// requested.
+func reasoningWithEffort(reasoning *core.Reasoning, effort string) *core.Reasoning {
+	replaced := core.Reasoning{Effort: effort}
+	if reasoning != nil {
+		replaced.Summary = reasoning.Summary
+	}
+	return &replaced
 }

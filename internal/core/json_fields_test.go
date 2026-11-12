@@ -428,3 +428,13 @@ func TestUnknownJSONFieldsLookupAllSeesRepeatedMembers(t *testing.T) {
 	assert.Equal(t, json.RawMessage(`1`), fields.Lookup("a"), "Lookup still reports the first")
 	assert.Nil(t, fields.LookupAll("missing"))
 }
+
+func TestUnknownJSONFieldsRespelledNamesOtherLetterCases(t *testing.T) {
+	fields, err := extractUnknownJSONFields([]byte(`{"model":"m","max_tokens":1,"MAX_TOKENS":2,"Max_Tokens":3,"max-tokens":4,"seed":5,"Seed":6}`), "model")
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"MAX_TOKENS", "Max_Tokens"}, fields.Respelled("max_tokens", "max_completion_tokens"))
+	assert.Nil(t, fields.Respelled("max-tokens"), "an exact spelling is not a respelling")
+	assert.Nil(t, fields.Respelled())
+	assert.Nil(t, UnknownJSONFields{}.Respelled("max_tokens"))
+}

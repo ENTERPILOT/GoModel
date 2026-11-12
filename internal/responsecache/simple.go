@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -156,12 +157,14 @@ func (m *simpleCacheMiddleware) StoreAfter(ex exchange, key string, body []byte,
 }
 
 // exactCacheKey derives the exact-cache key for one exchange, scoping the entry
-// to the request's guardrail chain identity and, when partitioning is on, to its
-// effective user path. Lookups, writes and in-flight coalescing all use this key;
-// it is costly for large bodies, so handle derives it once per request.
+// to the request's guardrail chain identity, to the caller's request ceilings
+// and, when partitioning is on, to its effective user path. Lookups, writes and
+// in-flight coalescing all use this key; it is costly for large bodies, so
+// handle derives it once per request.
 func (m *simpleCacheMiddleware) exactCacheKey(ex exchange, body []byte) string {
 	ctx := ex.Context()
 	key := hashRequest(ex.Path(), body, core.GetWorkflow(ctx), core.GetGuardrailsHash(ctx))
+	key = requestCeilingsScopedHash(key, core.RequestCeilingsFromContext(ctx))
 	if m.partitionByUserPath {
 		return userPathPartitionedHash(key, core.UserPathFromContext(ctx))
 	}
@@ -307,6 +310,20 @@ func hashRequest(path string, body []byte, plan *core.Workflow, chainHash string
 	h.Write([]byte{0})
 	h.Write(cacheKeyRequestBody(path, body))
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// requestCeilingsScopedHash scopes a cache identity (an exact-cache key or a
+// semantic params hash) to the ceilings the caller's policy puts on the
+// request. A provider adapter applies them after the body the identity is
+// built from (it clamps a token limit it raises or defaults, and an effort it
+// injects), so two requests with one body and different ceilings are answered
+// differently upstream and must not share an entry. Without ceilings the
+// identity is unchanged.
+func requestCeilingsScopedHash(hash string, ceilings core.RequestCeilings) string {
+	if ceilings == (core.RequestCeilings{}) {
+		return hash
+	}
+	return sha256HexOf("request_ceilings\x00" + ceilings.ReasoningEffort + "\x00" + strconv.Itoa(ceilings.OutputTokens) + "\x00" + hash)
 }
 
 // userPathPartitionedHash scopes a cache identity (an exact-cache key or a

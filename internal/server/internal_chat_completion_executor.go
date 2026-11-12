@@ -134,7 +134,7 @@ func (e *InternalChatCompletionExecutor) ChatCompletion(ctx context.Context, req
 	}
 	defer release()
 
-	ctx = e.orchestrator.WithCacheRequestContext(ctx, workflow)
+	ctx = e.orchestrator.WithRequestCeilings(e.orchestrator.WithCacheRequestContext(ctx, workflow), workflow)
 	execReq := gateway.CloneChatRequestForSelector(req, resolution.ResolvedSelector)
 	resp, meta, cacheType, err = e.executeChatCompletion(ctx, workflow, execReq)
 	if err != nil {

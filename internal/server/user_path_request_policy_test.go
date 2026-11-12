@@ -411,12 +411,14 @@ func TestUserPathPolicyAndNativeMessagesForwarding(t *testing.T) {
 		require.NotNil(t, provider.capturedChatReq.Reasoning)
 		assert.Equal(t, "medium", provider.capturedChatReq.Reasoning.Effort)
 	})
-	t.Run("a request served by the default model is translated", func(t *testing.T) {
+	t.Run("a request served by the default model is forwarded with the model added", func(t *testing.T) {
 		provider, post := newFixture(t)
 		post("/eng/alice", `{"max_tokens":1024,"messages":[{"role":"user","content":"hi"}]}`)
-		assert.Nil(t, provider.lastPassthroughReq, "the verbatim body names no model")
-		require.NotNil(t, provider.capturedChatReq)
-		assert.Equal(t, "claude-test", provider.capturedChatReq.Model)
+		require.NotNil(t, provider.lastPassthroughReq)
+		assert.Nil(t, provider.capturedChatReq)
+		forwarded, err := io.ReadAll(provider.lastPassthroughReq.Body)
+		require.NoError(t, err)
+		assert.Equal(t, `{"model":"claude-test","max_tokens":1024,"messages":[{"role":"user","content":"hi"}]}`, string(forwarded))
 	})
 	t.Run("another team is forwarded verbatim whatever it asks for", func(t *testing.T) {
 		provider, post := newFixture(t)
