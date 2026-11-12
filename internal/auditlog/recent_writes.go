@@ -84,10 +84,10 @@ const backgroundIndexLockKey int64 = 0x676d2d6175646974
 // backgroundIndexRetry is the pause between build attempts; tests shorten it.
 var backgroundIndexRetry = storage.BackgroundIndexRetry
 
-// writtenAtIndexBuilder returns the builder of the PostgreSQL written_at
-// index. It reports false on SQLite, which builds the index inline, and on a
-// DB without a pool to hold the build lock on.
-func writtenAtIndexBuilder(db sqlx.DB) (storage.BackgroundIndexBuilder, bool) {
+// backgroundIndexBuilder returns the builder of the PostgreSQL background
+// indexes. It reports false on SQLite, which builds its indexes inline, and
+// on a DB without a pool to hold the build lock on.
+func backgroundIndexBuilder(db sqlx.DB) (storage.BackgroundIndexBuilder, bool) {
 	pool := sqlx.PostgreSQLPool(db)
 	if pool == nil {
 		return storage.BackgroundIndexBuilder{}, false

@@ -92,13 +92,112 @@ func (b BackgroundIndexBuilder) Build(ctx context.Context, indexes ...Background
 	}
 }
 
+// BuildOnce gives each index that is not valid yet one build attempt, in
+// order, and reports whether all of them are valid when it returns. Unlike
+// Build it does not retry an attempt that failed. It does wait, checking every
+// Retry, while another replica holds the lock: that replica may be building
+// this very index, and if it stops before it gets there the index would
+// otherwise be left unbuilt until the next start.
+func (b BackgroundIndexBuilder) BuildOnce(ctx context.Context, indexes ...BackgroundIndex) bool {
+	retry := b.Retry
+	if retry <= 0 {
+		retry = BackgroundIndexRetry
+	}
+	all := true
+	for _, index := range indexes {
+		outcome := b.attempt(ctx, index)
+		for outcome == buildBusy {
+			select {
+			case <-ctx.Done():
+				return false
+			case <-time.After(retry):
+			}
+			outcome = b.attempt(ctx, index)
+		}
+		all = all && outcome == buildValid
+	}
+	return all
+}
+
 // TryBuild makes one attempt and reports whether the index is valid when it
 // returns. It does nothing but check when another session holds the lock.
 func (b BackgroundIndexBuilder) TryBuild(ctx context.Context, index BackgroundIndex) bool {
+	return b.attempt(ctx, index) == buildValid
+}
+
+// buildOutcome is how one attempt at an index ended.
+type buildOutcome int
+
+const (
+	// buildValid: the index is valid.
+	buildValid buildOutcome = iota
+	// buildBusy: another session holds the lock, so nothing was attempted.
+	buildBusy
+	// buildFailed: this session's attempt failed.
+	buildFailed
+)
+
+func (b BackgroundIndexBuilder) attempt(ctx context.Context, index BackgroundIndex) buildOutcome {
 	if exists, valid, err := backgroundIndexState(ctx, b.Pool, index.Name); err == nil && exists && valid {
+		return buildValid
+	}
+	outcome := buildFailed
+	locked := b.withLock(ctx, func(conn *pgxpool.Conn) bool {
+		// Checked again under the lock: another replica may have finished
+		// the build between the first check and taking the lock.
+		exists, valid, err := backgroundIndexState(ctx, conn, index.Name)
+		if err != nil {
+			return true
+		}
+		if exists && valid {
+			outcome = buildValid
+			return true
+		}
+		if exists {
+			slog.Warn("rebuilding invalid " + index.Label + " index")
+			if _, err := conn.Exec(ctx, `DROP INDEX CONCURRENTLY IF EXISTS `+index.Name); err != nil {
+				logBackgroundIndexError(ctx, index, "drop invalid", err)
+				return true
+			}
+		}
+		started := time.Now()
+		if _, err := conn.Exec(ctx, index.Create); err != nil {
+			logBackgroundIndexError(ctx, index, "create", err)
+			return true
+		}
+		if _, valid, err := backgroundIndexState(ctx, conn, index.Name); err != nil || !valid {
+			return true
+		}
+		slog.Info(index.Label+" index ready", "duration", time.Since(started).Round(time.Millisecond))
+		outcome = buildValid
+		return true
+	})
+	if !locked && ctx.Err() == nil {
+		return buildBusy
+	}
+	return outcome
+}
+
+// TryDrop makes one attempt to retire an index the table no longer needs,
+// and reports whether it is gone when it returns. The drop runs CONCURRENTLY
+// and under the lock, so it never waits on another replica's build.
+func (b BackgroundIndexBuilder) TryDrop(ctx context.Context, index BackgroundIndex) bool {
+	if exists, _, err := backgroundIndexState(ctx, b.Pool, index.Name); err == nil && !exists {
 		return true
 	}
+	return b.withLock(ctx, func(conn *pgxpool.Conn) bool {
+		if _, err := conn.Exec(ctx, `DROP INDEX CONCURRENTLY IF EXISTS `+index.Name); err != nil {
+			logBackgroundIndexError(ctx, index, "drop", err)
+			return false
+		}
+		return true
+	})
+}
 
+// withLock runs fn on a connection holding the session advisory lock and
+// returns its result. It returns false without running fn when the lock
+// cannot be taken, which while ctx is live means another session holds it.
+func (b BackgroundIndexBuilder) withLock(ctx context.Context, fn func(conn *pgxpool.Conn) bool) bool {
 	conn, err := b.Pool.Acquire(ctx)
 	if err != nil {
 		return false
@@ -118,33 +217,7 @@ func (b BackgroundIndexBuilder) TryBuild(ctx context.Context, index BackgroundIn
 			_ = conn.Conn().Close(unlockCtx)
 		}
 	}()
-
-	// Checked again under the lock: another replica may have finished the
-	// build between the first check and taking the lock.
-	exists, valid, err := backgroundIndexState(ctx, conn, index.Name)
-	if err != nil {
-		return false
-	}
-	if exists && valid {
-		return true
-	}
-	if exists {
-		slog.Warn("rebuilding invalid " + index.Label + " index")
-		if _, err := conn.Exec(ctx, `DROP INDEX CONCURRENTLY IF EXISTS `+index.Name); err != nil {
-			logBackgroundIndexError(ctx, index, "drop invalid", err)
-			return false
-		}
-	}
-	started := time.Now()
-	if _, err := conn.Exec(ctx, index.Create); err != nil {
-		logBackgroundIndexError(ctx, index, "create", err)
-		return false
-	}
-	if _, valid, err := backgroundIndexState(ctx, conn, index.Name); err != nil || !valid {
-		return false
-	}
-	slog.Info(index.Label+" index ready", "duration", time.Since(started).Round(time.Millisecond))
-	return true
+	return fn(conn)
 }
 
 type pgQueryRower interface {

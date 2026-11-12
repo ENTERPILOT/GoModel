@@ -1,10 +1,7 @@
 package auditlog
 
 import (
-	"context"
-	"log/slog"
-	"time"
-
+	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
@@ -44,44 +41,21 @@ func modelIndexStatements(dialect sqlx.Dialect) []string {
 	return append(statements, "DROP INDEX IF EXISTS "+legacyRequestedModelIndex)
 }
 
-// ensureModelIndexesConcurrently builds the PostgreSQL model indexes without
-// blocking writes to an existing large table. The legacy index is dropped only
-// once both replacements exist. Failures are logged: a missing index slows the
-// model filter down but does not break it.
-func ensureModelIndexesConcurrently(ctx context.Context, db sqlx.DB) {
-	if db.Dialect() != sqlx.PostgreSQL {
-		return
+// modelBackgroundIndexes are the PostgreSQL model indexes, built CONCURRENTLY
+// so an existing large table keeps accepting writes while they build.
+func modelBackgroundIndexes() []storage.BackgroundIndex {
+	labels := []string{"audit requested model", "audit resolved model"}
+	indexes := make([]storage.BackgroundIndex, 0, len(labels))
+	for i, index := range modelIndexes(sqlx.PostgreSQL) {
+		indexes = append(indexes, storage.BackgroundIndex{
+			Name:   index.name,
+			Create: "CREATE INDEX CONCURRENTLY IF NOT EXISTS " + index.name + " ON audit_logs(" + index.columns + ")",
+			Label:  labels[i],
+		})
 	}
-	for _, index := range modelIndexes(sqlx.PostgreSQL) {
-		if err := buildIndexConcurrently(ctx, db, index); err != nil {
-			slog.Warn("auditlog: failed to create model index", "index", index.name, "error", err)
-			return
-		}
-	}
-	if _, err := db.Exec(ctx, "DROP INDEX CONCURRENTLY IF EXISTS "+legacyRequestedModelIndex); err != nil {
-		slog.Warn("auditlog: failed to drop legacy model index", "index", legacyRequestedModelIndex, "error", err)
-	}
+	return indexes
 }
 
-// buildIndexConcurrently creates a PostgreSQL index with CREATE INDEX
-// CONCURRENTLY, which keeps the table writable while it builds. A build
-// interrupted midway leaves an invalid index behind; it is dropped and rebuilt.
-func buildIndexConcurrently(ctx context.Context, db sqlx.DB, index auditIndex) error {
-	var valid *bool
-	err := db.QueryRow(ctx, `SELECT i.indisvalid FROM pg_index i WHERE i.indexrelid = to_regclass(?)`, index.name).Scan(&valid)
-	switch {
-	case err == nil && valid != nil && *valid:
-		return nil
-	case err == nil && valid != nil:
-		slog.Warn("auditlog: rebuilding interrupted index", "index", index.name)
-		if _, err := db.Exec(ctx, "DROP INDEX "+index.name); err != nil {
-			return err
-		}
-	}
-	started := time.Now()
-	if _, err := db.Exec(ctx, "CREATE INDEX CONCURRENTLY IF NOT EXISTS "+index.name+" ON audit_logs("+index.columns+")"); err != nil {
-		return err
-	}
-	slog.Info("auditlog: built index", "index", index.name, "duration", time.Since(started).Round(time.Millisecond))
-	return nil
-}
+// legacyModelBackgroundIndex names the legacy index for its retirement, which
+// waits until both replacements are valid.
+var legacyModelBackgroundIndex = storage.BackgroundIndex{Name: legacyRequestedModelIndex, Label: "legacy audit model"}

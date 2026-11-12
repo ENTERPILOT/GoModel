@@ -345,7 +345,7 @@ func TestSQLStoreWriteBatchCommitsEntriesWithTheirAttempts(t *testing.T) {
 
 // An interrupted CREATE INDEX CONCURRENTLY leaves an invalid index; the next
 // start must replace it rather than keep the unusable one.
-func TestBuildIndexConcurrentlyRebuildsInvalidIndex(t *testing.T) {
+func TestBackgroundIndexesRebuildInvalidIndex(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		if db.Dialect() != sqlx.PostgreSQL {
 			t.Skip("concurrent index builds are PostgreSQL only")
@@ -361,10 +361,53 @@ func TestBuildIndexConcurrentlyRebuildsInvalidIndex(t *testing.T) {
 		if err != nil {
 			t.Skipf("cannot mark the index invalid on this server: %v", err)
 		}
-		require.NoError(t, buildIndexConcurrently(ctx, db, index))
+		buildBackgroundIndexes(ctx, db)
 
-		var valid bool
-		require.NoError(t, db.QueryRow(ctx, `SELECT indisvalid FROM pg_index WHERE indexrelid = to_regclass(?)`, index.name).Scan(&valid))
-		assert.True(t, valid)
+		assert.True(t, hasValidIndex(ctx, t, db, index.name))
+	})
+}
+
+// An invalid index is another replica's build in progress while that replica
+// holds the build lock. Dropping it would block on the build, stall every
+// statement queued on audit_logs behind the drop, and discard the build.
+func TestBackgroundIndexesLeaveAnotherReplicasBuildAlone(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		if db.Dialect() != sqlx.PostgreSQL {
+			t.Skip("concurrent index builds are PostgreSQL only")
+		}
+		ctx := context.Background()
+		store, err := NewSQLStore(ctx, db, 0)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = store.Close() })
+		store.indexBuild.Wait()
+
+		index := modelIndexes(sqlx.PostgreSQL)[0]
+		_, err = db.Exec(ctx, `UPDATE pg_index SET indisvalid = FALSE WHERE indexrelid = to_regclass(?)`, index.name)
+		if err != nil {
+			t.Skipf("cannot mark the index invalid on this server: %v", err)
+		}
+
+		// The other replica: a session holding the build lock.
+		holder, err := sqlx.PostgreSQLPool(db).Acquire(ctx)
+		require.NoError(t, err)
+		defer holder.Release()
+		var locked bool
+		require.Eventually(t, func() bool {
+			err := holder.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, backgroundIndexLockKey).Scan(&locked)
+			return err == nil && locked
+		}, 30*time.Second, 20*time.Millisecond, "another test holds the audit index lock")
+
+		buildCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		defer cancel()
+		buildBackgroundIndexes(buildCtx, db)
+		var exists bool
+		require.NoError(t, db.QueryRow(ctx, `SELECT to_regclass(?) IS NOT NULL`, index.name).Scan(&exists))
+		assert.True(t, exists, "the index is not dropped while another session holds the lock")
+		assert.False(t, hasValidIndex(ctx, t, db, index.name))
+
+		_, err = holder.Exec(ctx, `SELECT pg_advisory_unlock($1)`, backgroundIndexLockKey)
+		require.NoError(t, err)
+		buildBackgroundIndexes(ctx, db)
+		assert.True(t, hasValidIndex(ctx, t, db, index.name), "the abandoned build is replaced once the lock is free")
 	})
 }
