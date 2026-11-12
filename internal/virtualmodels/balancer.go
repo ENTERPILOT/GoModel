@@ -75,14 +75,20 @@ func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry 
 		}
 		return s.concreteTarget(ctx, snap, entry, available[0], sessionID, images, path)
 	}
+	// usable is the test a concrete model behind a target must pass to count
+	// for capacity and price. Once image routing narrows the targets it also
+	// requires image input: a chained redirect then picks among those models
+	// only, so a text-only one with room, or a lower price, says nothing
+	// about where the request lands.
+	usable := allowed
 	if images {
-		supported = s.imageTargets(snap, entry, supported, allowed)
+		supported, usable = s.imageTargets(snap, entry, supported, allowed)
 	}
 	// Prefer targets with live rate-limit capacity. When every live target is
 	// saturated, fall back to the first declared one: the request then reaches
 	// admission and receives an honest 429 with Retry-After (or defers to
 	// failover) instead of the all-targets-down error path.
-	pool := s.targetsWithCapacity(snap, entry, supported, allowed)
+	pool := s.targetsWithCapacity(snap, entry, supported, usable)
 	if len(pool) == 0 {
 		// This target is selected only to reach admission and produce the 429.
 		// Do not run affinity resolution: a transient capacity burst must not
@@ -125,7 +131,7 @@ func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry 
 			// primary; the legs below it are the failover chain.
 			return pool[0]
 		case StrategyCost:
-			return s.cheapestTarget(snap, entry, pool, allowed)
+			return s.cheapestTarget(snap, entry, pool, usable)
 		default:
 			// Round robin, and adaptive or plugin whose selector had no
 			// usable answer.
@@ -249,23 +255,28 @@ func (s *Service) targetsWithCapacity(snap *snapshot, entry *redirectEntry, targ
 
 // imageTargets narrows targets to those that accept image input; a chained
 // target does while any concrete model behind it that allow permits does.
-// Unknown capability counts as no image input. When no target qualifies,
-// targets are returned unchanged: the request keeps its images and today's
-// routing, and the provider's own error reaches the client.
-func (s *Service) imageTargets(snap *snapshot, entry *redirectEntry, targets []resolvedTarget, allow func(core.ModelSelector) bool) []resolvedTarget {
+// Unknown capability counts as no image input. It also returns the test
+// such a model passes: allow, plus accepting images. When no target
+// qualifies, targets and allow are returned unchanged: the request keeps its
+// images and today's routing, and the provider's own error reaches the
+// client.
+func (s *Service) imageTargets(snap *snapshot, entry *redirectEntry, targets []resolvedTarget, allow func(core.ModelSelector) bool) ([]resolvedTarget, func(core.ModelSelector) bool) {
+	accepts := func(selector core.ModelSelector) bool {
+		return allow(selector) && s.acceptsImages(selector.QualifiedModel())
+	}
 	out := make([]resolvedTarget, 0, len(targets))
 	for _, target := range targets {
 		for _, leaf := range snap.leaves(entry, target, s.catalog) {
-			if allow(leaf.selector) && s.acceptsImages(leaf.qualified) {
+			if accepts(leaf.selector) {
 				out = append(out, target)
 				break
 			}
 		}
 	}
 	if len(out) == 0 {
-		return targets
+		return targets, allow
 	}
-	return out
+	return out, accepts
 }
 
 // acceptsImages reports whether the registry's effective metadata for a

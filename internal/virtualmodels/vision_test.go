@@ -150,6 +150,52 @@ func TestVisionRouting_CarriesDownChains(t *testing.T) {
 	assert.Equal(t, []string{"groq/llama", "local/mistral"}, got)
 }
 
+// A chained target is judged by the models an image request can reach behind
+// it: its text-only models neither lend it capacity nor set its price.
+func TestVisionRouting_ChainedTargetCountsOnlyVisionModels(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		strategy  string
+		chain     []string
+		direct    string
+		saturated string
+		wantImage string
+		wantText  string
+	}{
+		{
+			name:     "a saturated vision model is not covered by a text-only one with room",
+			strategy: StrategyFailover,
+			chain:    []string{"groq/llama", "openai/gpt-4o"}, direct: "anthropic/claude",
+			saturated: "openai/gpt-4o",
+			wantImage: "anthropic/claude", wantText: "groq/llama",
+		},
+		{
+			name:     "cost prices the chain at its cheapest vision model",
+			strategy: StrategyCost,
+			chain:    []string{"groq/llama", "anthropic/claude"}, direct: "openai/gpt-4o",
+			wantImage: "openai/gpt-4o", wantText: "groq/llama",
+		},
+	}
+	saturated := ""
+	svc, err := NewService(newSQLVMStore(t), visionCatalog(), true)
+	require.NoError(t, err)
+	svc.SetTargetCapacity(func(qualified string) bool { return qualified != saturated })
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			saturated = tt.saturated
+			chain, source := fmt.Sprintf("mixed-%d", i), fmt.Sprintf("smart-%d", i)
+			upsertVisionRedirect(t, svc, chain, tt.strategy, false, tt.chain...)
+			upsertVisionRedirect(t, svc, source, tt.strategy, true, chain, tt.direct)
+
+			calls := 0
+			assert.Equal(t, []string{tt.wantImage}, resolveWithContext(t, svc, imageContext(true, &calls), source, 1))
+			assert.Equal(t, []string{tt.wantText}, resolveWithContext(t, svc, imageContext(false, &calls), source, 1))
+		})
+	}
+}
+
 func TestVisionRouting_RoundTripsThroughStoreAndView(t *testing.T) {
 	t.Parallel()
 	runStoreSuite(t, func(t *testing.T, store Store) {
