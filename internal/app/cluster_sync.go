@@ -36,8 +36,8 @@ type syncedService interface {
 // starts when the generation serves (see startServer).
 //
 // Entities refresh in this order on a tick: provider credentials first,
-// because virtual models, users, and pricing and metadata overrides validate against the
-// provider catalog.
+// because virtual models, users, and pricing and metadata overrides validate
+// against the provider catalog.
 func (b *bootstrap) initClusterSync() error {
 	app := b.app
 	syncer := app.clusterSync

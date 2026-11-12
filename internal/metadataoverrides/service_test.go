@@ -92,9 +92,7 @@ func TestServiceUpsertNormalizesAndApplies(t *testing.T) {
 	assert.True(t, applied.Capabilities["vision"])
 	assert.Equal(t, saved.Metadata.Categories, applied.Categories)
 
-	got, ok := service.Get("openrouter/meta-llama/llama-3.2-vision")
-	require.True(t, ok)
-	assert.Equal(t, saved, got)
+	assert.Equal(t, []Override{saved}, service.List())
 }
 
 func TestServiceUpsertRejectsInvalidInput(t *testing.T) {

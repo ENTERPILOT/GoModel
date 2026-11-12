@@ -14,9 +14,9 @@ import (
 	"github.com/enterpilot/gomodel/internal/modelselectors"
 )
 
-// InputCapabilities are the capability keys an override may set: the media a
+// inputCapabilities are the capability keys an override may set: the media a
 // model accepts besides text, under the model catalog's vocabulary.
-var InputCapabilities = []string{"vision", "audio_input", "video_input", "pdf_input"}
+var inputCapabilities = []string{"vision", "audio_input", "video_input", "pdf_input"}
 
 // Metadata is the editable subset of core.ModelMetadata. Unset fields inherit
 // from the layers below.
@@ -123,7 +123,7 @@ func normalizeMetadata(m Metadata) (Metadata, error) {
 		}
 	}
 	for key, supported := range m.Capabilities {
-		if !slices.Contains(InputCapabilities, key) {
+		if !slices.Contains(inputCapabilities, key) {
 			return Metadata{}, modelselectors.NewValidationError("unsupported capability: "+key, nil)
 		}
 		if out.Capabilities == nil {

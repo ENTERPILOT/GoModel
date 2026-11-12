@@ -109,19 +109,6 @@ func (s *Service) List() []Override {
 	return result
 }
 
-// Get returns one cached override by selector.
-func (s *Service) Get(selector string) (Override, bool) {
-	parts, err := modelselectors.NormalizeInput(s.registry, selector)
-	if err != nil {
-		return Override{}, false
-	}
-	override, ok := (*s.current.Load())[parts.Selector]
-	if !ok {
-		return Override{}, false
-	}
-	return cloneOverride(override), true
-}
-
 // Upsert validates and stores one override, then applies it. It returns the
 // normalized override. The write and refresh run under the refresh lock, so
 // concurrent saves each return their own value; a failed refresh restores the

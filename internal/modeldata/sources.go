@@ -19,10 +19,10 @@ const (
 
 // MetadataSources names, for every field set on effective, the layer that
 // supplied it. Precedence mirrors enrichment: dashboard over config over
-// provider over catalog, with modes and categories inferred from the ID when no layer set
-// them. Keys are the JSON field names; capabilities and rankings are reported
-// per key ("capabilities.vision"). Pricing is left out: PricingSources
-// already records it per price field.
+// provider over catalog, with modes and categories inferred from the ID when
+// no layer set them. Keys are the JSON field names; capabilities and rankings
+// are reported per key ("capabilities.vision"). Pricing is left out:
+// PricingSources already records it per price field.
 func MetadataSources(effective, provider, catalog, config, dashboard *core.ModelMetadata) map[string]string {
 	if effective == nil {
 		return nil
