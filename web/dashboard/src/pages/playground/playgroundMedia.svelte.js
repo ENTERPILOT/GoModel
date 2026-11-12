@@ -1,6 +1,7 @@
-// Playground media modes: image generation, text-to-speech and transcription
-// requests against the gateway's public API (/v1/images/generations,
-// /v1/audio/speech, /v1/audio/transcriptions). The model, user path and JSON
+// Playground media modes: image generation, text-to-speech, transcription and
+// embeddings requests against the gateway's public API
+// (/v1/images/generations, /v1/audio/speech, /v1/audio/transcriptions,
+// /v1/embeddings). The model, user path and JSON
 // panel state stay in the chat store, so every mode shares the toolbar.
 
 import { apiFetch, isAbortError } from "$lib/api/client.js";
@@ -10,11 +11,17 @@ import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import * as m from "$lib/paraglide/messages.js";
 import { abortable, extractUsage, playgroundUserPathHeader } from "./playgroundLogic.js";
 import {
+  DEFAULT_EMBEDDING_FORMAT,
   DEFAULT_SPEECH_FORMAT,
   DEFAULT_SPEECH_VOICE,
+  abbreviateEmbeddingResponse,
   abbreviateImageResponse,
+  buildEmbeddingRequest,
   buildImageRequest,
   buildSpeechRequest,
+  embeddingInputs,
+  embeddingDimensionsValid,
+  embeddingSummary,
   imageResults,
   mediaModeById,
   transcriptionFields,
@@ -33,15 +40,22 @@ class PlaygroundMediaStore {
   transcriptionFile = $state(null);
   transcriptionLanguage = $state("");
   transcriptionPrompt = $state("");
+  embeddingInput = $state("");
+  embeddingFormat = $state(DEFAULT_EMBEDDING_FORMAT);
+  embeddingDimensions = $state("");
 
   sending = $state(false);
   error = $state("");
   response = $state(null);
   responseMeta = $state(null);
+  // The unabridged response when `response` is trimmed for display (the
+  // embedding vectors); the JSON panel copies this one.
+  fullResponse = $state.raw(null);
   // Rendered results of the last successful request.
   images = $state([]);
   audioURL = $state("");
   transcript = $state("");
+  embeddings = $state(null);
 
   #abort = null;
 
@@ -69,6 +83,13 @@ class PlaygroundMediaStore {
         });
       case "transcription":
         return transcriptionPreview(this.#fields(), this.transcriptionFile);
+      case "embeddings":
+        return buildEmbeddingRequest({
+          model: chat.model,
+          input: this.embeddingInput,
+          format: this.embeddingFormat,
+          dimensions: this.embeddingDimensions,
+        });
       default:
         return null;
     }
@@ -83,6 +104,10 @@ class PlaygroundMediaStore {
         return this.speechInput.trim() !== "";
       case "transcription":
         return Boolean(this.transcriptionFile);
+      case "embeddings":
+        return (
+          embeddingInputs(this.embeddingInput).length > 0 && embeddingDimensionsValid(this.embeddingDimensions)
+        );
       default:
         return false;
     }
@@ -110,8 +135,10 @@ class PlaygroundMediaStore {
     this.error = "";
     this.response = null;
     this.responseMeta = null;
+    this.fullResponse = null;
     this.images = [];
     this.transcript = "";
+    this.embeddings = null;
     this.#setAudioURL("");
   }
 
@@ -218,6 +245,13 @@ class PlaygroundMediaStore {
       this.response = abbreviateImageResponse(data);
       this.images = imageResults(data);
       if (this.images.length === 0) this.error = m.playground_media_empty_response();
+      return;
+    }
+    if (modeID === "embeddings") {
+      this.fullResponse = data;
+      this.response = abbreviateEmbeddingResponse(data);
+      this.embeddings = embeddingSummary(data);
+      if (this.embeddings.count === 0) this.error = m.playground_embeddings_empty_response();
       return;
     }
     this.response = data;

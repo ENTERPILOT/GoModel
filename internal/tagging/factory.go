@@ -88,3 +88,20 @@ func createStore(ctx context.Context, store storage.Storage) (Store, error) {
 		func(db *mongo.Database) (Store, error) { return NewMongoDBStore(ctx, db) },
 	)
 }
+
+// ListStored returns the tagging rules saved in the dashboard, normalized.
+func ListStored(ctx context.Context, shared storage.Storage) ([]Rule, error) {
+	store, err := createStore(ctx, shared)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = store.Close() }()
+	rules, err := store.GetRules(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := NormalizeRules(rules); err != nil {
+		return nil, fmt.Errorf("stored tagging rules: %w", err)
+	}
+	return rules, nil
+}

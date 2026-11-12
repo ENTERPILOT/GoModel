@@ -11,6 +11,7 @@
 import { hasSecretReference } from "../../lib/utils/secretReference.js";
 import * as m from "../../lib/paraglide/messages.js";
 import { filterFields } from "../../lib/utils/textMatch.js";
+import { PROVIDER_DOCS_UTM } from "../../lib/utils/providerDocs.js";
 import { modelRowsToList, modelsToRows } from "./providerModels.js";
 
 // Field names, mirroring internal/providers/credential_schema.go.
@@ -20,6 +21,16 @@ export const FIELD_BILLABLE = "billable";
 export const FIELD_BASE_URL = "base_url";
 export const FIELD_SERVICE_ACCOUNT_JSON = "service_account_json";
 export const FIELD_MODELS = "models";
+export const FIELD_MODELS_MODE = "models_mode";
+
+// The models_mode values, mirroring internal/providers/credential_schema.go.
+// The schema serves them; the schema-less fallback form needs them too, or its
+// select would offer only the default.
+const MODELS_MODE_OPTIONS = ["fallback", "allowlist", "merge"];
+
+// The docs table comparing the models modes, linked from the field's "?".
+export const MODELS_MODE_DOCS_URL =
+  "https://gomodel.enterpilot.io/docs/advanced/config-yaml?" + PROVIDER_DOCS_UTM + "#models-modes";
 
 // Resolve translated metadata on access so locale changes cannot leave stale
 // labels, hints, or placeholders. The metadata describes each credential field:
@@ -43,6 +54,7 @@ const PROVIDER_CREDENTIAL_FIELD_NAMES = [
   "gcp_scope",
   "proxy_url",
   FIELD_MODELS,
+  FIELD_MODELS_MODE,
   FIELD_BILLABLE,
 ];
 
@@ -132,6 +144,13 @@ function providerCredentialFields() {
       control: "models",
       hint: m.providers_models_hint(),
     },
+    [FIELD_MODELS_MODE]: {
+      label: m.providers_models_mode(),
+      control: "select",
+      hint: m.providers_models_mode_hint(),
+      docsUrl: MODELS_MODE_DOCS_URL,
+      docsLabel: m.providers_models_mode_docs(),
+    },
     [FIELD_BILLABLE]: {
       label: m.providers_billable(),
       control: "checkbox",
@@ -179,6 +198,7 @@ export function defaultProviderCredentialForm() {
     gcp_scope: "",
     proxy_url: "",
     models: [],
+    models_mode: "",
     billable: true,
     enabled: true,
   };
@@ -201,6 +221,38 @@ export function providerCredentialTypeOptions(schemas, currentType) {
     list.push(current);
   }
   return list;
+}
+
+// AWS provider types read Base URL as a region first, and fall back to the
+// gateway host's AWS credentials when no API key is set; their generic
+// "Base URL" wording would hide both.
+const AWS_PROVIDER_TYPES = new Set(["bedrock", "bedrock-mantle"]);
+
+// Type labels for types whose name alone does not say which API they call.
+// The type name stays in the label: it is what config.yaml takes.
+function providerTypeLabels() {
+  return {
+    bedrock: m.providers_type_bedrock(),
+    "bedrock-mantle": m.providers_type_bedrock_mantle(),
+  };
+}
+
+// providerCredentialTypeLabel is the Type dropdown caption for one type.
+export function providerCredentialTypeLabel(type) {
+  return providerTypeLabels()[type] || type;
+}
+
+// awsFieldOverrides re-words the fields whose meaning differs on AWS types.
+function awsFieldOverrides(name) {
+  if (name === FIELD_BASE_URL) {
+    // No placeholder: the empty-value default comes from the host's AWS
+    // region settings, so any fixed value here could be the wrong one.
+    return { label: m.providers_aws_region(), placeholder: "", hint: m.providers_aws_region_hint() };
+  }
+  if (name === FIELD_API_KEYS) {
+    return { hint: m.providers_bedrock_api_key_hint() };
+  }
+  return {};
 }
 
 // providerCredentialSchema returns the credential schema of one type, or null
@@ -229,9 +281,11 @@ export function providerCredentialFormFields(schema, defaultBaseURL) {
           (name) => ({
             name,
             advanced: name !== FIELD_API_KEYS,
+            ...(name === FIELD_MODELS_MODE ? { options: MODELS_MODE_OPTIONS } : {}),
           }),
         );
   const fallbackBaseURL = defaultBaseURL || (schema && schema.default_base_url) || "";
+  const aws = AWS_PROVIDER_TYPES.has(String((schema && schema.type) || "").trim());
 
   const primary = [];
   const advanced = [];
@@ -252,6 +306,9 @@ export function providerCredentialFormFields(schema, defaultBaseURL) {
     if (name === FIELD_BASE_URL && fallbackBaseURL) {
       field.placeholder = fallbackBaseURL;
       field.hint = m.providers_default_value({ value: fallbackBaseURL });
+    }
+    if (aws) {
+      Object.assign(field, awsFieldOverrides(name));
     }
     if (field.options.length > 0) {
       field.control = "select";
@@ -378,6 +435,7 @@ export function providerCredentialRowToForm(row) {
     gcp_scope: String((row && row.gcp_scope) || ""),
     proxy_url: String((row && row.proxy_url) || ""),
     models: modelsToRows(row && row.models),
+    models_mode: String((row && row.models_mode) || ""),
     billable: !row || row.billable !== false,
     enabled: !row || row.enabled !== false,
   };

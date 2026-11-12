@@ -63,6 +63,11 @@ SQLite also runs with a single open connection by design, to keep one writer and
 avoid lock contention. Every audit flush, usage flush, and budget check
 serializes through it, which is a throughput ceiling under sustained load.
 
+The connection uses a 64 MiB page cache and memory-maps up to 256 MiB of the
+database file, and GoModel refreshes the query planner statistics at startup and
+hourly. Mapped pages are reclaimable file cache, but container memory metrics may
+count them.
+
 For Postgres, `POSTGRES_MAX_CONNS` defaults to `10`. Raise it first if you run
 high concurrency with budgets or rate limits enabled.
 
@@ -297,22 +302,29 @@ GOMODEL_OFFLINE=true
 | [Model catalog](/advanced/model-metadata) at `MODEL_LIST_URL` | Pricing, context windows, and capabilities, fetched at startup and on each cache refresh | on |
 
 `GOMODEL_OFFLINE=true` (or `offline: true` in `config.yaml`) disables the
-update check and drops any HTTP catalog URL. It is applied after every other
+update check, drops any HTTP catalog URL, and stops providers in `allowlist`
+mode from listing `/models` for metadata. It is applied after every other
 setting, so nothing in `config.yaml` or the environment can re-enable an
-outbound call underneath it. Calls to configured providers and to anything you
-declared yourself, such as an OTLP collector, MCP upstreams, or a vector
+outbound call underneath it. Inference calls to configured providers and to
+anything you declared yourself, such as an OTLP collector, MCP upstreams, or a vector
 store, are untouched. The startup log confirms the mode.
 
-You can also control the two calls individually with
-`GOMODEL_VERSION_CHECK_ENABLED=false` and `MODEL_LIST_URL=off`.
+You can also control these calls individually with
+`GOMODEL_VERSION_CHECK_ENABLED=false`, `MODEL_LIST_URL=off`, and
+`ALLOWLIST_UPSTREAM_METADATA=false`.
 
 The catalog fetch is best-effort. When it is off or fails, the gateway boots
-normally, `/health` and `/health/ready` return `200`, provider discovery still
-works because model lists come from each provider's own `/models` endpoint,
-and requests route normally. What you lose is metadata enrichment.
+normally, `/health` and `/health/ready` return `200`, model lists still come
+from each provider's own `/models` endpoint (or, for `allowlist` providers,
+from their configured list, which needs no upstream discovery), and requests
+route normally. What you lose is catalog enrichment; metadata a provider
+reports in its own `/models` (including the allowlist metadata call, unless
+`ALLOWLIST_UPSTREAM_METADATA=false`) still applies.
 
 <Warning>
-  Without metadata enrichment, models have **no pricing**. Cost tracking then
+  Without catalog enrichment, a model has **no pricing** unless its provider
+  reports prices in `/models` or you declare them (`models[].metadata.pricing`
+  in `config.yaml`, or a dashboard pricing override). Cost tracking then
   reports no cost, and since [budgets](/features/budgets) read spend from usage
   cost records, budgets have nothing to charge against and will not enforce
   spend limits.
@@ -405,11 +417,12 @@ coordinate across instances.
 | [Usage and cost records](/features/cost-tracking) | Durable (database) | Aggregated correctly. |
 | Audit logs | Durable (database) | Complete across replicas. |
 | [SSO](/pro/sso) sign-out (Pro) | Durable (database) | A signed-out session is rejected on every replica within about 2 seconds. |
-| [Rate limits](/features/rate-limits) | In memory, shared through the database | Replicas enforce one limit together, approximately: each sees the others' counts within about two flush intervals. Counters survive a restart, and a reset clears every replica. |
+| [Rate limits](/features/rate-limits) | In memory, shared through the database | Replicas enforce one limit together, approximately: each sees the others' counts within about two flush intervals. A restart restores the last saved request and token counts once; a crash can lose those since the last flush. A reset clears those windows on every replica; active concurrency slots stay held until their requests finish. |
 | Circuit breakers | In-memory, per process | Each replica learns an outage separately, so upstream sees up to `N x failure_threshold` failures before any breaker opens. |
 | [Session affinity](/features/session-keeping) pins | In-memory, per instance | Sessions stick per replica, not globally, unless the load balancer is sticky. |
 | [Live logs](/advanced/admin-endpoints#admin-dashboard) | Local events in memory, other replicas' from the database | A dashboard sees its own replica's requests instantly and every other replica's typically within 7 seconds, once they are persisted. See [live logs across replicas](#live-logs-across-replicas). |
-| MCP downstream sessions | Durable (database) | A session opened on one replica continues on any other, so [MCP](/features/mcp-gateway#sessions-across-replicas) clients need no sticky sessions. After a `DELETE`, every replica refuses its requests within about 2 seconds; an open `GET` stream is not closed early. A response stream in flight stays on the replica serving it. |
+| MCP downstream sessions | Durable (database) | A session opened on one replica continues on any other, so [MCP](/features/mcp-gateway#sessions-across-replicas) clients need no sticky sessions. After a `DELETE`, every replica refuses its requests within about 2 seconds; an open `GET` stream is not closed early. A `DELETE` that arrives while the database cannot be written ends the session only on the replica that receives it; until its record expires, up to 30 minutes later, the same client can still resume it on another replica, and the resumed session continues as usual. A response stream in flight stays on the replica serving it. |
+| [MCP OAuth](/features/mcp-gateway#sign-in-with-oauth) sign-in | Pending sign-ins in memory, per instance; tokens durable (database) | The dashboard sign-in callback must reach the replica that started it, so route `/admin` with session affinity while signing in. Stored and refreshed tokens are shared with every replica through the database. |
 | Provider request health | In-memory, per instance | Dashboard provider status reflects the replica that answered. |
 
 The one that surprises people is rate limits: admission is in memory, so a
@@ -452,8 +465,8 @@ Requests served by another replica:
 - are slotted into the list by request time, below anything newer.
 
 Under heavy traffic, at most 200 audit and 200 usage entries from other
-replicas are streamed per poll, the newest first. The rest are still in the
-list after a refresh. A dashboard that reconnects, or a replica whose reads
+replicas are streamed per poll; when there are more, the newest 200 are
+selected. The rest are still in the list after a refresh. A dashboard that reconnects, or a replica whose reads
 failed for a while, catches up on what the other replicas persisted in the
 meantime, up to 5 minutes back and within the same 200-entry limit per poll. Replica clocks should agree within a few
 seconds, which NTP gives you.
@@ -485,7 +498,9 @@ but model listings and virtual-model load balancing leave them out. A provider
 whose type changes starts routing once its new model list has been fetched.
 
 A replica that fails to apply a change logs a warning once and retries on every
-poll until it applies. One exception: a stored provider that fails to build on a
+poll until it applies. A poll waits at most 5 seconds for the revisions and 30
+seconds for each reload, so a database that stops answering fails the poll
+instead of stalling it. One exception: a stored provider that fails to build on a
 replica keeps whatever was already running under its name and is retried on the
 next change to any stored provider, since each change reloads all of them, or on
 restart. A replica that cannot record a change in `config_revisions` also
@@ -552,14 +567,20 @@ Two further points at volume:
 
 - **Usage and audit writes are buffered and dropped, not blocked, when the
   buffer fills.** A burst or a slow database can silently lose usage entries,
-  which means lost cost data and under-charged budgets. The only signal is a
-  `usage log buffer full` warning in the logs, so alert on it.
+  which means lost cost data and under-charged budgets. Alert on
+  `gomodel_usage_entries_dropped_total` (see
+  [Alerting on Lost Usage](/guides/prometheus-metrics#alerting-on-lost-usage)),
+  or, without metrics, on the `usage log buffer full`,
+  `usage logger closed` and `failed to write usage batch` log messages. A
+  dropped audit entry logs `audit log buffer full`.
 - **Budget checks query the usage table on every request.** Keep
   `USAGE_RETENTION_DAYS` tight when budgets are enabled, and prefer Postgres
   over SQLite, whose single connection makes this the dominant cost.
 
 Retention deletes rows but does not shrink a SQLite file. Vacuum it separately
-if the file size matters.
+if the file size matters. SQLite truncates the WAL file to 64 MiB when it
+resets the WAL; a long-lived reader can delay that reset and leave the file
+larger.
 
 ## Observability
 
@@ -624,7 +645,7 @@ if the file size matters.
 - Point readiness at `/health/ready` and set
   `terminationGracePeriodSeconds` above 30.
 - Enable metrics and alert on `gomodel_circuit_breaker_state` and on
-  `usage log buffer full`.
+  `gomodel_usage_entries_dropped_total`.
 - For air-gapped installs, set `GOMODEL_OFFLINE=true`, then ship the model
   catalog as a file or declare model pricing in config so cost tracking and
   budgets keep working.

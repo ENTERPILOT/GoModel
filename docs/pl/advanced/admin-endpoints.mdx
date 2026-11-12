@@ -573,6 +573,8 @@ curl "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=202
 
 - Klienci są posortowani według ścieżki użytkownika, a pozycje według modelu i
   providera.
+- Dni okresu są liczone w strefie czasowej z nagłówka `X-GoModel-Timezone`, bez
+  niego w UTC, a `time_zone` ją podaje (także jako ostatnia kolumna CSV).
 - Faktura ma co najwyżej 50 000 pozycji (klient × model × provider); powyżej
   tego limitu endpoint zwraca `400`. Zawęź okres lub filtry albo grupuj
   klientów za pomocą `parent`.

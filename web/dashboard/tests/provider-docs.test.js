@@ -48,6 +48,7 @@ test("providerDocsUrl links every documented provider to its own page", () => {
     "llamacpp",
     "llmd",
     "minimax",
+    "mistral",
     "opencode-go",
     "oracle",
     "sglang",

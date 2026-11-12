@@ -41,6 +41,23 @@ func (s *MongoDBStore) Get(ctx context.Context, key string) (string, bool, error
 	return doc.Value, true, nil
 }
 
+// GetAll returns every persisted value by key.
+func (s *MongoDBStore) GetAll(ctx context.Context) (map[string]string, error) {
+	cursor, err := s.settings.Find(ctx, bson.D{})
+	if err != nil {
+		return nil, fmt.Errorf("list runtime settings: %w", err)
+	}
+	var docs []mongoDocument
+	if err := cursor.All(ctx, &docs); err != nil {
+		return nil, fmt.Errorf("list runtime settings: %w", err)
+	}
+	values := make(map[string]string, len(docs))
+	for _, doc := range docs {
+		values[doc.Key] = doc.Value
+	}
+	return values, nil
+}
+
 // SetDefault inserts value unless key exists, then reads back the winner.
 // An upsert with $setOnInsert is atomic on the _id, so two instances
 // initialising at once cannot both believe they won.

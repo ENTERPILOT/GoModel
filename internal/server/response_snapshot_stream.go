@@ -3,7 +3,6 @@ package server
 import (
 	"bytes"
 	"context"
-	"io"
 	"slices"
 
 	"github.com/goccy/go-json"
@@ -12,15 +11,16 @@ import (
 	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
-// snapshotStream stores a streamed response the way a buffered one is
+// snapshotObserver stores a streamed response the way a buffered one is
 // stored: the terminal event carries the complete response, and its snapshot
-// is written in the background once that event passes through. The bytes
-// sent to the client are untouched.
-func (s *translatedInferenceService) snapshotStream(ctx context.Context, workflow *core.Workflow, req *core.ResponsesRequest, providerType, providerName, requestID string, stream io.ReadCloser) io.ReadCloser {
+// is written in the background once that event passes through. It observes
+// the stream next to the usage and audit observers; nil when the response is
+// not stored.
+func (s *translatedInferenceService) snapshotObserver(ctx context.Context, workflow *core.Workflow, req *core.ResponsesRequest, providerType, providerName, requestID string) streaming.Observer {
 	if s.currentResponseStore() == nil || (req.Store != nil && !*req.Store) {
-		return stream
+		return nil
 	}
-	return streaming.NewObservedSSEStream(stream, &responseSnapshotStreamObserver{
+	return &responseSnapshotStreamObserver{
 		service:      s,
 		ctx:          ctx,
 		workflow:     workflow,
@@ -28,7 +28,7 @@ func (s *translatedInferenceService) snapshotStream(ctx context.Context, workflo
 		providerType: providerType,
 		providerName: providerName,
 		requestID:    requestID,
-	})
+	}
 }
 
 type responseSnapshotStreamObserver struct {

@@ -65,8 +65,10 @@ curl -X PUT http://localhost:8080/admin/virtual-models \
   -d '{"source":"slow-sonnet","target_model":"anthropic/claude-sonnet-4-6","slowdown":2}'
 ```
 
-A value outside the active range returns `400`. Slowdown needs a model:
-a provider-wide selector such as `openai/*` is rejected.
+A value outside the active range returns `400`. On a model policy (no
+target), slowdown needs a model: a provider-wide selector such as `openai/`,
+the global `/`, or a `*` model such as `openai/*` is rejected with `400`. A
+redirect accepts any source string as its alias name.
 
 ## Precedence
 
