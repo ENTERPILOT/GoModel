@@ -2,7 +2,6 @@ package conversationstore
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -21,14 +20,10 @@ func (r *Result) Close() error {
 	if r == nil {
 		return nil
 	}
-	var errs []error
 	if r.Store != nil {
 		if err := r.Store.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("store close: %w", err))
+			return fmt.Errorf("store close: %w", err)
 		}
-	}
-	if len(errs) > 0 {
-		return fmt.Errorf("close errors: %w", errors.Join(errs...))
 	}
 	return nil
 }
