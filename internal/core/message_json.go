@@ -6,17 +6,46 @@ import (
 	"github.com/goccy/go-json"
 )
 
-// Message.UnmarshalJSON validates chat request message content, preserves
-// unknown JSON members in ExtraFields, and keeps null content handling intact.
-func (m *Message) UnmarshalJSON(data []byte) error {
-	var raw struct {
+// messageJSONFields and responseMessageJSONFields are the members of a
+// message with its content. A message is decoded without the content, which
+// is read in place; these only shape the decoder's error, whose text names
+// the type it decoded into.
+type (
+	messageJSONFields = struct {
 		Role       string          `json:"role"`
 		Content    json.RawMessage `json:"content"`
 		ToolCalls  []ToolCall      `json:"tool_calls,omitempty"`
 		ToolCallID string          `json:"tool_call_id,omitempty"`
 	}
+	responseMessageJSONFields = struct {
+		Role      string          `json:"role"`
+		Content   json.RawMessage `json:"content"`
+		ToolCalls []ToolCall      `json:"tool_calls,omitempty"`
+	}
+)
+
+// decodeErrorAs returns the error of decoding data into a T, or err if that
+// succeeds.
+func decodeErrorAs[T any](data []byte, err error) error {
+	var v T
+	if fullErr := json.Unmarshal(data, &v); fullErr != nil {
+		return fullErr
+	}
+	return err
+}
+
+// Message.UnmarshalJSON validates chat request message content, preserves
+// unknown JSON members in ExtraFields, and keeps null content handling intact.
+// The content is read in place rather than through a json.RawMessage field,
+// which would copy it before it is parsed.
+func (m *Message) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Role       string     `json:"role"`
+		ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+		ToolCallID string     `json:"tool_call_id,omitempty"`
+	}
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
+		return decodeErrorAs[messageJSONFields](data, err)
 	}
 	extraFields, err := extractUnknownJSONFields(data,
 		"role",
@@ -28,7 +57,7 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	content, err := UnmarshalMessageContent(raw.Content)
+	content, err := UnmarshalMessageContent(lastMatchingJSONMember(data, "content"))
 	if err != nil {
 		return err
 	}
@@ -69,15 +98,14 @@ func (m Message) MarshalJSON() ([]byte, error) {
 
 // ResponseMessage.UnmarshalJSON validates chat response message content,
 // preserves unknown JSON members in ExtraFields, and keeps tool-call null
-// content handling intact.
+// content handling intact. The content is read in place, as in Message.
 func (m *ResponseMessage) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		Role      string          `json:"role"`
-		Content   json.RawMessage `json:"content"`
-		ToolCalls []ToolCall      `json:"tool_calls,omitempty"`
+		Role      string     `json:"role"`
+		ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
+		return decodeErrorAs[responseMessageJSONFields](data, err)
 	}
 	extraFields, err := extractUnknownJSONFields(data,
 		"role",
@@ -88,7 +116,7 @@ func (m *ResponseMessage) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	content, err := UnmarshalMessageContent(raw.Content)
+	content, err := UnmarshalMessageContent(lastMatchingJSONMember(data, "content"))
 	if err != nil {
 		return err
 	}
