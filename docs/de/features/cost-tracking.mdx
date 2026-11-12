@@ -208,7 +208,7 @@ Auf der Nutzungsseite zeigt der Bereich **Kosten pro aktivem Nutzer** unterhalb 
   Kosten, und bei wenigen Nutzern liegen sie nahe daran.
 </Note>
 
-Der Endpunkt akzeptiert außerdem die Datenfilter `model`, `provider`, `label`, `endpoint`, `operation`, `auth_key_id` und `user_path`. `cache_mode` ist wie beim Rechnungsexport fest: Requests und Provider-Kosten stammen aus Requests an Provider, während ein Treffer des Response-Caches seinen Nutzer aktiv macht und seinen abgerechneten Betrag zu den abgerechneten Kosten hinzufügt, den Provider aber nichts kostet.
+Der Endpunkt akzeptiert außerdem die Datenfilter `model`, `provider`, `label`, `endpoint`, `operation`, `session_id`, `auth_key_id` und `user_path`. Das Datumsfenster der übrigen Nutzungs-Endpunkte (`start_date`, `end_date`, `days`) wird ignoriert und nicht geprüft: Den Bereich bestimmen `months`, `start_month` und `end_month`. `cache_mode` ist wie beim Rechnungsexport fest: Requests und Provider-Kosten stammen aus Requests an Provider, während ein Treffer des Response-Caches seinen Nutzer aktiv macht und seinen abgerechneten Betrag zu den abgerechneten Kosten hinzufügt, den Provider aber nichts kostet.
 
 ```bash
 curl "http://localhost:8080/admin/usage/benchmark?parent=/eng" \
@@ -244,10 +244,11 @@ curl "http://localhost:8080/admin/usage/benchmark?parent=/eng" \
 `months` listet jeden Monat des Bereichs, den ältesten zuerst, auch Monate ohne Nutzung. Pro Monat:
 
 - `active_users` — Nutzer mit mindestens einem Request im Monat; Treffer des Response-Caches zählen mit.
-- `total_cost`, `mean`, `p50` (Median), `p90` und `max` — Kosten in USD pro aktivem Nutzer. Die Statistiken sind in einem Monat ohne aktive Nutzer `null`. Die Kosten eines Nutzers sind die, die der [Rechnungsexport](#rechnungsexport-gomodel-pro) für diesen Kunden im selben Monat auf der gewählten `cost_basis` ausweist.
+- `total_cost` — die Monatssumme: die Kosten aller aktiven Nutzer des Monats zusammen in USD. In einem Monat ohne aktive Nutzer ist sie `0`, nicht `null`.
+- `mean`, `p50` (Median), `p90` und `max` — Kosten in USD pro aktivem Nutzer; `null` in einem Monat ohne aktive Nutzer. Die Kosten eines Nutzers sind die, die der [Rechnungsexport](#rechnungsexport-gomodel-pro) für diesen Kunden im selben Monat auf der gewählten `cost_basis` ausweist.
 - `mean_change_percent` und `p50_change_percent` — Veränderung gegenüber dem Vormonat; `null` für den ersten Monat, für den laufenden aktuellen Monat, für einen Monat ohne aktive Nutzer oder wenn der Wert des Vormonats nicht positiv ist.
-- `unpriced_users` — aktive Nutzer, deren gesamte Monatskosten unbekannt sind, weil ihre Modelle keine Preise haben (die Rechnung zeigt für sie `null`). Sie zählen mit Kosten `0`.
-- `partly_priced_users` — aktive Nutzer mit teilweise unbepreister Nutzung. Sie zählen mit ihren bekannten Kosten; ist der Wert nicht `0`, liegen `total_cost` und die Statistiken für den Monat zu niedrig.
+- `unpriced_users` — aktive Nutzer, deren gesamte Monatskosten unbekannt sind, weil ihre Modelle keine Preise haben. Sie zählen mit Kosten `0`. Die Rechnung zeigt für sie `null` oder lässt sie aus, wenn ihre einzige Nutzung abgerechnete Treffer des Response-Caches mit unbekannten Kosten sind.
+- `partly_priced_users` — aktive Nutzer mit teilweise unbepreister Nutzung; bei `billed` gehören dazu abgerechnete Treffer des Response-Caches mit unbekannten Kosten. Sie zählen mit ihren bekannten Kosten; ist der Wert nicht `0`, liegen `total_cost` und die Statistiken für den Monat zu niedrig.
 - `unattributed_cost` — Nutzung, die direkt auf `parent` erfasst wurde. Sie gehört keinem Nutzer und ist nicht Teil von `total_cost`.
 - `partial` — `true` für den aktuellen, noch laufenden Monat; er hat keine Veränderungswerte.
 - `top_users[].requests` — Requests an Provider, wie auf der Rechnung; Treffer des Response-Caches zählen nicht mit.

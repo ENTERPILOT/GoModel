@@ -2,15 +2,20 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
+import { scopeAllows } from "../src/lib/stores/accessScope.js";
 import {
   BENCHMARK_MONTH_OPTIONS,
   benchmarkChangeLabel,
   benchmarkChartConfig,
   benchmarkCostBasisOptions,
+  benchmarkFetchNeeded,
   benchmarkHasPricingGaps,
   benchmarkHasUsage,
   benchmarkMonthLabel,
+  benchmarkParentInScope,
   benchmarkPricingGaps,
   benchmarkQuery,
   benchmarkStatus,
@@ -18,6 +23,8 @@ import {
   effectiveBenchmarkCostBasis,
   formatChangePercent,
 } from "../src/pages/usage/benchmark-helpers.js";
+
+const source = (path) => readFileSync(fileURLToPath(new URL("../src/pages/usage/" + path, import.meta.url)), "utf8");
 
 const BENCHMARK = {
   parent: "/eng",
@@ -92,6 +99,79 @@ test("benchmarkStatus shows the failed state over any data", () => {
     assert.equal(benchmarkStatus(state), want, JSON.stringify(state));
   }
   assert.equal(benchmarkStatus(), "empty");
+});
+
+test("benchmarkStatus is loading until the first answer, not empty", () => {
+  const empty = { months: [BENCHMARK.months[0]] };
+  const cases = [
+    // The first request: no data yet is not "no active users".
+    [{ loading: true, data: null }, "loading"],
+    // Another group or range after an empty answer.
+    [{ loading: true, data: empty }, "loading"],
+    // A retry after a failure.
+    [{ loading: true, failed: true, data: null }, "loading"],
+    // Data already shown stays up while it is refetched.
+    [{ loading: true, data: BENCHMARK }, "ready"],
+    [{ loading: false, data: empty }, "empty"],
+    [{ loading: false, failed: true, data: null }, "failed"],
+  ];
+  for (const [state, want] of cases) {
+    assert.equal(benchmarkStatus(state), want, JSON.stringify(state));
+  }
+  const component = source("UsageBenchmark.svelte");
+  assert.match(component, /benchmarkStatus\(\{ data, failed: usageBenchmark\.failed, loading: usageBenchmark\.loading \}\)/);
+  assert.match(component, /status === "loading"/);
+  // The store is loading from the start, before the page asks for anything.
+  assert.match(source("usageBenchmark.svelte.js"), /loading = \$state\(true\);/);
+});
+
+test("a group outside the new API key's scope falls back to the default group", () => {
+  const scoped = (root) => ({ allows: (path) => scopeAllows(root, path) });
+  const global = { allows: () => true };
+  assert.equal(benchmarkParentInScope("/eng", global), "/eng");
+  assert.equal(benchmarkParentInScope("/eng/apps", scoped("/eng")), "/eng/apps");
+  assert.equal(benchmarkParentInScope("/eng", scoped("/eng")), "/eng");
+  assert.equal(benchmarkParentInScope("/eng", scoped("/sales")), "", "the API would answer 403");
+  assert.equal(benchmarkParentInScope("/eng", scoped("/eng/apps")), "", "above the scope root");
+  assert.equal(benchmarkParentInScope("/engineering", scoped("/eng")), "", "a prefix is not a parent");
+  assert.equal(benchmarkParentInScope("", scoped("/sales")), "", "the default group stays the default");
+
+  // The store checks the group against the scope loaded for the current key
+  // before it builds the request, and the picker shows the store's group.
+  const fetch = (source("usageBenchmark.svelte.js").match(/async fetch\(\{ force = false \} = \{\}\) \{[\s\S]*?\n  \}/) || [""])[0];
+  const scopeLoaded = fetch.indexOf("await access.ensureLoaded();");
+  const validated = fetch.indexOf("this.parent = benchmarkParentInScope(this.parent, access);");
+  const queryBuilt = fetch.indexOf("benchmarkQuery(");
+  assert.ok(scopeLoaded >= 0 && scopeLoaded < validated && validated < queryBuilt, "scope, then group, then request");
+  assert.match(source("UsageBenchmark.svelte"), /const picked = \$derived\(usageBenchmark\.parent \? \[usageBenchmark\.parent\] : \[\]\);/);
+});
+
+test("the benchmark refetches only when its own request changes or the page opens", () => {
+  const filters = { models: ["gpt-5"], providers: [], labels: [], userPaths: [], authKeys: [], endpoints: [], session: "" };
+  const shown = benchmarkQuery({ filters, parent: "/eng", months: 7 });
+  // A date-range change: the request holds no window, so it is the same.
+  assert.doesNotMatch(shown, /start_date|end_date|days/);
+  assert.equal(benchmarkFetchNeeded(benchmarkQuery({ filters, parent: "/eng", months: 7 }), shown), false);
+  for (const changed of [
+    { filters, parent: "/sales", months: 7 },
+    { filters, parent: "/eng", months: 12 },
+    { filters, parent: "/eng", months: 7, costBasis: "billed" },
+    { filters: { ...filters, session: "sess-1" }, parent: "/eng", months: 7 },
+  ]) {
+    assert.equal(benchmarkFetchNeeded(benchmarkQuery(changed), shown), true, JSON.stringify(changed));
+  }
+  assert.equal(benchmarkFetchNeeded(shown, shown, true), true, "opening the page reloads");
+  assert.equal(benchmarkFetchNeeded(shown, null), true, "nothing shown yet, or the last request failed");
+
+  // Wiring: only the page opening (or an API-key change) forces a reload; the
+  // date picker and the filters go through the unforced page refetch.
+  const page = source("UsagePage.svelte");
+  assert.match(page, /usagePage\.fetchUsagePage\(\{ reload: true \}\);/);
+  assert.match(page, /<DatePicker onchange=\{\(\) => usagePage\.fetchUsagePage\(\)\} \/>/);
+  assert.match(source("usage.svelte.js"), /usageBenchmark\.fetch\(\{ force: reload \}\),/);
+  const store = source("usageBenchmark.svelte.js");
+  assert.match(store, /if \(!benchmarkFetchNeeded\(query, this\.#query, force\)\) \{\n      this\.loading = this\.#controller !== null;\n      return;/);
+  assert.match(store, /if \(!loaded\) this\.#query = null;/);
 });
 
 test("the partial month reads as in progress, not as a decline", () => {

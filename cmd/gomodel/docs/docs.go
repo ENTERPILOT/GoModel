@@ -2631,7 +2631,7 @@ const docTemplate = `{
         },
         "/admin/usage/benchmark": {
             "get": {
-                "description": "Treats each direct child of parent as one user, summing its whole subtree, and returns per calendar month the number of active users (at least one request in the month, response-cache hits included), their total cost and the mean, median (p50), p90 and maximum cost per active user. Percentiles interpolate linearly between closest ranks. A user's cost is the one the invoice export reports for it; unpriced_users counts users whose cost is wholly unknown (counted at 0) and partly_priced_users those counted at a known part of it. Every user is counted; nothing is folded into an \"other\" bucket. Usage recorded on parent itself is reported as unattributed_cost. Months are read in the time zone of the X-GoModel-Timezone header (UTC without it); the current month is flagged partial and has no change percentages. A range covers at most 12 months. The response holds no user paths unless top_users asks for the highest-cost users of each month.",
+                "description": "Treats each direct child of parent as one user, summing its whole subtree, and returns per calendar month the number of active users (at least one request in the month, response-cache hits included), their total cost and the mean, median (p50), p90 and maximum cost per active user. Percentiles interpolate linearly between closest ranks. A user's cost is the one the invoice export reports for it; unpriced_users counts users whose cost is wholly unknown (counted at 0) and partly_priced_users those counted at a known part of it. Every user is counted; nothing is folded into an \"other\" bucket. Usage recorded on parent itself is reported as unattributed_cost. Months are read in the time zone of the X-GoModel-Timezone header (UTC without it); the current month is flagged partial and has no change percentages. A range covers at most 12 months; start_date, end_date and days, which the other usage endpoints take, are ignored. The response holds no user paths unless top_users asks for the highest-cost users of each month.",
                 "produces": [
                     "application/json"
                 ],
@@ -2729,6 +2729,12 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "type": "string",
+                        "description": "Filter by exact detected session ID",
+                        "name": "session_id",
+                        "in": "query"
+                    },
+                    {
                         "type": "array",
                         "items": {
                             "type": "string"
@@ -2736,6 +2742,16 @@ const docTemplate = `{
                         "collectionFormat": "multi",
                         "description": "Filter by managed auth key IDs; repeat or comma-separate for several",
                         "name": "auth_key_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by tracked user path subtrees; repeat for several",
+                        "name": "user_path",
                         "in": "query"
                     }
                 ],

@@ -52,11 +52,31 @@ export function effectiveBenchmarkCostBasis(costBasis, config) {
   return costBasis === "billed" && benchmarkCostBasisOptions(config) ? "billed" : "provider";
 }
 
-// benchmarkStatus picks what the section shows: "failed" after an error,
-// "empty" without an active user or unattributed cost, otherwise "ready".
-export function benchmarkStatus({ data = null, failed = false } = {}) {
+// benchmarkParentInScope returns the group to ask for: the picked one while
+// the credential's scope admits it, otherwise "" (the API default, the scope
+// root). A group picked under another API key may lie outside this one's
+// scope, where the API answers 403.
+export function benchmarkParentInScope(parent, access) {
+  return parent && access && access.allows(parent) ? parent : "";
+}
+
+// benchmarkFetchNeeded reports whether query has to be requested: always when
+// forced (the page opened or the API key changed), otherwise only when it is
+// not the request in flight or shown. A date-range change leaves the query
+// as it was, since the benchmark reads whole months.
+export function benchmarkFetchNeeded(query, current, force = false) {
+  return force || query !== current;
+}
+
+// benchmarkStatus picks what the section shows: "ready" with an active user
+// or unattributed cost, otherwise "loading" while a request runs, "failed"
+// after an error and "empty" when the answer holds no usage. Data already
+// shown stays up while it is refetched.
+export function benchmarkStatus({ data = null, failed = false, loading = false } = {}) {
+  const ready = benchmarkHasUsage(data) || benchmarkUnattributedCost(data) > 0;
+  if (loading && (failed || !ready)) return "loading";
   if (failed) return "failed";
-  return benchmarkHasUsage(data) || benchmarkUnattributedCost(data) > 0 ? "ready" : "empty";
+  return ready ? "ready" : "empty";
 }
 
 // benchmarkChangeLabel renders a month's median change; the partial current

@@ -37,7 +37,7 @@
       untrack(() => {
         restoreUsageUrl({ fromHistory: historyTick !== seenHistoryTick });
         seenHistoryTick = historyTick;
-        usagePage.fetchUsagePage();
+        usagePage.fetchUsagePage({ reload: true });
         usageFacets.fetchAuthKeyNames();
         liveLogs.ensureLiveLogs();
       });

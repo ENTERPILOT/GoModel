@@ -259,11 +259,18 @@ jobów etykietą z numerem PR, na przykład `pr-1234`. Nagłówek `x-litellm-tag
 działa bez konfiguracji, dopóki [tagi LiteLLM](#tagi-litellm) są włączone
 (domyślnie); jeśli są wyłączone, skonfiguruj
 [nagłówek tagujący](#nagłówki-tagujące) i wysyłaj go zamiast tego. W GitHub
-Actions ustaw etykietę raz dla joba:
+Actions ustaw etykietę raz dla joba. Uruchamiaj workflow na zdarzeniu
+`pull_request`: inne zdarzenia, na przykład `push`, nie mają numeru PR, więc
+etykietą byłoby samo `pr-`.
 
 ```yaml .github/workflows/ci.yml
-env:
-  GOMODEL_LABEL: pr-${{ github.event.pull_request.number }}
+on: pull_request
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    env:
+      GOMODEL_LABEL: pr-${{ github.event.pull_request.number }}
 ```
 
 Następnie wysyłaj ją z każdym requestem:

@@ -254,15 +254,22 @@ as the client sent them, so a provider that rejects `tags` returns its error.
 
 ## Cost per pull request
 
-To see what a pull request's CI spends on models, give every request its jobs
-make a label naming the PR, such as `pr-1234`. The `x-litellm-tags` header
+To see what a pull request's CI spends on models, send a label naming the PR,
+such as `pr-1234`, with every request its jobs make. The `x-litellm-tags` header
 works without configuration while [LiteLLM tags](#litellm-tags) are on (the
 default); with them off, configure a [tagging header](#tagging-headers) and
-send that instead. In GitHub Actions, set the label once for the job:
+send that instead. In GitHub Actions, set the label once for the job. Run the
+workflow on `pull_request`: other events, such as `push`, carry no PR number,
+so the label would be just `pr-`.
 
 ```yaml .github/workflows/ci.yml
-env:
-  GOMODEL_LABEL: pr-${{ github.event.pull_request.number }}
+on: pull_request
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    env:
+      GOMODEL_LABEL: pr-${{ github.event.pull_request.number }}
 ```
 
 Then send it on each request:

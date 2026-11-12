@@ -20,7 +20,7 @@ const defaultBenchmarkMonths = 7
 // UsageBenchmark handles GET /admin/usage/benchmark
 //
 // @Summary      Benchmark the monthly cost per active user of a group
-// @Description  Treats each direct child of parent as one user, summing its whole subtree, and returns per calendar month the number of active users (at least one request in the month, response-cache hits included), their total cost and the mean, median (p50), p90 and maximum cost per active user. Percentiles interpolate linearly between closest ranks. A user's cost is the one the invoice export reports for it; unpriced_users counts users whose cost is wholly unknown (counted at 0) and partly_priced_users those counted at a known part of it. Every user is counted; nothing is folded into an "other" bucket. Usage recorded on parent itself is reported as unattributed_cost. Months are read in the time zone of the X-GoModel-Timezone header (UTC without it); the current month is flagged partial and has no change percentages. A range covers at most 12 months. The response holds no user paths unless top_users asks for the highest-cost users of each month.
+// @Description  Treats each direct child of parent as one user, summing its whole subtree, and returns per calendar month the number of active users (at least one request in the month, response-cache hits included), their total cost and the mean, median (p50), p90 and maximum cost per active user. Percentiles interpolate linearly between closest ranks. A user's cost is the one the invoice export reports for it; unpriced_users counts users whose cost is wholly unknown (counted at 0) and partly_priced_users those counted at a known part of it. Every user is counted; nothing is folded into an "other" bucket. Usage recorded on parent itself is reported as unattributed_cost. Months are read in the time zone of the X-GoModel-Timezone header (UTC without it); the current month is flagged partial and has no change percentages. A range covers at most 12 months; start_date, end_date and days, which the other usage endpoints take, are ignored. The response holds no user paths unless top_users asks for the highest-cost users of each month.
 // @Tags         admin
 // @Produce      json
 // @Security     BearerAuth
@@ -36,7 +36,9 @@ const defaultBenchmarkMonths = 7
 // @Param        label       query     []string  false  "Filter by request labels (exact match); repeat for several"  collectionFormat(multi)
 // @Param        endpoint    query     []string  false  "Filter by exact request endpoints, e.g. /v1/chat/completions,/v1/messages; repeat or comma-separate for several"  collectionFormat(multi)
 // @Param        operation   query     string  false  "Filter by comma-separated operations, e.g. chat_completions,embeddings"
+// @Param        session_id  query     string  false  "Filter by exact detected session ID"
 // @Param        auth_key_id query     []string  false  "Filter by managed auth key IDs; repeat or comma-separate for several"  collectionFormat(multi)
+// @Param        user_path   query     []string  false  "Filter by tracked user path subtrees; repeat for several"  collectionFormat(multi)
 // @Success      200  {object}  usage.Benchmark
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
@@ -44,7 +46,10 @@ const defaultBenchmarkMonths = 7
 // @Failure      409  {object}  core.GatewayError
 // @Router       /admin/usage/benchmark [get]
 func (h *Handler) UsageBenchmark(c *echo.Context) error {
-	baseParams, err := parseUsageParams(c)
+	// Only the filters: the range is whole months, so the other usage
+	// endpoints' start_date, end_date and days are ignored, not validated.
+	timeZone, location := dashboardTimeZone(c)
+	baseParams, err := parseUsageFilterParams(c, usage.UsageQueryParams{TimeZone: timeZone})
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -76,7 +81,6 @@ func (h *Handler) UsageBenchmark(c *echo.Context) error {
 		return handleError(c, err)
 	}
 
-	_, location := dashboardTimeZone(c)
 	now := timeNow().In(location)
 	start, end, err := benchmarkMonthRange(c.QueryParam("start_month"), c.QueryParam("end_month"), months, now, location)
 	if err != nil {

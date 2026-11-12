@@ -624,9 +624,10 @@ maximum cost per active user. No Pro license is needed. See
 | `cost_basis`  | string | `provider`, or `billed` (provider cost plus markup, including billed cache hits) | `provider` |
 | `top_users`   | int    | List each month's N highest-cost users, `0` to `50`; `0` returns aggregates only | `0` |
 
-It also accepts every data filter. It ignores `cache_mode`: requests and
-provider cost cover provider-bound requests, while cache hits make a user
-active and count toward billed cost.
+It also accepts every data filter. `start_date`, `end_date`, and `days` are
+ignored and not validated. It ignores `cache_mode` too: requests and provider
+cost cover provider-bound requests, while cache hits make a user active and
+count toward billed cost.
 
 ```bash
 # Eleven complete months plus the current one, with the five most expensive users per month

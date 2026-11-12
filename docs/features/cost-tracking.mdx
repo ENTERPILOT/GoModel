@@ -204,7 +204,7 @@ On the usage page, the **Cost per active user** section below **Breakdown** show
   are that user's exact cost, and with few users they come close to it.
 </Note>
 
-It also takes the data filters `model`, `provider`, `label`, `endpoint`, `operation`, `auth_key_id`, and `user_path`. `cache_mode` is fixed, as on the invoice: requests and provider cost come from requests sent to providers, while a response-cache hit makes its user active and adds its billed charge to billed cost, but costs the provider nothing.
+It also takes the data filters `model`, `provider`, `label`, `endpoint`, `operation`, `session_id`, `auth_key_id`, and `user_path`. The date window of the other usage endpoints (`start_date`, `end_date`, `days`) is ignored and not validated: the range comes from `months`, `start_month`, and `end_month`. `cache_mode` is fixed, as on the invoice: requests and provider cost come from requests sent to providers, while a response-cache hit makes its user active and adds its billed charge to billed cost, but costs the provider nothing.
 
 ```bash
 curl "http://localhost:8080/admin/usage/benchmark?parent=/eng" \
@@ -240,10 +240,11 @@ curl "http://localhost:8080/admin/usage/benchmark?parent=/eng" \
 `months` lists every month in the range, oldest first, including months without usage. Per month:
 
 - `active_users` — users with at least one request in the month; response-cache hits count.
-- `total_cost`, `mean`, `p50` (median), `p90`, and `max` — USD cost per active user. The statistics are `null` in a month without active users. Each user's cost is the one the [invoice export](#invoice-export-gomodel-pro) reports for that customer over the same month, on the chosen `cost_basis`.
+- `total_cost` — the month's total: the USD cost of all its active users together. It is `0`, not `null`, in a month without active users.
+- `mean`, `p50` (median), `p90`, and `max` — USD cost per active user; `null` in a month without active users. Each user's cost is the one the [invoice export](#invoice-export-gomodel-pro) reports for that customer over the same month, on the chosen `cost_basis`.
 - `mean_change_percent` and `p50_change_percent` — change from the previous month; `null` for the first month, for the partial current month, for a month without active users, or when the previous month's value is not positive.
-- `unpriced_users` — active users whose whole month cost is unknown because their models have no pricing (the invoice shows `null` for them). They count at cost `0`.
-- `partly_priced_users` — active users with some unpriced usage. They count at their known cost, so `total_cost` and the statistics understate the month when it is not `0`.
+- `unpriced_users` — active users whose whole month cost is unknown because their models have no pricing. They count at cost `0`. The invoice shows `null` for them, or leaves them out when their only usage is billed response-cache hits of unknown cost.
+- `partly_priced_users` — active users with some unpriced usage; on `billed` cost that includes billed response-cache hits of unknown cost. They count at their known cost, so `total_cost` and the statistics understate the month when it is not `0`.
 - `unattributed_cost` — usage recorded on `parent` itself. It belongs to no user and is not part of `total_cost`.
 - `partial` — `true` for the current month, which is still running; it has no change percentages.
 - `top_users[].requests` — requests sent to providers, as on the invoice; response-cache hits are not counted.

@@ -205,7 +205,7 @@ Na stronie użycia sekcja **Koszt na aktywnego użytkownika** pod **Zestawieniem
   a przy niewielu użytkownikach są mu bliskie.
 </Note>
 
-Endpoint przyjmuje też filtry danych `model`, `provider`, `label`, `endpoint`, `operation`, `auth_key_id` i `user_path`. `cache_mode` jest stały, tak jak w eksporcie faktur: requesty i koszt providera pochodzą z requestów wysłanych do providerów, a cache hit odpowiedzi czyni swojego użytkownika aktywnym i dodaje swoją rozliczoną kwotę do kosztu rozliczonego, ale nic nie kosztuje u providera.
+Endpoint przyjmuje też filtry danych `model`, `provider`, `label`, `endpoint`, `operation`, `session_id`, `auth_key_id` i `user_path`. Okno dat pozostałych endpointów użycia (`start_date`, `end_date`, `days`) jest ignorowane i niesprawdzane: zakres wyznaczają `months`, `start_month` i `end_month`. `cache_mode` jest stały, tak jak w eksporcie faktur: requesty i koszt providera pochodzą z requestów wysłanych do providerów, a cache hit odpowiedzi czyni swojego użytkownika aktywnym i dodaje swoją rozliczoną kwotę do kosztu rozliczonego, ale nic nie kosztuje u providera.
 
 ```bash
 curl "http://localhost:8080/admin/usage/benchmark?parent=/eng" \
@@ -241,10 +241,11 @@ curl "http://localhost:8080/admin/usage/benchmark?parent=/eng" \
 `months` zawiera każdy miesiąc z zakresu, od najstarszego, także miesiące bez użycia. Dla każdego miesiąca:
 
 - `active_users` — użytkownicy z co najmniej jednym requestem w miesiącu; cache hity odpowiedzi się liczą.
-- `total_cost`, `mean`, `p50` (mediana), `p90` i `max` — koszt w USD na aktywnego użytkownika. W miesiącu bez aktywnych użytkowników statystyki mają wartość `null`. Koszt użytkownika to ten, który [eksport faktur](#eksport-faktur-gomodel-pro) podaje dla tego klienta za ten sam miesiąc, na wybranej podstawie `cost_basis`.
+- `total_cost` — suma miesiąca: łączny koszt w USD wszystkich jego aktywnych użytkowników. W miesiącu bez aktywnych użytkowników ma wartość `0`, nie `null`.
+- `mean`, `p50` (mediana), `p90` i `max` — koszt w USD na aktywnego użytkownika; `null` w miesiącu bez aktywnych użytkowników. Koszt użytkownika to ten, który [eksport faktur](#eksport-faktur-gomodel-pro) podaje dla tego klienta za ten sam miesiąc, na wybranej podstawie `cost_basis`.
 - `mean_change_percent` i `p50_change_percent` — zmiana względem poprzedniego miesiąca; `null` dla pierwszego miesiąca, dla niepełnego bieżącego miesiąca, dla miesiąca bez aktywnych użytkowników albo gdy wartość z poprzedniego miesiąca nie jest dodatnia.
-- `unpriced_users` — aktywni użytkownicy, których cały miesięczny koszt jest nieznany, bo ich modele nie mają cennika (faktura pokazuje dla nich `null`). Liczą się z kosztem `0`.
-- `partly_priced_users` — aktywni użytkownicy z częściowo niewycenionym użyciem. Liczą się ze znanym kosztem, więc gdy ta wartość nie jest `0`, `total_cost` i statystyki zaniżają miesiąc.
+- `unpriced_users` — aktywni użytkownicy, których cały miesięczny koszt jest nieznany, bo ich modele nie mają cennika. Liczą się z kosztem `0`. Faktura pokazuje dla nich `null` albo ich pomija, gdy ich jedynym użyciem są rozliczone cache hity odpowiedzi o nieznanym koszcie.
+- `partly_priced_users` — aktywni użytkownicy z częściowo niewycenionym użyciem; przy koszcie `billed` obejmuje to rozliczone cache hity odpowiedzi o nieznanym koszcie. Liczą się ze znanym kosztem, więc gdy ta wartość nie jest `0`, `total_cost` i statystyki zaniżają miesiąc.
 - `unattributed_cost` — użycie zapisane bezpośrednio na `parent`. Nie należy do żadnego użytkownika i nie wchodzi do `total_cost`.
 - `partial` — `true` dla bieżącego, wciąż trwającego miesiąca; nie ma on procentów zmiany.
 - `top_users[].requests` — requesty wysłane do providerów, jak na fakturze; cache hity odpowiedzi się nie liczą.

@@ -600,9 +600,10 @@ użytkownika. Licencja Pro nie jest potrzebna. Zobacz
 | `cost_basis`  | string | `provider` albo `billed` (koszt providera plus narzut, łącznie z rozliczonymi cache hitami) | `provider` |
 | `top_users`   | int    | Wymień N najdroższych użytkowników każdego miesiąca, od `0` do `50`; `0` zwraca tylko agregaty | `0` |
 
-Endpoint przyjmuje też wszystkie filtry danych. Ignoruje `cache_mode`:
-requesty i koszt providera obejmują requesty wysłane do providerów, a cache
-hity czynią użytkownika aktywnym i liczą się do kosztu rozliczonego.
+Endpoint przyjmuje też wszystkie filtry danych. `start_date`, `end_date` i
+`days` są ignorowane i niesprawdzane. Ignoruje też `cache_mode`: requesty i
+koszt providera obejmują requesty wysłane do providerów, a cache hity czynią
+użytkownika aktywnym i liczą się do kosztu rozliczonego.
 
 ```bash
 # Jedenaście pełnych miesięcy plus bieżący, z pięcioma najdroższymi użytkownikami w miesiącu

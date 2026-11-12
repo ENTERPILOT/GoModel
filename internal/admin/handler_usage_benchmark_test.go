@@ -121,6 +121,61 @@ func TestUsageBenchmark_Params(t *testing.T) {
 	}
 }
 
+// The benchmark reads whole months, so the date window of the other usage
+// endpoints is ignored, malformed or not, while the data filters apply.
+func TestUsageBenchmark_IgnoresTheDateWindowAndAppliesFilters(t *testing.T) {
+	setTimeNow(t, time.Date(2026, 11, 12, 12, 0, 0, 0, time.UTC))
+	wantStart := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	wantEnd := time.Date(2026, 11, 30, 0, 0, 0, 0, time.UTC)
+
+	windows := []struct{ name, query string }{
+		{name: "malformed start date", query: "start_date=yesterday"},
+		{name: "malformed end date", query: "end_date=2026-13-40"},
+		{name: "start after end", query: "start_date=2026-11-10&end_date=2026-11-01"},
+		{name: "longer than a year", query: "start_date=2024-01-01&end_date=2026-11-01"},
+		{name: "days", query: "days=3"},
+		{name: "interval and cache mode", query: "interval=daily&cache_mode=all"},
+	}
+	for _, tt := range windows {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := &mockUsageReader{}
+			c, rec := echotest.Get(t, "/admin/usage/benchmark?"+tt.query)
+			require.NoError(t, NewHandler(reader, nil).UsageBenchmark(c))
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			got := reader.lastBenchmark
+			assert.True(t, wantStart.Equal(got.StartDate), "start %s", got.StartDate)
+			assert.True(t, wantEnd.Equal(got.EndDate), "end %s", got.EndDate)
+			assert.Empty(t, got.Interval)
+			assert.Empty(t, got.CacheMode)
+		})
+	}
+
+	t.Run("filters", func(t *testing.T) {
+		reader := &mockUsageReader{}
+		c, rec := echotest.Get(t, "/admin/usage/benchmark?model=gpt-5,o3&provider=openai&label=pr-12&endpoint=/v1/messages"+
+			"&operation=embeddings&auth_key_id=key-1&session_id=sess-1&user_path=/eng/alice",
+			echotest.WithHeader(dashboardTimeZoneHeader, "Europe/Warsaw"))
+		require.NoError(t, NewHandler(reader, nil).UsageBenchmark(c))
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		got := reader.lastBenchmark
+		assert.Equal(t, []string{"gpt-5", "o3"}, got.Models)
+		assert.Equal(t, []string{"openai"}, got.Providers)
+		assert.Equal(t, []string{"pr-12"}, got.Labels)
+		assert.Equal(t, []string{"/v1/messages"}, got.Endpoints)
+		assert.Len(t, got.Operations, 1)
+		assert.Equal(t, []string{"key-1"}, got.AuthKeyIDs)
+		assert.Equal(t, "sess-1", got.SessionID)
+		assert.Equal(t, []string{"/eng/alice"}, got.UserPaths)
+		assert.Equal(t, "Europe/Warsaw", got.TimeZone)
+	})
+
+	t.Run("unknown operation", func(t *testing.T) {
+		c, rec := echotest.Get(t, "/admin/usage/benchmark?operation=teleport")
+		require.NoError(t, NewHandler(&mockUsageReader{}, nil).UsageBenchmark(c))
+		assert.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	})
+}
+
 func TestUsageBenchmark_EmptyMonthsWithoutReader(t *testing.T) {
 	setTimeNow(t, time.Date(2026, 3, 15, 12, 0, 0, 0, time.UTC))
 	h := NewHandler(nil, nil)

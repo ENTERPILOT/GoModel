@@ -602,7 +602,8 @@ Pro-Lizenz ist nicht nötig. Siehe
 | `cost_basis`  | string | `provider` oder `billed` (Provider-Kosten plus Aufschlag, einschließlich abgerechneter Cache-Treffer) | `provider` |
 | `top_users`   | int    | Die N teuersten Nutzer jedes Monats auflisten, `0` bis `50`; `0` liefert nur Aggregate | `0` |
 
-Der Endpunkt akzeptiert außerdem alle Datenfilter. `cache_mode` wird
+Der Endpunkt akzeptiert außerdem alle Datenfilter. `start_date`, `end_date`
+und `days` werden ignoriert und nicht geprüft. Auch `cache_mode` wird
 ignoriert: Requests und Provider-Kosten umfassen Requests an Provider,
 Cache-Treffer machen einen Nutzer aktiv und zählen zu den abgerechneten Kosten.
 

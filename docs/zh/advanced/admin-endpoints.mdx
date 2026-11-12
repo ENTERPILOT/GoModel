@@ -519,7 +519,7 @@ curl "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=202
 | `cost_basis`  | string | `provider`，或 `billed`（provider 成本加加价，包含已计费的缓存命中）         | `provider` |
 | `top_users`   | int    | 列出每个月成本最高的 N 个用户，`0` 到 `50`；`0` 只返回聚合统计               | `0`    |
 
-该端点还接受所有数据筛选条件。它会忽略 `cache_mode`：请求数和 provider 成本只包含发送给 provider 的请求，而缓存命中会使用户成为活跃用户并计入计费成本。
+该端点还接受所有数据筛选条件。`start_date`、`end_date` 和 `days` 会被忽略且不校验。它也会忽略 `cache_mode`：请求数和 provider 成本只包含发送给 provider 的请求，而缓存命中会使用户成为活跃用户并计入计费成本。
 
 ```bash
 # 十一个完整月份加当前月份，并列出每月成本最高的五个用户

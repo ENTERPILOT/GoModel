@@ -75,3 +75,49 @@ func TestBenchmarkRangeIsRefusedBeforeQuerying(t *testing.T) {
 		})
 	}
 }
+
+func TestBenchmarkCacheHitsOfUnknownBilledCost(t *testing.T) {
+	provider := breakdownGroup{Row: "/eng/a", Column: "2026-01", Requests: 1, PricedRequests: 1, BilledPricedRequests: 1, TotalCost: new(1.0), BilledCost: new(1.2)}
+	unknownHit := breakdownGroup{Row: "/eng/a", Column: "2026-01", Requests: 1}
+	unbilledHit := breakdownGroup{Row: "/eng/a", Column: "2026-01", Requests: 1, PricedRequests: 1, BilledPricedRequests: 1, TotalCost: new(2.0), BilledCost: new(0.0)}
+	tests := []struct {
+		name         string
+		provider     []breakdownGroup
+		hits         []breakdownGroup
+		basis        string
+		wantCost     float64
+		wantUnpriced int
+		wantPartly   int
+	}{
+		{name: "billed: a hit of unknown cost beside known usage is partly priced", provider: []breakdownGroup{provider}, hits: []breakdownGroup{unknownHit}, basis: BenchmarkCostBasisBilled, wantCost: 1.2, wantPartly: 1},
+		{name: "billed: only hits of unknown cost are unpriced", hits: []breakdownGroup{unknownHit}, basis: BenchmarkCostBasisBilled, wantUnpriced: 1},
+		{name: "billed: an unbilled hit is a known zero", hits: []breakdownGroup{unbilledHit}, basis: BenchmarkCostBasisBilled},
+		{name: "billed: an unbilled hit beside known usage stays priced", provider: []breakdownGroup{provider}, hits: []breakdownGroup{unbilledHit}, basis: BenchmarkCostBasisBilled, wantCost: 1.2},
+		{name: "provider: a hit costs the provider nothing, known or not", provider: []breakdownGroup{provider}, hits: []breakdownGroup{unknownHit}, basis: BenchmarkCostBasisProvider, wantCost: 1},
+		{name: "provider: only hits of unknown cost are a known zero", hits: []breakdownGroup{unknownHit}, basis: BenchmarkCostBasisProvider},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			params := BenchmarkParams{
+				StartDate: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+				EndDate:   time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC),
+				Parent:    "/eng", CostBasis: tt.basis,
+			}
+			benchmark := EmptyBenchmark(params)
+			totals := benchmarkTotals{parent: "/eng", users: map[benchmarkKey]*benchmarkUserMonth{}}
+			for _, group := range tt.provider {
+				require.NoError(t, totals.addProvider(group))
+			}
+			for _, group := range tt.hits {
+				require.NoError(t, totals.addCacheHit(group))
+			}
+			totals.fill(benchmark, params)
+			require.Len(t, benchmark.Months, 1)
+			month := benchmark.Months[0]
+			assert.Equal(t, 1, month.ActiveUsers)
+			assert.Equal(t, tt.wantCost, month.TotalCost)
+			assert.Equal(t, tt.wantUnpriced, month.UnpricedUsers, "unpriced")
+			assert.Equal(t, tt.wantPartly, month.PartlyPricedUsers, "partly priced")
+		})
+	}
+}

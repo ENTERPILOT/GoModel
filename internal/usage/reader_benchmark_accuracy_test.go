@@ -50,6 +50,9 @@ func benchmarkAgreementFixture(b *benchmarkEntries) []*UsageEntry {
 		b.entry(ts, "/eng/frank", new(3.0), new(3.6)),
 		b.entry(ts, "/eng/frank", nil, nil),  // partly priced within one path
 		hit("/eng/gina", new(2.0), new(0.0)), // active through an unbilled hit
+		b.entry(ts, "/eng/hana", new(1.0), new(1.2)),
+		hit("/eng/hana", nil, nil), // ... plus a billed hit of unknown cost
+		hit("/eng/ivan", nil, nil), // billed hits of unknown cost only
 		b.entry(ts, "/eng", new(10.0), new(11.0)),
 		b.entry(ts, "/sales/x", new(100.0), new(100.0)),
 	}
@@ -72,6 +75,10 @@ func assertBenchmarkAccuracy(t *testing.T, store usageBatchWriter, reader UsageR
 	t.Run("per-user totals agree with the invoice", func(t *testing.T) {
 		invoice, err := reader.GetUsageInvoice(ctx, InvoiceParams{UsageQueryParams: benchmarkMarch(), Parent: "/eng"})
 		require.NoError(t, err)
+		// The invoice bills hana's known cost and leaves ivan out; only the
+		// billed benchmark can say that cache hits of unknown cost are missing.
+		offInvoiceUnpriced := map[string]int{BenchmarkCostBasisProvider: 0, BenchmarkCostBasisBilled: 1}
+		partly := map[string]int{BenchmarkCostBasisProvider: 1, BenchmarkCostBasisBilled: 2}
 		for _, basis := range []string{BenchmarkCostBasisProvider, BenchmarkCostBasisBilled} {
 			t.Run(basis, func(t *testing.T) {
 				benchmark, err := reader.GetUsageBenchmark(ctx, BenchmarkParams{
@@ -79,7 +86,8 @@ func assertBenchmarkAccuracy(t *testing.T, store usageBatchWriter, reader UsageR
 				})
 				require.NoError(t, err)
 				require.Len(t, benchmark.Months, 1)
-				assertBenchmarkMatchesInvoice(t, benchmark.Months[0], invoice, "/eng", basis)
+				assertBenchmarkMatchesInvoice(t, benchmark.Months[0], invoice, "/eng", basis, offInvoiceUnpriced[basis])
+				assert.Equal(t, partly[basis], benchmark.Months[0].PartlyPricedUsers)
 			})
 		}
 	})
@@ -94,14 +102,14 @@ func assertBenchmarkAccuracy(t *testing.T, store usageBatchWriter, reader UsageR
 		{
 			name:       "provider: unpriced, partly priced and a sibling path",
 			params:     BenchmarkParams{UsageQueryParams: benchmarkMarch(), Parent: "/eng"},
-			want:       []benchmarkRow{{"2026-03", false, 6, 1, 13, 10, new(2.166666667), new(1.5), new(5.0), new(7.0), nil, nil}},
+			want:       []benchmarkRow{{"2026-03", false, 8, 1, 14, 10, new(1.75), new(0.5), new(4.2), new(7.0), nil, nil}},
 			wantPartly: []int{1},
 		},
 		{
-			name:       "billed: an unpriced user with an unbilled hit stays unpriced",
+			name:       "billed: unknown costs are counted, also those of cache hits",
 			params:     BenchmarkParams{UsageQueryParams: benchmarkMarch(), Parent: "/eng", CostBasis: BenchmarkCostBasisBilled},
-			want:       []benchmarkRow{{"2026-03", false, 6, 1, 15.7, 11, new(2.616666667), new(2.05), new(5.8), new(8.0), nil, nil}},
-			wantPartly: []int{1},
+			want:       []benchmarkRow{{"2026-03", false, 8, 2, 16.9, 11, new(2.1125), new(0.85), new(4.92), new(8.0), nil, nil}},
+			wantPartly: []int{2},
 		},
 		{
 			name:       "a parent does not absorb a sibling sharing its prefix",
@@ -112,7 +120,7 @@ func assertBenchmarkAccuracy(t *testing.T, store usageBatchWriter, reader UsageR
 		{
 			name:       "a scope equal to the parent keeps the unattributed cost",
 			params:     BenchmarkParams{UsageQueryParams: withScope(benchmarkMarch(), "/eng"), Parent: "/eng"},
-			want:       []benchmarkRow{{"2026-03", false, 6, 1, 13, 10, new(2.166666667), new(1.5), new(5.0), new(7.0), nil, nil}},
+			want:       []benchmarkRow{{"2026-03", false, 8, 1, 14, 10, new(1.75), new(0.5), new(4.2), new(7.0), nil, nil}},
 			wantPartly: []int{1},
 		},
 	}
@@ -158,7 +166,9 @@ func assertBenchmarkAccuracy(t *testing.T, store usageBatchWriter, reader UsageR
 // assertBenchmarkMatchesInvoice checks that month, read with top users,
 // reports each invoice customer's subtotal on basis: a null invoice cost is
 // an unpriced user at 0, and a user the invoice leaves out costs 0.
-func assertBenchmarkMatchesInvoice(t *testing.T, month BenchmarkMonth, invoice *Invoice, parent, basis string) {
+// offInvoiceUnpriced of those users are unpriced: the invoice has no line for
+// cache hits of unknown billed cost.
+func assertBenchmarkMatchesInvoice(t *testing.T, month BenchmarkMonth, invoice *Invoice, parent, basis string, offInvoiceUnpriced int) {
 	t.Helper()
 	users := map[string]BenchmarkUser{}
 	for _, user := range month.TopUsers {
@@ -192,7 +202,7 @@ func assertBenchmarkMatchesInvoice(t *testing.T, month BenchmarkMonth, invoice *
 		assert.Zero(t, user.Cost, "%s is not billed on the invoice", name)
 		assert.Zero(t, user.Requests, "%s has no provider requests", name)
 	}
-	assert.Equal(t, unpriced, month.UnpricedUsers)
+	assert.Equal(t, unpriced+offInvoiceUnpriced, month.UnpricedUsers)
 	assert.InDelta(t, total, month.TotalCost, 1e-9)
 }
 

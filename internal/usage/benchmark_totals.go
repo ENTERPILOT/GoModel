@@ -23,14 +23,15 @@ type benchmarkUserMonth struct {
 
 // cost returns the user's cost on basis and whether it is wholly or partly
 // unknown. A user with no provider requests costs a known 0 on either basis
-// when nothing billed it, as the invoice leaves it out.
+// when nothing billed it, as the invoice leaves it out; billed cache hits of
+// unknown cost make its billed cost unknown instead.
 func (u *benchmarkUserMonth) cost(basis string) (cost float64, unpriced, partly bool) {
 	sum, missing := u.billedCost, u.billedUnpriced
 	if basis == BenchmarkCostBasisProvider {
 		sum, missing = u.providerCost, u.providerUnpriced
 	}
 	if sum == nil {
-		return 0, u.providerRequests > 0, false
+		return 0, missing, false
 	}
 	return *sum, false, missing
 }
@@ -75,16 +76,17 @@ func (b benchmarkTotals) addProvider(group breakdownGroup) error {
 
 // addCacheHit adds a group of response-cache hits: they make the user active,
 // and only what billedHitGroup keeps of them reaches billed cost, exactly as
-// on the invoice.
+// on the invoice. A hit without a billed cost is flagged before that filter,
+// which drops a group whose known charges sum to nothing.
 func (b benchmarkTotals) addCacheHit(group breakdownGroup) error {
 	totals, err := b.user(group)
 	if err != nil {
 		return err
 	}
 	totals.requests += group.Requests
+	totals.billedUnpriced = totals.billedUnpriced || group.BilledPricedRequests < group.Requests
 	if billed, ok := billedHitGroup(group); ok {
 		totals.billedCost = addCost(totals.billedCost, billed.BilledCost)
-		totals.billedUnpriced = totals.billedUnpriced || group.BilledPricedRequests < group.Requests
 	}
 	return nil
 }

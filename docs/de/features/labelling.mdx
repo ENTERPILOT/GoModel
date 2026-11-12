@@ -269,11 +269,18 @@ jeden Request ihrer Jobs mit einem Label, das den PR nennt, etwa `pr-1234`. Der
 Header `x-litellm-tags` funktioniert ohne Konfiguration, solange
 [LiteLLM-Tags](#litellm-tags) aktiviert sind (Standard); sind sie aus,
 konfigurieren Sie einen [Tagging-Header](#tagging-header) und senden Sie
-stattdessen diesen. In GitHub Actions setzen Sie das Label einmal für den Job:
+stattdessen diesen. In GitHub Actions setzen Sie das Label einmal für den Job.
+Lassen Sie den Workflow bei `pull_request` laufen: Andere Events wie `push`
+haben keine PR-Nummer, das Label wäre dann nur `pr-`.
 
 ```yaml .github/workflows/ci.yml
-env:
-  GOMODEL_LABEL: pr-${{ github.event.pull_request.number }}
+on: pull_request
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    env:
+      GOMODEL_LABEL: pr-${{ github.event.pull_request.number }}
 ```
 
 Senden Sie es dann bei jedem Request mit:

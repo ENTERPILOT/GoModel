@@ -31,7 +31,7 @@
   const scope = $derived(access.scoped ? access.userPath : "/");
   const data = $derived(usageBenchmark.data);
   const months = $derived(benchmarkMonths(data));
-  const status = $derived(benchmarkStatus({ data, failed: usageBenchmark.failed }));
+  const status = $derived(benchmarkStatus({ data, failed: usageBenchmark.failed, loading: usageBenchmark.loading }));
   const hasUsers = $derived(benchmarkHasUsage(data));
   const pricingGaps = $derived(benchmarkHasPricingGaps(data));
   const unattributed = $derived(benchmarkUnattributedCost(data));
@@ -39,10 +39,10 @@
 
   // The tree picker selects several paths; a group is one, so the last pick
   // replaces the previous one and clearing falls back to the default group.
-  let picked = $state(usageBenchmark.parent ? [usageBenchmark.parent] : []);
+  // Derived from the store, which drops a group outside a new API key's scope.
+  const picked = $derived(usageBenchmark.parent ? [usageBenchmark.parent] : []);
   function pickGroup(values) {
     const parent = values.length ? values[values.length - 1] : "";
-    picked = parent ? [parent] : [];
     if (parent !== usageBenchmark.parent) usageBenchmark.set("parent", parent);
   }
 
@@ -104,7 +104,9 @@
     </label>
   </div>
 
-  {#if status !== "ready"}
+  {#if status === "loading"}
+    <p class="usage-benchmark-empty">{m.usage_benchmark_loading()}</p>
+  {:else if status !== "ready"}
     <p class="usage-benchmark-empty">{status === "failed" ? m.usage_benchmark_failed() : m.usage_benchmark_empty()}</p>
   {:else}
     {#if pricingGaps}
