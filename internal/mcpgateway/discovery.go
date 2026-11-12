@@ -403,7 +403,7 @@ func (s *Service) callableTools(session *mcp.ServerSession, idx *toolIndex) []in
 			visible = s.authorizeServer(binding, tool.upstream) == nil
 			allowed[tool.upstream] = visible
 		}
-		if !visible || binding.access.authorize(tool.upstream, tool.tool.Name) != nil {
+		if !visible || !binding.access.tool(tool.upstream, tool.tool.Name) {
 			continue
 		}
 		if u, ok := s.manager.get(tool.upstream); !ok || !u.toolExposed(tool.tool.Name) {
