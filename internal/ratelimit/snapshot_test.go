@@ -120,6 +120,45 @@ func TestSnapshotSkipsCountersRemovedSinceTheirChange(t *testing.T) {
 	}
 }
 
+// The save runs outside the admission mutex, so a counter can count again
+// while its row is being written. That change belongs to the next snapshot
+// whether the save succeeds or fails, and a failed save's rows come back once.
+func TestSnapshotKeepsChangesCountedDuringTheSave(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	tests := []struct {
+		name      string
+		saveFails bool
+		want      map[string]int64
+	}{
+		{name: "save succeeds", want: map[string]int64{"/customers/u0": 3}},
+		{name: "save fails", saveFails: true, want: map[string]int64{"/customers/u0": 3, "/customers/u1": 2}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l, template, children := childLimiter(t, 3, now)
+			for _, child := range children[:2] {
+				_, _, err := l.admit([]Rule{child}, now)
+				require.Nil(t, err)
+			}
+			saving := l.snapshot([]Rule{template})
+			require.Len(t, saving, 2)
+
+			_, _, err := l.admit([]Rule{children[0]}, now)
+			require.Nil(t, err)
+			if tt.saveFails {
+				l.unsaved(saving)
+			}
+
+			got := make(map[string]int64)
+			for _, snap := range l.snapshot([]Rule{template}) {
+				got[snap.Partition] = snap.RequestsCurrent
+			}
+			assert.Equal(t, tt.want, got)
+			assert.Empty(t, l.snapshot([]Rule{template}))
+		})
+	}
+}
+
 // BenchmarkAdmitDuringSnapshot measures how long one flush's snapshot over
 // 100k per-child counters, one of them changed since the previous flush,
 // holds the admission mutex. snapshot does all its work under l.mu, so this
