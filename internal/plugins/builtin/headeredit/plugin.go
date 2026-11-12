@@ -69,7 +69,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 			},
 			{
 				Key: "upstream_set", Label: "Upstream headers to set", Input: pluginapi.InputTextarea, Default: "",
-				Help:        "One \"Name: value\" per line. Adds static headers to every provider call of a Chat Completions, Responses or Messages request that goes through the gateway's HTTP client, failover attempts and the Responses input_tokens and compact routes included (/v1/messages/count_tokens carries none); the bedrock provider, which calls Bedrock Runtime through the AWS SDK, does not carry them (bedrock-mantle does). Applies to requests from clients: inference the gateway issues for its own work, such as a guardrail's judge, does not inherit them. Credential, transport, Anthropic-Beta and Idempotency-Key headers are skipped with a warning in the log. Takes effect in the prompt phase only; a response-phase run is after the provider call.",
+				Help:        "One \"Name: value\" per line. Adds static headers to every provider call of a Chat Completions, Responses or Messages request that goes through the gateway's HTTP client, failover attempts and the Responses input_tokens and compact routes included (/v1/messages/count_tokens carries none); the bedrock provider, which calls Bedrock Runtime through the AWS SDK, does not carry them (bedrock-mantle does). Applies to requests from clients: inference the gateway issues for its own work, such as a guardrail's judge, does not inherit them. Credential, transport, Anthropic-Beta and Idempotency-Key headers cannot be saved; in an instance stored earlier they are skipped with a warning in the log. Takes effect in the prompt phase only; a response-phase run is after the provider call.",
 				Placeholder: "X-Tenant: acme",
 			},
 		},
@@ -80,7 +80,8 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 // malformed lines are rejected. A header the plugin may not edit (a
 // credential, or for upstream_set a name the gateway owns) is ignored with a
 // warning instead: the list of such names grows between releases, and a
-// stored instance naming one must not stop the gateway from starting.
+// stored instance naming one must not stop the gateway from starting. Saving
+// an instance is stricter: see ValidateSave.
 func (p *Plugin) Init(_ context.Context, raw json.RawMessage, host pluginapi.Host) error {
 	cfg, err := decodeConfig(raw)
 	if err != nil {
@@ -100,6 +101,28 @@ func (p *Plugin) Init(_ context.Context, raw json.RawMessage, host pluginapi.Hos
 	p.request, p.response, p.upstream = request, response, upstream
 	p.key = fmt.Sprintf("%s:%d", Name, instances.Add(1))
 	return nil
+}
+
+// ValidateSave rejects a config with a line naming a header the plugin may
+// not edit. Init only skips such a line, so an operator who typed a
+// credential header here would have its value stored, in a field that is not
+// a secret, without it ever being applied. The error names the field, the
+// line and the header, never the value.
+func (p *Plugin) ValidateSave(raw json.RawMessage) error {
+	cfg, err := decodeConfig(raw)
+	if err != nil {
+		return err
+	}
+	var refused error
+	_, _, _, err = compile(cfg, func(field string, line int, err error) {
+		if refused == nil {
+			refused = fmt.Errorf("header_edit: %s line %d: %w", field, line, err)
+		}
+	})
+	if err != nil {
+		return err
+	}
+	return refused
 }
 
 // Close releases nothing; the plugin holds no resources.

@@ -509,7 +509,7 @@ func main() {}
   }
   ```
 - 添加 `Summarize(config json.RawMessage) string` 可在护栏列表中显示一行摘要，添加 `Normalize(config) (json.RawMessage, error)`
-  可在存储配置之前将其规范化。两者都是可选的。
+  可在存储配置之前将其规范化，添加 `ValidateSave(config json.RawMessage) error` 可在操作员保存实例时拒绝某个配置，而 `Init` 对已存储实例中的同一配置仍然容忍。三者都是可选的。
 - 当实例依赖进程外部的组件（例如分类器 sidecar）时，请实现 `pluginapi.HealthChecker`（`Health(ctx) error`）。
   GoModel 会在请求路径之外对其进行探测：实例构建完成时探测一次，之后每次护栏刷新时（`workflows.refresh_interval`，默认一分钟）再探测，
   截止时间为 5 s。探测失败会在 `GET /admin/guardrails` 和控制台中将该实例标记为
