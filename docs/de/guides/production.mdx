@@ -54,6 +54,14 @@ verwaltete API-Keys und weiteren Admin-Zustand über `STORAGE_TYPE`.
 | PostgreSQL | `postgresql` | Mehr als ein Replikat, oder Sie betreiben bereits Postgres. Die übliche Wahl für die Produktion. |
 | MongoDB | `mongodb` | Sie betreiben bereits MongoDB und ziehen es Postgres vor. |
 
+Verwenden Sie bei MongoDB bevorzugt ein Replica Set, auch ein einzelner Knoten
+genügt, wie ihn die `docker-compose.yaml` des Repositorys startet. Ein
+eigenständiger `mongod` funktioniert ebenfalls, kennt aber keine Transaktionen:
+GoModel protokolliert eine Warnung und speichert Änderungen über mehrere Dokumente
+(Budget- und Rate-Limit-Konfiguration, Guardrails, Workflow-Versionen) als einzelne
+Schreibvorgänge. Ein unterbrochenes Speichern kann daher nur einen Teil der
+Änderung übernehmen; erneutes Speichern vervollständigt sie.
+
 SQLite ist der Standardwert, damit GoModel ohne jede Konfiguration
 funktioniert, und für eine einzelne Instanz mit persistentem Volume eine echte
 Option für die Produktion. Es spart einen Netzwerk-Hop und eine zu betreibende

@@ -41,6 +41,10 @@ GoModel 通过 `STORAGE_TYPE` 持久化审计日志、用量记录、预算、�
 | PostgreSQL | `postgresql` | 多于一个副本，或您已经在运维 Postgres。生产环境的常规选择。 |
 | MongoDB | `mongodb` | 您已经在运维 MongoDB，且更倾向于使用它而非 Postgres。 |
 
+使用 MongoDB 时，建议使用副本集（replica set），单节点即可，仓库中的 `docker-compose.yaml` 就是这样启动的。
+独立部署的 `mongod` 同样可用，但不支持事务：GoModel 会记录一条警告，并将涉及多个文档的更改（预算和限流配置、护栏、工作流版本）拆成多次独立写入，
+因此中断的保存可能只应用部分更改，再次保存即可补全。
+
 SQLite 是默认选项，使 GoModel 无需任何配置即可运行；对于挂载了持久卷的单实例，它也是真正可用于生产环境的选择。
 它省去了一次网络跳转，也少了一个需要运维的组件。
 

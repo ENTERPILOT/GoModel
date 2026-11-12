@@ -50,6 +50,13 @@ API i inny stan administracyjny za pośrednictwem `STORAGE_TYPE`.
 | PostgreSQL | `postgresql` | Więcej niż jedna replika albo już utrzymujesz Postgresa. Typowy wybór produkcyjny. |
 | MongoDB | `mongodb` | Już utrzymujesz MongoDB i wolisz je od Postgresa. |
 
+Przy MongoDB wybieraj zestaw replik (replica set), nawet jednowęzłowy, taki jak
+uruchamia `docker-compose.yaml` z repozytorium. Samodzielny `mongod` też działa,
+ale nie obsługuje transakcji: GoModel zapisuje wtedy ostrzeżenie w logach, a zmiany
+obejmujące wiele dokumentów (konfigurację budżetów i limitów, guardrails, wersje
+workflow) zapisuje osobnymi operacjami. Przerwany zapis może więc wprowadzić tylko
+część zmiany; ponowny zapis ją uzupełnia.
+
 SQLite jest domyślny, aby GoModel działał bez żadnej konfiguracji, i jest pełnoprawną
 opcją produkcyjną dla pojedynczej instancji z trwałym wolumenem. Eliminuje przeskok
 sieciowy i komponent, który trzeba utrzymywać.
