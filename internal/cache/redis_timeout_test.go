@@ -8,7 +8,6 @@ import (
 	"net"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -61,40 +60,12 @@ func TestRedisOptionsTimeouts(t *testing.T) {
 	}
 }
 
-// unresponsiveRedis accepts connections and never replies, like a Redis that
-// is partitioned or wedged after the TCP handshake.
-func unresponsiveRedis(t *testing.T) string {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	var mu sync.Mutex
-	var conns []net.Conn
-	t.Cleanup(func() {
-		_ = ln.Close()
-		mu.Lock()
-		defer mu.Unlock()
-		for _, c := range conns {
-			_ = c.Close()
-		}
-	})
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			mu.Lock()
-			conns = append(conns, c)
-			mu.Unlock()
-		}
-	}()
-	return ln.Addr().String()
-}
-
 func TestRedisStoreGetTimesOutAgainstUnresponsiveServer(t *testing.T) {
 	// Socket timeouts well above the assertion bound, so only the Get budget
 	// can make the lookup return in time.
-	opts, err := redisOptions("redis://" + unresponsiveRedis(t) + "?read_timeout=5s&write_timeout=5s")
+	server := newHangingRedis(t, 0)
+	server.hang.Store(true)
+	opts, err := redisOptions(server.url() + "?read_timeout=5s&write_timeout=5s")
 	require.NoError(t, err)
 	store := &RedisStore{client: redis.NewClient(opts), getTimeout: 100 * time.Millisecond}
 	t.Cleanup(func() { _ = store.Close() })
@@ -108,106 +79,34 @@ func TestRedisStoreGetTimesOutAgainstUnresponsiveServer(t *testing.T) {
 	assert.Less(t, elapsed, 300*time.Millisecond)
 }
 
-// slowRedis answers every command after delay: PING with PONG, anything else
-// with an error, so the client falls back to a plain RESP2 handshake.
-func slowRedis(t *testing.T, delay time.Duration) string {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	var mu sync.Mutex
-	var conns []net.Conn
-	done := make(chan struct{})
-	t.Cleanup(func() {
-		close(done)
-		_ = ln.Close()
-		mu.Lock()
-		defer mu.Unlock()
-		for _, c := range conns {
-			_ = c.Close()
-		}
-	})
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			mu.Lock()
-			conns = append(conns, c)
-			mu.Unlock()
-			go serveSlowRedis(c, delay, done)
-		}
-	}()
-	return ln.Addr().String()
-}
-
-func serveSlowRedis(c net.Conn, delay time.Duration, done <-chan struct{}) {
-	r := bufio.NewReader(c)
-	for {
-		args, err := readRESPArray(r)
-		if err != nil {
-			return
-		}
-		select {
-		case <-time.After(delay):
-		case <-done:
-			return
-		}
-		reply := "-ERR unknown command\r\n"
-		if len(args) > 0 && strings.EqualFold(args[0], "PING") {
-			reply = "+PONG\r\n"
-		}
-		if _, err := c.Write([]byte(reply)); err != nil {
-			return
-		}
-	}
-}
-
-func readRESPArray(r *bufio.Reader) ([]string, error) {
-	line, err := r.ReadString('\n')
-	if err != nil {
-		return nil, err
-	}
-	n, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "*")))
-	if err != nil {
-		return nil, err
-	}
-	args := make([]string, 0, n)
-	for range n {
-		if _, err := r.ReadString('\n'); err != nil { // $len
-			return nil, err
-		}
-		arg, err := r.ReadString('\n')
-		if err != nil {
-			return nil, err
-		}
-		args = append(args, strings.TrimSpace(arg))
-	}
-	return args, nil
-}
-
 func TestNewRedisStoreToleratesSlowStartupPing(t *testing.T) {
 	// Each reply takes longer than the 500 ms runtime read timeout but the
 	// whole handshake fits the startup budget.
-	store, err := NewRedisStore(RedisStoreConfig{URL: "redis://" + slowRedis(t, 600*time.Millisecond)})
+	store, err := NewRedisStore(RedisStoreConfig{URL: newHangingRedis(t, 600*time.Millisecond).url()})
 	require.NoError(t, err)
 	require.NoError(t, store.Close())
 }
 
 // hangingRedis is a minimal RESP server: it answers PING and refuses every
-// other command until hang is set, after which it reads commands and never
-// replies, like a Redis that stopped responding without closing connections.
+// other command, each after delay, until hang is set, after which it reads
+// commands and never replies, like a Redis that stopped responding without
+// closing connections.
 type hangingRedis struct {
-	ln   net.Listener
-	hang atomic.Bool
+	ln    net.Listener
+	delay time.Duration
+	done  chan struct{}
+	hang  atomic.Bool
 }
 
-func newHangingRedis(t *testing.T) *hangingRedis {
+func newHangingRedis(t *testing.T, delay time.Duration) *hangingRedis {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
-	s := &hangingRedis{ln: ln}
-	t.Cleanup(func() { _ = ln.Close() })
+	s := &hangingRedis{ln: ln, delay: delay, done: make(chan struct{})}
+	t.Cleanup(func() {
+		close(s.done)
+		_ = ln.Close()
+	})
 	go func() {
 		for {
 			conn, err := ln.Accept()
@@ -232,6 +131,11 @@ func (s *hangingRedis) serve(conn net.Conn) {
 		}
 		if s.hang.Load() {
 			continue
+		}
+		select {
+		case <-time.After(s.delay):
+		case <-s.done:
+			return
 		}
 		reply := "-ERR unknown command\r\n"
 		if strings.EqualFold(cmd, "PING") {
@@ -279,7 +183,7 @@ func readRESPCommand(r *bufio.Reader) (string, error) {
 }
 
 func TestRedisStoreHonorsContextDeadlineWhenRedisHangs(t *testing.T) {
-	server := newHangingRedis(t)
+	server := newHangingRedis(t, 0)
 	store, err := NewRedisStore(RedisStoreConfig{URL: server.url()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
