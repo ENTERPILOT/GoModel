@@ -1,0 +1,315 @@
+---
+title: "SAML 2.0 Single Sign-On"
+sidebarTitle: "SAML SSO"
+description: "Protect the GoModel Dashboard with a SAML 2.0 identity provider: settings, registration, what every response is checked for, metadata refresh, certificate pinning, and limits."
+icon: "fingerprint"
+tag: "Pro"
+keywords: ["GoModel Pro", "SAML", "SAML 2.0", "SSO", "single sign-on", "identity provider", "IdP metadata", "assertion consumer service", "certificate pinning", "dashboard authentication"]
+---
+
+## Overview
+
+`protocol: saml` makes the gateway a SAML 2.0 service provider instead of an
+OIDC client. Sessions, user paths, [group mapping](/pro/sso#group-mapping),
+sign-out, and audit work exactly as described for [OIDC SSO](/pro/sso); only
+the way a login is proved changes.
+
+- **One protocol, one identity provider per gateway.** With `protocol: saml`,
+  the OIDC client settings (`issuer_url`, `client_id`, `client_secret`,
+  `redirect_url`) must be unset, in YAML and in the environment. With
+  `protocol: oidc`, every `saml` setting must be unset. Startup stops
+  otherwise.
+- **Switching protocol changes every principal ID.** The ID stored in audit
+  entries is derived from the protocol, the identity provider, and the
+  subject, so the same person appears under a new principal after the switch.
+
+<Warning>
+  SAML needs the `saml` entitlement in addition to `sso`. Like every enabled
+  SSO configuration it fails closed: startup aborts when either entitlement
+  is missing or the configuration is invalid. The gateway never falls back to
+  OIDC or to an unprotected Dashboard.
+</Warning>
+
+## Configure SAML
+
+```yaml
+extensions:
+  sso:
+    enabled: true
+    protocol: saml
+    session_secret: ${PRO_SSO_SESSION_SECRET}
+    admin_groups: [gomodel-admins]
+    saml:
+      acs_url: https://gomodel.example.com/sso/saml/acs
+      idp_metadata_url: https://login.example.com/saml/metadata
+      attributes:
+        email: mail          # the attribute that holds the email
+        groups: memberOf     # the attribute that holds the groups
+      trust_email: true      # read "Email trust" below before setting this
+```
+
+The same setup with environment variables, which override the YAML values:
+
+```bash
+PRO_SSO_ENABLED=true
+PRO_SSO_PROTOCOL=saml
+PRO_SSO_SESSION_SECRET=...
+PRO_SSO_ADMIN_GROUPS=gomodel-admins
+PRO_SSO_SAML_ACS_URL=https://gomodel.example.com/sso/saml/acs
+PRO_SSO_SAML_IDP_METADATA_URL=https://login.example.com/saml/metadata
+PRO_SSO_SAML_ATTRIBUTES='{"email":"mail","groups":"memberOf"}'
+PRO_SSO_SAML_TRUST_EMAIL=true
+```
+
+| Setting | Environment variable | Default | Notes |
+| --- | --- | --- | --- |
+| `protocol` | `PRO_SSO_PROTOCOL` | `oidc` | Set to `saml`. |
+| `saml.acs_url` | `PRO_SSO_SAML_ACS_URL` | required | Public URL of `/sso/saml/acs`, including any `BASE_PATH`. HTTPS, except on localhost. |
+| `saml.idp_metadata_url` | `PRO_SSO_SAML_IDP_METADATA_URL` | unset | Set this or the file, not both. HTTPS, except on localhost. Fetched at startup and refreshed. |
+| `saml.idp_metadata_file` | `PRO_SSO_SAML_IDP_METADATA_FILE` | unset | Use when the gateway cannot reach the identity provider. Read once at startup. |
+| `saml.entity_id` | `PRO_SSO_SAML_ENTITY_ID` | the service provider metadata URL | Change it when the identity provider expects a specific identifier. An absolute URI of at most 1024 characters. |
+| `saml.attributes` | `PRO_SSO_SAML_ATTRIBUTES` | none | Aliases for attribute names. The variable is a JSON object that replaces the YAML map. |
+| `saml.principal_attribute` | `PRO_SSO_SAML_PRINCIPAL_ATTRIBUTE` | unset (NameID) | Set it when the identity provider only sends a transient NameID. |
+| `saml.trust_email` | `PRO_SSO_SAML_TRUST_EMAIL` | `false` | See [Email trust](#email-trust). |
+| `saml.metadata_refresh_interval` | `PRO_SSO_SAML_METADATA_REFRESH_INTERVAL` | `1h` | Metadata URL only. `1m` to `24h`. Setting it with a metadata file stops startup. |
+| `saml.idp_certificate_fingerprints` | `PRO_SSO_SAML_IDP_CERTIFICATE_FINGERPRINTS` | none (trust every signing certificate in the metadata) | See [Certificate pinning](#certificate-pinning). Comma-separated in the environment variable. |
+
+The shared settings in
+[Identity and admission](/pro/sso#identity-and-admission) keep their meaning.
+
+## Register the gateway
+
+The gateway publishes two URLs, both below any `BASE_PATH`:
+
+| URL | Purpose |
+| --- | --- |
+| `https://gomodel.example.com/sso/saml/acs` | Assertion consumer service (ACS), HTTP-POST binding. This is `acs_url`. |
+| `https://gomodel.example.com/sso/saml/metadata` | Service provider metadata. Also the default entity ID. |
+
+<Steps>
+  <Step title="Create a SAML 2.0 application at the identity provider">
+    Import the service provider metadata URL if the provider supports it and
+    the gateway is already running. Otherwise enter the ACS URL with the
+    HTTP-POST binding and the entity ID (audience) by hand.
+  </Step>
+  <Step title="Sign the assertion">
+    The assertion itself must be signed with RSA-SHA256 or stronger and an RSA
+    key of at least 2048 bits. Signing only the response is not enough. Do
+    not encrypt the assertion. The gateway sends unsigned requests over
+    HTTP-Redirect.
+  </Step>
+  <Step title="Send a stable subject and the attributes you use">
+    Use a persistent NameID, or send an immutable user ID as an attribute and
+    name it in `principal_attribute`. Release the attribute for the user path
+    and, if you use `admin_groups` or group mappings, the groups attribute
+    with only the groups the gateway needs.
+  </Step>
+  <Step title="Give the gateway the identity provider metadata">
+    Set `idp_metadata_url`, or download the metadata and set
+    `idp_metadata_file`. The metadata must describe one identity provider
+    with an HTTP-Redirect sign-on endpoint and at least one signing
+    certificate.
+  </Step>
+  <Step title="Start the gateway and sign in">
+    Open `/sso/login`. If the login fails, look up the reason in
+    [Rejected login reasons](/pro/sso#rejected-login-reasons).
+  </Step>
+</Steps>
+
+<Note>
+  These steps use generic SAML 2.0 terms; setting names differ between
+  identity providers. SAML sign-in has so far been verified against a test
+  identity provider only, so treat a first rollout with your provider as an
+  integration to test, not a known-good recipe.
+</Note>
+
+## Attributes and the principal
+
+`user_path_claim` and `groups_claim` name SAML attributes, either directly by
+the attribute `Name` or through an alias in `saml.attributes`:
+
+```yaml
+extensions:
+  sso:
+    saml:
+      attributes:
+        email: mail        # user_path_claim: email reads the "mail" attribute
+        groups: memberOf   # groups_claim: groups reads "memberOf"
+```
+
+- An alias hides a SAML attribute of the same name.
+- The user path attribute must have exactly one value; it is trimmed. Group
+  values are compared exactly as sent.
+- `allowed_domains` and the default `user_path_claim: email` read the
+  attribute named or aliased `email`. The user path is lower-cased only with
+  `user_path_claim: email` or `user_path_case_insensitive: true`.
+- The principal is the NameID, or `principal_attribute` when set. A transient
+  NameID changes at every login and is refused unless `principal_attribute`
+  is set.
+
+## Email trust
+
+`trust_email` decides whether the email attribute counts as a verified email.
+It defaults to `false` because SAML has no equivalent of OIDC's
+`email_verified`: a signature proves the identity provider sent the address,
+not that it checked it. The user path is also the session's
+[access scope](/features/user-path#access-scope), so if people can edit their
+own email at the identity provider, one person could set a colleague's
+address and sign in on that colleague's path.
+
+Without `trust_email`, startup refuses a configuration that depends on the
+email:
+
+- `user_path_claim` that reads it, which includes the default
+  `user_path_claim: email`;
+- `allowed_domains`;
+- `groups_claim` that reads it, when `admin_groups` or group mappings are set.
+
+So choose one of the following:
+
+```yaml
+# The identity provider sets the email and users cannot change it.
+extensions:
+  sso:
+    saml:
+      trust_email: true
+```
+
+```yaml
+# Or build the user path from an attribute the identity provider controls,
+# such as an immutable user ID.
+extensions:
+  sso:
+    user_path_claim: employee_id
+```
+
+<Warning>
+  The startup check only recognises names: `email`, the attribute aliased as
+  `email`, and the well-known email attributes `mail`, `email`,
+  `urn:oid:0.9.2342.19200300.100.1.3`, and
+  `http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress`,
+  compared case-insensitively. An attribute that carries an email, or any
+  other value people can edit, under another name passes. Never use an
+  attribute a user can edit for `user_path_claim` or `groups_claim`.
+</Warning>
+
+## What is checked on every response
+
+A login succeeds only when all of the following hold. Each failure has its
+own [audit reason](/pro/sso#rejected-login-reasons).
+
+- **It answers a login this browser started.** The signed transaction cookie
+  (valid for 10 minutes), `RelayState`, and `InResponseTo` must match.
+- **It is addressed to this gateway.** `Destination` and `Recipient` equal
+  `acs_url`, and the audience is the gateway's entity ID.
+- **It comes from the configured identity provider.** The issuer is the
+  entity ID in the metadata.
+- **The assertion itself is signed** by a currently valid signing certificate
+  from the metadata, with RSA-SHA256 or stronger and a key of at least 2048
+  bits.
+- **There is exactly one assertion**, and it is not encrypted.
+- **It is within its validity window**, allowing 60 seconds of clock skew.
+- **The identity provider reports success.**
+- **It names a stable subject**: a non-transient NameID or
+  `principal_attribute`.
+- **It has not been used before.** See [Replay protection](#replay-protection).
+- **It is small and plain XML**: a form of at most 1 MiB, at most 900 XML
+  elements, no DTD, comments, or processing instructions.
+
+Every value a login uses is read from the signed assertion, never from the
+rest of the document. Admission then applies as for OIDC.
+
+## Identity provider metadata
+
+**From a file.** The file is read once. An unreadable or invalid file stops
+startup, and after the identity provider rotates its signing certificate you
+must replace the file and restart the gateway.
+
+**From a URL.** The gateway fetches the metadata at startup and again every
+`metadata_refresh_interval`, so a published certificate rotation is picked up
+without a restart. A failed refresh keeps the last good metadata. If the URL
+is unreachable at startup, the gateway still starts, logins answer `503` with
+`identity_provider_unavailable`, and the fetch is retried in the background
+(5 seconds, doubling to 5 minutes). Set `require_discovery: true`
+(`PRO_SSO_REQUIRE_DISCOVERY=true`) to make that a startup error instead.
+
+Metadata from either source is not used after its `validUntil`; logins are
+then unavailable until newer metadata is loaded.
+
+### What a refresh can change
+
+A refresh may replace the signing certificates, the sign-on URL, and
+`validUntil`. It may not change the identity provider's entity ID: such
+metadata is refused, the current metadata stays in use, and an error is
+logged. Restart the gateway to move to another entity ID.
+
+Whoever controls the metadata URL can publish a signing certificate of their
+own. Every refresh that changes the trusted certificates is therefore logged
+at warning level, with the SHA-256 fingerprints in `added_fingerprints` and
+`removed_fingerprints`:
+
+```text
+GoModel Pro: SAML identity provider signing certificates changed on metadata refresh
+```
+
+Alert on that line. Startup logs the fingerprints it trusts.
+
+### Certificate pinning
+
+To stop a rotation from being accepted automatically, list the SHA-256
+fingerprints of the identity provider's signing certificates:
+
+```yaml
+extensions:
+  sso:
+    saml:
+      idp_certificate_fingerprints:
+        - "AB:CD:...:EF"   # from: openssl x509 -noout -fingerprint -sha256
+```
+
+Fingerprints are hex, case-insensitive, with optional colons. Only listed
+certificates are trusted, for a metadata file and a URL alike. Metadata with
+none of them stops startup; on a refresh it is refused and the last good
+metadata stays in use.
+
+To rotate, add the new fingerprint before the identity provider switches and
+remove the old one afterwards. Each step needs a restart.
+
+## Sessions and sign-out
+
+A session ends at `session_ttl`, or at the assertion's `SessionNotOnOrAfter`
+when that is earlier. An assertion whose `SessionNotOnOrAfter` has already
+passed is refused.
+
+Sign-out ends the GoModel session only, and behaves as described in
+[Sign-out across replicas](/pro/sso#sign-out-across-replicas).
+
+## Replay protection
+
+Each assertion is accepted once. The gateway remembers the IDs of used
+assertions until they expire, in memory and in the configured storage
+backend.
+
+- **PostgreSQL or MongoDB:** a replayed assertion is refused on every replica
+  that shares the storage. Two replicas that receive the same assertion at
+  the same instant could both accept it; that also requires the person's
+  transaction cookie.
+- **SQLite (the default):** protection is per instance. Run a single replica,
+  as for sign-out; the gateway logs a warning at startup.
+- **Storage unavailable:** the login is refused with
+  `replay_check_unavailable`.
+
+## Limits
+
+- **About 850 groups per person.** Each group value is one XML element, and a
+  response with more than 900 elements is refused with `too_many_elements`.
+  The limit is not configurable. Filter at the identity provider: send only
+  the groups assigned to the application, or those named in `admin_groups`
+  and `group_mappings`.
+- **No login started at the identity provider.** Logins must start at the
+  gateway (`/sso/login`). Unsolicited responses are refused.
+- **No encrypted assertions.** They are refused with `encrypted_assertion`.
+- **No single logout.** Signing out of GoModel does not end the identity
+  provider session, and the gateway does not process logout requests from
+  the identity provider.
+- **One identity provider per gateway.**

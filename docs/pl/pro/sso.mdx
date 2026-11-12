@@ -1,10 +1,10 @@
 ---
 title: "OIDC Single Sign-On"
 sidebarTitle: "OIDC SSO"
-description: "Chroń GoModel Dashboard za pomocą swojego dostawcy tożsamości OIDC, korzystając z Authorization Code flow z PKCE."
+description: "Chroń GoModel Dashboard za pomocą swojego dostawcy tożsamości OIDC, korzystając z Authorization Code flow z PKCE, i mapuj grupy dostawcy tożsamości na ścieżki użytkowników."
 icon: "key-round"
 tag: "Pro"
-keywords: ["GoModel Pro", "OIDC", "SSO", "single sign-on", "jednokrotne logowanie", "PKCE", "uwierzytelnianie dashboardu", "dashboard authentication"]
+keywords: ["GoModel Pro", "OIDC", "SSO", "single sign-on", "jednokrotne logowanie", "PKCE", "uwierzytelnianie dashboardu", "dashboard authentication", "mapowanie grup", "group mapping", "user_path", "powody audytowe", "audit reasons"]
 ---
 
 ## Przegląd
@@ -17,6 +17,10 @@ W odróżnieniu od innych funkcji Pro jawnie włączona konfiguracja SSO
 blokuje w razie błędu (fail closed): uruchamianie zostaje przerwane, gdy brakuje
 uprawnienia licencyjnego `sso` lub konfiguracja jest nieprawidłowa, dzięki czemu
 granica uwierzytelniania nie może po cichu zniknąć.
+
+Logowanie przez SAML 2.0 opisuje strona [SAML SSO](/pl/pro/saml). Wszystko na
+tej stronie poza ustawieniami klienta OIDC dotyczy obu protokołów: ścieżki
+użytkowników, [mapowanie grup](#mapowanie-grup), sesje, wylogowanie i audyt.
 
 ## Skonfiguruj SSO
 
@@ -37,8 +41,109 @@ extensions:
 Zmienne środowiskowe `PRO_SSO_*` nadpisują wartości z YAML. Redirect URL
 musi kończyć się na `/sso/callback` (łącznie ze skonfigurowanym `BASE_PATH`),
 a HTTPS jest wymagany z wyjątkiem deweloperskich adresów loopback. Domyślnie
-wymagana jest co najmniej jedna grupa administratorów; ustaw
-`PRO_SSO_ALLOW_ALL_ADMINS=true` tylko dla celowo nieograniczonego klienta OIDC.
+wymagana jest co najmniej jedna grupa administratorów lub jedno
+[mapowanie grup](#mapowanie-grup); ustaw `PRO_SSO_ALLOW_ALL_ADMINS=true` tylko
+dla celowo nieograniczonego klienta OIDC.
+
+## Tożsamość i dopuszczanie
+
+Każde zaakceptowane logowanie otrzymuje własną ścieżkę użytkownika i dostęp do
+Dashboardu ograniczony do tej ścieżki. Przy wartościach domyślnych osoba
+trafia pod `/users/<e-mail małymi literami>`.
+
+| Ustawienie | Zmienna środowiskowa | Wartość domyślna | Kiedy zmienić |
+| --- | --- | --- | --- |
+| `user_path_claim` | `PRO_SSO_USER_PATH_CLAIM` | `email` | Adresy e-mail się zmieniają albo nie są weryfikowane u Twojego dostawcy. Wskaż inny claim tekstowy najwyższego poziomu, na przykład niezmienny identyfikator użytkownika. Przy `email` adres musi być zweryfikowany i jest zamieniany na małe litery. |
+| `user_path_case_insensitive` | `PRO_SSO_USER_PATH_CASE_INSENSITIVE` | `false` | Własny claim nie rozróżnia wielkości liter u Twojego dostawcy. Pozostałe claimy zachowują wielkość liter. |
+| `user_path_prefix` | `PRO_SSO_USER_PATH_PREFIX` | `/users` | Osoby, do których nie pasuje żadne mapowanie grup, mają trafiać w inne miejsce drzewa. |
+| `groups_claim` | `PRO_SSO_GROUPS_CLAIM` | `groups` | Twój dostawca wysyła grupy w innym claimie. |
+| `admin_groups` | `PRO_SSO_ADMIN_GROUPS` | brak | Podaj grupy, których członkowie mogą się logować bez mapowania grup. W zmiennej środowiskowej rozdzielone przecinkami. |
+| `allow_all_admins` | `PRO_SSO_ALLOW_ALL_ADMINS` | `false` | Klient OIDC jest już u dostawcy ograniczony do właściwych osób. |
+| `allowed_domains` | `PRO_SSO_ALLOWED_DOMAINS` | brak (dowolna domena) | Logować mogą się tylko zweryfikowane adresy e-mail z tych domen. |
+| `session_ttl` | `PRO_SSO_SESSION_TTL` | `1h` | Sesje mają trwać krócej lub dłużej. Dozwolony zakres: od `5m` do `24h`. |
+
+Wartość claimu staje się jednym segmentem ścieżki, więc wartość pusta lub
+zawierająca `/` jest odrzucana.
+
+## Mapowanie grup
+
+`group_mappings` umieszcza członków grupy dostawcy tożsamości pod węzłem
+ścieżki użytkownika. Budżety, rate limits i dostęp do modeli ustawione na tym węźle
+obejmują wtedy każdego członka, bez konfiguracji dla poszczególnych
+użytkowników:
+
+```yaml
+extensions:
+  sso:
+    group_mappings:
+      - group: eng-platform        # wartość z groups_claim
+        user_path: /eng/platform   # węzeł; każdy członek trafia poziom niżej
+      - group: finance
+        user_path: /finance
+```
+
+`PRO_SSO_GROUP_MAPPINGS` zawiera tę samą listę jako tablicę JSON. Ustawiona
+zmienna zastępuje listę z YAML w całości; obie nigdy nie są łączone, a `[]`
+czyści listę. Wartość, która nie jest tablicą JSON, przerywa uruchamianie.
+
+```bash
+PRO_SSO_GROUP_MAPPINGS='[{"group":"eng-platform","user_path":"/eng/platform"},{"group":"finance","user_path":"/finance"}]'
+```
+
+### Jak mapowane jest logowanie
+
+- **Dopasowanie jest dokładne i rozróżnia wielkość liter.** `group` jest
+  porównywane z wartościami `groups_claim`. Entra ID wysyła identyfikatory
+  obiektów grup, a nie ich nazwy, więc podaj identyfikatory obiektów.
+- **Wygrywa pierwsze zadeklarowane dopasowanie.** Ułóż listę od najbardziej
+  do najmniej szczegółowego wpisu; osoba ma zawsze dokładnie jedną ścieżkę
+  użytkownika.
+- **Ścieżka ma postać `<user_path>/<user>`.** `<user>` to wartość
+  `user_path_claim`, więc `alice@example.com` z grupy `eng-platform` loguje
+  się jako `/eng/platform/alice@example.com`. `user_path_prefix` dotyczy
+  tylko logowań, do których nie pasuje żadne mapowanie.
+- **Mapowanie daje liść dla każdego użytkownika, nigdy sam węzeł.** Ścieżka
+  użytkownika jest też
+  [zakresem dostępu](/pl/features/user-path#zakres-dostępu) sesji, więc osoba
+  przypisana do `/eng/platform` administrowałaby całym zespołem. Każdy
+  członek widzi tylko własne użycie, wpisy audytowe i klucze.
+- **Logowanie, którego ścieżka objęłaby węzeł, jest odrzucane.** Jeśli
+  wartość claimu sprawiłaby, że ścieżka byłaby równa zmapowanemu węzłowi lub
+  `user_path_prefix` albo znalazłaby się nad jednym z nich, logowanie kończy
+  się błędem `claim_mapping_failed`. Na przykład przy węzłach `/eng` i
+  `/eng/platform` członek grupy zmapowanej na `/eng`, którego wartość claimu
+  to `platform`, zostanie odrzucony.
+
+### Kto może się zalogować
+
+1. `allowed_domains`, jeśli jest ustawione, sprawdzane jest jako pierwsze.
+2. Logowanie pasujące do mapowania jest akceptowane pod tym węzłem.
+3. Logowanie niepasujące do żadnego mapowania trafia pod `user_path_prefix`,
+   o ile zostanie dopuszczone: gdy ustawiono `admin_groups`, osoba musi
+   należeć do jednej z tych grup (w przeciwnym razie `group_denied`); bez
+   `admin_groups` wszystkich dopuszcza `allow_all_admins: true`.
+4. Gdy nie skonfigurowano ani `admin_groups`, ani `allow_all_admins`,
+   niedopasowane logowanie jest odrzucane z powodem `group_unmapped`.
+
+Uruchomienie wymaga więc co najmniej jednego z: `admin_groups`,
+`group_mappings` lub `allow_all_admins: true`. Użyj samych mapowań, aby
+dopuszczać wyłącznie zmapowane grupy.
+
+Uruchamianie kończy się błędem przy wpisie bez `group`, zduplikowanej
+`group`, nieznanym kluczu albo `user_path`, który nie jest bezwzględny, jest
+korzeniem `/` lub zawiera segment `.`, `..` albo segment z `:`.
+
+### Ograniczenia
+
+- **Zmiana członkostwa w grupie obowiązuje od następnego logowania.** Ścieżka
+  jest częścią podpisanej sesji, więc przeniesienie zaczyna działać
+  najpóźniej po `session_ttl` (domyślnie 1 godzina, maksymalnie 24 godziny).
+- **Klucze API zostają na starej ścieżce.** Klucze utworzone przez osobę na
+  jej poprzednim liściu działają dalej po zmianie grupy lub odejściu.
+  Dezaktywuj je w Dashboardzie.
+- **Entra ID pomija claim grup u osób należących do ponad 200 grup.** Do
+  takiego logowania nie pasuje żadne mapowanie. Ogranicz claim w Entra ID do
+  grup przypisanych do aplikacji.
 
 ## Wylogowanie na wszystkich replikach
 
@@ -67,3 +172,68 @@ dozwolonych modeli na poziomie grup i użytkowników ze strony
 [Użytkownicy](/pl/features/users) obowiązują dla requestów wykonywanych w jej
 ramach. `allowed_models` per klucz to ustawienie zarządzanego klucza API i nie
 dotyczy sesji SSO.
+
+### Powody odrzuconych logowań
+
+Odrzucone logowanie trafia do audytu z jednym stałym powodem, a gateway
+zapisuje w logu `GoModel Pro: SSO login rejected` z tym samym `reason` oraz
+`request_id`. Osoba widzi jedynie ogólną stronę błędu z tym identyfikatorem
+jako numerem referencyjnym.
+
+| Powód | Protokół | Znaczenie |
+| --- | --- | --- |
+| `identity_provider_unavailable` | Oba | OIDC discovery lub metadane SAML są niedostępne. Logowanie odpowiada kodem `503`. |
+| `missing_transaction` | Oba | Przeglądarka nie wysłała ciasteczka transakcji logowania: logowanie nie zaczęło się w tym gatewayu (dotyczy też logowania SAML rozpoczętego u dostawcy tożsamości) albo ciasteczko zostało zablokowane. |
+| `invalid_transaction` | Oba | Ciasteczko transakcji jest nieprawidłowe lub starsze niż 10 minut. |
+| `provider_rejected` | Oba | Dostawca tożsamości odpowiedział błędem (OIDC) lub statusem innym niż sukces (SAML). |
+| `invalid_state` | OIDC | `state` nie pasuje do rozpoczętego logowania. |
+| `missing_code` | OIDC | Callback nie zawierał kodu autoryzacyjnego. |
+| `code_exchange_failed` | OIDC | Dostawca odmówił wymiany kodu na tokeny. |
+| `missing_id_token` | OIDC | Odpowiedź z tokenami nie zawierała ID tokena. |
+| `id_token_verification_failed` | OIDC | Weryfikacja podpisu lub claimów ID tokena nie powiodła się. |
+| `invalid_claims` | OIDC | Nie udało się odczytać claimów ID tokena albo nonce się nie zgadza. |
+| `response_too_large` | SAML | Przesłany formularz jest większy niż 1 MiB. |
+| `invalid_relay_state` | SAML | `RelayState` nie jest wartością wysłaną przez gateway. |
+| `malformed_response` | SAML | To nie jest zwykła, kompletna odpowiedź SAML 2.0: jest skompresowana albo zawiera DTD, komentarze, instrukcje przetwarzania, więcej niż 32 poziomy zagnieżdżenia, więcej niż 64 atrybuty w elemencie, powtórzoną nazwę atrybutu lub brakuje w niej wymaganej części. |
+| `too_many_elements` | SAML | Ponad 900 elementów XML, zwykle [zbyt wiele grup](/pl/pro/saml#ograniczenia). |
+| `assertion_count` | SAML | W odpowiedzi nie ma dokładnie jednej asercji umieszczonej bezpośrednio w niej. |
+| `encrypted_assertion` | SAML | Asercja jest zaszyfrowana, co nie jest obsługiwane. |
+| `destination_mismatch` | SAML | `Destination` odpowiedzi nie jest równe `acs_url`. |
+| `in_response_to_mismatch` | SAML | Odpowiedź nie odpowiada na żądanie rozpoczęte przez tę przeglądarkę. |
+| `issuer_mismatch` | SAML | Wystawca nie jest identyfikatorem jednostki (entity ID) z metadanych dostawcy tożsamości. |
+| `assertion_unsigned` | SAML | Sama asercja nie jest podpisana. Podpisana odpowiedź nie wystarcza. |
+| `weak_signature_algorithm` | SAML | Podpis inny niż RSA-SHA256, -SHA384 lub -SHA512 ze skrótem co najmniej SHA-256 albo klucz RSA krótszy niż 2048 bitów. |
+| `untrusted_certificate` | SAML | Certyfikat podpisujący nie jest zaufanym certyfikatem z metadanych albo jest poza okresem ważności. |
+| `invalid_signature` | SAML | Podpis się nie weryfikuje albo nie ma oczekiwanej postaci. |
+| `audience_mismatch` | SAML | Brak ograniczenia odbiorców (audience) albo ograniczenie, które nie wskazuje entity ID gatewaya. |
+| `invalid_conditions` | SAML | Brakuje warunków (Conditions), nie mają one okna ważności albo zawierają warunek nieznany gatewayowi. |
+| `assertion_not_yet_valid` | SAML | `NotBefore` wypada ponad 60 sekund w przyszłości. |
+| `assertion_expired` | SAML | `NotOnOrAfter` minęło ponad 60 sekund temu albo minęło `SessionNotOnOrAfter`. |
+| `recipient_mismatch` | SAML | `Recipient` w potwierdzeniu podmiotu nie jest równe `acs_url`. |
+| `invalid_subject` | SAML | Brak pojedynczego potwierdzenia podmiotu typu bearer albo brak stabilnego podmiotu: brakujący lub tymczasowy (transient) NameID bez `principal_attribute` albo `principal_attribute`, którego brakuje lub który ma kilka wartości. |
+| `assertion_replayed` | SAML | Asercja została już użyta. |
+| `replay_check_unavailable` | SAML | Storage nie odpowiedział na sprawdzenie powtórzenia, więc logowanie jest odrzucane. |
+| `unverified_identity` | Oba | Adres e-mail nie jest zweryfikowany, a wymaga go `allowed_domains` lub `user_path_claim: email`. |
+| `domain_denied` | Oba | Domeny adresu e-mail nie ma w `allowed_domains`. |
+| `group_denied` | Oba | Nie pasuje żadne mapowanie, a osoba nie należy do żadnej z `admin_groups`. |
+| `group_unmapped` | Oba | Nie pasuje żadne mapowanie, a nie skonfigurowano ani `admin_groups`, ani `allow_all_admins`. |
+| `claim_mapping_failed` | Oba | Nie udało się zbudować ścieżki użytkownika: claim ścieżki użytkownika nie istnieje, jest pusty lub zawiera `/`, claim grup nie jest tekstem ani listą tekstów, brakuje podmiotu, ścieżka objęłaby [zmapowany węzeł](#jak-mapowane-jest-logowanie) albo wartość została odrzucona przy [zamianie na małe litery](#uwagi-dotyczące-aktualizacji). |
+
+## Uwagi dotyczące aktualizacji
+
+<Warning>
+  Logowanie jest teraz odrzucane z powodem `claim_mapping_failed`, gdy zamiana
+  adresu e-mail na małe litery zmieniłaby literę spoza ASCII w literę ASCII:
+  znak kelwina (U+212A) w `k` albo wielkie I z kropką (U+0130) w `i`. Taka
+  pisownia mogłaby w przeciwnym razie trafić na ścieżkę użytkownika innej
+  osoby. Dotyczy to OIDC i SAML zawsze wtedy, gdy ścieżka użytkownika jest
+  zamieniana na małe litery: przy domyślnym `user_path_claim: email` albo przy
+  `user_path_case_insensitive: true`. Także `allowed_domains` nie dopasowuje
+  już tak zapisanej domeny.
+
+  Osoba, której adres zawiera jeden z tych znaków, nie może się już
+  zalogować. Skonfiguruj dostawcę tożsamości tak, aby wysyłał pisownię bez tych
+  znaków, albo ustaw `user_path_claim` na claim niebędący adresem e-mail, na
+  przykład niezmienny identyfikator użytkownika, co przenosi każdego
+  użytkownika na nową ścieżkę.
+</Warning>

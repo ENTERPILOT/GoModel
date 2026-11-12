@@ -1,10 +1,10 @@
 ---
 title: "OIDC Single Sign-On"
 sidebarTitle: "OIDC SSO"
-description: "Schützen Sie das GoModel Dashboard mit Ihrem OIDC-Identity-Provider über den Authorization Code Flow mit PKCE."
+description: "Schützen Sie das GoModel Dashboard mit Ihrem OIDC-Identity-Provider über den Authorization Code Flow mit PKCE und ordnen Sie Gruppen des Identity-Providers User-Paths zu."
 icon: "key-round"
 tag: "Pro"
-keywords: ["GoModel Pro", "OIDC", "SSO", "Single Sign-On", "PKCE", "Dashboard-Authentifizierung", "dashboard authentication"]
+keywords: ["GoModel Pro", "OIDC", "SSO", "Single Sign-On", "PKCE", "Dashboard-Authentifizierung", "dashboard authentication", "Gruppen-Mapping", "group mapping", "user_path", "Audit-Gründe", "audit reasons"]
 ---
 
 ## Übersicht
@@ -17,6 +17,11 @@ Anders als andere Pro-Features schlägt eine explizit aktivierte
 SSO-Konfiguration geschlossen fehl (fail closed): Der Start wird abgebrochen,
 wenn das `sso`-Entitlement fehlt oder die Konfiguration ungültig ist. So kann
 eine Authentifizierungsgrenze nicht unbemerkt verschwinden.
+
+Für die Anmeldung mit SAML 2.0 siehe [SAML SSO](/de/pro/saml). Alles auf
+dieser Seite außer den OIDC-Client-Einstellungen gilt für beide Protokolle:
+User-Paths, [Gruppen-Mapping](#gruppen-mapping), Sessions, Abmeldung und
+Audit.
 
 ## SSO konfigurieren
 
@@ -38,8 +43,114 @@ Umgebungsvariablen vom Typ `PRO_SSO_*` überschreiben die YAML-Werte. Die
 Redirect-URL muss auf `/sso/callback` enden (einschließlich eines ggf.
 konfigurierten `BASE_PATH`), und HTTPS ist erforderlich, außer bei
 Loopback-URLs für die Entwicklung. Standardmäßig ist mindestens eine
-Administratorgruppe erforderlich; setzen Sie `PRO_SSO_ALLOW_ALL_ADMINS=true`
-nur für einen bewusst uneingeschränkten OIDC-Client.
+Administratorgruppe oder ein [Gruppen-Mapping](#gruppen-mapping)
+erforderlich; setzen Sie `PRO_SSO_ALLOW_ALL_ADMINS=true` nur für einen bewusst
+uneingeschränkten OIDC-Client.
+
+## Identität und Zulassung
+
+Jede akzeptierte Anmeldung erhält einen eigenen User-Path und
+Dashboard-Zugriff, der auf diesen Pfad beschränkt ist. Mit den Standardwerten
+landet eine Person unter `/users/<E-Mail in Kleinbuchstaben>`.
+
+| Einstellung | Umgebungsvariable | Standardwert | Ändern, wenn |
+| --- | --- | --- | --- |
+| `user_path_claim` | `PRO_SSO_USER_PATH_CLAIM` | `email` | E-Mail-Adressen sich ändern oder bei Ihrem Provider nicht verifiziert sind. Nennen Sie einen anderen String-Claim der obersten Ebene, etwa eine unveränderliche Benutzer-ID. Bei `email` muss die Adresse verifiziert sein und wird in Kleinbuchstaben umgewandelt. |
+| `user_path_case_insensitive` | `PRO_SSO_USER_PATH_CASE_INSENSITIVE` | `false` | Ein eigener Claim bei Ihrem Provider nicht zwischen Groß- und Kleinschreibung unterscheidet. Andere Claims behalten ihre Schreibweise. |
+| `user_path_prefix` | `PRO_SSO_USER_PATH_PREFIX` | `/users` | Personen, auf die kein Gruppen-Mapping zutrifft, an anderer Stelle im Baum landen sollen. |
+| `groups_claim` | `PRO_SSO_GROUPS_CLAIM` | `groups` | Ihr Provider die Gruppen in einem anderen Claim sendet. |
+| `admin_groups` | `PRO_SSO_ADMIN_GROUPS` | keine | Sie die Gruppen angeben, deren Mitglieder sich ohne Gruppen-Mapping anmelden dürfen. In der Umgebungsvariable durch Kommas getrennt. |
+| `allow_all_admins` | `PRO_SSO_ALLOW_ALL_ADMINS` | `false` | Der OIDC-Client beim Provider bereits auf die richtigen Personen beschränkt ist. |
+| `allowed_domains` | `PRO_SSO_ALLOWED_DOMAINS` | keine (jede Domain) | Sich nur verifizierte E-Mail-Adressen dieser Domains anmelden dürfen. |
+| `session_ttl` | `PRO_SSO_SESSION_TTL` | `1h` | Sessions kürzer oder länger dauern sollen. Zulässiger Bereich: `5m` bis `24h`. |
+
+Der Claim-Wert wird zu genau einem Pfadsegment. Ein leerer Wert oder einer,
+der `/` enthält, wird daher abgelehnt.
+
+## Gruppen-Mapping
+
+`group_mappings` platziert die Mitglieder einer Gruppe des Identity-Providers
+unter einem User-Path-Knoten. Budgets, Rate-Limits und Modellzugriff, die an
+diesem Knoten gesetzt sind, gelten dann für jedes Mitglied, ohne Einrichtung
+pro Benutzer:
+
+```yaml
+extensions:
+  sso:
+    group_mappings:
+      - group: eng-platform        # ein Wert von groups_claim
+        user_path: /eng/platform   # ein Knoten; jedes Mitglied landet eine Ebene darunter
+      - group: finance
+        user_path: /finance
+```
+
+`PRO_SSO_GROUP_MAPPINGS` enthält dieselbe Liste als JSON-Array. Ist die
+Variable gesetzt, ersetzt sie die YAML-Liste vollständig; beide werden nie
+zusammengeführt, und `[]` leert die Liste. Ein Wert, der kein JSON-Array ist,
+bricht den Start ab.
+
+```bash
+PRO_SSO_GROUP_MAPPINGS='[{"group":"eng-platform","user_path":"/eng/platform"},{"group":"finance","user_path":"/finance"}]'
+```
+
+### So wird eine Anmeldung zugeordnet
+
+- **Der Abgleich ist exakt und beachtet Groß- und Kleinschreibung.** `group`
+  wird mit den Werten von `groups_claim` verglichen. Entra ID sendet die
+  Objekt-IDs der Gruppen, nicht deren Namen; tragen Sie also die Objekt-IDs
+  ein.
+- **Der erste deklarierte Treffer gewinnt.** Ordnen Sie die Liste vom
+  speziellsten zum allgemeinsten Eintrag; eine Person hat immer genau einen
+  User-Path.
+- **Der Pfad lautet `<user_path>/<user>`.** `<user>` ist der Wert von
+  `user_path_claim`. `alice@example.com` in `eng-platform` meldet sich also
+  als `/eng/platform/alice@example.com` an. `user_path_prefix` gilt nur für
+  Anmeldungen, auf die kein Mapping zutrifft.
+- **Ein Mapping ergibt ein Blatt pro Benutzer, nie den Knoten selbst.** Der
+  User-Path ist zugleich der
+  [Zugriffsbereich](/de/features/user-path#zugriffsbereich) der Session. Eine
+  an `/eng/platform` gebundene Person würde daher das gesamte Team
+  verwalten. Jedes Mitglied sieht nur die eigene Nutzung, die eigenen
+  Audit-Einträge und die eigenen Keys.
+- **Eine Anmeldung, deren Pfad einen Knoten abdecken würde, wird
+  abgelehnt.** Würde der Claim-Wert den Pfad einem gemappten Knoten oder
+  `user_path_prefix` gleichsetzen oder ihn oberhalb davon platzieren,
+  schlägt die Anmeldung mit `claim_mapping_failed` fehl. Beispiel: Bei den
+  Knoten `/eng` und `/eng/platform` wird ein Mitglied der auf `/eng`
+  gemappten Gruppe abgelehnt, wenn sein Claim-Wert `platform` lautet.
+
+### Wer sich anmelden darf
+
+1. `allowed_domains` wird, sofern gesetzt, zuerst geprüft.
+2. Eine Anmeldung, auf die ein Mapping zutrifft, wird unter diesem Knoten
+   akzeptiert.
+3. Eine Anmeldung, auf die keines zutrifft, landet unter `user_path_prefix`,
+   sofern sie zugelassen wird: Ist `admin_groups` gesetzt, muss die Person in
+   einer dieser Gruppen sein (sonst `group_denied`); ohne `admin_groups`
+   lässt `allow_all_admins: true` alle zu.
+4. Ist weder `admin_groups` noch `allow_all_admins` konfiguriert, wird eine
+   Anmeldung ohne Treffer mit dem Grund `group_unmapped` abgelehnt.
+
+Der Start erfordert daher mindestens eines von `admin_groups`,
+`group_mappings` oder `allow_all_admins: true`. Verwenden Sie ausschließlich
+Mappings, um nur gemappte Gruppen zuzulassen.
+
+Der Start schlägt fehl bei einem Eintrag ohne `group`, bei einer doppelten
+`group`, bei einem unbekannten Schlüssel oder bei einem `user_path`, der nicht
+absolut ist, die Wurzel `/` ist oder ein Segment `.`, `..` oder eines mit `:`
+enthält.
+
+### Grenzen
+
+- **Eine geänderte Gruppenmitgliedschaft gilt ab der nächsten Anmeldung.**
+  Der Pfad ist Teil der signierten Session; ein Wechsel wird also spätestens
+  nach `session_ttl` wirksam (standardmäßig 1 Stunde, höchstens 24 Stunden).
+- **API-Keys bleiben auf dem alten Pfad.** Keys, die eine Person auf ihrem
+  früheren Blatt erstellt hat, funktionieren weiter, nachdem sie die Gruppe
+  gewechselt oder verlassen hat. Deaktivieren Sie sie im Dashboard.
+- **Entra ID lässt den Gruppen-Claim bei Personen in mehr als 200 Gruppen
+  weg.** Auf eine solche Anmeldung trifft kein Mapping zu. Beschränken Sie
+  den Claim in Entra ID auf die Gruppen, die der Anwendung zugewiesen sind.
 
 ## Abmeldung über Replicas hinweg
 
@@ -68,3 +179,69 @@ gelten die Modell-Allowlists auf Gruppen- und Benutzerebene von der Seite
 [Benutzer](/de/features/users) auch für Requests, die über sie gestellt
 werden. Die `allowed_models` pro Key sind eine Einstellung verwalteter API-Keys
 und gelten nicht für SSO-Sessions.
+
+### Gründe für abgelehnte Anmeldungen
+
+Eine abgelehnte Anmeldung wird mit genau einem festen Grund auditiert, und das
+Gateway protokolliert `GoModel Pro: SSO login rejected` mit demselben `reason`
+und einer `request_id`. Die Person sieht nur eine allgemeine Fehlerseite mit
+dieser ID als Referenz.
+
+| Grund | Protokoll | Bedeutung |
+| --- | --- | --- |
+| `identity_provider_unavailable` | Beide | OIDC-Discovery oder die SAML-Metadaten sind nicht verfügbar. Die Anmeldung antwortet mit `503`. |
+| `missing_transaction` | Beide | Der Browser hat kein Transaktions-Cookie der Anmeldung gesendet: Die Anmeldung wurde nicht an diesem Gateway gestartet (auch eine beim Identity-Provider gestartete SAML-Anmeldung), oder das Cookie wurde blockiert. |
+| `invalid_transaction` | Beide | Das Transaktions-Cookie ist ungültig oder älter als 10 Minuten. |
+| `provider_rejected` | Beide | Der Identity-Provider hat mit einem Fehler (OIDC) oder einem anderen Status als Erfolg (SAML) geantwortet. |
+| `invalid_state` | OIDC | `state` passt nicht zur gestarteten Anmeldung. |
+| `missing_code` | OIDC | Der Callback enthielt keinen Autorisierungscode. |
+| `code_exchange_failed` | OIDC | Der Provider hat den Tausch des Codes gegen Tokens verweigert. |
+| `missing_id_token` | OIDC | Die Token-Antwort enthielt kein ID-Token. |
+| `id_token_verification_failed` | OIDC | Die Prüfung der Signatur oder der Claims des ID-Tokens ist fehlgeschlagen. |
+| `invalid_claims` | OIDC | Die Claims des ID-Tokens konnten nicht gelesen werden, oder die Nonce stimmt nicht überein. |
+| `response_too_large` | SAML | Das gesendete Formular ist größer als 1 MiB. |
+| `invalid_relay_state` | SAML | `RelayState` ist nicht der Wert, den das Gateway gesendet hat. |
+| `malformed_response` | SAML | Keine einfache, vollständige SAML-2.0-Response: komprimiert oder mit DTD, Kommentaren, Processing Instructions, mehr als 32 Verschachtelungsebenen, mehr als 64 Attributen an einem Element, einem wiederholten Attributnamen oder einem fehlenden Pflichtteil. |
+| `too_many_elements` | SAML | Mehr als 900 XML-Elemente, meist [zu viele Gruppen](/de/pro/saml#grenzen). |
+| `assertion_count` | SAML | Nicht genau eine Assertion direkt in der Response. |
+| `encrypted_assertion` | SAML | Die Assertion ist verschlüsselt, was nicht unterstützt wird. |
+| `destination_mismatch` | SAML | `Destination` der Response ist nicht `acs_url`. |
+| `in_response_to_mismatch` | SAML | Die Response beantwortet nicht den Request, den dieser Browser gestartet hat. |
+| `issuer_mismatch` | SAML | Der Issuer ist nicht die Entity-ID aus den Metadaten des Identity-Providers. |
+| `assertion_unsigned` | SAML | Die Assertion selbst ist nicht signiert. Eine signierte Response genügt nicht. |
+| `weak_signature_algorithm` | SAML | Nicht RSA-SHA256, -SHA384 oder -SHA512 mit einem Digest von mindestens SHA-256, oder ein RSA-Schlüssel mit weniger als 2048 Bit. |
+| `untrusted_certificate` | SAML | Das Signaturzertifikat ist kein vertrauenswürdiges Zertifikat aus den Metadaten oder liegt außerhalb seines Gültigkeitszeitraums. |
+| `invalid_signature` | SAML | Die Signatur lässt sich nicht verifizieren oder hat nicht die erwartete Form. |
+| `audience_mismatch` | SAML | Keine Audience-Einschränkung, oder eine, die die Entity-ID des Gateways nicht nennt. |
+| `invalid_conditions` | SAML | Die Conditions fehlen, haben kein Gültigkeitsfenster oder enthalten eine Bedingung, die das Gateway nicht kennt. |
+| `assertion_not_yet_valid` | SAML | `NotBefore` liegt mehr als 60 Sekunden in der Zukunft. |
+| `assertion_expired` | SAML | `NotOnOrAfter` ist seit mehr als 60 Sekunden überschritten, oder `SessionNotOnOrAfter` ist überschritten. |
+| `recipient_mismatch` | SAML | `Recipient` der Subject Confirmation ist nicht `acs_url`. |
+| `invalid_subject` | SAML | Keine einzelne Bearer-Subject-Confirmation oder kein stabiles Subject: eine fehlende oder transiente NameID ohne `principal_attribute`, oder ein `principal_attribute`, das fehlt oder mehrere Werte hat. |
+| `assertion_replayed` | SAML | Die Assertion wurde bereits verwendet. |
+| `replay_check_unavailable` | SAML | Der Storage hat die Replay-Prüfung nicht beantwortet; die Anmeldung wird daher abgelehnt. |
+| `unverified_identity` | Beide | Die E-Mail-Adresse ist nicht verifiziert, wird aber von `allowed_domains` oder `user_path_claim: email` benötigt. |
+| `domain_denied` | Beide | Die E-Mail-Domain steht nicht in `allowed_domains`. |
+| `group_denied` | Beide | Kein Mapping trifft zu, und die Person ist in keiner der `admin_groups`. |
+| `group_unmapped` | Beide | Kein Mapping trifft zu, und weder `admin_groups` noch `allow_all_admins` ist konfiguriert. |
+| `claim_mapping_failed` | Beide | Es konnte kein User-Path gebildet werden: Der User-Path-Claim fehlt, ist leer oder enthält `/`, der Gruppen-Claim ist weder ein String noch eine Liste von Strings, das Subject fehlt, der Pfad würde einen [gemappten Knoten](#so-wird-eine-anmeldung-zugeordnet) abdecken, oder der Wert wird wegen der [Kleinschreibung](#upgrade-hinweise) abgelehnt. |
+
+## Upgrade-Hinweise
+
+<Warning>
+  Eine Anmeldung wird jetzt mit `claim_mapping_failed` abgelehnt, wenn die
+  Umwandlung ihrer E-Mail-Adresse in Kleinbuchstaben einen Nicht-ASCII-Buchstaben
+  zu einem ASCII-Buchstaben machen würde: das Kelvin-Zeichen (U+212A) zu `k`
+  oder das große I mit Punkt (U+0130) zu `i`. Eine solche Schreibweise könnte
+  sonst den User-Path einer anderen Person erreichen. Das gilt für OIDC und
+  SAML, sobald der User-Path in Kleinbuchstaben umgewandelt wird: beim
+  Standard `user_path_claim: email` oder bei
+  `user_path_case_insensitive: true`. Auch `allowed_domains` trifft auf eine so
+  geschriebene Domain nicht mehr zu.
+
+  Eine Person, deren Adresse eines dieser Zeichen enthält, kann sich nicht
+  mehr anmelden. Lassen Sie den Identity-Provider eine Schreibweise ohne diese
+  Zeichen senden, oder setzen Sie `user_path_claim` auf einen Claim, der keine
+  E-Mail-Adresse ist, etwa eine unveränderliche Benutzer-ID. Dadurch erhält
+  jeder Benutzer einen neuen Pfad.
+</Warning>

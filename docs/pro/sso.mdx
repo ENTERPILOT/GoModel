@@ -1,10 +1,10 @@
 ---
 title: "OIDC Single Sign-On"
 sidebarTitle: "OIDC SSO"
-description: "Protect the GoModel Dashboard with your OIDC identity provider using Authorization Code flow with PKCE."
+description: "Protect the GoModel Dashboard with your OIDC identity provider using Authorization Code flow with PKCE, and map identity-provider groups to user paths."
 icon: "key-round"
 tag: "Pro"
-keywords: ["GoModel Pro", "OIDC", "SSO", "single sign-on", "PKCE", "dashboard authentication"]
+keywords: ["GoModel Pro", "OIDC", "SSO", "single sign-on", "PKCE", "dashboard authentication", "group mapping", "user_path", "audit reasons"]
 ---
 
 ## Overview
@@ -17,6 +17,10 @@ Unlike other Pro features, an explicitly enabled SSO configuration fails
 closed: startup aborts when the `sso` entitlement is missing or the
 configuration is invalid, so an authentication boundary cannot disappear
 silently.
+
+To sign in with SAML 2.0 instead, see [SAML SSO](/pro/saml). Everything on
+this page except the OIDC client settings applies to both protocols: user
+paths, [group mapping](#group-mapping), sessions, sign-out, and audit.
 
 ## Configure SSO
 
@@ -37,8 +41,103 @@ extensions:
 `PRO_SSO_*` environment variables override the YAML values. The redirect URL
 must end in `/sso/callback` (including any configured `BASE_PATH`), and HTTPS
 is required except for loopback development URLs. By default, at least one
-administrator group is required; set `PRO_SSO_ALLOW_ALL_ADMINS=true` only for
-an intentionally unrestricted OIDC client.
+administrator group or one [group mapping](#group-mapping) is required; set
+`PRO_SSO_ALLOW_ALL_ADMINS=true` only for an intentionally unrestricted OIDC
+client.
+
+## Identity and admission
+
+Every accepted login gets a user path of its own and Dashboard access scoped
+to that path. The defaults place a person at `/users/<lowercase email>`.
+
+| Setting | Environment variable | Default | Change it when |
+| --- | --- | --- | --- |
+| `user_path_claim` | `PRO_SSO_USER_PATH_CLAIM` | `email` | Emails change or are not verified at your provider. Name another top-level string claim, such as an immutable user ID. With `email`, the address must be verified and is lower-cased. |
+| `user_path_case_insensitive` | `PRO_SSO_USER_PATH_CASE_INSENSITIVE` | `false` | A custom claim is case-insensitive at your provider. Other claims keep their case. |
+| `user_path_prefix` | `PRO_SSO_USER_PATH_PREFIX` | `/users` | People that no group mapping matched should land elsewhere in the tree. |
+| `groups_claim` | `PRO_SSO_GROUPS_CLAIM` | `groups` | Your provider sends groups under another claim. |
+| `admin_groups` | `PRO_SSO_ADMIN_GROUPS` | none | List the groups whose members may sign in without a group mapping. Comma-separated in the environment variable. |
+| `allow_all_admins` | `PRO_SSO_ALLOW_ALL_ADMINS` | `false` | The OIDC client is already restricted to the right people at the provider. |
+| `allowed_domains` | `PRO_SSO_ALLOWED_DOMAINS` | none (any domain) | Only verified emails from these domains may sign in. |
+| `session_ttl` | `PRO_SSO_SESSION_TTL` | `1h` | Sessions should be shorter or longer. Allowed range: `5m` to `24h`. |
+
+The claim value becomes one path segment, so a value that is empty or
+contains `/` is refused.
+
+## Group mapping
+
+`group_mappings` places the members of an identity-provider group under a
+user path node. Budgets, rate limits, and model access set on that node then
+cover every member, with no per-user setup:
+
+```yaml
+extensions:
+  sso:
+    group_mappings:
+      - group: eng-platform        # a value of groups_claim
+        user_path: /eng/platform   # a node; each member lands one level below
+      - group: finance
+        user_path: /finance
+```
+
+`PRO_SSO_GROUP_MAPPINGS` carries the same list as a JSON array. When set, it
+replaces the YAML list as a whole; the two are never merged, and `[]` clears
+the list. A value that is not a JSON array stops startup.
+
+```bash
+PRO_SSO_GROUP_MAPPINGS='[{"group":"eng-platform","user_path":"/eng/platform"},{"group":"finance","user_path":"/finance"}]'
+```
+
+### How a login is mapped
+
+- **Matching is exact and case-sensitive.** `group` is compared with the
+  values of `groups_claim`. Entra ID sends group object IDs, not names, so
+  list the object IDs.
+- **The first declared match wins.** Order the list from most to least
+  specific; a person always has exactly one user path.
+- **The path is `<user_path>/<user>`.** `<user>` is the `user_path_claim`
+  value, so `alice@example.com` in `eng-platform` signs in as
+  `/eng/platform/alice@example.com`. `user_path_prefix` applies only to
+  logins that no mapping matched.
+- **A mapping gives a per-user leaf, never the node itself.** The user path
+  is also the [access scope](/features/user-path#access-scope) of the
+  session, so a person bound to `/eng/platform` would administer the whole
+  team. Each member sees only their own usage, audit entries, and keys.
+- **A login whose path would cover a node is refused.** If the claim value
+  would make the path equal to a mapped node or to `user_path_prefix`, or
+  place it above one of them, sign-in fails with `claim_mapping_failed`. For
+  example, with nodes `/eng` and `/eng/platform`, a member of the group
+  mapped to `/eng` whose claim value is `platform` is refused.
+
+### Who may sign in
+
+1. `allowed_domains`, when set, is checked first.
+2. A login that matches a mapping is accepted under that node.
+3. A login that matches none lands under `user_path_prefix`, if it is
+   admitted: with `admin_groups` set, the person must be in one of them
+   (`group_denied` otherwise); without `admin_groups`, everyone is admitted
+   when `allow_all_admins` is `true`.
+4. With neither `admin_groups` nor `allow_all_admins` configured, an
+   unmatched login is refused with the reason `group_unmapped`.
+
+Startup therefore needs at least one of `admin_groups`, `group_mappings`, or
+`allow_all_admins: true`. Use mappings alone to admit only mapped groups.
+
+Startup fails on an entry without a `group`, a duplicate `group`, an unknown
+key, or a `user_path` that is not absolute, is the root `/`, or has a `.`,
+`..`, or `:` segment.
+
+### Limits
+
+- **A changed group membership applies at the next login.** The path is part
+  of the signed session, so a move takes effect at most `session_ttl` later
+  (1 hour by default, 24 hours at most).
+- **API keys stay on the old path.** Keys a person created on their previous
+  leaf keep working after they change group or leave. Deactivate them in the
+  Dashboard.
+- **Entra ID omits the groups claim for people in more than 200 groups.**
+  Such a login matches no mapping. Limit the claim to the groups assigned to
+  the application in Entra ID.
 
 ## Sign-out across replicas
 
@@ -65,3 +164,65 @@ An SSO session carries a `user_path` like a managed API key does, so the
 group- and user-level model allowlists on the [Users](/features/users) page
 apply to requests made through it. Per-key `allowed_models` are a managed
 API key setting and do not apply to SSO sessions.
+
+### Rejected login reasons
+
+A rejected login is audited with one fixed reason, and the gateway logs
+`GoModel Pro: SSO login rejected` with the same `reason` and a `request_id`.
+The person sees only a generic failure page with that ID as its reference.
+
+| Reason | Protocol | Meaning |
+| --- | --- | --- |
+| `identity_provider_unavailable` | Both | OIDC discovery or the SAML metadata is not available. The login answers `503`. |
+| `missing_transaction` | Both | The browser sent no login transaction cookie: the login did not start at this gateway (including a SAML login started at the identity provider) or the cookie was blocked. |
+| `invalid_transaction` | Both | The transaction cookie is invalid or older than 10 minutes. |
+| `provider_rejected` | Both | The identity provider answered with an error (OIDC) or a status other than success (SAML). |
+| `invalid_state` | OIDC | `state` does not match the login that was started. |
+| `missing_code` | OIDC | The callback carried no authorization code. |
+| `code_exchange_failed` | OIDC | The provider refused to exchange the code for tokens. |
+| `missing_id_token` | OIDC | The token response had no ID token. |
+| `id_token_verification_failed` | OIDC | The ID token failed signature or claim verification. |
+| `invalid_claims` | OIDC | The ID token claims could not be read, or the nonce does not match. |
+| `response_too_large` | SAML | The posted form is larger than 1 MiB. |
+| `invalid_relay_state` | SAML | `RelayState` is not the one the gateway sent. |
+| `malformed_response` | SAML | Not a plain, complete SAML 2.0 response: compressed, or with a DTD, comments, processing instructions, more than 32 nesting levels, more than 64 attributes on an element, a repeated attribute name, or a required part missing. |
+| `too_many_elements` | SAML | More than 900 XML elements, usually [too many groups](/pro/saml#limits). |
+| `assertion_count` | SAML | Not exactly one assertion directly inside the response. |
+| `encrypted_assertion` | SAML | The assertion is encrypted, which is not supported. |
+| `destination_mismatch` | SAML | The response `Destination` is not `acs_url`. |
+| `in_response_to_mismatch` | SAML | The response does not answer the request this browser started. |
+| `issuer_mismatch` | SAML | The issuer is not the entity ID in the identity-provider metadata. |
+| `assertion_unsigned` | SAML | The assertion itself is not signed. A signed response is not enough. |
+| `weak_signature_algorithm` | SAML | Not RSA-SHA256, -SHA384, or -SHA512 with a SHA-256 or stronger digest, or an RSA key shorter than 2048 bits. |
+| `untrusted_certificate` | SAML | The signing certificate is not a trusted one from the metadata, or is outside its validity period. |
+| `invalid_signature` | SAML | The signature does not verify, or is not the expected kind. |
+| `audience_mismatch` | SAML | No audience restriction, or one that does not name the gateway's entity ID. |
+| `invalid_conditions` | SAML | Conditions are missing, have no validity window, or contain a condition the gateway does not know. |
+| `assertion_not_yet_valid` | SAML | `NotBefore` is more than 60 seconds in the future. |
+| `assertion_expired` | SAML | `NotOnOrAfter` passed more than 60 seconds ago, or `SessionNotOnOrAfter` has passed. |
+| `recipient_mismatch` | SAML | The subject confirmation `Recipient` is not `acs_url`. |
+| `invalid_subject` | SAML | No single bearer subject confirmation, or no stable subject: a missing or transient NameID without `principal_attribute`, or a `principal_attribute` that is missing or has several values. |
+| `assertion_replayed` | SAML | The assertion was already used. |
+| `replay_check_unavailable` | SAML | Storage did not answer the replay check, so the login is refused. |
+| `unverified_identity` | Both | The email is not verified, and `allowed_domains` or `user_path_claim: email` needs it. |
+| `domain_denied` | Both | The email domain is not in `allowed_domains`. |
+| `group_denied` | Both | No mapping matched and the person is in none of `admin_groups`. |
+| `group_unmapped` | Both | No mapping matched and neither `admin_groups` nor `allow_all_admins` is configured. |
+| `claim_mapping_failed` | Both | No user path could be built: the user path claim is missing, empty, or contains `/`, the groups claim is not a string or a list of strings, the subject is missing, the path would cover a [mapped node](#how-a-login-is-mapped), or the value is refused by [case folding](#upgrade-notes). |
+
+## Upgrade notes
+
+<Warning>
+  A login is now refused with `claim_mapping_failed` when lower-casing its
+  email would turn a non-ASCII letter into an ASCII one: the Kelvin sign
+  (U+212A) into `k`, or the dotted capital I (U+0130) into `i`. Such a
+  spelling could otherwise reach another person's user path. This applies to
+  OIDC and SAML whenever the user path is lower-cased: with the default
+  `user_path_claim: email`, or with `user_path_case_insensitive: true`.
+  `allowed_domains` no longer matches a domain spelled that way either.
+
+  A person whose address contains one of these characters can no longer sign
+  in. Have the identity provider send a spelling without them, or set
+  `user_path_claim` to a non-email claim such as an immutable user ID, which
+  moves every user to a new path.
+</Warning>

@@ -1,0 +1,334 @@
+---
+title: "SAML 2.0 Single Sign-On"
+sidebarTitle: "SAML SSO"
+description: "Chroń GoModel Dashboard za pomocą dostawcy tożsamości SAML 2.0: ustawienia, rejestracja, kontrole każdej odpowiedzi, odświeżanie metadanych, przypinanie certyfikatów i ograniczenia."
+icon: "fingerprint"
+tag: "Pro"
+keywords: ["GoModel Pro", "SAML", "SAML 2.0", "SSO", "single sign-on", "jednokrotne logowanie", "dostawca tożsamości", "identity provider", "metadane IdP", "IdP metadata", "assertion consumer service", "przypinanie certyfikatów", "certificate pinning", "uwierzytelnianie dashboardu", "dashboard authentication"]
+---
+
+## Przegląd
+
+`protocol: saml` sprawia, że gateway działa jako dostawca usług (service
+provider) SAML 2.0 zamiast klienta OIDC. Sesje, ścieżki użytkowników,
+[mapowanie grup](/pl/pro/sso#mapowanie-grup), wylogowanie i audyt działają
+dokładnie tak, jak opisano dla [OIDC SSO](/pl/pro/sso); zmienia się tylko
+sposób potwierdzania logowania.
+
+- **Jeden protokół i jeden dostawca tożsamości na gateway.** Przy
+  `protocol: saml` ustawienia klienta OIDC (`issuer_url`, `client_id`,
+  `client_secret`, `redirect_url`) nie mogą być ustawione ani w YAML, ani w
+  środowisku. Przy `protocol: oidc` nie może być ustawione żadne ustawienie
+  `saml`. W przeciwnym razie uruchamianie zostaje przerwane.
+- **Zmiana protokołu zmienia każdy identyfikator principala.** Identyfikator
+  zapisywany we wpisach audytowych jest wyprowadzany z protokołu, dostawcy
+  tożsamości i podmiotu, więc ta sama osoba po zmianie występuje jako nowy
+  principal.
+
+<Warning>
+  SAML wymaga uprawnienia licencyjnego `saml` oprócz `sso`. Jak każda włączona
+  konfiguracja SSO blokuje w razie błędu (fail closed): uruchamianie zostaje
+  przerwane, gdy brakuje któregokolwiek uprawnienia lub konfiguracja jest
+  nieprawidłowa. Gateway nigdy nie wraca do OIDC ani do niechronionego
+  Dashboardu.
+</Warning>
+
+## Skonfiguruj SAML
+
+```yaml
+extensions:
+  sso:
+    enabled: true
+    protocol: saml
+    session_secret: ${PRO_SSO_SESSION_SECRET}
+    admin_groups: [gomodel-admins]
+    saml:
+      acs_url: https://gomodel.example.com/sso/saml/acs
+      idp_metadata_url: https://login.example.com/saml/metadata
+      attributes:
+        email: mail          # atrybut zawierający adres e-mail
+        groups: memberOf     # atrybut zawierający grupy
+      trust_email: true      # najpierw przeczytaj „Zaufanie do adresu e-mail” poniżej
+```
+
+Ta sama konfiguracja za pomocą zmiennych środowiskowych, które nadpisują
+wartości z YAML:
+
+```bash
+PRO_SSO_ENABLED=true
+PRO_SSO_PROTOCOL=saml
+PRO_SSO_SESSION_SECRET=...
+PRO_SSO_ADMIN_GROUPS=gomodel-admins
+PRO_SSO_SAML_ACS_URL=https://gomodel.example.com/sso/saml/acs
+PRO_SSO_SAML_IDP_METADATA_URL=https://login.example.com/saml/metadata
+PRO_SSO_SAML_ATTRIBUTES='{"email":"mail","groups":"memberOf"}'
+PRO_SSO_SAML_TRUST_EMAIL=true
+```
+
+| Ustawienie | Zmienna środowiskowa | Wartość domyślna | Uwagi |
+| --- | --- | --- | --- |
+| `protocol` | `PRO_SSO_PROTOCOL` | `oidc` | Ustaw na `saml`. |
+| `saml.acs_url` | `PRO_SSO_SAML_ACS_URL` | wymagane | Publiczny adres URL `/sso/saml/acs`, łącznie ze skonfigurowanym `BASE_PATH`. HTTPS, z wyjątkiem localhost. |
+| `saml.idp_metadata_url` | `PRO_SSO_SAML_IDP_METADATA_URL` | nieustawione | Ustaw to albo plik, nie oba naraz. HTTPS, z wyjątkiem localhost. Pobierane przy starcie i odświeżane. |
+| `saml.idp_metadata_file` | `PRO_SSO_SAML_IDP_METADATA_FILE` | nieustawione | Użyj, gdy gateway nie może połączyć się z dostawcą tożsamości. Odczytywany raz przy starcie. |
+| `saml.entity_id` | `PRO_SSO_SAML_ENTITY_ID` | adres URL metadanych dostawcy usług | Zmień, gdy dostawca tożsamości oczekuje konkretnego identyfikatora. Bezwzględny URI o długości do 1024 znaków. |
+| `saml.attributes` | `PRO_SSO_SAML_ATTRIBUTES` | brak | Aliasy nazw atrybutów. Zmienna jest obiektem JSON, który zastępuje mapę z YAML. |
+| `saml.principal_attribute` | `PRO_SSO_SAML_PRINCIPAL_ATTRIBUTE` | nieustawione (NameID) | Ustaw, gdy dostawca tożsamości wysyła wyłącznie tymczasowy (transient) NameID. |
+| `saml.trust_email` | `PRO_SSO_SAML_TRUST_EMAIL` | `false` | Zobacz [Zaufanie do adresu e-mail](#zaufanie-do-adresu-e-mail). |
+| `saml.metadata_refresh_interval` | `PRO_SSO_SAML_METADATA_REFRESH_INTERVAL` | `1h` | Tylko dla adresu URL metadanych. Od `1m` do `24h`. Ustawienie go razem z plikiem metadanych przerywa uruchamianie. |
+| `saml.idp_certificate_fingerprints` | `PRO_SSO_SAML_IDP_CERTIFICATE_FINGERPRINTS` | brak (zaufany jest każdy certyfikat podpisujący z metadanych) | Zobacz [Przypinanie certyfikatów](#przypinanie-certyfikatów). W zmiennej środowiskowej rozdzielone przecinkami. |
+
+Wspólne ustawienia z sekcji
+[Tożsamość i dopuszczanie](/pl/pro/sso#tożsamość-i-dopuszczanie) zachowują
+swoje znaczenie.
+
+## Zarejestruj gateway
+
+Gateway udostępnia dwa adresy URL, oba poniżej skonfigurowanego `BASE_PATH`:
+
+| URL | Przeznaczenie |
+| --- | --- |
+| `https://gomodel.example.com/sso/saml/acs` | Assertion consumer service (ACS), binding HTTP-POST. To jest `acs_url`. |
+| `https://gomodel.example.com/sso/saml/metadata` | Metadane dostawcy usług. Zarazem domyślne entity ID. |
+
+<Steps>
+  <Step title="Utwórz aplikację SAML 2.0 u dostawcy tożsamości">
+    Zaimportuj adres URL metadanych dostawcy usług, jeśli dostawca to
+    obsługuje, a gateway już działa. W przeciwnym razie wpisz ręcznie adres
+    ACS z bindingiem HTTP-POST oraz entity ID (audience).
+  </Step>
+  <Step title="Podpisz asercję">
+    Sama asercja musi być podpisana algorytmem RSA-SHA256 lub silniejszym i
+    kluczem RSA o długości co najmniej 2048 bitów. Podpisanie samej odpowiedzi
+    nie wystarcza. Nie szyfruj asercji. Gateway wysyła niepodpisane żądania
+    przez HTTP-Redirect.
+  </Step>
+  <Step title="Wysyłaj stabilny podmiot i używane atrybuty">
+    Użyj trwałego (persistent) NameID albo wysyłaj niezmienny identyfikator
+    użytkownika jako atrybut i wskaż go w `principal_attribute`. Udostępnij
+    atrybut dla ścieżki użytkownika oraz, jeśli używasz `admin_groups` lub
+    mapowań grup, atrybut grup zawierający tylko grupy potrzebne gatewayowi.
+  </Step>
+  <Step title="Przekaż gatewayowi metadane dostawcy tożsamości">
+    Ustaw `idp_metadata_url` albo pobierz metadane i ustaw
+    `idp_metadata_file`. Metadane muszą opisywać jednego dostawcę tożsamości z
+    punktem logowania HTTP-Redirect i co najmniej jednym certyfikatem
+    podpisującym.
+  </Step>
+  <Step title="Uruchom gateway i zaloguj się">
+    Otwórz `/sso/login`. Jeśli logowanie się nie powiedzie, sprawdź powód w
+    sekcji
+    [Powody odrzuconych logowań](/pl/pro/sso#powody-odrzuconych-logowań).
+  </Step>
+</Steps>
+
+<Note>
+  Te kroki używają ogólnych pojęć SAML 2.0; nazwy ustawień różnią się między
+  dostawcami tożsamości. Logowanie SAML zostało dotąd zweryfikowane wyłącznie
+  z testowym dostawcą tożsamości, więc pierwsze wdrożenie ze swoim dostawcą
+  traktuj jako integrację do przetestowania, a nie sprawdzony przepis.
+</Note>
+
+## Atrybuty i principal
+
+`user_path_claim` i `groups_claim` wskazują atrybuty SAML, bezpośrednio przez
+`Name` atrybutu albo przez alias w `saml.attributes`:
+
+```yaml
+extensions:
+  sso:
+    saml:
+      attributes:
+        email: mail        # user_path_claim: email odczytuje atrybut "mail"
+        groups: memberOf   # groups_claim: groups odczytuje "memberOf"
+```
+
+- Alias przesłania atrybut SAML o tej samej nazwie.
+- Atrybut ścieżki użytkownika musi mieć dokładnie jedną wartość; otaczające
+  ją białe znaki są usuwane. Wartości grup są porównywane dokładnie w takiej
+  postaci, w jakiej zostały wysłane.
+- `allowed_domains` i domyślne `user_path_claim: email` odczytują atrybut o
+  nazwie lub aliasie `email`. Ścieżka użytkownika jest zamieniana na małe
+  litery tylko przy `user_path_claim: email` lub
+  `user_path_case_insensitive: true`.
+- Principalem jest NameID albo `principal_attribute`, jeśli jest ustawione.
+  Tymczasowy (transient) NameID zmienia się przy każdym logowaniu i jest
+  odrzucany, chyba że ustawiono `principal_attribute`.
+
+## Zaufanie do adresu e-mail
+
+`trust_email` decyduje o tym, czy atrybut e-mail jest uznawany za
+zweryfikowany adres e-mail. Domyślnie ma wartość `false`, ponieważ SAML nie ma
+odpowiednika `email_verified` z OIDC: podpis dowodzi, że dostawca tożsamości
+wysłał adres, a nie że go sprawdził. Ścieżka użytkownika jest też
+[zakresem dostępu](/pl/features/user-path#zakres-dostępu) sesji, więc jeśli
+osoby mogą edytować własny adres e-mail u dostawcy tożsamości, ktoś mógłby
+ustawić adres współpracownika i zalogować się na jego ścieżce.
+
+Bez `trust_email` uruchamianie odrzuca konfigurację zależną od adresu e-mail:
+
+- `user_path_claim`, który go odczytuje, w tym domyślne
+  `user_path_claim: email`;
+- `allowed_domains`;
+- `groups_claim`, który go odczytuje, gdy ustawiono `admin_groups` lub
+  mapowania grup.
+
+Wybierz więc jedną z możliwości:
+
+```yaml
+# Dostawca tożsamości ustawia adres e-mail, a użytkownicy nie mogą go zmienić.
+extensions:
+  sso:
+    saml:
+      trust_email: true
+```
+
+```yaml
+# Albo zbuduj ścieżkę użytkownika z atrybutu kontrolowanego przez dostawcę
+# tożsamości, na przykład niezmiennego identyfikatora użytkownika.
+extensions:
+  sso:
+    user_path_claim: employee_id
+```
+
+<Warning>
+  Kontrola przy starcie rozpoznaje wyłącznie nazwy: `email`, atrybut z aliasem
+  `email` oraz znane atrybuty e-mail `mail`, `email`,
+  `urn:oid:0.9.2342.19200300.100.1.3` i
+  `http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress`,
+  porównywane bez rozróżniania wielkości liter. Atrybut, który pod inną nazwą
+  zawiera adres e-mail albo dowolną inną wartość edytowalną przez użytkowników,
+  przechodzi kontrolę. Nigdy nie używaj w `user_path_claim` ani `groups_claim`
+  atrybutu, który użytkownik może edytować.
+</Warning>
+
+## Co jest sprawdzane w każdej odpowiedzi
+
+Logowanie udaje się tylko wtedy, gdy spełnione są wszystkie poniższe warunki.
+Każde niepowodzenie ma własny
+[powód audytowy](/pl/pro/sso#powody-odrzuconych-logowań).
+
+- **Odpowiada na logowanie rozpoczęte przez tę przeglądarkę.** Podpisane
+  ciasteczko transakcji (ważne 10 minut), `RelayState` i `InResponseTo` muszą
+  się zgadzać.
+- **Jest zaadresowana do tego gatewaya.** `Destination` i `Recipient` są równe
+  `acs_url`, a odbiorcą (audience) jest entity ID gatewaya.
+- **Pochodzi od skonfigurowanego dostawcy tożsamości.** Wystawcą jest entity
+  ID z metadanych.
+- **Sama asercja jest podpisana** aktualnie ważnym certyfikatem podpisującym
+  z metadanych, algorytmem RSA-SHA256 lub silniejszym i kluczem o długości co
+  najmniej 2048 bitów.
+- **Jest dokładnie jedna asercja** i nie jest ona zaszyfrowana.
+- **Mieści się w swoim oknie ważności**, z tolerancją 60 sekund na różnicę
+  zegarów.
+- **Dostawca tożsamości zgłasza sukces.**
+- **Wskazuje stabilny podmiot**: NameID inny niż tymczasowy albo
+  `principal_attribute`.
+- **Nie była wcześniej użyta.** Zobacz
+  [Ochrona przed powtórzeniem](#ochrona-przed-powtórzeniem).
+- **Jest małym, zwykłym dokumentem XML**: formularz o rozmiarze do 1 MiB,
+  najwyżej 900 elementów XML, bez DTD, komentarzy i instrukcji przetwarzania.
+
+Każda wartość używana przy logowaniu jest odczytywana z podpisanej asercji,
+nigdy z reszty dokumentu. Następnie dopuszczanie działa tak jak dla OIDC.
+
+## Metadane dostawcy tożsamości
+
+**Z pliku.** Plik jest odczytywany raz. Plik nieczytelny lub nieprawidłowy
+przerywa uruchamianie, a po rotacji certyfikatu podpisującego przez dostawcę
+tożsamości trzeba podmienić plik i zrestartować gateway.
+
+**Z adresu URL.** Gateway pobiera metadane przy starcie, a potem co
+`metadata_refresh_interval`, więc opublikowana tam rotacja certyfikatu jest
+uwzględniana bez restartu. Nieudane odświeżenie zachowuje ostatnie poprawne
+metadane. Jeśli adres URL jest nieosiągalny przy starcie, gateway i tak się
+uruchamia, logowania odpowiadają kodem `503` z powodem
+`identity_provider_unavailable`, a pobieranie jest ponawiane w tle (5 sekund,
+podwajane do 5 minut). Ustaw `require_discovery: true`
+(`PRO_SSO_REQUIRE_DISCOVERY=true`), aby zamiast tego był to błąd uruchamiania.
+
+Metadane z obu źródeł nie są używane po upływie ich `validUntil`; logowania są
+wtedy niedostępne do czasu załadowania nowszych metadanych.
+
+### Co może zmienić odświeżenie
+
+Odświeżenie może zastąpić certyfikaty podpisujące, adres URL logowania i
+`validUntil`. Nie może zmienić entity ID dostawcy tożsamości: takie metadane
+są odrzucane, bieżące metadane pozostają w użyciu, a w logu zapisywany jest
+błąd. Aby przejść na inne entity ID, zrestartuj gateway.
+
+Kto kontroluje adres URL metadanych, może opublikować własny certyfikat
+podpisujący. Dlatego każde odświeżenie zmieniające zaufane certyfikaty jest
+logowane na poziomie ostrzeżenia, z odciskami SHA-256 w polach
+`added_fingerprints` i `removed_fingerprints`:
+
+```text
+GoModel Pro: SAML identity provider signing certificates changed on metadata refresh
+```
+
+Ustaw alert na tę linię. Przy starcie logowane są odciski, którym gateway
+ufa.
+
+### Przypinanie certyfikatów
+
+Aby rotacja nie była akceptowana automatycznie, podaj odciski SHA-256
+certyfikatów podpisujących dostawcy tożsamości:
+
+```yaml
+extensions:
+  sso:
+    saml:
+      idp_certificate_fingerprints:
+        - "AB:CD:...:EF"   # z: openssl x509 -noout -fingerprint -sha256
+```
+
+Odciski są zapisane szesnastkowo, bez rozróżniania wielkości liter, z
+opcjonalnymi dwukropkami. Zaufane są tylko wymienione certyfikaty, zarówno dla
+pliku metadanych, jak i adresu URL. Metadane bez żadnego z nich przerywają
+uruchamianie; przy odświeżeniu są odrzucane, a w użyciu pozostają ostatnie
+poprawne metadane.
+
+Aby przeprowadzić rotację, dodaj nowy odcisk, zanim dostawca tożsamości się
+przełączy, a stary usuń później. Każdy krok wymaga restartu.
+
+## Sesje i wylogowanie
+
+Sesja kończy się po `session_ttl` albo w chwili `SessionNotOnOrAfter` z
+asercji, jeśli ta przypada wcześniej. Asercja, której `SessionNotOnOrAfter`
+już minęło, jest odrzucana.
+
+Wylogowanie kończy tylko sesję GoModel i działa tak, jak opisano w sekcji
+[Wylogowanie na wszystkich replikach](/pl/pro/sso#wylogowanie-na-wszystkich-replikach).
+
+## Ochrona przed powtórzeniem
+
+Każda asercja jest akceptowana raz. Gateway pamięta identyfikatory użytych
+asercji do czasu ich wygaśnięcia, w pamięci i w skonfigurowanym backendzie
+storage.
+
+- **PostgreSQL lub MongoDB:** powtórzona asercja jest odrzucana na każdej
+  replice współdzielącej storage. Dwie repliki, które otrzymają tę samą
+  asercję w tej samej chwili, mogłyby obie ją zaakceptować; wymaga to
+  dodatkowo ciasteczka transakcji danej osoby.
+- **SQLite (domyślnie):** ochrona działa w obrębie jednej instancji.
+  Uruchamiaj jedną replikę, tak jak w przypadku wylogowania; gateway zapisuje
+  ostrzeżenie przy starcie.
+- **Storage niedostępny:** logowanie jest odrzucane z powodem
+  `replay_check_unavailable`.
+
+## Ograniczenia
+
+- **Około 850 grup na osobę.** Każda wartość grupy to jeden element XML, a
+  odpowiedź zawierająca ponad 900 elementów jest odrzucana z powodem
+  `too_many_elements`. Limitu nie można konfigurować. Filtruj u dostawcy
+  tożsamości: wysyłaj tylko grupy przypisane do aplikacji albo te wymienione
+  w `admin_groups` i `group_mappings`.
+- **Brak logowania rozpoczynanego u dostawcy tożsamości.** Logowanie musi
+  zaczynać się w gatewayu (`/sso/login`). Niezamówione odpowiedzi są
+  odrzucane.
+- **Brak zaszyfrowanych asercji.** Są odrzucane z powodem
+  `encrypted_assertion`.
+- **Brak single logout.** Wylogowanie z GoModel nie kończy sesji u dostawcy
+  tożsamości, a gateway nie przetwarza żądań wylogowania od dostawcy
+  tożsamości.
+- **Jeden dostawca tożsamości na gateway.**
