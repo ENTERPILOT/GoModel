@@ -430,7 +430,11 @@ Tokens werden in der Gateway-Datenbank gespeichert, mit
 [`GOMODEL_ENCRYPTION_KEY`](/de/advanced/encryption-at-rest) verschlüsselt, wenn
 gesetzt, und nie von der Admin-API zurückgegeben. GoModel erneuert ein
 abgelaufenes Access-Token mit dem Refresh-Token und speichert das rotierte
-Refresh-Token. Die Zeile zeigt **Angemeldet**, **Anmeldung abgelaufen** (kein
+Refresh-Token. Antwortet der Server auf ein noch nicht abgelaufenes Token (zum
+Beispiel ein vorzeitig widerrufenes) mit `401 Unauthorized`, erneuert GoModel es
+einmal und wiederholt den Request, sofern der Autorisierungsserver ein
+Refresh-Token ausgestellt hat; andernfalls zeigt die Zeile **Anmeldung prüfen**,
+und Sie melden sich erneut an. Die Zeile zeigt **Angemeldet**, **Anmeldung abgelaufen** (kein
 Refresh-Token mehr; melden Sie sich erneut an) oder **Anmeldung prüfen** mit dem
 Fehler. Eine fehlgeschlagene Erneuerung wird bei der nächsten Anfrage
 wiederholt; melden Sie sich nur erneut an, wenn der Fehler bleibt. Das Abmeldesymbol löscht die gespeicherten
@@ -445,15 +449,67 @@ Hinweise:
 - Ein angemeldetes Token ersetzt einen konfigurierten `Authorization`-Header und
   wird nur an den Origin des Servers gesendet. Nach einer URL-Änderung werden
   die Tokens erst nach einer neuen Anmeldung wieder verwendet.
+- Discovery, Client-Registrierung und Token-Requests verbinden sich nur mit
+  öffentlichen Adressen, damit ein öffentlicher Server das Gateway nicht auf
+  interne Dienste lenken kann. Ausnahmen sind der eigene Host des MCP-Servers;
+  private Netze (`10.x`, `192.168.x` und ähnliche), wenn auch der MCP-Server in
+  einem privaten Netz liegt, etwa ein interner Server, der sich über einen
+  internen Identity Provider anmeldet; und Loopback, wenn die Server-URL selbst
+  auf Loopback liegt. Link-Local-Adressen, einschließlich Cloud-Metadaten-Endpunkten,
+  werden immer abgelehnt.
 - Alle Clients des Gateways teilen sich die eine Anmeldung. Upstream-Tokens pro
   Benutzer werden noch nicht unterstützt.
 - Bei mehreren Gateway-Instanzen muss der Callback die Instanz erreichen, die
-  die Anmeldung gestartet hat (Sticky Sessions für `/admin`); erneuerte Tokens
-  erreichen die anderen Instanzen über die Datenbank.
+  die Anmeldung gestartet hat (Sticky Sessions für `/admin`). Instanzen mit
+  gemeinsamer Datenbank erneuern ein Token nacheinander, sodass ein rotierendes
+  Refresh-Token nur einmal verwendet wird; die anderen übernehmen das erneuerte
+  Token aus der Datenbank.
 
 Die Admin-API-Entsprechungen sind `POST /admin/mcp-servers/{slug}/oauth/start`
 (Body: `redirect_uri`, optional `client_id`/`client_secret`; liefert
 `authorization_url`) und `DELETE /admin/mcp-servers/{slug}/oauth`.
+
+## Sessions über Replikate hinweg
+
+Replikate, die sich eine PostgreSQL- oder MongoDB-Datenbank teilen, teilen sich
+auch die MCP-Sessions, sodass Clients hinter einem Load Balancer keine Sticky
+Sessions benötigen. Wenn `initialize` erfolgreich ist, speichert das antwortende
+Replikat die Bindung der Session in der Datenbank: die Auth-Key-ID, den
+User-Path, den Endpunkt, den `X-MCP-Servers`-Bereich, den Discovery-Modus und
+die `initialize`-Parameter des Clients. Der Schlüssel ist ein SHA-256-Digest der
+`Mcp-Session-Id`, nie die ID selbst, und der Eintrag enthält keine Secrets. Ein
+Request mit dieser ID auf einem anderen Replikat wird gegen die Bindung geprüft
+und setzt die Session dort fort, ohne neues `initialize`.
+
+| | Über Replikate hinweg |
+| --- | --- |
+| Tool-Aufrufe, Listen, Prompts, Ressourcen | Funktionieren auf jedem Replikat, mit dem Bereich und Discovery-Modus, mit denen die Session geöffnet wurde. Ein Replikat, das eine Session fortsetzt, listet den Katalog so, wie er zum Zeitpunkt der Fortsetzung ist; das kann von einer früheren Liste abweichen. |
+| Ausgehandelte Protokollversion, Client-Info und Capabilities | Werden übernommen. |
+| Bindung der Session (Auth-Key, User-Path, Endpunkt) | Wird auf jedem Replikat geprüft; eine geleakte ID unter einer anderen Identität erhält überall 404. |
+| `DELETE` | Beendet die Session auf jedem Replikat: Jedes lehnt ihre Requests innerhalb von etwa 2 Sekunden ab. Ein offener `GET`-Stream auf einem anderen Replikat wird nicht vorzeitig geschlossen; er endet, wenn der Client ihn schließt, oder beim Leerlauf-Timeout dieses Replikats. |
+| Löschen eines virtuellen Servers | Beendet seine Sessions auf jedem Replikat, auch wenn er unter demselben Namen neu angelegt wird: Jedes lehnt ihre Requests innerhalb von etwa 2 Sekunden ab. Offene `GET`-Streams werden nicht vorzeitig geschlossen. |
+| Leerlauf-Timeout | 30 Minuten ohne Request auf irgendeinem Replikat, auf eine Minute genau. Ein noch laufender Aufruf zählt als Aktivität. |
+| Ein laufender Response-Stream | Bleibt auf seinem Replikat. Stoppt dieses Replikat, schlägt dieser Request für den Client fehl; die Session läuft auf einem anderen weiter. |
+| Der `GET`-Benachrichtigungsstream | Bleibt auf dem Replikat offen, auf dem er geöffnet wurde, bis der Client ihn schließt oder dieses Replikat die Session beendet. Verbindet der Client ihn neu, landet er auf einem beliebigen Replikat. |
+
+Die Wiederaufnahme von Streams mit `Last-Event-ID` wird nicht unterstützt,
+weder auf einem noch auf mehreren Replikaten. Das Gateway sendet keine
+Sampling-, Elicitation- oder Roots-Requests an Clients (siehe
+[Protokollabdeckung](#protokollabdeckung)), daher kann kein solcher Request auf
+einem anderen Replikat hängen bleiben.
+
+Mit SQLite bleiben Sessions auf der Instanz, die sie geöffnet hat, da SQLite nur
+ein Replikat bedient. Ist die Datenbank beim Öffnen einer Session nicht
+erreichbar, bleibt auch diese Session auf ihrem Replikat, und das Gateway
+protokolliert eine Warnung. Kann sie später nicht gelesen werden, bedient ein
+Replikat, das die Session bereits bedient, sie bis zu 30 Minuten weiter, ohne
+ein anderswo gesendetes `DELETE` zu sehen, und beendet sie dann; jedes andere
+Replikat antwortet mit 404, und der Client initialisiert eine neue Session. Ein
+`DELETE`, das gesendet wird, während die Datenbank nicht beschreibbar ist,
+beendet die Session nur auf dem Replikat, das es empfängt: Bis der Eintrag der
+Session abläuft, bis zu 30 Minuten später, kann derselbe Client sie noch auf
+einem anderen Replikat fortsetzen, und eine fortgesetzte Session läuft dann wie
+gewohnt weiter.
 
 ## Festlegen, welche Tools ein Server bereitstellt
 
@@ -531,6 +587,19 @@ durch die Filter verborgen werden, sind separat unter `excluded_tools` aufgefüh
 Die Namen sind die ursprünglichen Upstream-Namen; der aggregierte Endpunkt `/mcp`
 stellt sie als `{slug}_{name}` bereit.
 
+Um alle Tools auf einmal zu sehen, klicken Sie auf der Seite MCP-Server auf
+**Alle Tools**. Die Ansicht listet die Tools aller Server in einer durchsuchbaren
+Liste auf, mit Beschreibungen, Read-only- und Destructive-Hinweisen sowie dem
+zugehörigen Server. Bereitgestellte Tools erscheinen unter dem Namen, mit dem
+Clients sie aufrufen (`{slug}_{name}`); ausgeblendete behalten ihren Upstream-Namen.
+Wählen Sie einen virtuellen Server, um nur die Tools seiner Mitglieder zu sehen,
+und aktivieren Sie **Durch Filter ausgeblendete Tools anzeigen**, um
+ausgeschlossene Tools einzubeziehen. Server, die nicht verbunden sind oder deren
+Katalog nicht geladen werden konnte, werden über den Tools aufgeführt, da ihre
+Tools fehlen können. Die Liste zeigt die gatewayweite Sicht: Sie berücksichtigt
+keine `user_paths`-Grenzen eines bestimmten API-Schlüssels, daher sehen manche
+Clients nicht alle aufgeführten Server.
+
 ## Sicherheitshinweise
 
 - **Grenze für Zugangsdaten.** Die MCP-Spezifikation verbietet das Durchreichen von
@@ -577,7 +646,7 @@ stellt sie als `{slug}_{name}` bereit.
   authentifiziert, und eine Session ist zusätzlich an die Identität des verwalteten
   Auth-Keys, den User-Path und den festgelegten Endpunkt gebunden, die sie
   initialisiert haben; wer eine geleakte Session-ID unter einer anderen Identität
-  verwendet, erhält 404.
+  verwendet, erhält auf jedem Replikat 404.
 - Geheime Header-Werte werden in der Admin API und im Dashboard geschwärzt (`***`)
   angezeigt; das Speichern eines Formulars mit `***` behält das gespeicherte Secret
   bei.

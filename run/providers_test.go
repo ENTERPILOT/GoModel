@@ -80,10 +80,10 @@ func TestDefaultProviderFactoryCredentialForms(t *testing.T) {
 			options:      map[string][]string{"api_mode": {"auto", "native", "chat_compatible"}},
 		},
 		{
-			// Authenticates through the AWS SDK credential chain, never a key.
+			// An optional Bedrock API key, else the AWS SDK credential chain.
 			providerType: "bedrock",
-			fields:       []string{"base_url", "proxy_url", "models", "models_mode", "billable"},
-			absent:       []string{"api_keys"},
+			fields:       []string{"api_keys", "base_url", "session_sticky_keys", "proxy_url", "models", "models_mode", "billable"},
+			required:     nil,
 		},
 		{
 			// Bearer token or AWS_BEARER_TOKEN_BEDROCK, plus a request shape.
@@ -171,7 +171,7 @@ var credentialPayloadFields = []string{
 func TestDefaultProviderFactoryRegistersAllProviderTypes(t *testing.T) {
 	expected := []string{
 		"anthropic", "audiocpp", "azure", "bailian", "bedrock", "bedrock-mantle", "chatgpt", "chutes", "cohere", "deepinfra", "deepseek", "edenai", "elevenlabs",
-		"fireworks", "gemini", "github-copilot", "groq", "hetzner", "jev", "kilo", "kimicode", "llamacpp", "llmd", "meta", "minimax", "ollama", "openai", "opencode_go",
+		"fireworks", "gemini", "github-copilot", "groq", "hetzner", "jev", "kilo", "kimicode", "llamacpp", "llmd", "meta", "minimax", "mistral", "ollama", "openai", "opencode_go",
 		"openrouter", "oracle", "sglang", "together", "vertex", "vllm", "xai", "xiaomi", "zai",
 	}
 

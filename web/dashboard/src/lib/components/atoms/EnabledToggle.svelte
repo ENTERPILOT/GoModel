@@ -5,11 +5,13 @@
   //
   // Props:
   //   enabled    — current state (parent flips it in onclick)
-  //   label      — what is being toggled, for the aria-label ("MCP server")
+  //   label      — what is being toggled, the switch's accessible name
+  //                ("MCP server"); its on/off state is aria-checked
   //   disabled   — read-only (config-managed rows)
   //   restricted — the "enabled but user-path-scoped" amber state
   //   onclick    — toggle handler
   //   text       — visible caption override; defaults to Enabled/Disabled
+  //   ...rest    — extra button attributes (id, aria-describedby)
   let {
     enabled = false,
     label = "",
@@ -17,6 +19,7 @@
     restricted = false,
     onclick,
     text,
+    ...rest
   } = $props();
 
   function onToggle(event) {
@@ -29,12 +32,15 @@
 </script>
 
 <button
+  {...rest}
   type="button"
   class="alias-toggle"
   class:enabled
   class:restricted
   {disabled}
-  aria-label={(enabled ? "Disable " : "Enable ") + label}
+  role="switch"
+  aria-checked={enabled}
+  aria-label={label || undefined}
   onclick={onToggle}
 >
   <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>

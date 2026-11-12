@@ -18,7 +18,8 @@ i niestreamingowych na:
 
 Streamingowe i niestreamingowe warianty tego samego requestu są cache'owane
 niezależnie: streamingowy cache miss zapisuje surowe bajty SSE, a streamingowy
-cache hit odtwarza je bez zmian jako `text/event-stream`.
+cache hit odtwarza je bez zmian jako `text/event-stream`. Stream dłuższy niż
+4 MiB nadal w całości dociera do klienta, ale nie jest cache'owany.
 
 Cache dokładnego dopasowania zwraca identyczne co do bajtu odpowiedzi z:
 

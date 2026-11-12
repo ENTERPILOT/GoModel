@@ -96,3 +96,15 @@ func createCredentialStore(ctx context.Context, store storage.Storage) (Credenti
 		func(db *mongo.Database) (CredentialStore, error) { return NewMongoDBCredentialStore(db) },
 	)
 }
+
+// ListStoredCredentials returns the provider credentials saved in the
+// dashboard, secrets unsealed with box and references unresolved.
+func ListStoredCredentials(ctx context.Context, shared storage.Storage, box *encryption.Box) ([]ManagedProviderCredential, error) {
+	rawStore, err := createCredentialStore(ctx, shared)
+	if err != nil {
+		return nil, err
+	}
+	store := sealCredentialStore(rawStore, box)
+	defer func() { _ = store.Close() }()
+	return store.List(ctx)
+}

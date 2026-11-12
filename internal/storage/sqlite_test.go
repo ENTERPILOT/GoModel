@@ -85,3 +85,62 @@ func TestSQLiteConcurrentWriteSafety(t *testing.T) {
 	assert.Equal(t, expectedPerTable, auditCount)
 	assert.Equal(t, expectedPerTable, usageCount)
 }
+
+func TestSQLiteTuningPragmas(t *testing.T) {
+	store, err := NewSQLite(SQLiteConfig{Path: filepath.Join(t.TempDir(), "pragmas.db")})
+	require.NoError(t, err)
+	defer store.Close()
+
+	tests := []struct {
+		pragma string
+		want   string
+	}{
+		{pragma: "journal_mode", want: "wal"},
+		{pragma: "synchronous", want: "1"},
+		{pragma: "busy_timeout", want: "5000"},
+		{pragma: "cache_size", want: "-65536"},
+		{pragma: "mmap_size", want: "268435456"},
+		{pragma: "journal_size_limit", want: "67108864"},
+		{pragma: "analysis_limit", want: "100000"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.pragma, func(t *testing.T) {
+			var got string
+			require.NoError(t, store.DB().QueryRow("PRAGMA "+tt.pragma).Scan(&got))
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestSQLiteMaintenanceAnalyzesTables(t *testing.T) {
+	store, err := NewSQLite(SQLiteConfig{Path: filepath.Join(t.TempDir(), "analyze.db")})
+	require.NoError(t, err)
+	db := store.DB()
+
+	_, err = db.Exec(`CREATE TABLE items (id INTEGER PRIMARY KEY, model TEXT)`)
+	require.NoError(t, err)
+	_, err = db.Exec(`CREATE INDEX idx_items_model ON items(model)`)
+	require.NoError(t, err)
+	_, err = db.Exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 100)
+		INSERT INTO items (model) SELECT 'model-' || (i % 5) FROM n`)
+	require.NoError(t, err)
+
+	StartMaintenance(store)
+	StartMaintenance(store) // only the first call does anything
+
+	// The first check completes before StartMaintenance returns.
+	var rows int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM sqlite_stat1 WHERE tbl = 'items'`).Scan(&rows))
+	assert.Positive(t, rows)
+
+	require.NoError(t, store.Close())
+}
+
+func TestSQLiteMaintenanceAfterClose(t *testing.T) {
+	store, err := NewSQLite(SQLiteConfig{Path: filepath.Join(t.TempDir(), "closed.db")})
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+
+	// Returns at once without touching the closed database or panicking.
+	assert.NotPanics(t, func() { StartMaintenance(store) })
+}

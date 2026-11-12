@@ -307,7 +307,11 @@ Wykrywanie modeli jest ponawiane:
   (`cache.model.recheck_interval` w `config.yaml`; w sekundach,
   domyślnie `60`; `0` wyłącza), oraz
 - na żądanie, gdy request prosi o model kwalifikowany providerem
-  (`provider/model`), którego brakuje w rejestrze.
+  (`provider/model`), którego brakuje w rejestrze. Równoczesne chybienia dla
+  tego samego prefiksu `provider` współdzielą jedno pobranie, a każdy prefiks
+  jest pobierany w ten sposób najwyżej raz na minutę; chybienia w tej minucie
+  dostają poprzedni wynik, łącznie z błędem nieudanego odświeżenia. Nazwa
+  providera i jego typ to osobne prefiksy.
 
 ## Co się dzieje, gdy provider nie działa
 
