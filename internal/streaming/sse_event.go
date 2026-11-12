@@ -115,6 +115,11 @@ type EventScanner struct {
 	// one chunk or is still being buffered across chunks, so the limit does
 	// not depend on upstream read boundaries. Zero selects 256 KiB.
 	MaxEventBytes int
+	// AnyLineEnding ends lines at CRLF, LF or a bare CR, every ending the SSE
+	// specification allows, so a blank line ends an event whichever of them
+	// frame it. Unset, events end at "\n\n" and "\r\n\r\n" only, the
+	// framings providers send.
+	AnyLineEnding bool
 
 	pending    []byte
 	discarding bool
@@ -140,7 +145,7 @@ func (s *EventScanner) Feed(chunk []byte) []RawEvent {
 	data := chunk
 	aliased := false
 	if s.discarding {
-		idx, sepLen := nextJoinedEventBoundary(s.tail, chunk)
+		idx, sepLen := s.joinedBoundary(s.tail, chunk)
 		if idx == -1 {
 			s.tail = joinedSuffix(s.tail, chunk, maxBoundaryTailBytes)
 			return []RawEvent{{Oversized: true, Raw: chunk}}
@@ -157,7 +162,7 @@ func (s *EventScanner) Feed(chunk []byte) []RawEvent {
 	}
 
 	for len(data) > 0 {
-		idx, sepLen := NextEventBoundary(data)
+		idx, sepLen := s.boundary(data)
 		if idx == -1 {
 			break
 		}
@@ -165,7 +170,7 @@ func (s *EventScanner) Feed(chunk []byte) []RawEvent {
 		if idx > s.limit() {
 			events = append(events, RawEvent{Oversized: true, Raw: data[:end]})
 		} else {
-			events = append(events, parseRawEvent(data[:end], data[:idx]))
+			events = append(events, s.parse(data[:end], data[:idx]))
 		}
 		data = data[end:]
 	}
@@ -199,7 +204,28 @@ func (s *EventScanner) Flush() []RawEvent {
 	}
 	block := s.pending
 	s.pending = nil
-	return []RawEvent{parseRawEvent(block, bytes.TrimRight(block, "\r\n"))}
+	return []RawEvent{s.parse(block, bytes.TrimRight(block, "\r\n"))}
+}
+
+func (s *EventScanner) boundary(data []byte) (idx int, sepLen int) {
+	if s.AnyLineEnding {
+		return NextEventBoundaryAnyEOL(data)
+	}
+	return NextEventBoundary(data)
+}
+
+func (s *EventScanner) joinedBoundary(prefix, data []byte) (idx int, sepLen int) {
+	if s.AnyLineEnding {
+		return nextJoinedEventBoundaryAnyEOL(prefix, data)
+	}
+	return nextJoinedEventBoundary(prefix, data)
+}
+
+func (s *EventScanner) parse(raw, body []byte) RawEvent {
+	if s.AnyLineEnding {
+		return parseRawEventAnyEOL(raw, body)
+	}
+	return parseRawEvent(raw, body)
 }
 
 var (

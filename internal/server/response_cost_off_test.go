@@ -97,3 +97,24 @@ func TestResponseCost_OffChangesNoByte(t *testing.T) {
 		})
 	}
 }
+
+// A chained Responses stream (previous_response_id) is rewritten whether or
+// not costs are returned, so its bytes are pinned here: for an upstream that
+// frames with CRLF, the rewritten event ends its data line and the block with
+// LF, as it always did, and the lines before them keep their CRLF.
+func TestResponseCost_OffChainedResponsesStreamKeepsItsBytes(t *testing.T) {
+	const (
+		created   = "event: response.created\r\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_2\",\"status\":\"in_progress\"}}\r\n\r\n"
+		delta     = "event: response.output_text.delta\r\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"Hi\"}\r\n\r\n"
+		completed = "id: 7\r\nevent: response.completed\r\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_2\",\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"cost\":9}}}\r\nretry: 1000\r\n\r\n"
+		done      = "data: [DONE]\r\n\r\n"
+	)
+	const want = "event: response.created\r\ndata: {\"type\":\"response.created\",\"response\":{\"previous_response_id\":\"resp_1\",\"id\":\"resp_2\",\"status\":\"in_progress\"}}\n\n" +
+		delta +
+		"id: 7\r\nevent: response.completed\r\ndata: {\"type\":\"response.completed\",\"response\":{\"previous_response_id\":\"resp_1\",\"id\":\"resp_2\",\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"cost\":9}}}\nretry: 1000\n\n" +
+		done
+
+	for _, oneByte := range []bool{false, true} {
+		assert.Equal(t, want, readChained(t, created+delta+completed+done, "resp_1", oneByte))
+	}
+}

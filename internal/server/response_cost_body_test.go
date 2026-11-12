@@ -1,8 +1,8 @@
 package server
 
 import (
+	"bytes"
 	"net/http"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,15 +14,26 @@ import (
 
 // editBody runs body through a jsonUsageEditor in pieces of size bytes.
 func editBody(edit usageCostEdit, body string, size int) string {
-	editor := &jsonUsageEditor{edit: edit}
-	var out strings.Builder
-	for rest := body; len(rest) > 0; {
-		n := min(size, len(rest))
-		out.Write(editor.feed([]byte(rest[:n])))
-		rest = rest[n:]
+	return editBodyPieces(&jsonUsageEditor{edit: edit}, pieces(body, size)...)
+}
+
+// editBodyPieces writes pieces through editor and returns what it relayed.
+func editBodyPieces(editor *jsonUsageEditor, pieces ...string) string {
+	var out bytes.Buffer
+	for _, piece := range pieces {
+		_ = editor.feed(&out, []byte(piece)) // a bytes.Buffer never fails
 	}
 	out.Write(editor.flush())
 	return out.String()
+}
+
+// pieces cuts s into pieces of size bytes.
+func pieces(s string, size int) []string {
+	var out []string
+	for ; len(s) > size; s = s[size:] {
+		out = append(out, s[:size])
+	}
+	return append(out, s)
 }
 
 func TestJSONUsageEditor(t *testing.T) {

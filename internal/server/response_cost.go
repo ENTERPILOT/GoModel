@@ -23,11 +23,12 @@ const (
 
 // responseCostMiddleware returns the cost GoModel calculated for a model
 // request to its caller, in the shape OpenRouter uses: usage.cost, a number in
-// USD, in every usage object the response carries. Whatever records the
-// request's usage reports the cost on the context (usage.ReportCost). A
-// buffered response also carries it in the X-GoModel-Cost headers, for the
-// responses without a usage object (audio, most images). billed selects the
-// billed cost over the provider cost, and removes usage.cost_details.
+// USD, in the usage objects the response carries (see withUsageCost).
+// Whatever records the request's usage reports the cost on the context
+// (usage.ReportCost). A buffered response also carries it in the
+// X-GoModel-Cost headers, for the responses without a usage object (audio,
+// most images). billed selects the billed cost over the provider cost, and
+// removes every cost the provider reported (see usageCostEdit).
 func responseCostMiddleware(billed bool) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
@@ -46,9 +47,10 @@ func responseCostMiddleware(billed bool) echo.MiddlewareFunc {
 				editsJSON:      editsJSONBodies(desc.Operation),
 			}
 			c.SetResponse(w)
-			err := next(c)
-			w.finish()
-			return err
+			// Deferred, so what the writer holds back is relayed however the
+			// handler ends: it returns, fails or panics.
+			defer w.finish()
+			return next(c)
 		}
 	}
 }
@@ -71,9 +73,10 @@ type responseCostWriter struct {
 	billed    bool
 	editsJSON bool
 	prepared  bool
+	finished  bool
 	// events splits an event stream so the events carrying usage can be
 	// rewritten; body rewrites the usage of a JSON body. Both are nil for
-	// every other response.
+	// every other response, and once nothing more of it is rewritten.
 	events *streaming.EventScanner
 	body   *jsonUsageEditor
 	out    []byte
@@ -91,11 +94,16 @@ func (w *responseCostWriter) prepare() {
 	header := w.Header()
 	deleteHeaderFold(header, responseCostHeader)
 	deleteHeaderFold(header, responseCostCurrencyHeader)
-	// An encoded body cannot be read; the gateway sends none.
-	readable := header.Get("Content-Encoding") == ""
+	// An encoded body cannot be read; the gateway sends none. A response
+	// that starts after the handler ended (an error it returned) is not the
+	// handler's answer, and nothing would relay what an editor held of it.
+	readable := header.Get("Content-Encoding") == "" && !w.finished
 	if isSSEContentType(header) {
 		if readable {
-			w.events = &streaming.EventScanner{MaxEventBytes: streaming.MaxObservedEventBytes}
+			// Every line ending the SSE specification allows, so no event
+			// is held to the end of the stream, or relayed unread, for the
+			// way it is framed.
+			w.events = &streaming.EventScanner{MaxEventBytes: streaming.MaxObservedEventBytes, AnyLineEnding: true}
 		}
 		return
 	}
@@ -120,10 +128,13 @@ func (w *responseCostWriter) Write(p []byte) (int, error) {
 	w.prepare()
 	switch {
 	case w.body != nil:
-		if out := w.body.feed(p); len(out) > 0 {
-			if _, err := w.ResponseWriter.Write(out); err != nil {
-				return 0, err
-			}
+		// Written piece by piece, straight from p: only a usage object is
+		// held back.
+		if err := w.body.feed(w.ResponseWriter, p); err != nil {
+			return 0, err
+		}
+		if w.body.done {
+			w.body = nil
 		}
 		return len(p), nil
 	case w.events == nil:
@@ -142,22 +153,31 @@ func (w *responseCostWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// finish relays what the body ended with: the unterminated event a stream may
-// have ended with, or an unterminated usage object of a truncated JSON body.
+// finish relays what the body ended with, and what the writer still holds of
+// it: the unterminated event a stream may have ended with, or an unterminated
+// usage object of a truncated JSON body, as they are. It runs when the
+// handler ends, however it ends; whatever is written after it passes through.
 func (w *responseCostWriter) finish() {
+	if w.finished {
+		return
+	}
+	w.finished = true
+	body, events := w.body, w.events
+	w.body, w.events = nil, nil
 	w.out = w.out[:0]
 	switch {
-	case w.body != nil:
-		w.out = append(w.out, w.body.flush()...)
-	case w.events != nil:
-		for _, ev := range w.events.Flush() {
+	case body != nil:
+		w.out = append(w.out, body.flush()...)
+	case events != nil:
+		for _, ev := range events.Flush() {
 			w.out = w.appendEvent(w.out, ev)
 		}
 	}
-	if len(w.out) > 0 {
-		if _, err := w.ResponseWriter.Write(w.out); err == nil {
-			w.Flush()
-		}
+	if len(w.out) == 0 {
+		return
+	}
+	if _, err := w.ResponseWriter.Write(w.out); err == nil {
+		w.Flush()
 	}
 }
 

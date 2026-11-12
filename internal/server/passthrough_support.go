@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -373,7 +374,11 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 		observers = passthroughJSONResponseObservers(c, usageLogger, pricingResolver, providerType, providerName, endpoint, info, extraObservers)
 	}
 	if returnsCost && isJSONContentType(resp.Headers) {
-		return relayJSONAfterObservers(c, providerType, resp, observers)
+		body := bufio.NewReader(resp.Body)
+		if first := peekJSONStart(body); first != 0 && first != '{' {
+			return relayJSONAsItArrives(c, resp.StatusCode, body, observers)
+		}
+		return relayJSONAfterObservers(c, providerType, resp.StatusCode, body, observers)
 	}
 	if len(observers) == 0 || !isJSONContentType(resp.Headers) {
 		c.Response().WriteHeader(resp.StatusCode)
@@ -401,7 +406,7 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 	return nil
 }
 
-// relayJSONAfterObservers reads a JSON answer before relaying it, so its usage
+// relayJSONAfterObservers reads a JSON object before relaying it, so its usage
 // is priced in time for the response to carry the cost, in its headers and
 // in its usage.cost. Only requests that return their cost take this path: the
 // answer is complete either way, but the default path relays it as it arrives
@@ -410,8 +415,8 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 // An answer too large to observe is relayed as it arrives and without a cost,
 // as it is on the default path; the response cost writer still removes an
 // upstream's usage.cost from it.
-func relayJSONAfterObservers(c *echo.Context, providerType string, resp *core.PassthroughResponse, observers []streaming.Observer) error {
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxObservedJSONResponseBytes+1))
+func relayJSONAfterObservers(c *echo.Context, providerType string, status int, upstream io.Reader, observers []streaming.Observer) error {
+	body, err := io.ReadAll(io.LimitReader(upstream, maxObservedJSONResponseBytes+1))
 	if err != nil {
 		return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "failed to read provider response", err))
 	}
@@ -419,12 +424,12 @@ func relayJSONAfterObservers(c *echo.Context, providerType string, resp *core.Pa
 	if observed {
 		notifyObserversWithJSONBody(body, observers)
 	}
-	c.Response().WriteHeader(resp.StatusCode)
+	c.Response().WriteHeader(status)
 	if _, err := c.Response().Write(body); err != nil {
 		return err
 	}
 	if !observed {
-		if _, err := io.Copy(c.Response(), resp.Body); err != nil {
+		if _, err := io.Copy(c.Response(), upstream); err != nil {
 			return err
 		}
 	}
@@ -432,6 +437,45 @@ func relayJSONAfterObservers(c *echo.Context, providerType string, resp *core.Pa
 		f.Flush()
 	}
 	return nil
+}
+
+// relayJSONAsItArrives relays a JSON answer that is not one object, piece by
+// piece: an upstream may send such a body over time (Gemini's
+// streamGenerateContent without alt=sse sends an array, one element per
+// chunk), and reading it first would hold every piece to the end. It is
+// accounted for once complete, as on the default path, so it carries no cost;
+// the response cost writer rewrites the usage of an object only, and relays
+// it as it is.
+func relayJSONAsItArrives(c *echo.Context, status int, upstream io.Reader, observers []streaming.Observer) error {
+	capture := newCappedCaptureBuffer(maxObservedJSONResponseBytes)
+	if len(observers) > 0 {
+		upstream = io.TeeReader(upstream, capture)
+	}
+	c.Response().WriteHeader(status)
+	if err := flushStream(c.Response(), upstream); err != nil {
+		// The client received an incomplete body; do not account for it.
+		return err
+	}
+	if body, ok := capture.Captured(); ok {
+		notifyObserversWithJSONBody(body, observers)
+	}
+	return nil
+}
+
+// peekJSONStart returns the first byte of body that is not JSON whitespace,
+// without consuming any, or 0 when body ends or fails before one, or has none
+// within the reader's buffer.
+func peekJSONStart(body *bufio.Reader) byte {
+	for n := 1; n <= body.Size(); n++ {
+		window, err := body.Peek(n)
+		if len(window) == n && !isJSONSpace(window[n-1]) {
+			return window[n-1]
+		}
+		if err != nil {
+			return 0
+		}
+	}
+	return 0
 }
 
 // maxRelayedPassthroughErrorBytes caps the provider-native error body relayed

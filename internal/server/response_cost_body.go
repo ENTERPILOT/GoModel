@@ -1,161 +1,204 @@
 package server
 
 import (
-	"strings"
-
-	"github.com/tidwall/gjson"
+	"bytes"
+	"io"
 
 	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
-// maxUsageKeyBytes bounds how much of a top-level member name is kept to
-// compare it with "usage"; the longest escaped spelling of it is 32 bytes.
-const maxUsageKeyBytes = 64
+// maxHeldUsageBytes bounds the usage object a jsonUsageEditor holds back. A
+// larger one is relayed as it is: it is not rewritten, so it gets no cost and
+// keeps every member an upstream put in it.
+const maxHeldUsageBytes = streaming.MaxObservedEventBytes
 
-// jsonUsageEditor applies an edit to every top-level usage object of a JSON
-// body as the body passes through: like withUsageCost, every one named usage
-// in any case loses an upstream's cost members, and every one named exactly
-// usage then carries this gateway's cost. Only a usage object is held back, from
-// its opening to its closing brace; every other byte is relayed as it
-// arrives, so the body is neither buffered nor re-encoded.
+// maxKeptEmitBytes bounds the buffer kept between two rewritten pieces.
+const maxKeptEmitBytes = 64 << 10
+
+// jsonUsageEditor applies an edit to a JSON body as the body passes through,
+// the way withUsageCost applies it to an event: the usage objects at the top
+// level, under "response" and under "message" lose an upstream's cost members,
+// the ones named exactly usage (at the top level or under exactly response)
+// then carry this gateway's cost, and with a billed edit a provider's cost at
+// the top level is removed.
+//
+// Only a usage object is held back, from its opening to its closing brace,
+// and with a billed edit the few bytes between two top-level members until
+// the second is named. Every other byte is written as it arrives, straight
+// from the caller's buffer, so the body is neither buffered, copied nor
+// re-encoded. What is written depends on the body's bytes alone, never on how
+// the writes split them.
 type jsonUsageEditor struct {
 	edit usageCostEdit
+	// maxUsage bounds a held usage object; zero selects maxHeldUsageBytes.
+	maxUsage int
 
 	started  bool // the body's first byte other than whitespace was read
-	off      bool // the body is not an object: it is relayed as it is
-	closed   bool // the body's object has ended; nothing after it is edited
+	done     bool // nothing more is edited: the body is no object, or its object ended
 	depth    int  // nesting of objects and arrays, outside strings
 	inString bool
 	escaped  bool
 
-	expectKey bool   // the next string at depth 1 is a member name
-	inKey     bool   // that string is being read
-	key       []byte // its raw bytes, up to maxUsageKeyBytes
-	afterKey  bool   // a name was read and its colon is due
-	isUsage   bool   // the member being read is named usage, in any case
-	carries   bool   // and exactly usage: its object carries the cost
-	awaiting  bool   // the usage member's value is due
+	// Member names are read at depth 1, among the members of the body's
+	// object, and at depth 2 inside its response or message object.
+	envelope        bool // inside that object
+	envelopeCarries bool // which is named exactly response
+	expectKey       bool // the next string is a member name
+	inKey           bool // that string is being read
+	key             []byte
+	afterKey        bool       // a name was read and its colon is due
+	awaiting        bool       // its value is due
+	member          memberName // which member it is
+	exact           bool       // and whether its name is spelled exactly
 
-	capturing bool
-	usage     []byte // the usage object held back
-	out       []byte
+	capturing    bool
+	captureDepth int    // the depth the held usage object closes at
+	carries      bool   // it carries the cost
+	usage        []byte // the usage object held back
+
+	members rootMembers
+	emit    []byte // bytes to write in place of the byte just read
 }
 
-// feed returns the bytes of p that can be relayed now.
-func (e *jsonUsageEditor) feed(p []byte) []byte {
-	e.out = e.out[:0]
-	if e.off {
-		return append(e.out, p...)
-	}
-	from := 0
-	for i, c := range p {
-		if !e.started && !isJSONSpace(c) {
-			e.started = true
-			if c != '{' {
-				e.off = true
-				return append(e.out, p...)
+// feed writes to dst the bytes of p that can be relayed now.
+func (e *jsonUsageEditor) feed(dst io.Writer, p []byte) error {
+	from := 0 // p[from:i] is relayed as it is, and not written yet
+	for i := 0; i < len(p) && !e.done; i++ {
+		if e.inString && !e.escaped && !e.inKey && !e.capturing && !e.members.dropping {
+			// The bytes of a string up to its end or an escape are relayed
+			// and change nothing: a long one (an image) is not read bytewise.
+			if i += stringSpan(p[i:]); i == len(p) {
+				break
 			}
 		}
-		if e.capturing {
-			e.usage = append(e.usage, c)
-			if e.step(c) {
-				e.out = e.appendUsage(e.out)
-			} else if len(e.usage) > streaming.MaxObservedEventBytes {
-				// Too large to be a usage object; relayed as it is.
-				e.out = append(e.out, e.usage...)
-				e.capturing, e.usage = false, e.usage[:0]
-			}
-			from = i + 1
+		relayed := e.read(p[i])
+		if relayed && len(e.emit) == 0 {
 			continue
 		}
-		if e.awaiting && !isJSONSpace(c) {
-			e.awaiting = false
-			if c == '{' {
-				e.out = append(e.out, p[from:i]...)
-				e.capturing, e.usage = true, append(e.usage[:0], c)
-				e.step(c)
-				from = i + 1
-				continue
-			}
+		if err := writeBytes(dst, p[from:i], e.emit); err != nil {
+			return err
 		}
-		e.step(c)
+		if e.emit = e.emit[:0]; cap(e.emit) > maxKeptEmitBytes {
+			e.emit = nil // the buffer of a usage object over the limit
+		}
+		if from = i; !relayed {
+			from = i + 1
+		}
 	}
-	if !e.capturing {
-		e.out = append(e.out, p[from:]...)
-	}
-	return e.out
+	return writeBytes(dst, p[from:])
 }
 
-// flush returns what is still held back when the body ends: an unterminated
-// usage object, relayed as it is.
+// flush returns what is still held back when the body ends, as it is: an
+// unterminated usage object, or the bytes in front of an unnamed member.
 func (e *jsonUsageEditor) flush() []byte {
-	if !e.capturing {
-		return nil
+	var held []byte
+	switch {
+	case e.capturing:
+		held = e.usage
+	case e.members.holding:
+		held = e.members.held
 	}
-	e.capturing = false
-	return e.usage
+	e.capturing, e.members.holding, e.done = false, false, true
+	return held
 }
 
-func (e *jsonUsageEditor) appendUsage(out []byte) []byte {
-	e.capturing = false
-	if text, ok := e.edit.carrying(e.carries).apply(string(e.usage)); ok {
-		return append(out, text...)
+func writeBytes(dst io.Writer, parts ...[]byte) error {
+	for _, part := range parts {
+		if len(part) == 0 {
+			continue
+		}
+		if _, err := dst.Write(part); err != nil {
+			return err
+		}
 	}
-	return append(out, e.usage...)
+	return nil
 }
 
-// step advances the scanner past c and reports whether c closed the usage
-// object being held back.
-func (e *jsonUsageEditor) step(c byte) bool {
-	if e.inString {
-		if e.inKey && len(e.key) <= maxUsageKeyBytes {
-			e.key = append(e.key, c)
-		}
-		switch {
-		case e.escaped:
-			e.escaped = false
-		case c == '\\':
-			e.escaped = true
-		case c == '"':
-			e.inString = false
-			if e.inKey {
-				e.inKey, e.afterKey = false, true
-				name := ""
-				if len(e.key) <= maxUsageKeyBytes {
-					name = gjson.ParseBytes(e.key).Str
-				}
-				e.isUsage, e.carries = strings.EqualFold(name, "usage"), name == "usage"
-			}
-		}
+// read advances the scanner past c and reports whether c is relayed as it is.
+// A byte that is not was held back, removed, or written as part of e.emit.
+func (e *jsonUsageEditor) read(c byte) bool {
+	switch {
+	case e.capturing:
+		e.capture(c)
 		return false
+	case e.inString:
+		return e.readString(c)
+	case !e.started:
+		if isJSONSpace(c) {
+			return true
+		}
+		e.started = true
+		if c != '{' {
+			e.done = true
+			return true
+		}
 	}
-	switch c {
-	case '"':
+	return e.readStructure(c)
+}
+
+// capture holds back a byte of a usage object, and rewrites the object once c
+// closes it.
+func (e *jsonUsageEditor) capture(c byte) {
+	e.usage = append(e.usage, c)
+	switch {
+	case e.inString:
+		e.readStringByte(c)
+	case c == '"':
 		e.inString = true
-		if e.topLevel() && e.expectKey {
-			e.expectKey, e.inKey, e.key = false, true, append(e.key[:0], c)
-		}
-	case '{', '[':
+	case c == '{', c == '[':
 		e.depth++
-		e.expectKey = e.topLevel()
-	case '}', ']':
+	case c == '}', c == ']':
 		e.depth--
-		e.closed = e.closed || e.depth == 0
-		return e.capturing && e.depth == 1
-	case ',':
-		e.expectKey = e.topLevel()
-	case ':':
-		if e.topLevel() && e.afterKey {
-			e.afterKey, e.awaiting = false, e.isUsage
+	}
+	limit := e.maxUsage
+	if limit == 0 {
+		limit = maxHeldUsageBytes
+	}
+	switch {
+	case e.depth == e.captureDepth:
+		e.capturing = false
+		if text, ok := e.edit.carrying(e.carries).apply(string(e.usage)); ok {
+			e.emit = append(e.emit, text...)
+		} else {
+			e.emit = append(e.emit, e.usage...)
 		}
+		if e.depth == 1 {
+			e.members.valueEnded(e.edit.billed)
+		}
+	case len(e.usage) > limit:
+		// Too large to be a usage object: relayed as it is, and its buffer
+		// released.
+		e.capturing = false
+		e.emit, e.usage = e.usage, nil
+	}
+}
+
+// readStringByte advances past a byte of a string and reports whether it
+// closed the string.
+func (e *jsonUsageEditor) readStringByte(c byte) bool {
+	switch {
+	case e.escaped:
+		e.escaped = false
+	case c == '\\':
+		e.escaped = true
+	case c == '"':
+		e.inString = false
+		return true
 	}
 	return false
 }
 
-// topLevel reports whether the scanner is among the members of the body's
-// object.
-func (e *jsonUsageEditor) topLevel() bool {
-	return e.depth == 1 && !e.closed
+// stringSpan returns how many leading bytes of data neither end a string nor
+// start an escape in it.
+func stringSpan(data []byte) int {
+	end := bytes.IndexByte(data, '"')
+	if end == -1 {
+		end = len(data)
+	}
+	if escape := bytes.IndexByte(data[:end], '\\'); escape != -1 {
+		return escape
+	}
+	return end
 }
 
 func isJSONSpace(c byte) bool {

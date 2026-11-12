@@ -213,7 +213,7 @@ func assertOneGatewayCost(t *testing.T, payload []byte, want string) {
 func assertNoCostDetails(t *testing.T, payload []byte) {
 	t.Helper()
 	for _, object := range decodedUsages(t, payload) {
-		assert.NotContains(t, object, usageCostDetailsMember, "%s", payload)
+		assert.NotContains(t, object, "cost_details", "%s", payload)
 	}
 	var typed typedUsage
 	require.NoError(t, json.Unmarshal(payload, &typed))
@@ -348,19 +348,23 @@ func TestResponseCostWriter_ReplacesEveryCostHeader(t *testing.T) {
 	}
 }
 
-func TestMayHoldUsage(t *testing.T) {
+func TestMayHoldCost(t *testing.T) {
 	tests := []struct {
-		data string
-		want bool
+		data   string
+		want   bool
+		billed bool // what a billed edit reads on top
 	}{
-		{data: `{"usage":{"total_tokens":3}}`, want: true},
-		{data: `{"USAGE":{}}`, want: true},
-		{data: `{"uſage":{}}`, want: true},
-		{data: `{"usage":{}}`, want: true},
+		{data: `{"usage":{"total_tokens":3}}`, want: true, billed: true},
+		{data: `{"USAGE":{}}`, want: true, billed: true},
+		{data: `{"uſage":{}}`, want: true, billed: true},
+		{data: `{"\u0075sage":{}}`, want: true, billed: true},
+		{data: `{"choices":[],"cost":0.0009}`, billed: true},
+		{data: `{"choices":[],"COST":0.0009}`, billed: true},
 		{data: `{"choices":[{"delta":{"content":"Hi"}}]}`},
 		{data: `[DONE]`},
 	}
 	for _, tt := range tests {
-		assert.Equal(t, tt.want, mayHoldUsage([]byte(tt.data)), tt.data)
+		assert.Equal(t, tt.want, mayHoldCost([]byte(tt.data), false), tt.data)
+		assert.Equal(t, tt.billed, mayHoldCost([]byte(tt.data), true), "billed: %s", tt.data)
 	}
 }
