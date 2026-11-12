@@ -65,6 +65,32 @@ func TestDefaultConfigWithInvalidEnv(t *testing.T) {
 	assert.Equal(t, 600*time.Second, config.Timeout)
 }
 
+func TestDefaultConfigMaxIdleConnsPerHost(t *testing.T) {
+	tests := []struct {
+		name       string
+		configured int
+		want       int
+	}{
+		{name: "unset uses default", configured: 0, want: DefaultMaxIdleConnsPerHost},
+		{name: "configured value", configured: 2048, want: 2048},
+		{name: "negative uses default", configured: -5, want: DefaultMaxIdleConnsPerHost},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Cleanup(func() { SetConfiguredMaxIdleConnsPerHost(0) })
+			SetConfiguredMaxIdleConnsPerHost(tt.configured)
+
+			cfg := DefaultConfig()
+			assert.Equal(t, tt.want, cfg.MaxIdleConnsPerHost)
+			assert.Equal(t, tt.want, cfg.MaxIdleConns, "the total idle pool must hold a full per-host pool")
+
+			transport := underlyingTransport(t, NewDefaultHTTPClient())
+			assert.Equal(t, tt.want, transport.MaxIdleConnsPerHost)
+			assert.Equal(t, tt.want, transport.MaxIdleConns)
+		})
+	}
+}
+
 func TestNewHTTPClient(t *testing.T) {
 	tests := []struct {
 		name   string

@@ -79,7 +79,6 @@ func getEnvDuration(key string, defaultVal time.Duration) time.Duration {
 var (
 	configuredTimeoutSeconds               atomic.Int64
 	configuredResponseHeaderTimeoutSeconds atomic.Int64
-	configuredMaxIdleConnsPerHost          atomic.Int64
 )
 
 // DefaultMaxIdleConnsPerHost is the built-in idle (keep-alive) pool size per
@@ -87,6 +86,11 @@ var (
 // the provider's pool; it is sized for HTTP/1.1 self-hosted backends serving
 // hundreds of concurrent requests.
 const DefaultMaxIdleConnsPerHost = 512
+
+// configuredMaxIdleConnsPerHost holds the pool size installed by
+// SetConfiguredMaxIdleConnsPerHost. Zero means "not configured" and falls back
+// to DefaultMaxIdleConnsPerHost.
+var configuredMaxIdleConnsPerHost atomic.Int64
 
 // defaultHTTP2HealthCheckTimeout bounds both how long an HTTP/2 connection may
 // stay silent before it is pinged and how long the ping may go unanswered.
