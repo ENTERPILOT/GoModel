@@ -58,6 +58,7 @@ func benchSnapshots(writer string, n int) []WindowSnapshot {
 			PeriodSeconds: PeriodHourSeconds, Writer: writer, Epoch: "e1",
 			RequestsWindowStart: 1700000000, RequestsCurrent: 1,
 			TokensWindowStart: 1700000000, TokensCurrent: 10,
+			OwnCounts: true,
 		}
 	}
 	return out

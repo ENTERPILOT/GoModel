@@ -225,12 +225,13 @@ func epochs(t *testing.T, store Store) map[string]string {
 	return bySubject
 }
 
-// counterBatchSizes straddle SQLite's 66 rows per statement, so a save takes
+// counterBatchSizes straddle SQLite's 62 rows per statement, so a save takes
 // one statement, two, and several.
 var counterBatchSizes = []int{1, 70, 500}
 
 // runCounterBatchSuite saves n snapshots in one call, twice, and checks that
-// every row is written and then updated in place.
+// every row is written and then updated in place, every column with its own
+// row's value.
 func runCounterBatchSuite(t *testing.T, store Store, n int) {
 	t.Helper()
 	ctx := context.Background()
@@ -243,6 +244,7 @@ func runCounterBatchSuite(t *testing.T, store Store, n int) {
 	for i := range snapshots {
 		snapshots[i].RequestsCurrent += int64(i)
 		snapshots[i].TokensPrevious = int64(i)
+		snapshots[i].OwnCounts = i%2 == 1
 	}
 	require.NoError(t, store.SaveCounters(ctx, snapshots))
 	rows, err = store.LoadCounters(ctx, 0, "")

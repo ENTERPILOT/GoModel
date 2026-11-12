@@ -345,14 +345,26 @@ func TestSQLStorePruneUsesExpiresAtIndex(t *testing.T) {
 // TestSQLStoreMigratesRowsWithoutExpiresAt starts from a table as releases
 // before expires_at left it, holding rows they saved: the store adds the
 // column and its index, and the prune collects those rows on their old
-// bounds.
+// bounds. Releases up to v0.2.1 left it without own_counts as well.
 func TestSQLStoreMigratesRowsWithoutExpiresAt(t *testing.T) {
+	t.Run("expires_at", func(t *testing.T) {
+		runSQLStoreColumnMigration(t, "expires_at")
+	})
+	t.Run("expires_at and own_counts", func(t *testing.T) {
+		runSQLStoreColumnMigration(t, "expires_at", "own_counts")
+	})
+}
+
+func runSQLStoreColumnMigration(t *testing.T, missing ...string) {
+	t.Helper()
 	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
 		ctx := context.Background()
 		_, err := store.db.Exec(ctx, `DROP INDEX idx_rate_limit_window_snapshots_expires_at`)
 		require.NoError(t, err)
-		_, err = store.db.Exec(ctx, `ALTER TABLE rate_limit_window_snapshots DROP COLUMN expires_at`)
-		require.NoError(t, err)
+		for _, column := range missing {
+			_, err = store.db.Exec(ctx, `ALTER TABLE rate_limit_window_snapshots DROP COLUMN `+column)
+			require.NoError(t, err)
+		}
 
 		now := time.Now().Unix()
 		rows := []struct {
@@ -382,7 +394,9 @@ func TestSQLStoreMigratesRowsWithoutExpiresAt(t *testing.T) {
 		require.NoError(t, err)
 		columns, err := tableColumns(ctx, store.db, "rate_limit_window_snapshots")
 		require.NoError(t, err)
-		require.True(t, columns["expires_at"])
+		for _, column := range missing {
+			require.True(t, columns[column], column)
+		}
 
 		require.NoError(t, migrated.PruneCounters(ctx))
 		loaded, err := migrated.LoadCounters(ctx, 0, "")
@@ -390,18 +404,24 @@ func TestSQLStoreMigratesRowsWithoutExpiresAt(t *testing.T) {
 		var partitions []string
 		for _, row := range loaded {
 			partitions = append(partitions, row.Partition)
+			assert.False(t, row.OwnCounts, "an older release's row is merged by maximum")
 		}
 		assert.ElementsMatch(t, kept, partitions)
 
-		// The next save stamps the row's expiry.
-		snap := WindowSnapshot{Scope: string(ScopeUserPath), Subject: "/team", Partition: "/team/live", PeriodSeconds: PeriodHourSeconds, Writer: "old-replica"}
+		// The next save stamps the row's expiry, and marks its counts its own.
+		snap := WindowSnapshot{
+			Scope: string(ScopeUserPath), Subject: "/team", Partition: "/team/live",
+			PeriodSeconds: PeriodHourSeconds, Writer: "old-replica", OwnCounts: true,
+		}
 		require.NoError(t, migrated.SaveCounters(ctx, []WindowSnapshot{snap}))
 		var updatedAt, expiresAt int64
+		var ownCounts bool
 		err = store.db.QueryRow(ctx, `
-			SELECT updated_at, expires_at FROM rate_limit_window_snapshots WHERE partition = ?
-		`, "/team/live").Scan(&updatedAt, &expiresAt)
+			SELECT updated_at, expires_at, own_counts FROM rate_limit_window_snapshots WHERE partition = ?
+		`, "/team/live").Scan(&updatedAt, &expiresAt, &ownCounts)
 		require.NoError(t, err)
 		assert.Equal(t, updatedAt+2*PeriodHourSeconds, expiresAt)
+		assert.True(t, ownCounts)
 	})
 }
 
