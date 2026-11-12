@@ -95,7 +95,6 @@ class ModelTestState {
       } catch (error) {
         // A timeout can abort the body read after the headers arrived.
         if (controller.signal.aborted) throw error;
-        data = null;
       }
       if (res.status === 401 && isGatewayAuthError(data)) {
         auth.handleUnauthorized(generation);

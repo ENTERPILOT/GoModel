@@ -7,9 +7,15 @@
 // up in Audit Logs and Usage like any other client's request.
 
 import { errorPayloadMessage } from "../../lib/api/errors.js";
-import { buildPlaygroundRequest, extractResponseText } from "../playground/playgroundLogic.js";
+import {
+  buildPlaygroundRequest,
+  endpointById,
+  extractResponseText,
+} from "../playground/playgroundLogic.js";
 
-export const MODEL_TEST_PATH = "/v1/chat/completions";
+// The Playground endpoint the test is sent through and read back from.
+const MODEL_TEST_ENDPOINT = "chat";
+export const MODEL_TEST_PATH = endpointById(MODEL_TEST_ENDPOINT).path;
 export const MODEL_TEST_PROMPT = "Say hello in one short sentence.";
 export const MODEL_TEST_MAX_TOKENS = 64;
 // A test that has not answered by then is reported as timed out.
@@ -55,7 +61,7 @@ export function modelTestUserPath(row) {
 }
 
 export function buildModelTestRequest(selector) {
-  return buildPlaygroundRequest("chat", {
+  return buildPlaygroundRequest(MODEL_TEST_ENDPOINT, {
     model: selector,
     messages: [{ role: "user", content: MODEL_TEST_PROMPT }],
     maxTokens: MODEL_TEST_MAX_TOKENS,
@@ -88,7 +94,7 @@ export function summarizeModelTest({ ok, status, data, durationMs }, fallbackMes
   return {
     state: "ok",
     durationMs: duration,
-    reply: replySnippet(extractResponseText("chat", data)),
+    reply: replySnippet(extractResponseText(MODEL_TEST_ENDPOINT, data)),
     finishReason: String(choice?.finish_reason || ""),
   };
 }

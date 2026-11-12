@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   MODEL_TEST_MAX_TOKENS,
+  MODEL_TEST_PATH,
   MODEL_TEST_PROMPT,
   MODEL_TEST_SNIPPET_LENGTH,
   buildModelTestRequest,
@@ -88,6 +89,7 @@ test("modelTestUserPath picks the first allowed user path", () => {
 });
 
 test("buildModelTestRequest sends the default prompt with a small token budget", () => {
+  assert.equal(MODEL_TEST_PATH, "/v1/chat/completions");
   assert.deepEqual(buildModelTestRequest("openai/gpt-4o"), {
     model: "openai/gpt-4o",
     messages: [{ role: "user", content: MODEL_TEST_PROMPT }],
