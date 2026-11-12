@@ -332,14 +332,7 @@ func (s *SQLStore) SaveCounters(ctx context.Context, snapshots []WindowSnapshot)
 		maxParameters = postgresMaxBindParameters
 	}
 	rowsPerStatement := maxParameters / upsertCounterColumnCount
-	if len(snapshots) <= rowsPerStatement {
-		query, args := buildCounterUpsert(snapshots, now)
-		if _, err := s.db.Exec(ctx, query, args...); err != nil {
-			return fmt.Errorf("upsert %d rate limit counters: %w", len(snapshots), err)
-		}
-		return nil
-	}
-	return s.db.InTx(ctx, func(q sqlx.Querier) error {
+	save := func(q sqlx.Querier) error {
 		for chunk := range slices.Chunk(snapshots, rowsPerStatement) {
 			query, args := buildCounterUpsert(chunk, now)
 			if _, err := q.Exec(ctx, query, args...); err != nil {
@@ -347,7 +340,11 @@ func (s *SQLStore) SaveCounters(ctx context.Context, snapshots []WindowSnapshot)
 			}
 		}
 		return nil
-	})
+	}
+	if len(snapshots) <= rowsPerStatement {
+		return save(s.db)
+	}
+	return s.db.InTx(ctx, save)
 }
 
 // pruneCountersSQL collects the rows nobody writes any more: a rule that was
