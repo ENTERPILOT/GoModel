@@ -271,11 +271,14 @@ func TestMongoDBStoreCounterRoundTrip(t *testing.T) {
 		require.NoError(t, err)
 
 		counters := db.Collection("rate_limit_window_snapshots")
+		// Stale rows are seeded without expires_at, as releases before it
+		// saved them: the TTL monitor runs on its own schedule and could
+		// delete an expired one before the suite counts it. PruneCounters
+		// collects them on the same bounds.
 		runCounterStoreSuite(t, store, func(t *testing.T, snap WindowSnapshot, updatedAt int64) {
 			t.Helper()
 			snap.UpdatedAt = updatedAt
-			doc := counterDocument{WindowSnapshot: snap, ExpiresAt: time.Unix(updatedAt+counterRetention(snap.PeriodSeconds), 0)}
-			_, err := counters.InsertOne(context.Background(), doc)
+			_, err := counters.InsertOne(context.Background(), snap)
 			require.NoError(t, err)
 		}, func(t *testing.T) {
 			t.Helper()

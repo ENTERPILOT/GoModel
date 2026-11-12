@@ -21,8 +21,8 @@ func unstamped(rows []WindowSnapshot) []WindowSnapshot {
 
 // runCounterStoreSuite asserts the counter half of the Store contract. Every
 // backend runs the same body, so a window that round-trips on SQLite has to
-// round-trip on PostgreSQL and MongoDB too. seedStale writes a row as a save
-// at updatedAt would, so the suite can age one without waiting an hour.
+// round-trip on PostgreSQL and MongoDB too. seedStale writes a row saved at
+// updatedAt, so the suite can age one without waiting an hour.
 // expire collects what expired, as PruneCounters and whatever else the
 // backend relies on (a MongoDB TTL index) do.
 func runCounterStoreSuite(t *testing.T, store Store, seedStale func(t *testing.T, snap WindowSnapshot, updatedAt int64), expire func(t *testing.T)) {
