@@ -174,10 +174,13 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 				}
 			}
 
-			// Write log entry asynchronously (skip if streaming - the stream observer path handles it)
+			// Write log entry asynchronously (skip if streaming - the stream observer path handles it).
+			// The write publishes the completed entry, live changes still pending included.
 			if !IsEntryMarkedAsStreaming(c) {
 				entry.Complete()
 				logger.Write(entry)
+			} else {
+				FlushLiveUpdate(c)
 			}
 
 			return err

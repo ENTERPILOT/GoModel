@@ -383,6 +383,7 @@ func (s *audioService) relayAudioStream(c *echo.Context, route modelCallRoute, r
 		header.Set("Cache-Control", "no-cache")
 		header.Set("Connection", "keep-alive")
 		auditlog.EnrichEntryWithStream(c, true)
+		auditlog.FlushLiveUpdate(c)
 	}
 	c.Response().WriteHeader(http.StatusOK)
 

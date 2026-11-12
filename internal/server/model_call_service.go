@@ -68,6 +68,7 @@ func (s *modelCallService) prepare(c *echo.Context, model, providerHint string) 
 	// Stamp the executed route so audit rows carry the resolved model and
 	// provider, as the inference orchestrator does for chat.
 	auditlog.EnrichEntryWithResolvedRoute(c, selector.QualifiedModel(), route.providerType, route.providerName)
+	auditlog.FlushLiveUpdate(c)
 	route.slowdown = resolveModelSlowdown(
 		ctx,
 		s.modelResolver,

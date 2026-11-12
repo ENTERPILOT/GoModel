@@ -343,6 +343,8 @@ func handleWithCache[R any](
 		if marshalErr != nil {
 			slog.Debug("marshalRequestBody failed", "err", marshalErr)
 		} else {
+			// A semantic lookup calls the embedder first.
+			auditlog.FlushLiveUpdate(c)
 			err := s.responseCache.HandleRequest(c, body, func() error {
 				return dispatch(c, req, workflow)
 			})
@@ -650,6 +652,7 @@ func (s *translatedInferenceService) observeLiveProviderAttempts(c *echo.Context
 	req := c.Request()
 	c.SetRequest(req.WithContext(gateway.WithAttemptObserver(req.Context(), func() {
 		enrichAuditEntryWithProviderAttempts(c)
+		auditlog.FlushLiveUpdate(c)
 	})))
 }
 
@@ -695,6 +698,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 	if streamEntry != nil {
 		streamEntry.StatusCode = http.StatusOK
 	}
+	auditlog.FlushLiveUpdate(c)
 
 	requestID := requestIDFromContextOrHeader(c.Request())
 	endpoint := c.Request().URL.Path

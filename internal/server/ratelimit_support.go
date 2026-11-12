@@ -10,6 +10,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
@@ -119,6 +120,9 @@ func enforceAdmission(c *echo.Context, limiter RateLimiter, checker BudgetChecke
 	if c == nil || c.Request() == nil {
 		return admission{release: noopRelease}, nil
 	}
+	// Admission is the last step before the upstream call: show the request
+	// as resolved so far while it waits for a slot and while the call runs.
+	auditlog.FlushLiveUpdate(c)
 	return admit(c.Request().Context(), limiter, checker, route, rateLimitHeaderSetter(c))
 }
 

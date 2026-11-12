@@ -184,6 +184,7 @@ func TestMiddlewarePublishesWorkflowUpdateWithCapturedRequestBody(t *testing.T) 
 				},
 			},
 		})
+		FlushLiveUpdate(c)
 		require.Len(t, logger.events, 2)
 
 		return nil
@@ -232,6 +233,7 @@ func TestMiddlewareDoesNotPublishRequestBodyForAuditDisabledWorkflow(t *testing.
 			},
 		}
 		EnrichEntryWithWorkflow(c, workflow)
+		FlushLiveUpdate(c)
 		require.Equal(t, workflow, core.GetWorkflow(c.Request().Context()))
 		require.Len(t, logger.events, 2)
 

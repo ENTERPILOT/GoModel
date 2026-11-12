@@ -81,7 +81,8 @@ type LiveEventPublisher interface {
 }
 
 // LiveEventEmitter is implemented by loggers that can publish audit lifecycle
-// previews before the entry is persisted.
+// previews before the entry is persisted. Their Write publishes the written
+// entry, which carries any change not yet flushed with FlushLiveUpdate.
 type LiveEventEmitter interface {
 	PublishLiveEvent(eventType string, entry *LogEntry)
 }
@@ -103,6 +104,9 @@ type LogEntry struct {
 	// written: the response and stream phases finish after the handler
 	// returned (see EnrichEntryWithGuardrailOutcomes).
 	guardrailOutcomes func() []GuardrailOutcomeSnapshot
+	// liveUpdatePending is set when an Enrich* helper changed the entry
+	// after its last live event (see FlushLiveUpdate).
+	liveUpdatePending bool
 
 	// ID is a unique identifier for this log entry (UUID)
 	ID string `json:"id" bson:"_id"`

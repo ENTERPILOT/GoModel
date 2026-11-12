@@ -1,0 +1,848 @@
+{
+  "batch": {
+    "in_flight": [
+      {
+        "_live_pending": true,
+        "_live_state": "audit.updated",
+        "auth_method": "master_key",
+        "client_ip": "192.0.2.1",
+        "data": {
+          "request_body": {
+            "completion_window": "24h",
+            "requests": [
+              {
+                "body": {
+                  "messages": [
+                    {
+                      "content": "Hi",
+                      "role": "user"
+                    }
+                  ],
+                  "model": "gpt-4o-mini"
+                },
+                "custom_id": "chat-1",
+                "method": "POST",
+                "url": "/v1/chat/completions"
+              }
+            ]
+          },
+          "request_headers": {
+            "Authorization": "[REDACTED]",
+            "Content-Type": "application/json",
+            "X-Request-Id": "live-request"
+          }
+        },
+        "method": "POST",
+        "path": "/v1/batches",
+        "request_id": "live-request",
+        "user_path": "/"
+      }
+    ],
+    "final": {
+      "_live_pending": true,
+      "_live_state": "audit.flushed",
+      "auth_method": "master_key",
+      "client_ip": "192.0.2.1",
+      "data": {
+        "request_body": {
+          "completion_window": "24h",
+          "requests": [
+            {
+              "body": {
+                "messages": [
+                  {
+                    "content": "Hi",
+                    "role": "user"
+                  }
+                ],
+                "model": "gpt-4o-mini"
+              },
+              "custom_id": "chat-1",
+              "method": "POST",
+              "url": "/v1/chat/completions"
+            }
+          ]
+        },
+        "request_headers": {
+          "Authorization": "[REDACTED]",
+          "Content-Type": "application/json",
+          "X-Request-Id": "live-request"
+        },
+        "response_body": {
+          "completion_window": "24h",
+          "created_at": 1000,
+          "endpoint": "",
+          "metadata": {
+            "provider": "openai",
+            "provider_batch_id": "provider-batch-1"
+          },
+          "object": "batch",
+          "provider": "openai",
+          "provider_batch_id": "provider-batch-1",
+          "request_counts": {
+            "completed": 0,
+            "failed": 0,
+            "total": 1
+          },
+          "status": "in_progress",
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0
+          }
+        },
+        "response_headers": {
+          "Content-Type": "application/json",
+          "X-Request-Id": "live-request"
+        }
+      },
+      "method": "POST",
+      "path": "/v1/batches",
+      "provider": "openai",
+      "request_id": "live-request",
+      "requested_model": "batch",
+      "status_code": 200,
+      "user_path": "/"
+    }
+  },
+  "chat": {
+    "in_flight": [
+      {
+        "_live_pending": true,
+        "_live_state": "audit.updated",
+        "auth_method": "master_key",
+        "client_ip": "192.0.2.1",
+        "data": {
+          "request_body": {
+            "messages": [
+              {
+                "content": "Hi",
+                "role": "user"
+              }
+            ],
+            "model": "gpt-4o-mini"
+          },
+          "request_headers": {
+            "Authorization": "[REDACTED]",
+            "Content-Type": "application/json",
+            "X-Request-Id": "live-request"
+          }
+        },
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "provider": "openai",
+        "provider_name": "openai",
+        "request_id": "live-request",
+        "requested_model": "gpt-4o-mini",
+        "resolved_model": "openai/gpt-4o-mini",
+        "user_path": "/"
+      }
+    ],
+    "final": {
+      "_live_pending": true,
+      "_live_state": "audit.flushed",
+      "auth_method": "master_key",
+      "client_ip": "192.0.2.1",
+      "data": {
+        "attempts": [
+          {
+            "kind": "primary",
+            "model": "gpt-4o-mini",
+            "provider_name": "openai",
+            "provider_type": "openai",
+            "seq": 1,
+            "status_code": 200,
+            "success": true
+          }
+        ],
+        "request_body": {
+          "messages": [
+            {
+              "content": "Hi",
+              "role": "user"
+            }
+          ],
+          "model": "gpt-4o-mini"
+        },
+        "request_headers": {
+          "Authorization": "[REDACTED]",
+          "Content-Type": "application/json",
+          "X-Request-Id": "live-request"
+        },
+        "response_body": {
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "Hello",
+                "role": "assistant"
+              }
+            }
+          ],
+          "model": "gpt-4o-mini",
+          "object": "chat.completion",
+          "provider": "openai",
+          "usage": {
+            "completion_tokens": 1,
+            "prompt_tokens": 3,
+            "total_tokens": 4
+          }
+        },
+        "response_headers": {
+          "Content-Type": "application/json",
+          "X-Request-Id": "live-request"
+        }
+      },
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "provider": "openai",
+      "provider_name": "openai",
+      "request_id": "live-request",
+      "requested_model": "gpt-4o-mini",
+      "resolved_model": "openai/gpt-4o-mini",
+      "status_code": 200,
+      "user_path": "/"
+    }
+  },
+  "chat stream": {
+    "in_flight": [
+      {
+        "_live_pending": true,
+        "_live_state": "audit.updated",
+        "auth_method": "master_key",
+        "client_ip": "192.0.2.1",
+        "data": {
+          "request_body": {
+            "messages": [
+              {
+                "content": "Hi",
+                "role": "user"
+              }
+            ],
+            "model": "gpt-4o-mini",
+            "stream": true
+          },
+          "request_headers": {
+            "Authorization": "[REDACTED]",
+            "Content-Type": "application/json",
+            "X-Request-Id": "live-request"
+          }
+        },
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "provider": "openai",
+        "provider_name": "openai",
+        "request_id": "live-request",
+        "requested_model": "gpt-4o-mini",
+        "resolved_model": "openai/gpt-4o-mini",
+        "user_path": "/"
+      }
+    ],
+    "final": {
+      "_live_pending": true,
+      "_live_state": "audit.flushed",
+      "auth_method": "master_key",
+      "client_ip": "192.0.2.1",
+      "data": {
+        "attempts": [
+          {
+            "kind": "primary",
+            "model": "gpt-4o-mini",
+            "provider_name": "openai",
+            "provider_type": "openai",
+            "seq": 1,
+            "status_code": 200,
+            "success": true
+          }
+        ],
+        "request_body": {
+          "messages": [
+            {
+              "content": "Hi",
+              "role": "user"
+            }
+          ],
+          "model": "gpt-4o-mini",
+          "stream": true
+        },
+        "request_headers": {
+          "Authorization": "[REDACTED]",
+          "Content-Type": "application/json",
+          "X-Request-Id": "live-request"
+        },
+        "response_body": {
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "Hello",
+                "role": "assistant"
+              }
+            }
+          ],
+          "model": "gpt-4o-mini",
+          "object": "chat.completion"
+        },
+        "response_body_partial": true,
+        "response_headers": {
+          "Cache-Control": "no-cache",
+          "Connection": "keep-alive",
+          "Content-Type": "text/event-stream",
+          "X-Request-Id": "live-request"
+        }
+      },
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "provider": "openai",
+      "provider_name": "openai",
+      "request_id": "live-request",
+      "requested_model": "gpt-4o-mini",
+      "resolved_model": "openai/gpt-4o-mini",
+      "status_code": 200,
+      "stream": true,
+      "user_path": "/"
+    }
+  },
+  "error before upstream": {
+    "in_flight": null,
+    "final": {
+      "_live_pending": true,
+      "_live_state": "audit.flushed",
+      "auth_method": "master_key",
+      "client_ip": "192.0.2.1",
+      "data": {
+        "error_code": "model_not_found",
+        "error_message": "unsupported model: unknown-model",
+        "request_body": {
+          "messages": [
+            {
+              "content": "Hi",
+              "role": "user"
+            }
+          ],
+          "model": "unknown-model"
+        },
+        "request_headers": {
+          "Authorization": "[REDACTED]",
+          "Content-Type": "application/json",
+          "X-Request-Id": "live-request"
+        },
+        "response_body": {
+          "error": {
+            "code": "model_not_found",
+            "message": "unsupported model: unknown-model",
+            "param": null,
+            "type": "not_found_error"
+          }
+        },
+        "response_headers": {
+          "Content-Type": "application/json",
+          "X-Request-Id": "live-request"
+        }
+      },
+      "error_message": "unsupported model: unknown-model",
+      "error_type": "not_found_error",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "request_id": "live-request",
+      "requested_model": "unknown-model",
+      "status_code": 404,
+      "user_path": "/"
+    }
+  },
+  "exact cache hit": {
+    "in_flight": null,
+    "final": {
+      "_live_pending": true,
+      "_live_state": "audit.flushed",
+      "auth_method": "master_key",
+      "cache_type": "exact",
+      "client_ip": "192.0.2.1",
+      "data": {
+        "request_body": {
+          "messages": [
+            {
+              "content": "Hi",
+              "role": "user"
+            }
+          ],
+          "model": "gpt-4o-mini"
+        },
+        "request_headers": {
+          "Authorization": "[REDACTED]",
+          "Content-Type": "application/json",
+          "X-Request-Id": "live-request"
+        },
+        "response_body": {
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "Hello",
+                "role": "assistant"
+              }
+            }
+          ],
+          "model": "gpt-4o-mini",
+          "object": "chat.completion",
+          "provider": "openai",
+          "usage": {
+            "completion_tokens": 1,
+            "prompt_tokens": 3,
+            "total_tokens": 4
+          }
+        },
+        "response_headers": {
+          "Content-Type": "application/json",
+          "X-Cache": "HIT (exact)",
+          "X-Request-Id": "live-request"
+        }
+      },
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "provider": "openai",
+      "provider_name": "openai",
+      "request_id": "live-request",
+      "requested_model": "gpt-4o-mini",
+      "resolved_model": "openai/gpt-4o-mini",
+      "status_code": 200,
+      "user_path": "/"
+    }
+  },
+  "exact cache hit stream": {
+    "in_flight": null,
+    "final": {
+      "_live_pending": true,
+      "_live_state": "audit.flushed",
+      "auth_method": "master_key",
+      "cache_type": "exact",
+      "client_ip": "192.0.2.1",
+      "data": {
+        "request_body": {
+          "messages": [
+            {
+              "content": "Hi",
+              "role": "user"
+            }
+          ],
+          "model": "gpt-4o-mini",
+          "stream": true
+        },
+        "request_headers": {
+          "Authorization": "[REDACTED]",
+          "Content-Type": "application/json",
+          "X-Request-Id": "live-request"
+        },
+        "response_body": {
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "Hello",
+                "role": "assistant"
+              }
+            }
+          ],
+          "model": "gpt-4o-mini",
+          "object": "chat.completion"
+        },
+        "response_headers": {
+          "Cache-Control": "no-cache",
+          "Connection": "keep-alive",
+          "Content-Type": "text/event-stream",
+          "X-Cache": "HIT (exact)",
+          "X-Request-Id": "live-request"
+        }
+      },
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "provider": "openai",
+      "provider_name": "openai",
+      "request_id": "live-request",
+      "requested_model": "gpt-4o-mini",
+      "resolved_model": "openai/gpt-4o-mini",
+      "status_code": 200,
+      "stream": true,
+      "user_path": "/"
+    }
+  },
+  "failover": {
+    "in_flight": [
+      {
+        "_live_pending": true,
+        "_live_state": "audit.updated",
+        "auth_method": "master_key",
+        "client_ip": "192.0.2.1",
+        "data": {
+          "request_body": {
+            "messages": [
+              {
+                "content": "hi",
+                "role": "user"
+              }
+            ],
+            "model": "gpt-4o"
+          },
+          "request_headers": {
+            "Authorization": "[REDACTED]",
+            "Content-Type": "application/json",
+            "X-Request-Id": "live-request"
+          }
+        },
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "provider": "openai",
+        "request_id": "live-request",
+        "requested_model": "gpt-4o",
+        "resolved_model": "gpt-4o",
+        "user_path": "/"
+      },
+      {
+        "_live_pending": true,
+        "_live_state": "audit.updated",
+        "auth_method": "master_key",
+        "client_ip": "192.0.2.1",
+        "data": {
+          "attempts": [
+            {
+              "error_message": "model temporarily unavailable",
+              "error_type": "provider_error",
+              "kind": "primary",
+              "model": "gpt-4o",
+              "provider_type": "openai",
+              "seq": 1,
+              "status_code": 503,
+              "success": false
+            }
+          ],
+          "request_body": {
+            "messages": [
+              {
+                "content": "hi",
+                "role": "user"
+              }
+            ],
+            "model": "gpt-4o"
+          },
+          "request_headers": {
+            "Authorization": "[REDACTED]",
+            "Content-Type": "application/json",
+            "X-Request-Id": "live-request"
+          }
+        },
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "provider": "openai",
+        "request_id": "live-request",
+        "requested_model": "gpt-4o",
+        "resolved_model": "gpt-4o",
+        "user_path": "/"
+      }
+    ],
+    "final": {
+      "_live_pending": true,
+      "_live_state": "audit.flushed",
+      "auth_method": "master_key",
+      "client_ip": "192.0.2.1",
+      "data": {
+        "attempts": [
+          {
+            "error_message": "model temporarily unavailable",
+            "error_type": "provider_error",
+            "kind": "primary",
+            "model": "gpt-4o",
+            "provider_type": "openai",
+            "seq": 1,
+            "status_code": 503,
+            "success": false
+          },
+          {
+            "kind": "failover",
+            "model": "azure/gpt-4o",
+            "provider_name": "azure",
+            "provider_type": "azure",
+            "seq": 2,
+            "status_code": 200,
+            "success": true
+          }
+        ],
+        "failover": {
+          "target_model": "azure/gpt-4o"
+        },
+        "request_body": {
+          "messages": [
+            {
+              "content": "hi",
+              "role": "user"
+            }
+          ],
+          "model": "gpt-4o"
+        },
+        "request_headers": {
+          "Authorization": "[REDACTED]",
+          "Content-Type": "application/json",
+          "X-Request-Id": "live-request"
+        },
+        "response_body": {
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "failover ok",
+                "role": "assistant"
+              }
+            }
+          ],
+          "model": "gpt-4o",
+          "object": "chat.completion",
+          "provider": "azure",
+          "usage": {
+            "completion_tokens": 0,
+            "prompt_tokens": 0,
+            "total_tokens": 0
+          }
+        },
+        "response_headers": {
+          "Content-Type": "application/json",
+          "X-Request-Id": "live-request"
+        }
+      },
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "provider": "azure",
+      "provider_name": "azure",
+      "request_id": "live-request",
+      "requested_model": "gpt-4o",
+      "resolved_model": "azure/gpt-4o",
+      "status_code": 200,
+      "user_path": "/"
+    }
+  },
+  "passthrough": {
+    "in_flight": [
+      {
+        "_live_pending": true,
+        "_live_state": "audit.updated",
+        "auth_method": "master_key",
+        "client_ip": "192.0.2.1",
+        "data": {
+          "request_body": {
+            "model": "gpt-5-mini"
+          },
+          "request_headers": {
+            "Authorization": "[REDACTED]",
+            "Content-Type": "application/json",
+            "X-Request-Id": "live-request"
+          }
+        },
+        "method": "POST",
+        "path": "/p/openai/responses",
+        "provider": "openai",
+        "request_id": "live-request",
+        "requested_model": "gpt-5-mini",
+        "user_path": "/"
+      }
+    ],
+    "final": {
+      "_live_pending": true,
+      "_live_state": "audit.flushed",
+      "auth_method": "master_key",
+      "client_ip": "192.0.2.1",
+      "data": {
+        "request_body": {
+          "model": "gpt-5-mini"
+        },
+        "request_headers": {
+          "Authorization": "[REDACTED]",
+          "Content-Type": "application/json",
+          "X-Request-Id": "live-request"
+        },
+        "response_body": {
+          "ok": true
+        },
+        "response_headers": {
+          "Content-Type": "application/json",
+          "X-Request-Id": "live-request"
+        }
+      },
+      "method": "POST",
+      "path": "/p/openai/responses",
+      "provider": "openai",
+      "provider_name": "openai",
+      "request_id": "live-request",
+      "requested_model": "gpt-5-mini",
+      "status_code": 200,
+      "user_path": "/"
+    }
+  },
+  "passthrough stream": {
+    "in_flight": [
+      {
+        "_live_pending": true,
+        "_live_state": "audit.updated",
+        "auth_method": "master_key",
+        "client_ip": "192.0.2.1",
+        "data": {
+          "request_body": {
+            "model": "gpt-5-mini",
+            "stream": true
+          },
+          "request_headers": {
+            "Authorization": "[REDACTED]",
+            "Content-Type": "application/json",
+            "X-Request-Id": "live-request"
+          }
+        },
+        "method": "POST",
+        "path": "/p/openai/responses",
+        "provider": "openai",
+        "request_id": "live-request",
+        "requested_model": "gpt-5-mini",
+        "user_path": "/"
+      }
+    ],
+    "final": {
+      "_live_pending": true,
+      "_live_state": "audit.flushed",
+      "auth_method": "master_key",
+      "client_ip": "192.0.2.1",
+      "data": {
+        "request_body": {
+          "model": "gpt-5-mini",
+          "stream": true
+        },
+        "request_headers": {
+          "Authorization": "[REDACTED]",
+          "Content-Type": "application/json",
+          "X-Request-Id": "live-request"
+        },
+        "response_body": {
+          "choices": [
+            {
+              "finish_reason": "",
+              "index": 0,
+              "message": {
+                "content": "",
+                "role": "assistant"
+              }
+            }
+          ],
+          "model": "",
+          "object": "chat.completion"
+        },
+        "response_headers": {
+          "Content-Type": "text/event-stream",
+          "X-Request-Id": "live-request"
+        }
+      },
+      "method": "POST",
+      "path": "/p/openai/responses",
+      "provider": "openai",
+      "provider_name": "openai",
+      "request_id": "live-request",
+      "requested_model": "gpt-5-mini",
+      "status_code": 200,
+      "stream": true,
+      "user_path": "/"
+    }
+  },
+  "upstream error": {
+    "in_flight": [
+      {
+        "_live_pending": true,
+        "_live_state": "audit.updated",
+        "auth_method": "master_key",
+        "client_ip": "192.0.2.1",
+        "data": {
+          "request_body": {
+            "messages": [
+              {
+                "content": "Hi",
+                "role": "user"
+              }
+            ],
+            "model": "gpt-4o-mini"
+          },
+          "request_headers": {
+            "Authorization": "[REDACTED]",
+            "Content-Type": "application/json",
+            "X-Request-Id": "live-request"
+          }
+        },
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "provider": "openai",
+        "provider_name": "openai",
+        "request_id": "live-request",
+        "requested_model": "gpt-4o-mini",
+        "resolved_model": "openai/gpt-4o-mini",
+        "user_path": "/"
+      }
+    ],
+    "final": {
+      "_live_pending": true,
+      "_live_state": "audit.flushed",
+      "auth_method": "master_key",
+      "client_ip": "192.0.2.1",
+      "data": {
+        "attempts": [
+          {
+            "error_message": "upstream exploded",
+            "error_type": "provider_error",
+            "kind": "primary",
+            "model": "gpt-4o-mini",
+            "provider_name": "openai",
+            "provider_type": "openai",
+            "seq": 1,
+            "status_code": 500,
+            "success": false
+          }
+        ],
+        "error_message": "upstream exploded",
+        "request_body": {
+          "messages": [
+            {
+              "content": "Hi",
+              "role": "user"
+            }
+          ],
+          "model": "gpt-4o-mini"
+        },
+        "request_headers": {
+          "Authorization": "[REDACTED]",
+          "Content-Type": "application/json",
+          "X-Request-Id": "live-request"
+        },
+        "response_body": {
+          "error": {
+            "code": null,
+            "message": "upstream exploded",
+            "param": null,
+            "provider": "openai",
+            "type": "provider_error"
+          }
+        },
+        "response_headers": {
+          "Content-Type": "application/json",
+          "X-Request-Id": "live-request"
+        }
+      },
+      "error_message": "upstream exploded",
+      "error_type": "provider_error",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "provider": "openai",
+      "provider_name": "openai",
+      "request_id": "live-request",
+      "requested_model": "gpt-4o-mini",
+      "resolved_model": "openai/gpt-4o-mini",
+      "status_code": 500,
+      "user_path": "/"
+    }
+  }
+}

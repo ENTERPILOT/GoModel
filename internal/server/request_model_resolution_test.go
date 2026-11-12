@@ -173,6 +173,7 @@ func TestEnrichAuditEntryWithRequestedModelDoesNotPublishBodyBeforePolicy(t *tes
 
 	handler := auditlog.Middleware(logger)(func(c *echo.Context) error {
 		enrichAuditEntryWithRequestedModel(c, core.NewRequestedModelSelector("gpt-test", ""))
+		auditlog.FlushLiveUpdate(c)
 		require.Len(t, logger.events, 2)
 
 		updated := logger.events[1]
