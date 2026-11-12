@@ -135,6 +135,10 @@ A token limit is one limit in any spelling: `max_tokens`,
 chained virtual models and policies the deeper row wins whichever spelling
 either used.
 
+A key in `params` also removes the same key the client sent in another letter
+case, such as `Max_Tokens` or `TEMPERATURE`, so the configured value is the
+only one forwarded.
+
 One parameter set serves every API, so the keys listed here are skipped on
 the API that lacks them, and the token limit is mapped as described above.
 Every other key reaches the provider adapter unchanged and is handled like a
