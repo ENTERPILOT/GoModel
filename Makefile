@@ -51,7 +51,7 @@ run:
 # Guardrails (which imply plugins) are on so the seeded guardrail instances and
 # the workflows referencing them are live rather than capped off at runtime.
 # Audit retention is raised to the seeded window: the 30-day default would
-# delete two thirds of the demo audit log on the first startup sweep.
+# delete two thirds of the demo audit log on the first sweep after startup.
 # Exported so the seeder reads the same window as the retention settings: a
 # maintainer changing this default must not leave them out of step.
 # The allowlist mode serves the seeded providers' model lists without calling

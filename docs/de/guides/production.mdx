@@ -605,7 +605,9 @@ die Wette läuft.
 ## Datenaufbewahrung und Festplattenwachstum
 
 Audit-Logging und Nutzungserfassung schreiben pro Request eine Zeile, und
-beide bereinigen stündlich.
+beide bereinigen stündlich. Die erste Bereinigung läuft eine bis fünf Minuten
+nach dem Start, nicht beim Booten. Auf PostgreSQL bereinigt jeweils nur ein
+Replikat; die anderen überspringen diese Runde.
 
 | Einstellung | Standardwert | Hinweise |
 | --- | --- | --- |
