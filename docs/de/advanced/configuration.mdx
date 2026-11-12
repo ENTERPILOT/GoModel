@@ -43,7 +43,7 @@ Der gängigste Weg, GoModel zu konfigurieren. Setzen Sie eine der folgenden Vari
 | -------------------- | ----------------------------------------------------- | ---------------------- |
 | `PORT`               | Port des HTTP-Servers                                      | `8080`                 |
 | `BASE_PATH`          | Präfix des Mount-Pfads, zum Beispiel `/g`                   | `/`                    |
-| `GOMODEL_MASTER_KEY` | Authentifizierungsschlüssel zur Absicherung des Gateways           | _(leer, unsicherer Modus)_ |
+| `GOMODEL_MASTER_KEY` | Authentifizierungsschlüssel zur Absicherung des Gateways. Erzeugen Sie ihn mit `openssl rand -hex 32`; der Start schlägt bei einem Platzhalter aus den Vorlagen oder der Dokumentation (etwa `change-me`) fehl und warnt bei einem Schlüssel mit weniger als 16 Zeichen | _(leer, unsicherer Modus)_ |
 | `MASTER_KEY_DISABLED` | Schaltet die Authentifizierung per Master-Key ab, sodass nur noch [verwaltete Keys](/de/features/users) und Authentifizierungserweiterungen als Zugangsdaten gelten | `false`                |
 | `GOMODEL_DEMO_MODE`  | Aktiviert Warnungen für öffentliche Demos in den Logs und im Dashboard  | `false`                |
 | `BODY_SIZE_LIMIT`    | Maximale Größe des Request-Bodys (z. B. `10M`, `1024K`, `500KB`), komprimiert und dekomprimiert | `10M`                  |

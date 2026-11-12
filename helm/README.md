@@ -5,12 +5,14 @@ Deploys [GoModel](https://gomodel.enterpilot.io), an OpenAI-compatible AI gatewa
 ## Quick start
 
 ```bash
+export GOMODEL_MASTER_KEY="$(openssl rand -hex 32)"
+
 helm install gomodel ./helm -n gomodel --create-namespace \
-  --set secretEnv.GOMODEL_MASTER_KEY=change-me \
+  --set secretEnv.GOMODEL_MASTER_KEY="$GOMODEL_MASTER_KEY" \
   --set secretEnv.OPENAI_API_KEY=sk-...
 
 kubectl -n gomodel port-forward svc/gomodel 8080:8080
-curl -H "Authorization: Bearer change-me" http://127.0.0.1:8080/v1/models
+curl -H "Authorization: Bearer $GOMODEL_MASTER_KEY" http://127.0.0.1:8080/v1/models
 ```
 
 The default install runs one pod with SQLite on a 1Gi PersistentVolumeClaim,

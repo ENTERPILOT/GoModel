@@ -43,7 +43,7 @@ Najczęstszy sposób konfigurowania GoModel. Ustaw dowolną z poniższych zmienn
 | -------------------- | ----------------------------------------------------- | ---------------------- |
 | `PORT`               | Port serwera HTTP                                     | `8080`                 |
 | `BASE_PATH`          | Prefiks ścieżki montowania, na przykład `/g`          | `/`                    |
-| `GOMODEL_MASTER_KEY` | Klucz uwierzytelniający zabezpieczający gateway       | _(pusty, tryb niezabezpieczony)_ |
+| `GOMODEL_MASTER_KEY` | Klucz uwierzytelniający zabezpieczający gateway. Wygeneruj go poleceniem `openssl rand -hex 32`; start kończy się błędem, gdy klucz jest placeholderem z szablonów lub dokumentacji (np. `change-me`), a przy kluczu krótszym niż 16 znaków logowane jest ostrzeżenie | _(pusty, tryb niezabezpieczony)_ |
 | `MASTER_KEY_DISABLED` | Wyłącza uwierzytelnianie master key, tak że jedynymi danymi uwierzytelniającymi pozostają [zarządzane klucze](/pl/features/users) i rozszerzenia uwierzytelniania | `false`                |
 | `GOMODEL_DEMO_MODE`  | Włącza ostrzeżenia o publicznym demo w logach i w dashboardzie | `false`                |
 | `BODY_SIZE_LIMIT`    | Maksymalny rozmiar body requestu (np. `10M`, `1024K`, `500KB`), po kompresji i po dekompresji | `10M`                  |

@@ -19,8 +19,9 @@ Przepływ:
 
 - Zainstaluj [oh-my-pi](https://github.com/can1357/oh-my-pi#install), na przykład
   poleceniem `curl -fsSL https://omp.sh/install | sh`.
-- Wybierz master key GoModel do administrowania gatewayem, na przykład
-  `change-me`.
+- Wygeneruj master key GoModel do administrowania gatewayem, na przykład
+  poleceniem `openssl rand -hex 32`, i używaj go wszędzie tam, gdzie ten
+  przewodnik pokazuje placeholder `change-me`.
 - Upewnij się, że GoModel ma dane uwierzytelniające upstreamu dla modeli, których
   chcesz używać.
 

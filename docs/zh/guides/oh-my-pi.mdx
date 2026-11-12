@@ -15,7 +15,7 @@ keywords: ["oh-my-pi", "omp", "omp change effort", "omp 推理强度", "omp cust
 ## 开始之前
 
 - 安装 [oh-my-pi](https://github.com/can1357/oh-my-pi#install)，例如使用 `curl -fsSL https://omp.sh/install | sh`。
-- 选择一个用于网关管理的 GoModel 主密钥，例如 `change-me`。
+- 生成一个用于网关管理的 GoModel 主密钥，例如使用 `openssl rand -hex 32`，并在本指南出现占位符 `change-me` 的地方使用它。
 - 确保 GoModel 拥有您要使用的模型所需的上游凭据。
 
 ## 1. 运行 GoModel

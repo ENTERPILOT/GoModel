@@ -24,7 +24,7 @@ GoModel 在 `/v1/models` 暴露其模型目录，但该响应使用的是 OpenAI
 ## 开始之前
 
 - 安装 [Kimi Code CLI](https://moonshotai.github.io/kimi-cli/en/guides/getting-started.html)。
-- 为网关管理选择一个 GoModel 主密钥，例如 `change-me`。
+- 为网关管理生成一个 GoModel 主密钥，例如使用 `openssl rand -hex 32`，并在本指南出现占位符 `change-me` 的地方使用它。
 - 确保 GoModel 拥有您要使用的模型的上游凭据。
 
 ## 1. 运行 GoModel

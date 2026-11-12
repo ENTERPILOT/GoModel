@@ -27,8 +27,10 @@ env: {}
 
 # -- Sensitive environment variables, stored in a chart-managed Secret.
 # Set GOMODEL_MASTER_KEY here; without it the gateway runs without authentication.
+# Generate one with `openssl rand -hex 32`: the gateway refuses to start with a
+# placeholder from the documentation, such as change-me.
 secretEnv: {}
-#  GOMODEL_MASTER_KEY: change-me
+#  GOMODEL_MASTER_KEY: <output of openssl rand -hex 32>
 #  OPENAI_API_KEY: sk-...
 #  ANTHROPIC_API_KEY: sk-ant-...
 
