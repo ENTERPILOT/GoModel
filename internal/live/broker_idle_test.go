@@ -58,7 +58,7 @@ func TestBrokerRetainsSameEventsWithoutSubscribers(t *testing.T) {
 			require.Len(t, idle.events, len(events))
 			require.Len(t, watched.events, len(events))
 			for i := range events {
-				assert.JSONEq(t, string(watched.events[i].Data), string(idle.events[i].Data), "retained event %d", i)
+				assert.JSONEq(t, string(encoded(t, watched.events[i]).Data), string(encoded(t, idle.events[i]).Data), "retained event %d", i)
 			}
 			fresh := idle.Subscribe(0)
 			require.NotNil(t, fresh)
@@ -89,7 +89,7 @@ func TestBrokerFansOutBodiesOnlyToSubscribers(t *testing.T) {
 	assert.Contains(t, liveData, "request_body")
 	assert.Contains(t, liveData, "response_body")
 
-	retained := eventPayload(t, b.events[0])
+	retained := eventPayload(t, encoded(t, b.events[0]))
 	retainedData, ok := retained["data"].(map[string]any)
 	require.True(t, ok)
 	assert.NotContains(t, retainedData, "request_body")
