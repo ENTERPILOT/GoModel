@@ -3,15 +3,15 @@ package dashboard
 import (
 	"io/fs"
 	"net/http"
-	"net/http/httptest"
 	"path"
 	"testing"
 
-	"github.com/labstack/echo/v5"
+	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
 // BenchmarkStatic serves the largest embedded JS asset to a client that
-// accepts gzip, the common browser case on a cold dashboard load.
+// accepts gzip, the common browser case on a cold dashboard load. allocs/op
+// includes building the request and context.
 func BenchmarkStatic(b *testing.B) {
 	h, err := NewWithBasePath("/")
 	if err != nil {
@@ -32,31 +32,31 @@ func BenchmarkStatic(b *testing.B) {
 		}
 	}
 	target := "/admin/static/assets/" + path.Base(largest)
-	e := echo.New()
+
 	// Warm up so the timed loop measures steady state.
-	wire := w0(h, e, target)
+	warm := serveDiscard(b, h, target)
+	if size > 1024 && warm.header.Get("Content-Encoding") != "gzip" {
+		b.Fatalf("expected a gzip response for %s", target)
+	}
 	b.ReportAllocs()
 	for b.Loop() {
-		req := httptest.NewRequest(http.MethodGet, target, nil)
-		req.Header.Set("Accept-Encoding", "gzip, deflate, br")
-		w := &discardWriter{header: http.Header{}}
-		if err := h.Static(e.NewContext(req, w)); err != nil {
-			b.Fatal(err)
-		}
-		if w.code != http.StatusOK {
+		if w := serveDiscard(b, h, target); w.code != http.StatusOK {
 			b.Fatalf("status %d", w.code)
 		}
 	}
-	b.ReportMetric(float64(wire), "wire-B/op")
+	b.ReportMetric(float64(warm.n), "wire-B/op")
 }
 
-// w0 returns the body size one request puts on the wire.
-func w0(h *Handler, e *echo.Echo, target string) int {
-	req := httptest.NewRequest(http.MethodGet, target, nil)
-	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
+func serveDiscard(b *testing.B, h *Handler, target string) *discardWriter {
 	w := &discardWriter{header: http.Header{}}
-	_ = h.Static(e.NewContext(req, w))
-	return w.n
+	c, _ := echotest.Get(b, target,
+		echotest.WithHeader("Accept-Encoding", "gzip, deflate, br"),
+		echotest.WithResponseWriter(func(http.ResponseWriter) http.ResponseWriter { return w }),
+	)
+	if err := h.Static(c); err != nil {
+		b.Fatal(err)
+	}
+	return w
 }
 
 // discardWriter keeps the benchmark from measuring a recorder's buffer growth.

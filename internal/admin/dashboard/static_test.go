@@ -92,6 +92,7 @@ func TestStatic_ServesRawTextAssetsWithoutGzip(t *testing.T) {
 		{name: "no accept-encoding"},
 		{name: "other encodings only", opts: []echotest.Option{echotest.WithHeader("Accept-Encoding", "br, deflate")}},
 		{name: "gzip refused", opts: []echotest.Option{echotest.WithHeader("Accept-Encoding", "gzip;q=0, br")}},
+		{name: "gzip refused, upper-case Q", opts: []echotest.Option{echotest.WithHeader("Accept-Encoding", "gzip;Q=0")}},
 	}
 	h := newTestHandler(t)
 	for _, tt := range tests {
@@ -144,6 +145,37 @@ func TestStatic_RangeServesRawBytes(t *testing.T) {
 	assert.Equal(t, testJS[:10], rec.Body.Bytes())
 }
 
+// Embedded files have no ETag, so an entity-tag precondition is answered by
+// the file server exactly as before gzip, never with a 200 gzip body.
+func TestStatic_PreconditionsBypassGzip(t *testing.T) {
+	tests := []struct {
+		name     string
+		header   string
+		value    string
+		wantCode int
+		wantBody []byte
+	}{
+		{name: "if-none-match any", header: "If-None-Match", value: "*", wantCode: http.StatusNotModified},
+		{name: "if-none-match other tag", header: "If-None-Match", value: `"v1"`, wantCode: http.StatusOK, wantBody: testJS},
+		{name: "if-match other tag", header: "If-Match", value: `"v1"`, wantCode: http.StatusPreconditionFailed},
+	}
+	h := newTestHandler(t)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := serveStaticWith(t, h, "/admin/static/assets/index-abc.js",
+				echotest.WithHeader("Accept-Encoding", "gzip"),
+				echotest.WithHeader(tt.header, tt.value),
+			)
+
+			assert.Equal(t, tt.wantCode, rec.Code)
+			assert.Empty(t, rec.Header().Get("Content-Encoding"))
+			if tt.wantBody != nil {
+				assert.Equal(t, tt.wantBody, rec.Body.Bytes())
+			}
+		})
+	}
+}
+
 func TestAcceptsGzip(t *testing.T) {
 	tests := []struct {
 		header string
@@ -157,6 +189,8 @@ func TestAcceptsGzip(t *testing.T) {
 		{header: "br;q=1.0, gzip;q=0.8", want: true},
 		{header: "gzip;q=0", want: false},
 		{header: "gzip;q=0.000", want: false},
+		{header: "gzip;Q=0", want: false},
+		{header: "gzip; q = 0", want: false},
 		{header: "deflate, br", want: false},
 		{header: "gzipfoo", want: false},
 	}

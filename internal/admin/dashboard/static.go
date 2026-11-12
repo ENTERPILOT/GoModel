@@ -63,7 +63,9 @@ func newStaticAssets(files fs.FS) (*staticAssets, error) {
 }
 
 // ServeHTTP serves a request whose path has the /admin/static/ prefix
-// stripped. Range requests and clients without gzip get the stored bytes.
+// stripped. Clients without gzip get the stored bytes, and so do Range and
+// If-Match/If-None-Match requests, which the file server answers with 206,
+// 304 or 412 as it always has.
 func (s *staticAssets) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/")
 	asset, ok := s.gz[name]
@@ -74,7 +76,7 @@ func (s *staticAssets) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	header := w.Header()
 	header.Set("Content-Type", asset.contentType)
 	header.Add("Vary", "Accept-Encoding")
-	if r.Header.Get("Range") != "" || !acceptsGzip(r.Header.Get("Accept-Encoding")) {
+	if conditional(r) || !acceptsGzip(r.Header.Get("Accept-Encoding")) {
 		s.raw.ServeHTTP(w, r)
 		return
 	}
@@ -83,8 +85,8 @@ func (s *staticAssets) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.raw.ServeHTTP(w, r)
 		return
 	}
-	// Embedded files carry no modification time or ETag, so there is no
-	// conditional request to answer, as with the raw file server.
+	// Embedded files carry no modification time or ETag, so only the
+	// preconditions conditional() routes to the file server can apply.
 	header.Set("Content-Encoding", "gzip")
 	header.Set("Content-Length", strconv.Itoa(len(data)))
 	w.WriteHeader(http.StatusOK)
@@ -107,9 +109,18 @@ func (a *gzipAsset) compressed(files fs.FS, name string) []byte {
 		if err := zw.Close(); err != nil || buf.Len() >= len(raw) {
 			return
 		}
-		a.data = buf.Bytes()
+		a.data = bytes.Clone(buf.Bytes())
 	})
 	return a.data
+}
+
+// conditional reports whether r carries a range or entity-tag precondition.
+// If-Modified-Since and If-Unmodified-Since never apply: embedded files have
+// no modification time.
+func conditional(r *http.Request) bool {
+	return r.Header.Get("Range") != "" ||
+		r.Header.Get("If-Match") != "" ||
+		r.Header.Get("If-None-Match") != ""
 }
 
 // acceptsGzip reports whether an Accept-Encoding header allows gzip.
@@ -122,11 +133,11 @@ func acceptsGzip(header string) bool {
 		if !strings.EqualFold(coding, "gzip") && !strings.EqualFold(coding, "x-gzip") {
 			continue
 		}
-		q, ok := strings.CutPrefix(strings.TrimSpace(params), "q=")
-		if !ok {
+		name, q, ok := strings.Cut(strings.TrimSpace(params), "=")
+		if !ok || !strings.EqualFold(strings.TrimSpace(name), "q") {
 			return true
 		}
-		weight, err := strconv.ParseFloat(q, 64)
+		weight, err := strconv.ParseFloat(strings.TrimSpace(q), 64)
 		return err != nil || weight > 0
 	}
 	return false

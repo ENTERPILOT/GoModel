@@ -949,16 +949,12 @@ func TestAdminStaticAssets_EncodedOnce(t *testing.T) {
 	raw := serve("identity")
 	rec := serve("gzip")
 
-	encodings := rec.Header().Values("Content-Encoding")
-	require.LessOrEqual(t, len(encodings), 1)
-	body := rec.Body.Bytes()
-	if len(encodings) == 1 {
-		require.Equal(t, "gzip", encodings[0])
-		zr, err := gzip.NewReader(bytes.NewReader(body))
-		require.NoError(t, err)
-		body, err = io.ReadAll(zr)
-		require.NoError(t, err)
-	}
+	// The favicon shrinks under gzip in both the real and the stub bundle.
+	require.Equal(t, []string{"gzip"}, rec.Header().Values("Content-Encoding"))
+	zr, err := gzip.NewReader(bytes.NewReader(rec.Body.Bytes()))
+	require.NoError(t, err)
+	body, err := io.ReadAll(zr)
+	require.NoError(t, err)
 	assert.Equal(t, raw.Body.Bytes(), body)
 	assert.Equal(t, []string{"Accept-Encoding"}, rec.Header().Values("Vary"))
 }
