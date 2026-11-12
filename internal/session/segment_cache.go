@@ -56,6 +56,17 @@ func (c *segmentCache) key(raw string) segmentKey {
 	return segmentKey{sum: maphash.String(c.seed, raw), size: len(raw)}
 }
 
+// lookup returns the cached value for key and marks it most recently used.
+// The caller must hold c.mu.
+func (c *segmentCache) lookup(key segmentKey) (json.RawMessage, bool) {
+	elem, ok := c.entries[key]
+	if !ok {
+		return nil, false
+	}
+	c.order.MoveToFront(elem)
+	return elem.Value.(*segmentEntry).value, true
+}
+
 // canonical returns canonicalSegment(result), reusing the encoding of an
 // identical raw segment seen recently. The returned bytes are shared and must
 // not be modified.
@@ -65,15 +76,13 @@ func (c *segmentCache) canonical(result gjson.Result) json.RawMessage {
 	}
 	key := c.key(result.Raw)
 	c.mu.Lock()
-	if elem, ok := c.entries[key]; ok {
-		c.order.MoveToFront(elem)
-		value := elem.Value.(*segmentEntry).value
-		c.mu.Unlock()
+	value, ok := c.lookup(key)
+	c.mu.Unlock()
+	if ok {
 		return value
 	}
-	c.mu.Unlock()
 
-	value := canonicalSegment(result)
+	value = canonicalSegment(result)
 	if len(value) > c.maxBytes {
 		return value
 	}
@@ -85,9 +94,8 @@ func (c *segmentCache) canonical(result gjson.Result) json.RawMessage {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if elem, ok := c.entries[key]; ok {
-		c.order.MoveToFront(elem)
-		return elem.Value.(*segmentEntry).value
+	if cached, ok := c.lookup(key); ok {
+		return cached
 	}
 	c.entries[key] = c.order.PushFront(&segmentEntry{key: key, value: value})
 	c.bytes += cap(value)
