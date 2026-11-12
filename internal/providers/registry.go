@@ -87,6 +87,9 @@ type ModelRegistry struct {
 	// dashboardMetadataOverrides holds dashboard-managed metadata in the same
 	// shape, applied after configMetadataOverrides so it wins field by field.
 	dashboardMetadataOverrides map[string]map[string]*core.ModelMetadata
+	// dashboardMetadataRevision counts changes to dashboardMetadataOverrides, so
+	// an inventory enriched outside the lock can tell its snapshot went stale.
+	dashboardMetadataRevision uint64
 	// configuredProviderModels holds operator-supplied model inventories keyed by
 	// configured provider instance name. The mode decides whether these entries
 	// are fallback-only or an allowlist over the discovered upstream inventory.

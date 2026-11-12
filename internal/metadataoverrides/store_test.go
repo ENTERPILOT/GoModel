@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -66,5 +67,48 @@ func TestStoreRoundTripUpsertAndDelete(t *testing.T) {
 		listed, err = store.List(ctx)
 		require.NoError(t, err)
 		assert.Empty(t, listed)
+	})
+}
+
+func TestStoreListSkipsUndecodableRows(t *testing.T) {
+	ctx := context.Background()
+	valid := Override{
+		Selector:     "pollinations/flux",
+		ProviderName: "pollinations",
+		Model:        "flux",
+		Metadata:     Metadata{ContextWindow: new(32000)},
+	}
+	assertOnlyValidListed := func(t *testing.T, store Store) {
+		t.Helper()
+		listed, err := store.List(ctx)
+		require.NoError(t, err)
+		require.Len(t, listed, 1)
+		assert.Equal(t, valid.Selector, listed[0].Selector)
+		assert.Equal(t, valid.Metadata, listed[0].Metadata)
+	}
+
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		store, err := NewSQLStore(ctx, db)
+		require.NoError(t, err)
+		require.NoError(t, store.Upsert(ctx, valid))
+		_, err = db.Exec(ctx, `
+			INSERT INTO model_metadata_overrides (selector, provider_name, model, metadata, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`, "pollinations/broken", "pollinations", "broken", `{"context_window": "large"}`, 1, 1)
+		require.NoError(t, err)
+
+		assertOnlyValidListed(t, store)
+	})
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		store, err := NewMongoDBStore(db)
+		require.NoError(t, err)
+		require.NoError(t, store.Upsert(ctx, valid))
+		_, err = db.Collection("model_metadata_overrides").InsertOne(ctx, bson.M{
+			"_id":      "pollinations/broken",
+			"metadata": bson.M{"context_window": "large"},
+		})
+		require.NoError(t, err)
+
+		assertOnlyValidListed(t, store)
 	})
 }

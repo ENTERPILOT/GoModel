@@ -2130,7 +2130,7 @@ const docTemplate = `{
         },
         "/admin/models/metadata": {
             "get": {
-                "description": "Returns the merged metadata the gateway serves for a model together with each layer it was merged from: the provider's own listing, the model catalog entry and the config.yaml override. A null layer knows nothing about the model. ` + "`" + `sources` + "`" + ` names the winning layer per field (config, provider, catalog or inferred).",
+                "description": "Returns the merged metadata the gateway serves for a model together with each layer it was merged from: the provider's own listing, the model catalog entry, the config.yaml override and the dashboard-managed override. A null layer knows nothing about the model. ` + "`" + `sources` + "`" + ` names the winning layer per field (dashboard, config, provider, catalog or inferred).",
                 "produces": [
                     "application/json"
                 ],
@@ -13347,12 +13347,14 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "capabilities": {
+                    "description": "Capabilities marks input media as accepted or not. Supported keys:\nvision, audio_input, video_input, pdf_input.",
                     "type": "object",
                     "additionalProperties": {
                         "type": "boolean"
                     }
                 },
                 "categories": {
+                    "description": "Categories lists the model under these category tabs. Any category\nexcept \"all\", which is the tab that lists every model.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/core.ModelCategory"

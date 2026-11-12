@@ -40,7 +40,9 @@ func (s *MongoDBStore) List(ctx context.Context) ([]Override, error) {
 	for cursor.Next(ctx) {
 		var override Override
 		if err := cursor.Decode(&override); err != nil {
-			return nil, fmt.Errorf("decode model metadata override: %w", err)
+			selector, _ := cursor.Current.Lookup("_id").StringValueOK()
+			warnUndecodable(selector, err)
+			continue
 		}
 		override.CreatedAt = override.CreatedAt.UTC()
 		override.UpdatedAt = override.UpdatedAt.UTC()

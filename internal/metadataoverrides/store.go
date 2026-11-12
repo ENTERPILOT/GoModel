@@ -3,6 +3,7 @@ package metadataoverrides
 import (
 	"context"
 	"errors"
+	"log/slog"
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
@@ -20,12 +21,18 @@ func IsValidationError(err error) bool {
 }
 
 // Store defines persistence operations for metadata overrides. Upsert
-// receives normalized overrides and sets their timestamps.
+// receives normalized overrides and sets their timestamps. List leaves out a
+// row whose metadata does not decode, with a warning, for the reason
+// Service.Refresh skips one that does not validate.
 type Store interface {
 	List(ctx context.Context) ([]Override, error)
 	Upsert(ctx context.Context, override Override) error
 	Delete(ctx context.Context, selector string) error
 	Close() error
+}
+
+func warnUndecodable(selector string, err error) {
+	slog.Warn("skipping undecodable model metadata override", "selector", selector, "error", err)
 }
 
 func createStore(ctx context.Context, store storage.Storage) (Store, error) {

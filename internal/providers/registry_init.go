@@ -338,7 +338,7 @@ func (r *ModelRegistry) applyFetchedInventory(
 	fetched fetchedInventory,
 	totalProviders int,
 ) {
-	metadataStats := r.enrichFetchedProviderModelMaps(providerTypes, fetched.modelsByProvider)
+	metadataStats, overridesRevision := r.enrichFetchedProviderModelMaps(providerTypes, fetched.modelsByProvider)
 
 	r.mu.Lock()
 	r.dropUnregisteredFetchedProvidersLocked(&fetched)
@@ -370,7 +370,7 @@ func (r *ModelRegistry) applyFetchedInventory(
 		state.inventoryStale = stale[name]
 		r.providerRuntime[name] = state
 	}
-	r.publishFilteredInventoryLocked()
+	r.publishEnrichedInventoryLocked(overridesRevision)
 	// Count what the catalog actually serves: filters can hide models, and one
 	// bare ID served by several providers still resolves to a single entry.
 	fetched.totalModels = len(r.models)
@@ -421,10 +421,13 @@ func (r *ModelRegistry) fetchedProviderStillRegisteredLocked(fetched *fetchedInv
 	return ok && currentName == providerName
 }
 
+// enrichFetchedProviderModelMaps enriches freshly fetched, unpublished maps
+// outside the registry lock. It also returns the dashboard override revision
+// it enriched against, for publishEnrichedInventoryLocked.
 func (r *ModelRegistry) enrichFetchedProviderModelMaps(
 	providerTypes map[core.Provider]string,
 	modelsByProvider map[string]map[string]*ModelInfo,
-) metadataEnrichmentStats {
+) (metadataEnrichmentStats, uint64) {
 	r.mu.RLock()
 	list := r.modelList
 	r.mu.RUnlock()
@@ -436,7 +439,7 @@ func (r *ModelRegistry) enrichFetchedProviderModelMaps(
 	}
 	metadataStats.Enriched += overrides.apply(modelsByProvider, nil)
 	metadataStats.Enriched += applyInferredModelMetadata(modelsByProvider, nil)
-	return metadataStats
+	return metadataStats, overrides.dashboardRevision
 }
 
 // providerInventoryInput is what one provider's inventory fetch needs to

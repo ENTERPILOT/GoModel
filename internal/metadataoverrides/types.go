@@ -21,10 +21,14 @@ var InputCapabilities = []string{"vision", "audio_input", "video_input", "pdf_in
 // Metadata is the editable subset of core.ModelMetadata. Unset fields inherit
 // from the layers below.
 type Metadata struct {
-	Categories      []core.ModelCategory `json:"categories,omitempty" bson:"categories,omitempty"`
-	Capabilities    map[string]bool      `json:"capabilities,omitempty" bson:"capabilities,omitempty"`
-	ContextWindow   *int                 `json:"context_window,omitempty" bson:"context_window,omitempty"`
-	MaxOutputTokens *int                 `json:"max_output_tokens,omitempty" bson:"max_output_tokens,omitempty"`
+	// Categories lists the model under these category tabs. Any category
+	// except "all", which is the tab that lists every model.
+	Categories []core.ModelCategory `json:"categories,omitempty" bson:"categories,omitempty"`
+	// Capabilities marks input media as accepted or not. Supported keys:
+	// vision, audio_input, video_input, pdf_input.
+	Capabilities    map[string]bool `json:"capabilities,omitempty" bson:"capabilities,omitempty"`
+	ContextWindow   *int            `json:"context_window,omitempty" bson:"context_window,omitempty"`
+	MaxOutputTokens *int            `json:"max_output_tokens,omitempty" bson:"max_output_tokens,omitempty"`
 }
 
 // Override stores one metadata override for one provider model.

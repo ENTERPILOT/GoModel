@@ -134,3 +134,56 @@ func TestSetDashboardMetadataOverrides_DeepClonesInput(t *testing.T) {
 	require.NotNil(t, meta)
 	assert.Equal(t, 1000, *meta.ContextWindow)
 }
+
+// A provider refresh enriches the inventory it fetched outside the registry
+// lock. A dashboard save landing between that and the publish must not be
+// published over: the storage refresh that follows sees an unchanged set and
+// would never repair it.
+func TestRefreshPublishKeepsOverrideSavedDuringEnrichment(t *testing.T) {
+	tests := []struct {
+		name  string
+		saved map[string]map[string]*core.ModelMetadata
+		want  *int
+	}{
+		{"no save", map[string]map[string]*core.ModelMetadata{"pollinations": {"flux": {ContextWindow: new(1000)}}}, new(1000)},
+		{"changed override", map[string]map[string]*core.ModelMetadata{"pollinations": {"flux": {ContextWindow: new(2000)}}}, new(2000)},
+		{"removed override", nil, nil},
+	}
+	for _, withCatalog := range []bool{true, false} {
+		for _, tt := range tests {
+			name := tt.name + "/without catalog"
+			if withCatalog {
+				name = tt.name + "/with catalog"
+			}
+			t.Run(name, func(t *testing.T) {
+				registry := newDashboardOverrideRegistry(t, withCatalog)
+				registry.SetDashboardMetadataOverrides(map[string]map[string]*core.ModelMetadata{
+					"pollinations": {"flux": {ContextWindow: new(1000)}},
+				})
+
+				providers, providerTypes, providerNames := registry.snapshotProviders()
+				fetched := registry.fetchAllProviderModels(context.Background(), providers, providerTypes, providerNames, nil, nil)
+				_, enrichedAt := registry.enrichFetchedProviderModelMaps(providerTypes, fetched.modelsByProvider)
+
+				registry.SetDashboardMetadataOverrides(tt.saved)
+
+				registry.mu.Lock()
+				registry.discoveredByProvider = fetched.modelsByProvider
+				registry.publishEnrichedInventoryLocked(enrichedAt)
+				registry.mu.Unlock()
+
+				info := registry.GetModel("pollinations/flux")
+				require.NotNil(t, info)
+				if tt.want == nil {
+					if info.Model.Metadata != nil {
+						assert.Nil(t, info.Model.Metadata.ContextWindow)
+					}
+					return
+				}
+				require.NotNil(t, info.Model.Metadata)
+				require.NotNil(t, info.Model.Metadata.ContextWindow)
+				assert.Equal(t, *tt.want, *info.Model.Metadata.ContextWindow)
+			})
+		}
+	}
+}

@@ -15,6 +15,9 @@ import (
 type metadataOverrideLayers struct {
 	config    map[string]map[string]*core.ModelMetadata
 	dashboard map[string]map[string]*core.ModelMetadata
+	// dashboardRevision is the registry's dashboardMetadataRevision when the
+	// layers were snapshotted (see publishEnrichedInventoryLocked).
+	dashboardRevision uint64
 }
 
 // apply layers both override sets onto enriched models using the
@@ -35,8 +38,9 @@ func (r *ModelRegistry) snapshotMetadataOverrides() metadataOverrideLayers {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return metadataOverrideLayers{
-		config:    cloneOverrideIndex(r.configMetadataOverrides),
-		dashboard: cloneOverrideIndex(r.dashboardMetadataOverrides),
+		config:            cloneOverrideIndex(r.configMetadataOverrides),
+		dashboard:         cloneOverrideIndex(r.dashboardMetadataOverrides),
+		dashboardRevision: r.dashboardMetadataRevision,
 	}
 }
 
@@ -90,7 +94,22 @@ func (r *ModelRegistry) SetDashboardMetadataOverrides(overrides map[string]map[s
 		return
 	}
 	r.dashboardMetadataOverrides = next
+	r.dashboardMetadataRevision++
 	_ = r.enrichModelsLocked()
+}
+
+// publishEnrichedInventoryLocked publishes r.discoveredByProvider after a
+// caller replaced it with an inventory enriched outside the lock against the
+// dashboard overrides at enrichedAt. A save that landed since then would be
+// published over with the older values and stay lost, because an unchanged
+// set is a no-op in SetDashboardMetadataOverrides, so enrichment runs again
+// here instead. Caller must hold r.mu for writing.
+func (r *ModelRegistry) publishEnrichedInventoryLocked(enrichedAt uint64) {
+	if enrichedAt != r.dashboardMetadataRevision && len(r.discoveredByProvider) > 0 {
+		_ = r.enrichModelsLocked()
+		return
+	}
+	r.publishFilteredInventoryLocked()
 }
 
 // resetToDiscoveredMetadata restores every model's metadata to what its

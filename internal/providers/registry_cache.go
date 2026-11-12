@@ -126,14 +126,16 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 	// Publishing applies model filters after enrichment, so price rules see the
 	// cached pricing while the restored inventory itself stays unfiltered.
 	r.discoveredByProvider = newModelsByProvider
-	r.publishFilteredInventoryLocked()
-	loadedModels := len(r.models)
-	r.invalidateSortedCaches()
+	// The cached list is in place before publishing, so a re-enrichment there
+	// reads the same list the models above were enriched with.
 	if list != nil {
 		r.modelList = list
 		r.modelListRaw = modelCache.ModelListData
 		r.setModelListValidatorLocked(modelCache.ModelListETag, modelCache.ModelListURL)
 	}
+	r.publishEnrichedInventoryLocked(overrides.dashboardRevision)
+	loadedModels := len(r.models)
+	r.invalidateSortedCaches()
 	r.mu.Unlock()
 
 	attrs := []any{

@@ -59,7 +59,8 @@ func (s *SQLStore) List(ctx context.Context) ([]Override, error) {
 			return nil, fmt.Errorf("scan model metadata override: %w", err)
 		}
 		if err := json.Unmarshal(metadata, &override.Metadata); err != nil {
-			return nil, fmt.Errorf("decode model metadata override %q: %w", override.Selector, err)
+			warnUndecodable(override.Selector, err)
+			continue
 		}
 		override.CreatedAt = sqlutil.TimeFromUnix(createdAt)
 		override.UpdatedAt = sqlutil.TimeFromUnix(updatedAt)
