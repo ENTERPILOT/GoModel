@@ -1,9 +1,14 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io/fs"
+	"log/slog"
+	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -23,6 +28,83 @@ func TestSQLitePing(t *testing.T) {
 	err = store.Close()
 	require.NoError(t, err)
 	require.Error(t, hc.Ping(context.Background()))
+}
+
+func fileMode(t *testing.T, path string) fs.FileMode {
+	t.Helper()
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	return info.Mode().Perm()
+}
+
+// The database holds provider credentials and request content, so what
+// NewSQLite creates is private to its owner, WAL and shared-memory files
+// included.
+func TestSQLiteCreatesPrivateFiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no POSIX permission bits")
+	}
+	dir := filepath.Join(t.TempDir(), "nested", "data")
+	path := filepath.Join(dir, "gomodel.db")
+
+	store, err := NewSQLite(SQLiteConfig{Path: path})
+	require.NoError(t, err)
+	defer store.Close()
+	_, err = store.DB().Exec(`CREATE TABLE test_private (id TEXT PRIMARY KEY)`)
+	require.NoError(t, err)
+
+	assert.Equal(t, fs.FileMode(0o700), fileMode(t, dir))
+	assert.Equal(t, fs.FileMode(0o700), fileMode(t, filepath.Dir(dir)))
+	for _, name := range []string{path, path + "-wal", path + "-shm"} {
+		assert.Equal(t, fs.FileMode(0o600), fileMode(t, name), name)
+	}
+}
+
+// An operator may share an existing directory or database with another user
+// on purpose, so their modes are left alone and a readable database is only
+// reported.
+func TestSQLiteKeepsExistingModes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no POSIX permission bits")
+	}
+	tests := []struct {
+		name        string
+		mode        fs.FileMode
+		wantWarning bool
+	}{
+		{name: "world readable", mode: 0o644, wantWarning: true},
+		{name: "group readable", mode: 0o640, wantWarning: true},
+		{name: "private", mode: 0o600},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			original := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(original) })
+
+			dir := t.TempDir()
+			require.NoError(t, os.Chmod(dir, 0o755))
+			path := filepath.Join(dir, "gomodel.db")
+			require.NoError(t, os.WriteFile(path, nil, tt.mode))
+			require.NoError(t, os.Chmod(path, tt.mode))
+
+			store, err := NewSQLite(SQLiteConfig{Path: path})
+			require.NoError(t, err)
+			defer store.Close()
+			_, err = store.DB().Exec(`CREATE TABLE test_existing (id TEXT PRIMARY KEY)`)
+			require.NoError(t, err)
+
+			assert.Equal(t, fs.FileMode(0o755), fileMode(t, dir))
+			assert.Equal(t, tt.mode, fileMode(t, path))
+			if tt.wantWarning {
+				assert.Contains(t, logs.String(), "accessible to other users")
+				assert.Contains(t, logs.String(), path)
+			} else {
+				assert.NotContains(t, logs.String(), "accessible to other users")
+			}
+		})
+	}
 }
 
 func TestSQLiteConcurrentWriteSafety(t *testing.T) {
