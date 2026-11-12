@@ -2,31 +2,18 @@ package usage
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
+
+	"github.com/enterpilot/gomodel/internal/storage"
 )
 
 type mongoPricingSession interface {
-	WithTransaction(context.Context, func(context.Context) (any, error)) (any, error)
+	storage.MongoTransactor
 	EndSession(context.Context)
-}
-
-type mongoDriverPricingSession struct {
-	session *mongo.Session
-}
-
-func (s mongoDriverPricingSession) WithTransaction(ctx context.Context, fn func(context.Context) (any, error)) (any, error) {
-	return s.session.WithTransaction(ctx, fn)
-}
-
-func (s mongoDriverPricingSession) EndSession(ctx context.Context) {
-	s.session.EndSession(ctx)
 }
 
 // RecalculatePricing updates matching MongoDB usage documents with costs
@@ -49,30 +36,13 @@ func (s *MongoDBStore) RecalculatePricing(ctx context.Context, params Recalculat
 	defer session.EndSession(ctx)
 
 	var result RecalculatePricingResult
-	_, err = session.WithTransaction(ctx, func(txCtx context.Context) (any, error) {
-		next, err := s.recalculatePricingDocumentsInContext(txCtx, filter, resolver, params.Billing)
-		if err != nil {
-			if isMongoTransactionCapabilityError(err) {
-				return nil, &mongoTransactionFallbackError{err: err}
-			}
-			return nil, err
-		}
+	err = storage.MongoTransaction(ctx, session, "mongodb pricing recalculation", func(ctx context.Context) error {
+		next, err := s.recalculatePricingDocumentsInContext(ctx, filter, resolver, params.Billing)
 		result = next
-		return nil, nil
+		return err
 	})
 	if err != nil {
-		if fallbackErr := mongoTransactionFallbackCause(err); fallbackErr != nil || isMongoTransactionCapabilityError(err) {
-			if fallbackErr == nil {
-				fallbackErr = err
-			}
-			slog.Warn("MongoDB transactions unavailable for pricing recalculation; falling back to non-transactional update", "error", fallbackErr)
-			result, err := s.recalculatePricingDocumentsInContext(ctx, filter, resolver, params.Billing)
-			if err != nil {
-				return RecalculatePricingResult{}, fmt.Errorf("recalculate mongodb usage costs without transaction: %w", errors.Join(fallbackErr, err))
-			}
-			return finalizeRecalculatePricingResult(result), nil
-		}
-		return RecalculatePricingResult{}, fmt.Errorf("mongodb pricing recalculation transaction: %w", err)
+		return RecalculatePricingResult{}, err
 	}
 	return finalizeRecalculatePricingResult(result), nil
 }
@@ -88,7 +58,7 @@ func (s *MongoDBStore) startMongoPricingSession() (mongoPricingSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	return mongoDriverPricingSession{session: session}, nil
+	return session, nil
 }
 
 func (s *MongoDBStore) recalculatePricingDocumentsInContext(ctx context.Context, filter bson.D, resolver PricingResolver, billing Billing) (RecalculatePricingResult, error) {
@@ -96,44 +66,6 @@ func (s *MongoDBStore) recalculatePricingDocumentsInContext(ctx context.Context,
 		return s.recalculatePricingDocuments(ctx, filter, resolver, billing)
 	}
 	return s.recalculatePricingInMongoTransaction(ctx, filter, resolver, billing)
-}
-
-type mongoTransactionFallbackError struct {
-	err error
-}
-
-func (e *mongoTransactionFallbackError) Error() string {
-	if e == nil || e.err == nil {
-		return ""
-	}
-	return e.err.Error()
-}
-
-func mongoTransactionFallbackCause(err error) error {
-	if fallbackErr, ok := errors.AsType[*mongoTransactionFallbackError](err); ok {
-		return fallbackErr.err
-	}
-	return nil
-}
-
-func isMongoTransactionCapabilityError(err error) bool {
-	if err == nil {
-		return false
-	}
-	var commandErr mongo.CommandError
-	if errors.As(err, &commandErr) && commandErr.HasErrorCode(20) {
-		return true
-	}
-	var labeled mongo.LabeledError
-	if errors.As(err, &labeled) && labeled.HasErrorLabel("TransientTransactionError") {
-		message := strings.ToLower(err.Error())
-		return strings.Contains(message, "transaction") &&
-			(strings.Contains(message, "not supported") ||
-				strings.Contains(message, "not allowed") ||
-				strings.Contains(message, "replica set"))
-	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "transaction numbers are only allowed on a replica set member or mongos")
 }
 
 func (s *MongoDBStore) recalculatePricingInMongoTransaction(ctx context.Context, filter bson.D, resolver PricingResolver, billing Billing) (RecalculatePricingResult, error) {
