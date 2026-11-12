@@ -406,7 +406,11 @@ client**.
 Tokens are stored in the gateway database, encrypted with
 [`GOMODEL_ENCRYPTION_KEY`](/advanced/encryption-at-rest) when it is set, and
 are never returned by the admin API. GoModel refreshes an expired access token
-with the refresh token and saves the rotated refresh token. The row shows
+with the refresh token and saves the rotated refresh token. When the server
+answers `401 Unauthorized` to a token that has not expired yet (for example one
+revoked early), GoModel refreshes it once and retries the request, if the
+authorization server issued a refresh token; otherwise the row shows **Sign-in
+needs attention** and you sign in again. The row shows
 **Signed in**, **Sign-in expired** (no refresh token left; sign in again), or
 **Sign-in needs attention** with the error. A failed refresh is retried on the
 next request, so sign in again only if the error persists. The sign-out icon
@@ -421,11 +425,21 @@ Notes:
 - A signed-in token replaces a configured `Authorization` header, and is only
   sent to the server's own origin. Changing a server's URL stops using its
   tokens until you sign in again.
+- Discovery, client registration, and token requests only connect to public
+  addresses, so a public server cannot point the gateway at internal
+  services. The exceptions are the MCP server's own host; private networks
+  (`10.x`, `192.168.x`, and similar) when the MCP server is on a private
+  network too, such as an internal server signing in through an internal
+  identity provider; and loopback when the server URL itself is on loopback.
+  Link-local addresses, including cloud metadata endpoints, are always
+  refused.
 - Every client of the gateway shares the one sign-in. Per-user upstream
   tokens are not supported yet.
 - With several gateway instances, the sign-in callback must reach the
-  instance that started it (use sticky sessions for `/admin`); refreshed
-  tokens reach the other instances through the database.
+  instance that started it (use sticky sessions for `/admin`). Instances
+  sharing the database take turns refreshing a token, so a rotating refresh
+  token is used once; the others pick up the refreshed token from the
+  database.
 
 The admin API equivalents are `POST /admin/mcp-servers/{slug}/oauth/start`
 (body: `redirect_uri`, optional `client_id`/`client_secret`; returns
@@ -541,6 +555,16 @@ their descriptions, after your `allowed_tools` / `disallowed_tools` filters.
 Tools that the server reports but the filters hide are listed separately under
 `excluded_tools`. Names are the upstream originals; the aggregated `/mcp`
 endpoint serves them as `{slug}_{name}`.
+
+To see every tool at once, click **All tools** on the MCP Servers page. It
+lists the tools of all servers in one searchable list, with descriptions,
+read-only and destructive hints, and the owning server. Exposed tools are named
+as clients call them (`{slug}_{name}`); hidden tools keep their upstream name. Pick a virtual server to see only its members' tools, and
+turn on **Show tools hidden by filters** to include excluded tools. Servers
+that are not connected, or whose catalog failed to load, are listed above the
+tools, since their tools may be missing. The list is the gateway-wide view: it
+does not apply a given API key's `user_paths` limits, so some clients may not
+see every server listed.
 
 ## Security notes
 

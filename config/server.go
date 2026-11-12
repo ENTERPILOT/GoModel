@@ -23,8 +23,8 @@ var bodySizeLimitRegex = regexp.MustCompile(`(?i)^(\d+)([KMG])?B?$`)
 // ServerConfig holds HTTP server configuration
 type ServerConfig struct {
 	Port      string `yaml:"port" env:"PORT"`
-	BasePath  string `yaml:"base_path" env:"BASE_PATH"`           // URL path prefix where the app is mounted (e.g., "/g")
-	MasterKey string `yaml:"master_key" env:"GOMODEL_MASTER_KEY"` // Optional: Master key for authentication
+	BasePath  string `yaml:"base_path" env:"BASE_PATH"`                           // URL path prefix where the app is mounted (e.g., "/g")
+	MasterKey string `yaml:"master_key" env:"GOMODEL_MASTER_KEY" export:"secret"` // Optional: Master key for authentication
 	// MasterKeyDisabled turns off master key authentication. Default: false.
 	// Set it to leave managed keys and any configured authentication extension
 	// as the only credentials: the master key is forgotten at startup, and the

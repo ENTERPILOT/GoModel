@@ -20,9 +20,10 @@ const (
 	DefaultRedisTTL = 24 * time.Hour
 
 	// go-redis defaults to 5s socket timeouts plus retries, so a degraded Redis
-	// stalls every caller for seconds. A healthy Redis answers in milliseconds;
-	// fail fast instead. URL query parameters (dial_timeout, read_timeout,
-	// write_timeout) override these.
+	// stalls every caller for seconds and can hold a readiness probe past its
+	// own deadline. A healthy Redis answers in milliseconds; fail fast instead.
+	// URL query parameters (dial_timeout, read_timeout, write_timeout) override
+	// these.
 	defaultRedisDialTimeout = 2 * time.Second
 	defaultRedisIOTimeout   = 500 * time.Millisecond
 
@@ -88,8 +89,18 @@ func redisOptions(rawURL string) (*redis.Options, error) {
 		}
 		return nil, fmt.Errorf("invalid redis URL: %w", err)
 	}
-	// ParseURL leaves an unset timeout at 0 and maps an explicit "0" to -1
-	// (disabled), so 0 means the URL did not choose one.
+	opts.Dialer = redisDialer(opts.TLSConfig)
+	applyRedisTimeouts(opts)
+	return opts, nil
+}
+
+// applyRedisTimeouts makes go-redis honor context deadlines, so a request's
+// or a probe's deadline ends a call to a hung Redis, and applies the fail-fast
+// defaults to the timeouts the URL left unset. ParseURL leaves an unset
+// timeout at 0 and maps an explicit "0" to -1 (disabled), so 0 means the URL
+// did not choose one.
+func applyRedisTimeouts(opts *redis.Options) {
+	opts.ContextTimeoutEnabled = true
 	if opts.DialTimeout == 0 {
 		opts.DialTimeout = defaultRedisDialTimeout
 	}
@@ -97,12 +108,9 @@ func redisOptions(rawURL string) (*redis.Options, error) {
 		opts.ReadTimeout = defaultRedisIOTimeout
 	}
 	if opts.WriteTimeout == 0 {
-		opts.WriteTimeout = defaultRedisIOTimeout
+		// As in go-redis: a URL that sets only read_timeout sets both.
+		opts.WriteTimeout = opts.ReadTimeout
 	}
-	// Without this go-redis ignores context deadlines and cancellation.
-	opts.ContextTimeoutEnabled = true
-	opts.Dialer = redisDialer(opts.TLSConfig)
-	return opts, nil
 }
 
 // pingRedis probes Redis once at startup under its own budget. It uses a

@@ -103,10 +103,10 @@ func TestOAuthRefreshNeverUndoesAnotherSignIn(t *testing.T) {
 	record := testOAuthRecord()
 	source := newOAuthSource("notion", record, oauth, nil)
 	refreshed := func() {
-		source.mu.Lock()
-		defer source.mu.Unlock()
-		source.record.AccessToken = "refreshed"
-		source.persist(ctx, record.UpdatedAt)
+		next := record
+		next.AccessToken = "refreshed"
+		next.UpdatedAt = time.Now().UTC()
+		source.save(ctx, record, next, "")
 	}
 
 	// Same sign-in: the refreshed token is saved.
