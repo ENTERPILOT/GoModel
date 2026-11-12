@@ -31,6 +31,8 @@ BEDROCK_API_KEY=ABSK...
 
 已配置的密钥优先于 AWS 凭据和 `AWS_BEARER_TOKEN_BEDROCK`。在控制台中添加类型为 `bedrock` 的提供商，设置**区域或端点**，并将密钥粘贴到 **API 密钥**；留空时，如果网关主机设置了 `AWS_BEARER_TOKEN_BEDROCK`，则使用该令牌，否则使用主机的 AWS 凭据链。
 
+通过控制台保存的提供商只会把主机的 `AWS_BEARER_TOKEN_BEDROCK` 发送到 AWS 自有的 Bedrock 端点：区域，或 Bedrock 端点 URL（例如 FIPS 或 VPC 端点）。使用其他端点时，请为该提供商配置自己的 API 密钥，否则它会改用主机的 AWS 凭据链对请求签名。在 `config.yaml` 或环境变量中声明的提供商不受此限制。
+
 ## 运行 GoModel
 
 <CodeGroup>

@@ -51,7 +51,9 @@ Identity Center sowie Container- oder Instanzrollen. Bevorzugen Sie im Produktiv
 Workload-Zugangsdaten gegenüber langlebigen Access Keys.
 
 `AWS_BEARER_TOKEN_BEDROCK` wird ebenfalls als Bearer-Token-Fallback akzeptiert. Setzen Sie dazu
-`BEDROCK_MANTLE_BASE_URL`, damit die Provider-Erkennung Mantle aktivieren kann.
+`BEDROCK_MANTLE_BASE_URL`, damit die Provider-Erkennung Mantle aktivieren kann. Ein im Dashboard
+gespeicherter Provider nutzt es nur für AWS-Endpunkte; geben Sie ihm bei einem eigenen Endpunkt
+einen eigenen API-Key.
 
 Die Base URL kann eine AWS-Region oder ein vollständiger Endpunkt sein. Eine Region ist die
 empfohlene Form:

@@ -42,6 +42,14 @@ Skonfigurowany klucz ma pierwszeństwo przed danymi uwierzytelniającymi AWS i p
 używa `AWS_BEARER_TOKEN_BEDROCK` ze swojego hosta, jeśli jest ustawiony, a w
 przeciwnym razie łańcucha danych uwierzytelniających AWS hosta.
 
+Provider zapisany z dashboardu wysyła `AWS_BEARER_TOKEN_BEDROCK` hosta wyłącznie
+do własnych endpointów Bedrock w AWS: region albo URL endpointu Bedrock, np. FIPS
+lub VPC. Przy każdym
+innym endpoincie nadaj providerowi własny klucz API; w przeciwnym razie podpisuje
+on żądania łańcuchem danych uwierzytelniających AWS hosta. Providerów
+zadeklarowanych w `config.yaml` lub zmiennych środowiskowych to ograniczenie nie
+dotyczy.
+
 ## Uruchomienie GoModel
 
 <CodeGroup>

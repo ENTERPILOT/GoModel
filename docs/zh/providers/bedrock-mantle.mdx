@@ -46,7 +46,7 @@ GOMODEL_MASTER_KEY=change-me
 `AWS_PROFILE`、IAM Identity Center 以及容器或实例角色。在生产环境中，请优先使用工作负载凭据，而不是长期有效的访问密钥。
 
 `AWS_BEARER_TOKEN_BEDROCK` 也可作为 Bearer Token 的回退方式。使用它时请同时设置
-`BEDROCK_MANTLE_BASE_URL`，以便提供商发现能够启用 Mantle。
+`BEDROCK_MANTLE_BASE_URL`，以便提供商发现能够启用 Mantle。通过控制台保存的提供商仅对 AWS 端点使用该令牌；使用自定义端点时，请为其配置自己的 API 密钥。
 
 Base URL 可以是 AWS 区域，也可以是完整的端点。推荐使用区域形式：
 

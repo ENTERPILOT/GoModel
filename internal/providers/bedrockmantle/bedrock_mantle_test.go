@@ -201,3 +201,58 @@ func TestNew_UsesTheFactoryTransport(t *testing.T) {
 	assert.Equal(t, int32(1), calls.Load(), "request must travel through the factory-supplied client")
 	assert.Equal(t, "Bearer secret", capture.Last(t).Header.Get("Authorization"))
 }
+
+// TestNew_HostTokenDestination pins where the host's AWS_BEARER_TOKEN_BEDROCK
+// may go: wherever a provider declared in config.yaml or the environment
+// points, but only to AWS's own endpoints for one saved through the admin
+// API, which signs with SigV4 against a custom endpoint unless it has a key.
+func TestNew_HostTokenDestination(t *testing.T) {
+	const custom = "https://mantle.internal.example.com"
+	tests := []struct {
+		name     string
+		managed  bool
+		baseURL  string
+		apiKey   string
+		wantHost string
+		want     string
+	}{
+		{name: "declared, custom endpoint", baseURL: custom, wantHost: "mantle.internal.example.com", want: "Bearer ABSK-env"},
+		{name: "managed, custom endpoint", managed: true, baseURL: custom, wantHost: "mantle.internal.example.com", want: "AWS4-HMAC-SHA256 "},
+		{name: "managed, custom endpoint, own key", managed: true, baseURL: custom, apiKey: "ABSK-own", wantHost: "mantle.internal.example.com", want: "Bearer ABSK-own"},
+		{name: "managed, AWS lookalike host", managed: true, baseURL: "https://bedrock-mantle.us-east-1.api.aws.example.com", wantHost: "bedrock-mantle.us-east-1.api.aws.example.com", want: "AWS4-HMAC-SHA256 "},
+		{name: "managed, region", managed: true, baseURL: "us-west-2", wantHost: "bedrock-mantle.us-west-2.api.aws", want: "Bearer ABSK-env"},
+		{name: "managed, AWS endpoint", managed: true, baseURL: "https://bedrock-mantle.us-west-2.api.aws", wantHost: "bedrock-mantle.us-west-2.api.aws", want: "Bearer ABSK-env"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "ABSK-env")
+			t.Setenv("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE")
+			t.Setenv("AWS_SECRET_ACCESS_KEY", "secret")
+			t.Setenv("AWS_SESSION_TOKEN", "")
+			t.Setenv("AWS_PROFILE", "")
+			t.Setenv("AWS_REGION", "us-east-1")
+			t.Setenv("AWS_CONFIG_FILE", "/dev/null")
+			t.Setenv("AWS_SHARED_CREDENTIALS_FILE", "/dev/null")
+
+			var host, auth string
+			client := &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+				host, auth = r.URL.Hostname(), r.Header.Get("Authorization")
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"data":[]}`)),
+					Request:    r,
+				}, nil
+			})}
+
+			p, ok := New(providers.ProviderConfig{Managed: tt.managed, APIKey: tt.apiKey, BaseURL: tt.baseURL}, providers.ProviderOptions{HTTPClient: client}).(*Provider)
+			require.True(t, ok)
+			require.NoError(t, p.ready())
+
+			_, err := p.ListModels(context.Background())
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantHost, host)
+			assert.True(t, strings.HasPrefix(auth, tt.want), "Authorization = %q", auth)
+		})
+	}
+}
