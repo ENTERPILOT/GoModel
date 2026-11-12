@@ -10312,7 +10312,8 @@ const docTemplate = `{
             "properties": {
                 "context_window": {
                     "description": "ContextWindow and MaxOutputTokens set the token limits /v1/models lists\nfor a redirect. Omitted means the smallest value any target reports.",
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 1
                 },
                 "default_params": {
                     "type": "object"
@@ -10328,7 +10329,8 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "max_output_tokens": {
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 1
                 },
                 "old_source": {
                     "type": "string"
@@ -14614,7 +14616,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "context_window": {
-                    "description": "ContextWindow and MaxOutputTokens are the token limits /v1/models lists\nfor a redirect. Nil derives each from the targets: the smallest value\nany target reports, so a client sizing to it fits whichever target\nserves the request.",
+                    "description": "ContextWindow and MaxOutputTokens are the token limits /v1/models lists\nfor a redirect. Nil derives each from the targets: the smallest value\nany target reports.",
                     "type": "integer"
                 },
                 "created_at": {

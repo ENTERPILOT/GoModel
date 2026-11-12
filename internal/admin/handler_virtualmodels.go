@@ -46,8 +46,8 @@ type upsertVirtualModelRequest struct {
 	Slowdown *float64 `json:"slowdown,omitempty"`
 	// ContextWindow and MaxOutputTokens set the token limits /v1/models lists
 	// for a redirect. Omitted means the smallest value any target reports.
-	ContextWindow   *int `json:"context_window,omitempty"`
-	MaxOutputTokens *int `json:"max_output_tokens,omitempty"`
+	ContextWindow   *int `json:"context_window,omitempty" minimum:"1"`
+	MaxOutputTokens *int `json:"max_output_tokens,omitempty" minimum:"1"`
 	// ReasoningEffort forces the reasoning effort sent upstream ("none",
 	// "minimal", "low", "medium", "high", "xhigh", or "max"); empty keeps the
 	// client's value.

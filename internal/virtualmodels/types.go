@@ -74,8 +74,7 @@ type VirtualModel struct {
 
 	// ContextWindow and MaxOutputTokens are the token limits /v1/models lists
 	// for a redirect. Nil derives each from the targets: the smallest value
-	// any target reports, so a client sizing to it fits whichever target
-	// serves the request.
+	// any target reports.
 	ContextWindow   *int `json:"context_window,omitempty" bson:"context_window,omitempty"`
 	MaxOutputTokens *int `json:"max_output_tokens,omitempty" bson:"max_output_tokens,omitempty"`
 
