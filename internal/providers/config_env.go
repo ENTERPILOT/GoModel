@@ -116,6 +116,7 @@ const (
 	providerEnvFieldModelFilterInclude
 	providerEnvFieldModelFilterExclude
 	providerEnvFieldModelFilterMaxPrice
+	providerEnvFieldModelsMode
 	providerEnvFieldIdentityTokenFile
 	providerEnvFieldIdentityToken
 	providerEnvFieldTokenEndpoint
@@ -157,6 +158,7 @@ type providerEnvValues struct {
 	ProxyURL                 string
 	InferenceObjective       string
 	Models                   []string
+	ModelsMode               string
 	ModelFilterInclude       []string
 	ModelFilterExclude       []string
 	ModelFilterMaxPrice      *float64
@@ -271,6 +273,7 @@ func (v providerEnvValues) empty() bool {
 		v.Billable == nil &&
 		v.FairnessFromUserPath == nil &&
 		len(v.Models) == 0 &&
+		strings.TrimSpace(v.ModelsMode) == "" &&
 		v.modelFilter().Empty() &&
 		len(v.pending) == 0 &&
 		// A malformed value counts as set so the group is not dropped
@@ -349,6 +352,8 @@ func (v *providerEnvValues) setField(field providerEnvField, index int, key, val
 		v.APIVersion = value
 	case providerEnvFieldModels:
 		v.Models = parseCSVEnvList(value)
+	case providerEnvFieldModelsMode:
+		v.ModelsMode = strings.TrimSpace(value)
 	case providerEnvFieldModelFilterInclude:
 		v.ModelFilterInclude = parseCSVEnvList(value)
 	case providerEnvFieldModelFilterExclude:
@@ -467,6 +472,7 @@ func parseProviderEnvKey(prefix, key string, spec DiscoveryConfig) (string, prov
 		{name: "MODEL_FILTER_MAX_PRICE_PER_MTOK", field: providerEnvFieldModelFilterMaxPrice},
 		{name: "MODEL_FILTER_INCLUDE", field: providerEnvFieldModelFilterInclude},
 		{name: "MODEL_FILTER_EXCLUDE", field: providerEnvFieldModelFilterExclude},
+		{name: "MODELS_MODE", field: providerEnvFieldModelsMode},
 		{name: "MODELS", field: providerEnvFieldModels},
 	}
 	if strings.EqualFold(prefix, "VERTEX") {
@@ -668,6 +674,7 @@ func (v providerEnvValues) rawConfig(providerType string, spec DiscoveryConfig) 
 		InferenceObjective:       v.InferenceObjective,
 		FairnessFromUserPath:     v.FairnessFromUserPath,
 		Models:                   rawProviderModelsFromIDs(v.Models),
+		ModelsMode:               config.ConfiguredProviderModelsMode(v.ModelsMode),
 		ModelFilter:              v.modelFilter(),
 		SessionStickyKeys:        v.SessionStickyKeys,
 		Billable:                 v.Billable,
@@ -744,6 +751,9 @@ func overlayProviderEnvValues(existing config.RawProviderConfig, values provider
 	if len(values.Models) > 0 {
 		existing.Models = rawProviderModelsFromIDs(values.Models)
 	}
+	if values.ModelsMode != "" {
+		existing.ModelsMode = config.ConfiguredProviderModelsMode(values.ModelsMode)
+	}
 	// Each filter rule overlays independently, so an env price cap can narrow a
 	// YAML pattern filter (and vice versa) without restating the other rule.
 	if len(values.ModelFilterInclude) > 0 {
@@ -803,6 +813,7 @@ func (v providerEnvValues) withoutFieldsSetBy(existing config.RawProviderConfig)
 		{"gcp_scope", providerEnvFieldGCPScope, &v.GCPScope, existing.GCPScope},
 		{"proxy_url", providerEnvFieldProxyURL, &v.ProxyURL, existing.ProxyURL},
 		{"inference_objective", providerEnvFieldInferenceObjective, &v.InferenceObjective, existing.InferenceObjective},
+		{"models_mode", providerEnvFieldModelsMode, &v.ModelsMode, string(existing.ModelsMode)},
 	}
 	for _, f := range stringFields {
 		env := f.env

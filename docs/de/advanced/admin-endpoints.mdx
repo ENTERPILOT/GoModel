@@ -587,6 +587,8 @@ curl "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=202
 ```
 
 - Kunden sind nach User Path sortiert, Positionen nach Modell und Provider.
+- Die Tage des Zeitraums gelten in der Zeitzone des Headers `X-GoModel-Timezone`,
+  ohne ihn in UTC, und `time_zone` meldet sie (auch als letzte CSV-Spalte).
 - Eine Rechnung enthält höchstens 50.000 Positionen (Kunde × Modell ×
   Provider); darüber antwortet der Endpunkt mit `400`. Grenzen Sie Zeitraum
   oder Filter ein oder fassen Sie Kunden mit `parent` zusammen.

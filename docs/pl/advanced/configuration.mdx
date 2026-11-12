@@ -233,7 +233,8 @@ requestów/odpowiedzi, nagłówki) opisuje sekcja [Logowanie audytowe](#logowani
 | `CACHE_REFRESH_INTERVAL` | Liczba sekund między kolejnymi przebiegami ponownego wykrywania modeli providerów | `3600` (1h) |
 | `PROVIDER_RECHECK_INTERVAL` | Liczba sekund między ponownym sprawdzaniem providerów, których ostatnie odświeżenie się nie powiodło (`0` wyłącza) | `60` |
 | `MODEL_LIST_URL`    | Katalog metadanych modeli: URL HTTP, ścieżka do lokalnego pliku (`/etc/gomodel/models.json` lub `file://...`) albo `off` | publiczny katalog na GitHubie |
-| `GOMODEL_OFFLINE`   | Przełącznik dla środowisk air-gapped: wyłącza sprawdzanie aktualizacji i pomija URL-e katalogów HTTP. Nie wpływa na lokalne pliki katalogu ani na skonfigurowanych providerów | `false` |
+| `GOMODEL_OFFLINE`   | Przełącznik dla środowisk air-gapped: wyłącza sprawdzanie aktualizacji, pomija URL-e katalogów HTTP i wyłącza pobieranie metadanych z `/models` przez providerów w trybie allowlist. Nie wpływa na lokalne pliki katalogu ani na requesty inferencji do skonfigurowanych providerów | `false` |
+| `ALLOWLIST_UPSTREAM_METADATA` | W trybie `allowlist` odczytuje `/models` providera wyłącznie po metadane (okno kontekstu, maks. tokeny wyjściowe, ceny, nazwa wyświetlana, typ modelu) dla skonfigurowanych modeli; nigdy nie dodaje modeli. `false` wyłącza to wywołanie; tryb offline wymusza wyłączenie | `true` |
 | `REDIS_URL`         | URL połączenia z Redisem          | _(pusty)_        |
 | `REDIS_KEY_MODELS`     | Klucz Redisa dla cache'u modeli     | `gomodel:models`    |
 | `REDIS_KEY_RESPONSES`  | Klucz Redisa dla cache'u odpowiedzi | `gomodel:response:` |
@@ -312,6 +313,7 @@ Pliki są przechowywane tak długo jak wpisy audytowe, które się do nich odwo�
 | `LOGGING_LOG_AUDIO_BODIES`        | Loguje wejścia/wyjścia endpointów audio    | `false` |
 | `LOGGING_LOG_IMAGE_BODIES`        | Loguje wejścia/wyjścia endpointów obrazów  | `false` |
 | `LOGGING_LOG_IMAGE_BODIES_SCOPE`  | Które bajty obrazów zapisywać: `all`, `input`, `output` | `all` |
+| `LOGGING_LOG_EMBEDDING_BODIES`    | Loguje body żądań/odpowiedzi embeddingów (wyłączone: tylko metadane) | `true`  |
 | `LOGGING_LOG_HEADERS`             | Loguje nagłówki (wrażliwe są automatycznie maskowane) | `true`  |
 | `LOGGING_ONLY_MODEL_INTERACTIONS` | Loguje tylko endpointy modeli AI           | `true`  |
 | `LOGGING_BUFFER_SIZE`             | Bufor w pamięci przed zapisem              | `1000`  |
@@ -351,7 +353,8 @@ strony. Gdy logowanie audytowe jest włączone, zapisy są asynchroniczne i moż
 
 <Warning>
   Gdy `LOGGING_LOG_BODIES` jest włączone, body requestów i odpowiedzi są zapisywane
-  w całości. Mogą zawierać dane wrażliwe, takie jak dane osobowe (PII) lub klucze API osadzone w
+  w całości, z wyjątkiem miejsc, w których ustawienia dla poszczególnych
+  endpointów poniżej je pomijają lub zastępują placeholderami. Mogą zawierać dane wrażliwe, takie jak dane osobowe (PII) lub klucze API osadzone w
   promptach.
 </Warning>
 
@@ -381,6 +384,20 @@ strony. Gdy logowanie audytowe jest włączone, zapisy są asynchroniczne i moż
   body audio (odpowiedź speech i upload do transkrypcji, który zachowuje swoje
   metadane) są zapisywane jako lekki placeholder `{__audio__, content_type, bytes, stored: false}`;
   gdy logowanie body jest wyłączone, body audio nie jest zapisywane wcale.
+</Note>
+
+<Note>
+  `LOGGING_LOG_EMBEDDING_BODIES` doprecyzowuje `LOGGING_LOG_BODIES` dla embeddingów –
+  nie działa, jeśli logowanie body nie jest włączone. Obejmuje `/v1/embeddings`
+  oraz wywołania passthrough do endpointu embeddingów u providera
+  (`/p/{provider}/.../embeddings`, llama.cpp `/embedding`, Cohere i Ollama
+  `.../embed`, Gemini
+  `:embedContent` i `:batchEmbedContents`). Wejścia embeddingów mogą być całymi
+  dokumentami lub obrazami base64, a odpowiedzi to wektory liczb, więc masowe
+  indeksowanie szybko powiększa magazyn audytowy. Gdy logowanie body jest włączone,
+  a to ustawienie wyłączone, wpisy embeddingów zachowują metadane (model, provider,
+  status, czasy, ścieżka użytkownika, usage) i pomijają body żądania i odpowiedzi.
+  Domyślnie ma wartość `true`, co zachowuje dotychczasowe działanie.
 </Note>
 
 <Note>
@@ -552,16 +569,21 @@ Większość providerów może korzystać z niestandardowego bazowego URL-a prze
 
 Każdy typ providera akceptuje też rozdzieloną przecinkami listę skonfigurowanych modeli przez
 `<PROVIDER>_MODELS`, na przykład `OPENROUTER_MODELS`, `ORACLE_MODELS`,
-`AZURE_MODELS`, `SGLANG_MODELS`, `VLLM_MODELS` lub `LLMD_MODELS`. Domyślnie
-`CONFIGURED_PROVIDER_MODELS_MODE=fallback` używa skonfigurowanych list tylko wtedy, gdy
-upstreamowe `/models` zwraca błąd, nil lub pustą listę.
-Provider kompatybilny z OpenAI bez endpointu `/models` (404 lub 405) jest obsługiwany
+`AZURE_MODELS`, `SGLANG_MODELS`, `VLLM_MODELS` lub `LLMD_MODELS`. Sposób łączenia listy
+z `/models` providera określa `CONFIGURED_PROVIDER_MODELS_MODE` (domyślnie `allowlist`),
+a dla jednego providera `<PROVIDER>[_SUFFIX]_MODELS_MODE` (YAML:
+`providers.<name>.models_mode`), na przykład `OPENROUTER_MODELS_MODE=fallback`; zobacz
+[Tryby modeli](/pl/advanced/config-yaml#tryby-modeli). Provider kompatybilny z OpenAI bez endpointu `/models` (404 lub 405) jest obsługiwany
 na podstawie skonfigurowanej listy i raportowany jako sprawny, co pasuje do serwerów z jednym API,
-takich jak speech-to-text. Ustaw
-`CONFIGURED_PROVIDER_MODELS_MODE=allowlist`, żeby udostępniać tylko skonfigurowane modele
-providerów, które definiują listę, i pomijać ich upstreamowe wywołania `/models`. W YAML
+takich jak speech-to-text. W YAML
 `providers.<name>.models` dostarcza tę samą listę modeli dla nazwanych bloków
 providerów.
+
+<Warning>
+**Zmiana niekompatybilna:** wcześniej domyślnym trybem był `fallback`. Providery
+ze skonfigurowaną listą udostępniają teraz tylko te modele, a inne modele zwracają
+404. W [Tryby modeli](/pl/advanced/config-yaml#tryby-modeli) opisano, jak przywrócić dotychczasowe zachowanie.
+</Warning>
 
 `GET /v1/models` domyślnie zwraca identyfikatory z prefiksem providera (`openai/gpt-5`). Ustaw
 `UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT=true` (YAML:
@@ -767,7 +789,7 @@ export ORACLE_BASE_URL="https://inference.generativeai.us-chicago-1.oci.oraclecl
 export ORACLE_MODELS="openai.gpt-oss-120b,xai.grok-3" # Opcjonalna lista skonfigurowanych modeli
 export OPENROUTER_MODELS="openai/gpt-oss-120b,anthropic/claude-sonnet-4"
 export KILO_MODELS="anthropic/claude-sonnet-4.5,openai/gpt-5.5"
-export CONFIGURED_PROVIDER_MODELS_MODE="fallback" # fallback lub allowlist
+export CONFIGURED_PROVIDER_MODELS_MODE="allowlist" # allowlist (domyślnie), fallback lub merge
 export OLLAMA_BASE_URL="http://localhost:11434/v1" # Rejestruje providera "ollama"
 export SGLANG_BASE_URL="http://localhost:30000/v1" # Rejestruje providera "sglang" bez klucza
 # Opcjonalnie: export SGLANG_API_KEY="token-abc123"
@@ -822,11 +844,12 @@ ustrukturyzowane ustawienia), użyj pliku YAML:
 
 ```yaml
 models:
-  # fallback to wartość domyślna. Użyj allowlist, gdy skonfigurowane listy modeli
-  # providerów mają ukrywać modele upstreamu i pomijać wywołania /models, albo merge,
-  # żeby dodać skonfigurowane modele do wykrytego inwentarza (modele, które provider
-  # serwuje, ale ich nie wypisuje).
-  configured_provider_models_mode: fallback
+  # Użycie skonfigurowanych list modeli: allowlist (domyślnie), fallback lub
+  # merge. Zobacz tabelę Tryby modeli w przewodniku po config.yaml.
+  configured_provider_models_mode: allowlist
+  # allowlist czyta upstream /models tylko po metadane; false wyłącza to
+  # wywołanie (GOMODEL_OFFLINE=true również).
+  allowlist_upstream_metadata: true
   # Zwracaj z GET /v1/models same identyfikatory modeli (gpt-5) zamiast identyfikatorów
   # z prefiksem providera (openai/gpt-5). Gdy dwóch providerów udostępnia ten sam ID, na liście jest
   # tylko provider, do którego trafia request bez prefiksu (pierwszy zarejestrowany); przypnij nazwę
@@ -876,7 +899,7 @@ providers:
     # api_key jest opcjonalny; ustaw go tylko, gdy launch_server używa --api-key.
     # api_key: "token-abc123"
 
-  # Lista modeli dla trybu fallback lub allowlist
+  # Lista modeli (sposób użycia zależy od trybu modeli)
   gemini:
     type: gemini
     api_key: "..."
@@ -896,9 +919,8 @@ providers:
 ```
 
 <Note>
-  `models:` działa w każdym bloku providera. W trybie fallback to zabezpieczenie
-  na wypadek, gdy upstreamowe `/models` jest niedostępne lub puste. W trybie allowlist staje się
-  udostępnianym inwentarzem tego providera i pomija upstreamowe `/models`. Wymaganą politykę OCI
+  `models:` działa w każdym bloku providera; sposób łączenia z upstreamowym `/models`
+  zależy od [trybu modeli](/pl/advanced/config-yaml#tryby-modeli). Wymaganą politykę OCI
   i przetestowaną konfigurację dla Oracle GenAI znajdziesz w [przewodniku po Oracle
   GenAI](/pl/providers/oracle).
 </Note>

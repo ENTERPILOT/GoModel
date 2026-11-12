@@ -2,33 +2,37 @@ package responsecache
 
 import (
 	"bytes"
-	"github.com/enterpilot/gomodel/internal/streaming"
 
 	"github.com/goccy/go-json"
+
+	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
-// isNonCacheableTerminalEvent reports whether a payload is a terminal
-// Responses event that must never be replayed from cache: a response that
-// ended incomplete (interrupted upstream) or failed is not a reusable answer
-// even though it is fully framed and ends with [DONE]. The type field is
-// decoded rather than substring-matched so whitespace or key order in the
-// payload cannot smuggle such an event past validation.
-func isNonCacheableTerminalEvent(payload []byte) bool {
+// responsesEventType returns a JSON payload's Responses event type ("" for a
+// payload without one) and whether the payload is valid JSON. The type field
+// is decoded rather than substring-matched so whitespace or key order in the
+// payload cannot smuggle a terminal event past validation.
+//
+// Decoding validates the payload as it goes, so the usual payload, an object,
+// is parsed once; only one the decoder turns down (a non-object, or a type
+// that is not a string) is checked again with json.Valid.
+func responsesEventType(payload []byte) (eventType string, valid bool) {
 	var event struct {
 		Type string `json:"type"`
 	}
 	if err := json.Unmarshal(payload, &event); err != nil {
-		// json.Valid already accepted the payload; a non-object payload
-		// simply has no event type.
-		return false
+		return "", json.Valid(payload)
 	}
-	return event.Type == "response.incomplete" || event.Type == "response.failed"
+	return event.Type, true
 }
 
 // validateCacheableSSE reports whether raw is a complete, cache-safe SSE body.
 // Cacheable streams must be fully framed, contain at least one JSON data payload,
-// terminate with a final [DONE] event, and not carry an incomplete or failed
-// terminal Responses event.
+// and terminate with a final [DONE] event or, for a Responses stream from an
+// upstream that sends no [DONE], with response.completed as the last payload.
+// A response that ended incomplete (interrupted upstream) or failed is not a
+// reusable answer even though it is fully framed, so a stream carrying one is
+// never cacheable.
 func validateCacheableSSE(raw []byte) bool {
 	if len(raw) == 0 {
 		return false
@@ -36,6 +40,7 @@ func validateCacheableSSE(raw []byte) bool {
 
 	sawJSONPayload := false
 	sawDone := false
+	endsCompleted := false
 
 	for len(raw) > 0 {
 		remaining := raw
@@ -47,9 +52,18 @@ func validateCacheableSSE(raw []byte) bool {
 			raw = remaining[idx+sepLen:]
 		}
 
-		payload, hasData := sseEventPayload(event)
+		payload, hasData := streaming.EventData(event)
 		if sawDone {
 			return false
+		}
+		// A named error event is never a reusable answer, whatever its data.
+		if isErrorEvent(event) {
+			return false
+		}
+		// Only keep-alive comments may follow a final response.completed:
+		// any other event, even one without data, means the stream went on.
+		if endsCompleted && !commentsOnly(event) {
+			endsCompleted = false
 		}
 		if !hasData {
 			continue
@@ -61,30 +75,48 @@ func validateCacheableSSE(raw []byte) bool {
 			sawDone = true
 			continue
 		}
-		if !json.Valid(payload) {
+		eventType, valid := responsesEventType(payload)
+		if !valid {
 			return false
 		}
-		if isNonCacheableTerminalEvent(payload) {
+		switch eventType {
+		case "response.incomplete", "response.failed":
 			return false
+		case "response.completed":
+			// It ends the stream only once dispatched by a blank line: an
+			// event cut before it may still have had more fields.
+			endsCompleted = idx != -1
+		default:
+			endsCompleted = false
 		}
 		sawJSONPayload = true
 	}
 
-	return sawJSONPayload && sawDone
+	return sawJSONPayload && (sawDone || endsCompleted)
 }
 
-func sseEventPayload(event []byte) ([]byte, bool) {
-	lines := bytes.Split(event, []byte("\n"))
-	payloadLines := make([][]byte, 0, len(lines))
-	for _, line := range lines {
-		data, ok := streaming.ParseDataLine(line)
-		if !ok {
-			continue
+// commentsOnly reports whether every non-blank line of an SSE event is a
+// comment (starts with ':').
+func commentsOnly(event []byte) bool {
+	for line := range bytes.Lines(event) {
+		// Only the terminator is stripped: a line starting with a space is
+		// a field line, not a comment.
+		line = bytes.TrimRight(line, "\r\n")
+		if len(line) > 0 && line[0] != ':' {
+			return false
 		}
-		payloadLines = append(payloadLines, data)
 	}
-	if len(payloadLines) == 0 {
-		return nil, false
+	return true
+}
+
+// isErrorEvent reports whether an SSE event is named "error". The last event
+// field names the event, as for a client dispatching it.
+func isErrorEvent(event []byte) bool {
+	var name []byte
+	for line := range bytes.Lines(event) {
+		if field, ok := bytes.CutPrefix(bytes.TrimRight(line, "\r\n"), []byte("event:")); ok {
+			name = field
+		}
 	}
-	return bytes.Join(payloadLines, []byte("\n")), true
+	return string(bytes.TrimSpace(name)) == "error"
 }

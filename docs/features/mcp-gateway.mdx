@@ -364,6 +364,88 @@ A last error mentioning `x509: certificate signed by unknown authority` means
 the server's TLS certificate is issued by a CA the container does not trust.
 See [private CA certificates](/guides/production#upstream-certificates-behind-a-private-ca).
 
+## Sign in with OAuth
+
+Some MCP servers (Notion, Linear, GitHub, Sentry, ...) require an
+interactive OAuth sign-in instead of a static token. GoModel signs in to each
+server once, and every client of the gateway shares that sign-in. From the
+dashboard:
+
+1. Click **Add MCP Server** and pick the service under **Server**: Linear,
+   Notion, GitHub, Sentry, Stripe, Supabase, Vercel, or Hugging Face. The URL
+   is filled in.
+2. Choose how to connect:
+   - **Sign in with ...**: click **Save and sign in**, then approve access on
+     the service's sign-in page. You return to **MCP Servers**, and the server
+     reconnects with the new token.
+   - **API key or token**, where the service offers it: paste the key and
+     click **Save**. The server reconnects with it; there is no sign-in page.
+     Hugging Face offers this or **No authentication**.
+
+For any other server, pick **Custom server**, enter its URL with no
+`Authorization` header, and save. It shows **Sign-in required** once it
+answers `401 Unauthorized`; click the row's sign-in icon, then **Continue to
+sign-in**. The connection and access settings of a preset server are under
+**Advanced settings**; choose its tools later by editing the server.
+
+GitHub has no dynamic client registration: register a
+[GitHub OAuth app](https://github.com/settings/applications/new) once with the
+redirect URI the sign-in dialog shows, then enter its client ID and secret
+there.
+
+GoModel follows the
+[MCP authorization spec](https://modelcontextprotocol.io/specification/latest/basic/authorization):
+it discovers the authorization server from the server's protected resource
+metadata, requires S256 PKCE, sends the `resource` indicator on every token
+request, and checks `state` and `iss` on the way back. It registers itself as
+an OAuth client with dynamic client registration. If the authorization server
+does not support that, register a client yourself with the redirect URI the
+dialog shows (`https://<gateway>/admin/mcp-oauth/callback`) and enter its
+client ID (and secret, for a confidential client) under **Use your own OAuth
+client**.
+
+Tokens are stored in the gateway database, encrypted with
+[`GOMODEL_ENCRYPTION_KEY`](/advanced/encryption-at-rest) when it is set, and
+are never returned by the admin API. GoModel refreshes an expired access token
+with the refresh token and saves the rotated refresh token. When the server
+answers `401 Unauthorized` to a token that has not expired yet (for example one
+revoked early), GoModel refreshes it once and retries the request, if the
+authorization server issued a refresh token; otherwise the row shows **Sign-in
+needs attention** and you sign in again. The row shows
+**Signed in**, **Sign-in expired** (no refresh token left; sign in again), or
+**Sign-in needs attention** with the error. A failed refresh is retried on the
+next request, so sign in again only if the error persists. The sign-out icon
+deletes the stored tokens.
+
+Notes:
+
+- Sign-in works for `http` and `sse` servers, including ones declared in
+  `config.yaml`; tokens are runtime state, not configuration. The server URL
+  must use `https`; plain `http` works only on a loopback host (`localhost`,
+  `127.0.0.1`, `::1`).
+- A signed-in token replaces a configured `Authorization` header, and is only
+  sent to the server's own origin. Changing a server's URL stops using its
+  tokens until you sign in again.
+- Discovery, client registration, and token requests only connect to public
+  addresses, so a public server cannot point the gateway at internal
+  services. The exceptions are the MCP server's own host; private networks
+  (`10.x`, `192.168.x`, and similar) when the MCP server is on a private
+  network too, such as an internal server signing in through an internal
+  identity provider; and loopback when the server URL itself is on loopback.
+  Link-local addresses, including cloud metadata endpoints, are always
+  refused.
+- Every client of the gateway shares the one sign-in. Per-user upstream
+  tokens are not supported yet.
+- With several gateway instances, the sign-in callback must reach the
+  instance that started it (use sticky sessions for `/admin`). Instances
+  sharing the database take turns refreshing a token, so a rotating refresh
+  token is used once; the others pick up the refreshed token from the
+  database.
+
+The admin API equivalents are `POST /admin/mcp-servers/{slug}/oauth/start`
+(body: `redirect_uri`, optional `client_id`/`client_secret`; returns
+`authorization_url`) and `DELETE /admin/mcp-servers/{slug}/oauth`.
+
 ## Sessions across replicas
 
 Replicas that share a PostgreSQL or MongoDB database share MCP sessions too, so
@@ -506,11 +588,21 @@ Tools that the server reports but the filters hide are listed separately under
 `excluded_tools`. Names are the upstream originals; the aggregated `/mcp`
 endpoint serves them as `{slug}_{name}`.
 
+To see every tool at once, click **All tools** on the MCP Servers page. It
+lists the tools of all servers in one searchable list, with descriptions,
+read-only and destructive hints, and the owning server. Exposed tools are named
+as clients call them (`{slug}_{name}`); hidden tools keep their upstream name. Pick a virtual server to see only its members' tools, and
+turn on **Show tools hidden by filters** to include excluded tools. Servers
+that are not connected, or whose catalog failed to load, are listed above the
+tools, since their tools may be missing. The list is the gateway-wide view: it
+does not apply a given API key's `user_paths` limits, so some clients may not
+see every server listed.
+
 ## Security notes
 
 - **Credential boundary.** The MCP spec forbids token passthrough; GoModel
   terminates the client's bearer token and injects per-server credentials
-  from configuration. Client keys never reach an upstream, and configured
+  from configuration or an operator OAuth sign-in. Client keys never reach an upstream, and configured
   upstream headers are not sent across cross-origin redirects.
 - **Browser origins are denied by default.** MCP clients are not web pages, so
   `/mcp` refuses any request carrying browser fetch metadata (`Origin` or

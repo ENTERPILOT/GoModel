@@ -427,7 +427,7 @@ func TestStoreAfter_PartitionScopesInFlightCoalescing(t *testing.T) {
 			release := make(chan struct{})
 			leaderDone := make(chan error, 1)
 			go func() {
-				leaderDone <- m.StoreAfter(&blockingMissExchange{
+				leaderDone <- storeAfter(m, &blockingMissExchange{
 					ctx: contextWithUserPath(tt.leader), started: started, release: release,
 				}, body, next)
 			}()
@@ -436,7 +436,7 @@ func TestStoreAfter_PartitionScopesInFlightCoalescing(t *testing.T) {
 			joined := make(chan struct{})
 			followerDone := make(chan error, 1)
 			go func() {
-				followerDone <- m.StoreAfter(&blockingMissExchange{
+				followerDone <- storeAfter(m, &blockingMissExchange{
 					ctx: contextWithUserPath(tt.follower), joined: joined,
 				}, body, next)
 			}()

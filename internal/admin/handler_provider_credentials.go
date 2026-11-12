@@ -67,7 +67,10 @@ type upsertProviderCredentialRequest struct {
 	// masked) to keep the stored proxy credentials.
 	ProxyURL string   `json:"proxy_url,omitempty"`
 	Models   []string `json:"models,omitempty"`
-	Enabled  *bool    `json:"enabled,omitempty"`
+	// ModelsMode overrides the global configured provider models mode for
+	// this provider: fallback, allowlist, or merge. Empty uses the global mode.
+	ModelsMode string `json:"models_mode,omitempty"`
+	Enabled    *bool  `json:"enabled,omitempty"`
 }
 
 // providerCredentialFieldResponse describes one credential field a provider
@@ -115,12 +118,13 @@ type providerCredentialViewResponse struct {
 	ServiceAccountJSONBase64 string   `json:"service_account_json_base64,omitempty"`
 	GCPScope                 string   `json:"gcp_scope,omitempty"`
 	// ProxyURL is the provider's outbound proxy with any password masked.
-	ProxyURL  string     `json:"proxy_url,omitempty"`
-	Models    []string   `json:"models,omitempty"`
-	Enabled   bool       `json:"enabled"`
-	Managed   bool       `json:"managed"`
-	CreatedAt *time.Time `json:"created_at,omitempty"`
-	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	ProxyURL   string     `json:"proxy_url,omitempty"`
+	Models     []string   `json:"models,omitempty"`
+	ModelsMode string     `json:"models_mode,omitempty"`
+	Enabled    bool       `json:"enabled"`
+	Managed    bool       `json:"managed"`
+	CreatedAt  *time.Time `json:"created_at,omitempty"`
+	UpdatedAt  *time.Time `json:"updated_at,omitempty"`
 }
 
 // ListProviderCredentials handles GET /admin/provider-credentials.
@@ -364,6 +368,7 @@ func (h *Handler) buildProviderCredentialUpsert(ctx context.Context, name string
 		GCPScope:                 strings.TrimSpace(req.GCPScope),
 		ProxyURL:                 proxyURL,
 		Models:                   req.Models,
+		ModelsMode:               string(config.NormalizeConfiguredProviderModelsMode(config.ConfiguredProviderModelsMode(req.ModelsMode))),
 		Enabled:                  enabled,
 	}
 	if current != nil {
@@ -467,6 +472,7 @@ func (h *Handler) providerCredentialView(cred providers.ManagedProviderCredentia
 		GCPScope:           cred.GCPScope,
 		ProxyURL:           redactProxyURL(cred.ProxyURL),
 		Models:             cred.Models,
+		ModelsMode:         cred.ModelsMode,
 		Enabled:            cred.Enabled,
 		Managed:            h.providerCredentials.IsManaged(cred.Name),
 		CreatedAt:          nonZeroTime(cred.CreatedAt),
@@ -499,6 +505,7 @@ func (h *Handler) declaredProviderCredentialView(cfg providers.SanitizedProvider
 		BaseURL:           cfg.BaseURL,
 		APIVersion:        cfg.APIVersion,
 		Models:            cfg.Models,
+		ModelsMode:        cfg.ModelsMode,
 		SessionStickyKeys: cfg.SessionStickyKeys,
 		Billable:          cfg.Billable,
 		ProxyURL:          cfg.ProxyURL,

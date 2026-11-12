@@ -371,6 +371,124 @@ Ostatni błąd wspominający `x509: certificate signed by unknown authority` ozn
 że certyfikat TLS serwera został wystawiony przez CA, któremu kontener nie ufa.
 Zobacz [prywatne certyfikaty CA](/pl/guides/production#certyfikaty-upstreamu-za-prywatnym-ca).
 
+## Logowanie przez OAuth
+
+Niektóre serwery MCP (Notion, Linear, GitHub, Sentry, ...) wymagają
+interaktywnego logowania OAuth zamiast statycznego tokena. GoModel loguje się
+osobno do każdego serwera, a z tego logowania korzystają wszyscy klienci
+gatewaya. W dashboardzie:
+
+1. Kliknij **Dodaj serwer MCP** i wybierz usługę w polu **Serwer**: Linear, Notion, GitHub,
+   Sentry, Stripe, Supabase, Vercel lub Hugging Face. URL zostanie uzupełniony.
+2. Wybierz sposób połączenia:
+   - **Zaloguj się przez ...**: kliknij **Zapisz i zaloguj**, a potem zatwierdź
+     dostęp na stronie logowania usługi. Wrócisz do **MCP Servers**, a serwer
+     połączy się ponownie z nowym tokenem.
+   - **Klucz API lub token**, jeśli usługa go oferuje: wklej klucz i zapisz.
+     Serwer połączy się ponownie z tym kluczem, bez strony logowania. Hugging
+     Face oferuje tę opcję albo **Bez uwierzytelniania**.
+
+Dla innego serwera wybierz **Własny serwer**, wpisz jego URL bez nagłówka
+`Authorization` i zapisz. Gdy odpowie `401 Unauthorized`, pokaże **Wymagane
+logowanie**; kliknij ikonę logowania w wierszu, a potem **Przejdź do
+logowania**. Ustawienia połączenia i dostępu serwera z listy są w
+**Ustawieniach zaawansowanych**; narzędzia wybierzesz później, edytując serwer.
+
+GitHub nie obsługuje dynamicznej rejestracji klientów: raz zarejestruj
+[aplikację OAuth GitHub](https://github.com/settings/applications/new) z
+adresem przekierowania widocznym w oknie logowania, a potem wpisz tam jej
+client ID i secret.
+
+GoModel stosuje
+[specyfikację autoryzacji MCP](https://modelcontextprotocol.io/specification/latest/basic/authorization):
+odnajduje serwer autoryzacji w metadanych chronionego zasobu (protected
+resource metadata), wymaga PKCE S256, wysyła wskaźnik `resource` w każdym
+żądaniu tokena i sprawdza `state` oraz `iss` przy powrocie. Rejestruje się jako
+klient OAuth przez dynamiczną rejestrację klientów. Jeśli serwer autoryzacji jej
+nie obsługuje, zarejestruj klienta samodzielnie z adresem przekierowania
+widocznym w oknie (`https://<gateway>/admin/mcp-oauth/callback`) i wpisz jego
+identyfikator (oraz sekret dla klienta poufnego) w sekcji **Użyj własnego
+klienta OAuth**.
+
+Tokeny są przechowywane w bazie danych gatewaya, szyfrowane za pomocą
+[`GOMODEL_ENCRYPTION_KEY`](/pl/advanced/encryption-at-rest), jeśli jest
+ustawiony, i nigdy nie są zwracane przez admin API. GoModel odświeża wygasły
+access token za pomocą refresh tokena i zapisuje rotowany refresh token. Gdy
+serwer odpowie `401 Unauthorized` na token, który jeszcze nie wygasł (na
+przykład unieważniony wcześniej), GoModel odświeża go raz i ponawia żądanie, o
+ile serwer autoryzacji wydał refresh token; w przeciwnym razie wiersz pokazuje
+**Logowanie wymaga uwagi** i trzeba zalogować się ponownie.
+Wiersz pokazuje **Zalogowano**, **Logowanie wygasło** (brak refresh tokena; zaloguj
+się ponownie) albo **Logowanie wymaga uwagi** z błędem. Nieudane odświeżenie
+jest ponawiane przy następnym żądaniu, więc zaloguj się ponownie dopiero, gdy
+błąd się utrzymuje. Ikona wylogowania usuwa zapisane tokeny.
+
+Uwagi:
+
+- Logowanie działa dla serwerów `http` i `sse`, także tych zadeklarowanych w
+  `config.yaml`; tokeny są stanem w czasie działania, a nie konfiguracją. URL
+  serwera musi używać `https`; zwykłe `http` działa tylko na adresie loopback
+  (`localhost`, `127.0.0.1`, `::1`).
+- Token z logowania zastępuje skonfigurowany nagłówek `Authorization` i jest
+  wysyłany tylko do originu serwera. Po zmianie URL serwera tokeny nie są
+  używane, dopóki nie zalogujesz się ponownie.
+- Discovery, rejestracja klienta i żądania tokenów łączą się tylko z adresami
+  publicznymi, więc publiczny serwer nie może skierować gatewaya na usługi
+  wewnętrzne. Wyjątki to własny host serwera MCP; sieci prywatne (`10.x`,
+  `192.168.x` i podobne), gdy serwer MCP też jest w sieci prywatnej, np.
+  wewnętrzny serwer logujący się przez wewnętrznego dostawcę tożsamości; oraz
+  loopback, gdy sam URL serwera wskazuje na loopback. Adresy link-local, w tym
+  endpointy metadanych chmury, są zawsze odrzucane.
+- Wszyscy klienci gatewaya współdzielą jedno logowanie. Tokeny upstreamu per
+  użytkownik nie są jeszcze obsługiwane.
+- Przy kilku instancjach gatewaya callback musi trafić do instancji, która
+  rozpoczęła logowanie (sticky sessions dla `/admin`). Instancje współdzielące
+  bazę danych odświeżają token po kolei, więc rotowany refresh token jest
+  użyty tylko raz; pozostałe pobierają odświeżony token z bazy danych.
+
+Odpowiedniki w admin API to `POST /admin/mcp-servers/{slug}/oauth/start`
+(body: `redirect_uri`, opcjonalnie `client_id`/`client_secret`; zwraca
+`authorization_url`) oraz `DELETE /admin/mcp-servers/{slug}/oauth`.
+
+## Sesje między replikami
+
+Repliki korzystające ze wspólnej bazy PostgreSQL lub MongoDB współdzielą też
+sesje MCP, więc klienci za load balancerem nie potrzebują sticky sessions. Gdy
+`initialize` się powiedzie, replika, która odpowiedziała, zapisuje w bazie
+danych powiązanie sesji: ID klucza uwierzytelniającego, ścieżkę użytkownika,
+endpoint, zakres `X-MCP-Servers`, tryb discovery oraz parametry `initialize`
+klienta. Kluczem jest skrót SHA-256 `Mcp-Session-Id`, nigdy samo ID, a wpis nie
+zawiera sekretów. Request z tym ID na innej replice jest sprawdzany względem
+powiązania i wznawia tam sesję, bez nowego `initialize`.
+
+| | Między replikami |
+| --- | --- |
+| Wywołania narzędzi, listowanie, prompty, zasoby | Działają na każdej replice, z zakresem i trybem discovery, z którymi otwarto sesję. Replika, która wznawia sesję, listuje katalog w stanie z chwili wznowienia, który może różnić się od wcześniejszej listy. |
+| Wynegocjowana wersja protokołu, informacje o kliencie i capabilities | Są przenoszone. |
+| Powiązanie sesji (klucz, ścieżka użytkownika, endpoint) | Sprawdzane na każdej replice; wykradzione ID pod inną tożsamością dostaje 404 wszędzie. |
+| `DELETE` | Kończy sesję na każdej replice: każda odrzuca jej requesty w ciągu około 2 sekund. Otwarty strumień `GET` na innej replice nie jest zamykany wcześniej; kończy się, gdy klient go zamknie, albo po limicie bezczynności tej repliki. |
+| Usunięcie serwera wirtualnego | Kończy jego sesje na każdej replice, nawet jeśli zostanie odtworzony pod tą samą nazwą: każda odrzuca ich requesty w ciągu około 2 sekund. Otwarte strumienie `GET` nie są zamykane wcześniej. |
+| Limit bezczynności | 30 minut bez requestu na którejkolwiek replice, z dokładnością do minuty. Wywołanie, które wciąż trwa, liczy się jako aktywność. |
+| Trwający strumień odpowiedzi | Zostaje na swojej replice. Jeśli ta replika się zatrzyma, klient zobaczy błąd tego requestu; sesja trwa dalej na innej. |
+| Strumień powiadomień `GET` | Pozostaje otwarty na replice, na której go otwarto, dopóki klient go nie zamknie albo ta replika nie zakończy sesji. Klient, który go ponownie połączy, trafia na dowolną replikę. |
+
+Wznawianie strumieni przez `Last-Event-ID` nie jest obsługiwane, ani na jednej
+replice, ani na kilku. Gateway nie wysyła do klientów requestów sampling,
+elicitation ani roots (zobacz
+[zakres obsługi protokołu](#zakres-obsługi-protokołu)), więc żaden taki request
+nie może utknąć na innej replice.
+
+Z SQLite sesje zostają na instancji, która je otworzyła, bo SQLite obsługuje
+jedną replikę. Jeśli baza danych jest nieosiągalna w chwili otwierania sesji,
+ta sesja też zostaje na swojej replice, a gateway loguje ostrzeżenie. Jeśli
+później nie da się jej odczytać, replika, która już obsługuje sesję, obsługuje
+ją dalej przez maksymalnie 30 minut, nie widząc `DELETE` wysłanego gdzie
+indziej, a potem ją kończy; każda inna replika odpowiada 404, a klient
+inicjalizuje nową sesję. `DELETE` wysłany, gdy do bazy nie da się zapisywać,
+kończy sesję tylko na replice, która go odebrała: dopóki wpis sesji nie
+wygaśnie, do 30 minut później, ten sam klient może ją jeszcze wznowić na innej
+replice, a wznowiona sesja działa dalej normalnie.
+
 ## Wybierz, które narzędzia udostępnia każdy serwer
 
 Domyślnie udostępniane jest każde narzędzie zgłaszane przez serwer. Przytnij
@@ -475,11 +593,23 @@ serwer, ale ukryte przez filtry, są wymienione osobno w `excluded_tools`. Nazwy
 oryginalnymi nazwami z upstreamu; zagregowany endpoint `/mcp` udostępnia je jako
 `{slug}_{name}`.
 
+Aby zobaczyć wszystkie narzędzia naraz, kliknij **Wszystkie narzędzia** na
+stronie serwerów MCP. Widok pokazuje narzędzia wszystkich serwerów na jednej
+liście z wyszukiwarką, wraz z opisami, wskazówkami read-only i destructive oraz
+serwerem źródłowym. Udostępnione narzędzia mają nazwy, których używają klienci
+(`{slug}_{name}`); ukryte zachowują nazwę z serwera upstream.
+Wybierz serwer wirtualny, aby zobaczyć tylko narzędzia jego członków, i włącz
+**Pokaż narzędzia ukryte przez filtry**, aby uwzględnić narzędzia wykluczone.
+Serwery, które nie są połączone lub których katalog nie wczytał się, są wymienione
+nad listą, ponieważ może brakować ich narzędzi. Lista pokazuje widok całej
+bramy: nie uwzględnia limitów `user_paths` danego klucza API, więc niektórzy
+klienci mogą nie widzieć wszystkich wymienionych serwerów.
+
 ## Uwagi dotyczące bezpieczeństwa
 
 - **Granica danych uwierzytelniających.** Specyfikacja MCP zabrania przekazywania
   tokenów dalej; GoModel kończy obsługę bearer tokena klienta i dodaje dane
-  uwierzytelniające danego serwera z konfiguracji. Klucze klientów nigdy nie
+  uwierzytelniające danego serwera z konfiguracji lub z logowania OAuth. Klucze klientów nigdy nie
   docierają do upstreamu, a skonfigurowane nagłówki upstreamu nie są wysyłane
   przy przekierowaniach między originami.
 - **Originy przeglądarek są domyślnie blokowane.** Klienty MCP nie są stronami
@@ -519,7 +649,7 @@ oryginalnymi nazwami z upstreamu; zagregowany endpoint `/mcp` udostępnia je jak
 - **Sesje to nie uwierzytelnianie.** Każdy request jest uwierzytelniany bearer
   tokenem, a sesja jest dodatkowo powiązana z tożsamością zarządzanego klucza,
   ścieżką użytkownika i przypiętym endpointem, które ją zainicjowały; przedstawienie
-  wykradzionego ID sesji pod inną tożsamością zwraca 404.
+  wykradzionego ID sesji pod inną tożsamością zwraca 404 na każdej replice.
 - Wartości nagłówków z sekretami są wyświetlane zamaskowane (`***`) w Admin API
   i dashboardzie; zapisanie formularza z `***` zachowuje zapisany sekret.
 

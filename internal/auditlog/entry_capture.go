@@ -24,6 +24,9 @@ func PopulateRequestData(entry *LogEntry, req *http.Request, cfg Config) {
 		PopulateRequestHeaders(entry, req.Header)
 	}
 
+	if req.URL != nil {
+		cfg = cfg.ForPath(req.URL.Path)
+	}
 	if !cfg.LogBodies {
 		return
 	}
@@ -108,6 +111,7 @@ func CaptureInternalJSONExchange(
 	if entry == nil {
 		return
 	}
+	cfg = cfg.ForPath(path)
 
 	if req := internalJSONAuditRequest(ctx, method, path, requestIDForEntry(entry), requestBody, cfg.LogBodies); req != nil {
 		PopulateRequestData(entry, req, cfg)

@@ -1,6 +1,6 @@
 ---
 title: "Encryption at Rest"
-description: "Encrypt provider credentials, MCP headers, and guardrail secrets saved from the dashboard with GOMODEL_ENCRYPTION_KEY."
+description: "Encrypt provider credentials, MCP headers and OAuth tokens, and guardrail secrets saved from the dashboard with GOMODEL_ENCRYPTION_KEY."
 icon: "lock"
 keywords: ["encryption at rest", "GOMODEL_ENCRYPTION_KEY", "key rotation", "secrets", "AES-256-GCM", "KMS"]
 ---
@@ -16,6 +16,7 @@ Encrypted fields:
 | ----------------------- | ------------------------------------------------------------------------------ |
 | `provider_credentials`  | `api_keys`, `service_account_json`, `service_account_json_base64`, `proxy_url` |
 | `mcp_servers`           | `headers` values                                                               |
+| `mcp_server_oauth`      | the whole OAuth sign-in record (tokens and client secret)                      |
 | `guardrail_definitions` | config fields the plugin marks as secret (for example Presidio's `api_key`)    |
 
 Credentials declared in environment variables or `config.yaml` are never

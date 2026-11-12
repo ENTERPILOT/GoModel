@@ -1,6 +1,6 @@
 ---
 title: "Verschlüsselung ruhender Daten"
-description: "Verschlüsseln Sie über das Dashboard gespeicherte Provider-Zugangsdaten, MCP-Header und Guardrail-Secrets mit GOMODEL_ENCRYPTION_KEY."
+description: "Verschlüsseln Sie über das Dashboard gespeicherte Provider-Zugangsdaten, MCP-Header und OAuth-Tokens sowie Guardrail-Secrets mit GOMODEL_ENCRYPTION_KEY."
 icon: "lock"
 keywords: ["Verschlüsselung ruhender Daten", "encryption at rest", "GOMODEL_ENCRYPTION_KEY", "Key Rotation", "key rotation", "Secrets", "AES-256-GCM", "KMS"]
 ---
@@ -16,6 +16,7 @@ Verschlüsselte Felder:
 | ----------------------- | ------------------------------------------------------------------------------ |
 | `provider_credentials`  | `api_keys`, `service_account_json`, `service_account_json_base64`, `proxy_url` |
 | `mcp_servers`           | Werte von `headers`                                                            |
+| `mcp_server_oauth`      | der gesamte OAuth-Anmeldedatensatz (Tokens und Client-Secret)                  |
 | `guardrail_definitions` | Konfigurationsfelder, die das Plugin als geheim markiert (zum Beispiel `api_key` von Presidio) |
 
 Zugangsdaten, die in Umgebungsvariablen oder in `config.yaml` deklariert sind,

@@ -585,6 +585,7 @@ curl "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=202
 {
   "start_date": "2026-10-01",
   "end_date": "2026-10-31",
+  "time_zone": "UTC",
   "currency": "USD",
   "parent": "/customers",
   "customers": [
@@ -610,6 +611,8 @@ curl "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=202
 ```
 
 - Customers are sorted by user path, and lines by model and provider.
+- The period's days are read in the `X-GoModel-Timezone` header's zone, UTC
+  without it, and `time_zone` reports it (the last CSV column too).
 - An invoice holds at most 50,000 lines (customer × model × provider); past
   that it returns `400`. Narrow the period or filters, or group customers with
   `parent`.

@@ -299,6 +299,9 @@ func (a *App) startServer(ctx context.Context, address string, start func(contex
 	// still being built has nothing to refresh yet, and its first tick
 	// catches up on everything changed since it was built.
 	a.clusterSync.Start(serverCtx)
+	// Every subsystem has created its schema by now, so planner statistics
+	// cover all tables and indexes. Stopped when the storage closes.
+	storage.StartMaintenance(a.storage)
 
 	slog.Info("starting server", "address", address)
 	err := start(serverCtx)
@@ -505,6 +508,7 @@ func (a *App) logStartupInfo() {
 		slog.Info("audit logging enabled",
 			"log_bodies", cfg.Logging.LogBodies,
 			"log_audio_bodies", cfg.Logging.LogAudioBodies,
+			"log_embedding_bodies", cfg.Logging.LogEmbeddingBodies,
 			"log_image_bodies", cfg.Logging.LogImageBodies,
 			"log_image_bodies_scope", cfg.Logging.LogImageBodiesScope,
 			"log_headers", cfg.Logging.LogHeaders,
