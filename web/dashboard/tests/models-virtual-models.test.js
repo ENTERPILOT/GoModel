@@ -318,6 +318,78 @@ test("buildDisplayModels keeps a virtual model named like an upstream model ID v
   assert.deepEqual(Array.from(groups[0].rows, (row) => row.display_name), ["qwen/qwen3-vl-8b-instruct"]);
 });
 
+test("buildDisplayModels keeps a shadowing virtual model on a category page when its target is outside the category", () => {
+  // A category page loads only that category's models: the shadowed model is
+  // here, the virtual model's target is not.
+  const models = [
+    {
+      provider_name: "openrouter",
+      provider_type: "openrouter",
+      selector: "openrouter/qwen/qwen3-vl-8b-instruct",
+      model: { id: "qwen/qwen3-vl-8b-instruct", object: "model", metadata: { categories: ["vision"] } },
+    },
+  ];
+  const aliases = [
+    {
+      name: "qwen/qwen3-vl-8b-instruct",
+      target_provider: "local",
+      target_model: "qwen3-vl-8b",
+      enabled: true,
+      valid: true,
+    },
+    {
+      name: "unrelated",
+      target_provider: "local",
+      target_model: "qwen3-vl-8b",
+      enabled: true,
+      valid: true,
+    },
+  ];
+  const rows = display(models, aliases, { activeCategory: "vision" });
+
+  const virtualRow = rows.find((row) => row.key === "alias:qwen/qwen3-vl-8b-instruct");
+  const upstreamRow = rows.find((row) => row.key === "model:openrouter/qwen/qwen3-vl-8b-instruct");
+  assert.ok(virtualRow, "the shadowing virtual model keeps its row");
+  assert.equal(virtualRow.shadowed_model, "openrouter/qwen/qwen3-vl-8b-instruct");
+  assert.equal(aliasRowCanRemove(virtualRow), true);
+  assert.equal(rowRedirectCanRemove(upstreamRow), false);
+  assert.equal(rows.find((row) => row.key === "alias:unrelated"), undefined);
+});
+
+test("buildDisplayModels flags a shadowed model whose qualified name has its own redirect", () => {
+  const models = [
+    {
+      provider_name: "openai",
+      provider_type: "openai",
+      model: { id: "gpt-4o", object: "model" },
+    },
+  ];
+  const redirect = (name, target) => ({
+    name,
+    target_provider: "anthropic",
+    target_model: target,
+    enabled: true,
+    valid: true,
+  });
+
+  const alone = display(models, [redirect("gpt-4o", "claude-fable-5")]);
+  assert.equal(alone.find((row) => row.key === "alias:gpt-4o").shadowed_model_redirected, false);
+
+  const both = display(models, [
+    redirect("gpt-4o", "claude-fable-5"),
+    redirect("openai/gpt-4o", "claude-opus-5"),
+  ]);
+  const virtualRow = both.find((row) => row.key === "alias:gpt-4o");
+  const modelRow = both.find((row) => row.key === "model:openai/gpt-4o");
+  assert.equal(virtualRow.shadowed_model, "openai/gpt-4o");
+  assert.equal(virtualRow.shadowed_model_redirected, true);
+  // The model row stands for the redirect on its own name, which stays
+  // removable from there.
+  assert.equal(modelRow.masking_alias.name, "openai/gpt-4o");
+  assert.equal(rowShadowingAliasName(modelRow), "");
+  assert.equal(rowRedirectCanRemove(modelRow), true);
+});
+
 test("buildDisplayModels folds a virtual model named like the model row into that row", () => {
   const models = [
     {

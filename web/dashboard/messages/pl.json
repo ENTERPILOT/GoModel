@@ -780,6 +780,7 @@
   "models_shadows": "Przesłania",
   "models_shadowed_by": "Przesłonięty przez model wirtualny",
   "models_shadow_title": "Żądania dla {name} trafiają do modelu wirtualnego, a nie do modelu dostawcy. Użyj {model}, aby wywołać model dostawcy bezpośrednio.",
+  "models_shadow_title_redirected": "Żądania dla {name} trafiają do modelu wirtualnego, a nie do modelu dostawcy.",
   "models_redirects_to": "Przekierowuje do",
   "models_falls_back_to": "Awaryjnie przełącza na",
   "models_balanced_with": "Równoważony z",

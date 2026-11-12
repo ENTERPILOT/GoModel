@@ -159,7 +159,9 @@ import {
           {m.models_targets()} <span class="mono font-size-md"><HighlightText text={row.secondary_name} needle={modelsStore.filter} /></span>
         </div>
         {#if row.shadowed_model}
-          <div class="model-name-secondary" title={m.models_shadow_title({ name: row.alias.name, model: row.shadowed_model })}>
+          <div class="model-name-secondary" title={row.shadowed_model_redirected
+            ? m.models_shadow_title_redirected({ name: row.alias.name })
+            : m.models_shadow_title({ name: row.alias.name, model: row.shadowed_model })}>
             {m.models_shadows()} <span class="mono font-size-md">{row.shadowed_model}</span>
           </div>
         {/if}

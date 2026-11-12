@@ -41,7 +41,9 @@ export function buildDisplayModels({
   const concreteModelsByKey = new Map();
   const rows = safeModels.map((model) => {
     const displayName = qualifiedModelName(model);
-    let maskingAlias = null;
+    // A redirect on the row's own name wins over one reached through another
+    // name the model answers to: it is the redirect edited from this row.
+    let maskingAlias = redirectsBySource.get(normalizedAliasName(displayName)) || null;
     for (const key of modelKeys(model)) {
       if (!concreteModelsByKey.has(key)) {
         concreteModelsByKey.set(key, model);
@@ -93,9 +95,14 @@ export function buildDisplayModels({
       targetModel = concreteModelsByKey.get(key) || null;
       if (targetModel) break;
     }
-    if (!targetModel && activeCategory && activeCategory !== "all") {
+    // On a category page only that category's models are loaded, so a virtual
+    // model whose targets fall outside it is left out. One that shadows a model
+    // shown here stays: the shadowed model's row points at it and offers no
+    // removal of its own.
+    if (!targetModel && !masksSourceModel && activeCategory && activeCategory !== "all") {
       continue;
     }
+    const shadowedModel = masksSourceModel ? qualifiedModelName(sourceModel) : "";
 
     rows.push({
       key: "alias:" + alias.name,
@@ -114,7 +121,12 @@ export function buildDisplayModels({
       access: null,
       masking_alias: null,
       source_model_exists: Boolean(sourceModel),
-      shadowed_model: masksSourceModel ? qualifiedModelName(sourceModel) : "",
+      shadowed_model: shadowedModel,
+      // Whether the shadowed model's qualified name carries a redirect of its
+      // own, in which case requesting it does not reach the upstream model.
+      shadowed_model_redirected: Boolean(
+        shadowedModel && redirectsBySource.has(normalizedAliasName(shadowedModel)),
+      ),
       has_virtual_model: true,
       alias_state_class: aliasStateClass(alias),
       alias_state_text: aliasStateText(alias),

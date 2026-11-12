@@ -692,6 +692,7 @@
   "models_shadows": "遮蔽",
   "models_shadowed_by": "被虚拟模型遮蔽",
   "models_shadow_title": "对 {name} 的请求会发送到虚拟模型，而不是上游模型。请求 {model} 可直接调用上游模型。",
+  "models_shadow_title_redirected": "对 {name} 的请求会发送到虚拟模型，而不是上游模型。",
   "models_redirects_to": "重定向到",
   "models_falls_back_to": "回退到",
   "models_balanced_with": "与以下目标负载均衡",
