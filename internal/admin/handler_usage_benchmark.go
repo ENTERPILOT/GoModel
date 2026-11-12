@@ -3,6 +3,7 @@ package admin
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,13 +20,13 @@ const defaultBenchmarkMonths = 7
 // UsageBenchmark handles GET /admin/usage/benchmark
 //
 // @Summary      Benchmark the monthly cost per active user of a group
-// @Description  Treats each direct child of parent as one user, summing its whole subtree, and returns per calendar month the number of active users (at least one request in the month, response-cache hits included), their total cost and the mean, median (p50), p90 and maximum cost per active user. Percentiles interpolate linearly between closest ranks. Every user is counted; nothing is folded into an "other" bucket. Usage recorded on parent itself is reported as unattributed_cost. Months are read in the time zone of the X-GoModel-Timezone header (UTC without it); the current month is flagged partial. The response holds aggregates only unless top_users asks for the highest-cost users of each month.
+// @Description  Treats each direct child of parent as one user, summing its whole subtree, and returns per calendar month the number of active users (at least one request in the month, response-cache hits included), their total cost and the mean, median (p50), p90 and maximum cost per active user. Percentiles interpolate linearly between closest ranks. A user's cost is the one the invoice export reports for it; unpriced_users counts users whose cost is wholly unknown (counted at 0) and partly_priced_users those counted at a known part of it. Every user is counted; nothing is folded into an "other" bucket. Usage recorded on parent itself is reported as unattributed_cost. Months are read in the time zone of the X-GoModel-Timezone header (UTC without it); the current month is flagged partial and has no change percentages. A range covers at most 12 months. The response holds no user paths unless top_users asks for the highest-cost users of each month.
 // @Tags         admin
 // @Produce      json
 // @Security     BearerAuth
 // @Param        X-GoModel-Timezone  header  string  false  "IANA time zone months are read in, e.g. Europe/Warsaw (default UTC)"
 // @Param        parent       query     string  false  "Group whose direct children are the users, e.g. /eng (default: the credential's scope root, or /)"
-// @Param        months       query     int     false  "Number of months ending at end_month, 1-24 (default 7: six complete months plus the current one); ignored with start_month"
+// @Param        months       query     int     false  "Number of months ending at end_month, 1-12 (default 7: six complete months plus the current one); ignored with start_month"
 // @Param        start_month  query     string  false  "First month (YYYY-MM, default: months before end_month)"
 // @Param        end_month    query     string  false  "Last month (YYYY-MM, default and latest: the current month)"
 // @Param        cost_basis   query     string  false  "provider (default) or billed; billed requires pricing.markups_enabled"
@@ -47,6 +48,9 @@ func (h *Handler) UsageBenchmark(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
+	if parents := c.QueryParams()["parent"]; len(parents) > 1 {
+		return handleError(c, core.NewInvalidRequestError("invalid parent: name one group", nil))
+	}
 	parent, err := scopedUserPath(c, "parent", c.QueryParam("parent"))
 	if err != nil {
 		return handleError(c, err)
@@ -67,15 +71,9 @@ func (h *Handler) UsageBenchmark(c *echo.Context) error {
 		return handleError(c, core.NewInvalidRequestError(fmt.Sprintf("invalid top_users: use 0 to %d", usage.MaxBenchmarkTopUsers), nil))
 	}
 
-	months, err := optionalIntQueryParam(c, "months")
+	months, err := benchmarkMonthsParam(c)
 	if err != nil {
 		return handleError(c, err)
-	}
-	if months == 0 {
-		months = defaultBenchmarkMonths
-	}
-	if months < 1 || months > usage.MaxBenchmarkMonths {
-		return handleError(c, core.NewInvalidRequestError(fmt.Sprintf("invalid months: use 1 to %d", usage.MaxBenchmarkMonths), nil))
 	}
 
 	_, location := dashboardTimeZone(c)
@@ -98,6 +96,20 @@ func (h *Handler) UsageBenchmark(c *echo.Context) error {
 		benchmark = usage.EmptyBenchmark(params)
 	}
 	return c.JSON(http.StatusOK, benchmark)
+}
+
+// benchmarkMonthsParam returns the months query parameter, or the default
+// without it. With start_month the count is not used, so it is not read.
+func benchmarkMonthsParam(c *echo.Context) (int, error) {
+	raw := strings.TrimSpace(c.QueryParam("months"))
+	if raw == "" || strings.TrimSpace(c.QueryParam("start_month")) != "" {
+		return defaultBenchmarkMonths, nil
+	}
+	months, err := strconv.Atoi(raw)
+	if err != nil || months < 1 || months > usage.MaxBenchmarkMonths {
+		return 0, core.NewInvalidRequestError(fmt.Sprintf("invalid months: use a whole number from 1 to %d", usage.MaxBenchmarkMonths), nil)
+	}
+	return months, nil
 }
 
 // benchmarkMonthRange resolves the first days of the first and last month.

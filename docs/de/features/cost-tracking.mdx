@@ -189,21 +189,23 @@ Die Neuberechnung bepreist die abgerechneten Kosten mit dem Aufschlag neu, zu de
 
 Der Benchmark beantwortet die Frage „Was kostet ein aktiver Entwickler pro Monat, und wie verteilt sich das?“. `GET /admin/usage/benchmark` behandelt jedes direkte Kind von `parent` als einen Nutzer und summiert dessen gesamten Teilbaum, so wie der [Rechnungsexport](#rechnungsexport-gomodel-pro) und [Budgets pro Kind](/de/features/budgets#dynamische-budgets-pro-kind) Pfade gruppieren: Mit `parent=/eng` zählen `/eng/alice/laptop` und `/eng/alice/ci` beide als `/eng/alice`. Eine Pro-Lizenz ist nicht nötig.
 
-Auf der Nutzungsseite zeigt der Bereich **Kosten pro aktivem Nutzer** unterhalb von **Aufschlüsselung** dieselben Daten: Wählen Sie die Gruppe und die Anzahl der Monate und wechseln Sie zwischen einem Diagramm mit Median- und p90-Kosten pro aktivem Nutzer samt Anzahl aktiver Nutzer und einer Tabelle der Monatsstatistiken. Der Bereich folgt den Filtern der Seite, nicht aber ihrem Zeitraum. Bei aktivierten Aufschlägen wechselt ein Schalter zwischen Provider-Kosten und abgerechneten Kosten.
+Auf der Nutzungsseite zeigt der Bereich **Kosten pro aktivem Nutzer** unterhalb von **Aufschlüsselung** dieselben Daten: Wählen Sie die Gruppe und die Anzahl der Monate und wechseln Sie zwischen einem Diagramm mit Median- und p90-Kosten pro aktivem Nutzer samt Anzahl aktiver Nutzer und einer Tabelle der Monatsstatistiken. Der Bereich folgt den Filtern der Seite, nicht aber ihrem Zeitraum, und bietet bis zu 12 Monate. Bei aktivierten Aufschlägen wechselt ein Schalter zwischen Provider-Kosten und abgerechneten Kosten. Der aktuelle Monat ist als laufend markiert, statt mit dem Vormonat verglichen zu werden, Nutzer mit fehlenden Preisen zählt die Spalte **Preislücken**, und Kosten, die auf der Gruppe selbst erfasst wurden, erscheinen mit einem Hinweis.
 
 | Parameter | Standard | Ändern, wenn |
 | --- | --- | --- |
 | `parent` | Die Wurzel des [Bereichs](/de/advanced/admin-endpoints#bereichsbeschränkter-admin-zugriff) der Zugangsdaten, oder `/` für globale Zugangsdaten (Nutzer sind dann die Pfade der obersten Ebene) | Sie die Personen einer Gruppe sehen wollen, zum Beispiel `parent=/eng` |
-| `months` | `7`: sechs vollständige Monate plus der aktuelle | Sie einen längeren oder kürzeren Verlauf wollen, `1` bis `24` Monate bis `end_month` |
-| `start_month`, `end_month` | `end_month` ist der aktuelle Monat; `start_month` ergibt sich aus `months` | Sie einen festen Bereich wollen (`YYYY-MM`). `start_month` hat Vorrang vor `months`; `end_month` darf nicht nach dem aktuellen Monat liegen |
+| `months` | `7`: sechs vollständige Monate plus der aktuelle | Sie einen längeren oder kürzeren Verlauf wollen, `1` bis `12` Monate bis `end_month`. Jeder andere Wert, auch `0`, liefert `400` |
+| `start_month`, `end_month` | `end_month` ist der aktuelle Monat; `start_month` ergibt sich aus `months` | Sie einen festen Bereich von höchstens 12 Monaten wollen (`YYYY-MM`). Mit `start_month` wird `months` ignoriert und nicht geprüft; `end_month` darf nicht nach dem aktuellen Monat liegen |
 | `cost_basis` | `provider` | Sie Zugang weiterverkaufen: `billed` misst Provider-Kosten plus Aufschlag, einschließlich abgerechneter Treffer des Response-Caches. Erfordert `PRICING_MARKUPS_ENABLED=true`, sonst `409` `markups_disabled` |
 | `top_users` | `0` | Sie sehen wollen, wer die Kosten verursacht: Jeder Monat listet seine N teuersten Nutzer, höchstens `50` |
 
 <Note>
-  Standardmäßig enthält die Antwort nur aggregierte Statistiken: keine User
-  Paths und keine Werte pro Nutzer. Zeilen pro Nutzer
+  Standardmäßig nennt die Antwort keine User Paths: Sie enthält nur Anzahlen,
+  Summen und Statistiken pro Monat. Zeilen pro Nutzer
   (`top_users: [{user, requests, cost}]`) erscheinen nur, wenn Sie
-  `top_users` setzen.
+  `top_users` setzen. Die Statistiken sind nicht anonymisiert: In einem Monat
+  mit einem aktiven Nutzer sind `mean`, `p50`, `p90` und `max` genau dessen
+  Kosten, und bei wenigen Nutzern liegen sie nahe daran.
 </Note>
 
 Der Endpunkt akzeptiert außerdem die Datenfilter `model`, `provider`, `label`, `endpoint`, `operation`, `auth_key_id` und `user_path`. `cache_mode` ist wie beim Rechnungsexport fest: Requests und Provider-Kosten stammen aus Requests an Provider, während ein Treffer des Response-Caches seinen Nutzer aktiv macht und seinen abgerechneten Betrag zu den abgerechneten Kosten hinzufügt, den Provider aber nichts kostet.
@@ -225,6 +227,7 @@ curl "http://localhost:8080/admin/usage/benchmark?parent=/eng" \
       "partial": false,
       "active_users": 42,
       "unpriced_users": 0,
+      "partly_priced_users": 1,
       "total_cost": 1260.5,
       "mean": 30.01,
       "p50": 22.4,
@@ -241,17 +244,19 @@ curl "http://localhost:8080/admin/usage/benchmark?parent=/eng" \
 `months` listet jeden Monat des Bereichs, den ältesten zuerst, auch Monate ohne Nutzung. Pro Monat:
 
 - `active_users` — Nutzer mit mindestens einem Request im Monat; Treffer des Response-Caches zählen mit.
-- `total_cost`, `mean`, `p50` (Median), `p90` und `max` — Kosten in USD pro aktivem Nutzer. Die Statistiken sind in einem Monat ohne aktive Nutzer `null`.
-- `mean_change_percent` und `p50_change_percent` — Veränderung gegenüber dem Vormonat; `null` für den ersten Monat, für einen Monat ohne aktive Nutzer oder wenn der Wert des Vormonats nicht positiv ist.
-- `unpriced_users` — aktive Nutzer, deren gesamte Monatskosten unbekannt sind, weil ihre Modelle keine Preise haben. Sie zählen mit Kosten `0`; ein Nutzer mit teilweise unbepreister Nutzung zählt mit seinen bekannten Kosten.
+- `total_cost`, `mean`, `p50` (Median), `p90` und `max` — Kosten in USD pro aktivem Nutzer. Die Statistiken sind in einem Monat ohne aktive Nutzer `null`. Die Kosten eines Nutzers sind die, die der [Rechnungsexport](#rechnungsexport-gomodel-pro) für diesen Kunden im selben Monat auf der gewählten `cost_basis` ausweist.
+- `mean_change_percent` und `p50_change_percent` — Veränderung gegenüber dem Vormonat; `null` für den ersten Monat, für den laufenden aktuellen Monat, für einen Monat ohne aktive Nutzer oder wenn der Wert des Vormonats nicht positiv ist.
+- `unpriced_users` — aktive Nutzer, deren gesamte Monatskosten unbekannt sind, weil ihre Modelle keine Preise haben (die Rechnung zeigt für sie `null`). Sie zählen mit Kosten `0`.
+- `partly_priced_users` — aktive Nutzer mit teilweise unbepreister Nutzung. Sie zählen mit ihren bekannten Kosten; ist der Wert nicht `0`, liegen `total_cost` und die Statistiken für den Monat zu niedrig.
 - `unattributed_cost` — Nutzung, die direkt auf `parent` erfasst wurde. Sie gehört keinem Nutzer und ist nicht Teil von `total_cost`.
-- `partial` — `true` für den aktuellen, noch laufenden Monat. Vergleichen Sie ihn nur mit Vorsicht mit vollständigen Monaten.
+- `partial` — `true` für den aktuellen, noch laufenden Monat; er hat keine Veränderungswerte.
+- `top_users[].requests` — Requests an Provider, wie auf der Rechnung; Treffer des Response-Caches zählen nicht mit.
 
 Perzentile werden linear zwischen den nächstgelegenen Rängen interpoliert, wie bei Excels `PERCENTILE.INC`, dem Standard von NumPy und PostgreSQLs `percentile_cont`: Bei n sortierten Kosten liegt das p-te Perzentil auf dem 0-basierten Rang (n−1)·p, zwischen seinen beiden Nachbarn. Zwei Nutzer mit $10 und $20 ergeben ein `p50` von $15 und ein `p90` von $19; ein einzelner Nutzer ist jede Statistik. SQLite, PostgreSQL und MongoDB liefern dieselben Werte.
 
 Monate laufen von Mitternacht bis Mitternacht in der Zeitzone des Headers `X-GoModel-Timezone`, wie beim [Rechnungsexport](#rechnungsexport-gomodel-pro): Das Dashboard sendet seine eingestellte Zeitzone, ein API-Aufruf ohne den Header verwendet UTC. `time_zone` meldet die verwendete Zeitzone.
 
-Jeder Nutzer wird gezählt: Anders als bei der Aufschlüsselung wird nichts unter **Sonstige** zusammengefasst. Ein Benchmark enthält höchstens 100.000 Nutzermonate (Nutzer × Monate); darüber antwortet er mit `400`, statt Nutzer auszulassen. Wählen Sie einen tieferen `parent`, weniger Monate oder engere Filter. [Bereichsbeschränkte Zugangsdaten](/de/advanced/admin-endpoints#bereichsbeschränkter-admin-zugriff) können nur Gruppen innerhalb ihres Teilbaums auswerten; jeder andere `parent` liefert `403` `user_path_out_of_scope`.
+Jeder Nutzer wird gezählt: Anders als bei der Aufschlüsselung wird nichts unter **Sonstige** zusammengefasst. Ein Bereich umfasst höchstens 12 Monate einschließlich des aktuellen, passend zur 365-Tage-Grenze der übrigen Nutzungs-Endpunkte, und wird geprüft, bevor etwas gelesen wird. Ein Benchmark enthält höchstens 100.000 Nutzermonate (Nutzer × Monate); das Lesen bricht mit `400` ab, sobald es diese Grenze überschreitet, statt Nutzer auszulassen. Wählen Sie einen tieferen `parent`, weniger Monate oder engere Filter. `parent` nennt eine Gruppe; wird es wiederholt, folgt `400`. [Bereichsbeschränkte Zugangsdaten](/de/advanced/admin-endpoints#bereichsbeschränkter-admin-zugriff) können nur Gruppen innerhalb ihres Teilbaums auswerten; jeder andere `parent` liefert `403` `user_path_out_of_scope`.
 
 ## Rechnungsexport (GoModel Pro)
 

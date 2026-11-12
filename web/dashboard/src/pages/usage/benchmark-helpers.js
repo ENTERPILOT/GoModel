@@ -8,9 +8,10 @@ import { barColors, chartTickFont, chartTooltip } from "../../lib/utils/chartThe
 import { usageQuery } from "./usage-query.js";
 import * as m from "../../lib/paraglide/messages.js";
 
-// Month ranges offered, each ending with the current month: six complete
-// months (the API default), a year, and the API maximum.
-export const BENCHMARK_MONTH_OPTIONS = [7, 13, 24];
+// Month ranges offered, each ending with the current month: a quarter, six
+// complete months (the API default), and the API maximum of 12, in line with
+// the 365-day limit of the other usage views.
+export const BENCHMARK_MONTH_OPTIONS = [3, 7, 12];
 export const DEFAULT_BENCHMARK_MONTHS = 7;
 
 // benchmarkQuery renders the request: the page filters (the benchmark has
@@ -35,6 +36,57 @@ export function benchmarkMonthLabel(month) {
   return month.partial ? m.usage_benchmark_partial_month({ month: month.month }) : month.month;
 }
 
+// benchmarkCostBasisOptions returns the cost-basis toggle's options, or null
+// when billed cost is hidden (markups off), so the toggle is not shown.
+export function benchmarkCostBasisOptions(config) {
+  if (!config || !config.billedCostVisible()) return null;
+  return [
+    { value: "provider", label: m.usage_benchmark_cost_provider() },
+    { value: "billed", label: m.usage_benchmark_cost_billed() },
+  ];
+}
+
+// effectiveBenchmarkCostBasis is the basis requested: billed only while the
+// toggle is shown, since the API refuses it without markups.
+export function effectiveBenchmarkCostBasis(costBasis, config) {
+  return costBasis === "billed" && benchmarkCostBasisOptions(config) ? "billed" : "provider";
+}
+
+// benchmarkStatus picks what the section shows: "failed" after an error,
+// "empty" without an active user or unattributed cost, otherwise "ready".
+export function benchmarkStatus({ data = null, failed = false } = {}) {
+  if (failed) return "failed";
+  return benchmarkHasUsage(data) || benchmarkUnattributedCost(data) > 0 ? "ready" : "empty";
+}
+
+// benchmarkChangeLabel renders a month's median change; the partial current
+// month has none, so it reads as in progress rather than as a decline.
+export function benchmarkChangeLabel(month) {
+  if (month.partial) return m.usage_benchmark_change_partial();
+  return formatChangePercent(month.p50_change_percent);
+}
+
+// benchmarkPricingGaps renders a month's unpriced and partly priced users,
+// "–" when every user's cost is known.
+export function benchmarkPricingGaps(month) {
+  const unpriced = Number(month.unpriced_users || 0);
+  const partly = Number(month.partly_priced_users || 0);
+  if (!unpriced && !partly) return "–";
+  return m.usage_benchmark_pricing_gaps_value({ unpriced, partly });
+}
+
+// benchmarkHasPricingGaps reports whether any month has a user whose cost is
+// wholly or partly unknown.
+export function benchmarkHasPricingGaps(data) {
+  return benchmarkMonths(data).some((month) => month.unpriced_users > 0 || month.partly_priced_users > 0);
+}
+
+// benchmarkUnattributedCost sums the cost recorded on the group itself,
+// which no user carries.
+export function benchmarkUnattributedCost(data) {
+  return benchmarkMonths(data).reduce((sum, month) => sum + Number(month.unattributed_cost || 0), 0);
+}
+
 // formatChangePercent renders a month-over-month change: signed, one
 // decimal, "–" when there is nothing to compare with.
 export function formatChangePercent(value) {
@@ -48,12 +100,19 @@ export function benchmarkHasUsage(data) {
   return benchmarkMonths(data).some((month) => month.active_users > 0);
 }
 
+// fade halves a hex colour's opacity; other colour forms pass unchanged.
+function fade(color) {
+  return /^#[0-9a-f]{6}$/i.test(String(color)) ? color + "80" : color;
+}
+
 // benchmarkChartConfig plots median and p90 cost per active user (left axis)
 // over the months, with active users as bars on the right axis. Months
 // without active users leave gaps in the cost lines rather than reading as
-// free.
+// free; the line into the partial current month is dotted and its bar faded,
+// so it reads as still running rather than as a decline.
 export function benchmarkChartConfig(colors, data) {
   const months = benchmarkMonths(data);
+  const partial = (index) => Boolean(months[index] && months[index].partial);
   const palette = barColors();
   const ticks = { color: colors.text, font: chartTickFont() };
   const line = (label, key, color, dashed) => ({
@@ -65,7 +124,9 @@ export function benchmarkChartConfig(colors, data) {
     backgroundColor: color,
     borderWidth: 2,
     borderDash: dashed ? [6, 4] : [],
+    segment: { borderDash: (ctx) => (partial(ctx.p1DataIndex) ? [2, 3] : undefined) },
     pointRadius: 3,
+    pointStyle: months.map((month) => (month.partial ? "rectRot" : "circle")),
     spanGaps: false,
     order: 0,
   });
@@ -81,7 +142,7 @@ export function benchmarkChartConfig(colors, data) {
           label: m.usage_benchmark_active_users(),
           data: months.map((month) => month.active_users || 0),
           yAxisID: "users",
-          backgroundColor: palette[1],
+          backgroundColor: months.map((month) => (month.partial ? fade(palette[1]) : palette[1])),
           borderWidth: 0,
           maxBarThickness: 36,
           order: 1,

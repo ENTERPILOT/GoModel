@@ -596,8 +596,8 @@ Pro-Lizenz ist nicht nötig. Siehe
 | Parameter     | Typ    | Beschreibung                                                                 | Standard |
 | ------------- | ------ | ---------------------------------------------------------------------------- | -------- |
 | `parent`      | string | Gruppe, deren direkte Kinder die Nutzer sind; Nutzung auf dem Parent selbst wird als `unattributed_cost` gemeldet | Bereichswurzel der Zugangsdaten oder `/` |
-| `months`      | int    | Monate bis einschließlich `end_month`, `1` bis `24`; ignoriert, wenn `start_month` gesetzt ist | `7` |
-| `start_month` | string | Erster Monat, `YYYY-MM`                                                      | Aus `months` |
+| `months`      | int    | Monate bis einschließlich `end_month`, `1` bis `12`; ignoriert und nicht geprüft, wenn `start_month` gesetzt ist | `7` |
+| `start_month` | string | Erster Monat, `YYYY-MM`; der Bereich umfasst höchstens 12 Monate             | Aus `months` |
 | `end_month`   | string | Letzter Monat, `YYYY-MM`; darf nicht nach dem aktuellen Monat liegen         | Aktueller Monat |
 | `cost_basis`  | string | `provider` oder `billed` (Provider-Kosten plus Aufschlag, einschließlich abgerechneter Cache-Treffer) | `provider` |
 | `top_users`   | int    | Die N teuersten Nutzer jedes Monats auflisten, `0` bis `50`; `0` liefert nur Aggregate | `0` |
@@ -607,8 +607,8 @@ ignoriert: Requests und Provider-Kosten umfassen Requests an Provider,
 Cache-Treffer machen einen Nutzer aktiv und zählen zu den abgerechneten Kosten.
 
 ```bash
-# Ein Jahr plus der aktuelle Monat, mit den fünf teuersten Nutzern pro Monat
-curl "http://localhost:8080/admin/usage/benchmark?parent=/eng&months=13&top_users=5" \
+# Elf vollständige Monate plus der aktuelle, mit den fünf teuersten Nutzern pro Monat
+curl "http://localhost:8080/admin/usage/benchmark?parent=/eng&months=12&top_users=5" \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
 ```
 
@@ -624,13 +624,14 @@ curl "http://localhost:8080/admin/usage/benchmark?parent=/eng&months=13&top_user
       "partial": true,
       "active_users": 38,
       "unpriced_users": 1,
+      "partly_priced_users": 0,
       "total_cost": 512.3,
       "mean": 13.48,
       "p50": 9.1,
       "p90": 27.75,
       "max": 64.2,
-      "mean_change_percent": -55.08,
-      "p50_change_percent": -59.38,
+      "mean_change_percent": null,
+      "p50_change_percent": null,
       "unattributed_cost": 0,
       "top_users": [{ "user": "/eng/alice", "requests": 1840, "cost": 64.2 }]
     }
@@ -639,13 +640,19 @@ curl "http://localhost:8080/admin/usage/benchmark?parent=/eng&months=13&top_user
 ```
 
 - `months` enthält jeden Monat des Bereichs, den ältesten zuerst, auch Monate
-  ohne Nutzung; der aktuelle Monat hat `"partial": true`.
+  ohne Nutzung; der aktuelle Monat hat `"partial": true` und keine
+  Veränderungswerte.
 - Monate gelten in der Zeitzone des Headers `X-GoModel-Timezone`, ohne ihn in
   UTC, und `time_zone` meldet sie.
 - `mean`, `p50`, `p90` und `max` sind ohne aktive Nutzer `null`. Die
-  Änderungsfelder sind `null` für den ersten Monat, einen Monat ohne aktive
-  Nutzer oder einen nicht positiven Vormonatswert.
-- `top_users` fehlt, wenn es nicht angefordert wurde.
+  Änderungsfelder sind `null` für den ersten Monat, den laufenden Monat, einen
+  Monat ohne aktive Nutzer oder einen nicht positiven Vormonatswert.
+- Die Kosten eines Nutzers entsprechen der Zwischensumme des Rechnungsexports
+  für diesen Kunden. `unpriced_users` zählt Nutzer, deren Kosten ganz
+  unbekannt sind (mit `0` gezählt), `partly_priced_users` Nutzer, die mit dem
+  bekannten Teil ihrer Kosten zählen.
+- `top_users` fehlt, wenn es nicht angefordert wurde; seine `requests` sind
+  Requests an Provider, wie auf der Rechnung.
 - Jeder Nutzer wird gezählt, nichts wird unter „other“ zusammengefasst. Ein
   Benchmark enthält höchstens 100.000 Nutzermonate; darüber antwortet der
   Endpunkt mit `400`. Wählen Sie einen tieferen `parent`, weniger Monate oder
@@ -653,7 +660,7 @@ curl "http://localhost:8080/admin/usage/benchmark?parent=/eng&months=13&top_user
 
 | Status | Code | Wann |
 | ------ | ---- | ---- |
-| `400`  | —    | Ungültiger Monat, `months`, `cost_basis` oder `top_users`; ein Bereich über 24 Monate; `end_month` nach dem aktuellen Monat; mehr als 100.000 Nutzermonate |
+| `400`  | —    | Ungültiger Monat, `cost_basis` oder `top_users`; `months` außerhalb von `1` bis `12` (auch `0`) oder keine ganze Zahl, außer wenn `start_month` gesetzt ist; ein Bereich über 12 Monate; `end_month` nach dem aktuellen Monat; ein wiederholter `parent`; mehr als 100.000 Nutzermonate |
 | `403`  | `user_path_out_of_scope` | Bereichsbeschränkte Zugangsdaten nennen einen `parent` oder `user_path` außerhalb ihres Teilbaums |
 | `409`  | `markups_disabled` | `cost_basis=billed`, während `PRICING_MARKUPS_ENABLED` aus ist |
 

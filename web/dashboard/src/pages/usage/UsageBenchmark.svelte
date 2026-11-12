@@ -2,7 +2,7 @@
   // Cost per active user: for a group (each direct child of it is one user,
   // its subtree summed), the monthly active users and the spread of their
   // cost, as a chart (median and p90 lines over active-user bars) or a table
-  // of the monthly statistics. Aggregates only: no per-user rows.
+  // of the monthly statistics. No per-user rows.
   import SegmentedControl from "$lib/components/atoms/SegmentedControl.svelte";
   import ChartCanvas from "$lib/components/molecules/ChartCanvas.svelte";
   import Spinner from "$lib/components/atoms/Spinner.svelte";
@@ -15,19 +15,27 @@
   import UserPathTreeSelect from "./UserPathTreeSelect.svelte";
   import {
     BENCHMARK_MONTH_OPTIONS,
+    benchmarkChangeLabel,
     benchmarkChartConfig,
+    benchmarkCostBasisOptions,
+    benchmarkHasPricingGaps,
     benchmarkHasUsage,
     benchmarkMonthLabel,
     benchmarkMonths,
-    formatChangePercent,
+    benchmarkPricingGaps,
+    benchmarkStatus,
+    benchmarkUnattributedCost,
   } from "./benchmark-helpers.js";
   import * as m from "$lib/paraglide/messages.js";
 
   const scope = $derived(access.scoped ? access.userPath : "/");
   const data = $derived(usageBenchmark.data);
   const months = $derived(benchmarkMonths(data));
-  const empty = $derived(!benchmarkHasUsage(data));
-  const billedVisible = $derived(runtimeConfig.billedCostVisible());
+  const status = $derived(benchmarkStatus({ data, failed: usageBenchmark.failed }));
+  const hasUsers = $derived(benchmarkHasUsage(data));
+  const pricingGaps = $derived(benchmarkHasPricingGaps(data));
+  const unattributed = $derived(benchmarkUnattributedCost(data));
+  const basisOptions = $derived(benchmarkCostBasisOptions(runtimeConfig));
 
   // The tree picker selects several paths; a group is one, so the last pick
   // replaces the previous one and clearing falls back to the default group.
@@ -39,7 +47,7 @@
   }
 
   function buildChart() {
-    if (empty) return null;
+    if (!hasUsers) return null;
     return benchmarkChartConfig(chartColors(), data);
   }
 </script>
@@ -49,13 +57,10 @@
     <h3>{m.usage_benchmark_title()}</h3>
     {#if usageBenchmark.loading}<Spinner size={14} label={m.usage_benchmark_loading()} />{/if}
     <div class="usage-benchmark-actions">
-      {#if billedVisible}
+      {#if basisOptions}
         <SegmentedControl
           ariaLabel={m.usage_benchmark_cost_basis()}
-          options={[
-            { value: "provider", label: m.usage_benchmark_cost_provider() },
-            { value: "billed", label: m.usage_benchmark_cost_billed() },
-          ]}
+          options={basisOptions}
           value={usageBenchmark.costBasis}
           onchange={(basis) => usageBenchmark.set("costBasis", basis)}
         />
@@ -99,43 +104,59 @@
     </label>
   </div>
 
-  {#if empty}
-    <p class="usage-benchmark-empty">{usageBenchmark.failed ? m.usage_benchmark_failed() : m.usage_benchmark_empty()}</p>
-  {:else if usageBenchmark.view === "chart"}
-    <div class="usage-benchmark-chart">
-      <ChartCanvas build={buildChart} ariaLabel={m.usage_benchmark_title()} />
-    </div>
+  {#if status !== "ready"}
+    <p class="usage-benchmark-empty">{status === "failed" ? m.usage_benchmark_failed() : m.usage_benchmark_empty()}</p>
   {:else}
-    <div class="table-wrapper">
-      <table class="data-table usage-benchmark-table">
-        <thead>
-          <tr>
-            <th>{m.usage_benchmark_month()}</th>
-            <th class="col-price">{m.usage_benchmark_active_users()}</th>
-            <th class="col-price">{m.usage_benchmark_total()}</th>
-            <th class="col-price">{m.usage_benchmark_mean()}</th>
-            <th class="col-price">{m.usage_benchmark_median()}</th>
-            <th class="col-price">{m.usage_benchmark_p90()}</th>
-            <th class="col-price">{m.usage_benchmark_max()}</th>
-            <th class="col-price">{m.usage_benchmark_median_change()}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each months as month (month.month)}
-            <tr class:usage-benchmark-partial={month.partial}>
-              <td class="mono font-size-md">{benchmarkMonthLabel(month)}</td>
-              <td class="col-price">{Number(month.active_users || 0).toLocaleString()}</td>
-              <td class="col-price">{formatCost(month.total_cost)}</td>
-              <td class="col-price">{month.mean == null ? "–" : formatCost(month.mean)}</td>
-              <td class="col-price">{month.p50 == null ? "–" : formatCost(month.p50)}</td>
-              <td class="col-price">{month.p90 == null ? "–" : formatCost(month.p90)}</td>
-              <td class="col-price">{month.max == null ? "–" : formatCost(month.max)}</td>
-              <td class="col-price">{formatChangePercent(month.p50_change_percent)}</td>
+    {#if pricingGaps}
+      <p class="usage-benchmark-warning">{m.usage_benchmark_pricing_gaps_note()}</p>
+    {/if}
+    {#if unattributed > 0}
+      <p class="usage-benchmark-warning">
+        {m.usage_benchmark_unattributed_note({ cost: formatCost(unattributed), parent: data.parent })}
+      </p>
+    {/if}
+    {#if !hasUsers}
+      <p class="usage-benchmark-empty">{m.usage_benchmark_empty()}</p>
+    {:else if usageBenchmark.view === "chart"}
+      <div class="usage-benchmark-chart">
+        <ChartCanvas build={buildChart} ariaLabel={m.usage_benchmark_title()} />
+      </div>
+    {:else}
+      <div class="table-wrapper">
+        <table class="data-table usage-benchmark-table">
+          <thead>
+            <tr>
+              <th>{m.usage_benchmark_month()}</th>
+              <th class="col-price">{m.usage_benchmark_active_users()}</th>
+              <th class="col-price">{m.usage_benchmark_total()}</th>
+              <th class="col-price">{m.usage_benchmark_mean()}</th>
+              <th class="col-price">{m.usage_benchmark_median()}</th>
+              <th class="col-price">{m.usage_benchmark_p90()}</th>
+              <th class="col-price">{m.usage_benchmark_max()}</th>
+              <th class="col-price">{m.usage_benchmark_median_change()}</th>
+              <th class="col-price">{m.usage_benchmark_pricing_gaps()}</th>
+              {#if unattributed > 0}<th class="col-price">{m.usage_benchmark_unattributed()}</th>{/if}
             </tr>
-          {/each}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {#each months as month (month.month)}
+              <tr class:usage-benchmark-partial={month.partial}>
+                <td class="mono font-size-md">{benchmarkMonthLabel(month)}</td>
+                <td class="col-price">{Number(month.active_users || 0).toLocaleString()}</td>
+                <td class="col-price">{formatCost(month.total_cost)}</td>
+                <td class="col-price">{month.mean == null ? "–" : formatCost(month.mean)}</td>
+                <td class="col-price">{month.p50 == null ? "–" : formatCost(month.p50)}</td>
+                <td class="col-price">{month.p90 == null ? "–" : formatCost(month.p90)}</td>
+                <td class="col-price">{month.max == null ? "–" : formatCost(month.max)}</td>
+                <td class="col-price">{benchmarkChangeLabel(month)}</td>
+                <td class="col-price">{benchmarkPricingGaps(month)}</td>
+                {#if unattributed > 0}<td class="col-price">{formatCost(month.unattributed_cost)}</td>{/if}
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
   {/if}
   <p class="usage-benchmark-note">{m.usage_benchmark_note()}</p>
 </section>
@@ -186,6 +207,12 @@
   .usage-benchmark-partial {
     color: var(--text-muted);
     font-style: italic;
+  }
+
+  .usage-benchmark-warning {
+    margin: 0 0 8px;
+    color: var(--text);
+    font-size: 12px;
   }
 
   .usage-benchmark-empty,

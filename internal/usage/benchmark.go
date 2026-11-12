@@ -19,8 +19,9 @@ const (
 )
 
 const (
-	// MaxBenchmarkMonths caps the months one benchmark covers.
-	MaxBenchmarkMonths = 24
+	// MaxBenchmarkMonths caps the months one benchmark covers, the current
+	// one included, in line with MaxDateRangeDays.
+	MaxBenchmarkMonths = 12
 	// MaxBenchmarkTopUsers caps the per-user rows a benchmark month lists.
 	MaxBenchmarkTopUsers = 50
 )
@@ -61,21 +62,24 @@ type Benchmark struct {
 // BenchmarkMonth holds one month's statistics. A user is active with at least
 // one request in the month, response-cache hits included. Mean, P50, P90 and
 // Max are nil without active users; percentiles interpolate linearly between
-// closest ranks. Users whose month cost is unknown (unpriced models) count as
-// active at cost 0 and are counted in UnpricedUsers.
+// closest ranks. A user's cost is what the invoice reports for it. Users whose
+// month cost is wholly unknown (unpriced models) count as active at cost 0
+// and are counted in UnpricedUsers; users with some unknown cost count at
+// their known cost and are counted in PartlyPricedUsers.
 type BenchmarkMonth struct {
-	Month         string   `json:"month"`
-	Partial       bool     `json:"partial"`
-	ActiveUsers   int      `json:"active_users"`
-	UnpricedUsers int      `json:"unpriced_users"`
-	TotalCost     float64  `json:"total_cost"`
-	Mean          *float64 `json:"mean" extensions:"x-nullable"`
-	P50           *float64 `json:"p50" extensions:"x-nullable"`
-	P90           *float64 `json:"p90" extensions:"x-nullable"`
-	Max           *float64 `json:"max" extensions:"x-nullable"`
+	Month             string   `json:"month"`
+	Partial           bool     `json:"partial"`
+	ActiveUsers       int      `json:"active_users"`
+	UnpricedUsers     int      `json:"unpriced_users"`
+	PartlyPricedUsers int      `json:"partly_priced_users"`
+	TotalCost         float64  `json:"total_cost"`
+	Mean              *float64 `json:"mean" extensions:"x-nullable"`
+	P50               *float64 `json:"p50" extensions:"x-nullable"`
+	P90               *float64 `json:"p90" extensions:"x-nullable"`
+	Max               *float64 `json:"max" extensions:"x-nullable"`
 	// MeanChangePercent and P50ChangePercent compare with the previous month;
-	// nil for the first month, a month without active users, or a previous
-	// month whose value is not positive.
+	// nil for the first month, the partial current month, a month without
+	// active users, or a previous month whose value is not positive.
 	MeanChangePercent *float64 `json:"mean_change_percent" extensions:"x-nullable"`
 	P50ChangePercent  *float64 `json:"p50_change_percent" extensions:"x-nullable"`
 	// UnattributedCost is usage recorded on the parent path itself, which no
@@ -85,7 +89,8 @@ type BenchmarkMonth struct {
 	TopUsers []BenchmarkUser `json:"top_users,omitempty"`
 }
 
-// BenchmarkUser is one user's month.
+// BenchmarkUser is one user's month. Requests counts provider-bound
+// requests, like the invoice; cache hits are not included.
 type BenchmarkUser struct {
 	User     string  `json:"user"`
 	Requests int     `json:"requests"`
@@ -123,6 +128,11 @@ func readUsageBenchmark(ctx context.Context, params BenchmarkParams, stream brea
 	params.Interval = "monthly"
 
 	benchmark := EmptyBenchmark(params)
+	// Refused before any query runs: the database aggregates every leaf
+	// path of every month in range.
+	if len(benchmark.Months) > MaxBenchmarkMonths {
+		return nil, core.NewInvalidRequestError(fmt.Sprintf("the benchmark covers at most %d months", MaxBenchmarkMonths), nil)
+	}
 	breakdown := UsageBreakdownParams{
 		UsageQueryParams: params.UsageQueryParams,
 		Rows:             BreakdownUserPath,
@@ -137,12 +147,12 @@ func readUsageBenchmark(ctx context.Context, params BenchmarkParams, stream brea
 	}
 
 	totals := benchmarkTotals{parent: params.Parent, users: map[benchmarkKey]*benchmarkUserMonth{}}
-	if err := stream(ctx, breakdown, 0, totals.add(false)); err != nil {
+	if err := stream(ctx, breakdown, 0, totals.addProvider); err != nil {
 		return nil, err
 	}
 	hits := breakdown
-	hits.CacheMode = CacheModeCached
-	if err := stream(ctx, hits, 0, totals.add(true)); err != nil {
+	hits.CacheMode = billedCacheHitsMode(breakdown.CacheMode)
+	if err := stream(ctx, hits, 0, totals.addCacheHit); err != nil {
 		return nil, err
 	}
 	totals.fill(benchmark, params)
@@ -173,101 +183,6 @@ func EmptyBenchmark(params BenchmarkParams) *Benchmark {
 		benchmark.Months = append(benchmark.Months, BenchmarkMonth{Month: key, Partial: key == current})
 	}
 	return benchmark
-}
-
-type benchmarkKey struct{ month, user string }
-
-type benchmarkUserMonth struct {
-	providerRequests int
-	requests         int
-	providerCost     *float64
-	billedCost       *float64
-}
-
-// benchmarkTotals sums storage groups into (month, user) totals; usage on
-// the parent itself is kept under the parent's own key.
-type benchmarkTotals struct {
-	parent string
-	users  map[benchmarkKey]*benchmarkUserMonth
-}
-
-func (b benchmarkTotals) add(cacheHits bool) func(breakdownGroup) error {
-	return func(group breakdownGroup) error {
-		key := benchmarkKey{month: group.Column, user: invoiceCustomer(b.parent, group.Row)}
-		totals, ok := b.users[key]
-		if !ok {
-			if len(b.users) >= maxBenchmarkUserMonths {
-				return core.NewInvalidRequestError(fmt.Sprintf(
-					"benchmark has more than %d user months; pick a deeper parent, fewer months or narrower filters", maxBenchmarkUserMonths), nil)
-			}
-			totals = &benchmarkUserMonth{}
-			b.users[key] = totals
-		}
-		totals.requests += group.Requests
-		totals.billedCost = addCost(totals.billedCost, group.BilledCost)
-		if !cacheHits {
-			totals.providerRequests += group.Requests
-			totals.providerCost = addCost(totals.providerCost, group.TotalCost)
-		}
-		return nil
-	}
-}
-
-// fill computes each month's statistics into benchmark.
-func (b benchmarkTotals) fill(benchmark *Benchmark, params BenchmarkParams) {
-	users := map[string][]BenchmarkUser{}
-	unattributed := map[string]float64{}
-	unpriced := map[string]int{}
-	for key, totals := range b.users {
-		if totals.requests == 0 {
-			continue
-		}
-		cost, known := totals.billedCost, totals.billedCost != nil
-		if params.CostBasis == BenchmarkCostBasisProvider {
-			cost, known = totals.providerCost, totals.providerCost != nil || totals.providerRequests == 0
-		}
-		value := 0.0
-		if cost != nil {
-			value = *cost
-		}
-		if key.user == b.parent {
-			unattributed[key.month] += value
-			continue
-		}
-		if !known {
-			unpriced[key.month]++
-		}
-		users[key.month] = append(users[key.month], BenchmarkUser{User: key.user, Requests: totals.requests, Cost: value})
-	}
-
-	var previous *BenchmarkMonth
-	for i := range benchmark.Months {
-		month := &benchmark.Months[i]
-		month.UnattributedCost = roundBenchmarkCost(unattributed[month.Month])
-		month.UnpricedUsers = unpriced[month.Month]
-		active := users[month.Month]
-		month.ActiveUsers = len(active)
-		costs := make([]float64, len(active))
-		for j, user := range active {
-			costs[j] = user.Cost
-			month.TotalCost += user.Cost
-		}
-		month.TotalCost = roundBenchmarkCost(month.TotalCost)
-		if stats, ok := computeCostStats(costs); ok {
-			month.Mean = new(roundBenchmarkCost(stats.Mean))
-			month.P50 = new(roundBenchmarkCost(stats.P50))
-			month.P90 = new(roundBenchmarkCost(stats.P90))
-			month.Max = new(roundBenchmarkCost(stats.Max))
-		}
-		if previous != nil {
-			month.MeanChangePercent = changePercent(previous.Mean, month.Mean)
-			month.P50ChangePercent = changePercent(previous.P50, month.P50)
-		}
-		if params.TopUsers > 0 {
-			month.TopUsers = topBenchmarkUsers(active, params.TopUsers)
-		}
-		previous = month
-	}
 }
 
 // topBenchmarkUsers returns the limit highest-cost users, ties by path.

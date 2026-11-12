@@ -513,8 +513,8 @@ curl "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=202
 | 参数          | 类型   | 说明                                                                         | 默认值 |
 | ------------- | ------ | ---------------------------------------------------------------------------- | ------ |
 | `parent`      | string | 其直接子路径即为用户的分组；直接记录在父路径上的用量报告为 `unattributed_cost` | 凭据作用域的根路径，或 `/` |
-| `months`      | int    | 截至 `end_month` 的月数，`1` 到 `24`；设置了 `start_month` 时忽略            | `7`    |
-| `start_month` | string | 第一个月份，`YYYY-MM`                                                        | 由 `months` 推算 |
+| `months`      | int    | 截至 `end_month` 的月数，`1` 到 `12`；设置了 `start_month` 时忽略且不校验    | `7`    |
+| `start_month` | string | 第一个月份，`YYYY-MM`；范围最多 12 个月                                      | 由 `months` 推算 |
 | `end_month`   | string | 最后一个月份，`YYYY-MM`；不能晚于当前月份                                    | 当前月份 |
 | `cost_basis`  | string | `provider`，或 `billed`（provider 成本加加价，包含已计费的缓存命中）         | `provider` |
 | `top_users`   | int    | 列出每个月成本最高的 N 个用户，`0` 到 `50`；`0` 只返回聚合统计               | `0`    |
@@ -522,8 +522,8 @@ curl "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=202
 该端点还接受所有数据筛选条件。它会忽略 `cache_mode`：请求数和 provider 成本只包含发送给 provider 的请求，而缓存命中会使用户成为活跃用户并计入计费成本。
 
 ```bash
-# 一年加当前月份，并列出每月成本最高的五个用户
-curl "http://localhost:8080/admin/usage/benchmark?parent=/eng&months=13&top_users=5" \
+# 十一个完整月份加当前月份，并列出每月成本最高的五个用户
+curl "http://localhost:8080/admin/usage/benchmark?parent=/eng&months=12&top_users=5" \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
 ```
 
@@ -539,13 +539,14 @@ curl "http://localhost:8080/admin/usage/benchmark?parent=/eng&months=13&top_user
       "partial": true,
       "active_users": 38,
       "unpriced_users": 1,
+      "partly_priced_users": 0,
       "total_cost": 512.3,
       "mean": 13.48,
       "p50": 9.1,
       "p90": 27.75,
       "max": 64.2,
-      "mean_change_percent": -55.08,
-      "p50_change_percent": -59.38,
+      "mean_change_percent": null,
+      "p50_change_percent": null,
       "unattributed_cost": 0,
       "top_users": [{ "user": "/eng/alice", "requests": 1840, "cost": 64.2 }]
     }
@@ -553,15 +554,16 @@ curl "http://localhost:8080/admin/usage/benchmark?parent=/eng&months=13&top_user
 }
 ```
 
-- `months` 按从旧到新的顺序包含范围内的每个月份，包括没有用量的月份；当前月份为 `"partial": true`。
+- `months` 按从旧到新的顺序包含范围内的每个月份，包括没有用量的月份；当前月份为 `"partial": true`，且没有变化百分比。
 - 月份按 `X-GoModel-Timezone` Header 的时区解释，没有该 Header 时使用 UTC，`time_zone` 会报告所用时区。
-- 没有活跃用户时，`mean`、`p50`、`p90` 和 `max` 为 `null`。第一个月、没有活跃用户的月份，或上个月的值不为正时，变化字段为 `null`。
-- 未请求时不返回 `top_users`。
+- 没有活跃用户时，`mean`、`p50`、`p90` 和 `max` 为 `null`。第一个月、未完的当前月份、没有活跃用户的月份，或上个月的值不为正时，变化字段为 `null`。
+- 每个用户的成本与账单导出中该客户的小计一致。`unpriced_users` 统计成本完全未知的用户（按 `0` 计入），`partly_priced_users` 统计按已知部分成本计入的用户。
+- 未请求时不返回 `top_users`；其 `requests` 与账单一样，只统计发送给 provider 的请求。
 - 每个用户都会被计入，不会合并到 “other”。一次基准最多包含 100,000 个用户月，超出时返回 `400`。请选择更深的 `parent`、更少的月份或更窄的筛选条件。
 
 | 状态码 | 错误码 | 触发条件 |
 | ------ | ------ | -------- |
-| `400`  | —      | 月份、`months`、`cost_basis` 或 `top_users` 无效；范围超过 24 个月；`end_month` 晚于当前月份；超过 100,000 个用户月 |
+| `400`  | —      | 月份、`cost_basis` 或 `top_users` 无效；未设置 `start_month` 时 `months` 不在 `1` 到 `12` 之间（包括 `0`）或不是整数；范围超过 12 个月；`end_month` 晚于当前月份；重复的 `parent`；超过 100,000 个用户月 |
 | `403`  | `user_path_out_of_scope` | 作用域凭据指定了其子树之外的 `parent` 或 `user_path` |
 | `409`  | `markups_disabled` | 在 `PRICING_MARKUPS_ENABLED` 关闭时使用 `cost_basis=billed` |
 

@@ -4,7 +4,7 @@
 
 import { getJSON, isAbortError } from "$lib/api/client.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
-import { benchmarkQuery, DEFAULT_BENCHMARK_MONTHS } from "./benchmark-helpers.js";
+import { benchmarkQuery, DEFAULT_BENCHMARK_MONTHS, effectiveBenchmarkCostBasis } from "./benchmark-helpers.js";
 import { usageFilters } from "./usageFilters.svelte.js";
 
 class UsageBenchmarkState {
@@ -36,7 +36,7 @@ class UsageBenchmarkState {
       parent: this.parent,
       months: this.months,
       // Billed cost needs markups; without them the toggle is hidden.
-      costBasis: runtimeConfig.billedCostVisible() ? this.costBasis : "provider",
+      costBasis: effectiveBenchmarkCostBasis(this.costBasis, runtimeConfig),
     });
     try {
       const result = await getJSON("/admin/usage/benchmark?" + query, {

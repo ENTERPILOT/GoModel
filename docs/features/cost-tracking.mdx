@@ -186,20 +186,22 @@ Recalculation reprices billed cost with the markup each row was billed at, and b
 
 The benchmark answers "what does an active developer cost per month, and how is that spread?". `GET /admin/usage/benchmark` treats each direct child of `parent` as one user and sums its whole subtree, the same way the [invoice export](#invoice-export-gomodel-pro) and [per-child budgets](/features/budgets#dynamic-per-child-budgets) group paths: with `parent=/eng`, `/eng/alice/laptop` and `/eng/alice/ci` both count as `/eng/alice`. It needs no Pro license.
 
-On the usage page, the **Cost per active user** section below **Breakdown** shows the same data: pick the group and the number of months, then switch between a chart of the median and p90 cost per active user with the number of active users, and a table of the monthly statistics. It follows the page's filters but not its date range. With markups enabled, a toggle switches between provider and billed cost.
+On the usage page, the **Cost per active user** section below **Breakdown** shows the same data: pick the group and the number of months, then switch between a chart of the median and p90 cost per active user with the number of active users, and a table of the monthly statistics. It follows the page's filters but not its date range, and offers up to 12 months. With markups enabled, a toggle switches between provider and billed cost. The current month is marked as in progress rather than compared with the previous one, users with missing pricing are counted in a **Pricing gaps** column, and cost recorded on the group itself is shown with a note.
 
 | Parameter | Default | Change it when |
 | --- | --- | --- |
 | `parent` | The credential's [scope](/advanced/admin-endpoints#scoped-admin-access) root, or `/` for a global credential (users are then the top-level paths) | You want the people of one group, for example `parent=/eng` |
-| `months` | `7`: six complete months plus the current one | You want a longer or shorter trend, `1` to `24` months ending at `end_month` |
-| `start_month`, `end_month` | `end_month` is the current month; `start_month` follows from `months` | You want a fixed range (`YYYY-MM`). `start_month` overrides `months`; `end_month` cannot be after the current month |
+| `months` | `7`: six complete months plus the current one | You want a longer or shorter trend, `1` to `12` months ending at `end_month`. Any other value, including `0`, returns `400` |
+| `start_month`, `end_month` | `end_month` is the current month; `start_month` follows from `months` | You want a fixed range (`YYYY-MM`) of at most 12 months. With `start_month`, `months` is ignored and not validated; `end_month` cannot be after the current month |
 | `cost_basis` | `provider` | You resell access: `billed` measures provider cost plus markup, including billed response-cache hits. Needs `PRICING_MARKUPS_ENABLED=true`, otherwise `409` `markups_disabled` |
 | `top_users` | `0` | You want to see who drives the cost: each month lists its N highest-cost users, up to `50` |
 
 <Note>
-  By default the response holds aggregate statistics only: no user paths and no
-  per-user figures. Per-user rows (`top_users: [{user, requests, cost}]`)
-  appear only when you set `top_users`.
+  By default the response names no user paths: it returns per-month counts,
+  totals, and statistics only. Per-user rows (`top_users: [{user, requests,
+  cost}]`) appear only when you set `top_users`. The statistics are not
+  anonymized: in a month with one active user, `mean`, `p50`, `p90`, and `max`
+  are that user's exact cost, and with few users they come close to it.
 </Note>
 
 It also takes the data filters `model`, `provider`, `label`, `endpoint`, `operation`, `auth_key_id`, and `user_path`. `cache_mode` is fixed, as on the invoice: requests and provider cost come from requests sent to providers, while a response-cache hit makes its user active and adds its billed charge to billed cost, but costs the provider nothing.
@@ -221,6 +223,7 @@ curl "http://localhost:8080/admin/usage/benchmark?parent=/eng" \
       "partial": false,
       "active_users": 42,
       "unpriced_users": 0,
+      "partly_priced_users": 1,
       "total_cost": 1260.5,
       "mean": 30.01,
       "p50": 22.4,
@@ -237,17 +240,19 @@ curl "http://localhost:8080/admin/usage/benchmark?parent=/eng" \
 `months` lists every month in the range, oldest first, including months without usage. Per month:
 
 - `active_users` — users with at least one request in the month; response-cache hits count.
-- `total_cost`, `mean`, `p50` (median), `p90`, and `max` — USD cost per active user. The statistics are `null` in a month without active users.
-- `mean_change_percent` and `p50_change_percent` — change from the previous month; `null` for the first month, for a month without active users, or when the previous month's value is not positive.
-- `unpriced_users` — active users whose whole month cost is unknown because their models have no pricing. They count at cost `0`; a user with partly unpriced usage counts at its known cost.
+- `total_cost`, `mean`, `p50` (median), `p90`, and `max` — USD cost per active user. The statistics are `null` in a month without active users. Each user's cost is the one the [invoice export](#invoice-export-gomodel-pro) reports for that customer over the same month, on the chosen `cost_basis`.
+- `mean_change_percent` and `p50_change_percent` — change from the previous month; `null` for the first month, for the partial current month, for a month without active users, or when the previous month's value is not positive.
+- `unpriced_users` — active users whose whole month cost is unknown because their models have no pricing (the invoice shows `null` for them). They count at cost `0`.
+- `partly_priced_users` — active users with some unpriced usage. They count at their known cost, so `total_cost` and the statistics understate the month when it is not `0`.
 - `unattributed_cost` — usage recorded on `parent` itself. It belongs to no user and is not part of `total_cost`.
-- `partial` — `true` for the current month, which is still running. Compare it with complete months with care.
+- `partial` — `true` for the current month, which is still running; it has no change percentages.
+- `top_users[].requests` — requests sent to providers, as on the invoice; response-cache hits are not counted.
 
 Percentiles interpolate linearly between the closest ranks, like Excel's `PERCENTILE.INC`, NumPy's default, and PostgreSQL's `percentile_cont`: for n sorted costs, the p-th percentile sits at 0-based rank (n−1)·p, between its two neighbours. Two users costing $10 and $20 give a `p50` of $15 and a `p90` of $19; a single user is every statistic. SQLite, PostgreSQL, and MongoDB return the same figures.
 
 Months run midnight to midnight in the zone of the `X-GoModel-Timezone` header, as on the [invoice export](#invoice-export-gomodel-pro): the dashboard sends its configured zone, and an API call without the header uses UTC. `time_zone` reports the zone used.
 
-Every user is counted: unlike the breakdown, nothing folds into **Other**. One benchmark holds at most 100,000 user months (users × months); past that it returns `400` rather than leave users out. Pick a deeper `parent`, fewer months, or narrower filters. A [scoped credential](/advanced/admin-endpoints#scoped-admin-access) can benchmark only groups inside its subtree; any other `parent` returns `403` `user_path_out_of_scope`.
+Every user is counted: unlike the breakdown, nothing folds into **Other**. A range covers at most 12 months, the current one included, in line with the 365-day limit of the other usage endpoints, and is checked before anything is read. One benchmark holds at most 100,000 user months (users × months); the read stops with `400` as soon as it passes that, rather than leave users out. Pick a deeper `parent`, fewer months, or narrower filters. `parent` names one group; repeating it returns `400`. A [scoped credential](/advanced/admin-endpoints#scoped-admin-access) can benchmark only groups inside its subtree; any other `parent` returns `403` `user_path_out_of_scope`.
 
 ## Invoice export (GoModel Pro)
 

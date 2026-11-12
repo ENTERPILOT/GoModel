@@ -62,7 +62,28 @@ func TestUsageBenchmark_Params(t *testing.T) {
 			wantStart: time.Date(2025, 12, 1, 0, 0, 0, 0, time.UTC), wantEnd: time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC),
 			wantBasis: usage.BenchmarkCostBasisProvider,
 		},
-		{name: "too many months requested", query: "months=25", wantStatus: http.StatusBadRequest},
+		{
+			name: "months is ignored with start_month", query: "months=30&start_month=2026-01", wantStatus: http.StatusOK,
+			wantStart: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), wantEnd: time.Date(2026, 11, 30, 0, 0, 0, 0, time.UTC),
+			wantBasis: usage.BenchmarkCostBasisProvider,
+		},
+		{
+			name: "exactly the maximum months", query: "months=12", wantStatus: http.StatusOK,
+			wantStart: time.Date(2025, 12, 1, 0, 0, 0, 0, time.UTC), wantEnd: time.Date(2026, 11, 30, 0, 0, 0, 0, time.UTC),
+			wantBasis: usage.BenchmarkCostBasisProvider,
+		},
+		{
+			name: "exactly the maximum range", query: "start_month=2025-12", wantStatus: http.StatusOK,
+			wantStart: time.Date(2025, 12, 1, 0, 0, 0, 0, time.UTC), wantEnd: time.Date(2026, 11, 30, 0, 0, 0, 0, time.UTC),
+			wantBasis: usage.BenchmarkCostBasisProvider,
+		},
+		{name: "too many months requested", query: "months=13", wantStatus: http.StatusBadRequest},
+		{name: "zero months", query: "months=0", wantStatus: http.StatusBadRequest},
+		{name: "negative months", query: "months=-3", wantStatus: http.StatusBadRequest},
+		{name: "fractional months", query: "months=1.5", wantStatus: http.StatusBadRequest},
+		{name: "non-integer months", query: "months=all", wantStatus: http.StatusBadRequest},
+		{name: "one month over the maximum range", query: "start_month=2025-11", wantStatus: http.StatusBadRequest},
+		{name: "repeated parent", query: "parent=/eng&parent=/sales", wantStatus: http.StatusBadRequest},
 		{name: "billed without markups", query: "cost_basis=billed", wantStatus: http.StatusConflict, wantCode: "markups_disabled"},
 		{name: "unknown cost basis", query: "cost_basis=list", wantStatus: http.StatusBadRequest},
 		{name: "future end month", query: "end_month=2026-12", wantStatus: http.StatusBadRequest},
@@ -107,8 +128,8 @@ func TestUsageBenchmark_EmptyMonthsWithoutReader(t *testing.T) {
 	require.NoError(t, h.UsageBenchmark(c))
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	assert.JSONEq(t, `{"parent":"/eng","time_zone":"UTC","currency":"USD","cost_basis":"provider","months":[
-		{"month":"2026-02","partial":false,"active_users":0,"unpriced_users":0,"total_cost":0,"mean":null,"p50":null,"p90":null,"max":null,"mean_change_percent":null,"p50_change_percent":null,"unattributed_cost":0},
-		{"month":"2026-03","partial":true,"active_users":0,"unpriced_users":0,"total_cost":0,"mean":null,"p50":null,"p90":null,"max":null,"mean_change_percent":null,"p50_change_percent":null,"unattributed_cost":0}
+		{"month":"2026-02","partial":false,"active_users":0,"unpriced_users":0,"partly_priced_users":0,"total_cost":0,"mean":null,"p50":null,"p90":null,"max":null,"mean_change_percent":null,"p50_change_percent":null,"unattributed_cost":0},
+		{"month":"2026-03","partial":true,"active_users":0,"unpriced_users":0,"partly_priced_users":0,"total_cost":0,"mean":null,"p50":null,"p90":null,"max":null,"mean_change_percent":null,"p50_change_percent":null,"unattributed_cost":0}
 	]}`, rec.Body.String())
 }
 
@@ -123,6 +144,7 @@ func TestUsageBenchmark_Scope(t *testing.T) {
 	}{
 		{name: "global without parent benchmarks the root's children", wantStatus: http.StatusOK},
 		{name: "scoped without parent defaults to the scope root", scope: scopeAlpha, wantStatus: http.StatusOK, wantParent: scopeAlpha, wantScope: scopeAlpha},
+		{name: "parent equal to scope", scope: scopeAlpha, query: "parent=" + scopeAlpha, wantStatus: http.StatusOK, wantParent: scopeAlpha, wantScope: scopeAlpha},
 		{name: "parent inside scope", scope: scopeAlpha, query: "parent=" + scopeAlpha + "/apps", wantStatus: http.StatusOK, wantParent: scopeAlpha + "/apps", wantScope: scopeAlpha},
 		{name: "parent above scope", scope: scopeAlpha, query: "parent=/team", wantStatus: http.StatusForbidden},
 		{name: "root parent", scope: scopeAlpha, query: "parent=/", wantStatus: http.StatusForbidden},
@@ -143,4 +165,19 @@ func TestUsageBenchmark_Scope(t *testing.T) {
 			assert.Equal(t, tt.wantScope, reader.lastBenchmark.UserPath)
 		})
 	}
+}
+
+func TestUsageBenchmark_ScopeRootKeepsUnattributedCost(t *testing.T) {
+	setTimeNow(t, time.Date(2026, 3, 15, 12, 0, 0, 0, time.UTC))
+	reader := &mockUsageReader{benchmark: &usage.Benchmark{
+		Parent: scopeAlpha, TimeZone: "UTC", Currency: usage.InvoiceCurrency, CostBasis: usage.BenchmarkCostBasisProvider,
+		Months: []usage.BenchmarkMonth{{Month: "2026-03", Partial: true, UnattributedCost: 4.5}},
+	}}
+	h := NewHandler(reader, nil)
+	c, rec := scopedRequest(t, http.MethodGet, "/admin/usage/benchmark?months=1&parent="+scopeAlpha, "", scopeAlpha)
+	require.NoError(t, h.UsageBenchmark(c))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, scopeAlpha, reader.lastBenchmark.Parent)
+	assert.Equal(t, scopeAlpha, reader.lastBenchmark.UserPath)
+	assert.Contains(t, rec.Body.String(), `"unattributed_cost":4.5`)
 }
