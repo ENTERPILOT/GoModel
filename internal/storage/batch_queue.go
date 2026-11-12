@@ -57,7 +57,9 @@ type BatchQueue[T any] struct {
 	buffer chan T
 	done   chan struct{}
 	wg     sync.WaitGroup
-	writes sync.WaitGroup // tracks in-flight writes
+	// writes is read-held by every in-flight write; Close takes it once to
+	// wait for them.
+	writes sync.RWMutex
 	closed atomic.Bool
 }
 
@@ -79,10 +81,10 @@ func (q *BatchQueue[T]) BeginWrite() bool {
 	if q.closed.Load() {
 		return false
 	}
-	q.writes.Add(1)
-	// Close may have started between the check and Add.
+	q.writes.RLock()
+	// Close may have started between the check and RLock.
 	if q.closed.Load() {
-		q.writes.Done()
+		q.writes.RUnlock()
 		return false
 	}
 	return true
@@ -90,7 +92,7 @@ func (q *BatchQueue[T]) BeginWrite() bool {
 
 // EndWrite ends a write that BeginWrite registered.
 func (q *BatchQueue[T]) EndWrite() {
-	q.writes.Done()
+	q.writes.RUnlock()
 }
 
 // Enqueue adds entry to the buffer without blocking. It returns false when the
@@ -111,7 +113,8 @@ func (q *BatchQueue[T]) Close() error {
 	if q.closed.Swap(true) {
 		return nil
 	}
-	q.writes.Wait()
+	q.writes.Lock()
+	q.writes.Unlock() //nolint:staticcheck // empty critical section: only waits for in-flight writes
 	close(q.done)
 	q.wg.Wait()
 	return q.cfg.Store.Close()

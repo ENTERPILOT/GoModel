@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -191,4 +192,35 @@ func BenchmarkBatchQueueWrite(b *testing.B) {
 			q.EndWrite()
 		}
 	}
+}
+
+// TestBatchQueueConcurrentWriteAndClose checks that every entry Enqueue
+// accepted is written, even when Close races with writers. Run with -race.
+func TestBatchQueueConcurrentWriteAndClose(t *testing.T) {
+	var written atomic.Int64
+	q := NewBatchQueue(BatchQueueConfig[int]{
+		Name:          "test",
+		BufferSize:    1 << 14,
+		FlushInterval: time.Millisecond,
+		WriteBatch:    func(batch []int) { written.Add(int64(len(batch))) },
+		Store:         &recordingQueueStore{},
+	})
+
+	var accepted atomic.Int64
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			for i := range 1000 {
+				if write(q, i) {
+					accepted.Add(1)
+				}
+			}
+		})
+	}
+	// Close while the writers are still going.
+	require.Eventually(t, func() bool { return accepted.Load() > 100 }, 5*time.Second, time.Microsecond)
+	require.NoError(t, q.Close())
+	wg.Wait()
+
+	assert.Equal(t, accepted.Load(), written.Load())
 }
