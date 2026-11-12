@@ -71,8 +71,11 @@ func newHandler(assets fs.FS, basePath string, demoMode bool) (*Handler, error) 
 	return &Handler{
 		indexHTML: indexHTML,
 		csp:       contentSecurityPolicy(runtimeGlobals(basePath, demoMode)),
-		staticFS:  http.StripPrefix("/admin/static/", static),
-		basePath:  basePath,
+		staticFS: http.StripPrefix(
+			"/admin/static/",
+			static,
+		),
+		basePath: basePath,
 	}, nil
 }
 
