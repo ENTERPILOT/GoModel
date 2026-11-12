@@ -35,6 +35,12 @@ configuration on file. The same multi-key rotation env vars support
 [outbound proxy](/providers/outbound-proxy) are available from the dashboard
 form.
 
+A base URL saved from the dashboard or the admin API must be a plain
+`http://` or `https://` URL: no username or password, no query string, and no
+fragment. Loopback and private addresses are accepted, so local servers such as
+Ollama or vLLM work; link-local addresses and cloud instance metadata endpoints
+are rejected. Bedrock also accepts an AWS region in this field.
+
 Every provider also carries a `billable` setting, on by default. Turn it off
 for a provider whose cost the caller does not owe you, such as a customer's
 own API key registered as its own provider instance: usage is still tracked
