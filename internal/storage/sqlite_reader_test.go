@@ -64,6 +64,41 @@ func TestSQLiteReadPoolPragmas(t *testing.T) {
 	}
 }
 
+// TestSQLiteMaintenanceRefreshesReadPoolStatistics checks that a read
+// connection opened before the writer analyzed the tables plans with the new
+// statistics afterwards: without them the planner prefers the equality index
+// over the far more selective range.
+func TestSQLiteMaintenanceRefreshesReadPoolStatistics(t *testing.T) {
+	store, err := NewSQLite(SQLiteConfig{Path: filepath.Join(t.TempDir(), "stats.db")})
+	require.NoError(t, err)
+	defer store.Close()
+	writer, reader := store.DB(), store.ReadDB()
+
+	_, err = writer.Exec(`CREATE TABLE items (id INTEGER PRIMARY KEY, model TEXT, ts INTEGER)`)
+	require.NoError(t, err)
+	_, err = writer.Exec(`CREATE INDEX idx_items_model ON items(model)`)
+	require.NoError(t, err)
+	_, err = writer.Exec(`CREATE INDEX idx_items_ts ON items(ts)`)
+	require.NoError(t, err)
+	_, err = writer.Exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 20000)
+		INSERT INTO items (model, ts) SELECT 'model-' || (i % 2), i FROM n`)
+	require.NoError(t, err)
+
+	queryPlan := func() string {
+		var id, parent, unused int
+		var detail string
+		require.NoError(t, reader.QueryRow(`EXPLAIN QUERY PLAN
+			SELECT COUNT(*) FROM items WHERE model = 'model-1' AND ts BETWEEN 100 AND 200`).
+			Scan(&id, &parent, &unused, &detail))
+		return detail
+	}
+	require.Contains(t, queryPlan(), "idx_items_model", "the read connection has loaded the schema without statistics")
+
+	StartMaintenance(store)
+
+	assert.Contains(t, queryPlan(), "idx_items_ts")
+}
+
 func TestSQLiteInMemoryReadsShareWriter(t *testing.T) {
 	for _, path := range []string{":memory:", "file::memory:"} {
 		t.Run(path, func(t *testing.T) {
@@ -75,6 +110,9 @@ func TestSQLiteInMemoryReadsShareWriter(t *testing.T) {
 			require.Same(t, store.DB(), store.ReadDB())
 			_, err = store.DB().Exec(`CREATE TABLE items (id INTEGER PRIMARY KEY)`)
 			require.NoError(t, err)
+			// Maintenance reopens read connections, which must not reach the
+			// connection that holds the database.
+			StartMaintenance(store)
 			var count int
 			require.NoError(t, store.ReadDB().QueryRow(`SELECT COUNT(*) FROM items`).Scan(&count))
 			assert.Zero(t, count)

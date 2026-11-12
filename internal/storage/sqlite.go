@@ -192,4 +192,5 @@ func (s *sqliteStorage) optimize(warned *bool) {
 		return
 	}
 	slog.Debug("refreshed SQLite query planner statistics", "duration", time.Since(started).Round(time.Millisecond))
+	s.reopenIdleReaders()
 }

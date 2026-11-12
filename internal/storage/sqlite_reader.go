@@ -81,3 +81,16 @@ func sqliteReaderDSN(file string) string {
 func (s *sqliteStorage) ReadDB() *sql.DB {
 	return s.readDB
 }
+
+// reopenIdleReaders closes the idle read connections, so the next reads open
+// new ones. A connection loads the planner statistics once, along with the
+// schema, and would otherwise keep planning with the ones from before an
+// ANALYZE on the writer. A read connection in use right now is replaced after
+// a later check.
+func (s *sqliteStorage) reopenIdleReaders() {
+	if s.readDB == nil || s.readDB == s.db {
+		return // closing the writer's connection would drop an in-memory database
+	}
+	s.readDB.SetMaxIdleConns(0)
+	s.readDB.SetMaxIdleConns(sqliteReaderConns())
+}
