@@ -47,14 +47,23 @@ func NewWithBasePath(basePath string) (*Handler, error) {
 // NewWithDemoMode creates a dashboard handler and controls whether the demo
 // warning is rendered by the SPA.
 func NewWithDemoMode(basePath string, demoMode bool) (*Handler, error) {
+	return newHandler(content, basePath, demoMode)
+}
+
+// newHandler builds a handler over assets, which holds static/dist.
+func newHandler(assets fs.FS, basePath string, demoMode bool) (*Handler, error) {
 	basePath = config.NormalizeBasePath(basePath)
 
-	indexHTML, err := buildIndexHTML(content, basePath, demoMode)
+	indexHTML, err := buildIndexHTML(assets, basePath, demoMode)
 	if err != nil {
 		return nil, err
 	}
 
-	staticSub, err := fs.Sub(content, "static/dist")
+	staticSub, err := fs.Sub(assets, "static/dist")
+	if err != nil {
+		return nil, err
+	}
+	static, err := newStaticAssets(staticSub)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +73,7 @@ func NewWithDemoMode(basePath string, demoMode bool) (*Handler, error) {
 		csp:       contentSecurityPolicy(runtimeGlobals(basePath, demoMode)),
 		staticFS: http.StripPrefix(
 			"/admin/static/",
-			http.FileServer(http.FS(staticSub)),
+			static,
 		),
 		basePath: basePath,
 	}, nil
