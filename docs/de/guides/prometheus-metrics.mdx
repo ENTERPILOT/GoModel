@@ -37,7 +37,7 @@ docker run --rm -p 8080:8080 \
 ```
 
 ```bash Binary (make build)
-# Erfordert Go 1.27.3+; erzeugt bin/gomodel.
+# Erfordert Go 1.27.4+; erzeugt bin/gomodel.
 make build
 
 export METRICS_ENABLED=true
@@ -302,6 +302,25 @@ trotzdem zurückgegeben; sie beeinträchtigt nur die Nutzungs- und Kostenerfassu
 
 ```promql
 sum(rate(gomodel_empty_responses_total[5m])) by (provider, model, reason) > 0
+```
+
+## Alerts bei verlorener Nutzung
+
+Die Nutzung wird gebündelt in den Speicher geschrieben. Ein Eintrag, der den Speicher nie
+erreicht, fehlt in Nutzungsansichten, [Budgets](/de/features/budgets) und Rechnungen, daher
+zählt GoModel ihn in `gomodel_usage_entries_dropped_total` und loggt ihn.
+
+| Label    | Werte                                                                                                                                       |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reason` | `buffer_full` (`USAGE_BUFFER_SIZE` erreicht), `write_failed` (das Schreiben des Batches gab einen Fehler zurück) oder `logger_closed` (siehe unten) |
+
+Erhöhen Sie `USAGE_BUFFER_SIZE` bei `buffer_full`. Bei `write_failed` enthält das Server-Log
+den Schreibfehler. `logger_closed` zählt Nutzung, die erfasst wurde, nachdem der Usage-Logger
+heruntergefahren war, etwa durch einen Request oder eine Session, die beim Herunterfahren noch lief;
+der Prozess kann enden, bevor Prometheus den Wert abruft, daher hält das Log den Verlust fest.
+
+```promql
+sum(increase(gomodel_usage_entries_dropped_total[5m])) by (reason) > 0
 ```
 
 ## Prometheus-Konfiguration

@@ -92,8 +92,21 @@ func (c *Capture) record(r *http.Request) {
 // test ends.
 func Server(t testing.TB, handler http.HandlerFunc) (*httptest.Server, *Capture) {
 	t.Helper()
+	return start(t, handler, httptest.NewServer)
+}
+
+// TLSServer is Server over HTTPS, for clients that refuse to send a
+// credential in clear text. Call through server.Client(), which trusts the
+// test certificate.
+func TLSServer(t testing.TB, handler http.HandlerFunc) (*httptest.Server, *Capture) {
+	t.Helper()
+	return start(t, handler, httptest.NewTLSServer)
+}
+
+func start(t testing.TB, handler http.HandlerFunc, newServer func(http.Handler) *httptest.Server) (*httptest.Server, *Capture) {
+	t.Helper()
 	capture := &Capture{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capture.record(r)
 		if handler != nil {
 			handler(w, r)

@@ -110,8 +110,8 @@ type Broker struct {
 	events      []Event
 	head        int
 	subscribers map[uint64]chan Event
-	activeAudit map[string]auditSnapshot
-	activeUsage map[string]Event
+	activeAudit map[snapshotKey]auditSnapshot
+	activeUsage map[snapshotKey]Event
 
 	// present is closed while at least one subscriber is connected, and
 	// absent while none is; each is replaced when the state flips. The
@@ -163,8 +163,8 @@ func NewBroker(cfg Config) *Broker {
 		subscriberBuffer: cfg.SubscriberBuffer,
 		heartbeat:        cfg.Heartbeat,
 		subscribers:      make(map[uint64]chan Event),
-		activeAudit:      make(map[string]auditSnapshot),
-		activeUsage:      make(map[string]Event),
+		activeAudit:      make(map[snapshotKey]auditSnapshot),
+		activeUsage:      make(map[snapshotKey]Event),
 		present:          make(chan struct{}),
 		absent:           absent,
 	}
@@ -415,6 +415,10 @@ func (b *Broker) publishAuditPreview(eventType, entryID string, retained auditPr
 		deleteActiveSnapshot(b.activeAudit, keys)
 	} else if previous, ok := findActiveSnapshot(b.activeAudit, keys); ok {
 		retained = mergeAuditPreview(previous.preview, retained)
+	} else {
+		// The snapshot outlives the request, so it takes its own copies of
+		// what the entry goes on mutating; later merges may then keep them.
+		retained.Data = mergeAuditPreviewData(nil, retained.Data)
 	}
 
 	data, err := json.Marshal(retained)
@@ -447,7 +451,7 @@ func (b *Broker) publishAuditPreview(eventType, entryID string, retained auditPr
 	}
 
 	event := b.nextEventLocked(eventType, retained.RequestID, retained.Timestamp, data)
-	if !terminal && keys.canonical != "" {
+	if !terminal && keys.canonical != (snapshotKey{}) {
 		b.activeAudit[keys.canonical] = auditSnapshot{event: event, preview: retained}
 		deleteActiveSnapshotAliases(b.activeAudit, keys)
 	}
@@ -511,7 +515,7 @@ func (b *Broker) updateUsageSnapshotLocked(event *Event, entryID string) {
 		deleteActiveSnapshot(b.activeUsage, keys)
 		return
 	}
-	if keys.canonical == "" {
+	if keys.canonical == (snapshotKey{}) {
 		return
 	}
 	if previous, ok := findActiveSnapshot(b.activeUsage, keys); ok {
@@ -521,9 +525,27 @@ func (b *Broker) updateUsageSnapshotLocked(event *Event, entryID string) {
 	deleteActiveSnapshotAliases(b.activeUsage, keys)
 }
 
+// snapshotKey indexes an active snapshot by the request ID or the entry ID it
+// was published under. A comparable struct rather than a prefixed string, so
+// building the keys for every publish allocates nothing.
+type snapshotKey struct {
+	kind snapshotKeyKind
+	id   string
+}
+
+type snapshotKeyKind uint8
+
+const (
+	snapshotKeyRequest snapshotKeyKind = iota + 1
+	snapshotKeyEntry
+)
+
+// activeSnapshotKeys names the key a snapshot is stored under and the alias it
+// may have been stored under before the canonical ID was known. The zero
+// snapshotKey means absent.
 type activeSnapshotKeys struct {
-	canonical string
-	aliases   []string
+	canonical snapshotKey
+	alias     snapshotKey
 }
 
 func auditActiveKeys(requestID, id string) activeSnapshotKeys {
@@ -531,14 +553,14 @@ func auditActiveKeys(requestID, id string) activeSnapshotKeys {
 	id = strings.TrimSpace(id)
 	keys := activeSnapshotKeys{}
 	if requestID != "" {
-		keys.canonical = "request:" + requestID
+		keys.canonical = snapshotKey{kind: snapshotKeyRequest, id: requestID}
 		if id != "" {
-			keys.aliases = append(keys.aliases, "id:"+id)
+			keys.alias = snapshotKey{kind: snapshotKeyEntry, id: id}
 		}
 		return keys
 	}
 	if id != "" {
-		keys.canonical = "id:" + id
+		keys.canonical = snapshotKey{kind: snapshotKeyEntry, id: id}
 	}
 	return keys
 }
@@ -548,26 +570,26 @@ func usageActiveKeys(requestID, id string) activeSnapshotKeys {
 	requestID = strings.TrimSpace(requestID)
 	keys := activeSnapshotKeys{}
 	if id != "" {
-		keys.canonical = "id:" + id
+		keys.canonical = snapshotKey{kind: snapshotKeyEntry, id: id}
 		if requestID != "" {
-			keys.aliases = append(keys.aliases, "request:"+requestID)
+			keys.alias = snapshotKey{kind: snapshotKeyRequest, id: requestID}
 		}
 		return keys
 	}
 	if requestID != "" {
-		keys.canonical = "request:" + requestID
+		keys.canonical = snapshotKey{kind: snapshotKeyRequest, id: requestID}
 	}
 	return keys
 }
 
-func findActiveSnapshot[T any](snapshots map[string]T, keys activeSnapshotKeys) (T, bool) {
-	if keys.canonical != "" {
+func findActiveSnapshot[T any](snapshots map[snapshotKey]T, keys activeSnapshotKeys) (T, bool) {
+	if keys.canonical != (snapshotKey{}) {
 		if snapshot, ok := snapshots[keys.canonical]; ok {
 			return snapshot, true
 		}
 	}
-	for _, key := range keys.aliases {
-		if snapshot, ok := snapshots[key]; ok {
+	if keys.alias != (snapshotKey{}) {
+		if snapshot, ok := snapshots[keys.alias]; ok {
 			return snapshot, true
 		}
 	}
@@ -575,18 +597,16 @@ func findActiveSnapshot[T any](snapshots map[string]T, keys activeSnapshotKeys) 
 	return zero, false
 }
 
-func deleteActiveSnapshot[T any](snapshots map[string]T, keys activeSnapshotKeys) {
-	if keys.canonical != "" {
+func deleteActiveSnapshot[T any](snapshots map[snapshotKey]T, keys activeSnapshotKeys) {
+	if keys.canonical != (snapshotKey{}) {
 		delete(snapshots, keys.canonical)
 	}
-	for _, key := range keys.aliases {
-		delete(snapshots, key)
-	}
+	deleteActiveSnapshotAliases(snapshots, keys)
 }
 
-func deleteActiveSnapshotAliases[T any](snapshots map[string]T, keys activeSnapshotKeys) {
-	for _, key := range keys.aliases {
-		delete(snapshots, key)
+func deleteActiveSnapshotAliases[T any](snapshots map[snapshotKey]T, keys activeSnapshotKeys) {
+	if keys.alias != (snapshotKey{}) {
+		delete(snapshots, keys.alias)
 	}
 }
 
@@ -738,6 +758,9 @@ func cloneStringMap(src map[string]string) map[string]string {
 	return maps.Clone(src)
 }
 
+// mergeStringMap returns base overlaid with patch. base is owned by a snapshot
+// and never mutated, so it is returned as is when patch changes nothing — the
+// common case, since every update of a request carries the same headers.
 func mergeStringMap(base, patch map[string]string) map[string]string {
 	if len(patch) == 0 {
 		return base
@@ -745,10 +768,23 @@ func mergeStringMap(base, patch map[string]string) map[string]string {
 	if len(base) == 0 {
 		return maps.Clone(patch)
 	}
+	if containsStringMap(base, patch) {
+		return base
+	}
 	merged := make(map[string]string, len(base)+len(patch))
 	maps.Copy(merged, base)
 	maps.Copy(merged, patch)
 	return merged
+}
+
+// containsStringMap reports whether base already holds every entry of patch.
+func containsStringMap(base, patch map[string]string) bool {
+	for key, value := range patch {
+		if baseValue, ok := base[key]; !ok || baseValue != value {
+			return false
+		}
+	}
+	return true
 }
 
 // mergeEventData recursively merges two JSON objects, with patch members

@@ -703,6 +703,13 @@ providers:
     # base_url defaults to "https://llm.chutes.ai/v1".
     # Set base_url when using a different compatible endpoint.
 
+  mistral:
+    type: mistral
+    api_key: "${MISTRAL_API_KEY}"
+    # base_url defaults to "https://api.mistral.ai/v1".
+    # Reasoning models return thinking as reasoning_content; replayed
+    # assistant reasoning is sent back as Mistral thinking chunks.
+
   edenai:
     type: edenai
     api_key: "${EDENAI_API_KEY}"
@@ -898,14 +905,17 @@ providers:
   #   base_url: "https://api.deepseek.com"
   #   api_key: "${DEEPSEEK_API_KEY}"
 
-  # Example: Amazon Bedrock. The provider has no API key — auth is taken from
-  # the standard AWS credential chain (env vars, AWS_PROFILE, IAM Identity
-  # Center, container/instance roles). Set base_url to either an AWS region
-  # ("us-east-1") or a full https endpoint to enable the provider; without it
-  # gomodel falls back to AWS_REGION / AWS_DEFAULT_REGION.
+  # Example: Amazon Bedrock. Authenticate with an Amazon Bedrock API key, or
+  # omit api_key to use AWS_BEARER_TOKEN_BEDROCK when set, and otherwise the
+  # standard AWS credential chain (env vars, AWS_PROFILE, IAM Identity Center,
+  # container/instance roles). Set base_url
+  # to either an AWS region ("us-east-1") or a full https endpoint to enable
+  # the provider; without it gomodel falls back to AWS_REGION /
+  # AWS_DEFAULT_REGION.
   # bedrock:
   #   type: "bedrock"
   #   base_url: "us-east-1"
+  #   api_key: "${BEDROCK_API_KEY}" # optional
   #   # Optional configured model allowlist (model IDs or inference profiles)
   #   # models:
   #   #   - anthropic.claude-3-5-haiku-20241022-v1:0
