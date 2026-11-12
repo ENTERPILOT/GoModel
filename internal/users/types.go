@@ -1,9 +1,11 @@
-// Package users manages per-user-path model access policies. A user path is
-// the hierarchy behind every managed API key (/team/alpha/alice): interior
-// nodes act as groups, leaves as users. Each node may carry an allowlist of
-// model selectors; a request must satisfy every non-empty allowlist between
-// its key, its user path, and the root, so a child can narrow but never widen
-// what its group permits.
+// Package users manages per-user-path policies. A user path is the hierarchy
+// behind every managed API key (/team/alpha/alice): interior nodes act as
+// groups, leaves as users. Each node may carry an allowlist of model
+// selectors; a request must satisfy every non-empty allowlist between its
+// key, its user path, and the root, so a child can narrow but never widen
+// what its group permits. A node may also carry a request policy (a default
+// model and ceilings on reasoning effort and output tokens) that the paths
+// below it inherit; see RequestPolicy.
 package users
 
 import (
@@ -20,10 +22,22 @@ type User struct {
 	// AllowedModels lists canonical model selectors: exact "provider/model",
 	// provider-wide "provider/", or model-wide "model". Empty means the node
 	// itself does not restrict models.
-	AllowedModels []string  `json:"allowed_models" bson:"allowed_models"`
-	Description   string    `json:"description,omitempty" bson:"description,omitempty"`
-	CreatedAt     time.Time `json:"created_at" bson:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at" bson:"updated_at"`
+	AllowedModels []string `json:"allowed_models" bson:"allowed_models"`
+	// DefaultModel serves a request under this path that names no model. It
+	// is resolved like a model the client sent, so it may name a virtual
+	// model. The nearest path that sets one wins.
+	DefaultModel string `json:"default_model,omitempty" bson:"default_model,omitempty"`
+	// MaxReasoningEffort is the highest reasoning effort requests under this
+	// path may send upstream, one of requestparams.ReasoningEffortLevels.
+	// The lowest ceiling between the path and the root applies.
+	MaxReasoningEffort string `json:"max_reasoning_effort,omitempty" bson:"max_reasoning_effort,omitempty"`
+	// MaxOutputTokens is the highest output token limit requests under this
+	// path may send upstream; zero sets no ceiling. The lowest ceiling
+	// between the path and the root applies.
+	MaxOutputTokens int       `json:"max_output_tokens,omitempty" bson:"max_output_tokens,omitempty"`
+	Description     string    `json:"description,omitempty" bson:"description,omitempty"`
+	CreatedAt       time.Time `json:"created_at" bson:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at" bson:"updated_at"`
 	// Managed marks a row declared in config.yaml / USERS. Managed rows shadow
 	// store rows of the same path and are read-only through the admin API.
 	Managed bool `json:"managed,omitempty" bson:"-"`

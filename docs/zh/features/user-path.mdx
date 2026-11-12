@@ -95,6 +95,10 @@ Response、Conversation、Batch 和上传的文件都会记住创建它们时所
 **Users** 页面从另一个角度回答同样的问题：某个组、用户或 API 密钥可以调用哪些模型。每个用户路径节点和每个托管 API 密钥都带有可选的
 `allowed_models` 列表；这些列表沿树向下取交集，因此子节点只能缩小其所在组允许的范围。参见[用户](/zh/features/users)。
 
+## 请求策略
+
+用户路径树中的节点还可以为未指定模型的请求设置 `default_model`，并为所有模型设置推理强度上限（`max_reasoning_effort`）和输出 token 上限（`max_output_tokens`）。节点之下的所有路径都会继承它们：最近的默认模型生效，到 `/` 为止最低的上限生效，因此子节点无法放宽其组的上限。上限只会降低请求携带的值，从不添加值。与虚拟模型的 `reasoning_effort`（为一个模型强制一个值）不同，这些上限约束该路径使用的每个模型。参见[用户](/zh/features/users#请求策略)。
+
 ## 公开的模型
 
 `GET /v1/models` 同样使用有效的 `user_path`。

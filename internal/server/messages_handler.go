@@ -159,6 +159,7 @@ func (s *translatedInferenceService) Messages(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
+	defaultedModel := fillMessagesDefaultModel(c, decoded)
 	req, translateErr := anthropicapi.ToChatRequest(decoded)
 	if translateErr != nil {
 		// Content the canonical translation cannot represent (server-tool
@@ -197,7 +198,9 @@ func (s *translatedInferenceService) Messages(c *echo.Context) error {
 	// the translated pipeline can actually carry the request: content it cannot
 	// represent (server-tool history, …) still belongs upstream verbatim.
 	unsignedThinking := translateErr == nil && anthropicapi.HasUnsignedThinking(decoded)
-	if s.canForwardMessagesNatively(ctx, workflow, unsignedThinking) {
+	// The verbatim body of a request served by its user path's default model
+	// names no model, so it cannot be forwarded as it is.
+	if !defaultedModel && s.canForwardMessagesNatively(ctx, workflow, req, unsignedThinking) {
 		return s.dispatchMessagesNative(c, prepared, workflow)
 	}
 	if translateErr != nil {
@@ -221,6 +224,7 @@ func (s *translatedInferenceService) CountMessageTokens(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, invalidRequestBodyError(c, err))
 	}
+	fillMessagesDefaultModel(c, req)
 	if strings.TrimSpace(req.Model) == "" {
 		return handleError(c, core.NewInvalidRequestError("model is required", nil).WithParam("model"))
 	}

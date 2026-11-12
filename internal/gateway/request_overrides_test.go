@@ -15,11 +15,13 @@ import (
 	"github.com/enterpilot/gomodel/internal/requestparams"
 )
 
-// effortResolverStub forces a reasoning effort per concrete attempt model.
+// effortResolverStub forces a reasoning effort per concrete attempt model,
+// within the ceilings it sets on every attempt.
 type effortResolverStub struct {
 	efforts   map[string]string
 	params    map[string]requestparams.Set
 	defaults  map[string]requestparams.Set
+	ceilings  requestparams.Ceilings
 	requested []core.RequestedModelSelector
 }
 
@@ -30,7 +32,7 @@ func (r *effortResolverStub) ResolveModel(requested core.RequestedModelSelector)
 
 func (r *effortResolverStub) ResolveRequestOverrides(_ context.Context, resolution *core.RequestModelResolution, attempt core.ModelSelector) requestparams.Overrides {
 	r.requested = append(r.requested, resolution.Requested)
-	overrides := requestparams.Overrides{ReasoningEffort: r.efforts[attempt.QualifiedModel()]}
+	overrides := requestparams.Overrides{ReasoningEffort: r.efforts[attempt.QualifiedModel()], Ceilings: r.ceilings}
 	if r.params != nil {
 		overrides.Params = r.params[attempt.QualifiedModel()]
 	}

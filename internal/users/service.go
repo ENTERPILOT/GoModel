@@ -20,6 +20,9 @@ const defaultRefreshInterval = time.Minute
 type snapshot struct {
 	byPath map[string]User
 	order  []string
+	// requestPolicies reports whether any row sets a request policy, so the
+	// per-attempt lookup costs nothing until one is configured.
+	requestPolicies bool
 }
 
 // Service keeps user policies cached in memory and evaluates model access for
@@ -95,6 +98,9 @@ func (s *Service) ValidateManagedConfig(declaredProviders []string) error {
 			return fmt.Errorf("users[%d] (%s): %w", i, userPath, err)
 		}
 		user.AllowedModels = allowed
+		if err := normalizeRequestPolicy(user); err != nil {
+			return fmt.Errorf("users[%d] (%s): %w", i, userPath, err)
+		}
 	}
 	return nil
 }
@@ -144,6 +150,12 @@ func buildSnapshot(rows []User) *snapshot {
 			next.order = append(next.order, userPath)
 		}
 		next.byPath[userPath] = row
+	}
+	for _, row := range next.byPath {
+		if row.hasRequestPolicy() {
+			next.requestPolicies = true
+			break
+		}
 	}
 	sort.Strings(next.order)
 	return next
@@ -224,15 +236,21 @@ func (s *Service) Upsert(ctx context.Context, user User) (User, error) {
 	if err != nil {
 		return User{}, err
 	}
+	if err := normalizeRequestPolicy(&user); err != nil {
+		return User{}, err
+	}
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	now := time.Now().UTC()
 	row := User{
-		UserPath:      userPath,
-		AllowedModels: allowed,
-		Description:   strings.TrimSpace(user.Description),
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		UserPath:           userPath,
+		AllowedModels:      allowed,
+		DefaultModel:       user.DefaultModel,
+		MaxReasoningEffort: user.MaxReasoningEffort,
+		MaxOutputTokens:    user.MaxOutputTokens,
+		Description:        strings.TrimSpace(user.Description),
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
 	if existing, ok := s.snapshot().byPath[userPath]; ok && !existing.CreatedAt.IsZero() {
 		row.CreatedAt = existing.CreatedAt

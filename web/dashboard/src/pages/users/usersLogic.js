@@ -6,7 +6,61 @@ import { modelSelectorOptions, parseModelSelectors } from "../../lib/utils/model
 import { filterFields, normalizeQuery } from "../../lib/utils/textMatch.js";
 
 export function defaultUserForm() {
-  return { user_path: "", allowed_models: [], description: "" };
+  return {
+    user_path: "",
+    allowed_models: [],
+    default_model: "",
+    max_reasoning_effort: "",
+    max_output_tokens: "",
+    description: "",
+  };
+}
+
+// userFormFromNode fills the editor from a tree node. Every field the PUT
+// carries is copied: the API replaces the whole row, so a field left out
+// would be cleared on save.
+export function userFormFromNode(node, displaySelector = (selector) => selector) {
+  if (!node) {
+    return defaultUserForm();
+  }
+  return {
+    user_path: node.user_path,
+    allowed_models: (node.allowed_models || []).map(displaySelector),
+    default_model: node.default_model || "",
+    max_reasoning_effort: node.max_reasoning_effort || "",
+    max_output_tokens: node.max_output_tokens ? String(node.max_output_tokens) : "",
+    description: node.description || "",
+  };
+}
+
+// userRequestPolicyItems lists the request policy in force on a node (its
+// own combined with its ancestors'), each with the path it comes from, for
+// the tree's policy column.
+export function userRequestPolicyItems(node) {
+  const policy = (node && node.request_policy) || {};
+  const items = [];
+  if (policy.default_model) {
+    items.push({
+      key: "default_model",
+      label: m.users_policy_default_model({ model: policy.default_model }),
+      from: policy.default_model_from || "",
+    });
+  }
+  if (policy.max_reasoning_effort) {
+    items.push({
+      key: "max_reasoning_effort",
+      label: m.users_policy_max_reasoning_effort({ effort: policy.max_reasoning_effort }),
+      from: policy.max_reasoning_effort_from || "",
+    });
+  }
+  if (policy.max_output_tokens) {
+    items.push({
+      key: "max_output_tokens",
+      label: m.users_policy_max_output_tokens({ tokens: String(policy.max_output_tokens) }),
+      from: policy.max_output_tokens_from || "",
+    });
+  }
+  return items;
 }
 
 // userPathDepth counts the segments of a canonical path ("/" is 0).
@@ -145,7 +199,7 @@ function inactiveAncestors(nodes, userPath) {
 // userNodeSearchFields lists the text a node query matches against, one entry
 // per field so a fuzzy match cannot span two of them.
 function userNodeSearchFields(node) {
-  return [node.user_path, node.description, ...(node.allowed_models || [])].filter(Boolean);
+  return [node.user_path, node.description, node.default_model, ...(node.allowed_models || [])].filter(Boolean);
 }
 
 // filterUserNodes applies the toolbar query against the path, description,
@@ -277,11 +331,19 @@ export function buildUpsertUserPayload(form) {
   if (pathError) {
     return { error: pathError };
   }
+  const tokensText = String(source.max_output_tokens ?? "").trim();
+  const maxOutputTokens = tokensText ? Number(tokensText) : 0;
+  if (!Number.isInteger(maxOutputTokens) || maxOutputTokens < 0) {
+    return { error: m.users_max_output_tokens_invalid() };
+  }
   const trimmed = String(source.user_path || "").trim();
   return {
     payload: {
       user_path: trimmed.startsWith("/") ? trimmed : "/" + trimmed,
       allowed_models: parseModelSelectors(source.allowed_models),
+      default_model: String(source.default_model || "").trim() || undefined,
+      max_reasoning_effort: String(source.max_reasoning_effort || "").trim() || undefined,
+      max_output_tokens: maxOutputTokens || undefined,
       description: String(source.description || "").trim() || undefined,
     },
   };

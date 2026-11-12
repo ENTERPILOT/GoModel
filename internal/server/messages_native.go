@@ -18,6 +18,7 @@ import (
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
@@ -32,7 +33,8 @@ const anthropicProviderType = "anthropic"
 // requests using guardrails patching, response caching, failover, or a forced
 // reasoning effort stay on the translated pipeline. So does a request replaying an unsigned thinking
 // block, which Anthropic rejects and only the translated pipeline can drop.
-func (s *translatedInferenceService) canForwardMessagesNatively(ctx context.Context, workflow *core.Workflow, unsignedThinking bool) bool {
+// req is the client's request as translated, before any override.
+func (s *translatedInferenceService) canForwardMessagesNatively(ctx context.Context, workflow *core.Workflow, req *core.ChatRequest, unsignedThinking bool) bool {
 	if workflow == nil || strings.TrimSpace(workflow.ProviderType) != anthropicProviderType {
 		return false
 	}
@@ -52,8 +54,10 @@ func (s *translatedInferenceService) canForwardMessagesNatively(ctx context.Cont
 		return false
 	}
 	// A forced reasoning effort or request parameters rewrite the request,
-	// which the verbatim body cannot carry.
-	if !s.inference().RequestOverrides(ctx, workflow).IsZero() {
+	// which the verbatim body cannot carry. Ceilings rewrite only a request
+	// that exceeds them: one already within them is forwarded as it is.
+	overrides := s.inference().RequestOverrides(ctx, workflow)
+	if overrides.Forces() || gateway.ChatRequestExceedsCeilings(req, overrides.Ceilings) {
 		return false
 	}
 	_, ok := s.provider.(core.RoutablePassthrough)

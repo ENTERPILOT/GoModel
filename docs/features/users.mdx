@@ -1,8 +1,8 @@
 ---
 title: "Users"
-description: "Limit which models a group, user, or API key may call, with allowlists that inherit down the user-path tree."
+description: "Limit which models a group, user, or API key may call, and set a default model and request ceilings that inherit down the user-path tree."
 icon: "users"
-keywords: ["users", "groups", "model access", "allowed models", "user_path", "API key", "access policy"]
+keywords: ["users", "groups", "model access", "allowed models", "user_path", "API key", "access policy", "default model", "reasoning effort", "max output tokens"]
 ---
 
 ## Overview
@@ -138,18 +138,75 @@ single model.
 
 A denied request receives `400` with code `model_access_denied`.
 
+## Request policy
+
+A node can also shape the requests below it. All three fields are unset by
+default, so nothing changes until you set one:
+
+| Field                  | Effect                                                         | Inheritance           |
+| ---------------------- | -------------------------------------------------------------- | --------------------- |
+| `default_model`        | serves a request that names no model                           | the nearest path wins |
+| `max_reasoning_effort` | lowers a higher reasoning effort to this level                 | the lowest ceiling wins |
+| `max_output_tokens`    | lowers a higher output token limit to this number              | the lowest ceiling wins |
+
+```yaml
+users:
+  - path: /acme
+    max_output_tokens: 8192
+  - path: /acme/eng
+    default_model: team-model # a model or a virtual model
+    max_reasoning_effort: medium
+  - path: /acme/eng/interns
+    max_reasoning_effort: low
+```
+
+| Request from          | Client sends                         | Sent upstream                          |
+| --------------------- | ------------------------------------ | -------------------------------------- |
+| `/acme/eng/alice`     | no `model`                           | `team-model`, resolved as usual        |
+| `/acme/eng/alice`     | `reasoning_effort: high`, `max_tokens: 32000` | `medium`, `8192`              |
+| `/acme/eng/alice`     | `reasoning_effort: low`, `max_tokens: 100`    | unchanged                     |
+| `/acme/eng/alice`     | no effort, no limit                  | unchanged — a ceiling never adds a value |
+| `/acme/eng/interns/bob` | `reasoning_effort: medium`         | `low`                                  |
+| `/acme/sales`         | `max_tokens: 32000`                  | `8192`                                 |
+
+**Ceilings** are upper bounds, never values to send. The lowest ceiling between
+a path and `/` applies, so a child can tighten its group's ceiling but setting a
+higher one on a child changes nothing. Efforts use the scale `none`, `minimal`,
+`low`, `medium`, `high`, `xhigh`, `max`; an effort the scale cannot place (a
+raw thinking token budget, for example) counts as above the ceiling and is
+replaced by it. The token ceiling covers `max_tokens`, `max_completion_tokens`,
+and `max_output_tokens` in whichever spelling the client used.
+
+Ceilings apply after [virtual model overrides](/features/virtual-models#force-a-reasoning-effort),
+on every attempt, including failover legs, so they also bound an effort or a
+`max_tokens` that a virtual model forces or defaults. They apply to Chat
+Completions, the Responses API, and the Anthropic Messages API; a Messages
+request within the ceilings is still forwarded natively to Anthropic, and one
+above them takes the translated path so it can be lowered. Batches, provider
+passthrough under `/p/`, embeddings, and media endpoints are not rewritten.
+
+The **default model** is used only when a Chat Completions, Responses, or
+Messages request (including Messages token counting) names neither a `model`
+nor a `provider`; a model the client names always wins. It is resolved exactly
+like a model the client sent: it may be a [virtual model](/features/virtual-models),
+and it is still checked against the allowlists, so a default the path may not
+use is denied. Paths without a default, and requests without a user path,
+keep getting `400 model is required`.
+
 ## Managing policies
 
 ### Dashboard
 
-`Users` lists every node with its own allowlist, its **effective models** —
+`Users` lists every node with its own allowlist, the **request policy** in
+force on it (with the path each value comes from), its **effective models** —
 the path-level result once its own list, every parent's list, and the
 model-side virtual-model policies are applied (a red **None** flags a node
 whose lists intersect to nothing) — and how many API keys are bound to it. A
 managed API key's own `allowed_models` can narrow a request further than the
 path shows. The editor warns while you type when the
 list would leave no model available. Add or edit a node to
-set its models; remove the policy to fall back to the parents' limits.
+set its models, default model, and ceilings; remove the policy to fall back to
+the parents' limits.
 
 The key count links to the **API Keys** page filtered to that path's subtree,
 and each row has an *Add API key* action that opens the create-key form with
@@ -166,11 +223,12 @@ Declare policies in `config.yaml` under `users:` (see the example above) or
 in the `USERS` environment variable as a JSON array with the same fields:
 
 ```bash
-USERS='[{"path":"/acme/eng","allowed_models":["anthropic/*"]}]'
+USERS='[{"path":"/acme/eng","allowed_models":["anthropic/*"],"default_model":"team-model","max_reasoning_effort":"medium","max_output_tokens":4096}]'
 ```
 
 Declared policies shadow dashboard rows for the same path and are read-only
-in the dashboard. A misspelled provider in a declared policy fails startup.
+in the dashboard. A misspelled provider, an unknown effort, a negative token
+ceiling, or a wildcard default model in a declared policy fails startup.
 
 ### Admin API
 
@@ -180,6 +238,14 @@ in the dashboard. A misspelled provider in a declared policy fails startup.
 | `PUT`    | `/admin/users`                          | Create or replace one node's policy       |
 | `DELETE` | `/admin/users?user_path=/acme/eng`      | Remove one node's policy                  |
 | `PUT`    | `/admin/auth-keys/{id}/allowed-models`  | Replace one API key's allowlist           |
+
+`PUT /admin/users` takes `user_path`, `allowed_models`, `default_model`,
+`max_reasoning_effort`, `max_output_tokens`, and `description`, and replaces
+the whole row: a field left out is cleared. `GET /admin/users` returns each
+node's own fields and a `request_policy` object with the values in force and
+the path each comes from (`default_model_from`, `max_reasoning_effort_from`,
+`max_output_tokens_from`). A credential scoped to a subtree cannot change the
+policy of its own scope root, only of paths below it.
 
 `POST /admin/auth-keys` accepts `allowed_models` at creation time. See
 [Admin Endpoints](/advanced/admin-endpoints) for request and response shapes.

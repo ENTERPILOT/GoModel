@@ -12,10 +12,12 @@ import {
   sortUserNodes,
   userNodeInactive,
   userNodeKind,
+  userFormFromNode,
   userNodeRestricted,
   userPathDepth,
   userPathLeaf,
   userPathValidationError,
+  userRequestPolicyItems,
   userSelectorOptions,
 } from "../src/pages/users/usersLogic.js";
 import {
@@ -162,9 +164,78 @@ test("buildUpsertUserPayload prefixes the slash, parses selectors, and drops an 
   assert.deepEqual(payload, {
     user_path: "/acme/eng",
     allowed_models: ["anthropic/*", "openai/gpt-4o"],
+    default_model: undefined,
+    max_reasoning_effort: undefined,
+    max_output_tokens: undefined,
     description: undefined,
   });
   assert.ok(buildUpsertUserPayload({ ...defaultUserForm(), user_path: "" }).error);
+});
+
+test("buildUpsertUserPayload carries the request policy and rejects a bad token ceiling", () => {
+  const { payload } = buildUpsertUserPayload({
+    ...defaultUserForm(),
+    user_path: "/acme",
+    default_model: " team-model ",
+    max_reasoning_effort: "medium",
+    max_output_tokens: "4096",
+  });
+  assert.equal(payload.default_model, "team-model");
+  assert.equal(payload.max_reasoning_effort, "medium");
+  assert.equal(payload.max_output_tokens, 4096);
+  // A number input hands back a number, not a string.
+  assert.equal(buildUpsertUserPayload({ ...defaultUserForm(), user_path: "/acme", max_output_tokens: 512 }).payload.max_output_tokens, 512);
+  for (const bad of ["-1", "1.5", "many"]) {
+    assert.ok(buildUpsertUserPayload({ ...defaultUserForm(), user_path: "/acme", max_output_tokens: bad }).error, bad);
+  }
+});
+
+// The PUT replaces the whole row, so editing a node must round-trip every
+// field it has, or saving an unrelated change would clear its policy.
+test("userFormFromNode round-trips the node's own policy through the payload", () => {
+  const stored = node({
+    user_path: "/acme/eng",
+    allowed_models: ["anthropic/"],
+    default_model: "team-model",
+    max_reasoning_effort: "low",
+    max_output_tokens: 2048,
+    description: "eng",
+    request_policy: { max_output_tokens: 1024, max_output_tokens_from: "/acme" },
+  });
+  const form = userFormFromNode(stored, displayModelSelector);
+  assert.equal(form.max_output_tokens, "2048", "the form shows the node's own ceiling, not the inherited one");
+  assert.deepEqual(buildUpsertUserPayload(form).payload, {
+    user_path: "/acme/eng",
+    allowed_models: ["anthropic/*"],
+    default_model: "team-model",
+    max_reasoning_effort: "low",
+    max_output_tokens: 2048,
+    description: "eng",
+  });
+  assert.deepEqual(userFormFromNode(null), defaultUserForm());
+});
+
+test("userRequestPolicyItems lists the policy in force with where each value comes from", () => {
+  assert.deepEqual(userRequestPolicyItems(node({})), []);
+  const items = userRequestPolicyItems(node({
+    user_path: "/acme/eng/alice",
+    request_policy: {
+      default_model: "team-model",
+      default_model_from: "/acme/eng",
+      max_reasoning_effort: "medium",
+      max_reasoning_effort_from: "/acme",
+      max_output_tokens: 4096,
+      max_output_tokens_from: "/acme/eng/alice",
+    },
+  }));
+  assert.deepEqual(items.map((item) => [item.key, item.from]), [
+    ["default_model", "/acme/eng"],
+    ["max_reasoning_effort", "/acme"],
+    ["max_output_tokens", "/acme/eng/alice"],
+  ]);
+  assert.match(items[0].label, /team-model/);
+  assert.match(items[1].label, /medium/);
+  assert.match(items[2].label, /4096/);
 });
 
 test("userSelectorOptions lists provider wildcards first, then concrete selectors, de-duplicated", () => {

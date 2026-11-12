@@ -54,6 +54,8 @@ type Service struct {
 	// subject side (auth key and user-path allowlists). It is consulted after
 	// the model-side policy rows. Set once during startup, before serving.
 	accessPolicy AccessPolicy
+	// requestPolicy is accessPolicy when it also carries request policy.
+	requestPolicy SubjectRequestPolicy
 
 	balancer  roundRobin
 	sticky    stickySessions
@@ -79,12 +81,15 @@ type AccessPolicy interface {
 }
 
 // SetAccessPolicy installs the subject-side access policy consulted by
-// AllowsModel and ValidateModelAccess. Must be called before serving.
+// AllowsModel and ValidateModelAccess, and by ResolveRequestOverrides and
+// DefaultModel when it is a SubjectRequestPolicy. Must be called before
+// serving.
 func (s *Service) SetAccessPolicy(policy AccessPolicy) {
 	if s == nil {
 		return
 	}
 	s.accessPolicy = policy
+	s.requestPolicy, _ = policy.(SubjectRequestPolicy)
 }
 
 // SetTargetCapacity installs the rate-limit capacity probe consulted by load

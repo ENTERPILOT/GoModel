@@ -30,7 +30,8 @@ func withClientRequest[Req any](ctx context.Context, req Req) context.Context {
 
 // withRequestOverrides wraps one provider call so each attempt, primary or
 // failover, carries the reasoning effort and request parameters the operator
-// forced for the model it goes to. A primary attempt prepared with its
+// forced for the model it goes to, within the ceilings of the caller's user
+// path. A primary attempt prepared with its
 // overrides passes through untouched; a failover leg is rebuilt from the
 // client's request so the primary's overrides never leak into it. The effort
 // is written to the common reasoning.effort field, so every provider's
@@ -106,9 +107,10 @@ func overridesError(err error) error {
 }
 
 // ChatRequestWithOverrides returns a copy of req with the configured
-// parameters applied and then the reasoning effort forced. The effort goes
-// last so the typed override keeps winning over anything the parameter sets
-// carry.
+// parameters applied, then the reasoning effort forced, then the ceilings.
+// The effort goes after the parameters so the typed override keeps winning
+// over anything the parameter sets carry; the ceilings go last so they bound
+// a forced or defaulted value as they bound the client's.
 func ChatRequestWithOverrides(req *core.ChatRequest, overrides requestparams.Overrides) (*core.ChatRequest, error) {
 	applied, err := requestparams.ApplyChat(req, overrides.Defaults, overrides.Params)
 	if err != nil {
@@ -117,7 +119,7 @@ func ChatRequestWithOverrides(req *core.ChatRequest, overrides requestparams.Ove
 	if overrides.ReasoningEffort != "" {
 		applied = ChatRequestWithReasoningEffort(applied, overrides.ReasoningEffort)
 	}
-	return applied, nil
+	return ChatRequestWithCeilings(applied, overrides.Ceilings)
 }
 
 // ResponsesRequestWithOverrides is ChatRequestWithOverrides for Responses.
@@ -129,7 +131,7 @@ func ResponsesRequestWithOverrides(req *core.ResponsesRequest, overrides request
 	if overrides.ReasoningEffort != "" {
 		applied = ResponsesRequestWithReasoningEffort(applied, overrides.ReasoningEffort)
 	}
-	return applied, nil
+	return ResponsesRequestWithCeilings(applied, overrides.Ceilings)
 }
 
 func chatRequestSelectorOf(req *core.ChatRequest) core.ModelSelector {

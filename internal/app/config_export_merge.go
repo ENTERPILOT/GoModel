@@ -106,7 +106,14 @@ func exportUsers(declared []config.UserConfig, stored []users.User) []config.Use
 		if declaredPaths[user.UserPath] {
 			continue
 		}
-		result = append(result, config.UserConfig{Path: user.UserPath, AllowedModels: user.AllowedModels, Description: user.Description})
+		result = append(result, config.UserConfig{
+			Path:               user.UserPath,
+			AllowedModels:      user.AllowedModels,
+			DefaultModel:       user.DefaultModel,
+			MaxReasoningEffort: user.MaxReasoningEffort,
+			MaxOutputTokens:    user.MaxOutputTokens,
+			Description:        user.Description,
+		})
 	}
 	return result
 }

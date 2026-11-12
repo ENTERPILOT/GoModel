@@ -1,6 +1,6 @@
 // State module for the Users page: the user-path tree with per-node model
-// allowlists (GET/PUT/DELETE /admin/users), on top of the shared admin API
-// client.
+// allowlists and request policy (GET/PUT/DELETE /admin/users), on top of the
+// shared admin API client.
 
 import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
@@ -15,6 +15,7 @@ import {
   defaultUserForm,
   filterUserNodes,
   sortUserNodes,
+  userFormFromNode,
 } from "./usersLogic.js";
 
 class UsersStore {
@@ -121,13 +122,7 @@ class UsersStore {
     }
     this.error = "";
     this.editingPath = node ? node.user_path : "";
-    this.form = node
-      ? {
-          user_path: node.user_path,
-          allowed_models: (node.allowed_models || []).map(displayModelSelector),
-          description: node.description || "",
-        }
-      : defaultUserForm();
+    this.form = node ? userFormFromNode(node, displayModelSelector) : defaultUserForm();
     if (!node) {
       // A scoped key can only manage its own subtree: start there.
       this.form.user_path = access.defaultPath(this.form.user_path);

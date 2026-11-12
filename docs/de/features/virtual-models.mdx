@@ -118,6 +118,15 @@ senden lassen. Das ist das Gegenteil von Slowdown, wo der Alias gewinnt. Wie
 bei Slowdown schlägt ein exakter Override einen modellweiten, und ein Eintrag
 ohne Effort verdeckt keinen allgemeineren.
 
+Ein Override erzwingt einen Wert; er ist keine Obergrenze. Um den Effort zu
+begrenzen, den eine Gruppe von Aufrufern auf jedem Modell nutzen darf, setzen
+Sie stattdessen `max_reasoning_effort` auf ihrem
+[User Path](/de/features/users#request-policy). Diese Obergrenze greift nach
+jedem Override virtueller Modelle, sodass `team-model` oben für einen Aufrufer,
+dessen Pfad auf `medium` begrenzt ist, `medium` statt `high` sendet, und
+`hetzner/qwen3.8` weiterhin `medium`. Die Obergrenze hebt nie einen Override
+an, der darunter liegt.
+
 ## Request-Parameter setzen
 
 Setzen Sie **params** und **default_params** für einen Redirect oder ein
@@ -224,6 +233,11 @@ semantischen Caches umfasst ebenfalls die angewendeten Request-Parameter (siehe
 für die genauen Felder), sodass Aliase, deren angewendete Werte sich
 unterscheiden — auch für `top_k` oder `chat_template_kwargs` —, ebenfalls nie
 einen semantischen Eintrag teilen.
+
+Die [Obergrenzen des User Paths](/de/features/users#request-policy) des
+Aufrufers greifen zuletzt, nach `params` und dem Reasoning-Effort-Override:
+Ein `max_tokens` über dem `max_output_tokens` des Pfads wird gesenkt, egal ob
+der Client, `default_params` oder `params` es gesetzt hat.
 
 Der Rest dieser Seite behandelt Redirects.
 

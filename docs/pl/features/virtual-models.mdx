@@ -109,6 +109,15 @@ wartość. To odwrotność spowolnienia, gdzie wygrywa alias. Tak jak przy
 spowolnieniu, dokładne nadpisanie wygrywa z ustawieniem dla całego modelu, a
 wpis bez effort nie przesłania ogólniejszego.
 
+Nadpisanie wymusza wartość; nie jest limitem. Aby ograniczyć effort, którego
+grupa wywołujących może używać na każdym modelu, ustaw zamiast tego
+`max_reasoning_effort` na ich
+[ścieżce użytkownika](/pl/features/users#polityka-requestów). Ten limit działa
+po każdym nadpisaniu modeli wirtualnych, więc `team-model` powyżej wysyła
+`medium` zamiast `high` dla wywołującego, którego ścieżka jest ograniczona do
+`medium`, a `hetzner/qwen3.8` nadal wysyła `medium`. Limit nigdy nie podnosi
+nadpisania, które jest poniżej niego.
+
 ## Ustawianie parametrów żądania
 
 Ustaw **params** i **default_params** na przekierowaniu lub konkretnym modelu,
@@ -210,6 +219,11 @@ parametry żądania (dokładną listę pól znajdziesz w sekcji
 [Na czym opiera się klucz cache'u semantycznego](/pl/features/cache#na-czym-opiera-się-klucz-cache’u-semantycznego)),
 więc aliasy, których zastosowane wartości się różnią, także dla `top_k` czy
 `chat_template_kwargs`, również nigdy nie dzielą wpisu semantycznego.
+
+[Limity ścieżki użytkownika](/pl/features/users#polityka-requestów)
+wywołującego działają na końcu, po `params` i nadpisaniu reasoning effort:
+`max_tokens` powyżej `max_output_tokens` ścieżki zostaje obniżony niezależnie
+od tego, czy ustawił go klient, `default_params` czy `params`.
 
 Reszta tej strony dotyczy przekierowań.
 

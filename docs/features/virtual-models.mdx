@@ -107,6 +107,13 @@ that model would make both send its value. This is the reverse of slowdown,
 where the alias wins. As with slowdown, an exact override beats a model-wide
 one, and an entry that sets no effort does not hide a broader one.
 
+An override forces a value; it is not a ceiling. To cap the effort a group of
+callers may use on every model, set `max_reasoning_effort` on their
+[user path](/features/users#request-policy) instead. That ceiling applies after
+every virtual model override, so `team-model` above sends `medium`, not `high`,
+for a caller whose path is capped at `medium`, and `hetzner/qwen3.8` still
+sends `medium`. The ceiling never raises an override below it.
+
 ## Set request parameters
 
 Set **params** and **default_params** on a redirect or a concrete model to
@@ -191,7 +198,11 @@ row also decides whether a key is forced or a default: a concrete model's
 `default_params.temperature` turns an alias's forced `temperature` back into a
 default. A failover leg is rebuilt from the client's request and gets the
 parameters of its own route and concrete model; the primary model's policy
-never leaks into it.
+never leaks into it. The caller's
+[user path ceilings](/features/users#request-policy) apply last, after
+`params` and the reasoning effort override, so a `max_tokens` above the path's
+`max_output_tokens` is lowered whether the client, `default_params`, or
+`params` set it.
 [Guardrail](/advanced/guardrails) plugins run first, so `params` replaces a
 value a plugin set and `default_params` respects it. Parameters apply to Chat
 Completions, the Responses API, and the Anthropic Messages API (native

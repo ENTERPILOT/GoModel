@@ -127,6 +127,18 @@ darf eine Gruppe, ein Benutzer oder ein API-Key aufrufen? Jeder User-Path-Knoten
 optionale Liste `allowed_models`; die Listen werden den Baum hinab geschnitten, sodass ein Kindknoten
 nur einschränken kann, was seine Gruppe erlaubt. Siehe [Benutzer](/de/features/users).
 
+## Request-Policy
+
+Ein Knoten im User-Path-Baum kann außerdem ein `default_model` für Requests
+ohne Modell sowie Obergrenzen für Reasoning-Effort (`max_reasoning_effort`) und
+Ausgabe-Tokens (`max_output_tokens`) für jedes Modell setzen. Alles unter dem
+Knoten erbt sie: Das nächstgelegene Standardmodell gewinnt, und die niedrigste
+Obergrenze bis `/` gilt, sodass ein Kind die Obergrenze seiner Gruppe nicht
+lockern kann. Eine Obergrenze senkt nur einen Wert, den der Request mitbringt;
+sie fügt nie einen hinzu. Anders als das `reasoning_effort` eines virtuellen
+Modells, das einen Wert für ein Modell erzwingt, begrenzen diese jedes Modell,
+das der Pfad nutzt. Siehe [Benutzer](/de/features/users#request-policy).
+
 ## Bereitgestellte Modelle
 
 `GET /v1/models` verwendet ebenfalls den effektiven `user_path`.

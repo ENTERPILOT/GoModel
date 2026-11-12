@@ -127,6 +127,18 @@ może wywołać grupa, użytkownik lub klucz API. Każdy węzeł ścieżki użyt
 opcjonalną listę `allowed_models`; listy są przecinane w dół drzewa, więc potomek może
 jedynie zawęzić to, na co pozwala jego grupa. Zobacz [Użytkownicy](/pl/features/users).
 
+## Polityka requestów
+
+Węzeł drzewa ścieżek użytkownika może też ustawić `default_model` dla
+requestów bez modelu oraz limity reasoning effort (`max_reasoning_effort`) i
+tokenów wyjściowych (`max_output_tokens`) dla każdego modelu. Wszystko pod
+węzłem je dziedziczy: wygrywa najbliższy domyślny model, a obowiązuje
+najniższy limit aż do `/`, więc dziecko nie może poluzować limitu swojej grupy.
+Limit tylko obniża wartość, którą request niesie; nigdy jej nie dodaje. W
+odróżnieniu od `reasoning_effort` modelu wirtualnego, który wymusza jedną
+wartość dla jednego modelu, te limity obejmują każdy model używany przez
+ścieżkę. Zobacz [Użytkownicy](/pl/features/users#polityka-requestów).
+
 ## Udostępniane modele
 
 `GET /v1/models` również używa efektywnego `user_path`.
