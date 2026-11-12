@@ -43,12 +43,26 @@ func AddColumns(ctx context.Context, db DB, statements ...string) error {
 	}
 	dialect := db.Dialect()
 	for _, statement := range pending {
-		_, err := db.Exec(ctx, dialect.addColumnStatement(statement))
+		err := execAddColumn(ctx, db, dialect.addColumnStatement(statement))
 		if err != nil && !IsDuplicateColumnError(err) {
 			return fmt.Errorf("apply migration %q: %w", statement, err)
 		}
 	}
 	return nil
+}
+
+// execAddColumn runs one column migration. On PostgreSQL it bounds the wait
+// for the table lock (see postgresDB.changeSchema), one transaction per
+// statement so a tolerated duplicate-column error ends only its own.
+func execAddColumn(ctx context.Context, db DB, statement string) error {
+	if p, ok := db.(*postgresDB); ok {
+		return p.changeSchema(ctx, func(q Querier) error {
+			_, err := q.Exec(ctx, statement)
+			return err
+		})
+	}
+	_, err := db.Exec(ctx, statement)
+	return err
 }
 
 // missingColumnStatements drops the statements whose column already exists,

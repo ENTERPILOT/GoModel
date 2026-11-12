@@ -181,8 +181,11 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 	if db.Dialect() != sqlx.PostgreSQL {
 		indexes = append(indexes, modelIndexStatements(db.Dialect())...)
 	}
+	// One Schema call per statement keeps them best-effort, and on PostgreSQL
+	// skips the indexes that already exist instead of queueing each for a
+	// lock on audit_logs.
 	for _, statement := range indexes {
-		if _, err := db.Exec(ctx, statement); err != nil {
+		if err := db.Schema(ctx, statement); err != nil {
 			slog.Warn("failed to create index", "error", err)
 		}
 	}

@@ -13,7 +13,8 @@ import (
 // postgresDB adapts a pgx connection pool to DB. Queries arrive with `?`
 // placeholders and are rebound to $1, $2, ... on the way through.
 type postgresDB struct {
-	pool *pgxpool.Pool
+	pool     *pgxpool.Pool
+	lockWait lockWait
 }
 
 // NewPostgreSQL wraps a pgx pool. The caller retains ownership of the pool.
@@ -21,7 +22,7 @@ func NewPostgreSQL(pool *pgxpool.Pool) (DB, error) {
 	if pool == nil {
 		return nil, fmt.Errorf("connection pool is required")
 	}
-	return &postgresDB{pool: pool}, nil
+	return &postgresDB{pool: pool, lockWait: defaultLockWait}, nil
 }
 
 func (p *postgresDB) Dialect() Dialect { return PostgreSQL }
@@ -63,12 +64,19 @@ const postgresSchemaLockKey int64 = 0x676f6d6f64656c
 // fresh database hit exactly that. The transaction-scoped lock serializes
 // them: the second replica waits, then finds every table present.
 // PostgreSQL DDL is transactional, so a failure leaves nothing half-applied.
+//
+// Indexes that already exist are skipped, and the rest wait only briefly for
+// a table lock; see postgres_schema.go.
 func (p *postgresDB) Schema(ctx context.Context, statements ...string) error {
-	return p.InTx(ctx, func(q Querier) error {
-		if _, err := q.Exec(ctx, "SELECT pg_advisory_xact_lock(?)", postgresSchemaLockKey); err != nil {
-			return fmt.Errorf("acquire schema lock: %w", err)
-		}
-		return execSchema(ctx, q, PostgreSQL, statements)
+	pending, err := p.pendingSchema(ctx, statements)
+	if err != nil {
+		return err
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+	return p.changeSchema(ctx, func(q Querier) error {
+		return execSchema(ctx, q, PostgreSQL, pending)
 	})
 }
 

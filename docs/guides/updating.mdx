@@ -169,6 +169,13 @@ transform storage instead — when budgets and rate limits gained scopes, their
 tables were rebuilt and the old ones dropped. Both are safe going forward, which
 is what makes the reverse direction worth care.
 
+On PostgreSQL, a start that finds the schema up to date changes nothing and
+takes no table locks, so starting or restarting a replica does not stall the
+others. A migration that does add a column or an index waits for its table half
+a second at a time, for about a minute in total. If a long-running statement
+holds the table for that whole minute, the start fails instead of queueing
+traffic behind it.
+
 ## Pinning a version
 
 Updates default to the latest release. To stay on a known version, pin it:
@@ -221,6 +228,7 @@ docker run --rm -v gomodel_data:/data -v "$PWD":/backup alpine \
 | --- | --- |
 | Dashboard is empty after the update: no keys, no usage, no logs | The database was not on a volume, or `SQLITE_PATH` resolved somewhere else. Compare the `storage configured` path before and after. |
 | Gateway will not start after the update | Read the first error line. Configuration that was previously ignored can become validated; the release notes list breaking changes. |
+| Start fails with `schema change could not lock its table` | A long-running statement or index build held the table for the minute the migration waited. Start again once it has finished; nothing was half applied. |
 | The version did not change | The old container is still running (`docker ps`), or a second `gomodel` binary earlier in `PATH` is being launched. |
 
 Still stuck? Ask on [Discord](https://discord.gg/gaEB9BQSPH) or open a
