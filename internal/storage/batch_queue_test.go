@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"errors"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -174,6 +175,8 @@ func TestBatchQueueRejectsEntriesWhenBufferIsFull(t *testing.T) {
 }
 
 // BenchmarkBatchQueueWrite measures the per-entry cost of a guarded enqueue.
+// The timer pauses every 1<<14 writes until the flush goroutine has emptied
+// the buffer, so nothing is rejected; drops/op must read 0.
 func BenchmarkBatchQueueWrite(b *testing.B) {
 	q := NewBatchQueue(BatchQueueConfig[*int]{
 		Name:          "bench",
@@ -184,14 +187,59 @@ func BenchmarkBatchQueueWrite(b *testing.B) {
 	})
 	defer q.Close()
 	entry := new(int)
+	drops := 0
 
 	b.ReportAllocs()
-	for b.Loop() {
+	b.ResetTimer()
+	for i := range b.N {
 		if q.BeginWrite() {
-			q.Enqueue(entry)
+			if !q.Enqueue(entry) {
+				drops++
+			}
 			q.EndWrite()
 		}
+		if (i+1)%(1<<14) == 0 {
+			b.StopTimer()
+			for len(q.buffer) > 0 {
+				runtime.Gosched()
+			}
+			b.StartTimer()
+		}
 	}
+	b.StopTimer()
+	b.ReportMetric(float64(drops)/float64(b.N), "drops/op")
+}
+
+// TestBatchQueueCloseWaitsForActiveWrite holds a write open across the start
+// of Close and checks that its entry is still written.
+func TestBatchQueueCloseWaitsForActiveWrite(t *testing.T) {
+	store := &recordingQueueStore{}
+	q := newTestQueue(store, 10, time.Hour)
+	require.True(t, q.BeginWrite())
+
+	closed := make(chan error, 1)
+	go func() { closed <- q.Close() }()
+
+	// Close has started once it rejects new writes.
+	require.Eventually(t, func() bool {
+		if q.BeginWrite() {
+			q.EndWrite()
+			return false
+		}
+		return true
+	}, 5*time.Second, time.Microsecond)
+	select {
+	case <-closed:
+		require.FailNow(t, "Close returned while a write was in flight")
+	default:
+	}
+
+	require.True(t, q.Enqueue(7))
+	q.EndWrite()
+	require.NoError(t, <-closed)
+
+	batches, _ := store.snapshot()
+	assert.Equal(t, [][]int{{7}}, batches)
 }
 
 // TestBatchQueueConcurrentWriteAndClose checks that every entry Enqueue
