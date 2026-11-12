@@ -74,10 +74,18 @@ export function buildDisplayModels({
   }
 
   for (const alias of safeAliases) {
-    const sourceModel = concreteModelsByKey.get(
-      normalizedAliasName(alias && alias.name),
+    const aliasName = normalizedAliasName(alias && alias.name);
+    const sourceModel = concreteModelsByKey.get(aliasName);
+    const masksSourceModel = Boolean(
+      alias && alias.enabled !== false && alias.valid && sourceModel,
     );
-    if (alias && alias.enabled !== false && alias.valid && sourceModel) {
+    // A virtual model named exactly like the model row (its selector) is the
+    // redirect edited from that row, so the row stands for it. One that only
+    // matches another name the model answers to, such as the bare upstream ID
+    // "qwen/qwen3-vl-8b" of "openrouter/qwen/qwen3-vl-8b", is a virtual model
+    // of its own: requests for the qualified name still reach the upstream
+    // model, so it keeps its row and is marked as shadowing that model.
+    if (masksSourceModel && modelOwnsName(sourceModel, aliasName)) {
       continue;
     }
     let targetModel = null;
@@ -106,6 +114,7 @@ export function buildDisplayModels({
       access: null,
       masking_alias: null,
       source_model_exists: Boolean(sourceModel),
+      shadowed_model: masksSourceModel ? qualifiedModelName(sourceModel) : "",
       has_virtual_model: true,
       alias_state_class: aliasStateClass(alias),
       alias_state_text: aliasStateText(alias),
@@ -120,6 +129,25 @@ export function buildDisplayModels({
       String(b.display_name || ""),
     );
   });
+}
+
+// modelOwnsName reports whether a normalized virtual model name is the
+// model's own qualified name, the one its row displays.
+function modelOwnsName(model, name) {
+  return Boolean(name) && normalizedAliasName(qualifiedModelName(model)) === name;
+}
+
+// rowShadowingAliasName returns the name of the virtual model over a model row
+// when it is reached through another name the model answers to (its bare
+// upstream ID) rather than the row's own name, or "" otherwise.
+export function rowShadowingAliasName(row) {
+  if (!row || row.is_alias || !row.masking_alias) return "";
+  const name = String(row.masking_alias.name || "").trim();
+  const rowName = normalizedAliasName(row.display_name);
+  if (!name || !rowName || normalizedAliasName(name) === rowName) {
+    return "";
+  }
+  return name;
 }
 
 // rowCategories lists a model's categories, or nothing for an alias.
@@ -473,7 +501,10 @@ export function rowRedirectCanRemove(row) {
     !row.is_alias &&
     row.masking_alias &&
     row.masking_alias.name &&
-    !row.masking_alias.managed,
+    !row.masking_alias.managed &&
+    // A shadowing virtual model has its own row to remove it from; removing it
+    // from the model it shadows would read as removing that model's redirect.
+    !rowShadowingAliasName(row),
   );
 }
 

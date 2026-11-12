@@ -15,6 +15,7 @@ import {
   groupDisplayModels,
   rowIsManaged,
   rowRedirectCanRemove,
+  rowShadowingAliasName,
   rowAnchorID,
 } from "../src/pages/models/displayRows.js";
 import {
@@ -257,13 +258,90 @@ test("buildDisplayModels combines source-backed redirects with the concrete mode
   );
 
   assert.equal(aliasOnly.source_model_exists, false);
+  assert.equal(aliasOnly.shadowed_model, "");
   assert.equal(aliasRowCanRemove(aliasOnly), true);
-  assert.equal(modelBackedAliasRow, undefined);
+  // Virtual models named like the bare upstream ID keep their own row and are
+  // marked as shadowing the model: requests for the model's qualified name
+  // still reach the upstream model.
+  assert.equal(modelBackedAliasRow.shadowed_model, "openai/gpt-4o");
+  assert.equal(aliasRowCanRemove(modelBackedAliasRow), true);
   assert.equal(modelBacked.masking_alias.name, "gpt-4o");
-  assert.equal(rowRedirectCanRemove(modelBacked), true);
-  assert.equal(nestedTargetAlias, undefined);
+  assert.equal(rowShadowingAliasName(modelBacked), "gpt-4o");
+  assert.equal(rowRedirectCanRemove(modelBacked), false);
+  assert.equal(nestedTargetAlias.shadowed_model, "openrouter/anthropic/claude-fable-5");
   assert.equal(nestedTargetModel.masking_alias.name, "anthropic/claude-fable-5");
-  assert.equal(rowRedirectCanRemove(nestedTargetModel), true);
+  assert.equal(rowShadowingAliasName(nestedTargetModel), "anthropic/claude-fable-5");
+  assert.equal(rowRedirectCanRemove(nestedTargetModel), false);
+});
+
+test("buildDisplayModels keeps a virtual model named like an upstream model ID visible (#1379)", () => {
+  const models = [
+    {
+      provider_name: "local",
+      provider_type: "openai",
+      selector: "local/qwen3-vl-8b",
+      model: { id: "qwen3-vl-8b", object: "model" },
+    },
+    {
+      provider_name: "openrouter",
+      provider_type: "openrouter",
+      selector: "openrouter/qwen/qwen3-vl-8b-instruct",
+      model: { id: "qwen/qwen3-vl-8b-instruct", object: "model" },
+    },
+  ];
+  const aliases = [
+    {
+      name: "qwen/qwen3-vl-8b-instruct",
+      strategy: "failover",
+      targets: [
+        { provider: "local", model: "qwen3-vl-8b" },
+        { provider: "openrouter", model: "qwen/qwen3-vl-8b-instruct" },
+      ],
+      enabled: true,
+      valid: true,
+    },
+  ];
+  const rows = display(models, aliases);
+
+  const virtualRow = rows.find((row) => row.key === "alias:qwen/qwen3-vl-8b-instruct");
+  const upstreamRow = rows.find((row) => row.key === "model:openrouter/qwen/qwen3-vl-8b-instruct");
+  assert.ok(virtualRow, "the virtual model keeps its own row");
+  assert.equal(virtualRow.is_alias, true);
+  assert.equal(virtualRow.source_model_exists, true);
+  assert.equal(virtualRow.shadowed_model, "openrouter/qwen/qwen3-vl-8b-instruct");
+  assert.equal(upstreamRow.display_name, "openrouter/qwen/qwen3-vl-8b-instruct");
+  assert.equal(rowShadowingAliasName(upstreamRow), "qwen/qwen3-vl-8b-instruct");
+  assert.equal(rowRedirectCanRemove(upstreamRow), false);
+
+  const groups = groupDisplayModels(rows, models, []);
+  assert.equal(groups[0].key, "virtual-model-group");
+  assert.deepEqual(Array.from(groups[0].rows, (row) => row.display_name), ["qwen/qwen3-vl-8b-instruct"]);
+});
+
+test("buildDisplayModels folds a virtual model named like the model row into that row", () => {
+  const models = [
+    {
+      provider_name: "openrouter",
+      provider_type: "openrouter",
+      selector: "openrouter/qwen/qwen3-vl-8b-instruct",
+      model: { id: "qwen/qwen3-vl-8b-instruct", object: "model" },
+    },
+  ];
+  const aliases = [
+    {
+      name: "openrouter/qwen/qwen3-vl-8b-instruct",
+      target_provider: "local",
+      target_model: "qwen3-vl-8b",
+      enabled: true,
+      valid: true,
+    },
+  ];
+  const rows = display(models, aliases);
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].masking_alias.name, "openrouter/qwen/qwen3-vl-8b-instruct");
+  assert.equal(rowShadowingAliasName(rows[0]), "");
+  assert.equal(rowRedirectCanRemove(rows[0]), true);
 });
 
 test("buildDisplayModels flags model rows with a policy override as carrying a virtual model", () => {
@@ -370,7 +448,7 @@ test("groupDisplayModels keeps alias-only virtual models in a first group", () =
 
   assert.equal(groups[0].key, "virtual-model-group");
   assert.equal(groups[0].display_name, "Virtual models");
-  assert.deepEqual(Array.from(groups[0].rows, (row) => row.display_name), ["smart"]);
+  assert.deepEqual(Array.from(groups[0].rows, (row) => row.display_name), ["model-a", "smart"]);
   assert.equal(groups[0].provider_name, "");
   assert.equal(groups[0].access.selector, "");
   assert.deepEqual(Array.from(groups, (group) => group.display_name), ["Virtual models", "alpha", "zulu"]);

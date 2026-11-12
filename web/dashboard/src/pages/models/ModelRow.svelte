@@ -18,6 +18,7 @@
   rowAnchorID,
   rowIsManaged,
   rowRedirectCanRemove,
+  rowShadowingAliasName,
 } from "./displayRows.js";
 import {
   maskingFailsOver,
@@ -95,6 +96,11 @@ import {
         : m.models_removing_redirect({ model: row.display_name }),
   );
 
+  // A virtual model reached through the model's bare upstream ID rather than
+  // the row's own name: both rows say so, since requests for the qualified
+  // name still reach the upstream model.
+  const shadowingAliasName = $derived(rowShadowingAliasName(row));
+
   const slowdown = $derived(
     Number(configuredSlowdown == null ? 0 : configuredSlowdown),
   );
@@ -151,6 +157,16 @@ import {
       {#if row.is_alias}
         <div class="model-name-secondary">
           {m.models_targets()} <span class="mono font-size-md"><HighlightText text={row.secondary_name} needle={modelsStore.filter} /></span>
+        </div>
+        {#if row.shadowed_model}
+          <div class="model-name-secondary" title={m.models_shadow_title({ name: row.alias.name, model: row.shadowed_model })}>
+            {m.models_shadows()} <span class="mono font-size-md">{row.shadowed_model}</span>
+          </div>
+        {/if}
+      {/if}
+      {#if shadowingAliasName}
+        <div class="model-name-secondary" title={m.models_shadow_title({ name: shadowingAliasName, model: row.display_name })}>
+          {m.models_shadowed_by()} <span class="mono font-size-md">{shadowingAliasName}</span>
         </div>
       {/if}
       {#if !row.is_alias && row.masking_alias}
