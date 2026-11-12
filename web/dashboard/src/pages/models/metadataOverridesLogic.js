@@ -64,11 +64,27 @@ export function formFromOverride(override) {
   };
 }
 
+// inheritedTokenLimits returns the token limits a row would have without its
+// override, keyed by field: the effective value where the override leaves the
+// field unset. Where it sets the field, the effective value is the override's
+// own and the lower layers' value is not in the row, so the key is left out.
+export function inheritedTokenLimits(metadata, override) {
+  const effective = metadata || {};
+  const overridden = (override && override.metadata) || {};
+  const inherited = {};
+  for (const field of ["context_window", "max_output_tokens"]) {
+    if (overridden[field] == null && effective[field] != null) inherited[field] = effective[field];
+  }
+  return inherited;
+}
+
 function positiveInteger(raw, label) {
   const text = String(raw ?? "").trim();
   if (text === "") return { value: undefined };
   const value = Number(text);
-  if (!Number.isInteger(value) || value <= 0) {
+  // Beyond the safe range the number would be rounded, and saved as a
+  // different limit than the one typed.
+  if (!Number.isSafeInteger(value) || value <= 0) {
     return { error: m.models_metadata_invalid_tokens({ field: label }) };
   }
   return { value };

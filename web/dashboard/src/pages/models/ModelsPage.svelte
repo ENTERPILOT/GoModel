@@ -122,6 +122,9 @@
   {#if pricingOverrides.modelPricingOverrideError && !authError && !pricingOverrides.modelPricingOverrideFormOpen}
     <div class="alert alert-warning">{pricingOverrides.modelPricingOverrideError}</div>
   {/if}
+  {#if metadataOverrides.loadError && !authError}
+    <div class="alert alert-warning">{metadataOverrides.loadError}</div>
+  {/if}
 
   {#if modelsStore.categories.length > 0}
     <div class="category-tabs">

@@ -11,13 +11,18 @@ import {
   buildMetadataOverridePayload,
   findMetadataOverride,
   formFromOverride,
+  inheritedTokenLimits,
   metadataOverrideSelector,
 } from "./metadataOverridesLogic.js";
 
 const PATH = "/admin/model-metadata-overrides";
 
 class MetadataOverridesStore {
-  available = $state(true);
+  // True once the stored overrides are loaded. Editing waits for it: a form
+  // opened while the list is loading or failed to load starts blank, and
+  // saving it would replace the stored override.
+  loaded = $state(false);
+  loadError = $state("");
   overrides = $state([]);
   formOpen = $state(false);
   submitting = $state(false);
@@ -25,17 +30,22 @@ class MetadataOverridesStore {
   hasExisting = $state(false);
   displayName = $state("");
   selector = $state("");
-  // The row's effective metadata when the editor opened, for placeholders.
-  current = $state(null);
+  // The token limits the row inherits, for placeholders.
+  inherited = $state({});
   form = $state(formFromOverride(null));
 
+  #fetchSeq = 0;
+
   async fetchOverrides() {
+    const seq = ++this.#fetchSeq;
     const outcome = await loadAdminList(PATH, {
       label: "model metadata overrides",
       errorFallback: m.models_metadata_load_failed(),
     });
-    if (outcome.status === "stale") return;
-    this.available = outcome.status !== "unavailable";
+    // A slower earlier request must not replace a newer list.
+    if (outcome.status === "stale" || seq !== this.#fetchSeq) return;
+    this.loaded = outcome.status === "ok";
+    this.loadError = outcome.error;
     this.overrides = outcome.items;
   }
 
@@ -44,7 +54,7 @@ class MetadataOverridesStore {
   }
 
   canEdit(row) {
-    return this.available && Boolean(row) && !row.is_alias && Boolean(metadataOverrideSelector(row));
+    return this.loaded && Boolean(row) && !row.is_alias && Boolean(metadataOverrideSelector(row));
   }
 
   open(row) {
@@ -53,7 +63,7 @@ class MetadataOverridesStore {
     const override = findMetadataOverride(this.overrides, selector);
     this.selector = selector;
     this.displayName = row.display_name || selector;
-    this.current = (row.model && row.model.metadata) || {};
+    this.inherited = inheritedTokenLimits(row.model && row.model.metadata, override);
     this.hasExisting = Boolean(override);
     this.form = formFromOverride(override);
     this.error = "";
@@ -64,7 +74,7 @@ class MetadataOverridesStore {
     this.formOpen = false;
     this.submitting = false;
     this.error = "";
-    this.current = null;
+    this.inherited = {};
   }
 
   toggleCategory(category, checked) {
@@ -102,7 +112,7 @@ class MetadataOverridesStore {
       // A 404 on removal means it is already gone, which is the goal.
       const gone = method === "DELETE" && outcome.result && outcome.result.status === 404;
       if (outcome.status !== "ok" && !gone) {
-        if (outcome.status === "unavailable") this.available = false;
+        if (outcome.status === "unavailable") this.loaded = false;
         this.error = outcome.error;
         return;
       }

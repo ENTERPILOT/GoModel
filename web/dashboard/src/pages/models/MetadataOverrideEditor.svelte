@@ -25,10 +25,9 @@
     utility: m.models_category_utility,
   };
 
-  // Placeholders show the value in effect now, so an empty field says what
-  // it inherits.
-  function currentTokens(field) {
-    const value = mo.current && mo.current[field];
+  // Placeholders show what an empty field inherits, where the row says.
+  function inheritedTokens(field) {
+    const value = mo.inherited[field];
     return value == null ? m.models_metadata_inherit() : formatNumber(Number(value));
   }
 </script>
@@ -39,6 +38,7 @@
   error={mo.error}
   submitting={mo.submitting}
   submitLabel={m.models_metadata_save()}
+  canClose={() => !mo.submitting}
   onclose={() => mo.close()}
   onsubmit={() => mo.submit()}
 >
@@ -88,7 +88,7 @@
         min="1"
         step="1"
         inputmode="numeric"
-        placeholder={currentTokens("context_window")}
+        placeholder={inheritedTokens("context_window")}
         bind:value={mo.form.context_window}
       />
     </FormField>
@@ -99,7 +99,7 @@
         min="1"
         step="1"
         inputmode="numeric"
-        placeholder={currentTokens("max_output_tokens")}
+        placeholder={inheritedTokens("max_output_tokens")}
         bind:value={mo.form.max_output_tokens}
       />
     </FormField>

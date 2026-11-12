@@ -1820,7 +1820,7 @@
   "models_metadata_editor": "Model metadata editor",
   "models_metadata_override": "Metadata override",
   "models_metadata_save": "Save Metadata",
-  "models_metadata_help": "Set fields override config.yaml, provider discovery and the model catalog for this provider model; empty fields keep inheriting. Changes apply without a restart.",
+  "models_metadata_help": "Fields you set override config.yaml, provider discovery and the model catalog for this provider model; empty fields keep inheriting. Changes apply without a restart.",
   "models_metadata_categories_help": "Decides the tabs the model is listed under. Leave all unchecked to inherit.",
   "models_metadata_accepts": "Accepts {input}",
   "models_metadata_inherit": "Inherit",
