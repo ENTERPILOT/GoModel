@@ -99,13 +99,14 @@ func TestSQLStore_WriteBatch_ExactBatchBoundary(t *testing.T) {
 		defer store.Close()
 
 		ctx := context.Background()
+		maxEntriesPerBatch := rowLimitsFor(db.Dialect()).entries
 
 		// Test with exactly maxEntriesPerBatch entries
 		numEntries := maxEntriesPerBatch
 		entries := make([]*LogEntry, numEntries)
 		for i := range numEntries {
 			entries[i] = &LogEntry{
-				ID:             fmt.Sprintf("exact-%03d", i),
+				ID:             fmt.Sprintf("exact-%04d", i),
 				Timestamp:      time.Now(),
 				RequestedModel: "gpt-4",
 			}
@@ -122,7 +123,7 @@ func TestSQLStore_WriteBatch_ExactBatchBoundary(t *testing.T) {
 		entries = make([]*LogEntry, maxEntriesPerBatch+1)
 		for i := 0; i <= maxEntriesPerBatch; i++ {
 			entries[i] = &LogEntry{
-				ID:             fmt.Sprintf("boundary-%03d", i),
+				ID:             fmt.Sprintf("boundary-%04d", i),
 				Timestamp:      time.Now(),
 				RequestedModel: "gpt-4",
 			}

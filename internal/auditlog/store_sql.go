@@ -12,19 +12,41 @@ import (
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
-// SQLite allows 999 bindable parameters per statement
-// (SQLITE_MAX_VARIABLE_NUMBER). At 25 columns per entry that is 39 entries,
-// so larger batches are chunked. PostgreSQL's limit is far higher, but one
-// chunk size keeps the write path identical on both.
+// Multi-row inserts are chunked to stay within the engine's bind-parameter
+// ceiling per statement: SQLite's historical default SQLITE_MAX_VARIABLE_NUMBER
+// (the usage store keeps the same ceiling) and PostgreSQL's wire-protocol
+// limit. Entry and attempt rows are chunked on their own column counts, since
+// a failover-heavy flush can carry several attempts per entry.
 const (
-	maxSQLParams       = 999
-	columnsPerEntry    = 25
-	maxEntriesPerBatch = maxSQLParams / columnsPerEntry
-	// Attempt rows are inserted the same way, and a failover-heavy batch can
-	// carry several per entry, so they are chunked on their own column count.
-	columnsPerAttempt   = 15
-	maxAttemptsPerBatch = maxSQLParams / columnsPerAttempt
+	sqliteMaxSQLParams   = 999
+	postgresMaxSQLParams = 65535
+	columnsPerEntry      = 25
+	columnsPerAttempt    = 15
+
+	// maxStatementBytes caps the text bound into one statement. Entries carry
+	// captured bodies of up to MaxBodyCapture each, so a flush that fits the
+	// parameter ceiling could otherwise build one statement of hundreds of MB.
+	maxStatementBytes = 16 << 20
+
+	// maxConsecutiveRetryFailures stops the one-entry-at-a-time retry of a
+	// failed flush once that many entries fail in a row: the database is then
+	// failing every write, not rejecting one entry.
+	maxConsecutiveRetryFailures = 3
 )
+
+// rowLimits are the most entry and attempt rows one statement may carry.
+type rowLimits struct {
+	entries  int
+	attempts int
+}
+
+func rowLimitsFor(dialect sqlx.Dialect) rowLimits {
+	params := sqliteMaxSQLParams
+	if dialect == sqlx.PostgreSQL {
+		params = postgresMaxSQLParams
+	}
+	return rowLimits{entries: params / columnsPerEntry, attempts: params / columnsPerAttempt}
+}
 
 const auditLogTable = "audit_logs"
 
@@ -270,37 +292,65 @@ func jsonPathIndexes(dialect sqlx.Dialect) []string {
 	}
 }
 
-// WriteBatch writes log entries, chunked to stay within the parameter limit.
-// Each chunk's entries and their provider attempts commit together, so a
-// reader never sees an entry before its attempts.
+// WriteBatch writes log entries in one transaction, chunked to stay within the
+// engine's parameter limit. An entry and its provider attempts commit together,
+// so a reader never sees an entry before its attempts.
+//
+// When the transaction fails, the entries are retried one per transaction, so
+// an entry the database rejects costs only itself, not the whole flush.
 func (s *SQLStore) WriteBatch(ctx context.Context, entries []*LogEntry) error {
 	if len(entries) == 0 {
 		return nil
 	}
+	err := s.writeEntries(ctx, entries)
+	if err == nil || len(entries) == 1 || ctx.Err() != nil {
+		return err
+	}
+	return s.writeEachEntry(ctx, entries, err)
+}
+
+func (s *SQLStore) writeEntries(ctx context.Context, entries []*LogEntry) error {
 	dialect := s.db.Dialect()
-
-	for i := 0; i < len(entries); i += maxEntriesPerBatch {
-		chunk := entries[i:min(i+maxEntriesPerBatch, len(entries))]
-
-		placeholders := make([]string, len(chunk))
-		values := make([]any, 0, len(chunk)*columnsPerEntry)
-		for j, e := range chunk {
-			placeholders[j] = auditLogRowPlaceholder
-			values = append(values, auditLogValues(dialect, e)...)
-		}
-
-		query := insertAuditLogPrefix + strings.Join(placeholders, ",") + ` ON CONFLICT (id) DO NOTHING`
-		err := s.db.InTx(ctx, func(q sqlx.Querier) error {
-			if _, err := q.Exec(ctx, query, values...); err != nil {
-				return fmt.Errorf("failed to insert audit logs batch %d: %w", i/maxEntriesPerBatch, err)
+	limits := rowLimitsFor(dialect)
+	return s.db.InTx(ctx, func(q sqlx.Querier) error {
+		logs := newRowBatch(q, "audit logs", insertAuditLogPrefix, auditLogRowPlaceholder, ` ON CONFLICT (id) DO NOTHING`, limits.entries, columnsPerEntry, len(entries))
+		for _, e := range entries {
+			if err := logs.add(ctx, e.ID, auditLogValues(dialect, e)); err != nil {
+				return err
 			}
-			return writeAttempts(ctx, q, dialect, chunk)
-		})
-		if err != nil {
+		}
+		if err := logs.flush(ctx); err != nil {
 			return err
 		}
+		return writeAttempts(ctx, q, dialect, limits.attempts, entries)
+	})
+}
+
+// writeEachEntry retries a failed flush one entry per transaction. It gives up
+// after maxConsecutiveRetryFailures failures in a row and on a done context,
+// counting every entry it did not write.
+func (s *SQLStore) writeEachEntry(ctx context.Context, entries []*LogEntry, batchErr error) error {
+	failed, consecutive := 0, 0
+	firstErr := batchErr
+	for i := range entries {
+		if ctx.Err() != nil || consecutive == maxConsecutiveRetryFailures {
+			failed += len(entries) - i
+			break
+		}
+		if err := s.writeEntries(ctx, entries[i:i+1]); err != nil {
+			if failed == 0 {
+				firstErr = err
+			}
+			failed++
+			consecutive++
+			continue
+		}
+		consecutive = 0
 	}
-	return nil
+	if failed == 0 {
+		return nil
+	}
+	return fmt.Errorf("failed to write %d of %d audit log entries: %w", failed, len(entries), firstErr)
 }
 
 func auditLogValues(dialect sqlx.Dialect, e *LogEntry) []any {
@@ -348,9 +398,7 @@ func auditLogValues(dialect sqlx.Dialect, e *LogEntry) []any {
 	}
 }
 
-// attemptRef names one attempt row for error reporting: a rejected multi-row
-// insert reports a database error for the statement, not for the tuple, so the
-// range the statement covered is what lets an operator find the bad record.
+// attemptRef names one attempt row for error reporting.
 type attemptRef struct {
 	entryID string
 	seq     int
@@ -360,47 +408,97 @@ func (r attemptRef) String() string {
 	return fmt.Sprintf("%s seq %d", r.entryID, r.seq)
 }
 
-// writeAttempts inserts the provider attempts of every entry, one multi-row
-// statement per chunk. Rows are serialized into the chunk being filled and
-// handed to the database as soon as it is full, so the transient cost stays
-// bounded by the chunk size however many attempts (and however large their
-// captured bodies) the batch carries.
-func writeAttempts(ctx context.Context, q sqlx.Querier, dialect sqlx.Dialect, entries []*LogEntry) error {
-	values := make([]any, 0, maxAttemptsPerBatch*columnsPerAttempt)
-	rows := 0
-	var first, last attemptRef
-
-	flush := func() error {
-		if rows == 0 {
-			return nil
-		}
-		placeholders := strings.TrimSuffix(strings.Repeat(attemptRowPlaceholder+",", rows), ",")
-		query := insertAttemptPrefix + placeholders + insertAttemptSuffix
-		if _, err := q.Exec(ctx, query, values...); err != nil {
-			return fmt.Errorf("failed to insert audit log attempts %s through %s: %w", first, last, err)
-		}
-		values = values[:0]
-		rows = 0
-		return nil
+// writeAttempts inserts the provider attempts of every entry in multi-row
+// statements of at most maxRows rows.
+func writeAttempts(ctx context.Context, q sqlx.Querier, dialect sqlx.Dialect, maxRows int, entries []*LogEntry) error {
+	total := 0
+	for _, entry := range entries {
+		total += len(auditAttempts(entry))
 	}
-
+	attempts := newRowBatch(q, "audit log attempts", insertAttemptPrefix, attemptRowPlaceholder, insertAttemptSuffix, maxRows, columnsPerAttempt, total)
 	for _, entry := range entries {
 		for _, attempt := range auditAttempts(entry) {
-			ref := attemptRef{entryID: entry.ID, seq: attempt.Seq}
-			if rows == 0 {
-				first = ref
-			}
-			last = ref
-			values = append(values, auditAttemptValues(dialect, entry.ID, attempt)...)
-			rows++
-			if rows == maxAttemptsPerBatch {
-				if err := flush(); err != nil {
-					return err
-				}
+			ref := attemptRef{entryID: entry.ID, seq: attempt.Seq}.String()
+			if err := attempts.add(ctx, ref, auditAttemptValues(dialect, entry.ID, attempt)); err != nil {
+				return err
 			}
 		}
 	}
-	return flush()
+	return attempts.flush(ctx)
+}
+
+// rowBatch fills one multi-row INSERT and executes it once it holds maxRows
+// rows or maxStatementBytes of text, so the transient cost stays bounded
+// however many rows (and however large their captured bodies) a flush carries.
+type rowBatch struct {
+	q                   sqlx.Querier
+	noun                string
+	prefix, row, suffix string
+	maxRows             int
+
+	values      []any
+	rows, bytes int
+	first, last string
+}
+
+// newRowBatch sizes its buffer for totalRows, the rows the caller will add.
+func newRowBatch(q sqlx.Querier, noun, prefix, row, suffix string, maxRows, columns, totalRows int) *rowBatch {
+	return &rowBatch{
+		q: q, noun: noun, prefix: prefix, row: row, suffix: suffix, maxRows: maxRows,
+		values: make([]any, 0, min(maxRows, totalRows)*columns),
+	}
+}
+
+// add appends one row, named ref in errors, executing the statement first when
+// the row would take it past the byte cap and after when it fills it.
+func (b *rowBatch) add(ctx context.Context, ref string, values []any) error {
+	size := textBytes(values)
+	if b.rows > 0 && b.bytes+size > maxStatementBytes {
+		if err := b.flush(ctx); err != nil {
+			return err
+		}
+	}
+	if b.rows == 0 {
+		b.first = ref
+	}
+	b.last = ref
+	b.values = append(b.values, values...)
+	b.rows++
+	b.bytes += size
+	if b.rows == b.maxRows {
+		return b.flush(ctx)
+	}
+	return nil
+}
+
+// flush executes the rows added since the last flush, if any.
+func (b *rowBatch) flush(ctx context.Context) error {
+	if b.rows == 0 {
+		return nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat(b.row+",", b.rows), ",")
+	if _, err := b.q.Exec(ctx, b.prefix+placeholders+b.suffix, b.values...); err != nil {
+		// A rejected multi-row insert reports a database error for the
+		// statement, not for the tuple, so the range it covered is what lets
+		// an operator find the bad record.
+		return fmt.Errorf("failed to insert %s %s through %s: %w", b.noun, b.first, b.last, err)
+	}
+	clear(b.values)
+	b.values = b.values[:0]
+	b.rows, b.bytes = 0, 0
+	return nil
+}
+
+// textBytes sums the length of a row's string values: the captured bodies and
+// documents that dominate a statement's size.
+func textBytes(values []any) int {
+	n := 0
+	for _, v := range values {
+		if s, ok := v.(string); ok {
+			n += len(s)
+		}
+	}
+	return n
 }
 
 func auditAttemptValues(dialect sqlx.Dialect, entryID string, attempt AttemptSnapshot) []any {

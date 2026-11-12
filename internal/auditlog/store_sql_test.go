@@ -3,6 +3,7 @@ package auditlog
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -104,9 +105,9 @@ func TestSQLStoreWriteBatchChunksBeyondParameterLimit(t *testing.T) {
 		ctx := context.Background()
 		now := time.Unix(1700000000, 0).UTC()
 
-		// More than one chunk: SQLite rejects a statement binding over 999
-		// parameters, so the batch has to be split.
-		total := maxEntriesPerBatch*2 + 3
+		// More than one chunk: each engine rejects a statement binding past
+		// its parameter limit, so the batch has to be split.
+		total := rowLimitsFor(db.Dialect()).entries*2 + 3
 		entries := make([]*LogEntry, 0, total)
 		for i := range total {
 			entries = append(entries, testLogEntry(fmt.Sprintf("log-%03d", i), now))
@@ -121,8 +122,25 @@ func TestSQLStoreWriteBatchChunksBeyondParameterLimit(t *testing.T) {
 	})
 }
 
-func TestSQLStoreParameterLimitFitsOneChunk(t *testing.T) {
-	require.LessOrEqual(t, maxEntriesPerBatch*columnsPerEntry, maxSQLParams)
+func TestRowLimitsFitParameterLimit(t *testing.T) {
+	tests := []struct {
+		dialect      sqlx.Dialect
+		maxParams    int
+		wantEntries  int
+		wantAttempts int
+	}{
+		{sqlx.SQLite, 999, 39, 66},
+		{sqlx.PostgreSQL, 65535, 2621, 4369},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.dialect), func(t *testing.T) {
+			limits := rowLimitsFor(tt.dialect)
+			assert.Equal(t, tt.wantEntries, limits.entries)
+			assert.Equal(t, tt.wantAttempts, limits.attempts)
+			assert.LessOrEqual(t, limits.entries*columnsPerEntry, tt.maxParams)
+			assert.LessOrEqual(t, limits.attempts*columnsPerAttempt, tt.maxParams)
+		})
+	}
 }
 
 func TestSQLStoreCleanupDropsEntriesPastRetention(t *testing.T) {
@@ -286,8 +304,9 @@ func TestSQLStoreWriteBatchChunksAttemptsBeyondParameterLimit(t *testing.T) {
 		now := time.Unix(1700000000, 0).UTC()
 
 		const attemptsPerEntry = 8
-		entryCount := (maxAttemptsPerBatch*2)/attemptsPerEntry + 1
-		require.LessOrEqual(t, entryCount, maxEntriesPerBatch, "the entries must fit one entry chunk, so attempt chunking is what is exercised")
+		limits := rowLimitsFor(db.Dialect())
+		entryCount := (limits.attempts*2)/attemptsPerEntry + 1
+		require.LessOrEqual(t, entryCount, limits.entries, "the entries must fit one entry chunk, so attempt chunking is what is exercised")
 
 		entries := make([]*LogEntry, 0, entryCount)
 		for i := range entryCount {
@@ -310,7 +329,7 @@ func TestSQLStoreWriteBatchChunksAttemptsBeyondParameterLimit(t *testing.T) {
 			entries = append(entries, entry)
 		}
 
-		require.Greater(t, entryCount*attemptsPerEntry, maxAttemptsPerBatch*2, "more than two attempt chunks")
+		require.Greater(t, entryCount*attemptsPerEntry, limits.attempts*2, "more than two attempt chunks")
 		require.NoError(t, store.WriteBatch(ctx, entries))
 
 		var count int
@@ -318,10 +337,6 @@ func TestSQLStoreWriteBatchChunksAttemptsBeyondParameterLimit(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, entryCount*attemptsPerEntry, count)
 	})
-}
-
-func TestSQLStoreAttemptParameterLimitFitsOneChunk(t *testing.T) {
-	require.LessOrEqual(t, maxAttemptsPerBatch*columnsPerAttempt, maxSQLParams)
 }
 
 // A chunk's entries and attempts commit together: when the attempts cannot be
@@ -340,6 +355,157 @@ func TestSQLStoreWriteBatchCommitsEntriesWithTheirAttempts(t *testing.T) {
 		var count int
 		require.NoError(t, db.QueryRow(ctx, `SELECT COUNT(*) FROM audit_logs`).Scan(&count))
 		assert.Zero(t, count, "the entry is rolled back with its attempts")
+	})
+}
+
+// countingDB counts the transactions and statements a store runs through it.
+type countingDB struct {
+	sqlx.DB
+	txs, execs int
+}
+
+func (c *countingDB) Exec(ctx context.Context, query string, args ...any) (int64, error) {
+	c.execs++
+	return c.DB.Exec(ctx, query, args...)
+}
+
+func (c *countingDB) InTx(ctx context.Context, fn func(sqlx.Querier) error) error {
+	c.txs++
+	return c.DB.InTx(ctx, func(q sqlx.Querier) error {
+		return fn(countingQuerier{Querier: q, db: c})
+	})
+}
+
+type countingQuerier struct {
+	sqlx.Querier
+	db *countingDB
+}
+
+func (q countingQuerier) Exec(ctx context.Context, query string, args ...any) (int64, error) {
+	q.db.execs++
+	return q.Querier.Exec(ctx, query, args...)
+}
+
+func countStatements(t *testing.T, store *SQLStore) *countingDB {
+	t.Helper()
+	counting := &countingDB{DB: store.db}
+	store.db = counting
+	return counting
+}
+
+// A whole flush commits once, in as few statements as the engine's parameter
+// limit allows.
+func TestSQLStoreWriteBatchWritesFlushInOneTransaction(t *testing.T) {
+	for _, total := range []int{1, BatchFlushThreshold, 1000} {
+		t.Run(fmt.Sprint(total), func(t *testing.T) {
+			runSQLStoreTest(t, 0, func(t *testing.T, store *SQLStore, db sqlx.DB) {
+				counting := countStatements(t, store)
+				now := time.Unix(1700000000, 0).UTC()
+				entries := make([]*LogEntry, total)
+				attempts := 0
+				for i := range entries {
+					entries[i] = testLogEntry(fmt.Sprintf("log-%04d", i), now)
+					if i%10 == 0 {
+						entries[i].Data.Attempts = []AttemptSnapshot{{Seq: 1, Kind: AttemptKindFailover, ProviderType: "openai", StatusCode: 503}}
+						attempts++
+					}
+				}
+				require.NoError(t, store.WriteBatch(context.Background(), entries))
+
+				limits := rowLimitsFor(db.Dialect())
+				ceilDiv := func(n, d int) int { return (n + d - 1) / d }
+				assert.Equal(t, 1, counting.txs)
+				assert.Equal(t, ceilDiv(total, limits.entries)+ceilDiv(attempts, limits.attempts), counting.execs)
+
+				var count int
+				require.NoError(t, db.QueryRow(context.Background(), `SELECT COUNT(*) FROM audit_logs`).Scan(&count))
+				assert.Equal(t, total, count)
+			})
+		})
+	}
+}
+
+// Captured bodies count toward a statement's size: rows that fit the
+// parameter limit still go to separate statements once their text would pass
+// maxStatementBytes.
+func TestSQLStoreWriteBatchCapsStatementBytes(t *testing.T) {
+	runSQLStoreTest(t, 0, func(t *testing.T, store *SQLStore, db sqlx.DB) {
+		counting := countStatements(t, store)
+		now := time.Unix(1700000000, 0).UTC()
+		large := strings.Repeat("a", maxStatementBytes/2)
+		entries := make([]*LogEntry, 3)
+		for i := range entries {
+			entries[i] = testLogEntry(fmt.Sprintf("large-%d", i), now)
+			entries[i].Data.UserAgent = large
+		}
+		require.NoError(t, store.WriteBatch(context.Background(), entries))
+
+		assert.Equal(t, 1, counting.txs)
+		assert.Equal(t, len(entries), counting.execs, "each entry passes half the cap, so no two share a statement")
+
+		var count int
+		require.NoError(t, db.QueryRow(context.Background(), `SELECT COUNT(*) FROM audit_logs`).Scan(&count))
+		assert.Equal(t, len(entries), count)
+	})
+}
+
+// rejectRequestID makes the database reject any further entry carrying the
+// request id of an entry it already holds.
+func rejectRequestID(t *testing.T, store *SQLStore, db sqlx.DB, existing *LogEntry) {
+	t.Helper()
+	ctx := context.Background()
+	require.NoError(t, store.WriteBatch(ctx, []*LogEntry{existing}))
+	_, err := db.Exec(ctx, `CREATE UNIQUE INDEX test_unique_request_id ON audit_logs(request_id)`)
+	require.NoError(t, err)
+}
+
+// One entry the database rejects fails the flush transaction; the retry writes
+// every other entry on its own, so the bad entry costs only itself.
+func TestSQLStoreWriteBatchRetriesEntriesAfterFailedFlush(t *testing.T) {
+	runSQLStoreTest(t, 0, func(t *testing.T, store *SQLStore, db sqlx.DB) {
+		ctx := context.Background()
+		now := time.Unix(1700000000, 0).UTC()
+		existing := testLogEntry("existing", now)
+		rejectRequestID(t, store, db, existing)
+		counting := countStatements(t, store)
+
+		entries := make([]*LogEntry, 5)
+		for i := range entries {
+			entries[i] = testLogEntry(fmt.Sprintf("log-%d", i), now)
+		}
+		entries[2].RequestID = existing.RequestID
+
+		err := store.WriteBatch(ctx, entries)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to write 1 of 5 audit log entries")
+		assert.Equal(t, 1+len(entries), counting.txs, "the flush, then one per entry")
+
+		var count int
+		require.NoError(t, db.QueryRow(ctx, `SELECT COUNT(*) FROM audit_logs`).Scan(&count))
+		assert.Equal(t, len(entries), count, "the existing entry and every new one but the rejected one")
+	})
+}
+
+// When entries keep failing on their own, the database is failing every
+// write: the retry stops instead of trying each remaining entry.
+func TestSQLStoreWriteBatchStopsRetryAfterConsecutiveFailures(t *testing.T) {
+	runSQLStoreTest(t, 0, func(t *testing.T, store *SQLStore, db sqlx.DB) {
+		ctx := context.Background()
+		now := time.Unix(1700000000, 0).UTC()
+		existing := testLogEntry("existing", now)
+		rejectRequestID(t, store, db, existing)
+		counting := countStatements(t, store)
+
+		entries := make([]*LogEntry, 6)
+		for i := range entries {
+			entries[i] = testLogEntry(fmt.Sprintf("log-%d", i), now)
+			entries[i].RequestID = existing.RequestID
+		}
+
+		err := store.WriteBatch(ctx, entries)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to write 6 of 6 audit log entries")
+		assert.Equal(t, 1+maxConsecutiveRetryFailures, counting.txs)
 	})
 }
 
