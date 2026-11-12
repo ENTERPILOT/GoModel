@@ -84,7 +84,8 @@ func TestRunUsageImport(t *testing.T) {
 }
 
 // The import resolves secret references like a gateway start, so a secret
-// store behind a private CA needs the configured trust before extensions set up.
+// store behind a private CA needs the configured trust before extensions set
+// up. The trust is process-wide, so the import puts the previous one back.
 func TestRunUsageImportInstallsOutboundTLSBeforeExtensionSetup(t *testing.T) {
 	t.Chdir(t.TempDir())
 	t.Setenv("HTTP_TLS_INSECURE_SKIP_VERIFY", "true")
@@ -106,4 +107,5 @@ func TestRunUsageImportInstallsOutboundTLSBeforeExtensionSetup(t *testing.T) {
 	})
 	require.ErrorIs(t, err, wantErr)
 	assert.True(t, duringSetup, "http.tls was not installed before extension setup")
+	assert.Nil(t, httpclient.ConfiguredTLS(), "http.tls was left installed after the import returned")
 }

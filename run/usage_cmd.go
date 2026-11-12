@@ -9,6 +9,7 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/app"
+	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
@@ -73,7 +74,9 @@ func runUsageImport(ctx context.Context, opts Options, source string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 	// As at gateway start: trust first, so a secret store behind a private CA
-	// is reachable while extensions set up and references resolve.
+	// is reachable while extensions set up and references resolve. It is
+	// process-wide, so it is put back for a caller reusing the process.
+	defer httpclient.RestoreTLS(httpclient.SnapshotTLS())
 	if err := app.ApplyOutboundTLSEarly(ctx, result.Config.HTTP.TLS); err != nil {
 		return err
 	}
