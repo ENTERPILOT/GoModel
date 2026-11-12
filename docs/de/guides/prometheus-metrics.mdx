@@ -323,6 +323,26 @@ der Prozess kann enden, bevor Prometheus den Wert abruft, daher hält das Log de
 sum(increase(gomodel_usage_entries_dropped_total[5m])) by (reason) > 0
 ```
 
+## Warnung bei nicht zugestellten Budget-Warnungen
+
+[Budget-Warnungen](/de/features/budgets#warnungen) werden an einen Webhook
+zugestellt; ein ausfallender Webhook bleibt also stumm, wenn Sie ihn nicht
+überwachen. `gomodel_budget_alerts_fired_total` zählt die Warnungen, die eine
+Instanz ausgelöst hat, und `gomodel_budget_alert_delivery_failures_total` jene,
+die ein Ziel nicht erhalten hat: ein Webhook, der auch nach seinen
+Wiederholungen fehlschlug, oder eine Warnung, die verworfen wurde, weil die
+Warteschlange dieses Ziels voll war. Der Grund steht im Server-Log.
+
+| Metrik                                         | Label         | Werte                                          |
+| ---------------------------------------------- | ------------- | ---------------------------------------------- |
+| `gomodel_budget_alerts_fired_total`            | `scope`       | `user_path`, `label` oder `provider`           |
+|                                                | `threshold`   | Die Schwelle in Prozent, etwa `80`             |
+| `gomodel_budget_alert_delivery_failures_total` | `destination` | `webhook` oder der Name eines registrierten Sinks |
+
+```promql
+sum(increase(gomodel_budget_alert_delivery_failures_total[1h])) by (destination) > 0
+```
+
 ## Prometheus-Konfiguration
 
 ### Scrape-Konfiguration

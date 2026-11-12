@@ -75,6 +75,7 @@ func newResult(ctx context.Context, cfg *config.Config, storeConn storage.Storag
 		WithBilledBudgets(caps.billedBudgets),
 		WithBilledCacheHits(cfg.Pricing.MarkupsEnabled && cfg.Pricing.BillCacheHits),
 		WithProviderBilledCacheHits(cfg.Budgets.ProviderBilledCacheHits),
+		WithAlertThresholds(cfg.Budgets.Alerts.Thresholds),
 	)
 	if err != nil {
 		return nil, err
@@ -152,13 +153,14 @@ func seedBudgets(scope Scope, rawSubject string, perChild bool, limits []config.
 			return nil, fmt.Errorf("invalid budget cost basis for %s %q limit %d: %w", scope, subject, limitIdx, err)
 		}
 		budgets = append(budgets, Budget{
-			Scope:         scope,
-			Subject:       subject,
-			PerChild:      perChild || limit.PerChild,
-			CostBasis:     costBasis,
-			PeriodSeconds: seconds,
-			Amount:        limit.Amount,
-			Source:        SourceConfig,
+			Scope:           scope,
+			Subject:         subject,
+			PerChild:        perChild || limit.PerChild,
+			CostBasis:       costBasis,
+			PeriodSeconds:   seconds,
+			Amount:          limit.Amount,
+			AlertThresholds: limit.AlertThresholds,
+			Source:          SourceConfig,
 		})
 	}
 	return budgets, nil

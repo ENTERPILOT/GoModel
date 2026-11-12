@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
@@ -83,13 +84,17 @@ type Budget struct {
 	EnforcedCostBasis CostBasis `json:"-" bson:"-"`
 	// EffectiveSubject is populated only while evaluating a per-child budget.
 	// It is not part of the persisted definition or public JSON representation.
-	EffectiveSubject string     `json:"-" bson:"-"`
-	PeriodSeconds    int64      `json:"period_seconds" bson:"period_seconds"`
-	Amount           float64    `json:"amount" bson:"amount"`
-	Source           string     `json:"source,omitempty" bson:"source,omitempty"`
-	LastResetAt      *time.Time `json:"last_reset_at,omitempty" bson:"last_reset_at,omitempty"`
-	CreatedAt        time.Time  `json:"created_at" bson:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at" bson:"updated_at"`
+	EffectiveSubject string  `json:"-" bson:"-"`
+	PeriodSeconds    int64   `json:"period_seconds" bson:"period_seconds"`
+	Amount           float64 `json:"amount" bson:"amount"`
+	// AlertThresholds overrides the default alert thresholds for this
+	// budget: percentages of Amount, sorted, each 1-100. Empty keeps the
+	// defaults.
+	AlertThresholds []int      `json:"alert_thresholds,omitempty" bson:"alert_thresholds,omitempty"`
+	Source          string     `json:"source,omitempty" bson:"source,omitempty"`
+	LastResetAt     *time.Time `json:"last_reset_at,omitempty" bson:"last_reset_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at" bson:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at" bson:"updated_at"`
 }
 
 // EnforcedBasis returns the basis the budget's spend is measured on.
@@ -335,6 +340,11 @@ func NormalizeBudget(b Budget) (Budget, error) {
 	if math.IsNaN(b.Amount) || math.IsInf(b.Amount, 0) || b.Amount <= 0 {
 		return Budget{}, fmt.Errorf("amount must be a finite number greater than 0")
 	}
+	thresholds, err := config.NormalizeBudgetAlertThresholds(b.AlertThresholds)
+	if err != nil {
+		return Budget{}, err
+	}
+	b.AlertThresholds = thresholds
 	b.Source = strings.TrimSpace(b.Source)
 	if b.LastResetAt != nil {
 		t := b.LastResetAt.UTC()

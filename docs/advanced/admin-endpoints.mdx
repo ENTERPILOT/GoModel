@@ -764,6 +764,12 @@ These operations are not global per period. For the path-scoped `PUT` and
 `DELETE` routes, URL-encode `user_path`; see [Budgets](/features/budgets) for
 the request shape.
 
+`GET /admin/budgets` returns each budget with its status and, once 5% of its
+period has elapsed, `projected_spend` and `projected_exhaustion_at`. The
+top-level `alerts` object reports whether [budget alerts](/features/budgets#alerts)
+are `enabled` and their `default_thresholds`; a budget with its own carries
+`alert_thresholds`, which `PUT` accepts.
+
 See [Budgets](/features/budgets) for request examples and enforcement behavior.
 
 ### User endpoints

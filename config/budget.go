@@ -40,6 +40,9 @@ type BudgetsConfig struct {
 	// Default: true. Set false to limit only what was billed for requests the
 	// provider served. Provider-cost budgets never count cache hits.
 	ProviderBilledCacheHits bool `yaml:"provider_billed_cache_hits" env:"BUDGETS_PROVIDER_BILLED_CACHE_HITS"`
+
+	// Alerts configures soft alerts raised before a budget is spent.
+	Alerts BudgetAlertsConfig `yaml:"alerts"`
 }
 
 // BudgetUserPathConfig declares one or more budget limits for a user path.
@@ -80,6 +83,10 @@ type BudgetLimitConfig struct {
 	// requires pricing.markups_enabled and a GoModel Pro license with the
 	// billing entitlement.
 	CostBasis string `yaml:"cost_basis" json:"cost_basis,omitempty"`
+
+	// AlertThresholds overrides budgets.alerts.thresholds for this limit:
+	// percentages of the amount, each 1-100. Empty keeps the defaults.
+	AlertThresholds []int `yaml:"alert_thresholds,omitempty" json:"alert_thresholds,omitempty"`
 
 	// PerChild is accepted only in the JSON-array environment-variable form.
 	// YAML keeps this setting on the enclosing user-path entry.
@@ -124,7 +131,7 @@ func applyBudgetEnv(cfg *Config, strict bool) error {
 		return err
 	}
 	cfg.Budgets.Providers = providers
-	return nil
+	return applyBudgetAlertsEnv(&cfg.Budgets)
 }
 
 func parseBudgetEnvLimits(raw string, strict bool) ([]BudgetLimitConfig, error) {
@@ -190,6 +197,9 @@ func validateBudgetConfig(cfg *BudgetsConfig) error {
 	}
 	if !cfg.Enabled {
 		return nil
+	}
+	if err := validateBudgetAlertsConfig(&cfg.Alerts); err != nil {
+		return err
 	}
 	seen := make(map[string]struct{})
 	for pathIdx, entry := range cfg.UserPaths {
@@ -259,6 +269,11 @@ func validateBudgetLimits(limits []BudgetLimitConfig, field, scope, subject stri
 		default:
 			return fmt.Errorf("%s.limits[%d].cost_basis must be one of provider, billed", field, limitIdx)
 		}
+		thresholds, err := NormalizeBudgetAlertThresholds(limit.AlertThresholds)
+		if err != nil {
+			return fmt.Errorf("%s.limits[%d].alert_thresholds: %w", field, limitIdx, err)
+		}
+		limits[limitIdx].AlertThresholds = thresholds
 		key := scope + "\x00" + subject + "\x00" + strconv.FormatInt(seconds, 10)
 		if _, ok := seen[key]; ok {
 			return fmt.Errorf("duplicate budget for %s %s period %d", scope, subject, seconds)

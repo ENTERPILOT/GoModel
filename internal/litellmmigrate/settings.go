@@ -336,7 +336,7 @@ func (c *converter) reportKnownUnsupported() {
 		{c.litellm, []string{"set_verbose", "json_logs"}, "GoModel logging is set with LOG_LEVEL and LOG_FORMAT"},
 		{c.router, []string{"redis_host", "redis_port", "redis_password", "redis_url"}, "not needed for routing: GoModel keeps routing state in the gateway"},
 		{c.router, []string{"enable_pre_call_checks"}, "not needed: GoModel checks model availability before routing"},
-		{c.general, []string{"alerting", "alerting_threshold", "alert_types"}, "GoModel has no built-in alerting; alert on its Prometheus metrics"},
+		{c.general, []string{"alerting", "alerting_threshold", "alert_types"}, "not migrated: GoModel alerts on budget thresholds through a generic JSON webhook (budgets.alerts; see /features/budgets#alerts); alert on its Prometheus metrics for everything else"},
 	}
 	for _, note := range notes {
 		for _, key := range note.keys {

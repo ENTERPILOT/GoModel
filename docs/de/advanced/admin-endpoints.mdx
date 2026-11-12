@@ -744,6 +744,13 @@ Schlüssel `(user_path, period)` bzw. `(user_path, period_seconds)` für benutze
 Diese Operationen wirken nicht global pro Zeitraum. Für die pfadbezogenen Routen `PUT` und
 `DELETE` muss `user_path` URL-kodiert werden; die Form des Requests finden Sie unter [Budgets](/de/features/budgets).
 
+`GET /admin/budgets` liefert jedes Budget mit seinem Status und, sobald 5 % seines
+Zeitraums vergangen sind, `projected_spend` und `projected_exhaustion_at`. Das
+Objekt `alerts` auf oberster Ebene meldet, ob
+[Budget-Warnungen](/de/features/budgets#warnungen) aktiv sind (`enabled`), und
+ihre `default_thresholds`; ein Budget mit eigenen Schwellen trägt
+`alert_thresholds`, die `PUT` akzeptiert.
+
 Unter [Budgets](/de/features/budgets) finden Sie Request-Beispiele und das Durchsetzungsverhalten.
 
 ### Benutzer-Endpunkte

@@ -266,6 +266,12 @@ server:
 | `BUDGETS_PROVIDER_BILLED_CACHE_HITS` | 在基于计费成本的提供商预算中计入计费的响应缓存命中（GoModel Pro） | `true` |
 | `SET_BUDGET_<PATH>`          | 为用户路径预置预算限额，例如 `daily=10`                             | _（空）_ |
 | `SET_PROVIDER_BUDGET_<NAME>` | 为提供商实例预置预算限额，例如 `daily=100`                    | _（空）_ |
+| `BUDGETS_ALERTS_WEBHOOK_URL` | 以 JSON 接收[预算告警](/zh/features/budgets#告警)的 webhook。设置 webhook 后才会评估告警 | _（空）_ |
+| `BUDGETS_ALERTS_WEBHOOK_SECRET` | 为每次投递签名：`X-GoModel-Signature` 携带请求体的 HMAC-SHA256 | _（空）_ |
+| `BUDGETS_ALERTS_THRESHOLDS`  | 默认告警阈值，预算金额的百分比                                | `80,100` |
+| `BUDGETS_ALERTS_INTERVAL`    | 两次告警评估之间的秒数                                        | `60`     |
+| `BUDGETS_ALERTS_WEBHOOK_TIMEOUT` | 每次 webhook 投递尝试的秒数                               | `10`     |
+| `BUDGETS_ALERTS_WEBHOOK_MAX_RETRIES` | webhook 投递失败后的重试次数，采用指数退避            | `3`      |
 
 `SET_BUDGET_<PATH>` 支持标准周期 `hourly`、`daily`、`weekly` 和 `monthly`。`<PATH>` 后缀会被转换为小写；路径段之间使用双下划线（`__`），单下划线则保留在段内。例如，`SET_BUDGET_TEAM__ALPHA__SERVICE="daily=10"` 配置的是 `/team/alpha/service`，而 `SET_BUDGET_TEAM_ALPHA="daily=10"` 配置的是 `/team_alpha`。这与下文提供商的 `<SUFFIX>` 变量不同，后者会把提供商名称中的下划线转换为连字符；`SET_PROVIDER_BUDGET_<NAME>` 遵循提供商的规则，因此 `SET_PROVIDER_BUDGET_OPENAI_PROD` 限制的是 `openai-prod`。
 

@@ -740,6 +740,12 @@ dostępne, gdy zarządzanie budżetem jest włączone.
 Te operacje nie działają globalnie dla okresu. Dla tras `PUT` i
 `DELETE` ze ścieżką w URL zakoduj `user_path` w URL; kształt requestu opisuje strona [Budżety](/pl/features/budgets).
 
+`GET /admin/budgets` zwraca każdy budżet ze statusem oraz, gdy minie 5% jego
+okresu, `projected_spend` i `projected_exhaustion_at`. Obiekt `alerts` na
+najwyższym poziomie informuje, czy [alerty budżetowe](/pl/features/budgets#alerty)
+są włączone (`enabled`), i podaje ich `default_thresholds`; budżet z własnymi
+progami niesie `alert_thresholds`, które przyjmuje `PUT`.
+
 Przykłady requestów i zachowanie egzekwowania znajdziesz na stronie [Budżety](/pl/features/budgets).
 
 ### Endpointy użytkowników

@@ -57,6 +57,7 @@ type App struct {
 	audit               *auditlog.Result
 	usage               *usage.Result
 	budgets             *budget.Result
+	budgetAlerts        *budgetAlerts // nil unless an alert destination exists
 	rateLimits          *ratelimit.Result
 	batch               *batch.Result
 	fileStore           *filestore.Result
@@ -302,6 +303,9 @@ func (a *App) startServer(ctx context.Context, address string, start func(contex
 	// Every subsystem has created its schema by now, so planner statistics
 	// cover all tables and indexes. Stopped when the storage closes.
 	storage.StartMaintenance(a.storage)
+	// Budget alerts are evaluated by the serving generation only; Shutdown
+	// stops them.
+	a.budgetAlerts.start()
 
 	slog.Info("starting server", "address", address)
 	err := start(serverCtx)

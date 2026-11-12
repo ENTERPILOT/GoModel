@@ -25,6 +25,12 @@ func (*lifecycleRuntimeSetting) Apply(string) error { return nil }
 // SetSharedStore makes the extension shared store part of the fully wired app.
 func (*lifecycleRuntimeSetting) SetSharedStore(ext.SharedStore) {}
 
+type lifecycleAlertSink struct{}
+
+func (lifecycleAlertSink) Name() string { return "lifecycle" }
+
+func (lifecycleAlertSink) SendAlert(context.Context, ext.AlertEvent) error { return nil }
+
 // newFullyWiredApp builds an App with every optional subsystem enabled, so the
 // coverage tests below see the complete registry rather than the subset a
 // minimal config happens to initialize.
@@ -54,6 +60,8 @@ func newFullyWiredApp(t *testing.T) *App {
 
 	extensions := &ext.Registry{}
 	extensions.RegisterSetting(&lifecycleRuntimeSetting{})
+	// An alert destination makes budget alerts part of the fully wired app.
+	extensions.RegisterAlertSink(lifecycleAlertSink{})
 	application, err := New(context.Background(), Config{
 		AppConfig:  loaded,
 		Factory:    providers.NewProviderFactory(),

@@ -168,6 +168,18 @@ and failover both return empty increments the counter twice.
 
 Labels: `provider`, `model`, `reason`.
 
+### `gomodel_budget_alerts_fired_total`
+
+Counter, labels `scope` and `threshold`. Budget alerts this instance raised:
+a budget reached an alert threshold and this instance won the claim in
+storage. Incremented by `internal/alerts.Dispatcher.Notify`, not by a hook.
+
+### `gomodel_budget_alert_delivery_failures_total`
+
+Counter, label `destination` (`webhook`, or an `ext.AlertSink` name). Alerts a
+destination did not receive: a webhook that failed after its retries, a sink
+that returned an error or panicked, or an alert dropped on a full queue.
+
 ## Helpers in `client.go`
 
 - `extractModel(body any) string` — pulls `Model` from `*core.ChatRequest` or

@@ -221,6 +221,9 @@ func (b *bootstrap) initTracking() error {
 		// provider budgets only; see providers.ModelRegistry.ProviderBillable.
 		app.budgets.Service.SetProviderBillable(app.providers.Registry.ProviderBillable)
 	}
+	if err := b.initBudgetAlerts(); err != nil {
+		return err
+	}
 
 	var rateLimitResult *ratelimit.Result
 	if appCfg.RateLimits.Enabled {

@@ -9,6 +9,7 @@ import { scopedSubjectAllowed } from "$lib/stores/accessScope.js";
 import { router } from "$lib/stores/router.svelte.js";
 import { confirmDialog } from "$lib/stores/confirm.svelte.js";
 import {
+  budgetAlertThresholdsInput,
   budgetCostBasis,
   budgetDeleteBody,
   budgetInputUserPath,
@@ -25,6 +26,7 @@ import {
   defaultBudgetForm,
   filterAndSortBudgets,
   findExistingBudget,
+  normalizeBudgetAlerts,
   normalizeBudgetListPayload,
 } from "./budgets-helpers.js";
 import { RotateCcw } from "lucide";
@@ -32,6 +34,9 @@ import * as m from "$lib/paraglide/messages.js";
 
 class BudgetsStore {
   budgets = $state([]);
+  // Deployment alert settings: whether a destination exists, and the
+  // thresholds of budgets without their own.
+  alerts = $state(normalizeBudgetAlerts(null));
   budgetsAvailable = $state(true);
   loading = $state(false);
   filter = $state("");
@@ -119,6 +124,7 @@ class BudgetsStore {
       return;
     }
     this.budgets = outcome.items;
+    this.alerts = normalizeBudgetAlerts(outcome.result.data);
   }
 
   openForm(item) {
@@ -134,6 +140,7 @@ class BudgetsStore {
         amount: String(item.amount || ""),
         per_child: Boolean(item.per_child),
         cost_basis: budgetCostBasis(item),
+        alert_thresholds: budgetAlertThresholdsInput(item),
         source: String(item.source || "manual"),
       };
     } else {

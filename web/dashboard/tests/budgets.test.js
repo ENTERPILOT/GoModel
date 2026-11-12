@@ -5,6 +5,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  budgetAlertThresholds,
+  budgetAlertThresholdsInput,
+  budgetAlertThresholdsLabel,
   budgetAmountLabel,
   budgetBilledOnProviderCost,
   budgetCostBasis,
@@ -20,6 +23,8 @@ import {
   budgetPeriodIcon,
   budgetPeriodLabel,
   budgetPeriodTrackClass,
+  budgetProjectedOver,
+  budgetProjectedSpend,
   budgetPutBody,
   budgetResetOneBody,
   budgetScope,
@@ -35,7 +40,9 @@ import {
   defaultBudgetForm,
   filterAndSortBudgets,
   findExistingBudget,
+  normalizeBudgetAlerts,
   normalizeBudgetListPayload,
+  parseBudgetAlertThresholds,
   normalizeBudgetUserPath,
   syncBudgetScope,
 } from "../src/pages/budgets/budgets-helpers.js";
@@ -61,6 +68,7 @@ test("buildBudgetFormPayload normalizes user path and standard periods", () => {
       amount: 12.3456,
       per_child: false,
       cost_basis: "provider",
+      alert_thresholds: [],
       source: "manual",
     }),
   );
@@ -499,6 +507,7 @@ test("request bodies keep the exact /admin/budgets payload shapes", () => {
       amount: 12.5,
       per_child: false,
       cost_basis: "provider",
+      alert_thresholds: [],
     }),
   );
   assert.equal(
@@ -533,6 +542,7 @@ test("request bodies keep the exact /admin/budgets payload shapes", () => {
       amount: 5,
       per_child: false,
       cost_basis: "provider",
+      alert_thresholds: [],
     }),
   );
 });
@@ -649,4 +659,84 @@ test("the billed on provider cost badge is searchable", () => {
     found.map((item) => item.subject),
     ["acme"],
   );
+});
+
+test("parseBudgetAlertThresholds reads percentages and rejects anything else", () => {
+  const cases = [
+    { input: "", want: [] },
+    { input: "   ", want: [] },
+    { input: undefined, want: [] },
+    { input: "80", want: [80] },
+    { input: "90, 50,90", want: [50, 90] },
+    { input: "50% 80%; 100", want: [50, 80, 100] },
+    { input: "1,100", want: [1, 100] },
+    { input: "0", want: null },
+    { input: "101", want: null },
+    { input: "-5", want: null },
+    { input: "80.5", want: null },
+    { input: "high", want: null },
+  ];
+  for (const { input, want } of cases) {
+    assert.deepEqual(parseBudgetAlertThresholds(input), want, String(input));
+  }
+});
+
+test("the editor form sends its alert thresholds and refuses invalid ones", () => {
+  const form = {
+    ...defaultBudgetForm(),
+    subject: "/team",
+    amount: "10",
+    alert_thresholds: "90, 50",
+  };
+  const { payload, error } = buildBudgetFormPayload(form);
+  assert.equal(error, "");
+  assert.deepEqual(payload.alert_thresholds, [50, 90]);
+  assert.deepEqual(budgetPutBody(payload).alert_thresholds, [50, 90]);
+
+  const invalid = buildBudgetFormPayload({ ...form, alert_thresholds: "150" });
+  assert.equal(invalid.payload, null);
+  assert.equal(
+    invalid.error,
+    "Alert thresholds must be whole numbers from 1 to 100, separated by commas.",
+  );
+
+  assert.equal(defaultBudgetForm().alert_thresholds, "");
+  assert.equal(budgetAlertThresholdsInput({ alert_thresholds: [50, 90] }), "50, 90");
+  assert.equal(budgetAlertThresholdsInput({}), "");
+});
+
+test("a budget's alert thresholds fall back to the deployment defaults", () => {
+  const alerts = normalizeBudgetAlerts({
+    budgets: [],
+    alerts: { enabled: true, default_thresholds: [80, 100] },
+  });
+  assert.deepEqual(alerts, { enabled: true, default_thresholds: [80, 100] });
+  assert.deepEqual(budgetAlertThresholds({}, alerts), [80, 100]);
+  assert.deepEqual(budgetAlertThresholds({ alert_thresholds: [] }, alerts), [80, 100]);
+  assert.deepEqual(budgetAlertThresholds({ alert_thresholds: [50] }, alerts), [50]);
+  assert.equal(budgetAlertThresholdsLabel([80, 100]), "80%, 100%");
+  assert.equal(budgetAlertThresholdsLabel([]), "");
+
+  // A gateway that predates alerts sends no alerts object.
+  for (const payload of [null, [], { budgets: [] }]) {
+    assert.deepEqual(normalizeBudgetAlerts(payload), {
+      enabled: false,
+      default_thresholds: [],
+    });
+  }
+  assert.deepEqual(budgetAlertThresholds({}, normalizeBudgetAlerts(null)), []);
+});
+
+test("the projection is shown only when the gateway sends one", () => {
+  assert.equal(budgetProjectedSpend({ amount: 10 }), null);
+  assert.equal(budgetProjectedSpend({ amount: 10, projected_spend: null }), null);
+  assert.equal(budgetProjectedSpend({ amount: 10, projected_spend: "n/a" }), null);
+  // Nothing spent: a projection of zero says nothing.
+  assert.equal(budgetProjectedSpend({ amount: 10, projected_spend: 0 }), null);
+  assert.equal(budgetProjectedSpend({ amount: 10, projected_spend: 12.5 }), 12.5);
+
+  assert.equal(budgetProjectedOver({ amount: 10, projected_spend: 12.5 }), true);
+  assert.equal(budgetProjectedOver({ amount: 10, projected_spend: 10 }), false);
+  assert.equal(budgetProjectedOver({ amount: 10, projected_spend: 4 }), false);
+  assert.equal(budgetProjectedOver({ amount: 10 }), false);
 });

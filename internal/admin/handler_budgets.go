@@ -35,8 +35,10 @@ func (h *Handler) ListBudgets(c *echo.Context) error {
 		return handleError(c, budgetServiceError("failed to list budgets", err))
 	}
 	statuses = scopedBudgetStatuses(requestScope(c), statuses)
+	alerts := h.budgets.AlertSettings()
 	return c.JSON(http.StatusOK, budgetListResponse{
 		Budgets:    budgetStatusResponses(statuses, now),
+		Alerts:     budgetAlertsResponse{Enabled: alerts.Enabled, DefaultThresholds: alerts.DefaultThresholds},
 		ServerTime: now,
 	})
 }
@@ -77,13 +79,14 @@ func (h *Handler) UpsertBudget(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	item, err := budget.NormalizeBudget(budget.Budget{
-		Scope:         scope,
-		Subject:       subject,
-		PerChild:      req.PerChild,
-		CostBasis:     costBasis,
-		PeriodSeconds: periodSeconds,
-		Amount:        req.Amount,
-		Source:        budget.SourceManual,
+		Scope:           scope,
+		Subject:         subject,
+		PerChild:        req.PerChild,
+		CostBasis:       costBasis,
+		PeriodSeconds:   periodSeconds,
+		Amount:          req.Amount,
+		AlertThresholds: req.AlertThresholds,
+		Source:          budget.SourceManual,
 	})
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
@@ -259,8 +262,20 @@ func (h *Handler) ResetBudgets(c *echo.Context) error {
 }
 
 type budgetListResponse struct {
-	Budgets    []budgetStatusResponse `json:"budgets"`
-	ServerTime time.Time              `json:"server_time"`
+	Budgets []budgetStatusResponse `json:"budgets"`
+	// Alerts describes soft budget alerts for the deployment.
+	Alerts     budgetAlertsResponse `json:"alerts"`
+	ServerTime time.Time            `json:"server_time"`
+}
+
+type budgetAlertsResponse struct {
+	// Enabled reports that an alert destination exists (a webhook under
+	// budgets.alerts.webhooks, or a registered alert sink), so thresholds are
+	// evaluated. Without one no alert is ever raised.
+	Enabled bool `json:"enabled"`
+	// DefaultThresholds are the alert thresholds, as percentages of the
+	// amount, of every budget without alert_thresholds of its own.
+	DefaultThresholds []int `json:"default_thresholds"`
 }
 
 type budgetStatusResponse struct {
@@ -288,6 +303,16 @@ type budgetStatusResponse struct {
 	Remaining         float64    `json:"remaining"`
 	UsageRatio        float64    `json:"usage_ratio"`
 	PeriodRatio       float64    `json:"period_ratio"`
+	// AlertThresholds are this budget's own alert thresholds, as percentages
+	// of the amount. Omitted when it uses alerts.default_thresholds.
+	AlertThresholds []int `json:"alert_thresholds,omitempty"`
+	// ProjectedSpend is the spend the period ends on at the rate seen so far
+	// (spent / period_ratio). Omitted while less than 5% of the period has
+	// elapsed, and for a per-child template.
+	ProjectedSpend *float64 `json:"projected_spend,omitempty"`
+	// ProjectedExhaustionAt is when the budget runs out at that rate. Omitted
+	// when the budget lasts the period or is already spent.
+	ProjectedExhaustionAt *time.Time `json:"projected_exhaustion_at,omitempty"`
 }
 
 type upsertBudgetRequest struct {
@@ -302,6 +327,10 @@ type upsertBudgetRequest struct {
 	// requires PRICING_MARKUPS_ENABLED and a GoModel Pro license with the
 	// billing entitlement.
 	CostBasis string `json:"cost_basis,omitempty" enums:"provider,billed"`
+	// AlertThresholds overrides the default alert thresholds for this budget:
+	// percentages of the amount, each 1-100. Empty or omitted uses the
+	// defaults.
+	AlertThresholds []int `json:"alert_thresholds,omitempty"`
 }
 
 type deleteBudgetRequest struct {
@@ -407,6 +436,11 @@ func budgetStatusResponses(statuses []budget.CheckResult, now time.Time) []budge
 			Remaining:         status.Remaining,
 			UsageRatio:        status.UsageRatio(),
 			PeriodRatio:       status.PeriodRatio(now),
+			AlertThresholds:   item.AlertThresholds,
+		}
+		if projection, ok := status.Projection(now); ok {
+			response.ProjectedSpend = &projection.Spend
+			response.ProjectedExhaustionAt = projection.ExhaustionAt
 		}
 		// Convenience duplicate: user-path budgets keep the natural spelling.
 		if item.Scope == budget.ScopeUserPath {

@@ -1,8 +1,8 @@
 ---
 title: "Budgets"
-description: "Set spend limits per user path, request label, or provider and enforce them through workflow budget controls."
+description: "Set spend limits per user path, request label, or provider, enforce them through workflow budget controls, and get alerted before they are spent."
 icon: "wallet"
-keywords: ["budgets", "spend limits", "cost controls", "user path", "labels", "providers"]
+keywords: ["budgets", "spend limits", "cost controls", "user path", "labels", "providers", "alerts", "webhook", "projection"]
 ---
 
 ## Overview
@@ -80,7 +80,7 @@ Budgets -> Create Budget
 />
 
 Set the **scope**, **subject** (a user path, label, or provider), **period**, and
-**amount** in the form. Each row on the Budgets page then shows spend as a
+**amount** in the form; **Alert Thresholds** is optional, see [Alerts](#alerts). Each row on the Budgets page then shows spend as a
 percentage of the limit, the amount spent versus the cap, and the remaining
 balance for the current period. Label and provider budgets carry a `label` or
 `provider` chip next to the period. Dashboard-created budgets are marked as `manual`. Budgets loaded from
@@ -415,6 +415,179 @@ Editing a budget changes the limit but does not reset the current period. Use
 the row-level Reset action to start a new period for one budget, or
 `Settings -> Reset All Budgets` to reset all budgets.
 
+## Alerts
+
+A budget rejects requests once it is spent. Alerts tell you before that:
+each budget has thresholds, as percentages of its amount, and GoModel sends an
+alert when spend reaches one.
+
+Alerts are off until they have somewhere to go. Declare a webhook and every
+budget starts alerting at the default thresholds, 80% and 100%:
+
+```env
+BUDGETS_ALERTS_WEBHOOK_URL=https://alerts.example.com/gomodel
+BUDGETS_ALERTS_WEBHOOK_SECRET=${file:/run/secrets/alert_webhook_secret}
+```
+
+```yaml
+budgets:
+  alerts:
+    thresholds: [80, 100]
+    webhooks:
+      - url: "https://alerts.example.com/gomodel"
+        secret: "${env:BUDGET_ALERT_WEBHOOK_SECRET}"
+```
+
+The URL and the secret accept [secret references](/advanced/secret-references).
+The environment variables declare one webhook and replace the YAML list; use
+YAML for several.
+
+| Setting (`budgets.alerts.`) | Environment variable                 | Default   | Change it when                                                              |
+| --------------------------- | ------------------------------------ | --------- | --------------------------------------------------------------------------- |
+| `thresholds`                | `BUDGETS_ALERTS_THRESHOLDS`          | `80,100`  | You want an earlier warning (`50,80,100`). Each value is 1-100.             |
+| `interval`                  | `BUDGETS_ALERTS_INTERVAL`            | `60`      | You need alerts sooner than a minute after spend is stored. Seconds.        |
+| `webhooks`                  | `BUDGETS_ALERTS_WEBHOOK_URL`, `_SECRET` | _(none)_ | Always: without a webhook nothing is evaluated.                             |
+| `webhook_timeout`           | `BUDGETS_ALERTS_WEBHOOK_TIMEOUT`     | `10`      | Your receiver is slow. Seconds per attempt.                                 |
+| `webhook_max_retries`       | `BUDGETS_ALERTS_WEBHOOK_MAX_RETRIES` | `3`       | `0` to never retry; up to `10`.                                             |
+
+### Thresholds per budget
+
+A budget can carry its own thresholds, which replace the defaults for it. Set
+**Alert Thresholds** in the budget form, `alert_thresholds` in the admin API,
+or in configuration:
+
+```yaml
+budgets:
+  user_paths:
+    - path: "/team/alpha"
+      limits:
+        - period: "monthly"
+          amount: 500.00
+          alert_thresholds: [50, 75, 90]
+```
+
+```env
+SET_BUDGET_TEAM__ALPHA='[{"period":"monthly","amount":500,"alert_thresholds":[50,75,90]}]'
+```
+
+An empty list means the defaults. The Budgets page shows each budget's
+thresholds, marked `inactive` while no destination is configured.
+
+### When an alert fires
+
+GoModel evaluates budgets in the background, every `interval` seconds, never
+while serving a request. An alert fires once for each budget, period, and
+threshold:
+
+- Replicas sharing a database send it once between them: an instance records
+  the alert in the database before delivering it, and only the first record
+  wins. With SQLite each instance has its own database and alerts on its own.
+- A new period, or a [reset](#reset-windows), starts over and can fire again.
+  Raising a budget's amount mid-period does not re-arm thresholds already
+  reached in that period.
+- When spend passes several thresholds between two evaluations, each one
+  fires, lowest first.
+- A [per-child budget](#dynamic-per-child-budgets) alerts per child: each
+  child reaches the thresholds of its own budget.
+- Spend is read from stored usage, so an alert trails the request that caused
+  it by the usage flush (`USAGE_FLUSH_INTERVAL`, 5 s) plus up to one interval.
+
+The record is written before delivery, so an alert is delivered at most once:
+a gateway stopped between the two loses that alert, and one that could not be
+delivered after its retries is logged and counted, not sent later.
+
+### Webhook payload
+
+Each alert is one `POST` with a JSON body:
+
+```json
+{
+  "type": "budget.threshold_reached",
+  "id": "bgt_5f0c2a9d41b7e3a86c1d02ef",
+  "timestamp": "2026-04-25T12:00:07Z",
+  "budget": {
+    "scope": "user_path",
+    "subject": "/customers",
+    "effective_subject": "/customers/alice",
+    "per_child": true,
+    "period_seconds": 86400,
+    "period": "daily",
+    "amount": 100,
+    "cost_basis": "provider"
+  },
+  "threshold_percent": 80,
+  "spent": 81.2,
+  "usage_ratio": 0.812,
+  "period_start": "2026-04-25T00:00:00Z",
+  "period_end": "2026-04-26T00:00:00Z",
+  "projected_spend": 162.4
+}
+```
+
+| Field                      | Meaning                                                                                              |
+| -------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `type`                     | `budget.threshold_reached`. Ignore types you do not know: more may be added.                         |
+| `id`                       | Identifies the alert. Retries of one alert carry the same `id`, so deduplicate on it.                |
+| `timestamp`                | When GoModel raised the alert (UTC).                                                                 |
+| `budget.scope`, `.subject` | The budget: `user_path`, `label`, or `provider`, and its subject.                                    |
+| `budget.effective_subject` | What the spend was counted for: the child path of a per-child budget, otherwise the subject.         |
+| `budget.period_seconds`, `.period` | The reset period and its name (`hourly`, `daily`, `weekly`, `monthly`, or `<n>s`).           |
+| `budget.amount`, `.cost_basis` | The limit, and the cost `spent` is measured on (`provider` or `billed`).                         |
+| `threshold_percent`        | The threshold that was reached.                                                                      |
+| `spent`, `usage_ratio`     | Spend in the period when the alert was raised, and `spent / amount` (above `1` when exceeded).       |
+| `period_start`, `period_end` | The period the alert belongs to. A reset moves `period_start` to the reset time.                   |
+| `projected_spend`          | See [Spend projection](#spend-projection). Omitted when too little of the period has elapsed.        |
+
+Fields are only ever added. Every delivery also carries these headers:
+
+| Header                | Value                                                                    |
+| --------------------- | ------------------------------------------------------------------------ |
+| `X-GoModel-Event`     | The alert `type`                                                         |
+| `X-GoModel-Delivery`  | The alert `id`                                                           |
+| `X-GoModel-Signature` | `sha256=<hex>`: HMAC-SHA256 of the raw body, keyed with the webhook `secret`. Sent only when a secret is set. |
+
+Verify the signature against the raw request body, before parsing it:
+
+```python
+import hashlib, hmac
+
+def verified(secret: bytes, body: bytes, header: str) -> bool:
+    expected = "sha256=" + hmac.new(secret, body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, header)
+```
+
+Answer with any `2xx`. A network error, `408`, `429`, or `5xx` is retried up
+to `webhook_max_retries` times, waiting 1 s, 2 s, 4 s, and so on (30 s at
+most) between attempts; any other status is not retried. Redirects to another
+host are not followed. Deliveries use the gateway's outbound proxy
+(`HTTPS_PROXY`) and TLS trust (`http.tls`). A webhook that is down never
+delays the evaluation of other budgets or another webhook.
+
+The webhook is deliberately generic JSON: GoModel does not format messages for
+Slack, Teams, or email. Point it at a small receiver or an automation tool
+that does, or, in a custom build, register an `ext.AlertSink`, which receives
+the same events.
+
+Two Prometheus counters follow alerts: `gomodel_budget_alerts_fired_total`
+(`scope`, `threshold`) and `gomodel_budget_alert_delivery_failures_total`
+(`destination`); see
+[Prometheus metrics](/guides/prometheus-metrics#alerting-on-undelivered-budget-alerts).
+
+## Spend projection
+
+`GET /admin/budgets` and the Budgets page show where each budget is heading:
+
+- `projected_spend`: the spend the period ends on if spending continues at the
+  rate seen so far, `spent / period_ratio`.
+- `projected_exhaustion_at`: when the budget runs out at that rate. Present
+  only when the projection passes the amount and the budget is not yet spent.
+
+The projection is linear, so it reads a burst early in a period as the rate
+for all of it. Both fields are therefore omitted until 5% of the period has
+elapsed (72 minutes of a day, about a day and a half of a month), counted from
+a reset if there was one. A per-child template has no projection, since it has
+no single spend.
+
 ## Admin API
 
 Budget management is also available through the admin API:
@@ -455,9 +628,16 @@ console.log(budgets);
 
 </CodeGroup>
 
+Each budget in the response carries its status (`spent`, `remaining`,
+`usage_ratio`, `period_ratio`), its [projection](#spend-projection)
+(`projected_spend`, `projected_exhaustion_at`), and its own `alert_thresholds`
+when it has any. The top-level `alerts` object reports whether alerts are
+`enabled` (a destination exists) and the `default_thresholds`.
+
 Create or update a budget. A budget is identified by its `scope`, `subject`,
 and period; `user_path` is accepted as a shorthand spelling of the subject for
-user-path budgets:
+user-path budgets. `alert_thresholds` is optional: a `PUT` without it returns
+the budget to the default thresholds.
 
 <CodeGroup>
 
@@ -470,7 +650,8 @@ curl -X PUT http://localhost:8080/admin/budgets \
     "subject": "/team/alpha",
     "per_child": false,
     "budget_key": { "period": "daily" },
-    "amount": 10.00
+    "amount": 10.00,
+    "alert_thresholds": [50, 90]
   }'
 ```
 
