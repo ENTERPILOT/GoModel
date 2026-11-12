@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -129,6 +130,19 @@ func TestChatDecodeReferenceMirrorsTypes(t *testing.T) {
 			assert.Equal(t, jsonMembersOf(tt.real), jsonMembersOf(tt.ref))
 		})
 	}
+
+	// The message decoders list their members by hand; the reference decodes
+	// into the same struct, which must still cover every member of the type.
+	assert.Equal(t, jsonMemberNamesOf(Message{}), jsonMemberNamesOf(messageJSONFields{}))
+	assert.Equal(t, jsonMemberNamesOf(ResponseMessage{}), jsonMemberNamesOf(responseMessageJSONFields{}))
+}
+
+// jsonMemberNamesOf returns the sorted, distinct JSON member names of a
+// struct: ContentSchema documents content under the same name.
+func jsonMemberNamesOf(v any) []string {
+	names := jsonFieldNames(v)
+	slices.Sort(names)
+	return slices.Compact(names)
 }
 
 // jsonMembersOf lists a struct's JSON members by tag, naming a ref decoder

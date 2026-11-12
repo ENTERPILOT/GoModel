@@ -12,12 +12,8 @@ import "github.com/goccy/go-json"
 type refMessage struct{ v Message }
 
 func (m *refMessage) UnmarshalJSON(data []byte) error {
-	var raw struct {
-		Role       string          `json:"role"`
-		Content    json.RawMessage `json:"content"`
-		ToolCalls  []ToolCall      `json:"tool_calls,omitempty"`
-		ToolCallID string          `json:"tool_call_id,omitempty"`
-	}
+	// The struct the message decoder used before content was read in place.
+	var raw messageJSONFields
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
@@ -41,11 +37,7 @@ func (m *refMessage) UnmarshalJSON(data []byte) error {
 type refResponseMessage struct{ v ResponseMessage }
 
 func (m *refResponseMessage) UnmarshalJSON(data []byte) error {
-	var raw struct {
-		Role      string          `json:"role"`
-		Content   json.RawMessage `json:"content"`
-		ToolCalls []ToolCall      `json:"tool_calls,omitempty"`
-	}
+	var raw responseMessageJSONFields
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
