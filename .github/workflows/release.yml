@@ -131,8 +131,8 @@ jobs:
             VERSION=${{ steps.build_meta.outputs.version }}
             COMMIT=${{ steps.build_meta.outputs.commit }}
             DATE=${{ steps.build_meta.outputs.date }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # No cache-from/cache-to: a release image is built from the tagged
+          # sources alone, not from a cache other workflows can write to.
 
   docker-promote:
     name: Promote Docker image tags
@@ -226,7 +226,12 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: 1.27.4
-          cache: true
+          # Release binaries are compiled from scratch: main-branch jobs save
+          # Go caches in the scope a tag run restores from.
+          cache: false
+
+      - name: Verify module integrity
+        run: make mod-check
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7
