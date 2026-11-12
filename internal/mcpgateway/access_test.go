@@ -183,7 +183,7 @@ func TestKeyAllowlistEditEndsOpenSessions(t *testing.T) {
 	withSession := func(allowed string) map[string]string {
 		return map[string]string{testAllowedMCPHeader: allowed, "Mcp-Session-Id": sessionID}
 	}
-	assert.NotEqual(t, http.StatusNotFound, rawMCPStatus(t, gatewayURL+"/mcp", listTools, withSession("alpha/*")),
+	assert.Equal(t, http.StatusOK, rawMCPStatus(t, gatewayURL+"/mcp", listTools, withSession("alpha/*")),
 		"an unchanged allowlist keeps the session")
 
 	// The key was narrowed: the session's catalog is stale, so it ends and the
@@ -194,6 +194,14 @@ func TestKeyAllowlistEditEndsOpenSessions(t *testing.T) {
 
 	fresh := connectClient(t, gatewayURL+"/mcp", map[string]string{testAllowedMCPHeader: "alpha/read"})
 	assert.Equal(t, []string{"alpha_read"}, listToolNames(t, fresh))
+}
+
+func TestKeyAccessSelectorsRoundTrip(t *testing.T) {
+	access := newKeyAccess([]string{"github/*", "fs/Read/File", "exa/web_search_exa", "exa/a"})
+	selectors := access.selectors()
+	assert.Equal(t, []string{"exa/a", "exa/web_search_exa", "fs/Read/File", "github/*"}, selectors)
+	assert.True(t, newKeyAccess(selectors).equal(access))
+	assert.Nil(t, (*keyAccess)(nil).selectors(), "unrestricted has no selectors")
 }
 
 func TestAuthorizeSessionChecksKeyAllowlist(t *testing.T) {
@@ -245,5 +253,33 @@ func TestKeyAllowlistHoldsAcrossReplicas(t *testing.T) {
 		b.clock.Advance(sessionRecheckInterval)
 		assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, b.url+"/mcp", listToolsBody, withSession(narrow, session.ID())),
 			"the session ends on the other replica too")
+	})
+}
+
+// An allowlist edit first seen by a replica that does not host the session
+// ends it too, on that replica and on its host.
+func TestKeyAllowlistEditEndsSessionOnAnotherReplica(t *testing.T) {
+	runSharedStoreSuite(t, func(t *testing.T, store ext.SharedStore) {
+		servers := map[string]ServerSpec{
+			"alpha": testSpec("alpha", newTestUpstream(t, "alpha", func(server *mcp.Server) {
+				addEchoTool("read")(server)
+				addEchoTool("write")(server)
+			}), nil),
+		}
+		a := newReplica(t, store, Options{ConfigServers: servers}, nil)
+		b := newReplica(t, store, Options{ConfigServers: servers}, nil)
+
+		narrow := map[string]string{"X-Test-Auth-Key-ID": "key-a", testAllowedMCPHeader: "alpha/read"}
+		sessionID := initializeRawSession(t, a.url+"/mcp", narrow)
+
+		widened := map[string]string{"X-Test-Auth-Key-ID": "key-a", testAllowedMCPHeader: "alpha/*"}
+		assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, b.url+"/mcp", listToolsBody, withSession(widened, sessionID)),
+			"the session is not resumed under the edited allowlist")
+		_, resumed := b.binding(sessionID)
+		assert.False(t, resumed)
+
+		a.clock.Advance(sessionRecheckInterval)
+		assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, a.url+"/mcp", listToolsBody, withSession(narrow, sessionID)),
+			"the session ends on its host too")
 	})
 }

@@ -50,6 +50,9 @@ type sharedSession struct {
 	AuthKeyID string `json:"auth_key_id,omitempty"`
 	UserPath  string `json:"user_path,omitempty"`
 	Endpoint  string `json:"endpoint,omitempty"`
+	// AllowedMCP is the key's MCP allowlist when the session opened; empty is
+	// unrestricted.
+	AllowedMCP []string `json:"allowed_mcp,omitempty"`
 	// Scoped marks a session opened with ScopeHeader; Servers is its set.
 	Scoped    bool     `json:"scoped,omitempty"`
 	Servers   []string `json:"servers,omitempty"`
@@ -63,7 +66,12 @@ type sharedSession struct {
 // scope rebuilds the visibility inputs the session was opened with: later
 // requests never change a session's view, wherever they land.
 func (r sharedSession) scope() requestScope {
-	scope := requestScope{authKeyID: r.AuthKeyID, userPath: r.UserPath, discovery: r.Discovery}
+	scope := requestScope{
+		authKeyID: r.AuthKeyID,
+		userPath:  r.UserPath,
+		access:    newKeyAccess(r.AllowedMCP),
+		discovery: r.Discovery,
+	}
 	if virtual, ok := strings.CutPrefix(r.Endpoint, virtualBindingPrefix); ok {
 		scope.virtual = virtual
 	} else {
@@ -158,8 +166,8 @@ func (s *Service) admitSession(ctx context.Context, sessionID, authKeyID, userPa
 }
 
 // admitSharedSession admits a request for a session this replica does not
-// host by its shared record, resuming the session here under the request's
-// API key MCP allowlist, access.
+// host by its shared record, resuming the session here. access is the
+// request's API key MCP allowlist.
 func (s *Service) admitSharedSession(ctx context.Context, sessionID, authKeyID, userPath, endpoint string, access *keyAccess, remove bool) (sessionAdmission, *resumedSession) {
 	lookupCtx, cancel := context.WithTimeout(ctx, sharedSessionTimeout)
 	record, raw, err := s.loadSharedSession(lookupCtx, sessionID)
@@ -180,8 +188,14 @@ func (s *Service) admitSharedSession(ctx context.Context, sessionID, authKeyID, 
 		s.closeSharedSession(ctx, sessionID)
 		return sessionEnded, nil
 	}
+	if !newKeyAccess(record.AllowedMCP).equal(access) {
+		// As on the session's host: an edited allowlist ends the session
+		// everywhere, so it is never resumed with a stale catalog.
+		s.closeSharedSession(ctx, sessionID)
+		return sessionRejected, nil
+	}
 	host, err, _ := s.resumes.Do(sessionID, func() (any, error) {
-		return s.resumeSession(ctx, sessionID, record, raw, access)
+		return s.resumeSession(ctx, sessionID, record, raw)
 	})
 	if err != nil {
 		slog.Warn("failed to resume mcp session from the shared store", "error", err)
@@ -404,10 +418,8 @@ func (s *Service) markVerified(sessionID string, server *mcp.Server) {
 
 // resumeSession rebuilds a session from its shared record and hosts it here.
 // The SDK restores the negotiated state it carries, so the session continues
-// without a new initialize. access is the resuming request's API key MCP
-// allowlist: the record holds none, so the rebuilt catalog follows the key's
-// current one.
-func (s *Service) resumeSession(ctx context.Context, sessionID string, record *sharedSession, raw []byte, access *keyAccess) (*resumedSession, error) {
+// without a new initialize.
+func (s *Service) resumeSession(ctx context.Context, sessionID string, record *sharedSession, raw []byte) (*resumedSession, error) {
 	s.bindMu.Lock()
 	binding, ok := s.bindings[sessionID]
 	s.bindMu.Unlock()
@@ -416,7 +428,6 @@ func (s *Service) resumeSession(ctx context.Context, sessionID string, record *s
 	}
 
 	scope := record.scope()
-	scope.access = access
 	server, aliases := s.newSessionServer(scope)
 	transport := &mcp.StreamableServerTransport{SessionID: sessionID}
 	session, err := server.Connect(context.WithoutCancel(ctx), transport, &mcp.ServerSessionOptions{
@@ -446,7 +457,7 @@ func (s *Service) resumeSession(ctx context.Context, sessionID string, record *s
 	s.bindings[sessionID] = sessionBinding{
 		authKeyID:          record.AuthKeyID,
 		userPath:           record.UserPath,
-		access:             access,
+		access:             scope.access,
 		endpoint:           record.Endpoint,
 		lastSeen:           now,
 		virtualIncarnation: record.VirtualIncarnation,
@@ -523,6 +534,7 @@ func (s *Service) shareSession(ctx context.Context, sessionID string, scope requ
 	record := sharedSession{
 		AuthKeyID:       binding.authKeyID,
 		UserPath:        binding.userPath,
+		AllowedMCP:      binding.access.selectors(),
 		Endpoint:        binding.endpoint,
 		Discovery:       binding.discovery,
 		Initialize:      params,

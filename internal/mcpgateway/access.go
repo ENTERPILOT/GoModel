@@ -3,6 +3,7 @@ package mcpgateway
 import (
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 
 	"github.com/enterpilot/gomodel/config"
@@ -56,6 +57,25 @@ func (a *keyAccess) equal(other *keyAccess) bool {
 	}
 	return maps.Equal(a.servers, other.servers) &&
 		maps.EqualFunc(a.tools, other.tools, func(x, y map[string]struct{}) bool { return maps.Equal(x, y) })
+}
+
+// selectors returns the allowlist as sorted canonical selectors, which parse
+// back into an equal allowlist; nil (unrestricted) returns none.
+func (a *keyAccess) selectors() []string {
+	if a == nil {
+		return nil
+	}
+	out := make([]string, 0, len(a.servers)+len(a.tools))
+	for server := range a.servers {
+		out = append(out, server+"/"+accessWildcard)
+	}
+	for server, tools := range a.tools {
+		for tool := range tools {
+			out = append(out, server+"/"+tool)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // server reports whether any selector reaches the server, so it is listed.
