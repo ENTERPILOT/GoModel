@@ -93,9 +93,18 @@ func slimAuditListEntry(resp *auditLogEntryResponse) {
 // hasConversationPayload mirrors the dashboard's body sniff for entries whose
 // path alone does not qualify them for the Interactions drawer (for example
 // /v1/messages or provider passthrough): a request shaped like a conversation
-// or a response shaped like model output.
+// or a response shaped like model output. The list query leaves bodies in
+// the database and reports this per body in an auditlog.OmittedBody; its SQL
+// mirrors the checks here (see auditlog listColumns), so change both together.
 func hasConversationPayload(requestBody, responseBody any) bool {
-	if req, ok := auditlog.BodyDocument(requestBody).(map[string]any); ok {
+	return isConversationRequest(requestBody) || isConversationResponse(responseBody)
+}
+
+func isConversationRequest(body any) bool {
+	if omitted, ok := body.(auditlog.OmittedBody); ok {
+		return omitted.Conversation
+	}
+	if req, ok := auditlog.BodyDocument(body).(map[string]any); ok {
 		if _, ok := req["messages"].([]any); ok {
 			return true
 		}
@@ -109,7 +118,14 @@ func hasConversationPayload(requestBody, responseBody any) bool {
 			return true
 		}
 	}
-	if resp, ok := auditlog.BodyDocument(responseBody).(map[string]any); ok {
+	return false
+}
+
+func isConversationResponse(body any) bool {
+	if omitted, ok := body.(auditlog.OmittedBody); ok {
+		return omitted.Conversation
+	}
+	if resp, ok := auditlog.BodyDocument(body).(map[string]any); ok {
 		if _, ok := resp["choices"].([]any); ok {
 			return true
 		}

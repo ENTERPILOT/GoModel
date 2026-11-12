@@ -88,6 +88,8 @@ func (h *Handler) AuditLog(c *echo.Context) error {
 	}
 
 	asOf := time.Now().UnixMicro()
+	// The bodies would only be stripped again below.
+	params.OmitBodies = true
 	result, err := h.auditReader.GetLogs(c.Request().Context(), params)
 	if err != nil {
 		return handleError(c, err)
