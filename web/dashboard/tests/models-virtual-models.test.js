@@ -4,6 +4,8 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import {
   aliasRowCanRemove,
@@ -1097,6 +1099,24 @@ test("vision routing survives saving and toggling a single-target virtual model"
     enabled: true,
   });
   assert.equal(buildAliasTogglePayload(alias).vision_routing, true);
+});
+
+// There is no DOM test harness in this suite, so this asserts the wiring
+// contract directly on the source (like rate-limits.test.js).
+test("the vision routing checkbox does not wait for a second target", () => {
+  const editor = readFileSync(
+    fileURLToPath(
+      new URL("../src/pages/models/VirtualModelEditor.svelte", import.meta.url),
+    ),
+    "utf8",
+  );
+  const checkbox = editor.match(
+    /bind:checked=\{vm\.vmForm\.vision_routing\}\s+disabled=\{([^}]+)\}/,
+  );
+  assert.ok(checkbox, "vision routing checkbox missing");
+  // The flag is saved for a single target and applies when that target is
+  // another virtual model, so it must stay editable there.
+  assert.equal(checkbox[1], "vm.vmFormManaged");
 });
 
 test("virtualModelTargetOptions lists catalog models and other virtual models", () => {

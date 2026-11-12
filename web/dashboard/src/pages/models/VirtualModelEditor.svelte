@@ -205,7 +205,7 @@
       <input
         type="checkbox"
         bind:checked={vm.vmForm.vision_routing}
-        disabled={vm.vmFormManaged || vmFormStrategyPending(vm.vmForm)}
+        disabled={vm.vmFormManaged}
       />
       <span>{m.models_vision_routing_option()}</span>
     </label>
