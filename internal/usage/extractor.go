@@ -61,7 +61,7 @@ func buildRawUsageFromDetails(ptd *core.PromptTokensDetails, ctd *core.Completio
 func mergeRawUsageMaps(base map[string]any, overlays ...map[string]any) map[string]any {
 	var merged map[string]any
 	if len(base) > 0 {
-		merged = cloneRawData(base)
+		merged = maps.Clone(base)
 	}
 	for _, overlay := range overlays {
 		if len(overlay) == 0 {
@@ -135,12 +135,6 @@ func applyUsageCosts(entry *UsageEntry, provider, endpoint string, pricing ...*c
 	entry.CostsCalculationCaveat = costResult.Caveat
 }
 
-// cloneRawData creates a shallow copy of the raw data map to prevent races
-// when the original map might be mutated after the entry is enqueued.
-func cloneRawData(src map[string]any) map[string]any {
-	return maps.Clone(src)
-}
-
 // ExtractFromResponsesResponse extracts usage data from a ResponsesResponse.
 // It normalizes the usage data into a UsageEntry and preserves raw extended data.
 // If pricing is provided, cost fields are calculated.
@@ -211,7 +205,7 @@ func ExtractFromEmbeddingResponse(resp *core.EmbeddingResponse, requestID, provi
 		// an embeddings provider that returns an exact per-request charge is
 		// costed from that figure rather than from token rates. Nil for
 		// providers that report nothing beyond the token counts.
-		RawData: cloneRawData(resp.Usage.RawUsage),
+		RawData: maps.Clone(resp.Usage.RawUsage),
 	}
 
 	applyUsageCosts(entry, provider, endpoint, pricing...)
@@ -265,7 +259,7 @@ func ExtractFromSSEUsage(
 
 	// Defensive copy to avoid races when original map might be mutated
 	if len(rawData) > 0 {
-		entry.RawData = cloneRawData(rawData)
+		entry.RawData = maps.Clone(rawData)
 	}
 
 	applyUsageCosts(entry, provider, endpoint, pricing...)

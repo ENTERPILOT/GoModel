@@ -181,29 +181,8 @@ func cloneStrategyConfig(config map[string]any) map[string]any {
 	if config == nil {
 		return nil
 	}
-	cloned, _ := cloneConfigValue(config).(map[string]any)
+	cloned, _ := core.CloneJSONValue(config).(map[string]any)
 	return cloned
-}
-
-func cloneConfigValue(value any) any {
-	switch v := value.(type) {
-	case map[string]any:
-		out := make(map[string]any, len(v))
-		for key, item := range v {
-			out[key] = cloneConfigValue(item)
-		}
-		return out
-	case []any:
-		out := make([]any, len(v))
-		for i, item := range v {
-			out[i] = cloneConfigValue(item)
-		}
-		return out
-	case []string:
-		return append([]string(nil), v...)
-	default:
-		return v
-	}
 }
 
 // Role kinds for the admin view.

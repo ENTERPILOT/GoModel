@@ -3,6 +3,7 @@ package exchange
 import (
 	"encoding/base64"
 	"fmt"
+	"maps"
 
 	"github.com/goccy/go-json"
 
@@ -106,7 +107,7 @@ func rewriteBlocks(blocks []any, role pluginapi.Role, parts []pluginapi.Part) ([
 			}
 			if image, isMap := m["image_url"].(map[string]any); isMap {
 				// The nested map is shared with the caller's request.
-				image = cloneAnyMap(image)
+				image = maps.Clone(image)
 				image["url"] = part.URL
 				m["image_url"] = image
 			} else {

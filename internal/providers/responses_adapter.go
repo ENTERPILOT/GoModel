@@ -278,13 +278,13 @@ func normalizeResponsesToolForChat(tool map[string]any) map[string]any {
 
 	toolType, _ := tool["type"].(string)
 	if strings.TrimSpace(toolType) != "function" {
-		return cloneStringAnyMap(tool)
+		return maps.Clone(tool)
 	}
 	if _, ok := tool["function"].(map[string]any); ok {
-		return cloneStringAnyMap(tool)
+		return maps.Clone(tool)
 	}
 
-	normalized := cloneStringAnyMap(tool)
+	normalized := maps.Clone(tool)
 	function := map[string]any{}
 	for _, key := range []string{"name", "description", "parameters", "strict"} {
 		if value, ok := normalized[key]; ok {
@@ -330,15 +330,15 @@ func normalizeResponsesToolChoiceForChat(choice any) any {
 		return nil
 	}
 	if _, ok := choiceMap["function"].(map[string]any); ok {
-		return cloneStringAnyMap(choiceMap)
+		return maps.Clone(choiceMap)
 	}
 
 	name, hasName := choiceMap["name"]
 	if !hasName {
-		return cloneStringAnyMap(choiceMap)
+		return maps.Clone(choiceMap)
 	}
 
-	normalized := cloneStringAnyMap(choiceMap)
+	normalized := maps.Clone(choiceMap)
 	delete(normalized, "name")
 	normalized["function"] = map[string]any{"name": name}
 	return normalized
@@ -354,7 +354,7 @@ func normalizeResponsesToolChoiceForChat(choice any) any {
 // dropped and the model never gets every declared tool.
 func normalizeResponsesAllowedToolsForChat(choice map[string]any) map[string]any {
 	if _, ok := choice["allowed_tools"].(map[string]any); ok {
-		return cloneStringAnyMap(choice)
+		return maps.Clone(choice)
 	}
 
 	entries, _ := choice["tools"].([]any)
@@ -402,10 +402,6 @@ func dropUnavailableResponsesToolChoice(choice any, tools []map[string]any) any 
 		}
 	}
 	return nil
-}
-
-func cloneStringAnyMap(src map[string]any) map[string]any {
-	return maps.Clone(src)
 }
 
 // ResponsesViaChat implements the Responses API by converting to/from Chat format.
