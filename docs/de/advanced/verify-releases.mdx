@@ -1,0 +1,72 @@
+---
+title: "Release verifizieren"
+description: "Prüfen Sie mit signierter Build-Provenance, Cosign-Signaturen und SBOMs, dass ein GoModel-Binary oder Docker-Image vom Release-Workflow des offiziellen Repositorys gebaut wurde."
+icon: "shield-check"
+keywords: ["verifizieren", "verify", "Provenance", "Attestation", "SLSA", "Sigstore", "cosign", "Signatur", "SBOM", "Supply Chain"]
+---
+
+Jedes Release nach v0.2.3 wird mit signierter Build-Provenance ausgeliefert:
+einer Aussage darüber, aus welchem Repository, welchem Commit und mit welchem
+Workflow jedes Artefakt gebaut wurde. `checksums.txt` zeigt nur, dass ein
+Download zur Release-Seite passt. Die Provenance zeigt, wo er gebaut wurde.
+
+Die Signatur kommt ohne Schlüssel aus. Jeder Release-Lauf erhält ein kurzlebiges
+[Sigstore](https://www.sigstore.dev/)-Zertifikat, das an den Release-Workflow in
+`ENTERPILOT/GoModel` gebunden ist. Es gibt also keinen langlebigen
+Signaturschlüssel, der gestohlen werden könnte.
+
+<Note>
+  v0.2.3 und ältere Releases enthalten weder Attestations noch Signaturen. Die
+  folgenden Befehle schlagen für sie fehl.
+</Note>
+
+## Binaries
+
+Verwenden Sie die [GitHub CLI](https://cli.github.com/), angemeldet mit `gh auth login`:
+
+```bash
+gh attestation verify gomodel_0.2.4_linux_amd64.tar.gz --repo ENTERPILOT/GoModel
+```
+
+Der Befehl endet mit einem Fehlercode, wenn die Datei nicht von einem Workflow
+in diesem Repository gebaut wurde. Abgedeckt ist jede Datei eines Releases: die
+Archive, `checksums.txt` und die SBOMs.
+
+So verlangen Sie zusätzlich den Release-Workflow und einen bestimmten Tag:
+
+```bash
+gh attestation verify gomodel_0.2.4_linux_amd64.tar.gz \
+  --repo ENTERPILOT/GoModel \
+  --signer-workflow ENTERPILOT/GoModel/.github/workflows/release.yml \
+  --source-ref refs/tags/v0.2.4
+```
+
+## Docker-Image
+
+```bash
+gh attestation verify oci://docker.io/enterpilot/gomodel:0.2.4 --repo ENTERPILOT/GoModel
+```
+
+Das Image ist außerdem mit [Cosign](https://docs.sigstore.dev/cosign/system_config/installation/)
+signiert. Verifizieren Sie mit Cosign v3 oder neuer:
+
+```bash
+cosign verify enterpilot/gomodel:0.2.4 \
+  --certificate-identity "https://github.com/ENTERPILOT/GoModel/.github/workflows/release.yml@refs/tags/v0.2.4" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+```
+
+Ein Tag kann verschoben werden, ein Digest nicht. Um genau das auszuführen, was
+Sie verifiziert haben, deployen Sie das Image per Digest
+(`enterpilot/gomodel@sha256:...`).
+
+## SBOMs
+
+- **Binaries**: Zu jedem Archiv liegt im Release eine SPDX-Datei mit dem Namen
+  `<archive>.sbom.json`.
+- **Docker-Image**: Die SBOM ist zusammen mit dem Image gespeichert.
+
+  ```bash
+  docker buildx imagetools inspect enterpilot/gomodel:0.2.4 \
+    --format '{{ json (index .SBOM "linux/amd64").SPDX }}'
+  ```
