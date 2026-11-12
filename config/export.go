@@ -53,7 +53,7 @@ const (
 	// exportTagSecret marks a field whose whole value is a secret.
 	exportTagSecret = "secret"
 	// exportTagURL marks a URL whose user information, or query parameter
-	// named like a credential, is a secret.
+	// not known to be safe, is a secret.
 	exportTagURL = "url"
 	// exportTagArgs marks command-line arguments, in which the value of a
 	// flag named like a credential ("--api-key", "GITHUB_TOKEN=") is a secret.
@@ -82,8 +82,9 @@ const (
 // `export:"args"`, the fields in doc.SecretFields, and every string under a
 // map key, or a key of a section no schema describes (extension sections and
 // free-form settings), that names a credential, such as api_key, token, or
-// password. Any other string that equals a resolved secret, is a URL carrying
-// user information, or is a connection string carrying a password is one too.
+// password. A URL setting with a query parameter not known to be safe is one.
+// Any other string that equals a resolved secret, is a URL carrying user
+// information, or is a connection string carrying a password is one too.
 func (r *LoadResult) ExportYAML(doc ExportDocument, environ []string) ([]byte, error) {
 	if r == nil || doc.Config == nil {
 		return nil, fmt.Errorf("export configuration: no config")
@@ -387,7 +388,7 @@ func (e *exporter) scalar(path string, node *yaml.Node, class exportClass, envNa
 		}
 	}
 	if e.survey {
-		if class == exportSecret || class == exportURL && urlHasLiteralCredential(value) {
+		if class == exportSecret || class == exportURL && urlSettingHasSecret(value) {
 			e.secretPaths[path] = true
 		}
 		if secret := node.Value; class == exportSecret && prefix <= len(secret) {
@@ -412,7 +413,7 @@ func (e *exporter) scalar(path string, node *yaml.Node, class exportClass, envNa
 		}
 	case exportURL:
 		class = exportPlain
-		if urlHasLiteralCredential(value) || e.leaksSecret(value, !restored) {
+		if urlSettingHasSecret(value) || e.leaksSecret(value, !restored) {
 			class = exportSecret
 		}
 	}
@@ -537,11 +538,12 @@ func (e *exporter) recordSecret(secret string) {
 const minSecretCopy = 8
 
 // leaksSecret reports whether a value of a setting not known to hold a secret
-// is one all the same: a URL carrying user information, an assignment of a
-// credential ("password=..."), a bearer token, text holding a secret
-// setting's value, or, when resolved is set, what a reference in a secret
-// setting resolved to. It catches a credential the schema, tags, and key
-// names miss, such as one kept in a plugin setting with an unusual name.
+// is one all the same: a URL or connection string carrying user information,
+// an assignment of a credential ("password=..."), a Bearer or Basic
+// credential, text holding a secret setting's value, or, when resolved is
+// set, what a reference in a secret setting resolved to. It catches a
+// credential the schema, tags, and key names miss, such as one kept in a
+// plugin setting with an unusual name.
 func (e *exporter) leaksSecret(value string, resolved bool) bool {
 	if value == "" {
 		return false
@@ -549,7 +551,10 @@ func (e *exporter) leaksSecret(value string, resolved bool) bool {
 	if strings.Contains(value, "://") && urlHasLiteralCredential(value) {
 		return true
 	}
-	if assignsLiteralCredential(value) || bearerCredential(value) {
+	if password, ok := schemelessPassword(replaceReferences(value, referencePlaceholder)); ok && literal(password) {
+		return true
+	}
+	if assignsLiteralCredential(value) || authCredential(value) {
 		return true
 	}
 	// A copy of a secret setting's value, such as one an environment

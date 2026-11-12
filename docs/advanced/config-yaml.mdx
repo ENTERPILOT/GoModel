@@ -275,11 +275,17 @@ never runs with an empty master key or credential. Secrets include API keys,
 the master and encryption keys, MCP `env` values, MCP and OpenTelemetry
 headers, URL passwords, connection-string passwords, the values of credential
 flags in MCP `args` (`--api-key=...`, `--token ...`), and plugin settings the
-plugin marks as secret. Under `extensions:`, plugin settings, and maps such as
-`resource_attributes`, any string under a key naming a credential (`token`,
-`api_key`, `password`, `auth`, ...) counts as one too. So does any other
-text holding a secret's value, a `Bearer` token, or a credential assignment
-such as `password=...`.
+plugin marks as secret. A URL setting, such as a provider `base_url` or a
+storage or MCP server URL, is written whole as a reference when it has a query
+parameter other than a known connection option (`api-version`, `sslmode`,
+`replicaSet`, ...), since a parameter can carry a credential under any name.
+Under `extensions:`, plugin settings, and maps such as `resource_attributes`,
+any string under a key naming a credential (`token`, `api_key`, `password`,
+`auth`, `clientsecret`, `passphrase`, `license`, ...) counts as one too; names
+about model tokens, such as `max_tokens`, do not. So does any other text
+holding a secret's value, a `Bearer` or `Basic` credential, a
+`user:password@host` connection string, or a credential assignment such as
+`password=...`.
 
 <Note>
 Free-form text, such as a description typed into the dashboard, is checked
