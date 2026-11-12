@@ -24,7 +24,8 @@ func ResolveSQLBackend[T any](
 	mongodb func(*mongo.Database) (T, error),
 ) (T, error) {
 	if duck, ok := store.(DuckDBStorage); ok {
-		return withSQL(duck.DuckDB(), sqlx.NewDuckDB, sqlStore)
+		// Already wrapped: every store must share the backend's one sqlx.DB.
+		return withSQL(duck.DuckDB(), func(db sqlx.DB) (sqlx.DB, error) { return db, nil }, sqlStore)
 	}
 	return ResolveBackend[T](
 		store,

@@ -10,10 +10,13 @@ import (
 	"path/filepath"
 
 	_ "github.com/duckdb/duckdb-go/v2" // DuckDB driver (cgo)
+
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
 type duckdbStorage struct {
-	db *sql.DB
+	db      *sql.DB
+	wrapped sqlx.DB
 }
 
 // NewDuckDB opens a DuckDB database file. DuckDB takes an exclusive file lock,
@@ -34,10 +37,15 @@ func NewDuckDB(cfg DuckDBConfig) (DuckDBStorage, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("failed to open DuckDB database: %w", err)
 	}
-	return &duckdbStorage{db: db}, nil
+	wrapped, err := sqlx.NewDuckDB(db)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return &duckdbStorage{db: db, wrapped: wrapped}, nil
 }
 
-func (s *duckdbStorage) DuckDB() *sql.DB { return s.db }
+func (s *duckdbStorage) DuckDB() sqlx.DB { return s.wrapped }
 
 func (s *duckdbStorage) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
 

@@ -28,7 +28,9 @@ type duckdbDB struct {
 	writeMu sync.Mutex
 }
 
-// NewDuckDB wraps a DuckDB handle. The caller retains ownership.
+// NewDuckDB wraps a DuckDB handle. The caller retains ownership. Wrap a
+// database once and share the result: writeMu belongs to the wrapper, so two
+// wrappers on one database do not serialize each other's writes.
 func NewDuckDB(db *sql.DB) (DB, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database connection is required")

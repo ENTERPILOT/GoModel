@@ -12,6 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/enterpilot/gomodel/internal/platformdir"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
 // Type constants for storage backends
@@ -110,11 +111,13 @@ type PostgreSQLStorage interface {
 	Pool() *pgxpool.Pool
 }
 
-// DuckDBStorage exposes a DuckDB database handle. The method is not DB() so a
-// DuckDB backend never matches SQLiteStorage in a type switch.
+// DuckDBStorage exposes a DuckDB database. The method is not DB() so a DuckDB
+// backend never matches SQLiteStorage in a type switch. It returns the one
+// sqlx.DB every store shares, not the raw handle: the adapter's write lock
+// only serializes writers that go through the same wrapper.
 type DuckDBStorage interface {
 	Storage
-	DuckDB() *sql.DB
+	DuckDB() sqlx.DB
 }
 
 // MongoDBStorage exposes a MongoDB database handle.
