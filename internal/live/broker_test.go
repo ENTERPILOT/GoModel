@@ -2,6 +2,7 @@ package live
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1121,6 +1122,64 @@ func TestBrokerAuditActiveSnapshotDoesNotAliasEntryData(t *testing.T) {
 	require.True(t, ok, "request_headers = %T, want object", data["request_headers"])
 	assert.Equal(t, "[REDACTED]", requestHeaders["Authorization"], "the snapshot must hold the value published, not a later mutation")
 	assert.NotContains(t, requestHeaders, "X-Added-Later")
+}
+
+// Merges keep the snapshot's header map when an update repeats it, so the
+// snapshot must own that map from its first event: a later in-place change to
+// the entry's map must neither leak in nor erase what was reported.
+func TestBrokerAuditActiveSnapshotOwnsRepeatedHeaders(t *testing.T) {
+	b := NewBroker(Config{Enabled: true})
+	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
+	headers := map[string]string{"Authorization": "[REDACTED]", "Content-Type": "application/json"}
+	entry := &auditlog.LogEntry{
+		ID:        "audit-1",
+		RequestID: "req-1",
+		Timestamp: now,
+		Data:      &auditlog.LogData{RequestHeaders: headers},
+	}
+
+	b.PublishAuditEvent(EventAuditStarted, entry)
+	b.PublishAuditEvent(EventAuditUpdated, entry)
+	delete(headers, "Authorization")
+	headers["Content-Type"] = "text/plain"
+	b.PublishAuditEvent(EventAuditUpdated, entry)
+
+	sub := b.Subscribe(0)
+	require.NotNil(t, sub)
+	defer sub.Close()
+	require.Len(t, sub.Replay, 1)
+
+	data, ok := eventPayload(t, sub.Replay[0])["data"].(map[string]any)
+	require.True(t, ok)
+	requestHeaders, ok := data["request_headers"].(map[string]any)
+	require.True(t, ok, "request_headers = %T, want object", data["request_headers"])
+	assert.Equal(t, "[REDACTED]", requestHeaders["Authorization"], "a header an earlier event reported")
+	assert.Equal(t, "text/plain", requestHeaders["Content-Type"], "the newest value wins")
+}
+
+func TestMergeStringMap(t *testing.T) {
+	base := map[string]string{"A": "1", "B": "2"}
+	cases := []struct {
+		name     string
+		patch    map[string]string
+		want     map[string]string
+		keepBase bool
+	}{
+		{name: "nil patch", patch: nil, want: base, keepBase: true},
+		{name: "equal patch", patch: map[string]string{"A": "1", "B": "2"}, want: base, keepBase: true},
+		{name: "subset patch", patch: map[string]string{"B": "2"}, want: base, keepBase: true},
+		{name: "changed value", patch: map[string]string{"B": "3"}, want: map[string]string{"A": "1", "B": "3"}},
+		{name: "added key", patch: map[string]string{"C": "3"}, want: map[string]string{"A": "1", "B": "2", "C": "3"}},
+		{name: "empty value differs from missing", patch: map[string]string{"C": ""}, want: map[string]string{"A": "1", "B": "2", "C": ""}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mergeStringMap(base, tc.patch)
+			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.keepBase, reflect.ValueOf(got).UnsafePointer() == reflect.ValueOf(base).UnsafePointer(), "whether base is returned as is")
+			assert.Equal(t, map[string]string{"A": "1", "B": "2"}, base, "base must not be mutated")
+		})
+	}
 }
 
 // The retained-size cap bounds the ring, so it has to hold for the accumulated

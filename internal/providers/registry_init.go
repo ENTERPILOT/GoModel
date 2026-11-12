@@ -469,7 +469,7 @@ func fetchProviderInventory(ctx context.Context, provider core.Provider, in prov
 		return resp, reason, fetchAt, nil
 	}
 
-	resp, err := provider.ListModels(llmclient.WithoutCircuitBreaker(ctx))
+	resp, err := listModels(llmclient.WithoutCircuitBreaker(ctx), provider, in.name)
 	fetchAt = time.Now().UTC()
 	resp, reason := applyConfiguredProviderModels(in.name, in.providerType, in.mode, in.configuredModels, resp, err, fetchAt.Unix())
 	if err != nil && reason == configuredProviderModelsNotApplied && len(in.catalogModels) > 0 {
@@ -477,6 +477,15 @@ func fetchProviderInventory(ctx context.Context, provider core.Provider, in prov
 		reason = catalogProviderModelsUpstreamError
 	}
 	return resp, reason, fetchAt, err
+}
+
+// listModels calls provider.ListModels and turns a panic into an error, so
+// the configured-model and catalog fallbacks apply as for any failed listing.
+// Listings run on their own goroutines during startup and refreshes, where no
+// request's recover middleware is above them and a panic would end the process.
+func listModels(ctx context.Context, provider core.Provider, providerName string) (resp *core.ModelsResponse, err error) {
+	defer recoverProviderPanic(&err, "list models", providerName)
+	return provider.ListModels(ctx)
 }
 
 // catalogFallbackModels returns, per provider name, the model catalog's model

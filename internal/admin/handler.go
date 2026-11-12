@@ -663,8 +663,10 @@ func dashboardTimeZone(c *echo.Context) (string, *time.Location) {
 		return defaultDashboardTZ, time.UTC
 	}
 
+	// "Local" is the host's zone, which replicas need not share, so the same
+	// request could cover different hours on different replicas.
 	location, err := time.LoadLocation(value)
-	if err != nil {
+	if err != nil || location == time.Local {
 		return defaultDashboardTZ, time.UTC
 	}
 
