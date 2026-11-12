@@ -167,7 +167,7 @@ usage:
 
 Voraussetzung ist die Nutzungserfassung (`USAGE_ENABLED`, standardmäßig aktiv): Ein Request ohne Nutzungszeile hat keine Kosten, die zurückgegeben werden könnten.
 
-**Welche Kosten.** Sind Aufschläge aktiviert, erhält der Client die abgerechneten Kosten des Requests und nichts anderes: Provider-Kosten und Aufschlag verlassen das Gateway nie. Sind Aufschläge deaktiviert, erhält er die Provider-Kosten (`total_cost`), auch bei einem Provider mit `billable: false`. In beiden Fällen ist es der Wert aus der Nutzungszeile des Requests, in USD, und eine Schätzung wie alle anderen Kosten auf dieser Seite.
+**Welche Kosten.** Sind Aufschläge aktiviert, erhält der Client die abgerechneten Kosten des Requests und nichts anderes: Provider-Kosten und Aufschlag verlassen das Gateway nie. Sind Aufschläge deaktiviert, erhält er die Provider-Kosten (`total_cost`), auch bei einem Provider mit `billable: false`. In beiden Fällen ist er in USD angegeben und eine Schätzung wie alle anderen Kosten auf dieser Seite, und er entspricht dem Wert aus der Nutzungszeile des Requests, außer bei einem Cache-Treffer ohne Aufschläge (siehe unten).
 
 **Gepufferte Antworten** tragen die Kosten in zwei Response-Headern. Der Body bleibt unverändert, sodass streng typisierte SDKs und Parser nicht betroffen sind:
 
@@ -178,7 +178,7 @@ X-GoModel-Cost-Currency: USD
 
 Der Betrag ist eine einfache Dezimalzahl mit allen Stellen der Berechnung, nie gerundet und nie in Exponentialschreibweise.
 
-**Gestreamte Antworten** senden ihre Header, bevor die Kosten bekannt sind. Die Kosten stehen deshalb im Stream: `gomodel_cost` wird dem Usage-Objekt des Events hinzugefügt, das die endgültigen Token-Zahlen enthält.
+**Gestreamte Antworten** senden ihre Header, bevor die Kosten bekannt sind. Die Kosten stehen deshalb im Stream: `gomodel_cost` wird dem Usage-Objekt jedes Events mit Usage hinzugefügt, üblicherweise dem mit den endgültigen Token-Zahlen.
 
 ```text
 data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":271,"completion_tokens":12,"total_tokens":283,"gomodel_cost":{"amount":0.00000542,"currency":"USD"}}}
@@ -190,13 +190,32 @@ data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[],"usage":{
 | `/v1/responses`        | `response.completed` oder `response.incomplete`  | `response.usage.gomodel_cost` |
 | `/v1/messages`         | `message_delta`                                  | `usage.gomodel_cost`          |
 
-Alle anderen Events werden unverändert durchgereicht. Das Feld ist eine Ergänzung, die die SDKs von OpenAI und Anthropic ignorieren; lassen Sie die Einstellung für Clients deaktiviert, die unbekannte Felder ablehnen. Wiederholt ein Provider die Usage in mehreren Chunks, trägt jeder davon die bis dahin angefallenen Kosten, und der letzte ist endgültig. Ein Stream ohne Usage trägt keine Kosten: GoModel fordert die Usage standardmäßig beim Provider an (`ENFORCE_RETURNING_USAGE_DATA`).
+Alle anderen Events werden unverändert durchgereicht. Das Feld ist eine Ergänzung, die die SDKs von OpenAI und Anthropic ignorieren; lassen Sie die Einstellung für Clients deaktiviert, die unbekannte Felder ablehnen. Meldet ein Provider die Usage in mehreren Chunks, erhält jeder davon `gomodel_cost`. Der Wert ist kumuliert für den bisherigen Request, wie die Token-Zahlen im selben Objekt: Verwenden Sie den letzten und addieren Sie die Werte nie. Der letzte entspricht den Kosten in der Nutzungszeile. Ein Stream ohne Usage trägt keine Kosten: GoModel fordert die Usage standardmäßig beim Provider an (`ENFORCE_RETURNING_USAGE_DATA`).
 
-**Unbekannt ist nicht null.** Ein Modell ohne Preise hat unbekannte Kosten, und die Antwort enthält weder Header noch Feld. `0` bedeutet immer bekannte Kosten von null.
+**Unbekannt ist nicht null.** Ein Modell ohne Preise hat unbekannte Kosten, und die Antwort enthält in jedem Modus weder Header noch Feld. `0` bedeutet immer einen bepreisten Request, der nichts gekostet hat.
 
-**Treffer im Response-Cache** (`X-Cache: HIT`) rufen keinen Provider auf, ihre Provider-Kosten sind daher `0`. Sind Aufschläge aktiviert, gibt ein Treffer zurück, was für ihn abgerechnet wird: seine abgerechneten Kosten mit `bill_cache_hits`, sonst `0`. Die Kosten eines Treffers stehen fest, bevor die Wiedergabe beginnt; ein gecachter Stream trägt sie deshalb zusätzlich in den Headern.
+| Request | Aufschläge aus | Aufschläge an |
+| ------- | -------------- | ------------- |
+| Bepreist | `total_cost` | `billed_cost` |
+| Preise unbekannt | keine | keine |
+| Provider mit `billable: false`, bepreist | `total_cost` | `0` |
+| Provider mit `billable: false`, Preise unbekannt | keine | keine |
+| Cache-Treffer, bepreist | `0` | `billed_cost` mit `bill_cache_hits`, sonst `0` |
+| Cache-Treffer, Preise unbekannt | keine | keine |
 
-**Vom Provider gemeldete Kosten** wie `usage.cost` von OpenRouter werden weiterhin unverändert durchgereicht; GoModel stellt den eigenen Wert daneben und benennt oder ersetzt sie nie. Die Header `X-GoModel-Cost` und das Feld `gomodel_cost` gehören diesem Gateway: Ist die Einstellung aktiv, wird ein von einem vorgelagerten GoModel durchgereichter Wert durch die Kosten dieses Gateways ersetzt oder entfernt, wenn diese unbekannt sind.
+**Treffer im Response-Cache** (`X-Cache: HIT`) rufen keinen Provider auf, ihre Provider-Kosten sind daher `0`. Ihre Nutzungszeile hält trotzdem fest, was die gecachte Antwort gekostet hätte (`total_cost`); daraus stammen die Einsparungen im Dashboard, nicht die Ausgaben des Clients. Die Kosten eines Treffers stehen fest, bevor die Wiedergabe beginnt; ein gecachter Stream trägt sie deshalb zusätzlich in den Headern.
+
+**Vom Provider gemeldete Kosten** wie `usage.cost` von OpenRouter werden weiterhin unverändert durchgereicht; GoModel stellt den eigenen Wert daneben und benennt oder ersetzt sie nie. Die Header `X-GoModel-Cost` und das Feld `gomodel_cost` gehören diesem Gateway. Ist die Einstellung aktiv, wird ein Wert eines Upstreams (eines anderen GoModel oder von etwas anderem) nie als Wert dieses Gateways ausgegeben:
+
+- Header: Jeder Wert von `X-GoModel-Cost` und `X-GoModel-Cost-Currency`, in beliebiger Groß- und Kleinschreibung und beliebig oft wiederholt, wird durch die Kosten dieses Gateways ersetzt oder entfernt, wenn diese unbekannt sind.
+- Streams: Jedes Feld namens `gomodel_cost` (in beliebiger Schreibweise, Duplikate eingeschlossen) wird aus den Usage-Objekten des Events entfernt; danach trägt jedes Usage-Objekt auf oberster Ebene oder unter `response` genau eines, das dieses Gateways, oder keines, wenn die Kosten unbekannt sind. Ein Parser, der das erste oder das letzte von doppelten Feldern behält, liest denselben Wert.
+- Durchgereichte JSON-Antworten: Die Kosten stehen in den Headern, daher wird ein Feld `gomodel_cost` in der Usage der Antwort entfernt.
+- Eine Upstream-Antwort mit einem anderen `Content-Encoding` als `identity` wird mit `502` abgelehnt. GoModel fordert beim Upstream keine Kodierung an und dekodiert gzip selbst; eine solche Antwort kam also ungefragt und kann weder gelesen noch bereinigt werden.
+
+Zwei Grenzen bleiben, beide dort, wo das Lesen des Bodys bedeuten würde, ihn vollständig zu puffern:
+
+- Eine durchgereichte JSON-Antwort über 8 MiB wird ungelesen fortlaufend durchgereicht: Sie trägt keinen Kosten-Header, und ein Feld `gomodel_cost` darin stammt vom Upstream.
+- Ein Stream-Event über 64 MiB wird ungelesen durchgereicht: Es erhält keine Kosten und behält jedes `gomodel_cost`, das der Upstream hineingeschrieben hat. Kein Provider sendet Usage in so großen Events.
 
 | Endpunkt | Gepuffert | Gestreamt |
 | -------- | --------- | --------- |

@@ -192,7 +192,8 @@ skonfigurowane upstreamowe serwery MCP (gdy `MCP_ENABLED`, domyślnie włączone
 Przy `USAGE_RESPONSE_COST_ENABLED=true` (domyślnie `false`) endpointy modeli
 zwracają koszt, który GoModel wyliczył dla requestu: odpowiedzi buforowane w
 nagłówkach `X-GoModel-Cost` i `X-GoModel-Cost-Currency`, odpowiedzi streamowane
-jako `gomodel_cost` w obiekcie usage eventu z końcowymi liczbami tokenów.
+jako `gomodel_cost` w obiekcie usage każdego eventu z usage (narastająco dla
+requestu: liczy się ostatni).
 W [Śledzeniu kosztów](/pl/features/cost-tracking#koszt-w-odpowiedzi) opisano,
 które endpointy są objęte i co zwraca cache hit.
 

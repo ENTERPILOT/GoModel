@@ -160,7 +160,7 @@ usage:
 
 此功能依赖用量追踪（`USAGE_ENABLED`，默认开启）：没有用量记录的请求没有可返回的成本。
 
-**返回哪种成本。** 开启加价时，客户端只会得到该请求的计费成本：提供商成本和加价不会离开网关。关闭加价时，客户端得到提供商成本（`total_cost`），标记为 `billable: false` 的提供商也是如此。两种情况下返回的都是该请求用量记录中存储的值，以 USD 计，并且与本页的其他成本一样是估算值。
+**返回哪种成本。** 开启加价时，客户端只会得到该请求的计费成本：提供商成本和加价不会离开网关。关闭加价时，客户端得到提供商成本（`total_cost`），标记为 `billable: false` 的提供商也是如此。两种情况下都以 USD 计，并且与本页的其他成本一样是估算值；除未开启加价时的缓存命中外（见下文），返回的都是该请求用量记录中存储的值。
 
 **非流式响应**通过两个响应头携带成本。响应体不会被改动，因此严格类型化的 SDK 或解析器不会受到影响：
 
@@ -171,7 +171,7 @@ X-GoModel-Cost-Currency: USD
 
 金额是普通的十进制小数，保留计算得到的全部位数，不四舍五入，也不使用指数表示法。
 
-**流式响应**在成本确定之前就已发送响应头，因此成本随流返回：`gomodel_cost` 会被添加到携带最终 Token 数的事件的 usage 对象中。
+**流式响应**在成本确定之前就已发送响应头，因此成本随流返回：`gomodel_cost` 会被添加到每个携带 usage 的事件的 usage 对象中，通常是携带最终 Token 数的那个事件。
 
 ```text
 data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":271,"completion_tokens":12,"total_tokens":283,"gomodel_cost":{"amount":0.00000542,"currency":"USD"}}}
@@ -183,13 +183,32 @@ data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[],"usage":{
 | `/v1/responses`        | `response.completed` 或 `response.incomplete`   | `response.usage.gomodel_cost` |
 | `/v1/messages`         | `message_delta`                                 | `usage.gomodel_cost`          |
 
-其他事件全部原样透传。该字段是一个新增成员，OpenAI 和 Anthropic 的 SDK 会忽略它；如果客户端会拒绝未知成员，请保持此设置关闭。如果提供商在多个数据块中重复返回 usage，每个数据块都会携带截至当时的成本，最后一个为最终值。没有 usage 的流不携带成本：GoModel 默认会向提供商请求 usage（`ENFORCE_RETURNING_USAGE_DATA`）。
+其他事件全部原样透传。该字段是一个新增成员，OpenAI 和 Anthropic 的 SDK 会忽略它；如果客户端会拒绝未知成员，请保持此设置关闭。如果提供商在多个数据块中返回 usage，每个这样的数据块都会带有 `gomodel_cost`。该值是该请求截至当时的累计值，与同一对象中的 Token 数一样：请使用最后一个，切勿相加。最后一个即用量记录中的成本。没有 usage 的流不携带成本：GoModel 默认会向提供商请求 usage（`ENFORCE_RETURNING_USAGE_DATA`）。
 
-**未知不等于零。** 没有定价的模型成本未知，响应中既没有响应头也没有该字段。`0` 始终表示已知的零成本。
+**未知不等于零。** 没有定价的模型成本未知，在任何模式下响应中都既没有响应头也没有该字段。`0` 始终表示一个已定价且没有产生成本的请求。
 
-**响应缓存命中**（`X-Cache: HIT`）不会调用提供商，因此其提供商成本为 `0`。开启加价时，命中返回的是它被计费的金额：`bill_cache_hits` 开启时为其计费成本，关闭时为 `0`。命中的成本在重放开始前就已确定，因此缓存的流也会在响应头中携带它。
+| 请求 | 关闭加价 | 开启加价 |
+| ---- | -------- | -------- |
+| 已定价 | `total_cost` | `billed_cost` |
+| 定价未知 | 无 | 无 |
+| `billable: false` 的提供商，已定价 | `total_cost` | `0` |
+| `billable: false` 的提供商，定价未知 | 无 | 无 |
+| 缓存命中，已定价 | `0` | 开启 `bill_cache_hits` 时为 `billed_cost`，否则为 `0` |
+| 缓存命中，定价未知 | 无 | 无 |
 
-**提供商自行报告的成本**（例如 OpenRouter 的 `usage.cost`）继续原样透传；GoModel 只在旁边添加自己的数值，绝不重命名或替换它们。`X-GoModel-Cost` 响应头和 `gomodel_cost` 字段属于本网关：开启此设置后，从上游另一个 GoModel 透传来的值会被本网关的成本替换，在成本未知时则被移除。
+**响应缓存命中**（`X-Cache: HIT`）不会调用提供商，因此其提供商成本为 `0`。其用量记录仍会记下缓存的响应原本的成本（`total_cost`），控制台中的节省金额由此而来，但这并不是客户端的支出。命中的成本在重放开始前就已确定，因此缓存的流也会在响应头中携带它。
+
+**提供商自行报告的成本**（例如 OpenRouter 的 `usage.cost`）继续原样透传；GoModel 只在旁边添加自己的数值，绝不重命名或替换它们。`X-GoModel-Cost` 响应头和 `gomodel_cost` 字段属于本网关。开启此设置后，来自上游（另一个 GoModel 或其他任何服务）的值绝不会被当作本网关的值返回：
+
+- 响应头：每个 `X-GoModel-Cost` 和 `X-GoModel-Cost-Currency` 的值，无论大小写、重复多少次，都会被本网关的成本替换，在成本未知时则被移除。
+- 流：事件 usage 对象中所有名为 `gomodel_cost` 的字段（任意写法，包括重复字段）都会被移除，之后顶层或 `response` 下的每个 usage 对象恰好携带一个本网关的值，成本未知时则不携带。无论解析器保留重复字段中的第一个还是最后一个，读到的值都相同。
+- 转发的 JSON 响应：成本在响应头中，因此响应 usage 中的 `gomodel_cost` 字段会被移除。
+- `Content-Encoding` 不是 `identity` 的上游响应会以 `502` 拒绝。GoModel 不向上游请求编码，并自行解码 gzip，因此这样的响应是上游擅自发送的，无法读取也无法清理。
+
+仍有两项限制，都出现在读取响应体就必须将其完整缓冲的场景：
+
+- 超过 8 MiB 的转发 JSON 响应会边收边转发、不被读取：它不带成本响应头，其中的 `gomodel_cost` 字段来自上游。
+- 超过 64 MiB 的流事件不被读取直接转发：它不会获得成本，并保留上游写入的任何 `gomodel_cost`。没有提供商会在如此大的事件中发送 usage。
 
 | 端点 | 非流式 | 流式 |
 | ---- | ------ | ---- |

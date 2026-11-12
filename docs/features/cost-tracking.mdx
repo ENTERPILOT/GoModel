@@ -164,7 +164,7 @@ usage:
 
 It needs usage tracking (`USAGE_ENABLED`, on by default): a request without a usage row has no cost to return.
 
-**Which cost.** With [markups](#markups-and-billed-cost) enabled, the client gets the request's billed cost and nothing else: the provider cost and the markup never leave the gateway. With markups off, it gets the provider cost (`total_cost`), also for a provider marked `billable: false`. Either way it is the value stored on the request's usage row, in USD, and an estimate like every other cost on this page.
+**Which cost.** With [markups](#markups-and-billed-cost) enabled, the client gets the request's billed cost and nothing else: the provider cost and the markup never leave the gateway. With markups off, it gets the provider cost (`total_cost`), also for a provider marked `billable: false`. Either way it is in USD and an estimate like every other cost on this page, and it is the value on the request's usage row except for a cache hit without markups (see below).
 
 **Buffered responses** carry the cost in two response headers. The body is not touched, so a strictly typed SDK or parser cannot be affected:
 
@@ -175,7 +175,7 @@ X-GoModel-Cost-Currency: USD
 
 The amount is a plain decimal with every digit of the calculation, never rounded and never in exponent notation.
 
-**Streamed responses** send their headers before the cost is known, so the cost rides in the stream: `gomodel_cost` is added to the usage object of the event that carries the final token counts.
+**Streamed responses** send their headers before the cost is known, so the cost rides in the stream: `gomodel_cost` is added to the usage object of each event that carries usage, normally the one with the final token counts.
 
 ```text
 data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":271,"completion_tokens":12,"total_tokens":283,"gomodel_cost":{"amount":0.00000542,"currency":"USD"}}}
@@ -187,13 +187,32 @@ data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[],"usage":{
 | `/v1/responses`        | `response.completed` or `response.incomplete`  | `response.usage.gomodel_cost` |
 | `/v1/messages`         | `message_delta`                                | `usage.gomodel_cost`          |
 
-Every other event passes through unchanged. The member is an addition the OpenAI and Anthropic SDKs ignore; leave the setting off for a client that rejects unknown members. A provider that repeats usage on several chunks gets the cost so far on each of them, and the last one is final. A stream without usage carries no cost: GoModel asks providers for usage by default (`ENFORCE_RETURNING_USAGE_DATA`).
+Every other event passes through unchanged. The member is an addition the OpenAI and Anthropic SDKs ignore; leave the setting off for a client that rejects unknown members. A provider that reports usage on several chunks gets `gomodel_cost` on each of them. The value is cumulative for the request so far, like the token counts in the same object: use the last one, and never add them up. The last one is the cost on the usage row. A stream without usage carries no cost: GoModel asks providers for usage by default (`ENFORCE_RETURNING_USAGE_DATA`).
 
-**Unknown is not zero.** A model without pricing has an unknown cost, and the response carries no header and no member. `0` always means a known cost of zero.
+**Unknown is not zero.** A model without pricing has an unknown cost, and the response carries no header and no member, in every mode. `0` always means a priced request that cost nothing.
 
-**Response-cache hits** (`X-Cache: HIT`) call no provider, so their provider cost is `0`. With markups enabled a hit returns what it is billed at: its billed cost with `bill_cache_hits` on, `0` with it off. The cost of a hit is known before the replay starts, so a cached stream carries it in the headers as well.
+| Request | Markups off | Markups on |
+| ------- | ----------- | ---------- |
+| Priced | `total_cost` | `billed_cost` |
+| Pricing unknown | none | none |
+| `billable: false` provider, priced | `total_cost` | `0` |
+| `billable: false` provider, pricing unknown | none | none |
+| Cache hit, priced | `0` | `billed_cost` with `bill_cache_hits`, `0` without |
+| Cache hit, pricing unknown | none | none |
 
-**Provider-reported costs** such as OpenRouter's `usage.cost` keep passing through as they are; GoModel adds its own figure beside them and never renames or replaces them. The `X-GoModel-Cost` headers and the `gomodel_cost` member belong to this gateway: with the setting on, a value relayed from another GoModel upstream is replaced by this gateway's cost, or removed when that is unknown.
+**Response-cache hits** (`X-Cache: HIT`) call no provider, so their provider cost is `0`. Their usage row still records what the cached answer would have cost (`total_cost`), which is where the dashboard's savings come from; that is not what the client spent. The cost of a hit is known before the replay starts, so a cached stream carries it in the headers as well.
+
+**Provider-reported costs** such as OpenRouter's `usage.cost` keep passing through as they are; GoModel adds its own figure beside them and never renames or replaces them. The `X-GoModel-Cost` headers and the `gomodel_cost` member belong to this gateway. With the setting on, a value from an upstream (another GoModel, or anything else) is never presented as this gateway's:
+
+- Headers: every `X-GoModel-Cost` and `X-GoModel-Cost-Currency` value, in any letter case and however often repeated, is replaced by this gateway's cost, or removed when that is unknown.
+- Streams: every member named `gomodel_cost` (in any case or spelling, duplicates included) is removed from the event's usage objects, and each usage object at the top level or under `response` then carries exactly one, this gateway's, or none when the cost is unknown. A parser that keeps the first or the last of duplicate members reads the same value.
+- Relayed JSON answers: the cost is in the headers, so a `gomodel_cost` member in the answer's usage is removed.
+- An upstream answer with a `Content-Encoding` other than `identity` is refused with `502`. GoModel asks upstreams for no encoding and decodes gzip itself, so such an answer was sent unasked and cannot be read or cleaned.
+
+Two limits remain, both where reading the body would mean buffering it whole:
+
+- A relayed JSON answer over 8 MiB is relayed as it arrives, unread: it carries no cost header, and a `gomodel_cost` member in it is the upstream's.
+- A stream event over 64 MiB is relayed unread, so it gets no cost and keeps whatever `gomodel_cost` the upstream put in it. No provider sends usage in events that large.
 
 | Endpoint | Buffered | Streamed |
 | -------- | -------- | -------- |

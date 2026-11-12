@@ -731,7 +731,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 		})
 	}
 	stream = guardStreamCompletion(endpoint, stream)
-	wrappedStream := streaming.NewObservedSSEStream(stream, observers...)
+	wrappedStream := streaming.NewObservedSSEStream(paceForResponseCost(c, stream), observers...)
 	if outerWrap != nil {
 		wrappedStream = outerWrap(wrappedStream)
 	}

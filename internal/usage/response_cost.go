@@ -2,6 +2,8 @@ package usage
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"math"
 	"sync"
 
@@ -16,21 +18,28 @@ const ResponseCostCurrency = "USD"
 // billed cost and nothing else: a reseller's customer never sees the provider
 // cost. Otherwise it is the provider cost, which is zero for a response-cache
 // hit because no provider was called.
+//
+// A request whose pricing is unknown has no cost in either mode, even where
+// its bill is fixed at zero (a billable: false provider, an unbilled cache
+// hit): 0 always means a priced request that cost nothing.
 func ResponseCost(entry *UsageEntry, billed bool) (float64, bool) {
-	if entry == nil {
+	if entry == nil || !validCost(entry.TotalCost) {
 		return 0, false
 	}
-	cost := entry.TotalCost
 	switch {
 	case billed:
-		cost = entry.BilledCost
+		if !validCost(entry.BilledCost) {
+			return 0, false
+		}
+		return *entry.BilledCost, true
 	case entry.CacheType != "":
 		return 0, true
 	}
-	if cost == nil || math.IsNaN(*cost) || math.IsInf(*cost, 0) || *cost < 0 {
-		return 0, false
-	}
-	return *cost, true
+	return *entry.TotalCost, true
+}
+
+func validCost(cost *float64) bool {
+	return cost != nil && !math.IsNaN(*cost) && !math.IsInf(*cost, 0) && *cost >= 0
 }
 
 // BillingStamper is implemented by the usage loggers that stamp billing fields
@@ -42,7 +51,9 @@ type BillingStamper interface {
 
 // StampBilling stamps on entry the billing fields logger.Write would, without
 // recording it, so the cost of a request can be known before its usage is
-// written. Stamping is idempotent: Write stamps the same values again.
+// written. Stamping is idempotent: Write stamps the same values again. A
+// logger that wraps another must implement BillingStamper and forward it, or
+// the billed cost is not known before the response; see CostReport.Record.
 func StampBilling(logger LoggerInterface, entry *UsageEntry) {
 	if stamper, ok := logger.(BillingStamper); ok && entry != nil {
 		stamper.StampBilling(entry)
@@ -94,6 +105,16 @@ func (r *CostReport) Record(logger LoggerInterface, entry *UsageEntry) {
 		return
 	}
 	StampBilling(logger, entry)
+	if r.billed && validCost(entry.TotalCost) && entry.BilledCost == nil {
+		// The markup tap bills every priced entry, so a priced entry without
+		// a billed cost means a logger wrapper between here and that tap
+		// does not forward StampBilling. The response carries no cost rather
+		// than the provider cost, and the gap is reported, not hidden.
+		slog.Error("response cost withheld: the usage logger did not stamp the billed cost",
+			"request_id", entry.RequestID,
+			"logger", fmt.Sprintf("%T", logger),
+			"hint", "every usage logger wrapper must implement usage.BillingStamper and forward it to the logger it wraps")
+	}
 	amount, known := ResponseCost(entry, r.billed)
 	r.mu.Lock()
 	r.amount, r.known = amount, known

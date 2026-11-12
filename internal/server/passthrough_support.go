@@ -294,6 +294,16 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 		return relayPassthroughError(c, providerType, resp)
 	}
 
+	returnsCost := usage.CostReportFromContext(c.Request().Context()) != nil
+	if returnsCost && hasContentEncoding(resp.Headers) && (isSSEContentType(resp.Headers) || isJSONContentType(resp.Headers)) {
+		// The gateway asks for no encoding, so the transport decodes gzip
+		// itself; another encoding is unrequested. Its body cannot be read
+		// for usage or cleared of an upstream's gomodel_cost, so it is not
+		// relayed as if this gateway vouched for it.
+		return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway,
+			"provider returned an encoded response the gateway cannot read to return its cost", nil))
+	}
+
 	copyPassthroughResponseHeaders(c.Response().Header(), http.Header(resp.Headers))
 
 	if isSSEContentType(resp.Headers) {
@@ -336,7 +346,7 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 			observers = append(observers, observer)
 		}
 		observers = append(observers, extraObservers...)
-		wrappedStream := streaming.NewObservedSSEStream(resp.Body, observers...)
+		wrappedStream := streaming.NewObservedSSEStream(paceForResponseCost(c, resp.Body), observers...)
 		if len(observers) > 0 {
 			defer func() {
 				_ = wrappedStream.Close()
@@ -362,6 +372,9 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 	if isObservablePassthroughStatus(resp.StatusCode) {
 		observers = passthroughJSONResponseObservers(c, usageLogger, pricingResolver, providerType, providerName, endpoint, info, extraObservers)
 	}
+	if returnsCost && isJSONContentType(resp.Headers) {
+		return relayJSONAfterObservers(c, providerType, resp, observers)
+	}
 	if len(observers) == 0 || !isJSONContentType(resp.Headers) {
 		c.Response().WriteHeader(resp.StatusCode)
 		if _, err := io.Copy(c.Response(), resp.Body); err != nil {
@@ -371,10 +384,6 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 			f.Flush()
 		}
 		return nil
-	}
-
-	if usage.CostReportFromContext(c.Request().Context()) != nil {
-		return relayJSONAfterObservers(c, providerType, resp, observers)
 	}
 
 	capture := newCappedCaptureBuffer(maxObservedJSONResponseBytes)
@@ -396,7 +405,11 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 // is priced in time for the response headers to carry the cost. Only requests
 // that return their cost take this path: the answer is complete either way,
 // but the default path relays it as it arrives and accounts for it afterwards.
-// An answer too large to observe is relayed without a cost, as it is there.
+//
+// The cost of a buffered answer is in the headers only, so a gomodel_cost
+// member an upstream GoModel put in the answer's usage is removed: a client
+// must not read it as this gateway's. An answer too large to observe is
+// relayed unread and without a cost, as it is on the default path.
 func relayJSONAfterObservers(c *echo.Context, providerType string, resp *core.PassthroughResponse, observers []streaming.Observer) error {
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxObservedJSONResponseBytes+1))
 	if err != nil {
@@ -405,6 +418,11 @@ func relayJSONAfterObservers(c *echo.Context, providerType string, resp *core.Pa
 	observed := len(body) <= maxObservedJSONResponseBytes
 	if observed {
 		notifyObserversWithJSONBody(body, observers)
+		if mayHoldUsage(body) {
+			if stripped, ok := withUsageCost(body, 0, false); ok {
+				body = stripped
+			}
+		}
 	}
 	c.Response().WriteHeader(resp.StatusCode)
 	if _, err := c.Response().Write(body); err != nil {
@@ -619,6 +637,24 @@ func notifyObserversWithJSONBody(body []byte, observers []streaming.Observer) {
 // 206 Partial Content, whose body is by definition incomplete.
 func isObservablePassthroughStatus(status int) bool {
 	return status >= http.StatusOK && status < http.StatusMultipleChoices && status != http.StatusPartialContent
+}
+
+// hasContentEncoding reports whether a response body is encoded: any
+// Content-Encoding other than identity.
+func hasContentEncoding(headers map[string][]string) bool {
+	for key, values := range headers {
+		if !strings.EqualFold(strings.TrimSpace(key), "Content-Encoding") {
+			continue
+		}
+		for _, value := range values {
+			for coding := range strings.SplitSeq(value, ",") {
+				if coding = strings.TrimSpace(coding); coding != "" && !strings.EqualFold(coding, "identity") {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func isJSONContentType(headers map[string][]string) bool {

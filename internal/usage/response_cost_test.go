@@ -1,7 +1,9 @@
 package usage
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"math"
 	"testing"
 
@@ -22,12 +24,18 @@ func TestResponseCost(t *testing.T) {
 		{name: "provider cost", entry: &UsageEntry{TotalCost: new(0.25), BilledCost: new(0.5)}, want: 0.25, known: true},
 		{name: "a known zero is a cost", entry: &UsageEntry{TotalCost: new(0.0)}, want: 0, known: true},
 		{name: "unpriced model", entry: &UsageEntry{}},
+		{name: "unpriced model with markups", entry: &UsageEntry{BilledCost: new(0.0)}, billed: true},
 		{name: "cache hit costs nothing upstream", entry: &UsageEntry{CacheType: CacheTypeExact, TotalCost: new(0.25)}, want: 0, known: true},
-		{name: "unpriced cache hit costs nothing upstream", entry: &UsageEntry{CacheType: CacheTypeSemantic}, want: 0, known: true},
+		{name: "unpriced cache hit", entry: &UsageEntry{CacheType: CacheTypeSemantic}},
 		{name: "billed cost", entry: &UsageEntry{TotalCost: new(0.25), BilledCost: new(0.5)}, billed: true, want: 0.5, known: true},
 		{name: "billed cache hit", entry: &UsageEntry{CacheType: CacheTypeExact, TotalCost: new(0.25), BilledCost: new(0.5)}, billed: true, want: 0.5, known: true},
-		{name: "unbilled cache hit", entry: &UsageEntry{CacheType: CacheTypeExact, BilledCost: new(0.0)}, billed: true, want: 0, known: true},
+		{name: "unbilled cache hit", entry: &UsageEntry{CacheType: CacheTypeExact, TotalCost: new(0.25), BilledCost: new(0.0)}, billed: true, want: 0, known: true},
+		{name: "unpriced unbilled cache hit", entry: &UsageEntry{CacheType: CacheTypeExact, BilledCost: new(0.0)}, billed: true},
+		{name: "non-billable provider", entry: nonBillable(&UsageEntry{TotalCost: new(0.25), BilledCost: new(0.0)}), billed: true, want: 0, known: true},
+		{name: "unpriced non-billable provider", entry: nonBillable(&UsageEntry{BilledCost: new(0.0)}), billed: true},
+		{name: "non-billable provider without markups", entry: nonBillable(&UsageEntry{TotalCost: new(0.25)}), want: 0.25, known: true},
 		{name: "billed never falls back to the provider cost", entry: &UsageEntry{TotalCost: new(0.25)}, billed: true},
+		{name: "invalid billed cost", entry: &UsageEntry{TotalCost: new(0.25), BilledCost: new(math.NaN())}, billed: true},
 		{name: "not a number", entry: &UsageEntry{TotalCost: new(math.NaN())}},
 		{name: "infinite", entry: &UsageEntry{TotalCost: new(math.Inf(1))}},
 		{name: "negative", entry: &UsageEntry{TotalCost: new(-1.0)}},
@@ -41,6 +49,11 @@ func TestResponseCost(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func nonBillable(entry *UsageEntry) *UsageEntry {
+	entry.MarkNonBillable()
+	return entry
 }
 
 func TestCostReportKeepsTheLatestRecordedCost(t *testing.T) {
@@ -155,4 +168,51 @@ func TestStreamUsageObserverReportsCostAsUsageArrives(t *testing.T) {
 	require.Len(t, entries, 1)
 	require.NotNil(t, entries[0].TotalCost)
 	assert.Equal(t, cost, *entries[0].TotalCost, "the reported cost is the recorded one")
+}
+
+// opaqueWrapper wraps a stamping logger without forwarding StampBilling.
+type opaqueWrapper struct {
+	recordingTapLogger
+	inner LoggerInterface
+}
+
+// A logger wrapper that does not forward StampBilling hides the billed cost.
+// The response then carries no cost, never the provider cost, and the gap is
+// logged as an error instead of passing silently.
+func TestCostReportReportsAMissingBillingStamp(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	tests := []struct {
+		name    string
+		logger  LoggerInterface
+		entry   *UsageEntry
+		want    float64
+		known   bool
+		logsErr bool
+	}{
+		{name: "forwarded", logger: NewBillableTap(&stampingLogger{}, func(string) bool { return true }), entry: &UsageEntry{ProviderName: "openai", TotalCost: new(0.25)}, want: 0.5, known: true},
+		{name: "not forwarded", logger: &opaqueWrapper{inner: &stampingLogger{}}, entry: &UsageEntry{TotalCost: new(0.25)}, logsErr: true},
+		{name: "unpriced is not a missing stamp", logger: &opaqueWrapper{inner: &stampingLogger{}}, entry: &UsageEntry{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logs.Reset()
+			_, report := WithCostReport(context.Background(), true)
+
+			report.Record(tt.logger, tt.entry)
+
+			cost, known := report.Cost()
+			assert.Equal(t, tt.known, known)
+			assert.Equal(t, tt.want, cost)
+			if tt.logsErr {
+				assert.Contains(t, logs.String(), "level=ERROR")
+				assert.Contains(t, logs.String(), "did not stamp the billed cost")
+			} else {
+				assert.Empty(t, logs.String())
+			}
+		})
+	}
 }

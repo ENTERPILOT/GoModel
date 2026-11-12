@@ -99,25 +99,32 @@ func (s *chainedResponseStream) appendEvent(out []byte, ev streaming.RawEvent) [
 
 // appendWithData appends the SSE block raw with its data lines replaced by
 // data, one data line per line of it. Every other field (event, id, retry,
-// comments) stays in place, so reconnection metadata survives the rewrite.
+// comments) stays in place, so reconnection metadata survives the rewrite. A
+// block framed with CRLF keeps CRLF, so a client that splits a stream on one
+// kind of line ending still finds the block's end.
 func appendWithData(out, raw, data []byte) []byte {
+	eol := []byte("\n")
+	if bytes.Contains(raw, []byte("\r\n")) {
+		eol = []byte("\r\n")
+	}
 	written := false
 	for line := range bytes.SplitSeq(bytes.TrimRight(raw, "\r\n"), []byte("\n")) {
+		line = bytes.TrimSuffix(line, []byte("\r"))
 		if bytes.HasPrefix(line, []byte("data:")) {
 			if !written {
 				for part := range bytes.SplitSeq(data, []byte("\n")) {
 					out = append(out, "data: "...)
 					out = append(out, part...)
-					out = append(out, '\n')
+					out = append(out, eol...)
 				}
 				written = true
 			}
 			continue
 		}
 		out = append(out, line...)
-		out = append(out, '\n')
+		out = append(out, eol...)
 	}
-	return append(out, '\n')
+	return append(out, eol...)
 }
 
 // nameResponse returns the event payload with previous_response_id set on

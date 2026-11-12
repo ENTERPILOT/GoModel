@@ -348,7 +348,30 @@ func TestResponseCost_BilledCostReplacesProviderCost(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		assert.Empty(t, rec.Header().Values(responseCostHeader))
 	})
+
+	// A wrapper above the markup tap that does not forward StampBilling hides
+	// the billed cost until the entry is written. The response carries no
+	// cost, never the provider cost; the usage log still holds the billed cost
+	// (usage.CostReport.Record logs the gap as an error).
+	t.Run("wrapper without billing stamp", func(t *testing.T) {
+		billed := billCosts(t, 100, true)
+		srv, logger := costGateway(t, costChatProvider(), func(cfg *Config) {
+			billed(cfg)
+			cfg.UsageLogger = opaqueUsageLogger{cfg.UsageLogger}
+		})
+
+		rec := postJSON(t, srv, "/v1/chat/completions", bufferedCostRequests[0].body)
+
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		assert.Empty(t, rec.Header().Values(responseCostHeader))
+		require.Len(t, logger.entries, 1)
+		assert.Equal(t, "0.00004", formatResponseCost(*logger.entries[0].BilledCost))
+	})
 }
+
+// opaqueUsageLogger wraps a usage logger without implementing
+// usage.BillingStamper.
+type opaqueUsageLogger struct{ usage.LoggerInterface }
 
 // A model without pricing has an unknown cost, which is not a cost of zero:
 // the response carries nothing.
@@ -506,9 +529,8 @@ func TestResponseCost_ReplacesUpstreamGoModelCost(t *testing.T) {
 	t.Run("streamed without pricing", func(t *testing.T) {
 		srv, _ := costGateway(t, upstream("text/event-stream", upstreamStream), unpriced)
 		rec := postJSON(t, srv, streamed.path, streamed.body)
-		cost, events := streamedCost(rec.Body.String())
-		require.Equal(t, 1, events, rec.Body.String())
-		assert.Equal(t, "null", cost.Raw)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		assert.Equal(t, anthropicCostStream, rec.Body.String(), "the upstream's member is removed, and nothing else changes")
 	})
 
 	// With response costs off the gateway relays what the upstream sent.
@@ -616,4 +638,36 @@ func TestResponseCost_RelayedJSONAnswers(t *testing.T) {
 		assert.Empty(t, logger.entries)
 		assert.Empty(t, rec.Header().Values(responseCostHeader))
 	})
+}
+
+// Unknown pricing returns nothing in every mode, even where the bill is fixed
+// at zero: 0 only ever means a priced request that cost nothing.
+func TestResponseCost_UnpricedCacheHitsCarryNothing(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(*testing.T) func(*Config)
+	}{
+		{name: "provider cost", configure: func(*testing.T) func(*Config) { return returnCosts }},
+		{name: "unbilled hits", configure: func(t *testing.T) func(*Config) { return billCosts(t, 100, false) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, _ := costGateway(t, costChatProvider(), func(cfg *Config) {
+				cfg.PricingResolver = &mockPricingResolver{}
+			}, tt.configure(t), cachedResponses(t))
+			body := bufferedCostRequests[0].body
+
+			miss := postJSON(t, srv, "/v1/chat/completions", body)
+			require.Equal(t, http.StatusOK, miss.Code, miss.Body.String())
+			var hit *httptest.ResponseRecorder
+			require.Eventually(t, func() bool {
+				hit = postJSON(t, srv, "/v1/chat/completions", body)
+				return hit.Header().Get("X-Cache") != ""
+			}, 2*time.Second, 5*time.Millisecond)
+
+			assert.Empty(t, miss.Header().Values(responseCostHeader))
+			assert.Empty(t, hit.Header().Values(responseCostHeader))
+			assert.Empty(t, hit.Header().Values(responseCostCurrencyHeader))
+		})
+	}
 }

@@ -2,9 +2,11 @@ package server
 
 import (
 	"bufio"
+	"io"
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/labstack/echo/v5"
 
@@ -64,8 +66,8 @@ func (w *responseCostWriter) prepare() {
 	}
 	w.prepared = true
 	header := w.Header()
-	header.Del(responseCostHeader)
-	header.Del(responseCostCurrencyHeader)
+	deleteHeaderFold(header, responseCostHeader)
+	deleteHeaderFold(header, responseCostCurrencyHeader)
 	if amount, ok := w.report.Cost(); ok {
 		header.Set(responseCostHeader, formatResponseCost(amount))
 		header.Set(responseCostCurrencyHeader, usage.ResponseCostCurrency)
@@ -128,6 +130,28 @@ func (w *responseCostWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 
 func (w *responseCostWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
+}
+
+// paceForResponseCost paces a stream one event per read when its response
+// returns the cost, so the usage observer has priced exactly the events
+// relayed so far when each one is written: an event's cost then matches the
+// token counts beside it even when several arrived in one upstream read.
+func paceForResponseCost(c *echo.Context, stream io.ReadCloser) io.ReadCloser {
+	if usage.CostReportFromContext(c.Request().Context()) == nil {
+		return stream
+	}
+	return streaming.NewEventPacedStream(stream)
+}
+
+// deleteHeaderFold removes every value of the header name, under any key that
+// names it: Header.Del only removes the canonical key, and the server writes
+// a key set in another case, or with stray spaces, as it is.
+func deleteHeaderFold(header http.Header, name string) {
+	for key := range header {
+		if strings.EqualFold(strings.TrimSpace(key), name) {
+			delete(header, key)
+		}
+	}
 }
 
 // formatResponseCost renders a cost as a plain decimal with every digit the

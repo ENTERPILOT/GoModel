@@ -176,8 +176,8 @@ curl http://localhost:8080/v1/auth/verify \
 
 设置 `USAGE_RESPONSE_COST_ENABLED=true`（默认 `false`）后，模型端点会返回 GoModel
 为该请求计算出的成本：非流式响应通过 `X-GoModel-Cost` 和
-`X-GoModel-Cost-Currency` 响应头返回，流式响应则在携带最终 Token 数的事件的
-usage 对象中以 `gomodel_cost` 返回。涵盖哪些端点以及缓存命中返回什么，参见
+`X-GoModel-Cost-Currency` 响应头返回，流式响应则在每个携带 usage 的事件的
+usage 对象中以 `gomodel_cost` 返回（为该请求截至当时的累计值，以最后一个为准）。涵盖哪些端点以及缓存命中返回什么，参见
 [成本追踪](/zh/features/cost-tracking)。
 
 ## 管理端点
