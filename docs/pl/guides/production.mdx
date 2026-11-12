@@ -164,6 +164,11 @@ wolumen, ograniczaj dostęp i odpowiednio klasyfikuj kopie zapasowe.
 - **Zarządzane klucze API** są przechowywane jako hash SHA-256 losowego sekretu o wysokiej
   entropii, nigdy w postaci możliwej do odzyskania. Jawny tekst jest pokazywany raz, przy utworzeniu. To
   celowo inne podejście niż w przypadku danych uwierzytelniających providerów.
+- **Wpisy audytu identyfikują klucz klienta odciskiem zależnym od sekretu.** `api_key_hash` to
+  pierwsze 16 znaków szesnastkowych HMAC-SHA256 z przesłanego tokenu bearer. Kluczem jest losowy
+  sekret generowany raz na wdrożenie i przechowywany w bazie danych
+  (`audit_api_key_hash_secret` w `runtime_settings`). Wartość jest stała w ramach wdrożenia i nie
+  da się jej odtworzyć na podstawie samego klucza.
 - **Nagłówki z danymi uwierzytelniającymi klienta są redagowane przed utrwaleniem.** Przy
   `LOGGING_LOG_HEADERS=true` nagłówki `Authorization`, `x-api-key`, `Cookie` i
   inne nagłówki z danymi uwierzytelniającymi są zastępowane przez `[REDACTED]` na ścieżce zapisu, więc

@@ -339,6 +339,8 @@ func TestAuditLogMiddleware(t *testing.T) {
 			LogHeaders:    false,
 			BufferSize:    100,
 			FlushInterval: 100 * time.Millisecond,
+			// The hash is keyed; without the deployment secret it is left out.
+			APIKeyHashSecret: "e2e-deployment-secret",
 		}
 
 		serverURL, cleanup := setupAuditLogTestServer(t, cfg, store)
@@ -361,7 +363,7 @@ func TestAuditLogMiddleware(t *testing.T) {
 		require.Len(t, entries, 1)
 
 		entry := entries[0]
-		// API key hash should be present (16 chars of SHA256 for 64 bits of entropy)
+		// API key hash should be present (16 chars of keyed SHA256 for 64 bits of entropy)
 		assert.NotEmpty(t, entry.Data.APIKeyHash)
 		assert.Len(t, entry.Data.APIKeyHash, 16)
 		// Hash should NOT contain the actual key

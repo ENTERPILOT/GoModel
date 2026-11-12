@@ -555,4 +555,9 @@ type Config struct {
 	// OnlyModelInteractions limits logging to AI model endpoints only
 	// When true, only paths matched by core.IsModelInteractionPath are logged
 	OnlyModelInteractions bool
+
+	// APIKeyHashSecret keys LogData.APIKeyHash. It is generated once per
+	// deployment and kept in the database, so the fingerprint of a key is
+	// stable across restarts and replicas. Empty leaves the fingerprint out.
+	APIKeyHashSecret string
 }

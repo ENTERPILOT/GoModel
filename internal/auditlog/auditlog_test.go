@@ -1241,9 +1241,10 @@ func TestHashAPIKey(t *testing.T) {
 		},
 	}
 
+	const secret = "deployment-secret"
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := hashAPIKey(tt.authHeader)
+			result := hashAPIKey(secret, tt.authHeader)
 			if tt.wantEmpty {
 				assert.Empty(t, result)
 
@@ -1255,12 +1256,12 @@ func TestHashAPIKey(t *testing.T) {
 	}
 
 	// Test consistency - same input should produce same hash
-	hash1 := hashAPIKey("Bearer test-key")
-	hash2 := hashAPIKey("Bearer test-key")
+	hash1 := hashAPIKey(secret, "Bearer test-key")
+	hash2 := hashAPIKey(secret, "Bearer test-key")
 	assert.Equal(t, hash2, hash1)
 
 	// Test different inputs produce different hashes
-	hash3 := hashAPIKey("Bearer different-key")
+	hash3 := hashAPIKey(secret, "Bearer different-key")
 	assert.NotEqual(t, hash3, hash1)
 }
 
