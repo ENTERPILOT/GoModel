@@ -109,8 +109,8 @@ Dieselbe Option gibt es im Editor für virtuelle Modelle im Dashboard („Sessio
 keeping“) und in der Admin API (`session_affinity` bei
 `PUT /admin/virtual-models`).
 
-Pins werden pro Instanz im Arbeitsspeicher gehalten (wie Rate-Limit-Zähler):
-Nach einem Neustart oder auf einer anderen Replica wird der nächste Request
+Pins werden pro Instanz im Arbeitsspeicher gehalten und nicht über die
+Datenbank geteilt: Nach einem Neustart oder auf einer anderen Replica wird der nächste Request
 einer Session einfach neu gepinnt. Inaktive Sessions laufen nach 6 Stunden ab.
 
 Die API-Key-Affinität ist deterministisch statt gespeichert, daher wählt

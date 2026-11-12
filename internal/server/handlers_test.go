@@ -481,6 +481,9 @@ type mockProvider struct {
 	embeddingCalls          int
 	lastPassthroughProvider string
 	lastPassthroughReq      *core.PassthroughRequest
+	// lastPassthroughUpstream holds the plugin upstream headers the last
+	// passthrough call's context carried.
+	lastPassthroughUpstream http.Header
 
 	responseGetResponse         *core.ResponsesResponse
 	responseGetHook             func()
@@ -496,6 +499,7 @@ type mockProvider struct {
 	responseCancelCalls         []responseCall
 	responseDeleteCalls         []responseCall
 	capturedResponseUtilityReqs []*core.ResponsesRequest
+	capturedUtilityHeaders      []http.Header
 	capturedResponseUtility     []responseUtilityCall
 }
 
@@ -840,9 +844,10 @@ func (m *mockProvider) Embeddings(_ context.Context, _ *core.EmbeddingRequest) (
 	return m.embeddingResponse, nil
 }
 
-func (m *mockProvider) Passthrough(_ context.Context, providerType string, req *core.PassthroughRequest) (*core.PassthroughResponse, error) {
+func (m *mockProvider) Passthrough(ctx context.Context, providerType string, req *core.PassthroughRequest) (*core.PassthroughResponse, error) {
 	m.lastPassthroughProvider = providerType
 	m.lastPassthroughReq = req
+	m.lastPassthroughUpstream = core.PluginUpstreamHeaders(ctx)
 	if m.passthroughErr != nil {
 		return nil, m.passthroughErr
 	}
@@ -899,8 +904,9 @@ func (m *mockProvider) DeleteResponse(_ context.Context, providerType, id string
 	return &core.ResponseDeleteResponse{ID: id, Object: "response", Deleted: true}, nil
 }
 
-func (m *mockProvider) CountResponseInputTokens(_ context.Context, providerType string, req *core.ResponsesRequest) (*core.ResponseInputTokensResponse, error) {
+func (m *mockProvider) CountResponseInputTokens(ctx context.Context, providerType string, req *core.ResponsesRequest) (*core.ResponseInputTokensResponse, error) {
 	m.capturedResponseUtilityReqs = append(m.capturedResponseUtilityReqs, req)
+	m.capturedUtilityHeaders = append(m.capturedUtilityHeaders, core.PluginUpstreamHeaders(ctx))
 	m.capturedResponseUtility = append(m.capturedResponseUtility, responseUtilityCall{
 		provider:  providerType,
 		operation: "CountResponseInputTokens",
@@ -914,8 +920,9 @@ func (m *mockProvider) CountResponseInputTokens(_ context.Context, providerType 
 	return &core.ResponseInputTokensResponse{Object: "response.input_tokens", InputTokens: 7}, nil
 }
 
-func (m *mockProvider) CompactResponse(_ context.Context, providerType string, req *core.ResponsesRequest) (*core.ResponseCompactResponse, error) {
+func (m *mockProvider) CompactResponse(ctx context.Context, providerType string, req *core.ResponsesRequest) (*core.ResponseCompactResponse, error) {
 	m.capturedResponseUtilityReqs = append(m.capturedResponseUtilityReqs, req)
+	m.capturedUtilityHeaders = append(m.capturedUtilityHeaders, core.PluginUpstreamHeaders(ctx))
 	m.capturedResponseUtility = append(m.capturedResponseUtility, responseUtilityCall{
 		provider:  providerType,
 		operation: "CompactResponse",

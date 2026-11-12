@@ -1,6 +1,6 @@
 <script>
-  // MCP Servers page: list, filter, create/edit, reconnect, delete, and the
-  // per-server catalog inspector. The server list is fetched when this page
+  // MCP Servers page: list, filter, create/edit, reconnect, delete, the
+  // per-server catalog inspector, and the all-tools view. The server list is fetched when this page
   // is active (the overview card does its own count fetch) and again
   // whenever the API key changes.
   import LoadingState from "$lib/components/molecules/LoadingState.svelte";
@@ -12,12 +12,14 @@
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import McpCatalogModal from "./McpCatalogModal.svelte";
   import McpConnectPanel from "./McpConnectPanel.svelte";
+  import McpOAuthDialog from "./McpOAuthDialog.svelte";
   import McpServerEditor from "./McpServerEditor.svelte";
   import McpServerList from "./McpServerList.svelte";
+  import McpToolCatalogModal from "./McpToolCatalogModal.svelte";
   import McpVirtualServerEditor from "./McpVirtualServerEditor.svelte";
   import McpVirtualServerList from "./McpVirtualServerList.svelte";
   import { mcpServers } from "./mcpServers.svelte.js";
-  import { Plus } from "lucide";
+  import { List, Plus } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
   const PAGE = "mcp-servers";
@@ -28,8 +30,13 @@
   $effect(() => {
     void auth.refreshTick;
     if (router.page !== PAGE) return;
+    mcpServers.showOAuthOutcome();
     mcpServers.fetchServers();
-    return () => mcpServers.stopPolling();
+    return () => {
+      mcpServers.stopPolling();
+      // Catalogs loaded with the previous API key must not stay on screen.
+      mcpServers.closeToolCatalog();
+    };
   });
 </script>
 
@@ -41,6 +48,16 @@
       </InlineHelpSection>
     </div>
     <div class="page-header-controls">
+      {#if mcpServers.available && !auth.authError && mcpServers.servers.length > 0}
+        <button
+          type="button"
+          class="btn btn-with-icon"
+          onclick={() => mcpServers.openToolCatalog()}
+        >
+          <Icon icon={List} class="form-action-icon" />
+          <span>{m.mcp_all_tools_action()}</span>
+        </button>
+      {/if}
       {#if mcpServers.available && !auth.authError}
         <button
           type="button"
@@ -85,6 +102,8 @@
 
   <McpServerEditor />
   <McpCatalogModal />
+  <McpToolCatalogModal />
+  <McpOAuthDialog />
 
   {#if mcpServers.filtered.length > 0 && mcpServers.available && !auth.authError}
     <McpServerList />

@@ -46,7 +46,8 @@ models:
   keep_only_aliases_at_models_endpoint: false # env: KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT; hide provider models from GET /v1/models and expose only enabled virtual models
   vllm_discovery_compat: false # env: MODELS_VLLM_DISCOVERY_COMPAT; advertise every model the way a vLLM runtime does (owned_by "vllm", max_model_len from the limit the provider reports or else metadata.context_window) so a client whose discovery only understands vLLM picks the gateway up. It is a lie about the owner, so it stays opt-in and only for deployments whose consumers need it
   unqualified_model_ids_at_models_endpoint: false # env: UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT; list bare model IDs (gpt-5) instead of provider-qualified ones (openai/gpt-5). Caveat: when two providers expose the same model ID only the provider an unqualified request routes to (the first registered one) is listed; pin a name with a virtual model (source gpt-5 -> target azure/gpt-5)
-  configured_provider_models_mode: "fallback" # env: CONFIGURED_PROVIDER_MODELS_MODE; "fallback" uses configured lists only when upstream /models is unavailable/empty, "allowlist" exposes only configured models and skips upstream /models for configured lists, "merge" adds configured models on top of the upstream inventory (for models a provider serves but does not list)
+  configured_provider_models_mode: "allowlist" # env: CONFIGURED_PROVIDER_MODELS_MODE; "allowlist" (default) exposes only configured models and reads upstream /models only for their metadata, "fallback" uses configured lists only when upstream /models is unavailable/empty, "merge" adds configured models on top of the upstream inventory (for models a provider serves but does not list)
+  allowlist_upstream_metadata: true # env: ALLOWLIST_UPSTREAM_METADATA; in allowlist mode, read upstream /models only to fill in metadata for configured models (never adds models). false stops that call; GOMODEL_OFFLINE=true forces it off
 
 # Tagging based on headers: label every request from the listed headers. Labels
 # are recorded in usage tracking and audit logs. A header value can carry several
@@ -286,6 +287,7 @@ logging:
   # log_audio_bodies: false # embed audio bytes for /v1/audio/* entries (needs log_bodies)
   # log_image_bodies: false # embed image bytes for /v1/images/* entries (needs log_bodies)
   # log_image_bodies_scope: all # all | input | output
+  # log_embedding_bodies: true # store /v1/embeddings and /p/{provider}/... embeddings request/response bodies; false keeps metadata only (needs log_bodies)
   log_headers: true
   buffer_size: 1000
   flush_interval: 5 # seconds
@@ -702,6 +704,13 @@ providers:
     # base_url defaults to "https://llm.chutes.ai/v1".
     # Set base_url when using a different compatible endpoint.
 
+  mistral:
+    type: mistral
+    api_key: "${MISTRAL_API_KEY}"
+    # base_url defaults to "https://api.mistral.ai/v1".
+    # Reasoning models return thinking as reasoning_content; replayed
+    # assistant reasoning is sent back as Mistral thinking chunks.
+
   edenai:
     type: edenai
     api_key: "${EDENAI_API_KEY}"
@@ -838,9 +847,9 @@ providers:
   #   api_key: "${GROQ_API_KEY}"
 
   # Example: OpenRouter with an explicit configured model list.
-  # In fallback mode (default), this list is used only if upstream /models is
-  # unavailable or empty. In allowlist mode, only these models are exposed and
-  # upstream /models is skipped for this provider.
+  # In allowlist mode (default), only these models are exposed; upstream
+  # /models only supplies their metadata. In fallback mode, this list is used
+  # only if upstream /models is unavailable or empty.
   # You can also set OPENROUTER_MODELS="openai/gpt-oss-120b,anthropic/claude-sonnet-4".
   # openrouter:
   #   type: "openrouter"
@@ -849,6 +858,9 @@ providers:
   #   models:
   #     - openai/gpt-oss-120b
   #     - anthropic/claude-sonnet-4
+  #   # Override models.configured_provider_models_mode for this provider only
+  #   # (fallback, allowlist, or merge). Env: OPENROUTER_MODELS_MODE.
+  #   models_mode: fallback
   #   # Narrow the inventory to what should be routable. Patterns are globs
   #   # matched case-insensitively against the raw model ID; `*` also matches `/`,
   #   # so `*:free` matches `deepseek/deepseek-r1:free`.
@@ -894,14 +906,17 @@ providers:
   #   base_url: "https://api.deepseek.com"
   #   api_key: "${DEEPSEEK_API_KEY}"
 
-  # Example: Amazon Bedrock. The provider has no API key — auth is taken from
-  # the standard AWS credential chain (env vars, AWS_PROFILE, IAM Identity
-  # Center, container/instance roles). Set base_url to either an AWS region
-  # ("us-east-1") or a full https endpoint to enable the provider; without it
-  # gomodel falls back to AWS_REGION / AWS_DEFAULT_REGION.
+  # Example: Amazon Bedrock. Authenticate with an Amazon Bedrock API key, or
+  # omit api_key to use AWS_BEARER_TOKEN_BEDROCK when set, and otherwise the
+  # standard AWS credential chain (env vars, AWS_PROFILE, IAM Identity Center,
+  # container/instance roles). Set base_url
+  # to either an AWS region ("us-east-1") or a full https endpoint to enable
+  # the provider; without it gomodel falls back to AWS_REGION /
+  # AWS_DEFAULT_REGION.
   # bedrock:
   #   type: "bedrock"
   #   base_url: "us-east-1"
+  #   api_key: "${BEDROCK_API_KEY}" # optional
   #   # Optional configured model allowlist (model IDs or inference profiles)
   #   # models:
   #   #   - anthropic.claude-3-5-haiku-20241022-v1:0

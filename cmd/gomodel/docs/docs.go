@@ -1307,6 +1307,137 @@ const docTemplate = `{
                 ]
             }
         },
+        "/admin/mcp-servers/{name}/oauth": {
+            "delete": {
+                "description": "Deletes the stored OAuth tokens and reconnects the server without them.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Sign out of one MCP server",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "MCP server slug",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/admin/mcp-servers/{name}/oauth/start": {
+            "post": {
+                "description": "Runs MCP authorization discovery (protected resource metadata, authorization server metadata, PKCE check, dynamic client registration when no client_id is given) and returns the authorization URL to open in the browser. The response sets a short-lived cookie the callback checks.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Start an OAuth sign-in to one MCP server",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "MCP server slug",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Sign-in request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.startMCPOAuthRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.startMCPOAuthResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/admin/mcp-servers/{name}/reconnect": {
             "post": {
                 "produces": [
@@ -2971,7 +3102,7 @@ const docTemplate = `{
         },
         "/admin/usage/invoice": {
             "get": {
-                "description": "Returns billed usage for the period, one block of model/provider line items per customer user path, with subtotals and a grand total. Amounts are USD. With parent, each direct child of that user path is one customer (usage on the parent itself stays under the parent); without it every user path is its own customer. Requests, tokens and provider cost cover provider-served requests; billed cost also includes billed response-cache hits. CSV rows carry row_type item, subtotal or total. Requires a GoModel Pro license with the billing entitlement and pricing.markups_enabled.",
+                "description": "Returns billed usage for the period, one block of model/provider line items per customer user path, with subtotals and a grand total. Amounts are USD. With parent, each direct child of that user path is one customer (usage on the parent itself stays under the parent); without it every user path is its own customer. Requests, tokens and provider cost cover provider-served requests; billed cost also includes billed response-cache hits. The period's days are read in the time zone of the X-GoModel-Timezone header (UTC without it, as API clients send), reported as time_zone. CSV rows carry row_type item, subtotal or total. Requires a GoModel Pro license with the billing entitlement and pricing.markups_enabled.",
                 "produces": [
                     "text/csv",
                     "application/json"
@@ -2981,6 +3112,12 @@ const docTemplate = `{
                 ],
                 "summary": "Export billed usage as per-customer invoices",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "IANA time zone the period's days are read in, e.g. Europe/Warsaw (default UTC)",
+                        "name": "X-GoModel-Timezone",
+                        "in": "header"
+                    },
                     {
                         "type": "string",
                         "description": "Export format: csv (default, as an attachment) or json",
@@ -9366,6 +9503,32 @@ const docTemplate = `{
                 "source"
             ]
         },
+        "admin.mcpOAuthViewResponse": {
+            "type": "object",
+            "properties": {
+                "expires_at": {
+                    "type": "string"
+                },
+                "issuer": {
+                    "type": "string"
+                },
+                "last_error": {
+                    "type": "string"
+                },
+                "scopes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "signed_in_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
         "admin.mcpServerViewResponse": {
             "type": "object",
             "properties": {
@@ -9374,6 +9537,10 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "auth_required": {
+                    "description": "AuthRequired reports that the server answered 401 to the last connect.",
+                    "type": "boolean"
                 },
                 "connected_at": {
                     "type": "string"
@@ -9413,6 +9580,14 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                },
+                "oauth": {
+                    "description": "OAuth is the operator sign-in state; absent when never signed in.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/admin.mcpOAuthViewResponse"
+                        }
+                    ]
                 },
                 "prompt_count": {
                     "type": "integer"
@@ -9608,6 +9783,9 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "models_mode": {
+                    "type": "string"
                 },
                 "name": {
                     "type": "string"
@@ -9830,6 +10008,31 @@ const docTemplate = `{
                 }
             }
         },
+        "admin.startMCPOAuthRequest": {
+            "type": "object",
+            "required": [
+                "redirect_uri"
+            ],
+            "properties": {
+                "client_id": {
+                    "type": "string"
+                },
+                "client_secret": {
+                    "type": "string"
+                },
+                "redirect_uri": {
+                    "type": "string"
+                }
+            }
+        },
+        "admin.startMCPOAuthResponse": {
+            "type": "object",
+            "properties": {
+                "authorization_url": {
+                    "type": "string"
+                }
+            }
+        },
         "admin.taggingSettingsResponse": {
             "type": "object",
             "properties": {
@@ -10044,6 +10247,10 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "models_mode": {
+                    "description": "ModelsMode overrides the global configured provider models mode for\nthis provider: fallback, allowlist, or merge. Empty uses the global mode.",
+                    "type": "string"
+                },
                 "name": {
                     "type": "string"
                 },
@@ -10154,6 +10361,10 @@ const docTemplate = `{
                 },
                 "strategy_plugin": {
                     "description": "StrategyPlugin names the routing-strategy plugin for strategy \"plugin\";\nStrategyConfig holds that plugin's route-scoped settings, validated\nagainst its schema (see GET /admin/plugins, route_fields).",
+                    "type": "string"
+                },
+                "target": {
+                    "description": "Target is the config file's name for target_model, accepted so a body\nwritten after the YAML does not silently become an access policy.",
                     "type": "string"
                 },
                 "target_model": {
@@ -11823,6 +12034,9 @@ const docTemplate = `{
                 "output_tokens": {
                     "type": "integer"
                 },
+                "output_tokens_details": {
+                    "$ref": "#/definitions/core.ImageTokenDetails"
+                },
                 "total_tokens": {
                     "type": "integer"
                 }
@@ -12212,6 +12426,10 @@ const docTemplate = `{
             "properties": {
                 "effort": {
                     "description": "Effort controls how much reasoning effort the model should use.\nValid values are \"low\", \"medium\", \"high\", \"xhigh\", and \"max\".\n\"xhigh\" and \"max\" are supported by newer models such as Claude Opus 4.8;\nproviders downgrade unsupported levels to their nearest equivalent.",
+                    "type": "string"
+                },
+                "summary": {
+                    "description": "Summary requests a reasoning summary from the model (OpenAI Responses\nAPI: \"auto\", \"concise\", \"detailed\"). The Responses API never emits\nsummaries unprompted, so empty asks for none there. A chat request the\ngateway serves through the Responses API sends a summary only while\nreasoning is on: the client's, or \"auto\" when it set none. With effort\n\"none\", or without an effort on a model that does not reason, none is\nsent.",
                     "type": "string"
                 }
             }
@@ -13657,6 +13875,9 @@ const docTemplate = `{
                 "start_date": {
                     "type": "string"
                 },
+                "time_zone": {
+                    "type": "string"
+                },
                 "total": {
                     "$ref": "#/definitions/usage.InvoiceAmounts"
                 }
@@ -14580,7 +14801,7 @@ var SwaggerInfo = &swag.Spec{
 	BasePath:         "/",
 	Schemes:          []string{"http"},
 	Title:            "GoModel API",
-	Description:      "AI gateway routing requests to multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, Fireworks AI, Meta, OpenRouter, Kilo AI, DeepSeek, Z.ai, xAI, MiniMax, Xiaomi MiMo, OpenCode Go, Oracle, Ollama, Bailian). Drop-in OpenAI-compatible API.",
+	Description:      "AI gateway routing requests to multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, Fireworks AI, Meta, OpenRouter, Kilo AI, DeepSeek, Z.ai, xAI, MiniMax, Xiaomi MiMo, Mistral AI, OpenCode Go, Oracle, Ollama, Bailian). Drop-in OpenAI-compatible API.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

@@ -267,7 +267,12 @@ func classifyProviderStatus(cfg providers.SanitizedProviderConfig, runtime provi
 		if runtime.ModelListingUnsupported {
 			return "healthy", "Healthy", "provider does not list models; serving configured models", lastError
 		}
-		return "healthy", "Healthy", "configured and model discovery succeeded", lastError
+		// An allowlist inventory comes from configuration, so no model fetch
+		// clears a failed availability probe; only the next probe does.
+		if availabilityError != "" {
+			return "degraded", "Unreachable", "availability check failed; serving configured models", lastError
+		}
+		return "healthy", "Healthy", "configured and its models are available", lastError
 	case modelFetchError != "" && runtime.DiscoveredModelCount > 0:
 		// Refresh failed but the inventory was deliberately kept fresh (no
 		// healthy alternative exists, e.g. a total sweep failure), so models

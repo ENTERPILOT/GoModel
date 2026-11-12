@@ -40,6 +40,17 @@ type LogConfig struct {
 	// Default: all
 	LogImageBodiesScope ImageBodyScope `yaml:"log_image_bodies_scope" env:"LOGGING_LOG_IMAGE_BODIES_SCOPE"`
 
+	// LogEmbeddingBodies refines LogBodies for embeddings: when both are
+	// enabled, /v1/embeddings requests (and provider passthrough calls to an
+	// embeddings endpoint) store their request and response bodies. When
+	// LogBodies is on but this is off, embedding entries keep their metadata
+	// (model, provider, status, timing, usage) but drop both bodies. Embedding
+	// inputs can be large documents or base64 images and the responses are
+	// float vectors, so bulk indexing jobs grow the audit store quickly.
+	// Requires LogBodies.
+	// Default: true
+	LogEmbeddingBodies bool `yaml:"log_embedding_bodies" env:"LOGGING_LOG_EMBEDDING_BODIES"`
+
 	// LogRevisionBodies refines LogBodies for the request-revision chain:
 	// when both are enabled, every request rewriter that changed the body
 	// (for example GoModel Pro token compression) and every prompt guardrail

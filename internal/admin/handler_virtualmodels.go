@@ -16,16 +16,19 @@ import (
 )
 
 // upsertVirtualModelRequest is the unified admin upsert contract. Presence of
-// target_model or targets makes the row a redirect; absence makes it an access
+// target_model (or its alias target) or targets makes the row a redirect; absence makes it an access
 // policy. A single target_model is a plain alias; multiple targets are load
 // balanced across by strategy ("round_robin", "cost", "failover", "adaptive",
 // or "plugin" with strategy_plugin naming the routing-strategy plugin).
 type upsertVirtualModelRequest struct {
-	Source      string                      `json:"source"`
-	OldSource   string                      `json:"old_source,omitempty"`
-	TargetModel string                      `json:"target_model,omitempty"`
-	Targets     []virtualModelTargetRequest `json:"targets,omitempty"`
-	Strategy    string                      `json:"strategy,omitempty"`
+	Source      string `json:"source"`
+	OldSource   string `json:"old_source,omitempty"`
+	TargetModel string `json:"target_model,omitempty"`
+	// Target is the config file's name for target_model, accepted so a body
+	// written after the YAML does not silently become an access policy.
+	Target   string                      `json:"target,omitempty"`
+	Targets  []virtualModelTargetRequest `json:"targets,omitempty"`
+	Strategy string                      `json:"strategy,omitempty"`
 	// StrategyPlugin names the routing-strategy plugin for strategy "plugin";
 	// StrategyConfig holds that plugin's route-scoped settings, validated
 	// against its schema (see GET /admin/plugins, route_fields).
@@ -238,8 +241,8 @@ func (h *Handler) validateStrategyPlugin(vm virtualmodels.VirtualModel) error {
 }
 
 // buildVirtualModelTargets resolves the redirect targets from the request. The
-// multi-target `targets` form takes precedence; a single `target_model` is the
-// backward-compatible shorthand. An empty result makes the row an access policy.
+// multi-target `targets` form takes precedence; a single `target_model` (or
+// `target`, the config file's key) is the backward-compatible shorthand. An empty result makes the row an access policy.
 //
 // A target given as one name ("openai/gpt-4o", "team/cheap") is stored as
 // written, like a config declaration: the name may belong to a virtual model,
@@ -268,7 +271,14 @@ func buildVirtualModelTargets(req upsertVirtualModelRequest) ([]virtualmodels.Ta
 		return targets, nil
 	}
 
-	if model := strings.TrimSpace(req.TargetModel); model != "" {
+	model := strings.TrimSpace(req.TargetModel)
+	if alias := strings.TrimSpace(req.Target); alias != "" {
+		if model != "" && model != alias {
+			return nil, core.NewInvalidRequestError("target and target_model name different models; send one", nil)
+		}
+		model = alias
+	}
+	if model != "" {
 		target, err := virtualModelTarget(model, "")
 		if err != nil {
 			return nil, core.NewInvalidRequestError("invalid target_model: "+err.Error(), err)

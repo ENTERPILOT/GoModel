@@ -41,7 +41,9 @@ sie, und bei aktivierten [Aufschlägen](/de/features/cost-tracking#aufschläge-u
 wird sie mit null abgerechnet. Setzen Sie sie mit `providers.<name>.billable: false` in
 `config.yaml`, `<PROVIDER>[_SUFFIX]_BILLABLE=false` in der Umgebung, dem Kontrollkästchen
 **Billable** unter den erweiterten Feldern des Dashboard-Formulars oder `"billable": false` bei
-`PUT /admin/provider-credentials`. Siehe [Budgets](/de/features/budgets#nicht-abrechenbare-provider).
+`PUT /admin/provider-credentials`. Ein nicht leerer Wert von `<PROVIDER>_BILLABLE`, der kein Boolean
+(etwa `true`, `false`, `1`, `0`, `t`, `F` oder `TRUE`) ist, verhindert den Start, damit ein
+Tippfehler einen Provider nie versehentlich abrechenbar lässt; ein leerer Wert wird ignoriert. Siehe [Budgets](/de/features/budgets#nicht-abrechenbare-provider).
 
 ## Unterstützte Provider
 
@@ -86,7 +88,7 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
 | vLLM | `VLLM_BASE_URL` (`VLLM_API_KEY` optional) | `meta-llama/Llama-3.1-8B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [vLLM](/de/providers/vllm) |
 | llama.cpp / LM Studio | `LLAMACPP_BASE_URL` (`LLAMACPP_API_KEY` optional) | `gemma-3-4b-it` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [llama.cpp](/de/providers/llamacpp) |
 | llm-d | `LLMD_BASE_URL` (`LLMD_API_KEY` optional) | `Qwen/Qwen2.5-0.5B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [llm-d](/de/providers/llmd) |
-| Amazon Bedrock | `BEDROCK_BASE_URL` (Region oder Endpunkt) + AWS-Zugangsdaten | `anthropic.claude-3-5-haiku-20241022-v1:0` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Amazon Bedrock](/de/providers/bedrock) |
+| Amazon Bedrock | `BEDROCK_BASE_URL` (Region oder Endpunkt) + `BEDROCK_API_KEY` oder AWS-Zugangsdaten | `anthropic.claude-3-5-haiku-20241022-v1:0` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Amazon Bedrock](/de/providers/bedrock) |
 | Amazon Bedrock Mantle | `BEDROCK_MANTLE_API_KEY` oder AWS-Zugangsdaten | `openai.gpt-5.6-sol` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Bedrock Mantle](/de/providers/bedrock-mantle) |
 
 ✅ Unterstützt ❌ Nicht unterstützt
@@ -181,7 +183,8 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
 - **Xiaomi MiMo** – TTS (`mimo-v2.5-tts*`) und ASR (`mimo-v2.5-asr`) werden über
   `/v1/audio/speech` und `/v1/audio/transcriptions` (übersetzt in MiMos Audio-Dialekt für Chat
   Completions) sowie direkt über Chat Completions bedient; für einen Kontext von 1M hängen Sie
-  `[1m]` an die Modell-ID an und führen sie in `XIAOMI_MODELS` auf.
+  `[1m]` an die Modell-ID an, führen sie in `XIAOMI_MODELS` auf und setzen
+  `XIAOMI_MODELS_MODE=merge`.
 - **OpenCode Go (OpenCode Zen)** – routet pro Modell: Die meisten Modelle verwenden
   `/chat/completions` im OpenAI-Stil, während reine `/messages`-Modelle (standardmäßig
   `qwen3.7-max`, überschreibbar mit `OPENCODE_GO_MESSAGES_MODELS`) an den Anthropic-nativen
@@ -226,11 +229,11 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
   Beispiel `OPENROUTER_MODELS=openai/gpt-oss-120b,anthropic/claude-sonnet-4` oder
   `ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3`. DeepSeek verwendet standardmäßig
   `https://api.deepseek.com`; setzen Sie `DEEPSEEK_BASE_URL` nur, wenn Sie einen kompatiblen Proxy
-  oder einen alternativen DeepSeek-Endpunkt verwenden. Standardmäßig verwendet
-  `CONFIGURED_PROVIDER_MODELS_MODE=fallback` diese Listen nur, wenn das Upstream-`/models` nicht
-  verfügbar oder leer ist. Setzen Sie `CONFIGURED_PROVIDER_MODELS_MODE=allowlist`, um für Provider
-  mit einer definierten Liste nur die konfigurierten Modelle bereitzustellen und deren
-  Upstream-Aufrufe von `/models` zu überspringen.
+  oder einen alternativen DeepSeek-Endpunkt verwenden. Standardmäßig werden nur die
+  konfigurierten Modelle bereitgestellt, andere Modelle liefern 404. Ändern lässt sich das mit
+  `CONFIGURED_PROVIDER_MODELS_MODE`, für einen einzelnen Provider mit
+  `<PROVIDER>[_SUFFIX]_MODELS_MODE` (zum Beispiel `OPENROUTER_MODELS_MODE=fallback`)
+  oder mit **Modellmodus** im Dashboard; siehe [Modellmodi](/de/advanced/config-yaml#modellmodi).
 - **Modellfilter** – grenzen Sie einen großen Katalog per Glob-Muster oder Preis ein, statt Modelle
   einzeln aufzulisten: `OPENROUTER_MODEL_FILTER_INCLUDE=*:free` behält nur die kostenlose Stufe von
   OpenRouter, und `<PROVIDER>_MODEL_FILTER_MAX_PRICE_PER_MTOK` begrenzt, wohin ein Provider routen
@@ -320,7 +323,7 @@ Bei diesen Providern stoßen die meisten Benutzer auf Schwierigkeiten:
 
 - **Google Vertex AI** – benötigt ein GCP-Projekt, eine Region und entweder Application Default
   Credentials oder einen JSON-Key eines Service-Accounts.
-- **Amazon Bedrock** – kein eigener API-Key; verwendet die AWS-Credential-Chain und erfordert einen
+- **Amazon Bedrock** – ein Bedrock-API-Key oder die AWS-Credential-Chain; erfordert einen
   expliziten Modellzugriff in der Bedrock-Konsole.
 - **Azure OpenAI** – Deployment-bezogene oder `/openai/v1`-Base-URLs, der Query-Parameter `api-version` und der
   Header `api-key` statt `Authorization: Bearer`.
