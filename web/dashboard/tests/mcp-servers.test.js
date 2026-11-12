@@ -947,6 +947,35 @@ test("mcpToolCatalogExport asks the export endpoint for the endpoint in view", (
   }
 });
 
+// The export is not cancelled when the modal closes, so its response can land
+// after the dashboard switched API keys. The modal uses runes and the DOM, so
+// this asserts the wiring on the source.
+test("a tool catalog export answered after an API key change is not downloaded", () => {
+  const SRC = fileURLToPath(new URL("../src", import.meta.url));
+  const modal = readFileSync(join(SRC, "pages/mcp-servers/McpToolCatalogModal.svelte"), "utf8");
+  const exportCatalog = (modal.match(/async function exportCatalog\(format\) \{[\s\S]*?\n  \}/) || [""])[0];
+  assert.ok(exportCatalog, "exportCatalog missing");
+
+  const stale = "if (generation < auth.generation) return;";
+  // Each expression must exist: indexOf's -1 would pass an order check.
+  const assertOrder = (expressions, message) => {
+    let from = 0;
+    for (const expression of expressions) {
+      const index = exportCatalog.indexOf(expression, from);
+      assert.ok(index >= 0, message + ": " + expression);
+      from = index + expression.length;
+    }
+  };
+  assertOrder(
+    ["const generation = auth.generation;", "await apiFetch(", stale, "flash.error("],
+    "a previous key's failure must be dropped before it is reported",
+  );
+  assertOrder(
+    ["await res.blob();", stale, "URL.createObjectURL("],
+    "a previous key's file must be dropped before the download starts",
+  );
+});
+
 test("mcpToolCatalogServedScope drops a virtual server that is no longer served", () => {
   const virtualServers = [
     { name: "dev", servers: ["github"] },

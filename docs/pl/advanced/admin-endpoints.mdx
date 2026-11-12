@@ -881,7 +881,7 @@ poświadczeń administratora.
 
 | Parametr         | Typ    | Opis                                                                              | Domyślnie |
 | ---------------- | ------ | --------------------------------------------------------------------------------- | --------- |
-| `format`         | string | `json` lub `csv` (pobierany jako załącznik)                                       | `json`    |
+| `format`         | string | `json` lub `csv`; CSV jest pobierany jako załącznik                               | `json`    |
 | `server`         | string | Zostaw wiersze jednego serwera MCP, według sluga                                  | —         |
 | `virtual_server` | string | Zostaw członków jednego serwera wirtualnego                                       | —         |
 | `user_path`      | string | Zostaw serwery widoczne dla wywołującego z tą ścieżką użytkownika, np. `/team/x`  | —         |
@@ -921,8 +921,9 @@ curl "http://localhost:8080/admin/mcp-servers/catalog?user_path=/team/x" \
 ```
 
 - Każdy wiersz narzędzia powtarza pola swojego serwera. `name` to nazwa, którą
-  klienci wywołują na `/mcp`; `upstream_name` to nazwa nadana przez serwer,
-  udostępniana pod `/mcp/{slug}`.
+  klienci wywołują na `/mcp`, a przy `virtual_server` na
+  `/mcp/{virtual_server}`; `upstream_name` to nazwa nadana narzędziu przez
+  serwer, udostępniana pod `/mcp/{slug}`.
 - `exposed` ma wartość `false`, a `name` jest puste dla narzędzia ukrytego
   przez `allowed_tools` / `disallowed_tools` serwera. Klienci mogą wywołać
   narzędzie tylko wtedy, gdy jest udostępnione, a jego serwer włączony.
@@ -942,14 +943,15 @@ curl "http://localhost:8080/admin/mcp-servers/catalog?user_path=/team/x" \
   wyniku, oznaczone przez `enabled` i `exposed`. Pusty `user_path` niczego nie
   filtruje.
 - Eksport czyta katalogi, które brama już przechowuje, więc nieosiągalny
-  serwer nigdy go nie przerywa: serwer jest wymieniony w `servers` ze swoim
-  statusem i bez narzędzi. Serwer w stanie `degraded`, który wcześniej się
-  połączył, zachowuje ostatni katalog.
+  serwer nigdy go nie przerywa. Serwer wyłączony lub taki, który nigdy się nie
+  połączył, jest wymieniony w `servers` ze swoim statusem i bez narzędzi;
+  serwer w stanie `degraded`, który wcześniej się połączył, zachowuje ostatni
+  katalog, więc jego narzędzia zostają w eksporcie.
 - CSV ma jeden wiersz na narzędzie, z tymi samymi polami jako kolumnami;
   serwer bez narzędzi to jeden wiersz z pustymi kolumnami narzędzia. Ścieżki
   użytkowników są rozdzielone znakami nowej linii. Wartości zaczynające się od
-  `=`, `+`, `-` lub `@` dostają na początku `'`, aby arkusz kalkulacyjny nie
-  wykonał ich jako formuł.
+  `=`, `+`, `-`, `@`, tabulatora lub powrotu karetki dostają na początku `'`,
+  aby arkusz kalkulacyjny nie wykonał ich jako formuł.
 
 ### Endpointy pluginów, guardrails i workflow
 

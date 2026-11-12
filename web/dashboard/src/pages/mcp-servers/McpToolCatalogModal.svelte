@@ -11,6 +11,7 @@
   import LoadingState from "$lib/components/molecules/LoadingState.svelte";
   import { apiFetch } from "$lib/api/client.js";
   import { errorPayloadMessage } from "$lib/api/errors.js";
+  import { auth } from "$lib/stores/auth.svelte.js";
   import { flash } from "$lib/stores/flash.svelte.js";
   import { formatNumber } from "$lib/utils/format.js";
   import { Download } from "lucide";
@@ -44,11 +45,15 @@
 
   // The file is the full inventory of the endpoint in view: it ignores the
   // search and always includes the tools filters hide, marked as not exposed.
+  // Closing the modal does not cancel the request, so a response that lands
+  // after the API key changed is dropped: it is the previous key's inventory.
   async function exportCatalog(format) {
     const target = mcpToolCatalogExport(format, mcpServers.toolCatalogScope);
+    const generation = auth.generation;
     exporting = true;
     try {
       const res = await apiFetch(target.path);
+      if (generation < auth.generation) return;
       if (!res.ok) {
         let data = null;
         try {
@@ -59,7 +64,9 @@
         flash.error(errorPayloadMessage(data, m.mcp_all_tools_export_failed()));
         return;
       }
-      const url = URL.createObjectURL(await res.blob());
+      const blob = await res.blob();
+      if (generation < auth.generation) return;
+      const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
       link.download = target.filename;

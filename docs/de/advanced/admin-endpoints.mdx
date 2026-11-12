@@ -884,7 +884,7 @@ Endpunkt ist gatewayweit und erfordert daher globale Admin-Zugangsdaten.
 
 | Parameter        | Typ    | Beschreibung                                                                    | Standard |
 | ---------------- | ------ | ------------------------------------------------------------------------------- | -------- |
-| `format`         | string | `json` oder `csv` (als Anhang heruntergeladen)                                  | `json`   |
+| `format`         | string | `json` oder `csv`; CSV wird als Anhang heruntergeladen                          | `json`   |
 | `server`         | string | Nur die Zeilen eines MCP-Servers behalten, per Slug                             | —        |
 | `virtual_server` | string | Nur die Mitglieder eines virtuellen Servers behalten                            | —        |
 | `user_path`      | string | Nur die Server behalten, die ein Aufrufer mit diesem User Path sieht, z. B. `/team/x` | —   |
@@ -924,8 +924,9 @@ curl "http://localhost:8080/admin/mcp-servers/catalog?user_path=/team/x" \
 ```
 
 - Jede Tool-Zeile wiederholt die Felder ihres Servers. `name` ist der Name, den
-  Clients auf `/mcp` aufrufen; `upstream_name` ist der Name des Servers selbst,
-  bereitgestellt unter `/mcp/{slug}`.
+  Clients auf `/mcp` aufrufen, mit `virtual_server` auf
+  `/mcp/{virtual_server}`; `upstream_name` ist der Name, den der Server selbst
+  dem Tool gibt, bereitgestellt unter `/mcp/{slug}`.
 - `exposed` ist `false` und `name` leer bei einem Tool, das `allowed_tools` /
   `disallowed_tools` des Servers ausblenden. Clients können ein Tool nur
   aufrufen, wenn es freigegeben und sein Server aktiviert ist.
@@ -944,14 +945,15 @@ curl "http://localhost:8080/admin/mcp-servers/catalog?user_path=/team/x" \
   enthalten und sind an `enabled` und `exposed` erkennbar. Ein leerer
   `user_path` filtert nicht.
 - Der Export liest die Kataloge, die das Gateway bereits hält, daher lässt ein
-  nicht erreichbarer Server ihn nie fehlschlagen: Der Server steht mit seinem
-  Status und ohne Tools in `servers`. Ein Server im Status `degraded`, der
-  zuvor verbunden war, behält seinen letzten Katalog.
+  nicht erreichbarer Server ihn nie fehlschlagen. Ein deaktivierter oder noch
+  nie verbundener Server steht mit seinem Status und ohne Tools in `servers`;
+  ein Server im Status `degraded`, der zuvor verbunden war, behält seinen
+  letzten Katalog, seine Tools bleiben also im Export.
 - CSV enthält eine Zeile pro Tool mit denselben Feldern als Spalten; ein Server
   ohne Tools ist eine Zeile mit leeren Tool-Spalten. User Paths sind durch
-  Zeilenumbrüche getrennt. Werte, die mit `=`, `+`, `-` oder `@` beginnen,
-  erhalten ein vorangestelltes `'`, damit eine Tabellenkalkulation sie nicht
-  als Formel ausführt.
+  Zeilenumbrüche getrennt. Werte, die mit `=`, `+`, `-`, `@`, einem Tabulator
+  oder einem Wagenrücklauf beginnen, erhalten ein vorangestelltes `'`, damit
+  eine Tabellenkalkulation sie nicht als Formel ausführt.
 
 ### Plugin-, Guardrail- und Workflow-Endpunkte
 

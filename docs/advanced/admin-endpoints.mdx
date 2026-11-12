@@ -904,7 +904,7 @@ It is gateway-wide, so it needs a global admin credential.
 
 | Parameter        | Type   | Description                                                           | Default |
 | ---------------- | ------ | --------------------------------------------------------------------- | ------- |
-| `format`         | string | `json` or `csv` (downloaded as an attachment)                         | `json`  |
+| `format`         | string | `json` or `csv`; CSV is downloaded as an attachment                   | `json`  |
 | `server`         | string | Keep the rows of one MCP server, by slug                              | —       |
 | `virtual_server` | string | Keep the members of one virtual server                                | —       |
 | `user_path`      | string | Keep the servers a caller with this user path can see, e.g. `/team/x` | —       |
@@ -944,7 +944,9 @@ curl "http://localhost:8080/admin/mcp-servers/catalog?user_path=/team/x" \
 ```
 
 - Each tool row repeats its server's fields. `name` is what clients call on
-  `/mcp`; `upstream_name` is the server's own name, served at `/mcp/{slug}`.
+  `/mcp`, or on `/mcp/{virtual_server}` when `virtual_server` is set;
+  `upstream_name` is the name the server itself gives the tool, served at
+  `/mcp/{slug}`.
 - `exposed` is `false`, and `name` empty, for a tool the server's
   `allowed_tools` / `disallowed_tools` hide. Clients can call a tool only when
   it is exposed and its server is enabled.
@@ -962,12 +964,14 @@ curl "http://localhost:8080/admin/mcp-servers/catalog?user_path=/team/x" \
   `disallowed_user_paths` only. It keeps disabled servers and hidden tools,
   which `enabled` and `exposed` mark. An empty `user_path` does not filter.
 - The export reads the catalogs the gateway already holds, so an unreachable
-  server never fails it: the server is listed in `servers` with its status and
-  no tools. A `degraded` server that connected before keeps its last catalog.
+  server never fails it. A disabled server, or one that has never connected,
+  is listed in `servers` with its status and no tools; a `degraded` server
+  that connected before keeps its last catalog, so its tools stay in the
+  export.
 - CSV has one row per tool, with the same fields as columns; a server without
   tools is one row with empty tool columns. User paths are separated by line
-  breaks. Values that start with `=`, `+`, `-`, or `@` get a leading `'`, so a
-  spreadsheet does not run them as formulas.
+  breaks. Values that start with `=`, `+`, `-`, `@`, a tab, or a carriage
+  return get a leading `'`, so a spreadsheet does not run them as formulas.
 
 ### Plugin, guardrail, and workflow endpoints
 

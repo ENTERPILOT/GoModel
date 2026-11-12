@@ -746,7 +746,7 @@ curl -X PUT http://localhost:8080/admin/provider-credentials \
 
 | 参数             | 类型   | 说明                                                   | 默认值 |
 | ---------------- | ------ | ------------------------------------------------------ | ------ |
-| `format`         | string | `json` 或 `csv`（作为附件下载）                        | `json` |
+| `format`         | string | `json` 或 `csv`；CSV 作为附件下载                      | `json` |
 | `server`         | string | 只保留一个 MCP 服务器的行，按 slug 指定                | —      |
 | `virtual_server` | string | 只保留一个虚拟服务器的成员                             | —      |
 | `user_path`      | string | 只保留使用该用户路径的调用方可见的服务器，例如 `/team/x` | —    |
@@ -784,8 +784,8 @@ curl "http://localhost:8080/admin/mcp-servers/catalog?user_path=/team/x" \
 }
 ```
 
-- 每个工具行都会重复其服务器的字段。`name` 是客户端在 `/mcp` 上调用的名称；`upstream_name` 是服务器自身的名称，在
-  `/mcp/{slug}` 上提供。
+- 每个工具行都会重复其服务器的字段。`name` 是客户端在 `/mcp` 上调用的名称，设置 `virtual_server` 时则是在
+  `/mcp/{virtual_server}` 上调用的名称；`upstream_name` 是服务器自身为该工具使用的名称，在 `/mcp/{slug}` 上提供。
 - 对于被服务器的 `allowed_tools` / `disallowed_tools` 隐藏的工具，`exposed` 为 `false`，`name` 为空。
   只有工具已公开且其服务器已启用时，客户端才能调用它。
 - 当两个服务器产生相同的 `/mcp` 名称时会设置 `shadowed_by`，例如服务器 `a` 的工具 `b_read` 和服务器 `a_b` 的工具
@@ -796,10 +796,10 @@ curl "http://localhost:8080/admin/mcp-servers/catalog?user_path=/team/x" \
 - `read_only` 和 `destructive` 仅在服务器设置了相应提示时为 `true`；`false` 表示服务器没有说明。
 - `user_path` 只按服务器的 `user_paths` 和 `disallowed_user_paths` 筛选服务器。已禁用的服务器和被隐藏的工具仍会保留，
   并由 `enabled` 和 `exposed` 标明。空的 `user_path` 不进行筛选。
-- 导出读取的是网关已持有的目录，因此无法访问的服务器不会导致导出失败：该服务器会带着其状态列在 `servers`
-  中，且没有工具。之前连接成功、当前为 `degraded` 的服务器会保留其最后一份目录。
+- 导出读取的是网关已持有的目录，因此无法访问的服务器不会导致导出失败。已禁用或从未连接成功的服务器会带着其状态列在
+  `servers` 中，且没有工具；之前连接成功、当前为 `degraded` 的服务器会保留其最后一份目录，其工具仍在导出中。
 - CSV 每个工具一行，列与上述字段相同；没有工具的服务器占一行，工具列为空。用户路径之间以换行分隔。以
-  `=`、`+`、`-` 或 `@` 开头的值会加上前导 `'`，以免电子表格将其作为公式执行。
+  `=`、`+`、`-`、`@`、制表符或回车符开头的值会加上前导 `'`，以免电子表格将其作为公式执行。
 
 ### 插件、护栏和工作流端点
 
