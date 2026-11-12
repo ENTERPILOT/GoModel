@@ -61,11 +61,16 @@ func TestEnrichEntryWithSessionID(t *testing.T) {
 
 func TestEnrichEntryWithGatewayError(t *testing.T) {
 	upstream := core.ParseProviderError("openai", http.StatusUnauthorized, []byte(`{"error":{"message":"Incorrect API key provided"}}`), nil)
+	echoing := core.ParseProviderError("openai", http.StatusBadRequest, []byte(`{"error":{"message":"Invalid input: the user's prompt","code":"invalid_value"}}`), nil)
+	unstructured := core.ParseProviderError("openai", http.StatusBadGateway, []byte("<html>bad gateway: the user's prompt</html>"), nil)
 	gateway := core.NewAuthenticationError("", "invalid API key").WithCode("extension_authentication_failed")
+	bodies := Config{LogBodies: true, LogEmbeddingBodies: true}
 
 	tests := []struct {
 		name         string
 		context      bool
+		path         string
+		cfg          Config
 		entry        *LogEntry
 		err          *core.GatewayError
 		wantType     string
@@ -78,13 +83,40 @@ func TestEnrichEntryWithGatewayError(t *testing.T) {
 		{name: "nil error", context: true, entry: &LogEntry{}},
 		{name: "missing entry", context: true, err: upstream},
 		{
-			name: "upstream provider error", context: true, entry: &LogEntry{}, err: upstream,
+			name: "upstream provider error", context: true, cfg: bodies, entry: &LogEntry{}, err: upstream,
 			wantType: string(core.ErrorTypeAuthentication), wantMessage: "Incorrect API key provided",
 			wantProvider: "openai", wantEvents: 1,
 		},
 		{
-			name: "gateway error keeps provider empty", context: true,
+			name: "gateway error keeps provider empty", context: true, cfg: bodies,
 			entry: &LogEntry{Data: &LogData{ErrorCode: "stale"}}, err: gateway,
+			wantType: string(core.ErrorTypeAuthentication), wantMessage: "invalid API key",
+			wantCode: "extension_authentication_failed", wantEvents: 1,
+		},
+		{
+			name: "upstream message withheld without body logging", context: true, entry: &LogEntry{}, err: echoing,
+			wantType: string(core.ErrorTypeInvalidRequest), wantMessage: UpstreamErrorMessageWithheld,
+			wantCode: "invalid_value", wantProvider: "openai", wantEvents: 1,
+		},
+		{
+			name: "unstructured upstream body withheld without body logging", context: true, entry: &LogEntry{}, err: unstructured,
+			wantType: string(core.ErrorTypeProvider), wantMessage: UpstreamErrorMessageWithheld,
+			wantProvider: "openai", wantEvents: 1,
+		},
+		{
+			name: "unstructured upstream body kept with body logging", context: true, cfg: bodies, entry: &LogEntry{}, err: unstructured,
+			wantType: string(core.ErrorTypeProvider), wantMessage: "<html>bad gateway: the user's prompt</html>",
+			wantProvider: "openai", wantEvents: 1,
+		},
+		{
+			name: "upstream message withheld on embeddings without embedding bodies", context: true,
+			path: "/v1/embeddings", cfg: Config{LogBodies: true}, entry: &LogEntry{}, err: echoing,
+			wantType: string(core.ErrorTypeInvalidRequest), wantMessage: UpstreamErrorMessageWithheld,
+			wantCode: "invalid_value", wantProvider: "openai", wantEvents: 1,
+		},
+		{
+			name: "gateway message kept without body logging", context: true,
+			entry: &LogEntry{}, err: gateway,
 			wantType: string(core.ErrorTypeAuthentication), wantMessage: "invalid API key",
 			wantCode: "extension_authentication_failed", wantEvents: 1,
 		},
@@ -93,9 +125,13 @@ func TestEnrichEntryWithGatewayError(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var c *echo.Context
-			publisher := &sessionUpdatePublisher{}
+			publisher := &captureLiveLogger{cfg: tc.cfg}
 			if tc.context {
-				c, _ = echotest.Post(t, "/v1/chat/completions", nil)
+				path := tc.path
+				if path == "" {
+					path = "/v1/chat/completions"
+				}
+				c, _ = echotest.Post(t, path, nil)
 				if tc.entry != nil {
 					c.Set(string(LogEntryKey), tc.entry)
 				}

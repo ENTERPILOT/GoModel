@@ -229,6 +229,10 @@ server:
 </Warning>
 
 <Note>
+  当某个请求未启用请求体记录时（`LOGGING_LOG_BODIES=false`，或在 embeddings 端点上设置了 `LOGGING_LOG_EMBEDDING_BODIES=false`），提供商返回的错误文本也不会被存储，因为提供商常常在其中引用请求内容。审计条目及其每次尝试仍保留错误类型、错误码、状态码和提供商，`error_message` 则为 `upstream error message not logged: body logging is off for this request`。网关自身产生的错误会保留其消息，客户端收到的响应保持不变。
+</Note>
+
+<Note>
   `LOGGING_LOG_REVISION_BODIES` 是 `LOGGING_LOG_BODIES` 针对入口请求改写链的细化设置，只有在启用请求体记录时才生效。两者都开启时，每个修改了请求的改写器（例如 GoModel Pro 的 Token 压缩）以及每个编辑了提示词的提示词护栏，都会在审计条目中把其输出的请求与原始客户端请求体一同保存，以便逐步查看整条编辑链。`LOGGING_LOG_GUARDRAIL_STEPS` 控制这种逐步记录（请求体的编码在请求路径之外进行）：关闭后，整条链的编辑会记录为一条修订，携带最终转发的请求，而不保存逐步快照。
   禁用 `LOGGING_LOG_REVISION_BODIES` 会保留修订元数据（改写器名称、字节大小、节省的 Token 数、变更详情），但不保存额外的请求体副本，使每个被改写请求的审计存储大约减半。
 </Note>

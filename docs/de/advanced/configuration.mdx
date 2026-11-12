@@ -386,6 +386,17 @@ gespeicherte Logs sichtbar sind.
 </Warning>
 
 <Note>
+  Ist das Body-Logging für einen Request aus – `LOGGING_LOG_BODIES=false` oder
+  `LOGGING_LOG_EMBEDDING_BODIES=false` bei einem Embeddings-Endpunkt –, wird
+  auch der Fehlertext, den ein Provider zurückgegeben hat, nicht gespeichert,
+  weil Provider darin häufig den Request zitieren. Der Eintrag und jeder seiner
+  Versuche behalten Fehlertyp, Code, Status und Provider, und `error_message`
+  lautet `upstream error message not logged: body logging is off for this request`.
+  Fehler, die das Gateway selbst auslöst, behalten ihre Meldung, und die
+  Antwort an den Client bleibt unverändert.
+</Note>
+
+<Note>
   `LOGGING_LOG_REVISION_BODIES` verfeinert `LOGGING_LOG_BODIES` für die
   Rewrite-Kette eingehender Requests – ohne aktiviertes Body-Logging hat es
   keine Wirkung. Sind beide aktiv, speichern jeder Rewriter, der einen Request

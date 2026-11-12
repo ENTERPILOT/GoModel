@@ -359,6 +359,15 @@ strony. Gdy logowanie audytowe jest włączone, zapisy są asynchroniczne i moż
 </Warning>
 
 <Note>
+  Gdy logowanie body jest wyłączone dla requestu – `LOGGING_LOG_BODIES=false` albo
+  `LOGGING_LOG_EMBEDDING_BODIES=false` na endpoincie embeddingów – tekst błędu zwrócony przez
+  providera również nie jest zapisywany, bo providerzy często cytują w nim request. Wpis i każda
+  z jego prób zachowują typ błędu, kod, status i providera, a `error_message` ma wartość
+  `upstream error message not logged: body logging is off for this request`.
+  Błędy zgłaszane przez sam gateway zachowują swój komunikat, a odpowiedź dla klienta się nie zmienia.
+</Note>
+
+<Note>
   `LOGGING_LOG_REVISION_BODIES` doprecyzowuje `LOGGING_LOG_BODIES` dla łańcucha
   przepisywania requestów na wejściu – nie działa, jeśli logowanie body nie jest włączone. Gdy
   oba są włączone, każdy rewriter, który zmienił request (na przykład kompresja tokenów w GoModel Pro),
