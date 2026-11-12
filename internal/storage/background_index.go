@@ -99,15 +99,26 @@ func (b BackgroundIndexBuilder) TryBuild(ctx context.Context, index BackgroundIn
 		return true
 	}
 
-	valid := false
-	_, _ = withSessionAdvisoryLock(ctx, b.Pool, b.LockKey, func(conn *pgxpool.Conn) {
-		valid = b.buildLocked(ctx, conn, index)
-	})
-	return valid
-}
+	conn, err := b.Pool.Acquire(ctx)
+	if err != nil {
+		return false
+	}
+	defer conn.Release()
+	var locked bool
+	if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, b.LockKey).Scan(&locked); err != nil || !locked {
+		return false
+	}
+	defer func() {
+		// A pooled connection must not keep the session lock; drop it when
+		// the unlock cannot be confirmed. Bounded so a broken connection
+		// cannot stall shutdown, which waits for this goroutine.
+		unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := conn.Exec(unlockCtx, `SELECT pg_advisory_unlock($1)`, b.LockKey); err != nil {
+			_ = conn.Conn().Close(unlockCtx)
+		}
+	}()
 
-// buildLocked is TryBuild's work under the lock.
-func (b BackgroundIndexBuilder) buildLocked(ctx context.Context, conn *pgxpool.Conn, index BackgroundIndex) bool {
 	// Checked again under the lock: another replica may have finished the
 	// build between the first check and taking the lock.
 	exists, valid, err := backgroundIndexState(ctx, conn, index.Name)

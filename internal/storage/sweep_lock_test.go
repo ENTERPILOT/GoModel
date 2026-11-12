@@ -5,8 +5,11 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 )
@@ -72,4 +75,27 @@ func TestSingleReplicaSweepPostgreSQL(t *testing.T) {
 
 	second()
 	assert.Equal(t, int32(2), sweeps.Load(), "the lock is released after the sweep")
+}
+
+// TestSingleReplicaSweepPoolOfOne runs a sweep that queries through a pool of
+// a single connection: the lock must not hold that connection.
+func TestSingleReplicaSweepPoolOfOne(t *testing.T) {
+	shared := sqlxtest.NewPostgresPool(t)
+	if shared == nil {
+		return // skipped: no test server configured
+	}
+	config := shared.Config()
+	config.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(context.Background(), config)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	var swept bool
+	SingleReplicaSweep(pool, testSweepLockKey, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, err := pool.Exec(ctx, `SELECT 1`)
+		swept = assert.NoError(t, err)
+	})()
+	assert.True(t, swept)
 }

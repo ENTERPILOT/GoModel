@@ -5,10 +5,12 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// sweepLockTimeout bounds taking the sweep lock, not the sweep it guards.
+// sweepLockTimeout bounds connecting and taking the sweep lock, not the sweep
+// it guards.
 const sweepLockTimeout = 30 * time.Second
 
 // SingleReplicaSweep makes sweep run on one replica at a time when the
@@ -22,8 +24,30 @@ func SingleReplicaSweep(pool *pgxpool.Pool, key int64, sweep func()) func() {
 		return sweep
 	}
 	return lockedSweep(func(ctx context.Context, fn func()) (bool, error) {
-		return withSessionAdvisoryLock(ctx, pool, key, func(*pgxpool.Conn) { fn() })
+		return withSweepLock(ctx, pool.Config().ConnConfig, key, fn)
 	}, sweep)
+}
+
+// withSweepLock holds the lock on a connection of its own, outside the pool,
+// so the sweep's own statements never wait for the connection the lock
+// holds, even with a pool of one. Closing the connection releases the lock
+// on every path.
+func withSweepLock(ctx context.Context, config *pgx.ConnConfig, key int64, fn func()) (bool, error) {
+	conn, err := pgx.ConnectConfig(ctx, config)
+	if err != nil {
+		return false, err
+	}
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = conn.Close(closeCtx)
+	}()
+	var locked bool
+	if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, key).Scan(&locked); err != nil || !locked {
+		return false, err
+	}
+	fn()
+	return true, nil
 }
 
 // lockedSweep runs sweep through tryLock, which runs it only when it takes
