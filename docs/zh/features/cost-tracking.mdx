@@ -151,79 +151,120 @@ GoModel 选取覆盖请求 user path 的最深一级已配置路径（`/acme` �
 
 ## 随响应返回成本
 
-GoModel 可以把为某个请求计算出的成本返回给发起该请求的客户端。此功能默认关闭。当客户端需要自行按请求核算支出时开启它——例如某个应用只持有推理密钥，并把成本归属到自己的用户——这样它既不需要管理员密钥，也不需要事后查询 `/admin/usage/log`。
+GoModel 可以把为某个请求计算出的成本返回给发起该请求的客户端。默认关闭。当客户端需要自行按请求核算支出时启用它——例如持有仅推理密钥、把成本分摊给自己用户的应用——这样它们既不需要管理员密钥，也不需要事后查询 `/admin/usage/log`。
 
 ```yaml
 usage:
   response_cost_enabled: true # env: USAGE_RESPONSE_COST_ENABLED; default false
 ```
 
-此功能依赖用量追踪（`USAGE_ENABLED`，默认开启）：没有用量记录的请求没有可返回的成本。
+它依赖用量追踪（`USAGE_ENABLED`，默认开启）：没有用量记录的请求就没有可返回的成本。
 
-**返回哪种成本。** 开启加价时，客户端只会得到该请求的计费成本：提供商成本和加价不会离开网关。关闭加价时，客户端得到提供商成本（`total_cost`），标记为 `billable: false` 的提供商也是如此。两种情况下都以 USD 计，并且与本页的其他成本一样是估算值；除未开启加价时的缓存命中外（见下文），返回的都是该请求用量记录中存储的值。
+返回形式遵循 OpenRouter 的用量计费：成本是响应 usage 对象中的 `usage.cost`，一个以 USD 计的 JSON 数字。已经读取 OpenRouter 成本的客户端无需修改即可对接 GoModel。
 
-**非流式响应**通过两个响应头携带成本。响应体不会被改动，因此严格类型化的 SDK 或解析器不会受到影响：
+**返回哪种成本。** 启用加价时，客户端只拿到请求的计费成本：供应商成本和加价永远不会离开网关。未启用加价时，拿到的是供应商成本（`total_cost`），标记为 `billable: false` 的供应商也一样。两种情况下都以 USD 计，与本页其他成本一样是估算值，并且等于该请求用量记录中的值，未启用加价时的缓存命中除外（见下文）。
+
+**格式。** 金额四舍五入到小数点后 12 位，写成普通十进制数：没有指数、没有浮点噪声、没有末尾的 0（`0.00003`，而不是 `0.000030000000000000004`；`0.000000001`，而不是 `1e-9`）。
+
+### 非流式响应
+
+成本追加在响应 `usage` 对象的末尾：
+
+<CodeGroup>
+```json Chat Completions
+{"id":"chatcmpl-1","object":"chat.completion","choices":[...],"usage":{"prompt_tokens":271,"completion_tokens":12,"total_tokens":283,"cost":0.00000542}}
+```
+
+```json Responses
+{"id":"resp_1","object":"response","status":"completed","output":[...],"usage":{"input_tokens":271,"output_tokens":12,"total_tokens":283,"cost":0.00000542}}
+```
+
+```json Anthropic Messages
+{"id":"msg_1","type":"message","content":[...],"stop_reason":"end_turn","usage":{"input_tokens":271,"output_tokens":12,"cost":0.00000542}}
+```
+
+```json Embeddings
+{"object":"list","data":[...],"model":"text-embedding-3-small","usage":{"prompt_tokens":8,"total_tokens":8,"cost":0.00000016}}
+```
+</CodeGroup>
+
+GoModel 直接编辑响应体的字节：只有 `usage` 对象发生变化，其他字段的顺序、转义、格式和精度都保持不变。非流式响应还会在两个响应头中携带同一个四舍五入后的值，这也是没有 usage 对象的响应（音频、大多数图片）唯一的渠道：
 
 ```http
 X-GoModel-Cost: 0.00000542
 X-GoModel-Cost-Currency: USD
 ```
 
-金额是普通的十进制小数，保留计算得到的全部位数，不四舍五入，也不使用指数表示法。
+### 流式响应
 
-**流式响应**在成本确定之前就已发送响应头，因此成本随流返回：`gomodel_cost` 会被添加到每个携带 usage 的事件的 usage 对象中，通常是携带最终 Token 数的那个事件。
+流式响应在成本已知之前就发送了响应头，因此只在事件中携带成本：每个带 usage 的事件的 usage 对象都会加上 `usage.cost`，通常是带最终 token 数的那个事件。流不会被延迟。
 
-```text
-data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":271,"completion_tokens":12,"total_tokens":283,"gomodel_cost":{"amount":0.00000542,"currency":"USD"}}}
+<CodeGroup>
+```text Chat Completions
+data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":271,"completion_tokens":12,"total_tokens":283,"cost":0.00000542}}
 ```
 
-| 端点                   | 事件                                            | 字段                          |
-| ---------------------- | ----------------------------------------------- | ----------------------------- |
-| `/v1/chat/completions` | usage 数据块                                    | `usage.gomodel_cost`          |
-| `/v1/responses`        | `response.completed` 或 `response.incomplete`   | `response.usage.gomodel_cost` |
-| `/v1/messages`         | `message_delta`                                 | `usage.gomodel_cost`          |
+```text Responses
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","usage":{"input_tokens":271,"output_tokens":12,"total_tokens":283,"cost":0.00000542}}}
+```
 
-其他事件全部原样透传。该字段是一个新增成员，OpenAI 和 Anthropic 的 SDK 会忽略它；如果客户端会拒绝未知成员，请保持此设置关闭。如果提供商在多个数据块中返回 usage，每个这样的数据块都会带有 `gomodel_cost`。该值是该请求截至当时的累计值，与同一对象中的 Token 数一样：请使用最后一个，切勿相加。最后一个即用量记录中的成本。没有 usage 的流不携带成本：GoModel 默认会向提供商请求 usage（`ENFORCE_RETURNING_USAGE_DATA`）。
+```text Anthropic Messages
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":12,"cost":0.00000542}}
+```
+</CodeGroup>
 
-**未知不等于零。** 没有定价的模型成本未知，在任何模式下响应中都既没有响应头也没有该字段。`0` 始终表示一个已定价且没有产生成本的请求。
+| 端点                   | 事件                                          | 字段                  |
+| ---------------------- | --------------------------------------------- | --------------------- |
+| `/v1/chat/completions` | usage chunk                                   | `usage.cost`          |
+| `/v1/responses`        | `response.completed` 或 `response.incomplete` | `response.usage.cost` |
+| `/v1/messages`         | `message_delta`                               | `usage.cost`          |
 
-| 请求 | 关闭加价 | 开启加价 |
-| ---- | -------- | -------- |
+其他事件原样透传。在多个 chunk 中报告 usage 的供应商，每个这样的 chunk 都会带上 `usage.cost`。该值与同一对象中的 token 数一样，是截至当前的累计值：以最后一个为准，不要相加。最后一个值就是用量记录中的成本。没有 usage 的流不携带成本：GoModel 默认会向供应商请求 usage（`ENFORCE_RETURNING_USAGE_DATA`）。
+
+### 未知不等于零
+
+没有定价的模型成本未知：响应在任何模式下都既没有 `usage.cost` 也没有响应头。`0` 始终表示一个已定价但不花钱的请求。
+
+| 请求 | 未启用加价 | 启用加价 |
+| ---- | ---------- | -------- |
 | 已定价 | `total_cost` | `billed_cost` |
 | 定价未知 | 无 | 无 |
-| `billable: false` 的提供商，已定价 | `total_cost` | `0` |
-| `billable: false` 的提供商，定价未知 | 无 | 无 |
+| `billable: false` 供应商，已定价 | `total_cost` | `0` |
+| `billable: false` 供应商，定价未知 | 无 | 无 |
 | 缓存命中，已定价 | `0` | 开启 `bill_cache_hits` 时为 `billed_cost`，否则为 `0` |
 | 缓存命中，定价未知 | 无 | 无 |
 
-**响应缓存命中**（`X-Cache: HIT`）不会调用提供商，因此其提供商成本为 `0`。其用量记录仍会记下缓存的响应原本的成本（`total_cost`），控制台中的节省金额由此而来，但这并不是客户端的支出。命中的成本在重放开始前就已确定，因此缓存的流也会在响应头中携带它。
+**响应缓存命中**（`X-Cache: HIT`）不调用供应商，因此其供应商成本为 `0`。其用量记录仍会记下缓存答案原本的成本（`total_cost`），控制台中的节省就来自这里；那并不是客户端的支出。缓存保存的答案不含成本，命中时携带的是它自己的成本。
 
-**提供商自行报告的成本**（例如 OpenRouter 的 `usage.cost`）继续原样透传；GoModel 只在旁边添加自己的数值，绝不重命名或替换它们。`X-GoModel-Cost` 响应头和 `gomodel_cost` 字段属于本网关。开启此设置后，来自上游（另一个 GoModel 或其他任何服务）的值绝不会被当作本网关的值返回：
+### 上游成本
 
-- 响应头：每个 `X-GoModel-Cost` 和 `X-GoModel-Cost-Currency` 的值，无论大小写、重复多少次，都会被本网关的成本替换，在成本未知时则被移除。
-- 流：事件 usage 对象中所有名为 `gomodel_cost` 的字段（任意写法，包括重复字段）都会被移除，之后顶层或 `response` 下的每个 usage 对象恰好携带一个本网关的值，成本未知时则不携带。无论解析器保留重复字段中的第一个还是最后一个，读到的值都相同。
-- 转发的 JSON 响应：成本在响应头中，因此响应 usage 中的 `gomodel_cost` 字段会被移除。
-- `Content-Encoding` 不是 `identity` 的上游响应会以 `502` 拒绝。GoModel 不向上游请求编码，并自行解码 gzip，因此这样的响应是上游擅自发送的，无法读取也无法清理。
+上游可能报告自己的 `usage.cost`：OpenRouter 会这样做，另一个 GoModel 也会。开启该设置后，`usage.cost` 属于本网关，上游的值永远不会被当作本网关的值返回：
 
-仍有两项限制，都出现在读取响应体就必须将其完整缓冲的场景：
+- 每个 usage 对象最终恰好只有一个 `cost`，即本网关的值；成本未知时则没有。在此之前，会先从响应或事件的每个 usage 对象中移除上游的每个 `cost` 字段，无论大小写、是否用转义书写或是否重复，因此保留第一个或最后一个重复字段的解析器读到的是同一个值。
+- `usage.cost_details`（例如 `upstream_inference_cost`）：启用加价时会被移除，包括所有重复字段和大小写变体，确保供应商成本永远不会到达转售商的客户。未启用加价时按收到的原样透传。GoModel 从不自行添加它。
+- 上游的每个 `X-GoModel-Cost` 和 `X-GoModel-Cost-Currency` 响应头，无论大小写，都会被丢弃；非流式响应随后携带本网关的值。
+- `Content-Encoding` 不是 `identity` 的上游响应会以 `502` 拒绝。GoModel 不要求上游编码，且会自行解码 gzip，因此这样的响应是未经请求发送的，无法读取或清理。
 
-- 超过 8 MiB 的转发 JSON 响应会边收边转发、不被读取：它不带成本响应头，其中的 `gomodel_cost` 字段来自上游。
-- 超过 64 MiB 的流事件不被读取直接转发：它不会获得成本，并保留上游写入的任何 `gomodel_cost`。没有提供商会在如此大的事件中发送 usage。
+关闭该设置时，响应与没有该功能时完全相同，包括上游的 `usage.cost`、`cost_details` 和成本响应头。
+
+### 覆盖范围与限制
 
 | 端点 | 非流式 | 流式 |
 | ---- | ------ | ---- |
-| `/v1/chat/completions`、`/v1/responses`、`/v1/messages` | 响应头 | `gomodel_cost` |
-| `/v1/embeddings`、`/v1/images/generations`、`/v1/images/edits`、`/v1/decisions`、`/v1/systemone` | 响应头 | — |
-| `/v1/audio/*` | 响应头 | 无：转发的音频流或流式转录在发送之后才计价 |
-| `/p/{provider}/...` | 响应头，适用于 GoModel 能够计价的 JSON 响应 | `gomodel_cost`，适用于带有 OpenAI 或 Anthropic 格式 usage 的事件 |
+| `/v1/chat/completions`、`/v1/responses`、`/v1/messages` | `usage.cost` 和响应头 | `usage.cost` |
+| `/v1/embeddings` | `usage.cost` 和响应头 | — |
+| `/v1/images/generations`、`/v1/images/edits`、`/v1/decisions`、`/v1/systemone` | 响应头；答案有 usage 对象时还有 `usage.cost` | — |
+| `/v1/audio/*` | 响应头 | 无：转发的音频流或流式转写在发送后才定价 |
+| `/p/{provider}/...` | GoModel 能定价的 JSON 答案：响应头和 `usage.cost` | 带 OpenAI 或 Anthropic usage 的事件：`usage.cost` |
 
-不包括：实时会话（一个连接上有多个响应）、批处理（其成本在批处理的 `usage` 中）以及 MCP 工具调用。网关在处理请求时自行发起的模型调用（例如基于 LLM 的护栏）会记录为独立的用量记录，不计入返回的成本。关闭了用量追踪的工作流不返回成本。
+为了在应答前完成定价，GoModel 会先完整读取以供应商自身方言转发的 JSON 答案（`/p/{provider}/...`、`/v1/decisions`、原生转发的 `/v1/messages`），再发送，而不是边收边转发。流永远不会被延迟。仍有两个限制：
 
-<Note>
-  为了把成本放进响应头，GoModel 会先完整读取以提供商原生格式转发的 JSON
-  响应（`/p/{provider}/...`、`/v1/decisions`、原生转发的 `/v1/messages`），
-  然后再发送，而不是边收边转发。流式响应不会被延迟。
-</Note>
+- 超过 8 MiB 的转发 JSON 答案会边收边转发，不定价：既没有响应头也没有 `usage.cost`，上游的 `usage.cost` 仍会被移除。
+- 超过 64 MiB 的流事件不经读取直接转发，因此不带成本，并保留上游写入的任何 `usage.cost`。没有供应商会在这么大的事件中发送 usage。
+
+不在覆盖范围内：realtime 会话（每个连接有多个响应）、批处理、文件和会话（批处理的 `usage` 是它自己的），以及 MCP 工具调用。网关在处理请求时自行发起的模型调用（例如 LLM 护栏）会记录为独立的用量记录，不计入返回的成本。关闭了用量追踪的工作流不返回成本。
 
 ## 控制台汇总
 

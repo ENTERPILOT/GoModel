@@ -28,23 +28,26 @@ func receivedResponse(rec *httptest.ResponseRecorder) offResponse {
 // without any of the feature's code sends. The baseline runs without usage
 // tracking, so nothing reports a cost, the cache records no hit usage, and
 // passthrough takes its plain relay; passthrough answers are also compared
-// with the upstream's own bytes, its cost header included.
+// with the upstream's own bytes, its usage.cost, cost_details and cost header
+// included.
 func TestResponseCost_OffChangesNoByte(t *testing.T) {
-	const upstreamJSON = `{"id":"chatcmpl-1","object":"chat.completion","choices":[],"usage":{` + pricedUsage + `,"gomodel_cost":{"amount":9,"currency":"USD"}}}`
-	const upstreamStream = "data: {\"choices\":[],\"usage\":{" + pricedUsage + ",\"gomodel_cost\":{\"amount\":9}}}\r\n\r\ndata: [DONE]\r\n\r\n"
+	const upstreamJSON = `{"id":"chatcmpl-1","object":"chat.completion","choices":[],"usage":{` + openRouterUsage + `,"COST":7,"cost":9}}`
+	const upstreamStream = "data: {\"choices\":[],\"usage\":{" + openRouterUsage + ",\"Cost\":9}}\r\n\r\ndata: [DONE]\r\n\r\n"
 	upstreamHeader := func(contentType string) http.Header {
 		return http.Header{"Content-Type": {contentType}, "X-Gomodel-Cost": {"9"}, "X-Gomodel-Cost-Currency": {"USD"}}
 	}
-	tests := []struct {
+	type offCase struct {
 		name     string
 		provider func() *mockProvider
 		path     string
 		body     string
 		cached   bool
 		upstream string // the upstream's body, for a relayed answer
-	}{
+	}
+	tests := []offCase{
 		{name: "buffered chat", provider: costChatProvider, path: "/v1/chat/completions", body: bufferedCostRequests[0].body},
 		{name: "streamed chat", provider: costChatProvider, path: "/v1/chat/completions", body: streamedCostRequests[0].body},
+		{name: "buffered embeddings", provider: costEmbeddingsProvider, path: "/v1/embeddings", body: bufferedCostRequests[2].body},
 		{name: "cache hit", provider: costChatProvider, path: "/v1/chat/completions", body: bufferedCostRequests[0].body, cached: true},
 		{name: "streamed cache hit", provider: costChatProvider, path: "/v1/chat/completions", body: streamedCostRequests[0].body, cached: true},
 		{
@@ -59,6 +62,10 @@ func TestResponseCost_OffChangesNoByte(t *testing.T) {
 				return costPassthroughProvider(upstreamHeader("text/event-stream"), strings.NewReader(upstreamStream))
 			},
 		},
+	}
+	// Every dialect with an upstream's own usage.cost and cost_details.
+	for _, request := range openRouterRequests() {
+		tests = append(tests, offCase{name: "openrouter " + request.name, provider: request.provider, path: request.path, body: request.body})
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

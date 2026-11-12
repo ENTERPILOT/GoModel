@@ -17,8 +17,9 @@ type UsageConfig struct {
 	PricingRecalculationEnabled bool `yaml:"pricing_recalculation_enabled" env:"USAGE_PRICING_RECALCULATION_ENABLED"`
 
 	// ResponseCostEnabled returns the cost GoModel calculated for a request to
-	// its caller: in the X-GoModel-Cost response headers, and in the usage of
-	// a streamed response's events. It is the billed cost when
+	// its caller, in OpenRouter's shape: usage.cost in the response's usage
+	// objects, buffered and streamed, and the X-GoModel-Cost headers on
+	// buffered responses. It is the billed cost when
 	// pricing.markups_enabled is on, the provider cost otherwise. Turn it on
 	// when clients account for their own spend per request.
 	// Default: false

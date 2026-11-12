@@ -61,62 +61,79 @@ func usageEventData(t *testing.T, body string) []byte {
 
 // Duplicate members and objects are read differently by different parsers
 // (Go, JavaScript and Python keep the last one). Whichever a client keeps,
-// it reads this gateway's cost or none.
+// it reads this gateway's cost or none, and with markups no cost_details.
 func TestResponseCost_UpstreamDuplicatesNeverReachTheClient(t *testing.T) {
-	upstreamCost := `"gomodel_cost":{"amount":9,"currency":"USD"}`
-	events := []struct {
-		name  string
-		event string
+	const upstreamCost = `"cost":9,"cost_details":{"upstream_inference_cost":8}`
+	payloads := []struct {
+		name    string
+		payload string
 	}{
-		{name: "duplicate members", event: `{"choices":[],"usage":{"gomodel_cost":null,` + pricedUsage + `,` + upstreamCost + `}}`},
-		{name: "duplicate usage objects", event: `{"usage":{` + pricedUsage + `},"choices":[],"usage":{` + pricedUsage + `,` + upstreamCost + `}}`},
-		{name: "cased member", event: `{"choices":[],"usage":{` + pricedUsage + `,"GOMODEL_COST":{"amount":9}}}`},
+		{name: "duplicate members", payload: `{"choices":[],"usage":{"cost":null,"cost_details":null,` + pricedUsage + `,` + upstreamCost + `}}`},
+		{name: "duplicate usage objects", payload: `{"usage":{` + pricedUsage + `},"choices":[],"usage":{` + pricedUsage + `,` + upstreamCost + `}}`},
+		{name: "cased members", payload: `{"choices":[],"usage":{` + pricedUsage + `,"COST":9,"Cost_Details":{"upstream_inference_cost":8}}}`},
+		{name: "escaped members", payload: `{"choices":[],"usage":{` + pricedUsage + `,"c\u006fst":9,"co\u017ft_details":{"upstream_inference_cost":8}}}`},
 	}
-	for _, ev := range events {
-		for _, priced := range []bool{true, false} {
-			name := ev.name
-			if !priced {
-				name += " without pricing"
+	modes := []struct {
+		name      string
+		configure func(*testing.T) func(*Config)
+		want      string
+	}{
+		{name: "priced", configure: func(*testing.T) func(*Config) { return returnCosts }, want: responseCostAmount},
+		{name: "billed", configure: func(t *testing.T) func(*Config) { return billCosts(t, 100, true) }, want: "0.00004"},
+		{name: "without pricing", configure: func(*testing.T) func(*Config) {
+			return func(cfg *Config) {
+				cfg.ResponseCostEnabled = true
+				cfg.PricingResolver = &mockPricingResolver{}
 			}
-			t.Run(name, func(t *testing.T) {
-				stream := "data: " + ev.event + "\n\ndata: [DONE]\n\n"
-				srv, _ := costGateway(t, costPassthroughProvider(sseHeader(), strings.NewReader(stream)), returnCosts, func(cfg *Config) {
-					if !priced {
-						cfg.PricingResolver = &mockPricingResolver{}
-					}
-				})
+		}},
+	}
+	for _, p := range payloads {
+		for _, mode := range modes {
+			t.Run(p.name+"/"+mode.name+"/streamed", func(t *testing.T) {
+				stream := "data: " + p.payload + "\n\ndata: [DONE]\n\n"
+				srv, _ := costGateway(t, costPassthroughProvider(sseHeader(), strings.NewReader(stream)), mode.configure(t))
 
 				rec := postJSON(t, srv, passthroughChatPath, passthroughStreamBody)
 
 				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 				data := usageEventData(t, rec.Body.String())
-				assertOneGatewayCost(t, data, 0.00002, priced)
-				assert.NotContains(t, strings.ToLower(string(data)), `"amount":9`)
+				assertOneGatewayCost(t, data, mode.want)
+				if mode.name == "billed" {
+					assertNoCostDetails(t, data)
+				}
+				assert.NotContains(t, string(data), ":9")
+			})
+
+			t.Run(p.name+"/"+mode.name+"/buffered", func(t *testing.T) {
+				header := jsonHeader()
+				header["x-gomodel-cost"] = []string{"9"}
+				header["X-Gomodel-Cost"] = []string{"8", "7"}
+				header["X-GOMODEL-COST-CURRENCY"] = []string{"EUR"}
+				srv, _ := costGateway(t, costPassthroughProvider(header, strings.NewReader(p.payload)), mode.configure(t))
+
+				rec := postJSON(t, srv, passthroughChatPath, passthroughChatBody)
+
+				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+				assertOneGatewayCost(t, rec.Body.Bytes(), mode.want)
+				if mode.name == "billed" {
+					assertNoCostDetails(t, rec.Body.Bytes())
+				}
+				assert.NotContains(t, rec.Body.String(), ":9")
+				if mode.want == "" {
+					assert.Empty(t, rec.Header().Values(responseCostHeader))
+					assert.Empty(t, rec.Header().Values(responseCostCurrencyHeader))
+				} else {
+					assert.Equal(t, []string{mode.want}, rec.Header().Values(responseCostHeader))
+					assert.Equal(t, []string{"USD"}, rec.Header().Values(responseCostCurrencyHeader))
+				}
+				for key := range rec.Header() {
+					if strings.EqualFold(key, responseCostHeader) || strings.EqualFold(key, responseCostCurrencyHeader) {
+						assert.Contains(t, []string{"X-Gomodel-Cost", "X-Gomodel-Cost-Currency"}, key)
+					}
+				}
 			})
 		}
 	}
-
-	t.Run("buffered", func(t *testing.T) {
-		header := jsonHeader()
-		header["x-gomodel-cost"] = []string{"9"}
-		header["X-Gomodel-Cost"] = []string{"8", "7"}
-		header["X-GOMODEL-COST-CURRENCY"] = []string{"EUR"}
-		body := `{"id":"chatcmpl-1","object":"chat.completion","choices":[],"usage":{"gomodel_cost":null,` + pricedUsage + `,` + upstreamCost + `,"GoModel_Cost":1}}`
-		srv, _ := costGateway(t, costPassthroughProvider(header, strings.NewReader(body)), returnCosts)
-
-		rec := postJSON(t, srv, passthroughChatPath, passthroughChatBody)
-
-		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-		assert.Equal(t, []string{responseCostAmount}, rec.Header().Values(responseCostHeader))
-		assert.Equal(t, []string{"USD"}, rec.Header().Values(responseCostCurrencyHeader))
-		for key := range rec.Header() {
-			if strings.EqualFold(key, responseCostHeader) || strings.EqualFold(key, responseCostCurrencyHeader) {
-				assert.Contains(t, []string{"X-Gomodel-Cost", "X-Gomodel-Cost-Currency"}, key)
-			}
-		}
-		assert.JSONEq(t, `{"id":"chatcmpl-1","object":"chat.completion","choices":[],"usage":{`+pricedUsage+`}}`, rec.Body.String(),
-			"the cost of a buffered answer is in its headers; the upstream's members are removed")
-	})
 }
 
 // The gateway asks upstreams for no encoding and the transport decodes gzip
@@ -168,18 +185,19 @@ func TestResponseCost_RefusesEncodedAnswers(t *testing.T) {
 	})
 }
 
-// paddedChatAnswer returns a chat answer of exactly size bytes.
+// paddedChatAnswer returns a chat answer of exactly size bytes, with an
+// upstream's cost in its usage.
 func paddedChatAnswer(t *testing.T, size int) string {
 	t.Helper()
-	head := `{"id":"chatcmpl-1","object":"chat.completion","choices":[],"usage":{` + pricedUsage + `,"gomodel_cost":{"amount":9}},"padding":"`
+	head := `{"id":"chatcmpl-1","object":"chat.completion","choices":[],"usage":{` + pricedUsage + `,"cost":9},"padding":"`
 	tail := `"}`
 	require.Greater(t, size, len(head)+len(tail))
 	return head + strings.Repeat("x", size-len(head)-len(tail)) + tail
 }
 
-// A relayed JSON answer is read whole, up to 8 MiB, before it is sent, so its
-// headers can carry its cost. A larger answer is relayed as it arrives,
-// unread: it carries no cost header, and its body is the upstream's.
+// A relayed JSON answer is read whole, up to 8 MiB, before it is sent, so it
+// can carry its cost. A larger answer is relayed as it arrives, unpriced: it
+// carries no cost header and no cost, and loses the upstream's.
 func TestResponseCost_RelayedJSONSizeLimit(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -200,13 +218,11 @@ func TestResponseCost_RelayedJSONSizeLimit(t *testing.T) {
 			assert.Equal(t, tt.wantCost, rec.Header().Get(responseCostHeader))
 			if tt.wantCost == "" {
 				assert.Empty(t, logger.entries, "an answer too large to read is not accounted for")
-				assert.Equal(t, len(body), rec.Body.Len())
-				assert.Equal(t, body, rec.Body.String(), "an answer too large to read is relayed as it arrived")
+				assert.Equal(t, strings.Replace(body, `,"cost":9`, "", 1), rec.Body.String())
 				return
 			}
 			require.Len(t, logger.entries, 1)
-			assert.False(t, gjson.Get(rec.Body.String(), "usage.gomodel_cost").Exists())
-			assert.Equal(t, strings.Replace(body, `,"gomodel_cost":{"amount":9}`, "", 1), rec.Body.String())
+			assert.Equal(t, strings.Replace(body, `,"cost":9`, costMember(tt.wantCost), 1), rec.Body.String())
 		})
 	}
 }
@@ -251,12 +267,12 @@ func TestResponseCost_UsageOnEveryChunk(t *testing.T) {
 	var amounts []gjson.Result
 	for line := range strings.SplitSeq(rec.Body.String(), "\n") {
 		if data, ok := strings.CutPrefix(line, "data: "); ok && gjson.Get(data, "usage").Exists() {
-			amounts = append(amounts, gjson.Get(data, "usage.gomodel_cost.amount"))
+			amounts = append(amounts, gjson.Get(data, "usage.cost"))
 		}
 	}
 	require.Len(t, amounts, 3, rec.Body.String())
-	for i, want := range []float64{0.000012, 0.000016, 0.00002} {
-		assert.InDelta(t, want, amounts[i].Float(), 1e-12, "event %d carries the cost so far", i)
+	for i, want := range []string{"0.000012", "0.000016", responseCostAmount} {
+		assert.Equal(t, want, amounts[i].Raw, "event %d carries the cost so far", i)
 	}
 	require.Len(t, logger.entries, 1)
 	assert.Equal(t, formatResponseCost(*logger.entries[0].TotalCost), amounts[2].Raw, "the last cost is the logged one")

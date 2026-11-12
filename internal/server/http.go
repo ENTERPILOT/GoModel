@@ -82,7 +82,7 @@ type Config struct {
 	AuditLogger                     auditlog.LoggerInterface               // Optional: Audit logger for request/response logging
 	AuditReader                     auditlog.Reader                        // Optional: audit lookup used for dashboard interaction continuations
 	UsageLogger                     usage.LoggerInterface                  // Optional: Usage logger for token tracking
-	ResponseCostEnabled             bool                                   // Return each model request's calculated cost to its caller (X-GoModel-Cost headers, usage.gomodel_cost in streams)
+	ResponseCostEnabled             bool                                   // Return each model request's calculated cost to its caller (usage.cost in the body, and X-GoModel-Cost headers on buffered responses)
 	ResponseCostBilled              bool                                   // With ResponseCostEnabled: return the billed cost instead of the provider cost (markups enabled)
 	BudgetChecker                   BudgetChecker                          // Optional: per-user-path budget checker
 	RateLimiter                     RateLimiter                            // Optional: per-user-path rate limiter

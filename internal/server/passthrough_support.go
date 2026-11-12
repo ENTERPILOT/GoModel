@@ -298,7 +298,7 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 	if returnsCost && hasContentEncoding(resp.Headers) && (isSSEContentType(resp.Headers) || isJSONContentType(resp.Headers)) {
 		// The gateway asks for no encoding, so the transport decodes gzip
 		// itself; another encoding is unrequested. Its body cannot be read
-		// for usage or cleared of an upstream's gomodel_cost, so it is not
+		// for usage or cleared of an upstream's usage.cost, so it is not
 		// relayed as if this gateway vouched for it.
 		return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway,
 			"provider returned an encoded response the gateway cannot read to return its cost", nil))
@@ -402,14 +402,14 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 }
 
 // relayJSONAfterObservers reads a JSON answer before relaying it, so its usage
-// is priced in time for the response headers to carry the cost. Only requests
-// that return their cost take this path: the answer is complete either way,
-// but the default path relays it as it arrives and accounts for it afterwards.
+// is priced in time for the response to carry the cost, in its headers and
+// in its usage.cost. Only requests that return their cost take this path: the
+// answer is complete either way, but the default path relays it as it arrives
+// and accounts for it afterwards.
 //
-// The cost of a buffered answer is in the headers only, so a gomodel_cost
-// member an upstream GoModel put in the answer's usage is removed: a client
-// must not read it as this gateway's. An answer too large to observe is
-// relayed unread and without a cost, as it is on the default path.
+// An answer too large to observe is relayed as it arrives and without a cost,
+// as it is on the default path; the response cost writer still removes an
+// upstream's usage.cost from it.
 func relayJSONAfterObservers(c *echo.Context, providerType string, resp *core.PassthroughResponse, observers []streaming.Observer) error {
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxObservedJSONResponseBytes+1))
 	if err != nil {
@@ -418,11 +418,6 @@ func relayJSONAfterObservers(c *echo.Context, providerType string, resp *core.Pa
 	observed := len(body) <= maxObservedJSONResponseBytes
 	if observed {
 		notifyObserversWithJSONBody(body, observers)
-		if mayHoldUsage(body) {
-			if stripped, ok := withUsageCost(body, 0, false); ok {
-				body = stripped
-			}
-		}
 	}
 	c.Response().WriteHeader(resp.StatusCode)
 	if _, err := c.Response().Write(body); err != nil {

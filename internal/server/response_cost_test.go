@@ -161,8 +161,8 @@ func cachedResponses(t *testing.T) func(*Config) {
 	}
 }
 
-// streamedCost returns the cost member of the one event that carries it, and
-// the number of events that do.
+// streamedCost returns the cost of the last event that carries one, and the
+// number of events that do.
 func streamedCost(body string) (gjson.Result, int) {
 	var cost gjson.Result
 	count := 0
@@ -171,7 +171,7 @@ func streamedCost(body string) (gjson.Result, int) {
 		if !ok {
 			continue
 		}
-		for _, path := range []string{"usage.gomodel_cost", "response.usage.gomodel_cost"} {
+		for _, path := range []string{"usage.cost", "response.usage.cost"} {
 			if found := gjson.Get(data, path); found.Exists() {
 				cost = found
 				count++
@@ -181,8 +181,9 @@ func streamedCost(body string) (gjson.Result, int) {
 	return cost, count
 }
 
+// costMember is the member the gateway appends to a non-empty usage object.
 func costMember(amount string) string {
-	return `,"gomodel_cost":{"amount":` + amount + `,"currency":"USD"}`
+	return `,"cost":` + amount
 }
 
 type costRequest struct {
@@ -249,14 +250,14 @@ func TestResponseCost_OffByDefault(t *testing.T) {
 			require.NotNil(t, logger.entries[0].TotalCost)
 			assert.Empty(t, rec.Header().Values(responseCostHeader))
 			assert.Empty(t, rec.Header().Values(responseCostCurrencyHeader))
-			assert.NotContains(t, rec.Body.String(), responseCostMember)
+			assert.NotContains(t, rec.Body.String(), `"cost"`)
 		})
 	}
 }
 
-// A buffered response carries its cost in headers only: the body is the one
-// the gateway sends with response costs off, so no dialect parser is affected.
-func TestResponseCost_BufferedResponsesCarryHeaders(t *testing.T) {
+// A buffered response carries its cost as usage.cost and in the headers, the
+// same rounded value as the usage record. Nothing else in the body changes.
+func TestResponseCost_BufferedResponsesCarryCost(t *testing.T) {
 	for _, tt := range bufferedCostRequests {
 		t.Run(tt.name, func(t *testing.T) {
 			plain, _ := costGateway(t, tt.provider())
@@ -266,11 +267,13 @@ func TestResponseCost_BufferedResponsesCarryHeaders(t *testing.T) {
 			rec := postJSON(t, srv, tt.path, tt.body)
 
 			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-			assert.Equal(t, want.Body.String(), rec.Body.String())
 			wantAmount := responseCostAmount
 			if tt.path == "/v1/embeddings" {
 				wantAmount = "0.00001" // 10 input tokens, no output
 			}
+			assert.Equal(t, wantAmount, gjson.Get(rec.Body.String(), "usage.cost").Raw)
+			assert.Equal(t, want.Body.String(), strings.Replace(rec.Body.String(), costMember(wantAmount), "", 1),
+				"only the cost member may differ from the body sent with response costs off")
 			assert.Equal(t, wantAmount, rec.Header().Get(responseCostHeader))
 			assert.Equal(t, "USD", rec.Header().Get(responseCostCurrencyHeader))
 			require.Len(t, logger.entries, 1)
@@ -297,7 +300,7 @@ func TestResponseCost_StreamsCarryCostInFinalUsage(t *testing.T) {
 			assert.Empty(t, rec.Header().Values(responseCostHeader), "the headers are sent before a stream's cost is known")
 			cost, events := streamedCost(rec.Body.String())
 			require.Equal(t, 1, events, rec.Body.String())
-			assert.JSONEq(t, `{"amount":0.00002,"currency":"USD"}`, cost.Raw)
+			assert.Equal(t, responseCostAmount, cost.Raw)
 			assert.Equal(t, want.Body.String(), strings.Replace(rec.Body.String(), costMember(responseCostAmount), "", 1),
 				"only the cost member may differ from the stream sent with response costs off")
 			require.Len(t, logger.entries, 1)
@@ -318,6 +321,7 @@ func TestResponseCost_BilledCostReplacesProviderCost(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		assert.Equal(t, []string{billed}, rec.Header().Values(responseCostHeader))
+		assert.Equal(t, billed, gjson.Get(rec.Body.String(), "usage.cost").Raw)
 		require.Len(t, logger.entries, 1)
 		assert.Equal(t, responseCostAmount, formatResponseCost(*logger.entries[0].TotalCost))
 		assert.Equal(t, billed, formatResponseCost(*logger.entries[0].BilledCost))
@@ -331,7 +335,7 @@ func TestResponseCost_BilledCostReplacesProviderCost(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		cost, events := streamedCost(rec.Body.String())
 		require.Equal(t, 1, events, rec.Body.String())
-		assert.Equal(t, billed, cost.Get("amount").Raw)
+		assert.Equal(t, billed, cost.Raw)
 		assert.NotContains(t, rec.Body.String(), responseCostAmount)
 	})
 
@@ -347,6 +351,7 @@ func TestResponseCost_BilledCostReplacesProviderCost(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		assert.Empty(t, rec.Header().Values(responseCostHeader))
+		assert.False(t, gjson.Get(rec.Body.String(), "usage.cost").Exists())
 	})
 
 	// A wrapper above the markup tap that does not forward StampBilling hides
@@ -364,6 +369,7 @@ func TestResponseCost_BilledCostReplacesProviderCost(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		assert.Empty(t, rec.Header().Values(responseCostHeader))
+		assert.False(t, gjson.Get(rec.Body.String(), "usage.cost").Exists())
 		require.Len(t, logger.entries, 1)
 		assert.Equal(t, "0.00004", formatResponseCost(*logger.entries[0].BilledCost))
 	})
@@ -421,6 +427,7 @@ func TestResponseCost_CacheHits(t *testing.T) {
 			require.Equal(t, http.StatusOK, miss.Code, miss.Body.String())
 			require.Empty(t, miss.Header().Get("X-Cache"))
 			assert.Equal(t, tt.miss, miss.Header().Get(responseCostHeader))
+			assert.Equal(t, tt.miss, gjson.Get(miss.Body.String(), "usage.cost").Raw)
 
 			var hit *httptest.ResponseRecorder
 			require.Eventually(t, func() bool { // the cache is written off the request path
@@ -429,7 +436,9 @@ func TestResponseCost_CacheHits(t *testing.T) {
 			}, 2*time.Second, 5*time.Millisecond)
 			assert.Equal(t, tt.hit, hit.Header().Get(responseCostHeader))
 			assert.Equal(t, "USD", hit.Header().Get(responseCostCurrencyHeader))
-			assert.Equal(t, miss.Body.String(), hit.Body.String())
+			assert.Equal(t, tt.hit, gjson.Get(hit.Body.String(), "usage.cost").Raw)
+			assert.Equal(t, strings.Replace(miss.Body.String(), costMember(tt.miss), "", 1),
+				strings.Replace(hit.Body.String(), costMember(tt.hit), "", 1), "the hit replays the answer, with its own cost")
 		})
 
 		t.Run(tt.name+"/streamed", func(t *testing.T) {
@@ -440,110 +449,26 @@ func TestResponseCost_CacheHits(t *testing.T) {
 			require.Equal(t, http.StatusOK, miss.Code, miss.Body.String())
 			cost, events := streamedCost(miss.Body.String())
 			require.Equal(t, 1, events, miss.Body.String())
-			assert.Equal(t, tt.miss, cost.Get("amount").Raw)
+			assert.Equal(t, tt.miss, cost.Raw)
 
 			var hit *httptest.ResponseRecorder
 			require.Eventually(t, func() bool {
 				hit = postJSON(t, srv, "/v1/chat/completions", body)
 				return hit.Header().Get("X-Cache") != ""
 			}, 2*time.Second, 5*time.Millisecond)
-			// The cost of a hit is known before the replay starts.
-			assert.Equal(t, tt.hit, hit.Header().Get(responseCostHeader))
+			// A stream carries its cost in its events only, even where it
+			// is known before the replay starts.
+			assert.Empty(t, hit.Header().Values(responseCostHeader))
 			cost, events = streamedCost(hit.Body.String())
 			require.Equal(t, 1, events, hit.Body.String())
-			assert.Equal(t, tt.hit, cost.Get("amount").Raw)
+			assert.Equal(t, tt.hit, cost.Raw)
 		})
 	}
 }
 
-// Costs a provider reports itself keep passing through as they do today; the
-// gateway adds its own beside them and never renames or replaces them.
-func TestResponseCost_ProviderCostFieldsPassThrough(t *testing.T) {
-	t.Run("buffered", func(t *testing.T) {
-		provider := costChatProvider()
-		provider.response.Usage.RawUsage = map[string]any{"cost": 0.5}
-		provider.response.ExtraFields = core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"cost": json.RawMessage(`0.25`)})
-		srv, _ := costGateway(t, provider, returnCosts)
-
-		rec := postJSON(t, srv, "/v1/chat/completions", bufferedCostRequests[0].body)
-
-		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-		assert.Equal(t, 0.5, gjson.Get(rec.Body.String(), "usage.cost").Float())
-		assert.Equal(t, 0.25, gjson.Get(rec.Body.String(), "cost").Float())
-		assert.Equal(t, responseCostAmount, rec.Header().Get(responseCostHeader))
-	})
-
-	t.Run("streamed", func(t *testing.T) {
-		provider := costChatProvider()
-		provider.streamData = strings.Replace(chatCostStream, `"total_tokens":15}`, `"total_tokens":15,"cost":0.5,"cost_details":{"upstream_inference_cost":0.4}}`, 1)
-		srv, _ := costGateway(t, provider, returnCosts)
-
-		rec := postJSON(t, srv, "/v1/chat/completions", streamedCostRequests[0].body)
-
-		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-		assert.Equal(t, provider.streamData, strings.Replace(rec.Body.String(), costMember(responseCostAmount), "", 1))
-		assert.Contains(t, rec.Body.String(), `"cost":0.5,"cost_details":{"upstream_inference_cost":0.4},"gomodel_cost":`)
-	})
-}
-
-// The cost headers and the cost member belong to this gateway. A value an
-// upstream GoModel set is this gateway's provider cost, so the caller gets
-// this gateway's own cost in its place, or none when that is unknown.
-func TestResponseCost_ReplacesUpstreamGoModelCost(t *testing.T) {
-	upstreamStream := strings.Replace(anthropicCostStream, `"usage":{"output_tokens":5}`, `"usage":{"output_tokens":5,"gomodel_cost":{"amount":9,"currency":"USD"}}`, 1)
-	upstream := func(contentType, body string) *mockProvider {
-		provider := costNativeMessagesProvider(contentType, body)()
-		provider.passthroughResponse.Headers[responseCostHeader] = []string{"9"}
-		provider.passthroughResponse.Headers[responseCostCurrencyHeader] = []string{"USD"}
-		return provider
-	}
-	unpriced := func(cfg *Config) {
-		cfg.ResponseCostEnabled = true
-		cfg.PricingResolver = &mockPricingResolver{}
-	}
-	buffered, streamed := bufferedCostRequests[4], streamedCostRequests[3]
-
-	t.Run("buffered", func(t *testing.T) {
-		srv, _ := costGateway(t, upstream("application/json", anthropicCostMessage), returnCosts)
-		rec := postJSON(t, srv, buffered.path, buffered.body)
-		assert.Equal(t, []string{responseCostAmount}, rec.Header().Values(responseCostHeader))
-	})
-
-	t.Run("buffered without pricing", func(t *testing.T) {
-		srv, _ := costGateway(t, upstream("application/json", anthropicCostMessage), unpriced)
-		rec := postJSON(t, srv, buffered.path, buffered.body)
-		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-		assert.Empty(t, rec.Header().Values(responseCostHeader))
-		assert.Empty(t, rec.Header().Values(responseCostCurrencyHeader))
-	})
-
-	t.Run("streamed", func(t *testing.T) {
-		srv, _ := costGateway(t, upstream("text/event-stream", upstreamStream), returnCosts)
-		rec := postJSON(t, srv, streamed.path, streamed.body)
-		assert.Empty(t, rec.Header().Values(responseCostHeader))
-		cost, events := streamedCost(rec.Body.String())
-		require.Equal(t, 1, events, rec.Body.String())
-		assert.Equal(t, responseCostAmount, cost.Get("amount").Raw)
-	})
-
-	t.Run("streamed without pricing", func(t *testing.T) {
-		srv, _ := costGateway(t, upstream("text/event-stream", upstreamStream), unpriced)
-		rec := postJSON(t, srv, streamed.path, streamed.body)
-		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-		assert.Equal(t, anthropicCostStream, rec.Body.String(), "the upstream's member is removed, and nothing else changes")
-	})
-
-	// With response costs off the gateway relays what the upstream sent.
-	t.Run("off", func(t *testing.T) {
-		srv, _ := costGateway(t, upstream("text/event-stream", upstreamStream))
-		rec := postJSON(t, srv, streamed.path, streamed.body)
-		assert.Equal(t, []string{"9"}, rec.Header().Values(responseCostHeader))
-		assert.Equal(t, upstreamStream, rec.Body.String())
-	})
-}
-
 // Images and buffered audio record their usage before they answer, so they
-// carry the cost header like every other buffered response. Audio the gateway
+// carry the cost header like every other buffered response; it is their only
+// channel, since their answers carry no usage object. Audio the gateway
 // relays as it arrives is measured, and priced, only once it has been sent.
 func TestResponseCost_MediaEndpoints(t *testing.T) {
 	speech := func(resp *core.AudioResponse) core.RoutableProvider {
@@ -623,6 +548,9 @@ func TestResponseCost_RelayedJSONAnswers(t *testing.T) {
 		require.Len(t, logger.entries, 1)
 		require.NotNil(t, logger.entries[0].TotalCost)
 		assert.Equal(t, formatResponseCost(*logger.entries[0].TotalCost), rec.Header().Get(responseCostHeader))
+		if usageObject := gjson.Get(rec.Body.String(), "usage"); usageObject.IsObject() {
+			assert.Equal(t, rec.Header().Get(responseCostHeader), usageObject.Get("cost").Raw)
+		}
 	})
 
 	// The answer is not committed yet when the provider body fails, so the
@@ -668,6 +596,7 @@ func TestResponseCost_UnpricedCacheHitsCarryNothing(t *testing.T) {
 			assert.Empty(t, miss.Header().Values(responseCostHeader))
 			assert.Empty(t, hit.Header().Values(responseCostHeader))
 			assert.Empty(t, hit.Header().Values(responseCostCurrencyHeader))
+			assert.False(t, gjson.Get(hit.Body.String(), "usage.cost").Exists())
 		})
 	}
 }
