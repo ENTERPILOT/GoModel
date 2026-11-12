@@ -74,6 +74,10 @@ class ModelTestState {
       // USER_PATH_HEADER, so never guess the header name.
       if (userPath) {
         await runtimeConfig.ensureLoaded();
+        // apiFetch reads the key when it is called: after a key change
+        // during the wait the test would run under the new key, with its
+        // result (and a gateway 401) dropped as stale.
+        if (generation !== auth.generation) return;
         if (!runtimeConfig.loaded) {
           finish({ ok: false }, m.playground_config_unavailable());
           return;

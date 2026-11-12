@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import {
   MODEL_TEST_MAX_TOKENS,
@@ -144,4 +146,25 @@ test("summarizeModelTest reports the gateway error message or the fallback", () 
     summarizeModelTest({ ok: false, durationMs: 60000 }, "timed out"),
     { state: "error", durationMs: 60000, status: 0, message: "timed out" },
   );
+});
+
+// Regression: a key change while a restricted model's test waited for the
+// runtime config let the request go out under the new key, while its result
+// and a gateway 401 were dropped as stale. The store needs the Svelte
+// runtime, so this asserts the ordering on the source (like
+// editor-dialog.test.js).
+test("a model test is dropped when the key changes before it is sent", () => {
+  const store = readFileSync(
+    fileURLToPath(new URL("../src/pages/models/modelTest.svelte.js", import.meta.url)),
+    "utf8",
+  );
+  const run = (store.match(/async run\(row\) \{[\s\S]*?\n  \}/) || [""])[0];
+  const capture = run.indexOf("const generation = auth.generation;");
+  const wait = run.indexOf("await runtimeConfig.ensureLoaded();");
+  const guard = run.indexOf("if (generation !== auth.generation) return;");
+  const send = run.indexOf("await apiFetch(");
+
+  assert.ok(capture >= 0 && capture < wait, "the key generation is captured before the wait");
+  assert.ok(wait < guard, "the key generation is re-checked after the wait");
+  assert.ok(guard < send, "a test for an earlier key is never sent");
 });
