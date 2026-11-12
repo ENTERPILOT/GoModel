@@ -172,7 +172,10 @@ volume, restrict access, and classify backups accordingly.
 - **Client credential headers are redacted before they are persisted.** With
   `LOGGING_LOG_HEADERS=true`, `Authorization`, `x-api-key`, `Cookie`, and the
   other credential headers are replaced with `[REDACTED]` on the write path, so
-  the audit store never receives them.
+  the audit store never receives them. So is any header whose name looks like a
+  credential: one ending in `token`, `-key` or `-auth`, or containing
+  `authorization`, `api-key`, `apikey`, `secret`, `password`, `signature` or
+  `jwt`. `Idempotency-Key` and `Sec-WebSocket-Key` are kept.
 - **Set `GOMODEL_MASTER_KEY`.** If it is empty and no managed keys exist, every
   request is allowed through unauthenticated, and `/admin/*` is added to the
   auth skip list as a lockout-recovery path. An internet-reachable gateway in

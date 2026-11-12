@@ -362,4 +362,7 @@ jobs:
         run: make mod-check
 
       - name: Build
-        run: go build -v ./cmd/gomodel
+        run: go build -v -trimpath -tags=grpcnotrace ./cmd/gomodel
+
+      - name: Check binary size guard
+        run: make build-size-check

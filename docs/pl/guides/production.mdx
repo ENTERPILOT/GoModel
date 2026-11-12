@@ -167,7 +167,10 @@ wolumen, ograniczaj dostęp i odpowiednio klasyfikuj kopie zapasowe.
 - **Nagłówki z danymi uwierzytelniającymi klienta są redagowane przed utrwaleniem.** Przy
   `LOGGING_LOG_HEADERS=true` nagłówki `Authorization`, `x-api-key`, `Cookie` i
   inne nagłówki z danymi uwierzytelniającymi są zastępowane przez `[REDACTED]` na ścieżce zapisu, więc
-  magazyn audytu nigdy ich nie otrzymuje.
+  magazyn audytu nigdy ich nie otrzymuje. To samo dotyczy każdego nagłówka, którego nazwa
+  wygląda na dane uwierzytelniające: kończy się na `token`, `-key` lub `-auth` albo zawiera
+  `authorization`, `api-key`, `apikey`, `secret`, `password`, `signature` lub `jwt`.
+  `Idempotency-Key` i `Sec-WebSocket-Key` pozostają bez zmian.
 - **Ustaw `GOMODEL_MASTER_KEY`.** Jeśli jest pusty i nie istnieją żadne zarządzane klucze, każdy
   request jest przepuszczany bez uwierzytelnienia, a `/admin/*` zostaje dodane do
   listy ścieżek pomijających uwierzytelnianie jako ścieżka odzyskiwania dostępu. Gateway dostępny z internetu w
