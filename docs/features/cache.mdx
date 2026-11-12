@@ -98,6 +98,16 @@ replayed to another caller. A `background: true` request on
 layers as well: its `queued` body carries an id that belongs to one caller's
 response.
 
+Two request headers tune the semantic layer for a single request. Entries are
+shared between callers, so neither header can change what others are served:
+
+- `X-Cache-Semantic-Threshold` raises the similarity required for a hit, up to
+  `1.0`. A value below the configured threshold is ignored. A request that
+  misses only because of its stricter threshold is answered fresh and not
+  stored.
+- `X-Cache-TTL` shortens the lifetime, in seconds, of the entry the request
+  stores. A value above the configured `ttl` is capped to it.
+
 For the full semantic-cache design and storage options, see
 [ADR-0006](/adr/0006-semantic-response-cache).
 

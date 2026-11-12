@@ -98,6 +98,17 @@ przywrócony tekst nigdy nie został odtworzony innemu wywołującemu. Request
 [`/v1/responses`](/pl/advanced/responses-api#odpowiedzi-w-tle) także pomija obie
 warstwy: jego body `queued` zawiera id należące do odpowiedzi jednego wywołującego.
 
+Dwa nagłówki requestu dostrajają warstwę semantyczną dla pojedynczego requestu.
+Wpisy są współdzielone między wywołującymi, więc żaden z nagłówków nie zmienia
+tego, co otrzymują inni:
+
+- `X-Cache-Semantic-Threshold` podnosi podobieństwo wymagane do trafienia,
+  maksymalnie do `1.0`. Wartość poniżej skonfigurowanego progu jest ignorowana.
+  Request, który nie trafia w cache wyłącznie z powodu swojego ostrzejszego
+  progu, dostaje świeżą odpowiedź, która nie jest zapisywana.
+- `X-Cache-TTL` skraca czas życia (w sekundach) wpisu zapisywanego przez
+  request. Wartość powyżej skonfigurowanego `ttl` jest do niego ograniczana.
+
 Pełny projekt cache'u semantycznego i opcje przechowywania opisuje
 [ADR-0006](/adr/0006-semantic-response-cache).
 

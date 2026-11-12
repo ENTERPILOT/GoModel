@@ -440,6 +440,111 @@ func TestSemanticCacheMiddleware_HeaderThresholdOverride(t *testing.T) {
 	}
 }
 
+func TestSemanticCacheMiddleware_HeaderThresholdNeverCausesExtraWrite(t *testing.T) {
+	// Against the cached {1, 0, 0}, near has cosine similarity ~0.9986 and
+	// far ~0.9507; the configured threshold is 0.99.
+	same := []float32{1, 0, 0}
+	near := []float32{0.95, 0.05, 0}
+	far := []float32{0.95, 0.31, 0}
+	tests := []struct {
+		name        string
+		vector      []float32
+		header      string
+		wantCache   string
+		wantEntries int
+	}{
+		{name: "stricter header miss is not stored", vector: near, header: "0.9999", wantEntries: 1},
+		{name: "out of range header is clamped and still hits an identical prompt", vector: same, header: "5", wantCache: CacheHeaderSemantic, wantEntries: 1},
+		{name: "out of range header miss is not stored", vector: near, header: "5", wantEntries: 1},
+		{name: "infinite header miss is not stored", vector: near, header: "Inf", wantEntries: 1},
+		{name: "miss at configured threshold is stored", vector: far, wantEntries: 2},
+		{name: "stricter header keeps a configured miss stored", vector: far, header: "0.9999", wantEntries: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := NewMapVecStore()
+			emb := &mockEmbedder{vector: same}
+			m := newSemanticCacheMiddleware(emb, store, config.SemanticCacheConfig{
+				SimilarityThreshold:     0.99,
+				TTL:                     new(3600),
+				MaxConversationMessages: new(10),
+			}, nil)
+
+			body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hello"}]}`)
+			serveSemanticRequest(t, m, body, "")
+			m.wg.Wait()
+			require.Equal(t, 1, store.Len())
+
+			emb.vector = tt.vector
+			var opts []echotest.Option
+			if tt.header != "" {
+				opts = append(opts, echotest.WithHeader("X-Cache-Semantic-Threshold", tt.header))
+			}
+			c, rec := echotest.Post(t, "/v1/chat/completions", body, opts...)
+			err := m.Handle(&echoExchange{c: c}, body, func() error {
+				return c.JSON(http.StatusOK, map[string]string{"answer": "replaced"})
+			})
+			require.NoError(t, err)
+			m.wg.Wait()
+
+			assert.Equal(t, tt.wantCache, rec.Header().Get("X-Cache"))
+			assert.Equal(t, tt.wantEntries, store.Len())
+			if tt.wantCache == "" {
+				assert.JSONEq(t, `{"answer":"replaced"}`, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestSemanticCacheMiddleware_HeaderTTLOnlyShortens(t *testing.T) {
+	tests := []struct {
+		name          string
+		configuredTTL int
+		header        string
+		wantTTL       int64 // seconds; 0 means the entry never expires
+	}{
+		{name: "no header keeps configured TTL", configuredTTL: 3600, wantTTL: 3600},
+		{name: "shorter header is honored", configuredTTL: 3600, header: "60", wantTTL: 60},
+		{name: "longer header is capped", configuredTTL: 3600, header: "86400", wantTTL: 3600},
+		{name: "overflowing header is ignored", configuredTTL: 3600, header: "9223372036854775807", wantTTL: 3600},
+		{name: "negative header is ignored", configuredTTL: 3600, header: "-60", wantTTL: 3600},
+		{name: "malformed header is ignored", configuredTTL: 3600, header: "1h", wantTTL: 3600},
+		{name: "header shortens a non-expiring TTL", configuredTTL: 0, header: "60", wantTTL: 60},
+		{name: "overflowing header keeps a non-expiring TTL", configuredTTL: 0, header: "9223372036854775807", wantTTL: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := NewMapVecStore()
+			now := time.Unix(1_700_000_000, 0)
+			store.now = func() time.Time { return now }
+			m := newSemanticCacheMiddleware(&mockEmbedder{vector: []float32{1, 0, 0}}, store, config.SemanticCacheConfig{
+				SimilarityThreshold:     0.90,
+				TTL:                     new(tt.configuredTTL),
+				MaxConversationMessages: new(10),
+			}, nil)
+
+			body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"ttl"}]}`)
+			var opts []echotest.Option
+			if tt.header != "" {
+				opts = append(opts, echotest.WithHeader("X-Cache-TTL", tt.header))
+			}
+			c, _ := echotest.Post(t, "/v1/chat/completions", body, opts...)
+			err := m.Handle(&echoExchange{c: c}, body, func() error {
+				return c.JSON(http.StatusOK, map[string]string{"answer": "42"})
+			})
+			require.NoError(t, err)
+			m.wg.Wait()
+
+			require.Len(t, store.entries, 1)
+			wantExpiresAt := int64(0)
+			if tt.wantTTL != 0 {
+				wantExpiresAt = now.Unix() + tt.wantTTL
+			}
+			assert.Equal(t, wantExpiresAt, store.entries[0].expiresAt)
+		})
+	}
+}
+
 func TestSemanticCacheMiddleware_TTLExpiry(t *testing.T) {
 	store := NewMapVecStore()
 	current := time.Now()

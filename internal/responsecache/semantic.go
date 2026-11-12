@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"hash"
 	"log/slog"
+	"math"
 	"net/http"
 	"slices"
 	"sort"
@@ -21,6 +22,16 @@ import (
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/embedding"
+)
+
+const (
+	// maxSimilarityThreshold is the highest similarity a vector store reports,
+	// so a client-supplied threshold above it is clamped.
+	maxSimilarityThreshold = 1.0
+
+	// maxHeaderDurationSeconds is the largest whole-second count a
+	// time.Duration can hold.
+	maxHeaderDurationSeconds = int64(math.MaxInt64 / time.Second)
 )
 
 // semanticCacheWriteJob carries one vector-store insert handed to a background
@@ -135,7 +146,7 @@ func (m *semanticCacheMiddleware) Handle(ex exchange, body []byte, next func() e
 	// including other tenants'.
 	threshold := m.cfg.SimilarityThreshold
 	if v := headerFloat64(ex.RequestHeader, "X-Cache-Semantic-Threshold"); v > threshold {
-		threshold = v
+		threshold = min(v, maxSimilarityThreshold)
 	}
 
 	if m.cfg.MaxConversationMessages != nil && *m.cfg.MaxConversationMessages > 0 && msgCount > *m.cfg.MaxConversationMessages {
@@ -183,6 +194,12 @@ func (m *semanticCacheMiddleware) Handle(ex exchange, body []byte, next func() e
 			return replayErr
 		}
 		slog.Warn("semantic cache replay failed", "path", path, "err", replayErr)
+	} else if len(results) > 0 && float64(results[0].Score) >= m.cfg.SimilarityThreshold {
+		// Only the client's stricter threshold turned this into a miss. The entry
+		// ID below derives from the prompt, so storing the fresh response could
+		// replace the shared entry the configured threshold serves to everyone
+		// else. Answer fresh and leave the store untouched.
+		return next()
 	}
 
 	data, ok, err := ex.Capture("semantic cache: failed to capture cacheable response body", next)
@@ -196,8 +213,10 @@ func (m *semanticCacheMiddleware) Handle(ex exchange, body []byte, next func() e
 	if m.cfg.TTL != nil {
 		ttlSec = *m.cfg.TTL
 	}
+	// The header may only shorten an entry's lifetime: entries are shared, so a
+	// client must not keep one alive past the configured TTL (0 = no expiry).
 	ttl := time.Duration(ttlSec) * time.Second
-	if v := headerDuration(ex.RequestHeader, "X-Cache-TTL"); v > 0 {
+	if v := headerDuration(ex.RequestHeader, "X-Cache-TTL"); v > 0 && (ttl <= 0 || v < ttl) {
 		ttl = v
 	}
 
@@ -642,13 +661,16 @@ func headerFloat64(header func(string) string, name string) float64 {
 	return v
 }
 
+// headerDuration parses a header holding whole seconds. It returns 0, meaning
+// "not set", for a missing, malformed or non-positive value and for one too
+// large to represent as a time.Duration.
 func headerDuration(header func(string) string, name string) time.Duration {
 	s := header(name)
 	if s == "" {
 		return 0
 	}
 	seconds, err := strconv.ParseInt(s, 10, 64)
-	if err != nil {
+	if err != nil || seconds <= 0 || seconds > maxHeaderDurationSeconds {
 		return 0
 	}
 	return time.Duration(seconds) * time.Second

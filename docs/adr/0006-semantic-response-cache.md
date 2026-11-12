@@ -88,8 +88,8 @@ Bifrost's 0.80 is too aggressive for correctness-sensitive use cases.
 
 ### Per-Request Overrides
 
-- `X-Cache-Semantic-Threshold` (can only raise the configured threshold, never lower it)
-- `X-Cache-TTL`
+- `X-Cache-Semantic-Threshold` (can only raise the configured threshold, never lower it; clamped to `1.0`; a request that misses only because of its stricter threshold is not stored)
+- `X-Cache-TTL` (can only shorten the configured TTL, never extend it)
 - `X-Cache-Type`: `exact` | `semantic` | `both` (default)
 - `X-Cache-Control: no-store`
 

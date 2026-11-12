@@ -101,6 +101,19 @@ ausgespielt wird. Ein Request mit `background: true` auf
 beide Ebenen: Sein `queued`-Body enthält eine ID, die zur Response eines einzelnen
 Aufrufers gehört.
 
+Zwei Request-Header passen die semantische Ebene für einen einzelnen Request an.
+Einträge werden zwischen Aufrufern geteilt, daher kann keiner der beiden Header
+ändern, was andere ausgeliefert bekommen:
+
+- `X-Cache-Semantic-Threshold` erhöht die für einen Treffer erforderliche
+  Ähnlichkeit, höchstens auf `1.0`. Ein Wert unter dem konfigurierten
+  Schwellenwert wird ignoriert. Ein Request, der nur wegen seines strengeren
+  Schwellenwerts keinen Treffer erzielt, wird frisch beantwortet und nicht
+  gespeichert.
+- `X-Cache-TTL` verkürzt die Lebensdauer (in Sekunden) des Eintrags, den der
+  Request speichert. Ein Wert über der konfigurierten `ttl` wird auf diese
+  begrenzt.
+
 Das vollständige Design des semantischen Caches und die Speicheroptionen finden Sie
 in [ADR-0006](/adr/0006-semantic-response-cache).
 
