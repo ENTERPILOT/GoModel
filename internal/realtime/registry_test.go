@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/enterpilot/gomodel/internal/expiry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -159,13 +160,13 @@ func TestCallRegistryExpiresAtExactDeadline(t *testing.T) {
 }
 
 // Every call re-registered since the index tracked it makes eviction walk
-// nothing but stale nodes. Repair is budgeted, so past maxExpiryReconciliations
+// nothing but stale nodes. Repair is budgeted, so past expiry.MaxReconciliations
 // the index is rebuilt once instead; eviction must still drop exactly the call
 // closest to expiry and leave the index matching the map.
 func TestCallRegistryEvictsSoonestAfterEveryCallWasReRegistered(t *testing.T) {
 	now := time.Unix(1000, 0)
 	r := newTestRegistry(&now)
-	require.Greater(t, r.capacity, maxExpiryReconciliations, "the capacity must exceed the repair budget")
+	require.Greater(t, r.capacity, expiry.MaxReconciliations, "the capacity must exceed the repair budget")
 
 	for i := range r.capacity {
 		r.Register(fmt.Sprintf("rtc_%d", i), CallRoute{Model: "m"})

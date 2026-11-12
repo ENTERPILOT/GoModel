@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/expiry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -397,7 +398,7 @@ func TestSticky_IndexDoesNotGrowAfterSourcePrune(t *testing.T) {
 }
 
 // Every pin refreshed since the index tracked it makes eviction walk nothing
-// but stale nodes. Repair is budgeted, so past maxExpiryReconciliations the
+// but stale nodes. Repair is budgeted, so past expiry.MaxReconciliations the
 // index is rebuilt once instead; eviction must still drop exactly the pin
 // closest to expiry and leave the index matching the map.
 func TestSticky_EvictsSoonestAfterEveryPinWasRefreshed(t *testing.T) {
@@ -405,7 +406,7 @@ func TestSticky_EvictsSoonestAfterEveryPinWasRefreshed(t *testing.T) {
 	sticky := &stickySessions{capacity: 100}
 	current := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
 	sticky.now = func() time.Time { return current }
-	require.Greater(t, sticky.capacity, maxExpiryReconciliations, "the capacity must exceed the repair budget")
+	require.Greater(t, sticky.capacity, expiry.MaxReconciliations, "the capacity must exceed the repair budget")
 
 	for i := range sticky.capacity {
 		stickyAssign(sticky, "smart", "sess-"+strconv.Itoa(i), "openai/gpt-4o")
