@@ -316,17 +316,24 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 		}
 	})
 
+	// The upstream answers successfully, so a provider that ignores the
+	// cancelled context returns a reply and fails here instead of hanging.
 	t.Run("cancelled context surfaces as an error", func(t *testing.T) {
 		server, _ := Server(t, func(w http.ResponseWriter, r *http.Request) {
-			<-r.Context().Done()
+			w.Header().Set("Content-Type", "application/json")
+			body := ChatCompletionJSON
+			if strings.HasSuffix(r.URL.Path, "/responses") {
+				body = ResponsesJSON
+			}
+			_, _ = io.WriteString(w, body)
 		})
 		provider := p.New(apiKey, server.URL, server.Client(), llmclient.Hooks{})
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		_, err := provider.ChatCompletion(ctx, chatRequest())
-		require.Error(t, err, "chat completion")
+		require.ErrorIs(t, err, context.Canceled, "chat completion")
 		_, err = provider.Responses(ctx, responsesRequest())
-		require.Error(t, err, "responses")
+		require.ErrorIs(t, err, context.Canceled, "responses")
 	})
 
 	t.Run("allowed_tools tool_choice", func(t *testing.T) {

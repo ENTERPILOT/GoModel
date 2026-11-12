@@ -1298,11 +1298,20 @@ data: [DONE]
 `
 
 	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "mock")
-	data, err := io.ReadAll(converter)
+	raw, err := io.ReadAll(converter)
 	require.NoError(t, err)
 
+	events := parseTestSSEEvents(t, string(raw))
+	requireNormalizedResponsesStream(t, events)
+
 	// Empty deltas are not emitted: only the "Hello" delta event remains.
-	result := string(data)
-	assert.Equal(t, 1, strings.Count(result, "event: response.output_text.delta"))
-	assert.Contains(t, result, `"delta":"Hello"`)
+	var deltas []any
+	for _, event := range events {
+		if event.Name == "response.output_text.delta" {
+			deltas = append(deltas, event.Payload["delta"])
+		}
+	}
+	assert.Equal(t, []any{"Hello"}, deltas)
+	names := eventNames(events)
+	assert.Equal(t, []string{"response.completed", "[DONE]"}, names[len(names)-2:])
 }
