@@ -1,5 +1,5 @@
 # Build stage — run on the build host's native arch for speed, cross-compile for target
-FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine3.24 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine3.24@sha256:0a5f7fe796599ff487605987432e7619ae45beeb2fba4c2ce0b907879932aebf AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -24,7 +24,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GOARM=${TARGETVARIANT#v}
 RUN mkdir -p /app/.cache /app/data && touch /app/.cache/.keep /app/data/.keep
 
 # Runtime stage
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 
 # Ownership proof for the MCP Registry; must match the name in server.json
 LABEL io.modelcontextprotocol.server.name="io.github.ENTERPILOT/gomodel"
