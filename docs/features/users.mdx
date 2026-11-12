@@ -145,7 +145,7 @@ default, so nothing changes until you set one:
 
 | Field                  | Effect                                                         | Inheritance           |
 | ---------------------- | -------------------------------------------------------------- | --------------------- |
-| `default_model`        | serves a request that names no model                           | the nearest path wins |
+| `default_model`        | serves a request that names neither a `model` nor a `provider` | the nearest path wins |
 | `max_reasoning_effort` | lowers a higher reasoning effort to this level                 | the lowest ceiling wins |
 | `max_output_tokens`    | lowers a higher output token limit to this number, and sets it on a request that sends none | the lowest ceiling wins |
 
@@ -175,7 +175,10 @@ a child changes nothing. Efforts use the scale `none`, `minimal`, `low`,
 `medium`, `high`, `xhigh`, `max`. The token ceiling covers `max_tokens`,
 `max_completion_tokens`, and `max_output_tokens` in whichever spelling the
 client used, and a request that sends no limit gets the ceiling as its limit,
-in the field the upstream model takes. The effort ceiling only lowers an effort
+in the field the upstream model takes. A limit sent only in a spelling the
+endpoint does not have (`max_output_tokens` on Chat Completions, `max_tokens`
+on the Responses API) is moved to the endpoint's own field, and a value that is
+not a whole number of at least 1 is replaced by the ceiling. The effort ceiling only lowers an effort
 the request sends and never adds one, because adding an effort would switch
 reasoning on for requests that did not ask for it. A request without an effort
 therefore runs at the model's default, and a model that cannot think less than
@@ -213,12 +216,16 @@ on every attempt, including failover legs, so they also bound an effort or a
 Completions, the Responses API, and the Anthropic Messages API; a Messages
 request within the ceilings is still forwarded natively to Anthropic, and one
 above them takes the translated path so it can be lowered. Embeddings and
-media endpoints are not rewritten.
+media endpoints are not rewritten. [Response cache](/features/cache) entries
+are scoped to the ceilings in force, so an answer cached before a ceiling was
+set or changed is not served under the new one.
 
 <Warning>
 Batches and provider passthrough under `/p/` are **not** capped: their bodies
 go upstream as sent. A capped key that may also use batches or `/p/` can
-bypass the policy, so deny those endpoints to keys you cap.
+bypass the policy, so deny those endpoints to keys you cap. The
+[ChatGPT](/providers/chatgpt) provider accepts no output token limit, so
+`max_output_tokens` is not enforced on its models.
 </Warning>
 
 A policy on `/` binds every request, including those with no user path (the

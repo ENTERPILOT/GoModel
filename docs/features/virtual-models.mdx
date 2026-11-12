@@ -86,9 +86,13 @@ virtual_models:
       - { model: hetzner/qwen3.8 }
 ```
 
-The override replaces both `reasoning.effort` and the flat `reasoning_effort`
-field, and applies even when the client sent no effort. GoModel then translates
-it to each provider's own reasoning parameter, as it does for client values.
+The override replaces `reasoning.effort`, the flat `reasoning_effort` field,
+and every [provider-specific reasoning control](/features/users#request-policy)
+the client sent (`thinking`, `enable_thinking`, `thinking_budget`, `think`, the
+reasoning switches in `chat_template_kwargs`), and applies even when the client
+sent no effort. A control the virtual model sets in its own `params` stays.
+GoModel then translates the effort to each provider's own reasoning parameter,
+as it does for client values.
 
 The deepest configured value wins, per attempt. A concrete model's override beats
 any redirect above it, and an inner [chained](#chain-virtual-models) virtual
@@ -200,9 +204,10 @@ default. A failover leg is rebuilt from the client's request and gets the
 parameters of its own route and concrete model; the primary model's policy
 never leaks into it. The caller's
 [user path ceilings](/features/users#request-policy) apply last, after
-`params` and the reasoning effort override, so a `max_tokens` above the path's
-`max_output_tokens` is lowered whether the client, `default_params`, or
-`params` set it.
+`params` and the reasoning effort override, so an output token limit in any
+spelling (`max_tokens`, `max_completion_tokens`, `max_output_tokens`) above the
+path's `max_output_tokens` is lowered whether the client, `default_params`, or
+`params` set it, and a request left without a limit gets the path's.
 [Guardrail](/advanced/guardrails) plugins run first, so `params` replaces a
 value a plugin set and `default_params` respects it. Parameters apply to Chat
 Completions, the Responses API, and the Anthropic Messages API (native

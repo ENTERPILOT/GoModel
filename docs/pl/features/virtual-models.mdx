@@ -86,10 +86,13 @@ virtual_models:
       - { model: hetzner/qwen3.8 }
 ```
 
-Nadpisanie zastępuje zarówno `reasoning.effort`, jak i płaskie pole
-`reasoning_effort`, i działa także wtedy, gdy klient nie wysłał żadnego effort.
-GoModel tłumaczy je następnie na parametr reasoning danego providera, tak samo
-jak wartości klienta.
+Nadpisanie zastępuje `reasoning.effort`, płaskie pole `reasoning_effort` oraz
+każde [sterowanie reasoningiem specyficzne dla providera](/pl/features/users#polityka-requestów),
+które wysłał klient (`thinking`, `enable_thinking`, `thinking_budget`, `think`,
+przełączniki reasoningu w `chat_template_kwargs`), i działa także wtedy, gdy
+klient nie wysłał żadnego effort. Sterowanie, które model wirtualny ustawia we
+własnych `params`, zostaje. GoModel tłumaczy effort następnie na parametr
+reasoning danego providera, tak samo jak wartości klienta.
 
 Dla każdej próby wygrywa wartość skonfigurowana najgłębiej. Nadpisanie
 konkretnego modelu ma pierwszeństwo przed każdym przekierowaniem nad nim, a
@@ -222,8 +225,10 @@ więc aliasy, których zastosowane wartości się różnią, także dla `top_k` 
 
 [Limity ścieżki użytkownika](/pl/features/users#polityka-requestów)
 wywołującego działają na końcu, po `params` i nadpisaniu reasoning effort:
-`max_tokens` powyżej `max_output_tokens` ścieżki zostaje obniżony niezależnie
-od tego, czy ustawił go klient, `default_params` czy `params`.
+limit tokenów wyjściowych w dowolnej pisowni (`max_tokens`,
+`max_completion_tokens`, `max_output_tokens`) powyżej `max_output_tokens`
+ścieżki zostaje obniżony niezależnie od tego, czy ustawił go klient,
+`default_params` czy `params`, a request bez limitu dostaje limit ścieżki.
 
 Reszta tej strony dotyczy przekierowań.
 

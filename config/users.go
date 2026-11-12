@@ -20,20 +20,22 @@ type UserConfig struct {
 	// "model". Empty means the node itself does not restrict models.
 	AllowedModels []string `yaml:"allowed_models,omitempty" json:"allowed_models,omitempty"`
 
-	// DefaultModel serves requests under Path that name no model: a model or
-	// a virtual model. The nearest path that sets one wins. Empty (the
-	// default) keeps rejecting such requests.
+	// DefaultModel serves chat, Responses and Messages requests under Path
+	// that name neither a model nor a provider: a model or a virtual model.
+	// The nearest path that sets one wins. Empty (the default) keeps
+	// rejecting such requests.
 	DefaultModel string `yaml:"default_model,omitempty" json:"default_model,omitempty"`
 
 	// MaxReasoningEffort caps the reasoning effort of requests under Path:
 	// "none", "minimal", "low", "medium", "high", "xhigh", or "max". A
 	// higher request is lowered to it; the lowest cap up to the root
-	// applies. Empty (the default) sets no cap.
+	// applies. A model that cannot reason below a minimum level keeps that
+	// minimum. Empty (the default) sets no cap.
 	MaxReasoningEffort string `yaml:"max_reasoning_effort,omitempty" json:"max_reasoning_effort,omitempty"`
 
 	// MaxOutputTokens caps the output token limit of requests under Path. A
-	// higher request is lowered to it; the lowest cap up to the root
-	// applies. Zero (the default) sets no cap.
+	// higher request is lowered to it and a request without a limit gets it;
+	// the lowest cap up to the root applies. Zero (the default) sets no cap.
 	MaxOutputTokens int `yaml:"max_output_tokens,omitempty" json:"max_output_tokens,omitempty"`
 
 	// Description is an optional human-readable note.

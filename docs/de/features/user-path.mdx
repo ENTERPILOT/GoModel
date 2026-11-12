@@ -129,17 +129,20 @@ nur einschränken kann, was seine Gruppe erlaubt. Siehe [Benutzer](/de/features/
 
 ## Request-Policy
 
-Ein Knoten im User-Path-Baum kann außerdem ein `default_model` für Requests
-ohne Modell sowie Obergrenzen für Reasoning-Effort (`max_reasoning_effort`) und
-Ausgabe-Tokens (`max_output_tokens`) für jedes Modell setzen. Alles unter dem
-Knoten erbt sie: Das nächstgelegene Standardmodell gewinnt, und die niedrigste
+Ein Knoten im User-Path-Baum kann außerdem ein `default_model` für Chat-,
+Responses- und Messages-Requests setzen, die weder Modell noch Provider nennen,
+sowie Obergrenzen für Reasoning-Effort (`max_reasoning_effort`) und
+Ausgabe-Tokens (`max_output_tokens`) für jedes Modell. Alles unter dem Knoten
+erbt sie: Das nächstgelegene Standardmodell gewinnt, und die niedrigste
 Obergrenze bis `/` gilt, sodass ein Kind die Obergrenze seiner Gruppe nicht
 lockern kann. Die Effort-Obergrenze senkt nur einen Effort, den der Request
 mitbringt, und schaltet Reasoning daher nie ein; die Token-Obergrenze setzt das
 Limit auch bei einem Request, der keines sendet. Eine Policy auf `/` gilt für
 jeden Request, auch ohne User Path. Anders als das `reasoning_effort` eines
 virtuellen Modells, das einen Wert für ein Modell erzwingt, begrenzen diese
-jedes Modell, das der Pfad nutzt. Siehe [Benutzer](/de/features/users#request-policy).
+jedes Modell, das der Pfad nutzt; nur ein Modell, das nicht unter einer
+Mindeststufe denken kann, behält diese Mindeststufe auch unter einer
+niedrigeren Effort-Obergrenze. Siehe [Benutzer](/de/features/users#request-policy).
 
 Ein Key ohne gebundenen `user_path` wählt seinen Pfad über den Header oben und
 damit die Policy seines eigenen Teilbaums. Setzen Sie Obergrenzen auf Keys mit

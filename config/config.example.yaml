@@ -149,12 +149,15 @@ models:
 # A node may also set a request policy that everything below it inherits; all
 # three are unset by default:
 #   default_model         serves chat, Responses, and Messages requests that
-#                         name no model (a model or a virtual model); the
-#                         nearest path that sets one wins
+#                         name neither a model nor a provider; the default is
+#                         a model or a virtual model, and the nearest path that
+#                         sets one wins
 #   max_reasoning_effort  lowers a higher reasoning effort to this level (none,
-#                         minimal, low, medium, high, xhigh, max)
-#   max_output_tokens     lowers a higher output token limit to this number and
-#                         sets it on a request that sends none
+#                         minimal, low, medium, high, xhigh, max); a model that
+#                         cannot reason below a minimum level keeps that minimum
+#   max_output_tokens     lowers a higher output token limit (max_tokens,
+#                         max_completion_tokens, max_output_tokens) to this
+#                         number and sets it on a request that sends none
 # The lowest ceiling between a path and the root applies, so a child can
 # tighten its group's ceiling but not loosen it; a policy on / binds every
 # request, with or without a user path. The effort ceiling adds nothing to a

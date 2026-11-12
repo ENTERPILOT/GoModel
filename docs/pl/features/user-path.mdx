@@ -130,16 +130,19 @@ jedynie zawęzić to, na co pozwala jego grupa. Zobacz [Użytkownicy](/pl/featur
 ## Polityka requestów
 
 Węzeł drzewa ścieżek użytkownika może też ustawić `default_model` dla
-requestów bez modelu oraz limity reasoning effort (`max_reasoning_effort`) i
-tokenów wyjściowych (`max_output_tokens`) dla każdego modelu. Wszystko pod
-węzłem je dziedziczy: wygrywa najbliższy domyślny model, a obowiązuje
+requestów chat, Responses i Messages, które nie wskazują ani modelu, ani
+providera, oraz limity reasoning effort (`max_reasoning_effort`) i tokenów
+wyjściowych (`max_output_tokens`) dla każdego modelu. Wszystko pod węzłem je
+dziedziczy: wygrywa najbliższy domyślny model, a obowiązuje
 najniższy limit aż do `/`, więc dziecko nie może poluzować limitu swojej grupy.
 Limit effortu tylko obniża effort, który request niesie, więc nigdy nie włącza
 reasoningu; limit tokenów ustawia też limit w requeście, który go nie wysyła.
 Polityka na `/` obowiązuje każdy request, także bez ścieżki użytkownika. W
 odróżnieniu od `reasoning_effort` modelu wirtualnego, który wymusza jedną
 wartość dla jednego modelu, te limity obejmują każdy model używany przez
-ścieżkę. Zobacz [Użytkownicy](/pl/features/users#polityka-requestów).
+ścieżkę; tylko model, który nie potrafi rozumować poniżej minimalnego poziomu,
+zachowuje to minimum także przy niższym limicie effortu. Zobacz
+[Użytkownicy](/pl/features/users#polityka-requestów).
 
 Klucz bez przypisanego `user_path` wybiera ścieżkę przez nagłówek powyżej, a z
 nią politykę własnego poddrzewa. Ustawiaj limity na kluczach ze stałym

@@ -62,7 +62,7 @@ virtual_models:
       - { model: hetzner/qwen3.8 }
 ```
 
-该覆盖会同时替换 `reasoning.effort` 和扁平的 `reasoning_effort` 字段，即使客户端未发送推理强度也会生效。随后 GoModel 会像处理客户端的值一样，将其转换为各提供商自己的推理参数。
+该覆盖会替换 `reasoning.effort`、扁平的 `reasoning_effort` 字段，以及客户端发送的所有[提供商特定推理控制项](/zh/features/users#请求策略)（`thinking`、`enable_thinking`、`thinking_budget`、`think`、`chat_template_kwargs` 中的推理开关），即使客户端未发送推理强度也会生效。虚拟模型在自己的 `params` 中设置的控制项会保留。随后 GoModel 会像处理客户端的值一样，将该推理强度转换为各提供商自己的推理参数。
 
 每次尝试都以配置最深的值为准。具体模型的覆盖优先于其上方的任何重定向，内层[链式](#链式虚拟模型)虚拟模型优先于外层。在上面的示例中，`team-model` 向 `openai/gpt-5.2` 发送 `high`，向 `hetzner/qwen3.8` 发送 `medium`，即使通过故障转移到达也是如此。若同一模型可经由多个内层虚拟模型到达，则以路由实际选择的路径上的值为准；故障转移尝试使用通往其模型的第一条声明路径。该功能适用于 Chat Completions、Responses API 和 Anthropic Messages API；批处理和提供商直通不会被改写。
 
@@ -107,7 +107,7 @@ virtual_models:
 
 记录之间的优先级按键逐一确定，并遵循推理强度的规则：具体模型的策略优先于其上方的任何重定向，内层[链式](#链式虚拟模型)虚拟模型优先于外层。更深的记录还决定一个键是强制值还是默认值：具体模型的 `default_params.temperature` 会把别名强制的 `temperature` 变回默认值。故障转移尝试会从客户端请求重新构建，并获得其自身路由和具体模型的参数；主模型的策略绝不会泄漏到其中。[护栏](/zh/advanced/guardrails)插件先于这些覆盖运行，因此 `params` 会替换插件设置的值，而 `default_params` 会尊重它。参数适用于 Chat Completions、Responses API 和 Anthropic Messages API（当有参数生效时，原生 Messages 直通会改走转换路径）；批处理、`/p/` 下的提供商直通、嵌入和媒体端点不会被改写。精确[缓存](/zh/features/cache)的键由已应用的请求构建，因此同一模型的两个别名只有在向上游发送相同请求时才会共用一个精确缓存条目。语义缓存的键同样包含已应用的请求参数（具体包含哪些字段，参见[语义缓存键的组成](/zh/features/cache#语义缓存键的组成)），因此已应用值不同的别名（包括 `top_k` 或 `chat_template_kwargs`）同样不会共用语义缓存条目。
 
-调用方的[用户路径上限](/zh/features/users#请求策略)最后生效，位于 `params` 和推理强度覆盖之后：高于路径 `max_output_tokens` 的 `max_tokens` 会被降低，无论它是由客户端、`default_params` 还是 `params` 设置的。
+调用方的[用户路径上限](/zh/features/users#请求策略)最后生效，位于 `params` 和推理强度覆盖之后：任何写法的输出 token 上限（`max_tokens`、`max_completion_tokens`、`max_output_tokens`）只要高于路径的 `max_output_tokens` 就会被降低，无论它是由客户端、`default_params` 还是 `params` 设置的；未设置输出上限的请求则使用路径的上限。
 
 本页其余部分介绍重定向。
 

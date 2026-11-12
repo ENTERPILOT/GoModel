@@ -60,11 +60,12 @@ type userListResponse struct {
 type upsertUserRequest struct {
 	UserPath      string   `json:"user_path"`
 	AllowedModels []string `json:"allowed_models"`
-	// DefaultModel serves requests under the path that name no model.
+	// DefaultModel serves chat, Responses and Messages requests under the
+	// path that name neither a model nor a provider.
 	DefaultModel string `json:"default_model,omitempty"`
 	// MaxReasoningEffort and MaxOutputTokens cap what requests under the
-	// path may send upstream. A PUT replaces the whole policy: a field left
-	// out is cleared.
+	// path may send upstream, batches and /p/ passthrough excepted. A PUT
+	// replaces the whole policy: a field left out is cleared.
 	MaxReasoningEffort string `json:"max_reasoning_effort,omitempty"`
 	MaxOutputTokens    int    `json:"max_output_tokens,omitempty"`
 	Description        string `json:"description,omitempty"`

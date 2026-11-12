@@ -23,17 +23,21 @@ type User struct {
 	// provider-wide "provider/", or model-wide "model". Empty means the node
 	// itself does not restrict models.
 	AllowedModels []string `json:"allowed_models" bson:"allowed_models"`
-	// DefaultModel serves a request under this path that names no model. It
-	// is resolved like a model the client sent, so it may name a virtual
-	// model. The nearest path that sets one wins.
+	// DefaultModel serves a chat, Responses or Messages request under this
+	// path that names neither a model nor a provider. It is resolved like a
+	// model the client sent, so it may name a virtual model. The nearest path
+	// that sets one wins.
 	DefaultModel string `json:"default_model,omitempty" bson:"default_model,omitempty"`
 	// MaxReasoningEffort is the highest reasoning effort requests under this
 	// path may send upstream, one of requestparams.ReasoningEffortLevels.
-	// The lowest ceiling between the path and the root applies.
+	// The lowest ceiling between the path and the root applies. A model that
+	// cannot reason below a minimum level keeps that minimum, and batches and
+	// /p/ passthrough are not capped.
 	MaxReasoningEffort string `json:"max_reasoning_effort,omitempty" bson:"max_reasoning_effort,omitempty"`
 	// MaxOutputTokens is the highest output token limit requests under this
-	// path may send upstream; zero sets no ceiling. The lowest ceiling
-	// between the path and the root applies.
+	// path may send upstream, and the limit of a request that sends none;
+	// zero sets no ceiling. The lowest ceiling between the path and the root
+	// applies. Batches and /p/ passthrough are not capped.
 	MaxOutputTokens int       `json:"max_output_tokens,omitempty" bson:"max_output_tokens,omitempty"`
 	Description     string    `json:"description,omitempty" bson:"description,omitempty"`
 	CreatedAt       time.Time `json:"created_at" bson:"created_at"`

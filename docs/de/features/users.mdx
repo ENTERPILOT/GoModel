@@ -154,7 +154,7 @@ standardmäßig leer; solange keines gesetzt ist, ändert sich nichts:
 
 | Feld                   | Wirkung                                                  | Vererbung                        |
 | ---------------------- | -------------------------------------------------------- | -------------------------------- |
-| `default_model`        | bedient einen Request, der kein Modell nennt             | der nächstgelegene Pfad gewinnt  |
+| `default_model`        | bedient einen Request, der weder `model` noch `provider` nennt | der nächstgelegene Pfad gewinnt  |
 | `max_reasoning_effort` | senkt einen höheren Reasoning-Effort auf diese Stufe     | die niedrigste Obergrenze gilt   |
 | `max_output_tokens`    | senkt ein höheres Ausgabe-Token-Limit auf diesen Wert und setzt ihn bei einem Request ohne Limit | die niedrigste Obergrenze gilt   |
 
@@ -184,7 +184,11 @@ eine höhere Obergrenze am Kind ändert nichts. Efforts nutzen die Skala `none`,
 `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Die Token-Obergrenze deckt
 `max_tokens`, `max_completion_tokens` und `max_output_tokens` ab, in der
 Schreibweise, die der Client verwendet hat, und ein Request ohne Limit erhält
-die Obergrenze als Limit, in dem Feld, das das Upstream-Modell erwartet. Die
+die Obergrenze als Limit, in dem Feld, das das Upstream-Modell erwartet. Ein
+Limit, das nur in einer Schreibweise gesendet wird, die der Endpunkt nicht
+kennt (`max_output_tokens` bei Chat Completions, `max_tokens` bei der Responses
+API), wird in das eigene Feld des Endpunkts übernommen, und ein Wert, der keine
+ganze Zahl ab 1 ist, wird durch die Obergrenze ersetzt. Die
 Effort-Obergrenze senkt nur einen Effort, den der Request mitbringt, und fügt
 nie einen hinzu, weil ein hinzugefügter Effort Reasoning für Requests
 einschalten würde, die nicht danach gefragt haben. Ein Request ohne Effort
@@ -226,13 +230,18 @@ Standard setzt. Sie gelten für Chat Completions, die Responses API und die
 Anthropic Messages API; ein Messages-Request innerhalb der Obergrenzen wird
 weiterhin nativ an Anthropic weitergeleitet, einer darüber nimmt den
 übersetzten Pfad, damit er gesenkt werden kann. Embeddings und
-Medien-Endpunkte werden nicht umgeschrieben.
+Medien-Endpunkte werden nicht umgeschrieben. Einträge im
+[Response-Cache](/de/features/cache) sind an die geltenden Obergrenzen
+gebunden: Eine Antwort, die vor dem Setzen oder Ändern einer Obergrenze
+gecacht wurde, wird unter der neuen nicht ausgeliefert.
 
 <Warning>
 Batches und Provider-Passthrough unter `/p/` werden **nicht** begrenzt: Ihre
 Bodys gehen unverändert upstream. Ein begrenzter Key, der auch Batches oder
 `/p/` nutzen darf, kann die Policy umgehen; sperren Sie diese Endpunkte daher
-für Keys, die Sie begrenzen.
+für Keys, die Sie begrenzen. Der Provider [ChatGPT](/de/providers/chatgpt)
+akzeptiert kein Ausgabe-Token-Limit, daher wird `max_output_tokens` bei seinen
+Modellen nicht durchgesetzt.
 </Warning>
 
 Eine Policy auf `/` gilt für jeden Request, auch für Requests ohne User Path

@@ -71,7 +71,7 @@ func (o Overrides) IsZero() bool {
 
 // Forces reports whether a reasoning effort or a parameter set is
 // configured, which rewrites every request; ceilings alone rewrite only a
-// request that exceeds them.
+// request that exceeds them or sets no output token limit.
 func (o Overrides) Forces() bool {
 	return o.ReasoningEffort != "" || len(o.Defaults) > 0 || len(o.Params) > 0
 }
