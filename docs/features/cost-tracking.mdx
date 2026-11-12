@@ -33,11 +33,13 @@ When a provider returns an exact cost (OpenRouter credits, xAI `cost_in_usd_tick
 Anthropic bills cache writes by TTL: the default 5-minute writes at `cache_write_per_mtok` and 1-hour writes (`"ttl": "1h"`) at `cache_write_1h_per_mtok`. GoModel prices each share at its own rate from the `usage.cache_creation` split. Without a `cache_write_1h_per_mtok` rate, 1-hour writes are priced at `cache_write_per_mtok`.
 
 <Note>
-  Claude usage from earlier releases, recorded on `/v1/chat/completions` and
-  `/v1/responses`, counts input tokens without the prompt cache; newer rows
-  include it, as OpenAI does. Costs and the cached/uncached input breakdown read
-  both, so only the plain input and total token counts rise for cache-heavy
-  Claude traffic.
+  Claude usage recorded by earlier releases counts input tokens without the
+  prompt cache. Newer rows include it, as OpenAI does, except `/v1/messages`
+  requests [forwarded natively to Anthropic](/advanced/anthropic-messages-api#native-forwarding-to-anthropic),
+  which keep Anthropic's counts. Costs and the cached/uncached input breakdown
+  read both, so the plain input and total token counts rise for cache-heavy
+  Claude traffic. Long-context pricing tiers go by the whole prompt, cache
+  included, for both.
 </Note>
 
 ## Time-of-day pricing
