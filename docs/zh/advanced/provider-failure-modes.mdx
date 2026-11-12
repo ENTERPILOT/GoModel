@@ -115,15 +115,16 @@ sum(rate(gomodel_empty_responses_total{reason="no_usage"}[15m])) by (provider) >
 3. 对于使用默认基础 URL 的提供商，使用
    [模型目录](/zh/advanced/configuration)中该提供商类型的模型列表。
 
+该顺序以及下文的重新检查适用于所有未配置模型列表的提供商，以及 `fallback` 和 `merge` 模式。在默认的 `allowlist` 模式下，配置了列表的提供商只提供该列表中的模型（仍受 `model_filter` 约束）；`/models` 仅用于获取元数据，且仅在 `ALLOWLIST_UPSTREAM_METADATA` 开启且未启用离线模式时调用；获取失败时保留上次的元数据，也绝不会降低提供商的健康状态（参见[模型模式](/zh/advanced/config-yaml#模型模式)）。
+
 失败的提供商每隔 `PROVIDER_RECHECK_INTERVAL` 秒（默认 `60`）重新检查一次，一旦列表获取成功，实时列表就会替换临时列表。如果没有任何可用模型，请求会返回 `503`，以便客户端重试；
 `/health/ready` 会报告 `degraded` 并带有 `"models": "down"`，而实例仍保留在轮转中。
 
-如果要完全不依赖模型发现，请自行列出模型并设置
-`CONFIGURED_PROVIDER_MODELS_MODE=allowlist`：
+如果要完全不依赖模型发现，请自行列出模型。默认的
+`CONFIGURED_PROVIDER_MODELS_MODE=allowlist` 会只提供该列表，`/models` 仅用于获取元数据：
 
 ```bash
 export OPENAI_MODELS=gpt-6-sol,gpt-6-luna
-export CONFIGURED_PROVIDER_MODELS_MODE=allowlist
 ```
 
 ## 如果 GoModel 本身宕机
@@ -136,7 +137,7 @@ GoModel 的故障是显性的，而不是静默的：宕机的实例会返回连
 
 这次排空是一个截止时间，而不是完成保证：它针对的是能在十秒内真正完成的请求，超过时间仍未结束的请求——尤其是进行中的流——连接会被切断。对于长时间运行的流量，请在负载均衡器上排空连接，让新旧副本重叠运行足够长的时间以覆盖一次生成，并让客户端进行重试。
 
-以下状态按实例保存，因此不会在副本之间共享：熔断器状态、速率限制计数器、请求健康窗口以及会话保持。[生产环境指南](/zh/guides/production)介绍了这对您的拓扑意味着什么。
+以下状态按实例保存，因此不会在副本之间共享：熔断器状态、请求健康窗口以及会话保持。速率限制计数器通过数据库近似共享：在默认的 `RATE_LIMITS_FLUSH_INTERVAL=1` 下，每个副本会在约两秒内看到其他副本的计数；设为 `0` 时，副本启动后不再看到彼此的新计数。[生产环境指南](/zh/guides/production)介绍了这对您的拓扑意味着什么。
 
 如果 GoModel 宕机，而您需要立即恢复流量，可以将
 `base_url` 直接指回提供商——API 在两个方向上都兼容 OpenAI。在 GoModel 恢复之前，您将失去路由、故障转移和日志记录——而且，由于速率限制和预算检查运行在 GoModel 的请求路径中而非提供商的请求路径中，它们将完全不再起任何拦截作用。

@@ -18,7 +18,7 @@ func TestChatCompatibleContract(t *testing.T) {
 	providertest.AssertChatCompatible(t, providertest.ChatCompatible{
 		Registration:   Registration,
 		Type:           "hetzner",
-		DefaultBaseURL: "https://inference.hetzner.com/api/v1",
+		DefaultBaseURL: "https://inference.hetzner.com/v1",
 		New: func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider {
 			opts := providertest.Options(hooks)
 			opts.HTTPClient = client

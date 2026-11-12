@@ -39,7 +39,7 @@ Verwenden Sie Rate-Limits zur Traffic-Steuerung und Budgets zur
 Ausgabenkontrolle: Budgets begrenzen Dollarbeträge über Stunden bis Monate
 anhand dauerhaft gespeicherter Nutzungsdaten, Rate-Limits begrenzen die
 Request- und Token-Geschwindigkeit über Sekunden bis zu einem Tag mit schnellen
-In-Memory-Zählern.
+In-Memory-Zählern, die Replikate mit gemeinsamer Datenbank abgleichen.
 
 ## Rate-Limits aktivieren
 
@@ -262,15 +262,83 @@ Wissenswerte Details:
   Session einen Concurrency-Slot. Eine Batch-Einreichung zählt als ein Request
   und belegt keinen Concurrency-Slot.
 - Request- und Token-Fenster liegen für die Zulassung im Speicher und werden
-  etwa einmal pro Sekunde (und beim Herunterfahren) als Snapshot in den
-  konfigurierten Speicher geschrieben, sodass sie einen Neustart und
-  `gomodel --reload` überstehen. Concurrency-Zähler werden nicht persistiert:
-  Nach einem Neustart läuft nichts. Bei N Replikaten liegt das effektive Limit
-  weiterhin bei etwa dem N-Fachen des konfigurierten Werts – verwenden Sie
-  Budgets für dauerhafte, instanzübergreifende Kontrolle. Passen Sie das
-  Snapshot-Intervall mit `RATE_LIMITS_FLUSH_INTERVAL` an (Sekunden;
-  Standardwert `1`; `0` überspringt das periodische Schreiben, lädt aber
-  weiterhin beim Start und schreibt beim geordneten Herunterfahren).
+  etwa einmal pro Sekunde (und beim Herunterfahren) im konfigurierten Speicher
+  gesichert, sodass sie einen Neustart und `gomodel --reload` überstehen. Ein
+  Neustart zählt die gespeicherten Werte des vorherigen Laufs einmal, nicht
+  doppelt; ein Absturz verliert höchstens die Zählungen seit dem letzten Flush.
+  Passen Sie das Intervall mit `RATE_LIMITS_FLUSH_INTERVAL` an (Sekunden;
+  Standardwert `1`). `0` überspringt das periodische Schreiben: Zählerstände
+  werden weiterhin beim Start geladen und beim geordneten Herunterfahren
+  gespeichert, aber Replikate sehen den Traffic der anderen nach dem Start
+  nicht mehr.
+- Ein Reset gilt für alle Replikate: Das Replikat, das ihn verarbeitet, leert
+  seine Request- und Token-Fenster sofort, die anderen innerhalb weniger Sekunden, wenn sie
+  [die Regeln neu laden](/de/guides/production#konfigurationsänderungen-erreichen-alle-replikate-in-sekunden).
+  Belegte Concurrency-Slots bleiben belegt, bis ihre Requests abgeschlossen sind.
+  Das Umschalten einer Regel zwischen geteilt und `per_child` sowie das
+  Löschen und erneute Anlegen startet ihre Zähler auf dieselbe Weise bei null.
+  Gespeicherte Zählerstände von vor einem Reset oder einer solchen Änderung
+  kommen nie zurück, auch nicht nach einem Neustart oder nach dem
+  Zurückschalten. Das Bearbeiten eines Limits behält die Zählerstände.
+  Schließen Sie ein Rolling Upgrade von einem Release vor den Snapshots pro
+  Replikat ab, bevor Sie Regeln zurücksetzen oder löschen: Ein Reset oder
+  Löschen, das ein älteres Replikat verarbeitet hat, kann nach einem Neustart
+  zurückkehren.
+
+## Mehrere Replikate teilen sich ein Limit
+
+Bei einem `RATE_LIMITS_FLUSH_INTERVAL` ungleich null (Standardwert `1`) setzen
+Replikate mit gemeinsamer Datenbank jede Regel gemeinsam durch: Eine
+Regel mit `100 rpm` lässt über alle Replikate hinweg etwa 100 Requests pro
+Minute zu, nicht 100 pro Replikat. Jedes Replikat speichert, was es selbst
+gezählt hat, und liest bei jedem Flush, was die anderen seit seinem letzten
+Lesen gespeichert haben. Die Zulassung prüft den eigenen Live-Zählerstand des
+Replikats plus die zuletzt gespeicherten Zählerstände der anderen, vollständig
+im Speicher: Kein Request wartet auf die Datenbank. Header mit den verbleibenden
+Requests, die Nutzung in Admin und Dashboard, `GET /v1/usage` und das Umgehen
+eines ausgelasteten Providers oder Modells melden alle den clusterweiten Stand.
+
+Das Limit ist näherungsweise, nicht exakt:
+
+- Die Requests eines anderen Replikats erreichen dieses innerhalb von etwa zwei
+  Flush-Intervallen: eines, in dem jenes Replikat sie speichert, und eines, in
+  dem dieses sie liest. Bis dahin lässt jedes Replikat zu, als hätte es diese
+  Requests nicht gegeben, sodass der Cluster beim Standardintervall um bis zu
+  etwa zwei Sekunden Traffic der anderen Replikate über das Limit hinausgehen
+  kann. Requests, die mehrere Replikate im selben Moment zulassen, können alle
+  den letzten Slot belegen.
+- Concurrency-Limits werden genauso geteilt: Jedes Replikat veröffentlicht bei
+  jedem Flush seine Zahl laufender Requests. Ein abgestürztes Replikat hält
+  seine Slots, bis seine Zahl veraltet ist, nach drei Flush-Intervallen und
+  mindestens 5 Sekunden; dann werden sie auf allen anderen Replikaten frei. Die
+  Aktualität vergleicht den Zeitpunkt, zu dem ein Replikat seine Zahl
+  gespeichert hat, mit der Uhr des Lesers, halten Sie die Uhren der Replikate
+  also synchron (NTP).
+- Eine Obergrenze, die nie überschritten werden darf, etwa `concurrent=1` über
+  Replikate hinweg, braucht eine Prüfung gegen gemeinsamen Zustand bei jedem
+  Request, die GoModel noch nicht bietet. Verwenden Sie dafür ein einzelnes
+  Replikat, oder leiten Sie alle Requests, die die Regel zählt, an dasselbe
+  Replikat.
+
+Jeder Flush schreibt nur die Request- und Token-Zähler, die sich seit dem
+letzten geändert haben, plus jeden Concurrency-Zähler ungleich null, der bei
+jedem Flush als Heartbeat neu geschrieben wird, damit andere Replikate die
+Slots eines laufenden Replikats von denen eines abgestürzten unterscheiden
+können. Er liest nur die Zeilen, die seit kurz vor dem letzten Lesen
+geschrieben wurden, mit einem vollständigen Lesen einmal pro Minute.
+[Budgets](/de/features/budgets) bleiben die dauerhafte Kontrolle der Ausgaben.
+
+<Note>
+Upgrade von v0.2.1 oder älter: Zähler, die diese Releases gespeichert haben,
+werden per Maximum zusammengeführt, da jede dieser Zeilen auch enthält, was ihr
+Schreiber beim Start wiederhergestellt hat. Bis diese Fenster auslaufen (bis zu
+zwei Perioden), kann Traffic, den mehrere v0.2.1-Replikate gezählt haben, zu
+niedrig gezählt werden, und ein v0.2.1-Replikat, das während des Rollouts neu
+startet, kann manchen Traffic doppelt zählen. Beides endet, sobald diese
+Fenster ausgelaufen sind. Für einen sauberen Neustart setzen Sie die
+Zähler nach dem Rollout zurück (`POST /admin/rate-limits/reset`): Jede Regel
+zählt dann ab null.
+</Note>
 
 ## Verhalten gegenüber Clients
 
@@ -531,11 +599,15 @@ console.log(deleted);
 
 </CodeGroup>
 
-Setzen Sie die Live-Zähler für eine einzelne Regel
+Setzen Sie die Request- und Token-Zähler für eine einzelne Regel
 (`POST /admin/rate-limits/reset-one` mit
 `{"scope": ..., "subject": ..., "period": ...}`) oder für alle Regeln
-(`POST /admin/rate-limits/reset` mit `{"confirmation": "reset"}`) zurück. Das
-Bearbeiten einer Regel setzt ihre Zähler nie zurück, das Löschen schon.
+(`POST /admin/rate-limits/reset` mit `{"confirmation": "reset"}`) zurück, auf
+allen Replikaten. Belegte Concurrency-Slots bleiben belegt, bis ihre Requests
+abgeschlossen sind. Das reine Bearbeiten der Obergrenzen einer Regel setzt ihre
+Zähler nie zurück; das Löschen, das Verschieben auf einen neuen Scope, ein neues
+Subject oder eine neue Periode und das Umschalten zwischen geteilt und
+`per_child` schon.
 
 Die Liste der Endpunkte finden Sie unter
 [Admin-Endpunkte](/de/advanced/admin-endpoints).

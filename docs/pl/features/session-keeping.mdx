@@ -108,8 +108,8 @@ Ta sama flaga jest dostępna w edytorze modeli wirtualnych w dashboardzie
 („Session keeping”) oraz w Admin API (`session_affinity` w
 `PUT /admin/virtual-models`).
 
-Przypięcia są trzymane w pamięci każdej instancji (tak jak liczniki rate
-limitów): po restarcie lub na innej replice następny request sesji po prostu
+Przypięcia są trzymane w pamięci każdej instancji i nie są współdzielone
+przez bazę danych: po restarcie lub na innej replice następny request sesji po prostu
 przypina się na nowo. Bezczynne sesje wygasają po 6 godzinach.
 
 Powiązanie z kluczem API jest deterministyczne, a nie przechowywane, więc ten

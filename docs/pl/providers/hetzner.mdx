@@ -13,7 +13,7 @@ keywords: ["Hetzner", "eksperymentalne", "inferencja", "konfiguracja providera",
 </Warning>
 
 Hetzner Inference to REST API kompatybilne z OpenAI, serwowane pod adresem
-`https://inference.hetzner.com/api/v1`. GoModel routuje czat, listowanie modeli
+`https://inference.hetzner.com/v1`. GoModel routuje czat, listowanie modeli
 i requesty passthrough przez współdzielony adapter OpenAI. Endpoint `/v1/responses` jest
 tłumaczony przez chat completions. Pliki, batche i embeddingi nie są obsługiwane –
 Hetzner nie udostępnia endpointu `/v1/embeddings`. Requesty o embeddingi od razu kończą się
@@ -43,14 +43,14 @@ Albo w `config.yaml`:
 providers:
   hetzner:
     type: hetzner
-    base_url: "https://inference.hetzner.com/api/v1"
+    base_url: "https://inference.hetzner.com/v1"
     api_key: "${HETZNER_API_KEY}"
 ```
 
 Możesz też nadpisać bazowy URL i listę modeli:
 
 ```bash
-HETZNER_BASE_URL=https://inference.hetzner.com/api/v1
+HETZNER_BASE_URL=https://inference.hetzner.com/v1
 HETZNER_MODELS=Qwen/Qwen3.6-35B-A3B-FP8
 ```
 
@@ -67,7 +67,7 @@ Katalog modeli zmienia się w trakcie eksperymentu. Odpytuj aktualną listę, za
 polegać na migawkach z dokumentacji:
 
 ```bash
-curl -s https://inference.hetzner.com/api/v1/models \
+curl -s https://inference.hetzner.com/v1/models \
   -H "Authorization: Bearer $HETZNER_API_KEY"
 ```
 

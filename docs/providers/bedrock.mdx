@@ -11,9 +11,9 @@ ConverseStream APIs, normalizing responses across model families (Anthropic,
 Amazon Nova, Meta Llama, Mistral, Cohere, AI21, and others) into
 OpenAI-compatible chat completions.
 
-Bedrock has no API key of its own — GoModel resolves AWS credentials at runtime
-through the standard AWS credential chain (env, `AWS_PROFILE`, IAM Identity
-Center, instance/container roles).
+Authenticate with an Amazon Bedrock API key, or with AWS credentials that
+GoModel resolves at runtime through the standard AWS credential chain (env,
+`AWS_PROFILE`, IAM Identity Center, instance/container roles).
 
 ## Configure
 
@@ -28,6 +28,19 @@ GOMODEL_MASTER_KEY=change-me
 In production, prefer instance roles, IRSA, or IAM Identity Center over
 long-lived access keys. When `BEDROCK_BASE_URL` is empty, GoModel falls back to
 `AWS_REGION` / `AWS_DEFAULT_REGION`.
+
+To use an Amazon Bedrock API key instead of AWS credentials:
+
+```bash
+BEDROCK_BASE_URL=us-east-1
+BEDROCK_API_KEY=ABSK...
+```
+
+A configured key takes precedence over AWS credentials and over
+`AWS_BEARER_TOKEN_BEDROCK`. In the dashboard, add a provider of type `bedrock`,
+set **Region or endpoint**, and paste the key into **API Keys**. Left empty, the
+gateway uses `AWS_BEARER_TOKEN_BEDROCK` from its host when set, and the host's
+AWS credential chain otherwise.
 
 ## Run GoModel
 
@@ -112,9 +125,10 @@ Responses API are bridged onto Converse internally.
 
 ## Restrict or extend the model list
 
-By default GoModel queries Bedrock's control plane and lists all on-demand
-text models the account has access to. To pin inference profile IDs or custom
-model ARNs:
+Without a configured list, GoModel queries Bedrock's control plane and lists
+all on-demand text models the account has access to. To pin inference profile
+IDs or custom model ARNs, set a list; with the default models mode only those
+models are then served:
 
 ```bash
 BEDROCK_MODELS=anthropic.claude-3-5-haiku-20241022-v1:0,amazon.nova-lite-v1:0
@@ -132,9 +146,10 @@ providers:
       - amazon.nova-lite-v1:0
 ```
 
-Behavior follows the global `CONFIGURED_PROVIDER_MODELS_MODE` — `fallback`
-(default) uses the list only when `ListFoundationModels` is unavailable or
-empty; `allowlist` exposes only configured models and skips the upstream call.
+Bedrock's upstream listing is `ListFoundationModels`; how the configured list
+combines with it follows the [models mode](/advanced/config-yaml#models-modes)
+(by default only the configured models are served). To change the mode for
+Bedrock only, set `BEDROCK_MODELS_MODE` (YAML: `providers.<name>.models_mode`).
 
 ## Multiple Bedrock providers
 
