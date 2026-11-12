@@ -163,6 +163,9 @@ docker compose --profile app up -d
 # or: make image
 ```
 
+The compose file is meant for local development: Redis, PostgreSQL, MongoDB, Adminer, and Prometheus are published on
+`127.0.0.1` only, because they run with default or no credentials. Only the GoModel port is published on all interfaces.
+
 ---
 
 ## API docs
