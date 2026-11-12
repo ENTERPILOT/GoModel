@@ -137,6 +137,52 @@ cert-manager example.
 With the Prometheus Operator, set `metrics.serviceMonitor.enabled: true` and add
 the labels your Prometheus selects on under `metrics.serviceMonitor.labels`.
 
+### Network policy
+
+`networkPolicy.enabled` (default `false`) creates a NetworkPolicy for the gateway
+pods. It needs a network plugin that enforces NetworkPolicy; without one it has
+no effect. Enabled on its own it admits inbound traffic on the gateway port
+(8080) only, from any source. List the sources to restrict who can connect:
+
+```yaml
+networkPolicy:
+  enabled: true
+  ingress:
+    from:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: ingress-nginx
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: monitoring
+        podSelector:
+          matchLabels:
+            app.kubernetes.io/name: prometheus
+```
+
+The API, the dashboard and `/metrics` share that port, so a listed source
+reaches all three; include Prometheus if it scrapes the gateway. Kubelet probes
+come from the node and are not affected, and the release's own pods are always
+allowed so `helm test` keeps working.
+
+Egress stays unrestricted by default, because the gateway has to reach its
+providers. To restrict it, set `networkPolicy.egress` to the rules you need;
+everything they do not match is then denied. DNS and HTTPS only:
+
+```yaml
+networkPolicy:
+  enabled: true
+  egress:
+    - ports:
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }
+    - ports:
+        - { port: 443, protocol: TCP }
+```
+
+Add a rule for everything else the gateway connects to: PostgreSQL or MongoDB,
+Redis, an OTLP collector, and providers on other ports such as Ollama or vLLM.
+
 ### Cloud provider credentials
 
 Give the pod's ServiceAccount a cloud identity for AWS Bedrock or Google Vertex AI:
@@ -171,6 +217,9 @@ serviceAccount:
 | `metrics.serviceMonitor.enabled` | `false` | Prometheus Operator ServiceMonitor. |
 | `service.type` | `ClusterIP` | |
 | `service.port` | `8080` | |
+| `networkPolicy.enabled` | `false` | NetworkPolicy admitting only the gateway port. |
+| `networkPolicy.ingress.from` | `[]` | Allowed sources. Empty allows any. |
+| `networkPolicy.egress` | `[]` | Egress rules. Empty leaves egress unrestricted. |
 | `ingress.enabled` | `false` | |
 | `httpRoute.enabled` | `false` | Gateway API HTTPRoute; needs `httpRoute.parentRefs`. |
 | `serviceAccount.create` | `true` | |
