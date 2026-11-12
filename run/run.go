@@ -80,11 +80,12 @@ type Options struct {
 	ConfigureSwaggerDocs func(basePath string)
 	// Setup, when set, runs once the process is committed to starting the
 	// gateway, or to a command that loads its configuration (secrets
-	// reencrypt, usage import) — after CLI parsing, --version/--health/--ready
-	// short-circuits, dotenv loading, and logging configuration, but before
-	// config loading. Register extensions here so operator tooling modes
-	// stay silent; log handler wrappers are the exception and must be
-	// registered before Run. A returned error aborts startup.
+	// reencrypt, config export, usage import) — after CLI parsing,
+	// --version/--health/--ready short-circuits, dotenv loading, and logging
+	// configuration, but before config loading. Register extensions here so
+	// operator tooling modes stay silent; log handler wrappers are the
+	// exception and must be registered before Run. A returned error aborts
+	// startup.
 	Setup func(ctx context.Context) error
 	// SetupConfig runs once after the initial configuration has been loaded and
 	// before the application is constructed. It lets custom distributions
@@ -189,6 +190,18 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}
 
+	configExport := false
+	if cliOpts.ConfigArgs != nil {
+		configExport, err = parseConfigArgs(opts.ProductName, cliOpts.ConfigArgs, opts.Stdout, opts.Stderr)
+		if err != nil {
+			fmt.Fprintln(opts.Stderr, err)
+			return &usageError{err: err}
+		}
+		if !configExport {
+			return nil // help
+		}
+	}
+
 	var usageImportSource string
 	if cliOpts.UsageArgs != nil {
 		usageImportSource, err = parseUsageArgs(opts.ProductName, cliOpts.UsageArgs, opts.Stdout, opts.Stderr)
@@ -248,6 +261,13 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	if secretsOpts != nil {
 		if err := runSecretsReencrypt(ctx, opts, *secretsOpts); err != nil {
+			fmt.Fprintln(opts.Stderr, err)
+			return err
+		}
+		return nil
+	}
+	if configExport {
+		if err := runConfigExport(ctx, opts); err != nil {
 			fmt.Fprintln(opts.Stderr, err)
 			return err
 		}

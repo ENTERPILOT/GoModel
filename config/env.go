@@ -83,6 +83,7 @@ func applyOfflineMode(cfg *Config) {
 		return
 	}
 	cfg.VersionCheck.Enabled = false
+	cfg.Models.AllowlistUpstreamMetadata = false
 	if url := cfg.Cache.Model.ModelList.URL; url != "" && !IsLocalModelListSource(url) {
 		cfg.Cache.Model.ModelList.URL = ""
 	}

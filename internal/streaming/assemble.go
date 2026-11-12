@@ -28,6 +28,7 @@ type chatAssembleChunk struct {
 			ReasoningContent json.RawMessage `json:"reasoning_content"`
 			Reasoning        json.RawMessage `json:"reasoning"`
 			ExtraContent     json.RawMessage `json:"extra_content"`
+			Images           json.RawMessage `json:"images"`
 			ToolCalls        []struct {
 				Index    *int   `json:"index"`
 				ID       string `json:"id"`
@@ -53,6 +54,8 @@ type chatAssembledChoice struct {
 	// extraContent is the provider replay state of the turn. Chunks carry the
 	// cumulative value, so the last one seen wins rather than accumulating.
 	extraContent json.RawMessage
+	// images are the generated images of the turn; each delta adds its own.
+	images       []json.RawMessage
 	toolCalls    map[int]*core.ToolCall
 	toolOrder    []int
 	finishReason string
@@ -114,6 +117,10 @@ func AssembleChatResponse(events []Event) (*core.ChatResponse, error) {
 			if extra := bytes.TrimSpace(delta.ExtraContent); len(extra) > 0 && !core.IsJSONNull(extra) {
 				state.extraContent = extra
 			}
+			// A malformed images member is skipped, not the whole chunk, and a
+			// malformed entry is skipped, not the whole member.
+			images := core.ChatImageEntries(delta.Images)
+			state.images = append(state.images, images...)
 			for pos, call := range delta.ToolCalls {
 				index := pos
 				if call.Index != nil {
@@ -203,6 +210,15 @@ func (c *chatAssembledChoice) build() (core.Choice, error) {
 	// Anthropic thinking signature on the way cannot be continued.
 	if len(c.extraContent) > 0 {
 		fields[core.ExtraContentField] = c.extraContent
+	}
+	// Generated images carry their own thought signatures, which Gemini
+	// needs back to edit the image in a later turn.
+	if len(c.images) > 0 {
+		raw, err := json.Marshal(c.images)
+		if err != nil {
+			return core.Choice{}, err
+		}
+		fields[core.ChatImagesField] = raw
 	}
 	if len(fields) > 0 {
 		message.ExtraFields = core.UnknownJSONFieldsFromMap(fields)

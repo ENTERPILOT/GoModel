@@ -8,7 +8,7 @@ keywords: ["Amazon Bedrock", "AWS 凭据", "Converse API", "Bedrock 模型路由
 
 GoModel 通过 Bedrock Runtime 的 Converse 和 ConverseStream API 路由 Bedrock 请求，并将不同模型系列（Anthropic、Amazon Nova、Meta Llama、Mistral、Cohere、AI21 等）的响应统一规范化为兼容 OpenAI 的 Chat Completions 格式。
 
-Bedrock 本身没有 API 密钥：GoModel 在运行时通过标准 AWS 凭据链（环境变量、`AWS_PROFILE`、IAM Identity Center、实例/容器角色）解析 AWS 凭据。
+可以使用 Amazon Bedrock API 密钥进行认证，也可以使用 AWS 凭据：GoModel 在运行时通过标准 AWS 凭据链（环境变量、`AWS_PROFILE`、IAM Identity Center、实例/容器角色）解析这些凭据。
 
 ## 配置
 
@@ -21,6 +21,15 @@ GOMODEL_MASTER_KEY=change-me
 ```
 
 在生产环境中，建议使用实例角色、IRSA 或 IAM Identity Center，而不是长期有效的访问密钥。当 `BEDROCK_BASE_URL` 为空时，GoModel 会回退到 `AWS_REGION` / `AWS_DEFAULT_REGION`。
+
+如需使用 Amazon Bedrock API 密钥代替 AWS 凭据：
+
+```bash
+BEDROCK_BASE_URL=us-east-1
+BEDROCK_API_KEY=ABSK...
+```
+
+已配置的密钥优先于 AWS 凭据和 `AWS_BEARER_TOKEN_BEDROCK`。在控制台中添加类型为 `bedrock` 的提供商，设置**区域或端点**，并将密钥粘贴到 **API 密钥**；留空时，如果网关主机设置了 `AWS_BEARER_TOKEN_BEDROCK`，则使用该令牌，否则使用主机的 AWS 凭据链。
 
 ## 运行 GoModel
 
@@ -103,7 +112,7 @@ console.log(completion.choices[0].message.content);
 
 ## 限制或扩展模型列表
 
-默认情况下，GoModel 会查询 Bedrock 的控制平面，并列出该账户有权访问的所有按需文本模型。如需固定推理配置文件（inference profile）ID 或自定义模型 ARN：
+未配置模型列表时，GoModel 会查询 Bedrock 的控制平面，并列出该账户有权访问的所有按需文本模型。如需固定推理配置文件（inference profile）ID 或自定义模型 ARN，请配置列表；在默认模型模式下，届时只提供这些模型：
 
 ```bash
 BEDROCK_MODELS=anthropic.claude-3-5-haiku-20241022-v1:0,amazon.nova-lite-v1:0
@@ -121,7 +130,7 @@ providers:
       - amazon.nova-lite-v1:0
 ```
 
-其行为遵循全局的 `CONFIGURED_PROVIDER_MODELS_MODE`：`fallback`（默认）仅在 `ListFoundationModels` 不可用或返回为空时使用该列表；`allowlist` 只暴露配置的模型，并跳过上游调用。
+Bedrock 的上游列表是 `ListFoundationModels`；已配置列表与其如何结合遵循[模型模式](/zh/advanced/config-yaml#模型模式)（默认只提供已配置的模型）。如只想更改 Bedrock 的模式，请设置 `BEDROCK_MODELS_MODE`（YAML：`providers.<name>.models_mode`）。
 
 ## 多个 Bedrock 提供商
 

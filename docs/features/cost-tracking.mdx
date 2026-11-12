@@ -195,19 +195,21 @@ Recalculation reprices billed cost with the markup each row was billed at, and b
 
 It takes the same date range and filters as the other usage endpoints, plus `format=csv` (default, downloaded as `gomodel-invoice-<start>-to-<end>.csv`) or `format=json`. On the usage page, **Export invoice** downloads the CSV for the selected date range and filters.
 
+The period's days run midnight to midnight in the time zone of the `X-GoModel-Timezone` header, which the dashboard sets to the zone chosen in its settings, or the browser's zone by default; an API call without it uses UTC. Every export reports its zone in `time_zone`, and a file exported in another zone than UTC carries it in its name (`gomodel-invoice-2026-10-01-to-2026-10-31-America-Los_Angeles.csv`). Bill from one zone: the same dates in two zones cover different hours, so when consecutive invoices mix zones, usage near a month boundary lands on two invoices or on none.
+
 ```bash
 curl -OJ "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=2026-10-01&end_date=2026-10-31" \
   -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
 ```
 
 ```csv
-row_type,period_start,period_end,currency,customer,model,provider,requests,input_tokens,output_tokens,provider_cost,billed_cost,effective_markup_percent
-item,2026-10-01,2026-10-31,USD,/customers/acme,gpt-5,openai,1200,950000,210000,3.2875,3.945,20
-subtotal,2026-10-01,2026-10-31,USD,/customers/acme,,,1200,950000,210000,3.2875,3.945,20
-total,2026-10-01,2026-10-31,USD,,,,1200,950000,210000,3.2875,3.945,20
+row_type,period_start,period_end,currency,customer,model,provider,requests,input_tokens,output_tokens,provider_cost,billed_cost,effective_markup_percent,time_zone
+item,2026-10-01,2026-10-31,USD,/customers/acme,gpt-5,openai,1200,950000,210000,3.2875,3.945,20,UTC
+subtotal,2026-10-01,2026-10-31,USD,/customers/acme,,,1200,950000,210000,3.2875,3.945,20,UTC
+total,2026-10-01,2026-10-31,USD,,,,1200,950000,210000,3.2875,3.945,20,UTC
 ```
 
-Each line item is one model on one provider instance. `row_type` tells line items from each customer's `subtotal` and the grand `total`, so filter on `item` before summing in a spreadsheet. Amounts are plain USD decimals; an empty cost means it is unknown (no pricing). Requests, tokens, and provider cost cover requests sent to providers; billed cost also includes billed response-cache hits, as in the other billed views. `effective_markup_percent` is billed cost over provider cost, minus one, so billed cache hits raise it.
+Each line item is one model on one provider instance. `row_type` tells line items from each customer's `subtotal` and the grand `total`, so filter on `item` before summing in a spreadsheet. Amounts are plain USD decimals; an empty cost means it is unknown (no pricing). Requests, tokens, and provider cost cover requests sent to providers; billed cost also includes billed response-cache hits, as in the other billed views, so a line made only of cache hits shows a provider cost of `0`. `effective_markup_percent` is billed cost over provider cost, minus one, so billed cache hits raise it on a line with a provider cost; a line of cache hits alone has none.
 
 ## Combining usage from several instances
 

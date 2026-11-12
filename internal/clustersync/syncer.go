@@ -34,6 +34,15 @@ const syncInterval = 2 * time.Second
 // save still has it reach the other instances.
 const bumpTimeout = 5 * time.Second
 
+// revisionsTimeout bounds reading the revisions on one tick, so a database
+// that stops answering fails the tick, which the next one retries, instead of
+// stalling propagation and holding a pooled connection indefinitely.
+const revisionsTimeout = 5 * time.Second
+
+// refreshTimeout bounds reloading one entity's snapshot. It is longer than
+// revisionsTimeout because a refresh can fetch provider model lists.
+const refreshTimeout = 30 * time.Second
+
 // Syncer polls the revision table and refreshes changed entities.
 type Syncer struct {
 	store    Store
@@ -250,7 +259,9 @@ func (s *Syncer) flushAnnouncements(ctx context.Context) {
 // poll retries the failed announcements, then reads every revision and
 // refreshes each registered entity whose revision moved. An entity is marked
 // applied only after its refresh succeeds, so a failed one is retried on the
-// next tick.
+// next tick. The read and each refresh have their own deadline, so a database
+// that stops answering fails them, which the next tick retries, rather than
+// stalling the poller.
 func (s *Syncer) poll(ctx context.Context) {
 	// One failed retry ends the round: the store is most likely down, and
 	// waiting out bumpTimeout for every pending entity would delay the
@@ -263,7 +274,9 @@ func (s *Syncer) poll(ctx context.Context) {
 			break
 		}
 	}
-	revisions, err := s.store.Revisions(ctx)
+	readCtx, cancel := context.WithTimeout(ctx, revisionsTimeout)
+	revisions, err := s.store.Revisions(readCtx)
+	cancel()
 	if err != nil {
 		if ctx.Err() == nil {
 			s.logFailure("", "failed to read configuration revisions", err)
@@ -275,7 +288,10 @@ func (s *Syncer) poll(ctx context.Context) {
 		s.mu.Lock()
 		refresh := s.refreshes[entity]
 		s.mu.Unlock()
-		if err := refresh(ctx); err != nil {
+		refreshCtx, release := context.WithTimeout(ctx, refreshTimeout)
+		err = refresh(refreshCtx)
+		release()
+		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}

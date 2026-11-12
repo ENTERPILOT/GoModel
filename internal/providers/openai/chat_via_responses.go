@@ -256,14 +256,25 @@ func applyMappedChatFields(out *core.ResponsesRequest, req *core.ChatRequest) er
 		}
 		out.MaxOutputTokens = &limit
 	}
+	var summary string
+	if req.Reasoning != nil {
+		summary = strings.TrimSpace(req.Reasoning.Summary)
+	}
 	if effort := requestedEffort(req); effort != "" {
 		reasoning := &core.Reasoning{Effort: supportedEffort(req.Model, effort)}
 		// The Responses API emits reasoning summaries only on request; without
-		// one the chat rendering has no reasoning text to surface.
+		// one the chat rendering has no reasoning text to surface. A summary
+		// the client asked for is kept.
 		if !reasoningOff(reasoning.Effort) {
 			reasoning.Summary = "auto"
+			if summary != "" {
+				reasoning.Summary = summary
+			}
 		}
 		out.Reasoning = reasoning
+	} else if summary != "" && isReasoningChatModel(req.Model) {
+		// A summary alone runs at the model's default effort.
+		out.Reasoning = &core.Reasoning{Summary: summary}
 	}
 	text := map[string]any{}
 	if raw := req.ExtraFields.Lookup("verbosity"); len(raw) > 0 {
@@ -274,9 +285,9 @@ func applyMappedChatFields(out *core.ResponsesRequest, req *core.ChatRequest) er
 		text["verbosity"] = verbosity
 	}
 	if raw := req.ExtraFields.Lookup("response_format"); len(raw) > 0 {
-		format, err := responsesTextFormat(raw)
+		format, err := core.ResponsesTextFormat(raw)
 		if err != nil {
-			return err
+			return errNotTranslatable
 		}
 		text["format"] = format
 	}
@@ -284,28 +295,6 @@ func applyMappedChatFields(out *core.ResponsesRequest, req *core.ChatRequest) er
 		out.Text = text
 	}
 	return nil
-}
-
-// responsesTextFormat maps a chat response_format onto Responses text.format,
-// which carries the json_schema members flat instead of nested.
-func responsesTextFormat(raw json.RawMessage) (map[string]any, error) {
-	var format struct {
-		Type       string         `json:"type"`
-		JSONSchema map[string]any `json:"json_schema"`
-	}
-	if err := json.Unmarshal(raw, &format); err != nil {
-		return nil, errNotTranslatable
-	}
-	switch format.Type {
-	case "text", "json_object":
-		return map[string]any{"type": format.Type}, nil
-	case "json_schema":
-		out := map[string]any{"type": "json_schema"}
-		maps.Copy(out, format.JSONSchema)
-		return out, nil
-	default:
-		return nil, errNotTranslatable
-	}
 }
 
 // responsesInput translates chat messages into Responses input items. An

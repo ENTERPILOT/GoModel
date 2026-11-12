@@ -72,6 +72,10 @@ type Service struct {
 	virtualSpecs  map[string]VirtualServerSpec
 	// secrets resolves the secret references admin-managed headers hold.
 	secrets *config.Secrets
+
+	// oauth holds operator OAuth sign-ins to upstream servers; nil when the
+	// store cannot persist them.
+	oauth *oauthManager
 	// reloadMu serializes reloads, so a slower one never applies an older
 	// server set over a newer one. Close takes it too: an in-flight reload
 	// finishes before the upstreams are closed, and reloadStopped turns later
@@ -230,6 +234,8 @@ type Options struct {
 	// Secrets resolves secret references in admin-managed header values.
 	// Nil resolves the built-in env and file schemes only.
 	Secrets *config.Secrets
+	// oauthStore persists operator OAuth sign-ins; nil disables them.
+	oauthStore *oauthStore
 	// SharedStore shares downstream session bindings between the replicas on
 	// one database, so a session continues on whichever replica a request
 	// reaches. Nil keeps every session on the instance that opened it.
@@ -258,6 +264,9 @@ func NewService(ctx context.Context, opts Options) (*Service, error) {
 		postTouchInterval: sessionIdleTimeout / 2,
 		requestCancels:    make(map[uint64]context.CancelFunc),
 		stop:              make(chan struct{}),
+	}
+	if opts.oauthStore != nil {
+		s.oauth = newOAuthManager(opts.oauthStore, opts.HTTPClient)
 	}
 	s.stopCtx, s.stopCancel = context.WithCancel(context.Background())
 	guard, err := newOriginGuard(opts.AllowedOrigins)
@@ -397,6 +406,7 @@ func (s *Service) reload(ctx context.Context, rotated func(name string) bool) (u
 	s.virtualMu.Lock()
 	s.virtualSpecs = virtuals
 	s.virtualMu.Unlock()
+	s.attachOAuth(ctx, specs)
 	s.manager.Apply(specs)
 	s.logVirtualServerIssues()
 
@@ -457,9 +467,14 @@ func (s *Service) Running(name string) bool {
 	return ok && spec.Enabled
 }
 
-// Views returns the current admin snapshot of all servers.
+// Views returns the current admin snapshot of all servers, with their OAuth
+// sign-in state.
 func (s *Service) Views() []ServerView {
-	return s.manager.Views()
+	views := s.manager.Views()
+	for i := range views {
+		views[i].OAuth = s.oauth.view(views[i].Spec)
+	}
+	return views
 }
 
 // IsManaged reports whether name is declared in config/env (read-only).
@@ -600,12 +615,15 @@ func (s *Service) remove(ctx context.Context, name string) error {
 		return err
 	}
 	s.releaseSecrets(ctx, name, headerValues(previous), nil)
+	s.forgetOAuth(ctx, name)
 	return nil
 }
 
 // Reconnect force-redials one server and returns its fresh state.
 func (s *Service) Reconnect(ctx context.Context, name string) (ServerView, error) {
-	return s.manager.Reconnect(ctx, name)
+	view, err := s.manager.Reconnect(ctx, name)
+	view.OAuth = s.oauth.view(view.Spec)
+	return view, err
 }
 
 // Close stops background work, terminates upstream sessions, and cancels

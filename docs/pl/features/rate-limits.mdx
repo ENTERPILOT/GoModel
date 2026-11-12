@@ -32,7 +32,8 @@ embeddingi, audio, passthrough, sesje realtime i wysyłanie batchy.
 
 Używaj limitów żądań do kontroli ruchu, a budżetów do kontroli wydatków: budżety ograniczają
 dolary w horyzoncie od godzin do miesięcy na podstawie trwałych rekordów użycia, a limity żądań
-ograniczają tempo requestów i tokenów w horyzoncie od sekund do doby za pomocą szybkich liczników w pamięci.
+ograniczają tempo requestów i tokenów w horyzoncie od sekund do doby za pomocą szybkich liczników w pamięci,
+które repliki współdzielące bazę danych utrzymują w zgodzie.
 
 ## Włączanie limitów żądań
 
@@ -229,14 +230,77 @@ Warto wiedzieć:
 - Sesja realtime liczy się jako jeden request i zajmuje jeden slot współbieżności przez
   całą sesję. Wysłanie batcha liczy się jako jeden request i nie zajmuje
   slotu współbieżności.
-- Okna requestów i tokenów są przechowywane w pamięci na potrzeby przyjmowania requestów, a ich snapshot jest zapisywany
-  w skonfigurowanym storage mniej więcej raz na sekundę (i przy zamykaniu), więc
-  przetrwają restart i `gomodel --reload`. Wskaźniki współbieżności nie są
-  utrwalane: po restarcie nic nie jest w toku. Przy N replikach
-  efektywny limit nadal wynosi około N razy skonfigurowana wartość — do trwałej
-  kontroli między instancjami używaj budżetów. Interwał snapshotów dostroisz zmienną
-  `RATE_LIMITS_FLUSH_INTERVAL` (w sekundach; domyślnie `1`; `0` pomija okresowy
-  zapis, ale nadal wczytuje dane przy starcie i zapisuje je przy czystym zamknięciu).
+- Okna requestów i tokenów są przechowywane w pamięci na potrzeby przyjmowania
+  requestów i zapisywane w skonfigurowanym storage mniej więcej raz na sekundę
+  (i przy zamykaniu), więc przetrwają restart i `gomodel --reload`. Restart
+  liczy zapisane wartości poprzedniego uruchomienia raz, a nie dwa razy; awaria
+  traci co najwyżej to, co zliczono od ostatniego flusha. Interwał dostroisz
+  zmienną `RATE_LIMITS_FLUSH_INTERVAL` (w sekundach; domyślnie `1`). `0` pomija
+  okresowy zapis: liczniki nadal są wczytywane przy starcie i zapisywane przy
+  czystym zamknięciu, ale po starcie repliki nie widzą już nawzajem swojego
+  ruchu.
+- Reset obowiązuje na każdej replice: replika, która go obsłużyła, czyści swoje
+  okna requestów i tokenów od razu, a pozostałe w ciągu kilku sekund, gdy
+  [przeładują reguły](/pl/guides/production#zmiany-konfiguracji-docierają-do-wszystkich-replik-w-ciągu-kilku-sekund).
+  Zajęte sloty współbieżności pozostają zajęte, dopóki ich requesty się nie zakończą.
+  Przełączenie reguły między wspólną a `per_child` albo jej usunięcie i
+  ponowne utworzenie w ten sam sposób zaczyna liczenie od zera. Zapisane
+  liczniki sprzed resetu lub takiej zmiany nigdy nie wracają, nawet po
+  restarcie albo po przełączeniu z powrotem. Edycja limitu zachowuje liczniki.
+  Zanim zresetujesz lub usuniesz reguły, dokończ rolling upgrade z wydania
+  sprzed snapshotów per replika: reset lub usunięcie obsłużone przez starszą
+  replikę może wrócić po restarcie.
+
+## Kilka replik współdzieli jeden limit
+
+Przy niezerowym `RATE_LIMITS_FLUSH_INTERVAL` (domyślnie `1`) repliki
+współdzielące bazę danych egzekwują każdą regułę wspólnie: reguła
+`100 rpm` przepuszcza około 100 requestów na minutę łącznie we wszystkich
+replikach, a nie 100 na replikę. Każda replika zapisuje to, co sama zliczyła,
+a przy każdym flushu odczytuje to, co pozostałe zapisały od jej poprzedniego
+odczytu. Przyjmowanie requestu sprawdza bieżący licznik repliki plus ostatnio
+zapisane liczniki pozostałych, w całości w pamięci: żaden request nie czeka na
+bazę danych. Nagłówki z liczbą pozostałych requestów, użycie w panelu admina i
+dashboardzie, `GET /v1/usage` oraz omijanie nasyconego providera lub modelu
+pokazują licznik dla całego klastra.
+
+Limit jest przybliżony, a nie dokładny:
+
+- Requesty innej repliki docierają do tej w ciągu około dwóch interwałów
+  flush: jednego, w którym tamta replika je zapisuje, i drugiego, w którym ta
+  je odczytuje. Do tego czasu każda replika przyjmuje requesty tak, jakby
+  tamtych nie było, więc przy domyślnym interwale klaster może przekroczyć limit
+  o około dwie sekundy ruchu pozostałych replik. Requesty przyjęte przez kilka
+  replik w tej samej chwili mogą wszystkie zająć ostatni slot.
+- Limity współbieżności są współdzielone tak samo: każda replika publikuje
+  liczbę requestów w toku przy każdym flushu. Replika, która uległa awarii,
+  trzyma swoje sloty, dopóki jej licznik się nie zestarzeje, po trzech
+  interwałach flush i co najmniej 5 sekundach, a wtedy zwalniają się one na
+  wszystkich pozostałych replikach. Świeżość porównuje czas, w którym replika
+  zapisała swój licznik, z zegarem odczytującego, więc synchronizuj zegary
+  replik (NTP).
+- Limit, którego nigdy nie wolno przekroczyć, np. `concurrent=1` w obrębie
+  wszystkich replik, wymaga sprawdzania współdzielonego stanu przy każdym
+  requeście, czego GoModel jeszcze nie oferuje. Użyj do niego jednej repliki
+  albo kieruj wszystkie requesty liczone przez regułę do tej samej repliki.
+
+Każdy flush zapisuje tylko te liczniki requestów i tokenów, które zmieniły się
+od poprzedniego, plus każdy niezerowy wskaźnik współbieżności, który jest
+zapisywany przy każdym flushu jako heartbeat, aby inne repliki odróżniały sloty
+działającej repliki od slotów tej, która uległa awarii. Odczytuje tylko wiersze
+zapisane od chwili tuż przed poprzednim odczytem, z pełnym odczytem raz na minutę.
+[Budżety](/pl/features/budgets) pozostają trwałą kontrolą wydatków.
+
+<Note>
+Aktualizacja z v0.2.1 lub starszej: liczniki zapisane przez te wydania są
+scalane przez maksimum, bo każdy z tych wierszy zawiera też to, co jego autor
+przywrócił przy starcie. Dopóki te okna nie wygasną (do dwóch okresów), ruch
+zliczony przez kilka replik v0.2.1 może zostać policzony za nisko, a replika
+v0.2.1 zrestartowana w trakcie wdrażania może policzyć część ruchu podwójnie.
+Oba efekty ustają, gdy te okna wygasną. Aby zacząć od zera, po wdrożeniu
+zresetuj liczniki (`POST /admin/rate-limits/reset`): każda reguła
+liczy wtedy od zera.
+</Note>
 
 ## Zachowanie klienta
 
@@ -496,9 +560,13 @@ console.log(deleted);
 
 </CodeGroup>
 
-Zresetuj bieżące liczniki jednej reguły (`POST /admin/rate-limits/reset-one` z
+Zresetuj liczniki requestów i tokenów jednej reguły
+(`POST /admin/rate-limits/reset-one` z
 `{"scope": ..., "subject": ..., "period": ...}`) lub wszystkich reguł
-(`POST /admin/rate-limits/reset` z `{"confirmation": "reset"}`). Edycja
-reguły nigdy nie resetuje jej liczników; usunięcie reguły je resetuje.
+(`POST /admin/rate-limits/reset` z `{"confirmation": "reset"}`) na każdej
+replice. Zajęte sloty współbieżności pozostają zajęte, dopóki ich requesty się
+nie zakończą. Sama edycja limitów reguły nigdy nie resetuje jej liczników; usunięcie
+reguły, przeniesienie jej na nowy zakres, podmiot lub okres albo przełączenie
+między wspólną a `per_child` je resetuje.
 
 Listę endpointów znajdziesz w [Endpointach administracyjnych](/pl/advanced/admin-endpoints).

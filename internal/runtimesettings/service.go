@@ -30,6 +30,10 @@ type Service struct {
 	rejected map[string]string
 	cancel   context.CancelFunc
 	done     chan struct{}
+
+	// updates counts the values Update applied, so sync can drop a read
+	// that an Update may have overtaken.
+	updates uint64
 }
 
 // NewStore opens the deployment-wide key/value store on the shared backend.
@@ -140,6 +144,7 @@ func (s *Service) Update(ctx context.Context, key, value string) (ext.SettingDes
 	if !valueAllowed(previous, value) {
 		return ext.SettingDescriptor{}, fmt.Errorf("%w: %q is not allowed for %s", ErrInvalid, value, key)
 	}
+	s.updates++
 	if err := setting.Apply(value); err != nil {
 		return ext.SettingDescriptor{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}

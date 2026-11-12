@@ -124,6 +124,7 @@ The official SDKs therefore work unchanged. Configure their base URLs as follows
 - Kilo AI
 - Eden AI
 - MiniMax
+- Mistral AI
 - Xiaomi MiMo
 - OpenCode Go
 - Azure OpenAI
@@ -221,7 +222,7 @@ Not ready for Pro? [Sponsor GoModel](https://github.com/sponsors/ENTERPILOT) to 
 
 ## Roadmap
 
-See the [roadmap](https://gomodel.enterpilot.io/docs/about/roadmap?utm_source=readme) for GoModel Pro and the upcoming 0.2.0 release.
+See the [roadmap](https://gomodel.enterpilot.io/docs/about/roadmap?utm_source=readme) for GoModel Pro and the upcoming 0.3.0 release.
 
 ## Featured Sponsors
 
