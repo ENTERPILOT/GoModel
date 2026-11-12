@@ -1468,7 +1468,7 @@
   "api_keys_allowed_mcp_editor": "API key MCP access editor",
   "api_keys_save_allowed_mcp": "Save MCP Access",
   "api_keys_allowed_mcp_field": "MCP access",
-  "api_keys_allowed_mcp_edit_help": "Ends the key's open MCP sessions on their next request, so clients reconnect with the new tool list. Leave empty to lift the key-level restriction.",
+  "api_keys_allowed_mcp_edit_help": "Ends the key's open MCP sessions on their next request, so clients reconnect with the new tool list. Leave empty to lift the key-level restriction; if your own key has MCP access limits, an empty field is rejected.",
   "api_keys_edit_allowed_mcp_action": "Edit MCP access for API key {name}",
   "api_keys_allowed_mcp_update_failed": "Failed to update MCP access.",
   "api_keys_allowed_mcp_updated": "MCP access updated for key \"{name}\".",

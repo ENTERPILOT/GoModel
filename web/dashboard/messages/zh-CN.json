@@ -1270,7 +1270,7 @@
   "api_keys_allowed_mcp_editor": "API 密钥 MCP 访问编辑器",
   "api_keys_save_allowed_mcp": "保存 MCP 访问",
   "api_keys_allowed_mcp_field": "MCP 访问",
-  "api_keys_allowed_mcp_edit_help": "会在该密钥已打开的 MCP 会话的下一个请求时结束这些会话，客户端将使用新的工具列表重新连接。留空则取消密钥级限制。",
+  "api_keys_allowed_mcp_edit_help": "会在该密钥已打开的 MCP 会话的下一个请求时结束这些会话，客户端将使用新的工具列表重新连接。留空则取消密钥级限制；如果您自己的密钥有 MCP 访问限制，留空会被拒绝。",
   "api_keys_edit_allowed_mcp_action": "编辑 API 密钥 {name} 的 MCP 访问",
   "api_keys_allowed_mcp_update_failed": "更新 MCP 访问失败。",
   "api_keys_allowed_mcp_updated": "已更新密钥“{name}”的 MCP 访问。",
