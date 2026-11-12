@@ -22,6 +22,8 @@ type mongoBatchDocument struct {
 	Status    string `bson:"status"`
 	Data      []byte `bson:"data"`
 	UserPath  string `bson:"user_path"`
+	// UsageLoggedAt is part of the usage claim (see usage_claim.go).
+	UsageLoggedAt *int64 `bson:"usage_logged_at,omitempty"`
 }
 
 // MongoDBStore stores batches in MongoDB.
@@ -132,7 +134,7 @@ func (s *MongoDBStore) Get(ctx context.Context, id string) (*StoredBatch, error)
 	if err != nil {
 		return nil, fmt.Errorf("decode batch: %w", err)
 	}
-	return batch, nil
+	return withUsageLoggedAt(batch, doc.UsageLoggedAt), nil
 }
 
 // List returns batches ordered by created_at desc, id desc.
@@ -200,7 +202,7 @@ func (s *MongoDBStore) List(ctx context.Context, limit int, after, userPath stri
 		if err != nil {
 			return nil, fmt.Errorf("decode batch payload: %w", err)
 		}
-		items = append(items, batch)
+		items = append(items, withUsageLoggedAt(batch, doc.UsageLoggedAt))
 	}
 	if err := cursor.Err(); err != nil {
 		return nil, fmt.Errorf("iterate batches cursor: %w", err)
@@ -209,7 +211,7 @@ func (s *MongoDBStore) List(ctx context.Context, limit int, after, userPath stri
 	return items, nil
 }
 
-// Update updates a stored batch object.
+// Update updates a stored batch object. It leaves the usage fields alone.
 func (s *MongoDBStore) Update(ctx context.Context, batch *StoredBatch) error {
 	payload, err := serializeBatch(batch)
 	if err != nil {
@@ -234,36 +236,55 @@ func (s *MongoDBStore) Update(ctx context.Context, batch *StoredBatch) error {
 	return nil
 }
 
-// ClaimUsage replaces the batch unless the stored one already records usage,
-// swapping the payload only if it is unchanged since it was read.
-func (s *MongoDBStore) ClaimUsage(ctx context.Context, batch *StoredBatch) (bool, error) {
-	read := func() ([]byte, error) {
-		var doc mongoBatchDocument
-		err := s.collection.FindOne(ctx, bson.M{"_id": batch.Batch.ID}).Decode(&doc)
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			return nil, ErrNotFound
-		}
-		if err != nil {
-			return nil, fmt.Errorf("query batch: %w", err)
-		}
-		return doc.Data, nil
+// ClaimUsage grants the batch's usage claim with one conditional update, so
+// concurrent callers cannot both take it.
+func (s *MongoDBStore) ClaimUsage(ctx context.Context, id string, now time.Time, timeout time.Duration) (UsageClaim, error) {
+	// The read finds a missing batch and a marker kept in the serialized
+	// batch; neither can change back, so it need not be atomic with the claim.
+	stored, err := s.Get(ctx, id)
+	if err != nil {
+		return UsagePending, err
 	}
-	swap := func(current, next []byte) (bool, error) {
-		result, err := s.collection.UpdateOne(ctx,
-			bson.M{"_id": batch.Batch.ID, "data": current},
-			bson.M{"$set": bson.M{
-				"updated_at": time.Now().Unix(),
-				"status":     batch.Batch.Status,
-				"data":       next,
-				"user_path":  strings.TrimSpace(batch.UserPath),
-			}},
-		)
-		if err != nil {
-			return false, fmt.Errorf("claim batch usage: %w", err)
-		}
-		return result.MatchedCount > 0, nil
+	if stored.UsageLoggedAt != nil {
+		return UsageLogged, nil
 	}
-	return claimUsage(batch, read, swap)
+	// A nil filter value matches a field that is absent as well.
+	result, err := s.collection.UpdateOne(ctx,
+		bson.M{
+			"_id":             id,
+			"usage_logged_at": nil,
+			"$or": bson.A{
+				bson.M{"usage_claimed_at": nil},
+				bson.M{"usage_claimed_at": bson.M{"$lte": staleUsageClaim(now, timeout)}},
+			},
+		},
+		bson.M{"$set": bson.M{"usage_claimed_at": now.UnixNano()}},
+	)
+	if err != nil {
+		return UsagePending, fmt.Errorf("claim batch usage: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return UsagePending, nil
+	}
+	return UsageClaimed, nil
+}
+
+// CompleteUsage marks the batch's usage as logged and releases the claim.
+func (s *MongoDBStore) CompleteUsage(ctx context.Context, id string, loggedAt time.Time) error {
+	result, err := s.collection.UpdateOne(ctx,
+		bson.M{"_id": id},
+		bson.M{
+			"$set":   bson.M{"updated_at": time.Now().Unix(), "usage_logged_at": loggedAt.UnixNano()},
+			"$unset": bson.M{"usage_claimed_at": ""},
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("complete batch usage: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // Delete removes a stored batch object.

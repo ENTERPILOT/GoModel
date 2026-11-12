@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -46,7 +47,18 @@ type BatchOrchestrator struct {
 	usageLogger                          usage.LoggerInterface
 	pricingResolver                      usage.PricingResolver
 	budgetEnforcer                       func(context.Context) error
+	usageClaimTimeout                    time.Duration
 }
+
+// batchUsageClaimTimeout is how old a usage claim must be before another
+// results fetch takes it over. Writing a batch's entries hands them to the
+// logger's buffer and takes milliseconds, so a claim this old belongs to a
+// process that stopped. batchUsageClaimPoll is the first wait of a fetch
+// that finds the claim held; the wait doubles up to a second.
+const (
+	batchUsageClaimTimeout = 30 * time.Second
+	batchUsageClaimPoll    = 10 * time.Millisecond
+)
 
 // NewBatchOrchestrator creates a native batch orchestrator.
 func NewBatchOrchestrator(cfg BatchConfig) *BatchOrchestrator {
@@ -63,6 +75,7 @@ func NewBatchOrchestrator(cfg BatchConfig) *BatchOrchestrator {
 		usageLogger:                          cfg.UsageLogger,
 		pricingResolver:                      cfg.PricingResolver,
 		budgetEnforcer:                       cfg.BudgetEnforcer,
+		usageClaimTimeout:                    batchUsageClaimTimeout,
 	}
 }
 
@@ -525,7 +538,7 @@ func (o *BatchOrchestrator) Results(ctx context.Context, id, fallbackRequestID s
 
 	result := *upstream
 	result.BatchID = stored.Batch.ID
-	usageLogged := logBatchUsage(stored, &result, fallbackRequestID, o.usageLogger, o.pricingResolver, o.claimBatchUsage(ctx))
+	usageLogged := logBatchUsage(stored, &result, fallbackRequestID, o.usageLogger, o.pricingResolver, o.batchUsageClaim(ctx, stored.Batch))
 	if len(result.Data) > 0 {
 		stored.Batch.Results = result.Data
 	}
@@ -548,31 +561,56 @@ func (o *BatchOrchestrator) Results(ctx context.Context, id, fallbackRequestID s
 	return &BatchResultsResult{Response: &result, ProviderType: stored.Batch.Provider}, nil
 }
 
-// claimBatchUsage persists a batch's usage marker before its usage entries
-// are written, so a concurrent fetch of the same results, or one after the
-// final store update failed, does not write them again. Storage drops the
-// duplicates by ID, but the token and cost metrics would count them twice.
-// A failed claim writes nothing; a later fetch retries. A claim lost to an
-// earlier fetch adopts that fetch's usage fields, which the final update of
-// this fetch then keeps.
-func (o *BatchOrchestrator) claimBatchUsage(ctx context.Context) func(*batchstore.StoredBatch) (bool, error) {
-	return func(stored *batchstore.StoredBatch) (bool, error) {
-		claimed, err := o.batchStore.ClaimUsage(ctx, stored)
-		if err != nil {
-			slog.Warn(
-				"failed to claim batch usage; it is logged on a later results fetch",
-				"batch_id", stored.Batch.ID,
-				"provider", stored.Batch.Provider,
-				"error", err,
-			)
-			return false, err
-		}
-		if !claimed {
-			if winner, getErr := o.batchStore.Get(ctx, stored.Batch.ID); getErr == nil && winner.Batch != nil {
-				stored.RequestID, stored.UsageLoggedAt, stored.Batch.Usage = winner.RequestID, winner.UsageLoggedAt, winner.Batch.Usage
+// batchUsageClaim makes the fetches of one batch's results write its usage
+// entries once, without losing them when the writer stops halfway.
+//
+// A fetch claims the batch in the store, hands every entry to the usage
+// logger, and only then marks the usage as logged. A fetch that finds a
+// claim held waits for it: it returns once the usage is logged, or takes the
+// claim over when it is batchUsageClaimTimeout old, which means its holder
+// stopped, and writes every entry itself. So a fetch returns results only
+// after the batch's usage was handed to a logger.
+//
+// Usage storage drops the entries a takeover repeats, because their IDs are
+// derived from the batch; the token and cost metrics count them again. That
+// is the price of never skipping an entry, and it is paid only when entries
+// are written without their marker being saved: a holder that stops or
+// stalls past the timeout mid-write, or a store that fails while claiming or
+// marking. In the last case the entries are written unguarded, since losing
+// billable usage is worse than counting it twice in a metric.
+func (o *BatchOrchestrator) batchUsageClaim(ctx context.Context, batch *core.BatchResponse) *batchUsageClaim {
+	warn := func(msg string, err error) {
+		slog.Warn(msg, "batch_id", batch.ID, "provider", batch.Provider, "error", err)
+	}
+	return &batchUsageClaim{
+		take: func() bool {
+			wait := batchUsageClaimPoll
+			for {
+				claim, err := o.batchStore.ClaimUsage(ctx, batch.ID, time.Now().UTC(), o.usageClaimTimeout)
+				switch {
+				case err != nil && ctx.Err() != nil:
+					// Nobody receives these results; a later fetch logs them.
+					return false
+				case err != nil:
+					warn("failed to claim batch usage; writing it unguarded", err)
+					return true
+				case claim != batchstore.UsagePending:
+					return claim == batchstore.UsageClaimed
+				}
+				select {
+				case <-ctx.Done():
+					return false
+				case <-time.After(wait):
+					wait = min(2*wait, time.Second)
+				}
 			}
-		}
-		return claimed, nil
+		},
+		done: func(loggedAt time.Time) {
+			// The caller may be gone by now; the entries are written all the same.
+			if err := o.batchStore.CompleteUsage(context.WithoutCancel(ctx), batch.ID, loggedAt); err != nil {
+				warn("failed to mark batch usage as logged; a later results fetch may write it again", err)
+			}
+		},
 	}
 }
 
