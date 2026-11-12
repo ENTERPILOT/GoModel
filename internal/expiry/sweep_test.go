@@ -89,7 +89,11 @@ func TestPruneRebuildsAStaleIndex(t *testing.T) {
 
 	Prune(&index, entries, identity, base)
 
-	assert.Equal(t, 1, index.Len())
+	require.Equal(t, 1, index.Len())
+	key, expires, ok := index.Soonest()
+	require.True(t, ok)
+	assert.Equal(t, 7, key)
+	assert.Equal(t, base.Add(time.Hour), expires)
 }
 
 func TestEvictSoonestDeletesTheEntryClosestToExpiry(t *testing.T) {
