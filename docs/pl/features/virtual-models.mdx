@@ -213,6 +213,39 @@ więc aliasy, których zastosowane wartości się różnią, także dla `top_k` 
 
 Reszta tej strony dotyczy przekierowań.
 
+## Okno kontekstu i maksymalna liczba tokenów wyjściowych
+
+Klienci, na przykład agenci programistyczni, odczytują `metadata.context_window` i
+`metadata.max_output_tokens` z `GET /v1/models`, aby dopasować rozmiar promptów.
+Przekierowanie podaje dla każdego z tych pól **najmniejszą wartość zgłaszaną przez
+którykolwiek z jego celów**, także przez modele wirtualne w łańcuchu. Request może
+obsłużyć dowolny cel – przez load balancing, failover lub przeniesienie sesji – więc
+dopasowanie do najmniejszej wartości nie przepełni żadnego celu, który zgłasza wartość.
+Cele, które nie zgłaszają wartości, są pomijane, więc podana wartość ich nie ogranicza;
+jeśli żaden cel jej nie zgłasza, pole jest pomijane. Ustaw wartość jawnie, gdy taki cel
+przyjmuje mniej.
+
+Ustaw **Context window** lub **Max output tokens** na przekierowaniu, aby podać własną
+wartość, na przykład gdy cel z dużym kontekstem służy tylko jako rzadki fallback. Wartość
+jawna ma pierwszeństwo przed wyliczoną, a model wirtualny w łańcuchu stosuje własne
+wartości jawne, zanim zewnętrzny wyznaczy minimum.
+
+```yaml
+virtual_models:
+  - source: smart
+    context_window: 128000 # pomiń, aby użyć najmniejszej wartości celów
+    max_output_tokens: 16000
+    targets:
+      - { model: openai/gpt-4o }
+      - { model: anthropic/claude-sonnet-4-6 }
+```
+
+Przy `MODELS_VLLM_DISCOVERY_COMPAT=true` pole `max_model_len` przekierowania podlega tej
+samej regule: jawne okno kontekstu, a w przeciwnym razie najmniejszy limit spośród celów.
+
+Te wartości są wyłącznie metadanymi listy modeli: GoModel nie egzekwuje ich na
+requestach. Polityki dostępu nie mogą ich zawierać.
+
 ## Używanie stabilnych nazw
 
 Możesz udostępniać nazwy takie jak `regular` i `smarter` zamiast identyfikatorów
@@ -353,7 +386,9 @@ sesji przypina na każdym poziomie, więc sesja pozostaje przy tym samym konkret
   wirtualnego; zakres wewnętrznego nie jest sprawdzany, gdy dochodzi się do niego przez
   łańcuch.
 - `/v1/models` wypisuje przekierowanie z łańcuchem z metadanymi jego pierwszego
-  dostępnego konkretnego modelu.
+  dostępnego konkretnego modelu, z wyjątkiem
+  [limitów tokenów](#okno-kontekstu-i-maksymalna-liczba-tokenów-wyjściowych), które
+  uwzględniają każdy cel.
 
 Cel zapisany jako jedna nazwa jest dopasowywany po nazwie niezależnie od miejsca deklaracji –
 `config.yaml`, dashboard czy admin API – więc `team/cheap` trafia do
@@ -439,7 +474,9 @@ Każdy wpis przyjmuje `source`, pojedynczy `target` (skrót) lub listę `targets
 [Utrzymywanie sesji](/pl/features/session-keeping)), `failover` (domyślnie `true`; zobacz
 [Failover](/pl/features/failover)), `user_paths`, `description`,
 `slowdown` (`0` wyłącza odziedziczone spowolnienie; aktywne współczynniki mieszczą się w zakresie od `0.1` do
-`10`), `reasoning_effort` (zobacz
+`10`), `context_window` i `max_output_tokens` (zobacz
+[Okno kontekstu i maksymalna liczba tokenów wyjściowych](#okno-kontekstu-i-maksymalna-liczba-tokenów-wyjściowych)),
+`reasoning_effort` (zobacz
 [Wymuszanie reasoning effort](#wymuszanie-reasoning-effort)), `params` i
 `default_params` (zobacz
 [Ustawianie parametrów żądania](#ustawianie-parametrów-żądania)) oraz `enabled`.

@@ -227,6 +227,42 @@ einen semantischen Eintrag teilen.
 
 Der Rest dieser Seite behandelt Redirects.
 
+## Kontextfenster und maximale Ausgabe-Tokens
+
+Clients wie Coding-Agenten lesen `metadata.context_window` und
+`metadata.max_output_tokens` aus `GET /v1/models`, um ihre Prompts zu bemessen.
+Ein Redirect listet für beide Felder jeweils den **kleinsten Wert, den eines
+seiner Ziele meldet**, auch über verkettete virtuelle Modelle hinweg. Jedes Ziel
+kann einen Request bedienen – durch Load Balancing, Failover oder eine
+wandernde Session –, sodass eine Bemessung am kleinsten Wert kein Ziel
+überläuft, das einen Wert meldet. Ziele ohne gemeldeten Wert werden ignoriert,
+der gelistete Wert begrenzt sie also nicht; meldet keines einen Wert, entfällt
+das Feld. Setzen Sie einen expliziten Wert, wenn ein solches Ziel weniger
+akzeptiert.
+
+Setzen Sie **Context window** oder **Max output tokens** auf einem Redirect, um
+stattdessen Ihren eigenen Wert zu listen, etwa wenn ein Ziel mit großem Kontext
+nur als seltener Fallback dient. Ein expliziter Wert hat Vorrang vor dem
+abgeleiteten, und ein verkettetes virtuelles Modell wendet seine eigenen
+expliziten Werte an, bevor ein äußeres das Minimum bildet.
+
+```yaml
+virtual_models:
+  - source: smart
+    context_window: 128000 # weglassen, um den kleinsten Zielwert zu verwenden
+    max_output_tokens: 16000
+    targets:
+      - { model: openai/gpt-4o }
+      - { model: anthropic/claude-sonnet-4-6 }
+```
+
+Mit `MODELS_VLLM_DISCOVERY_COMPAT=true` folgt `max_model_len` eines Redirects
+derselben Regel: sein explizites Kontextfenster, andernfalls das kleinste Limit
+seiner Ziele.
+
+Diese Werte sind reine Listing-Metadaten: GoModel erzwingt sie nicht bei
+Requests. Zugriffsrichtlinien können sie nicht tragen.
+
 ## Stabile Namen verwenden
 
 Sie können Namen wie `regular` und `smarter` statt providerspezifischer
@@ -379,7 +415,9 @@ sodass eine Session beim selben konkreten Modell bleibt.
   einen Request; der Scope des inneren wird nicht ausgewertet, wenn es über eine
   Kette erreicht wird.
 - `/v1/models` listet einen verketteten Redirect mit den Metadaten seines ersten
-  verfügbaren konkreten Modells auf.
+  verfügbaren konkreten Modells auf, mit Ausnahme der
+  [Token-Limits](#kontextfenster-und-maximale-ausgabe-tokens), die jedes Ziel
+  berücksichtigen.
 
 Ein Ziel, das als einzelner Name geschrieben ist, wird überall dort, wo es
 deklariert ist – `config.yaml`, Dashboard oder Admin API –, nach Namen
@@ -474,7 +512,9 @@ Jeder Eintrag akzeptiert `source`, ein einzelnes `target` (Kurzform) oder eine
 [Session Keeping](/de/features/session-keeping)), `failover` (Standardwert
 `true`; siehe [Failover](/de/features/failover)), `user_paths`, `description`,
 `slowdown` (`0` deaktiviert geerbtes Slowdown; aktive Faktoren reichen von `0.1`
-bis `10`), `reasoning_effort` (siehe
+bis `10`), `context_window` und `max_output_tokens` (siehe
+[Kontextfenster und maximale Ausgabe-Tokens](#kontextfenster-und-maximale-ausgabe-tokens)),
+`reasoning_effort` (siehe
 [Reasoning-Effort erzwingen](#reasoning-effort-erzwingen)), `params` und
 `default_params` (siehe
 [Request-Parameter setzen](#request-parameter-setzen)) und `enabled`.
