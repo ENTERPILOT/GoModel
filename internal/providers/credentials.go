@@ -118,6 +118,11 @@ type CredentialStore interface {
 // mcpgateway.Service. Declarative names are read-only here (shadowed),
 // mirroring every other config-store precedence rule in the gateway.
 type CredentialsService struct {
+	// lifetime is the context the service was created with. Background work
+	// such as a model fetch after a refresh is bounded by it, not by the
+	// caller's, so a poll deadline cannot cut the fetch short while shutdown
+	// still ends it.
+	lifetime context.Context
 	factory  *ProviderFactory
 	registry *ModelRegistry
 	store    CredentialStore
@@ -197,6 +202,7 @@ func NewCredentialsService(ctx context.Context, factory *ProviderFactory, regist
 	}
 
 	s := &CredentialsService{
+		lifetime:     ctx,
 		factory:      factory,
 		registry:     registry,
 		store:        store,
@@ -258,16 +264,18 @@ func (s *CredentialsService) Reload(ctx context.Context) error {
 // gateway instance sharing the database may have changed: it installs new
 // and edited credentials, and unregisters deleted and disabled ones.
 // Unchanged credentials keep their running provider. The model inventory of
-// newly installed providers is fetched in the background, bounded by ctx,
-// even when a later pass fails: the next Refresh sees them as running and
-// would not fetch it again.
+// newly installed providers is fetched in the background, even when a later
+// pass fails: the next Refresh sees them as running and would not fetch it
+// again. The fetch is bounded by the service's lifetime and its own timeout
+// rather than by ctx, since a caller such as the cluster syncer bounds ctx by
+// its poll and the fetch can outlast that.
 func (s *CredentialsService) Refresh(ctx context.Context) error {
 	installed, err := s.reconcile(ctx)
 	if installed {
 		go func() {
-			refreshCtx, cancel := context.WithTimeout(ctx, credentialModelRefreshTimeout)
+			refreshCtx, cancel := context.WithTimeout(s.lifetime, credentialModelRefreshTimeout)
 			defer cancel()
-			if err := s.registry.Refresh(refreshCtx); err != nil && ctx.Err() == nil {
+			if err := s.registry.Refresh(refreshCtx); err != nil {
 				slog.Warn("provider credentials reconciled but the model catalog refresh failed", "error", err)
 			}
 		}()

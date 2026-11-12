@@ -78,6 +78,7 @@ support, not every individual model capability exposed by an upstream provider.
 | xAI (Grok) | `XAI_API_KEY` | `grok-4.6` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | [xAI (Grok)](/providers/xai) |
 | Alibaba Cloud Model Studio (Bailian) | `BAILIAN_API_KEY` (`BAILIAN_BASE_URL` optional) | `qwen3-max` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Alibaba Cloud Model Studio](/providers/bailian) |
 | MiniMax | `MINIMAX_API_KEY` (`MINIMAX_BASE_URL` optional) | `MiniMax-M3` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [MiniMax](/providers/minimax) |
+| Mistral AI | `MISTRAL_API_KEY` (`MISTRAL_BASE_URL` optional) | `mistral-large-latest` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Mistral AI](/providers/mistral) |
 | Xiaomi MiMo | `XIAOMI_API_KEY` (`XIAOMI_BASE_URL` optional) | `mimo-v2.5-pro` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | [Xiaomi MiMo](/providers/xiaomi) |
 | ElevenLabs (voice only) | `ELEVENLABS_API_KEY` (`ELEVENLABS_BASE_URL` optional) | `eleven_multilingual_v2` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [ElevenLabs](/providers/elevenlabs) |
 | audio.cpp (audio only) | `AUDIOCPP_BASE_URL` (`AUDIOCPP_API_KEY` optional) | `pocket-tts` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | [audio.cpp](/providers/audiocpp) |
@@ -92,7 +93,7 @@ support, not every individual model capability exposed by an upstream provider.
 | vLLM | `VLLM_BASE_URL` (`VLLM_API_KEY` optional) | `meta-llama/Llama-3.1-8B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [vLLM](/providers/vllm) |
 | llama.cpp / LM Studio | `LLAMACPP_BASE_URL` (`LLAMACPP_API_KEY` optional) | `gemma-3-4b-it` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [llama.cpp](/providers/llamacpp) |
 | llm-d | `LLMD_BASE_URL` (`LLMD_API_KEY` optional) | `Qwen/Qwen2.5-0.5B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [llm-d](/providers/llmd) |
-| Amazon Bedrock | `BEDROCK_BASE_URL` (region or endpoint) + AWS credentials | `anthropic.claude-3-5-haiku-20241022-v1:0` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Amazon Bedrock](/providers/bedrock) |
+| Amazon Bedrock | `BEDROCK_BASE_URL` (region or endpoint) + `BEDROCK_API_KEY` or AWS credentials | `anthropic.claude-3-5-haiku-20241022-v1:0` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Amazon Bedrock](/providers/bedrock) |
 | Amazon Bedrock Mantle | `BEDROCK_MANTLE_API_KEY` or AWS credentials | `openai.gpt-5.6-sol` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Bedrock Mantle](/providers/bedrock-mantle) |
 
 ✅ Supported ❌ Unsupported
@@ -193,8 +194,8 @@ support, not every individual model capability exposed by an upstream provider.
 - **Xiaomi MiMo** — TTS (`mimo-v2.5-tts*`) and ASR (`mimo-v2.5-asr`) are served
   through `/v1/audio/speech` and `/v1/audio/transcriptions` (translated to
   MiMo's chat-completions audio dialect) as well as directly via chat
-  completions; for 1M context append `[1m]` to the model ID and list it in
-  `XIAOMI_MODELS`.
+  completions; for 1M context append `[1m]` to the model ID, list it in
+  `XIAOMI_MODELS`, and set `XIAOMI_MODELS_MODE=merge`.
 - **OpenCode Go (OpenCode Zen)** — routes per model: most models use
   OpenAI-style `/chat/completions`, while `/messages`-only models (default
   `qwen3.7-max`, override with `OPENCODE_GO_MESSAGES_MODELS`) are sent to the
@@ -342,8 +343,8 @@ These are the providers most users hit friction on:
 
 - **Google Vertex AI** — needs a GCP project, region, and either Application
   Default Credentials or a service-account JSON key.
-- **Amazon Bedrock** — no API key of its own; uses the AWS credential chain
-  and requires explicit model access in the Bedrock console.
+- **Amazon Bedrock** — a Bedrock API key or the AWS credential chain, and
+  explicit model access in the Bedrock console.
 - **Azure OpenAI** — deployment-scoped or `/openai/v1` base URLs, the `api-version` query
   parameter, and the `api-key` header instead of `Authorization: Bearer`.
 - **Oracle GenAI** — requires an OCI IAM policy for `generativeaiapikey` and a

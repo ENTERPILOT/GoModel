@@ -33,6 +33,19 @@ Use budgets when you want limits such as:
   when the global budget feature is on.
 </Info>
 
+Budgets are soft limits. A request is admitted when it starts, against the
+spend already stored, and a failover target over its budget is skipped. Usage is written in batches, every
+`USAGE_FLUSH_INTERVAL` (5 s by default) or every 100 entries, so a budget does
+not yet see the requests of the batch being collected, nor requests still
+running, such as long streams. Those requests complete, and their spend counts
+toward the budget once written, under the budget's cost basis and the
+[non-billable provider](#non-billable-providers) rules. How far spend can pass
+a limit depends on traffic and request length, and grows while storage writes
+are slow, so leave headroom when a budget is a customer's credit limit. Usage
+entries that are never stored, because the buffer (`USAGE_BUFFER_SIZE`) is
+full or a write fails, are logged and counted in
+`gomodel_usage_entries_dropped_total`, and never reach a budget.
+
 ## Enable budgets
 
 Budgets are enabled by default:

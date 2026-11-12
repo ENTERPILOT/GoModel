@@ -3,14 +3,18 @@ package admin
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/goccy/go-json"
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
@@ -163,6 +167,89 @@ func TestLiveLogsWritesImmediateHeartbeat(t *testing.T) {
 				require.NotContains(t, body, tc.wantAbsent)
 			}
 		})
+	}
+}
+
+// The SSE frame is encoded by hand; it must stay byte for byte the frame the
+// handler wrote with json.Marshal and fmt.Fprintf, which the dashboard parses.
+func TestAppendLiveEventFrameMatchesMarshaledFrame(t *testing.T) {
+	require.Equal(t, 5, reflect.TypeFor[live.Event]().NumField(),
+		"live.Event changed shape; update appendLiveEventFrame and this test")
+
+	ts := time.Date(2026, 9, 15, 12, 0, 0, 123456789, time.UTC)
+	// Data is what the broker stores: json.Marshal output, already compact
+	// and escaped.
+	data, err := json.Marshal(map[string]any{
+		"id":   "audit-1",
+		"data": map[string]any{"request_headers": map[string]string{"User-Agent": "a<b>&\"c\"\n\u2028"}},
+	})
+	require.NoError(t, err)
+	cases := []struct {
+		name  string
+		event live.Event
+	}{
+		{name: "heartbeat without sequence", event: live.Event{Type: live.EventHeartbeat, Timestamp: ts}},
+		{name: "heartbeat with sequence", event: live.Event{Seq: 42, Type: live.EventHeartbeat, Timestamp: ts}},
+		{name: "audit event", event: live.Event{Seq: 7, Type: live.EventAuditUpdated, RequestID: "req-1", Timestamp: ts, Data: data}},
+		{name: "whole-second timestamp", event: live.Event{Seq: 1, Type: live.EventUsageCompleted, Timestamp: ts.Truncate(time.Second), Data: json.RawMessage(`{}`)}},
+		{name: "non-UTC timestamp", event: live.Event{Seq: 1, Type: live.EventReset, Timestamp: ts.In(time.FixedZone("CEST", 2*60*60))}},
+		{name: "request ID needing escapes", event: live.Event{Seq: 3, Type: live.EventAuditStarted, RequestID: "a\"b\\c<d>&e\n\x01", Timestamp: ts}},
+		{name: "non-ASCII request ID", event: live.Event{Seq: 3, Type: live.EventAuditStarted, RequestID: "żółw-\u2028-\xff", Timestamp: ts}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			payload, err := json.Marshal(tc.event)
+			require.NoError(t, err)
+			want := fmt.Sprintf("event: %s\ndata: %s\n\n", tc.event.Type, payload)
+			if tc.event.Seq > 0 {
+				want = fmt.Sprintf("id: %d\n", tc.event.Seq) + want
+			}
+
+			got, err := appendLiveEventFrame([]byte("previous frame"), tc.event)
+			require.NoError(t, err)
+			assert.Equal(t, "previous frame"+want, string(got))
+		})
+	}
+}
+
+func TestLiveEventWriterDropsOversizedFrameBuffer(t *testing.T) {
+	ts := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+	rec := httptest.NewRecorder()
+	w := liveEventWriter{res: rec}
+
+	require.NoError(t, w.write(live.Event{Seq: 1, Type: live.EventHeartbeat, Timestamp: ts}))
+	require.NotNil(t, w.buf, "small frame buffer is kept for reuse")
+	assert.LessOrEqual(t, cap(w.buf), maxReusedLiveFrameBuffer)
+
+	body := `"` + strings.Repeat("x", 2*maxReusedLiveFrameBuffer) + `"`
+	large := live.Event{Seq: 2, Type: live.EventAuditUpdated, Timestamp: ts, Data: json.RawMessage(body)}
+	require.NoError(t, w.write(large))
+	assert.Nil(t, w.buf, "oversized frame buffer is dropped after writing")
+
+	require.NoError(t, w.write(live.Event{Seq: 3, Type: live.EventHeartbeat, Timestamp: ts}))
+	require.NotNil(t, w.buf)
+	assert.LessOrEqual(t, cap(w.buf), maxReusedLiveFrameBuffer)
+
+	written := rec.Body.String()
+	assert.Contains(t, written, body, "large frame is written in full")
+	assert.Equal(t, 3, strings.Count(written, "\n\n"), "every frame is written")
+}
+
+func BenchmarkAppendLiveEventFrame(b *testing.B) {
+	event := live.Event{
+		Seq:       12345,
+		Type:      live.EventAuditUpdated,
+		RequestID: "req-bench",
+		Timestamp: time.Date(2026, 9, 15, 12, 0, 0, 123456789, time.UTC),
+		Data:      json.RawMessage(`{"id":"audit-bench","request_id":"req-bench","timestamp":"2026-09-15T12:00:00Z","requested_model":"gpt-4o-mini","provider":"openai","method":"POST","path":"/v1/chat/completions","data":{"user_agent":"openai-python/1.60.0","request_headers":{"Authorization":"[REDACTED]","Content-Type":"application/json"}},"_live_state":"audit.updated","_live_pending":true}`),
+	}
+	var buf []byte
+	b.ReportAllocs()
+	for b.Loop() {
+		var err error
+		if buf, err = appendLiveEventFrame(buf[:0], event); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 

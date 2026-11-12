@@ -15,6 +15,7 @@ import (
 	"syscall"
 
 	"github.com/goccy/go-json"
+	"golang.org/x/net/http/httpguts"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -292,8 +293,13 @@ func (c *Client) buildRequest(ctx context.Context, req Request) (*http.Request, 
 		c.headerSetter(httpReq)
 	}
 
-	// Apply request-specific headers
-	for key, values := range req.Headers {
+	// Apply request-specific headers, including the ones prompt-phase plugins
+	// asked to add. A plugin may not set a credential header, one that frames the
+	// connection or describes the body, or one the provider or the gateway owns
+	// (core.IsPluginUpstreamHeaderDenied). For every other name its value
+	// replaces both the one the request carried and the one the provider's
+	// header hook set above: the provider wins only on the denied names.
+	for key, values := range requestHeadersWithPluginOverrides(ctx, req.Headers) {
 		httpReq.Header.Del(key)
 		for _, value := range values {
 			httpReq.Header.Add(key, value)
@@ -311,6 +317,65 @@ func (c *Client) buildRequest(ctx context.Context, req Request) (*http.Request, 
 	}
 
 	return httpReq, nil
+}
+
+// requestHeadersWithPluginOverrides merges the headers plugins wrote to
+// Exchange.Headers.Upstream into the request headers. It returns reqHeaders
+// unchanged when no plugin set any header.
+//
+// Only external traffic carries them. Gateway-internal inference issued by a
+// plugin — its Host on behalf of an LLM-based guardrail, for example — is built
+// on a context derived from the request that triggered it, so it would
+// otherwise inherit headers chosen for the client's provider and send them to
+// the model the gateway picked for itself. Origin is the same signal the
+// idempotency-key forwarding above uses to tell the two apart.
+func requestHeadersWithPluginOverrides(ctx context.Context, reqHeaders http.Header) http.Header {
+	if core.GetRequestOrigin(ctx) != core.RequestOriginExternal {
+		return reqHeaders
+	}
+	extra := core.PluginUpstreamHeaders(ctx)
+	if len(extra) == 0 {
+		return reqHeaders
+	}
+	merged := reqHeaders.Clone()
+	if merged == nil {
+		merged = http.Header{}
+	}
+	for key, values := range extra {
+		canonical := http.CanonicalHeaderKey(key)
+		if core.IsPluginUpstreamHeaderDenied(canonical) {
+			continue
+		}
+		// A name or value the transport would refuse fails the whole call, so
+		// a plugin bug would read as a provider outage on every attempt. Drop
+		// the header instead, and never log the value.
+		if !httpguts.ValidHeaderFieldName(canonical) {
+			slog.Warn("dropped plugin upstream header with an invalid name", "request_id", core.GetRequestID(ctx))
+			continue
+		}
+		if !validHeaderValues(values) {
+			slog.Warn("dropped plugin upstream header with an invalid value", "request_id", core.GetRequestID(ctx), "header", canonical)
+			continue
+		}
+		// The request headers may spell the name differently. Leaving that
+		// copy would let map order decide which value reaches the wire.
+		for existing := range merged {
+			if existing != canonical && strings.EqualFold(existing, canonical) {
+				delete(merged, existing)
+			}
+		}
+		merged[canonical] = append([]string(nil), values...)
+	}
+	return merged
+}
+
+func validHeaderValues(values []string) bool {
+	for _, value := range values {
+		if !httpguts.ValidHeaderFieldValue(value) {
+			return false
+		}
+	}
+	return true
 }
 
 func providerErrorStatusCode(err error) int {

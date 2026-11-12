@@ -27,8 +27,13 @@ providers:
 
 <Note>
   Voice models (e.g. `grok-voice-latest`) are not listed by xAI's `/models`
-  endpoint. To route realtime sessions to them, add them explicitly via
-  `XAI_MODELS=grok-voice-latest` or a configured model list.
+  endpoint. To route realtime sessions to them, list them in `XAI_MODELS`
+  (for example `XAI_MODELS=grok-voice-latest`) and set `XAI_MODELS_MODE=merge`
+  so the discovered models stay routable alongside them; in `config.yaml`, add
+  them under the provider's `models:` list and set `models_mode: merge` (see
+  [Models modes](/advanced/config-yaml#models-modes)). Until the first
+  `/models` listing succeeds, `merge` serves only the configured IDs; a failed
+  refresh later keeps the models already discovered.
 </Note>
 
 Image models such as `grok-2-image` are served through the

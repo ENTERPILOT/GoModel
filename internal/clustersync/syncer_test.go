@@ -235,27 +235,25 @@ func TestSyncerBoundsStalledRefresh(t *testing.T) {
 	})
 }
 
-// A refresh may hand its context to background work, as provider credentials
-// do to fetch a new provider's models, so returning must not cancel it.
-func TestSyncerRefreshContextOutlivesRefresh(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		ctx := context.Background()
-		syncer, err := NewSyncer(ctx, newFakeStore(nil))
-		require.NoError(t, err)
-		var refreshCtx context.Context
-		syncer.Register("provider_credentials", func(ctx context.Context) error {
-			refreshCtx = ctx
-			return nil
-		})
-		syncer.Notifier("provider_credentials")(ctx)
-
-		syncer.poll(ctx)
-		require.NotNil(t, refreshCtx)
-		require.NoError(t, refreshCtx.Err(), "background work keeps running after refresh returns")
-		time.Sleep(refreshTimeout)
-		synctest.Wait()
-		assert.ErrorIs(t, refreshCtx.Err(), context.DeadlineExceeded, "the deadline still bounds it")
+// A refresh's context ends with the refresh: background work a refresher
+// starts, such as fetching a new provider's models, is bounded by the
+// refresher's own lifetime, not by the poll.
+func TestSyncerRefreshContextEndsWithRefresh(t *testing.T) {
+	ctx := context.Background()
+	syncer, err := NewSyncer(ctx, newFakeStore(nil))
+	require.NoError(t, err)
+	var refreshCtx context.Context
+	syncer.Register("provider_credentials", func(ctx context.Context) error {
+		refreshCtx = ctx
+		_, hasDeadline := ctx.Deadline()
+		assert.True(t, hasDeadline, "a refresh is bounded by the poll")
+		return nil
 	})
+	syncer.Notifier("provider_credentials")(ctx)
+
+	syncer.poll(ctx)
+	require.NotNil(t, refreshCtx)
+	assert.ErrorIs(t, refreshCtx.Err(), context.Canceled)
 }
 
 func TestSyncerIgnoresUnregisteredEntities(t *testing.T) {
