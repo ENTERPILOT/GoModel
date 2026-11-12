@@ -54,7 +54,8 @@ type secretRefCarrier struct {
 
 // newSecretRefServer wires the admin API over real MCP, provider-credential,
 // and guardrail services, with a managed key that has dashboard access.
-func newSecretRefServer(t *testing.T, masterKey string) (*Server, []secretRefCarrier) {
+// configure adjusts the server configuration before the server is built.
+func newSecretRefServer(t *testing.T, masterKey string, configure ...func(*Config)) (*Server, []secretRefCarrier) {
 	t.Helper()
 	ctx := t.Context()
 	db := sqlxtest.NewSQLite(t)
@@ -89,7 +90,7 @@ func newSecretRefServer(t *testing.T, masterKey string) (*Server, []secretRefCar
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = guardrailService.Close(context.Background()) })
 
-	srv := New(&mockProvider{}, &Config{
+	cfg := &Config{
 		MasterKey:             masterKey,
 		AdminEndpointsEnabled: true,
 		AdminHandler: admin.NewHandler(nil, nil,
@@ -102,7 +103,11 @@ func newSecretRefServer(t *testing.T, masterKey string) (*Server, []secretRefCar
 			tokenToID:      map[string]string{secretRefDashboard: "key-dashboard"},
 			tokenDashboard: map[string]bool{secretRefDashboard: true},
 		},
-	})
+	}
+	for _, apply := range configure {
+		apply(cfg)
+	}
+	srv := New(&mockProvider{}, cfg)
 
 	carriers := []secretRefCarrier{
 		{
@@ -204,11 +209,18 @@ func catalogSchema(t *testing.T, catalog *plugins.Catalog, pluginType string) []
 	return entry.Manifest.ConfigSchema
 }
 
+// masterKeyDisabled turns master key authentication off, which makes a
+// dashboard key the gateway's top credential.
+func masterKeyDisabled(cfg *Config) { cfg.MasterKeyDisabled = true }
+
+// putAdmin sends an admin upsert, without a credential when bearer is empty.
 func putAdmin(t *testing.T, srv *Server, path, bearer, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPut, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+bearer)
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 	return rec
@@ -322,7 +334,7 @@ func TestAdminSecretReferences_DashboardKeyRepointsWithoutMasterKey(t *testing.T
 	t.Setenv("SECRETREF_SEED", "seed-value")
 	const seed = "${env:SECRETREF_SEED}"
 
-	srv, carriers := newSecretRefServer(t, "")
+	srv, carriers := newSecretRefServer(t, "", masterKeyDisabled)
 	for _, carrier := range carriers {
 		for field, repoint := range carrier.repoints {
 			t.Run(carrier.name+"/"+field, func(t *testing.T) {
@@ -357,17 +369,64 @@ func TestAdminSecretReferences_MaskKeepsStoredReference(t *testing.T) {
 }
 
 func TestAdminSecretReferences_DashboardKeyWithoutMasterKey(t *testing.T) {
-	// Without a master key there is none to protect: a dashboard key is the
-	// gateway's top credential and saves references as before.
+	// With master key authentication turned off there is no master key to
+	// protect: an authenticated dashboard key is the gateway's top credential
+	// and saves references as before.
 	t.Setenv("SECRETREF_SEED", "seed-value")
 
-	srv, carriers := newSecretRefServer(t, "")
+	srv, carriers := newSecretRefServer(t, "", masterKeyDisabled)
 	for _, carrier := range carriers {
 		t.Run(carrier.name, func(t *testing.T) {
 			rec := putAdmin(t, srv, carrier.path, secretRefDashboard, carrier.body("${env:SECRETREF_SEED}"))
 			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 			assert.Equal(t, "${env:SECRETREF_SEED}", carrier.stored(t))
 		})
+	}
+}
+
+func TestAdminSecretReferences_UnauthenticatedCannotAddOrChangeReferences(t *testing.T) {
+	t.Setenv("SECRETREF_SEED", "seed-value")
+
+	modes := []struct {
+		name      string
+		configure func(*Config)
+		// bearer is a credential the request presents that the gateway does
+		// not authenticate in this mode.
+		bearer string
+	}{
+		{name: "open admin API", configure: func(*Config) {}},
+		{name: "open admin API with a managed key presented", configure: func(*Config) {}, bearer: secretRefDashboard},
+		{name: "no enabled auth mechanism", configure: func(cfg *Config) { cfg.Authenticator = mockAuthenticator{} }},
+		{name: "no authentication middleware", configure: func(cfg *Config) { cfg.Authenticator = nil }},
+	}
+	for _, mode := range modes {
+		srv, carriers := newSecretRefServer(t, "", mode.configure)
+		for _, carrier := range carriers {
+			t.Run(mode.name+"/"+carrier.name, func(t *testing.T) {
+				rec := putAdmin(t, srv, carrier.path, mode.bearer, carrier.body("sk-literal"))
+				require.Equal(t, http.StatusOK, rec.Code, "a literal secret still saves: %s", rec.Body.String())
+				require.Equal(t, "sk-literal", carrier.stored(t))
+
+				for _, value := range []string{"${env:SECRETREF_SEED}", "${file:/etc/hostname}", "pre-${env:SECRETREF_SEED}"} {
+					rec = putAdmin(t, srv, carrier.path, mode.bearer, carrier.body(value))
+					assert.Equal(t, http.StatusForbidden, rec.Code, "saving %s: %s", value, rec.Body.String())
+					assert.Contains(t, rec.Body.String(), "secret_reference_requires_master_key")
+					assert.Equal(t, "sk-literal", carrier.stored(t), "a refused save leaves the stored entity unchanged")
+				}
+
+				// The stored literal stays behind the mask, so it pins the
+				// destination.
+				destination := carrier.destination(t)
+				for field, repoint := range carrier.repoints {
+					rec = putAdmin(t, srv, carrier.path, mode.bearer, repoint(carrier.mask))
+					assert.Equal(t, http.StatusForbidden, rec.Code, "repointing %s behind the mask: %s", field, rec.Body.String())
+					assert.Equal(t, destination, carrier.destination(t))
+				}
+				rec = putAdmin(t, srv, carrier.path, mode.bearer, carrier.edit(carrier.mask))
+				require.Equal(t, http.StatusOK, rec.Code, "the mask still edits other fields: %s", rec.Body.String())
+				assert.Equal(t, "sk-literal", carrier.stored(t))
+			})
+		}
 	}
 }
 
@@ -406,6 +465,39 @@ func TestAuthMiddleware_RestrictsSecretReferencesBelowTheMasterKey(t *testing.T)
 			} else {
 				assert.NoError(t, storeErr)
 			}
+		})
+	}
+}
+
+func TestAuthMiddleware_RestrictsSecretReferencesWithoutIdentity(t *testing.T) {
+	keys := mockAuthenticator{enabled: true, tokenToID: map[string]string{secretRefDashboard: "key-dashboard"}, tokenDashboard: map[string]bool{secretRefDashboard: true}}
+	tests := []struct {
+		name   string
+		cfg    AuthMiddlewareConfig
+		bearer string
+	}{
+		{name: "no auth mechanism"},
+		{name: "managed keys not enabled", cfg: AuthMiddlewareConfig{Authenticator: mockAuthenticator{}}},
+		{name: "skipped prefix", cfg: AuthMiddlewareConfig{MasterKey: secretRefMasterKey, SkipPaths: []string{"/admin/*"}}},
+		{name: "skipped path", cfg: AuthMiddlewareConfig{MasterKey: secretRefMasterKey, SkipPaths: []string{"/admin/mcp-servers"}}},
+		{name: "skipped prefix with the master key presented", cfg: AuthMiddlewareConfig{MasterKey: secretRefMasterKey, SkipPaths: []string{"/admin/*"}}, bearer: secretRefMasterKey},
+		{name: "skipped prefix with a managed key presented", cfg: AuthMiddlewareConfig{Authenticator: keys, SkipPaths: []string{"/admin/*"}}, bearer: secretRefDashboard},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var storeErr error
+			next := func(c *echo.Context) error {
+				_, storeErr = config.NewSecrets().StoreSecret(c.Request().Context(), config.SecretKey{Entity: "mcp_servers", ID: "docs", Field: "headers.X"}, "${env:SECRETREF_OTHER}", nil)
+				return c.NoContent(http.StatusNoContent)
+			}
+			var opts []echotest.Option
+			if tt.bearer != "" {
+				opts = append(opts, echotest.WithHeader("Authorization", "Bearer "+tt.bearer))
+			}
+			c, rec := echotest.Get(t, "/admin/mcp-servers", opts...)
+			require.NoError(t, NewAuthMiddleware(tt.cfg)(next)(c))
+			require.Equal(t, http.StatusNoContent, rec.Code)
+			assert.ErrorIs(t, storeErr, config.ErrSecretReferenceRestricted)
 		})
 	}
 }

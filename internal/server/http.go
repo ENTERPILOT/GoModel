@@ -581,6 +581,11 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// need dashboard access to pass the gate; the master key always does.
 	if cfg != nil && cfg.AdminEndpointsEnabled && cfg.AdminHandler != nil {
 		adminGate := AdminAccessMiddleware()
+		if !authMiddlewareRegistered {
+			// No request is authenticated, so the access gate has nothing to
+			// check and none may add or change secret references.
+			adminGate = restrictSecretReferencesMiddleware
+		}
 		// Admin responses are large, highly compressible JSON (audit entries
 		// carrying request/response bodies, usage aggregates), so gzip cuts
 		// the wire size roughly an order of magnitude. The live-log SSE
