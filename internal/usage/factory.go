@@ -102,6 +102,9 @@ func NewPricingRecalculator(store storage.Storage) (PricingRecalculator, error) 
 		context.Background(),
 		store,
 		func(db sqlx.DB) (PricingRecalculator, error) {
+			if err := checkDialect(db.Dialect()); err != nil {
+				return nil, err
+			}
 			return &SQLStore{db: db, dialect: usageDialectFor(db.Dialect())}, nil
 		},
 		func(db *mongo.Database) (PricingRecalculator, error) {

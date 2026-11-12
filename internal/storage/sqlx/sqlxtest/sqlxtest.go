@@ -69,6 +69,15 @@ func Run(t *testing.T, fn func(t *testing.T, db sqlx.DB)) {
 // so the default build leaves it nil and Run skips the dialect entirely.
 var newDuckDB func(t *testing.T) sqlx.DB
 
+// SkipDuckDB skips the DuckDB run of a suite that cannot pass there, saying
+// why.
+func SkipDuckDB(t *testing.T, db sqlx.DB, reason string) {
+	t.Helper()
+	if db.Dialect() == sqlx.DuckDB {
+		t.Skip(reason)
+	}
+}
+
 // NewSQLite returns an empty in-memory SQLite database for one test.
 func NewSQLite(t *testing.T) sqlx.DB {
 	t.Helper()

@@ -51,6 +51,7 @@ var multiFilterRange = UsageQueryParams{
 
 func TestReadersMultiValueFiltersAndBreakdown(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		skipDuckDB(t, db)
 		store, err := NewSQLStore(context.Background(), db, 0)
 		require.NoError(t, err)
 		reader, err := NewSQLReader(db)

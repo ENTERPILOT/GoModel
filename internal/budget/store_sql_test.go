@@ -202,12 +202,16 @@ func TestSQLStoreMigratesPreScopeTable(t *testing.T) {
 // them would leave the other free to silently match nothing.
 func TestSQLStoreSumSpendHonorsSubjectBoundaryAndCacheType(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		sqlxtest.SkipDuckDB(t, db, noDuckDBUsage)
 		usageStore, err := usage.NewSQLStore(context.Background(), db, 0)
 		require.NoError(t, err)
 
 		assertSumSpendMatchesSubjects(t, usageStore, db)
 	})
 }
+
+// noDuckDBUsage is why the spend suites skip DuckDB.
+const noDuckDBUsage = "spend sums read the usage table, which has no DuckDB dialect"
 
 // usageWriter is the slice of a usage store this test needs.
 type usageWriter interface {

@@ -64,6 +64,7 @@ var sqlReaderFixtureRange = UsageQueryParams{
 
 func newSQLReaderFixture(t *testing.T, db sqlx.DB) (*SQLStore, *SQLReader) {
 	t.Helper()
+	skipDuckDB(t, db)
 	ctx := context.Background()
 	store, err := NewSQLStore(ctx, db, 0)
 	require.NoError(t, err)
@@ -213,6 +214,7 @@ func TestSQLReaderSessionsAndLog(t *testing.T) {
 
 func TestSQLReaderLogPagesEqualTimestampsByID(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		skipDuckDB(t, db)
 		ctx := context.Background()
 		store, err := NewSQLStore(ctx, db, 0)
 		require.NoError(t, err)
