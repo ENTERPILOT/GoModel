@@ -572,6 +572,31 @@ func TestNew_BearerTokenOnly(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// authEchoBody answers both Bedrock clients: the control plane reads
+// modelSummaries, Converse reads output/stopReason/usage, and each ignores the
+// other's fields.
+const authEchoBody = `{"modelSummaries":[],"output":{"message":{"role":"assistant","content":[{"text":"ok"}]}},"stopReason":"end_turn","usage":{"inputTokens":1,"outputTokens":1,"totalTokens":2}}`
+
+// assertBothClientsAuth sends one control-plane and one Converse request and
+// checks the Authorization header of each: the provider configures the two
+// SDK clients separately.
+func assertBothClientsAuth(t *testing.T, p *Provider, capture *providertest.Capture, want string) {
+	t.Helper()
+	_, err := p.ListModels(context.Background())
+	require.NoError(t, err)
+	_, err = p.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "amazon.nova-micro-v1:0",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	})
+	require.NoError(t, err)
+	requests := capture.All()
+	require.Len(t, requests, 2)
+	for _, req := range requests {
+		auth := req.Header.Get("Authorization")
+		assert.True(t, strings.HasPrefix(auth, want), "%s Authorization = %q", req.Path, auth)
+	}
+}
+
 // TestNew_AuthScheme pins which credential reaches Bedrock: a configured API
 // key beats both AWS_BEARER_TOKEN_BEDROCK and SigV4, the env token beats
 // SigV4, and SigV4 signs when neither is set.
@@ -600,7 +625,7 @@ func TestNew_AuthScheme(t *testing.T) {
 			// Bearer tokens require HTTPS.
 			server, capture := providertest.TLSServer(t, func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = io.WriteString(w, `{"modelSummaries":[]}`)
+				_, _ = io.WriteString(w, authEchoBody)
 			})
 			opts := providers.ProviderOptions{HTTPClient: server.Client()}
 			if len(tt.apiKeys) > 0 {
@@ -609,10 +634,7 @@ func TestNew_AuthScheme(t *testing.T) {
 			p := New(providers.ProviderConfig{BaseURL: server.URL}, opts).(*Provider)
 			require.NoError(t, p.configErr)
 
-			_, err := p.ListModels(context.Background())
-			require.NoError(t, err)
-			auth := capture.Last(t).Header.Get("Authorization")
-			assert.True(t, strings.HasPrefix(auth, tt.want), "Authorization = %q", auth)
+			assertBothClientsAuth(t, p, capture, tt.want)
 		})
 	}
 }
@@ -638,7 +660,6 @@ mfa_serial = arn:aws:iam::123456789012:mfa/example
 	t.Setenv("AWS_ACCESS_KEY_ID", "")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
 	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
-
 	t.Setenv("AWS_REGION", "us-east-1")
 
 	keyless := New(providers.ProviderConfig{BaseURL: "us-east-1"}, providers.ProviderOptions{}).(*Provider)
@@ -646,16 +667,14 @@ mfa_serial = arn:aws:iam::123456789012:mfa/example
 
 	server, capture := providertest.TLSServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"modelSummaries":[]}`)
+		_, _ = io.WriteString(w, authEchoBody)
 	})
 	withKey := New(providers.ProviderConfig{BaseURL: server.URL}, providers.ProviderOptions{
 		Keys:       providers.NewKeyring("ABSK-configured"),
 		HTTPClient: server.Client(),
 	}).(*Provider)
 	require.NoError(t, withKey.configErr)
-	_, err := withKey.ListModels(context.Background())
-	require.NoError(t, err)
-	assert.Equal(t, "Bearer ABSK-configured", capture.Last(t).Header.Get("Authorization"))
+	assertBothClientsAuth(t, withKey, capture, "Bearer ABSK-configured")
 }
 
 func TestRegistration(t *testing.T) {
