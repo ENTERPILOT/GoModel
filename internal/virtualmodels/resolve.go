@@ -153,8 +153,7 @@ func (s *Service) exposedModels(userPath string, enforceUserPaths bool, allow fu
 		}
 		cloned := *model
 		cloned.ID = entry.vm.Source
-		contextWindow, maxOutput := snap.tokenLimits(entry, s.catalog)
-		applyTokenLimits(&cloned, contextWindow, maxOutput)
+		applyTokenLimits(&cloned, snap.tokenLimits(entry, s.catalog))
 		result = append(result, cloned)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })

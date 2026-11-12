@@ -101,7 +101,9 @@ func TestExposedModels_TokenLimits(t *testing.T) {
 			rows: []VirtualModel{{Source: "vm", Targets: []Target{{Model: "openai/zero"}}}},
 		},
 		{
-			name: "configured value on a target without metadata",
+			// Named apart from the configured case above: sqlxtest.NewSQLite keys
+			// the database on the first 40 characters of the test name.
+			name: "target without metadata takes the configured value",
 			rows: []VirtualModel{{
 				Source:          "vm",
 				Targets:         []Target{{Model: "openai/unknown"}},
@@ -142,6 +144,82 @@ func TestExposedModels_TokenLimits(t *testing.T) {
 			// Listing never writes through to the catalog's shared metadata.
 			assert.Equal(t, new(200000), catalog.supported["openai/large"].Metadata.ContextWindow)
 			assert.Equal(t, new(8000), catalog.supported["openai/large"].Metadata.MaxOutputTokens)
+		})
+	}
+}
+
+// A listing reads the catalog each time, so limits follow a target whose
+// metadata changed in a provider refresh.
+func TestExposedModels_TokenLimitsFollowCatalog(t *testing.T) {
+	t.Parallel()
+	svc, catalog := newLimitsService(t)
+	require.NoError(t, svc.Upsert(context.Background(), VirtualModel{
+		Source:  "vm",
+		Targets: []Target{{Model: "openai/large"}, {Model: "openai/small"}},
+		Enabled: true,
+	}))
+	require.Equal(t, new(128000), exposedModel(t, svc, "vm").Metadata.ContextWindow)
+
+	catalog.supported["openai/small"] = limitsModel("openai/small", new(64000), new(4000))
+
+	model := exposedModel(t, svc, "vm")
+	assert.Equal(t, new(64000), model.Metadata.ContextWindow)
+	assert.Equal(t, new(4000), model.Metadata.MaxOutputTokens)
+}
+
+// vLLM discovery (models.vllm_discovery_compat) advertises MaxModelLen ahead of
+// the context window, so a redirect must not keep its first target's.
+func TestExposedModels_MaxModelLen(t *testing.T) {
+	t.Parallel()
+
+	runtimeModel := func(id string, maxModelLen int, contextWindow *int) core.Model {
+		model := limitsModel(id, contextWindow, nil)
+		model.MaxModelLen = &maxModelLen
+		return model
+	}
+	tests := []struct {
+		name string
+		vm   VirtualModel
+		want *int
+	}{
+		{
+			name: "smallest runtime-reported limit across targets",
+			vm:   VirtualModel{Source: "vm", Targets: []Target{{Model: "openai/runtime"}, {Model: "openai/runtime-small"}}},
+			want: new(8192),
+		},
+		{
+			name: "context window counts for a target without a runtime limit",
+			vm:   VirtualModel{Source: "vm", Targets: []Target{{Model: "openai/runtime"}, {Model: "openai/tiny"}}},
+			want: new(4096),
+		},
+		{
+			name: "runtime limit wins over the same target's context window",
+			vm:   VirtualModel{Source: "vm", Targets: []Target{{Model: "openai/runtime-over-catalog"}}},
+			want: new(16384),
+		},
+		{
+			name: "configured context window wins",
+			vm:   VirtualModel{Source: "vm", Targets: []Target{{Model: "openai/runtime"}}, ContextWindow: new(2000)},
+			want: new(2000),
+		},
+		{
+			name: "no target reports a limit",
+			vm:   VirtualModel{Source: "vm", Targets: []Target{{Model: "openai/unknown"}}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			svc, catalog := newLimitsService(t)
+			catalog.supported["openai/runtime"] = runtimeModel("openai/runtime", 32768, new(32768))
+			catalog.supported["openai/runtime-small"] = runtimeModel("openai/runtime-small", 8192, nil)
+			catalog.supported["openai/runtime-over-catalog"] = runtimeModel("openai/runtime-over-catalog", 16384, new(128000))
+			catalog.supported["openai/tiny"] = limitsModel("openai/tiny", new(4096), nil)
+			tt.vm.Enabled = true
+			require.NoError(t, svc.Upsert(context.Background(), tt.vm))
+
+			assert.Equal(t, tt.want, exposedModel(t, svc, "vm").MaxModelLen)
 		})
 	}
 }

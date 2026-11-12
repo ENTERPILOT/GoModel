@@ -233,6 +233,10 @@ virtual_models:
       - { model: anthropic/claude-sonnet-4-6 }
 ```
 
+With `MODELS_VLLM_DISCOVERY_COMPAT=true`, a redirect's `max_model_len` follows
+the same rule: its explicit context window, otherwise the smallest limit across
+its targets.
+
 These values are listing metadata only: GoModel does not enforce them on
 requests. Access policies cannot carry them.
 
