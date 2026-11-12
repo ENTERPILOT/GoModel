@@ -68,10 +68,10 @@ connections, so a slow dashboard query does not hold up the flushes. A read can
 miss a write that commits while it runs; the next read sees it. An in-memory
 database (`:memory:`) has no second pool and reads through the write connection.
 
-The connection uses a 64 MiB page cache and memory-maps up to 256 MiB of the
-database file, and GoModel refreshes the query planner statistics at startup and
-hourly. Mapped pages are reclaimable file cache, but container memory metrics may
-count them.
+The write connection uses a 64 MiB page cache and each read connection 8 MiB.
+Every connection memory-maps up to 256 MiB of the database file, and GoModel
+refreshes the query planner statistics at startup and hourly. Mapped pages are
+reclaimable file cache, but container memory metrics may count them.
 
 For Postgres, `POSTGRES_MAX_CONNS` defaults to `10`. Raise it first if you run
 high concurrency with budgets or rate limits enabled.

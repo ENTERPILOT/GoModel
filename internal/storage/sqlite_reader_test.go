@@ -33,14 +33,35 @@ func TestSQLiteReadPool(t *testing.T) {
 	require.NoError(t, reader.QueryRow(`SELECT COUNT(*) FROM items`).Scan(&count))
 	assert.Equal(t, 1, count, "a read after a commit sees it")
 
-	var queryOnly int
-	require.NoError(t, reader.QueryRow(`PRAGMA query_only`).Scan(&queryOnly))
-	assert.Equal(t, 1, queryOnly)
 	_, err = reader.Exec(`INSERT INTO items (id) VALUES (2)`)
 	require.Error(t, err, "the read pool rejects writes")
 
 	require.NoError(t, store.Close())
 	require.Error(t, reader.Ping(), "Close closes the read pool")
+}
+
+func TestSQLiteReadPoolPragmas(t *testing.T) {
+	store, err := NewSQLite(SQLiteConfig{Path: filepath.Join(t.TempDir(), "pragmas.db")})
+	require.NoError(t, err)
+	defer store.Close()
+
+	tests := []struct {
+		pragma string
+		want   string
+	}{
+		{pragma: "query_only", want: "1"},
+		{pragma: "journal_mode", want: "wal"},
+		{pragma: "busy_timeout", want: "5000"},
+		{pragma: "cache_size", want: "-8192"},
+		{pragma: "mmap_size", want: "268435456"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.pragma, func(t *testing.T) {
+			var got string
+			require.NoError(t, store.ReadDB().QueryRow("PRAGMA "+tt.pragma).Scan(&got))
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }
 
 func TestSQLiteInMemoryReadsShareWriter(t *testing.T) {

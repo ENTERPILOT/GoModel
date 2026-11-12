@@ -26,14 +26,17 @@ import (
 //     caps the estimated rows per key too far: at 1000, a day-range usage
 //     query still chose the model index over the timestamp index.
 const sqliteTuningPragmas = "&_pragma=cache_size(-65536)" +
-	"&_pragma=mmap_size(268435456)" +
+	"&" + sqliteMmapPragma +
 	"&_pragma=journal_size_limit(67108864)" +
 	"&_pragma=analysis_limit(100000)"
+
+// sqliteMmapPragma is shared with the read pool, see sqliteReaderPragmas.
+const sqliteMmapPragma = "_pragma=mmap_size(268435456)"
 
 const (
 	// sqliteOptimizeInterval is how often the planner statistics are checked.
 	sqliteOptimizeInterval = time.Hour
-	// sqliteOptimizeTimeout bounds one check, which holds the single
+	// sqliteOptimizeTimeout bounds one check, which holds the writer
 	// connection. It stays well under the 30-second usage and audit flush
 	// deadlines and bounds how long the startup check delays serving.
 	sqliteOptimizeTimeout = 10 * time.Second

@@ -9,6 +9,18 @@ import (
 	"strings"
 )
 
+// sqliteReaderPragmas configure every read connection. The writer's
+// journal_size_limit and analysis_limit are left out: they only take effect
+// on a connection that writes.
+//   - query_only: rejects every statement that would change the database.
+//   - cache_size: 8 MiB a connection, so a full pool caches no more than the
+//     writer's 64 MiB.
+//   - mmap_size: the writer's, see sqliteTuningPragmas.
+const sqliteReaderPragmas = "_busy_timeout=5000" +
+	"&_pragma=query_only(1)" +
+	"&_pragma=cache_size(-8192)" +
+	"&" + sqliteMmapPragma
+
 // sqliteReaderConns sizes the read-only pool: enough for a few concurrent
 // dashboard scans and budget checks, capped so idle connections stay cheap.
 func sqliteReaderConns() int {
@@ -37,8 +49,7 @@ func openSQLiteReader(writer *sql.DB) (*sql.DB, error) {
 		return writer, nil
 	}
 
-	// query_only rejects every statement that would change the database. The
-	// writer already switched the file to WAL, which persists.
+	// The writer already switched the file to WAL, which persists.
 	db, err := sql.Open("sqlite", sqliteReaderDSN(file))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open SQLite read pool: %w", err)
@@ -61,7 +72,7 @@ func sqliteReaderDSN(file string) string {
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path // a Windows drive path: file:///C:/...
 	}
-	u := url.URL{Scheme: "file", Path: path, RawQuery: "_busy_timeout=5000&_pragma=query_only(1)"}
+	u := url.URL{Scheme: "file", Path: path, RawQuery: sqliteReaderPragmas}
 	return u.String()
 }
 
