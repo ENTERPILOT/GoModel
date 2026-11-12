@@ -1591,3 +1591,121 @@ test("the usage total counts a remote entry only when the page has not", () => {
   app.mergeLiveUsageEntry({ id: "local", request_id: "req-local" }, "usage.completed");
   assert.equal(app.usageLog.total, 9, "local entries are always new to the page");
 });
+
+// A live event for a usage row already on the page updates it in place,
+// whatever the view: the server put it on this page under these filters, and
+// a later event for the same request does not change what they matched.
+function fetchedUsagePage(app, page) {
+  app.usageLog = {
+    entries: [
+      { id: "usage-b", request_id: "req-b", timestamp: "2026-10-30T12:00:10Z", total_tokens: 5 },
+      { id: "usage-a", request_id: "req-a", timestamp: "2026-10-30T12:00:09Z", total_tokens: 3 },
+    ],
+    total: 12,
+    limit: 2,
+    offset: 0,
+    ...page,
+  };
+}
+
+test("a live update to a row on the unfiltered first page updates it in place", () => {
+  const app = createLiveLogsApp();
+  fetchedUsagePage(app);
+
+  app.mergeLiveUsageEntry({ id: "usage-a", request_id: "req-a", total_tokens: 30 }, "usage.flushed");
+
+  assert.deepEqual(app.usageLog.entries.map((entry) => entry.id), ["usage-b", "usage-a"]);
+  assert.equal(app.usageLog.entries[1].total_tokens, 30);
+  assert.equal(app.usageLog.total, 12);
+});
+
+test("a live update to a row on a filtered page updates it in place", () => {
+  for (const view of [
+    { usageFilters: filtersWith({ userPaths: ["/team"] }) },
+    { usageLogSearch: "gpt" },
+  ]) {
+    const app = createLiveLogsApp(view);
+    fetchedUsagePage(app);
+
+    app.mergeLiveUsageEntry({ id: "usage-a", request_id: "req-a", total_tokens: 30 }, "usage.flushed");
+
+    assert.deepEqual(app.usageLog.entries.map((entry) => entry.id), ["usage-b", "usage-a"]);
+    assert.equal(app.usageLog.entries[1].total_tokens, 30);
+    assert.equal(app.usageLog.entries[1]._usage_flushed, true);
+    assert.equal(app.usageLog.total, 12, "the row still matches, so the total holds");
+  }
+});
+
+test("a live update to a row on a later page updates it in place", () => {
+  const app = createLiveLogsApp();
+  fetchedUsagePage(app, { offset: 2 });
+
+  app.mergeLiveUsageEntry({ id: "usage-b", request_id: "req-b", total_tokens: 50 }, "usage.flushed");
+
+  assert.deepEqual(app.usageLog.entries.map((entry) => entry.id), ["usage-b", "usage-a"]);
+  assert.equal(app.usageLog.entries[0].total_tokens, 50);
+  assert.equal(app.usageLog.total, 12);
+});
+
+test("filtered and later pages take no new live rows and keep their totals", () => {
+  for (const view of [
+    { usageFilters: filtersWith({ models: ["gpt-5"] }) },
+    { usageLogSearch: "gpt" },
+    { page: { offset: 2 } },
+  ]) {
+    const app = createLiveLogsApp(view.page ? {} : view);
+    fetchedUsagePage(app, view.page);
+
+    app.mergeLiveUsageEntry({ id: "usage-new", request_id: "req-new", total_tokens: 1 }, "usage.completed");
+
+    assert.deepEqual(app.usageLog.entries.map((entry) => entry.id), ["usage-b", "usage-a"]);
+    assert.equal(app.usageLog.total, 12);
+  }
+});
+
+test("a row an update moves out of the view leaves the page and its total", () => {
+  // With paging on too: the hide-cached filter is one the page can check.
+  const app = createLiveLogsApp({ usageLogHideCached: true });
+  fetchedUsagePage(app, { offset: 2 });
+
+  app.mergeLiveUsageEntry({ id: "usage-a", request_id: "req-a", cache_type: "exact" }, "usage.flushed");
+
+  assert.deepEqual(app.usageLog.entries.map((entry) => entry.id), ["usage-b"]);
+  assert.equal(app.usageLog.total, 11);
+  assert.equal(app.skippedLiveUsageByRequestId["req-a"].total_tokens, 3);
+});
+
+test("a duplicate live usage event neither duplicates nor recounts the row", () => {
+  for (const view of [{}, { usageFilters: filtersWith({ userPaths: ["/team"] }) }]) {
+    const app = createLiveLogsApp(view);
+    fetchedUsagePage(app, { limit: 50 });
+    const event = { id: "usage-a", request_id: "req-a", total_tokens: 30 };
+
+    app.mergeLiveUsageEntry(event, "usage.flushed");
+    app.mergeLiveUsageEntry(event, "usage.flushed");
+
+    assert.deepEqual(app.usageLog.entries.map((entry) => entry.id), ["usage-b", "usage-a"]);
+    assert.equal(app.usageLog.total, 12);
+  }
+
+  const app = createLiveLogsApp();
+  fetchedUsagePage(app, { limit: 50 });
+  const fresh = { id: "usage-new", request_id: "req-new", timestamp: "2026-10-30T12:00:11Z" };
+  app.mergeLiveUsageEntry(fresh, "usage.completed");
+  app.mergeLiveUsageEntry(fresh, "usage.flushed");
+  assert.deepEqual(app.usageLog.entries.map((entry) => entry.id), ["usage-new", "usage-b", "usage-a"]);
+  assert.equal(app.usageLog.total, 13, "a new row is counted once");
+});
+
+test("a remote usage row the filtered page already shows keeps the total", () => {
+  const app = createLiveLogsApp({ usageFilters: filtersWith({ userPaths: ["/team"] }) });
+  fetchedUsagePage(app, { as_of: 1_800_000_000_000_000 });
+
+  app.mergeLiveUsageEntry(
+    { id: "usage-a", request_id: "req-a", total_tokens: 30, _remote_written_at: 1_800_000_000_000_001 },
+    "usage.flushed",
+  );
+
+  assert.deepEqual(app.usageLog.entries.map((entry) => entry.id), ["usage-b", "usage-a"]);
+  assert.equal(app.usageLog.total, 12);
+});

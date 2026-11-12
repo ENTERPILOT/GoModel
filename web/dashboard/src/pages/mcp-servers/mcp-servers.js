@@ -371,6 +371,140 @@ export function mcpCatalogIsEmpty(catalog) {
   return mcpCatalogSections(catalog).length === 0;
 }
 
+// --- all-tools catalog -------------------------------------------------------
+
+// mcpToolCatalogMembers resolves the catalog scope to the server slugs it
+// covers: null for every server (the aggregated /mcp endpoint), or one
+// virtual server's members. An unknown virtual server covers nothing.
+export function mcpToolCatalogMembers(virtualServers, scope) {
+  const name = String(scope || "");
+  if (!name) {
+    return null;
+  }
+  const virtual = (Array.isArray(virtualServers) ? virtualServers : []).find(
+    (item) => item?.name === name,
+  );
+  return virtual ? [...(virtual.servers || [])] : [];
+}
+
+// mcpToolCatalogServedScope keeps a virtual-server scope only while that
+// virtual server is still served, falling back to every server ("").
+export function mcpToolCatalogServedScope(virtualServers, scope) {
+  const name = String(scope || "");
+  return mcpServedVirtualServers(virtualServers).some((item) => item.name === name) ? name : "";
+}
+
+function mcpToolCatalogEntriesInScope(entries, members) {
+  const scope = Array.isArray(members) ? new Set(members) : null;
+  return (Array.isArray(entries) ? entries : []).filter(
+    (entry) => entry?.server && (!scope || scope.has(String(entry.server))),
+  );
+}
+
+// mcpToolCatalogOwners maps each /mcp tool name in scope to the server that
+// serves it. Two servers can produce the same name (server "a" with tool
+// "b_read" and server "a_b" with tool "read"); the gateway registers servers
+// in slug byte order and keeps the first, so the same rule picks the owner.
+function mcpToolCatalogOwners(inScope) {
+  const owners = new Map();
+  [...inScope]
+    .filter((entry) => entry.catalog)
+    .map((entry) => String(entry.server))
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+    .forEach((server) => {
+      const entry = inScope.find((item) => String(item.server) === server);
+      (entry.catalog.tools || []).forEach((item) => {
+        const name = String(item?.name || "");
+        const aggregated = mcpNamespacedName({ server }, name);
+        if (name && !owners.has(aggregated)) {
+          owners.set(aggregated, server);
+        }
+      });
+    });
+  return owners;
+}
+
+// mcpToolCatalogRows flattens per-server catalogs into one list of tools
+// named as clients call them ({slug}_{name}), sorted by server and name.
+// members (see mcpToolCatalogMembers) limits the servers; showExcluded adds
+// the tools the servers' filters hide; query narrows by name, server, or
+// description. A tool whose /mcp name another server already serves is
+// marked shadowedBy that server and sorted after the reachable tools.
+export function mcpToolCatalogRows(entries, { members = null, showExcluded = false, query = "" } = {}) {
+  const inScope = mcpToolCatalogEntriesInScope(entries, members);
+  const owners = mcpToolCatalogOwners(inScope);
+  const rows = [];
+  inScope.forEach((entry) => {
+    const server = String(entry.server);
+    if (!entry.catalog) {
+      return;
+    }
+    // Names stay as the upstream reports them, since clients call them so.
+    // A repeated name keeps its first entry, as the gateway registers it.
+    const seen = new Set();
+    const add = (excluded) => (item) => {
+      const name = String(item?.name || "");
+      if (!name || seen.has(name)) {
+        return;
+      }
+      seen.add(name);
+      const aggregated = excluded ? "" : mcpNamespacedName({ server }, name);
+      const owner = aggregated ? owners.get(aggregated) : server;
+      rows.push({
+        key: server + ":" + name,
+        server,
+        name,
+        aggregated,
+        description: String(item.description || "").trim(),
+        readOnly: item.read_only === true,
+        destructive: item.destructive === true,
+        excluded,
+        shadowedBy: owner && owner !== server ? owner : "",
+      });
+    };
+    (entry.catalog.tools || []).forEach(add(false));
+    if (showExcluded) {
+      (entry.catalog.excluded_tools || []).forEach(add(true));
+    }
+  });
+  const filtered = filterFields(rows, query, (row) => [
+    row.aggregated,
+    row.name,
+    row.server,
+    row.description,
+  ]);
+  const rank = (row) => (row.excluded ? 2 : row.shadowedBy ? 1 : 0);
+  return filtered.sort(
+    (a, b) =>
+      rank(a) - rank(b) ||
+      a.server.localeCompare(b.server) ||
+      a.name.localeCompare(b.name),
+  );
+}
+
+// mcpToolCatalogSummary counts the distinct tools clients can call and the
+// servers in scope, before any search, so the header reads the same while
+// the operator types.
+export function mcpToolCatalogSummary(entries, members = null) {
+  const inScope = mcpToolCatalogEntriesInScope(entries, members);
+  return { tools: mcpToolCatalogOwners(inScope).size, servers: inScope.length };
+}
+
+// mcpToolCatalogIssues lists the servers in scope whose tools may be missing
+// from the combined list: the catalog failed to load, or the server is not
+// connected (a degraded server keeps its last catalog, so it is listed too).
+// A failed catalog load reads as an error whatever the server status says.
+export function mcpToolCatalogIssues(entries, members = null) {
+  return mcpToolCatalogEntriesInScope(entries, members)
+    .filter((entry) => entry.error || mcpServerStatus(entry) !== "connected")
+    .map((entry) => ({
+      server: entry.server,
+      status: mcpServerStatus(entry),
+      error: String(entry.error || entry.last_error || "").trim(),
+      statusClass: entry.error ? "status-error" : mcpServerStatusClass(entry),
+    }));
+}
+
 // --- tool picker -----------------------------------------------------------
 
 function uniqueToolNames(names) {
@@ -644,4 +778,100 @@ export function buildMcpVirtualServerPayload(form, mode, virtualServers, servers
         discovery === MCP_TOOL_DISCOVERY_OFF || discovery === MCP_TOOL_DISCOVERY_SEARCH ? discovery : "",
     },
   };
+}
+
+// --- OAuth sign-in -----------------------------------------------------------
+
+// MCP_OAUTH_CALLBACK_PATH is where authorization servers send the browser
+// back after a sign-in (mcpgateway.OAuthCallbackPath).
+export const MCP_OAUTH_CALLBACK_PATH = "/admin/mcp-oauth/callback";
+
+// mcpServerCanSignIn reports whether the server speaks HTTP, the only
+// transports the MCP authorization spec covers.
+export function mcpServerCanSignIn(server) {
+  const transport = String((server && server.transport) || "http");
+  return transport === "http" || transport === "sse";
+}
+
+// mcpServerOAuthState is the sign-in state shown on a row: the gateway's
+// oauth.status ("signed_in", "expired", "error"), "required" when the
+// server answered 401 and nobody signed in, else "".
+export function mcpServerOAuthState(server) {
+  const status = String((server && server.oauth && server.oauth.status) || "");
+  if (status) {
+    return status;
+  }
+  return server && server.auth_required ? "required" : "";
+}
+
+export function mcpServerOAuthLabel(state) {
+  const labels = {
+    signed_in: m.mcp_oauth_signed_in,
+    expired: m.mcp_oauth_expired,
+    error: m.mcp_oauth_error,
+    required: m.mcp_oauth_required,
+  };
+  return labels[state]?.() || "";
+}
+
+export function mcpServerOAuthClass(state) {
+  return state === "signed_in" ? "status-success" : state ? "status-warning" : "";
+}
+
+// mcpOAuthRedirectURI builds the callback URL as this browser reaches the
+// gateway: the page origin plus the base-path-prefixed callback path.
+export function mcpOAuthRedirectURI(origin, prefixPath = (path) => path) {
+  return String(origin || "").replace(/\/+$/, "") + prefixPath(MCP_OAUTH_CALLBACK_PATH);
+}
+
+// buildMcpOAuthStartPayload maps the sign-in form onto the start request.
+// The client fields are only sent when the operator filled them in.
+export function buildMcpOAuthStartPayload(form, redirectURI) {
+  const payload = { redirect_uri: redirectURI };
+  const clientID = String((form && form.client_id) || "").trim();
+  if (clientID) {
+    payload.client_id = clientID;
+    const secret = String((form && form.client_secret) || "").trim();
+    if (secret) {
+      payload.client_secret = secret;
+    }
+  }
+  return payload;
+}
+
+// parseMcpOAuthOutcome reads the ?mcp_oauth=...&server=... the callback
+// redirects to. It returns null when the page was not opened that way.
+export function parseMcpOAuthOutcome(search) {
+  const params = new URLSearchParams(search || "");
+  const outcome = params.get("mcp_oauth");
+  if (!outcome) {
+    return null;
+  }
+  return { outcome, server: params.get("server") || "" };
+}
+
+// MCP_OAUTH_OUTCOMES maps the callback outcome to the flash it shows. The
+// outcome only picks a message: the sign-in itself already happened on the
+// gateway, and the server list is re-read either way.
+const MCP_OAUTH_FAILED = { kind: "error", text: (name) => m.mcp_oauth_failed_flash({ name }) };
+const MCP_OAUTH_OUTCOMES = new Map([
+  ["signed_in", { kind: "success", text: (name) => m.mcp_oauth_signed_in_flash({ name }) }],
+  ["expired", { kind: "error", text: () => m.mcp_oauth_expired_flash() }],
+  ["error", MCP_OAUTH_FAILED],
+]);
+
+// mcpOAuthOutcomeMessage returns the flash { kind, text } for a parsed
+// callback outcome; unknown outcomes read as a failure.
+export function mcpOAuthOutcomeMessage(result) {
+  const entry = MCP_OAUTH_OUTCOMES.get(String(result?.outcome || "")) ?? MCP_OAUTH_FAILED;
+  return { kind: entry.kind, text: entry.text(String(result?.server || "")) };
+}
+
+// stripMcpOAuthParams removes the callback outcome from a URL so a reload
+// does not repeat the message.
+export function stripMcpOAuthParams(href) {
+  const url = new URL(href);
+  url.searchParams.delete("mcp_oauth");
+  url.searchParams.delete("server");
+  return url.pathname + url.search + url.hash;
 }

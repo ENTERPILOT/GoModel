@@ -119,6 +119,21 @@ func TestRunStreamObserveAndBuffer(t *testing.T) {
 	assert.Empty(t, res.Text, "buffer block: %+v, %v", res, err)
 }
 
+// A hook written to the docs calls Set on the header maps without allocating
+// them, as it does under the host.
+func TestExchangeProvidesHeaderMaps(t *testing.T) {
+	x := Exchange(nil, nil)
+	require.NotNil(t, x.Headers)
+
+	x.Headers.Request.Set("X-Team", "platform")
+	x.Headers.Response.Set("X-Served-By", "gomodel")
+	x.Headers.Upstream.Set("Helicone-Property-Tenant", "acme")
+
+	assert.Equal(t, "platform", x.Headers.Request.Get("X-Team"))
+	assert.Equal(t, "gomodel", x.Headers.Response.Get("X-Served-By"))
+	assert.Equal(t, "acme", x.Headers.Upstream.Get("Helicone-Property-Tenant"))
+}
+
 func TestHostAndFixtures(t *testing.T) {
 	h := NewHost("yes")
 	h.Finish = "length"

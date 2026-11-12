@@ -193,9 +193,15 @@ modelu nie są wymieniane: opisują współdzieloną przepustowość infrastrukt
 nie wywołującego.
 
 <Note>
-  Liczniki limitów żądań są przechowywane w pamięci każdej instancji gatewaya:
-  zerują się po restarcie, a przy N replikach każda replika ma własne liczniki.
-  Budżety to trwałe wartości wspólne dla wszystkich instancji.
+  Liczniki limitów żądań są przechowywane w pamięci i zapisywane w bazie danych
+  mniej więcej raz na sekundę przy domyślnym `RATE_LIMITS_FLUSH_INTERVAL=1`.
+  Restart przywraca ostatnio zapisane liczniki raz; awaria może stracić to, co
+  zliczono od ostatniego flusha. Repliki współdzielące bazę danych pokazują
+  licznik dla całego klastra, który może być opóźniony względem najnowszego
+  ruchu pozostałych replik o około dwie sekundy (przy `0` po starcie repliki
+  nie widzą już nowych liczników pozostałych); zobacz
+  [Kilka replik współdzieli jeden limit](/pl/features/rate-limits#kilka-replik-współdzieli-jeden-limit).
+  Budżety to trwałe wartości, liczone z zapisanych rekordów użycia.
 </Note>
 
 ## Okno dat

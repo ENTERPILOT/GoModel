@@ -166,18 +166,16 @@ func (m *ResponseCacheMiddleware) handle(ex exchange, body []byte, next func() e
 	skipExact := strings.EqualFold(ex.RequestHeader("X-Cache-Type"), CacheTypeSemantic)
 	skipSemantic := m.semantic == nil || strings.EqualFold(ex.RequestHeader("X-Cache-Type"), CacheTypeExact)
 
-	if !skipExact && m.simple != nil {
-		hit, err := m.simple.TryHit(ex, body)
-		if err != nil || hit {
-			return err
-		}
-	}
-
 	// innerNext is what actually calls the LLM. When exact caching is active we
 	// wrap next inside StoreAfter so both cache layers write on a full miss.
 	innerNext := next
 	if !skipExact && m.simple != nil {
-		innerNext = func() error { return m.simple.StoreAfter(ex, body, next) }
+		key := m.simple.exactCacheKey(ex, body)
+		hit, err := m.simple.TryHit(ex, key, body)
+		if err != nil || hit {
+			return err
+		}
+		innerNext = func() error { return m.simple.StoreAfter(ex, key, body, next) }
 	}
 
 	if !skipSemantic {

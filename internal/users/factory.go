@@ -51,12 +51,7 @@ func New(ctx context.Context, cfg *config.Config, shared storage.Storage, catalo
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
-	store, err := storage.ResolveSQLBackend[Store](
-		ctx,
-		shared,
-		func(db sqlx.DB) (Store, error) { return NewSQLStore(ctx, db) },
-		func(db *mongo.Database) (Store, error) { return NewMongoDBStore(db) },
-	)
+	store, err := createStore(ctx, shared)
 	if err != nil {
 		return nil, err
 	}
@@ -92,4 +87,23 @@ func ConfigUsers(entries []config.UserConfig) []User {
 		})
 	}
 	return result
+}
+
+// ListStored returns the user policies saved in the dashboard.
+func ListStored(ctx context.Context, shared storage.Storage) ([]User, error) {
+	store, err := createStore(ctx, shared)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = store.Close() }()
+	return store.List(ctx)
+}
+
+func createStore(ctx context.Context, shared storage.Storage) (Store, error) {
+	return storage.ResolveSQLBackend[Store](
+		ctx,
+		shared,
+		func(db sqlx.DB) (Store, error) { return NewSQLStore(ctx, db) },
+		func(db *mongo.Database) (Store, error) { return NewMongoDBStore(db) },
+	)
 }

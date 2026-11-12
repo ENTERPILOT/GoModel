@@ -45,8 +45,10 @@ blokują, ani nie liczą, a przy włączonych
 rozliczane na zero. Ustawisz je przez `providers.<name>.billable: false` w
 `config.yaml`, `<PROVIDER>[_SUFFIX]_BILLABLE=false` w środowisku, pole wyboru
 **Billable** wśród pól zaawansowanych formularza dashboardu albo
-`"billable": false` w `PUT /admin/provider-credentials`. Zobacz
-[Budżety](/pl/features/budgets#providerzy-nierozliczani).
+`"billable": false` w `PUT /admin/provider-credentials`. Niepusta wartość
+`<PROVIDER>_BILLABLE`, która nie jest wartością logiczną (np. `true`, `false`,
+`1`, `0`, `t`, `F` lub `TRUE`), blokuje start, więc literówka nigdy nie zostawi
+providera przypadkiem rozliczanego; pusta wartość jest ignorowana. Zobacz [Budżety](/pl/features/budgets#providerzy-nierozliczani).
 
 ## Obsługiwani providerzy
 
@@ -92,7 +94,7 @@ przez providera upstream.
 | vLLM | `VLLM_BASE_URL` (`VLLM_API_KEY` opcjonalnie) | `meta-llama/Llama-3.1-8B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [vLLM](/pl/providers/vllm) |
 | llama.cpp / LM Studio | `LLAMACPP_BASE_URL` (`LLAMACPP_API_KEY` opcjonalnie) | `gemma-3-4b-it` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [llama.cpp](/pl/providers/llamacpp) |
 | llm-d | `LLMD_BASE_URL` (`LLMD_API_KEY` opcjonalnie) | `Qwen/Qwen2.5-0.5B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [llm-d](/pl/providers/llmd) |
-| Amazon Bedrock | `BEDROCK_BASE_URL` (region lub endpoint) + dane uwierzytelniające AWS | `anthropic.claude-3-5-haiku-20241022-v1:0` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Amazon Bedrock](/pl/providers/bedrock) |
+| Amazon Bedrock | `BEDROCK_BASE_URL` (region lub endpoint) + `BEDROCK_API_KEY` lub dane uwierzytelniające AWS | `anthropic.claude-3-5-haiku-20241022-v1:0` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Amazon Bedrock](/pl/providers/bedrock) |
 | Amazon Bedrock Mantle | `BEDROCK_MANTLE_API_KEY` lub dane uwierzytelniające AWS | `openai.gpt-5.6-sol` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Bedrock Mantle](/pl/providers/bedrock-mantle) |
 
 ✅ Obsługiwane ❌ Nieobsługiwane
@@ -196,7 +198,8 @@ przez providera upstream.
 - **Xiaomi MiMo** – TTS (`mimo-v2.5-tts*`) i ASR (`mimo-v2.5-asr`) są obsługiwane
   przez `/v1/audio/speech` i `/v1/audio/transcriptions` (tłumaczone na dialekt
   audio chat-completions MiMo), a także bezpośrednio przez chat completions; aby
-  uzyskać kontekst 1M, dopisz `[1m]` do ID modelu i dodaj je do `XIAOMI_MODELS`.
+  uzyskać kontekst 1M, dopisz `[1m]` do ID modelu, dodaj je do `XIAOMI_MODELS`
+  i ustaw `XIAOMI_MODELS_MODE=merge`.
 - **OpenCode Go (OpenCode Zen)** – routing per model: większość modeli używa
   `/chat/completions` w stylu OpenAI, a modele obsługujące wyłącznie `/messages`
   (domyślnie `qwen3.7-max`, nadpisz przez `OPENCODE_GO_MESSAGES_MODELS`) są
@@ -247,11 +250,10 @@ przez providera upstream.
   `ORACLE_MODELS=openai.gpt-oss-120b,xai.grok-3`. DeepSeek domyślnie używa
   `https://api.deepseek.com`; ustaw `DEEPSEEK_BASE_URL` tylko wtedy, gdy używasz
   kompatybilnego proxy lub alternatywnego endpointu DeepSeek. Domyślnie
-  `CONFIGURED_PROVIDER_MODELS_MODE=fallback` używa tych list tylko wtedy, gdy
-  `/models` upstreamu jest niedostępne lub puste. Ustaw
-  `CONFIGURED_PROVIDER_MODELS_MODE=allowlist`, aby udostępniać tylko
-  skonfigurowane modele dla providerów, które definiują listę, z pominięciem
-  wywołań `/models` w ich upstreamie.
+  udostępniane są tylko skonfigurowane modele, a inne modele zwracają 404. Zmienisz
+  to przez `CONFIGURED_PROVIDER_MODELS_MODE`, dla pojedynczego providera przez
+  `<PROVIDER>[_SUFFIX]_MODELS_MODE` (na przykład `OPENROUTER_MODELS_MODE=fallback`)
+  lub **Tryb modeli** w dashboardzie; zobacz [Tryby modeli](/pl/advanced/config-yaml#tryby-modeli).
 - **Filtry modeli** – zawężaj duży katalog wzorcem glob lub ceną zamiast
   wymieniać modele jeden po drugim: `OPENROUTER_MODEL_FILTER_INCLUDE=*:free`
   zostawia tylko darmowe modele OpenRouter, a
@@ -353,8 +355,8 @@ To providerzy, z którymi użytkownicy najczęściej mają problemy:
 
 - **Google Vertex AI** – wymaga projektu GCP, regionu oraz Application Default
   Credentials albo klucza JSON konta serwisowego.
-- **Amazon Bedrock** – nie ma własnego klucza API; używa łańcucha danych
-  uwierzytelniających AWS i wymaga jawnego dostępu do modeli w konsoli Bedrock.
+- **Amazon Bedrock** – klucz API Bedrock lub łańcuch danych uwierzytelniających
+  AWS; wymaga jawnego dostępu do modeli w konsoli Bedrock.
 - **Azure OpenAI** – base URL-e w zakresie wdrożenia lub `/openai/v1`, parametr zapytania
   `api-version` i nagłówek `api-key` zamiast `Authorization: Bearer`.
 - **Oracle GenAI** – wymaga polityki OCI IAM dla `generativeaiapikey` i

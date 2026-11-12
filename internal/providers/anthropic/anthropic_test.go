@@ -5313,6 +5313,36 @@ func TestConvertToAnthropicRequest_HonoursDefaultMaxTokensEnv(t *testing.T) {
 	assert.Equal(t, 32768, got.MaxTokens)
 }
 
+func TestConvertToAnthropicRequest_ReadsMaxCompletionTokens(t *testing.T) {
+	// The fallback case asserts the built-in default, not a configured one.
+	t.Setenv(defaultMaxTokensEnvVar, "")
+	limit := 64
+	tests := []struct {
+		name      string
+		maxTokens *int
+		extra     string
+		want      int
+	}{
+		{name: "max_completion_tokens alone", extra: `{"max_completion_tokens":512}`, want: 512},
+		{name: "max_tokens wins", maxTokens: &limit, extra: `{"max_completion_tokens":512}`, want: 64},
+		{name: "an invalid value falls back to the default", extra: `{"max_completion_tokens":"x"}`, want: fallbackMaxTokens},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var extra map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal([]byte(tt.extra), &extra))
+			got, err := convertToAnthropicRequest(&core.ChatRequest{
+				Model:       "claude-sonnet-4-6",
+				Messages:    []core.Message{{Role: "user", Content: "Hello"}},
+				MaxTokens:   tt.maxTokens,
+				ExtraFields: core.UnknownJSONFieldsFromMap(extra),
+			})
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got.MaxTokens)
+		})
+	}
+}
+
 func TestConvertToAnthropicRequestSystemRoleMessages(t *testing.T) {
 	cacheMarker := core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 		"cache_control": json.RawMessage(`{"type":"ephemeral"}`),
