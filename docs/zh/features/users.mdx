@@ -119,7 +119,7 @@ users:
 | ---------------------- | -------------------------------------- | -------------------- |
 | `default_model`        | 为未指定模型的请求提供模型             | 最近的路径生效       |
 | `max_reasoning_effort` | 把更高的推理强度降到此级别             | 最低的上限生效       |
-| `max_output_tokens`    | 把更高的输出 token 上限降到此数值      | 最低的上限生效       |
+| `max_output_tokens`    | 把更高的输出 token 上限降到此数值，并为未设上限的请求设置此上限 | 最低的上限生效       |
 
 ```yaml
 users:
@@ -137,15 +137,34 @@ users:
 | `/acme/eng/alice`       | 没有 `model`                                  | `team-model`，照常解析                   |
 | `/acme/eng/alice`       | `reasoning_effort: high`、`max_tokens: 32000` | `medium`、`8192`                         |
 | `/acme/eng/alice`       | `reasoning_effort: low`、`max_tokens: 100`    | 不变                                     |
-| `/acme/eng/alice`       | 既没有推理强度也没有上限                      | 不变——上限从不添加值                     |
+| `/acme/eng/alice`       | 既没有推理强度也没有上限                      | 没有推理强度，`max_tokens: 8192`         |
 | `/acme/eng/interns/bob` | `reasoning_effort: medium`                    | `low`                                    |
 | `/acme/sales`           | `max_tokens: 32000`                           | `8192`                                   |
 
-**上限**是上界，而不是要发送的值。路径到 `/` 之间最低的上限生效，因此子节点可以收紧其组的上限，而在子节点上设置更高的上限不会改变任何东西。推理强度使用 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max` 这一刻度；刻度无法定位的推理强度（例如原始的 thinking token 预算）视为超过上限，并被替换为上限。token 上限覆盖 `max_tokens`、`max_completion_tokens` 和 `max_output_tokens`，并沿用客户端使用的写法。
+**上限**是上界。路径到 `/` 之间最低的上限生效，因此子节点可以收紧其组的上限，而在子节点上设置更高的上限不会改变任何东西。推理强度使用 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max` 这一刻度。token 上限覆盖 `max_tokens`、`max_completion_tokens` 和 `max_output_tokens`，并沿用客户端使用的写法；未设置上限的请求会以该上限作为其上限，写入上游模型所用的字段。推理强度上限只会降低请求携带的推理强度，从不添加，因为添加推理强度会为没有要求推理的请求开启推理。因此，没有推理强度的请求按模型默认值运行；无法低于某个级别思考的模型（Gemini 3、OpenAI o 系列、OpenCode Zen）在更低的上限下仍会收到该级别。
 
-上限在[虚拟模型覆盖](/zh/features/virtual-models#强制推理强度)之后生效，作用于每一次尝试，包括故障转移尝试，因此也会约束虚拟模型强制或默认设置的推理强度或 `max_tokens`。它们适用于 Chat Completions、Responses API 和 Anthropic Messages API；在上限之内的 Messages 请求仍会原生转发给 Anthropic，超过上限的请求会改走转换路径以便降低。批处理、`/p/` 下的提供商直通、嵌入和媒体端点不会被改写。
+除了 `reasoning_effort` 和 `reasoning.effort`，推理强度上限还会检查会到达上游的提供商特定推理控制项，无论它们位于请求体顶层还是 `extra_body` 中：
 
-**默认模型**仅在 Chat Completions、Responses 或 Messages 请求（包括 Messages 的 token 计数）既未指定 `model` 也未指定 `provider` 时使用；客户端指定的模型始终优先。它的解析方式与客户端发送的模型完全相同：可以是[虚拟模型](/zh/features/virtual-models)，并且仍要通过允许列表检查，因此路径无权使用的默认模型会被拒绝。没有默认模型的路径以及没有用户路径的请求仍会收到 `400 model is required`。
+| 控制项                                                     | 读取方                                    |
+| ---------------------------------------------------------- | ----------------------------------------- |
+| `thinking`（`{"type": "enabled", "budget_tokens"/"token_budget": N}`） | Cohere、Xiaomi MiMo、DeepSeek、Kimi、GLM 上游 |
+| `enable_thinking`、`thinking_budget`                       | Qwen、Bailian、vLLM 和 SGLang 服务器      |
+| `think`（布尔值或级别）                                    | Ollama                                    |
+| `chat_template_kwargs.enable_thinking`、`.thinking`、`.reasoning_effort`、`.thinking_budget` | vLLM、SGLang、llama.cpp |
+| `extra_body.google.thinking_config` 的 `thinking_budget`/`thinking_level`（名称不区分大小写） | Gemini |
+| Messages 的 `thinking.budget_tokens`                       | Anthropic                                 |
+
+关闭推理的控制项（`false`、零预算、`{"type": "disabled"}`）以及不超过上限的级别会保留。刻度无法定位的值（例如 token 预算或 `true`）视为超过上限：网关会移除客户端的所有推理控制项，改为发送上限作为推理强度。Messages 的 `budget_tokens` 若高于网关自身为上限级别发送的预算（`low` 为 5000，`medium` 为 10000，`high` 及以上为 20000），会被降到该预算。适配器自行填入的值（Anthropic 的默认 `max_tokens` 及其在 thinking 预算之上预留的空间、OpenCode Zen 的默认推理强度）同样保持在上限之内：thinking 预算会缩小到能放进受限的 `max_tokens`，连最小预算都放不下时则关闭 thinking。
+
+上限在[虚拟模型覆盖](/zh/features/virtual-models#强制推理强度)之后生效，作用于每一次尝试，包括故障转移尝试，因此也会约束虚拟模型强制或默认设置的推理强度或 `max_tokens`。它们适用于 Chat Completions、Responses API 和 Anthropic Messages API；在上限之内的 Messages 请求仍会原生转发给 Anthropic，超过上限的请求会改走转换路径以便降低。嵌入和媒体端点不会被改写。
+
+<Warning>
+批处理和 `/p/` 下的提供商直通**不受**上限约束：它们的请求体会原样发往上游。受限的密钥如果还能使用批处理或 `/p/`，就可以绕过该策略，因此请为受限的密钥禁止这些端点。
+</Warning>
+
+`/` 上的策略约束每个请求，包括没有用户路径的请求（主密钥，或未绑定路径且未发送请求头的密钥）。未绑定路径的凭据通过[用户路径请求头](/zh/features/user-path)自行选择路径，从而选择其所在子树的策略，因此可以避开树中更下层设置的上限。请通过绑定固定 `user_path` 的 [API 密钥](/zh/features/user-path#api-密钥)把上限绑定到调用方，或将其设置在 `/` 上。
+
+**默认模型**仅在 Chat Completions、Responses 或 Messages 请求（包括 Messages 的 token 计数）既未指定 `model` 也未指定 `provider` 时使用；客户端指定的模型始终优先。它的解析方式与客户端发送的模型完全相同：可以是[虚拟模型](/zh/features/virtual-models)，并且仍要通过允许列表检查，因此路径无权使用的默认模型会被拒绝。没有用户路径的请求使用 `/` 上的默认模型（如果设置了）；没有默认模型的路径仍会收到 `400 model is required`。
 
 ## 管理策略
 

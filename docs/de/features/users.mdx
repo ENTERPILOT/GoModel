@@ -156,7 +156,7 @@ standardmäßig leer; solange keines gesetzt ist, ändert sich nichts:
 | ---------------------- | -------------------------------------------------------- | -------------------------------- |
 | `default_model`        | bedient einen Request, der kein Modell nennt             | der nächstgelegene Pfad gewinnt  |
 | `max_reasoning_effort` | senkt einen höheren Reasoning-Effort auf diese Stufe     | die niedrigste Obergrenze gilt   |
-| `max_output_tokens`    | senkt ein höheres Ausgabe-Token-Limit auf diesen Wert    | die niedrigste Obergrenze gilt   |
+| `max_output_tokens`    | senkt ein höheres Ausgabe-Token-Limit auf diesen Wert und setzt ihn bei einem Request ohne Limit | die niedrigste Obergrenze gilt   |
 
 ```yaml
 users:
@@ -174,18 +174,50 @@ users:
 | `/acme/eng/alice`       | kein `model`                                  | `team-model`, wie üblich aufgelöst       |
 | `/acme/eng/alice`       | `reasoning_effort: high`, `max_tokens: 32000` | `medium`, `8192`                         |
 | `/acme/eng/alice`       | `reasoning_effort: low`, `max_tokens: 100`    | unverändert                              |
-| `/acme/eng/alice`       | weder Effort noch Limit                       | unverändert — eine Obergrenze fügt nie einen Wert hinzu |
+| `/acme/eng/alice`       | weder Effort noch Limit                       | kein Effort, `max_tokens: 8192`          |
 | `/acme/eng/interns/bob` | `reasoning_effort: medium`                    | `low`                                    |
 | `/acme/sales`           | `max_tokens: 32000`                           | `8192`                                   |
 
-**Obergrenzen** sind Höchstwerte, keine Werte, die gesendet werden. Es gilt die
-niedrigste Obergrenze zwischen einem Pfad und `/`: Ein Kind kann die Obergrenze
-seiner Gruppe verschärfen, eine höhere Obergrenze am Kind ändert nichts.
-Efforts nutzen die Skala `none`, `minimal`, `low`, `medium`, `high`, `xhigh`,
-`max`; ein Effort, den die Skala nicht einordnen kann (etwa ein rohes
-Thinking-Token-Budget), gilt als über der Obergrenze und wird durch sie
-ersetzt. Die Token-Obergrenze deckt `max_tokens`, `max_completion_tokens` und
-`max_output_tokens` ab, in der Schreibweise, die der Client verwendet hat.
+**Obergrenzen** sind Höchstwerte. Es gilt die niedrigste Obergrenze zwischen
+einem Pfad und `/`: Ein Kind kann die Obergrenze seiner Gruppe verschärfen,
+eine höhere Obergrenze am Kind ändert nichts. Efforts nutzen die Skala `none`,
+`minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Die Token-Obergrenze deckt
+`max_tokens`, `max_completion_tokens` und `max_output_tokens` ab, in der
+Schreibweise, die der Client verwendet hat, und ein Request ohne Limit erhält
+die Obergrenze als Limit, in dem Feld, das das Upstream-Modell erwartet. Die
+Effort-Obergrenze senkt nur einen Effort, den der Request mitbringt, und fügt
+nie einen hinzu, weil ein hinzugefügter Effort Reasoning für Requests
+einschalten würde, die nicht danach gefragt haben. Ein Request ohne Effort
+läuft daher mit dem Standard des Modells, und ein Modell, das nicht unter eine
+bestimmte Stufe denken kann (Gemini 3, OpenAI o-Serie, OpenCode Zen), erhält
+diese Stufe auch unter einer niedrigeren Obergrenze.
+
+Neben `reasoning_effort` und `reasoning.effort` prüft eine Effort-Obergrenze
+die providerspezifischen Reasoning-Steuerungen, die Upstreams erreichen, auf
+oberster Ebene des Bodys oder in `extra_body`:
+
+| Steuerung                                                  | Gelesen von                               |
+| ---------------------------------------------------------- | ----------------------------------------- |
+| `thinking` (`{"type": "enabled", "budget_tokens"/"token_budget": N}`) | Cohere, Xiaomi MiMo, DeepSeek, Kimi, GLM-Upstreams |
+| `enable_thinking`, `thinking_budget`                       | Qwen, Bailian, vLLM- und SGLang-Server    |
+| `think` (Boolean oder Stufe)                               | Ollama                                    |
+| `chat_template_kwargs.enable_thinking`, `.thinking`, `.reasoning_effort`, `.thinking_budget` | vLLM, SGLang, llama.cpp |
+| `extra_body.google.thinking_config` `thinking_budget`/`thinking_level` (Namen in beliebiger Schreibweise) | Gemini |
+| Messages `thinking.budget_tokens`                          | Anthropic                                 |
+
+Eine Steuerung, die Reasoning ausschaltet (`false`, ein Budget von null,
+`{"type": "disabled"}`), und eine Stufe innerhalb der Obergrenze bleiben
+erhalten. Alles, was die Skala nicht einordnen kann, etwa ein Token-Budget oder
+`true`, gilt als über der Obergrenze: Das Gateway entfernt alle
+Reasoning-Steuerungen des Clients und sendet stattdessen die Obergrenze als
+Effort. Ein Messages-`budget_tokens` über dem Budget, das das Gateway selbst für
+die Stufe der Obergrenze sendet (5000 für `low`, 10000 für `medium`, 20000 ab
+`high`), wird auf dieses Budget gesenkt. Wo ein Adapter selbst einen Wert
+einsetzt (Anthropics Standard-`max_tokens` und der Platz über einem
+Thinking-Budget, der Standard-Effort von OpenCode Zen), bleibt auch dieser
+innerhalb der Obergrenzen: Ein Thinking-Budget schrumpft, bis es unter das
+begrenzte `max_tokens` passt, und Thinking wird ausgeschaltet, wenn nicht
+einmal das Mindestbudget passt.
 
 Obergrenzen greifen nach den [Overrides virtueller Modelle](/de/features/virtual-models#reasoning-effort-erzwingen)
 bei jedem Versuch, auch bei Failover-Versuchen, und begrenzen daher auch einen
@@ -193,8 +225,23 @@ Effort oder ein `max_tokens`, das ein virtuelles Modell erzwingt oder als
 Standard setzt. Sie gelten für Chat Completions, die Responses API und die
 Anthropic Messages API; ein Messages-Request innerhalb der Obergrenzen wird
 weiterhin nativ an Anthropic weitergeleitet, einer darüber nimmt den
-übersetzten Pfad, damit er gesenkt werden kann. Batches, Provider-Passthrough
-unter `/p/`, Embeddings und Medien-Endpunkte werden nicht umgeschrieben.
+übersetzten Pfad, damit er gesenkt werden kann. Embeddings und
+Medien-Endpunkte werden nicht umgeschrieben.
+
+<Warning>
+Batches und Provider-Passthrough unter `/p/` werden **nicht** begrenzt: Ihre
+Bodys gehen unverändert upstream. Ein begrenzter Key, der auch Batches oder
+`/p/` nutzen darf, kann die Policy umgehen; sperren Sie diese Endpunkte daher
+für Keys, die Sie begrenzen.
+</Warning>
+
+Eine Policy auf `/` gilt für jeden Request, auch für Requests ohne User Path
+(der Master-Key oder ein Key ohne gebundenen Pfad, der keinen Header sendet).
+Ein Credential ohne gebundenen Pfad wählt seinen Pfad selbst über den
+[User-Path-Header](/de/features/user-path) und damit die Policy seines eigenen
+Teilbaums, sodass es einer weiter unten gesetzten Obergrenze ausweichen kann.
+Binden Sie Obergrenzen über [API-Keys](/de/features/user-path#api-keys) mit
+festem `user_path` an Aufrufer oder setzen Sie sie auf `/`.
 
 Das **Standardmodell** wird nur verwendet, wenn ein Chat-Completions-,
 Responses- oder Messages-Request (einschließlich Messages-Token-Zählung) weder
@@ -202,8 +249,9 @@ Responses- oder Messages-Request (einschließlich Messages-Token-Zählung) weder
 Es wird genau wie ein vom Client gesendetes Modell aufgelöst: Es darf ein
 [virtuelles Modell](/de/features/virtual-models) sein und wird weiterhin gegen
 die Allowlists geprüft, sodass ein Standardmodell, das der Pfad nicht nutzen
-darf, abgelehnt wird. Pfade ohne Standardmodell und Requests ohne User Path
-erhalten weiterhin `400 model is required`.
+darf, abgelehnt wird. Ein Request ohne User Path nutzt das Standardmodell von
+`/`, falls gesetzt; Pfade ohne Standardmodell erhalten weiterhin
+`400 model is required`.
 
 ## Richtlinien verwalten
 

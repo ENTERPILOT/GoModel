@@ -233,6 +233,7 @@ func TestReasoningEffortOverrideDropsGoogleThinkingEffort(t *testing.T) {
 		{name: "keeps include_thoughts", extraBody: `{"google":{"thinking_config":{"thinking_level":"high","include_thoughts":true}}}`, want: `{"google":{"thinking_config":{"include_thoughts":true}}}`},
 		{name: "keeps other members", extraBody: `{"google":{"thinking_config":{"thinkingBudget":1},"cached_content":"c"},"x":1}`, want: `{"google":{"cached_content":"c"},"x":1}`},
 		{name: "unrelated extra_body unchanged", extraBody: `{"google":{"cached_content":"c"}}`, want: `{"google":{"cached_content":"c"}}`},
+		{name: "object names in any case", extraBody: `{"Google":{"Thinking_Config":{"Thinking_Budget":1,"include_thoughts":true}}}`, want: `{"Google":{"Thinking_Config":{"include_thoughts":true}}}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -255,6 +256,37 @@ func TestReasoningEffortOverrideDropsGoogleThinkingEffort(t *testing.T) {
 			assert.JSONEq(t, tt.extraBody, string(req.ExtraFields.Lookup("extra_body")), "client request must not be mutated")
 		})
 	}
+}
+
+// Under an effort ceiling every provider-specific reasoning control is
+// dropped, at the top level and inside extra_body; unrelated members, chat
+// template switches included, stay. A forced effort alone keeps them, since
+// a virtual model's own params may set them next to its effort.
+func TestEffortCeilingDropsProviderControls(t *testing.T) {
+	req := &core.ChatRequest{Model: "m", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+		"thinking":             json.RawMessage(`{"type":"enabled","budget_tokens":30000}`),
+		"enable_thinking":      json.RawMessage(`true`),
+		"thinking_budget":      json.RawMessage(`30000`),
+		"think":                json.RawMessage(`"high"`),
+		"chat_template_kwargs": json.RawMessage(`{"enable_thinking":true,"thinking":true,"reasoning_effort":"max","thinking_budget":9,"add_generation_prompt":true}`),
+		"extra_body":           json.RawMessage(`{"enable_thinking":true,"chat_template_kwargs":{"thinking":true,"x":1},"keep":1}`),
+		"seed":                 json.RawMessage(`7`),
+	})}
+
+	capped, err := ChatRequestWithCeilings(req, requestparams.Ceilings{ReasoningEffort: "low"})
+	require.NoError(t, err)
+
+	fields := capped.ExtraFields
+	for _, field := range reasoningControlFields {
+		assert.Nil(t, fields.Lookup(field), field)
+	}
+	assert.JSONEq(t, `{"add_generation_prompt":true}`, string(fields.Lookup("chat_template_kwargs")))
+	assert.JSONEq(t, `{"chat_template_kwargs":{"x":1},"keep":1}`, string(fields.Lookup("extra_body")))
+	assert.JSONEq(t, `7`, string(fields.Lookup("seed")))
+	assert.JSONEq(t, `true`, string(req.ExtraFields.Lookup("enable_thinking")), "client request must not be mutated")
+
+	forced := ChatRequestWithReasoningEffort(req, "low").ExtraFields
+	assert.JSONEq(t, `true`, string(forced.Lookup("enable_thinking")), "a forced effort leaves provider controls alone")
 }
 
 func rawJSON(s string) json.RawMessage { return json.RawMessage(s) }

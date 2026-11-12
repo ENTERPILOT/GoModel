@@ -1,7 +1,9 @@
 package users
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -35,7 +37,9 @@ func TestService_RequestPolicyInheritsDownTheTree(t *testing.T) {
 		userPath string
 		want     RequestPolicy
 	}{
-		{"no user path has no policy", "", RequestPolicy{}},
+		{"no user path answers to the root", "", RequestPolicy{
+			MaxOutputTokens: 8000, MaxOutputTokensFrom: "/",
+		}},
 		{"unrelated path inherits the root ceiling only", "/other/dave", RequestPolicy{
 			MaxOutputTokens: 8000, MaxOutputTokensFrom: "/",
 		}},
@@ -180,4 +184,43 @@ func TestService_RefreshPicksUpRequestPolicyWrittenElsewhere(t *testing.T) {
 	assert.True(t, reader.RequestPolicy("/acme").IsZero(), "the reader has not reloaded yet")
 	require.NoError(t, reader.Refresh(ctx))
 	assert.Equal(t, "low", reader.RequestPolicy("/acme/eng").MaxReasoningEffort)
+}
+
+// A row written to the store directly, past validation, may carry an effort
+// outside the scale. It fails safe and visibly: the ceiling is enforced as
+// "none", the tightest level, and a warning names the row.
+func TestService_StoredInvalidEffortCeilingFailsSafe(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	ctx := context.Background()
+	store, err := NewSQLStore(ctx, sqlxtest.NewSQLite(t))
+	require.NoError(t, err)
+	require.NoError(t, store.Upsert(ctx, User{UserPath: "/typo", MaxReasoningEffort: "turbo", MaxOutputTokens: 100}))
+	svc, err := NewService(store, testCatalog{"openai"})
+	require.NoError(t, err)
+	require.NoError(t, svc.Refresh(ctx))
+
+	policy := svc.RequestPolicy("/typo/alice")
+	assert.Equal(t, "none", policy.MaxReasoningEffort)
+	assert.Equal(t, 100, policy.MaxOutputTokens, "the row's valid ceiling still applies")
+	assert.Contains(t, logs.String(), "unknown max_reasoning_effort")
+	assert.Contains(t, logs.String(), "user_path=/typo")
+	assert.Contains(t, logs.String(), "turbo")
+}
+
+// The root row binds every request, whatever path it carries or lacks.
+func TestService_RootPolicyBindsRequestsWithoutAPath(t *testing.T) {
+	t.Parallel()
+	svc := newTestService(t)
+	_, err := svc.Upsert(context.Background(), User{UserPath: "/", MaxReasoningEffort: "low", MaxOutputTokens: 1000})
+	require.NoError(t, err)
+
+	want := requestparams.Ceilings{ReasoningEffort: "low", OutputTokens: 1000}
+	for _, userPath := range []string{"", "/", "/chosen/by/header", "not a path"} {
+		assert.Equal(t, want, svc.RequestPolicy(userPath).Ceilings(), "path %q", userPath)
+	}
+	assert.Equal(t, want, svc.RequestCeilings(context.Background()), "a context without a user path")
 }

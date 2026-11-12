@@ -200,7 +200,7 @@ func (s *translatedInferenceService) Messages(c *echo.Context) error {
 	unsignedThinking := translateErr == nil && anthropicapi.HasUnsignedThinking(decoded)
 	// The verbatim body of a request served by its user path's default model
 	// names no model, so it cannot be forwarded as it is.
-	if !defaultedModel && s.canForwardMessagesNatively(ctx, workflow, req, unsignedThinking) {
+	if !defaultedModel && s.canForwardMessagesNatively(ctx, workflow, req, decoded.Thinking, unsignedThinking) {
 		return s.dispatchMessagesNative(c, prepared, workflow)
 	}
 	if translateErr != nil {

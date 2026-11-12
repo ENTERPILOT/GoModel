@@ -4,8 +4,6 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/goccy/go-json"
-
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/requestparams"
 )
@@ -13,11 +11,6 @@ import (
 // flatReasoningEffortField is the flat Chat Completions spelling of the
 // reasoning effort, kept in ExtraFields when a client sends it.
 const flatReasoningEffortField = "reasoning_effort"
-
-// googleThinkingEffortFields are the extra_body.google.thinking_config members
-// that set Gemini's effort. A forced effort drops them so the client's budget
-// or level cannot win over it; other members such as include_thoughts stay.
-var googleThinkingEffortFields = []string{"thinking_budget", "thinkingBudget", "thinking_level", "thinkingLevel"}
 
 // clientRequestKey keys the client's request as it was before preparation
 // forced the primary attempt's overrides onto it, so a failover attempt is
@@ -58,6 +51,7 @@ func withRequestOverrides[Req any, T any](
 			req = rebuild(client, req)
 		}
 		overrides := resolver.ResolveRequestOverrides(ctx, resolution, attempt)
+		ctx = withCeilingsContext(ctx, overrides.Ceilings)
 		if !overrides.IsZero() {
 			var err error
 			if req, err = apply(req, overrides); err != nil {
@@ -67,6 +61,13 @@ func withRequestOverrides[Req any, T any](
 		}
 		return call(ctx, req, providerName)
 	}
+}
+
+// withCeilingsContext attaches the ceilings to the provider call's context,
+// so an adapter that fills in or raises a value of its own (a default token
+// limit, room for a thinking budget, a default effort) keeps it within them.
+func withCeilingsContext(ctx context.Context, ceilings requestparams.Ceilings) context.Context {
+	return core.WithRequestCeilings(ctx, core.RequestCeilings{ReasoningEffort: ceilings.ReasoningEffort, OutputTokens: ceilings.OutputTokens})
 }
 
 // RequestOverrides returns what the operator forces on the primary attempt of
@@ -147,18 +148,29 @@ func responsesRequestSelectorOf(req *core.ResponsesRequest) core.ModelSelector {
 // a Gemini thinking budget or level) are dropped so no provider reads them
 // instead.
 func ChatRequestWithReasoningEffort(req *core.ChatRequest, effort string) *core.ChatRequest {
-	if req == nil {
-		return nil
-	}
-	cloned := *req
-	cloned.Reasoning = &core.Reasoning{Effort: effort}
-	cloned.ExtraFields = withoutClientEffort(req.ExtraFields)
-	return &cloned
+	return chatRequestWithEffort(req, effort, withoutClientEffort)
 }
 
 // ResponsesRequestWithReasoningEffort returns a shallow copy of req whose
 // reasoning effort is effort.
 func ResponsesRequestWithReasoningEffort(req *core.ResponsesRequest, effort string) *core.ResponsesRequest {
+	return responsesRequestWithEffort(req, effort, withoutClientEffort)
+}
+
+// chatRequestWithEffort returns a shallow copy of req whose reasoning effort
+// is effort and whose extra fields went through strip.
+func chatRequestWithEffort(req *core.ChatRequest, effort string, strip func(core.UnknownJSONFields) core.UnknownJSONFields) *core.ChatRequest {
+	if req == nil {
+		return nil
+	}
+	cloned := *req
+	cloned.Reasoning = &core.Reasoning{Effort: effort}
+	cloned.ExtraFields = strip(req.ExtraFields)
+	return &cloned
+}
+
+// responsesRequestWithEffort is chatRequestWithEffort for Responses.
+func responsesRequestWithEffort(req *core.ResponsesRequest, effort string, strip func(core.UnknownJSONFields) core.UnknownJSONFields) *core.ResponsesRequest {
 	if req == nil {
 		return nil
 	}
@@ -170,75 +182,6 @@ func ResponsesRequestWithReasoningEffort(req *core.ResponsesRequest, effort stri
 		reasoning.Summary = req.Reasoning.Summary
 	}
 	cloned.Reasoning = &reasoning
-	cloned.ExtraFields = withoutClientEffort(req.ExtraFields)
+	cloned.ExtraFields = strip(req.ExtraFields)
 	return &cloned
-}
-
-func withoutClientEffort(fields core.UnknownJSONFields) core.UnknownJSONFields {
-	fields = fields.Without(flatReasoningEffortField)
-	extraBody, changed := withoutGoogleThinkingEffort(fields.Lookup("extra_body"))
-	if !changed {
-		return fields
-	}
-	rest := fields.Without("extra_body")
-	if extraBody == nil {
-		return rest
-	}
-	merged, err := core.MergeUnknownJSONFields(rest, map[string]json.RawMessage{"extra_body": extraBody})
-	if err != nil {
-		return fields
-	}
-	return merged
-}
-
-// withoutGoogleThinkingEffort removes the effort members from
-// extra_body.google.thinking_config, dropping objects left empty. It returns
-// nil when nothing of extra_body remains, and false when nothing changed.
-func withoutGoogleThinkingEffort(extraBody json.RawMessage) (json.RawMessage, bool) {
-	if len(extraBody) == 0 {
-		return extraBody, false
-	}
-	var body, google, thinking map[string]json.RawMessage
-	if json.Unmarshal(extraBody, &body) != nil || json.Unmarshal(body["google"], &google) != nil || json.Unmarshal(google["thinking_config"], &thinking) != nil {
-		return extraBody, false
-	}
-	changed := false
-	for _, field := range googleThinkingEffortFields {
-		if _, ok := thinking[field]; ok {
-			delete(thinking, field)
-			changed = true
-		}
-	}
-	if !changed {
-		return extraBody, false
-	}
-	if err := setOrDelete(google, "thinking_config", thinking); err != nil {
-		return extraBody, false
-	}
-	if err := setOrDelete(body, "google", google); err != nil {
-		return extraBody, false
-	}
-	if len(body) == 0 {
-		return nil, true
-	}
-	raw, err := json.Marshal(body)
-	if err != nil {
-		return extraBody, false
-	}
-	return raw, true
-}
-
-// setOrDelete stores value under key in parent, or removes key when value is
-// empty.
-func setOrDelete(parent map[string]json.RawMessage, key string, value map[string]json.RawMessage) error {
-	if len(value) == 0 {
-		delete(parent, key)
-		return nil
-	}
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-	parent[key] = raw
-	return nil
 }

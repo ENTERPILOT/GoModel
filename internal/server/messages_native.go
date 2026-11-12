@@ -16,6 +16,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/enterpilot/gomodel/ext"
+	"github.com/enterpilot/gomodel/internal/anthropicapi"
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/gateway"
@@ -33,8 +34,9 @@ const anthropicProviderType = "anthropic"
 // requests using guardrails patching, response caching, failover, or a forced
 // reasoning effort stay on the translated pipeline. So does a request replaying an unsigned thinking
 // block, which Anthropic rejects and only the translated pipeline can drop.
-// req is the client's request as translated, before any override.
-func (s *translatedInferenceService) canForwardMessagesNatively(ctx context.Context, workflow *core.Workflow, req *core.ChatRequest, unsignedThinking bool) bool {
+// req is the client's request as translated, before any override, and
+// thinking its thinking config as sent.
+func (s *translatedInferenceService) canForwardMessagesNatively(ctx context.Context, workflow *core.Workflow, req *core.ChatRequest, thinking *anthropicapi.Thinking, unsignedThinking bool) bool {
 	if workflow == nil || strings.TrimSpace(workflow.ProviderType) != anthropicProviderType {
 		return false
 	}
@@ -55,9 +57,13 @@ func (s *translatedInferenceService) canForwardMessagesNatively(ctx context.Cont
 	}
 	// A forced reasoning effort or request parameters rewrite the request,
 	// which the verbatim body cannot carry. Ceilings rewrite only a request
-	// that exceeds them: one already within them is forwarded as it is.
+	// that exceeds them: one already within them is forwarded as it is. The
+	// translation keeps only a coarse level of an explicit thinking budget,
+	// so the budget itself is checked against the ceiling level's own; the
+	// translated pipeline then sends that level's budget.
 	overrides := s.inference().RequestOverrides(ctx, workflow)
-	if overrides.Forces() || gateway.ChatRequestExceedsCeilings(req, overrides.Ceilings) {
+	if overrides.Forces() || gateway.ChatRequestExceedsCeilings(req, overrides.Ceilings) ||
+		anthropicapi.ThinkingBudgetExceeds(thinking, overrides.Ceilings.ReasoningEffort) {
 		return false
 	}
 	_, ok := s.provider.(core.RoutablePassthrough)

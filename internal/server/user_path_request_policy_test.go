@@ -331,8 +331,9 @@ func TestUserPathCeilingsOnADirectModelRequest(t *testing.T) {
 	require.Len(t, f.provider.chatRequests, 3)
 	silent, within, above := f.provider.chatRequests[0], f.provider.chatRequests[1], f.provider.chatRequests[2]
 
-	assert.Nil(t, silent.Reasoning, "a silent client is not raised to the ceiling")
-	assert.Nil(t, silent.MaxTokens)
+	assert.Nil(t, silent.Reasoning, "a silent client is not raised to the effort ceiling")
+	require.NotNil(t, silent.MaxTokens, "an omitted token limit is set to the token ceiling")
+	assert.Equal(t, 4096, *silent.MaxTokens)
 	assert.Nil(t, silent.ExtraFields.Lookup("max_completion_tokens"))
 
 	assert.Nil(t, within.Reasoning)

@@ -2,6 +2,7 @@ package requestparams
 
 import (
 	"bytes"
+	"strconv"
 
 	"github.com/goccy/go-json"
 
@@ -9,8 +10,10 @@ import (
 )
 
 // Ceilings are upper bounds on what one provider attempt may ask for. A
-// ceiling lowers a request's value and never raises it: a request that sets
-// no value is left alone. Zero values mean no ceiling.
+// ceiling lowers a request's value and never raises it. The token ceiling
+// also fills in a limit a request leaves out, since an omitted limit is no
+// limit at all; the effort ceiling adds nothing, so it never switches
+// reasoning on. Zero values mean no ceiling.
 type Ceilings struct {
 	// ReasoningEffort is the highest level of ReasoningEffortLevels allowed.
 	ReasoningEffort string
@@ -37,11 +40,16 @@ func (c Ceilings) Tighten(other Ceilings) Ceilings {
 }
 
 // CapChatTokens returns req with every output token limit above limit lowered
-// to it, in the spelling the client used. The request is never mutated: the
-// result is req itself when nothing exceeds the limit.
+// to it, in the spelling the client used, or with max_tokens set to limit
+// when the request carries none: adapters translate it to the spelling the
+// model takes, as they do the client's. The request is never mutated: the
+// result is req itself when it is already within the limit.
 func CapChatTokens(req *core.ChatRequest, limit int) (*core.ChatRequest, error) {
 	if req == nil || limit <= 0 {
 		return req, nil
+	}
+	if !carriesTokenLimit(req.MaxTokens, req.ExtraFields, chatTokenLimitExtras) {
+		return ApplyChat(req, nil, forcedTokenLimit("max_tokens", limit))
 	}
 	maxTokens, fields, changed, err := capTokens(req.MaxTokens, req.ExtraFields, limit, chatTokenLimitExtras)
 	if err != nil || !changed {
@@ -57,6 +65,9 @@ func CapResponsesTokens(req *core.ResponsesRequest, limit int) (*core.ResponsesR
 	if req == nil || limit <= 0 {
 		return req, nil
 	}
+	if !carriesTokenLimit(req.MaxOutputTokens, req.ExtraFields, responsesTokenLimitExtras) {
+		return ApplyResponses(req, nil, forcedTokenLimit("max_output_tokens", limit))
+	}
 	maxTokens, fields, changed, err := capTokens(req.MaxOutputTokens, req.ExtraFields, limit, responsesTokenLimitExtras)
 	if err != nil || !changed {
 		return req, err
@@ -64,6 +75,29 @@ func CapResponsesTokens(req *core.ResponsesRequest, limit int) (*core.ResponsesR
 	cloned := *req
 	cloned.MaxOutputTokens, cloned.ExtraFields = maxTokens, fields
 	return &cloned, nil
+}
+
+// carriesTokenLimit reports whether a request sets an output token limit in
+// any spelling. A null is no limit.
+func carriesTokenLimit(typed *int, fields core.UnknownJSONFields, keys []string) bool {
+	if typed != nil {
+		return true
+	}
+	for _, key := range keys {
+		for _, raw := range fields.LookupAll(key) {
+			if raw = bytes.TrimSpace(raw); len(raw) > 0 && !bytes.Equal(raw, []byte(nullLexeme)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// forcedTokenLimit is the parameter set that writes limit as the request's
+// only token limit: forcing it also strips a null the client sent in another
+// spelling.
+func forcedTokenLimit(key string, limit int) Set {
+	return Set{key: json.RawMessage(strconv.Itoa(limit))}
 }
 
 // capTokens lowers the typed token limit and every spelling of it among keys
@@ -87,16 +121,13 @@ func capTokens(typed *int, fields core.UnknownJSONFields, limit int, keys []stri
 
 // cappedExtras returns the replacement for each token-limit spelling in
 // fields that exceeds limit. A value that is not a number cannot be compared,
-// so it is replaced too rather than let past the ceiling.
+// so it is replaced too rather than let past the ceiling. A repeated member
+// counts as exceeding when any occurrence does, and the replacement drops
+// every occurrence.
 func cappedExtras(fields core.UnknownJSONFields, limit int, keys []string) (map[string]json.RawMessage, error) {
 	var capped map[string]json.RawMessage
 	for _, key := range keys {
-		raw := bytes.TrimSpace(fields.Lookup(key))
-		if len(raw) == 0 || bytes.Equal(raw, []byte(nullLexeme)) {
-			continue
-		}
-		var value float64
-		if err := json.Unmarshal(raw, &value); err == nil && value <= float64(limit) {
+		if !anyExceeds(fields.LookupAll(key), limit) {
 			continue
 		}
 		encoded, err := json.Marshal(limit)
@@ -109,4 +140,18 @@ func cappedExtras(fields core.UnknownJSONFields, limit int, keys []string) (map[
 		capped[key] = encoded
 	}
 	return capped, nil
+}
+
+func anyExceeds(values []json.RawMessage, limit int) bool {
+	for _, raw := range values {
+		raw = bytes.TrimSpace(raw)
+		if len(raw) == 0 || bytes.Equal(raw, []byte(nullLexeme)) {
+			continue
+		}
+		var value float64
+		if err := json.Unmarshal(raw, &value); err != nil || value > float64(limit) {
+			return true
+		}
+	}
+	return false
 }

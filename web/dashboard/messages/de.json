@@ -1522,7 +1522,7 @@
   "users_max_reasoning_effort": "Maximaler Reasoning-Effort",
   "users_max_reasoning_effort_help": "Ein höherer Reasoning-Effort wird auf jedem Modell auf diese Stufe gesenkt, auch wenn ein virtuelles Modell ihn erzwingt. Eine Anfrage ohne Effort bleibt unverändert. Es gilt die niedrigste Obergrenze dieses Pfads und seiner Eltern.",
   "users_max_output_tokens": "Maximale Ausgabe-Tokens",
-  "users_max_output_tokens_help": "Ein höheres Ausgabe-Token-Limit wird auf diesen Wert gesenkt. Eine Anfrage ohne Limit bleibt unverändert. Es gilt die niedrigste Obergrenze dieses Pfads und seiner Eltern.",
+  "users_max_output_tokens_help": "Ein höheres Ausgabe-Token-Limit wird auf diesen Wert gesenkt. Eine Anfrage ohne Limit erhält diesen Wert. Es gilt die niedrigste Obergrenze dieses Pfads und seiner Eltern.",
   "users_max_output_tokens_invalid": "Maximale Ausgabe-Tokens müssen eine positive ganze Zahl sein.",
   "users_edit_action": "Richtlinie für {path} bearbeiten",
   "users_delete_action": "Richtlinie für {path} entfernen",

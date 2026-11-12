@@ -20,6 +20,15 @@ func extras(fields map[string]string) core.UnknownJSONFields {
 	return core.UnknownJSONFieldsFromMap(raw)
 }
 
+// rawFields decodes a raw extra fields object as the request decoder keeps
+// it, repeated members included.
+func rawFields(t *testing.T, raw string) core.UnknownJSONFields {
+	t.Helper()
+	var req core.ChatRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"model":"m","messages":[],`+raw[1:]), &req))
+	return req.ExtraFields
+}
+
 // A ceiling lowers what the client asked for and never raises it: a request
 // at or below the ceiling, or one that sets no effort, is sent as it came.
 func TestChatRequestWithCeilingsReasoningEffort(t *testing.T) {
@@ -27,7 +36,10 @@ func TestChatRequestWithCeilingsReasoningEffort(t *testing.T) {
 		name      string
 		reasoning *core.Reasoning
 		extras    map[string]string
-		ceiling   string
+		// raw, when set, is the extra fields object as sent, for bodies a
+		// map cannot hold (a repeated member).
+		raw     string
+		ceiling string
 		// want is the effort sent upstream; "" with unchanged means the
 		// request is passed through untouched.
 		want      string
@@ -50,11 +62,29 @@ func TestChatRequestWithCeilingsReasoningEffort(t *testing.T) {
 		{name: "gemini thinking level within the ceiling is kept", extras: map[string]string{"extra_body": `{"google":{"thinking_config":{"thinkingLevel":"low"}}}`}, ceiling: "medium", unchanged: true},
 		{name: "gemini thinking budget cannot be ranked, so the ceiling applies", extras: map[string]string{"extra_body": `{"google":{"thinking_config":{"thinking_budget":24576}}}`}, ceiling: "medium", want: "medium"},
 		{name: "gemini zero budget is reasoning off and is kept", extras: map[string]string{"extra_body": `{"google":{"thinking_config":{"thinking_budget":0}}}`}, ceiling: "medium", unchanged: true},
+		{name: "gemini object names match case-insensitively, as Gemini decodes them", extras: map[string]string{"extra_body": `{"Google":{"Thinking_Config":{"thinking_budget":32768}}}`}, ceiling: "low", want: "low"},
+		{name: "gemini member names match in any spelling", extras: map[string]string{"extra_body": `{"google":{"thinking_config":{"Thinking_Level":"high"}}}`}, ceiling: "low", want: "low"},
+		{name: "a repeated flat effort is checked in every occurrence", extras: map[string]string{"x": `0`}, raw: `{"reasoning_effort":"low","reasoning_effort":"max"}`, ceiling: "low", want: "low"},
+		{name: "a thinking budget cannot be ranked", extras: map[string]string{"thinking": `{"type":"enabled","token_budget":31999}`}, ceiling: "none", want: "none"},
+		{name: "disabled thinking is reasoning off", extras: map[string]string{"thinking": `{"type":"disabled"}`}, ceiling: "none", unchanged: true},
+		{name: "enable_thinking true cannot be ranked", extras: map[string]string{"enable_thinking": `true`}, ceiling: "high", want: "high"},
+		{name: "enable_thinking false is reasoning off", extras: map[string]string{"enable_thinking": `false`}, ceiling: "none", unchanged: true},
+		{name: "a zero thinking_budget is reasoning off", extras: map[string]string{"thinking_budget": `0`}, ceiling: "none", unchanged: true},
+		{name: "a thinking_budget cannot be ranked", extras: map[string]string{"thinking_budget": `100`}, ceiling: "medium", want: "medium"},
+		{name: "ollama think level above the ceiling", extras: map[string]string{"think": `"high"`}, ceiling: "low", want: "low"},
+		{name: "ollama think level within the ceiling", extras: map[string]string{"think": `"low"`}, ceiling: "low", unchanged: true},
+		{name: "chat template reasoning switch", extras: map[string]string{"chat_template_kwargs": `{"enable_thinking":true}`}, ceiling: "low", want: "low"},
+		{name: "chat template effort within the ceiling", extras: map[string]string{"chat_template_kwargs": `{"reasoning_effort":"low","enable_thinking":false}`}, ceiling: "low", unchanged: true},
+		{name: "controls inside extra_body count too", extras: map[string]string{"extra_body": `{"enable_thinking":true}`}, ceiling: "low", want: "low"},
 		{name: "no ceiling keeps any effort", reasoning: &core.Reasoning{Effort: "max"}, unchanged: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := &core.ChatRequest{Model: "m", Reasoning: tt.reasoning, ExtraFields: extras(tt.extras)}
+			fields := extras(tt.extras)
+			if tt.raw != "" {
+				fields = rawFields(t, tt.raw)
+			}
+			req := &core.ChatRequest{Model: "m", Reasoning: tt.reasoning, ExtraFields: fields}
 
 			capped, err := ChatRequestWithCeilings(req, requestparams.Ceilings{ReasoningEffort: tt.ceiling})
 			require.NoError(t, err)
@@ -68,6 +98,9 @@ func TestChatRequestWithCeilingsReasoningEffort(t *testing.T) {
 			assert.Equal(t, tt.want, capped.Reasoning.Effort)
 			assert.Nil(t, capped.ExtraFields.Lookup("reasoning_effort"), "no other spelling may outbid the ceiling")
 			assert.Nil(t, capped.ExtraFields.Lookup("extra_body"), "no other spelling may outbid the ceiling")
+			for _, field := range append([]string{chatTemplateKwargsField}, reasoningControlFields...) {
+				assert.Nil(t, capped.ExtraFields.Lookup(field), "no other spelling may outbid the ceiling")
+			}
 			assert.Equal(t, tt.reasoning, req.Reasoning, "the client's request must not be mutated")
 		})
 	}
@@ -79,7 +112,10 @@ func TestResponsesRequestWithCeilings(t *testing.T) {
 	silent := &core.ResponsesRequest{Model: "m"}
 	capped, err := ResponsesRequestWithCeilings(silent, ceilings)
 	require.NoError(t, err)
-	assert.Same(t, silent, capped, "a request that sets neither value is left alone")
+	assert.Nil(t, capped.Reasoning, "an omitted effort stays omitted")
+	require.NotNil(t, capped.MaxOutputTokens, "an omitted token limit is set to the ceiling")
+	assert.Equal(t, 100, *capped.MaxOutputTokens)
+	assert.Nil(t, silent.MaxOutputTokens, "the client's request must not be mutated")
 
 	within := &core.ResponsesRequest{Model: "m", Reasoning: &core.Reasoning{Effort: "low"}, MaxOutputTokens: new(64)}
 	capped, err = ResponsesRequestWithCeilings(within, ceilings)
@@ -99,7 +135,8 @@ func TestResponsesRequestWithCeilings(t *testing.T) {
 }
 
 // Ceilings go last: they bound what a virtual model forces or defaults just
-// as they bound the client's own value, and never add a value nobody set.
+// as they bound the client's own value. Only the token ceiling fills in a
+// value nobody set.
 func TestRequestOverridesComposeWithCeilings(t *testing.T) {
 	set := func(key, value string) requestparams.Set {
 		return requestparams.Set{key: json.RawMessage(value)}
@@ -154,9 +191,10 @@ func TestRequestOverridesComposeWithCeilings(t *testing.T) {
 			wantTokens: new(4096),
 		},
 		{
-			name:      "no client value and no default leaves the limit unset",
-			client:    &core.ChatRequest{Model: "m"},
-			overrides: requestparams.Overrides{Ceilings: requestparams.Ceilings{ReasoningEffort: "medium", OutputTokens: 4096}},
+			name:       "no client value and no default gets the ceiling as its limit and no effort",
+			client:     &core.ChatRequest{Model: "m"},
+			overrides:  requestparams.Overrides{Ceilings: requestparams.Ceilings{ReasoningEffort: "medium", OutputTokens: 4096}},
+			wantTokens: new(4096),
 		},
 	}
 	for _, tt := range tests {
@@ -215,7 +253,8 @@ func TestCeilingsApplyToEveryAttempt(t *testing.T) {
 		for i, sent := range provider.chats {
 			require.NotNil(t, sent.Reasoning, "attempt %d", i)
 			assert.Equal(t, "low", sent.Reasoning.Effort, "attempt %d", i)
-			assert.Nil(t, sent.MaxTokens, "attempt %d: a ceiling does not add a limit", i)
+			require.NotNil(t, sent.MaxTokens, "attempt %d: an omitted limit is set to the ceiling", i)
+			assert.Equal(t, 100, *sent.MaxTokens, "attempt %d", i)
 		}
 	})
 

@@ -134,10 +134,21 @@ requestów bez modelu oraz limity reasoning effort (`max_reasoning_effort`) i
 tokenów wyjściowych (`max_output_tokens`) dla każdego modelu. Wszystko pod
 węzłem je dziedziczy: wygrywa najbliższy domyślny model, a obowiązuje
 najniższy limit aż do `/`, więc dziecko nie może poluzować limitu swojej grupy.
-Limit tylko obniża wartość, którą request niesie; nigdy jej nie dodaje. W
+Limit effortu tylko obniża effort, który request niesie, więc nigdy nie włącza
+reasoningu; limit tokenów ustawia też limit w requeście, który go nie wysyła.
+Polityka na `/` obowiązuje każdy request, także bez ścieżki użytkownika. W
 odróżnieniu od `reasoning_effort` modelu wirtualnego, który wymusza jedną
 wartość dla jednego modelu, te limity obejmują każdy model używany przez
 ścieżkę. Zobacz [Użytkownicy](/pl/features/users#polityka-requestów).
+
+Klucz bez przypisanego `user_path` wybiera ścieżkę przez nagłówek powyżej, a z
+nią politykę własnego poddrzewa. Ustawiaj limity na kluczach ze stałym
+`user_path` albo na `/`.
+
+<Warning>
+Batche i passthrough pod `/p/` nie są ograniczane. Ograniczony klucz, który
+może ich używać, może obejść swoją politykę requestów.
+</Warning>
 
 ## Udostępniane modele
 

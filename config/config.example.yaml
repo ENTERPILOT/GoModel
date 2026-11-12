@@ -153,10 +153,13 @@ models:
 #                         nearest path that sets one wins
 #   max_reasoning_effort  lowers a higher reasoning effort to this level (none,
 #                         minimal, low, medium, high, xhigh, max)
-#   max_output_tokens     lowers a higher output token limit to this number
+#   max_output_tokens     lowers a higher output token limit to this number and
+#                         sets it on a request that sends none
 # The lowest ceiling between a path and the root applies, so a child can
-# tighten its group's ceiling but not loosen it. A ceiling never raises a
-# request and adds nothing to one that sets no effort or limit.
+# tighten its group's ceiling but not loosen it; a policy on / binds every
+# request, with or without a user path. The effort ceiling adds nothing to a
+# request that sets no effort, so it never switches reasoning on. Batches and
+# /p/ passthrough are not capped.
 # users:
 #   - path: /acme
 #     allowed_models: [openai/*, anthropic/*]

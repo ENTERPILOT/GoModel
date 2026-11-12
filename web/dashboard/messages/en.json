@@ -1522,7 +1522,7 @@
   "users_max_reasoning_effort": "Max reasoning effort",
   "users_max_reasoning_effort_help": "A higher reasoning effort is lowered to this level on every model, including what a virtual model forces. A request that asks for none is left alone. The lowest ceiling of this path and its parents applies.",
   "users_max_output_tokens": "Max output tokens",
-  "users_max_output_tokens_help": "A higher output token limit is lowered to this number. A request without a limit is left alone. The lowest ceiling of this path and its parents applies.",
+  "users_max_output_tokens_help": "A higher output token limit is lowered to this number. A request without a limit gets this one. The lowest ceiling of this path and its parents applies.",
   "users_max_output_tokens_invalid": "Max output tokens must be a positive whole number.",
   "users_edit_action": "Edit policy for {path}",
   "users_delete_action": "Remove policy for {path}",

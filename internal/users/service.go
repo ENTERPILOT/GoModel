@@ -146,6 +146,7 @@ func buildSnapshot(rows []User) *snapshot {
 			continue
 		}
 		row.UserPath = userPath
+		row.MaxReasoningEffort = failSafeEffortCeiling(userPath, row.MaxReasoningEffort)
 		if _, exists := next.byPath[userPath]; !exists {
 			next.order = append(next.order, userPath)
 		}

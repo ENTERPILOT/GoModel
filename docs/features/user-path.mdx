@@ -132,10 +132,21 @@ A user path node can also set a `default_model` for requests that name no
 model, and ceilings on reasoning effort (`max_reasoning_effort`) and output
 tokens (`max_output_tokens`) for every model. Everything below the node
 inherits them: the nearest default wins, and the lowest ceiling up to `/`
-applies, so a child cannot loosen its group's ceiling. A ceiling only lowers a
-value the request carries; it never adds one. Unlike a virtual model's
-`reasoning_effort`, which forces one value for one model, these bound every
-model the path uses. See [Users](/features/users#request-policy).
+applies, so a child cannot loosen its group's ceiling. The effort ceiling only
+lowers an effort the request carries, so it never switches reasoning on; the
+token ceiling also sets the limit on a request that sends none. A policy on `/`
+binds every request, including those without a user path. Unlike a virtual
+model's `reasoning_effort`, which forces one value for one model, these bound
+every model the path uses. See [Users](/features/users#request-policy).
+
+A key without a bound `user_path` picks its path through the header above, and
+with it its own subtree's policy. Put caps on keys with a fixed `user_path`, or
+on `/`.
+
+<Warning>
+Batches and passthrough under `/p/` are not capped. A capped key that may use
+them can bypass its request policy.
+</Warning>
 
 ## Exposed models
 

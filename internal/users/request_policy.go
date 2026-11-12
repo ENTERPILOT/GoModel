@@ -2,6 +2,8 @@ package users
 
 import (
 	"context"
+	"log/slog"
+	"strconv"
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -35,8 +37,9 @@ func (p RequestPolicy) Ceilings() requestparams.Ceilings {
 	return requestparams.Ceilings{ReasoningEffort: p.MaxReasoningEffort, OutputTokens: p.MaxOutputTokens}
 }
 
-// RequestPolicy returns the request policy in force on userPath. A request
-// without a user path has none, as it has no allowlist.
+// RequestPolicy returns the request policy in force on userPath. The root
+// row's policy applies to every request: one without a user path (the
+// master key, a key with no bound path that sent no header) answers to "/".
 func (s *Service) RequestPolicy(userPath string) RequestPolicy {
 	snap := s.snapshot()
 	var policy RequestPolicy
@@ -46,7 +49,7 @@ func (s *Service) RequestPolicy(userPath string) RequestPolicy {
 	// Deepest first: the first default model seen is the nearest one, and a
 	// ceiling is replaced only by a strictly lower one, so on a tie the
 	// nearest path is the one reported.
-	for _, ancestor := range core.UserPathAncestors(userPath) {
+	for _, ancestor := range policyAncestors(userPath) {
 		user, ok := snap.byPath[ancestor]
 		if !ok {
 			continue
@@ -66,6 +69,15 @@ func (s *Service) RequestPolicy(userPath string) RequestPolicy {
 	return policy
 }
 
+// policyAncestors lists the rows whose policy reaches userPath, deepest
+// first. A request without a usable path still answers to the root.
+func policyAncestors(userPath string) []string {
+	if ancestors := core.UserPathAncestors(userPath); len(ancestors) > 0 {
+		return ancestors
+	}
+	return []string{"/"}
+}
+
 // RequestCeilings returns the ceilings in force for the request's user path.
 func (s *Service) RequestCeilings(ctx context.Context) requestparams.Ceilings {
 	return s.RequestPolicy(core.UserPathFromContext(ctx)).Ceilings()
@@ -75,6 +87,21 @@ func (s *Service) RequestCeilings(ctx context.Context) requestparams.Ceilings {
 // path when it names none, or "" when no path sets one.
 func (s *Service) DefaultModel(ctx context.Context) string {
 	return s.RequestPolicy(core.UserPathFromContext(ctx)).DefaultModel
+}
+
+// failSafeEffortCeiling returns a stored row's effort ceiling on the common
+// scale. Rows are validated when saved, but a value edited in the store
+// directly may be anything: an unknown one is logged and read as "none", the
+// tightest level, so a typo can only make the ceiling stricter and the
+// upstream never receives the unknown value.
+func failSafeEffortCeiling(userPath, effort string) string {
+	normalized, err := requestparams.NormalizeReasoningEffort("max_reasoning_effort", effort)
+	if err == nil {
+		return normalized
+	}
+	slog.Warn("user policy has an unknown max_reasoning_effort; enforcing \"none\"",
+		"user_path", userPath, "max_reasoning_effort", strconv.Quote(effort))
+	return requestparams.ReasoningEffortLevels[0]
 }
 
 // hasRequestPolicy reports whether the row sets any request policy.

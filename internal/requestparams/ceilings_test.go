@@ -75,9 +75,11 @@ func TestCapChatTokens(t *testing.T) {
 		limit      int
 		wantTokens *int
 		wantExtras map[string]string
+		absent     []string
 		unchanged  bool
 	}{
-		{name: "no limit set by the client stays unset", limit: 100, unchanged: true},
+		{name: "an omitted limit is set to the ceiling", limit: 100, wantTokens: new(100)},
+		{name: "an omitted limit stays unset without a ceiling", unchanged: true},
 		{name: "lower client limit is kept", maxTokens: new(50), limit: 100, wantTokens: new(50), unchanged: true},
 		{name: "equal client limit is kept", maxTokens: new(100), limit: 100, wantTokens: new(100), unchanged: true},
 		{name: "higher client limit is lowered", maxTokens: new(4000), limit: 100, wantTokens: new(100)},
@@ -110,11 +112,11 @@ func TestCapChatTokens(t *testing.T) {
 			wantExtras: map[string]string{"max_completion_tokens": `100`},
 		},
 		{
-			name:       "a null limit counts as unset",
+			name:       "a null limit counts as unset and is replaced by the ceiling",
 			extras:     map[string]json.RawMessage{"max_completion_tokens": json.RawMessage(`null`)},
 			limit:      100,
-			wantExtras: map[string]string{"max_completion_tokens": `null`},
-			unchanged:  true,
+			wantTokens: new(100),
+			absent:     []string{"max_completion_tokens"},
 		},
 	}
 	for _, tt := range tests {
@@ -134,6 +136,9 @@ func TestCapChatTokens(t *testing.T) {
 			for key, want := range tt.wantExtras {
 				assert.JSONEq(t, want, string(capped.ExtraFields.Lookup(key)), key)
 			}
+			for _, key := range tt.absent {
+				assert.Nil(t, capped.ExtraFields.Lookup(key), key)
+			}
 			assert.Equal(t, client, req.MaxTokens, "the client's request must not be mutated")
 		})
 	}
@@ -147,9 +152,17 @@ func TestCapResponsesTokens(t *testing.T) {
 		limit      int
 		wantTokens *int
 		wantExtras map[string]string
+		absent     []string
 		unchanged  bool
 	}{
-		{name: "no limit set by the client stays unset", limit: 100, unchanged: true},
+		{name: "an omitted limit is set to the ceiling as max_output_tokens", limit: 100, wantTokens: new(100)},
+		{
+			name:       "a null chat spelling is replaced by the ceiling",
+			extras:     map[string]json.RawMessage{"max_tokens": json.RawMessage(`null`)},
+			limit:      100,
+			wantTokens: new(100),
+			absent:     []string{"max_tokens"},
+		},
 		{name: "lower client limit is kept", maxTokens: new(50), limit: 100, wantTokens: new(50), unchanged: true},
 		{name: "higher client limit is lowered", maxTokens: new(4000), limit: 100, wantTokens: new(100)},
 		{
@@ -175,6 +188,9 @@ func TestCapResponsesTokens(t *testing.T) {
 			assert.Equal(t, tt.wantTokens, capped.MaxOutputTokens)
 			for key, want := range tt.wantExtras {
 				assert.JSONEq(t, want, string(capped.ExtraFields.Lookup(key)), key)
+			}
+			for _, key := range tt.absent {
+				assert.Nil(t, capped.ExtraFields.Lookup(key), key)
 			}
 			assert.Equal(t, client, req.MaxOutputTokens, "the client's request must not be mutated")
 		})

@@ -101,6 +101,7 @@ func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*
 	if err != nil {
 		return nil, err
 	}
+	withinRequestCeilings(ctx, anthropicReq)
 
 	var anthropicResp anthropicResponse
 	err = p.client.Do(ctx, llmclient.Request{
@@ -123,6 +124,7 @@ func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesReque
 	if err != nil {
 		return nil, err
 	}
+	withinRequestCeilings(ctx, anthropicReq)
 	stream, err := p.openMessagesStream(ctx, anthropicReq, req.Model)
 	if err != nil {
 		return nil, err

@@ -419,3 +419,12 @@ func TestUnknownJSONFieldsHideValuesTheDecoderRejects(t *testing.T) {
 		assert.False(t, fields.HasAny("x_broken"), "value %q", value)
 	}
 }
+
+func TestUnknownJSONFieldsLookupAllSeesRepeatedMembers(t *testing.T) {
+	fields, err := extractUnknownJSONFields([]byte(`{"model":"m","a":1,"b":2,"a":3,"a":null}`), "model")
+	require.NoError(t, err)
+
+	assert.Equal(t, []json.RawMessage{json.RawMessage(`1`), json.RawMessage(`3`), json.RawMessage(`null`)}, fields.LookupAll("a"))
+	assert.Equal(t, json.RawMessage(`1`), fields.Lookup("a"), "Lookup still reports the first")
+	assert.Nil(t, fields.LookupAll("missing"))
+}

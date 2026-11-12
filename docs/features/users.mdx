@@ -147,7 +147,7 @@ default, so nothing changes until you set one:
 | ---------------------- | -------------------------------------------------------------- | --------------------- |
 | `default_model`        | serves a request that names no model                           | the nearest path wins |
 | `max_reasoning_effort` | lowers a higher reasoning effort to this level                 | the lowest ceiling wins |
-| `max_output_tokens`    | lowers a higher output token limit to this number              | the lowest ceiling wins |
+| `max_output_tokens`    | lowers a higher output token limit to this number, and sets it on a request that sends none | the lowest ceiling wins |
 
 ```yaml
 users:
@@ -165,33 +165,76 @@ users:
 | `/acme/eng/alice`     | no `model`                           | `team-model`, resolved as usual        |
 | `/acme/eng/alice`     | `reasoning_effort: high`, `max_tokens: 32000` | `medium`, `8192`              |
 | `/acme/eng/alice`     | `reasoning_effort: low`, `max_tokens: 100`    | unchanged                     |
-| `/acme/eng/alice`     | no effort, no limit                  | unchanged — a ceiling never adds a value |
+| `/acme/eng/alice`     | no effort, no limit                  | no effort, `max_tokens: 8192`          |
 | `/acme/eng/interns/bob` | `reasoning_effort: medium`         | `low`                                  |
 | `/acme/sales`         | `max_tokens: 32000`                  | `8192`                                 |
 
-**Ceilings** are upper bounds, never values to send. The lowest ceiling between
-a path and `/` applies, so a child can tighten its group's ceiling but setting a
-higher one on a child changes nothing. Efforts use the scale `none`, `minimal`,
-`low`, `medium`, `high`, `xhigh`, `max`; an effort the scale cannot place (a
-raw thinking token budget, for example) counts as above the ceiling and is
-replaced by it. The token ceiling covers `max_tokens`, `max_completion_tokens`,
-and `max_output_tokens` in whichever spelling the client used.
+**Ceilings** are upper bounds. The lowest ceiling between a path and `/`
+applies, so a child can tighten its group's ceiling but setting a higher one on
+a child changes nothing. Efforts use the scale `none`, `minimal`, `low`,
+`medium`, `high`, `xhigh`, `max`. The token ceiling covers `max_tokens`,
+`max_completion_tokens`, and `max_output_tokens` in whichever spelling the
+client used, and a request that sends no limit gets the ceiling as its limit,
+in the field the upstream model takes. The effort ceiling only lowers an effort
+the request sends and never adds one, because adding an effort would switch
+reasoning on for requests that did not ask for it. A request without an effort
+therefore runs at the model's default, and a model that cannot think less than
+some level (Gemini 3, OpenAI o-series, OpenCode Zen) still gets that level under
+a lower ceiling.
+
+Besides `reasoning_effort` and `reasoning.effort`, an effort ceiling checks the
+provider-specific reasoning controls that reach upstreams, at the top level of
+the body or inside `extra_body`:
+
+| Control                                                    | Read by                                   |
+| ---------------------------------------------------------- | ----------------------------------------- |
+| `thinking` (`{"type": "enabled", "budget_tokens"/"token_budget": N}`) | Cohere, Xiaomi MiMo, DeepSeek, Kimi, GLM upstreams |
+| `enable_thinking`, `thinking_budget`                       | Qwen, Bailian, vLLM and SGLang servers    |
+| `think` (boolean or level)                                 | Ollama                                    |
+| `chat_template_kwargs.enable_thinking`, `.thinking`, `.reasoning_effort`, `.thinking_budget` | vLLM, SGLang, llama.cpp |
+| `extra_body.google.thinking_config` `thinking_budget`/`thinking_level` (names in any case) | Gemini |
+| Messages `thinking.budget_tokens`                          | Anthropic                                 |
+
+A control that turns reasoning off (`false`, a zero budget,
+`{"type": "disabled"}`) and a level within the ceiling are kept. Anything the
+scale cannot place, such as a token budget or `true`, counts as above the
+ceiling: the gateway drops every client reasoning control and sends the ceiling
+as the effort instead. A Messages `budget_tokens` above the budget the gateway
+itself sends for the ceiling level (5000 for `low`, 10000 for `medium`, 20000
+for `high` and up) is lowered to that budget. Where an adapter fills in a value
+of its own (Anthropic's default `max_tokens` and the room it adds above a
+thinking budget, OpenCode Zen's default effort), that value is kept within the
+ceilings too: a thinking budget shrinks to fit under the capped `max_tokens`,
+and thinking is turned off when not even the minimum budget fits.
 
 Ceilings apply after [virtual model overrides](/features/virtual-models#force-a-reasoning-effort),
 on every attempt, including failover legs, so they also bound an effort or a
 `max_tokens` that a virtual model forces or defaults. They apply to Chat
 Completions, the Responses API, and the Anthropic Messages API; a Messages
 request within the ceilings is still forwarded natively to Anthropic, and one
-above them takes the translated path so it can be lowered. Batches, provider
-passthrough under `/p/`, embeddings, and media endpoints are not rewritten.
+above them takes the translated path so it can be lowered. Embeddings and
+media endpoints are not rewritten.
+
+<Warning>
+Batches and provider passthrough under `/p/` are **not** capped: their bodies
+go upstream as sent. A capped key that may also use batches or `/p/` can
+bypass the policy, so deny those endpoints to keys you cap.
+</Warning>
+
+A policy on `/` binds every request, including those with no user path (the
+master key, or a key without a bound path that sends no header). A credential
+without a bound path chooses its own path through the
+[user path header](/features/user-path) and with it its own subtree's policy,
+so it can step out of a cap set lower in the tree. Bind caps to callers through
+[API keys](/features/user-path#api-keys) with a fixed `user_path`, or set them on `/`.
 
 The **default model** is used only when a Chat Completions, Responses, or
 Messages request (including Messages token counting) names neither a `model`
 nor a `provider`; a model the client names always wins. It is resolved exactly
 like a model the client sent: it may be a [virtual model](/features/virtual-models),
 and it is still checked against the allowlists, so a default the path may not
-use is denied. Paths without a default, and requests without a user path,
-keep getting `400 model is required`.
+use is denied. A request without a user path answers to the default on `/`,
+if any; paths without a default keep getting `400 model is required`.
 
 ## Managing policies
 
