@@ -50,16 +50,17 @@ func rewriteCostSaved(
 		return nil
 	}
 
-	if rewriteCrossesInputPricingTier(effectivePricing, inputTokens, tokensSaved) {
-		return rewriteCostSavedFromPricing(inputTokens, outputTokens, rawData, provider, effectivePricing, tokensSaved)
-	}
-
 	uncached, cached, cacheWrite := EntryInputSegments(UsageLogEntry{
 		InputTokens: inputTokens,
 		Provider:    provider,
 		RawData:     rawData,
 	})
 	inputParts := uncached + cached + cacheWrite
+	// Tiers go by the whole prompt, as in CalculateGranularCost.
+	if rewriteCrossesInputPricingTier(effectivePricing, int(inputParts), tokensSaved) {
+		return rewriteCostSavedFromPricing(inputTokens, outputTokens, rawData, provider, effectivePricing, tokensSaved)
+	}
+
 	if requestInputCost != nil && isFiniteCost(*requestInputCost) && *requestInputCost >= 0 && inputParts > 0 {
 		if tokenInputCost, ok := rewriteTokenInputCost(*requestInputCost, rawData, provider, effectivePricing); ok {
 			saved := tokenInputCost * float64(tokensSaved) / float64(inputParts)

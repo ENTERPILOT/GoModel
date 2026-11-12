@@ -172,6 +172,33 @@ func TestApplyRewriteSavings(t *testing.T) {
 		require.InDelta(t, 0.0036-0.0008, *entry.RewriteCostSaved, 1e-9)
 	})
 
+	t.Run("tier crossing counts cache parts on top of input tokens", func(t *testing.T) {
+		tiered := &core.ModelPricing{
+			InputPerMtok:       new(10.0),
+			CachedInputPerMtok: new(0.5),
+			Tiers: []core.ModelPricingTier{
+				{UpToTokens: new(float64(1000)), InputPerMtok: new(1.0)},
+				{UpToTokens: new(float64(1_000_000)), InputPerMtok: new(3.0)},
+			},
+		}
+		inputCost := 0.000875
+		entry := &UsageEntry{
+			Endpoint:    "/v1/messages",
+			Provider:    "anthropic",
+			InputTokens: 800,
+			InputCost:   &inputCost,
+			RawData:     map[string]any{"cache_read_input_tokens": 150},
+		}
+		ApplyRewriteSavings(entry, 100, tiered)
+		require.NotNil(t, entry.RewriteCostSaved)
+
+		// As forwarded: a 950-token prompt in the $1/Mtok tier,
+		// 800 * 1.0/1M + 150 * 0.5/1M = $0.000875.
+		// As sent: a 1050-token prompt in the $3/Mtok tier,
+		// 900 * 3.0/1M + 150 * 0.5/1M = $0.002775.
+		require.InDelta(t, 0.002775-0.000875, *entry.RewriteCostSaved, 1e-9)
+	})
+
 	t.Run("batch endpoint uses batch input rate", func(t *testing.T) {
 		pricing := &core.ModelPricing{InputPerMtok: new(2.0), BatchInputPerMtok: new(1.0)}
 		entry := &UsageEntry{Endpoint: "/v1/batches", Provider: "openai", InputTokens: 0}

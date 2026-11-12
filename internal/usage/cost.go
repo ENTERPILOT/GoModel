@@ -283,7 +283,14 @@ func CalculateGranularCost(inputTokens, outputTokens int, rawData map[string]any
 	if pricing == nil {
 		return CostResult{}
 	}
-	pricing = pricingForTokenCount(pricing, inputTokens)
+	// Split the cache counts the way EntryInputSegments does, so the cost and
+	// the input breakdown agree on whether the cache is part of inputTokens.
+	uncachedInput, cachedInput, cacheWriteInput := EntryInputSegments(UsageLogEntry{InputTokens: inputTokens, RawData: rawData})
+	promptTokens := uncachedInput + cachedInput + cacheWriteInput
+	cacheInInput := promptTokens == int64(inputTokens)
+	// Pricing tiers go by the whole prompt, which is more than inputTokens
+	// when the cache counts come on top of it.
+	pricing = pricingForTokenCount(pricing, int(promptTokens))
 
 	var inputCost, outputCost float64
 	var hasInput, hasOutput bool
@@ -309,10 +316,6 @@ func CalculateGranularCost(inputTokens, outputTokens int, rawData map[string]any
 	// rawData keys map to the same pricing field (e.g. cached_tokens and prompt_cached_tokens
 	// both map to CachedInputPerMtok).
 	appliedFields := make(map[*float64]bool)
-	// Split the cache counts the way EntryInputSegments does, so the cost and
-	// the input breakdown agree on whether the cache is part of inputTokens.
-	uncachedInput, cachedInput, cacheWriteInput := EntryInputSegments(UsageLogEntry{InputTokens: inputTokens, RawData: rawData})
-	cacheInInput := uncachedInput+cachedInput+cacheWriteInput == int64(inputTokens)
 	for _, m := range tokenCostMappingsForProvider(providerType) {
 		count := extractInt(rawData, m.rawDataKey)
 		if count == 0 {

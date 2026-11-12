@@ -50,6 +50,28 @@ func TestClaudeCacheRowShapes_PriceTheSame(t *testing.T) {
 	}
 }
 
+func TestClaudeCacheRowShapes_SelectTheSamePricingTier(t *testing.T) {
+	pricing := &core.ModelPricing{
+		InputPerMtok:       new(3.0),
+		CachedInputPerMtok: new(0.30),
+		CacheWritePerMtok:  new(3.75),
+		Tiers: []core.ModelPricingTier{
+			{UpToTokens: new(200_000.0), InputPerMtok: new(3.0), CachedInputPerMtok: new(0.30)},
+			{UpToTokens: new(1_000_000.0), InputPerMtok: new(6.0), CachedInputPerMtok: new(0.60)},
+		},
+	}
+	for _, shape := range claudeCacheRowShapes {
+		t.Run(shape.name, func(t *testing.T) {
+			result := CalculateGranularCost(shape.input, 0, shape.raw, shape.provider, pricing)
+
+			// The 350k prompt is past the 200k tier, although the Anthropic
+			// names leave input_tokens at 200k:
+			// 200k * 6.0/1M + 100k * 0.60/1M + 50k * 3.75/1M
+			assertCostNear(t, "InputCost", result.InputCost, 1.4475)
+		})
+	}
+}
+
 func TestClaudeCacheRowShapes_Price1hWritesTheSame(t *testing.T) {
 	pricing := &core.ModelPricing{
 		InputPerMtok:        new(3.0),
