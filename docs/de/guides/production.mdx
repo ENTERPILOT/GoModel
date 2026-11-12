@@ -190,7 +190,11 @@ Volume, beschränken Sie den Zugriff und stufen Sie Backups entsprechend ein.
 - **Header mit Client-Zugangsdaten werden vor dem Persistieren geschwärzt.**
   Mit `LOGGING_LOG_HEADERS=true` werden `Authorization`, `x-api-key`, `Cookie`
   und die übrigen Header mit Zugangsdaten beim Schreiben durch `[REDACTED]`
-  ersetzt, sodass der Audit-Speicher sie nie erhält.
+  ersetzt, sodass der Audit-Speicher sie nie erhält. Dasselbe gilt für jeden
+  Header, dessen Name nach Zugangsdaten aussieht: wenn er auf `token`, `-key`
+  oder `-auth` endet oder `authorization`, `api-key`, `apikey`, `secret`,
+  `password`, `signature` oder `jwt` enthält. `Idempotency-Key` und
+  `Sec-WebSocket-Key` bleiben erhalten.
 - **Setzen Sie `GOMODEL_MASTER_KEY`.** Ist er leer und gibt es keine
   verwalteten Keys, wird jeder Request ohne Authentifizierung zugelassen, und
   `/admin/*` wird als Wiederherstellungspfad bei Aussperrung in die Liste der

@@ -117,7 +117,7 @@ GCP Secret Manager 或 Azure Key Vault 读取 Secret 的功能由 [GoModel Pro](
 
 - **托管 API 密钥**以高熵随机 Secret 的 SHA-256 哈希形式存储，永远无法还原。明文仅在创建时显示一次。这与提供商凭据的处理方式刻意不同。
 - **客户端凭据请求头在持久化之前会被脱敏。** 当设置 `LOGGING_LOG_HEADERS=true` 时，`Authorization`、`x-api-key`、`Cookie`
-  及其他凭据请求头会在写入路径上被替换为 `[REDACTED]`，因此审计存储永远不会收到它们。
+  及其他凭据请求头会在写入路径上被替换为 `[REDACTED]`，因此审计存储永远不会收到它们。名称看起来像凭据的请求头同样会被脱敏：以 `token`、`-key` 或 `-auth` 结尾，或包含 `authorization`、`api-key`、`apikey`、`secret`、`password`、`signature` 或 `jwt`。`Idempotency-Key` 和 `Sec-WebSocket-Key` 会保留。
 - **设置 `GOMODEL_MASTER_KEY`。** 如果它为空且不存在任何托管密钥，所有请求都会在未经认证的情况下放行，并且 `/admin/*`
   会被加入认证跳过列表，作为锁定后的恢复路径。处于这种状态且可从互联网访问的网关，会把完整的 Admin API 交给任何人。
 
