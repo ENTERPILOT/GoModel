@@ -181,6 +181,7 @@ func init() {
 // and its existing rows stay out of RecentWrites.
 func TestSQLStoreAddsWriteStampColumns(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		sqlxtest.SkipDuckDB(t, db, "DuckDB cannot drop a column of an indexed table, and has no table older than the write stamp")
 		ctx := context.Background()
 		store, err := newSQLStoreForTest(t, db, 0)
 		require.NoError(t, err)
