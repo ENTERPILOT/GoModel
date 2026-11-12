@@ -1,0 +1,23 @@
+# Paths that decide what gets built, released, or run on a user's machine.
+# A change here needs a code owner's review once branch protection on main
+# requires it.
+
+# CI, release, and repository automation
+/.github/ @SantiagoDePolonia
+
+# Build and release definitions
+Dockerfile* @SantiagoDePolonia
+/.goreleaser.yaml @SantiagoDePolonia
+/Makefile @SantiagoDePolonia
+/helm/ @SantiagoDePolonia
+
+# Dependency manifests and lockfiles
+/go.mod @SantiagoDePolonia
+/go.sum @SantiagoDePolonia
+/web/dashboard/package.json @SantiagoDePolonia
+/web/dashboard/package-lock.json @SantiagoDePolonia
+
+# Installer scripts: served from main and piped straight into a shell
+/docs/install/ @SantiagoDePolonia
+
+/SECURITY.md @SantiagoDePolonia
