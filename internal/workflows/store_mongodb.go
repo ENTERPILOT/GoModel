@@ -129,6 +129,8 @@ func (s *MongoDBStore) Create(ctx context.Context, input CreateInput) (*Version,
 	// transaction (standalone server) a failed insert, such as a concurrent
 	// create taking the same version number, leaves the scope untouched. Only
 	// an interruption between the two updates leaves it with no active version.
+	// Only older versions are deactivated, so a slower concurrent create cannot
+	// replace a newer active version: its activation fails on the unique index.
 	var created *Version
 	err = storage.MongoTransaction(ctx, session, "create workflow", func(sessionCtx context.Context) error {
 		created = nil
@@ -164,7 +166,7 @@ func (s *MongoDBStore) Create(ctx context.Context, input CreateInput) (*Version,
 
 		if input.Activate {
 			if _, err := s.collection.UpdateMany(sessionCtx,
-				bson.D{{Key: "scope_key", Value: scopeKey}, {Key: "active", Value: true}, {Key: "_id", Value: bson.D{{Key: "$ne", Value: version.ID}}}},
+				bson.D{{Key: "scope_key", Value: scopeKey}, {Key: "active", Value: true}, {Key: "version", Value: bson.D{{Key: "$lt", Value: version.Version}}}},
 				bson.D{{Key: "$set", Value: bson.D{{Key: "active", Value: false}}}},
 			); err != nil {
 				return fmt.Errorf("deactivate current workflow version: %w", err)
