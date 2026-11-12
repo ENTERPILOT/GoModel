@@ -11,7 +11,7 @@ keywords: ["Hetzner", "实验性", "推理", "提供商配置", "experimental", 
   更改模型、限制乃至端点本身。
 </Warning>
 
-Hetzner Inference 是一个兼容 OpenAI 的 REST API，地址为 `https://inference.hetzner.com/api/v1`。
+Hetzner Inference 是一个兼容 OpenAI 的 REST API，地址为 `https://inference.hetzner.com/v1`。
 GoModel 通过共享的 OpenAI 适配器路由聊天、模型列表和透传请求。`/v1/responses` 端点会通过
 Chat Completions 进行转换。不支持文件、批处理和嵌入，因为 Hetzner 没有提供 `/v1/embeddings` 端点。
 嵌入请求会以带类型的 “not supported” 错误快速失败，不会发起任何上游调用。
@@ -37,14 +37,14 @@ HETZNER_API_KEY=...
 providers:
   hetzner:
     type: hetzner
-    base_url: "https://inference.hetzner.com/api/v1"
+    base_url: "https://inference.hetzner.com/v1"
     api_key: "${HETZNER_API_KEY}"
 ```
 
 您还可以通过以下变量覆盖基础 URL 和模型列表：
 
 ```bash
-HETZNER_BASE_URL=https://inference.hetzner.com/api/v1
+HETZNER_BASE_URL=https://inference.hetzner.com/v1
 HETZNER_MODELS=Qwen/Qwen3.6-35B-A3B-FP8
 ```
 
@@ -59,7 +59,7 @@ HETZNER_MODELS=Qwen/Qwen3.6-35B-A3B-FP8
 在实验期间，模型目录会不断变化。请查询实时列表，而不是依赖文档快照：
 
 ```bash
-curl -s https://inference.hetzner.com/api/v1/models \
+curl -s https://inference.hetzner.com/v1/models \
   -H "Authorization: Bearer $HETZNER_API_KEY"
 ```
 

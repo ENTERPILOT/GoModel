@@ -68,6 +68,11 @@ connections, so a slow dashboard query does not hold up the flushes. A read can
 miss a write that commits while it runs; the next read sees it. An in-memory
 database (`:memory:`) has no second pool and reads through the write connection.
 
+The connection uses a 64 MiB page cache and memory-maps up to 256 MiB of the
+database file, and GoModel refreshes the query planner statistics at startup and
+hourly. Mapped pages are reclaimable file cache, but container memory metrics may
+count them.
+
 For Postgres, `POSTGRES_MAX_CONNS` defaults to `10`. Raise it first if you run
 high concurrency with budgets or rate limits enabled.
 
@@ -421,7 +426,8 @@ coordinate across instances.
 | Circuit breakers | In-memory, per process | Each replica learns an outage separately, so upstream sees up to `N x failure_threshold` failures before any breaker opens. |
 | [Session affinity](/features/session-keeping) pins | In-memory, per instance | Sessions stick per replica, not globally, unless the load balancer is sticky. |
 | [Live logs](/advanced/admin-endpoints#admin-dashboard) | Local events in memory, other replicas' from the database | A dashboard sees its own replica's requests instantly and every other replica's typically within 7 seconds, once they are persisted. See [live logs across replicas](#live-logs-across-replicas). |
-| MCP downstream sessions | Durable (database) | A session opened on one replica continues on any other, so [MCP](/features/mcp-gateway#sessions-across-replicas) clients need no sticky sessions. After a `DELETE`, every replica refuses its requests within about 2 seconds; an open `GET` stream is not closed early. A response stream in flight stays on the replica serving it. |
+| MCP downstream sessions | Durable (database) | A session opened on one replica continues on any other, so [MCP](/features/mcp-gateway#sessions-across-replicas) clients need no sticky sessions. After a `DELETE`, every replica refuses its requests within about 2 seconds; an open `GET` stream is not closed early. A `DELETE` that arrives while the database cannot be written ends the session only on the replica that receives it; until its record expires, up to 30 minutes later, the same client can still resume it on another replica, and the resumed session continues as usual. A response stream in flight stays on the replica serving it. |
+| [MCP OAuth](/features/mcp-gateway#sign-in-with-oauth) sign-in | Pending sign-ins in memory, per instance; tokens durable (database) | The dashboard sign-in callback must reach the replica that started it, so route `/admin` with session affinity while signing in. Stored and refreshed tokens are shared with every replica through the database. |
 | Provider request health | In-memory, per instance | Dashboard provider status reflects the replica that answered. |
 
 The one that surprises people is rate limits: admission is in memory, so a
@@ -464,8 +470,8 @@ Requests served by another replica:
 - are slotted into the list by request time, below anything newer.
 
 Under heavy traffic, at most 200 audit and 200 usage entries from other
-replicas are streamed per poll, the newest first. The rest are still in the
-list after a refresh. A dashboard that reconnects, or a replica whose reads
+replicas are streamed per poll; when there are more, the newest 200 are
+selected. The rest are still in the list after a refresh. A dashboard that reconnects, or a replica whose reads
 failed for a while, catches up on what the other replicas persisted in the
 meantime, up to 5 minutes back and within the same 200-entry limit per poll. Replica clocks should agree within a few
 seconds, which NTP gives you.
@@ -566,14 +572,20 @@ Two further points at volume:
 
 - **Usage and audit writes are buffered and dropped, not blocked, when the
   buffer fills.** A burst or a slow database can silently lose usage entries,
-  which means lost cost data and under-charged budgets. The only signal is a
-  `usage log buffer full` warning in the logs, so alert on it.
+  which means lost cost data and under-charged budgets. Alert on
+  `gomodel_usage_entries_dropped_total` (see
+  [Alerting on Lost Usage](/guides/prometheus-metrics#alerting-on-lost-usage)),
+  or, without metrics, on the `usage log buffer full`,
+  `usage logger closed` and `failed to write usage batch` log messages. A
+  dropped audit entry logs `audit log buffer full`.
 - **Budget checks query the usage table on every request.** Keep
   `USAGE_RETENTION_DAYS` tight when budgets are enabled, and prefer Postgres
   over SQLite at sustained high request rates.
 
 Retention deletes rows but does not shrink a SQLite file. Vacuum it separately
-if the file size matters.
+if the file size matters. SQLite truncates the WAL file to 64 MiB when it
+resets the WAL; a long-lived reader can delay that reset and leave the file
+larger.
 
 ## Observability
 
@@ -638,7 +650,7 @@ if the file size matters.
 - Point readiness at `/health/ready` and set
   `terminationGracePeriodSeconds` above 30.
 - Enable metrics and alert on `gomodel_circuit_breaker_state` and on
-  `usage log buffer full`.
+  `gomodel_usage_entries_dropped_total`.
 - For air-gapped installs, set `GOMODEL_OFFLINE=true`, then ship the model
   catalog as a file or declare model pricing in config so cost tracking and
   budgets keep working.

@@ -329,6 +329,7 @@
                             "providers/kimicode",
                             "providers/hetzner",
                             "providers/edenai",
+                            "providers/mistral",
                             {
                                 "group": "Cloud Platforms",
                                 "icon": "cloud",
@@ -514,6 +515,7 @@
                             "de/providers/kimicode",
                             "de/providers/hetzner",
                             "de/providers/edenai",
+                            "de/providers/mistral",
                             {
                                 "group": "Cloud-Plattformen",
                                 "icon": "cloud",
@@ -691,6 +693,7 @@
                             "zh/providers/kimicode",
                             "zh/providers/hetzner",
                             "zh/providers/edenai",
+                            "zh/providers/mistral",
                             {
                                 "group": "云平台",
                                 "icon": "cloud",
@@ -868,6 +871,7 @@
                             "pl/providers/kimicode",
                             "pl/providers/hetzner",
                             "pl/providers/edenai",
+                            "pl/providers/mistral",
                             {
                                 "group": "Platformy chmurowe",
                                 "icon": "cloud",

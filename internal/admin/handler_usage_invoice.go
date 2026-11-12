@@ -15,19 +15,22 @@ import (
 )
 
 // invoiceCSVHeader is the stable column order of the CSV invoice export.
+// New columns go at the end, so positional readers keep working.
 var invoiceCSVHeader = []string{
 	"row_type", "period_start", "period_end", "currency", "customer", "model", "provider",
 	"requests", "input_tokens", "output_tokens", "provider_cost", "billed_cost", "effective_markup_percent",
+	"time_zone",
 }
 
 // UsageInvoice handles GET /admin/usage/invoice
 //
 // @Summary      Export billed usage as per-customer invoices
-// @Description  Returns billed usage for the period, one block of model/provider line items per customer user path, with subtotals and a grand total. Amounts are USD. With parent, each direct child of that user path is one customer (usage on the parent itself stays under the parent); without it every user path is its own customer. Requests, tokens and provider cost cover provider-served requests; billed cost also includes billed response-cache hits. CSV rows carry row_type item, subtotal or total. Requires a GoModel Pro license with the billing entitlement and pricing.markups_enabled.
+// @Description  Returns billed usage for the period, one block of model/provider line items per customer user path, with subtotals and a grand total. Amounts are USD. With parent, each direct child of that user path is one customer (usage on the parent itself stays under the parent); without it every user path is its own customer. Requests, tokens and provider cost cover provider-served requests; billed cost also includes billed response-cache hits. The period's days are read in the time zone of the X-GoModel-Timezone header (UTC without it, as API clients send), reported as time_zone. CSV rows carry row_type item, subtotal or total. Requires a GoModel Pro license with the billing entitlement and pricing.markups_enabled.
 // @Tags         admin
 // @Produce      text/csv
 // @Produce      json
 // @Security     BearerAuth
+// @Param        X-GoModel-Timezone  header  string  false  "IANA time zone the period's days are read in, e.g. Europe/Warsaw (default UTC)"
 // @Param        format      query     string  false  "Export format: csv (default, as an attachment) or json"
 // @Param        parent      query     string  false  "Bill each direct child of this user path as one customer, e.g. /customers"
 // @Param        days        query     int     false  "Number of days (default 30)"
@@ -107,6 +110,7 @@ func invoiceCSV(invoice *usage.Invoice) ([]byte, error) {
 			csvText(customer), csvText(model), csvText(provider),
 			strconv.Itoa(a.Requests), strconv.FormatInt(a.InputTokens, 10), strconv.FormatInt(a.OutputTokens, 10),
 			csvDecimal(a.ProviderCost), csvDecimal(a.BilledCost), csvDecimal(a.EffectiveMarkupPercent),
+			invoice.TimeZone,
 		}
 	}
 	records := [][]string{invoiceCSVHeader}
@@ -141,9 +145,29 @@ func csvText(value string) string {
 	return value
 }
 
+// invoiceFilename names the export after its period, plus the time zone
+// when it is not UTC: the same dates read in another zone are another
+// period, and the two files must not look alike.
 func invoiceFilename(invoice *usage.Invoice) string {
-	if invoice.StartDate == "" || invoice.EndDate == "" {
-		return "gomodel-invoice.csv"
+	name := "gomodel-invoice"
+	if invoice.StartDate != "" && invoice.EndDate != "" {
+		name += "-" + invoice.StartDate + "-to-" + invoice.EndDate
 	}
-	return "gomodel-invoice-" + invoice.StartDate + "-to-" + invoice.EndDate + ".csv"
+	if invoice.TimeZone != "" && invoice.TimeZone != "UTC" {
+		name += "-" + filenameSafe(invoice.TimeZone)
+	}
+	return name + ".csv"
+}
+
+// filenameSafe keeps letters, digits, "_", "+" and "-" of a time zone name and
+// turns every other byte into "-", so the name is safe in a quoted
+// Content-Disposition filename: Europe/Warsaw becomes Europe-Warsaw.
+func filenameSafe(zone string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '+', r == '-':
+			return r
+		}
+		return '-'
+	}, zone)
 }

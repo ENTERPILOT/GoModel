@@ -3102,7 +3102,7 @@ const docTemplate = `{
         },
         "/admin/usage/invoice": {
             "get": {
-                "description": "Returns billed usage for the period, one block of model/provider line items per customer user path, with subtotals and a grand total. Amounts are USD. With parent, each direct child of that user path is one customer (usage on the parent itself stays under the parent); without it every user path is its own customer. Requests, tokens and provider cost cover provider-served requests; billed cost also includes billed response-cache hits. CSV rows carry row_type item, subtotal or total. Requires a GoModel Pro license with the billing entitlement and pricing.markups_enabled.",
+                "description": "Returns billed usage for the period, one block of model/provider line items per customer user path, with subtotals and a grand total. Amounts are USD. With parent, each direct child of that user path is one customer (usage on the parent itself stays under the parent); without it every user path is its own customer. Requests, tokens and provider cost cover provider-served requests; billed cost also includes billed response-cache hits. The period's days are read in the time zone of the X-GoModel-Timezone header (UTC without it, as API clients send), reported as time_zone. CSV rows carry row_type item, subtotal or total. Requires a GoModel Pro license with the billing entitlement and pricing.markups_enabled.",
                 "produces": [
                     "text/csv",
                     "application/json"
@@ -3112,6 +3112,12 @@ const docTemplate = `{
                 ],
                 "summary": "Export billed usage as per-customer invoices",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "IANA time zone the period's days are read in, e.g. Europe/Warsaw (default UTC)",
+                        "name": "X-GoModel-Timezone",
+                        "in": "header"
+                    },
                     {
                         "type": "string",
                         "description": "Export format: csv (default, as an attachment) or json",
@@ -10350,6 +10356,10 @@ const docTemplate = `{
                     "description": "StrategyPlugin names the routing-strategy plugin for strategy \"plugin\";\nStrategyConfig holds that plugin's route-scoped settings, validated\nagainst its schema (see GET /admin/plugins, route_fields).",
                     "type": "string"
                 },
+                "target": {
+                    "description": "Target is the config file's name for target_model, accepted so a body\nwritten after the YAML does not silently become an access policy.",
+                    "type": "string"
+                },
                 "target_model": {
                     "type": "string"
                 },
@@ -13858,6 +13868,9 @@ const docTemplate = `{
                 "start_date": {
                     "type": "string"
                 },
+                "time_zone": {
+                    "type": "string"
+                },
                 "total": {
                     "$ref": "#/definitions/usage.InvoiceAmounts"
                 }
@@ -14767,7 +14780,7 @@ var SwaggerInfo = &swag.Spec{
 	BasePath:         "/",
 	Schemes:          []string{"http"},
 	Title:            "GoModel API",
-	Description:      "AI gateway routing requests to multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, Fireworks AI, Meta, OpenRouter, Kilo AI, DeepSeek, Z.ai, xAI, MiniMax, Xiaomi MiMo, OpenCode Go, Oracle, Ollama, Bailian). Drop-in OpenAI-compatible API.",
+	Description:      "AI gateway routing requests to multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, Fireworks AI, Meta, OpenRouter, Kilo AI, DeepSeek, Z.ai, xAI, MiniMax, Xiaomi MiMo, Mistral AI, OpenCode Go, Oracle, Ollama, Bailian). Drop-in OpenAI-compatible API.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

@@ -150,3 +150,13 @@ func New(ctx context.Context, cfg Config) (Storage, error) {
 		return nil, fmt.Errorf("unknown storage type: %s (valid: sqlite, postgresql, mongodb)", cfg.Type)
 	}
 }
+
+// StartMaintenance starts the backend's periodic upkeep, if it has any; Close
+// stops it. Call it once every subsystem has created its schema. Only SQLite
+// has upkeep: it keeps its query planner statistics fresh, which PostgreSQL
+// and MongoDB do on their own.
+func StartMaintenance(store Storage) {
+	if m, ok := store.(interface{ startMaintenance() }); ok {
+		m.startMaintenance()
+	}
+}

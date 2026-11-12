@@ -412,6 +412,136 @@ func TestPluginErrorsUseInternalErrorType(t *testing.T) {
 	}
 }
 
+// Every hook can call Headers.Upstream.Set without allocating the map, and a
+// later mutator adds to what an earlier step wrote instead of replacing it.
+func TestRunUpstreamHeadersAccumulateAcrossSteps(t *testing.T) {
+	setter := func(name string, mutates bool, header string) *Instance {
+		return newTestInstance(&fakePlugin{name: name, mutates: mutates, onPrompt: func(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+			x.Headers.Upstream.Set(header, name)
+			return pluginapi.Allow(), nil
+		}}, InstanceSpec{})
+	}
+	chain, err := BuildChain(pluginapi.KindPrompt, []Ref{
+		{setter("first", true, "X-First"), 10},
+		{setter("reader", false, "X-Reader"), 20},
+		{setter("second", true, "X-Second"), 30},
+	})
+	require.NoError(t, err)
+
+	x := withPromptText(newExchange(), "hi")
+	outcome, err := chain.RunPrompt(context.Background(), x)
+	require.NoError(t, err)
+	require.Equal(t, pluginapi.ActionAllow, outcome.Decision.Action, "decision = %+v", outcome.Decision)
+
+	assert.Equal(t, http.Header{
+		"X-First":  {"first"},
+		"X-Reader": {"reader"},
+		"X-Second": {"second"},
+	}, x.Headers.Upstream)
+}
+
+// Readers merge back only the upstream headers they changed: a reader that
+// left a header alone must not overwrite, with its stale copy, the value
+// another reader of the same step set, whatever order the copies merge in.
+func TestRunReadersMergeOnlyTheUpstreamHeadersTheyChanged(t *testing.T) {
+	hook := func(name string, mutates bool, edit func(http.Header)) *Instance {
+		return newTestInstance(&fakePlugin{name: name, mutates: mutates, onPrompt: func(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+			edit(x.Headers.Upstream)
+			return pluginapi.Allow(), nil
+		}}, InstanceSpec{})
+	}
+	for _, order := range [][]string{{"setter", "idle"}, {"idle", "setter"}} {
+		t.Run(order[0]+" first", func(t *testing.T) {
+			readers := map[string]*Instance{
+				"setter": hook("setter", false, func(h http.Header) {
+					h.Set("X-Tenant", "acme")
+					h.Del("X-Drop")
+				}),
+				"idle": hook("idle", false, func(http.Header) {}),
+			}
+			defaults := hook("defaults", true, func(h http.Header) {
+				h.Set("X-Tenant", "default")
+				h.Set("X-Drop", "1")
+			})
+			chain, err := BuildChain(pluginapi.KindPrompt, []Ref{
+				{defaults, 10},
+				{readers[order[0]], 20},
+				{readers[order[1]], 20},
+			})
+			require.NoError(t, err)
+
+			x := withPromptText(newExchange(), "hi")
+			_, err = chain.RunPrompt(context.Background(), x)
+			require.NoError(t, err)
+
+			assert.Equal(t, http.Header{"X-Tenant": {"acme"}}, x.Headers.Upstream)
+		})
+	}
+}
+
+// A later hook's write wins over an earlier one whatever spelling either used:
+// names are canonicalized after every hook, so a raw "x-tenant" written first
+// is replaced by a later Set("X-Tenant") instead of shadowing it. The raw
+// write may come from a mutator, a single reader, or concurrent readers; each
+// takes its own path.
+func TestRunUpstreamHeaderLaterWriteWinsAcrossSpellings(t *testing.T) {
+	hook := func(name string, mutates bool, edit func(http.Header)) *Instance {
+		return newTestInstance(&fakePlugin{name: name, mutates: mutates, onPrompt: func(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+			edit(x.Headers.Upstream)
+			return pluginapi.Allow(), nil
+		}}, InstanceSpec{})
+	}
+	raw := func(h http.Header) { h["x-tenant"] = []string{"early"} }
+	idle := func(http.Header) {}
+
+	tests := []struct {
+		name  string
+		early []Ref
+	}{
+		{name: "mutator", early: []Ref{{hook("raw", true, raw), 10}}},
+		{name: "single reader", early: []Ref{{hook("raw", false, raw), 10}}},
+		{name: "concurrent readers", early: []Ref{{hook("raw", false, raw), 10}, {hook("idle", false, idle), 10}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			refs := append(tt.early, Ref{hook("canonical", true, func(h http.Header) { h.Set("X-Tenant", "late") }), 20})
+			chain, err := BuildChain(pluginapi.KindPrompt, refs)
+			require.NoError(t, err)
+
+			state := NewRequestState()
+			x := withPromptText(state.NewExchange(context.Background(), pluginapi.Meta{}), "hi")
+			_, err = chain.RunPrompt(context.Background(), x)
+			require.NoError(t, err)
+			state.Finish(x)
+
+			assert.Equal(t, http.Header{"X-Tenant": {"late"}}, x.Headers.Upstream)
+			assert.Equal(t, http.Header{"X-Tenant": {"late"}}, state.UpstreamHeaders())
+		})
+	}
+}
+
+// A reader that adds a header with no value keeps it, as a mutator does: the
+// key was absent before the step, so it is an edit even though nil and empty
+// compare equal.
+func TestRunReaderKeepsAnAddedEmptyUpstreamHeader(t *testing.T) {
+	for name, value := range map[string][]string{"nil": nil, "empty": {}} {
+		t.Run(name, func(t *testing.T) {
+			reader := newTestInstance(&fakePlugin{name: "reader", onPrompt: func(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+				x.Headers.Upstream["X-Empty"] = value
+				return pluginapi.Allow(), nil
+			}}, InstanceSpec{})
+			chain, err := BuildChain(pluginapi.KindPrompt, []Ref{{reader, 10}})
+			require.NoError(t, err)
+
+			x := withPromptText(newExchange(), "hi")
+			_, err = chain.RunPrompt(context.Background(), x)
+			require.NoError(t, err)
+
+			assert.Contains(t, x.Headers.Upstream, "X-Empty")
+		})
+	}
+}
+
 // A step with one reader takes its own path, which skips the goroutine and
 // the per-reader slices. It must merge back exactly what the concurrent path
 // does: values, response headers, and request headers the reader set,
