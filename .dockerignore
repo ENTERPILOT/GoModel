@@ -65,6 +65,21 @@ prometheus.yml
 config/config.yaml
 
 # ===================
+# Not read by the image build
+# ===================
+# The dashboard is built outside Docker (`make frontend`) into
+# internal/admin/dashboard/static/dist, which stays in the context; its sources
+# and node_modules are not needed.
+web/
+# Docs are not embedded in the binary. The example plugins stay: they are Go
+# packages the plugin-builder stage of Dockerfile.plugins can build in place.
+docs/
+!docs/example_plugins/
+# Local plugin builds and git worktrees.
+plugins/
+.worktrees/
+
+# ===================
 # Miscellaneous
 # ===================
 .cache/
