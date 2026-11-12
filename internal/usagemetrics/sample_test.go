@@ -116,3 +116,16 @@ func TestSampleEmpty(t *testing.T) {
 		})
 	}
 }
+
+// Label and attribute values must be valid UTF-8: Prometheus panics on one
+// that is not, and OTLP fails the whole export.
+func TestNewSampleReplacesInvalidUTF8(t *testing.T) {
+	sample := newSample(&usage.UsageEntry{
+		ProviderName: "openai\xff", Provider: "openai\xfe", Model: " gpt\xff4 ", RoutedModel: "\xffalias", InputTokens: 1,
+	})
+
+	assert.Equal(t, "openai\uFFFD", sample.Provider)
+	assert.Equal(t, "openai\uFFFD", sample.ProviderType)
+	assert.Equal(t, "gpt\uFFFD4", sample.Model)
+	assert.Equal(t, "\uFFFDalias", sample.RequestModel)
+}

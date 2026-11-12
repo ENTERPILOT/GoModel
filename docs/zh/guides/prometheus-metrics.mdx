@@ -367,9 +367,9 @@ sum(increase(gomodel_provider_cost_usd_total[1h])) by (provider)
 
 | 设置                            | 标签             | 取值                                                                 |
 | ------------------------------- | ---------------- | -------------------------------------------------------------------- |
-| `METRICS_CALLER_USER_PATH`      | `user_path`      | [用户路径](/zh/features/user-path)，截断为 `METRICS_CALLER_USER_PATH_DEPTH` 段 |
+| `METRICS_CALLER_USER_PATH`      | `user_path`      | [用户路径](/zh/features/user-path)，截断为 `METRICS_CALLER_USER_PATH_DEPTH` 段；请求没有用户路径时为 `/` |
 | `METRICS_CALLER_AUTH_KEY`       | `auth_key`       | 托管 API Key 的名称。使用主密钥时为空                                |
-| `METRICS_CALLER_REQUEST_LABELS` | `request_labels` | 请求的标签，排序后以逗号分隔（`prod,team-a`）                        |
+| `METRICS_CALLER_REQUEST_LABELS` | `request_labels` | 请求的标签，排序后以逗号分隔（`prod,team-a`）。标签内的逗号写作 `%2C`，百分号写作 `%25` |
 
 ```bash
 METRICS_ENABLED=true
@@ -384,13 +384,13 @@ sum(rate(gomodel_tokens_total[5m])) by (auth_key) * 60
 sum(rate(gomodel_caller_requests_total{status_type="error"}[5m])) by (auth_key)
   / sum(rate(gomodel_caller_requests_total[5m])) by (auth_key)
 
-# 某个团队标签今天的计费成本，无论请求还带有哪些其他标签
+# 某个团队标签最近 24 小时的计费成本，无论请求还带有哪些其他标签
 sum(increase(gomodel_billed_cost_usd_total{request_labels=~"(.*,)?team-a(,.*)?"}[24h]))
 ```
 
 这些标签出现在四个 Token 与成本指标上，以及 `gomodel_caller_requests_total` 上。后者是带有 `provider`、`model` 和 `status_type` 的请求计数器，只有在启用了某个调用方维度时才存在。它们**不会**加到 `gomodel_requests_total`、`gomodel_request_duration_seconds` 直方图或进行中请求的 Gauge 上：每个调用方取值都会使它们的每条序列成倍增加，而直方图的每个 bucket 都是一条序列。
 
-关闭的维度，或某个请求没有取值的维度，会导出为空标签，Prometheus 将其视为不存在。API Key 的密钥和 ID 永远不会被导出；已不存在的 Key 会上报为 `{unknown}`。
+关闭的维度，或某个请求没有取值的维度，会导出为空标签，Prometheus 将其视为不存在。用户路径维度启用后总有取值：没有用户路径的请求上报为 `/`。API Key 的密钥和 ID 永远不会被导出；已不存在的 Key 会上报为 `{unknown}`。
 
 ### 控制基数
 
@@ -398,7 +398,7 @@ sum(increase(gomodel_billed_cost_usd_total{request_labels=~"(.*,)?team-a(,.*)?"}
 
 - **用户路径深度。** 默认深度为 2 时，`/team/alice/laptop` 上报为 `/team/alice`。调低可以聚合得更粗；只有在更深层级取值很少时才调高。
 - **取值上限。** 每个维度保留它最先看到的 `METRICS_CALLER_MAX_VALUES`（默认 100）个不同取值。上限按维度分别计算：三个维度全部开启时最多保留 300 个取值。之后的取值共用一条序列：`{other}`（用户路径为 `/{other}`）。已接纳的取值会保留各自的序列，直到 GoModel 重启。
-- **取值长度。** 超过 256 字节的取值，或写法与保留名称（`{other}`、`/{other}`、`{unknown}`）相同的取值，上报为 `{other}`，且不占用上限名额。
+- **被拒绝的取值。** 超过 256 字节的取值、不是有效 UTF-8 的取值，或写法与保留名称（`{other}`、`/{other}`、`{unknown}`）相同的取值，上报为 `{other}`（用户路径为 `/{other}`），且不占用上限名额。
 - **请求标签按标签集合取值。** `prod,team-a` 和 `team-a` 是不同的取值，因此标签集合消耗上限的速度远快于标签本身：一个客户端任意组合 7 个标签即可发送 127 种不同集合，单独就能占满默认上限。此后每个新集合，无论是否正当，都会上报为 `{other}`，直到 GoModel 重启。如果客户端会发送任意标签，请保持此维度关闭。
 - **最坏情况。** 每个维度最多贡献其上限个取值，外加 `{other}` 和空值（API 密钥还有 `{unknown}`）。三个维度全部以默认上限开启时，单个提供商和模型在每种 token 类型下最多可达 102 × 103 × 102 ≈ 107 万条序列。只有实际出现的组合才会导出，但仍建议逐个开启维度，并把 `METRICS_CALLER_MAX_VALUES` 调低到预期的取值数量。
 

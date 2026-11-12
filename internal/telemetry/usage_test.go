@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"testing"
+	"unicode/utf8"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/metric"
@@ -172,6 +173,35 @@ func TestUsageRecorderExportsStreamingUsageWithCallerAttributes(t *testing.T) {
 	assert.Equal(t, "/team/alice", attrs["gomodel.user_path"])
 	assert.Equal(t, "ci-pipeline", attrs["gomodel.auth_key.name"])
 	assert.Equal(t, "prod,team-a", attrs["gomodel.request.labels"])
+}
+
+// OTLP refuses a string that is not valid UTF-8 and fails the whole export
+// with it, so a caller value from a raw request header must never reach an
+// attribute as it came.
+func TestUsageRecorderExportsOnlyValidUTF8(t *testing.T) {
+	usagemetrics.ResetCallerValues()
+	t.Cleanup(usagemetrics.ResetCallerValues)
+	recorder, reader := newTestUsageRecorder(t)
+	callers := usagemetrics.NewCallers(
+		config.MetricsCallerDimensionsConfig{UserPath: true, AuthKey: true, RequestLabels: true},
+		func(string) string { return "ci\xff" },
+	)
+	usagemetrics.NewTap(discardLogger{}, callers, recorder).Write(&usage.UsageEntry{
+		ProviderName: "openai\xff", Provider: "openai\xff", Model: "gpt\xff", RoutedModel: "alias\xff",
+		Endpoint: "/v1/chat/completions", InputTokens: 10,
+		UserPath: "/team/\xff", AuthKeyID: "key-1", Labels: []string{"prod", "team\xff"},
+	})
+
+	input, ok := tokenUsage(t, reader)["input"]
+	require.True(t, ok)
+	attrs := attributeMap(input.Attributes.ToSlice())
+	for key, value := range attrs {
+		assert.True(t, utf8.ValidString(value), "%s = %q", key, value)
+	}
+	assert.Equal(t, usagemetrics.OtherUserPath, attrs["gomodel.user_path"])
+	assert.Equal(t, usagemetrics.OtherValue, attrs["gomodel.auth_key.name"])
+	assert.Equal(t, usagemetrics.OtherValue, attrs["gomodel.request.labels"])
+	assert.Equal(t, "gpt\uFFFD", attrs["gen_ai.response.model"])
 }
 
 func TestUsageRecorderKeepsProviderAndBilledCostApart(t *testing.T) {

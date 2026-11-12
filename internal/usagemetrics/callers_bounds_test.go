@@ -18,8 +18,8 @@ func allDimensions(maxValues int) config.MetricsCallerDimensionsConfig {
 	}
 }
 
-// Over-long and reserved values go to the overflow bucket without taking a
-// slot, so the two legitimate values after them are still admitted.
+// Over-long, reserved, and non-UTF-8 values go to the overflow bucket without
+// taking a slot, so the two legitimate values after them are still admitted.
 func TestCallersRejectOverlongAndReservedValues(t *testing.T) {
 	long := strings.Repeat("x", MaxValueBytes+1)
 	tests := []struct {
@@ -31,6 +31,7 @@ func TestCallersRejectOverlongAndReservedValues(t *testing.T) {
 		{name: "over-long", userPath: "/" + long, keyName: long, labels: []string{long}},
 		{name: "spoofed overflow", userPath: OtherUserPath, keyName: OtherValue, labels: []string{OtherValue}},
 		{name: "spoofed unknown", userPath: "/" + UnknownAuthKey, keyName: UnknownAuthKey, labels: []string{UnknownAuthKey}},
+		{name: "invalid UTF-8", userPath: "/team\xff", keyName: "ci\xff", labels: []string{"prod", "team\xff"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -120,4 +121,31 @@ func TestCallersResolveRacesReset(t *testing.T) {
 		}
 	})
 	wg.Wait()
+}
+
+// A comma in the value always separates two labels, so no two label sets
+// share a value.
+func TestJoinLabelsIsUnambiguous(t *testing.T) {
+	tests := []struct {
+		name   string
+		labels []string
+		want   string
+	}{
+		{name: "no labels", want: ""},
+		{name: "one label", labels: []string{"prod"}, want: "prod"},
+		{name: "sorted and deduplicated", labels: []string{"team-a", "prod", " prod "}, want: "prod,team-a"},
+		{name: "two labels", labels: []string{"a", "b"}, want: "a,b"},
+		{name: "one label with a comma", labels: []string{"a,b"}, want: "a%2Cb"},
+		{name: "a label spelled like an escaped comma", labels: []string{"a%2Cb"}, want: "a%252Cb"},
+		{name: "sorted before escaping", labels: []string{"b", "a,c"}, want: "a%2Cc,b"},
+	}
+	seen := map[string]string{}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := joinLabels(tt.labels)
+			assert.Equal(t, tt.want, got)
+			assert.Empty(t, seen[got], "another label set has the same value")
+			seen[got] = tt.name
+		})
+	}
 }

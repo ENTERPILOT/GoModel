@@ -1,9 +1,12 @@
 package usagemetrics
 
-import "sync"
+import (
+	"sync"
+	"unicode/utf8"
+)
 
 // Overflow buckets for dimension values seen after the cap is reached, or
-// that are too long or reserved.
+// that are too long, reserved, or not valid UTF-8.
 const (
 	OtherValue    = "{other}"
 	OtherUserPath = "/" + OtherValue
@@ -43,13 +46,15 @@ type valueLimit struct {
 // admit returns value while fewer than limit distinct values are in use, and
 // overflow afterwards. An admitted value keeps its own series; the empty
 // value means "no value" and is never counted. A value longer than
-// MaxValueBytes, or spelled like a reserved name, is overflow and takes no
-// slot.
+// MaxValueBytes, spelled like a reserved name, or not valid UTF-8 is overflow
+// and takes no slot. Caller values come from raw request headers, and
+// Prometheus panics on a label value that is not UTF-8, while OTLP fails the
+// whole export.
 func (l *valueLimit) admit(value, overflow string, limit int) string {
 	if value == "" {
 		return ""
 	}
-	if len(value) > MaxValueBytes || reserved(value) {
+	if len(value) > MaxValueBytes || reserved(value) || !utf8.ValidString(value) {
 		return overflow
 	}
 	l.mu.RLock()

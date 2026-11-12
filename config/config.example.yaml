@@ -395,15 +395,19 @@ rate_limits:
 metrics:
   enabled: false
   endpoint: "/metrics"
-  # Who made the request, on the token, cost, and per-caller request metrics.
-  # Applies to the Prometheus and the OpenTelemetry metrics. All off by
-  # default: each dimension multiplies the exported series by its distinct values.
+  # Who made the request, on the token and cost metrics (Prometheus and
+  # OpenTelemetry alike) and on the Prometheus per-caller request counter. All
+  # off by default: each dimension multiplies the exported series by its
+  # distinct values.
   caller_dimensions:
     user_path: false # the user path, cut to user_path_depth segments
-    user_path_depth: 2 # "/team/alice/laptop" is reported as "/team/alice"
+    user_path_depth: 2 # "/team/alice/laptop" is reported as "/team/alice"; a value below 1 uses 2
     auth_key: false # the managed API key's name (never its secret or ID)
-    request_labels: false # the request labels, sorted and comma-separated
-    max_values: 100 # distinct values per dimension; later ones, and ones over 256 bytes, become "{other}"
+    request_labels: false # the request labels, sorted and comma-separated ("," inside a label is written "%2C")
+    # Distinct values per dimension; a value below 1 uses 100. Later values,
+    # ones over 256 bytes or not valid UTF-8, and reserved names become
+    # "{other}" ("/{other}" for user paths).
+    max_values: 100
 
 # OpenTelemetry export (traces and metrics over OTLP). The settings below
 # mirror the standard OTEL_* environment variables; a variable set in the

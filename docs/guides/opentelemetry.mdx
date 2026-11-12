@@ -237,15 +237,23 @@ which explains the cardinality limits in detail.
 
 | Setting | Attribute | Value |
 | --- | --- | --- |
-| `METRICS_CALLER_USER_PATH` | `gomodel.user_path` | The [user path](/features/user-path), cut to `METRICS_CALLER_USER_PATH_DEPTH` (default 2) segments. |
-| `METRICS_CALLER_AUTH_KEY` | `gomodel.auth_key.name` | The name of the managed API key; absent for the master key. Never the secret or the key ID. |
-| `METRICS_CALLER_REQUEST_LABELS` | `gomodel.request.labels` | The request's labels, sorted and comma-separated (`prod,team-a`). |
+| `METRICS_CALLER_USER_PATH` | `gomodel.user_path` | The [user path](/features/user-path), cut to `METRICS_CALLER_USER_PATH_DEPTH` (default 2) segments; `/` for a request without one. |
+| `METRICS_CALLER_AUTH_KEY` | `gomodel.auth_key.name` | The name of the managed API key; absent for the master key, `{unknown}` for a key that no longer exists. Never the secret or the key ID. |
+| `METRICS_CALLER_REQUEST_LABELS` | `gomodel.request.labels` | The request's labels, sorted and comma-separated (`prod,team-a`). A comma inside a label is written `%2C`, a percent sign `%25`. |
 
 Each dimension keeps the first `METRICS_CALLER_MAX_VALUES` (default 100)
-distinct values; later values, values over 256 bytes, and values spelled like
-`{other}` or `{unknown}` are exported as `{other}` (`/{other}` for user
-paths). The duration histograms and the spans never carry caller attributes.
-The number of calls per caller is the count of `gen_ai.client.token.usage`.
+distinct values; later values, values over 256 bytes, values that are not
+valid UTF-8, and values spelled like `{other}` or `{unknown}` are exported as
+`{other}` (`/{other}` for user paths). The duration histograms and the spans
+never carry caller attributes.
+
+`gen_ai.client.token.usage` is not a call counter. A call records one point
+per token type, a side without tokens records none, and a response-cache hit
+records nothing, so the histogram's count is about two per call. Counting
+only the `gen_ai.token.type=input` points gives the calls that reported input
+tokens; for request counts per caller, use
+[`gomodel_caller_requests_total`](/guides/prometheus-metrics#caller-dimensions)
+in Prometheus.
 
 ### Prompt and completion capture
 

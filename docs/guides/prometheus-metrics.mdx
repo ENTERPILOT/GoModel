@@ -403,9 +403,9 @@ dimensions add it:
 
 | Setting                         | Label            | Value                                                                |
 | ------------------------------- | ---------------- | -------------------------------------------------------------------- |
-| `METRICS_CALLER_USER_PATH`      | `user_path`      | The [user path](/features/user-path), cut to `METRICS_CALLER_USER_PATH_DEPTH` segments |
+| `METRICS_CALLER_USER_PATH`      | `user_path`      | The [user path](/features/user-path), cut to `METRICS_CALLER_USER_PATH_DEPTH` segments; `/` for a request without one |
 | `METRICS_CALLER_AUTH_KEY`       | `auth_key`       | The name of the managed API key. Empty for the master key            |
-| `METRICS_CALLER_REQUEST_LABELS` | `request_labels` | The request's labels, sorted and comma-separated (`prod,team-a`)     |
+| `METRICS_CALLER_REQUEST_LABELS` | `request_labels` | The request's labels, sorted and comma-separated (`prod,team-a`). A comma inside a label is written `%2C`, a percent sign `%25` |
 
 ```bash
 METRICS_ENABLED=true
@@ -420,7 +420,7 @@ sum(rate(gomodel_tokens_total[5m])) by (auth_key) * 60
 sum(rate(gomodel_caller_requests_total{status_type="error"}[5m])) by (auth_key)
   / sum(rate(gomodel_caller_requests_total[5m])) by (auth_key)
 
-# Billed cost today for one team label, whatever other labels a request has
+# Billed cost over the last 24 hours for one team label, whatever other labels a request has
 sum(increase(gomodel_billed_cost_usd_total{request_labels=~"(.*,)?team-a(,.*)?"}[24h]))
 ```
 
@@ -433,8 +433,10 @@ caller value would multiply each of their series, and a histogram has one
 series per bucket.
 
 A dimension that is off, or has no value for a request, is exported as an
-empty label, which Prometheus treats as absent. The API key's secret and ID
-are never exported; a key that no longer exists is reported as `{unknown}`.
+empty label, which Prometheus treats as absent. The user path always has a
+value once enabled: a request without one is reported as `/`. The API key's
+secret and ID are never exported; a key that no longer exists is reported as
+`{unknown}`.
 
 ### Keeping Cardinality Bounded
 
@@ -449,9 +451,10 @@ you query.
   three on, up to 300 values are kept. Later values share one series:
   `{other}` (`/{other}` for user paths). Admitted values keep their own
   series until GoModel restarts.
-- **Value length.** A value longer than 256 bytes, or one spelled like a
-  reserved name (`{other}`, `/{other}`, `{unknown}`), is reported as `{other}`
-  and takes no place under the cap.
+- **Rejected values.** A value longer than 256 bytes, one that is not valid
+  UTF-8, or one spelled like a reserved name (`{other}`, `/{other}`,
+  `{unknown}`) is reported as `{other}` (`/{other}` for user paths) and takes
+  no place under the cap.
 - **Request labels are one value per label set.** `prod,team-a` and `team-a`
   are different values, so label sets fill the cap much faster than labels:
   a client combining 7 labels freely can send 127 different sets, enough to

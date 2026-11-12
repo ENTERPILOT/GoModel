@@ -170,11 +170,13 @@ GoModel 会导出每个已记录用量的请求的 Token 和成本。这些指�
 
 | 设置 | 属性 | 取值 |
 | --- | --- | --- |
-| `METRICS_CALLER_USER_PATH` | `gomodel.user_path` | [用户路径](/zh/features/user-path)，截断为 `METRICS_CALLER_USER_PATH_DEPTH`（默认 2）段。 |
-| `METRICS_CALLER_AUTH_KEY` | `gomodel.auth_key.name` | 托管 API Key 的名称；使用主密钥时不存在。绝不是密钥本身或 Key ID。 |
-| `METRICS_CALLER_REQUEST_LABELS` | `gomodel.request.labels` | 请求的标签，排序后以逗号分隔（`prod,team-a`）。 |
+| `METRICS_CALLER_USER_PATH` | `gomodel.user_path` | [用户路径](/zh/features/user-path)，截断为 `METRICS_CALLER_USER_PATH_DEPTH`（默认 2）段；请求没有用户路径时为 `/`。 |
+| `METRICS_CALLER_AUTH_KEY` | `gomodel.auth_key.name` | 托管 API Key 的名称；使用主密钥时不存在，Key 已不存在时为 `{unknown}`。绝不是密钥本身或 Key ID。 |
+| `METRICS_CALLER_REQUEST_LABELS` | `gomodel.request.labels` | 请求的标签，排序后以逗号分隔（`prod,team-a`）。标签内的逗号写作 `%2C`，百分号写作 `%25`。 |
 
-每个维度保留最先出现的 `METRICS_CALLER_MAX_VALUES`（默认 100）个不同取值；之后的取值、超过 256 字节的取值，以及写法为 `{other}` 或 `{unknown}` 的取值，都导出为 `{other}`（用户路径为 `/{other}`）。时长直方图和 Span 永远不带调用方属性。每个调用方的调用次数即 `gen_ai.client.token.usage` 的计数。
+每个维度保留最先出现的 `METRICS_CALLER_MAX_VALUES`（默认 100）个不同取值；之后的取值、超过 256 字节的取值、不是有效 UTF-8 的取值，以及写法为 `{other}` 或 `{unknown}` 的取值，都导出为 `{other}`（用户路径为 `/{other}`）。时长直方图和 Span 永远不带调用方属性。
+
+`gen_ai.client.token.usage` 不是调用计数器。每次调用按 Token 类型各记录一个数据点，没有 Token 的一侧不记录，响应缓存命中则完全不记录，因此该直方图的计数大约是每次调用两个。只统计 `gen_ai.token.type=input` 的数据点，可得到上报了输入 Token 的调用次数；按调用方统计请求数，请使用 Prometheus 的 [`gomodel_caller_requests_total`](/zh/guides/prometheus-metrics#调用方维度)。
 
 ### 提示词与补全内容捕获
 

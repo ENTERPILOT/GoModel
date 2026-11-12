@@ -411,9 +411,9 @@ hat. Drei Dimensionen lassen sich einzeln einschalten:
 
 | Einstellung                     | Label            | Wert                                                                 |
 | ------------------------------- | ---------------- | -------------------------------------------------------------------- |
-| `METRICS_CALLER_USER_PATH`      | `user_path`      | Der [User Path](/de/features/user-path), gekürzt auf `METRICS_CALLER_USER_PATH_DEPTH` Segmente |
+| `METRICS_CALLER_USER_PATH`      | `user_path`      | Der [User Path](/de/features/user-path), gekürzt auf `METRICS_CALLER_USER_PATH_DEPTH` Segmente; `/` bei einem Request ohne User Path |
 | `METRICS_CALLER_AUTH_KEY`       | `auth_key`       | Der Name des verwalteten API-Keys. Leer beim Master-Key              |
-| `METRICS_CALLER_REQUEST_LABELS` | `request_labels` | Die Labels des Requests, sortiert und durch Kommas getrennt (`prod,team-a`) |
+| `METRICS_CALLER_REQUEST_LABELS` | `request_labels` | Die Labels des Requests, sortiert und durch Kommas getrennt (`prod,team-a`). Ein Komma innerhalb eines Labels wird als `%2C` geschrieben, ein Prozentzeichen als `%25` |
 
 ```bash
 METRICS_ENABLED=true
@@ -428,7 +428,7 @@ sum(rate(gomodel_tokens_total[5m])) by (auth_key) * 60
 sum(rate(gomodel_caller_requests_total{status_type="error"}[5m])) by (auth_key)
   / sum(rate(gomodel_caller_requests_total[5m])) by (auth_key)
 
-# Heute berechnete Kosten für ein Team-Label, unabhängig von weiteren Labels des Requests
+# Berechnete Kosten der letzten 24 Stunden für ein Team-Label, unabhängig von weiteren Labels des Requests
 sum(increase(gomodel_billed_cost_usd_total{request_labels=~"(.*,)?team-a(,.*)?"}[24h]))
 ```
 
@@ -442,8 +442,9 @@ eine Serie pro Bucket.
 
 Eine Dimension, die ausgeschaltet ist oder für einen Request keinen Wert hat,
 wird als leeres Label exportiert, das Prometheus wie ein fehlendes behandelt.
-Das Secret und die ID des API-Keys werden nie exportiert; ein Key, der nicht
-mehr existiert, wird als `{unknown}` gemeldet.
+Der User Path hat, einmal eingeschaltet, immer einen Wert: Ein Request ohne
+User Path wird als `/` gemeldet. Das Secret und die ID des API-Keys werden nie
+exportiert; ein Key, der nicht mehr existiert, wird als `{unknown}` gemeldet.
 
 ### Kardinalität begrenzen
 
@@ -459,9 +460,10 @@ nur ein, was Sie abfragen.
   bis zu 300 Werte behalten. Spätere Werte teilen sich eine Serie: `{other}`
   (`/{other}` bei User Paths). Aufgenommene Werte behalten ihre eigene Serie,
   bis GoModel neu startet.
-- **Länge der Werte.** Ein Wert über 256 Bytes oder ein Wert, der wie ein
-  reservierter Name lautet (`{other}`, `/{other}`, `{unknown}`), wird als
-  `{other}` gemeldet und belegt keinen Platz unter der Obergrenze.
+- **Abgelehnte Werte.** Ein Wert über 256 Bytes, ein Wert, der kein gültiges
+  UTF-8 ist, oder ein Wert, der wie ein reservierter Name lautet (`{other}`,
+  `/{other}`, `{unknown}`), wird als `{other}` gemeldet (`/{other}` bei User
+  Paths) und belegt keinen Platz unter der Obergrenze.
 - **Request-Labels sind ein Wert pro Label-Menge.** `prod,team-a` und `team-a`
   sind unterschiedliche Werte, daher füllen Label-Mengen die Obergrenze viel
   schneller als einzelne Labels: Ein Client, der 7 Labels frei kombiniert,

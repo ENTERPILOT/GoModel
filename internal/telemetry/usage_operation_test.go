@@ -91,7 +91,9 @@ func TestTokenUsageAndDurationAgreeOnOperation(t *testing.T) {
 	}
 }
 
-func TestMiddlewareRecordsOperationForUnsampledRequests(t *testing.T) {
+// The middleware attaches the operation record whether or not the request is
+// sampled; core covers setting and reading it.
+func TestMiddlewareAttachesOperationRecordToUnsampledRequests(t *testing.T) {
 	c, _ := echotest.Get(t, "/v1/chat/completions")
 	var record *core.GenAIOperation
 	handler := withGenerationTracing(func(c *echo.Context) error {

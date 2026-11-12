@@ -159,6 +159,47 @@ func TestNew_RejectedReloadKeepsRequestCallers(t *testing.T) {
 	assert.Same(t, serving, observability.RequestCallers(), "the rejected generation's caller resolver leaked")
 }
 
+// A reload that switches Prometheus metrics, or every caller dimension, off
+// must not leave the previous generation's caller resolver installed: it
+// holds that generation's key service.
+func TestNew_ReloadWithoutCallerDimensionsClearsRequestCallers(t *testing.T) {
+	tests := []struct {
+		name           string
+		metricsEnabled string
+	}{
+		{name: "prometheus metrics off", metricsEnabled: "false"},
+		{name: "caller dimensions off", metricsEnabled: "true"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			serving := usagemetrics.NewCallers(config.MetricsCallerDimensionsConfig{RequestLabels: true}, nil)
+			require.NotNil(t, serving)
+			observability.SetRequestCallers(serving)
+			t.Cleanup(func() { observability.SetRequestCallers(nil) })
+
+			t.Chdir(t.TempDir())
+			t.Setenv("STORAGE_TYPE", "sqlite")
+			t.Setenv("SQLITE_PATH", filepath.Join(t.TempDir(), "usage-metrics.db"))
+			t.Setenv("ADMIN_UI_ENABLED", "false")
+			t.Setenv("ADMIN_ENDPOINTS_ENABLED", "false")
+			t.Setenv("MCP_ENABLED", "false")
+			t.Setenv("OTEL_ENABLED", "false")
+			t.Setenv("METRICS_ENABLED", tt.metricsEnabled)
+			loaded, err := config.Load()
+			require.NoError(t, err)
+
+			ctx := context.Background()
+			application, err := New(ctx, Config{AppConfig: loaded, Factory: providers.NewProviderFactory()})
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				assert.NoError(t, application.Shutdown(ctx))
+			})
+
+			assert.Nil(t, observability.RequestCallers())
+		})
+	}
+}
+
 // A response-cache hit goes through the same chain: the markup tap prices it,
 // and the metrics tap counts only its billed cost, never tokens or provider
 // cost, since no provider was called.

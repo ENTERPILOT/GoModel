@@ -248,12 +248,15 @@ skipped, so a series appears with its first non-zero value.
 is off is an empty label in Prometheus and a missing attribute in
 OpenTelemetry.
 
-- The user path is cut to `user_path_depth` segments.
+- The user path is cut to `user_path_depth` segments; a request without one
+  is `/`.
 - `auth_key` is the key's name, looked up from the in-memory key snapshot; an
   unknown key ID is `{unknown}`. The ID and the secret are never exported.
 - `request_labels` is the sorted, comma-joined label set. One series per set
   keeps sums exact; one series per label would count a multi-label request
-  once per label.
+  once per label. A comma inside a label is written `%2C` and a percent sign
+  `%25` (`usagemetrics.joinLabels`), so a comma always separates two labels
+  and `["a,b"]` (`a%2Cb`) never shares a series with `["a", "b"]` (`a,b`).
 - Each dimension admits `max_values` distinct values and reports the rest as
   `{other}` (`/{other}` for user paths). The admitted sets are process-wide
   (`usagemetrics.admitted`), because Prometheus series outlive a reload.
@@ -261,9 +264,15 @@ OpenTelemetry.
   name (`{other}`, `/{other}`, `{unknown}`), is `{other}` and takes no slot,
   so neither long values nor spoofed bucket names can exhaust or forge the cap.
   `{unknown}` itself takes no slot either.
+- A value that is not valid UTF-8 is `{other}` too, without a slot. Caller
+  values come from raw request headers; Prometheus panics on such a label
+  value and OTLP fails the whole export. Provider and model names are cleaned
+  in `usagemetrics.newSample` for the same reason (invalid bytes become
+  U+FFFD).
 - The resolver of `gomodel_caller_requests_total` is process-wide too; the app
   installs it in `initServer`, after every fallible phase, so a rejected
-  reload leaves the serving generation's resolver in place.
+  reload leaves the serving generation's resolver in place. A reload without
+  Prometheus metrics or caller dimensions installs none.
 
 Caller labels are deliberately kept off `gomodel_requests_total`,
 `gomodel_request_duration_seconds` (one series per bucket), and
@@ -272,11 +281,42 @@ instead, without `endpoint`, `status_code`, and `stream`. None of the new
 metrics has an `endpoint` label: usage entries of passthrough calls carry
 caller-chosen paths.
 
-Batch usage is written when results are fetched. `batch.Store.ClaimUsage`
-persists `usage_logged_at` with a compare-and-swap before any entry is
-written, so concurrent fetches, or a fetch after a failed store update, do
-not count the batch twice (storage would drop the duplicates by ID, the
-metrics would not).
+### Batch usage
+
+Batch usage is written when results are fetched, once per batch: storage
+would drop entries written twice, because their IDs are derived from the
+batch, but the metrics would count them again.
+
+- A fetch takes the batch's claim (`batch.Store.ClaimUsage`), hands every
+  entry to the usage logger, and only then marks the usage as logged
+  (`CompleteUsage`). A marker saved before the entries would lose them for
+  good if the process stopped in between.
+- A fetch that finds the claim held waits. It returns when the usage is
+  logged, or takes the claim over once it is 30 seconds old
+  (`batchUsageClaimTimeout`), which means its holder stopped, and writes every
+  entry itself. A fetch therefore returns results only after the batch's
+  usage was handed to a logger.
+- The claim and the marker live beside the serialized batch
+  (`usage_claimed_at`, `usage_logged_at`), and `Store.Update` never writes
+  them. A status poll or a cancel that saves a copy it read earlier cannot
+  clear them.
+
+Storage stays exactly-once by ID. The metrics count a batch's entries twice
+only when they are written without their marker being saved:
+
+- A holder stops, or stalls for longer than the timeout, after handing some
+  entries to its logger. The takeover writes all of them again; the metrics
+  count again whatever the first process had already exported.
+- The store fails while marking the usage as logged, and again on the update
+  that follows. The claim stays held, and the next fetch after the timeout
+  writes every entry again.
+- The store fails while claiming. The entries are written unguarded, so every
+  such fetch counts them. Losing billable usage is worse than counting it
+  twice in a metric.
+
+The marker is set when the entries are handed to the logger, not when they
+are flushed: a process that stops with entries still in the logger's buffer
+loses them, as it loses those of any other request.
 
 The OpenTelemetry token metrics take `gen_ai.operation.name` from the
 provider call (`core.GenAIOperation`, set by the telemetry hook and copied to

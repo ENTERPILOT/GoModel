@@ -213,3 +213,30 @@ func TestCallerRequestsTotal(t *testing.T) {
 	assert.InDelta(t, 1, requests("success", "/", "", ""), 0, "a call without a caller is the root user path")
 	assert.Equal(t, 3, testutil.CollectAndCount(CallerRequestsTotal))
 }
+
+// Caller values come from raw request headers. A value that is not valid
+// UTF-8 would make WithLabelValues panic on the request path.
+func TestUsageRecorderSurvivesInvalidUTF8(t *testing.T) {
+	resetUsageMetrics(t)
+	callers := usagemetrics.NewCallers(config.MetricsCallerDimensionsConfig{
+		UserPath: true, AuthKey: true, RequestLabels: true,
+	}, func(string) string { return "ci\xff" })
+	logger := usagemetrics.NewTap(&discardLogger{}, callers, UsageRecorder{})
+	entry := &usage.UsageEntry{
+		ProviderName: "openai\xff", Provider: "openai", Model: "gpt\xff", InputTokens: 10,
+		UserPath: "/team/\xff", AuthKeyID: "key-1", Labels: []string{"prod", "team\xff"},
+	}
+
+	require.NotPanics(t, func() { logger.Write(entry) })
+
+	other := usagemetrics.OtherValue
+	assert.InDelta(t, 10, testutil.ToFloat64(TokensTotal.WithLabelValues(
+		"openai\uFFFD", "gpt\uFFFD", TokenTypeInput, usagemetrics.OtherUserPath, other, other)), 1e-9)
+	assert.Equal(t, 1, usageSeriesCount())
+
+	SetRequestCallers(callers)
+	ctx := core.WithRequestLabels(core.WithEffectiveUserPath(context.Background(), "/team/\xff"), []string{"team\xff"})
+	require.NotPanics(t, func() { recordCallerRequest(ctx, llmclient.ResponseInfo{Provider: "openai", Model: "gpt"}, "success") })
+	assert.InDelta(t, 1, testutil.ToFloat64(CallerRequestsTotal.WithLabelValues(
+		"openai", "gpt", "success", usagemetrics.OtherUserPath, "", other)), 1e-9)
+}

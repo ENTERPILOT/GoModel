@@ -251,16 +251,23 @@ dort sind die Kardinalitätsgrenzen im Detail beschrieben.
 
 | Einstellung | Attribut | Wert |
 | --- | --- | --- |
-| `METRICS_CALLER_USER_PATH` | `gomodel.user_path` | Der [User Path](/de/features/user-path), gekürzt auf `METRICS_CALLER_USER_PATH_DEPTH` (Standard 2) Segmente. |
-| `METRICS_CALLER_AUTH_KEY` | `gomodel.auth_key.name` | Der Name des verwalteten API-Keys; fehlt beim Master-Key. Nie das Secret oder die Key-ID. |
-| `METRICS_CALLER_REQUEST_LABELS` | `gomodel.request.labels` | Die Labels des Requests, sortiert und durch Kommas getrennt (`prod,team-a`). |
+| `METRICS_CALLER_USER_PATH` | `gomodel.user_path` | Der [User Path](/de/features/user-path), gekürzt auf `METRICS_CALLER_USER_PATH_DEPTH` (Standard 2) Segmente; `/` bei einem Request ohne User Path. |
+| `METRICS_CALLER_AUTH_KEY` | `gomodel.auth_key.name` | Der Name des verwalteten API-Keys; fehlt beim Master-Key, `{unknown}` bei einem Key, der nicht mehr existiert. Nie das Secret oder die Key-ID. |
+| `METRICS_CALLER_REQUEST_LABELS` | `gomodel.request.labels` | Die Labels des Requests, sortiert und durch Kommas getrennt (`prod,team-a`). Ein Komma innerhalb eines Labels wird als `%2C` geschrieben, ein Prozentzeichen als `%25`. |
 
 Jede Dimension behält die ersten `METRICS_CALLER_MAX_VALUES` (Standard 100)
-unterschiedlichen Werte; spätere Werte, Werte über 256 Bytes und Werte, die
-wie `{other}` oder `{unknown}` lauten, werden als `{other}` exportiert
-(`/{other}` bei User Paths). Die Dauer-Histogramme und die Spans tragen nie
-Aufrufer-Attribute. Die Anzahl der Aufrufe pro Aufrufer ist der Count von
-`gen_ai.client.token.usage`.
+unterschiedlichen Werte; spätere Werte, Werte über 256 Bytes, Werte, die
+kein gültiges UTF-8 sind, und Werte, die wie `{other}` oder `{unknown}`
+lauten, werden als `{other}` exportiert (`/{other}` bei User Paths). Die
+Dauer-Histogramme und die Spans tragen nie Aufrufer-Attribute.
+
+`gen_ai.client.token.usage` ist kein Aufrufzähler. Ein Aufruf zeichnet je
+Token-Typ einen Messpunkt auf, eine Seite ohne Token keinen und ein
+Response-Cache-Treffer gar keinen; der Count des Histogramms liegt also bei
+etwa zwei pro Aufruf. Zählt man nur die Messpunkte mit
+`gen_ai.token.type=input`, erhält man die Aufrufe, die Input-Token gemeldet
+haben. Request-Zahlen pro Aufrufer liefert in Prometheus
+[`gomodel_caller_requests_total`](/de/guides/prometheus-metrics#aufrufer-dimensionen).
 
 ### Erfassung von Prompts und Completions
 

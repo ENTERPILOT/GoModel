@@ -15,9 +15,9 @@ type MetricsConfig struct {
 	// Default: "/metrics"
 	Endpoint string `yaml:"endpoint" env:"METRICS_ENDPOINT"`
 
-	// CallerDimensions adds who made the request to the token, cost, and
-	// per-caller request metrics. It applies to the Prometheus metrics and
-	// to the OpenTelemetry metrics alike, whichever pipeline is enabled.
+	// CallerDimensions adds who made the request to the token and cost
+	// metrics of whichever pipeline is enabled, Prometheus or OpenTelemetry,
+	// and to the Prometheus per-caller request counter.
 	CallerDimensions MetricsCallerDimensionsConfig `yaml:"caller_dimensions"`
 }
 
@@ -46,13 +46,15 @@ type MetricsCallerDimensionsConfig struct {
 	AuthKey bool `yaml:"auth_key" env:"METRICS_CALLER_AUTH_KEY"`
 
 	// RequestLabels adds the request's labels (API key labels and tagging
-	// headers) as one sorted, comma-separated value.
+	// headers) as one sorted, comma-separated value. A comma inside a label
+	// is written "%2C" and a percent sign "%25".
 	// Default: false
 	RequestLabels bool `yaml:"request_labels" env:"METRICS_CALLER_REQUEST_LABELS"`
 
 	// MaxValues caps the distinct values of each dimension. Values seen after
-	// the cap is reached, values longer than 256 bytes, and values spelled
-	// like a reserved name ("{other}", "{unknown}") are reported as "{other}".
+	// the cap is reached, values longer than 256 bytes or not valid UTF-8,
+	// and values spelled like a reserved name ("{other}", "{unknown}") are
+	// reported as "{other}" ("/{other}" for user paths).
 	// Default: 100
 	MaxValues int `yaml:"max_values" env:"METRICS_CALLER_MAX_VALUES"`
 }

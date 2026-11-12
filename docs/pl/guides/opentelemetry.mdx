@@ -243,16 +243,23 @@ gdzie szczegółowo opisano limity kardynalności.
 
 | Ustawienie | Atrybut | Wartość |
 | --- | --- | --- |
-| `METRICS_CALLER_USER_PATH` | `gomodel.user_path` | [User path](/pl/features/user-path), przycięty do `METRICS_CALLER_USER_PATH_DEPTH` (domyślnie 2) segmentów. |
-| `METRICS_CALLER_AUTH_KEY` | `gomodel.auth_key.name` | Nazwa zarządzanego klucza API; brak dla klucza master. Nigdy sekret ani ID klucza. |
-| `METRICS_CALLER_REQUEST_LABELS` | `gomodel.request.labels` | Etykiety requestu, posortowane i rozdzielone przecinkami (`prod,team-a`). |
+| `METRICS_CALLER_USER_PATH` | `gomodel.user_path` | [User path](/pl/features/user-path), przycięty do `METRICS_CALLER_USER_PATH_DEPTH` (domyślnie 2) segmentów; `/` dla requestu bez user path. |
+| `METRICS_CALLER_AUTH_KEY` | `gomodel.auth_key.name` | Nazwa zarządzanego klucza API; brak dla klucza master, `{unknown}` dla klucza, który już nie istnieje. Nigdy sekret ani ID klucza. |
+| `METRICS_CALLER_REQUEST_LABELS` | `gomodel.request.labels` | Etykiety requestu, posortowane i rozdzielone przecinkami (`prod,team-a`). Przecinek wewnątrz etykiety jest zapisywany jako `%2C`, a znak procentu jako `%25`. |
 
 Każdy wymiar zachowuje pierwsze `METRICS_CALLER_MAX_VALUES` (domyślnie 100)
-różnych wartości; kolejne wartości, wartości dłuższe niż 256 bajtów oraz
-wartości zapisane jak `{other}` lub `{unknown}` są eksportowane jako `{other}`
-(`/{other}` dla user path). Histogramy czasu trwania i spany nigdy nie mają atrybutów
-wywołującego. Liczba wywołań na wywołującego to count metryki
-`gen_ai.client.token.usage`.
+różnych wartości; kolejne wartości, wartości dłuższe niż 256 bajtów,
+wartości niebędące poprawnym UTF-8 oraz wartości zapisane jak `{other}` lub
+`{unknown}` są eksportowane jako `{other}` (`/{other}` dla user path).
+Histogramy czasu trwania i spany nigdy nie mają atrybutów wywołującego.
+
+`gen_ai.client.token.usage` nie jest licznikiem wywołań. Wywołanie zapisuje
+jeden pomiar na typ tokenów, strona bez tokenów nie zapisuje żadnego,
+a trafienie w cache odpowiedzi nie zapisuje nic, więc count histogramu to
+mniej więcej dwa na wywołanie. Zliczenie samych pomiarów
+z `gen_ai.token.type=input` daje wywołania, które zgłosiły tokeny wejściowe;
+liczbę requestów na wywołującego podaje w Prometheusie
+[`gomodel_caller_requests_total`](/pl/guides/prometheus-metrics#wymiary-wywołującego).
 
 ### Przechwytywanie promptów i odpowiedzi
 

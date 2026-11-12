@@ -24,18 +24,19 @@ func (b *bootstrap) wrapUsageLoggerForMetrics() {
 	if app.telemetry != nil {
 		recorders = append(recorders, app.telemetry.UsageRecorder())
 	}
+	// Installed by initServer: the resolver is process-wide, so a reload
+	// rejected by a later phase must not hand it to the serving generation.
+	// It stays nil when Prometheus metrics or every dimension is off, which
+	// switches the per-caller request counter off again after a reload and
+	// lets go of the previous generation's resolver.
+	b.installRequestCallers = true
 	if len(recorders) == 0 {
 		return
 	}
 
 	callers := usagemetrics.NewCallers(metricsCfg.CallerDimensions, app.authKeyName)
 	if metricsCfg.Enabled {
-		// Installed by initServer: the resolver is process-wide, so a reload
-		// rejected by a later phase must not hand it to the serving
-		// generation. nil when every dimension is off, which also switches
-		// the per-caller request counter off again after a reload.
 		b.requestCallers = callers
-		b.installRequestCallers = true
 	}
 	if !b.appCfg.Usage.Enabled {
 		slog.Warn("token and cost metrics need usage tracking, which is disabled; they will stay empty",

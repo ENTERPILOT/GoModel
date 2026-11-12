@@ -512,11 +512,11 @@ Zuordnungsregeln und die Durchsetzung in Workflows.
 | ------------------ | ---------------------------------------- | ---------- |
 | `METRICS_ENABLED`  | Aktiviert Prometheus-Metriken (experimentell) | `false`    |
 | `METRICS_ENDPOINT` | HTTP-Pfad für Metriken                    | `/metrics` |
-| `METRICS_CALLER_USER_PATH` | Fügt den User Path zu den Token-, Kosten- und Aufrufer-Request-Metriken hinzu, für Prometheus und OpenTelemetry (siehe [Aufrufer-Dimensionen](/de/guides/prometheus-metrics#aufrufer-dimensionen)) | `false` |
-| `METRICS_CALLER_USER_PATH_DEPTH` | Führende User-Path-Segmente, die auf Metriken erhalten bleiben | `2` |
+| `METRICS_CALLER_USER_PATH` | Fügt den User Path zu den Token- und Kostenmetriken hinzu, für Prometheus und OpenTelemetry, sowie zum Aufrufer-Request-Zähler in Prometheus (siehe [Aufrufer-Dimensionen](/de/guides/prometheus-metrics#aufrufer-dimensionen)) | `false` |
+| `METRICS_CALLER_USER_PATH_DEPTH` | Führende User-Path-Segmente, die auf Metriken erhalten bleiben; ein Wert unter 1 verwendet den Standard | `2` |
 | `METRICS_CALLER_AUTH_KEY` | Fügt diesen Metriken den Namen des verwalteten API-Keys hinzu | `false` |
 | `METRICS_CALLER_REQUEST_LABELS` | Fügt diesen Metriken die Request-Labels hinzu | `false` |
-| `METRICS_CALLER_MAX_VALUES` | Unterschiedliche Werte je Aufrufer-Dimension; spätere werden als `{other}` gemeldet | `100` |
+| `METRICS_CALLER_MAX_VALUES` | Unterschiedliche Werte je Aufrufer-Dimension; spätere werden als `{other}` gemeldet (`/{other}` bei User Paths). Ein Wert unter 1 verwendet den Standard | `100` |
 | `OTEL_ENABLED`     | Exportiert OpenTelemetry-Traces und -Metriken über OTLP (siehe [OpenTelemetry](/de/guides/opentelemetry)) | `false`    |
 
 #### Admin

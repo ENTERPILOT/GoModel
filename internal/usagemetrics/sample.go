@@ -39,16 +39,17 @@ type Sample struct {
 }
 
 // newSample reads a usage entry. A response-cache hit never reached a
-// provider, so it carries no tokens and no provider cost; it keeps the billed
-// cost, which is non-zero only when cache hits are billed.
+// provider: its entry repeats the tokens and cost of the cached answer, and
+// the sample drops them. It keeps the billed cost, which is non-zero only
+// when cache hits are billed.
 func newSample(entry *usage.UsageEntry) Sample {
 	s := Sample{
-		Provider:     strings.TrimSpace(entry.ProviderName),
-		ProviderType: strings.TrimSpace(entry.Provider),
-		Model:        strings.TrimSpace(entry.Model),
-		RequestModel: strings.TrimSpace(entry.RoutedModel),
+		Provider:     dimension(entry.ProviderName),
+		ProviderType: dimension(entry.Provider),
+		Model:        dimension(entry.Model),
+		RequestModel: dimension(entry.RoutedModel),
 		Endpoint:     strings.TrimSpace(entry.Endpoint),
-		Operation:    strings.TrimSpace(entry.Operation),
+		Operation:    dimension(entry.Operation),
 	}
 	if s.Provider == "" {
 		// Entries logged without an instance name carry only the type, which
@@ -82,6 +83,14 @@ func newSample(entry *usage.UsageEntry) Sample {
 		s.ProviderCost = *entry.TotalCost
 	}
 	return s
+}
+
+// dimension cleans a value exported as a metric label or attribute. Model
+// names can come from request paths and upstream responses; one that is not
+// valid UTF-8 would make Prometheus panic and OTLP fail its export, so the
+// invalid bytes become U+FFFD.
+func dimension(value string) string {
+	return strings.ToValidUTF8(strings.TrimSpace(value), "\uFFFD")
 }
 
 // empty reports whether the sample would change no metric, as for an MCP

@@ -20,7 +20,8 @@ type Caller struct {
 	// AuthKey is the name of the managed API key; empty for the master key
 	// and for unauthenticated traffic.
 	AuthKey string
-	// RequestLabels is the request's labels, sorted and comma-separated.
+	// RequestLabels is the request's labels, sorted and comma-separated;
+	// see joinLabels for the encoding.
 	RequestLabels string
 }
 
@@ -95,13 +96,20 @@ func truncateUserPath(userPath string, depth int) string {
 	return "/" + strings.Join(segments, "/")
 }
 
+// labelEscaper percent-encodes the separator inside a label, and the percent
+// sign itself, so the joined value can be split back into its labels.
+var labelEscaper = strings.NewReplacer("%", "%25", ",", "%2C")
+
 // joinLabels renders a label set as one value that does not depend on the
-// order the labels arrived in.
+// order the labels arrived in: the labels sorted and joined by commas. A
+// comma inside a label is written %2C (and a percent sign %25), so a comma
+// in the value always separates two labels and distinct sets never share a
+// value: ["a,b"] is "a%2Cb", ["a", "b"] is "a,b".
 func joinLabels(labels []string) string {
 	labels = core.MergeLabels(labels)
-	if len(labels) < 2 {
-		return strings.Join(labels, ",")
-	}
 	slices.Sort(labels)
+	for i, label := range labels {
+		labels[i] = labelEscaper.Replace(label)
+	}
 	return strings.Join(labels, ",")
 }
