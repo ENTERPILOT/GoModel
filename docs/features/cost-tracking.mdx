@@ -36,7 +36,8 @@ Anthropic bills cache writes by TTL: the default 5-minute writes at `cache_write
   Claude usage from earlier releases, recorded on `/v1/chat/completions` and
   `/v1/responses`, counts input tokens without the prompt cache; newer rows
   include it, as OpenAI does. Costs and the cached/uncached input breakdown read
-  both, so only the plain input token total rises for cache-heavy Claude traffic.
+  both, so only the plain input and total token counts rise for cache-heavy
+  Claude traffic.
 </Note>
 
 ## Time-of-day pricing
