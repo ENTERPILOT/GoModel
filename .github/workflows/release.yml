@@ -34,7 +34,9 @@ jobs:
       - name: Check the tag is a semver release cut from main
         shell: bash
         run: |
-          semver='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+          num='(0|[1-9][0-9]*)'
+          pre='(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
+          semver="^v${num}\.${num}\.${num}(-${pre}(\.${pre})*)?\$"
           if [[ ! "$GITHUB_REF_NAME" =~ $semver ]]; then
             echo "::error::Tag $GITHUB_REF_NAME is not vMAJOR.MINOR.PATCH[-prerelease]; refusing to release"
             exit 1
