@@ -506,21 +506,30 @@ konfiguriert ist.
 ### Wann eine Warnung ausgelöst wird
 
 GoModel wertet Budgets im Hintergrund aus, alle `interval` Sekunden, nie
-während ein Request bedient wird. Eine Warnung wird je Budget, Zeitraum und
-Schwelle einmal ausgelöst:
+während ein Request bedient wird. Eine Warnung wird je Budget-Revision,
+Zeitraum und Schwelle einmal ausgelöst:
 
 - Replikate, die sich eine Datenbank teilen, senden sie gemeinsam nur einmal:
   Eine Instanz trägt die Warnung in die Datenbank ein, bevor sie sie zustellt,
   und nur der erste Eintrag gewinnt. Mit SQLite hat jede Instanz ihre eigene
   Datenbank und warnt für sich.
 - Ein neuer Zeitraum oder ein [Reset](#reset-fenster) beginnt von vorn und
-  kann erneut auslösen. Wird der Betrag eines Budgets mitten im Zeitraum
-  erhöht, werden bereits erreichte Schwellen in diesem Zeitraum nicht erneut
-  scharf geschaltet.
+  kann erneut auslösen. Ebenso eine Änderung des Reset-Ankers in den
+  Einstellungen: Der Zeitraum wird ab dem neuen Anker neu berechnet, und seine
+  Schwellen lösen aus, sobald die Ausgaben darin sie erreichen.
+- Eine Änderung des Betrags oder Löschen und Neuanlegen ist eine neue Revision
+  des Budgets und schaltet alle Schwellen für den Rest des Zeitraums wieder
+  scharf: Von 100 auf 1000 erhöht, nachdem die 80-%-Warnung kam, warnt es bei
+  800 erneut. Werden nur die Schwellen bearbeitet, nicht: Eine bereits
+  ausgelöste Schwelle bleibt ausgelöst, eine neue löst aus, sobald die
+  Ausgaben sie erreichen.
 - Überschreiten die Ausgaben zwischen zwei Auswertungen mehrere Schwellen,
   löst jede aus, die niedrigste zuerst.
 - Ein [Budget pro Kind](#dynamische-budgets-pro-kind) warnt pro Kind: Jedes
-  Kind erreicht die Schwellen seines eigenen Budgets.
+  Kind erreicht die Schwellen seines eigenen Budgets, auf denselben Ausgaben,
+  die die Durchsetzung zählt, Pfade unterhalb des Kindes eingeschlossen. Eine
+  Auswertung liest die 10.000 Kinder mit den höchsten Ausgaben; die übrigen
+  werden nicht ausgewertet.
 - Die Ausgaben werden aus der gespeicherten Nutzung gelesen. Eine Warnung
   folgt dem auslösenden Request daher um den Usage-Flush
   (`USAGE_FLUSH_INTERVAL`, 5 s) plus bis zu ein Intervall verzögert.
@@ -529,7 +538,9 @@ Der Eintrag wird vor der Zustellung geschrieben, eine Warnung wird also
 höchstens einmal zugestellt: Wird ein Gateway zwischen beidem gestoppt, geht
 diese Warnung verloren, und eine Warnung, die nach ihren Wiederholungen nicht
 zugestellt werden konnte, wird protokolliert und gezählt, nicht später
-gesendet.
+gesendet. Beim Herunterfahren haben wartende Warnungen 5 s Zeit für die
+Zustellung; was danach noch wartet, wird verworfen, protokolliert und als
+Zustellfehler gezählt.
 
 ### Webhook-Payload
 
@@ -537,6 +548,7 @@ Jede Warnung ist ein `POST` mit JSON-Body:
 
 ```json
 {
+  "schema_version": 1,
   "type": "budget.threshold_reached",
   "id": "bgt_5f0c2a9d41b7e3a86c1d02ef",
   "timestamp": "2026-04-25T12:00:07Z",
@@ -548,30 +560,42 @@ Jede Warnung ist ein `POST` mit JSON-Body:
     "period_seconds": 86400,
     "period": "daily",
     "amount": 100,
-    "cost_basis": "provider"
+    "cost_basis": "provider",
+    "revision": "1745539200:100"
   },
   "threshold_percent": 80,
   "spent": 81.2,
   "usage_ratio": 0.812,
   "period_start": "2026-04-25T00:00:00Z",
   "period_end": "2026-04-26T00:00:00Z",
-  "projected_spend": 162.4
+  "projected_spend": 162.4,
+  "projected_exhaustion_at": "2026-04-25T14:47:00Z"
 }
 ```
 
 | Feld                       | Bedeutung                                                                                                 |
 | -------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `schema_version`           | `1`. Ändert sich nur, wenn ein Feld umbenannt, entfernt oder umgedeutet wird; neue Felder behalten sie.   |
 | `type`                     | `budget.threshold_reached`. Ignorieren Sie unbekannte Typen: Es können weitere hinzukommen.               |
-| `id`                       | Identifiziert die Warnung. Wiederholungen tragen dieselbe `id`; deduplizieren Sie darauf.                  |
+| `id`                       | Identifiziert die Warnung; deduplizieren Sie darauf. Siehe unten.                                         |
 | `timestamp`                | Wann GoModel die Warnung ausgelöst hat (UTC).                                                             |
 | `budget.scope`, `.subject` | Das Budget: `user_path`, `label` oder `provider`, und sein Subjekt.                                       |
 | `budget.effective_subject` | Wofür die Ausgaben gezählt wurden: der Kindpfad eines Budgets pro Kind, sonst das Subjekt.                |
 | `budget.period_seconds`, `.period` | Der Reset-Zeitraum und sein Name (`hourly`, `daily`, `weekly`, `monthly` oder `<n>s`).             |
 | `budget.amount`, `.cost_basis` | Das Limit und die Kosten, auf denen `spent` gemessen wird (`provider` oder `billed`).                 |
+| `budget.revision`          | Opak. Ändert sich mit dem Betrag oder beim Neuanlegen, nicht wenn nur die Schwellen geändert werden.      |
 | `threshold_percent`        | Die erreichte Schwelle.                                                                                   |
 | `spent`, `usage_ratio`     | Ausgaben im Zeitraum beim Auslösen und `spent / amount` (über `1`, wenn überschritten).                   |
 | `period_start`, `period_end` | Der Zeitraum, zu dem die Warnung gehört. Ein Reset verschiebt `period_start` auf den Reset-Zeitpunkt.   |
 | `projected_spend`          | Siehe [Ausgabenprognose](#ausgabenprognose). Entfällt, solange zu wenig vom Zeitraum vergangen ist.       |
+| `projected_exhaustion_at`  | Wann das Budget beim aktuellen Tempo aufgebraucht ist. Entfällt ohne Prognose oder wenn es reicht.        |
+
+Zwei Zustellungen tragen genau dann dieselbe `id`, wenn sie dieselbe Warnung
+sind: dasselbe Budget (`scope`, `subject`, `effective_subject`, Zeitraum),
+dieselbe `revision`, derselbe `period_start` und dieselbe `threshold_percent`.
+Wiederholungen und Zustellungen eines anderen Replikats verwenden sie erneut.
+Ein neuer Zeitraum, ein Reset, ein verschobener Reset-Anker oder eine neue
+Revision ergibt eine neue `id`.
 
 Felder werden nur hinzugefügt. Jede Zustellung trägt außerdem diese Header:
 
@@ -579,23 +603,35 @@ Felder werden nur hinzugefügt. Jede Zustellung trägt außerdem diese Header:
 | --------------------- | ------------------------------------------------------------------------ |
 | `X-GoModel-Event`     | Der `type` der Warnung                                                   |
 | `X-GoModel-Delivery`  | Die `id` der Warnung                                                     |
-| `X-GoModel-Signature` | `sha256=<hex>`: HMAC-SHA256 des rohen Bodys mit dem `secret` des Webhooks als Schlüssel. Nur gesendet, wenn ein Secret gesetzt ist. |
+| `X-GoModel-Signature` | `t=<Unix-Sekunden>,v1=<hex>`: der Zeitpunkt des Versuchs und das HMAC-SHA256 von `<t>.<roher Body>` mit dem `secret` des Webhooks als Schlüssel. Nur gesendet, wenn ein Secret gesetzt ist. |
 
-Prüfen Sie die Signatur gegen den rohen Request-Body, bevor Sie ihn parsen:
+Prüfen Sie die Signatur gegen den rohen Request-Body, bevor Sie ihn parsen,
+und lehnen Sie einen Zeitstempel ab, der mehr als 5 Minuten von Ihrer Uhr
+abweicht, um Replays zu verhindern. Jeder Versuch wird beim Senden signiert,
+daher bestehen auch Wiederholungen. Ignorieren Sie Paare außer `t` und `v1`:
+Ein späteres Verfahren kommt als `v2=` neben `v1` hinzu.
 
 ```python
-import hashlib, hmac
+import hashlib, hmac, time
+
+TOLERANCE = 300  # seconds
 
 def verified(secret: bytes, body: bytes, header: str) -> bool:
-    expected = "sha256=" + hmac.new(secret, body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, header)
+    pairs = dict(p.split("=", 1) for p in header.split(",") if "=" in p)
+    t, signature = pairs.get("t", ""), pairs.get("v1", "")
+    if not t.isdigit() or abs(time.time() - int(t)) > TOLERANCE:
+        return False
+    expected = hmac.new(secret, t.encode() + b"." + body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature)
 ```
 
 Antworten Sie mit einem beliebigen `2xx`. Ein Netzwerkfehler, `408`, `429`
 oder `5xx` wird bis zu `webhook_max_retries`-mal wiederholt, mit 1 s, 2 s, 4 s
 und so weiter (höchstens 30 s) zwischen den Versuchen; jeder andere Status
-wird nicht wiederholt. Weiterleitungen auf einen anderen Host werden nicht
-verfolgt. Zustellungen nutzen den ausgehenden Proxy des Gateways
+wird nicht wiederholt. Nur ein `307` oder `308` zum selben Origin wird
+verfolgt, da er den `POST` mit seinem Body wiederholt; jede andere
+Weiterleitung gilt als fehlgeschlagene Zustellung, konfigurieren Sie also die
+endgültige URL. Zustellungen nutzen den ausgehenden Proxy des Gateways
 (`HTTPS_PROXY`) und dessen TLS-Vertrauen (`http.tls`). Ein ausgefallener
 Webhook verzögert weder die Auswertung anderer Budgets noch einen anderen
 Webhook.
@@ -604,6 +640,11 @@ Der Webhook ist bewusst generisches JSON: GoModel formatiert keine Nachrichten
 für Slack, Teams oder E-Mail. Richten Sie ihn auf einen kleinen Empfänger oder
 ein Automatisierungswerkzeug, das dies übernimmt, oder registrieren Sie in
 einem eigenen Build einen `ext.AlertSink`, der dieselben Ereignisse erhält.
+Ein Sink baut seine HTTP-Clients mit `ext.NewHTTPClient`, um denselben Proxy
+und dasselbe TLS-Vertrauen zu nutzen, kann `ext.SharedStoreAware`
+implementieren, um Zustand zwischen Replikaten zu teilen, und wird von dem
+Build freigegeben, der ihn registriert hat, sobald das Gateway
+heruntergefahren ist.
 
 Zwei Prometheus-Zähler begleiten Warnungen:
 `gomodel_budget_alerts_fired_total` (`scope`, `threshold`) und

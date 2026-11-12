@@ -434,7 +434,7 @@ starts with budget management disabled and logs a warning.
 | `SET_BUDGET_<PATH>`          | Seed budget limits for a user path, such as `daily=10`                             | _(empty)_ |
 | `SET_PROVIDER_BUDGET_<NAME>` | Seed budget limits for a provider instance, such as `daily=100`                    | _(empty)_ |
 | `BUDGETS_ALERTS_WEBHOOK_URL` | Webhook that receives [budget alerts](/features/budgets#alerts) as JSON. Alerts are evaluated only once a webhook is set | _(empty)_ |
-| `BUDGETS_ALERTS_WEBHOOK_SECRET` | Signs each delivery: `X-GoModel-Signature` carries the HMAC-SHA256 of the body | _(empty)_ |
+| `BUDGETS_ALERTS_WEBHOOK_SECRET` | Signs each delivery: `X-GoModel-Signature` carries a timestamp and the HMAC-SHA256 of `<timestamp>.<body>` | _(empty)_ |
 | `BUDGETS_ALERTS_THRESHOLDS`  | Default alert thresholds, percentages of the budget amount                         | `80,100`  |
 | `BUDGETS_ALERTS_INTERVAL`    | Seconds between alert evaluations                                                  | `60`      |
 | `BUDGETS_ALERTS_WEBHOOK_TIMEOUT` | Seconds per webhook delivery attempt                                           | `10`      |

@@ -42,7 +42,7 @@ type BudgetAlertWebhookConfig struct {
 	URL string `yaml:"url" export:"secret"`
 
 	// Secret, when set, signs every delivery: the X-GoModel-Signature header
-	// carries "sha256=" and the hex HMAC-SHA256 of the request body.
+	// carries "t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<body>">".
 	Secret string `yaml:"secret" export:"secret"`
 }
 

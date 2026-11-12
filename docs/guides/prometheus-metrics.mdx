@@ -329,8 +329,9 @@ sum(increase(gomodel_usage_entries_dropped_total[5m])) by (reason) > 0
 failing webhook is silent unless you watch for it.
 `gomodel_budget_alerts_fired_total` counts the alerts an instance raised, and
 `gomodel_budget_alert_delivery_failures_total` the ones a destination did not
-receive: a webhook that still failed after its retries, or an alert dropped
-because that destination's queue was full. The server log has the reason.
+receive: a webhook that still failed after its retries, a sink that failed,
+an alert dropped because that destination's queue was full, or one abandoned
+at shutdown. The server log has the reason.
 
 | Metric                                         | Label         | Values                                         |
 | ---------------------------------------------- | ------------- | ---------------------------------------------- |

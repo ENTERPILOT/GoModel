@@ -330,8 +330,9 @@ zugestellt; ein ausfallender Webhook bleibt also stumm, wenn Sie ihn nicht
 überwachen. `gomodel_budget_alerts_fired_total` zählt die Warnungen, die eine
 Instanz ausgelöst hat, und `gomodel_budget_alert_delivery_failures_total` jene,
 die ein Ziel nicht erhalten hat: ein Webhook, der auch nach seinen
-Wiederholungen fehlschlug, oder eine Warnung, die verworfen wurde, weil die
-Warteschlange dieses Ziels voll war. Der Grund steht im Server-Log.
+Wiederholungen fehlschlug, ein fehlgeschlagener Sink, eine Warnung, die
+verworfen wurde, weil die Warteschlange dieses Ziels voll war, oder eine, die
+beim Herunterfahren aufgegeben wurde. Der Grund steht im Server-Log.
 
 | Metrik                                         | Label         | Werte                                          |
 | ---------------------------------------------- | ------------- | ---------------------------------------------- |

@@ -10,7 +10,7 @@ import (
 
 // Soft alerts: each budget has alert thresholds, percentages of its amount.
 // An Alerter evaluates them in the background and raises one event per
-// budget, period, and threshold; see alerter.go.
+// budget revision, period, and threshold; see alerter.go.
 
 // MinProjectionPeriodRatio is the share of a budget period that has to elapse
 // before spend is projected to the period end. Earlier, a single request
@@ -92,32 +92,53 @@ func (r CheckResult) thresholdReached(percent int) bool {
 	return r.HasUsage && r.Spent >= r.Budget.Amount*float64(percent)/100
 }
 
-// AlertClaim identifies one alert: a budget (with the child a per-child
-// template was resolved to), the period it is in, and a threshold.
+// AlertClaim identifies one alert: a budget revision (with the child a
+// per-child template was resolved to), the period it is in, and a threshold.
+//
+// Revision is part of the identity so that changing a budget's amount, or
+// deleting and recreating it, re-arms its thresholds for the rest of the
+// period: the alerts fired against the old amount say nothing about the new
+// one. Editing only the thresholds is not a new revision: a threshold already
+// claimed in the period stays claimed, and one that is new fires once spend
+// has reached it.
 type AlertClaim struct {
 	Scope            Scope
 	Subject          string
 	EffectiveSubject string
+	Revision         string
 	PeriodSeconds    int64
 	PeriodStart      time.Time
 	PeriodEnd        time.Time
 	Threshold        int
 }
 
-// key identifies the claim within one process.
+// key identifies the claim within one process. The event ID is derived from
+// it, so it must only ever change together with the claim identity.
 func (c AlertClaim) key() string {
 	return strings.Join([]string{
-		string(c.Scope), c.Subject, c.EffectiveSubject,
+		string(c.Scope), c.Subject, c.EffectiveSubject, c.Revision,
 		strconv.FormatInt(c.PeriodSeconds, 10),
 		strconv.FormatInt(c.PeriodStart.Unix(), 10),
 		strconv.Itoa(c.Threshold),
 	}, "\x00")
 }
 
-// PathSpend is the spend recorded for one user path.
-type PathSpend struct {
-	UserPath string
-	Total    float64
+// alertRevision identifies the version of a budget its alerts were fired
+// for: its creation time, in seconds as every store keeps it, and its amount.
+// Every replica reads both from the database, so they agree on it.
+func (b Budget) alertRevision() string {
+	var created int64
+	if !b.CreatedAt.IsZero() {
+		created = b.CreatedAt.Unix()
+	}
+	return strconv.FormatInt(created, 10) + ":" + strconv.FormatFloat(b.Amount, 'f', -1, 64)
+}
+
+// ChildSpend is the spend of one direct child of a per-child template: the
+// child's own usage plus that of every path below it.
+type ChildSpend struct {
+	Child string
+	Total float64
 }
 
 // AlertStore is the storage alert evaluation needs beyond Store. The SQL and
@@ -131,10 +152,12 @@ type AlertStore interface {
 	// PruneAlerts forgets the alerts of periods that ended before cutoff.
 	PruneAlerts(ctx context.Context, cutoff time.Time) error
 
-	// SumSpendByUserPath totals the spend of a user-path window per recorded
-	// user path, largest first, for at most limit paths. It is how the
-	// children of a per-child budget are found.
-	SumSpendByUserPath(ctx context.Context, window SpendWindow, limit int) ([]PathSpend, error)
+	// SumSpendByChild totals the spend of a user-path window per direct child
+	// of the window's subject, each child including every path below it, as
+	// enforcement counts a per-child budget. It returns the largest at most
+	// limit children; usage recorded on the subject itself is nobody's child
+	// and left out.
+	SumSpendByChild(ctx context.Context, window SpendWindow, limit int) ([]ChildSpend, error)
 }
 
 // encodeAlertThresholds renders thresholds for the SQL budgets table.

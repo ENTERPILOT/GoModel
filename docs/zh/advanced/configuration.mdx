@@ -267,7 +267,7 @@ server:
 | `SET_BUDGET_<PATH>`          | 为用户路径预置预算限额，例如 `daily=10`                             | _（空）_ |
 | `SET_PROVIDER_BUDGET_<NAME>` | 为提供商实例预置预算限额，例如 `daily=100`                    | _（空）_ |
 | `BUDGETS_ALERTS_WEBHOOK_URL` | 以 JSON 接收[预算告警](/zh/features/budgets#告警)的 webhook。设置 webhook 后才会评估告警 | _（空）_ |
-| `BUDGETS_ALERTS_WEBHOOK_SECRET` | 为每次投递签名：`X-GoModel-Signature` 携带请求体的 HMAC-SHA256 | _（空）_ |
+| `BUDGETS_ALERTS_WEBHOOK_SECRET` | 为每次投递签名：`X-GoModel-Signature` 携带时间戳以及 `<时间戳>.<请求体>` 的 HMAC-SHA256 | _（空）_ |
 | `BUDGETS_ALERTS_THRESHOLDS`  | 默认告警阈值，预算金额的百分比                                | `80,100` |
 | `BUDGETS_ALERTS_INTERVAL`    | 两次告警评估之间的秒数                                        | `60`     |
 | `BUDGETS_ALERTS_WEBHOOK_TIMEOUT` | 每次 webhook 投递尝试的秒数                               | `10`     |

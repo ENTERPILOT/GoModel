@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,8 +26,12 @@ const (
 	// HeaderEvent carries the alert type, HeaderDelivery the alert ID.
 	HeaderEvent    = "X-GoModel-Event"
 	HeaderDelivery = "X-GoModel-Delivery"
-	// HeaderSignature carries "sha256=" and the hex HMAC-SHA256 of the request
-	// body, keyed with the webhook secret. It is sent only when a secret is set.
+	// HeaderSignature carries "t=<unix seconds>,v1=<hex>": the time of the
+	// attempt, and the hex HMAC-SHA256 of "<t>.<body>" keyed with the webhook
+	// secret. Signing the time lets a receiver reject a replayed delivery
+	// without parsing the body. A later scheme adds another "v<n>=" pair, so
+	// receivers ignore pairs they do not know. It is sent only when a secret
+	// is set.
 	HeaderSignature = "X-GoModel-Signature"
 )
 
@@ -46,6 +51,7 @@ type webhook struct {
 	client     *http.Client
 	maxRetries int
 	backoff    time.Duration
+	now        func() time.Time
 }
 
 // newWebhook validates the endpoint. Its errors never echo the URL.
@@ -59,15 +65,34 @@ func newWebhook(cfg WebhookConfig, timeout time.Duration, maxRetries int) (*webh
 		timeout = defaultWebhookTimeout
 	}
 	return &webhook{
-		url:    raw,
-		host:   parsed.Host,
-		secret: []byte(cfg.Secret),
-		// The shared transport applies the proxy environment and http.tls
-		// trust, and never follows a redirect to another origin.
-		client:     httpclient.NewClientWithTimeout(timeout),
+		url:        raw,
+		host:       parsed.Host,
+		secret:     []byte(cfg.Secret),
+		client:     webhookClient(timeout),
 		maxRetries: max(maxRetries, 0),
 		backoff:    webhookBackoff,
+		now:        time.Now,
 	}, nil
+}
+
+// webhookClient is on the shared transport, which applies the proxy
+// environment and http.tls trust. It follows only same-origin 307 and 308
+// redirects, the ones that repeat the POST with its body and signature; a
+// 301, 302, or 303 would turn the delivery into a bodiless GET, so it is
+// reported as a failed delivery instead.
+func webhookClient(timeout time.Duration) *http.Client {
+	client := httpclient.NewClientWithTimeout(timeout)
+	sameOrigin := client.CheckRedirect
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if req.Response != nil {
+			switch req.Response.StatusCode {
+			case http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+				return sameOrigin(req, via)
+			}
+		}
+		return http.ErrUseLastResponse
+	}
+	return client
 }
 
 // send delivers event, retrying a failure that may be transient.
@@ -106,7 +131,7 @@ func (w *webhook) post(ctx context.Context, body []byte, event ext.AlertEvent) (
 	req.Header.Set(HeaderEvent, event.Type)
 	req.Header.Set(HeaderDelivery, event.ID)
 	if len(w.secret) > 0 {
-		req.Header.Set(HeaderSignature, Sign(w.secret, body))
+		req.Header.Set(HeaderSignature, Sign(w.secret, w.now(), body))
 	}
 
 	resp, err := w.client.Do(req)
@@ -124,12 +149,15 @@ func (w *webhook) post(ctx context.Context, body []byte, event ext.AlertEvent) (
 	return retry, fmt.Errorf("webhook answered HTTP %d", resp.StatusCode)
 }
 
-// Sign returns the HeaderSignature value for body: "sha256=" and the hex
-// HMAC-SHA256 of body keyed with secret.
-func Sign(secret, body []byte) string {
+// Sign returns the HeaderSignature value of body sent at t:
+// "t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<body>" keyed with secret>".
+func Sign(secret []byte, t time.Time, body []byte) string {
+	timestamp := strconv.FormatInt(t.Unix(), 10)
 	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte(timestamp))
+	mac.Write([]byte("."))
 	mac.Write(body)
-	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
+	return "t=" + timestamp + ",v1=" + hex.EncodeToString(mac.Sum(nil))
 }
 
 // transportError strips the request URL net/http puts into its errors: a

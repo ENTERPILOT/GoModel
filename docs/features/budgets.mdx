@@ -476,25 +476,35 @@ thresholds, marked `inactive` while no destination is configured.
 ### When an alert fires
 
 GoModel evaluates budgets in the background, every `interval` seconds, never
-while serving a request. An alert fires once for each budget, period, and
-threshold:
+while serving a request. An alert fires once for each budget revision, period,
+and threshold:
 
 - Replicas sharing a database send it once between them: an instance records
   the alert in the database before delivering it, and only the first record
   wins. With SQLite each instance has its own database and alerts on its own.
 - A new period, or a [reset](#reset-windows), starts over and can fire again.
-  Raising a budget's amount mid-period does not re-arm thresholds already
-  reached in that period.
+  So does a change to the reset anchor in Settings: the period is recomputed
+  from the new anchor, and its thresholds fire once the spend inside it
+  reaches them.
+- Changing a budget's amount, or deleting and recreating it, is a new revision
+  of the budget and re-arms all its thresholds for the rest of the period:
+  raised from 100 to 1000 after the 80% alert, it alerts again at 800. Editing
+  only the thresholds is not: a threshold that already fired stays fired, and
+  a new one fires once spend reaches it.
 - When spend passes several thresholds between two evaluations, each one
   fires, lowest first.
 - A [per-child budget](#dynamic-per-child-budgets) alerts per child: each
-  child reaches the thresholds of its own budget.
+  child reaches the thresholds of its own budget, on the same spend
+  enforcement counts, paths below the child included. One evaluation reads
+  the 10,000 children that spent most; the rest are not evaluated.
 - Spend is read from stored usage, so an alert trails the request that caused
   it by the usage flush (`USAGE_FLUSH_INTERVAL`, 5 s) plus up to one interval.
 
 The record is written before delivery, so an alert is delivered at most once:
 a gateway stopped between the two loses that alert, and one that could not be
-delivered after its retries is logged and counted, not sent later.
+delivered after its retries is logged and counted, not sent later. On
+shutdown, queued alerts get 5 s to be delivered; the ones still queued after
+that are abandoned, logged, and counted as delivery failures.
 
 ### Webhook payload
 
@@ -502,6 +512,7 @@ Each alert is one `POST` with a JSON body:
 
 ```json
 {
+  "schema_version": 1,
   "type": "budget.threshold_reached",
   "id": "bgt_5f0c2a9d41b7e3a86c1d02ef",
   "timestamp": "2026-04-25T12:00:07Z",
@@ -513,30 +524,41 @@ Each alert is one `POST` with a JSON body:
     "period_seconds": 86400,
     "period": "daily",
     "amount": 100,
-    "cost_basis": "provider"
+    "cost_basis": "provider",
+    "revision": "1745539200:100"
   },
   "threshold_percent": 80,
   "spent": 81.2,
   "usage_ratio": 0.812,
   "period_start": "2026-04-25T00:00:00Z",
   "period_end": "2026-04-26T00:00:00Z",
-  "projected_spend": 162.4
+  "projected_spend": 162.4,
+  "projected_exhaustion_at": "2026-04-25T14:47:00Z"
 }
 ```
 
 | Field                      | Meaning                                                                                              |
 | -------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `schema_version`           | `1`. It changes only if a field is renamed, removed, or changes meaning; added fields keep it.       |
 | `type`                     | `budget.threshold_reached`. Ignore types you do not know: more may be added.                         |
-| `id`                       | Identifies the alert. Retries of one alert carry the same `id`, so deduplicate on it.                |
+| `id`                       | Identifies the alert; deduplicate on it. See below.                                                  |
 | `timestamp`                | When GoModel raised the alert (UTC).                                                                 |
 | `budget.scope`, `.subject` | The budget: `user_path`, `label`, or `provider`, and its subject.                                    |
 | `budget.effective_subject` | What the spend was counted for: the child path of a per-child budget, otherwise the subject.         |
 | `budget.period_seconds`, `.period` | The reset period and its name (`hourly`, `daily`, `weekly`, `monthly`, or `<n>s`).           |
 | `budget.amount`, `.cost_basis` | The limit, and the cost `spent` is measured on (`provider` or `billed`).                         |
+| `budget.revision`          | Opaque. Changes when the amount changes or the budget is recreated; not when only thresholds change. |
 | `threshold_percent`        | The threshold that was reached.                                                                      |
 | `spent`, `usage_ratio`     | Spend in the period when the alert was raised, and `spent / amount` (above `1` when exceeded).       |
 | `period_start`, `period_end` | The period the alert belongs to. A reset moves `period_start` to the reset time.                   |
 | `projected_spend`          | See [Spend projection](#spend-projection). Omitted when too little of the period has elapsed.        |
+| `projected_exhaustion_at`  | When the budget runs out at the current rate. Omitted without a projection, or when it lasts the period. |
+
+Two deliveries carry the same `id` exactly when they are the same alert: the
+same budget (`scope`, `subject`, `effective_subject`, period), the same
+`revision`, the same `period_start`, and the same `threshold_percent`. Retries,
+and deliveries from another replica, reuse it. A new period, a reset, a moved
+reset anchor, or a new revision gives a new `id`.
 
 Fields are only ever added. Every delivery also carries these headers:
 
@@ -544,29 +566,42 @@ Fields are only ever added. Every delivery also carries these headers:
 | --------------------- | ------------------------------------------------------------------------ |
 | `X-GoModel-Event`     | The alert `type`                                                         |
 | `X-GoModel-Delivery`  | The alert `id`                                                           |
-| `X-GoModel-Signature` | `sha256=<hex>`: HMAC-SHA256 of the raw body, keyed with the webhook `secret`. Sent only when a secret is set. |
+| `X-GoModel-Signature` | `t=<unix seconds>,v1=<hex>`: the time of the attempt, and the HMAC-SHA256 of `<t>.<raw body>` keyed with the webhook `secret`. Sent only when a secret is set. |
 
-Verify the signature against the raw request body, before parsing it:
+Verify the signature against the raw request body, before parsing it, and
+reject a timestamp more than 5 minutes from your clock to stop replays. Every
+attempt is signed when it is sent, so retries pass too. Ignore pairs other
+than `t` and `v1`: a later scheme is added as `v2=`, next to `v1`.
 
 ```python
-import hashlib, hmac
+import hashlib, hmac, time
+
+TOLERANCE = 300  # seconds
 
 def verified(secret: bytes, body: bytes, header: str) -> bool:
-    expected = "sha256=" + hmac.new(secret, body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, header)
+    pairs = dict(p.split("=", 1) for p in header.split(",") if "=" in p)
+    t, signature = pairs.get("t", ""), pairs.get("v1", "")
+    if not t.isdigit() or abs(time.time() - int(t)) > TOLERANCE:
+        return False
+    expected = hmac.new(secret, t.encode() + b"." + body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature)
 ```
 
 Answer with any `2xx`. A network error, `408`, `429`, or `5xx` is retried up
 to `webhook_max_retries` times, waiting 1 s, 2 s, 4 s, and so on (30 s at
-most) between attempts; any other status is not retried. Redirects to another
-host are not followed. Deliveries use the gateway's outbound proxy
+most) between attempts; any other status is not retried. Only a `307` or `308`
+to the same origin is followed, since it repeats the `POST` with its body;
+any other redirect counts as a failed delivery, so configure the final URL. Deliveries use the gateway's outbound proxy
 (`HTTPS_PROXY`) and TLS trust (`http.tls`). A webhook that is down never
 delays the evaluation of other budgets or another webhook.
 
 The webhook is deliberately generic JSON: GoModel does not format messages for
 Slack, Teams, or email. Point it at a small receiver or an automation tool
 that does, or, in a custom build, register an `ext.AlertSink`, which receives
-the same events.
+the same events. A sink builds its HTTP clients with `ext.NewHTTPClient` to
+use the same proxy and TLS trust, may implement `ext.SharedStoreAware` to
+share state across replicas, and is released by the build that registered it
+once the gateway has shut down.
 
 Two Prometheus counters follow alerts: `gomodel_budget_alerts_fired_total`
 (`scope`, `threshold`) and `gomodel_budget_alert_delivery_failures_total`

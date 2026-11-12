@@ -337,8 +337,8 @@ budgets:
     webhook_timeout: 10 # seconds per delivery attempt; env: BUDGETS_ALERTS_WEBHOOK_TIMEOUT
     webhook_max_retries: 3 # retries with exponential backoff, 0 = none; env: BUDGETS_ALERTS_WEBHOOK_MAX_RETRIES
     # Each alert is POSTed as JSON to every webhook. url and secret accept secret
-    # references. With a secret, X-GoModel-Signature carries "sha256=" + the hex
-    # HMAC-SHA256 of the body. Env equivalent for one webhook (replaces this list):
+    # references. With a secret, X-GoModel-Signature carries "t=<unix>,v1=<hex>",
+    # the HMAC-SHA256 of "<t>.<body>". Env equivalent for one webhook (replaces this list):
     # BUDGETS_ALERTS_WEBHOOK_URL and BUDGETS_ALERTS_WEBHOOK_SECRET.
     webhooks: []
     #   - url: "https://alerts.example.com/gomodel"

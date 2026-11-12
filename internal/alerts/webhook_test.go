@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -69,6 +70,8 @@ func TestWebhookSignsTheBody(t *testing.T) {
 
 			hook, err := newWebhook(WebhookConfig{URL: server.URL + "/hooks/token", Secret: tt.secret}, time.Second, 0)
 			require.NoError(t, err)
+			sentAt := time.Unix(1777118407, 0)
+			hook.now = func() time.Time { return sentAt }
 			require.NoError(t, hook.send(context.Background(), testEvent()))
 
 			assert.Equal(t, "application/json", header.Get("Content-Type"))
@@ -84,9 +87,148 @@ func TestWebhookSignsTheBody(t *testing.T) {
 				assert.Empty(t, header.Get(HeaderSignature))
 				return
 			}
+			// Recompute it the way the documentation tells a receiver to.
 			mac := hmac.New(sha256.New, []byte(tt.secret))
-			mac.Write(body)
-			assert.Equal(t, "sha256="+hex.EncodeToString(mac.Sum(nil)), header.Get(HeaderSignature))
+			mac.Write([]byte("1777118407." + string(body)))
+			assert.Equal(t, "t=1777118407,v1="+hex.EncodeToString(mac.Sum(nil)), header.Get(HeaderSignature))
+			assert.True(t, verifySignature([]byte(tt.secret), header.Get(HeaderSignature), body, sentAt.Add(time.Minute)))
+		})
+	}
+}
+
+// verifySignature is the receiver side of the documented scheme: parse the
+// pairs, reject a timestamp outside the tolerance, compare v1.
+func verifySignature(secret []byte, header string, body []byte, now time.Time) bool {
+	var timestamp, signature string
+	for pair := range strings.SplitSeq(header, ",") {
+		key, value, _ := strings.Cut(pair, "=")
+		switch key {
+		case "t":
+			timestamp = value
+		case "v1":
+			signature = value
+		}
+	}
+	sent, err := strconv.ParseInt(timestamp, 10, 64)
+	if err != nil || now.Sub(time.Unix(sent, 0)).Abs() > 5*time.Minute {
+		return false
+	}
+	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte(timestamp + "."))
+	mac.Write(body)
+	return hmac.Equal([]byte(hex.EncodeToString(mac.Sum(nil))), []byte(signature))
+}
+
+func TestSignatureVerification(t *testing.T) {
+	secret := []byte("s3cret")
+	body := []byte(`{"id":"bgt_test"}`)
+	sentAt := time.Unix(1777118407, 0)
+	valid := Sign(secret, sentAt, body)
+	tests := []struct {
+		name   string
+		header string
+		body   []byte
+		now    time.Time
+		want   bool
+	}{
+		{name: "valid", header: valid, body: body, now: sentAt.Add(4 * time.Minute), want: true},
+		{name: "an unknown future scheme is ignored", header: valid + ",v2=abc", body: body, now: sentAt, want: true},
+		{name: "replayed past the tolerance", header: valid, body: body, now: sentAt.Add(6 * time.Minute)},
+		{name: "changed body", header: valid, body: []byte(`{"id":"bgt_other"}`), now: sentAt},
+		{name: "changed timestamp", header: strings.Replace(valid, "t=1777118407", "t=1777118408", 1), body: body, now: sentAt},
+		{name: "wrong secret", header: Sign([]byte("other"), sentAt, body), body: body, now: sentAt},
+		{name: "legacy body-only form", header: "sha256=" + strings.TrimPrefix(valid, "t=1777118407,v1="), body: body, now: sentAt},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, verifySignature(secret, tt.header, tt.body, tt.now))
+		})
+	}
+}
+
+// Each attempt is signed at its own time, so a retry long after the first
+// attempt still passes a receiver's tolerance window.
+func TestWebhookSignsEveryAttemptAtItsTime(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		hook, err := newWebhook(WebhookConfig{URL: "https://hooks.example.com/t0ken", Secret: "s3cret"}, time.Second, 2)
+		require.NoError(t, err)
+		var signatures []string
+		hook.client = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			signatures = append(signatures, req.Header.Get(HeaderSignature))
+			if len(signatures) < 3 {
+				return statusResponse(http.StatusServiceUnavailable), nil
+			}
+			return statusResponse(http.StatusOK), nil
+		})}
+		start := time.Now()
+		require.NoError(t, hook.send(context.Background(), testEvent()))
+		require.Len(t, signatures, 3)
+		assert.True(t, strings.HasPrefix(signatures[0], "t="+strconv.FormatInt(start.Unix(), 10)+",v1="))
+		assert.True(t, strings.HasPrefix(signatures[2], "t="+strconv.FormatInt(start.Add(3*time.Second).Unix(), 10)+",v1="))
+	})
+}
+
+// Against a real server: a client error is final, and only a same-origin
+// 307 or 308 is followed, since those repeat the POST with its body.
+func TestWebhookAgainstAServer(t *testing.T) {
+	tests := []struct {
+		name string
+		// status answers /hook; a redirect points at location.
+		status       int
+		location     string
+		wantErr      string
+		wantHookHits int
+		wantFinal    bool
+	}{
+		{name: "client error is not retried", status: http.StatusUnauthorized, wantErr: "after 1 attempt(s): webhook answered HTTP 401", wantHookHits: 1},
+		{name: "same-origin 307 is followed with the body", status: http.StatusTemporaryRedirect, location: "/final", wantHookHits: 1, wantFinal: true},
+		{name: "same-origin 308 is followed with the body", status: http.StatusPermanentRedirect, location: "/final", wantHookHits: 1, wantFinal: true},
+		{name: "same-origin 302 is not followed", status: http.StatusFound, location: "/final", wantErr: "after 1 attempt(s): webhook answered HTTP 302", wantHookHits: 1},
+		{name: "same-origin 303 is not followed", status: http.StatusSeeOther, location: "/final", wantErr: "webhook answered HTTP 303", wantHookHits: 1},
+		{name: "cross-origin 307 is not followed", status: http.StatusTemporaryRedirect, location: "http://other.invalid/final", wantErr: "webhook answered HTTP 307", wantHookHits: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hookHits, finalHits := 0, 0
+			var finalBody []byte
+			var finalSignature string
+			mux := http.NewServeMux()
+			mux.HandleFunc("/hook", func(w http.ResponseWriter, r *http.Request) {
+				hookHits++
+				_, _ = io.Copy(io.Discard, r.Body)
+				if tt.location != "" {
+					w.Header().Set("Location", tt.location)
+				}
+				w.WriteHeader(tt.status)
+			})
+			mux.HandleFunc("/final", func(w http.ResponseWriter, r *http.Request) {
+				finalHits++
+				assert.Equal(t, http.MethodPost, r.Method)
+				finalBody, _ = io.ReadAll(r.Body)
+				finalSignature = r.Header.Get(HeaderSignature)
+			})
+			server := httptest.NewServer(mux)
+			defer server.Close()
+
+			hook, err := newWebhook(WebhookConfig{URL: server.URL + "/hook", Secret: "s3cret"}, time.Second, 3)
+			require.NoError(t, err)
+			hook.backoff = time.Millisecond
+			err = hook.send(context.Background(), testEvent())
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, tt.wantErr)
+			}
+			assert.Equal(t, tt.wantHookHits, hookHits)
+			if !tt.wantFinal {
+				assert.Zero(t, finalHits)
+				return
+			}
+			require.Equal(t, 1, finalHits)
+			want, err := json.Marshal(testEvent())
+			require.NoError(t, err)
+			assert.JSONEq(t, string(want), string(finalBody))
+			assert.True(t, verifySignature([]byte("s3cret"), finalSignature, finalBody, time.Now()))
 		})
 	}
 }

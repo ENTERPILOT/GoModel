@@ -360,15 +360,16 @@ SET_BUDGET_TEAM__ALPHA='[{"period":"monthly","amount":500,"alert_thresholds":[50
 
 ### 何时触发告警
 
-GoModel 在后台每隔 `interval` 秒评估一次预算，从不在处理请求时评估。每个预算、周期和阈值只触发一次告警：
+GoModel 在后台每隔 `interval` 秒评估一次预算，从不在处理请求时评估。每个预算修订版本、周期和阈值只触发一次告警：
 
 - 共享同一数据库的多个副本合计只发送一次：实例先把告警记录写入数据库再投递，只有第一条记录生效。使用 SQLite 时每个实例有自己的数据库，各自告警。
-- 新周期或[重置](#重置窗口)会重新开始，可以再次触发。在周期中途提高预算金额，不会让本周期内已达到的阈值重新生效。
+- 新周期或[重置](#重置窗口)会重新开始，可以再次触发。在设置中修改重置锚点也是如此：周期按新锚点重新计算，周期内的支出达到阈值时会再次触发。
+- 修改预算金额，或删除后重新创建预算，会产生预算的新修订版本，并在本周期剩余时间内重新启用所有阈值：在 80% 告警之后把金额从 100 提高到 1000，支出到 800 时会再次告警。只修改阈值不算新修订版本：已触发的阈值保持已触发，新增的阈值在支出达到时触发。
 - 如果两次评估之间支出越过了多个阈值，每个阈值都会触发，从最低的开始。
-- [子路径预算](#动态的子路径预算)按子路径告警：每个子路径达到的是自己预算的阈值。
+- [子路径预算](#动态的子路径预算)按子路径告警：每个子路径达到的是自己预算的阈值，所用支出与执行限额时统计的相同，包含该子路径下的所有路径。一次评估读取支出最多的 10,000 个子路径，其余不评估。
 - 支出读取自已入库的用量，因此告警相对于触发它的请求会有延迟：用量刷新间隔（`USAGE_FLUSH_INTERVAL`，5 秒）加上最多一个评估间隔。
 
-记录在投递之前写入，因此告警最多投递一次：网关在两者之间被停止时，这条告警会丢失；重试后仍无法投递的告警会被记录到日志并计数，不会稍后补发。
+记录在投递之前写入，因此告警最多投递一次：网关在两者之间被停止时，这条告警会丢失；重试后仍无法投递的告警会被记录到日志并计数，不会稍后补发。关闭时，队列中的告警有 5 秒时间完成投递；之后仍在排队的告警会被放弃、记录到日志并计为投递失败。
 
 ### Webhook 负载
 
@@ -376,6 +377,7 @@ GoModel 在后台每隔 `interval` 秒评估一次预算，从不在处理请求
 
 ```json
 {
+  "schema_version": 1,
   "type": "budget.threshold_reached",
   "id": "bgt_5f0c2a9d41b7e3a86c1d02ef",
   "timestamp": "2026-04-25T12:00:07Z",
@@ -387,30 +389,37 @@ GoModel 在后台每隔 `interval` 秒评估一次预算，从不在处理请求
     "period_seconds": 86400,
     "period": "daily",
     "amount": 100,
-    "cost_basis": "provider"
+    "cost_basis": "provider",
+    "revision": "1745539200:100"
   },
   "threshold_percent": 80,
   "spent": 81.2,
   "usage_ratio": 0.812,
   "period_start": "2026-04-25T00:00:00Z",
   "period_end": "2026-04-26T00:00:00Z",
-  "projected_spend": 162.4
+  "projected_spend": 162.4,
+  "projected_exhaustion_at": "2026-04-25T14:47:00Z"
 }
 ```
 
 | 字段                       | 含义                                                                         |
 | -------------------------- | ---------------------------------------------------------------------------- |
+| `schema_version`           | `1`。只有字段被重命名、删除或含义改变时才会变化；新增字段不改变它。          |
 | `type`                     | `budget.threshold_reached`。请忽略未知类型：以后可能增加。                   |
-| `id`                       | 标识这条告警。同一告警的重试带有相同的 `id`，请据此去重。                    |
+| `id`                       | 标识这条告警，请据此去重。见下文。                                           |
 | `timestamp`                | GoModel 发出告警的时间（UTC）。                                              |
 | `budget.scope`、`.subject` | 预算：`user_path`、`label` 或 `provider`，以及它的对象。                     |
 | `budget.effective_subject` | 支出实际归属的对象：子路径预算为子路径，否则为对象本身。                     |
 | `budget.period_seconds`、`.period` | 重置周期及其名称（`hourly`、`daily`、`weekly`、`monthly` 或 `<n>s`）。 |
 | `budget.amount`、`.cost_basis` | 限额，以及 `spent` 所依据的成本（`provider` 或 `billed`）。              |
+| `budget.revision`          | 不透明值。金额改变或预算被重新创建时变化；只修改阈值时不变。                 |
 | `threshold_percent`        | 达到的阈值。                                                                 |
 | `spent`、`usage_ratio`     | 发出告警时本周期的支出，以及 `spent / amount`（超出时大于 `1`）。            |
 | `period_start`、`period_end` | 告警所属的周期。重置会把 `period_start` 移到重置时间。                     |
 | `projected_spend`          | 参见[支出预测](#支出预测)。周期经过的时间太短时省略。                        |
+| `projected_exhaustion_at`  | 按当前速度预算耗尽的时间。没有预测或预算足够撑过本周期时省略。               |
+
+两次投递带有相同的 `id`，当且仅当它们是同一条告警：同一预算（`scope`、`subject`、`effective_subject`、周期）、同一 `revision`、同一 `period_start` 和同一 `threshold_percent`。重试以及来自其他副本的投递都沿用它。新周期、重置、重置锚点移动或新修订版本都会产生新的 `id`。
 
 字段只会增加。每次投递还带有以下请求头：
 
@@ -418,21 +427,27 @@ GoModel 在后台每隔 `interval` 秒评估一次预算，从不在处理请求
 | --------------------- | ------------------------------------------------------------------------ |
 | `X-GoModel-Event`     | 告警的 `type`                                                            |
 | `X-GoModel-Delivery`  | 告警的 `id`                                                              |
-| `X-GoModel-Signature` | `sha256=<hex>`：以 webhook 的 `secret` 为密钥，对原始请求体计算的 HMAC-SHA256。仅在设置了 secret 时发送。 |
+| `X-GoModel-Signature` | `t=<Unix 秒>,v1=<hex>`：本次尝试的时间，以及以 webhook 的 `secret` 为密钥对 `<t>.<原始请求体>` 计算的 HMAC-SHA256。仅在设置了 secret 时发送。 |
 
-请在解析之前，针对原始请求体校验签名：
+请在解析之前，针对原始请求体校验签名，并拒绝与本地时钟相差超过 5 分钟的时间戳，以防重放。每次尝试都在发送时签名，因此重试也能通过校验。请忽略 `t` 和 `v1` 以外的键值对：以后的新方案会以 `v2=` 的形式与 `v1` 并列加入。
 
 ```python
-import hashlib, hmac
+import hashlib, hmac, time
+
+TOLERANCE = 300  # seconds
 
 def verified(secret: bytes, body: bytes, header: str) -> bool:
-    expected = "sha256=" + hmac.new(secret, body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, header)
+    pairs = dict(p.split("=", 1) for p in header.split(",") if "=" in p)
+    t, signature = pairs.get("t", ""), pairs.get("v1", "")
+    if not t.isdigit() or abs(time.time() - int(t)) > TOLERANCE:
+        return False
+    expected = hmac.new(secret, t.encode() + b"." + body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature)
 ```
 
-以任意 `2xx` 响应即可。网络错误、`408`、`429` 或 `5xx` 最多重试 `webhook_max_retries` 次，两次尝试之间等待 1 秒、2 秒、4 秒，依此类推（最长 30 秒）；其他状态码不重试。不会跟随指向其他主机的重定向。投递使用网关的出站代理（`HTTPS_PROXY`）和 TLS 信任配置（`http.tls`）。某个 webhook 不可用，不会拖慢其他预算的评估，也不会影响其他 webhook。
+以任意 `2xx` 响应即可。网络错误、`408`、`429` 或 `5xx` 最多重试 `webhook_max_retries` 次，两次尝试之间等待 1 秒、2 秒、4 秒，依此类推（最长 30 秒）；其他状态码不重试。只跟随指向同一源的 `307` 或 `308`，因为它们会连同请求体重发 `POST`；其他重定向都算作投递失败，请直接配置最终 URL。投递使用网关的出站代理（`HTTPS_PROXY`）和 TLS 信任配置（`http.tls`）。某个 webhook 不可用，不会拖慢其他预算的评估，也不会影响其他 webhook。
 
-webhook 有意保持为通用 JSON：GoModel 不会为 Slack、Teams 或电子邮件格式化消息。请把它指向一个负责格式化的小型接收服务或自动化工具；在自定义构建中，也可以注册一个 `ext.AlertSink`，它会收到相同的事件。
+webhook 有意保持为通用 JSON：GoModel 不会为 Slack、Teams 或电子邮件格式化消息。请把它指向一个负责格式化的小型接收服务或自动化工具；在自定义构建中，也可以注册一个 `ext.AlertSink`，它会收到相同的事件。sink 应使用 `ext.NewHTTPClient` 创建 HTTP 客户端，以沿用相同的代理和 TLS 信任配置；它可以实现 `ext.SharedStoreAware` 以在副本之间共享状态；注册它的构建负责在网关关闭后释放它。
 
 有两个 Prometheus 计数器跟踪告警：`gomodel_budget_alerts_fired_total`（`scope`、`threshold`）和 `gomodel_budget_alert_delivery_failures_total`（`destination`）；参见 [Prometheus 指标](/zh/guides/prometheus-metrics#针对未投递的预算告警进行告警)。
 

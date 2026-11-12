@@ -120,13 +120,18 @@ func TestAlerterFiresEachThresholdOnceAcrossInstances(t *testing.T) {
 		require.Len(t, events, 1)
 
 		projected := 170.0 // 85 spent halfway through the day
+		exhaustion := time.Date(2026, time.April, 25, 14, 7, 3, 0, time.UTC)
+		budgets := first.service.Budgets()
+		require.Len(t, budgets, 1)
 		assert.Equal(t, ext.AlertEvent{
-			Type:      ext.AlertTypeBudgetThreshold,
-			ID:        events[0].ID,
-			Timestamp: alertTestNow,
+			SchemaVersion: ext.AlertSchemaVersion,
+			Type:          ext.AlertTypeBudgetThreshold,
+			ID:            events[0].ID,
+			Timestamp:     alertTestNow,
 			Budget: ext.AlertBudget{
 				Scope: "user_path", Subject: "/team", EffectiveSubject: "/team",
 				PeriodSeconds: PeriodDailySeconds, Period: "daily", Amount: 100, CostBasis: "provider",
+				Revision: strconv.FormatInt(budgets[0].CreatedAt.Unix(), 10) + ":100",
 			},
 			ThresholdPercent: 80,
 			Spent:            85,
@@ -134,6 +139,8 @@ func TestAlerterFiresEachThresholdOnceAcrossInstances(t *testing.T) {
 			PeriodStart:      time.Date(2026, time.April, 25, 0, 0, 0, 0, time.UTC),
 			PeriodEnd:        time.Date(2026, time.April, 26, 0, 0, 0, 0, time.UTC),
 			ProjectedSpend:   &projected,
+
+			ProjectedExhaustionAt: &exhaustion,
 		}, events[0])
 		assert.Regexp(t, `^bgt_[0-9a-f]{24}$`, events[0].ID)
 
@@ -432,7 +439,7 @@ func (s *memoryAlertStore) ClaimAlert(_ context.Context, claim AlertClaim) (bool
 
 func (s *memoryAlertStore) PruneAlerts(context.Context, time.Time) error { return nil }
 
-func (s *memoryAlertStore) SumSpendByUserPath(context.Context, SpendWindow, int) ([]PathSpend, error) {
+func (s *memoryAlertStore) SumSpendByChild(context.Context, SpendWindow, int) ([]ChildSpend, error) {
 	return nil, nil
 }
 

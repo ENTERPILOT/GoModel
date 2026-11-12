@@ -178,7 +178,8 @@ storage. Incremented by `internal/alerts.Dispatcher.Notify`, not by a hook.
 
 Counter, label `destination` (`webhook`, or an `ext.AlertSink` name). Alerts a
 destination did not receive: a webhook that failed after its retries, a sink
-that returned an error or panicked, or an alert dropped on a full queue.
+that returned an error, panicked, or outlived its timeout, an alert dropped on
+a full queue, or one abandoned when the dispatcher closed.
 
 ## Helpers in `client.go`
 

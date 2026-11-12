@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -125,24 +126,7 @@ func TestBudgetAlertsReachARegisteredSink(t *testing.T) {
 	require.NotNil(t, application.budgetAlerts)
 
 	ctx := context.Background()
-	usageStore, err := storage.ResolveSQLBackend(ctx, application.storage,
-		func(db sqlx.DB) (*usage.SQLStore, error) { return usage.NewSQLStore(ctx, db, 0) },
-		func(*mongo.Database) (*usage.SQLStore, error) { return nil, errors.New("test runs on SQLite") },
-	)
-	require.NoError(t, err)
-	// SQLite compares usage timestamps by the second, so the entry is dated
-	// just before now, without leaving the budget period.
-	now := time.Now().UTC()
-	at := now.Add(-2 * time.Second)
-	if start, _ := budget.PeriodBounds(now, budget.PeriodMonthlySeconds, budget.DefaultSettings()); at.Before(start) {
-		at = start
-	}
-	cost := 6.0
-	require.NoError(t, usageStore.WriteBatch(ctx, []*usage.UsageEntry{{
-		ID: "0b0e7f6e-6f0e-4d3a-9c59-4f1f6f0a0001", RequestID: "r1", ProviderID: "p1",
-		Timestamp: at, Model: "gpt-4", Provider: "test", ProviderName: "test",
-		Endpoint: "/v1/chat/completions", UserPath: "/team/app", TotalCost: &cost,
-	}}))
+	writeAlertTestUsage(t, application, "/team/app", 6)
 
 	var event ext.AlertEvent
 	require.Eventually(t, func() bool {
@@ -166,4 +150,28 @@ func TestBudgetAlertsReachARegisteredSink(t *testing.T) {
 	require.NoError(t, application.budgetAlerts.alerter.Evaluate(ctx))
 	require.NoError(t, application.budgetAlerts.Close())
 	assert.Empty(t, sink.events)
+}
+
+// writeAlertTestUsage records cost for userPath in the app's SQLite usage
+// table, inside the current monthly period.
+func writeAlertTestUsage(t *testing.T, application *App, userPath string, cost float64) {
+	t.Helper()
+	ctx := context.Background()
+	usageStore, err := storage.ResolveSQLBackend(ctx, application.storage,
+		func(db sqlx.DB) (*usage.SQLStore, error) { return usage.NewSQLStore(ctx, db, 0) },
+		func(*mongo.Database) (*usage.SQLStore, error) { return nil, errors.New("test runs on SQLite") },
+	)
+	require.NoError(t, err)
+	// SQLite compares usage timestamps by the second, so the entry is dated
+	// just before now, without leaving the budget period.
+	now := time.Now().UTC()
+	at := now.Add(-2 * time.Second)
+	if start, _ := budget.PeriodBounds(now, budget.PeriodMonthlySeconds, budget.DefaultSettings()); at.Before(start) {
+		at = start
+	}
+	require.NoError(t, usageStore.WriteBatch(ctx, []*usage.UsageEntry{{
+		ID: uuid.NewString(), RequestID: "r1", ProviderID: "p1",
+		Timestamp: at, Model: "gpt-4", Provider: "test", ProviderName: "test",
+		Endpoint: "/v1/chat/completions", UserPath: userPath, TotalCost: &cost,
+	}}))
 }

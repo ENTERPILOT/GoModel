@@ -2,6 +2,7 @@ package budget
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -24,7 +25,7 @@ var alertTestNow = time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
 func testAlertClaim() AlertClaim {
 	start := time.Date(2026, time.April, 25, 0, 0, 0, 0, time.UTC)
 	return AlertClaim{
-		Scope: ScopeUserPath, Subject: "/customers", EffectiveSubject: "/customers/alice",
+		Scope: ScopeUserPath, Subject: "/customers", EffectiveSubject: "/customers/alice", Revision: "1745539200:10",
 		PeriodSeconds: PeriodDailySeconds, PeriodStart: start, PeriodEnd: start.AddDate(0, 0, 1), Threshold: 80,
 	}
 }
@@ -53,6 +54,7 @@ func assertAlertClaims(t *testing.T, first, second AlertStore) {
 		"period start":      func(c *AlertClaim) { c.PeriodStart = c.PeriodStart.Add(time.Hour) },
 		"period":            func(c *AlertClaim) { c.PeriodSeconds = PeriodWeeklySeconds },
 		"effective subject": func(c *AlertClaim) { c.EffectiveSubject = "/customers/bob" },
+		"budget revision":   func(c *AlertClaim) { c.Revision = "1745539200:20" },
 		"subject":           func(c *AlertClaim) { c.Subject = "/customers/alice" },
 		"scope":             func(c *AlertClaim) { c.Scope = ScopeLabel },
 	}
@@ -120,25 +122,49 @@ func TestMongoDBStoreAlertClaims(t *testing.T) {
 	})
 }
 
-// wantSpendByUserPath is what both backends must return for the usage the two
-// tests below write: largest first, grouped by recorded path, with the rows a
-// user-path budget does not count left out.
-var wantSpendByUserPath = []PathSpend{
-	{UserPath: "/customers/carol", Total: 10.5},
-	{UserPath: "/customers/alice", Total: 5},
-	{UserPath: "/customers/alice/app", Total: 4},
-	{UserPath: "/customers/bob", Total: 3},
-	{UserPath: "/customers", Total: 1},
+// wantSpendByChild is what both backends must return for the usage the two
+// tests below write: largest first, one row per direct child with the paths
+// below it summed in, and the rows a user-path budget does not count left out.
+var wantSpendByChild = []ChildSpend{
+	{Child: "/customers/carol", Total: 10.5},
+	{Child: "/customers/alice", Total: 9}, // 5 on the child, 4 on /customers/alice/app
+	{Child: "/customers/bob", Total: 3},
 }
 
-func spendByUserPathWindow() SpendWindow {
+// wantSpendByRootChild is the same usage under a per-child budget on "/".
+var wantSpendByRootChild = []ChildSpend{
+	{Child: "/customers-eu", Total: 50},
+	{Child: "/customers", Total: 23.5},
+}
+
+func spendByChildWindow(subject string) SpendWindow {
 	return SpendWindow{
-		Scope: ScopeUserPath, Subject: "/customers",
+		Scope: ScopeUserPath, Subject: subject,
 		Start: alertTestNow.Add(-12 * time.Hour), End: alertTestNow,
 	}
 }
 
-func TestSQLStoreSumSpendByUserPath(t *testing.T) {
+// assertSpendByChild checks a store holding the usage of the tests below.
+func assertSpendByChild(t *testing.T, store AlertStore) {
+	t.Helper()
+	ctx := context.Background()
+	got, err := store.SumSpendByChild(ctx, spendByChildWindow("/customers"), 100)
+	require.NoError(t, err)
+	assert.Equal(t, wantSpendByChild, got)
+
+	got, err = store.SumSpendByChild(ctx, spendByChildWindow("/customers"), 2)
+	require.NoError(t, err)
+	assert.Equal(t, wantSpendByChild[:2], got, "the limit keeps the largest children")
+
+	got, err = store.SumSpendByChild(ctx, spendByChildWindow("/"), 100)
+	require.NoError(t, err)
+	assert.Equal(t, wantSpendByRootChild, got)
+
+	_, err = store.SumSpendByChild(ctx, SpendWindow{Scope: ScopeLabel, Subject: "prod"}, 10)
+	require.Error(t, err)
+}
+
+func TestSQLStoreSumSpendByChild(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
 		usageStore, err := usage.NewSQLStore(ctx, db, 0)
@@ -161,20 +187,11 @@ func TestSQLStoreSumSpendByUserPath(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		got, err := store.SumSpendByUserPath(ctx, spendByUserPathWindow(), 100)
-		require.NoError(t, err)
-		assert.Equal(t, wantSpendByUserPath, got)
-
-		got, err = store.SumSpendByUserPath(ctx, spendByUserPathWindow(), 2)
-		require.NoError(t, err)
-		assert.Equal(t, wantSpendByUserPath[:2], got, "the limit keeps the largest spenders")
-
-		_, err = store.SumSpendByUserPath(ctx, SpendWindow{Scope: ScopeLabel, Subject: "prod"}, 10)
-		require.Error(t, err)
+		assertSpendByChild(t, store)
 	})
 }
 
-func TestMongoDBStoreSumSpendByUserPath(t *testing.T) {
+func TestMongoDBStoreSumSpendByChild(t *testing.T) {
 	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
 		ctx := context.Background()
 		store, err := NewMongoDBStore(ctx, db)
@@ -200,13 +217,88 @@ func TestMongoDBStoreSumSpendByUserPath(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		got, err := store.SumSpendByUserPath(ctx, spendByUserPathWindow(), 100)
-		require.NoError(t, err)
-		assert.Equal(t, wantSpendByUserPath, got)
+		assertSpendByChild(t, store)
+	})
+}
 
-		got, err = store.SumSpendByUserPath(ctx, spendByUserPathWindow(), 2)
+// pathCost is usage of one user path, for a test that writes it to any
+// backend.
+type pathCost struct {
+	path string
+	cost float64
+}
+
+// deepChildUsage is a per-child budget on /c where one child spends mostly
+// through many small paths below it: 7 on /c/a and 24 x 0.125 on its
+// descendants, 10 in all, while ten other children spend 0.25 each, more than
+// any single path below /c/a. Capping raw paths before summing them would
+// rank /c/a/k* last and see only 7 for /c/a.
+func deepChildUsage() []pathCost {
+	usage := []pathCost{{path: "/c/a", cost: 7}, {path: "/c", cost: 100}}
+	for i := range 24 {
+		path := fmt.Sprintf("/c/a/k%02d", i)
+		if i%2 == 1 {
+			path += "/deeper/still"
+		}
+		usage = append(usage, pathCost{path: path, cost: 0.125})
+	}
+	for i := range 10 {
+		usage = append(usage, pathCost{path: fmt.Sprintf("/c/b%02d", i), cost: 0.25})
+	}
+	return usage
+}
+
+// assertDeepChildrenAtTheCap checks that the limit counts children and every
+// child carries its whole subtree, on a store holding deepChildUsage.
+func assertDeepChildrenAtTheCap(t *testing.T, store AlertStore) {
+	t.Helper()
+	window := spendByChildWindow("/c")
+	for _, limit := range []int{1, 3, 11} {
+		got, err := store.SumSpendByChild(context.Background(), window, limit)
 		require.NoError(t, err)
-		assert.Equal(t, wantSpendByUserPath[:2], got, "the limit keeps the largest spenders")
+		require.Len(t, got, limit)
+		assert.Equal(t, ChildSpend{Child: "/c/a", Total: 10}, got[0], "limit %d", limit)
+		for i, spend := range got[1:] {
+			assert.Equal(t, ChildSpend{Child: fmt.Sprintf("/c/b%02d", i), Total: 0.25}, spend, "limit %d", limit)
+		}
+	}
+}
+
+func TestSQLStoreSumSpendByChildCountsDeepPathsAtTheCap(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		ctx := context.Background()
+		usageStore, err := usage.NewSQLStore(ctx, db, 0)
+		require.NoError(t, err)
+		store, err := NewSQLStore(ctx, db)
+		require.NoError(t, err)
+
+		var entries []*usage.UsageEntry
+		for i, row := range deepChildUsage() {
+			entries = append(entries, usageEntryWithCost(fmt.Sprintf("deep-%d", i), row.path, "", alertTestNow.Add(-time.Hour), row.cost))
+		}
+		require.NoError(t, usageStore.WriteBatch(ctx, entries))
+
+		assertDeepChildrenAtTheCap(t, store)
+	})
+}
+
+func TestMongoDBStoreSumSpendByChildCountsDeepPathsAtTheCap(t *testing.T) {
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		ctx := context.Background()
+		store, err := NewMongoDBStore(ctx, db)
+		require.NoError(t, err)
+
+		var docs []any
+		for _, row := range deepChildUsage() {
+			docs = append(docs, bson.D{
+				{Key: "timestamp", Value: alertTestNow.Add(-time.Hour)},
+				{Key: "user_path", Value: row.path}, {Key: "total_cost", Value: row.cost},
+			})
+		}
+		_, err = db.Collection("usage").InsertMany(ctx, docs)
+		require.NoError(t, err)
+
+		assertDeepChildrenAtTheCap(t, store)
 	})
 }
 

@@ -330,8 +330,8 @@ sum(increase(gomodel_usage_entries_dropped_total[5m])) by (reason) > 0
 więc niedziałający webhook milczy, jeśli go nie obserwujesz.
 `gomodel_budget_alerts_fired_total` zlicza alerty zgłoszone przez instancję,
 a `gomodel_budget_alert_delivery_failures_total` te, których cel nie
-otrzymał: webhook, który zawiódł mimo ponowień, albo alert odrzucony, bo
-kolejka tego celu była pełna. Przyczynę znajdziesz w logu serwera.
+otrzymał: webhook, który zawiódł mimo ponowień, sink, który zawiódł, alert
+odrzucony, bo kolejka tego celu była pełna, albo porzucony przy zamykaniu. Przyczynę znajdziesz w logu serwera.
 
 | Metryka                                        | Etykieta      | Wartości                                       |
 | ---------------------------------------------- | ------------- | ---------------------------------------------- |

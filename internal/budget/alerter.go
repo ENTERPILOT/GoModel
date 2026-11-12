@@ -11,15 +11,15 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/ext"
-	"github.com/enterpilot/gomodel/internal/core"
 )
 
 const (
 	// alertEvaluationTimeout bounds the storage work of one evaluation.
 	alertEvaluationTimeout = 30 * time.Second
-	// alertChildPathLimit caps the user paths read for one per-child template
-	// in one evaluation, largest spenders first.
-	alertChildPathLimit = 10000
+	// alertChildLimit caps the children read for one per-child template in
+	// one evaluation. Children are ranked by their whole spend, paths below
+	// them included, so the ones left out are the smallest spenders.
+	alertChildLimit = 10000
 	// alertPruneInterval is how often fired alerts of ended periods are
 	// deleted; alertPruneGrace keeps them a while past the period end.
 	alertPruneInterval = time.Hour
@@ -30,17 +30,21 @@ const (
 // background and hands each alert that fires to notify. It never runs on the
 // request path.
 //
-// An alert fires once per budget, period, and threshold across every gateway
-// instance sharing the database: an instance claims the alert in storage
-// before notifying, and only the first claim wins. A reset or a new period
-// starts a new period and so fires again. Claiming first means an instance
-// that stops between the claim and the delivery loses that alert.
+// An alert fires once per budget revision, period, and threshold across every
+// gateway instance sharing the database: an instance claims the alert in
+// storage before notifying, and only the first claim wins. A reset, a new
+// period, a moved period anchor, a changed amount, or a recreated budget is a
+// new claim and so fires again; see AlertClaim. Claiming first means delivery
+// is at most once: an instance that stops between the claim and the delivery
+// loses that alert.
 type Alerter struct {
 	service  *Service
 	store    AlertStore
 	notify   func(ext.AlertEvent)
 	interval time.Duration
 	now      func() time.Time
+	// childLimit is alertChildLimit; tests lower it.
+	childLimit int
 
 	mu sync.Mutex
 	// settled remembers the claims this instance already made or lost, by
@@ -71,6 +75,8 @@ func NewAlerter(service *Service, interval time.Duration, notify func(ext.AlertE
 		interval: interval,
 		now:      time.Now,
 		settled:  make(map[string]time.Time),
+
+		childLimit: alertChildLimit,
 	}, nil
 }
 
@@ -152,47 +158,36 @@ func (a *Alerter) Evaluate(ctx context.Context) error {
 }
 
 // evaluateChildren resolves a per-child template to one result per direct
-// child that has spend in the current period.
+// child that has spend in the current period. The store totals each child
+// over its whole subtree, so a child's spend is what enforcement counts.
 func (a *Alerter) evaluateChildren(ctx context.Context, template Budget, now time.Time, settings Settings) ([]CheckResult, error) {
 	start, end := activePeriod(template, now, settings)
-	paths, err := a.store.SumSpendByUserPath(ctx, SpendWindow{
+	children, err := a.store.SumSpendByChild(ctx, SpendWindow{
 		Scope:     ScopeUserPath,
 		Subject:   template.Subject,
 		CostBasis: template.EnforcedBasis(),
 		Start:     start,
 		End:       now,
-	}, alertChildPathLimit)
+	}, a.childLimit)
 	if err != nil {
 		return nil, err
 	}
-	if len(paths) == alertChildPathLimit {
-		slog.Warn("per-child budget has more user paths with spend than one alert evaluation reads; the smallest spenders are not evaluated",
-			"subject", template.Subject, "period", PeriodLabel(template.PeriodSeconds), "limit", alertChildPathLimit)
+	if len(children) == a.childLimit {
+		slog.Warn("per-child budget has more children with spend than one alert evaluation reads; the children that spent least are not evaluated",
+			"subject", template.Subject, "period", PeriodLabel(template.PeriodSeconds), "limit", a.childLimit)
 	}
 
-	var order []string
-	totals := make(map[string]float64)
-	for _, spend := range paths {
-		child, ok := core.UserPathChild(template.Subject, spend.UserPath)
-		if !ok {
-			continue // spend recorded on the template path itself
-		}
-		if _, seen := totals[child]; !seen {
-			order = append(order, child)
-		}
-		totals[child] += spend.Total
-	}
-	results := make([]CheckResult, 0, len(order))
-	for _, child := range order {
+	results := make([]CheckResult, 0, len(children))
+	for _, child := range children {
 		budget := template
-		budget.EffectiveSubject = child
+		budget.EffectiveSubject = child.Child
 		results = append(results, CheckResult{
 			Budget:      budget,
 			PeriodStart: start,
 			PeriodEnd:   end,
-			Spent:       totals[child],
+			Spent:       child.Total,
 			HasUsage:    true,
-			Remaining:   budget.Amount - totals[child],
+			Remaining:   budget.Amount - child.Total,
 		})
 	}
 	return results, nil
@@ -209,6 +204,7 @@ func (a *Alerter) fire(ctx context.Context, result CheckResult, now time.Time) {
 			Scope:            result.Budget.Scope,
 			Subject:          result.Budget.Subject,
 			EffectiveSubject: result.Budget.evaluationSubject(),
+			Revision:         result.Budget.alertRevision(),
 			PeriodSeconds:    result.Budget.PeriodSeconds,
 			PeriodStart:      result.PeriodStart,
 			PeriodEnd:        result.PeriodEnd,
@@ -261,9 +257,10 @@ func (a *Alerter) prune(ctx context.Context, now time.Time) error {
 func alertEvent(claim AlertClaim, result CheckResult, now time.Time) ext.AlertEvent {
 	sum := sha256.Sum256([]byte(claim.key()))
 	event := ext.AlertEvent{
-		Type:      ext.AlertTypeBudgetThreshold,
-		ID:        "bgt_" + hex.EncodeToString(sum[:12]),
-		Timestamp: now.UTC(),
+		SchemaVersion: ext.AlertSchemaVersion,
+		Type:          ext.AlertTypeBudgetThreshold,
+		ID:            "bgt_" + hex.EncodeToString(sum[:12]),
+		Timestamp:     now.UTC(),
 		Budget: ext.AlertBudget{
 			Scope:            string(claim.Scope),
 			Subject:          claim.Subject,
@@ -273,6 +270,7 @@ func alertEvent(claim AlertClaim, result CheckResult, now time.Time) ext.AlertEv
 			Period:           PeriodLabel(claim.PeriodSeconds),
 			Amount:           result.Budget.Amount,
 			CostBasis:        string(result.Budget.EnforcedBasis()),
+			Revision:         claim.Revision,
 		},
 		ThresholdPercent: claim.Threshold,
 		Spent:            result.Spent,
@@ -282,6 +280,7 @@ func alertEvent(claim AlertClaim, result CheckResult, now time.Time) ext.AlertEv
 	}
 	if projection, ok := result.Projection(now); ok {
 		event.ProjectedSpend = &projection.Spend
+		event.ProjectedExhaustionAt = projection.ExhaustionAt
 	}
 	return event
 }

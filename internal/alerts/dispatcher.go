@@ -20,7 +20,9 @@ const (
 	queueSize = 256
 	// sinkTimeout bounds one AlertSink.SendAlert call.
 	sinkTimeout = 30 * time.Second
-	// drainTimeout is how long Close lets queued alerts finish.
+	// drainTimeout is how long Close lets queued alerts finish. Alerts are
+	// claimed before they are queued, so what is still undelivered after it
+	// is lost: no replica sends it later.
 	drainTimeout = 5 * time.Second
 )
 
@@ -124,6 +126,12 @@ func (d *Dispatcher) Notify(event ext.AlertEvent) {
 
 func (d *Dispatcher) deliver(dest *destination) {
 	for event := range dest.queue {
+		if d.ctx.Err() != nil {
+			observability.BudgetAlertDeliveryFailures.WithLabelValues(dest.metric).Inc()
+			slog.Warn("alert abandoned: the gateway stopped before it was delivered", "destination", dest.label,
+				"alert_id", event.ID, "alert_type", event.Type)
+			continue
+		}
 		if err := dest.send(d.ctx, event); err != nil {
 			observability.BudgetAlertDeliveryFailures.WithLabelValues(dest.metric).Inc()
 			slog.Warn("alert delivery failed", "destination", dest.label, "alert_id", event.ID,
@@ -134,8 +142,11 @@ func (d *Dispatcher) deliver(dest *destination) {
 	}
 }
 
-// Close stops accepting alerts, gives queued ones a short time to be
-// delivered, then abandons the rest. It is safe to call repeatedly.
+// Close stops accepting alerts and gives queued ones drainTimeout to be
+// delivered. It then cancels the deliveries in flight and abandons the rest of
+// every queue; each alert it gives up on is logged and counted as a delivery
+// failure. Those alerts were already claimed, so delivery is at most once. It
+// is safe to call repeatedly.
 func (d *Dispatcher) Close() error {
 	if d == nil {
 		return nil

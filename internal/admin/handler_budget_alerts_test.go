@@ -27,7 +27,7 @@ func (s *alertingBudgetStore) ClaimAlert(context.Context, budget.AlertClaim) (bo
 
 func (s *alertingBudgetStore) PruneAlerts(context.Context, time.Time) error { return nil }
 
-func (s *alertingBudgetStore) SumSpendByUserPath(context.Context, budget.SpendWindow, int) ([]budget.PathSpend, error) {
+func (s *alertingBudgetStore) SumSpendByChild(context.Context, budget.SpendWindow, int) ([]budget.ChildSpend, error) {
 	return nil, nil
 }
 
