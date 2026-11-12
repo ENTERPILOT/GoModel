@@ -1,7 +1,7 @@
 repos:
   # 1. Standard hooks for file hygiene (trailing whitespace, newlines, etc.)
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v6.0.0 # Latest as of this update (Aug 9, 2025)
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c  # frozen: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -13,7 +13,7 @@ repos:
   # 2. Go-specific hooks for formatting and tidying
   # The pre-commit-golang repo has a v1.0.0+ fork which is more actively maintained.
   - repo: https://github.com/Bahjat/pre-commit-golang
-    rev: v1.0.6
+    rev: e6dbd4ef19c8ed1b09be6abb3e342df86484ee05  # frozen: v1.0.6
     hooks:
       - id: go-fmt-import # Runs goimports + gofmt on staged .go files
 
