@@ -333,13 +333,16 @@ func (s *Service) createImported(ctx context.Context, input ImportInput) (*View,
 // are kept: the import never widens access an administrator narrowed.
 func (s *Service) updateImported(ctx context.Context, key AuthKey, input ImportInput) (*View, error) {
 	now := time.Now().UTC()
-	key.Name = input.Name
-	key.Description = input.Description
-	key.UserPath = input.UserPath
-	key.Labels = input.Labels
-	key.AllowedModels = input.AllowedModels
-	key.RedactedValue = input.RedactedValue
-	key.ExpiresAt = input.ExpiresAt
+	applyImport := func(key *AuthKey) {
+		key.Name = input.Name
+		key.Description = input.Description
+		key.UserPath = input.UserPath
+		key.Labels = input.Labels
+		key.AllowedModels = input.AllowedModels
+		key.RedactedValue = input.RedactedValue
+		key.ExpiresAt = input.ExpiresAt
+	}
+	applyImport(&key)
 	key.UpdatedAt = now
 	if err := s.store.UpdateImported(ctx, key); err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -347,7 +350,9 @@ func (s *Service) updateImported(ctx context.Context, key AuthKey, input ImportI
 		}
 		return nil, fmt.Errorf("update imported auth key: %w", err)
 	}
-	s.applyUpsert(key, now)
+	// Applied to the key as cached now, not as read before the write: an
+	// access edit or deactivation made meanwhile is not undone.
+	s.applyKeyUpdate(key.ID, now, applyImport)
 	s.refreshBestEffort(ctx, "import")
 	return s.viewByID(key.ID)
 }
@@ -665,9 +670,14 @@ func (s *Service) applyKeyUpdate(id string, now time.Time, mutate func(*AuthKey)
 	key.UpdatedAt = now.UTC()
 	next.byID[id] = key
 	next.bySecretHash[key.SecretHash] = key
-	if _, active := next.activeByHash[key.SecretHash]; active {
+	// Recomputed, not carried over: an import can move the expiry and rename
+	// the key, which changes whether it is active and where it sorts.
+	if key.Active(now) {
 		next.activeByHash[key.SecretHash] = key
+	} else {
+		delete(next.activeByHash, key.SecretHash)
 	}
+	sortSnapshotOrder(&next)
 	s.snapshot = next
 }
 
