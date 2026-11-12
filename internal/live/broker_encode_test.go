@@ -207,6 +207,31 @@ func TestRetainedSizeBoundRejectsUnencodablePreviews(t *testing.T) {
 	}
 }
 
+// A retained preview outlives the request, so changing the entry's values
+// after publishing must not reach what a later subscriber replays.
+func TestBrokerRetainedPreviewDoesNotAliasEntryValues(t *testing.T) {
+	b := NewBroker(Config{Enabled: true})
+	temperature, maxTokens := 0.2, 256
+	entry := benchAuditEntry("req-1")
+	entry.Data.Temperature, entry.Data.MaxTokens = &temperature, &maxTokens
+	entry.Data.ResponseHeaders = map[string]string{"X-Request-Id": "req-1"}
+	b.PublishAuditEvent(EventAuditCompleted, entry)
+	b.PublishAuditEvent(EventAuditFlushed, entry)
+
+	temperature, maxTokens = 1.5, 9
+	entry.Data.RequestHeaders["Authorization"] = "sk-leaked"
+	entry.Data.ResponseHeaders["X-Added-Later"] = "1"
+
+	for i, event := range b.events {
+		data, ok := eventPayload(t, encoded(t, event))["data"].(map[string]any)
+		require.True(t, ok, "event %d", i)
+		assert.InDelta(t, 0.2, data["temperature"], 1e-9, "event %d", i)
+		assert.InDelta(t, 256, data["max_tokens"], 1e-9, "event %d", i)
+		assert.Equal(t, map[string]any{"Authorization": "[REDACTED]", "Content-Type": "application/json", "User-Agent": "openai-python/1.60.0"}, data["request_headers"], "event %d", i)
+		assert.Equal(t, map[string]any{"X-Request-Id": "req-1"}, data["response_headers"], "event %d", i)
+	}
+}
+
 // The bound must cover every member a preview encodes, including ones added
 // after it was written: fill every field reflectively with worst-case values
 // and check the encoding stays within it.
@@ -214,6 +239,8 @@ func TestRetainedSizeBoundCoversEncoding(t *testing.T) {
 	for _, text := range []string{"", "a", strings.Repeat("<\x01\xff\u2028", 40)} {
 		preview := auditPreview{}
 		fillWorstCase(reflect.ValueOf(&preview).Elem(), text)
+		// Previews never carry attempt bodies or headers (compactAttemptsForPreview
+		// drops them), and the bound refuses any that do.
 		for i := range preview.Data.Attempts {
 			preview.Data.Attempts[i].ResponseBody = nil
 			preview.Data.Attempts[i].ResponseHeaders = nil

@@ -713,6 +713,8 @@ func mergeAuditPreviewData(base, patch *auditPreviewData) *auditPreviewData {
 		data.ResponseHeaders = cloneStringMap(patch.ResponseHeaders)
 		data.WorkflowFeatures = clonePtr(patch.WorkflowFeatures)
 		data.Failover = clonePtr(patch.Failover)
+		data.Temperature = clonePtr(patch.Temperature)
+		data.MaxTokens = clonePtr(patch.MaxTokens)
 		return &data
 	}
 
