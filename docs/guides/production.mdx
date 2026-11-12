@@ -63,6 +63,11 @@ SQLite also runs with a single open connection by design, to keep one writer and
 avoid lock contention. Every audit flush, usage flush, and budget check
 serializes through it, which is a throughput ceiling under sustained load.
 
+The connection uses a 64 MiB page cache and memory-maps up to 256 MiB of the
+database file, and GoModel refreshes the query planner statistics at startup and
+hourly. Mapped pages are reclaimable file cache, but container memory metrics may
+count them.
+
 For Postgres, `POSTGRES_MAX_CONNS` defaults to `10`. Raise it first if you run
 high concurrency with budgets or rate limits enabled.
 
@@ -573,7 +578,9 @@ Two further points at volume:
   over SQLite, whose single connection makes this the dominant cost.
 
 Retention deletes rows but does not shrink a SQLite file. Vacuum it separately
-if the file size matters.
+if the file size matters. SQLite truncates the WAL file to 64 MiB when it
+resets the WAL; a long-lived reader can delay that reset and leave the file
+larger.
 
 ## Observability
 
