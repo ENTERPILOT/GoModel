@@ -82,6 +82,13 @@ func TestVisionRoutingSkipsTextOnlyTargets_E2E(t *testing.T) {
 			map[string]any{"type": "text", "text": "what is this?"},
 		}}},
 	}
+	responsesImage := map[string]any{
+		"model": "vision-chat",
+		"input": []any{map[string]any{"role": "user", "content": []any{
+			map[string]any{"type": "input_text", "text": "what is this?"},
+			map[string]any{"type": "input_image", "image_url": "data:image/png;base64,iVBORw0KGgo="},
+		}}},
+	}
 	chatText := map[string]any{
 		"model":    "vision-chat",
 		"messages": []any{map[string]any{"role": "user", "content": "hello"}},
@@ -95,6 +102,7 @@ func TestVisionRoutingSkipsTextOnlyTargets_E2E(t *testing.T) {
 	}{
 		{name: "chat image", path: chatCompletionsPath, payload: chatImage("vision-chat"), want: "gpt-4.1"},
 		{name: "messages image", path: messagesPath, payload: messagesImage, want: "gpt-4.1"},
+		{name: "responses image", path: responsesPath, payload: responsesImage, want: "gpt-4.1"},
 		{name: "chat text", path: chatCompletionsPath, payload: chatText, want: "gpt-4"},
 		{name: "vision routing off", path: chatCompletionsPath, payload: chatImage("plain-chat"), want: "gpt-4"},
 	}

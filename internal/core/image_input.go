@@ -48,7 +48,10 @@ const maxImagePartDepth = 6
 // Anthropic Messages JSON body carries an image content part. It scans the
 // raw bytes without decoding the request.
 func BodyHasImageInput(body []byte) bool {
-	if !bytes.Contains(body, []byte(`image`)) {
+	// Every image part type spells "image". JSON escapes can hide it from a
+	// byte search, and each of its letters escapes to \u006x, so a body with
+	// such an escape is walked too.
+	if !bytes.Contains(body, []byte(`image`)) && !bytes.Contains(body, []byte(`\u006`)) {
 		return false
 	}
 	root := gjson.ParseBytes(body)

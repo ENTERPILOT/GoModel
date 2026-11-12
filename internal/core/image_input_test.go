@@ -56,6 +56,21 @@ func TestBodyHasImageInput(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "anthropic image block with a JSON-escaped type",
+			body: `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"\u0069mage","source":{"type":"url","url":"https://example.com/a.png"}}]}]}`,
+			want: true,
+		},
+		{
+			name: "responses input_image with a JSON-escaped type",
+			body: `{"model":"m","input":[{"role":"user","content":[{"type":"input_ima\u0067e","file_id":"file-1"}]}]}`,
+			want: true,
+		},
+		{
+			name: "escaped letters without an image part",
+			body: `{"model":"m","messages":[{"role":"user","content":"\u0068ello"}]}`,
+			want: false,
+		},
+		{
 			name: "image type outside messages is ignored",
 			body: `{"model":"m","messages":[{"role":"user","content":"hi"}],"metadata":{"type":"image"}}`,
 			want: false,

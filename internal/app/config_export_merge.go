@@ -76,6 +76,7 @@ func exportVirtualModels(declared []config.VirtualModelConfig, stored []virtualm
 			StrategyConfig:  model.StrategyConfig,
 			SessionAffinity: model.SessionAffinity,
 			Failover:        model.Failover,
+			VisionRouting:   model.VisionRouting,
 			UserPaths:       model.UserPaths,
 			Description:     model.Description,
 			Slowdown:        model.Slowdown,
