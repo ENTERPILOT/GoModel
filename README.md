@@ -124,6 +124,7 @@ The official SDKs therefore work unchanged. Configure their base URLs as follows
 - Kilo AI
 - Eden AI
 - MiniMax
+- Mistral AI
 - Xiaomi MiMo
 - OpenCode Go
 - Azure OpenAI

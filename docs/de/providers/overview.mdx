@@ -88,7 +88,7 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
 | vLLM | `VLLM_BASE_URL` (`VLLM_API_KEY` optional) | `meta-llama/Llama-3.1-8B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [vLLM](/de/providers/vllm) |
 | llama.cpp / LM Studio | `LLAMACPP_BASE_URL` (`LLAMACPP_API_KEY` optional) | `gemma-3-4b-it` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [llama.cpp](/de/providers/llamacpp) |
 | llm-d | `LLMD_BASE_URL` (`LLMD_API_KEY` optional) | `Qwen/Qwen2.5-0.5B-Instruct` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [llm-d](/de/providers/llmd) |
-| Amazon Bedrock | `BEDROCK_BASE_URL` (Region oder Endpunkt) + AWS-Zugangsdaten | `anthropic.claude-3-5-haiku-20241022-v1:0` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Amazon Bedrock](/de/providers/bedrock) |
+| Amazon Bedrock | `BEDROCK_BASE_URL` (Region oder Endpunkt) + `BEDROCK_API_KEY` oder AWS-Zugangsdaten | `anthropic.claude-3-5-haiku-20241022-v1:0` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Amazon Bedrock](/de/providers/bedrock) |
 | Amazon Bedrock Mantle | `BEDROCK_MANTLE_API_KEY` oder AWS-Zugangsdaten | `openai.gpt-5.6-sol` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | [Bedrock Mantle](/de/providers/bedrock-mantle) |
 
 ✅ Unterstützt ❌ Nicht unterstützt
@@ -183,7 +183,8 @@ Gateways wieder, nicht jede einzelne Modellfähigkeit, die ein Upstream-Provider
 - **Xiaomi MiMo** – TTS (`mimo-v2.5-tts*`) und ASR (`mimo-v2.5-asr`) werden über
   `/v1/audio/speech` und `/v1/audio/transcriptions` (übersetzt in MiMos Audio-Dialekt für Chat
   Completions) sowie direkt über Chat Completions bedient; für einen Kontext von 1M hängen Sie
-  `[1m]` an die Modell-ID an und führen sie in `XIAOMI_MODELS` auf.
+  `[1m]` an die Modell-ID an, führen sie in `XIAOMI_MODELS` auf und setzen
+  `XIAOMI_MODELS_MODE=merge`.
 - **OpenCode Go (OpenCode Zen)** – routet pro Modell: Die meisten Modelle verwenden
   `/chat/completions` im OpenAI-Stil, während reine `/messages`-Modelle (standardmäßig
   `qwen3.7-max`, überschreibbar mit `OPENCODE_GO_MESSAGES_MODELS`) an den Anthropic-nativen
@@ -322,7 +323,7 @@ Bei diesen Providern stoßen die meisten Benutzer auf Schwierigkeiten:
 
 - **Google Vertex AI** – benötigt ein GCP-Projekt, eine Region und entweder Application Default
   Credentials oder einen JSON-Key eines Service-Accounts.
-- **Amazon Bedrock** – kein eigener API-Key; verwendet die AWS-Credential-Chain und erfordert einen
+- **Amazon Bedrock** – ein Bedrock-API-Key oder die AWS-Credential-Chain; erfordert einen
   expliziten Modellzugriff in der Bedrock-Konsole.
 - **Azure OpenAI** – Deployment-bezogene oder `/openai/v1`-Base-URLs, der Query-Parameter `api-version` und der
   Header `api-key` statt `Authorization: Bearer`.

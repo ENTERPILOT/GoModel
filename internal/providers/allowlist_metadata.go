@@ -24,7 +24,7 @@ const allowlistMetadataTimeout = 10 * time.Second
 func fetchAllowlistMetadata(ctx context.Context, provider core.Provider, providerName string) *core.ModelsResponse {
 	ctx, cancel := context.WithTimeout(llmclient.WithoutCircuitBreaker(ctx), allowlistMetadataTimeout)
 	defer cancel()
-	resp, err := provider.ListModels(ctx)
+	resp, err := listModels(ctx, provider, providerName)
 	if err == nil {
 		return resp
 	}

@@ -135,8 +135,8 @@ func newOAuthManager(store *oauthStore, httpClient *http.Client) *oauthManager {
 // server whose record could not be read. generations is the sign-out count
 // per server from before records were read: a server signed out since then
 // gets no source, so a stale snapshot never brings its tokens back. The
-// decisions run without m.mu: a source's lock can be held by a token
-// refresh, and admin views must not wait for it.
+// decisions run without m.mu, so admin views never wait on a source; a
+// source's own lock is never held across a token refresh either.
 func (m *oauthManager) attach(specs []ServerSpec, records map[string]oauthRecord, keepMissing bool, generations map[string]uint64) {
 	if m == nil {
 		return
@@ -161,7 +161,7 @@ func (m *oauthManager) attach(specs []ServerSpec, records map[string]oauthRecord
 			current.adopt(record)
 			spec.oauth = current
 		default:
-			spec.oauth = newOAuthSource(spec.Name, record, m.store, m.httpClient)
+			spec.oauth = newOAuthSource(spec.Name, record, m.store, oauthHTTPClient(m.httpClient, spec.URL))
 		}
 		if spec.oauth != nil {
 			sources[spec.Name] = spec.oauth
@@ -177,6 +177,12 @@ func (m *oauthManager) attach(specs []ServerSpec, records map[string]oauthRecord
 		}
 	}
 	m.sources = sources
+	// A retired source keeps no idle connections to its token endpoint.
+	for name, old := range previous {
+		if sources[name] != old {
+			old.closeIdle()
+		}
+	}
 }
 
 // view is the sign-in state of name: its source, else its last failure.
@@ -216,6 +222,9 @@ func (m *oauthManager) fail(name, serverURL string, err error) {
 func (m *oauthManager) signedOut(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if source := m.sources[name]; source != nil {
+		source.closeIdle()
+	}
 	delete(m.sources, name)
 	delete(m.failures, name)
 	m.generations[name]++
@@ -343,7 +352,9 @@ func (s *Service) StartOAuth(ctx context.Context, name string, req OAuthStartReq
 }
 
 func (s *Service) startOAuth(ctx context.Context, spec ServerSpec, req OAuthStartRequest, generation uint64) (OAuthStart, error) {
-	discovery, err := discoverOAuth(ctx, s.oauth.httpClient, spec)
+	httpClient := oauthHTTPClient(s.oauth.httpClient, spec.URL)
+	defer httpClient.CloseIdleConnections()
+	discovery, err := discoverOAuth(ctx, httpClient, spec)
 	if err != nil {
 		return OAuthStart{}, err
 	}
@@ -351,7 +362,7 @@ func (s *Service) startOAuth(ctx context.Context, spec ServerSpec, req OAuthStar
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		slog.Warn("stored mcp oauth record could not be read; registering a new client", "server", spec.Name, "error", err)
 	}
-	client, err := resolveOAuthClient(ctx, s.oauth.httpClient, discovery.asm, req, stored)
+	client, err := resolveOAuthClient(ctx, httpClient, discovery.asm, req, stored)
 	if err != nil {
 		return OAuthStart{}, err
 	}
@@ -432,7 +443,9 @@ func (s *Service) completeOAuth(ctx context.Context, flow *oauthFlow, callback O
 	}
 	exchangeCtx, cancel := context.WithTimeout(ctx, oauthExchangeTimeout)
 	defer cancel()
-	exchangeCtx = context.WithValue(exchangeCtx, oauth2.HTTPClient, s.oauth.httpClient)
+	httpClient := oauthHTTPClient(s.oauth.httpClient, flow.record.ServerURL)
+	defer httpClient.CloseIdleConnections()
+	exchangeCtx = context.WithValue(exchangeCtx, oauth2.HTTPClient, httpClient)
 	token, err := flow.config.Exchange(exchangeCtx, callback.Code,
 		oauth2.VerifierOption(flow.verifier),
 		oauth2.SetAuthURLParam("resource", flow.record.Resource),
