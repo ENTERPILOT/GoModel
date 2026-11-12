@@ -103,7 +103,7 @@ func newPostgres(t *testing.T) sqlx.DB {
 // for the few tests that also need the raw pool — a store that has not moved
 // onto sqlx yet takes *pgxpool.Pool directly, and a test spanning both wants
 // them pointed at one schema.
-func NewPostgresPool(t *testing.T) *pgxpool.Pool {
+func NewPostgresPool(t testing.TB) *pgxpool.Pool {
 	t.Helper()
 
 	baseURL := strings.TrimSpace(os.Getenv(PostgresURLEnv))

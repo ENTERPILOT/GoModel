@@ -30,7 +30,10 @@ const (
 
 	// maxConsecutiveRetryFailures stops the one-entry-at-a-time retry of a
 	// failed flush once that many entries fail in a row: the database is then
-	// failing every write, not rejecting one entry.
+	// most likely failing every write (down, unreachable, out of space) rather
+	// than rejecting one entry, and retrying each remaining entry would only
+	// hold the flush loop until its deadline. The trade-off is that a run of
+	// that many rejected entries also gives up on the rest of the flush.
 	maxConsecutiveRetryFailures = 3
 )
 
@@ -411,9 +414,12 @@ func (r attemptRef) String() string {
 // writeAttempts inserts the provider attempts of every entry in multi-row
 // statements of at most maxRows rows.
 func writeAttempts(ctx context.Context, q sqlx.Querier, dialect sqlx.Dialect, maxRows int, entries []*LogEntry) error {
+	// An upper bound: normalization can drop attempts, never add them.
 	total := 0
 	for _, entry := range entries {
-		total += len(auditAttempts(entry))
+		if entry != nil && entry.Data != nil {
+			total += len(entry.Data.Attempts)
+		}
 	}
 	attempts := newRowBatch(q, "audit log attempts", insertAttemptPrefix, attemptRowPlaceholder, insertAttemptSuffix, maxRows, columnsPerAttempt, total)
 	for _, entry := range entries {

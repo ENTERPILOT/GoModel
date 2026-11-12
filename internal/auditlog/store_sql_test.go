@@ -509,6 +509,21 @@ func TestSQLStoreWriteBatchStopsRetryAfterConsecutiveFailures(t *testing.T) {
 	})
 }
 
+// A flush that fails because its context is done is not retried entry by
+// entry: every retry would fail the same way.
+func TestSQLStoreWriteBatchSkipsRetryOnDoneContext(t *testing.T) {
+	runSQLStoreTest(t, 0, func(t *testing.T, store *SQLStore, _ sqlx.DB) {
+		counting := countStatements(t, store)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		now := time.Unix(1700000000, 0).UTC()
+		entries := []*LogEntry{testLogEntry("log-0", now), testLogEntry("log-1", now), testLogEntry("log-2", now)}
+		require.Error(t, store.WriteBatch(ctx, entries))
+		assert.Equal(t, 1, counting.txs, "only the flush transaction")
+	})
+}
+
 // An interrupted CREATE INDEX CONCURRENTLY leaves an invalid index; the next
 // start must replace it rather than keep the unusable one.
 func TestBuildIndexConcurrentlyRebuildsInvalidIndex(t *testing.T) {
