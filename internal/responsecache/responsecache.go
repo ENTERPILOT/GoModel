@@ -12,6 +12,7 @@ import (
 	"github.com/tidwall/gjson"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/cache"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/embedding"
@@ -145,6 +146,10 @@ func (m *ResponseCacheMiddleware) setPartitionByUserPath(enabled bool) {
 func (m *ResponseCacheMiddleware) HandleRequest(c *echo.Context, body []byte, next func() error) error {
 	if m == nil {
 		return next()
+	}
+	if m.semantic != nil {
+		// The semantic lookup calls the embedder before any upstream call.
+		auditlog.FlushLiveUpdate(c)
 	}
 	return m.handle(&echoExchange{c: c}, body, next)
 }

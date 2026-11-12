@@ -121,7 +121,7 @@ func enforceAdmission(c *echo.Context, limiter RateLimiter, checker BudgetChecke
 		return admission{release: noopRelease}, nil
 	}
 	// Admission is the last step before the upstream call: show the request
-	// as resolved so far while it waits for a slot and while the call runs.
+	// as resolved so far while the upstream call runs.
 	auditlog.FlushLiveUpdate(c)
 	return admit(c.Request().Context(), limiter, checker, route, rateLimitHeaderSetter(c))
 }

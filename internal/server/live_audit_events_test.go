@@ -369,30 +369,32 @@ func TestLiveAuditEvents_RequestShapes(t *testing.T) {
 			cfg.AuditLogger = liveAuditTestLogger{broker: broker}
 			srv := New(provider, cfg)
 
-			send := func(r liveAuditRequest, requestID string) {
+			send := func(r liveAuditRequest, requestID string) *httptest.ResponseRecorder {
 				req := httptest.NewRequest(r.method, r.path, strings.NewReader(r.body))
 				req.Header.Set("Content-Type", "application/json")
 				req.Header.Set("Authorization", "Bearer live-master-key")
 				req.Header.Set(core.RequestIDHeader, requestID)
 				rec := httptest.NewRecorder()
 				srv.ServeHTTP(rec, req)
-				require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+				return rec
 			}
 			if tt.warmup != nil {
 				// The cache stores off the request path; wait until the
 				// warmed-up answer is served without an upstream call.
-				send(*tt.warmup, "live-warmup")
+				rec := send(*tt.warmup, "live-warmup")
+				require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
 				require.Eventually(t, func() bool {
 					before := upstreamCalls
-					send(*tt.warmup, "live-warmup")
-					return upstreamCalls == before
+					rec := send(*tt.warmup, "live-warmup")
+					return rec.Code == tt.wantStatus && upstreamCalls == before
 				}, 5*time.Second, 10*time.Millisecond)
 			}
 
 			recorder.sub = broker.Subscribe(broker.LatestSeq())
 			t.Cleanup(recorder.sub.Close)
 			probing = true
-			send(tt.request, "live-request")
+			rec := send(tt.request, "live-request")
+			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
 
 			assert.Len(t, inFlight, tt.wantInFlight)
 			assert.LessOrEqual(t, recorder.count(auditlog.LiveEventAuditUpdated), tt.maxUpdated)

@@ -65,7 +65,7 @@ func publishLiveAuditUpdate(c *echo.Context, entry *LogEntry) {
 }
 
 // EnrichEntryWithSessionID makes the detected session visible to realtime
-// audit subscribers once SessionCapture resolves it. Audit middleware
+// audit subscribers with the request's next live event. Audit middleware
 // starts outside authentication/session middleware, so audit.started cannot
 // carry the final scoped ID.
 func EnrichEntryWithSessionID(c *echo.Context, sessionID string) {

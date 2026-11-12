@@ -343,8 +343,6 @@ func handleWithCache[R any](
 		if marshalErr != nil {
 			slog.Debug("marshalRequestBody failed", "err", marshalErr)
 		} else {
-			// A semantic lookup calls the embedder first.
-			auditlog.FlushLiveUpdate(c)
 			err := s.responseCache.HandleRequest(c, body, func() error {
 				return dispatch(c, req, workflow)
 			})
