@@ -67,7 +67,12 @@ func TestSingleReplicaSweepPostgreSQL(t *testing.T) {
 		defer close(done)
 		first()
 	}()
-	<-inSweep
+	select {
+	case <-inSweep:
+	case <-time.After(10 * time.Second):
+		close(finish)
+		require.FailNow(t, "the first sweep did not start")
+	}
 	second()
 	assert.Equal(t, int32(1), sweeps.Load(), "the second replica skips while the first sweeps")
 	close(finish)

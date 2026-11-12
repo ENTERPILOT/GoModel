@@ -22,6 +22,7 @@ func TestFirstSweepDelay(t *testing.T) {
 		{"hourly, latest", time.Hour, highest, FirstSweepMinDelay + FirstSweepJitter - 1},
 		{"short interval, earliest", time.Minute, lowest, 0},
 		{"short interval, latest", time.Minute, highest, time.Minute - 1},
+		{"interval equal to the usual delay", FirstSweepMinDelay + FirstSweepJitter, lowest, FirstSweepMinDelay},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -38,7 +39,10 @@ func TestRunCleanupLoop(t *testing.T) {
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			RunCleanupLoop(stop, time.Hour, func() { runs <- time.Since(start) })
+			RunCleanupLoop(stop, time.Hour, func() {
+				runs <- time.Since(start)
+				time.Sleep(10 * time.Minute) // a long sweep does not shift the schedule
+			})
 		}()
 
 		synctest.Wait()

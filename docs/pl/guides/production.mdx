@@ -545,7 +545,7 @@ rozsądny wybór), aby zamykanie nie ścigało się z SIGKILL.
 
 ## Retencja danych i przyrost dysku
 
-Logowanie audytowe i śledzenie użycia zapisują jeden wiersz na request, a oba mechanizmy czyszczą dane co godzinę. Pierwsze czyszczenie rusza od jednej do pięciu minut po starcie, a nie przy uruchomieniu. Na PostgreSQL czyści jedna replika naraz; pozostałe pomijają tę rundę.
+Logowanie audytowe i śledzenie użycia zapisują jeden wiersz na request, a oba mechanizmy czyszczą dane co godzinę. Na SQLite i PostgreSQL pierwsze czyszczenie rusza od jednej do pięciu minut po starcie, a nie przy uruchomieniu, a na PostgreSQL każdą tabelę czyści naraz tylko jedna replika; pozostałe pomijają tę rundę. MongoDB usuwa oba rodzaje danych przez indeksy TTL.
 
 | Ustawienie | Wartość domyślna | Uwagi |
 | --- | --- | --- |

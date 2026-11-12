@@ -31,8 +31,8 @@ func runCleanupLoop(stop <-chan struct{}, first, interval time.Duration, cleanup
 	for {
 		select {
 		case <-timer.C:
+			timer.Reset(interval) // before the sweep, so its run time does not shift the schedule
 			cleanupFn()
-			timer.Reset(interval)
 		case <-stop:
 			return
 		}
@@ -43,7 +43,7 @@ func runCleanupLoop(stop <-chan struct{}, first, interval time.Duration, cleanup
 // shorter than the usual delay bounds it, so the first sweep is never later
 // than a regular one would be. randN returns a value in [0, n).
 func firstSweepDelay(interval time.Duration, randN func(n int64) int64) time.Duration {
-	if interval <= FirstSweepMinDelay+FirstSweepJitter {
+	if interval < FirstSweepMinDelay+FirstSweepJitter {
 		return time.Duration(randN(int64(interval)))
 	}
 	return FirstSweepMinDelay + time.Duration(randN(int64(FirstSweepJitter)))
