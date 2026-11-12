@@ -17,6 +17,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"path"
 	"strings"
 
 	"github.com/enterpilot/gomodel/config"
@@ -35,6 +36,7 @@ var content embed.FS
 type Handler struct {
 	indexHTML []byte
 	csp       string
+	assets    fs.FS
 	staticFS  http.Handler
 	basePath  string
 }
@@ -62,6 +64,7 @@ func NewWithDemoMode(basePath string, demoMode bool) (*Handler, error) {
 	return &Handler{
 		indexHTML: indexHTML,
 		csp:       contentSecurityPolicy(runtimeGlobals(basePath, demoMode)),
+		assets:    staticSub,
 		staticFS: http.StripPrefix(
 			"/admin/static/",
 			http.FileServer(http.FS(staticSub)),
@@ -137,10 +140,7 @@ func (h *Handler) Index(c *echo.Context) error {
 	header.Set("Content-Type", "text/html; charset=utf-8")
 	// The entry point references hashed assets; it must always be fresh.
 	header.Set("Cache-Control", "no-cache")
-	header.Set("Content-Security-Policy", h.csp)
-	header.Set("X-Frame-Options", "DENY")
-	header.Set("X-Content-Type-Options", "nosniff")
-	header.Set("Referrer-Policy", "no-referrer")
+	h.setSecurityHeaders(header)
 	c.Response().WriteHeader(http.StatusOK)
 	_, err := bytes.NewReader(h.indexHTML).WriteTo(c.Response())
 	if err != nil {
@@ -149,13 +149,41 @@ func (h *Handler) Index(c *echo.Context) error {
 	return err
 }
 
-// Static serves GET /admin/static/* — embedded SPA assets.
+// setSecurityHeaders applies the browser hardening headers every dashboard
+// response carries, the page and its assets alike.
+func (h *Handler) setSecurityHeaders(header http.Header) {
+	header.Set("Content-Security-Policy", h.csp)
+	header.Set("X-Frame-Options", "DENY")
+	header.Set("X-Content-Type-Options", "nosniff")
+	header.Set("Referrer-Policy", "no-referrer")
+}
+
+// Static serves GET /admin/static/* — embedded SPA assets. It serves files
+// only: a directory answers 404 instead of a listing, and so does index.html,
+// which Index alone serves, with the runtime globals its CSP expects.
 func (h *Handler) Static(c *echo.Context) error {
-	c.Response().Header().Set("X-Content-Type-Options", "nosniff")
+	header := c.Response().Header()
+	h.setSecurityHeaders(header)
+	urlPath := c.Request().URL.Path
+	if !h.isAsset(strings.TrimPrefix(urlPath, "/admin/static/")) {
+		http.NotFound(c.Response(), c.Request())
+		return nil
+	}
 	// Vite emits content-hashed filenames under assets/, safe to cache hard.
-	if strings.Contains(c.Request().URL.Path, "/assets/") {
-		c.Response().Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	if strings.Contains(urlPath, "/assets/") {
+		header.Set("Cache-Control", "public, max-age=31536000, immutable")
 	}
 	h.staticFS.ServeHTTP(c.Response(), c.Request())
 	return nil
+}
+
+// isAsset reports whether name, a path below /admin/static/, is a file the
+// static route serves.
+func (h *Handler) isAsset(name string) bool {
+	name = strings.TrimPrefix(path.Clean("/"+name), "/")
+	if path.Base(name) == "index.html" {
+		return false
+	}
+	info, err := fs.Stat(h.assets, name)
+	return err == nil && !info.IsDir()
 }
