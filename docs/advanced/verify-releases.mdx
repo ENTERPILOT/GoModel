@@ -28,8 +28,8 @@ gh attestation verify gomodel_0.2.4_linux_amd64.tar.gz --repo ENTERPILOT/GoModel
 ```
 
 The command exits non-zero unless the file was built by a workflow in this
-repository. Every file in a release is covered: the archives, `checksums.txt`,
-and the SBOMs.
+repository. Every asset uploaded to a release is covered: the archives,
+`checksums.txt`, and the SBOMs. GitHub's generated source code archives are not.
 
 To also require the release workflow and a specific tag:
 
@@ -60,8 +60,8 @@ the image by digest (`enterpilot/gomodel@sha256:...`).
 
 ## SBOMs
 
-- **Binaries**: each archive has an SPDX file next to it in the release, named
-  `<archive>.sbom.json`.
+- **Binaries**: each binary archive has an SPDX file next to it in the release,
+  named `<archive>.sbom.json`.
 - **Docker image**: the SBOM is stored with the image.
 
   ```bash

@@ -29,8 +29,9 @@ gh attestation verify gomodel_0.2.4_linux_amd64.tar.gz --repo ENTERPILOT/GoModel
 ```
 
 Der Befehl endet mit einem Fehlercode, wenn die Datei nicht von einem Workflow
-in diesem Repository gebaut wurde. Abgedeckt ist jede Datei eines Releases: die
-Archive, `checksums.txt` und die SBOMs.
+in diesem Repository gebaut wurde. Abgedeckt ist jedes in ein Release
+hochgeladene Asset: die Archive, `checksums.txt` und die SBOMs. Die von GitHub
+erzeugten Quellcode-Archive gehören nicht dazu.
 
 So verlangen Sie zusätzlich den Release-Workflow und einen bestimmten Tag:
 
@@ -62,8 +63,8 @@ Sie verifiziert haben, deployen Sie das Image per Digest
 
 ## SBOMs
 
-- **Binaries**: Zu jedem Archiv liegt im Release eine SPDX-Datei mit dem Namen
-  `<archive>.sbom.json`.
+- **Binaries**: Zu jedem Binary-Archiv liegt im Release eine SPDX-Datei mit dem
+  Namen `<archive>.sbom.json`.
 - **Docker-Image**: Die SBOM ist zusammen mit dem Image gespeichert.
 
   ```bash

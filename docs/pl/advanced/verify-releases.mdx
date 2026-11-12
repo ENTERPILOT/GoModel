@@ -29,8 +29,9 @@ gh attestation verify gomodel_0.2.4_linux_amd64.tar.gz --repo ENTERPILOT/GoModel
 ```
 
 Polecenie kończy się kodem błędu, jeśli plik nie został zbudowany przez workflow
-w tym repozytorium. Objęty jest każdy plik release’u: archiwa, `checksums.txt`
-i SBOM-y.
+w tym repozytorium. Objęty jest każdy plik wgrany do release’u: archiwa,
+`checksums.txt` i SBOM-y. Nie dotyczy to archiwów kodu źródłowego generowanych
+przez GitHuba.
 
 Aby dodatkowo wymagać workflow release’u i konkretnego tagu:
 
@@ -61,8 +62,8 @@ zweryfikowałeś, wdrażaj obraz po digeście (`enterpilot/gomodel@sha256:...`).
 
 ## SBOM-y
 
-- **Binarki**: obok każdego archiwum w release’ie znajduje się plik SPDX o
-  nazwie `<archive>.sbom.json`.
+- **Binarki**: obok każdego archiwum z binarką w release’ie znajduje się plik
+  SPDX o nazwie `<archive>.sbom.json`.
 - **Obraz Dockera**: SBOM jest przechowywany razem z obrazem.
 
   ```bash

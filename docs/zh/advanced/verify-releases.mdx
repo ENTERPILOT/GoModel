@@ -21,7 +21,7 @@ v0.2.3 之后的每个 Release 都附带签名的构建来源证明：它声明�
 gh attestation verify gomodel_0.2.4_linux_amd64.tar.gz --repo ENTERPILOT/GoModel
 ```
 
-如果该文件不是由本仓库中的工作流构建的，命令会以非零状态退出。Release 中的每个文件都在覆盖范围内：归档文件、`checksums.txt` 和 SBOM。
+如果该文件不是由本仓库中的工作流构建的，命令会以非零状态退出。上传到 Release 的每个文件都在覆盖范围内：归档文件、`checksums.txt` 和 SBOM。GitHub 自动生成的源代码归档不在其中。
 
 如需同时限定 Release 工作流和具体的 tag：
 
@@ -46,11 +46,11 @@ cosign verify enterpilot/gomodel:0.2.4 \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
 ```
 
-tag 可以被移动，digest 则不能。要运行的正是您验证过的内容，请按 digest 部署镜像（`enterpilot/gomodel@sha256:...`）。
+tag 可以被移动，digest 则不能。为确保运行的正是您验证过的内容，请按 digest 部署镜像（`enterpilot/gomodel@sha256:...`）。
 
 ## SBOM
 
-- **二进制文件**：Release 中每个归档文件旁都有一个 SPDX 文件，名为 `<archive>.sbom.json`。
+- **二进制文件**：Release 中每个二进制归档文件旁都有一个 SPDX 文件，名为 `<archive>.sbom.json`。
 - **Docker 镜像**：SBOM 与镜像一同存储。
 
   ```bash
