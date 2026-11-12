@@ -92,12 +92,15 @@ zuordnen kann, etwa `GET /files`. Der Zugriff ist daher eingeschränkt:
   behalten ihn. Ein Key ohne Zugriff erhält `403` mit dem Fehlercode
   `passthrough_access_denied`.
 - **Modell-Allowlists** – ein Body, der ein `model` nennt, wird gegen die
-  Allowlist des Aufrufers geprüft. Ein Request, der kein Modell nennt, wirkt auf
-  den gesamten Provider, daher muss die Allowlist den gesamten Provider
-  (`anthropic/`) oder alles (`/`) freigeben. Ein auf
+  Allowlist des Aufrufers geprüft. Die Freigabe des Modells genügt für einen
+  `POST` an einen Inferenz-Endpunkt (`chat/completions`, `completions`,
+  `responses`, `embeddings`, `messages`, `audio/speech`, DeepSeek
+  `beta/completions`, Cohere `v2/chat` und `v2/embed`, Jev `systemone`). Jeder
+  andere Request wirkt auf den gesamten Provider, daher muss die Allowlist den
+  gesamten Provider (`anthropic/`) oder alles (`/`) freigeben. Ein auf
   `anthropic/claude-sonnet-4-6` beschränkter Key kann
   `POST /p/anthropic/v1/messages` für dieses Modell aufrufen, aber nicht
-  `GET /p/anthropic/v1/models`.
+  `GET /p/anthropic/v1/models` oder `POST /p/anthropic/v1/messages/batches`.
 
 Gewähren Sie Passthrough-Zugriff beim Erstellen eines Keys
 (`"passthrough_access": true` bei `POST /admin/auth-keys`), auf der Seite API Keys

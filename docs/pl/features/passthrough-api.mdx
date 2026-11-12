@@ -85,11 +85,14 @@ serwera, w tym do ścieżek, których gateway nie potrafi ograniczyć do wywołu
   które istniały przed wprowadzeniem dostępu do passthrough, go zachowują. Klucz bez
   dostępu dostaje `403` z kodem błędu `passthrough_access_denied`.
 - **Allowlisty modeli** – body, które wskazuje `model`, jest sprawdzane z allowlistą
-  wywołującego. Request, który nie wskazuje modelu, działa na całym providerze,
+  wywołującego. Dostęp do modelu wystarcza dla `POST` na endpoint inferencji
+  (`chat/completions`, `completions`, `responses`, `embeddings`, `messages`,
+  `audio/speech`, DeepSeek `beta/completions`, Cohere `v2/chat` i `v2/embed`,
+  Jev `systemone`). Każdy inny request działa na całym providerze,
   więc allowlista musi obejmować całego providera (`anthropic/`) lub wszystko
   (`/`). Klucz ograniczony do `anthropic/claude-sonnet-4-6` może wywołać
   `POST /p/anthropic/v1/messages` dla tego modelu, ale nie
-  `GET /p/anthropic/v1/models`.
+  `GET /p/anthropic/v1/models` ani `POST /p/anthropic/v1/messages/batches`.
 
 Przyznaj dostęp do passthrough przy tworzeniu klucza (`"passthrough_access": true`
 w `POST /admin/auth-keys`), na stronie API Keys w dashboardzie lub później.

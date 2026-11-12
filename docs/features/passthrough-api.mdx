@@ -85,11 +85,14 @@ credential, including routes the gateway cannot scope to a caller, such as
   that existed before passthrough access was introduced keep it. A key without
   access gets `403` with error code `passthrough_access_denied`.
 - **Model allowlists** — a body that names a `model` is checked against the
-  caller's allowlist. A request that names no model acts on the whole provider,
+  caller's allowlist. Granting the model is enough for a `POST` to an inference
+  endpoint (`chat/completions`, `completions`, `responses`, `embeddings`,
+  `messages`, `audio/speech`, DeepSeek `beta/completions`, Cohere `v2/chat` and
+  `v2/embed`, Jev `systemone`). Every other request acts on the whole provider,
   so the allowlist must grant the whole provider (`anthropic/`) or everything
   (`/`). A key limited to `anthropic/claude-sonnet-4-6` can call
   `POST /p/anthropic/v1/messages` for that model, but not
-  `GET /p/anthropic/v1/models`.
+  `GET /p/anthropic/v1/models` or `POST /p/anthropic/v1/messages/batches`.
 
 Grant passthrough access when you create a key (`"passthrough_access": true`
 on `POST /admin/auth-keys`), on the dashboard's API Keys page, or later.
