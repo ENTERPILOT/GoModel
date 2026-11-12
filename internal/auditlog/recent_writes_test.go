@@ -203,7 +203,7 @@ func TestSQLStoreAddsWriteStampColumns(t *testing.T) {
 		t.Cleanup(func() { _ = store.Close() })
 		store.indexBuild.Wait()
 
-		columns, err := auditColumns(ctx, db, auditLogTable)
+		columns, err := sqlx.Columns(ctx, db, auditLogTable)
 		require.NoError(t, err)
 		assert.True(t, columns["writer_id"])
 		assert.True(t, columns["written_at"])
