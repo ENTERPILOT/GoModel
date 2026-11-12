@@ -137,8 +137,8 @@ optionalen Feld `allowed_mcp` bei `POST /admin/auth-keys` oder nachträglich mit
 `PUT /admin/auth-keys/<key-id>/allowed-mcp`
 (`{"allowed_mcp": ["github/*", "exa/web_search_exa"]}`). `server/*` gewährt einen
 ganzen Server und `server/tool` ein einzelnes Tool; ein reines `server` wird als
-`server/*` gespeichert. Eine explizit leere Liste hebt die Beschränkung auf; ein
-fehlendes Feld wird abgelehnt.
+`server/*` gespeichert. Bei `PUT` hebt eine explizit leere Liste die Beschränkung auf;
+ein fehlendes Feld wird abgelehnt.
 
 Dashboard-Zugriff regelt nur `/admin/*`. Modell-Endpunkte und der Self-Service-Endpunkt [`GET /v1/usage`](/de/advanced/usage-api) bleiben für jeden verwalteten Key verfügbar, mit Ausnahme der Provider-Passthrough-Routen (`/p/{provider}/...`): Verwaltete Keys werden ohne Passthrough-Zugriff erstellt; Sie erteilen ihn mit `"passthrough_access": true` bei `POST /admin/auth-keys` oder mit `PUT /admin/auth-keys/<key-id>/passthrough-access` (siehe [Passthrough-Zugriffskontrolle](/de/features/passthrough-api#zugriffskontrolle)).
 
@@ -216,7 +216,7 @@ Für einen bereichsbeschränkten Admin gilt:
 - Neue API-Keys und Benutzerrichtlinien verwenden standardmäßig die Wurzel des Bereichs und können nicht
   außerhalb davon erstellt werden. Auf diese Weise erstellte Keys mit Dashboard-Zugriff sind ihrerseits
   bereichsbeschränkte Admins dieses Teilbaums.
-- Ein Key kann seine eigenen Labels, erlaubten Modelle oder Zugriffs-Flags nicht ändern
+- Ein Key kann seine eigenen Labels, erlaubten Modelle, seinen MCP-Zugriff oder seine Zugriffs-Flags nicht ändern
   (`403 auth_key_self_update`); er kann sich aber weiterhin selbst deaktivieren. Ein Key mit
   erlaubten Modellen kann den Keys, die er erstellt oder bearbeitet, nur Modelle geben, die ihm selbst
   erlaubt sind: `openai/*` kann `openai/gpt-4o-mini` vergeben, aber weder

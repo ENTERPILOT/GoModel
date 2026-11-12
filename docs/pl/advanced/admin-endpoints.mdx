@@ -137,8 +137,8 @@ opcjonalnego pola `allowed_mcp` w `POST /admin/auth-keys` lub później przez
 `PUT /admin/auth-keys/<key-id>/allowed-mcp`
 (`{"allowed_mcp": ["github/*", "exa/web_search_exa"]}`). `server/*` daje dostęp do
 całego serwera, a `server/tool` do jednego narzędzia; samo `server` jest zapisywane
-jako `server/*`. Jawnie pusta lista znosi ograniczenie; pominięcie pola jest
-odrzucane.
+jako `server/*`. W `PUT` jawnie pusta lista znosi ograniczenie, a pominięcie pola
+jest odrzucane.
 
 Dostęp do dashboardu dotyczy wyłącznie `/admin/*`. Endpointy modeli i samoobsługowy endpoint [`GET /v1/usage`](/pl/advanced/usage-api) pozostają dostępne dla każdego zarządzanego klucza, z wyjątkiem tras passthrough do providerów (`/p/{provider}/...`): zarządzane klucze są tworzone bez dostępu do passthrough, a nadajesz go przez `"passthrough_access": true` w `POST /admin/auth-keys` lub `PUT /admin/auth-keys/<key-id>/passthrough-access` (zobacz [Kontrola dostępu do passthrough](/pl/features/passthrough-api#kontrola-dostępu)).
 
@@ -215,7 +215,7 @@ Dla administratora zakresowego:
 - Nowe klucze API i polityki użytkowników domyślnie trafiają do katalogu głównego zakresu i nie mogą być
   tworzone poza nim. Klucze z dostępem do dashboardu utworzone w ten sposób stają się z kolei
   administratorami zakresowymi tego poddrzewa.
-- Klucz nie może zmieniać własnych etykiet, dozwolonych modeli ani flag dostępu
+- Klucz nie może zmieniać własnych etykiet, dozwolonych modeli, dostępu MCP ani flag dostępu
   (`403 auth_key_self_update`); nadal może się sam dezaktywować. Klucz z
   dozwolonymi modelami może nadawać kluczom, które tworzy lub edytuje, tylko modele,
   które sam ma dozwolone: `openai/*` może nadać `openai/gpt-4o-mini`, ale nie
