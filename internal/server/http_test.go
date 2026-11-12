@@ -1,6 +1,8 @@
 package server
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"io"
 	"net"
@@ -923,6 +925,42 @@ func TestAdminStaticAssets_SkipAuth(t *testing.T) {
 	srv.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+// The dashboard handler gzips its own assets; no server middleware may
+// compress them a second time.
+func TestAdminStaticAssets_EncodedOnce(t *testing.T) {
+	srv := New(&mockProvider{}, &Config{
+		MasterKey:             "test-secret-key",
+		AdminEndpointsEnabled: true,
+		AdminUIEnabled:        true,
+		AdminHandler:          admin.NewHandler(nil, nil),
+		DashboardHandler:      newDashboardHandler(t),
+	})
+	serve := func(acceptEncoding string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/admin/static/favicon.svg", nil)
+		req.Header.Set("Accept-Encoding", acceptEncoding)
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+		return rec
+	}
+
+	raw := serve("identity")
+	rec := serve("gzip")
+
+	encodings := rec.Header().Values("Content-Encoding")
+	require.LessOrEqual(t, len(encodings), 1)
+	body := rec.Body.Bytes()
+	if len(encodings) == 1 {
+		require.Equal(t, "gzip", encodings[0])
+		zr, err := gzip.NewReader(bytes.NewReader(body))
+		require.NoError(t, err)
+		body, err = io.ReadAll(zr)
+		require.NoError(t, err)
+	}
+	assert.Equal(t, raw.Body.Bytes(), body)
+	assert.Equal(t, []string{"Accept-Encoding"}, rec.Header().Values("Vary"))
 }
 
 func TestHealthEndpointAlwaysAvailable(t *testing.T) {
