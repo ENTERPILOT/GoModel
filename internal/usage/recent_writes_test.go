@@ -64,6 +64,7 @@ func usageWriteIDs(writes []storage.RecentWrite) []string {
 func runRecentWritesSuite(t *testing.T, body func(t *testing.T, store UsageStore, reader RecentWriteReader)) {
 	t.Helper()
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		skipDuckDB(t, db)
 		store, err := NewSQLStore(context.Background(), db, 0)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = store.Close() })

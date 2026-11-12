@@ -34,6 +34,7 @@ type Dialect string
 const (
 	SQLite     Dialect = "sqlite"
 	PostgreSQL Dialect = "postgresql"
+	DuckDB     Dialect = "duckdb"
 )
 
 // Row is a single-row query result.

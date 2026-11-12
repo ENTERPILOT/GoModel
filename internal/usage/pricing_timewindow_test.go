@@ -197,6 +197,7 @@ func assertTimeWindowRecalculation(t *testing.T, store recalculatingStore, readT
 
 func TestSQLStoreRecalculatePricingAppliesTimeWindowsFromStoredTimestamps(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		skipDuckDB(t, db)
 		ctx := context.Background()
 		store, err := NewSQLStore(ctx, db, 0)
 		require.NoError(t, err)

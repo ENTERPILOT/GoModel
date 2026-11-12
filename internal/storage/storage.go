@@ -12,6 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/enterpilot/gomodel/internal/platformdir"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
 // Type constants for storage backends
@@ -19,6 +20,7 @@ const (
 	TypeSQLite     = "sqlite"
 	TypePostgreSQL = "postgresql"
 	TypeMongoDB    = "mongodb"
+	TypeDuckDB     = "duckdb"
 )
 
 // LegacySQLitePath is the historical default database location, relative to
@@ -47,6 +49,20 @@ type Config struct {
 
 	// MongoDB configuration
 	MongoDB MongoDBConfig
+
+	// DuckDB configuration
+	DuckDB DuckDBConfig
+}
+
+// DuckDBConfig holds DuckDB-specific configuration.
+type DuckDBConfig struct {
+	// Path is the database file path (default: DefaultDuckDBPath())
+	Path string
+}
+
+// DefaultDuckDBPath mirrors DefaultSQLitePath for the DuckDB file.
+func DefaultDuckDBPath() string {
+	return platformdir.DataFile("gomodel.duckdb")
 }
 
 // SQLiteConfig holds SQLite-specific configuration
@@ -95,6 +111,15 @@ type PostgreSQLStorage interface {
 	Pool() *pgxpool.Pool
 }
 
+// DuckDBStorage exposes a DuckDB database. The method is not DB() so a DuckDB
+// backend never matches SQLiteStorage in a type switch. It returns the one
+// sqlx.DB every store shares, not the raw handle: the adapter's write lock
+// only serializes writers that go through the same wrapper.
+type DuckDBStorage interface {
+	Storage
+	DuckDB() sqlx.DB
+}
+
 // MongoDBStorage exposes a MongoDB database handle.
 type MongoDBStorage interface {
 	Storage
@@ -141,8 +166,10 @@ func New(ctx context.Context, cfg Config) (Storage, error) {
 		return NewPostgreSQL(ctx, cfg.PostgreSQL)
 	case TypeMongoDB:
 		return NewMongoDB(ctx, cfg.MongoDB)
+	case TypeDuckDB:
+		return NewDuckDB(cfg.DuckDB)
 	default:
-		return nil, fmt.Errorf("unknown storage type: %s (valid: sqlite, postgresql, mongodb)", cfg.Type)
+		return nil, fmt.Errorf("unknown storage type: %s (valid: sqlite, postgresql, mongodb, duckdb)", cfg.Type)
 	}
 }
 

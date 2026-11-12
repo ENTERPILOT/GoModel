@@ -125,6 +125,9 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 // ensureUsageSchema creates the usage table and brings an existing one up to
 // the current columns and indexes. It is idempotent.
 func ensureUsageSchema(ctx context.Context, db sqlx.DB) error {
+	if err := checkDialect(db.Dialect()); err != nil {
+		return err
+	}
 	dialect := usageDialectFor(db.Dialect())
 	if err := db.Schema(ctx, fmt.Sprintf(usageTable, dialect.idType)); err != nil {
 		return fmt.Errorf("failed to create usage table: %w", err)

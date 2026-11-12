@@ -45,6 +45,7 @@ func invoiceFixture() []*UsageEntry {
 
 func TestReadersUsageInvoice(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		skipDuckDB(t, db)
 		store, err := NewSQLStore(context.Background(), db, 0)
 		require.NoError(t, err)
 		reader, err := NewSQLReader(db)
@@ -360,6 +361,7 @@ func endUserFixture() []*UsageEntry {
 
 func TestReadersUsageInvoiceStreamsEndUserPaths(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		skipDuckDB(t, db)
 		store, err := NewSQLStore(context.Background(), db, 0)
 		require.NoError(t, err)
 		reader, err := NewSQLReader(db)

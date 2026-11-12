@@ -54,6 +54,17 @@ type usageDialect struct {
 	lockRows string
 }
 
+// checkDialect rejects a dialect the usage queries are not written for.
+// usageDialectFor would otherwise hand it the SQLite spellings: DuckDB has
+// neither unixepoch nor json_each, so the table would be created and every
+// read would then fail.
+func checkDialect(dialect sqlx.Dialect) error {
+	if dialect != sqlx.SQLite && dialect != sqlx.PostgreSQL {
+		return fmt.Errorf("usage tracking does not support the %s storage backend", dialect)
+	}
+	return nil
+}
+
 func usageDialectFor(dialect sqlx.Dialect) usageDialect {
 	if dialect == sqlx.PostgreSQL {
 		return usageDialect{

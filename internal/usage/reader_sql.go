@@ -22,6 +22,9 @@ func NewSQLReader(db sqlx.DB) (*SQLReader, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database connection is required")
 	}
+	if err := checkDialect(db.Dialect()); err != nil {
+		return nil, err
+	}
 	return &SQLReader{db: db, dialect: usageDialectFor(db.Dialect())}, nil
 }
 

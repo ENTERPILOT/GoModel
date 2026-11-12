@@ -31,6 +31,12 @@ func TestAddColumnStatement(t *testing.T) {
 			statement: `ALTER TABLE t ADD COLUMN flag ` + TypeBool + ` NOT NULL DEFAULT FALSE`,
 			want:      `ALTER TABLE t ADD COLUMN flag INTEGER NOT NULL DEFAULT FALSE`,
 		},
+		{
+			name:      "duckdb drops NOT NULL it cannot add",
+			dialect:   DuckDB,
+			statement: `ALTER TABLE t ADD COLUMN flag ` + TypeBool + ` NOT NULL DEFAULT FALSE`,
+			want:      `ALTER TABLE t ADD COLUMN flag BOOLEAN DEFAULT FALSE`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

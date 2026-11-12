@@ -413,6 +413,7 @@ func TestServiceExcludesBilledCacheHitsFromProviderBudgetsWhenConfigured(t *test
 
 func TestSQLStoreSumSpendOnBilledCost(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		sqlxtest.SkipDuckDB(t, db, noDuckDBUsage)
 		ctx := context.Background()
 		usageStore, err := usage.NewSQLStore(ctx, db, 0)
 		require.NoError(t, err)

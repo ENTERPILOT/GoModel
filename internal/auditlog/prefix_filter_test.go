@@ -140,6 +140,7 @@ func TestReaderGetLogs_InvalidPrefixIsInvalidRequest(t *testing.T) {
 // to be on the same byte-wise expression the index is declared on.
 func TestSQLReader_PrefixFiltersUseIndexes(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		sqlxtest.SkipDuckDB(t, db, "DuckDB's EXPLAIN does not name the index a scan uses")
 		ctx := context.Background()
 		store, err := newSQLStoreForTest(t, db, 0)
 		require.NoError(t, err)

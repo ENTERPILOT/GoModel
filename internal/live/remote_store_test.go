@@ -29,6 +29,7 @@ type sharedStores struct {
 func runSharedStores(t *testing.T, body func(t *testing.T, stores sharedStores)) {
 	t.Helper()
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		sqlxtest.SkipDuckDB(t, db, "the usage store has no DuckDB dialect")
 		ctx := context.Background()
 		auditReader, err := auditlog.NewSQLReader(db)
 		require.NoError(t, err)
