@@ -430,14 +430,20 @@ Regeln aus `config.yaml` werden in den verwalteten Standard-Workflow an der Posi
 ```yaml
 plugins:
   search_paths: ["/etc/gomodel/plugins"]   # PLUGINS_SEARCH_PATHS, kommagetrennt; Standardwert: leer
+  require_sha256: true                     # PLUGINS_REQUIRE_SHA256; Standardwert: false
   load:
     - file: acme_guard.so                  # relativ zu einem Suchpfad oder absolut
-      sha256: "3b1f..."                    # optionale Fixierung; eine Abweichung lässt den Start fehlschlagen
+      sha256: "3b1f..."                    # Fixierung; eine Abweichung lässt den Start fehlschlagen
 ```
 
 Ein relativer `file`-Wert muss innerhalb eines der `search_paths` aufgelöst werden (symbolischen
 Links wird gefolgt, und sie werden geprüft). Eine Datei, die nicht aufgelöst, verifiziert oder
 geöffnet werden kann, führt zu einem Startfehler, der die Datei nennt.
+
+Fixieren Sie jede Datei mit `sha256`. Ein Eintrag ohne Fixierung wird ungeprüft geladen, es sei
+denn, `require_sha256` ist `true`: Dann führt er zu einem Startfehler. Der Standardwert ist `false`;
+aktivieren Sie die Einstellung im Produktivbetrieb, damit eine auf dem Datenträger ausgetauschte
+`.so` nicht als Gateway ausgeführt werden kann.
 
 Installationen ohne `config.yaml` können dieselben Einträge über die Umgebung angeben:
 `PLUGINS_LOAD` ist eine kommagetrennte Liste von `file`-Werten, jeweils optional als `file=sha256`,
@@ -445,6 +451,11 @@ um den Digest zu fixieren. Nur das letzte `=`, gefolgt von genau 64 Hexadezimalz
 Digest-Fixierung ein; jeder andere Eintrag ist ein Dateiname. Ist die Variable nicht leer, ersetzt
 sie die Liste `plugins.load` aus `config.yaml` (Umgebung > Konfiguration, wie bei jedem anderen
 über die Umgebung konfigurierbaren Wert).
+
+```bash
+PLUGINS_REQUIRE_SHA256=true
+PLUGINS_LOAD="acme_guard.so=$(sha256sum /etc/gomodel/plugins/acme_guard.so | cut -d' ' -f1)"
+```
 
 `GUARDRAILS_ENABLED` bleibt der Schalter, der entscheidet, ob konfigurierte Instanzen auf den
 Traffic angewendet werden.
@@ -489,8 +500,8 @@ Das Go-Paket `plugin` gibt die Regeln vor, und sie sind streng:
   werden beim Neustart wirksam; das Bearbeiten der Konfiguration einer Instanz führt `Init` ohne
   Neustart erneut auf einem frischen Wert aus.
 - **Vertrauenswürdiger Code**: Das Laden einer `.so` ist gleichbedeutend mit einer Änderung des
-  Binarys. Lassen Sie `search_paths` im Besitz von root und fixieren Sie im Produktivbetrieb
-  `sha256`.
+  Binarys. Lassen Sie im Produktivbetrieb `search_paths` im Besitz von root, fixieren Sie
+  `sha256` und setzen Sie `require_sha256: true`.
 
 ### Bauen und prüfen
 

@@ -441,14 +441,20 @@ Rules from `config.yaml` are seeded into the managed default workflow at
 ```yaml
 plugins:
   search_paths: ["/etc/gomodel/plugins"]   # PLUGINS_SEARCH_PATHS, comma-separated; default: empty
+  require_sha256: true                     # PLUGINS_REQUIRE_SHA256; default: false
   load:
     - file: acme_guard.so                  # relative to a search path, or absolute
-      sha256: "3b1f..."                    # optional pin; a mismatch fails startup
+      sha256: "3b1f..."                    # pin; a mismatch fails startup
 ```
 
 A relative `file` must resolve inside one of the `search_paths` (symlinks are
 followed and checked). A file that cannot be resolved, verified, or opened is
 a startup error naming the file.
+
+Pin every file with `sha256`. An entry without a pin is loaded unchecked
+unless `require_sha256` is `true`, which makes it a startup error. It defaults
+to `false`; turn it on in production, so a `.so` replaced on disk cannot run
+as the gateway.
 
 Installations without a `config.yaml` can list the same entries through the
 environment: `PLUGINS_LOAD` is a comma-separated list of `file` values, each
@@ -457,6 +463,11 @@ exactly 64 hexadecimal characters starts a digest pin; any other entry is a
 file name. When non-empty, it replaces the
 `plugins.load` list from `config.yaml` (env > config, like every other
 env-configurable value).
+
+```bash
+PLUGINS_REQUIRE_SHA256=true
+PLUGINS_LOAD="acme_guard.so=$(sha256sum /etc/gomodel/plugins/acme_guard.so | cut -d' ' -f1)"
+```
 
 `GUARDRAILS_ENABLED` remains the switch that decides whether configured
 instances run on traffic.
@@ -503,8 +514,9 @@ Go's `plugin` package sets the rules, and they are strict:
 - **No unload**: a `.so` stays loaded until restart. Changing a loaded file
   takes effect on restart; editing an instance's config re-runs `Init` on a
   fresh value without a restart.
-- **Trusted code**: loading a `.so` is equivalent to changing the binary. Keep
-  `search_paths` root-owned and pin `sha256` in production.
+- **Trusted code**: loading a `.so` is equivalent to changing the binary. In
+  production keep `search_paths` root-owned, pin `sha256`, and set
+  `require_sha256: true`.
 
 ### Build and inspect
 

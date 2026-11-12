@@ -25,6 +25,12 @@ type PluginsConfig struct {
 	// Default: empty (no .so loading)
 	SearchPaths []string `yaml:"search_paths" env:"PLUGINS_SEARCH_PATHS"`
 
+	// RequireSHA256 refuses to start when a Load entry has no sha256 pin, so
+	// a shared object replaced on disk cannot run as the gateway. Turn it on
+	// in production.
+	// Default: false
+	RequireSHA256 bool `yaml:"require_sha256" env:"PLUGINS_REQUIRE_SHA256"`
+
 	// Load lists the shared objects to open at startup. Each file exports a
 	// GoModelPlugin symbol (see the pluginapi package). A file that cannot be
 	// resolved, verified, or opened is a startup error.
@@ -62,7 +68,7 @@ type PluginFileConfig struct {
 	// File is the .so path: absolute, or relative to one of SearchPaths.
 	File string `yaml:"file"`
 
-	// SHA256 is an optional hex digest of the file. When set, a mismatch
-	// fails startup.
+	// SHA256 is a hex digest of the file. When set, a mismatch fails
+	// startup. Optional unless PluginsConfig.RequireSHA256 is set.
 	SHA256 string `yaml:"sha256"`
 }

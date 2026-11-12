@@ -540,10 +540,11 @@ guardrails:
 plugins:
   enabled: false # PLUGINS_ENABLED. Default: false
   search_paths: [] # PLUGINS_SEARCH_PATHS (comma-separated). Default: empty (no .so loading)
+  require_sha256: false # PLUGINS_REQUIRE_SHA256. Default: false. true refuses any load entry without a sha256 pin
   load: []
   # load:
   #   - file: keyword_block.so        # relative to search_paths, or absolute
-  #     sha256: ""                    # optional pin; mismatch fails startup
+  #     sha256: "<shasum -a 256 keyword_block.so>" # pin; a mismatch fails startup
 
 # Failover is a load-balancing behaviour of virtual models: when the target a
 # request was sent to fails, the redirect's remaining targets are tried in

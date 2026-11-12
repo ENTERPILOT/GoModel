@@ -20,8 +20,11 @@
 #   docker run --rm -v "$PWD/my-plugin:/src" -v "$PWD/plugins:/out" \
 #       gomodel-plugin-builder -o /out/my-plugin.so /src
 #
-# Run with plugins mounted:
-#   docker run -v "$PWD/plugins:/app/plugins:ro" -e PLUGINS_ENABLED=true -e PLUGINS_SEARCH_PATHS=/app/plugins ... gomodel:plugins
+# Run with plugins mounted, each pinned to its SHA-256 digest. A plugin runs
+# as the gateway, so PLUGINS_REQUIRE_SHA256 refuses any file without a pin:
+#   docker run -v "$PWD/plugins:/app/plugins:ro" -e PLUGINS_ENABLED=true \
+#       -e PLUGINS_SEARCH_PATHS=/app/plugins -e PLUGINS_REQUIRE_SHA256=true \
+#       -e PLUGINS_LOAD="my-plugin.so=$(sha256sum plugins/my-plugin.so | cut -d' ' -f1)" ... gomodel:plugins
 FROM golang:1.27.4-bookworm AS builder
 
 WORKDIR /app
