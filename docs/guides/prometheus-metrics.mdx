@@ -445,12 +445,24 @@ you query.
   reported as `/team/alice`. Lower it to group more, raise it only if the
   deeper levels are few.
 - **Value cap.** Each dimension keeps the first `METRICS_CALLER_MAX_VALUES`
-  (default 100) distinct values it sees. Later values share one series:
+  (default 100) distinct values it sees. The cap is per dimension: with all
+  three on, up to 300 values are kept. Later values share one series:
   `{other}` (`/{other}` for user paths). Admitted values keep their own
   series until GoModel restarts.
+- **Value length.** A value longer than 256 bytes, or one spelled like a
+  reserved name (`{other}`, `/{other}`, `{unknown}`), is reported as `{other}`
+  and takes no place under the cap.
 - **Request labels are one value per label set.** `prod,team-a` and `team-a`
-  are different series. If clients send free-form labels, leave this dimension
-  off.
+  are different values, so label sets fill the cap much faster than labels:
+  a client combining 7 labels freely can send 127 different sets, enough to
+  fill the default cap on its own. Every later set, legitimate or not, is then
+  reported as `{other}` until GoModel restarts. If clients send free-form
+  labels, leave this dimension off.
+- **Worst case.** Each dimension adds at most its cap plus `{other}` and the
+  empty value (and `{unknown}` for API keys). With all three on at the default
+  cap, one provider and model can reach 102 × 103 × 102 ≈ 1.07 million series
+  per token type. Only combinations that occur are exported, but enable one
+  dimension at a time and lower `METRICS_CALLER_MAX_VALUES` to what you expect.
 
 ## Prometheus Configuration
 

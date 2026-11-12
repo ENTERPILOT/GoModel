@@ -216,8 +216,11 @@ semantyczne nie definiują metryki dla szczegółów ani dla kosztu, stąd nazwy
 
 Wszystkie cztery mają atrybuty `gen_ai.provider.name`,
 `gomodel.provider.name`, `gen_ai.request.model` (gdy jest znany),
-`gen_ai.response.model` oraz, dla endpointów chat i embeddings,
-`gen_ai.operation.name`.
+`gen_ai.response.model` oraz `gen_ai.operation.name`: operację wywołania
+providera, tę samą wartość co w `gen_ai.client.operation.duration`
+(`generate_content` dla natywnych wywołań Gemini, `text_completion` dla
+`/v1/completions`). Endpointy bez operacji GenAI (audio, obrazy, realtime) jej
+nie mają.
 
 - **Śledzenie użycia musi być włączone** (`USAGE_ENABLED=true`, wartość
   domyślna).
@@ -245,8 +248,9 @@ gdzie szczegółowo opisano limity kardynalności.
 | `METRICS_CALLER_REQUEST_LABELS` | `gomodel.request.labels` | Etykiety requestu, posortowane i rozdzielone przecinkami (`prod,team-a`). |
 
 Każdy wymiar zachowuje pierwsze `METRICS_CALLER_MAX_VALUES` (domyślnie 100)
-różnych wartości; kolejne są eksportowane jako `{other}` (`/{other}` dla user
-path). Histogramy czasu trwania i spany nigdy nie mają atrybutów
+różnych wartości; kolejne wartości, wartości dłuższe niż 256 bajtów oraz
+wartości zapisane jak `{other}` lub `{unknown}` są eksportowane jako `{other}`
+(`/{other}` dla user path). Histogramy czasu trwania i spany nigdy nie mają atrybutów
 wywołującego. Liczba wywołań na wywołującego to count metryki
 `gen_ai.client.token.usage`.
 

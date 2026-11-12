@@ -25,6 +25,24 @@ func LogBatchUsageFromBatchResults(
 	usageLogger usage.LoggerInterface,
 	pricingResolver usage.PricingResolver,
 ) bool {
+	return logBatchUsage(stored, result, fallbackRequestID, usageLogger, pricingResolver, nil)
+}
+
+// logBatchUsage builds the batch's usage entries and records the totals and
+// UsageLoggedAt on stored, then asks claim to persist that before writing any
+// entry. Only a successful claim writes them, so concurrent or repeated
+// result fetches count the batch once. A claim lost to an earlier one keeps
+// the usage marker on stored, so a later update of it does not clear the
+// marker; a claim that fails with an error leaves stored as it was. A nil
+// claim always succeeds.
+func logBatchUsage(
+	stored *batchstore.StoredBatch,
+	result *core.BatchResultsResponse,
+	fallbackRequestID string,
+	usageLogger usage.LoggerInterface,
+	pricingResolver usage.PricingResolver,
+	claim func(*batchstore.StoredBatch) (bool, error),
+) bool {
 	if usageLogger == nil || !usageLogger.Config().Enabled || stored == nil || stored.Batch == nil || result == nil || len(result.Data) == 0 {
 		return false
 	}
@@ -43,7 +61,7 @@ func LogBatchUsageFromBatchResults(
 		requestID = "batch:" + stored.Batch.ID
 	}
 
-	loggedEntries := 0
+	var entries []*usage.UsageEntry
 	inputTotal := 0
 	outputTotal := 0
 	totalTokens := 0
@@ -125,8 +143,7 @@ func LogBatchUsageFromBatchResults(
 		entry.SessionID = stored.SessionID
 		entry.AuthKeyID = stored.AuthKeyID
 
-		usageLogger.Write(entry)
-		loggedEntries++
+		entries = append(entries, entry)
 		inputTotal += inputTokens
 		outputTotal += outputTokens
 		if hasTotal {
@@ -146,10 +163,11 @@ func LogBatchUsageFromBatchResults(
 		}
 	}
 
-	if loggedEntries == 0 {
+	if len(entries) == 0 {
 		return false
 	}
 
+	previousRequestID, previousUsage := stored.RequestID, stored.Batch.Usage
 	now := time.Now().UTC()
 	stored.RequestID = requestID
 	stored.UsageLoggedAt = &now
@@ -167,6 +185,19 @@ func LogBatchUsageFromBatchResults(
 		stored.Batch.Usage.TotalCost = &totalCostTotal
 	}
 
+	if claim != nil {
+		claimed, err := claim(stored)
+		if err != nil {
+			stored.RequestID, stored.UsageLoggedAt, stored.Batch.Usage = previousRequestID, nil, previousUsage
+			return false
+		}
+		if !claimed {
+			return false
+		}
+	}
+	for _, entry := range entries {
+		usageLogger.Write(entry)
+	}
 	return true
 }
 

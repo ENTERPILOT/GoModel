@@ -119,6 +119,11 @@ func SetRequestCallers(callers *usagemetrics.Callers) {
 	requestCallers.Store(callers)
 }
 
+// RequestCallers returns the caller dimensions SetRequestCallers selected.
+func RequestCallers() *usagemetrics.Callers {
+	return requestCallers.Load()
+}
+
 // recordCallerRequest counts one finished provider call for its caller. With
 // every caller dimension off it costs one atomic load.
 func recordCallerRequest(ctx context.Context, info llmclient.ResponseInfo, statusType string) {

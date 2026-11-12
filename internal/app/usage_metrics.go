@@ -30,15 +30,27 @@ func (b *bootstrap) wrapUsageLoggerForMetrics() {
 
 	callers := usagemetrics.NewCallers(metricsCfg.CallerDimensions, app.authKeyName)
 	if metricsCfg.Enabled {
-		// nil when every dimension is off, which also switches the per-caller
-		// request counter off again after a reload.
-		observability.SetRequestCallers(callers)
+		// Installed by initServer: the resolver is process-wide, so a reload
+		// rejected by a later phase must not hand it to the serving
+		// generation. nil when every dimension is off, which also switches
+		// the per-caller request counter off again after a reload.
+		b.requestCallers = callers
+		b.installRequestCallers = true
 	}
 	if !b.appCfg.Usage.Enabled {
 		slog.Warn("token and cost metrics need usage tracking, which is disabled; they will stay empty",
 			"hint", "set USAGE_ENABLED=true (usage.enabled) to record token and cost metrics")
 	}
 	app.usage.Logger = usagemetrics.NewTap(app.usage.Logger, callers, recorders...)
+}
+
+// installRequestCallersForMetrics hands the generation's caller resolver to the
+// per-caller request counter. It runs in the last phase, after every fallible
+// step, like the other generation-bound process-wide bindings.
+func (b *bootstrap) installRequestCallersForMetrics() {
+	if b.installRequestCallers {
+		observability.SetRequestCallers(b.requestCallers)
+	}
 }
 
 // authKeyName returns the name of a managed API key for the auth key metric

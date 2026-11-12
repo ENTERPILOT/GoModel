@@ -455,12 +455,27 @@ nur ein, was Sie abfragen.
   erhöhen Sie ihn nur, wenn die tieferen Ebenen wenige Werte haben.
 - **Obergrenze für Werte.** Jede Dimension behält die ersten
   `METRICS_CALLER_MAX_VALUES` (Standard 100) unterschiedlichen Werte, die sie
-  sieht. Spätere Werte teilen sich eine Serie: `{other}` (`/{other}` bei User
-  Paths). Aufgenommene Werte behalten ihre eigene Serie, bis GoModel neu
-  startet.
+  sieht. Die Obergrenze gilt pro Dimension: Mit allen drei Dimensionen werden
+  bis zu 300 Werte behalten. Spätere Werte teilen sich eine Serie: `{other}`
+  (`/{other}` bei User Paths). Aufgenommene Werte behalten ihre eigene Serie,
+  bis GoModel neu startet.
+- **Länge der Werte.** Ein Wert über 256 Bytes oder ein Wert, der wie ein
+  reservierter Name lautet (`{other}`, `/{other}`, `{unknown}`), wird als
+  `{other}` gemeldet und belegt keinen Platz unter der Obergrenze.
 - **Request-Labels sind ein Wert pro Label-Menge.** `prod,team-a` und `team-a`
-  sind unterschiedliche Serien. Wenn Clients frei wählbare Labels senden,
-  lassen Sie diese Dimension aus.
+  sind unterschiedliche Werte, daher füllen Label-Mengen die Obergrenze viel
+  schneller als einzelne Labels: Ein Client, der 7 Labels frei kombiniert,
+  kann 127 verschiedene Mengen senden und damit allein die
+  Standardobergrenze füllen. Jede spätere Menge, ob legitim oder nicht, wird
+  dann bis zum Neustart als `{other}` gemeldet. Wenn Clients frei wählbare
+  Labels senden, lassen Sie diese Dimension aus.
+- **Ungünstigster Fall.** Jede Dimension trägt höchstens ihre Obergrenze plus
+  `{other}` und den leeren Wert bei (bei API-Keys zusätzlich `{unknown}`). Mit
+  allen drei Dimensionen und der Standardobergrenze kann ein Provider mit
+  einem Modell 102 × 103 × 102 ≈ 1,07 Millionen Serien pro Token-Typ
+  erreichen. Exportiert werden nur tatsächlich auftretende Kombinationen,
+  aktivieren Sie trotzdem eine Dimension nach der anderen und senken Sie
+  `METRICS_CALLER_MAX_VALUES` auf die erwartete Anzahl.
 
 ## Prometheus-Konfiguration
 

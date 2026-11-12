@@ -201,12 +201,16 @@ func newMiddleware(tp *sdkTrace.TracerProvider, mp *sdkMetric.MeterProvider, pro
 // (see core.GenerationTrace), so their spans carry the decoded usage. A
 // request the sampler dropped is skipped: its spans are never exported, so
 // rebuilding its outcome would be wasted work.
+//
+// Every request also gets a core.GenAIOperation record, sampled or not, so
+// the token metrics name the operation the duration metric does.
 func withGenerationTracing(next echo.HandlerFunc, captureContent bool) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		req := c.Request()
-		if trace.SpanFromContext(req.Context()).IsRecording() {
-			c.SetRequest(req.WithContext(core.WithGenerationTracing(req.Context(), captureContent)))
+		ctx := core.WithGenAIOperation(c.Request().Context())
+		if trace.SpanFromContext(ctx).IsRecording() {
+			ctx = core.WithGenerationTracing(ctx, captureContent)
 		}
+		c.SetRequest(c.Request().WithContext(ctx))
 		return next(c)
 	}
 }

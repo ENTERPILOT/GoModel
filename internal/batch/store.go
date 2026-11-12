@@ -54,6 +54,11 @@ type Store interface {
 	// ErrNotFound.
 	List(ctx context.Context, limit int, after, userPath string) ([]*StoredBatch, error)
 	Update(ctx context.Context, batch *StoredBatch) error
+	// ClaimUsage persists batch, which must carry UsageLoggedAt, only while
+	// the stored batch has not recorded its usage yet, and reports whether
+	// it did. Of concurrent claims for one batch exactly one succeeds, so its
+	// usage is written once.
+	ClaimUsage(ctx context.Context, batch *StoredBatch) (bool, error)
 	Delete(ctx context.Context, id string) error
 	Close() error
 }

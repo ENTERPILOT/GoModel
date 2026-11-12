@@ -20,7 +20,9 @@ type Sample struct {
 	Model        string
 	RequestModel string
 	Endpoint     string
-	Caller       Caller
+	// Operation is the GenAI operation of the provider call, when known.
+	Operation string
+	Caller    Caller
 
 	InputTokens  int64
 	OutputTokens int64
@@ -46,6 +48,7 @@ func newSample(entry *usage.UsageEntry) Sample {
 		Model:        strings.TrimSpace(entry.Model),
 		RequestModel: strings.TrimSpace(entry.RoutedModel),
 		Endpoint:     strings.TrimSpace(entry.Endpoint),
+		Operation:    strings.TrimSpace(entry.Operation),
 	}
 	if s.Provider == "" {
 		// Entries logged without an instance name carry only the type, which

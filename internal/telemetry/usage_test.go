@@ -234,11 +234,17 @@ func TestUsageOperation(t *testing.T) {
 		"/v1/audio/speech":       "",
 		"/v1/images/generations": "",
 		"/v1/realtime":           "",
+		"/v1/completions":        "text_completion",
+		"/p/vllm/completions":    "text_completion",
 		"":                       "",
 	}
 	for endpoint, want := range tests {
 		t.Run(endpoint, func(t *testing.T) {
-			assert.Equal(t, want, usageOperation(endpoint))
+			assert.Equal(t, want, usageOperation(usagemetrics.Sample{Endpoint: endpoint}))
 		})
 	}
+}
+
+func TestUsageOperationPrefersTheRecordedOperation(t *testing.T) {
+	assert.Equal(t, "generate_content", usageOperation(usagemetrics.Sample{Endpoint: "/v1/chat/completions", Operation: "generate_content"}))
 }

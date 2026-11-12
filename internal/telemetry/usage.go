@@ -8,6 +8,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	apiMetric "go.opentelemetry.io/otel/metric"
 
+	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/usagemetrics"
 )
 
@@ -104,7 +105,7 @@ func (r *usageRecorder) addTokenDetail(ctx context.Context, attrs []attribute.Ke
 // dimensions the operator opted into.
 func usageAttributes(s usagemetrics.Sample) []attribute.KeyValue {
 	attrs := make([]attribute.KeyValue, 0, 8)
-	if operation := usageOperation(s.Endpoint); operation != "" {
+	if operation := usageOperation(s); operation != "" {
 		attrs = append(attrs, attribute.String("gen_ai.operation.name", operation))
 	}
 	attrs = append(attrs,
@@ -129,17 +130,25 @@ func usageAttributes(s usagemetrics.Sample) []attribute.KeyValue {
 	return attrs
 }
 
-// usageOperation maps a usage entry's endpoint onto the GenAI operation name.
-// Endpoints without a well-known operation (audio, images, realtime, …) get
-// none rather than a wrong one.
-func usageOperation(endpoint string) string {
-	endpoint, _, _ = strings.Cut(strings.TrimRight(strings.TrimSpace(endpoint), "/"), "?")
+// usageOperation is the GenAI operation of a sample: the one the provider
+// call recorded for gen_ai.client.operation.duration, or, when no call
+// recorded one (a response-cache hit, a request outside the telemetry
+// middleware), the operation its endpoint maps to. Endpoints without a
+// well-known operation (audio, images, realtime, …) get none rather than a
+// wrong one.
+func usageOperation(s usagemetrics.Sample) string {
+	if s.Operation != "" {
+		return s.Operation
+	}
+	endpoint, _, _ := strings.Cut(strings.TrimRight(strings.TrimSpace(s.Endpoint), "/"), "?")
 	switch {
 	case strings.HasSuffix(endpoint, "embeddings"), strings.HasSuffix(endpoint, "/embed"):
-		return "embeddings"
+		return llmclient.OperationEmbeddings
 	case strings.HasSuffix(endpoint, "chat/completions"), strings.HasSuffix(endpoint, "responses"),
 		strings.HasSuffix(endpoint, "messages"), strings.HasSuffix(endpoint, "/chat"):
-		return "chat"
+		return llmclient.OperationChat
+	case strings.HasSuffix(endpoint, "/completions"):
+		return llmclient.OperationTextCompletion
 	default:
 		return ""
 	}

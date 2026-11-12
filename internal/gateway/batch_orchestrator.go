@@ -525,7 +525,7 @@ func (o *BatchOrchestrator) Results(ctx context.Context, id, fallbackRequestID s
 
 	result := *upstream
 	result.BatchID = stored.Batch.ID
-	usageLogged := LogBatchUsageFromBatchResults(stored, &result, fallbackRequestID, o.usageLogger, o.pricingResolver)
+	usageLogged := logBatchUsage(stored, &result, fallbackRequestID, o.usageLogger, o.pricingResolver, o.claimBatchUsage(ctx))
 	if len(result.Data) > 0 {
 		stored.Batch.Results = result.Data
 	}
@@ -546,6 +546,34 @@ func (o *BatchOrchestrator) Results(ctx context.Context, id, fallbackRequestID s
 	}
 
 	return &BatchResultsResult{Response: &result, ProviderType: stored.Batch.Provider}, nil
+}
+
+// claimBatchUsage persists a batch's usage marker before its usage entries
+// are written, so a concurrent fetch of the same results, or one after the
+// final store update failed, does not write them again. Storage drops the
+// duplicates by ID, but the token and cost metrics would count them twice.
+// A failed claim writes nothing; a later fetch retries. A claim lost to an
+// earlier fetch adopts that fetch's usage fields, which the final update of
+// this fetch then keeps.
+func (o *BatchOrchestrator) claimBatchUsage(ctx context.Context) func(*batchstore.StoredBatch) (bool, error) {
+	return func(stored *batchstore.StoredBatch) (bool, error) {
+		claimed, err := o.batchStore.ClaimUsage(ctx, stored)
+		if err != nil {
+			slog.Warn(
+				"failed to claim batch usage; it is logged on a later results fetch",
+				"batch_id", stored.Batch.ID,
+				"provider", stored.Batch.Provider,
+				"error", err,
+			)
+			return false, err
+		}
+		if !claimed {
+			if winner, getErr := o.batchStore.Get(ctx, stored.Batch.ID); getErr == nil && winner.Batch != nil {
+				stored.RequestID, stored.UsageLoggedAt, stored.Batch.Usage = winner.RequestID, winner.UsageLoggedAt, winner.Batch.Usage
+			}
+		}
+		return claimed, nil
+	}
 }
 
 func (o *BatchOrchestrator) requireStoredBatch(ctx context.Context, id string) (*batchstore.StoredBatch, error) {

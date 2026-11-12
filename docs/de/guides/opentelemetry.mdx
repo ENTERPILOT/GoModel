@@ -223,8 +223,11 @@ Dollar doppelt. Die Semantic Conventions definieren keine Metrik für die
 Details oder für Kosten, daher die `gomodel.*`-Namen.
 
 Alle vier tragen `gen_ai.provider.name`, `gomodel.provider.name`,
-`gen_ai.request.model` (sofern bekannt), `gen_ai.response.model` und, bei
-Chat- und Embeddings-Endpunkten, `gen_ai.operation.name`.
+`gen_ai.request.model` (sofern bekannt), `gen_ai.response.model` und
+`gen_ai.operation.name`: die Operation des Provider-Aufrufs, derselbe Wert wie
+bei `gen_ai.client.operation.duration` (`generate_content` bei nativen
+Gemini-Aufrufen, `text_completion` für `/v1/completions`). Endpunkte ohne
+GenAI-Operation (Audio, Bilder, Realtime) haben keine.
 
 - **Die Nutzungserfassung muss aktiv sein** (`USAGE_ENABLED=true`, der
   Standard).
@@ -253,7 +256,8 @@ dort sind die Kardinalitätsgrenzen im Detail beschrieben.
 | `METRICS_CALLER_REQUEST_LABELS` | `gomodel.request.labels` | Die Labels des Requests, sortiert und durch Kommas getrennt (`prod,team-a`). |
 
 Jede Dimension behält die ersten `METRICS_CALLER_MAX_VALUES` (Standard 100)
-unterschiedlichen Werte; spätere Werte werden als `{other}` exportiert
+unterschiedlichen Werte; spätere Werte, Werte über 256 Bytes und Werte, die
+wie `{other}` oder `{unknown}` lauten, werden als `{other}` exportiert
 (`/{other}` bei User Paths). Die Dauer-Histogramme und die Spans tragen nie
 Aufrufer-Attribute. Die Anzahl der Aufrufe pro Aufrufer ist der Count von
 `gen_ai.client.token.usage`.

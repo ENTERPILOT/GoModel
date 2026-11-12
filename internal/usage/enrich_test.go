@@ -23,6 +23,23 @@ func TestEnrichUsageLogEntry_OpenAICachedTokens(t *testing.T) {
 	require.InDelta(t, want, entry.CachedInputRatio, 1e-9)
 }
 
+// OpenAI reports cache writes as prompt_tokens_details.cache_write_tokens,
+// part of prompt_tokens like cached reads.
+func TestEnrichUsageLogEntry_OpenAICacheWriteTokens(t *testing.T) {
+	entry := UsageLogEntry{
+		Provider:    "openai",
+		InputTokens: 120,
+		RawData: map[string]any{
+			"prompt_cached_tokens":      50,
+			"prompt_cache_write_tokens": 30,
+		},
+	}
+	EnrichUsageLogEntry(&entry)
+	require.Equal(t, int64(40), entry.UncachedInputTokens)
+	require.Equal(t, int64(50), entry.CachedInputTokens)
+	require.Equal(t, int64(30), entry.CacheWriteInputTokens)
+}
+
 func TestEnrichUsageLogEntry_AnthropicSplitAccounting(t *testing.T) {
 	entry := UsageLogEntry{
 		Provider:    "anthropic",

@@ -67,11 +67,12 @@ func (c *Callers) Resolve(userPath, authKeyID string, labels []string) Caller {
 	}
 	if c.authKeyName != nil {
 		if authKeyID = strings.TrimSpace(authKeyID); authKeyID != "" {
-			name := strings.TrimSpace(c.authKeyName(authKeyID))
-			if name == "" {
-				name = UnknownAuthKey
+			if name := strings.TrimSpace(c.authKeyName(authKeyID)); name != "" {
+				caller.AuthKey = admitted.authKeys.admit(name, OtherValue, c.maxValues)
+			} else {
+				// One fixed value, so it takes no slot.
+				caller.AuthKey = UnknownAuthKey
 			}
-			caller.AuthKey = admitted.authKeys.admit(name, OtherValue, c.maxValues)
 		}
 	}
 	if c.requestLabels {

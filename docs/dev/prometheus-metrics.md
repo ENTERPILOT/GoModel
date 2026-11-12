@@ -257,6 +257,13 @@ OpenTelemetry.
 - Each dimension admits `max_values` distinct values and reports the rest as
   `{other}` (`/{other}` for user paths). The admitted sets are process-wide
   (`usagemetrics.admitted`), because Prometheus series outlive a reload.
+- A value over `usagemetrics.MaxValueBytes` (256), or spelled like a reserved
+  name (`{other}`, `/{other}`, `{unknown}`), is `{other}` and takes no slot,
+  so neither long values nor spoofed bucket names can exhaust or forge the cap.
+  `{unknown}` itself takes no slot either.
+- The resolver of `gomodel_caller_requests_total` is process-wide too; the app
+  installs it in `initServer`, after every fallible phase, so a rejected
+  reload leaves the serving generation's resolver in place.
 
 Caller labels are deliberately kept off `gomodel_requests_total`,
 `gomodel_request_duration_seconds` (one series per bucket), and
@@ -264,6 +271,16 @@ Caller labels are deliberately kept off `gomodel_requests_total`,
 instead, without `endpoint`, `status_code`, and `stream`. None of the new
 metrics has an `endpoint` label: usage entries of passthrough calls carry
 caller-chosen paths.
+
+Batch usage is written when results are fetched. `batch.Store.ClaimUsage`
+persists `usage_logged_at` with a compare-and-swap before any entry is
+written, so concurrent fetches, or a fetch after a failed store update, do
+not count the batch twice (storage would drop the duplicates by ID, the
+metrics would not).
+
+The OpenTelemetry token metrics take `gen_ai.operation.name` from the
+provider call (`core.GenAIOperation`, set by the telemetry hook and copied to
+`UsageEntry.Operation`), so they match `gen_ai.client.operation.duration`.
 
 ## Helpers in `client.go`
 

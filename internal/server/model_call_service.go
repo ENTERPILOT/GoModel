@@ -125,6 +125,7 @@ func (s *modelCallService) logUsage(ctx context.Context, route modelCallRoute, e
 	}
 	entry.ProviderName = strings.TrimSpace(route.providerName)
 	entry.RoutedModel = strings.TrimSpace(route.model)
+	entry.Operation = core.GenAIOperationFromContext(ctx).Name()
 	entry.UserPath = core.UserPathFromContext(ctx)
 	entry.SessionID = core.SessionIDFromContext(ctx)
 	entry.AuthKeyID = core.GetAuthKeyID(ctx)

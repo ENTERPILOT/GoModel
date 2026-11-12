@@ -453,11 +453,26 @@ w zapytaniach.
   wartości.
 - **Limit wartości.** Każdy wymiar zachowuje pierwsze
   `METRICS_CALLER_MAX_VALUES` (domyślnie 100) różnych wartości, które zobaczy.
-  Kolejne wartości dzielą jedną serię: `{other}` (`/{other}` dla user path).
-  Przyjęte wartości zachowują własną serię do restartu GoModel.
+  Limit dotyczy każdego wymiaru osobno: przy trzech włączonych wymiarach
+  zachowanych może być do 300 wartości. Kolejne wartości dzielą jedną serię:
+  `{other}` (`/{other}` dla user path). Przyjęte wartości zachowują własną
+  serię do restartu GoModel.
+- **Długość wartości.** Wartość dłuższa niż 256 bajtów albo zapisana jak
+  nazwa zarezerwowana (`{other}`, `/{other}`, `{unknown}`) jest raportowana
+  jako `{other}` i nie zajmuje miejsca w limicie.
 - **Etykiety requestu to jedna wartość na zestaw etykiet.** `prod,team-a`
-  i `team-a` to różne serie. Jeśli klienci wysyłają dowolne etykiety, zostaw
-  ten wymiar wyłączony.
+  i `team-a` to różne wartości, więc zestawy etykiet wyczerpują limit dużo
+  szybciej niż same etykiety: klient, który dowolnie łączy 7 etykiet, może
+  wysłać 127 różnych zestawów, czyli sam zapełnić domyślny limit. Każdy
+  kolejny zestaw, poprawny czy nie, jest potem raportowany jako `{other}` aż
+  do restartu GoModel. Jeśli klienci wysyłają dowolne etykiety, zostaw ten
+  wymiar wyłączony.
+- **Najgorszy przypadek.** Każdy wymiar daje co najwyżej swój limit plus
+  `{other}` i pustą wartość (dla kluczy API także `{unknown}`). Przy trzech
+  wymiarach i domyślnym limicie jeden provider i model mogą osiągnąć
+  102 × 103 × 102 ≈ 1,07 mln serii na typ tokenów. Eksportowane są tylko
+  kombinacje, które faktycznie wystąpią, ale włączaj wymiary pojedynczo
+  i obniż `METRICS_CALLER_MAX_VALUES` do spodziewanej liczby wartości.
 
 ## Konfiguracja Prometheusa
 

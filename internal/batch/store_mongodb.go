@@ -234,6 +234,38 @@ func (s *MongoDBStore) Update(ctx context.Context, batch *StoredBatch) error {
 	return nil
 }
 
+// ClaimUsage replaces the batch unless the stored one already records usage,
+// swapping the payload only if it is unchanged since it was read.
+func (s *MongoDBStore) ClaimUsage(ctx context.Context, batch *StoredBatch) (bool, error) {
+	read := func() ([]byte, error) {
+		var doc mongoBatchDocument
+		err := s.collection.FindOne(ctx, bson.M{"_id": batch.Batch.ID}).Decode(&doc)
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrNotFound
+		}
+		if err != nil {
+			return nil, fmt.Errorf("query batch: %w", err)
+		}
+		return doc.Data, nil
+	}
+	swap := func(current, next []byte) (bool, error) {
+		result, err := s.collection.UpdateOne(ctx,
+			bson.M{"_id": batch.Batch.ID, "data": current},
+			bson.M{"$set": bson.M{
+				"updated_at": time.Now().Unix(),
+				"status":     batch.Batch.Status,
+				"data":       next,
+				"user_path":  strings.TrimSpace(batch.UserPath),
+			}},
+		)
+		if err != nil {
+			return false, fmt.Errorf("claim batch usage: %w", err)
+		}
+		return result.MatchedCount > 0, nil
+	}
+	return claimUsage(batch, read, swap)
+}
+
 // Delete removes a stored batch object.
 func (s *MongoDBStore) Delete(ctx context.Context, id string) error {
 	result, err := s.collection.DeleteOne(ctx, bson.M{"_id": id})

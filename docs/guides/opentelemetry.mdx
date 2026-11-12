@@ -214,8 +214,11 @@ over one metric counts a token or a dollar twice. The semantic conventions
 define no metric for the details or for cost, hence the `gomodel.*` names.
 
 All four carry `gen_ai.provider.name`, `gomodel.provider.name`,
-`gen_ai.request.model` (when known), `gen_ai.response.model`, and, for chat and
-embeddings endpoints, `gen_ai.operation.name`.
+`gen_ai.request.model` (when known), `gen_ai.response.model`, and
+`gen_ai.operation.name`: the operation of the provider call, the same value
+`gen_ai.client.operation.duration` reports (`generate_content` for native
+Gemini calls, `text_completion` for `/v1/completions`). Endpoints without a
+GenAI operation (audio, images, realtime) have none.
 
 - **Usage tracking must be on** (`USAGE_ENABLED=true`, the default).
 - **Cost needs pricing.** A model without a known price adds tokens but no
@@ -239,7 +242,8 @@ which explains the cardinality limits in detail.
 | `METRICS_CALLER_REQUEST_LABELS` | `gomodel.request.labels` | The request's labels, sorted and comma-separated (`prod,team-a`). |
 
 Each dimension keeps the first `METRICS_CALLER_MAX_VALUES` (default 100)
-distinct values; later values are exported as `{other}` (`/{other}` for user
+distinct values; later values, values over 256 bytes, and values spelled like
+`{other}` or `{unknown}` are exported as `{other}` (`/{other}` for user
 paths). The duration histograms and the spans never carry caller attributes.
 The number of calls per caller is the count of `gen_ai.client.token.usage`.
 

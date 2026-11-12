@@ -51,7 +51,8 @@ type MetricsCallerDimensionsConfig struct {
 	RequestLabels bool `yaml:"request_labels" env:"METRICS_CALLER_REQUEST_LABELS"`
 
 	// MaxValues caps the distinct values of each dimension. Values seen after
-	// the cap is reached are reported as "{other}".
+	// the cap is reached, values longer than 256 bytes, and values spelled
+	// like a reserved name ("{other}", "{unknown}") are reported as "{other}".
 	// Default: 100
 	MaxValues int `yaml:"max_values" env:"METRICS_CALLER_MAX_VALUES"`
 }

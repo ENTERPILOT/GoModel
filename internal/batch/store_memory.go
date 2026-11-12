@@ -119,6 +119,29 @@ func (s *MemoryStore) Update(_ context.Context, batch *StoredBatch) error {
 	return nil
 }
 
+// ClaimUsage replaces the batch unless the stored one already records usage.
+func (s *MemoryStore) ClaimUsage(_ context.Context, batch *StoredBatch) (bool, error) {
+	if err := checkUsageClaim(batch); err != nil {
+		return false, err
+	}
+	c, err := cloneBatch(batch)
+	if err != nil {
+		return false, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	existing, ok := s.items[c.Batch.ID]
+	if !ok {
+		return false, ErrNotFound
+	}
+	if existing.UsageLoggedAt != nil {
+		return false, nil
+	}
+	s.items[c.Batch.ID] = c
+	return true, nil
+}
+
 // Delete removes a stored batch object.
 func (s *MemoryStore) Delete(_ context.Context, id string) error {
 	s.mu.Lock()

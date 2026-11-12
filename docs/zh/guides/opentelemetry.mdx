@@ -156,7 +156,7 @@ GoModel 会导出每个已记录用量的请求的 Token 和成本。这些指�
 
 对每个提供商而言，`input` 涵盖全部提示词 Token（未缓存、已缓存和缓存写入），`output` 涵盖全部补全 Token（包含推理 Token）。明细是这些总量的**组成部分**，因此是一个单独的指标：对单个指标求和不会把任何 Token 或金额计两次。语义约定没有为明细或成本定义指标，因此使用 `gomodel.*` 名称。
 
-这四个指标都带有 `gen_ai.provider.name`、`gomodel.provider.name`、`gen_ai.request.model`（已知时）、`gen_ai.response.model`，对于 Chat 和 Embeddings 端点还带有 `gen_ai.operation.name`。
+这四个指标都带有 `gen_ai.provider.name`、`gomodel.provider.name`、`gen_ai.request.model`（已知时）、`gen_ai.response.model` 和 `gen_ai.operation.name`：即提供商调用的操作，与 `gen_ai.client.operation.duration` 上报的值相同（原生 Gemini 调用为 `generate_content`，`/v1/completions` 为 `text_completion`）。没有 GenAI 操作的端点（音频、图像、Realtime）不带此属性。
 
 - **必须开启用量跟踪**（`USAGE_ENABLED=true`，默认值）。
 - **成本需要定价。** 没有已知价格的模型只增加 Token，不增加成本。只有启用[定价加价](/zh/features/cost-tracking)时才会导出 `gomodel.client.billed_cost`。
@@ -174,7 +174,7 @@ GoModel 会导出每个已记录用量的请求的 Token 和成本。这些指�
 | `METRICS_CALLER_AUTH_KEY` | `gomodel.auth_key.name` | 托管 API Key 的名称；使用主密钥时不存在。绝不是密钥本身或 Key ID。 |
 | `METRICS_CALLER_REQUEST_LABELS` | `gomodel.request.labels` | 请求的标签，排序后以逗号分隔（`prod,team-a`）。 |
 
-每个维度保留最先出现的 `METRICS_CALLER_MAX_VALUES`（默认 100）个不同取值；之后的取值导出为 `{other}`（用户路径为 `/{other}`）。时长直方图和 Span 永远不带调用方属性。每个调用方的调用次数即 `gen_ai.client.token.usage` 的计数。
+每个维度保留最先出现的 `METRICS_CALLER_MAX_VALUES`（默认 100）个不同取值；之后的取值、超过 256 字节的取值，以及写法为 `{other}` 或 `{unknown}` 的取值，都导出为 `{other}`（用户路径为 `/{other}`）。时长直方图和 Span 永远不带调用方属性。每个调用方的调用次数即 `gen_ai.client.token.usage` 的计数。
 
 ### 提示词与补全内容捕获
 

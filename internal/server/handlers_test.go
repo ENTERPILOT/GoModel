@@ -365,6 +365,10 @@ func (s *failingBatchStore) Update(context.Context, *batchstore.StoredBatch) err
 	return batchstore.ErrNotFound
 }
 
+func (s *failingBatchStore) ClaimUsage(context.Context, *batchstore.StoredBatch) (bool, error) {
+	return false, batchstore.ErrNotFound
+}
+
 func (s *failingBatchStore) Delete(context.Context, string) error {
 	return batchstore.ErrNotFound
 }

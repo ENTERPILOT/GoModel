@@ -44,6 +44,17 @@ func TestNewSample(t *testing.T) {
 			},
 		},
 		{
+			name: "openai cache writes are part of input",
+			entry: usage.UsageEntry{
+				Provider: "openai", Model: "gpt-5", InputTokens: 100, OutputTokens: 5,
+				RawData: map[string]any{"prompt_cached_tokens": 60, "prompt_cache_write_tokens": 25},
+			},
+			want: Sample{
+				Provider: "openai", ProviderType: "openai", Model: "gpt-5",
+				InputTokens: 100, OutputTokens: 5, CachedInputTokens: 60, CacheWriteInputTokens: 25,
+			},
+		},
+		{
 			name: "anthropic reports cache reads and writes on top of input",
 			entry: usage.UsageEntry{
 				Provider: "anthropic", Model: "claude", InputTokens: 10, OutputTokens: 5,

@@ -235,6 +235,34 @@ func (s *SQLStore) Update(ctx context.Context, batch *StoredBatch) error {
 	return nil
 }
 
+// ClaimUsage replaces the batch unless the stored one already records usage,
+// swapping the payload only if it is unchanged since it was read.
+func (s *SQLStore) ClaimUsage(ctx context.Context, batch *StoredBatch) (bool, error) {
+	read := func() ([]byte, error) {
+		var payload []byte
+		err := s.db.QueryRow(ctx, "SELECT data FROM batches WHERE id = ?", batch.Batch.ID).Scan(&payload)
+		if errors.Is(err, sqlx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		if err != nil {
+			return nil, fmt.Errorf("query batch: %w", err)
+		}
+		return payload, nil
+	}
+	swap := func(current, next []byte) (bool, error) {
+		affected, err := s.db.Exec(ctx, `
+			UPDATE batches
+			SET updated_at = ?, status = ?, data = ?, user_path = ?
+			WHERE id = ? AND data = ?
+		`, time.Now().Unix(), batch.Batch.Status, string(next), strings.TrimSpace(batch.UserPath), batch.Batch.ID, string(current))
+		if err != nil {
+			return false, fmt.Errorf("claim batch usage: %w", err)
+		}
+		return affected > 0, nil
+	}
+	return claimUsage(batch, read, swap)
+}
+
 // Delete removes a stored batch object.
 func (s *SQLStore) Delete(ctx context.Context, id string) error {
 	affected, err := s.db.Exec(ctx, `DELETE FROM batches WHERE id = ?`, id)

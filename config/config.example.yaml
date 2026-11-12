@@ -403,7 +403,7 @@ metrics:
     user_path_depth: 2 # "/team/alice/laptop" is reported as "/team/alice"
     auth_key: false # the managed API key's name (never its secret or ID)
     request_labels: false # the request labels, sorted and comma-separated
-    max_values: 100 # distinct values per dimension; later ones become "{other}"
+    max_values: 100 # distinct values per dimension; later ones, and ones over 256 bytes, become "{other}"
 
 # OpenTelemetry export (traces and metrics over OTLP). The settings below
 # mirror the standard OTEL_* environment variables; a variable set in the
