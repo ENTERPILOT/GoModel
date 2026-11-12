@@ -342,6 +342,48 @@ func TestPeerInFlightExpiresWhileLoadsFail(t *testing.T) {
 	b.persistMu.Unlock()
 }
 
+// One failed load at start must not cut a replica off from the others: it
+// keeps saving its counts, and reads theirs as soon as the store answers.
+func TestFailedStartLoadRejoinsOnTheNextFlush(t *testing.T) {
+	ctx := context.Background()
+	shared := newClusterStore(t, Rule{
+		Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodHourSeconds,
+		MaxRequests: new(int64(3)), Source: SourceManual,
+	})
+	a := replica(t, shared)
+	now := shared.clock.Now
+	for range 2 {
+		_, err := a.Acquire(onPath("/team"), now())
+		require.NoError(t, err)
+	}
+	a.flush(ctx)
+
+	store := &failingLoadStore{clusterStore: shared, err: errors.New("store down")}
+	b, err := NewService(ctx, store, WithFlushInterval(0))
+	require.NoError(t, err)
+	t.Cleanup(b.Close)
+	b.now = now
+	b.Start(ctx)
+	b.flushInterval = time.Second
+
+	_, err = b.Acquire(onPath("/team"), now())
+	require.NoError(t, err, "the peer's counts are unknown while the store is unreadable")
+
+	store.err = nil
+	b.flush(ctx)
+	assert.Equal(t, int64(0), shared.loads[len(shared.loads)-1], "nothing was loaded yet, so the first load that works reads everything")
+	statuses := b.StatusesForUserPath("/team", now())
+	require.Len(t, statuses, 1)
+	assert.Equal(t, int64(3), statuses[0].RequestsUsed, "the peer's two requests plus its own")
+	_, err = b.Acquire(onPath("/team"), now())
+	require.Error(t, err, "the limit is shared again")
+
+	a.flush(ctx)
+	statuses = a.StatusesForUserPath("/team", now())
+	require.Len(t, statuses, 1)
+	assert.Equal(t, int64(3), statuses[0].RequestsUsed, "the peer sees what this replica saved")
+}
+
 func TestIncrementalLoadKeepsUnchangedRowsAndDropsRolledOutOnes(t *testing.T) {
 	ctx := context.Background()
 	store := newClusterStore(t, Rule{

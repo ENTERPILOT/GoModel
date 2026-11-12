@@ -191,7 +191,7 @@ serving, then shuts the old one down, then starts the new one
 | Call | When | Persistence |
 |---|---|---|
 | `New` / `NewService` | `app.New`, tests | Empty limiter. No load, no flush, no loop. |
-| `Start` | `App.startServer`, after the previous generation’s `Shutdown` | Load snapshot, apply rows whose **definition** still matches a current rule and whose `partition` matches the rule’s mode (empty iff `!PerChild`), re-arm child expiry, then start the flush loop if `flush_interval > 0`. Mark the generation **active** only if load succeeded. Start is idempotent. A failed load leaves the generation idle so it cannot flush an empty snapshot over durable windows. |
+| `Start` | `App.startServer`, after the previous generation’s `Shutdown` | Load snapshot, apply rows whose **definition** still matches a current rule and whose `partition` matches the rule’s mode (empty iff `!PerChild`), re-arm child expiry, then start the flush loop if `flush_interval > 0`. Start is idempotent. A failed load still marks the generation **active**: its rows are its own, keyed by its writer id, so saving them overwrites nothing, and the next flush loads everything again. |
 | `Close` (`Result.Close`) | `App.Shutdown` | Stop the flush loop. If **active**, write one last snapshot. Then stop the expiry worker and close the store. Close is idempotent. |
 
 An idle replacement that is built and then discarded (failed listen,
@@ -305,8 +305,9 @@ they are there to pin, not a per-test inventory.
 - `New` neither reads nor writes. `Start` loads. `Close` after `Start`
   writes once. `Close` without `Start` writes nothing, and neither does
   admission — the "only a serving generation persists" rule of §8.
-- A failed load leaves the generation idle, so a store hiccup cannot
-  cost the persisted windows.
+- A failed load leaves the persisted windows as they were, and the
+  generation still saves its own counts and reads the others' on the next
+  flush.
 - `Close` during an in-flight load does not restore after shutdown.
 - An in-flight flush cannot resurrect a completed reset or delete
   (`persistMu`), and a failed row delete reaches the caller.
