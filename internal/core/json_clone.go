@@ -1,8 +1,10 @@
 package core
 
+import "slices"
+
 // CloneJSONValue deep-copies a decoded JSON value: objects (map[string]any)
 // and arrays ([]any) are copied recursively, and []string, which Go-built
-// configs use for string arrays, is copied too. Every other value, including
+// configs use for string arrays, is copied too, keeping nil and empty apart. Every other value, including
 // scalars, structs, pointers and other slice types, is returned as is and
 // shared with the source.
 func CloneJSONValue(v any) any {
@@ -20,7 +22,7 @@ func CloneJSONValue(v any) any {
 		}
 		return out
 	case []string:
-		return append([]string(nil), value...)
+		return slices.Clone(value)
 	default:
 		return v
 	}

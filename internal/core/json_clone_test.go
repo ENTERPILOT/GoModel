@@ -9,9 +9,6 @@ import (
 )
 
 func TestCloneJSONValue(t *testing.T) {
-	type point struct{ X int }
-	shared := &point{X: 1}
-
 	tests := []struct {
 		name string
 		in   any
@@ -24,7 +21,8 @@ func TestCloneJSONValue(t *testing.T) {
 		{name: "nil map becomes empty map", in: map[string]any(nil), want: map[string]any{}},
 		{name: "empty map", in: map[string]any{}, want: map[string]any{}},
 		{name: "nil array becomes empty array", in: []any(nil), want: []any{}},
-		{name: "empty string slice becomes nil", in: []string{}, want: []string(nil)},
+		{name: "nil string slice", in: []string(nil), want: []string(nil)},
+		{name: "empty string slice", in: []string{}, want: []string{}},
 		{
 			name: "nested",
 			in: map[string]any{
@@ -36,8 +34,6 @@ func TestCloneJSONValue(t *testing.T) {
 				"d": []string{"e", "f"},
 			},
 		},
-		{name: "struct pointer is shared", in: shared, want: shared},
-		{name: "raw message is shared", in: json.RawMessage(`{}`), want: json.RawMessage(`{}`)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -77,11 +73,18 @@ func TestCloneJSONValueDoesNotAliasSource(t *testing.T) {
 	}, src)
 }
 
-func TestCloneJSONValueSharesOtherSlices(t *testing.T) {
-	src := []byte("abc")
+func TestCloneJSONValueSharesOtherValues(t *testing.T) {
+	type point struct{ X int }
+	ptr := &point{X: 1}
+	assert.Same(t, ptr, CloneJSONValue(ptr))
 
-	clone, ok := CloneJSONValue(src).([]byte)
+	bytes := []byte("abc")
+	clonedBytes, ok := CloneJSONValue(bytes).([]byte)
 	require.True(t, ok)
+	assert.Same(t, &bytes[0], &clonedBytes[0])
 
-	assert.Same(t, &src[0], &clone[0])
+	raw := json.RawMessage(`{}`)
+	clonedRaw, ok := CloneJSONValue(raw).(json.RawMessage)
+	require.True(t, ok)
+	assert.Same(t, &raw[0], &clonedRaw[0])
 }
