@@ -136,7 +136,6 @@ var sqlIndexes = []string{
 	"DROP INDEX IF EXISTS idx_audit_session_id",
 	"CREATE INDEX IF NOT EXISTS idx_audit_session_timestamp ON audit_logs(session_id, timestamp)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_error_type ON audit_logs(error_type)",
-	"CREATE INDEX IF NOT EXISTS idx_audit_attempts_log_seq ON audit_log_attempts(audit_log_id, seq)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_attempts_provider ON audit_log_attempts(provider_type)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_attempts_started_at ON audit_log_attempts(started_at)",
 }
@@ -186,6 +185,9 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 			slog.Warn("failed to create index", "error", err)
 		}
 	}
+	if db.Dialect() != sqlx.PostgreSQL {
+		dropDuplicateAttemptsIndex(ctx, db)
+	}
 
 	store := &SQLStore{
 		db:            db,
@@ -209,6 +211,9 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 		}
 		ensureModelIndexesConcurrently(buildCtx, db)
 		ensureTrigramSearchIndex(buildCtx, db, postgresErrorMessage)
+		if db.Dialect() == sqlx.PostgreSQL {
+			dropDuplicateAttemptsIndex(buildCtx, db)
+		}
 		if !built {
 			writtenAt.Build(buildCtx, writtenAtBackgroundIndex)
 		}
