@@ -11,12 +11,14 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy source and cross-compile for the target platform
+# Copy source and cross-compile for the target platform. grpcnotrace: see
+# GO_BUILD_TAGS in the Makefile.
 COPY . .
 ARG VERSION=dev
 ARG COMMIT=none
 ARG DATE=unknown
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GOARM=${TARGETVARIANT#v} go build \
+	-trimpath -tags=grpcnotrace \
 	-ldflags="-s -w -X github.com/enterpilot/gomodel/internal/version.Version=${VERSION} -X github.com/enterpilot/gomodel/internal/version.Commit=${COMMIT} -X github.com/enterpilot/gomodel/internal/version.Date=${DATE}" \
 	-o /gomodel ./cmd/gomodel
 
