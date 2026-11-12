@@ -159,6 +159,11 @@ func TestIsMongoTransactionCapabilityError(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "illegal operation unrelated to transactions",
+			err:  mongo.CommandError{Code: 20, Message: "cannot write to a capped collection"},
+			want: false,
+		},
+		{
 			name: "labeled unsupported transaction message",
 			err: mongo.CommandError{
 				Message: "transaction is not supported by this deployment",

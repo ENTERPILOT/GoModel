@@ -51,11 +51,15 @@ API i inny stan administracyjny za pośrednictwem `STORAGE_TYPE`.
 | MongoDB | `mongodb` | Już utrzymujesz MongoDB i wolisz je od Postgresa. |
 
 Przy MongoDB wybieraj zestaw replik (replica set), nawet jednowęzłowy, taki jak
-uruchamia `docker-compose.yaml` z repozytorium. Samodzielny `mongod` też działa,
-ale nie obsługuje transakcji: GoModel zapisuje wtedy ostrzeżenie w logach, a zmiany
-obejmujące wiele dokumentów (konfigurację budżetów i limitów, guardrails, wersje
-workflow) zapisuje osobnymi operacjami. Przerwany zapis może więc wprowadzić tylko
-część zmiany; ponowny zapis ją uzupełnia.
+ten uruchamiany przez `docker-compose.yaml` z repozytorium. Samodzielny `mongod`
+też działa, ale nie obsługuje transakcji: GoModel zapisuje wtedy ostrzeżenie
+w logach, a zmiany obejmujące wiele dokumentów (konfigurację budżetów i limitów,
+guardrails, wersje workflow, ponowne przeliczanie kosztów użycia) wykonuje
+osobnymi operacjami. Przerwana zmiana może więc zostać wprowadzona tylko
+częściowo; uruchom ją ponownie, aby ją dokończyć. Jeśli zapis workflow zostanie
+przerwany w trakcie aktywowania nowej wersji, zakres może zostać bez aktywnego
+workflow (dla zakresu globalnego przeładowanie workflow kończy się błędem), dopóki
+nie zapiszesz tego workflow ponownie.
 
 SQLite jest domyślny, aby GoModel działał bez żadnej konfiguracji, i jest pełnoprawną
 opcją produkcyjną dla pojedynczej instancji z trwałym wolumenem. Eliminuje przeskok

@@ -52,9 +52,12 @@ keys, and other admin state through `STORAGE_TYPE`.
 
 With MongoDB, prefer a replica set, even a single-node one like the repository's
 `docker-compose.yaml` starts. A standalone `mongod` works too, but it has no
-transactions: GoModel logs a warning and saves multi-document changes (budget and
-rate limit config, guardrails, workflow versions) as separate writes, so an
-interrupted save can apply only part of the change. Saving again completes it.
+transactions: GoModel logs a warning and runs multi-document changes (budget and
+rate limit config, guardrails, workflow versions, usage pricing recalculation) as
+separate writes. An interrupted change can apply only in part; run it again to
+complete it. If a workflow save is interrupted while it activates the new
+version, the scope can be left with no active workflow (for the global scope,
+workflow reloads fail) until you save that workflow again.
 
 SQLite is the default so GoModel works with zero configuration, and it is a real
 production option for a single instance with a persistent volume. It removes a

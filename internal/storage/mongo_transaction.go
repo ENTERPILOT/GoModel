@@ -69,18 +69,21 @@ func isMongoTransactionCapabilityError(err error) bool {
 	if err == nil {
 		return false
 	}
+	message := strings.ToLower(err.Error())
+	if !strings.Contains(message, "transaction") {
+		return false
+	}
+	// IllegalOperation (20) has other causes too, so it counts only together
+	// with transaction wording.
 	var commandErr mongo.CommandError
 	if errors.As(err, &commandErr) && commandErr.HasErrorCode(20) {
 		return true
 	}
 	var labeled mongo.LabeledError
 	if errors.As(err, &labeled) && labeled.HasErrorLabel("TransientTransactionError") {
-		message := strings.ToLower(err.Error())
-		return strings.Contains(message, "transaction") &&
-			(strings.Contains(message, "not supported") ||
-				strings.Contains(message, "not allowed") ||
-				strings.Contains(message, "replica set"))
+		return strings.Contains(message, "not supported") ||
+			strings.Contains(message, "not allowed") ||
+			strings.Contains(message, "replica set")
 	}
-	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "transaction numbers are only allowed on a replica set member or mongos")
 }

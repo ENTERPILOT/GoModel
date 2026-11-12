@@ -125,9 +125,10 @@ func (s *MongoDBStore) Create(ctx context.Context, input CreateInput) (*Version,
 	}
 	defer session.EndSession(ctx)
 
-	// Without a transaction (standalone server) a failed insert can leave the
-	// scope with no active version; the unique indexes still prevent duplicate
-	// version numbers and a second active version, and saving again repairs it.
+	// The version is inserted inactive and activated last, so that without a
+	// transaction (standalone server) a failed insert, such as a concurrent
+	// create taking the same version number, leaves the scope untouched. Only
+	// an interruption between the two updates leaves it with no active version.
 	var created *Version
 	err = storage.MongoTransaction(ctx, session, "create workflow", func(sessionCtx context.Context) error {
 		created = nil
@@ -140,22 +141,12 @@ func (s *MongoDBStore) Create(ctx context.Context, input CreateInput) (*Version,
 			return fmt.Errorf("load latest workflow version: %w", err)
 		}
 
-		if input.Activate {
-			if _, err := s.collection.UpdateMany(sessionCtx,
-				bson.D{{Key: "scope_key", Value: scopeKey}, {Key: "active", Value: true}},
-				bson.D{{Key: "$set", Value: bson.D{{Key: "active", Value: false}}}},
-			); err != nil {
-				return fmt.Errorf("deactivate current workflow version: %w", err)
-			}
-		}
-
 		now := time.Now().UTC()
 		version := &Version{
 			ID:           uuid.NewString(),
 			Scope:        input.Scope,
 			ScopeKey:     scopeKey,
 			Version:      latest.Version + 1,
-			Active:       input.Activate,
 			Managed:      input.Managed,
 			Name:         input.Name,
 			Description:  input.Description,
@@ -169,6 +160,21 @@ func (s *MongoDBStore) Create(ctx context.Context, input CreateInput) (*Version,
 				return fmt.Errorf("insert workflow version: duplicate key: %w", err)
 			}
 			return fmt.Errorf("insert workflow version: %w", err)
+		}
+
+		if input.Activate {
+			if _, err := s.collection.UpdateMany(sessionCtx,
+				bson.D{{Key: "scope_key", Value: scopeKey}, {Key: "active", Value: true}, {Key: "_id", Value: bson.D{{Key: "$ne", Value: version.ID}}}},
+				bson.D{{Key: "$set", Value: bson.D{{Key: "active", Value: false}}}},
+			); err != nil {
+				return fmt.Errorf("deactivate current workflow version: %w", err)
+			}
+			if _, err := s.collection.UpdateByID(sessionCtx, version.ID,
+				bson.D{{Key: "$set", Value: bson.D{{Key: "active", Value: true}}}},
+			); err != nil {
+				return fmt.Errorf("activate workflow version: %w", err)
+			}
+			version.Active = true
 		}
 
 		created = version
