@@ -221,12 +221,15 @@ Przekierowanie podaje dla każdego z tych pól **najmniejszą wartość zgłasza
 którykolwiek z jego celów**, także przez modele wirtualne w łańcuchu. Request może
 obsłużyć dowolny cel – przez load balancing, failover lub przeniesienie sesji – więc
 dopasowanie do najmniejszej wartości nie przepełni żadnego celu, który zgłasza wartość.
+Liczy się każdy zadeklarowany cel, także chwilowo niedostępny, więc podawane wartości nie
+zmieniają się wraz ze stanem providerów; wyłączony model wirtualny w łańcuchu jest pomijany.
 Cele, które nie zgłaszają wartości, są pomijane, więc podana wartość ich nie ogranicza;
 jeśli żaden cel jej nie zgłasza, pole jest pomijane. Ustaw wartość jawnie, gdy taki cel
 przyjmuje mniej.
 
 Ustaw **Context window** lub **Max output tokens** na przekierowaniu, aby podać własną
-wartość, na przykład gdy cel z dużym kontekstem służy tylko jako rzadki fallback. Wartość
+wartość, na przykład większą, gdy najmniejszy cel służy tylko jako rzadki fallback; request
+dopasowany do wartości powyżej limitu celu może ten cel przepełnić. Wartość
 jawna ma pierwszeństwo przed wyliczoną, a model wirtualny w łańcuchu stosuje własne
 wartości jawne, zanim zewnętrzny wyznaczy minimum.
 

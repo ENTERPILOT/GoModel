@@ -235,16 +235,19 @@ Ein Redirect listet für beide Felder jeweils den **kleinsten Wert, den eines
 seiner Ziele meldet**, auch über verkettete virtuelle Modelle hinweg. Jedes Ziel
 kann einen Request bedienen – durch Load Balancing, Failover oder eine
 wandernde Session –, sodass eine Bemessung am kleinsten Wert kein Ziel
-überläuft, das einen Wert meldet. Ziele ohne gemeldeten Wert werden ignoriert,
-der gelistete Wert begrenzt sie also nicht; meldet keines einen Wert, entfällt
-das Feld. Setzen Sie einen expliziten Wert, wenn ein solches Ziel weniger
-akzeptiert.
+überläuft, das einen Wert meldet. Jedes deklarierte Ziel zählt, auch wenn es
+gerade nicht verfügbar ist, sodass sich die gelisteten Werte nicht mit dem
+Zustand der Provider ändern; ein deaktiviertes verkettetes virtuelles Modell
+wird übersprungen. Ziele ohne gemeldeten Wert werden ignoriert, der gelistete
+Wert begrenzt sie also nicht; meldet keines einen Wert, entfällt das Feld.
+Setzen Sie einen expliziten Wert, wenn ein solches Ziel weniger akzeptiert.
 
 Setzen Sie **Context window** oder **Max output tokens** auf einem Redirect, um
-stattdessen Ihren eigenen Wert zu listen, etwa wenn ein Ziel mit großem Kontext
-nur als seltener Fallback dient. Ein expliziter Wert hat Vorrang vor dem
-abgeleiteten, und ein verkettetes virtuelles Modell wendet seine eigenen
-expliziten Werte an, bevor ein äußeres das Minimum bildet.
+stattdessen Ihren eigenen Wert zu listen, etwa einen größeren, wenn das kleinste
+Ziel nur als seltener Fallback dient; ein Request, der an einem Wert oberhalb
+des Limits eines Ziels bemessen ist, kann dieses Ziel überlaufen. Ein expliziter
+Wert hat Vorrang vor dem abgeleiteten, und ein verkettetes virtuelles Modell
+wendet seine eigenen expliziten Werte an, bevor ein äußeres das Minimum bildet.
 
 ```yaml
 virtual_models:
