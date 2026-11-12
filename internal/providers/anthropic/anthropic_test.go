@@ -433,9 +433,9 @@ data: {"type":"message_stop"}
 
 	// prompt_tokens covers the cache reads, as OpenAI counts it.
 	responseStr := string(raw)
-	assert.Contains(t, responseStr, `"prompt_tokens":16`)
-	assert.Contains(t, responseStr, `"completion_tokens":2`)
-	assert.Contains(t, responseStr, `"total_tokens":18`)
+	assert.Contains(t, responseStr, `"prompt_tokens":16,`)
+	assert.Contains(t, responseStr, `"completion_tokens":2,`)
+	assert.Contains(t, responseStr, `"total_tokens":18}`)
 	assert.Contains(t, responseStr, `"prompt_tokens_details":{"cached_tokens":6,`)
 	assert.NotContains(t, responseStr, `cache_read_input_tokens`)
 }
@@ -2858,10 +2858,10 @@ data: {"type":"message_stop"}
 
 	responseStr := string(raw)
 	require.Contains(t, responseStr, `"type":"response.completed"`)
-	assert.Contains(t, responseStr, `"input_tokens":14`)
-	assert.Contains(t, responseStr, `"output_tokens":2`)
-	assert.Contains(t, responseStr, `"total_tokens":16`)
-	assert.Contains(t, responseStr, `"cache_write_tokens":4`)
+	assert.Contains(t, responseStr, `"input_tokens":14,`)
+	assert.Contains(t, responseStr, `"output_tokens":2,`)
+	assert.Contains(t, responseStr, `"total_tokens":16}`)
+	assert.Contains(t, responseStr, `"cache_write_tokens":4}`)
 	assert.NotContains(t, responseStr, `cache_creation_input_tokens`)
 }
 

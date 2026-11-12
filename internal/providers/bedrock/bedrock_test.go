@@ -862,14 +862,18 @@ func TestBedrockUsage(t *testing.T) {
 
 			chunk := newOpenAIStream(nil, "test-model", providerName).formatChunk(map[string]any{}, "stop", tokens)
 			var parsed struct {
-				Usage map[string]any `json:"usage"`
+				Usage struct {
+					PromptTokens        int                       `json:"prompt_tokens"`
+					TotalTokens         int                       `json:"total_tokens"`
+					PromptTokensDetails *core.PromptTokensDetails `json:"prompt_tokens_details"`
+				} `json:"usage"`
 			}
 			err := json.Unmarshal([]byte(strings.TrimSuffix(strings.TrimPrefix(chunk, "data: "), "\n\n")), &parsed)
 			require.NoError(t, err)
-			assert.InDelta(t, tc.wantPrompt, parsed.Usage["prompt_tokens"], 0)
-			assert.InDelta(t, tc.wantPrompt+7, parsed.Usage["total_tokens"], 0)
-			assert.Equal(t, tc.wantDetails != nil, parsed.Usage["prompt_tokens_details"] != nil)
-			assert.NotContains(t, parsed.Usage, "cache_read_input_tokens")
+			assert.Equal(t, tc.wantPrompt, parsed.Usage.PromptTokens)
+			assert.Equal(t, tc.wantPrompt+7, parsed.Usage.TotalTokens)
+			assert.Equal(t, tc.wantDetails, parsed.Usage.PromptTokensDetails)
+			assert.NotContains(t, chunk, "_input_tokens", "Anthropic-named cache counts")
 		})
 	}
 }
