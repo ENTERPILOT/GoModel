@@ -13,11 +13,16 @@ builds:
       - amd64
       - arm64
     main: ./cmd/gomodel
+    # Reproducible builds: no runner paths, and the commit time instead of the
+    # wall clock, so rebuilding a tag yields byte-identical binaries.
+    flags:
+      - -trimpath
     ldflags:
       - -s -w
       - -X github.com/enterpilot/gomodel/internal/version.Version={{.Version}}
       - -X github.com/enterpilot/gomodel/internal/version.Commit={{.Commit}}
-      - -X github.com/enterpilot/gomodel/internal/version.Date={{.Date}}
+      - -X github.com/enterpilot/gomodel/internal/version.Date={{.CommitDate}}
+    mod_timestamp: "{{ .CommitTimestamp }}"
 
 archives:
   - formats: ['tar.gz']
