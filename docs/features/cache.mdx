@@ -130,8 +130,9 @@ cache:
         url: redis://redis:6379?dial_timeout=5s&read_timeout=2s&write_timeout=2s
 ```
 
-A value of `0` disables that timeout. The startup connection check is not
-capped by these timeouts; it has its own 5 s budget.
+A value of `0` disables that timeout, and `write_timeout` follows
+`read_timeout` when only `read_timeout` is set. The startup connection check
+is not capped by these timeouts; it has its own 5 s budget.
 
 ## What the exact cache keys on
 
