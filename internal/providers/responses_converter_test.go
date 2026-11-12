@@ -1275,3 +1275,34 @@ func TestOpenAIResponsesStreamConverter_FailedEventIsSequenced(t *testing.T) {
 	got := eventNames(events)
 	require.Equal(t, want, got)
 }
+
+func TestOpenAIResponsesStreamConverter_CloseEndsStream(t *testing.T) {
+	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader("data: [DONE]\n")), "test-model", "mock")
+
+	require.NoError(t, converter.Close())
+
+	buf := make([]byte, 100)
+	n, err := converter.Read(buf)
+	assert.Equal(t, 0, n)
+	assert.Equal(t, io.EOF, err)
+}
+
+func TestOpenAIResponsesStreamConverter_SkipsEmptyDeltas(t *testing.T) {
+	mockStream := `data: {"id":"chatcmpl-123","object":"chat.completion.chunk","model":"test-model","choices":[{"index":0,"delta":{},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","model":"test-model","choices":[{"index":0,"delta":{"content":""},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","model":"test-model","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
+
+data: [DONE]
+`
+
+	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "mock")
+	data, err := io.ReadAll(converter)
+	require.NoError(t, err)
+
+	// Empty deltas are not emitted: only the "Hello" delta event remains.
+	result := string(data)
+	assert.Equal(t, 1, strings.Count(result, "event: response.output_text.delta"))
+	assert.Contains(t, result, `"delta":"Hello"`)
+}

@@ -127,8 +127,9 @@ func (t *countingTransport) RoundTrip(req *http.Request) (*http.Response, error)
 
 // AssertChatCompatible checks the contract shared by providers that embed
 // the OpenAI-compatible adapter: registration metadata, constructor safety,
-// and that chat, streaming, model listing, Responses, and embeddings reach
-// the expected upstream paths with the API key attached.
+// that chat, streaming, model listing, Responses, and embeddings reach the
+// expected upstream paths with the API key attached, and that upstream errors
+// and cancelled contexts surface as errors.
 func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 	t.Helper()
 	if p.AuthHeader == "" {
@@ -179,6 +180,7 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 		req := capture.Last(t)
 		assertUpstream(t, req, http.MethodPost, path("/chat/completions"), p.AuthHeader, wantAuth)
 		assertChatRequest(t, req.JSON(t), false)
+		assert.Equal(t, "chatcmpl-test", resp.ID)
 		assert.Equal(t, Model, resp.Model)
 		require.Len(t, resp.Choices, 1)
 		assert.Equal(t, Reply, resp.Choices[0].Message.Content)
@@ -276,6 +278,55 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 		created := responseCreated(t, body)
 		checkStreamID(t, fmt.Sprint(created["id"]))
 		assert.Equal(t, Model, created["model"], "response.created model")
+	})
+
+	// Each call must surface an upstream rejection as a typed gateway error
+	// carrying the upstream status, not as a reply or a bare transport error.
+	t.Run("upstream errors surface as gateway errors", func(t *testing.T) {
+		server, _ := JSONServer(t, http.StatusUnauthorized, `{"error":{"message":"invalid api key"}}`)
+		provider := p.New(apiKey, server.URL, server.Client(), llmclient.Hooks{})
+		calls := map[string]func() error{
+			"chat completion": func() error {
+				_, err := provider.ChatCompletion(context.Background(), chatRequest())
+				return err
+			},
+			"stream chat completion": func() error {
+				_, err := provider.StreamChatCompletion(context.Background(), chatRequest())
+				return err
+			},
+			"list models": func() error {
+				_, err := provider.ListModels(context.Background())
+				return err
+			},
+			"responses": func() error {
+				_, err := provider.Responses(context.Background(), responsesRequest())
+				return err
+			},
+			"stream responses": func() error {
+				_, err := provider.StreamResponses(context.Background(), responsesRequest())
+				return err
+			},
+		}
+		for name, call := range calls {
+			err := call()
+			var gwErr *core.GatewayError
+			if assert.ErrorAs(t, err, &gwErr, name) {
+				assert.Equal(t, http.StatusUnauthorized, gwErr.HTTPStatusCode(), name)
+			}
+		}
+	})
+
+	t.Run("cancelled context surfaces as an error", func(t *testing.T) {
+		server, _ := Server(t, func(w http.ResponseWriter, r *http.Request) {
+			<-r.Context().Done()
+		})
+		provider := p.New(apiKey, server.URL, server.Client(), llmclient.Hooks{})
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := provider.ChatCompletion(ctx, chatRequest())
+		require.Error(t, err, "chat completion")
+		_, err = provider.Responses(ctx, responsesRequest())
+		require.Error(t, err, "responses")
 	})
 
 	t.Run("allowed_tools tool_choice", func(t *testing.T) {
@@ -447,4 +498,7 @@ func assertUpstream(t testing.TB, req Recorded, method, path, authHeader, wantAu
 	assert.Equal(t, method, req.Method, "upstream method")
 	assert.Equal(t, path, req.Path, "upstream path")
 	assert.Equal(t, wantAuth, req.Header.Get(authHeader), "upstream %s header", authHeader)
+	if method == http.MethodPost {
+		assert.Equal(t, "application/json", req.Header.Get("Content-Type"), "upstream Content-Type")
+	}
 }
