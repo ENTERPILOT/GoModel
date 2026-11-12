@@ -176,6 +176,72 @@ GoModel 选取覆盖请求 user path 的最深一级已配置路径（`/acme` �
   结果会报告仍然缺少定价的记录数量。Token 数永远不会被修改。
 </Warning>
 
+## 每位活跃用户成本
+
+该基准回答“一位活跃开发者每月花费多少，成本如何分布？”。`GET /admin/usage/benchmark` 把 `parent` 的每个直接子路径视为一个用户，并汇总其整个子树，与下文的账单导出和[子路径预算](/zh/features/budgets)对路径的分组方式相同：设置 `parent=/eng` 时，`/eng/alice/laptop` 和 `/eng/alice/ci` 都计入 `/eng/alice`。无需 Pro 许可证。
+
+在用量页面上，**细分**区域下方的**每位活跃用户成本**区域展示相同的数据：选择分组和月数，然后在图表（每位活跃用户成本的中位数和 p90，以及活跃用户数）和每月统计表格之间切换。该区域遵循页面的筛选条件，但不使用页面的日期范围。启用加价后，可以通过开关在 provider 成本和计费成本之间切换。
+
+| 参数 | 默认值 | 何时修改 |
+| --- | --- | --- |
+| `parent` | 凭据[作用域](/zh/advanced/admin-endpoints#作用域管理访问)的根路径；全局凭据为 `/`（此时用户是顶层路径） | 想查看某个分组的人员，例如 `parent=/eng` |
+| `months` | `7`：六个完整月份加当前月份 | 需要更长或更短的趋势，取值 `1` 到 `24`，截至 `end_month` |
+| `start_month`、`end_month` | `end_month` 为当前月份；`start_month` 由 `months` 推算 | 需要固定范围（`YYYY-MM`）。`start_month` 优先于 `months`；`end_month` 不能晚于当前月份 |
+| `cost_basis` | `provider` | 转售访问时：`billed` 衡量 provider 成本加加价，包含已计费的响应缓存命中。需要 `PRICING_MARKUPS_ENABLED=true`，否则返回 `409` `markups_disabled` |
+| `top_users` | `0` | 想了解成本由谁产生：每个月列出成本最高的 N 个用户，最多 `50` 个 |
+
+<Note>
+  默认情况下，响应只包含聚合统计：没有用户路径，也没有单个用户的数值。只有设置
+  `top_users` 时，才会出现按用户列出的行（`top_users: [{user, requests, cost}]`）。
+</Note>
+
+该端点还接受数据筛选条件 `model`、`provider`、`label`、`endpoint`、`operation`、`auth_key_id` 和 `user_path`。与账单导出一样，`cache_mode` 是固定的：请求数和 provider 成本来自发送给 provider 的请求；响应缓存命中会使其用户成为活跃用户，并把其计费金额计入计费成本，但不产生 provider 成本。
+
+```bash
+curl "http://localhost:8080/admin/usage/benchmark?parent=/eng" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```json
+{
+  "parent": "/eng",
+  "time_zone": "UTC",
+  "currency": "USD",
+  "cost_basis": "provider",
+  "months": [
+    {
+      "month": "2026-10",
+      "partial": false,
+      "active_users": 42,
+      "unpriced_users": 0,
+      "total_cost": 1260.5,
+      "mean": 30.01,
+      "p50": 22.4,
+      "p90": 61.2,
+      "max": 140.75,
+      "mean_change_percent": 4.2,
+      "p50_change_percent": -1.5,
+      "unattributed_cost": 3.1
+    }
+  ]
+}
+```
+
+`months` 按从旧到新的顺序列出范围内的每个月份，包括没有用量的月份。每个月包含：
+
+- `active_users` — 当月至少有一个请求的用户；响应缓存命中也计算在内。
+- `total_cost`、`mean`、`p50`（中位数）、`p90` 和 `max` — 每位活跃用户的 USD 成本。没有活跃用户的月份中，这些统计值为 `null`。
+- `mean_change_percent` 和 `p50_change_percent` — 相对上个月的变化；第一个月、没有活跃用户的月份，或上个月的值不为正时为 `null`。
+- `unpriced_users` — 因模型没有定价而当月成本完全未知的活跃用户。他们按成本 `0` 计入；部分用量未定价的用户按已知成本计入。
+- `unattributed_cost` — 直接记录在 `parent` 上的用量。它不属于任何用户，也不计入 `total_cost`。
+- `partial` — 当前月份（仍在进行中）为 `true`。与完整月份比较时请谨慎。
+
+百分位数在最接近的排名之间线性插值，与 Excel 的 `PERCENTILE.INC`、NumPy 的默认方法以及 PostgreSQL 的 `percentile_cont` 相同：对于 n 个排序后的成本，第 p 百分位数位于从 0 开始的排名 (n−1)·p 处，在两个相邻值之间插值。两个用户分别花费 $10 和 $20 时，`p50` 为 $15，`p90` 为 $19；只有一个用户时，所有统计值都等于该用户的成本。SQLite、PostgreSQL 和 MongoDB 返回相同的结果。
+
+与账单导出一样，月份按 `X-GoModel-Timezone` Header 指定的时区从午夜到午夜计算：仪表盘会发送其配置的时区，不带该 Header 的 API 调用使用 UTC。`time_zone` 会报告所用时区。
+
+每个用户都会被计入：与细分不同，不会有任何用户被合并到**其他**。一次基准最多包含 100,000 个用户月（用户 × 月份）；超出时返回 `400`，而不是遗漏用户。请选择更深的 `parent`、更少的月份或更窄的筛选条件。[作用域凭据](/zh/advanced/admin-endpoints#作用域管理访问)只能对其子树内的分组进行基准统计；其他 `parent` 会返回 `403` `user_path_out_of_scope`。
+
 ## 账单导出（GoModel Pro）
 
 <Info>

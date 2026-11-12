@@ -15,6 +15,7 @@
   import UsageStatCards from "./UsageStatCards.svelte";
   import UsageBreakdownChart from "./UsageBreakdownChart.svelte";
   import UsagePivot from "./UsagePivot.svelte";
+  import UsageBenchmark from "./UsageBenchmark.svelte";
   import UsageLog from "./UsageLog.svelte";
   import ExportInvoiceButton from "./ExportInvoiceButton.svelte";
   import { invoiceExportVisible } from "./usage-invoice.js";
@@ -89,6 +90,9 @@
 
   <!-- Two-dimension breakdown (e.g. cost per month by user path). -->
   <UsagePivot />
+
+  <!-- Cost per active user of a group, per month. -->
+  <UsageBenchmark />
 
   <!-- Session cardinality and identifiers need the full page width. -->
   <div class="usage-session-breakdown-wrap">

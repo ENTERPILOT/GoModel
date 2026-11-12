@@ -2629,6 +2629,155 @@ const docTemplate = `{
                 ]
             }
         },
+        "/admin/usage/benchmark": {
+            "get": {
+                "description": "Treats each direct child of parent as one user, summing its whole subtree, and returns per calendar month the number of active users (at least one request in the month, response-cache hits included), their total cost and the mean, median (p50), p90 and maximum cost per active user. Percentiles interpolate linearly between closest ranks. Every user is counted; nothing is folded into an \"other\" bucket. Usage recorded on parent itself is reported as unattributed_cost. Months are read in the time zone of the X-GoModel-Timezone header (UTC without it); the current month is flagged partial. The response holds aggregates only unless top_users asks for the highest-cost users of each month.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Benchmark the monthly cost per active user of a group",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "IANA time zone months are read in, e.g. Europe/Warsaw (default UTC)",
+                        "name": "X-GoModel-Timezone",
+                        "in": "header"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Group whose direct children are the users, e.g. /eng (default: the credential's scope root, or /)",
+                        "name": "parent",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Number of months ending at end_month, 1-24 (default 7: six complete months plus the current one); ignored with start_month",
+                        "name": "months",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "First month (YYYY-MM, default: months before end_month)",
+                        "name": "start_month",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Last month (YYYY-MM, default and latest: the current month)",
+                        "name": "end_month",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "provider (default) or billed; billed requires pricing.markups_enabled",
+                        "name": "cost_basis",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "List each month's N highest-cost users (0-50, default 0: aggregates only)",
+                        "name": "top_users",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact model names; repeat or comma-separate for several",
+                        "name": "model",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by provider names or types; repeat or comma-separate for several",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by request labels (exact match); repeat for several",
+                        "name": "label",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by exact request endpoints, e.g. /v1/chat/completions,/v1/messages; repeat or comma-separate for several",
+                        "name": "endpoint",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by comma-separated operations, e.g. chat_completions,embeddings",
+                        "name": "operation",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by managed auth key IDs; repeat or comma-separate for several",
+                        "name": "auth_key_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/usage.Benchmark"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/admin/usage/breakdown": {
             "get": {
                 "description": "Pivots the filtered usage by a row and an optional column dimension. Keys rank by the metric; those past limit fold into a trailing \"other\" key. Period keys follow interval and are never folded. A request with several labels counts once per label.",
@@ -13591,6 +13740,103 @@ const docTemplate = `{
                 },
                 "prefix": {
                     "description": "Prefix is optionally trimmed from the front of each label. Trimming only\naffects the extracted label, never the forwarded header value.",
+                    "type": "string"
+                }
+            }
+        },
+        "usage.Benchmark": {
+            "type": "object",
+            "properties": {
+                "cost_basis": {
+                    "type": "string",
+                    "enum": [
+                        "provider",
+                        "billed"
+                    ]
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "months": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/usage.BenchmarkMonth"
+                    }
+                },
+                "parent": {
+                    "type": "string"
+                },
+                "time_zone": {
+                    "type": "string"
+                }
+            }
+        },
+        "usage.BenchmarkMonth": {
+            "type": "object",
+            "properties": {
+                "active_users": {
+                    "type": "integer"
+                },
+                "max": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "mean": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "mean_change_percent": {
+                    "description": "MeanChangePercent and P50ChangePercent compare with the previous month;\nnil for the first month, a month without active users, or a previous\nmonth whose value is not positive.",
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "month": {
+                    "type": "string"
+                },
+                "p50": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "p50_change_percent": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "p90": {
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "partial": {
+                    "type": "boolean"
+                },
+                "top_users": {
+                    "description": "TopUsers is set only when requested.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/usage.BenchmarkUser"
+                    }
+                },
+                "total_cost": {
+                    "type": "number"
+                },
+                "unattributed_cost": {
+                    "description": "UnattributedCost is usage recorded on the parent path itself, which no\nuser carries; it is not part of TotalCost.",
+                    "type": "number"
+                },
+                "unpriced_users": {
+                    "type": "integer"
+                }
+            }
+        },
+        "usage.BenchmarkUser": {
+            "type": "object",
+            "properties": {
+                "cost": {
+                    "type": "number"
+                },
+                "requests": {
+                    "type": "integer"
+                },
+                "user": {
                     "type": "string"
                 }
             }

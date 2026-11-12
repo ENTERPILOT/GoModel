@@ -55,11 +55,8 @@ func (h *Handler) UsageInvoice(c *echo.Context) error {
 		return handleError(c, invoiceExportUnavailableError())
 	}
 	if !h.billing.Enabled {
-		return handleError(c, core.NewInvalidRequestErrorWithStatus(
-			http.StatusConflict,
-			"invoice export needs billed cost: enable markups with PRICING_MARKUPS_ENABLED=true (pricing.markups_enabled)",
-			nil,
-		).WithCode("markups_disabled"))
+		return handleError(c, markupsDisabledError(
+			"invoice export needs billed cost: enable markups with PRICING_MARKUPS_ENABLED=true (pricing.markups_enabled)"))
 	}
 	format := strings.ToLower(strings.TrimSpace(c.QueryParam("format")))
 	if format != "" && format != "csv" && format != "json" {

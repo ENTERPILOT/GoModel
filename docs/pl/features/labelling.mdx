@@ -252,6 +252,61 @@ w postaci wysłanej przez klienta, więc provider odrzucający `tags` zwraca sw�
 - **Budżety** — budżet może być ograniczony do etykiety i limitować wydatki każdego
   requestu, który ją niesie. Zobacz [Budżety](/pl/features/budgets).
 
+## Koszt pull requesta
+
+Aby zobaczyć, ile CI pull requesta wydaje na modele, oznacz każdy request jego
+jobów etykietą z numerem PR, na przykład `pr-1234`. Nagłówek `x-litellm-tags`
+działa bez konfiguracji, dopóki [tagi LiteLLM](#tagi-litellm) są włączone
+(domyślnie); jeśli są wyłączone, skonfiguruj
+[nagłówek tagujący](#nagłówki-tagujące) i wysyłaj go zamiast tego. W GitHub
+Actions ustaw etykietę raz dla joba:
+
+```yaml .github/workflows/ci.yml
+env:
+  GOMODEL_LABEL: pr-${{ github.event.pull_request.number }}
+```
+
+Następnie wysyłaj ją z każdym requestem:
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "x-litellm-tags: $GOMODEL_LABEL" \
+  -d '{"model": "gpt-5", "messages": [{"role": "user", "content": "Review this diff"}]}'
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_API_KEY"],
+    default_headers={"x-litellm-tags": os.environ["GOMODEL_LABEL"]},
+)
+```
+
+</CodeGroup>
+
+Koszt odczytasz na stronie użycia: w **Zestawieniu** ustaw wiersze na
+**Etykieta**, a kolumny na **Model** lub **Okres**. Możesz też przefiltrować
+dowolny endpoint użycia po etykiecie, aby dostać dokładną wartość:
+
+```bash
+curl "http://localhost:8080/admin/usage/summary?label=pr-1234&days=30" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+- Request z kilkoma etykietami liczy się raz pod każdą z nich, więc wiersze
+  etykiet się nakładają i razem mogą dać więcej niż suma całkowita.
+- Zestawienie zachowuje najwyższe wiersze (`limit`, najwyżej 50), a resztę
+  łączy w **Pozostałe**. Przy wielu PR-ach filtruj po `label`, aby poznać koszt
+  jednego PR-a, zamiast odczytywać go z tabeli przestawnej.
+
 ## Wartości domyślne
 
 Etykietowanie jest domyślnie włączone i nic nie kosztuje, dopóki nie skonfigurujesz reguły

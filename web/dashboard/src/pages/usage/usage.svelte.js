@@ -24,6 +24,7 @@ import { syncUsageUrl, usageApiQuery, usageFilterQueryStr, usagePivotQuery } fro
 import { usageFacets } from "./usageFacets.svelte.js";
 import { usageFilters } from "./usageFilters.svelte.js";
 import { usagePivot } from "./usagePivot.svelte.js";
+import { usageBenchmark } from "./usageBenchmark.svelte.js";
 
 class UsagePageState {
   usageMode = $state("tokens");
@@ -182,6 +183,7 @@ class UsagePageState {
     await runtimeConfig.ensureLoaded();
     const requests = [
       usagePivot.fetch(usagePivotQuery()),
+      usageBenchmark.fetch(),
       this.fetchUsagePageSummary(),
       usageFacets.fetch(),
       this.fetchModelUsage(),
