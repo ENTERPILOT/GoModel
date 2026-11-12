@@ -25,10 +25,12 @@ curl -fsSLO "https://github.com/ENTERPILOT/GoModel/releases/download/v${VERSION}
 grep " gomodel_${VERSION}_dashboard.tar.gz\$" checksums.txt | sha256sum -c -
 tar -xzf "gomodel_${VERSION}_dashboard.tar.gz"
 
-CGO_ENABLED=0 go build \
+CGO_ENABLED=0 go build -trimpath -tags=grpcnotrace \
   -ldflags "-s -w -X github.com/enterpilot/gomodel/internal/version.Version=${VERSION}" \
   -o gomodel ./cmd/gomodel
 ```
+
+`grpcnotrace` 标签会移除 GoModel 从未使用的 gRPC 内置请求追踪，使二进制文件缩小约 15 MB。`-trimpath` 会从二进制文件中移除构建机器的路径。两者都是可选的：不加它们，二进制文件功能完全相同，只是体积更大。`make build` 会自动设置它们。
 
 打包配方可以在源码校验和旁边固定该压缩包的 SHA-256。
 
