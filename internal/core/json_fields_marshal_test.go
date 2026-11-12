@@ -58,9 +58,11 @@ func TestMarshalMergingUnknownJSONObjectMatchesReference(t *testing.T) {
 		"floats":       known{Float: &tiny, Any: huge},
 		"nested":       known{Nested: &known{Name: "x", List: []string{}}},
 		"map":          map[string]any{"b": 1, "a": "<", "c": nil},
-		"all omitted":  struct{ A string `json:"a,omitempty"` }{},
-		"null":         nil,
-		"not object":   []int{1, 2},
+		"all omitted": struct {
+			A string `json:"a,omitempty"`
+		}{},
+		"null":       nil,
+		"not object": []int{1, 2},
 	}
 	extras := map[string]string{
 		"object":      `{"x":1,"y":"<&>"}`,
@@ -127,67 +129,95 @@ func TestChatMarshalMatchesReferenceOnFixtures(t *testing.T) {
 }
 
 func assertChatRequestLevels(t *testing.T, req ChatRequest) int {
-	type alias ChatRequest
-	levels := assertLevel(t, alias(req), req.ExtraFields)
+	known := req
+	known.ExtraFields = UnknownJSONFields{}
+	levels := assertLevel(t, req, known, req.ExtraFields)
 	for _, m := range req.Messages {
-		levels += assertMessageLevel(t, m.MarshalJSON, func() ([]byte, error) {
-			m.ExtraFields = UnknownJSONFields{}
-			return m.MarshalJSON()
-		}, m.ExtraFields)
+		known := m
+		known.ExtraFields = UnknownJSONFields{}
+		levels += assertLevel(t, m, known, m.ExtraFields)
+		levels += assertContentLevels(t, m.Content)
 		levels += assertToolCallLevels(t, m.ToolCalls)
 	}
 	return levels
 }
 
 func assertChatResponseLevels(t *testing.T, resp ChatResponse) int {
-	type responseAlias ChatResponse
-	type choiceAlias Choice
-	levels := assertLevel(t, responseAlias(resp), resp.ExtraFields)
+	known := resp
+	known.ExtraFields = UnknownJSONFields{}
+	levels := assertLevel(t, resp, known, resp.ExtraFields)
 	for _, c := range resp.Choices {
-		levels += assertLevel(t, choiceAlias(c), c.ExtraFields)
+		knownChoice := c
+		knownChoice.ExtraFields = UnknownJSONFields{}
+		levels += assertLevel(t, c, knownChoice, c.ExtraFields)
 		m := c.Message
-		levels += assertMessageLevel(t, m.MarshalJSON, func() ([]byte, error) {
-			m.ExtraFields = UnknownJSONFields{}
-			return m.MarshalJSON()
-		}, m.ExtraFields)
+		knownMessage := m
+		knownMessage.ExtraFields = UnknownJSONFields{}
+		levels += assertLevel(t, m, knownMessage, m.ExtraFields)
+		levels += assertContentLevels(t, m.Content)
 		levels += assertToolCallLevels(t, m.ToolCalls)
 	}
 	return levels
 }
 
-func assertToolCallLevels(t *testing.T, calls []ToolCall) int {
-	type toolCallAlias ToolCall
-	type functionAlias FunctionCall
+func assertContentLevels(t *testing.T, content MessageContent) int {
+	parts, _ := content.([]ContentPart)
 	levels := 0
-	for _, call := range calls {
-		levels += assertLevel(t, toolCallAlias(call), call.ExtraFields)
-		levels += assertLevel(t, functionAlias(call.Function), call.Function.ExtraFields)
+	for _, p := range parts {
+		known := p
+		known.ExtraFields = UnknownJSONFields{}
+		levels += assertLevel(t, p, known, p.ExtraFields)
+		if p.ImageURL != nil {
+			known := *p.ImageURL
+			known.ExtraFields = UnknownJSONFields{}
+			levels += assertLevel(t, *p.ImageURL, known, p.ImageURL.ExtraFields)
+		}
+		if p.VideoURL != nil {
+			known := *p.VideoURL
+			known.ExtraFields = UnknownJSONFields{}
+			levels += assertLevel(t, *p.VideoURL, known, p.VideoURL.ExtraFields)
+		}
+		if p.InputAudio != nil {
+			known := *p.InputAudio
+			known.ExtraFields = UnknownJSONFields{}
+			levels += assertLevel(t, *p.InputAudio, known, p.InputAudio.ExtraFields)
+		}
+		if p.File != nil {
+			known := *p.File
+			known.ExtraFields = UnknownJSONFields{}
+			levels += assertLevel(t, *p.File, known, p.File.ExtraFields)
+		}
 	}
 	return levels
 }
 
-// assertLevel compares one alias-encoded level and reports whether it carried
-// extras, the only case the new encoder handles.
-func assertLevel(t *testing.T, base any, extra UnknownJSONFields) int {
-	t.Helper()
-	if extra.IsEmpty() {
-		return 0
+func assertToolCallLevels(t *testing.T, calls []ToolCall) int {
+	levels := 0
+	for _, call := range calls {
+		known := call
+		known.ExtraFields = UnknownJSONFields{}
+		levels += assertLevel(t, call, known, call.ExtraFields)
+		knownFunction := call.Function
+		knownFunction.ExtraFields = UnknownJSONFields{}
+		levels += assertLevel(t, call.Function, knownFunction, call.Function.ExtraFields)
 	}
-	assertSameMarshal(t, base, extra.raw)
-	return 1
+	return levels
 }
 
-// assertMessageLevel covers message types whose MarshalJSON builds its known
-// members itself: the reference output is that MarshalJSON without extras
-// (plain json.Marshal of the known members) merged with the extras.
-func assertMessageLevel(t *testing.T, marshal, marshalKnown func() ([]byte, error), extra UnknownJSONFields) int {
+// assertLevel checks one object level that carries extras, the only case the
+// new encoder handles, and reports whether it did. Without extras a level's
+// MarshalJSON is plain json.Marshal of its known members, as before the
+// change, so the reference output is that merged with the extras. Children
+// are encoded by the same MarshalJSON methods on both sides; each child level
+// is checked by its own call.
+func assertLevel[T json.Marshaler](t *testing.T, v, known T, extra UnknownJSONFields) int {
 	t.Helper()
 	if extra.IsEmpty() {
 		return 0
 	}
-	got, err := marshal()
+	got, err := v.MarshalJSON()
 	require.NoError(t, err)
-	baseBody, err := marshalKnown()
+	baseBody, err := known.MarshalJSON()
 	require.NoError(t, err)
 	want, err := mergeUnknownJSONObject(baseBody, extra.raw)
 	require.NoError(t, err)
