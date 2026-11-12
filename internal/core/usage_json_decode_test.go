@@ -40,6 +40,8 @@ var usageDecodeInputs = []string{
 	`{"prompt_tokens":1,"prompt_tokens":2}`,
 	`{"prompt_tokens_details":{"cached_tokens":1},"prompt_tokens_details":{"audio_tokens":2}}`,
 	`{"raw_usage":{"a":1},"raw_usage":{"b":2}}`,
+	`{"raw_usage":5,"raw_usage":{"cost":0.5}}`,
+	`{"prompt_tokens":1,"raw_usage":{"prompt_tokens":2}}`,
 	`{"PROMPT_TOKENS":5}`,
 	`{"Raw_Usage":{"a":1}}`,
 	`{"prompt_\u0074okens":5}`,
@@ -74,19 +76,26 @@ func decodeUsageBothWays(data []byte, start Usage) (got, want Usage, gotErr, wan
 		gotDetails, wantDetails := *start.PromptTokensDetails, *start.PromptTokensDetails
 		got.PromptTokensDetails, want.PromptTokensDetails = &gotDetails, &wantDetails
 	}
+	if start.CompletionTokensDetails != nil {
+		gotDetails, wantDetails := *start.CompletionTokensDetails, *start.CompletionTokensDetails
+		got.CompletionTokensDetails, want.CompletionTokensDetails = &gotDetails, &wantDetails
+	}
 	gotErr = got.UnmarshalJSON(data)
 	wantErr = want.unmarshalJSONMemberByMember(data)
 	return got, want, gotErr, wantErr
 }
 
 // rawUsageCollides reports whether a member of the raw_usage object shares
-// its name with a top-level member. The member-by-member decode merges them
-// in map order, so its result is not deterministic for such objects.
+// its name with an unknown top-level member. The member-by-member decode
+// merges both into RawUsage in map order, so its result is not deterministic
+// for such objects.
 func rawUsageCollides(data []byte) bool {
 	root := gjson.ParseBytes(data)
 	collides := false
 	root.Get("raw_usage").ForEach(func(key, _ gjson.Result) bool {
-		collides = root.Get(gjson.Escape(key.String())).Exists()
+		name := key.String()
+		_, known := usageKnownFields[name]
+		collides = !known && root.Get(gjson.Escape(name)).Exists()
 		return !collides
 	})
 	return collides
@@ -99,7 +108,13 @@ func assertUsageDecodesAgree(t *testing.T, data []byte) {
 	}
 	starts := []Usage{
 		{},
-		{PromptTokens: 9, TotalTokens: 9, PromptTokensDetails: &PromptTokensDetails{AudioTokens: 4}, RawUsage: map[string]any{"stale": true}},
+		{
+			PromptTokens:            9,
+			TotalTokens:             9,
+			PromptTokensDetails:     &PromptTokensDetails{AudioTokens: 4},
+			CompletionTokensDetails: &CompletionTokensDetails{ReasoningTokens: 5},
+			RawUsage:                map[string]any{"stale": true},
+		},
 	}
 	for _, start := range starts {
 		got, want, gotErr, wantErr := decodeUsageBothWays(data, start)

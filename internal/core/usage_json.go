@@ -42,7 +42,9 @@ type usageMembers struct {
 // from the other members only when there are any.
 func (u *Usage) UnmarshalJSON(data []byte) error {
 	rawUsage, irregular, scanErr := scanUsageMembers(data)
-	if irregular {
+	// A scan error stops the scan before it sees a later duplicate that the
+	// member-by-member decode would keep instead, so that decode decides.
+	if irregular || scanErr != nil {
 		return u.unmarshalJSONMemberByMember(data)
 	}
 	members := usageMembers{
@@ -54,9 +56,6 @@ func (u *Usage) UnmarshalJSON(data []byte) error {
 	}
 	if err := json.Unmarshal(data, &members); err != nil {
 		return err
-	}
-	if scanErr != nil {
-		return scanErr
 	}
 	u.PromptTokens = members.PromptTokens
 	u.CompletionTokens = members.CompletionTokens
