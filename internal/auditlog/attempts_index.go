@@ -13,10 +13,11 @@ import (
 const duplicateAttemptsIndex = "idx_audit_attempts_log_seq"
 
 // dropDuplicateAttemptsIndex retires duplicateAttemptsIndex where it exists.
-// The catalog is checked first, so only the one start that finds the index
-// issues a DROP. PostgreSQL drops it CONCURRENTLY, which never blocks attempt
-// inserts and reads. A failure is logged: the index wastes writes and disk but
-// does not break anything.
+// The catalog is checked first, so once the index is gone a start issues no
+// DROP. Replicas starting together may both see it and both drop it; IF EXISTS
+// makes the later one a no-op. PostgreSQL drops it CONCURRENTLY, which never
+// blocks attempt inserts and reads. A failure is logged: the index wastes
+// writes and disk but does not break anything.
 func dropDuplicateAttemptsIndex(ctx context.Context, db sqlx.DB) {
 	exists := `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`
 	drop := "DROP INDEX IF EXISTS " + duplicateAttemptsIndex

@@ -204,6 +204,9 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 	buildCtx, cancel := context.WithCancel(context.Background())
 	store.cancelIndexBuild = cancel
 	store.indexBuild.Go(func() {
+		if db.Dialect() == sqlx.PostgreSQL {
+			dropDuplicateAttemptsIndex(buildCtx, db)
+		}
 		writtenAt, ok := writtenAtIndexBuilder(db)
 		built := !ok || writtenAt.TryBuild(buildCtx, writtenAtBackgroundIndex)
 		if buildCtx.Err() != nil {
@@ -211,9 +214,6 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 		}
 		ensureModelIndexesConcurrently(buildCtx, db)
 		ensureTrigramSearchIndex(buildCtx, db, postgresErrorMessage)
-		if db.Dialect() == sqlx.PostgreSQL {
-			dropDuplicateAttemptsIndex(buildCtx, db)
-		}
 		if !built {
 			writtenAt.Build(buildCtx, writtenAtBackgroundIndex)
 		}
