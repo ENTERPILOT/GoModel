@@ -96,7 +96,7 @@ services:
   prometheus:
     profiles:
       - app
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.16.0
     ports:
       - "9090:9090"
     volumes:

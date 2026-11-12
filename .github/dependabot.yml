@@ -38,6 +38,36 @@ updates:
         patterns:
           - "*"
 
+  # Images of the local development stack in docker-compose.yaml.
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 3
+    labels:
+      - "dependencies"
+    groups:
+      docker-compose:
+        patterns:
+          - "*"
+
+  # Build-time dependencies of the embedded dashboard.
+  - package-ecosystem: "npm"
+    directory: "/web/dashboard"
+    schedule:
+      interval: "weekly"
+    # Longer than the other ecosystems: a compromised npm release is usually
+    # reported and unpublished within days. Security updates skip the cooldown.
+    cooldown:
+      default-days: 7
+    labels:
+      - "dependencies"
+    groups:
+      npm:
+        patterns:
+          - "*"
+
   - package-ecosystem: "github-actions"
     # "/" covers .github/workflows only; local composite actions are listed
     # separately or their pinned actions never get updated.
