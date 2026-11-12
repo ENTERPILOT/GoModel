@@ -2,10 +2,12 @@ package streaming
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -105,9 +107,9 @@ func TestObservedSSEStream_DetectsBoundarySplitAcrossReads(t *testing.T) {
 
 func TestObservedSSEStream_DiscardsOversizedPendingDataWithoutTailCapping(t *testing.T) {
 	s := &ObservedSSEStream{
-		pending: bytes.Repeat([]byte("a"), maxPendingEventBytes),
+		pending: bytes.Repeat([]byte("a"), MaxObservedEventBytes),
 	}
-	data := bytes.Repeat([]byte("b"), maxPendingEventBytes+1024)
+	data := bytes.Repeat([]byte("b"), MaxObservedEventBytes+1024)
 
 	s.processChunk(data)
 	got := len(s.pending)
@@ -121,16 +123,16 @@ func TestObservedSSEStream_DropsOversizedBufferedEventAndResumesWithinSameChunk(
 		observers: []Observer{observer},
 		pending: append(
 			[]byte("data: {\"id\":\"too-big\",\"payload\":\""),
-			bytes.Repeat([]byte("a"), maxPendingEventBytes/2)...,
+			bytes.Repeat([]byte("a"), MaxObservedEventBytes/2)...,
 		),
 	}
 	data := append(
 		append(
 			append(
-				bytes.Repeat([]byte("b"), maxPendingEventBytes/2+1),
+				bytes.Repeat([]byte("b"), MaxObservedEventBytes/2+1),
 				[]byte("\"}\n\ndata: {\"id\":\"fresh\"}\n\n")...,
 			),
-			bytes.Repeat([]byte("c"), maxPendingEventBytes+1)...,
+			bytes.Repeat([]byte("c"), MaxObservedEventBytes+1)...,
 		),
 		[]byte("ignored-trailer")...,
 	)
@@ -150,7 +152,7 @@ func TestObservedSSEStream_ResumesAfterDiscardWhenBoundarySplitsAcrossReads(t *t
 	oversized := append(
 		append(
 			[]byte("data:{\"id\":\"too-big\",\"payload\":\""),
-			bytes.Repeat([]byte("x"), maxPendingEventBytes)...,
+			bytes.Repeat([]byte("x"), MaxObservedEventBytes)...,
 		),
 		[]byte("\"}\r\n\r")...,
 	)
@@ -169,7 +171,7 @@ func TestObservedSSEStream_DropsOversizedPendingPrefixBeforeCombining(t *testing
 		observers: []Observer{observer},
 		pending: append(
 			[]byte("data: {\"id\":\"stale\"}\n\n"),
-			bytes.Repeat([]byte("x"), maxPendingEventBytes)...,
+			bytes.Repeat([]byte("x"), MaxObservedEventBytes)...,
 		),
 	}
 
@@ -330,4 +332,72 @@ func TestObservedSSEStreamDecodesOnlyWantedEventsForFilteredObservers(t *testing
 	require.Equal(t, 1, got)
 	_, ok := selective.lastPayload["usage"]
 	require.True(t, ok, "delivered event = %#v, want the usage payload", selective.lastPayload)
+}
+
+func TestObservedSSEStream_ReassemblesLargeEventSplitAcrossSmallReads(t *testing.T) {
+	payload := `{"type":"response.completed","response":{"output_text":"` + strings.Repeat("0123456789", 20*1024) + `"}}`
+	body := []byte("data: " + payload + "\r\n\r\ndata: {\"id\":\"after\"}\n\n")
+
+	for _, readSize := range []int{1, 7, 4096} {
+		t.Run(fmt.Sprintf("read=%d", readSize), func(t *testing.T) {
+			var raws []string
+			observer := &filteringObserver{wants: func(raw []byte) bool {
+				raws = append(raws, string(raw))
+				return true
+			}}
+			s := &ObservedSSEStream{observers: []Observer{observer}, filters: []EventFilter{observer}}
+			for start := 0; start < len(body); start += readSize {
+				s.processChunk(body[start:min(start+readSize, len(body))])
+			}
+
+			require.Len(t, raws, 2)
+			assert.Equal(t, payload, raws[0])
+			assert.Equal(t, `{"id":"after"}`, raws[1])
+			assert.Equal(t, 2, observer.eventCount)
+			assert.Equal(t, "after", observer.lastID)
+			assert.Empty(t, s.pending)
+			assert.LessOrEqual(t, cap(s.pending), maxPendingEventBytes)
+		})
+	}
+}
+
+func TestObservedSSEStream_ReusesPendingBufferAcrossSplitEvents(t *testing.T) {
+	observer := &trackingObserver{}
+	s := &ObservedSSEStream{observers: []Observer{observer}}
+
+	s.processChunk([]byte(`data: {"id":"one",`))
+	s.processChunk([]byte(`"n":1}` + "\n\n" + `data: {"id":"two",`))
+	buffer := &s.pending[:1][0]
+	s.processChunk([]byte(`"n":2}` + "\n\n"))
+
+	require.Equal(t, 2, observer.eventCount)
+	assert.Equal(t, "two", observer.lastID)
+	require.Empty(t, s.pending)
+	assert.Same(t, buffer, &s.pending[:1][0])
+}
+
+func TestObservedSSEStream_ObservesMultiMegabyteTerminalEvent(t *testing.T) {
+	// A streamed image generation repeats the image's base64 in
+	// response.completed, next to the usage that must still be recorded.
+	image := strings.Repeat("A", 5<<20)
+	completed := `{"type":"response.completed","response":{"id":"resp_1","output":[{"type":"image_generation_call","result":"` +
+		image + `"}],"usage":{"input_tokens":15,"output_tokens":1300}}}`
+	body := []byte("data: {\"type\":\"response.created\"}\n\ndata: " + completed + "\n\ndata: [DONE]\n\n")
+
+	for _, readSize := range []int{32 << 10, len(body)} {
+		t.Run(fmt.Sprintf("read=%d", readSize), func(t *testing.T) {
+			observer := &trackingObserver{}
+			s := &ObservedSSEStream{observers: []Observer{observer}}
+			for start := 0; start < len(body); start += readSize {
+				s.processChunk(body[start:min(start+readSize, len(body))])
+			}
+
+			require.Equal(t, 2, observer.eventCount)
+			assert.Equal(t, "response.completed", observer.lastPayload["type"])
+			response, ok := observer.lastPayload["response"].(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, map[string]any{"input_tokens": float64(15), "output_tokens": float64(1300)}, response["usage"])
+			assert.LessOrEqual(t, cap(s.pending), maxPendingEventBytes)
+		})
+	}
 }

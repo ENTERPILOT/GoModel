@@ -280,7 +280,11 @@ func gateAttemptCaptureFromContext(c *echo.Context, attempts []AttemptSnapshot) 
 		return attempts
 	}
 	if logger, ok := c.Get(string(LogEntryLivePublisherKey)).(LoggerInterface); ok && logger != nil {
-		return GateAttemptCapture(attempts, logger.Config())
+		cfg := logger.Config()
+		if req := c.Request(); req != nil && req.URL != nil {
+			cfg = cfg.ForPath(req.URL.Path)
+		}
+		return GateAttemptCapture(attempts, cfg)
 	}
 	return GateAttemptCapture(attempts, Config{})
 }

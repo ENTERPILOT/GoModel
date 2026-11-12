@@ -96,8 +96,8 @@ Redisa, gdy kilka replik ma współdzielić wyniki wykrywania modeli i trafienia
   Uwzględnij to przy ustalaniu kolejności uruchamiania usług.
 </Note>
 
-Redis nie koordynuje limitów żądań ani budżetów. To cache, a nie
-rozproszona blokada.
+Redis nie koordynuje limitów żądań ani budżetów: repliki współdzielą jedne i
+drugie przez bazę danych. Redis to cache, a nie rozproszona blokada.
 
 ## Dane uwierzytelniające providerów
 
@@ -298,22 +298,30 @@ GOMODEL_OFFLINE=true
 | [Katalog modeli](/pl/advanced/model-metadata) pod `MODEL_LIST_URL` | Ceny, okna kontekstu i możliwości modeli, pobierane przy starcie i przy każdym odświeżeniu cache'u | włączone |
 
 `GOMODEL_OFFLINE=true` (lub `offline: true` w `config.yaml`) wyłącza
-sprawdzanie aktualizacji i pomija każdy URL katalogu HTTP. Jest stosowane po wszystkich innych
+sprawdzanie aktualizacji, pomija każdy URL katalogu HTTP i wyłącza pobieranie
+metadanych z `/models` przez providerów w trybie `allowlist`. Jest stosowane po wszystkich innych
 ustawieniach, więc nic w `config.yaml` ani w zmiennych środowiskowych nie może pod spodem ponownie włączyć
-wywołania wychodzącego. Wywołania do skonfigurowanych providerów i do wszystkiego, co
+wywołania wychodzącego. Wywołania inferencji do skonfigurowanych providerów i do wszystkiego, co
 zadeklarujesz samodzielnie, na przykład kolektora OTLP, upstreamów MCP czy magazynu
 wektorowego, pozostają nietknięte. Log startowy potwierdza tryb.
 
-Oba wywołania możesz też kontrolować osobno za pomocą
-`GOMODEL_VERSION_CHECK_ENABLED=false` i `MODEL_LIST_URL=off`.
+Te wywołania możesz też kontrolować osobno za pomocą
+`GOMODEL_VERSION_CHECK_ENABLED=false`, `MODEL_LIST_URL=off` i
+`ALLOWLIST_UPSTREAM_METADATA=false`.
 
 Pobieranie katalogu działa na zasadzie best-effort. Gdy jest wyłączone lub się nie powiedzie, gateway
-uruchamia się normalnie, `/health` i `/health/ready` zwracają `200`, wykrywanie modeli u providerów nadal
-działa, ponieważ listy modeli pochodzą z własnego endpointu `/models` każdego providera,
-a requesty są normalnie routowane. Tracisz natomiast wzbogacanie metadanymi.
+uruchamia się normalnie, `/health` i `/health/ready` zwracają `200`, listy modeli nadal
+pochodzą z własnego endpointu `/models` każdego providera (a u providerów w trybie
+`allowlist` ze skonfigurowanej listy, która nie wymaga wykrywania w upstreamie),
+a requesty są normalnie routowane. Tracisz natomiast wzbogacanie z katalogu;
+metadane, które provider zwraca we własnym `/models` (także przez wywołanie po
+metadane w trybie `allowlist`, o ile nie ustawiono
+`ALLOWLIST_UPSTREAM_METADATA=false`), nadal obowiązują.
 
 <Warning>
-  Bez wzbogacania metadanymi modele **nie mają cen**. Śledzenie kosztów
+  Bez wzbogacania z katalogu model **nie ma cen**, chyba że provider podaje je
+  w `/models` albo zadeklarujesz je sam (`models[].metadata.pricing` w
+  `config.yaml` lub nadpisanie cen w dashboardzie). Śledzenie kosztów
   nie raportuje wtedy żadnych kosztów, a ponieważ [budżety](/pl/features/budgets) odczytują wydatki z rekordów
   kosztów użycia, budżety nie mają czego obciążać i nie będą egzekwować
   limitów wydatków.
@@ -408,17 +416,63 @@ koordynuje go między instancjami.
 | [Rekordy użycia i kosztów](/pl/features/cost-tracking) | Trwały (baza danych) | Agregowane poprawnie. |
 | Logi audytowe | Trwały (baza danych) | Kompletne między replikami. |
 | Wylogowanie [SSO](/pl/pro/sso) (Pro) | Trwały (baza danych) | Wylogowana sesja jest odrzucana na każdej replice w ciągu około 2 sekund. |
-| [Limity żądań](/pl/features/rate-limits) | W pamięci, per instancja | Efektywny limit to około `N x` skonfigurowany limit. Liczniki resetują się przy restarcie. |
+| [Limity żądań](/pl/features/rate-limits) | W pamięci, współdzielone przez bazę danych | Repliki egzekwują jeden wspólny limit, w przybliżeniu: każda widzi liczniki pozostałych w ciągu około dwóch interwałów flush. Restart przywraca ostatnio zapisane liczniki requestów i tokenów raz; awaria może stracić to, co zliczono od ostatniego flusha. Reset czyści te okna na każdej replice; zajęte sloty współbieżności pozostają zajęte, dopóki ich requesty się nie zakończą. |
 | Circuit breakery | W pamięci, per proces | Każda replika osobno wykrywa awarię, więc upstream widzi do `N x failure_threshold` błędów, zanim otworzy się którykolwiek breaker. |
 | Przypięcia [powiązania sesji](/pl/features/session-keeping) | W pamięci, per instancja | Sesje są przyklejone per replika, a nie globalnie, chyba że load balancer używa sticky sessions. |
-| Bufor logów na żywo | W pamięci, per instancja | Podłączony dashboard widzi tylko ruch na żywo tej repliki, mniej więcej `1/N` całości. Historia nadal pochodzi z bazy danych. |
-| Sesje MCP po stronie klientów | W pamięci, per instancja | `Mcp-Session-Id` z jednej repliki zwraca 404 na innej. Klienci [MCP](/pl/features/mcp-gateway) potrzebują sticky sessions. |
+| [Logi na żywo](/pl/advanced/admin-endpoints#admin-dashboard) | Lokalne zdarzenia w pamięci, zdarzenia innych replik z bazy danych | Dashboard widzi requesty swojej repliki natychmiast, a requesty każdej innej repliki zwykle w ciągu 7 sekund, gdy tylko zostaną zapisane. Zobacz [logi na żywo z wielu replik](#logi-na-żywo-z-wielu-replik). |
+| Sesje MCP po stronie klientów | Trwały (baza danych) | Sesja otwarta na jednej replice działa dalej na każdej innej, więc klienci [MCP](/pl/features/mcp-gateway#sesje-między-replikami) nie potrzebują sticky sessions. Po `DELETE` każda replika odrzuca jej requesty w ciągu około 2 sekund; otwarty strumień `GET` nie jest zamykany wcześniej. `DELETE`, który dotrze, gdy do bazy nie da się zapisywać, kończy sesję tylko na replice, która go odebrała; dopóki jej wpis nie wygaśnie, do 30 minut później, ten sam klient może ją jeszcze wznowić na innej replice, a wznowiona sesja działa dalej normalnie. Trwający strumień odpowiedzi zostaje na replice, która go obsługuje. |
+| Logowanie [MCP OAuth](/pl/features/mcp-gateway#logowanie-przez-oauth) | Rozpoczęte logowania w pamięci, per instancja; tokeny trwałe (baza danych) | Callback logowania z dashboardu musi trafić do repliki, która je rozpoczęła, więc na czas logowania kieruj `/admin` z powiązaniem sesji (sticky sessions). Zapisane i odświeżone tokeny trafiają do wszystkich replik przez bazę danych. |
 | Stan zdrowia requestów do providerów | W pamięci, per instancja | Status providera w dashboardzie odzwierciedla replikę, która odpowiedziała. |
 
-Najbardziej zaskakują limity żądań: to mechanizm kontroli w procesie, więc
-trzy repliki z regułą 100 rpm przepuszczą łącznie do 300 rpm. Dobieraj reguły
-per replika, a jako trwałej kontroli między instancjami używaj [budżetów](/pl/features/budgets),
-ponieważ odczytują dane ze współdzielonej bazy danych.
+Najbardziej zaskakują limity żądań: przyjmowanie requestów odbywa się w pamięci,
+więc replika dowiaduje się o ruchu pozostałych dopiero wtedy, gdy odczyta ich
+zapisane liczniki, domyślnie mniej więcej raz na sekundę. Trzy repliki z regułą
+100 rpm przepuszczą łącznie około 100 rpm, ale mogą przekroczyć limit o około
+dwie sekundy ruchu pozostałych replik, a sloty współbieżności repliki, która
+uległa awarii, pozostają zajęte przez kilka sekund. Nie polegaj na limitach
+żądań przy limicie, którego nigdy nie wolno przekroczyć, np. jednym
+równoczesnym requeście w obrębie wszystkich replik, a jako trwałej kontroli
+wydatków między instancjami używaj [budżetów](/pl/features/budgets). Zobacz
+[Kilka replik współdzieli jeden limit](/pl/features/rate-limits#kilka-replik-współdzieli-jeden-limit).
+`RATE_LIMITS_FLUSH_INTERVAL=0` wyłącza współdzielenie liczników po starcie, więc
+repliki łącznie znów mogą przepuścić do około `N x` limitu.
+
+### Logi na żywo z wielu replik
+
+Dashboard streamuje logi na żywo z repliki, z którą jest połączony. Ta replika
+pokazuje swoje requesty od razu, gdy się zaczynają, z podglądem requestów
+w toku i streamowanych odpowiedzi. Dopóki połączony jest co najmniej jeden
+dashboard, replika co 2 sekundy odczytuje też wiersze audytu i użycia zapisane
+przez pozostałe repliki i streamuje je do tego samego widoku. Nie dodaje to
+żadnych zapisów do bazy: każda replika oznacza swoim ID partie, które i tak
+zapisuje, a gdy żaden dashboard nie jest otwarty, żadna replika niczego nie
+odczytuje.
+
+Requesty obsłużone przez inną replikę:
+
+- pojawiają się dopiero, gdy ta replika je zflushuje, czyli po maksymalnie
+  `LOGGING_FLUSH_INTERVAL` / `USAGE_FLUSH_INTERVAL` (domyślnie 5 sekund) plus
+  2-sekundowy polling, zwykle w ciągu 7 sekund; zapis, który baza kończy
+  powoli, pojawia się dopiero po jego zakończeniu, więc później;
+- pojawiają się jako zakończone wpisy ze statusem, czasem trwania, modelem,
+  providerem, użyciem i kosztem, ale bez podglądu requestu w toku ani
+  poszczególnych chunków streamu; body są ładowane z bazy danych po rozwinięciu
+  wpisu;
+- pojawiają się tylko wtedy, gdy zostały zapisane. Wpisy audytu i wpisy użycia
+  pochodzą z osobnych funkcji: replika z wyłączonymi logami audytowymi nie
+  dostarcza wpisów audytu, a replika z wyłączonym śledzeniem użycia – wpisów
+  użycia. Replika, z którą połączony jest Twój dashboard, pokazuje wpisy audytu
+  innej repliki tylko wtedy, gdy sama ma włączone logi audytowe, a jej wpisy
+  użycia tylko z włączonym śledzeniem użycia;
+- są wstawiane na listę według czasu requestu, poniżej wszystkiego, co nowsze.
+
+Przy dużym ruchu w jednym pollingu streamowanych jest maksymalnie 200 wpisów
+audytu i 200 wpisów użycia z innych replik; gdy jest ich więcej, wybieranych jest
+200 najnowszych. Pozostałe i tak są na liście po odświeżeniu. Dashboard, który połączy się ponownie, albo replika,
+której odczyty przez jakiś czas zawodziły, nadrabia to, co pozostałe repliki
+zapisały w międzyczasie, do 5 minut wstecz i w ramach tego samego limitu 200
+wpisów na polling. Zegary replik powinny zgadzać się co do kilku sekund, co
+zapewnia NTP.
 
 ### Zmiany konfiguracji docierają do wszystkich replik w ciągu kilku sekund
 
@@ -429,11 +483,22 @@ obszaru we wspólnej tabeli `config_revisions`. Każda replika odpytuje tę tabe
 i przeładowuje to, co się zmieniło, więc zmiana dociera do pozostałych w ciągu kilku sekund.
 Udział bierze tylko wspólna baza danych: bez Redisa, tak samo na PostgreSQL i MongoDB.
 
-Dotyczy to budżetów (definicji, ustawień i resetów), reguł limitów żądań, poświadczeń
-providerów (dodanie, edycja, wyłączenie, usunięcie), zarządzanych kluczy API (w tym
+Dotyczy to budżetów (definicji, ustawień i resetów), reguł limitów żądań i resetów ich
+liczników, poświadczeń providerów (dodanie, edycja, wyłączenie, usunięcie), zarządzanych kluczy API (w tym
 unieważnienia), polityk użytkowników, modeli wirtualnych, nadpisań cen, reguł tagowania,
 guardrails, workflowów i serwerów MCP. Provider dodany na innej replice zaczyna obsługiwać
-ruch, gdy tylko zostanie pobrana jego lista modeli.
+ruch, gdy tylko zostanie pobrana jego lista modeli. Provider, którego poświadczenia się
+zmieniają przy niezmienionym typie, nadal obsługuje modele, które już obsługiwał, teraz
+przez nowe poświadczenia, a jego lista modeli jest w tym czasie pobierana ponownie.
+Skonfigurowane modele i filtr modeli z edycji obowiązują od razu. Model usunięty ze
+skonfigurowanej listy przestaje być routowany; jeśli upstream nadal go wymienia, może być
+niedostępny do czasu nadejścia nowej listy. Gdy nowa lista nadejdzie, modele, których już
+w niej nie ma, przestają być routowane, z wyjątkiem skonfigurowanych modeli w trybie
+`merge`. Jeśli pobieranie się nie powiedzie lub nie zwróci żadnych modeli, a inny provider
+jest sprawny, poprzednie modele zostają zachowane jako nieaktualne: requesty, które je
+wskazują, nadal trafiają do tego providera, ale listy modeli i load balancing modeli
+wirtualnych je pomijają. Provider, którego typ się zmienia, zaczyna obsługiwać ruch, gdy
+tylko zostanie pobrana jego nowa lista modeli.
 
 Replika, która nie zdoła zastosować zmiany, raz loguje ostrzeżenie i ponawia próbę przy każdym
 odpytaniu, aż zmiana zacznie obowiązywać. Jeden wyjątek: zapisany provider, którego nie da się
@@ -447,12 +512,6 @@ obszarów już miała, przy ręcznym odświeżeniu runtime albo po restarcie.
 `POST /admin/runtime/refresh` przeładowuje na replice, która go odebrała, zarządzane klucze API,
 modele wirtualne, guardrails, workflowy, serwery MCP, budżety i limity żądań. Nie przeładowuje
 zapisanych poświadczeń providerów.
-
-<Warning>
-  **Reset liczników limitów żądań obowiązuje tylko na replice, która obsłużyła request.**
-  Liczniki są per instancja (zobacz tabelę powyżej): zmiany reguł się propagują, resety
-  liczników nie.
-</Warning>
 
 ### Sondy health i zamykanie
 
@@ -509,8 +568,12 @@ Dwie dodatkowe kwestie przy dużym wolumenie:
 
 - **Zapisy użycia i audytu są buforowane i odrzucane, a nie blokowane, gdy
   bufor się zapełni.** Skok ruchu lub wolna baza danych mogą po cichu zgubić wpisy użycia,
-  co oznacza utracone dane o kosztach i zaniżone obciążenie budżetów. Jedynym sygnałem jest
-  ostrzeżenie `usage log buffer full` w logach, więc ustaw na nie alert.
+  co oznacza utracone dane o kosztach i zaniżone obciążenie budżetów. Ustaw alert na
+  `gomodel_usage_entries_dropped_total` (zobacz
+  [Alerty na utracone użycie](/pl/guides/prometheus-metrics#alerty-na-utracone-użycie)),
+  a bez metryk na komunikaty `usage log buffer full`, `usage logger closed`
+  i `failed to write usage batch` w logach. Utracony wpis audytu zostawia
+  w logach `audit log buffer full`.
 - **Sprawdzenia budżetów odpytują tabelę użycia przy każdym requeście.** Trzymaj
   `USAGE_RETENTION_DAYS` na niskim poziomie, gdy budżety są włączone, i wybieraj Postgresa
   zamiast SQLite, którego pojedyncze połączenie sprawia, że to dominujący koszt.
@@ -576,12 +639,12 @@ wykonuj na nim VACUUM osobno.
   przy SQLite zamontuj wolumen i ustaw `SQLITE_PATH`.
 - Deklaruj providerów w zmiennych środowiskowych lub `config.yaml`, z wartościami z
   menedżera sekretów.
-- Przy kilku replikach dobieraj reguły limitów żądań per replika.
+- Synchronizuj zegary replik (NTP); współdzielone limity współbieżności od tego zależą.
 - Zdecyduj o `LOGGING_LOG_BODIES` i świadomie ustaw okresy retencji.
 - Skieruj readiness na `/health/ready` i ustaw
   `terminationGracePeriodSeconds` powyżej 30.
 - Włącz metryki i ustaw alerty na `gomodel_circuit_breaker_state` oraz na
-  `usage log buffer full`.
+  `gomodel_usage_entries_dropped_total`.
 - W instalacjach air-gapped ustaw `GOMODEL_OFFLINE=true`, a następnie dostarcz katalog
   modeli jako plik lub zadeklaruj ceny modeli w konfiguracji, aby śledzenie kosztów i
   budżety nadal działały.

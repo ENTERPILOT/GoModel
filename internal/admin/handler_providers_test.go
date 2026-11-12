@@ -32,6 +32,31 @@ func TestClassifyProviderStatus_HealthyForAllowlistInventory(t *testing.T) {
 	require.Equal(t, "Healthy", label)
 }
 
+// An allowlist inventory never contacts the upstream, so a failed
+// availability probe is the only sign the provider is down and must not be
+// reported healthy.
+func TestClassifyProviderStatus_AllowlistWithFailedProbeIsDegraded(t *testing.T) {
+	now := time.Now().UTC()
+	cfg := providers.SanitizedProviderConfig{Name: "ollama", Type: "ollama"}
+	runtime := providers.ProviderRuntimeSnapshot{
+		Name:                    "ollama",
+		Type:                    "ollama",
+		Registered:              true,
+		RegistryInitialized:     true,
+		DiscoveredModelCount:    1,
+		LastModelFetchAt:        &now,
+		LastModelFetchSuccessAt: &now,
+		LastAvailabilityCheckAt: &now,
+		LastAvailabilityError:   "connection refused",
+	}
+
+	status, label, reason, lastError := classifyProviderStatus(cfg, runtime)
+	require.Equal(t, "degraded", status)
+	require.Equal(t, "Unreachable", label)
+	require.Equal(t, "availability check failed; serving configured models", reason)
+	require.Equal(t, "connection refused", lastError)
+}
+
 // A provider without a /models endpoint (e.g. a speech-to-text server) is
 // fully described by its configured models and must not look degraded.
 func TestClassifyProviderStatus_HealthyWhenModelListingUnsupported(t *testing.T) {

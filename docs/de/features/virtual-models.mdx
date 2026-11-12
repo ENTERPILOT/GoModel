@@ -129,7 +129,9 @@ Aufrufer anpassen dürfen, und `params` für Einstellungen, die ein Alias
 festlegen muss. Beide Maps stehen in `config.yaml`, in der Umgebungsvariable
 `VIRTUAL_MODELS`, in der Admin API und im Dashboard-Editor zur Verfügung. Auch
 eine Richtlinien-Zeile für ein konkretes Modell (ein Eintrag ohne Ziele)
-akzeptiert sie; providerweite und globale Zeilen lehnen sie ab.
+akzeptiert sie; providerweite (`openai/`) und globale (`/`) Zeilen lehnen sie
+ab, genau wie einen erzwungenen Reasoning-Effort. Eine `*`-Quelle wie
+`openai/*` ist kein Platzhalter und wird für jede Richtlinie abgelehnt.
 
 Schlüssel folgen der Schreibweise von OpenAI Chat Completions (`temperature`,
 `top_p`, `max_tokens`, `presence_penalty`, ...). Providerspezifische Schlüssel
@@ -138,6 +140,28 @@ werden unverändert durchgereicht. Provider-Adapter übersetzen konfigurierte
 Werte genau wie Werte des Clients: `max_tokens` wird bei
 OpenAI-Reasoning-Modellen weiterhin zu `max_completion_tokens` und in der
 Responses API zu `max_output_tokens`.
+
+Ein Token-Limit ist in jeder Schreibweise dasselbe Limit: `max_tokens`,
+`max_completion_tokens` und `max_output_tokens` setzen es alle. Ein Wert in
+`params` ersetzt die Schreibweise, die der Client gesendet hat, und ein Wert in
+`default_params` gilt nur, wenn der Client keine davon gesendet hat. Über
+verkettete virtuelle Modelle und Policies hinweg gewinnt die tiefere Zeile,
+gleich welche Schreibweise beide verwenden.
+
+Ein Parametersatz bedient jede API, daher werden die hier genannten Keys in
+der API übersprungen, die sie nicht kennt, und das Token-Limit wird wie oben
+beschrieben abgebildet. Jeder andere Key erreicht den Provider-Adapter
+unverändert und wird wie der eines Clients behandelt: Der Adapter kann einen
+Key verwerfen, den er nicht übersetzt (der Anthropic-Adapter verwirft
+`top_k`), und der Upstream kann ihn ablehnen. In der Responses API werden die
+reinen Chat-Keys `seed`, `stop`, `n`, `frequency_penalty`,
+`presence_penalty`, `logit_bias`, `logprobs`, `modalities`, `audio`,
+`prediction`, `web_search_options`, `response_format` und `verbosity`
+übersprungen (ein erzwungenes `null` entfernt den Wert des Clients trotzdem);
+ein Ausgabeformat oder die Verbosity setzen Sie dort über
+`text`, etwa `{"format": {"type": "json_object"}}`. In Chat Completions werden
+die reinen Responses-Keys `text`, `include`, `truncation`, `max_tool_calls`,
+`background` und `context_management` übersprungen.
 
 Zum Beispiel mehrere Aliase eines selbst gehosteten Modells mit
 unterschiedlichen Thinking- und Sampling-Einstellungen:
@@ -194,11 +218,12 @@ Pfad, wenn Parameter greifen); Batches, Provider-Passthrough unter `/p/`,
 Embeddings und Medien-Endpunkte werden nicht umgeschrieben.
 Der exakte [Cache](/de/features/cache)-Schlüssel wird aus dem angewendeten
 Request gebildet, sodass zwei Aliase desselben Modells einen exakten Eintrag
-nur dann teilen, wenn sie denselben Request upstream senden. Der semantische
-Cache hasht nur seine ausgabeprägenden Parameter (Modell, temperature, top_p,
-Token-Limit, Reasoning, Tools, Response-Format), sodass Aliase, die sich nur
-in anderen Schlüsseln wie `top_k` oder `chat_template_kwargs` unterscheiden,
-einen semantischen Eintrag teilen können.
+nur dann teilen, wenn sie denselben Request upstream senden. Der Schlüssel des
+semantischen Caches umfasst ebenfalls die angewendeten Request-Parameter (siehe
+[Woraus der Schlüssel des semantischen Caches besteht](/de/features/cache#woraus-der-schlüssel-des-semantischen-caches-besteht)
+für die genauen Felder), sodass Aliase, deren angewendete Werte sich
+unterscheiden — auch für `top_k` oder `chat_template_kwargs` —, ebenfalls nie
+einen semantischen Eintrag teilen.
 
 Der Rest dieser Seite behandelt Redirects.
 

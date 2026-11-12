@@ -8,6 +8,7 @@ import { overwriteGetLocale } from "../src/lib/paraglide/runtime.js";
 import {
   defaultProviderCredentialForm,
   filterProviderCredentials,
+  providerCredentialTypeLabel,
   providerCredentialTypeOptions,
   providerCredentialSchema,
   providerCredentialFormFields,
@@ -634,4 +635,78 @@ test("a service-account JSON secret reference is not parsed as JSON", () => {
     validateProviderCredentialForm(invalid, "create", [], VERTEX_SCHEMA).service_account_json,
     "Paste the service account JSON file's contents — this is not valid JSON.",
   );
+});
+
+test("models_mode renders as a select and round-trips through the payload", () => {
+  const schema = {
+    ...OPENAI_SCHEMA,
+    fields: [
+      ...OPENAI_SCHEMA.fields,
+      { name: "models_mode", required: false, advanced: true, options: ["fallback", "allowlist", "merge"] },
+    ],
+  };
+  const { advanced } = providerCredentialFormFields(schema);
+  const field = advanced.find((entry) => entry.name === "models_mode");
+  assert.ok(field);
+  assert.equal(field.control, "select");
+  assert.deepEqual(field.options, ["fallback", "allowlist", "merge"]);
+
+  const form = providerCredentialRowToForm({
+    name: "openrouter",
+    type: "openai",
+    api_keys: ["***********"],
+    models: ["qwen/qwen3-vl-8b-instruct"],
+    models_mode: "allowlist",
+  });
+  assert.equal(form.models_mode, "allowlist");
+  assert.equal(buildProviderCredentialPayload(form, schema).models_mode, "allowlist");
+
+  // Default (empty) means the gateway-wide mode applies.
+  assert.equal(defaultProviderCredentialForm().models_mode, "");
+  assert.equal(
+    buildProviderCredentialPayload({ ...form, models_mode: "" }, schema).models_mode,
+    "",
+  );
+});
+
+test("the schema-less fallback form still offers the models_mode values", () => {
+  const { advanced } = providerCredentialFormFields(null);
+  const field = advanced.find((entry) => entry.name === "models_mode");
+  assert.ok(field);
+  assert.equal(field.control, "select");
+  assert.deepEqual(field.options, ["fallback", "allowlist", "merge"]);
+});
+
+test("models_mode links to the docs table comparing the modes", () => {
+  const meta = providerCredentialFieldMeta("models_mode");
+  assert.equal(
+    meta.docsUrl,
+    "https://gomodel.enterpilot.io/docs/advanced/config-yaml?utm_source=gomodel_dashboard#models-modes",
+  );
+  assert.ok(meta.docsLabel);
+  assert.equal(providerCredentialFieldMeta("proxy_url").docsUrl, undefined);
+});
+
+test("AWS types word Base URL as a region and say which API each Bedrock type calls", () => {
+  for (const type of ["bedrock", "bedrock-mantle"]) {
+    const { primary } = providerCredentialFormFields({
+      type,
+      fields: [
+        { name: "api_keys", required: false, advanced: false },
+        { name: "base_url", required: false, advanced: false },
+      ],
+    });
+    const baseURL = primary.find((field) => field.name === "base_url");
+    assert.equal(baseURL.label, "Region or endpoint", type);
+    assert.equal(baseURL.placeholder, "", type);
+    assert.match(baseURL.hint, /AWS credentials/, type);
+    assert.match(primary.find((field) => field.name === "api_keys").hint, /Optional Amazon Bedrock API key/, type);
+  }
+
+  const { primary, advanced } = providerCredentialFormFields(OPENAI_SCHEMA);
+  assert.equal([...primary, ...advanced].find((field) => field.name === "base_url").label, "Base URL");
+
+  assert.equal(providerCredentialTypeLabel("bedrock"), "bedrock (Converse API)");
+  assert.equal(providerCredentialTypeLabel("bedrock-mantle"), "bedrock-mantle (OpenAI-compatible API)");
+  assert.equal(providerCredentialTypeLabel("openai"), "openai");
 });
