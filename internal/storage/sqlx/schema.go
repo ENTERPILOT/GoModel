@@ -79,7 +79,9 @@ func missingColumnStatements(ctx context.Context, db DB, statements []string) ([
 
 // parseAddColumn extracts the lowercased table and column from an
 // `ALTER TABLE <table> ADD COLUMN [IF NOT EXISTS] <column> ...` statement.
-// ok is false for any other shape, and for quoted or schema-qualified names.
+// ok is false for any other shape, for quoted or schema-qualified names, and
+// for a statement holding a comma: it may carry further ALTER actions, and
+// judging it by its first column alone could skip a missing one.
 func parseAddColumn(statement string) (table, column string, ok bool) {
 	f := strings.Fields(statement)
 	if len(f) < 6 || !keywords(f[:2], "ALTER", "TABLE") || !keywords(f[3:5], "ADD", "COLUMN") {
@@ -89,7 +91,7 @@ func parseAddColumn(statement string) (table, column string, ok bool) {
 	if len(f) >= 9 && keywords(f[5:8], "IF", "NOT", "EXISTS") {
 		column = f[8]
 	}
-	if !isPlainIdentifier(table) || !isPlainIdentifier(column) {
+	if strings.Contains(statement, ",") || !isPlainIdentifier(table) || !isPlainIdentifier(column) {
 		return "", "", false
 	}
 	return strings.ToLower(table), strings.ToLower(column), true

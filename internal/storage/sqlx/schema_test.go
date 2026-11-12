@@ -56,6 +56,8 @@ func TestParseAddColumn(t *testing.T) {
 		{"quoted column", `ALTER TABLE t ADD COLUMN "Note" TEXT`, "", "", false},
 		{"schema-qualified table", `ALTER TABLE s.t ADD COLUMN note TEXT`, "", "", false},
 		{"too short", `ALTER TABLE t ADD COLUMN`, "", "", false},
+		{"several actions", `ALTER TABLE t ADD COLUMN a TEXT, ADD COLUMN b TEXT`, "", "", false},
+		{"comma in a type", `ALTER TABLE t ADD COLUMN amount NUMERIC(10,2)`, "", "", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
