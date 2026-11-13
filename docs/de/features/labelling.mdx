@@ -262,6 +262,70 @@ Provider, der `tags` ablehnt, gibt seinen Fehler zurück.
   dann die Ausgaben aller Requests mit diesem Label. Siehe
   [Budgets](/de/features/budgets).
 
+## Kosten pro Pull Request
+
+Um zu sehen, was die CI eines Pull Requests für Modelle ausgibt, versehen Sie
+jeden Request ihrer Jobs mit einem Label, das den PR nennt, etwa `pr-1234`. Der
+Header `x-litellm-tags` funktioniert ohne Konfiguration, solange
+[LiteLLM-Tags](#litellm-tags) aktiviert sind (Standard); sind sie aus,
+konfigurieren Sie einen [Tagging-Header](#tagging-header) und senden Sie
+stattdessen diesen. In GitHub Actions setzen Sie das Label einmal für den Job.
+Lassen Sie den Workflow bei `pull_request` laufen: Andere Events wie `push`
+haben keine PR-Nummer, das Label wäre dann nur `pr-`.
+
+```yaml .github/workflows/ci.yml
+on: pull_request
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    env:
+      GOMODEL_LABEL: pr-${{ github.event.pull_request.number }}
+```
+
+Senden Sie es dann bei jedem Request mit:
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "x-litellm-tags: $GOMODEL_LABEL" \
+  -d '{"model": "gpt-5", "messages": [{"role": "user", "content": "Review this diff"}]}'
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_API_KEY"],
+    default_headers={"x-litellm-tags": os.environ["GOMODEL_LABEL"]},
+)
+```
+
+</CodeGroup>
+
+Lesen Sie die Kosten auf der Nutzungsseite ab: Setzen Sie in
+**Aufschlüsselung** die Zeilen auf **Label** und die Spalten auf **Modell**
+oder **Zeitraum**. Oder filtern Sie einen beliebigen Nutzungsendpunkt nach dem
+Label, um einen exakten Wert zu erhalten:
+
+```bash
+curl "http://localhost:8080/admin/usage/summary?label=pr-1234&days=30" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+- Ein Request mit mehreren Labels zählt unter jedem davon einmal, Label-Zeilen
+  überschneiden sich also und können zusammen mehr als die Gesamtsumme ergeben.
+- Die Aufschlüsselung behält die obersten Zeilen (`limit`, höchstens 50) und
+  fasst den Rest unter **Sonstige** zusammen. Bei vielen PRs filtern Sie nach
+  `label`, um die Kosten eines PRs zu erhalten, statt sie aus der Pivot-Tabelle
+  abzulesen.
+
 ## Standardwerte
 
 Labeling ist standardmäßig aktiviert und kostet nichts, bis Sie eine

@@ -582,6 +582,86 @@ curl "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=202
   `effective_markup_percent` to stosunek rozliczonego kosztu do kosztu
   providera minus jeden.
 
+### GET /admin/usage/benchmark
+
+Zwraca miesięczny koszt na aktywnego użytkownika w grupie: każdy bezpośredni
+potomek `parent` to jeden użytkownik z zsumowanym całym poddrzewem, a każdy
+miesiąc kalendarzowy podaje liczbę aktywnych użytkowników, koszt całkowity
+oraz średnią, medianę (`p50`), `p90` i maksimum kosztu na aktywnego
+użytkownika. Licencja Pro nie jest potrzebna. Zobacz
+[Koszt na aktywnego użytkownika](/pl/features/cost-tracking#koszt-na-aktywnego-użytkownika-benchmark).
+
+| Parametr      | Typ    | Opis                                                                         | Domyślnie |
+| ------------- | ------ | ---------------------------------------------------------------------------- | --------- |
+| `parent`      | string | Grupa, której bezpośredni potomkowie są użytkownikami; użycie na samej ścieżce nadrzędnej trafia do `unattributed_cost` | Korzeń zakresu poświadczenia albo `/` |
+| `months`      | int    | Liczba miesięcy kończących się na `end_month`, od `1` do `12`; ignorowany i niesprawdzany, gdy ustawiono `start_month` | `7` |
+| `start_month` | string | Pierwszy miesiąc, `YYYY-MM`; zakres obejmuje najwyżej 12 miesięcy            | Z `months` |
+| `end_month`   | string | Ostatni miesiąc, `YYYY-MM`; nie może być późniejszy niż bieżący miesiąc      | Bieżący miesiąc |
+| `cost_basis`  | string | `provider` albo `billed` (koszt providera plus narzut, łącznie z rozliczonymi cache hitami) | `provider` |
+| `top_users`   | int    | Wymień N najdroższych użytkowników każdego miesiąca, od `0` do `50`; `0` zwraca tylko agregaty | `0` |
+
+Endpoint przyjmuje też wszystkie filtry danych. `start_date`, `end_date` i
+`days` są ignorowane i niesprawdzane. Ignoruje też `cache_mode`: requesty i
+koszt providera obejmują requesty wysłane do providerów, a cache hity czynią
+użytkownika aktywnym i liczą się do kosztu rozliczonego.
+
+```bash
+# Jedenaście pełnych miesięcy plus bieżący, z pięcioma najdroższymi użytkownikami w miesiącu
+curl "http://localhost:8080/admin/usage/benchmark?parent=/eng&months=12&top_users=5" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```json
+{
+  "parent": "/eng",
+  "time_zone": "UTC",
+  "currency": "USD",
+  "cost_basis": "provider",
+  "months": [
+    {
+      "month": "2026-11",
+      "partial": true,
+      "active_users": 38,
+      "unpriced_users": 1,
+      "partly_priced_users": 0,
+      "total_cost": 512.3,
+      "mean": 13.48,
+      "p50": 9.1,
+      "p90": 27.75,
+      "max": 64.2,
+      "mean_change_percent": null,
+      "p50_change_percent": null,
+      "unattributed_cost": 0,
+      "top_users": [{ "user": "/eng/alice", "requests": 1840, "cost": 64.2 }]
+    }
+  ]
+}
+```
+
+- `months` zawiera każdy miesiąc z zakresu, od najstarszego, także miesiące
+  bez użycia; bieżący miesiąc ma `"partial": true` i nie ma procentów zmiany.
+- Miesiące są liczone w strefie czasowej z nagłówka `X-GoModel-Timezone`, bez
+  niego w UTC, a `time_zone` ją podaje.
+- `mean`, `p50`, `p90` i `max` mają wartość `null` bez aktywnych użytkowników.
+  Pola zmian mają wartość `null` dla pierwszego miesiąca, niepełnego miesiąca,
+  miesiąca bez aktywnych użytkowników albo gdy poprzednia wartość nie jest
+  dodatnia.
+- Koszt użytkownika zgadza się z sumą częściową eksportu faktur dla tego
+  klienta. `unpriced_users` liczy użytkowników, których koszt jest całkowicie
+  nieznany (liczeni jako `0`), a `partly_priced_users` tych liczonych według
+  znanej części kosztu.
+- `top_users` jest pomijane, jeśli nie zostało zażądane; jego `requests` to
+  requesty wysłane do providerów, jak na fakturze.
+- Liczony jest każdy użytkownik, nic nie trafia do „other”. Benchmark mieści
+  najwyżej 100 000 miesięcy użytkowników; powyżej endpoint zwraca `400`.
+  Wybierz głębszy `parent`, mniej miesięcy albo węższe filtry.
+
+| Status | Kod | Kiedy |
+| ------ | --- | ----- |
+| `400`  | —   | Nieprawidłowy miesiąc, `cost_basis` lub `top_users`; `months` spoza zakresu `1`–`12` (także `0`) lub niebędący liczbą całkowitą, chyba że ustawiono `start_month`; zakres dłuższy niż 12 miesięcy; `end_month` po bieżącym miesiącu; powtórzony `parent`; ponad 100 000 miesięcy użytkowników |
+| `403`  | `user_path_out_of_scope` | Poświadczenie z zakresem podaje `parent` lub `user_path` spoza swojego poddrzewa |
+| `409`  | `markups_disabled` | `cost_basis=billed` przy wyłączonym `PRICING_MARKUPS_ENABLED` |
+
 ### Tryb cache
 
 Każde trafienie w [cache odpowiedzi](/pl/features/cache) jest zapisywane jako wpis użycia, z

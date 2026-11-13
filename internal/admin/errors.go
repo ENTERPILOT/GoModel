@@ -54,6 +54,12 @@ func invoiceExportUnavailableError() error {
 	).WithCode("invoice_export_not_entitled")
 }
 
+// markupsDisabledError reports that a usage view needs billed cost while
+// pricing markups are off.
+func markupsDisabledError(message string) error {
+	return core.NewInvalidRequestErrorWithStatus(http.StatusConflict, message, nil).WithCode("markups_disabled")
+}
+
 func billedBudgetsUnavailableError() error {
 	return core.NewInvalidRequestErrorWithStatus(
 		http.StatusForbidden,

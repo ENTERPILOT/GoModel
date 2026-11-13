@@ -524,6 +524,11 @@ type UsageReader interface {
 	// grand total. Nothing is folded away.
 	GetUsageInvoice(ctx context.Context, params InvoiceParams) (*Invoice, error)
 
+	// GetUsageBenchmark returns, per calendar month, the active users among
+	// a group's direct children and statistics of their cost. Every user is
+	// counted; nothing is folded away.
+	GetUsageBenchmark(ctx context.Context, params BenchmarkParams) (*Benchmark, error)
+
 	// GetUsageBySession returns a bounded page of per-session aggregates.
 	// Usage rows without a detected session are omitted. Request and token
 	// totals include local-cache hits; costs include provider-bound rows only.

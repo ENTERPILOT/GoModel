@@ -21,6 +21,12 @@ func (r *SQLReader) GetUsageInvoice(ctx context.Context, params InvoiceParams) (
 	return readUsageInvoice(ctx, params, r.breakdownGroupsEach)
 }
 
+// GetUsageBenchmark returns the monthly cost per active user of a group,
+// streamed from the same grouped query as the breakdown.
+func (r *SQLReader) GetUsageBenchmark(ctx context.Context, params BenchmarkParams) (*Benchmark, error) {
+	return readUsageBenchmark(ctx, params, r.breakdownGroupsEach)
+}
+
 // breakdownGroups returns every (row, column) aggregate of params, at most
 // maxBreakdownGroups+1 of them.
 func (r *SQLReader) breakdownGroups(ctx context.Context, params UsageBreakdownParams) ([]breakdownGroup, error) {
@@ -71,7 +77,7 @@ func (r *SQLReader) breakdownGroupsEach(ctx context.Context, params UsageBreakdo
 		FROM ` + from + sqlutil.BuildWhereClause(conditions) + `
 	)
 	SELECT row_key, column_key, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0),
-		COALESCE(SUM(total_tokens), 0), SUM(total_cost), SUM(billed_cost)
+		COALESCE(SUM(total_tokens), 0), SUM(total_cost), SUM(billed_cost), COUNT(total_cost), COUNT(billed_cost)
 		FROM usage_breakdown GROUP BY row_key, column_key`
 
 	args := make([]any, 0, len(rowArgs)+len(columnArgs)+len(whereArgs)+1)
@@ -89,7 +95,7 @@ func (r *SQLReader) breakdownGroupsEach(ctx context.Context, params UsageBreakdo
 
 	for rows.Next() {
 		var g breakdownGroup
-		if err := rows.Scan(&g.Row, &g.Column, &g.Requests, &g.InputTokens, &g.OutputTokens, &g.TotalTokens, &g.TotalCost, &g.BilledCost); err != nil {
+		if err := rows.Scan(&g.Row, &g.Column, &g.Requests, &g.InputTokens, &g.OutputTokens, &g.TotalTokens, &g.TotalCost, &g.BilledCost, &g.PricedRequests, &g.BilledPricedRequests); err != nil {
 			return fmt.Errorf("failed to scan usage breakdown row: %w", err)
 		}
 		if err := fn(g); err != nil {

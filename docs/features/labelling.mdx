@@ -252,6 +252,67 @@ as the client sent them, so a provider that rejects `tags` returns its error.
 - **Budgets** — a budget can be scoped to a label, capping the spend of every
   request carrying it. See [Budgets](/features/budgets).
 
+## Cost per pull request
+
+To see what a pull request's CI spends on models, send a label naming the PR,
+such as `pr-1234`, with every request its jobs make. The `x-litellm-tags` header
+works without configuration while [LiteLLM tags](#litellm-tags) are on (the
+default); with them off, configure a [tagging header](#tagging-headers) and
+send that instead. In GitHub Actions, set the label once for the job. Run the
+workflow on `pull_request`: other events, such as `push`, carry no PR number,
+so the label would be just `pr-`.
+
+```yaml .github/workflows/ci.yml
+on: pull_request
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    env:
+      GOMODEL_LABEL: pr-${{ github.event.pull_request.number }}
+```
+
+Then send it on each request:
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "x-litellm-tags: $GOMODEL_LABEL" \
+  -d '{"model": "gpt-5", "messages": [{"role": "user", "content": "Review this diff"}]}'
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_API_KEY"],
+    default_headers={"x-litellm-tags": os.environ["GOMODEL_LABEL"]},
+)
+```
+
+</CodeGroup>
+
+Read the cost on the usage page: in **Breakdown**, set rows to **Label** and
+columns to **Model** or **Period**. Or filter any usage endpoint by the label
+for an exact figure:
+
+```bash
+curl "http://localhost:8080/admin/usage/summary?label=pr-1234&days=30" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+- A request with several labels counts once under each of them, so label rows
+  overlap and can add up to more than the total.
+- The breakdown keeps the top rows (`limit`, at most 50) and folds the rest
+  into **Other**. With many PRs, filter by `label` to get one PR's cost rather
+  than reading it from the pivot.
+
 ## Defaults
 
 Labelling is on by default and costs nothing until you configure a tagging

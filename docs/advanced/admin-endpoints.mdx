@@ -607,6 +607,84 @@ curl "http://localhost:8080/admin/usage/invoice?parent=/customers&start_date=202
 - Costs and `effective_markup_percent` are `null` when unknown;
   `effective_markup_percent` is billed cost over provider cost, minus one.
 
+### GET /admin/usage/benchmark
+
+Returns the monthly cost per active user of a group: each direct child of
+`parent` is one user with its whole subtree summed, and each calendar month
+reports active users, total cost, and the mean, median (`p50`), `p90`, and
+maximum cost per active user. No Pro license is needed. See
+[Cost per active user](/features/cost-tracking#cost-per-active-user-benchmark).
+
+| Parameter     | Type   | Description                                                                 | Default |
+| ------------- | ------ | --------------------------------------------------------------------------- | ------- |
+| `parent`      | string | Group whose direct children are the users; usage on the parent itself is reported as `unattributed_cost` | Credential's scope root, or `/` |
+| `months`      | int    | Months ending at `end_month`, `1` to `12`; ignored and not validated when `start_month` is set | `7`     |
+| `start_month` | string | First month, `YYYY-MM`; the range covers at most 12 months                   | From `months` |
+| `end_month`   | string | Last month, `YYYY-MM`; may not be after the current month                    | Current month |
+| `cost_basis`  | string | `provider`, or `billed` (provider cost plus markup, including billed cache hits) | `provider` |
+| `top_users`   | int    | List each month's N highest-cost users, `0` to `50`; `0` returns aggregates only | `0` |
+
+It also accepts every data filter. `start_date`, `end_date`, and `days` are
+ignored and not validated. It ignores `cache_mode` too: requests and provider
+cost cover provider-bound requests, while cache hits make a user active and
+count toward billed cost.
+
+```bash
+# Eleven complete months plus the current one, with the five most expensive users per month
+curl "http://localhost:8080/admin/usage/benchmark?parent=/eng&months=12&top_users=5" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```json
+{
+  "parent": "/eng",
+  "time_zone": "UTC",
+  "currency": "USD",
+  "cost_basis": "provider",
+  "months": [
+    {
+      "month": "2026-11",
+      "partial": true,
+      "active_users": 38,
+      "unpriced_users": 1,
+      "partly_priced_users": 0,
+      "total_cost": 512.3,
+      "mean": 13.48,
+      "p50": 9.1,
+      "p90": 27.75,
+      "max": 64.2,
+      "mean_change_percent": null,
+      "p50_change_percent": null,
+      "unattributed_cost": 0,
+      "top_users": [{ "user": "/eng/alice", "requests": 1840, "cost": 64.2 }]
+    }
+  ]
+}
+```
+
+- `months` holds every month in the range, oldest first, including months
+  without usage; the current month has `"partial": true` and no change
+  percentages.
+- Months are read in the `X-GoModel-Timezone` header's zone, UTC without it,
+  and `time_zone` reports it.
+- `mean`, `p50`, `p90`, and `max` are `null` without active users. The change
+  fields are `null` for the first month, the partial month, a month without
+  active users, or a previous value that is not positive.
+- Each user's cost matches the invoice export's subtotal for that customer.
+  `unpriced_users` counts users whose cost is wholly unknown (counted at `0`),
+  `partly_priced_users` users counted at the known part of their cost.
+- `top_users` is omitted unless requested; its `requests` are provider-bound,
+  as on the invoice.
+- Every user is counted, never folded into "other". A benchmark holds at most
+  100,000 user months; past that it returns `400`. Pick a deeper `parent`,
+  fewer months, or narrower filters.
+
+| Status | Code | When |
+| ------ | ---- | ---- |
+| `400`  | —    | Invalid month, `cost_basis`, or `top_users`; `months` outside `1` to `12` (including `0`) or not a whole number, unless `start_month` is set; a range over 12 months; `end_month` after the current month; a repeated `parent`; more than 100,000 user months |
+| `403`  | `user_path_out_of_scope` | A scoped credential names a `parent` or `user_path` outside its subtree |
+| `409`  | `markups_disabled` | `cost_basis=billed` while `PRICING_MARKUPS_ENABLED` is off |
+
 ### Cache mode
 
 Every [response-cache](/features/cache) hit is recorded as a usage entry, with

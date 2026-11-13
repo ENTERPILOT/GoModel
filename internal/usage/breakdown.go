@@ -119,6 +119,11 @@ type breakdownGroup struct {
 	TotalTokens  int64
 	TotalCost    *float64
 	BilledCost   *float64
+	// PricedRequests and BilledPricedRequests count the requests whose
+	// total_cost and billed_cost are known, so a sum that is known can still
+	// be told apart from a complete one.
+	PricedRequests       int
+	BilledPricedRequests int
 }
 
 func (g *breakdownGroup) add(other breakdownGroup) {
@@ -128,6 +133,8 @@ func (g *breakdownGroup) add(other breakdownGroup) {
 	g.TotalTokens += other.TotalTokens
 	g.TotalCost = addCost(g.TotalCost, other.TotalCost)
 	g.BilledCost = addCost(g.BilledCost, other.BilledCost)
+	g.PricedRequests += other.PricedRequests
+	g.BilledPricedRequests += other.BilledPricedRequests
 }
 
 func (g breakdownGroup) metric(metric BreakdownMetric) float64 {

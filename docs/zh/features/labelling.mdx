@@ -219,6 +219,56 @@ tagging:
 - **API 密钥页面**——每个密钥的标签显示在其用户路径旁边。
 - **预算**——预算可以限定到某个标签，对携带该标签的所有请求的支出设置上限。请参阅[预算](/zh/features/budgets)。
 
+## 每个拉取请求的成本
+
+要查看某个拉取请求（PR）的 CI 在模型上花费了多少，请为其作业发出的每个请求加上一个标明该 PR 的标签，例如 `pr-1234`。只要 [LiteLLM 标签](#litellm-标签)处于启用状态（默认启用），`x-litellm-tags` Header 无需任何配置即可使用；如果已关闭，请配置一个[标签请求头](#标签请求头)并改为发送它。在 GitHub Actions 中，为作业设置一次标签。请让工作流在 `pull_request` 事件上运行：`push` 等其他事件没有 PR 编号，标签会只剩 `pr-`。
+
+```yaml .github/workflows/ci.yml
+on: pull_request
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    env:
+      GOMODEL_LABEL: pr-${{ github.event.pull_request.number }}
+```
+
+然后在每个请求中发送它：
+
+<CodeGroup>
+
+```bash curl
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "x-litellm-tags: $GOMODEL_LABEL" \
+  -d '{"model": "gpt-5", "messages": [{"role": "user", "content": "Review this diff"}]}'
+```
+
+```python Python
+import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key=os.environ["GOMODEL_API_KEY"],
+    default_headers={"x-litellm-tags": os.environ["GOMODEL_LABEL"]},
+)
+```
+
+</CodeGroup>
+
+在用量页面上查看成本：在**细分**中把行设为**标签**，把列设为**模型**或**周期**。也可以按该标签筛选任意用量端点，得到精确数值：
+
+```bash
+curl "http://localhost:8080/admin/usage/summary?label=pr-1234&days=30" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+- 带有多个标签的请求会在每个标签下各计一次，因此各标签行会相互重叠，加起来可能超过总计。
+- 细分只保留排名靠前的行（`limit`，最多 50），其余合并到**其他**。PR 较多时，请按 `label` 筛选来获取单个 PR 的成本，而不是从透视表中读取。
+
 ## 默认值
 
 标签功能默认开启，在您配置标签规则、创建带标签的密钥或客户端发送 LiteLLM 标签之前不会产生任何开销。没有标签的请求会像以前一样被追踪。

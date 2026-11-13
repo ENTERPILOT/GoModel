@@ -182,6 +182,80 @@ Przeliczanie ponownie wycenia koszt rozliczeniowy z narzutem, z jakim rozliczono
   modyfikowane.
 </Warning>
 
+## Koszt na aktywnego użytkownika (benchmark)
+
+Benchmark odpowiada na pytanie „ile miesięcznie kosztuje aktywny programista i jak ten koszt się rozkłada?”. `GET /admin/usage/benchmark` traktuje każdego bezpośredniego potomka `parent` jako jednego użytkownika i sumuje całe jego poddrzewo, tak jak grupują ścieżki [eksport faktur](#eksport-faktur-gomodel-pro) i [budżety dla każdego potomka](/pl/features/budgets): z `parent=/eng` zarówno `/eng/alice/laptop`, jak i `/eng/alice/ci` liczą się jako `/eng/alice`. Licencja Pro nie jest potrzebna.
+
+Na stronie użycia sekcja **Koszt na aktywnego użytkownika** pod **Zestawieniem** pokazuje te same dane: wybierz grupę i liczbę miesięcy, a potem przełączaj między wykresem mediany i p90 kosztu na aktywnego użytkownika wraz z liczbą aktywnych użytkowników a tabelą statystyk miesięcznych. Sekcja uwzględnia filtry strony, ale nie jej zakres dat, i oferuje do 12 miesięcy. Przy włączonych narzutach przełącznik zmienia koszt providera na koszt rozliczony. Bieżący miesiąc jest oznaczony jako trwający zamiast porównywany z poprzednim, użytkowników z brakującym cennikiem liczy kolumna **Braki cen**, a koszt zapisany na samej grupie jest pokazany z objaśnieniem.
+
+| Parametr | Domyślnie | Zmień, gdy |
+| --- | --- | --- |
+| `parent` | Korzeń [zakresu](/pl/advanced/admin-endpoints#zakresowy-dostęp-administracyjny) poświadczenia albo `/` dla poświadczenia globalnego (użytkownikami są wtedy ścieżki najwyższego poziomu) | Chcesz zobaczyć osoby z jednej grupy, na przykład `parent=/eng` |
+| `months` | `7`: sześć pełnych miesięcy plus bieżący | Chcesz dłuższego lub krótszego trendu, od `1` do `12` miesięcy kończących się na `end_month`. Każda inna wartość, także `0`, zwraca `400` |
+| `start_month`, `end_month` | `end_month` to bieżący miesiąc; `start_month` wynika z `months` | Chcesz stałego zakresu (`YYYY-MM`) obejmującego najwyżej 12 miesięcy. Przy `start_month` parametr `months` jest ignorowany i niesprawdzany; `end_month` nie może być późniejszy niż bieżący miesiąc |
+| `cost_basis` | `provider` | Odsprzedajesz dostęp: `billed` mierzy koszt providera plus narzut, łącznie z rozliczonymi cache hitami odpowiedzi. Wymaga `PRICING_MARKUPS_ENABLED=true`, w przeciwnym razie `409` `markups_disabled` |
+| `top_users` | `0` | Chcesz zobaczyć, kto generuje koszt: każdy miesiąc wymienia N najdroższych użytkowników, najwyżej `50` |
+
+<Note>
+  Domyślnie odpowiedź nie podaje ścieżek użytkowników: zawiera tylko liczby,
+  sumy i statystyki dla każdego miesiąca. Wiersze dla użytkowników
+  (`top_users: [{user, requests, cost}]`) pojawiają się tylko wtedy, gdy
+  ustawisz `top_users`. Statystyki nie są anonimizowane: w miesiącu z jednym
+  aktywnym użytkownikiem `mean`, `p50`, `p90` i `max` to dokładnie jego koszt,
+  a przy niewielu użytkownikach są mu bliskie.
+</Note>
+
+Endpoint przyjmuje też filtry danych `model`, `provider`, `label`, `endpoint`, `operation`, `session_id`, `auth_key_id` i `user_path`. Okno dat pozostałych endpointów użycia (`start_date`, `end_date`, `days`) jest ignorowane i niesprawdzane: zakres wyznaczają `months`, `start_month` i `end_month`. `cache_mode` jest stały, tak jak w eksporcie faktur: requesty i koszt providera pochodzą z requestów wysłanych do providerów, a cache hit odpowiedzi czyni swojego użytkownika aktywnym i dodaje swoją rozliczoną kwotę do kosztu rozliczonego, ale nic nie kosztuje u providera.
+
+```bash
+curl "http://localhost:8080/admin/usage/benchmark?parent=/eng" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```json
+{
+  "parent": "/eng",
+  "time_zone": "UTC",
+  "currency": "USD",
+  "cost_basis": "provider",
+  "months": [
+    {
+      "month": "2026-10",
+      "partial": false,
+      "active_users": 42,
+      "unpriced_users": 0,
+      "partly_priced_users": 1,
+      "total_cost": 1260.5,
+      "mean": 30.01,
+      "p50": 22.4,
+      "p90": 61.2,
+      "max": 140.75,
+      "mean_change_percent": 4.2,
+      "p50_change_percent": -1.5,
+      "unattributed_cost": 3.1
+    }
+  ]
+}
+```
+
+`months` zawiera każdy miesiąc z zakresu, od najstarszego, także miesiące bez użycia. Dla każdego miesiąca:
+
+- `active_users` — użytkownicy z co najmniej jednym requestem w miesiącu; cache hity odpowiedzi się liczą.
+- `total_cost` — suma miesiąca: łączny koszt w USD wszystkich jego aktywnych użytkowników. W miesiącu bez aktywnych użytkowników ma wartość `0`, nie `null`.
+- `mean`, `p50` (mediana), `p90` i `max` — koszt w USD na aktywnego użytkownika; `null` w miesiącu bez aktywnych użytkowników. Koszt użytkownika to ten, który [eksport faktur](#eksport-faktur-gomodel-pro) podaje dla tego klienta za ten sam miesiąc, na wybranej podstawie `cost_basis`.
+- `mean_change_percent` i `p50_change_percent` — zmiana względem poprzedniego miesiąca; `null` dla pierwszego miesiąca, dla niepełnego bieżącego miesiąca, dla miesiąca bez aktywnych użytkowników albo gdy wartość z poprzedniego miesiąca nie jest dodatnia.
+- `unpriced_users` — aktywni użytkownicy, których cały miesięczny koszt jest nieznany, bo ich modele nie mają cennika. Liczą się z kosztem `0`. Faktura pokazuje dla nich `null` albo ich pomija, gdy ich jedynym użyciem są rozliczone cache hity odpowiedzi o nieznanym koszcie.
+- `partly_priced_users` — aktywni użytkownicy z częściowo niewycenionym użyciem; przy koszcie `billed` obejmuje to rozliczone cache hity odpowiedzi o nieznanym koszcie. Liczą się ze znanym kosztem, więc gdy ta wartość nie jest `0`, `total_cost` i statystyki zaniżają miesiąc.
+- `unattributed_cost` — użycie zapisane bezpośrednio na `parent`. Nie należy do żadnego użytkownika i nie wchodzi do `total_cost`.
+- `partial` — `true` dla bieżącego, wciąż trwającego miesiąca; nie ma on procentów zmiany.
+- `top_users[].requests` — requesty wysłane do providerów, jak na fakturze; cache hity odpowiedzi się nie liczą.
+
+Percentyle są interpolowane liniowo między najbliższymi rangami, tak jak `PERCENTILE.INC` w Excelu, domyślna metoda NumPy i `percentile_cont` w PostgreSQL: dla n posortowanych kosztów p-ty percentyl leży na randze (n−1)·p liczonej od 0, między dwoma sąsiadami. Dwóch użytkowników kosztujących $10 i $20 daje `p50` równe $15 i `p90` równe $19; pojedynczy użytkownik jest każdą statystyką. SQLite, PostgreSQL i MongoDB zwracają te same wartości.
+
+Miesiące trwają od północy do północy w strefie czasowej z nagłówka `X-GoModel-Timezone`, tak jak w [eksporcie faktur](#eksport-faktur-gomodel-pro): dashboard wysyła swoją skonfigurowaną strefę, a wywołanie API bez nagłówka używa UTC. `time_zone` podaje użytą strefę.
+
+Liczony jest każdy użytkownik: inaczej niż w zestawieniu nic nie trafia do **Pozostałe**. Zakres obejmuje najwyżej 12 miesięcy łącznie z bieżącym, zgodnie z limitem 365 dni pozostałych endpointów użycia, i jest sprawdzany przed odczytem danych. Jeden benchmark mieści najwyżej 100 000 miesięcy użytkowników (użytkownicy × miesiące); odczyt kończy się błędem `400`, gdy tylko przekroczy ten limit, zamiast pomijać użytkowników. Wybierz głębszy `parent`, mniej miesięcy albo węższe filtry. `parent` wskazuje jedną grupę; powtórzony zwraca `400`. [Poświadczenie z zakresem](/pl/advanced/admin-endpoints#zakresowy-dostęp-administracyjny) może badać tylko grupy w swoim poddrzewie; każdy inny `parent` zwraca `403` `user_path_out_of_scope`.
+
 ## Eksport faktur (GoModel Pro)
 
 <Info>
