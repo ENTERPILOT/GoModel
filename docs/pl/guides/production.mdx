@@ -94,6 +94,12 @@ jawnie. Rozwiązana ścieżka jest wypisywana przy starcie jako
 `storage configured`. Zobacz
 [Gdzie GoModel przechowuje dane?](/pl/about/faq#gdzie-gomodel-przechowuje-dane).
 
+Baza zawiera dane uwierzytelniające providerów (jawnym tekstem, o ile nie ustawiono
+`GOMODEL_ENCRYPTION_KEY`) oraz treść requestów, dlatego GoModel tworzy plik z uprawnieniami
+`0600`, a jego katalog z `0700`. Istniejący plik lub katalog zachowuje swoje uprawnienia,
+a przy starcie logowane jest ostrzeżenie, gdy inni użytkownicy mają dostęp do pliku bazy:
+wykonaj na nim `chmod 600`, chyba że musi go czytać inny użytkownik, np. sidecar z backupem.
+
 ### Redis
 
 Redis jest opcjonalny. Przechowuje współdzielony snapshot katalogu modeli i dokładny

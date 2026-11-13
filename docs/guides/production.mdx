@@ -97,6 +97,13 @@ explicitly in production. The resolved path is printed at startup as
 `storage configured`. See
 [Where does GoModel store its data?](/about/faq#where-does-gomodel-store-its-data).
 
+The database holds provider credentials (in plaintext unless
+`GOMODEL_ENCRYPTION_KEY` is set) and request content, so GoModel creates the
+file with mode `0600` and its directory with `0700`. A file or directory that
+already exists keeps its mode, and startup logs a warning when other users can
+access the database file: run `chmod 600` on it unless another user, such as a
+backup sidecar, has to read it.
+
 ### Redis
 
 Redis is optional. It backs the shared model catalog snapshot and the exact
