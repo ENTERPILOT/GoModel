@@ -356,6 +356,17 @@ to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
 </Warning>
 
 <Note>
+  With body logging off for a request — `LOGGING_LOG_BODIES=false`, or
+  `LOGGING_LOG_EMBEDDING_BODIES=false` on an embeddings endpoint — the error
+  text a provider returned is not stored either, because providers often quote
+  the request in it. The entry and each of its attempts keep the error type,
+  code, status and provider, and `error_message` reads
+  `upstream error message not logged: body logging is off for this request`.
+  Errors the gateway raises itself keep their message, and the response the
+  client receives is unchanged.
+</Note>
+
+<Note>
   `LOGGING_LOG_REVISION_BODIES` refines `LOGGING_LOG_BODIES` for the ingress
   request-rewrite chain — it has no effect unless body logging is enabled. With
   both on, every rewriter that changed a request (for example GoModel Pro token

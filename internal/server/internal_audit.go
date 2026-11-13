@@ -91,7 +91,7 @@ func finishInternalAuditEntry(logger auditlog.LoggerInterface, ctx context.Conte
 			entry.ErrorType = string(gatewayErr.Type)
 			entry.StatusCode = gatewayErr.HTTPStatusCode()
 			if entry.Data != nil {
-				entry.Data.ErrorMessage = gatewayErr.Message
+				entry.Data.ErrorMessage = auditlog.GatewayErrorMessage(gatewayErr, cfg.ForPath(x.path))
 				if gatewayErr.Code != nil {
 					entry.Data.ErrorCode = *gatewayErr.Code
 				}

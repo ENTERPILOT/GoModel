@@ -273,20 +273,27 @@ func EnrichEntryWithAttempts(c *echo.Context, attempts []AttemptSnapshot) {
 }
 
 // gateAttemptCaptureFromContext strips per-attempt response bodies/headers that
-// the request's audit config did not opt into. When the config cannot be
-// resolved, opt-in-only captures are dropped rather than persisted.
+// the request's audit config did not opt into.
 func gateAttemptCaptureFromContext(c *echo.Context, attempts []AttemptSnapshot) []AttemptSnapshot {
 	if c == nil || len(attempts) == 0 {
 		return attempts
 	}
-	if logger, ok := c.Get(string(LogEntryLivePublisherKey)).(LoggerInterface); ok && logger != nil {
-		cfg := logger.Config()
-		if req := c.Request(); req != nil && req.URL != nil {
-			cfg = cfg.ForPath(req.URL.Path)
-		}
-		return GateAttemptCapture(attempts, cfg)
+	return GateAttemptCapture(attempts, captureConfigFromContext(c))
+}
+
+// captureConfigFromContext returns the audit capture config for the request's
+// path. When the config cannot be resolved it is the zero Config, so
+// opt-in-only captures are dropped rather than persisted.
+func captureConfigFromContext(c *echo.Context) Config {
+	logger, ok := c.Get(string(LogEntryLivePublisherKey)).(LoggerInterface)
+	if !ok || logger == nil {
+		return Config{}
 	}
-	return GateAttemptCapture(attempts, Config{})
+	cfg := logger.Config()
+	if req := c.Request(); req != nil && req.URL != nil {
+		cfg = cfg.ForPath(req.URL.Path)
+	}
+	return cfg
 }
 
 // EnrichLogEntryWithFailover attaches failover redirect metadata directly to an
@@ -423,9 +430,28 @@ func HasRecordedError(c *echo.Context) bool {
 	return entry != nil && entry.ErrorType != ""
 }
 
+// UpstreamErrorMessageWithheld is recorded in place of an error message taken
+// from an upstream response body when body capture is off for the request.
+const UpstreamErrorMessageWithheld = "upstream error message not logged: body logging is off for this request"
+
+// GatewayErrorMessage returns the message to record for gatewayErr under cfg,
+// the capture config for the request's path (Config.ForPath). A message taken
+// from an upstream response body is body content, and providers often quote
+// the request in it, so it is recorded only where bodies are. Messages the
+// gateway wrote itself are always kept, as are the error type, code and
+// status.
+func GatewayErrorMessage(gatewayErr *core.GatewayError, cfg Config) string {
+	if !cfg.LogBodies && len(gatewayErr.ResponseBody) > 0 {
+		return UpstreamErrorMessageWithheld
+	}
+	return gatewayErr.Message
+}
+
 // EnrichEntryWithGatewayError records a gateway error on the log entry:
 // type, message and code as EnrichEntryWithError does, plus the upstream
-// provider the error originated from (empty for gateway-raised errors).
+// provider the error originated from (empty for gateway-raised errors). An
+// upstream message is withheld when body capture is off; see
+// GatewayErrorMessage.
 func EnrichEntryWithGatewayError(c *echo.Context, gatewayErr *core.GatewayError) {
 	if gatewayErr == nil {
 		return
@@ -440,7 +466,7 @@ func EnrichEntryWithGatewayError(c *echo.Context, gatewayErr *core.GatewayError)
 	}
 	entry.ErrorType = string(gatewayErr.Type)
 	data := ensureLogData(entry)
-	data.ErrorMessage = gatewayErr.Message
+	data.ErrorMessage = GatewayErrorMessage(gatewayErr, captureConfigFromContext(c))
 	if code = strings.TrimSpace(code); code != "" {
 		data.ErrorCode = code
 	}
