@@ -455,7 +455,7 @@ func (s *SQLStore) cleanup() {
 // renameAuditColumn renames a column when the old name is still present and
 // the new one is not, so the rename runs once and is a no-op thereafter.
 func renameAuditColumn(ctx context.Context, db sqlx.DB, table, from, to string) error {
-	columns, err := auditColumns(ctx, db, table)
+	columns, err := sqlx.Columns(ctx, db, table)
 	if err != nil {
 		return err
 	}
@@ -464,39 +464,4 @@ func renameAuditColumn(ctx context.Context, db sqlx.DB, table, from, to string) 
 	}
 	_, err = db.Exec(ctx, fmt.Sprintf("ALTER TABLE %s RENAME COLUMN %s TO %s", table, from, to))
 	return err
-}
-
-// auditColumns reports the table's current column names, lowercased.
-func auditColumns(ctx context.Context, db sqlx.DB, table string) (map[string]bool, error) {
-	var query string
-	var args []any
-	switch db.Dialect() {
-	case sqlx.SQLite:
-		query = fmt.Sprintf(`SELECT name FROM pragma_table_info('%s')`, table)
-	case sqlx.PostgreSQL:
-		query = `SELECT column_name FROM information_schema.columns
-			WHERE table_schema = current_schema() AND table_name = ?`
-		args = []any{table}
-	default:
-		return nil, fmt.Errorf("unsupported dialect %q", db.Dialect())
-	}
-
-	rows, err := db.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("inspect %s columns: %w", table, err)
-	}
-	defer rows.Close()
-
-	columns := make(map[string]bool)
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, fmt.Errorf("inspect %s columns: %w", table, err)
-		}
-		columns[strings.ToLower(name)] = true
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("inspect %s columns: %w", table, err)
-	}
-	return columns, nil
 }
