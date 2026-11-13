@@ -420,6 +420,7 @@ http:
   timeout: 600 # seconds (10 minutes)
   response_header_timeout: 600
   stream_idle_timeout: 300 # seconds of silence allowed mid-stream before a stalled stream fails; 0 disables
+  max_idle_conns_per_host: 512 # idle keep-alive connections per provider; raise for busy HTTP/1.1 backends (vLLM, Ollama)
   # Client TLS trust for the gateway's outbound HTTPS clients (providers, model
   # catalog, update check, MCP upstreams, vector stores). OTLP export and the
   # database and Redis drivers keep their own TLS settings. All optional; the

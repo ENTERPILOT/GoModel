@@ -23,12 +23,16 @@ func TestNewGatewayStartConfig_AppliesTimeoutOverrides(t *testing.T) {
 		ReadTimeout:       time.Hour,
 		ReadHeaderTimeout: time.Hour,
 		WriteTimeout:      time.Hour,
+		IdleTimeout:       time.Hour,
 	}
 	err := cfg.BeforeServeFunc(server)
 	require.NoError(t, err)
 	require.Equal(t, inboundServerReadTimeout, server.ReadTimeout)
 	require.Equal(t, inboundServerReadHeaderTimeout, server.ReadHeaderTimeout)
 	require.Equal(t, inboundServerWriteTimeout, server.WriteTimeout)
+	require.Equal(t, inboundServerIdleTimeout, server.IdleTimeout)
+	// Idle keep-alives must outlive a 60s load balancer idle timeout.
+	require.Equal(t, 120*time.Second, server.IdleTimeout)
 }
 
 // Leaving GracefulTimeout unset takes Echo's implicit 10s default and reports
@@ -158,6 +162,7 @@ func TestNewGatewayStartConfigForListener_KeepsTheServerConfiguration(t *testing
 		{"ReadTimeout", server.ReadTimeout, inboundServerReadTimeout},
 		{"ReadHeaderTimeout", server.ReadHeaderTimeout, inboundServerReadHeaderTimeout},
 		{"WriteTimeout", server.WriteTimeout, inboundServerWriteTimeout},
+		{"IdleTimeout", server.IdleTimeout, inboundServerIdleTimeout},
 	} {
 		assert.Equal(t, timeout.want, timeout.got, "%s = %v, want %v", timeout.name, timeout.got, timeout.want)
 	}

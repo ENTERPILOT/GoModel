@@ -51,6 +51,11 @@ const (
 	inboundServerReadTimeout       = 30 * time.Second
 	inboundServerReadHeaderTimeout = 10 * time.Second
 	inboundServerWriteTimeout      = 30 * time.Second
+	// inboundServerIdleTimeout keeps idle keep-alive connections open longer
+	// than the common 60s load balancer idle timeout, so the balancer closes
+	// first instead of reusing a connection the gateway is closing. Left unset,
+	// net/http would fall back to the 30s ReadTimeout.
+	inboundServerIdleTimeout = 120 * time.Second
 
 	// GracefulDrainTimeout bounds how long the HTTP server waits for in-flight
 	// requests to finish once shutdown begins. Streamed model responses run far
@@ -793,6 +798,7 @@ func configureGatewayHTTPServer(server *http.Server) error {
 	server.ReadTimeout = inboundServerReadTimeout
 	server.ReadHeaderTimeout = inboundServerReadHeaderTimeout
 	server.WriteTimeout = inboundServerWriteTimeout
+	server.IdleTimeout = inboundServerIdleTimeout
 	return nil
 }
 
