@@ -14,25 +14,40 @@ var ErrNotFound = errors.New("rate limit rule not found")
 // Service.inFlightLiveness); this only bounds how long it takes space.
 const inFlightRowRetention = PeriodDaySeconds
 
+// counterRetention is how long a store keeps a counter row after its last
+// save: two of its periods for a window row, inFlightRowRetention for an
+// in-flight one.
+func counterRetention(periodSeconds int64) int64 {
+	if periodSeconds == PeriodConcurrent {
+		return inFlightRowRetention
+	}
+	return 2 * periodSeconds
+}
+
 // Store persists rate limit rule definitions and optional window snapshots.
 type Store interface {
 	ListRules(ctx context.Context) ([]Rule, error)
 	UpsertRules(ctx context.Context, rules []Rule) error
 	DeleteRule(ctx context.Context, scope RuleScope, subject string, periodSeconds int64) error
 	ReplaceConfigRules(ctx context.Context, rules []Rule) error
-	// LoadCounters returns every writer's rows saved at or after since, in
-	// unix seconds by the writer's clock (WindowSnapshot.UpdatedAt); since 0
-	// returns them all.
-	LoadCounters(ctx context.Context, since int64) ([]WindowSnapshot, error)
+	// LoadCounters returns the rows saved at or after since, in unix seconds
+	// by the writer's clock (WindowSnapshot.UpdatedAt), by every writer but
+	// exclude; since 0 returns them all, and an empty exclude every writer's.
+	LoadCounters(ctx context.Context, since int64, exclude string) ([]WindowSnapshot, error)
 	// SaveCounters upserts the given snapshots, keyed by their Writer as well
 	// as their window, so writers never overwrite each other's rows, and
-	// stamps them with the current time. It also collects window rows no
-	// writer has saved for two of their own periods — by then every count
-	// they hold has rolled out — and in-flight rows no writer has saved for
-	// a day, long after peers stopped counting them.
+	// stamps them with the current time and the time they expire (see
+	// counterRetention). A snapshot holds each key at most once.
 	// Nothing is deleted to make room for a write, so a crash mid-save costs at
 	// most the flush interval rather than a whole window.
 	SaveCounters(ctx context.Context, snapshots []WindowSnapshot) error
+	// PruneCounters deletes the rows that expired: window rows no writer has
+	// saved for two of their own periods — by then every count they hold has
+	// rolled out — and in-flight rows no writer has saved for a day, long
+	// after peers stopped counting them. It runs apart from SaveCounters,
+	// about once a minute per replica, as every row it finds is one nobody
+	// reads any more.
+	PruneCounters(ctx context.Context) error
 	// ResetCounter gives the rule a new counter epoch, so every replica's
 	// next Refresh clears its counts and loads skip every row saved before,
 	// and removes the window rows of every writer. In-flight rows stay: they

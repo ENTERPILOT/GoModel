@@ -2,11 +2,15 @@ package ratelimit
 
 import (
 	"context"
+	"strconv"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -265,13 +269,309 @@ func TestSQLStoreCounterRoundTrip(t *testing.T) {
 	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
 		runCounterStoreSuite(t, store, func(t *testing.T, snap WindowSnapshot, updatedAt int64) {
 			t.Helper()
-			_, err := store.db.Exec(context.Background(), upsertCounterSQL,
-				snap.Scope, snap.Subject, snap.Partition, snap.PeriodSeconds, snap.Writer, snap.Epoch,
-				snap.RequestsWindowStart, snap.RequestsCurrent, snap.RequestsPrevious,
-				snap.TokensWindowStart, snap.TokensCurrent, snap.TokensPrevious, snap.InFlight, updatedAt, snap.OwnCounts,
-			)
+			query, args := buildCounterUpsert([]WindowSnapshot{snap}, updatedAt)
+			_, err := store.db.Exec(context.Background(), query, args...)
 			require.NoError(t, err)
+		}, func(t *testing.T) {
+			t.Helper()
+			require.NoError(t, store.PruneCounters(context.Background()))
 		})
+	})
+}
+
+func TestSQLStoreSavesCounterBatches(t *testing.T) {
+	for _, n := range counterBatchSizes {
+		t.Run(strconv.Itoa(n), func(t *testing.T) {
+			runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+				runCounterBatchSuite(t, store, n)
+			})
+		})
+	}
+}
+
+// TestSQLStoreSavesPostgresCounterBatches covers PostgreSQL's own row limit:
+// a save of exactly one maximal statement, and one more row, which takes a
+// second statement in a transaction.
+func TestSQLStoreSavesPostgresCounterBatches(t *testing.T) {
+	rowsPerStatement := postgresMaxBindParameters / upsertCounterColumnCount
+	for _, n := range []int{rowsPerStatement, rowsPerStatement + 1} {
+		t.Run(strconv.Itoa(n), func(t *testing.T) {
+			sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+				if db.Dialect() != sqlx.PostgreSQL {
+					t.Skip("SQLite batches are covered by TestSQLStoreSavesCounterBatches")
+				}
+				store, err := NewSQLStore(context.Background(), db)
+				require.NoError(t, err)
+				runCounterBatchSuite(t, store, n)
+			})
+		})
+	}
+}
+
+// TestSQLStorePruneUsesExpiresAtIndex keeps the prune that every replica
+// runs off a full table scan.
+func TestSQLStorePruneUsesExpiresAtIndex(t *testing.T) {
+	ctx := context.Background()
+	db := sqlxtest.NewSQLite(t)
+	_, err := NewSQLStore(ctx, db)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name  string
+		query string
+		args  []any
+	}{
+		{"expired", pruneCountersSQL, []any{int64(1700000000)}},
+		{"legacy", pruneLegacyCountersSQL, []any{PeriodConcurrent, inFlightRowRetention, int64(1700000000)}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rows, err := db.Query(ctx, `EXPLAIN QUERY PLAN `+tc.query, tc.args...)
+			require.NoError(t, err)
+			defer rows.Close()
+			var plan []string
+			for rows.Next() {
+				var id, parent, unused int
+				var detail string
+				require.NoError(t, rows.Scan(&id, &parent, &unused, &detail))
+				plan = append(plan, detail)
+			}
+			require.NoError(t, rows.Err())
+			require.Len(t, plan, 1)
+			assert.Contains(t, plan[0], "SEARCH rate_limit_window_snapshots USING")
+			assert.Contains(t, plan[0], "INDEX idx_rate_limit_window_snapshots_expires_at (expires_at")
+		})
+	}
+}
+
+// TestSQLStorePostgresPruneUsesExpiresAtIndex is the PostgreSQL half of the
+// test above: each prune finds its rows through the index and deletes them by
+// row address, so neither step reads the whole table.
+func TestSQLStorePostgresPruneUsesExpiresAtIndex(t *testing.T) {
+	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+		if store.db.Dialect() != sqlx.PostgreSQL {
+			t.Skip("SQLite is covered by TestSQLStorePruneUsesExpiresAtIndex")
+		}
+		ctx := context.Background()
+		// PostgreSQL reads a table it takes for small in full whatever its
+		// indexes, so the plans are those of a table with rows and statistics.
+		require.NoError(t, store.SaveCounters(ctx, benchSnapshots("writer-a", 2000)))
+		_, err := store.db.Exec(ctx, `ANALYZE rate_limit_window_snapshots`)
+		require.NoError(t, err)
+
+		tests := []struct {
+			name  string
+			query string
+			args  []any
+		}{
+			{"expired", pruneCountersPostgreSQL, []any{int64(1700000000)}},
+			{"legacy", pruneLegacyCountersPostgreSQL, []any{PeriodConcurrent, inFlightRowRetention, int64(1700000000)}},
+		}
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				rows, err := store.db.Query(ctx, `EXPLAIN `+tc.query, tc.args...)
+				require.NoError(t, err)
+				defer rows.Close()
+				var plan strings.Builder
+				for rows.Next() {
+					var line string
+					require.NoError(t, rows.Scan(&line))
+					plan.WriteString(line + "\n")
+				}
+				require.NoError(t, rows.Err())
+				assert.Contains(t, plan.String(), "Index Scan using idx_rate_limit_window_snapshots_expires_at")
+				assert.Contains(t, plan.String(), "Tid Scan on rate_limit_window_snapshots")
+				assert.NotContains(t, plan.String(), "Seq Scan")
+			})
+		}
+	})
+}
+
+// TestSQLStorePruneDoesNotDeadlockWithSave revives two expired rows, as a
+// writer does when traffic returns to windows that sat idle for two periods,
+// while the prune collects them in the opposite order. SQLite serializes
+// every write, so only PostgreSQL can interleave the two.
+//
+// A third transaction holds the save's first row locked so the save stops
+// before it takes any, then the prune starts; once the prune has finished or
+// is waiting behind the save, the lock is released and both run to
+// completion. A prune that waits there holds the row the save takes next.
+func TestSQLStorePruneDoesNotDeadlockWithSave(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		name := "expired"
+		if legacy {
+			name = "without expires_at"
+		}
+		t.Run(name, func(t *testing.T) {
+			runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+				if store.db.Dialect() != sqlx.PostgreSQL {
+					t.Skip("SQLite serializes write transactions")
+				}
+				ctx := context.Background()
+				db := store.db
+				// The prune reaches first before second, by expiry and by
+				// position in the table alike.
+				first := WindowSnapshot{
+					Scope: string(ScopeUserPath), Subject: "/team", Partition: "/team/first",
+					PeriodSeconds: PeriodMinuteSeconds, Writer: "writer-a", RequestsCurrent: 1,
+				}
+				second := first
+				second.Partition = "/team/second"
+				now := time.Now().Unix()
+				for i, snap := range []WindowSnapshot{first, second} {
+					query, args := buildCounterUpsert([]WindowSnapshot{snap}, now-int64(4-i)*PeriodMinuteSeconds)
+					if legacy {
+						args[14] = nil // expires_at
+					}
+					_, err := db.Exec(ctx, query, args...)
+					require.NoError(t, err)
+				}
+
+				blockedBy := func(pid int64) int64 {
+					var blocked int64
+					err := db.QueryRow(ctx, `SELECT COALESCE(MAX(pid), 0) FROM pg_stat_activity WHERE ? = ANY(pg_blocking_pids(pid))`, pid).Scan(&blocked)
+					assert.NoError(t, err)
+					return blocked
+				}
+				// Whatever fails below, the lock is released and all three
+				// sessions end before the test's database is torn down.
+				held := make(chan struct{})
+				release := sync.OnceFunc(func() { close(held) })
+				var sessions sync.WaitGroup
+				t.Cleanup(func() {
+					release()
+					sessions.Wait()
+				})
+				lockerPID := make(chan int64, 1)
+				lockerDone := make(chan error, 1)
+				sessions.Go(func() {
+					lockerDone <- db.InTx(ctx, func(q sqlx.Querier) error {
+						var pid int64
+						if err := q.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+							return err
+						}
+						if _, err := q.Exec(ctx, `SELECT 1 FROM rate_limit_window_snapshots WHERE partition = ? FOR UPDATE`, second.Partition); err != nil {
+							return err
+						}
+						lockerPID <- pid
+						<-held
+						return nil
+					})
+				})
+				var locker int64
+				select {
+				case locker = <-lockerPID:
+				case err := <-lockerDone:
+					require.FailNow(t, "the locker ended without holding the row", "%v", err)
+				}
+
+				saveDone := make(chan error, 1)
+				sessions.Go(func() { saveDone <- store.SaveCounters(ctx, []WindowSnapshot{second, first}) })
+				var savePID int64
+				require.Eventually(t, func() bool {
+					savePID = blockedBy(locker)
+					return savePID != 0
+				}, 5*time.Second, 10*time.Millisecond, "save never reached the locked row")
+
+				pruneDone := make(chan error, 1)
+				sessions.Go(func() { pruneDone <- store.PruneCounters(ctx) })
+				require.Eventually(t, func() bool {
+					return len(pruneDone) > 0 || blockedBy(savePID) != 0
+				}, 5*time.Second, 10*time.Millisecond, "prune neither finished nor waited on the save")
+
+				release()
+				require.NoError(t, <-lockerDone)
+				require.NoError(t, <-saveDone)
+				require.NoError(t, <-pruneDone)
+
+				rows, err := store.LoadCounters(ctx, now, "")
+				require.NoError(t, err)
+				require.Len(t, rows, 2, "the save brings back what the prune collected")
+			})
+		})
+	}
+}
+
+// TestSQLStoreMigratesRowsWithoutExpiresAt starts from a table as releases
+// before expires_at left it, holding rows they saved: the store adds the
+// column and its index, and the prune collects those rows on their old
+// bounds. Releases up to v0.2.1 left it without own_counts as well.
+func TestSQLStoreMigratesRowsWithoutExpiresAt(t *testing.T) {
+	t.Run("expires_at", func(t *testing.T) {
+		runSQLStoreColumnMigration(t, "expires_at")
+	})
+	t.Run("expires_at and own_counts", func(t *testing.T) {
+		runSQLStoreColumnMigration(t, "expires_at", "own_counts")
+	})
+}
+
+func runSQLStoreColumnMigration(t *testing.T, missing ...string) {
+	t.Helper()
+	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+		ctx := context.Background()
+		_, err := store.db.Exec(ctx, `DROP INDEX idx_rate_limit_window_snapshots_expires_at`)
+		require.NoError(t, err)
+		for _, column := range missing {
+			_, err = store.db.Exec(ctx, `ALTER TABLE rate_limit_window_snapshots DROP COLUMN `+column)
+			require.NoError(t, err)
+		}
+
+		now := time.Now().Unix()
+		rows := []struct {
+			partition string
+			period    int64
+			updatedAt int64
+			kept      bool
+		}{
+			{"/team/stale", PeriodHourSeconds, now - 3*PeriodHourSeconds, false},
+			{"/team/live", PeriodHourSeconds, now - PeriodHourSeconds, true},
+			{"/team/gone", PeriodConcurrent, now - inFlightRowRetention - 60, false},
+			{"/team/idle", PeriodConcurrent, now - PeriodHourSeconds, true},
+		}
+		var kept []string
+		for _, row := range rows {
+			_, err := store.db.Exec(ctx, `
+				INSERT INTO rate_limit_window_snapshots (scope, subject, partition, period_seconds, writer, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?)
+			`, ScopeUserPath, "/team", row.partition, row.period, "old-replica", row.updatedAt)
+			require.NoError(t, err)
+			if row.kept {
+				kept = append(kept, row.partition)
+			}
+		}
+
+		migrated, err := NewSQLStore(ctx, store.db)
+		require.NoError(t, err)
+		columns, err := tableColumns(ctx, store.db, "rate_limit_window_snapshots")
+		require.NoError(t, err)
+		for _, column := range missing {
+			require.True(t, columns[column], column)
+		}
+
+		require.NoError(t, migrated.PruneCounters(ctx))
+		loaded, err := migrated.LoadCounters(ctx, 0, "")
+		require.NoError(t, err)
+		var partitions []string
+		for _, row := range loaded {
+			partitions = append(partitions, row.Partition)
+			assert.False(t, row.OwnCounts, "an older release's row is merged by maximum")
+		}
+		assert.ElementsMatch(t, kept, partitions)
+
+		// The next save stamps the row's expiry, and marks its counts its own.
+		snap := WindowSnapshot{
+			Scope: string(ScopeUserPath), Subject: "/team", Partition: "/team/live",
+			PeriodSeconds: PeriodHourSeconds, Writer: "old-replica", OwnCounts: true,
+		}
+		require.NoError(t, migrated.SaveCounters(ctx, []WindowSnapshot{snap}))
+		var updatedAt, expiresAt int64
+		var ownCounts bool
+		err = store.db.QueryRow(ctx, `
+			SELECT updated_at, expires_at, own_counts FROM rate_limit_window_snapshots WHERE partition = ?
+		`, "/team/live").Scan(&updatedAt, &expiresAt, &ownCounts)
+		require.NoError(t, err)
+		assert.Equal(t, updatedAt+2*PeriodHourSeconds, expiresAt)
+		assert.True(t, ownCounts)
 	})
 }
 
@@ -291,13 +591,14 @@ func TestSQLStoreLoadCountersSkipsMalformedRow(t *testing.T) {
 	}
 	err = store.SaveCounters(ctx, []WindowSnapshot{good})
 	require.NoError(t, err)
-	_, err = db.Exec(ctx, upsertCounterSQL,
-		string(ScopeUserPath), "/broken", "", PeriodHourSeconds, "w1", "",
-		0, "not-a-number", 0, 0, 0, 0, 0, time.Now().Unix(), false,
-	)
+	query, args := buildCounterUpsert([]WindowSnapshot{{
+		Scope: string(ScopeUserPath), Subject: "/broken", PeriodSeconds: PeriodHourSeconds, Writer: "w1",
+	}}, time.Now().Unix())
+	args[7] = "not-a-number" // requests_current
+	_, err = db.Exec(ctx, query, args...)
 	require.NoError(t, err)
 
-	got, err := store.LoadCounters(ctx, 0)
+	got, err := store.LoadCounters(ctx, 0, "")
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	require.Equal(t, good, unstamped(got)[0])
@@ -353,7 +654,7 @@ func TestSQLStoreImportsLegacyCounters(t *testing.T) {
 
 		store, err := NewSQLStore(ctx, db)
 		require.NoError(t, err)
-		got, err := store.LoadCounters(ctx, 0)
+		got, err := store.LoadCounters(ctx, 0, "")
 		require.NoError(t, err)
 		require.Equal(t, []WindowSnapshot{legacy}, unstamped(got), "the legacy row loads under the empty writer")
 		var remaining int64
@@ -364,7 +665,7 @@ func TestSQLStoreImportsLegacyCounters(t *testing.T) {
 		// Re-opening imports nothing new and keeps the imported row.
 		_, err = NewSQLStore(ctx, db)
 		require.NoError(t, err)
-		got, err = store.LoadCounters(ctx, 0)
+		got, err = store.LoadCounters(ctx, 0, "")
 		require.NoError(t, err)
 		require.Equal(t, []WindowSnapshot{legacy}, unstamped(got))
 
@@ -378,7 +679,7 @@ func TestSQLStoreImportsLegacyCounters(t *testing.T) {
 		require.NoError(t, err)
 		store, err = NewSQLStore(ctx, db)
 		require.NoError(t, err)
-		got, err = store.LoadCounters(ctx, 0)
+		got, err = store.LoadCounters(ctx, 0, "")
 		require.NoError(t, err)
 		require.Len(t, got, 1)
 		require.Equal(t, int64(7), got[0].RequestsCurrent)
@@ -394,7 +695,7 @@ func TestSQLStoreImportsLegacyCounters(t *testing.T) {
 		require.NoError(t, err)
 		store, err = NewSQLStore(ctx, db)
 		require.NoError(t, err)
-		got, err = store.LoadCounters(ctx, 0)
+		got, err = store.LoadCounters(ctx, 0, "")
 		require.NoError(t, err)
 		require.Empty(t, got)
 	})
@@ -484,7 +785,7 @@ func TestSQLStoreLegacyImportCannotUndoConcurrentReset(t *testing.T) {
 		require.NoError(t, <-resetDone)
 		require.NoError(t, <-importDone)
 
-		got, err := store.LoadCounters(ctx, 0)
+		got, err := store.LoadCounters(ctx, 0, "")
 		require.NoError(t, err)
 		require.Empty(t, got, "the import must not bring back the count the reset deleted")
 	})
