@@ -63,23 +63,41 @@ func TestObserverOmitsUserPathWhenUnset(t *testing.T) {
 }
 
 func TestServerSpanGetsUserPathResolvedByInnerMiddleware(t *testing.T) {
-	recorder := tracetest.NewSpanRecorder()
-	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
-	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
-
-	c, _ := echotest.Request(t, http.MethodPost, "/v1/chat/completions", nil)
-	ctx, span := tp.Tracer("test").Start(c.Request().Context(), "POST /v1/chat/completions")
-	c.SetRequest(c.Request().WithContext(ctx))
-
-	auth := func(c *echo.Context) error {
-		c.SetRequest(c.Request().WithContext(core.WithEffectiveUserPath(c.Request().Context(), "/team/alpha/service")))
-		return nil
+	tests := []struct {
+		name  string
+		panic bool
+	}{
+		{name: "handler returns"},
+		{name: "handler panics after authentication", panic: true},
 	}
-	err := withGenerationTracing(auth, false)(c)
-	require.NoError(t, err)
-	span.End()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := tracetest.NewSpanRecorder()
+			tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+			t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
 
-	spans := recorder.Ended()
-	require.Len(t, spans, 1)
-	assert.Equal(t, "/team/alpha/service", attributeMap(spans[0].Attributes())[userPathAttribute])
+			c, _ := echotest.Request(t, http.MethodPost, "/v1/chat/completions", nil)
+			ctx, span := tp.Tracer("test").Start(c.Request().Context(), "POST /v1/chat/completions")
+			c.SetRequest(c.Request().WithContext(ctx))
+
+			auth := func(c *echo.Context) error {
+				c.SetRequest(c.Request().WithContext(core.WithEffectiveUserPath(c.Request().Context(), "/team/alpha/service")))
+				if tt.panic {
+					panic("handler failed")
+				}
+				return nil
+			}
+			handler := withGenerationTracing(auth, false)
+			if tt.panic {
+				assert.Panics(t, func() { _ = handler(c) })
+			} else {
+				require.NoError(t, handler(c))
+			}
+			span.End()
+
+			spans := recorder.Ended()
+			require.Len(t, spans, 1)
+			assert.Equal(t, "/team/alpha/service", attributeMap(spans[0].Attributes())[userPathAttribute])
+		})
+	}
 }

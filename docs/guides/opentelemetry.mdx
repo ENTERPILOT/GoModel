@@ -131,7 +131,7 @@ Every request gets a `SERVER` span named after its route (for example
 `POST /v1/chat/completions`) with the standard `http.request.method`,
 `http.route`, `http.response.status_code`, and `url.scheme` attributes, plus the
 `http.server.request.duration` histogram and the request and response body size
-histograms. Authenticated requests also carry `gomodel.user_path` (see
+histograms. Requests with a user path also carry `gomodel.user_path` (see
 [Per-team traces](#per-team-traces)).
 
 Trace context from the caller is honored, so a gateway span appears as a child
@@ -169,7 +169,8 @@ streams, GoModel asks the provider for a usage chunk only while usage tracking
 is on (the default). `/v1/messages` requests that GoModel forwards natively to an Anthropic
 provider, and other passthrough calls, carry the request attributes only.
 
-Metrics are histograms in seconds, carrying the same attributes:
+Metrics are histograms in seconds, carrying the same attributes except
+`gomodel.user_path`, which is span-only:
 
 | Metric | Recorded for |
 | --- | --- |

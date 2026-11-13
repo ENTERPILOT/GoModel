@@ -194,7 +194,7 @@ func newMiddleware(tp *sdkTrace.TracerProvider, mp *sdkMetric.MeterProvider, pro
 // rebuilding its outcome would be wasted work.
 //
 // Authentication resolves the user path inside next, so the server span gets
-// it once the handler returns.
+// it once the handler returns, or panics: Recover runs outside this wrapper.
 func withGenerationTracing(next echo.HandlerFunc, captureContent bool) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		req := c.Request()
@@ -203,9 +203,8 @@ func withGenerationTracing(next echo.HandlerFunc, captureContent bool) echo.Hand
 			return next(c)
 		}
 		c.SetRequest(req.WithContext(core.WithGenerationTracing(req.Context(), captureContent)))
-		err := next(c)
-		span.SetAttributes(userPathAttributes(c.Request().Context())...)
-		return err
+		defer func() { span.SetAttributes(userPathAttributes(c.Request().Context())...) }()
+		return next(c)
 	}
 }
 
