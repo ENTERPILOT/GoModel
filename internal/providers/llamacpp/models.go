@@ -105,13 +105,9 @@ func (r *modelsResponse) toCore(props *serverProps) *core.ModelsResponse {
 }
 
 func (e modelEntry) toCore(props *serverProps) core.Model {
-	object := strings.TrimSpace(e.Object)
-	if object == "" {
-		object = "model"
-	}
 	model := core.Model{
 		ID:      strings.TrimSpace(e.ID),
-		Object:  object,
+		Object:  providers.ModelObject(e.Object),
 		OwnedBy: strings.TrimSpace(e.OwnedBy),
 		Created: e.Created,
 	}
