@@ -532,7 +532,8 @@ request to `anthropic/claude-sonnet-4-6`.
 
 A redirect matches the requested name exactly. In the dashboard, a redirect
 whose source is a model's full name (the name shown on its row, such as
-`openrouter/qwen/qwen3-vl-8b-instruct`) appears on that model's row. A redirect
+`openrouter/qwen/qwen3-vl-8b-instruct`) appears on that model's row while it is
+enabled and valid; otherwise it gets its own row. A redirect
 named after the bare upstream ID (`qwen/qwen3-vl-8b-instruct`) or any other name
 gets its own row under **Virtual models**, and requests for the model's full name
 still go to the model.
