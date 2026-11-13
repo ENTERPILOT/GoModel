@@ -51,7 +51,9 @@ For SigV4, GoModel uses the AWS SDK credential chain, including
 production, prefer workload credentials over long-lived access keys.
 
 `AWS_BEARER_TOKEN_BEDROCK` is also accepted as a bearer-token fallback. Set
-`BEDROCK_MANTLE_BASE_URL` with it so provider discovery can enable Mantle.
+`BEDROCK_MANTLE_BASE_URL` with it so provider discovery can enable Mantle. A
+provider saved from the dashboard uses it only for AWS's own endpoints; with a custom
+endpoint, give that provider its own API key.
 
 The base URL can be an AWS Region or a complete endpoint. A region is the
 recommended form:

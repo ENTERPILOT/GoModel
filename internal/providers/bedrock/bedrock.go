@@ -37,8 +37,19 @@ import (
 
 const providerName = "bedrock"
 
-// bearerAuthScheme is the SDK's scheme ID for Bedrock API keys.
-const bearerAuthScheme = "httpBearerAuth" //nolint:gosec // Auth scheme name, not a credential.
+// bearerAuthScheme and sigV4AuthScheme are the SDK's scheme IDs for Bedrock
+// API keys and for request signing.
+const (
+	bearerAuthScheme = "httpBearerAuth" //nolint:gosec // Auth scheme name, not a credential.
+	sigV4AuthScheme  = "sigv4"
+)
+
+// withheldHostToken replaces the host's bearer token for a provider that must
+// not send it. SigV4 is preferred alongside it, so it is only asked for a
+// token when the SDK has no credentials to sign with.
+var withheldHostToken = bearer.TokenProviderFunc(func(context.Context) (bearer.Token, error) {
+	return bearer.Token{}, errors.New("a custom Bedrock endpoint needs its own API key or AWS credentials: the host's bearer token is only sent to AWS endpoints")
+})
 
 // Registration provides factory registration for the Amazon Bedrock provider.
 var Registration = providers.Registration{
@@ -84,6 +95,8 @@ func (p *Provider) responseProviderName() string {
 // qualified endpoint URL. When empty, the region is resolved from the
 // standard AWS environment variables / shared config. Configured API keys are
 // sent as Bedrock bearer tokens (rotated per request) instead of SigV4.
+// Without one, the host's AWS_BEARER_TOKEN_BEDROCK applies, except for a
+// provider saved through the admin API that names a non-AWS endpoint.
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	p := &Provider{hooks: opts.Hooks, instanceName: opts.ClientName(providerName)}
 
@@ -99,11 +112,22 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 	// The SigV4 chain is skipped too: with a key it is never used, and a
 	// profile it cannot resolve (an MFA assume-role) must not fail the load.
 	var token bearer.TokenProvider
+	authScheme := bearerAuthScheme
 	if keys := opts.Keyring(providerCfg.APIKey); keys.Len() > 0 {
 		token = bearer.TokenProviderFunc(func(ctx context.Context) (bearer.Token, error) {
 			return bearer.Token{Value: keys.NextForContext(ctx)}, nil
 		})
 		loadOpts = append(loadOpts, awsconfig.WithCredentialsProvider(awssdk.AnonymousCredentials{}))
+	} else if providerCfg.Managed && !onBedrockHost(region, endpoint) {
+		// The host's bearer token belongs to whoever runs the gateway. A
+		// provider declared in config.yaml or the environment comes from that
+		// operator; one saved through the admin API may come from an identity
+		// that is not trusted with host secrets. Without a key of its own,
+		// such a provider gets the host token only for AWS's own endpoints.
+		// Anywhere else it signs with SigV4, whose signature is bound to the
+		// host it is sent to.
+		token = withheldHostToken
+		authScheme = sigV4AuthScheme
 	}
 
 	// The SDK's own client would ignore the gateway's proxy and TLS trust. The
@@ -125,7 +149,7 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 		}
 		if token != nil {
 			o.BearerAuthTokenProvider = token
-			o.AuthSchemePreference = []string{bearerAuthScheme}
+			o.AuthSchemePreference = []string{authScheme}
 		}
 	}
 	controlOpts := func(o *bedrock.Options) {
@@ -134,13 +158,24 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 		}
 		if token != nil {
 			o.BearerAuthTokenProvider = token
-			o.AuthSchemePreference = []string{bearerAuthScheme}
+			o.AuthSchemePreference = []string{authScheme}
 		}
 	}
 
 	p.runtime = bedrockruntime.NewFromConfig(awsCfg, runtimeOpts)
 	p.control = bedrock.NewFromConfig(awsCfg, controlOpts)
 	return p
+}
+
+// onBedrockHost reports whether a parsed base URL keeps requests on AWS's own
+// Bedrock hosts: a Bedrock endpoint URL, or no endpoint at all, where the SDK
+// forms the host from the region. A region is a single DNS label; anything
+// with a dot in it would name a host of its own under AWS's suffix.
+func onBedrockHost(region, endpoint string) bool {
+	if endpoint == "" {
+		return !strings.Contains(region, ".")
+	}
+	return awscfg.IsBedrockEndpoint(endpoint)
 }
 
 // parseBaseURL splits the operator-provided BaseURL into (region, endpoint).

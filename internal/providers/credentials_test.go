@@ -211,6 +211,33 @@ func TestCredentialsService_UpsertKeepsThePreviousProviderLiveWhenTheEditIsUnres
 	assert.True(t, registry.Supports("flaky/test-model"))
 }
 
+// An adapter learns from ProviderConfig.Managed that a provider was saved
+// through the admin API rather than declared by the operator, which decides
+// whether it may use credentials taken from the gateway's host.
+func TestCredentialsService_MarksSavedProvidersManaged(t *testing.T) {
+	ctx := t.Context()
+	var managed []bool
+	factory := NewProviderFactory()
+	factory.Add(Registration{
+		Type: "test",
+		New: func(cfg ProviderConfig, _ ProviderOptions) core.Provider {
+			managed = append(managed, cfg.Managed)
+			return &registryMockProvider{name: cfg.Type, modelsResponse: &core.ModelsResponse{Object: "list"}}
+		},
+	})
+	svc, err := NewCredentialsService(ctx, factory, NewModelRegistry(), newFakeCredentialStore(), nil, config.ResilienceConfig{}, nil)
+	require.NoError(t, err)
+
+	require.NoError(t, svc.Upsert(ctx, ManagedProviderCredential{Name: "saved", Type: "test", APIKeys: []string{"sk-test"}, Enabled: true}))
+	require.NotEmpty(t, managed)
+	assert.NotContains(t, managed, false)
+
+	managed = nil
+	_, err = factory.Create(ProviderConfig{Name: "declared", Type: "test", APIKeys: []string{"sk-test"}})
+	require.NoError(t, err)
+	assert.Equal(t, []bool{false}, managed)
+}
+
 func TestCredentialsService_UpsertRejectsNameContainingSlash(t *testing.T) {
 	ctx := t.Context()
 	factory := newCredentialsTestFactory(t)

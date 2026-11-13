@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
@@ -635,6 +636,90 @@ func TestNew_AuthScheme(t *testing.T) {
 			require.NoError(t, p.configErr)
 
 			assertBothClientsAuth(t, p, capture, tt.want)
+		})
+	}
+}
+
+// authRecorder answers every request with authEchoBody and records where it
+// went and how it was authenticated, so a test can name an AWS host without
+// reaching it.
+type authRecorder struct {
+	mu    sync.Mutex
+	hosts []string
+	auth  []string
+}
+
+func (r *authRecorder) RoundTrip(req *http.Request) (*http.Response, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.hosts = append(r.hosts, req.URL.Hostname())
+	r.auth = append(r.auth, req.Header.Get("Authorization"))
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(authEchoBody)),
+		Request:    req,
+	}, nil
+}
+
+// TestNew_HostTokenDestination pins where the host's AWS_BEARER_TOKEN_BEDROCK
+// may go. A provider declared in config.yaml or the environment keeps sending
+// it wherever the operator points it. One saved through the admin API sends
+// it to AWS's own endpoints only: against a custom endpoint it uses its own
+// key, or signs with SigV4 when it has none.
+func TestNew_HostTokenDestination(t *testing.T) {
+	const custom = "https://bedrock.internal.example.com"
+	tests := []struct {
+		name     string
+		managed  bool
+		baseURL  string
+		apiKeys  []string
+		wantHost string
+		want     string
+	}{
+		{name: "declared, custom endpoint", baseURL: custom, wantHost: "internal.example.com", want: "Bearer ABSK-env"},
+		{name: "managed, custom endpoint", managed: true, baseURL: custom, wantHost: "internal.example.com", want: "AWS4-HMAC-SHA256"},
+		{name: "managed, custom endpoint, own key", managed: true, baseURL: custom, apiKeys: []string{"ABSK-own"}, wantHost: "internal.example.com", want: "Bearer ABSK-own"},
+		{name: "managed, AWS lookalike host", managed: true, baseURL: "https://bedrock-runtime.us-east-1.amazonaws.com.example.com", wantHost: "example.com", want: "AWS4-HMAC-SHA256"},
+		{name: "managed, region with a dot", managed: true, baseURL: "internal.example", wantHost: "internal.example.amazonaws.com", want: "AWS4-HMAC-SHA256"},
+		{name: "managed, default endpoint", managed: true, wantHost: "us-east-1.amazonaws.com", want: "Bearer ABSK-env"},
+		{name: "managed, region", managed: true, baseURL: "eu-west-1", wantHost: "eu-west-1.amazonaws.com", want: "Bearer ABSK-env"},
+		{name: "managed, AWS endpoint", managed: true, baseURL: "https://bedrock-runtime.us-west-2.amazonaws.com", wantHost: "us-west-2.amazonaws.com", want: "Bearer ABSK-env"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "ABSK-env")
+			t.Setenv("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE")
+			t.Setenv("AWS_SECRET_ACCESS_KEY", "secret")
+			t.Setenv("AWS_SESSION_TOKEN", "")
+			t.Setenv("AWS_PROFILE", "")
+			t.Setenv("AWS_REGION", "us-east-1")
+			t.Setenv("AWS_CONFIG_FILE", "/dev/null")
+			t.Setenv("AWS_SHARED_CREDENTIALS_FILE", "/dev/null")
+
+			recorder := &authRecorder{}
+			opts := providers.ProviderOptions{HTTPClient: &http.Client{Transport: recorder}}
+			if len(tt.apiKeys) > 0 {
+				opts.Keys = providers.NewKeyring(tt.apiKeys...)
+			}
+			p := New(providers.ProviderConfig{Managed: tt.managed, BaseURL: tt.baseURL}, opts).(*Provider)
+			require.NoError(t, p.configErr)
+
+			// One control-plane and one Converse request: the provider
+			// configures the two SDK clients separately.
+			_, err := p.ListModels(context.Background())
+			require.NoError(t, err)
+			_, err = p.ChatCompletion(context.Background(), &core.ChatRequest{
+				Model:    "amazon.nova-micro-v1:0",
+				Messages: []core.Message{{Role: "user", Content: "hi"}},
+			})
+			require.NoError(t, err)
+
+			require.Len(t, recorder.auth, 2)
+			for i, auth := range recorder.auth {
+				assert.True(t, strings.HasSuffix(recorder.hosts[i], tt.wantHost), "host = %q", recorder.hosts[i])
+				assert.True(t, strings.HasPrefix(auth, tt.want), "%s Authorization = %q", recorder.hosts[i], auth)
+			}
 		})
 	}
 }

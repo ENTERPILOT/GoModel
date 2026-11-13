@@ -52,6 +52,8 @@ produkcji preferuj dane uwierzytelniające workloadu zamiast długoterminowych k
 
 `AWS_BEARER_TOKEN_BEDROCK` jest również akceptowany jako zapasowy token bearer. Ustaw
 razem z nim `BEDROCK_MANTLE_BASE_URL`, aby wykrywanie providerów mogło włączyć Mantle.
+Provider zapisany z dashboardu używa go tylko dla endpointów AWS; przy własnym
+endpoincie nadaj mu własny klucz API.
 
 Base URL może być regionem AWS albo pełnym endpointem. Zalecaną formą jest
 region:

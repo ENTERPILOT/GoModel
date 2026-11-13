@@ -42,6 +42,12 @@ set **Region or endpoint**, and paste the key into **API Keys**. Left empty, the
 gateway uses `AWS_BEARER_TOKEN_BEDROCK` from its host when set, and the host's
 AWS credential chain otherwise.
 
+A provider saved from the dashboard sends the host's `AWS_BEARER_TOKEN_BEDROCK`
+only to AWS's own Bedrock endpoints: a region, or a Bedrock endpoint URL such as
+a FIPS or VPC endpoint. With any other endpoint, give the provider its own API
+key, or it signs requests with the host's AWS credential chain instead.
+Providers declared in `config.yaml` or env vars are not restricted.
+
 ## Run GoModel
 
 <CodeGroup>
