@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/goccy/go-json"
@@ -190,7 +191,7 @@ func rewriteChatContent(original any, originalNull bool, parts []pluginapi.Part)
 			// edited one is copied before its payload member changes.
 			if isMap && parts[i].URL != "" {
 				if image, ok := m["image_url"].(map[string]any); ok && image["url"] != parts[i].URL {
-					image = cloneAnyMap(image)
+					image = maps.Clone(image)
 					image["url"] = parts[i].URL
 					delete(image, "media_type")
 					m["image_url"] = image
@@ -200,7 +201,7 @@ func rewriteChatContent(original any, originalNull bool, parts []pluginapi.Part)
 			if isMap && len(parts[i].Data) > 0 {
 				format := strings.TrimPrefix(parts[i].MediaType, "audio/")
 				if audio, ok := m["input_audio"].(map[string]any); ok && (audio["data"] != string(parts[i].Data) || audio["format"] != format) {
-					audio = cloneAnyMap(audio)
+					audio = maps.Clone(audio)
 					audio["data"] = string(parts[i].Data)
 					audio["format"] = format
 					m["input_audio"] = audio
