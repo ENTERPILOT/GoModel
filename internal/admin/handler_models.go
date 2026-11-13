@@ -110,7 +110,7 @@ func (h *Handler) modelAccessResolver() func(core.ModelSelector) modelAccessResp
 // ModelMetadataLayers handles GET /admin/models/metadata
 //
 // @Summary      Show where one model's metadata comes from
-// @Description  Returns the merged metadata the gateway serves for a model together with each layer it was merged from: the provider's own listing, the model catalog entry and the config.yaml override. A null layer knows nothing about the model. `sources` names the winning layer per field (config, provider, catalog or inferred).
+// @Description  Returns the merged metadata the gateway serves for a model together with each layer it was merged from: the provider's own listing, the model catalog entry, the config.yaml override and the dashboard-managed override. A null layer knows nothing about the model. `sources` names the winning layer per field (dashboard, config, provider, catalog or inferred).
 // @Tags         admin
 // @Produce      json
 // @Security     BearerAuth
