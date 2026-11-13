@@ -264,8 +264,122 @@ func TestCredentialKey(t *testing.T) {
 		"apiKey2":         true,
 		"password1":       true,
 		"gpt4":            false,
+		// Written without separators.
+		"passphrase":    true,
+		"privatekey":    true,
+		"secretkey":     true,
+		"accesskey":     true,
+		"clientsecret":  true,
+		"license":       true,
+		"licensekey":    true,
+		"apitoken":      true,
+		"dbpassword":    true,
+		"sslkey":        true,
+		"sessioncookie": true,
+		"APIKEYS":       true,
+		"api_keys":      true,
+		"api_tokens":    true,
+		"tokens":        true,
+		// The tokens of a model.
+		"maxTokens":             false,
+		"MAX_TOKENS":            false,
+		"maxtokens":             false,
+		"max_completion_tokens": false,
+		"prompt_tokens":         false,
+		"budget_tokens":         false,
+		"skip_special_tokens":   false,
+		"stop_token_ids":        false,
+		"token_limit":           false,
+		"token_count":           false,
+		"tokens_per_minute":     false,
+		"detokenize":            false,
+		"max_token_secret":      true,
+		// Words holding a credential word without naming a credential.
+		"keyword":      false,
+		"keywords":     false,
+		"keyword_list": false,
+		"keyboard":     false,
+		"keyspace":     false,
+		"keycloak_url": false,
+		// Short credential words match whole words only.
+		"user_path":   false,
+		"pattern":     false,
+		"passthrough": false,
+		"bypass":      false,
+		"author":      false,
+		"design":      false,
 	} {
 		assert.Equal(t, want, credentialKey(key), key)
+	}
+}
+
+func TestAuthCredential(t *testing.T) {
+	for value, want := range map[string]bool{
+		"Bearer abc123":              true,
+		"bearer   abc123":            true,
+		"Basic dXNlcjpwYXNz":         true, // user:pass
+		"basic dXNlcjpwYXNzd29yZA==": true, // user:password
+		"Basic dXNlcjpwYXNzd29yZA":   true, // the same, unpadded
+		"Basic ${env:BASIC_AUTH}":    false,
+		"Bearer ${env:TOKEN}":        false,
+		"Bearer of good news":        false,
+		"Basic plan":                 false,
+		"Basic settings":             false,
+		"Basic tier pricing":         false,
+		"Basic":                      false,
+		"Basically dXNlcjpwYXNz":     false,
+	} {
+		assert.Equal(t, want, authCredential(value), value)
+	}
+}
+
+func TestSchemelessPassword(t *testing.T) {
+	for value, want := range map[string]string{
+		"app:s3cret@tcp(db:3306)/gomodel":              "s3cret",
+		"app:s3cret@db:5432/gomodel?sslmode=disable":   "s3cret",
+		"app:p/w+x@tcp(db:3306)/gomodel":               "p/w+x",
+		"app:p@ss@db/gomodel":                          "p@ss",
+		"app:s3cret@proxy:8080":                        "s3cret",
+		"app:s3cret@db/gomodel?notify=ops@example.com": "s3cret",
+		// A URL with a scheme is parsed as one.
+		"postgres://app:s3cret@db/gomodel":      "",
+		"app@db/gomodel":                        "",
+		"app:@db/gomodel":                       "",
+		"ops@example.com":                       "",
+		"mailto:ops@example.com":                "",
+		"owner:ops@example.com":                 "",
+		"git@github.com:org/repo.git":           "",
+		"registry:5000/gomodel@sha256:0123abcd": "",
+		"db:5432":                               "",
+		"note: mail ops@example.com":            "",
+		"":                                      "",
+	} {
+		got, ok := schemelessPassword(value)
+		assert.Equal(t, want, got, value)
+		assert.Equal(t, want != "", ok, value)
+	}
+}
+
+func TestURLSettingHasSecret(t *testing.T) {
+	for value, want := range map[string]bool{
+		"https://example.openai.azure.com/openai?api-version=2024-10-21": false,
+		"postgres://db/gomodel?sslmode=disable&connect_timeout=5":        false,
+		"mongodb://mongo:27017/gomodel?replicaSet=rs0&retryWrites=true":  false,
+		"redis://cache:6379/0?protocol=3":                                false,
+		"https://models.example.com/models.json":                         false,
+		"https://models.example.com/models.json#latest":                  false,
+		"https://models.example.com/models.json?debug":                   false,
+		"https://models.example.com/models.json?v=2":                     false,
+		"https://mcp.example.com/mcp?code=${env:MCP_CODE}":               false,
+		"app:${env:DB_PASSWORD}@tcp(db:3306)/gomodel":                    false,
+		"https://mcp.example.com/mcp?code=abc123":                        true,
+		"https://mcp.example.com/mcp?api-version=1&workspace=acme":       true,
+		"https://mcp.example.com/mcp#session=abc123":                     true,
+		"https://mcp.example.com/mcp?exaApiKey=abc123":                   true,
+		"postgres://app:s3cret@db/gomodel?sslmode=disable":               true,
+		"app:s3cret@tcp(db:3306)/gomodel":                                true,
+	} {
+		assert.Equal(t, want, urlSettingHasSecret(value), value)
 	}
 }
 

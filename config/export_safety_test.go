@@ -299,6 +299,64 @@ func TestExportYAMLRedactsCredentialsInText(t *testing.T) {
 	assert.Equal(t, `{"token":null,"max_tokens":256}`, exportedValue(t, out, "users", "6", "description"))
 }
 
+func TestExportYAMLRedactsCredentialShapes(t *testing.T) {
+	// Each secret must stay out of the document, and each plain value that
+	// looks like one must be written as it is.
+	cfg := buildDefaultConfig()
+	cfg.Storage.PostgreSQL.URL = "postgres://db/gomodel?sslmode=disable&connect_timeout=5"
+	cfg.Storage.MongoDB.URL = "mongodb://mongo:27017/gomodel?replicaSet=rs0&directConnection=true"
+	cfg.Cache.Model.ModelList.URL = "https://models.example.com/models.json?code=query-do-not-leak"
+	cfg.OpenTelemetry.Endpoint = "app:otlp-dsn-do-not-leak@collector:4318"
+	cfg.OpenTelemetry.ResourceAttributes = map[string]string{
+		"passphrase":   "passphrase-do-not-leak",
+		"privatekey":   "privatekey-do-not-leak",
+		"secretkey":    "secretkey-do-not-leak",
+		"accesskey":    "accesskey-do-not-leak",
+		"clientsecret": "clientsecret-do-not-leak",
+		"license":      "license-do-not-leak",
+		"keyword":      "alpha",
+		"monkey":       "banana",
+		"max_tokens":   "256",
+		"token_limit":  "1000",
+	}
+	cfg.Users = []UserConfig{
+		{Path: "/a", Description: "app:dsn-do-not-leak@tcp(db:3306)/gomodel"},
+		{Path: "/b", Description: "Basic dXNlcjpiYXNpYy1kby1ub3QtbGVhaw=="}, // user:basic-do-not-leak
+		{Path: "/c", Description: "Basic plan"},
+		{Path: "/d", Description: "mailto:ops@example.com"},
+		{Path: "/e", Description: "https://docs.example.com/guide?page=2"},
+	}
+	providers := map[string]RawProviderConfig{
+		"azure": {Type: "azure", BaseURL: "https://example.openai.azure.com/openai?api-version=2024-10-21"},
+		"proxy": {Type: "openai", BaseURL: "https://proxy.example.com/v1?tenant=tenant-do-not-leak"},
+	}
+
+	out := exportYAML(t, NewSecrets(), cfg, providers, nil)
+
+	for _, secret := range []string{
+		"query-do-not-leak", "otlp-dsn-do-not-leak", "passphrase-do-not-leak", "privatekey-do-not-leak",
+		"secretkey-do-not-leak", "accesskey-do-not-leak", "clientsecret-do-not-leak", "license-do-not-leak",
+		"dsn-do-not-leak", "dXNlcjpiYXNpYy1kby1ub3QtbGVhaw", "tenant-do-not-leak",
+	} {
+		assert.NotContains(t, out, secret)
+	}
+	for path, want := range map[string]string{
+		"storage postgresql url":                        cfg.Storage.PostgreSQL.URL,
+		"storage mongodb url":                           cfg.Storage.MongoDB.URL,
+		"providers azure base_url":                      providers["azure"].BaseURL,
+		"opentelemetry resource_attributes keyword":     "alpha",
+		"opentelemetry resource_attributes monkey":      "banana",
+		"opentelemetry resource_attributes max_tokens":  "256",
+		"opentelemetry resource_attributes token_limit": "1000",
+		"users 2 description":                           "Basic plan",
+		"users 3 description":                           "mailto:ops@example.com",
+		"users 4 description":                           "https://docs.example.com/guide?page=2",
+	} {
+		assert.Equal(t, want, exportedValue(t, out, strings.Fields(path)...), path)
+	}
+	assert.Equal(t, "Basic ${env:GOMODEL_USERS_1_DESCRIPTION}", exportedValue(t, out, "users", "1", "description"))
+}
+
 func TestExportYAMLOnlyCountsSecretsResolvedIntoSecretSettings(t *testing.T) {
 	// A tenant copying what a reference resolved to into a description must
 	// not make the export ask for a variable, unless it copied a secret.
