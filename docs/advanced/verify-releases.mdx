@@ -1,0 +1,70 @@
+---
+title: "Verify a Release"
+description: "Check that a GoModel binary or Docker image was built from the official repository by its release workflow, using signed build provenance, Cosign signatures, and SBOMs."
+icon: "shield-check"
+keywords: ["verify", "provenance", "attestation", "SLSA", "Sigstore", "cosign", "signature", "SBOM", "supply chain"]
+---
+
+Every release after v0.2.3 ships with signed build provenance: a statement
+naming the repository, commit, and workflow that built each artifact.
+`checksums.txt` only shows that a download matches the release page. Provenance
+shows where it was built.
+
+Signing is keyless. Each release run gets a short-lived
+[Sigstore](https://www.sigstore.dev/) certificate bound to the release workflow
+in `ENTERPILOT/GoModel`, so there is no long-lived signing key to steal.
+
+<Note>
+  v0.2.3 and earlier releases carry no attestations or signatures, so the
+  commands below fail for them.
+</Note>
+
+## Binaries
+
+Use the [GitHub CLI](https://cli.github.com/), signed in with `gh auth login`:
+
+```bash
+gh attestation verify gomodel_0.2.4_linux_amd64.tar.gz --repo ENTERPILOT/GoModel
+```
+
+The command exits non-zero unless the file was built by a workflow in this
+repository. Every asset uploaded to a release is covered: the archives,
+`checksums.txt`, and the SBOMs. GitHub's generated source code archives are not.
+
+To also require the release workflow and a specific tag:
+
+```bash
+gh attestation verify gomodel_0.2.4_linux_amd64.tar.gz \
+  --repo ENTERPILOT/GoModel \
+  --signer-workflow ENTERPILOT/GoModel/.github/workflows/release.yml \
+  --source-ref refs/tags/v0.2.4
+```
+
+## Docker image
+
+```bash
+gh attestation verify oci://docker.io/enterpilot/gomodel:0.2.4 --repo ENTERPILOT/GoModel
+```
+
+The image is also signed with [Cosign](https://docs.sigstore.dev/cosign/system_config/installation/).
+Verify with Cosign v3 or newer:
+
+```bash
+cosign verify enterpilot/gomodel:0.2.4 \
+  --certificate-identity "https://github.com/ENTERPILOT/GoModel/.github/workflows/release.yml@refs/tags/v0.2.4" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+```
+
+A tag can be moved; a digest cannot. To run exactly what you verified, deploy
+the image by digest (`enterpilot/gomodel@sha256:...`).
+
+## SBOMs
+
+- **Binaries**: each binary archive has an SPDX file next to it in the release,
+  named `<archive>.sbom.json`.
+- **Docker image**: the SBOM is stored with the image.
+
+  ```bash
+  docker buildx imagetools inspect enterpilot/gomodel:0.2.4 \
+    --format '{{ json (index .SBOM "linux/amd64").SPDX }}'
+  ```

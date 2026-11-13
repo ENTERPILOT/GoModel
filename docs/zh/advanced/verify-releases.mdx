@@ -1,0 +1,59 @@
+---
+title: "验证 Release"
+description: "通过签名的构建来源证明、Cosign 签名和 SBOM，确认 GoModel 二进制文件或 Docker 镜像确实由官方仓库的 Release 工作流构建。"
+icon: "shield-check"
+keywords: ["验证", "verify", "来源证明", "provenance", "attestation", "SLSA", "Sigstore", "cosign", "签名", "SBOM", "供应链", "supply chain"]
+---
+
+v0.2.3 之后的每个 Release 都附带签名的构建来源证明：它声明每个产物由哪个仓库、哪个 commit、哪个工作流构建。`checksums.txt` 只能说明下载的文件与 Release 页面一致，来源证明则说明它是在哪里构建的。
+
+签名不使用密钥。每次 Release 运行都会获得一份短期有效的 [Sigstore](https://www.sigstore.dev/) 证书，该证书绑定到 `ENTERPILOT/GoModel` 中的 Release 工作流，因此不存在可被窃取的长期签名密钥。
+
+<Note>
+  v0.2.3 及更早的 Release 没有来源证明和签名，因此下面的命令对它们会失败。
+</Note>
+
+## 二进制文件
+
+请使用 [GitHub CLI](https://cli.github.com/)，并先通过 `gh auth login` 登录：
+
+```bash
+gh attestation verify gomodel_0.2.4_linux_amd64.tar.gz --repo ENTERPILOT/GoModel
+```
+
+如果该文件不是由本仓库中的工作流构建的，命令会以非零状态退出。上传到 Release 的每个文件都在覆盖范围内：归档文件、`checksums.txt` 和 SBOM。GitHub 自动生成的源代码归档不在其中。
+
+如需同时限定 Release 工作流和具体的 tag：
+
+```bash
+gh attestation verify gomodel_0.2.4_linux_amd64.tar.gz \
+  --repo ENTERPILOT/GoModel \
+  --signer-workflow ENTERPILOT/GoModel/.github/workflows/release.yml \
+  --source-ref refs/tags/v0.2.4
+```
+
+## Docker 镜像
+
+```bash
+gh attestation verify oci://docker.io/enterpilot/gomodel:0.2.4 --repo ENTERPILOT/GoModel
+```
+
+镜像还使用 [Cosign](https://docs.sigstore.dev/cosign/system_config/installation/) 签名。请使用 Cosign v3 或更高版本进行验证：
+
+```bash
+cosign verify enterpilot/gomodel:0.2.4 \
+  --certificate-identity "https://github.com/ENTERPILOT/GoModel/.github/workflows/release.yml@refs/tags/v0.2.4" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+```
+
+tag 可以被移动，digest 则不能。为确保运行的正是您验证过的内容，请按 digest 部署镜像（`enterpilot/gomodel@sha256:...`）。
+
+## SBOM
+
+- **二进制文件**：Release 中每个二进制归档文件旁都有一个 SPDX 文件，名为 `<archive>.sbom.json`。
+- **Docker 镜像**：SBOM 与镜像一同存储。
+
+  ```bash
+  docker buildx imagetools inspect enterpilot/gomodel:0.2.4 \
+    --format '{{ json (index .SBOM "linux/amd64").SPDX }}'
+  ```
