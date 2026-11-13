@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -74,27 +73,26 @@ func TestSeedRequestBodySelectorHintsAppliesCompleteModelForOpaqueBody(t *testin
 	require.Equal(t, `{"model":"gpt-4o-mini","stream":true}`, string(restored))
 }
 
-// An opaque body larger than the peek limit is read in full, so a model field
-// repeated after a long value is still caught: the upstream's parser would
-// take the second one, which the gateway never authorized.
-func TestSeedRequestBodySelectorHintsDetectsDuplicateModelBeyondPeekLimit(t *testing.T) {
+// An opaque body larger than the peek limit is read in full, so a selector
+// field repeated after a long value is still caught: the upstream's parser
+// would take the second one, which the gateway never authorized.
+func TestSeedRequestBodySelectorHintsRejectsDuplicateSelectorBeyondPeekLimit(t *testing.T) {
+	padding := strings.Repeat("x", int(requestSelectorPeekLimit))
 	tests := []struct {
 		name          string
-		prefix        string
-		wantStream    bool
-		wantUncertain bool
+		body          string
+		wantDuplicate string
 		knownLength   bool
 	}{
-		{name: "model first", prefix: `{"model":"allowed-model","padding":"`, wantUncertain: true},
-		{name: "stream first", prefix: `{"stream":true,"model":"allowed-model","padding":"`, wantStream: true},
-		{name: "model before stream", prefix: `{"model":"allowed-model","stream":true,"padding":"`, wantStream: true},
-		{name: "model before stream with known length", prefix: `{"model":"allowed-model","stream":true,"padding":"`, wantStream: true, knownLength: true},
+		{name: "model first", body: `{"model":"allowed-model","padding":"` + padding + `","model":"restricted-model"}`, wantDuplicate: "model"},
+		{name: "stream first", body: `{"stream":true,"model":"allowed-model","padding":"` + padding + `","model":"restricted-model"}`, wantDuplicate: "model"},
+		{name: "model before stream with known length", body: `{"model":"allowed-model","stream":true,"padding":"` + padding + `","model":"restricted-model"}`, wantDuplicate: "model", knownLength: true},
+		{name: "duplicate provider with known length", body: `{"provider":"a","padding":"` + padding + `","provider":"b"}`, wantDuplicate: "provider", knownLength: true},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			body := test.prefix + strings.Repeat("x", int(requestSelectorPeekLimit)) + `","model":"restricted-model"}`
-			req := httptest.NewRequest(http.MethodPost, "/p/openai/chat/completions", strings.NewReader(body))
+			req := httptest.NewRequest(http.MethodPost, "/p/openai/chat/completions", strings.NewReader(test.body))
 			if !test.knownLength {
 				req.ContentLength = -1
 			}
@@ -102,21 +100,12 @@ func TestSeedRequestBodySelectorHintsDetectsDuplicateModelBeyondPeekLimit(t *tes
 			env := &core.WhiteBoxPrompt{}
 			core.CachePassthroughRouteInfo(env, &core.PassthroughRouteInfo{Provider: "openai"})
 
-			require.NoError(t, seedRequestBodySelectorHints(req, core.BodyModeOpaque, env))
+			err := seedRequestBodySelectorHints(req, core.BodyModeOpaque, env)
 
-			require.False(t, env.JSONBodyParsed)
-			require.Empty(t, env.RouteHints.Model)
-
-			info := env.CachedPassthroughRouteInfo()
-			require.NotNil(t, info)
-			require.Empty(t, info.Model)
-			require.True(t, info.ModelAmbiguous)
-			require.Equal(t, test.wantStream, info.Stream)
-			require.Equal(t, test.wantUncertain, info.StreamUncertain)
-
-			restored, err := io.ReadAll(req.Body)
-			require.NoError(t, err)
-			require.Equal(t, body, string(restored))
+			assertDuplicateSelectorError(t, err, test.wantDuplicate)
+			assert.False(t, env.JSONBodyParsed)
+			assert.Empty(t, env.RouteHints.Model)
+			assertBodyReplays(t, req, test.body)
 		})
 	}
 }
@@ -141,7 +130,6 @@ func TestSeedRequestBodySelectorHintsAppliesModelFromOversizedOpaqueBody(t *test
 	info := env.CachedPassthroughRouteInfo()
 	require.NotNil(t, info)
 	require.Equal(t, "jev-latest", info.Model)
-	require.False(t, info.ModelAmbiguous)
 	require.True(t, info.Stream)
 	require.False(t, info.StreamUncertain)
 
@@ -181,20 +169,17 @@ func TestSeedRequestBodySelectorHintsRejectsAmbiguousStreamBeforePeekLimit(t *te
 	env := &core.WhiteBoxPrompt{}
 	core.CachePassthroughRouteInfo(env, &core.PassthroughRouteInfo{Provider: "openai"})
 
-	require.NoError(t, seedRequestBodySelectorHints(req, core.BodyModeOpaque, env))
+	err := seedRequestBodySelectorHints(req, core.BodyModeOpaque, env)
 
-	require.False(t, env.StreamRequested)
-
-	info := env.CachedPassthroughRouteInfo()
-	require.NotNil(t, info)
-	require.False(t, info.Stream)
-	require.True(t, info.StreamUncertain)
+	assertDuplicateSelectorError(t, err, "stream")
+	assert.False(t, env.StreamRequested)
+	assert.False(t, env.JSONBodyParsed)
+	assertBodyReplays(t, req, body)
 }
 
 // A stream field repeated after a value longer than the peek limit is read
-// whole and treated like any duplicate: no stream intent is claimed, and the
-// uncertainty is recorded, rather than trusting the first value the upstream
-// would not use.
+// whole and rejected like any duplicate, rather than trusting the first value
+// the upstream would not use.
 func TestSeedRequestBodySelectorHintsRejectsDuplicateStreamBeyondPeekLimit(t *testing.T) {
 	body := `{"stream":true,"padding":"` + strings.Repeat("x", int(requestSelectorPeekLimit)) + `","stream":false}`
 	req := httptest.NewRequest(http.MethodPost, "/p/openai/chat/completions", strings.NewReader(body))
@@ -203,44 +188,21 @@ func TestSeedRequestBodySelectorHintsRejectsDuplicateStreamBeyondPeekLimit(t *te
 	env := &core.WhiteBoxPrompt{}
 	core.CachePassthroughRouteInfo(env, &core.PassthroughRouteInfo{Provider: "openai"})
 
-	require.NoError(t, seedRequestBodySelectorHints(req, core.BodyModeOpaque, env))
+	err := seedRequestBodySelectorHints(req, core.BodyModeOpaque, env)
 
-	require.False(t, env.StreamRequested)
-
-	info := env.CachedPassthroughRouteInfo()
-	require.NotNil(t, info)
-	require.False(t, info.Stream)
-	require.True(t, info.StreamUncertain)
-
-	restored, err := io.ReadAll(req.Body)
-	require.NoError(t, err)
-	require.Equal(t, body, string(restored))
-
-	var forwarded struct {
-		Stream bool `json:"stream"`
-	}
-	err = json.Unmarshal(restored, &forwarded)
-	require.NoError(t, err)
-	require.False(t, forwarded.Stream)
+	assertDuplicateSelectorError(t, err, "stream")
+	assert.False(t, env.StreamRequested)
+	assertBodyReplays(t, req, body)
 }
 
 func TestSeedRequestBodySelectorHintsRejectsCompleteDuplicateOpaqueFields(t *testing.T) {
 	tests := []struct {
-		name          string
-		body          string
-		wantStream    bool
-		wantUncertain bool
+		name string
+		body string
 	}{
-		{
-			name:          "stream",
-			body:          `{"stream":true,"stream":false}`,
-			wantUncertain: true,
-		},
-		{
-			name:       "provider",
-			body:       `{"provider":"first","provider":"second","stream":true}`,
-			wantStream: true,
-		},
+		{name: "stream", body: `{"stream":true,"stream":false}`},
+		{name: "provider", body: `{"provider":"first","provider":"second","stream":true}`},
+		{name: "model", body: `{"model":"allowed-model","stream":true,"model":"restricted-model"}`},
 	}
 
 	for _, test := range tests {
@@ -250,51 +212,79 @@ func TestSeedRequestBodySelectorHintsRejectsCompleteDuplicateOpaqueFields(t *tes
 			env := &core.WhiteBoxPrompt{}
 			core.CachePassthroughRouteInfo(env, &core.PassthroughRouteInfo{Provider: "openai"})
 
-			require.NoError(t, seedRequestBodySelectorHints(req, core.BodyModeOpaque, env))
+			err := seedRequestBodySelectorHints(req, core.BodyModeOpaque, env)
 
-			require.False(t, env.JSONBodyParsed)
-			require.Equal(t, "openai", env.RouteHints.Provider)
-
-			info := env.CachedPassthroughRouteInfo()
-			require.NotNil(t, info)
-			require.Equal(t, test.wantStream, info.Stream)
-			require.Equal(t, test.wantUncertain, info.StreamUncertain)
+			assertDuplicateSelectorError(t, err, test.name)
+			assert.False(t, env.JSONBodyParsed)
+			assert.Empty(t, env.RouteHints.Model)
+			assertBodyReplays(t, req, test.body)
 		})
 	}
 }
 
 func TestSeedRequestBodySelectorHintsRejectsDuplicateOpaqueModel(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/p/openai/chat/completions", strings.NewReader(`{"model":"allowed-model","stream":true,"model":"restricted-model"}`))
+	body := `{"model":"allowed-model","stream":true,"model":"restricted-model"}`
+	req := httptest.NewRequest(http.MethodPost, "/p/openai/chat/completions", strings.NewReader(body))
 	req.ContentLength = -1
 	req.Header.Set("Content-Type", "application/json")
 	env := &core.WhiteBoxPrompt{}
 	core.CachePassthroughRouteInfo(env, &core.PassthroughRouteInfo{Provider: "openai"})
 
-	require.NoError(t, seedRequestBodySelectorHints(req, core.BodyModeOpaque, env))
+	err := seedRequestBodySelectorHints(req, core.BodyModeOpaque, env)
 
-	require.False(t, env.JSONBodyParsed)
-	require.Empty(t, env.RouteHints.Model)
-	require.True(t, env.StreamRequested)
+	assertDuplicateSelectorError(t, err, "model")
+	assert.False(t, env.JSONBodyParsed)
+	assert.False(t, env.StreamRequested)
+	assert.Empty(t, env.RouteHints.Model)
+	assertBodyReplays(t, req, body)
+}
 
-	info := env.CachedPassthroughRouteInfo()
-	require.NotNil(t, info)
-	require.True(t, info.ModelAmbiguous)
-	require.True(t, info.Stream)
-	require.False(t, info.StreamUncertain)
+func TestSeedRequestBodySelectorHintsRejectsDuplicateTranslatedSelectorWithinPeek(t *testing.T) {
+	body := `{"provider":"openai","provider":"groq","model":"gpt-4o-mini","messages":[]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	req.ContentLength = -1
+	req.Header.Set("Content-Type", "application/json")
+	env := &core.WhiteBoxPrompt{}
+
+	err := seedRequestBodySelectorHints(req, core.BodyModeJSON, env)
+
+	assertDuplicateSelectorError(t, err, "provider")
+	assert.False(t, env.JSONBodyParsed)
+	assert.Empty(t, env.RouteHints.Provider)
+	assertBodyReplays(t, req, body)
+}
+
+func assertDuplicateSelectorError(t *testing.T, err error, field string) {
+	t.Helper()
+	require.Error(t, err, "want duplicate %q rejection", field)
+	assert.Contains(t, err.Error(), `duplicate top-level "`+field+`" field`)
+}
+
+// assertBodyReplays verifies the peek left the request body byte-for-byte
+// intact for whoever reads it next.
+func assertBodyReplays(t *testing.T, req *http.Request, want string) {
+	t.Helper()
+	got, err := io.ReadAll(req.Body)
+	require.NoError(t, err)
+	assert.Equal(t, want, string(got))
 }
 
 func TestDecodeCompleteRequestBodySelectorHintsRejectsAmbiguousBodies(t *testing.T) {
-	bodies := []string{
-		`{"model":"first","model":"second"}`,
-		`{"provider":"first","provider":"second"}`,
-		`{"stream":false,"stream":true}`,
-		`{"model":"gpt-4o-mini"`,
-		`{"model":"gpt-4o-mini"} {}`,
+	tests := []struct {
+		body          string
+		wantDuplicate string
+	}{
+		{body: `{"model":"first","model":"second"}`, wantDuplicate: "model"},
+		{body: `{"provider":"first","provider":"second"}`, wantDuplicate: "provider"},
+		{body: `{"stream":false,"stream":true}`, wantDuplicate: "stream"},
+		{body: `{"model":"gpt-4o-mini"`},
+		{body: `{"model":"gpt-4o-mini"} {}`},
 	}
 
-	for _, body := range bodies {
-		hints := decodeCompleteRequestBodySelectorHints(strings.NewReader(body))
-		require.False(t, hints.complete, "decodeCompleteRequestBodySelectorHints(%q).complete = true, want false", body)
+	for _, tt := range tests {
+		hints := decodeCompleteRequestBodySelectorHints(strings.NewReader(tt.body))
+		assert.False(t, hints.complete, "body %q", tt.body)
+		assert.Equal(t, tt.wantDuplicate, hints.duplicate, "body %q", tt.body)
 	}
 }
 
