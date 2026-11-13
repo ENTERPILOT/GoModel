@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -432,10 +433,18 @@ func TestSQLStorePruneDoesNotDeadlockWithSave(t *testing.T) {
 					assert.NoError(t, err)
 					return blocked
 				}
+				// Whatever fails below, the lock is released and all three
+				// sessions end before the test's database is torn down.
+				held := make(chan struct{})
+				release := sync.OnceFunc(func() { close(held) })
+				var sessions sync.WaitGroup
+				t.Cleanup(func() {
+					release()
+					sessions.Wait()
+				})
 				lockerPID := make(chan int64, 1)
-				release := make(chan struct{})
 				lockerDone := make(chan error, 1)
-				go func() {
+				sessions.Go(func() {
 					lockerDone <- db.InTx(ctx, func(q sqlx.Querier) error {
 						var pid int64
 						if err := q.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
@@ -445,14 +454,19 @@ func TestSQLStorePruneDoesNotDeadlockWithSave(t *testing.T) {
 							return err
 						}
 						lockerPID <- pid
-						<-release
+						<-held
 						return nil
 					})
-				}()
-				locker := <-lockerPID
+				})
+				var locker int64
+				select {
+				case locker = <-lockerPID:
+				case err := <-lockerDone:
+					require.FailNow(t, "the locker ended without holding the row", "%v", err)
+				}
 
 				saveDone := make(chan error, 1)
-				go func() { saveDone <- store.SaveCounters(ctx, []WindowSnapshot{second, first}) }()
+				sessions.Go(func() { saveDone <- store.SaveCounters(ctx, []WindowSnapshot{second, first}) })
 				var savePID int64
 				require.Eventually(t, func() bool {
 					savePID = blockedBy(locker)
@@ -460,12 +474,12 @@ func TestSQLStorePruneDoesNotDeadlockWithSave(t *testing.T) {
 				}, 5*time.Second, 10*time.Millisecond, "save never reached the locked row")
 
 				pruneDone := make(chan error, 1)
-				go func() { pruneDone <- store.PruneCounters(ctx) }()
+				sessions.Go(func() { pruneDone <- store.PruneCounters(ctx) })
 				require.Eventually(t, func() bool {
 					return len(pruneDone) > 0 || blockedBy(savePID) != 0
 				}, 5*time.Second, 10*time.Millisecond, "prune neither finished nor waited on the save")
 
-				close(release)
+				release()
 				require.NoError(t, <-lockerDone)
 				require.NoError(t, <-saveDone)
 				require.NoError(t, <-pruneDone)
