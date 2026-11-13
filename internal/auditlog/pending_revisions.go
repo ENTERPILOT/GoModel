@@ -86,7 +86,7 @@ func EnrichEntryWithGuardrailOutcomes(c *echo.Context, compute func() []Guardrai
 	outcomes := compute()
 	entry.setGuardrailOutcomes(outcomes)
 	if len(outcomes) > 0 {
-		publishLiveAuditUpdate(c, entry)
+		markLiveUpdate(entry)
 	}
 }
 

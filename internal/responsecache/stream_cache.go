@@ -169,6 +169,7 @@ func writeCachedResponse(c *echo.Context, path string, requestBody, cached []byt
 	if isStreamingRequest(path, requestBody) {
 		auditlog.EnrichEntryWithStream(c, true)
 		auditlog.EnrichEntryWithCachedStreamResponse(c, path, cached)
+		auditlog.FlushLiveUpdate(c)
 		c.Response().Header().Set("Content-Type", "text/event-stream")
 		c.Response().Header().Set("Cache-Control", "no-cache")
 		c.Response().Header().Set("Connection", "keep-alive")

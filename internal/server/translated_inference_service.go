@@ -650,6 +650,7 @@ func (s *translatedInferenceService) observeLiveProviderAttempts(c *echo.Context
 	req := c.Request()
 	c.SetRequest(req.WithContext(gateway.WithAttemptObserver(req.Context(), func() {
 		enrichAuditEntryWithProviderAttempts(c)
+		auditlog.FlushLiveUpdate(c)
 	})))
 }
 
@@ -695,6 +696,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 	if streamEntry != nil {
 		streamEntry.StatusCode = http.StatusOK
 	}
+	auditlog.FlushLiveUpdate(c)
 
 	requestID := requestIDFromContextOrHeader(c.Request())
 	endpoint := c.Request().URL.Path

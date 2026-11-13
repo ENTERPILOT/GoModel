@@ -10,10 +10,13 @@ import (
 )
 
 // This file is the enrichment API handlers use to attach data to the live
-// audit entry stored on the request context. Every context-based Enrich*
-// helper publishes an audit.updated live event so connected dashboards see
-// the entry evolve in realtime; the EnrichLogEntry* variants mutate an entry
-// directly for executors that run outside Echo middleware state.
+// audit entry stored on the request context. The context-based Enrich*
+// helpers mark the entry changed; FlushLiveUpdate then publishes the changes
+// as one audit.updated live event at each request phase (before the upstream
+// call, when a stream starts), and errors publish at once. A change made after
+// the last flush reaches dashboards with the entry's completion event. The
+// EnrichLogEntry* variants mutate an entry directly for executors that run
+// outside Echo middleware state.
 
 // entryFromContext returns the live audit entry stored on the request context,
 // or nil when audit logging is inactive for the request.
@@ -28,10 +31,32 @@ func entryFromContext(c *echo.Context) *LogEntry {
 	return entry
 }
 
+// markLiveUpdate records that entry changed since its last live event. The
+// entry is only ever enriched from the request goroutine, so a plain field
+// suffices.
+func markLiveUpdate(entry *LogEntry) {
+	entry.liveUpdatePending = true
+}
+
+// FlushLiveUpdate publishes the changes made to the request's audit entry
+// since its last live event as one audit.updated event, and does nothing when
+// there are none. Handlers call it where a dashboard watcher would otherwise
+// wait: right before an upstream call and when a stream starts.
+func FlushLiveUpdate(c *echo.Context) {
+	entry := entryFromContext(c)
+	if entry == nil || !entry.liveUpdatePending {
+		return
+	}
+	publishLiveAuditUpdate(c, entry)
+}
+
+// publishLiveAuditUpdate publishes entry's current state as audit.updated
+// now, carrying any change still pending.
 func publishLiveAuditUpdate(c *echo.Context, entry *LogEntry) {
 	if c == nil || entry == nil {
 		return
 	}
+	entry.liveUpdatePending = false
 	publisher, ok := c.Get(string(LogEntryLivePublisherKey)).(LiveEventEmitter)
 	if !ok || publisher == nil {
 		return
@@ -40,7 +65,7 @@ func publishLiveAuditUpdate(c *echo.Context, entry *LogEntry) {
 }
 
 // EnrichEntryWithSessionID makes the detected session visible to realtime
-// audit subscribers as soon as SessionCapture resolves it. Audit middleware
+// audit subscribers with the request's next live event. Audit middleware
 // starts outside authentication/session middleware, so audit.started cannot
 // carry the final scoped ID.
 func EnrichEntryWithSessionID(c *echo.Context, sessionID string) {
@@ -53,7 +78,7 @@ func EnrichEntryWithSessionID(c *echo.Context, sessionID string) {
 		return
 	}
 	entry.SessionID = sessionID
-	publishLiveAuditUpdate(c, entry)
+	markLiveUpdate(entry)
 }
 
 // EnrichEntry retrieves the log entry from context for enrichment by handlers.
@@ -65,7 +90,7 @@ func EnrichEntry(c *echo.Context, model, provider string) {
 	}
 	entry.RequestedModel = model
 	entry.Provider = provider
-	publishLiveAuditUpdate(c, entry)
+	markLiveUpdate(entry)
 }
 
 // EnrichEntryWithRequestBody sets the audit request body from a handler that
@@ -85,7 +110,7 @@ func EnrichEntryWithRequestBody(c *echo.Context, body any) {
 		return
 	}
 	data.RequestBody = body
-	publishLiveAuditUpdate(c, entry)
+	markLiveUpdate(entry)
 }
 
 // EnrichEntryWithRawRequestBody captures a raw request payload from a handler
@@ -110,7 +135,7 @@ func EnrichEntryWithRawRequestBody(c *echo.Context, body []byte) {
 	} else {
 		data.RequestBody = CaptureLoggedBody(body)
 	}
-	publishLiveAuditUpdate(c, entry)
+	markLiveUpdate(entry)
 }
 
 // EnrichEntryWithCapturedResponseBody sets the response body and truncation
@@ -132,7 +157,7 @@ func EnrichEntryWithCapturedResponseBody(c *echo.Context, body any, truncated bo
 		data.ResponseBodyTooBigToHandle = true
 	}
 	markResponseBodyCaptured(c)
-	publishLiveAuditUpdate(c, entry)
+	markLiveUpdate(entry)
 }
 
 // markResponseBodyCaptured records that the handler owns the response body so
@@ -162,7 +187,7 @@ func EnrichEntryWithResponseBody(c *echo.Context, body any) {
 	}
 	ensureLogData(entry).ResponseBody = body
 	markResponseBodyCaptured(c)
-	publishLiveAuditUpdate(c, entry)
+	markLiveUpdate(entry)
 }
 
 // EnrichEntryWithRequestRevision appends one ingress request-rewrite revision
@@ -176,7 +201,7 @@ func EnrichEntryWithRequestRevision(c *echo.Context, revision RequestRevisionSna
 	data := ensureLogData(entry)
 	revision.Seq = len(data.RequestRevisions) + 1
 	data.RequestRevisions = append(data.RequestRevisions, revision)
-	publishLiveAuditUpdate(c, entry)
+	markLiveUpdate(entry)
 }
 
 // EnrichEntryWithRequestedModel attaches early requested-model metadata to the
@@ -191,7 +216,7 @@ func EnrichEntryWithRequestedModel(c *echo.Context, requestedModel string) {
 		return
 	}
 	entry.RequestedModel = requestedModel
-	publishLiveAuditUpdate(c, entry)
+	markLiveUpdate(entry)
 }
 
 // EnrichEntryWithWorkflow attaches workflow metadata to the live
@@ -206,7 +231,7 @@ func EnrichEntryWithWorkflow(c *echo.Context, workflow *core.Workflow) {
 	}
 	enrichEntryWithWorkflow(entry, workflow)
 	populateLiveRequestDataAfterWorkflow(c, entry, workflow)
-	publishLiveAuditUpdate(c, entry)
+	markLiveUpdate(entry)
 }
 
 func syncRequestWorkflow(c *echo.Context, workflow *core.Workflow) {
@@ -239,7 +264,7 @@ func EnrichEntryWithResolvedRoute(c *echo.Context, resolvedModel, providerType, 
 		return
 	}
 	enrichEntryWithResolvedRoute(entry, resolvedModel, providerType, providerName)
-	publishLiveAuditUpdate(c, entry)
+	markLiveUpdate(entry)
 }
 
 // EnrichLogEntryWithResolvedRoute attaches the final executed route directly to
@@ -257,7 +282,7 @@ func EnrichEntryWithFailover(c *echo.Context, targetModel string) {
 		return
 	}
 	enrichEntryWithFailover(entry, targetModel)
-	publishLiveAuditUpdate(c, entry)
+	markLiveUpdate(entry)
 }
 
 // EnrichEntryWithAttempts attaches provider attempt summaries to the live
@@ -269,7 +294,7 @@ func EnrichEntryWithAttempts(c *echo.Context, attempts []AttemptSnapshot) {
 		return
 	}
 	enrichEntryWithAttempts(entry, gateAttemptCaptureFromContext(c, attempts))
-	publishLiveAuditUpdate(c, entry)
+	markLiveUpdate(entry)
 }
 
 // gateAttemptCaptureFromContext strips per-attempt response bodies/headers that
@@ -314,7 +339,7 @@ func EnrichEntryWithCacheType(c *echo.Context, cacheType string) {
 		return
 	}
 	entry.CacheType = cacheType
-	publishLiveAuditUpdate(c, entry)
+	markLiveUpdate(entry)
 }
 
 // NormalizeAuthMethod returns a bounded lowercase audit identifier. Extension
@@ -346,7 +371,7 @@ func EnrichEntryWithAuthMethod(c *echo.Context, method string) {
 		return
 	}
 	entry.AuthMethod = method
-	publishLiveAuditUpdate(c, entry)
+	markLiveUpdate(entry)
 }
 
 // EnrichEntryWithAuthKeyID attaches the authenticated managed auth key id to the live audit entry.
@@ -360,7 +385,7 @@ func EnrichEntryWithAuthKeyID(c *echo.Context, authKeyID string) {
 		return
 	}
 	entry.AuthKeyID = authKeyID
-	publishLiveAuditUpdate(c, entry)
+	markLiveUpdate(entry)
 }
 
 // EnrichEntryWithPrincipalID attaches an extension-authenticated principal to
@@ -375,7 +400,7 @@ func EnrichEntryWithPrincipalID(c *echo.Context, principalID string) {
 		return
 	}
 	entry.PrincipalID = principalID
-	publishLiveAuditUpdate(c, entry)
+	markLiveUpdate(entry)
 }
 
 // EnrichEntryWithUserPath attaches the effective user path to the live audit entry.
@@ -389,7 +414,7 @@ func EnrichEntryWithUserPath(c *echo.Context, userPath string) {
 		return
 	}
 	entry.UserPath = userPath
-	publishLiveAuditUpdate(c, entry)
+	markLiveUpdate(entry)
 }
 
 // EnrichLogEntryWithRequestContext attaches auth and effective user-path
@@ -455,7 +480,7 @@ func EnrichEntryWithStream(c *echo.Context, stream bool) {
 		return
 	}
 	entry.Stream = stream
-	publishLiveAuditUpdate(c, entry)
+	markLiveUpdate(entry)
 }
 
 func populateLiveRequestDataAfterWorkflow(c *echo.Context, entry *LogEntry, workflow *core.Workflow) {

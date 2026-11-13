@@ -62,6 +62,7 @@ func (s *nativeBatchService) Batches(c *echo.Context) error {
 	}
 
 	ctx, requestID := requestContextWithRequestID(c.Request())
+	auditlog.FlushLiveUpdate(c)
 	result, err := s.batch().Create(ctx, req, batchRequestMeta(c, requestID))
 	if err != nil {
 		return handleError(c, err)
