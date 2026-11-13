@@ -44,8 +44,11 @@ type observer struct {
 }
 
 type callState struct {
-	spanName   string
+	spanName string
+	// attrs label both metrics and spans; spanAttrs adds the span-only
+	// attributes whose values are unbounded (user path).
 	attrs      []attribute.KeyValue
+	spanAttrs  []attribute.KeyValue
 	span       trace.Span
 	generation *core.GenerationTrace
 	ended      atomic.Bool
@@ -121,10 +124,11 @@ func (o *observer) start(ctx context.Context, info llmclient.RequestInfo) contex
 		attrs:      callAttributes(info, operation),
 		generation: core.GenerationTraceFromContext(ctx),
 	}
+	state.spanAttrs = append(slices.Clone(state.attrs), userPathAttributes(ctx)...)
 	if !info.StreamUncertain && (!info.Stream || state.generation != nil) {
 		ctx, state.span = o.tracer.Start(ctx, state.spanName,
 			trace.WithSpanKind(trace.SpanKindClient),
-			trace.WithAttributes(state.attrs...),
+			trace.WithAttributes(state.spanAttrs...),
 		)
 	}
 	return context.WithValue(ctx, callStateKey{}, state)
@@ -161,7 +165,7 @@ func (o *observer) end(ctx context.Context, info llmclient.ResponseInfo) {
 		endTime := time.Now()
 		_, span := o.tracer.Start(ctx, state.spanName,
 			trace.WithSpanKind(trace.SpanKindClient),
-			trace.WithAttributes(state.attrs...),
+			trace.WithAttributes(state.spanAttrs...),
 			trace.WithTimestamp(endTime.Add(-duration)),
 		)
 		setResultAttributes(span, info, errorType)

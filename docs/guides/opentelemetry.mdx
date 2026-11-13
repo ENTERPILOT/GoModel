@@ -131,7 +131,8 @@ Every request gets a `SERVER` span named after its route (for example
 `POST /v1/chat/completions`) with the standard `http.request.method`,
 `http.route`, `http.response.status_code`, and `url.scheme` attributes, plus the
 `http.server.request.duration` histogram and the request and response body size
-histograms.
+histograms. Requests with a user path also carry `gomodel.user_path` (see
+[Per-team traces](#per-team-traces)).
 
 Trace context from the caller is honored, so a gateway span appears as a child
 of the calling application's span whenever the client sends `traceparent` (or
@@ -151,6 +152,7 @@ Each logical call to a model provider is instrumented with:
 | `gen_ai.request.model` | `gpt-5` | The model sent upstream, after alias and virtual model resolution. |
 | `gen_ai.provider.name` | `openai` | Semantic provider name: `openai`, `anthropic`, `aws.bedrock`, `gcp.vertex_ai`, `gcp.gemini`, `azure.ai.openai`, `x_ai`, … or `unknown`. |
 | `gomodel.provider.name` | `openai-eu` | The exact provider name from your GoModel configuration. |
+| `gomodel.user_path` | `/team/alpha` | The caller's effective [user path](/features/user-path). Spans only, never metrics. Absent when the request has none. |
 | `gen_ai.request.stream` | `true` | Present only on streaming calls. |
 | `error.type` | `429`, `timeout`, `network_error`, `empty_stream` | Present only on failures; `empty_stream` marks a stream that ended before its first chunk. |
 | `http.response.status_code` | `200` | Upstream status. |
@@ -167,7 +169,8 @@ streams, GoModel asks the provider for a usage chunk only while usage tracking
 is on (the default). `/v1/messages` requests that GoModel forwards natively to an Anthropic
 provider, and other passthrough calls, carry the request attributes only.
 
-Metrics are histograms in seconds, carrying the same attributes:
+Metrics are histograms in seconds, carrying the same attributes except
+`gomodel.user_path`, which is span-only:
 
 | Metric | Recorded for |
 | --- | --- |
@@ -254,6 +257,97 @@ without leaking what flows through the gateway:
   `user_agent.original` are stripped from HTTP spans, and host-derived
   dimensions are excluded from HTTP metrics so a client cannot inflate metric
   cardinality through the `Host` header.
+- `gomodel.user_path` is the only caller attribute GoModel adds. It is the
+  same value usage and audit records carry, and it is never a metric
+  dimension.
+
+## Per-team traces
+
+Every gateway span of a request carries the caller's
+[user path](/features/user-path) as `gomodel.user_path`. It is the effective
+path that usage, budgets, and audit logs use: the API key's bound path when it
+has one, otherwise the `X-GoModel-User-Path` header.
+
+Filter on it in your backend, for example
+`{ span.gomodel.user_path =~ "/team/alpha(/.*)?" }` in Tempo's TraceQL to
+match `/team/alpha` and its subtree.
+
+To give each team its own tracing backend, point GoModel at an
+[OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) and route
+on the attribute with the
+[routing connector](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/connector/routingconnector).
+The pattern `^/team/alpha(/|$)` matches the whole `/team/alpha` subtree;
+traces with no matching route go to the default pipeline.
+
+```yaml otel-collector.yaml
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+connectors:
+  routing:
+    default_pipelines: [traces/platform]
+    table:
+      - context: span
+        condition: IsMatch(attributes["gomodel.user_path"], "^/team/alpha(/|$)")
+        pipelines: [traces/alpha]
+      - context: span
+        condition: IsMatch(attributes["gomodel.user_path"], "^/team/beta(/|$)")
+        pipelines: [traces/beta]
+
+exporters:
+  otlphttp/platform:
+    endpoint: http://tempo:4318
+  otlphttp/alpha:
+    endpoint: https://api.honeycomb.io
+    headers:
+      x-honeycomb-team: ${env:ALPHA_HONEYCOMB_KEY}
+  otlphttp/beta:
+    endpoint: https://cloud.langfuse.com/api/public/otel
+    headers:
+      Authorization: Basic ${env:BETA_LANGFUSE_AUTH}
+
+service:
+  pipelines:
+    traces/in:
+      receivers: [otlp]
+      exporters: [routing]
+    traces/alpha:
+      receivers: [routing]
+      exporters: [otlphttp/alpha]
+    traces/beta:
+      receivers: [routing]
+      exporters: [otlphttp/beta]
+    traces/platform:
+      receivers: [routing]
+      exporters: [otlphttp/platform]
+```
+
+Point only traces at this Collector, since it has no metrics pipeline:
+
+```bash
+OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://otel-collector:4318/v1/traces
+# Send metrics to their own backend (Prometheus needs --web.enable-otlp-receiver),
+# or turn them off with OTEL_METRICS_EXPORTER=none:
+OTEL_EXPORTER_OTLP_METRICS_PROTOCOL=http/protobuf
+OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://prometheus:9090/api/v1/otlp/v1/metrics
+```
+
+Keep the Collector's port on a private network: it accepts spans from anyone
+who can reach it.
+
+Give each team an API key bound to its user path. With an unbound key the
+caller picks the path through the header, and so picks the backend its traces
+go to.
+
+<Note>
+  [Content capture](#prompt-and-completion-capture) is global. When it is on,
+  every team's prompts reach the Collector, which forwards each trace only to
+  its team's backend.
+</Note>
 
 ## Reloading
 
