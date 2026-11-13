@@ -2,7 +2,6 @@ package usage
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -30,14 +29,10 @@ func (r *Result) Close() error {
 	if r.stopIndexBuild != nil {
 		r.stopIndexBuild()
 	}
-	var errs []error
 	if r.Logger != nil {
 		if err := r.Logger.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("logger close: %w", err))
+			return fmt.Errorf("logger close: %w", err)
 		}
-	}
-	if len(errs) > 0 {
-		return fmt.Errorf("close errors: %w", errors.Join(errs...))
 	}
 	return nil
 }
