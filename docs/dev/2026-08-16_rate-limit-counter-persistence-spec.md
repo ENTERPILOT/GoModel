@@ -5,9 +5,14 @@ Date: 2026-08-16
 Extends: `docs/dev/2026-07-05_rate-limiting-spec.md` §8, §11.2, §11.7
 Depends on: `feat(quotas): add per-child user-path templates` (`#670`)
 Superseded in part: since `#1296` every replica saves rows of its own, keyed
-by a `writer` id as well as the window key, and reads the other writers' rows
-on each flush (`#1339`). §6 and §7 below still describe the original model of
-one row per key, last write wins; `WindowSnapshot` and `Store` in
+by a `writer` id as well as the window key, and since `#1339` it reads the
+other writers' rows on each flush and enforces against the sum. The replica
+statements in §3, §4 and §13 (no shared counters, about N × the limit,
+last write wins) and the data model and store methods in §6 and §7 (one row
+per key) describe the original design, not this one. Sharing is approximate,
+within about two flush intervals, and stops after start when
+`RATE_LIMITS_FLUSH_INTERVAL=0`; see "Several replicas share one limit" in
+`docs/features/rate-limits.mdx`. `WindowSnapshot` and `Store` in
 `internal/ratelimit` are the current shape.
 
 ## 1. Why
