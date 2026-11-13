@@ -2,8 +2,10 @@ package core
 
 import (
 	"maps"
+	"strings"
 
 	"github.com/goccy/go-json"
+	"github.com/tidwall/gjson"
 )
 
 var usageKnownFields = map[string]struct{}{
@@ -26,7 +28,133 @@ var responsesUsageKnownFields = map[string]struct{}{
 	"raw_usage":                 {},
 }
 
+// usageMembers is the typed part of Usage's JSON form. It has no RawUsage and
+// no methods, so decoding into it neither recurses nor captures raw_usage.
+type usageMembers struct {
+	PromptTokens            int                      `json:"prompt_tokens"`
+	CompletionTokens        int                      `json:"completion_tokens"`
+	TotalTokens             int                      `json:"total_tokens"`
+	PromptTokensDetails     *PromptTokensDetails     `json:"prompt_tokens_details"`
+	CompletionTokensDetails *CompletionTokensDetails `json:"completion_tokens_details"`
+}
+
+// UnmarshalJSON decodes the typed members in one pass and builds RawUsage
+// from the other members only when there are any.
 func (u *Usage) UnmarshalJSON(data []byte) error {
+	rawUsage, irregular, scanErr := scanUsageMembers(data)
+	// A scan error stops the scan before it sees a later duplicate that the
+	// member-by-member decode would keep instead, so that decode decides.
+	if irregular || scanErr != nil {
+		return u.unmarshalJSONMemberByMember(data)
+	}
+	members := usageMembers{
+		PromptTokens:            u.PromptTokens,
+		CompletionTokens:        u.CompletionTokens,
+		TotalTokens:             u.TotalTokens,
+		PromptTokensDetails:     u.PromptTokensDetails,
+		CompletionTokensDetails: u.CompletionTokensDetails,
+	}
+	if err := json.Unmarshal(data, &members); err != nil {
+		return err
+	}
+	u.PromptTokens = members.PromptTokens
+	u.CompletionTokens = members.CompletionTokens
+	u.TotalTokens = members.TotalTokens
+	u.PromptTokensDetails = members.PromptTokensDetails
+	u.CompletionTokensDetails = members.CompletionTokensDetails
+	u.RawUsage = rawUsage
+	return nil
+}
+
+// scanUsageMembers collects the members usageMembers does not decode into a
+// RawUsage map. It reports irregular for objects the typed decode would read
+// differently from the member-by-member decode: a typed or raw_usage member
+// given twice (the typed decode merges repeated detail objects, the other
+// keeps the last), and keys that are escaped, non-ASCII or a case variant of
+// a typed member (the typed decode matches keys case-insensitively).
+func scanUsageMembers(data []byte) (rawUsage map[string]any, irregular bool, err error) {
+	root := gjson.ParseBytes(data)
+	if !root.IsObject() {
+		return nil, false, nil
+	}
+	var seen uint8
+	root.ForEach(func(key, value gjson.Result) bool {
+		if !isPlainJSONKey(key.Raw) {
+			irregular = true
+			return false
+		}
+		name := key.String()
+		if bit := usageMemberBit(name); bit != 0 {
+			if seen&bit != 0 {
+				irregular = true
+				return false
+			}
+			seen |= bit
+			if name == "raw_usage" {
+				err = mergeRawUsageObject(&rawUsage, rawJSONValue(data, value))
+			}
+			return err == nil
+		}
+		if foldsToUsageMember(name) {
+			irregular = true
+			return false
+		}
+		err = mergeRawUsageField(&rawUsage, name, rawJSONValue(data, value))
+		return err == nil
+	})
+	return rawUsage, irregular, err
+}
+
+func usageMemberBit(name string) uint8 {
+	switch name {
+	case "prompt_tokens":
+		return 1 << 0
+	case "completion_tokens":
+		return 1 << 1
+	case "total_tokens":
+		return 1 << 2
+	case "prompt_tokens_details":
+		return 1 << 3
+	case "completion_tokens_details":
+		return 1 << 4
+	case "raw_usage":
+		return 1 << 5
+	}
+	return 0
+}
+
+func foldsToUsageMember(name string) bool {
+	for known := range usageKnownFields {
+		if strings.EqualFold(name, known) {
+			return true
+		}
+	}
+	return false
+}
+
+// isPlainJSONKey reports whether a raw key is printable ASCII without
+// escapes, so its bytes are its name.
+func isPlainJSONKey(raw string) bool {
+	for i := 0; i < len(raw); i++ {
+		if c := raw[i]; c == '\\' || c < 0x20 || c >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+// rawJSONValue returns value's bytes as a slice of data, which gjson parsed,
+// instead of copying the string gjson returns.
+func rawJSONValue(data []byte, value gjson.Result) json.RawMessage {
+	if end := value.Index + len(value.Raw); value.Index > 0 && end <= len(data) {
+		return data[value.Index:end]
+	}
+	return json.RawMessage(value.Raw)
+}
+
+// unmarshalJSONMemberByMember decodes each member on its own. UnmarshalJSON
+// falls back to it for the irregular objects scanUsageMembers reports.
+func (u *Usage) unmarshalJSONMemberByMember(data []byte) error {
 	var payload map[string]json.RawMessage
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return err
