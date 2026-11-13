@@ -192,14 +192,34 @@ func newMiddleware(tp *sdkTrace.TracerProvider, mp *sdkMetric.MeterProvider, pro
 // (see core.GenerationTrace), so their spans carry the decoded usage. A
 // request the sampler dropped is skipped: its spans are never exported, so
 // rebuilding its outcome would be wasted work.
+//
+// Authentication resolves the user path inside next, so the server span gets
+// it once the handler returns.
 func withGenerationTracing(next echo.HandlerFunc, captureContent bool) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		req := c.Request()
-		if trace.SpanFromContext(req.Context()).IsRecording() {
-			c.SetRequest(req.WithContext(core.WithGenerationTracing(req.Context(), captureContent)))
+		span := trace.SpanFromContext(req.Context())
+		if !span.IsRecording() {
+			return next(c)
 		}
-		return next(c)
+		c.SetRequest(req.WithContext(core.WithGenerationTracing(req.Context(), captureContent)))
+		err := next(c)
+		span.SetAttributes(userPathAttributes(c.Request().Context())...)
+		return err
 	}
+}
+
+// userPathAttribute names the caller's effective user path on spans. It is
+// span-only: user paths are unbounded and would explode metric cardinality.
+const userPathAttribute = "gomodel.user_path"
+
+// userPathAttributes returns the request's effective user path, the same
+// value usage and audit records carry, or nothing when none is set.
+func userPathAttributes(ctx context.Context) []attribute.KeyValue {
+	if userPath := core.UserPathFromContext(ctx); userPath != "" {
+		return []attribute.KeyValue{attribute.String(userPathAttribute, userPath)}
+	}
+	return nil
 }
 
 // operationalEndpointSkipper leaves health probes, Prometheus scrapes, and
