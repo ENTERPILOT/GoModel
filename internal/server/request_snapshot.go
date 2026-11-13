@@ -10,11 +10,19 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
 const requestSnapshotInlineBodyLimit int64 = 64 * 1024
+
+// requestBodyPreallocLimit is the largest declared Content-Length whose read
+// is sized from it. It is the default body size limit, which already rejects
+// any larger declared length; a body above it (a raised limit) reads with
+// growing buffers instead. core.ReadAllSized separately caps the reservation
+// made before any bytes arrive.
+const requestBodyPreallocLimit = config.DefaultBodySizeLimit
 
 // RequestSnapshotCapture captures immutable transport-level request data for
 // model-facing endpoints. It does not read the body: that waits for
@@ -222,7 +230,7 @@ func captureSmallRequestBodyForSnapshot(req *http.Request, bodyMode core.BodyMod
 
 	originalBody := req.Body
 	limitedReader := io.LimitReader(originalBody, requestSnapshotInlineBodyLimit+1)
-	bodyBytes, err := io.ReadAll(limitedReader)
+	bodyBytes, err := core.ReadAllSized(limitedReader, req.ContentLength, requestSnapshotInlineBodyLimit)
 	if err != nil {
 		return nil, false, false, err
 	}
@@ -318,7 +326,7 @@ func requestBodyBytes(c *echo.Context) ([]byte, error) {
 		}
 	}
 
-	bodyBytes, err := io.ReadAll(req.Body)
+	bodyBytes, err := core.ReadAllSized(req.Body, req.ContentLength, requestBodyPreallocLimit)
 	if err != nil {
 		return nil, err
 	}

@@ -26,7 +26,22 @@ type canonicalOperationCodec struct {
 
 func unmarshalCanonicalJSON[T any](body []byte, newValue func() T) (T, error) {
 	req := newValue()
-	if err := json.Unmarshal(body, req); err != nil {
+	// Every canonical request type decodes itself. Calling the method directly
+	// skips json.Unmarshal's two whole-body copies (its own input copy and the
+	// value it hands the method) and yields the same result and error text.
+	//
+	// Only a body that starts with its object takes the shortcut. Decode errors
+	// carry offsets into the bytes the method received, and json.Unmarshal hands
+	// it the value without leading whitespace, which is what
+	// describeJSONDecodeError resolves those offsets against. Passing leading
+	// whitespace through would shift them onto the wrong member.
+	var err error
+	if u, ok := any(req).(json.Unmarshaler); ok && len(body) > 0 && body[0] == '{' {
+		err = u.UnmarshalJSON(body)
+	} else {
+		err = json.Unmarshal(body, req)
+	}
+	if err != nil {
 		var zero T
 		return zero, err
 	}

@@ -25,6 +25,12 @@ import (
 // answers an error status with an endless body must not be buffered whole.
 const maxErrorBodyBytes = 64 * 1024
 
+// maxResponsePreallocBytes is the largest upstream Content-Length whose read
+// is sized from it; larger responses read with growing buffers.
+// core.ReadAllSized caps the reservation made before any bytes arrive, so an
+// upstream cannot make the gateway reserve memory for a length it never sends.
+const maxResponsePreallocBytes = 16 << 20
+
 // extractModel attempts to extract the model name from a request body
 // UnknownModel is the model label reported for requests whose model cannot be
 // recovered from the request body (body-less discovery GETs, availability
@@ -207,10 +213,12 @@ func (c *Client) doRequest(ctx context.Context, req Request) (*Response, error) 
 	// error bodies are bounded — they only feed error parsing and audit
 	// capture, both of which cap at the same size.
 	reader := io.Reader(resp.Body)
+	size := resp.ContentLength
 	if resp.StatusCode >= http.StatusBadRequest {
 		reader = io.LimitReader(resp.Body, maxErrorBodyBytes)
+		size = min(size, maxErrorBodyBytes)
 	}
-	body, err := io.ReadAll(reader)
+	body, err := core.ReadAllSized(reader, size, maxResponsePreallocBytes)
 	if err != nil {
 		logTransportError("reading provider response failed", c.config.ProviderName, req.Endpoint, err)
 		return nil, core.NewProviderError(c.config.ProviderName, providerErrorStatusCode(err), readErrorMessage(err), err)
