@@ -91,7 +91,8 @@ func SummarizeRequestUsage(entries []UsageLogEntry) *RequestUsageSummary {
 //   - cached reads: cache_read_input_tokens (Anthropic, Bedrock),
 //     prompt_cached_tokens (OpenAI, DeepSeek), cached_tokens (Gemini)
 //   - cache writes: cache_creation_input_tokens (Anthropic),
-//     cache_write_input_tokens (Bedrock Converse)
+//     cache_write_input_tokens (Bedrock Converse), both on top of input;
+//     prompt_cache_write_tokens (OpenAI), part of input like cached reads
 func EntryInputSegments(entry UsageLogEntry) (uncachedInput, cachedInput, cacheWriteInput int64) {
 	cacheReadTopLevel := int64(extractInt(entry.RawData, "cache_read_input_tokens"))
 	cacheReadNormalized := int64(extractInt(entry.RawData, "prompt_cached_tokens"))
@@ -107,11 +108,10 @@ func EntryInputSegments(entry UsageLogEntry) (uncachedInput, cachedInput, cacheW
 		return baseInput, cachedInput, cacheWriteInput
 	}
 
-	if cachedInput > baseInput {
-		cachedInput = baseInput
-	}
-	uncachedInput = baseInput - cachedInput
-	return uncachedInput, cachedInput, cacheWriteInput
+	cachedInput = min(cachedInput, baseInput)
+	includedCacheWrite := min(int64(extractInt(entry.RawData, "prompt_cache_write_tokens")), baseInput-cachedInput)
+	uncachedInput = baseInput - cachedInput - includedCacheWrite
+	return uncachedInput, cachedInput, includedCacheWrite
 }
 
 func entryUsesSplitPromptCacheAccounting(entry UsageLogEntry, cacheReadInput, cacheWriteInput int64) bool {

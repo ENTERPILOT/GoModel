@@ -81,10 +81,15 @@ METRICS_ENDPOINT=/internal/prometheus
 
 ### 通过环境变量
 
-| 变量               | 默认值     | 说明                              |
-| ------------------ | ---------- | --------------------------------- |
-| `METRICS_ENABLED`  | `false`    | 启用/禁用指标采集                 |
-| `METRICS_ENDPOINT` | `/metrics` | 指标端点的 HTTP 路径              |
+| 变量                             | 默认值     | 说明                                                |
+| -------------------------------- | ---------- | --------------------------------------------------- |
+| `METRICS_ENABLED`                | `false`    | 启用/禁用指标采集                                   |
+| `METRICS_ENDPOINT`               | `/metrics` | 指标端点的 HTTP 路径                                |
+| `METRICS_CALLER_USER_PATH`       | `false`    | 将用户路径加入[调用方指标](#调用方维度)             |
+| `METRICS_CALLER_USER_PATH_DEPTH` | `2`        | 保留的用户路径前几段                                |
+| `METRICS_CALLER_AUTH_KEY`        | `false`    | 加入托管 API Key 的名称                             |
+| `METRICS_CALLER_REQUEST_LABELS`  | `false`    | 加入请求标签                                        |
+| `METRICS_CALLER_MAX_VALUES`      | `100`      | 每个调用方维度保留的不同取值数量                    |
 
 ### 通过 config.yaml
 
@@ -96,6 +101,15 @@ metrics:
 
   # 暴露指标的 HTTP 端点路径
   endpoint: "/metrics"
+
+  # 谁发起了请求：作用于 Token、成本和按调用方统计的请求指标。
+  # 默认全部关闭；参见下文“调用方维度”。
+  caller_dimensions:
+    user_path: false
+    user_path_depth: 2
+    auth_key: false
+    request_labels: false
+    max_values: 100
 ```
 
 ## 示例
@@ -303,6 +317,90 @@ sum(rate(gomodel_empty_responses_total[5m])) by (provider, model, reason) > 0
 ```promql
 sum(increase(gomodel_usage_entries_dropped_total[5m])) by (reason) > 0
 ```
+
+## Token 与成本指标
+
+GoModel 会统计每个已记录用量的请求的 Token 和成本，因此您无需查询用量数据库即可对开销绘图和告警。计数器在响应结束时更新；流式请求在其流关闭时计一次。
+
+| 指标                              | 统计内容                                        |
+| --------------------------------- | ----------------------------------------------- |
+| `gomodel_tokens_total`            | 发送给提供商以及由提供商返回的 Token            |
+| `gomodel_token_details_total`     | 缓存 Token、缓存写入 Token 和推理 Token         |
+| `gomodel_provider_cost_usd_total` | 提供商收取的费用（美元）                        |
+| `gomodel_billed_cost_usd_total`   | 向调用方计费的金额（美元，提供商成本加上加价）  |
+
+这四个指标都带有 `provider`（配置中的提供商名称）和 `model`（实际应答的模型），以及[调用方标签](#调用方维度)。两个 Token 指标还带有 `token_type`：
+
+| 指标                          | `token_type`        | 含义                                         |
+| ----------------------------- | ------------------- | -------------------------------------------- |
+| `gomodel_tokens_total`        | `input`             | 全部提示词 Token：未缓存、已缓存和缓存写入   |
+| `gomodel_tokens_total`        | `output`            | 全部补全 Token，包含推理 Token               |
+| `gomodel_token_details_total` | `input_cached`      | 提供商从其提示词缓存读取的提示词 Token       |
+| `gomodel_token_details_total` | `input_cache_write` | 提供商写入其提示词缓存的提示词 Token         |
+| `gomodel_token_details_total` | `output_reasoning`  | 推理（“思考”）Token                          |
+
+明细是 `gomodel_tokens_total` 的**组成部分**，而不是额外的增量，因此它们是一个单独的指标：`sum(gomodel_tokens_total)` 就是 Token 总量，对单个指标求和不会把任何 Token 计两次。两个成本指标同理。各提供商上报缓存 Token 和推理 Token 的方式不同（Anthropic 在输入之外单独上报缓存读取，xAI 在输出之外单独上报推理）；GoModel 会对其进行归一化，因此 `input` 和 `output` 对每个提供商含义相同。
+
+```promql
+# 按模型和方向统计的每分钟 Token 数
+sum(rate(gomodel_tokens_total[5m])) by (model, token_type) * 60
+
+# 由提供商提示词缓存提供的提示词 Token 占比
+sum(rate(gomodel_token_details_total{token_type="input_cached"}[5m]))
+  / sum(rate(gomodel_tokens_total{token_type="input"}[5m]))
+
+# 按提供商统计的每小时提供商开销
+sum(increase(gomodel_provider_cost_usd_total[1h])) by (provider)
+```
+
+哪些计入，哪些不计入：
+
+- **必须开启用量跟踪**（`USAGE_ENABLED=true`，默认值）。这些指标来自用量仪表盘所展示的同一批记录。
+- **成本需要定价。** 对没有已知价格的模型的请求只增加 Token，不增加成本。只有启用[定价加价](/zh/features/cost-tracking)时才会记录 `gomodel_billed_cost_usd_total`。
+- **响应缓存命中**不会到达提供商，因此不增加 Token，也不增加提供商成本。被计费的缓存命中（`pricing.bill_cache_hits`）仍会计入 `gomodel_billed_cost_usd_total`。
+- **MCP 工具调用**既不记录 Token 也不记录成本，因此不会增加任何数值。
+- 序列在出现非零值后才会出现。
+
+## 调用方维度
+
+默认情况下，指标不包含任何关于请求发起者的信息。三个可选维度可以补充这一信息：
+
+| 设置                            | 标签             | 取值                                                                 |
+| ------------------------------- | ---------------- | -------------------------------------------------------------------- |
+| `METRICS_CALLER_USER_PATH`      | `user_path`      | [用户路径](/zh/features/user-path)，截断为 `METRICS_CALLER_USER_PATH_DEPTH` 段；请求没有用户路径时为 `/` |
+| `METRICS_CALLER_AUTH_KEY`       | `auth_key`       | 托管 API Key 的名称。使用主密钥时为空                                |
+| `METRICS_CALLER_REQUEST_LABELS` | `request_labels` | 请求的标签，排序后以逗号分隔（`prod,team-a`）。标签内的逗号写作 `%2C`，百分号写作 `%25` |
+
+```bash
+METRICS_ENABLED=true
+METRICS_CALLER_AUTH_KEY=true
+```
+
+```promql
+# 按 API Key 统计的每分钟 Token 数
+sum(rate(gomodel_tokens_total[5m])) by (auth_key) * 60
+
+# 按 API Key 统计的错误率
+sum(rate(gomodel_caller_requests_total{status_type="error"}[5m])) by (auth_key)
+  / sum(rate(gomodel_caller_requests_total[5m])) by (auth_key)
+
+# 某个团队标签最近 24 小时的计费成本，无论请求还带有哪些其他标签
+sum(increase(gomodel_billed_cost_usd_total{request_labels=~"(.*,)?team-a(,.*)?"}[24h]))
+```
+
+这些标签出现在四个 Token 与成本指标上，以及 `gomodel_caller_requests_total` 上。后者是带有 `provider`、`model` 和 `status_type` 的请求计数器，只有在启用了某个调用方维度时才存在。它们**不会**加到 `gomodel_requests_total`、`gomodel_request_duration_seconds` 直方图或进行中请求的 Gauge 上：每个调用方取值都会使它们的每条序列成倍增加，而直方图的每个 bucket 都是一条序列。
+
+关闭的维度，或某个请求没有取值的维度，会导出为空标签，Prometheus 将其视为不存在。用户路径维度启用后总有取值：没有用户路径的请求上报为 `/`。API Key 的密钥和 ID 永远不会被导出；已不存在的 Key 会上报为 `{unknown}`。
+
+### 控制基数
+
+每个启用的维度都会成倍增加序列数量，因此只开启您会查询的维度。
+
+- **用户路径深度。** 默认深度为 2 时，`/team/alice/laptop` 上报为 `/team/alice`。调低可以聚合得更粗；只有在更深层级取值很少时才调高。
+- **取值上限。** 每个维度保留它最先看到的 `METRICS_CALLER_MAX_VALUES`（默认 100）个不同取值。上限按维度分别计算：三个维度全部开启时最多保留 300 个取值。之后的取值共用一条序列：`{other}`（用户路径为 `/{other}`）。已接纳的取值会保留各自的序列，直到 GoModel 重启。
+- **被拒绝的取值。** 超过 256 字节的取值、不是有效 UTF-8 的取值，或写法与保留名称（`{other}`、`/{other}`、`{unknown}`）相同的取值，上报为 `{other}`（用户路径为 `/{other}`），且不占用上限名额。
+- **请求标签按标签集合取值。** `prod,team-a` 和 `team-a` 是不同的取值，因此标签集合消耗上限的速度远快于标签本身：一个客户端任意组合 7 个标签即可发送 127 种不同集合，单独就能占满默认上限。此后每个新集合，无论是否正当，都会上报为 `{other}`，直到 GoModel 重启。如果客户端会发送任意标签，请保持此维度关闭。
+- **最坏情况。** 每个维度最多贡献其上限个取值，外加 `{other}` 和空值（API 密钥还有 `{unknown}`）。三个维度全部以默认上限开启时，单个提供商和模型在每种 token 类型下最多可达 102 × 103 × 102 ≈ 107 万条序列。只有实际出现的组合才会导出，但仍建议逐个开启维度，并把 `METRICS_CALLER_MAX_VALUES` 调低到预期的取值数量。
 
 ## Prometheus 配置
 

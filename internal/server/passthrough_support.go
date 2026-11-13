@@ -533,6 +533,7 @@ func passthroughUsageObserver(c *echo.Context, usageLogger usage.LoggerInterface
 	observer.SetSessionID(core.SessionIDFromContext(c.Request().Context()))
 	observer.SetAuthKeyID(core.GetAuthKeyID(c.Request().Context()))
 	observer.SetLabels(core.RequestLabelsFromContext(c.Request().Context()))
+	observer.SetGenAIOperation(core.GenAIOperationFromContext(c.Request().Context()))
 	observer.SetRewriteTokensSaved(core.RewriteTokensSavedFromContext(c.Request().Context()))
 	return observer
 }

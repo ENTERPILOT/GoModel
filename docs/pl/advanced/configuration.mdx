@@ -472,6 +472,11 @@ Przykłady YAML, okresy, dopasowywanie i egzekwowanie w workflowach opisuje stro
 | ------------------ | ---------------------------------------- | ---------- |
 | `METRICS_ENABLED`  | Włącza metryki Prometheusa (eksperymentalne) | `false`    |
 | `METRICS_ENDPOINT` | Ścieżka HTTP dla metryk                  | `/metrics` |
+| `METRICS_CALLER_USER_PATH` | Dodaje user path do metryk tokenów i kosztów, w Prometheusie i OpenTelemetry, oraz do licznika requestów per wywołujący w Prometheusie (zobacz [Wymiary wywołującego](/pl/guides/prometheus-metrics#wymiary-wywołującego)) | `false` |
+| `METRICS_CALLER_USER_PATH_DEPTH` | Liczba początkowych segmentów user path zachowywanych w metrykach; wartość poniżej 1 oznacza wartość domyślną | `2` |
+| `METRICS_CALLER_AUTH_KEY` | Dodaje do tych metryk nazwę zarządzanego klucza API | `false` |
+| `METRICS_CALLER_REQUEST_LABELS` | Dodaje do tych metryk etykiety requestu | `false` |
+| `METRICS_CALLER_MAX_VALUES` | Liczba różnych wartości na wymiar wywołującego; kolejne są raportowane jako `{other}` (`/{other}` dla user path). Wartość poniżej 1 oznacza wartość domyślną | `100` |
 | `OTEL_ENABLED`     | Eksportuje trace'y i metryki OpenTelemetry przez OTLP (zobacz [OpenTelemetry](/pl/guides/opentelemetry)) | `false`    |
 
 #### Admin

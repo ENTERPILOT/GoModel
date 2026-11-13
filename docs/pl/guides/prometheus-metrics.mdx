@@ -88,10 +88,15 @@ METRICS_ENDPOINT=/internal/prometheus
 
 ### Przez zmienne środowiskowe
 
-| Zmienna            | Wartość domyślna | Opis                              |
-| ------------------ | ---------- | --------------------------------- |
-| `METRICS_ENABLED`  | `false`    | Włącza/wyłącza zbieranie metryk   |
-| `METRICS_ENDPOINT` | `/metrics` | Ścieżka HTTP endpointu metryk     |
+| Zmienna                          | Wartość domyślna | Opis                                                        |
+| -------------------------------- | ---------------- | ----------------------------------------------------------- |
+| `METRICS_ENABLED`                | `false`          | Włącza/wyłącza zbieranie metryk                             |
+| `METRICS_ENDPOINT`               | `/metrics`       | Ścieżka HTTP endpointu metryk                               |
+| `METRICS_CALLER_USER_PATH`       | `false`          | Dodaje user path do [metryk wywołującego](#wymiary-wywołującego) |
+| `METRICS_CALLER_USER_PATH_DEPTH` | `2`              | Liczba początkowych segmentów user path, które są zachowywane |
+| `METRICS_CALLER_AUTH_KEY`        | `false`          | Dodaje nazwę zarządzanego klucza API                        |
+| `METRICS_CALLER_REQUEST_LABELS`  | `false`          | Dodaje etykiety requestu                                    |
+| `METRICS_CALLER_MAX_VALUES`      | `100`            | Liczba różnych wartości zachowywanych dla każdego wymiaru   |
 
 ### Przez config.yaml
 
@@ -103,6 +108,16 @@ metrics:
 
   # Ścieżka endpointu HTTP, pod którą udostępniane są metryki
   endpoint: "/metrics"
+
+  # Kto wysłał request: wymiary na metrykach tokenów, kosztów i requestów
+  # per wywołujący. Domyślnie wszystko wyłączone; zobacz „Wymiary
+  # wywołującego" poniżej.
+  caller_dimensions:
+    user_path: false
+    user_path_depth: 2
+    auth_key: false
+    request_labels: false
+    max_values: 100
 ```
 
 ## Przykłady
@@ -323,6 +338,143 @@ proces może się zakończyć, zanim Prometheus odczyta licznik, więc stratę z
 ```promql
 sum(increase(gomodel_usage_entries_dropped_total[5m])) by (reason) > 0
 ```
+
+## Metryki tokenów i kosztów
+
+GoModel zlicza tokeny i koszt każdego requestu, dla którego zapisuje użycie,
+więc możesz rysować wykresy wydatków i ustawiać na nie alerty bez odpytywania
+bazy użycia. Liczniki są aktualizowane po zakończeniu odpowiedzi; request
+streamowany jest liczony raz, w chwili zamknięcia streamu.
+
+| Metryka                           | Zlicza                                                        |
+| --------------------------------- | ------------------------------------------------------------- |
+| `gomodel_tokens_total`            | Tokeny wysłane do providerów i przez nich zwrócone            |
+| `gomodel_token_details_total`     | Tokeny z cache, zapisy do cache i tokeny reasoningu           |
+| `gomodel_provider_cost_usd_total` | Ile naliczają providerzy, w USD                               |
+| `gomodel_billed_cost_usd_total`   | Ile naliczono wywołującym, w USD (koszt providera plus narzut) |
+
+Wszystkie cztery mają etykiety `provider` (nazwa providera z konfiguracji)
+i `model` (model, który odpowiedział) oraz
+[etykiety wywołującego](#wymiary-wywołującego). Dwie metryki tokenów mają
+dodatkowo `token_type`:
+
+| Metryka                       | `token_type`        | Znaczenie                                                  |
+| ----------------------------- | ------------------- | ---------------------------------------------------------- |
+| `gomodel_tokens_total`        | `input`             | Wszystkie tokeny promptu: bez cache, z cache i zapisy do cache |
+| `gomodel_tokens_total`        | `output`            | Wszystkie tokeny odpowiedzi, łącznie z reasoningiem        |
+| `gomodel_token_details_total` | `input_cached`      | Tokeny promptu odczytane przez providera z jego prompt cache |
+| `gomodel_token_details_total` | `input_cache_write` | Tokeny promptu zapisane przez providera do jego prompt cache |
+| `gomodel_token_details_total` | `output_reasoning`  | Tokeny reasoningu („thinking")                             |
+
+Szczegóły są **częściami** `gomodel_tokens_total`, a nie dodatkiem do niej,
+i dlatego są osobną metryką: `sum(gomodel_tokens_total)` to suma tokenów,
+a żadna suma po jednej metryce nie liczy tokenu dwa razy. To samo dotyczy
+obu metryk kosztów. Providerzy różnie raportują tokeny z cache i tokeny
+reasoningu (Anthropic podaje odczyty z cache ponad input, xAI podaje
+reasoning ponad output); GoModel je normalizuje, więc `input` i `output`
+znaczą to samo dla każdego providera.
+
+```promql
+# Tokeny na minutę według modelu i kierunku
+sum(rate(gomodel_tokens_total[5m])) by (model, token_type) * 60
+
+# Udział tokenów promptu obsłużonych z prompt cache providera
+sum(rate(gomodel_token_details_total{token_type="input_cached"}[5m]))
+  / sum(rate(gomodel_tokens_total{token_type="input"}[5m]))
+
+# Wydatki u providerów na godzinę według providera
+sum(increase(gomodel_provider_cost_usd_total[1h])) by (provider)
+```
+
+Co jest liczone, a co nie:
+
+- **Śledzenie użycia musi być włączone** (`USAGE_ENABLED=true`, wartość
+  domyślna). Metryki powstają z tych samych wpisów, które pokazuje dashboard
+  użycia.
+- **Koszt wymaga cennika.** Request do modelu bez znanej ceny dodaje tokeny,
+  ale nie koszt. `gomodel_billed_cost_usd_total` jest zapisywana tylko wtedy,
+  gdy włączone są [narzuty cenowe](/pl/features/cost-tracking).
+- **Trafienia w cache odpowiedzi** nigdy nie docierają do providera, więc nie
+  dodają tokenów ani kosztu providera. Naliczone trafienie w cache
+  (`pricing.bill_cache_hits`) nadal trafia do `gomodel_billed_cost_usd_total`.
+- **Wywołania narzędzi MCP** nie zapisują tokenów ani kosztu, więc niczego nie
+  dodają.
+- Seria pojawia się, gdy ma wartość różną od zera.
+
+## Wymiary wywołującego
+
+Domyślnie metryki nie mówią nic o tym, kto wysłał request. Dodają to trzy
+opcjonalne wymiary:
+
+| Ustawienie                      | Etykieta         | Wartość                                                              |
+| ------------------------------- | ---------------- | -------------------------------------------------------------------- |
+| `METRICS_CALLER_USER_PATH`      | `user_path`      | [User path](/pl/features/user-path), przycięty do `METRICS_CALLER_USER_PATH_DEPTH` segmentów; `/` dla requestu bez user path |
+| `METRICS_CALLER_AUTH_KEY`       | `auth_key`       | Nazwa zarządzanego klucza API. Pusta dla klucza master               |
+| `METRICS_CALLER_REQUEST_LABELS` | `request_labels` | Etykiety requestu, posortowane i rozdzielone przecinkami (`prod,team-a`). Przecinek wewnątrz etykiety jest zapisywany jako `%2C`, a znak procentu jako `%25` |
+
+```bash
+METRICS_ENABLED=true
+METRICS_CALLER_AUTH_KEY=true
+```
+
+```promql
+# Tokeny na minutę według klucza API
+sum(rate(gomodel_tokens_total[5m])) by (auth_key) * 60
+
+# Odsetek błędów według klucza API
+sum(rate(gomodel_caller_requests_total{status_type="error"}[5m])) by (auth_key)
+  / sum(rate(gomodel_caller_requests_total[5m])) by (auth_key)
+
+# Naliczony koszt z ostatnich 24 godzin dla etykiety zespołu, niezależnie od innych etykiet requestu
+sum(increase(gomodel_billed_cost_usd_total{request_labels=~"(.*,)?team-a(,.*)?"}[24h]))
+```
+
+Etykiety są na czterech metrykach tokenów i kosztów oraz na
+`gomodel_caller_requests_total`, liczniku requestów z etykietami `provider`,
+`model` i `status_type`, który istnieje tylko wtedy, gdy włączony jest
+któryś wymiar wywołującego. **Nie** są dodawane do `gomodel_requests_total`,
+histogramu `gomodel_request_duration_seconds` ani wskaźnika requestów
+w toku: każda wartość wywołującego mnożyłaby każdą z ich serii, a histogram
+ma jedną serię na bucket.
+
+Wymiar wyłączony albo bez wartości dla danego requestu jest eksportowany jako
+pusta etykieta, którą Prometheus traktuje jak brak etykiety. Włączony user
+path zawsze ma wartość: request bez user path jest raportowany jako `/`.
+Sekret i ID klucza API nigdy nie są eksportowane; klucz, który już nie
+istnieje, jest raportowany jako `{unknown}`.
+
+### Ograniczanie kardynalności
+
+Każdy włączony wymiar mnoży liczbę serii, więc włączaj tylko to, o co pytasz
+w zapytaniach.
+
+- **Głębokość user path.** Przy domyślnej głębokości 2 ścieżka
+  `/team/alice/laptop` jest raportowana jako `/team/alice`. Zmniejsz ją, żeby
+  grupować mocniej; zwiększaj tylko wtedy, gdy głębsze poziomy mają mało
+  wartości.
+- **Limit wartości.** Każdy wymiar zachowuje pierwsze
+  `METRICS_CALLER_MAX_VALUES` (domyślnie 100) różnych wartości, które zobaczy.
+  Limit dotyczy każdego wymiaru osobno: przy trzech włączonych wymiarach
+  zachowanych może być do 300 wartości. Kolejne wartości dzielą jedną serię:
+  `{other}` (`/{other}` dla user path). Przyjęte wartości zachowują własną
+  serię do restartu GoModel.
+- **Odrzucane wartości.** Wartość dłuższa niż 256 bajtów, niebędąca
+  poprawnym UTF-8 albo zapisana jak nazwa zarezerwowana (`{other}`,
+  `/{other}`, `{unknown}`) jest raportowana jako `{other}` (`/{other}` dla
+  user path) i nie zajmuje miejsca w limicie.
+- **Etykiety requestu to jedna wartość na zestaw etykiet.** `prod,team-a`
+  i `team-a` to różne wartości, więc zestawy etykiet wyczerpują limit dużo
+  szybciej niż same etykiety: klient, który dowolnie łączy 7 etykiet, może
+  wysłać 127 różnych zestawów, czyli sam zapełnić domyślny limit. Każdy
+  kolejny zestaw, poprawny czy nie, jest potem raportowany jako `{other}` aż
+  do restartu GoModel. Jeśli klienci wysyłają dowolne etykiety, zostaw ten
+  wymiar wyłączony.
+- **Najgorszy przypadek.** Każdy wymiar daje co najwyżej swój limit plus
+  `{other}` i pustą wartość (dla kluczy API także `{unknown}`). Przy trzech
+  wymiarach i domyślnym limicie jeden provider i model mogą osiągnąć
+  102 × 103 × 102 ≈ 1,07 mln serii na typ tokenów. Eksportowane są tylko
+  kombinacje, które faktycznie wystąpią, ale włączaj wymiary pojedynczo
+  i obniż `METRICS_CALLER_MAX_VALUES` do spodziewanej liczby wartości.
 
 ## Konfiguracja Prometheusa
 

@@ -38,8 +38,18 @@ under us.
 Rules that follow from this:
 
 - New gateway metrics are added to Prometheus with `client_golang`, as today.
-- OpenTelemetry emits semantic-convention signals only; it is not a second
-  transport for `gomodel_*` metrics.
+- OpenTelemetry emits semantic-convention signals, plus `gomodel.*`
+  instruments where the conventions are silent; it is not a second transport
+  for `gomodel_*` metrics. A signal the conventions do not define yet gets a
+  `gomodel.*` instrument rather than an invented `gen_ai.*` name:
+  empty responses, the cached, cache-write, and reasoning parts of
+  `gen_ai.client.token.usage`, and cost.
+- Token usage and cost are read from recorded usage entries, not from the
+  provider hooks, so these metrics need usage tracking (`USAGE_ENABLED`, on by
+  default) and stay empty without it. `internal/usagemetrics` reads each entry
+  once and hands the result to both pipelines, so they report the same numbers
+  and share the opt-in caller dimensions; each pipeline still defines its own
+  instruments.
 - The OpenTelemetry HTTP middleware excludes the configured Prometheus endpoint
   (together with health and pprof), so scrapes never produce spans or inflate
   HTTP metrics.

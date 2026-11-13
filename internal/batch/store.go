@@ -44,6 +44,19 @@ type StoredBatch struct {
 	UsageLoggedAt     *time.Time `json:"usage_logged_at,omitempty"`
 }
 
+// UsageClaim is the outcome of Store.ClaimUsage.
+type UsageClaim int
+
+const (
+	// UsagePending means another writer holds a claim younger than the
+	// timeout: it is writing the entries now, or stopped a moment ago.
+	UsagePending UsageClaim = iota
+	// UsageClaimed means the caller holds the claim and writes the entries.
+	UsageClaimed
+	// UsageLogged means the entries were already written.
+	UsageLogged
+)
+
 // Store defines persistence operations for batch lifecycle APIs.
 type Store interface {
 	Create(ctx context.Context, batch *StoredBatch) error
@@ -53,7 +66,18 @@ type Store interface {
 	// itself and its descendants); the cursor must lie inside it too, else
 	// ErrNotFound.
 	List(ctx context.Context, limit int, after, userPath string) ([]*StoredBatch, error)
+	// Update replaces the stored batch. It never clears a stored
+	// UsageLoggedAt and never touches a usage claim, so saving a copy read
+	// before the batch's usage was logged does not make it count again.
 	Update(ctx context.Context, batch *StoredBatch) error
+	// ClaimUsage asks for the right to write the batch's usage entries at
+	// now. The claim is granted when nobody holds one, or when the one held
+	// is at least timeout old and so belongs to a writer that stopped. Of
+	// concurrent callers exactly one is granted the claim.
+	ClaimUsage(ctx context.Context, id string, now time.Time, timeout time.Duration) (UsageClaim, error)
+	// CompleteUsage records that every usage entry of the batch was handed
+	// to the usage logger at loggedAt, and releases the claim.
+	CompleteUsage(ctx context.Context, id string, loggedAt time.Time) error
 	Delete(ctx context.Context, id string) error
 	Close() error
 }

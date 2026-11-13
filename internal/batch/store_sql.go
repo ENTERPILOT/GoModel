@@ -33,8 +33,11 @@ var sqlSchema = []string{
 // sqlMigrations add columns to tables created by earlier releases. The
 // user_path column lets scoped listings filter in the database; rows written
 // before it existed are backfilled from their serialized payload on start.
+// The usage columns hold the usage claim (see usage_claim.go).
 var sqlMigrations = []string{
 	`ALTER TABLE batches ADD COLUMN user_path TEXT`,
+	`ALTER TABLE batches ADD COLUMN usage_claimed_at ` + sqlx.TypeInt64,
+	`ALTER TABLE batches ADD COLUMN usage_logged_at ` + sqlx.TypeInt64,
 }
 
 var sqlPostMigrationSchema = []string{
@@ -133,7 +136,8 @@ func (s *SQLStore) Create(ctx context.Context, batch *StoredBatch) error {
 // Get returns a batch by id.
 func (s *SQLStore) Get(ctx context.Context, id string) (*StoredBatch, error) {
 	var payload []byte
-	err := s.db.QueryRow(ctx, "SELECT data FROM batches WHERE id = ?", id).Scan(&payload)
+	var usageLoggedAt *int64
+	err := s.db.QueryRow(ctx, "SELECT data, usage_logged_at FROM batches WHERE id = ?", id).Scan(&payload, &usageLoggedAt)
 	if err != nil {
 		if errors.Is(err, sqlx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -145,7 +149,7 @@ func (s *SQLStore) Get(ctx context.Context, id string) (*StoredBatch, error) {
 	if err != nil {
 		return nil, fmt.Errorf("decode batch: %w", err)
 	}
-	return batch, nil
+	return withUsageLoggedAt(batch, usageLoggedAt), nil
 }
 
 // List returns batches ordered by created_at desc, id desc, optionally
@@ -185,7 +189,7 @@ func (s *SQLStore) List(ctx context.Context, limit int, after, userPath string) 
 	args = append(args, limit)
 
 	rows, err := s.db.Query(ctx, `
-		SELECT data
+		SELECT data, usage_logged_at
 		FROM batches`+sqlutil.BuildWhereClause(conditions)+`
 		ORDER BY created_at DESC, id DESC
 		LIMIT ?
@@ -198,14 +202,15 @@ func (s *SQLStore) List(ctx context.Context, limit int, after, userPath string) 
 	items := make([]*StoredBatch, 0, limit)
 	for rows.Next() {
 		var payload []byte
-		if err := rows.Scan(&payload); err != nil {
+		var usageLoggedAt *int64
+		if err := rows.Scan(&payload, &usageLoggedAt); err != nil {
 			return nil, fmt.Errorf("scan batch row: %w", err)
 		}
 		batch, err := deserializeBatch(payload)
 		if err != nil {
 			return nil, fmt.Errorf("decode batch row: %w", err)
 		}
-		items = append(items, batch)
+		items = append(items, withUsageLoggedAt(batch, usageLoggedAt))
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate batch rows: %w", err)
@@ -214,7 +219,7 @@ func (s *SQLStore) List(ctx context.Context, limit int, after, userPath string) 
 	return items, nil
 }
 
-// Update updates a stored batch object.
+// Update updates a stored batch object. It leaves the usage columns alone.
 func (s *SQLStore) Update(ctx context.Context, batch *StoredBatch) error {
 	payload, err := serializeBatch(batch)
 	if err != nil {
@@ -228,6 +233,48 @@ func (s *SQLStore) Update(ctx context.Context, batch *StoredBatch) error {
 	`, time.Now().Unix(), batch.Batch.Status, string(payload), strings.TrimSpace(batch.UserPath), batch.Batch.ID)
 	if err != nil {
 		return fmt.Errorf("update batch: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ClaimUsage grants the batch's usage claim with one conditional update, so
+// concurrent callers cannot both take it.
+func (s *SQLStore) ClaimUsage(ctx context.Context, id string, now time.Time, timeout time.Duration) (UsageClaim, error) {
+	// The read finds a missing batch and a marker kept in the serialized
+	// batch; neither can change back, so it need not be atomic with the claim.
+	stored, err := s.Get(ctx, id)
+	if err != nil {
+		return UsagePending, err
+	}
+	if stored.UsageLoggedAt != nil {
+		return UsageLogged, nil
+	}
+	affected, err := s.db.Exec(ctx, `
+		UPDATE batches
+		SET usage_claimed_at = ?
+		WHERE id = ? AND usage_logged_at IS NULL AND (usage_claimed_at IS NULL OR usage_claimed_at <= ?)
+	`, now.UnixNano(), id, staleUsageClaim(now, timeout))
+	if err != nil {
+		return UsagePending, fmt.Errorf("claim batch usage: %w", err)
+	}
+	if affected == 0 {
+		return UsagePending, nil
+	}
+	return UsageClaimed, nil
+}
+
+// CompleteUsage marks the batch's usage as logged and releases the claim.
+func (s *SQLStore) CompleteUsage(ctx context.Context, id string, loggedAt time.Time) error {
+	affected, err := s.db.Exec(ctx, `
+		UPDATE batches
+		SET updated_at = ?, usage_logged_at = ?, usage_claimed_at = NULL
+		WHERE id = ?
+	`, time.Now().Unix(), loggedAt.UnixNano(), id)
+	if err != nil {
+		return fmt.Errorf("complete batch usage: %w", err)
 	}
 	if affected == 0 {
 		return ErrNotFound

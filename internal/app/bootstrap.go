@@ -17,6 +17,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/server"
 	"github.com/enterpilot/gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/internal/usagemetrics"
 )
 
 // bootstrap carries the state New threads through its initialization phases:
@@ -46,6 +47,10 @@ type bootstrap struct {
 	pricingResolver      usage.PricingResolver
 	seedGuardrails       []guardrails.Definition
 	featureCaps          core.WorkflowFeatures
+	// requestCallers is the caller resolver of gomodel_caller_requests_total,
+	// installed process-wide only once the generation is sure to serve.
+	requestCallers        *usagemetrics.Callers
+	installRequestCallers bool
 
 	// Produced by the server phases.
 	provider                 core.RoutableProvider

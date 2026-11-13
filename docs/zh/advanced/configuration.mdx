@@ -285,6 +285,11 @@ server:
 | ------------------ | ---------------------------------------- | ---------- |
 | `METRICS_ENABLED`  | 启用 Prometheus 指标（实验性） | `false`    |
 | `METRICS_ENDPOINT` | 指标的 HTTP 路径                    | `/metrics` |
+| `METRICS_CALLER_USER_PATH` | 将用户路径加入 Token 和成本指标（Prometheus 与 OpenTelemetry 均适用），以及 Prometheus 中按调用方统计的请求计数器（请参阅[调用方维度](/zh/guides/prometheus-metrics#调用方维度)） | `false` |
+| `METRICS_CALLER_USER_PATH_DEPTH` | 指标上保留的用户路径前几段；小于 1 的值使用默认值 | `2` |
+| `METRICS_CALLER_AUTH_KEY` | 为这些指标加入托管 API Key 的名称 | `false` |
+| `METRICS_CALLER_REQUEST_LABELS` | 为这些指标加入请求标签 | `false` |
+| `METRICS_CALLER_MAX_VALUES` | 每个调用方维度保留的不同取值数量；之后的取值上报为 `{other}`（用户路径为 `/{other}`）。小于 1 的值使用默认值 | `100` |
 | `OTEL_ENABLED`     | 通过 OTLP 导出 OpenTelemetry Trace 和指标（请参阅 [OpenTelemetry](/zh/guides/opentelemetry)） | `false`    |
 
 #### 管理

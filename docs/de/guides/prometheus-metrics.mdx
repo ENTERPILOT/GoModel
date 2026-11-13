@@ -87,10 +87,15 @@ METRICS_ENDPOINT=/internal/prometheus
 
 ### Über Umgebungsvariablen
 
-| Variable           | Standardwert | Beschreibung                      |
-| ------------------ | ---------- | --------------------------------- |
-| `METRICS_ENABLED`  | `false`    | Erfassung von Metriken aktivieren/deaktivieren |
-| `METRICS_ENDPOINT` | `/metrics` | HTTP-Pfad des Metrik-Endpunkts    |
+| Variable                         | Standardwert | Beschreibung                                                   |
+| -------------------------------- | ------------ | -------------------------------------------------------------- |
+| `METRICS_ENABLED`                | `false`      | Erfassung von Metriken aktivieren/deaktivieren                 |
+| `METRICS_ENDPOINT`               | `/metrics`   | HTTP-Pfad des Metrik-Endpunkts                                 |
+| `METRICS_CALLER_USER_PATH`       | `false`      | Fügt den User Path zu den [Aufrufer-Metriken](/de/guides/prometheus-metrics#aufrufer-dimensionen) hinzu |
+| `METRICS_CALLER_USER_PATH_DEPTH` | `2`          | Anzahl der führenden User-Path-Segmente, die erhalten bleiben  |
+| `METRICS_CALLER_AUTH_KEY`        | `false`      | Fügt den Namen des verwalteten API-Keys hinzu                  |
+| `METRICS_CALLER_REQUEST_LABELS`  | `false`      | Fügt die Request-Labels hinzu                                  |
+| `METRICS_CALLER_MAX_VALUES`      | `100`        | Unterschiedliche Werte, die je Aufrufer-Dimension erhalten bleiben |
 
 ### Über config.yaml
 
@@ -102,6 +107,16 @@ metrics:
 
   # HTTP-Endpunktpfad, unter dem die Metriken bereitgestellt werden
   endpoint: "/metrics"
+
+  # Wer den Request gestellt hat, auf den Token-, Kosten- und
+  # Aufrufer-Request-Metriken. Standardmäßig alles aus; siehe
+  # „Aufrufer-Dimensionen" weiter unten.
+  caller_dimensions:
+    user_path: false
+    user_path_depth: 2
+    auth_key: false
+    request_labels: false
+    max_values: 100
 ```
 
 ## Beispiele
@@ -322,6 +337,147 @@ der Prozess kann enden, bevor Prometheus den Wert abruft, daher hält das Log de
 ```promql
 sum(increase(gomodel_usage_entries_dropped_total[5m])) by (reason) > 0
 ```
+
+## Token- und Kostenmetriken
+
+GoModel zählt die Token und die Kosten jedes Requests, für den es Nutzung
+aufzeichnet. So können Sie Ausgaben grafisch darstellen und Alerts darauf
+setzen, ohne die Nutzungsdatenbank abzufragen. Die Zähler werden aktualisiert,
+wenn die Response endet; ein Streaming-Request wird einmal gezählt, wenn sein
+Stream schließt.
+
+| Metrik                            | Zählt                                                          |
+| --------------------------------- | -------------------------------------------------------------- |
+| `gomodel_tokens_total`            | Token, die an Provider gesendet und von ihnen zurückgegeben wurden |
+| `gomodel_token_details_total`     | Gecachte Token, Cache-Write-Token und Reasoning-Token          |
+| `gomodel_provider_cost_usd_total` | Was Provider berechnen, in USD                                 |
+| `gomodel_billed_cost_usd_total`   | Was Aufrufern berechnet wird, in USD (Provider-Kosten plus Aufschlag) |
+
+Alle vier tragen `provider` (den Provider-Namen aus Ihrer Konfiguration) und
+`model` (das Modell, das geantwortet hat) sowie die
+[Aufrufer-Labels](/de/guides/prometheus-metrics#aufrufer-dimensionen). Die
+beiden Token-Metriken haben zusätzlich `token_type`:
+
+| Metrik                        | `token_type`        | Bedeutung                                                  |
+| ----------------------------- | ------------------- | ---------------------------------------------------------- |
+| `gomodel_tokens_total`        | `input`             | Alle Prompt-Token: ungecacht, gecacht und Cache-Write      |
+| `gomodel_tokens_total`        | `output`            | Alle Completion-Token, einschließlich Reasoning            |
+| `gomodel_token_details_total` | `input_cached`      | Prompt-Token, die der Provider aus seinem Prompt-Cache gelesen hat |
+| `gomodel_token_details_total` | `input_cache_write` | Prompt-Token, die der Provider in seinen Prompt-Cache geschrieben hat |
+| `gomodel_token_details_total` | `output_reasoning`  | Reasoning-Token („Thinking")                               |
+
+Die Details sind **Teile** von `gomodel_tokens_total`, keine Ergänzungen, und
+deshalb eine eigene Metrik: `sum(gomodel_tokens_total)` ist die Token-Summe,
+und keine Summe über eine einzelne Metrik zählt ein Token doppelt. Dasselbe
+gilt für die beiden Kostenmetriken. Provider melden gecachte Token und
+Reasoning-Token unterschiedlich (Anthropic meldet Cache-Lesezugriffe
+zusätzlich zum Input, xAI meldet Reasoning zusätzlich zum Output); GoModel
+normalisiert sie, sodass `input` und `output` für jeden Provider dasselbe
+bedeuten.
+
+```promql
+# Token pro Minute nach Modell und Richtung
+sum(rate(gomodel_tokens_total[5m])) by (model, token_type) * 60
+
+# Anteil der Prompt-Token aus dem Prompt-Cache des Providers
+sum(rate(gomodel_token_details_total{token_type="input_cached"}[5m]))
+  / sum(rate(gomodel_tokens_total{token_type="input"}[5m]))
+
+# Provider-Ausgaben pro Stunde nach Provider
+sum(increase(gomodel_provider_cost_usd_total[1h])) by (provider)
+```
+
+Was gezählt wird und was nicht:
+
+- **Die Nutzungserfassung muss aktiv sein** (`USAGE_ENABLED=true`, der
+  Standard). Die Metriken stammen aus denselben Einträgen, die das
+  Nutzungs-Dashboard zeigt.
+- **Kosten brauchen Preise.** Ein Request an ein Modell ohne bekannten Preis
+  fügt Token hinzu, aber keine Kosten. `gomodel_billed_cost_usd_total` wird
+  nur aufgezeichnet, wenn [Preisaufschläge](/de/features/cost-tracking)
+  aktiviert sind.
+- **Response-Cache-Treffer** erreichen nie einen Provider und fügen daher
+  weder Token noch Provider-Kosten hinzu. Ein berechneter Cache-Treffer
+  (`pricing.bill_cache_hits`) zählt weiterhin in
+  `gomodel_billed_cost_usd_total`.
+- **MCP-Tool-Aufrufe** zeichnen weder Token noch Kosten auf und fügen daher
+  nichts hinzu.
+- Eine Serie erscheint, sobald sie einen Wert ungleich null hat.
+
+## Aufrufer-Dimensionen
+
+Standardmäßig sagen die Metriken nichts darüber, wer einen Request gestellt
+hat. Drei Dimensionen lassen sich einzeln einschalten:
+
+| Einstellung                     | Label            | Wert                                                                 |
+| ------------------------------- | ---------------- | -------------------------------------------------------------------- |
+| `METRICS_CALLER_USER_PATH`      | `user_path`      | Der [User Path](/de/features/user-path), gekürzt auf `METRICS_CALLER_USER_PATH_DEPTH` Segmente; `/` bei einem Request ohne User Path |
+| `METRICS_CALLER_AUTH_KEY`       | `auth_key`       | Der Name des verwalteten API-Keys. Leer beim Master-Key              |
+| `METRICS_CALLER_REQUEST_LABELS` | `request_labels` | Die Labels des Requests, sortiert und durch Kommas getrennt (`prod,team-a`). Ein Komma innerhalb eines Labels wird als `%2C` geschrieben, ein Prozentzeichen als `%25` |
+
+```bash
+METRICS_ENABLED=true
+METRICS_CALLER_AUTH_KEY=true
+```
+
+```promql
+# Token pro Minute nach API-Key
+sum(rate(gomodel_tokens_total[5m])) by (auth_key) * 60
+
+# Fehlerrate nach API-Key
+sum(rate(gomodel_caller_requests_total{status_type="error"}[5m])) by (auth_key)
+  / sum(rate(gomodel_caller_requests_total[5m])) by (auth_key)
+
+# Berechnete Kosten der letzten 24 Stunden für ein Team-Label, unabhängig von weiteren Labels des Requests
+sum(increase(gomodel_billed_cost_usd_total{request_labels=~"(.*,)?team-a(,.*)?"}[24h]))
+```
+
+Die Labels stehen auf den vier Token- und Kostenmetriken und auf
+`gomodel_caller_requests_total`, einem Request-Zähler mit `provider`, `model`
+und `status_type`, der nur existiert, solange eine Aufrufer-Dimension aktiv
+ist. Sie werden **nicht** zu `gomodel_requests_total`, zum Histogramm
+`gomodel_request_duration_seconds` oder zum In-Flight-Gauge hinzugefügt: Jeder
+Aufrufer-Wert würde jede ihrer Serien vervielfachen, und ein Histogramm hat
+eine Serie pro Bucket.
+
+Eine Dimension, die ausgeschaltet ist oder für einen Request keinen Wert hat,
+wird als leeres Label exportiert, das Prometheus wie ein fehlendes behandelt.
+Der User Path hat, einmal eingeschaltet, immer einen Wert: Ein Request ohne
+User Path wird als `/` gemeldet. Das Secret und die ID des API-Keys werden nie
+exportiert; ein Key, der nicht mehr existiert, wird als `{unknown}` gemeldet.
+
+### Kardinalität begrenzen
+
+Jede aktive Dimension vervielfacht die Anzahl der Serien. Schalten Sie daher
+nur ein, was Sie abfragen.
+
+- **User-Path-Tiefe.** Mit der Standardtiefe 2 wird `/team/alice/laptop` als
+  `/team/alice` gemeldet. Senken Sie den Wert, um stärker zu gruppieren;
+  erhöhen Sie ihn nur, wenn die tieferen Ebenen wenige Werte haben.
+- **Obergrenze für Werte.** Jede Dimension behält die ersten
+  `METRICS_CALLER_MAX_VALUES` (Standard 100) unterschiedlichen Werte, die sie
+  sieht. Die Obergrenze gilt pro Dimension: Mit allen drei Dimensionen werden
+  bis zu 300 Werte behalten. Spätere Werte teilen sich eine Serie: `{other}`
+  (`/{other}` bei User Paths). Aufgenommene Werte behalten ihre eigene Serie,
+  bis GoModel neu startet.
+- **Abgelehnte Werte.** Ein Wert über 256 Bytes, ein Wert, der kein gültiges
+  UTF-8 ist, oder ein Wert, der wie ein reservierter Name lautet (`{other}`,
+  `/{other}`, `{unknown}`), wird als `{other}` gemeldet (`/{other}` bei User
+  Paths) und belegt keinen Platz unter der Obergrenze.
+- **Request-Labels sind ein Wert pro Label-Menge.** `prod,team-a` und `team-a`
+  sind unterschiedliche Werte, daher füllen Label-Mengen die Obergrenze viel
+  schneller als einzelne Labels: Ein Client, der 7 Labels frei kombiniert,
+  kann 127 verschiedene Mengen senden und damit allein die
+  Standardobergrenze füllen. Jede spätere Menge, ob legitim oder nicht, wird
+  dann bis zum Neustart als `{other}` gemeldet. Wenn Clients frei wählbare
+  Labels senden, lassen Sie diese Dimension aus.
+- **Ungünstigster Fall.** Jede Dimension trägt höchstens ihre Obergrenze plus
+  `{other}` und den leeren Wert bei (bei API-Keys zusätzlich `{unknown}`). Mit
+  allen drei Dimensionen und der Standardobergrenze kann ein Provider mit
+  einem Modell 102 × 103 × 102 ≈ 1,07 Millionen Serien pro Token-Typ
+  erreichen. Exportiert werden nur tatsächlich auftretende Kombinationen,
+  aktivieren Sie trotzdem eine Dimension nach der anderen und senken Sie
+  `METRICS_CALLER_MAX_VALUES` auf die erwartete Anzahl.
 
 ## Prometheus-Konfiguration
 

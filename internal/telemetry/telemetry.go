@@ -29,6 +29,7 @@ import (
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/usagemetrics"
 )
 
 const (
@@ -67,6 +68,7 @@ type Service struct {
 	meterProvider  *sdkMetric.MeterProvider
 	middleware     echo.MiddlewareFunc
 	observer       *observer
+	usage          *usageRecorder
 }
 
 // New configures OTLP traces and metrics from the standard OpenTelemetry
@@ -105,6 +107,9 @@ func New(ctx context.Context, cfg config.OpenTelemetryConfig, metricsEndpoint, s
 	captureContent := captureMessageContent()
 	service := &Service{tracerProvider: tp, meterProvider: mp}
 	service.observer, err = newObserver(tp, mp, captureContent)
+	if err == nil {
+		service.usage, err = newUsageRecorder(mp)
+	}
 	if err == nil {
 		service.middleware, err = newMiddleware(tp, mp, propagatorsFromEnv(), metricsEndpoint, captureContent)
 	}
@@ -145,6 +150,10 @@ func (s *Service) Middleware() echo.MiddlewareFunc { return s.middleware }
 // Hooks instruments logical provider calls with GenAI client spans and
 // metrics. Attach them to the provider factory before any provider exists.
 func (s *Service) Hooks() llmclient.Hooks { return s.observer.hooks() }
+
+// UsageRecorder exports token usage and cost from recorded usage entries.
+// Attach it to the usage logger with usagemetrics.NewTap.
+func (s *Service) UsageRecorder() usagemetrics.Recorder { return s.usage }
 
 // Close flushes pending telemetry and releases exporter resources. Both
 // providers shut down concurrently so a stalled metric export cannot consume
@@ -192,12 +201,16 @@ func newMiddleware(tp *sdkTrace.TracerProvider, mp *sdkMetric.MeterProvider, pro
 // (see core.GenerationTrace), so their spans carry the decoded usage. A
 // request the sampler dropped is skipped: its spans are never exported, so
 // rebuilding its outcome would be wasted work.
+//
+// Every request also gets a core.GenAIOperation record, sampled or not, so
+// the token metrics name the operation the duration metric does.
 func withGenerationTracing(next echo.HandlerFunc, captureContent bool) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		req := c.Request()
-		if trace.SpanFromContext(req.Context()).IsRecording() {
-			c.SetRequest(req.WithContext(core.WithGenerationTracing(req.Context(), captureContent)))
+		ctx := core.WithGenAIOperation(c.Request().Context())
+		if trace.SpanFromContext(ctx).IsRecording() {
+			ctx = core.WithGenerationTracing(ctx, captureContent)
 		}
+		c.SetRequest(c.Request().WithContext(ctx))
 		return next(c)
 	}
 }

@@ -228,6 +228,10 @@ func buildDefaultConfig() *Config {
 		},
 		Metrics: MetricsConfig{
 			Endpoint: "/metrics",
+			CallerDimensions: MetricsCallerDimensionsConfig{
+				UserPathDepth: DefaultMetricsUserPathDepth,
+				MaxValues:     DefaultMetricsCallerMaxValues,
+			},
 		},
 		HTTP: HTTPConfig{
 			Timeout:               600,

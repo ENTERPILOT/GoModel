@@ -194,6 +194,67 @@ full stream lifetime as seen by the client. A stream that fails to establish,
 or ends before delivering its first chunk, always gets a failure span, so
 errors are traced.
 
+### Token usage and cost metrics
+
+GoModel exports the tokens and the cost of every request it records usage
+for. The metrics are updated when the response ends; a streaming request is
+exported once, when its stream closes.
+
+| Metric | Type | Unit | Records |
+| --- | --- | --- | --- |
+| `gen_ai.client.token.usage` | Histogram | `{token}` | Input and output tokens per call, split by `gen_ai.token.type` (`input` or `output`), as the GenAI semantic conventions define it. |
+| `gomodel.client.token.usage.details` | Counter | `{token}` | Parts of those tokens, split by `gomodel.token.type`: `input_cached`, `input_cache_write`, `output_reasoning`. |
+| `gomodel.client.provider_cost` | Counter | `{USD}` | What providers charge. |
+| `gomodel.client.billed_cost` | Counter | `{USD}` | What callers are billed: provider cost plus markup. |
+
+`input` covers every prompt token (uncached, cached, and cache-write) and
+`output` every completion token (reasoning included), for every provider. The
+details are **parts** of those totals, so they are a separate metric: no sum
+over one metric counts a token or a dollar twice. The semantic conventions
+define no metric for the details or for cost, hence the `gomodel.*` names.
+
+All four carry `gen_ai.provider.name`, `gomodel.provider.name`,
+`gen_ai.request.model` (when known), `gen_ai.response.model`, and
+`gen_ai.operation.name`: the operation of the provider call, the same value
+`gen_ai.client.operation.duration` reports (`generate_content` for native
+Gemini calls, `text_completion` for `/v1/completions`). Endpoints without a
+GenAI operation (audio, images, realtime) have none.
+
+- **Usage tracking must be on** (`USAGE_ENABLED=true`, the default).
+- **Cost needs pricing.** A model without a known price adds tokens but no
+  cost. `gomodel.client.billed_cost` is exported only when
+  [pricing markups](/features/cost-tracking) are enabled.
+- **Response-cache hits** never reach a provider: they add no tokens and no
+  provider cost, only their billed cost when cache hits are billed.
+- **MCP tool calls** record neither tokens nor cost, so they add nothing.
+- `OTEL_METRICS_EXPORTER=none` switches these metrics off with the others.
+
+#### Caller attributes
+
+Three opt-in settings add who made the request to these four metrics. They
+are shared with the [Prometheus metrics](/guides/prometheus-metrics#caller-dimensions),
+which explains the cardinality limits in detail.
+
+| Setting | Attribute | Value |
+| --- | --- | --- |
+| `METRICS_CALLER_USER_PATH` | `gomodel.user_path` | The [user path](/features/user-path), cut to `METRICS_CALLER_USER_PATH_DEPTH` (default 2) segments; `/` for a request without one. |
+| `METRICS_CALLER_AUTH_KEY` | `gomodel.auth_key.name` | The name of the managed API key; absent for the master key, `{unknown}` for a key that no longer exists. Never the secret or the key ID. |
+| `METRICS_CALLER_REQUEST_LABELS` | `gomodel.request.labels` | The request's labels, sorted and comma-separated (`prod,team-a`). A comma inside a label is written `%2C`, a percent sign `%25`. |
+
+Each dimension keeps the first `METRICS_CALLER_MAX_VALUES` (default 100)
+distinct values; later values, values over 256 bytes, values that are not
+valid UTF-8, and values spelled like `{other}` or `{unknown}` are exported as
+`{other}` (`/{other}` for user paths). The duration histograms and the spans
+never carry caller attributes.
+
+`gen_ai.client.token.usage` is not a call counter. A call records one point
+per token type, a side without tokens records none, and a response-cache hit
+records nothing, so the histogram's count is about two per call. Counting
+only the `gen_ai.token.type=input` points gives the calls that reported input
+tokens; for request counts per caller, use
+[`gomodel_caller_requests_total`](/guides/prometheus-metrics#caller-dimensions)
+in Prometheus.
+
 ### Prompt and completion capture
 
 Content capture is **off by default**. Turn it on to see the exchanged
@@ -254,6 +315,10 @@ without leaking what flows through the gateway:
   `user_agent.original` are stripped from HTTP spans, and host-derived
   dimensions are excluded from HTTP metrics so a client cannot inflate metric
   cardinality through the `Host` header.
+- User paths, API key names, and request labels are exported only on the
+  token and cost metrics, and only when you turn on the matching
+  [caller attribute](#caller-attributes). API key secrets and IDs are never
+  exported.
 
 ## Reloading
 
