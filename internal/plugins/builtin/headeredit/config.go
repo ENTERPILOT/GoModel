@@ -55,9 +55,13 @@ func decodeConfig(raw json.RawMessage) (config, error) {
 	return c, cfg.Err()
 }
 
-// errRefusedHeader marks a well-formed line naming a header the plugin may
-// not edit. Such a line is skipped, not an error: see Plugin.Init.
-var errRefusedHeader = errors.New("refused header")
+// refusedHeaderError marks a well-formed line naming a header the plugin may
+// not edit. Loading a stored instance skips such a line (Plugin.Init); saving
+// one rejects it (Plugin.ValidateSave). The text names the header, never its
+// value.
+type refusedHeaderError string
+
+func (e refusedHeaderError) Error() string { return string(e) }
 
 // parseEdits turns the lines of one config field into edits. Blank lines and
 // lines starting with # are ignored. Set and add lines look like
@@ -73,9 +77,9 @@ func parseEdits(field string, entries []string, o op, upstream bool, ignored fun
 		}
 		e, err := parseLine(line, o)
 		if err == nil && upstream && core.IsPluginUpstreamHeaderDenied(e.name) {
-			err = fmt.Errorf("header %q is set by the gateway and cannot be sent upstream: %w", e.name, errRefusedHeader)
+			err = refusedHeaderError(fmt.Sprintf("header %q is set by the gateway and cannot be sent upstream", e.name))
 		}
-		if errors.Is(err, errRefusedHeader) {
+		if _, refused := errors.AsType[refusedHeaderError](err); refused {
 			if ignored != nil {
 				ignored(field, i+1, err)
 			}
@@ -117,10 +121,10 @@ func checkName(name string, o op) error {
 	}
 	lower := strings.ToLower(name)
 	if core.IsCredentialHeader(lower) {
-		return fmt.Errorf("header %q carries credentials and cannot be edited: %w", name, errRefusedHeader)
+		return refusedHeaderError(fmt.Sprintf("header %q carries credentials and cannot be edited", name))
 	}
 	if o != opRemove && (strings.Contains(lower, "secret") || strings.Contains(lower, "token")) {
-		return fmt.Errorf("header %q looks like a credential and cannot be set: %w", name, errRefusedHeader)
+		return refusedHeaderError(fmt.Sprintf("header %q looks like a credential and cannot be set", name))
 	}
 	return nil
 }

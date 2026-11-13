@@ -32,6 +32,12 @@ type Normalizer interface {
 	Normalize(config json.RawMessage) (json.RawMessage, error)
 }
 
+// SaveValidator is implemented by plugins that refuse, when an operator saves
+// an instance, a config their Init tolerates in one that is already stored.
+type SaveValidator interface {
+	ValidateSave(config json.RawMessage) error
+}
+
 type serviceSnapshot struct {
 	definitions map[string]Definition
 	order       []string
@@ -395,6 +401,9 @@ func (s *Service) Upsert(ctx context.Context, definition Definition) error {
 	if err != nil {
 		return err
 	}
+	if err := s.validateSave(normalized); err != nil {
+		return err
+	}
 	if err := config.CheckSecretDestinations(ctx, DefinitionSecretEntity, normalized.Name, s.definitionDestinations(stored, normalized), s.definitionSecretValues(normalized)); err != nil {
 		return err
 	}
@@ -672,6 +681,29 @@ func (s *Service) normalizeDefinition(def Definition) (Definition, error) {
 	}
 	def.Config = config
 	return def, nil
+}
+
+// validateSave runs the plugin's save-time checks on a definition an operator
+// is saving. Definitions that are loaded from storage or seeded from the
+// configuration do not pass through it, so they keep loading.
+func (s *Service) validateSave(def Definition) (err error) {
+	entry, ok := s.catalog.Lookup(def.Type)
+	if !ok {
+		return nil
+	}
+	validator, ok := entry.Factory().(SaveValidator)
+	if !ok {
+		return nil
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("plugin panicked while validating the config: %v", r)
+		}
+		if err != nil {
+			err = newValidationError("invalid "+def.Type+" config: "+err.Error(), err)
+		}
+	}()
+	return validator.ValidateSave(def.Config)
 }
 
 // normalize calls a plugin's Normalize with panic recovery.

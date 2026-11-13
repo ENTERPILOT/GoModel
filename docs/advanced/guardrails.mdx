@@ -461,10 +461,12 @@ edited, and names containing `secret` or `token` cannot be set. That includes
 the keys of AI gateways in front of a provider (`Helicone-Auth`,
 `cf-aig-authorization`, `x-portkey-api-key`, `Ocp-Apim-Subscription-Key`): a
 failover to another provider would send them there. Names are matched with `_`
-read as `-`, so `X_Api_Key` is refused too. A line naming a refused header is
-skipped with a warning in the log, and the rest of the config loads: the list
-grows between releases, and a saved guardrail must keep loading after an
-upgrade.
+read as `-`, so `X_Api_Key` is refused too. Saving an instance with a line that
+names a refused header fails with a validation error naming the field and the
+line, so a credential typed there is never stored. An instance that is already
+stored, or declared in the configuration file, keeps loading: the line is
+skipped with a warning in the log, because the list grows between releases and
+a saved guardrail must keep loading after an upgrade.
 
 `upstream_set` also skips, the same way, the names a plugin may not
 set on the provider call because the transport, the gateway or the provider
