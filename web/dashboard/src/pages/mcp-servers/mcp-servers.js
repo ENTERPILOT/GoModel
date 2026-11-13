@@ -505,6 +505,25 @@ export function mcpToolCatalogIssues(entries, members = null) {
     }));
 }
 
+// mcpToolCatalogExport is the request and file name of the tool catalog
+// download: GET /admin/mcp-servers/catalog as "csv" or "json", for every
+// server or, with a scope, the members of that virtual server.
+export function mcpToolCatalogExport(format, scope) {
+  const extension = format === "json" ? "json" : "csv";
+  const virtual = String(scope || "");
+  return {
+    path:
+      "/admin/mcp-servers/catalog?format=" +
+      extension +
+      (virtual ? "&virtual_server=" + encodeURIComponent(virtual) : ""),
+    filename:
+      "gomodel-mcp-tools" +
+      (virtual ? "-" + virtual.replace(/[^\w.+-]/g, "-") : "") +
+      "." +
+      extension,
+  };
+}
+
 // --- tool picker -----------------------------------------------------------
 
 function uniqueToolNames(names) {

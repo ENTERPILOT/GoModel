@@ -1,17 +1,25 @@
 <script>
   // All-tools view: every tool exposed across all servers in one searchable
   // list, named as clients call it ({slug}_{name}). It can be narrowed to one
-  // virtual server's members and can include the tools filters hide.
+  // virtual server's members and can include the tools filters hide. The
+  // download actions fetch the server-side export of the same endpoint.
   import DialogCloseButton from "$lib/components/atoms/DialogCloseButton.svelte";
   import HighlightText from "$lib/components/atoms/HighlightText.svelte";
+  import Icon from "$lib/components/atoms/Icon.svelte";
   import Modal from "$lib/components/atoms/Modal.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import LoadingState from "$lib/components/molecules/LoadingState.svelte";
+  import { apiFetch } from "$lib/api/client.js";
+  import { errorPayloadMessage } from "$lib/api/errors.js";
+  import { auth } from "$lib/stores/auth.svelte.js";
+  import { flash } from "$lib/stores/flash.svelte.js";
   import { formatNumber } from "$lib/utils/format.js";
+  import { Download } from "lucide";
   import { mcpServers } from "./mcpServers.svelte.js";
   import {
     mcpServedVirtualServers,
     mcpServerStatusLabel,
+    mcpToolCatalogExport,
     mcpToolCatalogIssues,
     mcpToolCatalogMembers,
     mcpToolCatalogRows,
@@ -32,6 +40,45 @@
   );
   const summary = $derived(mcpToolCatalogSummary(mcpServers.toolCatalogEntries, members));
   const issues = $derived(mcpToolCatalogIssues(mcpServers.toolCatalogEntries, members));
+
+  let exporting = $state(false);
+
+  // The file is the full inventory of the endpoint in view: it ignores the
+  // search and always includes the tools filters hide, marked as not exposed.
+  // Closing the modal does not cancel the request, so a response that lands
+  // after the API key changed is dropped: it is the previous key's inventory.
+  async function exportCatalog(format) {
+    const target = mcpToolCatalogExport(format, mcpServers.toolCatalogScope);
+    const generation = auth.generation;
+    exporting = true;
+    try {
+      const res = await apiFetch(target.path);
+      if (generation < auth.generation) return;
+      if (!res.ok) {
+        let data = null;
+        try {
+          data = await res.json();
+        } catch {
+          data = null;
+        }
+        flash.error(errorPayloadMessage(data, m.mcp_all_tools_export_failed()));
+        return;
+      }
+      const blob = await res.blob();
+      if (generation < auth.generation) return;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = target.filename;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error("Failed to export MCP tool catalog:", e);
+      flash.error(m.mcp_all_tools_export_failed());
+    } finally {
+      exporting = false;
+    }
+  }
 </script>
 
 <Modal
@@ -157,6 +204,26 @@
     {/if}
 
     <div class="form-actions">
+      <button
+        type="button"
+        class="btn btn-with-icon"
+        title={m.mcp_all_tools_export_title()}
+        disabled={exporting}
+        onclick={() => exportCatalog("csv")}
+      >
+        <Icon icon={Download} class="form-action-icon" />
+        <span>{m.mcp_all_tools_export_csv()}</span>
+      </button>
+      <button
+        type="button"
+        class="btn btn-with-icon"
+        title={m.mcp_all_tools_export_title()}
+        disabled={exporting}
+        onclick={() => exportCatalog("json")}
+      >
+        <Icon icon={Download} class="form-action-icon" />
+        <span>{m.mcp_all_tools_export_json()}</span>
+      </button>
       <button type="button" class="btn" onclick={() => mcpServers.closeToolCatalog()}
         >{m.mcp_close()}</button
       >

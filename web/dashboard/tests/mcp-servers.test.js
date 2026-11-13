@@ -30,6 +30,7 @@ import {
   normalizeMcpUserPaths,
   mcpDiscoveredTools,
   mcpToolFilterFromServer,
+  mcpToolCatalogExport,
   mcpToolCatalogIssues,
   mcpToolCatalogMembers,
   mcpToolCatalogRows,
@@ -931,6 +932,48 @@ test("mcpToolCatalogRows keeps upstream names and the first of repeated tools", 
     ],
   );
   assert.deepEqual(mcpToolCatalogSummary(entries), { tools: 2, servers: 1 });
+});
+
+test("mcpToolCatalogExport asks the export endpoint for the endpoint in view", () => {
+  const cases = [
+    ["csv", "", "/admin/mcp-servers/catalog?format=csv", "gomodel-mcp-tools.csv"],
+    ["json", "", "/admin/mcp-servers/catalog?format=json", "gomodel-mcp-tools.json"],
+    ["csv", "dev", "/admin/mcp-servers/catalog?format=csv&virtual_server=dev", "gomodel-mcp-tools-dev.csv"],
+    ["json", "a/b c", "/admin/mcp-servers/catalog?format=json&virtual_server=a%2Fb%20c", "gomodel-mcp-tools-a-b-c.json"],
+    ["xml", undefined, "/admin/mcp-servers/catalog?format=csv", "gomodel-mcp-tools.csv"],
+  ];
+  for (const [format, scope, path, filename] of cases) {
+    assert.deepEqual(mcpToolCatalogExport(format, scope), { path, filename }, format + " " + scope);
+  }
+});
+
+// The export is not cancelled when the modal closes, so its response can land
+// after the dashboard switched API keys. The modal uses runes and the DOM, so
+// this asserts the wiring on the source.
+test("a tool catalog export answered after an API key change is not downloaded", () => {
+  const SRC = fileURLToPath(new URL("../src", import.meta.url));
+  const modal = readFileSync(join(SRC, "pages/mcp-servers/McpToolCatalogModal.svelte"), "utf8");
+  const exportCatalog = (modal.match(/async function exportCatalog\(format\) \{[\s\S]*?\n  \}/) || [""])[0];
+  assert.ok(exportCatalog, "exportCatalog missing");
+
+  const stale = "if (generation < auth.generation) return;";
+  // Each expression must exist: indexOf's -1 would pass an order check.
+  const assertOrder = (expressions, message) => {
+    let from = 0;
+    for (const expression of expressions) {
+      const index = exportCatalog.indexOf(expression, from);
+      assert.ok(index >= 0, message + ": " + expression);
+      from = index + expression.length;
+    }
+  };
+  assertOrder(
+    ["const generation = auth.generation;", "await apiFetch(", stale, "flash.error("],
+    "a previous key's failure must be dropped before it is reported",
+  );
+  assertOrder(
+    ["await res.blob();", stale, "URL.createObjectURL("],
+    "a previous key's file must be dropped before the download starts",
+  );
 });
 
 test("mcpToolCatalogServedScope drops a virtual server that is no longer served", () => {

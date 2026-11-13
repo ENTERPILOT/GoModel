@@ -1195,6 +1195,88 @@ const docTemplate = `{
                 ]
             }
         },
+        "/admin/mcp-servers/catalog": {
+            "get": {
+                "description": "Lists every tool the MCP servers report, one row per tool with its server, for security reviews and audits. name is the name that reaches the tool on the aggregated endpoint (/mcp, or /mcp/{virtual_server} with virtual_server) and upstream_name the server's own name for the tool, which /mcp/{server} serves. exposed is false for a tool the server's allowed_tools / disallowed_tools hide. shadowed_by names the server that owns the tool's /mcp name when two servers produce the same one: the gateway keeps the first in slug order, so that name reaches the other server's tool, and this one stays callable only on /mcp/{server}. name is empty for a tool that is not exposed or is shadowed. read_only and destructive are true only when the upstream set the hint. Each row repeats its server's transport, enabled flag, status, and user-path scope. virtual_server and user_path describe the endpoint: they narrow the servers, combine, and decide name ownership among the servers left; without them ownership is decided across all servers. An empty user_path does not filter. server only keeps that server's rows. The export reads the catalogs the gateway already holds: a disabled server, or one that never connected, is listed under servers with its status and no tools, and a degraded server that connected before keeps its last catalog and its tools. In CSV, a server without tools is one row with empty tool columns, and user paths are separated by line breaks.",
+                "produces": [
+                    "application/json",
+                    "text/csv"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Export every MCP tool across all servers",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Export format: json (default) or csv (as an attachment)",
+                        "name": "format",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Keep the rows of one MCP server, by slug",
+                        "name": "server",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Keep the members of one virtual MCP server",
+                        "name": "virtual_server",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Keep the servers a caller with this user path can see, e.g. /team/x",
+                        "name": "user_path",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/mcpgateway.ToolCatalog"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/admin/mcp-servers/{name}": {
             "delete": {
                 "produces": [
@@ -13159,6 +13241,111 @@ const docTemplate = `{
                 "StatusConnected",
                 "StatusDegraded"
             ]
+        },
+        "mcpgateway.ToolCatalog": {
+            "type": "object",
+            "properties": {
+                "servers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/mcpgateway.ToolCatalogServer"
+                    }
+                },
+                "tools": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/mcpgateway.ToolCatalogTool"
+                    }
+                }
+            }
+        },
+        "mcpgateway.ToolCatalogServer": {
+            "type": "object",
+            "properties": {
+                "disallowed_user_paths": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "server": {
+                    "type": "string"
+                },
+                "server_name": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/mcpgateway.ServerStatus"
+                },
+                "transport": {
+                    "type": "string"
+                },
+                "user_paths": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "mcpgateway.ToolCatalogTool": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "destructive": {
+                    "type": "boolean"
+                },
+                "disallowed_user_paths": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "exposed": {
+                    "description": "Exposed is false for a tool the server's allowed_tools /\ndisallowed_tools hide from clients. It says nothing about shadowing.",
+                    "type": "boolean"
+                },
+                "name": {
+                    "description": "Name is the name that reaches this tool on the aggregated endpoint\n(/mcp, or the virtual server in the filter). It is empty when no such\nname exists: the tool is not exposed, or it is shadowed.",
+                    "type": "string"
+                },
+                "read_only": {
+                    "type": "boolean"
+                },
+                "server": {
+                    "type": "string"
+                },
+                "server_name": {
+                    "type": "string"
+                },
+                "shadowed_by": {
+                    "description": "ShadowedBy names the server that owns this tool's aggregated name:\ntwo servers produced the same name and the gateway keeps the first\nin slug order, so that name reaches the other server's tool. The tool\nstays callable on /mcp/{server} under UpstreamName.",
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/mcpgateway.ServerStatus"
+                },
+                "transport": {
+                    "type": "string"
+                },
+                "upstream_name": {
+                    "type": "string"
+                },
+                "user_paths": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
         },
         "pricingoverrides.Pricing": {
             "type": "object",

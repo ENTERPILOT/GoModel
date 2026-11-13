@@ -896,6 +896,83 @@ is resolved on demand.
 Returns `400` when a parameter is missing and `404` when the model is not
 registered.
 
+### GET /admin/mcp-servers/catalog
+
+Exports the tool inventory of the [MCP gateway](/features/mcp-gateway): every
+tool across all MCP servers in one response, for security reviews and audits.
+It is gateway-wide, so it needs a global admin credential.
+
+| Parameter        | Type   | Description                                                           | Default |
+| ---------------- | ------ | --------------------------------------------------------------------- | ------- |
+| `format`         | string | `json` or `csv`; CSV is downloaded as an attachment                   | `json`  |
+| `server`         | string | Keep the rows of one MCP server, by slug                              | —       |
+| `virtual_server` | string | Keep the members of one virtual server                                | —       |
+| `user_path`      | string | Keep the servers a caller with this user path can see, e.g. `/team/x` | —       |
+
+The filters narrow the servers and combine. An unknown `server` or
+`virtual_server` returns `404`.
+
+```bash
+curl "http://localhost:8080/admin/mcp-servers/catalog?user_path=/team/x" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+```json
+{
+  "servers": [
+    { "server": "github", "server_name": "GitHub", "transport": "http", "enabled": true, "status": "connected", "user_paths": ["/team"], "disallowed_user_paths": [] },
+    { "server": "wiki", "server_name": "Wiki", "transport": "http", "enabled": true, "status": "degraded", "user_paths": [], "disallowed_user_paths": [] }
+  ],
+  "tools": [
+    {
+      "server": "github",
+      "server_name": "GitHub",
+      "transport": "http",
+      "enabled": true,
+      "status": "connected",
+      "user_paths": ["/team"],
+      "disallowed_user_paths": [],
+      "name": "github_create_issue",
+      "upstream_name": "create_issue",
+      "description": "Create an issue",
+      "read_only": false,
+      "destructive": false,
+      "exposed": true
+    }
+  ]
+}
+```
+
+- Each tool row repeats its server's fields. `name` is what clients call on
+  `/mcp`, or on `/mcp/{virtual_server}` when `virtual_server` is set;
+  `upstream_name` is the name the server itself gives the tool, served at
+  `/mcp/{slug}`.
+- `exposed` is `false`, and `name` empty, for a tool the server's
+  `allowed_tools` / `disallowed_tools` hide. Clients can call a tool only when
+  it is exposed and its server is enabled.
+- `shadowed_by` is set when two servers produce the same `/mcp` name, such as
+  server `a` with tool `b_read` and server `a_b` with tool `read`. The gateway
+  keeps the first server in slug order, so the other tool's row has an empty
+  `name` and names that server in `shadowed_by`. Its `exposed` stays `true`:
+  the tool is still callable at `/mcp/{slug}` under `upstream_name`. The owner
+  is decided among the servers that `virtual_server` and `user_path` leave, or
+  among all servers without them; `server` does not change it. JSON omits the
+  field when it is empty.
+- `read_only` and `destructive` are `true` only when the server set the hint;
+  `false` means it did not say.
+- `user_path` filters servers by their `user_paths` and
+  `disallowed_user_paths` only. It keeps disabled servers and hidden tools,
+  which `enabled` and `exposed` mark. An empty `user_path` does not filter.
+- The export reads the catalogs the gateway already holds, so an unreachable
+  server never fails it. A disabled server, or one that has never connected,
+  is listed in `servers` with its status and no tools; a `degraded` server
+  that connected before keeps its last catalog, so its tools stay in the
+  export.
+- CSV has one row per tool, with the same fields as columns; a server without
+  tools is one row with empty tool columns. User paths are separated by line
+  breaks. Values that start with `=`, `+`, `-`, `@`, a tab, or a carriage
+  return get a leading `'`, so a spreadsheet does not run them as formulas.
+
 ### Plugin, guardrail, and workflow endpoints
 
 | Method | Path | Description |
