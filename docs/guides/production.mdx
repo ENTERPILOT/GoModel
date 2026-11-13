@@ -554,6 +554,24 @@ are cut at the 10-second mark, so a long completion in progress during a rolling
 deploy will be truncated. Set `terminationGracePeriodSeconds` above 30 (45 is a
 reasonable choice) so the teardown is not racing SIGKILL.
 
+## Memory limit
+
+`GOMEMLIMIT` is the Go runtime's soft memory limit. Without it the garbage
+collector paces only by heap growth, so a burst of large requests can push the
+heap past the container's memory limit and get the container OOM-killed. With
+it, the collector works harder as memory nears the limit.
+
+The Helm chart sets `GOMEMLIMIT` to the container memory limit
+(`resources.limits.memory`, `512Mi` by default). Lower it with `goMemLimit`, for
+example `goMemLimit: 400MiB` for a `512Mi` limit, when much of the memory sits
+outside the Go heap (SQLite's cache and memory-mapped pages) or when bursts of
+many concurrent large requests need headroom, since the limit is soft.
+
+Without the chart (docker-compose, Cloud Run, Fargate), set `GOMEMLIMIT` to about
+90% of the container memory limit, for example `GOMEMLIMIT=460MiB` for 512 MiB.
+Go expects `B`, `KiB`, `MiB`, `GiB`, or `TiB` suffixes, not Kubernetes-style `Mi`.
+`GOMAXPROCS` needs no setting: the runtime reads the container's CPU limit.
+
 ## Data retention and disk growth
 
 Audit logging and usage tracking write a row per request, and both sweep hourly.
@@ -656,6 +674,7 @@ larger.
 - Decide on `LOGGING_LOG_BODIES` and set retention windows deliberately.
 - Point readiness at `/health/ready` and set
   `terminationGracePeriodSeconds` above 30.
+- Set `GOMEMLIMIT` near the container memory limit (the Helm chart does this).
 - Enable metrics and alert on `gomodel_circuit_breaker_state` and on
   `gomodel_usage_entries_dropped_total`.
 - For air-gapped installs, set `GOMODEL_OFFLINE=true`, then ship the model

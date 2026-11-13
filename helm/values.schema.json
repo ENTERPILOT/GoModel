@@ -117,6 +117,7 @@
       }
     },
     "resources": { "type": "object" },
+    "goMemLimit": { "type": "string", "pattern": "^(|off|[0-9]+(B|KiB|MiB|GiB|TiB)?)$" },
     "autoscaling": {
       "type": "object",
       "properties": {
