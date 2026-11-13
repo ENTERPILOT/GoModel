@@ -1,10 +1,10 @@
 ---
 title: "GoModel Pro"
 sidebarTitle: "Przegląd"
-description: "GoModel Pro dodaje do gatewaya GoModel licencjonowaną kompresję promptów, inteligentny routing, OIDC SSO, pule proxy wychodzącego i sejfy menedżerów sekretów. Wypróbuj za darmo przez 21 dni."
+description: "GoModel Pro dodaje do gatewaya GoModel licencjonowaną kompresję promptów, inteligentny routing, SSO przez OIDC i SAML, pule proxy wychodzącego i sejfy menedżerów sekretów. Wypróbuj za darmo przez 21 dni."
 icon: "gem"
 tag: "Pro"
-keywords: ["GoModel Pro", "kompresja promptów", "prompt compression", "inteligentny routing", "intelligent routing", "OIDC", "SSO", "szablony limitów", "quota templates", "pule proxy wychodzącego", "egress proxy pools", "sejfy", "vaults", "licencja", "license", "darmowy okres próbny", "free trial"]
+keywords: ["GoModel Pro", "kompresja promptów", "prompt compression", "inteligentny routing", "intelligent routing", "OIDC", "SAML", "SSO", "szablony limitów", "quota templates", "pule proxy wychodzącego", "egress proxy pools", "sejfy", "vaults", "licencja", "license", "darmowy okres próbny", "free trial"]
 ---
 
 ## Czym jest Pro
@@ -12,7 +12,7 @@ keywords: ["GoModel Pro", "kompresja promptów", "prompt compression", "intelige
 GoModel Pro to komercyjna dystrybucja GoModel. Korzysta z tego samego
 gatewaya, konfiguracji, providerów, dashboardu i API co open source'owy
 GoModel, z licencjonowanymi rozszerzeniami do kompresji promptów, inteligentnego routingu,
-jednokrotnego logowania OIDC (SSO), pul proxy wychodzącego, szablonów limitów dla ścieżek podrzędnych
+jednokrotnego logowania (SSO) przez OIDC i SAML, pul proxy wychodzącego, szablonów limitów dla ścieżek podrzędnych
 i sejfów menedżerów sekretów (vaults).
 
 Bez ważnej licencji binarka Pro uruchamia się jako open source'owy gateway i
@@ -27,9 +27,9 @@ po cichu wspólne, a sekrety nigdy nie zostają nierozwiązane.
     Deterministyczne przepisywanie requestów, przepuszczające w razie błędu (fail open),
     które usuwa powtarzający się kontekst, zanim dotrze on do providera.
   </Card>
-  <Card title="Jednokrotne logowanie OIDC" icon="key-round" href="/pl/pro/sso">
-    Chroń Dashboard za pomocą swojego dostawcy tożsamości, korzystając z przepływu Authorization Code
-    z PKCE.
+  <Card title="Jednokrotne logowanie (SSO)" icon="key-round" href="/pl/pro/sso">
+    Chroń Dashboard za pomocą swojego dostawcy tożsamości OIDC lub SAML 2.0 i mapuj jego grupy
+    na ścieżki użytkowników.
   </Card>
   <Card title="Inteligentny routing" icon="route" href="/pl/pro/intelligent-routing">
     Klasyfikacja każdego requestu do poziomu łatwy/trudny oraz adaptacyjny, uwzględniający stan zdrowia

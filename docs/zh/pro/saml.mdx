@@ -1,0 +1,220 @@
+---
+title: "SAML 2.0 单点登录"
+sidebarTitle: "SAML SSO"
+description: "使用 SAML 2.0 身份提供商保护 GoModel 控制台：设置、注册、每个响应的校验内容、元数据刷新、证书固定以及限制。"
+icon: "fingerprint"
+tag: "Pro"
+keywords: ["GoModel Pro", "SAML", "SAML 2.0", "SSO", "单点登录", "single sign-on", "身份提供商", "identity provider", "IdP 元数据", "IdP metadata", "assertion consumer service", "证书固定", "certificate pinning", "控制台认证", "dashboard authentication"]
+---
+
+## 概览
+
+`protocol: saml` 使网关成为 SAML 2.0 服务提供商，而不是 OIDC 客户端。会话、用户路径、[组映射](/zh/pro/sso#组映射)、退出登录和审计的行为与 [OIDC SSO](/zh/pro/sso) 中的描述完全一致；变化的只是证明一次登录的方式。
+
+- **每个网关只使用一种协议和一个身份提供商。** 使用 `protocol: saml` 时，OIDC 客户端设置（`issuer_url`、`client_id`、`client_secret`、`redirect_url`）在 YAML 和环境变量中都不得设置。使用 `protocol: oidc` 时，任何 `saml` 设置都不得设置。否则启动会中止。
+- **切换协议会改变每一个主体 ID。** 审计条目中存储的 ID 由协议、身份提供商和主体推导而来，因此同一个人在切换后会以新的主体出现。
+
+<Warning>
+  SAML 除 `sso` 外还需要 `saml` 授权。与所有已启用的 SSO 配置一样，它采用失败即拒绝（fail closed）策略：缺少任一授权或配置无效时，启动会中止。网关绝不会回退到 OIDC，也不会回退到未受保护的控制台。
+</Warning>
+
+## 配置 SAML
+
+```yaml
+extensions:
+  sso:
+    enabled: true
+    protocol: saml
+    session_secret: ${PRO_SSO_SESSION_SECRET}
+    admin_groups: [gomodel-admins]
+    saml:
+      acs_url: https://gomodel.example.com/sso/saml/acs
+      idp_metadata_url: https://login.example.com/saml/metadata
+      attributes:
+        email: mail          # 存放邮箱的属性
+        groups: memberOf     # 存放组的属性
+      trust_email: true      # 设置前请先阅读下文的“邮箱信任”
+```
+
+使用环境变量的等效配置，环境变量会覆盖 YAML 中的值：
+
+```bash
+PRO_SSO_ENABLED=true
+PRO_SSO_PROTOCOL=saml
+PRO_SSO_SESSION_SECRET=...
+PRO_SSO_ADMIN_GROUPS=gomodel-admins
+PRO_SSO_SAML_ACS_URL=https://gomodel.example.com/sso/saml/acs
+PRO_SSO_SAML_IDP_METADATA_URL=https://login.example.com/saml/metadata
+PRO_SSO_SAML_ATTRIBUTES='{"email":"mail","groups":"memberOf"}'
+PRO_SSO_SAML_TRUST_EMAIL=true
+```
+
+| 设置 | 环境变量 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `protocol` | `PRO_SSO_PROTOCOL` | `oidc` | 设置为 `saml`。 |
+| `saml.acs_url` | `PRO_SSO_SAML_ACS_URL` | 必填 | `/sso/saml/acs` 的公开 URL，包括已配置的 `BASE_PATH`。必须为 HTTPS，localhost 除外。 |
+| `saml.idp_metadata_url` | `PRO_SSO_SAML_IDP_METADATA_URL` | 未设置 | 与元数据文件二选一，不能同时设置。必须为 HTTPS，localhost 除外。启动时获取，之后定期刷新。 |
+| `saml.idp_metadata_file` | `PRO_SSO_SAML_IDP_METADATA_FILE` | 未设置 | 在网关无法访问身份提供商时使用。启动时读取一次。 |
+| `saml.entity_id` | `PRO_SSO_SAML_ENTITY_ID` | 服务提供商元数据 URL | 当身份提供商要求特定标识符时修改。必须是不超过 1024 个字符的绝对 URI。 |
+| `saml.attributes` | `PRO_SSO_SAML_ATTRIBUTES` | 无 | 属性名的别名。该变量是一个 JSON 对象，会替换 YAML 中的映射。 |
+| `saml.principal_attribute` | `PRO_SSO_SAML_PRINCIPAL_ATTRIBUTE` | 未设置（使用 NameID） | 当身份提供商只发送临时（transient）NameID 时设置。 |
+| `saml.trust_email` | `PRO_SSO_SAML_TRUST_EMAIL` | `false` | 参见[邮箱信任](#邮箱信任)。 |
+| `saml.metadata_refresh_interval` | `PRO_SSO_SAML_METADATA_REFRESH_INTERVAL` | `1h` | 仅适用于元数据 URL。`1m` 到 `24h`。与元数据文件同时设置会使启动中止。 |
+| `saml.idp_certificate_fingerprints` | `PRO_SSO_SAML_IDP_CERTIFICATE_FINGERPRINTS` | 无（信任元数据中的每个签名证书） | 参见[证书固定](#证书固定)。在环境变量中以逗号分隔。 |
+
+[身份与准入](/zh/pro/sso#身份与准入)中的共享设置含义不变。
+
+## 注册网关
+
+网关提供两个 URL，二者都位于已配置的 `BASE_PATH` 之下：
+
+| URL | 用途 |
+| --- | --- |
+| `https://gomodel.example.com/sso/saml/acs` | 断言消费服务（ACS），使用 HTTP-POST 绑定。即 `acs_url`。 |
+| `https://gomodel.example.com/sso/saml/metadata` | 服务提供商元数据。同时也是默认的实体 ID。 |
+
+<Steps>
+  <Step title="在身份提供商处创建 SAML 2.0 应用">
+    如果提供商支持且网关已在运行，请导入服务提供商元数据 URL。否则请手动填写使用 HTTP-POST 绑定的 ACS URL 和实体 ID（受众）。
+  </Step>
+  <Step title="对断言签名">
+    断言本身必须使用 RSA-SHA256 或更强的算法以及至少 2048 位的 RSA 密钥签名。仅对响应签名是不够的。不要加密断言。网关通过 HTTP-Redirect 发送未签名的请求。
+  </Step>
+  <Step title="发送稳定的主体和所用的属性">
+    请使用持久（persistent）NameID，或将不可变的用户 ID 作为属性发送，并在 `principal_attribute` 中指定它。请发放用于用户路径的属性；如果使用 `admin_groups` 或组映射，还需发放组属性，并且只包含网关需要的组。
+  </Step>
+  <Step title="向网关提供身份提供商元数据">
+    设置 `idp_metadata_url`，或下载元数据并设置 `idp_metadata_file`。元数据必须只描述一个身份提供商，并包含一个 HTTP-Redirect 登录端点和至少一个签名证书。
+  </Step>
+  <Step title="启动网关并登录">
+    打开 `/sso/login`。如果登录失败，请在[登录被拒绝的原因](/zh/pro/sso#登录被拒绝的原因)中查找原因。
+  </Step>
+</Steps>
+
+<Note>
+  这些步骤使用通用的 SAML 2.0 术语；不同身份提供商的设置名称各不相同。SAML 登录目前仅在测试用身份提供商上验证过，因此请把与您的提供商的首次上线视为需要测试的集成，而不是经过验证的现成方案。
+</Note>
+
+## 属性与主体
+
+`user_path_claim` 和 `groups_claim` 指定 SAML 属性，既可以直接使用属性的 `Name`，也可以通过 `saml.attributes` 中的别名：
+
+```yaml
+extensions:
+  sso:
+    saml:
+      attributes:
+        email: mail        # user_path_claim: email 读取 "mail" 属性
+        groups: memberOf   # groups_claim: groups 读取 "memberOf"
+```
+
+- 别名会遮蔽同名的 SAML 属性。
+- 用户路径属性必须恰好有一个值；其首尾空白会被去除。组的值按发送时的原样精确比较。
+- `allowed_domains` 和默认的 `user_path_claim: email` 读取名为 `email` 或别名为 `email` 的属性。只有在使用 `user_path_claim: email` 或 `user_path_case_insensitive: true` 时，用户路径才会被转换为小写。
+- 主体是 NameID；如果设置了 `principal_attribute`，则为该属性。临时（transient）NameID 每次登录都会变化，除非设置了 `principal_attribute`，否则会被拒绝。
+
+## 邮箱信任
+
+`trust_email` 决定邮箱属性是否被视为已验证的邮箱。它默认为 `false`，因为 SAML 没有与 OIDC 的 `email_verified` 对应的机制：签名只能证明身份提供商发送了该地址，不能证明它验证过该地址。用户路径同时也是会话的[访问作用域](/zh/features/user-path#访问作用域)，因此如果用户可以在身份提供商处修改自己的邮箱，某个人就可以填入同事的地址，并以该同事的路径登录。
+
+未设置 `trust_email` 时，启动会拒绝依赖邮箱的配置：
+
+- 读取邮箱的 `user_path_claim`，其中包括默认的 `user_path_claim: email`；
+- `allowed_domains`；
+- 在设置了 `admin_groups` 或组映射时，读取邮箱的 `groups_claim`。
+
+因此请从以下方式中选择一种：
+
+```yaml
+# 邮箱由身份提供商设置，用户无法修改。
+extensions:
+  sso:
+    saml:
+      trust_email: true
+```
+
+```yaml
+# 或者使用身份提供商控制的属性来构建用户路径，例如不可变的用户 ID。
+extensions:
+  sso:
+    user_path_claim: employee_id
+```
+
+<Warning>
+  启动检查只识别名称：`email`、别名为 `email` 的属性，以及常见的邮箱属性 `mail`、`email`、`urn:oid:0.9.2342.19200300.100.1.3` 和 `http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress`，比较时不区分大小写。以其他名称携带邮箱或任何其他用户可修改的值的属性，可以通过检查。切勿将用户可以修改的属性用于 `user_path_claim` 或 `groups_claim`。
+</Warning>
+
+## 每个响应的校验内容
+
+只有同时满足以下所有条件，登录才会成功。每一种失败都有各自的[审计原因](/zh/pro/sso#登录被拒绝的原因)。
+
+- **它是对此浏览器发起的登录的应答。** 已签名的事务 Cookie（有效期 10 分钟）、`RelayState` 和 `InResponseTo` 必须匹配。
+- **它是发给此网关的。** `Destination` 和 `Recipient` 等于 `acs_url`，受众是网关的实体 ID。
+- **它来自已配置的身份提供商。** 签发者是元数据中的实体 ID。
+- **断言本身已签名**，使用元数据中当前有效的签名证书、RSA-SHA256 或更强的算法以及至少 2048 位的密钥。
+- **恰好有一个断言**，且未加密。
+- **它处于有效期窗口内**，允许 60 秒的时钟偏差。
+- **身份提供商报告成功。**
+- **它指明了稳定的主体**：非临时的 NameID 或 `principal_attribute`。
+- **它此前未被使用过。** 参见[重放保护](#重放保护)。
+- **它是体积小且简单的 XML**：表单不超过 1 MiB，XML 元素不超过 900 个，不含 DTD、注释或处理指令。
+
+登录使用的每一个值都从已签名的断言中读取，绝不会从文档的其余部分读取。随后的准入规则与 OIDC 相同。
+
+## 身份提供商元数据
+
+**来自文件。** 文件只读取一次。无法读取或无效的文件会使启动中止；身份提供商轮换签名证书后，必须替换该文件并重启网关。
+
+**来自 URL。** 网关在启动时获取元数据，之后每隔 `metadata_refresh_interval` 再次获取，因此在该 URL 发布的证书轮换无需重启即可生效。刷新失败时会保留最近一次有效的元数据。如果启动时 URL 不可达，网关仍会启动，登录返回 `503` 和 `identity_provider_unavailable`，并在后台重试获取（5 秒起，每次翻倍，最长 5 分钟）。设置 `require_discovery: true`（`PRO_SSO_REQUIRE_DISCOVERY=true`）可将这种情况改为启动错误。
+
+无论来自哪种来源，元数据在其 `validUntil` 之后都不再使用；此后登录不可用，直到加载了更新的元数据。
+
+### 刷新可以改变什么
+
+刷新可以替换签名证书、登录 URL 和 `validUntil`。它不能改变身份提供商的实体 ID：这样的元数据会被拒绝，当前元数据继续使用，并记录一条错误日志。如需切换到另一个实体 ID，请重启网关。
+
+控制元数据 URL 的人可以发布自己的签名证书。因此，每次改变受信任证书的刷新都会以警告级别记录，并在 `added_fingerprints` 和 `removed_fingerprints` 中给出 SHA-256 指纹：
+
+```text
+GoModel Pro: SAML identity provider signing certificates changed on metadata refresh
+```
+
+请针对这一行日志设置告警。启动时会记录网关信任的指纹。
+
+### 证书固定
+
+要阻止证书轮换被自动接受，请列出身份提供商签名证书的 SHA-256 指纹：
+
+```yaml
+extensions:
+  sso:
+    saml:
+      idp_certificate_fingerprints:
+        - "AB:CD:...:EF"   # 来自：openssl x509 -noout -fingerprint -sha256
+```
+
+指纹为十六进制，不区分大小写，冒号可选。无论使用元数据文件还是 URL，都只信任列出的证书。不包含其中任何证书的元数据会使启动中止；在刷新时则会被拒绝，并继续使用最近一次有效的元数据。
+
+轮换时，请在身份提供商切换之前添加新指纹，并在之后移除旧指纹。每一步都需要重启。
+
+## 会话与退出登录
+
+会话在 `session_ttl` 到期时结束；如果断言的 `SessionNotOnOrAfter` 更早，则在该时间结束。`SessionNotOnOrAfter` 已过的断言会被拒绝。
+
+退出登录只结束 GoModel 会话，其行为如[跨副本退出登录](/zh/pro/sso#跨副本退出登录)所述。
+
+## 重放保护
+
+每个断言只会被接受一次。网关会在内存和已配置的存储后端中记住已使用断言的 ID，直到断言过期。
+
+- **PostgreSQL 或 MongoDB：** 重放的断言会在共享该存储的每个副本上被拒绝。在同一瞬间收到同一断言的两个副本可能都会接受它；这还需要该用户的事务 Cookie。
+- **SQLite（默认）：** 保护仅限于单个实例。与退出登录一样，请只运行一个副本；网关会在启动时记录一条警告。
+- **存储不可用：** 登录会以 `replay_check_unavailable` 被拒绝。
+
+## 限制
+
+- **每人约 850 个组。** 每个组值是一个 XML 元素，而超过 900 个元素的响应会以 `too_many_elements` 被拒绝。该上限不可配置。请在身份提供商处进行过滤：只发送分配给应用的组，或 `admin_groups` 和 `group_mappings` 中指定的组。
+- **不支持在身份提供商处发起的登录。** 登录必须从网关（`/sso/login`）开始。未经请求的响应会被拒绝。
+- **不支持加密断言。** 它们会以 `encrypted_assertion` 被拒绝。
+- **不支持单点登出。** 退出 GoModel 不会结束身份提供商的会话，网关也不处理来自身份提供商的登出请求。
+- **每个网关一个身份提供商。**
