@@ -52,14 +52,18 @@ func (r *roundRobin) prune(active map[string]*redirectEntry) {
 // the pinned target is still healthy. The plugin strategy works the same way
 // with the virtual model's named routing-strategy plugin. A target model that
 // is disabled, or that this request may not use, is skipped like an
-// unavailable one. It reports false when no target is available. path, when
-// not nil, collects the virtual models the chosen route passes through.
-func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry *redirectEntry, sessionID string, path *[]string) (core.ModelSelector, bool) {
+// unavailable one. A request carrying images through a redirect with vision
+// routing (or through an enclosing one, reported by images) only considers
+// targets that accept image input, when any does. It reports false when no
+// target is available. path, when not nil, collects the virtual models the
+// chosen route passes through.
+func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry *redirectEntry, sessionID string, images bool, path *[]string) (core.ModelSelector, bool) {
 	if path != nil {
 		*path = append(*path, entry.vm.Source)
 	}
 	allowed := func(selector core.ModelSelector) bool { return s.allowsIn(ctx, snap, selector) }
 	supported := snap.viableTargets(entry, s.catalog, allowed)
+	images = images || (entry.vm.VisionRouting && core.RequestHasImageInput(ctx))
 	if len(supported) == 0 {
 		// Nothing this request may use: resolve to the first available
 		// target without touching strategy state, so access validation
@@ -69,18 +73,27 @@ func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry 
 		if len(available) == 0 {
 			return core.ModelSelector{}, false
 		}
-		return s.concreteTarget(ctx, snap, entry, available[0], sessionID, path)
+		return s.concreteTarget(ctx, snap, entry, available[0], sessionID, images, path)
+	}
+	// usable is the test a concrete model behind a target must pass to count
+	// for capacity and price. Once image routing narrows the targets it also
+	// requires image input: a chained redirect then picks among those models
+	// only, so a text-only one with room, or a lower price, says nothing
+	// about where the request lands.
+	usable := allowed
+	if images {
+		supported, usable = s.imageTargets(snap, entry, supported, allowed)
 	}
 	// Prefer targets with live rate-limit capacity. When every live target is
 	// saturated, fall back to the first declared one: the request then reaches
 	// admission and receives an honest 429 with Retry-After (or defers to
 	// failover) instead of the all-targets-down error path.
-	pool := s.targetsWithCapacity(snap, entry, supported, allowed)
+	pool := s.targetsWithCapacity(snap, entry, supported, usable)
 	if len(pool) == 0 {
 		// This target is selected only to reach admission and produce the 429.
 		// Do not run affinity resolution: a transient capacity burst must not
 		// discard or replace the target that actually served the session.
-		return s.concreteTarget(ctx, snap, entry, supported[0], sessionID, path)
+		return s.concreteTarget(ctx, snap, entry, supported[0], sessionID, images, path)
 	}
 
 	// selectorChoice consults the route selector, reporting false when there
@@ -118,7 +131,7 @@ func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry 
 			// primary; the legs below it are the failover chain.
 			return pool[0]
 		case StrategyCost:
-			return s.cheapestTarget(snap, entry, pool, allowed)
+			return s.cheapestTarget(snap, entry, pool, usable)
 		default:
 			// Round robin, and adaptive or plugin whose selector had no
 			// usable answer.
@@ -157,9 +170,9 @@ func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry 
 		if choice, ok := selectorChoice(pinned); ok {
 			qualified := s.sticky.repin(entry.vm.Source, sessionID, pinned, choice.qualified)
 			if target, found := poolTarget(pool, qualified); found {
-				return s.concreteTarget(ctx, snap, entry, target, sessionID, path)
+				return s.concreteTarget(ctx, snap, entry, target, sessionID, images, path)
 			}
-			return s.concreteTarget(ctx, snap, entry, choice, sessionID, path)
+			return s.concreteTarget(ctx, snap, entry, choice, sessionID, images, path)
 		}
 
 		// No selector answer — a decline, a panic, an answer outside the pool,
@@ -170,7 +183,7 @@ func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry 
 		// the next new session receives.
 		if hasPin {
 			if target, found := poolTarget(pool, pinned); found {
-				return s.concreteTarget(ctx, snap, entry, target, sessionID, path)
+				return s.concreteTarget(ctx, snap, entry, target, sessionID, images, path)
 			}
 		}
 
@@ -182,21 +195,24 @@ func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry 
 			choice.qualified,
 		)
 		if target, ok := poolTarget(pool, qualified); ok {
-			return s.concreteTarget(ctx, snap, entry, target, sessionID, path)
+			return s.concreteTarget(ctx, snap, entry, target, sessionID, images, path)
 		}
-		return s.concreteTarget(ctx, snap, entry, choice, sessionID, path)
+		return s.concreteTarget(ctx, snap, entry, choice, sessionID, images, path)
 	}
 	if choice, ok := selectorChoice(""); ok {
-		return s.concreteTarget(ctx, snap, entry, choice, sessionID, path)
+		return s.concreteTarget(ctx, snap, entry, choice, sessionID, images, path)
 	}
-	return s.concreteTarget(ctx, snap, entry, pick(), sessionID, path)
+	return s.concreteTarget(ctx, snap, entry, pick(), sessionID, images, path)
 }
 
 // concreteTarget turns a chosen target of entry into the concrete model to
 // execute: the target itself, or — when it names another virtual model — that
 // redirect's own balanced resolution. Chains are acyclic and bounded by
-// construction (see validateChains), so the recursion terminates.
-func (s *Service) concreteTarget(ctx context.Context, snap *snapshot, entry *redirectEntry, target resolvedTarget, sessionID string, path *[]string) (core.ModelSelector, bool) {
+// construction (see validateChains), so the recursion terminates. images
+// carries an image-routing decision down the chain, so a chained redirect
+// also picks a target that accepts the request's images. path, when not nil,
+// collects the virtual models the chosen route passes through.
+func (s *Service) concreteTarget(ctx context.Context, snap *snapshot, entry *redirectEntry, target resolvedTarget, sessionID string, images bool, path *[]string) (core.ModelSelector, bool) {
 	inner, ok := snap.chained(entry.vm.Source, target)
 	if !ok {
 		return target.selector, true
@@ -204,7 +220,7 @@ func (s *Service) concreteTarget(ctx context.Context, snap *snapshot, entry *red
 	if !inner.vm.Enabled {
 		return core.ModelSelector{}, false
 	}
-	return s.balancedResolution(ctx, snap, inner, sessionID, path)
+	return s.balancedResolution(ctx, snap, inner, sessionID, images, path)
 }
 
 // poolTarget finds a qualified model among the viable targets.
@@ -235,6 +251,39 @@ func (s *Service) targetsWithCapacity(snap *snapshot, entry *redirectEntry, targ
 		}
 	}
 	return out
+}
+
+// imageTargets narrows targets to those that accept image input; a chained
+// target does while any concrete model behind it that allow permits does.
+// Unknown capability counts as no image input. It also returns the test
+// such a model passes: allow, plus accepting images. When no target
+// qualifies, targets and allow are returned unchanged: the request keeps its
+// images and today's routing, and the provider's own error reaches the
+// client.
+func (s *Service) imageTargets(snap *snapshot, entry *redirectEntry, targets []resolvedTarget, allow func(core.ModelSelector) bool) ([]resolvedTarget, func(core.ModelSelector) bool) {
+	accepts := func(selector core.ModelSelector) bool {
+		return allow(selector) && s.acceptsImages(selector.QualifiedModel())
+	}
+	out := make([]resolvedTarget, 0, len(targets))
+	for _, target := range targets {
+		for _, leaf := range snap.leaves(entry, target, s.catalog) {
+			if accepts(leaf.selector) {
+				out = append(out, target)
+				break
+			}
+		}
+	}
+	if len(out) == 0 {
+		return targets, allow
+	}
+	return out, accepts
+}
+
+// acceptsImages reports whether the registry's effective metadata for a
+// concrete model reports the vision capability.
+func (s *Service) acceptsImages(model string) bool {
+	info, ok := s.catalog.LookupModel(model)
+	return ok && info != nil && info.Metadata != nil && info.Metadata.Capabilities["vision"]
 }
 
 // weightedIndex maps a monotonic counter to a target index, honoring per-target

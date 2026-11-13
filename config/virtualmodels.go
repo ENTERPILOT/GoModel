@@ -43,6 +43,11 @@ type VirtualModelConfig struct {
 	// fails over.
 	Failover *bool `yaml:"failover,omitempty" json:"failover,omitempty"`
 
+	// VisionRouting sends a request that carries images only to targets whose
+	// model metadata reports the vision capability, before the strategy
+	// picks. When no target does, routing is unchanged. Defaults to false.
+	VisionRouting bool `yaml:"vision_routing,omitempty" json:"vision_routing,omitempty"`
+
 	// Target is shorthand for a single-target alias, e.g. "openai/gpt-4o". Use
 	// Targets instead to load balance across several models.
 	Target string `yaml:"target,omitempty" json:"target,omitempty"`

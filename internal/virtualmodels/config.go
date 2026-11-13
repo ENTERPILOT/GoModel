@@ -48,6 +48,7 @@ func configModel(entry config.VirtualModelConfig) (VirtualModel, error) {
 		StrategyConfig:  cloneStrategyConfig(entry.StrategyConfig),
 		SessionAffinity: entry.SessionAffinity,
 		Failover:        entry.Failover,
+		VisionRouting:   entry.VisionRouting,
 		Targets:         configTargets(entry),
 		UserPaths:       entry.UserPaths,
 		Description:     entry.Description,
