@@ -54,6 +54,18 @@ verwaltete API-Keys und weiteren Admin-Zustand über `STORAGE_TYPE`.
 | PostgreSQL | `postgresql` | Mehr als ein Replikat, oder Sie betreiben bereits Postgres. Die übliche Wahl für die Produktion. |
 | MongoDB | `mongodb` | Sie betreiben bereits MongoDB und ziehen es Postgres vor. |
 
+Verwenden Sie bei MongoDB bevorzugt ein Replica Set, auch ein einzelner Knoten
+genügt, wie ihn die `docker-compose.yaml` des Repositorys startet. Ein
+eigenständiger `mongod` funktioniert ebenfalls, kennt aber keine Transaktionen:
+GoModel protokolliert eine Warnung und führt Änderungen über mehrere Dokumente
+(Budget- und Rate-Limit-Konfiguration, Guardrails, Workflow-Versionen,
+Neuberechnung der Nutzungspreise) als einzelne Schreibvorgänge aus. Eine
+unterbrochene Änderung kann daher nur teilweise wirksam werden; führen Sie sie
+erneut aus, um sie abzuschließen. Wird das Speichern eines Workflows unterbrochen,
+während die neue Version aktiviert wird, kann der Scope ohne aktiven Workflow
+bleiben (beim globalen Scope schlägt das Neuladen der Workflows fehl), bis Sie
+diesen Workflow erneut speichern.
+
 SQLite ist der Standardwert, damit GoModel ohne jede Konfiguration
 funktioniert, und für eine einzelne Instanz mit persistentem Volume eine echte
 Option für die Produktion. Es spart einen Netzwerk-Hop und eine zu betreibende
@@ -190,7 +202,11 @@ Volume, beschränken Sie den Zugriff und stufen Sie Backups entsprechend ein.
 - **Header mit Client-Zugangsdaten werden vor dem Persistieren geschwärzt.**
   Mit `LOGGING_LOG_HEADERS=true` werden `Authorization`, `x-api-key`, `Cookie`
   und die übrigen Header mit Zugangsdaten beim Schreiben durch `[REDACTED]`
-  ersetzt, sodass der Audit-Speicher sie nie erhält.
+  ersetzt, sodass der Audit-Speicher sie nie erhält. Dasselbe gilt für jeden
+  Header, dessen Name nach Zugangsdaten aussieht: wenn er auf `token`, `-key`
+  oder `-auth` endet oder `authorization`, `api-key`, `apikey`, `secret`,
+  `password`, `signature` oder `jwt` enthält. `Idempotency-Key` und
+  `Sec-WebSocket-Key` bleiben erhalten.
 - **Setzen Sie `GOMODEL_MASTER_KEY`.** Ist er leer und gibt es keine
   verwalteten Keys, wird jeder Request ohne Authentifizierung zugelassen, und
   `/admin/*` wird als Wiederherstellungspfad bei Aussperrung in die Liste der

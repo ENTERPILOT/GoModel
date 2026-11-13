@@ -186,16 +186,14 @@ func (s *MongoDBStore) UpsertMany(ctx context.Context, definitions []Definition)
 	}
 	defer session.EndSession(ctx)
 
-	_, err = session.WithTransaction(ctx, func(sessionCtx context.Context) (any, error) {
-		if _, err := s.collection.BulkWrite(sessionCtx, models, options.BulkWrite().SetOrdered(true)); err != nil {
-			return nil, fmt.Errorf("bulk upsert guardrails: %w", err)
+	// Each row is an idempotent upsert, so the non-transactional fallback on a
+	// standalone server can at worst save some rows of a failed batch.
+	return storage.MongoTransaction(ctx, session, "upsert guardrails", func(ctx context.Context) error {
+		if _, err := s.collection.BulkWrite(ctx, models, options.BulkWrite().SetOrdered(true)); err != nil {
+			return fmt.Errorf("bulk upsert guardrails: %w", err)
 		}
-		return nil, nil
+		return nil
 	})
-	if err != nil {
-		return fmt.Errorf("upsert guardrails: %w", err)
-	}
-	return nil
 }
 
 func (s *MongoDBStore) Delete(ctx context.Context, name string) error {
