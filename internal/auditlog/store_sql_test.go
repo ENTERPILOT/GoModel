@@ -3,6 +3,8 @@ package auditlog
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -189,6 +191,87 @@ func TestNewSQLStoreDropsLegacyExecutionPlanIndex(t *testing.T) {
 		// Recreating the index must succeed, proving the startup drop removed it.
 		_, err = db.Exec(ctx, `CREATE INDEX idx_audit_execution_plan_version_id ON audit_logs(execution_plan_version_id)`)
 		require.NoError(t, err)
+	})
+}
+
+// execRecorder records every statement Exec runs.
+type execRecorder struct {
+	sqlx.DB
+	mu         sync.Mutex
+	statements []string
+}
+
+func (r *execRecorder) Exec(ctx context.Context, query string, args ...any) (int64, error) {
+	r.mu.Lock()
+	r.statements = append(r.statements, query)
+	r.mu.Unlock()
+	return r.DB.Exec(ctx, query, args...)
+}
+
+func (r *execRecorder) drops(index string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	count := 0
+	for _, statement := range r.statements {
+		if strings.HasPrefix(statement, "DROP INDEX") && strings.Contains(statement, index) {
+			count++
+		}
+	}
+	return count
+}
+
+func attemptsIndexNames(t *testing.T, db sqlx.DB) []string {
+	t.Helper()
+	query := `SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'audit_log_attempts'`
+	if db.Dialect() == sqlx.PostgreSQL {
+		query = `SELECT indexname FROM pg_indexes WHERE tablename = 'audit_log_attempts' AND schemaname = current_schema()`
+	}
+	rows, err := db.Query(context.Background(), query)
+	require.NoError(t, err)
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var name string
+		require.NoError(t, rows.Scan(&name))
+		names = append(names, name)
+	}
+	require.NoError(t, rows.Err())
+	return names
+}
+
+// The attempts table's UNIQUE(audit_log_id, seq) already indexes those
+// columns; the separate index repeating them is dropped once and never
+// recreated.
+func TestNewSQLStoreDropsDuplicateAttemptsIndex(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		ctx := context.Background()
+		start := func() *execRecorder {
+			recorder := &execRecorder{DB: db}
+			store, err := NewSQLStore(ctx, recorder, 0)
+			require.NoError(t, err)
+			store.indexBuild.Wait()
+			require.NoError(t, store.Close())
+			return recorder
+		}
+
+		start()
+		assert.NotContains(t, attemptsIndexNames(t, db), duplicateAttemptsIndex, "a fresh database gets no duplicate index")
+
+		// Databases created before the fix carry the duplicate.
+		_, err := db.Exec(ctx, "CREATE INDEX "+duplicateAttemptsIndex+" ON audit_log_attempts(audit_log_id, seq)")
+		require.NoError(t, err)
+		assert.Equal(t, 1, start().drops(duplicateAttemptsIndex))
+		names := attemptsIndexNames(t, db)
+		assert.NotContains(t, names, duplicateAttemptsIndex, "startup drops the existing duplicate")
+		// What is left is the UNIQUE(audit_log_id, seq) index, the provider and
+		// started_at indexes and, on PostgreSQL, the primary key.
+		wantIndexes := 3
+		if db.Dialect() == sqlx.PostgreSQL {
+			wantIndexes = 4
+		}
+		assert.Len(t, names, wantIndexes, "attempts indexes: %v", names)
+
+		assert.Zero(t, start().drops(duplicateAttemptsIndex), "a later startup issues no DROP")
 	})
 }
 
