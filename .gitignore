@@ -3,6 +3,10 @@
 /recordapi
 /bin
 
+# GoReleaser output. Left untracked it marks the tree as modified during the
+# release build, which stamps the binaries `+dirty` (vcs.modified=true).
+/dist/
+
 # Environment variables
 /.env
 

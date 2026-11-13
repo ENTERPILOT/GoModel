@@ -112,7 +112,8 @@ jobs:
             echo "image=${image}"
             echo "version=${version}"
             echo "commit=${GITHUB_SHA}"
-            echo "date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            # Commit time, not the wall clock, so the stamp is reproducible.
+            echo "date=$(TZ=UTC0 git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ)"
           } >> "$GITHUB_OUTPUT"
 
       - name: Extract Docker labels
