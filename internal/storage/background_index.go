@@ -191,13 +191,16 @@ func (b BackgroundIndexBuilder) TryDrop(ctx context.Context, index BackgroundInd
 		return true
 	}
 	dropped := false
-	_, _ = b.withLock(ctx, func(conn *pgxpool.Conn) {
+	_, err := b.withLock(ctx, func(conn *pgxpool.Conn) {
 		if _, err := conn.Exec(ctx, `DROP INDEX CONCURRENTLY IF EXISTS `+index.Name); err != nil {
 			logBackgroundIndexError(ctx, index, "drop", err)
 			return
 		}
 		dropped = true
 	})
+	if err != nil {
+		logBackgroundIndexError(ctx, index, "take the build lock to drop", err)
+	}
 	return dropped
 }
 
