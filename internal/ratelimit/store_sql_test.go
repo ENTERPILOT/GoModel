@@ -276,9 +276,9 @@ func TestSQLStoreCounterRoundTrip(t *testing.T) {
 }
 
 // TestSQLStoreLoadCountersSkipsMalformedRow keeps one unreadable row from
-// costing every other window its restore: Start treats a load error as "do not
-// persist this generation". SQLite only — its dynamic typing is what lets a
-// row hold a value the scan cannot read.
+// costing every other window its restore: a load error leaves Start with none
+// of them. SQLite only — its dynamic typing is what lets a row hold a value
+// the scan cannot read.
 func TestSQLStoreLoadCountersSkipsMalformedRow(t *testing.T) {
 	ctx := context.Background()
 	db := sqlxtest.NewSQLite(t)

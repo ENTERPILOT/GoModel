@@ -235,8 +235,8 @@ func (s *SQLStore) LoadCounters(ctx context.Context, since int64) ([]WindowSnaps
 			&snap.InFlight, &snap.UpdatedAt, &snap.OwnCounts,
 		); err != nil {
 			// One unreadable row must not cost every other window its
-			// restore: Start treats a load error as "do not persist this
-			// generation". Same policy as the Mongo loader.
+			// restore: a load error leaves Start with none of them. Same
+			// policy as the Mongo loader.
 			slog.Warn("rate limit counters: skipping malformed snapshot", "error", err)
 			continue
 		}

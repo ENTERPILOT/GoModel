@@ -4,6 +4,16 @@ Status: approved design (updated 2026-08-16 for `#670` per-child templates)
 Date: 2026-08-16
 Extends: `docs/dev/2026-07-05_rate-limiting-spec.md` §8, §11.2, §11.7
 Depends on: `feat(quotas): add per-child user-path templates` (`#670`)
+Superseded in part: since `#1296` every replica saves rows of its own, keyed
+by a `writer` id as well as the window key, and since `#1339` it reads the
+other writers' rows on each flush and enforces against the sum. The replica
+statements in §3, §4 and §13 (no shared counters, about N × the limit,
+last write wins) and the data model and store methods in §6 and §7 (one row
+per key) describe the original design, not this one. Sharing is approximate,
+within about two flush intervals, and stops after start when
+`RATE_LIMITS_FLUSH_INTERVAL=0`; see "Several replicas share one limit" in
+`docs/features/rate-limits.mdx`. `WindowSnapshot` and `Store` in
+`internal/ratelimit` are the current shape.
 
 ## 1. Why
 
@@ -191,7 +201,7 @@ serving, then shuts the old one down, then starts the new one
 | Call | When | Persistence |
 |---|---|---|
 | `New` / `NewService` | `app.New`, tests | Empty limiter. No load, no flush, no loop. |
-| `Start` | `App.startServer`, after the previous generation’s `Shutdown` | Load snapshot, apply rows whose **definition** still matches a current rule and whose `partition` matches the rule’s mode (empty iff `!PerChild`), re-arm child expiry, then start the flush loop if `flush_interval > 0`. Mark the generation **active** only if load succeeded. Start is idempotent. A failed load leaves the generation idle so it cannot flush an empty snapshot over durable windows. |
+| `Start` | `App.startServer`, after the previous generation’s `Shutdown` | Load snapshot, apply rows whose **definition** still matches a current rule and whose `partition` matches the rule’s mode (empty iff `!PerChild`), re-arm child expiry, then start the flush loop if `flush_interval > 0`. Start is idempotent. A failed load still marks the generation **active**: its rows are its own, keyed by its writer id, so saving them overwrites nothing, and the next periodic flush loads everything again. With `flush_interval = 0` there is no later flush: `Close` saves this replica's rows, and the other replicas' counts are never read. |
 | `Close` (`Result.Close`) | `App.Shutdown` | Stop the flush loop. If **active**, write one last snapshot. Then stop the expiry worker and close the store. Close is idempotent. |
 
 An idle replacement that is built and then discarded (failed listen,
@@ -282,10 +292,11 @@ next flush from putting the row back.
 
 Persistence never fails a request. `admit()` does not see store errors.
 
-- **Load failure:** log and leave the generation **idle**. Do not
-  block the listener. Do not flush. The previous snapshot stays on
-  disk. Skip corrupt rows; restore the good ones. Only a successful
-  load (including “no rows”) activates persistence.
+- **Load failure:** log, do not block the listener, and activate the
+  generation anyway. It saves rows of its own, so the windows other
+  writers persisted stay as they were, and the next periodic flush
+  loads them all; with `flush_interval = 0` no later load runs. Skip
+  corrupt rows; restore the good ones.
 - **Periodic flush failure:** log and retry on the next tick. Memory
   stays authoritative.
 - **Shutdown flush failure:** log and continue teardown. Do not hang
@@ -305,8 +316,10 @@ they are there to pin, not a per-test inventory.
 - `New` neither reads nor writes. `Start` loads. `Close` after `Start`
   writes once. `Close` without `Start` writes nothing, and neither does
   admission — the "only a serving generation persists" rule of §8.
-- A failed load leaves the generation idle, so a store hiccup cannot
-  cost the persisted windows.
+- A failed load leaves the persisted windows as they were, and the
+  generation still saves its own counts and reads the others' on the next
+  periodic flush. With `flush_interval = 0` no flush follows, so it
+  shares nothing after start beyond the save on `Close`.
 - `Close` during an in-flight load does not restore after shutdown.
 - An in-flight flush cannot resurrect a completed reset or delete
   (`persistMu`), and a failed row delete reaches the caller.
