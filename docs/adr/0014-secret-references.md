@@ -212,8 +212,10 @@ master key is configured, only it may add or change a reference: for every
 other credential, authentication marks the request with
 `config.RestrictSecretReferences`, and `Secrets.StoreSecret` then rejects any
 reference the entity's stored row does not already hold with a 403
-(`secret_reference_requires_master_key`). Literals, the mask, and unchanged
-references still save. Repointing an entity sends it what its references
+(`secret_reference_requires_master_key`). A request let through without an
+authenticated identity is marked the same way whether or not a master key is
+configured, so an open admin API never accepts a new reference. Literals, the
+mask, and unchanged references still save. Repointing an entity sends it what its references
 resolve to, so `config.CheckSecretDestinations` refuses the same credentials
 a change to a destination field (MCP `url`; provider `type`, `base_url`,
 `backend`, `proxy_url`; guardrail type and plugin fields marked
