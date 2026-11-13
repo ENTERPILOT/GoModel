@@ -37,11 +37,11 @@ func execSchema(ctx context.Context, q Querier, dialect Dialect, statements []st
 // spelling (see addColumnStatement), because replicas starting together can
 // all see a column missing and race to add it.
 func AddColumns(ctx context.Context, db DB, statements ...string) error {
-	pending, err := missingColumnStatements(ctx, db, statements)
+	dialect := db.Dialect()
+	pending, err := missingColumnStatements(ctx, db, dialect, statements)
 	if err != nil {
 		return err
 	}
-	dialect := db.Dialect()
 	for _, statement := range pending {
 		err := execAddColumn(ctx, db, dialect.addColumnStatement(statement))
 		if err != nil && !IsDuplicateColumnError(err) {
@@ -55,19 +55,27 @@ func AddColumns(ctx context.Context, db DB, statements ...string) error {
 // for the table lock (see postgresDB.changeSchema), one transaction per
 // statement so a tolerated duplicate-column error ends only its own.
 func execAddColumn(ctx context.Context, db DB, statement string) error {
-	if p, ok := db.(*postgresDB); ok {
-		return p.changeSchema(ctx, func(q Querier) error {
-			_, err := q.Exec(ctx, statement)
-			return err
-		})
+	p, ok := db.(*postgresDB)
+	if !ok {
+		_, err := db.Exec(ctx, statement)
+		return err
 	}
-	_, err := db.Exec(ctx, statement)
-	return err
+	return p.changeSchema(ctx, func(q Querier) error {
+		// Checked again under the lock, on every attempt: a replica that
+		// queued here behind another one finds the column added, and must
+		// not queue for the table to add nothing.
+		pending, err := missingColumnStatements(ctx, q, PostgreSQL, []string{statement})
+		if err != nil || len(pending) == 0 {
+			return err
+		}
+		_, err = q.Exec(ctx, statement)
+		return err
+	})
 }
 
 // missingColumnStatements drops the statements whose column already exists,
 // reading each table's columns at most once.
-func missingColumnStatements(ctx context.Context, db DB, statements []string) ([]string, error) {
+func missingColumnStatements(ctx context.Context, q Querier, dialect Dialect, statements []string) ([]string, error) {
 	existing := make(map[string]map[string]bool)
 	pending := make([]string, 0, len(statements))
 	for _, statement := range statements {
@@ -79,7 +87,7 @@ func missingColumnStatements(ctx context.Context, db DB, statements []string) ([
 		columns, seen := existing[table]
 		if !seen {
 			var err error
-			if columns, err = Columns(ctx, db, table); err != nil {
+			if columns, err = columnsOf(ctx, q, dialect, table); err != nil {
 				return nil, err
 			}
 			existing[table] = columns
@@ -143,9 +151,15 @@ func isPlainIdentifier(name string) bool {
 //
 // The SQLite query interpolates table, so it must be a fixed identifier.
 func Columns(ctx context.Context, db DB, table string) (map[string]bool, error) {
+	return columnsOf(ctx, db, db.Dialect(), table)
+}
+
+// columnsOf is Columns on any Querier, so it can also read inside a
+// transaction.
+func columnsOf(ctx context.Context, q Querier, dialect Dialect, table string) (map[string]bool, error) {
 	var query string
 	var args []any
-	switch db.Dialect() {
+	switch dialect {
 	case SQLite:
 		query = fmt.Sprintf(`SELECT name FROM pragma_table_info('%s')`, table)
 	case PostgreSQL:
@@ -153,10 +167,10 @@ func Columns(ctx context.Context, db DB, table string) (map[string]bool, error) 
 			WHERE table_schema = current_schema() AND table_name = ?`
 		args = []any{table}
 	default:
-		return nil, fmt.Errorf("unsupported dialect %q", db.Dialect())
+		return nil, fmt.Errorf("unsupported dialect %q", dialect)
 	}
 
-	rows, err := db.Query(ctx, query, args...)
+	rows, err := q.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("inspect %s columns: %w", table, err)
 	}

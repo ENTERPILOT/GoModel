@@ -37,6 +37,10 @@ type lockWait struct {
 
 var defaultLockWait = lockWait{timeout: 500 * time.Millisecond, pause: time.Second, attempts: 40}
 
+// ErrTableLocked reports a schema change that gave up waiting for its table
+// lock: a long-running statement or index build held the table throughout.
+var ErrTableLocked = errors.New("schema change could not lock its table")
+
 // lockNotAvailable is the SQLSTATE of a statement cancelled by lock_timeout.
 const lockNotAvailable = "55P03"
 
@@ -55,8 +59,9 @@ func (p *postgresDB) changeSchema(ctx context.Context, fn func(Querier) error) e
 			if _, err := q.Exec(ctx, "SELECT pg_advisory_xact_lock(?)", postgresSchemaLockKey); err != nil {
 				return fmt.Errorf("acquire schema lock: %w", err)
 			}
-			// Set after the advisory lock: lock_timeout bounds that wait
-			// too, and replicas queueing to apply their schema is expected.
+			// Set only once the advisory lock is held, so that it bounds
+			// the wait for a table and not the wait above: replicas queueing
+			// there to apply their schema is expected.
 			timeout := fmt.Sprintf("SET LOCAL lock_timeout = %d", p.lockWait.timeout.Milliseconds())
 			if _, err := q.Exec(ctx, timeout); err != nil {
 				return fmt.Errorf("set lock timeout: %w", err)
@@ -76,8 +81,8 @@ func (p *postgresDB) changeSchema(ctx context.Context, fn func(Querier) error) e
 		}
 	}
 	if isLockTimeout(err) {
-		return fmt.Errorf("schema change could not lock its table in %d attempts; a long-running statement or index build holds it: %w",
-			p.lockWait.attempts, err)
+		return fmt.Errorf("%w in %d attempts; a long-running statement or index build holds it: %w",
+			ErrTableLocked, p.lockWait.attempts, err)
 	}
 	return err
 }
@@ -89,7 +94,7 @@ func isLockTimeout(err error) bool {
 
 // pendingSchema drops the CREATE INDEX IF NOT EXISTS statements whose index
 // already exists. A statement it cannot parse is kept, so it runs as written.
-func (p *postgresDB) pendingSchema(ctx context.Context, statements []string) ([]string, error) {
+func pendingSchema(ctx context.Context, q Querier, statements []string) ([]string, error) {
 	pending := make([]string, 0, len(statements))
 	for _, statement := range statements {
 		match := createIndexPattern.FindStringSubmatch(statement)
@@ -100,7 +105,7 @@ func (p *postgresDB) pendingSchema(ctx context.Context, statements []string) ([]
 		// IF NOT EXISTS looks for any relation of that name in the table's
 		// schema, so this does too.
 		var exists bool
-		err := p.QueryRow(ctx, `
+		err := q.QueryRow(ctx, `
 			SELECT EXISTS (
 				SELECT 1 FROM pg_class i
 				JOIN pg_class t ON t.relnamespace = i.relnamespace
