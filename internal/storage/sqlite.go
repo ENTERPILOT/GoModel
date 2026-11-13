@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -25,14 +26,17 @@ import (
 //     caps the estimated rows per key too far: at 1000, a day-range usage
 //     query still chose the model index over the timestamp index.
 const sqliteTuningPragmas = "&_pragma=cache_size(-65536)" +
-	"&_pragma=mmap_size(268435456)" +
+	"&" + sqliteMmapPragma +
 	"&_pragma=journal_size_limit(67108864)" +
 	"&_pragma=analysis_limit(100000)"
+
+// sqliteMmapPragma is shared with the read pool, see sqliteReaderPragmas.
+const sqliteMmapPragma = "_pragma=mmap_size(268435456)"
 
 const (
 	// sqliteOptimizeInterval is how often the planner statistics are checked.
 	sqliteOptimizeInterval = time.Hour
-	// sqliteOptimizeTimeout bounds one check, which holds the single
+	// sqliteOptimizeTimeout bounds one check, which holds the writer
 	// connection. It stays well under the 30-second usage and audit flush
 	// deadlines and bounds how long the startup check delays serving.
 	sqliteOptimizeTimeout = 10 * time.Second
@@ -47,6 +51,9 @@ const (
 // sqliteStorage implements Storage for SQLite
 type sqliteStorage struct {
 	db *sql.DB
+	// readDB is the read-only pool behind ReadDB; it is db itself for an
+	// in-memory database.
+	readDB *sql.DB
 
 	maintenanceCtx  context.Context
 	stopMaintenance context.CancelFunc
@@ -75,10 +82,11 @@ func NewSQLite(cfg SQLiteConfig) (SQLiteStorage, error) {
 		return nil, fmt.Errorf("failed to open SQLite database: %w", err)
 	}
 
-	// Serialize all SQLite access through a single connection.
+	// Serialize all SQLite writes through a single connection.
 	// SQLite only permits one writer at a time. With multiple open connections,
 	// concurrent flush loops (audit log + usage tracking) cause SQLITE_BUSY errors.
 	// A single connection lets database/sql queue callers in Go, eliminating contention.
+	// Read-only stores use the separate pool behind ReadDB instead.
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
@@ -95,8 +103,14 @@ func NewSQLite(cfg SQLiteConfig) (SQLiteStorage, error) {
 		return nil, fmt.Errorf("failed to set busy_timeout pragma: %w", err)
 	}
 
+	readDB, err := openSQLiteReader(db)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
-	return &sqliteStorage{db: db, maintenanceCtx: ctx, stopMaintenance: cancel}, nil
+	return &sqliteStorage{db: db, readDB: readDB, maintenanceCtx: ctx, stopMaintenance: cancel}, nil
 }
 
 func (s *sqliteStorage) DB() *sql.DB {
@@ -118,10 +132,14 @@ func (s *sqliteStorage) Close() error {
 		s.maintenanceMu.Unlock()
 		s.maintenance.Wait()
 	}
-	if s.db != nil {
-		return s.db.Close()
+	var errs []error
+	if s.readDB != nil && s.readDB != s.db {
+		errs = append(errs, s.readDB.Close())
 	}
-	return nil
+	if s.db != nil {
+		errs = append(errs, s.db.Close())
+	}
+	return errors.Join(errs...)
 }
 
 // startMaintenance checks the planner statistics before returning, so the
@@ -174,4 +192,5 @@ func (s *sqliteStorage) optimize(warned *bool) {
 		return
 	}
 	slog.Debug("refreshed SQLite query planner statistics", "duration", time.Since(started).Round(time.Millisecond))
+	s.reopenIdleReaders()
 }

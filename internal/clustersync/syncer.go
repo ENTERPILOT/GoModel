@@ -83,7 +83,14 @@ func New(ctx context.Context, shared storage.Storage) (*Syncer, error) {
 		return nil, fmt.Errorf("shared storage is required")
 	}
 	store, err := storage.ResolveSQLBackend[Store](ctx, shared,
-		func(db sqlx.DB) (Store, error) { return NewSQLStore(ctx, db) },
+		func(db sqlx.DB) (Store, error) {
+			sqlStore, err := NewSQLStore(ctx, db)
+			if err != nil {
+				return nil, err
+			}
+			sqlStore.reads = storage.ReadSQL(shared, db)
+			return sqlStore, nil
+		},
 		func(db *mongo.Database) (Store, error) { return NewMongoDBStore(db) },
 	)
 	if err != nil {

@@ -58,6 +58,10 @@ const sqlRateLimitWindowSnapshotsSchema = `
 // SQLStore stores rate limit rules in a SQL database.
 type SQLStore struct {
 	db sqlx.DB
+	// reads serves LoadCounters, which only reads and tolerates a
+	// snapshot taken just before a concurrent write commits: SQLite's
+	// read-only pool, or db.
+	reads sqlx.DB
 	// legacyCounters records that the pre-writer rate_limit_counters table
 	// exists, so resets clear it too: an older replica still running during
 	// a rolling upgrade keeps writing there, and the next start imports it.
@@ -123,7 +127,7 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &SQLStore{db: db, legacyCounters: legacy}, nil
+	return &SQLStore{db: db, reads: db, legacyCounters: legacy}, nil
 }
 
 func (s *SQLStore) ListRules(ctx context.Context) ([]Rule, error) {
@@ -212,7 +216,7 @@ func (s *SQLStore) ReplaceConfigRules(ctx context.Context, rules []Rule) error {
 }
 
 func (s *SQLStore) LoadCounters(ctx context.Context, since int64) ([]WindowSnapshot, error) {
-	rows, err := s.db.Query(ctx, `
+	rows, err := s.reads.Query(ctx, `
 		SELECT scope, subject, partition, period_seconds, writer, epoch,
 			requests_window_start, requests_current, requests_previous,
 			tokens_window_start, tokens_current, tokens_previous,

@@ -26,6 +26,10 @@ const (
 // SQLStore stores budgets and budget settings in a SQL database.
 type SQLStore struct {
 	db sqlx.DB
+	// reads serves SumSpend, which only reads and tolerates a
+	// snapshot taken just before a concurrent write commits: SQLite's
+	// read-only pool, or db.
+	reads sqlx.DB
 }
 
 // sqlBudgetsSchema is shared by fresh installs and the pre-scope migration
@@ -90,7 +94,7 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	if err := db.Schema(ctx, sqlRest...); err != nil {
 		return nil, fmt.Errorf("failed to create budget tables: %w", err)
 	}
-	return &SQLStore{db: db}, nil
+	return &SQLStore{db: db, reads: db}, nil
 }
 
 func (s *SQLStore) ListBudgets(ctx context.Context) ([]Budget, error) {
@@ -308,7 +312,7 @@ func (s *SQLStore) sumSpendChunk(ctx context.Context, windows []SpendWindow) ([]
 	for i := range totals {
 		dest[i] = &totals[i]
 	}
-	if err := s.db.QueryRow(ctx, query, args...).Scan(dest...); err != nil {
+	if err := s.reads.QueryRow(ctx, query, args...).Scan(dest...); err != nil {
 		return nil, fmt.Errorf("sum usage cost: %w", err)
 	}
 

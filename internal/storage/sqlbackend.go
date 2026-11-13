@@ -48,3 +48,36 @@ func withSQL[H any, T any](handle H, wrap func(H) (sqlx.DB, error), sqlStore fun
 	}
 	return sqlStore(db)
 }
+
+// ResolveSQLReadBackend is ResolveSQLBackend for stores that only read. On
+// SQLite the store gets ReadSQL's read-only pool, so its queries never queue
+// writes behind them; other backends get what ResolveSQLBackend gives.
+func ResolveSQLReadBackend[T any](
+	ctx context.Context,
+	store Storage,
+	sqlStore func(sqlx.DB) (T, error),
+	mongodb func(*mongo.Database) (T, error),
+) (T, error) {
+	if sqlStore == nil {
+		// ResolveSQLBackend errors only when an SQL backend is selected.
+		return ResolveSQLBackend(ctx, store, nil, mongodb)
+	}
+	return ResolveSQLBackend(ctx, store, func(db sqlx.DB) (T, error) {
+		return sqlStore(ReadSQL(store, db))
+	}, mongodb)
+}
+
+// ReadSQL returns the handle for a store's read-only queries: SQLite's read
+// pool (see SQLiteStorage.ReadDB), otherwise db itself. Writes, and reads that
+// must see a write in the same transaction, stay on db.
+func ReadSQL(store Storage, db sqlx.DB) sqlx.DB {
+	sqlite, ok := store.(SQLiteStorage)
+	if !ok {
+		return db
+	}
+	reads, err := sqlx.NewSQLite(sqlite.ReadDB())
+	if err != nil {
+		return db
+	}
+	return reads
+}
