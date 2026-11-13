@@ -23,9 +23,10 @@ func convertFromAnthropicResponse(resp *anthropicResponse) *core.ChatResponse {
 	}
 
 	usage := core.Usage{
-		PromptTokens:     resp.Usage.InputTokens,
-		CompletionTokens: resp.Usage.OutputTokens,
-		TotalTokens:      resp.Usage.InputTokens + resp.Usage.OutputTokens,
+		PromptTokens:        resp.Usage.promptTokens(),
+		CompletionTokens:    resp.Usage.OutputTokens,
+		TotalTokens:         resp.Usage.promptTokens() + resp.Usage.OutputTokens,
+		PromptTokensDetails: resp.Usage.promptDetails(),
 	}
 
 	rawUsage := buildAnthropicRawUsage(resp.Usage)
