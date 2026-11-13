@@ -36,6 +36,13 @@ dashboardu dostępna jest ta sama rotacja wielu kluczy, którą obsługują zmie
 środowiskowe (`api_keys`, uporządkowana lista), oraz
 [proxy wychodzące](/pl/providers/outbound-proxy) per provider.
 
+Bazowy URL zapisany z dashboardu lub przez API administracyjne musi być zwykłym
+adresem `http://` lub `https://`: bez nazwy użytkownika i hasła, bez query
+stringa i bez fragmentu. Adresy loopback i prywatne są akceptowane, więc lokalne
+serwery, takie jak Ollama czy vLLM, działają; adresy link-local i endpointy
+metadanych instancji chmurowych są odrzucane. Bedrock przyjmuje w tym polu także
+region AWS.
+
 Każdy provider ma też ustawienie `billable`, domyślnie włączone. Wyłącz je dla
 providera, za którego koszt wywołujący nie jest ci winien, np. własnego klucza
 API klienta zarejestrowanego jako osobna instancja providera: użycie jest nadal
