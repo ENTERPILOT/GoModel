@@ -3,9 +3,10 @@
 //
 // A shared object is trusted code: opening one is equivalent to changing the
 // binary. The loader therefore refuses relative paths that escape the
-// configured search paths, verifies optional SHA-256 pins, and turns every
-// failure into a startup error that names the file. It never loads anything
-// unless plugins.load is configured.
+// configured search paths, verifies SHA-256 pins (required for every file
+// when plugins.require_sha256 is set), and turns every failure into a startup
+// error that names the file. It never loads anything unless plugins.load is
+// configured.
 //
 // Go's plugin package requires the host and the plugin to be built with the
 // same toolchain and the same build flags (notably -trimpath and -race) from
@@ -58,10 +59,19 @@ type Loaded struct {
 
 // Load resolves, verifies, and opens every configured shared object. It
 // returns nil when nothing is configured. The first failure aborts loading
-// with an error naming the offending file.
+// with an error naming the offending file. With cfg.RequireSHA256, an entry
+// without a sha256 pin fails before any file is opened: opening a shared
+// object runs its code.
 func Load(cfg config.PluginsConfig) ([]Loaded, error) {
 	if len(cfg.Load) == 0 {
 		return nil, nil
+	}
+	if cfg.RequireSHA256 {
+		for i, entry := range cfg.Load {
+			if normalizeDigest(entry.SHA256) == "" {
+				return nil, fmt.Errorf("plugins.load[%d]: plugin file %q has no sha256 pin, which plugins.require_sha256 requires", i, strings.TrimSpace(entry.File))
+			}
+		}
 	}
 	loaded := make([]Loaded, 0, len(cfg.Load))
 	for i, entry := range cfg.Load {
@@ -144,11 +154,16 @@ func within(dir, path string) bool {
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
+// normalizeDigest returns a configured digest in lower case, without
+// surrounding space or a "sha256:" prefix.
+func normalizeDigest(digest string) string {
+	return strings.TrimPrefix(strings.ToLower(strings.TrimSpace(digest)), "sha256:")
+}
+
 // VerifySHA256 checks the file against a hex digest. An empty digest skips
 // the check.
 func VerifySHA256(path, want string) error {
-	want = strings.ToLower(strings.TrimSpace(want))
-	want = strings.TrimPrefix(want, "sha256:")
+	want = normalizeDigest(want)
 	if want == "" {
 		return nil
 	}

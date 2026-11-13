@@ -332,7 +332,8 @@ Constraints of Go's `plugin` package that the documentation states plainly:
   changed instance config re-runs `Init` on a fresh value.
 - A `.so` is trusted code with full memory access. Loading one is equivalent
   to changing the binary; `search_paths` should be root-owned and `sha256`
-  pinned in production. Sandboxing is out of scope; a subprocess or Wasm
+  pinned in production, where `plugins.require_sha256` (default false)
+  refuses any file without a pin. Sandboxing is out of scope; a subprocess or Wasm
   loader can be added later behind the same catalog.
 
 ### 9. Routing strategy plugins

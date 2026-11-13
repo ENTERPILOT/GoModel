@@ -312,17 +312,25 @@ guardrails:
 ```yaml
 plugins:
   search_paths: ["/etc/gomodel/plugins"]   # PLUGINS_SEARCH_PATHS，逗号分隔；默认值：空
+  require_sha256: true                     # PLUGINS_REQUIRE_SHA256；默认值：false
   load:
     - file: acme_guard.so                  # 相对于某个搜索路径，或使用绝对路径
-      sha256: "3b1f..."                    # 可选的摘要固定；不匹配时启动失败
+      sha256: "3b1f..."                    # 摘要固定；不匹配时启动失败
 ```
 
 相对路径的 `file` 必须解析到某个 `search_paths` 之内（会跟随并检查符号链接）。无法解析、校验或打开的文件会导致启动错误，错误信息中会指明该文件。
+
+请使用 `sha256` 固定每个文件。未固定摘要的条目会在不经校验的情况下加载，除非 `require_sha256` 为 `true`，此时它会导致启动错误。该设置默认为 `false`；请在生产环境中开启，这样磁盘上被替换的 `.so` 就无法以网关的身份运行。
 
 没有 `config.yaml` 的部署可以通过环境变量列出相同的条目：`PLUGINS_LOAD` 是以逗号分隔的 `file` 值列表，每一项都可以写成
 `file=sha256` 以固定摘要。只有最后一个 `=` 且其后紧跟恰好 64 个十六进制字符时，才会被视为摘要固定；其他条目都视为文件名。
 该变量非空时，会替换
 `config.yaml` 中的 `plugins.load` 列表（环境变量 > 配置文件，与其他所有可通过环境变量配置的值一致）。
+
+```bash
+PLUGINS_REQUIRE_SHA256=true
+PLUGINS_LOAD="acme_guard.so=$(sha256sum /etc/gomodel/plugins/acme_guard.so | cut -d' ' -f1)"
+```
 
 `GUARDRAILS_ENABLED` 仍然是决定已配置实例是否作用于流量的开关。
 
@@ -354,7 +362,7 @@ plugins:
 - **无法卸载**：`.so` 会一直保持加载状态，直到重启。修改已加载的文件需要重启才能生效；
   编辑实例的配置则会在新的值上重新运行 `Init`，无需重启。
 - **受信任的代码**：加载 `.so` 等同于修改二进制文件。在生产环境中，请确保
-  `search_paths` 归 root 所有，并固定 `sha256`。
+  `search_paths` 归 root 所有，固定 `sha256`，并设置 `require_sha256: true`。
 
 ### 构建与检查
 

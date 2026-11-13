@@ -89,6 +89,36 @@ func TestLoad_PluginsEnabledFlag(t *testing.T) {
 	}
 }
 
+func TestLoad_PluginsRequireSHA256(t *testing.T) {
+	tests := []struct {
+		name string
+		env  string
+		yaml string
+		want bool
+	}{
+		{name: "off by default"},
+		{name: "env enables", env: "true", want: true},
+		{name: "yaml enables", yaml: "plugins:\n  require_sha256: true\n", want: true},
+		{name: "env overrides yaml", env: "false", yaml: "plugins:\n  require_sha256: true\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllConfigEnvVars(t)
+			if tt.env != "" {
+				t.Setenv("PLUGINS_REQUIRE_SHA256", tt.env)
+			}
+			withTempDir(t, func(dir string) {
+				if tt.yaml != "" {
+					writeConfigYAML(t, dir, tt.yaml)
+				}
+				result, err := Load()
+				require.NoError(t, err)
+				require.Equal(t, tt.want, result.Config.Plugins.RequireSHA256)
+			})
+		})
+	}
+}
+
 func TestApplyPluginsLoadEnv(t *testing.T) {
 	sha := strings.Repeat("ab", 32) // 64 hex chars
 	t.Setenv("PLUGINS_LOAD", "a.so, b.so="+sha+", , c.so")
