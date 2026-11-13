@@ -98,62 +98,43 @@ func ResolveBatchItemEndpoint(defaultEndpoint, itemURL string) string {
 	return defaultEndpoint
 }
 
-// MaybeDecodeKnownBatchItemRequest selectively decodes a known JSON batch
-// subrequest only when it targets one of the requested operations. Non-POST,
-// body-less, or unmatched items are reported as not handled.
+// MaybeDecodeKnownBatchItemRequest decodes a batch subrequest when it targets
+// one of the requested operations, and reports any other valid item as not
+// handled. An item the gateway cannot check (an unsupported url or method, no
+// body, or ambiguous JSON) is an error rather than skipped, so it never
+// reaches the provider unchecked.
 func MaybeDecodeKnownBatchItemRequest(defaultEndpoint string, item BatchRequestItem, operations ...Operation) (*DecodedBatchItemRequest, bool, error) {
-	if len(item.Body) == 0 {
+	if err := validateBatchItem(defaultEndpoint, item); err != nil {
+		return nil, true, err
+	}
+	endpoint, _ := batchItemEndpoint(ResolveBatchItemEndpoint(defaultEndpoint, item.URL))
+	if len(operations) > 0 && !slices.Contains(operations, DescribeEndpointPath(endpoint).Operation) {
 		return nil, false, nil
 	}
-
-	method := strings.ToUpper(strings.TrimSpace(item.Method))
-	if method == "" {
-		method = http.MethodPost
-	}
-	if method != http.MethodPost {
-		return nil, false, nil
-	}
-
-	endpoint := NormalizeOperationPath(ResolveBatchItemEndpoint(defaultEndpoint, item.URL))
-	if endpoint == "" {
-		return nil, false, nil
-	}
-	operation := DescribeEndpointPath(endpoint).Operation
-	if len(operations) > 0 && !slices.Contains(operations, operation) {
-		return nil, false, nil
-	}
-
-	decoded, err := DecodeKnownBatchItemRequest(defaultEndpoint, item)
+	decoded, err := decodeBatchItem(endpoint, item)
 	if err != nil {
 		return nil, true, err
 	}
 	return decoded, true, nil
 }
 
-// DecodeKnownBatchItemRequest normalizes and decodes a known JSON batch subrequest.
+// DecodeKnownBatchItemRequest validates and decodes a batch subrequest.
 func DecodeKnownBatchItemRequest(defaultEndpoint string, item BatchRequestItem) (*DecodedBatchItemRequest, error) {
-	endpoint := NormalizeOperationPath(ResolveBatchItemEndpoint(defaultEndpoint, item.URL))
-	if endpoint == "" {
-		return nil, fmt.Errorf("url is required")
+	if err := validateBatchItem(defaultEndpoint, item); err != nil {
+		return nil, err
 	}
+	endpoint, _ := batchItemEndpoint(ResolveBatchItemEndpoint(defaultEndpoint, item.URL))
+	return decodeBatchItem(endpoint, item)
+}
 
-	method := strings.ToUpper(strings.TrimSpace(item.Method))
-	if method == "" {
-		method = http.MethodPost
-	}
-	if method != http.MethodPost {
-		return nil, fmt.Errorf("only POST is supported")
-	}
-	if len(item.Body) == 0 {
-		return nil, fmt.Errorf("body is required")
-	}
-
+// decodeBatchItem decodes a validated batch item's body for its canonical
+// endpoint.
+func decodeBatchItem(endpoint string, item BatchRequestItem) (*DecodedBatchItemRequest, error) {
 	decoded := &DecodedBatchItemRequest{
 		Endpoint:  endpoint,
-		Method:    method,
+		Method:    http.MethodPost,
 		Operation: DescribeEndpointPath(endpoint).Operation,
 	}
-
 	codec, ok := canonicalOperationCodecFor(decoded.Operation)
 	if !ok {
 		return nil, fmt.Errorf("unsupported batch item url: %s", endpoint)
