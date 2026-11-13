@@ -163,8 +163,12 @@ func (r *SQLReader) GetLogs(ctx context.Context, params LogQueryParams) (*LogLis
 		return nil, fmt.Errorf("failed to count audit log entries: %w", err)
 	}
 
+	query, attempts := selectLogColumns, attemptPayloadsFull
+	if params.OmitBodies {
+		query, attempts = "SELECT "+listColumns(r.db.Dialect())+" FROM audit_logs", attemptPayloadsMarked
+	}
 	rows, err := r.db.Query(ctx,
-		selectLogColumns+where+" ORDER BY timestamp DESC, "+r.dialect.idColumn+" DESC LIMIT ? OFFSET ?",
+		query+where+" ORDER BY timestamp DESC, "+r.dialect.idColumn+" DESC LIMIT ? OFFSET ?",
 		append(append([]any(nil), args...), limit, offset)...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query audit logs: %w", err)
@@ -173,10 +177,18 @@ func (r *SQLReader) GetLogs(ctx context.Context, params LogQueryParams) (*LogLis
 
 	entries := make([]LogEntry, 0)
 	for rows.Next() {
-		entry, err := scanSQLLogEntry(rows)
+		var omitted omittedBodies
+		var scanner sqlx.Row = rows
+		if params.OmitBodies {
+			scanner = extraColumns{row: rows, extra: []any{
+				&omitted.Request, &omitted.Response, &omitted.RequestConversation, &omitted.ResponseConversation,
+			}}
+		}
+		entry, err := scanSQLLogEntry(scanner)
 		if err != nil {
 			return nil, err
 		}
+		omitted.apply(entry)
 		entries = append(entries, *entry)
 	}
 	if err := rows.Err(); err != nil {
@@ -185,11 +197,49 @@ func (r *SQLReader) GetLogs(ctx context.Context, params LogQueryParams) (*LogLis
 	rows.Close()
 
 	if !params.OmitAttempts {
-		if err := r.loadAttempts(ctx, entries, true); err != nil {
+		if err := r.loadAttempts(ctx, entries, attempts); err != nil {
 			return nil, err
 		}
 	}
 	return &LogListResult{Entries: entries, Total: total, Limit: limit, Offset: offset}, nil
+}
+
+// listColumns are logColumns with the bodies cut out of data, followed by
+// the omittedBodies flags (GetLogs with OmitBodies). A body counts as
+// captured unless it is absent or JSON null, which both read back as nil.
+//
+// The conversation flags mirror admin.hasConversationPayload on the decoded
+// body: a request whose messages is an array, that has an input key, or
+// whose instructions or previous_response_id is a string; a response whose
+// choices is an array, or whose output is an array whose first item is an
+// object with a type or content key. A path into a body of another shape
+// (a string fallback, an array) has no type, so it reads as false. Every
+// SQLite row holds valid JSON or NULL: the store's json_extract indexes
+// reject anything else on insert.
+func listColumns(dialect sqlx.Dialect) string {
+	typeOf := func(path ...string) string {
+		return "json_type(data, '$." + strings.ReplaceAll(strings.Join(path, "."), ".0", "[0]") + "')"
+	}
+	text, data := "'text'", `json_remove(data, '$.request_body', '$.response_body')`
+	if dialect == sqlx.PostgreSQL {
+		typeOf = func(path ...string) string {
+			return "jsonb_typeof(data #> '{" + strings.Join(path, ",") + "}')"
+		}
+		text, data = "'string'", `data - 'request_body' - 'response_body'`
+	}
+	captured := func(body string) string { return "COALESCE(" + typeOf(body) + ", 'null') <> 'null'" }
+	request := typeOf("request_body", "messages") + " = 'array'" +
+		" OR " + typeOf("request_body", "input") + " IS NOT NULL" +
+		" OR " + typeOf("request_body", "instructions") + " = " + text +
+		" OR " + typeOf("request_body", "previous_response_id") + " = " + text
+	response := typeOf("response_body", "choices") + " = 'array'" +
+		" OR (" + typeOf("response_body", "output") + " = 'array'" +
+		" AND " + typeOf("response_body", "output", "0") + " = 'object'" +
+		" AND (" + typeOf("response_body", "output", "0", "type") + " IS NOT NULL" +
+		" OR " + typeOf("response_body", "output", "0", "content") + " IS NOT NULL))"
+	return strings.TrimSuffix(logColumns, "data") + data +
+		", " + captured("request_body") + ", " + captured("response_body") +
+		", COALESCE(" + request + ", FALSE), COALESCE(" + response + ", FALSE)"
 }
 
 // logFilters builds the WHERE conditions for a log query. Placeholders are
@@ -432,16 +482,30 @@ func (r *SQLReader) queryLogEntryWithAttempts(ctx context.Context, query, arg st
 	}
 
 	hydrated := []LogEntry{*entry}
-	if err := r.loadAttempts(ctx, hydrated, true); err != nil {
+	if err := r.loadAttempts(ctx, hydrated, attemptPayloadsFull); err != nil {
 		return nil, err
 	}
 	*entry = hydrated[0]
 	return entry, nil
 }
 
-// loadAttempts hydrates the entries' provider attempts. Without bodies, each
-// attempt's response body and headers stay in the database.
-func (r *SQLReader) loadAttempts(ctx context.Context, entries []LogEntry, bodies bool) error {
+// attemptPayloads selects how much of each attempt's captured upstream
+// response loadAttempts reads.
+type attemptPayloads int
+
+const (
+	// attemptPayloadsFull reads the response body and headers.
+	attemptPayloadsFull attemptPayloads = iota
+	// attemptPayloadsNone leaves both in the database.
+	attemptPayloadsNone
+	// attemptPayloadsMarked reads the headers and puts an OmittedBody where
+	// a response body was captured (GetLogs with OmitBodies).
+	attemptPayloadsMarked
+)
+
+// loadAttempts hydrates the entries' provider attempts with the response
+// payloads selects.
+func (r *SQLReader) loadAttempts(ctx context.Context, entries []LogEntry, payloads attemptPayloads) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -457,8 +521,12 @@ func (r *SQLReader) loadAttempts(ctx context.Context, entries []LogEntry, bodies
 	}
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
 	responseColumns := "response_body, response_headers"
-	if !bodies {
+	switch payloads {
+	case attemptPayloadsNone:
 		responseColumns = "NULL, NULL"
+	case attemptPayloadsMarked:
+		// A stored body reads back as nil only when it is NULL or empty.
+		responseColumns = "CASE WHEN response_body <> '' THEN 'true' END, response_headers"
 	}
 
 	rows, err := r.db.Query(ctx, fmt.Sprintf(`
@@ -483,6 +551,9 @@ func (r *SQLReader) loadAttempts(ctx context.Context, entries []LogEntry, bodies
 		auditLogID, attempt, err := scanSQLAttempt(rows)
 		if err != nil {
 			return err
+		}
+		if payloads == attemptPayloadsMarked && attempt.ResponseBody != nil {
+			attempt.ResponseBody = OmittedBody{}
 		}
 		grouped[auditLogID] = append(grouped[auditLogID], attempt)
 	}

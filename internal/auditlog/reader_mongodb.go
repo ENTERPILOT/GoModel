@@ -128,6 +128,64 @@ func mongoExactUserPathMatchFilter(userPath string) bson.E {
 	}
 }
 
+// mongoOmitBodiesStages leave the request and response bodies and each
+// attempt's response body out of a page of entries (GetLogs with
+// OmitBodies). A body counts as captured unless it is missing or null, which
+// both decode to nil; a captured attempt body is replaced with true, which
+// markOmittedAttemptBodies turns into an OmittedBody.
+//
+// The conversation flags stay false. Bodies read back from MongoDB decode
+// into bson.D, never the map admin.hasConversationPayload looks for, so the
+// full entries report no conversation payload either.
+func mongoOmitBodiesStages() bson.A {
+	captured := func(field string) bson.D {
+		return bson.D{{Key: "$not", Value: bson.A{
+			bson.D{{Key: "$in", Value: bson.A{bson.D{{Key: "$type", Value: field}}, bson.A{"missing", "null"}}}},
+		}}}
+	}
+	markedAttempts := bson.D{{Key: "$map", Value: bson.D{
+		{Key: "input", Value: "$data.attempts"},
+		{Key: "in", Value: bson.D{{Key: "$cond", Value: bson.A{
+			captured("$$this.response_body"),
+			bson.D{{Key: "$mergeObjects", Value: bson.A{"$$this", bson.D{{Key: "response_body", Value: true}}}}},
+			"$$this",
+		}}}},
+	}}}
+	// Merged into data rather than set as data.attempts, which would create
+	// an empty data document on an entry that has none.
+	attempts := bson.D{{Key: "$cond", Value: bson.A{
+		bson.D{{Key: "$isArray", Value: "$data.attempts"}}, markedAttempts, "$$REMOVE",
+	}}}
+	merged := bson.D{{Key: "$mergeObjects", Value: bson.A{"$data", bson.D{{Key: "attempts", Value: attempts}}}}}
+	data := bson.D{{Key: "$cond", Value: bson.A{
+		bson.D{{Key: "$eq", Value: bson.A{bson.D{{Key: "$type", Value: "$data"}}, "object"}}}, merged, "$data",
+	}}}
+	return bson.A{
+		bson.D{{Key: "$set", Value: bson.D{
+			{Key: "_request_body_captured", Value: captured("$data.request_body")},
+			{Key: "_response_body_captured", Value: captured("$data.response_body")},
+			{Key: "data", Value: data},
+		}}},
+		bson.D{{Key: "$project", Value: bson.D{
+			{Key: "data.request_body", Value: 0},
+			{Key: "data.response_body", Value: 0},
+		}}},
+	}
+}
+
+// markOmittedAttemptBodies replaces the attempt response bodies that
+// mongoOmitBodiesStages marked with OmittedBody.
+func markOmittedAttemptBodies(entry *LogEntry) {
+	if entry.Data == nil {
+		return
+	}
+	for i := range entry.Data.Attempts {
+		if entry.Data.Attempts[i].ResponseBody != nil {
+			entry.Data.Attempts[i].ResponseBody = OmittedBody{}
+		}
+	}
+}
+
 // GetLogs returns a paginated list of audit log entries.
 func (r *MongoDBReader) GetLogs(ctx context.Context, params LogQueryParams) (*LogListResult, error) {
 	limit, offset := clampLimitOffset(params.Limit, params.Offset)
@@ -145,12 +203,16 @@ func (r *MongoDBReader) GetLogs(ctx context.Context, params LogQueryParams) (*Lo
 		pipeline = append(pipeline, bson.D{{Key: "$project", Value: bson.D{{Key: "data.attempts", Value: 0}}}})
 	}
 
+	page := bson.A{
+		bson.D{{Key: "$sort", Value: bson.D{{Key: "timestamp", Value: -1}, {Key: "_id", Value: -1}}}},
+		bson.D{{Key: "$skip", Value: offset}},
+		bson.D{{Key: "$limit", Value: limit}},
+	}
+	if params.OmitBodies {
+		page = append(page, mongoOmitBodiesStages()...)
+	}
 	pipeline = append(pipeline, bson.D{{Key: "$facet", Value: bson.D{
-		{Key: "data", Value: bson.A{
-			bson.D{{Key: "$sort", Value: bson.D{{Key: "timestamp", Value: -1}, {Key: "_id", Value: -1}}}},
-			bson.D{{Key: "$skip", Value: offset}},
-			bson.D{{Key: "$limit", Value: limit}},
-		}},
+		{Key: "data", Value: page},
 		{Key: "total", Value: bson.A{
 			bson.D{{Key: "$count", Value: "count"}},
 		}},
@@ -163,7 +225,10 @@ func (r *MongoDBReader) GetLogs(ctx context.Context, params LogQueryParams) (*Lo
 	defer cursor.Close(ctx)
 
 	var facetResult struct {
-		Data  []mongoLogRow `bson:"data"`
+		Data []struct {
+			Row     mongoLogRow   `bson:",inline"`
+			Omitted omittedBodies `bson:",inline"`
+		} `bson:"data"`
 		Total []struct {
 			Count int `bson:"count"`
 		} `bson:"total"`
@@ -186,8 +251,12 @@ func (r *MongoDBReader) GetLogs(ctx context.Context, params LogQueryParams) (*Lo
 
 	entries := make([]LogEntry, 0, len(facetResult.Data))
 	for _, row := range facetResult.Data {
-		entry := row.toLogEntry()
+		entry := row.Row.toLogEntry()
 		if entry != nil {
+			if params.OmitBodies {
+				row.Omitted.apply(entry)
+				markOmittedAttemptBodies(entry)
+			}
 			entries = append(entries, *entry)
 		}
 	}

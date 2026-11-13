@@ -173,7 +173,7 @@ func (r *SQLReader) PreviewsByID(ctx context.Context, ids []string) ([]EntryPrev
 	}
 	rows.Close()
 
-	if err := r.loadAttempts(ctx, entries, false); err != nil {
+	if err := r.loadAttempts(ctx, entries, attemptPayloadsNone); err != nil {
 		return nil, err
 	}
 	previews := make([]EntryPreview, len(entries))
