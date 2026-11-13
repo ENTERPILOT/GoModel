@@ -81,9 +81,12 @@ func ConfigUsers(entries []config.UserConfig) []User {
 	result := make([]User, 0, len(entries))
 	for _, entry := range entries {
 		result = append(result, User{
-			UserPath:      entry.Path,
-			AllowedModels: entry.AllowedModels,
-			Description:   entry.Description,
+			UserPath:           entry.Path,
+			AllowedModels:      entry.AllowedModels,
+			DefaultModel:       entry.DefaultModel,
+			MaxReasoningEffort: entry.MaxReasoningEffort,
+			MaxOutputTokens:    entry.MaxOutputTokens,
+			Description:        entry.Description,
 		})
 	}
 	return result

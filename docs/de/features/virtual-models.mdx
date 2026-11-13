@@ -95,10 +95,14 @@ virtual_models:
       - { model: hetzner/qwen3.8 }
 ```
 
-Der Override ersetzt sowohl `reasoning.effort` als auch das flache Feld
-`reasoning_effort` und gilt auch dann, wenn der Client keinen Effort gesendet
-hat. GoModel übersetzt ihn anschließend in den Reasoning-Parameter des
-jeweiligen Providers, genau wie Werte des Clients.
+Der Override ersetzt `reasoning.effort`, das flache Feld `reasoning_effort`
+und jede [provider-spezifische Reasoning-Steuerung](/de/features/users#request-policy),
+die der Client gesendet hat (`thinking`, `enable_thinking`, `thinking_budget`,
+`think`, die Reasoning-Schalter in `chat_template_kwargs`), und gilt auch dann,
+wenn der Client keinen Effort gesendet hat. Eine Steuerung, die das virtuelle
+Modell in seinen eigenen `params` setzt, bleibt erhalten. GoModel übersetzt den
+Effort anschließend in den Reasoning-Parameter des jeweiligen Providers, genau
+wie Werte des Clients.
 
 Pro Versuch gewinnt der am tiefsten konfigurierte Wert. Der Override eines
 konkreten Modells hat Vorrang vor jedem Redirect darüber, und ein inneres
@@ -117,6 +121,15 @@ auf Aliase. Zum Beispiel können die Aliase `fast` und `smart` desselben Modells
 senden lassen. Das ist das Gegenteil von Slowdown, wo der Alias gewinnt. Wie
 bei Slowdown schlägt ein exakter Override einen modellweiten, und ein Eintrag
 ohne Effort verdeckt keinen allgemeineren.
+
+Ein Override erzwingt einen Wert; er ist keine Obergrenze. Um den Effort zu
+begrenzen, den eine Gruppe von Aufrufern auf jedem Modell nutzen darf, setzen
+Sie stattdessen `max_reasoning_effort` auf ihrem
+[User Path](/de/features/users#request-policy). Diese Obergrenze greift nach
+jedem Override virtueller Modelle, sodass `team-model` oben für einen Aufrufer,
+dessen Pfad auf `medium` begrenzt ist, `medium` statt `high` sendet, und
+`hetzner/qwen3.8` weiterhin `medium`. Die Obergrenze hebt nie einen Override
+an, der darunter liegt.
 
 ## Request-Parameter setzen
 
@@ -224,6 +237,13 @@ semantischen Caches umfasst ebenfalls die angewendeten Request-Parameter (siehe
 für die genauen Felder), sodass Aliase, deren angewendete Werte sich
 unterscheiden — auch für `top_k` oder `chat_template_kwargs` —, ebenfalls nie
 einen semantischen Eintrag teilen.
+
+Die [Obergrenzen des User Paths](/de/features/users#request-policy) des
+Aufrufers greifen zuletzt, nach `params` und dem Reasoning-Effort-Override:
+Ein Ausgabe-Token-Limit in jeder Schreibweise (`max_tokens`,
+`max_completion_tokens`, `max_output_tokens`) über dem `max_output_tokens` des
+Pfads wird gesenkt, egal ob der Client, `default_params` oder `params` es
+gesetzt hat, und ein Request ohne Limit erhält das des Pfads.
 
 Der Rest dieser Seite behandelt Redirects.
 

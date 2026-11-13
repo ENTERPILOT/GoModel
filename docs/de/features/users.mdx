@@ -1,8 +1,8 @@
 ---
 title: "Benutzer"
-description: "Legen Sie fest, welche Modelle eine Gruppe, ein Benutzer oder ein API-Key aufrufen darf – mit Allowlists, die im Baum der User Paths nach unten vererbt werden."
+description: "Legen Sie fest, welche Modelle eine Gruppe, ein Benutzer oder ein API-Key aufrufen darf – mit Allowlists sowie einem Standardmodell und Request-Obergrenzen, die im Baum der User Paths nach unten vererbt werden."
 icon: "users"
-keywords: ["Benutzer", "users", "Gruppen", "groups", "Modellzugriff", "model access", "erlaubte Modelle", "allowed models", "user_path", "API-Key", "API key", "Zugriffsrichtlinie", "access policy"]
+keywords: ["Benutzer", "users", "Gruppen", "groups", "Modellzugriff", "model access", "erlaubte Modelle", "allowed models", "user_path", "API-Key", "API key", "Zugriffsrichtlinie", "access policy", "Standardmodell", "default model", "Reasoning-Effort", "max output tokens"]
 ---
 
 ## Übersicht
@@ -147,6 +147,121 @@ dieses eine Modell ein.
 
 Ein abgelehnter Request erhält `400` mit dem Code `model_access_denied`.
 
+## Request-Policy
+
+Ein Knoten kann außerdem die Requests unter ihm formen. Alle drei Felder sind
+standardmäßig leer; solange keines gesetzt ist, ändert sich nichts:
+
+| Feld                   | Wirkung                                                  | Vererbung                        |
+| ---------------------- | -------------------------------------------------------- | -------------------------------- |
+| `default_model`        | bedient einen Request, der weder `model` noch `provider` nennt | der nächstgelegene Pfad gewinnt  |
+| `max_reasoning_effort` | senkt einen höheren Reasoning-Effort auf diese Stufe     | die niedrigste Obergrenze gilt   |
+| `max_output_tokens`    | senkt ein höheres Ausgabe-Token-Limit auf diesen Wert und setzt ihn bei einem Request ohne Limit | die niedrigste Obergrenze gilt   |
+
+```yaml
+users:
+  - path: /acme
+    max_output_tokens: 8192
+  - path: /acme/eng
+    default_model: team-model # ein Modell oder ein virtuelles Modell
+    max_reasoning_effort: medium
+  - path: /acme/eng/interns
+    max_reasoning_effort: low
+```
+
+| Request von             | Client sendet                                 | Upstream gesendet                        |
+| ----------------------- | --------------------------------------------- | ---------------------------------------- |
+| `/acme/eng/alice`       | kein `model`                                  | `team-model`, wie üblich aufgelöst       |
+| `/acme/eng/alice`       | `reasoning_effort: high`, `max_tokens: 32000` | `medium`, `8192`                         |
+| `/acme/eng/alice`       | `reasoning_effort: low`, `max_tokens: 100`    | unverändert                              |
+| `/acme/eng/alice`       | weder Effort noch Limit                       | kein Effort, `max_tokens: 8192`          |
+| `/acme/eng/interns/bob` | `reasoning_effort: medium`                    | `low`                                    |
+| `/acme/sales`           | `max_tokens: 32000`                           | `8192`                                   |
+
+**Obergrenzen** sind Höchstwerte. Es gilt die niedrigste Obergrenze zwischen
+einem Pfad und `/`: Ein Kind kann die Obergrenze seiner Gruppe verschärfen,
+eine höhere Obergrenze am Kind ändert nichts. Efforts nutzen die Skala `none`,
+`minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Die Token-Obergrenze deckt
+`max_tokens`, `max_completion_tokens` und `max_output_tokens` ab, in der
+Schreibweise, die der Client verwendet hat, und ein Request ohne Limit erhält
+die Obergrenze als Limit, in dem Feld, das das Upstream-Modell erwartet. Ein
+Limit, das nur in einer Schreibweise gesendet wird, die der Endpunkt nicht
+kennt (`max_output_tokens` bei Chat Completions, `max_tokens` bei der Responses
+API), wird in das eigene Feld des Endpunkts übernommen, und ein Wert, der keine
+ganze Zahl ab 1 ist, wird durch die Obergrenze ersetzt. Die
+Effort-Obergrenze senkt nur einen Effort, den der Request mitbringt, und fügt
+nie einen hinzu, weil ein hinzugefügter Effort Reasoning für Requests
+einschalten würde, die nicht danach gefragt haben. Ein Request ohne Effort
+läuft daher mit dem Standard des Modells, und ein Modell, das nicht unter eine
+bestimmte Stufe denken kann (Gemini 3, OpenAI o-Serie, OpenCode Zen), erhält
+diese Stufe auch unter einer niedrigeren Obergrenze.
+
+Neben `reasoning_effort` und `reasoning.effort` prüft eine Effort-Obergrenze
+die providerspezifischen Reasoning-Steuerungen, die Upstreams erreichen, auf
+oberster Ebene des Bodys oder in `extra_body`:
+
+| Steuerung                                                  | Gelesen von                               |
+| ---------------------------------------------------------- | ----------------------------------------- |
+| `thinking` (`{"type": "enabled", "budget_tokens"/"token_budget": N}`) | Cohere, Xiaomi MiMo, DeepSeek, Kimi, GLM-Upstreams |
+| `enable_thinking`, `thinking_budget`                       | Qwen, Bailian, vLLM- und SGLang-Server    |
+| `think` (Boolean oder Stufe)                               | Ollama                                    |
+| `chat_template_kwargs.enable_thinking`, `.thinking`, `.reasoning_effort`, `.thinking_budget` | vLLM, SGLang, llama.cpp |
+| `extra_body.google.thinking_config` `thinking_budget`/`thinking_level` (Namen in beliebiger Schreibweise) | Gemini |
+| Messages `thinking.budget_tokens`                          | Anthropic                                 |
+
+Eine Steuerung, die Reasoning ausschaltet (`false`, ein Budget von null,
+`{"type": "disabled"}`), und eine Stufe innerhalb der Obergrenze bleiben
+erhalten. Alles, was die Skala nicht einordnen kann, etwa ein Token-Budget oder
+`true`, gilt als über der Obergrenze: Das Gateway entfernt alle
+Reasoning-Steuerungen des Clients und sendet stattdessen die Obergrenze als
+Effort. Ein Messages-`budget_tokens` über dem Budget, das das Gateway selbst für
+die Stufe der Obergrenze sendet (5000 für `low`, 10000 für `medium`, 20000 ab
+`high`), wird auf dieses Budget gesenkt. Wo ein Adapter selbst einen Wert
+einsetzt (Anthropics Standard-`max_tokens` und der Platz über einem
+Thinking-Budget, der Standard-Effort von OpenCode Zen), bleibt auch dieser
+innerhalb der Obergrenzen: Ein Thinking-Budget schrumpft, bis es unter das
+begrenzte `max_tokens` passt, und Thinking wird ausgeschaltet, wenn nicht
+einmal das Mindestbudget passt.
+
+Obergrenzen greifen nach den [Overrides virtueller Modelle](/de/features/virtual-models#reasoning-effort-erzwingen)
+bei jedem Versuch, auch bei Failover-Versuchen, und begrenzen daher auch einen
+Effort oder ein `max_tokens`, das ein virtuelles Modell erzwingt oder als
+Standard setzt. Sie gelten für Chat Completions, die Responses API und die
+Anthropic Messages API; ein Messages-Request innerhalb der Obergrenzen wird
+weiterhin nativ an Anthropic weitergeleitet, einer darüber nimmt den
+übersetzten Pfad, damit er gesenkt werden kann. Embeddings und
+Medien-Endpunkte werden nicht umgeschrieben. Einträge im
+[Response-Cache](/de/features/cache) sind an die geltenden Obergrenzen
+gebunden: Eine Antwort, die vor dem Setzen oder Ändern einer Obergrenze
+gecacht wurde, wird unter der neuen nicht ausgeliefert.
+
+<Warning>
+Batches und Provider-Passthrough unter `/p/` werden **nicht** begrenzt: Ihre
+Bodys gehen unverändert upstream. Ein begrenzter Key, der auch Batches oder
+`/p/` nutzen darf, kann die Policy umgehen; sperren Sie diese Endpunkte daher
+für Keys, die Sie begrenzen. Der Provider [ChatGPT](/de/providers/chatgpt)
+akzeptiert kein Ausgabe-Token-Limit, daher wird `max_output_tokens` bei seinen
+Modellen nicht durchgesetzt.
+</Warning>
+
+Eine Policy auf `/` gilt für jeden Request, auch für Requests ohne User Path
+(der Master-Key oder ein Key ohne gebundenen Pfad, der keinen Header sendet).
+Ein Credential ohne gebundenen Pfad wählt seinen Pfad selbst über den
+[User-Path-Header](/de/features/user-path) und damit die Policy seines eigenen
+Teilbaums, sodass es einer weiter unten gesetzten Obergrenze ausweichen kann.
+Binden Sie Obergrenzen über [API-Keys](/de/features/user-path#api-keys) mit
+festem `user_path` an Aufrufer oder setzen Sie sie auf `/`.
+
+Das **Standardmodell** wird nur verwendet, wenn ein Chat-Completions-,
+Responses- oder Messages-Request (einschließlich Messages-Token-Zählung) weder
+`model` noch `provider` nennt; ein vom Client genanntes Modell gewinnt immer.
+Es wird genau wie ein vom Client gesendetes Modell aufgelöst: Es darf ein
+[virtuelles Modell](/de/features/virtual-models) sein und wird weiterhin gegen
+die Allowlists geprüft, sodass ein Standardmodell, das der Pfad nicht nutzen
+darf, abgelehnt wird. Ein Request ohne User Path nutzt das Standardmodell von
+`/`, falls gesetzt; Pfade ohne Standardmodell erhalten weiterhin
+`400 model is required`.
+
 ## Richtlinien verwalten
 
 ### Dashboard
@@ -160,8 +275,10 @@ gebundenen API-Keys. Die eigenen `allowed_models` eines verwalteten API-Keys
 können einen Request weiter einschränken, als der Pfad anzeigt. Der Editor
 warnt bereits während der Eingabe, wenn die Liste kein Modell mehr übrig
 lassen würde. Fügen Sie einen Knoten hinzu oder bearbeiten Sie ihn, um seine
-Modelle festzulegen; entfernen Sie die Richtlinie, um auf die Limits der
-übergeordneten Knoten zurückzufallen.
+Modelle, sein Standardmodell und seine Obergrenzen festzulegen; entfernen Sie
+die Richtlinie, um auf die Limits der übergeordneten Knoten zurückzufallen. Die
+Spalte **Request-Policy** zeigt die geltenden Werte und den Pfad, aus dem jeder
+stammt.
 
 Die Anzahl der Keys verlinkt auf die Seite **API Keys**, gefiltert auf den
 Teilbaum dieses Pfads, und jede Zeile hat eine Aktion *Add API key*, die das
@@ -180,12 +297,13 @@ oben) oder in der Umgebungsvariable `USERS` als JSON-Array mit denselben
 Feldern:
 
 ```bash
-USERS='[{"path":"/acme/eng","allowed_models":["anthropic/*"]}]'
+USERS='[{"path":"/acme/eng","allowed_models":["anthropic/*"],"default_model":"team-model","max_reasoning_effort":"medium","max_output_tokens":4096}]'
 ```
 
 Deklarierte Richtlinien überdecken Dashboard-Zeilen für denselben Pfad und
 sind im Dashboard schreibgeschützt. Ein falsch geschriebener Provider in einer
-deklarierten Richtlinie lässt den Start fehlschlagen.
+deklarierten Richtlinie lässt den Start fehlschlagen, ebenso ein unbekannter
+Effort, eine negative Token-Obergrenze oder ein Wildcard-Standardmodell.
 
 ### Admin API
 
@@ -195,6 +313,15 @@ deklarierten Richtlinie lässt den Start fehlschlagen.
 | `PUT`    | `/admin/users`                          | Legt die Richtlinie eines Knotens an oder ersetzt sie       |
 | `DELETE` | `/admin/users?user_path=/acme/eng`      | Entfernt die Richtlinie eines Knotens                  |
 | `PUT`    | `/admin/auth-keys/{id}/allowed-models`  | Ersetzt die Allowlist eines API-Keys           |
+
+`PUT /admin/users` nimmt `user_path`, `allowed_models`, `default_model`,
+`max_reasoning_effort`, `max_output_tokens` und `description` entgegen und
+ersetzt die ganze Zeile: Ein weggelassenes Feld wird geleert. `GET /admin/users`
+liefert die eigenen Felder jedes Knotens und ein Objekt `request_policy` mit den
+geltenden Werten und dem Pfad, aus dem jeder stammt (`default_model_from`,
+`max_reasoning_effort_from`, `max_output_tokens_from`). Ein auf einen Teilbaum
+beschränktes Credential kann die Policy seiner eigenen Scope-Wurzel nicht
+ändern, nur die von Pfaden darunter.
 
 `POST /admin/auth-keys` akzeptiert `allowed_models` beim Anlegen. Request- und
 Response-Formate finden Sie unter [Admin-Endpunkte](/de/advanced/admin-endpoints).

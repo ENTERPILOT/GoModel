@@ -1,8 +1,8 @@
 ---
 title: "用户"
-description: "通过沿用户路径树向下继承的允许列表，限制某个组、用户或 API 密钥可以调用哪些模型。"
+description: "通过沿用户路径树向下继承的允许列表，限制某个组、用户或 API 密钥可以调用哪些模型，并设置默认模型和请求上限。"
 icon: "users"
-keywords: ["用户", "组", "模型访问", "允许的模型", "访问策略", "users", "groups", "model access", "allowed models", "user_path", "API key", "access policy"]
+keywords: ["用户", "组", "模型访问", "允许的模型", "访问策略", "users", "groups", "model access", "allowed models", "user_path", "API key", "access policy", "默认模型", "推理强度", "default model", "reasoning effort", "max output tokens"]
 ---
 
 ## 概览
@@ -111,11 +111,66 @@ users:
 
 被拒绝的请求会收到 `400`，错误码为 `model_access_denied`。
 
+## 请求策略
+
+节点还可以塑造其下的请求。三个字段默认都未设置，因此在设置之前不会有任何变化：
+
+| 字段                   | 作用                                   | 继承方式             |
+| ---------------------- | -------------------------------------- | -------------------- |
+| `default_model`        | 为既未指定 `model` 也未指定 `provider` 的请求提供模型 | 最近的路径生效       |
+| `max_reasoning_effort` | 把更高的推理强度降到此级别             | 最低的上限生效       |
+| `max_output_tokens`    | 把更高的输出 token 上限降到此数值，并为未设上限的请求设置此上限 | 最低的上限生效       |
+
+```yaml
+users:
+  - path: /acme
+    max_output_tokens: 8192
+  - path: /acme/eng
+    default_model: team-model # 模型或虚拟模型
+    max_reasoning_effort: medium
+  - path: /acme/eng/interns
+    max_reasoning_effort: low
+```
+
+| 请求来自                | 客户端发送                                    | 发往上游                                 |
+| ----------------------- | --------------------------------------------- | ---------------------------------------- |
+| `/acme/eng/alice`       | 没有 `model`                                  | `team-model`，照常解析                   |
+| `/acme/eng/alice`       | `reasoning_effort: high`、`max_tokens: 32000` | `medium`、`8192`                         |
+| `/acme/eng/alice`       | `reasoning_effort: low`、`max_tokens: 100`    | 不变                                     |
+| `/acme/eng/alice`       | 既没有推理强度也没有上限                      | 没有推理强度，`max_tokens: 8192`         |
+| `/acme/eng/interns/bob` | `reasoning_effort: medium`                    | `low`                                    |
+| `/acme/sales`           | `max_tokens: 32000`                           | `8192`                                   |
+
+**上限**是上界。路径到 `/` 之间最低的上限生效，因此子节点可以收紧其组的上限，而在子节点上设置更高的上限不会改变任何东西。推理强度使用 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max` 这一刻度。token 上限覆盖 `max_tokens`、`max_completion_tokens` 和 `max_output_tokens`，并沿用客户端使用的写法；未设置上限的请求会以该上限作为其上限，写入上游模型所用的字段。仅以端点没有的写法发送的上限（Chat Completions 上的 `max_output_tokens`、Responses API 上的 `max_tokens`）会被移到该端点自己的字段中；不是大于等于 1 的整数的值会被替换为该上限。推理强度上限只会降低请求携带的推理强度，从不添加，因为添加推理强度会为没有要求推理的请求开启推理。因此，没有推理强度的请求按模型默认值运行；无法低于某个级别思考的模型（Gemini 3、OpenAI o 系列、OpenCode Zen）在更低的上限下仍会收到该级别。
+
+除了 `reasoning_effort` 和 `reasoning.effort`，推理强度上限还会检查会到达上游的提供商特定推理控制项，无论它们位于请求体顶层还是 `extra_body` 中：
+
+| 控制项                                                     | 读取方                                    |
+| ---------------------------------------------------------- | ----------------------------------------- |
+| `thinking`（`{"type": "enabled", "budget_tokens"/"token_budget": N}`） | Cohere、Xiaomi MiMo、DeepSeek、Kimi、GLM 上游 |
+| `enable_thinking`、`thinking_budget`                       | Qwen、Bailian、vLLM 和 SGLang 服务器      |
+| `think`（布尔值或级别）                                    | Ollama                                    |
+| `chat_template_kwargs.enable_thinking`、`.thinking`、`.reasoning_effort`、`.thinking_budget` | vLLM、SGLang、llama.cpp |
+| `extra_body.google.thinking_config` 的 `thinking_budget`/`thinking_level`（名称不区分大小写） | Gemini |
+| Messages 的 `thinking.budget_tokens`                       | Anthropic                                 |
+
+关闭推理的控制项（`false`、零预算、`{"type": "disabled"}`）以及不超过上限的级别会保留。刻度无法定位的值（例如 token 预算或 `true`）视为超过上限：网关会移除客户端的所有推理控制项，改为发送上限作为推理强度。Messages 的 `budget_tokens` 若高于网关自身为上限级别发送的预算（`low` 为 5000，`medium` 为 10000，`high` 及以上为 20000），会被降到该预算。适配器自行填入的值（Anthropic 的默认 `max_tokens` 及其在 thinking 预算之上预留的空间、OpenCode Zen 的默认推理强度）同样保持在上限之内：thinking 预算会缩小到能放进受限的 `max_tokens`，连最小预算都放不下时则关闭 thinking。
+
+上限在[虚拟模型覆盖](/zh/features/virtual-models#强制推理强度)之后生效，作用于每一次尝试，包括故障转移尝试，因此也会约束虚拟模型强制或默认设置的推理强度或 `max_tokens`。它们适用于 Chat Completions、Responses API 和 Anthropic Messages API；在上限之内的 Messages 请求仍会原生转发给 Anthropic，超过上限的请求会改走转换路径以便降低。嵌入和媒体端点不会被改写。[响应缓存](/zh/features/cache)的条目与生效的上限绑定，因此在设置或修改上限之前缓存的回答不会在新上限下返回。
+
+<Warning>
+批处理和 `/p/` 下的提供商直通**不受**上限约束：它们的请求体会原样发往上游。受限的密钥如果还能使用批处理或 `/p/`，就可以绕过该策略，因此请为受限的密钥禁止这些端点。[ChatGPT](/zh/providers/chatgpt) 提供商不接受输出 token 上限，因此 `max_output_tokens` 不会在其模型上强制执行。
+</Warning>
+
+`/` 上的策略约束每个请求，包括没有用户路径的请求（主密钥，或未绑定路径且未发送请求头的密钥）。未绑定路径的凭据通过[用户路径请求头](/zh/features/user-path)自行选择路径，从而选择其所在子树的策略，因此可以避开树中更下层设置的上限。请通过绑定固定 `user_path` 的 [API 密钥](/zh/features/user-path#api-密钥)把上限绑定到调用方，或将其设置在 `/` 上。
+
+**默认模型**仅在 Chat Completions、Responses 或 Messages 请求（包括 Messages 的 token 计数）既未指定 `model` 也未指定 `provider` 时使用；客户端指定的模型始终优先。它的解析方式与客户端发送的模型完全相同：可以是[虚拟模型](/zh/features/virtual-models)，并且仍要通过允许列表检查，因此路径无权使用的默认模型会被拒绝。没有用户路径的请求使用 `/` 上的默认模型（如果设置了）；没有默认模型的路径仍会收到 `400 model is required`。
+
 ## 管理策略
 
 ### 控制台
 
-`Users` 列出每个节点及其自身的允许列表、其**有效模型**（即应用自身列表、每个父节点的列表以及模型侧虚拟模型策略之后的路径级结果；红色的 **None** 表示该节点的列表交集为空），以及绑定到该节点的 API 密钥数量。托管 API 密钥自身的 `allowed_models` 可以比路径显示的结果进一步缩小请求范围。在您输入时，如果列表会导致没有可用模型，编辑器会发出警告。添加或编辑节点即可设置其模型；移除策略则会回退到父节点的限制。
+`Users` 列出每个节点及其自身的允许列表、其**有效模型**（即应用自身列表、每个父节点的列表以及模型侧虚拟模型策略之后的路径级结果；红色的 **None** 表示该节点的列表交集为空），以及绑定到该节点的 API 密钥数量。托管 API 密钥自身的 `allowed_models` 可以比路径显示的结果进一步缩小请求范围。在您输入时，如果列表会导致没有可用模型，编辑器会发出警告。添加或编辑节点即可设置其模型、默认模型和上限；移除策略则会回退到父节点的限制。**请求策略**列显示生效的值以及每个值来自的路径。
 
 密钥数量链接到 **API Keys** 页面，并按该路径的子树过滤；每一行都有一个 *Add API key* 操作，会打开预填好该路径的创建密钥表单。
 
@@ -126,10 +181,10 @@ users:
 可以在 `config.yaml` 的 `users:` 下声明策略（参见上面的示例），也可以在 `USERS` 环境变量中以包含相同字段的 JSON 数组声明：
 
 ```bash
-USERS='[{"path":"/acme/eng","allowed_models":["anthropic/*"]}]'
+USERS='[{"path":"/acme/eng","allowed_models":["anthropic/*"],"default_model":"team-model","max_reasoning_effort":"medium","max_output_tokens":4096}]'
 ```
 
-声明的策略会覆盖控制台中同一路径的条目，并在控制台中显示为只读。声明的策略中如果提供商名称拼写错误，会导致启动失败。
+声明的策略会覆盖控制台中同一路径的条目，并在控制台中显示为只读。声明的策略中如果提供商名称拼写错误、推理强度未知、token 上限为负数或默认模型为通配符，会导致启动失败。
 
 ### Admin API
 
@@ -139,5 +194,7 @@ USERS='[{"path":"/acme/eng","allowed_models":["anthropic/*"]}]'
 | `PUT`    | `/admin/users`                          | 创建或替换某个节点的策略       |
 | `DELETE` | `/admin/users?user_path=/acme/eng`      | 移除某个节点的策略                  |
 | `PUT`    | `/admin/auth-keys/{id}/allowed-models`  | 替换某个 API 密钥的允许列表           |
+
+`PUT /admin/users` 接受 `user_path`、`allowed_models`、`default_model`、`max_reasoning_effort`、`max_output_tokens` 和 `description`，并替换整行：省略的字段会被清空。`GET /admin/users` 返回每个节点自身的字段，以及一个 `request_policy` 对象，其中包含生效的值和每个值来自的路径（`default_model_from`、`max_reasoning_effort_from`、`max_output_tokens_from`）。限定在某个子树的凭据不能修改其自身作用域根节点的策略，只能修改其下的路径。
 
 `POST /admin/auth-keys` 在创建时接受 `allowed_models`。请求和响应格式请参阅 [Admin 端点](/zh/advanced/admin-endpoints)。

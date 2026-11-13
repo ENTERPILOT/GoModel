@@ -6,7 +6,7 @@
   import HighlightText from "$lib/components/atoms/HighlightText.svelte";
   import { authKeysStore } from "$pages/auth-keys/authKeys.svelte.js";
   import { usersStore as store } from "./users.svelte.js";
-  import { userNodeKind, userPathDepth, userPathLeaf } from "./usersLogic.js";
+  import { userNodeKind, userPathDepth, userPathLeaf, userRequestPolicyItems } from "./usersLogic.js";
   import { CircleCheck, Copy, Folder, KeyRound, Pencil, Trash2, TriangleAlert, User } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 </script>
@@ -18,6 +18,7 @@
         <th>{m.users_column_path()}</th>
         <th>{m.users_column_allowed_models()}</th>
         <th>{m.users_column_effective()}</th>
+        <th>{m.users_column_request_policy()}</th>
         <th>{m.users_column_keys()}</th>
         <th>{m.users_column_description()}</th>
         <th class="col-actions" aria-label={m.users_actions()}></th>
@@ -82,6 +83,18 @@
                 {m.users_effective_via({ path: node.inherited_from[node.inherited_from.length - 1] })}
               </span>
             {/if}
+          </td>
+          <td>
+            {#each userRequestPolicyItems(node) as item (item.key)}
+              <span class="user-policy-item">
+                {item.label}
+                {#if item.from && item.from !== node.user_path}
+                  <span class="user-effective-via">{m.users_effective_via({ path: item.from })}</span>
+                {/if}
+              </span>
+            {:else}
+              <span class="user-muted">{m.users_policy_none()}</span>
+            {/each}
           </td>
           <td>
             {#if node.key_count > 0}
@@ -199,6 +212,12 @@
     color: var(--text-muted);
     font-size: 12px;
     cursor: help;
+  }
+
+  .user-policy-item {
+    display: block;
+    font-size: 13px;
+    white-space: nowrap;
   }
 
   .user-muted {

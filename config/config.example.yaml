@@ -146,11 +146,31 @@ models:
 # limited to that list and to the lists of every parent. These shadow dashboard
 # rows with the same path and are read-only in the dashboard. The USERS env var
 # (a JSON array) merges over this list and wins per path.
+# A node may also set a request policy that everything below it inherits; all
+# three are unset by default:
+#   default_model         serves chat, Responses, and Messages requests that
+#                         name neither a model nor a provider; the default is
+#                         a model or a virtual model, and the nearest path that
+#                         sets one wins
+#   max_reasoning_effort  lowers a higher reasoning effort to this level (none,
+#                         minimal, low, medium, high, xhigh, max); a model that
+#                         cannot reason below a minimum level keeps that minimum
+#   max_output_tokens     lowers a higher output token limit (max_tokens,
+#                         max_completion_tokens, max_output_tokens) to this
+#                         number and sets it on a request that sends none
+# The lowest ceiling between a path and the root applies, so a child can
+# tighten its group's ceiling but not loosen it; a policy on / binds every
+# request, with or without a user path. The effort ceiling adds nothing to a
+# request that sets no effort, so it never switches reasoning on. Batches and
+# /p/ passthrough are not capped.
 # users:
 #   - path: /acme
 #     allowed_models: [openai/*, anthropic/*]
+#     max_output_tokens: 8192
 #   - path: /acme/eng
 #     allowed_models: [anthropic/*] # provider wildcard, provider/model, or bare model id; virtual models resolve to their targets first, so list the targets, not the virtual model
+#     default_model: anthropic/claude-sonnet-4-6
+#     max_reasoning_effort: medium
 #     description: Engineering only ships on Claude
 
 # MCP gateway: aggregate upstream MCP (Model Context Protocol) servers behind the

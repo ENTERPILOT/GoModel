@@ -242,6 +242,36 @@ func (fields UnknownJSONFields) Lookup(key string) json.RawMessage {
 	return found
 }
 
+// LookupAll returns every raw value stored under key, in document order. A
+// body may repeat a member, and most upstream decoders keep the last
+// occurrence where Lookup reports the first, so a check that bounds a value
+// must see them all.
+func (fields UnknownJSONFields) LookupAll(key string) []json.RawMessage {
+	var found []json.RawMessage
+	fields.forEachMember(func(name string, value gjson.Result) bool {
+		if name == key && decoderAcceptsJSONValue(value.Raw) {
+			found = append(found, CloneRawJSON(json.RawMessage(value.Raw)))
+		}
+		return true
+	})
+	return found
+}
+
+// Respelled returns the names of the members that spell one of keys in
+// another letter case. A decoder that matches member names
+// case-insensitively, as Go's do, reads such a member as the key itself, so
+// a check that bounds a key must not let its respellings through.
+func (fields UnknownJSONFields) Respelled(keys ...string) []string {
+	var names []string
+	fields.forEachMember(func(name string, _ gjson.Result) bool {
+		if !slices.Contains(keys, name) && slices.ContainsFunc(keys, func(key string) bool { return strings.EqualFold(key, name) }) {
+			names = append(names, name)
+		}
+		return true
+	})
+	return names
+}
+
 // HasAny reports whether any of the named members is present, in one pass over
 // the stored object rather than one pass per key. Callers that only test for
 // presence — the prompt-cache planner checks six directive keys on every

@@ -10,14 +10,17 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/labstack/echo/v5"
 
 	"github.com/enterpilot/gomodel/ext"
+	"github.com/enterpilot/gomodel/internal/anthropicapi"
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
@@ -32,7 +35,9 @@ const anthropicProviderType = "anthropic"
 // requests using guardrails patching, response caching, failover, or a forced
 // reasoning effort stay on the translated pipeline. So does a request replaying an unsigned thinking
 // block, which Anthropic rejects and only the translated pipeline can drop.
-func (s *translatedInferenceService) canForwardMessagesNatively(ctx context.Context, workflow *core.Workflow, unsignedThinking bool) bool {
+// req is the client's request as translated, before any override, and
+// thinking its thinking config as sent.
+func (s *translatedInferenceService) canForwardMessagesNatively(ctx context.Context, workflow *core.Workflow, req *core.ChatRequest, thinking *anthropicapi.Thinking, unsignedThinking bool) bool {
 	if workflow == nil || strings.TrimSpace(workflow.ProviderType) != anthropicProviderType {
 		return false
 	}
@@ -52,8 +57,14 @@ func (s *translatedInferenceService) canForwardMessagesNatively(ctx context.Cont
 		return false
 	}
 	// A forced reasoning effort or request parameters rewrite the request,
-	// which the verbatim body cannot carry.
-	if !s.inference().RequestOverrides(ctx, workflow).IsZero() {
+	// which the verbatim body cannot carry. Ceilings rewrite only a request
+	// that exceeds them: one already within them is forwarded as it is. The
+	// translation keeps only a coarse level of an explicit thinking budget,
+	// so the budget itself is checked against the ceiling level's own; the
+	// translated pipeline then sends that level's budget.
+	overrides := s.inference().RequestOverrides(ctx, workflow)
+	if overrides.Forces() || gateway.ChatRequestExceedsCeilings(req, overrides.Ceilings) ||
+		anthropicapi.ThinkingBudgetExceeds(thinking, overrides.Ceilings.ReasoningEffort) {
 		return false
 	}
 	_, ok := s.provider.(core.RoutablePassthrough)
@@ -73,7 +84,9 @@ func (s *translatedInferenceService) dispatchMessagesNative(c *echo.Context, req
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
-	body, err = rewriteMessagesModel(body, req.Model)
+	// A request served by its user path's default model may name no model
+	// at all, so the resolved one is added where there is none to replace.
+	body, err = setMessagesModel(body, req.Model)
 	if err != nil {
 		return handleError(c, invalidRequestBodyError(c, err))
 	}
@@ -157,10 +170,29 @@ func rewriteMessagesModel(body []byte, model string) ([]byte, error) {
 	return replaceTopLevelMember(body, "model", encoded)
 }
 
+// setMessagesModel is rewriteMessagesModel for a body that may have no model
+// member: the member is then added at the start of the object.
+func setMessagesModel(body []byte, model string) ([]byte, error) {
+	if strings.TrimSpace(model) == "" {
+		return body, nil
+	}
+	encoded, err := json.Marshal(model)
+	if err != nil {
+		return nil, err
+	}
+	return spliceTopLevelMember(body, "model", encoded, true)
+}
+
 // replaceTopLevelMember returns body with the value of its top-level key
 // member replaced by value, splicing only those bytes. The body is returned
 // unchanged when the member is absent or already holds value.
 func replaceTopLevelMember(body []byte, key string, value []byte) ([]byte, error) {
+	return spliceTopLevelMember(body, key, value, false)
+}
+
+// spliceTopLevelMember is replaceTopLevelMember that, when add is set, puts
+// an absent member first in the object instead of leaving the body as it is.
+func spliceTopLevelMember(body []byte, key string, value []byte, add bool) ([]byte, error) {
 	dec := json.NewDecoder(bytes.NewReader(body))
 	tok, err := dec.Token()
 	if err != nil {
@@ -174,6 +206,7 @@ func replaceTopLevelMember(body []byte, key string, value []byte) ([]byte, error
 	// gateway read and the one to rewrite.
 	var found json.RawMessage
 	var foundEnd int64
+	open, empty := dec.InputOffset(), !dec.More()
 	for dec.More() {
 		keyTok, err := dec.Token()
 		if err != nil {
@@ -189,6 +222,17 @@ func replaceTopLevelMember(body []byte, key string, value []byte) ([]byte, error
 		}
 		found = raw
 		foundEnd = dec.InputOffset()
+	}
+	if found == nil && add {
+		member, err := json.Marshal(key)
+		if err != nil {
+			return nil, err
+		}
+		member = append(append(member, ':'), value...)
+		if !empty {
+			member = append(member, ',')
+		}
+		return slices.Concat(body[:open], member, body[open:]), nil
 	}
 	if found == nil || bytes.Equal(found, value) {
 		return body, nil

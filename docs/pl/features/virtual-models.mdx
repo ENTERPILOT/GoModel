@@ -86,10 +86,13 @@ virtual_models:
       - { model: hetzner/qwen3.8 }
 ```
 
-Nadpisanie zastępuje zarówno `reasoning.effort`, jak i płaskie pole
-`reasoning_effort`, i działa także wtedy, gdy klient nie wysłał żadnego effort.
-GoModel tłumaczy je następnie na parametr reasoning danego providera, tak samo
-jak wartości klienta.
+Nadpisanie zastępuje `reasoning.effort`, płaskie pole `reasoning_effort` oraz
+każde [sterowanie reasoningiem specyficzne dla providera](/pl/features/users#polityka-requestów),
+które wysłał klient (`thinking`, `enable_thinking`, `thinking_budget`, `think`,
+przełączniki reasoningu w `chat_template_kwargs`), i działa także wtedy, gdy
+klient nie wysłał żadnego effort. Sterowanie, które model wirtualny ustawia we
+własnych `params`, zostaje. GoModel tłumaczy effort następnie na parametr
+reasoning danego providera, tak samo jak wartości klienta.
 
 Dla każdej próby wygrywa wartość skonfigurowana najgłębiej. Nadpisanie
 konkretnego modelu ma pierwszeństwo przed każdym przekierowaniem nad nim, a
@@ -108,6 +111,15 @@ aliasach. Na przykład aliasy `fast` i `smart` tego samego modelu mogą wysyła�
 wartość. To odwrotność spowolnienia, gdzie wygrywa alias. Tak jak przy
 spowolnieniu, dokładne nadpisanie wygrywa z ustawieniem dla całego modelu, a
 wpis bez effort nie przesłania ogólniejszego.
+
+Nadpisanie wymusza wartość; nie jest limitem. Aby ograniczyć effort, którego
+grupa wywołujących może używać na każdym modelu, ustaw zamiast tego
+`max_reasoning_effort` na ich
+[ścieżce użytkownika](/pl/features/users#polityka-requestów). Ten limit działa
+po każdym nadpisaniu modeli wirtualnych, więc `team-model` powyżej wysyła
+`medium` zamiast `high` dla wywołującego, którego ścieżka jest ograniczona do
+`medium`, a `hetzner/qwen3.8` nadal wysyła `medium`. Limit nigdy nie podnosi
+nadpisania, które jest poniżej niego.
 
 ## Ustawianie parametrów żądania
 
@@ -210,6 +222,13 @@ parametry żądania (dokładną listę pól znajdziesz w sekcji
 [Na czym opiera się klucz cache'u semantycznego](/pl/features/cache#na-czym-opiera-się-klucz-cache’u-semantycznego)),
 więc aliasy, których zastosowane wartości się różnią, także dla `top_k` czy
 `chat_template_kwargs`, również nigdy nie dzielą wpisu semantycznego.
+
+[Limity ścieżki użytkownika](/pl/features/users#polityka-requestów)
+wywołującego działają na końcu, po `params` i nadpisaniu reasoning effort:
+limit tokenów wyjściowych w dowolnej pisowni (`max_tokens`,
+`max_completion_tokens`, `max_output_tokens`) powyżej `max_output_tokens`
+ścieżki zostaje obniżony niezależnie od tego, czy ustawił go klient,
+`default_params` czy `params`, a request bez limitu dostaje limit ścieżki.
 
 Reszta tej strony dotyczy przekierowań.
 

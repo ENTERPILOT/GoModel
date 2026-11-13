@@ -1,8 +1,8 @@
 ---
 title: "Użytkownicy"
-description: "Ogranicz, z których modeli może korzystać grupa, użytkownik lub klucz API, za pomocą list dozwolonych modeli dziedziczonych w dół drzewa ścieżek użytkownika."
+description: "Ogranicz, z których modeli może korzystać grupa, użytkownik lub klucz API, za pomocą list dozwolonych modeli, domyślnego modelu i limitów Request'ów dziedziczonych w dół drzewa ścieżek użytkownika."
 icon: "users"
-keywords: ["użytkownicy", "grupy", "dostęp do modeli", "dozwolone modele", "users", "groups", "model access", "allowed models", "user_path", "API key", "klucz API", "access policy"]
+keywords: ["użytkownicy", "grupy", "dostęp do modeli", "dozwolone modele", "users", "groups", "model access", "allowed models", "user_path", "API key", "klucz API", "access policy", "domyślny model", "default model", "reasoning effort", "max output tokens"]
 ---
 
 ## Przegląd
@@ -138,6 +138,117 @@ jednego modelu.
 
 Odrzucony request otrzymuje `400` z kodem `model_access_denied`.
 
+## Polityka requestów
+
+Węzeł może też kształtować requesty pod sobą. Wszystkie trzy pola są domyślnie
+puste, więc nic się nie zmienia, dopóki któregoś nie ustawisz:
+
+| Pole                   | Działanie                                                   | Dziedziczenie                  |
+| ---------------------- | ----------------------------------------------------------- | ------------------------------ |
+| `default_model`        | obsługuje request, który nie wskazuje ani `model`, ani `provider` | wygrywa najbliższa ścieżka     |
+| `max_reasoning_effort` | obniża wyższy reasoning effort do tego poziomu              | obowiązuje najniższy limit     |
+| `max_output_tokens`    | obniża wyższy limit tokenów wyjściowych do tej wartości i ustawia go w requeście bez limitu | obowiązuje najniższy limit     |
+
+```yaml
+users:
+  - path: /acme
+    max_output_tokens: 8192
+  - path: /acme/eng
+    default_model: team-model # model lub model wirtualny
+    max_reasoning_effort: medium
+  - path: /acme/eng/interns
+    max_reasoning_effort: low
+```
+
+| Request z               | Klient wysyła                                 | Wysłane upstream                         |
+| ----------------------- | --------------------------------------------- | ---------------------------------------- |
+| `/acme/eng/alice`       | brak `model`                                  | `team-model`, rozwiązany jak zwykle      |
+| `/acme/eng/alice`       | `reasoning_effort: high`, `max_tokens: 32000` | `medium`, `8192`                         |
+| `/acme/eng/alice`       | `reasoning_effort: low`, `max_tokens: 100`    | bez zmian                                |
+| `/acme/eng/alice`       | bez effortu i bez limitu                      | bez effortu, `max_tokens: 8192`          |
+| `/acme/eng/interns/bob` | `reasoning_effort: medium`                    | `low`                                    |
+| `/acme/sales`           | `max_tokens: 32000`                           | `8192`                                   |
+
+**Limity** to górne granice. Obowiązuje najniższy limit między ścieżką a `/`,
+więc dziecko może zaostrzyć limit swojej grupy, a wyższy limit ustawiony na
+dziecku niczego nie zmienia. Efforty używają skali `none`, `minimal`, `low`,
+`medium`, `high`, `xhigh`, `max`. Limit tokenów obejmuje `max_tokens`,
+`max_completion_tokens` i `max_output_tokens` w pisowni użytej przez klienta, a
+request bez limitu dostaje limit jako swój limit, w polu, którego oczekuje
+model upstream. Limit wysłany tylko w pisowni, której endpoint nie ma
+(`max_output_tokens` w Chat Completions, `max_tokens` w Responses API), jest
+przenoszony do własnego pola endpointu, a wartość, która nie jest liczbą
+całkowitą równą co najmniej 1, jest zastępowana limitem. Limit effortu tylko
+obniża effort, który request niesie, i
+nigdy go nie dodaje, bo dodany effort włączyłby reasoning w requestach, które o
+to nie prosiły. Request bez effortu działa więc z domyślnym ustawieniem modelu,
+a model, który nie potrafi myśleć mniej niż na pewnym poziomie (Gemini 3,
+OpenAI seria o, OpenCode Zen), dostaje ten poziom także przy niższym limicie.
+
+Oprócz `reasoning_effort` i `reasoning.effort` limit effortu sprawdza
+specyficzne dla providerów sterowania reasoningiem, które docierają do
+upstreamów, na najwyższym poziomie body albo w `extra_body`:
+
+| Sterowanie                                                 | Czytane przez                             |
+| ---------------------------------------------------------- | ----------------------------------------- |
+| `thinking` (`{"type": "enabled", "budget_tokens"/"token_budget": N}`) | Cohere, Xiaomi MiMo, DeepSeek, Kimi, upstreamy GLM |
+| `enable_thinking`, `thinking_budget`                       | Qwen, Bailian, serwery vLLM i SGLang      |
+| `think` (wartość logiczna albo poziom)                     | Ollama                                    |
+| `chat_template_kwargs.enable_thinking`, `.thinking`, `.reasoning_effort`, `.thinking_budget` | vLLM, SGLang, llama.cpp |
+| `extra_body.google.thinking_config` `thinking_budget`/`thinking_level` (nazwy w dowolnej wielkości liter) | Gemini |
+| Messages `thinking.budget_tokens`                          | Anthropic                                 |
+
+Sterowanie, które wyłącza reasoning (`false`, budżet zero,
+`{"type": "disabled"}`), oraz poziom w granicach limitu zostają zachowane.
+Wszystko, czego skala nie potrafi umieścić, np. budżet tokenów albo `true`,
+liczy się jako powyżej limitu: gateway usuwa wszystkie sterowania reasoningiem
+klienta i zamiast nich wysyła limit jako effort. Messages `budget_tokens`
+powyżej budżetu, który gateway sam wysyła dla poziomu limitu (5000 dla `low`,
+10000 dla `medium`, 20000 od `high`), zostaje obniżony do tego budżetu. Gdy
+adapter sam wstawia wartość (domyślne `max_tokens` Anthropic i zapas, który
+dodaje ponad budżet thinking, domyślny effort OpenCode Zen), także ona mieści
+się w limitach: budżet thinking kurczy się, aż zmieści się pod ograniczonym
+`max_tokens`, a thinking zostaje wyłączony, gdy nie mieści się nawet budżet
+minimalny.
+
+Limity działają po [nadpisaniach modeli wirtualnych](/pl/features/virtual-models#wymuszanie-reasoning-effort),
+przy każdej próbie, także przy próbach failover, więc ograniczają też effort
+lub `max_tokens`, które model wirtualny wymusza albo ustawia domyślnie. Dotyczą
+Chat Completions, Responses API i Anthropic Messages API; request Messages
+mieszczący się w limitach jest nadal przekazywany natywnie do Anthropic, a
+przekraczający je idzie ścieżką tłumaczoną, żeby można go było obniżyć.
+Embeddingi i endpointy mediów nie są przepisywane. Wpisy
+[cache'u odpowiedzi](/pl/features/cache) są powiązane z obowiązującymi
+limitami, więc odpowiedź zapisana w cache'u przed ustawieniem lub zmianą limitu
+nie jest zwracana pod nowym.
+
+<Warning>
+Batche i passthrough providera pod `/p/` **nie** są ograniczane: ich body
+trafiają upstream bez zmian. Ograniczony klucz, który może też używać batchy
+albo `/p/`, może obejść politykę, więc zablokuj te endpointy kluczom, które
+ograniczasz. Provider [ChatGPT](/pl/providers/chatgpt) nie przyjmuje limitu
+tokenów wyjściowych, więc `max_output_tokens` nie jest egzekwowany na jego
+modelach.
+</Warning>
+
+Polityka na `/` obowiązuje każdy request, także bez ścieżki użytkownika (master
+key albo klucz bez przypisanej ścieżki, który nie wysyła nagłówka). Credential
+bez przypisanej ścieżki sam wybiera ścieżkę przez
+[nagłówek ścieżki użytkownika](/pl/features/user-path), a z nią politykę
+własnego poddrzewa, więc może uciec spod limitu ustawionego niżej w drzewie.
+Przypisuj limity wywołującym przez [klucze API](/pl/features/user-path#klucze-api)
+ze stałym `user_path` albo ustawiaj je na `/`.
+
+**Domyślny model** jest używany tylko wtedy, gdy request Chat Completions,
+Responses lub Messages (łącznie z liczeniem tokenów Messages) nie wskazuje ani
+`model`, ani `provider`; model wskazany przez klienta zawsze wygrywa. Jest
+rozwiązywany dokładnie jak model wysłany przez klienta: może być
+[modelem wirtualnym](/pl/features/virtual-models) i nadal jest sprawdzany
+względem list dozwolonych modeli, więc domyślny model, którego ścieżka nie może
+używać, zostaje odrzucony. Request bez ścieżki użytkownika używa domyślnego
+modelu z `/`, jeśli jest ustawiony; ścieżki bez domyślnego modelu nadal dostają
+`400 model is required`.
+
 ## Zarządzanie politykami
 
 ### Dashboard
@@ -149,7 +260,9 @@ którego listy przecinają się do zbioru pustego) – oraz liczbą przypisanych
 Własne `allowed_models` zarządzanego klucza API może zawęzić request bardziej, niż
 pokazuje ścieżka. Edytor ostrzega już w trakcie pisania, gdy
 lista nie pozostawiłaby żadnego dostępnego modelu. Dodaj lub edytuj węzeł, żeby
-ustawić jego modele; usuń politykę, żeby wrócić do limitów rodziców.
+ustawić jego modele, domyślny model i limity; usuń politykę, żeby wrócić do
+limitów rodziców. Kolumna **Polityka Request'ów** pokazuje obowiązujące
+wartości i ścieżkę, z której pochodzi każda z nich.
 
 Liczba kluczy prowadzi do strony **API Keys** przefiltrowanej do poddrzewa tej ścieżki,
 a każdy wiersz ma akcję *Add API key*, która otwiera formularz tworzenia klucza z
@@ -166,11 +279,12 @@ Zadeklaruj polityki w `config.yaml` pod `users:` (zobacz przykład powyżej) lub
 w zmiennej środowiskowej `USERS` jako tablicę JSON z tymi samymi polami:
 
 ```bash
-USERS='[{"path":"/acme/eng","allowed_models":["anthropic/*"]}]'
+USERS='[{"path":"/acme/eng","allowed_models":["anthropic/*"],"default_model":"team-model","max_reasoning_effort":"medium","max_output_tokens":4096}]'
 ```
 
 Zadeklarowane polityki przesłaniają wiersze z dashboardu dla tej samej ścieżki i są w dashboardzie
-tylko do odczytu. Literówka w nazwie providera w zadeklarowanej polityce powoduje błąd przy starcie.
+tylko do odczytu. Literówka w nazwie providera w zadeklarowanej polityce powoduje błąd przy starcie, podobnie jak
+nieznany effort, ujemny limit tokenów lub domyślny model z wildcardem.
 
 ### Admin API
 
@@ -180,6 +294,15 @@ tylko do odczytu. Literówka w nazwie providera w zadeklarowanej polityce powodu
 | `PUT`    | `/admin/users`                          | Tworzy lub zastępuje politykę jednego węzła |
 | `DELETE` | `/admin/users?user_path=/acme/eng`      | Usuwa politykę jednego węzła              |
 | `PUT`    | `/admin/auth-keys/{id}/allowed-models`  | Zastępuje listę dozwolonych modeli jednego klucza API |
+
+`PUT /admin/users` przyjmuje `user_path`, `allowed_models`, `default_model`,
+`max_reasoning_effort`, `max_output_tokens` i `description` i zastępuje cały
+wiersz: pominięte pole zostaje wyczyszczone. `GET /admin/users` zwraca własne
+pola każdego węzła oraz obiekt `request_policy` z obowiązującymi wartościami i
+ścieżką, z której pochodzi każda z nich (`default_model_from`,
+`max_reasoning_effort_from`, `max_output_tokens_from`). Poświadczenie
+ograniczone do poddrzewa nie może zmienić polityki własnego korzenia zakresu,
+tylko ścieżek pod nim.
 
 `POST /admin/auth-keys` akceptuje `allowed_models` przy tworzeniu klucza. Kształty requestów i odpowiedzi
 opisuje strona [Endpointy administracyjne](/pl/advanced/admin-endpoints).

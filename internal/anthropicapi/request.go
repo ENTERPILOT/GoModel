@@ -954,6 +954,33 @@ func thinkingToReasoning(thinking *Thinking) *core.Reasoning {
 	return &core.Reasoning{Effort: effort}
 }
 
+// ThinkingBudgetExceeds reports whether an explicit thinking budget is larger
+// than the budget the gateway itself sends for the ceiling level (the
+// anthropic provider's effort-to-budget mapping). thinkingToReasoning ranks a
+// budget only coarsely, so without this check a client under a "high"
+// ceiling could forward budget_tokens far above the gateway's own "high".
+func ThinkingBudgetExceeds(thinking *Thinking, ceiling string) bool {
+	if thinking == nil || thinking.Type != "enabled" || strings.TrimSpace(ceiling) == "" {
+		return false
+	}
+	return thinking.BudgetTokens > effortBudget(ceiling)
+}
+
+// effortBudget is the budget_tokens the anthropic provider sends for effort;
+// a level that allows no thinking allows no budget.
+func effortBudget(effort string) int {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "minimal", "low":
+		return 5000
+	case "medium":
+		return 10000
+	case "high", "xhigh", "max":
+		return 20000
+	default:
+		return 0
+	}
+}
+
 // buildExtraFields carries Anthropic request fields that have a portable
 // OpenAI-compatible equivalent but no typed core.ChatRequest field. Fields
 // with typed equivalents (top_p, user) are set directly on the ChatRequest in

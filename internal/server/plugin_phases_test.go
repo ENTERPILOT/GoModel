@@ -290,7 +290,7 @@ func TestCanForwardMessagesNatively_DisabledByPostResponsePlugins(t *testing.T) 
 	chains := phaseChains(t, map[string]string{"response": "warn"}, guardrails.StepReference{Ref: "phase", Phase: pluginapi.KindResponse, Step: 1})
 	svc := &translatedInferenceService{provider: &capturingProvider{}, pluginChains: staticChainsResolver{chains: chains}}
 	workflow := &core.Workflow{ProviderType: anthropicProviderType}
-	require.False(t, svc.canForwardMessagesNatively(context.Background(), workflow, false))
+	require.False(t, svc.canForwardMessagesNatively(context.Background(), workflow, &core.ChatRequest{}, nil, false))
 
 	svc.pluginChains = staticChainsResolver{chains: &plugins.Chains{}}
 	require.False(t, svc.hasPostResponsePlugins(context.Background()))

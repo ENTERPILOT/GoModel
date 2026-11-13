@@ -52,29 +52,40 @@ var frozenKeys = map[string]struct{}{
 	"prompt":               {},
 }
 
-// Overrides is everything the operator forces onto one provider attempt: the
-// reasoning effort and both parameter sets, already merged along the route
-// the request took.
+// Overrides is everything the operator configures for one provider attempt:
+// the forced reasoning effort and both parameter sets, already merged along
+// the route the request took, and the ceilings that bound the result.
 type Overrides struct {
 	ReasoningEffort string
 	Defaults        Set
 	Params          Set
+	// Ceilings apply last, to the request as the fields above left it, so
+	// they bound a forced or defaulted value as they bound the client's.
+	Ceilings Ceilings
 }
 
 // IsZero reports whether nothing is configured.
 func (o Overrides) IsZero() bool {
-	return o.ReasoningEffort == "" && len(o.Defaults) == 0 && len(o.Params) == 0
+	return !o.Forces() && o.Ceilings.IsZero()
+}
+
+// Forces reports whether a reasoning effort or a parameter set is
+// configured, which rewrites every request; ceilings alone rewrite only a
+// request that exceeds them or sets no output token limit.
+func (o Overrides) Forces() bool {
+	return o.ReasoningEffort != "" || len(o.Defaults) > 0 || len(o.Params) > 0
 }
 
 // Layer returns o with the deeper over applied on top: a non-empty effort
 // replaces, and parameter sets merge per key with over winning. Precedence
 // holds across the two sets: a key over configures as a default stops being
 // forced by a shallower row, and one it forces stops being a shallower
-// row's default.
+// row's default. Ceilings have no winner: the tightest of both stays.
 func (o Overrides) Layer(over Overrides) Overrides {
 	if over.ReasoningEffort != "" {
 		o.ReasoningEffort = over.ReasoningEffort
 	}
+	o.Ceilings = o.Ceilings.Tighten(over.Ceilings)
 	o.Defaults = Merge(without(o.Defaults, over.Params), over.Defaults)
 	o.Params = Merge(without(o.Params, over.Defaults), over.Params)
 	return o

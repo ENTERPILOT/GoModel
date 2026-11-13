@@ -2,7 +2,6 @@ package virtualmodels
 
 import (
 	"context"
-	"fmt"
 	"slices"
 	"strings"
 
@@ -11,18 +10,10 @@ import (
 	"github.com/enterpilot/gomodel/internal/requestparams"
 )
 
-// ReasoningEffortLevels are the reasoning effort values an override may force,
-// in ascending order. "none" turns reasoning off where the provider allows it.
-var ReasoningEffortLevels = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
-
 // normalizeReasoningEffort trims and lower-cases an override, rejecting values
-// outside ReasoningEffortLevels.
+// outside requestparams.ReasoningEffortLevels.
 func normalizeReasoningEffort(effort string) (string, error) {
-	effort = strings.ToLower(strings.TrimSpace(effort))
-	if effort == "" || slices.Contains(ReasoningEffortLevels, effort) {
-		return effort, nil
-	}
-	return "", newValidationError(fmt.Sprintf("unknown reasoning_effort %q (use one of: %s)", effort, strings.Join(ReasoningEffortLevels, ", ")), nil)
+	return requestparams.NormalizeReasoningEffort("reasoning_effort", effort)
 }
 
 // setsOverrides reports whether the row forces anything onto requests: a
@@ -36,16 +27,12 @@ func (v VirtualModel) overrides() requestparams.Overrides {
 	return requestparams.Overrides{ReasoningEffort: v.ReasoningEffort, Defaults: v.DefaultParams, Params: v.Params}
 }
 
-// ResolveRequestOverrides returns what the operator forces on one provider
-// attempt: the reasoning effort and the parameter sets, or a zero value to
-// keep the client's request. Values layer from the outermost redirect to the
-// concrete model, the deeper row winning: a policy on the concrete model the
-// attempt goes to beats every redirect, and within a chain of redirects the
-// one nearest the model beats the ones above it. Efforts replace; parameter
-// sets merge per key. attempt is the concrete model of this attempt, which
-// for a failover leg differs from the primary resolution. The primary attempt
-// follows the route routing recorded on resolution; a failover leg, which
-// carries only its concrete model, follows the first declared path to it.
+// ResolveRequestOverrides returns what the operator configures for one
+// provider attempt: the forced reasoning effort and parameter sets of the
+// models on its route, bounded by the ceilings of the caller's user path. A
+// zero value keeps the client's request. The ceilings belong to the caller,
+// not to a model, so they are the same on every attempt of a request and
+// bound whatever a virtual model forces.
 func (s *Service) ResolveRequestOverrides(
 	ctx context.Context,
 	resolution *core.RequestModelResolution,
@@ -54,6 +41,27 @@ func (s *Service) ResolveRequestOverrides(
 	if s == nil || resolution == nil {
 		return requestparams.Overrides{}
 	}
+	resolved := s.modelOverrides(ctx, resolution, attempt)
+	if s.requestPolicy != nil {
+		resolved.Ceilings = resolved.Ceilings.Tighten(s.requestPolicy.RequestCeilings(ctx))
+	}
+	return resolved
+}
+
+// modelOverrides returns what the virtual models force on one provider
+// attempt. Values layer from the outermost redirect to the concrete model,
+// the deeper row winning: a policy on the concrete model the attempt goes to
+// beats every redirect, and within a chain of redirects the one nearest the
+// model beats the ones above it. Efforts replace; parameter sets merge per
+// key. attempt is the concrete model of this attempt, which for a failover
+// leg differs from the primary resolution. The primary attempt follows the
+// route routing recorded on resolution; a failover leg, which carries only
+// its concrete model, follows the first declared path to it.
+func (s *Service) modelOverrides(
+	ctx context.Context,
+	resolution *core.RequestModelResolution,
+	attempt core.ModelSelector,
+) requestparams.Overrides {
 	snap := s.snapshot()
 	if !snap.overrides {
 		return requestparams.Overrides{}

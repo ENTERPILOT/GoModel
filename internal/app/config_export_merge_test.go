@@ -11,6 +11,7 @@ import (
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/plugins"
+	"github.com/enterpilot/gomodel/internal/users"
 	"github.com/enterpilot/gomodel/pluginapi"
 )
 
@@ -46,6 +47,21 @@ func TestExportBudgets(t *testing.T) {
 		}
 		assert.Equal(t, want, got.Labels[0].Limits[0].CostBasis, "billed=%v", billed)
 	}
+}
+
+// A dashboard row exports with its request policy, and a declared entry
+// shadows the stored row of the same path.
+func TestExportUsersCarriesRequestPolicy(t *testing.T) {
+	declared := []config.UserConfig{{Path: "/acme", MaxOutputTokens: 8192}}
+	stored := []users.User{
+		{UserPath: "/acme", MaxOutputTokens: 100},
+		{UserPath: "/acme/eng", AllowedModels: []string{"anthropic/"}, DefaultModel: "team-model", MaxReasoningEffort: "medium", MaxOutputTokens: 4096},
+	}
+
+	assert.Equal(t, []config.UserConfig{
+		{Path: "/acme", MaxOutputTokens: 8192},
+		{Path: "/acme/eng", AllowedModels: []string{"anthropic/"}, DefaultModel: "team-model", MaxReasoningEffort: "medium", MaxOutputTokens: 4096},
+	}, exportUsers(declared, stored))
 }
 
 func TestExportBudgetsWritesDisabledSectionAsDeclared(t *testing.T) {
