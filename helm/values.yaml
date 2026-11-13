@@ -97,6 +97,38 @@ service:
   port: 8080
   annotations: {}
 
+# NetworkPolicy for the gateway pods. Off by default: it only takes effect on a
+# cluster whose network plugin enforces NetworkPolicy.
+networkPolicy:
+  # -- Allow inbound traffic to the gateway port (8080) only.
+  enabled: false
+  ingress:
+    # -- Sources allowed to reach the gateway port, as NetworkPolicy peers.
+    # Empty allows every source. /metrics and the dashboard share this port, so
+    # list your ingress controller and Prometheus when you restrict it.
+    from: []
+    #  - namespaceSelector:
+    #      matchLabels:
+    #        kubernetes.io/metadata.name: ingress-nginx
+    #  - namespaceSelector:
+    #      matchLabels:
+    #        kubernetes.io/metadata.name: monitoring
+    #    podSelector:
+    #      matchLabels:
+    #        app.kubernetes.io/name: prometheus
+  # -- Egress rules in Kubernetes form. Empty leaves egress unrestricted, because
+  # the gateway must reach its providers. When set, everything else is denied:
+  # include DNS, and your database, Redis, and OTLP collector if you use them.
+  egress: []
+  #  - ports:
+  #      - port: 53
+  #        protocol: UDP
+  #      - port: 53
+  #        protocol: TCP
+  #  - ports:
+  #      - port: 443
+  #        protocol: TCP
+
 ingress:
   enabled: false
   className: ""
