@@ -328,10 +328,11 @@ service:
 Point only traces at this Collector, since it has no metrics pipeline:
 
 ```bash
-OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://otel-collector:4318/v1/traces
 # Send metrics to their own backend (Prometheus needs --web.enable-otlp-receiver),
 # or turn them off with OTEL_METRICS_EXPORTER=none:
+OTEL_EXPORTER_OTLP_METRICS_PROTOCOL=http/protobuf
 OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://prometheus:9090/api/v1/otlp/v1/metrics
 ```
 
