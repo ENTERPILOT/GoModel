@@ -366,6 +366,13 @@ func TestFailedStartLoadRejoinsOnTheNextFlush(t *testing.T) {
 	b.Start(ctx)
 	b.flushInterval = time.Second
 
+	// Without this the flush below would prove nothing: the test calls it
+	// itself, and Start alone decides whether the service ever would.
+	b.lifeMu.Lock()
+	state := b.persistState
+	b.lifeMu.Unlock()
+	require.Equal(t, persistActive, state, "a failed load at start still activates persistence")
+
 	_, err = b.Acquire(onPath("/team"), now())
 	require.NoError(t, err, "the peer's counts are unknown while the store is unreadable")
 
