@@ -3,6 +3,7 @@ package ratelimit
 import (
 	"context"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -338,6 +339,141 @@ func TestSQLStorePruneUsesExpiresAtIndex(t *testing.T) {
 			require.Len(t, plan, 1)
 			assert.Contains(t, plan[0], "SEARCH rate_limit_window_snapshots USING")
 			assert.Contains(t, plan[0], "INDEX idx_rate_limit_window_snapshots_expires_at (expires_at")
+		})
+	}
+}
+
+// TestSQLStorePostgresPruneUsesExpiresAtIndex is the PostgreSQL half of the
+// test above: each prune finds its rows through the index and deletes them by
+// row address, so neither step reads the whole table.
+func TestSQLStorePostgresPruneUsesExpiresAtIndex(t *testing.T) {
+	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+		if store.db.Dialect() != sqlx.PostgreSQL {
+			t.Skip("SQLite is covered by TestSQLStorePruneUsesExpiresAtIndex")
+		}
+		ctx := context.Background()
+		// PostgreSQL reads a table it takes for small in full whatever its
+		// indexes, so the plans are those of a table with rows and statistics.
+		require.NoError(t, store.SaveCounters(ctx, benchSnapshots("writer-a", 2000)))
+		_, err := store.db.Exec(ctx, `ANALYZE rate_limit_window_snapshots`)
+		require.NoError(t, err)
+
+		tests := []struct {
+			name  string
+			query string
+			args  []any
+		}{
+			{"expired", pruneCountersPostgreSQL, []any{int64(1700000000)}},
+			{"legacy", pruneLegacyCountersPostgreSQL, []any{PeriodConcurrent, inFlightRowRetention, int64(1700000000)}},
+		}
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				rows, err := store.db.Query(ctx, `EXPLAIN `+tc.query, tc.args...)
+				require.NoError(t, err)
+				defer rows.Close()
+				var plan strings.Builder
+				for rows.Next() {
+					var line string
+					require.NoError(t, rows.Scan(&line))
+					plan.WriteString(line + "\n")
+				}
+				require.NoError(t, rows.Err())
+				assert.Contains(t, plan.String(), "Index Scan using idx_rate_limit_window_snapshots_expires_at")
+				assert.Contains(t, plan.String(), "Tid Scan on rate_limit_window_snapshots")
+				assert.NotContains(t, plan.String(), "Seq Scan")
+			})
+		}
+	})
+}
+
+// TestSQLStorePruneDoesNotDeadlockWithSave revives two expired rows, as a
+// writer does when traffic returns to windows that sat idle for two periods,
+// while the prune collects them in the opposite order. SQLite serializes
+// every write, so only PostgreSQL can interleave the two.
+//
+// A third transaction holds the save's first row locked so the save stops
+// before it takes any, then the prune starts; once the prune has finished or
+// is waiting behind the save, the lock is released and both run to
+// completion. A prune that waits there holds the row the save takes next.
+func TestSQLStorePruneDoesNotDeadlockWithSave(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		name := "expired"
+		if legacy {
+			name = "without expires_at"
+		}
+		t.Run(name, func(t *testing.T) {
+			runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+				if store.db.Dialect() != sqlx.PostgreSQL {
+					t.Skip("SQLite serializes write transactions")
+				}
+				ctx := context.Background()
+				db := store.db
+				// The prune reaches first before second, by expiry and by
+				// position in the table alike.
+				first := WindowSnapshot{
+					Scope: string(ScopeUserPath), Subject: "/team", Partition: "/team/first",
+					PeriodSeconds: PeriodMinuteSeconds, Writer: "writer-a", RequestsCurrent: 1,
+				}
+				second := first
+				second.Partition = "/team/second"
+				now := time.Now().Unix()
+				for i, snap := range []WindowSnapshot{first, second} {
+					query, args := buildCounterUpsert([]WindowSnapshot{snap}, now-int64(4-i)*PeriodMinuteSeconds)
+					if legacy {
+						args[14] = nil // expires_at
+					}
+					_, err := db.Exec(ctx, query, args...)
+					require.NoError(t, err)
+				}
+
+				blockedBy := func(pid int64) int64 {
+					var blocked int64
+					err := db.QueryRow(ctx, `SELECT COALESCE(MAX(pid), 0) FROM pg_stat_activity WHERE ? = ANY(pg_blocking_pids(pid))`, pid).Scan(&blocked)
+					assert.NoError(t, err)
+					return blocked
+				}
+				lockerPID := make(chan int64, 1)
+				release := make(chan struct{})
+				lockerDone := make(chan error, 1)
+				go func() {
+					lockerDone <- db.InTx(ctx, func(q sqlx.Querier) error {
+						var pid int64
+						if err := q.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+							return err
+						}
+						if _, err := q.Exec(ctx, `SELECT 1 FROM rate_limit_window_snapshots WHERE partition = ? FOR UPDATE`, second.Partition); err != nil {
+							return err
+						}
+						lockerPID <- pid
+						<-release
+						return nil
+					})
+				}()
+				locker := <-lockerPID
+
+				saveDone := make(chan error, 1)
+				go func() { saveDone <- store.SaveCounters(ctx, []WindowSnapshot{second, first}) }()
+				var savePID int64
+				require.Eventually(t, func() bool {
+					savePID = blockedBy(locker)
+					return savePID != 0
+				}, 5*time.Second, 10*time.Millisecond, "save never reached the locked row")
+
+				pruneDone := make(chan error, 1)
+				go func() { pruneDone <- store.PruneCounters(ctx) }()
+				require.Eventually(t, func() bool {
+					return len(pruneDone) > 0 || blockedBy(savePID) != 0
+				}, 5*time.Second, 10*time.Millisecond, "prune neither finished nor waited on the save")
+
+				close(release)
+				require.NoError(t, <-lockerDone)
+				require.NoError(t, <-saveDone)
+				require.NoError(t, <-pruneDone)
+
+				rows, err := store.LoadCounters(ctx, now, "")
+				require.NoError(t, err)
+				require.Len(t, rows, 2, "the save brings back what the prune collected")
+			})
 		})
 	}
 }

@@ -347,30 +347,58 @@ func (s *SQLStore) SaveCounters(ctx context.Context, snapshots []WindowSnapshot)
 	return s.db.InTx(ctx, save)
 }
 
-// pruneCountersSQL collects the rows nobody writes any more: a rule that was
+// expiredCountersSQL matches the rows nobody writes any more: a rule that was
 // deleted, a window that went unchanged, or a writer that stopped — every
 // restart leaves its predecessor's rows behind. Every save stamps expires_at
 // (see counterRetention), so this is a range scan of
 // idx_rate_limit_window_snapshots_expires_at; rows without one are left to
-// pruneLegacyCountersSQL.
-const pruneCountersSQL = `DELETE FROM rate_limit_window_snapshots WHERE expires_at < ?`
+// legacyExpiredCountersSQL.
+const expiredCountersSQL = `expires_at < ?`
 
-// pruneLegacyCountersSQL collects, on the same bounds, the rows without an
+// legacyExpiredCountersSQL matches, on the same bounds, the rows without an
 // expires_at: those saved before it existed, imported from the legacy table,
 // or written by an older replica during a rolling upgrade. The index finds
 // them by the NULL, so once a cluster is upgraded it reads nothing.
-const pruneLegacyCountersSQL = `
-	DELETE FROM rate_limit_window_snapshots
-	WHERE expires_at IS NULL
-		AND updated_at + CASE WHEN period_seconds = ? THEN ? ELSE 2 * period_seconds END < ?
-`
+const legacyExpiredCountersSQL = `expires_at IS NULL
+	AND updated_at + CASE WHEN period_seconds = ? THEN ? ELSE 2 * period_seconds END < ?`
+
+const (
+	pruneCountersSQL       = `DELETE FROM rate_limit_window_snapshots WHERE ` + expiredCountersSQL
+	pruneLegacyCountersSQL = `DELETE FROM rate_limit_window_snapshots WHERE ` + legacyExpiredCountersSQL
+)
+
+// On PostgreSQL the prunes pass over the rows another session has locked
+// instead of waiting for them. A window that sat idle for two periods has
+// expired, and is also the row its writer saves again when traffic returns:
+// a delete that waits for a row of that save, while the save waits for a row
+// the delete already took, is a deadlock, and PostgreSQL aborts one of the
+// two. A row passed over is collected by a later prune if it is still expired.
+// The array keeps the delete a lookup by row address; ctid IN (SELECT ...)
+// can be planned as a join against a scan of the whole table.
+const (
+	pruneCountersPostgreSQL       = pruneSkipLockedPrefix + expiredCountersSQL + pruneSkipLockedSuffix
+	pruneLegacyCountersPostgreSQL = pruneSkipLockedPrefix + legacyExpiredCountersSQL + pruneSkipLockedSuffix
+
+	pruneSkipLockedPrefix = `
+		DELETE FROM rate_limit_window_snapshots
+		WHERE ctid = ANY(ARRAY(
+			SELECT ctid FROM rate_limit_window_snapshots
+			WHERE `
+	pruneSkipLockedSuffix = `
+			FOR UPDATE SKIP LOCKED
+		))`
+)
 
 func (s *SQLStore) PruneCounters(ctx context.Context) error {
 	now := time.Now().Unix()
-	if _, err := s.db.Exec(ctx, pruneCountersSQL, now); err != nil {
+	expired, legacy := pruneCountersSQL, pruneLegacyCountersSQL
+	if s.db.Dialect() == sqlx.PostgreSQL {
+		expired, legacy = pruneCountersPostgreSQL, pruneLegacyCountersPostgreSQL
+	}
+	if _, err := s.db.Exec(ctx, expired, now); err != nil {
 		return fmt.Errorf("prune expired rate limit counters: %w", err)
 	}
-	if _, err := s.db.Exec(ctx, pruneLegacyCountersSQL, PeriodConcurrent, inFlightRowRetention, now); err != nil {
+	if _, err := s.db.Exec(ctx, legacy, PeriodConcurrent, inFlightRowRetention, now); err != nil {
 		return fmt.Errorf("prune expired legacy rate limit counters: %w", err)
 	}
 	return nil
