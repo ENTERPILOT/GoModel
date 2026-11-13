@@ -28,6 +28,8 @@ import {
   import ModelDetails from "./ModelDetails.svelte";
   import { modelDetailsState } from "./modelDetails.svelte.js";
   import { rowHasModelDetails } from "./modelDetails.js";
+  import ModelTestButton from "./ModelTestButton.svelte";
+  import ModelTestResult from "./ModelTestResult.svelte";
   import { ChevronRight, CircleDollarSign, Gauge, Pencil, ShieldCheck, Split, Trash2 } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
@@ -173,6 +175,7 @@ import {
           {m.models_slowdown()} <span class="mono font-size-md">{m.models_inference_time({ value: slowdown })}</span>
         </div>
       {/if}
+      <ModelTestResult {row} />
     </div>
   </td>
   {#each columns as col, i (i)}
@@ -185,6 +188,7 @@ import {
     {#if row.is_alias}
       <div class="alias-actions-cell model-list-actions">
         <AccessToggle {row} />
+        <ModelTestButton {row} />
         {#if virtualModels.virtualModelsAvailable && aliasRowCanRemove(row)}
           <TableActionButton
             label={virtualModels.rowDeletingKey === row.key
@@ -210,6 +214,7 @@ import {
     {:else}
       <div class="alias-actions-cell model-list-actions">
         <AccessToggle {row} />
+        <ModelTestButton {row} />
         {#if pricingOverrides.modelPricingOverridesAvailable}
           <TableActionButton
             label={pricingOverrides.modelPricingButtonLabel(m.models_model_pricing_for({ name: row.display_name }), pricingOverrides.hasModelPricingOverride(row))}
