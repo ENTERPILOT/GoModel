@@ -159,7 +159,10 @@ func TestSchemaChangeRechecksAfterWaitingForAnotherReplica(t *testing.T) {
 			applied := make(chan error, 1)
 			go func() { applied <- tt.apply(ctx, db, tt.statement) }()
 			require.Eventually(t, waiting(
-				`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND objid = $1::bigint & 4294967295`,
+				`SELECT count(*) FROM pg_locks
+					WHERE locktype = 'advisory' AND NOT granted
+						AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+						AND classid = ($1::bigint >> 32) AND objid = ($1::bigint & 4294967295) AND objsubid = 1`,
 				sqlx.SchemaLockKey), 10*time.Second, 10*time.Millisecond, "this replica waits for the schema lock")
 
 			// The other replica applies the change. A write queues for the
