@@ -15,7 +15,8 @@ type windowCounter struct {
 	// dirty marks a local counter that counted something since its last
 	// snapshot, so a flush writes only the rows that changed (see
 	// limiter.snapshot). Rolling the window forward is not a change: a
-	// reader rolls the saved row forward the same way.
+	// reader rolls the saved row forward the same way. Set it only through
+	// limiter.markDirty, which also records the key in limiter.dirty.
 	dirty bool
 }
 
@@ -111,6 +112,10 @@ type limiter struct {
 	requests map[ruleKey]*windowCounter
 	tokens   map[ruleKey]*windowCounter
 	inFlight map[ruleKey]int64
+	// dirty holds the key of every counter whose dirty flag is set, so a
+	// snapshot visits only the counters that changed rather than every
+	// counter while admission waits on mu.
+	dirty map[ruleKey]struct{}
 
 	remoteRequests map[ruleKey]windowCounter
 	remoteTokens   map[ruleKey]windowCounter
@@ -135,6 +140,7 @@ func newLimiter() *limiter {
 		requests:          make(map[ruleKey]*windowCounter),
 		tokens:            make(map[ruleKey]*windowCounter),
 		inFlight:          make(map[ruleKey]int64),
+		dirty:             make(map[ruleKey]struct{}),
 		publishedInFlight: make(map[ruleKey]struct{}),
 	}
 }
@@ -159,6 +165,25 @@ func (l *limiter) counter(counters map[ruleKey]*windowCounter, key ruleKey) *win
 		counters[key] = counter
 	}
 	return counter
+}
+
+// markDirty flags counter, stored under key, for the next snapshot. The
+// caller must hold l.mu.
+func (l *limiter) markDirty(key ruleKey, counter *windowCounter) {
+	if counter.dirty {
+		return
+	}
+	counter.dirty = true
+	l.dirty[key] = struct{}{}
+}
+
+// forgetDirty drops key from the dirty set once neither of its counters
+// remains, so removed counters do not pile up there. The caller must hold
+// l.mu.
+func (l *limiter) forgetDirty(key ruleKey) {
+	if l.requests[key] == nil && l.tokens[key] == nil {
+		delete(l.dirty, key)
+	}
 }
 
 // admit checks every matching rule and, only when all pass, commits the
@@ -194,7 +219,7 @@ func (l *limiter) admit(rules []Rule, now time.Time) (HeaderSnapshot, []ruleKey,
 		if rule.MaxRequests != nil {
 			counter := l.requests[key]
 			counter.current++
-			counter.dirty = true
+			l.markDirty(key, counter)
 			total := withRemote(l.remoteRequests, key, counter, now, rule.PeriodSeconds)
 			remaining := max(*rule.MaxRequests-total.estimate(now, rule.PeriodSeconds), 0)
 			if !headers.HasRequests || remaining < headers.RequestRemaining {
@@ -308,11 +333,12 @@ func (l *limiter) recordTokens(rules []Rule, tokens int64, now time.Time) {
 		if rule.PeriodSeconds == PeriodConcurrent || rule.MaxTokens == nil {
 			continue
 		}
-		counter := l.counter(l.tokens, keyForRule(rule))
+		key := keyForRule(rule)
+		counter := l.counter(l.tokens, key)
 		counter.advance(now, rule.PeriodSeconds)
 		counter.current += tokens
-		counter.dirty = true
-		l.trackCounterExpiry(tokenCounter, keyForRule(rule), counter)
+		l.markDirty(key, counter)
+		l.trackCounterExpiry(tokenCounter, key, counter)
 	}
 }
 
@@ -376,12 +402,14 @@ func (l *limiter) reset(key ruleKey) {
 		if candidate.sameDefinition(key) {
 			l.removeCounterExpiry(requestCounter, candidate)
 			delete(l.requests, candidate)
+			l.forgetDirty(candidate)
 		}
 	}
 	for candidate := range l.tokens {
 		if candidate.sameDefinition(key) {
 			l.removeCounterExpiry(tokenCounter, candidate)
 			delete(l.tokens, candidate)
+			l.forgetDirty(candidate)
 		}
 	}
 }
@@ -396,6 +424,7 @@ func (l *limiter) resetAll() {
 	defer l.mu.Unlock()
 	l.requests = make(map[ruleKey]*windowCounter)
 	l.tokens = make(map[ruleKey]*windowCounter)
+	l.dirty = make(map[ruleKey]struct{})
 	l.remoteRequests = nil
 	l.remoteTokens = nil
 	l.resetCounterExpiries()
