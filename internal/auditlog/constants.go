@@ -10,10 +10,6 @@ const (
 	// Used by the stream observer to limit reconstructed response body size.
 	MaxContentCapture = 1024 * 1024
 
-	// BatchFlushThreshold is the number of entries that triggers an immediate flush.
-	// When the batch reaches this size, it's written to storage without waiting for the timer.
-	BatchFlushThreshold = 100
-
 	// APIKeyHashPrefixLength is the number of hex characters from SHA256 hash.
 	// 16 hex chars = 64 bits of entropy for identification without exposure.
 	APIKeyHashPrefixLength = 16
