@@ -101,6 +101,39 @@ response.
 For the full semantic-cache design and storage options, see
 [ADR-0006](/adr/0006-semantic-response-cache).
 
+## Slow or unreachable caches
+
+A degraded cache never holds a request for long. When a lookup runs out of
+time, the request skips that cache and goes to the provider:
+
+| Lookup | Budget | On timeout |
+| --- | --- | --- |
+| Exact cache (Redis `GET`) | 250 ms | Treated as a miss; storing the response is still attempted |
+| Semantic cache (embed + vector search) | 3 s | Semantic cache bypassed; no semantic entry is stored for that request (the exact cache, if enabled, still stores it) |
+
+Timeouts are logged at debug level, not as warnings on every request.
+
+The Redis client also uses fail-fast connection timeouts: 2 s to dial and
+500 ms per read or write. Raise them with URL query parameters when Redis is
+far away or stores large values, for example the model catalog snapshot.
+The response cache and the model catalog each read their own Redis URL, so set
+the parameters on every URL that needs them:
+
+```yaml
+cache:
+  model:
+    redis:
+      url: redis://redis:6379?dial_timeout=5s&read_timeout=2s&write_timeout=2s
+  response:
+    simple:
+      redis:
+        url: redis://redis:6379?dial_timeout=5s&read_timeout=2s&write_timeout=2s
+```
+
+A value of `0` disables that timeout, and `write_timeout` follows
+`read_timeout` when only `read_timeout` is set. The startup connection check
+is not capped by these timeouts; it has its own 5 s budget.
+
 ## What the exact cache keys on
 
 The exact cache hashes:

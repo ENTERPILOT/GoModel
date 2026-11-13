@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"hash"
 	"log/slog"
@@ -34,6 +35,13 @@ type semanticCacheWriteJob struct {
 	ttl        time.Duration
 }
 
+// semanticLookupTimeout bounds the embed plus vector search that runs before
+// every semantic miss. Past it the request skips the cache and goes to the
+// provider.
+const semanticLookupTimeout = 3 * time.Second
+
+var errSemanticLookupTimeout = errors.New("semantic cache lookup timed out")
+
 // SemanticCacheMiddleware implements the vector-similarity response cache layer.
 // It is the second cache layer, consulted only after an exact-match miss.
 type semanticCacheMiddleware struct {
@@ -42,6 +50,7 @@ type semanticCacheMiddleware struct {
 	cfg              config.SemanticCacheConfig
 	embedderIdentity string
 	hitRecorder      func(exchange, []byte, string)
+	lookupTimeout    time.Duration
 
 	partitionByUserPath bool
 
@@ -62,6 +71,7 @@ func newSemanticCacheMiddleware(emb embedding.Embedder, store VecStore, cfg conf
 		cfg:              cfg,
 		embedderIdentity: emb.Identity(),
 		hitRecorder:      hitRecorder,
+		lookupTimeout:    semanticLookupTimeout,
 		jobs:             make(chan semanticCacheWriteJob, cacheWriteQueueSize),
 	}
 	m.startWorkers()
@@ -156,15 +166,8 @@ func (m *semanticCacheMiddleware) Handle(ex exchange, body []byte, next func() e
 		paramsHash = userPathPartitionedHash(paramsHash, core.UserPathFromContext(ctx))
 	}
 
-	vec, err := m.embedder.Embed(ctx, embedText)
-	if err != nil {
-		slog.Warn("semantic cache: embed failed, bypassing", "err", err)
-		return next()
-	}
-
-	results, err := m.store.Search(ctx, vec, paramsHash, 1)
-	if err != nil {
-		slog.Warn("semantic cache: search failed, bypassing", "err", err)
+	vec, results, ok := m.lookup(ctx, embedText, paramsHash)
+	if !ok {
 		return next()
 	}
 
@@ -212,6 +215,36 @@ func (m *semanticCacheMiddleware) Handle(ex exchange, body []byte, next func() e
 	})
 
 	return nil
+}
+
+// lookup embeds text and searches the vector store under one shared budget.
+// ok is false when either step fails or the budget runs out; the caller then
+// bypasses the cache, so nothing is written for this request.
+func (m *semanticCacheMiddleware) lookup(ctx context.Context, text, paramsHash string) ([]float32, []VecResult, bool) {
+	ctx, cancel := context.WithTimeoutCause(ctx, m.lookupTimeout, errSemanticLookupTimeout)
+	defer cancel()
+	vec, err := m.embedder.Embed(ctx, text)
+	if err != nil {
+		logSemanticBypass(ctx, "embed", err)
+		return nil, nil, false
+	}
+	results, err := m.store.Search(ctx, vec, paramsHash, 1)
+	if err != nil {
+		logSemanticBypass(ctx, "search", err)
+		return nil, nil, false
+	}
+	return vec, results, true
+}
+
+// logSemanticBypass logs why a lookup was skipped. Running out of the lookup
+// budget is expected when the embedder or vector store is degraded, so it logs
+// at debug instead of warning on every request.
+func logSemanticBypass(ctx context.Context, step string, err error) {
+	if errors.Is(context.Cause(ctx), errSemanticLookupTimeout) {
+		slog.Debug("semantic cache: lookup timed out, bypassing", "step", step, "request_id", core.GetRequestID(ctx))
+		return
+	}
+	slog.Warn("semantic cache: "+step+" failed, bypassing", "err", err)
 }
 
 func (m *semanticCacheMiddleware) close() error {
