@@ -137,6 +137,10 @@ Limit tokenów to jeden limit w każdej pisowni: `max_tokens`,
 obowiązuje tylko wtedy, gdy klient nie wysłał żadnej z nich. W łańcuchu modeli
 wirtualnych i polityk wygrywa głębszy wiersz niezależnie od pisowni.
 
+Klucz w `params` usuwa też ten sam klucz wysłany przez klienta z inną
+wielkością liter, np. `Max_Tokens` lub `TEMPERATURE`, więc dalej trafia tylko
+skonfigurowana wartość.
+
 Jeden zestaw parametrów obsługuje każde API, więc wymienione tu klucze są
 pomijane w API, które ich nie zna, a limit tokenów jest mapowany tak, jak
 opisano wyżej. Każdy inny klucz trafia do adaptera providera bez zmian i jest

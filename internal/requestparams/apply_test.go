@@ -147,6 +147,72 @@ func TestApplyChat(t *testing.T) {
 			defaults: Set{"truncation": raw(`"auto"`), "include": raw(`["x"]`), "text": raw(`{"verbosity":"low"}`), "seed": raw("7")},
 			want:     `{"model":"m","messages":[],"seed":7}`,
 		},
+		{
+			name:   "forced typed fields drop the client's case variants",
+			body:   `{"model":"m","messages":[],"temperature":0.2,"Temperature":2,"TOP_P":0.1,"User":"u"}`,
+			params: Set{"temperature": raw("1"), "top_p": raw("0.9"), "user": raw(`"ops"`)},
+			want:   `{"model":"m","messages":[],"temperature":1,"top_p":0.9,"user":"ops"}`,
+		},
+		{
+			name:   "a forced token limit drops the case variants of every spelling",
+			body:   `{"model":"m","messages":[],"max_tokens":10,"MAX_TOKENS":9000,"Max_Completion_Tokens":9000,"MAX_OUTPUT_TOKENS":9000}`,
+			params: Set{"max_tokens": raw("64")},
+			want:   `{"model":"m","messages":[],"max_tokens":64}`,
+		},
+		{
+			name:   "a forced max_completion_tokens drops the case variants of every spelling",
+			body:   `{"model":"m","messages":[],"Max_Tokens":9000,"MAX_COMPLETION_TOKENS":9000,"Max_Output_Tokens":9000}`,
+			params: Set{"max_completion_tokens": raw("50")},
+			want:   `{"model":"m","messages":[],"max_completion_tokens":50}`,
+		},
+		{
+			name:   "a forced unknown field drops the client's case variants and keeps other members",
+			body:   `{"model":"m","messages":[],"top_k":5,"Top_K":50,"TOP_K":60,"Min_P":0.1}`,
+			params: Set{"top_k": raw("20")},
+			want:   `{"model":"m","messages":[],"top_k":20,"Min_P":0.1}`,
+		},
+		{
+			name:   "a forced object drops the client's case variants instead of merging them",
+			body:   `{"model":"m","messages":[],"Chat_Template_Kwargs":{"enable_thinking":false}}`,
+			params: Set{"chat_template_kwargs": raw(`{"enable_thinking":true}`)},
+			want:   `{"model":"m","messages":[],"chat_template_kwargs":{"enable_thinking":true}}`,
+		},
+		{
+			name:   "a forced null strips the client's case variants too",
+			body:   `{"model":"m","messages":[],"Top_K":50,"User":"u"}`,
+			params: Set{"top_k": nil, "user": nil},
+			want:   `{"model":"m","messages":[]}`,
+		},
+		{
+			name:   "case variants are matched the way a JSON decoder folds names",
+			body:   `{"model":"m","messages":[],"u\u017Fer":"u","top_\u212A":50}`,
+			params: Set{"user": raw(`"ops"`), "top_k": raw("20")},
+			want:   `{"model":"m","messages":[],"user":"ops","top_k":20}`,
+		},
+		{
+			name:   "an operator key in another letter case still wins",
+			body:   `{"model":"m","messages":[],"top_k":5}`,
+			params: Set{"Top_K": raw("20")},
+			want:   `{"model":"m","messages":[],"Top_K":20}`,
+		},
+		{
+			name:   "two forced spellings of one key are both kept",
+			body:   `{"model":"m","messages":[],"top_k":5,"TOP_K":9}`,
+			params: Set{"top_k": raw("1"), "Top_K": raw("2")},
+			want:   `{"model":"m","messages":[],"top_k":1,"Top_K":2}`,
+		},
+		{
+			name:     "defaults leave the client's case variants alone",
+			body:     `{"model":"m","messages":[],"Temperature":0.2,"Top_K":50}`,
+			defaults: Set{"temperature": raw("1"), "min_p": raw("0")},
+			want:     `{"model":"m","messages":[],"temperature":0.2,"Temperature":0.2,"Top_K":50,"min_p":0}`,
+		},
+		{
+			name:   "a skipped Responses-only key keeps the client's members",
+			body:   `{"model":"m","messages":[],"Truncation":"auto"}`,
+			params: Set{"truncation": raw(`"disabled"`)},
+			want:   `{"model":"m","messages":[],"Truncation":"auto"}`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -293,6 +359,36 @@ func TestApplyResponses(t *testing.T) {
 			body:   `{"model":"m","input":"hi","response_format":{"type":"json_object"},"text":{"verbosity":"low"}}`,
 			params: Set{"response_format": nil},
 			want:   `{"model":"m","input":"hi","text":{"verbosity":"low"}}`,
+		},
+		{
+			name:   "a forced token limit drops the case variants of every spelling",
+			body:   `{"model":"m","input":"hi","Max_Output_Tokens":9000,"MAX_TOKENS":9000,"max_completion_Tokens":9000}`,
+			params: Set{"max_tokens": raw("64")},
+			want:   `{"model":"m","input":"hi","max_output_tokens":64}`,
+		},
+		{
+			name:   "forced typed and unknown fields drop the client's case variants",
+			body:   `{"model":"m","input":"hi","Temperature":2,"STORE":true,"Top_K":50,"Truncation":"auto","Min_P":0.1}`,
+			params: Set{"temperature": raw("1"), "store": raw("false"), "top_k": raw("20"), "truncation": raw(`"disabled"`)},
+			want:   `{"model":"m","input":"hi","temperature":1,"store":false,"top_k":20,"truncation":"disabled","Min_P":0.1}`,
+		},
+		{
+			name:   "a forced JSON-merged typed field drops the client's case variants",
+			body:   `{"model":"m","input":"hi","Metadata":{"a":"1"},"INCLUDE":["y"]}`,
+			params: Set{"metadata": raw(`{"b":"2"}`), "include": raw(`["x"]`)},
+			want:   `{"model":"m","input":"hi","metadata":{"a":"1","b":"2"},"include":["x"]}`,
+		},
+		{
+			name:   "a forced null strips the client's case variants too",
+			body:   `{"model":"m","input":"hi","Metadata":{"a":"1"},"Top_K":50}`,
+			params: Set{"metadata": nil, "top_k": nil},
+			want:   `{"model":"m","input":"hi"}`,
+		},
+		{
+			name:   "a skipped chat-only key keeps the client's members",
+			body:   `{"model":"m","input":"hi","Seed":7}`,
+			params: Set{"seed": raw("1")},
+			want:   `{"model":"m","input":"hi","Seed":7}`,
 		},
 	}
 	for _, tt := range tests {

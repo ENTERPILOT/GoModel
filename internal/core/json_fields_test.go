@@ -83,6 +83,33 @@ func TestUnknownJSONFieldsWithoutRemovesOnlyNamedMembers(t *testing.T) {
 	require.NotNil(t, got)
 }
 
+func TestUnknownJSONFieldsWithoutCaseVariants(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		keys []string
+		want string
+	}{
+		{name: "drops other letter cases and keeps the exact spelling", body: `{"top_k":1,"Top_K":2,"TOP_K":3,"min_p":4}`, keys: []string{"top_k"}, want: `{"top_k":1,"min_p":4}`},
+		{name: "drops variants of a key that is not present", body: `{"Max_Tokens":1,"x":2}`, keys: []string{"max_tokens"}, want: `{"x":2}`},
+		{name: "keeps every spelling that is itself a key", body: `{"top_k":1,"Top_K":2,"TOP_K":3}`, keys: []string{"top_k", "Top_K"}, want: `{"top_k":1,"Top_K":2}`},
+		{name: "folds like a JSON decoder", body: `{"u\u017Fer":1,"top_\u212A":2,"users":3}`, keys: []string{"user", "top_k"}, want: `{"users":3}`},
+		{name: "leaves nested members alone", body: `{"extra":{"Top_K":2}}`, keys: []string{"top_k"}, want: `{"extra":{"Top_K":2}}`},
+		{name: "no keys", body: `{"Top_K":2}`, want: `{"Top_K":2}`},
+		{name: "everything dropped", body: `{"Top_K":2}`, keys: []string{"top_k"}, want: ``},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fields, err := extractUnknownJSONFields([]byte(tt.body))
+			require.NoError(t, err)
+			before := string(fields.raw)
+
+			assert.Equal(t, tt.want, string(fields.WithoutCaseVariants(tt.keys...).raw))
+			assert.Equal(t, before, string(fields.raw), "the receiver must not change")
+		})
+	}
+}
+
 func TestUnknownJSONFieldsOnlyKeepsNamedMembers(t *testing.T) {
 	fields, err := extractUnknownJSONFields(
 		[]byte(`{"known":true,"prefix":true,"refusal":null,"name":"bot","x":1,"x":2}`),

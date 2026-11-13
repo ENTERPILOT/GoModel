@@ -148,6 +148,10 @@ Ein Token-Limit ist in jeder Schreibweise dasselbe Limit: `max_tokens`,
 verkettete virtuelle Modelle und Policies hinweg gewinnt die tiefere Zeile,
 gleich welche Schreibweise beide verwenden.
 
+Ein Key in `params` entfernt außerdem denselben Key, den der Client in anderer
+Groß-/Kleinschreibung gesendet hat, etwa `Max_Tokens` oder `TEMPERATURE`,
+sodass nur der konfigurierte Wert weitergeleitet wird.
+
 Ein Parametersatz bedient jede API, daher werden die hier genannten Keys in
 der API übersprungen, die sie nicht kennt, und das Token-Limit wird wie oben
 beschrieben abgebildet. Jeder andere Key erreicht den Provider-Adapter
