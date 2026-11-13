@@ -214,7 +214,7 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 		}
 	})
 	if retentionDays > 0 {
-		go storage.RunCleanupLoop(store.stopCleanup, CleanupInterval, store.cleanup)
+		go storage.RunCleanupLoop(store.stopCleanup, CleanupInterval, storage.SingleReplicaSweep(sqlx.PostgreSQLPool(db), cleanupLockKey, store.cleanup))
 	}
 	return store, nil
 }

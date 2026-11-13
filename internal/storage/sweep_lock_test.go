@@ -1,0 +1,106 @@
+package storage
+
+import (
+	"context"
+	"errors"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
+)
+
+// testSweepLockKey is this test's own lock, so it never contends with the
+// sweeps other packages' tests run against the same server.
+const testSweepLockKey int64 = 0x746573742d737770
+
+func TestLockedSweep(t *testing.T) {
+	tests := []struct {
+		name    string
+		tryLock func(ctx context.Context, fn func()) (bool, error)
+		wantRun bool
+	}{
+		{"lock taken", func(_ context.Context, fn func()) (bool, error) { fn(); return true, nil }, true},
+		{"lock held elsewhere", func(context.Context, func()) (bool, error) { return false, nil }, false},
+		{"lock error", func(context.Context, func()) (bool, error) { return false, errors.New("down") }, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ran := false
+			lockedSweep(tt.tryLock, func() { ran = true })()
+			assert.Equal(t, tt.wantRun, ran)
+		})
+	}
+}
+
+func TestSingleReplicaSweepWithoutPoolIsUnchanged(t *testing.T) {
+	ran := false
+	SingleReplicaSweep(nil, testSweepLockKey, func() { ran = true })()
+	assert.True(t, ran)
+}
+
+// TestSingleReplicaSweepPostgreSQL runs two replicas' sweeps against one
+// database at the same moment: only one of them sweeps, and the lock is free
+// again for the next round.
+func TestSingleReplicaSweepPostgreSQL(t *testing.T) {
+	pool := sqlxtest.NewPostgresPool(t)
+	if pool == nil {
+		return // skipped: no test server configured
+	}
+
+	var sweeps atomic.Int32
+	inSweep := make(chan struct{})
+	finish := make(chan struct{})
+	first := SingleReplicaSweep(pool, testSweepLockKey, func() {
+		sweeps.Add(1)
+		close(inSweep)
+		<-finish
+	})
+	second := SingleReplicaSweep(pool, testSweepLockKey, func() { sweeps.Add(1) })
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		first()
+	}()
+	select {
+	case <-inSweep:
+	case <-time.After(10 * time.Second):
+		close(finish)
+		require.FailNow(t, "the first sweep did not start")
+	}
+	second()
+	assert.Equal(t, int32(1), sweeps.Load(), "the second replica skips while the first sweeps")
+	close(finish)
+	<-done
+
+	second()
+	assert.Equal(t, int32(2), sweeps.Load(), "the lock is released after the sweep")
+}
+
+// TestSingleReplicaSweepPoolOfOne runs a sweep that queries through a pool of
+// a single connection: the lock must not hold that connection.
+func TestSingleReplicaSweepPoolOfOne(t *testing.T) {
+	shared := sqlxtest.NewPostgresPool(t)
+	if shared == nil {
+		return // skipped: no test server configured
+	}
+	config := shared.Config()
+	config.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(context.Background(), config)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	var swept bool
+	SingleReplicaSweep(pool, testSweepLockKey, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, err := pool.Exec(ctx, `SELECT 1`)
+		swept = assert.NoError(t, err)
+	})()
+	assert.True(t, swept)
+}

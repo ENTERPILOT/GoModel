@@ -21,6 +21,11 @@ const (
 	CleanupInterval = 1 * time.Hour
 )
 
+// cleanupLockKey is the PostgreSQL advisory lock that keeps the SQL store's
+// expired-snapshot sweep to one replica at a time (see
+// storage.SingleReplicaSweep).
+const cleanupLockKey int64 = 0x676d72742d636e76 // "gmrt-cnv"
+
 // prepareStoredConversationForStorage validates, normalizes, and — when stamp
 // is true — applies StoredAt/ExpiresAt defaults, then serializes the snapshot
 // with items split out so backends can append them atomically. Create paths

@@ -557,6 +557,9 @@ reasonable choice) so the teardown is not racing SIGKILL.
 ## Data retention and disk growth
 
 Audit logging and usage tracking write a row per request, and both sweep hourly.
+On SQLite and PostgreSQL the first sweep runs one to five minutes after
+startup, not at boot, and on PostgreSQL each table's sweep runs on one replica
+at a time; the others skip that round. MongoDB expires both with TTL indexes.
 
 | Setting | Default | Notes |
 | --- | --- | --- |
