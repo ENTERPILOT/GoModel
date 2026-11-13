@@ -1,5 +1,10 @@
 # Infra (redis, postgres, mongodb, adminer): `docker compose up -d`
 # App + Prometheus: `docker compose --profile app up -d`
+#
+# This file is for local development. The datastores use default or no
+# credentials, so their ports (and Adminer's and Prometheus's) are published on
+# 127.0.0.1 only. Do not publish them on other interfaces; only the gateway
+# port is reachable from outside the host.
 
 services:
   gomodel:
@@ -41,7 +46,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
@@ -55,7 +60,7 @@ services:
   postgres:
     image: postgres:18-alpine
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     environment:
       - POSTGRES_USER=gomodel
       - POSTGRES_PASSWORD=gomodel
@@ -73,7 +78,7 @@ services:
   mongodb:
     image: mongo:8
     ports:
-      - "27017:27017"
+      - "127.0.0.1:27017:27017"
     volumes:
       - mongodb_data:/data/db
     command: ["--replSet", "rs0", "--bind_ip_all"]
@@ -88,7 +93,7 @@ services:
   adminer:
     image: adminer:5
     ports:
-      - "8081:8080"
+      - "127.0.0.1:8081:8080"
     depends_on:
       - postgres
     restart: unless-stopped
@@ -98,14 +103,13 @@ services:
       - app
     image: prom/prometheus:latest
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
-      - "--web.enable-lifecycle"
     depends_on:
       - gomodel
     restart: unless-stopped
