@@ -35,10 +35,11 @@ type SQLStore struct {
 	stopCleanup   chan struct{}
 	closeOnce     sync.Once
 
-	// indexBuild tracks the background written_at and trigram search index
-	// builds, so tests can wait for them; production never blocks on them.
-	// Close cancels a build still in flight rather than holding shutdown for
-	// it — the interrupted index is dropped and rebuilt on the next start.
+	// indexBuild tracks the background written_at, model, auth-key and
+	// trigram search index builds, so tests can wait for them; production
+	// never blocks on them. Close cancels a build still in flight rather than
+	// holding shutdown for it — the interrupted index is dropped and rebuilt
+	// on the next start.
 	indexBuild       sync.WaitGroup
 	cancelIndexBuild context.CancelFunc
 }
@@ -126,7 +127,6 @@ var sqlIndexes = []string{
 	"CREATE INDEX IF NOT EXISTS idx_audit_workflow_version_id ON audit_logs(workflow_version_id)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_request_id ON audit_logs(request_id)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_principal_id ON audit_logs(principal_id)",
-	"CREATE INDEX IF NOT EXISTS idx_audit_auth_key_id ON audit_logs(auth_key_id)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_client_ip ON audit_logs(client_ip)",
 	"CREATE INDEX IF NOT EXISTS idx_audit_path ON audit_logs(path)",
 	// Composite: serves both the session_id equality filter and its per-thread
@@ -186,19 +186,20 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 			slog.Warn("failed to create index", "error", err)
 		}
 	}
+	ensureSQLiteAuthKeyIndex(ctx, db)
 
 	store := &SQLStore{
 		db:            db,
 		retentionDays: retentionDays,
 		stopCleanup:   make(chan struct{}),
 	}
-	// The written_at, model and trigram search indexes can take minutes to
-	// build on a large existing PostgreSQL table, so they are built off the
-	// startup path (and CONCURRENTLY, so writes keep flowing); readers pick
-	// each up as soon as it exists. They are built one after the other, since
-	// PostgreSQL runs one concurrent build per table at a time. The written_at
-	// index gets one attempt first and its retries last, so one that keeps
-	// failing holds up neither of the others.
+	// The written_at, model, auth-key and trigram search indexes can take
+	// minutes to build on a large existing PostgreSQL table, so they are built
+	// off the startup path (and CONCURRENTLY, so writes keep flowing); readers
+	// pick each up as soon as it exists. They are built one after the other,
+	// since PostgreSQL runs one concurrent build per table at a time. The
+	// written_at index gets one attempt first and its retries last, so one that
+	// keeps failing holds up none of the others.
 	buildCtx, cancel := context.WithCancel(context.Background())
 	store.cancelIndexBuild = cancel
 	store.indexBuild.Go(func() {
@@ -208,6 +209,7 @@ func NewSQLStore(ctx context.Context, db sqlx.DB, retentionDays int) (*SQLStore,
 			return
 		}
 		ensureModelIndexesConcurrently(buildCtx, db)
+		ensureAuthKeyTimestampIndex(buildCtx, db)
 		ensureTrigramSearchIndex(buildCtx, db, postgresErrorMessage)
 		if !built {
 			writtenAt.Build(buildCtx, writtenAtBackgroundIndex)
