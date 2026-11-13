@@ -74,10 +74,13 @@ JSON 响应的 Token 数从 `usage` 成员中读取，因此成本和预算会�
 - **`GOMODEL_MASTER_KEY`**：始终拥有透传访问权限。
 - **托管 API 密钥**：默认创建时*不*带透传访问权限。在引入透传访问权限之前就已存在的密钥会保留该权限。
   没有访问权限的密钥会收到 `403`，错误代码为 `passthrough_access_denied`。
-- **模型允许列表**：指定了 `model` 的请求体会根据调用方的允许列表进行检查。未指定模型的请求作用于
+- **模型允许列表**：指定了 `model` 的请求体会根据调用方的允许列表进行检查。对推理端点
+  （`chat/completions`、`completions`、`responses`、`embeddings`、`messages`、`audio/speech`、
+  DeepSeek `beta/completions`、Cohere `v2/chat` 和 `v2/embed`、Jev `systemone`）的 `POST`
+  请求只需获得该模型的授权。其他所有请求都作用于
   整个提供商，因此允许列表必须授予整个提供商（`anthropic/`）或全部内容（`/`）的权限。仅限于
   `anthropic/claude-sonnet-4-6` 的密钥可以为该模型调用 `POST /p/anthropic/v1/messages`，
-  但不能调用 `GET /p/anthropic/v1/models`。
+  但不能调用 `GET /p/anthropic/v1/models` 或 `POST /p/anthropic/v1/messages/batches`。
 
 您可以在创建密钥时（在 `POST /admin/auth-keys` 中设置 `"passthrough_access": true`）、在控制台的
 API Keys 页面上，或在之后授予透传访问权限。只有全局管理员凭据（主密钥或不带用户路径的控制台密钥）
