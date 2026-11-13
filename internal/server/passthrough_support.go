@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -294,6 +295,16 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 		return relayPassthroughError(c, providerType, resp)
 	}
 
+	returnsCost := usage.CostReportFromContext(c.Request().Context()) != nil
+	if returnsCost && hasContentEncoding(resp.Headers) && (isSSEContentType(resp.Headers) || isJSONContentType(resp.Headers)) {
+		// The gateway asks for no encoding, so the transport decodes gzip
+		// itself; another encoding is unrequested. Its body cannot be read
+		// for usage or cleared of an upstream's usage.cost, so it is not
+		// relayed as if this gateway vouched for it.
+		return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway,
+			"provider returned an encoded response the gateway cannot read to return its cost", nil))
+	}
+
 	copyPassthroughResponseHeaders(c.Response().Header(), http.Header(resp.Headers))
 
 	if isSSEContentType(resp.Headers) {
@@ -336,7 +347,7 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 			observers = append(observers, observer)
 		}
 		observers = append(observers, extraObservers...)
-		wrappedStream := streaming.NewObservedSSEStream(resp.Body, observers...)
+		wrappedStream := streaming.NewObservedSSEStream(paceForResponseCost(c, resp.Body), observers...)
 		if len(observers) > 0 {
 			defer func() {
 				_ = wrappedStream.Close()
@@ -362,6 +373,13 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 	if isObservablePassthroughStatus(resp.StatusCode) {
 		observers = passthroughJSONResponseObservers(c, usageLogger, pricingResolver, providerType, providerName, endpoint, info, extraObservers)
 	}
+	if returnsCost && isJSONContentType(resp.Headers) {
+		body := bufio.NewReader(resp.Body)
+		if first := peekJSONStart(body); first != 0 && first != '{' {
+			return relayJSONAsItArrives(c, resp.StatusCode, body, observers)
+		}
+		return relayJSONAfterObservers(c, providerType, resp.StatusCode, body, observers)
+	}
 	if len(observers) == 0 || !isJSONContentType(resp.Headers) {
 		c.Response().WriteHeader(resp.StatusCode)
 		if _, err := io.Copy(c.Response(), resp.Body); err != nil {
@@ -386,6 +404,78 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 		notifyObserversWithJSONBody(body, observers)
 	}
 	return nil
+}
+
+// relayJSONAfterObservers reads a JSON object before relaying it, so its usage
+// is priced in time for the response to carry the cost, in its headers and
+// in its usage.cost. Only requests that return their cost take this path: the
+// answer is complete either way, but the default path relays it as it arrives
+// and accounts for it afterwards.
+//
+// An answer too large to observe is relayed as it arrives and without a cost,
+// as it is on the default path; the response cost writer still removes an
+// upstream's usage.cost from it.
+func relayJSONAfterObservers(c *echo.Context, providerType string, status int, upstream io.Reader, observers []streaming.Observer) error {
+	body, err := io.ReadAll(io.LimitReader(upstream, maxObservedJSONResponseBytes+1))
+	if err != nil {
+		return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "failed to read provider response", err))
+	}
+	observed := len(body) <= maxObservedJSONResponseBytes
+	if observed {
+		notifyObserversWithJSONBody(body, observers)
+	}
+	c.Response().WriteHeader(status)
+	if _, err := c.Response().Write(body); err != nil {
+		return err
+	}
+	if !observed {
+		if _, err := io.Copy(c.Response(), upstream); err != nil {
+			return err
+		}
+	}
+	if f, ok := c.Response().(http.Flusher); ok {
+		f.Flush()
+	}
+	return nil
+}
+
+// relayJSONAsItArrives relays a JSON answer that is not one object, piece by
+// piece: an upstream may send such a body over time (Gemini's
+// streamGenerateContent without alt=sse sends an array, one element per
+// chunk), and reading it first would hold every piece to the end. It is
+// accounted for once complete, as on the default path, so it carries no cost;
+// the response cost writer rewrites the usage of an object only, and relays
+// it as it is.
+func relayJSONAsItArrives(c *echo.Context, status int, upstream io.Reader, observers []streaming.Observer) error {
+	capture := newCappedCaptureBuffer(maxObservedJSONResponseBytes)
+	if len(observers) > 0 {
+		upstream = io.TeeReader(upstream, capture)
+	}
+	c.Response().WriteHeader(status)
+	if err := flushStream(c.Response(), upstream); err != nil {
+		// The client received an incomplete body; do not account for it.
+		return err
+	}
+	if body, ok := capture.Captured(); ok {
+		notifyObserversWithJSONBody(body, observers)
+	}
+	return nil
+}
+
+// peekJSONStart returns the first byte of body that is not JSON whitespace,
+// without consuming any, or 0 when body ends or fails before one, or has none
+// within the reader's buffer.
+func peekJSONStart(body *bufio.Reader) byte {
+	for n := 1; n <= body.Size(); n++ {
+		window, err := body.Peek(n)
+		if len(window) == n && !isJSONSpace(window[n-1]) {
+			return window[n-1]
+		}
+		if err != nil {
+			return 0
+		}
+	}
+	return 0
 }
 
 // maxRelayedPassthroughErrorBytes caps the provider-native error body relayed
@@ -534,6 +624,7 @@ func passthroughUsageObserver(c *echo.Context, usageLogger usage.LoggerInterface
 	observer.SetAuthKeyID(core.GetAuthKeyID(c.Request().Context()))
 	observer.SetLabels(core.RequestLabelsFromContext(c.Request().Context()))
 	observer.SetRewriteTokensSaved(core.RewriteTokensSavedFromContext(c.Request().Context()))
+	observer.SetCostReport(usage.CostReportFromContext(c.Request().Context()))
 	return observer
 }
 
@@ -585,6 +676,24 @@ func notifyObserversWithJSONBody(body []byte, observers []streaming.Observer) {
 // 206 Partial Content, whose body is by definition incomplete.
 func isObservablePassthroughStatus(status int) bool {
 	return status >= http.StatusOK && status < http.StatusMultipleChoices && status != http.StatusPartialContent
+}
+
+// hasContentEncoding reports whether a response body is encoded: any
+// Content-Encoding other than identity.
+func hasContentEncoding(headers map[string][]string) bool {
+	for key, values := range headers {
+		if !strings.EqualFold(strings.TrimSpace(key), "Content-Encoding") {
+			continue
+		}
+		for _, value := range values {
+			for coding := range strings.SplitSeq(value, ",") {
+				if coding = strings.TrimSpace(coding); coding != "" && !strings.EqualFold(coding, "identity") {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func isJSONContentType(headers map[string][]string) bool {

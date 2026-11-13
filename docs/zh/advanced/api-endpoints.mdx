@@ -172,6 +172,16 @@ curl http://localhost:8080/v1/auth/verify \
 | `/mcp`          | POST, GET, DELETE | 聚合的 MCP 端点；工具 / 提示词以 `{server}_{name}` 形式添加命名空间 |
 | `/mcp/{server}` | POST, GET, DELETE | 单个已配置的 MCP 服务器，保留原始工具名称 |
 
+## 响应成本
+
+设置 `USAGE_RESPONSE_COST_ENABLED=true`（默认 `false`）后，模型端点会以
+OpenRouter 的形式返回 GoModel 为该请求计算的成本：`usage.cost`，一个以 USD
+计、四舍五入到小数点后 12 位的数字，位于非流式答案以及每个带 usage 的流式事件的
+usage 对象中（是截至当前的累计值：以最后一个为准）。非流式响应还会在
+`X-GoModel-Cost` 和 `X-GoModel-Cost-Currency` 响应头中携带它。上游自己的
+`usage.cost` 会被替换，成本未知时则被移除。覆盖的端点、`cost_details`
+的处理以及缓存命中返回什么，参见[成本追踪](/zh/features/cost-tracking)。
+
 ## 管理端点
 
 管理 REST 和控制台路由（`/admin/*`）请参阅

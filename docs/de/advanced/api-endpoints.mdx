@@ -184,6 +184,20 @@ bündeln (wenn `MCP_ENABLED`, standardmäßig aktiviert). Siehe [MCP Gateway](/d
 | `/mcp`          | POST, GET, DELETE | Gebündelter MCP-Endpunkt; Tools/Prompts mit Namensraum als `{server}_{name}`          |
 | `/mcp/{server}` | POST, GET, DELETE | Ein einzelner konfigurierter MCP-Server mit den ursprünglichen Tool-Namen                           |
 
+## Kosten in der Antwort
+
+Mit `USAGE_RESPONSE_COST_ENABLED=true` (Standard `false`) geben Modell-Endpunkte
+die Kosten, die GoModel für den Request berechnet hat, in der Form von
+OpenRouter zurück: `usage.cost`, eine Zahl in USD, auf 12 Nachkommastellen
+gerundet, im Usage-Objekt gepufferter Antworten und jedes gestreamten Events
+mit Usage (kumuliert für den bisherigen Request: maßgeblich ist das letzte).
+Gepufferte Antworten tragen sie zusätzlich in den Headern `X-GoModel-Cost` und
+`X-GoModel-Cost-Currency`. Das eigene `usage.cost` eines Upstreams wird
+ersetzt oder, wenn die Kosten unbekannt sind, entfernt. Unter
+[Kostenerfassung](/de/features/cost-tracking#kosten-in-der-antwort) steht,
+welche Endpunkte abgedeckt sind, was mit `cost_details` geschieht und was ein
+Cache-Treffer zurückgibt.
+
 ## Admin-Endpunkte
 
 Admin-REST- und Dashboard-Routen (`/admin/*`) werden unter

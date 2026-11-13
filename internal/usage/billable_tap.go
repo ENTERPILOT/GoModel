@@ -22,18 +22,29 @@ func NewBillableTap(inner LoggerInterface, billable func(providerName string) bo
 }
 
 func (t *BillableTap) Write(entry *UsageEntry) {
-	if entry != nil {
-		// Rows written before provider names existed carry only the provider
-		// type, which is also the default instance name.
-		name := strings.TrimSpace(entry.ProviderName)
-		if name == "" {
-			name = strings.TrimSpace(entry.Provider)
-		}
-		if name != "" && !t.billable(name) {
-			entry.MarkNonBillable()
-		}
-	}
+	t.mark(entry)
 	t.inner.Write(entry)
+}
+
+// StampBilling implements BillingStamper.
+func (t *BillableTap) StampBilling(entry *UsageEntry) {
+	t.mark(entry)
+	StampBilling(t.inner, entry)
+}
+
+func (t *BillableTap) mark(entry *UsageEntry) {
+	if entry == nil {
+		return
+	}
+	// Rows written before provider names existed carry only the provider
+	// type, which is also the default instance name.
+	name := strings.TrimSpace(entry.ProviderName)
+	if name == "" {
+		name = strings.TrimSpace(entry.Provider)
+	}
+	if name != "" && !t.billable(name) {
+		entry.MarkNonBillable()
+	}
 }
 
 // SetLivePublisher forwards the dashboard publisher to the wrapped logger, so

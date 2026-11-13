@@ -69,3 +69,28 @@ func TestUsageTapForwardsLivePublisher(t *testing.T) {
 	// A wrapped logger without live support is left alone.
 	NewUsageTap(&recordingLogger{}, svc).(*UsageTap).SetLivePublisher(nopPublisher{})
 }
+
+// Stamping gives an entry the billed cost Write would record, without
+// recording it, for every tap of the chain: a provider the caller does not
+// owe is billed at zero.
+func TestUsageTapStampsBillingWithoutRecording(t *testing.T) {
+	svc, err := New(config.PricingConfig{Markups: map[string]float64{"/": 25}}, testCatalog, false)
+	require.NoError(t, err)
+	inner := &recordingLogger{}
+	logger := usage.NewBillableTap(NewUsageTap(inner, svc), func(providerName string) bool { return providerName != "anthropic" })
+	owed := &usage.UsageEntry{ProviderName: "openai", Provider: "openai", Model: "gpt-5", TotalCost: new(4.0)}
+	own := &usage.UsageEntry{ProviderName: "anthropic", Provider: "anthropic", Model: "claude", TotalCost: new(4.0)}
+
+	usage.StampBilling(logger, owed)
+	usage.StampBilling(logger, own)
+
+	require.NotNil(t, owed.BilledCost)
+	require.InDelta(t, 5.0, *owed.BilledCost, 1e-12)
+	require.NotNil(t, own.BilledCost)
+	require.Zero(t, *own.BilledCost)
+	require.Empty(t, inner.entries)
+
+	logger.Write(owed)
+	require.Len(t, inner.entries, 1)
+	require.InDelta(t, 5.0, *inner.entries[0].BilledCost, 1e-12, "recording stamps the same billed cost again")
+}

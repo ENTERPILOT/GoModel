@@ -714,6 +714,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 			usageObserver.SetAuthKeyID(core.GetAuthKeyID(c.Request().Context()))
 			usageObserver.SetLabels(core.RequestLabelsFromContext(c.Request().Context()))
 			usageObserver.SetRewriteTokensSaved(core.RewriteTokensSavedFromContext(c.Request().Context()))
+			usageObserver.SetCostReport(usage.CostReportFromContext(c.Request().Context()))
 			observers = append(observers, usageObserver)
 		}
 	}
@@ -730,7 +731,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 		})
 	}
 	stream = guardStreamCompletion(endpoint, stream)
-	wrappedStream := streaming.NewObservedSSEStream(stream, observers...)
+	wrappedStream := streaming.NewObservedSSEStream(paceForResponseCost(c, stream), observers...)
 	if outerWrap != nil {
 		wrappedStream = outerWrap(wrappedStream)
 	}

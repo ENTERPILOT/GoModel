@@ -299,6 +299,7 @@ usage:
   enabled: true
   pricing_recalculation_enabled: true
   enforce_returning_usage_data: true
+  # response_cost_enabled: false # env: USAGE_RESPONSE_COST_ENABLED; true returns each request's cost to its caller as usage.cost (OpenRouter's shape) and in X-GoModel-Cost headers on buffered responses: billed cost with markups enabled, provider cost otherwise
   buffer_size: 1000
   flush_interval: 5
   retention_days: 90

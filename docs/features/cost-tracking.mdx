@@ -153,6 +153,141 @@ GoModel takes the deepest configured path that covers the request's user path (`
 
 The default is none: without `user_path_markups`, `markups` applies to everyone. With `markups_enabled: false`, `user_path_markups` is ignored like `markups`, and GoModel logs a warning at startup. A rule from `user_path_markups` is recorded in `markup_selector` as `<user path>:<selector>`, for example `/acme:openai/gpt-5`, so the request log shows which customer rule was billed. User paths are normalized as on requests, so `acme/` and `/acme` are the same key; `/` is rejected, since `markups` already covers it.
 
+## Return the cost with each response
+
+GoModel can return the cost it calculated for a request to the client that made it. It is off by default. Turn it on when clients account for their own spend per request — for example an application that holds an inference-only key and attributes cost to its own users — so they need neither an admin key nor a later lookup in `/admin/usage/log`.
+
+```yaml
+usage:
+  response_cost_enabled: true # env: USAGE_RESPONSE_COST_ENABLED; default false
+```
+
+It needs usage tracking (`USAGE_ENABLED`, on by default): a request without a usage row has no cost to return.
+
+The shape follows OpenRouter's usage accounting: the cost is `usage.cost`, a JSON number in USD, in the usage object of the response. A client that already reads OpenRouter's cost works against GoModel unchanged.
+
+**Which cost.** With [markups](#markups-and-billed-cost) enabled, the client gets the request's billed cost, and GoModel removes every cost the provider reported in a field it reads costs from (see *Upstream costs* below), so the response reveals neither the provider cost nor the markup. A cost a provider reports in a field GoModel does not know is not recognised as one and stays in the response. With markups off, it gets the provider cost (`total_cost`), also for a provider marked `billable: false`. Either way it is in USD and an estimate like every other cost on this page, and it is the value on the request's usage row except for a cache hit without markups (see below).
+
+**Format.** The amount is rounded to 12 decimal places and written as a plain decimal: no exponent, no float noise, no trailing zeros (`0.00003`, never `0.000030000000000000004`; `0.000000001`, never `1e-9`).
+
+### Buffered responses
+
+The cost is added at the end of the response's `usage` object:
+
+<CodeGroup>
+```json Chat Completions
+{"id":"chatcmpl-1","object":"chat.completion","choices":[...],"usage":{"prompt_tokens":271,"completion_tokens":12,"total_tokens":283,"cost":0.00000542}}
+```
+
+```json Responses
+{"id":"resp_1","object":"response","status":"completed","output":[...],"usage":{"input_tokens":271,"output_tokens":12,"total_tokens":283,"cost":0.00000542}}
+```
+
+```json Anthropic Messages
+{"id":"msg_1","type":"message","content":[...],"stop_reason":"end_turn","usage":{"input_tokens":271,"output_tokens":12,"cost":0.00000542}}
+```
+
+```json Embeddings
+{"object":"list","data":[...],"model":"text-embedding-3-small","usage":{"prompt_tokens":8,"total_tokens":8,"cost":0.00000016}}
+```
+</CodeGroup>
+
+GoModel edits the body's bytes: only the usage object changes (with markups, the provider's cost fields listed under *Upstream costs* are removed too), and every other member keeps its order, escaping, formatting and precision. A buffered response also carries the same rounded value in two headers, the only channel for answers without a usage object (audio, most images):
+
+```http
+X-GoModel-Cost: 0.00000542
+X-GoModel-Cost-Currency: USD
+```
+
+### Streamed responses
+
+A stream sends its headers before the cost is known, so it carries the cost in its events only: `usage.cost` is added to the usage object of each event that carries usage, normally the one with the final token counts. Each event is relayed as soon as it is complete, when its blank line arrives; only the event still arriving is held.
+
+<CodeGroup>
+```text Chat Completions
+data: {"id":"chatcmpl-1","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":271,"completion_tokens":12,"total_tokens":283,"cost":0.00000542}}
+```
+
+```text Responses
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","usage":{"input_tokens":271,"output_tokens":12,"total_tokens":283,"cost":0.00000542}}}
+```
+
+```text Anthropic Messages
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":12,"cost":0.00000542}}
+```
+</CodeGroup>
+
+| Endpoint               | Event                                         | Member                |
+| ---------------------- | --------------------------------------------- | --------------------- |
+| `/v1/chat/completions` | the usage chunk                               | `usage.cost`          |
+| `/v1/responses`        | `response.completed` or `response.incomplete` | `response.usage.cost` |
+| `/v1/messages`         | `message_delta`                               | `usage.cost`          |
+
+Every other event passes through unchanged, unless it holds a cost field that is removed (see *Upstream costs* below). A provider that reports usage on several chunks gets `usage.cost` on each of them. The value is cumulative for the request so far, like the token counts in the same object: use the last one, and never add them up. The last one is the cost on the usage row. A stream without usage carries no cost: GoModel asks providers for usage by default (`ENFORCE_RETURNING_USAGE_DATA`).
+
+### Unknown is not zero
+
+A model without pricing has an unknown cost: the response carries no `usage.cost` and no header, in every mode. `0` always means a priced request that cost nothing.
+
+| Request | Markups off | Markups on |
+| ------- | ----------- | ---------- |
+| Priced | `total_cost` | `billed_cost` |
+| Pricing unknown | none | none |
+| `billable: false` provider, priced | `total_cost` | `0` |
+| `billable: false` provider, pricing unknown | none | none |
+| Cache hit, priced | `0` | `billed_cost` with `bill_cache_hits`, `0` without |
+| Cache hit, pricing unknown | none | none |
+
+**Response-cache hits** (`X-Cache: HIT`) call no provider, so their provider cost is `0`. Their usage row still records what the cached answer would have cost (`total_cost`), which is where the dashboard's savings come from; that is not what the client spent. The cache stores answers without the cost, so a hit carries its own.
+
+### Upstream costs
+
+An upstream may report its own `usage.cost`: OpenRouter does, and so does another GoModel. With the setting on, `usage.cost` belongs to this gateway, and an upstream's value is never presented as its own:
+
+- Every usage object GoModel reads ends up with exactly one `cost`, this gateway's, or none when that is unknown. Every upstream `cost` member is removed first, in any letter case, spelled with escapes, or repeated, so a parser that keeps the first or the last duplicate reads the same value.
+- GoModel reads three usage objects, in a buffered body and in a stream event alike: the top-level `usage`, `response.usage` and `message.usage`. The cost is added to `usage` and `response.usage`; `message.usage` (Anthropic's `message_start`) only loses members. A usage object nested anywhere else is not edited.
+- With markups enabled, every field GoModel knows a provider reports its cost in is removed too, all duplicates and case variants included, so a reseller's customer learns neither the provider cost nor the markup:
+
+  | Field | Where | Reported by |
+  | ----- | ----- | ----------- |
+  | `cost_details` | usage object | OpenRouter (for example `upstream_inference_cost`) |
+  | `cost_in_usd_ticks` | usage object | xAI |
+  | `cost` | root of the response or event, beside `usage` | Eden AI |
+  | `cost`, `cost_details`, `cost_in_usd_ticks` | `usage.raw_usage`, where an embeddings response and some streams carry provider usage fields | the providers above |
+
+  These are exactly the fields GoModel reads a provider's cost from for the usage log: both use one list, so a field GoModel learns to read is removed as well. With markups off they pass through exactly as received. GoModel never adds any of them.
+- **A cost field GoModel does not know cannot be removed.** A provider that reports what a request cost under another name or in another place is relayed with it, with or without markups. Before reselling a provider that is not in the table, check what its responses contain.
+- Every `X-GoModel-Cost` and `X-GoModel-Cost-Currency` header from an upstream, in any letter case, is dropped; a buffered response then carries this gateway's.
+- An upstream answer with a `Content-Encoding` other than `identity` is refused with `502`. GoModel asks upstreams for no encoding and decodes gzip itself, so such an answer was sent unasked and cannot be read or cleaned.
+
+With the setting off, responses are exactly what they were without it, an upstream's `usage.cost`, `cost_details` and cost headers included.
+
+### Coverage and limits
+
+| Endpoint | Buffered | Streamed |
+| -------- | -------- | -------- |
+| `/v1/chat/completions`, `/v1/responses`, `/v1/messages` | `usage.cost` and headers | `usage.cost` |
+| `/v1/embeddings` | `usage.cost` and headers | — |
+| `/v1/images/generations`, `/v1/images/edits`, `/v1/decisions`, `/v1/systemone` | headers, and `usage.cost` when the answer has a usage object | — |
+| `/v1/audio/*` | headers | none: a relayed audio stream or streamed transcript is priced after it was sent |
+| `/p/{provider}/...` | headers and `usage.cost`, for JSON answers GoModel can price | `usage.cost`, for events with OpenAI or Anthropic usage |
+
+**What is buffered.** To price it before it answers, GoModel reads a relayed JSON answer that is a single JSON object (`/p/{provider}/...`, `/v1/decisions`, a natively forwarded `/v1/messages`) in full before it sends the first byte, instead of relaying it as it arrives. Nothing else is buffered:
+
+- A relayed JSON answer that is not a single object, such as the JSON array Gemini's `streamGenerateContent` sends piece by piece without `alt=sse`, is relayed as it arrives and as it is. It is sent before it could be priced, so it carries no header and no `usage.cost`, and nothing inside it is edited: a cost member in such an array is not removed, with or without markups. No provider GoModel reads costs from answers this way.
+- In a JSON body only a usage object is held back while it is rewritten, from its opening to its closing brace, up to 64 MiB. (With markups, so are the few bytes between two top-level members, until the name of the second is read.) A larger usage object is relayed as it is: it gets no cost and keeps every member the upstream put in it.
+- A stream is relayed event by event. An event ends at its blank line whether its lines end in LF, CRLF or a bare CR. Only streams framed with LF or CRLF, which is what providers send, are priced; a stream framed another way loses upstream costs but carries none.
+
+The remaining limits:
+
+- A relayed JSON object over 8 MiB is relayed as it arrives, unpriced: it carries no header and no `usage.cost`, and an upstream's costs are still removed.
+- A stream event over 64 MiB is relayed unread, so it gets no cost and keeps whatever cost fields the upstream put in it. No provider sends usage in events that large.
+- Only well-formed JSON is cleaned. An event whose payload does not parse, or a body cut off inside its usage object, is relayed as received.
+
+Not covered: realtime sessions (many responses per connection), batches, files and conversations (a batch's `usage` is its own), and MCP tool calls. Model calls the gateway makes itself while serving a request, such as an LLM guardrail, are recorded as their own usage rows and are not part of the returned cost. A workflow with usage tracking turned off returns none.
+
 ## Dashboard totals
 
 - **Estimated Cost** — spend on live provider requests; cache hits are excluded.

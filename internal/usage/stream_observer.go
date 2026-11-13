@@ -23,6 +23,7 @@ type StreamUsageObserver struct {
 	authKeyID       string
 	labels          []string
 	rewriteSaved    int
+	costReport      *CostReport
 	closed          bool
 }
 
@@ -93,6 +94,16 @@ func (o *StreamUsageObserver) SetRewriteTokensSaved(tokensSaved int) {
 	o.rewriteSaved = tokensSaved
 }
 
+// SetCostReport makes the observer report the cost of the usage it has seen
+// so far each time an event adds to it, so a stream can carry its cost in the
+// event that carries its final usage.
+func (o *StreamUsageObserver) SetCostReport(report *CostReport) {
+	if o == nil {
+		return
+	}
+	o.costReport = report
+}
+
 var usageKeyLiteral = []byte(`"usage"`)
 
 // HasUsageObject reports whether a raw SSE JSON payload contains a "usage"
@@ -135,6 +146,7 @@ func (o *StreamUsageObserver) OnJSONEvent(chunk map[string]any) {
 		return
 	}
 	o.cachedEntry = o.mergeWithCachedEntry(entry)
+	o.costReport.Record(o.logger, o.cachedEntry)
 }
 
 // mergeWithCachedEntry folds usage from an earlier event into the latest one.
@@ -344,36 +356,25 @@ func (o *StreamUsageObserver) pricingProvider() string {
 // on, so harvesting it for everyone adds a raw-usage member without changing
 // any other provider's cost math.
 func copyRootLevelCost(rawData map[string]any, chunk map[string]any) {
-	if _, exists := rawData["cost"]; exists {
-		return
-	}
-	// A NaN fails this comparison and is dropped, matching how
-	// copyExtendedUsageFields screens the usage-level member.
-	if value, ok := numericFloat(chunk["cost"]); ok && value >= 0 {
-		rawData["cost"] = value
-	}
+	copyProviderCosts(rawData, chunk, true)
 }
 
+// copyExtendedUsageFields copies the usage members without a typed home. The
+// provider-reported costs among them are the ones providerCostFields lists.
 func copyExtendedUsageFields(rawData map[string]any, usageMap map[string]any) {
+	copyProviderCosts(rawData, usageMap, false)
 	for key, value := range usageMap {
 		switch key {
 		case "prompt_tokens", "completion_tokens", "total_tokens", "input_tokens", "output_tokens",
 			"prompt_tokens_details", "completion_tokens_details", "input_tokens_details", "output_tokens_details":
 			continue
-		case "cost", "cost_in_usd_ticks":
-			if numericValue, ok := numericFloat(value); ok && numericValue >= 0 {
-				rawData[key] = numericValue
-			}
-			continue
-		case "cost_details":
-			if details, ok := nestedUsageMap(value); ok {
-				rawData[key] = details
-			}
-			continue
 		case "is_byok":
 			if boolValue, ok := value.(bool); ok {
 				rawData[key] = boolValue
 			}
+			continue
+		}
+		if isProviderCostMember(key) {
 			continue
 		}
 		if numericValue, ok := numericUsageValue(value); ok && numericValue > 0 {

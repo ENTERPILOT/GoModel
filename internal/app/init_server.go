@@ -203,6 +203,7 @@ func (b *bootstrap) initServerConfig() error {
 		serverCfg.UsageSummarizer = b.usageReader
 	}
 
+	applyResponseCost(serverCfg, appCfg)
 	applyExtensions(serverCfg, b.cfg.Extensions)
 	if app.telemetry != nil {
 		// Outermost, so the HTTP server span also covers extension middleware.
@@ -344,6 +345,14 @@ func (b *bootstrap) initServer() error {
 
 // applyExtensions snapshots a registered extension set into the server
 // configuration. A nil registry leaves the config untouched.
+// applyResponseCost sets whether responses carry their cost, and which: the
+// billed cost exactly when markups are enabled, so a reseller's customer never
+// sees the provider cost, and the provider cost otherwise.
+func applyResponseCost(serverCfg *server.Config, appCfg *config.Config) {
+	serverCfg.ResponseCostEnabled = appCfg.Usage.ResponseCostEnabled
+	serverCfg.ResponseCostBilled = appCfg.Pricing.MarkupsEnabled
+}
+
 func applyExtensions(serverCfg *server.Config, extensions *ext.Registry) {
 	if extensions == nil {
 		return

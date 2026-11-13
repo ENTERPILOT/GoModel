@@ -39,6 +39,7 @@ func (o *InferenceOrchestrator) logUsage(
 		entry.AuthKeyID = core.GetAuthKeyID(ctx)
 		entry.Labels = core.RequestLabelsFromContext(ctx)
 		usage.ApplyRewriteSavings(entry, core.RewriteTokensSavedFromContext(ctx), pricing)
+		usage.ReportCost(ctx, o.usageLogger, entry)
 		o.usageLogger.Write(entry)
 	}
 }

@@ -129,5 +129,6 @@ func (s *modelCallService) logUsage(ctx context.Context, route modelCallRoute, e
 	entry.SessionID = core.SessionIDFromContext(ctx)
 	entry.AuthKeyID = core.GetAuthKeyID(ctx)
 	entry.Labels = core.RequestLabelsFromContext(ctx)
+	usage.ReportCost(ctx, s.usageLogger, entry)
 	s.usageLogger.Write(entry)
 }

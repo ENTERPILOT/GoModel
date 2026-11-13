@@ -16,6 +16,15 @@ type UsageConfig struct {
 	// Default: true
 	PricingRecalculationEnabled bool `yaml:"pricing_recalculation_enabled" env:"USAGE_PRICING_RECALCULATION_ENABLED"`
 
+	// ResponseCostEnabled returns the cost GoModel calculated for a request to
+	// its caller, in OpenRouter's shape: usage.cost in the response's usage
+	// objects, buffered and streamed, and the X-GoModel-Cost headers on
+	// buffered responses. It is the billed cost when
+	// pricing.markups_enabled is on, the provider cost otherwise. Turn it on
+	// when clients account for their own spend per request.
+	// Default: false
+	ResponseCostEnabled bool `yaml:"response_cost_enabled" env:"USAGE_RESPONSE_COST_ENABLED"`
+
 	// BufferSize is the number of usage entries to buffer before flushing
 	// Default: 1000
 	BufferSize int `yaml:"buffer_size" env:"USAGE_BUFFER_SIZE"`

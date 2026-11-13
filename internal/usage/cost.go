@@ -600,7 +600,7 @@ func openRouterCreditCost(rawData map[string]any, providerType string) (CostResu
 	if !isOpenRouterProvider(providerType) {
 		return CostResult{}, false
 	}
-	total, ok := extractFloat(rawData, "cost")
+	total, ok := extractFloat(rawData, providerCostMember)
 	if !ok || !isFiniteCost(total) || total < 0 {
 		return CostResult{}, false
 	}
@@ -626,7 +626,7 @@ func xaiTicksCost(rawData map[string]any, providerType string) (CostResult, bool
 	if !isXAIProvider(providerType) {
 		return CostResult{}, false
 	}
-	ticks, ok := extractFloat(rawData, "cost_in_usd_ticks")
+	ticks, ok := extractFloat(rawData, providerCostTicksMember)
 	if !ok || !isFiniteCost(ticks) || ticks < 0 {
 		return CostResult{}, false
 	}
@@ -655,7 +655,7 @@ func edenAICost(rawData map[string]any, providerType string) (CostResult, bool) 
 	if !isEdenAIProvider(providerType) {
 		return CostResult{}, false
 	}
-	total, ok := extractFloat(rawData, "cost")
+	total, ok := extractFloat(rawData, providerCostMember)
 	if !ok || !isFiniteCost(total) || total < 0 {
 		return CostResult{}, false
 	}
@@ -685,7 +685,7 @@ func isProviderReportedCostSource(source string) bool {
 }
 
 func openRouterCreditCostSplit(rawData map[string]any, total float64) (float64, float64, bool) {
-	details, ok := nestedUsageMap(rawData["cost_details"])
+	details, ok := nestedUsageMap(rawData[providerCostDetailsMember])
 	if !ok {
 		return 0, 0, false
 	}
