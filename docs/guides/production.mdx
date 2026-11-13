@@ -178,6 +178,11 @@ volume, restrict access, and classify backups accordingly.
 - **Managed API keys** are stored as a SHA-256 hash of a high-entropy random
   secret, never recoverably. The plaintext is shown once at creation. This is
   deliberately different from provider credentials.
+- **Audit entries identify a client key by a keyed fingerprint.** `api_key_hash`
+  is the first 16 hex characters of an HMAC-SHA256 of the presented bearer
+  token, keyed with a random secret that is generated once per deployment and
+  kept in the database (`audit_api_key_hash_secret` in `runtime_settings`). It
+  is stable within a deployment and cannot be recomputed from a key alone.
 - **Client credential headers are redacted before they are persisted.** With
   `LOGGING_LOG_HEADERS=true`, `Authorization`, `x-api-key`, `Cookie`, and the
   other credential headers are replaced with `[REDACTED]` on the write path, so

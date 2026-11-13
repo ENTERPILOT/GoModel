@@ -6,6 +6,7 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
@@ -78,7 +79,7 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 
 			// Hash API key if present (for identification without exposing the key)
 			if authHeader := req.Header.Get("Authorization"); authHeader != "" {
-				entry.Data.APIKeyHash = hashAPIKey(authHeader)
+				entry.Data.APIKeyHash = hashAPIKey(cfg.APIKeyHashSecret, authHeader)
 			}
 			if cfg.LogHeaders {
 				PopulateRequestHeaders(entry, req.Header)
@@ -328,9 +329,17 @@ func extractHeaders(headers map[string][]string) map[string]string {
 	return result
 }
 
-// hashAPIKey creates a short hash of the API key for identification.
-// Returns first APIKeyHashPrefixLength hex characters of SHA256 hash.
-func hashAPIKey(authHeader string) string {
+// hashAPIKey creates a short fingerprint of the API key for identification:
+// the first APIKeyHashPrefixLength hex characters of HMAC-SHA256 keyed with
+// the deployment's secret (Config.APIKeyHashSecret). The header is hashed
+// before authentication, so it may hold any credential a client sends,
+// including the master key; the secret keeps the fingerprint from being
+// recomputed by someone who can only read audit entries. Without a secret no
+// fingerprint is recorded.
+func hashAPIKey(secret, authHeader string) string {
+	if secret == "" {
+		return ""
+	}
 	// Extract token from "Bearer <token>"
 	token := strings.TrimPrefix(authHeader, "Bearer ")
 	token = strings.TrimSpace(token)
@@ -338,8 +347,9 @@ func hashAPIKey(authHeader string) string {
 		return ""
 	}
 
-	hash := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(hash[:APIKeyHashPrefixLength/2])
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(token))
+	return hex.EncodeToString(mac.Sum(nil)[:APIKeyHashPrefixLength/2])
 }
 
 func auditEnabledForContext(ctx context.Context) bool {

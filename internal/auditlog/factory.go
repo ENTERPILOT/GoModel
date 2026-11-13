@@ -2,13 +2,16 @@ package auditlog
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/runtimesettings"
 	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
@@ -54,7 +57,30 @@ func New(ctx context.Context, cfg *config.Config, store storage.Storage) (*Resul
 	if err != nil {
 		return nil, err
 	}
-	return &Result{Logger: NewLogger(logStore, buildLoggerConfig(cfg.Logging))}, nil
+	loggerCfg := buildLoggerConfig(cfg.Logging)
+	loggerCfg.APIKeyHashSecret = loadAPIKeyHashSecret(ctx, store)
+	return &Result{Logger: NewLogger(logStore, loggerCfg)}, nil
+}
+
+// apiKeyHashSecretKey is where the secret that keys LogData.APIKeyHash is
+// kept: in the deployment's runtime_settings table, next to the install
+// identifier.
+const apiKeyHashSecretKey = "audit_api_key_hash_secret" //nolint:gosec // G101: settings key name, not a credential.
+
+// loadAPIKeyHashSecret returns the deployment's secret, creating it on first
+// use. The insert is atomic, so replicas sharing a database agree on one
+// value and give the same key the same fingerprint. When the secret cannot be
+// loaded the fingerprint is left out rather than computed without a key.
+func loadAPIKeyHashSecret(ctx context.Context, store storage.Storage) string {
+	settings, err := runtimesettings.NewStore(ctx, store)
+	if err == nil {
+		var secret string
+		if secret, err = settings.SetDefault(ctx, apiKeyHashSecretKey, rand.Text()); err == nil {
+			return secret
+		}
+	}
+	slog.Warn("audit entries will not carry api_key_hash: its secret could not be loaded", "error", err)
+	return ""
 }
 
 // createLogStore creates the appropriate LogStore for the given storage backend.
