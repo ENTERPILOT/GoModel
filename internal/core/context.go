@@ -73,6 +73,10 @@ const (
 	// authenticated credential (a managed auth key). Empty means unrestricted.
 	credentialAllowedModelsKey contextKey = "credential-allowed-models" //nolint:gosec // G101: context key name, not a credential.
 
+	// credentialAllowedMCPKey stores the MCP allowlist bound to the
+	// authenticated credential (a managed auth key). Empty means unrestricted.
+	credentialAllowedMCPKey contextKey = "credential-allowed-mcp" //nolint:gosec // G101: context key name, not a credential.
+
 	// pluginUpstreamHeadersKey stores the headers prompt-phase plugins wrote
 	// to Exchange.Headers.Upstream. The provider client merges them into every
 	// outgoing call, minus credential headers the provider itself sets.
@@ -236,6 +240,23 @@ func GetCredentialAllowedModels(ctx context.Context) []string {
 		}
 	}
 	return nil
+}
+
+// WithCredentialAllowedMCP returns a new context carrying the MCP allowlist
+// ("server/*" or "server/tool" selectors) bound to the authenticated
+// credential. An empty list clears it.
+func WithCredentialAllowedMCP(ctx context.Context, allowed []string) context.Context {
+	if len(allowed) == 0 {
+		return context.WithValue(ctx, credentialAllowedMCPKey, []string(nil))
+	}
+	return context.WithValue(ctx, credentialAllowedMCPKey, allowed)
+}
+
+// GetCredentialAllowedMCP retrieves the credential-bound MCP allowlist. Nil
+// means the credential does not restrict MCP servers or tools.
+func GetCredentialAllowedMCP(ctx context.Context) []string {
+	allowed, _ := ctx.Value(credentialAllowedMCPKey).([]string)
+	return allowed
 }
 
 // WithEffectiveUserPath returns a new context with an effective user path override attached.

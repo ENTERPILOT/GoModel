@@ -73,6 +73,17 @@ func (s *authKeyTestStore) UpdateAllowedModels(_ context.Context, id string, all
 	return nil
 }
 
+func (s *authKeyTestStore) UpdateAllowedMCP(_ context.Context, id string, allowedMCP []string, now time.Time) error {
+	key, ok := s.keys[id]
+	if !ok {
+		return authkeys.ErrNotFound
+	}
+	key.AllowedMCP = allowedMCP
+	key.UpdatedAt = now.UTC()
+	s.keys[id] = key
+	return nil
+}
+
 func (s *authKeyTestStore) UpdateDashboardAccess(_ context.Context, id string, allowed bool, now time.Time) error {
 	key, ok := s.keys[id]
 	if !ok {
@@ -244,6 +255,42 @@ func TestUpdateAuthKeyPassthroughAccess(t *testing.T) {
 	}
 }
 
+func TestUpdateAuthKeyAllowedMCP(t *testing.T) {
+	h := newAuthKeyHandler(t, newAuthKeyTestStore())
+	issued := createAuthKey(t, h, `{"name":"agent","allowed_mcp":["exa"," github/create_issue ","exa/*"]}`)
+	assert.Equal(t, []string{"exa/*", "github/create_issue"}, issued.AllowedMCP, "selectors are canonicalized and de-duplicated")
+
+	c, rec := echotest.Post(t, "/admin/auth-keys", `{"name":"bad","allowed_mcp":["exa/"]}`)
+	require.NoError(t, h.CreateAuthKey(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+
+	update := func(id, body string) *httptest.ResponseRecorder {
+		c, rec := echotest.Request(t, http.MethodPut, "/admin/auth-keys/"+id+"/allowed-mcp", body, echotest.WithPathValue("id", id))
+		require.NoError(t, h.UpdateAuthKeyAllowedMCP(c))
+		return rec
+	}
+
+	rec = update(issued.ID, `{"allowed_mcp":["exa/web_search_exa"]}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"exa/web_search_exa"}, echotest.Decode[authkeys.View](t, rec).AllowedMCP)
+
+	rec = update(issued.ID, `{"allowed_mcp":["Not A Slug"]}`)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+
+	rec = update("missing", `{"allowed_mcp":["exa"]}`)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+
+	// Omitted or null values must be rejected, not treated as a clear.
+	for _, body := range []string{`{}`, `{"allowed_mcp":null}`} {
+		rec = update(issued.ID, body)
+		assert.Equal(t, http.StatusBadRequest, rec.Code, body)
+	}
+
+	rec = update(issued.ID, `{"allowed_mcp":[]}`)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Empty(t, echotest.Decode[authkeys.View](t, rec).AllowedMCP, "an empty list lifts the restriction")
+}
+
 func TestUpdateAuthKeyLabels(t *testing.T) {
 	h := newAuthKeyHandler(t, newAuthKeyTestStore())
 	issued := createAuthKey(t, h, `{"name":"primary","labels":["old"]}`)
@@ -355,6 +402,7 @@ func TestAuthKeyCannotUpdateItself(t *testing.T) {
 		{name: "allowed models", path: "allowed-models", body: `{"allowed_models":["openai/gpt-4o-mini"]}`, handler: h.UpdateAuthKeyAllowedModels},
 		{name: "dashboard access", path: "dashboard-access", body: `{"dashboard_access":true}`, handler: h.UpdateAuthKeyDashboardAccess},
 		{name: "passthrough access", path: "passthrough-access", body: `{"passthrough_access":false}`, handler: h.UpdateAuthKeyPassthroughAccess},
+		{name: "allowed mcp", path: "allowed-mcp", body: `{"allowed_mcp":[]}`, handler: h.UpdateAuthKeyAllowedMCP},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -423,6 +471,51 @@ func TestAuthKeyAllowedModelsMustStayWithinCaller(t *testing.T) {
 			asManagedKey(c, "caller", "/team/a", tt.callerModels...)
 			require.NoError(t, h.UpdateAuthKeyAllowedModels(c))
 			assert.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+		})
+	}
+}
+
+// A key limited to an MCP allowlist must not issue keys broader than itself.
+func TestAuthKeyAllowedMCPMustStayWithinCaller(t *testing.T) {
+	tests := []struct {
+		name       string
+		callerMCP  []string
+		body       string
+		wantStatus int
+	}{
+		{name: "unrestricted caller", body: `[]`, wantStatus: http.StatusOK},
+		{name: "same server", callerMCP: []string{"exa/*"}, body: `["exa"]`, wantStatus: http.StatusOK},
+		{name: "tool within server", callerMCP: []string{"exa/*"}, body: `["exa/web_search_exa"]`, wantStatus: http.StatusOK},
+		{name: "empty list is unrestricted", callerMCP: []string{"exa/*"}, body: `[]`, wantStatus: http.StatusForbidden},
+		{name: "server wider than tool", callerMCP: []string{"exa/web_search_exa"}, body: `["exa/*"]`, wantStatus: http.StatusForbidden},
+		{name: "other server", callerMCP: []string{"exa/*"}, body: `["github/*"]`, wantStatus: http.StatusForbidden},
+	}
+	for _, tt := range tests {
+		asCaller := func(c *echo.Context) {
+			asManagedKey(c, "caller", "/team/a")
+			c.SetRequest(c.Request().WithContext(core.WithCredentialAllowedMCP(c.Request().Context(), tt.callerMCP)))
+		}
+		t.Run(tt.name+"/create", func(t *testing.T) {
+			h := newAuthKeyHandler(t, newAuthKeyTestStore())
+			c, rec := echotest.Post(t, "/admin/auth-keys", `{"name":"child","allowed_mcp":`+tt.body+`}`)
+			asCaller(c)
+			require.NoError(t, h.CreateAuthKey(c))
+			wantStatus := tt.wantStatus
+			if wantStatus == http.StatusOK {
+				wantStatus = http.StatusCreated
+			}
+			assert.Equal(t, wantStatus, rec.Code, rec.Body.String())
+		})
+		t.Run(tt.name+"/update", func(t *testing.T) {
+			h := newAuthKeyHandler(t, newAuthKeyTestStore())
+			child := createAuthKey(t, h, `{"name":"child","user_path":"/team/a/svc","allowed_mcp":["exa/web_search_exa"]}`)
+			c, rec := echotest.Request(t, http.MethodPut, "/admin/auth-keys/"+child.ID+"/allowed-mcp", `{"allowed_mcp":`+tt.body+`}`, echotest.WithPathValue("id", child.ID))
+			asCaller(c)
+			require.NoError(t, h.UpdateAuthKeyAllowedMCP(c))
+			assert.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+			if tt.wantStatus == http.StatusForbidden {
+				assert.Contains(t, rec.Body.String(), codeAllowedMCPOutOfScope)
+			}
 		})
 	}
 }

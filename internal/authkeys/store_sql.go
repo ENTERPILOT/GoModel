@@ -25,6 +25,7 @@ var sqlTable = `CREATE TABLE IF NOT EXISTS auth_keys (
 		user_path TEXT,
 		labels ` + sqlx.TypeJSON + `,
 		allowed_models ` + sqlx.TypeJSON + `,
+		allowed_mcp ` + sqlx.TypeJSON + `,
 		dashboard_access ` + sqlx.TypeBool + ` NOT NULL DEFAULT FALSE,
 		passthrough_access ` + sqlx.TypeBool + ` NOT NULL DEFAULT TRUE,
 		redacted_value TEXT NOT NULL,
@@ -52,10 +53,11 @@ var sqlMigrations = []string{
 	`ALTER TABLE auth_keys ADD COLUMN allowed_models ` + sqlx.TypeJSON,
 	`ALTER TABLE auth_keys ADD COLUMN imported_from TEXT`,
 	`ALTER TABLE auth_keys ADD COLUMN passthrough_access ` + sqlx.TypeBool + ` NOT NULL DEFAULT TRUE`,
+	`ALTER TABLE auth_keys ADD COLUMN allowed_mcp ` + sqlx.TypeJSON,
 }
 
 const selectAuthKeyColumns = `
-	SELECT id, name, description, user_path, labels, allowed_models, dashboard_access,
+	SELECT id, name, description, user_path, labels, allowed_models, allowed_mcp, dashboard_access,
 		passthrough_access, redacted_value, secret_hash, imported_from, enabled, expires_at, deactivated_at,
 		created_at, updated_at
 	FROM auth_keys
@@ -96,15 +98,16 @@ func (s *SQLStore) List(ctx context.Context) ([]AuthKey, error) {
 func (s *SQLStore) Create(ctx context.Context, key AuthKey) error {
 	affected, err := s.db.Exec(ctx, `
 		INSERT INTO auth_keys (
-			id, name, description, user_path, labels, allowed_models, dashboard_access,
+			id, name, description, user_path, labels, allowed_models, allowed_mcp, dashboard_access,
 			passthrough_access, redacted_value, secret_hash, imported_from, enabled, expires_at,
 			deactivated_at, created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (secret_hash) DO NOTHING
 	`, key.ID, key.Name, key.Description,
 		sqlutil.NullableString(key.UserPath), sqlutil.NullableJSONStrings(key.Labels, key.ID),
 		sqlutil.NullableJSONStrings(key.AllowedModels, key.ID),
+		sqlutil.NullableJSONStrings(key.AllowedMCP, key.ID),
 		key.DashboardAccess, key.PassthroughAccess, key.RedactedValue, key.SecretHash,
 		sqlutil.NullableString(key.ImportedFrom), key.Enabled,
 		sqlutil.UnixOrNil(key.ExpiresAt), sqlutil.UnixOrNil(key.DeactivatedAt),
@@ -174,6 +177,22 @@ func (s *SQLStore) UpdateAllowedModels(ctx context.Context, id string, allowedMo
 	return nil
 }
 
+func (s *SQLStore) UpdateAllowedMCP(ctx context.Context, id string, allowedMCP []string, now time.Time) error {
+	affected, err := s.db.Exec(ctx, `
+		UPDATE auth_keys
+		SET allowed_mcp = ?,
+			updated_at = ?
+		WHERE id = ?
+	`, sqlutil.NullableJSONStrings(allowedMCP, id), now.Unix(), normalizeID(id))
+	if err != nil {
+		return fmt.Errorf("update auth key allowed mcp: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *SQLStore) UpdateDashboardAccess(ctx context.Context, id string, allowed bool, now time.Time) error {
 	affected, err := s.db.Exec(ctx, `
 		UPDATE auth_keys
@@ -229,7 +248,7 @@ func (s *SQLStore) Close() error {
 
 func scanSQLAuthKey(scanner authKeyScanner) (AuthKey, error) {
 	var key AuthKey
-	var userPath, labelsJSON, allowedModelsJSON, importedFrom *string
+	var userPath, labelsJSON, allowedModelsJSON, allowedMCPJSON, importedFrom *string
 	var expiresAt, deactivatedAt *int64
 	var createdAt, updatedAt int64
 	if err := scanner.Scan(
@@ -239,6 +258,7 @@ func scanSQLAuthKey(scanner authKeyScanner) (AuthKey, error) {
 		&userPath,
 		&labelsJSON,
 		&allowedModelsJSON,
+		&allowedMCPJSON,
 		&key.DashboardAccess,
 		&key.PassthroughAccess,
 		&key.RedactedValue,
@@ -262,6 +282,9 @@ func scanSQLAuthKey(scanner authKeyScanner) (AuthKey, error) {
 	}
 	if allowedModelsJSON != nil {
 		key.AllowedModels = sqlutil.StringsFromJSON(*allowedModelsJSON, key.ID)
+	}
+	if allowedMCPJSON != nil {
+		key.AllowedMCP = sqlutil.StringsFromJSON(*allowedMCPJSON, key.ID)
 	}
 	key.ExpiresAt = sqlutil.TimeFromUnixPtr(expiresAt)
 	key.DeactivatedAt = sqlutil.TimeFromUnixPtr(deactivatedAt)

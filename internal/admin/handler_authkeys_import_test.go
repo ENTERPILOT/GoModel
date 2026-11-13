@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/authkeys"
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
 )
@@ -155,4 +156,34 @@ func TestImportAuthKeyHonorsCallerRestrictions(t *testing.T) {
 		rec := importAs("caller", []string{"openai/"}, body("sk-third-token-qrst", `["openai/gpt-4o-mini"]`))
 		assert.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
 	})
+}
+
+// An MCP-restricted caller must not import a token with broader MCP access;
+// a new import keeps the allowlist it was given.
+func TestImportAuthKeyHonorsCallerMCPRestrictions(t *testing.T) {
+	service, err := authkeys.NewService(newAuthKeyTestStore())
+	require.NoError(t, err)
+	h := NewHandler(nil, nil, WithAuthKeys(service))
+
+	importAs := func(token, allowedMCP string) *httptest.ResponseRecorder {
+		body := `{"name":"imported","imported_from":"litellm","secret_hash":"` + hexOf(token) + `"`
+		if allowedMCP != "" {
+			body += `,"allowed_mcp":` + allowedMCP
+		}
+		c, rec := echotest.Post(t, "/admin/auth-keys/import", body+`}`)
+		asManagedKey(c, "caller", "")
+		c.SetRequest(c.Request().WithContext(core.WithCredentialAllowedMCP(c.Request().Context(), []string{"exa/*"})))
+		require.NoError(t, h.ImportAuthKey(c))
+		return rec
+	}
+
+	for _, allowedMCP := range []string{"", `[]`, `["github/*"]`} {
+		rec := importAs("sk-broad-token-"+allowedMCP, allowedMCP)
+		assert.Equal(t, http.StatusForbidden, rec.Code, allowedMCP)
+		assert.Contains(t, rec.Body.String(), codeAllowedMCPOutOfScope)
+	}
+
+	rec := importAs("sk-narrow-token-abcd", `["exa/web_search_exa"]`)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	assert.Equal(t, []string{"exa/web_search_exa"}, echotest.Decode[authkeys.View](t, rec).AllowedMCP)
 }

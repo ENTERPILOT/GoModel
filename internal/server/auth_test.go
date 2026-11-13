@@ -37,6 +37,7 @@ type mockAuthenticator struct {
 	tokenPath      map[string]string
 	tokenLabels    map[string][]string
 	tokenAllowed   map[string][]string
+	tokenMCP       map[string][]string
 	tokenDashboard map[string]bool
 	// tokenPassthrough lists keys granted passthrough access.
 	tokenPassthrough map[string]bool
@@ -60,6 +61,7 @@ func (m mockAuthenticator) Authenticate(_ context.Context, token string) (authke
 		UserPath:          m.tokenPath[token],
 		Labels:            m.tokenLabels[token],
 		AllowedModels:     m.tokenAllowed[token],
+		AllowedMCP:        m.tokenMCP[token],
 		DashboardAccess:   m.tokenDashboard[token],
 		PassthroughAccess: m.tokenPassthrough[token],
 	}, nil
@@ -96,6 +98,36 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyAllowedModelsReachContext(t *
 	c.SetRequest(c.Request().WithContext(core.WithCredentialAllowedModels(c.Request().Context(), []string{"stale/"})))
 	require.NoError(t, handler(c))
 	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestAuthMiddlewareWithAuthenticator_ManagedKeyAllowedMCPReachesContext(t *testing.T) {
+	tests := []struct {
+		name    string
+		allowed []string
+		want    []string
+	}{
+		{name: "restricted key", allowed: []string{"exa/*", "github/create_issue"}, want: []string{"exa/*", "github/create_issue"}},
+		{name: "unrestricted key clears a stale allowlist", allowed: nil, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []string
+			handler := AuthMiddlewareWithAuthenticator("", mockAuthenticator{
+				enabled:   true,
+				tokenToID: map[string]string{"sk_gom_token": "key-123"},
+				tokenMCP:  map[string][]string{"sk_gom_token": tt.allowed},
+			}, nil)(func(c *echo.Context) error {
+				got = core.GetCredentialAllowedMCP(c.Request().Context())
+				return c.String(http.StatusOK, "ok")
+			})
+
+			c, rec := echotest.Get(t, "/", echotest.WithHeader("Authorization", "Bearer sk_gom_token"))
+			c.SetRequest(c.Request().WithContext(core.WithCredentialAllowedMCP(c.Request().Context(), []string{"stale/*"})))
+			require.NoError(t, handler(c))
+			require.Equal(t, http.StatusOK, rec.Code)
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }
 
 func TestAuthMiddleware(t *testing.T) {
