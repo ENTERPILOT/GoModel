@@ -30,6 +30,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers/meta"
 	"github.com/enterpilot/gomodel/internal/providers/minimax"
 	"github.com/enterpilot/gomodel/internal/providers/mistral"
+	"github.com/enterpilot/gomodel/internal/providers/oauthlogin"
 	"github.com/enterpilot/gomodel/internal/providers/ollama"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
 	"github.com/enterpilot/gomodel/internal/providers/opencodego"
@@ -83,6 +84,7 @@ func defaultProviderFactory(cfg *config.Config) *providers.ProviderFactory {
 	factory.Add(meta.Registration)
 	factory.Add(minimax.Registration)
 	factory.Add(mistral.Registration)
+	factory.Add(oauthlogin.Registration)
 	factory.Add(ollama.Registration)
 	factory.Add(opencodego.Registration)
 	factory.Add(sglang.Registration)

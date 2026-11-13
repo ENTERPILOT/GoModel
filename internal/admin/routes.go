@@ -56,6 +56,8 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.GET("/provider-credentials/types", h.ProviderCredentialTypes, global)
 	g.PUT("/provider-credentials", h.UpsertProviderCredential, global)
 	g.DELETE("/provider-credentials/:name", h.DeleteProviderCredential, global)
+	g.POST("/provider-credentials/:name/oauth/start", h.StartOAuthLogin, global)
+	g.GET("/provider-credentials/:name/oauth", h.GetOAuthLogin, global)
 
 	g.GET("/budgets", h.ListBudgets)
 	g.PUT("/budgets", h.UpsertBudget)
