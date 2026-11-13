@@ -106,7 +106,9 @@ func okPassthroughResponse() *core.PassthroughResponse {
 }
 
 // The passthrough endpoint is the decoded request path, so encoded dot
-// segments, "?" and "#" would otherwise reshape the upstream URL.
+// segments, "?" and "#" would otherwise reshape the upstream URL. So could a
+// path character that is still encoded after that decode, or a backslash
+// standing in for a slash; other encoded characters pass.
 func TestProviderPassthroughRoute_RejectsEndpointsThatEscapeTheBasePath(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -123,6 +125,23 @@ func TestProviderPassthroughRoute_RejectsEndpointsThatEscapeTheBasePath(t *testi
 		{name: "dot-dot after v1 alias", target: "/p/openai/v1/%2e%2e/admin", wantStatus: http.StatusBadRequest},
 		{name: "encoded question mark", target: "/p/openai/files/x%3Finjected=1", wantStatus: http.StatusBadRequest},
 		{name: "encoded hash", target: "/p/openai/files/x%23frag", wantStatus: http.StatusBadRequest},
+		{name: "encoded space and colon in an id", target: "/p/openai/models/ft%3Agpt-4o%3Aorg%20a", wantStatus: http.StatusOK, wantEndpoint: "models/ft:gpt-4o:org a"},
+		{name: "double-encoded space and colon stay encoded", target: "/p/openai/files/a%2520b%253Ac", wantStatus: http.StatusOK, wantEndpoint: "files/a%20b%3Ac"},
+		{name: "double-encoded percent sign", target: "/p/openai/files/100%2525", wantStatus: http.StatusOK, wantEndpoint: "files/100%25"},
+		{name: "trailing percent sign", target: "/p/openai/files/50%25", wantStatus: http.StatusOK, wantEndpoint: "files/50%"},
+		{name: "backslash inside a name", target: "/p/openai/files/a%5Cb", wantStatus: http.StatusOK, wantEndpoint: `files/a\b`},
+		{name: "double-encoded dot-dot segments", target: "/p/openai/%252e%252e/%252e%252e/admin", wantStatus: http.StatusBadRequest},
+		{name: "double-encoded dot-dot in upper-case hex", target: "/p/openai/%252E%252E/admin", wantStatus: http.StatusBadRequest},
+		{name: "double-encoded dot-dot in mixed-case hex", target: "/p/openai/%252e%252E/admin", wantStatus: http.StatusBadRequest},
+		{name: "double-encoded single dot segment", target: "/p/openai/files/%252e/abc", wantStatus: http.StatusBadRequest},
+		{name: "double-encoded dot inside a name", target: "/p/openai/files/a%252eb", wantStatus: http.StatusBadRequest},
+		{name: "double-encoded slashes around dot-dot", target: "/p/openai/..%252f..%252fadmin", wantStatus: http.StatusBadRequest},
+		{name: "double-encoded slash in upper-case hex", target: "/p/openai/files%252Fabc", wantStatus: http.StatusBadRequest},
+		{name: "double-encoded backslash", target: "/p/openai/files%255cabc", wantStatus: http.StatusBadRequest},
+		{name: "double-encoded backslash in upper-case hex", target: "/p/openai/files%255Cabc", wantStatus: http.StatusBadRequest},
+		{name: "double-encoded dot-dot after v1 alias", target: "/p/openai/v1/%252e%252e/admin", wantStatus: http.StatusBadRequest},
+		{name: "encoded backslashes around dot-dot", target: "/p/openai/..%5c..%5cadmin", wantStatus: http.StatusBadRequest},
+		{name: "encoded backslash before dot-dot", target: "/p/openai/files%5c..", wantStatus: http.StatusBadRequest},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
