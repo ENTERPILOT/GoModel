@@ -263,8 +263,9 @@ support, not every individual model capability exposed by an upstream provider.
   capabilities), and finally a conservative name check for models still
   unclassified: IDs containing `embed` or matching well-known embedding
   families (`bge`, `e5`, `gte`, `minilm`) are categorized as embedding models,
-  and IDs containing `rerank` as reranking models — namespaced IDs like
-  `org/model` are checked by their final path segment. Declare operator
+  IDs containing `rerank` as reranking models, and IDs with a `tts`,
+  `whisper`, `transcribe`, `asr`, or `stt` token as audio models — namespaced
+  IDs like `org/model` are checked by their final path segment. Declare operator
   metadata only when a model stays unclassified after all of this. Categories
   affect dashboard grouping only; `/v1/embeddings`
   routes to any model the provider serves regardless of category.
