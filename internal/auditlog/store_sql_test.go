@@ -241,8 +241,8 @@ func TestModelIndexesMatchReaderExpressions(t *testing.T) {
 		t.Run(string(dialect), func(t *testing.T) {
 			reader := readerDialectFor(dialect)
 			want := []auditIndex{
-				{name: "idx_audit_requested_model_timestamp", columns: reader.requestedModel + ", timestamp"},
-				{name: "idx_audit_resolved_model_timestamp", columns: reader.resolvedModel + ", timestamp"},
+				{name: "idx_audit_requested_model_timestamp", columns: reader.requestedModel + ", timestamp", label: "audit requested model"},
+				{name: "idx_audit_resolved_model_timestamp", columns: reader.resolvedModel + ", timestamp", label: "audit resolved model"},
 			}
 			require.Equal(t, want, modelIndexes(dialect))
 		})

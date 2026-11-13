@@ -250,3 +250,20 @@ func TestBackgroundIndexBuilderTryDrop(t *testing.T) {
 	exists, _ = indexState(t, pool)
 	assert.False(t, exists)
 }
+
+// Only a lock another replica holds is worth waiting on. A lock that cannot
+// be asked for at all is a failed attempt, or BuildOnce would poll a broken
+// connection for as long as it stays broken.
+func TestBackgroundIndexBuilderBuildOnceDoesNotWaitOnALockError(t *testing.T) {
+	pool := newBackgroundIndexPool(t)
+	if pool == nil {
+		return
+	}
+	pool.Close()
+
+	builder := BackgroundIndexBuilder{Pool: pool, LockKey: testIndexLockKey, Retry: 20 * time.Millisecond}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	assert.False(t, builder.BuildOnce(ctx, testIndex))
+	require.NoError(t, ctx.Err(), "it returned without waiting")
+}

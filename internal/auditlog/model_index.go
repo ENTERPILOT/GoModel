@@ -5,10 +5,12 @@ import (
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
-// auditIndex is one audit_logs index: its name and the column list it covers.
+// auditIndex is one audit_logs index: its name, the column list it covers and
+// what log messages call it.
 type auditIndex struct {
 	name    string
 	columns string
+	label   string
 }
 
 // legacyRequestedModelIndex is the single-column requested_model index the
@@ -26,8 +28,8 @@ func modelIndexes(dialect sqlx.Dialect) []auditIndex {
 		requested, resolved = `requested_model COLLATE "C"`, `resolved_model COLLATE "C"`
 	}
 	return []auditIndex{
-		{name: "idx_audit_requested_model_timestamp", columns: requested + ", timestamp"},
-		{name: "idx_audit_resolved_model_timestamp", columns: resolved + ", timestamp"},
+		{name: "idx_audit_requested_model_timestamp", columns: requested + ", timestamp", label: "audit requested model"},
+		{name: "idx_audit_resolved_model_timestamp", columns: resolved + ", timestamp", label: "audit resolved model"},
 	}
 }
 
@@ -44,13 +46,13 @@ func modelIndexStatements(dialect sqlx.Dialect) []string {
 // modelBackgroundIndexes are the PostgreSQL model indexes, built CONCURRENTLY
 // so an existing large table keeps accepting writes while they build.
 func modelBackgroundIndexes() []storage.BackgroundIndex {
-	labels := []string{"audit requested model", "audit resolved model"}
-	indexes := make([]storage.BackgroundIndex, 0, len(labels))
-	for i, index := range modelIndexes(sqlx.PostgreSQL) {
+	models := modelIndexes(sqlx.PostgreSQL)
+	indexes := make([]storage.BackgroundIndex, 0, len(models))
+	for _, index := range models {
 		indexes = append(indexes, storage.BackgroundIndex{
 			Name:   index.name,
 			Create: "CREATE INDEX CONCURRENTLY IF NOT EXISTS " + index.name + " ON audit_logs(" + index.columns + ")",
-			Label:  labels[i],
+			Label:  index.label,
 		})
 	}
 	return indexes

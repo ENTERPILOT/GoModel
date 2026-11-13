@@ -133,7 +133,8 @@ const (
 	buildValid buildOutcome = iota
 	// buildBusy: another session holds the lock, so nothing was attempted.
 	buildBusy
-	// buildFailed: this session's attempt failed.
+	// buildFailed: this session's attempt failed, or it could not ask for
+	// the lock.
 	buildFailed
 )
 
@@ -142,37 +143,41 @@ func (b BackgroundIndexBuilder) attempt(ctx context.Context, index BackgroundInd
 		return buildValid
 	}
 	outcome := buildFailed
-	locked := b.withLock(ctx, func(conn *pgxpool.Conn) bool {
+	held, err := b.withLock(ctx, func(conn *pgxpool.Conn) {
 		// Checked again under the lock: another replica may have finished
 		// the build between the first check and taking the lock.
 		exists, valid, err := backgroundIndexState(ctx, conn, index.Name)
 		if err != nil {
-			return true
+			return
 		}
 		if exists && valid {
 			outcome = buildValid
-			return true
+			return
 		}
 		if exists {
 			slog.Warn("rebuilding invalid " + index.Label + " index")
 			if _, err := conn.Exec(ctx, `DROP INDEX CONCURRENTLY IF EXISTS `+index.Name); err != nil {
 				logBackgroundIndexError(ctx, index, "drop invalid", err)
-				return true
+				return
 			}
 		}
 		started := time.Now()
 		if _, err := conn.Exec(ctx, index.Create); err != nil {
 			logBackgroundIndexError(ctx, index, "create", err)
-			return true
+			return
 		}
 		if _, valid, err := backgroundIndexState(ctx, conn, index.Name); err != nil || !valid {
-			return true
+			return
 		}
 		slog.Info(index.Label+" index ready", "duration", time.Since(started).Round(time.Millisecond))
 		outcome = buildValid
-		return true
 	})
-	if !locked && ctx.Err() == nil {
+	if err != nil {
+		// Not busy: only a lock another session holds is worth waiting on.
+		logBackgroundIndexError(ctx, index, "take the build lock for", err)
+		return buildFailed
+	}
+	if !held {
 		return buildBusy
 	}
 	return outcome
@@ -185,27 +190,28 @@ func (b BackgroundIndexBuilder) TryDrop(ctx context.Context, index BackgroundInd
 	if exists, _, err := backgroundIndexState(ctx, b.Pool, index.Name); err == nil && !exists {
 		return true
 	}
-	return b.withLock(ctx, func(conn *pgxpool.Conn) bool {
+	dropped := false
+	_, _ = b.withLock(ctx, func(conn *pgxpool.Conn) {
 		if _, err := conn.Exec(ctx, `DROP INDEX CONCURRENTLY IF EXISTS `+index.Name); err != nil {
 			logBackgroundIndexError(ctx, index, "drop", err)
-			return false
+			return
 		}
-		return true
+		dropped = true
 	})
+	return dropped
 }
 
 // withLock runs fn on a connection holding the session advisory lock and
-// returns its result. It returns false without running fn when the lock
-// cannot be taken, which while ctx is live means another session holds it.
-func (b BackgroundIndexBuilder) withLock(ctx context.Context, fn func(conn *pgxpool.Conn) bool) bool {
+// reports whether it did. It returns false and no error when another session
+// holds the lock, and an error when the lock could not be asked for at all.
+func (b BackgroundIndexBuilder) withLock(ctx context.Context, fn func(conn *pgxpool.Conn)) (held bool, err error) {
 	conn, err := b.Pool.Acquire(ctx)
 	if err != nil {
-		return false
+		return false, err
 	}
 	defer conn.Release()
-	var locked bool
-	if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, b.LockKey).Scan(&locked); err != nil || !locked {
-		return false
+	if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, b.LockKey).Scan(&held); err != nil || !held {
+		return false, err
 	}
 	defer func() {
 		// A pooled connection must not keep the session lock; drop it when
@@ -217,7 +223,8 @@ func (b BackgroundIndexBuilder) withLock(ctx context.Context, fn func(conn *pgxp
 			_ = conn.Conn().Close(unlockCtx)
 		}
 	}()
-	return fn(conn)
+	fn(conn)
+	return true, nil
 }
 
 type pgQueryRower interface {
