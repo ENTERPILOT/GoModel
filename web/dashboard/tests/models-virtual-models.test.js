@@ -352,6 +352,7 @@ test("buildDisplayModels keeps a shadowing virtual model on a category page when
   assert.ok(virtualRow, "the shadowing virtual model keeps its row");
   assert.equal(virtualRow.shadowed_model, "openrouter/qwen/qwen3-vl-8b-instruct");
   assert.equal(aliasRowCanRemove(virtualRow), true);
+  assert.ok(upstreamRow, "the shadowed model keeps its row");
   assert.equal(rowRedirectCanRemove(upstreamRow), false);
   assert.equal(rows.find((row) => row.key === "alias:unrelated"), undefined);
 });
