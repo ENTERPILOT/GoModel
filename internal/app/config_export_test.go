@@ -111,7 +111,7 @@ func seedDashboardObjects(t *testing.T, db sqlx.DB) {
 	require.NoError(t, userStore.Upsert(ctx, users.User{UserPath: "/tenant", Description: "${env:EXPORT_TEST_MASTER_KEY}"}))
 	models, err := virtualmodels.NewSQLStore(ctx, db)
 	require.NoError(t, err)
-	require.NoError(t, models.Upsert(ctx, virtualmodels.VirtualModel{Source: "smart", Targets: []virtualmodels.Target{{Provider: "openai", Model: "gpt-4o"}}, ReasoningEffort: "high", Enabled: true}))
+	require.NoError(t, models.Upsert(ctx, virtualmodels.VirtualModel{Source: "smart", Targets: []virtualmodels.Target{{Provider: "openai", Model: "gpt-4o"}}, ReasoningEffort: "high", ContextWindow: new(128000), MaxOutputTokens: new(16000), Enabled: true}))
 	rules, err := tagging.NewSQLStore(ctx, db)
 	require.NoError(t, err)
 	require.NoError(t, rules.SaveRules(ctx, []tagging.Rule{{Header: "X-Cost-Center", Prefix: "cc-", Delimiter: ","}, {Header: "x-team"}}))
@@ -169,6 +169,8 @@ func TestExportConfig(t *testing.T) {
 	require.Len(t, doc.VirtualModels, 1)
 	assert.Equal(t, "smart", doc.VirtualModels[0].Source)
 	assert.Equal(t, "high", doc.VirtualModels[0].ReasoningEffort)
+	assert.Equal(t, new(128000), doc.VirtualModels[0].ContextWindow)
+	assert.Equal(t, new(16000), doc.VirtualModels[0].MaxOutputTokens)
 	assert.Equal(t, []config.TaggingHeaderConfig{{Header: "X-Team", Delimiter: ","}, {Header: "X-Cost-Center", Prefix: "cc-", Delimiter: ","}}, doc.Tagging.Headers)
 	// The amount edited in the dashboard wins over config.yaml's, as at start.
 	assert.Equal(t, []config.BudgetUserPathConfig{{Path: "/team", Limits: []config.BudgetLimitConfig{{Period: "daily", PeriodSeconds: budget.PeriodDailySeconds, Amount: 99, CostBasis: "provider"}}}}, doc.Budgets.UserPaths)
