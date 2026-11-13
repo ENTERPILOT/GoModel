@@ -12,6 +12,12 @@ concurrency:
   group: release-${{ github.ref_name }}
   cancel-in-progress: false
 
+env:
+  # BuildKit daemon for the buildx builders below. Dependabot does not update
+  # this pin; bump it by hand to the release moby/buildkit:buildx-stable-1
+  # points at, with the digest from `docker buildx imagetools inspect <ref>`.
+  BUILDKIT_IMAGE: moby/buildkit:v0.34.2@sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe
+
 jobs:
   # Every job below descends from this one, so a failed check here stops the
   # release before any image tag or artifact is published.
@@ -87,11 +93,12 @@ jobs:
           name: dashboard-dist
           path: internal/admin/dashboard/static/dist
 
-      - name: Set up QEMU (for multi-platform builds)
-        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
-
+      # No QEMU: the Dockerfile cross-compiles in a $BUILDPLATFORM stage and the
+      # runtime stage has no RUN, so nothing executes for a foreign platform.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+        with:
+          driver-opts: image=${{ env.BUILDKIT_IMAGE }}
 
       - name: Login to Docker Hub
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
@@ -143,6 +150,8 @@ jobs:
     steps:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+        with:
+          driver-opts: image=${{ env.BUILDKIT_IMAGE }}
 
       - name: Login to Docker Hub
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
@@ -235,7 +244,8 @@ jobs:
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7
         with:
           distribution: goreleaser
-          version: "~> v2"
+          # Exact release; Dependabot does not update this input, bump by hand.
+          version: "v2.20.0"
           args: release --clean --draft
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
