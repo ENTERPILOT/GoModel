@@ -72,6 +72,9 @@ jobs:
   docker:
     name: Build and push Docker image by digest
     runs-on: ubuntu-latest
+    # Every job that holds publishing credentials or publishes runs in the
+    # `release` environment, so its protection rules gate their secrets.
+    environment: release
     needs: frontend
     outputs:
       digest: ${{ steps.build.outputs.digest }}
@@ -139,6 +142,7 @@ jobs:
   docker-promote:
     name: Promote Docker image tags
     runs-on: ubuntu-latest
+    environment: release
     needs: docker
     steps:
       - name: Set up Docker Buildx
@@ -209,6 +213,7 @@ jobs:
   goreleaser:
     name: Build draft GitHub release
     runs-on: ubuntu-latest
+    environment: release
     needs: frontend
     permissions:
       contents: write
@@ -243,6 +248,7 @@ jobs:
   github-release:
     name: Publish GitHub release
     runs-on: ubuntu-latest
+    environment: release
     needs:
       - docker-promote
       - goreleaser
@@ -258,6 +264,7 @@ jobs:
   discord-notify:
     name: Announce release on Discord
     runs-on: ubuntu-latest
+    environment: release
     needs: github-release
     # Best-effort: a Discord outage must not fail the release.
     continue-on-error: true
@@ -361,6 +368,7 @@ jobs:
   deploy-demo:
     name: Update demo.enterpilot.io
     runs-on: ubuntu-latest
+    environment: release
     # Must run after tag promotion: the demo pulls :latest, which is what
     # docker-promote pushes.
     needs: docker-promote
@@ -383,6 +391,7 @@ jobs:
   publish-version-manifest:
     name: Publish version manifest
     runs-on: ubuntu-latest
+    environment: release
     # Gateways check this manifest daily, so it must only ever advertise a
     # release operators can actually download.
     needs: github-release
@@ -406,6 +415,7 @@ jobs:
   publish-mcp:
     name: Publish to MCP Registry
     runs-on: ubuntu-latest
+    environment: release
     # Registry verification pulls the versioned Docker Hub image, so the tag must exist first
     needs: docker-promote
     # Best-effort: a registry outage must not fail the release
