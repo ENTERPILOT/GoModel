@@ -107,7 +107,7 @@ type Broker struct {
 	// events is a circular buffer of the most recent events. While it is
 	// filling, head is 0 and events are ordered; once full, head indexes the
 	// oldest event and each publish overwrites it in place (O(1)).
-	events      []Event
+	events      []retainedEvent
 	head        int
 	subscribers map[uint64]chan Event
 	activeAudit map[snapshotKey]auditSnapshot
@@ -126,12 +126,13 @@ type Broker struct {
 }
 
 // auditSnapshot is the accumulated live state of one in-flight request: the
-// event a fresh subscriber replays, and the typed preview it was encoded from
+// event a fresh subscriber replays, and the typed preview it is encoded from
 // so the next event of the same request merges onto a struct rather than
-// decoding and re-encoding JSON.
+// decoding and re-encoding JSON. The preview is shared with the event and the
+// replay ring, so it is never mutated once stored.
 type auditSnapshot struct {
-	event   Event
-	preview auditPreview
+	event   retainedEvent
+	preview *auditPreview
 }
 
 // NewBroker creates a live event broker. A disabled broker is safe to use.
@@ -215,8 +216,8 @@ func (b *Broker) Subscribe(cursor uint64) *Subscription {
 	}
 
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	if b.closed {
+		b.mu.Unlock()
 		return nil
 	}
 
@@ -226,18 +227,22 @@ func (b *Broker) Subscribe(cursor uint64) *Subscription {
 	ch := make(chan Event, b.subscriberBuffer)
 	b.subscribers[id] = ch
 	b.subscribersChangedLocked()
+	latest := b.nextSeq
+	b.mu.Unlock()
 
+	// Retained previews are never mutated, so they encode without the lock;
+	// events published meanwhile queue on ch.
 	return &Subscription{
-		Replay: replay,
+		Replay: encodeRetainedEvents(replay),
 		Events: ch,
 		Reset:  reset,
-		Latest: b.nextSeq,
+		Latest: latest,
 		broker: b,
 		id:     id,
 	}
 }
 
-func (b *Broker) replayAfterLocked(cursor uint64) ([]Event, bool) {
+func (b *Broker) replayAfterLocked(cursor uint64) ([]retainedEvent, bool) {
 	count := len(b.events)
 	if cursor == 0 {
 		return b.activeSnapshotsLocked(), false
@@ -262,7 +267,7 @@ func (b *Broker) replayAfterLocked(cursor uint64) ([]Event, bool) {
 	if cursor >= oldest {
 		start = int(cursor - oldest + 1) //nolint:gosec // G115: the cursor is inside the buffer here, so the offset is below count.
 	}
-	replay := make([]Event, 0, count-start)
+	replay := make([]retainedEvent, 0, count-start)
 	for i := start; i < count; i++ {
 		replay = append(replay, b.eventAtLocked(i))
 	}
@@ -271,7 +276,7 @@ func (b *Broker) replayAfterLocked(cursor uint64) ([]Event, bool) {
 
 // eventAtLocked returns the i-th event in publish order (0 = oldest).
 // Caller must hold b.mu.
-func (b *Broker) eventAtLocked(i int) Event {
+func (b *Broker) eventAtLocked(i int) retainedEvent {
 	idx := b.head + i
 	if idx >= len(b.events) {
 		idx -= len(b.events)
@@ -279,13 +284,13 @@ func (b *Broker) eventAtLocked(i int) Event {
 	return b.events[idx]
 }
 
-func (b *Broker) activeSnapshotsLocked() []Event {
-	snapshots := make([]Event, 0, len(b.activeAudit)+len(b.activeUsage))
+func (b *Broker) activeSnapshotsLocked() []retainedEvent {
+	snapshots := make([]retainedEvent, 0, len(b.activeAudit)+len(b.activeUsage))
 	for _, snapshot := range b.activeAudit {
 		snapshots = append(snapshots, snapshot.event)
 	}
 	for _, event := range b.activeUsage {
-		snapshots = append(snapshots, event)
+		snapshots = append(snapshots, retainedEvent{Event: event})
 	}
 	sort.Slice(snapshots, func(i, j int) bool {
 		return snapshots[i].Seq < snapshots[j].Seq
@@ -385,16 +390,20 @@ func (b *Broker) publishEvent(eventType, entryID, requestID string, timestamp ti
 	}
 	event := b.nextEventLocked(eventType, requestID, timestamp, data)
 	b.updateUsageSnapshotLocked(&event, entryID)
-	b.bufferAndFanoutLocked(event, nil)
+	b.bufferAndFanoutLocked(retainedEvent{Event: event}, nil)
 }
 
 // publishAuditPreview accumulates the retained preview onto the request's
-// active snapshot, encodes the result once, and buffers and fans out the
-// event. fanoutData, when non-nil, replaces the retained payload on the copy
-// sent to live subscribers — used to deliver request/response bodies to
-// connected dashboards without retaining them in the replay ring or active
-// snapshots, which outlive the request.
-func (b *Broker) publishAuditPreview(eventType, entryID string, retained auditPreview, fanoutData json.RawMessage) {
+// active snapshot, and buffers and fans out the event. fanoutData, when
+// non-nil, replaces the retained payload on the copy sent to live subscribers
+// — used to deliver request/response bodies to connected dashboards without
+// retaining them in the replay ring or active snapshots, which outlive the
+// request.
+//
+// The retained payload is encoded here only when a subscriber receives it now
+// or it may need compaction. Otherwise the event keeps the preview, and
+// Subscribe encodes it, outside the lock, for whoever replays it.
+func (b *Broker) publishAuditPreview(eventType, entryID string, patch *auditPreview, fanoutData json.RawMessage) {
 	if b == nil || !b.enabled {
 		return
 	}
@@ -409,16 +418,28 @@ func (b *Broker) publishAuditPreview(eventType, entryID string, retained auditPr
 		return
 	}
 
-	keys := auditActiveKeys(retained.RequestID, entryID)
+	keys := auditActiveKeys(patch.RequestID, entryID)
 	terminal := auditEventTerminal(eventType)
+	retained := new(auditPreview)
+	*retained = *patch
+	merged := false
 	if terminal {
 		deleteActiveSnapshot(b.activeAudit, keys)
 	} else if previous, ok := findActiveSnapshot(b.activeAudit, keys); ok {
-		retained = mergeAuditPreview(previous.preview, retained)
-	} else {
-		// The snapshot outlives the request, so it takes its own copies of
-		// what the entry goes on mutating; later merges may then keep them.
+		*retained = mergeAuditPreview(*previous.preview, *patch)
+		merged = true
+	}
+	lazy := (fanoutData != nil || len(b.subscribers) == 0) && retainedSizeBound(retained) <= maxRetainedEventBytes
+	if !merged && (!terminal || lazy) {
+		// What is retained outlives the request, so it takes its own copies
+		// of what the entry goes on mutating; later merges may then keep them.
 		retained.Data = mergeAuditPreviewData(nil, retained.Data)
+	}
+	if lazy {
+		event := retainedEvent{Event: b.nextEventLocked(eventType, retained.RequestID, retained.Timestamp, nil), preview: retained}
+		b.storeAuditSnapshotLocked(keys, terminal, event, retained)
+		b.bufferAndFanoutLocked(event, fanoutData)
+		return
 	}
 
 	data, err := json.Marshal(retained)
@@ -431,7 +452,8 @@ func (b *Broker) publishAuditPreview(eventType, entryID string, retained auditPr
 		if fanoutData == nil && len(b.subscribers) > 0 {
 			fanoutData = data
 		}
-		retained = compactAuditPreviewForRetention(retained)
+		compacted := compactAuditPreviewForRetention(*retained)
+		retained = &compacted
 		if data, err = json.Marshal(retained); err != nil {
 			return
 		}
@@ -450,12 +472,19 @@ func (b *Broker) publishAuditPreview(eventType, entryID string, retained auditPr
 		}
 	}
 
-	event := b.nextEventLocked(eventType, retained.RequestID, retained.Timestamp, data)
-	if !terminal && keys.canonical != (snapshotKey{}) {
-		b.activeAudit[keys.canonical] = auditSnapshot{event: event, preview: retained}
-		deleteActiveSnapshotAliases(b.activeAudit, keys)
-	}
+	event := retainedEvent{Event: b.nextEventLocked(eventType, retained.RequestID, retained.Timestamp, data)}
+	b.storeAuditSnapshotLocked(keys, terminal, event, retained)
 	b.bufferAndFanoutLocked(event, fanoutData)
+}
+
+// storeAuditSnapshotLocked keeps the event as the request's active snapshot
+// unless it ends the request. Caller must hold b.mu.
+func (b *Broker) storeAuditSnapshotLocked(keys activeSnapshotKeys, terminal bool, event retainedEvent, retained *auditPreview) {
+	if terminal || keys.canonical == (snapshotKey{}) {
+		return
+	}
+	b.activeAudit[keys.canonical] = auditSnapshot{event: event, preview: retained}
+	deleteActiveSnapshotAliases(b.activeAudit, keys)
 }
 
 // nextEventLocked assigns the next stream sequence. Caller must hold b.mu.
@@ -480,7 +509,7 @@ func (b *Broker) nextEventLocked(eventType, requestID string, timestamp time.Tim
 // bufferAndFanoutLocked writes the event to the replay ring and sends it to
 // every subscriber, dropping the ones that cannot keep up. Caller must hold
 // b.mu.
-func (b *Broker) bufferAndFanoutLocked(event Event, fanoutData json.RawMessage) {
+func (b *Broker) bufferAndFanoutLocked(event retainedEvent, fanoutData json.RawMessage) {
 	if len(b.events) < b.bufferSize {
 		b.events = append(b.events, event)
 	} else {
@@ -491,7 +520,7 @@ func (b *Broker) bufferAndFanoutLocked(event Event, fanoutData json.RawMessage) 
 		}
 	}
 
-	fanout := event
+	fanout := event.Event
 	if fanoutData != nil {
 		fanout.Data = fanoutData
 	}
@@ -684,6 +713,8 @@ func mergeAuditPreviewData(base, patch *auditPreviewData) *auditPreviewData {
 		data.ResponseHeaders = cloneStringMap(patch.ResponseHeaders)
 		data.WorkflowFeatures = clonePtr(patch.WorkflowFeatures)
 		data.Failover = clonePtr(patch.Failover)
+		data.Temperature = clonePtr(patch.Temperature)
+		data.MaxTokens = clonePtr(patch.MaxTokens)
 		return &data
 	}
 
@@ -833,7 +864,7 @@ func (b *Broker) PublishAuditEvent(eventType string, entry *auditlog.LogEntry) {
 			return
 		}
 	}
-	b.publishAuditPreview(eventType, entry.ID, retained, fanoutData)
+	b.publishAuditPreview(eventType, entry.ID, &retained, fanoutData)
 }
 
 // stripAuditPreviewBodies returns a preview copy without request/response
@@ -897,7 +928,7 @@ func (b *Broker) PublishRemoteAuditEntry(entry *auditlog.EntryPreview, writtenAt
 		data.ResponseBodyCaptured = entry.ResponseBodyCaptured
 		preview.Data = &data
 	}
-	b.publishAuditPreview(EventAuditFlushed, entry.ID, preview, nil)
+	b.publishAuditPreview(EventAuditFlushed, entry.ID, &preview, nil)
 }
 
 // remoteUsagePreview is a usage entry another replica persisted, marked with
