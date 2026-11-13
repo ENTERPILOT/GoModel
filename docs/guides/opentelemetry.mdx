@@ -329,6 +329,9 @@ Point only traces at this Collector, since it has no metrics pipeline:
 
 ```bash
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://otel-collector:4318/v1/traces
+# Send metrics to their own backend, or turn them off:
+OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://prometheus:9090/api/v1/otlp/v1/metrics
+# OTEL_METRICS_EXPORTER=none
 ```
 
 Keep the Collector's port on a private network: it accepts spans from anyone
