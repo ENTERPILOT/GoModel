@@ -3,8 +3,10 @@ package core
 import "strings"
 
 // credentialHeaders lists HTTP headers whose values carry secrets (API keys,
-// tokens, cookies). It is the single source of truth for audit-log header
-// redaction and for rejecting these headers as tagging label sources.
+// tokens, cookies). It is the single source of truth for the headers the
+// gateway refuses to forward, to let plugins edit, or to use as tagging label
+// sources. Audit-log redaction starts from it and also covers names that
+// merely look like a credential (auditlog.RedactHeaders).
 var credentialHeaders = map[string]struct{}{
 	"authorization":       {},
 	"proxy-authorization": {},

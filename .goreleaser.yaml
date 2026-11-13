@@ -5,6 +5,9 @@ project_name: gomodel
 builds:
   - env:
       - CGO_ENABLED=0
+    # See GO_BUILD_TAGS in the Makefile.
+    tags:
+      - grpcnotrace
     goos:
       - linux
       - windows

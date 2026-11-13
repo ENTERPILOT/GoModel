@@ -33,10 +33,15 @@ curl -fsSLO "https://github.com/ENTERPILOT/GoModel/releases/download/v${VERSION}
 grep " gomodel_${VERSION}_dashboard.tar.gz\$" checksums.txt | sha256sum -c -
 tar -xzf "gomodel_${VERSION}_dashboard.tar.gz"
 
-CGO_ENABLED=0 go build \
+CGO_ENABLED=0 go build -trimpath -tags=grpcnotrace \
   -ldflags "-s -w -X github.com/enterpilot/gomodel/internal/version.Version=${VERSION}" \
   -o gomodel ./cmd/gomodel
 ```
+
+Tag `grpcnotrace` usuwa wbudowane śledzenie żądań gRPC, z którego GoModel nie
+korzysta, i zmniejsza binarkę o około 15 MB. `-trimpath` usuwa z niej ścieżki
+Twojej maszyny budującej. Oba są opcjonalne: bez nich binarka działa tak samo,
+jest tylko większa. `make build` ustawia je automatycznie.
 
 Receptury pakietów mogą przypiąć SHA-256 archiwum obok sumy kontrolnej źródeł.
 
