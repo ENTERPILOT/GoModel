@@ -62,7 +62,7 @@ type SharedStore interface {
 
 // SharedStoreAware is optionally implemented by a registered extension
 // component: an authenticator, request rewriter, runtime setting, health
-// checker, route selector, or proxy selector. Core calls SetSharedStore once
+// checker, alert sink, route selector, or proxy selector. Core calls SetSharedStore once
 // the configuration generation that owns the store has built successfully,
 // and again with the new store after every reload, so an implementation must
 // accept repeated calls and always use the most recent store. Until the first

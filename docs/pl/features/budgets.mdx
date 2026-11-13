@@ -424,6 +424,218 @@ Edycja budżetu zmienia limit, ale nie resetuje bieżącego okresu. Użyj akcji 
 w wierszu, aby rozpocząć nowy okres dla jednego budżetu, lub
 `Settings -> Reset All Budgets`, aby zresetować wszystkie budżety.
 
+## Alerty
+
+Budżet odrzuca requesty, gdy zostanie wydany. Alerty informują wcześniej:
+każdy budżet ma progi, wyrażone jako procent kwoty, a GoModel wysyła alert,
+gdy wydatki osiągną któryś z nich.
+
+Alerty są wyłączone, dopóki nie mają dokąd trafić. Zadeklaruj webhook, a każdy
+budżet zacznie alarmować przy domyślnych progach 80% i 100%:
+
+```env
+BUDGETS_ALERTS_WEBHOOK_URL=https://alerts.example.com/gomodel
+BUDGETS_ALERTS_WEBHOOK_SECRET=${file:/run/secrets/alert_webhook_secret}
+```
+
+```yaml
+budgets:
+  alerts:
+    thresholds: [80, 100]
+    webhooks:
+      - url: "https://alerts.example.com/gomodel"
+        secret: "${env:BUDGET_ALERT_WEBHOOK_SECRET}"
+```
+
+URL i sekret przyjmują [referencje do sekretów](/pl/advanced/secret-references).
+Zmienne środowiskowe deklarują jeden webhook i zastępują listę z YAML; kilka
+webhooków zadeklaruj w YAML.
+
+| Ustawienie (`budgets.alerts.`) | Zmienna środowiskowa                 | Domyślnie | Zmień, gdy                                                                  |
+| ------------------------------ | ------------------------------------ | --------- | --------------------------------------------------------------------------- |
+| `thresholds`                   | `BUDGETS_ALERTS_THRESHOLDS`          | `80,100`  | Chcesz wcześniejszego ostrzeżenia (`50,80,100`). Każda wartość to 1-100.    |
+| `interval`                     | `BUDGETS_ALERTS_INTERVAL`            | `60`      | Potrzebujesz alertów szybciej niż minutę po zapisaniu wydatków. Sekundy.    |
+| `webhooks`                     | `BUDGETS_ALERTS_WEBHOOK_URL`, `_SECRET` | _(brak)_ | Zawsze: bez webhooka nic nie jest oceniane.                                 |
+| `webhook_timeout`              | `BUDGETS_ALERTS_WEBHOOK_TIMEOUT`     | `10`      | Twój odbiorca jest wolny. Sekundy na próbę.                                 |
+| `webhook_max_retries`          | `BUDGETS_ALERTS_WEBHOOK_MAX_RETRIES` | `3`       | `0`, aby nigdy nie ponawiać; najwyżej `10`.                                 |
+
+### Progi dla pojedynczego budżetu
+
+Budżet może mieć własne progi, które zastępują dla niego wartości domyślne.
+Ustaw **Alert Thresholds** w formularzu budżetu, `alert_thresholds` w Admin
+API albo w konfiguracji:
+
+```yaml
+budgets:
+  user_paths:
+    - path: "/team/alpha"
+      limits:
+        - period: "monthly"
+          amount: 500.00
+          alert_thresholds: [50, 75, 90]
+```
+
+```env
+SET_BUDGET_TEAM__ALPHA='[{"period":"monthly","amount":500,"alert_thresholds":[50,75,90]}]'
+```
+
+Pusta lista oznacza wartości domyślne. Strona Budgets pokazuje progi każdego
+budżetu, oznaczone jako `inactive`, dopóki nie skonfigurowano celu.
+
+### Kiedy alert jest wysyłany
+
+GoModel ocenia budżety w tle, co `interval` sekund, nigdy podczas obsługi
+requestu. Alert jest wysyłany raz dla każdej rewizji budżetu, okresu i progu:
+
+- Repliki współdzielące bazę danych wysyłają go łącznie raz: instancja
+  zapisuje alert w bazie przed jego dostarczeniem i wygrywa tylko pierwszy
+  zapis. Z SQLite każda instancja ma własną bazę i alarmuje samodzielnie.
+- Nowy okres albo [reset](#okna-resetu) zaczyna od nowa i może wysłać alert
+  ponownie. Tak samo zmiana kotwicy resetu w ustawieniach: okres jest
+  przeliczany od nowej kotwicy, a jego progi wysyłają alert, gdy wydatki w nim
+  je osiągną.
+- Zmiana kwoty budżetu albo jego usunięcie i ponowne utworzenie to nowa
+  rewizja budżetu, która ponownie uzbraja wszystkie progi do końca okresu:
+  podniesiony ze 100 do 1000 po alercie 80%, alarmuje znowu przy 800. Sama
+  edycja progów nie jest nową rewizją: próg, który już wysłał alert, pozostaje
+  wysłany, a nowy wysyła alert, gdy wydatki go osiągną.
+- Gdy między dwiema ocenami wydatki przekroczą kilka progów, każdy z nich
+  wysyła alert, od najniższego.
+- [Budżet dla każdego potomka](#dynamiczne-budżety-dla-każdego-potomka)
+  alarmuje osobno dla każdego potomka: każdy osiąga progi własnego budżetu,
+  na tych samych wydatkach, które liczy egzekwowanie, łącznie ze ścieżkami
+  poniżej potomka. Jedna ocena czyta 10 000 potomków o największych
+  wydatkach; pozostali nie są oceniani.
+- Wydatki są odczytywane z zapisanego zużycia, więc alert jest opóźniony
+  względem requestu, który go wywołał, o zapis zużycia
+  (`USAGE_FLUSH_INTERVAL`, 5 s) plus najwyżej jeden interwał.
+
+Zapis następuje przed dostarczeniem, więc alert jest dostarczany najwyżej raz:
+gateway zatrzymany między jednym a drugim traci ten alert, a alert, którego
+nie udało się dostarczyć mimo ponowień, jest logowany i zliczany, a nie
+wysyłany później. Przy zamykaniu alerty w kolejce mają 5 s na dostarczenie;
+te, które nadal czekają, są porzucane, logowane i zliczane jako błędy
+dostarczenia.
+
+### Payload webhooka
+
+Każdy alert to jeden `POST` z treścią JSON:
+
+```json
+{
+  "schema_version": 1,
+  "type": "budget.threshold_reached",
+  "id": "bgt_5f0c2a9d41b7e3a86c1d02ef",
+  "timestamp": "2026-04-25T12:00:07Z",
+  "budget": {
+    "scope": "user_path",
+    "subject": "/customers",
+    "effective_subject": "/customers/alice",
+    "per_child": true,
+    "period_seconds": 86400,
+    "period": "daily",
+    "amount": 100,
+    "cost_basis": "provider",
+    "revision": "1745539200:100"
+  },
+  "threshold_percent": 80,
+  "spent": 81.2,
+  "usage_ratio": 0.812,
+  "period_start": "2026-04-25T00:00:00Z",
+  "period_end": "2026-04-26T00:00:00Z",
+  "projected_spend": 162.4,
+  "projected_exhaustion_at": "2026-04-25T14:47:00Z"
+}
+```
+
+| Pole                       | Znaczenie                                                                                              |
+| -------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `schema_version`           | `1`. Zmienia się tylko, gdy pole zostanie przemianowane, usunięte lub zmieni znaczenie.                |
+| `type`                     | `budget.threshold_reached`. Ignoruj nieznane typy: mogą dojść kolejne.                                 |
+| `id`                       | Identyfikuje alert; deduplikuj po nim. Zobacz niżej.                                                   |
+| `timestamp`                | Kiedy GoModel zgłosił alert (UTC).                                                                     |
+| `budget.scope`, `.subject` | Budżet: `user_path`, `label` albo `provider`, oraz jego podmiot.                                       |
+| `budget.effective_subject` | Dla kogo policzono wydatki: ścieżka potomka w budżecie dla każdego potomka, w innym razie podmiot.     |
+| `budget.period_seconds`, `.period` | Okres resetu i jego nazwa (`hourly`, `daily`, `weekly`, `monthly` albo `<n>s`).               |
+| `budget.amount`, `.cost_basis` | Limit oraz koszt, na którym mierzone jest `spent` (`provider` albo `billed`).                      |
+| `budget.revision`          | Nieprzezroczysta. Zmienia się ze zmianą kwoty lub po ponownym utworzeniu, nie przy samej zmianie progów. |
+| `threshold_percent`        | Osiągnięty próg.                                                                                       |
+| `spent`, `usage_ratio`     | Wydatki w okresie w chwili zgłoszenia alertu oraz `spent / amount` (powyżej `1` po przekroczeniu).     |
+| `period_start`, `period_end` | Okres, do którego należy alert. Reset przesuwa `period_start` na czas resetu.                        |
+| `projected_spend`          | Zobacz [Prognoza wydatków](#prognoza-wydatków). Pomijane, gdy minęło zbyt mało okresu.                 |
+| `projected_exhaustion_at`  | Kiedy budżet wyczerpie się w obecnym tempie. Pomijane bez prognozy albo gdy budżet wystarczy na okres. |
+
+Dwa dostarczenia mają to samo `id` dokładnie wtedy, gdy są tym samym alertem:
+ten sam budżet (`scope`, `subject`, `effective_subject`, okres), ta sama
+`revision`, ten sam `period_start` i ten sam `threshold_percent`. Ponowienia
+i dostarczenia z innej repliki używają go ponownie. Nowy okres, reset,
+przesunięta kotwica resetu albo nowa rewizja dają nowe `id`.
+
+Pola są wyłącznie dodawane. Każde dostarczenie niesie też te nagłówki:
+
+| Nagłówek              | Wartość                                                                  |
+| --------------------- | ------------------------------------------------------------------------ |
+| `X-GoModel-Event`     | `type` alertu                                                            |
+| `X-GoModel-Delivery`  | `id` alertu                                                              |
+| `X-GoModel-Signature` | `t=<sekundy Unix>,v1=<hex>`: czas próby oraz HMAC-SHA256 z `<t>.<surowa treść>` z kluczem `secret` webhooka. Wysyłany tylko, gdy ustawiono sekret. |
+
+Zweryfikuj podpis na surowej treści requestu, zanim ją sparsujesz, i odrzuć
+znacznik czasu odległy o więcej niż 5 minut od twojego zegara, aby zablokować
+powtórzenia. Każda próba jest podpisywana w chwili wysłania, więc ponowienia
+też przechodzą. Ignoruj pary inne niż `t` i `v1`: późniejszy schemat dojdzie
+jako `v2=` obok `v1`.
+
+```python
+import hashlib, hmac, time
+
+TOLERANCE = 300  # seconds
+
+def verified(secret: bytes, body: bytes, header: str) -> bool:
+    pairs = dict(p.split("=", 1) for p in header.split(",") if "=" in p)
+    t, signature = pairs.get("t", ""), pairs.get("v1", "")
+    if not t.isdigit() or abs(time.time() - int(t)) > TOLERANCE:
+        return False
+    expected = hmac.new(secret, t.encode() + b"." + body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature)
+```
+
+Odpowiedz dowolnym `2xx`. Błąd sieci, `408`, `429` albo `5xx` jest ponawiany
+do `webhook_max_retries` razy, z odstępami 1 s, 2 s, 4 s i tak dalej
+(najwyżej 30 s); żaden inny status nie jest ponawiany. Śledzone jest tylko
+`307` albo `308` do tego samego originu, bo powtarza `POST` z jego treścią;
+każde inne przekierowanie liczy się jako nieudane dostarczenie, więc
+skonfiguruj docelowy URL. Dostarczenia korzystają z wychodzącego proxy gatewaya
+(`HTTPS_PROXY`) i jego zaufania TLS (`http.tls`). Niedziałający webhook nie
+opóźnia oceny innych budżetów ani innego webhooka.
+
+Webhook to celowo generyczny JSON: GoModel nie formatuje wiadomości dla
+Slacka, Teams ani e-maila. Skieruj go na mały odbiornik albo narzędzie do
+automatyzacji, które to robi, albo we własnym buildzie zarejestruj
+`ext.AlertSink`, który otrzymuje te same zdarzenia. Sink tworzy klientów HTTP
+przez `ext.NewHTTPClient`, aby używać tego samego proxy i zaufania TLS, może
+implementować `ext.SharedStoreAware`, aby współdzielić stan między
+replikami, a zwalnia go build, który go zarejestrował, po zamknięciu
+gatewaya.
+
+Alertom towarzyszą dwa liczniki Prometheusa:
+`gomodel_budget_alerts_fired_total` (`scope`, `threshold`) oraz
+`gomodel_budget_alert_delivery_failures_total` (`destination`); zobacz
+[Metryki Prometheusa](/pl/guides/prometheus-metrics#alertowanie-o-niedostarczonych-alertach-budżetowych).
+
+## Prognoza wydatków
+
+`GET /admin/budgets` i strona Budgets pokazują, dokąd zmierza każdy budżet:
+
+- `projected_spend`: wydatki na koniec okresu, jeśli utrzyma się dotychczasowe
+  tempo, `spent / period_ratio`.
+- `projected_exhaustion_at`: kiedy budżet wyczerpie się w tym tempie. Obecne
+  tylko, gdy prognoza przekracza kwotę, a budżet nie jest jeszcze wydany.
+
+Prognoza jest liniowa, więc skok na początku okresu odczytuje jako tempo
+całego okresu. Dlatego oba pola są pomijane, dopóki nie minie 5% okresu (72
+minuty doby, około półtora dnia miesiąca), liczone od resetu, jeśli był.
+Szablon dla każdego potomka nie ma prognozy, bo nie ma jednej sumy wydatków.
+
 ## Admin API
 
 Zarządzanie budżetami jest dostępne także przez Admin API:
@@ -464,9 +676,16 @@ console.log(budgets);
 
 </CodeGroup>
 
+Każdy budżet w odpowiedzi niesie swój status (`spent`, `remaining`,
+`usage_ratio`, `period_ratio`), [prognozę](#prognoza-wydatków)
+(`projected_spend`, `projected_exhaustion_at`) oraz własne `alert_thresholds`,
+jeśli je ma. Obiekt `alerts` na najwyższym poziomie informuje, czy alerty są
+włączone (`enabled`, istnieje cel), oraz podaje `default_thresholds`.
+
 Utwórz lub zaktualizuj budżet. Budżet jest identyfikowany przez `scope`, `subject`
 i okres; dla budżetów ścieżek użytkowników `user_path` jest akceptowane jako skrócony
-zapis podmiotu:
+zapis podmiotu. `alert_thresholds` jest opcjonalne: `PUT` bez tego pola przywraca
+budżetowi progi domyślne.
 
 <CodeGroup>
 
@@ -479,7 +698,8 @@ curl -X PUT http://localhost:8080/admin/budgets \
     "subject": "/team/alpha",
     "per_child": false,
     "budget_key": { "period": "daily" },
-    "amount": 10.00
+    "amount": 10.00,
+    "alert_thresholds": [50, 90]
   }'
 ```
 

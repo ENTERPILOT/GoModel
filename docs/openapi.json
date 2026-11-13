@@ -13654,6 +13654,22 @@
           }
         }
       },
+      "admin.budgetAlertsResponse": {
+        "type": "object",
+        "properties": {
+          "default_thresholds": {
+            "description": "DefaultThresholds are the alert thresholds, as percentages of the\namount, of every budget without alert_thresholds of its own.",
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "enabled": {
+            "description": "Enabled reports that an alert destination exists (a webhook under\nbudgets.alerts.webhooks, or a registered alert sink), so thresholds are\nevaluated. Without one no alert is ever raised.",
+            "type": "boolean"
+          }
+        }
+      },
       "admin.budgetKeyRequest": {
         "type": "object",
         "properties": {
@@ -13680,6 +13696,14 @@
       "admin.budgetListResponse": {
         "type": "object",
         "properties": {
+          "alerts": {
+            "description": "Alerts describes soft budget alerts for the deployment.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/admin.budgetAlertsResponse"
+              }
+            ]
+          },
           "budgets": {
             "type": "array",
             "items": {
@@ -13694,6 +13718,13 @@
       "admin.budgetStatusResponse": {
         "type": "object",
         "properties": {
+          "alert_thresholds": {
+            "description": "AlertThresholds are this budget's own alert thresholds, as percentages\nof the amount. Omitted when it uses alerts.default_thresholds.",
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
           "amount": {
             "type": "number"
           },
@@ -13741,6 +13772,14 @@
           },
           "period_start": {
             "type": "string"
+          },
+          "projected_exhaustion_at": {
+            "description": "ProjectedExhaustionAt is when the budget runs out at that rate. Omitted\nwhen the budget lasts the period or is already spent.",
+            "type": "string"
+          },
+          "projected_spend": {
+            "description": "ProjectedSpend is the spend the period ends on at the rate seen so far\n(spent / period_ratio). Omitted while less than 5% of the period has\nelapsed, and for a per-child template.",
+            "type": "number"
           },
           "remaining": {
             "type": "number"
@@ -14419,6 +14458,13 @@
       "admin.upsertBudgetRequest": {
         "type": "object",
         "properties": {
+          "alert_thresholds": {
+            "description": "AlertThresholds overrides the default alert thresholds for this budget:\npercentages of the amount, each 1-100. Empty or omitted uses the\ndefaults.",
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
           "amount": {
             "type": "number"
           },

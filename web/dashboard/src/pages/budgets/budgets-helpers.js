@@ -16,6 +16,8 @@ export function defaultBudgetForm() {
     amount: "",
     per_child: false,
     cost_basis: "provider",
+    // Comma-separated percentages; empty uses the default thresholds.
+    alert_thresholds: "",
     source: "manual",
   };
 }
@@ -308,6 +310,10 @@ export function buildBudgetFormPayload(form) {
   if (!Number.isFinite(periodSeconds) || periodSeconds <= 0) {
     return { payload: null, error: m.budgets_period_positive() };
   }
+  const alertThresholds = parseBudgetAlertThresholds(f.alert_thresholds);
+  if (!alertThresholds) {
+    return { payload: null, error: m.budgets_alert_thresholds_invalid() };
+  }
   return {
     payload: {
       scope,
@@ -316,10 +322,93 @@ export function buildBudgetFormPayload(form) {
       amount,
       per_child: scope === "user_path" && Boolean(f.per_child),
       cost_basis: budgetCostBasis(f),
+      alert_thresholds: alertThresholds,
       source: String(f.source || "manual").trim() || "manual",
     },
     error: "",
   };
+}
+
+// parseBudgetAlertThresholds reads the editor's comma-separated percentages
+// into a sorted list without duplicates. Empty input is an empty list (use
+// the defaults); anything that is not a whole number from 1 to 100 is null.
+export function parseBudgetAlertThresholds(value) {
+  const parts = String(value ?? "")
+    .split(/[,;\s]+/)
+    .map((part) => part.replace(/%$/, ""))
+    .filter((part) => part !== "");
+  const thresholds = new Set();
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) {
+      return null;
+    }
+    const threshold = Number(part);
+    if (threshold < 1 || threshold > 100) {
+      return null;
+    }
+    thresholds.add(threshold);
+  }
+  return [...thresholds].sort((a, b) => a - b);
+}
+
+// budgetOwnAlertThresholds reads the thresholds set on the budget itself,
+// empty when it uses the defaults.
+export function budgetOwnAlertThresholds(item) {
+  const thresholds = item && item.alert_thresholds;
+  return Array.isArray(thresholds)
+    ? thresholds.filter((threshold) => Number.isFinite(Number(threshold)))
+    : [];
+}
+
+// budgetAlertThresholdsInput renders a budget's own thresholds for the editor.
+export function budgetAlertThresholdsInput(item) {
+  return budgetOwnAlertThresholds(item).join(", ");
+}
+
+// normalizeBudgetAlerts reads the deployment's alert settings from the
+// /admin/budgets payload; a gateway without the field has alerts off.
+export function normalizeBudgetAlerts(payload) {
+  const alerts = (payload && payload.alerts) || {};
+  return {
+    enabled: Boolean(alerts.enabled),
+    default_thresholds: Array.isArray(alerts.default_thresholds)
+      ? alerts.default_thresholds
+      : [],
+  };
+}
+
+// budgetAlertThresholds returns the thresholds that apply to a budget: its
+// own, or the deployment defaults.
+export function budgetAlertThresholds(item, alerts) {
+  const own = budgetOwnAlertThresholds(item);
+  if (own.length > 0) {
+    return own;
+  }
+  return (alerts && alerts.default_thresholds) || [];
+}
+
+export function budgetAlertThresholdsLabel(thresholds) {
+  return (thresholds || []).map((threshold) => threshold + "%").join(", ");
+}
+
+// budgetProjectedSpend reads the projected end-of-period spend, null when
+// there is nothing to show: the gateway omitted it (too early in the period,
+// or a per-child template), or nothing was spent yet.
+export function budgetProjectedSpend(item) {
+  const raw = item && item.projected_spend;
+  if (raw === null || raw === undefined) {
+    return null;
+  }
+  const projected = Number(raw);
+  return Number.isFinite(projected) && projected > 0 ? projected : null;
+}
+
+// budgetProjectedOver reports a projection that ends the period past the
+// budget amount.
+export function budgetProjectedOver(item) {
+  const projected = budgetProjectedSpend(item);
+  const amount = Number(item && item.amount);
+  return projected !== null && Number.isFinite(amount) && projected > amount;
 }
 
 // Provider names are matched case-insensitively and stored lowercased; label
@@ -341,6 +430,8 @@ export function budgetPutBody(payload) {
     amount: payload.amount,
     per_child: Boolean(payload.per_child),
     cost_basis: budgetCostBasis(payload),
+    // Empty returns the budget to the default thresholds.
+    alert_thresholds: budgetOwnAlertThresholds(payload),
   };
 }
 

@@ -9,6 +9,7 @@
   import { access } from "$lib/stores/access.svelte.js";
   import { budgetsStore as store } from "./budgets.svelte.js";
   import {
+    budgetAlertThresholdsLabel,
     budgetCostBasisOptions,
     budgetOverrideDialogMessage,
     budgetPeriodOptions,
@@ -144,6 +145,26 @@
         data-modal-autofocus={store.editing || undefined}
       />
     </FormField>
+    <FormField id="budget-alert-thresholds" label={m.budgets_alert_thresholds()}>
+      <input
+        id="budget-alert-thresholds"
+        class="form-input"
+        type="text"
+        inputmode="numeric"
+        autocomplete="off"
+        placeholder={store.alerts.default_thresholds.join(", ")}
+        aria-describedby="budget-alert-thresholds-help"
+        bind:value={store.form.alert_thresholds}
+      />
+    </FormField>
+    <p id="budget-alert-thresholds-help" class="form-hint alert-thresholds-help">
+      {m.budgets_alert_thresholds_help({
+        defaults: budgetAlertThresholdsLabel(store.alerts.default_thresholds),
+      })}
+      {#if !store.alerts.enabled}
+        {m.budgets_alerts_inactive_title()}
+      {/if}
+    </p>
   </div>
   {#if store.editing}
     <p class="form-hint">
@@ -227,6 +248,11 @@
   .per-child-option small {
     color: var(--text-muted);
     line-height: 1.4;
+  }
+
+  .alert-thresholds-help {
+    grid-column: 1 / -1;
+    margin: 0;
   }
 
   .budget-override-dialog {

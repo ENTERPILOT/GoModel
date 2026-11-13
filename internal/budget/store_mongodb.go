@@ -18,6 +18,7 @@ type MongoDBStore struct {
 	budgets  *mongo.Collection
 	settings *mongo.Collection
 	usage    *mongo.Collection
+	alerts   *mongo.Collection
 }
 
 func NewMongoDBStore(ctx context.Context, database *mongo.Database) (*MongoDBStore, error) {
@@ -28,6 +29,7 @@ func NewMongoDBStore(ctx context.Context, database *mongo.Database) (*MongoDBSto
 		budgets:  database.Collection("budgets"),
 		settings: database.Collection("budget_settings"),
 		usage:    database.Collection("usage"),
+		alerts:   database.Collection("budget_alerts"),
 	}
 	if err := store.migratePreScopeDocuments(ctx); err != nil {
 		return nil, err
@@ -48,6 +50,9 @@ func NewMongoDBStore(ctx context.Context, database *mongo.Database) (*MongoDBSto
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create budget settings indexes: %w", err)
+	}
+	if err := store.createAlertIndexes(ctx); err != nil {
+		return nil, err
 	}
 	return store, nil
 }
@@ -128,6 +133,7 @@ func (s *MongoDBStore) upsertNormalizedBudgets(ctx context.Context, budgets []Bu
 			{Key: "cost_basis", Value: budget.CostBasis},
 			{Key: "period_seconds", Value: budget.PeriodSeconds},
 			{Key: "amount", Value: budget.Amount},
+			{Key: "alert_thresholds", Value: budget.AlertThresholds},
 			{Key: "source", Value: budget.Source},
 			{Key: "updated_at", Value: budget.UpdatedAt},
 		}}, {Key: "$setOnInsert", Value: bson.D{

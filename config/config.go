@@ -221,6 +221,7 @@ func buildDefaultConfig() *Config {
 		Budgets: BudgetsConfig{
 			Enabled:                 true,
 			ProviderBilledCacheHits: true,
+			Alerts:                  defaultBudgetAlertsConfig(),
 		},
 		RateLimits: RateLimitsConfig{
 			Enabled:       true,

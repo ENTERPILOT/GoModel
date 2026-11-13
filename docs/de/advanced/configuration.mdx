@@ -473,6 +473,12 @@ Budgetverwaltung und protokolliert eine Warnung.
 | `BUDGETS_PROVIDER_BILLED_CACHE_HITS` | Zählt abgerechnete Cache-Treffer in Provider-Budgets auf abgerechneten Kosten (GoModel Pro) | `true` |
 | `SET_BUDGET_<PATH>`          | Legt anfängliche Budgetlimits für einen User Path fest, etwa `daily=10`                             | _(leer)_ |
 | `SET_PROVIDER_BUDGET_<NAME>` | Legt anfängliche Budgetlimits für eine Provider-Instanz fest, etwa `daily=100`                    | _(leer)_ |
+| `BUDGETS_ALERTS_WEBHOOK_URL` | Webhook, der [Budget-Warnungen](/de/features/budgets#warnungen) als JSON erhält. Warnungen werden erst ausgewertet, wenn ein Webhook gesetzt ist | _(leer)_ |
+| `BUDGETS_ALERTS_WEBHOOK_SECRET` | Signiert jede Zustellung: `X-GoModel-Signature` trägt einen Zeitstempel und den HMAC-SHA256 von `<Zeitstempel>.<Body>` | _(leer)_ |
+| `BUDGETS_ALERTS_THRESHOLDS`  | Standard-Warnschwellen, Prozentwerte des Budgetbetrags                                           | `80,100` |
+| `BUDGETS_ALERTS_INTERVAL`    | Sekunden zwischen den Auswertungen der Warnungen                                                 | `60`     |
+| `BUDGETS_ALERTS_WEBHOOK_TIMEOUT` | Sekunden pro Zustellversuch an den Webhook                                                   | `10`     |
+| `BUDGETS_ALERTS_WEBHOOK_MAX_RETRIES` | Wiederholungen einer fehlgeschlagenen Webhook-Zustellung, mit exponentiellem Backoff     | `3`      |
 
 `SET_BUDGET_<PATH>` unterstützt die Standardzeiträume `hourly`, `daily`,
 `weekly` und `monthly`. Das Suffix `<PATH>` wird in Kleinbuchstaben

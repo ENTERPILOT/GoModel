@@ -57,6 +57,7 @@ const (
 	subsystemAudit               = "audit"
 	subsystemUsage               = "usage"
 	subsystemBudgets             = "budgets"
+	subsystemBudgetAlerts        = "budget alerts"
 	subsystemRateLimits          = "rate limits"
 	subsystemBatch               = "batch store"
 	subsystemFileStore           = "file store"
@@ -148,6 +149,9 @@ func (a *App) shutdownOrder() []registeredSubsystem {
 		// The remaining stores flush buffered work into storage, so they must
 		// close before the connection they write through.
 		{name: subsystemBatch, close: closerOf(a.batch)},
+		// Stops alert evaluation and delivery before the budget and usage
+		// stores it reads.
+		{name: subsystemBudgetAlerts, close: closerOf(a.budgetAlerts)},
 		{name: subsystemBudgets, close: closerOf(a.budgets)},
 		{name: subsystemRateLimits, close: closerOf(a.rateLimits)},
 		{name: subsystemUsage, close: closerOf(a.usage)},

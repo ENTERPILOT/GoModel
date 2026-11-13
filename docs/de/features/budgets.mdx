@@ -85,7 +85,8 @@ Budgets -> Create Budget
 />
 
 Legen Sie im Formular **Scope**, **Subjekt** (einen User-Path, ein Label oder einen
-Provider), **Zeitraum** und **Betrag** fest. Jede Zeile auf der Budgets-Seite zeigt
+Provider), **Zeitraum** und **Betrag** fest; **Alert Thresholds** ist optional,
+siehe [Warnungen](#warnungen). Jede Zeile auf der Budgets-Seite zeigt
 dann die Ausgaben als Prozentsatz des Limits, den ausgegebenen Betrag im Verhältnis
 zur Obergrenze und das verbleibende Guthaben für den aktuellen Zeitraum. Label- und
 Provider-Budgets tragen neben dem Zeitraum einen `label`- bzw. `provider`-Chip. Im
@@ -443,6 +444,230 @@ nicht zurück. Verwenden Sie die Aktion Reset in der jeweiligen Zeile, um für e
 einzelnes Budget einen neuen Zeitraum zu starten, oder
 `Settings -> Reset All Budgets`, um alle Budgets zurückzusetzen.
 
+## Warnungen
+
+Ein Budget weist Requests ab, sobald es aufgebraucht ist. Warnungen melden
+sich vorher: Jedes Budget hat Schwellen, als Prozentwerte seines Betrags, und
+GoModel sendet eine Warnung, sobald die Ausgaben eine davon erreichen.
+
+Warnungen sind aus, bis sie ein Ziel haben. Deklarieren Sie einen Webhook, und
+jedes Budget warnt bei den Standardschwellen 80 % und 100 %:
+
+```env
+BUDGETS_ALERTS_WEBHOOK_URL=https://alerts.example.com/gomodel
+BUDGETS_ALERTS_WEBHOOK_SECRET=${file:/run/secrets/alert_webhook_secret}
+```
+
+```yaml
+budgets:
+  alerts:
+    thresholds: [80, 100]
+    webhooks:
+      - url: "https://alerts.example.com/gomodel"
+        secret: "${env:BUDGET_ALERT_WEBHOOK_SECRET}"
+```
+
+URL und Secret akzeptieren [Secret-Referenzen](/de/advanced/secret-references).
+Die Umgebungsvariablen deklarieren einen Webhook und ersetzen die YAML-Liste;
+für mehrere verwenden Sie YAML.
+
+| Einstellung (`budgets.alerts.`) | Umgebungsvariable                    | Standard  | Ändern, wenn                                                                  |
+| ------------------------------- | ------------------------------------ | --------- | ----------------------------------------------------------------------------- |
+| `thresholds`                    | `BUDGETS_ALERTS_THRESHOLDS`          | `80,100`  | Sie früher gewarnt werden möchten (`50,80,100`). Jeder Wert liegt bei 1-100.  |
+| `interval`                      | `BUDGETS_ALERTS_INTERVAL`            | `60`      | Sie Warnungen schneller als eine Minute nach dem Speichern brauchen. Sekunden. |
+| `webhooks`                      | `BUDGETS_ALERTS_WEBHOOK_URL`, `_SECRET` | _(keine)_ | Immer: Ohne Webhook wird nichts ausgewertet.                                 |
+| `webhook_timeout`               | `BUDGETS_ALERTS_WEBHOOK_TIMEOUT`     | `10`      | Ihr Empfänger langsam ist. Sekunden pro Versuch.                              |
+| `webhook_max_retries`           | `BUDGETS_ALERTS_WEBHOOK_MAX_RETRIES` | `3`       | `0`, um nie zu wiederholen; höchstens `10`.                                   |
+
+### Schwellen pro Budget
+
+Ein Budget kann eigene Schwellen tragen, die für dieses Budget die
+Standardwerte ersetzen. Setzen Sie **Alert Thresholds** im Budgetformular,
+`alert_thresholds` in der Admin API oder in der Konfiguration:
+
+```yaml
+budgets:
+  user_paths:
+    - path: "/team/alpha"
+      limits:
+        - period: "monthly"
+          amount: 500.00
+          alert_thresholds: [50, 75, 90]
+```
+
+```env
+SET_BUDGET_TEAM__ALPHA='[{"period":"monthly","amount":500,"alert_thresholds":[50,75,90]}]'
+```
+
+Eine leere Liste bedeutet die Standardwerte. Die Budgets-Seite zeigt die
+Schwellen jedes Budgets, markiert als `inactive`, solange kein Ziel
+konfiguriert ist.
+
+### Wann eine Warnung ausgelöst wird
+
+GoModel wertet Budgets im Hintergrund aus, alle `interval` Sekunden, nie
+während ein Request bedient wird. Eine Warnung wird je Budget-Revision,
+Zeitraum und Schwelle einmal ausgelöst:
+
+- Replikate, die sich eine Datenbank teilen, senden sie gemeinsam nur einmal:
+  Eine Instanz trägt die Warnung in die Datenbank ein, bevor sie sie zustellt,
+  und nur der erste Eintrag gewinnt. Mit SQLite hat jede Instanz ihre eigene
+  Datenbank und warnt für sich.
+- Ein neuer Zeitraum oder ein [Reset](#reset-fenster) beginnt von vorn und
+  kann erneut auslösen. Ebenso eine Änderung des Reset-Ankers in den
+  Einstellungen: Der Zeitraum wird ab dem neuen Anker neu berechnet, und seine
+  Schwellen lösen aus, sobald die Ausgaben darin sie erreichen.
+- Eine Änderung des Betrags oder Löschen und Neuanlegen ist eine neue Revision
+  des Budgets und schaltet alle Schwellen für den Rest des Zeitraums wieder
+  scharf: Von 100 auf 1000 erhöht, nachdem die 80-%-Warnung kam, warnt es bei
+  800 erneut. Werden nur die Schwellen bearbeitet, nicht: Eine bereits
+  ausgelöste Schwelle bleibt ausgelöst, eine neue löst aus, sobald die
+  Ausgaben sie erreichen.
+- Überschreiten die Ausgaben zwischen zwei Auswertungen mehrere Schwellen,
+  löst jede aus, die niedrigste zuerst.
+- Ein [Budget pro Kind](#dynamische-budgets-pro-kind) warnt pro Kind: Jedes
+  Kind erreicht die Schwellen seines eigenen Budgets, auf denselben Ausgaben,
+  die die Durchsetzung zählt, Pfade unterhalb des Kindes eingeschlossen. Eine
+  Auswertung liest die 10.000 Kinder mit den höchsten Ausgaben; die übrigen
+  werden nicht ausgewertet.
+- Die Ausgaben werden aus der gespeicherten Nutzung gelesen. Eine Warnung
+  folgt dem auslösenden Request daher um den Usage-Flush
+  (`USAGE_FLUSH_INTERVAL`, 5 s) plus bis zu ein Intervall verzögert.
+
+Der Eintrag wird vor der Zustellung geschrieben, eine Warnung wird also
+höchstens einmal zugestellt: Wird ein Gateway zwischen beidem gestoppt, geht
+diese Warnung verloren, und eine Warnung, die nach ihren Wiederholungen nicht
+zugestellt werden konnte, wird protokolliert und gezählt, nicht später
+gesendet. Beim Herunterfahren haben wartende Warnungen 5 s Zeit für die
+Zustellung; was danach noch wartet, wird verworfen, protokolliert und als
+Zustellfehler gezählt.
+
+### Webhook-Payload
+
+Jede Warnung ist ein `POST` mit JSON-Body:
+
+```json
+{
+  "schema_version": 1,
+  "type": "budget.threshold_reached",
+  "id": "bgt_5f0c2a9d41b7e3a86c1d02ef",
+  "timestamp": "2026-04-25T12:00:07Z",
+  "budget": {
+    "scope": "user_path",
+    "subject": "/customers",
+    "effective_subject": "/customers/alice",
+    "per_child": true,
+    "period_seconds": 86400,
+    "period": "daily",
+    "amount": 100,
+    "cost_basis": "provider",
+    "revision": "1745539200:100"
+  },
+  "threshold_percent": 80,
+  "spent": 81.2,
+  "usage_ratio": 0.812,
+  "period_start": "2026-04-25T00:00:00Z",
+  "period_end": "2026-04-26T00:00:00Z",
+  "projected_spend": 162.4,
+  "projected_exhaustion_at": "2026-04-25T14:47:00Z"
+}
+```
+
+| Feld                       | Bedeutung                                                                                                 |
+| -------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `schema_version`           | `1`. Ändert sich nur, wenn ein Feld umbenannt, entfernt oder umgedeutet wird; neue Felder behalten sie.   |
+| `type`                     | `budget.threshold_reached`. Ignorieren Sie unbekannte Typen: Es können weitere hinzukommen.               |
+| `id`                       | Identifiziert die Warnung; deduplizieren Sie darauf. Siehe unten.                                         |
+| `timestamp`                | Wann GoModel die Warnung ausgelöst hat (UTC).                                                             |
+| `budget.scope`, `.subject` | Das Budget: `user_path`, `label` oder `provider`, und sein Subjekt.                                       |
+| `budget.effective_subject` | Wofür die Ausgaben gezählt wurden: der Kindpfad eines Budgets pro Kind, sonst das Subjekt.                |
+| `budget.period_seconds`, `.period` | Der Reset-Zeitraum und sein Name (`hourly`, `daily`, `weekly`, `monthly` oder `<n>s`).             |
+| `budget.amount`, `.cost_basis` | Das Limit und die Kosten, auf denen `spent` gemessen wird (`provider` oder `billed`).                 |
+| `budget.revision`          | Opak. Ändert sich mit dem Betrag oder beim Neuanlegen, nicht wenn nur die Schwellen geändert werden.      |
+| `threshold_percent`        | Die erreichte Schwelle.                                                                                   |
+| `spent`, `usage_ratio`     | Ausgaben im Zeitraum beim Auslösen und `spent / amount` (über `1`, wenn überschritten).                   |
+| `period_start`, `period_end` | Der Zeitraum, zu dem die Warnung gehört. Ein Reset verschiebt `period_start` auf den Reset-Zeitpunkt.   |
+| `projected_spend`          | Siehe [Ausgabenprognose](#ausgabenprognose). Entfällt, solange zu wenig vom Zeitraum vergangen ist.       |
+| `projected_exhaustion_at`  | Wann das Budget beim aktuellen Tempo aufgebraucht ist. Entfällt ohne Prognose oder wenn es reicht.        |
+
+Zwei Zustellungen tragen genau dann dieselbe `id`, wenn sie dieselbe Warnung
+sind: dasselbe Budget (`scope`, `subject`, `effective_subject`, Zeitraum),
+dieselbe `revision`, derselbe `period_start` und dieselbe `threshold_percent`.
+Wiederholungen und Zustellungen eines anderen Replikats verwenden sie erneut.
+Ein neuer Zeitraum, ein Reset, ein verschobener Reset-Anker oder eine neue
+Revision ergibt eine neue `id`.
+
+Felder werden nur hinzugefügt. Jede Zustellung trägt außerdem diese Header:
+
+| Header                | Wert                                                                     |
+| --------------------- | ------------------------------------------------------------------------ |
+| `X-GoModel-Event`     | Der `type` der Warnung                                                   |
+| `X-GoModel-Delivery`  | Die `id` der Warnung                                                     |
+| `X-GoModel-Signature` | `t=<Unix-Sekunden>,v1=<hex>`: der Zeitpunkt des Versuchs und das HMAC-SHA256 von `<t>.<roher Body>` mit dem `secret` des Webhooks als Schlüssel. Nur gesendet, wenn ein Secret gesetzt ist. |
+
+Prüfen Sie die Signatur gegen den rohen Request-Body, bevor Sie ihn parsen,
+und lehnen Sie einen Zeitstempel ab, der mehr als 5 Minuten von Ihrer Uhr
+abweicht, um Replays zu verhindern. Jeder Versuch wird beim Senden signiert,
+daher bestehen auch Wiederholungen. Ignorieren Sie Paare außer `t` und `v1`:
+Ein späteres Verfahren kommt als `v2=` neben `v1` hinzu.
+
+```python
+import hashlib, hmac, time
+
+TOLERANCE = 300  # seconds
+
+def verified(secret: bytes, body: bytes, header: str) -> bool:
+    pairs = dict(p.split("=", 1) for p in header.split(",") if "=" in p)
+    t, signature = pairs.get("t", ""), pairs.get("v1", "")
+    if not t.isdigit() or abs(time.time() - int(t)) > TOLERANCE:
+        return False
+    expected = hmac.new(secret, t.encode() + b"." + body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature)
+```
+
+Antworten Sie mit einem beliebigen `2xx`. Ein Netzwerkfehler, `408`, `429`
+oder `5xx` wird bis zu `webhook_max_retries`-mal wiederholt, mit 1 s, 2 s, 4 s
+und so weiter (höchstens 30 s) zwischen den Versuchen; jeder andere Status
+wird nicht wiederholt. Nur ein `307` oder `308` zum selben Origin wird
+verfolgt, da er den `POST` mit seinem Body wiederholt; jede andere
+Weiterleitung gilt als fehlgeschlagene Zustellung, konfigurieren Sie also die
+endgültige URL. Zustellungen nutzen den ausgehenden Proxy des Gateways
+(`HTTPS_PROXY`) und dessen TLS-Vertrauen (`http.tls`). Ein ausgefallener
+Webhook verzögert weder die Auswertung anderer Budgets noch einen anderen
+Webhook.
+
+Der Webhook ist bewusst generisches JSON: GoModel formatiert keine Nachrichten
+für Slack, Teams oder E-Mail. Richten Sie ihn auf einen kleinen Empfänger oder
+ein Automatisierungswerkzeug, das dies übernimmt, oder registrieren Sie in
+einem eigenen Build einen `ext.AlertSink`, der dieselben Ereignisse erhält.
+Ein Sink baut seine HTTP-Clients mit `ext.NewHTTPClient`, um denselben Proxy
+und dasselbe TLS-Vertrauen zu nutzen, kann `ext.SharedStoreAware`
+implementieren, um Zustand zwischen Replikaten zu teilen, und wird von dem
+Build freigegeben, der ihn registriert hat, sobald das Gateway
+heruntergefahren ist.
+
+Zwei Prometheus-Zähler begleiten Warnungen:
+`gomodel_budget_alerts_fired_total` (`scope`, `threshold`) und
+`gomodel_budget_alert_delivery_failures_total` (`destination`); siehe
+[Prometheus-Metriken](/de/guides/prometheus-metrics#warnung-bei-nicht-zugestellten-budget-warnungen).
+
+## Ausgabenprognose
+
+`GET /admin/budgets` und die Budgets-Seite zeigen, wohin sich jedes Budget
+bewegt:
+
+- `projected_spend`: die Ausgaben am Ende des Zeitraums, wenn sie im
+  bisherigen Tempo weiterlaufen, `spent / period_ratio`.
+- `projected_exhaustion_at`: wann das Budget bei diesem Tempo aufgebraucht
+  ist. Nur vorhanden, wenn die Prognose den Betrag übersteigt und das Budget
+  noch nicht aufgebraucht ist.
+
+Die Prognose ist linear und liest eine Lastspitze früh im Zeitraum als Tempo
+für den gesamten Zeitraum. Beide Felder entfallen deshalb, bis 5 % des
+Zeitraums vergangen sind (72 Minuten eines Tages, etwa anderthalb Tage eines
+Monats), gerechnet ab einem Reset, falls es einen gab. Eine Vorlage pro Kind
+hat keine Prognose, da sie keine einzelnen Ausgaben hat.
+
 ## Admin API
 
 Die Budgetverwaltung ist auch über die Admin API verfügbar:
@@ -483,9 +708,17 @@ console.log(budgets);
 
 </CodeGroup>
 
+Jedes Budget in der Antwort trägt seinen Status (`spent`, `remaining`,
+`usage_ratio`, `period_ratio`), seine [Prognose](#ausgabenprognose)
+(`projected_spend`, `projected_exhaustion_at`) und seine eigenen
+`alert_thresholds`, falls es welche hat. Das Objekt `alerts` auf oberster Ebene
+meldet, ob Warnungen aktiv sind (`enabled`, ein Ziel existiert), und die
+`default_thresholds`.
+
 Ein Budget erstellen oder aktualisieren. Ein Budget wird über `scope`, `subject` und
 Zeitraum identifiziert; bei User-Path-Budgets wird `user_path` als Kurzschreibweise
-für das Subjekt akzeptiert:
+für das Subjekt akzeptiert. `alert_thresholds` ist optional: Ein `PUT` ohne dieses
+Feld setzt das Budget auf die Standardschwellen zurück.
 
 <CodeGroup>
 
@@ -498,7 +731,8 @@ curl -X PUT http://localhost:8080/admin/budgets \
     "subject": "/team/alpha",
     "per_child": false,
     "budget_key": { "period": "daily" },
-    "amount": 10.00
+    "amount": 10.00,
+    "alert_thresholds": [50, 90]
   }'
 ```
 

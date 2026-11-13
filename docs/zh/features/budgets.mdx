@@ -62,7 +62,7 @@ Budgets -> Create Budget
   className="rounded-lg"
 />
 
-在表单中设置**作用域**、**对象**（用户路径、标签或提供商）、**周期**和**金额**。之后，Budgets 页面上的每一行都会显示支出占上限的百分比、已支出金额与上限的对比，以及当前周期的剩余额度。标签和提供商预算会在周期旁显示 `label` 或 `provider` 标记。在控制台中创建的预算标记为 `manual`，从 YAML 或环境变量加载的预算标记为 `config`。
+在表单中设置**作用域**、**对象**（用户路径、标签或提供商）、**周期**和**金额**；**Alert Thresholds** 为可选项，参见[告警](#告警)。之后，Budgets 页面上的每一行都会显示支出占上限的百分比、已支出金额与上限的对比，以及当前周期的剩余额度。标签和提供商预算会在周期旁显示 `label` 或 `provider` 标记。在控制台中创建的预算标记为 `manual`，从 YAML 或环境变量加载的预算标记为 `config`。
 
 您也可以通过 YAML 预置预算：
 
@@ -308,6 +308,158 @@ Settings -> Budget Resets
 
 编辑预算会更改上限，但不会重置当前周期。使用行级的 Reset 操作可为单个预算开始新周期，使用 `Settings -> Reset All Budgets` 可重置所有预算。
 
+## 告警
+
+预算用尽后会拒绝请求。告警会在此之前通知你：每个预算都有阈值（金额的百分比），支出达到某个阈值时，GoModel 发送一条告警。
+
+在有投递目标之前，告警处于关闭状态。声明一个 webhook 后，每个预算都会在默认阈值 80% 和 100% 时告警：
+
+```env
+BUDGETS_ALERTS_WEBHOOK_URL=https://alerts.example.com/gomodel
+BUDGETS_ALERTS_WEBHOOK_SECRET=${file:/run/secrets/alert_webhook_secret}
+```
+
+```yaml
+budgets:
+  alerts:
+    thresholds: [80, 100]
+    webhooks:
+      - url: "https://alerts.example.com/gomodel"
+        secret: "${env:BUDGET_ALERT_WEBHOOK_SECRET}"
+```
+
+URL 和 secret 都支持[密钥引用](/zh/advanced/secret-references)。环境变量声明一个 webhook，并替换 YAML 中的列表；需要多个 webhook 时请使用 YAML。
+
+| 设置（`budgets.alerts.`） | 环境变量                             | 默认值    | 何时修改                                         |
+| ------------------------- | ------------------------------------ | --------- | ------------------------------------------------ |
+| `thresholds`              | `BUDGETS_ALERTS_THRESHOLDS`          | `80,100`  | 希望更早收到提醒（`50,80,100`）。每个值为 1-100。 |
+| `interval`                | `BUDGETS_ALERTS_INTERVAL`            | `60`      | 需要在支出入库后一分钟内更快告警。单位为秒。     |
+| `webhooks`                | `BUDGETS_ALERTS_WEBHOOK_URL`、`_SECRET` | _（无）_ | 必须设置：没有 webhook 就不会评估任何内容。      |
+| `webhook_timeout`         | `BUDGETS_ALERTS_WEBHOOK_TIMEOUT`     | `10`      | 接收端较慢。每次尝试的秒数。                     |
+| `webhook_max_retries`     | `BUDGETS_ALERTS_WEBHOOK_MAX_RETRIES` | `3`       | 设为 `0` 则从不重试；最大为 `10`。               |
+
+### 单个预算的阈值
+
+预算可以有自己的阈值，用来替换默认值。可在预算表单中设置 **Alert Thresholds**，在 Admin API 中设置 `alert_thresholds`，或写入配置：
+
+```yaml
+budgets:
+  user_paths:
+    - path: "/team/alpha"
+      limits:
+        - period: "monthly"
+          amount: 500.00
+          alert_thresholds: [50, 75, 90]
+```
+
+```env
+SET_BUDGET_TEAM__ALPHA='[{"period":"monthly","amount":500,"alert_thresholds":[50,75,90]}]'
+```
+
+空列表表示使用默认值。Budgets 页面会显示每个预算的阈值；尚未配置投递目标时标记为 `inactive`。
+
+### 何时触发告警
+
+GoModel 在后台每隔 `interval` 秒评估一次预算，从不在处理请求时评估。每个预算修订版本、周期和阈值只触发一次告警：
+
+- 共享同一数据库的多个副本合计只发送一次：实例先把告警记录写入数据库再投递，只有第一条记录生效。使用 SQLite 时每个实例有自己的数据库，各自告警。
+- 新周期或[重置](#重置窗口)会重新开始，可以再次触发。在设置中修改重置锚点也是如此：周期按新锚点重新计算，周期内的支出达到阈值时会再次触发。
+- 修改预算金额，或删除后重新创建预算，会产生预算的新修订版本，并在本周期剩余时间内重新启用所有阈值：在 80% 告警之后把金额从 100 提高到 1000，支出到 800 时会再次告警。只修改阈值不算新修订版本：已触发的阈值保持已触发，新增的阈值在支出达到时触发。
+- 如果两次评估之间支出越过了多个阈值，每个阈值都会触发，从最低的开始。
+- [子路径预算](#动态的子路径预算)按子路径告警：每个子路径达到的是自己预算的阈值，所用支出与执行限额时统计的相同，包含该子路径下的所有路径。一次评估读取支出最多的 10,000 个子路径，其余不评估。
+- 支出读取自已入库的用量，因此告警相对于触发它的请求会有延迟：用量刷新间隔（`USAGE_FLUSH_INTERVAL`，5 秒）加上最多一个评估间隔。
+
+记录在投递之前写入，因此告警最多投递一次：网关在两者之间被停止时，这条告警会丢失；重试后仍无法投递的告警会被记录到日志并计数，不会稍后补发。关闭时，队列中的告警有 5 秒时间完成投递；之后仍在排队的告警会被放弃、记录到日志并计为投递失败。
+
+### Webhook 负载
+
+每条告警是一次带 JSON 请求体的 `POST`：
+
+```json
+{
+  "schema_version": 1,
+  "type": "budget.threshold_reached",
+  "id": "bgt_5f0c2a9d41b7e3a86c1d02ef",
+  "timestamp": "2026-04-25T12:00:07Z",
+  "budget": {
+    "scope": "user_path",
+    "subject": "/customers",
+    "effective_subject": "/customers/alice",
+    "per_child": true,
+    "period_seconds": 86400,
+    "period": "daily",
+    "amount": 100,
+    "cost_basis": "provider",
+    "revision": "1745539200:100"
+  },
+  "threshold_percent": 80,
+  "spent": 81.2,
+  "usage_ratio": 0.812,
+  "period_start": "2026-04-25T00:00:00Z",
+  "period_end": "2026-04-26T00:00:00Z",
+  "projected_spend": 162.4,
+  "projected_exhaustion_at": "2026-04-25T14:47:00Z"
+}
+```
+
+| 字段                       | 含义                                                                         |
+| -------------------------- | ---------------------------------------------------------------------------- |
+| `schema_version`           | `1`。只有字段被重命名、删除或含义改变时才会变化；新增字段不改变它。          |
+| `type`                     | `budget.threshold_reached`。请忽略未知类型：以后可能增加。                   |
+| `id`                       | 标识这条告警，请据此去重。见下文。                                           |
+| `timestamp`                | GoModel 发出告警的时间（UTC）。                                              |
+| `budget.scope`、`.subject` | 预算：`user_path`、`label` 或 `provider`，以及它的对象。                     |
+| `budget.effective_subject` | 支出实际归属的对象：子路径预算为子路径，否则为对象本身。                     |
+| `budget.period_seconds`、`.period` | 重置周期及其名称（`hourly`、`daily`、`weekly`、`monthly` 或 `<n>s`）。 |
+| `budget.amount`、`.cost_basis` | 限额，以及 `spent` 所依据的成本（`provider` 或 `billed`）。              |
+| `budget.revision`          | 不透明值。金额改变或预算被重新创建时变化；只修改阈值时不变。                 |
+| `threshold_percent`        | 达到的阈值。                                                                 |
+| `spent`、`usage_ratio`     | 发出告警时本周期的支出，以及 `spent / amount`（超出时大于 `1`）。            |
+| `period_start`、`period_end` | 告警所属的周期。重置会把 `period_start` 移到重置时间。                     |
+| `projected_spend`          | 参见[支出预测](#支出预测)。周期经过的时间太短时省略。                        |
+| `projected_exhaustion_at`  | 按当前速度预算耗尽的时间。没有预测或预算足够撑过本周期时省略。               |
+
+两次投递带有相同的 `id`，当且仅当它们是同一条告警：同一预算（`scope`、`subject`、`effective_subject`、周期）、同一 `revision`、同一 `period_start` 和同一 `threshold_percent`。重试以及来自其他副本的投递都沿用它。新周期、重置、重置锚点移动或新修订版本都会产生新的 `id`。
+
+字段只会增加。每次投递还带有以下请求头：
+
+| 请求头                | 值                                                                       |
+| --------------------- | ------------------------------------------------------------------------ |
+| `X-GoModel-Event`     | 告警的 `type`                                                            |
+| `X-GoModel-Delivery`  | 告警的 `id`                                                              |
+| `X-GoModel-Signature` | `t=<Unix 秒>,v1=<hex>`：本次尝试的时间，以及以 webhook 的 `secret` 为密钥对 `<t>.<原始请求体>` 计算的 HMAC-SHA256。仅在设置了 secret 时发送。 |
+
+请在解析之前，针对原始请求体校验签名，并拒绝与本地时钟相差超过 5 分钟的时间戳，以防重放。每次尝试都在发送时签名，因此重试也能通过校验。请忽略 `t` 和 `v1` 以外的键值对：以后的新方案会以 `v2=` 的形式与 `v1` 并列加入。
+
+```python
+import hashlib, hmac, time
+
+TOLERANCE = 300  # seconds
+
+def verified(secret: bytes, body: bytes, header: str) -> bool:
+    pairs = dict(p.split("=", 1) for p in header.split(",") if "=" in p)
+    t, signature = pairs.get("t", ""), pairs.get("v1", "")
+    if not t.isdigit() or abs(time.time() - int(t)) > TOLERANCE:
+        return False
+    expected = hmac.new(secret, t.encode() + b"." + body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature)
+```
+
+以任意 `2xx` 响应即可。网络错误、`408`、`429` 或 `5xx` 最多重试 `webhook_max_retries` 次，两次尝试之间等待 1 秒、2 秒、4 秒，依此类推（最长 30 秒）；其他状态码不重试。只跟随指向同一源的 `307` 或 `308`，因为它们会连同请求体重发 `POST`；其他重定向都算作投递失败，请直接配置最终 URL。投递使用网关的出站代理（`HTTPS_PROXY`）和 TLS 信任配置（`http.tls`）。某个 webhook 不可用，不会拖慢其他预算的评估，也不会影响其他 webhook。
+
+webhook 有意保持为通用 JSON：GoModel 不会为 Slack、Teams 或电子邮件格式化消息。请把它指向一个负责格式化的小型接收服务或自动化工具；在自定义构建中，也可以注册一个 `ext.AlertSink`，它会收到相同的事件。sink 应使用 `ext.NewHTTPClient` 创建 HTTP 客户端，以沿用相同的代理和 TLS 信任配置；它可以实现 `ext.SharedStoreAware` 以在副本之间共享状态；注册它的构建负责在网关关闭后释放它。
+
+有两个 Prometheus 计数器跟踪告警：`gomodel_budget_alerts_fired_total`（`scope`、`threshold`）和 `gomodel_budget_alert_delivery_failures_total`（`destination`）；参见 [Prometheus 指标](/zh/guides/prometheus-metrics#针对未投递的预算告警进行告警)。
+
+## 支出预测
+
+`GET /admin/budgets` 和 Budgets 页面会显示每个预算的走向：
+
+- `projected_spend`：如果按目前的速度继续支出，周期结束时的支出，即 `spent / period_ratio`。
+- `projected_exhaustion_at`：按该速度预算何时用尽。仅当预测值超过金额且预算尚未用尽时出现。
+
+预测是线性的，会把周期早期的突发当作整个周期的速度。因此在周期经过 5% 之前（一天中的 72 分钟，一个月中约一天半），这两个字段都会省略；如果发生过重置，则从重置时起算。子路径模板没有预测，因为它没有单一的支出值。
+
 ## Admin API
 
 预算管理也可以通过 Admin API 进行：
@@ -348,7 +500,9 @@ console.log(budgets);
 
 </CodeGroup>
 
-创建或更新预算。预算由其 `scope`、`subject` 和周期唯一标识；对于用户路径预算，可以使用 `user_path` 作为 subject 的简写形式：
+响应中的每个预算都带有其状态（`spent`、`remaining`、`usage_ratio`、`period_ratio`）、[预测](#支出预测)（`projected_spend`、`projected_exhaustion_at`），以及自己的 `alert_thresholds`（如果设置了）。顶层的 `alerts` 对象说明告警是否启用（`enabled`，即存在投递目标）以及 `default_thresholds`。
+
+创建或更新预算。预算由其 `scope`、`subject` 和周期唯一标识；对于用户路径预算，可以使用 `user_path` 作为 subject 的简写形式。`alert_thresholds` 是可选的：不带该字段的 `PUT` 会让预算恢复使用默认阈值。
 
 <CodeGroup>
 
@@ -361,7 +515,8 @@ curl -X PUT http://localhost:8080/admin/budgets \
     "subject": "/team/alpha",
     "per_child": false,
     "budget_key": { "period": "daily" },
-    "amount": 10.00
+    "amount": 10.00,
+    "alert_thresholds": [50, 90]
   }'
 ```
 

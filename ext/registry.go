@@ -44,6 +44,7 @@ type Registry struct {
 	proxySelector   ProxySelector
 	settings        []RuntimeSetting
 	authenticators  []RequestAuthenticator
+	alertSinks      []AlertSink
 	capabilities    map[Capability]struct{}
 	plugins         []PluginFactory
 	license         License
@@ -91,6 +92,25 @@ func (r *Registry) RegisterAuthenticator(authenticator RequestAuthenticator) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.authenticators = append(r.authenticators, authenticator)
+}
+
+// RegisterAlertSink adds a destination for gateway alerts, such as budget
+// thresholds. Every registered sink receives every alert, alongside the
+// generic webhook core delivers to. Registering one turns alert evaluation on.
+func (r *Registry) RegisterAlertSink(sink AlertSink) {
+	if sink == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.alertSinks = append(r.alertSinks, sink)
+}
+
+// AlertSinks returns a defensive copy of the registered alert sinks.
+func (r *Registry) AlertSinks() []AlertSink {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.alertSinks)
 }
 
 // RegisterSetting adds a deployment-wide setting exposed through the generic
@@ -290,6 +310,9 @@ func RegisterSetting(setting RuntimeSetting) { Default.RegisterSetting(setting) 
 func RegisterAuthenticator(authenticator RequestAuthenticator) {
 	Default.RegisterAuthenticator(authenticator)
 }
+
+// RegisterAlertSink registers an alert sink on the Default registry.
+func RegisterAlertSink(sink AlertSink) { Default.RegisterAlertSink(sink) }
 
 // EnableCapability unlocks an optional core behavior on the Default registry.
 func EnableCapability(capability Capability) { Default.EnableCapability(capability) }

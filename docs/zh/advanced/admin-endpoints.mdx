@@ -625,6 +625,8 @@ curl -X PUT http://localhost:8080/admin/provider-credentials \
 这些操作并非按周期全局生效。对于带路径作用域的 `PUT` 和
 `DELETE` 路由，请对 `user_path` 进行 URL 编码；请求格式参见[预算](/zh/features/budgets)。
 
+`GET /admin/budgets` 返回每个预算及其状态；周期经过 5% 之后，还会返回 `projected_spend` 和 `projected_exhaustion_at`。顶层的 `alerts` 对象说明[预算告警](/zh/features/budgets#告警)是否启用（`enabled`）及其 `default_thresholds`；有自己阈值的预算带有 `alert_thresholds`，`PUT` 接受该字段。
+
 请求示例和执行行为参见[预算](/zh/features/budgets)。
 
 ### 用户端点

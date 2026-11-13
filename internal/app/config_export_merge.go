@@ -226,7 +226,10 @@ func exportBudgets(declared config.BudgetsConfig, stored []budget.Budget, billed
 	result := declared
 	result.UserPaths, result.Labels, result.Providers = nil, nil, nil
 	for _, row := range rows {
-		limit := config.BudgetLimitConfig{PeriodSeconds: row.PeriodSeconds, Amount: row.Amount, CostBasis: string(row.CostBasis)}
+		limit := config.BudgetLimitConfig{
+			PeriodSeconds: row.PeriodSeconds, Amount: row.Amount, CostBasis: string(row.CostBasis),
+			AlertThresholds: row.AlertThresholds,
+		}
 		if label := budget.PeriodLabel(row.PeriodSeconds); isBudgetPeriodName(label) {
 			limit.Period = label
 		}

@@ -304,6 +304,20 @@ sum(rate(gomodel_empty_responses_total[5m])) by (provider, model, reason) > 0
 sum(increase(gomodel_usage_entries_dropped_total[5m])) by (reason) > 0
 ```
 
+## 针对未投递的预算告警进行告警
+
+[预算告警](/zh/features/budgets#告警)投递到 webhook，因此 webhook 出故障时不会有任何提示，除非你主动监控。`gomodel_budget_alerts_fired_total` 统计实例发出的告警，`gomodel_budget_alert_delivery_failures_total` 统计目标未收到的告警：重试后仍然失败的 webhook、失败的 sink、因该目标的队列已满而被丢弃的告警，或在关闭时被放弃的告警。原因见服务器日志。
+
+| 指标                                           | 标签          | 取值                                           |
+| ---------------------------------------------- | ------------- | ---------------------------------------------- |
+| `gomodel_budget_alerts_fired_total`            | `scope`       | `user_path`、`label` 或 `provider`             |
+|                                                | `threshold`   | 阈值百分比，例如 `80`                          |
+| `gomodel_budget_alert_delivery_failures_total` | `destination` | `webhook`，或已注册 sink 的名称                |
+
+```promql
+sum(increase(gomodel_budget_alert_delivery_failures_total[1h])) by (destination) > 0
+```
+
 ## Prometheus 配置
 
 ### 抓取配置

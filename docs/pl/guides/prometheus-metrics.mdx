@@ -324,6 +324,25 @@ proces może się zakończyć, zanim Prometheus odczyta licznik, więc stratę z
 sum(increase(gomodel_usage_entries_dropped_total[5m])) by (reason) > 0
 ```
 
+## Alertowanie o niedostarczonych alertach budżetowych
+
+[Alerty budżetowe](/pl/features/budgets#alerty) są dostarczane do webhooka,
+więc niedziałający webhook milczy, jeśli go nie obserwujesz.
+`gomodel_budget_alerts_fired_total` zlicza alerty zgłoszone przez instancję,
+a `gomodel_budget_alert_delivery_failures_total` te, których cel nie
+otrzymał: webhook, który zawiódł mimo ponowień, sink, który zawiódł, alert
+odrzucony, bo kolejka tego celu była pełna, albo porzucony przy zamykaniu. Przyczynę znajdziesz w logu serwera.
+
+| Metryka                                        | Etykieta      | Wartości                                       |
+| ---------------------------------------------- | ------------- | ---------------------------------------------- |
+| `gomodel_budget_alerts_fired_total`            | `scope`       | `user_path`, `label` albo `provider`           |
+|                                                | `threshold`   | Próg w procentach, np. `80`                    |
+| `gomodel_budget_alert_delivery_failures_total` | `destination` | `webhook` albo nazwa zarejestrowanego sinka    |
+
+```promql
+sum(increase(gomodel_budget_alert_delivery_failures_total[1h])) by (destination) > 0
+```
+
 ## Konfiguracja Prometheusa
 
 ### Konfiguracja scrapowania

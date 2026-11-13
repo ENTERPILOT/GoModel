@@ -18,6 +18,7 @@ func sharedStoreAwareComponents(registry *ext.Registry) []ext.SharedStoreAware {
 	components = appendComponents(components, registry.Rewriters())
 	components = appendComponents(components, registry.Settings())
 	components = appendComponents(components, registry.HealthCheckers())
+	components = appendComponents(components, registry.AlertSinks())
 	components = append(components, registry.RouteSelector(), registry.ProxySelector())
 
 	var aware []ext.SharedStoreAware

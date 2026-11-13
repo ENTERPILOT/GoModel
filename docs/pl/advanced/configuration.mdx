@@ -437,6 +437,12 @@ startuje z wyłączonym zarządzaniem budżetami i loguje ostrzeżenie.
 | `BUDGETS_PROVIDER_BILLED_CACHE_HITS` | Wlicza rozliczone cache hity do budżetów providerów na koszcie rozliczeniowym (GoModel Pro) | `true` |
 | `SET_BUDGET_<PATH>`          | Wstępnie ustawia limity budżetu dla ścieżki użytkownika, np. `daily=10`            | _(pusty)_ |
 | `SET_PROVIDER_BUDGET_<NAME>` | Wstępnie ustawia limity budżetu dla instancji providera, np. `daily=100`           | _(pusty)_ |
+| `BUDGETS_ALERTS_WEBHOOK_URL` | Webhook, który otrzymuje [alerty budżetowe](/pl/features/budgets#alerty) jako JSON. Alerty są oceniane dopiero po ustawieniu webhooka | _(pusty)_ |
+| `BUDGETS_ALERTS_WEBHOOK_SECRET` | Podpisuje każde dostarczenie: `X-GoModel-Signature` niesie znacznik czasu i HMAC-SHA256 z `<znacznik>.<treść>` | _(pusty)_ |
+| `BUDGETS_ALERTS_THRESHOLDS`  | Domyślne progi alertów, procenty kwoty budżetu                                     | `80,100`  |
+| `BUDGETS_ALERTS_INTERVAL`    | Sekundy między ocenami alertów                                                     | `60`      |
+| `BUDGETS_ALERTS_WEBHOOK_TIMEOUT` | Sekundy na jedną próbę dostarczenia do webhooka                                | `10`      |
+| `BUDGETS_ALERTS_WEBHOOK_MAX_RETRIES` | Ponowienia nieudanego dostarczenia do webhooka, z wykładniczym odstępem    | `3`       |
 
 `SET_BUDGET_<PATH>` obsługuje standardowe okresy `hourly`, `daily`, `weekly`
 i `monthly`. Sufiks `<PATH>` jest zamieniany na małe litery; używaj podwójnych podkreślników

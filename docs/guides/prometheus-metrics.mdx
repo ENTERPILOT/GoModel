@@ -323,6 +323,26 @@ the process may exit before Prometheus scrapes it, so the log is the record.
 sum(increase(gomodel_usage_entries_dropped_total[5m])) by (reason) > 0
 ```
 
+## Alerting on Undelivered Budget Alerts
+
+[Budget alerts](/features/budgets#alerts) are delivered to a webhook, so a
+failing webhook is silent unless you watch for it.
+`gomodel_budget_alerts_fired_total` counts the alerts an instance raised, and
+`gomodel_budget_alert_delivery_failures_total` the ones a destination did not
+receive: a webhook that still failed after its retries, a sink that failed,
+an alert dropped because that destination's queue was full, or one abandoned
+at shutdown. The server log has the reason.
+
+| Metric                                         | Label         | Values                                         |
+| ---------------------------------------------- | ------------- | ---------------------------------------------- |
+| `gomodel_budget_alerts_fired_total`            | `scope`       | `user_path`, `label`, or `provider`            |
+|                                                | `threshold`   | The threshold percentage, such as `80`         |
+| `gomodel_budget_alert_delivery_failures_total` | `destination` | `webhook`, or the name of a registered sink    |
+
+```promql
+sum(increase(gomodel_budget_alert_delivery_failures_total[1h])) by (destination) > 0
+```
+
 ## Prometheus Configuration
 
 ### Scrape Config

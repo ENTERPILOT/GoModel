@@ -9,8 +9,10 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
@@ -108,6 +110,11 @@ type Service struct {
 	// providerBillable reports whether a provider's cost is owed by the
 	// caller; see SetProviderBillable. nil treats every provider as billable.
 	providerBillable func(providerName string) bool
+
+	// alertDefaults are the alert thresholds of a budget without its own;
+	// alertsEnabled is set once an Alerter evaluates them. See alerts.go.
+	alertDefaults []int
+	alertsEnabled atomic.Bool
 }
 
 // SetProviderBillable installs the lookup that tells a non-billable provider
@@ -155,6 +162,7 @@ func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Se
 		settings:                DefaultSettings(),
 		caps:                    capabilities{quotaTemplates: true, billedBudgets: true},
 		providerBilledCacheHits: true,
+		alertDefaults:           config.DefaultBudgetAlertThresholds(),
 	}
 	for _, option := range options {
 		if option != nil {
@@ -610,6 +618,16 @@ func (s *Service) match(subjects *Subjects, now time.Time) ([]Budget, Settings, 
 	return matching, settings, now, nil
 }
 
+// activePeriod returns the bounds of the period budget is in at now. A reset
+// inside the calendar period starts it at the reset.
+func activePeriod(budget Budget, now time.Time, settings Settings) (time.Time, time.Time) {
+	start, end := PeriodBounds(now, budget.PeriodSeconds, settings)
+	if budget.LastResetAt != nil && budget.LastResetAt.After(start) {
+		start = budget.LastResetAt.UTC()
+	}
+	return start, end
+}
+
 // evaluate resolves the active period of every budget and asks the store for
 // all their spends in one round trip. Enforcement runs on every request, so the
 // batched lookup is what keeps a wide match set from costing a query each.
@@ -621,10 +639,7 @@ func (s *Service) evaluate(ctx context.Context, budgets []Budget, now time.Time,
 	windows := make([]SpendWindow, 0, len(budgets))
 	windowIndexes := make([]int, 0, len(budgets))
 	for i, budget := range budgets {
-		start, end := PeriodBounds(now, budget.PeriodSeconds, settings)
-		if budget.LastResetAt != nil && budget.LastResetAt.After(start) {
-			start = budget.LastResetAt.UTC()
-		}
+		start, end := activePeriod(budget, now, settings)
 		results[i] = CheckResult{Budget: budget, PeriodStart: start, PeriodEnd: end, Remaining: budget.Amount}
 		// A template shown in the global admin list has no single usage total.
 		// Only resolved request/user-path checks query one child partition.
