@@ -161,7 +161,9 @@ networkPolicy:
 ```
 
 The API, the dashboard and `/metrics` share that port, so a listed source
-reaches all three; include Prometheus if it scrapes the gateway. Kubelet probes
+reaches all three; include Prometheus if it scrapes the gateway. With
+`httpRoute`, list the pods of your Gateway implementation (its data plane), not
+the ingress controller's. Kubelet probes
 come from the node and are not affected, and the release's own pods are always
 allowed so `helm test` keeps working.
 
