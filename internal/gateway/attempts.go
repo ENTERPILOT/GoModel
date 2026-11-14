@@ -67,6 +67,9 @@ type ProviderAttempt struct {
 	// is enabled; the audit layer parses and redacts them before storage.
 	ResponseBody    []byte
 	ResponseHeaders http.Header
+	// UpstreamErrorMessage reports that ErrorMessage was taken from the
+	// provider's response; see core.GatewayError.MessageFromUpstream.
+	UpstreamErrorMessage bool
 }
 
 type AttemptRecorder struct {
@@ -179,6 +182,7 @@ func providerAttemptFromResult(kind, providerType, providerName, model string, s
 		}
 		attempt.ResponseBody = gatewayErr.ResponseBody
 		attempt.ResponseHeaders = gatewayErr.ResponseHeaders
+		attempt.UpstreamErrorMessage = gatewayErr.MessageFromUpstream()
 		return attempt
 	}
 

@@ -340,26 +340,31 @@ func mapAWSError(err error) error {
 		ErrorMessage() string
 	}
 	message := err.Error()
-	if ae, ok := errors.AsType[apiErr](err); ok {
+	ae, fromAPI := errors.AsType[apiErr](err)
+	if fromAPI {
 		if msg := strings.TrimSpace(ae.ErrorMessage()); msg != "" {
 			message = fmt.Sprintf("%s: %s", ae.ErrorCode(), msg)
 		}
 	}
 
+	var ge *core.GatewayError
 	switch status {
 	case http.StatusUnauthorized, http.StatusForbidden:
-		return core.NewAuthenticationError(providerName, message)
+		ge = core.NewAuthenticationError(providerName, message)
 	case http.StatusTooManyRequests:
-		return core.NewRateLimitError(providerName, message)
+		ge = core.NewRateLimitError(providerName, message)
 	case http.StatusBadRequest:
-		return core.NewInvalidRequestErrorWithStatus(http.StatusBadRequest, message, err)
+		ge = core.NewInvalidRequestErrorWithStatus(http.StatusBadRequest, message, err)
 	case http.StatusNotFound:
-		ge := core.NewNotFoundError(message)
+		ge = core.NewNotFoundError(message)
 		ge.Provider = providerName
 		ge.Err = err
-		return ge
+	default:
+		ge = core.NewProviderError(providerName, status, message, err)
 	}
-	return core.NewProviderError(providerName, status, message, err)
+	// An AWS API error carries the service's own message.
+	ge.UpstreamMessage = fromAPI
+	return ge
 }
 
 var _ core.Provider = (*Provider)(nil)

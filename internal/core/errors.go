@@ -49,6 +49,11 @@ type GatewayError struct {
 	// failed provider attempts can be audited. Never serialized to API clients.
 	ResponseBody    []byte      `json:"-"`
 	ResponseHeaders http.Header `json:"-"`
+	// UpstreamMessage reports that Message was taken from the provider's
+	// response rather than written by the gateway. Providers often quote the
+	// request in it, so the audit log treats it as body content. See
+	// MessageFromUpstream.
+	UpstreamMessage bool `json:"-"`
 }
 
 // maxGatewayErrorBodyBytes caps the raw upstream error body retained for audit.
@@ -166,6 +171,20 @@ func (e *GatewayError) WithCode(code string) *GatewayError {
 func (e *GatewayError) WithResponseBody(body []byte) *GatewayError {
 	e.ResponseBody = captureGatewayErrorBody(body)
 	return e
+}
+
+// WithUpstreamMessage marks Message as taken from the provider's response.
+// Adapters that copy provider text into an error without attaching the raw
+// body use it; ParseProviderError sets it itself.
+func (e *GatewayError) WithUpstreamMessage() *GatewayError {
+	e.UpstreamMessage = true
+	return e
+}
+
+// MessageFromUpstream reports whether Message came from the provider: it was
+// marked with WithUpstreamMessage or the raw upstream body was retained.
+func (e *GatewayError) MessageFromUpstream() bool {
+	return e.UpstreamMessage || len(e.ResponseBody) > 0
 }
 
 // NewProviderError creates a new provider error (upstream 5xx)
@@ -356,6 +375,7 @@ func ParseProviderError(provider string, statusCode int, body []byte, originalEr
 		gatewayErr = gatewayErr.WithCode(errorResponse.Code)
 	}
 	gatewayErr.ResponseBody = captureGatewayErrorBody(body)
+	gatewayErr.UpstreamMessage = len(body) > 0
 
 	return gatewayErr
 }

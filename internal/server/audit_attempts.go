@@ -47,6 +47,8 @@ func auditAttemptsFromGateway(ctx context.Context) []auditlog.AttemptSnapshot {
 			DurationNs:      attempt.DurationNs,
 			ResponseBody:    auditlog.CaptureAttemptResponseBody(attempt.ResponseBody),
 			ResponseHeaders: auditlog.RedactAttemptResponseHeaders(attempt.ResponseHeaders),
+
+			UpstreamErrorMessage: attempt.UpstreamErrorMessage,
 		})
 	}
 	return attempts

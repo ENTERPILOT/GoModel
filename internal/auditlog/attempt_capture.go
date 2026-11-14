@@ -67,8 +67,8 @@ func unmarshalAttemptHeaders(raw *string) map[string]string {
 
 // GateAttemptCapture clears per-attempt response bodies and/or headers that the
 // audit configuration did not opt into, leaving the structured error fields
-// (type / code / status) untouched. An error message that came with an
-// upstream response body is withheld along with the body; see
+// (type / code / status) untouched. An error message taken from the upstream
+// response is withheld along with the body; see
 // GatewayErrorMessage. It mutates and returns attempts.
 func GateAttemptCapture(attempts []AttemptSnapshot, cfg Config) []AttemptSnapshot {
 	if len(attempts) == 0 || (cfg.LogBodies && cfg.LogHeaders) {
@@ -76,7 +76,7 @@ func GateAttemptCapture(attempts []AttemptSnapshot, cfg Config) []AttemptSnapsho
 	}
 	for i := range attempts {
 		if !cfg.LogBodies {
-			if attempts[i].ResponseBody != nil {
+			if attempts[i].ResponseBody != nil || attempts[i].UpstreamErrorMessage {
 				attempts[i].ErrorMessage = UpstreamErrorMessageWithheld
 			}
 			attempts[i].ResponseBody = nil

@@ -441,7 +441,7 @@ const UpstreamErrorMessageWithheld = "upstream error message not logged: body lo
 // gateway wrote itself are always kept, as are the error type, code and
 // status.
 func GatewayErrorMessage(gatewayErr *core.GatewayError, cfg Config) string {
-	if !cfg.LogBodies && len(gatewayErr.ResponseBody) > 0 {
+	if !cfg.LogBodies && gatewayErr.MessageFromUpstream() {
 		return UpstreamErrorMessageWithheld
 	}
 	return gatewayErr.Message

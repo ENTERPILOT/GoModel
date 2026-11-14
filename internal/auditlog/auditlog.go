@@ -326,6 +326,11 @@ type AttemptSnapshot struct {
 	// when audit body/header logging is enabled.
 	ResponseBody    any               `json:"response_body,omitempty" bson:"response_body,omitempty"`
 	ResponseHeaders map[string]string `json:"response_headers,omitempty" bson:"response_headers,omitempty"`
+
+	// UpstreamErrorMessage reports that ErrorMessage was taken from the
+	// provider's response (core.GatewayError.MessageFromUpstream), so
+	// GateAttemptCapture withholds it with the body. Never stored.
+	UpstreamErrorMessage bool `json:"-" bson:"-"`
 }
 
 // marshalLogData marshals the Data field to JSON for SQL storage.

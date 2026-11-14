@@ -76,6 +76,11 @@ func TestGateAttemptCaptureWithholdsUpstreamErrorMessage(t *testing.T) {
 				Seq: 2, Kind: AttemptKindFailover, StatusCode: http.StatusBadGateway,
 				ErrorType: "provider_error", ErrorMessage: "upstream connection failed",
 			},
+			{
+				Seq: 3, Kind: AttemptKindFailover, StatusCode: http.StatusBadGateway,
+				ErrorType: "provider_error", ErrorMessage: "failed on: the user's prompt",
+				UpstreamErrorMessage: true,
+			},
 		}
 	}
 
@@ -99,6 +104,11 @@ func TestGateAttemptCaptureWithholdsUpstreamErrorMessage(t *testing.T) {
 			assert.Equal(t, "invalid_value", got[0].ErrorCode)
 			assert.Equal(t, http.StatusBadRequest, got[0].StatusCode)
 			assert.Equal(t, "upstream connection failed", got[1].ErrorMessage, "a gateway-written message is kept")
+			wantBodiless := UpstreamErrorMessageWithheld
+			if tt.cfg.LogBodies {
+				wantBodiless = "failed on: the user's prompt"
+			}
+			assert.Equal(t, wantBodiless, got[2].ErrorMessage, "an upstream message without a retained body follows body logging")
 		})
 	}
 }

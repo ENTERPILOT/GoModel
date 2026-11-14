@@ -64,6 +64,8 @@ func TestEnrichEntryWithGatewayError(t *testing.T) {
 	echoing := core.ParseProviderError("openai", http.StatusBadRequest, []byte(`{"error":{"message":"Invalid input: the user's prompt","code":"invalid_value"}}`), nil)
 	unstructured := core.ParseProviderError("openai", http.StatusBadGateway, []byte("<html>bad gateway: the user's prompt</html>"), nil)
 	gateway := core.NewAuthenticationError("", "invalid API key").WithCode("extension_authentication_failed")
+	// An adapter copied the provider's text without keeping the raw body.
+	bodiless := core.NewProviderError("openai", http.StatusBadGateway, "failed on: the user's prompt", nil).WithUpstreamMessage()
 	bodies := Config{LogBodies: true, LogEmbeddingBodies: true}
 
 	tests := []struct {
@@ -113,6 +115,16 @@ func TestEnrichEntryWithGatewayError(t *testing.T) {
 			path: "/v1/embeddings", cfg: Config{LogBodies: true}, entry: &LogEntry{}, err: echoing,
 			wantType: string(core.ErrorTypeInvalidRequest), wantMessage: UpstreamErrorMessageWithheld,
 			wantCode: "invalid_value", wantProvider: "openai", wantEvents: 1,
+		},
+		{
+			name: "bodiless upstream message withheld without body logging", context: true, entry: &LogEntry{}, err: bodiless,
+			wantType: string(core.ErrorTypeProvider), wantMessage: UpstreamErrorMessageWithheld,
+			wantProvider: "openai", wantEvents: 1,
+		},
+		{
+			name: "bodiless upstream message kept with body logging", context: true, cfg: bodies, entry: &LogEntry{}, err: bodiless,
+			wantType: string(core.ErrorTypeProvider), wantMessage: "failed on: the user's prompt",
+			wantProvider: "openai", wantEvents: 1,
 		},
 		{
 			name: "gateway message kept without body logging", context: true,
