@@ -261,7 +261,10 @@ virtual_models:
 				assert.Nil(t, got[key], key)
 				continue
 			}
-			assert.JSONEq(t, string(value), string(got[key]), key)
+			// Both sides are encoded by FromAny, so equal values are equal
+			// text; JSONEq reads numbers as float64 and would miss a
+			// rounded integer.
+			assert.Equal(t, string(value), string(got[key]), key)
 		}
 	}
 	assertParams(sets(map[string]any{"max_tokens": 128, "stop": nil}), bySource["declared"].Params)

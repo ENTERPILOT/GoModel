@@ -1,6 +1,7 @@
 package requestparams
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
@@ -183,8 +184,8 @@ func TestToAny(t *testing.T) {
 		{name: "empty set is nil", set: Set{}, want: nil},
 		{
 			name: "integers stay integers",
-			set:  Set{"max_tokens": raw("256"), "seed": raw("9007199254740993")},
-			want: map[string]any{"max_tokens": int64(256), "seed": int64(9007199254740993)},
+			set:  Set{"max_tokens": raw("256"), "seed": raw("9007199254740993"), "big": raw("9223372036854775809")},
+			want: map[string]any{"max_tokens": int64(256), "seed": int64(9007199254740993), "big": uint64(9223372036854775809)},
 		},
 		{
 			name: "floats, booleans, and strings",
@@ -213,13 +214,25 @@ func TestToAny(t *testing.T) {
 					assert.Nil(t, back[key], key)
 					continue
 				}
-				assert.JSONEq(t, string(value), string(back[key]), key)
+				// Not JSONEq, which reads numbers as float64 and so would
+				// miss a rounded integer.
+				assert.Equal(t, exactJSON(t, value), exactJSON(t, back[key]), key)
 			}
 		})
 	}
 
 	_, err := ToAny(Set{"bad": raw("{")})
 	require.ErrorContains(t, err, `parameter "bad"`)
+}
+
+// exactJSON decodes raw keeping each number as written.
+func exactJSON(t *testing.T, raw json.RawMessage) any {
+	t.Helper()
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	require.NoError(t, decoder.Decode(&value))
+	return value
 }
 
 func TestClone(t *testing.T) {

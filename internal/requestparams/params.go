@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"maps"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -215,13 +216,17 @@ func ToAny(set Set) (map[string]any, error) {
 	return values, nil
 }
 
-// plainNumbers replaces each json.Number in a decoded value with an int64
-// when it is an integer and a float64 otherwise.
+// plainNumbers replaces each json.Number in a decoded value with an int64 or
+// uint64 when it is an integer that fits one, and a float64 otherwise. YAML
+// reads no wider integer back exactly, so a float64 is the closest it keeps.
 func plainNumbers(value any) any {
 	switch v := value.(type) {
 	case json.Number:
 		if i, err := v.Int64(); err == nil {
 			return i
+		}
+		if u, err := strconv.ParseUint(v.String(), 10, 64); err == nil {
+			return u
 		}
 		f, _ := v.Float64()
 		return f
