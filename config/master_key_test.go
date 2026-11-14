@@ -37,8 +37,8 @@ func TestMasterKeyCheck(t *testing.T) {
 		{name: "env template placeholder", key: "your-secret-key-here", wantErr: true},
 		{name: "example config placeholder", key: "your-secret-key", wantErr: true},
 		{name: "configuration docs placeholder", key: "my-secret-key", wantErr: true},
-		{name: "documentation placeholder", key: "change-me", wantErr: true},
-		{name: "placeholder in another case", key: "Change-Me", wantErr: true},
+		{name: "placeholder in another case", key: "Your-Secret-Key", wantErr: true},
+		{name: "guide example key", key: "change-me", wantWarning: true},
 		{name: "short key", key: "short-key", wantWarning: true},
 		{name: "key just under the minimum", key: "123456789012345", wantWarning: true},
 		{name: "key at the minimum", key: "1234567890123456"},
@@ -110,7 +110,7 @@ func TestMasterKeyCheck(t *testing.T) {
 func TestMasterKeyCheckSkippedWhenDisabled(t *testing.T) {
 	clearAllConfigEnvVars(t)
 	withTempDir(t, func(string) {
-		t.Setenv("GOMODEL_MASTER_KEY", "change-me")
+		t.Setenv("GOMODEL_MASTER_KEY", "your-secret-key")
 		t.Setenv("MASTER_KEY_DISABLED", "true")
 
 		result, err := Load()

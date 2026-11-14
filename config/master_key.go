@@ -10,11 +10,12 @@ import (
 // weak. A shorter key still works, so existing deployments keep starting.
 const minMasterKeyLength = 16
 
-// masterKeyPlaceholders are the example master keys GoModel's own templates
-// and documentation show. They are public, so a gateway started with one is
-// as open as a gateway without a key.
+// masterKeyPlaceholders are the fill-in master keys GoModel's templates and
+// configuration documentation show. They are public, so a gateway started with
+// one is as open as a gateway without a key. The runnable local examples in
+// the guides use change-me; it is short, so it draws the weak-key warning
+// instead of stopping those copy-paste commands.
 var masterKeyPlaceholders = map[string]struct{}{
-	"change-me":            {},
 	"my-secret-key":        {},
 	"your-secret-key":      {},
 	"your-secret-key-here": {},
