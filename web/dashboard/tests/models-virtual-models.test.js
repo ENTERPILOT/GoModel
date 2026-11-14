@@ -258,12 +258,110 @@ test("buildDisplayModels combines source-backed redirects with the concrete mode
 
   assert.equal(aliasOnly.source_model_exists, false);
   assert.equal(aliasRowCanRemove(aliasOnly), true);
-  assert.equal(modelBackedAliasRow, undefined);
-  assert.equal(modelBacked.masking_alias.name, "gpt-4o");
-  assert.equal(rowRedirectCanRemove(modelBacked), true);
-  assert.equal(nestedTargetAlias, undefined);
-  assert.equal(nestedTargetModel.masking_alias.name, "anthropic/claude-fable-5");
-  assert.equal(rowRedirectCanRemove(nestedTargetModel), true);
+  // Redirects named like a model's bare upstream ID are separate models: the
+  // gateway matches the requested name exactly, so requests for the model's
+  // qualified name never reach them.
+  assert.equal(modelBackedAliasRow.source_model_exists, true);
+  assert.equal(aliasRowCanRemove(modelBackedAliasRow), true);
+  assert.equal(modelBacked.masking_alias, null);
+  assert.equal(modelBacked.has_virtual_model, false);
+  assert.ok(nestedTargetAlias);
+  assert.equal(nestedTargetModel.masking_alias, null);
+});
+
+test("buildDisplayModels keeps a virtual model named like an upstream model ID visible (#1379)", () => {
+  const models = [
+    {
+      provider_name: "local",
+      provider_type: "openai",
+      selector: "local/qwen3-vl-8b",
+      model: { id: "qwen3-vl-8b", object: "model" },
+    },
+    {
+      provider_name: "openrouter",
+      provider_type: "openrouter",
+      selector: "openrouter/qwen/qwen3-vl-8b-instruct",
+      model: { id: "qwen/qwen3-vl-8b-instruct", object: "model" },
+    },
+  ];
+  const aliases = [
+    {
+      name: "qwen/qwen3-vl-8b-instruct",
+      strategy: "failover",
+      targets: [
+        { provider: "local", model: "qwen3-vl-8b" },
+        { provider: "openrouter", model: "qwen/qwen3-vl-8b-instruct" },
+      ],
+      enabled: true,
+      valid: true,
+    },
+  ];
+  const rows = display(models, aliases);
+
+  const virtualRow = rows.find((row) => row.key === "alias:qwen/qwen3-vl-8b-instruct");
+  const upstreamRow = rows.find((row) => row.key === "model:openrouter/qwen/qwen3-vl-8b-instruct");
+  assert.ok(virtualRow, "the virtual model keeps its own row");
+  assert.equal(virtualRow.is_alias, true);
+  assert.equal(upstreamRow.masking_alias, null, "the upstream row stays a plain model row");
+  assert.equal(upstreamRow.has_virtual_model, false);
+
+  const groups = groupDisplayModels(rows, models, []);
+  assert.equal(groups[0].key, "virtual-model-group");
+  assert.deepEqual(Array.from(groups[0].rows, (row) => row.display_name), ["qwen/qwen3-vl-8b-instruct"]);
+});
+
+test("buildDisplayModels folds a virtual model into the row that owns its name, whatever the model order", () => {
+  // The openrouter model also answers to "anthropic/claude-fable-5" and is
+  // listed first; the anthropic model owns that qualified name.
+  const models = [
+    {
+      provider_name: "openrouter",
+      provider_type: "openrouter",
+      selector: "openrouter/anthropic/claude-fable-5",
+      model: { id: "anthropic/claude-fable-5", object: "model" },
+    },
+    {
+      provider_name: "anthropic",
+      provider_type: "anthropic",
+      selector: "anthropic/claude-fable-5",
+      model: { id: "claude-fable-5", object: "model" },
+    },
+  ];
+  const aliases = [
+    {
+      name: "anthropic/claude-fable-5",
+      target_provider: "anthropic",
+      target_model: "claude-opus-5",
+      enabled: true,
+      valid: true,
+    },
+  ];
+  const rows = display(models, aliases);
+
+  assert.equal(rows.length, 2, "the virtual model is not rendered twice");
+  assert.equal(rows.some((row) => row.is_alias), false);
+  const owner = rows.find((row) => row.key === "model:anthropic/claude-fable-5");
+  const other = rows.find((row) => row.key === "model:openrouter/anthropic/claude-fable-5");
+  assert.equal(owner.masking_alias.name, "anthropic/claude-fable-5");
+  assert.equal(rowRedirectCanRemove(owner), true);
+  assert.equal(other.masking_alias, null);
+});
+
+test("buildDisplayModels gives a bare-name redirect served by several providers its own row", () => {
+  const models = [
+    { provider_name: "openai", provider_type: "openai", selector: "openai/gpt-5", model: { id: "gpt-5", object: "model" } },
+    { provider_name: "azure", provider_type: "azure", selector: "azure/gpt-5", model: { id: "gpt-5", object: "model" } },
+  ];
+  const aliases = [
+    { name: "gpt-5", target_provider: "azure", target_model: "gpt-5", enabled: true, valid: true },
+  ];
+  const rows = display(models, aliases);
+
+  const virtualRow = rows.find((row) => row.key === "alias:gpt-5");
+  assert.ok(virtualRow);
+  for (const key of ["model:openai/gpt-5", "model:azure/gpt-5"]) {
+    assert.equal(rows.find((row) => row.key === key).masking_alias, null, key);
+  }
 });
 
 test("buildDisplayModels flags model rows with a policy override as carrying a virtual model", () => {
@@ -363,7 +461,7 @@ test("groupDisplayModels keeps alias-only virtual models in a first group", () =
   ];
   const aliases = [
     { name: "smart", target_provider: "zulu", target_model: "model-z", enabled: true, valid: true },
-    { name: "model-a", target_provider: "zulu", target_model: "model-z", enabled: true, valid: true },
+    { name: "alpha/model-a", target_provider: "zulu", target_model: "model-z", enabled: true, valid: true },
   ];
   const rows = display(models, aliases, { activeCategory: "all" });
   const groups = groupDisplayModels(rows, models, []);
@@ -376,7 +474,7 @@ test("groupDisplayModels keeps alias-only virtual models in a first group", () =
   assert.deepEqual(Array.from(groups, (group) => group.display_name), ["Virtual models", "alpha", "zulu"]);
 
   const overriddenModel = groups[1].rows.find((row) => row.display_name === "alpha/model-a");
-  assert.equal(overriddenModel.masking_alias.name, "model-a");
+  assert.equal(overriddenModel.masking_alias.name, "alpha/model-a");
 });
 
 test("groupDisplayModels lets provider-wide overrides replace global paths", () => {
@@ -1387,4 +1485,37 @@ test("params and default_params round-trip through views and toggle payloads", (
   assert.equal(disable.method, "PUT");
   assert.equal(disable.payload.enabled, false);
   assert.deepEqual(disable.payload.params, { min_p: 0.1 });
+});
+
+test("buildDisplayModels matches a virtual model to a row by its exact, case-sensitive name", () => {
+  // The gateway resolves redirect sources by exact trimmed name, so
+  // "OPENAI/gpt-5" never answers requests for "openai/gpt-5".
+  const models = [
+    {
+      provider_name: "openai",
+      provider_type: "openai",
+      selector: "openai/gpt-5",
+      model: { id: "gpt-5", object: "model" },
+    },
+  ];
+  const aliases = [
+    {
+      name: "OPENAI/gpt-5",
+      target_provider: "openai",
+      target_model: "gpt-5",
+      enabled: true,
+      valid: true,
+    },
+  ];
+  const rows = display(models, aliases);
+
+  const modelRow = rows.find((row) => row.key === "model:openai/gpt-5");
+  const aliasRow = rows.find((row) => row.key === "alias:OPENAI/gpt-5");
+  assert.equal(modelRow.masking_alias, null);
+  assert.ok(aliasRow, "the differently cased virtual model keeps its own row");
+
+  const exact = display(models, [{ ...aliases[0], name: " openai/gpt-5 " }]);
+  const exactRow = exact.find((row) => row.key === "model:openai/gpt-5");
+  assert.equal(exactRow.masking_alias.name, " openai/gpt-5 ");
+  assert.equal(exact.filter((row) => row.is_alias).length, 0);
 });

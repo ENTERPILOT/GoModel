@@ -384,8 +384,9 @@ so update any app still sending it. Renaming onto a name that already belongs to
 another virtual model is rejected; renaming onto a concrete model name shadows
 that model (see [Shadow a model](#shadow-a-model)).
 
-Redirects that shadow a model can be edited the same way — use the model row's
-**Edit redirect** action. Virtual models declared as code keep their `source`
+Redirects that shadow a model by its full name can be edited the same way — use
+the model row's **Edit redirect** action. Other redirects are edited from their
+own row. Virtual models declared as code keep their `source`
 fixed in configuration; rename them by editing the declaration.
 
 ## Define virtual models as code
@@ -528,6 +529,15 @@ For example:
 
 Your app can keep sending `anthropic/claude-opus-4-6`, while GoModel routes the
 request to `anthropic/claude-sonnet-4-6`.
+
+A redirect matches the requested name exactly, including case. In the
+dashboard, a redirect whose source is a model's full name (the name shown on its
+row, such as `openrouter/qwen/qwen3-vl-8b-instruct`) appears on that model's row
+while it is enabled and valid. Any other redirect, including one named after the
+bare upstream ID (`qwen/qwen3-vl-8b-instruct`), gets its own row under
+**Virtual models**, and requests for the model's full name still go to the model.
+With a category selected, that row is shown only when one of the redirect's
+targets is in the category; **All** always shows it.
 
 ## A/B testing
 
