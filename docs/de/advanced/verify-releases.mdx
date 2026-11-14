@@ -29,9 +29,9 @@ gh attestation verify gomodel_0.2.4_linux_amd64.tar.gz --repo ENTERPILOT/GoModel
 ```
 
 Der Befehl endet mit einem Fehlercode, wenn die Datei nicht von einem Workflow
-in diesem Repository gebaut wurde. Abgedeckt ist jedes in ein Release
-hochgeladene Asset: die Archive, `checksums.txt` und die SBOMs. Die von GitHub
-erzeugten Quellcode-Archive gehören nicht dazu.
+in diesem Repository gebaut wurde. Abgedeckt sind die Archive, `checksums.txt`
+und die SBOMs. Das Provenance-Bundle und die von GitHub erzeugten
+Quellcode-Archive gehören nicht dazu.
 
 So verlangen Sie zusätzlich den Release-Workflow und einen bestimmten Tag:
 
@@ -40,6 +40,32 @@ gh attestation verify gomodel_0.2.4_linux_amd64.tar.gz \
   --repo ENTERPILOT/GoModel \
   --signer-workflow ENTERPILOT/GoModel/.github/workflows/release.yml \
   --source-ref refs/tags/v0.2.4
+```
+
+### Mit dem heruntergeladenen Bundle
+
+Jedes Release enthält die Provenance zusätzlich als
+`gomodel_<version>.intoto.jsonl`, ein Sigstore-Bundle für die oben genannten
+Dateien. Laden Sie es neben das Archiv und übergeben Sie es mit `--bundle`, um
+die Attestation von der Festplatte statt über die GitHub-API zu lesen:
+
+```bash
+gh attestation verify gomodel_0.2.4_linux_amd64.tar.gz \
+  --bundle gomodel_0.2.4.intoto.jsonl \
+  --repo ENTERPILOT/GoModel \
+  --signer-workflow ENTERPILOT/GoModel/.github/workflows/release.yml \
+  --source-ref refs/tags/v0.2.4
+```
+
+Oder mit Cosign v3 oder neuer:
+
+```bash
+cosign verify-blob-attestation \
+  --bundle gomodel_0.2.4.intoto.jsonl \
+  --type slsaprovenance1 \
+  --certificate-identity "https://github.com/ENTERPILOT/GoModel/.github/workflows/release.yml@refs/tags/v0.2.4" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  gomodel_0.2.4_linux_amd64.tar.gz
 ```
 
 ## Docker-Image

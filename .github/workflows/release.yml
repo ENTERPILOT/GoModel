@@ -291,6 +291,7 @@ jobs:
       # Covers every file GoReleaser uploaded to the draft. The attestation is
       # stored by GitHub, not in the release, so the draft stays unchanged.
       - name: Attest release artifacts
+        id: attest
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: |
@@ -298,6 +299,20 @@ jobs:
             dist/*.tar.gz
             dist/*.zip
             dist/*.sbom.json
+
+      # The same Sigstore bundle as a release asset, for offline verification.
+      # Scorecard's Signed-Releases check only sees release assets and detects
+      # provenance by the .intoto.jsonl suffix. Uploaded before the draft is
+      # published, so it also works with immutable releases.
+      - name: Attach provenance bundle to draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          asset="$RUNNER_TEMP/gomodel_${GITHUB_REF_NAME#v}.intoto.jsonl"
+          cp "$BUNDLE" "$asset"
+          gh release upload "$GITHUB_REF_NAME" "$asset" --repo "$GITHUB_REPOSITORY" --clobber
 
   github-release:
     name: Publish GitHub release

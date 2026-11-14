@@ -21,7 +21,7 @@ v0.2.3 之后的每个 Release 都附带签名的构建来源证明：它声明�
 gh attestation verify gomodel_0.2.4_linux_amd64.tar.gz --repo ENTERPILOT/GoModel
 ```
 
-如果该文件不是由本仓库中的工作流构建的，命令会以非零状态退出。上传到 Release 的每个文件都在覆盖范围内：归档文件、`checksums.txt` 和 SBOM。GitHub 自动生成的源代码归档不在其中。
+如果该文件不是由本仓库中的工作流构建的，命令会以非零状态退出。覆盖范围包括归档文件、`checksums.txt` 和 SBOM。provenance bundle 和 GitHub 自动生成的源代码归档不在其中。
 
 如需同时限定 Release 工作流和具体的 tag：
 
@@ -30,6 +30,29 @@ gh attestation verify gomodel_0.2.4_linux_amd64.tar.gz \
   --repo ENTERPILOT/GoModel \
   --signer-workflow ENTERPILOT/GoModel/.github/workflows/release.yml \
   --source-ref refs/tags/v0.2.4
+```
+
+### 使用下载的 bundle
+
+每个 Release 还以 `gomodel_<version>.intoto.jsonl` 的形式附带 provenance，这是一个覆盖上述文件的 Sigstore bundle。将其下载到归档文件旁，并通过 `--bundle` 传入，即可从磁盘读取 attestation，而不是通过 GitHub API：
+
+```bash
+gh attestation verify gomodel_0.2.4_linux_amd64.tar.gz \
+  --bundle gomodel_0.2.4.intoto.jsonl \
+  --repo ENTERPILOT/GoModel \
+  --signer-workflow ENTERPILOT/GoModel/.github/workflows/release.yml \
+  --source-ref refs/tags/v0.2.4
+```
+
+或使用 Cosign v3 或更高版本：
+
+```bash
+cosign verify-blob-attestation \
+  --bundle gomodel_0.2.4.intoto.jsonl \
+  --type slsaprovenance1 \
+  --certificate-identity "https://github.com/ENTERPILOT/GoModel/.github/workflows/release.yml@refs/tags/v0.2.4" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  gomodel_0.2.4_linux_amd64.tar.gz
 ```
 
 ## Docker 镜像

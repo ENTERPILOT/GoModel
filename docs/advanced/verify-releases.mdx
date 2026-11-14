@@ -28,8 +28,8 @@ gh attestation verify gomodel_0.2.4_linux_amd64.tar.gz --repo ENTERPILOT/GoModel
 ```
 
 The command exits non-zero unless the file was built by a workflow in this
-repository. Every asset uploaded to a release is covered: the archives,
-`checksums.txt`, and the SBOMs. GitHub's generated source code archives are not.
+repository. The archives, `checksums.txt`, and the SBOMs are covered. The
+provenance bundle and GitHub's generated source code archives are not.
 
 To also require the release workflow and a specific tag:
 
@@ -38,6 +38,32 @@ gh attestation verify gomodel_0.2.4_linux_amd64.tar.gz \
   --repo ENTERPILOT/GoModel \
   --signer-workflow ENTERPILOT/GoModel/.github/workflows/release.yml \
   --source-ref refs/tags/v0.2.4
+```
+
+### With the downloaded bundle
+
+Each release also carries its provenance as `gomodel_<version>.intoto.jsonl`, a
+Sigstore bundle covering the files above. Download it next to the archive and
+pass it with `--bundle` to read the attestation from disk instead of the GitHub
+API:
+
+```bash
+gh attestation verify gomodel_0.2.4_linux_amd64.tar.gz \
+  --bundle gomodel_0.2.4.intoto.jsonl \
+  --repo ENTERPILOT/GoModel \
+  --signer-workflow ENTERPILOT/GoModel/.github/workflows/release.yml \
+  --source-ref refs/tags/v0.2.4
+```
+
+Or with Cosign v3 or newer:
+
+```bash
+cosign verify-blob-attestation \
+  --bundle gomodel_0.2.4.intoto.jsonl \
+  --type slsaprovenance1 \
+  --certificate-identity "https://github.com/ENTERPILOT/GoModel/.github/workflows/release.yml@refs/tags/v0.2.4" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  gomodel_0.2.4_linux_amd64.tar.gz
 ```
 
 ## Docker image
