@@ -53,6 +53,15 @@ func TestNormalizeTokenPrefix(t *testing.T) {
 	}
 }
 
+// A key pasted where the prefix belongs must not reach the startup log.
+func TestNormalizeTokenPrefixErrorOmitsValue(t *testing.T) {
+	for _, value := range []string{"sk bad!", strings.Repeat("a", MaxTokenPrefixLength+1)} {
+		_, err := NormalizeTokenPrefix(value)
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), value)
+	}
+}
+
 func TestNewServiceRejectsInvalidTokenPrefix(t *testing.T) {
 	_, err := NewService(newTestStore(), WithTokenPrefix("sk acme"))
 	require.Error(t, err)

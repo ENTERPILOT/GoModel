@@ -2,6 +2,8 @@ package authkeys
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -719,4 +721,9 @@ func sortSnapshotOrder(next *snapshot) {
 		}
 		return left.ID < right.ID
 	})
+}
+
+func hashSecret(secret string) string {
+	sum := sha256.Sum256([]byte(secret))
+	return hex.EncodeToString(sum[:])
 }

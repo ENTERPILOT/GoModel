@@ -2,9 +2,8 @@ package authkeys
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -12,17 +11,18 @@ import (
 // NormalizeTokenPrefix trims prefix and checks it can start a managed key.
 // Empty means DefaultTokenPrefix. A prefix is 1 to MaxTokenPrefixLength
 // ASCII letters, digits, "_" or "-": keys travel in Authorization headers and
-// get pasted into shells and YAML, so nothing in one may need quoting.
+// get pasted into shells and YAML, so nothing in one may need quoting. Errors
+// never repeat the value, in case a key was pasted where the prefix belongs.
 func NormalizeTokenPrefix(prefix string) (string, error) {
 	prefix = strings.TrimSpace(prefix)
 	if prefix == "" {
 		return DefaultTokenPrefix, nil
 	}
 	if len(prefix) > MaxTokenPrefixLength {
-		return "", fmt.Errorf("must be at most %d characters; got %d", MaxTokenPrefixLength, len(prefix))
+		return "", fmt.Errorf("must be at most %d characters", MaxTokenPrefixLength)
 	}
 	if !validTokenPrefix(prefix) {
-		return "", fmt.Errorf("may contain only ASCII letters, digits, \"_\" and \"-\"; got %q", prefix)
+		return "", errors.New("may contain only ASCII letters, digits, \"_\" and \"-\"")
 	}
 	return prefix, nil
 }
@@ -84,11 +84,6 @@ func issuedTokenSecrets(token string) (legacy, fixed string) {
 // whose imported hash covers the whole token.
 func looksLikeLiteLLMToken(token string) bool {
 	return len(token) > len(liteLLMTokenPrefix) && strings.HasPrefix(token, liteLLMTokenPrefix)
-}
-
-func hashSecret(secret string) string {
-	sum := sha256.Sum256([]byte(secret))
-	return hex.EncodeToString(sum[:])
 }
 
 func redactTokenValue(prefix, value string) string {

@@ -168,7 +168,7 @@ a klucz nigdy nieimportowany nie jest tworzony (`204`). Hash należący do klucz
 z kodem `auth_key_exists`.
 
 Zaimportowany klucz pasuje tylko do całego tokenu LiteLLM `sk-...`, a klucz wydany
-przez GoModel tylko do własnego tokenu, więc żaden nie może zastąpić drugiego. Dotyczy
+przez GoModel jest rozpoznawany po swoim sekrecie (części po prefiksie), więc żaden nie może zastąpić drugiego. Dotyczy
 to także własnego prefiksu kluczy zaczynającego się od `sk-`. Bez zaimportowanych kluczy
 tokeny LiteLLM są odrzucane tak jak wcześniej. Zaimportowany klucz dezaktywujesz tak samo jak
 każdy inny. Endpoint importu wymaga globalnego dostępu administracyjnego.

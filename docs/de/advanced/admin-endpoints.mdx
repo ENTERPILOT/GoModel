@@ -168,8 +168,8 @@ und ein nie importierter Key wird nicht erstellt (`204`). Ein Hash, der zu einem
 mit dem Code `auth_key_exists`.
 
 Ein importierter Key passt nur zum vollständigen LiteLLM-Token `sk-...`, ein
-von GoModel ausgestellter Key nur zu seinem eigenen Token, sodass keiner für den
-anderen einspringen kann. Das gilt auch für ein eigenes Key-Präfix, das mit
+von GoModel ausgestellter Key wird über sein Secret (den Teil nach dem Präfix)
+erkannt, sodass keiner für den anderen einspringen kann. Das gilt auch für ein eigenes Key-Präfix, das mit
 `sk-` beginnt. Ohne importierte Keys werden LiteLLM-Tokens wie bisher abgelehnt. Deaktivieren Sie einen importierten Key wie jeden
 anderen. Der Import-Endpunkt erfordert globalen Admin-Zugriff.
 
