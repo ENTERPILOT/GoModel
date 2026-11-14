@@ -36,8 +36,10 @@ verfügbar.
 Eine über das Dashboard oder die Admin-API gespeicherte Base-URL muss eine einfache `http://`- oder
 `https://`-URL sein: ohne Benutzername oder Passwort, ohne Query-String und ohne Fragment.
 Loopback- und private Adressen werden akzeptiert, sodass lokale Server wie Ollama oder vLLM
-funktionieren; Link-Local-Adressen und Metadaten-Endpunkte von Cloud-Instanzen werden abgelehnt.
-Bedrock akzeptiert in diesem Feld auch eine AWS-Region.
+funktionieren; Link-Local-IP-Adressen und bekannte Metadaten-Hostnamen von Cloud-Instanzen
+werden abgelehnt. Hostnamen werden nicht aufgelöst, ein eigener Name, der auf eine solche
+Adresse zeigt, wird also nicht erkannt. Bedrock und Bedrock Mantle akzeptieren in diesem Feld
+auch eine AWS-Region.
 
 Jeder Provider trägt außerdem eine Einstellung `billable`, die standardmäßig aktiviert ist.
 Deaktivieren Sie sie für einen Provider, dessen Kosten der Aufrufer Ihnen nicht schuldet, etwa den

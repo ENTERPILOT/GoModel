@@ -14,6 +14,11 @@ import (
 // request to any other scheme-less value.
 var bareBaseURLPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)+$`)
 
+// regionBaseURLTypes are the provider types that read a scheme-less base URL
+// as an AWS region. Every other type would send requests to a URL with no
+// scheme, so it needs http:// or https://.
+var regionBaseURLTypes = []string{"bedrock", "bedrock-mantle"}
+
 // metadataPrefixes are the address ranges instance metadata services answer
 // on: IPv4 and IPv6 link-local, and the fixed addresses cloud providers use
 // outside those. Loopback and private ranges are deliberately absent: local
@@ -46,15 +51,15 @@ func validateCredentialBaseURL(cred ManagedProviderCredential) error {
 	if raw == "" {
 		return nil
 	}
-	if err := checkBaseURL(raw); err != nil {
+	if err := checkBaseURL(raw, slices.Contains(regionBaseURLTypes, cred.Type)); err != nil {
 		return credentialFieldError(CredentialFieldBaseURL, "%s", err.Error())
 	}
 	return nil
 }
 
-func checkBaseURL(raw string) error {
+func checkBaseURL(raw string, acceptsRegion bool) error {
 	if !strings.Contains(raw, "://") {
-		if bareBaseURLPattern.MatchString(raw) {
+		if acceptsRegion && bareBaseURLPattern.MatchString(raw) {
 			return nil
 		}
 		return errors.New("base URL must start with http:// or https://")
@@ -81,10 +86,10 @@ func checkBaseURL(raw string) error {
 	}
 	addr, err := netip.ParseAddr(host)
 	if err != nil {
-		// A name whose last label is a number is an IP address in a legacy
+		// A host made only of numeric labels is an IP address in a legacy
 		// spelling (decimal, hex, short forms) that system resolvers accept;
 		// only the canonical form is taken, so the range check below sees it.
-		if numericLabel(host[strings.LastIndexByte(host, '.')+1:]) {
+		if allNumericLabels(host) {
 			return errors.New("base URL host must be a host name or a standard IP address")
 		}
 		return nil
@@ -96,6 +101,17 @@ func checkBaseURL(raw string) error {
 		}
 	}
 	return nil
+}
+
+// allNumericLabels reports whether every dot-separated label of host is a
+// number, the shape inet_aton reads as an IPv4 address.
+func allNumericLabels(host string) bool {
+	for label := range strings.SplitSeq(host, ".") {
+		if !numericLabel(label) {
+			return false
+		}
+	}
+	return true
 }
 
 // numericLabel reports whether a host label is a decimal or 0x-prefixed

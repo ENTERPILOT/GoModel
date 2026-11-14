@@ -12,9 +12,10 @@ func TestValidateCredential_BaseURL(t *testing.T) {
 	schema := credentialSchema("keyless", DiscoveryConfig{AllowAPIKeyless: true})
 
 	tests := []struct {
-		name    string
-		baseURL string
-		valid   bool
+		name         string
+		providerType string // default "keyless"
+		baseURL      string
+		valid        bool
 	}{
 		{name: "unset", baseURL: "", valid: true},
 		{name: "https origin", baseURL: "https://api.openai.com/v1", valid: true},
@@ -30,8 +31,14 @@ func TestValidateCredential_BaseURL(t *testing.T) {
 		{name: "single-label service name", baseURL: "http://ollama:11434/v1", valid: true},
 		{name: "cluster service name", baseURL: "http://vllm.models.svc.cluster.local:8000/v1", valid: true},
 		{name: "host label that starts with digits", baseURL: "https://123.example.com/v1", valid: true},
-		{name: "AWS region", baseURL: "us-east-1", valid: true},
-		{name: "AWS GovCloud region", baseURL: "us-gov-west-1", valid: true},
+		{name: "numeric top-level label", baseURL: "http://vllm.123:8000/v1", valid: true},
+		{name: "AWS region for Bedrock", providerType: "bedrock", baseURL: "us-east-1", valid: true},
+		{name: "AWS GovCloud region for Bedrock", providerType: "bedrock", baseURL: "us-gov-west-1", valid: true},
+		{name: "AWS region for Bedrock Mantle", providerType: "bedrock-mantle", baseURL: "us-west-2", valid: true},
+		{name: "Bedrock URL still checked", providerType: "bedrock", baseURL: "http://169.254.169.254/v1"},
+
+		{name: "AWS region for a provider that needs a URL", baseURL: "us-east-1"},
+		{name: "bare name for a provider that needs a URL", baseURL: "my-server"},
 
 		{name: "no scheme", baseURL: "localhost:11434/v1"},
 		{name: "scheme-relative", baseURL: "//api.example.com/v1"},
@@ -64,7 +71,11 @@ func TestValidateCredential_BaseURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateCredential(ManagedProviderCredential{Name: "p", Type: "keyless", BaseURL: tt.baseURL}, schema)
+			providerType := tt.providerType
+			if providerType == "" {
+				providerType = "keyless"
+			}
+			err := validateCredential(ManagedProviderCredential{Name: "p", Type: providerType, BaseURL: tt.baseURL}, schema)
 			if tt.valid {
 				require.NoError(t, err)
 
