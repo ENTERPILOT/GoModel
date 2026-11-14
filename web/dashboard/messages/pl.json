@@ -170,6 +170,8 @@
   "usage_search_providers": "Szukaj dostawców",
   "usage_search_labels": "Szukaj etykiet",
   "usage_search_auth_keys": "Szukaj kluczy API",
+  "usage_show_inactive_auth_keys": "Pokaż nieaktywne klucze",
+  "usage_show_inactive_user_paths": "Pokaż nieaktywne ścieżki",
   "usage_all_user_paths": "Wszystkie ścieżki użytkownika",
   "usage_search_user_paths": "Szukaj lub wpisz ścieżkę użytkownika",
   "usage_expand_path": "Rozwiń {path}",

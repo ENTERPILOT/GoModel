@@ -5,7 +5,16 @@
 
 import { getJSON, isAbortError } from "$lib/api/client.js";
 import { providerDisplayValue } from "$lib/utils/format.js";
-import { authKeyNameMap, authKeyOptionList, facetOptionList } from "./usage-filter-options.js";
+import {
+  authKeyInactiveIDs,
+  authKeyNameMap,
+  authKeyOptionList,
+  facetOptionList,
+  hiddenAuthKeyCount,
+  hiddenUserPathCount,
+  knownUserPaths,
+  userPathOptionList,
+} from "./usage-filter-options.js";
 import { endpointOptionsWithSelection, usageEndpointOptions } from "./usage-endpoints.js";
 import { usageFilters } from "./usageFilters.svelte.js";
 import { usageApiQuery } from "./usage-view.js";
@@ -19,6 +28,15 @@ class UsageFacetsState {
   // Managed auth key names by id, so the API key filter, log column and
   // breakdown can show names instead of ids. Empty when unavailable.
   authKeyNames = $state({});
+  // Ids of inactive (deactivated or expired) keys, hidden from the API key
+  // filter unless showInactiveKeys. Names stay in authKeyNames for display.
+  inactiveAuthKeys = $state({});
+  showInactiveKeys = $state(false);
+  // Paths with a policy or an active key (from /admin/users); the user path
+  // filter hides other paths unless showInactivePaths. Null when the users
+  // list is unavailable, which shows every path.
+  knownUserPaths = $state(null);
+  showInactivePaths = $state(false);
 
   #controllers = {};
 
@@ -46,7 +64,25 @@ class UsageFacetsState {
   }
 
   authKeyOptions() {
-    return authKeyOptionList(this.authKeyNames, usageFilters.authKeys);
+    return authKeyOptionList(this.authKeyNames, usageFilters.authKeys, {
+      inactive: this.inactiveAuthKeys,
+      showInactive: this.showInactiveKeys,
+    });
+  }
+
+  hiddenAuthKeyCount() {
+    return hiddenAuthKeyCount(this.authKeyNames, usageFilters.authKeys, this.inactiveAuthKeys);
+  }
+
+  userPathOptions() {
+    return userPathOptionList(this.options.userPaths, usageFilters.userPaths, {
+      known: this.knownUserPaths,
+      showInactive: this.showInactivePaths,
+    });
+  }
+
+  hiddenUserPathCount() {
+    return hiddenUserPathCount(this.options.userPaths, usageFilters.userPaths, this.knownUserPaths);
   }
 
   endpointOptions() {
@@ -104,13 +140,38 @@ class UsageFacetsState {
         signal: controller.signal,
       });
       if (result.stale || controller.signal.aborted) return;
-      this.authKeyNames = result.ok && Array.isArray(result.data) ? authKeyNameMap(result.data) : {};
+      const keys = result.ok && Array.isArray(result.data) ? result.data : [];
+      this.authKeyNames = authKeyNameMap(keys);
+      this.inactiveAuthKeys = authKeyInactiveIDs(keys);
     } catch (e) {
       if (isAbortError(e)) return;
       console.error("Failed to fetch auth key names:", e);
       this.authKeyNames = {};
+      this.inactiveAuthKeys = {};
     } finally {
       this.#finish("authKeys", controller);
+    }
+  }
+
+  // Policies and key bindings change rarely too, so the known user paths load
+  // with the key names. Any failure (feature off, no access, network) leaves
+  // the set null so the filter falls back to every facet path.
+  async fetchKnownUserPaths() {
+    const controller = this.#start("users");
+    try {
+      const result = await getJSON("/admin/users", {
+        label: "usage known user paths",
+        signal: controller.signal,
+      });
+      if (result.stale || controller.signal.aborted) return;
+      const nodes = result.ok && result.data && result.data.users;
+      this.knownUserPaths = Array.isArray(nodes) ? knownUserPaths(nodes) : null;
+    } catch (e) {
+      if (isAbortError(e)) return;
+      console.error("Failed to fetch known user paths:", e);
+      this.knownUserPaths = null;
+    } finally {
+      this.#finish("users", controller);
     }
   }
 }
