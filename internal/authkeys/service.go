@@ -349,6 +349,37 @@ func (s *Service) updateImported(ctx context.Context, key AuthKey, input ImportI
 	return s.viewByID(key.ID)
 }
 
+// UpdateName renames a managed auth key, updates the in-memory snapshot
+// immediately, best-effort reconciles from storage, and returns the updated
+// admin-facing view. The name is normalized as on create and need not be
+// unique.
+func (s *Service) UpdateName(ctx context.Context, id, name string) (*View, error) {
+	if s == nil {
+		return nil, fmt.Errorf("auth key service is required")
+	}
+	id = normalizeID(id)
+	if id == "" {
+		return nil, newValidationError("auth key id is required", nil)
+	}
+	name, err := normalizeName(name)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+	if err := s.store.UpdateName(ctx, id, name, now); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("update auth key name: %w", err)
+	}
+	s.applyKeyUpdate(id, now, func(key *AuthKey) {
+		key.Name = name
+	})
+	s.refreshBestEffort(ctx, "update-name")
+	return s.viewByID(id)
+}
+
 // UpdateLabels replaces a managed auth key's labels, updates the in-memory
 // snapshot immediately, best-effort reconciles from storage, and returns the
 // updated admin-facing view. Passing no labels clears them.

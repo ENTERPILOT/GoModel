@@ -133,6 +133,15 @@ Benutzerebene verwalten Sie über die [Benutzer-Endpunkte](/de/advanced/admin-en
 
 Dashboard-Zugriff regelt nur `/admin/*`. Modell-Endpunkte und der Self-Service-Endpunkt [`GET /v1/usage`](/de/advanced/usage-api) bleiben für jeden verwalteten Key verfügbar, mit Ausnahme der Provider-Passthrough-Routen (`/p/{provider}/...`): Verwaltete Keys werden ohne Passthrough-Zugriff erstellt; Sie erteilen ihn mit `"passthrough_access": true` bei `POST /admin/auth-keys` oder mit `PUT /admin/auth-keys/<key-id>/passthrough-access` (siehe [Passthrough-Zugriffskontrolle](/de/features/passthrough-api#zugriffskontrolle)).
 
+Key-Namen müssen nicht eindeutig sein; eindeutig ist nur das Token. Benennen Sie
+einen Key mit `PUT /admin/auth-keys/<key-id>/name` (`{"name": "ci-deploy-old"}`)
+um; die Antwort enthält den aktualisierten Key. Der Name wird wie beim Erstellen
+getrimmt und darf nicht leer sein. Nutzungs- und Audit-Einträge speichern die
+Key-ID, nicht den Namen, daher zeigt auch bisheriger Traffic den neuen Namen.
+Ein erneuter Import eines LiteLLM-Keys setzt seinen Namen wieder aus dem Import.
+Teilen sich zwei Keys einen Namen, zeigt das Dashboard neben jedem das
+maskierte Token, und das Erstellformular warnt, wenn ein Name bereits vergeben ist.
+
 ### Keys aus LiteLLM importieren
 
 `POST /admin/auth-keys/import` fügt einen virtuellen LiteLLM-Key über den SHA-256-Hash

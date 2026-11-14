@@ -165,6 +165,29 @@ func TestStore_CreateRejectsDuplicates(t *testing.T) {
 	})
 }
 
+func TestStore_UpdateName(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
+		ctx := context.Background()
+		now := storeTestNow
+		for _, key := range []AuthKey{newTestKey("key-a", now), newTestKey("key-b", now.Add(-time.Hour))} {
+			require.NoError(t, store.Create(ctx, key))
+		}
+
+		later := now.Add(time.Hour)
+		require.NoError(t, store.UpdateName(ctx, "key-a", "renamed", later))
+		// Names are not unique: a second key may take the same one.
+		require.NoError(t, store.UpdateName(ctx, "key-b", "renamed", later))
+		require.ErrorIs(t, store.UpdateName(ctx, "missing", "x", later), ErrNotFound)
+
+		byID := listByID(t, store)
+		for _, id := range []string{"key-a", "key-b"} {
+			require.Equal(t, "renamed", byID[id].Name, id)
+			require.True(t, byID[id].UpdatedAt.Equal(later), "%s UpdatedAt = %v, want %v", id, byID[id].UpdatedAt, later)
+			require.Equal(t, "hash-"+id, byID[id].SecretHash, "%s keeps its secret hash", id)
+		}
+	})
+}
+
 func TestStore_UpdateLabels(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()
