@@ -3,22 +3,32 @@ package providers
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
 )
 
 type mockVoicesProvider struct {
 	*mockProvider
 	voices  *core.AudioVoicesResponse
 	lastReq *core.AudioVoicesRequest
+	// call, when set, runs with the context the router dispatched with.
+	call func(ctx context.Context) error
 }
 
-func (m *mockVoicesProvider) ListVoices(_ context.Context, req *core.AudioVoicesRequest) (*core.AudioVoicesResponse, error) {
+func (m *mockVoicesProvider) ListVoices(ctx context.Context, req *core.AudioVoicesRequest) (*core.AudioVoicesResponse, error) {
 	m.lastReq = req
+	if m.call != nil {
+		if err := m.call(ctx); err != nil {
+			return nil, err
+		}
+	}
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -41,6 +51,43 @@ func TestRouterListVoices(t *testing.T) {
 	require.NotNil(t, lister.lastReq)
 	assert.Equal(t, "pocket-tts", lister.lastReq.Model)
 	assert.Empty(t, lister.lastReq.Provider, "routing hint is stripped before dispatch")
+}
+
+// A failing voice listing must not open the breaker speech and chat share
+// with it, so inference keeps reaching the provider.
+func TestRouterListVoices_BypassesCircuitBreaker(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(server.Close)
+	cfg := llmclient.DefaultConfig("audiocpp", server.URL)
+	cfg.Retry.MaxRetries = 0
+	cfg.CircuitBreaker.FailureThreshold = 1
+	cfg.CircuitBreaker.Timeout = time.Hour
+	client := llmclient.New(cfg, nil)
+	request := llmclient.Request{Method: http.MethodGet, Endpoint: "/audio/voices"}
+
+	lister := &mockVoicesProvider{
+		mockProvider: &mockProvider{name: "audiocpp"},
+		call: func(ctx context.Context) error {
+			_, err := client.DoRaw(ctx, request)
+			return err
+		},
+	}
+	lookup := newMockLookup()
+	lookup.addModel("audiocpp/pocket-tts", lister, "audiocpp")
+	router, err := NewRouter(lookup)
+	require.NoError(t, err)
+
+	for range 3 {
+		_, err = router.ListVoices(context.Background(), &core.AudioVoicesRequest{Model: "pocket-tts", Provider: "audiocpp"})
+		require.Error(t, err)
+	}
+
+	_, err = client.DoRaw(context.Background(), request)
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, llmclient.ErrCircuitOpen)
 }
 
 func TestRouterListVoices_Errors(t *testing.T) {

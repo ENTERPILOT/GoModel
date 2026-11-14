@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
 )
 
 func forwardAudioSpeechRequest(req *core.AudioSpeechRequest, selector core.ModelSelector) *core.AudioSpeechRequest {
@@ -84,7 +85,9 @@ func (r *Router) CreateTranslation(ctx context.Context, req *core.AudioTranscrip
 }
 
 // ListVoices routes a voice listing request to the provider that owns the
-// model, requiring it to implement core.AudioVoicesProvider.
+// model, requiring it to implement core.AudioVoicesProvider. Like model
+// discovery it bypasses the circuit breaker: a failing listing endpoint says
+// nothing about inference and must not pause speech or chat.
 func (r *Router) ListVoices(ctx context.Context, req *core.AudioVoicesRequest) (*core.AudioVoicesResponse, error) {
 	if req == nil {
 		return nil, core.NewInvalidRequestError("audio voices request is required", nil)
@@ -99,7 +102,7 @@ func (r *Router) ListVoices(ctx context.Context, req *core.AudioVoicesRequest) (
 			if !ok {
 				return nil, core.NewAudioVoicesUnsupportedError(req.Model)
 			}
-			return lister.ListVoices(ctx, forwardReq)
+			return lister.ListVoices(llmclient.WithoutCircuitBreaker(ctx), forwardReq)
 		},
 	)
 	return resp, err

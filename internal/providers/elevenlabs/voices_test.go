@@ -11,6 +11,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
@@ -41,6 +42,37 @@ func TestListVoices_FollowsPagination(t *testing.T) {
 	}
 	assert.Empty(t, requests[0].Query.Get("next_page_token"))
 	assert.Equal(t, "page-2", requests[1].Query.Get("next_page_token"))
+}
+
+// With several keys configured, every page of one listing must use the same
+// key: a next_page_token belongs to the workspace that issued it.
+func TestListVoices_KeepsOneKeyAcrossPages(t *testing.T) {
+	server, capture := providertest.RouteServer(t, map[string]http.HandlerFunc{
+		"/v2/voices": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if r.URL.Query().Get("next_page_token") == "" {
+				_, _ = io.WriteString(w, `{"voices":[{"voice_id":"v1","name":"Rachel"}],"has_more":true,"next_page_token":"page-2"}`)
+				return
+			}
+			_, _ = io.WriteString(w, `{"voices":[{"voice_id":"v2","name":"Adam"}],"has_more":false}`)
+		},
+	})
+	opts := providertest.Options(llmclient.Hooks{})
+	opts.HTTPClient = server.Client()
+	opts.Keys = providers.NewKeyring("xi-key-a", "xi-key-b")
+	provider := New(providers.ProviderConfig{BaseURL: server.URL}, opts).(*Provider)
+
+	// Two listings, so the rotation starts once on each key.
+	for range 2 {
+		_, err := provider.ListVoices(context.Background(), &core.AudioVoicesRequest{Model: "eleven_multilingual_v2"})
+		require.NoError(t, err)
+	}
+
+	requests := capture.All()
+	require.Len(t, requests, 4)
+	assert.Equal(t, requests[0].Header.Get("xi-api-key"), requests[1].Header.Get("xi-api-key"))
+	assert.Equal(t, requests[2].Header.Get("xi-api-key"), requests[3].Header.Get("xi-api-key"))
+	assert.NotEqual(t, requests[0].Header.Get("xi-api-key"), requests[2].Header.Get("xi-api-key"), "rotation still advances between listings")
 }
 
 func TestListVoices_RefinesUpstreamError(t *testing.T) {

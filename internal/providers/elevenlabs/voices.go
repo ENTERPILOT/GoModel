@@ -31,10 +31,13 @@ type voicesPage struct {
 // ListVoices lists the workspace's voices through GET /v2/voices, following
 // pagination. ElevenLabs voices are not tied to a model, so every TTS model
 // lists the same set; each voice_id is what /v1/audio/speech takes as voice.
+// One API key serves every page and retry: with several keys configured, a
+// next_page_token from one workspace is meaningless in another.
 func (p *Provider) ListVoices(ctx context.Context, req *core.AudioVoicesRequest) (*core.AudioVoicesResponse, error) {
 	if req == nil {
 		return nil, core.NewInvalidRequestError("audio voices request is required", nil)
 	}
+	ctx = context.WithValue(ctx, pinnedKeyContextKey{}, p.keys.NextForContext(ctx))
 	items := []json.RawMessage{}
 	token := ""
 	for range maxVoicePages {
