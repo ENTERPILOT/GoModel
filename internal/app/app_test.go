@@ -822,14 +822,15 @@ func TestLogStartupInfoTreatsExtensionAuthenticatorAsEffectiveAuth(t *testing.T)
 	require.Contains(t, output, `mode=extension`)
 }
 
-func TestLogStartupInfoWarnsWhenManagedKeysLeaveAdminOpen(t *testing.T) {
+func TestLogStartupInfoManagedKeysGateAdmin(t *testing.T) {
 	tests := []struct {
-		name     string
-		server   config.ServerConfig
-		admin    config.AdminConfig
-		wantWarn bool
+		name         string
+		server       config.ServerConfig
+		admin        config.AdminConfig
+		wantRecovery bool
 	}{
-		{name: "admin endpoints without master key", admin: config.AdminConfig{EndpointsEnabled: true}, wantWarn: true},
+		{name: "admin endpoints without master key", admin: config.AdminConfig{EndpointsEnabled: true}, wantRecovery: true},
+		{name: "remote opt-in has no effect once a key exists", admin: config.AdminConfig{EndpointsEnabled: true, AllowUnauthenticatedRemote: true}, wantRecovery: true},
 		{name: "master key disabled", server: config.ServerConfig{MasterKeyDisabled: true}, admin: config.AdminConfig{EndpointsEnabled: true}},
 		{name: "admin endpoints disabled"},
 	}
@@ -842,25 +843,52 @@ func TestLogStartupInfoWarnsWhenManagedKeysLeaveAdminOpen(t *testing.T) {
 			_, err = service.Create(t.Context(), authkeys.CreateInput{Name: "team"})
 			require.NoError(t, err)
 
-			var logs bytes.Buffer
-			previous := slog.Default()
-			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
-			t.Cleanup(func() { slog.SetDefault(previous) })
-
-			app := &App{
+			output := captureStartupInfo(t, &App{
 				config:   &config.Config{Server: tt.server, Admin: tt.admin},
 				authKeys: &authkeys.Result{Service: service},
-			}
-			app.logStartupInfo()
-			output := logs.String()
+			})
 			assert.Contains(t, output, "mode=managed_keys")
-			if tt.wantWarn {
-				assert.Contains(t, output, "admin API is reachable without authentication")
+			assert.NotContains(t, output, "without authentication")
+			if tt.wantRecovery {
+				assert.Contains(t, output, "set GOMODEL_MASTER_KEY and restart")
 			} else {
-				assert.NotContains(t, output, "admin API is reachable without authentication")
+				assert.NotContains(t, output, "set GOMODEL_MASTER_KEY and restart")
 			}
 		})
 	}
+}
+
+func TestLogStartupInfoStatesOpenAdminAccessMode(t *testing.T) {
+	tests := []struct {
+		name       string
+		admin      config.AdminConfig
+		wantAccess string
+	}{
+		{name: "loopback only by default", admin: config.AdminConfig{EndpointsEnabled: true}, wantAccess: "admin_api_access=loopback_only"},
+		{name: "remote opt-in", admin: config.AdminConfig{EndpointsEnabled: true, AllowUnauthenticatedRemote: true}, wantAccess: "admin_api_access=remote"},
+		{name: "admin endpoints disabled"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := captureStartupInfo(t, &App{config: &config.Config{Admin: tt.admin}})
+			assert.Contains(t, output, "UNSAFE MODE")
+			if tt.wantAccess == "" {
+				assert.NotContains(t, output, "admin_api_access")
+			} else {
+				assert.Contains(t, output, tt.wantAccess)
+			}
+		})
+	}
+}
+
+func captureStartupInfo(t *testing.T, app *App) string {
+	t.Helper()
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	app.logStartupInfo()
+	return logs.String()
 }
 
 type staticRewriter struct{ name string }

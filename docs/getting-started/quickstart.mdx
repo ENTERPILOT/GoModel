@@ -12,10 +12,15 @@ keywords: ["quick start", "install", "getting started", "AI gateway setup", "Doc
 <Tabs>
   <Tab title="Docker">
     ```bash
+    export GOMODEL_MASTER_KEY="$(openssl rand -hex 32)"
+    echo "$GOMODEL_MASTER_KEY"
     docker run --rm -p 8080:8080 \
+      -e GOMODEL_MASTER_KEY \
       -v gomodel_data:/app/data \
       enterpilot/gomodel
     ```
+
+    Keep the key: the dashboard asks for it, and requests send it as the API key.
   </Tab>
   <Tab title="macOS / Linux">
     ```bash
@@ -46,14 +51,15 @@ the Dashboard's [Providers page](/providers/overview#configuring-providers-witho
 ### 3. Send your first request
 
 Use `curl`, the OpenAI SDK, or the Anthropic SDK for Python and JavaScript
-against the same gateway:
+against the same gateway. If you set `GOMODEL_MASTER_KEY`, use it in place of
+`change-me`:
 
 <CodeGroup>
 
 ```bash curl
 curl http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer change-me" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
   -d '{
     "model": "gpt-4o-mini",
     "messages": [{"role": "user", "content": "Say hello in one sentence."}]

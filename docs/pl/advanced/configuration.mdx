@@ -162,12 +162,17 @@ nic z niego nie wynika: nie działa wobec gatewaya, wobec
 `/admin`. Klucz pozostawiony w środowisku lub w `config.yaml` jest nieaktywny, a nie
 powoduje błędu – dzięki temu przełącznik można bezpiecznie włączyć jeszcze przed jego usunięciem.
 
-Wyłączenie to nie to samo co pozostawienie pustego `GOMODEL_MASTER_KEY`, które uruchamia
-gateway bez uwierzytelniania i otwiera `/admin/*`, żeby dashboard mógł utworzyć
-pierwszy zarządzany klucz. Jeśli nie skonfigurowano rozszerzenia uwierzytelniania,
-`/admin/*` pozostaje otwarte nawet po utworzeniu zarządzanych kluczy, a GoModel loguje
-ostrzeżenie bezpieczeństwa przy starcie, dopóki tak jest – ustaw więc master key lub go wyłącz,
-gdy tylko wydasz pierwszy klucz z dostępem do dashboardu. Wyłączony master
+Wyłączenie to nie to samo co pozostawienie pustego `GOMODEL_MASTER_KEY`. Bez master
+key, bez zarządzanego klucza i bez rozszerzenia uwierzytelniania gateway działa bez
+uwierzytelniania, a `/admin/*` odpowiada tylko wywołującym z tej samej maszyny –
+peerowi loopback, którego request nie zawiera nagłówka przekazywania – żeby dashboard
+mógł utworzyć pierwszy zarządzany klucz. Przy `docker run -p` lub za proxy requesty
+nie przychodzą z loopback, więc ustaw tam master key. Ustaw
+`ADMIN_ALLOW_UNAUTHENTICATED_REMOTE=true`, aby udostępnić nieuwierzytelnione Admin API
+każdemu adresowi – tylko w zaufanej sieci; GoModel loguje przy starcie, który tryb
+obowiązuje. Pierwszy zarządzany klucz zamyka `/admin/*`: od tej chwili wymaga ono
+master key lub zarządzanego klucza z dostępem do dashboardu. Jeśli nie ma już
+takiego klucza, ustaw `GOMODEL_MASTER_KEY` i zrestartuj gateway, aby odzyskać dostęp. Wyłączony master
 key działa natomiast w trybie fail closed: każdy request
 wymaga danych uwierzytelniających, a Admin API pozostaje dostępne tylko z takimi, które mają
 dostęp do dashboardu. Wydaj je, zanim włączysz przełącznik – bez master key,
@@ -480,6 +485,7 @@ Przykłady YAML, okresy, dopasowywanie i egzekwowanie w workflowach opisuje stro
 | ------------------------------------- | ------------------------------------------------ | ------- |
 | `ADMIN_ENDPOINTS_ENABLED`             | Włącza administracyjne REST API                  | `true`  |
 | `ADMIN_UI_ENABLED`                    | Włącza UI dashboardu administracyjnego           | `true`  |
+| `ADMIN_ALLOW_UNAUTHENTICATED_REMOTE`  | Udostępnia Admin API innym maszynom, dopóki nie istnieje master key, zarządzany klucz ani rozszerzenie uwierzytelniania | `false` |
 | `DASHBOARD_LIVE_LOGS_ENABLED`         | Streamuje podgląd audytu/użycia na żywo w dashboardzie | `true`  |
 | `DASHBOARD_LIVE_LOGS_BUFFER_SIZE`     | Okno odtwarzania w pamięci dla zdarzeń dashboardu na żywo | `10000` |
 | `DASHBOARD_LIVE_LOGS_REPLAY_LIMIT`    | Maksymalna liczba zdarzeń odtwarzanych jednemu ponownie łączącemu się klientowi | `1000`  |

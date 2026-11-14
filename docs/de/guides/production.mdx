@@ -208,11 +208,10 @@ Volume, beschränken Sie den Zugriff und stufen Sie Backups entsprechend ein.
   `password`, `signature` oder `jwt` enthält. `Idempotency-Key` und
   `Sec-WebSocket-Key` bleiben erhalten.
 - **Setzen Sie `GOMODEL_MASTER_KEY`.** Ist er leer und gibt es keine
-  verwalteten Keys, wird jeder Request ohne Authentifizierung zugelassen, und
-  `/admin/*` wird als Wiederherstellungspfad bei Aussperrung in die Liste der
-  von der Authentifizierung ausgenommenen Pfade aufgenommen. Ein aus dem
-  Internet erreichbares Gateway in diesem Zustand gibt jedem Zugriff auf die
-  vollständige Admin API.
+  verwalteten Keys, wird jeder Request ohne Authentifizierung zugelassen.
+  `/admin/*` antwortet dann nur Aufrufern auf der Maschine des Gateways, es sei
+  denn, `ADMIN_ALLOW_UNAUTHENTICATED_REMOTE=true` öffnet es für jede Adresse –
+  dann erhält jeder, der das Gateway erreicht, die vollständige Admin API.
 
 ### TLS
 

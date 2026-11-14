@@ -176,14 +176,20 @@ akzeptiert oder daraus ableitet: Er schlägt am Gateway fehl, an
 wirkungslos statt ein Fehler. Deshalb können Sie den Schalter gefahrlos
 umlegen, bevor Sie den Key entfernen.
 
-Deaktivieren ist nicht dasselbe, wie `GOMODEL_MASTER_KEY` leer zu lassen. Ein
-leerer Wert betreibt das Gateway ohne Authentifizierung und öffnet `/admin/*`,
-damit das Dashboard seinen ersten verwalteten Key anlegen kann. Sofern keine
-Authentifizierungserweiterung konfiguriert ist, bleibt `/admin/*` auch dann
-offen, wenn bereits verwaltete Keys existieren, und GoModel protokolliert
-währenddessen beim Start eine Sicherheitswarnung. Setzen Sie daher einen
-Master-Key oder deaktivieren Sie ihn, sobald der erste Key mit
-Dashboard-Zugriff ausgegeben ist. Ein deaktivierter Master-Key schlägt
+Deaktivieren ist nicht dasselbe, wie `GOMODEL_MASTER_KEY` leer zu lassen. Ohne
+Master-Key, ohne verwalteten Key und ohne Authentifizierungserweiterung läuft das
+Gateway ohne Authentifizierung, und `/admin/*` antwortet nur Aufrufern auf
+derselben Maschine – einem Loopback-Peer, dessen Request keinen
+Weiterleitungs-Header trägt –, damit das Dashboard den ersten verwalteten Key
+anlegen kann. Unter `docker run -p` oder hinter einem Proxy kommen Requests nicht
+über Loopback an; setzen Sie dort einen Master-Key. Mit
+`ADMIN_ALLOW_UNAUTHENTICATED_REMOTE=true` liefert das Gateway die
+unauthentifizierte Admin API stattdessen an jede Adresse aus – nur in einem
+vertrauenswürdigen Netz; GoModel protokolliert beim Start, welcher Modus gilt.
+Der erste verwaltete Key schließt `/admin/*`: Ab dann ist der Master-Key oder ein
+verwalteter Key mit Dashboard-Zugriff nötig. Gibt es keinen solchen Key mehr,
+setzen Sie `GOMODEL_MASTER_KEY` und starten Sie neu, um wieder Zugriff zu
+erhalten. Ein deaktivierter Master-Key schlägt
 dagegen geschlossen fehl (Fail-Closed): Jeder Request benötigt Zugangsdaten,
 und die Admin API bleibt hinter Zugangsdaten mit Dashboard-Zugriff. Geben Sie
 diese Zugangsdaten aus, bevor Sie den Schalter umlegen – ohne Master-Key, ohne
@@ -520,6 +526,7 @@ Zuordnungsregeln und die Durchsetzung in Workflows.
 | ------------------------------------- | ------------------------------------------------ | ------- |
 | `ADMIN_ENDPOINTS_ENABLED`             | Aktiviert die Admin-REST-API                        | `true`  |
 | `ADMIN_UI_ENABLED`                    | Aktiviert die Oberfläche des Admin-Dashboards                    | `true`  |
+| `ADMIN_ALLOW_UNAUTHENTICATED_REMOTE`  | Liefert die Admin API an andere Maschinen aus, solange weder Master-Key noch verwalteter Key noch Authentifizierungserweiterung existiert | `false` |
 | `DASHBOARD_LIVE_LOGS_ENABLED`         | Streamt Echtzeit-Vorschauen von Audit und Nutzung ins Dashboard   | `true`  |
 | `DASHBOARD_LIVE_LOGS_BUFFER_SIZE`     | Replay-Fenster im Arbeitsspeicher für Live-Ereignisse im Dashboard | `10000` |
 | `DASHBOARD_LIVE_LOGS_REPLAY_LIMIT`    | Maximale Anzahl an Ereignissen, die einem sich neu verbindenden Client erneut gesendet werden   | `1000`  |

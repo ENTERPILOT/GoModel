@@ -33,6 +33,9 @@ func newAdminGateServer(masterKey string) *Server {
 func adminGateStatus(t *testing.T, srv *Server, path, bearer string) (int, map[string]any) {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, path, nil)
+	// A loopback peer, so these tests exercise credentials rather than the
+	// local-only guard of an admin API without any.
+	req.RemoteAddr = loopbackPeer
 	if bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
@@ -93,13 +96,29 @@ func TestAdminGate_DoesNotCoverModelAndUsageRoutes(t *testing.T) {
 	assert.Equal(t, http.StatusOK, status)
 }
 
-func TestAdminGate_LockoutRecoveryPathStaysOpen(t *testing.T) {
-	// Without a master key the /admin/* routes deliberately skip auth so the
-	// dashboard can recover managed-key access; the gate must not re-lock it.
+func TestAdminGate_ManagedKeysGateAdminWithoutMasterKey(t *testing.T) {
+	// Without a master key, the first managed key closes the admin API: an
+	// operator who loses every dashboard key recovers by setting a master key
+	// and restarting.
 	srv := newAdminGateServer("")
 
-	status, _ := adminGateStatus(t, srv, "/admin/auth-keys", "")
-	assert.Equal(t, http.StatusServiceUnavailable, status)
+	tests := []struct {
+		name       string
+		bearer     string
+		wantStatus int
+	}{
+		{name: "no credential", wantStatus: http.StatusUnauthorized},
+		{name: "key without dashboard access", bearer: "sk_gom_plain", wantStatus: http.StatusForbidden},
+		{name: "dashboard key", bearer: "sk_gom_admin", wantStatus: http.StatusServiceUnavailable},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, path := range []string{"/admin/auth-keys", "/admin/api/v1/auth-keys"} {
+				status, _ := adminGateStatus(t, srv, path, tt.bearer)
+				assert.Equal(t, tt.wantStatus, status, "path %s", path)
+			}
+		})
+	}
 }
 
 func TestAdminGate_RequestAuthenticatorDisablesAnonymousRecoveryBypass(t *testing.T) {
@@ -138,7 +157,7 @@ func TestAdminGate_RequestAuthenticatorDisablesAnonymousRecoveryBypass(t *testin
 	}
 }
 
-func TestAdminGate_NilRequestAuthenticatorsKeepRecoveryBypass(t *testing.T) {
+func TestAdminGate_NilRequestAuthenticatorsLeaveAdminOpenLocally(t *testing.T) {
 	var typedNil *mockRequestAuthenticator
 	for _, authenticators := range [][]ext.RequestAuthenticator{{nil}, {typedNil}} {
 		srv := New(&mockProvider{}, &Config{
@@ -236,7 +255,7 @@ func TestExtensionAdminRoutesMountOnlyWithAdminEndpoints(t *testing.T) {
 		ExtraAdminRoutes:      []func(*echo.Group){vaultsStatusRoute},
 	})
 	status, _ := adminGateStatus(t, enabled, "/admin/vaults/status", "")
-	assert.Equal(t, http.StatusOK, status, "open like built-in admin routes without a master key")
+	assert.Equal(t, http.StatusOK, status, "open to this machine like built-in admin routes without a credential")
 
 	disabled := New(&mockProvider{}, &Config{ExtraAdminRoutes: []func(*echo.Group){vaultsStatusRoute}})
 	status, _ = adminGateStatus(t, disabled, "/admin/vaults/status", "")
