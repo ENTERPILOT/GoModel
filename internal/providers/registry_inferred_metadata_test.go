@@ -60,6 +60,54 @@ func TestInitialize_InfersEmbeddingModesForUnknownModels(t *testing.T) {
 	assert.False(t, found["llama-3.1-8b-instruct"], "chat model must not appear in the embedding category")
 }
 
+// TestInitialize_InfersAudioModesForUnknownModels covers models the remote
+// registry does not list yet, such as Xiaomi's MiMo TTS variants: a speech or
+// transcription model whose ID says so lands in the Audio category instead of
+// in no category at all, while a chat model next to it stays uncategorized.
+func TestInitialize_InfersAudioModesForUnknownModels(t *testing.T) {
+	registry := NewModelRegistry()
+
+	provider := &registryMockProvider{
+		name: "provider-uruk",
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "mimo-v2.5-tts-voiceclone", Object: "model", OwnedBy: "xiaomi"},
+				{ID: "whisper-large-v3", Object: "model", OwnedBy: "xiaomi"},
+				{ID: "mimo-v2.5-pro", Object: "model", OwnedBy: "xiaomi"},
+			},
+		},
+	}
+	registry.RegisterProviderWithNameAndType(provider, "uruk", "xiaomi")
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
+
+	wantModes := map[string]string{
+		"mimo-v2.5-tts-voiceclone": "audio_speech",
+		"whisper-large-v3":         "audio_transcription",
+	}
+	for id, mode := range wantModes {
+		info := registry.GetModel("uruk/" + id)
+		require.NotNil(t, info)
+		require.NotNil(t, info.Model.Metadata, "expected %s to have inferred metadata", id)
+		assert.Equal(t, []string{mode}, info.Model.Metadata.Modes, "%s modes", id)
+		assert.Equal(t, []core.ModelCategory{core.CategoryAudio}, info.Model.Metadata.Categories, "%s categories", id)
+	}
+
+	chat := registry.GetModel("uruk/mimo-v2.5-pro")
+	require.NotNil(t, chat)
+	assert.Nil(t, chat.Model.Metadata, "chat model must not get inferred metadata")
+
+	audio := map[string]bool{}
+	for _, m := range registry.ListModelsWithProviderByCategory(core.CategoryAudio) {
+		audio[m.Model.ID] = true
+	}
+	assert.Equal(t, map[string]bool{"mimo-v2.5-tts-voiceclone": true, "whisper-large-v3": true}, audio)
+	for _, m := range registry.ListModelsWithProviderByCategory(core.CategoryTextGeneration) {
+		assert.NotContains(t, wantModes, m.Model.ID, "audio model must not appear in the text generation category")
+	}
+}
+
 // TestApplyInferredModelMetadata_ReplacementsProtocol exercises the published-
 // map path (EnrichModels), where entries must be replaced rather than mutated
 // in place so concurrent readers keep a stable view. Covers both a fresh entry

@@ -13,12 +13,26 @@ var embeddingFamilyTokens = map[string]struct{}{
 	"minilm": {},
 }
 
+// audioModeTokens map whole delimited ID tokens to audio modes, so speech and
+// transcription models the registry has no entry for yet (for example
+// "mimo-v2.5-tts-voiceclone" or a local "whisper-large-v3") land in the audio
+// category. Whole-token matching keeps lookalikes such as "putts-7b" or
+// "whisperer-13b" unclassified.
+var audioModeTokens = map[string]string{
+	"tts":        "audio_speech",
+	"asr":        "audio_transcription",
+	"stt":        "audio_transcription",
+	"transcribe": "audio_transcription",
+	"whisper":    "audio_transcription",
+}
+
 // InferModesFromID guesses a model's modes from its ID alone. It is a
 // last-resort fallback for models absent from the remote model registry —
 // typically local models served by llama.cpp, LM Studio, Ollama, or vLLM,
 // whose IDs (often GGUF file names or user-chosen aliases) the registry can
-// never enumerate. Without a mode, such a model is never categorized as an
-// embedding model anywhere in the gateway even though calling it works fine.
+// never enumerate — and for hosted models the registry has not caught up with
+// yet. Without a mode, such a model is never categorized as an embedding or
+// audio model anywhere in the gateway even though calling it works fine.
 //
 // The heuristic is deliberately conservative: it only claims the modes it is
 // confident about and returns nil otherwise, so unknown models keep the
@@ -39,9 +53,15 @@ func InferModesFromID(modelID string) []string {
 	if strings.Contains(id, "embed") {
 		return []string{"embedding"}
 	}
-	for _, token := range strings.FieldsFunc(id, isModelIDDelimiter) {
+	tokens := strings.FieldsFunc(id, isModelIDDelimiter)
+	for _, token := range tokens {
 		if _, ok := embeddingFamilyTokens[token]; ok {
 			return []string{"embedding"}
+		}
+	}
+	for _, token := range tokens {
+		if mode, ok := audioModeTokens[token]; ok {
+			return []string{mode}
 		}
 	}
 	return nil
