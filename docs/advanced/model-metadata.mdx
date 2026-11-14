@@ -64,7 +64,8 @@ flowchart LR
    embedding models, IDs containing `rerank` become reranking models, and IDs
    with a `tts` token become speech models while `whisper`, `transcribe`, `asr`,
    or `stt` tokens mark transcription models (`mimo-v2.5-tts-voiceclone`,
-   `whisper-large-v3`). Namespaced IDs are matched by their final path segment.
+   `whisper-large-v3`); an embedding or reranking match wins over an audio
+   token. Namespaced IDs are matched by their final path segment.
    When unsure, it claims nothing.
 
 ## Checking where a value came from
