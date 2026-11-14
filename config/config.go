@@ -372,6 +372,10 @@ func Load() (*LoadResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid server.user_path_header: %w", err)
 	}
+	cfg.Server.RealtimeAllowedOrigins, err = normalizeRealtimeAllowedOrigins(cfg.Server.RealtimeAllowedOrigins)
+	if err != nil {
+		return nil, fmt.Errorf("server.realtime_allowed_origins: %w", err)
+	}
 	cfg.Models.ConfiguredProviderModelsMode = ResolveConfiguredProviderModelsMode(cfg.Models.ConfiguredProviderModelsMode)
 	if !cfg.Models.ConfiguredProviderModelsMode.Valid() {
 		return nil, fmt.Errorf("models.configured_provider_models_mode must be one of: fallback, allowlist, merge")

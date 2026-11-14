@@ -60,6 +60,24 @@ i [Usage API](/pl/advanced/usage-api).
 | `/v1/batches/{id}/cancel`         | POST   | Anuluje oczekujący batch                                                                                     |
 | `/v1/batches/{id}/results`        | GET    | Pobiera natywne wyniki batcha, gdy są dostępne                                                               |
 
+### Websockety realtime z przeglądarki
+
+Handshake websocketa nie podlega polityce same-origin przeglądarki, dlatego
+gateway sprawdza nagłówek `Origin` każdego upgrade'u realtime (`/v1/realtime`,
+`/v1/realtime/translations` oraz passthrough `/p/{provider}/v1/realtime`).
+Klienci, którzy nie wysyłają `Origin` – SDK, serwery, narzędzia CLI – oraz strony
+serwowane z hosta samego gatewaya są akceptowane. Upgrade ze strony o innym
+originie kończy się kodem `403`, chyba że ten origin jest na liście:
+
+```bash
+REALTIME_ALLOWED_ORIGINS=https://app.example.com,http://localhost:3000
+```
+
+Domyślnie lista jest pusta. Dodawaj tylko originy, z których serwujesz webowego
+klienta realtime; `*` wyłącza sprawdzanie. Aplikacje przeglądarkowe, które łączą
+się bezpośrednio z providerem za pomocą sekretu klienta, nie są objęte tym
+ograniczeniem.
+
 ### Sesje tłumaczenia w czasie rzeczywistym
 
 Modele tłumaczenia mowy (OpenAI `gpt-realtime-translate`) działają na własnym

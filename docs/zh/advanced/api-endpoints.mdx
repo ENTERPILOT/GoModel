@@ -59,6 +59,16 @@ GoModel 提供兼容 OpenAI 和兼容 Anthropic 的 API、提供商原生透传�
 | `/v1/batches/{id}/cancel`         | POST   | 取消待处理的批处理 |
 | `/v1/batches/{id}/results`        | GET    | 获取原生批处理结果（如可用） |
 
+### 浏览器中的实时 WebSocket
+
+WebSocket 握手不受浏览器同源策略的约束，因此网关会检查每个实时升级请求（`/v1/realtime`、`/v1/realtime/translations` 以及透传的 `/p/{provider}/v1/realtime`）的 `Origin` Header。不发送 `Origin` 的客户端（SDK、服务器、CLI 工具）以及由网关自身主机提供的页面会被接受。来自其他来源页面的升级请求会收到 `403`，除非该来源已被列出：
+
+```bash
+REALTIME_ALLOWED_ORIGINS=https://app.example.com,http://localhost:3000
+```
+
+默认为空。只添加您实际用来提供实时 Web 客户端的来源；`*` 表示关闭该检查。使用客户端 Secret 直接连接提供商的浏览器应用不受影响。
+
 ### 实时翻译会话
 
 语音翻译模型（OpenAI `gpt-realtime-translate`）运行在独立的会话接口上，因此网关也对其进行了镜像。

@@ -103,9 +103,9 @@ func Proxy(w http.ResponseWriter, r *http.Request, target Target, hooks Hooks) e
 
 	client, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		Subprotocols: target.Subprotocols,
-		// The gateway authenticates clients by bearer token, not cookies, so the
-		// browser same-origin CSRF check does not apply. Auth is enforced upstream
-		// of Proxy.
+		// The library's origin check would run here, after the upstream is
+		// already dialed. The caller checks Origin before it calls Proxy
+		// (server.realtimeOriginGuard), where a refusal costs nothing.
 		InsecureSkipVerify: true,
 	})
 	if err != nil {

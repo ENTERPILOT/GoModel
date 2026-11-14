@@ -1076,6 +1076,41 @@ server:
 	})
 }
 
+func TestLoad_RealtimeAllowedOrigins(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(string) {
+		result, err := Load()
+		require.NoError(t, err)
+		require.Empty(t, result.Config.Server.RealtimeAllowedOrigins)
+	})
+
+	withTempDir(t, func(dir string) {
+		yaml := `
+server:
+  realtime_allowed_origins: ["HTTPS://App.Example.com:443", "https://app.example.com", " "]
+`
+		result := loadConfigYAML(t, dir, yaml)
+		require.Equal(t, []string{"https://app.example.com"}, result.Config.Server.RealtimeAllowedOrigins)
+	})
+
+	withTempDir(t, func(string) {
+		t.Setenv("REALTIME_ALLOWED_ORIGINS", "http://localhost:3000, *")
+
+		result, err := Load()
+		require.NoError(t, err)
+		require.Equal(t, []string{"http://localhost:3000", "*"}, result.Config.Server.RealtimeAllowedOrigins)
+	})
+
+	withTempDir(t, func(string) {
+		t.Setenv("REALTIME_ALLOWED_ORIGINS", "app.example.com")
+
+		_, err := Load()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "server.realtime_allowed_origins")
+	})
+}
+
 func TestLoad_UserPathHeaderRejectsInvalidName(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
