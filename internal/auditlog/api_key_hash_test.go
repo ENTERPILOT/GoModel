@@ -103,3 +103,14 @@ func TestNewLoadsAPIKeyHashSecret(t *testing.T) {
 	assert.Equal(t, loadAPIKeyHashSecret(ctx, backend), result.Logger.Config().APIKeyHashSecret)
 	assert.NotEmpty(t, result.Logger.Config().APIKeyHashSecret)
 }
+
+// A database that cannot hold the secret leaves the fingerprint out instead
+// of falling back to an unkeyed one.
+func TestLoadAPIKeyHashSecretFailureLeavesFingerprintOut(t *testing.T) {
+	backend := newAPIKeyHashTestStorage(t)
+	require.NoError(t, backend.Close())
+
+	secret := loadAPIKeyHashSecret(context.Background(), backend)
+	assert.Empty(t, secret)
+	assert.Empty(t, hashAPIKey(secret, "Bearer sk-test"))
+}
