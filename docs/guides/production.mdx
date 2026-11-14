@@ -99,10 +99,12 @@ explicitly in production. The resolved path is printed at startup as
 
 The database holds provider credentials (in plaintext unless
 `GOMODEL_ENCRYPTION_KEY` is set) and request content, so GoModel creates the
-file with mode `0600` and its directory with `0700`. A file or directory that
-already exists keeps its mode, and startup logs a warning when other users can
-access the database file: run `chmod 600` on it unless another user, such as a
-backup sidecar, has to read it.
+file with mode `0600` and its directory with `0700` on Linux and macOS. A file
+or directory that already exists keeps its mode, and startup logs a warning
+when other users can access the database file or its `-wal` and `-shm` files:
+run `chmod 600` on them unless another user, such as a backup sidecar, has to
+read them. On Windows the data directory's ACLs apply; GoModel does not check
+them.
 
 ### Redis
 
@@ -631,9 +633,10 @@ larger.
   listener. Restrict them at the proxy or network level, or disable them with
   `ADMIN_ENDPOINTS_ENABLED=false`. The dashboard shell and its static assets skip
   auth by design; only the data they load is gated.
-- **Restrict the database file.** The SQLite data directory is created `0755`
-  and the database file with default permissions, so on a shared host it can be
-  world-readable. Run GoModel as a dedicated user and tighten permissions,
+- **Restrict the database file.** A SQLite data directory and database file
+  GoModel creates are private to its user (see [Choose a storage backend](#choose-a-storage-backend)), but ones
+  from earlier versions keep their mode and may be world-readable on a shared
+  host. Run GoModel as a dedicated user and act on the startup warning,
   especially if any credentials are stored through the dashboard.
 - **Keep `BODY_SIZE_LIMIT` sane.** It defaults to `10M` and is what stops an
   oversized body becoming a memory-exhaustion vector. An unparseable value falls

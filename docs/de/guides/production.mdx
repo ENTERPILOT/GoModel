@@ -108,11 +108,13 @@ Produktion daher explizit. Der aufgelöste Pfad wird beim Start als
 
 Die Datenbank enthält Provider-Zugangsdaten (im Klartext, sofern
 `GOMODEL_ENCRYPTION_KEY` nicht gesetzt ist) und Request-Inhalte. GoModel legt
-die Datei daher mit dem Modus `0600` und ihr Verzeichnis mit `0700` an. Eine
-bereits vorhandene Datei oder ein vorhandenes Verzeichnis behält ihren Modus,
-und beim Start wird eine Warnung protokolliert, wenn andere Benutzer auf die
-Datenbankdatei zugreifen können: Führen Sie `chmod 600` darauf aus, sofern kein
-anderer Benutzer, etwa ein Backup-Sidecar, sie lesen muss.
+die Datei unter Linux und macOS daher mit dem Modus `0600` und ihr Verzeichnis
+mit `0700` an. Eine bereits vorhandene Datei oder ein vorhandenes Verzeichnis
+behält ihren Modus, und beim Start wird eine Warnung protokolliert, wenn andere
+Benutzer auf die Datenbankdatei oder ihre `-wal`- und `-shm`-Dateien zugreifen
+können: Führen Sie `chmod 600` darauf aus, sofern kein anderer Benutzer, etwa
+ein Backup-Sidecar, sie lesen muss. Unter Windows gelten die ACLs des
+Datenverzeichnisses; GoModel prüft sie nicht.
 
 ### Redis
 
@@ -704,11 +706,12 @@ separat ein VACUUM aus, wenn die Dateigröße wichtig ist.
   mit `ADMIN_ENDPOINTS_ENABLED=false`. Die Dashboard-Shell und ihre statischen
   Ressourcen umgehen die Authentifizierung bewusst; geschützt sind nur die
   Daten, die sie laden.
-- **Beschränken Sie den Zugriff auf die Datenbankdatei.** Das
-  SQLite-Datenverzeichnis wird mit `0755` und die Datenbankdatei mit
-  Standardberechtigungen angelegt, sodass sie auf einem gemeinsam genutzten
-  Host für alle lesbar sein kann. Führen Sie GoModel unter einem eigenen
-  Benutzer aus und verschärfen Sie die Berechtigungen, insbesondere wenn
+- **Beschränken Sie den Zugriff auf die Datenbankdatei.** Ein
+  SQLite-Datenverzeichnis und eine Datenbankdatei, die GoModel anlegt, sind
+  privat für seinen Benutzer (siehe oben). Solche aus früheren
+  Versionen behalten jedoch ihren Modus und können auf einem gemeinsam
+  genutzten Host für alle lesbar sein. Führen Sie GoModel unter einem eigenen
+  Benutzer aus und beachten Sie die Warnung beim Start, insbesondere wenn
   Zugangsdaten über das Dashboard gespeichert werden.
 - **Halten Sie `BODY_SIZE_LIMIT` vernünftig.** Der Standardwert ist `10M`, und
   diese Einstellung verhindert, dass ein übergroßer Body zum Vektor für

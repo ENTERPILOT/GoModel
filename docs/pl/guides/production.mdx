@@ -95,10 +95,12 @@ jawnie. Rozwiązana ścieżka jest wypisywana przy starcie jako
 [Gdzie GoModel przechowuje dane?](/pl/about/faq#gdzie-gomodel-przechowuje-dane).
 
 Baza zawiera dane uwierzytelniające providerów (jawnym tekstem, o ile nie ustawiono
-`GOMODEL_ENCRYPTION_KEY`) oraz treść requestów, dlatego GoModel tworzy plik z uprawnieniami
-`0600`, a jego katalog z `0700`. Istniejący plik lub katalog zachowuje swoje uprawnienia,
-a przy starcie logowane jest ostrzeżenie, gdy inni użytkownicy mają dostęp do pliku bazy:
-wykonaj na nim `chmod 600`, chyba że musi go czytać inny użytkownik, np. sidecar z backupem.
+`GOMODEL_ENCRYPTION_KEY`) oraz treść requestów, dlatego na Linuksie i macOS GoModel tworzy
+plik z uprawnieniami `0600`, a jego katalog z `0700`. Istniejący plik lub katalog zachowuje
+swoje uprawnienia, a przy starcie logowane jest ostrzeżenie, gdy inni użytkownicy mają dostęp
+do pliku bazy lub jego plików `-wal` i `-shm`: wykonaj na nich `chmod 600`, chyba że musi je
+czytać inny użytkownik, np. sidecar z backupem. Na Windows obowiązują ACL katalogu danych;
+GoModel ich nie sprawdza.
 
 ### Redis
 
@@ -631,9 +633,10 @@ wykonuj na nim VACUUM osobno.
   listener. Ogranicz do nich dostęp na poziomie proxy lub sieci albo wyłącz je za pomocą
   `ADMIN_ENDPOINTS_ENABLED=false`. Powłoka dashboardu i jej zasoby statyczne celowo pomijają
   uwierzytelnianie; chronione są tylko dane, które ładują.
-- **Ogranicz dostęp do pliku bazy danych.** Katalog danych SQLite jest tworzony z uprawnieniami `0755`,
-  a plik bazy danych z domyślnymi uprawnieniami, więc na współdzielonym hoście może być
-  czytelny dla wszystkich. Uruchamiaj GoModel jako dedykowany użytkownik i zaostrz uprawnienia,
+- **Ogranicz dostęp do pliku bazy danych.** Katalog danych SQLite i plik bazy tworzone przez
+  GoModel są prywatne dla jego użytkownika (zobacz wyżej), ale te z wcześniejszych
+  wersji zachowują swoje uprawnienia i na współdzielonym hoście mogą być czytelne dla wszystkich.
+  Uruchamiaj GoModel jako dedykowany użytkownik i reaguj na ostrzeżenie przy starcie,
   zwłaszcza jeśli jakiekolwiek dane uwierzytelniające są zapisywane przez dashboard.
 - **Utrzymuj rozsądną wartość `BODY_SIZE_LIMIT`.** Domyślnie wynosi `10M` i to ona chroni przed
   użyciem zbyt dużego body do wyczerpania pamięci. Wartość, której nie da się sparsować, wraca
