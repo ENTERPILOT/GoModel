@@ -64,7 +64,8 @@ und [Usage API](/de/advanced/usage-api).
 
 Ein Websocket-Handshake unterliegt nicht der Same-Origin-Policy des Browsers. Das
 Gateway prüft deshalb bei jedem Realtime-Upgrade (`/v1/realtime`,
-`/v1/realtime/translations` und dem Passthrough `/p/{provider}/v1/realtime`) den
+`/v1/realtime/translations` und den Passthroughs `/p/{provider}/v1/realtime` und
+`/p/{provider}/v1/realtime/translations`) den
 `Origin`-Header. Clients ohne `Origin` – SDKs, Server, CLI-Tools – und Seiten, die
 vom Host des Gateways selbst ausgeliefert werden, werden akzeptiert. Ein Upgrade
 von einer Seite mit einem anderen Origin erhält `403`, sofern dieser Origin nicht
@@ -77,6 +78,12 @@ REALTIME_ALLOWED_ORIGINS=https://app.example.com,http://localhost:3000
 Standardmäßig ist die Liste leer. Tragen Sie nur Origins ein, von denen Sie einen
 Realtime-Web-Client ausliefern; `*` schaltet die Prüfung ab. Browser-Apps, die
 mit einem Client-Secret direkt mit dem Provider sprechen, sind nicht betroffen.
+
+„Gleicher Host“ vergleicht `Origin` mit dem `Host`-Header, den das Gateway empfängt.
+Ein Reverse-Proxy, der `Host` umschreibt, muss den öffentlichen Host erhalten, oder
+der öffentliche Origin muss aufgeführt werden. Die Same-Host-Regel verhindert kein
+DNS-Rebinding und ist daher keine Zugriffskontrolle: Ein Gateway ohne
+Authentifizierung bleibt für alle offen, die es erreichen.
 
 ### Realtime-Übersetzungs-Sessions
 

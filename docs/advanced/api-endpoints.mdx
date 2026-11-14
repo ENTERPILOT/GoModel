@@ -65,7 +65,7 @@ and [Usage API](/advanced/usage-api).
 A websocket handshake is not covered by the browser's same-origin policy, so
 the gateway checks the `Origin` header of every realtime upgrade
 (`/v1/realtime`, `/v1/realtime/translations`, and the `/p/{provider}/v1/realtime`
-passthrough). Clients that send no `Origin` — SDKs, servers, CLI tools — and
+and `/p/{provider}/v1/realtime/translations` passthroughs). Clients that send no `Origin` — SDKs, servers, CLI tools — and
 pages served from the gateway's own host are accepted. An upgrade from a page on
 any other origin gets `403` unless that origin is listed:
 
@@ -76,6 +76,12 @@ REALTIME_ALLOWED_ORIGINS=https://app.example.com,http://localhost:3000
 The default is empty. Set it only for origins you serve a realtime web client
 from; `*` turns the check off. Browser apps that talk to the provider directly
 with a client secret (`/v1/realtime/client_secrets`) are not affected.
+
+"Same host" compares `Origin` with the `Host` header the gateway receives. A
+reverse proxy that rewrites `Host` must preserve the public host, or list the
+public origin. The same-host rule does not stop DNS rebinding, so it is not an
+access-control boundary: a gateway without authentication is still open to
+anything that can reach it.
 
 ### Realtime translation sessions
 

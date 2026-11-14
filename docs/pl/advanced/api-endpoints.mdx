@@ -64,7 +64,8 @@ i [Usage API](/pl/advanced/usage-api).
 
 Handshake websocketa nie podlega polityce same-origin przeglądarki, dlatego
 gateway sprawdza nagłówek `Origin` każdego upgrade'u realtime (`/v1/realtime`,
-`/v1/realtime/translations` oraz passthrough `/p/{provider}/v1/realtime`).
+`/v1/realtime/translations` oraz passthroughów `/p/{provider}/v1/realtime` i
+`/p/{provider}/v1/realtime/translations`).
 Klienci, którzy nie wysyłają `Origin` – SDK, serwery, narzędzia CLI – oraz strony
 serwowane z hosta samego gatewaya są akceptowane. Upgrade ze strony o innym
 originie kończy się kodem `403`, chyba że ten origin jest na liście:
@@ -77,6 +78,12 @@ Domyślnie lista jest pusta. Dodawaj tylko originy, z których serwujesz weboweg
 klienta realtime; `*` wyłącza sprawdzanie. Aplikacje przeglądarkowe, które łączą
 się bezpośrednio z providerem za pomocą sekretu klienta, nie są objęte tym
 ograniczeniem.
+
+„Ten sam host” oznacza porównanie `Origin` z nagłówkiem `Host`, który otrzymuje
+gateway. Reverse proxy, które przepisuje `Host`, musi zachować publiczny host,
+albo publiczny origin musi być na liście. Reguła tego samego hosta nie chroni
+przed DNS rebinding, więc nie jest granicą kontroli dostępu: gateway bez
+uwierzytelniania pozostaje otwarty dla każdego, kto do niego dotrze.
 
 ### Sesje tłumaczenia w czasie rzeczywistym
 

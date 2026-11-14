@@ -372,7 +372,7 @@ func Load() (*LoadResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid server.user_path_header: %w", err)
 	}
-	cfg.Server.RealtimeAllowedOrigins, err = normalizeRealtimeAllowedOrigins(cfg.Server.RealtimeAllowedOrigins)
+	cfg.Server.RealtimeAllowedOrigins, err = normalizeRealtimeAllowedOrigins(cfg.Server.RealtimeAllowedOrigins, false)
 	if err != nil {
 		return nil, fmt.Errorf("server.realtime_allowed_origins: %w", err)
 	}

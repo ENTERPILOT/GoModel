@@ -23,20 +23,26 @@ var bodySizeLimitRegex = regexp.MustCompile(`(?i)^(\d+)([KMG])?B?$`)
 
 // normalizeRealtimeAllowedOrigins canonicalizes
 // server.realtime_allowed_origins for comparison against an Origin header,
-// dropping blanks and repeats. TrustAnyOrigin is kept as written.
-func normalizeRealtimeAllowedOrigins(origins []string) ([]string, error) {
+// dropping blanks and repeats. TrustAnyOrigin is kept as written. At load
+// time (resolved false) an entry holding a secret reference keeps its text;
+// the resolved pass checks it once ResolveSecrets has run, and then names the
+// entry rather than its value.
+func normalizeRealtimeAllowedOrigins(origins []string, resolved bool) ([]string, error) {
 	if len(origins) == 0 {
 		return origins, nil
 	}
 	normalized := make([]string, 0, len(origins))
-	for _, raw := range origins {
+	for i, raw := range origins {
 		entry := strings.TrimSpace(raw)
 		if entry == "" {
 			continue
 		}
-		if entry != TrustAnyOrigin {
+		if entry != TrustAnyOrigin && (resolved || !HasSecretReference(entry)) {
 			canonical, err := NormalizeAllowedOrigin(entry)
 			if err != nil {
+				if resolved {
+					return nil, resolvedValueError(fmt.Sprintf("server.realtime_allowed_origins[%d]", i), "is not a valid origin (want scheme://host[:port])")
+				}
 				return nil, err
 			}
 			entry = canonical
