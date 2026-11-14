@@ -2,10 +2,6 @@ package authkeys
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -42,6 +38,9 @@ type AuthenticationResult struct {
 // Service keeps managed auth keys cached in memory for request authentication.
 type Service struct {
 	store Store
+	// tokenPrefix starts every key Create issues. Authentication does not
+	// depend on it, so changing it never invalidates an existing key.
+	tokenPrefix string
 
 	mu       sync.RWMutex
 	snapshot snapshot
@@ -63,12 +62,24 @@ func (s *Service) SetChangeNotifier(fn func(context.Context)) {
 	}
 }
 
+// Option configures a Service.
+type Option func(*Service)
+
+// WithTokenPrefix sets the prefix of newly issued keys. Empty keeps
+// DefaultTokenPrefix; NewService rejects a prefix NormalizeTokenPrefix does
+// not accept.
+func WithTokenPrefix(prefix string) Option {
+	return func(s *Service) {
+		s.tokenPrefix = prefix
+	}
+}
+
 // NewService creates a managed auth key service backed by storage.
-func NewService(store Store) (*Service, error) {
+func NewService(store Store, opts ...Option) (*Service, error) {
 	if store == nil {
 		return nil, fmt.Errorf("store is required")
 	}
-	return &Service{
+	s := &Service{
 		store: store,
 		snapshot: snapshot{
 			order:        []string{},
@@ -76,7 +87,16 @@ func NewService(store Store) (*Service, error) {
 			bySecretHash: map[string]AuthKey{},
 			activeByHash: map[string]AuthKey{},
 		},
-	}, nil
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	prefix, err := NormalizeTokenPrefix(s.tokenPrefix)
+	if err != nil {
+		return nil, fmt.Errorf("auth key prefix %w", err)
+	}
+	s.tokenPrefix = prefix
+	return s, nil
 }
 
 // Refresh reloads keys from storage and atomically swaps the in-memory snapshot.
@@ -189,7 +209,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*IssuedKey, er
 		return nil, err
 	}
 
-	value, redactedValue, secretHash, err := generateTokenMaterial()
+	value, redactedValue, secretHash, err := generateTokenMaterial(s.tokenPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("generate auth key: %w", err)
 	}
@@ -504,21 +524,28 @@ func (s *Service) Authenticate(_ context.Context, token string) (AuthenticationR
 		return AuthenticationResult{}, ErrInvalidToken
 	}
 
-	secretHash, importedFrom, err := tokenSecretHash(token)
-	if err != nil {
-		return AuthenticationResult{}, err
-	}
+	token = strings.TrimSpace(token)
 	now := time.Now().UTC()
 
-	s.mu.RLock()
-	key, exists := s.snapshot.bySecretHash[secretHash]
-	s.mu.RUnlock()
-	// A token only matches keys hashed the way its own format is, so a
-	// GoModel token can never match an imported hash or the other way round.
-	if !exists || key.ImportedFrom != importedFrom {
-		return AuthenticationResult{}, ErrInvalidToken
+	// A token only matches keys hashed the way the candidate was: a GoModel
+	// secret only keys GoModel issued, a whole LiteLLM token only imported
+	// keys. So neither kind can ever pass for the other, even when a custom
+	// prefix starts with "sk-" like LiteLLM tokens do.
+	legacy, fixed := issuedTokenSecrets(token)
+	for _, secret := range [...]string{legacy, fixed} {
+		if secret == "" {
+			continue
+		}
+		if key, ok := s.keyBySecretHash(hashSecret(secret)); ok && key.ImportedFrom == "" {
+			return authenticateKey(key, now)
+		}
 	}
-	return authenticateKey(key, now)
+	if looksLikeLiteLLMToken(token) {
+		if key, ok := s.keyBySecretHash(hashSecret(token)); ok && key.ImportedFrom == ImportedFromLiteLLM {
+			return authenticateKey(key, now)
+		}
+	}
+	return AuthenticationResult{}, ErrInvalidToken
 }
 
 // StartBackgroundRefresh periodically reloads auth keys from storage until stopped.
@@ -692,43 +719,4 @@ func sortSnapshotOrder(next *snapshot) {
 		}
 		return left.ID < right.ID
 	})
-}
-
-func generateTokenMaterial() (value string, redactedValue string, secretHash string, err error) {
-	secretBytesBuf := make([]byte, secretBytes)
-	if _, err := rand.Read(secretBytesBuf); err != nil {
-		return "", "", "", err
-	}
-	secret := base64.RawURLEncoding.EncodeToString(secretBytesBuf)
-	value = TokenPrefix + secret
-	return value, redactTokenValue(value), hashSecret(secret), nil
-}
-
-// tokenSecretHash returns the hash a presented token is stored under and the
-// ImportedFrom value of the keys it may match: GoModel hashes the secret after
-// its prefix, LiteLLM hashes the whole "sk-..." token.
-func tokenSecretHash(token string) (secretHash, importedFrom string, err error) {
-	token = strings.TrimSpace(token)
-	if secret, ok := strings.CutPrefix(token, TokenPrefix); ok {
-		if secret == "" {
-			return "", "", ErrInvalidToken
-		}
-		return hashSecret(secret), "", nil
-	}
-	if len(token) > len(liteLLMTokenPrefix) && strings.HasPrefix(token, liteLLMTokenPrefix) {
-		return hashSecret(token), ImportedFromLiteLLM, nil
-	}
-	return "", "", ErrInvalidToken
-}
-
-func hashSecret(secret string) string {
-	sum := sha256.Sum256([]byte(secret))
-	return hex.EncodeToString(sum[:])
-}
-
-func redactTokenValue(value string) string {
-	if len(value) <= len(TokenPrefix)+4 {
-		return TokenPrefix + "..."
-	}
-	return TokenPrefix + "..." + value[len(value)-4:]
 }

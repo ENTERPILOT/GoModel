@@ -167,9 +167,11 @@ source blocked: an earlier import is deactivated and otherwise left unchanged,
 and a key never imported is not created (`204`). A hash that belongs to a key GoModel issued answers `409`
 with code `auth_key_exists`.
 
-Tokens starting with `sk-` are checked only against imported keys, and
-`sk_gom_` tokens only against keys GoModel issued. Without imported keys,
-`sk-` tokens are rejected as before. Deactivate an imported key like any
+An imported key only matches the whole LiteLLM `sk-` token, and a key GoModel
+issued only matches its own token, so neither can stand in for the other. This
+holds with a [custom key prefix](/advanced/configuration#managed-key-prefix)
+that starts with `sk-` too. Without imported keys, LiteLLM tokens are rejected
+as before. Deactivate an imported key like any
 other. The import endpoint needs global admin access.
 
 An imported key is exactly as strong as the LiteLLM key. LiteLLM lets you pick

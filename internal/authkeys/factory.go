@@ -47,19 +47,19 @@ func (r *Result) Close() error {
 }
 
 // New creates an auth key subsystem using an existing storage connection.
-func New(ctx context.Context, shared storage.Storage) (*Result, error) {
+func New(ctx context.Context, shared storage.Storage, opts ...Option) (*Result, error) {
 	if shared == nil {
 		return nil, fmt.Errorf("shared storage is required")
 	}
-	return newResult(ctx, shared)
+	return newResult(ctx, shared, opts)
 }
 
-func newResult(ctx context.Context, storeConn storage.Storage) (*Result, error) {
+func newResult(ctx context.Context, storeConn storage.Storage, opts []Option) (*Result, error) {
 	store, err := createStore(ctx, storeConn)
 	if err != nil {
 		return nil, err
 	}
-	service, err := NewService(store)
+	service, err := NewService(store, opts...)
 	if err != nil {
 		return nil, err
 	}

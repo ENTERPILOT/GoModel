@@ -16,7 +16,7 @@ func newTestKey(id string, createdAt time.Time) AuthKey {
 	return AuthKey{
 		ID:            id,
 		Name:          id,
-		RedactedValue: TokenPrefix + "..." + id,
+		RedactedValue: DefaultTokenPrefix + "..." + id,
 		SecretHash:    "hash-" + id,
 		Enabled:       true,
 		CreatedAt:     createdAt,
@@ -52,7 +52,7 @@ func TestStore_RoundTrip(t *testing.T) {
 			AllowedModels:     []string{"anthropic/", "openai/gpt-4o"},
 			DashboardAccess:   true,
 			PassthroughAccess: true,
-			RedactedValue:     TokenPrefix + "...full",
+			RedactedValue:     DefaultTokenPrefix + "...full",
 			SecretHash:        "hash-full",
 			ImportedFrom:      ImportedFromLiteLLM,
 			Enabled:           false,
