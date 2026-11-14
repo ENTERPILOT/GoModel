@@ -346,7 +346,8 @@ var modelTokenWords = map[string]bool{
 // modelTokens reports whether words[i], "token" or "tokens", is about model
 // tokens: a word next to it is in modelTokenWords. Only a neighbor counts, so
 // "new_access_token" still names a credential; "new" is skipped on the left
-// ("max_new_tokens").
+// ("max_new_tokens"). "cached" counts before the plural only: "cached_tokens"
+// is a count, "cached_token" a credential.
 func modelTokens(words []string, i int) bool {
 	if words[i] != "token" && words[i] != "tokens" {
 		return false
@@ -354,6 +355,12 @@ func modelTokens(words []string, i int) bool {
 	left := i - 1
 	if left > 0 && words[left] == "new" {
 		left--
+	}
+	if left >= 0 && words[left] == "cached" {
+		if words[i] == "tokens" {
+			return true
+		}
+		left = -1
 	}
 	return left >= 0 && modelTokenWords[words[left]] || i+1 < len(words) && modelTokenWords[words[i+1]]
 }

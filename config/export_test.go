@@ -299,6 +299,9 @@ func TestCredentialKey(t *testing.T) {
 		"cached_access_token":   true,
 		"new_token":             true,
 		"cached_token":          true,
+		"cached_tokens":         false,
+		"prompt_cached_tokens":  false,
+		"cached_token_count":    false,
 		// Words holding a credential word without naming a credential.
 		"keyword":      false,
 		"keywords":     false,
