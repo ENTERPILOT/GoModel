@@ -14,6 +14,11 @@ type MetricsConfig struct {
 	// Endpoint is the HTTP path where metrics are exposed
 	// Default: "/metrics"
 	Endpoint string `yaml:"endpoint" env:"METRICS_ENDPOINT"`
+
+	// RequireAuth keeps the metrics endpoint behind the gateway's normal
+	// bearer authentication instead of serving it without a credential.
+	// Default: false
+	RequireAuth bool `yaml:"require_auth" env:"METRICS_REQUIRE_AUTH"`
 }
 
 // reservedMetricsPrefixes are the authenticated route trees the metrics

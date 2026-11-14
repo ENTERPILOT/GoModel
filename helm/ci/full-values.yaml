@@ -22,6 +22,9 @@ persistence:
 metrics:
   serviceMonitor:
     enabled: true
+    bearerTokenSecret:
+      name: gomodel-metrics
+      key: token
     labels:
       release: kube-prometheus-stack
 ingress:

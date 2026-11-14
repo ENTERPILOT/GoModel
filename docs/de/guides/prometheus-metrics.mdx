@@ -91,6 +91,7 @@ METRICS_ENDPOINT=/internal/prometheus
 | ------------------ | ---------- | --------------------------------- |
 | `METRICS_ENABLED`  | `false`    | Erfassung von Metriken aktivieren/deaktivieren |
 | `METRICS_ENDPOINT` | `/metrics` | HTTP-Pfad des Metrik-Endpunkts    |
+| `METRICS_REQUIRE_AUTH` | `false` | Bearer-Credential für den Metrik-Endpunkt verlangen |
 
 ### Über config.yaml
 
@@ -254,10 +255,31 @@ try {
 
 ### Den Metrik-Endpunkt bereitstellen
 
-Der `/metrics`-Endpunkt ist durch Master-Key-Authentifizierung geschützt, wenn ein Master-Key
-konfiguriert ist, genau wie andere HTTP-Endpunkte. Ist kein Master-Key konfiguriert, ist der
-Endpunkt ohne Authentifizierung erreichbar, sodass Prometheus Metriken ohne Zugangsdaten scrapen
-kann.
+Standardmäßig überspringt der Metrik-Endpunkt die Authentifizierung, auch wenn
+ein Master-Key oder verwaltete API-Keys konfiguriert sind, damit Prometheus ohne
+Zugangsdaten scrapen kann. Jeder, der das Gateway erreicht, kann ihn dann lesen,
+auch über einen Ingress, der `/` an GoModel weiterleitet.
+
+Setzen Sie `METRICS_REQUIRE_AUTH=true` (`metrics.require_auth: true`), um ihn hinter
+die normale Bearer-Authentifizierung des Gateways zu legen: Akzeptiert werden der
+Master-Key und jeder verwaltete API-Key. Verwenden Sie für Prometheus besser einen
+eigenen verwalteten Key statt des Master-Keys. Ohne konfigurierte
+Authentifizierung hat die Einstellung keine Wirkung.
+
+```yaml
+scrape_configs:
+  - job_name: "gomodel"
+    static_configs:
+      - targets: ["gomodel:8080"]
+    metrics_path: "/metrics"
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/gomodel-token
+```
+
+Mit dem Prometheus Operator setzen Sie dasselbe Credential am ServiceMonitor-Endpunkt
+(`authorization.credentials` mit Verweis auf einen Secret-Key); das Helm-Chart
+erledigt das mit `metrics.serviceMonitor.bearerTokenSecret`.
 
 Wenn Sie den Metrik-Endpunkt zusätzlich schützen müssen:
 

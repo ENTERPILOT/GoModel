@@ -542,6 +542,48 @@ func TestServerWithMasterKeyAndMetrics(t *testing.T) {
 	})
 }
 
+// METRICS_REQUIRE_AUTH keeps the metrics endpoint behind bearer auth; the
+// default leaves it public for unauthenticated scrapers.
+func TestMetricsEndpointRequireAuth(t *testing.T) {
+	tests := []struct {
+		name        string
+		requireAuth bool
+		endpoint    string
+		token       string
+		want        int
+	}{
+		{name: "default: public without a credential", want: http.StatusOK},
+		{name: "required: refused without a credential", requireAuth: true, want: http.StatusUnauthorized},
+		{name: "required: refused with a wrong credential", requireAuth: true, token: "wrong", want: http.StatusUnauthorized},
+		{name: "required: served with the master key", requireAuth: true, token: "test-secret-key", want: http.StatusOK},
+		{name: "required: custom endpoint refused without a credential", requireAuth: true, endpoint: "/internal/prometheus", want: http.StatusUnauthorized},
+		{name: "required: custom endpoint served with the master key", requireAuth: true, endpoint: "/internal/prometheus", token: "test-secret-key", want: http.StatusOK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			endpoint := tt.endpoint
+			if endpoint == "" {
+				endpoint = "/metrics"
+			}
+			srv := New(&mockProvider{}, &Config{
+				MasterKey:          "test-secret-key",
+				MetricsEnabled:     true,
+				MetricsEndpoint:    endpoint,
+				MetricsRequireAuth: tt.requireAuth,
+			})
+			req := httptest.NewRequest(http.MethodGet, endpoint, nil)
+			if tt.token != "" {
+				req.Header.Set("Authorization", "Bearer "+tt.token)
+			}
+			rec := httptest.NewRecorder()
+
+			srv.ServeHTTP(rec, req)
+
+			assert.Equal(t, tt.want, rec.Code)
+		})
+	}
+}
+
 func TestServer_ManagedAuthKeyUserPathOverridesHeaderBeforeWorkflowResolution(t *testing.T) {
 	mock := &mockProvider{
 		supportedModels: []string{"gpt-5-mini"},

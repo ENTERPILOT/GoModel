@@ -665,8 +665,9 @@ separat ein VACUUM aus, wenn die Dateigröße wichtig ist.
 
 - **Metriken sind standardmäßig deaktiviert.** Setzen Sie
   `METRICS_ENABLED=true`, um Prometheus-Metriken unter `METRICS_ENDPOINT`
-  (`/metrics`) bereitzustellen. Der Endpunkt ist nicht authentifiziert, halten
-  Sie ihn also innerhalb Ihres Perimeters. Siehe den
+  (`/metrics`) bereitzustellen. Der Endpunkt ist ohne `METRICS_REQUIRE_AUTH=true`
+  nicht authentifiziert, halten Sie ihn also innerhalb Ihres Perimeters oder
+  verlangen Sie ein Credential. Siehe den
   [Prometheus-Leitfaden](/de/guides/prometheus-metrics).
 - **Der OpenTelemetry-Export ist standardmäßig deaktiviert.** Setzen Sie
   `OTEL_ENABLED=true` und `OTEL_EXPORTER_OTLP_ENDPOINT`, um Traces und

@@ -382,8 +382,8 @@ GoModel 分别提供存活和就绪检查，二进制文件还可以自我探测
 
 ## 可观测性
 
-- **指标默认关闭。** 设置 `METRICS_ENABLED=true` 可在 `METRICS_ENDPOINT`（`/metrics`）暴露 Prometheus 指标。该端点无需认证，
-  因此请将其保留在您的网络边界之内。请参阅 [Prometheus 指南](/zh/guides/prometheus-metrics)。
+- **指标默认关闭。** 设置 `METRICS_ENABLED=true` 可在 `METRICS_ENDPOINT`（`/metrics`）暴露 Prometheus 指标。除非设置 `METRICS_REQUIRE_AUTH=true`，该端点无需认证，
+  因此请将其保留在您的网络边界之内，或要求提供凭据。请参阅 [Prometheus 指南](/zh/guides/prometheus-metrics)。
 - **OpenTelemetry 导出默认关闭。** 设置 `OTEL_ENABLED=true` 和 `OTEL_EXPORTER_OTLP_ENDPOINT`，即可将 Trace 和 GenAI 指标发送到您的采集器。
   请参阅 [OpenTelemetry 指南](/zh/guides/opentelemetry)。
 - **当 stdout 不是 TTY 时，日志会自动采用 JSON 格式**，因此容器无需任何配置即可获得结构化日志。如需覆盖，请显式设置 `LOG_FORMAT`。

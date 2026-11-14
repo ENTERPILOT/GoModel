@@ -76,6 +76,7 @@ type Config struct {
 	Authenticator                   BearerTokenAuthenticator               // Optional: managed API key authenticator
 	MetricsEnabled                  bool                                   // Whether to expose Prometheus metrics endpoint
 	MetricsEndpoint                 string                                 // HTTP path for metrics endpoint (default: /metrics)
+	MetricsRequireAuth              bool                                   // Keep the metrics endpoint behind bearer authentication
 	BodySizeLimit                   string                                 // Max request body size (e.g., "10M", "1024K")
 	StreamStallTimeout              time.Duration                          // Max time one response write on a model route waits for the client to read; 0 disables
 	PprofEnabled                    bool                                   // Whether to expose debug profiling routes at /debug/pprof/*
@@ -290,7 +291,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 				"configured", cfg.MetricsEndpoint,
 				"normalized", configuredPath)
 		}
-		authSkipPaths = append(authSkipPaths, metricsPath)
+		if !cfg.MetricsRequireAuth {
+			authSkipPaths = append(authSkipPaths, metricsPath)
+		}
 	}
 
 	// Admin dashboard pages and static assets skip auth (/* enables prefix matching)

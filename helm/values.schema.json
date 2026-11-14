@@ -55,6 +55,13 @@
             "enabled": { "type": "boolean" },
             "interval": { "type": "string" },
             "namespace": { "type": "string" },
+            "bearerTokenSecret": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string", "minLength": 1 },
+                "key": { "type": "string", "minLength": 1 }
+              }
+            },
             "labels": { "type": "object" }
           }
         }

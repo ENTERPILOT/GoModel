@@ -598,8 +598,9 @@ wykonuj na nim VACUUM osobno.
 ## Obserwowalność
 
 - **Metryki są domyślnie wyłączone.** Ustaw `METRICS_ENABLED=true`, aby udostępnić
-  metryki Prometheus pod `METRICS_ENDPOINT` (`/metrics`). Endpoint nie wymaga
-  uwierzytelnienia, więc trzymaj go wewnątrz swojego perymetru. Zobacz
+  metryki Prometheus pod `METRICS_ENDPOINT` (`/metrics`). Bez
+  `METRICS_REQUIRE_AUTH=true` endpoint nie wymaga uwierzytelnienia, więc trzymaj
+  go wewnątrz swojego perymetru albo wymagaj poświadczenia. Zobacz
   [przewodnik po Prometheusie](/pl/guides/prometheus-metrics).
 - **Eksport OpenTelemetry jest domyślnie wyłączony.** Ustaw `OTEL_ENABLED=true` i
   `OTEL_EXPORTER_OTLP_ENDPOINT`, aby wysyłać trace'y i metryki GenAI do swojego
