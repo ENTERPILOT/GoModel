@@ -162,7 +162,7 @@ func TestNewSQLStoreRenamesLegacyModelColumn(t *testing.T) {
 		_, err = NewSQLStore(ctx, db, 0)
 		require.NoError(t, err)
 
-		columns, err := auditColumns(ctx, db, auditLogTable)
+		columns, err := sqlx.Columns(ctx, db, auditLogTable)
 		require.NoError(t, err)
 
 		assert.False(t, columns["model"], "legacy model column still present")
