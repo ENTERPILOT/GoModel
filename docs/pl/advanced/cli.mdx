@@ -41,9 +41,10 @@ gomodel --health
 - W przeciwnym razie kończy się kodem niezerowym (odmowa połączenia, status inny
   niż `200` lub dowolna inna wartość statusu).
 
-Sonda zawsze trafia w interfejs loopback (`127.0.0.1`), ponieważ działa
-w tym samym kontenerze co serwer, ale `PORT` i `BASE_PATH` wyznacza
-z konfiguracji, zamiast na sztywno używać `8080` i `/health`. Ogranicz czas
+Sonda trafia w interfejs loopback (`127.0.0.1`), ponieważ działa w tym samym
+kontenerze co serwer, albo w adres z `SERVER_HOST`, gdy serwer nasłuchuje na
+konkretnym adresie. `PORT` i `BASE_PATH` wyznacza z konfiguracji, zamiast na
+sztywno używać `8080` i `/health`. Ogranicz czas
 requestu flagą `--health-timeout`:
 
 ```bash
@@ -170,8 +171,9 @@ docker exec my-gateway /gomodel --reload
 
 ### Czego reload nie zmienia
 
-- **`PORT`** — socket pozostaje zbindowany, więc żadne połączenie nie zostaje odrzucone;
-  zmiana portu wymaga restartu. Gateway loguje ostrzeżenie z oboma portami.
+- **`PORT`** i **`SERVER_HOST`** — socket pozostaje zbindowany, więc żadne połączenie nie
+  zostaje odrzucone; zmiana portu lub adresu nasłuchu wymaga restartu. Gateway loguje
+  ostrzeżenie z bieżącą i skonfigurowaną wartością.
 - **`PID_FILE`** — wskazuje proces, który już działa.
 - **`GOMODEL_DEMO_MODE`** — ostrzeżenia trybu demo są konfigurowane raz, przy starcie.
 - **Stan w pamięci** — powiązanie sesji z modelem wirtualnym (session affinity) i bufory

@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"net"
+	"net/netip"
 	"net/textproto"
 	"path"
 	"regexp"
@@ -22,6 +24,12 @@ var bodySizeLimitRegex = regexp.MustCompile(`(?i)^(\d+)([KMG])?B?$`)
 
 // ServerConfig holds HTTP server configuration
 type ServerConfig struct {
+	// Host is the address the HTTP listener binds: an IP address or a host
+	// name. Empty listens on every interface. Set 127.0.0.1 to serve only the
+	// local machine, for example behind a reverse proxy on the same host.
+	// Changing it needs a restart, like Port.
+	// Default: empty (all interfaces)
+	Host      string `yaml:"host" env:"SERVER_HOST"`
 	Port      string `yaml:"port" env:"PORT"`
 	BasePath  string `yaml:"base_path" env:"BASE_PATH"`                           // URL path prefix where the app is mounted (e.g., "/g")
 	MasterKey string `yaml:"master_key" env:"GOMODEL_MASTER_KEY" export:"secret"` // Optional: Master key for authentication
@@ -128,6 +136,33 @@ type ServerConfig struct {
 	// them.
 	// Default: empty (no client certificate requested)
 	TLSClientCAFile string `yaml:"tls_client_ca_file" env:"SERVER_TLS_CLIENT_CA_FILE"`
+}
+
+// ListenAddress is the host:port address the HTTP listener binds. An empty
+// Host leaves the address unspecified, which binds every interface.
+func (s ServerConfig) ListenAddress() string {
+	return net.JoinHostPort(s.Host, s.Port)
+}
+
+// BindsAllInterfaces reports whether the listener binds every interface: an
+// empty Host or an unspecified address such as 0.0.0.0 or ::.
+func (s ServerConfig) BindsAllInterfaces() bool {
+	if s.Host == "" {
+		return true
+	}
+	addr, err := netip.ParseAddr(s.Host)
+	return err == nil && addr.IsUnspecified()
+}
+
+// NormalizeServerHost canonicalizes the listener's bind address, accepting an
+// IPv6 literal with or without the brackets it carries in a URL. Anything the
+// listener cannot bind is reported when the server starts.
+func NormalizeServerHost(value string) string {
+	host := strings.TrimSpace(value)
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		host = host[1 : len(host)-1]
+	}
+	return host
 }
 
 // TLSEnabled reports whether the listener serves HTTPS.

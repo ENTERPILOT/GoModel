@@ -42,6 +42,7 @@ Der gängigste Weg, GoModel zu konfigurieren. Setzen Sie eine der folgenden Vari
 | Variable             | Beschreibung                                           | Standardwert                |
 | -------------------- | ----------------------------------------------------- | ---------------------- |
 | `PORT`               | Port des HTTP-Servers                                      | `8080`                 |
+| `SERVER_HOST`        | Adresse, an die der Listener bindet. Leer bedeutet alle Interfaces; mit `127.0.0.1` ist das Gateway nur lokal erreichbar | _(leer, alle Interfaces)_ |
 | `BASE_PATH`          | Präfix des Mount-Pfads, zum Beispiel `/g`                   | `/`                    |
 | `GOMODEL_MASTER_KEY` | Authentifizierungsschlüssel zur Absicherung des Gateways           | _(leer, unsicherer Modus)_ |
 | `MASTER_KEY_DISABLED` | Schaltet die Authentifizierung per Master-Key ab, sodass nur noch [verwaltete Keys](/de/features/users) und Authentifizierungserweiterungen als Zugangsdaten gelten | `false`                |

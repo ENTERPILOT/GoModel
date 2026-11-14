@@ -11,6 +11,7 @@
 
 server:
   port: "8080"
+  # host: "127.0.0.1" # env: SERVER_HOST; address the listener binds. Empty (default) listens on every interface; set 127.0.0.1 to serve only this machine, for example behind a reverse proxy on the same host. Changing it needs a restart, not a reload
   base_path: "/" # env: BASE_PATH; set to "/g" to serve the gateway under https://example.com/g/
   master_key: "your-secret-key"
   master_key_disabled: false # env: MASTER_KEY_DISABLED; true forgets the master key, leaving managed gateway API keys and any configured authentication extension as the only credentials. The gateway then requires a credential on every request and keeps the admin API gated, so issue one with dashboard access first

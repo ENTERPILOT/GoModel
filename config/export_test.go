@@ -299,6 +299,7 @@ var credentialFieldName = regexp.MustCompile(`(?i)(key|token|secret|password|cre
 // plainCredentialLookalikes are reviewed settings whose names look like a
 // credential but whose values are not secrets.
 var plainCredentialLookalikes = map[string]bool{
+	"server.host":                                       true,
 	"server.user_path_header":                           true,
 	"server.client_ip_header":                           true,
 	"cache.model.redis.key":                             true,

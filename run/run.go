@@ -353,7 +353,7 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 
-	socket, err := listenOn(":" + appCfg.Server.Port)
+	socket, err := listenOn(appCfg.Server.ListenAddress())
 	if err != nil {
 		slog.Error("failed to bind the server address", "error", err)
 		_ = shutdownApplicationWithTimeout(application)
@@ -591,6 +591,10 @@ func shutdownApplicationWithTimeout(application lifecycleApp) error {
 // listening socket is kept bound across generations precisely so no connection
 // is refused, and the pid file names the process that is already running.
 func warnAboutStartupOnlySettings(current, next config.ServerConfig) {
+	if next.Host != current.Host {
+		slog.Warn("server host change needs a restart; keeping the bound address",
+			"bound_host", current.Host, "configured_host", next.Host)
+	}
 	if next.Port != current.Port {
 		slog.Warn("server port change needs a restart; keeping the bound address",
 			"bound_port", current.Port, "configured_port", next.Port)
