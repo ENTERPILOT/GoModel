@@ -187,6 +187,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	if basePath != "/" {
 		e.Pre(stripBasePathMiddleware(basePath))
 	}
+	if cfg != nil && cfg.TLSConfig != nil {
+		e.Pre(strictTransportSecurity)
+	}
 	if cfg != nil && cfg.TLSConfig != nil && cfg.ClientCertificatesRequired {
 		e.Pre(requireClientCertificate)
 	}

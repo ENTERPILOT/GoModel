@@ -117,3 +117,47 @@ func TestClientCertificateRequired(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, status(nil, "/health%2Fready"))
 	assert.Equal(t, http.StatusOK, status([]tls.Certificate{pair}, "/private"))
 }
+
+// HSTS goes out only when the gateway terminates TLS itself; behind a proxy,
+// on plain HTTP, the header must be absent. It applies to every response,
+// including errors and probes.
+func TestStrictTransportSecurity(t *testing.T) {
+	ca := tlstest.NewCA(t, "test CA")
+	certFile, keyFile := ca.Issue(t, "gateway").Write(t, t.TempDir())
+	source, err := servertls.New(servertls.Settings{CertFile: certFile, KeyFile: keyFile})
+	require.NoError(t, err)
+
+	tests := []struct {
+		name      string
+		tlsConfig *tls.Config
+		scheme    string
+		want      string
+	}{
+		{name: "native TLS", tlsConfig: source.ServerConfig(), scheme: "https", want: "max-age=15552000"},
+		{name: "plain HTTP", scheme: "http"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := New(&mockProvider{}, &Config{TLSConfig: tt.tlsConfig})
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			require.NoError(t, err)
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan error, 1)
+			go func() { done <- srv.StartWithListener(ctx, listener) }()
+			t.Cleanup(func() {
+				cancel()
+				require.NoError(t, <-done)
+			})
+			transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: ca.Pool, MinVersion: tls.VersionTLS12}}
+			t.Cleanup(transport.CloseIdleConnections)
+			client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
+
+			for _, path := range []string{"/health", "/no-such-route"} {
+				resp, err := client.Get(tt.scheme + "://" + listener.Addr().String() + path)
+				require.NoError(t, err)
+				require.NoError(t, resp.Body.Close())
+				assert.Equal(t, tt.want, resp.Header.Get("Strict-Transport-Security"), path)
+			}
+		})
+	}
+}
