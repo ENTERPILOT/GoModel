@@ -102,8 +102,8 @@ The database holds provider credentials (in plaintext unless
 file with mode `0600` and its directory with `0700` on Linux and macOS. A file
 or directory that already exists keeps its mode, and startup logs a warning
 when other users can access the database file or its `-wal` and `-shm` files:
-run `chmod 600` on them unless another user, such as a backup sidecar, has to
-read them. On Windows the data directory's ACLs apply; GoModel does not check
+run `chmod 600` on them, and `chmod 700` on the data directory, unless another
+user, such as a backup sidecar, has to read them. On Windows the data directory's ACLs apply; GoModel does not check
 them.
 
 ### Redis

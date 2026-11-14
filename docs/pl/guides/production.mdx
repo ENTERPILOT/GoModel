@@ -98,7 +98,8 @@ Baza zawiera dane uwierzytelniające providerów (jawnym tekstem, o ile nie usta
 `GOMODEL_ENCRYPTION_KEY`) oraz treść requestów, dlatego na Linuksie i macOS GoModel tworzy
 plik z uprawnieniami `0600`, a jego katalog z `0700`. Istniejący plik lub katalog zachowuje
 swoje uprawnienia, a przy starcie logowane jest ostrzeżenie, gdy inni użytkownicy mają dostęp
-do pliku bazy lub jego plików `-wal` i `-shm`: wykonaj na nich `chmod 600`, chyba że musi je
+do pliku bazy lub jego plików `-wal` i `-shm`: wykonaj na nich `chmod 600`, a na katalogu danych
+`chmod 700`, chyba że musi je
 czytać inny użytkownik, np. sidecar z backupem. Na Windows obowiązują ACL katalogu danych;
 GoModel ich nie sprawdza.
 

@@ -112,8 +112,8 @@ die Datei unter Linux und macOS daher mit dem Modus `0600` und ihr Verzeichnis
 mit `0700` an. Eine bereits vorhandene Datei oder ein vorhandenes Verzeichnis
 behält ihren Modus, und beim Start wird eine Warnung protokolliert, wenn andere
 Benutzer auf die Datenbankdatei oder ihre `-wal`- und `-shm`-Dateien zugreifen
-können: Führen Sie `chmod 600` darauf aus, sofern kein anderer Benutzer, etwa
-ein Backup-Sidecar, sie lesen muss. Unter Windows gelten die ACLs des
+können: Führen Sie `chmod 600` darauf und `chmod 700` auf dem Datenverzeichnis
+aus, sofern kein anderer Benutzer, etwa ein Backup-Sidecar, sie lesen muss. Unter Windows gelten die ACLs des
 Datenverzeichnisses; GoModel prüft sie nicht.
 
 ### Redis

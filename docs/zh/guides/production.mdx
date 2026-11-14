@@ -67,7 +67,7 @@ SQLite 是默认选项，使 GoModel 无需任何配置即可运行；对于挂�
 `storage configured` 打印出来。请参阅 [GoModel 将数据存储在哪里？](/zh/about/faq#gomodel-在哪里存储数据？)。
 
 数据库中保存着提供商凭据（未设置 `GOMODEL_ENCRYPTION_KEY` 时为明文）和请求内容，因此在 Linux 和 macOS 上，GoModel 以 `0600` 权限创建该文件，并以 `0700` 权限创建其所在目录。
-已存在的文件或目录保持原有权限；如果其他用户可以访问数据库文件或其 `-wal`、`-shm` 文件，启动时会记录一条警告：除非其他用户（例如备份 sidecar）需要读取它们，否则请对其执行 `chmod 600`。在 Windows 上由数据目录的 ACL 控制访问，GoModel 不会检查它们。
+已存在的文件或目录保持原有权限；如果其他用户可以访问数据库文件或其 `-wal`、`-shm` 文件，启动时会记录一条警告：除非其他用户（例如备份 sidecar）需要读取它们，否则请对其执行 `chmod 600`，并对数据目录执行 `chmod 700`。在 Windows 上由数据目录的 ACL 控制访问，GoModel 不会检查它们。
 
 ### Redis
 
