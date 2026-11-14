@@ -87,8 +87,9 @@ credential, including routes the gateway cannot scope to a caller, such as
 - **Model allowlists** — a body that names a `model` is checked against the
   caller's allowlist. Granting the model is enough for a `POST` to an inference
   endpoint (`chat/completions`, `completions`, `responses`, `embeddings`,
-  `messages`, `audio/speech`, DeepSeek `beta/completions`, Cohere `v2/chat` and
-  `v2/embed`, Jev `systemone`). Every other request acts on the whole provider,
+  `messages`, `audio/speech`, `images/generations`, DeepSeek `beta/completions`,
+  Cohere `v2/chat` and `v2/embed`, Jev `systemone`, `systemone/permute` and
+  `systemone/separate`). Every other request acts on the whole provider,
   so the allowlist must grant the whole provider (`anthropic/`) or everything
   (`/`). A key limited to `anthropic/claude-sonnet-4-6` can call
   `POST /p/anthropic/v1/messages` for that model, but not

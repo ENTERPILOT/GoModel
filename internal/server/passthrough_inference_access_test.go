@@ -73,6 +73,8 @@ func TestProviderPassthroughRoute_ModelGrantCoversOnlyInference(t *testing.T) {
 		{name: "responses", method: http.MethodPost, target: "/p/openai/responses", body: jsonBody, contentType: "application/json", wantModel: true},
 		{name: "embeddings", method: http.MethodPost, target: "/p/openai/embeddings", body: jsonBody, contentType: "application/json", wantModel: true},
 		{name: "anthropic messages", method: http.MethodPost, target: "/p/anthropic/v1/messages", body: jsonBody, contentType: "application/json", wantModel: true},
+		{name: "image generation", method: http.MethodPost, target: "/p/openai/images/generations", body: jsonBody, contentType: "application/json", wantModel: true},
+		{name: "system one permute", method: http.MethodPost, target: "/p/openai/systemone/permute", body: jsonBody, contentType: "application/json", wantModel: true},
 		{name: "json content type with a suffix", method: http.MethodPost, target: "/p/openai/chat/completions", body: jsonBody, contentType: "application/vnd.api+json; charset=utf-8", wantModel: true},
 
 		{name: "file upload as json", method: http.MethodPost, target: "/p/openai/files", body: jsonBody, contentType: "application/json"},

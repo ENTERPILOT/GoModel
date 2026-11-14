@@ -8,10 +8,10 @@ import (
 )
 
 // passthroughInferenceEndpoints are the normalized passthrough endpoints where
-// a POST runs inference on the one model its body names. They mirror the
-// inference rows of the providers' passthrough semantics tables. The list is
-// deliberately short: an endpoint missing from it still works, it only needs a
-// provider-wide grant.
+// a POST runs inference on the one model its body names and creates no
+// provider resource: the inference rows of the providers' passthrough
+// semantics tables, plus image generation. The list is deliberately short: an
+// endpoint missing from it still works, it only needs a provider-wide grant.
 var passthroughInferenceEndpoints = map[string]struct{}{
 	"chat/completions":   {},
 	"completions":        {},
@@ -19,6 +19,7 @@ var passthroughInferenceEndpoints = map[string]struct{}{
 	"embeddings":         {},
 	"messages":           {},
 	"audio/speech":       {},
+	"images/generations": {},
 	"beta/completions":   {}, // deepseek
 	"v2/chat":            {}, // cohere
 	"v2/embed":           {}, // cohere

@@ -87,8 +87,9 @@ serwera, w tym do ścieżek, których gateway nie potrafi ograniczyć do wywołu
 - **Allowlisty modeli** – body, które wskazuje `model`, jest sprawdzane z allowlistą
   wywołującego. Dostęp do modelu wystarcza dla `POST` na endpoint inferencji
   (`chat/completions`, `completions`, `responses`, `embeddings`, `messages`,
-  `audio/speech`, DeepSeek `beta/completions`, Cohere `v2/chat` i `v2/embed`,
-  Jev `systemone`). Każdy inny request działa na całym providerze,
+  `audio/speech`, `images/generations`, DeepSeek `beta/completions`, Cohere
+  `v2/chat` i `v2/embed`, Jev `systemone`, `systemone/permute` i
+  `systemone/separate`). Każdy inny request działa na całym providerze,
   więc allowlista musi obejmować całego providera (`anthropic/`) lub wszystko
   (`/`). Klucz ograniczony do `anthropic/claude-sonnet-4-6` może wywołać
   `POST /p/anthropic/v1/messages` dla tego modelu, ale nie

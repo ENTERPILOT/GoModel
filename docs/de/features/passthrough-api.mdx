@@ -94,8 +94,9 @@ zuordnen kann, etwa `GET /files`. Der Zugriff ist daher eingeschränkt:
 - **Modell-Allowlists** – ein Body, der ein `model` nennt, wird gegen die
   Allowlist des Aufrufers geprüft. Die Freigabe des Modells genügt für einen
   `POST` an einen Inferenz-Endpunkt (`chat/completions`, `completions`,
-  `responses`, `embeddings`, `messages`, `audio/speech`, DeepSeek
-  `beta/completions`, Cohere `v2/chat` und `v2/embed`, Jev `systemone`). Jeder
+  `responses`, `embeddings`, `messages`, `audio/speech`, `images/generations`,
+  DeepSeek `beta/completions`, Cohere `v2/chat` und `v2/embed`, Jev
+  `systemone`, `systemone/permute` und `systemone/separate`). Jeder
   andere Request wirkt auf den gesamten Provider, daher muss die Allowlist den
   gesamten Provider (`anthropic/`) oder alles (`/`) freigeben. Ein auf
   `anthropic/claude-sonnet-4-6` beschränkter Key kann
