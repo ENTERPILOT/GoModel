@@ -103,10 +103,12 @@ shared between callers, so neither header can change what others are served:
 
 - `X-Cache-Semantic-Threshold` raises the similarity required for a hit, up to
   `1.0`. A value below the configured threshold is ignored. A request that
-  misses only because of its stricter threshold is answered fresh and not
-  stored.
-- `X-Cache-TTL` shortens the lifetime, in seconds, of the entry the request
-  stores. A value above the configured `ttl` is capped to it.
+  misses only because of its stricter threshold is answered fresh and adds no
+  semantic entry; the exact layer still stores it.
+- `X-Cache-TTL` shortens the lifetime, in seconds, of the semantic entry the
+  request stores. A value above a finite configured `ttl` is capped to it; with
+  `ttl: 0` (no expiry), a positive value sets a finite lifetime. Invalid,
+  non-positive or out-of-range values are ignored.
 
 For the full semantic-cache design and storage options, see
 [ADR-0006](/adr/0006-semantic-response-cache).

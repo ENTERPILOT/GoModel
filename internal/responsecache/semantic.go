@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"hash"
 	"log/slog"
@@ -654,8 +655,10 @@ func headerFloat64(header func(string) string, name string) float64 {
 	if s == "" {
 		return 0
 	}
+	// An out-of-range value still parses, to ±Inf or ±0, so a huge threshold
+	// is clamped like "Inf" instead of being ignored.
 	v, err := strconv.ParseFloat(s, 64)
-	if err != nil {
+	if err != nil && !errors.Is(err, strconv.ErrRange) {
 		return 0
 	}
 	return v

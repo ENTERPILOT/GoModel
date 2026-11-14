@@ -457,6 +457,8 @@ func TestSemanticCacheMiddleware_HeaderThresholdNeverCausesExtraWrite(t *testing
 		{name: "out of range header is clamped and still hits an identical prompt", vector: same, header: "5", wantCache: CacheHeaderSemantic, wantEntries: 1},
 		{name: "out of range header miss is not stored", vector: near, header: "5", wantEntries: 1},
 		{name: "infinite header miss is not stored", vector: near, header: "Inf", wantEntries: 1},
+		{name: "overflowing header is clamped and still hits an identical prompt", vector: same, header: "1e309", wantCache: CacheHeaderSemantic, wantEntries: 1},
+		{name: "overflowing header miss is not stored", vector: near, header: "1e309", wantEntries: 1},
 		{name: "miss at configured threshold is stored", vector: far, wantEntries: 2},
 		{name: "stricter header keeps a configured miss stored", vector: far, header: "0.9999", wantEntries: 2},
 	}

@@ -105,9 +105,13 @@ tego, co otrzymują inni:
 - `X-Cache-Semantic-Threshold` podnosi podobieństwo wymagane do trafienia,
   maksymalnie do `1.0`. Wartość poniżej skonfigurowanego progu jest ignorowana.
   Request, który nie trafia w cache wyłącznie z powodu swojego ostrzejszego
-  progu, dostaje świeżą odpowiedź, która nie jest zapisywana.
-- `X-Cache-TTL` skraca czas życia (w sekundach) wpisu zapisywanego przez
-  request. Wartość powyżej skonfigurowanego `ttl` jest do niego ograniczana.
+  progu, dostaje świeżą odpowiedź, która nie tworzy wpisu semantycznego;
+  warstwa dokładna nadal ją zapisuje.
+- `X-Cache-TTL` skraca czas życia (w sekundach) wpisu semantycznego
+  zapisywanego przez request. Wartość powyżej skończonego skonfigurowanego `ttl`
+  jest do niego ograniczana; przy `ttl: 0` (bez wygasania) dodatnia wartość
+  ustawia skończony czas życia. Wartości nieprawidłowe, niedodatnie lub spoza
+  zakresu są ignorowane.
 
 Pełny projekt cache'u semantycznego i opcje przechowywania opisuje
 [ADR-0006](/adr/0006-semantic-response-cache).
