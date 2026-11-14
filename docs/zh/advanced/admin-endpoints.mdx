@@ -126,7 +126,7 @@ console.log(authKey);
 
 控制台访问权限只控制 `/admin/*`。模型端点和自助式 [`GET /v1/usage`](/zh/advanced/usage-api) 端点对所有托管密钥开放，但提供商透传路由（`/p/{provider}/...`）除外：托管密钥创建时不带透传访问权限，您可以通过在 `POST /admin/auth-keys` 中设置 `"passthrough_access": true` 或调用 `PUT /admin/auth-keys/<key-id>/passthrough-access` 来授予（参见[透传访问控制](/zh/features/passthrough-api#访问控制)）。
 
-密钥名称不必唯一，唯一的只有令牌。使用 `PUT /admin/auth-keys/<key-id>/name`（`{"name": "ci-deploy-old"}`）重命名密钥，响应为更新后的密钥。与创建时一样，名称会去除首尾空白且不能为空。密钥不能重命名自身（`403 auth_key_self_update`）。用量记录保存的是密钥 ID 而不是名称，因此控制台会以新名称显示过去的用量；审计条目显示密钥 ID。重新导入 LiteLLM 密钥会再次使用导入中的名称。当两个密钥同名时，控制台会在名称旁显示各自的脱敏令牌，令牌无法区分时改为显示简短的密钥 ID；创建表单也会在名称已被使用时给出警告。
+密钥名称不必唯一，唯一的只有令牌。使用 `PUT /admin/auth-keys/<key-id>/name`（`{"name": "ci-deploy-old"}`）重命名密钥，响应为更新后的密钥。与创建时一样，名称会去除首尾空白且不能为空。密钥不能重命名自身（`403 auth_key_self_update`）。用量记录保存的是密钥 ID 而不是名称，因此控制台会以新名称显示过去的用量；审计条目显示密钥 ID。重新导入 LiteLLM 密钥会再次使用导入中的名称。当两个密钥同名时，控制台会在名称旁显示各自的脱敏令牌，令牌相同或缺失时再附加简短的密钥 ID；创建表单和重命名对话框都会在名称已被使用时给出警告。
 
 ### 从 LiteLLM 导入密钥
 

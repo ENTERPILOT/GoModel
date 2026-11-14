@@ -140,9 +140,9 @@ creation. A key cannot rename itself (`403 auth_key_self_update`). Usage
 records store the key id, not its name, so the dashboard shows past usage under
 the new name; audit entries show the key id. Re-importing a LiteLLM key sets
 its name from the import again. Where two keys share a name, the dashboard
-shows each key's redacted token next to it, or a short key id where the token
-does not tell them apart, and the create form warns when a name is already in
-use.
+shows each key's redacted token next to it, adding a short key id where the
+tokens match or are missing. The create form and the rename dialog warn when a
+name is already in use.
 
 ### Importing keys from LiteLLM
 
