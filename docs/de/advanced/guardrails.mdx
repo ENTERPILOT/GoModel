@@ -557,7 +557,7 @@ ist entweder ein Chat-Modell oder ein Decision-Modell:
 | `message` | Nein | `This request was blocked by policy` | Fehlermeldung für `block`, Audit-Notiz für `warn`. |
 | `block_status` | Nein | Standard der Phase | Ein HTTP-Statuscode zwischen 400 und 599 für `block`, zum Beispiel `403`. Leer bedeutet 400, wenn der Prompt blockiert wird, und 502, wenn die Response blockiert wird. |
 | `respond_text` | Nein | `I can't help with that request.` | Assistant-Antwort für `respond`. |
-| `on_unclear` | Nein | `warn` | Wenn die Antwort des Judges nicht geparst werden kann, durch `max_tokens` abgeschnitten wurde oder vollständig für Reasoning verbraucht wurde: `allow`, `warn` oder `block` (wendet `action` an). Als Urteil zählt nur ein JSON-Objekt oder ein alleinstehendes `allow` oder `block`, nie ein Wort innerhalb eines Satzes. |
+| `on_unclear` | Nein | `block` | Wenn die Antwort des Judges nicht geparst werden kann, durch `max_tokens` abgeschnitten wurde oder vollständig für Reasoning verbraucht wurde: `allow`, `warn` oder `block` (wendet `action` an). Als Urteil zählt nur ein JSON-Objekt oder ein alleinstehendes `allow` oder `block`, nie ein Wort innerhalb eines Satzes. |
 | `max_tokens` | Nein | `2048` | Chat-Engine: Completion-Obergrenze für den Judge-Aufruf. Nicht verbrauchte Tokens kosten nichts; bemessen Sie den Wert für das Reasoning des Judge-Modells, nicht für das Urteil. |
 | `temperature` | Nein | `0` | Chat-Engine: Sampling-Temperatur für den Judge-Aufruf (0 bis 2). |
 
@@ -609,8 +609,8 @@ ein Bild enthält; andernfalls wird er ohne Judge-Aufruf zugelassen.
 
 Ein Reasoning-Judge-Modell verbraucht seine Completion für das Nachdenken, bevor
 es irgendetwas schreibt: Ist die Obergrenze vorher erreicht, liefert der Judge
-kein Urteil, und die Instanz setzt nichts durch – sie folgt stattdessen
-`on_unclear`, das standardmäßig nur warnt. Die Standardobergrenze von `2048`
+kein Urteil, und die Instanz folgt stattdessen `on_unclear`, das den Request
+standardmäßig blockiert. Die Standardobergrenze von `2048`
 lässt dafür Spielraum; nicht verbrauchte Tokens werden nie berechnet. Erhöhen
 Sie den Wert daher eher weiter, statt ihn zu kürzen, wenn das Judge-Modell viel
 Reasoning betreibt.
@@ -625,9 +625,10 @@ die zwar gegeben wurde, aber nicht geparst werden konnte:
 | `llm_judge_unclear` | Der Judge hat geantwortet, aber die Antwort ist kein Urteil, oder ein Decision-Modell hat die Frage abgelehnt. `on_unclear` greift. |
 
 Prüfen Sie nach dem Konfigurieren einer Instanz das Gateway-Log auf
-`judge returned no verdict`, und setzen Sie `on_unclear: block` für eine
-Richtlinie, die auch dann gelten muss, wenn der Judge nichts Verwertbares
-liefert. Ein Judge-Aufruf, der vollständig fehlschlägt – Provider-Fehler,
+`judge returned no verdict`: Mit dem Standard `on_unclear: block` wird ein
+solcher Request wie bei einem Block-Urteil blockiert. Setzen Sie
+`on_unclear: warn` oder `allow` nur für eine Richtlinie, die einen Request
+durchlassen darf, wenn der Judge nichts Verwertbares liefert. Ein Judge-Aufruf, der vollständig fehlschlägt – Provider-Fehler,
 Timeout –, ist kein unklares Urteil: Darüber entscheidet `fail_mode`, wie bei
 jedem anderen Guardrail-Fehler.
 

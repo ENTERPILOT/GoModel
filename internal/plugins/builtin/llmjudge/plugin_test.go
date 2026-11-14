@@ -106,7 +106,7 @@ func TestDefaults(t *testing.T) {
 	want := settings{
 		model: "openai/gpt-4o-mini", prompt: DefaultPrompt, target: TargetAuto,
 		enforcement: pluginapi.Enforcement{Action: pluginapi.ActionBlock, Message: DefaultMessage, RespondText: DefaultRespondText},
-		onUnclear:   UnclearWarn, maxTokens: DefaultMaxTokens, temperature: 0,
+		onUnclear:   UnclearBlock, maxTokens: DefaultMaxTokens, temperature: 0,
 		engine: EngineAuto, question: DefaultDecisionQuestion, threshold: DefaultBlockThreshold,
 	}
 	assert.Equal(t, want, p.settings)
@@ -222,7 +222,9 @@ func TestDecisions(t *testing.T) {
 		{"block custom", `{"model": "a/b", "block_status": 446, "message": "no"}`, `{"verdict":"block","reason":"bad"}`, pluginapi.ActionBlock, 446, Code, "no", blockDetail},
 		{"respond", `{"model": "a/b", "action": "respond"}`, `{"verdict":"block","reason":"bad"}`, pluginapi.ActionRespond, 0, Code, "", blockDetail},
 		{"warn", `{"model": "a/b", "action": "warn"}`, `{"verdict":"block","reason":"bad"}`, pluginapi.ActionWarn, 0, Code, DefaultMessage, blockDetail},
-		{"unclear warn default", `{"model": "a/b"}`, "???", pluginapi.ActionWarn, 0, CodeUnclear, "judge verdict unclear", unclearDetail},
+		{"unclear block default", `{"model": "a/b"}`, "???", pluginapi.ActionBlock, 0, CodeUnclear, DefaultMessage, unclearDetail},
+		{"unclear default applies the action", `{"model": "a/b", "action": "respond"}`, "???", pluginapi.ActionRespond, 0, CodeUnclear, "", unclearDetail},
+		{"unclear warn", `{"model": "a/b", "on_unclear": "warn"}`, "???", pluginapi.ActionWarn, 0, CodeUnclear, "judge verdict unclear", unclearDetail},
 		{"unclear allow", `{"model": "a/b", "on_unclear": "allow"}`, "???", pluginapi.ActionAllow, 0, "", "", unclearDetail},
 		{"unclear block", `{"model": "a/b", "on_unclear": "block"}`, "???", pluginapi.ActionBlock, 0, CodeUnclear, DefaultMessage, unclearDetail},
 		{"unclear block with respond action", `{"model": "a/b", "on_unclear": "block", "action": "respond"}`, "???", pluginapi.ActionRespond, 0, CodeUnclear, "", unclearDetail},
@@ -349,16 +351,30 @@ func TestNoVerdictReplies(t *testing.T) {
 	}
 }
 
-// Under the defaults a judge that never reaches a verdict warns with the
-// no-verdict code, not the generic unclear one.
-func TestNoVerdictWarnsByDefault(t *testing.T) {
-	host := &plugintest.Host{Replies: []string{"Let me consider"}, Finish: "length"}
-	p := newPlugin(t, `{"model": "a/b"}`, host)
-	d, err := p.OnPrompt(context.Background(), plugintest.Exchange(prompt(), nil))
-	require.NoError(t, err)
-	require.Equal(t, pluginapi.ActionWarn, d.Action)
-	require.Equal(t, CodeNoVerdict, d.Code)
-	require.Equal(t, "judge returned no verdict", d.Message)
+// A judge that never reaches a verdict carries the no-verdict code, not the
+// generic unclear one. Under the defaults the request is blocked: the
+// guardrail fails closed. Warn lets it through with a note.
+func TestNoVerdictBlocksByDefault(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     string
+		action  pluginapi.Action
+		message string
+	}{
+		{"default", `{"model": "a/b"}`, pluginapi.ActionBlock, DefaultMessage},
+		{"warn", `{"model": "a/b", "on_unclear": "warn"}`, pluginapi.ActionWarn, "judge returned no verdict"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			host := &plugintest.Host{Replies: []string{"Let me consider"}, Finish: "length"}
+			p := newPlugin(t, tt.cfg, host)
+			d, err := p.OnPrompt(context.Background(), plugintest.Exchange(prompt(), nil))
+			require.NoError(t, err)
+			assert.Equal(t, tt.action, d.Action)
+			assert.Equal(t, CodeNoVerdict, d.Code)
+			assert.Equal(t, tt.message, d.Message)
+		})
+	}
 }
 
 func TestInferenceError(t *testing.T) {
@@ -473,7 +489,7 @@ func TestSummarize(t *testing.T) {
 		cfg  string
 		want string
 	}{
-		{`{"model": "openai/gpt-4o-mini"}`, "openai/gpt-4o-mini, block, target auto, unclear: warn"},
+		{`{"model": "openai/gpt-4o-mini"}`, "openai/gpt-4o-mini, block, target auto, unclear: block"},
 		{`{"model": "judge", "action": "respond", "target": "conversation", "on_unclear": "allow"}`, "judge, respond, target conversation, unclear: allow"},
 		{`{}`, ""},
 	}

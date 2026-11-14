@@ -159,8 +159,9 @@ func (r judgeReply) noVerdictReason() string {
 }
 
 // logNoVerdict records that the judge decided nothing. The instance keeps
-// running under on_unclear, so without this line an operator sees only a
-// warn header on a guardrail that has stopped enforcing.
+// running under on_unclear, so without this line an operator sees only
+// blocked requests, or with allow or warn a guardrail that has stopped
+// enforcing.
 func (p *Plugin) logNoVerdict(reason string) {
 	if p.host == nil {
 		return
