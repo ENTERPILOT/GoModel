@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
@@ -118,13 +119,16 @@ func newTestServiceWithOptions(t *testing.T, opts Options) (*Service, string) {
 	return service, gateway.URL
 }
 
-// gatewayHandler mimics GoModel's ingress in front of service: bearer auth is
-// assumed done; the auth key and user path are read from test headers into
-// the context, and /mcp/{server} pins a single upstream.
+// gatewayHandler mimics GoModel's ingress in front of service: authentication
+// is assumed done; the auth key, extension principal and user path are read
+// from test headers into the context, and /mcp/{server} pins a single upstream.
 func gatewayHandler(service *Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if authKeyID := r.Header.Get("X-Test-Auth-Key-ID"); authKeyID != "" {
 			r = r.WithContext(core.WithAuthKeyID(r.Context(), authKeyID))
+		}
+		if principalID := r.Header.Get("X-Test-Principal-ID"); principalID != "" {
+			r = r.WithContext(ext.WithAuthentication(r.Context(), ext.Authentication{PrincipalID: principalID}))
 		}
 		if userPath := r.Header.Get(core.UserPathHeader); userPath != "" {
 			r = r.WithContext(core.WithEffectiveUserPath(r.Context(), userPath))
@@ -562,9 +566,9 @@ func TestAuthorizeSessionFailsClosedWithoutBinding(t *testing.T) {
 	err := service.authorizeSessionID("deleted-session", "alpha")
 	require.ErrorIs(t, err, ErrServerNotVisible)
 
-	service.bindSession("live", "", "/staff", "", false, nil, nil)
+	service.bindSession("live", "", "", "/staff", "", false, nil, nil)
 	require.NoError(t, service.authorizeSessionID("live", "alpha"))
-	service.bindSession("contractor", "", "/contractors/acme", "", false, nil, nil)
+	service.bindSession("contractor", "", "", "/contractors/acme", "", false, nil, nil)
 	require.ErrorIs(t, service.authorizeSessionID("contractor", "alpha"), ErrServerNotVisible)
 }
 
@@ -594,6 +598,37 @@ func TestSessionBindingRejectsForeignAuthKey(t *testing.T) {
 		"X-Test-Auth-Key-ID": "key-b",
 	})
 	require.Equal(t, http.StatusNotFound, status)
+}
+
+// An identity from an extension authenticator carries no auth key ID, so its
+// principal ID is what keeps sessions apart on a shared user path.
+func TestSessionBindingRejectsForeignPrincipal(t *testing.T) {
+	alphaURL := newTestUpstream(t, "alpha", addEchoTool("echo"))
+	_, gatewayURL := newTestService(t, nil, testSpec("alpha", alphaURL, nil))
+
+	alice := map[string]string{"X-Test-Principal-ID": "alice", core.UserPathHeader: "/team"}
+	bob := map[string]string{"X-Test-Principal-ID": "bob", core.UserPathHeader: "/team"}
+	noPrincipal := map[string]string{core.UserPathHeader: "/team"}
+	authKey := map[string]string{"X-Test-Auth-Key-ID": "key-a", core.UserPathHeader: "/team"}
+
+	tests := []struct {
+		name    string
+		owner   map[string]string
+		foreign []map[string]string
+	}{
+		{name: "principal session", owner: alice, foreign: []map[string]string{bob, noPrincipal, authKey}},
+		{name: "session without a principal", owner: noPrincipal, foreign: []map[string]string{alice}},
+		{name: "auth key session", owner: authKey, foreign: []map[string]string{alice}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sessionID := initializeRawSession(t, gatewayURL+"/mcp", tt.owner)
+			for _, headers := range tt.foreign {
+				assert.Equal(t, http.StatusNotFound, rawMCPStatus(t, gatewayURL+"/mcp", listToolsBody, withSession(headers, sessionID)), "%v", headers)
+			}
+			assert.Equal(t, http.StatusOK, rawMCPStatus(t, gatewayURL+"/mcp", listToolsBody, withSession(tt.owner, sessionID)), "the owner keeps its session")
+		})
+	}
 }
 
 func TestSessionBindingRejectsDifferentPinnedEndpoint(t *testing.T) {

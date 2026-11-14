@@ -48,8 +48,13 @@ const (
 // binding and what the SDK needs to restore the session, never a secret.
 type sharedSession struct {
 	AuthKeyID string `json:"auth_key_id,omitempty"`
-	UserPath  string `json:"user_path,omitempty"`
-	Endpoint  string `json:"endpoint,omitempty"`
+	// PrincipalID is sessionBinding.principalID. A record written before the
+	// field existed has none, so it no longer matches a caller that has one:
+	// that caller's request is answered as an unknown session and the client
+	// initializes a new one.
+	PrincipalID string `json:"principal_id,omitempty"`
+	UserPath    string `json:"user_path,omitempty"`
+	Endpoint    string `json:"endpoint,omitempty"`
 	// Scoped marks a session opened with ScopeHeader; Servers is its set.
 	Scoped    bool     `json:"scoped,omitempty"`
 	Servers   []string `json:"servers,omitempty"`
@@ -63,7 +68,7 @@ type sharedSession struct {
 // scope rebuilds the visibility inputs the session was opened with: later
 // requests never change a session's view, wherever they land.
 func (r sharedSession) scope() requestScope {
-	scope := requestScope{authKeyID: r.AuthKeyID, userPath: r.UserPath, discovery: r.Discovery}
+	scope := requestScope{authKeyID: r.AuthKeyID, principalID: r.PrincipalID, userPath: r.UserPath, discovery: r.Discovery}
 	if virtual, ok := strings.CutPrefix(r.Endpoint, virtualBindingPrefix); ok {
 		scope.virtual = virtual
 	} else {
@@ -112,7 +117,7 @@ const (
 // admitSession checks a request's session ID against the binding the session
 // was opened under, on this replica or in the shared store, and finds its
 // host. remove marks a DELETE, which ends the session on every replica.
-func (s *Service) admitSession(ctx context.Context, sessionID, authKeyID, userPath, endpoint string, remove bool) (sessionAdmission, *resumedSession) {
+func (s *Service) admitSession(ctx context.Context, sessionID, authKeyID, principalID, userPath, endpoint string, remove bool) (sessionAdmission, *resumedSession) {
 	binding, ok := s.liveBinding(sessionID)
 	if !ok {
 		if s.shared == nil {
@@ -120,9 +125,9 @@ func (s *Service) admitSession(ctx context.Context, sessionID, authKeyID, userPa
 			// and bindings do not survive restarts.
 			return sessionAdmitted, nil
 		}
-		return s.admitSharedSession(ctx, sessionID, authKeyID, userPath, endpoint, remove)
+		return s.admitSharedSession(ctx, sessionID, authKeyID, principalID, userPath, endpoint, remove)
 	}
-	if !binding.boundTo(authKeyID, userPath, endpoint) {
+	if !binding.boundTo(authKeyID, principalID, userPath, endpoint) {
 		return sessionRejected, nil
 	}
 	if s.endpointReplaced(binding.endpoint, binding.virtualIncarnation) {
@@ -147,7 +152,7 @@ func (s *Service) admitSession(ctx context.Context, sessionID, authKeyID, userPa
 
 // admitSharedSession admits a request for a session this replica does not
 // host by its shared record, resuming the session here.
-func (s *Service) admitSharedSession(ctx context.Context, sessionID, authKeyID, userPath, endpoint string, remove bool) (sessionAdmission, *resumedSession) {
+func (s *Service) admitSharedSession(ctx context.Context, sessionID, authKeyID, principalID, userPath, endpoint string, remove bool) (sessionAdmission, *resumedSession) {
 	lookupCtx, cancel := context.WithTimeout(ctx, sharedSessionTimeout)
 	record, raw, err := s.loadSharedSession(lookupCtx, sessionID)
 	cancel()
@@ -159,8 +164,8 @@ func (s *Service) admitSharedSession(ctx context.Context, sessionID, authKeyID, 
 	if record == nil {
 		return sessionAdmitted, nil
 	}
-	if record.AuthKeyID != authKeyID || record.UserPath != userPath || record.Endpoint != endpoint ||
-		s.endpointReplaced(record.Endpoint, record.VirtualIncarnation) {
+	if record.AuthKeyID != authKeyID || record.PrincipalID != principalID || record.UserPath != userPath ||
+		record.Endpoint != endpoint || s.endpointReplaced(record.Endpoint, record.VirtualIncarnation) {
 		return sessionRejected, nil
 	}
 	if remove {
@@ -429,6 +434,7 @@ func (s *Service) resumeSession(ctx context.Context, sessionID string, record *s
 	}
 	s.bindings[sessionID] = sessionBinding{
 		authKeyID:          record.AuthKeyID,
+		principalID:        record.PrincipalID,
 		userPath:           record.UserPath,
 		endpoint:           record.Endpoint,
 		lastSeen:           now,
@@ -505,6 +511,7 @@ func (s *Service) shareSession(ctx context.Context, sessionID string, scope requ
 	}
 	record := sharedSession{
 		AuthKeyID:       binding.authKeyID,
+		PrincipalID:     binding.principalID,
 		UserPath:        binding.userPath,
 		Endpoint:        binding.endpoint,
 		Discovery:       binding.discovery,
