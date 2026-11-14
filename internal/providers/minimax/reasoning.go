@@ -6,6 +6,7 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/providers"
 )
 
 // MiniMax's reasoning models keep the answer content clean only when the
@@ -31,11 +32,24 @@ func isReasoningModel(model string) bool {
 		"minimax-m2.5-highspeed",
 		"minimax-m2.7",
 		"minimax-m2.7-highspeed",
-		"minimax-m3":
+		"minimax-m3",
+		"minimax-m3.1-flash":
 		return true
 	default:
 		return false
 	}
+}
+
+// adaptFlashEffort translates the gateway's common reasoning shape, including
+// Responses requests, into Flash's native reasoning_effort parameter.
+func adaptFlashEffort(req *core.ChatRequest) (*core.ChatRequest, error) {
+	if req == nil || !strings.EqualFold(req.Model, "MiniMax-M3.1-Flash") || req.Reasoning == nil {
+		return req, nil
+	}
+	if req.ExtraFields.Lookup("reasoning_effort") != nil || req.Reasoning.Effort == "" {
+		return providers.DropReasoning(req), nil
+	}
+	return providers.AdaptReasoningEffortRequest(req, req.Reasoning.Effort)
 }
 
 // adaptChatRequest merges MiniMax's reasoning_split flag into the request's
