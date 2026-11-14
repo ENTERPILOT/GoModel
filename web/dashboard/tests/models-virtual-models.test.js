@@ -1486,3 +1486,36 @@ test("params and default_params round-trip through views and toggle payloads", (
   assert.equal(disable.payload.enabled, false);
   assert.deepEqual(disable.payload.params, { min_p: 0.1 });
 });
+
+test("buildDisplayModels matches a virtual model to a row by its exact, case-sensitive name", () => {
+  // The gateway resolves redirect sources by exact trimmed name, so
+  // "OPENAI/gpt-5" never answers requests for "openai/gpt-5".
+  const models = [
+    {
+      provider_name: "openai",
+      provider_type: "openai",
+      selector: "openai/gpt-5",
+      model: { id: "gpt-5", object: "model" },
+    },
+  ];
+  const aliases = [
+    {
+      name: "OPENAI/gpt-5",
+      target_provider: "openai",
+      target_model: "gpt-5",
+      enabled: true,
+      valid: true,
+    },
+  ];
+  const rows = display(models, aliases);
+
+  const modelRow = rows.find((row) => row.key === "model:openai/gpt-5");
+  const aliasRow = rows.find((row) => row.key === "alias:OPENAI/gpt-5");
+  assert.equal(modelRow.masking_alias, null);
+  assert.ok(aliasRow, "the differently cased virtual model keeps its own row");
+
+  const exact = display(models, [{ ...aliases[0], name: " openai/gpt-5 " }]);
+  const exactRow = exact.find((row) => row.key === "model:openai/gpt-5");
+  assert.equal(exactRow.masking_alias.name, " openai/gpt-5 ");
+  assert.equal(exact.filter((row) => row.is_alias).length, 0);
+});
