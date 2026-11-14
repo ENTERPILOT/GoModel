@@ -239,6 +239,24 @@ func TestServiceWriteOperationsIgnoreRefreshReconciliationFailures(t *testing.T)
 		_, err = service.Authenticate(context.Background(), TokenPrefix+"secret")
 		require.ErrorIs(t, err, ErrInactive)
 	})
+
+	t.Run("rename updates the cache when refresh reconciliation fails", func(t *testing.T) {
+		store := newTestStore()
+		service, err := NewService(store)
+		require.NoError(t, err)
+		issued, err := service.Create(context.Background(), CreateInput{Name: "primary"})
+		require.NoError(t, err)
+
+		store.listErr = errors.New("transient list failure")
+		view, err := service.UpdateName(context.Background(), issued.ID, "renamed")
+		require.NoError(t, err)
+		assert.Equal(t, "renamed", view.Name)
+		cached, err := service.View(issued.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "renamed", cached.Name)
+		_, err = service.Authenticate(context.Background(), issued.Value)
+		require.NoError(t, err, "the token keeps working")
+	})
 }
 
 func TestServiceCreateNormalizesUserPathAndReturnsItOnAuthenticate(t *testing.T) {

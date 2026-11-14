@@ -22,21 +22,33 @@ function keyTag(key, id) {
 }
 
 // authKeyLabels maps each key id to its label: the name alone when no other
-// key shares it, otherwise "name (sk_gom_...abcd)". A key without a name
-// falls back to its id. Entries without an id are skipped.
+// key shares it, otherwise "name (sk_gom_...abcd)". Same-name keys whose
+// redacted tokens also match (the four visible characters can repeat, and an
+// import supplies its own) get a short id added. A key without a name falls
+// back to its id. Entries without an id are skipped.
 export function authKeyLabels(keys) {
   const list = (Array.isArray(keys) ? keys : []).filter((key) => keyID(key));
-  const counts = new Map();
+  const names = new Map();
+  const tags = new Map();
   for (const key of list) {
     const name = keyName(key);
-    if (name) counts.set(name, (counts.get(name) || 0) + 1);
+    if (!name) continue;
+    names.set(name, (names.get(name) || 0) + 1);
+    const tagged = name + "\n" + keyTag(key, keyID(key));
+    tags.set(tagged, (tags.get(tagged) || 0) + 1);
   }
   const labels = {};
   for (const key of list) {
     const id = keyID(key);
     const name = keyName(key);
     if (!name) labels[id] = id;
-    else labels[id] = counts.get(name) > 1 ? name + " (" + keyTag(key, id) + ")" : name;
+    else if (names.get(name) === 1) labels[id] = name;
+    else {
+      const tag = keyTag(key, id);
+      const shortID = id.slice(0, 8);
+      const unique = tags.get(name + "\n" + tag) === 1 || tag === shortID;
+      labels[id] = name + " (" + (unique ? tag : tag + ", " + shortID) + ")";
+    }
   }
   return labels;
 }

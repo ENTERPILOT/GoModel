@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -169,22 +170,27 @@ func TestStore_UpdateName(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()
 		now := storeTestNow
+		// Both keys share a name that differs from their ids, so an update
+		// matched by name instead of id would rename both.
 		for _, key := range []AuthKey{newTestKey("key-a", now), newTestKey("key-b", now.Add(-time.Hour))} {
+			key.Name = "shared"
 			require.NoError(t, store.Create(ctx, key))
 		}
 
 		later := now.Add(time.Hour)
 		require.NoError(t, store.UpdateName(ctx, "key-a", "renamed", later))
-		// Names are not unique: a second key may take the same one.
-		require.NoError(t, store.UpdateName(ctx, "key-b", "renamed", later))
 		require.ErrorIs(t, store.UpdateName(ctx, "missing", "x", later), ErrNotFound)
 
 		byID := listByID(t, store)
-		for _, id := range []string{"key-a", "key-b"} {
-			require.Equal(t, "renamed", byID[id].Name, id)
-			require.True(t, byID[id].UpdatedAt.Equal(later), "%s UpdatedAt = %v, want %v", id, byID[id].UpdatedAt, later)
-			require.Equal(t, "hash-"+id, byID[id].SecretHash, "%s keeps its secret hash", id)
-		}
+		assert.Equal(t, "renamed", byID["key-a"].Name)
+		assert.True(t, byID["key-a"].UpdatedAt.Equal(later), "key-a UpdatedAt = %v, want %v", byID["key-a"].UpdatedAt, later)
+		assert.Equal(t, "hash-key-a", byID["key-a"].SecretHash, "key-a keeps its secret hash")
+		assert.Equal(t, "shared", byID["key-b"].Name, "only the addressed key is renamed")
+		assert.True(t, byID["key-b"].UpdatedAt.Equal(now.Add(-time.Hour)), "key-b UpdatedAt = %v, want unchanged", byID["key-b"].UpdatedAt)
+
+		// Names are not unique: a second key may take the same one.
+		require.NoError(t, store.UpdateName(ctx, "key-b", "renamed", later))
+		assert.Equal(t, "renamed", listByID(t, store)["key-b"].Name)
 	})
 }
 

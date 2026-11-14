@@ -136,11 +136,14 @@ Dashboard-Zugriff regelt nur `/admin/*`. Modell-Endpunkte und der Self-Service-E
 Key-Namen müssen nicht eindeutig sein; eindeutig ist nur das Token. Benennen Sie
 einen Key mit `PUT /admin/auth-keys/<key-id>/name` (`{"name": "ci-deploy-old"}`)
 um; die Antwort enthält den aktualisierten Key. Der Name wird wie beim Erstellen
-getrimmt und darf nicht leer sein. Nutzungs- und Audit-Einträge speichern die
-Key-ID, nicht den Namen, daher zeigt auch bisheriger Traffic den neuen Namen.
-Ein erneuter Import eines LiteLLM-Keys setzt seinen Namen wieder aus dem Import.
-Teilen sich zwei Keys einen Namen, zeigt das Dashboard neben jedem das
-maskierte Token, und das Erstellformular warnt, wenn ein Name bereits vergeben ist.
+getrimmt und darf nicht leer sein. Ein Key kann sich nicht selbst umbenennen
+(`403 auth_key_self_update`). Nutzungseinträge speichern die Key-ID, nicht den
+Namen, daher zeigt das Dashboard auch bisherige Nutzung unter dem neuen Namen;
+Audit-Einträge zeigen die Key-ID. Ein erneuter Import eines LiteLLM-Keys setzt
+seinen Namen wieder aus dem Import. Teilen sich zwei Keys einen Namen, zeigt
+das Dashboard neben jedem das maskierte Token oder, wo das Token sie nicht
+unterscheidet, eine kurze Key-ID, und das Erstellformular warnt, wenn ein Name
+bereits vergeben ist.
 
 ### Keys aus LiteLLM importieren
 
@@ -216,7 +219,7 @@ Für einen bereichsbeschränkten Admin gilt:
 - Neue API-Keys und Benutzerrichtlinien verwenden standardmäßig die Wurzel des Bereichs und können nicht
   außerhalb davon erstellt werden. Auf diese Weise erstellte Keys mit Dashboard-Zugriff sind ihrerseits
   bereichsbeschränkte Admins dieses Teilbaums.
-- Ein Key kann seine eigenen Labels, erlaubten Modelle oder Zugriffs-Flags nicht ändern
+- Ein Key kann seinen eigenen Namen, seine Labels, erlaubten Modelle oder Zugriffs-Flags nicht ändern
   (`403 auth_key_self_update`); er kann sich aber weiterhin selbst deaktivieren. Ein Key mit
   erlaubten Modellen kann den Keys, die er erstellt oder bearbeitet, nur Modelle geben, die ihm selbst
   erlaubt sind: `openai/*` kann `openai/gpt-4o-mini` vergeben, aber weder
