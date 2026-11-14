@@ -174,6 +174,54 @@ func TestFromAny(t *testing.T) {
 	assert.Nil(t, empty)
 }
 
+func TestToAny(t *testing.T) {
+	tests := []struct {
+		name string
+		set  Set
+		want map[string]any
+	}{
+		{name: "empty set is nil", set: Set{}, want: nil},
+		{
+			name: "integers stay integers",
+			set:  Set{"max_tokens": raw("256"), "seed": raw("9007199254740993")},
+			want: map[string]any{"max_tokens": int64(256), "seed": int64(9007199254740993)},
+		},
+		{
+			name: "floats, booleans, and strings",
+			set:  Set{"temperature": raw("0.2"), "store": raw("false"), "service_tier": raw(`"flex"`)},
+			want: map[string]any{"temperature": 0.2, "store": false, "service_tier": "flex"},
+		},
+		{name: "a stripped key stays nil", set: Set{"stop": nil}, want: map[string]any{"stop": nil}},
+		{
+			name: "nested values",
+			set:  Set{"chat_template_kwargs": raw(`{"enable_thinking":false,"budgets":[1,2.5]}`)},
+			want: map[string]any{"chat_template_kwargs": map[string]any{"enable_thinking": false, "budgets": []any{int64(1), 2.5}}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ToAny(tt.set)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+
+			// FromAny reads back the set it was decoded from.
+			back, err := FromAny(got)
+			require.NoError(t, err)
+			require.Len(t, back, len(tt.set))
+			for key, value := range tt.set {
+				if value == nil {
+					assert.Nil(t, back[key], key)
+					continue
+				}
+				assert.JSONEq(t, string(value), string(back[key]), key)
+			}
+		})
+	}
+
+	_, err := ToAny(Set{"bad": raw("{")})
+	require.ErrorContains(t, err, `parameter "bad"`)
+}
+
 func TestClone(t *testing.T) {
 	set := Set{"a": raw("1"), "b": nil}
 	cloned := Clone(set)
