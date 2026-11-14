@@ -170,7 +170,7 @@ func (d *dynamicTransport) current() *http.Transport {
 }
 
 func (d *dynamicTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	return d.current().RoundTrip(req)
+	return (&requestTimeoutTransport{base: d.current()}).RoundTrip(req)
 }
 
 // CloseIdleConnections lets http.Client.CloseIdleConnections reach the pool.
