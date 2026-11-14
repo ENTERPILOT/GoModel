@@ -126,6 +126,7 @@ func TestProviderPassthroughRoute_RejectsEndpointsThatEscapeTheBasePath(t *testi
 		{name: "encoded question mark", target: "/p/openai/files/x%3Finjected=1", wantStatus: http.StatusBadRequest},
 		{name: "encoded hash", target: "/p/openai/files/x%23frag", wantStatus: http.StatusBadRequest},
 		{name: "encoded space and colon in an id", target: "/p/openai/models/ft%3Agpt-4o%3Aorg%20a", wantStatus: http.StatusOK, wantEndpoint: "models/ft:gpt-4o:org a"},
+		{name: "encoded plus and at sign in an id", target: "/p/openai/files/a%2Bb%40c", wantStatus: http.StatusOK, wantEndpoint: "files/a+b@c"},
 		{name: "double-encoded space and colon stay encoded", target: "/p/openai/files/a%2520b%253Ac", wantStatus: http.StatusOK, wantEndpoint: "files/a%20b%3Ac"},
 		{name: "double-encoded percent sign", target: "/p/openai/files/100%2525", wantStatus: http.StatusOK, wantEndpoint: "files/100%25"},
 		{name: "trailing percent sign", target: "/p/openai/files/50%25", wantStatus: http.StatusOK, wantEndpoint: "files/50%"},
@@ -154,6 +155,8 @@ func TestProviderPassthroughRoute_RejectsEndpointsThatEscapeTheBasePath(t *testi
 
 			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
 			if tt.wantStatus != http.StatusOK {
+				assert.Contains(t, rec.Body.String(), "invalid_request_error")
+				assert.Contains(t, rec.Body.String(), "provider passthrough endpoint cannot contain")
 				assert.Nil(t, mock.lastPassthroughReq, "rejected endpoint reached the provider")
 				return
 			}
