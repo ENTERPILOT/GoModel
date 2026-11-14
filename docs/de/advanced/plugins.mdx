@@ -440,10 +440,14 @@ Ein relativer `file`-Wert muss innerhalb eines der `search_paths` aufgelöst wer
 Links wird gefolgt, und sie werden geprüft). Eine Datei, die nicht aufgelöst, verifiziert oder
 geöffnet werden kann, führt zu einem Startfehler, der die Datei nennt.
 
-Fixieren Sie jede Datei mit `sha256`. Ein Eintrag ohne Fixierung wird ungeprüft geladen, es sei
-denn, `require_sha256` ist `true`: Dann führt er zu einem Startfehler. Der Standardwert ist `false`;
-aktivieren Sie die Einstellung im Produktivbetrieb, damit eine auf dem Datenträger ausgetauschte
-`.so` nicht als Gateway ausgeführt werden kann.
+Fixieren Sie jede Datei mit `sha256`: mit ihrem vollständigen 64-stelligen Digest, den Sie beim
+Bauen oder Herunterladen festhalten (`sha256sum acme_guard.so` unter Linux, `shasum -a 256
+acme_guard.so` unter macOS). Berechnen Sie die Fixierung nicht beim Start aus der bereitgestellten
+Datei, denn dann passt sie auch zu einer ausgetauschten Datei. Ein Eintrag ohne Fixierung wird
+ungeprüft geladen, es sei denn, `require_sha256` ist `true`: Dann führt er zu einem Startfehler. Der
+Standardwert ist `false`; aktivieren Sie die Einstellung im Produktivbetrieb. Der Digest wird beim
+Start unmittelbar vor dem Öffnen der Datei geprüft. Lassen Sie `search_paths` daher nur für root
+beschreibbar: Eine zwischen Prüfung und Öffnen ausgetauschte Datei wird nicht erkannt.
 
 Installationen ohne `config.yaml` können dieselben Einträge über die Umgebung angeben:
 `PLUGINS_LOAD` ist eine kommagetrennte Liste von `file`-Werten, jeweils optional als `file=sha256`,
@@ -453,8 +457,10 @@ sie die Liste `plugins.load` aus `config.yaml` (Umgebung > Konfiguration, wie be
 über die Umgebung konfigurierbaren Wert).
 
 ```bash
-PLUGINS_REQUIRE_SHA256=true
-PLUGINS_LOAD="acme_guard.so=$(sha256sum /etc/gomodel/plugins/acme_guard.so | cut -d' ' -f1)"
+export PLUGINS_ENABLED=true
+export PLUGINS_SEARCH_PATHS=/etc/gomodel/plugins
+export PLUGINS_REQUIRE_SHA256=true
+export PLUGINS_LOAD="acme_guard.so=$ACME_GUARD_SHA256"   # beim Bauen festgehaltener Digest
 ```
 
 `GUARDRAILS_ENABLED` bleibt der Schalter, der entscheidet, ob konfigurierte Instanzen auf den

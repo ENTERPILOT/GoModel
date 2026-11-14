@@ -451,10 +451,13 @@ Względna wartość `file` musi wskazywać plik wewnątrz jednej ze `search_path
 są rozwijane i sprawdzane). Plik, którego nie da się rozwiązać, zweryfikować lub otworzyć,
 powoduje błąd startu ze wskazaniem pliku.
 
-Przypinaj każdy plik przez `sha256`. Wpis bez przypięcia jest ładowany bez sprawdzenia, chyba że
-`require_sha256` ma wartość `true` – wtedy powoduje błąd startu. Domyślnie jest to `false`; włącz
-to ustawienie na produkcji, aby podmieniony na dysku plik `.so` nie mógł zostać uruchomiony jako
-gateway.
+Przypinaj każdy plik przez `sha256`: pełny 64-znakowy digest zapisany przy budowaniu lub pobieraniu
+pliku (`sha256sum acme_guard.so` na Linuksie, `shasum -a 256 acme_guard.so` na macOS). Nie obliczaj
+przypięcia z wdrożonego pliku przy starcie, bo pasowałoby też do podmienionego pliku. Wpis bez
+przypięcia jest ładowany bez sprawdzenia, chyba że `require_sha256` ma wartość `true` – wtedy
+powoduje błąd startu. Domyślnie jest to `false`; włącz to ustawienie na produkcji. Digest jest
+sprawdzany przy starcie, tuż przed otwarciem pliku, więc utrzymuj też `search_paths` jako
+zapisywalne tylko dla roota: plik podmieniony między sprawdzeniem a otwarciem nie zostanie wykryty.
 
 Instalacje bez `config.yaml` mogą podać te same wpisy przez
 zmienne środowiskowe: `PLUGINS_LOAD` to rozdzielona przecinkami lista wartości `file`, każda
@@ -465,8 +468,10 @@ to nazwa pliku. Gdy zmienna nie jest pusta, zastępuje listę
 wartość konfigurowalna przez zmienne środowiskowe).
 
 ```bash
-PLUGINS_REQUIRE_SHA256=true
-PLUGINS_LOAD="acme_guard.so=$(sha256sum /etc/gomodel/plugins/acme_guard.so | cut -d' ' -f1)"
+export PLUGINS_ENABLED=true
+export PLUGINS_SEARCH_PATHS=/etc/gomodel/plugins
+export PLUGINS_REQUIRE_SHA256=true
+export PLUGINS_LOAD="acme_guard.so=$ACME_GUARD_SHA256"   # digest zapisany przy budowaniu
 ```
 
 `GUARDRAILS_ENABLED` pozostaje przełącznikiem decydującym, czy skonfigurowane
