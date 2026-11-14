@@ -8792,7 +8792,7 @@ curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/audio/voices?model=gpt
 sed -n '1,20p' "$HEADERS_FILE"
 jq '.' "$BODY_FILE"
 grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
-jq -e '.error.type == "invalid_request_error" and (.error.message | test("does not support listing voices"))' "$BODY_FILE" >/dev/null
+jq -e '.error.type == "invalid_request_error" and .error.message == "model \"gpt-4o-mini-tts\" does not support listing voices"' "$BODY_FILE" >/dev/null
 
 curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/audio/voices"
 grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"

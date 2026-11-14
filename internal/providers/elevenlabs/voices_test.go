@@ -2,6 +2,7 @@ package elevenlabs
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"testing"
@@ -84,4 +85,54 @@ func TestListVoices_RefinesUpstreamError(t *testing.T) {
 	require.ErrorAs(t, err, &gatewayErr)
 	assert.Equal(t, http.StatusUnauthorized, gatewayErr.HTTPStatusCode())
 	assert.Equal(t, "Invalid API key", gatewayErr.Message)
+}
+
+// Past the page cap the listing stops and returns what it fetched: a partial
+// list is still useful for discovery, while an error would leave none.
+func TestListVoices_StopsAtPageCap(t *testing.T) {
+	server, capture := providertest.RouteServer(t, map[string]http.HandlerFunc{
+		"/v2/voices": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			page := r.URL.Query().Get("next_page_token") + "x"
+			_, _ = fmt.Fprintf(w, `{"voices":[{"voice_id":%q}],"has_more":true,"next_page_token":%q}`, page, page)
+		},
+	})
+	provider := newTestProvider("xi-secret", server.URL, server.Client(), llmclient.Hooks{})
+
+	resp, err := provider.ListVoices(context.Background(), &core.AudioVoicesRequest{Model: "eleven_multilingual_v2"})
+	require.NoError(t, err)
+	assert.Len(t, resp.Voices, maxVoicePages)
+	assert.Len(t, capture.All(), maxVoicePages)
+}
+
+func TestListVoices_MalformedPage(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "no voices array", body: `{"has_more":false}`},
+		{name: "null voices", body: `{"voices":null,"has_more":false}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server, _ := providertest.JSONServer(t, http.StatusOK, tt.body)
+			provider := newTestProvider("xi-secret", server.URL, server.Client(), llmclient.Hooks{})
+
+			_, err := provider.ListVoices(context.Background(), &core.AudioVoicesRequest{Model: "eleven_multilingual_v2"})
+			var gatewayErr *core.GatewayError
+			require.ErrorAs(t, err, &gatewayErr)
+			assert.Equal(t, http.StatusBadGateway, gatewayErr.HTTPStatusCode())
+			assert.Equal(t, core.ErrorTypeProvider, gatewayErr.Type)
+		})
+	}
+}
+
+func TestListVoices_EmptyWorkspace(t *testing.T) {
+	server, _ := providertest.JSONServer(t, http.StatusOK, `{"voices":[],"has_more":false}`)
+	provider := newTestProvider("xi-secret", server.URL, server.Client(), llmclient.Hooks{})
+
+	resp, err := provider.ListVoices(context.Background(), &core.AudioVoicesRequest{Model: "eleven_multilingual_v2"})
+	require.NoError(t, err)
+	assert.Empty(t, resp.Voices)
+	assert.NotNil(t, resp.Voices)
 }

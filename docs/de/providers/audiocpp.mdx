@@ -177,7 +177,7 @@ bereitgestellt.
 | `POST /p/audiocpp/audio/transcriptions/live` | Rohes PCM in Chunks hinein, Transkript-Events heraus, über eine einzige Verbindung |
 | `POST /p/audiocpp/audio/speech/live` | Die Live-Ingest-Variante für Speech-to-Speech |
 | `POST /p/audiocpp/audio/alignments` | Forced Alignment von bekanntem Text gegen Audio |
-| `GET /p/audiocpp/audio/voices?model=<id>` | Die rohe Stimmenliste von audio.cpp; `GET /v1/audio/voices` liefert sie ohne Passthrough |
+| `GET /p/audiocpp/audio/voices?model=<id>` | Die rohe Stimmenliste von audio.cpp; `GET /v1/audio/voices` liefert sie ohne Passthrough, normalisiert auf `{id, name}` |
 | `POST /p/audiocpp/tasks/run` | Der generische Framework-Request von audio.cpp für Aufgaben ohne OpenAI-Endpunkt (Separation, VAD, Diarisierung, Musik) |
 | `GET /p/audiocpp/health` | Bereitschaft des Servers und Anzahl der konfigurierten Modelle |
 

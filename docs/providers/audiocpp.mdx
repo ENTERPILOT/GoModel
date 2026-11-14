@@ -168,7 +168,7 @@ server root.
 | `POST /p/audiocpp/audio/transcriptions/live` | Raw chunked PCM in, transcript events out, on one connection |
 | `POST /p/audiocpp/audio/speech/live` | The speech-to-speech live-ingest variant |
 | `POST /p/audiocpp/audio/alignments` | Forced alignment of known text against audio |
-| `GET /p/audiocpp/audio/voices?model=<id>` | audio.cpp's raw voice list; `GET /v1/audio/voices` serves it without passthrough |
+| `GET /p/audiocpp/audio/voices?model=<id>` | audio.cpp's raw voice list; `GET /v1/audio/voices` returns it normalized to `{id, name}` without passthrough |
 | `POST /p/audiocpp/tasks/run` | audio.cpp's generic framework request, for tasks with no OpenAI endpoint (separation, VAD, diarization, music) |
 | `GET /p/audiocpp/health` | Server readiness and configured model count |
 

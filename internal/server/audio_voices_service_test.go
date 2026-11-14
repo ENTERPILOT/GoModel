@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/echotest"
 )
@@ -65,6 +66,24 @@ func TestAudioVoices_HappyPath(t *testing.T) {
 	require.NotNil(t, mock.captured)
 	assert.Equal(t, "kokoro", mock.captured.Model)
 	assert.Equal(t, "kokoro-local", mock.captured.Provider)
+}
+
+// The audit row names the provider that served the listing, as speech does.
+func TestAudioVoices_AuditEntryCarriesResolvedRoute(t *testing.T) {
+	mock := newVoicesMock(core.AudioVoice{ID: "af_bella", Name: "Bella"})
+	mock.providerTypes = map[string]string{"kokoro-local/kokoro": "openai"}
+	mock.providerNames = map[string]string{"kokoro-local/kokoro": "kokoro-local"}
+	svc := &audioService{provider: mock}
+	entry := &auditlog.LogEntry{}
+
+	c, rec := echotest.Get(t, "/v1/audio/voices?model=kokoro", echotest.WithValue(string(auditlog.LogEntryKey), entry))
+	require.NoError(t, svc.ListVoices(c))
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, "kokoro", entry.RequestedModel)
+	assert.Equal(t, "kokoro-local/kokoro", entry.ResolvedModel)
+	assert.Equal(t, "openai", entry.Provider)
+	assert.Equal(t, "kokoro-local", entry.ProviderName)
 }
 
 func TestAudioVoices_EmptyListIsAnArray(t *testing.T) {

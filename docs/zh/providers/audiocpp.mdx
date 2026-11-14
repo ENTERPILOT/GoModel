@@ -127,7 +127,7 @@ ENABLED_PASSTHROUGH_PROVIDERS=openai,anthropic,...,audiocpp
 | `POST /p/audiocpp/audio/transcriptions/live` | 在同一个连接上输入分块的原始 PCM，输出转写事件 |
 | `POST /p/audiocpp/audio/speech/live` | 语音到语音的实时输入变体 |
 | `POST /p/audiocpp/audio/alignments` | 将已知文本与音频进行强制对齐 |
-| `GET /p/audiocpp/audio/voices?model=<id>` | audio.cpp 的原始音色列表；`GET /v1/audio/voices` 无需透传即可提供 |
+| `GET /p/audiocpp/audio/voices?model=<id>` | audio.cpp 的原始音色列表；`GET /v1/audio/voices` 无需透传即可提供，并规范化为 `{id, name}` |
 | `POST /p/audiocpp/tasks/run` | audio.cpp 的通用框架请求，用于没有 OpenAI 端点的任务（音源分离、VAD、说话人分离、音乐） |
 | `GET /p/audiocpp/health` | 服务器就绪状态和已配置的模型数量 |
 

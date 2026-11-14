@@ -49,10 +49,11 @@ var ErrUnrecognizedVoices = errors.New("unrecognized voices response")
 // servers return into AudioVoice values. It accepts a bare array, or an object
 // carrying the array under "voices", "data", or "items". Array items are voice
 // ID strings, or objects naming the voice by "id", "voice_id", or "name" with
-// an optional display "name" or "voice_name". An object item with no ID but
-// its own "voices" array (LocalAI groups voices per model this way) is
-// flattened. Items with no ID are skipped, repeated IDs keep their first
-// entry, and every other field is dropped.
+// an optional display "name" or "voice_name" (only "voice_name" when "name"
+// is the ID). An object item with no ID but its own "voices" array (LocalAI
+// groups voices per model this way) is flattened. Items with no ID are
+// skipped, repeated IDs keep their first entry, and every other field is
+// dropped.
 func ParseAudioVoices(body []byte) ([]AudioVoice, error) {
 	items, err := voiceItems(body)
 	if err != nil {
@@ -140,11 +141,14 @@ func parseVoiceItem(item json.RawMessage) (voice AudioVoice, nested []json.RawMe
 	if err := json.Unmarshal(item, &fields); err != nil {
 		return AudioVoice{}, nil, false
 	}
-	id = firstNonBlank(fields.ID, fields.VoiceID, fields.Name)
-	if id == "" {
-		return AudioVoice{}, fields.Voices, len(fields.Voices) > 0
+	if id = firstNonBlank(fields.ID, fields.VoiceID); id != "" {
+		return AudioVoice{ID: id, Name: firstNonBlank(fields.Name, fields.VoiceName, id)}, nil, true
 	}
-	return AudioVoice{ID: id, Name: firstNonBlank(fields.Name, fields.VoiceName, id)}, nil, true
+	// With no explicit ID, name is the ID and voice_name the display label.
+	if id = firstNonBlank(fields.Name); id != "" {
+		return AudioVoice{ID: id, Name: firstNonBlank(fields.VoiceName, id)}, nil, true
+	}
+	return AudioVoice{}, fields.Voices, len(fields.Voices) > 0
 }
 
 func firstNonBlank(values ...string) string {

@@ -36,6 +36,33 @@ func TestListVoices(t *testing.T) {
 	assert.Equal(t, map[string]any{"voice_type": "all"}, req.JSON(t))
 }
 
+// A voice ID listed under more than one category keeps its first entry.
+func TestListVoices_DeduplicatesAcrossCategories(t *testing.T) {
+	server, _ := providertest.JSONServer(t, http.StatusOK, `{
+		"system_voice":[{"voice_id":"shared","voice_name":"System"}],
+		"voice_cloning":[{"voice_id":"shared"},{"voice_id":"clone-1"}],
+		"base_resp":{"status_code":0,"status_msg":"success"}
+	}`)
+	provider := newTestProvider("minimax-key", server.URL+"/v1", server.Client(), llmclient.Hooks{})
+
+	resp, err := provider.ListVoices(context.Background(), &core.AudioVoicesRequest{Model: "speech-2.8-hd"})
+	require.NoError(t, err)
+	assert.Equal(t, []core.AudioVoice{
+		{ID: "shared", Name: "System"},
+		{ID: "clone-1", Name: "clone-1"},
+	}, resp.Voices)
+}
+
+func TestListVoices_EmptyAccount(t *testing.T) {
+	server, _ := providertest.JSONServer(t, http.StatusOK, `{"system_voice":null,"base_resp":{"status_code":0}}`)
+	provider := newTestProvider("minimax-key", server.URL+"/v1", server.Client(), llmclient.Hooks{})
+
+	resp, err := provider.ListVoices(context.Background(), &core.AudioVoicesRequest{Model: "speech-2.8-hd"})
+	require.NoError(t, err)
+	assert.NotNil(t, resp.Voices)
+	assert.Empty(t, resp.Voices)
+}
+
 func TestListVoices_Errors(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -47,6 +74,8 @@ func TestListVoices_Errors(t *testing.T) {
 		{name: "base_resp auth failure", status: http.StatusOK, body: `{"base_resp":{"status_code":1004,"status_msg":"login fail"}}`, wantStatus: http.StatusUnauthorized, wantType: core.ErrorTypeAuthentication},
 		{name: "http 5xx", status: http.StatusBadGateway, body: `{"error":{"message":"upstream down"}}`, wantStatus: http.StatusBadGateway, wantType: core.ErrorTypeProvider},
 		{name: "unparseable body", status: http.StatusOK, body: `not json`, wantStatus: http.StatusBadGateway, wantType: core.ErrorTypeProvider},
+		{name: "no base_resp", status: http.StatusOK, body: `{"system_voice":[]}`, wantStatus: http.StatusBadGateway, wantType: core.ErrorTypeProvider},
+		{name: "category is not a list", status: http.StatusOK, body: `{"system_voice":{"voice_id":"x"},"base_resp":{"status_code":0}}`, wantStatus: http.StatusBadGateway, wantType: core.ErrorTypeProvider},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

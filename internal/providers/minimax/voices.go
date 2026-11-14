@@ -18,7 +18,7 @@ type voicesResponse struct {
 	SystemVoice     json.RawMessage `json:"system_voice"`
 	VoiceCloning    json.RawMessage `json:"voice_cloning"`
 	VoiceGeneration json.RawMessage `json:"voice_generation"`
-	BaseResponse    struct {
+	BaseResponse    *struct {
 		StatusCode int    `json:"status_code"`
 		StatusMsg  string `json:"status_msg"`
 	} `json:"base_resp"`
@@ -57,20 +57,29 @@ func (p *Provider) ListVoices(ctx context.Context, req *core.AudioVoicesRequest)
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, core.NewProviderError("minimax", http.StatusBadGateway, "failed to parse voices response", err)
 	}
+	if resp.BaseResponse == nil {
+		return nil, core.NewProviderError("minimax", http.StatusBadGateway, "voices response contains no status", nil)
+	}
 	if resp.BaseResponse.StatusCode != 0 {
 		return nil, statusError("voices", resp.BaseResponse.StatusCode, resp.BaseResponse.StatusMsg, body)
 	}
 
-	voices := []core.AudioVoice{}
+	// Parse the three categories as one list, so a voice ID that appears in
+	// more than one keeps a single entry.
+	items := []json.RawMessage{}
 	for _, list := range []json.RawMessage{resp.SystemVoice, resp.VoiceCloning, resp.VoiceGeneration} {
 		if list = bytes.TrimSpace(list); len(list) == 0 || bytes.Equal(list, []byte("null")) {
 			continue
 		}
-		parsed, err := core.ParseAudioVoices(list)
-		if err != nil {
+		var category []json.RawMessage
+		if err := json.Unmarshal(list, &category); err != nil {
 			return nil, core.NewProviderError("minimax", http.StatusBadGateway, "minimax returned an unrecognized voices response", err)
 		}
-		voices = append(voices, parsed...)
+		items = append(items, category...)
 	}
-	return &core.AudioVoicesResponse{Voices: voices}, nil
+	combined, err := json.Marshal(items)
+	if err != nil {
+		return nil, core.NewProviderError("minimax", http.StatusBadGateway, "failed to read voices response", err)
+	}
+	return core.AudioVoicesFromBody("minimax", combined)
 }

@@ -45,6 +45,11 @@ func TestListVoices_Errors(t *testing.T) {
 		{name: "missing model", status: http.StatusOK, body: `{"voices":[]}`, model: " ", wantStatus: http.StatusBadRequest, wantType: core.ErrorTypeInvalidRequest},
 		{name: "upstream 5xx", status: http.StatusServiceUnavailable, body: `{"error":{"message":"loading"}}`, model: "pocket-tts", wantStatus: http.StatusServiceUnavailable, wantType: core.ErrorTypeProvider},
 		{name: "unrecognized body", status: http.StatusOK, body: `{"ok":true}`, model: "pocket-tts", wantStatus: http.StatusBadGateway, wantType: core.ErrorTypeProvider},
+		// audio.cpp has served this route since its first release, so a 404 or
+		// 405 means a wrong base URL or a proxy in the way; it surfaces as the
+		// upstream error instead of being hidden as "does not support listing voices".
+		{name: "upstream 404", status: http.StatusNotFound, body: `{"error":{"message":"not found"}}`, model: "pocket-tts", wantStatus: http.StatusNotFound, wantType: core.ErrorTypeNotFound},
+		{name: "upstream 405", status: http.StatusMethodNotAllowed, body: `{"error":{"message":"method not allowed"}}`, model: "pocket-tts", wantStatus: http.StatusMethodNotAllowed, wantType: core.ErrorTypeInvalidRequest},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

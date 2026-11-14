@@ -2,6 +2,7 @@ package elevenlabs
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -20,10 +21,15 @@ const voicesPageSize = 100
 
 // maxVoicePages bounds how many pages one listing follows, so a workspace
 // with a huge voice library cannot turn one call into an unbounded crawl.
+// Past the cap the listing returns the voices fetched so far and logs a
+// warning: a discovery call is still useful with the first 2000 voices,
+// while failing it would leave such a workspace with no list at all.
 const maxVoicePages = 20
 
 type voicesPage struct {
-	Voices        []json.RawMessage `json:"voices"`
+	// Voices is a pointer so a page without the array is told apart from an
+	// empty one and reported as malformed instead of as "no voices".
+	Voices        *[]json.RawMessage `json:"voices"`
 	HasMore       bool              `json:"has_more"`
 	NextPageToken string            `json:"next_page_token"`
 }
@@ -40,7 +46,8 @@ func (p *Provider) ListVoices(ctx context.Context, req *core.AudioVoicesRequest)
 	ctx = context.WithValue(ctx, pinnedKeyContextKey{}, p.keys.NextForContext(ctx))
 	items := []json.RawMessage{}
 	token := ""
-	for range maxVoicePages {
+	truncated := false
+	for page := range maxVoicePages {
 		query := url.Values{"page_size": {strconv.Itoa(voicesPageSize)}, "include_total_count": {"false"}}
 		if token != "" {
 			query.Set("next_page_token", token)
@@ -53,11 +60,19 @@ func (p *Provider) ListVoices(ctx context.Context, req *core.AudioVoicesRequest)
 		}, &resp); err != nil {
 			return nil, refineElevenLabsError(err)
 		}
-		items = append(items, resp.Voices...)
+		if resp.Voices == nil {
+			return nil, core.NewProviderError("elevenlabs", http.StatusBadGateway, "elevenlabs returned an unrecognized voices response", core.ErrUnrecognizedVoices)
+		}
+		items = append(items, *resp.Voices...)
 		token = strings.TrimSpace(resp.NextPageToken)
 		if !resp.HasMore || token == "" {
 			break
 		}
+		truncated = page == maxVoicePages-1
+	}
+	if truncated {
+		slog.WarnContext(ctx, "elevenlabs voice listing stopped at the page cap; returning a partial list",
+			"pages", maxVoicePages, "voices", len(items))
 	}
 	body, err := json.Marshal(items)
 	if err != nil {

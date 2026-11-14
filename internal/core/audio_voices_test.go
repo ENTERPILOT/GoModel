@@ -45,6 +45,11 @@ func TestParseAudioVoices(t *testing.T) {
 			want: []AudioVoice{{ID: "af_sky", Name: "af_sky"}, {ID: "am_adam", Name: "am_adam"}},
 		},
 		{
+			name: "name as id keeps voice_name as the label",
+			body: `{"voices":[{"name":"af_sky","voice_name":"Sky"},{"name":"am_adam"}]}`,
+			want: []AudioVoice{{ID: "af_sky", Name: "Sky"}, {ID: "am_adam", Name: "am_adam"}},
+		},
+		{
 			name: "data envelope of plain voices",
 			body: `{"data":[{"id":"v1","name":"Voice One"}]}`,
 			want: []AudioVoice{{ID: "v1", Name: "Voice One"}},

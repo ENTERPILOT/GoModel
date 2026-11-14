@@ -110,6 +110,7 @@ func TestRouterListVoices_Errors(t *testing.T) {
 			req:        &core.AudioVoicesRequest{Model: "nope", Provider: "openai"},
 			wantStatus: http.StatusNotFound,
 			wantType:   core.ErrorTypeNotFound,
+			wantMsg:    "model not found: openai/nope",
 		},
 		{
 			name:       "nil request",

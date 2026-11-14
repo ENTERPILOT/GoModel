@@ -61,6 +61,7 @@ func (s *audioService) ListVoices(c *echo.Context) error {
 	c.SetRequest(c.Request().WithContext(ctx))
 	auditlog.EnrichEntry(c, selector.Model, "")
 	route := s.routeFor(selector, requestID)
+	auditlog.EnrichEntryWithResolvedRoute(c, selector.QualifiedModel(), route.providerType, route.providerName)
 	release, err := enforceRateLimit(c, s.rateLimiter, rateLimitRoute{provider: route.providerName, model: route.model})
 	if err != nil {
 		return handleError(c, err)

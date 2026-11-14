@@ -166,12 +166,12 @@ jak w `/v1/audio/speech`.
 | Provider | Źródło upstream |
 | --- | --- |
 | [audio.cpp](/pl/providers/audiocpp) | `GET /v1/audio/voices?model=` |
-| [ElevenLabs](/pl/providers/elevenlabs) | `GET /v2/voices` (głosy workspace'u, dla każdego modelu) |
+| [ElevenLabs](/pl/providers/elevenlabs) | `GET /v2/voices` (głosy workspace'u, dla każdego modelu; najwyżej pierwsze 2000) |
 | [MiniMax](/pl/providers/minimax) | `POST /v1/get_voice` (głosy systemowe, sklonowane i wygenerowane) |
 | Providery typu `openai` | `GET {base_url}/audio/voices?model=` – self-hostowane serwery, takie jak Kokoro-FastAPI, Speaches, LocalAI czy xn-ptts |
 
 Provider bez listy głosów – w tym samo OpenAI i hostowane API zgodne z OpenAI,
-których `/audio/voices` odpowiada 404 – zwraca `400` `invalid_request_error`
+których `/audio/voices` odpowiada 404 lub 405 – zwraca `400` `invalid_request_error`
 (`model "…" does not support listing voices`). Brak `model` to również `400`;
 nieznany model to `404`.
 

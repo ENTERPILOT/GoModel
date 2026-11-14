@@ -170,7 +170,7 @@ z katalogu głównego serwera.
 | `POST /p/audiocpp/audio/transcriptions/live` | Surowe PCM w kawałkach na wejściu, zdarzenia transkrypcji na wyjściu, w jednym połączeniu |
 | `POST /p/audiocpp/audio/speech/live` | Wariant live-ingest speech-to-speech |
 | `POST /p/audiocpp/audio/alignments` | Wymuszone wyrównanie znanego tekstu do audio |
-| `GET /p/audiocpp/audio/voices?model=<id>` | Surowa lista głosów audio.cpp; `GET /v1/audio/voices` zwraca ją bez passthrough |
+| `GET /p/audiocpp/audio/voices?model=<id>` | Surowa lista głosów audio.cpp; `GET /v1/audio/voices` zwraca ją bez passthrough, znormalizowaną do `{id, name}` |
 | `POST /p/audiocpp/tasks/run` | Ogólny request frameworka audio.cpp dla zadań bez endpointu OpenAI (separacja, VAD, diaryzacja, muzyka) |
 | `GET /p/audiocpp/health` | Gotowość serwera i liczba skonfigurowanych modeli |
 

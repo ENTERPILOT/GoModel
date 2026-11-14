@@ -165,12 +165,12 @@ budgeted. Each call asks the provider, so request rate limits apply as on
 | Provider | Upstream source |
 | --- | --- |
 | [audio.cpp](/providers/audiocpp) | `GET /v1/audio/voices?model=` |
-| [ElevenLabs](/providers/elevenlabs) | `GET /v2/voices` (the workspace's voices, for every model) |
+| [ElevenLabs](/providers/elevenlabs) | `GET /v2/voices` (the workspace's voices, for every model; at most the first 2000) |
 | [MiniMax](/providers/minimax) | `POST /v1/get_voice` (system, cloned, and generated voices) |
 | `openai`-type providers | `GET {base_url}/audio/voices?model=` — self-hosted servers such as Kokoro-FastAPI, Speaches, LocalAI, or xn-ptts |
 
 A provider without a voice listing — including OpenAI itself and hosted
-OpenAI-compatible APIs, whose `/audio/voices` answers 404 — returns `400`
+OpenAI-compatible APIs, whose `/audio/voices` answers 404 or 405 — returns `400`
 `invalid_request_error` (`model "…" does not support listing voices`). A
 missing `model` is also a `400`; an unknown model is a `404`.
 
