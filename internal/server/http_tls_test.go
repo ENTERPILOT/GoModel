@@ -120,7 +120,7 @@ func TestClientCertificateRequired(t *testing.T) {
 
 // HSTS goes out only when the gateway terminates TLS itself; behind a proxy,
 // on plain HTTP, the header must be absent. It applies to every response,
-// including errors and probes.
+// including errors, probes and paths the base path rejects.
 func TestStrictTransportSecurity(t *testing.T) {
 	ca := tlstest.NewCA(t, "test CA")
 	certFile, keyFile := ca.Issue(t, "gateway").Write(t, t.TempDir())
@@ -138,7 +138,7 @@ func TestStrictTransportSecurity(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv := New(&mockProvider{}, &Config{TLSConfig: tt.tlsConfig})
+			srv := New(&mockProvider{}, &Config{TLSConfig: tt.tlsConfig, BasePath: "/gw"})
 			listener, err := net.Listen("tcp", "127.0.0.1:0")
 			require.NoError(t, err)
 			ctx, cancel := context.WithCancel(context.Background())
@@ -152,7 +152,8 @@ func TestStrictTransportSecurity(t *testing.T) {
 			t.Cleanup(transport.CloseIdleConnections)
 			client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
 
-			for _, path := range []string{"/health", "/no-such-route"} {
+			// A routed path, an unrouted one, and one outside the base path.
+			for _, path := range []string{"/gw/health", "/gw/no-such-route", "/outside"} {
 				resp, err := client.Get(tt.scheme + "://" + listener.Addr().String() + path)
 				require.NoError(t, err)
 				require.NoError(t, resp.Body.Close())
@@ -160,4 +161,16 @@ func TestStrictTransportSecurity(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The gateway's HSTS policy covers its own host, so a provider's header on a
+// relayed passthrough response must neither replace nor clear it.
+func TestPassthroughKeepsGatewayHSTS(t *testing.T) {
+	dst := http.Header{"Strict-Transport-Security": {strictTransportSecurityValue}}
+	copyPassthroughResponseHeaders(dst, http.Header{
+		"Strict-Transport-Security": {"max-age=0; includeSubDomains"},
+		"X-Upstream":                {"kept"},
+	})
+	assert.Equal(t, []string{strictTransportSecurityValue}, dst.Values("Strict-Transport-Security"))
+	assert.Equal(t, "kept", dst.Get("X-Upstream"))
 }

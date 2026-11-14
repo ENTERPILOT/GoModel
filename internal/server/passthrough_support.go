@@ -145,7 +145,10 @@ func skipPassthroughHeader(key string) bool {
 	switch canonicalKey {
 	case "Authorization", "X-Api-Key", "Host", "Content-Length", "Connection", "Keep-Alive",
 		"Proxy-Authenticate", "Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
-		"Cookie", "Forwarded", "Set-Cookie":
+		"Cookie", "Forwarded", "Set-Cookie",
+		// HSTS is the gateway's own policy for its host: a provider's value
+		// must not replace or clear it.
+		"Strict-Transport-Security":
 		return true
 	default:
 		return strings.HasPrefix(canonicalKey, "X-Forwarded-")
