@@ -60,7 +60,12 @@ curl -s http://localhost:8080/v1/audio/transcriptions \
 
 ## 音色使用 audio.cpp 的名称，而非 OpenAI 的名称
 
-`voice` 指定的是 audio.cpp 的音色预设、缓存的音色 id，或所配置音色库中的 wav 文件。audio.cpp 没有固定的音色集合，因此 OpenAI 的 `alloy`/`nova`/… 对它没有意义。使用 `GET /p/audiocpp/audio/voices?model=<id>` 可列出某个模型提供的音色。
+`voice` 指定的是 audio.cpp 的音色预设、缓存的音色 id，或所配置音色库中的 wav 文件。audio.cpp 没有固定的音色集合，因此 OpenAI 的 `alloy`/`nova`/… 对它没有意义。使用 [`GET /v1/audio/voices`](/zh/advanced/api-endpoints#音色发现) 可列出某个模型提供的音色：
+
+```bash
+curl -s "http://localhost:8080/v1/audio/voices?model=audiocpp/pocket-tts" \
+  -H "Authorization: Bearer change-me"
+```
 
 省略 `voice` 即可让 audio.cpp 使用模型所配置的 `default_voice_preset`。
 
@@ -122,7 +127,7 @@ ENABLED_PASSTHROUGH_PROVIDERS=openai,anthropic,...,audiocpp
 | `POST /p/audiocpp/audio/transcriptions/live` | 在同一个连接上输入分块的原始 PCM，输出转写事件 |
 | `POST /p/audiocpp/audio/speech/live` | 语音到语音的实时输入变体 |
 | `POST /p/audiocpp/audio/alignments` | 将已知文本与音频进行强制对齐 |
-| `GET /p/audiocpp/audio/voices?model=<id>` | TTS 模型提供的音色 |
+| `GET /p/audiocpp/audio/voices?model=<id>` | audio.cpp 的原始音色列表；`GET /v1/audio/voices` 无需透传即可提供 |
 | `POST /p/audiocpp/tasks/run` | audio.cpp 的通用框架请求，用于没有 OpenAI 端点的任务（音源分离、VAD、说话人分离、音乐） |
 | `GET /p/audiocpp/health` | 服务器就绪状态和已配置的模型数量 |
 

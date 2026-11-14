@@ -126,6 +126,35 @@ WebRTC 翻译通话除外：其媒体流不经过网关，因此不会被计量�
 | ----------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `/v1/usage` | GET    | 自助查询调用方有效用户路径的用量、预算和速率限制状态，请参阅 [Usage API](/zh/advanced/usage-api) |
 | `/v1/auth/verify` | GET | 报告请求所携带的 API 密钥是否有效（需启用 `AUTH_VERIFY_ENABLED`） |
+| `/v1/audio/voices` | GET | 列出文本转语音模型提供的音色（`?model=`），请参阅[音色发现](#音色发现) |
+
+### 音色发现
+
+`GET /v1/audio/voices?model=<model>` 返回模型背后的提供商所提供的音色，客户端无需知道由哪个提供商服务该模型即可选择音色。该端点是 GoModel 扩展，不属于 OpenAI API，其格式与 Kokoro-FastAPI 提供、Open WebUI 读取的端点一致。
+
+```bash
+curl "http://localhost:8080/v1/audio/voices?model=kokoro" \
+  -H "Authorization: Bearer $GOMODEL_API_KEY"
+```
+
+```json
+{ "voices": [{ "id": "af_bella", "name": "af_bella" }, { "id": "am_adam", "name": "am_adam" }] }
+```
+
+将 `id` 作为 `voice` 传给 `/v1/audio/speech`；`name` 是显示名称，缺省时等于 `id`。`model` 的解析与授权方式与 `/v1/audio/speech` 完全相同，包括别名和虚拟模型。该调用不计费，也不计入预算。每次调用都会请求上游提供商，因此与 `/v1/audio/speech` 一样受请求速率限制。
+
+| 提供商 | 上游来源 |
+| --- | --- |
+| [audio.cpp](/zh/providers/audiocpp) | `GET /v1/audio/voices?model=` |
+| [ElevenLabs](/zh/providers/elevenlabs) | `GET /v2/voices`（工作区的音色，适用于所有模型） |
+| [MiniMax](/zh/providers/minimax) | `POST /v1/get_voice`（系统、克隆和生成的音色） |
+| `openai` 类型的提供商 | `GET {base_url}/audio/voices?model=`，适用于 Kokoro-FastAPI、Speaches、LocalAI 或 xn-ptts 等自托管服务器 |
+
+没有音色列表的提供商（包括 OpenAI 本身，以及 `/audio/voices` 返回 404 的托管 OpenAI 兼容 API）返回 `400` `invalid_request_error`（`model "…" does not support listing voices`）。缺少 `model` 同样返回 `400`；未知模型返回 `404`。
+
+<Note>
+  Open WebUI 的 OpenAI TTS 引擎请求 `{base_url}/audio/voices` 时既不带 `model` 也不带 API 密钥，因此对接 GoModel 时会回退到其内置的 OpenAI 音色列表。请改为在其设置中直接填写音色 ID。
+</Note>
 
 ### 密钥验证
 

@@ -76,7 +76,13 @@ curl -s http://localhost:8080/v1/audio/transcriptions \
 `voice` wskazuje preset głosu audio.cpp, id głosu z cache'u lub plik wav
 w skonfigurowanej bibliotece głosów – audio.cpp nie ma stałego zestawu głosów,
 więc `alloy`/`nova`/… z OpenAI nic dla niego nie znaczą. Listę głosów oferowanych
-przez model uzyskasz przez `GET /p/audiocpp/audio/voices?model=<id>`.
+przez model uzyskasz przez
+[`GET /v1/audio/voices`](/pl/advanced/api-endpoints#wykrywanie-głosów):
+
+```bash
+curl -s "http://localhost:8080/v1/audio/voices?model=audiocpp/pocket-tts" \
+  -H "Authorization: Bearer change-me"
+```
 
 Pomiń `voice`, aby audio.cpp zastosował skonfigurowany dla modelu
 `default_voice_preset`.
@@ -164,7 +170,7 @@ z katalogu głównego serwera.
 | `POST /p/audiocpp/audio/transcriptions/live` | Surowe PCM w kawałkach na wejściu, zdarzenia transkrypcji na wyjściu, w jednym połączeniu |
 | `POST /p/audiocpp/audio/speech/live` | Wariant live-ingest speech-to-speech |
 | `POST /p/audiocpp/audio/alignments` | Wymuszone wyrównanie znanego tekstu do audio |
-| `GET /p/audiocpp/audio/voices?model=<id>` | Głosy oferowane przez model TTS |
+| `GET /p/audiocpp/audio/voices?model=<id>` | Surowa lista głosów audio.cpp; `GET /v1/audio/voices` zwraca ją bez passthrough |
 | `POST /p/audiocpp/tasks/run` | Ogólny request frameworka audio.cpp dla zadań bez endpointu OpenAI (separacja, VAD, diaryzacja, muzyka) |
 | `GET /p/audiocpp/health` | Gotowość serwera i liczba skonfigurowanych modeli |
 

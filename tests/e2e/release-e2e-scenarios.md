@@ -8777,3 +8777,24 @@ curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
   -d "{\"model\":\"$SOURCE\",\"reasoning_effort\":\"high\",\"max_tokens\":3000,\"messages\":[{\"role\":\"user\",\"content\":\"What is 17*23? $QA_SUFFIX\"}]}" > "$F"
 jq -e '(.choices[0].message.reasoning_content // "") == "" and (.choices[0].message.content | length > 0)' "$F" >/dev/null
 ```
+
+### S270 Voice listing on OpenAI is a clean unsupported error (negative)
+
+Checks `GET /v1/audio/voices`: OpenAI has no voice-listing route, so its
+upstream 404 surfaces as a `400` `invalid_request_error` naming the model, not
+as an upstream failure. A request without `model` is rejected before any
+upstream call.
+
+```bash
+HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s270.headers.XXXXXX")
+BODY_FILE=$(mktemp "$QA_RUN_DIR/s270.body.XXXXXX")
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/audio/voices?model=gpt-4o-mini-tts"
+sed -n '1,20p' "$HEADERS_FILE"
+jq '.' "$BODY_FILE"
+grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
+jq -e '.error.type == "invalid_request_error" and (.error.message | test("does not support listing voices"))' "$BODY_FILE" >/dev/null
+
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/audio/voices"
+grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
+jq -e '.error.type == "invalid_request_error" and .error.param == "model"' "$BODY_FILE" >/dev/null
+```

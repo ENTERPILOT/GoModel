@@ -83,6 +83,28 @@ func (r *Router) CreateTranslation(ctx context.Context, req *core.AudioTranscrip
 	return resp, err
 }
 
+// ListVoices routes a voice listing request to the provider that owns the
+// model, requiring it to implement core.AudioVoicesProvider.
+func (r *Router) ListVoices(ctx context.Context, req *core.AudioVoicesRequest) (*core.AudioVoicesResponse, error) {
+	if req == nil {
+		return nil, core.NewInvalidRequestError("audio voices request is required", nil)
+	}
+	resp, _, err := routeResolvedModelCall(
+		r, ctx, req.Model, req.Provider,
+		func(route resolvedRoute) *core.AudioVoicesRequest {
+			return &core.AudioVoicesRequest{Model: route.selector.Model}
+		},
+		func(ctx context.Context, provider core.Provider, forwardReq *core.AudioVoicesRequest) (*core.AudioVoicesResponse, error) {
+			lister, ok := provider.(core.AudioVoicesProvider)
+			if !ok {
+				return nil, core.NewAudioVoicesUnsupportedError(req.Model)
+			}
+			return lister.ListVoices(ctx, forwardReq)
+		},
+	)
+	return resp, err
+}
+
 // CreateImage routes an image generation request to the provider that owns the
 // model, requiring it to implement core.ImageProvider.
 func (r *Router) CreateImage(ctx context.Context, req *core.ImageGenerationRequest) (*core.ImageGenerationResponse, error) {

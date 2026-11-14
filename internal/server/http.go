@@ -536,6 +536,8 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	e.DELETE("/v1/conversations/:id", handler.DeleteConversation)
 	e.POST("/v1/embeddings", handler.Embeddings)
 	e.POST("/v1/audio/speech", handler.AudioSpeech)
+	// GoModel extension (not OpenAI): voice discovery for a TTS model.
+	e.GET("/v1/audio/voices", handler.AudioVoices)
 	e.POST("/v1/audio/transcriptions", handler.AudioTranscriptions)
 	e.POST("/v1/audio/translations", handler.AudioTranslations)
 	e.POST("/v1/images/generations", handler.ImageGenerations)

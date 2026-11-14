@@ -8489,6 +8489,98 @@
         }
       }
     },
+    "/v1/audio/voices": {
+      "get": {
+        "description": "GoModel extension, not part of the OpenAI API. Returns the voices the provider behind model offers; each id is a valid voice for POST /v1/audio/speech.",
+        "tags": [
+          "audio"
+        ],
+        "summary": "List voices for a text-to-speech model",
+        "parameters": [
+          {
+            "description": "Model ID",
+            "name": "model",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider routing hint",
+            "name": "provider",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.AudioVoicesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/audio/voices",
+            "title": "List voices for a text-to-speech model",
+            "description": "GoModel API reference for GET /v1/audio/voices: List voices for a text-to-speech model."
+          }
+        }
+      }
+    },
     "/v1/auth/verify": {
       "get": {
         "description": "Reports whether the presented credential authenticates against this gateway. Returns 401 when it does not. A gateway with no authentication configured has no credential to confirm and answers 200 with valid=false and method=none. Disabled unless AUTH_VERIFY_ENABLED is set.",
@@ -15564,6 +15656,30 @@
           "model",
           "voice"
         ]
+      },
+      "core.AudioVoice": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "af_bella"
+          },
+          "name": {
+            "type": "string",
+            "example": "Bella"
+          }
+        }
+      },
+      "core.AudioVoicesResponse": {
+        "type": "object",
+        "properties": {
+          "voices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/core.AudioVoice"
+            }
+          }
+        }
       },
       "core.BatchError": {
         "type": "object",
