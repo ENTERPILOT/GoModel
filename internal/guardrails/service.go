@@ -691,10 +691,6 @@ func (s *Service) validateSave(def Definition) (err error) {
 	if !ok {
 		return nil
 	}
-	validator, ok := entry.Factory().(SaveValidator)
-	if !ok {
-		return nil
-	}
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("plugin panicked while validating the config: %v", r)
@@ -703,6 +699,10 @@ func (s *Service) validateSave(def Definition) (err error) {
 			err = newValidationError("invalid "+def.Type+" config: "+err.Error(), err)
 		}
 	}()
+	validator, ok := entry.Factory().(SaveValidator)
+	if !ok {
+		return nil
+	}
 	return validator.ValidateSave(def.Config)
 }
 

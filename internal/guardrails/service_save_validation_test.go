@@ -3,10 +3,14 @@ package guardrails
 import (
 	"context"
 	"encoding/json"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/enterpilot/gomodel/internal/plugins"
+	"github.com/enterpilot/gomodel/pluginapi"
 )
 
 // refusedHeaderEditDefinition names a credential header, which header_edit
@@ -57,4 +61,24 @@ func TestServiceSaveValidationDoesNotApplyToStoredOrSeededDefinitions(t *testing
 		assert.True(t, IsValidationError(err))
 		assert.Equal(t, 1, service.Len(), "the stored definition keeps serving")
 	})
+}
+
+// A plugin factory that panics during save validation is reported as a
+// validation error, not left to unwind the admin request.
+func TestServiceValidateSaveRecoversFactoryPanic(t *testing.T) {
+	catalog := plugins.NewCatalog()
+	var broken atomic.Bool
+	require.NoError(t, catalog.Register(func() pluginapi.Plugin {
+		if broken.Load() {
+			panic("factory failed")
+		}
+		return &secretPlugin{}
+	}, plugins.SourceRegistered))
+	service, err := NewService(newTestStore(), catalog, plugins.HostDeps{})
+	require.NoError(t, err)
+	broken.Store(true)
+
+	err = service.validateSave(Definition{Name: "s", Type: "secret_check", Config: json.RawMessage(`{}`)})
+	require.ErrorContains(t, err, "plugin panicked while validating the config: factory failed")
+	assert.True(t, IsValidationError(err))
 }

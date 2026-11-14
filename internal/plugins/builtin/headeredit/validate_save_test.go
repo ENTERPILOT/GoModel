@@ -50,6 +50,8 @@ func TestValidateSave(t *testing.T) {
 		{name: "allowed edits", cfg: `{"request_set": "X-Team: a", "response_remove": "X-Debug", "upstream_set": "# note\nX-Tenant: acme"}`},
 		{name: "removing a token-like header", cfg: `{"response_remove": "X-Session-Token"}`},
 		{name: "malformed line", cfg: `{"request_set": "broken"}`, wantErr: `request_set line 1: expected "Name: value"`},
+		{name: "malformed line is not quoted", cfg: `{"request_set": "Authorization Bearer sk-secret"}`, wantErr: `request_set line 1: expected "Name: value"`},
+		{name: "invalid name is not quoted", cfg: `{"request_set": "Authorization Bearer sk-secret: x"}`, wantErr: "request_set line 1: invalid header name"},
 		{name: "unknown key", cfg: `{"nope": "x"}`, wantErr: "nope"},
 	}
 	for _, tt := range tests {
@@ -60,6 +62,7 @@ func TestValidateSave(t *testing.T) {
 				return
 			}
 			require.ErrorContains(t, err, tt.wantErr)
+			assert.NotContains(t, err.Error(), "sk-secret", "the error never quotes the line")
 		})
 	}
 }

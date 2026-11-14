@@ -93,16 +93,18 @@ func parseEdits(field string, entries []string, o op, upstream bool, ignored fun
 	return out, nil
 }
 
+// parseLine and checkName report a malformed line without quoting it: the
+// line may hold a secret, and the error reaches the admin response.
 func parseLine(line string, o op) (edit, error) {
 	name, value := line, ""
 	if o != opRemove {
 		before, after, ok := strings.Cut(line, ":")
 		if !ok {
-			return edit{}, fmt.Errorf("expected \"Name: value\", got %q", line)
+			return edit{}, errors.New(`expected "Name: value"`)
 		}
 		name, value = strings.TrimSpace(before), strings.TrimSpace(after)
 	} else if strings.Contains(line, ":") {
-		return edit{}, fmt.Errorf("expected a bare header name, got %q", line)
+		return edit{}, errors.New("expected a bare header name")
 	}
 	if err := checkName(name, o); err != nil {
 		return edit{}, err
@@ -112,11 +114,11 @@ func parseLine(line string, o op) (edit, error) {
 
 func checkName(name string, o op) error {
 	if name == "" {
-		return fmt.Errorf("empty header name")
+		return errors.New("empty header name")
 	}
 	for _, r := range name {
 		if !isTokenChar(r) {
-			return fmt.Errorf("invalid header name %q", name)
+			return errors.New("invalid header name")
 		}
 	}
 	lower := strings.ToLower(name)
