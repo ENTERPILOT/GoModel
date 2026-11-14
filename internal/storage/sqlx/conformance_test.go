@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
@@ -64,6 +65,91 @@ func TestAddColumnsIsIdempotent(t *testing.T) {
 		_, err := db.Exec(ctx, `INSERT INTO conformance (id, flag, updated_at, note) VALUES (?, ?, ?, ?)`, "a", true, int64(1), "n")
 		require.NoError(t, err)
 	})
+}
+
+// execRecorder records every statement Exec runs.
+type execRecorder struct {
+	sqlx.DB
+	execs []string
+}
+
+func (r *execRecorder) Exec(ctx context.Context, query string, args ...any) (int64, error) {
+	r.execs = append(r.execs, query)
+	return r.DB.Exec(ctx, query, args...)
+}
+
+func TestAddColumnsRunsOnlyMissingColumns(t *testing.T) {
+	note := `ALTER TABLE conformance ADD COLUMN note TEXT`
+	enabled := `ALTER TABLE conformance ADD COLUMN enabled ` + sqlx.TypeBool + ` NOT NULL DEFAULT FALSE`
+	existing := `ALTER TABLE conformance ADD COLUMN amount ` + sqlx.TypeFloat
+	rename := `ALTER TABLE conformance_extra RENAME TO conformance_renamed`
+
+	tests := []struct {
+		name       string
+		applied    []string // run before the measured call
+		statements []string
+		wantRun    []string // statements expected to reach Exec, unexpanded
+	}{
+		{
+			name:       "fresh columns all run",
+			statements: []string{note, enabled},
+			wantRun:    []string{note, enabled},
+		},
+		{
+			name:       "up-to-date schema runs nothing",
+			applied:    []string{note, enabled},
+			statements: []string{note, enabled},
+		},
+		{
+			name:       "column from CREATE TABLE is skipped",
+			statements: []string{existing},
+		},
+		{
+			name:       "only the missing column runs",
+			applied:    []string{note},
+			statements: []string{note, enabled},
+			wantRun:    []string{enabled},
+		},
+		{
+			name:       "other statement shapes always run",
+			applied:    []string{note},
+			statements: []string{note, rename},
+			wantRun:    []string{rename},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+				ctx := context.Background()
+				db = newConformanceDB(t, db)
+				_, err := db.Exec(ctx, `CREATE TABLE conformance_extra (id TEXT)`)
+				require.NoError(t, err)
+				require.NoError(t, sqlx.AddColumns(ctx, db, tt.applied...))
+
+				recorder := &execRecorder{DB: db}
+				require.NoError(t, sqlx.AddColumns(ctx, recorder, tt.statements...))
+
+				var wantRun []string
+				for _, statement := range tt.wantRun {
+					want := db.Dialect().ExpandTypes(statement)
+					if db.Dialect() == sqlx.PostgreSQL && statement != rename {
+						want = strings.Replace(want, "ADD COLUMN ", "ADD COLUMN IF NOT EXISTS ", 1)
+					}
+					wantRun = append(wantRun, want)
+				}
+				assert.Equal(t, wantRun, recorder.execs)
+
+				columns, err := sqlx.Columns(ctx, db, "conformance")
+				require.NoError(t, err)
+				added := map[string]string{note: "note", enabled: "enabled", existing: "amount"}
+				for _, statement := range tt.statements {
+					if column, ok := added[statement]; ok {
+						assert.True(t, columns[column], "column %s present", column)
+					}
+				}
+			})
+		})
+	}
 }
 
 func TestScalarRoundTrip(t *testing.T) {
