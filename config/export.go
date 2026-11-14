@@ -403,6 +403,11 @@ func (e *exporter) scalar(path string, node *yaml.Node, class exportClass, envNa
 			for _, credential := range credentials {
 				e.recordSecret(credential)
 			}
+			// A parameter under any name can be a credential ("?code=..."),
+			// so a copy of the whole URL is one too.
+			if urlSettingHasSecret(value) {
+				e.recordSecret(node.Value)
+			}
 		}
 		return
 	}

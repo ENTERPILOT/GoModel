@@ -325,6 +325,7 @@ func TestExportYAMLRedactsCredentialShapes(t *testing.T) {
 		{Path: "/c", Description: "Basic plan"},
 		{Path: "/d", Description: "mailto:ops@example.com"},
 		{Path: "/e", Description: "https://docs.example.com/guide?page=2"},
+		{Path: "/f", Description: cfg.Cache.Model.ModelList.URL},
 	}
 	providers := map[string]RawProviderConfig{
 		"azure": {Type: "azure", BaseURL: "https://example.openai.azure.com/openai?api-version=2024-10-21"},

@@ -78,9 +78,10 @@ func urlCredentials(value string) ([]string, bool) {
 			credentials = append(credentials, credential)
 		}
 	}
-	for _, query := range urlParameters(u) {
+	params, _ := urlParameters(u)
+	for _, query := range params {
 		for key, values := range query {
-			if credentialKey(key) {
+			if !safeQueryParameters[strings.ToLower(key)] && credentialKey(key) {
 				credentials = append(credentials, slices.DeleteFunc(values, func(v string) bool { return !literal(v) })...)
 			}
 		}
@@ -89,11 +90,13 @@ func urlCredentials(value string) ([]string, bool) {
 }
 
 // urlParameters returns the parameters of a URL's query and of its fragment,
-// which can carry a query too ("#access_token=...").
-func urlParameters(u *url.URL) []url.Values {
+// which can carry a query too ("#access_token=..."). It reports false when
+// either does not parse, which drops the malformed parameters.
+func urlParameters(u *url.URL) ([]url.Values, bool) {
+	query, queryErr := url.ParseQuery(u.RawQuery)
 	// Escaped, so an encoded delimiter ("%3B") stays inside its value.
-	fragment, _ := url.ParseQuery(u.EscapedFragment())
-	return []url.Values{u.Query(), fragment}
+	fragment, fragmentErr := url.ParseQuery(u.EscapedFragment())
+	return []url.Values{query, fragment}, queryErr == nil && fragmentErr == nil
 }
 
 // portSuffix matches the port ending a host ("db:5432").
@@ -105,7 +108,10 @@ var portSuffix = regexp.MustCompile(`:\d+$`)
 // information. The address must hold a protocol, a path, or a port, which
 // tells it from an address such as "mailto:ops@example.com".
 func schemelessPassword(value string) (string, bool) {
-	head, _, _ := strings.Cut(value, "?")
+	head := value
+	if end := strings.IndexAny(head, "?#"); end >= 0 {
+		head = head[:end]
+	}
 	at := strings.LastIndex(head, "@")
 	if at < 0 || strings.ContainsAny(value, " \t\n") {
 		return "", false
@@ -148,7 +154,7 @@ var safeQueryParameters = map[string]bool{
 // fragment parameter that is not in safeQueryParameters and not made of
 // secret references alone. A parameter can carry a credential under any name
 // ("?code=...", "?sv=...&se=..."), so in a URL setting only known ones are
-// written out.
+// written out. A URL whose parameters do not parse is assumed to hold one.
 func urlSettingHasSecret(value string) bool {
 	if urlHasLiteralCredential(value) {
 		return true
@@ -160,7 +166,11 @@ func urlSettingHasSecret(value string) bool {
 	if err != nil {
 		return true
 	}
-	for _, query := range urlParameters(u) {
+	params, parsed := urlParameters(u)
+	if !parsed {
+		return true
+	}
+	for _, query := range params {
 		for key, values := range query {
 			if !safeQueryParameters[strings.ToLower(key)] && slices.ContainsFunc(values, literal) {
 				return true
@@ -323,14 +333,29 @@ var plainWords = map[string]bool{
 	"tokenization": true, "detokenize": true, "maxtokens": true,
 }
 
-// modelTokenWords mark a name holding "token" or "tokens" as about the tokens
-// a model reads and writes rather than a credential ("max_tokens",
+// modelTokenWords next to "token" or "tokens" mark it as about the tokens a
+// model reads and writes rather than a credential ("max_tokens",
 // "token_limit", "skip_special_tokens", "stop_token_ids").
 var modelTokenWords = map[string]bool{
 	"max": true, "min": true, "limit": true, "limits": true, "count": true, "budget": true,
 	"total": true, "num": true, "per": true, "usage": true, "prompt": true, "completion": true,
-	"input": true, "output": true, "reasoning": true, "thinking": true, "cached": true,
-	"context": true, "special": true, "new": true, "ids": true,
+	"input": true, "output": true, "reasoning": true, "thinking": true,
+	"context": true, "special": true, "ids": true,
+}
+
+// modelTokens reports whether words[i], "token" or "tokens", is about model
+// tokens: a word next to it is in modelTokenWords. Only a neighbor counts, so
+// "new_access_token" still names a credential; "new" is skipped on the left
+// ("max_new_tokens").
+func modelTokens(words []string, i int) bool {
+	if words[i] != "token" && words[i] != "tokens" {
+		return false
+	}
+	left := i - 1
+	if left > 0 && words[left] == "new" {
+		left--
+	}
+	return left >= 0 && modelTokenWords[words[left]] || i+1 < len(words) && modelTokenWords[words[i+1]]
 }
 
 // credentialKey reports whether a setting name names a credential: one of
@@ -338,10 +363,9 @@ var modelTokenWords = map[string]bool{
 // neither in plainWords nor about model tokens.
 func credentialKey(key string) bool {
 	words := nameWords(key)
-	modelTokens := slices.ContainsFunc(words, func(word string) bool { return modelTokenWords[word] })
-	for _, word := range words {
+	for i, word := range words {
 		switch {
-		case plainWords[word], modelTokens && (word == "token" || word == "tokens"):
+		case plainWords[word], modelTokens(words, i):
 		case credentialWords[word]:
 			return true
 		case slices.ContainsFunc(credentialStems, func(stem string) bool { return strings.Contains(word, stem) }):
