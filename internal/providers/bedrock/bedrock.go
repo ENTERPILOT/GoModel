@@ -169,11 +169,13 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 
 // onBedrockHost reports whether a parsed base URL keeps requests on AWS's own
 // Bedrock hosts: a Bedrock endpoint URL, or no endpoint at all, where the SDK
-// forms the host from the region. A region is a single DNS label; anything
-// with a dot in it would name a host of its own under AWS's suffix.
+// forms the host from the region. The region must then be unset (resolved
+// from the host's own AWS configuration) or shaped like an AWS region: any
+// other label, such as "s3" or a dotted name, would make the SDK address a
+// host under AWS's suffix that is not Bedrock's.
 func onBedrockHost(region, endpoint string) bool {
 	if endpoint == "" {
-		return !strings.Contains(region, ".")
+		return region == "" || awscfg.IsRegion(region)
 	}
 	return awscfg.IsBedrockEndpoint(endpoint)
 }

@@ -23,6 +23,7 @@ func TestIsBedrockEndpoint(t *testing.T) {
 		{url: "https://bedrock-runtime.eusc-de-east-1.amazonaws.eu", want: true},
 		{url: "HTTPS://Bedrock-Runtime.us-east-1.AmazonAWS.com.", want: true},
 		{url: " https://bedrock-runtime.us-east-1.amazonaws.com:443 ", want: true},
+		{url: "https://bedrock-runtime.us-east-1.amazonaws.com:8443", want: false},
 
 		{url: "", want: false},
 		{url: "us-east-1", want: false},
@@ -51,6 +52,30 @@ func TestIsBedrockEndpoint(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.url, func(t *testing.T) {
 			assert.Equal(t, tt.want, IsBedrockEndpoint(tt.url))
+		})
+	}
+}
+
+func TestIsRegion(t *testing.T) {
+	tests := []struct {
+		region string
+		want   bool
+	}{
+		{region: "us-east-1", want: true},
+		{region: "us-gov-west-1", want: true},
+		{region: "eusc-de-east-1", want: true},
+		{region: "cn-north-1", want: true},
+
+		{region: ""},
+		{region: "s3"},
+		{region: "internal.example"},
+		{region: "us-east-1.example.com"},
+		{region: "US-EAST-1"},
+		{region: "my-server"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.region, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsRegion(tt.region))
 		})
 	}
 }

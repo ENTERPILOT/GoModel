@@ -220,6 +220,7 @@ func TestNew_HostTokenDestination(t *testing.T) {
 		{name: "managed, custom endpoint", managed: true, baseURL: custom, wantHost: "mantle.internal.example.com", want: "AWS4-HMAC-SHA256 "},
 		{name: "managed, custom endpoint, own key", managed: true, baseURL: custom, apiKey: "ABSK-own", wantHost: "mantle.internal.example.com", want: "Bearer ABSK-own"},
 		{name: "managed, AWS lookalike host", managed: true, baseURL: "https://bedrock-mantle.us-east-1.api.aws.example.com", wantHost: "bedrock-mantle.us-east-1.api.aws.example.com", want: "AWS4-HMAC-SHA256 "},
+		{name: "managed, AWS endpoint on another port", managed: true, baseURL: "https://bedrock-mantle.us-west-2.api.aws:8443", wantHost: "bedrock-mantle.us-west-2.api.aws", want: "AWS4-HMAC-SHA256 "},
 		{name: "managed, region", managed: true, baseURL: "us-west-2", wantHost: "bedrock-mantle.us-west-2.api.aws", want: "Bearer ABSK-env"},
 		{name: "managed, AWS endpoint", managed: true, baseURL: "https://bedrock-mantle.us-west-2.api.aws", wantHost: "bedrock-mantle.us-west-2.api.aws", want: "Bearer ABSK-env"},
 	}

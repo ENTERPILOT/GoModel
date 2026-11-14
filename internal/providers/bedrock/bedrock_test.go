@@ -682,6 +682,8 @@ func TestNew_HostTokenDestination(t *testing.T) {
 		{name: "managed, custom endpoint, own key", managed: true, baseURL: custom, apiKeys: []string{"ABSK-own"}, wantHost: "internal.example.com", want: "Bearer ABSK-own"},
 		{name: "managed, AWS lookalike host", managed: true, baseURL: "https://bedrock-runtime.us-east-1.amazonaws.com.example.com", wantHost: "example.com", want: "AWS4-HMAC-SHA256"},
 		{name: "managed, region with a dot", managed: true, baseURL: "internal.example", wantHost: "internal.example.amazonaws.com", want: "AWS4-HMAC-SHA256"},
+		{name: "managed, label that is not a region", managed: true, baseURL: "s3", wantHost: "s3.amazonaws.com", want: "AWS4-HMAC-SHA256"},
+		{name: "managed, AWS endpoint on another port", managed: true, baseURL: "https://bedrock-runtime.us-west-2.amazonaws.com:8443", wantHost: "us-west-2.amazonaws.com", want: "AWS4-HMAC-SHA256"},
 		{name: "managed, default endpoint", managed: true, wantHost: "us-east-1.amazonaws.com", want: "Bearer ABSK-env"},
 		{name: "managed, region", managed: true, baseURL: "eu-west-1", wantHost: "eu-west-1.amazonaws.com", want: "Bearer ABSK-env"},
 		{name: "managed, AWS endpoint", managed: true, baseURL: "https://bedrock-runtime.us-west-2.amazonaws.com", wantHost: "us-west-2.amazonaws.com", want: "Bearer ABSK-env"},
