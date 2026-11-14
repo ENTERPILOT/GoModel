@@ -113,6 +113,7 @@ type Config struct {
 	EnabledPassthroughProviders     []string                               // Provider types enabled on /p/{provider}/... passthrough routes
 	AllowPassthroughV1Alias         *bool                                  // Allow /p/{provider}/v1/... aliases; nil defaults to true
 	UserPathHeader                  string                                 // Header carrying the request user path (default: X-GoModel-User-Path)
+	UserPathHeaderMasterKeyOnly     bool                                   // Managed keys without a bound user path ignore the user-path header
 	AdminEndpointsEnabled           bool                                   // Whether admin API endpoints are enabled
 	AdminUIEnabled                  bool                                   // Whether admin dashboard UI is enabled
 	AdminHandler                    *admin.Handler                         // Admin API handler (nil if disabled)
@@ -424,12 +425,13 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	authMiddlewareRegistered := cfg != nil && (cfg.effectiveMasterKey() != "" || cfg.Authenticator != nil || hasRequestAuthenticators(cfg.RequestAuthenticators) || cfg.MasterKeyDisabled)
 	if authMiddlewareRegistered {
 		e.Use(NewAuthMiddleware(AuthMiddlewareConfig{
-			MasterKey:             cfg.effectiveMasterKey(),
-			Authenticator:         cfg.Authenticator,
-			RequestAuthenticators: cfg.RequestAuthenticators,
-			SkipPaths:             authSkipPaths,
-			UserPathHeader:        userPathHeaderName,
-			RequireCredential:     cfg.MasterKeyDisabled,
+			MasterKey:                   cfg.effectiveMasterKey(),
+			Authenticator:               cfg.Authenticator,
+			RequestAuthenticators:       cfg.RequestAuthenticators,
+			SkipPaths:                   authSkipPaths,
+			UserPathHeader:              userPathHeaderName,
+			RequireCredential:           cfg.MasterKeyDisabled,
+			UserPathHeaderMasterKeyOnly: cfg.UserPathHeaderMasterKeyOnly,
 		}))
 	}
 

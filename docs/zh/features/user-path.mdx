@@ -43,6 +43,18 @@ X-GoModel-User-Path: /team/alpha
 
 如果 API 密钥有自己的 `user_path`，则以密钥为准。在工作流匹配、审计日志记录、用量追踪和模型访问检查运行之前，GoModel 会用密钥绑定的路径覆盖请求头中的值。
 
+### 未绑定路径的密钥
+
+默认情况下，主密钥**和未设置 `user_path` 的托管密钥**都可以在请求头中发送任意路径。对这些密钥而言，按路径的速率限制、预算、[按路径的缓存分区](/zh/features/cache)以及 MCP [`user_paths`](/zh/features/mcp-gateway) 都不构成边界：调用方自己决定规则匹配的路径。
+
+多租户部署必须为每个密钥绑定 `user_path`，或让未绑定路径的密钥忽略该请求头：
+
+```bash
+USER_PATH_HEADER_MASTER_KEY_ONLY=true # 默认：false
+```
+
+也可以设置 `server.user_path_header_master_key_only: true`。此后，未绑定路径的密钥发出的请求将按未发送该请求头处理。主密钥仍可选择路径，绑定了路径的密钥不受影响。
+
 ## 访问作用域
 
 密钥绑定的 `user_path` 同时也是该密钥的**访问作用域**：即它可以读取和管理的子树。绑定到 `/team/alpha` 的密钥可以访问 `/team/alpha` 及其所有后代路径，但不能访问 `/team/beta`、`/team`，也不能访问未记录用户路径的行。请求头永远不会扩大作用域；它只决定请求被归属到哪个路径。

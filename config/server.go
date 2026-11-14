@@ -43,6 +43,11 @@ type ServerConfig struct {
 	// UserPathHeader is the inbound HTTP header used to read/write user paths.
 	// Default: X-GoModel-User-Path.
 	UserPathHeader string `yaml:"user_path_header" env:"USER_PATH_HEADER"`
+	// UserPathHeaderMasterKeyOnly makes managed API keys without a bound user
+	// path ignore the user-path header, so only the master key (and keys bound
+	// to a path, which always override it) decide a request's user path.
+	// Default: false (unbound keys may assert any user path).
+	UserPathHeaderMasterKeyOnly bool `yaml:"user_path_header_master_key_only" env:"USER_PATH_HEADER_MASTER_KEY_ONLY"`
 	// EnabledPassthroughProviders lists the provider types enabled on
 	// /p/{provider}/... passthrough routes. Default:
 	// ["openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "jev"].

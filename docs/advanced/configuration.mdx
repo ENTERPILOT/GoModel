@@ -49,6 +49,7 @@ The most common way to configure GoModel. Set any of the variables below to over
 | `BODY_SIZE_LIMIT`    | Max request body size (e.g., `10M`, `1024K`, `500KB`), compressed and decompressed | `10M`                  |
 | `STREAM_STALL_TIMEOUT` | Seconds one response write on a model route may wait for the client to read it; `0` disables | `60`                   |
 | `USER_PATH_HEADER`   | Header used to read/write request `user_path` values  | `X-GoModel-User-Path`  |
+| `USER_PATH_HEADER_MASTER_KEY_ONLY` | Managed keys without a bound `user_path` ignore the [user path header](/features/user-path#keys-without-a-bound-path) | `false` |
 | `SERVER_TRUSTED_PROXIES` | Networks your own proxies sit on; enables header-based client addresses | _(empty)_ |
 | `SERVER_CLIENT_IP_HEADER` | Header a trusted proxy passes the client address in | `X-Forwarded-For` |
 | `SERVER_TRUSTED_HOPS` | Proxies between the client and the gateway; `0` scans the chain instead | `0` |

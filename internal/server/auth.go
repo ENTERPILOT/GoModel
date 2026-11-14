@@ -54,6 +54,10 @@ type AuthMiddlewareConfig struct {
 	RequestAuthenticators []ext.RequestAuthenticator // Optional: extension authenticators such as OIDC sessions
 	SkipPaths             []string                   // Paths that bypass authentication; a "/*" suffix matches by prefix
 	UserPathHeader        string                     // Header carrying the request user path
+	// UserPathHeaderMasterKeyOnly makes managed keys without a bound user
+	// path ignore the user-path header, as if the request carried none. The
+	// master key and keys with a bound path are unaffected.
+	UserPathHeaderMasterKeyOnly bool
 	// RequireCredential rejects requests that carry no valid credential even
 	// when no auth mechanism is configured, instead of allowing them. It is
 	// what keeps a gateway whose master key was turned off closed rather than
@@ -146,6 +150,9 @@ func NewAuthMiddleware(cfg AuthMiddlewareConfig) echo.MiddlewareFunc {
 					authResult, err := authenticator.Authenticate(c.Request().Context(), token)
 					if err == nil {
 						applyAuthKeyResult(c, authResult, userPathHeaderName)
+						if cfg.UserPathHeaderMasterKeyOnly && strings.TrimSpace(authResult.UserPath) == "" {
+							dropClientUserPath(c, userPathHeaderName)
+						}
 						restrictSecretReferences(c, masterKey)
 						return next(c)
 					}
@@ -410,6 +417,21 @@ func applyAuthKeyResult(c *echo.Context, authResult authkeys.AuthenticationResul
 	c.SetRequest(c.Request().WithContext(ctx))
 	setAuthenticationUserHeader(c, strings.TrimSpace(authResult.UserPath))
 	auditlog.EnrichEntryWithAuthKeyID(c, authResult.ID)
+}
+
+// dropClientUserPath discards the user path a request asserted through its
+// header, leaving it exactly as if no header had been sent: the header is
+// removed (so no later reader or upstream sees it), the snapshot and the
+// effective path are cleared, and the audit entry falls back to the root.
+func dropClientUserPath(c *echo.Context, userPathHeaderName string) {
+	req := c.Request()
+	req.Header.Del(userPathHeaderName)
+	ctx := core.WithEffectiveUserPath(req.Context(), "")
+	if snapshot := core.GetRequestSnapshot(ctx); snapshot != nil {
+		ctx = core.WithRequestSnapshot(ctx, snapshot.WithUserPathHeader("", userPathHeaderName))
+	}
+	c.SetRequest(req.WithContext(ctx))
+	auditlog.EnrichEntryWithUserPath(c, "/")
 }
 
 // setAuthenticationUserHeader publishes the authenticated identity's user path

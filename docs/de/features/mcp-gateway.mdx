@@ -572,6 +572,14 @@ Andernfalls – auch mit dem Master-Key – stammt er aus dem Header
 `X-GoModel-User-Path` (oder dem über `USER_PATH_HEADER` benannten Header); so können
 Sie schnell prüfen, was ein bestimmter Teilbaum sieht.
 
+<Warning>
+  Ein verwalteter Key ohne gebundenen Pfad kann in diesem Header einen beliebigen
+  Pfad senden, daher schränkt `user_paths` ihn nicht ein. Multi-Tenant-Setups
+  müssen jeden Key an einen `user_path` binden oder
+  `USER_PATH_HEADER_MASTER_KEY_ONLY=true` setzen, damit Keys ohne Pfad den Header
+  ignorieren.
+</Warning>
+
 Verborgene Server fehlen in `tools/list`, und `/mcp/{slug}` gibt für sie 404 zurück.
 Wie bei Tool-Filtern werden Änderungen an der Sichtbarkeit ohne neuen
 Verbindungsaufbau zum Server wirksam und bei jedem Aufruf geprüft; sie erreichen
