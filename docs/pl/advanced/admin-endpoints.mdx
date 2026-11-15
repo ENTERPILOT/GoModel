@@ -133,6 +133,18 @@ modeli na poziomie grup i użytkowników zarządzasz przez [endpointy użytkowni
 
 Dostęp do dashboardu dotyczy wyłącznie `/admin/*`. Endpointy modeli i samoobsługowy endpoint [`GET /v1/usage`](/pl/advanced/usage-api) pozostają dostępne dla każdego zarządzanego klucza, z wyjątkiem tras passthrough do providerów (`/p/{provider}/...`): zarządzane klucze są tworzone bez dostępu do passthrough, a nadajesz go przez `"passthrough_access": true` w `POST /admin/auth-keys` lub `PUT /admin/auth-keys/<key-id>/passthrough-access` (zobacz [Kontrola dostępu do passthrough](/pl/features/passthrough-api#kontrola-dostępu)).
 
+Nazwy kluczy nie muszą być unikalne; unikalny jest tylko token. Nazwę klucza
+zmienisz przez `PUT /admin/auth-keys/<key-id>/name` (`{"name": "ci-deploy-old"}`),
+który zwraca zaktualizowany klucz. Nazwa jest przycinana i nie może być pusta,
+tak jak przy tworzeniu. Klucz nie może zmienić własnej nazwy
+(`403 auth_key_self_update`). Rekordy użycia zapisują identyfikator klucza, a nie
+jego nazwę, więc dashboard pokazuje wcześniejsze użycie pod nową nazwą; wpisy
+audytu pokazują identyfikator klucza. Ponowny import klucza z LiteLLM ustawia
+jego nazwę z importu. Gdy dwa klucze mają tę samą nazwę, dashboard pokazuje obok
+każdego zamaskowany token i dodaje krótki identyfikator klucza, gdy tokeny są
+takie same lub ich brakuje. Formularz tworzenia i okno zmiany nazwy ostrzegają,
+gdy nazwa jest już zajęta.
+
 ### Import kluczy z LiteLLM
 
 `POST /admin/auth-keys/import` dodaje wirtualny klucz LiteLLM na podstawie hasha SHA-256,
@@ -206,7 +218,7 @@ Dla administratora zakresowego:
 - Nowe klucze API i polityki użytkowników domyślnie trafiają do katalogu głównego zakresu i nie mogą być
   tworzone poza nim. Klucze z dostępem do dashboardu utworzone w ten sposób stają się z kolei
   administratorami zakresowymi tego poddrzewa.
-- Klucz nie może zmieniać własnych etykiet, dozwolonych modeli ani flag dostępu
+- Klucz nie może zmieniać własnej nazwy, etykiet, dozwolonych modeli ani flag dostępu
   (`403 auth_key_self_update`); nadal może się sam dezaktywować. Klucz z
   dozwolonymi modelami może nadawać kluczom, które tworzy lub edytuje, tylko modele,
   które sam ma dozwolone: `openai/*` może nadać `openai/gpt-4o-mini`, ale nie

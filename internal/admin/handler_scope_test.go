@@ -350,6 +350,10 @@ func TestAuthKeysScoped(t *testing.T) {
 				require.NoError(t, h.UpdateAuthKeyLabels(c))
 				assert.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
 
+				c, rec = scopedRequest(t, http.MethodPut, "/admin/auth-keys/"+tt.id+"/name", `{"name":"renamed"}`, scopeAlpha, echotest.WithPathValue("id", tt.id))
+				require.NoError(t, h.UpdateAuthKeyName(c))
+				assert.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+
 				c, rec = scopedRequest(t, http.MethodPost, "/admin/auth-keys/"+tt.id+"/deactivate", "", scopeAlpha, echotest.WithPathValue("id", tt.id))
 				require.NoError(t, h.DeactivateAuthKey(c))
 				want := tt.wantStatus

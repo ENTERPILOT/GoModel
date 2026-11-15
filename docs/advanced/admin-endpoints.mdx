@@ -133,6 +133,17 @@ allowlists are managed through the [user endpoints](#user-endpoints).
 
 Dashboard access only gates `/admin/*`. Model endpoints and the self-service [`GET /v1/usage`](/advanced/usage-api) endpoint stay available to every managed key, except the provider passthrough routes (`/p/{provider}/...`): managed keys are created without passthrough access, and you grant it with `"passthrough_access": true` on `POST /admin/auth-keys` or `PUT /admin/auth-keys/<key-id>/passthrough-access` (see [Passthrough access control](/features/passthrough-api#access-control)).
 
+Key names need not be unique; only the token is. Rename a key with
+`PUT /admin/auth-keys/<key-id>/name` (`{"name": "ci-deploy-old"}`), which
+answers with the updated key. The name is trimmed and must not be empty, as on
+creation. A key cannot rename itself (`403 auth_key_self_update`). Usage
+records store the key id, not its name, so the dashboard shows past usage under
+the new name; audit entries show the key id. Re-importing a LiteLLM key sets
+its name from the import again. Where two keys share a name, the dashboard
+shows each key's redacted token next to it, adding a short key id where the
+tokens match or are missing. The create form and the rename dialog warn when a
+name is already in use.
+
 ### Importing keys from LiteLLM
 
 `POST /admin/auth-keys/import` adds a LiteLLM virtual key by the SHA-256 hash
@@ -207,7 +218,7 @@ For a scoped admin:
 - New API keys and user policies default to the scope root and cannot be
   created outside it. Keys with dashboard access created this way are scoped
   admins of that subtree in turn.
-- A key cannot change its own labels, allowed models, or access flags
+- A key cannot change its own name, labels, allowed models, or access flags
   (`403 auth_key_self_update`); it can still deactivate itself. A key with
   allowed models can only give the keys it creates or edits models it is
   allowed itself: `openai/*` can grant `openai/gpt-4o-mini`, but not
