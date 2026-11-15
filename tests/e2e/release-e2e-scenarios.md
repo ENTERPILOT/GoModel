@@ -8792,7 +8792,12 @@ curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/audio/voices?model=gpt
 sed -n '1,20p' "$HEADERS_FILE"
 jq '.' "$BODY_FILE"
 grep -Eiq '^HTTP/.* 200 ' "$HEADERS_FILE"
-jq -e '(.voices | length) > 0 and all(.voices[]; (.id | type == "string" and length > 0) and (.name | type == "string" and length > 0)) and any(.voices[]; .id == "alloy")' "$BODY_FILE" >/dev/null
+jq -e 'all(.voices[]; (.name | type == "string" and length > 0)) and ([.voices[].id] | sort) == (["alloy","ash","ballad","coral","echo","fable","nova","onyx","sage","shimmer","verse","marin","cedar"] | sort)' "$BODY_FILE" >/dev/null
+
+# The tts-1 family supports a smaller set.
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/audio/voices?model=tts-1"
+grep -Eiq '^HTTP/.* 200 ' "$HEADERS_FILE"
+jq -e '([.voices[].id] | sort) == (["alloy","ash","coral","echo","fable","nova","onyx","sage","shimmer"] | sort)' "$BODY_FILE" >/dev/null
 
 curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/audio/voices"
 grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
