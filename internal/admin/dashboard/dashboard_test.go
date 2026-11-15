@@ -202,10 +202,61 @@ func TestIndex_SetsSecurityHeaders(t *testing.T) {
 	}
 }
 
-func TestStatic_SetsNoSniff(t *testing.T) {
+// The static route is reachable without a credential, so it serves files
+// only: no directory listing, and no second copy of the SPA entry point
+// without the runtime globals its CSP hash covers.
+func TestStatic_ServesFilesOnly(t *testing.T) {
 	h, err := NewWithBasePath("/")
 	require.NoError(t, err)
 
-	rec := serveStatic(t, h, "/admin/static/favicon.svg")
-	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
+	tests := []struct {
+		name   string
+		target string
+	}{
+		{name: "route root", target: "/admin/static/"},
+		{name: "entry point", target: "/admin/static/index.html"},
+		{name: "entry point through a dot segment", target: "/admin/static/assets/../index.html"},
+		{name: "directory", target: "/admin/static/assets"},
+		{name: "directory with trailing slash", target: "/admin/static/assets/"},
+		{name: "nested entry point", target: "/admin/static/fonts/index.html"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := serveStatic(t, h, tt.target)
+
+			assert.Equal(t, http.StatusNotFound, rec.Code)
+			assert.NotContains(t, strings.ToLower(rec.Body.String()), "<html")
+			assert.NotContains(t, rec.Body.String(), "<a href")
+		})
+	}
+}
+
+// Assets carry the same hardening headers as the page, whether or not the
+// requested file exists.
+func TestStatic_SetsSecurityHeaders(t *testing.T) {
+	h, err := NewWithBasePath("/")
+	require.NoError(t, err)
+	index := serveIndex(t, h, "/admin/dashboard").Header()
+
+	tests := []struct {
+		name     string
+		target   string
+		wantCode int
+	}{
+		{name: "asset", target: "/admin/static/favicon.svg", wantCode: http.StatusOK},
+		{name: "missing asset", target: "/admin/static/nope.js", wantCode: http.StatusNotFound},
+		{name: "directory", target: "/admin/static/assets/", wantCode: http.StatusNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := serveStatic(t, h, tt.target)
+
+			require.Equal(t, tt.wantCode, rec.Code)
+			assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
+			assert.Equal(t, "DENY", rec.Header().Get("X-Frame-Options"))
+			assert.Equal(t, "no-referrer", rec.Header().Get("Referrer-Policy"))
+			assert.NotEmpty(t, rec.Header().Get("Content-Security-Policy"))
+			assert.Equal(t, index.Get("Content-Security-Policy"), rec.Header().Get("Content-Security-Policy"))
+		})
+	}
 }
