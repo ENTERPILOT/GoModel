@@ -53,30 +53,39 @@ func single(t *testing.T, object, key string) string {
 // A decoder may keep the first occurrence of a repeated member, or read only
 // the exact name, where the gateway's reads the last in any letter case. A
 // body that names its limit more than once therefore reaches Anthropic with
-// one max_tokens, within the cap.
+// one max_tokens, within the cap: the lowest the client named when the body
+// is forwarded natively, and the one the gateway read, capped, when it takes
+// the translated pipeline because that one is above the cap.
 func TestNativeMessagesForwardOneLimitWithinTheCap(t *testing.T) {
-	limits := map[string]string{
-		"review request: a re-cased duplicate after":  `"max_tokens":100000,"MAX_TOKENS":5`,
-		"a re-cased duplicate before":                 `"MAX_TOKENS":5,"max_tokens":100000`,
-		"review request: an exact duplicate":          `"max_tokens":64000,"max_tokens":500`,
-		"an exact duplicate in the other order":       `"max_tokens":500,"max_tokens":64000`,
-		"duplicates that are all above the cap":       `"max_tokens":64000,"Max_Tokens":32000,"max_tokens":16000`,
-		"only a re-cased member":                      `"Max_Tokens":64000`,
-		"a re-cased member within the cap on its own": `"MAX_TOKENS":500`,
-		"a null after the limit":                      `"max_tokens":64000,"max_tokens":null`,
-		"a null before the limit":                     `"MAX_TOKENS":null,"max_tokens":64000`,
+	tests := []struct {
+		name  string
+		limit string
+		// wantNative is the max_tokens a native-only request is forwarded
+		// with, wantTranslatable that of a request the pipeline can carry.
+		wantNative, wantTranslatable int
+	}{
+		{"review request: a re-cased duplicate after", `"max_tokens":100000,"MAX_TOKENS":5`, 5, 5},
+		{"a re-cased duplicate before", `"MAX_TOKENS":5,"max_tokens":100000`, 5, 1000},
+		{"review request: an exact duplicate", `"max_tokens":64000,"max_tokens":500`, 500, 500},
+		{"an exact duplicate in the other order", `"max_tokens":500,"max_tokens":64000`, 500, 1000},
+		{"duplicates that are all above the cap", `"max_tokens":64000,"Max_Tokens":32000,"max_tokens":16000`, 1000, 1000},
+		{"only a re-cased member", `"Max_Tokens":64000`, 1000, 1000},
+		{"a re-cased member within the cap on its own", `"MAX_TOKENS":500`, 500, 500},
+		{"a null after the limit", `"max_tokens":64000,"max_tokens":null`, 1000, 1000},
+		{"a null before the limit", `"MAX_TOKENS":null,"max_tokens":64000`, 1000, 1000},
 	}
 	for history, messages := range messagesHistories {
-		for name, limit := range limits {
-			t.Run(history+" with "+name, func(t *testing.T) {
+		for _, tt := range tests {
+			t.Run(history+" with "+tt.name, func(t *testing.T) {
 				f := newUpstreamFixture(t, cappedRows, nil)
-				rec := f.post(t, "/tokens", "/v1/messages", `{"model":"anthropic/claude-sonnet-4-5",`+limit+`,`+messages+`}`)
+				rec := f.post(t, "/tokens", "/v1/messages", `{"model":"anthropic/claude-sonnet-4-5",`+tt.limit+`,`+messages+`}`)
 				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-				sent, err := strconv.Atoi(single(t, string(f.upstreams["anthropic"].Last(t).Body), "max_tokens"))
-				require.NoError(t, err)
-				assert.GreaterOrEqual(t, sent, 1)
-				assert.LessOrEqual(t, sent, 1000)
+				want := tt.wantTranslatable
+				if messages == serverToolHistory {
+					want = tt.wantNative
+				}
+				assert.Equal(t, strconv.Itoa(want), single(t, string(f.upstreams["anthropic"].Last(t).Body), "max_tokens"))
 			})
 		}
 	}

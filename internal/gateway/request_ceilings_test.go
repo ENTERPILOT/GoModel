@@ -91,6 +91,7 @@ func TestChatRequestWithCeilingsReasoningEffort(t *testing.T) {
 		{name: "a control on in the type decoders keep gets the ceiling", raw: `{"thinking":{"type":"disabled","type":"enabled"}}`, ceiling: "low", want: "low"},
 		{name: "an effort within the ceiling outlasts a control that is off", reasoning: &core.Reasoning{Effort: "low"}, raw: `{"thinking":{"TYPE":"enabled","type":"disabled"}}`, ceiling: "medium", want: "low"},
 		{name: "an effort above the ceiling next to a control that is off", reasoning: &core.Reasoning{Effort: "max"}, raw: `{"thinking":{"type":"enabled","type":"disabled"}}`, ceiling: "medium", want: "medium"},
+		{name: "review request: no effort string a client sends counts as a control that is off", reasoning: &core.Reasoning{Effort: "?off"}, raw: `{"reasoning_effort":"?off","think":"?off"}`, ceiling: "low", want: "low"},
 		{name: "re-cased template switches", raw: `{"Chat_Template_Kwargs":{"Enable_Thinking":true}}`, ceiling: "low", want: "low"},
 		{name: "re-cased extra_body members", raw: `{"Extra_Body":{"Thinking_Budget":9}}`, ceiling: "low", want: "low"},
 		{name: "a repeated control is checked in every occurrence", raw: `{"extra_body":{"think":"max","think":"low"},"chat_template_kwargs":{"enable_thinking":true,"enable_thinking":false}}`, ceiling: "low", want: "low"},

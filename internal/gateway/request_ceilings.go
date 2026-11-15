@@ -41,23 +41,21 @@ func ChatRequestExceedsCeilings(req *core.ChatRequest, ceilings requestparams.Ce
 // spelling, have to be replaced, and the effort that replaces them all. One
 // above ceiling is replaced by the ceiling, and so is one the common scale
 // cannot rank, so no spelling slips past it. A control that is off where
-// decoders read it but not in every occurrence (unsettledOff) is replaced
-// too, by the highest effort the request does ask for, "none" when there is
-// no other: a ceiling never switches reasoning on.
+// decoders read it but not in every occurrence (requested.unsettledOff) is
+// replaced too, by the highest effort the request does ask for, "none" when
+// there is no other: a ceiling never switches reasoning on.
 func effortWithinCeiling(reasoning *core.Reasoning, fields core.UnknownJSONFields, ceiling string) (effort string, exceeds bool) {
 	if ceiling == "" {
 		return "", false
 	}
+	found := requestedEfforts(reasoning, fields)
 	limit, highest := requestparams.EffortRank(ceiling), 0
-	for _, requested := range requestedEfforts(reasoning, fields) {
-		switch rank := requestparams.EffortRank(requested); {
-		case requested == unsettledOff:
-			exceeds = true
-		case rank < 0 || rank > limit:
+	for _, level := range found.efforts {
+		rank := requestparams.EffortRank(level)
+		if rank < 0 || rank > limit {
 			return ceiling, true
-		default:
-			highest = max(highest, rank)
 		}
+		highest = max(highest, rank)
 	}
-	return requestparams.ReasoningEffortLevels()[highest], exceeds
+	return requestparams.ReasoningEffortLevels()[highest], found.unsettledOff
 }

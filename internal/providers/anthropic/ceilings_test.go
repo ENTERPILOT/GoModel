@@ -2,13 +2,16 @@ package anthropic
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/enterpilot/gomodel/internal/anthropicapi"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestparams"
 )
 
 // The translation's own additions (the default limit, the room above a
@@ -99,5 +102,37 @@ func TestWithinRequestCeilings(t *testing.T) {
 func TestModelsThatThinkOnTheirOwnTakeNoBudget(t *testing.T) {
 	for _, model := range slices.Concat(defaultThinkingPrefixes, alwaysThinkingPrefixes) {
 		assert.True(t, isAdaptiveThinkingModel(model), model)
+	}
+}
+
+// The Messages ingress keeps its own copies of this adapter's budget table:
+// it holds a native thinking budget to the one sent here for the ceiling
+// level, and reads a budget back as the level it stands for. They have to
+// agree with reasoningEffortToBudgetTokens for every level, or a ceiling
+// would allow a budget the adapter never sends.
+func TestMessagesBudgetsAgreeWithTheAdapter(t *testing.T) {
+	messages := func(budget int) *anthropicapi.MessagesRequest {
+		req, err := anthropicapi.DecodeMessagesRequest(fmt.Appendf(nil,
+			`{"model":"claude-sonnet-4-5","max_tokens":200000,"thinking":{"type":"enabled","budget_tokens":%d},"messages":[{"role":"user","content":"hi"}]}`, budget))
+		require.NoError(t, err)
+		return req
+	}
+	for _, level := range requestparams.ReasoningEffortLevels() {
+		if level == "none" {
+			continue // allows no budget at all
+		}
+		budget := reasoningEffortToBudgetTokens(level)
+
+		_, lowered := anthropicapi.WithinCeilings(messages(budget), level, 0, false)
+		assert.False(t, lowered, "the %s budget is within a %s ceiling", level, level)
+		above, lowered := anthropicapi.WithinCeilings(messages(budget+1), level, 0, false)
+		require.True(t, lowered, level)
+		assert.Equal(t, budget, above.Thinking.BudgetTokens, level)
+	}
+	for _, level := range []string{"low", "medium", "high"} {
+		chat, err := anthropicapi.ToChatRequest(messages(reasoningEffortToBudgetTokens(level)))
+		require.NoError(t, err)
+		require.NotNil(t, chat.Reasoning)
+		assert.Equal(t, level, chat.Reasoning.Effort)
 	}
 }

@@ -381,9 +381,9 @@ func thinksByDefault(model string) bool {
 	return matchesModelPrefix(model, defaultThinkingPrefixes) && !matchesModelPrefix(model, disabledThinkingRejectedPrefixes)
 }
 
-// alwaysThinks reports whether model thinks on every request and rejects
+// AlwaysThinks reports whether model thinks on every request and rejects
 // thinking {"type": "disabled"}.
-func alwaysThinks(model string) bool {
+func AlwaysThinks(model string) bool {
 	return matchesModelPrefix(model, alwaysThinkingPrefixes)
 }
 

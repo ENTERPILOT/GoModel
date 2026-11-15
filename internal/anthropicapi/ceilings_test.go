@@ -17,6 +17,8 @@ func TestWithinCeilings(t *testing.T) {
 		tokens  int
 		want    MessagesRequest
 		lowered bool
+		// alwaysThinks marks a model that cannot stop thinking.
+		alwaysThinks bool
 	}{
 		{name: "no ceilings", req: MessagesRequest{MaxTokens: 64000, Thinking: enabled(63000), OutputConfig: effort("max")}},
 		{name: "within both", req: MessagesRequest{MaxTokens: 1000, Thinking: enabled(2000), OutputConfig: effort("low")}, effort: "low", tokens: 1000},
@@ -79,6 +81,23 @@ func TestWithinCeilings(t *testing.T) {
 			name: "a none ceiling allows no budget", req: MessagesRequest{MaxTokens: 2048, Thinking: enabled(1024)}, effort: "none",
 			want: MessagesRequest{MaxTokens: 2048, Thinking: &Thinking{Type: "disabled"}}, lowered: true,
 		},
+		{
+			name: "a model that always thinks gets the least it accepts under a none ceiling",
+			req:  MessagesRequest{MaxTokens: 2048, Thinking: &Thinking{Type: "adaptive"}, OutputConfig: effort("high")}, effort: "none", alwaysThinks: true,
+			want: MessagesRequest{MaxTokens: 2048, Thinking: &Thinking{Type: "adaptive"}, OutputConfig: effort("low")}, lowered: true,
+		},
+		{
+			name: "a model that always thinks and names no effort", req: MessagesRequest{MaxTokens: 2048, Thinking: &Thinking{Type: "adaptive"}}, effort: "none", alwaysThinks: true,
+			want: MessagesRequest{MaxTokens: 2048, Thinking: &Thinking{Type: "adaptive"}, OutputConfig: effort("low")}, lowered: true,
+		},
+		{
+			name: "a model that always thinks takes no budget", req: MessagesRequest{MaxTokens: 2048, Thinking: enabled(1024)}, effort: "none", alwaysThinks: true,
+			want: MessagesRequest{MaxTokens: 2048, Thinking: &Thinking{Type: "adaptive"}, OutputConfig: effort("low")}, lowered: true,
+		},
+		{
+			name: "a model that always thinks at its least already",
+			req:  MessagesRequest{MaxTokens: 2048, Thinking: &Thinking{Type: "adaptive"}, OutputConfig: effort("low")}, effort: "none", alwaysThinks: true,
+		},
 		{name: "a budget within a spaced, upper-case ceiling", req: MessagesRequest{MaxTokens: 16000, Thinking: enabled(2000)}, effort: " LOW "},
 	}
 	for _, tt := range tests {
@@ -92,7 +111,7 @@ func TestWithinCeilings(t *testing.T) {
 			if tt.req.OutputConfig != nil {
 				sent.OutputConfig = new(*tt.req.OutputConfig)
 			}
-			got, lowered := WithinCeilings(&tt.req, tt.effort, tt.tokens)
+			got, lowered := WithinCeilings(&tt.req, tt.effort, tt.tokens, tt.alwaysThinks)
 
 			assert.Equal(t, tt.lowered, lowered)
 			assert.Equal(t, sent, tt.req, "the request must not be mutated")
@@ -101,7 +120,7 @@ func TestWithinCeilings(t *testing.T) {
 				return
 			}
 			assert.Equal(t, tt.want, *got)
-			_, again := WithinCeilings(got, tt.effort, tt.tokens)
+			_, again := WithinCeilings(got, tt.effort, tt.tokens, tt.alwaysThinks)
 			assert.False(t, again, "a lowered request is within the ceilings")
 		})
 	}

@@ -12,29 +12,40 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/anthropicapi"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/providers/anthropic"
 	"github.com/enterpilot/gomodel/internal/requestparams"
 )
 
+// modelAlwaysThinks reports whether the model workflow resolved to cannot stop
+// thinking, by the anthropic provider's own list. A ceiling that allows no
+// thinking then asks a native body for the least the model accepts, as the
+// provider does on the translated pipeline.
+func modelAlwaysThinks(workflow *core.Workflow) bool {
+	return workflow != nil && workflow.Resolution != nil && anthropic.AlwaysThinks(workflow.Resolution.ResolvedSelector.Model)
+}
+
 // messagesExceedCeilings reports whether a Messages request forwarded as it
 // was sent would be above the ceilings.
-func messagesExceedCeilings(req *anthropicapi.MessagesRequest, ceilings requestparams.Ceilings) bool {
-	_, exceeds := anthropicapi.WithinCeilings(req, ceilings.ReasoningEffort, ceilings.OutputTokens)
+func messagesExceedCeilings(req *anthropicapi.MessagesRequest, ceilings requestparams.Ceilings, alwaysThinks bool) bool {
+	_, exceeds := anthropicapi.WithinCeilings(req, ceilings.ReasoningEffort, ceilings.OutputTokens, alwaysThinks)
 	return exceeds
 }
 
 // messagesBodyWithinCeilings returns a native Messages body its caller's
 // ceilings hold for, whichever decoder reads it. The body first gets a single
 // member for each limit (see withSingleLimits); then max_tokens, the thinking
-// config and output_config.effort are lowered where they stand. Every other
-// byte is kept, and a body under no ceiling, or one within them that spells
-// each limit once, is returned as it is. req is the body as decoded. A body
-// the edits cannot bring within the ceilings is refused, never forwarded
-// above them.
-func messagesBodyWithinCeilings(body []byte, req *anthropicapi.MessagesRequest, ceilings requestparams.Ceilings) ([]byte, error) {
+// config and output_config.effort are lowered where they stand. A body under
+// no ceiling, or one within them that spells each limit once, is returned as
+// it is. Lowering a value keeps every other byte; folding a repeated or
+// re-cased member keeps every other member's bytes but rewrites the object,
+// without the whitespace between its members. req is the body as decoded and
+// alwaysThinks whether its model cannot stop thinking. A body the edits
+// cannot bring within the ceilings is refused, never forwarded above them.
+func messagesBodyWithinCeilings(body []byte, req *anthropicapi.MessagesRequest, ceilings requestparams.Ceilings, alwaysThinks bool) ([]byte, error) {
 	if ceilings.IsZero() {
 		return body, nil
 	}
-	body, err := lowerMessagesBody(body, req, ceilings)
+	body, err := lowerMessagesBody(body, req, ceilings, alwaysThinks)
 	if err != nil {
 		return nil, core.NewInvalidRequestError("the request exceeds the limits of its user path and could not be lowered to them", err)
 	}
@@ -43,7 +54,7 @@ func messagesBodyWithinCeilings(body []byte, req *anthropicapi.MessagesRequest, 
 
 // lowerMessagesBody folds and lowers body, then reads the result back the
 // way the gateway decodes it: an edit that did not take fails here.
-func lowerMessagesBody(body []byte, req *anthropicapi.MessagesRequest, ceilings requestparams.Ceilings) ([]byte, error) {
+func lowerMessagesBody(body []byte, req *anthropicapi.MessagesRequest, ceilings requestparams.Ceilings, alwaysThinks bool) ([]byte, error) {
 	body, folded := withSingleLimits(body)
 	if folded {
 		var err error
@@ -51,7 +62,7 @@ func lowerMessagesBody(body []byte, req *anthropicapi.MessagesRequest, ceilings 
 			return nil, err
 		}
 	}
-	lowered, exceeds := anthropicapi.WithinCeilings(req, ceilings.ReasoningEffort, ceilings.OutputTokens)
+	lowered, exceeds := anthropicapi.WithinCeilings(req, ceilings.ReasoningEffort, ceilings.OutputTokens, alwaysThinks)
 	if !exceeds {
 		return body, nil
 	}
@@ -63,7 +74,7 @@ func lowerMessagesBody(body []byte, req *anthropicapi.MessagesRequest, ceilings 
 	if err != nil {
 		return nil, err
 	}
-	if _, folded := withSingleLimits(body); folded || messagesExceedCeilings(sent, ceilings) {
+	if _, folded := withSingleLimits(body); folded || messagesExceedCeilings(sent, ceilings, alwaysThinks) {
 		return nil, errors.New("the lowered body is still above the ceilings")
 	}
 	return body, nil
@@ -79,11 +90,12 @@ func writeMessagesLimits(body []byte, req, lowered *anthropicapi.MessagesRequest
 		}
 	}
 	if thinking := lowered.Thinking; thinking != req.Thinking {
-		// Lowering leaves thinking on with a smaller budget, or turns it off.
+		// Lowering leaves thinking on with a smaller budget, or replaces it:
+		// by "disabled", or by "adaptive" on a model that cannot stop thinking.
 		if thinking.Type == "enabled" {
 			body, err = setObjectMember(body, "thinking", "budget_tokens", []byte(strconv.Itoa(thinking.BudgetTokens)))
 		} else {
-			body, err = replaceTopLevelMember(body, "thinking", []byte(`{"type":"disabled"}`))
+			body, err = replaceTopLevelMember(body, "thinking", []byte(`{"type":"`+thinking.Type+`"}`))
 		}
 		if err != nil {
 			return nil, err

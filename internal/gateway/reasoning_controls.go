@@ -38,16 +38,23 @@ var templateControlFields = []string{"enable_thinking", "thinking", "reasoning_e
 // as exceeding, so the control is replaced by the ceiling, never forwarded.
 const unrankedEffort = "?"
 
-// unsettledOff stands for a control object that names its type more than
-// once and is "disabled" in the last of them, the one a decoder keeps, but
-// not in all. Like unrankedEffort it ranks as unknown, so the control is
-// replaced and no decoder reads the other occurrence; it asks for no
-// reasoning, though, so it is not what the ceiling is written for (see
-// effortWithinCeiling).
-const unsettledOff = "?off"
+// requested is what a request's reasoning controls ask for.
+type requested struct {
+	// efforts are the efforts the request sets, as the client spelled them
+	// or unrankedEffort.
+	efforts []string
+	// unsettledOff reports a control object that names its type more than
+	// once and is "disabled" in the last of them, the one a decoder keeps,
+	// but not in all. Such a control is replaced, so that no decoder reads
+	// the other occurrence; it asks for no reasoning, though, so it is not
+	// what the ceiling is written for (see effortWithinCeiling). It is a
+	// flag of its own because no effort string could stand for it: a client
+	// can send any of them.
+	unsettledOff bool
+}
 
-// effortReader appends the effort one control's value sets to efforts.
-type effortReader func(efforts []string, raw json.RawMessage) []string
+// effortReader adds the effort one control's value sets to found.
+type effortReader func(found *requested, raw json.RawMessage)
 
 // controls names the members of one JSON object that set reasoning. Names
 // are lower-case and matched in any letter case (see foldName): the
@@ -68,12 +75,12 @@ var (
 	googleControls = &controls{objects: map[string]*controls{
 		"thinking_config": {reader: func(name string) effortReader {
 			if isGoogleThinkingEffortMember(name) {
-				return appendControlEffort
+				return readControlEffort
 			}
 			return nil
 		}},
 	}}
-	templateControls = &controls{reader: readers(appendControlEffort, templateControlFields...)}
+	templateControls = &controls{reader: readers(readControlEffort, templateControlFields...)}
 
 	// clientControls are every reasoning control a request carries next to
 	// the typed reasoning.effort. A re-cased "reasoning" is one of them: the
@@ -81,7 +88,7 @@ var (
 	clientControls = &controls{
 		reader: func(name string) effortReader {
 			if name == "reasoning" {
-				return appendReasoningObjectEffort
+				return readReasoningObjectEffort
 			}
 			return bodyControls(name)
 		},
@@ -96,7 +103,7 @@ var (
 	// effortSpellings are the controls an adapter reads in place of
 	// reasoning.effort: the flat reasoning_effort and Gemini's budget and level.
 	effortSpellings = &controls{
-		reader: readers(appendFlatEffort, flatReasoningEffortField),
+		reader: readers(readFlatEffort, flatReasoningEffortField),
 		objects: map[string]*controls{
 			"extra_body": {objects: map[string]*controls{"google": googleControls}},
 		},
@@ -107,9 +114,9 @@ var (
 // controls, at the top level of the body or inside extra_body.
 func bodyControls(name string) effortReader {
 	if name == flatReasoningEffortField {
-		return appendFlatEffort
+		return readFlatEffort
 	}
-	return readers(appendControlEffort, reasoningControlFields...)(name)
+	return readers(readControlEffort, reasoningControlFields...)(name)
 }
 
 func readers(read effortReader, names ...string) func(string) effortReader {
@@ -122,16 +129,15 @@ func readers(read effortReader, names ...string) func(string) effortReader {
 }
 
 // without returns the rewrite that drops every control from one object, at
-// any depth, and appends the effort each one set to efforts when it is not
-// nil. An object the rewrite leaves empty is dropped; a member that should
+// any depth, and adds the effort each one set to found when it is not nil. An object the rewrite leaves empty is dropped; a member that should
 // hold controls but is not an object carries none and stays.
-func (c *controls) without(efforts *[]string) func(string, json.RawMessage) json.RawMessage {
+func (c *controls) without(found *requested) func(string, json.RawMessage) json.RawMessage {
 	return func(name string, value json.RawMessage) json.RawMessage {
 		name = foldName(name)
 		if c.reader != nil {
 			if read := c.reader(name); read != nil {
-				if efforts != nil {
-					*efforts = read(*efforts, value)
+				if found != nil {
+					read(found, value)
 				}
 				return nil
 			}
@@ -140,7 +146,7 @@ func (c *controls) without(efforts *[]string) func(string, json.RawMessage) json
 		if !ok {
 			return value
 		}
-		rewritten, changed := core.RewriteJSONObject(value, nested.without(efforts))
+		rewritten, changed := core.RewriteJSONObject(value, nested.without(found))
 		if changed && string(rewritten) == "{}" {
 			return nil
 		}
@@ -162,60 +168,59 @@ func foldName(name string) string {
 }
 
 // requestedEfforts lists every reasoning effort a request sets, in any
-// spelling, letter case and occurrence of a repeated member. Each is a level
-// of the common scale, unrankedEffort or unsettledOff.
-func requestedEfforts(reasoning *core.Reasoning, fields core.UnknownJSONFields) []string {
-	var efforts []string
+// spelling, letter case and occurrence of a repeated member.
+func requestedEfforts(reasoning *core.Reasoning, fields core.UnknownJSONFields) requested {
+	var found requested
 	if reasoning != nil && strings.TrimSpace(reasoning.Effort) != "" {
-		efforts = append(efforts, reasoning.Effort)
+		found.efforts = append(found.efforts, reasoning.Effort)
 	}
-	fields.Rewritten(clientControls.without(&efforts))
-	return efforts
+	fields.Rewritten(clientControls.without(&found))
+	return found
 }
 
-// appendFlatEffort reads a flat reasoning_effort: a level, or a value the
+// readFlatEffort reads a flat reasoning_effort: a level, or a value the
 // scale cannot place.
-func appendFlatEffort(efforts []string, raw json.RawMessage) []string {
-	if !isSet(raw) {
-		return efforts
+func readFlatEffort(found *requested, raw json.RawMessage) {
+	if isSet(raw) {
+		found.efforts = append(found.efforts, stringOrUnranked(raw))
 	}
-	return append(efforts, stringOrUnranked(raw))
 }
 
-// appendReasoningObjectEffort reads every effort member of a reasoning
+// readReasoningObjectEffort reads every effort member of a reasoning
 // object.
-func appendReasoningObjectEffort(efforts []string, raw json.RawMessage) []string {
+func readReasoningObjectEffort(found *requested, raw json.RawMessage) {
 	gjson.ParseBytes(raw).ForEach(func(key, value gjson.Result) bool {
 		if strings.EqualFold(key.String(), "effort") {
-			efforts = appendFlatEffort(efforts, json.RawMessage(value.Raw))
+			readFlatEffort(found, json.RawMessage(value.Raw))
 		}
 		return true
 	})
-	return efforts
 }
 
-// appendControlEffort places one control value on the common scale: false,
+// readControlEffort places one control value on the common scale: false,
 // a zero budget and {"type":"disabled"} turn reasoning off, a string is a
 // level, and anything else (a budget, true, "enabled") cannot be ranked.
-func appendControlEffort(efforts []string, raw json.RawMessage) []string {
+func readControlEffort(found *requested, raw json.RawMessage) {
 	raw = bytes.TrimSpace(raw)
 	if !isSet(raw) {
-		return efforts
+		return
 	}
+	effort := unrankedEffort
 	switch {
 	case bytes.Equal(raw, []byte("false")), isZero(raw):
-		return append(efforts, "none")
+		effort = "none"
 	case raw[0] == '"':
-		return append(efforts, stringOrUnranked(raw))
+		effort = stringOrUnranked(raw)
 	case raw[0] == '{':
 		switch last, every := isDisabled(raw); {
 		case every:
-			return append(efforts, "none")
+			effort = "none"
 		case last:
-			return append(efforts, unsettledOff)
+			found.unsettledOff = true
+			return
 		}
 	}
-	return append(efforts, unrankedEffort)
+	found.efforts = append(found.efforts, effort)
 }
 
 // isDisabled reports whether a control object's type is "disabled" in the

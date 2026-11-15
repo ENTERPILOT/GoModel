@@ -75,7 +75,7 @@ func applyReasoning(req *anthropicRequest, model, effort string) {
 			req.Thinking = &anthropicThinking{Type: "disabled"}
 			return
 		}
-		if !alwaysThinks(model) {
+		if !AlwaysThinks(model) {
 			return
 		}
 		effort = "low"
@@ -133,7 +133,7 @@ const thinkingDisplaySummarized = "summarized"
 func applyReasoningSummary(req *anthropicRequest, model string) {
 	switch {
 	case req.Thinking == nil:
-		if thinksByDefault(model) || alwaysThinks(model) {
+		if thinksByDefault(model) || AlwaysThinks(model) {
 			req.Thinking = &anthropicThinking{Type: "adaptive", Display: thinkingDisplaySummarized}
 		}
 	case req.Thinking.Type != "disabled":

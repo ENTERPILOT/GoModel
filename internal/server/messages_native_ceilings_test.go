@@ -34,7 +34,8 @@ func TestWithSingleLimits(t *testing.T) {
 			want: `{"output_config":{"format":{"effort":"x","EFFORT":"y"},"effort":"low"}}`,
 		},
 		{name: "a null control after an object", body: `{"thinking":{"type":"enabled"},"thinking":null}`, want: `{"thinking":null}`},
-		{name: "an escaped name is the name", body: `{"max_tokens":5}`},
+		{name: "an escaped name is the name", body: `{"\u006dax_tokens":5}`},
+		{name: "an escaped name folds like the name", body: `{"\u006dax_tokens":9,"MAX_TOKENS":5}`, want: `{"max_tokens":5}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

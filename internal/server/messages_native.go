@@ -70,7 +70,7 @@ func (s *translatedInferenceService) canForwardMessagesNatively(ctx context.Cont
 	if overrides.Forces() {
 		return false
 	}
-	if !nativeOnly && (gateway.ChatRequestExceedsCeilings(req, overrides.Ceilings) || messagesExceedCeilings(decoded, overrides.Ceilings)) {
+	if !nativeOnly && (gateway.ChatRequestExceedsCeilings(req, overrides.Ceilings) || messagesExceedCeilings(decoded, overrides.Ceilings, modelAlwaysThinks(workflow))) {
 		return false
 	}
 	_, ok := s.provider.(core.RoutablePassthrough)
@@ -97,7 +97,7 @@ func (s *translatedInferenceService) dispatchMessagesNative(c *echo.Context, req
 	if err != nil {
 		return handleError(c, invalidRequestBodyError(c, err))
 	}
-	body, err = messagesBodyWithinCeilings(body, decoded, s.inference().RequestOverrides(c.Request().Context(), workflow).Ceilings)
+	body, err = messagesBodyWithinCeilings(body, decoded, s.inference().RequestOverrides(c.Request().Context(), workflow).Ceilings, modelAlwaysThinks(workflow))
 	if err != nil {
 		return handleError(c, err)
 	}

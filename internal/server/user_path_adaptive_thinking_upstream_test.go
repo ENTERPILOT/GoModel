@@ -77,6 +77,21 @@ func TestCeilingsHoldForAdaptiveThinking(t *testing.T) {
 			wantTokens: 1000, wantThinking: "adaptive", wantEffort: "low",
 		},
 		{
+			name: "review request: native-only messages to a model that always thinks get the least it accepts", userPath: "/off", path: "/v1/messages",
+			body:       `{"model":"anthropic/claude-fable-5-2","max_tokens":2048,` + adaptive + `,"output_config":{"effort":"high"},` + serverToolHistory + `}`,
+			wantTokens: 2048, wantThinking: "adaptive", wantEffort: "low",
+		},
+		{
+			name: "native-only messages to a model that always thinks, naming no effort", userPath: "/off", path: "/v1/messages",
+			body:       `{"model":"anthropic/claude-fable-5-2","max_tokens":2048,` + adaptive + `,` + serverToolHistory + `}`,
+			wantTokens: 2048, wantThinking: "adaptive", wantEffort: "low",
+		},
+		{
+			name: "native-only messages: a none ceiling turns thinking off where the model allows it", userPath: "/off", path: "/v1/messages",
+			body:       `{"model":"anthropic/claude-opus-5","max_tokens":2048,` + adaptive + `,"output_config":{"effort":"high"},` + serverToolHistory + `}`,
+			wantTokens: 2048, wantThinking: "disabled", wantEffort: "low",
+		},
+		{
 			name: "native-only messages: a model that thinks by default gets no effort it did not send", userPath: "/capped", path: "/v1/messages",
 			body:       `{"model":"anthropic/claude-opus-5","max_tokens":64000,` + serverToolHistory + `}`,
 			wantTokens: 1000,

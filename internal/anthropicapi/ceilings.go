@@ -30,13 +30,15 @@ const defaultEffort = "high"
 // lowered to the budget the gateway sends for the ceiling level, then to
 // what fits under a lowered max_tokens; adaptive thinking has no budget and
 // is bounded by max_tokens itself. Thinking is turned off when the ceiling
-// allows none or no valid budget fits. Only MaxTokens, Thinking and
-// OutputConfig differ in the result, which is req itself when nothing does.
-// A zero ceiling bounds nothing.
+// allows none or no valid budget fits. alwaysThinks marks a model that cannot
+// stop thinking: where the ceiling allows none it gets adaptive thinking at
+// "low", the least it accepts, as the anthropic provider asks it for effort
+// "none". Only MaxTokens, Thinking and OutputConfig differ in the result,
+// which is req itself when nothing does. A zero ceiling bounds nothing.
 //
 // It is for a request forwarded to Anthropic in its own dialect; one the
 // translated pipeline serves is lowered there.
-func WithinCeilings(req *MessagesRequest, effortCeiling string, tokenCeiling int) (*MessagesRequest, bool) {
+func WithinCeilings(req *MessagesRequest, effortCeiling string, tokenCeiling int, alwaysThinks bool) (*MessagesRequest, bool) {
 	if req == nil {
 		return req, false
 	}
@@ -48,7 +50,7 @@ func WithinCeilings(req *MessagesRequest, effortCeiling string, tokenCeiling int
 		maxTokens = tokenCeiling
 	}
 	if strings.TrimSpace(effortCeiling) != "" {
-		thinking, effort = effortWithinCeiling(thinking, effort, effortCeiling)
+		thinking, effort = effortWithinCeiling(thinking, effort, effortCeiling, alwaysThinks)
 	}
 	if maxTokens < req.MaxTokens && thinking != nil && thinking.Type == "enabled" && thinking.BudgetTokens >= maxTokens {
 		budget := max(maxTokens-thinkingAnswerRoom, minThinkingBudget)
@@ -80,7 +82,7 @@ func WithinCeilings(req *MessagesRequest, effortCeiling string, tokenCeiling int
 
 // effortWithinCeiling lowers a thinking config and an output_config effort
 // to ceiling. thinking is returned as it is, or replaced, never edited.
-func effortWithinCeiling(thinking *Thinking, effort, ceiling string) (*Thinking, string) {
+func effortWithinCeiling(thinking *Thinking, effort, ceiling string, alwaysThinks bool) (*Thinking, string) {
 	limit := requestparams.EffortRank(ceiling)
 	exceeds := func(level string) bool {
 		rank := requestparams.EffortRank(level)
@@ -88,8 +90,12 @@ func effortWithinCeiling(thinking *Thinking, effort, ceiling string) (*Thinking,
 	}
 	budget := effortBudget(ceiling)
 	thinks := thinking != nil && thinking.Type != "" && thinking.Type != "disabled"
-	if thinks && budget == 0 {
+	switch {
+	case !thinks || budget > 0:
+	case !alwaysThinks:
 		thinking, thinks = &Thinking{Type: "disabled"}, false
+	case thinking.Type != "adaptive":
+		thinking = &Thinking{Type: "adaptive"}
 	}
 	switch {
 	case strings.TrimSpace(effort) != "":
@@ -120,7 +126,8 @@ func messagesEffort(ceiling string) string {
 // a level that allows no thinking allows no budget. thinkingToReasoning ranks
 // a budget only coarsely, so a budget is held to this one instead: a client
 // under a "high" ceiling cannot forward budget_tokens far above the gateway's
-// own "high".
+// own "high". The provider's tests hold this table and thinkingToReasoning's
+// thresholds to its own.
 func effortBudget(effort string) int {
 	switch strings.ToLower(strings.TrimSpace(effort)) {
 	case "minimal", "low":
