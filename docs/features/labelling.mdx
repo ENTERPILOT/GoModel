@@ -270,9 +270,14 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GOMODEL_LABEL: pr-${{ github.event.pull_request.number }}
+      GOMODEL_API_KEY: ${{ secrets.GOMODEL_API_KEY }}
     steps:
-      - uses: actions/checkout@v5
-      - run: ./scripts/review.sh
+      - run: |
+          curl https://gomodel.example.com/v1/chat/completions \
+            -H "Authorization: Bearer $GOMODEL_API_KEY" \
+            -H "Content-Type: application/json" \
+            -H "x-litellm-tags: $GOMODEL_LABEL" \
+            -d '{"model": "gpt-5", "messages": [{"role": "user", "content": "Review this diff"}]}'
 ```
 
 Then send it on each request:
