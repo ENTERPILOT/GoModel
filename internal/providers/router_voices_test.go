@@ -55,6 +55,8 @@ func TestRouterListVoices(t *testing.T) {
 
 // A failing voice listing must not open the breaker speech and chat share
 // with it, so inference keeps reaching the provider.
+// The fake upstream is a plain httptest server: providertest imports this
+// package, so tests inside it cannot import providertest.
 func TestRouterListVoices_BypassesCircuitBreaker(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
