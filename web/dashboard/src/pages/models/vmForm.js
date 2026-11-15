@@ -65,6 +65,8 @@ export function defaultVirtualModelForm() {
     target_provider: "",
     target_model: "",
     target_weight: 1,
+    // Reasoning effort forced on the first target; extra rows carry their own.
+    target_reasoning_effort: "",
     targets: [],
     strategy: "round_robin",
     // A "plugin" strategy names its routing plugin and carries that plugin's
@@ -210,6 +212,7 @@ export function flattenFormTargets(form) {
       provider: String(form.target_provider || ""),
       model: String(form.target_model || "").trim(),
       weight: normalizedTargetWeight(form.target_weight),
+      reasoning_effort: String(form.target_reasoning_effort || ""),
     });
   }
   if (Array.isArray(form.targets)) {
@@ -218,6 +221,7 @@ export function flattenFormTargets(form) {
         provider: String((target && target.provider) || ""),
         model: String((target && target.model) || ""),
         weight: normalizedTargetWeight((target && target.weight)),
+        reasoning_effort: String((target && target.reasoning_effort) || ""),
       });
     }
   }
@@ -240,10 +244,12 @@ export function moveFormTarget(form, from, to) {
   form.target_provider = String(first.provider || "");
   form.target_model = first.model || "";
   form.target_weight = normalizedTargetWeight(first.weight);
+  form.target_reasoning_effort = first.reasoning_effort;
   form.targets = list.slice(1).map((row) => ({
     provider: row.provider || "",
     model: row.model || "",
     weight: normalizedTargetWeight(row.weight),
+    reasoning_effort: row.reasoning_effort,
   }));
   return true;
 }
@@ -307,6 +313,15 @@ export function vmFormShowWeights(form) {
   return (
     vmFormHasExtraTargetRows(form) && strategyUsesWeights(form && form.strategy)
   );
+}
+
+// vmFormShowTargetEffort: a per-target reasoning effort only differs from the
+// virtual model's own once there are several targets, so a plain alias keeps
+// the one field under advanced settings. A row that already carries an effort
+// (set through the API or config, or left after removing the other targets)
+// always shows it, so a stored value is never hidden.
+export function vmFormShowTargetEffort(form, effort) {
+  return vmFormHasExtraTargetRows(form) || Boolean(effort);
 }
 
 // vmFormShowBalancingOptions: session keeping and the failover opt-out only
@@ -410,11 +425,13 @@ export function removePrimaryTarget(form) {
     form.target_provider = next.provider || "";
     form.target_model = next.model || "";
     form.target_weight = next.weight || 1;
+    form.target_reasoning_effort = next.reasoning_effort || "";
     return;
   }
   form.target_provider = "";
   form.target_model = "";
   form.target_weight = 1;
+  form.target_reasoning_effort = "";
 }
 
 // aliasFormTargets maps a stored alias onto the editor's primary/extra target
@@ -428,10 +445,12 @@ export function aliasFormTargets(alias) {
       primaryProvider: lbTargets[0].provider || "",
       primaryModel: qualifyTarget(lbTargets[0]),
       primaryWeight: lbTargets[0].weight || 1,
+      primaryReasoningEffort: lbTargets[0].reasoning_effort || "",
       extraTargets: lbTargets.slice(1).map((target) => ({
         provider: target.provider || "",
         model: qualifyTarget(target),
         weight: target.weight || 1,
+        reasoning_effort: target.reasoning_effort || "",
       })),
     };
   }
@@ -442,16 +461,21 @@ export function aliasFormTargets(alias) {
         ? alias.target_provider + "/" + alias.target_model
         : (alias && alias.target_model) || "",
     primaryWeight: 1,
+    primaryReasoningEffort: "",
     extraTargets: [],
   };
 }
 
 // weightless strips the weight from an API target for strategies that ignore
 // it, so a value with no effect is not persisted.
-function weightless(target) {
-  return target.provider
-    ? { provider: target.provider, model: target.model }
-    : { model: target.model };
+function weightless({ weight: _ignored, ...target }) {
+  return target;
+}
+
+// needsTargetsList: a single target that pins a provider or forces a
+// reasoning effort cannot ride the back-compat target_model field.
+function needsTargetsList(target) {
+  return Boolean(target.provider || target.reasoning_effort);
 }
 
 export function normalizeUserPaths(raw) {
@@ -487,8 +511,13 @@ export function buildVirtualModelSavePayload(form, originalSource, mode) {
       payload.slowdown = slowdown;
     }
   }
+  // A model left as its own only target saves as a policy, which has no
+  // targets: the effort still shown on that row becomes the policy's, as it
+  // beat the virtual model's own while the redirect existed.
   const reasoningEffort = String(
-    (form && form.reasoning_effort) || "",
+    (vmFormSelfOnly(form) && form.target_reasoning_effort) ||
+      (form && form.reasoning_effort) ||
+      "",
   ).trim();
   if (reasoningEffort) {
     payload.reasoning_effort = reasoningEffort;
@@ -503,7 +532,12 @@ export function buildVirtualModelSavePayload(form, originalSource, mode) {
     const targets = [];
     if (primaryTarget) {
       targets.push(
-        targetEntry(primaryTarget, form.target_weight, form.target_provider),
+        targetEntry(
+          primaryTarget,
+          form.target_weight,
+          form.target_provider,
+          form.target_reasoning_effort,
+        ),
       );
     }
     targets.push(...extraTargets);
@@ -526,8 +560,8 @@ export function buildVirtualModelSavePayload(form, originalSource, mode) {
       if (form && form.failover === false) {
         payload.failover = false;
       }
-    } else if (targets[0].provider) {
-      // Only the targets list can carry an explicit provider.
+    } else if (needsTargetsList(targets[0])) {
+      // Only the targets list can carry an explicit provider or an effort.
       payload.targets = [weightless(targets[0])];
     } else {
       // A single target stays a plain alias on the back-compat field.
@@ -572,13 +606,25 @@ export function buildAliasTogglePayload(alias) {
     // Strategies that ignore weight persist weight-less targets — same
     // contract as the editor save path.
     const targets = lbTargets.map((target) =>
-      targetEntry(qualifyTarget(target), target.weight, target.provider),
+      targetEntry(
+        qualifyTarget(target),
+        target.weight,
+        target.provider,
+        target.reasoning_effort,
+      ),
     );
     payload.targets = strategyUsesWeights(payload.strategy)
       ? targets
       : targets.map(weightless);
-  } else if (lbTargets.length === 1 && lbTargets[0].provider) {
-    payload.targets = [weightless(targetEntry(qualifyTarget(lbTargets[0]), null, lbTargets[0].provider))];
+  } else if (lbTargets.length === 1 && needsTargetsList(lbTargets[0])) {
+    payload.targets = [
+      targetEntry(
+        qualifyTarget(lbTargets[0]),
+        null,
+        lbTargets[0].provider,
+        lbTargets[0].reasoning_effort,
+      ),
+    ];
   } else if (lbTargets.length === 1) {
     payload.target_model = qualifyTarget(lbTargets[0]);
   } else {

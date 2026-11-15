@@ -129,7 +129,7 @@ models:
 #     targets:
 #       - { model: gpt-4o }
 #       - { model: azure/gpt-4o }
-#       - { model: gemini/gemini-2.5-pro }
+#       - { model: gemini/gemini-2.5-pro, reasoning_effort: low } # per-target effort: beats the entry's own reasoning_effort for this target
 #   - source: smart-router # plugin: a routing-strategy plugin picks the target; weights are ignored
 #     strategy: plugin
 #     strategy_plugin: cheapest_healthy # built in; GET /admin/plugins lists loaded plugins with kind "route"

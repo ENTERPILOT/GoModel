@@ -122,6 +122,30 @@ every virtual model override, so `team-model` above sends `medium`, not `high`,
 for a caller whose path is capped at `medium`, and `hetzner/qwen3.8` still
 sends `medium`. The ceiling never raises an override below it.
 
+### Set an effort per target
+
+A virtual model with several targets can force a different effort on each one,
+so an application that only knows the virtual model's name gets the right level
+whichever model serves it. In the dashboard, pick it in the dropdown next to
+each target; it appears once the virtual model has a second target, or when a
+target already has an effort set. Leave it on **inherit effort** (the default)
+to keep the virtual model's own override, or the client's value.
+
+```yaml
+virtual_models:
+  - source: faq-reply-bot
+    strategy: failover
+    targets:
+      - { model: deepseek/deepseek-chat, reasoning_effort: high }
+      - { model: openai/gpt-5.2, reasoning_effort: low }
+      - { model: gemini/gemini-2.5-pro } # keeps the client's value
+```
+
+It works with every strategy, for the first attempt and for each failover leg.
+A target's effort beats the `reasoning_effort` of the virtual model it belongs
+to. Whatever the target names still wins: an override on the concrete model, or
+on the [chained](#chain-virtual-models) virtual model the target points to.
+
 ## Set request parameters
 
 Set **params** and **default_params** on a redirect or a concrete model to
@@ -456,7 +480,9 @@ Each entry accepts `source`, a single `target` (shorthand) or a `targets` list,
 `10`), `reasoning_effort` (see [Force a reasoning effort](#force-a-reasoning-effort)),
 `params` and `default_params` (see
 [Set request parameters](#set-request-parameters)), and `enabled`.
-A target `model` may name another declared virtual model (see
+A target has `model` and optional `provider`, `weight`, and `reasoning_effort`
+(see [Set an effort per target](#set-an-effort-per-target)). Its `model` may
+name another declared virtual model (see
 [Chain virtual models](#chain-virtual-models)).
 Leave the targets empty to declare an access policy on the `source` selector. An
 invalid declaration (unknown strategy, missing or self-referential target, a

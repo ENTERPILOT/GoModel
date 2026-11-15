@@ -48,6 +48,7 @@ import {
   vmFormParamsValid,
   vmFormSelfOnly,
   vmFormShowBalancingOptions,
+  vmFormShowTargetEffort,
   vmFormShowWeights,
   vmFormStrategyPending,
   vmFormSupportsSlowdown,
@@ -826,9 +827,10 @@ test("editing a redirect preserves a provider prefix on a multi-slash model name
     ],
   });
   assert.equal(primaryModel, "groq/openai/gpt-oss-120b");
-  // Stored targets without an explicit weight surface the neutral default of 1.
+  // Stored targets without an explicit weight surface the neutral default of 1,
+  // and without a reasoning effort an empty one.
   assert.deepEqual(extraTargets, [
-    { provider: "openrouter", model: "openrouter/openai/gpt-4o", weight: 1 },
+    { provider: "openrouter", model: "openrouter/openai/gpt-4o", weight: 1, reasoning_effort: "" },
   ]);
 
   const { payload } = buildVirtualModelSavePayload(
@@ -1264,6 +1266,104 @@ test("reasoning effort override round-trips through views and payloads", () => {
     "create",
   );
   assert.equal(Object.prototype.hasOwnProperty.call(inherited.payload, "reasoning_effort"), false);
+});
+
+test("per-target reasoning effort round-trips through views, the form, and payloads", () => {
+  const alias = mapRedirectView({
+    source: "faq-reply-bot",
+    kind: "redirect",
+    strategy: "failover",
+    enabled: true,
+    targets: [
+      { model: "deepseek/deepseek-chat", reasoning_effort: "high" },
+      { provider: "openai", model: "gpt-4o", reasoning_effort: "low" },
+      { model: "groq/llama" },
+    ],
+  });
+  assert.deepEqual(alias.targets, [
+    { provider: "", model: "deepseek/deepseek-chat", reasoning_effort: "high" },
+    { provider: "openai", model: "gpt-4o", reasoning_effort: "low" },
+    { provider: "", model: "groq/llama" },
+  ]);
+
+  // Toggling the alias keeps every target's effort; failover drops weights only.
+  const stored = [
+    { model: "deepseek/deepseek-chat", reasoning_effort: "high" },
+    { provider: "openai", model: "gpt-4o", reasoning_effort: "low" },
+    { model: "groq/llama" },
+  ];
+  assert.deepEqual(buildAliasTogglePayload(alias).targets, stored);
+
+  const { primaryModel, primaryReasoningEffort, extraTargets } = aliasFormTargets(alias);
+  assert.equal(primaryReasoningEffort, "high");
+  assert.deepEqual(
+    extraTargets.map((target) => target.reasoning_effort),
+    ["low", ""],
+  );
+
+  const form = {
+    ...defaultVirtualModelForm(),
+    source: "faq-reply-bot",
+    target_model: primaryModel,
+    target_reasoning_effort: primaryReasoningEffort,
+    targets: extraTargets,
+    strategy: "failover",
+  };
+  assert.deepEqual(buildVirtualModelSavePayload(form, "faq-reply-bot", "edit").payload.targets, stored);
+
+  // Removing the first target promotes the next one together with its effort.
+  removePrimaryTarget(form);
+  assert.equal(form.target_model, "openai/gpt-4o");
+  assert.equal(form.target_reasoning_effort, "low");
+});
+
+test("a single target with a reasoning effort is saved through the targets list", () => {
+  const { payload } = buildVirtualModelSavePayload(
+    { ...defaultVirtualModelForm(), source: "smart", target_model: "openai/gpt-4o", target_reasoning_effort: "high" },
+    "",
+    "create",
+  );
+  assert.deepEqual(payload.targets, [{ model: "openai/gpt-4o", reasoning_effort: "high" }]);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "target_model"), false);
+
+  const toggled = buildAliasTogglePayload({
+    name: "smart",
+    enabled: true,
+    targets: [{ provider: "", model: "openai/gpt-4o", reasoning_effort: "high" }],
+  });
+  assert.deepEqual(toggled.targets, [{ model: "openai/gpt-4o", reasoning_effort: "high" }]);
+});
+
+test("removing the last fallback of a real model keeps its target effort as the policy's", () => {
+  const form = {
+    ...defaultVirtualModelForm(),
+    source: "openai/gpt-4o",
+    target_model: "openai/gpt-4o",
+    target_reasoning_effort: "high",
+    reasoning_effort: "low",
+    targets: [{ model: "groq/llama", weight: 1, reasoning_effort: "medium" }],
+    strategy: "failover",
+  };
+  form.targets = [];
+
+  const { payload, isRedirect } = buildVirtualModelSavePayload(form, "openai/gpt-4o", "edit");
+  assert.equal(isRedirect, false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "targets"), false);
+  // The effort still shown on the remaining row wins, as it did in the redirect.
+  assert.equal(payload.reasoning_effort, "high");
+
+  form.target_reasoning_effort = "";
+  assert.equal(buildVirtualModelSavePayload(form, "openai/gpt-4o", "edit").payload.reasoning_effort, "low");
+});
+
+test("the per-target effort shows with several targets or when a row already sets one", () => {
+  const form = defaultVirtualModelForm();
+  form.target_model = "openai/gpt-4o";
+  assert.equal(vmFormShowTargetEffort(form, ""), false);
+  assert.equal(vmFormShowTargetEffort(form, "high"), true);
+
+  form.targets = [{ model: "", weight: 1 }];
+  assert.equal(vmFormShowTargetEffort(form, ""), true);
 });
 
 test("a hidden model's substring hit does not hide a shown model's fuzzy match", () => {

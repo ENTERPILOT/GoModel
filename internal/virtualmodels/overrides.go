@@ -17,9 +17,15 @@ func normalizeReasoningEffort(effort string) (string, error) {
 }
 
 // setsOverrides reports whether the row forces anything onto requests: a
-// reasoning effort or request parameters.
+// reasoning effort, on the row or on one of its targets, or request
+// parameters.
 func (v VirtualModel) setsOverrides() bool {
-	return v.ReasoningEffort != "" || len(v.Params) > 0 || len(v.DefaultParams) > 0
+	return v.ReasoningEffort != "" || len(v.Params) > 0 || len(v.DefaultParams) > 0 || v.setsTargetEffort()
+}
+
+// setsTargetEffort reports whether any target forces a reasoning effort.
+func (v VirtualModel) setsTargetEffort() bool {
+	return slices.ContainsFunc(v.Targets, func(target Target) bool { return target.ReasoningEffort != "" })
 }
 
 // overrides returns the row's per-request overrides.
@@ -52,11 +58,13 @@ func (s *Service) ResolveRequestOverrides(
 // attempt. Values layer from the outermost redirect to the concrete model,
 // the deeper row winning: a policy on the concrete model the attempt goes to
 // beats every redirect, and within a chain of redirects the one nearest the
-// model beats the ones above it. Efforts replace; parameter sets merge per
-// key. attempt is the concrete model of this attempt, which for a failover
-// leg differs from the primary resolution. The primary attempt follows the
-// route routing recorded on resolution; a failover leg, which carries only
-// its concrete model, follows the first declared path to it.
+// model beats the ones above it. The effort a redirect sets on one of its
+// targets sits in between: it beats that redirect's own effort and loses to
+// whatever the target names. Efforts replace; parameter sets merge per key.
+// attempt is the concrete model of this attempt, which for a failover leg
+// differs from the primary resolution. The primary attempt follows the route
+// routing recorded on resolution; a failover leg, which carries only its
+// concrete model, follows the first declared path to it.
 func (s *Service) modelOverrides(
 	ctx context.Context,
 	resolution *core.RequestModelResolution,
@@ -75,7 +83,8 @@ func (s *Service) modelOverrides(
 }
 
 // redirectOverridesFor layers the overrides of every redirect on the path
-// from the requested name to attempt, outermost first.
+// from the requested name to attempt, outermost first, each followed by the
+// effort it sets on the target the path leaves it by.
 func (s *snapshot) redirectOverridesFor(resolution *core.RequestModelResolution, attempt core.ModelSelector, userPath string) requestparams.Overrides {
 	var chain []*redirectEntry
 	if len(resolution.VirtualModelPath) > 0 && attempt.QualifiedModel() == resolution.ResolvedSelector.QualifiedModel() {
@@ -88,10 +97,52 @@ func (s *snapshot) redirectOverridesFor(resolution *core.RequestModelResolution,
 		}
 	}
 	var layered requestparams.Overrides
-	for _, entry := range chain {
+	for i, entry := range chain {
 		layered = layered.Layer(entry.vm.overrides())
+		var next *redirectEntry
+		if i+1 < len(chain) {
+			next = chain[i+1]
+		}
+		if effort := s.targetEffort(entry, next, attempt); effort != "" {
+			layered.ReasoningEffort = effort
+		}
 	}
 	return layered
+}
+
+// targetEffort returns the effort entry forces on the target a path leaves it
+// by: the one chaining to next, the following redirect on the path, or, for
+// the last redirect (next is nil), the concrete one attempt goes to. A target
+// naming attempt's provider beats one declared without a provider, which
+// matches the model on any provider: in [gpt-4o, azure/gpt-4o] the Azure
+// attempt must not take the first target's effort.
+func (s *snapshot) targetEffort(entry, next *redirectEntry, attempt core.ModelSelector) string {
+	if !entry.targetEfforts {
+		return ""
+	}
+	qualified := attempt.QualifiedModel()
+	anyProvider, found := "", false
+	for _, target := range entry.targets {
+		// Names are compared first; only a match pays for the lookup that
+		// tells a chained redirect from a concrete model of the same name.
+		exact := target.qualified == qualified
+		switch {
+		case next != nil:
+			if target.qualified != next.vm.Source {
+				continue
+			}
+		case !exact && (found || target.selector.Provider != "" || target.selector.Model != attempt.Model):
+			continue
+		}
+		if inner, _ := s.chained(entry.vm.Source, target); inner != next {
+			continue
+		}
+		if next != nil || exact {
+			return target.effort
+		}
+		anyProvider, found = target.effort, true
+	}
+	return anyProvider
 }
 
 // policyOverrides returns what the model policies force on attempt: the
