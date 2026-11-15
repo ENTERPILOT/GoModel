@@ -28,7 +28,7 @@ func TestConfigModels_Conversion(t *testing.T) {
 			Strategy: StrategyCost,
 			Targets: []config.VirtualModelTargetConfig{
 				{Provider: "openai", Model: "gpt-4o", Weight: 2},
-				{Model: "groq/llama"},
+				{Model: "groq/llama", ReasoningEffort: "low"},
 			},
 		},
 		{Source: "off", Target: "openai/gpt-4o", Enabled: &enabled},
@@ -43,6 +43,7 @@ func TestConfigModels_Conversion(t *testing.T) {
 	require.Len(t, got[1].Targets, 2)
 	require.Equal(t, StrategyCost, got[1].Strategy)
 	require.Equal(t, float64(2), got[1].Targets[0].Weight, "multi-target conversion = %#v", got[1])
+	require.Equal(t, "low", got[1].Targets[1].ReasoningEffort)
 	require.False(t, got[2].Enabled, "explicit enabled=false not honored: %#v", got[2])
 }
 
