@@ -127,7 +127,8 @@ func applyUsageCosts(entry *UsageEntry, provider, endpoint string, pricing ...*c
 	if len(pricing) > 0 && pricing[0] != nil {
 		effectivePricing = pricingForEndpoint(pricing[0].AtTime(entry.Timestamp), endpoint)
 	}
-	costResult := CalculateUsageCost(entry.InputTokens, entry.OutputTokens, entry.RawData, provider, effectivePricing)
+	outputTokens := completeOutputTokens(provider, entry.InputTokens, entry.OutputTokens, entry.TotalTokens, entry.RawData)
+	costResult := CalculateUsageCost(entry.InputTokens, outputTokens, entry.RawData, provider, effectivePricing)
 	entry.InputCost = costResult.InputCost
 	entry.OutputCost = costResult.OutputCost
 	entry.TotalCost = costResult.TotalCost
