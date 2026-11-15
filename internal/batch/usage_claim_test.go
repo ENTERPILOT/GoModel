@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -146,20 +147,51 @@ func TestStoreUpdateKeepsUsageClaim(t *testing.T) {
 	}
 }
 
-// Earlier releases kept the marker inside the serialized batch.
-func TestStoreClaimUsageHonoursSerializedMarker(t *testing.T) {
-	runClaimSuite(t, func(t *testing.T, store Store) {
-		ctx := context.Background()
-		loggedAt := testUsageClaimTime
-		require.NoError(t, store.Create(ctx, &StoredBatch{
-			Batch:         &core.BatchResponse{ID: "batch-legacy", Status: "completed"},
-			UsageLoggedAt: &loggedAt,
-		}))
-
-		claim, err := store.ClaimUsage(ctx, "batch-legacy", testUsageClaimTime, testUsageClaimTimeout)
+// insertLegacyBatch stores a row as an earlier release wrote it: the
+// serialized batch alone, with no usage claim beside it.
+func insertLegacyBatch(t *testing.T, store Store, id, payload string) {
+	t.Helper()
+	ctx := context.Background()
+	switch s := store.(type) {
+	case *SQLStore:
+		_, err := s.db.Exec(ctx, "INSERT INTO batches (id, created_at, updated_at, status, data) VALUES (?, ?, ?, ?, ?)", id, 1, 1, "completed", payload)
 		require.NoError(t, err)
-		assert.Equal(t, UsageLogged, claim)
-	})
+	case *MongoDBStore:
+		_, err := s.collection.InsertOne(ctx, bson.M{"_id": id, "created_at": int64(1), "updated_at": int64(1), "status": "completed", "data": []byte(payload)})
+		require.NoError(t, err)
+	default:
+		require.Failf(t, "unsupported store", "%T keeps no rows of an earlier release", store)
+	}
+}
+
+// Earlier releases kept the marker inside the serialized batch: first in the
+// batch's metadata, then beside the batch.
+func TestStoreClaimUsageHonoursSerializedMarker(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload string
+	}{
+		{name: "marker beside the batch", payload: `{"batch":{"id":"batch-legacy","status":"completed"},"usage_logged_at":"2023-11-14T22:13:20Z"}`},
+		{name: "marker in the batch metadata", payload: `{"batch":{"id":"batch-legacy","status":"completed","metadata":{"usage_logged_at":"1700000000"}}}`},
+		{name: "marker in the metadata of a bare batch", payload: `{"id":"batch-legacy","status":"completed","metadata":{"usage_logged_at":"1700000000"}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runStoreSuite(t, func(t *testing.T, store Store) {
+				ctx := context.Background()
+				insertLegacyBatch(t, store, "batch-legacy", tt.payload)
+
+				claim, err := store.ClaimUsage(ctx, "batch-legacy", testUsageClaimTime.Add(time.Hour), testUsageClaimTimeout)
+				require.NoError(t, err)
+				assert.Equal(t, UsageLogged, claim)
+
+				got, err := store.Get(ctx, "batch-legacy")
+				require.NoError(t, err)
+				require.NotNil(t, got.UsageLoggedAt)
+				assert.True(t, got.UsageLoggedAt.Equal(testUsageClaimTime), "UsageLoggedAt = %v, want %v", got.UsageLoggedAt, testUsageClaimTime)
+			})
+		})
+	}
 }
 
 func TestStoreUsageClaimOfMissingBatch(t *testing.T) {

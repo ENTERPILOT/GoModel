@@ -32,7 +32,8 @@ func NewTap(inner usage.LoggerInterface, callers *Callers, recorders ...Recorder
 }
 
 func (t *Tap) Write(entry *usage.UsageEntry) {
-	if entry != nil {
+	// A repeated entry was counted when this process first wrote it.
+	if entry != nil && !entry.Repeated {
 		if sample := newSample(entry); !sample.empty() {
 			sample.Caller = t.callers.Resolve(entry.UserPath, entry.AuthKeyID, entry.Labels)
 			for _, recorder := range t.recorders {

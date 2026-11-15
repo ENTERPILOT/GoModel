@@ -19,14 +19,19 @@ import (
 
 // countingUsageLogger counts the entries written to it, as the token and cost
 // metrics tap in front of storage does. With stopAfter set it panics once
-// that many entries were written, as a process that stops mid-write.
+// that many entries were written, as a process that stops mid-write. onWrite,
+// when set, runs before each entry is taken.
 type countingUsageLogger struct {
 	mu        sync.Mutex
 	entries   []*usage.UsageEntry
 	stopAfter *int
+	onWrite   func()
 }
 
 func (l *countingUsageLogger) Write(entry *usage.UsageEntry) {
+	if l.onWrite != nil {
+		l.onWrite()
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.stopAfter != nil && len(l.entries) == *l.stopAfter {
@@ -50,6 +55,17 @@ func (l *countingUsageLogger) ids() []string {
 		ids = append(ids, entry.ID)
 	}
 	return ids
+}
+
+// repeated lists, per entry written, whether it was marked as a repeat.
+func (l *countingUsageLogger) repeated() []bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	repeated := make([]bool, 0, len(l.entries))
+	for _, entry := range l.entries {
+		repeated = append(repeated, entry.Repeated)
+	}
+	return repeated
 }
 
 // failingUpdateStore loses every update, as a store that is briefly down

@@ -493,7 +493,7 @@ Przykłady YAML, okresy, dopasowywanie i egzekwowanie w workflowach opisuje stro
 | `METRICS_CALLER_USER_PATH_DEPTH` | Liczba początkowych segmentów user path zachowywanych w metrykach; wartość poniżej 1 oznacza wartość domyślną | `2` |
 | `METRICS_CALLER_AUTH_KEY` | Dodaje do tych metryk nazwę zarządzanego klucza API | `false` |
 | `METRICS_CALLER_REQUEST_LABELS` | Dodaje do tych metryk etykiety requestu | `false` |
-| `METRICS_CALLER_MAX_VALUES` | Liczba różnych wartości na wymiar wywołującego; kolejne są raportowane jako `{other}` (`/{other}` dla user path). Wartość poniżej 1 oznacza wartość domyślną | `100` |
+| `METRICS_CALLER_MAX_VALUES` | Liczba różnych wartości na wymiar wywołującego; kolejne wartości, wartości dłuższe niż 256 bajtów lub niebędące poprawnym UTF-8 oraz nazwy zarezerwowane są raportowane jako `{other}` (`/{other}` dla user path). Wartość poniżej 1 oznacza wartość domyślną | `100` |
 | `OTEL_ENABLED`     | Eksportuje trace'y i metryki OpenTelemetry przez OTLP (zobacz [OpenTelemetry](/pl/guides/opentelemetry)) | `false`    |
 
 #### Admin

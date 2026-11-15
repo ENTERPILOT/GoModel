@@ -48,6 +48,8 @@ type BatchOrchestrator struct {
 	pricingResolver                      usage.PricingResolver
 	budgetEnforcer                       func(context.Context) error
 	usageClaimTimeout                    time.Duration
+	usageCompleteTimeout                 time.Duration
+	usageHandoffs                        batchUsageHandoffs
 }
 
 // batchUsageClaimTimeout is how old a usage claim must be before another
@@ -55,9 +57,12 @@ type BatchOrchestrator struct {
 // logger's buffer and takes milliseconds, so a claim this old belongs to a
 // process that stopped. batchUsageClaimPoll is the first wait of a fetch
 // that finds the claim held; the wait doubles up to a second.
+// batchUsageCompleteTimeout is how long a fetch waits for the store to mark
+// the usage as logged before it returns the results without the marker.
 const (
-	batchUsageClaimTimeout = 30 * time.Second
-	batchUsageClaimPoll    = 10 * time.Millisecond
+	batchUsageClaimTimeout    = 30 * time.Second
+	batchUsageClaimPoll       = 10 * time.Millisecond
+	batchUsageCompleteTimeout = 5 * time.Second
 )
 
 // NewBatchOrchestrator creates a native batch orchestrator.
@@ -76,6 +81,7 @@ func NewBatchOrchestrator(cfg BatchConfig) *BatchOrchestrator {
 		pricingResolver:                      cfg.PricingResolver,
 		budgetEnforcer:                       cfg.BudgetEnforcer,
 		usageClaimTimeout:                    batchUsageClaimTimeout,
+		usageCompleteTimeout:                 batchUsageCompleteTimeout,
 	}
 }
 
@@ -572,12 +578,17 @@ func (o *BatchOrchestrator) Results(ctx context.Context, id, fallbackRequestID s
 // after the batch's usage was handed to a logger.
 //
 // Usage storage drops the entries a takeover repeats, because their IDs are
-// derived from the batch; the token and cost metrics count them again. That
-// is the price of never skipping an entry, and it is paid only when entries
-// are written without their marker being saved: a holder that stops or
-// stalls past the timeout mid-write, or a store that fails while claiming or
-// marking. In the last case the entries are written unguarded, since losing
-// billable usage is worse than counting it twice in a metric.
+// derived from the batch; the token and cost metrics would count them again.
+// Entries are repeated only when they were written without their marker
+// being saved: a holder that stops or stalls past the timeout mid-write, or
+// a store that fails while claiming or marking. In the last case the entries
+// are written unguarded, since losing billable usage is worse than counting
+// it twice in a metric.
+//
+// A process that repeats a batch it wrote in full itself marks the entries
+// as repeated (see batchUsageHandoffs), and the metrics skip them. A repeat
+// by another process, or of a write that stopped partway, is counted again:
+// that is the price of never skipping an entry.
 func (o *BatchOrchestrator) batchUsageClaim(ctx context.Context, batch *core.BatchResponse) *batchUsageClaim {
 	warn := func(msg string, err error) {
 		slog.Warn(msg, "batch_id", batch.ID, "provider", batch.Provider, "error", err)
@@ -605,11 +616,19 @@ func (o *BatchOrchestrator) batchUsageClaim(ctx context.Context, batch *core.Bat
 				}
 			}
 		},
+		repeated: func() bool { return o.usageHandoffs.has(batch.ID) },
 		done: func(loggedAt time.Time) {
-			// The caller may be gone by now; the entries are written all the same.
-			if err := o.batchStore.CompleteUsage(context.WithoutCancel(ctx), batch.ID, loggedAt); err != nil {
+			// The caller may be gone by now; the entries are written all the
+			// same, so the marker is saved without the request's cancellation.
+			// It gets a bound of its own instead: a store that does not answer
+			// must not hold back results whose usage is already with the logger.
+			markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), o.usageCompleteTimeout)
+			defer cancel()
+			err := o.batchStore.CompleteUsage(markCtx, batch.ID, loggedAt)
+			if err != nil {
 				warn("failed to mark batch usage as logged; a later results fetch may write it again", err)
 			}
+			o.usageHandoffs.set(batch.ID, err != nil)
 		},
 	}
 }

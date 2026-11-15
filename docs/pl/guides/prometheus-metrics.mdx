@@ -460,8 +460,8 @@ w zapytaniach.
   serię do restartu GoModel.
 - **Odrzucane wartości.** Wartość dłuższa niż 256 bajtów, niebędąca
   poprawnym UTF-8 albo zapisana jak nazwa zarezerwowana (`{other}`,
-  `/{other}`, `{unknown}`) jest raportowana jako `{other}` (`/{other}` dla
-  user path) i nie zajmuje miejsca w limicie.
+  `/{other}`, `{unknown}`, `/{unknown}`) jest raportowana jako `{other}`
+  (`/{other}` dla user path) i nie zajmuje miejsca w limicie.
 - **Etykiety requestu to jedna wartość na zestaw etykiet.** `prod,team-a`
   i `team-a` to różne wartości, więc zestawy etykiet wyczerpują limit dużo
   szybciej niż same etykiety: klient, który dowolnie łączy 7 etykiet, może

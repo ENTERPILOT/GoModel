@@ -453,8 +453,8 @@ you query.
   series until GoModel restarts.
 - **Rejected values.** A value longer than 256 bytes, one that is not valid
   UTF-8, or one spelled like a reserved name (`{other}`, `/{other}`,
-  `{unknown}`) is reported as `{other}` (`/{other}` for user paths) and takes
-  no place under the cap.
+  `{unknown}`, `/{unknown}`) is reported as `{other}` (`/{other}` for user
+  paths) and takes no place under the cap.
 - **Request labels are one value per label set.** `prod,team-a` and `team-a`
   are different values, so label sets fill the cap much faster than labels:
   a client combining 7 labels freely can send 127 different sets, enough to

@@ -56,13 +56,14 @@ func TestTapRecordsEveryPipelineAndDelegates(t *testing.T) {
 	assert.True(t, inner.closed)
 }
 
-func TestTapSkipsEntriesWithoutTokensOrCost(t *testing.T) {
+func TestTapSkipsEntriesWithNothingToCount(t *testing.T) {
 	tests := []struct {
 		name  string
 		entry *usage.UsageEntry
 	}{
 		{name: "mcp tool call", entry: &usage.UsageEntry{Provider: "mcp", ProviderName: "github", Model: "search", RawData: map[string]any{"method": "tools/call"}}},
 		{name: "unbilled response-cache hit", entry: &usage.UsageEntry{Provider: "openai", Model: "gpt-5", CacheType: usage.CacheTypeExact, InputTokens: 10, TotalCost: new(0.2), BilledCost: new(0.0)}},
+		{name: "batch entry written again", entry: &usage.UsageEntry{Provider: "openai", Model: "gpt-5", InputTokens: 10, TotalCost: new(0.2), Repeated: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

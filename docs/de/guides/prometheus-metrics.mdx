@@ -462,8 +462,8 @@ nur ein, was Sie abfragen.
   bis GoModel neu startet.
 - **Abgelehnte Werte.** Ein Wert über 256 Bytes, ein Wert, der kein gültiges
   UTF-8 ist, oder ein Wert, der wie ein reservierter Name lautet (`{other}`,
-  `/{other}`, `{unknown}`), wird als `{other}` gemeldet (`/{other}` bei User
-  Paths) und belegt keinen Platz unter der Obergrenze.
+  `/{other}`, `{unknown}`, `/{unknown}`), wird als `{other}` gemeldet
+  (`/{other}` bei User Paths) und belegt keinen Platz unter der Obergrenze.
 - **Request-Labels sind ein Wert pro Label-Menge.** `prod,team-a` und `team-a`
   sind unterschiedliche Werte, daher füllen Label-Mengen die Obergrenze viel
   schneller als einzelne Labels: Ein Client, der 7 Labels frei kombiniert,

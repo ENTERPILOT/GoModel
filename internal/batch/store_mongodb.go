@@ -239,8 +239,9 @@ func (s *MongoDBStore) Update(ctx context.Context, batch *StoredBatch) error {
 // ClaimUsage grants the batch's usage claim with one conditional update, so
 // concurrent callers cannot both take it.
 func (s *MongoDBStore) ClaimUsage(ctx context.Context, id string, now time.Time, timeout time.Duration) (UsageClaim, error) {
-	// The read finds a missing batch and a marker kept in the serialized
-	// batch; neither can change back, so it need not be atomic with the claim.
+	// The read finds a missing batch and logged usage: the usage_logged_at
+	// field, or the marker an earlier release kept in the serialized batch.
+	// Neither can change back, so it need not be atomic with the claim.
 	stored, err := s.Get(ctx, id)
 	if err != nil {
 		return UsagePending, err

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -35,8 +36,51 @@ func LogBatchUsageFromBatchResults(
 type batchUsageClaim struct {
 	// take reports whether this fetch writes the entries.
 	take func() bool
+	// repeated reports whether this process handed every entry to its logger
+	// before, so that the write only repeats them for storage.
+	repeated func() bool
 	// done records that every entry was handed to the usage logger.
 	done func(loggedAt time.Time)
+}
+
+// batchUsageHandoffLimit bounds batchUsageHandoffs. Past it an arbitrary
+// batch is forgotten, and its repeat is counted like another process's.
+const batchUsageHandoffLimit = 1024
+
+// batchUsageHandoffs remembers the batches whose usage entries this process
+// handed to its logger without their marker being saved. A later fetch
+// writes such a batch again; it marks the entries as repeated, so the token
+// and cost metrics count them once.
+type batchUsageHandoffs struct {
+	mu      sync.Mutex
+	batches map[string]struct{}
+}
+
+func (h *batchUsageHandoffs) has(id string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	_, ok := h.batches[id]
+	return ok
+}
+
+// set records whether the batch's entries were handed over without a marker.
+func (h *batchUsageHandoffs) set(id string, unmarked bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !unmarked {
+		delete(h.batches, id)
+		return
+	}
+	if h.batches == nil {
+		h.batches = make(map[string]struct{})
+	}
+	if _, ok := h.batches[id]; !ok && len(h.batches) >= batchUsageHandoffLimit {
+		for forgotten := range h.batches {
+			delete(h.batches, forgotten)
+			break
+		}
+	}
+	h.batches[id] = struct{}{}
 }
 
 // logBatchUsage builds the batch's usage entries, records their totals on
@@ -45,6 +89,7 @@ type batchUsageClaim struct {
 // computes the same ones and may save them, whichever fetch writes the
 // entries. UsageLoggedAt is set on stored, and claim.done called, only after
 // the last entry was handed to the logger. A nil claim always writes.
+// Entries are marked as repeated when claim.repeated says so.
 func logBatchUsage(
 	stored *batchstore.StoredBatch,
 	result *core.BatchResultsResponse,
@@ -196,7 +241,9 @@ func logBatchUsage(
 	if stored.UsageLoggedAt != nil || (claim != nil && !claim.take()) {
 		return false
 	}
+	repeated := claim != nil && claim.repeated()
 	for _, entry := range entries {
+		entry.Repeated = repeated
 		usageLogger.Write(entry)
 	}
 	now := time.Now().UTC()

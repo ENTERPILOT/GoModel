@@ -261,9 +261,9 @@ OpenTelemetry.
   `{other}` (`/{other}` for user paths). The admitted sets are process-wide
   (`usagemetrics.admitted`), because Prometheus series outlive a reload.
 - A value over `usagemetrics.MaxValueBytes` (256), or spelled like a reserved
-  name (`{other}`, `/{other}`, `{unknown}`), is `{other}` and takes no slot,
-  so neither long values nor spoofed bucket names can exhaust or forge the cap.
-  `{unknown}` itself takes no slot either.
+  name (`{other}`, `/{other}`, `{unknown}`, `/{unknown}`), is `{other}` and
+  takes no slot, so neither long values nor spoofed bucket names can exhaust
+  or forge the cap. `{unknown}` itself takes no slot either.
 - A value that is not valid UTF-8 is `{other}` too, without a slot. Caller
   values come from raw request headers; Prometheus panics on such a label
   value and OTLP fails the whole export. Provider and model names are cleaned
@@ -301,18 +301,28 @@ batch, but the metrics would count them again.
   them. A status poll or a cancel that saves a copy it read earlier cannot
   clear them.
 
-Storage stays exactly-once by ID. The metrics count a batch's entries twice
-only when they are written without their marker being saved:
+Storage stays exactly-once by ID. Entries written without their marker being
+saved are written again by a later fetch:
 
 - A holder stops, or stalls for longer than the timeout, after handing some
-  entries to its logger. The takeover writes all of them again; the metrics
-  count again whatever the first process had already exported.
-- The store fails while marking the usage as logged, and again on the update
-  that follows. The claim stays held, and the next fetch after the timeout
-  writes every entry again.
-- The store fails while claiming. The entries are written unguarded, so every
-  such fetch counts them. Losing billable usage is worse than counting it
-  twice in a metric.
+  entries to its logger. The takeover writes all of them again.
+- The store fails while marking the usage as logged, or does not answer
+  within 5 seconds (`batchUsageCompleteTimeout`), and fails again on the
+  update that follows. The fetch returns its results all the same. The claim
+  stays held, and the next fetch after the claim timeout writes every entry
+  again.
+- The store fails while claiming. The entries are written unguarded, by every
+  such fetch. Losing billable usage is worse than counting it twice in a
+  metric.
+
+The metrics count once what one process writes twice. A process remembers the
+batches it wrote in full without saving their marker (`batchUsageHandoffs`,
+1024 at most, until it restarts or reloads its configuration) and marks their
+entries as repeated when it writes them again (`UsageEntry.Repeated`), which
+`usagemetrics.Tap` skips. The metrics count twice what the first writer had
+already exported when the second one is another replica, or the same one
+after a restart or reload, and whatever a holder that stopped or stalled
+partway had exported.
 
 The marker is set when the entries are handed to the logger, not when they
 are flushed: a process that stops with entries still in the logger's buffer
