@@ -31,10 +31,16 @@ import (
 // the share of a target with weight 1. A non-positive or unset weight is treated
 // as 1, so single-target and unweighted redirects behave identically to before.
 // Weight is ignored by the cost strategy, which always picks the cheapest target.
+//
+// ReasoningEffort, when set, replaces the reasoning effort of the requests the
+// redirect sends to this target, as the first attempt or as a failover leg. It
+// beats the redirect's own ReasoningEffort; whatever the target names (a
+// chained virtual model, a model policy) still beats it.
 type Target struct {
-	Provider string  `json:"provider,omitempty" bson:"provider,omitempty"`
-	Model    string  `json:"model" bson:"model"`
-	Weight   float64 `json:"weight,omitempty" bson:"weight,omitempty"`
+	Provider        string  `json:"provider,omitempty" bson:"provider,omitempty"`
+	Model           string  `json:"model" bson:"model"`
+	Weight          float64 `json:"weight,omitempty" bson:"weight,omitempty"`
+	ReasoningEffort string  `json:"reasoning_effort,omitempty" bson:"reasoning_effort,omitempty"`
 }
 
 // selector returns the concrete selector this target points to.
