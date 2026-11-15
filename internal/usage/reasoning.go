@@ -50,8 +50,9 @@ func reasoningTokens(providerType string, rawData map[string]any) int {
 // nothing by itself. Gemini's native API reports thoughts beside candidates,
 // but its adapter adds them to the completion tokens and passes the reported
 // total on, so a Gemini total above input + output never means that thoughts
-// are missing from the output. Gemini's OpenAI-compatible mode has no
-// recorded response with reasoning tokens; its usage is read as reported.
+// are missing from the output. Gemini's OpenAI-compatible endpoint leaves
+// thoughts out of the completion tokens too, and its adapter adds them the
+// same way.
 func reasoningOnTopOfOutput(providerType string, inputTokens, outputTokens, totalTokens, reasoning int) bool {
 	return isXAIProvider(providerType) && reasoning > 0 && totalTokens >= inputTokens+outputTokens+reasoning
 }

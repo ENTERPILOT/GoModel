@@ -84,6 +84,7 @@ When recording fixtures manually with `cmd/recordapi`, available endpoint option
 
 - `chat`: `POST /v1/chat/completions`
 - `chat_stream`: `POST /v1/chat/completions` with `"stream": true`
+- `chat_usage_stream`: `chat_stream` plus `"stream_options": {"include_usage": true}`, as the gateway sends it
 - `models`: `GET /v1/models`
 - `responses`: `POST /v1/responses`
 - `responses_stream`: `POST /v1/responses` with `"stream": true`
