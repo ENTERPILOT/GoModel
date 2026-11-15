@@ -281,6 +281,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GOMODEL_LABEL: pr-${{ github.event.pull_request.number }}
+    steps:
+      - uses: actions/checkout@v5
+      - run: ./scripts/review.sh
 ```
 
 Senden Sie es dann bei jedem Request mit:
