@@ -11520,7 +11520,25 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "voice": {
-                    "type": "string"
+                    "description": "Voice is a voice name or ID. It may be sent as a string (\"alloy\") or as\nan OpenAI custom-voice object ({\"id\": \"voice_1234\"}).",
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "object",
+                            "required": [
+                                "id"
+                            ],
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "pattern": "\\S"
+                                }
+                            },
+                            "additionalProperties": true
+                        }
+                    ]
                 }
             }
         },
