@@ -157,3 +157,26 @@ func TestResponseFeedbackStreamObserverReportsUnknownUsage(t *testing.T) {
 	require.Len(t, observer.feedback, 1)
 	require.False(t, observer.feedback[0].usageObserved)
 }
+
+// Cache writes reported in the OpenAI shape (prompt_tokens_details or
+// input_tokens_details cache_write_tokens) reach the feedback hook.
+func TestResponseFeedbackReadsOpenAIShapedCacheWrites(t *testing.T) {
+	usage := cacheUsageFromCore(2400, &core.PromptTokensDetails{CachedTokens: 1800, CacheWriteTokens: 300}, nil)
+	require.Equal(t, responseCacheUsage{input: 2400, read: 1800, write: 300, observed: true}, usage)
+
+	for _, detailsKey := range []string{"prompt_tokens_details", "input_tokens_details"} {
+		t.Run(detailsKey, func(t *testing.T) {
+			observer := &feedbackCaptureObserver{}
+			streamObserver := &responseFeedbackStreamObserver{ctx: context.Background(), observers: []ext.ResponseFeedbackObserver{observer}}
+			streamObserver.OnJSONEvent(map[string]any{"usage": map[string]any{
+				"prompt_tokens": float64(2400),
+				detailsKey:      map[string]any{"cached_tokens": float64(1800), "cache_write_tokens": float64(300)},
+			}})
+			streamObserver.OnStreamClose()
+
+			require.Len(t, observer.feedback, 1)
+			require.Equal(t, 1800, observer.feedback[0].cacheRead)
+			require.Equal(t, 300, observer.feedback[0].cacheWrite)
+		})
+	}
+}

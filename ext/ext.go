@@ -94,7 +94,11 @@ type RequestRewriter interface {
 //
 // It is an optional companion to RequestRewriter: core detects implementations
 // structurally. usageObserved distinguishes a provider-confirmed zero from a
-// provider or stream that returned no usage breakdown. Implementations can be
+// provider or stream that returned no usage breakdown. inputTokens is the
+// prompt count as the response reports it: translated responses count
+// cachedInputTokens and cacheWriteInputTokens inside it, while Anthropic
+// /v1/messages requests forwarded natively keep Anthropic's counting, where
+// the two come on top of it. Implementations can be
 // called concurrently, must therefore be concurrency-safe, and must return
 // promptly so they do not delay completion of the client request.
 //
