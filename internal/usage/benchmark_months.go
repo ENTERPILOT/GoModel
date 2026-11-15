@@ -5,13 +5,15 @@ import "time"
 // BenchmarkMonthBounds returns the StartDate and EndDate of a benchmark over
 // the calendar months from first to last in location; only the year and month
 // of first and last are read. The range starts at the first instant of
-// first's first day and ends at the first instant of the month after last:
-// readers end a range one calendar day after EndDate, so EndDate is that
-// instant one day earlier.
+// first's first day and ends at the first instant of the month after last.
+// Readers end a range one calendar day after EndDate, on EndDate's own clock,
+// so EndDate is that instant one day earlier in UTC, whose days are all 24
+// hours: on location's clock the day before may start at a midnight that is
+// skipped or repeated, and the end would move by the hour.
 func BenchmarkMonthBounds(first, last time.Time, location *time.Location) (start, end time.Time) {
 	start = startOfDay(first.Year(), first.Month(), 1, location)
 	next := startOfDay(last.Year(), last.Month()+1, 1, location)
-	return start, next.AddDate(0, 0, -1)
+	return start, next.UTC().AddDate(0, 0, -1)
 }
 
 // startOfDay returns the first instant of a calendar day in location: the

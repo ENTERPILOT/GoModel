@@ -261,14 +261,15 @@ default); with them off, configure a [tagging header](#tagging-headers) and
 send that instead. In GitHub Actions, set the label once for the job. Run the
 workflow on `pull_request`: other events, such as `push`, carry no PR number,
 so the label would be just `pr-`. GitHub does not pass repository secrets to
-pull requests from forks, so the job has no key there: run it only for branches
-in the repository, or skip it when the secret is empty.
+pull requests from forks, so the job would have no key there: the `if` runs it
+only for branches in the repository.
 
 ```yaml .github/workflows/ci.yml
 on: pull_request
 
 jobs:
   review:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     env:
       GOMODEL_LABEL: pr-${{ github.event.pull_request.number }}

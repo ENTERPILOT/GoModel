@@ -210,20 +210,20 @@ func assertBenchmarkMatchesInvoice(t *testing.T, month BenchmarkMonth, invoice *
 }
 
 // assertBenchmarkMonthEdges puts usage on the first and last instant of
-// months, in Warsaw across both DST changes, in UTC, and in Asunción, where
-// October 2023 has no midnight to start at; user i of a group costs 2^i, so
-// each month's total names the instants it holds.
+// months, in Warsaw across both DST changes, in UTC, and where a zone skips or
+// repeats the midnight a month's first or last day starts at; row i of a
+// group costs 2^i, so each month's total names the instants it holds.
 func assertBenchmarkMonthEdges(t *testing.T, store usageBatchWriter, reader UsageReader, entries *benchmarkEntries) {
 	t.Helper()
 	ctx := context.Background()
 	warsaw, err := time.LoadLocation("Europe/Warsaw")
 	require.NoError(t, err)
-	asuncion, err := time.LoadLocation("America/Asuncion")
-	require.NoError(t, err)
-	asuncionMonths := func(first, last time.Month) UsageQueryParams {
-		params := UsageQueryParams{TimeZone: asuncion.String()}
+	months := func(zone string, year int, first, last time.Month) UsageQueryParams {
+		location, err := time.LoadLocation(zone)
+		require.NoError(t, err)
+		params := UsageQueryParams{TimeZone: zone}
 		params.StartDate, params.EndDate = BenchmarkMonthBounds(
-			time.Date(2023, first, 1, 0, 0, 0, 0, time.UTC), time.Date(2023, last, 1, 0, 0, 0, 0, time.UTC), asuncion)
+			time.Date(year, first, 1, 0, 0, 0, 0, time.UTC), time.Date(year, last, 1, 0, 0, 0, 0, time.UTC), location)
 		return params
 	}
 	instant := func(year int, month time.Month, day, hour, minute, second, ms int) time.Time {
@@ -251,6 +251,25 @@ func assertBenchmarkMonthEdges(t *testing.T, store usageBatchWriter, reader Usag
 			instant(2023, 10, 1, 4, 0, 0, 0),     // first of October (01:00 -03): 24:00 became 01:00
 			instant(2023, 11, 1, 2, 59, 59, 999), // last of October
 			instant(2023, 11, 1, 3, 0, 0, 0),     // first of November
+		},
+		"/fold": {
+			instant(2004, 9, 30, 20, 59, 59, 999),  // last of September (23:59 +03)
+			instant(2004, 9, 30, 21, 0, 0, 0),      // first of October (00:00 +03), the first of two midnights
+			instant(2004, 9, 30, 22, 0, 0, 0),      // the second (00:00 +02): 01:00 became 00:00
+			instant(2004, 10, 31, 21, 59, 59, 999), // last of October
+			instant(2004, 10, 31, 22, 0, 0, 0),     // first of November
+		},
+		"/lastgap": {
+			instant(2024, 3, 1, 0, 59, 59, 999),   // last of February (23:59 -01)
+			instant(2024, 3, 1, 1, 0, 0, 0),       // first of March
+			instant(2024, 3, 31, 23, 59, 59, 999), // last of March (+00), whose last day started at 01:00
+			instant(2024, 4, 1, 0, 0, 0, 0),       // first of April
+		},
+		"/lastfold": {
+			instant(2021, 9, 30, 23, 59, 59, 999), // last of September (+00)
+			instant(2021, 10, 1, 0, 0, 0, 0),      // first of October
+			instant(2021, 11, 1, 0, 59, 59, 999),  // last of October (23:59 -01), whose last day had two midnights
+			instant(2021, 11, 1, 1, 0, 0, 0),      // first of November
 		},
 	}
 	var rows []*UsageEntry
@@ -288,9 +307,13 @@ func assertBenchmarkMonthEdges(t *testing.T, store usageBatchWriter, reader Usag
 			},
 			want: map[string]float64{"2026-02": 1, "2026-03": 2 + 4, "2026-04": 8},
 		},
-		{name: "a month starting at a skipped midnight", group: "/gap", params: asuncionMonths(time.October, time.October), want: map[string]float64{"2023-10": 2 + 4}},
-		{name: "the month before a skipped midnight", group: "/gap", params: asuncionMonths(time.September, time.September), want: map[string]float64{"2023-09": 1}},
-		{name: "months around a skipped midnight", group: "/gap", params: asuncionMonths(time.September, time.November), want: map[string]float64{"2023-09": 1, "2023-10": 2 + 4, "2023-11": 8}},
+		{name: "a month starting at a skipped midnight", group: "/gap", params: months("America/Asuncion", 2023, time.October, time.October), want: map[string]float64{"2023-10": 2 + 4}},
+		{name: "the month before a skipped midnight", group: "/gap", params: months("America/Asuncion", 2023, time.September, time.September), want: map[string]float64{"2023-09": 1}},
+		{name: "months around a skipped midnight", group: "/gap", params: months("America/Asuncion", 2023, time.September, time.November), want: map[string]float64{"2023-09": 1, "2023-10": 2 + 4, "2023-11": 8}},
+		{name: "a month starting at a repeated midnight", group: "/fold", params: months("Asia/Gaza", 2004, time.October, time.October), want: map[string]float64{"2004-10": 2 + 4 + 8}},
+		{name: "the month before a repeated midnight", group: "/fold", params: months("Asia/Gaza", 2004, time.September, time.September), want: map[string]float64{"2004-09": 1}},
+		{name: "a last day starting at a skipped midnight", group: "/lastgap", params: months("Atlantic/Azores", 2024, time.March, time.March), want: map[string]float64{"2024-03": 2 + 4}},
+		{name: "a last day starting at a repeated midnight", group: "/lastfold", params: months("Atlantic/Azores", 2021, time.October, time.October), want: map[string]float64{"2021-10": 2 + 4}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
