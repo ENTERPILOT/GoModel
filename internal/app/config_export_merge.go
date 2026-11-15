@@ -95,7 +95,9 @@ func exportVirtualModels(declared []config.VirtualModelConfig, stored []virtualm
 			DefaultParams:   defaultParams,
 		}
 		for _, target := range targets {
-			entry.Targets = append(entry.Targets, config.VirtualModelTargetConfig{Provider: target.Provider, Model: target.Model, Weight: target.Weight})
+			entry.Targets = append(entry.Targets, config.VirtualModelTargetConfig{
+				Provider: target.Provider, Model: target.Model, Weight: target.Weight, ReasoningEffort: target.ReasoningEffort,
+			})
 		}
 		if !model.Enabled {
 			entry.Enabled = new(bool)
