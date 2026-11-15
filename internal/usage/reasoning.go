@@ -13,7 +13,9 @@ var reasoningRawDataKeys = map[string]struct{}{
 // EntryReasoningTokens returns the reasoning output tokens a usage entry
 // reports and whether its OutputTokens already contain them. They do for
 // every usage object but that of xAI's chat completions (see
-// reasoningOnTopOfOutput), the rule the entry was costed by.
+// reasoningOnTopOfOutput), the rule the entry was costed by. Adapters that
+// translate a provider's own usage, like Gemini's native one, add reasoning
+// to the output themselves.
 func EntryReasoningTokens(entry UsageLogEntry) (tokens int64, includedInOutput bool) {
 	reasoning := reasoningTokens(entry.Provider, entry.RawData)
 	onTop := reasoningOnTopOfOutput(entry.Provider, entry.InputTokens, entry.OutputTokens, entry.TotalTokens, reasoning)
@@ -42,6 +44,14 @@ func reasoningTokens(providerType string, rawData map[string]any) int {
 // the usage object whichever endpoint the caller used. A usage object whose
 // total has no room for the reasoning tokens, or that has no total, is read as
 // containing them, which never counts a token twice.
+//
+// The rule is not applied to other providers: none has a recorded response
+// that reaches this package with reasoning on top, and room in a total proves
+// nothing by itself. Gemini's native API reports thoughts beside candidates,
+// but its adapter adds them to the completion tokens and passes the reported
+// total on, so a Gemini total above input + output never means that thoughts
+// are missing from the output. Gemini's OpenAI-compatible mode has no
+// recorded response with reasoning tokens; its usage is read as reported.
 func reasoningOnTopOfOutput(providerType string, inputTokens, outputTokens, totalTokens, reasoning int) bool {
 	return isXAIProvider(providerType) && reasoning > 0 && totalTokens >= inputTokens+outputTokens+reasoning
 }

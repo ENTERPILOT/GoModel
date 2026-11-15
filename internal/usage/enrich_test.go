@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 func TestEnrichUsageLogEntry_OpenAICachedTokens(t *testing.T) {
@@ -23,21 +25,32 @@ func TestEnrichUsageLogEntry_OpenAICachedTokens(t *testing.T) {
 	require.InDelta(t, want, entry.CachedInputRatio, 1e-9)
 }
 
-// DeepSeek can report cache hits only as usage.prompt_cache_hit_tokens, part
-// of prompt_tokens; the cost calculation prices that count as cached input.
+// DeepSeek reports cache hits as usage.prompt_cache_hit_tokens, part of
+// prompt_tokens, and repeats the count as prompt_tokens_details.cached_tokens.
+// Both names are one count: it is shown, and priced as cached input, once.
 func TestEnrichUsageLogEntry_DeepSeekCacheHitTokens(t *testing.T) {
-	entry := UsageLogEntry{
-		Provider:    "deepseek",
-		InputTokens: 120,
-		RawData: map[string]any{
-			"prompt_cache_hit_tokens":  80,
-			"prompt_cache_miss_tokens": 40,
-		},
+	tests := []struct {
+		name    string
+		rawData map[string]any
+	}{
+		{name: "hit count alone", rawData: map[string]any{"prompt_cache_hit_tokens": 80, "prompt_cache_miss_tokens": 40}},
+		{name: "hit count and its cached_tokens alias", rawData: map[string]any{"prompt_cache_hit_tokens": 80, "prompt_cache_miss_tokens": 40, "prompt_cached_tokens": 80}},
 	}
-	EnrichUsageLogEntry(&entry)
-	require.Equal(t, int64(40), entry.UncachedInputTokens)
-	require.Equal(t, int64(80), entry.CachedInputTokens)
-	require.Equal(t, int64(0), entry.CacheWriteInputTokens)
+	pricing := &core.ModelPricing{InputPerMtok: new(1.0), CachedInputPerMtok: new(0.1)}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := UsageLogEntry{Provider: "deepseek", InputTokens: 120, RawData: tt.rawData}
+			EnrichUsageLogEntry(&entry)
+			require.Equal(t, int64(40), entry.UncachedInputTokens)
+			require.Equal(t, int64(80), entry.CachedInputTokens)
+			require.Equal(t, int64(0), entry.CacheWriteInputTokens)
+
+			// Input: 120 * 1.0/1M + 80 * (0.1-1.0)/1M
+			cost := CalculateGranularCost(120, 0, tt.rawData, "deepseek", pricing)
+			assertCostNear(t, "InputCost", cost.InputCost, 0.000048)
+			require.Empty(t, cost.Caveat)
+		})
+	}
 }
 
 // OpenAI reports cache writes as prompt_tokens_details.cache_write_tokens,

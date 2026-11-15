@@ -103,6 +103,20 @@ func TestNewSample(t *testing.T) {
 			},
 		},
 		{
+			// tests/contract/testdata/gemini/native_chat_completion.json: the
+			// native adapter has added the 21 thoughts to the 4 candidates.
+			name: "gemini native output already holds its thoughts",
+			entry: usage.UsageEntry{
+				Provider: "gemini", Model: "gemini-2.5-flash", Endpoint: "/v1/chat/completions",
+				InputTokens: 11, OutputTokens: 25, TotalTokens: 36,
+				RawData: map[string]any{"thoughts_token_count": 21, "completion_reasoning_tokens": 21},
+			},
+			want: Sample{
+				Provider: "gemini", ProviderType: "gemini", Model: "gemini-2.5-flash", Endpoint: "/v1/chat/completions",
+				InputTokens: 11, OutputTokens: 25, ReasoningOutputTokens: 21,
+			},
+		},
+		{
 			name: "xai usage without a total is not counted twice",
 			entry: usage.UsageEntry{
 				Provider: "xai", Model: "grok", InputTokens: 10, OutputTokens: 40,
