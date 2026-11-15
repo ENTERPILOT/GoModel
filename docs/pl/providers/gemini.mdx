@@ -152,11 +152,19 @@ GoModel jej nie wznawia.
 
 Google rozlicza tokeny thinkingu jako wyjściowe. Jego endpoint zgodny z OpenAI
 wlicza je do `total_tokens`, ale pomija w `completion_tokens`, dlatego w trybie
-`openai_compatible` GoModel dolicza je z powrotem: `completion_tokens` zawiera
-thinking, a `completion_tokens_details.reasoning_tokens` go wyszczególnia,
-dokładnie tak jak w trybie natywnym. Gdy endpoint nie wyszczególnia tokenów
-reasoningowych, za thinking uznawana jest ta część `total_tokens`, która
-wykracza poza tokeny promptu i odpowiedzi.
+`openai_compatible` GoModel dolicza je z powrotem, zanim zapisze użycie i
+odpowie klientowi. Tak jak w trybie natywnym liczba tokenów wyjściowych zawiera
+wtedy thinking: Chat Completions podaje go w `completion_tokens` i
+`completion_tokens_details.reasoning_tokens`, a Responses API w `output_tokens`
+i `output_tokens_details.reasoning_tokens`. Zapisane tokeny wyjściowe i koszt
+odpowiednio rosną. To, ile zostanie doliczone, zależy od odpowiedzi:
+
+- **Tokeny reasoningowe wyszczególnione**: doliczana jest najwyżej ta liczba, a
+  jawne `0` nie dolicza niczego.
+- **Niewyszczególnione** (kształt zarejestrowany dla Gemini 2.5 Flash i 3 Flash): cała część
+  `total_tokens` ponad tokeny promptu i odpowiedzi jest liczona jako wyjście.
+  Może ona zawierać tokeny promptu wbudowanych narzędzi Google, które są wtedy
+  wyceniane według stawki wyjściowej.
 
 ## Parametry samplingu w Gemini 3 i 4
 

@@ -33,7 +33,7 @@ Wenn ein Provider exakte Kosten zurückgibt (OpenRouter-Credits, xAI `cost_in_us
   Input-Preis berechnet.
 </Note>
 
-Gemini-Thinking-Tokens zählen in beiden API-Modi als Output-Token und werden zum Output-Preis berechnet, oder zu `reasoning_output_per_mtok`, wenn das Modell einen solchen Preis hat. Googles OpenAI-kompatibler Endpunkt lässt sie in `completion_tokens` aus, daher rechnet GoModel sie vor der Bepreisung wieder hinzu; siehe [Gemini](/de/providers/gemini#reasoning-effort).
+Gemini-Thinking-Tokens zählen in beiden API-Modi als Output-Token und werden zum Output-Preis berechnet, oder zu `reasoning_output_per_mtok`, wenn das Modell einen solchen Preis hat. Im Modus `openai_compatible` lässt Google sie in `completion_tokens` aus, daher rechnet GoModel sie vor der Bepreisung wieder hinzu, und die erfassten Kosten steigen um das Thinking. Weist die Antwort keine Reasoning-Tokens aus, wird der gesamte Teil von `total_tokens`, der über Prompt- und Completion-Tokens hinausgeht, als Output bepreist; er kann Prompt-Tokens von Googles eingebauten Tools enthalten. Weist sie welche aus, wird höchstens die ausgewiesene Anzahl hinzugerechnet. Siehe [Gemini](/de/providers/gemini#reasoning-effort).
 
 Anthropic rechnet Cache-Schreibvorgänge nach TTL ab: die standardmäßigen 5-Minuten-Schreibvorgänge zu `cache_write_per_mtok` und 1-Stunden-Schreibvorgänge (`"ttl": "1h"`) zu `cache_write_1h_per_mtok`. GoModel bepreist jeden Anteil anhand der Aufteilung in `usage.cache_creation` zu seinem eigenen Preis. Ohne einen `cache_write_1h_per_mtok`-Preis werden 1-Stunden-Schreibvorgänge zu `cache_write_per_mtok` berechnet.
 

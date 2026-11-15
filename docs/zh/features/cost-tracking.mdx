@@ -28,7 +28,7 @@ GoModel 根据模型定价估算每个被追踪请求的成本，并在控制台
   否则，它们会按完整的输入费率计价。
 </Note>
 
-Gemini 的思考 Token 在两种 API 模式下都计为输出 Token，并按输出费率计价；如果模型设有 `reasoning_output_per_mtok`，则按该费率计价。Google 的 OpenAI 兼容端点不会把它们计入 `completion_tokens`，因此 GoModel 会在计价前把它们加回去；请参阅 [Gemini](/zh/providers/gemini#推理强度)。
+Gemini 的思考 Token 在两种 API 模式下都计为输出 Token，并按输出费率计价；如果模型设有 `reasoning_output_per_mtok`，则按该费率计价。在 `openai_compatible` 模式下，Google 不会把它们计入 `completion_tokens`，因此 GoModel 会在计价前把它们加回去，记录的成本也会随之增加。如果响应没有单独列出推理 Token，`total_tokens` 中超出提示与补全 Token 的全部部分都会按输出计价，其中可能包含 Google 内置工具的提示 Token；如果单独列出了，则最多加回所列出的数量。请参阅 [Gemini](/zh/providers/gemini#推理强度)。
 
 Anthropic 按 TTL 对缓存写入计费：默认的 5 分钟写入按 `cache_write_per_mtok` 计费，1 小时写入（`"ttl": "1h"`）按 `cache_write_1h_per_mtok` 计费。GoModel 根据 `usage.cache_creation` 的拆分，以各自的费率对每部分计价。如果没有 `cache_write_1h_per_mtok` 费率，1 小时写入会按 `cache_write_per_mtok` 计价。
 

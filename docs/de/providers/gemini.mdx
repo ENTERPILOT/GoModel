@@ -168,11 +168,20 @@ die das Ausgabelimit pro Request erreicht, endet mit `length` (Geminis
 
 Google berechnet Thinking-Tokens als Output. Der OpenAI-kompatible Endpunkt
 zählt sie in `total_tokens`, lässt sie aber in `completion_tokens` aus. Im Modus
-`openai_compatible` rechnet GoModel sie deshalb wieder hinzu:
-`completion_tokens` enthält das Thinking und
-`completion_tokens_details.reasoning_tokens` weist es aus, genau wie im nativen
-Modus. Weist der Endpunkt keine Reasoning-Tokens aus, gilt der Teil von
-`total_tokens`, der über Prompt- und Completion-Tokens hinausgeht, als Thinking.
+`openai_compatible` rechnet GoModel sie deshalb wieder hinzu, bevor es die
+Nutzung erfasst und dem Client antwortet. Wie im nativen Modus enthält die
+Output-Zahl dann das Thinking: Chat Completions melden es in
+`completion_tokens` und `completion_tokens_details.reasoning_tokens`, die
+Responses API in `output_tokens` und `output_tokens_details.reasoning_tokens`.
+Erfasste Output-Token und Kosten steigen entsprechend. Wie viel hinzukommt,
+hängt von der Antwort ab:
+
+- **Reasoning-Tokens ausgewiesen**: Höchstens diese Anzahl wird hinzugerechnet,
+  und eine ausdrückliche `0` fügt nichts hinzu.
+- **Nicht ausgewiesen** (die von Gemini 2.5 Flash und 3 Flash aufgezeichnete Form): Der gesamte
+  Teil von `total_tokens`, der über Prompt- und Completion-Tokens hinausgeht,
+  zählt als Output. Er kann Prompt-Tokens von Googles eingebauten Tools
+  enthalten, die dann zum Output-Preis berechnet werden.
 
 ## Sampling-Parameter bei Gemini 3 und 4
 

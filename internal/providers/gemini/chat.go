@@ -170,23 +170,23 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	var resp core.ChatResponse
+	var decoded compatChatResponse
 	err = p.client.Do(ctx, llmclient.Request{
 		Method:    http.MethodPost,
 		Endpoint:  "/chat/completions",
 		Operation: llmclient.OperationChat,
 		Model:     req.Model,
 		Body:      body,
-	}, &resp)
+	}, &decoded)
 	if err != nil {
 		return nil, err
 	}
-	foldCompatThinkingTokens(&resp.Usage)
+	resp := &decoded.ChatResponse
 	core.EnsureModel(&resp.Model, req.Model)
 	if resp.Provider == "" {
 		resp.Provider = p.responseProviderName()
 	}
-	return &resp, nil
+	return resp, nil
 }
 
 // prepareNativeRequest applies the backend-specific members a translated

@@ -16,6 +16,7 @@
       "model": "gemini-2.5-flash",
       "object": "chat.completion.chunk",
       "usage": {
+        "completion_reasoning_tokens": 21,
         "completion_tokens": 25,
         "completion_tokens_details": {
           "accepted_prediction_tokens": 0,

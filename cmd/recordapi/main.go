@@ -266,15 +266,17 @@ var providerCapabilities = map[string]map[string]bool{
 
 var providerDefaultModels = map[string]map[string]string{
 	"oracle": {
-		"chat":             oracleDefaultModel,
-		"chat_stream":      oracleDefaultModel,
-		"responses":        oracleDefaultModel,
-		"responses_stream": oracleDefaultModel,
+		"chat":              oracleDefaultModel,
+		"chat_stream":       oracleDefaultModel,
+		"chat_usage_stream": oracleDefaultModel,
+		"responses":         oracleDefaultModel,
+		"responses_stream":  oracleDefaultModel,
 	},
 	"kimicode": {
-		"chat":        kimicodeDefaultChatModel,
-		"chat_stream": kimicodeDefaultChatModel,
-		"embeddings":  kimicodeDefaultEmbeddingsModel,
+		"chat":              kimicodeDefaultChatModel,
+		"chat_stream":       kimicodeDefaultChatModel,
+		"chat_usage_stream": kimicodeDefaultChatModel,
+		"embeddings":        kimicodeDefaultEmbeddingsModel,
 	},
 }
 

@@ -153,11 +153,19 @@ hits the per-request output cap finishes with `length` (Gemini's
 
 Google bills thinking tokens as output. Its OpenAI-compatible endpoint counts
 them in `total_tokens` but leaves them out of `completion_tokens`, so in
-`openai_compatible` mode GoModel adds them back: `completion_tokens` includes
-thinking and `completion_tokens_details.reasoning_tokens` itemises it, exactly
-as in native mode. When the endpoint does not itemise reasoning tokens, the
-part of `total_tokens` beyond prompt and completion tokens is counted as
-thinking.
+`openai_compatible` mode GoModel adds them back before it records usage and
+answers the client. As in native mode, the output count then includes thinking:
+Chat Completions report it in `completion_tokens` and
+`completion_tokens_details.reasoning_tokens`, the Responses API in
+`output_tokens` and `output_tokens_details.reasoning_tokens`. Recorded output
+tokens and cost rise accordingly. How much is added depends on the response:
+
+- **Reasoning tokens itemised**: at most that count is added, and an explicit
+  `0` adds nothing.
+- **Not itemised** (the shape recorded from Gemini 2.5 Flash and 3 Flash): the whole part of
+  `total_tokens` beyond prompt and completion tokens is counted as output. It
+  can include prompt tokens of Google's built-in tools, which are then priced
+  at the output rate.
 
 ## Sampling parameters on Gemini 3 and 4
 

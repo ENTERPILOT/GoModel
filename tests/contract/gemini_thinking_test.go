@@ -8,11 +8,11 @@ package contract
 
 import (
 	"context"
+	"math"
 	"net/http"
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -21,8 +21,10 @@ import (
 
 const geminiNativeGeneratePath = "/models/gemini-2.5-flash:generateContent"
 
+// TestGeminiReplayThinkingUsageCost pins what the gateway records for each
+// recorded response: token counts, raw usage data and cost at the given
+// dollars per million input and output tokens.
 func TestGeminiReplayThinkingUsageCost(t *testing.T) {
-	// Dollars per million tokens (input, output).
 	flash25 := [2]float64{0.30, 2.50}
 	flash3 := [2]float64{0.50, 3.00}
 
@@ -31,41 +33,35 @@ func TestGeminiReplayThinkingUsageCost(t *testing.T) {
 		fixturePath string
 		native      bool
 		rates       [2]float64
-		input       int
-		output      int
-		total       int
-		reasoning   int
-		// Cost in millionths of a dollar, and what the upstream numbers
-		// priced as they arrive would have come to.
-		cost       float64
-		unfoldCost float64
 	}{
-		{name: "thinking", fixturePath: "gemini/chat_with_thinking.json", rates: flash25, input: 11, output: 22, total: 33, reasoning: 18, cost: 58.3, unfoldCost: 13.3},
-		{name: "thinking truncated", fixturePath: "gemini/chat_with_thinking_truncated.json", rates: flash3, input: 11, output: 46, total: 57, reasoning: 46, cost: 143.5, unfoldCost: 5.5},
-		{name: "thinking stream", fixturePath: "gemini/chat_with_thinking_stream.txt", rates: flash25, input: 11, output: 25, total: 36, reasoning: 21, cost: 65.8, unfoldCost: 13.3},
-		{name: "no thinking", fixturePath: "gemini/chat_with_tools.json", rates: flash25, input: 44, output: 19, total: 63, cost: 60.7, unfoldCost: 60.7},
-		{name: "native", fixturePath: "gemini/native_chat_completion.json", native: true, rates: flash25, input: 11, output: 25, total: 36, reasoning: 21, cost: 65.8, unfoldCost: 65.8},
+		{name: "thinking", fixturePath: "gemini/chat_with_thinking.json", rates: flash25},
+		{name: "thinking_truncated", fixturePath: "gemini/chat_with_thinking_truncated.json", rates: flash3},
+		{name: "thinking_stream", fixturePath: "gemini/chat_with_thinking_stream.txt", rates: flash25},
+		{name: "no_thinking", fixturePath: "gemini/chat_with_tools.json", rates: flash25},
+		{name: "native", fixturePath: "gemini/native_chat_completion.json", native: true, rates: flash25},
 	}
 
+	recorded := make(map[string]any, len(tests))
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			pricing := &core.ModelPricing{Currency: "USD", InputPerMtok: &tt.rates[0], OutputPerMtok: &tt.rates[1]}
-			entry := replayGeminiUsageEntry(t, tt.fixturePath, tt.native, pricing)
+		pricing := &core.ModelPricing{Currency: "USD", InputPerMtok: &tt.rates[0], OutputPerMtok: &tt.rates[1]}
+		entry := replayGeminiUsageEntry(t, tt.fixturePath, tt.native, pricing)
+		require.NotNil(t, entry, tt.name)
+		require.NotNil(t, entry.TotalCost, tt.name)
 
-			require.NotNil(t, entry)
-			assert.Equal(t, tt.input, entry.InputTokens)
-			assert.Equal(t, tt.output, entry.OutputTokens)
-			assert.Equal(t, tt.total, entry.TotalTokens)
-			if tt.reasoning == 0 {
-				assert.NotContains(t, entry.RawData, "completion_reasoning_tokens")
-			} else {
-				assert.Equal(t, tt.reasoning, entry.RawData["completion_reasoning_tokens"])
-			}
-			require.NotNil(t, entry.TotalCost)
-			assert.InDelta(t, tt.cost, *entry.TotalCost*1e6, 1e-6)
-			assert.GreaterOrEqual(t, tt.cost, tt.unfoldCost, "folding never lowers a cost")
-		})
+		recorded[tt.name] = map[string]any{
+			"fixture":              tt.fixturePath,
+			"input_per_mtok":       tt.rates[0],
+			"output_per_mtok":      tt.rates[1],
+			"input_tokens":         entry.InputTokens,
+			"output_tokens":        entry.OutputTokens,
+			"total_tokens":         entry.TotalTokens,
+			"raw_data":             entry.RawData,
+			"total_cost_micro_usd": math.Round(*entry.TotalCost*1e10) / 1e4,
+			"costs_caveat":         entry.CostsCalculationCaveat,
+		}
 	}
+
+	compareGoldenJSON(t, "gemini/thinking_usage_cost.golden.json", recorded)
 }
 
 // replayGeminiUsageEntry replays a fixture through the adapter and meters the

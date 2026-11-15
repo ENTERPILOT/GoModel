@@ -15,6 +15,7 @@
   "object": "chat.completion",
   "provider": "gemini",
   "usage": {
+    "completion_reasoning_tokens": 18,
     "completion_tokens": 22,
     "completion_tokens_details": {
       "accepted_prediction_tokens": 0,
