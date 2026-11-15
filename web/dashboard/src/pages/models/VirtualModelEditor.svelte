@@ -105,6 +105,7 @@
       bind:provider={vm.vmForm.target_provider}
       bind:model={vm.vmForm.target_model}
       bind:weight={vm.vmForm.target_weight}
+      bind:reasoningEffort={vm.vmForm.target_reasoning_effort}
       showRemove={vmFormHasPrimaryTarget(vm.vmForm)}
       onremove={() => vm.removePrimaryTarget()}
     />
@@ -116,6 +117,7 @@
         bind:provider={target.provider}
         bind:model={target.model}
         bind:weight={target.weight}
+        bind:reasoningEffort={target.reasoning_effort}
         onremove={() => vm.removeVmTarget(index)}
       />
     {/each}

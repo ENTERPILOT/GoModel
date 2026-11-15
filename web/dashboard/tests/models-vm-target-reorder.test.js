@@ -89,7 +89,7 @@ test("reopening a reordered virtual model restores the saved order", () => {
   assert.deepEqual(modelsOf(reopened), ["c", "a", "b"]);
 });
 
-test("weights and explicit provider pins survive a reorder", () => {
+test("weights, reasoning efforts and explicit provider pins survive a reorder", () => {
   const form = {
     ...defaultVirtualModelForm(),
     source: "pool",
@@ -97,8 +97,9 @@ test("weights and explicit provider pins survive a reorder", () => {
     target_provider: "",
     target_model: "a",
     target_weight: 1,
+    target_reasoning_effort: "high",
     targets: [
-      { provider: "team", model: "b", weight: 3 },
+      { provider: "team", model: "b", weight: 3, reasoning_effort: "low" },
       { provider: "", model: "c", weight: 1 },
     ],
   };
@@ -106,9 +107,10 @@ test("weights and explicit provider pins survive a reorder", () => {
   assert.equal(form.target_model, "b");
   assert.equal(form.target_provider, "team");
   assert.equal(form.target_weight, 3);
+  assert.equal(form.target_reasoning_effort, "low");
   assert.deepEqual(
-    form.targets.map((t) => `${t.model}:${t.weight}`),
-    ["a:1", "c:1"],
+    form.targets.map((t) => `${t.model}:${t.weight}:${t.reasoning_effort}`),
+    ["a:1:high", "c:1:"],
   );
 });
 
@@ -120,7 +122,7 @@ test("target helpers tolerate a null or malformed form", () => {
   // Non-array targets still surfaces the primary row; moveFormTarget refuses
   // because it cannot build a contiguous list.
   assert.deepEqual(flattenFormTargets({ target_model: "a", targets: "bad" }), [
-    { provider: "", model: "a", weight: 1 },
+    { provider: "", model: "a", weight: 1, reasoning_effort: "" },
   ]);
   assert.equal(moveFormTarget(null, 0, 1), false);
   assert.equal(

@@ -15171,6 +15171,9 @@
           "provider": {
             "type": "string"
           },
+          "reasoning_effort": {
+            "type": "string"
+          },
           "weight": {
             "type": "number"
           }
@@ -19571,6 +19574,9 @@
             "type": "string"
           },
           "provider": {
+            "type": "string"
+          },
+          "reasoning_effort": {
             "type": "string"
           },
           "weight": {

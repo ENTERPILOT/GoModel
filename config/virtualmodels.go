@@ -86,11 +86,14 @@ type VirtualModelConfig struct {
 
 // VirtualModelTargetConfig is one load-balancing destination. Model may be a bare
 // id (with Provider set) or a "provider/model" selector. Weight biases the
-// round_robin strategy and defaults to 1.
+// round_robin strategy and defaults to 1. ReasoningEffort forces the reasoning
+// effort of requests sent to this target, beating the entry's own
+// ReasoningEffort; empty keeps that one, or the client's value.
 type VirtualModelTargetConfig struct {
-	Provider string  `yaml:"provider,omitempty" json:"provider,omitempty"`
-	Model    string  `yaml:"model" json:"model"`
-	Weight   float64 `yaml:"weight,omitempty" json:"weight,omitempty"`
+	Provider        string  `yaml:"provider,omitempty" json:"provider,omitempty"`
+	Model           string  `yaml:"model" json:"model"`
+	Weight          float64 `yaml:"weight,omitempty" json:"weight,omitempty"`
+	ReasoningEffort string  `yaml:"reasoning_effort,omitempty" json:"reasoning_effort,omitempty"`
 }
 
 const envVirtualModels = "VIRTUAL_MODELS"
