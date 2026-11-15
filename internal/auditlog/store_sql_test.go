@@ -3,6 +3,7 @@ package auditlog
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -223,6 +224,63 @@ func TestNewSQLStoreReplacesSingleColumnUserPathIndex(t *testing.T) {
 		_, err = db.Exec(ctx, `CREATE INDEX idx_audit_user_path_timestamp ON audit_logs(user_path, timestamp)`)
 		require.Error(t, err)
 	})
+}
+
+// Replicas that start together against one database change the audit schema
+// one at a time: each of them starts, whether the database is new or an older
+// release created it, and every index gets built.
+func TestNewSQLStoreStartsReplicasTogether(t *testing.T) {
+	cases := map[string][]string{
+		"new database": nil,
+		"legacy schema": {`
+			CREATE TABLE audit_logs (
+				id TEXT PRIMARY KEY,
+				timestamp ` + sqlx.TypeTimestamp + ` NOT NULL,
+				model TEXT,
+				status_code INTEGER DEFAULT 0
+			)`},
+	}
+	for name, existing := range cases {
+		t.Run(name, func(t *testing.T) {
+			sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+				if db.Dialect() != sqlx.PostgreSQL {
+					t.Skip("replicas share a database only on PostgreSQL")
+				}
+				ctx := context.Background()
+				require.NoError(t, db.Schema(ctx, existing...))
+
+				const replicas = 4
+				stores := make([]*SQLStore, replicas)
+				errs := make([]error, replicas)
+				var starting sync.WaitGroup
+				for i := range replicas {
+					starting.Go(func() { stores[i], errs[i] = NewSQLStore(ctx, db, 0) })
+				}
+				starting.Wait()
+				for _, store := range stores {
+					if store != nil {
+						t.Cleanup(func() { _ = store.Close() })
+					}
+				}
+				for i, err := range errs {
+					require.NoError(t, err, "replica %d", i)
+				}
+				for _, store := range stores {
+					store.indexBuild.Wait()
+				}
+
+				for _, index := range append(modelIndexes(sqlx.PostgreSQL), auditIndex{name: writtenAtIndex}) {
+					assert.True(t, hasValidIndex(ctx, t, db, index.name), index.name)
+				}
+				var invalid int
+				require.NoError(t, db.QueryRow(ctx, `SELECT COUNT(*) FROM pg_index i
+					JOIN pg_class c ON c.oid = i.indrelid
+					JOIN pg_namespace n ON n.oid = c.relnamespace
+					WHERE n.nspname = current_schema() AND NOT i.indisvalid`).Scan(&invalid))
+				assert.Zero(t, invalid, "no build is left interrupted")
+			})
+		})
+	}
 }
 
 // The index must be declared on the same expression the reader compares
