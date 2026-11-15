@@ -94,10 +94,11 @@ func (w *responseCostWriter) prepare() {
 	header := w.Header()
 	deleteHeaderFold(header, responseCostHeader)
 	deleteHeaderFold(header, responseCostCurrencyHeader)
-	// An encoded body cannot be read; the gateway sends none. A response
+	// An encoded body cannot be read; the gateway sends none. identity is no
+	// encoding, here as where an upstream's answer is relayed. A response
 	// that starts after the handler ended (an error it returned) is not the
 	// handler's answer, and nothing would relay what an editor held of it.
-	readable := header.Get("Content-Encoding") == "" && !w.finished
+	readable := !hasContentEncoding(header) && !w.finished
 	if isSSEContentType(header) {
 		if readable {
 			// Every line ending the SSE specification allows, so no event
@@ -138,6 +139,8 @@ func (w *responseCostWriter) Write(p []byte) (int, error) {
 		}
 		return len(p), nil
 	case w.events == nil:
+		// The handler's own bytes, under the content type it chose: nothing
+		// of the request is reflected here.
 		return w.ResponseWriter.Write(p)
 	}
 	// Only whole events are relayed; a client cannot act on part of one.

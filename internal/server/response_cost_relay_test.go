@@ -36,20 +36,24 @@ func postToGateway(t *testing.T, srv *Server, path, body string) *http.Response 
 // An upstream may send a JSON body that is not one object over time: Gemini's
 // streamGenerateContent without alt=sse sends an array, one element per
 // chunk. Each piece reaches the client when it arrives, not when the upstream
-// is done, and the body is relayed as it is.
+// is done, and the body is relayed as it is, however much whitespace the
+// array starts after.
 func TestResponseCost_StreamedJSONArrayIsRelayedAsItArrives(t *testing.T) {
 	const (
-		first = "[{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hi\"}]}}]}\n,"
+		array = "[{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hi\"}]}}]}\n,"
 		rest  = "\n{\"candidates\":[],\"usageMetadata\":{\"totalTokenCount\":3},\"usage\":{\"cost\":9}}]"
 	)
 	for _, mode := range []struct {
 		name      string
+		lead      string
 		configure func(*testing.T) func(*Config)
 	}{
 		{name: "markups off", configure: func(*testing.T) func(*Config) { return returnCosts }},
 		{name: "markups on", configure: func(t *testing.T) func(*Config) { return billCosts(t, 50, true) }},
+		{name: "after more whitespace than one read holds", lead: strings.Repeat(" \n", 8<<10), configure: func(*testing.T) func(*Config) { return returnCosts }},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
+			first := mode.lead + array
 			upstream, feed := io.Pipe()
 			srv, _ := costGateway(t, costPassthroughProvider(jsonHeader(), upstream), mode.configure(t))
 			fed := make(chan error, 1)
@@ -145,6 +149,7 @@ func TestResponseCost_StreamsInEveryFramingArriveEventByEvent(t *testing.T) {
 
 			resp := postToGateway(t, srv, passthroughChatPath, passthroughStreamBody)
 
+			require.Equal(t, http.StatusOK, resp.StatusCode)
 			require.NoError(t, <-fed)
 			want := `data: {"choices":[],"usage":{` + pricedUsage + `}}` + tt.blank
 			if tt.wantCost != "" {

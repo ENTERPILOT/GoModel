@@ -64,11 +64,11 @@ type eventEndFinder struct {
 type lineEndState uint8
 
 const (
-	inLine      lineEndState = iota // in a line, or at the start of an event
-	afterLF                         // a line just ended with an LF
-	afterCR                         // a line just ended with a CR, the first half of a CRLF if an LF follows
-	afterCRLF                       // a line just ended with a CRLF
-	afterCRLFCR                     // a CRLF, then a CR: the blank line of a CRLF stream once its LF comes
+	inLine       lineEndState = iota // in a line, or at the start of an event
+	afterLF                          // a line just ended with an LF
+	afterCR                          // a line just ended with a CR, the first half of a CRLF if an LF follows
+	afterCRLF                        // a line just ended with a CRLF
+	afterBlankCR                     // a piece ended with the CR of a blank line, the first half of a CRLF if an LF follows
 )
 
 // next returns how many bytes of data end with the first event that ends in
@@ -77,9 +77,11 @@ const (
 func (f *eventEndFinder) next(data []byte) int {
 	for i := 0; i < len(data); i++ {
 		c := data[i]
-		if f.state == afterCRLFCR {
-			// Only ever the state a piece ended in: with an LF this one
-			// completes the blank line, and without, the CR alone was it.
+		if f.state == afterBlankCR {
+			// Only ever the state a piece ended in. An LF completes that
+			// blank line and is handed out alone, so no byte of the next
+			// event comes with it; without one, the CR alone was the blank
+			// line.
 			f.state = inLine
 			if c == '\n' {
 				return i + 1
@@ -109,8 +111,10 @@ func (f *eventEndFinder) next(data []byte) int {
 		case i+1 < len(data) && data[i+1] == '\n':
 			f.state = inLine
 			return i + 2
-		case i+1 == len(data) && f.state == afterCRLF:
-			f.state = afterCRLFCR
+		case i+1 == len(data):
+			// The blank line of a CRLF stream ends with the LF still to
+			// come; after an LF or a CR this CR may be all of it.
+			f.state = afterBlankCR
 		default:
 			f.state = inLine
 			return i + 1

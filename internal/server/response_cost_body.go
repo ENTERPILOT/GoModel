@@ -24,10 +24,16 @@ const maxKeptEmitBytes = 64 << 10
 //
 // Only a usage object is held back, from its opening to its closing brace,
 // and with a billed edit the few bytes between two top-level members until
-// the second is named. Every other byte is written as it arrives, straight
-// from the caller's buffer, so the body is neither buffered, copied nor
-// re-encoded. What is written depends on the body's bytes alone, never on how
-// the writes split them.
+// the second is named (see rootMembers). Every other byte is written as it
+// arrives, straight from the caller's buffer, so the body is neither
+// buffered, copied nor re-encoded. What is written depends on the body's
+// bytes alone, never on how the writes split them.
+//
+// The price of not buffering is that a body is edited before it is known to
+// be valid JSON: a usage object that is complete and well-formed is rewritten,
+// and a provider's cost in front of it removed, even when the bytes after it
+// turn out malformed or the body is cut off. Validating first would mean
+// holding every answer to its last byte.
 type jsonUsageEditor struct {
 	edit usageCostEdit
 	// maxUsage bounds a held usage object; zero selects maxHeldUsageBytes.
@@ -154,22 +160,24 @@ func (e *jsonUsageEditor) capture(c byte) {
 	if limit == 0 {
 		limit = maxHeldUsageBytes
 	}
+	closed := e.depth == e.captureDepth
 	switch {
-	case e.depth == e.captureDepth:
-		e.capturing = false
+	case len(e.usage) > limit:
+		// Too large to be a usage object, also when c is the byte that
+		// closes it: relayed as it is, and its buffer released.
+		e.emit, e.usage = e.usage, nil
+	case closed:
 		if text, ok := e.edit.carrying(e.carries).apply(string(e.usage)); ok {
 			e.emit = append(e.emit, text...)
 		} else {
 			e.emit = append(e.emit, e.usage...)
 		}
-		if e.depth == 1 {
-			e.members.valueEnded(e.edit.billed)
-		}
-	case len(e.usage) > limit:
-		// Too large to be a usage object: relayed as it is, and its buffer
-		// released.
-		e.capturing = false
-		e.emit, e.usage = e.usage, nil
+	default:
+		return
+	}
+	e.capturing = false
+	if closed && e.depth == 1 {
+		e.members.valueEnded(e.edit.billed)
 	}
 }
 

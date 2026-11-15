@@ -122,6 +122,21 @@ func TestEventPacedStream_BlankLineSplitAcrossReads(t *testing.T) {
 			want:   []string{"data: A\r", "\r", "data: B\r\r", "data: C\r\r"},
 		},
 		{
+			name:   "CR then CRLF, split inside the CRLF",
+			pieces: []string{"data: A\r\r", "\ndata: B\r\r\n"},
+			want:   []string{"data: A\r\r", "\n", "data: B\r\r\n"},
+		},
+		{
+			name:   "LF then CRLF, split inside the CRLF",
+			pieces: []string{"data: A\n\r", "\ndata: B\n\r\n"},
+			want:   []string{"data: A\n\r", "\n", "data: B\n\r\n"},
+		},
+		{
+			name:   "a bare CR blank line at the end of a read, no LF after it",
+			pieces: []string{"data: A\r\r", "data: B\r\r"},
+			want:   []string{"data: A\r\r", "data: B\r\r"},
+		},
+		{
 			name:   "several events in the read that completes one",
 			pieces: []string{"data: A\n", "\ndata: B\n\ndata: C\n", "\n"},
 			want:   []string{"data: A\n", "\n", "data: B\n\n", "data: C\n", "\n"},
@@ -137,7 +152,7 @@ func TestEventPacedStream_BlankLineSplitAcrossReads(t *testing.T) {
 // Wherever two upstream reads split a stream, no Read of the paced stream
 // returns bytes of two events.
 func TestEventPacedStream_NeverJoinsTwoEvents(t *testing.T) {
-	for _, blank := range []string{"\n\n", "\r\n\r\n", "\r\r"} {
+	for _, blank := range []string{"\n\n", "\r\n\r\n", "\r\r", "\r\r\n", "\n\r\n", "\r\n\n"} {
 		events := []string{"data: A" + blank, "event: x" + blank[:len(blank)/2] + "data: B" + blank, "data: C" + blank}
 		stream := strings.Join(events, "")
 		for cut := 0; cut <= len(stream); cut++ {
@@ -169,11 +184,13 @@ func TestEventPacedStream_ObserverSeesEachEventOfASplitBlankLine(t *testing.T) {
 		"data: {\"n\":1}\n", "\ndata: {\"n\":2}\n\n",
 	}}), observer)
 	buf := make([]byte, 1024)
-	seen := []int{}
+	var reads []string
+	var seen [][]map[string]any
 	for {
 		n, err := stream.Read(buf)
 		if n > 0 {
-			seen = append(seen, len(observer.events))
+			reads = append(reads, string(buf[:n]))
+			seen = append(seen, append([]map[string]any(nil), observer.events...))
 		}
 		if errors.Is(err, io.EOF) {
 			break
@@ -181,7 +198,9 @@ func TestEventPacedStream_ObserverSeesEachEventOfASplitBlankLine(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	assert.Equal(t, []int{0, 1, 2}, seen, "events observed after each read")
+	first, second := map[string]any{"n": float64(1)}, map[string]any{"n": float64(2)}
+	assert.Equal(t, []string{"data: {\"n\":1}\n", "\n", "data: {\"n\":2}\n\n"}, reads)
+	assert.Equal(t, [][]map[string]any{nil, {first}, {first, second}}, seen, "the events observed after each read")
 }
 
 // Observers wrapped above the paced stream see an event only once the events
@@ -192,12 +211,13 @@ func TestEventPacedStream_ObserversSeeEventsAsTheyAreRead(t *testing.T) {
 		"data: {\"n\":1}\n\ndata: {\"n\":2}\n\n"))), observer)
 	buf := make([]byte, 1024)
 
+	first, second := map[string]any{"n": float64(1)}, map[string]any{"n": float64(2)}
 	_, err := stream.Read(buf)
 	require.NoError(t, err)
-	assert.Len(t, observer.events, 1)
+	assert.Equal(t, []map[string]any{first}, observer.events)
 	_, err = stream.Read(buf)
 	require.NoError(t, err)
-	assert.Len(t, observer.events, 2)
+	assert.Equal(t, []map[string]any{first, second}, observer.events)
 }
 
 type collectingObserver struct{ events []map[string]any }

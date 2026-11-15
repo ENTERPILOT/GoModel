@@ -404,8 +404,9 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 		observers = passthroughJSONResponseObservers(c, usageLogger, pricingResolver, providerType, providerName, endpoint, info, extraObservers)
 	}
 	if returnsCost && isJSONContentType(resp.Headers) {
-		body := bufio.NewReader(resp.Body)
-		if first := peekJSONStart(body); first != 0 && first != '{' {
+		lead, first, rest := readJSONStart(resp.Body, maxObservedJSONResponseBytes)
+		body := io.MultiReader(bytes.NewReader(lead), rest)
+		if first != 0 && first != '{' {
 			return relayJSONAsItArrives(c, resp.StatusCode, body, observers)
 		}
 		return relayJSONAfterObservers(c, providerType, resp.StatusCode, body, observers)
@@ -442,9 +443,11 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 // answer is complete either way, but the default path relays it as it arrives
 // and accounts for it afterwards.
 //
-// An answer too large to observe is relayed as it arrives and without a cost,
-// as it is on the default path; the response cost writer still removes an
-// upstream's usage.cost from it.
+// An answer too large to observe carries no cost, as on the default path; the
+// response cost writer still removes an upstream's usage.cost from it. It is
+// known to be too large only once the limit was read, so that much of it is
+// held: it is sent the moment the limit is passed, and what follows is relayed
+// as it arrives.
 func relayJSONAfterObservers(c *echo.Context, providerType string, status int, upstream io.Reader, observers []streaming.Observer) error {
 	body, err := io.ReadAll(io.LimitReader(upstream, maxObservedJSONResponseBytes+1))
 	if err != nil {
@@ -459,9 +462,7 @@ func relayJSONAfterObservers(c *echo.Context, providerType string, status int, u
 		return err
 	}
 	if !observed {
-		if _, err := io.Copy(c.Response(), upstream); err != nil {
-			return err
-		}
+		return flushStream(c.Response(), upstream)
 	}
 	if f, ok := c.Response().(http.Flusher); ok {
 		f.Flush()
@@ -492,20 +493,24 @@ func relayJSONAsItArrives(c *echo.Context, status int, upstream io.Reader, obser
 	return nil
 }
 
-// peekJSONStart returns the first byte of body that is not JSON whitespace,
-// without consuming any, or 0 when body ends or fails before one, or has none
-// within the reader's buffer.
-func peekJSONStart(body *bufio.Reader) byte {
-	for n := 1; n <= body.Size(); n++ {
-		window, err := body.Peek(n)
-		if len(window) == n && !isJSONSpace(window[n-1]) {
-			return window[n-1]
-		}
+// readJSONStart reads the whitespace a JSON body starts with, up to limit
+// bytes of it, and returns it with the first byte after it and a reader of the
+// body from that byte on. first is 0 when the body ends or fails before such
+// a byte, or has none within limit.
+func readJSONStart(body io.Reader, limit int) (lead []byte, first byte, rest io.Reader) {
+	reader := bufio.NewReader(body)
+	for len(lead) < limit {
+		c, err := reader.ReadByte()
 		if err != nil {
-			return 0
+			break
 		}
+		if !isJSONSpace(c) {
+			_ = reader.UnreadByte() // never fails right after ReadByte
+			return lead, c, reader
+		}
+		lead = append(lead, c)
 	}
-	return 0
+	return lead, 0, reader
 }
 
 // maxRelayedPassthroughErrorBytes caps the provider-native error body relayed

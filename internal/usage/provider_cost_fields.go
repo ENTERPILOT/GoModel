@@ -30,8 +30,14 @@ type ProviderCostField struct {
 // providerCostFields is every provider-reported cost the gateway knows. The
 // usage readers take a provider's cost from these members and from no other
 // (see copyProviderCosts and CalculateUsageCost), and a response that must not
-// reveal the provider cost loses exactly these (internal/server), so reading
-// a new one here is what removes it there.
+// reveal the provider cost loses these (internal/server), so reading a new one
+// here is what removes it there.
+//
+// Reading is narrower than removing, on purpose. A cost is read from the name
+// as providers spell it, as JSON names are case-sensitive: a member in another
+// case is no documented cost and is not billed from. A response loses the
+// name in any case (IsProviderCostField), because a lenient client decoder
+// reads those as the cost too.
 var providerCostFields = []ProviderCostField{
 	{Name: providerCostMember},
 	{Name: providerCostTicksMember},

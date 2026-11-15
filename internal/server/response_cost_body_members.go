@@ -31,12 +31,21 @@ const (
 	nestedValue           // with the brace or bracket that closes it
 )
 
+// maxHeldSeparatorBytes bounds the whitespace rootMembers holds between two
+// members. No formatter writes that much there.
+const maxHeldSeparatorBytes = 4 << 10
+
 // rootMembers removes members of the body's object, for a billed edit. The
 // bytes between two members (whitespace, the comma) and the name that follows
 // are held until the name tells whether the member stays; a removed member is
 // not held but skipped as it arrives. The result is the one
 // usageCostEdit.apply gives: a removed member takes the separator in front of
 // it along, and the first member kept has none.
+//
+// What is held is bounded: whitespace past maxHeldSeparatorBytes is relayed as
+// it arrives, ahead of the held bytes. It means the same on either side of the
+// comma, so the body stays the JSON it was, and a removed member still takes
+// its comma along.
 type rootMembers struct {
 	value    valueKind // the value being read at depth 1
 	holding  bool
@@ -173,12 +182,16 @@ func (e *jsonUsageEditor) readStructure(c byte) bool {
 		}
 	}
 	if m.holding {
-		if isJSONSpace(c) || c == ',' {
+		switch {
+		case isJSONSpace(c) && len(m.held) >= maxHeldSeparatorBytes:
+			return true
+		case isJSONSpace(c), c == ',' && len(m.held) <= maxHeldSeparatorBytes:
 			m.held = append(m.held, c)
 			return false
 		}
 		// The brace that closes the body's object, or a byte no JSON has
-		// here: what was held is no separator in front of a removed member.
+		// here (a comma past the bound among them): what was held is no
+		// separator in front of a removed member.
 		e.emit = append(e.emit, m.held...)
 		m.holding = false
 	}

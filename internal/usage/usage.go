@@ -131,6 +131,10 @@ type UsageEntry struct {
 	// read it to show the entry in their live log view. The logger sets it
 	// when it flushes, so it is nil until then.
 	Stamp *storage.WriteStamp `json:"-" bson:",inline"`
+
+	// billabilityDecided is set once a BillableTap looked the provider up, so
+	// an entry stamped for the response is recorded with that decision.
+	billabilityDecided bool
 }
 
 // Config holds usage tracking configuration

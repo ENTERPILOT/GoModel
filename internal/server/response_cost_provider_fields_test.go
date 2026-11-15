@@ -58,9 +58,10 @@ type providerCostPath struct {
 	body string
 	// nested reports the usage members under raw_usage.
 	nested bool
-	// billed is the cost a 50% markup makes of the request; empty when the
-	// response carries none.
-	billed string
+	// cost is the provider cost the gateway calculates for the request, and
+	// billed what a 50% markup makes of it; empty when the response carries
+	// none.
+	cost, billed string
 	// provider answers with field reported; nil when the path cannot carry it.
 	provider func(t *testing.T, field usage.ProviderCostField) *mockProvider
 }
@@ -81,7 +82,7 @@ func providerCostPaths() []providerCostPath {
 	event := func(payload string) string { return relayedDelta + "data: " + payload + relayedEnding }
 	return []providerCostPath{
 		{
-			name: "typed chat", path: "/v1/chat/completions", body: bufferedCostRequests[0].body, billed: "0.00003",
+			name: "typed chat", path: "/v1/chat/completions", body: bufferedCostRequests[0].body, cost: responseCostAmount, billed: "0.00003",
 			provider: func(t *testing.T, field usage.ProviderCostField) *mockProvider {
 				provider := costChatProvider()
 				if !field.Root {
@@ -95,7 +96,7 @@ func providerCostPaths() []providerCostPath {
 			},
 		},
 		{
-			name: "typed chat stream", path: "/v1/chat/completions", body: streamedCostRequests[0].body, billed: "0.00003",
+			name: "typed chat stream", path: "/v1/chat/completions", body: streamedCostRequests[0].body, cost: responseCostAmount, billed: "0.00003",
 			provider: func(t *testing.T, field usage.ProviderCostField) *mockProvider {
 				provider := costChatProvider()
 				provider.streamData = event(withProviderCost(t, relayedChunk, field, false))
@@ -103,7 +104,7 @@ func providerCostPaths() []providerCostPath {
 			},
 		},
 		{
-			name: "typed embeddings", path: "/v1/embeddings", body: bufferedCostRequests[2].body, nested: true, billed: "0.000015",
+			name: "typed embeddings", path: "/v1/embeddings", body: bufferedCostRequests[2].body, nested: true, cost: "0.00001", billed: "0.000015",
 			provider: func(_ *testing.T, field usage.ProviderCostField) *mockProvider {
 				if field.Root {
 					return nil // an embedding response has no member the provider's root can ride in
@@ -114,19 +115,19 @@ func providerCostPaths() []providerCostPath {
 			},
 		},
 		{
-			name: "relayed JSON", path: passthroughChatPath, body: passthroughChatBody, billed: "0.00003",
+			name: "relayed JSON", path: passthroughChatPath, body: passthroughChatBody, cost: responseCostAmount, billed: "0.00003",
 			provider: relayed(jsonHeader(), whole, relayedChat, false),
 		},
 		{
-			name: "relayed JSON, raw_usage", path: passthroughChatPath, body: passthroughChatBody, nested: true, billed: "0.00003",
+			name: "relayed JSON, raw_usage", path: passthroughChatPath, body: passthroughChatBody, nested: true, cost: responseCostAmount, billed: "0.00003",
 			provider: relayed(jsonHeader(), whole, relayedChat, true),
 		},
 		{
-			name: "relayed stream", path: passthroughChatPath, body: passthroughStreamBody, billed: "0.00003",
+			name: "relayed stream", path: passthroughChatPath, body: passthroughStreamBody, cost: responseCostAmount, billed: "0.00003",
 			provider: relayed(sseHeader(), event, relayedChunk, false),
 		},
 		{
-			name: "relayed stream, raw_usage", path: passthroughChatPath, body: passthroughStreamBody, nested: true, billed: "0.00003",
+			name: "relayed stream, raw_usage", path: passthroughChatPath, body: passthroughStreamBody, nested: true, cost: responseCostAmount, billed: "0.00003",
 			provider: relayed(sseHeader(), event, relayedChunk, true),
 		},
 		{
@@ -138,13 +139,13 @@ func providerCostPaths() []providerCostPath {
 			}, relayedChunk, false),
 		},
 		{
-			name: "native messages", path: "/v1/messages", body: bufferedCostRequests[4].body, billed: "0.00003",
+			name: "native messages", path: "/v1/messages", body: bufferedCostRequests[4].body, cost: responseCostAmount, billed: "0.00003",
 			provider: func(t *testing.T, field usage.ProviderCostField) *mockProvider {
 				return costNativeMessagesProvider("application/json", withProviderCost(t, anthropicCostMessage, field, false))()
 			},
 		},
 		{
-			name: "native messages stream", path: "/v1/messages", body: streamedCostRequests[3].body, billed: "0.00003",
+			name: "native messages stream", path: "/v1/messages", body: streamedCostRequests[3].body, cost: responseCostAmount, billed: "0.00003",
 			provider: func(t *testing.T, field usage.ProviderCostField) *mockProvider {
 				// A usage member goes into message_start, whose usage sits
 				// under "message"; a root member to the root of message_delta.
@@ -204,6 +205,11 @@ func TestResponseCost_ProviderCostFields(t *testing.T) {
 				// the provider's and is relayed as it was.
 				owned := !field.Root && !route.nested && field.Name == usageCostMember
 				assert.Equal(t, !owned, strings.Contains(rec.Body.String(), providerCostDigits), rec.Body.String())
+				if route.cost == "" {
+					return
+				}
+				assert.Contains(t, rec.Body.String(), `"cost":`+route.cost, "the gateway's own cost")
+				assert.NotContains(t, rec.Body.String(), `"cost":`+route.billed, "no markup is applied")
 			})
 		}
 	}

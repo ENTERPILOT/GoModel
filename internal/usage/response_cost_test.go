@@ -194,7 +194,7 @@ func TestCostReportReportsAMissingBillingStamp(t *testing.T) {
 		logsErr bool
 	}{
 		{name: "forwarded", logger: NewBillableTap(&stampingLogger{}, func(string) bool { return true }), entry: &UsageEntry{ProviderName: "openai", TotalCost: new(0.25)}, want: 0.5, known: true},
-		{name: "not forwarded", logger: &opaqueWrapper{inner: &stampingLogger{}}, entry: &UsageEntry{TotalCost: new(0.25)}, logsErr: true},
+		{name: "not forwarded", logger: &opaqueWrapper{inner: &stampingLogger{}}, entry: &UsageEntry{RequestID: "req-from-a-header", TotalCost: new(0.25)}, logsErr: true},
 		{name: "unpriced is not a missing stamp", logger: &opaqueWrapper{inner: &stampingLogger{}}, entry: &UsageEntry{}},
 	}
 	for _, tt := range tests {
@@ -210,9 +210,67 @@ func TestCostReportReportsAMissingBillingStamp(t *testing.T) {
 			if tt.logsErr {
 				assert.Contains(t, logs.String(), "level=ERROR")
 				assert.Contains(t, logs.String(), "did not stamp the billed cost")
+				assert.Contains(t, logs.String(), "opaqueWrapper", "the logger that hides the stamp is named")
+				assert.NotContains(t, logs.String(), tt.entry.RequestID, "no value of the request is logged")
 			} else {
 				assert.Empty(t, logs.String())
 			}
+		})
+	}
+}
+
+// billingLogger bills an entry the way the markup tap does, when it is stamped
+// and again when it is recorded: twice the provider cost, or nothing for a
+// provider the caller does not owe.
+type billingLogger struct {
+	recordingTapLogger
+}
+
+func (l *billingLogger) StampBilling(entry *UsageEntry) {
+	entry.BilledCost = new(0.0)
+	if entry.IsBillable() {
+		entry.BilledCost = new(*entry.TotalCost * 2)
+	}
+}
+
+func (l *billingLogger) Write(entry *UsageEntry) {
+	l.StampBilling(entry)
+	l.recordingTapLogger.Write(entry)
+}
+
+// A provider's billable setting may change between the moment the cost of a
+// response is calculated and the moment its usage is recorded. The entry is
+// recorded with the decision the returned cost was calculated with, so the
+// client is told what it is billed.
+func TestBillableTapRecordsTheDecisionTheReturnedCostWasCalculatedWith(t *testing.T) {
+	tests := []struct {
+		name             string
+		stamped, written bool // the provider's billable setting at each moment
+		want             float64
+	}{
+		{name: "billable, then not", stamped: true, written: false, want: 0.5},
+		{name: "not billable, then billable", stamped: false, written: true, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			billable, lookups := tt.stamped, 0
+			inner := &billingLogger{}
+			tap := NewBillableTap(inner, func(string) bool { lookups++; return billable })
+			_, report := WithCostReport(context.Background(), true)
+			entry := &UsageEntry{ProviderName: "openai", TotalCost: new(0.25)}
+
+			report.Record(tap, entry)
+			billable = tt.written
+			tap.Write(entry)
+
+			cost, known := report.Cost()
+			require.True(t, known)
+			assert.Equal(t, tt.want, cost)
+			require.Len(t, inner.entries, 1)
+			assert.Equal(t, tt.stamped, inner.entries[0].IsBillable())
+			require.NotNil(t, inner.entries[0].BilledCost)
+			assert.Equal(t, cost, *inner.entries[0].BilledCost, "the recorded billed cost is the returned one")
+			assert.Equal(t, 1, lookups)
 		})
 	}
 }

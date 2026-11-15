@@ -51,7 +51,8 @@ type BillingStamper interface {
 
 // StampBilling stamps on entry the billing fields logger.Write would, without
 // recording it, so the cost of a request can be known before its usage is
-// written. Stamping is idempotent: Write stamps the same values again. A
+// written. Stamping is idempotent: Write stamps the same values again, with
+// the billability decided here (see BillableTap.StampBilling). A
 // logger that wraps another must implement BillingStamper and forward it, or
 // the billed cost is not known before the response; see CostReport.Record.
 func StampBilling(logger LoggerInterface, entry *UsageEntry) {
@@ -109,9 +110,10 @@ func (r *CostReport) Record(logger LoggerInterface, entry *UsageEntry) {
 		// The markup tap bills every priced entry, so a priced entry without
 		// a billed cost means a logger wrapper between here and that tap
 		// does not forward StampBilling. The response carries no cost rather
-		// than the provider cost, and the gap is reported, not hidden.
+		// than the provider cost, and the gap is reported, not hidden. It is
+		// a fault of the logger chain, the same for every request, so no
+		// request value is logged.
 		slog.Error("response cost withheld: the usage logger did not stamp the billed cost",
-			"request_id", entry.RequestID,
 			"logger", fmt.Sprintf("%T", logger),
 			"hint", "every usage logger wrapper must implement usage.BillingStamper and forward it to the logger it wraps")
 	}

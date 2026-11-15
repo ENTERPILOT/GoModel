@@ -100,6 +100,11 @@ func containsFoldASCII(data []byte, word string) bool {
 // lose members. With billed, a provider's cost at the top level is removed
 // too. A usage object anywhere else is not read.
 func withUsageCost(data []byte, edit usageCostEdit) ([]byte, bool) {
+	// The scanner relays a larger event unparsed, so a larger payload is no
+	// event to rewrite; the bound also keeps the size of the copy in range.
+	if len(data) > streaming.MaxObservedEventBytes {
+		return nil, false
+	}
 	if !gjson.ValidBytes(data) {
 		return nil, false
 	}

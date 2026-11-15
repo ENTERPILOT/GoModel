@@ -75,16 +75,35 @@ func CutLine(data []byte) (line, ending, rest []byte) {
 	return data[:i], data[i:end], data[end:]
 }
 
+// joinLookaheadBytes is how many bytes of data decide a boundary that starts
+// in the maxBoundaryTailBytes before it: the rest of a CRLF, a second CRLF and
+// the byte that tells a bare CR from one.
+const joinLookaheadBytes = 4
+
 // nextJoinedEventBoundaryAnyEOL is nextJoinedEventBoundary for lines ending
 // in CRLF, LF or a bare CR: the first boundary in prefix followed by data,
-// prefix being the last bytes before data. The two are joined to be read,
-// which only the fragments of an event over the scanner's limit cost.
+// prefix being the last bytes before data. Only the end of prefix and the
+// first bytes of data are joined to be read, in a buffer of a fixed size: a
+// boundary that starts in prefix ends there, and one that starts in data is
+// found in data alone.
 func nextJoinedEventBoundaryAnyEOL(prefix, data []byte) (idx int, sepLen int) {
-	if len(prefix) == 0 {
-		return NextEventBoundaryAnyEOL(data)
+	skipped := max(len(prefix)-maxBoundaryTailBytes, 0)
+	tail := prefix[skipped:]
+	var joined [maxBoundaryTailBytes + joinLookaheadBytes]byte
+	n := copy(joined[:], tail)
+	n += copy(joined[n:], data)
+	idx, sepLen = NextEventBoundaryAnyEOL(joined[:n])
+	if n == len(tail)+len(data) || (idx != -1 && idx < len(tail)) {
+		// All of data was read, or the boundary starts in prefix.
+		if idx != -1 {
+			idx += skipped
+		}
+		return idx, sepLen
 	}
-	joined := make([]byte, 0, len(prefix)+len(data))
-	return NextEventBoundaryAnyEOL(append(append(joined, prefix...), data...))
+	if idx, sepLen = NextEventBoundaryAnyEOL(data); idx != -1 {
+		idx += len(prefix)
+	}
+	return idx, sepLen
 }
 
 // parseRawEventAnyEOL is parseRawEvent for lines ending in CRLF, LF or a bare

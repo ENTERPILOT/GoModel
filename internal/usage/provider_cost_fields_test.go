@@ -39,10 +39,19 @@ func TestProviderCostFields_AreWhatTheReaderReads(t *testing.T) {
 		assert.Equal(t, value, entry.RawData[field.Name], "%+v", field)
 	}
 
+	// The reader keeps every numeric usage member it does not know, so what
+	// tells a cost from another member is that the request is priced by it.
 	observer := NewStreamUsageObserver(&trackingLogger{enabled: true}, "m", "openrouter", "req", "/v1/chat/completions", nil)
-	entry := observer.extractUsageFromEvent(streamEventWith(ProviderCostField{Name: "estimated_cost"}, 0.25))
-	require.NotNil(t, entry)
-	assert.NotContains(t, entry.RawData, "estimated_cost", "a member the table does not list is not read as a cost")
+	priced := observer.extractUsageFromEvent(streamEventWith(ProviderCostField{Name: providerCostMember}, 2.5))
+	require.NotNil(t, priced)
+	require.NotNil(t, priced.TotalCost)
+	assert.Equal(t, 2.5, *priced.TotalCost)
+	for _, name := range []string{"estimated_cost", "Cost"} {
+		entry := observer.extractUsageFromEvent(streamEventWith(ProviderCostField{Name: name}, 2.5))
+		require.NotNil(t, entry, name)
+		assert.Nil(t, entry.TotalCost, "%s: a member the table does not list is not read as a cost", name)
+		assert.NotContains(t, entry.RawData, providerCostMember, name)
+	}
 }
 
 // Every provider-reported cost CalculateUsageCost prices from is a field of

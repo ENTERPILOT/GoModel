@@ -343,8 +343,6 @@ func (b *bootstrap) initServer() error {
 	return nil
 }
 
-// applyExtensions snapshots a registered extension set into the server
-// configuration. A nil registry leaves the config untouched.
 // applyResponseCost sets whether responses carry their cost, and which: the
 // billed cost exactly when markups are enabled, so a reseller's customer never
 // sees the provider cost, and the provider cost otherwise.
@@ -353,6 +351,8 @@ func applyResponseCost(serverCfg *server.Config, appCfg *config.Config) {
 	serverCfg.ResponseCostBilled = appCfg.Pricing.MarkupsEnabled
 }
 
+// applyExtensions snapshots a registered extension set into the server
+// configuration. A nil registry leaves the config untouched.
 func applyExtensions(serverCfg *server.Config, extensions *ext.Registry) {
 	if extensions == nil {
 		return

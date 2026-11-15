@@ -90,7 +90,10 @@ func TestUsageTapStampsBillingWithoutRecording(t *testing.T) {
 	require.Zero(t, *own.BilledCost)
 	require.Empty(t, inner.entries)
 
+	// Without the stamp, recording alone bills the entry.
+	owed.BilledCost = nil
 	logger.Write(owed)
 	require.Len(t, inner.entries, 1)
+	require.NotNil(t, inner.entries[0].BilledCost)
 	require.InDelta(t, 5.0, *inner.entries[0].BilledCost, 1e-12, "recording stamps the same billed cost again")
 }

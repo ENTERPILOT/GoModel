@@ -2,15 +2,18 @@ package server
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 
 	"github.com/enterpilot/gomodel/internal/echotest"
 )
@@ -103,6 +106,73 @@ func TestJSONUsageEditor_UsageObjectOverTheLimit(t *testing.T) {
 	within := &jsonUsageEditor{edit: edit, maxUsage: 64}
 	assert.Equal(t, `{"id":"x","usage":{"prompt_tokens":1,"padding":"0123456789","cost":0.5},"more":1,"usage":{"cost":0.5}}`,
 		editBodyPieces(within, large+small))
+}
+
+// The limit counts every byte of the object, its closing brace included: an
+// object of exactly the limit is rewritten, and one byte more is relayed as
+// it is. Either way the members after it are read on, so a provider's cost
+// behind it is still removed.
+func TestJSONUsageEditor_UsageObjectAtTheLimit(t *testing.T) {
+	const (
+		object = `{"prompt_tokens":1,"cost":9}`
+		body   = `{"usage":` + object + `,"cost":7,"id":"x"}`
+	)
+	tests := []struct {
+		name  string
+		limit int
+		want  string
+	}{
+		{name: "at the limit", limit: len(object), want: `{"usage":{"prompt_tokens":1,"cost":0.5},"id":"x"}`},
+		{name: "one byte over", limit: len(object) - 1, want: `{"usage":` + object + `,"id":"x"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, size := range []int{1, 3, len(body)} {
+				editor := &jsonUsageEditor{edit: newUsageCostEdit(0.5, true, true), maxUsage: tt.limit}
+
+				assert.Equal(t, tt.want, editBodyPieces(editor, pieces(body, size)...), "write size %d", size)
+			}
+		})
+	}
+}
+
+// With markups the bytes between two top-level members are held until the
+// second is named. An upstream cannot make the gateway hold a body's worth of
+// them: whitespace past the bound is relayed as it arrives, the body stays
+// the JSON it was, and a provider's cost is still removed with its comma.
+func TestJSONUsageEditor_BoundsTheHeldSeparator(t *testing.T) {
+	gap := strings.Repeat(" ", 16*maxHeldSeparatorBytes)
+	tests := []struct {
+		name string
+		body string
+		want string // the body without its whitespace
+	}{
+		{name: "before a member that stays", body: `{"id":"x",` + gap + `"usage":{"total_tokens":3}}`, want: `{"id":"x","usage":{"total_tokens":3,"cost":0.5}}`},
+		{name: "before a removed member", body: `{"id":"x",` + gap + `"cost":9,"usage":{}}`, want: `{"id":"x","usage":{"cost":0.5}}`},
+		{name: "before the comma of a removed member", body: `{"id":"x"` + gap + `,` + gap + `"cost":9}`, want: `{"id":"x"}`},
+		{name: "after a removed first member", body: `{"cost":9,` + gap + `"id":"x"}`, want: `{"id":"x"}`},
+		{name: "before the closing brace", body: `{"id":"x"` + gap + `}`, want: `{"id":"x"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			whole := editedBody(newUsageCostEdit(0.5, true, true), tt.body)
+			for _, size := range []int{1, maxHeldSeparatorBytes + 1, len(tt.body)} {
+				editor := &jsonUsageEditor{edit: newUsageCostEdit(0.5, true, true)}
+				held := 0
+				var out bytes.Buffer
+				for _, piece := range pieces(tt.body, size) {
+					require.NoError(t, editor.feed(&out, []byte(piece)))
+					held = max(held, cap(editor.members.held))
+				}
+				out.Write(editor.flush())
+
+				require.True(t, gjson.ValidBytes(out.Bytes()), "write size %d", size)
+				assert.Equal(t, tt.want, strings.ReplaceAll(out.String(), " ", ""), "write size %d", size)
+				require.Equal(t, whole, out.String(), "every split gives the same body (write size %d)", size)
+				assert.LessOrEqual(t, held, 2*maxHeldSeparatorBytes, "write size %d", size)
+			}
+		})
+	}
 }
 
 // The limit a gateway runs with is the size of the largest event it reads.

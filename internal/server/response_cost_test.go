@@ -538,7 +538,9 @@ func TestResponseCost_ErrorsCarryNothing(t *testing.T) {
 // are relayed when costs are returned, so the header can carry the cost.
 func TestResponseCost_RelayedJSONAnswers(t *testing.T) {
 	t.Run("decisions", func(t *testing.T) {
-		srv, logger := costGateway(t, newDecisionsTestProvider(), returnCosts, func(cfg *Config) {
+		provider := newDecisionsTestProvider()
+		provider.cost = "9" // an upstream's own usage.cost, which the gateway's replaces
+		srv, logger := costGateway(t, provider, returnCosts, func(cfg *Config) {
 			cfg.ModelResolver = decisionAliases
 		})
 
@@ -547,10 +549,13 @@ func TestResponseCost_RelayedJSONAnswers(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		require.Len(t, logger.entries, 1)
 		require.NotNil(t, logger.entries[0].TotalCost)
-		assert.Equal(t, formatResponseCost(*logger.entries[0].TotalCost), rec.Header().Get(responseCostHeader))
-		if usageObject := gjson.Get(rec.Body.String(), "usage"); usageObject.IsObject() {
-			assert.Equal(t, rec.Header().Get(responseCostHeader), usageObject.Get("cost").Raw)
-		}
+		// 40 input tokens at $1 per million.
+		assert.Equal(t, "0.00004", formatResponseCost(*logger.entries[0].TotalCost))
+		assert.Equal(t, "0.00004", rec.Header().Get(responseCostHeader))
+		usageObject := gjson.Get(rec.Body.String(), "usage")
+		require.True(t, usageObject.IsObject(), rec.Body.String())
+		assert.Equal(t, "0.00004", usageObject.Get("cost").Raw)
+		assert.Equal(t, int64(40), usageObject.Get("total_tokens").Int(), "the rest of the usage object is the upstream's")
 	})
 
 	// The answer is not committed yet when the provider body fails, so the

@@ -101,7 +101,8 @@ func TestResponseCost_OffChangesNoByte(t *testing.T) {
 // A chained Responses stream (previous_response_id) is rewritten whether or
 // not costs are returned, so its bytes are pinned here: for an upstream that
 // frames with CRLF, the rewritten event ends its data line and the block with
-// LF, as it always did, and the lines before them keep their CRLF.
+// LF, as it always did, and the lines before them keep their CRLF. With costs
+// returned, the same stream carries this gateway's cost instead.
 func TestResponseCost_OffChainedResponsesStreamKeepsItsBytes(t *testing.T) {
 	const (
 		created   = "event: response.created\r\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_2\",\"status\":\"in_progress\"}}\r\n\r\n"
@@ -114,7 +115,24 @@ func TestResponseCost_OffChainedResponsesStreamKeepsItsBytes(t *testing.T) {
 		"id: 7\r\nevent: response.completed\r\ndata: {\"type\":\"response.completed\",\"response\":{\"previous_response_id\":\"resp_1\",\"id\":\"resp_2\",\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"cost\":9}}}\nretry: 1000\n\n" +
 		done
 
-	for _, oneByte := range []bool{false, true} {
-		assert.Equal(t, want, readChained(t, created+delta+completed+done, "resp_1", oneByte))
+	send := func(configure ...func(*Config)) offResponse {
+		provider := costResponsesProvider()
+		provider.streamData = created + delta + completed + done
+		srv, _ := costGateway(t, provider, configure...)
+		// The turn the stream chains on.
+		first := postJSON(t, srv, "/v1/responses", `{"model":"gpt-4o-mini","input":"Hi"}`)
+		require.Equal(t, http.StatusOK, first.Code, first.Body.String())
+		waitForStoredResponse(t, srv.handler.currentResponseStore(), "resp_1")
+		return receivedResponse(postJSON(t, srv, "/v1/responses", `{"model":"gpt-4o-mini","input":"Hi","previous_response_id":"resp_1","stream":true}`))
 	}
+	bypassed := send(func(cfg *Config) { cfg.UsageLogger = nil })
+
+	off := send()
+	on := send(returnCosts)
+
+	require.Equal(t, http.StatusOK, off.code, off.body)
+	assert.Equal(t, want, off.body)
+	assert.Equal(t, bypassed, off)
+	// One input token at $1 per million.
+	assert.Equal(t, strings.Replace(want, `"cost":9`, `"cost":0.000001`, 1), on.body, "the middleware is what changes the stream")
 }

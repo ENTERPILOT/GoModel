@@ -26,16 +26,19 @@ func (t *BillableTap) Write(entry *UsageEntry) {
 	t.inner.Write(entry)
 }
 
-// StampBilling implements BillingStamper.
+// StampBilling implements BillingStamper. The provider is looked up once per
+// entry: Write records a stamped entry with the decision its returned cost was
+// calculated with, even if the provider's setting changed in between.
 func (t *BillableTap) StampBilling(entry *UsageEntry) {
 	t.mark(entry)
 	StampBilling(t.inner, entry)
 }
 
 func (t *BillableTap) mark(entry *UsageEntry) {
-	if entry == nil {
+	if entry == nil || entry.billabilityDecided {
 		return
 	}
+	entry.billabilityDecided = true
 	// Rows written before provider names existed carry only the provider
 	// type, which is also the default instance name.
 	name := strings.TrimSpace(entry.ProviderName)

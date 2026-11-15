@@ -172,17 +172,39 @@ func TestResponseCost_RefusesEncodedAnswers(t *testing.T) {
 		})
 	}
 
-	t.Run("identity is not an encoding", func(t *testing.T) {
-		header := jsonHeader()
-		header.Set("Content-Encoding", "identity")
-		body := `{"id":"chatcmpl-1","choices":[],"usage":{` + pricedUsage + `}}`
-		srv, _ := costGateway(t, costPassthroughProvider(header, strings.NewReader(body)), returnCosts)
+	// identity names no encoding: the answer is read, priced and cleaned of
+	// the upstream's costs like one without the header.
+	const upstreamUsage = `{"choices":[],"usage":{` + pricedUsage + `,"cost":9,"cost_details":{"upstream_inference_cost":8}}}`
+	identity := []struct {
+		name    string
+		header  http.Header
+		request string
+		answer  string
+	}{
+		{name: "JSON", header: jsonHeader(), request: passthroughChatBody, answer: upstreamUsage},
+		{name: "stream", header: sseHeader(), request: passthroughStreamBody, answer: "data: " + upstreamUsage + "\n\ndata: [DONE]\n\n"},
+	}
+	for _, tt := range identity {
+		t.Run("identity is not an encoding/"+tt.name, func(t *testing.T) {
+			header := tt.header.Clone()
+			header.Set("Content-Encoding", "Identity")
+			srv, _ := costGateway(t, costPassthroughProvider(header, strings.NewReader(tt.answer)), billCosts(t, 100, true))
 
-		rec := postJSON(t, srv, passthroughChatPath, passthroughChatBody)
+			rec := postJSON(t, srv, passthroughChatPath, tt.request)
 
-		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-		assert.Equal(t, responseCostAmount, rec.Header().Get(responseCostHeader))
-	})
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			payload := rec.Body.Bytes()
+			if isSSEContentType(tt.header) {
+				payload = usageEventData(t, rec.Body.String())
+			} else {
+				assert.Equal(t, "0.00004", rec.Header().Get(responseCostHeader))
+			}
+			assertOneGatewayCost(t, payload, "0.00004")
+			assertNoCostDetails(t, payload)
+			assert.NotContains(t, rec.Body.String(), ":9")
+			assert.NotContains(t, rec.Body.String(), ":8")
+		})
+	}
 }
 
 // paddedChatAnswer returns a chat answer of exactly size bytes, with an
@@ -225,6 +247,48 @@ func TestResponseCost_RelayedJSONSizeLimit(t *testing.T) {
 			assert.Equal(t, strings.Replace(body, `,"cost":9`, costMember(tt.wantCost), 1), rec.Body.String())
 		})
 	}
+}
+
+// An answer is known to be too large only once the limit was read. From then
+// on nothing is held: what was read is sent at once, and each later piece when
+// it arrives, not when the upstream is done.
+func TestResponseCost_OversizedJSONIsRelayedAsItArrivesPastTheLimit(t *testing.T) {
+	body := paddedChatAnswer(t, maxObservedJSONResponseBytes+64)
+	head, next, last := body[:maxObservedJSONResponseBytes+1], body[maxObservedJSONResponseBytes+1:maxObservedJSONResponseBytes+32], body[maxObservedJSONResponseBytes+32:]
+	upstream, feed := io.Pipe()
+	srv, _ := costGateway(t, costPassthroughProvider(jsonHeader(), upstream), returnCosts)
+	fed := make(chan error, 1)
+	feedPiece := func(piece string) {
+		go func() {
+			_, err := feed.Write([]byte(piece))
+			fed <- err
+		}()
+	}
+	feedPiece(head)
+
+	resp := postToGateway(t, srv, passthroughChatPath, passthroughChatBody)
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Empty(t, resp.Header.Values(responseCostHeader), "too large to price")
+	// The upstream is still open: each read returns only if the piece was
+	// relayed before the upstream sent more.
+	for _, piece := range []string{strings.Replace(head, `,"cost":9`, "", 1), next} {
+		require.NoError(t, <-fed)
+		got := make([]byte, len(piece))
+		_, err := io.ReadFull(resp.Body, got)
+		require.NoError(t, err, "a piece is held back")
+		require.Equal(t, piece, string(got), "the piece is relayed as it is, without the upstream's cost")
+		if piece != next {
+			feedPiece(next)
+		}
+	}
+	go func() {
+		_, _ = feed.Write([]byte(last))
+		_ = feed.Close()
+	}()
+	tail, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, last, string(tail))
 }
 
 // A stream framed with CRLF keeps its framing: the rewritten usage event ends

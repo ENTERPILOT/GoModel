@@ -103,6 +103,13 @@ func TestJSONUsageEditor(t *testing.T) {
 		{name: "top-level array", body: `[{"usage":{"cost":1}}]`},
 		{name: "not JSON", body: `data: {"usage":{"cost":1}}`},
 		{name: "truncated", body: `{"usage":{"cost":1,"total_tokens":`},
+		{
+			// The body is not held to be validated first: a complete usage
+			// object is rewritten before the bytes after it are read.
+			name: "malformed after a complete usage object",
+			body: `{"usage":{"total_tokens":1,"cost":9},"broken":}`,
+			want: `{"usage":{"total_tokens":1,` + cost + `},"broken":}`,
+		},
 		{name: "after the object", body: `{"id":"x"} {"usage":{"cost":1}}`},
 	}
 	for _, tt := range tests {
