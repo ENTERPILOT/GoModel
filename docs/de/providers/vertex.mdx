@@ -71,6 +71,14 @@ Die Standard-Basen werden aus Projekt und Standort abgeleitet:
 - OpenAI-kompatibel: `.../projects/{project}/locations/{location}/endpoints/openapi`
 - natives Gemini: `.../projects/{project}/locations/{location}/publishers/google`
 
+Ein im Dashboard gespeicherter Provider nutzt die Application Default Credentials
+des Hosts oder eine Service-Account-Datei auf dem Host nur für Googles
+Vertex-AI-Endpunkte: `aiplatform.googleapis.com`, `{location}-aiplatform.googleapis.com`
+und `aiplatform.{location}.rep.googleapis.com`, jeweils über HTTPS. Speichern Sie
+für jede andere Base URL, etwa einen Proxy oder einen Private-Service-Connect-Endpunkt,
+Service-Account-JSON mit dem Provider. Für Provider, die in `config.yaml` oder über
+Umgebungsvariablen deklariert sind, gilt diese Einschränkung nicht.
+
 Vertex-Embeddings verwenden unabhängig von `VERTEX_API_MODE` die native Vorhersage (Prediction)
 von Vertex AI. Im nativen Modus (dem Standard) werden die [Bild-Endpunkte](/de/advanced/images-api)
 über die Publisher-Endpunkte bedient (Imagen über `predict`, Gemini-Bildmodelle über
