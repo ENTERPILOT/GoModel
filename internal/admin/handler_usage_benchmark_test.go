@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -117,6 +118,62 @@ func TestUsageBenchmark_Params(t *testing.T) {
 			assert.Equal(t, tt.wantTop, got.TopUsers)
 			// The mock returns nil, so the handler answers with the empty months.
 			assert.Contains(t, rec.Body.String(), `"months":[`)
+		})
+	}
+}
+
+// America/Asuncion went from 2023-09-30 24:00 straight to 2023-10-01 01:00, so
+// October has no midnight to start at: it starts at 01:00 (04:00 UTC).
+func TestUsageBenchmark_MonthStartingAtASkippedMidnight(t *testing.T) {
+	tests := []struct {
+		name       string
+		query      string
+		now        time.Time
+		wantStart  time.Time
+		wantEnd    time.Time // exclusive
+		wantMonths []string
+	}{
+		{
+			name: "the month itself", query: "start_month=2023-10&end_month=2023-10", now: time.Date(2023, 12, 10, 12, 0, 0, 0, time.UTC),
+			wantStart: time.Date(2023, 10, 1, 4, 0, 0, 0, time.UTC), wantEnd: time.Date(2023, 11, 1, 3, 0, 0, 0, time.UTC),
+			wantMonths: []string{"2023-10"},
+		},
+		{
+			name: "the month before it", query: "start_month=2023-09&end_month=2023-09", now: time.Date(2023, 12, 10, 12, 0, 0, 0, time.UTC),
+			wantStart: time.Date(2023, 9, 1, 4, 0, 0, 0, time.UTC), wantEnd: time.Date(2023, 10, 1, 4, 0, 0, 0, time.UTC),
+			wantMonths: []string{"2023-09"},
+		},
+		{
+			name: "months counted back across it", query: "months=3&end_month=2023-11", now: time.Date(2023, 12, 10, 12, 0, 0, 0, time.UTC),
+			wantStart: time.Date(2023, 9, 1, 4, 0, 0, 0, time.UTC), wantEnd: time.Date(2023, 12, 1, 3, 0, 0, 0, time.UTC),
+			wantMonths: []string{"2023-09", "2023-10", "2023-11"},
+		},
+		{
+			name: "as the current month", now: time.Date(2023, 10, 20, 12, 0, 0, 0, time.UTC),
+			wantStart: time.Date(2023, 4, 1, 4, 0, 0, 0, time.UTC), wantEnd: time.Date(2023, 11, 1, 3, 0, 0, 0, time.UTC),
+			wantMonths: []string{"2023-04", "2023-05", "2023-06", "2023-07", "2023-08", "2023-09", "2023-10"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setTimeNow(t, tt.now)
+			reader := &mockUsageReader{}
+			c, rec := echotest.Get(t, "/admin/usage/benchmark?"+tt.query, echotest.WithHeader(dashboardTimeZoneHeader, "America/Asuncion"))
+			require.NoError(t, NewHandler(reader, nil).UsageBenchmark(c))
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			got := reader.lastBenchmark
+			assert.True(t, tt.wantStart.Equal(got.StartDate), "start %s", got.StartDate)
+			// Readers end the range one calendar day after EndDate.
+			end := got.EndDate.AddDate(0, 0, 1)
+			assert.True(t, tt.wantEnd.Equal(end), "end %s", end)
+
+			var body usage.Benchmark
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+			months := []string{}
+			for _, month := range body.Months {
+				months = append(months, month.Month)
+			}
+			assert.Equal(t, tt.wantMonths, months)
 		})
 	}
 }

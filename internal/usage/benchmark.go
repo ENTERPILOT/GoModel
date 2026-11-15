@@ -33,7 +33,7 @@ const (
 var maxBenchmarkUserMonths = 100000
 
 // BenchmarkParams configures a per-user cost benchmark. StartDate and EndDate
-// span whole months in TimeZone.
+// span whole months in TimeZone, as BenchmarkMonthBounds returns them.
 type BenchmarkParams struct {
 	UsageQueryParams
 	// Parent is the group: each direct child of it is one user, with its
@@ -178,7 +178,9 @@ func EmptyBenchmark(params BenchmarkParams) *Benchmark {
 	}
 	start := params.StartDate.In(location)
 	end := params.EndDate.In(location)
-	for month := time.Date(start.Year(), start.Month(), 1, 0, 0, 0, 0, location); !month.After(end); month = month.AddDate(0, 1, 0) {
+	// Counted in UTC: location may skip the midnight a month starts at.
+	last := time.Date(end.Year(), end.Month(), 1, 0, 0, 0, 0, time.UTC)
+	for month := time.Date(start.Year(), start.Month(), 1, 0, 0, 0, 0, time.UTC); !month.After(last); month = month.AddDate(0, 1, 0) {
 		key := month.Format("2006-01")
 		benchmark.Months = append(benchmark.Months, BenchmarkMonth{Month: key, Partial: key == current})
 	}

@@ -261,7 +261,9 @@ działa bez konfiguracji, dopóki [tagi LiteLLM](#tagi-litellm) są włączone
 [nagłówek tagujący](#nagłówki-tagujące) i wysyłaj go zamiast tego. W GitHub
 Actions ustaw etykietę raz dla joba. Uruchamiaj workflow na zdarzeniu
 `pull_request`: inne zdarzenia, na przykład `push`, nie mają numeru PR, więc
-etykietą byłoby samo `pr-`.
+etykietą byłoby samo `pr-`. GitHub nie przekazuje sekretów repozytorium do
+pull requestów z forków, więc job nie ma tam klucza: uruchamiaj go tylko dla
+gałęzi w repozytorium albo pomijaj, gdy sekret jest pusty.
 
 ```yaml .github/workflows/ci.yml
 on: pull_request

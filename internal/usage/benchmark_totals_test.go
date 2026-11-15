@@ -80,6 +80,9 @@ func TestBenchmarkCacheHitsOfUnknownBilledCost(t *testing.T) {
 	provider := breakdownGroup{Row: "/eng/a", Column: "2026-01", Requests: 1, PricedRequests: 1, BilledPricedRequests: 1, TotalCost: new(1.0), BilledCost: new(1.2)}
 	unknownHit := breakdownGroup{Row: "/eng/a", Column: "2026-01", Requests: 1}
 	unbilledHit := breakdownGroup{Row: "/eng/a", Column: "2026-01", Requests: 1, PricedRequests: 1, BilledPricedRequests: 1, TotalCost: new(2.0), BilledCost: new(0.0)}
+	// One hit billed a known 0 and one of unknown billed cost, in one group.
+	mixedHits := breakdownGroup{Row: "/eng/a", Column: "2026-01", Requests: 2, PricedRequests: 1, BilledPricedRequests: 1, TotalCost: new(2.0), BilledCost: new(0.0)}
+	unpriced := breakdownGroup{Row: "/eng/a", Column: "2026-01", Requests: 1}
 	tests := []struct {
 		name         string
 		provider     []breakdownGroup
@@ -93,6 +96,12 @@ func TestBenchmarkCacheHitsOfUnknownBilledCost(t *testing.T) {
 		{name: "billed: only hits of unknown cost are unpriced", hits: []breakdownGroup{unknownHit}, basis: BenchmarkCostBasisBilled, wantUnpriced: 1},
 		{name: "billed: an unbilled hit is a known zero", hits: []breakdownGroup{unbilledHit}, basis: BenchmarkCostBasisBilled},
 		{name: "billed: an unbilled hit beside known usage stays priced", provider: []breakdownGroup{provider}, hits: []breakdownGroup{unbilledHit}, basis: BenchmarkCostBasisBilled, wantCost: 1.2},
+		{name: "billed: an unbilled hit beside one of unknown cost is partly priced", hits: []breakdownGroup{mixedHits}, basis: BenchmarkCostBasisBilled, wantPartly: 1},
+		{name: "billed: the same hits in two groups", hits: []breakdownGroup{unknownHit, unbilledHit}, basis: BenchmarkCostBasisBilled, wantPartly: 1},
+		{name: "billed: an unbilled hit beside an unpriced request stays unpriced, as on the invoice", provider: []breakdownGroup{unpriced}, hits: []breakdownGroup{unbilledHit}, basis: BenchmarkCostBasisBilled, wantUnpriced: 1},
+		{name: "billed: so do mixed hits beside an unpriced request", provider: []breakdownGroup{unpriced}, hits: []breakdownGroup{mixedHits}, basis: BenchmarkCostBasisBilled, wantUnpriced: 1},
+		{name: "billed: mixed hits beside known usage are partly priced", provider: []breakdownGroup{provider}, hits: []breakdownGroup{mixedHits}, basis: BenchmarkCostBasisBilled, wantCost: 1.2, wantPartly: 1},
+		{name: "provider: mixed hits are a known zero", hits: []breakdownGroup{mixedHits}, basis: BenchmarkCostBasisProvider},
 		{name: "provider: a hit costs the provider nothing, known or not", provider: []breakdownGroup{provider}, hits: []breakdownGroup{unknownHit}, basis: BenchmarkCostBasisProvider, wantCost: 1},
 		{name: "provider: only hits of unknown cost are a known zero", hits: []breakdownGroup{unknownHit}, basis: BenchmarkCostBasisProvider},
 	}

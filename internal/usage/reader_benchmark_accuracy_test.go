@@ -51,8 +51,10 @@ func benchmarkAgreementFixture(b *benchmarkEntries) []*UsageEntry {
 		b.entry(ts, "/eng/frank", nil, nil),  // partly priced within one path
 		hit("/eng/gina", new(2.0), new(0.0)), // active through an unbilled hit
 		b.entry(ts, "/eng/hana", new(1.0), new(1.2)),
-		hit("/eng/hana", nil, nil), // ... plus a billed hit of unknown cost
-		hit("/eng/ivan", nil, nil), // billed hits of unknown cost only
+		hit("/eng/hana", nil, nil),      // ... plus a billed hit of unknown cost
+		hit("/eng/ivan", nil, nil),      // billed hits of unknown cost only
+		hit("/eng/judy", nil, new(0.0)), // an unbilled hit ...
+		hit("/eng/judy", nil, nil),      // ... and a billed one of unknown cost, in one group
 		b.entry(ts, "/eng", new(10.0), new(11.0)),
 		b.entry(ts, "/sales/x", new(100.0), new(100.0)),
 	}
@@ -75,10 +77,11 @@ func assertBenchmarkAccuracy(t *testing.T, store usageBatchWriter, reader UsageR
 	t.Run("per-user totals agree with the invoice", func(t *testing.T) {
 		invoice, err := reader.GetUsageInvoice(ctx, InvoiceParams{UsageQueryParams: benchmarkMarch(), Parent: "/eng"})
 		require.NoError(t, err)
-		// The invoice bills hana's known cost and leaves ivan out; only the
-		// billed benchmark can say that cache hits of unknown cost are missing.
+		// The invoice bills hana's known cost and leaves ivan and judy out;
+		// only the billed benchmark can say that cache hits of unknown cost
+		// are missing: all that ivan was billed, a part of judy's.
 		offInvoiceUnpriced := map[string]int{BenchmarkCostBasisProvider: 0, BenchmarkCostBasisBilled: 1}
-		partly := map[string]int{BenchmarkCostBasisProvider: 1, BenchmarkCostBasisBilled: 2}
+		partly := map[string]int{BenchmarkCostBasisProvider: 1, BenchmarkCostBasisBilled: 3}
 		for _, basis := range []string{BenchmarkCostBasisProvider, BenchmarkCostBasisBilled} {
 			t.Run(basis, func(t *testing.T) {
 				benchmark, err := reader.GetUsageBenchmark(ctx, BenchmarkParams{
@@ -102,14 +105,14 @@ func assertBenchmarkAccuracy(t *testing.T, store usageBatchWriter, reader UsageR
 		{
 			name:       "provider: unpriced, partly priced and a sibling path",
 			params:     BenchmarkParams{UsageQueryParams: benchmarkMarch(), Parent: "/eng"},
-			want:       []benchmarkRow{{"2026-03", false, 8, 1, 14, 10, new(1.75), new(0.5), new(4.2), new(7.0), nil, nil}},
+			want:       []benchmarkRow{{"2026-03", false, 9, 1, 14, 10, new(1.555555556), new(0.0), new(3.8), new(7.0), nil, nil}},
 			wantPartly: []int{1},
 		},
 		{
 			name:       "billed: unknown costs are counted, also those of cache hits",
 			params:     BenchmarkParams{UsageQueryParams: benchmarkMarch(), Parent: "/eng", CostBasis: BenchmarkCostBasisBilled},
-			want:       []benchmarkRow{{"2026-03", false, 8, 2, 16.9, 11, new(2.1125), new(0.85), new(4.92), new(8.0), nil, nil}},
-			wantPartly: []int{2},
+			want:       []benchmarkRow{{"2026-03", false, 9, 2, 16.9, 11, new(1.877777778), new(0.5), new(4.48), new(8.0), nil, nil}},
+			wantPartly: []int{3},
 		},
 		{
 			name:       "a parent does not absorb a sibling sharing its prefix",
@@ -120,7 +123,7 @@ func assertBenchmarkAccuracy(t *testing.T, store usageBatchWriter, reader UsageR
 		{
 			name:       "a scope equal to the parent keeps the unattributed cost",
 			params:     BenchmarkParams{UsageQueryParams: withScope(benchmarkMarch(), "/eng"), Parent: "/eng"},
-			want:       []benchmarkRow{{"2026-03", false, 8, 1, 14, 10, new(1.75), new(0.5), new(4.2), new(7.0), nil, nil}},
+			want:       []benchmarkRow{{"2026-03", false, 9, 1, 14, 10, new(1.555555556), new(0.0), new(3.8), new(7.0), nil, nil}},
 			wantPartly: []int{1},
 		},
 	}
@@ -207,13 +210,22 @@ func assertBenchmarkMatchesInvoice(t *testing.T, month BenchmarkMonth, invoice *
 }
 
 // assertBenchmarkMonthEdges puts usage on the first and last instant of
-// months, in Warsaw across both DST changes and in UTC; user i of a group
-// costs 2^i, so each month's total names the instants it holds.
+// months, in Warsaw across both DST changes, in UTC, and in Asunción, where
+// October 2023 has no midnight to start at; user i of a group costs 2^i, so
+// each month's total names the instants it holds.
 func assertBenchmarkMonthEdges(t *testing.T, store usageBatchWriter, reader UsageReader, entries *benchmarkEntries) {
 	t.Helper()
 	ctx := context.Background()
 	warsaw, err := time.LoadLocation("Europe/Warsaw")
 	require.NoError(t, err)
+	asuncion, err := time.LoadLocation("America/Asuncion")
+	require.NoError(t, err)
+	asuncionMonths := func(first, last time.Month) UsageQueryParams {
+		params := UsageQueryParams{TimeZone: asuncion.String()}
+		params.StartDate, params.EndDate = BenchmarkMonthBounds(
+			time.Date(2023, first, 1, 0, 0, 0, 0, time.UTC), time.Date(2023, last, 1, 0, 0, 0, 0, time.UTC), asuncion)
+		return params
+	}
 	instant := func(year int, month time.Month, day, hour, minute, second, ms int) time.Time {
 		return time.Date(year, month, day, hour, minute, second, ms*int(time.Millisecond), time.UTC)
 	}
@@ -233,6 +245,12 @@ func assertBenchmarkMonthEdges(t *testing.T, store usageBatchWriter, reader Usag
 			instant(2026, 3, 1, 0, 0, 0, 0),
 			instant(2026, 3, 31, 23, 59, 59, 999),
 			instant(2026, 4, 1, 0, 0, 0, 0),
+		},
+		"/gap": {
+			instant(2023, 10, 1, 3, 59, 59, 999), // last of September (23:59 -04)
+			instant(2023, 10, 1, 4, 0, 0, 0),     // first of October (01:00 -03): 24:00 became 01:00
+			instant(2023, 11, 1, 2, 59, 59, 999), // last of October
+			instant(2023, 11, 1, 3, 0, 0, 0),     // first of November
 		},
 	}
 	var rows []*UsageEntry
@@ -270,6 +288,9 @@ func assertBenchmarkMonthEdges(t *testing.T, store usageBatchWriter, reader Usag
 			},
 			want: map[string]float64{"2026-02": 1, "2026-03": 2 + 4, "2026-04": 8},
 		},
+		{name: "a month starting at a skipped midnight", group: "/gap", params: asuncionMonths(time.October, time.October), want: map[string]float64{"2023-10": 2 + 4}},
+		{name: "the month before a skipped midnight", group: "/gap", params: asuncionMonths(time.September, time.September), want: map[string]float64{"2023-09": 1}},
+		{name: "months around a skipped midnight", group: "/gap", params: asuncionMonths(time.September, time.November), want: map[string]float64{"2023-09": 1, "2023-10": 2 + 4, "2023-11": 8}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -221,7 +221,7 @@ tagging:
 
 ## 每个拉取请求的成本
 
-要查看某个拉取请求（PR）的 CI 在模型上花费了多少，请为其作业发出的每个请求加上一个标明该 PR 的标签，例如 `pr-1234`。只要 [LiteLLM 标签](#litellm-标签)处于启用状态（默认启用），`x-litellm-tags` Header 无需任何配置即可使用；如果已关闭，请配置一个[标签请求头](#标签请求头)并改为发送它。在 GitHub Actions 中，为作业设置一次标签。请让工作流在 `pull_request` 事件上运行：`push` 等其他事件没有 PR 编号，标签会只剩 `pr-`。
+要查看某个拉取请求（PR）的 CI 在模型上花费了多少，请为其作业发出的每个请求加上一个标明该 PR 的标签，例如 `pr-1234`。只要 [LiteLLM 标签](#litellm-标签)处于启用状态（默认启用），`x-litellm-tags` Header 无需任何配置即可使用；如果已关闭，请配置一个[标签请求头](#标签请求头)并改为发送它。在 GitHub Actions 中，为作业设置一次标签。请让工作流在 `pull_request` 事件上运行：`push` 等其他事件没有 PR 编号，标签会只剩 `pr-`。GitHub 不会把仓库 Secret 传给来自 fork 的拉取请求，作业在那里没有密钥：请只为仓库内的分支运行它，或在 Secret 为空时跳过。
 
 ```yaml .github/workflows/ci.yml
 on: pull_request

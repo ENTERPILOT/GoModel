@@ -82,12 +82,11 @@ func (h *Handler) UsageBenchmark(c *echo.Context) error {
 	}
 
 	now := timeNow().In(location)
-	start, end, err := benchmarkMonthRange(c.QueryParam("start_month"), c.QueryParam("end_month"), months, now, location)
+	first, last, err := benchmarkMonthRange(c.QueryParam("start_month"), c.QueryParam("end_month"), months, now)
 	if err != nil {
 		return handleError(c, err)
 	}
-	baseParams.StartDate = start
-	baseParams.EndDate = end.AddDate(0, 1, -1)
+	baseParams.StartDate, baseParams.EndDate = usage.BenchmarkMonthBounds(first, last, location)
 	params := usage.BenchmarkParams{UsageQueryParams: baseParams, Parent: parent, CostBasis: costBasis, TopUsers: topUsers, Now: now}
 
 	var benchmark *usage.Benchmark
@@ -116,16 +115,18 @@ func benchmarkMonthsParam(c *echo.Context) (int, error) {
 	return months, nil
 }
 
-// benchmarkMonthRange resolves the first days of the first and last month.
-// The last month defaults to, and may not pass, the current one; the first
-// defaults to months-1 months before the last.
-func benchmarkMonthRange(rawStart, rawEnd string, months int, now time.Time, location *time.Location) (time.Time, time.Time, error) {
-	current := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, location)
-	end, err := parseBenchmarkMonth("end_month", rawEnd, current, location)
+// benchmarkMonthRange resolves the first and last month, each as its first
+// day in UTC: a calendar month, not an instant, because the request's zone
+// may skip the midnight a month starts at. The last month defaults to, and
+// may not pass, the month of now; the first defaults to months-1 months
+// before the last.
+func benchmarkMonthRange(rawStart, rawEnd string, months int, now time.Time) (time.Time, time.Time, error) {
+	current := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	end, err := parseBenchmarkMonth("end_month", rawEnd, current)
 	if err != nil {
 		return time.Time{}, time.Time{}, err
 	}
-	start, err := parseBenchmarkMonth("start_month", rawStart, end.AddDate(0, -(months-1), 0), location)
+	start, err := parseBenchmarkMonth("start_month", rawStart, end.AddDate(0, -(months-1), 0))
 	if err != nil {
 		return time.Time{}, time.Time{}, err
 	}
@@ -140,12 +141,12 @@ func benchmarkMonthRange(rawStart, rawEnd string, months int, now time.Time, loc
 	return start, end, nil
 }
 
-func parseBenchmarkMonth(name, raw string, fallback time.Time, location *time.Location) (time.Time, error) {
+func parseBenchmarkMonth(name, raw string, fallback time.Time) (time.Time, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return fallback, nil
 	}
-	month, err := time.ParseInLocation("2006-01", raw, location)
+	month, err := time.Parse("2006-01", raw)
 	if err != nil {
 		return time.Time{}, core.NewInvalidRequestError("invalid "+name+", expected YYYY-MM", nil)
 	}
