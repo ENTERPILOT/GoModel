@@ -185,8 +185,8 @@ limit the client sent. The effort ceiling only lowers an effort
 the request sends and never adds one, because adding an effort would switch
 reasoning on for requests that did not ask for it. A request without an effort
 therefore runs at the model's default, and a model that cannot think less than
-some level (Gemini 3, OpenAI o-series, OpenCode Zen) still gets that level under
-a lower ceiling.
+some level (Gemini 3 and 4, OpenAI o-series, OpenCode Zen, Claude Fable 5.x,
+Mythos 5.x, and Opus 5.5) still gets that level under a lower ceiling.
 
 Besides `reasoning_effort` and `reasoning.effort`, an effort ceiling checks the
 provider-specific reasoning controls that reach upstreams, at the top level of
@@ -200,19 +200,25 @@ occurrence of a repeated member:
 | `think` (boolean or level)                                 | Ollama                                    |
 | `chat_template_kwargs.enable_thinking`, `.thinking`, `.reasoning_effort`, `.thinking_budget` | vLLM, SGLang, llama.cpp |
 | `extra_body.google.thinking_config` `thinking_budget`/`thinking_level` (names in any case) | Gemini |
-| Messages `thinking.budget_tokens`                          | Anthropic                                 |
+| Messages `thinking` (a `budget_tokens`, or adaptive) and `output_config.effort` | Anthropic            |
 
 A control that turns reasoning off (`false`, a zero budget,
 `{"type": "disabled"}`) and a level within the ceiling are kept. Anything the
 scale cannot place, such as a token budget or `true`, counts as above the
 ceiling: the gateway drops every client reasoning control and sends the ceiling
-as the effort instead. A Messages `budget_tokens` above the budget the gateway
-itself sends for the ceiling level (5000 for `low`, 10000 for `medium`, 20000
-for `high` and up) is lowered to that budget. Where an adapter fills in a value
+as the effort instead. A control object that repeats `type` and is `disabled`
+only in the last one is dropped too, but `none` is sent in its place, so the
+ceiling does not switch reasoning on. A Messages `budget_tokens` above the
+budget the gateway itself sends for the ceiling level (5000 for `low`, 10000
+for `medium`, 20000 for `high` and up) is lowered to that budget, and adaptive
+Messages thinking that names no `output_config.effort`, which Anthropic runs at
+`high`, gets a lower ceiling as its effort. Where an adapter fills in a value
 of its own (Anthropic's default `max_tokens` and the room it adds above a
 thinking budget, OpenCode Zen's default effort), that value is kept within the
 ceilings too: a thinking budget shrinks to fit under the capped `max_tokens`,
-and thinking is turned off when not even the minimum budget fits.
+and thinking is turned off when not even the minimum budget fits. Adaptive
+thinking (Claude Opus 4.6, Sonnet 4.6, and later) has no budget: it stays on,
+and the capped `max_tokens` bounds what it spends.
 
 Ceilings apply after [virtual model overrides](/features/virtual-models#force-a-reasoning-effort),
 on every attempt, including failover legs, so they also bound an effort or a
@@ -222,7 +228,13 @@ request within the ceilings is still forwarded natively to Anthropic, and one
 above them takes the translated path so it can be lowered. A request only
 Anthropic can read (server-tool history, for example) has no translated path,
 so its `max_tokens`, thinking budget, and `output_config.effort` are lowered in
-the forwarded body instead. Embeddings and
+the forwarded body instead. Under a `none` ceiling its thinking is turned off
+with `thinking: {"type": "disabled"}`, which Fable 5.x, Mythos 5.x, Opus 5.5,
+and Sonnet 5.5 reject, so it fails on those models. A natively forwarded body
+that repeats one of these members or spells it in another letter case reaches
+Anthropic with a single one: the lowest `max_tokens`, the last `thinking` and
+`output_config`. A body the gateway cannot bring within the ceilings is refused
+with `400`, never forwarded above them. Embeddings and
 media endpoints are not rewritten. [Response cache](/features/cache) entries
 are scoped to the ceilings in force, so an answer cached before a ceiling was
 set or changed is not served under the new one.

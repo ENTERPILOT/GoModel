@@ -185,8 +185,9 @@ podnosi wartości wysłanej przez klienta. Limit effortu tylko
 obniża effort, który request niesie, i
 nigdy go nie dodaje, bo dodany effort włączyłby reasoning w requestach, które o
 to nie prosiły. Request bez effortu działa więc z domyślnym ustawieniem modelu,
-a model, który nie potrafi myśleć mniej niż na pewnym poziomie (Gemini 3,
-OpenAI seria o, OpenCode Zen), dostaje ten poziom także przy niższym limicie.
+a model, który nie potrafi myśleć mniej niż na pewnym poziomie (Gemini 3 i 4,
+OpenAI seria o, OpenCode Zen, Claude Fable 5.x, Mythos 5.x i Opus 5.5), dostaje
+ten poziom także przy niższym limicie.
 
 Oprócz `reasoning_effort` i `reasoning.effort` limit effortu sprawdza
 specyficzne dla providerów sterowania reasoningiem, które docierają do
@@ -200,20 +201,25 @@ dowolnej wielkości liter i w każdym wystąpieniu powtórzonej składowej:
 | `think` (wartość logiczna albo poziom)                     | Ollama                                    |
 | `chat_template_kwargs.enable_thinking`, `.thinking`, `.reasoning_effort`, `.thinking_budget` | vLLM, SGLang, llama.cpp |
 | `extra_body.google.thinking_config` `thinking_budget`/`thinking_level` (nazwy w dowolnej wielkości liter) | Gemini |
-| Messages `thinking.budget_tokens`                          | Anthropic                                 |
+| Messages `thinking` (`budget_tokens` albo adaptacyjny) i `output_config.effort` | Anthropic            |
 
 Sterowanie, które wyłącza reasoning (`false`, budżet zero,
 `{"type": "disabled"}`), oraz poziom w granicach limitu zostają zachowane.
 Wszystko, czego skala nie potrafi umieścić, np. budżet tokenów albo `true`,
 liczy się jako powyżej limitu: gateway usuwa wszystkie sterowania reasoningiem
-klienta i zamiast nich wysyła limit jako effort. Messages `budget_tokens`
-powyżej budżetu, który gateway sam wysyła dla poziomu limitu (5000 dla `low`,
-10000 dla `medium`, 20000 od `high`), zostaje obniżony do tego budżetu. Gdy
+klienta i zamiast nich wysyła limit jako effort. Obiekt sterowania, który
+powtarza `type` i ma `disabled` tylko w ostatnim wystąpieniu, też jest usuwany,
+ale w jego miejsce wysyłane jest `none`, żeby limit nie włączał reasoningu.
+Messages `budget_tokens` powyżej budżetu, który gateway sam wysyła dla poziomu
+limitu (5000 dla `low`, 10000 dla `medium`, 20000 od `high`), zostaje obniżony
+do tego budżetu, a adaptacyjny thinking Messages bez `output_config.effort`,
+który Anthropic wykonuje z `high`, dostaje niższy limit jako effort. Gdy
 adapter sam wstawia wartość (domyślne `max_tokens` Anthropic i zapas, który
 dodaje ponad budżet thinking, domyślny effort OpenCode Zen), także ona mieści
 się w limitach: budżet thinking kurczy się, aż zmieści się pod ograniczonym
 `max_tokens`, a thinking zostaje wyłączony, gdy nie mieści się nawet budżet
-minimalny.
+minimalny. Adaptacyjny thinking (Claude Opus 4.6, Sonnet 4.6 i nowsze) nie ma
+budżetu: zostaje włączony, a ograniczone `max_tokens` wyznacza, ile może zużyć.
 
 Limity działają po [nadpisaniach modeli wirtualnych](/pl/features/virtual-models#wymuszanie-reasoning-effort),
 przy każdej próbie, także przy próbach failover, więc ograniczają też effort
@@ -223,8 +229,15 @@ mieszczący się w limitach jest nadal przekazywany natywnie do Anthropic, a
 przekraczający je idzie ścieżką tłumaczoną, żeby można go było obniżyć.
 Request, który potrafi odczytać tylko Anthropic (np. z historią narzędzi
 serwerowych), nie ma ścieżki tłumaczonej, więc jego `max_tokens`, budżet
-thinking i `output_config.effort` są obniżane w przekazywanym body.
-Embeddingi i endpointy mediów nie są przepisywane. Wpisy
+thinking i `output_config.effort` są obniżane w przekazywanym body. Przy
+limicie `none` jego thinking jest wyłączany przez
+`thinking: {"type": "disabled"}`, co Fable 5.x, Mythos 5.x, Opus 5.5 i
+Sonnet 5.5 odrzucają, więc na tych modelach taki request kończy się błędem.
+Natywnie przekazywane body, które powtarza jedną z tych składowych albo zapisuje
+ją inną wielkością liter, dociera do Anthropic z jedną: najniższym `max_tokens`
+oraz ostatnim `thinking` i `output_config`. Body, którego gateway nie potrafi
+zmieścić w limitach, jest odrzucane z `400` i nigdy nie jest przekazywane ponad
+nie. Embeddingi i endpointy mediów nie są przepisywane. Wpisy
 [cache'u odpowiedzi](/pl/features/cache) są powiązane z obowiązującymi
 limitami, więc odpowiedź zapisana w cache'u przed ustawieniem lub zmianą limitu
 nie jest zwracana pod nowym.

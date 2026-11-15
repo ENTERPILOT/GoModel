@@ -196,8 +196,9 @@ Effort-Obergrenze senkt nur einen Effort, den der Request mitbringt, und fügt
 nie einen hinzu, weil ein hinzugefügter Effort Reasoning für Requests
 einschalten würde, die nicht danach gefragt haben. Ein Request ohne Effort
 läuft daher mit dem Standard des Modells, und ein Modell, das nicht unter eine
-bestimmte Stufe denken kann (Gemini 3, OpenAI o-Serie, OpenCode Zen), erhält
-diese Stufe auch unter einer niedrigeren Obergrenze.
+bestimmte Stufe denken kann (Gemini 3 und 4, OpenAI o-Serie, OpenCode Zen,
+Claude Fable 5.x, Mythos 5.x und Opus 5.5), erhält diese Stufe auch unter einer
+niedrigeren Obergrenze.
 
 Neben `reasoning_effort` und `reasoning.effort` prüft eine Effort-Obergrenze
 die providerspezifischen Reasoning-Steuerungen, die Upstreams erreichen, auf
@@ -211,21 +212,28 @@ Groß-/Kleinschreibung und in jedem Vorkommen eines wiederholten Members:
 | `think` (Boolean oder Stufe)                               | Ollama                                    |
 | `chat_template_kwargs.enable_thinking`, `.thinking`, `.reasoning_effort`, `.thinking_budget` | vLLM, SGLang, llama.cpp |
 | `extra_body.google.thinking_config` `thinking_budget`/`thinking_level` (Namen in beliebiger Schreibweise) | Gemini |
-| Messages `thinking.budget_tokens`                          | Anthropic                                 |
+| Messages `thinking` (ein `budget_tokens` oder adaptiv) und `output_config.effort` | Anthropic          |
 
 Eine Steuerung, die Reasoning ausschaltet (`false`, ein Budget von null,
 `{"type": "disabled"}`), und eine Stufe innerhalb der Obergrenze bleiben
 erhalten. Alles, was die Skala nicht einordnen kann, etwa ein Token-Budget oder
 `true`, gilt als über der Obergrenze: Das Gateway entfernt alle
 Reasoning-Steuerungen des Clients und sendet stattdessen die Obergrenze als
-Effort. Ein Messages-`budget_tokens` über dem Budget, das das Gateway selbst für
-die Stufe der Obergrenze sendet (5000 für `low`, 10000 für `medium`, 20000 ab
-`high`), wird auf dieses Budget gesenkt. Wo ein Adapter selbst einen Wert
+Effort. Ein Steuerungsobjekt, das `type` wiederholt und nur im letzten Vorkommen
+`disabled` ist, wird ebenfalls entfernt, an seiner Stelle wird aber `none`
+gesendet, damit die Obergrenze Reasoning nicht einschaltet. Ein
+Messages-`budget_tokens` über dem Budget, das das Gateway selbst für die Stufe
+der Obergrenze sendet (5000 für `low`, 10000 für `medium`, 20000 ab `high`),
+wird auf dieses Budget gesenkt, und adaptives Messages-Thinking ohne
+`output_config.effort`, das Anthropic mit `high` ausführt, erhält eine
+niedrigere Obergrenze als Effort. Wo ein Adapter selbst einen Wert
 einsetzt (Anthropics Standard-`max_tokens` und der Platz über einem
 Thinking-Budget, der Standard-Effort von OpenCode Zen), bleibt auch dieser
 innerhalb der Obergrenzen: Ein Thinking-Budget schrumpft, bis es unter das
 begrenzte `max_tokens` passt, und Thinking wird ausgeschaltet, wenn nicht
-einmal das Mindestbudget passt.
+einmal das Mindestbudget passt. Adaptives Thinking (Claude Opus 4.6, Sonnet 4.6
+und neuer) hat kein Budget: Es bleibt an, und das begrenzte `max_tokens`
+beschränkt, was es verbraucht.
 
 Obergrenzen greifen nach den [Overrides virtueller Modelle](/de/features/virtual-models#reasoning-effort-erzwingen)
 bei jedem Versuch, auch bei Failover-Versuchen, und begrenzen daher auch einen
@@ -236,7 +244,14 @@ weiterhin nativ an Anthropic weitergeleitet, einer darüber nimmt den
 übersetzten Pfad, damit er gesenkt werden kann. Ein Request, den nur Anthropic
 lesen kann (etwa mit Server-Tool-Verlauf), hat keinen übersetzten Pfad; bei ihm
 werden `max_tokens`, das Thinking-Budget und `output_config.effort` stattdessen
-im weitergeleiteten Body gesenkt. Embeddings und
+im weitergeleiteten Body gesenkt. Unter einer Obergrenze `none` wird sein
+Thinking mit `thinking: {"type": "disabled"}` ausgeschaltet; Fable 5.x,
+Mythos 5.x, Opus 5.5 und Sonnet 5.5 lehnen das ab, sodass er auf diesen Modellen
+fehlschlägt. Ein nativ weitergeleiteter Body, der einen dieser Member wiederholt
+oder in anderer Groß-/Kleinschreibung schreibt, erreicht Anthropic mit einem
+einzigen: dem niedrigsten `max_tokens`, dem letzten `thinking` und
+`output_config`. Ein Body, den das Gateway nicht unter die Obergrenzen bringen
+kann, wird mit `400` abgelehnt und nie darüber weitergeleitet. Embeddings und
 Medien-Endpunkte werden nicht umgeschrieben. Einträge im
 [Response-Cache](/de/features/cache) sind an die geltenden Obergrenzen
 gebunden: Eine Antwort, die vor dem Setzen oder Ändern einer Obergrenze
