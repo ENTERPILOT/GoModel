@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -23,6 +24,8 @@ func TestWithinRequestCeilings(t *testing.T) {
 		wantTokens int
 		// wantThinking is the thinking block sent: nil for none.
 		wantThinking *anthropicThinking
+		// wantEffort is the output_config.effort sent: "" for none.
+		wantEffort string
 	}{
 		{name: "the default limit is clamped to the ceiling", model: "claude-sonnet-4-5", ceiling: 1000, wantTokens: 1000},
 		{name: "a configured default is clamped too", model: "claude-sonnet-4-5", ceiling: 1000, envDefault: "64000", wantTokens: 1000},
@@ -32,9 +35,22 @@ func TestWithinRequestCeilings(t *testing.T) {
 			wantTokens: 1000,
 		},
 		{
-			name: "no budget fits on a model that thinks by default: thinking is disabled", model: "claude-haiku-5-5", maxTokens: new(1000), effort: "low", ceiling: 1000,
+			name: "adaptive thinking has no budget: it stays under the clamped limit", model: "claude-haiku-5-5", maxTokens: new(1000), effort: "low", ceiling: 1000,
+			wantTokens: 1000, wantThinking: &anthropicThinking{Type: "adaptive"}, wantEffort: "low",
+		},
+		{
+			name: "the default limit is clamped under adaptive thinking", model: "claude-opus-5", effort: "high", ceiling: 1000,
+			wantTokens: 1000, wantThinking: &anthropicThinking{Type: "adaptive"}, wantEffort: "high",
+		},
+		{
+			name: "a model that always thinks keeps the least effort it accepts", model: "claude-fable-5-2", effort: "none", ceiling: 1000,
+			wantTokens: 1000, wantThinking: &anthropicThinking{Type: "adaptive"}, wantEffort: "low",
+		},
+		{
+			name: "thinking turned off on a model that thinks by default stays off", model: "claude-opus-5", effort: "none", ceiling: 1000,
 			wantTokens: 1000, wantThinking: &anthropicThinking{Type: "disabled"},
 		},
+		{name: "a model that thinks by default gets no thinking block it did not ask for", model: "claude-opus-5", ceiling: 1000, wantTokens: 1000},
 		{
 			name: "the budget shrinks to leave room for the answer", model: "claude-sonnet-4-5", maxTokens: new(8000), effort: "high", ceiling: 8000,
 			wantTokens: 8000, wantThinking: &anthropicThinking{Type: "enabled", BudgetTokens: 8000 - thinkingAnswerRoom},
@@ -67,6 +83,21 @@ func TestWithinRequestCeilings(t *testing.T) {
 
 			assert.Equal(t, tt.wantTokens, translated.MaxTokens)
 			assert.Equal(t, tt.wantThinking, translated.Thinking)
+			if tt.wantEffort == "" {
+				assert.Nil(t, translated.OutputConfig)
+				return
+			}
+			require.NotNil(t, translated.OutputConfig)
+			assert.Equal(t, tt.wantEffort, translated.OutputConfig.Effort)
 		})
+	}
+}
+
+// Leaving a budget's thinking block out turns thinking off only on a model
+// that does not think unless asked. Every model that thinks on its own takes
+// adaptive thinking, which has no budget for withinRequestCeilings to drop.
+func TestModelsThatThinkOnTheirOwnTakeNoBudget(t *testing.T) {
+	for _, model := range slices.Concat(defaultThinkingPrefixes, alwaysThinkingPrefixes) {
+		assert.True(t, isAdaptiveThinkingModel(model), model)
 	}
 }
