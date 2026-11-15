@@ -73,6 +73,7 @@ PRO_SSO_SAML_TRUST_EMAIL=true
 | `saml.trust_email` | `PRO_SSO_SAML_TRUST_EMAIL` | `false` | See [Email trust](#email-trust). |
 | `saml.metadata_refresh_interval` | `PRO_SSO_SAML_METADATA_REFRESH_INTERVAL` | `1h` | Metadata URL only. `1m` to `24h`. Setting it with a metadata file stops startup. |
 | `saml.idp_certificate_fingerprints` | `PRO_SSO_SAML_IDP_CERTIFICATE_FINGERPRINTS` | none (trust every signing certificate in the metadata) | See [Certificate pinning](#certificate-pinning). Comma-separated in the environment variable. |
+| `require_discovery` | `PRO_SSO_REQUIRE_DISCOVERY` | `false` | Set directly under `extensions.sso`, not under `saml`; the same setting covers OIDC discovery. With `idp_metadata_url`, makes metadata that cannot be fetched at startup a startup error instead of starting with logins unavailable. A metadata file must always be readable, so it has no effect there. |
 
 The shared settings in
 [Identity and admission](/pro/sso#identity-and-admission) keep their meaning.
@@ -139,7 +140,19 @@ extensions:
 
 - An alias hides a SAML attribute of the same name.
 - The user path attribute must have exactly one value; it is trimmed. Group
-  values are compared exactly as sent.
+  values are not trimmed and are compared exactly as sent. A groups attribute
+  with a single empty value counts as no groups, and one with a non-text
+  value refuses the login with `claim_mapping_failed` while `admin_groups` or
+  group mappings are set.
+- An assertion without the groups attribute that carries Entra ID's
+  `http://schemas.microsoft.com/claims/groups.link` instead (sent for people
+  in more than 150 groups) is refused with `groups_overage` while
+  `admin_groups` or group mappings are set. See
+  [Limits](/pro/sso#limits).
+- Changing `protocol`, or the attribute that `user_path_claim` or
+  `groups_claim` resolves to through `saml.attributes`, ends existing
+  sessions, as described in
+  [When the configuration changes](/pro/sso#when-the-configuration-changes).
 - `allowed_domains` and the default `user_path_claim: email` read the
   attribute named or aliased `email`. The user path is lower-cased only with
   `user_path_claim: email` or `user_path_case_insensitive: true`.
@@ -185,10 +198,12 @@ extensions:
 
 <Warning>
   The startup check only recognises names: `email`, the attribute aliased as
-  `email`, and the well-known email attributes `mail`, `email`,
-  `urn:oid:0.9.2342.19200300.100.1.3`, and
+  `email`, and the well-known email attributes
   `http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress`,
-  compared case-insensitively. An attribute that carries an email, or any
+  `http://schemas.xmlsoap.org/claims/EmailAddress`, `mail`, `email`,
+  `EmailAddress`, `User.Email`, `urn:oid:0.9.2342.19200300.100.1.3`, and
+  `urn:oid:1.2.840.113549.1.9.1`, all compared case-insensitively, directly or
+  through an alias. An attribute that carries an email, or any
   other value people can edit, under another name passes. Never use an
   attribute a user can edit for `user_path_claim` or `groups_claim`.
 </Warning>
@@ -206,7 +221,9 @@ own [audit reason](/pro/sso#rejected-login-reasons).
   entity ID in the metadata.
 - **The assertion itself is signed** by a currently valid signing certificate
   from the metadata, with RSA-SHA256 or stronger and a key of at least 2048
-  bits.
+  bits. A signature whose `KeyInfo` carries a certificate must use that one; a
+  signature without `KeyInfo` is tried against each trusted certificate, as
+  during a certificate rollover.
 - **There is exactly one assertion**, and it is not encrypted.
 - **It is within its validity window**, allowing 60 seconds of clock skew.
 - **The identity provider reports success.**
@@ -216,8 +233,15 @@ own [audit reason](/pro/sso#rejected-login-reasons).
 - **It is small and plain XML**: a form of at most 1 MiB, at most 900 XML
   elements, no DTD, comments, or processing instructions.
 
-Every value a login uses is read from the signed assertion, never from the
-rest of the document. Admission then applies as for OIDC.
+Every assertion value a login uses (the subject, the attributes, and the
+conditions such as audience and validity window) is read from the assertion as
+its signature verified it, never from the rest of the document. Some checks
+compare values outside the assertion's signature with what the gateway
+expects: `RelayState` is a field of the posted form, and the
+response's `Destination`, `InResponseTo`, `Issuer`, and status are part of the
+response envelope, which a signature covers only if the identity provider
+signs the response as well. None of them is used as identity. Admission then
+applies as for OIDC.
 
 ## Identity provider metadata
 
@@ -281,7 +305,8 @@ A session ends at `session_ttl`, or at the assertion's `SessionNotOnOrAfter`
 when that is earlier. An assertion whose `SessionNotOnOrAfter` has already
 passed is refused.
 
-Sign-out ends the GoModel session only, and behaves as described in
+Sign-out ends the GoModel session and then redirects to
+`provider_logout_url` when it is set, as for OIDC; see
 [Sign-out across replicas](/pro/sso#sign-out-across-replicas).
 
 ## Replay protection
@@ -306,10 +331,15 @@ backend.
   The limit is not configurable. Filter at the identity provider: send only
   the groups assigned to the application, or those named in `admin_groups`
   and `group_mappings`.
+- **Entra ID: at most 150 groups in an assertion.** Above that, Entra ID sends
+  `http://schemas.microsoft.com/claims/groups.link` instead of the groups, and
+  the login is refused with `groups_overage`. Emit only the groups assigned
+  to the application.
 - **No login started at the identity provider.** Logins must start at the
   gateway (`/sso/login`). Unsolicited responses are refused.
 - **No encrypted assertions.** They are refused with `encrypted_assertion`.
-- **No single logout.** Signing out of GoModel does not end the identity
-  provider session, and the gateway does not process logout requests from
-  the identity provider.
+- **No SAML single logout.** The gateway sends no SAML logout request and
+  processes none from the identity provider. Signing out ends the GoModel
+  session; it ends the identity-provider session only through a
+  `provider_logout_url` redirect.
 - **One identity provider per gateway.**

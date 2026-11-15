@@ -61,6 +61,7 @@ PRO_SSO_SAML_TRUST_EMAIL=true
 | `saml.trust_email` | `PRO_SSO_SAML_TRUST_EMAIL` | `false` | 参见[邮箱信任](#邮箱信任)。 |
 | `saml.metadata_refresh_interval` | `PRO_SSO_SAML_METADATA_REFRESH_INTERVAL` | `1h` | 仅适用于元数据 URL。`1m` 到 `24h`。与元数据文件同时设置会使启动中止。 |
 | `saml.idp_certificate_fingerprints` | `PRO_SSO_SAML_IDP_CERTIFICATE_FINGERPRINTS` | 无（信任元数据中的每个签名证书） | 参见[证书固定](#证书固定)。在环境变量中以逗号分隔。 |
+| `require_discovery` | `PRO_SSO_REQUIRE_DISCOVERY` | `false` | 直接设置在 `extensions.sso` 下，而不是 `saml` 下；同一设置也适用于 OIDC 服务发现。使用 `idp_metadata_url` 时，启动时无法获取的元数据会成为启动错误，而不是在登录不可用的状态下启动。元数据文件必须始终可读，因此该设置对其无效。 |
 
 [身份与准入](/zh/pro/sso#身份与准入)中的共享设置含义不变。
 
@@ -109,7 +110,9 @@ extensions:
 ```
 
 - 别名会遮蔽同名的 SAML 属性。
-- 用户路径属性必须恰好有一个值；其首尾空白会被去除。组的值按发送时的原样精确比较。
+- 用户路径属性必须恰好有一个值；其首尾空白会被去除。组的值不去除空白，按发送时的原样精确比较。只有一个空值的组属性表示没有组；在设置了 `admin_groups` 或组映射时，含有非文本值的组属性会使登录以 `claim_mapping_failed` 被拒绝。
+- 在设置了 `admin_groups` 或组映射时，没有组属性、而是携带 Entra ID 的 `http://schemas.microsoft.com/claims/groups.link`（对属于 150 个以上组的人发送）的断言会以 `groups_overage` 被拒绝。参见[限制](/zh/pro/sso#限制)。
+- 修改 `protocol`，或修改 `user_path_claim`、`groups_claim` 通过 `saml.attributes` 对应的属性，会结束现有会话，详见[配置变更时](/zh/pro/sso#配置变更时)。
 - `allowed_domains` 和默认的 `user_path_claim: email` 读取名为 `email` 或别名为 `email` 的属性。只有在使用 `user_path_claim: email` 或 `user_path_case_insensitive: true` 时，用户路径才会被转换为小写。
 - 主体是 NameID；如果设置了 `principal_attribute`，则为该属性。临时（transient）NameID 每次登录都会变化，除非设置了 `principal_attribute`，否则会被拒绝。
 
@@ -141,7 +144,7 @@ extensions:
 ```
 
 <Warning>
-  启动检查只识别名称：`email`、别名为 `email` 的属性，以及常见的邮箱属性 `mail`、`email`、`urn:oid:0.9.2342.19200300.100.1.3` 和 `http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress`，比较时不区分大小写。以其他名称携带邮箱或任何其他用户可修改的值的属性，可以通过检查。切勿将用户可以修改的属性用于 `user_path_claim` 或 `groups_claim`。
+  启动检查只识别名称：`email`、别名为 `email` 的属性，以及常见的邮箱属性 `http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress`、`http://schemas.xmlsoap.org/claims/EmailAddress`、`mail`、`email`、`EmailAddress`、`User.Email`、`urn:oid:0.9.2342.19200300.100.1.3` 和 `urn:oid:1.2.840.113549.1.9.1`，无论直接指定还是通过别名，比较时都不区分大小写。以其他名称携带邮箱或任何其他用户可修改的值的属性，可以通过检查。切勿将用户可以修改的属性用于 `user_path_claim` 或 `groups_claim`。
 </Warning>
 
 ## 每个响应的校验内容
@@ -151,7 +154,7 @@ extensions:
 - **它是对此浏览器发起的登录的应答。** 已签名的事务 Cookie（有效期 10 分钟）、`RelayState` 和 `InResponseTo` 必须匹配。
 - **它是发给此网关的。** `Destination` 和 `Recipient` 等于 `acs_url`，受众是网关的实体 ID。
 - **它来自已配置的身份提供商。** 签发者是元数据中的实体 ID。
-- **断言本身已签名**，使用元数据中当前有效的签名证书、RSA-SHA256 或更强的算法以及至少 2048 位的密钥。
+- **断言本身已签名**，使用元数据中当前有效的签名证书、RSA-SHA256 或更强的算法以及至少 2048 位的密钥。签名的 `KeyInfo` 携带证书时必须使用该证书；没有 `KeyInfo` 的签名会依次用每个受信任证书校验，与证书轮换期间一样。
 - **恰好有一个断言**，且未加密。
 - **它处于有效期窗口内**，允许 60 秒的时钟偏差。
 - **身份提供商报告成功。**
@@ -159,7 +162,7 @@ extensions:
 - **它此前未被使用过。** 参见[重放保护](#重放保护)。
 - **它是体积小且简单的 XML**：表单不超过 1 MiB，XML 元素不超过 900 个，不含 DTD、注释或处理指令。
 
-登录使用的每一个值都从已签名的断言中读取，绝不会从文档的其余部分读取。随后的准入规则与 OIDC 相同。
+登录使用的每一个断言值（主体、属性，以及受众和有效期窗口等条件）都按断言签名所校验的内容读取，绝不会从文档的其余部分读取。部分检查会将断言签名之外的值与网关的预期进行比较：`RelayState` 是提交表单中的字段，响应的 `Destination`、`InResponseTo`、`Issuer` 和状态属于响应外层，只有当身份提供商同时对响应签名时才受签名保护。这些值都不会被用作身份。随后的准入规则与 OIDC 相同。
 
 ## 身份提供商元数据
 
@@ -201,7 +204,7 @@ extensions:
 
 会话在 `session_ttl` 到期时结束；如果断言的 `SessionNotOnOrAfter` 更早，则在该时间结束。`SessionNotOnOrAfter` 已过的断言会被拒绝。
 
-退出登录只结束 GoModel 会话，其行为如[跨副本退出登录](/zh/pro/sso#跨副本退出登录)所述。
+退出登录会结束 GoModel 会话，并在设置了 `provider_logout_url` 时重定向到该地址，与 OIDC 相同；参见[跨副本退出登录](/zh/pro/sso#跨副本退出登录)。
 
 ## 重放保护
 
@@ -214,7 +217,8 @@ extensions:
 ## 限制
 
 - **每人约 850 个组。** 每个组值是一个 XML 元素，而超过 900 个元素的响应会以 `too_many_elements` 被拒绝。该上限不可配置。请在身份提供商处进行过滤：只发送分配给应用的组，或 `admin_groups` 和 `group_mappings` 中指定的组。
+- **Entra ID：一个断言中最多 150 个组。** 超过时，Entra ID 会发送 `http://schemas.microsoft.com/claims/groups.link` 而不是组，登录会以 `groups_overage` 被拒绝。请只发送分配给应用的组。
 - **不支持在身份提供商处发起的登录。** 登录必须从网关（`/sso/login`）开始。未经请求的响应会被拒绝。
 - **不支持加密断言。** 它们会以 `encrypted_assertion` 被拒绝。
-- **不支持单点登出。** 退出 GoModel 不会结束身份提供商的会话，网关也不处理来自身份提供商的登出请求。
+- **不支持 SAML 单点登出。** 网关不发送 SAML 登出请求，也不处理来自身份提供商的登出请求。退出登录会结束 GoModel 会话；身份提供商的会话只能通过重定向到 `provider_logout_url` 结束。
 - **每个网关一个身份提供商。**

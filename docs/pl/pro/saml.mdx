@@ -77,6 +77,7 @@ PRO_SSO_SAML_TRUST_EMAIL=true
 | `saml.trust_email` | `PRO_SSO_SAML_TRUST_EMAIL` | `false` | Zobacz [Zaufanie do adresu e-mail](#zaufanie-do-adresu-e-mail). |
 | `saml.metadata_refresh_interval` | `PRO_SSO_SAML_METADATA_REFRESH_INTERVAL` | `1h` | Tylko dla adresu URL metadanych. Od `1m` do `24h`. Ustawienie go razem z plikiem metadanych przerywa uruchamianie. |
 | `saml.idp_certificate_fingerprints` | `PRO_SSO_SAML_IDP_CERTIFICATE_FINGERPRINTS` | brak (zaufany jest każdy certyfikat podpisujący z metadanych) | Zobacz [Przypinanie certyfikatów](#przypinanie-certyfikatów). W zmiennej środowiskowej rozdzielone przecinkami. |
+| `require_discovery` | `PRO_SSO_REQUIRE_DISCOVERY` | `false` | Ustawiane bezpośrednio pod `extensions.sso`, nie pod `saml`; to samo ustawienie dotyczy OIDC discovery. Przy `idp_metadata_url` sprawia, że metadane, których nie da się pobrać przy starcie, są błędem uruchamiania, zamiast uruchomienia z niedostępnymi logowaniami. Plik metadanych zawsze musi być czytelny, więc tam ustawienie nie ma wpływu. |
 
 Wspólne ustawienia z sekcji
 [Tożsamość i dopuszczanie](/pl/pro/sso#tożsamość-i-dopuszczanie) zachowują
@@ -145,8 +146,20 @@ extensions:
 
 - Alias przesłania atrybut SAML o tej samej nazwie.
 - Atrybut ścieżki użytkownika musi mieć dokładnie jedną wartość; otaczające
-  ją białe znaki są usuwane. Wartości grup są porównywane dokładnie w takiej
-  postaci, w jakiej zostały wysłane.
+  ją białe znaki są usuwane. Wartości grup nie są przycinane i są porównywane
+  dokładnie w takiej postaci, w jakiej zostały wysłane. Atrybut grup z jedną
+  pustą wartością oznacza brak grup, a atrybut z wartością nietekstową
+  odrzuca logowanie z powodem `claim_mapping_failed`, gdy ustawiono
+  `admin_groups` lub mapowania grup.
+- Asercja bez atrybutu grup, która zamiast niego zawiera atrybut Entra ID
+  `http://schemas.microsoft.com/claims/groups.link` (wysyłany dla osób w
+  ponad 150 grupach), jest odrzucana z powodem `groups_overage`, gdy
+  ustawiono `admin_groups` lub mapowania grup. Zobacz
+  [Ograniczenia](/pl/pro/sso#ograniczenia).
+- Zmiana `protocol` albo atrybutu, na który `user_path_claim` lub
+  `groups_claim` wskazują przez `saml.attributes`, kończy istniejące sesje,
+  jak opisano w sekcji
+  [Gdy zmienia się konfiguracja](/pl/pro/sso#gdy-zmienia-się-konfiguracja).
 - `allowed_domains` i domyślne `user_path_claim: email` odczytują atrybut o
   nazwie lub aliasie `email`. Ścieżka użytkownika jest zamieniana na małe
   litery tylko przy `user_path_claim: email` lub
@@ -193,10 +206,12 @@ extensions:
 
 <Warning>
   Kontrola przy starcie rozpoznaje wyłącznie nazwy: `email`, atrybut z aliasem
-  `email` oraz znane atrybuty e-mail `mail`, `email`,
-  `urn:oid:0.9.2342.19200300.100.1.3` i
+  `email` oraz znane atrybuty e-mail
   `http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress`,
-  porównywane bez rozróżniania wielkości liter. Atrybut, który pod inną nazwą
+  `http://schemas.xmlsoap.org/claims/EmailAddress`, `mail`, `email`,
+  `EmailAddress`, `User.Email`, `urn:oid:0.9.2342.19200300.100.1.3` i
+  `urn:oid:1.2.840.113549.1.9.1`, wszystkie porównywane bez rozróżniania
+  wielkości liter, bezpośrednio lub przez alias. Atrybut, który pod inną nazwą
   zawiera adres e-mail albo dowolną inną wartość edytowalną przez użytkowników,
   przechodzi kontrolę. Nigdy nie używaj w `user_path_claim` ani `groups_claim`
   atrybutu, który użytkownik może edytować.
@@ -217,7 +232,9 @@ Każde niepowodzenie ma własny
   ID z metadanych.
 - **Sama asercja jest podpisana** aktualnie ważnym certyfikatem podpisującym
   z metadanych, algorytmem RSA-SHA256 lub silniejszym i kluczem o długości co
-  najmniej 2048 bitów.
+  najmniej 2048 bitów. Jeśli `KeyInfo` podpisu zawiera certyfikat, musi to być
+  ten certyfikat; podpis bez `KeyInfo` jest sprawdzany każdym zaufanym
+  certyfikatem, jak podczas rotacji certyfikatu.
 - **Jest dokładnie jedna asercja** i nie jest ona zaszyfrowana.
 - **Mieści się w swoim oknie ważności**, z tolerancją 60 sekund na różnicę
   zegarów.
@@ -229,8 +246,14 @@ Każde niepowodzenie ma własny
 - **Jest małym, zwykłym dokumentem XML**: formularz o rozmiarze do 1 MiB,
   najwyżej 900 elementów XML, bez DTD, komentarzy i instrukcji przetwarzania.
 
-Każda wartość używana przy logowaniu jest odczytywana z podpisanej asercji,
-nigdy z reszty dokumentu. Następnie dopuszczanie działa tak jak dla OIDC.
+Każda wartość z asercji używana przy logowaniu (podmiot, atrybuty i warunki
+takie jak audience i okno ważności) jest odczytywana z asercji w postaci
+zweryfikowanej przez jej podpis, nigdy z reszty dokumentu. Część kontroli
+porównuje z oczekiwaniami gatewaya wartości spoza podpisu asercji: `RelayState`
+jest polem przesłanego formularza, a `Destination`, `InResponseTo`, `Issuer` i
+status odpowiedzi należą do koperty odpowiedzi, którą podpis obejmuje tylko
+wtedy, gdy dostawca tożsamości podpisuje także odpowiedź. Żadna z tych wartości
+nie służy jako tożsamość. Następnie dopuszczanie działa tak jak dla OIDC.
 
 ## Metadane dostawcy tożsamości
 
@@ -297,7 +320,8 @@ Sesja kończy się po `session_ttl` albo w chwili `SessionNotOnOrAfter` z
 asercji, jeśli ta przypada wcześniej. Asercja, której `SessionNotOnOrAfter`
 już minęło, jest odrzucana.
 
-Wylogowanie kończy tylko sesję GoModel i działa tak, jak opisano w sekcji
+Wylogowanie kończy sesję GoModel, a potem przekierowuje do
+`provider_logout_url`, jeśli jest ustawione, tak jak dla OIDC; zobacz
 [Wylogowanie na wszystkich replikach](/pl/pro/sso#wylogowanie-na-wszystkich-replikach).
 
 ## Ochrona przed powtórzeniem
@@ -323,12 +347,17 @@ storage.
   `too_many_elements`. Limitu nie można konfigurować. Filtruj u dostawcy
   tożsamości: wysyłaj tylko grupy przypisane do aplikacji albo te wymienione
   w `admin_groups` i `group_mappings`.
+- **Entra ID: najwyżej 150 grup w asercji.** Powyżej tej liczby Entra ID
+  zamiast grup wysyła `http://schemas.microsoft.com/claims/groups.link`, a
+  logowanie jest odrzucane z powodem `groups_overage`. Wysyłaj tylko grupy
+  przypisane do aplikacji.
 - **Brak logowania rozpoczynanego u dostawcy tożsamości.** Logowanie musi
   zaczynać się w gatewayu (`/sso/login`). Niezamówione odpowiedzi są
   odrzucane.
 - **Brak zaszyfrowanych asercji.** Są odrzucane z powodem
   `encrypted_assertion`.
-- **Brak single logout.** Wylogowanie z GoModel nie kończy sesji u dostawcy
-  tożsamości, a gateway nie przetwarza żądań wylogowania od dostawcy
-  tożsamości.
+- **Brak single logout SAML.** Gateway nie wysyła żądań wylogowania SAML i
+  nie przetwarza takich żądań od dostawcy tożsamości. Wylogowanie kończy sesję
+  GoModel; sesja u dostawcy tożsamości kończy się tylko przez przekierowanie
+  do `provider_logout_url`.
 - **Jeden dostawca tożsamości na gateway.**
