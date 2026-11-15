@@ -16,8 +16,12 @@ import {
 import * as m from "../../lib/paraglide/messages.js";
 import { timeWindowHint } from "./categoryColumns.js";
 import { PRICE_FIELDS } from "./pricingOverridesLogic.js";
+import { INPUT_CAPABILITY_KEYS, inputCapabilityChips } from "./metadataOverridesLogic.js";
 
-export const METADATA_VIEWS = ["effective", "provider", "catalog", "config"];
+export const METADATA_VIEWS = ["effective", "provider", "catalog", "config", "dashboard"];
+
+// Views offered only when the row has that override.
+const OVERRIDE_VIEWS = ["config", "dashboard"];
 
 function text(value) {
   return String(value ?? "").trim();
@@ -76,6 +80,8 @@ export function metadataViewLabel(view) {
       return m.models_details_view_catalog();
     case "config":
       return m.models_details_view_config();
+    case "dashboard":
+      return m.models_details_view_dashboard();
     default:
       return m.models_details_view_effective();
   }
@@ -90,6 +96,8 @@ export function metadataSourceLabel(source) {
       return m.models_details_source_catalog();
     case "config":
       return m.models_details_source_config();
+    case "dashboard":
+      return m.models_details_source_dashboard();
     case "inferred":
       return m.models_details_source_inferred();
     default:
@@ -97,12 +105,12 @@ export function metadataSourceLabel(source) {
   }
 }
 
-// metadataViewOptions lists the views the fetched layers support: config only
-// appears when an override exists, so the switch never leads to an empty
-// panel by default.
+// metadataViewOptions lists the views the fetched layers support: config and
+// dashboard only appear when that override exists, so the switch never leads
+// to an empty panel by default.
 export function metadataViewOptions(layers) {
   if (!layers || typeof layers !== "object") return [];
-  return METADATA_VIEWS.filter((view) => view !== "config" || layers.config).map((view) => ({
+  return METADATA_VIEWS.filter((view) => !OVERRIDE_VIEWS.includes(view) || layers[view]).map((view) => ({
     value: view,
     label: metadataViewLabel(view),
   }));
@@ -133,6 +141,8 @@ export function metadataViewEmptyMessage(view) {
       return m.models_details_layer_empty_catalog();
     case "config":
       return m.models_details_layer_empty_config();
+    case "dashboard":
+      return m.models_details_layer_empty_dashboard();
     default:
       return m.models_details_no_metadata();
   }
@@ -162,9 +172,12 @@ function propertyItems(metadata, sources) {
   ].filter(present);
 }
 
+// capabilityChips lists the non-input capabilities; the input media have
+// their own section (inputCapabilityChips).
 function capabilityChips(capabilities, sources) {
   if (!capabilities || typeof capabilities !== "object") return [];
   return Object.keys(capabilities)
+    .filter((name) => !INPUT_CAPABILITY_KEYS.includes(name))
     .sort()
     .map((name) => ({
       label: name,
@@ -237,8 +250,20 @@ export function buildModelDetails(row, pricing, pricingSources, options = {}) {
   if (view === "effective" || view === "provider") {
     pushSection(sections, "listing", m.models_details_section_listing(), listingItems(model));
   }
+  // The effective view always lists every input type, so whether a model
+  // takes images or audio is visible even when no layer reports it.
+  const inputChips = inputCapabilityChips(
+    metadata && metadata.capabilities,
+    (field) => metadataSourceLabel(sources[field]),
+    view === "effective",
+  );
   if (metadata) {
     pushSection(sections, "properties", m.models_details_section_properties(), propertyItems(metadata, sources));
+  }
+  if (inputChips.length > 0) {
+    sections.push({ key: "input", title: m.models_details_section_input(), chips: inputChips });
+  }
+  if (metadata) {
     const chips = capabilityChips(metadata.capabilities, sources);
     if (chips.length > 0) {
       sections.push({ key: "capabilities", title: m.models_details_section_capabilities(), chips });

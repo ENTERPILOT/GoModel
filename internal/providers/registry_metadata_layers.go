@@ -18,6 +18,8 @@ type ModelMetadataLayers struct {
 	Catalog *core.ModelMetadata `json:"catalog" extensions:"x-nullable"`
 	// Config is the config.yaml metadata override.
 	Config *core.ModelMetadata `json:"config" extensions:"x-nullable"`
+	// Dashboard is the dashboard-managed metadata override.
+	Dashboard *core.ModelMetadata `json:"dashboard" extensions:"x-nullable"`
 	// Sources names the layer that supplied each effective field
 	// (see modeldata.MetadataSources).
 	Sources map[string]string `json:"sources"`
@@ -26,7 +28,7 @@ type ModelMetadataLayers struct {
 // ModelMetadataLayers returns the metadata layers of one routable model.
 // providerSegment is a provider instance name or a provider type, modelID the
 // raw upstream model ID. Nothing is stored for this view: the provider's
-// report and the config override are already held per model, and the catalog
+// report and both overrides are already held per model, and the catalog
 // entry is resolved on demand, so the cost is one read lock and a few lookups
 // per call.
 func (r *ModelRegistry) ModelMetadataLayers(providerSegment, modelID string) (ModelMetadataLayers, bool) {
@@ -55,6 +57,10 @@ func (r *ModelRegistry) ModelMetadataLayers(providerSegment, modelID string) (Mo
 	if override := r.configMetadataOverrides[selector.Provider][selector.Model]; !metadataOverrideEmpty(override) {
 		configOverride = override.Clone()
 	}
+	var dashboardOverride *core.ModelMetadata
+	if override := r.dashboardMetadataOverrides[selector.Provider][selector.Model]; !metadataOverrideEmpty(override) {
+		dashboardOverride = override.Clone()
+	}
 
 	return ModelMetadataLayers{
 		Selector:  selector.QualifiedModel(),
@@ -62,6 +68,7 @@ func (r *ModelRegistry) ModelMetadataLayers(providerSegment, modelID string) (Mo
 		Provider:  info.Discovered.Clone(),
 		Catalog:   catalog,
 		Config:    configOverride,
-		Sources:   modeldata.MetadataSources(info.Model.Metadata, info.Discovered, catalog, configOverride),
+		Dashboard: dashboardOverride,
+		Sources:   modeldata.MetadataSources(info.Model.Metadata, info.Discovered, catalog, configOverride, dashboardOverride),
 	}, true
 }

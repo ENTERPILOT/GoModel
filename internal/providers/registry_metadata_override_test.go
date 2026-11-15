@@ -392,8 +392,8 @@ func TestSetProviderMetadataOverrides_DeepClonesExternalInput(t *testing.T) {
 	*external["m"].ContextWindow = 0
 	external["m"].Pricing.Currency = "EUR"
 
-	snap := registry.snapshotConfigOverrides()
-	stored := snap["p"]["m"]
+	snap := registry.snapshotMetadataOverrides()
+	stored := snap.config["p"]["m"]
 	require.NotNil(t, stored)
 	assert.Equal(t, "chat", stored.Modes[0], "stored Modes mutated via caller: %v", stored.Modes)
 	assert.True(t, stored.Capabilities["tools"])

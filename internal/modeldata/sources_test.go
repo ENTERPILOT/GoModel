@@ -30,7 +30,7 @@ func TestMetadataSources_NamesTheWinningLayerPerField(t *testing.T) {
 	}
 	effective := MergeMetadata(MergeMetadata(catalog, provider), config)
 
-	sources := MetadataSources(effective, provider, catalog, config)
+	sources := MetadataSources(effective, provider, catalog, config, nil)
 
 	assert.Equal(t, map[string]string{
 		"display_name":           MetadataSourceConfig,
@@ -56,7 +56,7 @@ func TestMetadataSources_CategoriesFollowTheLayerThatDeclaredModes(t *testing.T)
 	effective := MergeMetadata(catalog, config)
 	require.Equal(t, []core.ModelCategory{core.CategoryEmbedding}, effective.Categories)
 
-	sources := MetadataSources(effective, nil, catalog, config)
+	sources := MetadataSources(effective, nil, catalog, config, nil)
 
 	assert.Equal(t, MetadataSourceConfig, sources["modes"])
 	assert.Equal(t, MetadataSourceConfig, sources["categories"])
@@ -68,7 +68,7 @@ func TestMetadataSources_ReportsInferredModes(t *testing.T) {
 		Categories: []core.ModelCategory{core.CategoryEmbedding},
 	}
 
-	sources := MetadataSources(effective, nil, nil, nil)
+	sources := MetadataSources(effective, nil, nil, nil, nil)
 
 	assert.Equal(t, map[string]string{
 		"modes":      MetadataSourceInferred,
@@ -77,6 +77,29 @@ func TestMetadataSources_ReportsInferredModes(t *testing.T) {
 }
 
 func TestMetadataSources_NilEffective(t *testing.T) {
-	assert.Nil(t, MetadataSources(nil, &core.ModelMetadata{DisplayName: "x"}, nil, nil))
-	assert.Empty(t, MetadataSources(&core.ModelMetadata{}, nil, nil, nil))
+	assert.Nil(t, MetadataSources(nil, &core.ModelMetadata{DisplayName: "x"}, nil, nil, nil))
+	assert.Empty(t, MetadataSources(&core.ModelMetadata{}, nil, nil, nil, nil))
+}
+
+func TestMetadataSources_DashboardWinsOverConfig(t *testing.T) {
+	catalog := &core.ModelMetadata{
+		Categories:    []core.ModelCategory{core.CategoryTextGeneration},
+		ContextWindow: new(128000),
+		Capabilities:  map[string]bool{"vision": false, "tools": true},
+	}
+	config := &core.ModelMetadata{ContextWindow: new(64000)}
+	dashboard := &core.ModelMetadata{
+		Categories:   []core.ModelCategory{core.CategoryImage},
+		Capabilities: map[string]bool{"vision": true},
+	}
+	effective := MergeMetadata(MergeMetadata(catalog, config), dashboard)
+
+	sources := MetadataSources(effective, nil, catalog, config, dashboard)
+
+	assert.Equal(t, map[string]string{
+		"categories":          MetadataSourceDashboard,
+		"context_window":      MetadataSourceConfig,
+		"capabilities.vision": MetadataSourceDashboard,
+		"capabilities.tools":  MetadataSourceCatalog,
+	}, sources)
 }

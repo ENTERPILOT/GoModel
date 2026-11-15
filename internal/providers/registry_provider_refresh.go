@@ -198,7 +198,7 @@ func fetchedProviderRefreshError(fetched fetchedInventory) error {
 }
 
 func (r *ModelRegistry) applyFetchedProviderInventory(providerTypes map[core.Provider]string, fetched fetchedInventory) {
-	metadataStats := r.enrichFetchedProviderModelMaps(providerTypes, fetched.modelsByProvider)
+	metadataStats, overridesRevision := r.enrichFetchedProviderModelMaps(providerTypes, fetched.modelsByProvider)
 
 	r.mu.Lock()
 	r.dropUnregisteredFetchedProvidersLocked(&fetched)
@@ -210,7 +210,7 @@ func (r *ModelRegistry) applyFetchedProviderInventory(providerTypes map[core.Pro
 		r.providerRuntime[providerName] = state
 	}
 	r.applyProviderRuntimeUpdatesLocked(fetched.runtimeUpdates)
-	r.publishFilteredInventoryLocked()
+	r.publishEnrichedInventoryLocked(overridesRevision)
 	// Report what these providers actually serve after filtering, keeping the
 	// count scoped to the refreshed providers rather than the whole catalog.
 	fetched.totalModels = r.publishedModelCountLocked(fetched.modelsByProvider)

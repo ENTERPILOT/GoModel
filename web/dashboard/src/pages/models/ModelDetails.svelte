@@ -1,6 +1,7 @@
 <script>
   // The details row under an expanded model row: what the provider listed,
-  // the model's properties, capabilities, rankings and pricing. The panel
+  // the model's properties, accepted input, capabilities, rankings and
+  // pricing. The panel
   // opens on the effective metadata the inventory row already carries, then
   // fetches the layers behind it (/admin/models/metadata) to label each
   // field's source and offer the provider / catalog / config views.
@@ -65,10 +66,22 @@
           {#if section.chips}
             <ul class="model-details-chips">
               {#each section.chips as chip (chip.label)}
-                {@const chipStatus = [chip.enabled ? m.models_details_supported() : m.models_details_unsupported(), chip.source]
+                {@const chipStatus = [
+                  chip.unknown
+                    ? m.models_details_unknown()
+                    : chip.enabled
+                      ? m.models_details_supported()
+                      : m.models_details_unsupported(),
+                  chip.source,
+                ]
                   .filter(Boolean)
                   .join(" · ")}
-                <li class="provider-badge model-details-chip" class:is-off={!chip.enabled} title={chipStatus}>
+                <li
+                  class="provider-badge model-details-chip"
+                  class:is-off={!chip.enabled}
+                  class:is-unknown={chip.unknown}
+                  title={chipStatus}
+                >
                   {chip.label}<span class="model-details-sr-only">, {chipStatus}</span>
                 </li>
               {/each}
@@ -174,6 +187,10 @@
   .model-details-chip.is-off {
     opacity: 0.55;
     border-style: dashed;
+  }
+
+  .model-details-chip.is-unknown {
+    opacity: 0.4;
   }
 
   /* Text for assistive technology only: the chip's status and a price's

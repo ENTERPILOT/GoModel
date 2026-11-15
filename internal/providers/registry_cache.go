@@ -118,22 +118,24 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 	if list != nil {
 		metadataStats = enrichProviderModelMaps(list, r.snapshotProviderTypes(), newModelsByProvider, nil)
 	}
-	configOverrides := r.snapshotConfigOverrides()
-	metadataStats.Enriched += applyConfigMetadataOverrides(configOverrides, newModelsByProvider, nil)
+	overrides := r.snapshotMetadataOverrides()
+	metadataStats.Enriched += overrides.apply(newModelsByProvider, nil)
 	metadataStats.Enriched += applyInferredModelMetadata(newModelsByProvider, nil)
 
 	r.mu.Lock()
 	// Publishing applies model filters after enrichment, so price rules see the
 	// cached pricing while the restored inventory itself stays unfiltered.
 	r.discoveredByProvider = newModelsByProvider
-	r.publishFilteredInventoryLocked()
-	loadedModels := len(r.models)
-	r.invalidateSortedCaches()
+	// The cached list is in place before publishing, so a re-enrichment there
+	// reads the same list the models above were enriched with.
 	if list != nil {
 		r.modelList = list
 		r.modelListRaw = modelCache.ModelListData
 		r.setModelListValidatorLocked(modelCache.ModelListETag, modelCache.ModelListURL)
 	}
+	r.publishEnrichedInventoryLocked(overrides.dashboardRevision)
+	loadedModels := len(r.models)
+	r.invalidateSortedCaches()
 	r.mu.Unlock()
 
 	attrs := []any{
