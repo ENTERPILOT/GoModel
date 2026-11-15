@@ -171,6 +171,8 @@
   "usage_search_providers": "Anbieter suchen",
   "usage_search_labels": "Labels suchen",
   "usage_search_auth_keys": "API-Schlüssel suchen",
+  "usage_show_inactive_auth_keys": "Inaktive Schlüssel anzeigen",
+  "usage_show_inactive_user_paths": "Inaktive Pfade anzeigen",
   "usage_all_user_paths": "Alle Nutzerpfade",
   "usage_search_user_paths": "Nutzerpfad suchen oder eingeben",
   "usage_expand_path": "{path} aufklappen",

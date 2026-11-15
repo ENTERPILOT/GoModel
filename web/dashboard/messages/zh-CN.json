@@ -126,6 +126,8 @@
   "usage_search_providers": "搜索提供商",
   "usage_search_labels": "搜索标签",
   "usage_search_auth_keys": "搜索 API 密钥",
+  "usage_show_inactive_auth_keys": "显示不活跃密钥",
+  "usage_show_inactive_user_paths": "显示不活跃路径",
   "usage_all_user_paths": "全部用户路径",
   "usage_search_user_paths": "搜索或输入用户路径",
   "usage_expand_path": "展开 {path}",
