@@ -84,6 +84,29 @@ function applyResponseConversationOneOf(name) {
   properties.conversation = conversation;
 }
 
+// OpenAI takes a speech voice as a name or as a custom-voice object with an id.
+function applySpeechVoiceOneOf() {
+  const properties = schema("core.AudioSpeechRequest").properties;
+  if (!properties?.voice) {
+    throw new Error("missing voice property on schema: core.AudioSpeechRequest");
+  }
+
+  const voice = {};
+  if (properties.voice.description) {
+    voice.description = properties.voice.description;
+  }
+  voice.oneOf = [
+    { type: "string" },
+    {
+      type: "object",
+      required: ["id"],
+      properties: { id: { type: "string", pattern: "\\S" } },
+      additionalProperties: true,
+    },
+  ];
+  properties.voice = voice;
+}
+
 function ensureResponsesInputElementSchema() {
   const schemas = spec.components?.schemas;
   if (!schemas) {
@@ -589,8 +612,8 @@ applyRetrieveModelDialects();
 applyImageEditMultiImageSchema();
 ensureBearerAuthSecurityScheme();
 ensureRequiredProperty("core.AudioSpeechRequest", "model");
+applySpeechVoiceOneOf();
 ensureRequiredProperty("core.AudioSpeechRequest", "input");
-ensureRequiredProperty("core.AudioSpeechRequest", "voice");
 ensureRequiredProperty("admin.recalculatePricingRequest", "confirmation");
 ensureRequiredProperty("admin.upsertBudgetRequest", "amount");
 ensureRequiredProperty("admin.upsertBudgetRequest", "budget_key");
