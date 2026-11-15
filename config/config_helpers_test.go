@@ -259,6 +259,18 @@ func TestApplyEnvOverrides(t *testing.T) {
 			},
 		},
 		{
+			name: "metrics caller dimension overrides",
+			envVars: map[string]string{
+				"METRICS_CALLER_USER_PATH": "true", "METRICS_CALLER_USER_PATH_DEPTH": "3", "METRICS_CALLER_AUTH_KEY": "true",
+				"METRICS_CALLER_REQUEST_LABELS": "true", "METRICS_CALLER_MAX_VALUES": "25",
+			},
+			check: func(t *testing.T, cfg *Config) {
+				assert.Equal(t, MetricsCallerDimensionsConfig{
+					UserPath: true, UserPathDepth: 3, AuthKey: true, RequestLabels: true, MaxValues: 25,
+				}, cfg.Metrics.CallerDimensions)
+			},
+		},
+		{
 			name:    "guardrails batch flag override",
 			envVars: map[string]string{"ENABLE_GUARDRAILS_FOR_BATCH_PROCESSING": "true"},
 			check: func(t *testing.T, cfg *Config) {

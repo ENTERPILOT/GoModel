@@ -116,6 +116,7 @@ func (o *observer) start(ctx context.Context, info llmclient.RequestInfo) contex
 	if operation == "" {
 		return ctx
 	}
+	core.GenAIOperationFromContext(ctx).Set(operation)
 	state := &callState{
 		spanName:   operationSpanName(operation, info.Model),
 		attrs:      callAttributes(info, operation),
