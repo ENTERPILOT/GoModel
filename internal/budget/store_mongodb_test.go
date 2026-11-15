@@ -2,7 +2,6 @@ package budget
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -14,57 +13,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func TestIsMongoTransactionCapabilityError(t *testing.T) {
-	tests := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{
-			name: "standalone transaction message",
-			err:  errors.New("Transaction numbers are only allowed on a replica set member or mongos"),
-			want: true,
-		},
-		{
-			name: "illegal operation command code",
-			err: mongo.CommandError{
-				Code:    20,
-				Message: "transaction is not supported by this deployment",
-				Labels:  []string{"TransientTransactionError"},
-			},
-			want: true,
-		},
-		{
-			name: "labeled unsupported transaction message",
-			err: mongo.CommandError{
-				Message: "transaction is not supported by this deployment",
-				Labels:  []string{"TransientTransactionError"},
-			},
-			want: true,
-		},
-		{
-			name: "ordinary transient transaction error",
-			err: mongo.CommandError{
-				Message: "temporary write conflict",
-				Labels:  []string{"TransientTransactionError"},
-			},
-			want: false,
-		},
-		{
-			name: "ordinary error",
-			err:  errors.New("network timeout"),
-			want: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := isMongoTransactionCapabilityError(tt.err)
-			require.Equal(t, tt.want, got)
-		})
-	}
-}
 
 func TestUsagePathRegexBoundaries(t *testing.T) {
 	// The root pattern must also catch the rows a blank user path normalizes

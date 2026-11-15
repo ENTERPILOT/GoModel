@@ -331,6 +331,8 @@ func AssertNoNativeSurfaces(t testing.TB, provider any) {
 	assert.False(t, ok, "provider should not implement core.NativeFileProvider")
 	_, ok = provider.(core.AudioProvider)
 	assert.False(t, ok, "provider should not implement core.AudioProvider")
+	_, ok = provider.(core.AudioVoicesProvider)
+	assert.False(t, ok, "provider should not implement core.AudioVoicesProvider")
 }
 
 func chatRequest() *core.ChatRequest {

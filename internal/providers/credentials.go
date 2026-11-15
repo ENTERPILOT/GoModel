@@ -737,6 +737,7 @@ func (s *CredentialsService) providerConfig(stored, resolved ManagedProviderCred
 	}
 	cfg := buildProviderConfig(rawCfg, s.resilience)
 	cfg.Name = name
+	cfg.Managed = true
 	return cfg, nil
 }
 
