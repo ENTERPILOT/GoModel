@@ -44,10 +44,11 @@ type AudioTranslationProvider interface {
 	CreateTranslation(ctx context.Context, req *AudioTranscriptionRequest) (*AudioResponse, error)
 }
 
-// AudioVoicesProvider is implemented by providers whose upstream can list the
-// voices a text-to-speech model offers, served at GET /v1/audio/voices. It is
-// optional: there is no OpenAI endpoint for it, and providers without an
-// upstream listing omit it rather than return a static list.
+// AudioVoicesProvider is implemented by providers that can list the voices a
+// text-to-speech model offers, served at GET /v1/audio/voices. It is optional:
+// there is no OpenAI endpoint for it. Providers ask their upstream listing; the
+// only static list is OpenAI's built-in voices, since OpenAI has no listing and
+// documents a fixed set. Providers without either omit it.
 type AudioVoicesProvider interface {
 	ListVoices(ctx context.Context, req *AudioVoicesRequest) (*AudioVoicesResponse, error)
 }

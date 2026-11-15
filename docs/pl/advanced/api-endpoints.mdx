@@ -160,18 +160,18 @@ Przekaż `id` jako `voice` do `/v1/audio/speech`; `name` to etykieta do
 wyświetlenia, która domyślnie przyjmuje wartość `id`. `model` jest rozwiązywany
 i autoryzowany dokładnie tak jak w `/v1/audio/speech`, łącznie z aliasami
 i modelami wirtualnymi. Wywołanie nie jest rozliczane i nie wlicza się do
-budżetów. Każde wywołanie odpytuje dostawcę, więc limity żądań obowiązują tak
-jak w `/v1/audio/speech`.
+budżetów. Każde wywołanie (poza OpenAI) odpytuje dostawcę, więc limity żądań
+obowiązują tak jak w `/v1/audio/speech`.
 
 | Provider | Źródło upstream |
 | --- | --- |
 | [audio.cpp](/pl/providers/audiocpp) | `GET /v1/audio/voices?model=` |
 | [ElevenLabs](/pl/providers/elevenlabs) | `GET /v2/voices` (głosy workspace'u, dla każdego modelu; najwyżej pierwsze 2000) |
 | [MiniMax](/pl/providers/minimax) | `POST /v1/get_voice` (głosy systemowe, sklonowane i wygenerowane) |
-| Providery typu `openai` | `GET {base_url}/audio/voices?model=` – self-hostowane serwery, takie jak Kokoro-FastAPI, Speaches, LocalAI czy xn-ptts |
+| OpenAI (`api.openai.com`) | Statyczna lista wbudowanych głosów, bez wywołania upstream: `alloy`, `ash`, `ballad`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage`, `shimmer`, `verse`, `marin`, `cedar`; dla `tts-1` i `tts-1-hd` dziewięć, które obsługują (bez `ballad`, `verse`, `marin`, `cedar`). Własne głosy (custom voices) nie są listowane: OpenAI nie ma do tego API |
+| Providery typu `openai` z własnym `base_url` | `GET {base_url}/audio/voices?model=` – self-hostowane serwery, takie jak Kokoro-FastAPI, Speaches, LocalAI czy xn-ptts |
 
-Provider bez listy głosów – w tym samo OpenAI i hostowane API zgodne z OpenAI,
-których `/audio/voices` odpowiada 404 lub 405 – zwraca `400` `invalid_request_error`
+Provider bez listy głosów – w tym hostowane API zgodne z OpenAI, których `/audio/voices` odpowiada 404 lub 405 – zwraca `400` `invalid_request_error`
 (`model "…" does not support listing voices`). Brak `model` to również `400`;
 nieznany model to `404`.
 

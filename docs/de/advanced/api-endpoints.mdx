@@ -159,18 +159,18 @@ curl "http://localhost:8080/v1/audio/voices?model=kokoro" \
 Anzeigebezeichnung und fällt auf `id` zurück. `model` wird genau wie bei
 `/v1/audio/speech` aufgelöst und autorisiert, Aliase und virtuelle Modelle
 eingeschlossen. Der Aufruf wird nicht abgerechnet und nicht auf Budgets
-angerechnet. Jeder Aufruf fragt den Provider ab, daher gelten Request-Rate-Limits
-wie bei `/v1/audio/speech`.
+angerechnet. Jeder Aufruf fragt den Provider ab (außer bei OpenAI), daher gelten
+Request-Rate-Limits wie bei `/v1/audio/speech`.
 
 | Provider | Upstream-Quelle |
 | --- | --- |
 | [audio.cpp](/de/providers/audiocpp) | `GET /v1/audio/voices?model=` |
 | [ElevenLabs](/de/providers/elevenlabs) | `GET /v2/voices` (die Stimmen des Workspace, für jedes Modell; höchstens die ersten 2000) |
 | [MiniMax](/de/providers/minimax) | `POST /v1/get_voice` (System-, geklonte und generierte Stimmen) |
-| Provider vom Typ `openai` | `GET {base_url}/audio/voices?model=` — selbst gehostete Server wie Kokoro-FastAPI, Speaches, LocalAI oder xn-ptts |
+| OpenAI (`api.openai.com`) | Statische Liste der eingebauten Stimmen, ohne Upstream-Aufruf: `alloy`, `ash`, `ballad`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage`, `shimmer`, `verse`, `marin`, `cedar`; für `tts-1` und `tts-1-hd` die neun, die sie unterstützen (ohne `ballad`, `verse`, `marin`, `cedar`). Eigene Stimmen (Custom Voices) werden nicht gelistet: OpenAI bietet dafür keine API |
+| Provider vom Typ `openai` mit eigener `base_url` | `GET {base_url}/audio/voices?model=` — selbst gehostete Server wie Kokoro-FastAPI, Speaches, LocalAI oder xn-ptts |
 
-Ein Provider ohne Stimmenliste — auch OpenAI selbst und gehostete
-OpenAI-kompatible APIs, deren `/audio/voices` mit 404 oder 405 antwortet — liefert `400`
+Ein Provider ohne Stimmenliste — auch gehostete OpenAI-kompatible APIs, deren `/audio/voices` mit 404 oder 405 antwortet — liefert `400`
 `invalid_request_error` (`model "…" does not support listing voices`). Ein
 fehlendes `model` ergibt ebenfalls `400`, ein unbekanntes Modell `404`.
 
