@@ -128,12 +128,15 @@ PRO_SSO_GROUP_MAPPINGS='[{"group":"eng-platform","user_path":"/eng/platform"},{"
 - **Ścieżki skonfigurowane gdzie indziej nie są sprawdzane.** Ta reguła zna
   tylko węzły konfigurowane przez SSO (ścieżki użytkowników z mapowań i
   `user_path_prefix`), a nie ścieżki z polityk
-  [użytkowników](/pl/features/users), budżetów ani rate limits. Własny
-  `user_path_claim` nie może dawać wartości wskazującej taką ścieżkę:
-  `preferred_username` równe `contractors` pod `/users` zalogowałoby tę osobę
-  jako `/users/contractors`, z zakresem dostępu wszystkich poniżej. Domyślny
-  claim `email` nie może do tego doprowadzić, bo jego wartością jest zawsze
-  własny zweryfikowany adres osoby.
+  [użytkowników](/pl/features/users), budżetów ani rate limits. Wartość
+  `user_path_claim` wskazująca taką ścieżkę daje sesji jej zakres dostępu
+  łącznie ze wszystkim poniżej: `preferred_username` równe `contractors` pod
+  `/users` zalogowałoby tę osobę jako `/users/contractors`, z zakresem
+  dostępu wszystkich poniżej. Dotyczy to także domyślnego claimu `email`. Jego
+  wartością jest zawsze własny zweryfikowany adres osoby, więc ścieżka taka
+  jak `/users/alice@example.com` to zwykle własna polityka Alice, co jest
+  zamierzone. Ryzykiem jest ścieżka nazwana adresem e-mail, pod którą znajdują
+  się inni użytkownicy lub klucze; nie umieszczaj ich tam.
 
 ### Kto może się zalogować
 
@@ -160,7 +163,12 @@ dopuszczać wyłącznie zmapowane grupy.
 Logowanie bez claimu grup to logowanie bez żadnej grupy, a nie błąd, bo wielu
 dostawców tożsamości pomija ten claim u osób, które nie należą do żadnej
 grupy. Przy `allow_all_admins` bez `admin_groups` takie logowanie trafia więc
-pod `user_path_prefix`, poza wszystkie zmapowane węzły i ich limity. Jeśli
+pod `user_path_prefix`, poza wszystkie zmapowane węzły i ich limity, chyba że
+samo `user_path_prefix` leży wewnątrz zmapowanego węzła. Uruchamianie nie
+odrzuca takiego nakładania się (na przykład mapowania na `/teams` z prefiksem
+`/teams/guests`); takie logowania podlegają wtedy budżetom, rate limits i
+dostępowi do modeli każdego węzła zawierającego `user_path_prefix`, a ich
+zakresem dostępu pozostaje ich własny liść. Jeśli
 osoba nigdy nie może ominąć mapowań, na przykład dlatego, że źle
 skonfigurowany dostawca mógłby pominąć claim, nie włączaj `allow_all_admins`;
 same `admin_groups` lub same mapowania odrzucają takie logowanie.
@@ -220,7 +228,9 @@ Wylogowanie zawsze najpierw kończy sesję GoModel. Aby zakończyć także sesj�
 dostawcy tożsamości, ustaw `provider_logout_url`
 (`PRO_SSO_PROVIDER_LOGOUT_URL`) na bezwzględny adres HTTPS wylogowania u
 dostawcy; po wylogowaniu gateway przekierowuje pod ten adres. Skonfiguruj
-dostawcę tak, aby wracał do `/sso/logged-out`. Bez tego ustawienia GoModel
+dostawcę tak, aby wracał do `/sso/logged-out` poniżej skonfigurowanego
+`BASE_PATH`: przy `BASE_PATH=/g` jest to
+`https://gomodel.example.com/g/sso/logged-out`. Bez tego ustawienia GoModel
 pokazuje własną stronę wylogowania.
 
 Wylogowanie natychmiast unieważnia sesję na replice, która je obsłużyła, i

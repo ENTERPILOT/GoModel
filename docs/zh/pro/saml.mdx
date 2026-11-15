@@ -88,7 +88,7 @@ PRO_SSO_SAML_TRUST_EMAIL=true
     设置 `idp_metadata_url`，或下载元数据并设置 `idp_metadata_file`。元数据必须只描述一个身份提供商，并包含一个 HTTP-Redirect 登录端点和至少一个签名证书。
   </Step>
   <Step title="启动网关并登录">
-    打开 `/sso/login`。如果登录失败，请在[登录被拒绝的原因](/zh/pro/sso#登录被拒绝的原因)中查找原因。
+    打开 `BASE_PATH`（如有）下的 `/sso/login`。如果登录失败，请在[登录被拒绝的原因](/zh/pro/sso#登录被拒绝的原因)中查找原因。
   </Step>
 </Steps>
 
@@ -217,8 +217,8 @@ extensions:
 ## 限制
 
 - **每人约 850 个组。** 每个组值是一个 XML 元素，而超过 900 个元素的响应会以 `too_many_elements` 被拒绝。该上限不可配置。请在身份提供商处进行过滤：只发送分配给应用的组，或 `admin_groups` 和 `group_mappings` 中指定的组。
-- **Entra ID：一个断言中最多 150 个组。** 超过时，Entra ID 会发送 `http://schemas.microsoft.com/claims/groups.link` 而不是组，登录会以 `groups_overage` 被拒绝。请只发送分配给应用的组。
-- **不支持在身份提供商处发起的登录。** 登录必须从网关（`/sso/login`）开始。未经请求的响应会被拒绝。
+- **Entra ID：一个断言中最多 150 个组。** 超过时，Entra ID 会发送 `http://schemas.microsoft.com/claims/groups.link` 而不是组；在设置了 `admin_groups` 或组映射时，登录会以 `groups_overage` 被拒绝。请只发送分配给应用的组。
+- **不支持在身份提供商处发起的登录。** 登录必须从网关（`BASE_PATH` 下的 `/sso/login`）开始。未经请求的响应会被拒绝。
 - **不支持加密断言。** 它们会以 `encrypted_assertion` 被拒绝。
 - **不支持 SAML 单点登出。** 网关不发送 SAML 登出请求，也不处理来自身份提供商的登出请求。退出登录会结束 GoModel 会话；身份提供商的会话只能通过重定向到 `provider_logout_url` 结束。
 - **每个网关一个身份提供商。**

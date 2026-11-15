@@ -120,11 +120,15 @@ PRO_SSO_GROUP_MAPPINGS='[{"group":"eng-platform","user_path":"/eng/platform"},{"
 - **Paths configured elsewhere are not checked.** That rule knows only the
   nodes SSO configures (mapping user paths and `user_path_prefix`), not the
   paths named by [users](/features/users) policies, budgets, or rate limits.
-  A custom `user_path_claim` must not produce a value that names such a path:
-  a `preferred_username` of `contractors` under `/users` would sign that
-  person in as `/users/contractors`, with the access scope of everyone below
-  it. The default `email` claim cannot, as its value is always the person's
-  own verified address.
+  A `user_path_claim` value that names such a path gives the session that
+  path's scope, including everything below it: a `preferred_username` of
+  `contractors` under `/users` would sign that person in as
+  `/users/contractors`, with the access scope of everyone below it. This
+  applies to the default `email` claim too. Its value is always the person's
+  own verified address, so a path such as `/users/alice@example.com` is
+  usually Alice's own policy, which is intended. The risk is a path named
+  after an email address that other users or keys sit under; do not place
+  them there.
 
 ### Who may sign in
 
@@ -148,7 +152,12 @@ Startup therefore needs at least one of `admin_groups`, `group_mappings`, or
 A login without a groups claim is a login in no group, not an error, because
 many identity providers leave the claim out for a person in no group. Under
 `allow_all_admins` without `admin_groups`, such a login therefore lands under
-`user_path_prefix`, outside every mapped node and its limits. If a person must
+`user_path_prefix`, outside every mapped node and its limits unless
+`user_path_prefix` itself lies inside a mapped node. Startup does not refuse
+that overlap (for example a mapping to `/teams` with prefix `/teams/guests`);
+such logins are then subject to the budgets, rate limits, and model access of
+every node that contains `user_path_prefix`, while their access scope stays
+their own leaf. If a person must
 never get past the mappings, for example because a misconfigured provider
 could drop the claim, do not enable `allow_all_admins`; `admin_groups` or
 mappings alone refuse such a login.
@@ -205,8 +214,10 @@ an ancestor of either is refused on every request, not only at sign-in.
 Sign-out always ends the GoModel session first. To end the identity-provider
 session as well, set `provider_logout_url` (`PRO_SSO_PROVIDER_LOGOUT_URL`) to
 the provider's absolute HTTPS logout URL; the gateway redirects there after
-signing out. Configure the provider to return to `/sso/logged-out`. Without
-it, GoModel shows its own signed-out page.
+signing out. Configure the provider to return to `/sso/logged-out` below any
+`BASE_PATH`: with `BASE_PATH=/g`, that is
+`https://gomodel.example.com/g/sso/logged-out`. Without it, GoModel shows its
+own signed-out page.
 
 Signing out revokes the session immediately on the replica that handled it,
 and records the revocation in the configured storage backend. Every replica

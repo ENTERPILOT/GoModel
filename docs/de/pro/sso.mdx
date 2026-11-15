@@ -132,12 +132,16 @@ PRO_SSO_GROUP_MAPPINGS='[{"group":"eng-platform","user_path":"/eng/platform"},{"
 - **Anderswo konfigurierte Pfade werden nicht geprüft.** Diese Regel kennt
   nur die Knoten, die SSO konfiguriert (die User-Paths der Mappings und
   `user_path_prefix`), nicht die Pfade aus Richtlinien für
-  [Benutzer](/de/features/users), Budgets oder Rate-Limits. Ein eigener
-  `user_path_claim` darf keinen Wert liefern, der einen solchen Pfad benennt:
-  Ein `preferred_username` `contractors` unter `/users` würde die Person als
-  `/users/contractors` anmelden, mit dem Zugriffsbereich aller darunter. Der
-  Standard-Claim `email` kann das nicht, denn sein Wert ist immer die eigene
-  verifizierte Adresse der Person.
+  [Benutzer](/de/features/users), Budgets oder Rate-Limits. Ein Wert von
+  `user_path_claim`, der einen solchen Pfad benennt, gibt der Session dessen
+  Zugriffsbereich einschließlich allem darunter: Ein `preferred_username`
+  `contractors` unter `/users` würde die Person als `/users/contractors`
+  anmelden, mit dem Zugriffsbereich aller darunter. Das gilt auch für den
+  Standard-Claim `email`. Sein Wert ist immer die eigene verifizierte Adresse
+  der Person, ein Pfad wie `/users/alice@example.com` ist also meist Alices
+  eigene Richtlinie, und das ist beabsichtigt. Riskant ist ein nach einer
+  E-Mail-Adresse benannter Pfad, unter dem andere Benutzer oder Keys liegen;
+  legen Sie sie dort nicht ab.
 
 ### Wer sich anmelden darf
 
@@ -166,7 +170,12 @@ Eine Anmeldung ohne Gruppen-Claim ist eine Anmeldung ohne Gruppe, kein
 Fehler, denn viele Identity-Provider lassen den Claim bei Personen ohne Gruppe
 weg. Mit `allow_all_admins` und ohne `admin_groups` landet eine solche
 Anmeldung daher unter `user_path_prefix`, außerhalb aller gemappten Knoten und
-ihrer Limits. Darf eine Person nie an den Mappings vorbeikommen, etwa weil ein
+ihrer Limits, sofern `user_path_prefix` nicht selbst in einem gemappten Knoten
+liegt. Der Start lehnt eine solche Überschneidung nicht ab (etwa ein Mapping
+auf `/teams` mit dem Präfix `/teams/guests`); solche Anmeldungen unterliegen
+dann den Budgets, Rate-Limits und dem Modellzugriff jedes Knotens, der
+`user_path_prefix` enthält, während ihr Zugriffsbereich ihr eigenes Blatt
+bleibt. Darf eine Person nie an den Mappings vorbeikommen, etwa weil ein
 falsch konfigurierter Provider den Claim weglassen könnte, aktivieren Sie
 `allow_all_admins` nicht; `admin_groups` oder Mappings allein lehnen eine
 solche Anmeldung ab.
@@ -230,8 +239,10 @@ Die Abmeldung beendet immer zuerst die GoModel-Session. Um auch die Session
 beim Identity-Provider zu beenden, setzen Sie `provider_logout_url`
 (`PRO_SSO_PROVIDER_LOGOUT_URL`) auf die absolute HTTPS-Logout-URL des
 Providers; das Gateway leitet nach der Abmeldung dorthin weiter. Konfigurieren
-Sie den Provider so, dass er zu `/sso/logged-out` zurückkehrt. Ohne diese
-Einstellung zeigt GoModel seine eigene Abmeldeseite.
+Sie den Provider so, dass er zu `/sso/logged-out` unterhalb eines ggf.
+konfigurierten `BASE_PATH` zurückkehrt: Mit `BASE_PATH=/g` ist das
+`https://gomodel.example.com/g/sso/logged-out`. Ohne diese Einstellung zeigt
+GoModel seine eigene Abmeldeseite.
 
 Die Abmeldung widerruft die Session sofort auf der Replica, die sie
 bearbeitet hat, und speichert den Widerruf im konfigurierten Storage-Backend.

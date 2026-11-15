@@ -119,7 +119,7 @@ Das Gateway stellt zwei URLs bereit, beide unterhalb eines ggf. konfigurierten
     einem Signaturzertifikat beschreiben.
   </Step>
   <Step title="Gateway starten und anmelden">
-    Öffnen Sie `/sso/login`. Schlägt die Anmeldung fehl, schlagen Sie den Grund
+    Öffnen Sie `/sso/login` unterhalb eines ggf. konfigurierten `BASE_PATH`. Schlägt die Anmeldung fehl, schlagen Sie den Grund
     unter
     [Gründe für abgelehnte Anmeldungen](/de/pro/sso#gründe-für-abgelehnte-anmeldungen)
     nach.
@@ -365,11 +365,13 @@ konfigurierten Storage-Backend.
   sind oder die in `admin_groups` und `group_mappings` genannt werden.
 - **Entra ID: höchstens 150 Gruppen in einer Assertion.** Darüber sendet
   Entra ID statt der Gruppen
-  `http://schemas.microsoft.com/claims/groups.link`, und die Anmeldung wird
-  mit `groups_overage` abgelehnt. Senden Sie nur die Gruppen, die der
+  `http://schemas.microsoft.com/claims/groups.link`, und solange
+  `admin_groups` oder Gruppen-Mappings gesetzt sind, wird die Anmeldung mit
+  `groups_overage` abgelehnt. Senden Sie nur die Gruppen, die der
   Anwendung zugewiesen sind.
 - **Keine beim Identity-Provider gestartete Anmeldung.** Anmeldungen müssen
-  am Gateway beginnen (`/sso/login`). Unaufgeforderte Responses werden
+  am Gateway beginnen (`/sso/login` unterhalb eines ggf. konfigurierten
+  `BASE_PATH`). Unaufgeforderte Responses werden
   abgelehnt.
 - **Keine verschlüsselten Assertions.** Sie werden mit `encrypted_assertion`
   abgelehnt.

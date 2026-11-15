@@ -117,7 +117,7 @@ Gateway udostępnia dwa adresy URL, oba poniżej skonfigurowanego `BASE_PATH`:
     podpisującym.
   </Step>
   <Step title="Uruchom gateway i zaloguj się">
-    Otwórz `/sso/login`. Jeśli logowanie się nie powiedzie, sprawdź powód w
+    Otwórz `/sso/login` poniżej skonfigurowanego `BASE_PATH`. Jeśli logowanie się nie powiedzie, sprawdź powód w
     sekcji
     [Powody odrzuconych logowań](/pl/pro/sso#powody-odrzuconych-logowań).
   </Step>
@@ -349,10 +349,12 @@ storage.
   w `admin_groups` i `group_mappings`.
 - **Entra ID: najwyżej 150 grup w asercji.** Powyżej tej liczby Entra ID
   zamiast grup wysyła `http://schemas.microsoft.com/claims/groups.link`, a
-  logowanie jest odrzucane z powodem `groups_overage`. Wysyłaj tylko grupy
+  gdy ustawiono `admin_groups` lub mapowania grup, logowanie jest odrzucane z
+  powodem `groups_overage`. Wysyłaj tylko grupy
   przypisane do aplikacji.
 - **Brak logowania rozpoczynanego u dostawcy tożsamości.** Logowanie musi
-  zaczynać się w gatewayu (`/sso/login`). Niezamówione odpowiedzi są
+  zaczynać się w gatewayu (`/sso/login` poniżej skonfigurowanego
+  `BASE_PATH`). Niezamówione odpowiedzi są
   odrzucane.
 - **Brak zaszyfrowanych asercji.** Są odrzucane z powodem
   `encrypted_assertion`.

@@ -112,7 +112,7 @@ The gateway publishes two URLs, both below any `BASE_PATH`:
     certificate.
   </Step>
   <Step title="Start the gateway and sign in">
-    Open `/sso/login`. If the login fails, look up the reason in
+    Open `/sso/login` below any `BASE_PATH`. If the login fails, look up the reason in
     [Rejected login reasons](/pro/sso#rejected-login-reasons).
   </Step>
 </Steps>
@@ -333,10 +333,11 @@ backend.
   and `group_mappings`.
 - **Entra ID: at most 150 groups in an assertion.** Above that, Entra ID sends
   `http://schemas.microsoft.com/claims/groups.link` instead of the groups, and
-  the login is refused with `groups_overage`. Emit only the groups assigned
+  while `admin_groups` or group mappings are set, the login is refused with
+  `groups_overage`. Emit only the groups assigned
   to the application.
 - **No login started at the identity provider.** Logins must start at the
-  gateway (`/sso/login`). Unsolicited responses are refused.
+  gateway (`/sso/login` below any `BASE_PATH`). Unsolicited responses are refused.
 - **No encrypted assertions.** They are refused with `encrypted_assertion`.
 - **No SAML single logout.** The gateway sends no SAML logout request and
   processes none from the identity provider. Signing out ends the GoModel

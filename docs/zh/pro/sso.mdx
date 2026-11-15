@@ -81,7 +81,7 @@ PRO_SSO_GROUP_MAPPINGS='[{"group":"eng-platform","user_path":"/eng/platform"},{"
 - **路径为 `<user_path>/<user>`。** `<user>` 是 `user_path_claim` 的值，因此 `eng-platform` 组中的 `alice@example.com` 会以 `/eng/platform/alice@example.com` 登录。`user_path_prefix` 只适用于未匹配任何映射的登录。
 - **映射得到的是每个用户各自的叶子，而不是节点本身。** 用户路径同时也是会话的[访问作用域](/zh/features/user-path#访问作用域)，因此绑定到 `/eng/platform` 的人将能管理整个团队。每位成员只能看到自己的用量、审计条目和密钥。
 - **路径会覆盖某个节点的登录将被拒绝。** 如果声明的值会使路径等于某个已映射的节点或 `user_path_prefix`，或位于其中之一的上层，登录会以 `claim_mapping_failed` 失败。例如，存在节点 `/eng` 和 `/eng/platform` 时，映射到 `/eng` 的组中声明值为 `platform` 的成员会被拒绝。
-- **不检查在其他地方配置的路径。** 该规则只知道 SSO 配置的节点（映射的用户路径和 `user_path_prefix`），不知道[用户](/zh/features/users)策略、预算或速率限制中指定的路径。自定义的 `user_path_claim` 不得产生指向此类路径的值：`/users` 下值为 `contractors` 的 `preferred_username` 会使此人以 `/users/contractors` 登录，并拥有其下所有人的访问作用域。默认的 `email` 声明不会出现这种情况，因为它的值始终是此人自己已验证的邮箱。
+- **不检查在其他地方配置的路径。** 该规则只知道 SSO 配置的节点（映射的用户路径和 `user_path_prefix`），不知道[用户](/zh/features/users)策略、预算或速率限制中指定的路径。指向此类路径的 `user_path_claim` 值会使会话获得该路径及其下所有内容的访问作用域：`/users` 下值为 `contractors` 的 `preferred_username` 会使此人以 `/users/contractors` 登录，并拥有其下所有人的访问作用域。默认的 `email` 声明同样如此。它的值始终是此人自己已验证的邮箱，因此 `/users/alice@example.com` 这样的路径通常就是 Alice 自己的策略，这是预期行为。风险在于以邮箱命名、其下还有其他用户或密钥的路径；请不要把它们放在那里。
 
 ### 谁可以登录
 
@@ -93,7 +93,7 @@ PRO_SSO_GROUP_MAPPINGS='[{"group":"eng-platform","user_path":"/eng/platform"},{"
 
 因此，启动至少需要 `admin_groups`、`group_mappings` 或 `allow_all_admins: true` 之一。如果只想准入已映射的组，请只使用映射。
 
-没有组声明的登录被视为不属于任何组，而不是错误，因为许多身份提供商会对不属于任何组的人省略该声明。因此，在设置了 `allow_all_admins` 而未设置 `admin_groups` 时，这样的登录会位于 `user_path_prefix` 之下，处于所有已映射节点及其限制之外。如果绝不允许任何人绕过映射（例如配置错误的提供商可能丢失该声明），请不要启用 `allow_all_admins`；仅使用 `admin_groups` 或映射时，这样的登录会被拒绝。
+没有组声明的登录被视为不属于任何组，而不是错误，因为许多身份提供商会对不属于任何组的人省略该声明。因此，在设置了 `allow_all_admins` 而未设置 `admin_groups` 时，这样的登录会位于 `user_path_prefix` 之下，处于所有已映射节点及其限制之外，除非 `user_path_prefix` 本身位于某个已映射节点之内。启动时不会拒绝这种重叠（例如映射到 `/teams`，前缀为 `/teams/guests`）；此时这些登录受包含 `user_path_prefix` 的每个节点的预算、速率限制和模型访问约束，而其访问作用域仍只是自己的叶子。如果绝不允许任何人绕过映射（例如配置错误的提供商可能丢失该声明），请不要启用 `allow_all_admins`；仅使用 `admin_groups` 或映射时，这样的登录会被拒绝。
 
 以下情况会导致启动失败：条目缺少 `group` 或 `user_path`、`group` 重复、存在未知键、某个键在条目中重复或大小写与 `group`、`user_path` 不同（YAML 和 `PRO_SSO_GROUP_MAPPINGS` 均如此），或 `user_path` 不是绝对路径、是根路径 `/`、包含 `.`、`..` 段或带 `:` 的段。
 
@@ -113,7 +113,7 @@ PRO_SSO_GROUP_MAPPINGS='[{"group":"eng-platform","user_path":"/eng/platform"},{"
 
 ## 跨副本退出登录
 
-退出登录总是先结束 GoModel 会话。如需同时结束身份提供商的会话，请将 `provider_logout_url`（`PRO_SSO_PROVIDER_LOGOUT_URL`）设置为提供商的绝对 HTTPS 登出 URL；退出登录后网关会重定向到该地址。请将提供商配置为返回 `/sso/logged-out`。未设置时，GoModel 显示自己的已退出页面。
+退出登录总是先结束 GoModel 会话。如需同时结束身份提供商的会话，请将 `provider_logout_url`（`PRO_SSO_PROVIDER_LOGOUT_URL`）设置为提供商的绝对 HTTPS 登出 URL；退出登录后网关会重定向到该地址。请将提供商配置为返回 `BASE_PATH`（如有）下的 `/sso/logged-out`：设置 `BASE_PATH=/g` 时为 `https://gomodel.example.com/g/sso/logged-out`。未设置时，GoModel 显示自己的已退出页面。
 
 退出登录会立即在处理该请求的副本上吊销会话，并将吊销记录写入已配置的存储后端。每个副本每 2 秒重新读取一次吊销记录，因此使用 PostgreSQL 或 MongoDB 存储时，已退出的会话会在几秒内在所有副本上失效。吊销记录在重启后依然保留，并在会话本应过期后删除。
 
