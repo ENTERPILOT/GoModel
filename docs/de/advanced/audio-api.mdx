@@ -108,7 +108,9 @@ verwendet, der sich aus `response_format` ergibt (zum Beispiel `wav` → `audio/
 [eigene Stimmen](https://developers.openai.com/api/docs/guides/custom-voices)
 verwendet: `"voice": {"id": "voice_1234"}`. OpenAI-kompatible Provider erhalten
 das Objekt unverändert; ElevenLabs, MiniMax, Xiaomi und audio.cpp verwenden
-seine `id` als Stimme.
+seine `id` als Stimme. Ein Objekt ohne nicht-leere String-`id` liefert `400`.
+Ein kompatibler Provider ohne Unterstützung für eigene Stimmen kann das Objekt
+ablehnen.
 
 Synthetisiertes Audio wird **so weitergereicht, wie der Provider es erzeugt** –
 siehe [Streaming](/de/advanced/audio-api#streaming).
