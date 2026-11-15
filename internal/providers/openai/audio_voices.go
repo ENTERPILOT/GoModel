@@ -15,9 +15,10 @@ import (
 // The route is not part of the OpenAI API, but self-hosted TTS servers
 // registered as openai providers (Kokoro-FastAPI, Speaches, ...) serve it, so
 // the shared adapter asks rather than guesses. An upstream without the route
-// (OpenAI itself, most hosted providers) answers 404 or 405, which is reported
-// as the same unsupported-capability error a provider without voice listing
-// returns, not as an upstream failure.
+// (most hosted providers) answers 404 or 405, which is reported as the same
+// unsupported-capability error a provider without voice listing returns, not
+// as an upstream failure. OpenAI itself has no such route either; Provider
+// answers for it from a static list instead (see builtinVoices).
 func (p *CompatibleProvider) ListVoices(ctx context.Context, req *core.AudioVoicesRequest) (*core.AudioVoicesResponse, error) {
 	if req == nil {
 		return nil, core.NewInvalidRequestError("audio voices request is required", nil)

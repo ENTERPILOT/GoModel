@@ -159,18 +159,19 @@ curl "http://localhost:8080/v1/audio/voices?model=kokoro" \
 Pass `id` as `voice` to `/v1/audio/speech`; `name` is a display label and
 falls back to `id`. `model` resolves and is authorized exactly as on
 `/v1/audio/speech`, aliases and virtual models included. The call is not billed or
-budgeted. Each call asks the provider, so request rate limits apply as on
-`/v1/audio/speech`.
+budgeted. Each call asks the provider (OpenAI excepted), so request rate
+limits apply as on `/v1/audio/speech`.
 
 | Provider | Upstream source |
 | --- | --- |
 | [audio.cpp](/providers/audiocpp) | `GET /v1/audio/voices?model=` |
 | [ElevenLabs](/providers/elevenlabs) | `GET /v2/voices` (the workspace's voices, for every model; at most the first 2000) |
 | [MiniMax](/providers/minimax) | `POST /v1/get_voice` (system, cloned, and generated voices) |
-| `openai`-type providers | `GET {base_url}/audio/voices?model=` — self-hosted servers such as Kokoro-FastAPI, Speaches, LocalAI, or xn-ptts |
+| OpenAI (`api.openai.com` and its regional hosts, such as `eu.api.openai.com`) | Static list of built-in voices, no upstream call: `alloy`, `ash`, `ballad`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage`, `shimmer`, `verse`, `marin`, `cedar`; for the `tts-1` family (`tts-1`, `tts-1-hd` and their snapshots), the nine it supports (no `ballad`, `verse`, `marin`, `cedar`). Custom voices are not listed: OpenAI has no API for them. Only text-to-speech models are listed; realtime and chat models, which take a different voice set, return the `400` below |
+| `openai`-type providers with a custom `base_url` | `GET {base_url}/audio/voices?model=` — self-hosted servers such as Kokoro-FastAPI, Speaches, LocalAI, or xn-ptts |
 
-A provider without a voice listing — including OpenAI itself and hosted
-OpenAI-compatible APIs, whose `/audio/voices` answers 404 or 405 — returns `400`
+A provider without a voice listing — including hosted OpenAI-compatible APIs,
+whose `/audio/voices` answers 404 or 405 — returns `400`
 `invalid_request_error` (`model "…" does not support listing voices`). A
 missing `model` is also a `400`; an unknown model is a `404`.
 

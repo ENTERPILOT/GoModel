@@ -8778,12 +8778,12 @@ curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
 jq -e '(.choices[0].message.reasoning_content // "") == "" and (.choices[0].message.content | length > 0)' "$F" >/dev/null
 ```
 
-### S270 Voice listing on OpenAI is a clean unsupported error (negative)
+### S270 Voice listing on OpenAI returns the built-in voices
 
-Checks `GET /v1/audio/voices`: OpenAI has no voice-listing route, so its
-upstream 404 surfaces as a `400` `invalid_request_error` naming the model, not
-as an upstream failure. A request without `model` is rejected before any
-upstream call.
+Checks `GET /v1/audio/voices`: OpenAI has no voice-listing route, so the
+gateway answers for an OpenAI model from its static list of built-in voices,
+normalized to `id` and `name`. A request without `model` is rejected before any
+provider is asked.
 
 ```bash
 HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s270.headers.XXXXXX")
@@ -8791,8 +8791,13 @@ BODY_FILE=$(mktemp "$QA_RUN_DIR/s270.body.XXXXXX")
 curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/audio/voices?model=gpt-4o-mini-tts"
 sed -n '1,20p' "$HEADERS_FILE"
 jq '.' "$BODY_FILE"
-grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
-jq -e '.error.type == "invalid_request_error" and .error.message == "model \"gpt-4o-mini-tts\" does not support listing voices"' "$BODY_FILE" >/dev/null
+grep -Eiq '^HTTP/.* 200 ' "$HEADERS_FILE"
+jq -e 'all(.voices[]; (.name | type == "string" and length > 0)) and ([.voices[].id] | sort) == (["alloy","ash","ballad","coral","echo","fable","nova","onyx","sage","shimmer","verse","marin","cedar"] | sort)' "$BODY_FILE" >/dev/null
+
+# The tts-1 family supports a smaller set.
+curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/audio/voices?model=tts-1"
+grep -Eiq '^HTTP/.* 200 ' "$HEADERS_FILE"
+jq -e '([.voices[].id] | sort) == (["alloy","ash","coral","echo","fable","nova","onyx","sage","shimmer"] | sort)' "$BODY_FILE" >/dev/null
 
 curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/audio/voices"
 grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
