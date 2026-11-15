@@ -181,6 +181,7 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 	if err != nil {
 		return nil, err
 	}
+	foldCompatThinkingTokens(&resp.Usage)
 	core.EnsureModel(&resp.Model, req.Model)
 	if resp.Provider == "" {
 		resp.Provider = p.responseProviderName()
@@ -253,7 +254,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 	}
 
 	// Gemini's OpenAI-compatible endpoint returns OpenAI-format SSE; only its
-	// tool-call chunks need repair on the way through.
+	// tool-call and usage chunks need repair on the way through.
 	return newCompatToolCallStream(stream), nil
 }
 

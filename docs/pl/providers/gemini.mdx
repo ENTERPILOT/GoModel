@@ -150,6 +150,14 @@ W Gemini 4 tokeny thinkingu wliczają się do `max_tokens`, a długa odpowiedź,
 osiągnie limit wyjścia per request, kończy się z `length` (`CONTINUATION` w Gemini);
 GoModel jej nie wznawia.
 
+Google rozlicza tokeny thinkingu jako wyjściowe. Jego endpoint zgodny z OpenAI
+wlicza je do `total_tokens`, ale pomija w `completion_tokens`, dlatego w trybie
+`openai_compatible` GoModel dolicza je z powrotem: `completion_tokens` zawiera
+thinking, a `completion_tokens_details.reasoning_tokens` go wyszczególnia,
+dokładnie tak jak w trybie natywnym. Gdy endpoint nie wyszczególnia tokenów
+reasoningowych, za thinking uznawana jest ta część `total_tokens`, która
+wykracza poza tokeny promptu i odpowiedzi.
+
 ## Parametry samplingu w Gemini 3 i 4
 
 Przewodniki migracji Google do Gemini 3 i 4 zalecają usunięcie `temperature`, `top_p`

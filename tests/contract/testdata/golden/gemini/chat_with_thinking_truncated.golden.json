@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "length",
+      "index": 0,
+      "message": {
+        "content": "",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 0,
+  "id": "uKH5ar2bGY-D7M8PoYHKsQc",
+  "model": "gemini-3-flash-preview",
+  "object": "chat.completion",
+  "provider": "gemini",
+  "usage": {
+    "completion_tokens": 46,
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": 0,
+      "audio_tokens": 0,
+      "reasoning_tokens": 46,
+      "rejected_prediction_tokens": 0
+    },
+    "prompt_tokens": 11,
+    "total_tokens": 57
+  }
+}

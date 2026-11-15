@@ -89,6 +89,8 @@ Gemini 3 和 4 无法关闭思考，并且 Pro 系列、3.7 和 3.8 Flash、Gemi
 
 在 Gemini 4 上，思考 Token 会计入 `max_tokens`，达到按请求输出上限的长回答会以 `length`（Gemini 的 `CONTINUATION`）结束；GoModel 不会续写它。
 
+Google 按输出费率对思考 Token 计费。其 OpenAI 兼容端点会把它们计入 `total_tokens`，却不计入 `completion_tokens`，因此在 `openai_compatible` 模式下 GoModel 会把它们加回去：`completion_tokens` 包含思考 Token，`completion_tokens_details.reasoning_tokens` 单独列出其数量，与原生模式完全一致。如果该端点没有单独列出推理 Token，则 `total_tokens` 中超出提示与补全 Token 的部分会被计为思考 Token。
+
 ## Gemini 3 和 4 上的采样参数
 
 Google 的 Gemini 3 和 4 迁移指南建议从每个请求中移除 `temperature`、`top_p` 和 `top_k`，因为这些模型已针对其默认值调优（Gemini 4 会忽略它们），并将 `candidate_count` 列为不支持的参数。因此在原生模式下，GoModel 会为 Gemini 3 及更高版本（`gemini-3-*`、`gemini-3.8-*`、`gemini-4-*` 等）丢弃这四个字段，而对 Gemini 2.5、Gemma 和其他模型仍会转发。`presence_penalty` 和 `frequency_penalty` 从不转发：包括 2.5 在内的所有当前 Gemini API 模型都会返回 HTTP 400 "Penalty is not enabled for this model"。`max_tokens`、`stop`、`response_format` 和思考设置不受影响。

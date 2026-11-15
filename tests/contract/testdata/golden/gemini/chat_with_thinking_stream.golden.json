@@ -1,0 +1,33 @@
+{
+  "chunks": [
+    {
+      "choices": [
+        {
+          "delta": {
+            "content": "Hello, World!",
+            "role": "assistant"
+          },
+          "finish_reason": "stop",
+          "index": 0
+        }
+      ],
+      "created": 0,
+      "id": "66b5arLCB5rd7M8PiqWx-QQ",
+      "model": "gemini-2.5-flash",
+      "object": "chat.completion.chunk",
+      "usage": {
+        "completion_tokens": 25,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": 0,
+          "audio_tokens": 0,
+          "reasoning_tokens": 21,
+          "rejected_prediction_tokens": 0
+        },
+        "prompt_tokens": 11,
+        "total_tokens": 36
+      }
+    }
+  ],
+  "done": true,
+  "text": "Hello, World!"
+}

@@ -166,6 +166,14 @@ Bei Gemini 4 zählen Thinking-Tokens gegen `max_tokens`, und eine lange Antwort,
 die das Ausgabelimit pro Request erreicht, endet mit `length` (Geminis
 `CONTINUATION`); GoModel setzt sie nicht fort.
 
+Google berechnet Thinking-Tokens als Output. Der OpenAI-kompatible Endpunkt
+zählt sie in `total_tokens`, lässt sie aber in `completion_tokens` aus. Im Modus
+`openai_compatible` rechnet GoModel sie deshalb wieder hinzu:
+`completion_tokens` enthält das Thinking und
+`completion_tokens_details.reasoning_tokens` weist es aus, genau wie im nativen
+Modus. Weist der Endpunkt keine Reasoning-Tokens aus, gilt der Teil von
+`total_tokens`, der über Prompt- und Completion-Tokens hinausgeht, als Thinking.
+
 ## Sampling-Parameter bei Gemini 3 und 4
 
 Googles Migrationsleitfäden für Gemini 3 und 4 empfehlen, `temperature`,

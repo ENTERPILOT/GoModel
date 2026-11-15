@@ -116,6 +116,21 @@ var endpointConfigs = map[string]struct {
 			"stream":     true,
 		},
 	},
+	// chat_usage_stream asks for the usage chunk, as the gateway does by
+	// default for the streams it forwards.
+	"chat_usage_stream": {
+		path:   "/v1/chat/completions",
+		method: http.MethodPost,
+		requestBody: map[string]any{
+			"model": "gpt-4o-mini",
+			"messages": []map[string]string{
+				{"role": "user", "content": "Say 'Hello, World!' and nothing else."},
+			},
+			"max_tokens":     50,
+			"stream":         true,
+			"stream_options": map[string]any{"include_usage": true},
+		},
+	},
 	"models": {
 		path:   "/v1/models",
 		method: http.MethodGet,
@@ -309,7 +324,7 @@ func providerSupportsEmbeddings(provider string) bool {
 
 func main() {
 	provider := flag.String("provider", "openai", "Provider to test (openai, anthropic, gemini, gemini-native, groq, xai, kimicode, oracle)")
-	endpoint := flag.String("endpoint", "chat", "Endpoint to test (chat, chat_stream, models, responses, responses_stream, embeddings, generate_content, generate_content_stream, image_generate_content, batch_embed_contents)")
+	endpoint := flag.String("endpoint", "chat", "Endpoint to test (chat, chat_stream, chat_usage_stream, models, responses, responses_stream, embeddings, generate_content, generate_content_stream, image_generate_content, batch_embed_contents)")
 	output := flag.String("output", "", "Output file path (required)")
 	model := flag.String("model", "", "Override model in request")
 	flag.Parse()
