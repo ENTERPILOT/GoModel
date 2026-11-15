@@ -140,8 +140,8 @@ func TestServiceCreateAuthenticateAndDeactivate(t *testing.T) {
 	issued, err := service.Create(context.Background(), CreateInput{Name: "primary"})
 	require.NoError(t, err)
 	require.NotNil(t, issued)
-	require.Greater(t, len(issued.Value), len(TokenPrefix))
-	require.Equal(t, TokenPrefix, issued.Value[:len(TokenPrefix)])
+	require.Greater(t, len(issued.Value), len(DefaultTokenPrefix))
+	require.Equal(t, DefaultTokenPrefix, issued.Value[:len(DefaultTokenPrefix)])
 	require.True(t, service.Enabled())
 
 	authKeyID, err := service.Authenticate(context.Background(), issued.Value)
@@ -162,7 +162,7 @@ func TestServiceAuthenticateExpiredKey(t *testing.T) {
 	key := AuthKey{
 		ID:            "key-expired",
 		Name:          "expired",
-		RedactedValue: TokenPrefix + "...zzzz",
+		RedactedValue: DefaultTokenPrefix + "...zzzz",
 		SecretHash:    hashSecret("secret"),
 		Enabled:       true,
 		ExpiresAt:     &expiredAt,
@@ -173,7 +173,7 @@ func TestServiceAuthenticateExpiredKey(t *testing.T) {
 	require.NoError(t, err)
 	err = service.Refresh(context.Background())
 	require.NoError(t, err)
-	_, err = service.Authenticate(context.Background(), TokenPrefix+"secret")
+	_, err = service.Authenticate(context.Background(), DefaultTokenPrefix+"secret")
 	require.ErrorIs(t, err, ErrExpired)
 }
 
@@ -182,7 +182,7 @@ func TestServiceAuthenticateRechecksStaleActiveSnapshot(t *testing.T) {
 	key := AuthKey{
 		ID:            "key-expired",
 		Name:          "expired",
-		RedactedValue: TokenPrefix + "...zzzz",
+		RedactedValue: DefaultTokenPrefix + "...zzzz",
 		SecretHash:    hashSecret("secret"),
 		Enabled:       true,
 		ExpiresAt:     &expiredAt,
@@ -198,7 +198,7 @@ func TestServiceAuthenticateRechecksStaleActiveSnapshot(t *testing.T) {
 		bySecretHash: map[string]AuthKey{key.SecretHash: key},
 		activeByHash: map[string]AuthKey{key.SecretHash: key},
 	}
-	_, err = service.Authenticate(context.Background(), TokenPrefix+"secret")
+	_, err = service.Authenticate(context.Background(), DefaultTokenPrefix+"secret")
 	require.ErrorIs(t, err, ErrExpired)
 }
 
@@ -221,7 +221,7 @@ func TestServiceWriteOperationsIgnoreRefreshReconciliationFailures(t *testing.T)
 		key := AuthKey{
 			ID:            "key-1",
 			Name:          "primary",
-			RedactedValue: TokenPrefix + "...abcd",
+			RedactedValue: DefaultTokenPrefix + "...abcd",
 			SecretHash:    hashSecret("secret"),
 			Enabled:       true,
 			CreatedAt:     time.Now().UTC().Add(-time.Hour),
@@ -236,7 +236,7 @@ func TestServiceWriteOperationsIgnoreRefreshReconciliationFailures(t *testing.T)
 		store.listErr = errors.New("transient list failure")
 		err = service.Deactivate(context.Background(), key.ID)
 		require.NoError(t, err)
-		_, err = service.Authenticate(context.Background(), TokenPrefix+"secret")
+		_, err = service.Authenticate(context.Background(), DefaultTokenPrefix+"secret")
 		require.ErrorIs(t, err, ErrInactive)
 	})
 

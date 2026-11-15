@@ -179,9 +179,10 @@ Quelle gesperrt hat: Ein früherer Import wird deaktiviert und ansonsten nicht v
 und ein nie importierter Key wird nicht erstellt (`204`). Ein Hash, der zu einem von GoModel ausgestellten Key gehört, liefert `409`
 mit dem Code `auth_key_exists`.
 
-Tokens, die mit `sk-` beginnen, werden nur gegen importierte Keys geprüft und
-`sk_gom_`-Tokens nur gegen von GoModel ausgestellte Keys. Ohne importierte Keys
-werden `sk-`-Tokens wie bisher abgelehnt. Deaktivieren Sie einen importierten Key wie jeden
+Ein importierter Key passt nur zum vollständigen LiteLLM-Token `sk-...`, ein
+von GoModel ausgestellter Key wird über sein Secret (den Teil nach dem Präfix)
+erkannt, sodass keiner für den anderen einspringen kann. Das gilt auch für ein eigenes Key-Präfix, das mit
+`sk-` beginnt. Ohne importierte Keys werden LiteLLM-Tokens wie bisher abgelehnt. Deaktivieren Sie einen importierten Key wie jeden
 anderen. Der Import-Endpunkt erfordert globalen Admin-Zugriff.
 
 Ein importierter Key ist genau so stark wie der LiteLLM-Key. Bei LiteLLM können Sie

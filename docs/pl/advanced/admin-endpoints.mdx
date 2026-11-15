@@ -179,9 +179,10 @@ zablokowany w źródle: wcześniej zaimportowany klucz zostaje dezaktywowany i p
 a klucz nigdy nieimportowany nie jest tworzony (`204`). Hash należący do klucza wydanego przez GoModel daje odpowiedź `409`
 z kodem `auth_key_exists`.
 
-Tokeny zaczynające się od `sk-` są sprawdzane wyłącznie względem zaimportowanych kluczy, a
-tokeny `sk_gom_` wyłącznie względem kluczy wydanych przez GoModel. Bez zaimportowanych kluczy
-tokeny `sk-` są odrzucane tak jak wcześniej. Zaimportowany klucz dezaktywujesz tak samo jak
+Zaimportowany klucz pasuje tylko do całego tokenu LiteLLM `sk-...`, a klucz wydany
+przez GoModel jest rozpoznawany po swoim sekrecie (części po prefiksie), więc żaden nie może zastąpić drugiego. Dotyczy
+to także własnego prefiksu kluczy zaczynającego się od `sk-`. Bez zaimportowanych kluczy
+tokeny LiteLLM są odrzucane tak jak wcześniej. Zaimportowany klucz dezaktywujesz tak samo jak
 każdy inny. Endpoint importu wymaga globalnego dostępu administracyjnego.
 
 Zaimportowany klucz jest dokładnie tak silny jak klucz w LiteLLM. LiteLLM pozwala wybierać
