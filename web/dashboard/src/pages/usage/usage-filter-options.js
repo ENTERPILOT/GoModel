@@ -1,6 +1,7 @@
 // Usage filter dropdown choices: facet options and API key names.
 // Kept free of Svelte/DOM dependencies so node:test can exercise it.
 
+import { authKeyLabels } from "../../lib/utils/authKeyLabels.js";
 import { authKeyActive } from "../auth-keys/authKeysLogic.js";
 import { shortSessionID } from "./usage-helpers.js";
 import { normalizeUserPath } from "./user-path-tree.js";
@@ -22,13 +23,10 @@ export function facetOptionList(values, active) {
 }
 
 // Maps managed auth key ids to their names from an /admin/auth-keys response.
+// Same-name keys carry their redacted token, so the filter, log column and
+// breakdown can tell them apart.
 export function authKeyNameMap(keys) {
-  const names = {};
-  for (const key of keys || []) {
-    const id = String((key && key.id) || "").trim();
-    if (id) names[id] = String(key.name || "").trim() || id;
-  }
-  return names;
+  return authKeyLabels(keys);
 }
 
 // Ids of managed auth keys that are not active (deactivated or expired), as

@@ -336,6 +336,20 @@ test("authKeyNameMap maps ids to names, falling back to the id", () => {
   assert.deepEqual(authKeyNameMap(null), {});
 });
 
+test("same-name keys stay distinguishable in the API key filter and log column", () => {
+  const names = authKeyNameMap([
+    { id: "k1", name: "ci-deploy", redacted_value: "sk_gom_...abcd" },
+    { id: "k2", name: "ci-deploy", redacted_value: "sk_gom_...wxyz" },
+    { id: "k3", name: "batch", redacted_value: "sk_gom_...q1q1" },
+  ]);
+  assert.deepEqual(
+    authKeyOptionList(names, []).map((option) => option.label),
+    ["batch", "ci-deploy (sk_gom_...abcd)", "ci-deploy (sk_gom_...wxyz)"],
+  );
+  assert.equal(authKeyDisplayName("k2", names), "ci-deploy (sk_gom_...wxyz)");
+  assert.equal(authKeyDisplayName("k3", names), "batch");
+});
+
 test("authKeyDisplayName prefers the key name, then a short id", () => {
   const names = { k1: "CI" };
   assert.equal(authKeyDisplayName("k1", names), "CI");
