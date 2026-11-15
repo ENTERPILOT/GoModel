@@ -193,6 +193,7 @@ func (b *bootstrap) initPricing() error {
 		b.pricingResolver = app.pricingOverrides.Service
 	}
 
+	b.wrapUsageLoggerForMetrics()
 	if err := b.wrapUsageLoggerForBilling(registry); err != nil {
 		return err
 	}
