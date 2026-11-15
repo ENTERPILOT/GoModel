@@ -44,6 +44,14 @@ type AudioTranslationProvider interface {
 	CreateTranslation(ctx context.Context, req *AudioTranscriptionRequest) (*AudioResponse, error)
 }
 
+// AudioVoicesProvider is implemented by providers whose upstream can list the
+// voices a text-to-speech model offers, served at GET /v1/audio/voices. It is
+// optional: there is no OpenAI endpoint for it, and providers without an
+// upstream listing omit it rather than return a static list.
+type AudioVoicesProvider interface {
+	ListVoices(ctx context.Context, req *AudioVoicesRequest) (*AudioVoicesResponse, error)
+}
+
 // ImageProvider is implemented by providers that support the OpenAI-compatible
 // image generation endpoint (POST /v1/images/generations). It is optional so
 // providers without image models can omit it; the router discovers support by
