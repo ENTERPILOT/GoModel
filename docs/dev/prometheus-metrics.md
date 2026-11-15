@@ -202,14 +202,28 @@ Labels: `provider`, `model`, `token_type` (`input`, `output`), `user_path`,
 
 `input` is the whole prompt (uncached + provider-cached + cache-write, from
 `usage.EntryInputSegments`, the split the dashboard uses) and `output`
-includes reasoning. Only xAI's chat completions report reasoning on top of
-`completion_tokens`; xAI's Responses API, like every other provider, counts it
-inside `output_tokens`. Both store the count under the same name, so
-`usage.EntryReasoningTokens` reads the usage object: reasoning is on top when
-`total_tokens` has room for it beside input and output (recorded xAI usage:
-chat 10 + 35 + 375 = 420, Responses 17 + 276 = 293). The cost calculation
-applies the same rule. An xAI entry without such a total is read as
-containing its reasoning, which can undercount but never counts a token twice.
+includes reasoning. Two recorded providers report reasoning on top of their
+output:
+
+- Gemini's native API reports `thoughtsTokenCount` beside
+  `candidatesTokenCount` (recorded: 11 + 4 + 21 = 36). Its adapter adds the
+  two, so the usage entry already holds the complete output (11 + 25 = 36).
+- xAI's chat completions report it on top of `completion_tokens`; xAI's
+  Responses API counts it inside `output_tokens`. Both store the count under
+  the same name, so `usage.EntryReasoningTokens` reads the usage object:
+  reasoning is on top when `total_tokens` has room for it beside input and
+  output (recorded: chat 10 + 35 + 375 = 420, Responses 17 + 276 = 293). An
+  xAI entry without such a total is read as containing its reasoning, which
+  can undercount but never counts a token twice.
+
+Every other usage entry is read as containing its reasoning (recorded: OpenAI
+43 + 148 = 191, MiniMax 769 + 116 = 885, Anthropic without a total). The total
+decides for xAI alone: another provider's total may count tokens that are
+neither input nor output, and room for them is not reasoning left out.
+Gemini's OpenAI-compatible mode (`api_mode: openai_compatible`) has no
+recorded response with reasoning tokens, so its usage is read as reported;
+record one before changing that. The cost calculation applies the same rule,
+when an entry is written and when its pricing is recalculated.
 
 ### `gomodel_token_details_total`
 
@@ -304,9 +318,11 @@ batch, but the metrics would count them again.
   entry itself. A fetch therefore returns results only after the batch's
   usage was handed to a logger.
 - The claim and the marker live beside the serialized batch
-  (`usage_claimed_at`, `usage_logged_at`), and `Store.Update` never writes
-  them. A status poll or a cancel that saves a copy it read earlier cannot
-  clear them.
+  (`usage_claimed_at`, `usage_logged_at`). `Store.Update` never touches the
+  claim and never clears the marker, so a status poll or a cancel that saves
+  a copy it read earlier cannot undo either. It sets the marker when the
+  batch it saves carries one, which is how the update that follows a failed
+  `CompleteUsage` saves it.
 
 Storage stays exactly-once by ID. Entries written without their marker being
 saved are written again by a later fetch:

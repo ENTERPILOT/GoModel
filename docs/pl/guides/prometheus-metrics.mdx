@@ -370,9 +370,9 @@ Szczegóły są **częściami** `gomodel_tokens_total`, a nie dodatkiem do niej,
 i dlatego są osobną metryką: `sum(gomodel_tokens_total)` to suma tokenów,
 a żadna suma po jednej metryce nie liczy tokenu dwa razy. To samo dotyczy
 obu metryk kosztów. Providerzy różnie raportują tokeny z cache i tokeny
-reasoningu (Anthropic podaje odczyty z cache ponad input, chat completions
-xAI podają reasoning ponad output); GoModel je normalizuje, więc `input`
-i `output` znaczą to samo dla każdego providera.
+reasoningu: Anthropic podaje odczyty z cache ponad input, a xAI w Chat
+Completions i Gemini w natywnym API podają reasoning ponad output. GoModel je
+normalizuje, więc `input` i `output` znaczą to samo dla każdego providera.
 
 ```promql
 # Tokeny na minutę według modelu i kierunku

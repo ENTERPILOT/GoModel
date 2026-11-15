@@ -68,7 +68,8 @@ type Store interface {
 	List(ctx context.Context, limit int, after, userPath string) ([]*StoredBatch, error)
 	// Update replaces the stored batch. It never clears a stored
 	// UsageLoggedAt and never touches a usage claim, so saving a copy read
-	// before the batch's usage was logged does not make it count again.
+	// before the batch's usage was logged does not make it count again. A
+	// UsageLoggedAt the batch carries is stored.
 	Update(ctx context.Context, batch *StoredBatch) error
 	// ClaimUsage asks for the right to write the batch's usage entries at
 	// now. The claim is granted when nobody holds one, or when the one held
