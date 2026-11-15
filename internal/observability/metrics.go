@@ -85,8 +85,10 @@ var (
 
 	// BudgetAlertDeliveryFailures counts alerts a destination did not
 	// receive: a webhook that failed after its retries, a sink that returned
-	// an error, or an alert dropped because the destination's queue was full.
-	// destination is "webhook" or the sink's name.
+	// an error, panicked, or did not return in time, an alert dropped because
+	// the destination's queue was full, and one abandoned at shutdown.
+	// destination is "webhook" for every webhook, or the sink's name, which
+	// the dispatcher keeps distinct from it and from every other sink's.
 	BudgetAlertDeliveryFailures = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "gomodel_budget_alert_delivery_failures_total",
@@ -198,7 +200,7 @@ func NewPrometheusHooks() llmclient.Hooks {
 // Empty 200 responses by provider and reason:
 //   sum(rate(gomodel_empty_responses_total[5m])) by (provider, reason)
 //
-// Budget alerts that never reached a destination:
+// Budget alert delivery failures by destination:
 //   sum(increase(gomodel_budget_alert_delivery_failures_total[1h])) by (destination)
 
 // Example Grafana dashboard queries:

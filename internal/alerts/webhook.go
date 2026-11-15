@@ -82,6 +82,7 @@ func newWebhook(cfg WebhookConfig, timeout time.Duration, maxRetries int) (*webh
 // reported as a failed delivery instead.
 func webhookClient(timeout time.Duration) *http.Client {
 	client := httpclient.NewClientWithTimeout(timeout)
+	client.Transport = unparsedLocations{next: client.Transport}
 	sameOrigin := client.CheckRedirect
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if req.Response != nil {
@@ -93,6 +94,28 @@ func webhookClient(timeout time.Duration) *http.Client {
 		return http.ErrUseLastResponse
 	}
 	return client
+}
+
+// unparsedLocations drops a Location header that does not parse. net/http
+// quotes such a header in the error it returns, before CheckRedirect runs,
+// and a redirect commonly repeats the path it was asked for, token included.
+// Without the header the response is an ordinary redirect that is not
+// followed, reported by its status alone.
+type unparsedLocations struct {
+	next http.RoundTripper
+}
+
+func (t unparsedLocations) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.next.RoundTrip(req)
+	if err != nil {
+		return resp, err
+	}
+	if location := resp.Header.Get("Location"); location != "" {
+		if _, err := req.URL.Parse(location); err != nil {
+			resp.Header.Del("Location")
+		}
+	}
+	return resp, nil
 }
 
 // send delivers event, retrying a failure that may be transient.

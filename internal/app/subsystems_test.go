@@ -112,6 +112,22 @@ func TestShutdownStopsRuntimeSettingsBeforeProviders(t *testing.T) {
 	require.Less(t, runtimeSettingsIndex, providersIndex)
 }
 
+// Alerts are claimed before they are queued, so one that fails while the
+// queue drains is lost for good. Draining therefore has to finish before
+// anything a delivery or an evaluation uses closes: the shared store a sink
+// keeps state in, the budget and usage stores, telemetry, and storage.
+func TestShutdownDrainsBudgetAlertsBeforeWhatTheyUse(t *testing.T) {
+	order := newFullyWiredApp(t).shutdownOrder()
+	index := func(name string) int {
+		return slices.IndexFunc(order, func(subsystem registeredSubsystem) bool { return subsystem.name == name })
+	}
+	alertsIndex := index(subsystemBudgetAlerts)
+	require.GreaterOrEqual(t, alertsIndex, 0)
+	for _, used := range []string{subsystemSharedStore, subsystemBudgets, subsystemUsage, subsystemTelemetry, subsystemStorage} {
+		assert.Greater(t, index(used), alertsIndex, "%s closes before budget alerts have drained", used)
+	}
+}
+
 // The mirror of the check above: an entry in shutdownOrder that nothing
 // registers is either a stale leftover or a subsystem whose owner was
 // mislabelled, and it silently closes nothing.

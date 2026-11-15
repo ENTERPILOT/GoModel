@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,11 +33,14 @@ func (s *appAlertSink) SendAlert(_ context.Context, event ext.AlertEvent) error 
 	return nil
 }
 
-// newBudgetAlertsApp builds a local app; setup can add environment and
-// extensions before the configuration loads.
-func newBudgetAlertsApp(t *testing.T, extensions *ext.Registry) (*App, error) {
+// newBudgetAlertsApp builds a local app that alerts to webhookURL, or to no
+// webhook when it is empty. Both webhook variables are always set, so one
+// inherited from the environment the tests run in changes nothing.
+func newBudgetAlertsApp(t *testing.T, webhookURL string, extensions *ext.Registry) (*App, error) {
 	t.Helper()
 	t.Chdir(t.TempDir())
+	t.Setenv("BUDGETS_ALERTS_WEBHOOK_URL", webhookURL)
+	t.Setenv("BUDGETS_ALERTS_WEBHOOK_SECRET", "")
 	t.Setenv("STORAGE_TYPE", "sqlite")
 	t.Setenv("SQLITE_PATH", filepath.Join(t.TempDir(), "alerts.db"))
 	t.Setenv("ADMIN_UI_ENABLED", "false")
@@ -72,14 +76,11 @@ func TestBudgetAlertsAreBuiltOnlyWithADestination(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.webhookURL != "" {
-				t.Setenv("BUDGETS_ALERTS_WEBHOOK_URL", tt.webhookURL)
-			}
 			extensions := &ext.Registry{}
 			if tt.sink != nil {
 				extensions.RegisterAlertSink(tt.sink)
 			}
-			application, err := newBudgetAlertsApp(t, extensions)
+			application, err := newBudgetAlertsApp(t, tt.webhookURL, extensions)
 			require.NoError(t, err)
 
 			assert.Equal(t, tt.want, application.budgetAlerts != nil)
@@ -98,17 +99,14 @@ func TestBudgetAlertsAreBuiltOnlyWithADestination(t *testing.T) {
 
 func TestBudgetAlertsNeedBudgets(t *testing.T) {
 	t.Setenv("BUDGETS_ENABLED", "false")
-	t.Setenv("BUDGETS_ALERTS_WEBHOOK_URL", "https://alerts.example.com/hook")
 
-	application, err := newBudgetAlertsApp(t, nil)
+	application, err := newBudgetAlertsApp(t, "https://alerts.example.com/hook", nil)
 	require.NoError(t, err)
 	assert.Nil(t, application.budgetAlerts)
 }
 
 func TestBudgetAlertsRejectAnInvalidWebhookWithoutEchoingIt(t *testing.T) {
-	t.Setenv("BUDGETS_ALERTS_WEBHOOK_URL", "alerts.example.com/t0ken")
-
-	_, err := newBudgetAlertsApp(t, nil)
+	_, err := newBudgetAlertsApp(t, "alerts.example.com/t0ken", nil)
 	require.ErrorContains(t, err, "budgets.alerts.webhooks[0].url")
 	assert.NotContains(t, err.Error(), "t0ken")
 }
@@ -121,7 +119,7 @@ func TestBudgetAlertsReachARegisteredSink(t *testing.T) {
 	extensions := &ext.Registry{}
 	extensions.RegisterAlertSink(sink)
 
-	application, err := newBudgetAlertsApp(t, extensions)
+	application, err := newBudgetAlertsApp(t, "", extensions)
 	require.NoError(t, err)
 	require.NotNil(t, application.budgetAlerts)
 
@@ -150,6 +148,66 @@ func TestBudgetAlertsReachARegisteredSink(t *testing.T) {
 	require.NoError(t, application.budgetAlerts.alerter.Evaluate(ctx))
 	require.NoError(t, application.budgetAlerts.Close())
 	assert.Empty(t, sink.events)
+}
+
+// storeWritingSink holds every alert until released, then writes it to the
+// shared store, as a sink deduplicating across replicas would.
+type storeWritingSink struct {
+	started chan struct{}
+	release chan struct{}
+	written chan error
+
+	mu    sync.Mutex
+	store ext.SharedStore
+}
+
+func (*storeWritingSink) Name() string { return "store-writing-sink" }
+
+func (s *storeWritingSink) SetSharedStore(store ext.SharedStore) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.store = store
+}
+
+func (s *storeWritingSink) SendAlert(ctx context.Context, event ext.AlertEvent) error {
+	s.started <- struct{}{}
+	<-s.release
+	s.mu.Lock()
+	store := s.store
+	s.mu.Unlock()
+	err := store.Put(ctx, "test.alerts", event.ID, []byte("sent"), time.Now().Add(time.Hour))
+	s.written <- err
+	return err
+}
+
+// An alert is claimed before it is queued, so one still queued at shutdown is
+// lost unless its delivery works: a sink has to reach its shared store until
+// the dispatcher has drained.
+func TestShutdownDrainsBudgetAlertsWhileTheSharedStoreIsOpen(t *testing.T) {
+	sink := &storeWritingSink{started: make(chan struct{}, 1), release: make(chan struct{}), written: make(chan error, 1)}
+	extensions := &ext.Registry{}
+	extensions.RegisterAlertSink(sink)
+	application, err := newBudgetAlertsApp(t, "", extensions)
+	require.NoError(t, err)
+	require.NotNil(t, application.budgetAlerts)
+	require.NotNil(t, application.sharedStore)
+
+	application.budgetAlerts.dispatcher.Notify(ext.AlertEvent{ID: "queued"})
+	<-sink.started
+
+	shutdown := make(chan error, 1)
+	go func() { shutdown <- application.Shutdown(context.Background()) }()
+	// Shutdown has reached the alerts once they stop evaluating; it then
+	// waits there for the sink.
+	require.Eventually(t, func() bool {
+		application.budgetAlerts.mu.Lock()
+		defer application.budgetAlerts.mu.Unlock()
+		return application.budgetAlerts.stop != nil
+	}, 5*time.Second, time.Millisecond)
+	close(sink.release)
+
+	require.NoError(t, <-sink.written, "the shared store is still open while alerts drain")
+	require.NoError(t, <-shutdown)
 }
 
 // writeAlertTestUsage records cost for userPath in the app's SQLite usage

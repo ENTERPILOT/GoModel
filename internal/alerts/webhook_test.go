@@ -186,6 +186,10 @@ func TestWebhookAgainstAServer(t *testing.T) {
 		{name: "same-origin 302 is not followed", status: http.StatusFound, location: "/final", wantErr: "after 1 attempt(s): webhook answered HTTP 302", wantHookHits: 1},
 		{name: "same-origin 303 is not followed", status: http.StatusSeeOther, location: "/final", wantErr: "webhook answered HTTP 303", wantHookHits: 1},
 		{name: "cross-origin 307 is not followed", status: http.StatusTemporaryRedirect, location: "http://other.invalid/final", wantErr: "webhook answered HTTP 307", wantHookHits: 1},
+		// net/http quotes a Location it cannot parse in its error, and a
+		// redirect commonly repeats the path it was asked for.
+		{name: "307 to a Location that does not parse is not followed", status: http.StatusTemporaryRedirect, location: "/services/t0ken/%zz", wantErr: "after 1 attempt(s): webhook answered HTTP 307", wantHookHits: 1},
+		{name: "302 to a Location that does not parse is not followed", status: http.StatusFound, location: "/services/t0ken/%zz", wantErr: "after 1 attempt(s): webhook answered HTTP 302", wantHookHits: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -218,6 +222,7 @@ func TestWebhookAgainstAServer(t *testing.T) {
 				require.NoError(t, err)
 			} else {
 				require.ErrorContains(t, err, tt.wantErr)
+				assert.NotContains(t, err.Error(), "t0ken")
 			}
 			assert.Equal(t, tt.wantHookHits, hookHits)
 			if !tt.wantFinal {

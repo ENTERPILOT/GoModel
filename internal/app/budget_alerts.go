@@ -82,6 +82,8 @@ func (a *budgetAlerts) start() {
 }
 
 // Close stops evaluating, then lets the dispatcher finish queued deliveries.
+// It has to run before anything a destination uses is closed; see
+// shutdownOrder.
 func (a *budgetAlerts) Close() error {
 	if a == nil {
 		return nil

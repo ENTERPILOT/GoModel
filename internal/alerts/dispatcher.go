@@ -4,6 +4,7 @@ package alerts
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -20,10 +21,16 @@ const (
 	queueSize = 256
 	// sinkTimeout bounds one AlertSink.SendAlert call.
 	sinkTimeout = 30 * time.Second
+	// sinkReturnGrace is how long a sink has to return once its context has
+	// ended, before the call is given up on.
+	sinkReturnGrace = 2 * time.Second
 	// drainTimeout is how long Close lets queued alerts finish. Alerts are
 	// claimed before they are queued, so what is still undelivered after it
 	// is lost: no replica sends it later.
 	drainTimeout = 5 * time.Second
+	// webhookDestination names every webhook in the delivery-failure metric,
+	// so no sink may use it.
+	webhookDestination = "webhook"
 )
 
 // WebhookConfig is one generic JSON webhook.
@@ -78,15 +85,23 @@ func New(cfg Config) (*Dispatcher, error) {
 			return nil, fmt.Errorf("budgets.alerts.webhooks[%d].url: %w", i, err)
 		}
 		destinations = append(destinations, &destination{
-			metric: "webhook",
+			metric: webhookDestination,
 			label:  "webhook " + webhook.host,
 			send:   webhook.send,
 		})
 	}
+	names := make(map[string]bool, len(cfg.Sinks))
 	for _, sink := range cfg.Sinks {
+		name := sink.Name()
+		// The name labels the sink's metric series, so it has to tell the sink
+		// from the webhook and from every other sink.
+		if name == "" || name == webhookDestination || names[name] {
+			return nil, fmt.Errorf("alert sink name %q is empty, reserved, or registered twice", name)
+		}
+		names[name] = true
 		destinations = append(destinations, &destination{
-			metric: sink.Name(),
-			label:  "sink " + sink.Name(),
+			metric: name,
+			label:  "sink " + name,
 			send:   sinkSender(sink),
 		})
 	}
@@ -147,6 +162,10 @@ func (d *Dispatcher) deliver(dest *destination) {
 // every queue; each alert it gives up on is logged and counted as a delivery
 // failure. Those alerts were already claimed, so delivery is at most once. It
 // is safe to call repeatedly.
+//
+// Close always returns: a webhook attempt ends with its context, and a sink
+// that does not is given up on after sinkReturnGrace, so Close takes at most
+// drainTimeout plus sinkReturnGrace.
 func (d *Dispatcher) Close() error {
 	if d == nil {
 		return nil
@@ -177,17 +196,53 @@ func (d *Dispatcher) Close() error {
 	return nil
 }
 
-// sinkSender calls a sink with a deadline. A panicking sink is reported as a
-// failed delivery, never allowed to take the gateway down.
+// sinkSender calls a sink with a deadline, one call at a time. A panicking
+// sink is reported as a failed delivery, never allowed to take the gateway
+// down.
+//
+// A sink has to return once its context ends. One that does not would hold
+// its worker, and with it Close, for as long as it likes, so the call runs on
+// its own goroutine and is given up on sinkReturnGrace after the context
+// ended. Until that call returns the sink is not called again: every later
+// alert fails at once.
 func sinkSender(sink ext.AlertSink) func(context.Context, ext.AlertEvent) error {
-	return func(ctx context.Context, event ext.AlertEvent) (err error) {
+	// running holds a token while a SendAlert call has not returned.
+	running := make(chan struct{}, 1)
+	return func(ctx context.Context, event ext.AlertEvent) error {
+		select {
+		case running <- struct{}{}:
+		default:
+			return errors.New("alert sink has not returned from an earlier alert")
+		}
 		ctx, cancel := context.WithTimeout(ctx, sinkTimeout)
 		defer cancel()
-		defer func() {
-			if recovered := recover(); recovered != nil {
-				err = fmt.Errorf("alert sink panicked: %v", recovered)
-			}
+		result := make(chan error, 1)
+		go func() {
+			err := callSink(ctx, sink, event)
+			<-running
+			result <- err
 		}()
-		return sink.SendAlert(ctx, event)
+		select {
+		case err := <-result:
+			return err
+		case <-ctx.Done():
+		}
+		grace := time.NewTimer(sinkReturnGrace)
+		defer grace.Stop()
+		select {
+		case err := <-result:
+			return err
+		case <-grace.C:
+			return fmt.Errorf("alert sink did not return within %s of its context ending (%w)", sinkReturnGrace, context.Cause(ctx))
+		}
 	}
+}
+
+func callSink(ctx context.Context, sink ext.AlertSink, event ext.AlertEvent) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("alert sink panicked: %v", recovered)
+		}
+	}()
+	return sink.SendAlert(ctx, event)
 }

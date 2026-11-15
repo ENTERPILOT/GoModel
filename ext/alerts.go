@@ -77,9 +77,10 @@ type AlertBudget struct {
 	// CostBasis is the spend the budget is measured on: "provider" or "billed".
 	CostBasis string `json:"cost_basis"`
 	// Revision identifies the version of the budget the alert was raised
-	// for. It is opaque; it changes when the amount changes or the budget is
-	// deleted and recreated, and stays the same when only its thresholds are
-	// edited.
+	// for. It is opaque and never used twice: the budget gets a new one when
+	// its amount or cost basis changes, even back to an earlier value, and
+	// when it is deleted and recreated. It stays the same when only its
+	// thresholds are edited.
 	Revision string `json:"revision"`
 }
 
@@ -87,20 +88,53 @@ type AlertBudget struct {
 // a chat tool or email. Core delivers the same events to its generic JSON
 // webhook.
 //
-// SendAlert is called off the request path, one event at a time per sink, and
-// ctx carries a deadline. An error is logged and counted, never fatal, and
-// core does not retry it: a sink that wants retries does them itself within
-// the deadline. A sink is registered once and outlives configuration
-// reloads, so it must be safe for concurrent use.
+// Delivery is at most once, and not guaranteed. An alert is recorded in the
+// database before it is handed to any sink and is never raised again, so
+// gateways sharing a database call SendAlert at most once for an alert, and
+// a sink misses the alerts that:
+//
+//   - it returned an error for, panicked on, or did not return from in time.
+//     Core does not retry: a sink that wants retries does them itself, within
+//     the deadline.
+//   - were raised while 256 alerts were already waiting for this sink. Each
+//     sink has its own queue, so that takes a sink slower than alerts are
+//     raised, and a slow sink delays no other destination.
+//   - were still waiting or in flight when their gateway stopped. On
+//     shutdown, and when a configuration reload replaces the gateway that
+//     raised them, queued alerts have 5 seconds to be delivered; a process
+//     that is killed loses them at once.
+//
+// Core logs every alert a sink missed and counts it in
+// gomodel_budget_alert_delivery_failures_total under the sink's name, except
+// those lost with a killed process. Gateways that do not share a database, as
+// with SQLite, each raise the alert: a sink that must not repeat one
+// deduplicates on AlertEvent.ID.
+//
+// SendAlert is called off the request path. One gateway calls a sink with one
+// alert at a time, but a sink is registered once and outlives configuration
+// reloads, and the gateway a reload replaced may still be delivering, so it
+// must be safe for concurrent use.
+//
+// ctx ends after 30 seconds, or sooner when a stopping gateway gives up on
+// its queue, and SendAlert must return once it has. When it has not returned
+// 2 seconds later, core stops waiting for it: the alert counts as missed, and
+// so does every later alert that gateway has for this sink, without a call,
+// until SendAlert returns. A stopping gateway therefore waits at most 7
+// seconds for its sinks.
 //
 // Like every registered component, a sink is owned by the distribution that
 // registered it, not by core. It may implement SharedStoreAware to share
-// state, such as its own deduplication, across replicas. For outbound calls
-// it uses NewHTTPClient, so they follow the gateway's proxy environment and
-// http.tls trust. Core stops calling SendAlert before the app's Shutdown
-// returns, so the distribution releases the sink's resources after that.
+// state, such as its own deduplication, across replicas; the store stays open
+// until core has stopped waiting for SendAlert, on shutdown too. For outbound
+// calls it uses NewHTTPClient, so they follow the gateway's proxy environment
+// and http.tls trust. Core starts no SendAlert call after the app's Shutdown
+// has returned, and a call that returned when its context ended is over by
+// then, so the distribution releases the sink's resources after that.
 type AlertSink interface {
-	// Name identifies the sink in logs and metrics.
+	// Name identifies the sink in logs and as the destination label of the
+	// delivery-failure metric. It must not be empty, the name of another
+	// registered sink, or "webhook", which is core's webhook: a gateway that
+	// builds alerts with such a sink does not start.
 	Name() string
 	SendAlert(ctx context.Context, event AlertEvent) error
 }

@@ -123,6 +123,12 @@ func (a *App) shutdownOrder() []registeredSubsystem {
 		// Stop refreshing snapshots changed on other instances before the
 		// services that hold them are torn down.
 		{name: subsystemClusterSync, close: closerOf(a.clusterSync)},
+		// Stops alert evaluation, then drains the alerts already claimed.
+		// A sink may keep state in the shared store, so this runs while
+		// that store is open; nothing else a delivery uses (the outbound
+		// HTTP transport, the budget and usage stores, telemetry, storage)
+		// closes before it either.
+		{name: subsystemBudgetAlerts, close: closerOf(a.budgetAlerts)},
 		// Fail extension shared-store calls with ext.ErrSharedStoreClosed
 		// from here on, so an extension's background work never reaches the
 		// connection closed below. The server has drained, so no request
@@ -149,9 +155,6 @@ func (a *App) shutdownOrder() []registeredSubsystem {
 		// The remaining stores flush buffered work into storage, so they must
 		// close before the connection they write through.
 		{name: subsystemBatch, close: closerOf(a.batch)},
-		// Stops alert evaluation and delivery before the budget and usage
-		// stores it reads.
-		{name: subsystemBudgetAlerts, close: closerOf(a.budgetAlerts)},
 		{name: subsystemBudgets, close: closerOf(a.budgets)},
 		{name: subsystemRateLimits, close: closerOf(a.rateLimits)},
 		{name: subsystemUsage, close: closerOf(a.usage)},

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -123,19 +124,19 @@ func TestDispatcherDeliversToEveryDestination(t *testing.T) {
 func TestDispatcherNotifyNeverBlocksOnAStuckDestination(t *testing.T) {
 	observability.ResetMetrics()
 	stuck := &chanSink{name: "stuck", events: make(chan ext.AlertEvent, 1), hold: make(chan struct{})}
-	healthy := &chanSink{name: "healthy", events: make(chan ext.AlertEvent, queueSize+2)}
+	healthy := &chanSink{name: "healthy", events: make(chan ext.AlertEvent, 1)}
 
 	dispatcher, err := New(Config{Sinks: []ext.AlertSink{stuck, healthy}})
 	require.NoError(t, err)
 
 	dispatcher.Notify(testEvent())
 	receive(t, stuck.events) // the stuck sink now holds its worker
+	receive(t, healthy.events)
 
-	// Fill the stuck queue, then one more: it is dropped, not waited for.
+	// Fill the stuck queue, then one more: it is dropped, not waited for. The
+	// healthy sink takes each alert before the next, so its queue never fills.
 	for range queueSize + 1 {
 		dispatcher.Notify(testEvent())
-	}
-	for range queueSize + 2 {
 		receive(t, healthy.events)
 	}
 	assert.Equal(t, float64(1), testutil.ToFloat64(observability.BudgetAlertDeliveryFailures.WithLabelValues("stuck")))
@@ -271,6 +272,96 @@ func TestDispatcherCloseWithAlertsQueued(t *testing.T) {
 				"an alert after Close is not queued")
 		})
 	})
+}
+
+// deafSink ignores its context: every call blocks until release is closed.
+type deafSink struct {
+	calls   atomic.Int32
+	release chan struct{}
+}
+
+func (*deafSink) Name() string { return "deaf" }
+
+func (s *deafSink) SendAlert(context.Context, ext.AlertEvent) error {
+	s.calls.Add(1)
+	<-s.release
+	return nil
+}
+
+func deafFailures() float64 {
+	return testutil.ToFloat64(observability.BudgetAlertDeliveryFailures.WithLabelValues("deaf"))
+}
+
+// A sink that does not return when its context ends must cost the gateway one
+// goroutine at most: the call is given up on, later alerts fail without
+// reaching the sink, and it is used again once it returns.
+func TestDispatcherGivesUpOnASinkThatIgnoresItsContext(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		observability.ResetMetrics()
+		sink := &deafSink{release: make(chan struct{})}
+		dispatcher, err := New(Config{Sinks: []ext.AlertSink{sink}})
+		require.NoError(t, err)
+
+		for _, id := range []string{"first", "second", "third"} {
+			dispatcher.Notify(eventWithID(id))
+		}
+		time.Sleep(sinkTimeout + sinkReturnGrace - time.Second)
+		synctest.Wait()
+		assert.Zero(t, deafFailures(), "the sink has until the grace period ends")
+
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		assert.Equal(t, float64(3), deafFailures(), "the abandoned alert, and the two behind it")
+		assert.Equal(t, int32(1), sink.calls.Load(), "a sink that has not returned is not called again")
+
+		close(sink.release)
+		synctest.Wait()
+		dispatcher.Notify(eventWithID("fourth"))
+		synctest.Wait()
+		assert.Equal(t, int32(2), sink.calls.Load(), "the sink is used again once it has returned")
+		assert.Equal(t, float64(3), deafFailures())
+		require.NoError(t, dispatcher.Close())
+	})
+}
+
+func TestDispatcherCloseIsBoundedBySinksThatIgnoreTheirContext(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		observability.ResetMetrics()
+		sink := &deafSink{release: make(chan struct{})}
+		dispatcher, err := New(Config{Sinks: []ext.AlertSink{sink}})
+		require.NoError(t, err)
+		for _, id := range []string{"a", "b", "c"} {
+			dispatcher.Notify(eventWithID(id))
+		}
+		synctest.Wait()
+
+		start := time.Now()
+		require.NoError(t, dispatcher.Close())
+		assert.Equal(t, drainTimeout+sinkReturnGrace, time.Since(start))
+		assert.Equal(t, float64(3), deafFailures(), "every alert Close gave up on is counted")
+		assert.Equal(t, int32(1), sink.calls.Load())
+
+		close(sink.release) // lets the abandoned call end with the test
+	})
+}
+
+func TestNewRejectsSinkNamesThatDoNotIdentifyTheSink(t *testing.T) {
+	sink := func(name string) ext.AlertSink { return &chanSink{name: name} }
+	tests := []struct {
+		name  string
+		sinks []ext.AlertSink
+	}{
+		{name: "empty", sinks: []ext.AlertSink{sink("")}},
+		{name: "the webhook's", sinks: []ext.AlertSink{sink("webhook")}},
+		{name: "registered twice", sinks: []ext.AlertSink{sink("chat"), sink("mail"), sink("chat")}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dispatcher, err := New(Config{Sinks: tt.sinks})
+			require.ErrorContains(t, err, "alert sink name")
+			assert.Nil(t, dispatcher)
+		})
+	}
 }
 
 // slowSink takes delay for every alert and records the order it got them in.

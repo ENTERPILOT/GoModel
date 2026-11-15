@@ -95,8 +95,15 @@ func (r *Registry) RegisterAuthenticator(authenticator RequestAuthenticator) {
 }
 
 // RegisterAlertSink adds a destination for gateway alerts, such as budget
-// thresholds. Every registered sink receives every alert, alongside the
-// generic webhook core delivers to. Registering one turns alert evaluation on.
+// thresholds. Core offers every alert it raises to every registered sink,
+// alongside its generic webhook; delivery is at most once and can miss an
+// alert, as AlertSink describes.
+//
+// A sink is a destination, and budget alerts are evaluated only when one
+// exists, so a sink turns them on without a webhook. It does so only where
+// budgets are enabled (BUDGETS_ENABLED, the default), which in turn needs
+// usage tracking (USAGE_ENABLED, the default): on a gateway without them no
+// alert is raised and the sink is never called.
 func (r *Registry) RegisterAlertSink(sink AlertSink) {
 	if sink == nil {
 		return
