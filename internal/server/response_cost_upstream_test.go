@@ -256,6 +256,7 @@ func TestResponseCost_OversizedJSONIsRelayedAsItArrivesPastTheLimit(t *testing.T
 	body := paddedChatAnswer(t, maxObservedJSONResponseBytes+64)
 	head, next, last := body[:maxObservedJSONResponseBytes+1], body[maxObservedJSONResponseBytes+1:maxObservedJSONResponseBytes+32], body[maxObservedJSONResponseBytes+32:]
 	upstream, feed := io.Pipe()
+	defer closePipe(upstream, feed)
 	srv, _ := costGateway(t, costPassthroughProvider(jsonHeader(), upstream), returnCosts)
 	fed := make(chan error, 1)
 	feedPiece := func(piece string) {
@@ -342,10 +343,117 @@ func TestResponseCost_UsageOnEveryChunk(t *testing.T) {
 	assert.Equal(t, formatResponseCost(*logger.entries[0].TotalCost), amounts[2].Raw, "the last cost is the logged one")
 }
 
+// failsOnceReader reads lead, fails once with err and then reports a clean
+// end, like a reader that does not keep its error.
+type failsOnceReader struct {
+	lead string
+	err  error
+}
+
+func (r *failsOnceReader) Read(p []byte) (int, error) {
+	if r.lead != "" {
+		n := copy(p, r.lead)
+		r.lead = r.lead[n:]
+		return n, nil
+	}
+	err := r.err
+	r.err = io.EOF
+	return 0, err
+}
+
+// A JSON answer that fails before its first byte, or in the whitespace in
+// front of it, is not relayed as a complete, empty one: the client gets a
+// gateway error.
+func TestResponseCost_JSONAnswerFailingAtItsStart(t *testing.T) {
+	tests := []struct {
+		name string
+		lead string
+	}{
+		{name: "before the first byte"},
+		{name: "after whitespace", lead: " \n\t"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := &failsOnceReader{lead: tt.lead, err: io.ErrUnexpectedEOF}
+			srv, logger := costGateway(t, costPassthroughProvider(jsonHeader(), body), returnCosts)
+
+			rec := postJSON(t, srv, passthroughChatPath, passthroughChatBody)
+
+			assert.Equal(t, http.StatusBadGateway, rec.Code, rec.Body.String())
+			assert.Equal(t, "provider_error", gjson.Get(rec.Body.String(), "error.type").String(), rec.Body.String())
+			assert.Empty(t, logger.entries)
+			assert.Empty(t, rec.Header().Values(responseCostHeader))
+		})
+	}
+}
+
+// An event carries the cost of its own usage or none. One whose usage the
+// usage reader did not read (a framing it does not know, a usage it skips)
+// never carries the cost of the event before it, and once an event ended
+// where the reader ends none, it no longer reads the events relayed.
+func TestResponseCost_UnreadUsageEventCarriesNoCost(t *testing.T) {
+	usageEvent := func(usage string) string { return `data: {"choices":[],"usage":{` + usage + `}}` }
+	const done = "data: [DONE]\n\n"
+	var (
+		first      = usageEvent(`"prompt_tokens":10,"completion_tokens":1,"total_tokens":11`)
+		firstCost  = usageEvent(`"prompt_tokens":10,"completion_tokens":1,"total_tokens":11` + costMember("0.000012"))
+		second     = usageEvent(`"prompt_tokens":20,"completion_tokens":1,"total_tokens":21`)
+		secondCost = usageEvent(`"prompt_tokens":20,"completion_tokens":1,"total_tokens":21` + costMember("0.000022"))
+		noTokens   = usageEvent(`"prompt_tokens":0,"completion_tokens":0,"total_tokens":0`)
+	)
+	tests := []struct {
+		name   string
+		stream string
+		want   string
+	}{
+		{
+			name:   "every event read",
+			stream: first + "\n\n" + second + "\r\n\r\n" + done,
+			want:   firstCost + "\n\n" + secondCost + "\r\n\r\n" + done,
+		},
+		{
+			name:   "bare CR framing after a priced event",
+			stream: first + "\n\n" + second + "\r\r" + done,
+			want:   firstCost + "\n\n" + second + "\r\r" + done,
+		},
+		{
+			name:   "LF framing again after a bare CR event",
+			stream: first + "\n\n" + ": ping\r\r" + second + "\n\n" + done,
+			want:   firstCost + "\n\n" + ": ping\r\r" + second + "\n\n" + done,
+		},
+		{
+			name:   "blank line of an LF then a CR",
+			stream: first + "\n\r" + second + "\n\n" + done,
+			want:   first + "\n\r" + second + "\n\n" + done,
+		},
+		{
+			name:   "blank line of a CRLF then a CR",
+			stream: first + "\r\n\r" + second + "\n\n" + done,
+			want:   first + "\r\n\r" + second + "\n\n" + done,
+		},
+		{
+			name:   "usage without tokens after a priced event",
+			stream: first + "\n\n" + noTokens + "\n\n" + done,
+			want:   firstCost + "\n\n" + noTokens + "\n\n" + done,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, _ := costGateway(t, costPassthroughProvider(sseHeader(), strings.NewReader(tt.stream)), returnCosts)
+
+			rec := postJSON(t, srv, passthroughChatPath, passthroughStreamBody)
+
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			assert.Equal(t, tt.want, rec.Body.String())
+		})
+	}
+}
+
 // A client that goes away mid-stream ends the relay: the gateway stops
 // writing and closes the upstream body instead of draining it.
 func TestResponseCost_ClientDisconnectMidStream(t *testing.T) {
 	upstream, feed := io.Pipe()
+	defer closePipe(upstream, feed)
 	srv, _ := costGateway(t, costPassthroughProvider(sseHeader(), upstream), returnCosts)
 	server := httptest.NewServer(srv)
 	t.Cleanup(server.Close)

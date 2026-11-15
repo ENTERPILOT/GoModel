@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -109,13 +110,19 @@ func FuzzJSONUsageEditor_Splits(f *testing.F) {
 }
 
 // splitStreams are event streams in every framing the SSE specification
-// allows, with a usage event whose upstream cost must not survive.
-var splitStreams = []string{
-	"data: {\"usage\":{\"prompt_tokens\":1,\"cost\":9}}\n\ndata: [DONE]\n\n",
-	"data: {\"usage\":{\"prompt_tokens\":1,\"cost\":9}}\r\n\r\ndata: [DONE]\r\n\r\n",
-	"data: {\"usage\":{\"prompt_tokens\":1,\"cost\":9}}\r\rdata: [DONE]\r\r",
-	"data: {\"usage\":{\"prompt_tokens\":1,\"cost\":9}}\n\r\ndata: [DONE]\n\r\n",
-	"event: x\rid: 1\rdata: {\"usage\":\rdata: {\"cost\":9}}\r\r: ping\r\rdata: [DONE]",
+// allows, with a usage event whose upstream cost must not survive. Only the
+// ones framed the way the usage reader frames events are priced.
+var splitStreams = []struct {
+	stream string
+	priced bool
+}{
+	{stream: "data: {\"usage\":{\"prompt_tokens\":1,\"cost\":9}}\n\ndata: [DONE]\n\n", priced: true},
+	{stream: "data: {\"usage\":{\"prompt_tokens\":1,\"cost\":9}}\r\n\r\ndata: [DONE]\r\n\r\n", priced: true},
+	{stream: "data: {\"usage\":{\"prompt_tokens\":1,\"cost\":9}}\r\n\ndata: [DONE]\r\n\n", priced: true},
+	{stream: "data: {\"usage\":{\"prompt_tokens\":1,\"cost\":9}}\r\rdata: [DONE]\r\r"},
+	{stream: "data: {\"usage\":{\"prompt_tokens\":1,\"cost\":9}}\n\r\ndata: [DONE]\n\r\n"},
+	{stream: "event: x\rid: 1\rdata: {\"usage\":\rdata: {\"cost\":9}}\r\r: ping\r\rdata: [DONE]"},
+	{stream: ": ping\r\rdata: {\"usage\":{\"prompt_tokens\":1,\"cost\":9}}\n\ndata: [DONE]\n\n"},
 }
 
 // However the writes split a stream, the client receives the same bytes, and
@@ -130,10 +137,11 @@ func TestResponseCostWriter_EverySplitGivesTheSameStream(t *testing.T) {
 		w.finish()
 		return rec.Body.String()
 	}
-	for _, stream := range splitStreams {
+	for _, tt := range splitStreams {
+		stream := tt.stream
 		want := relayed(stream)
 		assert.NotContains(t, want, `"cost":9`, "%q", stream)
-		assert.Contains(t, want, `"cost":0.5`, "%q", stream)
+		assert.Equal(t, tt.priced, strings.Contains(want, `"cost":0.5`), "%q", stream)
 		for i := 0; i <= len(stream); i++ {
 			for j := i; j <= len(stream); j++ {
 				require.Equal(t, want, relayed(stream[:i], stream[i:j], stream[j:]), "%q | %q | %q", stream[:i], stream[i:j], stream[j:])

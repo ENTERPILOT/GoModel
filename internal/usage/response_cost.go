@@ -123,6 +123,18 @@ func (r *CostReport) Record(logger LoggerInterface, entry *UsageEntry) {
 	r.mu.Unlock()
 }
 
+// Forget makes the cost unknown again. A stream reports the cost of each of
+// its events on its own, so the cost of one event is never taken for the cost
+// of another whose usage was not recorded. A nil report forgets nothing.
+func (r *CostReport) Forget() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.amount, r.known = 0, false
+	r.mu.Unlock()
+}
+
 // Cost returns the recorded cost, or false while it is unknown.
 func (r *CostReport) Cost() (float64, bool) {
 	if r == nil {

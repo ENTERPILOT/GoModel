@@ -138,24 +138,33 @@ func TestJSONUsageEditor_UsageObjectAtTheLimit(t *testing.T) {
 
 // With markups the bytes between two top-level members are held until the
 // second is named. An upstream cannot make the gateway hold a body's worth of
-// them: whitespace past the bound is relayed as it arrives, the body stays
-// the JSON it was, and a provider's cost is still removed with its comma.
+// them: a separator past the bound is relayed as it is, every byte in the
+// order it arrived, and the body stays the JSON it was. Its comma is written
+// by then, so the member after it stays, a provider's cost included. Before
+// the first member kept no separator is written, so that one is still removed.
 func TestJSONUsageEditor_BoundsTheHeldSeparator(t *testing.T) {
-	gap := strings.Repeat(" ", 16*maxHeldSeparatorBytes)
+	// Every kind of whitespace, so a byte relayed out of order shows.
+	gap := strings.Repeat(" \n\t\r", 4*maxHeldSeparatorBytes)
+	atBound := gap[:maxHeldSeparatorBytes-1] // with its comma
 	tests := []struct {
 		name string
 		body string
-		want string // the body without its whitespace
+		want string
 	}{
-		{name: "before a member that stays", body: `{"id":"x",` + gap + `"usage":{"total_tokens":3}}`, want: `{"id":"x","usage":{"total_tokens":3,"cost":0.5}}`},
-		{name: "before a removed member", body: `{"id":"x",` + gap + `"cost":9,"usage":{}}`, want: `{"id":"x","usage":{"cost":0.5}}`},
-		{name: "before the comma of a removed member", body: `{"id":"x"` + gap + `,` + gap + `"cost":9}`, want: `{"id":"x"}`},
+		{name: "before a member that stays", body: `{"id":"x",` + gap + `"usage":{"total_tokens":3}}`, want: `{"id":"x",` + gap + `"usage":{"total_tokens":3,"cost":0.5}}`},
+		{name: "before the comma of a member that stays", body: `{"id":"x"` + gap + `,` + gap + `"usage":{}}`, want: `{"id":"x"` + gap + `,` + gap + `"usage":{"cost":0.5}}`},
+		{name: "before a provider's cost", body: `{"id":"x",` + gap + `"cost":9,"usage":{}}`, want: `{"id":"x",` + gap + `"cost":9,"usage":{"cost":0.5}}`},
+		{name: "before the comma of a provider's cost", body: `{"id":"x"` + gap + `,"cost":9}`, want: `{"id":"x"` + gap + `,"cost":9}`},
+		{name: "a provider's cost at the bound", body: `{"id":"x",` + atBound + `"cost":9}`, want: `{"id":"x"}`},
+		{name: "a provider's cost one byte past the bound", body: `{"id":"x",` + atBound + ` "cost":9}`, want: `{"id":"x",` + atBound + ` "cost":9}`},
+		{name: "a provider's cost after the member that stayed", body: `{"id":"x",` + gap + `"cost":9,"Cost":8}`, want: `{"id":"x",` + gap + `"cost":9}`},
 		{name: "after a removed first member", body: `{"cost":9,` + gap + `"id":"x"}`, want: `{"id":"x"}`},
-		{name: "before the closing brace", body: `{"id":"x"` + gap + `}`, want: `{"id":"x"}`},
+		{name: "between removed first members", body: `{"cost":9,` + gap + `"Cost":8,"id":"x"}`, want: `{"id":"x"}`},
+		{name: "before the closing brace", body: `{"id":"x"` + gap + `}`, want: `{"id":"x"` + gap + `}`},
+		{name: "before the closing brace of an emptied object", body: `{"cost":9` + gap + `}`, want: `{` + gap[:maxHeldSeparatorBytes] + `}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			whole := editedBody(newUsageCostEdit(0.5, true, true), tt.body)
 			for _, size := range []int{1, maxHeldSeparatorBytes + 1, len(tt.body)} {
 				editor := &jsonUsageEditor{edit: newUsageCostEdit(0.5, true, true)}
 				held := 0
@@ -167,8 +176,7 @@ func TestJSONUsageEditor_BoundsTheHeldSeparator(t *testing.T) {
 				out.Write(editor.flush())
 
 				require.True(t, gjson.ValidBytes(out.Bytes()), "write size %d", size)
-				assert.Equal(t, tt.want, strings.ReplaceAll(out.String(), " ", ""), "write size %d", size)
-				require.Equal(t, whole, out.String(), "every split gives the same body (write size %d)", size)
+				require.Equal(t, tt.want, out.String(), "write size %d", size)
 				assert.LessOrEqual(t, held, 2*maxHeldSeparatorBytes, "write size %d", size)
 			}
 		})

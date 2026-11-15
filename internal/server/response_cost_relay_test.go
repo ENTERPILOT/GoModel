@@ -33,6 +33,16 @@ func postToGateway(t *testing.T, srv *Server, path, body string) *http.Response 
 	return resp
 }
 
+// closePipe closes both ends of a pipe a test feeds an upstream body through.
+// Deferred where the pipe is made, it runs however the test ends and before
+// its cleanups, so a handler still reading the body ends and the gateway,
+// which waits for its handlers, can close. (A t.Cleanup registered there
+// would run after the gateway's.)
+func closePipe(upstream *io.PipeReader, feed *io.PipeWriter) {
+	_ = feed.Close()
+	_ = upstream.Close()
+}
+
 // An upstream may send a JSON body that is not one object over time: Gemini's
 // streamGenerateContent without alt=sse sends an array, one element per
 // chunk. Each piece reaches the client when it arrives, not when the upstream
@@ -55,6 +65,7 @@ func TestResponseCost_StreamedJSONArrayIsRelayedAsItArrives(t *testing.T) {
 		t.Run(mode.name, func(t *testing.T) {
 			first := mode.lead + array
 			upstream, feed := io.Pipe()
+			defer closePipe(upstream, feed)
 			srv, _ := costGateway(t, costPassthroughProvider(jsonHeader(), upstream), mode.configure(t))
 			fed := make(chan error, 1)
 			go func() {
@@ -140,6 +151,7 @@ func TestResponseCost_StreamsInEveryFramingArriveEventByEvent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			upstream, feed := io.Pipe()
+			defer closePipe(upstream, feed)
 			srv, _ := costGateway(t, costPassthroughProvider(sseHeader(), upstream), returnCosts)
 			fed := make(chan error, 1)
 			go func() {

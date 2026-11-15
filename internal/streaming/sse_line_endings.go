@@ -42,16 +42,36 @@ func NextEventBoundaryAnyEOL(data []byte) (idx int, sepLen int) {
 	}
 }
 
-// indexLineEnd returns the offset of the first CR or LF in data, or -1.
+// EndsAtObservedBoundary reports whether raw, an event split off at any line
+// ending, ends with a boundary NextEventBoundary knows too. An
+// ObservedSSEStream then ends the event where raw ends; after an event that
+// ends another way it reads on, into the events that follow.
+func EndsAtObservedBoundary(raw []byte) bool {
+	return bytes.HasSuffix(raw, lfEventBoundary) || bytes.HasSuffix(raw, crlfEventBoundary)
+}
+
+// lineEndWindowBytes is how far indexLineEnd looks for one line ending before
+// it looks for the other.
+const lineEndWindowBytes = 256
+
+// indexLineEnd returns the offset of the first CR or LF in data, or -1. It
+// reads data once, a window at a time, so the lines of an event that has only
+// one of the two are not each searched to the end of the event for the other.
 func indexLineEnd(data []byte) int {
-	lf := bytes.IndexByte(data, '\n')
-	if lf == -1 {
-		return bytes.IndexByte(data, '\r')
+	for at := 0; at < len(data); at += lineEndWindowBytes {
+		window := data[at:min(at+lineEndWindowBytes, len(data))]
+		lf := bytes.IndexByte(window, '\n')
+		if lf != -1 {
+			window = window[:lf]
+		}
+		if cr := bytes.IndexByte(window, '\r'); cr != -1 {
+			return at + cr
+		}
+		if lf != -1 {
+			return at + lf
+		}
 	}
-	if cr := bytes.IndexByte(data[:lf], '\r'); cr != -1 {
-		return cr
-	}
-	return lf
+	return -1
 }
 
 // lineEndLen returns the length of the line ending data starts with: 2 for

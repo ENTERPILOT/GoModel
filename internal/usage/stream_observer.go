@@ -24,7 +24,10 @@ type StreamUsageObserver struct {
 	labels          []string
 	rewriteSaved    int
 	costReport      *CostReport
-	closed          bool
+	// inheritedCost is set while cachedEntry is priced with a cost the
+	// provider reported for the token counts of an earlier event.
+	inheritedCost bool
+	closed        bool
 }
 
 func NewStreamUsageObserver(logger LoggerInterface, model, provider, requestID, endpoint string, pricingResolver PricingResolver, userPath ...string) *StreamUsageObserver {
@@ -145,8 +148,24 @@ func (o *StreamUsageObserver) OnJSONEvent(chunk map[string]any) {
 	if entry == nil {
 		return
 	}
+	cached, reportsCost := o.cachedEntry, isProviderReportedCostSource(entry.CostSource)
 	o.cachedEntry = o.mergeWithCachedEntry(entry)
+	o.inheritedCost = !reportsCost && (o.inheritedCost || inheritsProviderCost(o.cachedEntry, cached))
+	if o.inheritedCost {
+		// The cost the provider reported for other token counts is not the
+		// cost of these, so this event is returned without one.
+		o.costReport.Forget()
+		return
+	}
 	o.costReport.Record(o.logger, o.cachedEntry)
+}
+
+// inheritsProviderCost reports whether entry, merged with cached, is priced
+// with a cost the provider reported for the token counts of cached, which
+// entry no longer has.
+func inheritsProviderCost(entry, cached *UsageEntry) bool {
+	return cached != nil && isProviderReportedCostSource(entry.CostSource) &&
+		(entry.InputTokens != cached.InputTokens || entry.OutputTokens != cached.OutputTokens)
 }
 
 // mergeWithCachedEntry folds usage from an earlier event into the latest one.

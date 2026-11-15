@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"maps"
 	"math"
 	"testing"
 
@@ -75,8 +76,25 @@ func TestCostReportKeepsTheLatestRecordedCost(t *testing.T) {
 	assert.False(t, known, "an unpriced entry makes the cost unknown again")
 }
 
+// A forgotten cost is unknown until the next entry is recorded.
+func TestCostReportForgetsItsCost(t *testing.T) {
+	ctx, report := WithCostReport(context.Background(), false)
+	ReportCost(ctx, nil, &UsageEntry{TotalCost: new(0.25)})
+
+	report.Forget()
+	cost, known := report.Cost()
+	require.False(t, known)
+	assert.Zero(t, cost)
+
+	ReportCost(ctx, nil, &UsageEntry{TotalCost: new(0.5)})
+	cost, known = report.Cost()
+	require.True(t, known)
+	assert.Equal(t, 0.5, cost)
+}
+
 func TestCostReportIsNilSafe(t *testing.T) {
 	var report *CostReport
+	report.Forget()
 	report.Record(nil, &UsageEntry{TotalCost: new(0.25)})
 	_, known := report.Cost()
 	assert.False(t, known)
@@ -168,6 +186,87 @@ func TestStreamUsageObserverReportsCostAsUsageArrives(t *testing.T) {
 	require.Len(t, entries, 1)
 	require.NotNil(t, entries[0].TotalCost)
 	assert.Equal(t, cost, *entries[0].TotalCost, "the reported cost is the recorded one")
+}
+
+// A provider's own cost belongs to the token counts it was reported with. A
+// later usage event without one is merged with it for the usage row, but the
+// cost of other token counts is not returned as the cost of these.
+func TestStreamUsageObserverReturnsNoProviderCostOfOtherTokenCounts(t *testing.T) {
+	usageEvent := func(prompt, completion float64, cost map[string]any) map[string]any {
+		usage := map[string]any{"prompt_tokens": prompt, "completion_tokens": completion}
+		maps.Copy(usage, cost)
+		return map[string]any{"usage": usage}
+	}
+	credits := func(cost float64) map[string]any { return map[string]any{"cost": cost} }
+	tests := []struct {
+		name      string
+		provider  string
+		events    []map[string]any // the first one is priced
+		wantKnown bool             // of the last one
+		wantCost  float64
+	}{
+		{
+			name: "openrouter, other tokens and no cost", provider: "openrouter",
+			events: []map[string]any{usageEvent(10, 1, credits(0.001)), usageEvent(20, 1, nil)},
+		},
+		{
+			name: "xai, other tokens and no cost", provider: "xai",
+			events: []map[string]any{usageEvent(10, 1, map[string]any{"cost_in_usd_ticks": float64(10_000_000)}), usageEvent(20, 1, nil)},
+		},
+		{
+			name: "edenai, other tokens and no cost", provider: "edenai",
+			events: []map[string]any{
+				{"cost": 0.001, "usage": map[string]any{"prompt_tokens": float64(10), "completion_tokens": float64(1)}},
+				usageEvent(20, 1, nil),
+			},
+		},
+		{
+			name: "output tokens reported after the cost", provider: "openrouter",
+			events: []map[string]any{
+				{"usage": map[string]any{"prompt_tokens": float64(10), "cost": 0.001}},
+				{"usage": map[string]any{"completion_tokens": float64(5)}},
+			},
+		},
+		{
+			name: "the other tokens again", provider: "openrouter",
+			events: []map[string]any{usageEvent(10, 1, credits(0.001)), usageEvent(20, 1, nil), usageEvent(20, 1, nil)},
+		},
+		{
+			name: "other tokens with their own cost", provider: "openrouter",
+			events:    []map[string]any{usageEvent(10, 1, credits(0.001)), usageEvent(20, 1, nil), usageEvent(30, 1, credits(0.003))},
+			wantKnown: true, wantCost: 0.003,
+		},
+		{
+			name: "the same tokens again, without the cost", provider: "openrouter",
+			events:    []map[string]any{usageEvent(10, 1, credits(0.001)), usageEvent(10, 1, nil)},
+			wantKnown: true, wantCost: 0.001,
+		},
+		{
+			name: "a provider whose cost is calculated", provider: "openai",
+			events:    []map[string]any{usageEvent(1_000_000, 1_000_000, credits(0.001)), usageEvent(2_000_000, 1_000_000, nil)},
+			wantKnown: true, wantCost: 4,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logger := &trackingLogger{enabled: true}
+			pricing := &streamPricingCaptureResolver{pricing: &core.ModelPricing{InputPerMtok: new(1.0), OutputPerMtok: new(2.0)}}
+			observer := NewStreamUsageObserver(logger, "model-1", tt.provider, "req-1", "/v1/chat/completions", pricing)
+			_, report := WithCostReport(context.Background(), false)
+			observer.SetCostReport(report)
+
+			observer.OnJSONEvent(tt.events[0])
+			_, known := report.Cost()
+			require.True(t, known, "the first event is priced")
+			for _, event := range tt.events[1:] {
+				observer.OnJSONEvent(event)
+			}
+
+			cost, known := report.Cost()
+			assert.Equal(t, tt.wantKnown, known)
+			assert.InDelta(t, tt.wantCost, cost, 1e-9)
+		})
+	}
 }
 
 // opaqueWrapper wraps a stamping logger without forwarding StampBilling.

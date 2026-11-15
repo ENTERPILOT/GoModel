@@ -79,6 +79,10 @@ type responseCostWriter struct {
 	// every other response, and once nothing more of it is rewritten.
 	events *streaming.EventScanner
 	body   *jsonUsageEditor
+	// unread is set once an event of the stream ended where the usage reader
+	// ends none: what it reads from there on is not the events relayed, so
+	// no later event carries a cost.
+	unread bool
 	out    []byte
 }
 
@@ -146,6 +150,7 @@ func (w *responseCostWriter) Write(p []byte) (int, error) {
 	// Only whole events are relayed; a client cannot act on part of one.
 	w.out = w.out[:0]
 	for _, ev := range w.events.Feed(p) {
+		w.unread = w.unread || !ev.Oversized && !streaming.EndsAtObservedBoundary(ev.Raw)
 		w.out = w.appendEvent(w.out, ev)
 	}
 	if len(w.out) > 0 {
@@ -204,10 +209,30 @@ func (w *responseCostWriter) Unwrap() http.ResponseWriter {
 // relayed so far when each one is written: an event's cost then matches the
 // token counts beside it even when several arrived in one upstream read.
 func paceForResponseCost(c *echo.Context, stream io.ReadCloser) io.ReadCloser {
-	if usage.CostReportFromContext(c.Request().Context()) == nil {
+	report := usage.CostReportFromContext(c.Request().Context())
+	if report == nil {
 		return stream
 	}
-	return streaming.NewEventPacedStream(stream)
+	return &eventCostStream{ReadCloser: streaming.NewEventPacedStream(stream), report: report}
+}
+
+// eventCostStream forgets the reported cost when a paced stream hands out a
+// usage object, before the usage observer reads it. The cost is known again
+// once the observer priced that usage, so an event whose usage it does not
+// read (one it skips, or cannot parse) carries no cost, never the cost of an
+// event before it. Events without usage leave the cost as it is: a stream
+// converted for the client carries its usage in an event written after them.
+type eventCostStream struct {
+	io.ReadCloser
+	report *usage.CostReport
+}
+
+func (s *eventCostStream) Read(p []byte) (int, error) {
+	n, err := s.ReadCloser.Read(p)
+	if usage.HasUsageObject(p[:n]) {
+		s.report.Forget()
+	}
+	return n, err
 }
 
 // deleteHeaderFold removes every value of the header name, under any key that

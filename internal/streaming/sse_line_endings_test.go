@@ -60,6 +60,65 @@ func TestNextEventBoundaryAnyEOL_AgreesOnProviderFramings(t *testing.T) {
 	}
 }
 
+// The first line ending is found wherever it lies in the windows the search
+// reads, and whichever of the two comes first.
+func TestIndexLineEnd(t *testing.T) {
+	const w = lineEndWindowBytes
+	pad := func(n int) string { return strings.Repeat("x", n) }
+	tests := []struct {
+		name string
+		data string
+		want int
+	}{
+		{name: "empty", data: "", want: -1},
+		{name: "no line ending", data: pad(3 * w), want: -1},
+		{name: "LF", data: "a\nb", want: 1},
+		{name: "CR", data: "a\rb", want: 1},
+		{name: "CR before LF", data: "a\rb\nc", want: 1},
+		{name: "LF before CR", data: "a\nb\rc", want: 1},
+		{name: "CRLF", data: "a\r\nb", want: 1},
+		{name: "LF that ends a window", data: pad(w-1) + "\n\r", want: w - 1},
+		{name: "CR that starts the next window", data: pad(w) + "\r\n", want: w},
+		{name: "CR a window before an LF", data: pad(w-1) + "\r" + pad(w) + "\n", want: w - 1},
+		{name: "LF a window before a CR", data: pad(w-1) + "\n" + pad(w) + "\r", want: w - 1},
+		{name: "CR in the last, short window", data: pad(2*w+3) + "\r", want: 2*w + 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, indexLineEnd([]byte(tt.data)))
+		})
+	}
+}
+
+// An event ends where an ObservedSSEStream ends it exactly when
+// NextEventBoundary finds its first boundary at its end.
+func TestEndsAtObservedBoundary(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{name: "LF", raw: "data: 1\n\n", want: true},
+		{name: "CRLF", raw: "event: x\r\ndata: 1\r\n\r\n", want: true},
+		{name: "CRLF then LF", raw: "data: 1\r\n\n", want: true},
+		{name: "bare CR", raw: "data: 1\r\r"},
+		{name: "LF then CRLF", raw: "data: 1\n\r\n"},
+		{name: "LF then CR", raw: "data: 1\n\r"},
+		{name: "CR then CRLF", raw: "data: 1\r\r\n"},
+		{name: "CRLF then a bare CR", raw: "data: 1\r\n\r"},
+		{name: "unterminated", raw: "data: 1"},
+		{name: "empty", raw: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			idx, sep := NextEventBoundary([]byte(tt.raw))
+
+			assert.Equal(t, tt.want, EndsAtObservedBoundary([]byte(tt.raw)))
+			assert.Equal(t, tt.want, idx != -1 && idx+sep == len(tt.raw), "NextEventBoundary")
+		})
+	}
+}
+
 func TestCutLine(t *testing.T) {
 	tests := []struct {
 		data, line, ending, rest string

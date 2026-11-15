@@ -10,13 +10,14 @@ import (
 )
 
 // appendEvent appends ev to out, with the cost known so far on the usage
-// object it carries. Every event without one passes byte for byte.
+// object it carries, and none once the stream is unread. Every event without
+// one passes byte for byte.
 func (w *responseCostWriter) appendEvent(out []byte, ev streaming.RawEvent) []byte {
 	if ev.Comment || ev.Oversized || !mayHoldCost(ev.Data, w.billed) {
 		return append(out, ev.Raw...)
 	}
 	amount, known := w.report.Cost()
-	data, ok := withUsageCost(ev.Data, newUsageCostEdit(amount, known, w.billed))
+	data, ok := withUsageCost(ev.Data, newUsageCostEdit(amount, known && !w.unread, w.billed))
 	if !ok {
 		return append(out, ev.Raw...)
 	}

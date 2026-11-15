@@ -404,7 +404,10 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 		observers = passthroughJSONResponseObservers(c, usageLogger, pricingResolver, providerType, providerName, endpoint, info, extraObservers)
 	}
 	if returnsCost && isJSONContentType(resp.Headers) {
-		lead, first, rest := readJSONStart(resp.Body, maxObservedJSONResponseBytes)
+		lead, first, rest, err := readJSONStart(resp.Body, maxObservedJSONResponseBytes)
+		if err != nil {
+			return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "failed to read provider response", err))
+		}
 		body := io.MultiReader(bytes.NewReader(lead), rest)
 		if first != 0 && first != '{' {
 			return relayJSONAsItArrives(c, resp.StatusCode, body, observers)
@@ -495,22 +498,26 @@ func relayJSONAsItArrives(c *echo.Context, status int, upstream io.Reader, obser
 
 // readJSONStart reads the whitespace a JSON body starts with, up to limit
 // bytes of it, and returns it with the first byte after it and a reader of the
-// body from that byte on. first is 0 when the body ends or fails before such
-// a byte, or has none within limit.
-func readJSONStart(body io.Reader, limit int) (lead []byte, first byte, rest io.Reader) {
+// body from that byte on. first is 0 when the body ends before such a byte, or
+// has none within limit. A body that fails before that byte returns the
+// error: the reader does not report it a second time.
+func readJSONStart(body io.Reader, limit int) (lead []byte, first byte, rest io.Reader, err error) {
 	reader := bufio.NewReader(body)
 	for len(lead) < limit {
 		c, err := reader.ReadByte()
-		if err != nil {
+		if err == io.EOF {
 			break
+		}
+		if err != nil {
+			return lead, 0, reader, err
 		}
 		if !isJSONSpace(c) {
 			_ = reader.UnreadByte() // never fails right after ReadByte
-			return lead, c, reader
+			return lead, c, reader, nil
 		}
 		lead = append(lead, c)
 	}
-	return lead, 0, reader
+	return lead, 0, reader, nil
 }
 
 // maxRelayedPassthroughErrorBytes caps the provider-native error body relayed
