@@ -50,6 +50,7 @@ func TestStore_RoundTrip(t *testing.T) {
 			UserPath:          "/team/alpha",
 			Labels:            []string{"team-a", "batch"},
 			AllowedModels:     []string{"anthropic/", "openai/gpt-4o"},
+			AllowedMCP:        []string{"github/*", "exa/web_search_exa"},
 			DashboardAccess:   true,
 			PassthroughAccess: true,
 			RedactedValue:     TokenPrefix + "...full",
@@ -65,6 +66,7 @@ func TestStore_RoundTrip(t *testing.T) {
 		emptySlices := newTestKey("key-empty-slices", now.Add(-2*time.Hour))
 		emptySlices.Labels = []string{}
 		emptySlices.AllowedModels = []string{}
+		emptySlices.AllowedMCP = []string{}
 
 		for _, key := range []AuthKey{full, minimal, emptySlices} {
 			require.NoError(t, store.Create(ctx, key))
@@ -84,6 +86,7 @@ func TestStore_RoundTrip(t *testing.T) {
 		require.Equal(t, full.UserPath, got.UserPath)
 		require.Equal(t, full.Labels, got.Labels)
 		require.Equal(t, full.AllowedModels, got.AllowedModels)
+		require.Equal(t, full.AllowedMCP, got.AllowedMCP)
 		require.True(t, got.DashboardAccess)
 		require.True(t, got.PassthroughAccess)
 		require.Equal(t, full.RedactedValue, got.RedactedValue)
@@ -103,6 +106,7 @@ func TestStore_RoundTrip(t *testing.T) {
 			require.Empty(t, got.UserPath)
 			require.Nil(t, got.Labels, "%s: Labels = %#v, want nil", got.ID, got.Labels)
 			require.Nil(t, got.AllowedModels, "%s: AllowedModels = %#v, want nil", got.ID, got.AllowedModels)
+			require.Nil(t, got.AllowedMCP, "%s: AllowedMCP = %#v, want nil", got.ID, got.AllowedMCP)
 			require.False(t, got.DashboardAccess)
 			require.False(t, got.PassthroughAccess)
 			require.Empty(t, got.ImportedFrom)
@@ -221,6 +225,28 @@ func TestStore_UpdateAllowedModels(t *testing.T) {
 		require.True(t, byID["key-restricted"].UpdatedAt.Equal(later), "cleared key = %#v, want nil allowed models and bumped updated_at", byID["key-restricted"])
 		require.Equal(t, []string{"openai/"}, byID["key-other"].AllowedModels)
 		require.True(t, byID["key-other"].UpdatedAt.Equal(later), "restricted key = %#v, want bumped updated_at", byID["key-other"])
+	})
+}
+
+func TestStore_UpdateAllowedMCP(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
+		ctx := context.Background()
+		now := storeTestNow
+		key := newTestKey("key-restricted", now)
+		key.AllowedMCP = []string{"github/*"}
+		require.NoError(t, store.Create(ctx, key))
+		require.NoError(t, store.Create(ctx, newTestKey("key-other", now)))
+
+		later := now.Add(time.Hour)
+		require.NoError(t, store.UpdateAllowedMCP(ctx, "key-restricted", nil, later))
+		require.NoError(t, store.UpdateAllowedMCP(ctx, "key-other", []string{"exa/web_search_exa"}, later))
+		require.ErrorIs(t, store.UpdateAllowedMCP(ctx, "missing", []string{"exa/*"}, later), ErrNotFound)
+
+		byID := listByID(t, store)
+		require.Nil(t, byID["key-restricted"].AllowedMCP)
+		require.True(t, byID["key-restricted"].UpdatedAt.Equal(later))
+		require.Equal(t, []string{"exa/web_search_exa"}, byID["key-other"].AllowedMCP)
+		require.True(t, byID["key-other"].UpdatedAt.Equal(later))
 	})
 }
 

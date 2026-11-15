@@ -5,6 +5,7 @@ import {
   authKeyActive,
   authKeyDeactivated,
   authKeyExpired,
+  authKeyMCPSelectorOptions,
   authKeyUnderPath,
   authKeyUserPathValidationError,
   buildCreateAuthKeyPayload,
@@ -15,6 +16,7 @@ import {
   lastUsedCellState,
   labelColor,
   normalizeAuthKeyUserPath,
+  parseAuthKeyAllowedMCP,
   parseAuthKeyAllowedModels,
   parseAuthKeyLabels,
   retentionDaysFromConfig,
@@ -301,6 +303,35 @@ test("filterAuthKeys matches allowed model selectors", () => {
     authKey({ id: "k2", name: "b" }),
   ];
   assert.deepEqual(filterAuthKeys(keys, { query: "anthropic" }).map((k) => k.id), ["k1"]);
+});
+
+test("buildCreateAuthKeyPayload sends allowed_mcp only when the field lists selectors", () => {
+  const empty = buildCreateAuthKeyPayload({ ...defaultAuthKeyForm(), name: "agent" });
+  assert.equal(empty.payload.allowed_mcp, undefined);
+  assert.deepEqual(defaultAuthKeyForm().allowed_mcp, []);
+
+  const restricted = buildCreateAuthKeyPayload({
+    ...defaultAuthKeyForm(),
+    name: "agent",
+    allowed_mcp: ["exa/web_search_exa", "github/*, exa/web_search_exa"],
+  });
+  assert.deepEqual(restricted.payload.allowed_mcp, ["exa/web_search_exa", "github/*"]);
+  assert.deepEqual(parseAuthKeyAllowedMCP(""), []);
+});
+
+test("authKeyMCPSelectorOptions offers one whole-server selector per slug", () => {
+  const options = authKeyMCPSelectorOptions(["github", "exa", "github", ""]);
+  assert.deepEqual(options.map((option) => option.value), ["exa/*", "github/*"]);
+  assert.ok(options.every((option) => option.description));
+  assert.deepEqual(authKeyMCPSelectorOptions(undefined), []);
+});
+
+test("filterAuthKeys matches MCP access selectors", () => {
+  const keys = [
+    authKey({ id: "k1", name: "a", allowed_mcp: ["exa/web_search_exa"] }),
+    authKey({ id: "k2", name: "b" }),
+  ];
+  assert.deepEqual(filterAuthKeys(keys, { query: "web_search" }).map((k) => k.id), ["k1"]);
 });
 
 test("filterAuthKeys userPath keeps the path and its subtree on segment boundaries", () => {

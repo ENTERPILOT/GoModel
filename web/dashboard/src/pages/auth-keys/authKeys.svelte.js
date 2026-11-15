@@ -4,6 +4,7 @@
 
 
 import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
+import { getJSON } from "$lib/api/client.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import { router } from "$lib/stores/router.svelte.js";
 import { access } from "$lib/stores/access.svelte.js";
@@ -17,6 +18,7 @@ import {
   countInactiveAuthKeys,
   defaultAuthKeyForm,
   filterAuthKeys,
+  parseAuthKeyAllowedMCP,
   parseAuthKeyAllowedModels,
   parseAuthKeyLabels,
   retentionDaysFromConfig,
@@ -28,6 +30,10 @@ function emptyLabelsEditor() {
 }
 
 function emptyAllowedModelsEditor() {
+  return { open: false, id: "", name: "", value: [], submitting: false, error: "" };
+}
+
+function emptyAllowedMCPEditor() {
   return { open: false, id: "", name: "", value: [], submitting: false, error: "" };
 }
 
@@ -70,6 +76,11 @@ class AuthKeysStore {
   form = $state(defaultAuthKeyForm());
   labelsEditor = $state(emptyLabelsEditor());
   allowedModelsEditor = $state(emptyAllowedModelsEditor());
+  allowedMCPEditor = $state(emptyAllowedMCPEditor());
+  // MCP server slugs offered by the MCP access picker. Listing servers needs
+  // a global credential, so scoped keys type selectors in by hand.
+  mcpServerSlugs = $state([]);
+  mcpVisible = $derived(runtimeConfig.mcpVisible());
 
   copyState = createCopyState({ logPrefix: "Failed to copy auth key:" });
 
@@ -100,8 +111,25 @@ class AuthKeysStore {
       }
       this.available = true;
       this.keys = outcome.items;
+      void this.fetchMCPServerSlugs();
     } finally {
       this.loading = false;
+    }
+  }
+
+  async fetchMCPServerSlugs() {
+    if (access.scoped || !runtimeConfig.mcpVisible()) {
+      this.mcpServerSlugs = [];
+      return;
+    }
+    try {
+      const result = await getJSON("/admin/mcp-servers", { label: "mcp servers" });
+      if (result.stale) return;
+      const servers = result.ok && Array.isArray(result.data) ? result.data : [];
+      this.mcpServerSlugs = servers.map((server) => String(server?.slug || server?.name || "").trim()).filter(Boolean);
+    } catch (e) {
+      console.error("Failed to fetch MCP servers:", e);
+      this.mcpServerSlugs = [];
     }
   }
 
@@ -300,22 +328,63 @@ class AuthKeysStore {
   }
 
   async submitAllowedModelsEditor() {
-    const editor = this.allowedModelsEditor;
+    await this.submitSelectorEditor(this.allowedModelsEditor, {
+      endpoint: "allowed-models",
+      payload: (value) => ({ allowed_models: parseAuthKeyAllowedModels(value) }),
+      failed: m.api_keys_allowed_models_update_failed(),
+      updated: (name) => m.api_keys_allowed_models_updated({ name }),
+      close: () => this.closeAllowedModelsEditor(),
+    });
+  }
+
+  openAllowedMCPEditor(key) {
+    if (!key || this.allowedMCPEditor.submitting) {
+      return;
+    }
+    this.allowedMCPEditor = {
+      open: true,
+      id: key.id,
+      name: key.name || "",
+      value: [...(key.allowed_mcp || [])],
+      submitting: false,
+      error: "",
+    };
+  }
+
+  closeAllowedMCPEditor() {
+    if (!this.allowedMCPEditor.open || this.allowedMCPEditor.submitting) {
+      return;
+    }
+    this.allowedMCPEditor = emptyAllowedMCPEditor();
+  }
+
+  async submitAllowedMCPEditor() {
+    await this.submitSelectorEditor(this.allowedMCPEditor, {
+      endpoint: "allowed-mcp",
+      payload: (value) => ({ allowed_mcp: parseAuthKeyAllowedMCP(value) }),
+      failed: m.api_keys_allowed_mcp_update_failed(),
+      updated: (name) => m.api_keys_allowed_mcp_updated({ name }),
+      close: () => this.closeAllowedMCPEditor(),
+    });
+  }
+
+  // submitSelectorEditor saves one allowlist editor dialog through its
+  // PUT /admin/auth-keys/{id}/{endpoint} route.
+  async submitSelectorEditor(editor, { endpoint, payload, failed, updated, close }) {
     if (!editor.open || editor.submitting || !editor.id) {
       return;
     }
     editor.submitting = true;
     editor.error = "";
-    const payload = { allowed_models: parseAuthKeyAllowedModels(editor.value) };
 
     try {
       const outcome = await sendAdminMutation(
-        "/admin/auth-keys/" + encodeURIComponent(editor.id) + "/allowed-models",
+        "/admin/auth-keys/" + encodeURIComponent(editor.id) + "/" + endpoint,
         "PUT",
-        payload,
+        payload(editor.value),
         {
-          label: "update API key allowed models",
-          errorFallback: m.api_keys_allowed_models_update_failed(),
+          label: "update API key " + endpoint,
+          errorFallback: failed,
           unavailableMessage: m.api_keys_feature_unavailable(),
         },
       );
@@ -330,13 +399,13 @@ class AuthKeysStore {
       if (outcome.status === "error") {
         editor.error = outcome.error;
         if (outcome.result && outcome.result.status !== 401) {
-          console.error("Failed to update auth key allowed models:", outcome.result.status, editor.error);
+          console.error("Failed to update auth key " + endpoint + ":", outcome.result.status, editor.error);
         }
         return;
       }
-      flash.success(m.api_keys_allowed_models_updated({ name: editor.name }));
+      flash.success(updated(editor.name));
       editor.submitting = false;
-      this.closeAllowedModelsEditor();
+      close();
       void this.fetchKeys();
     } finally {
       editor.submitting = false;

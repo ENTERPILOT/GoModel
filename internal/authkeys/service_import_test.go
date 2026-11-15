@@ -2,6 +2,7 @@ package authkeys
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -204,6 +205,53 @@ func TestServiceImportUpdatesAKeyAnotherInstanceStored(t *testing.T) {
 	assert.Equal(t, ImportUpdated, outcome)
 	assert.Equal(t, "elsewhere", view.ID)
 	assert.Equal(t, "again", view.Name)
+}
+
+// editDuringImportStore runs edit once an import's update reached the store,
+// then fails every List, so the import's own reconciliation cannot hide what
+// it wrote to the cache.
+type editDuringImportStore struct {
+	*testStore
+	edit func()
+}
+
+func (s *editDuringImportStore) UpdateImported(ctx context.Context, key AuthKey) error {
+	if err := s.testStore.UpdateImported(ctx, key); err != nil {
+		return err
+	}
+	s.edit()
+	s.listErr = errors.New("database unavailable")
+	return nil
+}
+
+// A re-import read the key before an administrator narrowed it. Its cache
+// update must not put the broader access back.
+func TestServiceImportKeepsAnEditMadeWhileItRan(t *testing.T) {
+	ctx := context.Background()
+	store := &editDuringImportStore{testStore: newTestStore()}
+	service, err := NewService(store)
+	require.NoError(t, err)
+	first := importLiteLLMKey(t, service, ImportInput{Name: "old", AllowedMCP: []string{"alpha/*"}})
+	_, err = service.UpdatePassthroughAccess(ctx, first.ID, true)
+	require.NoError(t, err)
+
+	store.edit = func() {
+		_, err := service.UpdateAllowedMCP(ctx, first.ID, []string{"alpha/read"})
+		require.NoError(t, err)
+		_, err = service.UpdatePassthroughAccess(ctx, first.ID, false)
+		require.NoError(t, err)
+	}
+	view, outcome, err := service.Import(ctx, ImportInput{
+		Name: "new", ImportedFrom: ImportedFromLiteLLM, SecretHash: hashSecret(liteLLMToken),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, ImportUpdated, outcome)
+	assert.Equal(t, "new", view.Name)
+
+	got, err := service.Authenticate(ctx, liteLLMToken)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"alpha/read"}, got.AllowedMCP, "the narrowed MCP allowlist is kept")
+	assert.False(t, got.PassthroughAccess, "the revoked passthrough access is kept")
 }
 
 func TestServiceImportNeverTakesOverAKeyFromAnotherSource(t *testing.T) {

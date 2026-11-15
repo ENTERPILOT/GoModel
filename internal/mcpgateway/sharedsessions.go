@@ -50,6 +50,9 @@ type sharedSession struct {
 	AuthKeyID string `json:"auth_key_id,omitempty"`
 	UserPath  string `json:"user_path,omitempty"`
 	Endpoint  string `json:"endpoint,omitempty"`
+	// AllowedMCP is the key's MCP allowlist when the session opened; empty is
+	// unrestricted.
+	AllowedMCP []string `json:"allowed_mcp,omitempty"`
 	// Scoped marks a session opened with ScopeHeader; Servers is its set.
 	Scoped    bool     `json:"scoped,omitempty"`
 	Servers   []string `json:"servers,omitempty"`
@@ -63,7 +66,12 @@ type sharedSession struct {
 // scope rebuilds the visibility inputs the session was opened with: later
 // requests never change a session's view, wherever they land.
 func (r sharedSession) scope() requestScope {
-	scope := requestScope{authKeyID: r.AuthKeyID, userPath: r.UserPath, discovery: r.Discovery}
+	scope := requestScope{
+		authKeyID: r.AuthKeyID,
+		userPath:  r.UserPath,
+		access:    newKeyAccess(r.AllowedMCP),
+		discovery: r.Discovery,
+	}
 	if virtual, ok := strings.CutPrefix(r.Endpoint, virtualBindingPrefix); ok {
 		scope.virtual = virtual
 	} else {
@@ -111,8 +119,9 @@ const (
 
 // admitSession checks a request's session ID against the binding the session
 // was opened under, on this replica or in the shared store, and finds its
-// host. remove marks a DELETE, which ends the session on every replica.
-func (s *Service) admitSession(ctx context.Context, sessionID, authKeyID, userPath, endpoint string, remove bool) (sessionAdmission, *resumedSession) {
+// host. access is the request's API key MCP allowlist. remove marks a DELETE,
+// which ends the session on every replica.
+func (s *Service) admitSession(ctx context.Context, sessionID, authKeyID, userPath, endpoint string, access *keyAccess, remove bool) (sessionAdmission, *resumedSession) {
 	binding, ok := s.liveBinding(sessionID)
 	if !ok {
 		if s.shared == nil {
@@ -120,7 +129,7 @@ func (s *Service) admitSession(ctx context.Context, sessionID, authKeyID, userPa
 			// and bindings do not survive restarts.
 			return sessionAdmitted, nil
 		}
-		return s.admitSharedSession(ctx, sessionID, authKeyID, userPath, endpoint, remove)
+		return s.admitSharedSession(ctx, sessionID, authKeyID, userPath, endpoint, access, remove)
 	}
 	if !binding.boundTo(authKeyID, userPath, endpoint) {
 		return sessionRejected, nil
@@ -137,6 +146,17 @@ func (s *Service) admitSession(ctx context.Context, sessionID, authKeyID, userPa
 		}
 		return sessionAdmitted, binding.resumed
 	}
+	if !binding.access.equal(access) {
+		// The key's MCP allowlist changed since the session opened, so its
+		// catalog no longer matches: end it everywhere, and the client
+		// re-initializes and lists the current tools.
+		s.unbind(sessionID, binding.server)
+		closeSessions(binding.server)
+		if binding.shared {
+			s.closeSharedSession(ctx, sessionID)
+		}
+		return sessionRejected, nil
+	}
 	if binding.shared && !s.recheckSharedSession(ctx, sessionID, binding) {
 		s.unbind(sessionID, binding.server)
 		closeSessions(binding.server)
@@ -146,8 +166,9 @@ func (s *Service) admitSession(ctx context.Context, sessionID, authKeyID, userPa
 }
 
 // admitSharedSession admits a request for a session this replica does not
-// host by its shared record, resuming the session here.
-func (s *Service) admitSharedSession(ctx context.Context, sessionID, authKeyID, userPath, endpoint string, remove bool) (sessionAdmission, *resumedSession) {
+// host by its shared record, resuming the session here. access is the
+// request's API key MCP allowlist.
+func (s *Service) admitSharedSession(ctx context.Context, sessionID, authKeyID, userPath, endpoint string, access *keyAccess, remove bool) (sessionAdmission, *resumedSession) {
 	lookupCtx, cancel := context.WithTimeout(ctx, sharedSessionTimeout)
 	record, raw, err := s.loadSharedSession(lookupCtx, sessionID)
 	cancel()
@@ -166,6 +187,12 @@ func (s *Service) admitSharedSession(ctx context.Context, sessionID, authKeyID, 
 	if remove {
 		s.closeSharedSession(ctx, sessionID)
 		return sessionEnded, nil
+	}
+	if !newKeyAccess(record.AllowedMCP).equal(access) {
+		// As on the session's host: an edited allowlist ends the session
+		// everywhere, so it is never resumed with a stale catalog.
+		s.closeSharedSession(ctx, sessionID)
+		return sessionRejected, nil
 	}
 	host, err, _ := s.resumes.Do(sessionID, func() (any, error) {
 		return s.resumeSession(ctx, sessionID, record, raw)
@@ -430,6 +457,7 @@ func (s *Service) resumeSession(ctx context.Context, sessionID string, record *s
 	s.bindings[sessionID] = sessionBinding{
 		authKeyID:          record.AuthKeyID,
 		userPath:           record.UserPath,
+		access:             scope.access,
 		endpoint:           record.Endpoint,
 		lastSeen:           now,
 		virtualIncarnation: record.VirtualIncarnation,
@@ -506,6 +534,7 @@ func (s *Service) shareSession(ctx context.Context, sessionID string, scope requ
 	record := sharedSession{
 		AuthKeyID:       binding.authKeyID,
 		UserPath:        binding.userPath,
+		AllowedMCP:      binding.access.selectors(),
 		Endpoint:        binding.endpoint,
 		Discovery:       binding.discovery,
 		Initialize:      params,

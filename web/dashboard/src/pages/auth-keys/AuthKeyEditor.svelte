@@ -9,11 +9,12 @@
   import SearchSelect from "$lib/components/molecules/SearchSelect.svelte";
   import { modelsStore } from "$lib/stores/models.svelte.js";
   import { authKeysStore as store } from "./authKeys.svelte.js";
-  import { authKeySelectorOptions } from "./authKeysLogic.js";
+  import { authKeyMCPSelectorOptions, authKeySelectorOptions } from "./authKeysLogic.js";
   import { Check, Plus } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
   const selectorOptions = $derived(authKeySelectorOptions(modelsStore.models));
+  const mcpSelectorOptions = $derived(authKeyMCPSelectorOptions(store.mcpServerSlugs));
 </script>
 
 <EditorDialog
@@ -133,6 +134,33 @@
           />
         </div>
       </div>
+      {#if store.mcpVisible}
+        <div class="form-field">
+          <InlineHelpSection copyId="auth-key-allowed-mcp-help-copy" label={m.api_keys_allowed_mcp_help_label()}>
+            {#snippet title()}
+              <label class="form-field-label" for="auth-key-allowed-mcp">
+                {m.api_keys_allowed_mcp()}
+              </label>
+            {/snippet}
+            {#snippet help()}
+              {m.api_keys_allowed_mcp_help()}
+            {/snippet}
+          </InlineHelpSection>
+          <div class="auth-key-allowed-models-select">
+            <SearchSelect
+              id="auth-key-allowed-mcp"
+              options={mcpSelectorOptions}
+              multiple
+              bind:values={store.form.allowed_mcp}
+              placeholder={m.api_keys_allowed_mcp_placeholder()}
+              searchPlaceholder={m.model_selectors_search()}
+              ariaLabel={m.api_keys_allowed_mcp()}
+              allowCustom
+              mono
+            />
+          </div>
+        </div>
+      {/if}
       <div class="form-field">
         <InlineHelpSection copyId="auth-key-dashboard-access-help-copy" label={m.api_keys_dashboard_help_label()}>
           {#snippet title()}

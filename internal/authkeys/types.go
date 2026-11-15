@@ -25,6 +25,10 @@ type AuthKey struct {
 	// "provider/model", provider-wide "provider/", or model-wide "model").
 	// Empty means the key alone imposes no model restriction.
 	AllowedModels []string `json:"allowed_models,omitempty" bson:"allowed_models,omitempty"`
+	// AllowedMCP restricts the key's MCP gateway access to the listed
+	// selectors: "server/*" for a whole server, "server/tool" for one tool.
+	// Empty means the key alone imposes no MCP restriction.
+	AllowedMCP []string `json:"allowed_mcp,omitempty" bson:"allowed_mcp,omitempty"`
 	// DashboardAccess grants the key access to the admin API and dashboard.
 	// Keys without it can still call every model endpoint and /v1/usage.
 	DashboardAccess bool `json:"dashboard_access" bson:"dashboard_access,omitempty"`
@@ -66,6 +70,7 @@ type CreateInput struct {
 	UserPath          string
 	Labels            []string
 	AllowedModels     []string
+	AllowedMCP        []string
 	DashboardAccess   bool
 	PassthroughAccess bool
 	ExpiresAt         *time.Time

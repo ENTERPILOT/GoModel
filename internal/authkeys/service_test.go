@@ -78,6 +78,17 @@ func (s *testStore) UpdateAllowedModels(_ context.Context, id string, allowedMod
 	return nil
 }
 
+func (s *testStore) UpdateAllowedMCP(_ context.Context, id string, allowedMCP []string, now time.Time) error {
+	key, ok := s.keys[id]
+	if !ok {
+		return ErrNotFound
+	}
+	key.AllowedMCP = allowedMCP
+	key.UpdatedAt = now.UTC()
+	s.keys[id] = key
+	return nil
+}
+
 func (s *testStore) UpdateDashboardAccess(_ context.Context, id string, allowed bool, now time.Time) error {
 	key, ok := s.keys[id]
 	if !ok {
@@ -361,6 +372,36 @@ func TestServicePassthroughAccessLifecycle(t *testing.T) {
 	require.False(t, authenticated.PassthroughAccess)
 
 	_, err = service.UpdatePassthroughAccess(ctx, "missing", true)
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
+func TestServiceAllowedMCPLifecycle(t *testing.T) {
+	ctx := context.Background()
+	service, err := NewService(newTestStore())
+	require.NoError(t, err)
+
+	issued, err := service.Create(ctx, CreateInput{Name: "agent", AllowedMCP: []string{" exa/* ", "exa/*", ""}})
+	require.NoError(t, err)
+	require.Equal(t, []string{"exa/*"}, issued.AllowedMCP)
+
+	authenticated, err := service.Authenticate(ctx, issued.Value)
+	require.NoError(t, err)
+	require.Equal(t, []string{"exa/*"}, authenticated.AllowedMCP)
+
+	view, err := service.UpdateAllowedMCP(ctx, issued.ID, []string{"exa/web_search_exa"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"exa/web_search_exa"}, view.AllowedMCP)
+	authenticated, err = service.Authenticate(ctx, issued.Value)
+	require.NoError(t, err)
+	require.Equal(t, []string{"exa/web_search_exa"}, authenticated.AllowedMCP)
+
+	_, err = service.UpdateAllowedMCP(ctx, issued.ID, nil)
+	require.NoError(t, err)
+	authenticated, err = service.Authenticate(ctx, issued.Value)
+	require.NoError(t, err)
+	require.Nil(t, authenticated.AllowedMCP)
+
+	_, err = service.UpdateAllowedMCP(ctx, "missing", []string{"exa/*"})
 	require.ErrorIs(t, err, ErrNotFound)
 }
 

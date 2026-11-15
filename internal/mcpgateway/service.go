@@ -158,6 +158,10 @@ var errServiceClosed = errors.New("mcp gateway is shut down")
 // longer use the server.
 var ErrServerNotVisible = errors.New("server is not available for this user path")
 
+// ErrNotAllowedForKey rejects a call the session's API key MCP allowlist does
+// not grant.
+var ErrNotAllowedForKey = errors.New("not allowed for this API key")
+
 // sessionBinding pins a downstream MCP session to the user path it was
 // initialized under. Bearer auth still runs on every request; the binding
 // additionally stops a *different* principal from riding a leaked session ID,
@@ -165,6 +169,9 @@ var ErrServerNotVisible = errors.New("server is not available for this user path
 type sessionBinding struct {
 	authKeyID string
 	userPath  string
+	// access is the key's MCP allowlist when the session initialized; nil is
+	// unrestricted. A request carrying a different one ends the session.
+	access *keyAccess
 	// endpoint identifies the endpoint the session was opened on: a pinned
 	// server slug, virtualBindingPrefix plus a virtual server name, or "" for
 	// the aggregated endpoint.
@@ -693,6 +700,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer
 
 	userPath := core.UserPathFromContext(r.Context())
 	authKeyID := core.GetAuthKeyID(r.Context())
+	access := newKeyAccess(core.GetCredentialAllowedMCP(r.Context()))
 
 	virtual := ""
 	if s.servedVirtual(pinnedServer) {
@@ -700,7 +708,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer
 	} else if pinnedServer != "" {
 		s.closeStaleVirtualSessions(r, pinnedServer)
 		view, ok := s.findVisibleServer(pinnedServer, userPath)
-		if !ok {
+		if !ok || !access.server(pinnedServer) {
 			return core.NewNotFoundError("unknown MCP server or virtual server: " + pinnedServer)
 		}
 		if !view.Spec.Enabled {
@@ -715,13 +723,14 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer
 	var resumed *resumedSession
 	sessionID := strings.TrimSpace(r.Header.Get("Mcp-Session-Id"))
 	if sessionID != "" {
-		admission, host := s.admitSession(r.Context(), sessionID, authKeyID, userPath, bindingEndpoint, r.Method == http.MethodDelete)
+		admission, host := s.admitSession(r.Context(), sessionID, authKeyID, userPath, bindingEndpoint, access, r.Method == http.MethodDelete)
 		switch admission {
 		case sessionRejected:
-			// A different principal presented this session ID, or the session
-			// was closed on another replica. Report the session as gone (404
-			// per the transport spec) so the legitimate client's session stays
-			// unaffected and this caller re-initializes.
+			// A different principal presented this session ID, the session
+			// was closed on another replica, or the key's MCP allowlist
+			// changed and the session was ended. Report the session as gone
+			// (404 per the transport spec) so this caller re-initializes;
+			// another principal's session stays unaffected.
 			return core.NewNotFoundError("unknown MCP session")
 		case sessionEnded:
 			w.WriteHeader(http.StatusNoContent)
@@ -762,6 +771,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, pinnedServer
 type requestScope struct {
 	authKeyID string
 	userPath  string
+	access    *keyAccess
 	pinned    string
 	// virtual names the virtual server whose members bound the view.
 	virtual   string
@@ -790,6 +800,7 @@ func (s *Service) scopeFromRequest(r *http.Request) requestScope {
 	scope := requestScope{
 		authKeyID: core.GetAuthKeyID(r.Context()),
 		userPath:  core.UserPathFromContext(r.Context()),
+		access:    newKeyAccess(core.GetCredentialAllowedMCP(r.Context())),
 	}
 	if pinned, ok := r.Context().Value(pinnedServerKey{}).(string); ok {
 		scope.pinned = pinned
@@ -851,7 +862,7 @@ func (s *Service) newSessionServer(scope requestScope) (*mcp.Server, map[string]
 		},
 		GetSessionID: func() string {
 			id := rand.Text()
-			s.bindSession(id, scope.authKeyID, scope.userPath, scope.bindingEndpoint(), scope.discovery, aliases, server)
+			s.bindSession(id, scope, aliases, server)
 			return id
 		},
 	})
@@ -874,9 +885,11 @@ func (s *Service) newSessionServer(scope requestScope) (*mcp.Server, map[string]
 		if snapshot == nil {
 			continue
 		}
-		s.registerTools(server, view.Spec.Name, snapshot, prefixNames, endpoint, toolOwners, index)
-		s.registerPrompts(server, view.Spec.Name, snapshot, prefixNames, promptOwners)
-		s.registerResources(server, view.Spec.Name, snapshot, resourceOwners)
+		s.registerTools(server, view.Spec.Name, snapshot, prefixNames, endpoint, toolOwners, index, scope.access)
+		if scope.access.wholeServer(view.Spec.Name) {
+			s.registerPrompts(server, view.Spec.Name, snapshot, prefixNames, promptOwners)
+			s.registerResources(server, view.Spec.Name, snapshot, resourceOwners)
+		}
 	}
 	if prefixNames {
 		aliases = bareToolAliases(toolOwners)
@@ -970,7 +983,7 @@ func (s *Service) visibleServers(scope requestScope) []ServerView {
 				continue
 			}
 		}
-		if !view.Spec.visibleTo(scope.userPath) {
+		if !view.Spec.visibleTo(scope.userPath) || !scope.access.server(view.Spec.Name) {
 			continue
 		}
 		visible = append(visible, view)
@@ -1040,9 +1053,13 @@ func (s *Service) composeInstructions(scope requestScope, views []ServerView) st
 // and valid schemas relay verbatim; only the name is prefixed on the
 // aggregated endpoint. Arguments relay as raw JSON — validation belongs to
 // the upstream. A non-nil index collects the tools for search discovery
-// instead of listing them.
-func (s *Service) registerTools(server *mcp.Server, upstreamName string, snapshot *catalog, prefix bool, endpoint string, owners map[string]string, index *toolIndex) {
+// instead of listing them. Tools the API key's allowlist does not grant are
+// never registered.
+func (s *Service) registerTools(server *mcp.Server, upstreamName string, snapshot *catalog, prefix bool, endpoint string, owners map[string]string, index *toolIndex, access *keyAccess) {
 	for _, tool := range snapshot.tools {
+		if !access.tool(upstreamName, tool.Name) {
+			continue
+		}
 		exposed := tool.Name
 		if prefix {
 			exposed = NamespacedName(upstreamName, tool.Name)
@@ -1065,7 +1082,7 @@ func (s *Service) registerTools(server *mcp.Server, upstreamName string, snapsho
 
 func (s *Service) toolHandler(upstreamName, toolName, exposedName, endpoint string) mcp.ToolHandler {
 	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		if err := s.authorizeSession(req.Session, upstreamName); err != nil {
+		if err := s.authorizeSession(req.Session, upstreamName, toolName); err != nil {
 			return nil, err
 		}
 		started := time.Now()
@@ -1095,7 +1112,7 @@ func (s *Service) registerPrompts(server *mcp.Server, upstreamName string, snaps
 		clone.Name = exposed
 		originalName := prompt.Name
 		server.AddPrompt(&clone, func(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
-			if err := s.authorizeSession(req.Session, upstreamName); err != nil {
+			if err := s.authorizeSession(req.Session, upstreamName, ""); err != nil {
 				return nil, err
 			}
 			params := *req.Params
@@ -1114,7 +1131,7 @@ func (s *Service) registerPrompts(server *mcp.Server, upstreamName string, snaps
 // skipped with a warning rather than silently re-routed.
 func (s *Service) registerResources(server *mcp.Server, upstreamName string, snapshot *catalog, owners map[string]string) {
 	read := func(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
-		if err := s.authorizeSession(req.Session, upstreamName); err != nil {
+		if err := s.authorizeSession(req.Session, upstreamName, ""); err != nil {
 			return nil, err
 		}
 		result, err := s.manager.ReadResource(ctx, upstreamName, req.Params)
@@ -1153,20 +1170,42 @@ func (s *Service) registerResources(server *mcp.Server, upstreamName string, sna
 // guessing a user path could slip past disallowed_user_paths. A session on a
 // virtual server is also held to the virtual server's current members, so
 // removing a member or the virtual server reaches open sessions too.
-func (s *Service) authorizeSession(session *mcp.ServerSession, upstreamName string) error {
+//
+// The session's API key allowlist applies the same way: toolName is checked
+// against it for tool calls, and "" (prompts and resources) needs the whole
+// server granted.
+func (s *Service) authorizeSession(session *mcp.ServerSession, upstreamName, toolName string) error {
 	sessionID := ""
 	if session != nil {
 		sessionID = session.ID()
 	}
-	return s.authorizeSessionID(sessionID, upstreamName)
+	return s.authorizeSessionID(sessionID, upstreamName, toolName)
 }
 
-func (s *Service) authorizeSessionID(sessionID, upstreamName string) error {
-	s.bindMu.Lock()
-	binding, ok := s.bindings[sessionID]
-	s.bindMu.Unlock()
+func (s *Service) authorizeSessionID(sessionID, upstreamName, toolName string) error {
+	binding, ok := s.binding(sessionID)
 	if !ok {
 		return fmt.Errorf("mcp server %q: %w", upstreamName, ErrServerNotVisible)
+	}
+	if err := s.authorizeServer(binding, upstreamName); err != nil {
+		return err
+	}
+	return binding.access.authorize(upstreamName, toolName)
+}
+
+func (s *Service) binding(sessionID string) (sessionBinding, bool) {
+	s.bindMu.Lock()
+	defer s.bindMu.Unlock()
+	binding, ok := s.bindings[sessionID]
+	return binding, ok
+}
+
+// authorizeServer reports whether a session may still reach upstreamName at
+// all: its user path, its virtual server's members, and its API key's MCP
+// allowlist.
+func (s *Service) authorizeServer(binding sessionBinding, upstreamName string) error {
+	if !binding.access.server(upstreamName) {
+		return fmt.Errorf("mcp server %q: %w", upstreamName, ErrNotAllowedForKey)
 	}
 	if _, visible := s.findVisibleServer(upstreamName, binding.userPath); !visible {
 		return fmt.Errorf("mcp server %q: %w", upstreamName, ErrServerNotVisible)
@@ -1178,16 +1217,18 @@ func (s *Service) authorizeSessionID(sessionID, upstreamName string) error {
 }
 
 // bindSession records the principal a new session was initialized under.
-func (s *Service) bindSession(sessionID, authKeyID, userPath, endpoint string, discovery bool, toolAliases map[string]string, server *mcp.Server) {
+func (s *Service) bindSession(sessionID string, scope requestScope, toolAliases map[string]string, server *mcp.Server) {
 	now := s.now()
+	endpoint := scope.bindingEndpoint()
 	s.bindMu.Lock()
 	s.bindings[sessionID] = sessionBinding{
-		authKeyID:          authKeyID,
-		userPath:           userPath,
+		authKeyID:          scope.authKeyID,
+		userPath:           scope.userPath,
+		access:             scope.access,
 		endpoint:           endpoint,
 		lastSeen:           now,
 		virtualIncarnation: s.endpointIncarnation(endpoint),
-		discovery:          discovery,
+		discovery:          scope.discovery,
 		toolAliases:        toolAliases,
 		server:             server,
 	}
