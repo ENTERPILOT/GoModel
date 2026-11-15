@@ -138,7 +138,7 @@
       disabled={vm.vmFormManaged}
       aria-label={m.models_target_effort()}
     >
-      <option value="">{m.models_target_effort_default()}</option>
+      <option value="">{m.models_target_effort_inherit()}</option>
       {#each REASONING_EFFORT_LEVELS as level (level)}
         <option value={level}>{level}</option>
       {/each}

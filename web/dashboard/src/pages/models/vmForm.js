@@ -511,8 +511,13 @@ export function buildVirtualModelSavePayload(form, originalSource, mode) {
       payload.slowdown = slowdown;
     }
   }
+  // A model left as its own only target saves as a policy, which has no
+  // targets: the effort still shown on that row becomes the policy's, as it
+  // beat the virtual model's own while the redirect existed.
   const reasoningEffort = String(
-    (form && form.reasoning_effort) || "",
+    (vmFormSelfOnly(form) && form.target_reasoning_effort) ||
+      (form && form.reasoning_effort) ||
+      "",
   ).trim();
   if (reasoningEffort) {
     payload.reasoning_effort = reasoningEffort;

@@ -188,6 +188,25 @@
   width: 88px;
 }
 
+/* On phones the row wraps: the model picker keeps a usable width and the
+   effort, weight, and remove controls drop to a second line when they no
+   longer fit beside it. */
+@media (max-width: 520px) {
+  .vm-target-row {
+    flex-wrap: wrap;
+  }
+
+  .vm-target-row .vm-target-model {
+    flex-basis: 160px;
+  }
+
+  .vm-target-row .vm-target-effort {
+    flex: 1 1 100px;
+    width: auto;
+    min-width: 0;
+  }
+}
+
 /* Default/effective summary on the left, the enable toggle on the right. */
 .vm-status-row {
   display: flex;

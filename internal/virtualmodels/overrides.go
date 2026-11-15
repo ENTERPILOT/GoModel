@@ -104,26 +104,37 @@ func (s *snapshot) redirectOverridesFor(resolution *core.RequestModelResolution,
 
 // targetEffort returns the effort entry forces on the target a path leaves it
 // by: the one chaining to next, the following redirect on the path, or, for
-// the last redirect (next is nil), the first declared one matching attempt.
+// the last redirect (next is nil), the concrete one attempt goes to. A target
+// naming attempt's provider beats one declared without a provider, which
+// matches the model on any provider: in [gpt-4o, azure/gpt-4o] the Azure
+// attempt must not take the first target's effort.
 func (s *snapshot) targetEffort(entry, next *redirectEntry, attempt core.ModelSelector) string {
 	if !entry.targetEfforts {
 		return ""
 	}
+	qualified := attempt.QualifiedModel()
+	anyProvider, found := "", false
 	for _, target := range entry.targets {
 		// Names are compared first; only a match pays for the lookup that
 		// tells a chained redirect from a concrete model of the same name.
-		if next != nil {
+		exact := target.qualified == qualified
+		switch {
+		case next != nil:
 			if target.qualified != next.vm.Source {
 				continue
 			}
-		} else if !targetMatches(target, attempt) {
+		case !exact && (found || target.selector.Provider != "" || target.selector.Model != attempt.Model):
 			continue
 		}
-		if inner, _ := s.chained(entry.vm.Source, target); inner == next {
+		if inner, _ := s.chained(entry.vm.Source, target); inner != next {
+			continue
+		}
+		if next != nil || exact {
 			return target.effort
 		}
+		anyProvider, found = target.effort, true
 	}
-	return ""
+	return anyProvider
 }
 
 // policyOverrides returns what the model policies force on attempt: the

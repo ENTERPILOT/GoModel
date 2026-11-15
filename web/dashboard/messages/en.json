@@ -844,7 +844,7 @@
   "models_weight": "weight",
   "models_weight_help": "Relative share of requests: 1 is a normal share, 2 gets twice as many, 3 three times (whole numbers, 1 or more).",
   "models_target_effort": "Target reasoning effort",
-  "models_target_effort_default": "default effort",
+  "models_target_effort_inherit": "inherit effort",
   "models_target_effort_help": "Reasoning effort for requests sent to this target. It beats this virtual model's reasoning effort override; an override on the target model itself still wins.",
   "models_remove_target": "Remove target",
   "models_move_target": "Drag to reorder (or focus and use the arrow keys)",

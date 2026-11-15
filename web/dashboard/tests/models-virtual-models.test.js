@@ -1334,6 +1334,28 @@ test("a single target with a reasoning effort is saved through the targets list"
   assert.deepEqual(toggled.targets, [{ model: "openai/gpt-4o", reasoning_effort: "high" }]);
 });
 
+test("removing the last fallback of a real model keeps its target effort as the policy's", () => {
+  const form = {
+    ...defaultVirtualModelForm(),
+    source: "openai/gpt-4o",
+    target_model: "openai/gpt-4o",
+    target_reasoning_effort: "high",
+    reasoning_effort: "low",
+    targets: [{ model: "groq/llama", weight: 1, reasoning_effort: "medium" }],
+    strategy: "failover",
+  };
+  form.targets = [];
+
+  const { payload, isRedirect } = buildVirtualModelSavePayload(form, "openai/gpt-4o", "edit");
+  assert.equal(isRedirect, false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "targets"), false);
+  // The effort still shown on the remaining row wins, as it did in the redirect.
+  assert.equal(payload.reasoning_effort, "high");
+
+  form.target_reasoning_effort = "";
+  assert.equal(buildVirtualModelSavePayload(form, "openai/gpt-4o", "edit").payload.reasoning_effort, "low");
+});
+
 test("the per-target effort shows with several targets or when a row already sets one", () => {
   const form = defaultVirtualModelForm();
   form.target_model = "openai/gpt-4o";
