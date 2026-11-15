@@ -53,6 +53,11 @@ Tarif standardmäßig. Im nativen Modus wird ein `store: false` aus Chat
 Completions als Geminis Opt-out pro Request weitergeleitet; der
 OpenAI-kompatible Endpunkt hat kein solches Feld.
 
+Im nativen AI-Studio-Modus beantwortet Geminis eigenes `countTokens`
+`/v1/messages/count_tokens`, die Zählung enthält also den Overhead pro Request,
+den Gemini 4 berechnet. Der Modus `openai_compatible`, Vertex und Requests, deren
+`countTokens`-Aufruf fehlschlägt, erhalten GoModels Schätzung.
+
 ## Base-URLs
 
 GoModel verwendet intern getrennte Basis-URLs für natives Gemini und die
@@ -146,12 +151,14 @@ Im nativen Modus wird `reasoning_effort` (oder `reasoning.effort`) in Geminis
 | Gemini 3 Pro, 3.1 Pro, 3.7 Flash, 3.8 Flash, Gemini 4 | `thinkingLevel: low` | `thinkingLevel` wie angegeben |
 
 Thinking lässt sich bei Gemini 3 und 4 nicht abschalten, und Pro-Modelle, 3.7
-und 3.8 Flash sowie Gemini 4 (`gemini-4-argon`, ...) lehnen `minimal` ab.
+und 3.8 Flash, Gemini 4 (`gemini-4-argon`, ...) sowie die `-latest`-Aliase lehnen `minimal` ab.
 GoModel sendet daher die niedrigste Stufe, die diese Modelle akzeptieren, statt
-Googles 400 weiterzugeben. Ein explizites `extra_body.google.thinking_config`
+Googles 400 weiterzugeben. Ebenso akzeptiert nur Gemini 4 Hydrogen `xhigh`,
+sodass jedes andere Gemini-Modell `high` erhält (bei Gemini 2.5 das Budget für
+`high`). Ein explizites `extra_body.google.thinking_config`
 wird unverändert weitergeleitet, wenn es `thinking_budget` oder
 `thinking_level` setzt; andernfalls ergänzt `reasoning_effort` darin seine
-Stufe oder sein Budget. Dieselbe Begrenzung gilt im Modus `openai_compatible`,
+Stufe oder sein Budget. Dieselbe Begrenzung gilt für Gemini 3 und 4 im Modus `openai_compatible`,
 in dem Googles Endpunkt `reasoning_effort` als Thinking-Stufe weiterleitet und
 dieselben Werte ablehnt.
 
