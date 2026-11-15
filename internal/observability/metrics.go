@@ -168,6 +168,8 @@ func NewPrometheusHooks() llmclient.Hooks {
 				streamLabel,
 			).Observe(info.Duration.Seconds())
 
+			recordCallerRequest(ctx, info, statusType)
+
 			// Record circuit breaker state (empty when the breaker is disabled)
 			if value, ok := circuitStateValue(info.CircuitState); ok {
 				CircuitBreakerState.WithLabelValues(info.Provider).Set(value)
@@ -226,4 +228,9 @@ func ResetMetrics() {
 	CircuitBreakerState.Reset()
 	BudgetAlertsFired.Reset()
 	BudgetAlertDeliveryFailures.Reset()
+	TokensTotal.Reset()
+	TokenDetailsTotal.Reset()
+	ProviderCostTotal.Reset()
+	BilledCostTotal.Reset()
+	CallerRequestsTotal.Reset()
 }
