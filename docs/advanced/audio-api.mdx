@@ -101,6 +101,11 @@ provider. The response `Content-Type` is the one
 the upstream returns, falling back to the type implied by `response_format` (for
 example `wav` → `audio/wav`).
 
+`voice` may also be an object with an `id`, the form OpenAI uses for
+[custom voices](https://developers.openai.com/api/docs/guides/custom-voices):
+`"voice": {"id": "voice_1234"}`. OpenAI-compatible providers receive the object
+unchanged; ElevenLabs, MiniMax, Xiaomi and audio.cpp use its `id` as the voice.
+
 Synthesized audio is **relayed as the provider produces it** — see
 [Streaming](#streaming).
 

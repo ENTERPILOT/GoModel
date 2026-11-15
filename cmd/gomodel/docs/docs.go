@@ -11209,6 +11209,7 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "voice": {
+                    "description": "Voice is a voice name or ID. It may be sent as a string (\"alloy\") or as\nan OpenAI custom-voice object ({\"id\": \"voice_1234\"}).",
                     "type": "string"
                 }
             }

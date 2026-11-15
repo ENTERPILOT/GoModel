@@ -95,6 +95,11 @@ await writeFile("speech.wav", Buffer.from(await speech.arrayBuffer()));
 响应的 `Content-Type` 使用上游返回的值；若上游未返回，则回退为 `response_format`
 所对应的类型（例如 `wav` → `audio/wav`）。
 
+`voice` 也可以是带 `id` 的对象，即 OpenAI
+[自定义声音](https://developers.openai.com/api/docs/guides/custom-voices)使用的形式：
+`"voice": {"id": "voice_1234"}`。兼容 OpenAI 的提供商会原样收到该对象；ElevenLabs、
+MiniMax、Xiaomi 和 audio.cpp 则将其 `id` 用作声音。
+
 合成的音频会**在提供商生成的同时进行中继**，详见[流式传输](#流式传输)。
 
 ## 语音转文本
