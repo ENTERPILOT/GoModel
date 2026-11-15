@@ -188,7 +188,10 @@ die Obergrenze als Limit, in dem Feld, das das Upstream-Modell erwartet. Ein
 Limit, das nur in einer Schreibweise gesendet wird, die der Endpunkt nicht
 kennt (`max_output_tokens` bei Chat Completions, `max_tokens` bei der Responses
 API), wird in das eigene Feld des Endpunkts übernommen, und ein Wert, der keine
-ganze Zahl ab 1 ist, wird durch die Obergrenze ersetzt. Die
+ganze Zahl ab 1 ist, wird durch die Obergrenze ersetzt. Ein Limit, dessen Name
+in anderer Groß-/Kleinschreibung steht (`MAX_TOKENS`), wird nicht upstream
+gesendet; liegt es innerhalb der Obergrenze, senkt es zuvor das Limit des
+Requests, sodass eine Obergrenze nie ein vom Client gesendetes Limit anhebt. Die
 Effort-Obergrenze senkt nur einen Effort, den der Request mitbringt, und fügt
 nie einen hinzu, weil ein hinzugefügter Effort Reasoning für Requests
 einschalten würde, die nicht danach gefragt haben. Ein Request ohne Effort
@@ -198,7 +201,8 @@ diese Stufe auch unter einer niedrigeren Obergrenze.
 
 Neben `reasoning_effort` und `reasoning.effort` prüft eine Effort-Obergrenze
 die providerspezifischen Reasoning-Steuerungen, die Upstreams erreichen, auf
-oberster Ebene des Bodys oder in `extra_body`:
+oberster Ebene des Bodys oder in `extra_body`, mit Namen in beliebiger
+Groß-/Kleinschreibung und in jedem Vorkommen eines wiederholten Members:
 
 | Steuerung                                                  | Gelesen von                               |
 | ---------------------------------------------------------- | ----------------------------------------- |

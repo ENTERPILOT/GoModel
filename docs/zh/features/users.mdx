@@ -141,9 +141,9 @@ users:
 | `/acme/eng/interns/bob` | `reasoning_effort: medium`                    | `low`                                    |
 | `/acme/sales`           | `max_tokens: 32000`                           | `8192`                                   |
 
-**上限**是上界。路径到 `/` 之间最低的上限生效，因此子节点可以收紧其组的上限，而在子节点上设置更高的上限不会改变任何东西。推理强度使用 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max` 这一刻度。token 上限覆盖 `max_tokens`、`max_completion_tokens` 和 `max_output_tokens`，并沿用客户端使用的写法；未设置上限的请求会以该上限作为其上限，写入上游模型所用的字段。仅以端点没有的写法发送的上限（Chat Completions 上的 `max_output_tokens`、Responses API 上的 `max_tokens`）会被移到该端点自己的字段中；不是大于等于 1 的整数的值会被替换为该上限。推理强度上限只会降低请求携带的推理强度，从不添加，因为添加推理强度会为没有要求推理的请求开启推理。因此，没有推理强度的请求按模型默认值运行；无法低于某个级别思考的模型（Gemini 3、OpenAI o 系列、OpenCode Zen）在更低的上限下仍会收到该级别。
+**上限**是上界。路径到 `/` 之间最低的上限生效，因此子节点可以收紧其组的上限，而在子节点上设置更高的上限不会改变任何东西。推理强度使用 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max` 这一刻度。token 上限覆盖 `max_tokens`、`max_completion_tokens` 和 `max_output_tokens`，并沿用客户端使用的写法；未设置上限的请求会以该上限作为其上限，写入上游模型所用的字段。仅以端点没有的写法发送的上限（Chat Completions 上的 `max_output_tokens`、Responses API 上的 `max_tokens`）会被移到该端点自己的字段中；不是大于等于 1 的整数的值会被替换为该上限。名称大小写不同的上限（`MAX_TOKENS`）不会发送到上游；若它在上限之内，会先降低请求的上限，因此上限绝不会提高客户端发送的限制。推理强度上限只会降低请求携带的推理强度，从不添加，因为添加推理强度会为没有要求推理的请求开启推理。因此，没有推理强度的请求按模型默认值运行；无法低于某个级别思考的模型（Gemini 3、OpenAI o 系列、OpenCode Zen）在更低的上限下仍会收到该级别。
 
-除了 `reasoning_effort` 和 `reasoning.effort`，推理强度上限还会检查会到达上游的提供商特定推理控制项，无论它们位于请求体顶层还是 `extra_body` 中：
+除了 `reasoning_effort` 和 `reasoning.effort`，推理强度上限还会检查会到达上游的提供商特定推理控制项，无论它们位于请求体顶层还是 `extra_body` 中，名称不区分大小写，重复成员的每一次出现都会检查：
 
 | 控制项                                                     | 读取方                                    |
 | ---------------------------------------------------------- | ----------------------------------------- |

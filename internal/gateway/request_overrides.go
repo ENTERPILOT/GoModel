@@ -121,7 +121,9 @@ func overridesError(err error) error {
 // a forced or defaulted value as they bound the client's. A forced effort
 // replaces every reasoning control the client sent, so those are dropped
 // before the parameters apply: a control the operator configures next to the
-// effort stays.
+// effort stays. The exception is Gemini's thinking budget and level in
+// extra_body.google.thinking_config, which the Gemini adapter reads in place
+// of the effort: the typed override wins over them too.
 func ChatRequestWithOverrides(req *core.ChatRequest, overrides requestparams.Overrides) (*core.ChatRequest, error) {
 	applied, err := requestparams.ApplyChat(chatRequestForEffort(req, overrides.ReasoningEffort), overrides.Defaults, overrides.Params)
 	if err != nil {

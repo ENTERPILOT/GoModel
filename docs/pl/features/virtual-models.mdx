@@ -89,9 +89,13 @@ virtual_models:
 Nadpisanie zastępuje `reasoning.effort`, płaskie pole `reasoning_effort` oraz
 każde [sterowanie reasoningiem specyficzne dla providera](/pl/features/users#polityka-requestów),
 które wysłał klient (`thinking`, `enable_thinking`, `thinking_budget`, `think`,
-przełączniki reasoningu w `chat_template_kwargs`), i działa także wtedy, gdy
-klient nie wysłał żadnego effort. Sterowanie, które model wirtualny ustawia we
-własnych `params`, zostaje. GoModel tłumaczy effort następnie na parametr
+przełączniki reasoningu w `chat_template_kwargs`, te same sterowania w
+`extra_body` oraz budżet i poziom w `extra_body.google.thinking_config`
+Gemini), i działa także wtedy, gdy klient nie wysłał żadnego effort.
+Sterowanie, które model wirtualny ustawia we własnych `params`, zostaje, z
+jednym wyjątkiem: Gemini czyta budżet lub poziom thinking z
+`extra_body.google.thinking_config` zamiast effortu, więc nadpisanie usuwa je
+także stamtąd. GoModel tłumaczy effort następnie na parametr
 reasoning danego providera, tak samo jak wartości klienta.
 
 Dla każdej próby wygrywa wartość skonfigurowana najgłębiej. Nadpisanie

@@ -225,8 +225,8 @@ func openAIEffort(sent map[string]any) any {
 func openAILimit(t *testing.T, sent map[string]any) int {
 	t.Helper()
 	for _, key := range []string{"max_output_tokens", "max_completion_tokens", "max_tokens"} {
-		if value, ok := sent[key].(float64); ok {
-			return int(value)
+		if _, ok := sent[key]; ok {
+			return number(t, sent, key)
 		}
 	}
 	require.Failf(t, "no output token limit upstream", "%v", sent)

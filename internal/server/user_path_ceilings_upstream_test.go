@@ -1,6 +1,7 @@
 package server
 
 import (
+	"math"
 	"net/http"
 	"testing"
 
@@ -29,6 +30,7 @@ func number(t *testing.T, body map[string]any, key string) int {
 	t.Helper()
 	value, ok := body[key].(float64)
 	require.True(t, ok, "%s missing from upstream body %v", key, body)
+	require.Equal(t, math.Trunc(value), value, "%s is not a whole number in upstream body %v", key, body)
 	return int(value)
 }
 

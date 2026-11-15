@@ -438,3 +438,33 @@ func TestUnknownJSONFieldsRespelledNamesOtherLetterCases(t *testing.T) {
 	assert.Nil(t, fields.Respelled())
 	assert.Nil(t, UnknownJSONFields{}.Respelled("max_tokens"))
 }
+
+func TestUnknownJSONFieldsRewrittenVisitsEveryOccurrence(t *testing.T) {
+	fields, err := extractUnknownJSONFields([]byte(`{"model":"m","a":1,"b": {"x":1},"a":3,"c":null}`), "model")
+	require.NoError(t, err)
+
+	var seen []string
+	rewritten := fields.Rewritten(func(name string, value json.RawMessage) json.RawMessage {
+		seen = append(seen, name+"="+string(value))
+		switch name {
+		case "a":
+			return nil
+		case "c":
+			return json.RawMessage(`0`)
+		}
+		return value
+	})
+	assert.Equal(t, []string{"a=1", `b={"x":1}`, "a=3", "c=null"}, seen)
+	body, err := marshalWithUnknownJSONFields(struct{}{}, rewritten)
+	require.NoError(t, err)
+	assert.Equal(t, `{"b":{"x":1},"c":0}`, string(body), "kept members retain their bytes")
+
+	same := fields.Rewritten(func(_ string, value json.RawMessage) json.RawMessage { return value })
+	assert.Equal(t, fields, same, "a rewrite that changes nothing returns the fields as they are")
+	assert.True(t, fields.Rewritten(func(string, json.RawMessage) json.RawMessage { return nil }).IsEmpty())
+	assert.True(t, UnknownJSONFields{}.Rewritten(func(string, json.RawMessage) json.RawMessage { return nil }).IsEmpty())
+
+	notObject, changed := RewriteJSONObject(json.RawMessage(`[1]`), func(string, json.RawMessage) json.RawMessage { return nil })
+	assert.False(t, changed)
+	assert.Equal(t, `[1]`, string(notObject))
+}

@@ -456,14 +456,18 @@ func TestUserPathDefaultModelThroughTheIngressChain(t *testing.T) {
 				require.Len(t, f.provider.responsesRequests, 1)
 				sent := f.provider.responsesRequests[0]
 				assert.Equal(t, "gpt-5", sent.Model)
+				require.NotNil(t, sent.MaxOutputTokens)
 				assert.Equal(t, 4096, *sent.MaxOutputTokens)
+				require.NotNil(t, sent.Reasoning)
 				assert.Equal(t, "medium", sent.Reasoning.Effort)
 				return
 			}
 			require.Len(t, f.provider.chatRequests, 1)
 			sent := f.provider.chatRequests[0]
 			assert.Equal(t, "gpt-5", sent.Model)
+			require.NotNil(t, sent.MaxTokens)
 			assert.Equal(t, 4096, *sent.MaxTokens)
+			require.NotNil(t, sent.Reasoning)
 			assert.Equal(t, "medium", sent.Reasoning.Effort)
 		})
 	}

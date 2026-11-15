@@ -80,6 +80,17 @@ func TestChatRequestWithCeilingsReasoningEffort(t *testing.T) {
 		{name: "chat template reasoning switch", extras: map[string]string{"chat_template_kwargs": `{"enable_thinking":true}`}, ceiling: "low", want: "low"},
 		{name: "chat template effort within the ceiling", extras: map[string]string{"chat_template_kwargs": `{"reasoning_effort":"low","enable_thinking":false}`}, ceiling: "low", unchanged: true},
 		{name: "controls inside extra_body count too", extras: map[string]string{"extra_body": `{"enable_thinking":true}`}, ceiling: "low", want: "low"},
+		{name: "a re-cased flat effort is the effort", raw: `{"REASONING_EFFORT":"max"}`, ceiling: "low", want: "low"},
+		{name: "a re-cased reasoning object the decoder kept", reasoning: &core.Reasoning{Effort: "low"}, raw: `{"Reasoning":{"effort":"max"}}`, ceiling: "low", want: "low"},
+		{name: "a re-cased reasoning object within the ceiling is kept", reasoning: &core.Reasoning{Effort: "low"}, raw: `{"Reasoning":{"effort":"low","summary":"auto"}}`, ceiling: "medium", unchanged: true},
+		{name: "a re-cased control is the control", raw: `{"Enable_Thinking":true}`, ceiling: "low", want: "low"},
+		{name: "a name that only Unicode case folding matches", raw: `{"reaſoning_effort":"max","thinKing_budget":9}`, ceiling: "low", want: "low"},
+		{name: "a re-cased control within the ceiling is kept", raw: `{"Think":"low","THINKING":{"type":"disabled"}}`, ceiling: "low", unchanged: true},
+		{name: "a re-cased type cannot hide behind a disabled one", raw: `{"thinking":{"Type":"enabled","type":"disabled"}}`, ceiling: "none", want: "none"},
+		{name: "re-cased template switches", raw: `{"Chat_Template_Kwargs":{"Enable_Thinking":true}}`, ceiling: "low", want: "low"},
+		{name: "re-cased extra_body members", raw: `{"Extra_Body":{"Thinking_Budget":9}}`, ceiling: "low", want: "low"},
+		{name: "a repeated control is checked in every occurrence", raw: `{"extra_body":{"think":"max","think":"low"},"chat_template_kwargs":{"enable_thinking":true,"enable_thinking":false}}`, ceiling: "low", want: "low"},
+		{name: "a repeated gemini thinking config is checked in every occurrence", raw: `{"extra_body":{"google":{"thinking_config":{"thinking_budget":9},"thinking_config":{"thinking_budget":0}}}}`, ceiling: "low", want: "low"},
 		{name: "no ceiling keeps any effort", reasoning: &core.Reasoning{Effort: "max"}, unchanged: true},
 	}
 	for _, tt := range tests {
@@ -105,6 +116,7 @@ func TestChatRequestWithCeilingsReasoningEffort(t *testing.T) {
 			for _, field := range append([]string{chatTemplateKwargsField}, reasoningControlFields...) {
 				assert.Nil(t, capped.ExtraFields.Lookup(field), "no other spelling may outbid the ceiling")
 			}
+			assert.Empty(t, capped.ExtraFields.Respelled(append([]string{"reasoning", "reasoning_effort", "extra_body", chatTemplateKwargsField}, reasoningControlFields...)...), "nor may one in another letter case")
 			assert.Equal(t, tt.reasoning, req.Reasoning, "the client's request must not be mutated")
 		})
 	}

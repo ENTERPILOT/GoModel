@@ -257,6 +257,42 @@ func TestCapResponsesTokens(t *testing.T) {
 	}
 }
 
+// A limit spelled in another letter case is dropped from a capped request,
+// and the lowest one within the cap is the limit the request keeps: a cap
+// never raises what the client asked for.
+func TestCapTokensKeepsTheLowestRecasedLimit(t *testing.T) {
+	tests := []struct {
+		name      string
+		maxTokens *int
+		extras    map[string]json.RawMessage
+		want      int
+	}{
+		{name: "review request: a re-cased limit below the cap", extras: map[string]json.RawMessage{"MAX_COMPLETION_TOKENS": json.RawMessage(`20`)}, want: 20},
+		{name: "a re-cased limit above the cap", extras: map[string]json.RawMessage{"MAX_COMPLETION_TOKENS": json.RawMessage(`9000`)}, want: 100},
+		{name: "a re-cased limit no adapter takes", extras: map[string]json.RawMessage{"Max_Tokens": json.RawMessage(`0`)}, want: 100},
+		{name: "a re-cased limit below the typed one", maxTokens: new(50), extras: map[string]json.RawMessage{"Max_Tokens": json.RawMessage(`20`)}, want: 20},
+		{name: "a re-cased limit above the typed one", maxTokens: new(50), extras: map[string]json.RawMessage{"Max_Output_Tokens": json.RawMessage(`80`)}, want: 50},
+		{name: "the lowest of several", extras: map[string]json.RawMessage{"MAX_TOKENS": json.RawMessage(`30`), "Max_Completion_Tokens": json.RawMessage(`20`)}, want: 20},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fields := core.UnknownJSONFieldsFromMap(tt.extras)
+
+			chat, err := CapChatTokens(&core.ChatRequest{Model: "m", MaxTokens: tt.maxTokens, ExtraFields: fields}, 100)
+			require.NoError(t, err)
+			require.NotNil(t, chat.MaxTokens)
+			assert.Equal(t, tt.want, *chat.MaxTokens)
+			assert.True(t, chat.ExtraFields.IsEmpty(), "no re-cased limit is left for an upstream to read")
+
+			responses, err := CapResponsesTokens(&core.ResponsesRequest{Model: "m", MaxOutputTokens: tt.maxTokens, ExtraFields: fields}, 100)
+			require.NoError(t, err)
+			require.NotNil(t, responses.MaxOutputTokens)
+			assert.Equal(t, tt.want, *responses.MaxOutputTokens)
+			assert.True(t, responses.ExtraFields.IsEmpty(), "no re-cased limit is left for an upstream to read")
+		})
+	}
+}
+
 func clonePtr(value *int) *int {
 	if value == nil {
 		return nil

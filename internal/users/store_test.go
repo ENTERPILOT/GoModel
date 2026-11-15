@@ -123,6 +123,7 @@ func TestSQLStore_AddsRequestPolicyColumnsToAnExistingTable(t *testing.T) {
 		require.NoError(t, store.Upsert(ctx, User{UserPath: "/acme", MaxReasoningEffort: "low", MaxOutputTokens: 256, CreatedAt: now, UpdatedAt: now}))
 		rows, err = store.List(ctx)
 		require.NoError(t, err)
+		require.Len(t, rows, 1)
 		require.Equal(t, "low", rows[0].MaxReasoningEffort)
 		require.Equal(t, 256, rows[0].MaxOutputTokens)
 	})

@@ -178,7 +178,10 @@ client used, and a request that sends no limit gets the ceiling as its limit,
 in the field the upstream model takes. A limit sent only in a spelling the
 endpoint does not have (`max_output_tokens` on Chat Completions, `max_tokens`
 on the Responses API) is moved to the endpoint's own field, and a value that is
-not a whole number of at least 1 is replaced by the ceiling. The effort ceiling only lowers an effort
+not a whole number of at least 1 is replaced by the ceiling. A limit whose name
+is in another letter case (`MAX_TOKENS`) is not sent upstream; when it is within
+the ceiling it lowers the request's limit first, so a ceiling never raises a
+limit the client sent. The effort ceiling only lowers an effort
 the request sends and never adds one, because adding an effort would switch
 reasoning on for requests that did not ask for it. A request without an effort
 therefore runs at the model's default, and a model that cannot think less than
@@ -187,7 +190,8 @@ a lower ceiling.
 
 Besides `reasoning_effort` and `reasoning.effort`, an effort ceiling checks the
 provider-specific reasoning controls that reach upstreams, at the top level of
-the body or inside `extra_body`:
+the body or inside `extra_body`, with names in any letter case and in every
+occurrence of a repeated member:
 
 | Control                                                    | Read by                                   |
 | ---------------------------------------------------------- | ----------------------------------------- |

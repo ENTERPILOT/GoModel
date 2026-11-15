@@ -339,6 +339,28 @@ func TestForcedEffortReplacesClientReasoningControls(t *testing.T) {
 	assert.JSONEq(t, `false`, string(client.Lookup("enable_thinking")), "client request must not be mutated")
 }
 
+// A forced effort replaces the client's controls in any letter case and in
+// every occurrence of a repeated member. Of the controls the virtual model's
+// own params set, it replaces the ones Gemini reads in place of the effort,
+// the thinking budget and level; the others stay.
+func TestForcedEffortReplacesRecasedAndRepeatedControls(t *testing.T) {
+	client := rawFields(t, `{"Reasoning":{"effort":"max"},"THINK":"high","extra_body":{"Thinking_Budget":9},"extra_body":{"keep":1},"seed":7}`)
+	overrides := requestparams.Overrides{
+		ReasoningEffort: "low",
+		Params: requestparams.Set{
+			"extra_body":      json.RawMessage(`{"google":{"thinking_config":{"thinking_budget":9,"include_thoughts":true}}}`),
+			"enable_thinking": json.RawMessage(`true`),
+		},
+	}
+
+	chat, err := ChatRequestWithOverrides(&core.ChatRequest{Model: "m", Reasoning: &core.Reasoning{Effort: "max"}, ExtraFields: client}, overrides)
+	require.NoError(t, err)
+
+	body, err := json.Marshal(chat)
+	require.NoError(t, err)
+	assert.Equal(t, `{"model":"m","messages":null,"reasoning":{"effort":"low"},"seed":7,"enable_thinking":true,"extra_body":{"google":{"thinking_config":{"include_thoughts":true}},"keep":1}}`, string(body))
+}
+
 // An effort the gateway replaces, forced or lowered to a ceiling, keeps the
 // reasoning summary the client asked for, on chat as on Responses.
 func TestChatEffortReplacementKeepsClientSummary(t *testing.T) {

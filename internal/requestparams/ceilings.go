@@ -47,12 +47,14 @@ func (c Ceilings) Tighten(other Ceilings) Ceilings {
 // that is within limit (chat has no such member, so alone it would limit
 // nothing upstream), limit otherwise. Every spelling the request does carry
 // is lowered to limit in place. The request is never mutated: the result is
-// req itself when it is already within the limit.
+// req itself when it is already within the limit and spells no limit in
+// another letter case.
 func CapChatTokens(req *core.ChatRequest, limit int) (*core.ChatRequest, error) {
 	if req == nil || limit <= 0 {
 		return req, nil
 	}
 	if respelled := req.ExtraFields.Respelled(tokenLimitSpellings...); len(respelled) > 0 {
+		limit = lowestTokenLimit(req.ExtraFields, limit, respelled)
 		cloned := *req
 		cloned.ExtraFields = req.ExtraFields.Without(respelled...)
 		req = &cloned
@@ -77,6 +79,7 @@ func CapResponsesTokens(req *core.ResponsesRequest, limit int) (*core.ResponsesR
 		return req, nil
 	}
 	if respelled := req.ExtraFields.Respelled(tokenLimitSpellings...); len(respelled) > 0 {
+		limit = lowestTokenLimit(req.ExtraFields, limit, respelled)
 		cloned := *req
 		cloned.ExtraFields = req.ExtraFields.Without(respelled...)
 		req = &cloned
@@ -94,9 +97,10 @@ func CapResponsesTokens(req *core.ResponsesRequest, limit int) (*core.ResponsesR
 }
 
 // tokenLimitSpellings are the members a cap bounds. One spelled in another
-// letter case (MAX_TOKENS) is dropped from a capped request: the gateway
-// already read it as the typed limit where it is one, and an upstream that
-// matches names case-insensitively would read it over the capped member.
+// letter case (MAX_TOKENS) is dropped from a capped request, since an
+// upstream that matches names case-insensitively would read it over the
+// capped member. A limit it carries within the cap tightens the cap for the
+// request first, so dropping it never raises the limit the client asked for.
 var tokenLimitSpellings = slices.Collect(maps.Keys(tokenLimitKeys))
 
 // carriesTokenLimit reports whether fields set key to anything but null,

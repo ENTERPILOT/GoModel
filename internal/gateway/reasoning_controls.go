@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/goccy/go-json"
+	"github.com/tidwall/gjson"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -36,60 +38,151 @@ var templateControlFields = []string{"enable_thinking", "thinking", "reasoning_e
 // as exceeding, so the control is replaced by the ceiling, never forwarded.
 const unrankedEffort = "?"
 
+// effortReader appends the effort one control's value sets to efforts.
+type effortReader func(efforts []string, raw json.RawMessage) []string
+
+// controls names the members of one JSON object that set reasoning. Names
+// are lower-case and matched in any letter case (see foldName): the
+// gateway's decoder and Gemini's read a re-cased member as the member
+// itself, and so does every upstream that matches names the way Go does. A
+// repeated member counts once per occurrence, since decoders differ in which
+// one they keep, or merge them.
+type controls struct {
+	// reader returns how to read the named member's effort, or nil when the
+	// member sets none.
+	reader func(name string) effortReader
+	// objects are the members that hold further controls.
+	objects map[string]*controls
+}
+
+var (
+	// googleControls are extra_body.google.thinking_config's budget and level.
+	googleControls = &controls{objects: map[string]*controls{
+		"thinking_config": {reader: func(name string) effortReader {
+			if isGoogleThinkingEffortMember(name) {
+				return appendControlEffort
+			}
+			return nil
+		}},
+	}}
+	templateControls = &controls{reader: readers(appendControlEffort, templateControlFields...)}
+
+	// clientControls are every reasoning control a request carries next to
+	// the typed reasoning.effort. A re-cased "reasoning" is one of them: the
+	// decoder reads it into the typed field and keeps the member too.
+	clientControls = &controls{
+		reader: func(name string) effortReader {
+			if name == "reasoning" {
+				return appendReasoningObjectEffort
+			}
+			return bodyControls(name)
+		},
+		objects: map[string]*controls{
+			chatTemplateKwargsField: templateControls,
+			"extra_body": {reader: bodyControls, objects: map[string]*controls{
+				chatTemplateKwargsField: templateControls,
+				"google":                googleControls,
+			}},
+		},
+	}
+	// effortSpellings are the controls an adapter reads in place of
+	// reasoning.effort: the flat reasoning_effort and Gemini's budget and level.
+	effortSpellings = &controls{
+		reader: readers(appendFlatEffort, flatReasoningEffortField),
+		objects: map[string]*controls{
+			"extra_body": {objects: map[string]*controls{"google": googleControls}},
+		},
+	}
+)
+
+// bodyControls reads the flat reasoning_effort and the provider-specific
+// controls, at the top level of the body or inside extra_body.
+func bodyControls(name string) effortReader {
+	if name == flatReasoningEffortField {
+		return appendFlatEffort
+	}
+	return readers(appendControlEffort, reasoningControlFields...)(name)
+}
+
+func readers(read effortReader, names ...string) func(string) effortReader {
+	return func(name string) effortReader {
+		if slices.Contains(names, name) {
+			return read
+		}
+		return nil
+	}
+}
+
+// without returns the rewrite that drops every control from one object, at
+// any depth, and appends the effort each one set to efforts when it is not
+// nil. An object the rewrite leaves empty is dropped; a member that should
+// hold controls but is not an object carries none and stays.
+func (c *controls) without(efforts *[]string) func(string, json.RawMessage) json.RawMessage {
+	return func(name string, value json.RawMessage) json.RawMessage {
+		name = foldName(name)
+		if c.reader != nil {
+			if read := c.reader(name); read != nil {
+				if efforts != nil {
+					*efforts = read(*efforts, value)
+				}
+				return nil
+			}
+		}
+		nested, ok := c.objects[name]
+		if !ok {
+			return value
+		}
+		rewritten, changed := core.RewriteJSONObject(value, nested.without(efforts))
+		if changed && string(rewritten) == "{}" {
+			return nil
+		}
+		return rewritten
+	}
+}
+
+// foldName returns the lower-case name every spelling that
+// strings.EqualFold matches to it shares, so the names Go's decoders take
+// for one member compare equal.
+func foldName(name string) string {
+	return strings.ToLower(strings.Map(func(r rune) rune {
+		lowest := r
+		for folded := unicode.SimpleFold(r); folded != r; folded = unicode.SimpleFold(folded) {
+			lowest = min(lowest, folded)
+		}
+		return lowest
+	}, name))
+}
+
 // requestedEfforts lists every reasoning effort a request sets, in any
-// spelling and any occurrence of a repeated member. Each is a level of the
-// common scale or unrankedEffort.
+// spelling, letter case and occurrence of a repeated member. Each is a level
+// of the common scale or unrankedEffort.
 func requestedEfforts(reasoning *core.Reasoning, fields core.UnknownJSONFields) []string {
 	var efforts []string
 	if reasoning != nil && strings.TrimSpace(reasoning.Effort) != "" {
 		efforts = append(efforts, reasoning.Effort)
 	}
-	efforts = append(efforts, memberEfforts(fields.LookupAll)...)
-	for _, raw := range fields.LookupAll("extra_body") {
-		body, _ := objectOf(raw)
-		efforts = append(efforts, memberEfforts(mapLookup(body))...)
-		efforts = append(efforts, googleThinkingEfforts(body)...)
-	}
+	fields.Rewritten(clientControls.without(&efforts))
 	return efforts
 }
 
-// memberEfforts reads the flat reasoning_effort and every provider-specific
-// control among one object's members.
-func memberEfforts(lookup func(string) []json.RawMessage) []string {
-	var efforts []string
-	for _, raw := range lookup(flatReasoningEffortField) {
-		if isSet(raw) {
-			efforts = append(efforts, stringOrUnranked(raw))
-		}
+// appendFlatEffort reads a flat reasoning_effort: a level, or a value the
+// scale cannot place.
+func appendFlatEffort(efforts []string, raw json.RawMessage) []string {
+	if !isSet(raw) {
+		return efforts
 	}
-	for _, field := range reasoningControlFields {
-		for _, raw := range lookup(field) {
-			efforts = appendControlEffort(efforts, raw)
-		}
-	}
-	for _, raw := range lookup(chatTemplateKwargsField) {
-		kwargs, _ := objectOf(raw)
-		for _, field := range templateControlFields {
-			efforts = appendControlEffort(efforts, kwargs[field])
-		}
-	}
-	return efforts
+	return append(efforts, stringOrUnranked(raw))
 }
 
-// googleThinkingEfforts reads extra_body.google.thinking_config. Gemini
-// decodes both object names case-insensitively, so they are matched that
-// way, and every member that names a thinking budget or level counts.
-func googleThinkingEfforts(body map[string]json.RawMessage) []string {
-	var efforts []string
-	for _, google := range foldedObjects(body, "google") {
-		for _, thinking := range foldedObjects(google, "thinking_config") {
-			for key, raw := range thinking {
-				if isGoogleThinkingEffortMember(key) {
-					efforts = appendControlEffort(efforts, raw)
-				}
-			}
+// appendReasoningObjectEffort reads every effort member of a reasoning
+// object.
+func appendReasoningObjectEffort(efforts []string, raw json.RawMessage) []string {
+	gjson.ParseBytes(raw).ForEach(func(key, value gjson.Result) bool {
+		if strings.EqualFold(key.String(), "effort") {
+			efforts = appendFlatEffort(efforts, json.RawMessage(value.Raw))
 		}
-	}
+		return true
+	})
 	return efforts
 }
 
@@ -106,15 +199,24 @@ func appendControlEffort(efforts []string, raw json.RawMessage) []string {
 		return append(efforts, "none")
 	case raw[0] == '"':
 		return append(efforts, stringOrUnranked(raw))
-	case raw[0] == '{':
-		var object struct {
-			Type string `json:"type"`
-		}
-		if json.Unmarshal(raw, &object) == nil && strings.EqualFold(strings.TrimSpace(object.Type), "disabled") {
-			return append(efforts, "none")
-		}
+	case raw[0] == '{' && isDisabled(raw):
+		return append(efforts, "none")
 	}
 	return append(efforts, unrankedEffort)
+}
+
+// isDisabled reports whether a control object's type is "disabled", in every
+// occurrence and letter case of the member.
+func isDisabled(object json.RawMessage) bool {
+	disabled := false
+	gjson.ParseBytes(object).ForEach(func(key, value gjson.Result) bool {
+		if strings.EqualFold(key.String(), "type") {
+			disabled = value.Type == gjson.String && strings.EqualFold(strings.TrimSpace(value.String()), "disabled")
+			return disabled
+		}
+		return true
+	})
+	return disabled
 }
 
 // isZero reports whether raw is the number zero in any JSON spelling: 0, -0,
@@ -126,46 +228,23 @@ func isZero(raw json.RawMessage) bool {
 
 // withoutClientEffort drops the effort spellings a forced effort replaces
 // once the parameter sets are applied: the flat reasoning_effort and Gemini's
-// thinking budget and level, so no provider reads them instead of the forced
-// reasoning.effort. Provider controls such as chat_template_kwargs stay:
-// the client's are already gone (see withoutReasoningControls), so the ones
-// left are those a virtual model's own params set next to its effort.
+// thinking budget and level, whoever set them, so no provider reads them
+// instead of the forced reasoning.effort. The other provider controls stay:
+// the client's reasoning controls are already gone (see
+// withoutReasoningControls), so the ones left are those a virtual model's
+// own params set next to its effort.
 func withoutClientEffort(fields core.UnknownJSONFields) core.UnknownJSONFields {
-	fields = fields.Without(flatReasoningEffortField)
-	return rewriteMember(fields, "extra_body", withoutGoogleThinkingEffort)
+	return fields.Rewritten(effortSpellings.without(nil))
 }
 
-// withoutReasoningControls drops every reasoning control a request carries:
-// under an effort ceiling, where what is left upstream is the ceiling the
-// gateway writes to reasoning.effort, and from the client's request before a
-// forced effort and its parameter sets apply. Other members, such as Gemini's
-// include_thoughts or unrelated chat template switches, stay.
+// withoutReasoningControls drops every reasoning control a request carries,
+// in any letter case and every occurrence: under an effort ceiling, where
+// what is left upstream is the ceiling the gateway writes to
+// reasoning.effort, and from the client's request before a forced effort and
+// its parameter sets apply. Members that set no effort stay, the client's
+// included: Gemini's include_thoughts, unrelated chat template switches.
 func withoutReasoningControls(fields core.UnknownJSONFields) core.UnknownJSONFields {
-	fields = fields.Without(append([]string{flatReasoningEffortField}, reasoningControlFields...)...)
-	fields = rewriteMember(fields, chatTemplateKwargsField, withoutTemplateControls)
-	return rewriteMember(fields, "extra_body", withoutExtraBodyControls)
-}
-
-func withoutTemplateControls(kwargs map[string]json.RawMessage) bool {
-	return deleteMembers(kwargs, func(key string) bool { return slices.Contains(templateControlFields, key) })
-}
-
-func withoutExtraBodyControls(body map[string]json.RawMessage) bool {
-	changed := deleteMembers(body, func(key string) bool {
-		return key == flatReasoningEffortField || slices.Contains(reasoningControlFields, key)
-	})
-	changed = rewriteChildren(body, chatTemplateKwargsField, false, withoutTemplateControls) || changed
-	return withoutGoogleThinkingEffort(body) || changed
-}
-
-// withoutGoogleThinkingEffort drops the budget and level from
-// extra_body.google.thinking_config, matching names as Gemini decodes them.
-func withoutGoogleThinkingEffort(body map[string]json.RawMessage) bool {
-	return rewriteChildren(body, "google", true, func(google map[string]json.RawMessage) bool {
-		return rewriteChildren(google, "thinking_config", true, func(thinking map[string]json.RawMessage) bool {
-			return deleteMembers(thinking, isGoogleThinkingEffortMember)
-		})
-	})
+	return fields.Rewritten(clientControls.without(nil))
 }
 
 // isGoogleThinkingEffortMember reports whether a thinking_config member sets
@@ -174,110 +253,6 @@ func withoutGoogleThinkingEffort(body map[string]json.RawMessage) bool {
 func isGoogleThinkingEffortMember(key string) bool {
 	folded := strings.ReplaceAll(strings.ToLower(key), "_", "")
 	return folded == "thinkingbudget" || folded == "thinkinglevel"
-}
-
-// rewriteMember applies rewrite to the object stored under key. When it
-// changes anything, or the member is repeated, every occurrence is replaced
-// by the rewritten last one (the one most decoders keep), and an object left
-// empty is dropped. A value that is not an object is left alone.
-func rewriteMember(fields core.UnknownJSONFields, key string, rewrite func(map[string]json.RawMessage) bool) core.UnknownJSONFields {
-	values := fields.LookupAll(key)
-	if len(values) == 0 {
-		return fields
-	}
-	changed := len(values) > 1
-	for _, raw := range values[:len(values)-1] {
-		object, _ := objectOf(raw)
-		changed = rewrite(object) || changed
-	}
-	last, ok := objectOf(values[len(values)-1])
-	if !ok {
-		return fields
-	}
-	if !rewrite(last) && !changed {
-		return fields
-	}
-	rest := fields.Without(key)
-	if len(last) == 0 {
-		return rest
-	}
-	encoded, err := json.Marshal(last)
-	if err != nil {
-		return fields
-	}
-	merged, err := core.MergeUnknownJSONFields(rest, map[string]json.RawMessage{key: encoded})
-	if err != nil {
-		return fields
-	}
-	return merged
-}
-
-// rewriteChildren applies rewrite to each object member of parent named name
-// (case-insensitively when fold is set), storing the result back and
-// dropping objects left empty. It reports whether anything changed.
-func rewriteChildren(parent map[string]json.RawMessage, name string, fold bool, rewrite func(map[string]json.RawMessage) bool) bool {
-	changed := false
-	for key, raw := range parent {
-		if key != name && (!fold || !strings.EqualFold(key, name)) {
-			continue
-		}
-		child, ok := objectOf(raw)
-		if !ok || !rewrite(child) {
-			continue
-		}
-		changed = true
-		if len(child) == 0 {
-			delete(parent, key)
-			continue
-		}
-		if encoded, err := json.Marshal(child); err == nil {
-			parent[key] = encoded
-		}
-	}
-	return changed
-}
-
-func deleteMembers(object map[string]json.RawMessage, match func(string) bool) bool {
-	changed := false
-	for key := range object {
-		if match(key) {
-			delete(object, key)
-			changed = true
-		}
-	}
-	return changed
-}
-
-// foldedObjects returns the object members of parent whose name matches name
-// case-insensitively, as Go's JSON decoders match struct fields.
-func foldedObjects(parent map[string]json.RawMessage, name string) []map[string]json.RawMessage {
-	var objects []map[string]json.RawMessage
-	for key, raw := range parent {
-		if !strings.EqualFold(key, name) {
-			continue
-		}
-		if object, ok := objectOf(raw); ok {
-			objects = append(objects, object)
-		}
-	}
-	return objects
-}
-
-func objectOf(raw json.RawMessage) (map[string]json.RawMessage, bool) {
-	var object map[string]json.RawMessage
-	if !isSet(raw) || json.Unmarshal(raw, &object) != nil || object == nil {
-		return nil, false
-	}
-	return object, true
-}
-
-func mapLookup(object map[string]json.RawMessage) func(string) []json.RawMessage {
-	return func(key string) []json.RawMessage {
-		if raw, ok := object[key]; ok {
-			return []json.RawMessage{raw}
-		}
-		return nil
-	}
 }
 
 func isSet(raw json.RawMessage) bool {

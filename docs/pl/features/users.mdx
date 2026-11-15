@@ -178,7 +178,10 @@ request bez limitu dostaje limit jako swój limit, w polu, którego oczekuje
 model upstream. Limit wysłany tylko w pisowni, której endpoint nie ma
 (`max_output_tokens` w Chat Completions, `max_tokens` w Responses API), jest
 przenoszony do własnego pola endpointu, a wartość, która nie jest liczbą
-całkowitą równą co najmniej 1, jest zastępowana limitem. Limit effortu tylko
+całkowitą równą co najmniej 1, jest zastępowana limitem. Limit, którego nazwa
+ma inną wielkość liter (`MAX_TOKENS`), nie jest wysyłany do upstreamu; jeśli
+mieści się w limicie, najpierw obniża limit requestu, więc limit nigdy nie
+podnosi wartości wysłanej przez klienta. Limit effortu tylko
 obniża effort, który request niesie, i
 nigdy go nie dodaje, bo dodany effort włączyłby reasoning w requestach, które o
 to nie prosiły. Request bez effortu działa więc z domyślnym ustawieniem modelu,
@@ -187,7 +190,8 @@ OpenAI seria o, OpenCode Zen), dostaje ten poziom także przy niższym limicie.
 
 Oprócz `reasoning_effort` i `reasoning.effort` limit effortu sprawdza
 specyficzne dla providerów sterowania reasoningiem, które docierają do
-upstreamów, na najwyższym poziomie body albo w `extra_body`:
+upstreamów, na najwyższym poziomie body albo w `extra_body`, z nazwami w
+dowolnej wielkości liter i w każdym wystąpieniu powtórzonej składowej:
 
 | Sterowanie                                                 | Czytane przez                             |
 | ---------------------------------------------------------- | ----------------------------------------- |
