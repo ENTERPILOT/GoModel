@@ -46,7 +46,7 @@ func TestListVoices_NativeOpenAIServesBuiltinVoices(t *testing.T) {
 		{name: "tts-1", model: "tts-1", want: legacy},
 		{name: "tts-1-hd", model: "tts-1-hd", want: legacy},
 		{name: "tts-1-hd snapshot", model: "tts-1-hd-1106", want: legacy},
-		{name: "other model gets every voice", model: "gpt-realtime", want: all},
+		{name: "gpt-4o-mini-tts snapshot", model: "gpt-4o-mini-tts-2025-12-15", want: all},
 		{name: "explicit OpenAI base URL", baseURL: "https://API.openai.com/v1/", model: "tts-1", want: legacy},
 		{name: "regional OpenAI host", baseURL: "https://eu.api.openai.com/v1", model: "gpt-4o-mini-tts", want: all},
 	}
@@ -63,6 +63,28 @@ func TestListVoices_NativeOpenAIServesBuiltinVoices(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, resp.Voices)
 			assert.Zero(t, capture.Count(), "OpenAI has no voice listing; no upstream request is expected")
+		})
+	}
+}
+
+// Realtime and chat models take other voice sets, so the speech list is not
+// offered for them.
+func TestListVoices_NativeOpenAIRejectsNonSpeechModels(t *testing.T) {
+	for _, model := range []string{"gpt-realtime", "gpt-4o-audio-preview", "gpt-4o"} {
+		t.Run(model, func(t *testing.T) {
+			server, capture := providertest.JSONServer(t, http.StatusNotFound, `{"error":{"message":"Invalid URL"}}`)
+			target, err := url.Parse(server.URL)
+			require.NoError(t, err)
+			opts := providertest.Options(llmclient.Hooks{})
+			opts.HTTPClient = &http.Client{Transport: redirectTransport{target: target}}
+			provider := New(providers.ProviderConfig{APIKey: "sk-test"}, opts).(*Provider)
+
+			_, err = provider.ListVoices(context.Background(), &core.AudioVoicesRequest{Model: model})
+			var gatewayErr *core.GatewayError
+			require.ErrorAs(t, err, &gatewayErr)
+			assert.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
+			assert.Contains(t, gatewayErr.Message, "does not support listing voices")
+			assert.Zero(t, capture.Count())
 		})
 	}
 }

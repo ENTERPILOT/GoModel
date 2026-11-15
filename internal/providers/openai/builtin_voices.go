@@ -32,23 +32,33 @@ var openAIVoices = []struct {
 	{"cedar", false},
 }
 
-// ListVoices returns OpenAI's built-in voices for model without calling the
-// upstream, which has no voice-listing route. An organization's custom voices
-// are not included: OpenAI has no API to list them. A provider pointed at a
-// custom base URL (a self-hosted server) forwards to its /audio/voices instead.
+// ListVoices returns OpenAI's built-in voices for a speech model without
+// calling the upstream, which has no voice-listing route. An organization's
+// custom voices are not included: OpenAI has no API to list them. A model that
+// is not a speech model reports voice listing as unsupported: realtime and
+// chat-audio models take a different voice set. A provider pointed at a custom
+// base URL (a self-hosted server) forwards to its /audio/voices instead.
 func (p *Provider) ListVoices(ctx context.Context, req *core.AudioVoicesRequest) (*core.AudioVoicesResponse, error) {
 	if req == nil || !isOpenAIHost(p.GetBaseURL()) {
 		return p.CompatibleProvider.ListVoices(ctx, req)
 	}
-	return &core.AudioVoicesResponse{Voices: builtinVoices(req.Model)}, nil
+	voices := builtinVoices(req.Model)
+	if voices == nil {
+		return nil, core.NewAudioVoicesUnsupportedError(req.Model)
+	}
+	return &core.AudioVoicesResponse{Voices: voices}, nil
 }
 
-// builtinVoices returns the built-in voices model supports: the smaller set
-// for the tts-1 family (tts-1, tts-1-hd and their snapshots), all of them
-// otherwise.
+// builtinVoices returns the built-in voices a speech model supports: the
+// smaller set for the tts-1 family (tts-1, tts-1-hd and their snapshots), all
+// of them for the other speech models, which carry "tts" in their name
+// (gpt-4o-mini-tts and its snapshots). It returns nil for any other model.
 func builtinVoices(model string) []core.AudioVoice {
 	m := strings.ToLower(strings.TrimSpace(model))
 	legacyOnly := m == "tts-1" || strings.HasPrefix(m, "tts-1-")
+	if !legacyOnly && !strings.Contains(m, "tts") {
+		return nil
+	}
 	voices := make([]core.AudioVoice, 0, len(openAIVoices))
 	for _, voice := range openAIVoices {
 		if legacyOnly && !voice.legacy {

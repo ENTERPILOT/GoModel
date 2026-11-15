@@ -148,7 +148,7 @@ curl "http://localhost:8080/v1/audio/voices?model=kokoro" \
 | [audio.cpp](/zh/providers/audiocpp) | `GET /v1/audio/voices?model=` |
 | [ElevenLabs](/zh/providers/elevenlabs) | `GET /v2/voices`（工作区的音色，适用于所有模型；最多返回前 2000 个） |
 | [MiniMax](/zh/providers/minimax) | `POST /v1/get_voice`（系统、克隆和生成的音色） |
-| OpenAI（`api.openai.com` 及其区域主机，如 `eu.api.openai.com`） | 内置音色的静态列表，不调用上游：`alloy`, `ash`, `ballad`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage`, `shimmer`, `verse`, `marin`, `cedar`；`tts-1` 系列（`tts-1`、`tts-1-hd` 及其快照版本）仅返回其支持的九种（不含 `ballad`、`verse`、`marin`、`cedar`）。不列出自定义音色：OpenAI 没有相应的 API |
+| OpenAI（`api.openai.com` 及其区域主机，如 `eu.api.openai.com`） | 内置音色的静态列表，不调用上游：`alloy`, `ash`, `ballad`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage`, `shimmer`, `verse`, `marin`, `cedar`；`tts-1` 系列（`tts-1`、`tts-1-hd` 及其快照版本）仅返回其支持的九种（不含 `ballad`、`verse`、`marin`、`cedar`）。不列出自定义音色：OpenAI 没有相应的 API。非语音合成模型（实时、聊天）返回下文所述的 `400` |
 | 使用自定义 `base_url` 的 `openai` 类型提供商 | `GET {base_url}/audio/voices?model=`，适用于 Kokoro-FastAPI、Speaches、LocalAI 或 xn-ptts 等自托管服务器 |
 
 没有音色列表的提供商（包括 `/audio/voices` 返回 404 或 405 的托管 OpenAI 兼容 API）返回 `400` `invalid_request_error`（`model "…" does not support listing voices`）。缺少 `model` 同样返回 `400`；未知模型返回 `404`。
