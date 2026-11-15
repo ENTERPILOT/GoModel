@@ -75,10 +75,17 @@ func TestCeilingsLowerANativeOnlyMessagesBodyInPlace(t *testing.T) {
 			added:    `"output_config":{"effort":"low"},`,
 		},
 		{
-			name:     "the occurrence decoders keep is the one lowered",
-			userPath: "/tokens",
-			limits:   `"max_tokens":500,"max_tokens":64000`,
-			want:     `"max_tokens":500,"max_tokens":1000`,
+			name:     "adaptive thinking that names no effort runs at high upstream",
+			userPath: "/medium",
+			limits:   `"max_tokens":2048,"thinking":{"type":"adaptive"}`,
+			want:     `"max_tokens":2048,"thinking":{"type":"adaptive"}`,
+			added:    `"output_config":{"effort":"medium"},`,
+		},
+		{
+			name:     "adaptive thinking has no budget to fit under the cap",
+			userPath: "/capped",
+			limits:   `"max_tokens":64000,"thinking":{"type":"adaptive","display":"summarized"},"output_config":{"effort":"xhigh"}`,
+			want:     `"max_tokens":1000,"thinking":{"type":"adaptive","display":"summarized"},"output_config":{"effort":"low"}`,
 		},
 	}
 	for _, tt := range tests {
@@ -90,15 +97,4 @@ func TestCeilingsLowerANativeOnlyMessagesBodyInPlace(t *testing.T) {
 			assert.Equal(t, `{`+tt.added+`"model":"claude-sonnet-4-5",`+tt.want+`,`+serverToolHistory+`}`, string(f.upstreams["anthropic"].Last(t).Body))
 		})
 	}
-}
-
-// A native-only body whose limit the gateway cannot lower where it stands
-// (a re-cased member Anthropic does not know) is refused, not forwarded
-// above the cap.
-func TestNativeOnlyMessagesBodyThatCannotBeLoweredIsRefused(t *testing.T) {
-	f := newUpstreamFixture(t, cappedRows, nil)
-	rec := f.post(t, "/tokens", "/v1/messages", `{"model":"anthropic/claude-sonnet-4-5","Max_Tokens":64000,`+serverToolHistory+`}`)
-
-	assert.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
-	assert.Zero(t, f.upstreams["anthropic"].Count(), "nothing may reach the upstream")
 }

@@ -37,6 +37,8 @@ const (
 // upstreamModels are the models the fixture serves, by provider.
 var upstreamModels = map[string]string{
 	"anthropic/claude-sonnet-4-5":  "anthropic",
+	"anthropic/claude-opus-5":      "anthropic",
+	"anthropic/claude-fable-5-2":   "anthropic",
 	"openai/gpt-5":                 "openai",
 	"openai/gpt-4o":                "openai",
 	"openai/gpt-5.1":               "openai",

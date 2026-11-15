@@ -59,11 +59,39 @@ func TestWithinCeilings(t *testing.T) {
 			name: "adaptive thinking without an effort gets the ceiling", req: MessagesRequest{MaxTokens: 2048, Thinking: &Thinking{Type: "adaptive"}}, effort: "low",
 			want: MessagesRequest{MaxTokens: 2048, Thinking: &Thinking{Type: "adaptive"}, OutputConfig: effort("low")}, lowered: true,
 		},
-		{name: "adaptive thinking within the ceiling", req: MessagesRequest{MaxTokens: 2048, Thinking: &Thinking{Type: "adaptive"}}, effort: "medium"},
+		{
+			name: "adaptive thinking without an effort runs at Anthropic's default, high", req: MessagesRequest{MaxTokens: 2048, Thinking: &Thinking{Type: "adaptive"}}, effort: "medium",
+			want: MessagesRequest{MaxTokens: 2048, Thinking: &Thinking{Type: "adaptive"}, OutputConfig: effort("medium")}, lowered: true,
+		},
+		{name: "adaptive thinking within the ceiling", req: MessagesRequest{MaxTokens: 2048, Thinking: &Thinking{Type: "adaptive"}}, effort: "high"},
+		{name: "adaptive thinking with an effort within the ceiling", req: MessagesRequest{MaxTokens: 2048, Thinking: &Thinking{Type: "adaptive"}, OutputConfig: effort("low")}, effort: "low"},
+		{
+			name: "adaptive thinking has no budget to fit: max_tokens bounds it", req: MessagesRequest{MaxTokens: 64000, Thinking: &Thinking{Type: "adaptive"}, OutputConfig: effort("max")}, effort: "max", tokens: 1000,
+			want: MessagesRequest{MaxTokens: 1000, Thinking: &Thinking{Type: "adaptive"}, OutputConfig: effort("max")}, lowered: true,
+		},
+		{name: "a model that thinks by default sent no effort and gets none", req: MessagesRequest{Model: "claude-opus-5", MaxTokens: 1000}, effort: "low", tokens: 1000},
+		{name: "a budget at the ceiling level's own", req: MessagesRequest{MaxTokens: 64000, Thinking: enabled(20000)}, effort: "high"},
+		{
+			name: "max allows the high budget only", req: MessagesRequest{MaxTokens: 64000, Thinking: enabled(32000)}, effort: "max",
+			want: MessagesRequest{MaxTokens: 64000, Thinking: enabled(20000)}, lowered: true,
+		},
+		{
+			name: "a none ceiling allows no budget", req: MessagesRequest{MaxTokens: 2048, Thinking: enabled(1024)}, effort: "none",
+			want: MessagesRequest{MaxTokens: 2048, Thinking: &Thinking{Type: "disabled"}}, lowered: true,
+		},
+		{name: "a budget within a spaced, upper-case ceiling", req: MessagesRequest{MaxTokens: 16000, Thinking: enabled(2000)}, effort: " LOW "},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// A copy that shares no pointer with the request, so a change
+			// made in place to Thinking or OutputConfig shows.
 			sent := tt.req
+			if tt.req.Thinking != nil {
+				sent.Thinking = new(*tt.req.Thinking)
+			}
+			if tt.req.OutputConfig != nil {
+				sent.OutputConfig = new(*tt.req.OutputConfig)
+			}
 			got, lowered := WithinCeilings(&tt.req, tt.effort, tt.tokens)
 
 			assert.Equal(t, tt.lowered, lowered)

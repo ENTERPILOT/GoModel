@@ -14,8 +14,8 @@ func ChatRequestWithCeilings(req *core.ChatRequest, ceilings requestparams.Ceili
 	if req == nil || ceilings.IsZero() {
 		return req, nil
 	}
-	if effortExceeds(req.Reasoning, req.ExtraFields, ceilings.ReasoningEffort) {
-		req = chatRequestWithEffort(req, ceilings.ReasoningEffort, withoutReasoningControls)
+	if effort, exceeds := effortWithinCeiling(req.Reasoning, req.ExtraFields, ceilings.ReasoningEffort); exceeds {
+		req = chatRequestWithEffort(req, effort, withoutReasoningControls)
 	}
 	return requestparams.CapChatTokens(req, ceilings.OutputTokens)
 }
@@ -25,8 +25,8 @@ func ResponsesRequestWithCeilings(req *core.ResponsesRequest, ceilings requestpa
 	if req == nil || ceilings.IsZero() {
 		return req, nil
 	}
-	if effortExceeds(req.Reasoning, req.ExtraFields, ceilings.ReasoningEffort) {
-		req = responsesRequestWithEffort(req, ceilings.ReasoningEffort, withoutReasoningControls)
+	if effort, exceeds := effortWithinCeiling(req.Reasoning, req.ExtraFields, ceilings.ReasoningEffort); exceeds {
+		req = responsesRequestWithEffort(req, effort, withoutReasoningControls)
 	}
 	return requestparams.CapResponsesTokens(req, ceilings.OutputTokens)
 }
@@ -37,18 +37,27 @@ func ChatRequestExceedsCeilings(req *core.ChatRequest, ceilings requestparams.Ce
 	return err != nil || capped != req
 }
 
-// effortExceeds reports whether a request asks for more reasoning than
-// ceiling allows, in any spelling it carries. An effort the common scale
-// cannot rank counts as exceeding, so no spelling slips past the ceiling.
-func effortExceeds(reasoning *core.Reasoning, fields core.UnknownJSONFields, ceiling string) bool {
+// effortWithinCeiling reports whether the efforts a request carries, in any
+// spelling, have to be replaced, and the effort that replaces them all. One
+// above ceiling is replaced by the ceiling, and so is one the common scale
+// cannot rank, so no spelling slips past it. A control that is off where
+// decoders read it but not in every occurrence (unsettledOff) is replaced
+// too, by the highest effort the request does ask for, "none" when there is
+// no other: a ceiling never switches reasoning on.
+func effortWithinCeiling(reasoning *core.Reasoning, fields core.UnknownJSONFields, ceiling string) (effort string, exceeds bool) {
 	if ceiling == "" {
-		return false
+		return "", false
 	}
-	limit := requestparams.EffortRank(ceiling)
-	for _, effort := range requestedEfforts(reasoning, fields) {
-		if rank := requestparams.EffortRank(effort); rank < 0 || rank > limit {
-			return true
+	limit, highest := requestparams.EffortRank(ceiling), 0
+	for _, requested := range requestedEfforts(reasoning, fields) {
+		switch rank := requestparams.EffortRank(requested); {
+		case requested == unsettledOff:
+			exceeds = true
+		case rank < 0 || rank > limit:
+			return ceiling, true
+		default:
+			highest = max(highest, rank)
 		}
 	}
-	return false
+	return requestparams.ReasoningEffortLevels()[highest], exceeds
 }

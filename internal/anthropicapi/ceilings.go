@@ -18,14 +18,21 @@ const (
 // that names no effort.
 const adaptiveEffort = "medium"
 
+// defaultEffort is the level Anthropic itself runs adaptive thinking at when
+// the request names none, which is what a forwarded body gets.
+const defaultEffort = "high"
+
 // WithinCeilings returns req lowered to its caller's ceilings, and whether
 // that changed it: max_tokens above the token ceiling becomes the ceiling,
-// output_config.effort above the effort ceiling becomes the ceiling, and a
-// thinking budget is lowered to the budget the gateway sends for the ceiling
-// level, then to what fits under a lowered max_tokens. Thinking is turned
-// off when the ceiling allows none or no valid budget fits. Only MaxTokens,
-// Thinking and OutputConfig differ in the result, which is req itself when
-// nothing does. A zero ceiling bounds nothing.
+// output_config.effort above the effort ceiling becomes the ceiling, and
+// adaptive thinking that names no effort, which Anthropic runs at
+// defaultEffort, gets the ceiling when that is lower. A thinking budget is
+// lowered to the budget the gateway sends for the ceiling level, then to
+// what fits under a lowered max_tokens; adaptive thinking has no budget and
+// is bounded by max_tokens itself. Thinking is turned off when the ceiling
+// allows none or no valid budget fits. Only MaxTokens, Thinking and
+// OutputConfig differ in the result, which is req itself when nothing does.
+// A zero ceiling bounds nothing.
 //
 // It is for a request forwarded to Anthropic in its own dialect; one the
 // translated pipeline serves is lowered there.
@@ -89,7 +96,7 @@ func effortWithinCeiling(thinking *Thinking, effort, ceiling string) (*Thinking,
 		if exceeds(effort) {
 			effort = messagesEffort(ceiling)
 		}
-	case thinks && thinking.Type == "adaptive" && exceeds(adaptiveEffort):
+	case thinks && thinking.Type == "adaptive" && exceeds(defaultEffort):
 		effort = messagesEffort(ceiling)
 	}
 	if thinks && thinking.Type == "enabled" && thinking.BudgetTokens > budget {
@@ -106,5 +113,23 @@ func messagesEffort(ceiling string) string {
 		return "low"
 	default:
 		return level
+	}
+}
+
+// effortBudget is the budget_tokens the anthropic provider sends for effort;
+// a level that allows no thinking allows no budget. thinkingToReasoning ranks
+// a budget only coarsely, so a budget is held to this one instead: a client
+// under a "high" ceiling cannot forward budget_tokens far above the gateway's
+// own "high".
+func effortBudget(effort string) int {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "minimal", "low":
+		return 5000
+	case "medium":
+		return 10000
+	case "high", "xhigh", "max":
+		return 20000
+	default:
+		return 0
 	}
 }

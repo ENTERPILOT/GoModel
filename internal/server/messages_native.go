@@ -36,9 +36,9 @@ const anthropicProviderType = "anthropic"
 // reasoning effort stay on the translated pipeline. So does a request replaying an unsigned thinking
 // block, which Anthropic rejects and only the translated pipeline can drop.
 // req is the client's request as translated, before any override, and
-// thinking its thinking config as sent. nativeOnly marks a request the
-// translated pipeline cannot carry.
-func (s *translatedInferenceService) canForwardMessagesNatively(ctx context.Context, workflow *core.Workflow, req *core.ChatRequest, thinking *anthropicapi.Thinking, unsignedThinking, nativeOnly bool) bool {
+// decoded the request as sent. nativeOnly marks a request the translated
+// pipeline cannot carry.
+func (s *translatedInferenceService) canForwardMessagesNatively(ctx context.Context, workflow *core.Workflow, req *core.ChatRequest, decoded *anthropicapi.MessagesRequest, unsignedThinking, nativeOnly bool) bool {
 	if workflow == nil || strings.TrimSpace(workflow.ProviderType) != anthropicProviderType {
 		return false
 	}
@@ -60,17 +60,17 @@ func (s *translatedInferenceService) canForwardMessagesNatively(ctx context.Cont
 	// A forced reasoning effort or request parameters rewrite the request,
 	// which the verbatim body cannot carry. Ceilings rewrite only a request
 	// that exceeds them: one already within them is forwarded as it is. The
-	// translation keeps only a coarse level of an explicit thinking budget,
-	// so the budget itself is checked against the ceiling level's own; the
-	// translated pipeline then sends that level's budget. A request only
+	// translation keeps only a coarse level of the thinking config (a budget's
+	// band, "medium" for adaptive thinking that Anthropic runs at "high"), so
+	// the config itself is checked too, as the forwarded body would carry it;
+	// the translated pipeline then sends the ceiling level. A request only
 	// the native path can carry stays on it above the ceilings too:
 	// dispatchMessagesNative lowers its body to them.
 	overrides := s.inference().RequestOverrides(ctx, workflow)
 	if overrides.Forces() {
 		return false
 	}
-	if !nativeOnly && (gateway.ChatRequestExceedsCeilings(req, overrides.Ceilings) ||
-		anthropicapi.ThinkingBudgetExceeds(thinking, overrides.Ceilings.ReasoningEffort)) {
+	if !nativeOnly && (gateway.ChatRequestExceedsCeilings(req, overrides.Ceilings) || messagesExceedCeilings(decoded, overrides.Ceilings)) {
 		return false
 	}
 	_, ok := s.provider.(core.RoutablePassthrough)

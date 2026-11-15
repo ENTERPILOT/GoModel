@@ -21,6 +21,7 @@ var cappedRows = []users.User{
 	{UserPath: "/capped", MaxReasoningEffort: "low", MaxOutputTokens: 1000},
 	{UserPath: "/roomy", MaxReasoningEffort: "high", MaxOutputTokens: 8000},
 	{UserPath: "/high", MaxReasoningEffort: "high"},
+	{UserPath: "/medium", MaxReasoningEffort: "medium"},
 	{UserPath: "/low", MaxReasoningEffort: "low"},
 	{UserPath: "/off", MaxReasoningEffort: "none"},
 	{UserPath: "/tokens", MaxOutputTokens: 1000},

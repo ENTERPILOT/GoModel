@@ -38,6 +38,14 @@ var templateControlFields = []string{"enable_thinking", "thinking", "reasoning_e
 // as exceeding, so the control is replaced by the ceiling, never forwarded.
 const unrankedEffort = "?"
 
+// unsettledOff stands for a control object that names its type more than
+// once and is "disabled" in the last of them, the one a decoder keeps, but
+// not in all. Like unrankedEffort it ranks as unknown, so the control is
+// replaced and no decoder reads the other occurrence; it asks for no
+// reasoning, though, so it is not what the ceiling is written for (see
+// effortWithinCeiling).
+const unsettledOff = "?off"
+
 // effortReader appends the effort one control's value sets to efforts.
 type effortReader func(efforts []string, raw json.RawMessage) []string
 
@@ -155,7 +163,7 @@ func foldName(name string) string {
 
 // requestedEfforts lists every reasoning effort a request sets, in any
 // spelling, letter case and occurrence of a repeated member. Each is a level
-// of the common scale or unrankedEffort.
+// of the common scale, unrankedEffort or unsettledOff.
 func requestedEfforts(reasoning *core.Reasoning, fields core.UnknownJSONFields) []string {
 	var efforts []string
 	if reasoning != nil && strings.TrimSpace(reasoning.Effort) != "" {
@@ -199,24 +207,31 @@ func appendControlEffort(efforts []string, raw json.RawMessage) []string {
 		return append(efforts, "none")
 	case raw[0] == '"':
 		return append(efforts, stringOrUnranked(raw))
-	case raw[0] == '{' && isDisabled(raw):
-		return append(efforts, "none")
+	case raw[0] == '{':
+		switch last, every := isDisabled(raw); {
+		case every:
+			return append(efforts, "none")
+		case last:
+			return append(efforts, unsettledOff)
+		}
 	}
 	return append(efforts, unrankedEffort)
 }
 
-// isDisabled reports whether a control object's type is "disabled", in every
-// occurrence and letter case of the member.
-func isDisabled(object json.RawMessage) bool {
-	disabled := false
+// isDisabled reports whether a control object's type is "disabled" in the
+// last occurrence of the member, in any letter case, which is the one a
+// decoder that matches names as Go does keeps, and whether it is in every
+// occurrence, so that no decoder reads anything else.
+func isDisabled(object json.RawMessage) (last, every bool) {
+	every = true
 	gjson.ParseBytes(object).ForEach(func(key, value gjson.Result) bool {
 		if strings.EqualFold(key.String(), "type") {
-			disabled = value.Type == gjson.String && strings.EqualFold(strings.TrimSpace(value.String()), "disabled")
-			return disabled
+			last = value.Type == gjson.String && strings.EqualFold(strings.TrimSpace(value.String()), "disabled")
+			every = every && last
 		}
 		return true
 	})
-	return disabled
+	return last, every && last
 }
 
 // isZero reports whether raw is the number zero in any JSON spelling: 0, -0,

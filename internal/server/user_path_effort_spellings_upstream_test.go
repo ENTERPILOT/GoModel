@@ -29,7 +29,7 @@ func TestEffortCeilingReplacesRecasedAndRepeatedControls(t *testing.T) {
 		"a re-cased effort inside a re-cased object":  `"Reasoning":{"Effort":"max","effort":"low"},"reasoning":{"effort":"low"}`,
 		"a re-cased flat effort":                      `"REASONING_EFFORT":"max"`,
 		"re-cased provider controls":                  `"Thinking":{"type":"enabled"},"Enable_Thinking":true,"THINKING_BUDGET":32000,"Think":"high"`,
-		"a re-cased type next to a disabled one":      `"thinking":{"Type":"enabled","budget_tokens":32000,"type":"disabled"}`,
+		"a re-cased type after a disabled one":        `"thinking":{"type":"disabled","budget_tokens":32000,"Type":"enabled"}`,
 		"re-cased template switches":                  `"Chat_Template_Kwargs":{"enable_thinking":true},"chat_template_kwargs":{"Enable_Thinking":true}`,
 		"a repeated template switch":                  `"chat_template_kwargs":{"enable_thinking":true,"enable_thinking":false}`,
 		"re-cased extra_body members":                 `"Extra_Body":{"thinking_budget":32000},"extra_body":{"Thinking_Budget":32000}`,
@@ -52,6 +52,27 @@ func TestEffortCeilingReplacesRecasedAndRepeatedControls(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// A control that is off in the type a decoder keeps, the last one, asks for
+// no reasoning. Its other type still must not reach the upstream, but the
+// ceiling is not what replaces it: that would switch reasoning on.
+func TestEffortCeilingDoesNotSwitchOnAControlThatIsOff(t *testing.T) {
+	for name, control := range map[string]string{
+		"review request: a repeated type": `"thinking":{"type":"enabled","budget_tokens":32000,"type":"disabled"}`,
+		"a re-cased type before":          `"thinking":{"Type":"enabled","budget_tokens":32000,"type":"disabled"}`,
+		"a re-cased type after":           `"thinking":{"type":"enabled","budget_tokens":32000,"TYPE":"disabled"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newUpstreamFixture(t, cappedRows, nil)
+			rec := f.post(t, "/low", "/v1/chat/completions", `{"model":"openai/gpt-5.1",`+hiMessages+`,`+control+`}`)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+			sent := f.sent(t, "openai")
+			assert.Equal(t, "none", openAIEffort(sent))
+			assert.NotContains(t, sent, "thinking")
+		})
 	}
 }
 
