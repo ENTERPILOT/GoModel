@@ -90,6 +90,8 @@ func exportVirtualModels(declared []config.VirtualModelConfig, stored []virtualm
 			UserPaths:       model.UserPaths,
 			Description:     model.Description,
 			Slowdown:        model.Slowdown,
+			ContextWindow:   model.ContextWindow,
+			MaxOutputTokens: model.MaxOutputTokens,
 			ReasoningEffort: model.ReasoningEffort,
 			Params:          params,
 			DefaultParams:   defaultParams,

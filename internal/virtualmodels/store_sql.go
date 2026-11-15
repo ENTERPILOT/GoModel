@@ -29,6 +29,8 @@ var sqlSchema = []string{
 		user_paths TEXT NOT NULL DEFAULT '[]',
 		description TEXT NOT NULL DEFAULT '',
 		slowdown DOUBLE PRECISION DEFAULT NULL,
+		context_window ` + sqlx.TypeInt64 + ` DEFAULT NULL,
+		max_output_tokens ` + sqlx.TypeInt64 + ` DEFAULT NULL,
 		reasoning_effort TEXT NOT NULL DEFAULT '',
 		params TEXT NOT NULL DEFAULT '',
 		default_params TEXT NOT NULL DEFAULT '',
@@ -49,6 +51,8 @@ var virtualModelMigrations = []string{
 	"ALTER TABLE virtual_models ADD COLUMN failover TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE virtual_models ADD COLUMN strategy_plugin TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE virtual_models ADD COLUMN strategy_config TEXT NOT NULL DEFAULT '{}'",
+	"ALTER TABLE virtual_models ADD COLUMN context_window " + sqlx.TypeInt64 + " DEFAULT NULL",
+	"ALTER TABLE virtual_models ADD COLUMN max_output_tokens " + sqlx.TypeInt64 + " DEFAULT NULL",
 	"ALTER TABLE virtual_models ADD COLUMN reasoning_effort TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE virtual_models ADD COLUMN params TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE virtual_models ADD COLUMN default_params TEXT NOT NULL DEFAULT ''",
@@ -56,15 +60,16 @@ var virtualModelMigrations = []string{
 
 const selectVirtualModelColumns = `
 	SELECT source, targets, strategy, strategy_plugin, strategy_config, session_affinity, failover, provider_name, model, user_paths,
-		description, slowdown, reasoning_effort, params, default_params, enabled, created_at, updated_at
+		description, slowdown, context_window, max_output_tokens, reasoning_effort, params, default_params, enabled, created_at, updated_at
 	FROM virtual_models
 `
 
 const upsertVirtualModelSQL = `
 	INSERT INTO virtual_models (
-		source, targets, strategy, strategy_plugin, strategy_config, session_affinity, failover, provider_name, model, user_paths, description, slowdown, reasoning_effort, params, default_params, enabled, created_at, updated_at
+		source, targets, strategy, strategy_plugin, strategy_config, session_affinity, failover, provider_name, model, user_paths, description, slowdown,
+		context_window, max_output_tokens, reasoning_effort, params, default_params, enabled, created_at, updated_at
 	)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(source) DO UPDATE SET
 		targets = excluded.targets,
 		strategy = excluded.strategy,
@@ -77,6 +82,8 @@ const upsertVirtualModelSQL = `
 		user_paths = excluded.user_paths,
 		description = excluded.description,
 		slowdown = excluded.slowdown,
+		context_window = excluded.context_window,
+		max_output_tokens = excluded.max_output_tokens,
 		reasoning_effort = excluded.reasoning_effort,
 		params = excluded.params,
 		default_params = excluded.default_params,
@@ -189,6 +196,8 @@ func virtualModelUpsertArgs(vm VirtualModel) ([]any, error) {
 		sqlutil.JSONStrings(vm.UserPaths),
 		vm.Description,
 		vm.Slowdown,
+		vm.ContextWindow,
+		vm.MaxOutputTokens,
 		vm.ReasoningEffort,
 		paramsJSON,
 		defaultParamsJSON,
@@ -202,6 +211,7 @@ func scanSQLVirtualModel(scanner sqlx.Row) (VirtualModel, error) {
 	var vm VirtualModel
 	var targets, userPaths, strategyConfig, params, defaultParams []byte
 	var sessionAffinity, failover string
+	var contextWindow, maxOutputTokens *int64
 	var createdAt, updatedAt int64
 	if err := scanner.Scan(
 		&vm.Source,
@@ -216,6 +226,8 @@ func scanSQLVirtualModel(scanner sqlx.Row) (VirtualModel, error) {
 		&userPaths,
 		&vm.Description,
 		&vm.Slowdown,
+		&contextWindow,
+		&maxOutputTokens,
 		&vm.ReasoningEffort,
 		&params,
 		&defaultParams,
@@ -243,6 +255,8 @@ func scanSQLVirtualModel(scanner sqlx.Row) (VirtualModel, error) {
 	}
 	vm.SessionAffinity = decodeTriStateBool(sessionAffinity)
 	vm.Failover = decodeTriStateBool(failover)
+	vm.ContextWindow = intFromNullable(contextWindow)
+	vm.MaxOutputTokens = intFromNullable(maxOutputTokens)
 	vm.CreatedAt = sqlutil.TimeFromUnix(createdAt)
 	vm.UpdatedAt = sqlutil.TimeFromUnix(updatedAt)
 	return vm, nil
@@ -271,4 +285,14 @@ func decodeTriStateBool(value string) *bool {
 	default:
 		return nil
 	}
+}
+
+// intFromNullable converts a nullable integer column to the *int the model
+// uses; NULL stays nil.
+func intFromNullable(value *int64) *int {
+	if value == nil {
+		return nil
+	}
+	converted := int(*value)
+	return &converted
 }

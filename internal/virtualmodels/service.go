@@ -325,6 +325,8 @@ func (s *Service) ListViews() []View {
 			UserPaths:       vm.UserPaths,
 			Description:     vm.Description,
 			Slowdown:        vm.Slowdown,
+			ContextWindow:   vm.ContextWindow,
+			MaxOutputTokens: vm.MaxOutputTokens,
 			ReasoningEffort: vm.ReasoningEffort,
 			Params:          vm.Params,
 			DefaultParams:   vm.DefaultParams,

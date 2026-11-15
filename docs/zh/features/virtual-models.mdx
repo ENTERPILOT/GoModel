@@ -107,6 +107,31 @@ virtual_models:
 
 本页其余部分介绍重定向。
 
+## 上下文窗口与最大输出 tokens
+
+编码智能体等客户端会从 `GET /v1/models` 读取 `metadata.context_window` 和 `metadata.max_output_tokens` 来确定提示词大小。
+对这两个字段，重定向分别列出**其各目标报告的最小值**（会深入链式虚拟模型）。任何目标都可能处理请求（负载均衡、故障转移或会话迁移），
+因此按最小值确定大小不会超出任何已报告该值的目标的限制。每个已声明的目标都会计入，即使它暂时不可用，因此所列的值不会随提供商的
+健康状况变化；被禁用的链式虚拟模型会被跳过。未报告该值的目标会被忽略，所列的值并不约束它们；如果没有目标报告该值，
+则省略该字段。当这样的目标接受的更少时，请显式设置一个值。
+
+在重定向上设置 **Context window** 或 **Max output tokens** 可以改为列出您自己的值，例如当最小的目标只是偶尔使用的回退时列出更大的值；
+按高于某个目标限制的值确定大小的请求可能超出该目标的限制。显式值优先于推导值，链式虚拟模型会先应用自己的显式值，外层再取最小值。
+
+```yaml
+virtual_models:
+  - source: smart
+    context_window: 128000 # 省略则使用各目标的最小值
+    max_output_tokens: 16000
+    targets:
+      - { model: openai/gpt-4o }
+      - { model: anthropic/claude-sonnet-4-6 }
+```
+
+设置 `MODELS_VLLM_DISCOVERY_COMPAT=true` 时，重定向的 `max_model_len` 遵循同样的规则：使用显式的上下文窗口，否则取各目标限制中的最小值。
+
+这些值仅是列表元数据：GoModel 不会在请求上强制执行它们。访问策略不能携带这些值。
+
 ## 使用稳定的名称
 
 您可以对外提供 `regular` 和 `smarter` 这样的名称，而不是特定于提供商的模型 ID。
@@ -209,7 +234,7 @@ virtual_models:
 - **cost** 策略按链式分支背后当前可用的最便宜具体模型为其计价。
 - 被**禁用**或没有可用目标的链式虚拟模型，会像不可用的提供商模型一样被跳过。
 - 只有**外层**虚拟模型的 `user_paths` 和 `slowdown` 会作用于请求；通过链访问内层虚拟模型时，不会参考其作用域。
-- `/v1/models` 会使用链式重定向第一个可用具体模型的元数据来列出该重定向。
+- `/v1/models` 会使用链式重定向第一个可用具体模型的元数据来列出该重定向，但 [token 限制](#上下文窗口与最大输出-tokens)除外，它会考虑每一个目标。
 
 以单个名称书写的目标，无论在何处声明（`config.yaml`、控制台或 Admin API），都按名称匹配，因此即使
 `team/cheap` 看起来像 `provider/model`，它也会指向同名的虚拟模型。显式设置 `provider`
@@ -276,7 +301,7 @@ VIRTUAL_MODELS=[{"source":"smart","strategy":"cost","targets":[{"model":"openai/
 每个条目接受 `source`、单个 `target`（简写）或 `targets` 列表、`strategy`（`round_robin`、`cost` 或
 `failover`）、`session_affinity`（默认 `true`；参见[会话保持](/zh/features/session-keeping)）、
 `failover`（默认 `true`；参见[故障转移](/zh/features/failover)）、`user_paths`、`description`、
-`slowdown`（`0` 表示禁用继承的减速；有效系数范围为 `0.1` 到 `10`）、`reasoning_effort`（参见[强制推理强度](#强制推理强度)）、`params` 和 `default_params`（参见[设置请求参数](#设置请求参数)）以及 `enabled`。
+`slowdown`（`0` 表示禁用继承的减速；有效系数范围为 `0.1` 到 `10`）、`context_window` 和 `max_output_tokens`（参见[上下文窗口与最大输出 tokens](#上下文窗口与最大输出-tokens)）、`reasoning_effort`（参见[强制推理强度](#强制推理强度)）、`params` 和 `default_params`（参见[设置请求参数](#设置请求参数)）以及 `enabled`。
 目标的 `model` 可以指定另一个已声明的虚拟模型（参见[链式虚拟模型](#链式虚拟模型)）。
 将目标留空即可在 `source` 选择器上声明访问策略。无效的声明（未知策略、缺失或自引用的目标、链中存在循环或链深度
 超过 8 个虚拟模型，或目标的 `provider` 与任何已配置的提供商都不匹配，即拼写错误）会导致启动失败，
