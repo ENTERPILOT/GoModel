@@ -148,7 +148,10 @@ Działa z każdą strategią, dla pierwszej próby i dla każdej próby failover
 Effort celu wygrywa z `reasoning_effort` modelu wirtualnego, do którego cel
 należy. Nadal wygrywa to, na co cel wskazuje: nadpisanie na konkretnym modelu
 albo na [połączonym w łańcuch](#łączenie-modeli-wirtualnych-w-łańcuchy) modelu
-wirtualnym, który jest celem.
+wirtualnym, który jest celem. Limit `max_reasoning_effort`
+[ścieżki użytkownika](/pl/features/users#polityka-requestów) działa ponad nimi
+wszystkimi, przy każdej próbie: effort celu powyżej tego limitu zostaje do
+niego obniżony.
 
 ## Ustawianie parametrów żądania
 

@@ -38,7 +38,7 @@ func (v VirtualModel) overrides() requestparams.Overrides {
 // models on its route, bounded by the ceilings of the caller's user path. A
 // zero value keeps the client's request. The ceilings belong to the caller,
 // not to a model, so they are the same on every attempt of a request and
-// bound whatever a virtual model forces.
+// bound whatever a virtual model forces, on itself or on one of its targets.
 func (s *Service) ResolveRequestOverrides(
 	ctx context.Context,
 	resolution *core.RequestModelResolution,

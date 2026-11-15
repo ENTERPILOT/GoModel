@@ -144,7 +144,10 @@ virtual_models:
 It works with every strategy, for the first attempt and for each failover leg.
 A target's effort beats the `reasoning_effort` of the virtual model it belongs
 to. Whatever the target names still wins: an override on the concrete model, or
-on the [chained](#chain-virtual-models) virtual model the target points to.
+on the [chained](#chain-virtual-models) virtual model the target points to. A
+[user path](/features/users#request-policy)'s `max_reasoning_effort` applies on
+top of all of them, on every attempt: a target's effort above that ceiling is
+lowered to it.
 
 ## Set request parameters
 
