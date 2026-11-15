@@ -102,6 +102,14 @@ Azure. Pola opcjonalne – `instructions`,
 który zwraca upstream, a w razie jego braku typ wynikający z `response_format` (na
 przykład `wav` → `audio/wav`).
 
+`voice` może być też obiektem z polem `id`, w formie, której OpenAI używa dla
+[własnych głosów](https://developers.openai.com/api/docs/guides/custom-voices):
+`"voice": {"id": "voice_1234"}`. Providerzy zgodni z OpenAI dostają obiekt bez
+zmian; ElevenLabs, MiniMax, Xiaomi i audio.cpp używają jego `id` jako głosu.
+Pole `id` musi być tekstem zawierającym co najmniej jeden znak inny niż biały;
+w przeciwnym razie zwracany jest błąd `400`. Zgodny provider, który nie
+obsługuje własnych głosów, może odrzucić obiekt.
+
 Zsyntetyzowane audio jest **przekazywane na bieżąco, w miarę jak provider je generuje** – zobacz
 [Streaming](#streaming).
 
