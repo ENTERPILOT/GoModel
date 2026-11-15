@@ -98,7 +98,7 @@ func NewPrometheusHooks() llmclient.Hooks {
 			streamLabel := strconv.FormatBool(info.Stream)
 			InFlightRequests.WithLabelValues(
 				info.Provider,
-				info.Endpoint,
+				metricEndpoint(info.Endpoint),
 				streamLabel,
 			).Inc()
 
@@ -109,7 +109,7 @@ func NewPrometheusHooks() llmclient.Hooks {
 			streamLabel := strconv.FormatBool(info.Stream)
 			InFlightRequests.WithLabelValues(
 				info.Provider,
-				info.Endpoint,
+				metricEndpoint(info.Endpoint),
 				streamLabel,
 			).Dec()
 
@@ -132,7 +132,7 @@ func NewPrometheusHooks() llmclient.Hooks {
 			RequestsTotal.WithLabelValues(
 				info.Provider,
 				info.Model,
-				info.Endpoint,
+				metricEndpoint(info.Endpoint),
 				statusCode,
 				statusType,
 				streamLabel,
@@ -142,7 +142,7 @@ func NewPrometheusHooks() llmclient.Hooks {
 			RequestDuration.WithLabelValues(
 				info.Provider,
 				info.Model,
-				info.Endpoint,
+				metricEndpoint(info.Endpoint),
 				streamLabel,
 			).Observe(info.Duration.Seconds())
 
@@ -193,6 +193,7 @@ func NewPrometheusHooks() llmclient.Hooks {
 
 // ResetMetrics resets all metrics to zero (useful for testing)
 func ResetMetrics() {
+	resetEndpointLabels()
 	RequestsTotal.Reset()
 	RequestDuration.Reset()
 	InFlightRequests.Reset()

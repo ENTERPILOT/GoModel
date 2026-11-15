@@ -2,11 +2,8 @@ package usage
 
 import (
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
-
-	"github.com/goccy/go-json"
 )
 
 // ThroughputGranularity describes one bucket width for the overview live
@@ -180,12 +177,7 @@ func foldThroughput(rows inputSegmentRows, acc *throughputAccumulator) error {
 		if err := rows.Scan(&bucketStart, &cacheType, &inputTokens, &outputTokens, &totalTokens, &provider, &rawDataJSON); err != nil {
 			return fmt.Errorf("failed to scan throughput row: %w", err)
 		}
-		var rawData map[string]any
-		if rawDataJSON != nil && *rawDataJSON != "" {
-			if err := json.Unmarshal([]byte(*rawDataJSON), &rawData); err != nil {
-				slog.Warn("failed to unmarshal raw_data JSON", "error", err)
-			}
-		}
+		rawData := promptCacheRawData(rawDataJSON)
 		cacheTypeValue := ""
 		if cacheType != nil {
 			cacheTypeValue = *cacheType
