@@ -165,7 +165,8 @@
   color: var(--text-muted);
 }
 
-/* One load-balancing target row: model selector, weight, and remove button. */
+/* One load-balancing target row: model selector, reasoning effort, weight,
+   and remove button. */
 .vm-target-row {
   display: flex;
   gap: 8px;
@@ -175,6 +176,11 @@
 .vm-target-row .vm-target-model {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+.vm-target-row .vm-target-effort {
+  flex: 0 0 132px;
+  width: 132px;
 }
 
 .vm-target-row .vm-target-weight {

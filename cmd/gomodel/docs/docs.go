@@ -10537,6 +10537,9 @@ const docTemplate = `{
                 "provider": {
                     "type": "string"
                 },
+                "reasoning_effort": {
+                    "type": "string"
+                },
                 "weight": {
                     "type": "number"
                 }
@@ -14797,6 +14800,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "provider": {
+                    "type": "string"
+                },
+                "reasoning_effort": {
                     "type": "string"
                 },
                 "weight": {

@@ -1,14 +1,20 @@
 <script>
   // One target row of the virtual-model editor. The primary target and the
   // extra {#each} rows share this shape; two or more rows make the redirect
-  // a load balancer (weights show only for round-robin). The ☰ handle drags
+  // a load balancer (weights show only for round-robin) and let each target
+  // force its own reasoning effort. The ☰ handle drags
   // a row onto another row to reorder the list; keyboard users get the same
   // via ArrowUp/ArrowDown on the focused handle.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import SearchSelect from "$lib/components/molecules/SearchSelect.svelte";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import { virtualModelEditor as vm } from "./virtualModelEditor.svelte.js";
-  import { moveFormTarget, vmFormShowWeights } from "./vmForm.js";
+  import {
+    moveFormTarget,
+    vmFormShowTargetEffort,
+    vmFormShowWeights,
+    REASONING_EFFORT_LEVELS,
+  } from "./vmForm.js";
   import { GripVertical, Trash2 } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
@@ -19,6 +25,9 @@
     provider = $bindable(""),
     model = $bindable(""),
     weight = $bindable(),
+    // reasoningEffort is the effort forced on requests sent to this target;
+    // empty keeps the virtual model's own, or the client's.
+    reasoningEffort = $bindable(""),
     id = undefined,
     placeholder = "openai/gpt-4o",
     showRemove = true,
@@ -121,6 +130,20 @@
     allowCustom
     mono
   />
+  {#if vmFormShowTargetEffort(vm.vmForm, reasoningEffort)}
+    <select
+      class="form-select vm-target-effort"
+      title={m.models_target_effort_help()}
+      bind:value={reasoningEffort}
+      disabled={vm.vmFormManaged}
+      aria-label={m.models_target_effort()}
+    >
+      <option value="">{m.models_target_effort_default()}</option>
+      {#each REASONING_EFFORT_LEVELS as level (level)}
+        <option value={level}>{level}</option>
+      {/each}
+    </select>
+  {/if}
   {#if vmFormShowWeights(vm.vmForm)}
     <input
       type="number"

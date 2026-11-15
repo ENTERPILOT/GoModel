@@ -15,6 +15,8 @@ type resolvedTarget struct {
 	selector  core.ModelSelector
 	qualified string
 	weight    float64
+	// effort is the reasoning effort the redirect forces on this target.
+	effort string
 	// explicitProvider records that the declaration named a provider. A
 	// bare "a/b" model may be a slash-shaped model id or a slash-named virtual
 	// model, so only an explicit provider pins the target to a concrete model.
@@ -30,6 +32,9 @@ type redirectEntry struct {
 	// route caches the validated strategy_config handed to a routing-strategy
 	// plugin; nil for entries built outside buildSnapshot.
 	route *routeConfigCache
+	// targetEfforts reports whether any target forces a reasoning effort, so
+	// override resolution scans the targets only of redirects that set one.
+	targetEfforts bool
 }
 
 // sessionAffinity reports whether this redirect keeps sessions pinned to the
@@ -117,14 +122,16 @@ func buildSnapshot(rows []VirtualModel, defaultEnable bool) (snapshot, error) {
 					selector:         selector,
 					qualified:        selector.QualifiedModel(),
 					weight:           normalized.Targets[i].Weight,
+					effort:           normalized.Targets[i].ReasoningEffort,
 					explicitProvider: normalized.Targets[i].Provider != "",
 				}
 			}
 			next.redirects[normalized.Source] = &redirectEntry{
-				vm:       normalized,
-				targets:  targets,
-				strategy: normalized.Strategy,
-				route:    &routeConfigCache{},
+				vm:            normalized,
+				targets:       targets,
+				strategy:      normalized.Strategy,
+				route:         &routeConfigCache{},
+				targetEfforts: normalized.setsTargetEffort(),
 			}
 			next.order = append(next.order, normalized.Source)
 			next.bySource[normalized.Source] = normalized
