@@ -183,6 +183,10 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		HTTPErrorHandler: gatewayErrorHandler,
 	})
 	e.Logger = slog.Default()
+	// HSTS runs first so responses the base path rejects carry it too.
+	if cfg != nil && cfg.TLSConfig != nil {
+		e.Pre(strictTransportSecurity)
+	}
 	basePath := configuredBasePath(cfg)
 	if basePath != "/" {
 		e.Pre(stripBasePathMiddleware(basePath))
