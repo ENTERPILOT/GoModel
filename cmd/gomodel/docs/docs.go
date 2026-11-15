@@ -11285,7 +11285,8 @@ const docTemplate = `{
                             ],
                             "properties": {
                                 "id": {
-                                    "type": "string"
+                                    "type": "string",
+                                    "pattern": "\\S"
                                 }
                             },
                             "additionalProperties": true

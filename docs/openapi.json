@@ -15660,7 +15660,8 @@
                 ],
                 "properties": {
                   "id": {
-                    "type": "string"
+                    "type": "string",
+                    "pattern": "\\S"
                   }
                 },
                 "additionalProperties": true
@@ -15670,8 +15671,7 @@
         },
         "required": [
           "input",
-          "model",
-          "voice"
+          "model"
         ]
       },
       "core.AudioVoice": {

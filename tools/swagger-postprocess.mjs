@@ -98,7 +98,7 @@ function applySpeechVoiceOneOf() {
     {
       type: "object",
       required: ["id"],
-      properties: { id: { type: "string" } },
+      properties: { id: { type: "string", pattern: "\\S" } },
       additionalProperties: true,
     },
   ];

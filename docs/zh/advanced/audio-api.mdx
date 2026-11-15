@@ -99,7 +99,7 @@ await writeFile("speech.wav", Buffer.from(await speech.arrayBuffer()));
 `voice` 也可以是带 `id` 的对象，即 OpenAI
 [自定义声音](https://developers.openai.com/api/docs/guides/custom-voices)使用的形式：
 `"voice": {"id": "voice_1234"}`。兼容 OpenAI 的提供商会原样收到该对象；ElevenLabs、
-MiniMax、Xiaomi 和 audio.cpp 则将其 `id` 用作声音。缺少非空字符串 `id` 的对象会返回 `400`。
+MiniMax、Xiaomi 和 audio.cpp 则将其 `id` 用作声音。缺少非空白字符串 `id` 的对象会返回 `400`。
 不支持自定义声音的兼容提供商可能会拒绝该对象。
 
 合成的音频会**在提供商生成的同时进行中继**，详见[流式传输](#流式传输)。

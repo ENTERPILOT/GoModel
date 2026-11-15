@@ -106,7 +106,7 @@ example `wav` → `audio/wav`).
 [custom voices](https://developers.openai.com/api/docs/guides/custom-voices):
 `"voice": {"id": "voice_1234"}`. OpenAI-compatible providers receive the object
 unchanged; ElevenLabs, MiniMax, Xiaomi and audio.cpp use its `id` as the voice.
-An object without a non-empty string `id` returns `400`. A compatible provider
+An object without a non-blank string `id` returns `400`. A compatible provider
 that does not support custom voices may reject the object.
 
 Synthesized audio is **relayed as the provider produces it** — see

@@ -100,7 +100,7 @@ function applySpeechVoiceOneOf() {
     {
       type: "object",
       required: ["id"],
-      properties: { id: { type: "string" } },
+      properties: { id: { type: "string", pattern: "\\S" } },
       additionalProperties: true,
     },
   ];
@@ -613,7 +613,6 @@ ensureBearerAuthSecurityScheme();
 ensureRequiredProperty("core.AudioSpeechRequest", "model");
 applySpeechVoiceOneOf();
 ensureRequiredProperty("core.AudioSpeechRequest", "input");
-ensureRequiredProperty("core.AudioSpeechRequest", "voice");
 ensureRequiredProperty("admin.recalculatePricingRequest", "confirmation");
 ensureRequiredProperty("admin.upsertBudgetRequest", "amount");
 ensureRequiredProperty("admin.upsertBudgetRequest", "budget_key");
