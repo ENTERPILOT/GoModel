@@ -177,11 +177,15 @@ Erfasste Output-Token und Kosten steigen entsprechend. Wie viel hinzukommt,
 hängt von der Antwort ab:
 
 - **Reasoning-Tokens ausgewiesen**: Höchstens diese Anzahl wird hinzugerechnet,
-  und eine ausdrückliche `0` fügt nichts hinzu.
-- **Nicht ausgewiesen** (die von Gemini 2.5 Flash und 3 Flash aufgezeichnete Form): Der gesamte
-  Teil von `total_tokens`, der über Prompt- und Completion-Tokens hinausgeht,
-  zählt als Output. Er kann Prompt-Tokens von Googles eingebauten Tools
-  enthalten, die dann zum Output-Preis berechnet werden.
+  und eine ausdrückliche `0` fügt nichts hinzu. `reasoning_tokens` meldet die
+  ausgewiesene Anzahl, gekürzt auf die Output-Zahl, wenn `total_tokens` nicht
+  für alle Platz lässt; der Wert übersteigt die Output-Zahl also nie.
+- **Nicht ausgewiesen** (die von Gemini 2.5 Flash und 3 Flash aufgezeichnete
+  Form): Der gesamte Teil von `total_tokens`, der über Prompt- und
+  Completion-Tokens hinausgeht, wird hinzugerechnet und als Reasoning-Tokens
+  gemeldet. Er kann Prompt-Tokens von Googles eingebauten Tools enthalten, die
+  dann wie Thinking bepreist werden: zum Output-Preis oder zu
+  `reasoning_output_per_mtok`, wenn das Modell einen solchen Preis hat.
 
 ## Sampling-Parameter bei Gemini 3 und 4
 

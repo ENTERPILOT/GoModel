@@ -91,8 +91,8 @@ Gemini 3 和 4 无法关闭思考，并且 Pro 系列、3.7 和 3.8 Flash、Gemi
 
 Google 按输出费率对思考 Token 计费。其 OpenAI 兼容端点会把它们计入 `total_tokens`，却不计入 `completion_tokens`，因此在 `openai_compatible` 模式下，GoModel 会在记录用量并响应客户端之前把它们加回去。与原生模式一样，输出计数此时包含思考 Token：Chat Completions 通过 `completion_tokens` 和 `completion_tokens_details.reasoning_tokens` 报告，Responses API 通过 `output_tokens` 和 `output_tokens_details.reasoning_tokens` 报告。记录的输出 Token 和成本会相应增加。加回多少取决于响应：
 
-- **单独列出了推理 Token**：最多加回该数量，显式的 `0` 则不加回任何 Token。
-- **没有单独列出**（从 Gemini 2.5 Flash 和 3 Flash 录制到的形式）：`total_tokens` 中超出提示与补全 Token 的全部部分都计为输出。其中可能包含 Google 内置工具的提示 Token，它们随后会按输出费率计价。
+- **单独列出了推理 Token**：最多加回该数量，显式的 `0` 则不加回任何 Token。`reasoning_tokens` 报告所列出的数量；如果 `total_tokens` 容纳不下全部数量，则将其削减为输出 Token 数，因此它永远不会超过输出 Token 数。
+- **没有单独列出**（从 Gemini 2.5 Flash 和 3 Flash 录制到的形式）：`total_tokens` 中超出提示与补全 Token 的全部部分都会被加回，并作为推理 Token 报告。其中可能包含 Google 内置工具的提示 Token，它们随后会按思考 Token 计价：按输出费率，或者在模型设有 `reasoning_output_per_mtok` 时按该费率。
 
 ## Gemini 3 和 4 上的采样参数
 

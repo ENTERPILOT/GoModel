@@ -25,6 +25,8 @@ const (
 	oracleDefaultModel             = "openai.gpt-oss-120b"
 	kimicodeDefaultChatModel       = "kimi-for-coding"
 	kimicodeDefaultEmbeddingsModel = "bge_m3_embed"
+	// geminiDefaultChatModel is the model the native Gemini endpoints record.
+	geminiDefaultChatModel = "gemini-2.5-flash"
 )
 
 // Provider configurations
@@ -265,6 +267,11 @@ var providerCapabilities = map[string]map[string]bool{
 }
 
 var providerDefaultModels = map[string]map[string]string{
+	"gemini": {
+		"chat":              geminiDefaultChatModel,
+		"chat_stream":       geminiDefaultChatModel,
+		"chat_usage_stream": geminiDefaultChatModel,
+	},
 	"oracle": {
 		"chat":              oracleDefaultModel,
 		"chat_stream":       oracleDefaultModel,
@@ -363,6 +370,12 @@ func main() {
 	}
 	if endpointRequiresEmbeddingsCapability(*endpoint) && !providerSupportsEmbeddings(*provider) {
 		fmt.Fprintf(os.Stderr, "Error: provider %q is missing embeddings capability (/embeddings)\n", *provider)
+		os.Exit(1)
+	}
+	if *provider == "anthropic" && *endpoint == "chat_usage_stream" {
+		// adjustForAnthropic keeps neither stream nor stream_options, so the
+		// answer would be a buffered message saved as a stream fixture.
+		fmt.Fprintf(os.Stderr, "Error: provider %q cannot record endpoint %q: its request has no stream options\n", *provider, *endpoint)
 		os.Exit(1)
 	}
 	if required, ok := providerExclusiveEndpoints[*endpoint]; ok && *provider != required {

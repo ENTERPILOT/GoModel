@@ -54,9 +54,16 @@ var compatUsageCases = []struct {
 		output: 549, total: 600, reasoning: 504, cost: 1380.6, reasoningRateCost: 1884.6,
 	},
 	{
-		name:   "itemised thinking larger than the excess moves only the excess",
+		// The total has room for 100 of the 504 itemised tokens: the excess
+		// is moved and no more reasoning is reported than there is output.
+		name:   "itemised thinking larger than the excess, in completion_tokens_details",
 		usage:  `{"prompt_tokens":27,"completion_tokens":45,"total_tokens":172,"completion_tokens_details":{"reasoning_tokens":504}}`,
-		output: 145, total: 172, reasoning: 504, cost: 370.6, reasoningRateCost: 874.6,
+		output: 145, total: 172, reasoning: 145, cost: 370.6, reasoningRateCost: 515.6,
+	},
+	{
+		name:   "itemised thinking larger than the excess, at the top level",
+		usage:  `{"prompt_tokens":27,"completion_tokens":45,"reasoning_tokens":504,"total_tokens":172}`,
+		output: 145, total: 172, reasoning: 145, cost: 370.6, reasoningRateCost: 515.6,
 	},
 	{
 		// An explicit zero says the excess is something other than thinking.
@@ -230,6 +237,13 @@ func assertCompatUsageEntry(t *testing.T, output, total, reasoning int, microUSD
 	} else {
 		assert.Equal(t, reasoning, entry.RawData["completion_reasoning_tokens"], "reasoning tokens")
 	}
+	recorded, includedInOutput := usage.EntryReasoningTokens(usage.UsageLogEntry{
+		Provider: "gemini", InputTokens: entry.InputTokens, OutputTokens: entry.OutputTokens,
+		TotalTokens: entry.TotalTokens, RawData: entry.RawData,
+	})
+	assert.Equal(t, int64(reasoning), recorded, "reasoning tokens under every name")
+	assert.True(t, includedInOutput)
+	assert.LessOrEqual(t, recorded, int64(entry.OutputTokens), "no more reasoning than output")
 	require.NotNil(t, entry.TotalCost)
 	assert.InDelta(t, microUSD, *entry.TotalCost*1e6, 1e-6, "cost in millionths of a dollar")
 }

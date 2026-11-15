@@ -14,6 +14,10 @@ import (
 // usage object carrying it has already been through an adapter.
 const compatFoldedKey = "completion_reasoning_tokens"
 
+// compatReasoningKey is the top-level usage member the endpoint may itemise
+// reasoning tokens under, beside completion_tokens_details.reasoning_tokens.
+const compatReasoningKey = "reasoning_tokens"
+
 // compatChatResponse decodes a chat completion from Google's OpenAI-compatible
 // endpoint and folds its thinking tokens into the completion tokens.
 type compatChatResponse struct {
@@ -46,6 +50,12 @@ func (r *compatChatResponse) UnmarshalJSON(data []byte) error {
 // billed as thinking and an explicit zero moves nothing. Without it the whole
 // excess is taken as thinking, the only source observed on this endpoint.
 //
+// The reasoning count reported afterwards is the itemised one, or what was
+// moved when none was itemised, and never more than the completion tokens: an
+// itemised count the total has no room for is cut down to them, in every
+// member that carries it, so no reasoning token is priced that is not also an
+// output token.
+//
 // A folded usage is marked with compatFoldedKey and left alone from then on,
 // so folding twice changes nothing. It reports whether usage changed.
 func foldCompatThinkingTokens(usage *core.Usage, itemised *int) bool {
@@ -59,11 +69,11 @@ func foldCompatThinkingTokens(usage *core.Usage, itemised *int) bool {
 	if thinking <= 0 {
 		return false
 	}
+	usage.CompletionTokens += thinking
 	reasoning := thinking
 	if itemised != nil {
-		reasoning = *itemised
+		reasoning = min(*itemised, usage.CompletionTokens)
 	}
-	usage.CompletionTokens += thinking
 
 	var details core.CompletionTokensDetails
 	if usage.CompletionTokensDetails != nil {
@@ -77,6 +87,9 @@ func foldCompatThinkingTokens(usage *core.Usage, itemised *int) bool {
 		raw = make(map[string]any, 1)
 	}
 	raw[compatFoldedKey] = reasoning
+	if _, reported := raw[compatReasoningKey]; reported {
+		raw[compatReasoningKey] = reasoning
+	}
 	usage.RawUsage = raw
 	return true
 }
