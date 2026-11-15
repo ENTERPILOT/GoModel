@@ -3,23 +3,23 @@
 # requires it.
 
 # CI, release, and repository automation
-/.github/ @SantiagoDePolonia
+/.github/ @ENTERPILOT/maintainers
 
 # Build and release definitions
-Dockerfile* @SantiagoDePolonia
-/.dockerignore @SantiagoDePolonia
-/docker-compose.yaml @SantiagoDePolonia
-/.goreleaser.yaml @SantiagoDePolonia
-/Makefile @SantiagoDePolonia
-/helm/ @SantiagoDePolonia
+Dockerfile* @ENTERPILOT/maintainers
+/.dockerignore @ENTERPILOT/maintainers
+/docker-compose.yaml @ENTERPILOT/maintainers
+/.goreleaser.yaml @ENTERPILOT/maintainers
+/Makefile @ENTERPILOT/maintainers
+/helm/ @ENTERPILOT/maintainers
 
 # Dependency manifests and lockfiles
-/go.mod @SantiagoDePolonia
-/go.sum @SantiagoDePolonia
-/web/dashboard/package.json @SantiagoDePolonia
-/web/dashboard/package-lock.json @SantiagoDePolonia
+/go.mod @ENTERPILOT/maintainers
+/go.sum @ENTERPILOT/maintainers
+/web/dashboard/package.json @ENTERPILOT/maintainers
+/web/dashboard/package-lock.json @ENTERPILOT/maintainers
 
 # Installer scripts: served from main and piped straight into a shell
-/docs/install/ @SantiagoDePolonia
+/docs/install/ @ENTERPILOT/maintainers
 
-/SECURITY.md @SantiagoDePolonia
+/SECURITY.md @ENTERPILOT/maintainers
