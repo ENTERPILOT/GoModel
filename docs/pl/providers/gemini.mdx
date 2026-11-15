@@ -50,7 +50,8 @@ rezygnacja per request w Gemini; endpoint kompatybilny z OpenAI nie ma takiego p
 
 W natywnym trybie AI Studio na `/v1/messages/count_tokens` odpowiada własne
 `countTokens` Gemini, więc wynik obejmuje narzut per request, który nalicza
-Gemini 4. Tryb `openai_compatible` i Vertex dostają oszacowanie GoModel.
+Gemini 4. Tryb `openai_compatible`, Vertex oraz requesty, dla których wywołanie
+`countTokens` się nie powiedzie, dostają oszacowanie GoModel.
 
 ## Bazowe URL-e
 
@@ -138,7 +139,7 @@ W trybie natywnym `reasoning_effort` (lub `reasoning.effort`) jest tłumaczone n
 W Gemini 3 i 4 nie da się wyłączyć thinkingu, a modele Pro, 3.7 i 3.8
 Flash, Gemini 4 (`gemini-4-argon`, ...) oraz aliasy `-latest` odrzucają `minimal`, więc GoModel wysyła
 najniższy poziom akceptowany przez te modele, zamiast zwracać błąd 400 od Google.
-Podobnie `xhigh` akceptuje tylko `gemini-4-hydrogen`, więc każdy inny model dostaje
+Podobnie `xhigh` akceptuje tylko Gemini 4 Hydrogen, więc każdy inny model Gemini dostaje
 `high` (w Gemini 2.5 budżet dla `high`). Jawne
 `extra_body.google.thinking_config` jest przekazywane bez zmian, gdy ustawia
 `thinking_budget` lub `thinking_level`; w przeciwnym razie `reasoning_effort` dodaje

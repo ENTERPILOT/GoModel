@@ -52,7 +52,7 @@ blok, którego kanoniczny request nie potrafi odwzorować, docierają do Anthrop
 | Endpoint | Zachowanie |
 | --- | --- |
 | `POST /v1/messages` | Tworzy wiadomość przez routing modelu z tłumaczeniem. Obsługuje streaming (`stream: true`) ze zdarzeniami SSE w formacie Anthropic. |
-| `POST /v1/messages/count_tokens` | Liczy tokeny wejściowe. Dokładnie dla modeli, których provider ma endpoint do liczenia (Anthropic, OpenAI, Gemini); w pozostałych przypadkach jest to skalibrowane oszacowanie. |
+| `POST /v1/messages/count_tokens` | Liczy tokeny wejściowe. Dokładnie dla modeli, których provider ma endpoint do liczenia (Anthropic, OpenAI oraz Gemini w natywnym trybie AI Studio); w pozostałych przypadkach jest to skalibrowane oszacowanie. |
 | `GET /v1/models` | Zwraca katalog w kształcie listy Anthropic (`type: "model"`, `display_name`, `created_at`), gdy request zawiera nagłówek `anthropic-version`, który SDK Anthropic zawsze wysyłają; w przeciwnym razie w kształcie OpenAI. Cały katalog wraca na jednej stronie, chyba że klient stronicuje za pomocą `limit`, `after_id` lub `before_id` (stronicowanie Anthropic, `has_more` ustawiane odpowiednio); kursor, który nie wskazuje żadnego modelu z listy, zwraca `400`, więc zacznij od pierwszej strony. |
 | `GET /v1/models/{model}` | Pobiera jeden model, w kształcie modelu Anthropic, gdy request zawiera `anthropic-version`; w przeciwnym razie w kształcie OpenAI. Samo ID działające przy inferencji (`gpt-6-luna`) pobiera model z listy, do którego zostaje rozwiązane. Błędy (np. nieznany model) używają koperty błędu Anthropic (`{"type": "error", "error": {...}}`) pod tym samym warunkiem. |
 | `POST /v1/messages/batches` | Tworzy Message Batch. Inline `requests[].params` są tłumaczone dla każdego elementu osobno, więc batch może trafić do dowolnego providera z natywną obsługą batchy (Anthropic, OpenAI, …), nie tylko do Anthropic. |
@@ -311,8 +311,9 @@ Anthropic, które nie mają kanonicznego odpowiednika, nie są zachowywane od po
   dla requestu z narzędziami obsługiwanego przez Chat Completions doliczany jest
   stały preambuł narzędzi, za który naliczana jest opłata. W starszych rodzinach
   modeli taki request może dać wynik o kilka tokenów niższy od rozliczanego wejścia
-  (6 w `gpt-4o-mini`). Modele Gemini w natywnym trybie AI Studio liczy
-  `countTokens` Gemini. Guardrails nie są uruchamiane przy liczeniu, więc gdy workflow
+  (6 w `gpt-4o-mini`). Modele Gemini w natywnym trybie AI Studio są liczone
+  przez `countTokens` Gemini; w Gemini 4 request ze schematem odpowiedzi albo historią
+  wywołań narzędzi może dać wynik niższy od rozliczonego inputu. Guardrails nie są uruchamiane przy liczeniu, więc gdy workflow
   requestu ma guardrails promptu, prompt nigdy nie jest wysyłany do providera w celu
   policzenia i odpowiada oszacowanie (guardrails działające tylko na odpowiedzi
   i strumieniu zachowują dokładne liczenie). Dla każdego innego providera, a także

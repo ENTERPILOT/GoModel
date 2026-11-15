@@ -19,15 +19,17 @@ type geminiCountTokensRequest struct {
 
 // geminiCountedRequest holds the generateContent members that make up the
 // input. The generation config rides along because a response schema is
-// billed as input (Gemini 4 counts 100 tokens more for a two-field schema).
-// The tool config, safety settings, cached content and store flag are left
-// out: they do not change the count or have side effects.
+// billed as input (Gemini 4 counts 100 tokens more for a two-field schema),
+// and a cached content the client named is counted with the request that
+// reads it. The tool config, safety settings and store flag are left out:
+// they do not change the count.
 type geminiCountedRequest struct {
 	Model             string          `json:"model"`
 	SystemInstruction *geminiContent  `json:"system_instruction,omitempty"`
 	Contents          []geminiContent `json:"contents"`
 	Tools             []geminiTool    `json:"tools,omitempty"`
 	GenerationConfig  map[string]any  `json:"generationConfig,omitempty"`
+	CachedContent     string          `json:"cachedContent,omitempty"`
 }
 
 // CountChatTokens counts a chat request's input tokens with the Gemini API's
@@ -55,12 +57,14 @@ func (p *Provider) CountChatTokens(ctx context.Context, req *core.ChatRequest) (
 	err = p.nativeClient.Do(ctx, llmclient.Request{
 		Method:   http.MethodPost,
 		Endpoint: "/models/" + url.PathEscape(model) + ":countTokens",
+		Model:    req.Model,
 		Body: geminiCountTokensRequest{GenerateContentRequest: geminiCountedRequest{
 			Model:             "models/" + model,
 			SystemInstruction: converted.SystemInstruction,
 			Contents:          converted.Contents,
 			Tools:             converted.Tools,
 			GenerationConfig:  converted.GenerationConfig,
+			CachedContent:     converted.CachedContent,
 		}},
 	}, &resp)
 	if err != nil {

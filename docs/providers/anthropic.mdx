@@ -144,6 +144,8 @@ Claude has a single summary level) to get it:
 GoModel sends `thinking.display: "summarized"`. The text comes back as
 `reasoning_content` on Chat Completions and in the reasoning item's `content`
 on `/v1/responses`. Thinking is billed the same with or without a summary.
+Anthropic SDK clients on `/v1/messages` set `thinking.display` themselves; that
+request is forwarded as sent.
 
 A summary never turns thinking on: without `reasoning.effort` it applies only
 to models that think on their own, and it is ignored with `effort: "none"`

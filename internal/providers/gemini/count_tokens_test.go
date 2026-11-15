@@ -74,7 +74,8 @@ func TestCountChatTokens(t *testing.T) {
 			assert.JSONEq(t, `[{"functionDeclarations":[{"name":"get_weather","parametersJsonSchema":{"type":"object"}}]}]`,
 				string(counted["tools"]))
 			assert.JSONEq(t, `{"maxOutputTokens":1,"thinkingConfig":{"thinkingLevel":"low"}}`, string(counted["generationConfig"]))
-			assert.Len(t, counted, 5, "tool config, cached content and store are left out")
+			assert.JSONEq(t, `"cachedContents/abc"`, string(counted["cachedContent"]))
+			assert.Len(t, counted, 6, "tool config and store are left out")
 		})
 	}
 }

@@ -50,7 +50,8 @@ per-request opt-out; the OpenAI-compatible endpoint has no such member.
 
 In native AI Studio mode `/v1/messages/count_tokens` is answered by Gemini's
 own `countTokens`, so the count includes the per-request overhead Gemini 4
-bills. `openai_compatible` mode and Vertex get GoModel's estimate.
+bills. `openai_compatible` mode, Vertex, and any request whose `countTokens`
+call fails get GoModel's estimate.
 
 ## Base URLs
 
@@ -139,7 +140,7 @@ Gemini's `thinkingConfig`:
 Thinking cannot be turned off on Gemini 3 or 4, and Pro models, 3.7 and 3.8
 Flash, Gemini 4 (`gemini-4-argon`, ...) and the `-latest` aliases reject `minimal`, so GoModel sends
 the lowest level those models accept instead of surfacing Google's 400.
-Likewise only `gemini-4-hydrogen` accepts `xhigh`, so every other model gets
+Likewise only Gemini 4 Hydrogen accepts `xhigh`, so every other Gemini model gets
 `high` (the `high` budget on Gemini 2.5). An
 explicit `extra_body.google.thinking_config` is forwarded unchanged when it
 sets `thinking_budget` or `thinking_level`; otherwise `reasoning_effort` adds
