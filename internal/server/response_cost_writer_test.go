@@ -151,15 +151,38 @@ func heldSeparatorBodies(gap string, bound int) []struct{ name, body, want strin
 		{name: "before the comma of a removed member", body: `{"id":"x"` + gap + `,` + gap + `"cost":9}`, want: `{"id":"x"}`},
 		{name: "around removed members", body: `{"id":"x",` + gap + `"cost":9` + gap + `,` + gap + `"Cost":8,` + gap + `"n":1}`, want: `{"id":"x",` + afterComma + `"n":1}`},
 		{name: "after a removed first member", body: `{"cost":9,` + gap + `"id":"x"}`, want: `{"id":"x"}`},
+		{name: "between strings that hold whitespace", body: `{"note":" a  b\t",` + gap + `"cost":9,` + gap + `"n":" 1 "}`, want: `{"note":" a  b\t",` + afterComma + `"n":" 1 "}`},
 		{name: "before the closing brace", body: `{"id":"x"` + gap + `}`, want: `{"id":"x"` + kept + `}`},
 		{name: "before the closing brace of an emptied object", body: `{"cost":9` + gap + `}`, want: `{` + kept + `}`},
 	}
 }
 
-// withoutJSONSpace returns a body that has no whitespace inside its strings
-// without the whitespace between its tokens.
+// withoutJSONSpace returns body without the whitespace between its tokens.
+// The contents of its strings stay as they are.
 func withoutJSONSpace(body string) string {
-	return strings.NewReplacer(" ", "", "\n", "", "\t", "", "\r", "").Replace(body)
+	var out strings.Builder
+	inString, escaped := false, false
+	for i := range len(body) {
+		c := body[i]
+		switch {
+		case escaped:
+			escaped = false
+		case inString && c == '\\':
+			escaped = true
+		case c == '"':
+			inString = !inString
+		case !inString && isJSONSpace(c):
+			continue
+		}
+		out.WriteByte(c)
+	}
+	return out.String()
+}
+
+func TestWithoutJSONSpace(t *testing.T) {
+	const body = "{ \"a b\" :\t\" \\\" c \\\\\" ,\r\n \"d\" : [ 1 , \" \" ] }"
+
+	assert.Equal(t, `{"a b":" \" c \\","d":[1," "]}`, withoutJSONSpace(body))
 }
 
 // With markups the bytes between two top-level members are held until the

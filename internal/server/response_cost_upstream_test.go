@@ -361,21 +361,31 @@ func (r *failsOnceReader) Read(p []byte) (int, error) {
 	return 0, err
 }
 
-// A JSON answer that fails before its first byte, or in the whitespace in
-// front of it, is not relayed as a complete, empty one: the client gets a
-// gateway error.
-func TestResponseCost_JSONAnswerFailingAtItsStart(t *testing.T) {
+// A JSON answer that fails before it was read (before its first byte, in the
+// whitespace in front of it, or inside its object) is not relayed as a
+// complete one: the client gets a gateway error, and that error carries none
+// of the provider's headers, which belong to the answer it did not get.
+func TestResponseCost_JSONAnswerFailingBeforeItWasRead(t *testing.T) {
+	upstreamHeader := func() http.Header {
+		header := jsonHeader()
+		header.Set("Cache-Control", "public, max-age=600")
+		header.Set("Location", "https://provider.example/elsewhere")
+		header.Set("Access-Control-Allow-Origin", "*")
+		header.Set("X-Upstream", "1")
+		return header
+	}
 	tests := []struct {
 		name string
 		lead string
 	}{
 		{name: "before the first byte"},
 		{name: "after whitespace", lead: " \n\t"},
+		{name: "inside the object", lead: `{"choices":[],"usage":{` + pricedUsage},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			body := &failsOnceReader{lead: tt.lead, err: io.ErrUnexpectedEOF}
-			srv, logger := costGateway(t, costPassthroughProvider(jsonHeader(), body), returnCosts)
+			srv, logger := costGateway(t, costPassthroughProvider(upstreamHeader(), body), returnCosts)
 
 			rec := postJSON(t, srv, passthroughChatPath, passthroughChatBody)
 
@@ -383,7 +393,25 @@ func TestResponseCost_JSONAnswerFailingAtItsStart(t *testing.T) {
 			assert.Equal(t, "provider_error", gjson.Get(rec.Body.String(), "error.type").String(), rec.Body.String())
 			assert.Empty(t, logger.entries)
 			assert.Empty(t, rec.Header().Values(responseCostHeader))
+			for name := range upstreamHeader() {
+				if name != "Content-Type" {
+					assert.Empty(t, rec.Header().Values(name), "the provider's %s is on a gateway error", name)
+				}
+			}
+			assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
 		})
+	}
+
+	// An answer that was read is relayed with the provider's headers.
+	for _, body := range []string{`{"choices":[],"usage":{` + pricedUsage + `}}`, `[{"usage":{}}]`} {
+		srv, _ := costGateway(t, costPassthroughProvider(upstreamHeader(), strings.NewReader(body)), returnCosts)
+
+		rec := postJSON(t, srv, passthroughChatPath, passthroughChatBody)
+
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		for name, values := range upstreamHeader() {
+			assert.Equal(t, values, rec.Header().Values(name), "%s: %s", name, body)
+		}
 	}
 }
 

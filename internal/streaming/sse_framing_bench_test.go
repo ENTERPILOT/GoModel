@@ -35,9 +35,6 @@ func BenchmarkNextEventBoundary(b *testing.B) {
 	}
 }
 
-// BenchmarkObservedSSEStreamSplitEvent feeds one large Responses terminal
-// event in 4 KiB reads, the shape of a response.completed carrying a long
-// answer. The observer declines decoding so only framing cost is measured.
 // BenchmarkCutLineBareCREvent cuts the lines of an event framed with bare CRs
 // only: no line is searched to the end of the event for an LF it does not
 // have.
@@ -55,6 +52,9 @@ func BenchmarkCutLineBareCREvent(b *testing.B) {
 	}
 }
 
+// BenchmarkObservedSSEStreamSplitEvent feeds one large Responses terminal
+// event in 4 KiB reads, the shape of a response.completed carrying a long
+// answer. The observer declines decoding so only framing cost is measured.
 func BenchmarkObservedSSEStreamSplitEvent(b *testing.B) {
 	payload := `{"type":"response.completed","response":{"id":"resp_1","output_text":"` + strings.Repeat("y", 200*1024) + `"}}`
 	body := []byte("data: " + payload + "\n\n")

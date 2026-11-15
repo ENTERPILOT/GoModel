@@ -216,25 +216,6 @@ func paceForResponseCost(c *echo.Context, stream io.ReadCloser) io.ReadCloser {
 	return &eventCostStream{ReadCloser: streaming.NewEventPacedStream(stream), report: report}
 }
 
-// eventCostStream forgets the reported cost when a paced stream hands out a
-// usage object, before the usage observer reads it. The cost is known again
-// once the observer priced that usage, so an event whose usage it does not
-// read (one it skips, or cannot parse) carries no cost, never the cost of an
-// event before it. Events without usage leave the cost as it is: a stream
-// converted for the client carries its usage in an event written after them.
-type eventCostStream struct {
-	io.ReadCloser
-	report *usage.CostReport
-}
-
-func (s *eventCostStream) Read(p []byte) (int, error) {
-	n, err := s.ReadCloser.Read(p)
-	if usage.HasUsageObject(p[:n]) {
-		s.report.Forget()
-	}
-	return n, err
-}
-
 // deleteHeaderFold removes every value of the header name, under any key that
 // names it: Header.Del only removes the canonical key, and the server writes
 // a key set in another case, or with stray spaces, as it is.

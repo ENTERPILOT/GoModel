@@ -335,7 +335,17 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 			"provider returned an encoded response the gateway cannot read to return its cost", nil))
 	}
 
-	copyPassthroughResponseHeaders(c.Response().Header(), http.Header(resp.Headers))
+	// A JSON answer whose cost is returned is read before it is relayed, and
+	// one that cannot be read is answered with a gateway error. That error
+	// carries none of the provider's headers: they are relayed with the
+	// answer, once it was read.
+	readsFirst := returnsCost && isJSONContentType(resp.Headers) && !isSSEContentType(resp.Headers)
+	relayHeaders := func() {
+		copyPassthroughResponseHeaders(c.Response().Header(), http.Header(resp.Headers))
+	}
+	if !readsFirst {
+		relayHeaders()
+	}
 
 	if isSSEContentType(resp.Headers) {
 		auditlog.MarkEntryAsStreaming(c, true)
@@ -403,16 +413,17 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 	if isObservablePassthroughStatus(resp.StatusCode) {
 		observers = passthroughJSONResponseObservers(c, usageLogger, pricingResolver, providerType, providerName, endpoint, info, extraObservers)
 	}
-	if returnsCost && isJSONContentType(resp.Headers) {
+	if readsFirst {
 		lead, first, rest, err := readJSONStart(resp.Body, maxObservedJSONResponseBytes)
 		if err != nil {
 			return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "failed to read provider response", err))
 		}
 		body := io.MultiReader(bytes.NewReader(lead), rest)
 		if first != 0 && first != '{' {
+			relayHeaders()
 			return relayJSONAsItArrives(c, resp.StatusCode, body, observers)
 		}
-		return relayJSONAfterObservers(c, providerType, resp.StatusCode, body, observers)
+		return relayJSONAfterObservers(c, providerType, resp.StatusCode, body, observers, relayHeaders)
 	}
 	if len(observers) == 0 || !isJSONContentType(resp.Headers) {
 		c.Response().WriteHeader(resp.StatusCode)
@@ -451,11 +462,15 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 // known to be too large only once the limit was read, so that much of it is
 // held: it is sent the moment the limit is passed, and what follows is relayed
 // as it arrives.
-func relayJSONAfterObservers(c *echo.Context, providerType string, status int, upstream io.Reader, observers []streaming.Observer) error {
+//
+// relayHeaders puts the provider's headers on the response. It is called once
+// the answer was read, so the gateway error for one that was not has none.
+func relayJSONAfterObservers(c *echo.Context, providerType string, status int, upstream io.Reader, observers []streaming.Observer, relayHeaders func()) error {
 	body, err := io.ReadAll(io.LimitReader(upstream, maxObservedJSONResponseBytes+1))
 	if err != nil {
 		return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "failed to read provider response", err))
 	}
+	relayHeaders()
 	observed := len(body) <= maxObservedJSONResponseBytes
 	if observed {
 		notifyObserversWithJSONBody(body, observers)
