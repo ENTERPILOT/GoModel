@@ -331,12 +331,13 @@ export function buildBudgetFormPayload(form) {
 
 // parseBudgetAlertThresholds reads the editor's comma-separated percentages
 // into a sorted list without duplicates. Empty input is an empty list (use
-// the defaults); anything that is not a whole number from 1 to 100 is null.
+// the defaults); anything that is not a whole number from 1 to 100 is null,
+// a percent sign without a number included.
 export function parseBudgetAlertThresholds(value) {
   const parts = String(value ?? "")
     .split(/[,;\s]+/)
-    .map((part) => part.replace(/%$/, ""))
-    .filter((part) => part !== "");
+    .filter((part) => part !== "")
+    .map((part) => part.replace(/%$/, ""));
   const thresholds = new Set();
   for (const part of parts) {
     if (!/^\d+$/.test(part)) {

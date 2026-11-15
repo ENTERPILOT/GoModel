@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/enterpilot/gomodel/config"
 )
 
 // Soft alerts: each budget has alert thresholds, percentages of its amount.
@@ -27,12 +29,18 @@ type AlertSettings struct {
 	DefaultThresholds []int
 }
 
-// WithAlertThresholds sets the alert thresholds of budgets without their own.
-// An empty list keeps the built-in defaults.
+// WithAlertThresholds sets the alert thresholds of budgets without their own,
+// sorted and without duplicates. An empty list keeps the built-in defaults; a
+// threshold outside 1-100 makes NewService fail.
 func WithAlertThresholds(thresholds []int) ServiceOption {
 	return func(service *Service) {
-		if len(thresholds) > 0 {
-			service.alertDefaults = slices.Clone(thresholds)
+		normalized, err := config.NormalizeBudgetAlertThresholds(thresholds)
+		if err != nil {
+			service.optionErr = err
+			return
+		}
+		if len(normalized) > 0 {
+			service.alertDefaults = normalized
 		}
 	}
 }
@@ -49,7 +57,8 @@ func (s *Service) AlertSettings() AlertSettings {
 	}
 }
 
-// alertThresholds returns the thresholds that apply to budget, ascending.
+// alertThresholds returns the thresholds that apply to budget. Both lists are
+// normalized when they are written.
 func (s *Service) alertThresholds(budget Budget) []int {
 	if len(budget.AlertThresholds) > 0 {
 		return budget.AlertThresholds
@@ -95,12 +104,13 @@ func (r CheckResult) thresholdReached(percent int) bool {
 // AlertClaim identifies one alert: a budget revision (with the child a
 // per-child template was resolved to), the period it is in, and a threshold.
 //
-// Revision is part of the identity so that changing a budget's amount, or
-// deleting and recreating it, re-arms its thresholds for the rest of the
-// period: the alerts fired against the old amount say nothing about the new
-// one. Editing only the thresholds is not a new revision: a threshold already
-// claimed in the period stays claimed, and one that is new fires once spend
-// has reached it.
+// Revision is part of the identity so that changing a budget's amount or cost
+// basis, or deleting and recreating it, re-arms its thresholds for the rest
+// of the period: the alerts fired against the old amount say nothing about
+// the new one, even when the new amount is one the budget had before. Editing
+// only the thresholds is not a new revision: a threshold already claimed in
+// the period stays claimed, and one that is new fires once spend has reached
+// it.
 type AlertClaim struct {
 	Scope            Scope
 	Subject          string
@@ -124,9 +134,16 @@ func (c AlertClaim) key() string {
 }
 
 // alertRevision identifies the version of a budget its alerts were fired
-// for: its creation time, in seconds as every store keeps it, and its amount.
-// Every replica reads both from the database, so they agree on it.
+// for. The store writes a new, random Revision with every new budget and
+// every change of amount or cost basis, so a revision is never used twice,
+// and every replica reads the same one from the database.
+//
+// A budget stored before revisions existed has none until it next changes;
+// it is identified by its creation time and amount, as it was then.
 func (b Budget) alertRevision() string {
+	if b.Revision != "" {
+		return b.Revision
+	}
 	var created int64
 	if !b.CreatedAt.IsZero() {
 		created = b.CreatedAt.Unix()
@@ -146,7 +163,7 @@ type ChildSpend struct {
 type AlertStore interface {
 	// ClaimAlert records that the alert fired and reports whether this call
 	// was the first to do so. Every gateway instance on the database claims
-	// before it delivers, so an alert is delivered once.
+	// before it delivers, so an alert is delivered at most once.
 	ClaimAlert(ctx context.Context, claim AlertClaim) (bool, error)
 
 	// PruneAlerts forgets the alerts of periods that ended before cutoff.

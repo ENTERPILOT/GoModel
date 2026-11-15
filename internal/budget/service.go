@@ -115,6 +115,10 @@ type Service struct {
 	// alertsEnabled is set once an Alerter evaluates them. See alerts.go.
 	alertDefaults []int
 	alertsEnabled atomic.Bool
+
+	// optionErr is set by an option given a value it cannot use; NewService
+	// returns it.
+	optionErr error
 }
 
 // SetProviderBillable installs the lookup that tells a non-billable provider
@@ -168,6 +172,9 @@ func NewService(ctx context.Context, store Store, options ...ServiceOption) (*Se
 		if option != nil {
 			option(service)
 		}
+	}
+	if service.optionErr != nil {
+		return nil, service.optionErr
 	}
 	if err := service.Refresh(ctx); err != nil {
 		return nil, err

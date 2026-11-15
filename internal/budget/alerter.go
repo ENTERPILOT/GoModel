@@ -33,10 +33,10 @@ const (
 // An alert fires once per budget revision, period, and threshold across every
 // gateway instance sharing the database: an instance claims the alert in
 // storage before notifying, and only the first claim wins. A reset, a new
-// period, a moved period anchor, a changed amount, or a recreated budget is a
-// new claim and so fires again; see AlertClaim. Claiming first means delivery
-// is at most once: an instance that stops between the claim and the delivery
-// loses that alert.
+// period, a moved period anchor, a changed amount or cost basis, or a
+// recreated budget is a new claim and so fires again; see AlertClaim. Claiming
+// first means delivery is at most once: an instance that stops between the
+// claim and the delivery loses that alert.
 type Alerter struct {
 	service  *Service
 	store    AlertStore
@@ -116,8 +116,8 @@ func (a *Alerter) Start() func() {
 }
 
 // Evaluate runs one pass: it reads the spend of every budget, in one batched
-// lookup plus one grouped lookup per per-child template, and fires the
-// thresholds reached and not yet claimed.
+// lookup plus one grouped lookup per per-child template, and after each
+// lookup fires the thresholds reached and not yet claimed.
 func (a *Alerter) Evaluate(ctx context.Context) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -136,22 +136,22 @@ func (a *Alerter) Evaluate(ctx context.Context) error {
 			plain = append(plain, budget)
 		}
 	}
-	// One failed lookup must not silence the budgets that were read.
+	// One failed lookup must not silence the budgets that were read, and a
+	// slow one must not use up the time the others need to be claimed: every
+	// lookup fires what it found before the next one starts.
 	var errs []error
 	results, err := a.service.evaluate(ctx, plain, now, settings)
 	if err != nil {
 		errs = append(errs, err)
 	}
+	a.fireAll(ctx, results, now)
 	for _, template := range templates {
 		children, err := a.evaluateChildren(ctx, template, now, settings)
 		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
-		results = append(results, children...)
-	}
-	for _, result := range results {
-		a.fire(ctx, result, now)
+		a.fireAll(ctx, children, now)
 	}
 	errs = append(errs, a.prune(ctx, now))
 	return errors.Join(errs...)
@@ -193,12 +193,19 @@ func (a *Alerter) evaluateChildren(ctx context.Context, template Budget, now tim
 	return results, nil
 }
 
-// fire claims and notifies every threshold result has reached. A claim that
-// fails in storage is logged and tried again on the next pass.
+func (a *Alerter) fireAll(ctx context.Context, results []CheckResult, now time.Time) {
+	for _, result := range results {
+		a.fire(ctx, result, now)
+	}
+}
+
+// fire claims and notifies every threshold result has reached, whatever
+// order they are listed in. A claim that fails in storage is logged and tried
+// again on the next pass.
 func (a *Alerter) fire(ctx context.Context, result CheckResult, now time.Time) {
 	for _, threshold := range a.service.alertThresholds(result.Budget) {
 		if !result.thresholdReached(threshold) {
-			return // thresholds ascend
+			continue
 		}
 		claim := AlertClaim{
 			Scope:            result.Budget.Scope,

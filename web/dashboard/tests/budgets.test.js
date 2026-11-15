@@ -675,6 +675,8 @@ test("parseBudgetAlertThresholds reads percentages and rejects anything else", (
     { input: "-5", want: null },
     { input: "80.5", want: null },
     { input: "high", want: null },
+    { input: "%", want: null },
+    { input: "80, %", want: null },
   ];
   for (const { input, want } of cases) {
     assert.deepEqual(parseBudgetAlertThresholds(input), want, String(input));

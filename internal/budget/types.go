@@ -90,11 +90,16 @@ type Budget struct {
 	// AlertThresholds overrides the default alert thresholds for this
 	// budget: percentages of Amount, sorted, each 1-100. Empty keeps the
 	// defaults.
-	AlertThresholds []int      `json:"alert_thresholds,omitempty" bson:"alert_thresholds,omitempty"`
-	Source          string     `json:"source,omitempty" bson:"source,omitempty"`
-	LastResetAt     *time.Time `json:"last_reset_at,omitempty" bson:"last_reset_at,omitempty"`
-	CreatedAt       time.Time  `json:"created_at" bson:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at" bson:"updated_at"`
+	AlertThresholds []int `json:"alert_thresholds,omitempty" bson:"alert_thresholds,omitempty"`
+	// Revision identifies what the budget's alerts are claimed against; see
+	// AlertClaim. The store assigns it and ignores a caller's: a new one when
+	// the budget is created, and whenever its amount or cost basis changes.
+	// It is empty on a budget stored before revisions existed.
+	Revision    string     `json:"-" bson:"alert_revision,omitempty"`
+	Source      string     `json:"source,omitempty" bson:"source,omitempty"`
+	LastResetAt *time.Time `json:"last_reset_at,omitempty" bson:"last_reset_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at" bson:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at" bson:"updated_at"`
 }
 
 // EnforcedBasis returns the basis the budget's spend is measured on.

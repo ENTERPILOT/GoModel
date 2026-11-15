@@ -333,29 +333,36 @@ func TestSQLStoreRoundTripsAlertThresholds(t *testing.T) {
 	})
 }
 
+// createBudgetsTableBeforeAlerts creates the budgets table as it was before
+// alert thresholds and revisions existed, holding one budget.
+func createBudgetsTableBeforeAlerts(t *testing.T, db sqlx.DB) {
+	t.Helper()
+	ctx := context.Background()
+	err := db.Schema(ctx, `CREATE TABLE budgets (
+		scope TEXT NOT NULL DEFAULT 'user_path',
+		subject TEXT NOT NULL,
+		per_child `+sqlx.TypeBool+` NOT NULL DEFAULT FALSE,
+		cost_basis TEXT NOT NULL DEFAULT 'provider',
+		period_seconds `+sqlx.TypeInt64+` NOT NULL,
+		amount `+sqlx.TypeFloat+` NOT NULL,
+		source TEXT NOT NULL DEFAULT '',
+		last_reset_at `+sqlx.TypeInt64+`,
+		created_at `+sqlx.TypeInt64+` NOT NULL,
+		updated_at `+sqlx.TypeInt64+` NOT NULL,
+		PRIMARY KEY (scope, subject, period_seconds)
+	)`)
+	require.NoError(t, err)
+	_, err = db.Exec(ctx, `
+		INSERT INTO budgets (scope, subject, period_seconds, amount, source, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, ScopeUserPath, "/existing", PeriodDailySeconds, 10.0, SourceManual, int64(1), int64(1))
+	require.NoError(t, err)
+}
+
 func TestSQLStoreMigratesBudgetsWithoutAlertThresholds(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
-		// The budgets table as it was before alert thresholds existed.
-		err := db.Schema(ctx, `CREATE TABLE budgets (
-			scope TEXT NOT NULL DEFAULT 'user_path',
-			subject TEXT NOT NULL,
-			per_child `+sqlx.TypeBool+` NOT NULL DEFAULT FALSE,
-			cost_basis TEXT NOT NULL DEFAULT 'provider',
-			period_seconds `+sqlx.TypeInt64+` NOT NULL,
-			amount `+sqlx.TypeFloat+` NOT NULL,
-			source TEXT NOT NULL DEFAULT '',
-			last_reset_at `+sqlx.TypeInt64+`,
-			created_at `+sqlx.TypeInt64+` NOT NULL,
-			updated_at `+sqlx.TypeInt64+` NOT NULL,
-			PRIMARY KEY (scope, subject, period_seconds)
-		)`)
-		require.NoError(t, err)
-		_, err = db.Exec(ctx, `
-			INSERT INTO budgets (scope, subject, period_seconds, amount, source, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
-		`, ScopeUserPath, "/existing", PeriodDailySeconds, 10.0, SourceManual, int64(1), int64(1))
-		require.NoError(t, err)
+		createBudgetsTableBeforeAlerts(t, db)
 
 		store, err := NewSQLStore(ctx, db)
 		require.NoError(t, err)

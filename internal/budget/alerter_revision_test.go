@@ -88,13 +88,34 @@ func TestAlerterRearmsOnANewBudgetRevision(t *testing.T) {
 			wantAfterSpend: []string{"/team@90"},
 		},
 		{
-			name: "deleted and recreated: a new budget alerts from scratch",
+			name: "amount changed and changed back: the restored amount is a new revision",
+			edit: func(t *testing.T, service *Service) {
+				upsertRevision(revisionBudget(200))(t, service)
+				upsertRevision(revisionBudget(100))(t, service)
+			},
+			wantAfterEdit:  []string{"/team@80"}, // 85 of 100, as before the edits
+			wantAfterSpend: []string{"/team@100"},
+			newRevision:    true,
+		},
+		{
+			name: "cost basis changed: the thresholds are measured on other spend",
+			edit: func(t *testing.T, service *Service) {
+				billed := revisionBudget(100)
+				billed.CostBasis = CostBasisBilled
+				upsertRevision(billed)(t, service)
+			},
+			wantAfterEdit:  []string{"/team@80"},
+			wantAfterSpend: []string{"/team@100"},
+			newRevision:    true,
+		},
+		{
+			// The recreated budget has the amount and the creation second of
+			// the deleted one.
+			name: "deleted and recreated within the same second: a new budget alerts from scratch",
 			edit: func(t *testing.T, service *Service) {
 				ctx := context.Background()
 				require.NoError(t, service.DeleteBudget(ctx, ScopeUserPath, "/team", PeriodDailySeconds))
-				recreated := revisionBudget(100)
-				recreated.CreatedAt = alertTestNow.Add(-time.Minute)
-				require.NoError(t, service.UpsertBudgets(ctx, []Budget{recreated}))
+				require.NoError(t, service.UpsertBudgets(ctx, []Budget{revisionBudget(100)}))
 			},
 			wantAfterEdit:  []string{"/team@80"},
 			wantAfterSpend: []string{"/team@100"},
@@ -114,12 +135,14 @@ func TestAlerterRearmsOnANewBudgetRevision(t *testing.T) {
 				before := first.recorder.take()
 				require.Equal(t, []string{"/team@80"}, alertNames(before))
 
+				// The edit is made on one replica and evaluated first on the
+				// other, which knows the budget only from the database.
 				tt.edit(t, first.service)
 				require.NoError(t, second.service.Refresh(ctx))
-				require.NoError(t, first.alerter.Evaluate(ctx))
-				afterEdit := first.recorder.take()
+				require.NoError(t, second.alerter.Evaluate(ctx))
+				afterEdit := second.recorder.take()
 				assert.Equal(t, nonNil(tt.wantAfterEdit), alertNames(afterEdit), "after the edit")
-				assert.Empty(t, second.evaluate(t), "the other replica agrees on the revision")
+				assert.Empty(t, first.evaluate(t), "the replicas agree on the revision")
 
 				spend(t, usageStore, "after", "/team", alertTestNow.Add(-time.Hour), 800)
 				require.NoError(t, first.alerter.Evaluate(ctx))

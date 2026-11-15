@@ -131,7 +131,7 @@ func TestAlerterFiresEachThresholdOnceAcrossInstances(t *testing.T) {
 			Budget: ext.AlertBudget{
 				Scope: "user_path", Subject: "/team", EffectiveSubject: "/team",
 				PeriodSeconds: PeriodDailySeconds, Period: "daily", Amount: 100, CostBasis: "provider",
-				Revision: strconv.FormatInt(budgets[0].CreatedAt.Unix(), 10) + ":100",
+				Revision: budgets[0].Revision,
 			},
 			ThresholdPercent: 80,
 			Spent:            85,
@@ -371,16 +371,23 @@ func TestAlerterKeepsStorageWorkBounded(t *testing.T) {
 	assert.Equal(t, 1, store.prunes, "pruning runs once an interval")
 	assert.Len(t, alerter.settled, 2)
 
+	// The claim the evaluation made for the 80% alert, with its revision.
+	day := time.Date(2026, time.April, 25, 0, 0, 0, 0, time.UTC)
+	fired := AlertClaim{
+		Scope: ScopeUserPath, Subject: "/team", EffectiveSubject: "/team", Revision: service.Budgets()[0].alertRevision(),
+		PeriodSeconds: PeriodDailySeconds, PeriodStart: day, PeriodEnd: day.AddDate(0, 0, 1), Threshold: 80,
+	}
+	won, err := sqlStore.ClaimAlert(ctx, fired)
+	require.NoError(t, err)
+	require.False(t, won, "the alert is claimed in storage")
+
 	// Once the period is over its claims are forgotten and pruning runs again.
 	now = now.Add(48 * time.Hour)
 	require.NoError(t, alerter.Evaluate(ctx))
 	assert.Empty(t, alerter.settled)
 	assert.Equal(t, 2, store.prunes)
 
-	won, err := sqlStore.ClaimAlert(ctx, AlertClaim{
-		Scope: ScopeUserPath, Subject: "/team", EffectiveSubject: "/team", PeriodSeconds: PeriodDailySeconds,
-		PeriodStart: time.Date(2026, time.April, 25, 0, 0, 0, 0, time.UTC), Threshold: 80,
-	})
+	won, err = sqlStore.ClaimAlert(ctx, fired)
 	require.NoError(t, err)
 	assert.True(t, won, "the claims of the ended period were pruned from storage")
 }
@@ -419,11 +426,16 @@ type memoryAlertStore struct {
 	mu       sync.Mutex
 	claimed  map[string]bool
 	claimErr error
+	// byChild, when set, answers SumSpendByChild.
+	byChild func() ([]ChildSpend, error)
 }
 
-func (s *memoryAlertStore) ClaimAlert(_ context.Context, claim AlertClaim) (bool, error) {
+func (s *memoryAlertStore) ClaimAlert(ctx context.Context, claim AlertClaim) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	if s.claimErr != nil {
 		return false, s.claimErr
 	}
@@ -440,7 +452,58 @@ func (s *memoryAlertStore) ClaimAlert(_ context.Context, claim AlertClaim) (bool
 func (s *memoryAlertStore) PruneAlerts(context.Context, time.Time) error { return nil }
 
 func (s *memoryAlertStore) SumSpendByChild(context.Context, SpendWindow, int) ([]ChildSpend, error) {
+	if s.byChild != nil {
+		return s.byChild()
+	}
 	return nil, nil
+}
+
+// A per-child lookup that uses up the evaluation's time must not cost the
+// budgets already read their alerts.
+func TestAlerterFiresWhatItReadBeforeASlowChildLookup(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := &memoryAlertStore{byChild: func() ([]ChildSpend, error) {
+		cancel()
+		return nil, ctx.Err()
+	}}
+	store.budgets = []Budget{
+		{Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10},
+		{Scope: ScopeUserPath, Subject: "/customers", PerChild: true, PeriodSeconds: PeriodDailySeconds, Amount: 10},
+	}
+	store.sum = func(SpendWindow) (float64, bool, error) { return 9, true, nil }
+	service, err := NewService(context.Background(), store)
+	require.NoError(t, err)
+	recorder := &alertRecorder{}
+	alerter, err := NewAlerter(service, time.Minute, recorder.notify)
+	require.NoError(t, err)
+	alerter.now = func() time.Time { return alertTestNow }
+
+	require.ErrorIs(t, alerter.Evaluate(ctx), context.Canceled)
+	assert.Equal(t, []string{"/team@80"}, alertNames(recorder.take()))
+}
+
+// Thresholds fire whatever order they are listed in: the defaults given to
+// the service, and those of a budget whose stored list is not sorted.
+func TestAlerterFiresUnsortedThresholds(t *testing.T) {
+	tests := []struct {
+		name     string
+		defaults []int
+		own      []int
+	}{
+		{name: "default thresholds", defaults: []int{100, 80, 80}},
+		{name: "stored thresholds", own: []int{100, 80}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &memoryAlertStore{}
+			store.budgets = []Budget{{Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10, AlertThresholds: tt.own}}
+			store.sum = func(SpendWindow) (float64, bool, error) { return 8.5, true, nil }
+			instance := newAlertInstanceOn(t, store, WithAlertThresholds(tt.defaults))
+
+			assert.Equal(t, []string{"/team@80"}, instance.evaluate(t), "85% is past 80 and short of 100")
+		})
+	}
 }
 
 func TestAlerterStartEvaluatesUntilStopped(t *testing.T) {

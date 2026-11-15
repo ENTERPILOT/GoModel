@@ -125,24 +125,9 @@ func (s *MongoDBStore) upsertNormalizedBudgets(ctx context.Context, budgets []Bu
 	}
 	models := make([]mongo.WriteModel, 0, len(budgets))
 	for _, budget := range budgets {
-		filter := mongoBudgetKey(budget.Scope, budget.Subject, budget.PeriodSeconds)
-		update := bson.D{{Key: "$set", Value: bson.D{
-			{Key: "scope", Value: budget.Scope},
-			{Key: "subject", Value: budget.Subject},
-			{Key: "per_child", Value: budget.PerChild},
-			{Key: "cost_basis", Value: budget.CostBasis},
-			{Key: "period_seconds", Value: budget.PeriodSeconds},
-			{Key: "amount", Value: budget.Amount},
-			{Key: "alert_thresholds", Value: budget.AlertThresholds},
-			{Key: "source", Value: budget.Source},
-			{Key: "updated_at", Value: budget.UpdatedAt},
-		}}, {Key: "$setOnInsert", Value: bson.D{
-			{Key: "created_at", Value: budget.CreatedAt},
-			{Key: "last_reset_at", Value: budget.LastResetAt},
-		}}}
 		models = append(models, mongo.NewUpdateOneModel().
-			SetFilter(filter).
-			SetUpdate(update).
+			SetFilter(mongoBudgetKey(budget.Scope, budget.Subject, budget.PeriodSeconds)).
+			SetUpdate(mongoBudgetUpsert(budget)).
 			SetUpsert(true))
 	}
 	if _, err := s.budgets.BulkWrite(ctx, models); err != nil {
@@ -164,6 +149,40 @@ func (s *MongoDBStore) DeleteBudget(ctx context.Context, scope Scope, subject st
 		return fmt.Errorf("%w: %s %s/%d", ErrNotFound, scope, subject, periodSeconds)
 	}
 	return nil
+}
+
+// mongoBudgetUpsert writes one budget as an update pipeline, which can read
+// the stored document: alert_revision is replaced only when the amount or
+// the cost basis changes, in the same write that changes them, and
+// created_at and last_reset_at are written only with a new document. Every
+// expression reads the document as it was before the stage. Values are
+// literals, so a subject starting with "$" is never read as a field path.
+func mongoBudgetUpsert(budget Budget) mongo.Pipeline {
+	literal := func(value any) bson.D { return bson.D{{Key: "$literal", Value: value}} }
+	isNew := bson.D{{Key: "$eq", Value: bson.A{bson.D{{Key: "$type", Value: "$created_at"}}, "missing"}}}
+	onInsert := func(field string, value any) bson.D {
+		return bson.D{{Key: "$cond", Value: bson.A{isNew, literal(value), "$" + field}}}
+	}
+	// Documents stored before cost bases existed limit provider cost.
+	storedBasis := bson.D{{Key: "$ifNull", Value: bson.A{"$cost_basis", string(CostBasisProvider)}}}
+	unchanged := bson.D{{Key: "$and", Value: bson.A{
+		bson.D{{Key: "$eq", Value: bson.A{"$amount", literal(budget.Amount)}}},
+		bson.D{{Key: "$eq", Value: bson.A{storedBasis, literal(budget.CostBasis)}}},
+	}}}
+	return mongo.Pipeline{{{Key: "$set", Value: bson.D{
+		{Key: "scope", Value: literal(budget.Scope)},
+		{Key: "subject", Value: literal(budget.Subject)},
+		{Key: "per_child", Value: literal(budget.PerChild)},
+		{Key: "cost_basis", Value: literal(budget.CostBasis)},
+		{Key: "period_seconds", Value: literal(budget.PeriodSeconds)},
+		{Key: "amount", Value: literal(budget.Amount)},
+		{Key: "alert_thresholds", Value: literal(budget.AlertThresholds)},
+		{Key: "alert_revision", Value: bson.D{{Key: "$cond", Value: bson.A{unchanged, "$alert_revision", literal(budget.Revision)}}}},
+		{Key: "source", Value: literal(budget.Source)},
+		{Key: "updated_at", Value: literal(budget.UpdatedAt)},
+		{Key: "created_at", Value: onInsert("created_at", budget.CreatedAt)},
+		{Key: "last_reset_at", Value: onInsert("last_reset_at", budget.LastResetAt)},
+	}}}}
 }
 
 // mongoBudgetKey is the document filter identifying one budget.

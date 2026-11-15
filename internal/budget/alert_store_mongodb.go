@@ -112,7 +112,10 @@ func (s *MongoDBStore) SumSpendByChild(ctx context.Context, window SpendWindow, 
 		bson.D{{Key: "$sort", Value: bson.D{{Key: "total", Value: -1}, {Key: "_id", Value: 1}}}},
 		bson.D{{Key: "$limit", Value: limit}},
 	}
-	cursor, err := s.usage.Aggregate(ctx, pipeline)
+	// One group per child: let a subject with very many children spill to
+	// disk instead of failing on the stage's memory limit, which MongoDB
+	// before 6.0 does unless asked.
+	cursor, err := s.usage.Aggregate(ctx, pipeline, options.Aggregate().SetAllowDiskUse(true))
 	if err != nil {
 		return nil, fmt.Errorf("sum usage cost by child: %w", err)
 	}

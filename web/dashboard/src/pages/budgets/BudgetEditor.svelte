@@ -150,7 +150,6 @@
         id="budget-alert-thresholds"
         class="form-input"
         type="text"
-        inputmode="numeric"
         autocomplete="off"
         placeholder={store.alerts.default_thresholds.join(", ")}
         aria-describedby="budget-alert-thresholds-help"

@@ -1,6 +1,7 @@
 package budget
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -174,4 +175,30 @@ func TestServiceAlertThresholdsPreferTheBudgetsOwn(t *testing.T) {
 	assert.Equal(t, []int{60, 90}, service.alertThresholds(Budget{}))
 	assert.Equal(t, []int{25}, service.alertThresholds(Budget{AlertThresholds: []int{25}}))
 	assert.Equal(t, AlertSettings{DefaultThresholds: []int{60, 90}}, service.AlertSettings())
+}
+
+func TestWithAlertThresholdsNormalizes(t *testing.T) {
+	tests := []struct {
+		name       string
+		thresholds []int
+		want       []int
+		wantErr    string
+	}{
+		{name: "empty keeps the built-in defaults", want: []int{80, 100}},
+		{name: "sorted", thresholds: []int{100, 80}, want: []int{80, 100}},
+		{name: "without duplicates", thresholds: []int{90, 50, 90, 50}, want: []int{50, 90}},
+		{name: "above 100", thresholds: []int{80, 101}, wantErr: "between 1 and 100"},
+		{name: "below 1", thresholds: []int{0, 80}, wantErr: "between 1 and 100"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service, err := NewService(context.Background(), &fakeStore{}, WithAlertThresholds(tt.thresholds))
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, service.AlertSettings().DefaultThresholds)
+		})
+	}
 }
