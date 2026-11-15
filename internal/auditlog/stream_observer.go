@@ -3,6 +3,7 @@ package auditlog
 import (
 	"bytes"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -236,7 +237,7 @@ func parseChatCompletionEvent(builder *streamResponseBuilder, event map[string]a
 		builder.Created = created
 	}
 	if usage, ok := event["usage"].(map[string]any); ok {
-		builder.Usage = copyAnyMap(usage)
+		builder.Usage = maps.Clone(usage)
 	}
 
 	if choices, ok := event["choices"].([]any); ok && len(choices) > 0 {
