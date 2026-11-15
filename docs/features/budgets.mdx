@@ -421,8 +421,11 @@ A budget rejects requests once it is spent. Alerts tell you before that:
 each budget has thresholds, as percentages of its amount, and GoModel sends an
 alert when spend reaches one.
 
-Alerts are off until they have somewhere to go. Declare a webhook and every
-budget starts alerting at the default thresholds, 80% and 100%:
+Alerts need budgets, and therefore usage tracking, to be on (`BUDGETS_ENABLED`
+and `USAGE_ENABLED`, both on by default); otherwise the `BUDGETS_ALERTS_*`
+settings are ignored. They are also off until they have somewhere to go: a
+webhook, or an `ext.AlertSink` registered by a custom build. Declare a webhook
+and every budget starts alerting at the default thresholds, 80% and 100%:
 
 ```env
 BUDGETS_ALERTS_WEBHOOK_URL=https://alerts.example.com/gomodel
@@ -435,7 +438,7 @@ budgets:
     thresholds: [80, 100]
     webhooks:
       - url: "https://alerts.example.com/gomodel"
-        secret: "${env:BUDGET_ALERT_WEBHOOK_SECRET}"
+        secret: "${env:ALERT_HOOK_SECRET}"
 ```
 
 The URL and the secret accept [secret references](/advanced/secret-references).
@@ -446,7 +449,7 @@ YAML for several.
 | --------------------------- | ------------------------------------ | --------- | --------------------------------------------------------------------------- |
 | `thresholds`                | `BUDGETS_ALERTS_THRESHOLDS`          | `80,100`  | You want an earlier warning (`50,80,100`). Each value is 1-100.             |
 | `interval`                  | `BUDGETS_ALERTS_INTERVAL`            | `60`      | You need alerts sooner than a minute after spend is stored. Seconds.        |
-| `webhooks`                  | `BUDGETS_ALERTS_WEBHOOK_URL`, `_SECRET` | _(none)_ | Always: without a webhook nothing is evaluated.                             |
+| `webhooks`                  | `BUDGETS_ALERTS_WEBHOOK_URL`, `_SECRET` | _(none)_ | Always, unless a custom build registers an `ext.AlertSink`: without either, nothing is evaluated. |
 | `webhook_timeout`           | `BUDGETS_ALERTS_WEBHOOK_TIMEOUT`     | `10`      | Your receiver is slow. Seconds per attempt.                                 |
 | `webhook_max_retries`       | `BUDGETS_ALERTS_WEBHOOK_MAX_RETRIES` | `3`       | `0` to never retry; up to `10`.                                             |
 
@@ -486,11 +489,13 @@ and threshold:
   So does a change to the reset anchor in Settings: the period is recomputed
   from the new anchor, and its thresholds fire once the spend inside it
   reaches them.
-- Changing a budget's amount, or deleting and recreating it, is a new revision
-  of the budget and re-arms all its thresholds for the rest of the period:
-  raised from 100 to 1000 after the 80% alert, it alerts again at 800. Editing
-  only the thresholds is not: a threshold that already fired stays fired, and
-  a new one fires once spend reaches it.
+- Changing a budget's amount or cost basis, or deleting and recreating it, is
+  a new revision of the budget and re-arms all its thresholds for the rest of
+  the period: raised from 100 to 1000 after the 80% alert, it alerts again at
+  800. Every such change is a new revision, a change back to an earlier amount
+  included: changed from 100 to 200 and back to 100, it alerts at 80 again.
+  Editing only the thresholds is not: a threshold that already fired stays
+  fired, and a new one fires once spend reaches it.
 - When spend passes several thresholds between two evaluations, each one
   fires, lowest first.
 - A [per-child budget](#dynamic-per-child-budgets) alerts per child: each
@@ -500,11 +505,16 @@ and threshold:
 - Spend is read from stored usage, so an alert trails the request that caused
   it by the usage flush (`USAGE_FLUSH_INTERVAL`, 5 s) plus up to one interval.
 
-The record is written before delivery, so an alert is delivered at most once:
-a gateway stopped between the two loses that alert, and one that could not be
-delivered after its retries is logged and counted, not sent later. On
-shutdown, queued alerts get 5 s to be delivered; the ones still queued after
-that are abandoned, logged, and counted as delivery failures.
+Delivery is at-most-once, not guaranteed. The record is written before
+delivery and an alert is never raised a second time, so a gateway stopped
+between the two loses that alert, and one that still fails after its retries
+is dropped: logged and counted, not sent later. On shutdown, queued alerts get
+5 s to be delivered; the ones still queued after that are abandoned, logged,
+and counted as delivery failures.
+
+A receiver can still see the same alert twice, so deduplicate on `id`:
+replicas on SQLite, each with its own database, each raise it, and a retry
+repeats a `POST` whose answer was lost on the way back.
 
 ### Webhook payload
 
@@ -525,7 +535,7 @@ Each alert is one `POST` with a JSON body:
     "period": "daily",
     "amount": 100,
     "cost_basis": "provider",
-    "revision": "1745539200:100"
+    "revision": "4MZ7Q2KXJ5T3WNBAG6RHV8YPDC"
   },
   "threshold_percent": 80,
   "spent": 81.2,
@@ -547,7 +557,7 @@ Each alert is one `POST` with a JSON body:
 | `budget.effective_subject` | What the spend was counted for: the child path of a per-child budget, otherwise the subject.         |
 | `budget.period_seconds`, `.period` | The reset period and its name (`hourly`, `daily`, `weekly`, `monthly`, or `<n>s`).           |
 | `budget.amount`, `.cost_basis` | The limit, and the cost `spent` is measured on (`provider` or `billed`).                         |
-| `budget.revision`          | Opaque. Changes when the amount changes or the budget is recreated; not when only thresholds change. |
+| `budget.revision`          | Opaque. A new one whenever the amount or cost basis changes, even back to an earlier value, and when the budget is recreated; not when only thresholds change. |
 | `threshold_percent`        | The threshold that was reached.                                                                      |
 | `spent`, `usage_ratio`     | Spend in the period when the alert was raised, and `spent / amount` (above `1` when exceeded).       |
 | `period_start`, `period_end` | The period the alert belongs to. A reset moves `period_start` to the reset time.                   |
@@ -584,7 +594,7 @@ def verified(secret: bytes, body: bytes, header: str) -> bool:
     if not t.isdigit() or abs(time.time() - int(t)) > TOLERANCE:
         return False
     expected = hmac.new(secret, t.encode() + b"." + body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature)
+    return hmac.compare_digest(expected.encode(), signature.encode())
 ```
 
 Answer with any `2xx`. A network error, `408`, `429`, or `5xx` is retried up
@@ -598,7 +608,7 @@ delays the evaluation of other budgets or another webhook.
 The webhook is deliberately generic JSON: GoModel does not format messages for
 Slack, Teams, or email. Point it at a small receiver or an automation tool
 that does, or, in a custom build, register an `ext.AlertSink`, which receives
-the same events. A sink builds its HTTP clients with `ext.NewHTTPClient` to
+the same events, each at most once and never retried by the gateway. A sink builds its HTTP clients with `ext.NewHTTPClient` to
 use the same proxy and TLS trust, may implement `ext.SharedStoreAware` to
 share state across replicas, and is released by the build that registered it
 once the gateway has shut down.

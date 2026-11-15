@@ -450,8 +450,12 @@ Ein Budget weist Requests ab, sobald es aufgebraucht ist. Warnungen melden
 sich vorher: Jedes Budget hat Schwellen, als Prozentwerte seines Betrags, und
 GoModel sendet eine Warnung, sobald die Ausgaben eine davon erreichen.
 
-Warnungen sind aus, bis sie ein Ziel haben. Deklarieren Sie einen Webhook, und
-jedes Budget warnt bei den Standardschwellen 80 % und 100 %:
+Warnungen setzen aktivierte Budgets und damit die Nutzungserfassung voraus
+(`BUDGETS_ENABLED` und `USAGE_ENABLED`, beide standardmäßig an); sonst werden
+die `BUDGETS_ALERTS_*`-Einstellungen ignoriert. Außerdem sind sie aus, bis sie
+ein Ziel haben: einen Webhook oder einen `ext.AlertSink`, den ein eigener
+Build registriert. Deklarieren Sie einen Webhook, und jedes Budget warnt bei
+den Standardschwellen 80 % und 100 %:
 
 ```env
 BUDGETS_ALERTS_WEBHOOK_URL=https://alerts.example.com/gomodel
@@ -464,7 +468,7 @@ budgets:
     thresholds: [80, 100]
     webhooks:
       - url: "https://alerts.example.com/gomodel"
-        secret: "${env:BUDGET_ALERT_WEBHOOK_SECRET}"
+        secret: "${env:ALERT_HOOK_SECRET}"
 ```
 
 URL und Secret akzeptieren [Secret-Referenzen](/de/advanced/secret-references).
@@ -475,7 +479,7 @@ für mehrere verwenden Sie YAML.
 | ------------------------------- | ------------------------------------ | --------- | ----------------------------------------------------------------------------- |
 | `thresholds`                    | `BUDGETS_ALERTS_THRESHOLDS`          | `80,100`  | Sie früher gewarnt werden möchten (`50,80,100`). Jeder Wert liegt bei 1-100.  |
 | `interval`                      | `BUDGETS_ALERTS_INTERVAL`            | `60`      | Sie Warnungen schneller als eine Minute nach dem Speichern brauchen. Sekunden. |
-| `webhooks`                      | `BUDGETS_ALERTS_WEBHOOK_URL`, `_SECRET` | _(keine)_ | Immer: Ohne Webhook wird nichts ausgewertet.                                 |
+| `webhooks`                      | `BUDGETS_ALERTS_WEBHOOK_URL`, `_SECRET` | _(keine)_ | Immer, außer ein eigener Build registriert einen `ext.AlertSink`: Ohne eines von beiden wird nichts ausgewertet. |
 | `webhook_timeout`               | `BUDGETS_ALERTS_WEBHOOK_TIMEOUT`     | `10`      | Ihr Empfänger langsam ist. Sekunden pro Versuch.                              |
 | `webhook_max_retries`           | `BUDGETS_ALERTS_WEBHOOK_MAX_RETRIES` | `3`       | `0`, um nie zu wiederholen; höchstens `10`.                                   |
 
@@ -517,12 +521,14 @@ Zeitraum und Schwelle einmal ausgelöst:
   kann erneut auslösen. Ebenso eine Änderung des Reset-Ankers in den
   Einstellungen: Der Zeitraum wird ab dem neuen Anker neu berechnet, und seine
   Schwellen lösen aus, sobald die Ausgaben darin sie erreichen.
-- Eine Änderung des Betrags oder Löschen und Neuanlegen ist eine neue Revision
-  des Budgets und schaltet alle Schwellen für den Rest des Zeitraums wieder
-  scharf: Von 100 auf 1000 erhöht, nachdem die 80-%-Warnung kam, warnt es bei
-  800 erneut. Werden nur die Schwellen bearbeitet, nicht: Eine bereits
-  ausgelöste Schwelle bleibt ausgelöst, eine neue löst aus, sobald die
-  Ausgaben sie erreichen.
+- Eine Änderung des Betrags oder der Kostenbasis oder Löschen und Neuanlegen
+  ist eine neue Revision des Budgets und schaltet alle Schwellen für den Rest
+  des Zeitraums wieder scharf: Von 100 auf 1000 erhöht, nachdem die
+  80-%-Warnung kam, warnt es bei 800 erneut. Jede solche Änderung ist eine
+  neue Revision, auch die Rückkehr zu einem früheren Betrag: Von 100 auf 200
+  und zurück auf 100 geändert, warnt es bei 80 erneut. Werden nur die
+  Schwellen bearbeitet, nicht: Eine bereits ausgelöste Schwelle bleibt
+  ausgelöst, eine neue löst aus, sobald die Ausgaben sie erreichen.
 - Überschreiten die Ausgaben zwischen zwei Auswertungen mehrere Schwellen,
   löst jede aus, die niedrigste zuerst.
 - Ein [Budget pro Kind](#dynamische-budgets-pro-kind) warnt pro Kind: Jedes
@@ -534,13 +540,19 @@ Zeitraum und Schwelle einmal ausgelöst:
   folgt dem auslösenden Request daher um den Usage-Flush
   (`USAGE_FLUSH_INTERVAL`, 5 s) plus bis zu ein Intervall verzögert.
 
-Der Eintrag wird vor der Zustellung geschrieben, eine Warnung wird also
-höchstens einmal zugestellt: Wird ein Gateway zwischen beidem gestoppt, geht
-diese Warnung verloren, und eine Warnung, die nach ihren Wiederholungen nicht
-zugestellt werden konnte, wird protokolliert und gezählt, nicht später
-gesendet. Beim Herunterfahren haben wartende Warnungen 5 s Zeit für die
-Zustellung; was danach noch wartet, wird verworfen, protokolliert und als
-Zustellfehler gezählt.
+Die Zustellung erfolgt höchstens einmal und ist nicht garantiert. Der Eintrag
+wird vor der Zustellung geschrieben, und eine Warnung wird nie ein zweites Mal
+ausgelöst: Wird ein Gateway zwischen beidem gestoppt, geht diese Warnung
+verloren, und eine Warnung, die auch nach ihren Wiederholungen fehlschlägt,
+wird verworfen: protokolliert und gezählt, nicht später gesendet. Beim
+Herunterfahren haben wartende Warnungen 5 s Zeit für die Zustellung; was
+danach noch wartet, wird verworfen, protokolliert und als Zustellfehler
+gezählt.
+
+Ein Empfänger kann dieselbe Warnung dennoch zweimal sehen, deduplizieren Sie
+also auf `id`: Replikate mit SQLite, jedes mit eigener Datenbank, lösen sie
+jeweils aus, und eine Wiederholung sendet einen `POST` erneut, dessen Antwort
+auf dem Rückweg verloren ging.
 
 ### Webhook-Payload
 
@@ -561,7 +573,7 @@ Jede Warnung ist ein `POST` mit JSON-Body:
     "period": "daily",
     "amount": 100,
     "cost_basis": "provider",
-    "revision": "1745539200:100"
+    "revision": "4MZ7Q2KXJ5T3WNBAG6RHV8YPDC"
   },
   "threshold_percent": 80,
   "spent": 81.2,
@@ -583,7 +595,7 @@ Jede Warnung ist ein `POST` mit JSON-Body:
 | `budget.effective_subject` | Wofür die Ausgaben gezählt wurden: der Kindpfad eines Budgets pro Kind, sonst das Subjekt.                |
 | `budget.period_seconds`, `.period` | Der Reset-Zeitraum und sein Name (`hourly`, `daily`, `weekly`, `monthly` oder `<n>s`).             |
 | `budget.amount`, `.cost_basis` | Das Limit und die Kosten, auf denen `spent` gemessen wird (`provider` oder `billed`).                 |
-| `budget.revision`          | Opak. Ändert sich mit dem Betrag oder beim Neuanlegen, nicht wenn nur die Schwellen geändert werden.      |
+| `budget.revision`          | Opak. Neu bei jeder Änderung des Betrags oder der Kostenbasis, auch zurück auf einen früheren Wert, und beim Neuanlegen; nicht, wenn nur die Schwellen geändert werden. |
 | `threshold_percent`        | Die erreichte Schwelle.                                                                                   |
 | `spent`, `usage_ratio`     | Ausgaben im Zeitraum beim Auslösen und `spent / amount` (über `1`, wenn überschritten).                   |
 | `period_start`, `period_end` | Der Zeitraum, zu dem die Warnung gehört. Ein Reset verschiebt `period_start` auf den Reset-Zeitpunkt.   |
@@ -622,7 +634,7 @@ def verified(secret: bytes, body: bytes, header: str) -> bool:
     if not t.isdigit() or abs(time.time() - int(t)) > TOLERANCE:
         return False
     expected = hmac.new(secret, t.encode() + b"." + body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature)
+    return hmac.compare_digest(expected.encode(), signature.encode())
 ```
 
 Antworten Sie mit einem beliebigen `2xx`. Ein Netzwerkfehler, `408`, `429`
@@ -639,7 +651,8 @@ Webhook.
 Der Webhook ist bewusst generisches JSON: GoModel formatiert keine Nachrichten
 für Slack, Teams oder E-Mail. Richten Sie ihn auf einen kleinen Empfänger oder
 ein Automatisierungswerkzeug, das dies übernimmt, oder registrieren Sie in
-einem eigenen Build einen `ext.AlertSink`, der dieselben Ereignisse erhält.
+einem eigenen Build einen `ext.AlertSink`, der dieselben Ereignisse erhält,
+jedes höchstens einmal und ohne Wiederholung durch das Gateway.
 Ein Sink baut seine HTTP-Clients mit `ext.NewHTTPClient`, um denselben Proxy
 und dasselbe TLS-Vertrauen zu nutzen, kann `ext.SharedStoreAware`
 implementieren, um Zustand zwischen Replikaten zu teilen, und wird von dem

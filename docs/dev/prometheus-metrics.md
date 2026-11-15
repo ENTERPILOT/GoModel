@@ -176,10 +176,12 @@ storage. Incremented by `internal/alerts.Dispatcher.Notify`, not by a hook.
 
 ### `gomodel_budget_alert_delivery_failures_total`
 
-Counter, label `destination` (`webhook`, or an `ext.AlertSink` name). Alerts a
-destination did not receive: a webhook that failed after its retries, a sink
-that returned an error, panicked, or outlived its timeout, an alert dropped on
-a full queue, or one abandoned when the dispatcher closed.
+Counter, label `destination` (`webhook`, or an `ext.AlertSink` name; the
+dispatcher refuses a sink named `webhook`, unnamed, or named like another).
+Alerts a destination did not receive: a webhook that failed after its retries,
+a sink that returned an error or panicked, a sink that had not returned 2 s
+after its context ended, every alert for that sink until the call returns, an
+alert dropped on a full queue, and one abandoned when the dispatcher closed.
 
 ## Token and Cost Metrics
 

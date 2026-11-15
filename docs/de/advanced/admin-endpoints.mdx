@@ -839,8 +839,10 @@ Diese Operationen wirken nicht global pro Zeitraum. Für die pfadbezogenen Route
 `DELETE` muss `user_path` URL-kodiert werden; die Form des Requests finden Sie unter [Budgets](/de/features/budgets).
 
 `GET /admin/budgets` liefert jedes Budget mit seinem Status und, sobald 5 % seines
-Zeitraums vergangen sind, `projected_spend` und `projected_exhaustion_at`. Das
-Objekt `alerts` auf oberster Ebene meldet, ob
+Zeitraums vergangen sind, `projected_spend`. `projected_exhaustion_at` kommt nur
+hinzu, solange das Budget laut Prognose vor dem Ende des Zeitraums aufgebraucht
+wird und es noch nicht ist; die Vorlage eines Budgets pro Kind hat keines der
+beiden Felder. Das Objekt `alerts` auf oberster Ebene meldet, ob
 [Budget-Warnungen](/de/features/budgets#warnungen) aktiv sind (`enabled`), und
 ihre `default_thresholds`; ein Budget mit eigenen Schwellen trägt
 `alert_thresholds`, die `PUT` akzeptiert.
