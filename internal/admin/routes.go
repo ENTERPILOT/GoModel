@@ -83,6 +83,7 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.DELETE("/virtual-models", h.DeleteVirtualModel, global)
 
 	g.GET("/mcp-servers", h.ListMCPServers, global)
+	g.GET("/mcp-servers/catalog", h.MCPToolCatalog, global)
 	g.PUT("/mcp-servers", h.UpsertMCPServer, global)
 	g.DELETE("/mcp-servers/:name", h.DeleteMCPServer, global)
 	g.POST("/mcp-servers/:name/reconnect", h.ReconnectMCPServer, global)
