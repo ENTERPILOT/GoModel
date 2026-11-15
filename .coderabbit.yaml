@@ -1,6 +1,0 @@
-# CodeRabbit settings for this repository. Anything not set here comes from
-# the organization settings in the CodeRabbit UI.
-inheritance: true
-reviews:
-  auto_approvals:
-    enabled: true

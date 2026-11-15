@@ -3,6 +3,7 @@ package mcpgateway
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -205,10 +206,17 @@ func initializeRawSession(t *testing.T, endpoint string, headers map[string]stri
 	return sessionID
 }
 
+// rawMCPStatus returns once the handler has: the status reaches the client
+// while the handler still runs, but the response body ends only after it
+// returns. A test can then move a clock or read state without racing what a
+// handler does last, such as the end-of-POST touch of a shared session.
 func rawMCPStatus(t *testing.T, endpoint, body string, headers map[string]string) int {
 	t.Helper()
 	resp := rawMCPPost(t, endpoint, body, headers)
 	defer resp.Body.Close()
+	_, err := io.Copy(io.Discard, resp.Body)
+	require.NoError(t, err)
+
 	return resp.StatusCode
 }
 
