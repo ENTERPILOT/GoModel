@@ -73,6 +73,7 @@ export function defaultVirtualModelForm() {
     strategy_config: {},
     session_affinity: true,
     failover: true,
+    vision_routing: false,
     user_paths: "",
     description: "",
     slowdown: "",
@@ -533,6 +534,11 @@ export function buildVirtualModelSavePayload(form, originalSource, mode) {
       // A single target stays a plain alias on the back-compat field.
       payload.target_model = targets[0].model;
     }
+    // Vision routing is off by default; only the opt-in travels. It is kept
+    // for a single target so adding another target later still honors it.
+    if (form && form.vision_routing) {
+      payload.vision_routing = true;
+    }
   }
   return { payload, source, isRedirect, isRename };
 }
@@ -552,6 +558,9 @@ export function buildAliasTogglePayload(alias) {
     if (Number.isFinite(slowdown)) {
       payload.slowdown = slowdown;
     }
+  }
+  if (alias.vision_routing) {
+    payload.vision_routing = true;
   }
   if (alias.reasoning_effort) {
     payload.reasoning_effort = alias.reasoning_effort;
