@@ -9,11 +9,13 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"encoding/pem"
+	"io"
 	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -472,4 +474,105 @@ func TestNewAppliesCredentialsOverConfiguredHTTPClient(t *testing.T) {
 	req := upstreamCapture.Last(t)
 	assert.Equal(t, "Bearer adc-token", req.Header.Get("Authorization"), "the configured transport must not bypass Vertex credentials")
 	assert.Positive(t, counted.calls.Load(), "the configured transport must still carry the request")
+}
+
+// authRecorder answers every Vertex request with generateContentJSON and
+// records where it went and how it was authenticated, so a test can name a
+// Google host without reaching it. Token exchanges with tokenHost go through.
+type authRecorder struct {
+	tokenHost string
+	hosts     []string
+	auth      []string
+}
+
+func (r *authRecorder) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Host == r.tokenHost {
+		return http.DefaultTransport.RoundTrip(req)
+	}
+	r.hosts = append(r.hosts, req.URL.Host)
+	r.auth = append(r.auth, req.Header.Get("Authorization"))
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(generateContentJSON)),
+		Request:    req,
+	}, nil
+}
+
+// TestNew_HostCredentialDestination pins where the host's Google credentials
+// may go. A provider declared in config.yaml or the environment keeps sending
+// them wherever the operator points it. One saved through the admin API sends
+// them to Google's own Vertex AI endpoints only: against any other base URL
+// it needs service-account JSON of its own.
+func TestNew_HostCredentialDestination(t *testing.T) {
+	const custom = "https://vertex-proxy.example.com" + nativeBasePath
+	tests := []struct {
+		name     string
+		managed  bool
+		baseURL  string
+		creds    string // "adc", "file", "json", or "base64"
+		wantHost string // empty: the provider refuses to build
+		want     string
+	}{
+		{name: "declared, ADC, custom endpoint", baseURL: custom, creds: "adc", wantHost: "vertex-proxy.example.com", want: "Bearer adc-token"},
+		{name: "declared, key file, custom endpoint", baseURL: custom, creds: "file", wantHost: "vertex-proxy.example.com", want: "Bearer sa-token"},
+		{name: "managed, ADC, custom endpoint", managed: true, baseURL: custom, creds: "adc"},
+		{name: "managed, key file, custom endpoint", managed: true, baseURL: custom, creds: "file"},
+		{name: "managed, own JSON, custom endpoint", managed: true, baseURL: custom, creds: "json", wantHost: "vertex-proxy.example.com", want: "Bearer sa-token"},
+		{name: "managed, own base64 JSON, custom endpoint", managed: true, baseURL: custom, creds: "base64", wantHost: "vertex-proxy.example.com", want: "Bearer sa-token"},
+		{name: "managed, ADC, Google lookalike host", managed: true, baseURL: "https://aiplatform.googleapis.com.example.com" + nativeBasePath, creds: "adc"},
+		{name: "managed, ADC, Google endpoint on another port", managed: true, baseURL: "https://aiplatform.googleapis.com:8443" + nativeBasePath, creds: "adc"},
+		{name: "managed, ADC, Google endpoint over http", managed: true, baseURL: "http://aiplatform.googleapis.com" + nativeBasePath, creds: "adc"},
+		{name: "managed, ADC, default endpoint", managed: true, creds: "adc", wantHost: "aiplatform.googleapis.com", want: "Bearer adc-token"},
+		{name: "managed, ADC, regional endpoint", managed: true, baseURL: "https://us-central1-aiplatform.googleapis.com" + nativeBasePath, creds: "adc", wantHost: "us-central1-aiplatform.googleapis.com", want: "Bearer adc-token"},
+		{name: "managed, ADC, multi-region endpoint", managed: true, baseURL: "https://aiplatform.eu.rep.googleapis.com" + nativeBasePath, creds: "adc", wantHost: "aiplatform.eu.rep.googleapis.com", want: "Bearer adc-token"},
+		{name: "managed, key file, default endpoint", managed: true, creds: "file", wantHost: "aiplatform.googleapis.com", want: "Bearer sa-token"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			token := "adc-token"
+			if tt.creds != "adc" {
+				token = "sa-token"
+			}
+			tokenURL, tokenCapture := tokenServer(t, token)
+			t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", vertexADCCredentialsFile(t, tokenURL))
+
+			cfg := testConfig()
+			cfg.Managed = tt.managed
+			cfg.APIMode = "native"
+			cfg.BaseURL = tt.baseURL
+			switch tt.creds {
+			case "file":
+				cfg.AuthType = "gcp_service_account"
+				cfg.ServiceAccountFile = vertexServiceAccountCredentialsFile(t, tokenURL)
+			case "json":
+				cfg.AuthType = "gcp_service_account"
+				cfg.ServiceAccountJSON = vertexServiceAccountCredentials(t, tokenURL)
+			case "base64":
+				cfg.AuthType = "gcp_service_account"
+				cfg.ServiceAccountJSONBase64 = base64.StdEncoding.EncodeToString([]byte(vertexServiceAccountCredentials(t, tokenURL)))
+			}
+
+			parsed, err := url.Parse(tokenURL)
+			require.NoError(t, err)
+			recorder := &authRecorder{tokenHost: parsed.Host}
+			provider := New(cfg, providers.ProviderOptions{HTTPClient: &http.Client{Transport: recorder}})
+			_, err = provider.ChatCompletion(context.Background(), &core.ChatRequest{
+				Model:    "google/gemini-2.5-flash",
+				Messages: []core.Message{{Role: "user", Content: "hi"}},
+			})
+
+			if tt.wantHost == "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "only sent to Google's Vertex AI endpoints")
+				assert.Empty(t, recorder.hosts, "a refused provider must not send requests")
+				assert.Zero(t, tokenCapture.Count(), "a refused provider must not exchange the host's credentials")
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, recorder.auth, 1)
+			assert.Equal(t, tt.wantHost, recorder.hosts[0])
+			assert.Equal(t, tt.want, recorder.auth[0])
+		})
+	}
 }

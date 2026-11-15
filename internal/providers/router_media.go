@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
 )
 
 func forwardAudioSpeechRequest(req *core.AudioSpeechRequest, selector core.ModelSelector) *core.AudioSpeechRequest {
@@ -78,6 +79,30 @@ func (r *Router) CreateTranslation(ctx context.Context, req *core.AudioTranscrip
 				return nil, core.NewInvalidRequestError(fmt.Sprintf("model %q does not support audio translations", req.Model), nil)
 			}
 			return translator.CreateTranslation(ctx, forwardReq)
+		},
+	)
+	return resp, err
+}
+
+// ListVoices routes a voice listing request to the provider that owns the
+// model, requiring it to implement core.AudioVoicesProvider. Like model
+// discovery it bypasses the circuit breaker: a failing listing endpoint says
+// nothing about inference and must not pause speech or chat.
+func (r *Router) ListVoices(ctx context.Context, req *core.AudioVoicesRequest) (*core.AudioVoicesResponse, error) {
+	if req == nil {
+		return nil, core.NewInvalidRequestError("audio voices request is required", nil)
+	}
+	resp, _, err := routeResolvedModelCall(
+		r, ctx, req.Model, req.Provider,
+		func(route resolvedRoute) *core.AudioVoicesRequest {
+			return &core.AudioVoicesRequest{Model: route.selector.Model}
+		},
+		func(ctx context.Context, provider core.Provider, forwardReq *core.AudioVoicesRequest) (*core.AudioVoicesResponse, error) {
+			lister, ok := provider.(core.AudioVoicesProvider)
+			if !ok {
+				return nil, core.NewAudioVoicesUnsupportedError(req.Model)
+			}
+			return lister.ListVoices(llmclient.WithoutCircuitBreaker(ctx), forwardReq)
 		},
 	)
 	return resp, err
