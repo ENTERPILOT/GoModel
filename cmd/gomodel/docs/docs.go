@@ -5664,6 +5664,70 @@ const docTemplate = `{
                 ]
             }
         },
+        "/v1/audio/voices": {
+            "get": {
+                "description": "GoModel extension, not part of the OpenAI API. Returns the voices the provider behind model offers; each id is a valid voice for POST /v1/audio/speech.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "audio"
+                ],
+                "summary": "List voices for a text-to-speech model",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model ID",
+                        "name": "model",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Provider routing hint",
+                        "name": "provider",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/core.AudioVoicesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/v1/auth/verify": {
             "get": {
                 "description": "Reports whether the presented credential authenticates against this gateway. Returns 401 when it does not. A gateway with no authentication configured has no credential to confirm and answers 200 with valid=false and method=none. Disabled unless AUTH_VERIFY_ENABLED is set.",
@@ -11227,6 +11291,30 @@ const docTemplate = `{
                             "additionalProperties": true
                         }
                     ]
+                }
+            }
+        },
+        "core.AudioVoice": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "example": "af_bella"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Bella"
+                }
+            }
+        },
+        "core.AudioVoicesResponse": {
+            "type": "object",
+            "properties": {
+                "voices": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/core.AudioVoice"
+                    }
                 }
             }
         },

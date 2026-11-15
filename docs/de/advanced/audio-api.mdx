@@ -31,6 +31,7 @@ Request falsch zu routen.
 | `POST /v1/audio/speech` | Text-to-Speech. Akzeptiert einen JSON-Body und gibt **binäres Audio** im angeforderten `response_format` zurück. |
 | `POST /v1/audio/transcriptions` | Speech-to-Text. Akzeptiert einen `multipart/form-data`-Upload und gibt je nach `response_format` JSON oder reinen Text zurück. |
 | `POST /v1/audio/translations` | Speech-to-Text mit englischem Ausgabetext. Gleiche Upload-Form wie bei Transkriptionen, ohne `language` und `timestamp_granularities[]`. |
+| `GET /v1/audio/voices?model=` | GoModel-Erweiterung: die Stimmen, die ein TTS-Modell anbietet — siehe [Stimmen abfragen](/de/advanced/api-endpoints#stimmen-abfragen). |
 
 JSON-Bodys von Transkriptionen und Übersetzungen werden in die OpenAI-Form
 normalisiert: Das herstellerspezifische Feld `x_groq` von Groq wird aus

@@ -171,6 +171,8 @@
   "usage_search_providers": "Search providers",
   "usage_search_labels": "Search labels",
   "usage_search_auth_keys": "Search API keys",
+  "usage_show_inactive_auth_keys": "Show inactive keys",
+  "usage_show_inactive_user_paths": "Show inactive paths",
   "usage_all_user_paths": "All User Paths",
   "usage_search_user_paths": "Search or type a user path",
   "usage_expand_path": "Expand {path}",

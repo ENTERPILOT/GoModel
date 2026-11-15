@@ -310,13 +310,6 @@ func copyMap(m map[string]string) map[string]string {
 	return result
 }
 
-func copyAnyMap(m map[string]any) map[string]any {
-	if m == nil {
-		return nil
-	}
-	return maps.Clone(m)
-}
-
 func jsonNumberToInt(value any) (int, bool) {
 	switch v := value.(type) {
 	case float64:

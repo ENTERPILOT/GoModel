@@ -8,6 +8,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 )
 
 // usdPerTokenToPerMtok scales Eden's per-token USD rates to the gateway's
@@ -145,25 +146,12 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 		return nil, err
 	}
 
-	result := &core.ModelsResponse{Object: "list"}
-	result.Data = make([]core.Model, 0, len(upstream.Data))
-	for _, model := range upstream.Data {
-		if strings.TrimSpace(model.ID) == "" {
-			continue
-		}
-		result.Data = append(result.Data, model.toCore())
-	}
-	return result, nil
+	return providers.ModelList(upstream.Data, modelInfo.toCore), nil
 }
 
 // toCore normalizes an Eden catalog entry into GoModel's provider-neutral
 // model shape.
 func (m modelInfo) toCore() core.Model {
-	object := strings.TrimSpace(m.Object)
-	if object == "" {
-		object = "model"
-	}
-
 	metadata := &core.ModelMetadata{
 		Description:  strings.TrimSpace(m.Description),
 		Capabilities: m.capabilities(),
@@ -182,7 +170,7 @@ func (m modelInfo) toCore() core.Model {
 
 	return core.Model{
 		ID:       strings.TrimSpace(m.ID),
-		Object:   object,
+		Object:   providers.ModelObject(m.Object),
 		OwnedBy:  strings.TrimSpace(m.OwnedBy),
 		Created:  m.Created,
 		Metadata: metadata,
