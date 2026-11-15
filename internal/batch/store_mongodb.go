@@ -211,22 +211,25 @@ func (s *MongoDBStore) List(ctx context.Context, limit int, after, userPath stri
 	return items, nil
 }
 
-// Update updates a stored batch object. It leaves the usage fields alone.
+// Update updates a stored batch object. It leaves the usage claim alone, and
+// only ever sets the usage marker: one the batch carries is saved beside it
+// too, where an update of a copy read before it cannot drop it.
 func (s *MongoDBStore) Update(ctx context.Context, batch *StoredBatch) error {
 	payload, err := serializeBatch(batch)
 	if err != nil {
 		return err
 	}
 
-	result, err := s.collection.UpdateOne(ctx,
-		bson.M{"_id": batch.Batch.ID},
-		bson.M{"$set": bson.M{
-			"updated_at": time.Now().Unix(),
-			"status":     batch.Batch.Status,
-			"data":       payload,
-			"user_path":  strings.TrimSpace(batch.UserPath),
-		}},
-	)
+	set := bson.M{
+		"updated_at": time.Now().Unix(),
+		"status":     batch.Batch.Status,
+		"data":       payload,
+		"user_path":  strings.TrimSpace(batch.UserPath),
+	}
+	if batch.UsageLoggedAt != nil {
+		set["usage_logged_at"] = batch.UsageLoggedAt.UnixNano()
+	}
+	result, err := s.collection.UpdateOne(ctx, bson.M{"_id": batch.Batch.ID}, bson.M{"$set": set})
 	if err != nil {
 		return fmt.Errorf("update batch: %w", err)
 	}

@@ -367,9 +367,9 @@ The details are **parts** of `gomodel_tokens_total`, not additions to it, which
 is why they are a separate metric: `sum(gomodel_tokens_total)` is the token
 total, and no sum over one metric counts a token twice. The same holds for the
 two cost metrics. Providers report cached and reasoning tokens differently
-(Anthropic reports cache reads on top of input, xAI reports reasoning on top
-of output); GoModel normalizes them, so `input` and `output` mean the same for
-every provider.
+(Anthropic reports cache reads on top of input, xAI's chat completions report
+reasoning on top of output); GoModel normalizes them, so `input` and `output`
+mean the same for every provider.
 
 ```promql
 # Tokens per minute by model and direction

@@ -219,18 +219,22 @@ func (s *SQLStore) List(ctx context.Context, limit int, after, userPath string) 
 	return items, nil
 }
 
-// Update updates a stored batch object. It leaves the usage columns alone.
+// Update updates a stored batch object. It leaves the usage claim alone, and
+// only ever sets the usage marker: one the batch carries is saved beside it
+// too, where an update of a copy read before it cannot drop it.
 func (s *SQLStore) Update(ctx context.Context, batch *StoredBatch) error {
 	payload, err := serializeBatch(batch)
 	if err != nil {
 		return err
 	}
 
-	affected, err := s.db.Exec(ctx, `
-		UPDATE batches
-		SET updated_at = ?, status = ?, data = ?, user_path = ?
-		WHERE id = ?
-	`, time.Now().Unix(), batch.Batch.Status, string(payload), strings.TrimSpace(batch.UserPath), batch.Batch.ID)
+	set := "updated_at = ?, status = ?, data = ?, user_path = ?"
+	args := []any{time.Now().Unix(), batch.Batch.Status, string(payload), strings.TrimSpace(batch.UserPath)}
+	if batch.UsageLoggedAt != nil {
+		set += ", usage_logged_at = COALESCE(usage_logged_at, ?)"
+		args = append(args, batch.UsageLoggedAt.UnixNano())
+	}
+	affected, err := s.db.Exec(ctx, "UPDATE batches SET "+set+" WHERE id = ?", append(args, batch.Batch.ID)...)
 	if err != nil {
 		return fmt.Errorf("update batch: %w", err)
 	}

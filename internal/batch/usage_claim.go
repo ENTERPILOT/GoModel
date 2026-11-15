@@ -3,12 +3,14 @@ package batch
 import "time"
 
 // The SQL and MongoDB stores keep the usage claim beside the serialized
-// batch, as usage_claimed_at and usage_logged_at in Unix nanoseconds, and
-// write both only from ClaimUsage and CompleteUsage. Update replaces the
-// serialized batch alone, so it cannot undo a claim it never saw.
+// batch, as usage_claimed_at and usage_logged_at in Unix nanoseconds.
+// ClaimUsage and CompleteUsage write them. Update replaces the serialized
+// batch and never clears either, so it cannot undo a claim it never saw; it
+// sets usage_logged_at when the batch it saves carries a marker, as after a
+// failed CompleteUsage, so that a copy read earlier cannot drop the marker.
 //
 // A batch logged by an earlier release carries its marker inside the
-// serialized batch instead; it is still honoured, and can only ever be set.
+// serialized batch alone; it is still honoured.
 
 // withUsageLoggedAt overlays the stored usage marker on a decoded batch.
 func withUsageLoggedAt(batch *StoredBatch, loggedAt *int64) *StoredBatch {

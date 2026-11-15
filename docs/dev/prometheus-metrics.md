@@ -202,8 +202,14 @@ Labels: `provider`, `model`, `token_type` (`input`, `output`), `user_path`,
 
 `input` is the whole prompt (uncached + provider-cached + cache-write, from
 `usage.EntryInputSegments`, the split the dashboard uses) and `output`
-includes reasoning (`usage.EntryReasoningTokens` adds it for providers that
-report it on top of completion tokens).
+includes reasoning. Only xAI's chat completions report reasoning on top of
+`completion_tokens`; xAI's Responses API, like every other provider, counts it
+inside `output_tokens`. Both store the count under the same name, so
+`usage.EntryReasoningTokens` reads the usage object: reasoning is on top when
+`total_tokens` has room for it beside input and output (recorded xAI usage:
+chat 10 + 35 + 375 = 420, Responses 17 + 276 = 293). The cost calculation
+applies the same rule. An xAI entry without such a total is read as
+containing its reasoning, which can undercount but never counts a token twice.
 
 ### `gomodel_token_details_total`
 
@@ -261,14 +267,15 @@ OpenTelemetry.
   `{other}` (`/{other}` for user paths). The admitted sets are process-wide
   (`usagemetrics.admitted`), because Prometheus series outlive a reload.
 - A value over `usagemetrics.MaxValueBytes` (256), or spelled like a reserved
-  name (`{other}`, `/{other}`, `{unknown}`, `/{unknown}`), is `{other}` and
-  takes no slot, so neither long values nor spoofed bucket names can exhaust
-  or forge the cap. `{unknown}` itself takes no slot either.
-- A value that is not valid UTF-8 is `{other}` too, without a slot. Caller
-  values come from raw request headers; Prometheus panics on such a label
-  value and OTLP fails the whole export. Provider and model names are cleaned
-  in `usagemetrics.newSample` for the same reason (invalid bytes become
-  U+FFFD).
+  name (`{other}`, `/{other}`, `{unknown}`, `/{unknown}`), is the dimension's
+  overflow value (`{other}`, or `/{other}` for user paths) and takes no slot,
+  so neither long values nor spoofed bucket names can exhaust or forge the
+  cap. `{unknown}` itself takes no slot either.
+- A value that is not valid UTF-8 is the overflow value too, without a slot.
+  Caller values come from raw request headers; Prometheus panics on such a
+  label value and OTLP fails the whole export. Provider and model names are
+  cleaned in `usagemetrics.newSample` for the same reason (invalid bytes
+  become U+FFFD).
 - The resolver of `gomodel_caller_requests_total` is process-wide too; the app
   installs it in `initServer`, after every fallible phase, so a rejected
   reload leaves the serving generation's resolver in place. A reload without

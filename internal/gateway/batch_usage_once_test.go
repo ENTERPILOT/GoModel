@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -92,6 +94,57 @@ func (s failingClaimStore) CompleteUsage(context.Context, string, time.Time) err
 	return errors.New("store unavailable")
 }
 
+// overlappingClaimStore makes the fetches of one batch overlap. It holds each
+// fetch's first claim until every fetch has asked for one, and answered is
+// done once each of those claims was answered, so a writer that waits for it
+// writes while every other fetch has been refused the claim.
+type overlappingClaimStore struct {
+	batchstore.Store
+	fetches  int32
+	asked    atomic.Int32
+	allAsked chan struct{}
+	answered sync.WaitGroup
+
+	mu     sync.Mutex
+	claims map[batchstore.UsageClaim]int
+}
+
+func newOverlappingClaimStore(store batchstore.Store, fetches int) *overlappingClaimStore {
+	s := &overlappingClaimStore{
+		Store:    store,
+		fetches:  int32(fetches),
+		allAsked: make(chan struct{}),
+		claims:   make(map[batchstore.UsageClaim]int),
+	}
+	s.answered.Add(fetches)
+	return s
+}
+
+func (s *overlappingClaimStore) ClaimUsage(ctx context.Context, id string, now time.Time, timeout time.Duration) (batchstore.UsageClaim, error) {
+	asked := s.asked.Add(1)
+	if asked > s.fetches {
+		// A refused fetch asking again.
+		return s.Store.ClaimUsage(ctx, id, now, timeout)
+	}
+	if asked == s.fetches {
+		close(s.allAsked)
+	}
+	<-s.allAsked
+	claim, err := s.Store.ClaimUsage(ctx, id, now, timeout)
+	s.mu.Lock()
+	s.claims[claim]++
+	s.mu.Unlock()
+	s.answered.Done()
+	return claim, err
+}
+
+// firstClaims counts the answers to each fetch's first claim.
+func (s *overlappingClaimStore) firstClaims() map[batchstore.UsageClaim]int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return maps.Clone(s.claims)
+}
+
 // batchItemsProvider answers batch results with the given number of billable
 // items. Its status calls report a completed batch once block, when set, is
 // closed; entered is signalled when such a call starts waiting.
@@ -162,8 +215,16 @@ func TestBatchResultsLogUsageOnce(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			const fetches = 8
 			logger := &countingUsageLogger{}
-			orchestrator := newUsageOrchestrator(&batchItemsProvider{items: 1}, tt.store(batchstore.NewMemoryStore()), logger)
+			store := tt.store(batchstore.NewMemoryStore())
+			var overlapping *overlappingClaimStore
+			if tt.concurrent {
+				overlapping = newOverlappingClaimStore(store, fetches)
+				logger.onWrite = overlapping.answered.Wait
+				store = overlapping
+			}
+			orchestrator := newUsageOrchestrator(&batchItemsProvider{items: 1}, store, logger)
 			id := createUsageBatch(t, orchestrator)
 
 			fetch := func() {
@@ -171,16 +232,15 @@ func TestBatchResultsLogUsageOnce(t *testing.T) {
 				assert.NoError(t, err)
 			}
 			if tt.concurrent {
-				start := make(chan struct{})
 				var wg sync.WaitGroup
-				for range 8 {
-					wg.Go(func() {
-						<-start
-						fetch()
-					})
+				for range fetches {
+					wg.Go(fetch)
 				}
-				close(start)
 				wg.Wait()
+				assert.Equal(t, map[batchstore.UsageClaim]int{
+					batchstore.UsageClaimed: 1,
+					batchstore.UsagePending: fetches - 1,
+				}, overlapping.firstClaims(), "every fetch asked for the claim before any of them wrote")
 			} else {
 				fetch()
 				fetch()

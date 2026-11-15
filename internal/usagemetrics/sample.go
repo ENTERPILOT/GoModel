@@ -63,16 +63,19 @@ func newSample(entry *usage.UsageEntry) Sample {
 		return s
 	}
 
-	uncached, cached, cacheWrite := usage.EntryInputSegments(usage.UsageLogEntry{
-		Provider:    entry.Provider,
-		InputTokens: entry.InputTokens,
-		RawData:     entry.RawData,
-	})
+	logged := usage.UsageLogEntry{
+		Provider:     entry.Provider,
+		InputTokens:  entry.InputTokens,
+		OutputTokens: entry.OutputTokens,
+		TotalTokens:  entry.TotalTokens,
+		RawData:      entry.RawData,
+	}
+	uncached, cached, cacheWrite := usage.EntryInputSegments(logged)
 	s.InputTokens = uncached + cached + cacheWrite
 	s.CachedInputTokens = cached
 	s.CacheWriteInputTokens = cacheWrite
 
-	reasoning, included := usage.EntryReasoningTokens(s.ProviderType, entry.RawData)
+	reasoning, included := usage.EntryReasoningTokens(logged)
 	s.OutputTokens = int64(max(entry.OutputTokens, 0))
 	if !included {
 		s.OutputTokens += reasoning

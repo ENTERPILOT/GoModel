@@ -371,9 +371,9 @@ deshalb eine eigene Metrik: `sum(gomodel_tokens_total)` ist die Token-Summe,
 und keine Summe über eine einzelne Metrik zählt ein Token doppelt. Dasselbe
 gilt für die beiden Kostenmetriken. Provider melden gecachte Token und
 Reasoning-Token unterschiedlich (Anthropic meldet Cache-Lesezugriffe
-zusätzlich zum Input, xAI meldet Reasoning zusätzlich zum Output); GoModel
-normalisiert sie, sodass `input` und `output` für jeden Provider dasselbe
-bedeuten.
+zusätzlich zum Input, die Chat Completions von xAI melden Reasoning
+zusätzlich zum Output); GoModel normalisiert sie, sodass `input` und `output`
+für jeden Provider dasselbe bedeuten.
 
 ```promql
 # Token pro Minute nach Modell und Richtung

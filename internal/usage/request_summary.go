@@ -89,7 +89,8 @@ func SummarizeRequestUsage(entries []UsageLogEntry) *RequestUsageSummary {
 // request summaries, the admin usage log, and the live SSE preview — stay in
 // sync. The various provider field names are coalesced via max:
 //   - cached reads: cache_read_input_tokens (Anthropic, Bedrock),
-//     prompt_cached_tokens (OpenAI, DeepSeek), cached_tokens (Gemini)
+//     prompt_cached_tokens (OpenAI, DeepSeek), cached_tokens (Gemini),
+//     prompt_cache_hit_tokens (DeepSeek's own name for the same count)
 //   - cache writes: cache_creation_input_tokens (Anthropic),
 //     cache_write_input_tokens (Bedrock Converse), both on top of input;
 //     prompt_cache_write_tokens (OpenAI), part of input like cached reads
@@ -97,11 +98,12 @@ func EntryInputSegments(entry UsageLogEntry) (uncachedInput, cachedInput, cacheW
 	cacheReadTopLevel := int64(extractInt(entry.RawData, "cache_read_input_tokens"))
 	cacheReadNormalized := int64(extractInt(entry.RawData, "prompt_cached_tokens"))
 	cacheReadGeneric := int64(extractInt(entry.RawData, "cached_tokens"))
+	cacheReadHit := int64(extractInt(entry.RawData, "prompt_cache_hit_tokens"))
 	cacheWriteCreation := int64(extractInt(entry.RawData, "cache_creation_input_tokens"))
 	cacheWriteGeneric := int64(extractInt(entry.RawData, "cache_write_input_tokens"))
 	cacheWriteInput = maxInt64(cacheWriteCreation, cacheWriteGeneric)
 
-	cachedInput = maxInt64(cacheReadTopLevel, cacheReadNormalized, cacheReadGeneric)
+	cachedInput = maxInt64(cacheReadTopLevel, cacheReadNormalized, cacheReadGeneric, cacheReadHit)
 	baseInput := int64(entry.InputTokens)
 
 	if entryUsesSplitPromptCacheAccounting(entry, cacheReadTopLevel, cacheWriteInput) {

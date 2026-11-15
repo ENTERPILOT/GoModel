@@ -55,6 +55,17 @@ func TestNewSample(t *testing.T) {
 			},
 		},
 		{
+			name: "deepseek cache hits are part of input",
+			entry: usage.UsageEntry{
+				Provider: "deepseek", Model: "deepseek-chat", InputTokens: 120, OutputTokens: 5,
+				RawData: map[string]any{"prompt_cache_hit_tokens": 80, "prompt_cache_miss_tokens": 40},
+			},
+			want: Sample{
+				Provider: "deepseek", ProviderType: "deepseek", Model: "deepseek-chat",
+				InputTokens: 120, OutputTokens: 5, CachedInputTokens: 80,
+			},
+		},
+		{
 			name: "anthropic reports cache reads and writes on top of input",
 			entry: usage.UsageEntry{
 				Provider: "anthropic", Model: "claude", InputTokens: 10, OutputTokens: 5,
@@ -66,14 +77,40 @@ func TestNewSample(t *testing.T) {
 			},
 		},
 		{
-			name: "xai reports reasoning on top of output",
+			// tests/contract/testdata/xai/chat_completion.json
+			name: "xai chat completions report reasoning on top of output",
 			entry: usage.UsageEntry{
-				Provider: "xai", Model: "grok", InputTokens: 10, OutputTokens: 5,
+				Provider: "xai", Model: "grok", Endpoint: "/v1/chat/completions",
+				InputTokens: 10, OutputTokens: 35, TotalTokens: 420,
+				RawData: map[string]any{"prompt_cached_tokens": 3, "completion_reasoning_tokens": 375},
+			},
+			want: Sample{
+				Provider: "xai", ProviderType: "xai", Model: "grok", Endpoint: "/v1/chat/completions",
+				InputTokens: 10, OutputTokens: 410, CachedInputTokens: 3, ReasoningOutputTokens: 375,
+			},
+		},
+		{
+			// tests/contract/testdata/xai/responses.json
+			name: "xai responses count reasoning inside output",
+			entry: usage.UsageEntry{
+				Provider: "xai", Model: "grok", Endpoint: "/v1/responses",
+				InputTokens: 17, OutputTokens: 276, TotalTokens: 293,
+				RawData: map[string]any{"prompt_cached_tokens": 3, "completion_reasoning_tokens": 272},
+			},
+			want: Sample{
+				Provider: "xai", ProviderType: "xai", Model: "grok", Endpoint: "/v1/responses",
+				InputTokens: 17, OutputTokens: 276, CachedInputTokens: 3, ReasoningOutputTokens: 272,
+			},
+		},
+		{
+			name: "xai usage without a total is not counted twice",
+			entry: usage.UsageEntry{
+				Provider: "xai", Model: "grok", InputTokens: 10, OutputTokens: 40,
 				RawData: map[string]any{"reasoning_tokens": 30},
 			},
 			want: Sample{
 				Provider: "xai", ProviderType: "xai", Model: "grok",
-				InputTokens: 10, OutputTokens: 35, ReasoningOutputTokens: 30,
+				InputTokens: 10, OutputTokens: 40, ReasoningOutputTokens: 30,
 			},
 		},
 		{

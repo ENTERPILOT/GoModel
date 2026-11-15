@@ -147,6 +147,36 @@ func TestStoreUpdateKeepsUsageClaim(t *testing.T) {
 	}
 }
 
+// When CompleteUsage fails, the update after the results carries the marker
+// instead. A status poll that read the batch before then saves a copy
+// without it.
+func TestStoreUpdateKeepsMarkerSavedByUpdate(t *testing.T) {
+	runClaimSuite(t, func(t *testing.T, store Store) {
+		ctx := context.Background()
+		createClaimBatch(t, store, "batch-marked")
+		stale, err := store.Get(ctx, "batch-marked")
+		require.NoError(t, err)
+
+		marked, err := store.Get(ctx, "batch-marked")
+		require.NoError(t, err)
+		loggedAt := testUsageClaimTime
+		marked.UsageLoggedAt = &loggedAt
+		require.NoError(t, store.Update(ctx, marked))
+
+		stale.Batch.Status = "cancelled"
+		require.NoError(t, store.Update(ctx, stale))
+
+		claim, err := store.ClaimUsage(ctx, "batch-marked", testUsageClaimTime.Add(time.Hour), testUsageClaimTimeout)
+		require.NoError(t, err)
+		assert.Equal(t, UsageLogged, claim)
+		got, err := store.Get(ctx, "batch-marked")
+		require.NoError(t, err)
+		assert.Equal(t, "cancelled", got.Batch.Status, "the update itself is saved")
+		require.NotNil(t, got.UsageLoggedAt, "the stale copy cleared the usage marker")
+		assert.True(t, got.UsageLoggedAt.Equal(loggedAt), "UsageLoggedAt = %v, want %v", got.UsageLoggedAt, loggedAt)
+	})
+}
+
 // insertLegacyBatch stores a row as an earlier release wrote it: the
 // serialized batch alone, with no usage claim beside it.
 func insertLegacyBatch(t *testing.T, store Store, id, payload string) {

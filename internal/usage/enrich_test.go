@@ -23,6 +23,23 @@ func TestEnrichUsageLogEntry_OpenAICachedTokens(t *testing.T) {
 	require.InDelta(t, want, entry.CachedInputRatio, 1e-9)
 }
 
+// DeepSeek can report cache hits only as usage.prompt_cache_hit_tokens, part
+// of prompt_tokens; the cost calculation prices that count as cached input.
+func TestEnrichUsageLogEntry_DeepSeekCacheHitTokens(t *testing.T) {
+	entry := UsageLogEntry{
+		Provider:    "deepseek",
+		InputTokens: 120,
+		RawData: map[string]any{
+			"prompt_cache_hit_tokens":  80,
+			"prompt_cache_miss_tokens": 40,
+		},
+	}
+	EnrichUsageLogEntry(&entry)
+	require.Equal(t, int64(40), entry.UncachedInputTokens)
+	require.Equal(t, int64(80), entry.CachedInputTokens)
+	require.Equal(t, int64(0), entry.CacheWriteInputTokens)
+}
+
 // OpenAI reports cache writes as prompt_tokens_details.cache_write_tokens,
 // part of prompt_tokens like cached reads.
 func TestEnrichUsageLogEntry_OpenAICacheWriteTokens(t *testing.T) {

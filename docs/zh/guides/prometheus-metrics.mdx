@@ -339,7 +339,7 @@ GoModel 会统计每个已记录用量的请求的 Token 和成本，因此您�
 | `gomodel_token_details_total` | `input_cache_write` | 提供商写入其提示词缓存的提示词 Token         |
 | `gomodel_token_details_total` | `output_reasoning`  | 推理（“思考”）Token                          |
 
-明细是 `gomodel_tokens_total` 的**组成部分**，而不是额外的增量，因此它们是一个单独的指标：`sum(gomodel_tokens_total)` 就是 Token 总量，对单个指标求和不会把任何 Token 计两次。两个成本指标同理。各提供商上报缓存 Token 和推理 Token 的方式不同（Anthropic 在输入之外单独上报缓存读取，xAI 在输出之外单独上报推理）；GoModel 会对其进行归一化，因此 `input` 和 `output` 对每个提供商含义相同。
+明细是 `gomodel_tokens_total` 的**组成部分**，而不是额外的增量，因此它们是一个单独的指标：`sum(gomodel_tokens_total)` 就是 Token 总量，对单个指标求和不会把任何 Token 计两次。两个成本指标同理。各提供商上报缓存 Token 和推理 Token 的方式不同（Anthropic 在输入之外单独上报缓存读取，xAI 的 Chat Completions 在输出之外单独上报推理）；GoModel 会对其进行归一化，因此 `input` 和 `output` 对每个提供商含义相同。
 
 ```promql
 # 按模型和方向统计的每分钟 Token 数
