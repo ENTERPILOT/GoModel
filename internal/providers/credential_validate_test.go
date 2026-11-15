@@ -208,6 +208,22 @@ func TestValidateCredential_VertexFieldsNeedAnExplicitBackend(t *testing.T) {
 	err = validateCredential(keyed, schema)
 	require.NoError(t, err)
 
+	// The adapter then authenticates with the host's Google credentials, so a
+	// keyed row gets them only for Google's own Vertex AI endpoints.
+	keyedCustom := keyed
+	keyedCustom.BaseURL = "https://vertex-proxy.example.com"
+	assertCredentialField(t, validateCredential(keyedCustom, schema), CredentialFieldBaseURL)
+	keyedCustom.AuthType = "gcp_service_account"
+	keyedCustom.ServiceAccountJSON = "{}"
+	require.NoError(t, validateCredential(keyedCustom, schema))
+	keyedVertex := keyed
+	keyedVertex.BaseURL = "https://us-central1-aiplatform.googleapis.com"
+	require.NoError(t, validateCredential(keyedVertex, schema))
+	aiStudio := keyedCustom
+	aiStudio.Backend = "aistudio"
+	aiStudio.AuthType, aiStudio.ServiceAccountJSON = "", ""
+	require.NoError(t, validateCredential(aiStudio, schema))
+
 	// A type with no backend field to set is never asked to set one.
 	vertexOnly := credentialSchema("vertex", DiscoveryConfig{
 		CredentialFields: []CredentialField{{Name: CredentialFieldVertexProject}, {Name: CredentialFieldVertexLocation}},
