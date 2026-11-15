@@ -50,6 +50,7 @@ import {
   vmFormShowBalancingOptions,
   vmFormShowTargetEffort,
   vmFormShowWeights,
+  vmFormTargetColumns,
   vmFormStrategyPending,
   vmFormSupportsSlowdown,
   vmRoutingSummary,
@@ -1364,6 +1365,43 @@ test("the per-target effort shows with several targets or when a row already set
 
   form.targets = [{ model: "", weight: 1 }];
   assert.equal(vmFormShowTargetEffort(form, ""), true);
+});
+
+test("the target column labels show exactly when the rows show their controls", () => {
+  const cases = [
+    {
+      name: "plain alias",
+      form: { target_model: "openai/gpt-4o", targets: [], strategy: "round_robin" },
+      want: { effort: false, weight: false },
+    },
+    {
+      name: "single target that already sets an effort",
+      form: { target_model: "openai/gpt-4o", target_reasoning_effort: "high", targets: [], strategy: "round_robin" },
+      want: { effort: true, weight: false },
+    },
+    {
+      name: "several targets under round-robin",
+      form: { target_model: "openai/gpt-4o", targets: [{ model: "groq/llama", weight: 1 }], strategy: "round_robin" },
+      want: { effort: true, weight: true },
+    },
+    {
+      name: "several targets under failover",
+      form: { target_model: "openai/gpt-4o", targets: [{ model: "groq/llama" }], strategy: "failover" },
+      want: { effort: true, weight: false },
+    },
+    {
+      name: "empty first row with a second row",
+      form: { target_model: "", targets: [{ model: "", weight: 1 }], strategy: "round_robin" },
+      want: { effort: true, weight: true },
+    },
+  ];
+  for (const { name, form, want } of cases) {
+    const columns = vmFormTargetColumns(form);
+    assert.deepEqual(columns, want, name);
+    // The effort label shows when at least one row shows its dropdown.
+    const efforts = [form.target_reasoning_effort, ...form.targets.map((target) => target.reasoning_effort)];
+    assert.equal(efforts.some((effort) => vmFormShowTargetEffort(form, effort || "")), columns.effort, name);
+  }
 });
 
 test("a hidden model's substring hit does not hide a shown model's fuzzy match", () => {

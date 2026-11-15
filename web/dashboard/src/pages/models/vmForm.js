@@ -324,6 +324,16 @@ export function vmFormShowTargetEffort(form, effort) {
   return vmFormHasExtraTargetRows(form) || Boolean(effort);
 }
 
+// vmFormTargetColumns: which column labels sit above the target rows. They
+// follow the rows: with one row only its own effort can show the dropdown,
+// with more every row has it.
+export function vmFormTargetColumns(form) {
+  return {
+    effort: vmFormShowTargetEffort(form, form && form.target_reasoning_effort),
+    weight: vmFormShowWeights(form),
+  };
+}
+
 // vmFormShowBalancingOptions: session keeping and the failover opt-out only
 // mean something for strategies that spread requests. The failover strategy
 // always retries its primary first (nothing to pin) and always fails over

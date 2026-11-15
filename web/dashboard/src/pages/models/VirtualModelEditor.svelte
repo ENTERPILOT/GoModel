@@ -13,9 +13,8 @@
   import {
     vmFormHasPrimaryTarget,
     vmFormShowBalancingOptions,
-    vmFormShowTargetEffort,
-    vmFormShowWeights,
     vmFormStrategyPending,
+    vmFormTargetColumns,
     vmFormSupportsSlowdown,
     parseParamsJSON,
     REASONING_EFFORT_LEVELS,
@@ -32,12 +31,7 @@
   // Row indices must match the flattened target list the move logic operates
   // on: an empty primary row is not in that list, so extras start at 0 then.
   const hasPrimary = $derived(vmFormHasPrimaryTarget(vm.vmForm));
-  // The column labels follow the rows: with one row only its own effort can
-  // show the dropdown, with more every row has it.
-  const showEffortColumn = $derived(
-    vmFormShowTargetEffort(vm.vmForm, vm.vmForm.target_reasoning_effort),
-  );
-  const showWeightColumn = $derived(vmFormShowWeights(vm.vmForm));
+  const columns = $derived(vmFormTargetColumns(vm.vmForm));
   // Parameter maps are edited as JSON text; a malformed map shows its error
   // inline and the store refuses to save until it parses.
   const paramsInvalid = $derived(parseParamsJSON(vm.vmForm.params) === null);
@@ -107,13 +101,13 @@
   <div class="form-field">
     <div class="vm-target-head">
       <span class="form-field-label vm-target-model">{m.models_targets()}</span>
-      {#if showEffortColumn}
+      {#if columns.effort}
         <span class="form-field-label vm-target-effort">{m.models_target_effort_column()}</span>
       {/if}
-      {#if showWeightColumn}
+      {#if columns.weight}
         <span class="form-field-label vm-target-weight">{m.models_weight()}</span>
       {/if}
-      {#if showEffortColumn || showWeightColumn}
+      {#if columns.effort || columns.weight}
         <span class="vm-target-remove-space" aria-hidden="true"></span>
       {/if}
     </div>

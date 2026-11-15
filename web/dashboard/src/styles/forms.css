@@ -219,7 +219,8 @@
   /* A row with columns always takes two lines: the model picker, then its
      effort, weight, and remove controls. The column labels above the list
      cannot line up with that, so each control shows its own instead. The
-     picker's basis leaves room for the drag handle's gap. */
+     picker's basis stops short of the full width so rounding cannot push it
+     below the drag handle; it grows to fill the line. */
   .vm-target-columns {
     padding-bottom: 8px;
   }
