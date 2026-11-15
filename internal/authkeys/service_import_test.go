@@ -67,12 +67,12 @@ func TestServiceAuthenticateMatchesOnlyTheTokensOwnFormat(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, service.Refresh(context.Background()))
 
-	for _, token := range []string{"sk-native", TokenPrefix + "sk-imported", "sk-", "Zx9v2Qm7Lp4Tn8Wb1Kc6Hd", ""} {
+	for _, token := range []string{"sk-native", DefaultTokenPrefix + "sk-imported", "sk-", "Zx9v2Qm7Lp4Tn8Wb1Kc6Hd", ""} {
 		_, err := service.Authenticate(context.Background(), token)
 		require.ErrorIs(t, err, ErrInvalidToken, "token %q", token)
 	}
 
-	got, err := service.Authenticate(context.Background(), TokenPrefix+"sk-native")
+	got, err := service.Authenticate(context.Background(), DefaultTokenPrefix+"sk-native")
 	require.NoError(t, err)
 	assert.Equal(t, "native", got.ID)
 	got, err = service.Authenticate(context.Background(), " sk-imported ")

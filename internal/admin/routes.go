@@ -84,6 +84,7 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.DELETE("/virtual-models", h.DeleteVirtualModel, global)
 
 	g.GET("/mcp-servers", h.ListMCPServers, global)
+	g.GET("/mcp-servers/catalog", h.MCPToolCatalog, global)
 	g.PUT("/mcp-servers", h.UpsertMCPServer, global)
 	g.DELETE("/mcp-servers/:name", h.DeleteMCPServer, global)
 	g.POST("/mcp-servers/:name/reconnect", h.ReconnectMCPServer, global)
@@ -101,6 +102,7 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.GET("/auth-keys", h.ListAuthKeys)
 	g.POST("/auth-keys", h.CreateAuthKey)
 	g.POST("/auth-keys/import", h.ImportAuthKey, global)
+	g.PUT("/auth-keys/:id/name", h.UpdateAuthKeyName)
 	g.PUT("/auth-keys/:id/labels", h.UpdateAuthKeyLabels)
 	g.PUT("/auth-keys/:id/allowed-models", h.UpdateAuthKeyAllowedModels)
 	g.PUT("/auth-keys/:id/dashboard-access", h.UpdateAuthKeyDashboardAccess)

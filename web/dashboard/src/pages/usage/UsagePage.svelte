@@ -39,6 +39,7 @@
         seenHistoryTick = historyTick;
         usagePage.fetchUsagePage({ reload: true });
         usageFacets.fetchAuthKeyNames();
+        usageFacets.fetchKnownUserPaths();
         liveLogs.ensureLiveLogs();
       });
     }
