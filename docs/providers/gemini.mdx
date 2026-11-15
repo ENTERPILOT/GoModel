@@ -161,9 +161,9 @@ Chat Completions report it in `completion_tokens` and
 tokens and cost rise accordingly. How much is added depends on the response:
 
 - **Reasoning tokens itemised**: at most that count is added, and an explicit
-  `0` adds nothing. `reasoning_tokens` reports the itemised count, cut down to
-  the output count when `total_tokens` has no room for all of it, so it never
-  exceeds the output count.
+  `0` adds nothing. `reasoning_tokens` reports the itemised count, or the
+  output count when the itemised count is larger, whether or not anything was
+  added, so it never exceeds the output count.
 - **Not itemised** (the shape recorded from Gemini 2.5 Flash and 3 Flash): the
   whole part of `total_tokens` beyond prompt and completion tokens is added
   and reported as reasoning tokens. It can include prompt tokens of Google's

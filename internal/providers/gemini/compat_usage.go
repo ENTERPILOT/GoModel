@@ -52,46 +52,62 @@ func (r *compatChatResponse) UnmarshalJSON(data []byte) error {
 //
 // The reasoning count reported afterwards is the itemised one, or what was
 // moved when none was itemised, and never more than the completion tokens: an
-// itemised count the total has no room for is cut down to them, in every
-// member that carries it, so no reasoning token is priced that is not also an
-// output token.
+// itemised count above them is cut down to them in every member that carries
+// it, also when nothing is moved, so no reasoning token is priced that is not
+// also an output token.
 //
-// A folded usage is marked with compatFoldedKey and left alone from then on,
-// so folding twice changes nothing. It reports whether usage changed.
+// A folded usage is marked with compatFoldedKey and nothing is moved into it
+// again, so folding twice changes nothing. It reports whether usage changed.
 func foldCompatThinkingTokens(usage *core.Usage, itemised *int) bool {
-	if _, folded := usage.RawUsage[compatFoldedKey]; folded {
-		return false
-	}
+	_, folded := usage.RawUsage[compatFoldedKey]
 	thinking := usage.TotalTokens - usage.PromptTokens - usage.CompletionTokens
 	if itemised != nil {
 		thinking = min(thinking, *itemised)
 	}
-	if thinking <= 0 {
-		return false
+	if folded || thinking <= 0 {
+		if itemised == nil || *itemised <= usage.CompletionTokens {
+			return false
+		}
+		setCompatReasoningTokens(usage, max(usage.CompletionTokens, 0), false)
+		return true
 	}
 	usage.CompletionTokens += thinking
 	reasoning := thinking
 	if itemised != nil {
 		reasoning = min(*itemised, usage.CompletionTokens)
 	}
+	setCompatReasoningTokens(usage, reasoning, true)
+	return true
+}
 
-	var details core.CompletionTokensDetails
-	if usage.CompletionTokensDetails != nil {
-		details = *usage.CompletionTokensDetails
+// setCompatReasoningTokens writes the reasoning count to every usage member
+// that reports it. mark adds the members of a folded usage: the OpenAI detail
+// and compatFoldedKey.
+func setCompatReasoningTokens(usage *core.Usage, reasoning int, mark bool) {
+	if mark || usage.CompletionTokensDetails != nil {
+		var details core.CompletionTokensDetails
+		if usage.CompletionTokensDetails != nil {
+			details = *usage.CompletionTokensDetails
+		}
+		details.ReasoningTokens = reasoning
+		usage.CompletionTokensDetails = &details
 	}
-	details.ReasoningTokens = reasoning
-	usage.CompletionTokensDetails = &details
 
 	raw := maps.Clone(usage.RawUsage)
 	if raw == nil {
 		raw = make(map[string]any, 1)
 	}
-	raw[compatFoldedKey] = reasoning
-	if _, reported := raw[compatReasoningKey]; reported {
-		raw[compatReasoningKey] = reasoning
+	if mark {
+		raw[compatFoldedKey] = reasoning
 	}
-	usage.RawUsage = raw
-	return true
+	for _, key := range []string{compatFoldedKey, compatReasoningKey} {
+		if _, reported := raw[key]; reported {
+			raw[key] = reasoning
+		}
+	}
+	if len(raw) > 0 {
+		usage.RawUsage = raw
+	}
 }
 
 // compatItemisedReasoning returns the reasoning tokens a usage object

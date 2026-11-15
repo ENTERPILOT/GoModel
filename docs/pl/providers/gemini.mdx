@@ -161,8 +161,9 @@ odpowiednio rosną. To, ile zostanie doliczone, zależy od odpowiedzi:
 
 - **Tokeny reasoningowe wyszczególnione**: doliczana jest najwyżej ta liczba, a
   jawne `0` nie dolicza niczego. `reasoning_tokens` podaje wyszczególnioną
-  liczbę, obciętą do liczby tokenów wyjściowych, gdy `total_tokens` nie mieści
-  jej w całości, więc nigdy nie przekracza liczby tokenów wyjściowych.
+  liczbę albo, gdy jest ona większa, liczbę tokenów wyjściowych, niezależnie
+  od tego, czy cokolwiek doliczono, więc nigdy nie przekracza liczby tokenów
+  wyjściowych.
 - **Niewyszczególnione** (kształt zarejestrowany dla Gemini 2.5 Flash i
   3 Flash): cała część `total_tokens` ponad tokeny promptu i odpowiedzi jest
   doliczana i raportowana jako tokeny reasoningowe. Może ona zawierać tokeny

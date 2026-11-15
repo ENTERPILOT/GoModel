@@ -66,6 +66,23 @@ var compatUsageCases = []struct {
 		output: 145, total: 172, reasoning: 145, cost: 370.6, reasoningRateCost: 515.6,
 	},
 	{
+		// Nothing to move, but 504 reasoning tokens cannot be inside 45
+		// completion tokens: the count is cut down to them.
+		name:   "itemised thinking above the completion tokens of an explained total, in completion_tokens_details",
+		usage:  `{"prompt_tokens":27,"completion_tokens":45,"total_tokens":72,"completion_tokens_details":{"reasoning_tokens":504}}`,
+		output: 45, total: 72, reasoning: 45, cost: 120.6, reasoningRateCost: 165.6,
+	},
+	{
+		name:   "itemised thinking above the completion tokens of an explained total, at the top level",
+		usage:  `{"prompt_tokens":27,"completion_tokens":45,"reasoning_tokens":504,"total_tokens":72}`,
+		output: 45, total: 72, reasoning: 45, cost: 120.6, reasoningRateCost: 165.6,
+	},
+	{
+		name:   "itemised thinking inside completion tokens, at the top level",
+		usage:  `{"prompt_tokens":27,"completion_tokens":45,"reasoning_tokens":30,"total_tokens":72}`,
+		output: 45, total: 72, reasoning: 30, cost: 120.6, reasoningRateCost: 150.6, unchanged: true,
+	},
+	{
 		// An explicit zero says the excess is something other than thinking.
 		name:   "zero thinking itemised in completion_tokens_details",
 		usage:  `{"prompt_tokens":27,"completion_tokens":45,"total_tokens":100,"completion_tokens_details":{"reasoning_tokens":0}}`,
@@ -232,11 +249,6 @@ func assertCompatUsageEntry(t *testing.T, output, total, reasoning int, microUSD
 	assert.Equal(t, output, entry.OutputTokens, "output tokens")
 	assert.Equal(t, total, entry.TotalTokens, "total tokens")
 	assert.GreaterOrEqual(t, entry.TotalTokens, entry.InputTokens+entry.OutputTokens, "no token is counted twice")
-	if reasoning == 0 {
-		assert.NotContains(t, entry.RawData, "completion_reasoning_tokens")
-	} else {
-		assert.Equal(t, reasoning, entry.RawData["completion_reasoning_tokens"], "reasoning tokens")
-	}
 	recorded, includedInOutput := usage.EntryReasoningTokens(usage.UsageLogEntry{
 		Provider: "gemini", InputTokens: entry.InputTokens, OutputTokens: entry.OutputTokens,
 		TotalTokens: entry.TotalTokens, RawData: entry.RawData,

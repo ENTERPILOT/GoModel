@@ -178,8 +178,9 @@ hängt von der Antwort ab:
 
 - **Reasoning-Tokens ausgewiesen**: Höchstens diese Anzahl wird hinzugerechnet,
   und eine ausdrückliche `0` fügt nichts hinzu. `reasoning_tokens` meldet die
-  ausgewiesene Anzahl, gekürzt auf die Output-Zahl, wenn `total_tokens` nicht
-  für alle Platz lässt; der Wert übersteigt die Output-Zahl also nie.
+  ausgewiesene Anzahl oder, wenn diese größer ist, die Output-Zahl, unabhängig
+  davon, ob etwas hinzugerechnet wurde; der Wert übersteigt die Output-Zahl
+  also nie.
 - **Nicht ausgewiesen** (die von Gemini 2.5 Flash und 3 Flash aufgezeichnete
   Form): Der gesamte Teil von `total_tokens`, der über Prompt- und
   Completion-Tokens hinausgeht, wird hinzugerechnet und als Reasoning-Tokens
