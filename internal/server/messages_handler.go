@@ -198,8 +198,8 @@ func (s *translatedInferenceService) Messages(c *echo.Context) error {
 	// the translated pipeline can actually carry the request: content it cannot
 	// represent (server-tool history, …) still belongs upstream verbatim.
 	unsignedThinking := translateErr == nil && anthropicapi.HasUnsignedThinking(decoded)
-	if s.canForwardMessagesNatively(ctx, workflow, req, decoded.Thinking, unsignedThinking) {
-		return s.dispatchMessagesNative(c, prepared, workflow)
+	if s.canForwardMessagesNatively(ctx, workflow, req, decoded.Thinking, unsignedThinking, translateErr != nil) {
+		return s.dispatchMessagesNative(c, prepared, decoded, workflow)
 	}
 	if translateErr != nil {
 		return handleError(c, translateErr)

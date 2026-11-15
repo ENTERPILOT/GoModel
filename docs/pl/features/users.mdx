@@ -221,6 +221,9 @@ lub `max_tokens`, które model wirtualny wymusza albo ustawia domyślnie. Dotycz
 Chat Completions, Responses API i Anthropic Messages API; request Messages
 mieszczący się w limitach jest nadal przekazywany natywnie do Anthropic, a
 przekraczający je idzie ścieżką tłumaczoną, żeby można go było obniżyć.
+Request, który potrafi odczytać tylko Anthropic (np. z historią narzędzi
+serwerowych), nie ma ścieżki tłumaczonej, więc jego `max_tokens`, budżet
+thinking i `output_config.effort` są obniżane w przekazywanym body.
 Embeddingi i endpointy mediów nie są przepisywane. Wpisy
 [cache'u odpowiedzi](/pl/features/cache) są powiązane z obowiązującymi
 limitami, więc odpowiedź zapisana w cache'u przed ustawieniem lub zmianą limitu

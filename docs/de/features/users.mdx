@@ -233,7 +233,10 @@ Effort oder ein `max_tokens`, das ein virtuelles Modell erzwingt oder als
 Standard setzt. Sie gelten für Chat Completions, die Responses API und die
 Anthropic Messages API; ein Messages-Request innerhalb der Obergrenzen wird
 weiterhin nativ an Anthropic weitergeleitet, einer darüber nimmt den
-übersetzten Pfad, damit er gesenkt werden kann. Embeddings und
+übersetzten Pfad, damit er gesenkt werden kann. Ein Request, den nur Anthropic
+lesen kann (etwa mit Server-Tool-Verlauf), hat keinen übersetzten Pfad; bei ihm
+werden `max_tokens`, das Thinking-Budget und `output_config.effort` stattdessen
+im weitergeleiteten Body gesenkt. Embeddings und
 Medien-Endpunkte werden nicht umgeschrieben. Einträge im
 [Response-Cache](/de/features/cache) sind an die geltenden Obergrenzen
 gebunden: Eine Antwort, die vor dem Setzen oder Ändern einer Obergrenze

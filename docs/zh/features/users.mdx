@@ -156,7 +156,7 @@ users:
 
 关闭推理的控制项（`false`、零预算、`{"type": "disabled"}`）以及不超过上限的级别会保留。刻度无法定位的值（例如 token 预算或 `true`）视为超过上限：网关会移除客户端的所有推理控制项，改为发送上限作为推理强度。Messages 的 `budget_tokens` 若高于网关自身为上限级别发送的预算（`low` 为 5000，`medium` 为 10000，`high` 及以上为 20000），会被降到该预算。适配器自行填入的值（Anthropic 的默认 `max_tokens` 及其在 thinking 预算之上预留的空间、OpenCode Zen 的默认推理强度）同样保持在上限之内：thinking 预算会缩小到能放进受限的 `max_tokens`，连最小预算都放不下时则关闭 thinking。
 
-上限在[虚拟模型覆盖](/zh/features/virtual-models#强制推理强度)之后生效，作用于每一次尝试，包括故障转移尝试，因此也会约束虚拟模型强制或默认设置的推理强度或 `max_tokens`。它们适用于 Chat Completions、Responses API 和 Anthropic Messages API；在上限之内的 Messages 请求仍会原生转发给 Anthropic，超过上限的请求会改走转换路径以便降低。嵌入和媒体端点不会被改写。[响应缓存](/zh/features/cache)的条目与生效的上限绑定，因此在设置或修改上限之前缓存的回答不会在新上限下返回。
+上限在[虚拟模型覆盖](/zh/features/virtual-models#强制推理强度)之后生效，作用于每一次尝试，包括故障转移尝试，因此也会约束虚拟模型强制或默认设置的推理强度或 `max_tokens`。它们适用于 Chat Completions、Responses API 和 Anthropic Messages API；在上限之内的 Messages 请求仍会原生转发给 Anthropic，超过上限的请求会改走转换路径以便降低。只有 Anthropic 能读取的请求（例如带有服务器工具历史）没有转换路径，因此会直接在转发的请求体中降低其 `max_tokens`、thinking 预算和 `output_config.effort`。嵌入和媒体端点不会被改写。[响应缓存](/zh/features/cache)的条目与生效的上限绑定，因此在设置或修改上限之前缓存的回答不会在新上限下返回。
 
 <Warning>
 批处理和 `/p/` 下的提供商直通**不受**上限约束：它们的请求体会原样发往上游。受限的密钥如果还能使用批处理或 `/p/`，就可以绕过该策略，因此请为受限的密钥禁止这些端点。[ChatGPT](/zh/providers/chatgpt) 提供商不接受输出 token 上限，因此 `max_output_tokens` 不会在其模型上强制执行。
