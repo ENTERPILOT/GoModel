@@ -38,6 +38,9 @@ type jsonUsageEditor struct {
 	edit usageCostEdit
 	// maxUsage bounds a held usage object; zero selects maxHeldUsageBytes.
 	maxUsage int
+	// maxSeparator bounds the whitespace held between two top-level members;
+	// zero selects maxHeldSeparatorBytes.
+	maxSeparator int
 
 	started  bool // the body's first byte other than whitespace was read
 	done     bool // nothing more is edited: the body is no object, or its object ended

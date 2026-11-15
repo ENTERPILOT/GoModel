@@ -31,7 +31,7 @@ const (
 	nestedValue           // with the brace or bracket that closes it
 )
 
-// maxHeldSeparatorBytes bounds the separator rootMembers holds between two
+// maxHeldSeparatorBytes bounds the whitespace rootMembers holds between two
 // members. No formatter writes that much there.
 const maxHeldSeparatorBytes = 4 << 10
 
@@ -42,12 +42,10 @@ const maxHeldSeparatorBytes = 4 << 10
 // usageCostEdit.apply gives: a removed member takes the separator in front of
 // it along, and the first member kept has none.
 //
-// What is held is bounded, and no byte is relayed out of order: a separator
-// past maxHeldSeparatorBytes is relayed as it is, what was held first. Its
-// comma is then written, so the member after it stays whatever its name, a
-// provider's cost included. Before the first member kept no separator is due,
-// so there the bytes past the bound are left out and that member is still
-// removed.
+// What is held is bounded: whitespace past maxHeldSeparatorBytes is left out.
+// It means nothing between two members, so the body stays the JSON it was, no
+// byte is relayed out of order, and a removed member still takes its comma
+// along however much whitespace an upstream puts in front of it.
 type rootMembers struct {
 	value    valueKind // the value being read at depth 1
 	holding  bool
@@ -55,12 +53,11 @@ type rootMembers struct {
 	nameAt   int    // where the name starts in held
 	kept     bool   // a member before this one was kept
 	dropping bool   // the member being read is removed
-	relayed  bool   // the separator was relayed past the bound: the member after it stays
 }
 
 // valueEnded is called when the value of a top-level member ended.
 func (m *rootMembers) valueEnded(billed bool) {
-	m.value, m.dropping, m.relayed = noValue, false, false
+	m.value, m.dropping = noValue, false
 	if billed {
 		m.holding, m.held, m.nameAt = true, m.held[:0], 0
 	}
@@ -152,7 +149,7 @@ func (e *jsonUsageEditor) readStructure(c byte) bool {
 			break
 		}
 		e.expectKey, e.inKey, e.key = false, true, append(e.key[:0], c)
-		if e.depth != 1 || !e.edit.billed || m.relayed {
+		if e.depth != 1 || !e.edit.billed {
 			return relayed
 		}
 		if !m.holding { // the first member: no separator in front of it
@@ -185,20 +182,22 @@ func (e *jsonUsageEditor) readStructure(c byte) bool {
 		}
 	}
 	if m.holding {
-		separator := isJSONSpace(c) || c == ','
+		limit := e.maxSeparator
+		if limit == 0 {
+			limit = maxHeldSeparatorBytes
+		}
 		switch {
-		case separator && len(m.held) < maxHeldSeparatorBytes:
+		case isJSONSpace(c) && len(m.held) >= limit:
+			return false // left out
+		case isJSONSpace(c), c == ',' && len(m.held) <= limit:
 			m.held = append(m.held, c)
 			return false
-		case separator && !m.kept:
-			// No member was kept yet, so no separator is written here.
-			return false
 		}
-		// A separator past the bound, the brace that closes the body's
-		// object, or a byte no JSON has here: what was held is relayed, and
-		// is no separator in front of a removed member.
+		// The brace that closes the body's object, or a byte no JSON has
+		// here (a comma past the bound among them): what was held is no
+		// separator in front of a removed member.
 		e.emit = append(e.emit, m.held...)
-		m.holding, m.relayed = false, separator
+		m.holding = false
 	}
 	return relayed
 }
