@@ -48,6 +48,29 @@ func TestServiceAccountJSONReportsOriginalBase64DecodeError(t *testing.T) {
 	assert.Contains(t, err.Error(), "standard base64 decode failed")
 }
 
+func TestUsesHostCredentials(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+		want bool
+	}{
+		{name: "default is ADC", cfg: Config{}, want: true},
+		{name: "explicit ADC", cfg: Config{AuthType: "gcp_adc"}, want: true},
+		{name: "explicit ADC beside own JSON", cfg: Config{AuthType: "adc", ServiceAccountJSON: "{}"}, want: true},
+		{name: "key file on the host", cfg: Config{AuthType: "gcp_service_account", ServiceAccountFile: "/etc/sa.json"}, want: true},
+		{name: "inferred key file on the host", cfg: Config{ServiceAccountFile: "/etc/sa.json"}, want: true},
+		{name: "own JSON", cfg: Config{AuthType: "gcp_service_account", ServiceAccountJSON: "{}"}, want: false},
+		{name: "own base64 JSON", cfg: Config{AuthType: "service_account", ServiceAccountJSONBase64: "e30="}, want: false},
+		{name: "inferred own JSON", cfg: Config{ServiceAccountJSON: "{}"}, want: false},
+		{name: "own JSON wins over key file", cfg: Config{ServiceAccountJSON: "{}", ServiceAccountFile: "/etc/sa.json"}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, UsesHostCredentials(tt.cfg))
+		})
+	}
+}
+
 func TestFindCredentialsAndHTTPClientAuthSelection(t *testing.T) {
 	tests := []struct {
 		name        string

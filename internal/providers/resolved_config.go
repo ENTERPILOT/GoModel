@@ -9,11 +9,3 @@ func ResolveBaseURL(baseURL, fallback string) string {
 	}
 	return baseURL
 }
-
-// ResolveAPIVersion returns the configured API version when present, otherwise the provider default.
-func ResolveAPIVersion(apiVersion, fallback string) string {
-	if strings.TrimSpace(apiVersion) == "" {
-		return fallback
-	}
-	return apiVersion
-}

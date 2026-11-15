@@ -2,7 +2,6 @@ package users
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 
@@ -35,7 +34,7 @@ func (r *Result) Close() error {
 		}
 		if r.Store != nil {
 			if err := r.Store.Close(); err != nil {
-				r.closeErr = fmt.Errorf("close errors: %w", errors.Join(fmt.Errorf("store close: %w", err)))
+				r.closeErr = fmt.Errorf("store close: %w", err)
 			}
 		}
 	})
