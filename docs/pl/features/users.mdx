@@ -208,12 +208,16 @@ Sterowanie, które wyłącza reasoning (`false`, budżet zero,
 Wszystko, czego skala nie potrafi umieścić, np. budżet tokenów albo `true`,
 liczy się jako powyżej limitu: gateway usuwa wszystkie sterowania reasoningiem
 klienta i zamiast nich wysyła limit jako effort. Obiekt sterowania, który
-powtarza `type` i ma `disabled` tylko w ostatnim wystąpieniu, też jest usuwany,
-ale w jego miejsce wysyłane jest `none`, żeby limit nie włączał reasoningu.
-Messages `budget_tokens` powyżej budżetu, który gateway sam wysyła dla poziomu
-limitu (5000 dla `low`, 10000 dla `medium`, 20000 od `high`), zostaje obniżony
-do tego budżetu, a adaptacyjny thinking Messages bez `output_config.effort`,
-który Anthropic wykonuje z `high`, dostaje niższy limit jako effort. Gdy
+powtarza `type` i ma `disabled` tylko w ostatnim wystąpieniu, też jest usuwany;
+zastępuje go najwyższy effort, który request podaje gdzie indziej w granicach
+limitu, albo `none`, gdy nie podaje żadnego innego, żeby limit nie włączał
+reasoningu. Messages `budget_tokens` powyżej budżetu, który gateway sam wysyła
+dla poziomu limitu (5000 dla `low`, 10000 dla `medium`, 20000 od `high`),
+zostaje obniżony do tego budżetu. Jedynym wyjątkiem od zasady, że effort nigdy
+nie jest dodawany, jest adaptacyjny thinking Messages
+(`thinking: {"type": "adaptive"}`) bez `output_config.effort`: thinking jest
+tam już włączony, a Anthropic wykonuje go z `high`, więc przy niższym limicie
+limit jest wysyłany jako jego effort. Gdy
 adapter sam wstawia wartość (domyślne `max_tokens` Anthropic i zapas, który
 dodaje ponad budżet thinking, domyślny effort OpenCode Zen), także ona mieści
 się w limitach: budżet thinking kurczy się, aż zmieści się pod ograniczonym
@@ -231,9 +235,11 @@ Request, który potrafi odczytać tylko Anthropic (np. z historią narzędzi
 serwerowych), nie ma ścieżki tłumaczonej, więc jego `max_tokens`, budżet
 thinking i `output_config.effort` są obniżane w przekazywanym body. Przy
 limicie `none` jego thinking jest wyłączany przez
-`thinking: {"type": "disabled"}`, co Fable 5.x, Mythos 5.x, Opus 5.5 i
-Sonnet 5.5 odrzucają, więc na tych modelach taki request kończy się błędem.
-Natywnie przekazywane body, które powtarza jedną z tych składowych albo zapisuje
+`thinking: {"type": "disabled"}`; model, który zawsze myśli (Fable 5.x,
+Mythos 5.x, Opus 5.5), dostaje zamiast tego `low`, tak jak na ścieżce
+tłumaczonej. Znane ograniczenie: Sonnet 5.5 odrzuca `disabled`, więc taki
+request do tego modelu kończy się błędem `400` od Anthropic. Natywnie
+przekazywane body, które powtarza jedną z tych składowych albo zapisuje
 ją inną wielkością liter, dociera do Anthropic z jedną: najniższym `max_tokens`
 oraz ostatnim `thinking` i `output_config`. Body, którego gateway nie potrafi
 zmieścić w limitach, jest odrzucane z `400` i nigdy nie jest przekazywane ponad

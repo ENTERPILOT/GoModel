@@ -220,13 +220,16 @@ erhalten. Alles, was die Skala nicht einordnen kann, etwa ein Token-Budget oder
 `true`, gilt als über der Obergrenze: Das Gateway entfernt alle
 Reasoning-Steuerungen des Clients und sendet stattdessen die Obergrenze als
 Effort. Ein Steuerungsobjekt, das `type` wiederholt und nur im letzten Vorkommen
-`disabled` ist, wird ebenfalls entfernt, an seiner Stelle wird aber `none`
-gesendet, damit die Obergrenze Reasoning nicht einschaltet. Ein
+`disabled` ist, wird ebenfalls entfernt; an seine Stelle tritt der höchste
+Effort, den der Request sonst innerhalb der Obergrenze nennt, oder `none`, wenn
+er keinen anderen nennt, damit die Obergrenze Reasoning nicht einschaltet. Ein
 Messages-`budget_tokens` über dem Budget, das das Gateway selbst für die Stufe
 der Obergrenze sendet (5000 für `low`, 10000 für `medium`, 20000 ab `high`),
-wird auf dieses Budget gesenkt, und adaptives Messages-Thinking ohne
-`output_config.effort`, das Anthropic mit `high` ausführt, erhält eine
-niedrigere Obergrenze als Effort. Wo ein Adapter selbst einen Wert
+wird auf dieses Budget gesenkt. Die einzige Ausnahme davon, nie einen Effort
+hinzuzufügen, ist adaptives Messages-Thinking
+(`thinking: {"type": "adaptive"}`) ohne `output_config.effort`: Thinking ist
+dort bereits an und Anthropic führt es mit `high` aus, daher wird unter einer
+niedrigeren Obergrenze die Obergrenze als Effort gesendet. Wo ein Adapter selbst einen Wert
 einsetzt (Anthropics Standard-`max_tokens` und der Platz über einem
 Thinking-Budget, der Standard-Effort von OpenCode Zen), bleibt auch dieser
 innerhalb der Obergrenzen: Ein Thinking-Budget schrumpft, bis es unter das
@@ -245,9 +248,11 @@ weiterhin nativ an Anthropic weitergeleitet, einer darüber nimmt den
 lesen kann (etwa mit Server-Tool-Verlauf), hat keinen übersetzten Pfad; bei ihm
 werden `max_tokens`, das Thinking-Budget und `output_config.effort` stattdessen
 im weitergeleiteten Body gesenkt. Unter einer Obergrenze `none` wird sein
-Thinking mit `thinking: {"type": "disabled"}` ausgeschaltet; Fable 5.x,
-Mythos 5.x, Opus 5.5 und Sonnet 5.5 lehnen das ab, sodass er auf diesen Modellen
-fehlschlägt. Ein nativ weitergeleiteter Body, der einen dieser Member wiederholt
+Thinking mit `thinking: {"type": "disabled"}` ausgeschaltet; ein Modell, das
+immer denkt (Fable 5.x, Mythos 5.x, Opus 5.5), erhält stattdessen `low`, wie auf
+dem übersetzten Pfad. Bekannte Einschränkung: Sonnet 5.5 lehnt `disabled` ab,
+ein solcher Request an dieses Modell scheitert daher mit Anthropics `400`. Ein
+nativ weitergeleiteter Body, der einen dieser Member wiederholt
 oder in anderer Groß-/Kleinschreibung schreibt, erreicht Anthropic mit einem
 einzigen: dem niedrigsten `max_tokens`, dem letzten `thinking` und
 `output_config`. Ein Body, den das Gateway nicht unter die Obergrenzen bringen

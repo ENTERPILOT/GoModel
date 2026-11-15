@@ -207,12 +207,15 @@ A control that turns reasoning off (`false`, a zero budget,
 scale cannot place, such as a token budget or `true`, counts as above the
 ceiling: the gateway drops every client reasoning control and sends the ceiling
 as the effort instead. A control object that repeats `type` and is `disabled`
-only in the last one is dropped too, but `none` is sent in its place, so the
-ceiling does not switch reasoning on. A Messages `budget_tokens` above the
+only in the last one is dropped too; what replaces it is the highest effort the
+request names elsewhere within the ceiling, or `none` when it names no other, so
+the ceiling does not switch reasoning on. A Messages `budget_tokens` above the
 budget the gateway itself sends for the ceiling level (5000 for `low`, 10000
-for `medium`, 20000 for `high` and up) is lowered to that budget, and adaptive
-Messages thinking that names no `output_config.effort`, which Anthropic runs at
-`high`, gets a lower ceiling as its effort. Where an adapter fills in a value
+for `medium`, 20000 for `high` and up) is lowered to that budget. The one
+exception to never adding an effort is adaptive Messages thinking
+(`thinking: {"type": "adaptive"}`) that names no `output_config.effort`:
+thinking is already on there and Anthropic runs it at `high`, so under a lower
+ceiling the ceiling is sent as its effort. Where an adapter fills in a value
 of its own (Anthropic's default `max_tokens` and the room it adds above a
 thinking budget, OpenCode Zen's default effort), that value is kept within the
 ceilings too: a thinking budget shrinks to fit under the capped `max_tokens`,
@@ -229,8 +232,10 @@ above them takes the translated path so it can be lowered. A request only
 Anthropic can read (server-tool history, for example) has no translated path,
 so its `max_tokens`, thinking budget, and `output_config.effort` are lowered in
 the forwarded body instead. Under a `none` ceiling its thinking is turned off
-with `thinking: {"type": "disabled"}`, which Fable 5.x, Mythos 5.x, Opus 5.5,
-and Sonnet 5.5 reject, so it fails on those models. A natively forwarded body
+with `thinking: {"type": "disabled"}`; a model that always thinks (Fable 5.x,
+Mythos 5.x, Opus 5.5) gets `low` instead, as on the translated path. Known
+limit: Sonnet 5.5 rejects `disabled`, so such a request to it fails with
+Anthropic's `400`. A natively forwarded body
 that repeats one of these members or spells it in another letter case reaches
 Anthropic with a single one: the lowest `max_tokens`, the last `thinking` and
 `output_config`. A body the gateway cannot bring within the ceilings is refused
