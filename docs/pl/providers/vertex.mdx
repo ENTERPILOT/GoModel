@@ -77,8 +77,8 @@ Provider zapisany w dashboardzie używa Application Default Credentials hosta
 lub pliku konta usługi na hoście tylko dla endpointów Vertex AI Google:
 `aiplatform.googleapis.com`, `{location}-aiplatform.googleapis.com` oraz
 `aiplatform.{location}.rep.googleapis.com`, przez HTTPS. Dla każdego innego base URL,
-np. proxy lub endpointu Private Service Connect, zapisz z providerem JSON konta
-usługi. Providerów zadeklarowanych w `config.yaml` lub w zmiennych środowiskowych
+np. proxy lub endpointu Private Service Connect, ustaw typ uwierzytelniania
+`gcp_service_account` i zapisz z providerem JSON konta usługi. Providerów zadeklarowanych w `config.yaml` lub w zmiennych środowiskowych
 to ograniczenie nie dotyczy.
 
 Embeddingi w Vertex używają natywnej predykcji Vertex AI niezależnie od

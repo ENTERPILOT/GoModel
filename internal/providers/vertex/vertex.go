@@ -190,13 +190,13 @@ func (p *Provider) authHTTPClient(providerCfg providers.ProviderConfig, base *ht
 	return googlecommon.HTTPClient(base, creds.TokenSource, quotaProject)
 }
 
-var errHostCredentialsWithheld = errors.New("a custom Vertex AI base URL needs its own service_account_json: the host's Google credentials are only sent to Google's Vertex AI endpoints")
+var errHostCredentialsWithheld = errors.New("a custom Vertex AI base URL needs auth_type gcp_service_account with its own service_account_json: the host's Google credentials are only sent to Google's Vertex AI endpoints")
 
 // onVertexHost reports whether a base URL keeps requests on Google's own
 // Vertex AI hosts: a Vertex endpoint URL, or none at all, where the adapter
 // uses aiplatform.googleapis.com.
 func onVertexHost(baseURL string) bool {
-	return strings.TrimSpace(baseURL) == "" || googlecommon.IsVertexEndpoint(baseURL)
+	return strings.TrimSpace(baseURL) == "" || providers.IsVertexEndpoint(baseURL)
 }
 
 func buildGoogleAuthConfig(providerCfg providers.ProviderConfig) googlecommon.Config {

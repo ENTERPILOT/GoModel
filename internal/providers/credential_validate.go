@@ -153,19 +153,27 @@ func validateGoogleCredential(cred ManagedProviderCredential) error {
 	// An API key does not authenticate against Vertex, so "api_key" is valid
 	// on a Gemini row only while it talks to AI Studio — which is not this
 	// code path.
+	ownJSON := HasResolvedProviderValue(cred.ServiceAccountJSON) || HasResolvedProviderValue(cred.ServiceAccountJSONBase64)
+	hostCredentials := !ownJSON
 	switch strings.ToLower(strings.TrimSpace(cred.AuthType)) {
-	case "", "gcp_adc", "adc", "google_adc":
-		return nil
+	case "":
+	case "gcp_adc", "adc", "google_adc":
+		hostCredentials = true
 	case "gcp_service_account", "service_account":
-		if HasResolvedProviderValue(cred.ServiceAccountFile) ||
-			HasResolvedProviderValue(cred.ServiceAccountJSON) ||
-			HasResolvedProviderValue(cred.ServiceAccountJSONBase64) {
-			return nil
+		if !ownJSON && !HasResolvedProviderValue(cred.ServiceAccountFile) {
+			return credentialFieldError(CredentialFieldServiceAccountJSON, "a service account file, JSON, or base64 JSON is required when auth_type is gcp_service_account")
 		}
-		return credentialFieldError(CredentialFieldServiceAccountJSON, "a service account file, JSON, or base64 JSON is required when auth_type is gcp_service_account")
 	default:
 		return credentialFieldError(CredentialFieldAuthType, "auth_type %q cannot authenticate against Vertex; use gcp_adc or gcp_service_account", cred.AuthType)
 	}
+	// A saved provider gets the host's Google credentials (ADC, or a key file
+	// on the host) only for Google's own Vertex AI endpoints; see
+	// ProviderConfig.Managed. The adapter refuses the same rows, so one stored
+	// before this check never sends them either.
+	if hostCredentials && HasResolvedProviderValue(cred.BaseURL) && !IsVertexEndpoint(cred.BaseURL) {
+		return credentialFieldError(CredentialFieldBaseURL, "a base URL that is not a Google Vertex AI endpoint needs auth_type gcp_service_account with service_account_json saved with the provider: the host's Google credentials are only sent to Google's Vertex AI endpoints")
+	}
+	return nil
 }
 
 // validateCredentialProxyURL rejects a malformed outbound proxy before the

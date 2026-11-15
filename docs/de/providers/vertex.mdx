@@ -76,7 +76,7 @@ des Hosts oder eine Service-Account-Datei auf dem Host nur für Googles
 Vertex-AI-Endpunkte: `aiplatform.googleapis.com`, `{location}-aiplatform.googleapis.com`
 und `aiplatform.{location}.rep.googleapis.com`, jeweils über HTTPS. Speichern Sie
 für jede andere Base URL, etwa einen Proxy oder einen Private-Service-Connect-Endpunkt,
-Service-Account-JSON mit dem Provider. Für Provider, die in `config.yaml` oder über
+den Auth-Typ `gcp_service_account` und Service-Account-JSON mit dem Provider. Für Provider, die in `config.yaml` oder über
 Umgebungsvariablen deklariert sind, gilt diese Einschränkung nicht.
 
 Vertex-Embeddings verwenden unabhängig von `VERTEX_API_MODE` die native Vorhersage (Prediction)

@@ -131,6 +131,32 @@ func TestValidateCredential_GoogleAuth(t *testing.T) {
 			cred:  ManagedProviderCredential{Name: "v", Type: "vertex", VertexProject: "p", VertexLocation: "us-central1", AuthType: "api_key"},
 			field: CredentialFieldAuthType,
 		},
+		// The host's Google credentials go only to Google's Vertex AI hosts.
+		{
+			name:  "ADC with a custom base URL",
+			cred:  ManagedProviderCredential{Name: "v", Type: "vertex", BaseURL: "https://vertex-proxy.example.com"},
+			field: CredentialFieldBaseURL,
+		},
+		{
+			name:  "explicit ADC with a custom base URL",
+			cred:  ManagedProviderCredential{Name: "v", Type: "vertex", AuthType: "gcp_adc", ServiceAccountJSON: "{}", BaseURL: "https://vertex-proxy.example.com"},
+			field: CredentialFieldBaseURL,
+		},
+		{
+			name:  "host key file with a custom base URL",
+			cred:  ManagedProviderCredential{Name: "v", Type: "vertex", AuthType: "gcp_service_account", ServiceAccountFile: "/etc/sa.json", BaseURL: "https://vertex-proxy.example.com"},
+			field: CredentialFieldBaseURL,
+		},
+		{
+			name:  "ADC with a Vertex host on another port",
+			cred:  ManagedProviderCredential{Name: "v", Type: "vertex", BaseURL: "https://aiplatform.googleapis.com:8443"},
+			field: CredentialFieldBaseURL,
+		},
+		{
+			name:  "Vertex-backed Gemini with ADC and a custom base URL",
+			cred:  ManagedProviderCredential{Name: "g", Type: "gemini", Backend: "vertex", BaseURL: "https://vertex-proxy.example.com"},
+			field: CredentialFieldBaseURL,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -141,7 +167,10 @@ func TestValidateCredential_GoogleAuth(t *testing.T) {
 	valid := []ManagedProviderCredential{
 		{Name: "v", Type: "vertex", VertexProject: "p", VertexLocation: "us-central1"},
 		{Name: "v", Type: "vertex", BaseURL: "https://us-central1-aiplatform.googleapis.com"},
+		{Name: "v", Type: "vertex", BaseURL: "https://aiplatform.eu.rep.googleapis.com/v1/projects/p/locations/eu/endpoints/openapi"},
 		{Name: "v", Type: "vertex", VertexProject: "p", VertexLocation: "us-central1", AuthType: "gcp_service_account", ServiceAccountFile: "/etc/sa.json"},
+		{Name: "v", Type: "vertex", AuthType: "gcp_service_account", ServiceAccountJSON: "{}", BaseURL: "https://vertex-proxy.example.com"},
+		{Name: "v", Type: "vertex", ServiceAccountJSONBase64: "e30=", BaseURL: "https://vertex-proxy.example.com"},
 	}
 	for _, cred := range valid {
 		err := validateCredential(cred, schema)
