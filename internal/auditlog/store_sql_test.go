@@ -147,6 +147,17 @@ func TestSQLStoreCleanupDropsEntriesPastRetention(t *testing.T) {
 	})
 }
 
+// startSQLStore starts a store and waits for its background index builds, so
+// DDL a test then runs on the audit tables does not meet one: a statement
+// waiting for a table that an index is being built on deadlocks with the build.
+func startSQLStore(t *testing.T, db sqlx.DB) {
+	t.Helper()
+	store, err := NewSQLStore(context.Background(), db, 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	store.indexBuild.Wait()
+}
+
 func TestNewSQLStoreRenamesLegacyModelColumn(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
@@ -159,8 +170,7 @@ func TestNewSQLStoreRenamesLegacyModelColumn(t *testing.T) {
 				status_code INTEGER DEFAULT 0
 			)`)
 		require.NoError(t, err)
-		_, err = NewSQLStore(ctx, db, 0)
-		require.NoError(t, err)
+		startSQLStore(t, db)
 
 		columns, err := sqlx.Columns(ctx, db, auditLogTable)
 		require.NoError(t, err)
@@ -184,8 +194,7 @@ func TestNewSQLStoreDropsLegacyExecutionPlanIndex(t *testing.T) {
 			`CREATE INDEX idx_audit_execution_plan_version_id ON audit_logs(execution_plan_version_id)`,
 		)
 		require.NoError(t, err)
-		_, err = NewSQLStore(ctx, db, 0)
-		require.NoError(t, err)
+		startSQLStore(t, db)
 		// Recreating the index must succeed, proving the startup drop removed it.
 		_, err = db.Exec(ctx, `CREATE INDEX idx_audit_execution_plan_version_id ON audit_logs(execution_plan_version_id)`)
 		require.NoError(t, err)
@@ -206,8 +215,7 @@ func TestNewSQLStoreReplacesSingleColumnUserPathIndex(t *testing.T) {
 			`CREATE INDEX idx_audit_user_path ON audit_logs(user_path)`,
 		)
 		require.NoError(t, err)
-		_, err = NewSQLStore(ctx, db, 0)
-		require.NoError(t, err)
+		startSQLStore(t, db)
 		// Recreating the old index must succeed, proving the startup drop removed it.
 		_, err = db.Exec(ctx, `CREATE INDEX idx_audit_user_path ON audit_logs(user_path)`)
 		require.NoError(t, err)
