@@ -396,6 +396,9 @@ func TestSQLStoreWriteBatchCommitsEntriesWithTheirAttempts(t *testing.T) {
 	runSQLStoreTest(t, 0, func(t *testing.T, store *SQLStore, db sqlx.DB) {
 		ctx := context.Background()
 		now := time.Unix(1700000000, 0).UTC()
+		// The drop needs a lock on audit_logs through the foreign key, and a
+		// background index build still running there deadlocks with it.
+		store.indexBuild.Wait()
 		_, err := db.Exec(ctx, `DROP TABLE audit_log_attempts`)
 		require.NoError(t, err)
 
