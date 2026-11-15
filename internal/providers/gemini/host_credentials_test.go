@@ -62,6 +62,7 @@ func TestNew_HostCredentialDestination(t *testing.T) {
 		{name: "declared, inferred Vertex, custom endpoint", baseURL: custom, project: "p", wantHost: "vertex-proxy.example.com", want: "Bearer adc-token"},
 		{name: "managed, inferred Vertex, custom endpoint", managed: true, baseURL: custom, project: "p"},
 		{name: "managed, inferred Vertex, Google lookalike host", managed: true, baseURL: "https://aiplatform.googleapis.com.example.com" + nativePath, project: "p"},
+		{name: "managed, inferred Vertex, default endpoint", managed: true, project: "p", wantHost: "aiplatform.googleapis.com", want: "Bearer adc-token"},
 		{name: "managed, inferred Vertex, Vertex endpoint", managed: true, baseURL: "https://us-central1-aiplatform.googleapis.com" + nativePath, project: "p", wantHost: "us-central1-aiplatform.googleapis.com", want: "Bearer adc-token"},
 		{name: "managed, AI Studio key, custom endpoint", managed: true, baseURL: "https://gemini-proxy.example.com/v1beta", wantHost: "gemini-proxy.example.com", want: "AIza-own"},
 	}
@@ -84,6 +85,9 @@ func TestNew_HostCredentialDestination(t *testing.T) {
 				APIMode:       "native",
 				BaseURL:       tt.baseURL,
 				VertexProject: tt.project,
+			}
+			if tt.project != "" {
+				cfg.VertexLocation = "us-central1"
 			}
 			opts := providers.ProviderOptions{HTTPClient: &http.Client{Transport: recorder}, Keys: providers.NewKeyring("AIza-own")}
 			_, err = New(cfg, opts).ChatCompletion(context.Background(), &core.ChatRequest{
