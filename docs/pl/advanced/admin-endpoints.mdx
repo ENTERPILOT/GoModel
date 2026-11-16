@@ -807,7 +807,9 @@ curl -X PUT http://localhost:8080/admin/provider-credentials \
   maskują hasło w `proxy_url`. Odesłanie dowolnej wartości złożonej z trzech
   lub więcej gwiazdek zachowuje zapisaną wartość, więc edycja nigdy nie
   wymaga powtórzenia sekretu; zamaskowany wpis, za którym nie stoi żadna
-  zapisana wartość, zwraca `400`. Wartość złożona wyłącznie z referencji do
+  zapisana wartość, zwraca `400`. `proxy_url` odesłane z wciąż zamaskowanym
+  hasłem (`xxxxx`) zachowuje zapisane hasło, także gdy zmienia się schemat,
+  host, port lub nazwa użytkownika. Wartość złożona wyłącznie z referencji do
   sekretów jest pokazywana bez zmian.
 - `billable: false` oznacza providera, za którego koszt wywołujący nie jest
   ci winien; zobacz [Budżety](/pl/features/budgets#providerzy-nierozliczani).
