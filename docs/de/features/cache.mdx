@@ -135,6 +135,15 @@ Misses werden zudem prozessintern zusammengeführt: Ein Request erreicht den
 Provider, und die wartenden Requests spielen dessen Response ab. Fehlgeschlagene
 oder anderweitig nicht cachebare Responses werden nie an mehrere Wartende verteilt.
 
+Bei `/v1/chat/completions` und `/v1/messages` bleiben Felder, die den Aufrufer
+identifizieren oder das Prompt-Caching des Providers steuern, im gehashten Body
+außen vor, weil sie die Antwort nicht verändern: `user` (bei Anthropic
+`metadata.user_id`), `metadata`, `safety_identifier`, `prompt_cache_key` und
+`prompt_cache_retention`. Claude Code sendet zum Beispiel für jede Sitzung eine
+neue Sitzungs-ID in `metadata.user_id`, und ein wiederholter Request aus einer
+neuen Sitzung trifft trotzdem. Damit Aufrufer keine Einträge teilen,
+partitionieren Sie den Cache nach `user_path` (siehe unten).
+
 ## Woraus der Schlüssel des semantischen Caches besteht
 
 Ein semantischer Treffer braucht eine ähnliche letzte Nutzernachricht und eine

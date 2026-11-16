@@ -129,6 +129,14 @@ entry. Concurrent identical misses are also coalesced in-process: one request
 reaches the provider and the waiters replay its response. Failed or otherwise
 non-cacheable responses are never fanned out.
 
+On `/v1/chat/completions` and `/v1/messages`, fields that identify the caller
+or steer provider prompt caching are left out of the hashed body, because they
+do not change the answer: `user` (Anthropic `metadata.user_id`), `metadata`,
+`safety_identifier`, `prompt_cache_key` and `prompt_cache_retention`. Claude
+Code, for example, sends a new session id in `metadata.user_id` for every
+session, and a repeated request from a new session still hits. To keep callers
+from sharing entries, partition the cache by `user_path` (see below).
+
 ## What the semantic cache keys on
 
 A semantic hit needs a similar last user message and an identical match on

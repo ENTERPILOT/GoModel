@@ -97,6 +97,8 @@ cache:
 
 在计算哈希之前，JSON 对象成员的顺序和无意义的空白会被规范化。因此，仅格式不同的请求会共用同一个精确缓存条目。并发的相同未命中请求也会在进程内合并：只有一个请求到达提供商，其他等待的请求会重放它的响应。失败的或其他不可缓存的响应绝不会被分发给等待者。
 
+在 `/v1/chat/completions` 和 `/v1/messages` 上，用于标识调用方或控制提供商提示词缓存的字段不计入请求体哈希，因为它们不会改变回答：`user`（Anthropic 的 `metadata.user_id`）、`metadata`、`safety_identifier`、`prompt_cache_key` 和 `prompt_cache_retention`。例如，Claude Code 会为每个会话在 `metadata.user_id` 中发送新的会话 ID，而来自新会话的重复请求仍然会命中。如需避免调用方共用条目，请按 `user_path` 对缓存分区（见下文）。
+
 ## 语义缓存键的组成
 
 语义缓存命中要求最后一条用户消息相似，并且其他所有内容完全一致：
