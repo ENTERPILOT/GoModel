@@ -67,6 +67,10 @@ const (
 	exportSecret
 	exportURL
 	exportArgs
+	// exportFree is a string no schema describes, which may hold HTTP
+	// headers as "Name: value" lines, as the header_edit plugin takes them:
+	// the value of a header that carries a credential is a secret.
+	exportFree
 )
 
 // ExportYAML renders doc as a config.yaml that holds no secret, so it can be
@@ -83,7 +87,9 @@ const (
 // map key, or a key of a section no schema describes (extension sections and
 // free-form settings), that names a credential, such as api_key, token, or
 // password. Any other string that equals a resolved secret, is a URL carrying
-// user information, or is a connection string carrying a password is one too.
+// user information, or is a connection string carrying a password is one too,
+// as is the value of a "Name: value" header line in such a section when the
+// header carries a credential.
 func (r *LoadResult) ExportYAML(doc ExportDocument, environ []string) ([]byte, error) {
 	if r == nil || doc.Config == nil {
 		return nil, fmt.Errorf("export configuration: no config")
@@ -309,7 +315,7 @@ func (e *exporter) walkUntyped(path string, node *yaml.Node, secret bool) {
 				return
 			}
 		}
-		class := exportPlain
+		class := exportFree
 		if secret {
 			class = exportSecret
 		}
@@ -408,9 +414,13 @@ func (e *exporter) scalar(path string, node *yaml.Node, class exportClass, envNa
 		return
 	}
 	switch class {
-	case exportPlain:
+	case exportPlain, exportFree:
+		free := class == exportFree
+		class = exportPlain
 		if e.leaksSecret(value, !restored) {
 			class = exportSecret
+		} else if free && e.headerLines(path, node, value, configured) {
+			return
 		}
 	case exportURL:
 		class = exportPlain
@@ -471,24 +481,72 @@ func (e *exporter) setValue(path string, node *yaml.Node, value string, configur
 
 // setSecret writes secret, which follows the text head, as an env reference.
 func (e *exporter) setSecret(path string, node *yaml.Node, head, secret, envName string) {
-	head = escapeReferences(head)
+	text, unset := e.reference(path, secret, envName)
+	e.setText(node, quoteText(escapeReferences(head)+text))
+	if unset != "" {
+		node.LineComment = "# secret not exported: set " + unset
+	}
+}
+
+// reference returns the env reference written in place of secret, and the
+// variable to set when none holds it: envName, or one named after path.
+func (e *exporter) reference(path, secret, envName string) (text, unset string) {
 	if name, ok := e.envHolding(secret, envName); ok {
-		e.setText(node, quoteText(head+"${env:"+name+"}"))
-		return
+		return "${env:" + name + "}", ""
 	}
 	// An Authorization value keeps its scheme: only the credential is secret.
+	head := ""
 	if scheme, credential, ok := cutAuthScheme(secret); ok {
 		if name, ok := e.envHolding(credential, ""); ok {
-			e.setText(node, quoteText(head+scheme+" ${env:"+name+"}"))
-			return
+			return scheme + " ${env:" + name + "}", ""
 		}
-		head += scheme + " "
+		head = scheme + " "
 	}
 	if envName == "" {
 		envName = e.suggestEnvName(path)
 	}
-	e.setText(node, quoteText(head+"${env:"+envName+"}"))
-	node.LineComment = "# secret not exported: set " + envName
+	return head + "${env:" + envName + "}", envName
+}
+
+// headerLines writes value with the credential of each "Name: value" header
+// line that carries one (headerCredential) as an env reference, named after
+// the line when value holds several. It reports whether any line does.
+func (e *exporter) headerLines(path string, node *yaml.Node, value string, configured bool) bool {
+	plain := func(s string) string {
+		if configured {
+			return s
+		}
+		return escapeReferences(s)
+	}
+	lines := strings.Split(value, "\n")
+	var unset []string
+	found := false
+	for i, line := range lines {
+		start, end := headerCredential(line)
+		// A variable config.Load left unset is kept, as in scalar.
+		if start < 0 || e.isUnresolved(path) && unsetVariables.MatchString(line[start:end]) {
+			lines[i] = plain(line)
+			continue
+		}
+		linePath := path
+		if len(lines) > 1 {
+			linePath += "[" + strconv.Itoa(i) + "]"
+		}
+		text, name := e.reference(linePath, line[start:end], "")
+		if name != "" {
+			unset = append(unset, name)
+		}
+		lines[i] = plain(line[:start]) + text + plain(line[end:])
+		found = true
+	}
+	if !found {
+		return false
+	}
+	e.setValue(path, node, strings.Join(lines, "\n"), true)
+	if len(unset) > 0 {
+		node.LineComment = "# secret not exported: set " + strings.Join(unset, ", ")
+	}
+	return true
 }
 
 // suggestEnvName returns suggestedEnvName(path), numbered when another path

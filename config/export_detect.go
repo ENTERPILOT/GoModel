@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"unicode"
+
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // onlyReferences reports whether value is made of secret references alone,
@@ -128,6 +130,33 @@ func bearerCredential(value string) bool {
 	credential = strings.TrimLeft(credential, " \t")
 	return ok && strings.EqualFold(scheme, "bearer") && !strings.ContainsAny(credential, " \t\n") &&
 		literal(replaceReferences(credential, referencePlaceholder))
+}
+
+// headerLine matches an HTTP header written as a "Name: value" line, as the
+// header_edit plugin takes them, commented out with "#" or not. The value
+// ends before trailing white space.
+var headerLine = regexp.MustCompile("^[ \t#]*([0-9A-Za-z!#$%&'*+.^_`|~-]+)[ \t]*:[ \t]*(.*?)[ \t\r]*$")
+
+// headerCredential returns where the value of a "Name: value" header line
+// starts and ends when it is a credential that is not made of secret
+// references alone: the header names one ("X-Proxy-Key: ..."), or the value
+// is an auth scheme and one word ("X-Upstream: Bearer ..."). It returns -1
+// for any other line.
+func headerCredential(line string) (start, end int) {
+	match := headerLine.FindStringSubmatchIndex(line)
+	if match == nil {
+		return -1, -1
+	}
+	name, value := line[match[2]:match[3]], line[match[4]:match[5]]
+	if value == "" || onlyReferences(value) {
+		return -1, -1
+	}
+	_, credential, scheme := cutAuthScheme(value)
+	if credentialKey(name) || core.IsCredentialHeader(name) ||
+		scheme && !strings.ContainsAny(strings.TrimLeft(credential, " \t"), " \t") {
+		return match[4], match[5]
+	}
+	return -1, -1
 }
 
 // argCredential reports how a command-line argument carries a credential:
