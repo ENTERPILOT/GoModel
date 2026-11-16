@@ -178,6 +178,44 @@ func TestValidateCredential_GoogleAuth(t *testing.T) {
 	}
 }
 
+// A Bedrock row without an API key of its own authenticates with the host's
+// AWS credentials, which go only to AWS's own Bedrock endpoints.
+func TestValidateCredential_BedrockHostCredentials(t *testing.T) {
+	schema := credentialSchema("bedrock", DiscoveryConfig{
+		AllowAPIKeyless:  true,
+		CredentialFields: []CredentialField{{Name: CredentialFieldAPIKeys}, {Name: CredentialFieldBaseURL}},
+	})
+
+	rejected := []ManagedProviderCredential{
+		{Name: "b", Type: "bedrock", BaseURL: "https://bedrock-proxy.example.com"},
+		{Name: "b", Type: "Bedrock", BaseURL: "https://bedrock-proxy.example.com"},
+		{Name: "b", Type: "bedrock", BaseURL: "http://bedrock-runtime.us-east-1.amazonaws.com"},
+		{Name: "b", Type: "bedrock", BaseURL: "https://bedrock-runtime.us-east-1.amazonaws.com:8443"},
+		{Name: "b", Type: "bedrock", BaseURL: "https://abc123.execute-api.us-east-1.amazonaws.com"},
+		{Name: "b", Type: "bedrock", BaseURL: "not a region"},
+		{Name: "m", Type: "bedrock-mantle", BaseURL: "https://mantle-proxy.example.com"},
+	}
+	for _, cred := range rejected {
+		t.Run(cred.Type+" "+cred.BaseURL, func(t *testing.T) {
+			assertCredentialField(t, validateCredential(cred, schema), CredentialFieldBaseURL)
+		})
+	}
+
+	valid := []ManagedProviderCredential{
+		{Name: "b", Type: "bedrock"},
+		{Name: "b", Type: "bedrock", BaseURL: "us-east-1"},
+		{Name: "b", Type: "bedrock", BaseURL: "https://bedrock-runtime.us-east-1.amazonaws.com"},
+		{Name: "b", Type: "bedrock", BaseURL: "https://bedrock-proxy.example.com", APIKeys: []string{"ABSK-own"}},
+		{Name: "m", Type: "bedrock-mantle", BaseURL: "https://bedrock-mantle.us-east-1.api.aws/v1"},
+		{Name: "m", Type: "bedrock-mantle", BaseURL: "http://mantle-proxy.internal:8080", APIKeys: []string{"own-key"}},
+		// Other keyless types keep any base URL.
+		{Name: "o", Type: "ollama", BaseURL: "http://localhost:11434/v1"},
+	}
+	for _, cred := range valid {
+		assert.NoError(t, validateCredential(cred, schema), "%s %s", cred.Type, cred.BaseURL)
+	}
+}
+
 // A Gemini adapter infers the Vertex backend from the project/location fields
 // alone, while resolution only recognizes an explicit backend and would reject
 // the row for missing an API key. The form asks the operator to finish

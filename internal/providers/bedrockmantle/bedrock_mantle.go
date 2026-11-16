@@ -6,10 +6,12 @@ package bedrockmantle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -47,12 +49,20 @@ type Provider struct {
 	configErr  error
 }
 
+var errHostCredentialsWithheld = errors.New("a base URL that is not an AWS region or an AWS Bedrock endpoint needs an API key of its own: the host's AWS credentials are only sent to AWS's Bedrock endpoints")
+
 // New creates a Bedrock Mantle provider. BEDROCK_MANTLE_API_KEY (or
 // AWS_BEARER_TOKEN_BEDROCK) uses bearer authentication; without one, the AWS
 // SDK default credential chain is used for SigV4 authentication.
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	keys := opts.Keyring(cfg.APIKey)
 	if keys.Len() == 0 {
+		// A provider saved through the admin API gets the host's AWS
+		// credentials only for AWS's own Bedrock endpoints (see
+		// providers.ProviderConfig.Managed).
+		if cfg.Managed && strings.TrimSpace(cfg.BaseURL) != "" && !providers.IsBedrockEndpoint(cfg.BaseURL) {
+			return &Provider{configErr: errHostCredentialsWithheld}
+		}
 		keys = providers.NewKeyring(os.Getenv("AWS_BEARER_TOKEN_BEDROCK"))
 	}
 

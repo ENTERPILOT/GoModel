@@ -52,6 +52,9 @@ func validateCredential(cred ManagedProviderCredential, schema CredentialSchema)
 	if err := validateGoogleBackendIsExplicit(cred, schema); err != nil {
 		return err
 	}
+	if err := validateHostAWSCredentialDestination(cred); err != nil {
+		return err
+	}
 	for _, field := range schema.Fields {
 		if !field.Required || field.Name == CredentialFieldAPIKeys {
 			continue
@@ -193,6 +196,23 @@ func validateHostGoogleCredentialDestination(cred ManagedProviderCredential) err
 		return nil
 	}
 	return credentialFieldError(CredentialFieldBaseURL, "a base URL that is not a Google Vertex AI endpoint needs auth_type gcp_service_account with service_account_json saved with the provider: the host's Google credentials are only sent to Google's Vertex AI endpoints")
+}
+
+// validateHostAWSCredentialDestination rejects a Bedrock row that would send
+// the host's AWS credentials (AWS_BEARER_TOKEN_BEDROCK, or the SDK's
+// credential chain) to a base URL other than AWS's own Bedrock endpoints; see
+// ProviderConfig.Managed. The adapters refuse the same rows, so one stored
+// before this check never sends them either.
+func validateHostAWSCredentialDestination(cred ManagedProviderCredential) error {
+	switch strings.ToLower(strings.TrimSpace(cred.Type)) {
+	case "bedrock", "bedrock-mantle":
+	default:
+		return nil
+	}
+	if len(cred.APIKeys) > 0 || !HasResolvedProviderValue(cred.BaseURL) || IsBedrockEndpoint(cred.BaseURL) {
+		return nil
+	}
+	return credentialFieldError(CredentialFieldBaseURL, "a base URL that is not an AWS region or an AWS Bedrock endpoint needs an API key saved with the provider: the host's AWS credentials are only sent to AWS's Bedrock endpoints")
 }
 
 // validateCredentialProxyURL rejects a malformed outbound proxy before the

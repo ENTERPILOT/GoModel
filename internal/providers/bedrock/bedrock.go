@@ -105,6 +105,15 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 		})
 		loadOpts = append(loadOpts, awsconfig.WithCredentialsProvider(awssdk.AnonymousCredentials{}))
 	}
+	if token == nil && providerCfg.Managed && !onBedrockHost(providerCfg.BaseURL) {
+		// The host's AWS credentials belong to whoever runs the gateway. A
+		// provider declared in config.yaml or the environment comes from that
+		// operator; one saved through the admin API may come from an identity
+		// that is not trusted with host secrets, so it gets them only for
+		// AWS's own Bedrock endpoints.
+		p.configErr = errHostCredentialsWithheld
+		return p
+	}
 
 	// The SDK's own client would ignore the gateway's proxy and TLS trust. The
 	// factory supplies a proxy-aware client when the provider has an outbound
@@ -141,6 +150,15 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 	p.runtime = bedrockruntime.NewFromConfig(awsCfg, runtimeOpts)
 	p.control = bedrock.NewFromConfig(awsCfg, controlOpts)
 	return p
+}
+
+var errHostCredentialsWithheld = errors.New("a base URL that is not an AWS region or an AWS Bedrock endpoint needs an API key of its own: the host's AWS credentials are only sent to AWS's Bedrock endpoints")
+
+// onBedrockHost reports whether a base URL keeps requests on AWS's own Bedrock
+// hosts: a region, a Bedrock endpoint URL, or none at all, where the SDK
+// resolves the endpoint from the host's AWS configuration.
+func onBedrockHost(baseURL string) bool {
+	return strings.TrimSpace(baseURL) == "" || providers.IsBedrockEndpoint(baseURL)
 }
 
 // parseBaseURL splits the operator-provided BaseURL into (region, endpoint).
