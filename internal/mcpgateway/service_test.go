@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -678,6 +679,45 @@ func TestUpstreamHeadersStayOnConfiguredOrigin(t *testing.T) {
 	_ = resp.Body.Close()
 	require.Equal(t, "Bearer upstream-secret", sameOriginHeader)
 	require.Empty(t, redirectedHeader)
+}
+
+// Reconnect runs inside an admin request, so a server that accepts the
+// connection and never answers must not hold it past reconnectTimeout: the
+// call returns the degraded view, which keeps the last known catalog.
+func TestReconnectToAHangingUpstreamReturnsWithinItsBudget(t *testing.T) {
+	upstream := mcp.NewServer(&mcp.Implementation{Name: "alpha", Version: "test"}, nil)
+	addEchoTool("echo")(upstream)
+	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return upstream }, nil)
+	var hang atomic.Bool
+	release := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The DELETE that ends the old session still answers: the SDK waits
+		// up to 5s for it, which would hide the budget under test.
+		if hang.Load() && r.Method != http.MethodDelete {
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+			return
+		}
+		handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(func() {
+		close(release)
+		ts.Close()
+	})
+
+	service, _ := newTestService(t, nil, testSpec("alpha", ts.URL, nil))
+	service.manager.reconnectTimeout = 200 * time.Millisecond
+	hang.Store(true)
+
+	start := time.Now()
+	view, err := service.Reconnect(context.Background(), "alpha")
+	require.Error(t, err)
+	assert.Less(t, time.Since(start), 5*time.Second, "the reconnect outlived its budget")
+	assert.Equal(t, StatusDegraded, view.Status)
+	assert.Equal(t, 1, view.ToolCount, "the last known catalog is kept")
+	assert.NotEmpty(t, view.LastError)
 }
 
 func TestDegradedUpstreamKeepsCatalogAndReportsError(t *testing.T) {
