@@ -120,6 +120,13 @@ func (m *semanticCacheMiddleware) Handle(ex exchange, body []byte, next func() e
 		return next()
 	}
 
+	// A streamed Messages reply is an Anthropic event stream, which
+	// validateCacheableSSE does not accept yet. Nothing is ever stored for it,
+	// so a lookup could not hit and would only spend an embedding call.
+	if path == messagesPath && isStreamingRequest(path, body) {
+		return next()
+	}
+
 	ctx := ex.Context()
 	plan := core.GetWorkflow(ctx)
 
