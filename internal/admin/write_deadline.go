@@ -1,6 +1,8 @@
 package admin
 
 import (
+	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -12,5 +14,11 @@ import (
 // stop the handler, it only drops the response, so the dashboard would report
 // a failure for work that completed.
 func clearWriteDeadline(c *echo.Context) {
-	_ = http.NewResponseController(c.Response()).SetWriteDeadline(time.Time{})
+	err := http.NewResponseController(c.Response()).SetWriteDeadline(time.Time{})
+	if err != nil && !errors.Is(err, http.ErrNotSupported) {
+		slog.Warn("failed to clear write deadline for a long admin action",
+			"path", c.Request().URL.Path,
+			"error", err,
+		)
+	}
 }

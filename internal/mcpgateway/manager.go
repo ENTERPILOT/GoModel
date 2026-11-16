@@ -194,10 +194,11 @@ func (m *Manager) Views() []ServerView {
 	return views
 }
 
-// reconnectTimeout bounds the redial and relisting of one Reconnect. It runs
-// inside an admin request, and connectTimeout plus listTimeout exceed the
-// inbound write timeout (30s): past it the response carrying the degraded
-// view would be dropped. The re-probe loop retries a server it cut short.
+// reconnectTimeout bounds one Reconnect: the wait for a dial or listing
+// already in flight, the redial, and the relisting. It runs inside an admin
+// request, and connectTimeout plus listTimeout exceed the inbound write
+// timeout (30s): past it the response carrying the server's view would be
+// dropped. The re-probe loop retries a server it cut short.
 const reconnectTimeout = 20 * time.Second
 
 // Reconnect force-redials one server and relists its catalog synchronously,

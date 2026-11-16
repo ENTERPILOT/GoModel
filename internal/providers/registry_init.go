@@ -104,8 +104,9 @@ type fetchedInventory struct {
 // sweep, retries included. A provider whose /models never answers would
 // otherwise hold the sweep until the caller's deadline, or, for a caller
 // without one, for as long as the upstream HTTP timeouts allow. A listing
-// that times out is a failed fetch like any other: the provider keeps its
-// previous inventory.
+// that times out is a failed fetch like any other: the provider serves its
+// configured models when it has any, and otherwise keeps its previous
+// inventory.
 const providerListingTimeout = 10 * time.Second
 
 // fetchAllProviderModels runs ListModels (or applies a configured allowlist)

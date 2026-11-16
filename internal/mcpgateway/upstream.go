@@ -29,6 +29,26 @@ const connectTimeout = 15 * time.Second
 // listTimeout bounds one full catalog listing pass.
 const listTimeout = 30 * time.Second
 
+// ctxMutex is a mutex whose lock can give up when a context ends.
+type ctxMutex chan struct{}
+
+func (m ctxMutex) Lock() { m <- struct{}{} }
+
+func (m ctxMutex) Unlock() { <-m }
+
+// LockContext locks m, or returns ctx's error when ctx ends first.
+func (m ctxMutex) LockContext(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case m <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // ErrToolExcluded rejects a call to a tool the operator filters hide.
 var ErrToolExcluded = errors.New("tool is excluded by the gateway tool filters")
 
@@ -42,7 +62,7 @@ type upstream struct {
 
 	// connectMu serializes dial/refresh so concurrent callers cannot race a
 	// reconnect. stateMu guards the fields below and is never held across IO.
-	connectMu sync.Mutex
+	connectMu ctxMutex
 	stateMu   sync.Mutex
 
 	session      *mcp.ClientSession
@@ -62,7 +82,7 @@ type upstream struct {
 }
 
 func newUpstream(spec ServerSpec, httpClient *http.Client) *upstream {
-	u := &upstream{spec: spec, httpClient: httpClient, status: StatusConnecting}
+	u := &upstream{spec: spec, httpClient: httpClient, status: StatusConnecting, connectMu: make(ctxMutex, 1)}
 	u.life, u.lifeCancel = context.WithCancel(context.Background())
 	if !spec.Enabled {
 		u.status = StatusDisabled
@@ -129,7 +149,12 @@ func (u *upstream) snapshot() (*catalog, ServerStatus) {
 // a transient upstream hiccup does not blank out tools that were working — a
 // failed listing must never register an "empty but connected" server.
 func (u *upstream) refresh(ctx context.Context) error {
-	u.connectMu.Lock()
+	// Another dial or listing may hold the lock for longer than this caller
+	// can wait. Its outcome decides the server's status, not this wait, so
+	// giving up leaves the status as it is.
+	if err := u.connectMu.LockContext(ctx); err != nil {
+		return err
+	}
 	defer u.connectMu.Unlock()
 	if !u.spec.Enabled || u.isClosed() {
 		return nil
@@ -668,14 +693,16 @@ func (u *upstream) isClosed() bool {
 }
 
 // reset drops the shared session so the next use redials. The upstream stays
-// alive — this is the "force reconnect" path, not disposal.
+// alive — this is the "force reconnect" path, not disposal. The old session
+// is closed in the background: the SDK's Close waits for the calls still in
+// flight on it, which can take a server's whole tool timeout.
 func (u *upstream) reset() {
 	u.stateMu.Lock()
 	session := u.session
 	u.session = nil
 	u.stateMu.Unlock()
 	if session != nil {
-		_ = session.Close()
+		go func() { _ = session.Close() }()
 	}
 }
 
