@@ -1,10 +1,10 @@
 ---
 title: "GoModel Pro"
 sidebarTitle: "Overview"
-description: "GoModel Pro adds licensed prompt compression, intelligent routing, OIDC SSO, egress proxy pools, and secret manager vaults to the GoModel gateway. Try it free for 21 days."
+description: "GoModel Pro adds licensed prompt compression, intelligent routing, OIDC and SAML SSO, egress proxy pools, and secret manager vaults to the GoModel gateway. Try it free for 21 days."
 icon: "gem"
 tag: "Pro"
-keywords: ["GoModel Pro", "prompt compression", "intelligent routing", "OIDC", "SSO", "quota templates", "egress proxy pools", "vaults", "license", "free trial"]
+keywords: ["GoModel Pro", "prompt compression", "intelligent routing", "OIDC", "SAML", "SSO", "quota templates", "egress proxy pools", "vaults", "license", "free trial"]
 ---
 
 ## What Pro is
@@ -12,8 +12,8 @@ keywords: ["GoModel Pro", "prompt compression", "intelligent routing", "OIDC", "
 GoModel Pro is the commercial distribution of GoModel. It uses the same
 gateway, configuration, providers, dashboard, and APIs as open-source
 GoModel, with licensed extensions for prompt compression, intelligent routing,
-OIDC single sign-on, egress proxy pools, per-child quota templates, and
-secret manager vaults.
+OIDC and SAML single sign-on, egress proxy pools, per-child quota templates,
+and secret manager vaults.
 
 Without a valid license, the Pro binary starts as the open-source gateway and
 does not block traffic. Explicitly enabled SSO, egress pools, per-child quota
@@ -27,9 +27,9 @@ address, limits are not quietly shared, and secrets are never left unresolved.
     Deterministic, fail-open request rewriting that removes repeated context
     before it reaches the provider.
   </Card>
-  <Card title="OIDC single sign-on" icon="key-round" href="/pro/sso">
-    Protect the Dashboard with your identity provider using Authorization Code
-    flow with PKCE.
+  <Card title="Single sign-on" icon="key-round" href="/pro/sso">
+    Protect the Dashboard with your OIDC or SAML 2.0 identity provider, and
+    map its groups to user paths.
   </Card>
   <Card title="Intelligent routing" icon="route" href="/pro/intelligent-routing">
     Easy/hard tier classification per request plus adaptive, health-aware

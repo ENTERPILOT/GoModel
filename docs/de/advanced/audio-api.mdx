@@ -31,6 +31,7 @@ Request falsch zu routen.
 | `POST /v1/audio/speech` | Text-to-Speech. Akzeptiert einen JSON-Body und gibt **binäres Audio** im angeforderten `response_format` zurück. |
 | `POST /v1/audio/transcriptions` | Speech-to-Text. Akzeptiert einen `multipart/form-data`-Upload und gibt je nach `response_format` JSON oder reinen Text zurück. |
 | `POST /v1/audio/translations` | Speech-to-Text mit englischem Ausgabetext. Gleiche Upload-Form wie bei Transkriptionen, ohne `language` und `timestamp_granularities[]`. |
+| `GET /v1/audio/voices?model=` | GoModel-Erweiterung: die Stimmen, die ein TTS-Modell anbietet — siehe [Stimmen abfragen](/de/advanced/api-endpoints#stimmen-abfragen). |
 
 JSON-Bodys von Transkriptionen und Übersetzungen werden in die OpenAI-Form
 normalisiert: Das herstellerspezifische Feld `x_groq` von Groq wird aus
@@ -103,6 +104,14 @@ also nur bei OpenAI und Azure. Optionale Felder – `instructions`,
 und `speed` – werden an den Provider weitergeleitet. Der `Content-Type` der
 Response ist derjenige, den der Upstream zurückgibt; ersatzweise wird der Typ
 verwendet, der sich aus `response_format` ergibt (zum Beispiel `wav` → `audio/wav`).
+
+`voice` kann auch ein Objekt mit einer `id` sein, die Form, die OpenAI für
+[eigene Stimmen](https://developers.openai.com/api/docs/guides/custom-voices)
+verwendet: `"voice": {"id": "voice_1234"}`. OpenAI-kompatible Provider erhalten
+das Objekt unverändert; ElevenLabs, MiniMax, Xiaomi und audio.cpp verwenden
+seine `id` als Stimme. Ein Objekt ohne `id` als String mit sichtbaren Zeichen liefert `400`.
+Ein kompatibler Provider ohne Unterstützung für eigene Stimmen kann das Objekt
+ablehnen.
 
 Synthetisiertes Audio wird **so weitergereicht, wie der Provider es erzeugt** –
 siehe [Streaming](/de/advanced/audio-api#streaming).

@@ -2,7 +2,6 @@ package pricingoverrides
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -36,14 +35,10 @@ func (r *Result) Close() error {
 			r.stopRefresh = nil
 		}
 
-		var errs []error
 		if r.Store != nil {
 			if err := r.Store.Close(); err != nil {
-				errs = append(errs, fmt.Errorf("store close: %w", err))
+				r.closeErr = fmt.Errorf("store close: %w", err)
 			}
-		}
-		if len(errs) > 0 {
-			r.closeErr = fmt.Errorf("close errors: %w", errors.Join(errs...))
 		}
 	})
 	return r.closeErr

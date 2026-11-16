@@ -3,9 +3,18 @@ package authkeys
 import "time"
 
 const (
-	// TokenPrefix is the managed API key prefix returned to clients.
-	TokenPrefix = "sk_gom_"
-	secretBytes = 32
+	// DefaultTokenPrefix is the managed API key prefix used when none is
+	// configured.
+	DefaultTokenPrefix = "sk_gom_"
+	// MaxTokenPrefixLength bounds a configured prefix. Authentication applies
+	// the same bound to the prefix of a presented token, so never lower it:
+	// keys issued under a longer prefix would stop authenticating.
+	MaxTokenPrefixLength = 32
+	secretBytes          = 32
+	// secretLength is the length of the base64url (unpadded) secret every
+	// issued key ends with. It is what lets authentication find the secret
+	// without knowing which prefix the key was issued under.
+	secretLength = (secretBytes*8 + 5) / 6
 
 	// ImportedFromLiteLLM marks a key imported from a LiteLLM proxy. Its
 	// SecretHash is the SHA-256 of the whole "sk-..." token, as LiteLLM stores

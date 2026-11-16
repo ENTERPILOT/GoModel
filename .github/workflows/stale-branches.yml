@@ -18,8 +18,7 @@ on:
         default: true
 
 permissions:
-  contents: write
-  pull-requests: read
+  contents: read
 
 concurrency:
   group: stale-branches
@@ -27,6 +26,9 @@ concurrency:
 jobs:
   prune:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # delete stale branch refs
+      pull-requests: read
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       REPO: ${{ github.repository }}

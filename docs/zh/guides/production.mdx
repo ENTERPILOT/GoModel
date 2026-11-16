@@ -147,6 +147,7 @@ SERVER_TLS_CLIENT_CA_FILE=/etc/gomodel/tls/ca.crt
 - 无法加载的轮换（例如只写了一半的证书对）会保留之前的证书并记录警告。启动时文件缺失或无效会报错。
 - 修改路径会在[配置重新加载](/zh/advanced/cli#配置重新加载)时生效。
 - 启用 TLS 后，该端口不再响应纯 HTTP。Docker `HEALTHCHECK` 运行的 `gomodel --health` 和 `gomodel --ready` 会自动切换到 HTTPS。
+- 响应会携带 `Strict-Transport-Security: max-age=15552000`（180 天，不含 `includeSubDomains` 或 `preload`），使浏览器对该主机坚持使用 HTTPS。在终止 TLS 的代理之后以纯 HTTP 提供服务时不会发送 HSTS 头；请在代理上设置。
 
 **Kubernetes 与 cert-manager。** 将证书签发到 Secret 中，并以卷的形式挂载。不要使用 `subPath`：kubelet 不会更新 `subPath` 挂载，续期后的证书将永远无法到达 Pod。
 
