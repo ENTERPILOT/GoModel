@@ -179,7 +179,7 @@ serviceAccount:
 | `autoscaling.enabled` | `false` | HPA on CPU (70%) and optionally memory. |
 | `podDisruptionBudget.enabled` | `true` | Created only when more than one pod can run. |
 | `terminationGracePeriodSeconds` | `45` | Covers GoModel's 30s drain. |
-| `startupProbe` | `/health`, up to 5 minutes | Holds off the liveness probe during a slow start, such as a PostgreSQL replica waiting for another one to build an index. Raise `failureThreshold` if a start needs longer. |
+| `startupProbe` | `/health`, up to 5 minutes | Holds off the liveness probe during a slow start, such as a PostgreSQL replica waiting for another one to build an index. Raise `failureThreshold` if a start needs longer; `null` disables it. Follows the liveness probe's `httpGet.scheme` unless it sets one. |
 | `livenessProbe` / `readinessProbe` | `/health`, `/health/ready` | Readiness fails while storage is down. |
 | `podSecurityContext` / `securityContext` | non-root 65532, read-only FS | Writable: `/app/data`, `/app/.cache`, and `/tmp` (emptyDir, SQLite temp files). |
 | `extraVolumes` / `extraVolumeMounts` | `[]` | CA bundles, local model catalogs, … |

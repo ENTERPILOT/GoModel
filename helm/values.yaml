@@ -152,6 +152,8 @@ podDisruptionBudget:
 # Holds off the liveness probe until the listener answers, for up to 5 minutes
 # (periodSeconds x failureThreshold). The gateway listens only after storage is
 # set up, and on PostgreSQL a replica waits while another one builds an index.
+# Without its own httpGet.scheme it uses the liveness probe's (the readiness
+# probe's when liveness is off). null disables it.
 startupProbe:
   httpGet:
     path: /health
