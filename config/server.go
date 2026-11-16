@@ -102,6 +102,12 @@ type ServerConfig struct {
 	// Default: false — turn it on only when a service in front of the gateway
 	// needs to validate keys without holding a copy of them.
 	AuthVerifyEnabled bool `yaml:"auth_verify_enabled" env:"AUTH_VERIFY_ENABLED"`
+	// AuthKeyPrefix starts every managed API key issued from now on.
+	// Default: "sk_gom_" (authkeys.DefaultTokenPrefix); empty keeps it. Up to
+	// 32 ASCII letters, digits, "_" and "-". Change it to white-label keys or
+	// to match a key format your secret scanners know. Keys issued before a
+	// change keep authenticating: only the secret after the prefix is hashed.
+	AuthKeyPrefix string `yaml:"auth_key_prefix" env:"AUTH_KEY_PREFIX"`
 	// PIDFile records the process id of the running gateway so `gomodel --reload`
 	// can find it. Default: DefaultPIDFilePath(). Set it per instance when
 	// several gateways share a host, or to "" in config.yaml to write no pid

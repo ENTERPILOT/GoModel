@@ -1,0 +1,29 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Hello, World!",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 0,
+  "id": "t6H5ap2MA-P8vdIP97qQsAg",
+  "model": "gemini-2.5-flash",
+  "object": "chat.completion",
+  "provider": "gemini",
+  "usage": {
+    "completion_reasoning_tokens": 18,
+    "completion_tokens": 22,
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": 0,
+      "audio_tokens": 0,
+      "reasoning_tokens": 18,
+      "rejected_prediction_tokens": 0
+    },
+    "prompt_tokens": 11,
+    "total_tokens": 33
+  }
+}

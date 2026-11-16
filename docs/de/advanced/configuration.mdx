@@ -45,6 +45,7 @@ Der gängigste Weg, GoModel zu konfigurieren. Setzen Sie eine der folgenden Vari
 | `BASE_PATH`          | Präfix des Mount-Pfads, zum Beispiel `/g`                   | `/`                    |
 | `GOMODEL_MASTER_KEY` | Authentifizierungsschlüssel zur Absicherung des Gateways           | _(leer, unsicherer Modus)_ |
 | `MASTER_KEY_DISABLED` | Schaltet die Authentifizierung per Master-Key ab, sodass nur noch [verwaltete Keys](/de/features/users) und Authentifizierungserweiterungen als Zugangsdaten gelten | `false`                |
+| `AUTH_KEY_PREFIX`    | Präfix neu ausgestellter [verwalteter Keys](/de/features/users); bestehende Keys bleiben gültig | `sk_gom_`              |
 | `GOMODEL_DEMO_MODE`  | Aktiviert Warnungen für öffentliche Demos in den Logs und im Dashboard  | `false`                |
 | `BODY_SIZE_LIMIT`    | Maximale Größe des Request-Bodys (z. B. `10M`, `1024K`, `500KB`), komprimiert und dekomprimiert | `10M`                  |
 | `STREAM_STALL_TIMEOUT` | Sekunden, die ein einzelner Response-Schreibvorgang auf einer Modellroute darauf warten darf, dass der Client ihn liest; `0` deaktiviert | `60`                   |
@@ -190,6 +191,23 @@ und die Admin API bleibt hinter Zugangsdaten mit Dashboard-Zugriff. Geben Sie
 diese Zugangsdaten aus, bevor Sie den Schalter umlegen – ohne Master-Key, ohne
 verwalteten Key und ohne Authentifizierungserweiterung lehnt das Gateway jeden
 Request ab und protokolliert beim Start eine entsprechende Warnung.
+
+#### Präfix verwalteter Keys
+
+Standardmäßig beginnen verwaltete Keys mit `sk_gom_`. Setzen Sie `AUTH_KEY_PREFIX`
+(`server.auth_key_prefix` in YAML), um sie mit Ihrer eigenen Marke zu versehen
+oder an das Key-Format Ihrer Organisation bzw. an die Muster Ihres
+Secret-Scanners anzupassen:
+
+```bash
+AUTH_KEY_PREFIX=sk-acme-
+```
+
+Das Präfix besteht aus bis zu 32 ASCII-Buchstaben, Ziffern, `_` und `-`; alles
+andere verhindert den Start, ein leerer Wert behält den Standard. Nur danach
+ausgestellte Keys erhalten das neue Präfix. Bestehende Keys, auch solche unter
+einem früheren eigenen Präfix, funktionieren weiter und behalten ihren
+gekürzten Anzeigewert.
 
 #### HTTPS ausliefern
 
@@ -513,6 +531,11 @@ Zuordnungsregeln und die Durchsetzung in Workflows.
 | ------------------ | ---------------------------------------- | ---------- |
 | `METRICS_ENABLED`  | Aktiviert Prometheus-Metriken (experimentell) | `false`    |
 | `METRICS_ENDPOINT` | HTTP-Pfad für Metriken                    | `/metrics` |
+| `METRICS_CALLER_USER_PATH` | Fügt den User Path zu den Token- und Kostenmetriken hinzu, für Prometheus und OpenTelemetry, sowie zum Aufrufer-Request-Zähler in Prometheus (siehe [Aufrufer-Dimensionen](/de/guides/prometheus-metrics#aufrufer-dimensionen)) | `false` |
+| `METRICS_CALLER_USER_PATH_DEPTH` | Führende User-Path-Segmente, die auf Metriken erhalten bleiben; ein Wert unter 1 verwendet den Standard | `2` |
+| `METRICS_CALLER_AUTH_KEY` | Fügt diesen Metriken den Namen des verwalteten API-Keys hinzu | `false` |
+| `METRICS_CALLER_REQUEST_LABELS` | Fügt diesen Metriken die Request-Labels hinzu | `false` |
+| `METRICS_CALLER_MAX_VALUES` | Unterschiedliche Werte je Aufrufer-Dimension; spätere Werte, Werte über 256 Bytes oder ohne gültiges UTF-8 und reservierte Namen werden als `{other}` gemeldet (`/{other}` bei User Paths). Ein Wert unter 1 verwendet den Standard | `100` |
 | `OTEL_ENABLED`     | Exportiert OpenTelemetry-Traces und -Metriken über OTLP (siehe [OpenTelemetry](/de/guides/opentelemetry)) | `false`    |
 
 #### Admin

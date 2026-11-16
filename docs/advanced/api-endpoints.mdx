@@ -161,6 +161,48 @@ Available when a `jev` or `openrouter` provider is configured; see
 | ----------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `/v1/usage` | GET    | Self-service usage, budget, and rate limit status for the caller's effective user path — see [Usage API](/advanced/usage-api) |
 | `/v1/auth/verify` | GET | Report whether the API key the request carries is valid (when `AUTH_VERIFY_ENABLED`) |
+| `/v1/audio/voices` | GET | List the voices a text-to-speech model offers (`?model=`) — see [Voice discovery](#voice-discovery) |
+
+### Voice discovery
+
+`GET /v1/audio/voices?model=<model>` returns the voices the provider behind a
+model offers, so a client can pick one without knowing which provider serves the
+model. It is a GoModel extension, not part of the OpenAI API, shaped like the
+endpoint Kokoro-FastAPI serves and Open WebUI reads.
+
+```bash
+curl "http://localhost:8080/v1/audio/voices?model=kokoro" \
+  -H "Authorization: Bearer $GOMODEL_API_KEY"
+```
+
+```json
+{ "voices": [{ "id": "af_bella", "name": "af_bella" }, { "id": "am_adam", "name": "am_adam" }] }
+```
+
+Pass `id` as `voice` to `/v1/audio/speech`; `name` is a display label and
+falls back to `id`. `model` resolves and is authorized exactly as on
+`/v1/audio/speech`, aliases and virtual models included. The call is not billed or
+budgeted. Each call asks the provider (OpenAI excepted), so request rate
+limits apply as on `/v1/audio/speech`.
+
+| Provider | Upstream source |
+| --- | --- |
+| [audio.cpp](/providers/audiocpp) | `GET /v1/audio/voices?model=` |
+| [ElevenLabs](/providers/elevenlabs) | `GET /v2/voices` (the workspace's voices, for every model; at most the first 2000) |
+| [MiniMax](/providers/minimax) | `POST /v1/get_voice` (system, cloned, and generated voices) |
+| OpenAI (`api.openai.com` and its regional hosts, such as `eu.api.openai.com`) | Static list of built-in voices, no upstream call: `alloy`, `ash`, `ballad`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage`, `shimmer`, `verse`, `marin`, `cedar`; for the `tts-1` family (`tts-1`, `tts-1-hd` and their snapshots), the nine it supports (no `ballad`, `verse`, `marin`, `cedar`). Custom voices are not listed: OpenAI has no API for them. Only text-to-speech models are listed; realtime and chat models, which take a different voice set, return the `400` below |
+| `openai`-type providers with a custom `base_url` | `GET {base_url}/audio/voices?model=` — self-hosted servers such as Kokoro-FastAPI, Speaches, LocalAI, or xn-ptts |
+
+A provider without a voice listing — including hosted OpenAI-compatible APIs,
+whose `/audio/voices` answers 404 or 405 — returns `400`
+`invalid_request_error` (`model "…" does not support listing voices`). A
+missing `model` is also a `400`; an unknown model is a `404`.
+
+<Note>
+  Open WebUI's OpenAI TTS engine requests `{base_url}/audio/voices` with neither
+  a `model` nor an API key, so against GoModel it falls back to its built-in
+  OpenAI voice list. Type the voice ID into its settings instead.
+</Note>
 
 ### Key verification
 

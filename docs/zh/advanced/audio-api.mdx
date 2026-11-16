@@ -26,6 +26,7 @@ GoModel 提供**兼容 OpenAI 的音频端点**，用于文本转语音（TTS）
 | `POST /v1/audio/speech` | 文本转语音。接收 JSON 请求体，并以请求的 `response_format` 返回**二进制音频**。 |
 | `POST /v1/audio/transcriptions` | 语音转文本。接收 `multipart/form-data` 上传，并根据 `response_format` 返回 JSON 或纯文本。 |
 | `POST /v1/audio/translations` | 语音转英文文本。上传格式与转录相同，但不含 `language` 和 `timestamp_granularities[]`。 |
+| `GET /v1/audio/voices?model=` | GoModel 扩展：TTS 模型提供的音色，请参阅[音色发现](/zh/advanced/api-endpoints#音色发现)。 |
 
 JSON 格式的转录和翻译响应体会被规范化为 OpenAI 的格式：Groq 特有的 `x_groq` 成员会从
 `json` 和 `verbose_json` 响应中移除，因此按 OpenAI 编写的客户端在任何地方看到的字段都相同。
@@ -94,6 +95,12 @@ await writeFile("speech.wav", Buffer.from(await speech.arrayBuffer()));
 （默认 `mp3`，另支持 `opus`、`aac`、`flac`、`wav`、`pcm`）和 `speed` 会转发给提供商。
 响应的 `Content-Type` 使用上游返回的值；若上游未返回，则回退为 `response_format`
 所对应的类型（例如 `wav` → `audio/wav`）。
+
+`voice` 也可以是带 `id` 的对象，即 OpenAI
+[自定义声音](https://developers.openai.com/api/docs/guides/custom-voices)使用的形式：
+`"voice": {"id": "voice_1234"}`。兼容 OpenAI 的提供商会原样收到该对象；ElevenLabs、
+MiniMax、Xiaomi 和 audio.cpp 则将其 `id` 用作声音。缺少非空白字符串 `id` 的对象会返回 `400`。
+不支持自定义声音的兼容提供商可能会拒绝该对象。
 
 合成的音频会**在提供商生成的同时进行中继**，详见[流式传输](#流式传输)。
 

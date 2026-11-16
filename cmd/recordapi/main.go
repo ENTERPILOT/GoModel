@@ -25,6 +25,9 @@ const (
 	oracleDefaultModel             = "openai.gpt-oss-120b"
 	kimicodeDefaultChatModel       = "kimi-for-coding"
 	kimicodeDefaultEmbeddingsModel = "bge_m3_embed"
+	// geminiDefaultChatModel is the model for Gemini's OpenAI-compatible chat
+	// endpoints. The native endpoints carry their model in the path.
+	geminiDefaultChatModel = "gemini-2.5-flash"
 )
 
 // Provider configurations
@@ -114,6 +117,21 @@ var endpointConfigs = map[string]struct {
 			},
 			"max_tokens": 50,
 			"stream":     true,
+		},
+	},
+	// chat_usage_stream asks for the usage chunk, as the gateway does by
+	// default for the streams it forwards.
+	"chat_usage_stream": {
+		path:   "/v1/chat/completions",
+		method: http.MethodPost,
+		requestBody: map[string]any{
+			"model": "gpt-4o-mini",
+			"messages": []map[string]string{
+				{"role": "user", "content": "Say 'Hello, World!' and nothing else."},
+			},
+			"max_tokens":     50,
+			"stream":         true,
+			"stream_options": map[string]any{"include_usage": true},
 		},
 	},
 	"models": {
@@ -250,16 +268,23 @@ var providerCapabilities = map[string]map[string]bool{
 }
 
 var providerDefaultModels = map[string]map[string]string{
+	"gemini": {
+		"chat":              geminiDefaultChatModel,
+		"chat_stream":       geminiDefaultChatModel,
+		"chat_usage_stream": geminiDefaultChatModel,
+	},
 	"oracle": {
-		"chat":             oracleDefaultModel,
-		"chat_stream":      oracleDefaultModel,
-		"responses":        oracleDefaultModel,
-		"responses_stream": oracleDefaultModel,
+		"chat":              oracleDefaultModel,
+		"chat_stream":       oracleDefaultModel,
+		"chat_usage_stream": oracleDefaultModel,
+		"responses":         oracleDefaultModel,
+		"responses_stream":  oracleDefaultModel,
 	},
 	"kimicode": {
-		"chat":        kimicodeDefaultChatModel,
-		"chat_stream": kimicodeDefaultChatModel,
-		"embeddings":  kimicodeDefaultEmbeddingsModel,
+		"chat":              kimicodeDefaultChatModel,
+		"chat_stream":       kimicodeDefaultChatModel,
+		"chat_usage_stream": kimicodeDefaultChatModel,
+		"embeddings":        kimicodeDefaultEmbeddingsModel,
 	},
 }
 
@@ -309,7 +334,7 @@ func providerSupportsEmbeddings(provider string) bool {
 
 func main() {
 	provider := flag.String("provider", "openai", "Provider to test (openai, anthropic, gemini, gemini-native, groq, xai, kimicode, oracle)")
-	endpoint := flag.String("endpoint", "chat", "Endpoint to test (chat, chat_stream, models, responses, responses_stream, embeddings, generate_content, generate_content_stream, image_generate_content, batch_embed_contents)")
+	endpoint := flag.String("endpoint", "chat", "Endpoint to test (chat, chat_stream, chat_usage_stream, models, responses, responses_stream, embeddings, generate_content, generate_content_stream, image_generate_content, batch_embed_contents)")
 	output := flag.String("output", "", "Output file path (required)")
 	model := flag.String("model", "", "Override model in request")
 	flag.Parse()
@@ -346,6 +371,12 @@ func main() {
 	}
 	if endpointRequiresEmbeddingsCapability(*endpoint) && !providerSupportsEmbeddings(*provider) {
 		fmt.Fprintf(os.Stderr, "Error: provider %q is missing embeddings capability (/embeddings)\n", *provider)
+		os.Exit(1)
+	}
+	if *provider == "anthropic" && (*endpoint == "chat_stream" || *endpoint == "chat_usage_stream") {
+		// adjustForAnthropic keeps neither stream nor stream_options, so the
+		// answer would be a buffered message saved as a stream fixture.
+		fmt.Fprintf(os.Stderr, "Error: provider %q cannot record endpoint %q: its request is sent without the stream flag\n", *provider, *endpoint)
 		os.Exit(1)
 	}
 	if required, ok := providerExclusiveEndpoints[*endpoint]; ok && *provider != required {

@@ -2,6 +2,7 @@
 package gemini
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -187,8 +188,26 @@ func (p *Provider) validateConfig(providerCfg providers.ProviderConfig) {
 	}
 }
 
+var errHostCredentialsWithheld = errors.New("a custom Vertex AI base URL needs auth_type gcp_service_account with its own service_account_json: the host's Google credentials are only sent to Google's Vertex AI endpoints")
+
 func (p *Provider) authHTTPClient(providerCfg providers.ProviderConfig, base *http.Client) *http.Client {
 	if p.configErr != nil || p.authType == geminiAuthTypeAPIKey {
+		return base
+	}
+	authCfg := googlecommon.Config{
+		AuthType:                 p.authType,
+		ServiceAccountFile:       providerCfg.ServiceAccountFile,
+		ServiceAccountJSON:       providerCfg.ServiceAccountJSON,
+		ServiceAccountJSONBase64: providerCfg.ServiceAccountJSONBase64,
+		Scope:                    providerCfg.GCPScope,
+	}
+	// A provider saved through the admin API gets the host's Google
+	// credentials only for Google's own Vertex AI endpoints (see
+	// providers.ProviderConfig.Managed). This covers a Gemini row whose Vertex
+	// backend is inferred from its project or location.
+	if providerCfg.Managed && googlecommon.UsesHostCredentials(authCfg) &&
+		strings.TrimSpace(providerCfg.BaseURL) != "" && !providers.IsVertexEndpoint(providerCfg.BaseURL) {
+		p.configErr = errHostCredentialsWithheld
 		return base
 	}
 	if base == nil {
@@ -196,13 +215,7 @@ func (p *Provider) authHTTPClient(providerCfg providers.ProviderConfig, base *ht
 	}
 	// Token exchange must use the same (possibly proxied) transport as the
 	// API calls it authenticates.
-	creds, err := googlecommon.FindCredentials(googlecommon.CredentialsContext(base), googlecommon.Config{
-		AuthType:                 p.authType,
-		ServiceAccountFile:       providerCfg.ServiceAccountFile,
-		ServiceAccountJSON:       providerCfg.ServiceAccountJSON,
-		ServiceAccountJSONBase64: providerCfg.ServiceAccountJSONBase64,
-		Scope:                    providerCfg.GCPScope,
-	})
+	creds, err := googlecommon.FindCredentials(googlecommon.CredentialsContext(base), authCfg)
 	if err != nil {
 		p.configErr = err
 		return base

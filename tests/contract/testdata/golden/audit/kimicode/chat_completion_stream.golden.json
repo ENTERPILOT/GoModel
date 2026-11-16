@@ -1,0 +1,16 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Hello, World!",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 0,
+  "id": "chatcmpl-F8zUrZGKHjudWKEZR6RlkWI1",
+  "model": "kimi-for-coding",
+  "object": "chat.completion"
+}
