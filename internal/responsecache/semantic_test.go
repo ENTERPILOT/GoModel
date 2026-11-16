@@ -266,6 +266,25 @@ func TestSemanticCacheMiddleware_MessagesPath(t *testing.T) {
 	}
 }
 
+// A streamed Messages reply cannot be stored yet, so its lookup is skipped
+// rather than spending an embedding call that can never hit.
+func TestSemanticCacheMiddleware_StreamedMessagesSkipLookup(t *testing.T) {
+	m, store, emb := newTestSemanticMiddleware(0.90, 10, false)
+	body := []byte(`{"model":"claude-test","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"Hi"}]}`)
+
+	c, _ := echotest.Post(t, messagesPath, body)
+	called := false
+	require.NoError(t, m.Handle(&echoExchange{c: c}, body, func() error {
+		called = true
+		return nil
+	}))
+	m.wg.Wait()
+
+	assert.True(t, called)
+	assert.Zero(t, emb.calls)
+	assert.Zero(t, store.Len())
+}
+
 func TestSemanticCacheMiddleware_CacheMissOnLowScore(t *testing.T) {
 	store := NewMapVecStore()
 	emb := &mockEmbedder{}
