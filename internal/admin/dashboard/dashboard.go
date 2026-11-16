@@ -142,8 +142,8 @@ func contentSecurityPolicy(inlineScript string) string {
 	}, "; ")
 }
 
-// Index serves GET /admin/dashboard and every /admin/dashboard/* route — the
-// SPA handles routing client-side.
+// Index serves GET and HEAD /admin/dashboard and every /admin/dashboard/*
+// route — the SPA handles routing client-side.
 func (h *Handler) Index(c *echo.Context) error {
 	header := c.Response().Header()
 	header.Set("Content-Type", "text/html; charset=utf-8")
@@ -151,6 +151,9 @@ func (h *Handler) Index(c *echo.Context) error {
 	header.Set("Cache-Control", "no-cache")
 	h.setSecurityHeaders(header)
 	c.Response().WriteHeader(http.StatusOK)
+	if c.Request().Method == http.MethodHead {
+		return nil
+	}
 	_, err := bytes.NewReader(h.indexHTML).WriteTo(c.Response())
 	if err != nil {
 		slog.Error("failed to write admin dashboard response", "path", c.Request().URL.Path, "error", err)
@@ -167,7 +170,7 @@ func (h *Handler) setSecurityHeaders(header http.Header) {
 	header.Set("Referrer-Policy", "no-referrer")
 }
 
-// Static serves GET /admin/static/* — embedded SPA assets. It serves files
+// Static serves GET and HEAD /admin/static/* — embedded SPA assets. It serves files
 // only: a directory answers 404 instead of a listing, and so does index.html,
 // which Index alone serves, with the runtime globals its CSP expects.
 func (h *Handler) Static(c *echo.Context) error {

@@ -15,6 +15,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
+	"github.com/enterpilot/gomodel/internal/requestparams"
 	"github.com/enterpilot/gomodel/internal/tagging"
 	"github.com/enterpilot/gomodel/internal/users"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
@@ -57,7 +58,7 @@ func exportProviders(declared providers.ExportedProviders, stored []providers.Ma
 	return result, references
 }
 
-func exportVirtualModels(declared []config.VirtualModelConfig, stored []virtualmodels.VirtualModel) []config.VirtualModelConfig {
+func exportVirtualModels(declared []config.VirtualModelConfig, stored []virtualmodels.VirtualModel) ([]config.VirtualModelConfig, error) {
 	result := slices.Clone(declared)
 	for _, model := range stored {
 		if slices.ContainsFunc(declared, func(d config.VirtualModelConfig) bool {
@@ -65,9 +66,15 @@ func exportVirtualModels(declared []config.VirtualModelConfig, stored []virtualm
 		}) {
 			continue
 		}
-		targets := model.Targets
-		if len(targets) == 0 && model.Model != "" {
-			targets = []virtualmodels.Target{{Provider: model.ProviderName, Model: model.Model}}
+		// The parameters a virtual model forces or defaults are controls, such
+		// as a token cap or store: false, so an export must carry them.
+		params, err := requestparams.ToAny(model.Params)
+		if err != nil {
+			return nil, fmt.Errorf("virtual model %q: params: %w", model.Source, err)
+		}
+		defaultParams, err := requestparams.ToAny(model.DefaultParams)
+		if err != nil {
+			return nil, fmt.Errorf("virtual model %q: default_params: %w", model.Source, err)
 		}
 		entry := config.VirtualModelConfig{
 			Source:          model.Source,
@@ -80,16 +87,22 @@ func exportVirtualModels(declared []config.VirtualModelConfig, stored []virtualm
 			Description:     model.Description,
 			Slowdown:        model.Slowdown,
 			ReasoningEffort: model.ReasoningEffort,
+			Params:          params,
+			DefaultParams:   defaultParams,
 		}
-		for _, target := range targets {
-			entry.Targets = append(entry.Targets, config.VirtualModelTargetConfig{Provider: target.Provider, Model: target.Model, Weight: target.Weight})
+		// An access policy has no targets, and is written without any: its
+		// provider and model are the scope its source names, not a destination.
+		for _, target := range model.Targets {
+			entry.Targets = append(entry.Targets, config.VirtualModelTargetConfig{
+				Provider: target.Provider, Model: target.Model, Weight: target.Weight, ReasoningEffort: target.ReasoningEffort,
+			})
 		}
 		if !model.Enabled {
 			entry.Enabled = new(bool)
 		}
 		result = append(result, entry)
 	}
-	return result
+	return result, nil
 }
 
 func exportUsers(declared []config.UserConfig, stored []users.User) []config.UserConfig {

@@ -77,6 +77,11 @@ func normalizeRedirect(vm VirtualModel) (VirtualModel, []core.ModelSelector, err
 		if target.Weight < 0 {
 			return VirtualModel{}, nil, newValidationError("target weight cannot be negative", nil)
 		}
+		effort, err := normalizeReasoningEffort(target.ReasoningEffort)
+		if err != nil {
+			return VirtualModel{}, nil, err
+		}
+		target.ReasoningEffort = effort
 		selector, err := target.selector()
 		if err != nil {
 			return VirtualModel{}, nil, newValidationError("invalid target selector: "+err.Error(), err)

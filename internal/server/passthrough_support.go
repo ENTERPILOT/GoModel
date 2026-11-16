@@ -95,16 +95,43 @@ func normalizePassthroughEndpoint(endpoint string, enabled bool) (string, error)
 // path, so an encoded "." or ".." segment would climb out of the base path,
 // and an encoded "?" or "#" would start a query or fragment the client never
 // sent as one. The request's real query string is appended separately.
+//
+// A ".", "/" or "\" that is still percent-encoded after that decode would be
+// forwarded encoded, and the upstream or a proxy in front of it could decode
+// it into a path this check never saw. A backslash can be read as a separator
+// the same way. Both are refused.
 func validatePassthroughEndpoint(endpoint string) error {
 	if strings.ContainsAny(endpoint, "?#") {
 		return core.NewInvalidRequestError("provider passthrough endpoint cannot contain '?' or '#'", nil)
 	}
-	for segment := range strings.SplitSeq(endpoint, "/") {
+	for segment := range strings.FieldsFuncSeq(endpoint, isPathSeparator) {
 		if segment == "." || segment == ".." {
 			return core.NewInvalidRequestError("provider passthrough endpoint cannot contain '.' or '..' segments", nil)
 		}
 	}
+	if hasEncodedPathControl(endpoint) {
+		return core.NewInvalidRequestError(`provider passthrough endpoint cannot contain a percent-encoded '.', '/' or '\'`, nil)
+	}
 	return nil
+}
+
+func isPathSeparator(r rune) bool {
+	return r == '/' || r == '\\'
+}
+
+// hasEncodedPathControl reports whether endpoint carries a percent-encoded
+// ".", "/" or "\", in either hex case.
+func hasEncodedPathControl(endpoint string) bool {
+	for i := 0; i+2 < len(endpoint); i++ {
+		if endpoint[i] != '%' {
+			continue
+		}
+		switch endpoint[i+1 : i+3] {
+		case "2e", "2E", "2f", "2F", "5c", "5C":
+			return true
+		}
+	}
+	return false
 }
 
 func buildPassthroughHeaders(ctx context.Context, src http.Header) http.Header {
@@ -145,7 +172,10 @@ func skipPassthroughHeader(key string) bool {
 	switch canonicalKey {
 	case "Authorization", "X-Api-Key", "Host", "Content-Length", "Connection", "Keep-Alive",
 		"Proxy-Authenticate", "Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
-		"Cookie", "Forwarded", "Set-Cookie":
+		"Cookie", "Forwarded", "Set-Cookie",
+		// HSTS is the gateway's own policy for its host: a provider's value
+		// must not replace or clear it.
+		"Strict-Transport-Security":
 		return true
 	default:
 		return strings.HasPrefix(canonicalKey, "X-Forwarded-")
@@ -533,6 +563,7 @@ func passthroughUsageObserver(c *echo.Context, usageLogger usage.LoggerInterface
 	observer.SetSessionID(core.SessionIDFromContext(c.Request().Context()))
 	observer.SetAuthKeyID(core.GetAuthKeyID(c.Request().Context()))
 	observer.SetLabels(core.RequestLabelsFromContext(c.Request().Context()))
+	observer.SetGenAIOperation(core.GenAIOperationFromContext(c.Request().Context()))
 	observer.SetRewriteTokensSaved(core.RewriteTokensSavedFromContext(c.Request().Context()))
 	return observer
 }
