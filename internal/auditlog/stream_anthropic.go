@@ -132,8 +132,11 @@ func (b *streamResponseBuilder) anthropicBlock(event map[string]any) *anthropicS
 // fitsCapture charges a value that arrives whole against the capture budget
 // and reports whether it fit. One that does not marks the body truncated.
 func (b *streamResponseBuilder) fitsCapture(value any) bool {
+	if b.truncated {
+		return false
+	}
 	raw, err := json.Marshal(value)
-	if err != nil || b.truncated || len(raw) > MaxContentCapture-b.contentLen {
+	if err != nil || len(raw) > MaxContentCapture-b.contentLen {
 		b.truncated = true
 		return false
 	}
