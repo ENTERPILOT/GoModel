@@ -11,7 +11,10 @@ import (
 const redactedValue = "[REDACTED]"
 
 // issuedKeyRouteSuffix ends the route that issues a managed API key, under
-// /admin and under the legacy /admin/api/v1 alias.
+// /admin and under the legacy /admin/api/v1 alias. It is a suffix, not the two
+// routes spelled out, for the reason header redaction is broad: a route that
+// matches by accident loses a little detail, while one that is missed after a
+// mount changes stores a working key.
 const issuedKeyRouteSuffix = "/auth-keys"
 
 // redactIssuedKey masks the plaintext token in the response to

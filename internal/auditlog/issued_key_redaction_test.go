@@ -20,6 +20,7 @@ func TestRedactIssuedKey(t *testing.T) {
 	}{
 		{name: "issued key", method: http.MethodPost, route: "/admin/auth-keys", body: issued, want: masked},
 		{name: "issued key on the legacy alias", method: http.MethodPost, route: "/admin/api/v1/auth-keys", body: issued, want: masked},
+		{name: "issued key under another mount", method: http.MethodPost, route: "/gateway/auth-keys", body: issued, want: masked},
 		{
 			name:   "error response is kept as sent",
 			method: http.MethodPost,
