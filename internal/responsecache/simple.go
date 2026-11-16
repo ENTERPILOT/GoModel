@@ -22,9 +22,13 @@ import (
 
 const embeddingsPath = "/v1/embeddings"
 
+// cacheablePaths lists the paths whose request body the semantic layer can
+// read. /v1/messages is one of them because it reaches the cache as the chat
+// translation of the Anthropic request.
 var cacheablePaths = map[string]bool{
 	"/v1/chat/completions": true,
 	"/v1/responses":        true,
+	"/v1/messages":         true,
 	embeddingsPath:         true,
 }
 

@@ -215,6 +215,7 @@ func TestHandleRequest_PartitionIsolatesEveryEntryPath(t *testing.T) {
 		{name: "semantic chat stream", semantic: true, path: partitionChatPath, body: chatStream, stream: true, wantHitLabel: CacheHeaderSemantic},
 		{name: "semantic responses", semantic: true, path: "/v1/responses", body: responses, wantHitLabel: CacheHeaderSemantic},
 		{name: "semantic responses stream", semantic: true, path: "/v1/responses", body: responsesStream, stream: true, wantHitLabel: CacheHeaderSemantic},
+		{name: "semantic messages", semantic: true, path: "/v1/messages", body: partitionChatBody, wantHitLabel: CacheHeaderSemantic},
 		{name: "both layers", exact: true, semantic: true, path: partitionChatPath, body: partitionChatBody, wantHitLabel: CacheHeaderExact},
 	}
 	for _, tt := range tests {
