@@ -622,6 +622,10 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		e.GET("/admin/dashboard", cfg.DashboardHandler.Index)
 		e.GET("/admin/dashboard/*", cfg.DashboardHandler.Index)
 		e.GET("/admin/static/*", cfg.DashboardHandler.Static)
+		// Probes and link checkers use HEAD; it answers with GET's headers.
+		e.HEAD("/admin/dashboard", cfg.DashboardHandler.Index)
+		e.HEAD("/admin/dashboard/*", cfg.DashboardHandler.Index)
+		e.HEAD("/admin/static/*", cfg.DashboardHandler.Static)
 	}
 
 	// Extension routes register after all core routes.
