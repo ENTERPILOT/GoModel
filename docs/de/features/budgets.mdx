@@ -452,7 +452,9 @@ GoModel sendet eine Warnung, sobald die Ausgaben eine davon erreichen.
 
 Warnungen setzen aktivierte Budgets und damit die Nutzungserfassung voraus
 (`BUDGETS_ENABLED` und `USAGE_ENABLED`, beide standardmäßig an); sonst werden
-die `BUDGETS_ALERTS_*`-Einstellungen ignoriert. Außerdem sind sie aus, bis sie
+die `BUDGETS_ALERTS_*`-Einstellungen nicht angewendet. Eine
+Secret-Referenz in `BUDGETS_ALERTS_THRESHOLDS` lehnt der Start trotzdem ab, wie
+bei jeder Variable, die als Zahl gelesen wird. Außerdem sind sie aus, bis sie
 ein Ziel haben: einen Webhook oder einen `ext.AlertSink`, den ein eigener
 Build registriert. Deklarieren Sie einen Webhook, und jedes Budget warnt bei
 den Standardschwellen 80 % und 100 %:
@@ -549,10 +551,14 @@ Herunterfahren haben wartende Warnungen 5 s Zeit für die Zustellung; was
 danach noch wartet, wird verworfen, protokolliert und als Zustellfehler
 gezählt.
 
-Ein Empfänger kann dieselbe Warnung dennoch zweimal sehen, deduplizieren Sie
-also auf `id`: Replikate mit SQLite, jedes mit eigener Datenbank, lösen sie
-jeweils aus, und eine Wiederholung sendet einen `POST` erneut, dessen Antwort
-auf dem Rückweg verloren ging.
+Ein Empfänger kann dieselbe Warnung dennoch zweimal sehen. Eine Wiederholung
+sendet einen `POST` erneut, dessen Antwort auf dem Rückweg verloren ging, mit
+derselben `id`; deduplizieren Sie also auf `id`. Replikate mit SQLite, jedes
+mit eigener Datenbank, lösen die Warnung jeweils mit einer anderen `id` aus,
+weil jede Datenbank dem Budget eine eigene `revision` gibt. Um auch diese
+zusammenzuführen, deduplizieren Sie auf `budget.scope`, `budget.subject`,
+`budget.effective_subject`, `budget.period_seconds`, `period_start` und
+`threshold_percent`.
 
 ### Webhook-Payload
 
@@ -605,7 +611,9 @@ Jede Warnung ist ein `POST` mit JSON-Body:
 Zwei Zustellungen tragen genau dann dieselbe `id`, wenn sie dieselbe Warnung
 sind: dasselbe Budget (`scope`, `subject`, `effective_subject`, Zeitraum),
 dieselbe `revision`, derselbe `period_start` und dieselbe `threshold_percent`.
-Wiederholungen und Zustellungen eines anderen Replikats verwenden sie erneut.
+Wiederholungen und Zustellungen eines anderen Replikats mit derselben Datenbank
+verwenden sie erneut. Replikate mit eigener SQLite-Datenbank nicht, da jede
+ihre eigene `revision` speichert.
 Ein neuer Zeitraum, ein Reset, ein verschobener Reset-Anker oder eine neue
 Revision ergibt eine neue `id`.
 
@@ -678,7 +686,9 @@ bewegt:
 Die Prognose ist linear und liest eine Lastspitze früh im Zeitraum als Tempo
 für den gesamten Zeitraum. Beide Felder entfallen deshalb, bis 5 % des
 Zeitraums vergangen sind (72 Minuten eines Tages, etwa anderthalb Tage eines
-Monats), gerechnet ab einem Reset, falls es einen gab. Eine Vorlage pro Kind
+Monats). Nach einem Reset läuft der Zeitraum vom Reset bis zu seinem Ende, die
+5 % beziehen sich also auf dieses kürzere Fenster: Ein Tagesbudget mit Reset um
+12:00 zeigt beide Felder ab 12:36. Eine Vorlage pro Kind
 hat keine Prognose, da sie keine einzelnen Ausgaben hat.
 
 ## Admin API

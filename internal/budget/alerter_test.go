@@ -192,7 +192,7 @@ func TestAlerterFiresAgainAfterResetAndInANewPeriod(t *testing.T) {
 		spend(t, usageStore, "next-day", "/a", instance.now.Add(-time.Hour), 10, "prod")
 		require.NoError(t, instance.alerter.Evaluate(ctx))
 		events = instance.recorder.take()
-		assert.Equal(t, []string{"prod@80", "prod@100"}, alertNames(events), "every threshold reached fires, lowest first")
+		require.Equal(t, []string{"prod@80", "prod@100"}, alertNames(events), "every threshold reached fires, lowest first")
 		assert.Equal(t, time.Date(2026, time.April, 26, 0, 0, 0, 0, time.UTC), events[0].PeriodStart)
 		assert.NotEqual(t, afterReset, events[0].ID, "an alert of another period has another ID")
 	})

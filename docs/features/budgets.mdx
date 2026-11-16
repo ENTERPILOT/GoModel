@@ -423,7 +423,9 @@ alert when spend reaches one.
 
 Alerts need budgets, and therefore usage tracking, to be on (`BUDGETS_ENABLED`
 and `USAGE_ENABLED`, both on by default); otherwise the `BUDGETS_ALERTS_*`
-settings are ignored. They are also off until they have somewhere to go: a
+settings are not applied. Startup still refuses a secret reference in
+`BUDGETS_ALERTS_THRESHOLDS`, as it does for every variable read as a number.
+They are also off until they have somewhere to go: a
 webhook, or an `ext.AlertSink` registered by a custom build. Declare a webhook
 and every budget starts alerting at the default thresholds, 80% and 100%:
 
@@ -512,9 +514,13 @@ is dropped: logged and counted, not sent later. On shutdown, queued alerts get
 5 s to be delivered; the ones still queued after that are abandoned, logged,
 and counted as delivery failures.
 
-A receiver can still see the same alert twice, so deduplicate on `id`:
-replicas on SQLite, each with its own database, each raise it, and a retry
-repeats a `POST` whose answer was lost on the way back.
+A receiver can still see the same alert twice. A retry repeats a `POST` whose
+answer was lost on the way back, with the same `id`, so deduplicate on `id`.
+Replicas on SQLite, each with its own database, each raise the alert under a
+different `id`, because each database gives the budget its own `revision`. To
+collapse those too, deduplicate on `budget.scope`, `budget.subject`,
+`budget.effective_subject`, `budget.period_seconds`, `period_start`, and
+`threshold_percent`.
 
 ### Webhook payload
 
@@ -567,7 +573,8 @@ Each alert is one `POST` with a JSON body:
 Two deliveries carry the same `id` exactly when they are the same alert: the
 same budget (`scope`, `subject`, `effective_subject`, period), the same
 `revision`, the same `period_start`, and the same `threshold_percent`. Retries,
-and deliveries from another replica, reuse it. A new period, a reset, a moved
+and deliveries from another replica sharing the database, reuse it. Replicas
+with their own SQLite databases do not, since each stores its own `revision`. A new period, a reset, a moved
 reset anchor, or a new revision gives a new `id`.
 
 Fields are only ever added. Every delivery also carries these headers:
@@ -629,8 +636,9 @@ Two Prometheus counters follow alerts: `gomodel_budget_alerts_fired_total`
 
 The projection is linear, so it reads a burst early in a period as the rate
 for all of it. Both fields are therefore omitted until 5% of the period has
-elapsed (72 minutes of a day, about a day and a half of a month), counted from
-a reset if there was one. A per-child template has no projection, since it has
+elapsed (72 minutes of a day, about a day and a half of a month). After a
+reset the period runs from the reset to its end, so the 5% is of that shorter
+window: a daily budget reset at 12:00 shows both fields from 12:36. A per-child template has no projection, since it has
 no single spend.
 
 ## Admin API

@@ -432,7 +432,9 @@ gdy wydatki osiągną któryś z nich.
 
 Alerty wymagają włączonych budżetów, a więc i śledzenia użycia
 (`BUDGETS_ENABLED` i `USAGE_ENABLED`, oba domyślnie włączone); w przeciwnym
-razie ustawienia `BUDGETS_ALERTS_*` są ignorowane. Są też wyłączone, dopóki
+razie ustawienia `BUDGETS_ALERTS_*` nie są stosowane. Start nadal odrzuca
+referencję do sekretu w `BUDGETS_ALERTS_THRESHOLDS`, jak dla każdej zmiennej
+czytanej jako liczba. Są też wyłączone, dopóki
 nie mają dokąd trafić: do webhooka albo do `ext.AlertSink` zarejestrowanego
 we własnym buildzie. Zadeklaruj webhook, a każdy budżet zacznie alarmować przy
 domyślnych progach 80% i 100%:
@@ -524,9 +526,13 @@ wysyłany później. Przy zamykaniu alerty w kolejce mają 5 s na dostarczenie;
 te, które nadal czekają, są porzucane, logowane i zliczane jako błędy
 dostarczenia.
 
-Odbiorca może mimo to zobaczyć ten sam alert dwa razy, więc deduplikuj po
-`id`: repliki z SQLite, każda z własną bazą, zgłaszają go osobno, a ponowienie
-powtarza `POST`, na który odpowiedź zaginęła w drodze powrotnej.
+Odbiorca może mimo to zobaczyć ten sam alert dwa razy. Ponowienie powtarza
+`POST`, na który odpowiedź zaginęła w drodze powrotnej, z tym samym `id`, więc
+deduplikuj po `id`. Repliki z SQLite, każda z własną bazą, zgłaszają alert
+osobno i z innym `id`, bo każda baza nadaje budżetowi własną `revision`. Aby
+scalić także je, deduplikuj po `budget.scope`, `budget.subject`,
+`budget.effective_subject`, `budget.period_seconds`, `period_start`
+i `threshold_percent`.
 
 ### Payload webhooka
 
@@ -579,7 +585,9 @@ Każdy alert to jeden `POST` z treścią JSON:
 Dwa dostarczenia mają to samo `id` dokładnie wtedy, gdy są tym samym alertem:
 ten sam budżet (`scope`, `subject`, `effective_subject`, okres), ta sama
 `revision`, ten sam `period_start` i ten sam `threshold_percent`. Ponowienia
-i dostarczenia z innej repliki używają go ponownie. Nowy okres, reset,
+i dostarczenia z innej repliki korzystającej z tej samej bazy używają go
+ponownie. Repliki z własną bazą SQLite nie, bo każda przechowuje własną
+`revision`. Nowy okres, reset,
 przesunięta kotwica resetu albo nowa rewizja dają nowe `id`.
 
 Pola są wyłącznie dodawane. Każde dostarczenie niesie też te nagłówki:
@@ -645,7 +653,9 @@ Alertom towarzyszą dwa liczniki Prometheusa:
 
 Prognoza jest liniowa, więc skok na początku okresu odczytuje jako tempo
 całego okresu. Dlatego oba pola są pomijane, dopóki nie minie 5% okresu (72
-minuty doby, około półtora dnia miesiąca), liczone od resetu, jeśli był.
+minuty doby, około półtora dnia miesiąca). Po resecie okres trwa od resetu do
+swojego końca, więc 5% liczy się z tego krótszego okna: dzienny budżet
+zresetowany o 12:00 pokazuje oba pola od 12:36.
 Szablon dla każdego potomka nie ma prognozy, bo nie ma jednej sumy wydatków.
 
 ## Admin API
