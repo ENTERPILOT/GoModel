@@ -9,6 +9,7 @@ They do not call external APIs in CI. Instead, they replay recorded provider pay
 - Real adapter parsing paths (`ChatCompletion`, `StreamChatCompletion`, `ListModels`, `Responses`, `StreamResponses`)
 - Streaming conversion behavior (`[DONE]`, chunk/event mapping)
 - Provider-specific conversion logic (for example Anthropic -> OpenAI-compatible / Responses output)
+- Audit capture: every recorded `*stream*.txt` must rebuild, in the audit log, into the reply it carried (`audit_stream_test.go`, goldens under `golden/audit/`). A new stream recording joins this check automatically.
 
 ## How replay works
 
