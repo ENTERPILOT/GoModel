@@ -399,10 +399,13 @@ func (e *exporter) scalar(path string, node *yaml.Node, class exportClass, envNa
 			e.secretPaths[path] = true
 		}
 		if secret := node.Value; class == exportSecret && prefix <= len(secret) {
-			secret = secret[prefix:]
-			e.recordSecret(secret)
-			if _, credential, ok := cutAuthScheme(secret); ok {
-				e.recordSecret(strings.TrimLeft(credential, " \t"))
+			e.recordCredential(secret[prefix:])
+		}
+		if class == exportFree {
+			for line := range strings.SplitSeq(node.Value, "\n") {
+				if start, end := e.headerCredential(path, line); start >= 0 {
+					e.recordCredential(line[start:end])
+				}
 			}
 		}
 		if class == exportURL {
@@ -417,10 +420,11 @@ func (e *exporter) scalar(path string, node *yaml.Node, class exportClass, envNa
 	case exportPlain, exportFree:
 		free := class == exportFree
 		class = exportPlain
+		if free && e.headerLines(path, node, value, configured, !restored) {
+			return
+		}
 		if e.leaksSecret(value, !restored) {
 			class = exportSecret
-		} else if free && e.headerLines(path, node, value, configured) {
-			return
 		}
 	case exportURL:
 		class = exportPlain
@@ -508,23 +512,44 @@ func (e *exporter) reference(path, secret, envName string) (text, unset string) 
 	return head + "${env:" + envName + "}", envName
 }
 
+// headerCredential is headerCredential for a line of the string at path. A
+// variable config.Load left unset is kept, as in scalar.
+func (e *exporter) headerCredential(path, line string) (start, end int) {
+	start, end = headerCredential(line)
+	if start >= 0 && e.isUnresolved(path) && unsetVariables.MatchString(line[start:end]) {
+		return -1, -1
+	}
+	return start, end
+}
+
 // headerLines writes value with the credential of each "Name: value" header
 // line that carries one (headerCredential) as an env reference, named after
-// the line when value holds several. It reports whether any line does.
-func (e *exporter) headerLines(path string, node *yaml.Node, value string, configured bool) bool {
+// the line when value holds several. It reports false, writing nothing, when
+// no line does, or when the rest of value leaks a secret as well (leaksSecret
+// with resolved), so all of it is one.
+func (e *exporter) headerLines(path string, node *yaml.Node, value string, configured, resolved bool) bool {
+	lines := strings.Split(value, "\n")
+	rest := slices.Clone(lines)
+	found := false
+	for i, line := range lines {
+		if start, end := e.headerCredential(path, line); start >= 0 {
+			rest[i] = line[:start] + line[end:]
+			found = true
+		}
+	}
+	if !found || e.leaksSecret(strings.Join(rest, "\n"), resolved) {
+		return false
+	}
 	plain := func(s string) string {
 		if configured {
 			return s
 		}
 		return escapeReferences(s)
 	}
-	lines := strings.Split(value, "\n")
 	var unset []string
-	found := false
 	for i, line := range lines {
-		start, end := headerCredential(line)
-		// A variable config.Load left unset is kept, as in scalar.
-		if start < 0 || e.isUnresolved(path) && unsetVariables.MatchString(line[start:end]) {
+		start, end := e.headerCredential(path, line)
+		if start < 0 {
 			lines[i] = plain(line)
 			continue
 		}
@@ -537,10 +562,6 @@ func (e *exporter) headerLines(path string, node *yaml.Node, value string, confi
 			unset = append(unset, name)
 		}
 		lines[i] = plain(line[:start]) + text + plain(line[end:])
-		found = true
-	}
-	if !found {
-		return false
 	}
 	e.setValue(path, node, strings.Join(lines, "\n"), true)
 	if len(unset) > 0 {
@@ -582,6 +603,15 @@ func setScalar(node *yaml.Node, value string, changed bool) {
 	node.Value = value
 	node.Tag = "!!str"
 	node.Style = yaml.DoubleQuotedStyle
+}
+
+// recordCredential records secret and, when it starts with an auth scheme,
+// the credential after it.
+func (e *exporter) recordCredential(secret string) {
+	e.recordSecret(secret)
+	if _, credential, ok := cutAuthScheme(secret); ok {
+		e.recordSecret(strings.TrimLeft(credential, " \t"))
+	}
 }
 
 // recordSecret records secret, unless it is too short or a reference, so

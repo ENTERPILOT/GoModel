@@ -84,6 +84,27 @@ guardrails:
 	assert.Equal(t, want, got)
 }
 
+func TestExportYAMLRedactsCopiesOfHeaderLineCredentials(t *testing.T) {
+	const prefix = "GOMODEL_GUARDRAILS_RULES_0_CONFIG_"
+	cfg := buildDefaultConfig()
+	cfg.Guardrails.Rules = []GuardrailRuleConfig{{Name: "proxy", Type: "header_edit", Config: map[string]any{
+		"upstream_set": "X-Proxy-Key: proxy-do-not-leak\nX-Litellm-Key: Bearer litellm-do-not-leak",
+		// A copy under a name that is no credential's: all of it is a secret.
+		"response_set": "X-Served-By: gomodel\nX-Echo: proxy-do-not-leak",
+	}}}
+	cfg.Users = []UserConfig{{Path: "/a", Description: "proxy-do-not-leak"}, {Path: "/b", Description: "sends litellm-do-not-leak upstream"}}
+
+	out := exportYAML(t, NewSecrets(), cfg, nil, nil)
+
+	assert.NotContains(t, out, "proxy-do-not-leak")
+	assert.NotContains(t, out, "litellm-do-not-leak")
+	rule := []string{"guardrails", "rules", "0", "config"}
+	assert.Equal(t, "X-Proxy-Key: ${env:"+prefix+"UPSTREAM_SET_0}\nX-Litellm-Key: Bearer ${env:"+prefix+"UPSTREAM_SET_1}", exportedValue(t, out, append(rule, "upstream_set")...))
+	assert.Equal(t, "${env:"+prefix+"RESPONSE_SET}", exportedValue(t, out, append(rule, "response_set")...))
+	assert.Equal(t, "${env:GOMODEL_USERS_0_DESCRIPTION}", exportedValue(t, out, "users", "0", "description"))
+	assert.Equal(t, "${env:GOMODEL_USERS_1_DESCRIPTION}", exportedValue(t, out, "users", "1", "description"))
+}
+
 func TestHeaderCredential(t *testing.T) {
 	for line, want := range map[string]string{
 		"X-Proxy-Key: abc":                     "abc",
