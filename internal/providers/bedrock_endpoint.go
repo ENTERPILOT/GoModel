@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"errors"
 	"net/url"
 	"regexp"
 	"strings"
@@ -24,6 +25,11 @@ var awsRegionPattern = regexp.MustCompile(`^` + awsRegionExpr + `$`)
 var bedrockHostPattern = regexp.MustCompile(
 	`^(` + bedrockServiceExpr + `\.` + awsRegionExpr + `\.(amazonaws\.com(\.cn)?|api\.aws)` +
 		`|vpce-[a-z0-9-]+\.` + bedrockServiceExpr + `\.` + awsRegionExpr + `\.vpce\.amazonaws\.com(\.cn)?)$`)
+
+// ErrHostAWSCredentialsWithheld is the configuration error of a Bedrock
+// provider saved through the admin API whose base URL would take the host's AWS
+// credentials off AWS's own Bedrock endpoints.
+var ErrHostAWSCredentialsWithheld = errors.New("a base URL that is not an AWS region or an AWS Bedrock endpoint needs an API key saved with the provider: the host's AWS credentials are only sent to AWS's Bedrock endpoints")
 
 // IsBedrockEndpoint reports whether a Bedrock base URL keeps requests on AWS's
 // own Bedrock hosts: an AWS region, or an https URL on one of those hosts and

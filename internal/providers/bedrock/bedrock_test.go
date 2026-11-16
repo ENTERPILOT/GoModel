@@ -711,7 +711,7 @@ func TestNew_HostCredentialDestination(t *testing.T) {
 		baseURL   string
 		ownKey    string
 		envToken  string
-		wantHosts []string // control plane, then runtime; empty: the provider refuses to build
+		wantHosts []string // control plane, then runtime; empty: the provider refuses every request
 		want      string
 	}{
 		{name: "declared, env token, custom endpoint", baseURL: custom, envToken: "ABSK-env", wantHosts: customHosts, want: "Bearer ABSK-env"},

@@ -216,7 +216,7 @@ func TestNew_HostCredentialDestination(t *testing.T) {
 		baseURL  string
 		ownKey   string
 		envToken string
-		wantHost string // empty: the provider refuses to build
+		wantHost string // empty: the provider refuses every request
 		want     string
 	}{
 		{name: "declared, env token, custom endpoint", baseURL: custom, envToken: "env-token", wantHost: "mantle-proxy.example.com", want: "Bearer env-token"},

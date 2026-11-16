@@ -212,7 +212,7 @@ func validateHostAWSCredentialDestination(cred ManagedProviderCredential) error 
 	if len(cred.APIKeys) > 0 || !HasResolvedProviderValue(cred.BaseURL) || IsBedrockEndpoint(cred.BaseURL) {
 		return nil
 	}
-	return credentialFieldError(CredentialFieldBaseURL, "a base URL that is not an AWS region or an AWS Bedrock endpoint needs an API key saved with the provider: the host's AWS credentials are only sent to AWS's Bedrock endpoints")
+	return credentialFieldError(CredentialFieldBaseURL, "%s", ErrHostAWSCredentialsWithheld.Error())
 }
 
 // validateCredentialProxyURL rejects a malformed outbound proxy before the

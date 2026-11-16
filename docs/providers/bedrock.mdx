@@ -43,11 +43,11 @@ gateway uses `AWS_BEARER_TOKEN_BEDROCK` from its host when set, and the host's
 AWS credential chain otherwise.
 
 A provider saved in the dashboard uses those host credentials only for an AWS
-region or AWS's own Bedrock endpoints over HTTPS, such as
-`bedrock-runtime.{region}.amazonaws.com` or its VPC endpoint name under
-`vpce.amazonaws.com`. For any other base URL, such as a proxy, save an API key
-with the provider. Providers declared in `config.yaml` or environment variables
-are not restricted.
+region or a Bedrock endpoint hosted by AWS, over HTTPS on the default port: for
+example `bedrock-runtime.{region}.amazonaws.com`, or its VPC endpoint name
+`vpce-{id}.bedrock-runtime.{region}.vpce.amazonaws.com`. For any other base
+URL, such as a proxy, save an API key with the provider. Providers declared in
+`config.yaml` or environment variables are not restricted.
 
 ## Run GoModel
 

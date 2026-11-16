@@ -111,7 +111,7 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 		// operator; one saved through the admin API may come from an identity
 		// that is not trusted with host secrets, so it gets them only for
 		// AWS's own Bedrock endpoints.
-		p.configErr = errHostCredentialsWithheld
+		p.configErr = providers.ErrHostAWSCredentialsWithheld
 		return p
 	}
 
@@ -151,8 +151,6 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 	p.control = bedrock.NewFromConfig(awsCfg, controlOpts)
 	return p
 }
-
-var errHostCredentialsWithheld = errors.New("a base URL that is not an AWS region or an AWS Bedrock endpoint needs an API key of its own: the host's AWS credentials are only sent to AWS's Bedrock endpoints")
 
 // onBedrockHost reports whether a base URL keeps requests on AWS's own Bedrock
 // hosts: a region, a Bedrock endpoint URL, or none at all, where the SDK

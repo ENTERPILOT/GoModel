@@ -43,10 +43,10 @@ używa `AWS_BEARER_TOKEN_BEDROCK` ze swojego hosta, jeśli jest ustawiony, a w
 przeciwnym razie łańcucha danych uwierzytelniających AWS hosta.
 
 Provider zapisany w dashboardzie używa tych danych uwierzytelniających hosta
-tylko dla regionu AWS lub własnych endpointów Bedrock AWS przez HTTPS, np.
-`bedrock-runtime.{region}.amazonaws.com` albo jego nazwy endpointu VPC w
-`vpce.amazonaws.com`. Dla każdego innego base URL, np. proxy, zapisz z
-providerem klucz API. Providerów zadeklarowanych w `config.yaml` lub w zmiennych
+tylko dla regionu AWS lub endpointu Bedrock hostowanego przez AWS, przez HTTPS
+na domyślnym porcie, np. `bedrock-runtime.{region}.amazonaws.com` albo jego
+nazwy endpointu VPC `vpce-{id}.bedrock-runtime.{region}.vpce.amazonaws.com`.
+Dla każdego innego base URL, np. proxy, zapisz z providerem klucz API. Providerów zadeklarowanych w `config.yaml` lub w zmiennych
 środowiskowych to ograniczenie nie dotyczy.
 
 ## Uruchomienie GoModel

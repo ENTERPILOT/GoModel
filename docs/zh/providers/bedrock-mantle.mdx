@@ -69,7 +69,7 @@ providers:
     api_key: "${BEDROCK_MANTLE_API_KEY}"
 ```
 
-在控制台中保存的提供商只会把主机的 `AWS_BEARER_TOKEN_BEDROCK` 或 AWS 凭据用于 AWS 区域或 AWS 自有的 Bedrock 端点（通过 HTTPS），例如 `bedrock-mantle.{region}.api.aws`。对于其他任何 Base URL（例如代理），请随提供商一起保存 API 密钥。在 `config.yaml` 或环境变量中声明的提供商不受此限制。
+在控制台中保存的提供商只会把主机的 `AWS_BEARER_TOKEN_BEDROCK` 或 AWS 凭据用于 AWS 区域或由 AWS 托管的 Bedrock 端点（通过 HTTPS 和默认端口），例如 `bedrock-mantle.{region}.api.aws`。对于其他任何 Base URL（例如代理），请随提供商一起保存 API 密钥。在 `config.yaml` 或环境变量中声明的提供商不受此限制。
 
 ## 调用 GPT-5.6
 
