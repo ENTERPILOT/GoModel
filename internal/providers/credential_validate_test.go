@@ -193,6 +193,8 @@ func TestValidateCredential_BedrockHostCredentials(t *testing.T) {
 		{Name: "b", Type: "bedrock", BaseURL: "https://bedrock-runtime.us-east-1.amazonaws.com:8443"},
 		{Name: "b", Type: "bedrock", BaseURL: "https://abc123.execute-api.us-east-1.amazonaws.com"},
 		{Name: "b", Type: "bedrock", BaseURL: "not a region"},
+		// The adapter receives a base URL holding "${" as written.
+		{Name: "b", Type: "bedrock", BaseURL: "https://bedrock-proxy.example.com/${MODEL}"},
 		{Name: "m", Type: "bedrock-mantle", BaseURL: "https://mantle-proxy.example.com"},
 	}
 	for _, cred := range rejected {

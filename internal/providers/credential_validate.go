@@ -209,7 +209,7 @@ func validateHostAWSCredentialDestination(cred ManagedProviderCredential) error 
 	default:
 		return nil
 	}
-	if len(cred.APIKeys) > 0 || !HasResolvedProviderValue(cred.BaseURL) || IsBedrockEndpoint(cred.BaseURL) {
+	if len(cred.APIKeys) > 0 || strings.TrimSpace(cred.BaseURL) == "" || IsBedrockEndpoint(cred.BaseURL) {
 		return nil
 	}
 	return credentialFieldError(CredentialFieldBaseURL, "%s", ErrHostAWSCredentialsWithheld.Error())
