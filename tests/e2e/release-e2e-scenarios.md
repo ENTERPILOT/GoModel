@@ -716,7 +716,7 @@ export GOMODEL_BIN="${GOMODEL_RELEASE_BINARY:-$PWD/bin/gomodel}"
 # other gateway on the machine reads and overwrites.
 # usage: scratch_gateway_start DIR PORT [VAR=value...]
 scratch_gateway_start() {
-  local dir="$1" port="$2"
+  local dir="$1" port="$2" ready
   shift 2
   mkdir -p "$dir"
   if curl -fsS --max-time 1 "http://localhost:$port/health" >/dev/null 2>&1; then
@@ -734,12 +734,16 @@ scratch_gateway_start() {
   for _ in $(seq 1 60); do
     if curl -fsS --max-time 1 "http://localhost:$port/health" >/dev/null 2>&1; then
       # An empty cache means /health answers while provider discovery is still
-      # running. Wait until the catalog is no longer reported empty; a gateway
-      # without providers never reports it, and one whose discovery fails is
-      # left to the scenario's own assertions.
+      # running. Wait until /health/ready no longer reports the catalog as
+      # empty; a gateway without providers never reports it, and one whose
+      # discovery fails is left to the scenario's own assertions. Only an
+      # answer ends the wait: a request that fails or times out is retried.
       for _ in $(seq 1 120); do
-        curl -fsS --max-time 1 "http://localhost:$port/health/ready" 2>/dev/null \
-          | jq -e '.components.models == "down"' >/dev/null 2>&1 || break
+        kill -0 "$(cat "$dir/server.pid")" 2>/dev/null || break
+        if ready="$(curl -sS --max-time 3 "http://localhost:$port/health/ready" 2>/dev/null)" \
+          && jq -e '.components.models != "down"' >/dev/null 2>&1 <<<"$ready"; then
+          break
+        fi
         sleep 0.5
       done
       return 0
