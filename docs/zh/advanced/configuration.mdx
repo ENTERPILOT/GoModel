@@ -44,6 +44,7 @@ GoModel 会根据常用的环境变量自动发现提供商。
 | `BASE_PATH`          | 挂载路径前缀，例如 `/g`                   | `/`                    |
 | `GOMODEL_MASTER_KEY` | 用于保护网关的认证密钥           | _（空，不安全模式）_ |
 | `MASTER_KEY_DISABLED` | 关闭主密钥认证，仅保留[托管密钥](/zh/features/users)和认证扩展作为凭据 | `false`                |
+| `AUTH_KEY_PREFIX`    | 新签发的[托管密钥](/zh/features/users)所用的前缀；已有密钥继续有效 | `sk_gom_`              |
 | `GOMODEL_DEMO_MODE`  | 在日志和控制台中启用公开演示警告  | `false`                |
 | `BODY_SIZE_LIMIT`    | 请求体大小上限（例如 `10M`、`1024K`、`500KB`），同时作用于压缩和解压后的大小 | `10M`                  |
 | `STREAM_STALL_TIMEOUT` | 模型路由上的单次响应写入等待客户端读取的秒数；`0` 表示禁用 | `60`                   |
@@ -103,6 +104,16 @@ MASTER_KEY_DISABLED=true
 GoModel 会在启动时忽略任何已配置的主密钥，因此没有任何地方接受它或基于它派生：它对网关、对 [`GET /v1/auth/verify`](/zh/advanced/api-endpoints#密钥验证) 以及对 `/admin` 都会失败。留在环境变量或 `config.yaml` 中的密钥不会生效，也不会报错，因此您可以在移除它之前安全地打开这个开关。
 
 禁用主密钥与将 `GOMODEL_MASTER_KEY` 留空不同：留空会让网关以免认证方式运行，并开放 `/admin/*`，以便控制台引导创建第一个托管密钥。除非配置了认证扩展，否则即使已存在托管密钥，`/admin/*` 仍保持开放，GoModel 会在启动时记录安全警告；因此一旦签发了第一个具有控制台访问权限的密钥，请立即设置主密钥或将其禁用。禁用主密钥则是失败即拒绝（fail closed）：每个请求都需要凭据，Admin API 只能通过具有控制台访问权限的凭据访问。请在打开开关之前签发该凭据：如果既没有主密钥、也没有托管密钥和认证扩展，网关会拒绝所有请求，并在启动时记录相应警告。
+
+#### 托管密钥前缀
+
+托管密钥默认以 `sk_gom_` 开头。设置 `AUTH_KEY_PREFIX`（YAML 中为 `server.auth_key_prefix`）可以为密钥使用自有品牌，或使其符合组织的密钥格式或密钥扫描工具识别的模式：
+
+```bash
+AUTH_KEY_PREFIX=sk-acme-
+```
+
+前缀最多 32 个字符，只能包含 ASCII 字母、数字、`_` 和 `-`；其他值会使启动失败，空值则保留默认值。只有之后签发的密钥使用新前缀。已有密钥（包括在之前的自定义前缀下签发的密钥）继续有效，并保留原来的脱敏显示值。
 
 #### 提供 HTTPS 服务
 
@@ -286,6 +297,11 @@ server:
 | `METRICS_ENABLED`  | 启用 Prometheus 指标（实验性） | `false`    |
 | `METRICS_ENDPOINT` | 指标的 HTTP 路径                    | `/metrics` |
 | `METRICS_REQUIRE_AUTH` | 指标端点需要 Bearer 认证 | `false` |
+| `METRICS_CALLER_USER_PATH` | 将用户路径加入 Token 和成本指标（Prometheus 与 OpenTelemetry 均适用），以及 Prometheus 中按调用方统计的请求计数器（请参阅[调用方维度](/zh/guides/prometheus-metrics#调用方维度)） | `false` |
+| `METRICS_CALLER_USER_PATH_DEPTH` | 指标上保留的用户路径前几段；小于 1 的值使用默认值 | `2` |
+| `METRICS_CALLER_AUTH_KEY` | 为这些指标加入托管 API Key 的名称 | `false` |
+| `METRICS_CALLER_REQUEST_LABELS` | 为这些指标加入请求标签 | `false` |
+| `METRICS_CALLER_MAX_VALUES` | 每个调用方维度保留的不同取值数量；之后的取值、超过 256 字节或不是有效 UTF-8 的取值，以及保留名称，上报为 `{other}`（用户路径为 `/{other}`）。小于 1 的值使用默认值 | `100` |
 | `OTEL_ENABLED`     | 通过 OTLP 导出 OpenTelemetry Trace 和指标（请参阅 [OpenTelemetry](/zh/guides/opentelemetry)） | `false`    |
 
 #### 管理

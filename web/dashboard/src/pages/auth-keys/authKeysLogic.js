@@ -1,6 +1,7 @@
 // Pure logic for the API Keys page.
 
 import * as m from "../../lib/paraglide/messages.js";
+import { authKeysNamed } from "../../lib/utils/authKeyLabels.js";
 import { modelSelectorOptions, parseModelSelectors } from "../../lib/utils/modelSelectors.js";
 import { filterFields } from "../../lib/utils/textMatch.js";
 
@@ -152,6 +153,22 @@ export function authKeyActive(key, now = Date.now()) {
     return false;
   }
   return !authKeyExpired(key, now);
+}
+
+// duplicateNameWarning returns a non-blocking warning when `name` (trimmed,
+// case kept, as the backend compares it) is already another key's name, or
+// "" when it is free. Names need not be unique, so the warning never blocks
+// saving; it says whether the existing key is still active. `exceptID` leaves
+// out the key being renamed.
+export function duplicateNameWarning(keys, name, exceptID = "", now = Date.now()) {
+  const matches = authKeysNamed(keys, name, exceptID);
+  if (!matches.length) {
+    return "";
+  }
+  const trimmed = String(name).trim();
+  return matches.some((key) => authKeyActive(key, now))
+    ? m.api_keys_name_in_use_active({ name: trimmed })
+    : m.api_keys_name_in_use_inactive({ name: trimmed });
 }
 
 // authKeySearchFields lists the text the toolbar query matches against, one

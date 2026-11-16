@@ -184,6 +184,10 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		HTTPErrorHandler: gatewayErrorHandler,
 	})
 	e.Logger = slog.Default()
+	// HSTS runs first so responses the base path rejects carry it too.
+	if cfg != nil && cfg.TLSConfig != nil {
+		e.Pre(strictTransportSecurity)
+	}
 	basePath := configuredBasePath(cfg)
 	if basePath != "/" {
 		e.Pre(stripBasePathMiddleware(basePath))
@@ -539,6 +543,8 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	e.DELETE("/v1/conversations/:id", handler.DeleteConversation)
 	e.POST("/v1/embeddings", handler.Embeddings)
 	e.POST("/v1/audio/speech", handler.AudioSpeech)
+	// GoModel extension (not OpenAI): voice discovery for a TTS model.
+	e.GET("/v1/audio/voices", handler.AudioVoices)
 	e.POST("/v1/audio/transcriptions", handler.AudioTranscriptions)
 	e.POST("/v1/audio/translations", handler.AudioTranslations)
 	e.POST("/v1/images/generations", handler.ImageGenerations)
@@ -619,6 +625,10 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		e.GET("/admin/dashboard", cfg.DashboardHandler.Index)
 		e.GET("/admin/dashboard/*", cfg.DashboardHandler.Index)
 		e.GET("/admin/static/*", cfg.DashboardHandler.Static)
+		// Probes and link checkers use HEAD; it answers with GET's headers.
+		e.HEAD("/admin/dashboard", cfg.DashboardHandler.Index)
+		e.HEAD("/admin/dashboard/*", cfg.DashboardHandler.Index)
+		e.HEAD("/admin/static/*", cfg.DashboardHandler.Static)
 	}
 
 	// Extension routes register after all core routes.

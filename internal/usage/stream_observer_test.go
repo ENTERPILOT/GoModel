@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"context"
 	"io"
 	"math"
 	"strings"
@@ -261,6 +262,22 @@ func TestStreamUsageObserverIncludesUserPath(t *testing.T) {
 	require.Equal(t, "/team/alpha", entries[0].UserPath)
 	require.Equal(t, "scoped-session", entries[0].SessionID)
 	require.Equal(t, "key-a", entries[0].AuthKeyID)
+}
+
+// The operation is read when the usage arrives: the provider call records it
+// after the observer is built.
+func TestStreamUsageObserverReadsTheRecordedOperation(t *testing.T) {
+	logger := &trackingLogger{enabled: true}
+	ctx := core.WithGenAIOperation(context.Background())
+	observer := NewStreamUsageObserver(logger, "gemini-2.5-flash", "gemini", "req-123", "/v1/chat/completions", nil)
+	observer.SetGenAIOperation(core.GenAIOperationFromContext(ctx))
+	core.GenAIOperationFromContext(ctx).Set("generate_content")
+	observer.OnJSONEvent(chatUsageEvent())
+	observer.OnStreamClose()
+
+	entries := logger.getEntries()
+	require.Len(t, entries, 1)
+	assert.Equal(t, "generate_content", entries[0].Operation)
 }
 
 func TestStreamUsageObserverNoUserPath(t *testing.T) {

@@ -45,6 +45,7 @@ Najczęstszy sposób konfigurowania GoModel. Ustaw dowolną z poniższych zmienn
 | `BASE_PATH`          | Prefiks ścieżki montowania, na przykład `/g`          | `/`                    |
 | `GOMODEL_MASTER_KEY` | Klucz uwierzytelniający zabezpieczający gateway       | _(pusty, tryb niezabezpieczony)_ |
 | `MASTER_KEY_DISABLED` | Wyłącza uwierzytelnianie master key, tak że jedynymi danymi uwierzytelniającymi pozostają [zarządzane klucze](/pl/features/users) i rozszerzenia uwierzytelniania | `false`                |
+| `AUTH_KEY_PREFIX`    | Prefiks nowo wydawanych [zarządzanych kluczy](/pl/features/users); istniejące klucze nadal działają | `sk_gom_`              |
 | `GOMODEL_DEMO_MODE`  | Włącza ostrzeżenia o publicznym demo w logach i w dashboardzie | `false`                |
 | `BODY_SIZE_LIMIT`    | Maksymalny rozmiar body requestu (np. `10M`, `1024K`, `500KB`), po kompresji i po dekompresji | `10M`                  |
 | `STREAM_STALL_TIMEOUT` | Liczba sekund, przez którą pojedynczy zapis odpowiedzi na trasie modelu może czekać, aż klient go odczyta; `0` wyłącza | `60`                   |
@@ -173,6 +174,22 @@ wymaga danych uwierzytelniających, a Admin API pozostaje dostępne tylko z taki
 dostęp do dashboardu. Wydaj je, zanim włączysz przełącznik – bez master key,
 bez zarządzanego klucza i bez rozszerzenia uwierzytelniania gateway odrzuca każdy
 request i loguje o tym ostrzeżenie przy starcie.
+
+#### Prefiks zarządzanych kluczy
+
+Domyślnie zarządzane klucze zaczynają się od `sk_gom_`. Ustaw `AUTH_KEY_PREFIX`
+(`server.auth_key_prefix` w YAML), aby oznaczyć je własną marką albo dopasować
+do formatu kluczy w Twojej organizacji lub do wzorców, których szuka Twój
+skaner sekretów:
+
+```bash
+AUTH_KEY_PREFIX=sk-acme-
+```
+
+Prefiks to do 32 znaków ASCII: liter, cyfr, `_` i `-`; cokolwiek innego
+zatrzymuje start, a pusta wartość zostawia domyślny. Nowy prefiks dostają
+tylko klucze wydane później. Istniejące klucze, także wydane pod wcześniejszym
+własnym prefiksem, działają dalej i zachowują swoją skróconą wartość.
 
 #### Serwowanie HTTPS
 
@@ -473,6 +490,11 @@ Przykłady YAML, okresy, dopasowywanie i egzekwowanie w workflowach opisuje stro
 | `METRICS_ENABLED`  | Włącza metryki Prometheusa (eksperymentalne) | `false`    |
 | `METRICS_ENDPOINT` | Ścieżka HTTP dla metryk                  | `/metrics` |
 | `METRICS_REQUIRE_AUTH` | Endpoint metryk za uwierzytelnianiem bearer | `false` |
+| `METRICS_CALLER_USER_PATH` | Dodaje user path do metryk tokenów i kosztów, w Prometheusie i OpenTelemetry, oraz do licznika requestów per wywołujący w Prometheusie (zobacz [Wymiary wywołującego](/pl/guides/prometheus-metrics#wymiary-wywołującego)) | `false` |
+| `METRICS_CALLER_USER_PATH_DEPTH` | Liczba początkowych segmentów user path zachowywanych w metrykach; wartość poniżej 1 oznacza wartość domyślną | `2` |
+| `METRICS_CALLER_AUTH_KEY` | Dodaje do tych metryk nazwę zarządzanego klucza API | `false` |
+| `METRICS_CALLER_REQUEST_LABELS` | Dodaje do tych metryk etykiety requestu | `false` |
+| `METRICS_CALLER_MAX_VALUES` | Liczba różnych wartości na wymiar wywołującego; kolejne wartości, wartości dłuższe niż 256 bajtów lub niebędące poprawnym UTF-8 oraz nazwy zarezerwowane są raportowane jako `{other}` (`/{other}` dla user path). Wartość poniżej 1 oznacza wartość domyślną | `100` |
 | `OTEL_ENABLED`     | Eksportuje trace'y i metryki OpenTelemetry przez OTLP (zobacz [OpenTelemetry](/pl/guides/opentelemetry)) | `false`    |
 
 #### Admin

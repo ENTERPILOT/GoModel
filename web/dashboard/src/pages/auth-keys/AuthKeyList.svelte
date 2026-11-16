@@ -8,7 +8,7 @@
   import { displayModelSelector } from "$lib/utils/modelSelectors.js";
   import { authKeyDeactivated, authKeyExpired, labelChipStyle, lastUsedCellState } from "./authKeysLogic.js";
   import { authKeysStore as store } from "./authKeys.svelte.js";
-  import { Boxes, Info, Pencil, Plug, Power, ShieldCheck, ShieldOff, TriangleAlert, Unplug } from "lucide";
+  import { Boxes, Info, Pencil, Plug, Power, ShieldCheck, ShieldOff, TextCursorInput, TriangleAlert, Unplug } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 </script>
 
@@ -151,11 +151,20 @@
           </td>
           <td class="auth-key-actions-cell col-actions">
             <div class="auth-key-row-actions">
+              <!-- Renaming stays available on inactive keys, so an old key
+                   can give up its name to a new one. -->
+              <TableActionButton
+                label={m.api_keys_edit_name_action({ name: store.displayName(key) })}
+                class="table-icon-btn"
+                onclick={() => store.openNameEditor(key)}
+              >
+                <Icon icon={TextCursorInput} class="table-icon-svg" />
+              </TableActionButton>
               {#if key.active}
                 <TableActionButton
                   label={key.dashboard_access
-                    ? m.api_keys_revoke_access_action({ name: key.name })
-                    : m.api_keys_grant_access_action({ name: key.name })}
+                    ? m.api_keys_revoke_access_action({ name: store.displayName(key) })
+                    : m.api_keys_grant_access_action({ name: store.displayName(key) })}
                   class="table-icon-btn"
                   onclick={() => store.toggleDashboardAccess(key)}
                   disabled={Boolean(store.dashboardAccessID)}
@@ -164,8 +173,8 @@
                 </TableActionButton>
                 <TableActionButton
                   label={key.passthrough_access
-                    ? m.api_keys_revoke_passthrough_action({ name: key.name })
-                    : m.api_keys_grant_passthrough_action({ name: key.name })}
+                    ? m.api_keys_revoke_passthrough_action({ name: store.displayName(key) })
+                    : m.api_keys_grant_passthrough_action({ name: store.displayName(key) })}
                   class="table-icon-btn"
                   onclick={() => store.togglePassthroughAccess(key)}
                   disabled={Boolean(store.passthroughAccessID)}
@@ -173,14 +182,14 @@
                   <Icon icon={key.passthrough_access ? Unplug : Plug} class="table-icon-svg" />
                 </TableActionButton>
                 <TableActionButton
-                  label={m.api_keys_edit_labels_action({ name: key.name })}
+                  label={m.api_keys_edit_labels_action({ name: store.displayName(key) })}
                   class="table-icon-btn"
                   onclick={() => store.openLabelsEditor(key)}
                 >
                   <Icon icon={Pencil} class="table-icon-svg" />
                 </TableActionButton>
                 <TableActionButton
-                  label={m.api_keys_edit_allowed_models_action({ name: key.name })}
+                  label={m.api_keys_edit_allowed_models_action({ name: store.displayName(key) })}
                   class="table-icon-btn"
                   onclick={() => store.openAllowedModelsEditor(key)}
                 >
@@ -188,8 +197,8 @@
                 </TableActionButton>
                 <TableActionButton
                   label={store.deactivatingID === key.id
-                    ? m.api_keys_deactivating_action({ name: key.name })
-                    : m.api_keys_deactivate_action({ name: key.name })}
+                    ? m.api_keys_deactivating_action({ name: store.displayName(key) })
+                    : m.api_keys_deactivate_action({ name: store.displayName(key) })}
                   class="table-action-btn-danger table-icon-btn"
                   onclick={() => store.deactivateKey(key)}
                   disabled={store.deactivatingID === key.id}

@@ -224,6 +224,10 @@ SERVER_TLS_CLIENT_CA_FILE=/etc/gomodel/tls/ca.crt
 - Po włączeniu TLS port nie odpowiada już na zwykłe HTTP. `gomodel --health` i
   `gomodel --ready`, które uruchamia dockerowy `HEALTHCHECK`, same przełączają
   się na HTTPS.
+- Odpowiedzi zawierają `Strict-Transport-Security: max-age=15552000` (180 dni,
+  bez `includeSubDomains` i `preload`), więc przeglądarki trzymają się HTTPS dla
+  tego hosta. Zwykłe HTTP za proxy terminującym TLS nie wysyła nagłówka HSTS;
+  ustaw go na proxy.
 
 **Kubernetes z cert-managerem.** Wystaw certyfikat do Secretu i zamontuj go jako
 wolumen. Nie używaj `subPath`: kubelet nie aktualizuje montowań `subPath`, więc

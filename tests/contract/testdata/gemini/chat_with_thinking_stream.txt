@@ -1,0 +1,3 @@
+data: {"choices":[{"delta":{"content":"Hello, World!","role":"assistant"},"finish_reason":"stop","index":0}],"created":1794746091,"id":"66b5arLCB5rd7M8PiqWx-QQ","model":"gemini-2.5-flash","object":"chat.completion.chunk","usage":{"completion_tokens":4,"prompt_tokens":11,"total_tokens":36}}
+
+data: [DONE]

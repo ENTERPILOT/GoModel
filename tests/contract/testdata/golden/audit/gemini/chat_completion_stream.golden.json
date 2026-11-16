@@ -1,0 +1,16 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Hello World",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 0,
+  "id": "SzpyaZuaHu_WxN8P9M-PgA4",
+  "model": "gemini-2.5-flash-preview-09-2025",
+  "object": "chat.completion"
+}

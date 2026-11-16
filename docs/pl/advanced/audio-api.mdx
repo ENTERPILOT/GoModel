@@ -29,6 +29,7 @@ który nie obsługuje audio, zwraca czytelny błąd, zamiast błędnie routować
 | `POST /v1/audio/speech` | Tekst na mowę. Przyjmuje body JSON i zwraca **binarne audio** w żądanym `response_format`. |
 | `POST /v1/audio/transcriptions` | Mowa na tekst. Przyjmuje upload `multipart/form-data` i zwraca JSON lub zwykły tekst zgodnie z `response_format`. |
 | `POST /v1/audio/translations` | Mowa na tekst angielski. Ten sam kształt uploadu co transkrypcje, bez `language` i `timestamp_granularities[]`. |
+| `GET /v1/audio/voices?model=` | Rozszerzenie GoModel: głosy oferowane przez model TTS – zobacz [Wykrywanie głosów](/pl/advanced/api-endpoints#wykrywanie-głosów). |
 
 Body JSON transkrypcji i tłumaczeń są normalizowane do kształtu OpenAI:
 specyficzne dla Groq pole `x_groq` jest usuwane z odpowiedzi `json`
@@ -100,6 +101,14 @@ Azure. Pola opcjonalne – `instructions`,
 `speed` – są przekazywane do providera. `Content-Type` odpowiedzi to ten,
 który zwraca upstream, a w razie jego braku typ wynikający z `response_format` (na
 przykład `wav` → `audio/wav`).
+
+`voice` może być też obiektem z polem `id`, w formie, której OpenAI używa dla
+[własnych głosów](https://developers.openai.com/api/docs/guides/custom-voices):
+`"voice": {"id": "voice_1234"}`. Providerzy zgodni z OpenAI dostają obiekt bez
+zmian; ElevenLabs, MiniMax, Xiaomi i audio.cpp używają jego `id` jako głosu.
+Pole `id` musi być tekstem zawierającym co najmniej jeden znak inny niż biały;
+w przeciwnym razie zwracany jest błąd `400`. Zgodny provider, który nie
+obsługuje własnych głosów, może odrzucić obiekt.
 
 Zsyntetyzowane audio jest **przekazywane na bieżąco, w miarę jak provider je generuje** – zobacz
 [Streaming](#streaming).

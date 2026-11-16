@@ -340,6 +340,7 @@ func (b *bootstrap) initServer() error {
 	if app.sharedStore != nil {
 		bindSharedStore(b.cfg.Extensions, app.sharedStore)
 	}
+	b.installRequestCallersForMetrics()
 	return nil
 }
 

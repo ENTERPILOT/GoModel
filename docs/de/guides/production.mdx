@@ -252,6 +252,10 @@ SERVER_TLS_CLIENT_CA_FILE=/etc/gomodel/tls/ca.crt
 - Sobald TLS aktiv ist, beantwortet der Port kein einfaches HTTP mehr.
   `gomodel --health` und `gomodel --ready`, die der Docker-`HEALTHCHECK`
   ausführt, wechseln automatisch zu HTTPS.
+- Antworten enthalten `Strict-Transport-Security: max-age=15552000` (180 Tage,
+  ohne `includeSubDomains` oder `preload`), damit Browser für diesen Host bei
+  HTTPS bleiben. Einfaches HTTP hinter einem TLS-terminierenden Proxy sendet
+  keinen HSTS-Header; setzen Sie ihn am Proxy.
 
 **Kubernetes mit cert-manager.** Stellen Sie das Zertifikat in ein Secret aus und
 mounten Sie es als Volume. Verwenden Sie kein `subPath`: Das Kubelet aktualisiert
