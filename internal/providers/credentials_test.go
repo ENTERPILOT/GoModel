@@ -509,8 +509,11 @@ func TestCredentialsService_SaveAndDeleteReturnWithinTheRefreshBudget(t *testing
 	assert.Eventually(t, func() bool { return svc.registry.Supports("ok/ok-model") }, 5*time.Second, 5*time.Millisecond,
 		"the healthy provider of the same sweep was not discovered")
 
+	// Delete the healthy provider, so the hanging one is still registered
+	// when the delete's own sweep runs.
 	start = time.Now()
-	requireReturns(t, "the delete", func() error { return svc.Delete(t.Context(), "hang") })
+	requireReturns(t, "the delete next to the hanging provider", func() error { return svc.Delete(t.Context(), "ok") })
 	assert.Less(t, time.Since(start), 5*time.Second, "the delete outlived the refresh budget")
-	assert.Nil(t, svc.registry.ProviderByName("hang"))
+	assert.Nil(t, svc.registry.ProviderByName("ok"))
+	assert.NotNil(t, svc.registry.ProviderByName("hang"), "the hanging provider must still be registered for the delete's sweep")
 }

@@ -467,10 +467,9 @@ func (s *CredentialsService) Upsert(ctx context.Context, cred ManagedProviderCre
 		return &CredentialFieldError{Field: "type", Message: "unknown provider type: " + cred.Type}
 	}
 	cred.Name = name
-	// The refresh budget covers the whole request, persistence and
-	// notification included: a slow secret backend or store write counts
-	// against the same bound as the sweep, so the response can never outlive
-	// the inbound write timeout.
+	// The refresh budget starts here rather than at the sweep, so time spent
+	// on persistence and notification shortens the sweep instead of adding to
+	// it. Persistence itself still runs on ctx and is not bounded by it.
 	refreshCtx, cancel := context.WithTimeout(ctx, credentialSaveRefreshTimeout)
 	defer cancel()
 	// ErrSealUnconfirmed means the row was written and applied: refresh like
@@ -505,7 +504,7 @@ func (s *CredentialsService) Delete(ctx context.Context, name string) error {
 	if s.IsManaged(name) {
 		return fmt.Errorf("provider %q is managed by config/env and is read-only", name)
 	}
-	// The refresh budget covers the whole request, as in Upsert.
+	// The refresh budget starts before persistence, as in Upsert.
 	refreshCtx, cancel := context.WithTimeout(ctx, credentialSaveRefreshTimeout)
 	defer cancel()
 	if err := s.deleteStored(ctx, name); err != nil {
