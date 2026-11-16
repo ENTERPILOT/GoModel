@@ -1,6 +1,7 @@
 package mcpgateway
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -783,6 +784,53 @@ func TestReconnectGivesUpWaitingForAConnectInFlight(t *testing.T) {
 	u.stateMu.Lock()
 	assert.Same(t, session, u.session, "a reconnect that never got the lock must not drop the session")
 	u.stateMu.Unlock()
+}
+
+// A server can complete the handshake and then stop answering. The session
+// dialed for the reconnect is then dropped when its listing times out, and
+// closing it waits on requests that server never answers; the reconnect must
+// not wait with it.
+func TestReconnectDoesNotWaitToCloseASessionWhoseListingStalled(t *testing.T) {
+	upstream := mcp.NewServer(&mcp.Implementation{Name: "alpha", Version: "test"}, nil)
+	addEchoTool("echo")(upstream)
+	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return upstream }, nil)
+	var stall atomic.Bool
+	release := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if stall.Load() && r.Method != http.MethodGet {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			// The handshake still answers; the listing and the requests that
+			// close the session do not.
+			if !bytes.Contains(body, []byte(`"server/discover"`)) && !bytes.Contains(body, []byte(`"initialize"`)) && !bytes.Contains(body, []byte(`"notifications/initialized"`)) {
+				select {
+				case <-release:
+				case <-r.Context().Done():
+				}
+				return
+			}
+		}
+		handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(func() {
+		close(release)
+		ts.Close()
+	})
+
+	service, _ := newTestService(t, nil, testSpec("alpha", ts.URL, nil))
+	service.manager.reconnectTimeout = 200 * time.Millisecond
+	stall.Store(true)
+
+	start := time.Now()
+	view, err := service.Reconnect(context.Background(), "alpha")
+	require.ErrorContains(t, err, "list tools", "the handshake must succeed so the listing is what stalls")
+	assert.Less(t, time.Since(start), 3*time.Second, "the reconnect waited for the stalled session to close")
+	assert.Equal(t, StatusDegraded, view.Status)
+	assert.Equal(t, 1, view.ToolCount, "the last known catalog is kept")
 }
 
 func TestDegradedUpstreamKeepsCatalogAndReportsError(t *testing.T) {

@@ -693,7 +693,15 @@ func (u *upstream) dropSession(session *mcp.ClientSession) {
 		u.session = nil
 	}
 	u.stateMu.Unlock()
-	_ = session.Close()
+	closeInBackground(session)
+}
+
+// closeInBackground closes a session the upstream no longer uses without
+// waiting for it. The SDK's Close waits for the calls still in flight on the
+// session, which can take a server's whole tool timeout, and then for the
+// server to acknowledge the session's end, which a stalled server never does.
+func closeInBackground(session *mcp.ClientSession) {
+	go func() { _ = session.Close() }()
 }
 
 func (u *upstream) markDegraded(err error) {
@@ -710,16 +718,14 @@ func (u *upstream) isClosed() bool {
 }
 
 // reset drops the shared session so the next use redials. The upstream stays
-// alive — this is the "force reconnect" path, not disposal. The old session
-// is closed in the background: the SDK's Close waits for the calls still in
-// flight on it, which can take a server's whole tool timeout.
+// alive — this is the "force reconnect" path, not disposal.
 func (u *upstream) reset() {
 	u.stateMu.Lock()
 	session := u.session
 	u.session = nil
 	u.stateMu.Unlock()
 	if session != nil {
-		go func() { _ = session.Close() }()
+		closeInBackground(session)
 	}
 }
 
