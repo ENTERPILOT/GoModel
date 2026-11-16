@@ -17,7 +17,7 @@ func clearWriteDeadline(c *echo.Context) {
 	err := http.NewResponseController(c.Response()).SetWriteDeadline(time.Time{})
 	if err != nil && !errors.Is(err, http.ErrNotSupported) {
 		slog.Warn("failed to clear write deadline for a long admin action",
-			"path", c.Request().URL.Path,
+			"route", c.Path(),
 			"error", err,
 		)
 	}

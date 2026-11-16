@@ -151,11 +151,28 @@ func (u *upstream) snapshot() (*catalog, ServerStatus) {
 func (u *upstream) refresh(ctx context.Context) error {
 	// Another dial or listing may hold the lock for longer than this caller
 	// can wait. Its outcome decides the server's status, not this wait, so
-	// giving up leaves the status as it is.
+	// giving up leaves the upstream as it is.
 	if err := u.connectMu.LockContext(ctx); err != nil {
 		return err
 	}
 	defer u.connectMu.Unlock()
+	return u.refreshLocked(ctx)
+}
+
+// reconnect drops the shared session and refreshes on a fresh dial. The
+// session is dropped only once the lock is held, so a reconnect that gives up
+// waiting leaves the session, and the status reported for it, untouched.
+func (u *upstream) reconnect(ctx context.Context) error {
+	if err := u.connectMu.LockContext(ctx); err != nil {
+		return err
+	}
+	defer u.connectMu.Unlock()
+	u.reset()
+	return u.refreshLocked(ctx)
+}
+
+// refreshLocked is refresh for a caller holding connectMu.
+func (u *upstream) refreshLocked(ctx context.Context) error {
 	if !u.spec.Enabled || u.isClosed() {
 		return nil
 	}

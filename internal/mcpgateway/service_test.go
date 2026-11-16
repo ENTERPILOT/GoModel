@@ -760,7 +760,7 @@ func TestReconnectDoesNotWaitForACallInFlight(t *testing.T) {
 
 // A dial or listing already in flight holds the connect lock for up to
 // connectTimeout plus listTimeout. Reconnect gives up waiting for it at its
-// budget, and that wait alone does not change the server's status.
+// budget and leaves the server as it was: still connected, on the same session.
 func TestReconnectGivesUpWaitingForAConnectInFlight(t *testing.T) {
 	url := newTestUpstream(t, "alpha", addEchoTool("echo"))
 	service, _ := newTestService(t, nil, testSpec("alpha", url, nil))
@@ -768,6 +768,10 @@ func TestReconnectGivesUpWaitingForAConnectInFlight(t *testing.T) {
 
 	u, ok := service.manager.get("alpha")
 	require.True(t, ok)
+	u.stateMu.Lock()
+	session := u.session
+	u.stateMu.Unlock()
+	require.NotNil(t, session)
 	u.connectMu.Lock()
 	defer u.connectMu.Unlock()
 
@@ -776,6 +780,9 @@ func TestReconnectGivesUpWaitingForAConnectInFlight(t *testing.T) {
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Less(t, time.Since(start), 5*time.Second, "the reconnect outlived its budget")
 	assert.Equal(t, StatusConnected, view.Status)
+	u.stateMu.Lock()
+	assert.Same(t, session, u.session, "a reconnect that never got the lock must not drop the session")
+	u.stateMu.Unlock()
 }
 
 func TestDegradedUpstreamKeepsCatalogAndReportsError(t *testing.T) {

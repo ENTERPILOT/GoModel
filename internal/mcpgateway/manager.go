@@ -210,11 +210,8 @@ func (m *Manager) Reconnect(ctx context.Context, name string) (ServerView, error
 	}
 	ctx, cancel := context.WithTimeout(ctx, m.reconnectTimeout)
 	defer cancel()
-	u.reset()
-	if u.spec.Enabled {
-		if err := u.refresh(ctx); err != nil {
-			return u.view(), err
-		}
+	if err := u.reconnect(ctx); err != nil {
+		return u.view(), err
 	}
 	return u.view(), nil
 }
