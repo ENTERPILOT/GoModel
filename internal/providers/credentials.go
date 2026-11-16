@@ -290,8 +290,9 @@ const credentialModelRefreshTimeout = 60 * time.Second
 // credentialSaveRefreshTimeout bounds the model refresh inside a save
 // request. It must stay well under the inbound write timeout, so a slow
 // fetch degrades to a warn instead of dropping the response of an
-// already-persisted save.
-const credentialSaveRefreshTimeout = 20 * time.Second
+// already-persisted save. A var rather than a const so tests can shorten
+// it instead of waiting out the full budget.
+var credentialSaveRefreshTimeout = 20 * time.Second
 
 // reconcile applies the stored rows to the registry, reporting whether it
 // installed a provider. A credential that no longer builds keeps whatever is
@@ -466,6 +467,12 @@ func (s *CredentialsService) Upsert(ctx context.Context, cred ManagedProviderCre
 		return &CredentialFieldError{Field: "type", Message: "unknown provider type: " + cred.Type}
 	}
 	cred.Name = name
+	// The refresh budget covers the whole request, persistence and
+	// notification included: a slow secret backend or store write counts
+	// against the same bound as the sweep, so the response can never outlive
+	// the inbound write timeout.
+	refreshCtx, cancel := context.WithTimeout(ctx, credentialSaveRefreshTimeout)
+	defer cancel()
 	// ErrSealUnconfirmed means the row was written and applied: refresh like
 	// any other save, then report the error.
 	saveErr := s.apply(ctx, cred)
@@ -485,8 +492,6 @@ func (s *CredentialsService) Upsert(ctx context.Context, cred ManagedProviderCre
 	// delay every save by the slowest provider's timeout x retries and, past
 	// the inbound write timeout, silently drop the response of an
 	// already-persisted save.
-	refreshCtx, cancel := context.WithTimeout(ctx, credentialSaveRefreshTimeout)
-	defer cancel()
 	if err := s.registry.Refresh(refreshCtx); err != nil {
 		slog.Warn("provider credential saved but its model catalog refresh failed", "provider", name, "error", err)
 	}
@@ -500,6 +505,9 @@ func (s *CredentialsService) Delete(ctx context.Context, name string) error {
 	if s.IsManaged(name) {
 		return fmt.Errorf("provider %q is managed by config/env and is read-only", name)
 	}
+	// The refresh budget covers the whole request, as in Upsert.
+	refreshCtx, cancel := context.WithTimeout(ctx, credentialSaveRefreshTimeout)
+	defer cancel()
 	if err := s.deleteStored(ctx, name); err != nil {
 		return err
 	}
@@ -508,8 +516,6 @@ func (s *CredentialsService) Delete(ctx context.Context, name string) error {
 	// remaining provider's own health, not whether the delete succeeded. The
 	// sweep is bounded the same way, so a slow upstream cannot delay the
 	// delete response past the inbound write timeout and drop it.
-	refreshCtx, cancel := context.WithTimeout(ctx, credentialSaveRefreshTimeout)
-	defer cancel()
 	if err := s.registry.Refresh(refreshCtx); err != nil {
 		slog.Warn("provider credential deleted but the model catalog refresh failed", "provider", name, "error", err)
 	}
