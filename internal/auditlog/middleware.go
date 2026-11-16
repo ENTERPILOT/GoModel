@@ -170,7 +170,7 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 						}
 					}
 
-					captureLoggedResponseBody(entry, bodyBytes)
+					captureLoggedResponseBody(entry, redactIssuedKey(entry.Method, c.Path(), bodyBytes))
 				}
 			}
 

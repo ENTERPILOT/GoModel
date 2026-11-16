@@ -176,7 +176,8 @@ volume, restrict access, and classify backups accordingly.
 ### Other credential handling
 
 - **Managed API keys** are stored as a SHA-256 hash of a high-entropy random
-  secret, never recoverably. The plaintext is shown once at creation. This is
+  secret, never recoverably. The plaintext is shown once at creation, and the
+  audit entry for that response stores `[REDACTED]` in its place. This is
   deliberately different from provider credentials.
 - **Client credential headers are redacted before they are persisted.** With
   `LOGGING_LOG_HEADERS=true`, `Authorization`, `x-api-key`, `Cookie`, and the
