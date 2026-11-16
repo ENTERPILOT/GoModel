@@ -134,6 +134,65 @@ func TestSemanticCacheMiddleware_MultimodalAttachmentIsolatesNamespace(t *testin
 	require.NotEqual(t, "HIT (semantic)", rec.Header().Get("X-Cache"))
 }
 
+// Earlier turns have to match exactly, tool calls and tool results included:
+// the same question asked after a different tool exchange has another answer.
+func TestSemanticCacheMiddleware_ToolHistoryIsolatesNamespace(t *testing.T) {
+	tests := []struct {
+		name  string
+		path  string
+		first string
+		other string
+	}{
+		{
+			name: "responses function_call_output",
+			path: "/v1/responses",
+			first: `{"model":"gpt-4","input":[
+				{"role":"user","content":"What is the weather like?"},
+				{"type":"function_call","call_id":"call_1","name":"get_weather","arguments":"{\"city\":\"Paris\"}"},
+				{"type":"function_call_output","call_id":"call_1","output":"Sunny, 25C"}
+			]}`,
+			other: `{"model":"gpt-4","input":[
+				{"role":"user","content":"What is the weather like?"},
+				{"type":"function_call","call_id":"call_1","name":"get_weather","arguments":"{\"city\":\"Oslo\"}"},
+				{"type":"function_call_output","call_id":"call_1","output":"Snow, -10C"}
+			]}`,
+		},
+		{
+			name: "chat tool_calls arguments",
+			path: "/v1/chat/completions",
+			first: `{"model":"gpt-4","messages":[
+				{"role":"user","content":"What is the weather like?"},
+				{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}]},
+				{"role":"tool","tool_call_id":"call_1","content":"See the forecast."}
+			]}`,
+			other: `{"model":"gpt-4","messages":[
+				{"role":"user","content":"What is the weather like?"},
+				{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Oslo\"}"}}]},
+				{"role":"tool","tool_call_id":"call_1","content":"See the forecast."}
+			]}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, store, _ := newTestSemanticMiddleware(0.90, 10, false)
+			serve := func(body string) *httptest.ResponseRecorder {
+				c, rec := echotest.Post(t, tt.path, []byte(body))
+				require.NoError(t, m.Handle(&echoExchange{c: c}, []byte(body), func() error {
+					return c.JSON(http.StatusOK, map[string]string{"answer": "42"})
+				}))
+				return rec
+			}
+
+			serve(tt.first)
+			m.wg.Wait()
+			require.Equal(t, 1, store.Len())
+
+			assert.Empty(t, serve(tt.other).Header().Get("X-Cache"))
+			assert.Equal(t, "HIT (semantic)", serve(tt.first).Header().Get("X-Cache"))
+		})
+	}
+}
+
 func TestSemanticCacheMiddleware_CacheMissOnLowScore(t *testing.T) {
 	store := NewMapVecStore()
 	emb := &mockEmbedder{}
