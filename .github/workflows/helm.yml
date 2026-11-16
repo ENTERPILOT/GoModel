@@ -69,7 +69,7 @@ jobs:
           helm template gomodel helm --set env.SERVER_TLS_CERT_FILE=/tls/tls.crt --set readinessProbe.httpGet.scheme=HTTP -s templates/deployment.yaml | grep -q 'scheme: HTTP$'
           test "$(helm template gomodel helm --set livenessProbe.httpGet.scheme=HTTPS --set readinessProbe.httpGet.scheme=HTTPS -s templates/deployment.yaml | grep -c 'scheme: HTTPS')" = 3
           test "$(helm template gomodel helm --set livenessProbe.httpGet.scheme=HTTPS --set startupProbe.httpGet.scheme=HTTP -s templates/deployment.yaml | grep -c 'scheme: HTTPS')" = 1
-          ! helm template gomodel helm --set startupProbe=null -s templates/deployment.yaml | grep -q 'startupProbe'
+          test "$(helm template gomodel helm --set startupProbe=null -s templates/deployment.yaml | grep -c 'Probe:$')" = 2
           helm template gomodel helm --set replicaCount=2 --set storage.type=postgresql --set storage.url=postgres://x \
             --set podDisruptionBudget.maxUnavailable=0 -s templates/pdb.yaml | grep -q 'maxUnavailable: 0'
 
