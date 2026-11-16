@@ -711,7 +711,9 @@ export GOMODEL_BIN="${GOMODEL_RELEASE_BINARY:-$PWD/bin/gomodel}"
 
 # Starts a scratch gateway in DIR on PORT and waits until it is healthy.
 # DIR becomes its working directory, so a DIR/config.yaml is loaded; storage
-# is SQLite in DIR unless the caller passes other STORAGE_* variables.
+# is SQLite in DIR unless the caller passes other STORAGE_* variables. The
+# model cache is DIR/cache: the default is the per-user cache, which every
+# other gateway on the machine reads and overwrites.
 # usage: scratch_gateway_start DIR PORT [VAR=value...]
 scratch_gateway_start() {
   local dir="$1" port="$2"
@@ -725,11 +727,21 @@ scratch_gateway_start() {
     cd "$dir"
     nohup env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" \
       PORT="$port" STORAGE_TYPE=sqlite SQLITE_PATH="$dir/gomodel.db" \
+      GOMODEL_CACHE_DIR="$dir/cache" \
       "$@" "$GOMODEL_BIN" >>"$dir/server.log" 2>&1 </dev/null &
     echo $! >"$dir/server.pid"
   )
   for _ in $(seq 1 60); do
     if curl -fsS --max-time 1 "http://localhost:$port/health" >/dev/null 2>&1; then
+      # An empty cache means /health answers while provider discovery is still
+      # running. Wait until the catalog is no longer reported empty; a gateway
+      # without providers never reports it, and one whose discovery fails is
+      # left to the scenario's own assertions.
+      for _ in $(seq 1 120); do
+        curl -fsS --max-time 1 "http://localhost:$port/health/ready" 2>/dev/null \
+          | jq -e '.components.models == "down"' >/dev/null 2>&1 || break
+        sleep 0.5
+      done
       return 0
     fi
     if ! kill -0 "$(cat "$dir/server.pid")" 2>/dev/null; then
@@ -769,6 +781,7 @@ scratch_gateway_expect_refusal() {
     cd "$dir"
     exec env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" \
       PORT="$port" STORAGE_TYPE=sqlite SQLITE_PATH="$dir/gomodel.db" \
+      GOMODEL_CACHE_DIR="$dir/cache" \
       "$@" "$GOMODEL_BIN" >"$dir/refused.log" 2>&1 </dev/null
   ) &
   pid=$!

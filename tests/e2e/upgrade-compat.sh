@@ -15,8 +15,12 @@
 #
 #   usage: tests/e2e/upgrade-compat.sh [sqlite|postgresql|mongodb|all]
 #
-#   UPGRADE_BASELINE_REF   git ref to compare against  (default: origin/main)
+#   UPGRADE_BASELINE_REF   git ref to upgrade from     (default: the newest
+#                          v* release tag HEAD contains)
 #   UPGRADE_PORT           gateway port                (default: 18190)
+#
+# The baseline must be an ancestor of HEAD. A branch that is behind its
+# baseline would otherwise test a downgrade and still report a pass.
 #
 # Needs .env with provider credentials (two scenarios call a real model), plus
 # the docker infra from `make infra` for the postgresql and mongodb backends.
@@ -26,7 +30,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 BACKEND="${1:-all}"
-BASELINE_REF="${UPGRADE_BASELINE_REF:-origin/main}"
 GW_PORT="${UPGRADE_PORT:-18190}"
 BASE="http://localhost:$GW_PORT"
 
@@ -39,6 +42,19 @@ MONGO_DB="${UPGRADE_MONGO_DATABASE:-gomodel_upgrade_compat}"
 MONGO_CONTAINER="${UPGRADE_MONGO_CONTAINER:-gomodel-mongodb-1}"
 
 die() { echo "error: $*" >&2; exit 1; }
+
+# The default is the release a user would upgrade from. Describing HEAD, rather
+# than taking the newest tag in the repository, keeps it an ancestor of HEAD.
+BASELINE_REF="${UPGRADE_BASELINE_REF:-$(git -C "$REPO_ROOT" describe --tags --abbrev=0 --match 'v*' HEAD 2>/dev/null || true)}"
+[[ -n "$BASELINE_REF" ]] \
+  || die "no v* release tag is reachable from HEAD; fetch tags or set UPGRADE_BASELINE_REF"
+git -C "$REPO_ROOT" rev-parse --verify --quiet "$BASELINE_REF^{commit}" >/dev/null \
+  || die "baseline ref $BASELINE_REF does not name a commit"
+# A baseline holding commits HEAD lacks (origin/main seen from a branch that is
+# behind it) makes the working tree the older side: a downgrade, not an upgrade.
+git -C "$REPO_ROOT" merge-base --is-ancestor "$BASELINE_REF^{commit}" HEAD \
+  || die "baseline $BASELINE_REF is not an ancestor of HEAD, so this would not test an upgrade; update the branch or set UPGRADE_BASELINE_REF to a ref HEAD contains"
+export UPGRADE_BASELINE_REF="$BASELINE_REF"
 
 if [[ "$BACKEND" == "all" ]]; then
   status=0
@@ -126,10 +142,15 @@ start_gw() {
   local bin="$1" tag="$2" env_args=()
   while IFS= read -r line; do [[ -n "$line" ]] && env_args+=("$line"); done < <(storage_env)
 
+  # With no Redis the model cache is a file, by default the per-user one that
+  # every other gateway on the machine reads and writes. The baseline and the
+  # upgraded binary share this private directory instead, as an upgrade in
+  # place would; it starts empty because $WORK does.
   (
     cd "$WORK"
     nohup env PORT="$GW_PORT" BASE_PATH= \
       "${env_args[@]}" \
+      GOMODEL_CACHE_DIR="$WORK/cache" \
       LOGGING_ENABLED=true LOGGING_LOG_BODIES=true LOGGING_LOG_HEADERS=true \
       GUARDRAILS_ENABLED=true \
       RESPONSE_CACHE_SIMPLE_ENABLED=false SEMANTIC_CACHE_ENABLED=false \
