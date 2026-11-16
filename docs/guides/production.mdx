@@ -632,6 +632,11 @@ larger.
   and the database file with default permissions, so on a shared host it can be
   world-readable. Run GoModel as a dedicated user and tighten permissions,
   especially if any credentials are stored through the dashboard.
+- **Give a read-only root filesystem a writable `/tmp`.** SQLite writes temp
+  files there. Without it, audit log batches of two or more entries fail with
+  `disk I/O error (6410)` and are dropped. Add `--tmpfs /tmp` to
+  `docker run --read-only`, or mount an `emptyDir` at `/tmp` in Kubernetes. The
+  Helm chart already does.
 - **Keep `BODY_SIZE_LIMIT` sane.** It defaults to `10M` and is what stops an
   oversized body becoming a memory-exhaustion vector. An unparseable value falls
   back to the default with only a warning, so check the spelling.

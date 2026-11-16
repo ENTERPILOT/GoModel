@@ -706,6 +706,12 @@ separat ein VACUUM aus, wenn die Dateigröße wichtig ist.
   Host für alle lesbar sein kann. Führen Sie GoModel unter einem eigenen
   Benutzer aus und verschärfen Sie die Berechtigungen, insbesondere wenn
   Zugangsdaten über das Dashboard gespeichert werden.
+- **Geben Sie einem schreibgeschützten Root-Dateisystem ein beschreibbares
+  `/tmp`.** SQLite legt dort temporäre Dateien an. Ohne `/tmp` schlagen
+  Audit-Log-Batches mit zwei oder mehr Einträgen mit `disk I/O error (6410)`
+  fehl und werden verworfen. Ergänzen Sie `docker run --read-only` um
+  `--tmpfs /tmp`, oder binden Sie in Kubernetes ein `emptyDir` unter `/tmp`
+  ein. Das Helm-Chart erledigt das bereits.
 - **Halten Sie `BODY_SIZE_LIMIT` vernünftig.** Der Standardwert ist `10M`, und
   diese Einstellung verhindert, dass ein übergroßer Body zum Vektor für
   Speichererschöpfung wird. Ein nicht parsbarer Wert fällt nur mit einer
