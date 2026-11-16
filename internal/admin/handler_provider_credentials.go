@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"slices"
 	"sort"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 )
 
@@ -433,15 +435,58 @@ func mergeRedactedValue(field, incoming, stored string) (string, error) {
 	return stored, nil
 }
 
-// mergeRedactedProxyURL keeps the stored proxy URL when the client echoes the
-// masked form the view rendered ("socks5://user:xxxxx@host:1080"), so editing
-// another field never strips the proxy password. Any other value replaces it.
+// mergeRedactedProxyURL keeps the stored proxy password when the client echoes
+// the masked form the view rendered ("socks5://user:xxxxx@host:1080"), even if
+// it changes another part of the same URL such as the scheme, host, or port.
+// Any other value replaces the stored URL as sent.
 func mergeRedactedProxyURL(incoming, stored string) string {
 	incoming = strings.TrimSpace(incoming)
-	if incoming != "" && stored != "" && incoming == redactProxyURL(stored) {
+	if incoming == "" || stored == "" {
+		return incoming
+	}
+	if incoming == redactProxyURL(stored) {
 		return stored
 	}
-	return incoming
+	// Editing the scheme, host, or port of a masked URL would otherwise persist
+	// the mask itself as the password.
+	inURL, err := httpclient.ParseProxyURL(incoming)
+	if err != nil {
+		return incoming
+	}
+	if !isMaskedProxyPassword(inURL.User) {
+		return incoming
+	}
+	storedURL, err := httpclient.ParseProxyURL(stored)
+	if err != nil || storedURL.User == nil {
+		return incoming
+	}
+	password, ok := storedURL.User.Password()
+	if !ok || password == "" {
+		return incoming
+	}
+	username := storedURL.User.Username()
+	if inURL.User != nil && inURL.User.Username() != "" {
+		username = inURL.User.Username()
+	}
+	inURL.User = url.UserPassword(username, password)
+	return inURL.String()
+}
+
+// proxyPasswordMask is what url.URL.Redacted replaces a password with, and
+// therefore what the dashboard echoes back in a masked proxy URL.
+const proxyPasswordMask = "xxxxx"
+
+// isMaskedProxyPassword reports whether the userinfo carries the display mask
+// instead of a real password.
+func isMaskedProxyPassword(user *url.Userinfo) bool {
+	if user == nil {
+		return false
+	}
+	password, ok := user.Password()
+	if !ok {
+		return false
+	}
+	return password == proxyPasswordMask || isRedactedCredentialValue(password)
 }
 
 // isRedactedCredentialValue recognizes both the current display mask and

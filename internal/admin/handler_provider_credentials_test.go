@@ -627,3 +627,46 @@ func TestUpsertProviderCredential_ProxyURL(t *testing.T) {
 		})
 	}
 }
+
+func TestUpsertProviderCredential_ProxyURLKeepsPasswordAcrossEdits(t *testing.T) {
+	const stored = "https://egress:pw-9f3a1c@10.0.0.1:1080"
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "scheme change keeps the stored password",
+			body: `{"name":"proxied","type":"openai","api_keys":["***"],"proxy_url":"http://egress:xxxxx@10.0.0.1:1080"}`,
+			want: "http://egress:pw-9f3a1c@10.0.0.1:1080",
+		},
+		{
+			name: "host and port change keep the stored password",
+			body: `{"name":"proxied","type":"openai","api_keys":["***"],"proxy_url":"https://egress:xxxxx@10.0.0.2:3128"}`,
+			want: "https://egress:pw-9f3a1c@10.0.0.2:3128",
+		},
+		{
+			name: "legacy asterisk mask keeps the stored password",
+			body: `{"name":"proxied","type":"openai","api_keys":["***"],"proxy_url":"https://egress:***@10.0.0.1:1080"}`,
+			want: "https://egress:pw-9f3a1c@10.0.0.1:1080",
+		},
+		{
+			name: "a new password replaces the stored one",
+			body: `{"name":"proxied","type":"openai","api_keys":["***"],"proxy_url":"http://egress:new-pw-77aa@10.0.0.1:1080"}`,
+			want: "http://egress:new-pw-77aa@10.0.0.1:1080",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := newProviderCredentialsAdminFake()
+			fake.rows["proxied"] = providers.ManagedProviderCredential{Name: "proxied", Type: "openai", APIKeys: []string{"sk-one"}, ProxyURL: stored, Enabled: true}
+			h := newProviderCredentialsHandler(fake)
+
+			c, rec := echotest.Request(t, http.MethodPut, "/admin/provider-credentials", tt.body)
+			require.NoError(t, h.UpsertProviderCredential(c))
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			assert.NotContains(t, rec.Body.String(), "pw-9f3a1c")
+			assert.Equal(t, tt.want, fake.rows["proxied"].ProxyURL)
+		})
+	}
+}
