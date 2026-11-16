@@ -14,11 +14,13 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/budget"
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/openai"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
 	"github.com/enterpilot/gomodel/internal/requestparams"
+	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/tagging"
 	"github.com/enterpilot/gomodel/internal/users"
@@ -274,6 +276,60 @@ virtual_models:
 	assertParams(saved.DefaultParams, bySource["capped"].DefaultParams)
 	// A secret in a parameter is written as a reference, like any other.
 	assert.Contains(t, string(bySource["signed"].Params["extra_body"]), "${env:")
+}
+
+func TestExportConfigKeepsAccessPoliciesLoadable(t *testing.T) {
+	// An access policy has no targets: its source selects the models it
+	// gates. Written with its own model as a target, it would read back as a
+	// redirect to itself and stop the gateway started from the export.
+	isolateEnv(t)
+	ctx := context.Background()
+	registry := providers.NewModelRegistry()
+	registry.RegisterProviderWithNameAndType(catalogProvider(core.Model{ID: "gpt-4.1-mini", Object: "model"}), "openai", "openai")
+	require.NoError(t, registry.Initialize(ctx))
+	// start loads the virtual models as the gateway does when it starts.
+	start := func(loaded *config.LoadResult) (*virtualmodels.Service, func()) {
+		shared, err := storage.New(ctx, loaded.Config.Storage.BackendConfig())
+		require.NoError(t, err)
+		result, err := virtualmodels.New(ctx, loaded.Config, shared, registry, []string{"openai"})
+		if err != nil {
+			_ = shared.Close()
+		}
+		require.NoError(t, err)
+		return result.Service, func() {
+			_ = result.Close()
+			_ = shared.Close()
+		}
+	}
+
+	policies := []virtualmodels.VirtualModel{
+		{Source: "openai/gpt-4.1-mini", UserPaths: []string{"/team/b"}, Enabled: true},
+		{Source: "gpt-4.1-mini", UserPaths: []string{"/team/c"}, Enabled: true},
+		{Source: "openai/", UserPaths: []string{"/team"}, Enabled: true},
+	}
+	loaded := loadExportConfig(t, "providers:\n  openai:\n    type: openai\n")
+	saved, stop := start(loaded)
+	for _, policy := range policies {
+		require.NoError(t, saved.Upsert(ctx, policy), policy.Source)
+	}
+	stop()
+
+	out, err := ExportConfig(ctx, ConfigExportOptions{Config: loaded, Factory: exportTestFactory()})
+	require.NoError(t, err)
+
+	exported, stop := start(loadExportConfig(t, string(out)))
+	defer stop()
+	bySource := make(map[string]virtualmodels.VirtualModel, len(policies))
+	for _, model := range exported.List() {
+		bySource[model.Source] = model
+	}
+	require.Len(t, bySource, len(policies), string(out))
+	for _, policy := range policies {
+		require.Contains(t, bySource, policy.Source)
+		got := bySource[policy.Source]
+		assert.Equal(t, virtualmodels.KindPolicy, got.Kind(), policy.Source)
+		assert.Equal(t, policy.UserPaths, got.UserPaths, policy.Source)
+	}
 }
 
 func TestExportRateLimitsPrefersDashboardEdits(t *testing.T) {
