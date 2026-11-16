@@ -374,9 +374,11 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 		}
 
 		c.Response().WriteHeader(resp.StatusCode)
+		// The response is committed, so a failure here is recorded and not
+		// returned: the central error handler could only log it a second time,
+		// as a gateway 500, when it is usually the client hanging up.
 		if err := flushStream(c.Response(), wrappedStream); err != nil {
 			recordStreamingError(streamEntry, model, providerType, c.Request().URL.Path, requestID, c.Request().Context(), err)
-			return err
 		}
 		return nil
 	}
