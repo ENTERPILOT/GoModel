@@ -45,13 +45,20 @@ func auditPathForStream(fixture string) string {
 	}
 }
 
-// replyOf collects the assistant's text and tool-call arguments from a
-// rebuilt response body, whichever dialect it is in.
+// replyOf collects the assistant's text and tool calls from a rebuilt
+// response body, whichever dialect it is in. A tool call counts by its
+// arguments: a string in the OpenAI dialects, an "input" object in
+// Anthropic's, where even an empty one is a call.
 func replyOf(body any) string {
 	var reply strings.Builder
 	switch value := body.(type) {
 	case map[string]any:
 		for key, item := range value {
+			if key == "input" && item != nil {
+				raw, _ := json.Marshal(item)
+				reply.Write(raw)
+				continue
+			}
 			if text, ok := item.(string); ok {
 				if key == "content" || key == "text" || key == "arguments" {
 					reply.WriteString(text)

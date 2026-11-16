@@ -31,6 +31,7 @@ type anthropicStreamBlock struct {
 	Thinking  strings.Builder
 	Signature strings.Builder
 	InputJSON strings.Builder
+	Citations []any
 }
 
 // parseAnthropicEvent folds one Anthropic Messages stream event into the
@@ -51,7 +52,14 @@ func parseAnthropicEvent(builder *streamResponseBuilder, event map[string]any) b
 	case "content_block_start":
 		block := builder.anthropicBlock(event)
 		if start, ok := event["content_block"].(map[string]any); ok && block.Start == nil {
-			block.Start = builder.limitedAnthropicBlock(start)
+			// Most opening blocks are a few bytes, but a server-tool result
+			// arrives complete in this one event; past the budget only its
+			// type is kept.
+			if builder.fitsCapture(start) {
+				block.Start = maps.Clone(start)
+			} else {
+				block.Start = map[string]any{"type": start["type"]}
+			}
 		}
 	case "content_block_delta":
 		block := builder.anthropicBlock(event)
@@ -69,6 +77,10 @@ func parseAnthropicEvent(builder *streamResponseBuilder, event map[string]any) b
 		case "input_json_delta":
 			partial, _ := delta["partial_json"].(string)
 			appendLimitedStreamText(builder, &block.InputJSON, partial)
+		case "citations_delta":
+			if citation, ok := delta["citation"].(map[string]any); ok && builder.fitsCapture(citation) {
+				block.Citations = append(block.Citations, citation)
+			}
 		}
 	case "message_delta":
 		msg := builder.anthropicMessage()
@@ -117,17 +129,16 @@ func (b *streamResponseBuilder) anthropicBlock(event map[string]any) *anthropicS
 	return block
 }
 
-// limitedAnthropicBlock keeps an opening block whole while it fits the
-// capture budget. Most are a few bytes, but a server-tool result arrives
-// complete in this one event; past the budget only its type is kept.
-func (b *streamResponseBuilder) limitedAnthropicBlock(start map[string]any) map[string]any {
-	raw, err := json.Marshal(start)
+// fitsCapture charges a value that arrives whole against the capture budget
+// and reports whether it fit. One that does not marks the body truncated.
+func (b *streamResponseBuilder) fitsCapture(value any) bool {
+	raw, err := json.Marshal(value)
 	if err != nil || b.truncated || len(raw) > MaxContentCapture-b.contentLen {
 		b.truncated = true
-		return map[string]any{"type": start["type"]}
+		return false
 	}
 	b.contentLen += len(raw)
-	return maps.Clone(start)
+	return true
 }
 
 // build returns the message as a non-streaming Messages call would have.
@@ -179,18 +190,31 @@ func (b *anthropicStreamBlock) build() map[string]any {
 	if b.Signature.Len() > 0 {
 		block["signature"] = b.Signature.String()
 	}
+	if len(b.Citations) > 0 {
+		block["citations"] = b.Citations
+	}
 	if b.InputJSON.Len() > 0 {
-		// Tool input streams as JSON text. A cut or truncated stream leaves it
-		// unparsable, and then the text is all there is to show.
-		var input any
-		if err := json.Unmarshal([]byte(b.InputJSON.String()), &input); err == nil {
-			block["input"] = input
-		} else {
-			block["input"] = b.InputJSON.String()
-		}
+		block["input"] = decodeToolInput(b.InputJSON.String())
 	}
 	if _, ok := block["type"]; !ok {
 		block["type"] = "text"
 	}
 	return block
+}
+
+// decodeToolInput parses the JSON text a tool input streamed as. Numbers stay
+// exact, so a large ID is logged as the client received it. A cut or
+// truncated stream leaves the text unparsable, and then the text is all there
+// is to show.
+func decodeToolInput(raw string) any {
+	if !json.Valid([]byte(raw)) {
+		return raw
+	}
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.UseNumber()
+	var input any
+	if err := decoder.Decode(&input); err != nil {
+		return raw
+	}
+	return input
 }

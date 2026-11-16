@@ -212,7 +212,8 @@ func (b *streamResponseBuilder) buildResponsesAPIResponse() map[string]any {
 		response["output"] = b.Output
 		return response
 	}
-	// A stream cut before its closing event has only the text deltas.
+	// Without a closing output to keep (the stream was cut, or its output was
+	// empty or past the capture budget) the text deltas are all there is.
 	response["output"] = []map[string]any{
 		{
 			"type": "message",

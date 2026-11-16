@@ -50,8 +50,9 @@ func TestStreamResponseBuilderDialects(t *testing.T) {
 				`{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"today."}}`,
 				`{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig=="}}`,
 				`{"type":"content_block_stop","index":0}`,
-				`{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`,
+				`{"type":"content_block_start","index":1,"content_block":{"type":"text","text":"","citations":[]}}`,
 				`{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Checking "}}`,
+				`{"type":"content_block_delta","index":1,"delta":{"type":"citations_delta","citation":{"type":"char_location","cited_text":"Paris","document_index":0}}}`,
 				`{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"the weather."}}`,
 				`{"type":"content_block_stop","index":1}`,
 				`{"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_1","name":"get_weather","input":{}}}`,
@@ -65,7 +66,7 @@ func TestStreamResponseBuilderDialects(t *testing.T) {
 				"id":"msg_1","type":"message","role":"assistant","model":"claude-test",
 				"content":[
 					{"type":"thinking","thinking":"Paris, today.","signature":"sig=="},
-					{"type":"text","text":"Checking the weather."},
+					{"type":"text","text":"Checking the weather.","citations":[{"type":"char_location","cited_text":"Paris","document_index":0}]},
 					{"type":"tool_use","id":"toolu_1","name":"get_weather","input":{"city":"Paris"}}
 				],
 				"stop_reason":"tool_use","stop_sequence":null,
@@ -92,6 +93,8 @@ func TestStreamResponseBuilderDialects(t *testing.T) {
 			path: "/v1/messages",
 			events: []string{
 				`{"id":"chatcmpl-1","model":"gpt-test","choices":[{"index":0,"delta":{"role":"assistant","content":"Hel"}}]}`,
+				// A keepalive is not evidence of an Anthropic stream.
+				`{"type":"ping"}`,
 				`{"id":"chatcmpl-1","model":"gpt-test","choices":[{"index":0,"delta":{"content":"lo"},"finish_reason":"stop"}]}`,
 			},
 			want: `{
@@ -165,4 +168,16 @@ func TestAnthropicStreamRespectsCaptureBudget(t *testing.T) {
 		"content":[{"type":"text","text":"kept"},{"type":"web_search_tool_result"}],
 		"stop_reason":null,"stop_sequence":null
 	}`, got)
+}
+
+// A tool input is logged as the client received it: a number too large for a
+// float64 keeps every digit.
+func TestAnthropicStreamKeepsToolInputNumbersExact(t *testing.T) {
+	got, _ := rebuildStream(t, "/v1/messages",
+		`{"type":"message_start","message":{"id":"msg_4","role":"assistant","model":"claude-test"}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_4","name":"get_order","input":{}}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"id\":9007199254740993}"}}`,
+	)
+
+	assert.Contains(t, got, `"input":{"id":9007199254740993}`)
 }
