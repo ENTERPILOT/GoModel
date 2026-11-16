@@ -27,10 +27,28 @@ type streamResponseBuilder struct {
 	CreatedAt      int64
 	Status         string
 	OutputText     strings.Builder
+	// Output is the complete output of the closing event, when one arrived.
+	Output []any
+
+	// Anthropic is set once the stream turns out to carry Anthropic Messages
+	// events rather than chat chunks.
+	Anthropic *anthropicStreamMessage
 
 	// Tracking
 	contentLen int // track content length to enforce limit
 	truncated  bool
+}
+
+// build returns the response in the dialect the stream spoke.
+func (b *streamResponseBuilder) build() map[string]any {
+	switch {
+	case b.IsResponsesAPI:
+		return b.buildResponsesAPIResponse()
+	case b.Anthropic != nil:
+		return b.Anthropic.build()
+	default:
+		return b.buildChatCompletionResponse()
+	}
 }
 
 type streamChatToolCallState struct {
@@ -183,25 +201,32 @@ func (c *streamChatChoiceState) toolCall(index int) *streamChatToolCallState {
 
 // buildResponsesAPIResponse constructs a Responses API response from accumulated data
 func (b *streamResponseBuilder) buildResponsesAPIResponse() map[string]any {
-	return map[string]any{
+	response := map[string]any{
 		"id":         b.ResponseID,
 		"object":     "response",
 		"model":      b.Model,
 		"created_at": b.CreatedAt,
 		"status":     b.Status,
-		"output": []map[string]any{
-			{
-				"type": "message",
-				"role": "assistant",
-				"content": []map[string]any{
-					{
-						"type": "output_text",
-						"text": b.OutputText.String(),
-					},
+	}
+	if b.Output != nil {
+		response["output"] = b.Output
+		return response
+	}
+	// Without a closing output to keep (the stream was cut, or its output was
+	// empty or past the capture budget) the text deltas are all there is.
+	response["output"] = []map[string]any{
+		{
+			"type": "message",
+			"role": "assistant",
+			"content": []map[string]any{
+				{
+					"type": "output_text",
+					"text": b.OutputText.String(),
 				},
 			},
 		},
 	}
+	return response
 }
 
 // CreateStreamEntry creates a new log entry for a streaming request.
