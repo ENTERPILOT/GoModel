@@ -138,7 +138,7 @@ native TLS, http otherwise.
 {{- end }}
 
 {{/*
-Render a liveness or readiness probe. An httpGet probe gets its path prefixed
+Render a startup, liveness or readiness probe. An httpGet probe gets its path prefixed
 with BASE_PATH and, when the gateway serves native TLS, scheme HTTPS, so the
 kubelet does not probe a TLS listener over plain HTTP (which answers 400 and
 keeps the pod from ever becoming Ready). A scheme set in values wins.

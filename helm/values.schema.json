@@ -135,6 +135,7 @@
         "maxUnavailable": { "type": ["integer", "string", "null"] }
       }
     },
+    "startupProbe": { "type": "object" },
     "livenessProbe": { "type": "object" },
     "readinessProbe": { "type": "object" },
     "terminationGracePeriodSeconds": { "type": "integer", "minimum": 0 },
