@@ -136,9 +136,9 @@ sterujące prompt cache u providera są pomijane w hashowanym body, bo nie
 zmieniają odpowiedzi: `user` (w API Anthropic `metadata.user_id`), `metadata`,
 `safety_identifier`, `prompt_cache_key` i `prompt_cache_retention`. Na przykład
 Claude Code wysyła w `metadata.user_id` nowy identyfikator sesji dla każdej
-sesji, a powtórzony request z nowej sesji nadal trafia w cache. Aby rozdzielić
-tenantów, włącz partycjonowanie cache'u według `user_path` (patrz niżej);
-wywołujący w obrębie tej samej ścieżki nadal współdzielą wpisy.
+sesji, a powtórzony niestreamowany request z nowej sesji nadal trafia w cache.
+Aby rozdzielić tenantów, włącz partycjonowanie cache'u według `user_path` (patrz
+niżej); wywołujący w obrębie tej samej ścieżki nadal współdzielą wpisy.
 
 ## Na czym opiera się klucz cache'u semantycznego
 

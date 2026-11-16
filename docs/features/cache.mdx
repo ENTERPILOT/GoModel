@@ -135,9 +135,9 @@ or steer provider prompt caching are left out of the hashed body, because they
 do not change the answer: `user` (Anthropic `metadata.user_id`), `metadata`,
 `safety_identifier`, `prompt_cache_key` and `prompt_cache_retention`. Claude
 Code, for example, sends a new session id in `metadata.user_id` for every
-session, and a repeated request from a new session still hits. To keep tenants
-apart, partition the cache by `user_path` (see below); callers under the same
-path still share entries.
+session, and a repeated non-streaming request from a new session still hits. To
+keep tenants apart, partition the cache by `user_path` (see below); callers
+under the same path still share entries.
 
 ## What the semantic cache keys on
 

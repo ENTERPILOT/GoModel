@@ -142,8 +142,8 @@ identifizieren oder das Prompt-Caching des Providers steuern, im gehashten Body
 außen vor, weil sie die Antwort nicht verändern: `user` (bei Anthropic
 `metadata.user_id`), `metadata`, `safety_identifier`, `prompt_cache_key` und
 `prompt_cache_retention`. Claude Code sendet zum Beispiel für jede Sitzung eine
-neue Sitzungs-ID in `metadata.user_id`, und ein wiederholter Request aus einer
-neuen Sitzung trifft trotzdem. Um Mandanten zu trennen, partitionieren Sie den
+neue Sitzungs-ID in `metadata.user_id`, und ein wiederholter, nicht gestreamter
+Request aus einer neuen Sitzung trifft trotzdem. Um Mandanten zu trennen, partitionieren Sie den
 Cache nach `user_path` (siehe unten); Aufrufer unter demselben Pfad teilen sich
 weiterhin Einträge.
 
