@@ -287,6 +287,12 @@ func (s *CredentialsService) Refresh(ctx context.Context) error {
 // Refresh, as InitializeAsync bounds the one at startup.
 const credentialModelRefreshTimeout = 60 * time.Second
 
+// credentialSaveRefreshTimeout bounds the model refresh inside a save
+// request. It must stay well under the inbound write timeout, so a slow
+// fetch degrades to a warn instead of dropping the response of an
+// already-persisted save.
+const credentialSaveRefreshTimeout = 20 * time.Second
+
 // reconcile applies the stored rows to the registry, reporting whether it
 // installed a provider. A credential that no longer builds keeps whatever is
 // running under its name and is reported by Skipped.
@@ -473,7 +479,15 @@ func (s *CredentialsService) Upsert(ctx context.Context, cred ManagedProviderCre
 	// of silently vanishing. That is not a save failure: an admin fixing a
 	// typo'd API key should see "saved", not a scary error on every attempt
 	// until the key happens to be valid.
-	if err := s.registry.Refresh(ctx); err != nil {
+	//
+	// The sweep is bounded by credentialSaveRefreshTimeout: unbounded, it
+	// waits on every provider's upstream, so one unreachable base_url would
+	// delay every save by the slowest provider's timeout x retries and, past
+	// the inbound write timeout, silently drop the response of an
+	// already-persisted save.
+	refreshCtx, cancel := context.WithTimeout(ctx, credentialSaveRefreshTimeout)
+	defer cancel()
+	if err := s.registry.Refresh(refreshCtx); err != nil {
 		slog.Warn("provider credential saved but its model catalog refresh failed", "provider", name, "error", err)
 	}
 	return saveErr
@@ -491,8 +505,12 @@ func (s *CredentialsService) Delete(ctx context.Context, name string) error {
 	}
 	s.notifyChanged(ctx)
 	// See the matching comment in Upsert: a Refresh failure here reflects a
-	// remaining provider's own health, not whether the delete succeeded.
-	if err := s.registry.Refresh(ctx); err != nil {
+	// remaining provider's own health, not whether the delete succeeded. The
+	// sweep is bounded the same way, so a slow upstream cannot delay the
+	// delete response past the inbound write timeout and drop it.
+	refreshCtx, cancel := context.WithTimeout(ctx, credentialSaveRefreshTimeout)
+	defer cancel()
+	if err := s.registry.Refresh(refreshCtx); err != nil {
 		slog.Warn("provider credential deleted but the model catalog refresh failed", "provider", name, "error", err)
 	}
 	return nil
