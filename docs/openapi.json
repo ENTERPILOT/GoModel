@@ -15023,7 +15023,7 @@
             "type": "string"
           },
           "proxy_url": {
-            "description": "ProxyURL may be sent back exactly as the view rendered it (password\nmasked) to keep the stored proxy credentials.",
+            "description": "ProxyURL may be sent back with the password masked, as the view rendered\nit, to keep the stored proxy password, also when the rest of the URL is\nedited.",
             "type": "string"
           },
           "service_account_file": {

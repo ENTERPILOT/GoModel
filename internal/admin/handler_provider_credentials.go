@@ -65,8 +65,9 @@ type upsertProviderCredentialRequest struct {
 	ServiceAccountJSON       string `json:"service_account_json,omitempty"`
 	ServiceAccountJSONBase64 string `json:"service_account_json_base64,omitempty"`
 	GCPScope                 string `json:"gcp_scope,omitempty"`
-	// ProxyURL may be sent back exactly as the view rendered it (password
-	// masked) to keep the stored proxy credentials.
+	// ProxyURL may be sent back with the password masked, as the view rendered
+	// it, to keep the stored proxy password, also when the rest of the URL is
+	// edited.
 	ProxyURL string   `json:"proxy_url,omitempty"`
 	Models   []string `json:"models,omitempty"`
 	// ModelsMode overrides the global configured provider models mode for
@@ -339,7 +340,10 @@ func (h *Handler) buildProviderCredentialUpsert(ctx context.Context, name string
 	if isRedactedCredentialValue(req.ServiceAccountJSONBase64) {
 		kept = append(kept, serviceAccountJSONBase64)
 	}
-	proxyURL := mergeRedactedProxyURL(req.ProxyURL, currentField(current, func(c providers.ManagedProviderCredential) string { return c.ProxyURL }))
+	proxyURL, err := mergeRedactedProxyURL(req.ProxyURL, currentField(current, func(c providers.ManagedProviderCredential) string { return c.ProxyURL }))
+	if err != nil {
+		return providers.ManagedProviderCredential{}, nil, err
+	}
 	if proxyURL != strings.TrimSpace(req.ProxyURL) {
 		kept = append(kept, proxyURL)
 	}
@@ -437,39 +441,32 @@ func mergeRedactedValue(field, incoming, stored string) (string, error) {
 
 // mergeRedactedProxyURL keeps the stored proxy password when the client echoes
 // the masked form the view rendered ("socks5://user:xxxxx@host:1080"), even if
-// it changes another part of the same URL such as the scheme, host, or port.
-// Any other value replaces the stored URL as sent.
-func mergeRedactedProxyURL(incoming, stored string) string {
+// it changes another part of the same URL such as the scheme, host, port, or
+// username. A masked password with no stored one behind it is rejected, so the
+// mask is never saved as the password. Any other value replaces the stored URL
+// as sent.
+func mergeRedactedProxyURL(incoming, stored string) (string, error) {
 	incoming = strings.TrimSpace(incoming)
-	if incoming == "" || stored == "" {
-		return incoming
+	if incoming != "" && stored != "" && incoming == redactProxyURL(stored) {
+		return stored, nil
 	}
-	if incoming == redactProxyURL(stored) {
-		return stored
-	}
-	// Editing the scheme, host, or port of a masked URL would otherwise persist
-	// the mask itself as the password.
 	inURL, err := httpclient.ParseProxyURL(incoming)
-	if err != nil {
-		return incoming
+	if err != nil || !isMaskedProxyPassword(inURL.User) {
+		return incoming, nil
 	}
-	if !isMaskedProxyPassword(inURL.User) {
-		return incoming
+	// url.URL.Redacted masks a password that is present but empty too, so
+	// only an absent one leaves nothing to restore. A stored URL holding a
+	// secret reference does not parse, and its password was never masked.
+	password, ok := "", false
+	if storedURL, err := httpclient.ParseProxyURL(stored); err == nil {
+		password, ok = storedURL.User.Password()
 	}
-	storedURL, err := httpclient.ParseProxyURL(stored)
-	if err != nil || storedURL.User == nil {
-		return incoming
+	if !ok {
+		return "", core.NewInvalidRequestError(providers.CredentialFieldProxyURL+" password is redacted but has no stored value to preserve; provide the real value", nil).
+			WithParam(providers.CredentialFieldProxyURL)
 	}
-	password, ok := storedURL.User.Password()
-	if !ok || password == "" {
-		return incoming
-	}
-	username := storedURL.User.Username()
-	if inURL.User != nil && inURL.User.Username() != "" {
-		username = inURL.User.Username()
-	}
-	inURL.User = url.UserPassword(username, password)
-	return inURL.String()
+	inURL.User = url.UserPassword(inURL.User.Username(), password)
+	return inURL.String(), nil
 }
 
 // proxyPasswordMask is what url.URL.Redacted replaces a password with, and
