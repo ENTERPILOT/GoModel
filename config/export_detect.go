@@ -2,6 +2,7 @@ package config
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"net/url"
 	"regexp"
@@ -140,8 +141,8 @@ var headerLine = regexp.MustCompile("^[ \t#]*([0-9A-Za-z!#$%&'*+.^_`|~-]+)[ \t]*
 // headerCredential returns where the value of a "Name: value" header line
 // starts and ends when it is a credential that is not made of secret
 // references alone: the header names one ("X-Proxy-Key: ..."), or the value
-// is an auth scheme and one word ("X-Upstream: Bearer ..."). It returns -1
-// for any other line.
+// is what Authorization holds ("X-Upstream: Bearer ..."). It returns -1 for
+// any other line.
 func headerCredential(line string) (start, end int) {
 	match := headerLine.FindStringSubmatchIndex(line)
 	if match == nil {
@@ -151,12 +152,27 @@ func headerCredential(line string) (start, end int) {
 	if value == "" || onlyReferences(value) {
 		return -1, -1
 	}
-	_, credential, scheme := cutAuthScheme(value)
-	if credentialKey(name) || core.IsCredentialHeader(name) ||
-		scheme && !strings.ContainsAny(strings.TrimLeft(credential, " \t"), " \t") {
+	if credentialKey(name) || core.IsCredentialHeader(name) || authCredential(value) {
 		return match[4], match[5]
 	}
 	return -1, -1
+}
+
+// authCredential reports whether value is what an Authorization header
+// holds: a bearer token, or Basic credentials, the base64 of "user:password".
+// The scheme alone does not tell: "Mode: Basic auth" is text. A tab separates
+// the scheme as a space does.
+func authCredential(value string) bool {
+	value = strings.ReplaceAll(value, "\t", " ")
+	if bearerCredential(value) {
+		return true
+	}
+	scheme, credential, ok := cutAuthScheme(value)
+	if !ok || !strings.EqualFold(scheme, "basic") {
+		return false
+	}
+	decoded, err := base64.RawStdEncoding.DecodeString(strings.TrimRight(strings.TrimSpace(credential), "="))
+	return err == nil && strings.Contains(string(decoded), ":")
 }
 
 // argCredential reports how a command-line argument carries a credential:

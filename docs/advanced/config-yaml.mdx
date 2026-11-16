@@ -281,9 +281,10 @@ plugin marks as secret. Under `extensions:`, plugin settings, and maps such as
 text holding a secret's value, a `Bearer` token, or a credential assignment
 such as `password=...`. In plugin settings and under `extensions:`, the value
 of a `Name: value` header line is one when the name names a credential
-(`X-Proxy-Key: ...`) or the value starts with an auth scheme (`Bearer ...`),
-as in a `header_edit` rule's `upstream_set`. Each such line gets its own
-variable; the header name and the other lines are kept.
+(`X-Proxy-Key: ...`) or the value is a `Bearer` token or `Basic` credentials,
+as in a `header_edit` rule's `upstream_set`, commented out with `#` or not.
+Each such line gets its own variable; the header name and the other lines are
+kept.
 
 <Note>
 Free-form text, such as a description typed into the dashboard, is checked
