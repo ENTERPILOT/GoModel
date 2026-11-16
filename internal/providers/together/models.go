@@ -9,6 +9,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 )
 
 // modelList decodes Together's /models listing, which is a bare JSON array,
@@ -70,29 +71,23 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 		return nil, core.MarkModelListingUnsupported(err)
 	}
 
-	result := &core.ModelsResponse{Object: "list", Data: make([]core.Model, 0, len(upstream))}
-	for _, model := range upstream {
-		id := strings.TrimSpace(model.ID)
-		if id == "" {
-			continue
-		}
-		metadata, servable := model.metadata()
-		if !servable {
-			continue
-		}
-		object := strings.TrimSpace(model.Object)
-		if object == "" {
-			object = "model"
-		}
-		result.Data = append(result.Data, core.Model{
-			ID:       id,
-			Object:   object,
-			OwnedBy:  strings.TrimSpace(model.Organization),
-			Created:  model.Created,
-			Metadata: metadata,
-		})
+	return providers.ModelList(upstream, modelInfo.toCore), nil
+}
+
+// toCore normalizes one listing entry, returning the zero model for a type
+// the gateway does not serve.
+func (m modelInfo) toCore() core.Model {
+	metadata, servable := m.metadata()
+	if !servable {
+		return core.Model{}
 	}
-	return result, nil
+	return core.Model{
+		ID:       strings.TrimSpace(m.ID),
+		Object:   providers.ModelObject(m.Object),
+		OwnedBy:  strings.TrimSpace(m.Organization),
+		Created:  m.Created,
+		Metadata: metadata,
+	}
 }
 
 // metadata normalizes one listing entry. It reports false when the model's
@@ -127,20 +122,11 @@ func (p *modelPricing) toCore() *core.ModelPricing {
 	}
 	return &core.ModelPricing{
 		Currency:      "USD",
-		InputPerMtok:  cloneFloat(p.Input),
-		OutputPerMtok: cloneFloat(p.Output),
+		InputPerMtok:  p.Input,
+		OutputPerMtok: p.Output,
 	}
 }
 
 func isZero(value *float64) bool {
 	return value == nil || *value == 0
-}
-
-// cloneFloat copies optional prices so the normalized model does not retain upstream pointers.
-func cloneFloat(value *float64) *float64 {
-	if value == nil {
-		return nil
-	}
-	cloned := *value
-	return &cloned
 }

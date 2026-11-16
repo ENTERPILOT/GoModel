@@ -9,6 +9,7 @@
   import { auth } from "$lib/stores/auth.svelte.js";
   import { authKeysStore as store } from "./authKeys.svelte.js";
   import AuthKeyEditor from "./AuthKeyEditor.svelte";
+  import AuthKeyNameEditor from "./AuthKeyNameEditor.svelte";
   import AuthKeyLabelsEditor from "./AuthKeyLabelsEditor.svelte";
   import AuthKeyAllowedModelsEditor from "./AuthKeyAllowedModelsEditor.svelte";
   import AuthKeyList from "./AuthKeyList.svelte";
@@ -58,6 +59,7 @@
   {/if}
 
   <AuthKeyEditor />
+  <AuthKeyNameEditor />
   <AuthKeyLabelsEditor />
   <AuthKeyAllowedModelsEditor />
 

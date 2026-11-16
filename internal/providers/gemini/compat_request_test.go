@@ -29,6 +29,22 @@ func TestCompatReasoningEffort(t *testing.T) {
 		{model: "gemini-2.5-flash", effort: "none", want: "none"},
 		{model: "gemini-2.5-flash", effort: "minimal", want: "minimal"},
 		{model: "gemma-4-31b-it", effort: "none", want: "none"},
+		{model: "gemini-4-argon", effort: "xhigh", want: "high"},
+		{model: "gemini-4-carbon", effort: "XHIGH", want: "high"},
+		{model: "gemini-3.8-flash", effort: "xhigh", want: "high"},
+		{model: "gemini-3.1-pro-preview", effort: "xhigh", want: "high"},
+		{model: "models/gemini-4-argon", effort: "xhigh", want: "high"},
+		{model: "google/gemini-4-carbon", effort: "xhigh", want: "high"},
+		{model: "gemini-4-hydrogenx", effort: "xhigh", want: "high"},
+		{model: "gemini-4-hydrogen", effort: "xhigh", want: "xhigh"},
+		{model: "gemini-4-hydrogen-preview", effort: "xhigh", want: "xhigh"},
+		{model: "google/gemini-4-hydrogen", effort: "xhigh", want: "xhigh"},
+		{model: "gemini-4-argon", effort: "max", want: "max"},
+		{model: "gemini-4-hydrogen", effort: "max", want: "max"},
+		{model: "gemini-2.5-flash", effort: "xhigh", want: "xhigh"},
+		{model: "gemini-pro-latest", effort: "xhigh", want: "high"},
+		{model: "gemini-flash-latest", effort: "minimal", want: "low"},
+		{model: "gemini-pro-latest", effort: "medium", want: "medium"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.model+"/"+tt.effort, func(t *testing.T) {

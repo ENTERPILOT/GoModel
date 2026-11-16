@@ -215,7 +215,9 @@ func newExporter(secrets *Secrets, environ []string, doc ExportDocument, expande
 // walk visits node, encoded from v found at path. class is how the field
 // holding v is exported and envName the variable that sets it, if any. A nil
 // slice, map, or pointer under a mapping is dropped: it encodes as [], {}, or
-// null, which config.yaml does not always read as unset.
+// null, which config.yaml does not always read as unset. A nil value in a
+// free-form map is kept: it is a null the configuration states, such as a
+// parameter a virtual model strips from requests.
 func (e *exporter) walk(path string, v reflect.Value, node *yaml.Node, class exportClass, envName string) {
 	for v.Kind() == reflect.Pointer {
 		v = v.Elem()
@@ -251,7 +253,7 @@ func (e *exporter) walk(path string, v reflect.Value, node *yaml.Node, class exp
 			switch v.Kind() {
 			case reflect.Map:
 				child := v.MapIndex(reflect.ValueOf(key.Value).Convert(v.Type().Key()))
-				if isNil(child) {
+				if isNil(child) && v.Type().Elem().Kind() != reflect.Interface {
 					continue
 				}
 				childClass := class

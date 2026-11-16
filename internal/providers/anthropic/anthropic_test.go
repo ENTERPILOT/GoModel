@@ -2267,6 +2267,7 @@ func TestNormalizeAnthropicStopReason(t *testing.T) {
 		{name: "stop sequence", in: "stop_sequence", want: "stop"},
 		{name: "max tokens", in: "max_tokens", want: "length"},
 		{name: "context window exceeded", in: "model_context_window_exceeded", want: "length"},
+		{name: "refusal", in: "refusal", want: "content_filter"},
 		{name: "unknown", in: "pause_turn", want: "pause_turn"},
 	}
 
@@ -4150,11 +4151,58 @@ func TestConvertToAnthropicRequest_ReasoningEffort(t *testing.T) {
 			expectedMaxTokens: 4096,
 		},
 		{
-			name:              "opus 5.5 - none effort sends no thinking it would reject",
+			name:              "opus 5.5 - none effort clamps to low because it always thinks",
 			model:             "claude-opus-5-5",
 			reasoning:         &core.Reasoning{Effort: "none"},
 			maxTokens:         new(4096),
+			expectedThinkType: "adaptive",
+			expectedEffort:    "low",
 			expectedMaxTokens: 4096,
+		},
+		{
+			name:              "fable 5.2 - none effort clamps to low because it always thinks",
+			model:             "claude-fable-5-2",
+			reasoning:         &core.Reasoning{Effort: "none"},
+			maxTokens:         new(4096),
+			expectedThinkType: "adaptive",
+			expectedEffort:    "low",
+			expectedMaxTokens: 4096,
+		},
+		{
+			name:              "sonnet 5.5 - none effort sends no thinking it would reject",
+			model:             "claude-sonnet-5-5",
+			reasoning:         &core.Reasoning{Effort: "none"},
+			maxTokens:         new(4096),
+			expectedMaxTokens: 4096,
+		},
+		{
+			name:              "haiku 5.5 - adaptive thinking and no temperature",
+			model:             "claude-haiku-5-5",
+			reasoning:         &core.Reasoning{Effort: "medium"},
+			maxTokens:         new(4096),
+			setTemperatureOne: true,
+			expectedThinkType: "adaptive",
+			expectedEffort:    "medium",
+			expectedMaxTokens: 4096,
+			expectNilTemp:     true,
+		},
+		{
+			name:              "haiku 5.5 - none effort disables default thinking",
+			model:             "claude-haiku-5-5-20261001",
+			reasoning:         &core.Reasoning{Effort: "none"},
+			maxTokens:         new(4096),
+			expectedThinkType: "disabled",
+			expectedMaxTokens: 4096,
+		},
+		{
+			name:              "haiku 4.5 - still uses a thinking budget",
+			model:             "claude-haiku-4-5-20251001",
+			reasoning:         &core.Reasoning{Effort: "low"},
+			maxTokens:         new(10000),
+			expectedThinkType: "enabled",
+			expectedBudget:    5000,
+			expectedMaxTokens: 10000,
+			expectNilTemp:     true,
 		},
 	}
 
@@ -4383,6 +4431,15 @@ func TestConvertResponsesRequestToAnthropic_ReasoningEffort(t *testing.T) {
 			expectedThinkType: "disabled",
 			expectedMaxTokens: 4096,
 		},
+		{
+			name:              "mythos 5.2 - none effort clamps to low because it always thinks",
+			model:             "claude-mythos-5-2",
+			reasoning:         &core.Reasoning{Effort: "none"},
+			maxOutputTokens:   new(4096),
+			expectedThinkType: "adaptive",
+			expectedEffort:    "low",
+			expectedMaxTokens: 4096,
+		},
 	}
 
 	for _, tt := range tests {
@@ -4459,6 +4516,172 @@ func TestThinksByDefault(t *testing.T) {
 	}
 }
 
+func TestAlwaysThinks(t *testing.T) {
+	for model, want := range map[string]bool{
+		"claude-fable-5":             true,
+		"claude-fable-5-2":           true,
+		"claude-mythos-5-2-20261001": true,
+		"claude-opus-5-5":            true,
+		"claude-opus-5":              false,
+		"claude-sonnet-5-5":          false,
+		"claude-haiku-5-5":           false,
+		"claude-opus-4-8":            false,
+	} {
+		assert.Equal(t, want, alwaysThinks(model), model)
+	}
+}
+
+// reasoning.summary opts into readable thinking text, but only on a thinking
+// block the request would carry anyway or on a model that thinks unasked.
+func TestConvertToAnthropicRequest_ReasoningSummary(t *testing.T) {
+	tests := []struct {
+		name        string
+		model       string
+		reasoning   *core.Reasoning
+		wantType    string // "" means no thinking block
+		wantDisplay string
+		wantBudget  int
+		wantEffort  string // "" means no output_config
+	}{
+		{
+			name:        "adaptive effort gains display",
+			model:       "claude-fable-5-2",
+			reasoning:   &core.Reasoning{Effort: "high", Summary: "auto"},
+			wantType:    "adaptive",
+			wantDisplay: "summarized",
+			wantEffort:  "high",
+		},
+		{
+			name:        "budget thinking gains display",
+			model:       "claude-haiku-4-5",
+			reasoning:   &core.Reasoning{Effort: "low", Summary: " Detailed "},
+			wantType:    "enabled",
+			wantDisplay: "summarized",
+			wantBudget:  5000,
+		},
+		{
+			name:        "always-thinking model without effort keeps its default effort",
+			model:       "claude-fable-5-2",
+			reasoning:   &core.Reasoning{Summary: "concise"},
+			wantType:    "adaptive",
+			wantDisplay: "summarized",
+		},
+		{
+			name:        "default-thinking model without effort keeps its default effort",
+			model:       "claude-haiku-5-5",
+			reasoning:   &core.Reasoning{Summary: "auto"},
+			wantType:    "adaptive",
+			wantDisplay: "summarized",
+		},
+		{
+			name:        "none clamped to low still summarizes",
+			model:       "claude-opus-5-5",
+			reasoning:   &core.Reasoning{Effort: "none", Summary: "auto"},
+			wantType:    "adaptive",
+			wantDisplay: "summarized",
+			wantEffort:  "low",
+		},
+		{
+			name:      "disabled thinking carries no display",
+			model:     "claude-opus-5",
+			reasoning: &core.Reasoning{Effort: "none", Summary: "auto"},
+			wantType:  "disabled",
+		},
+		{
+			name:       "no summary leaves display unset",
+			model:      "claude-sonnet-5-5",
+			reasoning:  &core.Reasoning{Effort: "low"},
+			wantType:   "adaptive",
+			wantEffort: "low",
+		},
+		{
+			name:       "summary none leaves display unset",
+			model:      "claude-opus-4-7",
+			reasoning:  &core.Reasoning{Effort: "low", Summary: " None "},
+			wantType:   "adaptive",
+			wantEffort: "low",
+		},
+		{name: "opus 4.8 without effort is not made to think", model: "claude-opus-4-8", reasoning: &core.Reasoning{Summary: "auto"}},
+		{name: "opus 4.6 without effort is not made to think", model: "claude-opus-4-6", reasoning: &core.Reasoning{Summary: "auto"}},
+		{name: "sonnet 5.5 without effort is not made to think", model: "claude-sonnet-5-5", reasoning: &core.Reasoning{Summary: "auto"}},
+		{name: "sonnet 5.5 with none is not made to think", model: "claude-sonnet-5-5", reasoning: &core.Reasoning{Effort: "none", Summary: "auto"}},
+	}
+
+	assertThinking := func(t *testing.T, out *anthropicRequest, wantType, wantDisplay, wantEffort string, wantBudget int) {
+		t.Helper()
+		if wantType == "" {
+			assert.Nil(t, out.Thinking)
+			assert.Nil(t, out.OutputConfig)
+			return
+		}
+		require.NotNil(t, out.Thinking)
+		assert.Equal(t, anthropicThinking{Type: wantType, BudgetTokens: wantBudget, Display: wantDisplay}, *out.Thinking)
+		if wantEffort == "" {
+			assert.Nil(t, out.OutputConfig)
+			return
+		}
+		require.NotNil(t, out.OutputConfig)
+		assert.Equal(t, wantEffort, out.OutputConfig.Effort)
+	}
+
+	for _, tt := range tests {
+		t.Run("chat "+tt.name, func(t *testing.T) {
+			out, err := convertToAnthropicRequest(&core.ChatRequest{
+				Model:     tt.model,
+				Reasoning: tt.reasoning,
+				Messages:  []core.Message{{Role: "user", Content: "Hello"}},
+			})
+			require.NoError(t, err)
+			assertThinking(t, out, tt.wantType, tt.wantDisplay, tt.wantEffort, tt.wantBudget)
+		})
+		// A /v1/responses request decoded from JSON has to arrive with the
+		// summary intact, on the batch path too.
+		t.Run("responses "+tt.name, func(t *testing.T) {
+			body, err := json.Marshal(map[string]any{"model": tt.model, "input": "Hello", "reasoning": tt.reasoning})
+			require.NoError(t, err)
+			var req core.ResponsesRequest
+			require.NoError(t, json.Unmarshal(body, &req))
+
+			out, err := convertResponsesRequestToAnthropic(&req)
+			require.NoError(t, err)
+			assertThinking(t, out, tt.wantType, tt.wantDisplay, tt.wantEffort, tt.wantBudget)
+
+			batch, err := convertDecodedBatchItemToAnthropic(&core.DecodedBatchItemRequest{
+				Endpoint:  "/v1/responses",
+				Operation: core.OperationResponses,
+				Request:   &req,
+			})
+			require.NoError(t, err)
+			assertThinking(t, batch, tt.wantType, tt.wantDisplay, tt.wantEffort, tt.wantBudget)
+		})
+	}
+
+	t.Run("chat reasoning_effort string with a summary", func(t *testing.T) {
+		out, err := convertToAnthropicRequest(&core.ChatRequest{
+			Model:     "claude-sonnet-4-6",
+			Reasoning: &core.Reasoning{Summary: "auto"},
+			Messages:  []core.Message{{Role: "user", Content: "Hello"}},
+			ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				"reasoning_effort": json.RawMessage(`"high"`),
+			}),
+		})
+		require.NoError(t, err)
+		assertThinking(t, out, "adaptive", "summarized", "high", 0)
+	})
+
+	t.Run("wire format", func(t *testing.T) {
+		out, err := convertToAnthropicRequest(&core.ChatRequest{
+			Model:     "claude-fable-5-2",
+			Reasoning: &core.Reasoning{Summary: "auto"},
+			Messages:  []core.Message{{Role: "user", Content: "Hello"}},
+		})
+		require.NoError(t, err)
+		wire, err := json.Marshal(out.Thinking)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"type":"adaptive","display":"summarized"}`, string(wire))
+	})
+}
+
 func TestIsAdaptiveThinkingModel(t *testing.T) {
 	tests := []struct {
 		model    string
@@ -4473,6 +4696,9 @@ func TestIsAdaptiveThinkingModel(t *testing.T) {
 		{"claude-opus-5-20260601", true},
 		{"claude-sonnet-5", true},
 		{"claude-sonnet-5-20260601", true},
+		// Haiku 5.5 rejects thinking {"type": "enabled"}.
+		{"claude-haiku-5-5", true},
+		{"claude-haiku-5-5-20261001", true},
 		// Haiku 4.5 predates adaptive thinking and stays on manual budgets.
 		{"claude-haiku-4-5-20251001", false},
 		{"claude-opus-4-8", true},
@@ -5388,6 +5614,8 @@ func TestSupportsSystemRoleMessages(t *testing.T) {
 		"claude-opus-4-8-20260301":   true,
 		"claude-opus-5-20260115":     true,
 		"claude-sonnet-5-20250929":   true,
+		"claude-haiku-5-5":           true,
+		"claude-haiku-5-5-20261001":  true,
 		"claude-sonnet-4-5-20250929": false,
 		"claude-opus-4-6":            false,
 		"claude-haiku-4-5-20251001":  false,
@@ -5447,6 +5675,8 @@ func TestRejectsSamplingParameters(t *testing.T) {
 		"claude-sonnet-5-20260601":   true,
 		"claude-opus-4-8":            true,
 		"claude-opus-4-7-20260101":   true,
+		"claude-haiku-5-5":           true,
+		"claude-haiku-5-5-20261001":  true,
 		"claude-opus-4-6":            false,
 		"claude-sonnet-4-6":          false,
 		"claude-sonnet-4-5-20250929": false,
@@ -5512,14 +5742,23 @@ func TestConvertToAnthropicRequestDropsConflictingSamplingParameter(t *testing.T
 
 func TestRejectsForcedToolChoice(t *testing.T) {
 	for model, want := range map[string]bool{
-		"claude-fable-5-1":          true,
-		"claude-fable-5-1-20260901": true,
-		"claude-mythos-5-1":         true,
-		"claude-fable-5":            false,
-		"claude-fable-5-20260601":   false,
-		"claude-fable-5-10":         false,
-		"claude-opus-5":             false,
-		"claude-sonnet-4-6":         false,
+		"claude-fable-5-1":           true,
+		"claude-fable-5-1-20260901":  true,
+		"claude-mythos-5-1":          true,
+		"claude-fable-5-2":           true,
+		"claude-fable-5-2-20261101":  true,
+		"claude-mythos-5-2":          true,
+		"claude-opus-5-5":            true,
+		"claude-sonnet-5-5":          true,
+		"claude-sonnet-5-5-20261001": true,
+		"claude-fable-5":             false,
+		"claude-fable-5-20260601":    false,
+		"claude-fable-5-10":          false,
+		"claude-opus-5":              false,
+		"claude-opus-5-20260601":     false,
+		"claude-sonnet-5":            false,
+		"claude-haiku-5-5":           false,
+		"claude-sonnet-4-6":          false,
 	} {
 		got := rejectsForcedToolChoice(model)
 		assert.Equal(t, want, got)
@@ -5536,6 +5775,7 @@ func TestConvertToAnthropicRequest_DropsSamplingForModelsThatRejectIt(t *testing
 	}{
 		{name: "fable 5.1 drops temperature and top_p", model: "claude-fable-5-1"},
 		{name: "opus 4.7 drops temperature and top_p", model: "claude-opus-4-7"},
+		{name: "haiku 5.5 drops temperature and top_p", model: "claude-haiku-5-5"},
 		// Models that still accept sampling parameters keep temperature;
 		// top_p goes because Anthropic refuses the two together.
 		{name: "sonnet 4.6 keeps temperature", model: "claude-sonnet-4-6", wantKept: true},
@@ -5617,6 +5857,39 @@ func TestConvertToAnthropicRequest_RelaxesForcedToolChoice(t *testing.T) {
 			model:      "claude-fable-5-1",
 			toolChoice: "auto",
 			wantType:   "auto",
+		},
+		{
+			name:            "fable 5.2 downgrades a named function",
+			model:           "claude-fable-5-2",
+			toolChoice:      map[string]any{"type": "function", "function": map[string]any{"name": "get_weather"}},
+			wantType:        "auto",
+			wantInstruction: `You must respond by calling the tool named "get_weather".`,
+		},
+		{
+			name:            "opus 5.5 downgrades required",
+			model:           "claude-opus-5-5",
+			toolChoice:      "required",
+			wantType:        "auto",
+			wantInstruction: "You must respond by calling one of the provided tools.",
+		},
+		{
+			name:            "sonnet 5.5 downgrades required",
+			model:           "claude-sonnet-5-5",
+			toolChoice:      "required",
+			wantType:        "auto",
+			wantInstruction: "You must respond by calling one of the provided tools.",
+		},
+		{
+			name:       "opus 5 keeps forced tool use",
+			model:      "claude-opus-5",
+			toolChoice: "required",
+			wantType:   "any",
+		},
+		{
+			name:       "haiku 5.5 keeps forced tool use",
+			model:      "claude-haiku-5-5",
+			toolChoice: "required",
+			wantType:   "any",
 		},
 		{
 			name:       "fable 5 keeps forced tool use",
@@ -6486,4 +6759,111 @@ func TestConvertResponsesRequestToAnthropic_AllowedToolsNarrowsDeclaredTools(t *
 	assert.Equal(t, "tool_b", req.Tools[0].Name)
 	require.NotNil(t, req.ToolChoice)
 	assert.Equal(t, "any", req.ToolChoice.Type)
+}
+
+// reasoning.summary has to reach Anthropic as thinking.display, and the
+// summary text it buys has to come back on both dialects.
+func TestReasoningSummaryRoundTrip(t *testing.T) {
+	const upstream = `{"id":"msg_sum","type":"message","role":"assistant","model":"claude-fable-5-2","content":[{"type":"thinking","thinking":"Weighing options.","signature":"sig-1"},{"type":"text","text":"Done."}],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":5}}`
+	newProvider := func(t *testing.T) (*Provider, *providertest.Capture) {
+		server, capture := providertest.JSONServer(t, http.StatusOK, upstream)
+		return New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider), capture
+	}
+	assertSent := func(t *testing.T, capture *providertest.Capture) {
+		t.Helper()
+		sent := capture.Last(t).JSON(t)
+		assert.Equal(t, map[string]any{"type": "adaptive", "display": "summarized"}, sent["thinking"])
+		assert.Equal(t, map[string]any{"effort": "high"}, sent["output_config"])
+	}
+
+	t.Run("responses", func(t *testing.T) {
+		provider, capture := newProvider(t)
+		var req core.ResponsesRequest
+		require.NoError(t, json.Unmarshal([]byte(`{"model":"claude-fable-5-2","input":"hi","reasoning":{"effort":"high","summary":"auto"}}`), &req))
+
+		resp, err := provider.Responses(context.Background(), &req)
+		require.NoError(t, err)
+		assertSent(t, capture)
+		require.NotEmpty(t, resp.Output)
+		require.Equal(t, "reasoning", resp.Output[0].Type)
+		require.Len(t, resp.Output[0].Content, 1)
+		assert.Equal(t, "Weighing options.", resp.Output[0].Content[0].Text)
+	})
+
+	t.Run("chat", func(t *testing.T) {
+		provider, capture := newProvider(t)
+		var req core.ChatRequest
+		require.NoError(t, json.Unmarshal([]byte(`{"model":"claude-fable-5-2","messages":[{"role":"user","content":"hi"}],"reasoning_effort":"high","reasoning":{"summary":"auto"}}`), &req))
+
+		resp, err := provider.ChatCompletion(context.Background(), &req)
+		require.NoError(t, err)
+		assertSent(t, capture)
+		require.Len(t, resp.Choices, 1)
+		assert.JSONEq(t, `"Weighing options."`, string(resp.Choices[0].Message.ExtraFields.Lookup("reasoning_content")))
+	})
+
+	t.Run("chat stream", func(t *testing.T) {
+		var reasoning strings.Builder
+		for _, delta := range chatStreamDeltas(t, thinkingResponsesSSE) {
+			text, _ := delta["reasoning_content"].(string)
+			reasoning.WriteString(text)
+		}
+		assert.Equal(t, "Let me think.", reasoning.String())
+	})
+
+	t.Run("responses stream", func(t *testing.T) {
+		events := responsesStreamEvents(t, thinkingResponsesSSE)
+		output := events[len(events)-1]["response"].(map[string]any)["output"].([]any)
+		reasoning := output[0].(map[string]any)
+		require.Equal(t, "reasoning", reasoning["type"])
+		assert.Equal(t, []any{map[string]any{"type": "reasoning_text", "text": "Let me think."}}, reasoning["content"])
+	})
+}
+
+const refusalSSE = `event: message_start
+data: {"type":"message_start","message":{"id":"msg_ref","type":"message","role":"assistant","model":"claude-fable-5-2","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"refusal"},"usage":{"output_tokens":1}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`
+
+// Anthropic answers 200 with stop_reason "refusal" when its safety classifiers
+// stop a turn. "refusal" is not an OpenAI finish_reason, so every surface
+// reports content_filter.
+func TestRefusalSurfacesAsContentFilter(t *testing.T) {
+	refused := &anthropicResponse{ID: "msg_ref", Model: "claude-fable-5-2", StopReason: "refusal"}
+
+	t.Run("chat", func(t *testing.T) {
+		chat := convertFromAnthropicResponse(refused)
+		require.Len(t, chat.Choices, 1)
+		assert.Equal(t, "content_filter", chat.Choices[0].FinishReason)
+		// The Anthropic dialect hands the client back the reason it came from.
+		assert.Equal(t, "refusal", anthropicapi.FromChatResponse(chat).StopReason)
+	})
+
+	t.Run("responses", func(t *testing.T) {
+		resp := convertAnthropicResponseToResponses(refused, "claude-fable-5-2")
+		assert.Equal(t, "incomplete", resp.Status)
+		require.NotNil(t, resp.IncompleteDetails)
+		assert.Equal(t, "content_filter", resp.IncompleteDetails.Reason)
+	})
+
+	t.Run("chat stream", func(t *testing.T) {
+		conv := newStreamConverter(io.NopCloser(strings.NewReader(refusalSSE)), "claude-fable-5-2", "anthropic")
+		out, err := io.ReadAll(conv)
+		require.NoError(t, err)
+		assert.Contains(t, string(out), `"finish_reason":"content_filter"`)
+		assert.NotContains(t, string(out), "refusal")
+	})
+
+	t.Run("responses stream", func(t *testing.T) {
+		events := responsesStreamEvents(t, refusalSSE)
+		final := events[len(events)-1]
+		require.Equal(t, "response.incomplete", final["type"])
+		response := final["response"].(map[string]any)
+		assert.Equal(t, map[string]any{"reason": "content_filter"}, response["incomplete_details"])
+	})
 }
