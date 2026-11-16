@@ -170,22 +170,23 @@ func (p *Provider) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	var resp core.ChatResponse
+	var decoded compatChatResponse
 	err = p.client.Do(ctx, llmclient.Request{
 		Method:    http.MethodPost,
 		Endpoint:  "/chat/completions",
 		Operation: llmclient.OperationChat,
 		Model:     req.Model,
 		Body:      body,
-	}, &resp)
+	}, &decoded)
 	if err != nil {
 		return nil, err
 	}
+	resp := &decoded.ChatResponse
 	core.EnsureModel(&resp.Model, req.Model)
 	if resp.Provider == "" {
 		resp.Provider = p.responseProviderName()
 	}
-	return &resp, nil
+	return resp, nil
 }
 
 // prepareNativeRequest applies the backend-specific members a translated
@@ -253,7 +254,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 	}
 
 	// Gemini's OpenAI-compatible endpoint returns OpenAI-format SSE; only its
-	// tool-call chunks need repair on the way through.
+	// tool-call and usage chunks need repair on the way through.
 	return newCompatToolCallStream(stream), nil
 }
 

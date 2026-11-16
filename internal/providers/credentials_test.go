@@ -475,3 +475,45 @@ func TestCredentialsService_UpsertAppliesASaveWhoseDataKeyIsUnconfirmed(t *testi
 	require.ErrorIs(t, err, encryption.ErrSealUnconfirmed, "the caller learns the save is not confirmed")
 	assert.True(t, registry.Supports("my-openai/test-model"), "the saved credential is applied like any other save")
 }
+
+// The refresh inside a save or delete is bounded by
+// credentialSaveRefreshTimeout: a provider whose /models never answers must
+// not stretch the request out unbounded, while the other providers of the
+// same sweep are still discovered and a stored change is kept.
+func TestCredentialsService_SaveAndDeleteReturnWithinTheRefreshBudget(t *testing.T) {
+	hanging := &registryMockProvider{listModelsDelay: time.Hour}
+	healthy := &registryMockProvider{modelsResponse: modelsList("ok-model")}
+	svc, err := NewCredentialsService(t.Context(),
+		keyedProviderFactory(map[string]core.Provider{"sk-hang": hanging, "sk-ok": healthy}),
+		NewModelRegistry(), newFakeCredentialStore(), nil, config.ResilienceConfig{}, nil)
+	require.NoError(t, err)
+
+	old := credentialSaveRefreshTimeout
+	credentialSaveRefreshTimeout = 500 * time.Millisecond
+	defer func() { credentialSaveRefreshTimeout = old }()
+
+	start := time.Now()
+	requireReturns(t, "the hanging save", func() error {
+		return svc.Upsert(t.Context(), ManagedProviderCredential{Name: "hang", Type: "test", APIKeys: []string{"sk-hang"}, Enabled: true})
+	})
+	assert.Less(t, time.Since(start), 5*time.Second, "the save outlived the refresh budget")
+	stored, err := svc.Get(t.Context(), "hang")
+	require.NoError(t, err)
+	assert.True(t, stored.Enabled)
+
+	start = time.Now()
+	requireReturns(t, "the save next to the hanging provider", func() error {
+		return svc.Upsert(t.Context(), ManagedProviderCredential{Name: "ok", Type: "test", APIKeys: []string{"sk-ok"}, Enabled: true})
+	})
+	assert.Less(t, time.Since(start), 5*time.Second, "the save outlived the refresh budget")
+	assert.Eventually(t, func() bool { return svc.registry.Supports("ok/ok-model") }, 5*time.Second, 5*time.Millisecond,
+		"the healthy provider of the same sweep was not discovered")
+
+	// Delete the healthy provider, so the hanging one is still registered
+	// when the delete's own sweep runs.
+	start = time.Now()
+	requireReturns(t, "the delete next to the hanging provider", func() error { return svc.Delete(t.Context(), "ok") })
+	assert.Less(t, time.Since(start), 5*time.Second, "the delete outlived the refresh budget")
+	assert.Nil(t, svc.registry.ProviderByName("ok"))
+	assert.NotNil(t, svc.registry.ProviderByName("hang"), "the hanging provider must still be registered for the delete's sweep")
+}

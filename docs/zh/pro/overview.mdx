@@ -1,16 +1,16 @@
 ---
 title: "GoModel Pro"
 sidebarTitle: "概览"
-description: "GoModel Pro 为 GoModel 网关增加了需授权的提示词压缩、智能路由、OIDC SSO、出站代理池和密钥管理器 Vaults。可免费试用 21 天。"
+description: "GoModel Pro 为 GoModel 网关增加了需授权的提示词压缩、智能路由、OIDC 与 SAML SSO、出站代理池和密钥管理器 Vaults。可免费试用 21 天。"
 icon: "gem"
 tag: "Pro"
-keywords: ["GoModel Pro", "提示词压缩", "prompt compression", "智能路由", "intelligent routing", "OIDC", "SSO", "配额模板", "quota templates", "出站代理池", "egress proxy pools", "密钥库", "vaults", "许可证", "license", "免费试用", "free trial"]
+keywords: ["GoModel Pro", "提示词压缩", "prompt compression", "智能路由", "intelligent routing", "OIDC", "SAML", "SSO", "配额模板", "quota templates", "出站代理池", "egress proxy pools", "密钥库", "vaults", "许可证", "license", "免费试用", "free trial"]
 ---
 
 ## Pro 是什么
 
 GoModel Pro 是 GoModel 的商业发行版。它与开源版 GoModel 使用相同的网关、配置、提供商、控制台和 API，并提供需授权的扩展功能：
-提示词压缩、智能路由、OIDC 单点登录、出站代理池、按子路径的配额模板以及密钥管理器 Vaults。
+提示词压缩、智能路由、OIDC 与 SAML 单点登录、出站代理池、按子路径的配额模板以及密钥管理器 Vaults。
 
 没有有效许可证时，Pro 二进制文件会以开源网关的形式启动，且不会阻断流量。显式启用的 SSO、出站代理池、按子路径的配额模板和 Vaults 是例外：
 当其授权或配置无效时，启动会失败即拒绝（fail closed），这样认证边界就不会悄无声息地消失，经代理的流量永远不会从网关自身的地址发出，
@@ -20,8 +20,8 @@ GoModel Pro 是 GoModel 的商业发行版。它与开源版 GoModel 使用相�
   <Card title="提示词压缩" icon="package-minus" href="/zh/pro/compression">
     确定性的、失败即放行（fail open）的请求改写，在上下文到达提供商之前移除重复的内容。
   </Card>
-  <Card title="OIDC 单点登录" icon="key-round" href="/zh/pro/sso">
-    使用带 PKCE 的授权码（Authorization Code）流程，借助您的身份提供商保护控制台。
+  <Card title="单点登录" icon="key-round" href="/zh/pro/sso">
+    使用您的 OIDC 或 SAML 2.0 身份提供商保护控制台，并将其组映射到用户路径。
   </Card>
   <Card title="智能路由" icon="route" href="/zh/pro/intelligent-routing">
     对每个请求进行简单/困难层级分类，并在虚拟模型内进行自适应、感知健康状态的提供商选择。Beta 版。

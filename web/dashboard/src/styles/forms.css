@@ -166,31 +166,47 @@
 }
 
 /* One load-balancing target row: model selector, reasoning effort, weight,
-   and remove button. */
-.vm-target-row {
+   and remove button. The head row above the targets labels those columns, so
+   both share the column widths. */
+.vm-target-row,
+.vm-target-head {
   display: flex;
   gap: 8px;
   align-items: center;
 }
 
-.vm-target-row .vm-target-model {
+:is(.vm-target-row, .vm-target-head) .vm-target-model {
   flex: 1 1 auto;
   min-width: 0;
 }
 
-.vm-target-row .vm-target-effort {
-  flex: 0 0 132px;
-  width: 132px;
+:is(.vm-target-row, .vm-target-head) .vm-target-effort {
+  flex: 0 0 108px;
+  width: 108px;
 }
 
-.vm-target-row .vm-target-weight {
+:is(.vm-target-row, .vm-target-head) .vm-target-weight {
   flex: 0 0 88px;
   width: 88px;
 }
 
+.vm-target-row .vm-target-weight input {
+  width: 100%;
+  min-width: 0;
+}
+
+/* Stands in for the remove button (.table-icon-btn) where there is none. */
+.vm-target-remove-space {
+  flex: 0 0 32px;
+}
+
+/* The per-control labels are for phones only (below). */
+.vm-target-cell-label {
+  display: none;
+}
+
 /* On phones the row wraps: the model picker keeps a usable width and the
-   effort, weight, and remove controls drop to a second line when they no
-   longer fit beside it. */
+   remove control drops to a second line when it no longer fits beside it. */
 @media (max-width: 520px) {
   .vm-target-row {
     flex-wrap: wrap;
@@ -200,10 +216,38 @@
     flex-basis: 160px;
   }
 
-  .vm-target-row .vm-target-effort {
-    flex: 1 1 100px;
+  /* A row with columns always takes two lines: the model picker, then its
+     effort, weight, and remove controls. The column labels above the list
+     cannot line up with that, so each control shows its own instead. The
+     picker's basis stops short of the full width so rounding cannot push it
+     below the drag handle; it grows to fill the line. */
+  .vm-target-columns {
+    padding-bottom: 8px;
+  }
+
+  .vm-target-columns .vm-target-model {
+    flex-basis: calc(100% - 8px);
+  }
+
+  .vm-target-columns .vm-target-effort {
+    flex: 1 1 96px;
     width: auto;
     min-width: 0;
+  }
+
+  .vm-target-columns .vm-target-remove {
+    align-self: flex-end;
+  }
+
+  .vm-target-cell-label {
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  .vm-target-head .vm-target-effort,
+  .vm-target-head .vm-target-weight,
+  .vm-target-remove-space {
+    display: none;
   }
 }
 
