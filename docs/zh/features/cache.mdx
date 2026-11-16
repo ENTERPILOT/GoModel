@@ -15,7 +15,7 @@ GoModel 内置两层响应缓存，适用于以下端点上的流式和非流式
 - `/v1/embeddings`
 - `/v1/systemone`（以及 Kev 的 `/permute` 和 `/separate`）
 
-同一请求的流式和非流式版本会分别缓存：流式请求未命中时会存储原始 SSE 字节，流式请求命中时会以 `text/event-stream` 原样重放这些字节。超过 4 MiB 的流仍会完整发送给客户端，但不会被缓存。
+同一请求的流式和非流式版本会分别缓存：流式请求未命中时会存储原始 SSE 字节，流式请求命中时会以 `text/event-stream` 原样重放这些字节。超过 4 MiB 的流仍会完整发送给客户端，但不会被缓存。流式的 `/v1/messages` 响应目前尚不缓存，非流式的会缓存。
 
 精确匹配缓存返回逐字节相同的响应，并带有：
 
@@ -97,7 +97,7 @@ cache:
 
 在计算哈希之前，JSON 对象成员的顺序和无意义的空白会被规范化。因此，仅格式不同的请求会共用同一个精确缓存条目。并发的相同未命中请求也会在进程内合并：只有一个请求到达提供商，其他等待的请求会重放它的响应。失败的或其他不可缓存的响应绝不会被分发给等待者。
 
-在 `/v1/chat/completions` 和 `/v1/messages` 上，用于标识调用方或控制提供商提示词缓存的字段不计入请求体哈希，因为它们不会改变回答：`user`（Anthropic 的 `metadata.user_id`）、`metadata`、`safety_identifier`、`prompt_cache_key` 和 `prompt_cache_retention`。例如，Claude Code 会为每个会话在 `metadata.user_id` 中发送新的会话 ID，而来自新会话的重复请求仍然会命中。如需避免调用方共用条目，请按 `user_path` 对缓存分区（见下文）。
+在 `/v1/chat/completions` 和 `/v1/messages` 上，用于标识调用方或控制提供商提示词缓存的字段不计入请求体哈希，因为它们不会改变回答：`user`（Anthropic 的 `metadata.user_id`）、`metadata`、`safety_identifier`、`prompt_cache_key` 和 `prompt_cache_retention`。例如，Claude Code 会为每个会话在 `metadata.user_id` 中发送新的会话 ID，而来自新会话的重复请求仍然会命中。如需隔离不同租户，请按 `user_path` 对缓存分区（见下文）；同一路径下的调用方仍会共用条目。
 
 ## 语义缓存键的组成
 

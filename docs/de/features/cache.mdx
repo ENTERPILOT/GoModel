@@ -20,6 +20,8 @@ Streaming- und Nicht-Streaming-Varianten desselben Requests werden unabhängig
 voneinander gecacht: Ein Streaming-Miss speichert die rohen SSE-Bytes, und ein
 Streaming-Hit spielt sie unverändert als `text/event-stream` wieder ab. Ein Stream
 über 4 MiB erreicht den Client trotzdem vollständig, wird aber nicht gecacht.
+Gestreamte `/v1/messages`-Responses werden noch nicht gecacht, nicht gestreamte
+schon.
 
 Der Exact-Match-Cache liefert byte-identische Responses mit:
 
@@ -141,8 +143,9 @@ außen vor, weil sie die Antwort nicht verändern: `user` (bei Anthropic
 `metadata.user_id`), `metadata`, `safety_identifier`, `prompt_cache_key` und
 `prompt_cache_retention`. Claude Code sendet zum Beispiel für jede Sitzung eine
 neue Sitzungs-ID in `metadata.user_id`, und ein wiederholter Request aus einer
-neuen Sitzung trifft trotzdem. Damit Aufrufer keine Einträge teilen,
-partitionieren Sie den Cache nach `user_path` (siehe unten).
+neuen Sitzung trifft trotzdem. Um Mandanten zu trennen, partitionieren Sie den
+Cache nach `user_path` (siehe unten); Aufrufer unter demselben Pfad teilen sich
+weiterhin Einträge.
 
 ## Woraus der Schlüssel des semantischen Caches besteht
 
