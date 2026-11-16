@@ -137,6 +137,11 @@ func TestSemanticCacheMiddleware_MultimodalAttachmentIsolatesNamespace(t *testin
 // Earlier turns have to match exactly, tool calls and tool results included:
 // the same question asked after a different tool exchange has another answer.
 func TestSemanticCacheMiddleware_ToolHistoryIsolatesNamespace(t *testing.T) {
+	const responsesParisSunny = `{"model":"gpt-4","input":[
+		{"role":"user","content":"What is the weather like?"},
+		{"type":"function_call","call_id":"call_1","name":"get_weather","arguments":"{\"city\":\"Paris\"}"},
+		{"type":"function_call_output","call_id":"call_1","output":"Sunny, 25C"}
+	]}`
 	tests := []struct {
 		name  string
 		path  string
@@ -144,16 +149,22 @@ func TestSemanticCacheMiddleware_ToolHistoryIsolatesNamespace(t *testing.T) {
 		other string
 	}{
 		{
-			name: "responses function_call_output",
-			path: "/v1/responses",
-			first: `{"model":"gpt-4","input":[
-				{"role":"user","content":"What is the weather like?"},
-				{"type":"function_call","call_id":"call_1","name":"get_weather","arguments":"{\"city\":\"Paris\"}"},
-				{"type":"function_call_output","call_id":"call_1","output":"Sunny, 25C"}
-			]}`,
+			name:  "responses function_call arguments",
+			path:  "/v1/responses",
+			first: responsesParisSunny,
 			other: `{"model":"gpt-4","input":[
 				{"role":"user","content":"What is the weather like?"},
 				{"type":"function_call","call_id":"call_1","name":"get_weather","arguments":"{\"city\":\"Oslo\"}"},
+				{"type":"function_call_output","call_id":"call_1","output":"Sunny, 25C"}
+			]}`,
+		},
+		{
+			name:  "responses function_call_output",
+			path:  "/v1/responses",
+			first: responsesParisSunny,
+			other: `{"model":"gpt-4","input":[
+				{"role":"user","content":"What is the weather like?"},
+				{"type":"function_call","call_id":"call_1","name":"get_weather","arguments":"{\"city\":\"Paris\"}"},
 				{"type":"function_call_output","call_id":"call_1","output":"Snow, -10C"}
 			]}`,
 		},
