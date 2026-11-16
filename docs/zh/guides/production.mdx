@@ -41,6 +41,10 @@ GoModel 通过 `STORAGE_TYPE` 持久化审计日志、用量记录、预算、�
 | PostgreSQL | `postgresql` | 多于一个副本，或您已经在运维 Postgres。生产环境的常规选择。 |
 | MongoDB | `mongodb` | 您已经在运维 MongoDB，且更倾向于使用它而非 Postgres。 |
 
+使用 MongoDB 时，建议使用副本集（replica set），单节点即可，仓库中的 `docker-compose.yaml` 就是这样启动的。
+独立部署的 `mongod` 同样可用，但不支持事务：GoModel 会记录一条警告，并将涉及多个文档的更改（预算和限流配置、护栏、工作流版本、用量价格重新计算）拆成多次独立写入。
+中断的更改可能只生效一部分，再次执行即可完成。如果保存工作流时在激活新版本的过程中被中断，该作用域可能没有活动的工作流（对全局作用域而言，重新加载工作流会失败），直到您再次保存该工作流。
+
 SQLite 是默认选项，使 GoModel 无需任何配置即可运行；对于挂载了持久卷的单实例，它也是真正可用于生产环境的选择。
 它省去了一次网络跳转，也少了一个需要运维的组件。
 
@@ -118,7 +122,7 @@ GCP Secret Manager 或 Azure Key Vault 读取 Secret 的功能由 [GoModel Pro](
 - **托管 API 密钥**以高熵随机 Secret 的 SHA-256 哈希形式存储，永远无法还原。明文仅在创建时显示一次。这与提供商凭据的处理方式刻意不同。
 - **审计条目通过带密钥的指纹识别客户端密钥。** `api_key_hash` 是对所提交 `Authorization` 请求头值（去掉 `Bearer ` 前缀）计算的 HMAC-SHA256 的前 16 个十六进制字符，其密钥是每个部署生成一次并保存在数据库中的随机 Secret（`runtime_settings` 中的 `audit_api_key_hash_secret`）。该值在同一部署内保持稳定，共享同一数据库的副本使用相同的值，且无法仅凭密钥本身重新计算。此版本之前写入的条目保留原先未加密钥的值，因此同一密钥的条目在升级前后不会共享同一个 `api_key_hash`。如果启动时无法加载该 Secret，条目会省略此字段，网关会记录一条警告。
 - **客户端凭据请求头在持久化之前会被脱敏。** 当设置 `LOGGING_LOG_HEADERS=true` 时，`Authorization`、`x-api-key`、`Cookie`
-  及其他凭据请求头会在写入路径上被替换为 `[REDACTED]`，因此审计存储永远不会收到它们。
+  及其他凭据请求头会在写入路径上被替换为 `[REDACTED]`，因此审计存储永远不会收到它们。名称看起来像凭据的请求头同样会被脱敏：以 `token`、`-key` 或 `-auth` 结尾，或包含 `authorization`、`api-key`、`apikey`、`secret`、`password`、`signature` 或 `jwt`。`Idempotency-Key` 和 `Sec-WebSocket-Key` 会保留。
 - **设置 `GOMODEL_MASTER_KEY`。** 如果它为空且不存在任何托管密钥，所有请求都会在未经认证的情况下放行，并且 `/admin/*`
   会被加入认证跳过列表，作为锁定后的恢复路径。处于这种状态且可从互联网访问的网关，会把完整的 Admin API 交给任何人。
 
@@ -144,6 +148,7 @@ SERVER_TLS_CLIENT_CA_FILE=/etc/gomodel/tls/ca.crt
 - 无法加载的轮换（例如只写了一半的证书对）会保留之前的证书并记录警告。启动时文件缺失或无效会报错。
 - 修改路径会在[配置重新加载](/zh/advanced/cli#配置重新加载)时生效。
 - 启用 TLS 后，该端口不再响应纯 HTTP。Docker `HEALTHCHECK` 运行的 `gomodel --health` 和 `gomodel --ready` 会自动切换到 HTTPS。
+- 响应会携带 `Strict-Transport-Security: max-age=15552000`（180 天，不含 `includeSubDomains` 或 `preload`），使浏览器对该主机坚持使用 HTTPS。在终止 TLS 的代理之后以纯 HTTP 提供服务时不会发送 HSTS 头；请在代理上设置。
 
 **Kubernetes 与 cert-manager。** 将证书签发到 Secret 中，并以卷的形式挂载。不要使用 `subPath`：kubelet 不会更新 `subPath` 挂载，续期后的证书将永远无法到达 Pod。
 

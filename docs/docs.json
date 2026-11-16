@@ -207,6 +207,7 @@
                                     "pro/overview",
                                     "pro/compression",
                                     "pro/sso",
+                                    "pro/saml",
                                     "pro/intelligent-routing",
                                     "pro/egress"
                                 ]
@@ -393,6 +394,7 @@
                                     "de/pro/overview",
                                     "de/pro/compression",
                                     "de/pro/sso",
+                                    "de/pro/saml",
                                     "de/pro/intelligent-routing",
                                     "de/pro/egress"
                                 ]
@@ -571,6 +573,7 @@
                                     "zh/pro/overview",
                                     "zh/pro/compression",
                                     "zh/pro/sso",
+                                    "zh/pro/saml",
                                     "zh/pro/intelligent-routing",
                                     "zh/pro/egress"
                                 ]
@@ -749,6 +752,7 @@
                                     "pl/pro/overview",
                                     "pl/pro/compression",
                                     "pl/pro/sso",
+                                    "pl/pro/saml",
                                     "pl/pro/intelligent-routing",
                                     "pl/pro/egress"
                                 ]
