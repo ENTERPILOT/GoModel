@@ -46,6 +46,45 @@ func adaptChatRequest(defaultEffort string) func(*core.ChatRequest) (*core.ChatR
 	}
 }
 
+// adaptResponsesRequest applies to a native Responses request the policy
+// adaptChatRequest applies to chat: the effort is mapped onto the low/high/max
+// set OpenCode Zen accepts, and defaultEffort fills in one that carries none.
+// The Responses dialect already speaks the nested reasoning object, so only the
+// effort level and the injected default differ from what the client sent.
+func adaptResponsesRequest(defaultEffort string) func(*core.ResponsesRequest) *core.ResponsesRequest {
+	return func(req *core.ResponsesRequest) *core.ResponsesRequest {
+		if req == nil {
+			return nil
+		}
+		// A flat reasoning_effort in the provider extras is the client asking
+		// for reasoning in the chat dialect: it must not be overwritten, the
+		// same precedence adaptChatRequest applies.
+		flatEffort := req.ExtraFields.Lookup("reasoning_effort") != nil
+		if req.Reasoning == nil || strings.TrimSpace(req.Reasoning.Effort) == "" {
+			if defaultEffort == "" || flatEffort {
+				return req
+			}
+			reasoning := core.Reasoning{}
+			if req.Reasoning != nil {
+				reasoning = *req.Reasoning
+			}
+			reasoning.Effort = defaultEffort
+			adapted := *req
+			adapted.Reasoning = &reasoning
+			return &adapted
+		}
+		effort := normalizeReasoningEffort(req.Reasoning.Effort)
+		if effort == req.Reasoning.Effort {
+			return req
+		}
+		adapted := *req
+		reasoning := *req.Reasoning
+		reasoning.Effort = effort
+		adapted.Reasoning = &reasoning
+		return &adapted
+	}
+}
+
 // normalizeReasoningEffort maps GoModel's effort levels onto the low/high/max
 // set OpenCode Zen accepts, downgrading the levels it does not know to their
 // nearest supported equivalent. "none" becomes "low" because the models that

@@ -180,6 +180,43 @@ func TestCompatibleProvider_AdaptChatRequest_ErrorAborts(t *testing.T) {
 	assert.Zero(t, capture.Count(), "upstream must not be called when adaptation fails")
 }
 
+// TestCompatibleProvider_ResponsesRequestHeaders_AppliedToNativeResponses is the
+// mirror of the chat case: an upstream that identifies itself on both dialects
+// gets the same headers on the native Responses endpoints, and only there.
+func TestCompatibleProvider_ResponsesRequestHeaders_AppliedToNativeResponses(t *testing.T) {
+	server, capture := providertest.RouteServer(t, map[string]http.HandlerFunc{
+		"/models":    jsonHandler(`{"object":"list","data":[]}`),
+		"/responses": jsonHandler(`{"id":"resp_1","model":"m","status":"completed","output":[]}`),
+	})
+	provider := NewCompatibleProvider(
+		"test-key",
+		providers.ProviderOptions{HTTPClient: server.Client()},
+		CompatibleProviderConfig{
+			ProviderName: "affine",
+			BaseURL:      server.URL,
+			ResponsesRequestHeaders: func(_ context.Context, req *core.ResponsesRequest) http.Header {
+				h := make(http.Header, 1)
+				h.Set("X-Session-Id", "session-"+req.Model)
+				return h
+			},
+		},
+	)
+
+	_, err := provider.Responses(context.Background(), &core.ResponsesRequest{Model: "m", Input: "hi"})
+	require.NoError(t, err)
+	assert.Equal(t, "session-m", capture.Last(t).Header.Get("X-Session-Id"))
+
+	stream, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{Model: "m", Input: "hi"})
+	require.NoError(t, err)
+	_, _ = io.ReadAll(stream)
+	stream.Close()
+	assert.Equal(t, "session-m", capture.Last(t).Header.Get("X-Session-Id"))
+
+	_, err = provider.ListModels(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, capture.Last(t).Header.Get("X-Session-Id"), "the hook is Responses-only")
+}
+
 func TestCompatibleProvider_ChatRequestHeaders_AppliedToChatOnly(t *testing.T) {
 	server, capture := providertest.RouteServer(t, map[string]http.HandlerFunc{
 		"/models":           jsonHandler(`{"object":"list","data":[]}`),
