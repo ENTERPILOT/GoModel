@@ -39,24 +39,29 @@ OPENCODE_GO_MODELS=glm-5.1,kimi-k2.7-code,deepseek-v4-pro
 
 ## 端点
 
-OpenCode Zen 在 OpenAI 风格的 `/chat/completions`（Bearer 认证）上提供大多数模型，另有少数模型仅在 Anthropic 原生的 `/messages` 端点（`x-api-key` 认证）上提供。GoModel 按模型进行路由：
+OpenCode Zen 为每个模型提供各自的原生端点，并公布在 `GET /models` 每个条目的 `api` 字段中：OpenAI 风格的 `/chat/completions`（Bearer 认证）、OpenAI 风格的 `/responses`，或 Anthropic 原生的 `/messages` 端点（`x-api-key` 认证）。GoModel 读取该列表并按模型路由，因此 Zen 新增的模型会自动落到自己的端点上，无需修改配置：
 
-- **OpenAI 风格的模型**（GLM、Kimi、DeepSeek、MiMo、MiniMax 以及大多数 Qwen）发送到 `/chat/completions`。`/models` 和 `/v1/responses`（转换为聊天补全）使用同一路径。
-- **仅支持 Anthropic 格式的模型**会被转换为 Anthropic Messages 格式并发送到 `/messages`，这与 GoModel 处理原生 Anthropic 的方式一致。两条路径都会规范化为相同的兼容 OpenAI 的响应，因此无论客户端选择哪个模型，也无论调用的是 `/v1/chat/completions` 还是 `/v1/messages`，看到的都是一致的接口。
+- **`/chat/completions` 模型**（GLM、Kimi、DeepSeek、MiMo 以及大多数 Qwen）按原样发送，两个接口均是如此：`/v1/responses` 会被转换为聊天补全。
+- **`/responses` 模型**（Muse Spark、Grok 4.7、GPT Luna 系列）在 `/responses` 上原生提供，缓冲与流式均是如此。`/chat/completions` 会用 "Model does not support this protocol" 拒绝它们，因此对这类模型的 `/v1/chat/completions` 请求会被转换为 Responses API，并以聊天补全的形式返回。
+- **仅支持 Anthropic 格式的模型**会被转换为 Anthropic Messages 格式并发送到 `/messages`，这与 GoModel 处理原生 Anthropic 的方式一致。
 
-仅支持 `/messages` 的模型集合目前需要手动维护（默认值：`qwen3.7-max`），因为 OpenCode Zen 尚未提供按模型区分的端点元数据。需要时可以覆盖它：
+每条路径都会规范化为相同的兼容 OpenAI 的响应，因此无论客户端选择哪个模型，也无论调用的是 `/v1/chat/completions` 还是 `/v1/messages`，看到的都是一致的接口。
+
+该列表最多每分钟读取一次，且仅在请求中出现尚未路由过的模型时读取，因此正常路径上的路由不产生额外的上游调用。列表中未出现的模型（例如列表获取失败或模型未公布）会发送到 `/chat/completions`，也就是为大多数模型提供服务的端点。
+
+仅支持 `/messages` 的模型集合仍需要手动维护（默认值：`qwen3.7-max`）。需要时可以覆盖它：
 
 ```bash
 OPENCODE_GO_MESSAGES_MODELS=qwen3.7-max
 ```
 
 <Note>
-  这种手动划分是临时措施；一旦上游模型列表能够区分端点，就会被基于元数据的路由所取代。
+  这种 `/messages` 划分是临时措施；一旦 provider 也能从该列表路由 Anthropic 原生模型，就会迁移到同一份元数据上。
 </Note>
 
 ## 会话请求头
 
-OpenCode Zen 要求每个客户端发送 `x-opencode-session` 请求头，以便将同一个对话路由到同一个上游，并保持其提示词缓存处于预热状态。上游已宣布，不带该请求头的请求可能会开始失败。GoModel 默认会为每个 OpenCode Go 请求添加该请求头（`/chat/completions` 和 `/messages` 路径均是如此），并使用第一个可用的值：
+OpenCode Zen 要求每个客户端发送 `x-opencode-session` 请求头，以便将同一个对话路由到同一个上游，并保持其提示词缓存处于预热状态。上游已宣布，不带该请求头的请求可能会开始失败。GoModel 默认会为每个 OpenCode Go 请求添加该请求头（`/chat/completions`、`/responses` 和 `/messages` 路径均是如此），并使用第一个可用的值：
 
 1. 客户端发送的 `x-opencode-session` 请求头（来自 OpenCode 本身、pi 以及其他使用 OpenCode Zen 格式的工具）会被原样转发。
 2. 否则，使用 GoModel 通过[会话保持](/zh/features/session-keeping)检测到的会话：OpenCode 的 `X-Session-Id`、Claude Code 的会话 id、请求体中的会话字段，或者对于完全不发送任何信号的智能体，使用根据内容派生的 `auto-…` id。
