@@ -137,9 +137,11 @@ func TestPartitionOff_KeepsTodaysIdentities(t *testing.T) {
 
 			require.Len(t, vecStore.entries, 1)
 			// Recomputed when the params hash started covering every output-shaping
-			// field; it still must not vary with the user path while the setting is off.
-			assert.Equal(t, "3a5b7dc3ad2b549beb609572a75b4ed6c46004c15be579c2b67bf614a924fcc6", vecStore.entries[0].paramsHash)
-			assert.Equal(t, "efd36f887a065acdc1500ef21d3770d0302b05dacb3ecbcd878ce1115b65fd4e", vecStore.entries[0].key)
+			// field, and again when the conversation fingerprint started covering
+			// earlier turns in full; it still must not vary with the user path while
+			// the setting is off.
+			assert.Equal(t, "55663ef812d7b5d2252f7cd69ceb55aa43e4d4e97af442e209f216568957d55e", vecStore.entries[0].paramsHash)
+			assert.Equal(t, "264a61e337df57ab35833b216cba72591349d9ceef23272a7917d1e17200101e", vecStore.entries[0].key)
 		})
 	}
 }
@@ -213,6 +215,7 @@ func TestHandleRequest_PartitionIsolatesEveryEntryPath(t *testing.T) {
 		{name: "semantic chat stream", semantic: true, path: partitionChatPath, body: chatStream, stream: true, wantHitLabel: CacheHeaderSemantic},
 		{name: "semantic responses", semantic: true, path: "/v1/responses", body: responses, wantHitLabel: CacheHeaderSemantic},
 		{name: "semantic responses stream", semantic: true, path: "/v1/responses", body: responsesStream, stream: true, wantHitLabel: CacheHeaderSemantic},
+		{name: "semantic messages", semantic: true, path: "/v1/messages", body: partitionChatBody, wantHitLabel: CacheHeaderSemantic},
 		{name: "both layers", exact: true, semantic: true, path: partitionChatPath, body: partitionChatBody, wantHitLabel: CacheHeaderExact},
 	}
 	for _, tt := range tests {

@@ -50,7 +50,7 @@ type ServerConfig struct {
 	UserPathHeaderMasterKeyOnly bool `yaml:"user_path_header_master_key_only" env:"USER_PATH_HEADER_MASTER_KEY_ONLY"`
 	// EnabledPassthroughProviders lists the provider types enabled on
 	// /p/{provider}/... passthrough routes. Default:
-	// ["openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "jev"].
+	// ["openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "hetzner", "edenai", "jev"].
 	EnabledPassthroughProviders []string `yaml:"enabled_passthrough_providers" env:"ENABLED_PASSTHROUGH_PROVIDERS"`
 	// RealtimeEnabled exposes the realtime (speech-to-speech) websocket endpoints
 	// at /v1/realtime and /v1/realtime/translations, their WebRTC signaling

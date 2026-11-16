@@ -137,7 +137,7 @@ func TestBuildDefaultConfig(t *testing.T) {
 	assert.Equal(t, DefaultStreamStallTimeoutSeconds, cfg.Server.StreamStallTimeout)
 	assert.True(t, cfg.Server.EnablePassthroughRoutes)
 	assert.True(t, cfg.Server.AllowPassthroughV1Alias)
-	assert.Equal(t, []string{"openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "edenai", "jev"}, cfg.Server.EnabledPassthroughProviders)
+	assert.Equal(t, []string{"openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "hetzner", "edenai", "jev"}, cfg.Server.EnabledPassthroughProviders)
 	assert.Equal(t, ConfiguredProviderModelsModeAllowlist, cfg.Models.ConfiguredProviderModelsMode)
 	assert.Nil(t, cfg.Cache.Model.Local)
 	assert.Equal(t, 3600, cfg.Cache.Model.RefreshInterval)
@@ -1023,9 +1023,8 @@ func TestLoad_ConfigExample_UsesNestedModelCacheSettings(t *testing.T) {
 		require.Equal(t, ".cache", result.Config.Cache.Model.Local.CacheDir)
 		require.Nil(t, result.Config.Cache.Model.Redis)
 
-		gotProviders := result.Config.Server.EnabledPassthroughProviders
-		wantProviders := []string{"openai", "anthropic", "cohere", "openrouter", "kilo", "zai", "sglang", "vllm", "llmd", "deepseek", "bailian"}
-		require.Equal(t, wantProviders, gotProviders)
+		// The example shows the default allowlist, so it must not drift from it.
+		require.Equal(t, buildDefaultConfig().Server.EnabledPassthroughProviders, result.Config.Server.EnabledPassthroughProviders)
 	})
 }
 

@@ -23,7 +23,7 @@ server:
   allow_passthrough_v1_alias: true # allow /p/{provider}/v1/... while keeping /p/{provider}/... canonical
   user_path_header: "X-GoModel-User-Path" # env: USER_PATH_HEADER; inbound header used for user_path scoping
   user_path_header_master_key_only: false # env: USER_PATH_HEADER_MASTER_KEY_ONLY; true makes managed keys without a bound user path ignore the header (treated as no path). Multi-tenant setups should bind every key or enable this
-  enabled_passthrough_providers: ["openai", "anthropic", "cohere", "openrouter", "kilo", "zai", "sglang", "vllm", "llmd", "deepseek", "bailian"] # providers enabled on /p/{provider}/...
+  enabled_passthrough_providers: ["openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "hetzner", "edenai", "jev"] # env: ENABLED_PASSTHROUGH_PROVIDERS; providers enabled on /p/{provider}/... (default shown); others, such as cohere, audiocpp or bailian, are opt-in
   auth_verify_enabled: false # env: AUTH_VERIFY_ENABLED; expose GET /v1/auth/verify, which reports whether the API key a request carries authenticates against this gateway (401 when it does not; 200 with {"valid":false,"method":"none"} when the gateway has no authentication configured). Outside /admin, so it works with the admin API disabled
   realtime_enabled: true # env: REALTIME_ENABLED; expose the /v1/realtime and /v1/realtime/translations websockets, their calls/client_secrets siblings, and /p/{provider}/v1/realtime upgrades
   # Client address resolution. Leave trusted_proxies empty (default) and every
