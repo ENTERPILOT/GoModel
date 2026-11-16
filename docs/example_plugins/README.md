@@ -45,7 +45,9 @@ the `gomodel` binary that runs it, forces `CGO_ENABLED=1`, pins
 matching release), stamps a `GoModelBuildInfo` variable into the plugin, and
 refuses an output whose Go version differs from the host's. Always build with
 the binary that will load the plugin. In Docker, build the `plugin-builder`
-target of `Dockerfile.plugins` and run it against your plugin directory.
+target of `Dockerfile.plugins`: it builds a plugin in this tree from its path
+under `/app`, and a plugin in its own module mounted at `/src`. The header of
+`Dockerfile.plugins` has both commands.
 
 A refused load names both sides, for example:
 
@@ -101,6 +103,9 @@ For local development against a GoModel checkout, point the module at it:
 // go.mod
 replace github.com/enterpilot/gomodel => ../gomodel
 ```
+
+In the `plugin-builder` image the checkout is at `/app`, so use `=> /app`
+there.
 
 Build with the host binary and inspect the result:
 

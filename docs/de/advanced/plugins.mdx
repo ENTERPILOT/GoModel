@@ -514,11 +514,19 @@ this binary was built with go1.27.3, gomodel v0.1.91, flags (none). Rebuild it
 with `gomodel plugin build` from this GoModel version
 ```
 
-Bauen Sie in Docker das Target `plugin-builder` von `Dockerfile.plugins` und führen Sie es gegen
-Ihr Plugin-Verzeichnis aus:
+Bauen Sie in Docker das Target `plugin-builder` von `Dockerfile.plugins`. Ein Plugin aus dem
+GoModel-Repository, etwa das Beispiel, liegt im Image bereits unter `/app`:
 
 ```sh
 docker build -f Dockerfile.plugins --target plugin-builder -t gomodel-plugin-builder .
+docker run --rm -v "$PWD/plugins:/out" gomodel-plugin-builder \
+  -o /out/keyword_block.so /app/docs/example_plugins/keywordblock
+```
+
+Ein Plugin in einem eigenen Go-Modul mounten Sie unter `/src`. Verweisen Sie in dessen `go.mod` mit
+`replace github.com/enterpilot/gomodel => /app` auf die GoModel-Quellen im Image:
+
+```sh
 docker run --rm -v "$PWD/my-plugin:/src" -v "$PWD/plugins:/out" \
   gomodel-plugin-builder -o /out/my-plugin.so /src
 ```
