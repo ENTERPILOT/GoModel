@@ -1,0 +1,65 @@
+---
+title: "礼貌回复"
+description: "在网关直接回复感谢和道别消息，而不是以全价把长对话重新发送给模型。"
+icon: "hand-heart"
+tag: "Pro"
+keywords: ["GoModel Pro", "礼貌回复", "courtesy replies", "courtesy_reply", "guardrail", "提示缓存", "prompt cache", "节省 token"]
+---
+
+## 功能
+
+当用户用“谢谢！”或“再见”结束一段长对话时，客户端会把整段对话重新发送给模型，只为了得到一句“不客气！”。如果此时提供商的提示缓存已经过期，这条一个词的消息就会按完整上下文、以全价计费。
+
+`courtesy_reply` guardrail 会识别这类消息并在网关直接回复，请求根本不会到达提供商。它适用于 `/v1/chat/completions`、`/v1/responses` 和 `/v1/messages`，可识别英语、波兰语、德语、西班牙语、法语、葡萄牙语和意大利语的感谢与道别。
+
+## 何时回复
+
+默认情况下，只有在跳过模型能真正省钱时才回复：
+
+- **缓存已冷。** 网关会记录每段对话最后一次到达其提供商和模型的时间。只有当提示缓存很可能已过期（默认五分钟，请求要求更长缓存时则更久），或提供商根本不缓存时，才回复礼貌消息。缓存仍热时，这条消息主要按低价的缓存读取计费，照常发送给模型。
+- **对话足够大。** 少于 2,000 token 的对话会发送给模型；节省的费用不值得替换模型的回复。
+- **消息只是客套。** 仅由感谢或道别用语组成的短消息。任何包含问题、请求或新信息的消息都会发送给模型。
+
+缓存跟踪需要会话 ID，GoModel 会为大多数客户端自动检测；参见[会话保持](/zh/features/session-keeping)。网关未观察过的对话，例如新会话或由其他副本处理的会话，会被视为冷缓存，除非将 `unknown_cache` 设为 `warm`。
+
+## 始终发送给模型的情况
+
+只要预设回复可能出错，guardrail 就不会介入：
+
+- 待处理的工具或函数结果，以及随消息发送的非文本内容
+- 紧跟在助手提问之后的消息，此时“谢谢”可能意味着“好的，继续”
+- 强制工具调用和结构化输出
+- 由提供商保存状态的 Responses 请求；Responses 消息仅在 `"store": false` 时才会被回复
+
+“好的”“完美”“明白了”等确认语默认不回复，因为它们常常表示同意助手提出的操作。可通过 `reply_to_acknowledgments` 开启。
+
+## 启用
+
+在 `config/config.yaml` 的 `guardrails` 部分添加一条规则：
+
+```yaml
+guardrails:
+  enabled: true
+  rules:
+    - name: "courtesy"
+      type: "courtesy_reply"
+      fail_mode: "open"
+```
+
+就这样：冷缓存下的感谢和道别现在会得到预设回复，没有推理成本。也可以在 Dashboard 的 **Plugins & Guardrails** 中创建该规则，那里会显示每项设置及其说明。
+
+## 主要设置
+
+| 设置 | 默认值 | 用途 |
+| --- | --- | --- |
+| `reply` | `canned` | `canned` 使用固定文本回复；`model` 请 `reply_model` 生成一句简短回复，只发送最后几条消息。 |
+| `reply_model` | — | 用于 `reply: model` 的低价聊天模型，例如 `openai/gpt-4o-mini`。 |
+| `cache_policy` | `cold_only` | `always` 无论缓存冷热都回复每条礼貌消息。 |
+| `cache_ttl` | `auto` | 提供商保留缓存的时长，例如 `5m` 或 `1h`。`auto` 从请求中读取。 |
+| `unknown_cache` | `cold` | 如何处理网关未观察过的对话。 |
+| `min_context_tokens` | `2000` | 更小的对话始终发送给模型。 |
+| `reply_to_acknowledgments` | `false` | 同时回复“好的”“明白了”等确认语。 |
+
+完整列表（包括自定义回复文本、额外短语，以及用于识别内置列表之外表达的可选决策模型）可通过 `GET /admin/guardrails/types` 获取，也会显示在 Dashboard 中。
+
+礼貌回复包含在压缩授权中。没有该授权时，已配置的规则仍会加载，并放行所有请求。

@@ -206,6 +206,7 @@
                                 "pages": [
                                     "pro/overview",
                                     "pro/compression",
+                                    "pro/courtesy-replies",
                                     "pro/sso",
                                     "pro/saml",
                                     "pro/intelligent-routing",
@@ -393,6 +394,7 @@
                                 "pages": [
                                     "de/pro/overview",
                                     "de/pro/compression",
+                                    "de/pro/courtesy-replies",
                                     "de/pro/sso",
                                     "de/pro/saml",
                                     "de/pro/intelligent-routing",
@@ -572,6 +574,7 @@
                                 "pages": [
                                     "zh/pro/overview",
                                     "zh/pro/compression",
+                                    "zh/pro/courtesy-replies",
                                     "zh/pro/sso",
                                     "zh/pro/saml",
                                     "zh/pro/intelligent-routing",
@@ -751,6 +754,7 @@
                                 "pages": [
                                     "pl/pro/overview",
                                     "pl/pro/compression",
+                                    "pl/pro/courtesy-replies",
                                     "pl/pro/sso",
                                     "pl/pro/saml",
                                     "pl/pro/intelligent-routing",
