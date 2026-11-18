@@ -159,4 +159,4 @@ Jeśli dostaniesz `401 Unauthorized`, sprawdź, czy OpenClaw wysyła tę samą w
 - Jeśli GoModel działa w Dockerze, a OpenClaw nie, `http://localhost:8080` zwykle jest poprawnym adresem.
 - Jeśli oba działają w różnych kontenerach, użyj wspólnej sieci Dockera i nazwy hosta kontenera zamiast `localhost`.
 - Możesz udostępnić wiele modeli obsługiwanych przez GoModel, dodając kolejne wpisy w `models.providers.gomodel.models`.
-- GoModel jako AI gateway zapewnia też scentralizowane uwierzytelnianie, logi audytowe, analitykę użycia i abstrakcję providerów za jednym endpointem kompatybilnym z OpenAI.
+- GoModel jako AI gateway zapewnia też scentralizowane uwierzytelnianie, logi requestów, analitykę użycia i abstrakcję providerów za jednym endpointem kompatybilnym z OpenAI.

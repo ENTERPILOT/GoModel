@@ -1,5 +1,5 @@
 // Package storage provides shared database connections for all features.
-// This abstraction allows multiple features (audit logging, IAM, guardrails)
+// This abstraction allows multiple features (request logging, IAM, guardrails)
 // to share a single database connection.
 package storage
 

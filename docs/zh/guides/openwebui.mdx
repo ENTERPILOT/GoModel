@@ -1,13 +1,13 @@
 ---
 title: "GoModel 与 Open WebUI"
-description: "通过 GoModel 为 Open WebUI 提供一个连接即可访问所有提供商，并为每次对话获得审计日志、按用户的成本追踪和指标。"
+description: "通过 GoModel 为 Open WebUI 提供一个连接即可访问所有提供商，并为每次对话获得请求日志、按用户的成本追踪和指标。"
 icon: "messages-square"
 keywords: ["Open WebUI", "open-webui", "自托管聊天", "基础 URL", "OpenAI 连接", "按用户成本", "LLM 可观测性", "配置指南", "self-hosted chat", "base URL", "OpenAI connection", "per-user costs", "LLM observability", "setup guide"]
 ---
 
 ## 概览
 
-Open WebUI 是一个自托管的聊天 UI，但它本身无法告诉您每个用户的对话花了多少钱，也无法为模型流量保留审计记录。将其 OpenAI 连接指向 GoModel 即可解决这些问题：只需一个连接，每次对话都会被记录、计价，并归属到已登录的 Open WebUI 用户。同一个连接还会将 Anthropic、Gemini 以及 GoModel 中配置的所有其他提供商加入 Open WebUI 的模型选择器。
+Open WebUI 是一个自托管的聊天 UI，但它本身无法告诉您每个用户的对话花了多少钱，也无法为模型流量保留请求日志。将其 OpenAI 连接指向 GoModel 即可解决这些问题：只需一个连接，每次对话都会被记录、计价，并归属到已登录的 Open WebUI 用户。同一个连接还会将 Anthropic、Gemini 以及 GoModel 中配置的所有其他提供商加入 Open WebUI 的模型选择器。
 
 流程：
 
@@ -15,7 +15,7 @@ Open WebUI 是一个自托管的聊天 UI，但它本身无法告诉您每个用
 
 您将获得：
 
-- GoModel 审计日志中每次对话的完整请求体和响应体。
+- GoModel 请求日志中每次对话的完整请求体和响应体。
 - 通过转发的用户请求头和[标签](/zh/features/labelling)，获得每个 Open WebUI 用户的成本。
 - 所有提供商都位于同一个 OpenAI 连接之后；无需在 Open WebUI 中逐个配置提供商。
 - 启用相应的导出器后，可获得聊天流量的 Prometheus 指标和 OpenTelemetry Trace（参见[注意事项](#注意事项)）。
@@ -77,7 +77,7 @@ volumes:
 ## 2. 开始对话，并在 GoModel 中查看每次调用
 
 选择任意模型——`openai/gpt-5-mini`、`anthropic/claude-haiku-4-5-20251001`、
-`gemini/gemini-2.5-flash`——开始对话。流式响应，以及 Open WebUI 在每次对话后执行的标题和标签生成，都会经过 GoModel。每次调用都会出现在审计日志中，包含完整的提示词、响应、Token 数、成本以及标识用户的请求头。
+`gemini/gemini-2.5-flash`——开始对话。流式响应，以及 Open WebUI 在每次对话后执行的标题和标签生成，都会经过 GoModel。每次调用都会出现在请求日志中，包含完整的提示词、响应、Token 数、成本以及标识用户的请求头。
 
 <Note>
   已在 Open WebUI 0.11.3 上验证：模型列表、流式和非流式对话、标题生成以及按用户的标签，测试对象为通过 GoModel 路由的 OpenAI、Anthropic 和
@@ -103,7 +103,7 @@ GoModel 可能公开数百个模型，而 Open WebUI 会将它们全部列出。
 
 ### 选择低成本的任务模型
 
-每次对话后，Open WebUI 默认使用与对话相同的模型生成标题和标签——每次会话会额外消耗数百个提示词 Token，现在您可以在审计日志中看到这些明细。在
+每次对话后，Open WebUI 默认使用与对话相同的模型生成标题和标签——每次会话会额外消耗数百个提示词 Token，现在您可以在请求日志中看到这些明细。在
 `Admin Panel -> Settings -> Interface` 下将一个小模型（例如 `openai/gpt-5-mini`）设置为任务模型，即可降低这部分开销。任务调用同样经过 GoModel，因此也会被记录和计价。
 
 ## 嵌入与 RAG

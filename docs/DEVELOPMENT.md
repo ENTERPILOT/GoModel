@@ -40,7 +40,7 @@ The contract replay suite and its golden files are described in `tests/contract/
 
 ### Store suites on every backend
 
-Every persistence domain (usage, audit log, budgets, rate limits, auth keys,
+Every persistence domain (usage, request log, budgets, rate limits, auth keys,
 workflows, ...) ships a SQL store and a MongoDB store. Their unit suites are
 written once against the domain's `Store` interface and run on each backend
 that is reachable:

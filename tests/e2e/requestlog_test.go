@@ -1,0 +1,948 @@
+//go:build e2e
+
+package e2e
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net"
+	"net/http"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/requestlog"
+	"github.com/enterpilot/gomodel/internal/server"
+)
+
+// mockLogStore is an in-memory log store for testing
+type mockLogStore struct {
+	mu      sync.Mutex
+	entries []*requestlog.LogEntry
+}
+
+func newMockLogStore() *mockLogStore {
+	return &mockLogStore{
+		entries: make([]*requestlog.LogEntry, 0),
+	}
+}
+
+func (m *mockLogStore) WriteBatch(_ context.Context, entries []*requestlog.LogEntry) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.entries = append(m.entries, entries...)
+	return nil
+}
+
+func (m *mockLogStore) Flush(_ context.Context) error {
+	return nil
+}
+
+func (m *mockLogStore) Close() error {
+	return nil
+}
+
+func (m *mockLogStore) GetEntries() []*requestlog.LogEntry {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// Return a copy to avoid race conditions
+	result := make([]*requestlog.LogEntry, len(m.entries))
+	copy(result, m.entries)
+	return result
+}
+
+// GetAPIEntries returns only entries for API paths (excludes health checks)
+func (m *mockLogStore) GetAPIEntries() []*requestlog.LogEntry {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var result []*requestlog.LogEntry
+	for _, entry := range m.entries {
+		if entry.Path != "/health" {
+			result = append(result, entry)
+		}
+	}
+	return result
+}
+
+func (m *mockLogStore) WaitForEntries(count int, timeout time.Duration) []*requestlog.LogEntry {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		entries := m.GetEntries()
+		if len(entries) >= count {
+			return entries
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return m.GetEntries()
+}
+
+// WaitForAPIEntries waits for API entries (excludes health checks)
+func (m *mockLogStore) WaitForAPIEntries(count int, timeout time.Duration) []*requestlog.LogEntry {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		entries := m.GetAPIEntries()
+		if len(entries) >= count {
+			return entries
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return m.GetAPIEntries()
+}
+
+// setupRequestLogTestServer creates a test server with request logging enabled
+// serverOption adjusts the server configuration a request log test runs
+// against, for behavior that is decided outside the request logger.
+type serverOption func(*server.Config)
+
+func setupRequestLogTestServer(t *testing.T, cfg requestlog.Config, store *mockLogStore, opts ...serverOption) (string, func()) {
+	t.Helper()
+
+	// Reserve a loopback listener up front so the port cannot be stolen before
+	// the server starts accepting connections.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	// Create test provider and registry
+	testProvider := NewTestProvider(mockLLMURL, "sk-test-key-12345")
+	registry := providers.NewModelRegistry()
+	registry.RegisterProvider(testProvider)
+
+	ctx := context.Background()
+	require.NoError(t, registry.Initialize(ctx))
+
+	router, err := providers.NewRouter(registry)
+	require.NoError(t, err)
+
+	// Create logger with the mock store
+	logger := requestlog.NewLogger(store, cfg)
+
+	// Create server with request logging
+	serverCfg := &server.Config{RequestLogger: logger}
+	for _, opt := range opts {
+		opt(serverCfg)
+	}
+	srv := server.New(router, serverCfg)
+
+	// Start server (bind to loopback only)
+	serverURL := "http://" + listener.Addr().String()
+	serverCtx, cancel := context.WithCancel(context.Background())
+	serverDone := make(chan error, 1)
+	go func() {
+		serverDone <- srv.StartWithListener(serverCtx, listener)
+	}()
+
+	// Wait for server to be ready
+	client := &http.Client{Timeout: 2 * time.Second}
+	for range 30 {
+		resp, err := client.Get(serverURL + "/health")
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				break
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	cleanup := func() {
+		// These tests issue requests through the shared default client, whose
+		// keep-alive connections outlive each request. Graceful shutdown waits
+		// for them up to server.GracefulDrainTimeout (10s), which is longer
+		// than the 5s budget below, so leaving them open makes shutdown look
+		// like a hang. Releasing them first lets the drain finish at once.
+		http.DefaultClient.CloseIdleConnections()
+		cancel()
+		select {
+		case err := <-serverDone:
+			require.NoError(t, err)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("server shutdown timed out")
+		}
+		require.NoError(t, logger.Close())
+	}
+
+	return serverURL, cleanup
+}
+
+func TestRequestLogMiddleware(t *testing.T) {
+	t.Run("captures basic request metadata", func(t *testing.T) {
+		store := newMockLogStore()
+		cfg := requestlog.Config{
+			Enabled:       true,
+			LogBodies:     false,
+			LogHeaders:    false,
+			BufferSize:    100,
+			FlushInterval: 100 * time.Millisecond,
+		}
+
+		serverURL, cleanup := setupRequestLogTestServer(t, cfg, store)
+		defer cleanup()
+
+		// Make a request
+		payload := defaultChatReq("Hello")
+		body, _ := json.Marshal(payload)
+		resp, err := http.Post(serverURL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
+		require.NoError(t, err)
+		defer closeBody(resp)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+
+		// Wait for log entry to be written
+		entries := store.WaitForAPIEntries(1, 2*time.Second)
+		require.Len(t, entries, 1, "Expected 1 log entry")
+
+		entry := entries[0]
+		assert.NotEmpty(t, entry.ID)
+		assert.NotZero(t, entry.Timestamp)
+		assert.Positive(t, entry.DurationNs)
+		assert.Equal(t, http.StatusOK, entry.StatusCode)
+		assert.Equal(t, "POST", entry.Method)
+		assert.Equal(t, "/v1/chat/completions", entry.Path)
+		assert.NotEmpty(t, entry.RequestID)
+	})
+
+	t.Run("captures request and response bodies when enabled", func(t *testing.T) {
+		store := newMockLogStore()
+		cfg := requestlog.Config{
+			Enabled:       true,
+			LogBodies:     true,
+			LogHeaders:    false,
+			BufferSize:    100,
+			FlushInterval: 100 * time.Millisecond,
+		}
+
+		serverURL, cleanup := setupRequestLogTestServer(t, cfg, store)
+		defer cleanup()
+
+		// Make a request
+		payload := defaultChatReq("Test message")
+		body, _ := json.Marshal(payload)
+		resp, err := http.Post(serverURL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
+		require.NoError(t, err)
+		defer closeBody(resp)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+
+		// Wait for log entry
+		entries := store.WaitForAPIEntries(1, 2*time.Second)
+		require.Len(t, entries, 1)
+
+		entry := entries[0]
+		require.NotNil(t, entry.Data.RequestBody)
+		require.NotNil(t, entry.Data.ResponseBody)
+
+		// In-memory entries hold the raw JSON; decode it to inspect fields.
+		reqBody, ok := requestlog.BodyDocument(entry.Data.RequestBody).(map[string]any)
+		require.True(t, ok, "RequestBody should be a JSON object, got %T", entry.Data.RequestBody)
+		assert.Equal(t, "gpt-4", reqBody["model"])
+
+		// Verify response body captured the upstream chat completion payload, not
+		// just an empty marker — a regression that stored {} but non-nil would
+		// otherwise slip past a NotNil-only check.
+		respBody, ok := requestlog.BodyDocument(entry.Data.ResponseBody).(map[string]any)
+		require.True(t, ok, "ResponseBody should be a JSON object, got %T", entry.Data.ResponseBody)
+		assert.Equal(t, "chat.completion", respBody["object"])
+		assert.Equal(t, "gpt-4", respBody["model"])
+		assert.NotEmpty(t, respBody["id"], "response id should be captured")
+		choices, ok := respBody["choices"].([]any)
+		require.True(t, ok, "choices should be an array, got %T", respBody["choices"])
+		require.NotEmpty(t, choices)
+		choice0, ok := choices[0].(map[string]any)
+		require.True(t, ok)
+		msg, ok := choice0["message"].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "assistant", msg["role"])
+		content, ok := msg["content"].(string)
+		require.True(t, ok, "message.content should be a string, got %T", msg["content"])
+		assert.Contains(t, content, "Test message", "captured response body should echo our input via the mock")
+	})
+
+	t.Run("captures headers with redaction when enabled", func(t *testing.T) {
+		store := newMockLogStore()
+		cfg := requestlog.Config{
+			Enabled:       true,
+			LogBodies:     false,
+			LogHeaders:    true,
+			BufferSize:    100,
+			FlushInterval: 100 * time.Millisecond,
+		}
+
+		serverURL, cleanup := setupRequestLogTestServer(t, cfg, store)
+		defer cleanup()
+
+		// Make a request with Authorization header
+		payload := defaultChatReq("Hello")
+		body, _ := json.Marshal(payload)
+		req, _ := http.NewRequest("POST", serverURL+"/v1/chat/completions", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer sk-secret-key-12345")
+		req.Header.Set("X-Custom-Header", "custom-value")
+
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		defer closeBody(resp)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+
+		// Wait for log entry
+		entries := store.WaitForAPIEntries(1, 2*time.Second)
+		require.Len(t, entries, 1)
+
+		entry := entries[0]
+		assert.NotNil(t, entry.Data.RequestHeaders)
+
+		// Authorization header should be redacted
+		assert.Equal(t, "[REDACTED]", entry.Data.RequestHeaders["Authorization"])
+
+		// Custom header should not be redacted
+		assert.Equal(t, "custom-value", entry.Data.RequestHeaders["X-Custom-Header"])
+	})
+
+	t.Run("does not log when disabled", func(t *testing.T) {
+		store := newMockLogStore()
+		cfg := requestlog.Config{
+			Enabled:       false, // Disabled
+			LogBodies:     true,
+			LogHeaders:    true,
+			BufferSize:    100,
+			FlushInterval: 100 * time.Millisecond,
+		}
+
+		serverURL, cleanup := setupRequestLogTestServer(t, cfg, store)
+		defer cleanup()
+
+		// Make a request
+		payload := defaultChatReq("Hello")
+		body, _ := json.Marshal(payload)
+		resp, err := http.Post(serverURL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
+		require.NoError(t, err)
+		defer closeBody(resp)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+
+		// Wait a bit and verify no API entries were logged
+		time.Sleep(500 * time.Millisecond)
+		entries := store.GetAPIEntries()
+		assert.Empty(t, entries, "Expected no API log entries when logging is disabled")
+	})
+
+	t.Run("hashes API key for identification", func(t *testing.T) {
+		store := newMockLogStore()
+		cfg := requestlog.Config{
+			Enabled:       true,
+			LogBodies:     false,
+			LogHeaders:    false,
+			BufferSize:    100,
+			FlushInterval: 100 * time.Millisecond,
+			// The hash is keyed; without the deployment secret it is left out.
+			APIKeyHashSecret: "e2e-deployment-secret",
+		}
+
+		serverURL, cleanup := setupRequestLogTestServer(t, cfg, store)
+		defer cleanup()
+
+		// Make a request with Authorization header
+		payload := defaultChatReq("Hello")
+		body, _ := json.Marshal(payload)
+		req, _ := http.NewRequest("POST", serverURL+"/v1/chat/completions", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer sk-test-api-key")
+
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		defer closeBody(resp)
+
+		// Wait for log entry
+		entries := store.WaitForAPIEntries(1, 2*time.Second)
+		require.Len(t, entries, 1)
+
+		entry := entries[0]
+		// API key hash should be present (16 chars of keyed SHA256 for 64 bits of entropy)
+		assert.NotEmpty(t, entry.Data.APIKeyHash)
+		assert.Len(t, entry.Data.APIKeyHash, 16)
+		// Hash should NOT contain the actual key
+		assert.NotContains(t, entry.Data.APIKeyHash, "sk-test")
+	})
+}
+
+func TestRequestLogStreaming(t *testing.T) {
+	t.Run("logs streaming requests", func(t *testing.T) {
+		store := newMockLogStore()
+		cfg := requestlog.Config{
+			Enabled:       true,
+			LogBodies:     false,
+			LogHeaders:    false,
+			BufferSize:    100,
+			FlushInterval: 100 * time.Millisecond,
+		}
+
+		serverURL, cleanup := setupRequestLogTestServer(t, cfg, store)
+		defer cleanup()
+
+		// Make a streaming request
+		payload := defaultChatReq("Count to 3")
+		payload.Stream = true
+		body, _ := json.Marshal(payload)
+		resp, err := http.Post(serverURL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
+		require.NoError(t, err)
+		defer closeBody(resp)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+
+		// Read the stream to completion
+		_ = readStreamingResponse(t, resp.Body)
+
+		// Wait for log entry
+		entries := store.WaitForAPIEntries(1, 2*time.Second)
+		require.Len(t, entries, 1)
+
+		entry := entries[0]
+		assert.Equal(t, http.StatusOK, entry.StatusCode)
+		assert.Equal(t, "/v1/chat/completions", entry.Path)
+	})
+
+	t.Run("captures response headers for streaming requests", func(t *testing.T) {
+		store := newMockLogStore()
+		cfg := requestlog.Config{
+			Enabled:       true,
+			LogBodies:     false,
+			LogHeaders:    true, // Enable header logging
+			BufferSize:    100,
+			FlushInterval: 100 * time.Millisecond,
+		}
+
+		serverURL, cleanup := setupRequestLogTestServer(t, cfg, store)
+		defer cleanup()
+
+		// Make a streaming request
+		payload := defaultChatReq("Hello")
+		payload.Stream = true
+		body, _ := json.Marshal(payload)
+		resp, err := http.Post(serverURL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
+		require.NoError(t, err)
+		defer closeBody(resp)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+
+		// Read the stream to completion
+		_ = readStreamingResponse(t, resp.Body)
+
+		// Wait for log entry
+		entries := store.WaitForAPIEntries(1, 2*time.Second)
+		require.Len(t, entries, 1)
+
+		entry := entries[0]
+
+		// Verify request headers are captured
+		assert.NotNil(t, entry.Data.RequestHeaders)
+		assert.Equal(t, "application/json", entry.Data.RequestHeaders["Content-Type"])
+
+		// Verify response headers are captured for streaming
+		assert.NotNil(t, entry.Data.ResponseHeaders, "ResponseHeaders should be captured for streaming requests")
+		assert.Equal(t, "text/event-stream", entry.Data.ResponseHeaders["Content-Type"])
+		assert.Equal(t, "no-cache", entry.Data.ResponseHeaders["Cache-Control"])
+		assert.Equal(t, "keep-alive", entry.Data.ResponseHeaders["Connection"])
+	})
+
+	t.Run("captures duration for streaming requests", func(t *testing.T) {
+		store := newMockLogStore()
+		cfg := requestlog.Config{
+			Enabled:       true,
+			LogBodies:     false,
+			LogHeaders:    false,
+			BufferSize:    100,
+			FlushInterval: 100 * time.Millisecond,
+		}
+
+		serverURL, cleanup := setupRequestLogTestServer(t, cfg, store)
+		defer cleanup()
+
+		// Make a streaming request
+		payload := defaultChatReq("Hello")
+		payload.Stream = true
+		body, _ := json.Marshal(payload)
+		resp, err := http.Post(serverURL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
+		require.NoError(t, err)
+		defer closeBody(resp)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+
+		// Read the stream to completion
+		_ = readStreamingResponse(t, resp.Body)
+
+		// Wait for log entry
+		entries := store.WaitForAPIEntries(1, 2*time.Second)
+		require.Len(t, entries, 1)
+
+		entry := entries[0]
+
+		// Verify duration is captured (should be > 0 since streaming takes time)
+		assert.Positive(t, entry.DurationNs, "DurationNs should be captured for streaming requests")
+		// Duration should be reasonable (less than 10 seconds for this test)
+		assert.Less(t, entry.DurationNs, int64(10*time.Second), "DurationNs should be reasonable")
+	})
+}
+
+func TestRequestLogConcurrency(t *testing.T) {
+	t.Run("handles concurrent requests", func(t *testing.T) {
+		store := newMockLogStore()
+		cfg := requestlog.Config{
+			Enabled:       true,
+			LogBodies:     false,
+			LogHeaders:    false,
+			BufferSize:    1000,
+			FlushInterval: 100 * time.Millisecond,
+		}
+
+		serverURL, cleanup := setupRequestLogTestServer(t, cfg, store)
+		defer cleanup()
+
+		const numRequests = 20
+		type result struct {
+			statusCode int
+			err        error
+		}
+
+		var wg sync.WaitGroup
+		wg.Add(numRequests)
+		results := make(chan result, numRequests)
+
+		for i := range numRequests {
+			go func(idx int) {
+				defer wg.Done()
+				payload := defaultChatReq(fmt.Sprintf("Request %d", idx))
+				body, _ := json.Marshal(payload)
+				resp, err := http.Post(serverURL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
+				if err != nil {
+					results <- result{err: fmt.Errorf("request %d failed: %w", idx, err)}
+					return
+				}
+				results <- result{statusCode: resp.StatusCode}
+				closeBody(resp)
+			}(i)
+		}
+
+		wg.Wait()
+		close(results)
+
+		var requestErrors []error
+		statusCounts := make(map[int]int)
+		for r := range results {
+			if r.err != nil {
+				requestErrors = append(requestErrors, r.err)
+				continue
+			}
+			statusCounts[r.statusCode]++
+		}
+		require.Empty(t, requestErrors)
+		assert.Equal(t, numRequests, statusCounts[http.StatusOK], "all concurrent requests should return 200; status counts: %v", statusCounts)
+
+		// Wait for all log entries
+		entries := store.WaitForAPIEntries(numRequests, 5*time.Second)
+		assert.Len(t, entries, numRequests, "Expected all requests to be logged")
+		// Verify all entries have unique IDs
+		ids := make(map[string]bool)
+		for _, entry := range entries {
+			assert.NotEmpty(t, entry.ID)
+			assert.False(t, ids[entry.ID], "Duplicate entry ID found")
+			ids[entry.ID] = true
+		}
+	})
+}
+
+func TestRequestLogHeaderRedaction(t *testing.T) {
+	// Test that all sensitive headers are properly redacted
+	sensitiveHeaders := []string{
+		"Authorization",
+		"X-Api-Key",
+		"Cookie",
+		"X-Auth-Token",
+		"X-Access-Token",
+		"Proxy-Authorization",
+		"X-Gomodel-Key",
+	}
+
+	for _, header := range sensitiveHeaders {
+		t.Run(fmt.Sprintf("redacts %s header", header), func(t *testing.T) {
+			store := newMockLogStore()
+			cfg := requestlog.Config{
+				Enabled:       true,
+				LogBodies:     false,
+				LogHeaders:    true,
+				BufferSize:    100,
+				FlushInterval: 100 * time.Millisecond,
+			}
+
+			serverURL, cleanup := setupRequestLogTestServer(t, cfg, store)
+			defer cleanup()
+
+			payload := defaultChatReq("Hello")
+			body, _ := json.Marshal(payload)
+			req, _ := http.NewRequest("POST", serverURL+"/v1/chat/completions", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set(header, "sensitive-secret-value")
+
+			client := &http.Client{}
+			resp, err := client.Do(req)
+			require.NoError(t, err)
+			defer closeBody(resp)
+
+			entries := store.WaitForAPIEntries(1, 2*time.Second)
+			require.Len(t, entries, 1)
+
+			entry := entries[0]
+			require.NotNil(t, entry.Data.RequestHeaders)
+
+			// The header should be redacted
+			assert.Equal(t, "[REDACTED]", entry.Data.RequestHeaders[header],
+				"Header %s should be redacted", header)
+		})
+	}
+}
+
+func TestRequestLogErrorCapture(t *testing.T) {
+	t.Run("logs failed requests", func(t *testing.T) {
+		store := newMockLogStore()
+		cfg := requestlog.Config{
+			Enabled:       true,
+			LogBodies:     true,
+			LogHeaders:    false,
+			BufferSize:    100,
+			FlushInterval: 100 * time.Millisecond,
+		}
+
+		serverURL, cleanup := setupRequestLogTestServer(t, cfg, store)
+		defer cleanup()
+
+		// Make a request with an unsupported model
+		payload := core.ChatRequest{
+			Model: "unsupported-model-xyz",
+			Messages: []core.Message{
+				{Role: "user", Content: "Hello"},
+			},
+		}
+		body, _ := json.Marshal(payload)
+		resp, err := http.Post(serverURL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
+		require.NoError(t, err)
+		defer closeBody(resp)
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+
+		// Wait for log entry
+		entries := store.WaitForAPIEntries(1, 2*time.Second)
+		require.Len(t, entries, 1)
+
+		entry := entries[0]
+		assert.Equal(t, http.StatusNotFound, entry.StatusCode)
+		assert.Equal(t, "/v1/chat/completions", entry.Path)
+		assert.Equal(t, "unsupported-model-xyz", entry.RequestedModel)
+		assert.Equal(t, "not_found_error", entry.ErrorType)
+		assert.Empty(t, entry.Provider)
+	})
+
+	t.Run("logs unsupported passthrough provider requests", func(t *testing.T) {
+		store := newMockLogStore()
+		cfg := requestlog.Config{
+			Enabled:       true,
+			LogBodies:     true,
+			LogHeaders:    false,
+			BufferSize:    100,
+			FlushInterval: 100 * time.Millisecond,
+		}
+
+		serverURL, cleanup := setupRequestLogTestServer(t, cfg, store)
+		defer cleanup()
+
+		payload := map[string]any{
+			"model": "gpt-4.1-nano",
+			"input": "Reply with exactly QA_INVALID_PROVIDER",
+		}
+		body, _ := json.Marshal(payload)
+		resp, err := http.Post(serverURL+"/p/unknown/responses", "application/json", bytes.NewReader(body))
+		require.NoError(t, err)
+		defer closeBody(resp)
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+
+		entries := store.WaitForAPIEntries(1, 2*time.Second)
+		require.Len(t, entries, 1)
+
+		entry := entries[0]
+		assert.Equal(t, http.StatusBadRequest, entry.StatusCode)
+		assert.Equal(t, "/p/unknown/responses", entry.Path)
+		assert.Equal(t, "gpt-4.1-nano", entry.RequestedModel)
+		assert.Equal(t, "unknown", entry.Provider)
+		assert.Equal(t, "invalid_request_error", entry.ErrorType)
+	})
+
+	t.Run("logs 405 for wrong HTTP method", func(t *testing.T) {
+		store := newMockLogStore()
+		cfg := requestlog.Config{
+			Enabled:       true,
+			LogBodies:     false,
+			LogHeaders:    false,
+			BufferSize:    100,
+			FlushInterval: 100 * time.Millisecond,
+		}
+
+		serverURL, cleanup := setupRequestLogTestServer(t, cfg, store)
+		defer cleanup()
+
+		// Send GET to a POST-only endpoint
+		resp, err := http.Get(serverURL + "/v1/chat/completions")
+		require.NoError(t, err)
+		defer closeBody(resp)
+		assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
+
+		// Wait for log entry
+		entries := store.WaitForAPIEntries(1, 2*time.Second)
+		require.Len(t, entries, 1)
+
+		entry := entries[0]
+		assert.Equal(t, http.StatusMethodNotAllowed, entry.StatusCode)
+		assert.Equal(t, "GET", entry.Method)
+		assert.Equal(t, "/v1/chat/completions", entry.Path)
+	})
+
+	t.Run("logs invalid JSON requests", func(t *testing.T) {
+		store := newMockLogStore()
+		cfg := requestlog.Config{
+			Enabled:       true,
+			LogBodies:     true,
+			LogHeaders:    false,
+			BufferSize:    100,
+			FlushInterval: 100 * time.Millisecond,
+		}
+
+		serverURL, cleanup := setupRequestLogTestServer(t, cfg, store)
+		defer cleanup()
+
+		// Send invalid JSON
+		resp, err := http.Post(serverURL+"/v1/chat/completions", "application/json",
+			bytes.NewReader([]byte(`{"model": "gpt-4", invalid json}`)))
+		require.NoError(t, err)
+		defer closeBody(resp)
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+
+		// Wait for log entry
+		entries := store.WaitForAPIEntries(1, 2*time.Second)
+		require.Len(t, entries, 1)
+
+		entry := entries[0]
+		assert.Equal(t, http.StatusBadRequest, entry.StatusCode)
+	})
+}
+
+func TestRequestLogOnlyModelInteractions(t *testing.T) {
+	t.Run("logs model endpoints when OnlyModelInteractions enabled", func(t *testing.T) {
+		store := newMockLogStore()
+		cfg := requestlog.Config{
+			Enabled:               true,
+			LogBodies:             false,
+			LogHeaders:            false,
+			BufferSize:            100,
+			FlushInterval:         100 * time.Millisecond,
+			OnlyModelInteractions: true,
+		}
+
+		serverURL, cleanup := setupRequestLogTestServer(t, cfg, store)
+		defer cleanup()
+
+		// Make a request to a model endpoint
+		payload := defaultChatReq("Hello")
+		body, _ := json.Marshal(payload)
+		resp, err := http.Post(serverURL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
+		require.NoError(t, err)
+		defer closeBody(resp)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+
+		// Wait for log entry to be written
+		entries := store.WaitForEntries(1, 2*time.Second)
+		require.Len(t, entries, 1, "Expected 1 log entry for model endpoint")
+
+		entry := entries[0]
+		assert.Equal(t, "/v1/chat/completions", entry.Path)
+	})
+
+	t.Run("skips health endpoint when OnlyModelInteractions enabled", func(t *testing.T) {
+		store := newMockLogStore()
+		cfg := requestlog.Config{
+			Enabled:               true,
+			LogBodies:             false,
+			LogHeaders:            false,
+			BufferSize:            100,
+			FlushInterval:         100 * time.Millisecond,
+			OnlyModelInteractions: true,
+		}
+
+		serverURL, cleanup := setupRequestLogTestServer(t, cfg, store)
+		defer cleanup()
+
+		// Make multiple requests to health endpoint
+		for range 3 {
+			resp, err := http.Get(serverURL + "/health")
+			require.NoError(t, err)
+			closeBody(resp)
+		}
+
+		// Wait a bit and check that NO entries were logged
+		time.Sleep(500 * time.Millisecond)
+		entries := store.GetEntries()
+		assert.Empty(t, entries, "Expected no log entries for health endpoint when OnlyModelInteractions=true")
+	})
+
+	t.Run("logs health endpoint when OnlyModelInteractions disabled", func(t *testing.T) {
+		store := newMockLogStore()
+		cfg := requestlog.Config{
+			Enabled:               true,
+			LogBodies:             false,
+			LogHeaders:            false,
+			BufferSize:            100,
+			FlushInterval:         100 * time.Millisecond,
+			OnlyModelInteractions: false,
+		}
+
+		serverURL, cleanup := setupRequestLogTestServer(t, cfg, store)
+		defer cleanup()
+
+		// Note: setupRequestLogTestServer makes health check calls during startup
+		// so we may already have entries. Count before making our request.
+		time.Sleep(200 * time.Millisecond) // Wait for any buffered entries to flush
+		entriesBefore := len(store.GetEntries())
+
+		// Make requests to health endpoint
+		resp, err := http.Get(serverURL + "/health")
+		require.NoError(t, err)
+		closeBody(resp)
+
+		// Wait for log entry to be written (at least 1 more than before)
+		entries := store.WaitForEntries(entriesBefore+1, 2*time.Second)
+		require.Greater(t, len(entries), entriesBefore, "Expected new log entry for health endpoint when OnlyModelInteractions=false")
+
+		// The last entry should be our health request
+		lastEntry := entries[len(entries)-1]
+		assert.Equal(t, "/health", lastEntry.Path)
+	})
+
+	t.Run("filters mixed requests correctly", func(t *testing.T) {
+		store := newMockLogStore()
+		cfg := requestlog.Config{
+			Enabled:               true,
+			LogBodies:             false,
+			LogHeaders:            false,
+			BufferSize:            100,
+			FlushInterval:         100 * time.Millisecond,
+			OnlyModelInteractions: true,
+		}
+
+		serverURL, cleanup := setupRequestLogTestServer(t, cfg, store)
+		defer cleanup()
+
+		// Make multiple health requests (should not be logged)
+		for range 5 {
+			resp, err := http.Get(serverURL + "/health")
+			require.NoError(t, err)
+			closeBody(resp)
+		}
+
+		// Make a model request (should be logged)
+		payload := defaultChatReq("Hello")
+		body, _ := json.Marshal(payload)
+		resp, err := http.Post(serverURL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
+		require.NoError(t, err)
+		closeBody(resp)
+
+		// Make more health requests (should not be logged)
+		for range 3 {
+			resp, err := http.Get(serverURL + "/health")
+			require.NoError(t, err)
+			closeBody(resp)
+		}
+
+		// Wait for log entry to be written
+		entries := store.WaitForEntries(1, 2*time.Second)
+
+		// Should only have the model endpoint logged
+		require.Len(t, entries, 1, "Expected only 1 log entry (model endpoint)")
+		assert.Equal(t, "/v1/chat/completions", entries[0].Path)
+	})
+}
+
+// TestRequestLogClientIP checks that request log entries keep recording the
+// connection address by default, and record the forwarded client instead once
+// the gateway's own proxy network is listed as trusted.
+func TestRequestLogClientIP(t *testing.T) {
+	tests := []struct {
+		name    string
+		proxies []string
+		header  string
+		headers map[string]string
+		wantIP  string
+	}{
+		{
+			name:    "records the connection address when no proxies are trusted",
+			headers: map[string]string{"X-Forwarded-For": "198.51.100.23"},
+			wantIP:  "127.0.0.1",
+		},
+		{
+			name:    "records the forwarded client behind a trusted proxy network",
+			proxies: []string{"127.0.0.0/8"},
+			headers: map[string]string{"X-Forwarded-For": "203.0.113.9, 198.51.100.23"},
+			wantIP:  "198.51.100.23",
+		},
+		{
+			name:    "the loopback preset covers a proxy on the gateway host",
+			proxies: []string{"loopback"},
+			headers: map[string]string{"X-Forwarded-For": "198.51.100.23"},
+			wantIP:  "198.51.100.23",
+		},
+		{
+			name:    "a configured single-address header wins over the chain",
+			proxies: []string{"loopback"},
+			header:  "X-Real-IP",
+			headers: map[string]string{
+				"X-Real-IP":       "198.51.100.23",
+				"X-Forwarded-For": "203.0.113.9",
+			},
+			wantIP: "198.51.100.23",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			serverCfg := config.ServerConfig{TrustedProxies: tt.proxies, ClientIPHeader: tt.header}
+			require.NoError(t, config.ResolveClientIPPolicy(&serverCfg))
+
+			store := newMockLogStore()
+			cfg := requestlog.Config{
+				Enabled:               true,
+				BufferSize:            100,
+				FlushInterval:         100 * time.Millisecond,
+				OnlyModelInteractions: true,
+			}
+
+			serverURL, cleanup := setupRequestLogTestServer(t, cfg, store, func(c *server.Config) {
+				c.IPExtractor = server.ClientIPExtractor(serverCfg.ClientIP)
+			})
+			defer cleanup()
+
+			body, err := json.Marshal(defaultChatReq("Hello"))
+			require.NoError(t, err)
+			req, err := http.NewRequest(http.MethodPost, serverURL+"/v1/chat/completions", bytes.NewReader(body))
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", "application/json")
+			for name, value := range tt.headers {
+				req.Header.Set(name, value)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			defer closeBody(resp)
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+
+			entries := store.WaitForAPIEntries(1, 2*time.Second)
+			require.Len(t, entries, 1)
+			assert.Equal(t, tt.wantIP, entries[0].ClientIP)
+		})
+	}
+}

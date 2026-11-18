@@ -22,7 +22,7 @@ server:
   enable_passthrough_routes: true # expose /p/{provider}/{endpoint} passthrough routes
   allow_passthrough_v1_alias: true # allow /p/{provider}/v1/... while keeping /p/{provider}/... canonical
   user_path_header: "X-GoModel-User-Path" # env: USER_PATH_HEADER; inbound header used for user_path scoping
-  enabled_passthrough_providers: ["openai", "anthropic", "cohere", "openrouter", "kilo", "zai", "sglang", "vllm", "llmd", "deepseek", "bailian"] # providers enabled on /p/{provider}/...
+  enabled_passthrough_providers: ["openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek", "hetzner", "edenai", "jev"] # env: ENABLED_PASSTHROUGH_PROVIDERS; providers enabled on /p/{provider}/... (default shown); others, such as cohere, audiocpp or bailian, are opt-in
   auth_verify_enabled: false # env: AUTH_VERIFY_ENABLED; expose GET /v1/auth/verify, which reports whether the API key a request carries authenticates against this gateway (401 when it does not; 200 with {"valid":false,"method":"none"} when the gateway has no authentication configured). Outside /admin, so it works with the admin API disabled
   realtime_enabled: true # env: REALTIME_ENABLED; expose the /v1/realtime and /v1/realtime/translations websockets, their calls/client_secrets siblings, and /p/{provider}/v1/realtime upgrades
   # Client address resolution. Leave trusted_proxies empty (default) and every
@@ -51,7 +51,7 @@ models:
   allowlist_upstream_metadata: true # env: ALLOWLIST_UPSTREAM_METADATA; in allowlist mode, read upstream /models only to fill in metadata for configured models (never adds models). false stops that call; GOMODEL_OFFLINE=true forces it off
 
 # Tagging based on headers: label every request from the listed headers. Labels
-# are recorded in usage tracking and audit logs. A header value can carry several
+# are recorded in usage tracking and request logs. A header value can carry several
 # labels split by `delimiter` (default: ","). `prefix` is trimmed from each
 # extracted label only — the header itself is forwarded unchanged unless
 # `do_not_pass: true`. An env entry replaces the whole YAML entry with the same
@@ -77,7 +77,7 @@ models:
 #   litellm_tags_enabled: true # env: LITELLM_TAGS_ENABLED
 
 # Session keeping: identify which requests belong to one client session, for
-# sticky virtual-model load balancing and audit-log session grouping. Everything
+# sticky virtual-model load balancing and request-log session grouping. Everything
 # below is the default — omit the section entirely for the same behavior. Extra
 # headers are merged over the built-in known-tools registry; the optional
 # transform "session-uuid" extracts a session_<uuid> value.
@@ -269,7 +269,7 @@ storage:
   # encryption_key: "${GOMODEL_ENCRYPTION_KEY}"
   # encryption_key_previous: "${GOMODEL_ENCRYPTION_KEY_PREVIOUS}" # only during a key rotation
 
-# Where media files go: audio and images captured for the audit log (see
+# Where media files go: audio and images captured for the request log (see
 # logging.log_audio_bodies / log_image_bodies). Metadata stays in storage
 # above; only the bytes are written here. Mount a volume at the path in
 # containers, or a shared mount (EFS, S3 FUSE) when running several replicas.
@@ -282,7 +282,7 @@ logging:
   enabled: true
   log_bodies: true # WARNING: may contain sensitive data
   log_revision_bodies: true # store rewritten bodies from request rewriters and prompt guardrails (needs log_bodies)
-  # log_guardrail_steps: true # one audit revision per editing prompt guardrail; false records the chain's edits as one revision
+  # log_guardrail_steps: true # one request log revision per editing prompt guardrail; false records the chain's edits as one revision
   # log_audio_bodies: false # embed audio bytes for /v1/audio/* entries (needs log_bodies)
   # log_image_bodies: false # embed image bytes for /v1/images/* entries (needs log_bodies)
   # log_image_bodies_scope: all # all | input | output
@@ -434,6 +434,7 @@ http:
   timeout: 600 # seconds (10 minutes)
   response_header_timeout: 600
   stream_idle_timeout: 300 # seconds of silence allowed mid-stream before a stalled stream fails; 0 disables
+  max_idle_conns_per_host: 512 # idle keep-alive connections per provider; raise for busy HTTP/1.1 backends (vLLM, Ollama)
   # Client TLS trust for the gateway's outbound HTTPS clients (providers, model
   # catalog, update check, MCP upstreams, vector stores). OTLP export and the
   # database and Redis drivers keep their own TLS settings. All optional; the
@@ -534,7 +535,7 @@ guardrails:
     # implement other LLM-based rewrites.
     # - name: "privacy-rewrite"
     #   type: "llm_based_altering"
-    #   user_path: "/team/privacy" # optional base path for internal rewrite calls and audit logs
+    #   user_path: "/team/privacy" # optional base path for internal rewrite calls and request logs
     #   order: 1
     #   timeout_ms: 20000
     #   llm_based_altering:

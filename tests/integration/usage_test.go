@@ -16,7 +16,7 @@ import (
 func TestUsage_CapturesAllFields_PostgreSQL(t *testing.T) {
 	fixture := SetupTestServer(t, TestServerConfig{
 		DBType:                "postgresql",
-		AuditLogEnabled:       false,
+		RequestLogEnabled:     false,
 		UsageEnabled:          true,
 		OnlyModelInteractions: false,
 	})
@@ -67,7 +67,7 @@ func TestUsage_CapturesAllFields_PostgreSQL(t *testing.T) {
 func TestUsage_CapturesAllFields_MongoDB(t *testing.T) {
 	fixture := SetupTestServer(t, TestServerConfig{
 		DBType:                "mongodb",
-		AuditLogEnabled:       false,
+		RequestLogEnabled:     false,
 		UsageEnabled:          true,
 		OnlyModelInteractions: false,
 	})
@@ -100,7 +100,7 @@ func TestUsage_CapturesAllFields_MongoDB(t *testing.T) {
 func TestUsage_ResponsesEndpoint_PostgreSQL(t *testing.T) {
 	fixture := SetupTestServer(t, TestServerConfig{
 		DBType:                "postgresql",
-		AuditLogEnabled:       false,
+		RequestLogEnabled:     false,
 		UsageEnabled:          true,
 		OnlyModelInteractions: false,
 	})
@@ -130,7 +130,7 @@ func TestUsage_ResponsesEndpoint_PostgreSQL(t *testing.T) {
 func TestUsage_MultipleRequests_PostgreSQL(t *testing.T) {
 	fixture := SetupTestServer(t, TestServerConfig{
 		DBType:                "postgresql",
-		AuditLogEnabled:       false,
+		RequestLogEnabled:     false,
 		UsageEnabled:          true,
 		OnlyModelInteractions: false,
 	})
@@ -165,7 +165,7 @@ func TestUsage_MultipleRequests_PostgreSQL(t *testing.T) {
 func TestUsage_TokenSummary_PostgreSQL(t *testing.T) {
 	fixture := SetupTestServer(t, TestServerConfig{
 		DBType:                "postgresql",
-		AuditLogEnabled:       false,
+		RequestLogEnabled:     false,
 		UsageEnabled:          true,
 		OnlyModelInteractions: false,
 	})
@@ -199,7 +199,7 @@ func TestUsage_TokenSummary_PostgreSQL(t *testing.T) {
 func TestUsage_ProviderID_PostgreSQL(t *testing.T) {
 	fixture := SetupTestServer(t, TestServerConfig{
 		DBType:                "postgresql",
-		AuditLogEnabled:       false,
+		RequestLogEnabled:     false,
 		UsageEnabled:          true,
 		OnlyModelInteractions: false,
 	})
@@ -222,10 +222,10 @@ func TestUsage_ProviderID_PostgreSQL(t *testing.T) {
 	assert.Equal(t, "chatcmpl-test123", entries[0].ProviderID, "expected provider ID from mock response")
 }
 
-func TestUsage_BothAuditAndUsage_PostgreSQL(t *testing.T) {
+func TestUsage_BothRequestLogAndUsage_PostgreSQL(t *testing.T) {
 	fixture := SetupTestServer(t, TestServerConfig{
 		DBType:                "postgresql",
-		AuditLogEnabled:       true,
+		RequestLogEnabled:     true,
 		UsageEnabled:          true,
 		LogBodies:             true,
 		OnlyModelInteractions: false,
@@ -243,21 +243,21 @@ func TestUsage_BothAuditAndUsage_PostgreSQL(t *testing.T) {
 	fixture.FlushAndClose(t)
 
 	// Both tables should have entries
-	auditEntries := dbassert.QueryAuditLogsByRequestID(t, fixture.PgPool, requestID)
-	require.Len(t, auditEntries, 1, "expected audit log entry")
+	requestLogEntries := dbassert.QueryRequestLogsByRequestID(t, fixture.PgPool, requestID)
+	require.Len(t, requestLogEntries, 1, "expected request log entry")
 
 	usageEntries := dbassert.QueryUsageByRequestID(t, fixture.PgPool, requestID)
 	require.Len(t, usageEntries, 1, "expected usage entry")
 
 	// They should share the same request ID
-	assert.Equal(t, requestID, auditEntries[0].RequestID)
+	assert.Equal(t, requestID, requestLogEntries[0].RequestID)
 	assert.Equal(t, requestID, usageEntries[0].RequestID)
 }
 
 func TestUsage_StreamingChatCompletion_PostgreSQL(t *testing.T) {
 	fixture := SetupTestServer(t, TestServerConfig{
 		DBType:                "postgresql",
-		AuditLogEnabled:       false,
+		RequestLogEnabled:     false,
 		UsageEnabled:          true,
 		OnlyModelInteractions: false,
 	})
@@ -308,7 +308,7 @@ func TestUsage_StreamingChatCompletion_PostgreSQL(t *testing.T) {
 func TestUsage_StreamingChatCompletion_MongoDB(t *testing.T) {
 	fixture := SetupTestServer(t, TestServerConfig{
 		DBType:                "mongodb",
-		AuditLogEnabled:       false,
+		RequestLogEnabled:     false,
 		UsageEnabled:          true,
 		OnlyModelInteractions: false,
 	})
@@ -346,7 +346,7 @@ func TestUsage_StreamingChatCompletion_MongoDB(t *testing.T) {
 func TestUsage_StreamingResponses_PostgreSQL(t *testing.T) {
 	fixture := SetupTestServer(t, TestServerConfig{
 		DBType:                "postgresql",
-		AuditLogEnabled:       false,
+		RequestLogEnabled:     false,
 		UsageEnabled:          true,
 		OnlyModelInteractions: false,
 	})
@@ -378,10 +378,10 @@ func TestUsage_StreamingResponses_PostgreSQL(t *testing.T) {
 	}, entries[0])
 }
 
-func TestUsage_StreamingBothAuditAndUsage_PostgreSQL(t *testing.T) {
+func TestUsage_StreamingBothRequestLogAndUsage_PostgreSQL(t *testing.T) {
 	fixture := SetupTestServer(t, TestServerConfig{
 		DBType:                "postgresql",
-		AuditLogEnabled:       true,
+		RequestLogEnabled:     true,
 		UsageEnabled:          true,
 		LogBodies:             true,
 		OnlyModelInteractions: false,
@@ -403,13 +403,13 @@ func TestUsage_StreamingBothAuditAndUsage_PostgreSQL(t *testing.T) {
 	fixture.FlushAndClose(t)
 
 	// Both tables should have entries for streaming request
-	auditEntries := dbassert.QueryAuditLogsByRequestID(t, fixture.PgPool, requestID)
-	require.Len(t, auditEntries, 1, "expected audit log entry for streaming")
+	requestLogEntries := dbassert.QueryRequestLogsByRequestID(t, fixture.PgPool, requestID)
+	require.Len(t, requestLogEntries, 1, "expected request log entry for streaming")
 
 	usageEntries := dbassert.QueryUsageByRequestID(t, fixture.PgPool, requestID)
 	require.Len(t, usageEntries, 1, "expected usage entry for streaming")
 
 	// They should share the same request ID
-	assert.Equal(t, requestID, auditEntries[0].RequestID)
+	assert.Equal(t, requestID, requestLogEntries[0].RequestID)
 	assert.Equal(t, requestID, usageEntries[0].RequestID)
 }

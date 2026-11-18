@@ -113,6 +113,12 @@ seine `id` als Stimme. Ein Objekt ohne `id` als String mit sichtbaren Zeichen li
 Ein kompatibler Provider ohne Unterstützung für eigene Stimmen kann das Objekt
 ablehnen.
 
+OpenAI akzeptiert eine eigene Stimme nur in der Objektform. Für OpenAI
+(`api.openai.com` und regionale Hosts) sendet GoModel deshalb einen String,
+der mit `voice_` beginnt, als `{"id": "voice_…"}`. So funktioniert eine `id`
+aus [Stimmen abfragen](/de/advanced/api-endpoints#stimmen-abfragen) auch als
+einfacher String.
+
 Synthetisiertes Audio wird **so weitergereicht, wie der Provider es erzeugt** –
 siehe [Streaming](/de/advanced/audio-api#streaming).
 
@@ -270,7 +276,7 @@ Transkriptionsoptionen, die es neu ausgibt – `language`, `prompt`,
 Alias ohne Klammern `timestamp_granularities`), und zusätzliche **Datei**-Teile
 in einem Transkriptions-Upload; nur das Audio in `file` wird gesendet.
 
-Weitergeleitete Werte werden nicht im [Audit-Log](/de/advanced/admin-endpoints)
+Weitergeleitete Werte werden nicht im [Request-Log](/de/advanced/admin-endpoints)
 gespeichert: Da es sich um beliebige Client-Eingaben handelt, die
 Provider-Zugangsdaten enthalten können, erfasst der Eintrag unter
 `forwarded_fields` nur die **Namen** der Felder.
@@ -321,7 +327,7 @@ Im Vergleich zu `/v1/chat/completions` gilt:
 - **Kein Failover, keine Guardrails, kein Response-Cache** – diese Stufen werden
   übersprungen. Requests werden trotzdem autorisiert, gegen das Budget geprüft,
   erfasst (siehe [Kostenerfassung](/de/advanced/audio-api#kostenerfassung)) und unter ihrem
-  `/v1/audio/*`-Pfad in das [Audit-Log](/de/advanced/admin-endpoints) geschrieben.
+  `/v1/audio/*`-Pfad in das [Request-Log](/de/advanced/admin-endpoints) geschrieben.
 - **OpenAI-Request-Form rein, Provider-Dialekt raus** – Clients senden immer das
   Audioformat von OpenAI. OpenAI-kompatible Upstreams erhalten es unverändert;
   Requests an Xiaomi MiMo, Cohere und MiniMax werden in den nativen Audio-Vertrag
@@ -336,11 +342,11 @@ Sie die [Passthrough-API](/de/features/passthrough-api)
 (`/p/{provider}/v1/audio/...`), um Bytes unverändert an diesen Upstream
 weiterzuleiten.
 
-## Audit-Logging
+## Request-Logging
 
-Audio-Requests erscheinen im Audit-Log wie jede andere Modellinteraktion. Da
+Audio-Requests erscheinen im Request-Log wie jede andere Modellinteraktion. Da
 Audio-Payloads binär und groß sind, werden ihre Bodys über eine eigene
-Einstellung gesteuert, [`LOGGING_LOG_AUDIO_BODIES`](/de/advanced/configuration#audit-logging)
+Einstellung gesteuert, [`LOGGING_LOG_AUDIO_BODIES`](/de/advanced/configuration#request-logging)
 (Standardwert `false`), die `LOGGING_LOG_BODIES` **verfeinert** – sie hat keine
 Wirkung, solange das Body-Logging nicht aktiviert ist:
 
@@ -356,8 +362,8 @@ Wirkung, solange das Body-Logging nicht aktiviert ist:
   (Dateiname, Modell, Parameter).
 
 Die Audio-Bytes landen im [Medienspeicher](/de/advanced/configuration#medienspeicher),
-nicht in der Audit-Datenbank: Der Eintrag enthält eine `media_id`, und das
+nicht in der Request-Log-Datenbank: Der Eintrag enthält eine `media_id`, und das
 Dashboard ruft die Datei über `GET /admin/media/{id}` ab. Es gibt keine
 Größenbegrenzung, und eine gestreamte Response wird gespeichert, während sie
-weitergereicht wird. Dateien werden so lange aufbewahrt wie die Audit-Einträge,
+weitergereicht wird. Dateien werden so lange aufbewahrt wie die Request-Log-Einträge,
 die auf sie verweisen (`LOGGING_RETENTION_DAYS`).

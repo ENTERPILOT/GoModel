@@ -71,9 +71,27 @@ func chatStreamDialect(includeUsage bool) streamDialect {
 			if err != nil {
 				return nil, err
 			}
+			// The edited text of a cut-off answer is replayed cut off too,
+			// with only the usage the provider reported.
+			if chatStreamTruncated(events, resp) {
+				return streaming.SynthesizeTruncatedChatStream(applied, usage != nil), nil
+			}
 			return streaming.SynthesizeChatStream(applied, includeUsage), nil
 		},
 	}
+}
+
+// chatStreamTruncated reports whether the provider stream resp was assembled
+// from stopped before its end: it carries neither [DONE] nor a finish_reason
+// for any choice, which is what the completion guard takes for a truncated
+// stream when the same events are relayed unchanged.
+func chatStreamTruncated(events []streaming.Event, resp *core.ChatResponse) bool {
+	for _, choice := range resp.Choices {
+		if choice.FinishReason != "" {
+			return false
+		}
+	}
+	return !slices.ContainsFunc(events, func(ev streaming.Event) bool { return ev.Kind == streaming.KindDone })
 }
 
 // messagesStreamDialect is the chat dialect behind a streamed /v1/messages
@@ -292,7 +310,7 @@ type pluginStream struct {
 	// replaced and dropped count, per in-flight instance, the events it
 	// rewrote or withheld; eventTime is the time its event hook took over
 	// the stream and failedOpen its first event failure the chain carried on
-	// from. All feed the audit outcome trail.
+	// from. All feed the request log outcome trail.
 	replaced   map[string]int
 	dropped    map[string]int
 	eventTime  map[string]time.Duration
@@ -545,7 +563,7 @@ func (ps *pluginStream) streamStep(instance string) int {
 
 // recordWarn adds the warn header for a warn outcome. It reaches the client
 // only when the headers are not committed yet: a buffered stream that
-// finished before its first keep-alive. Later warns stay in the audit trail.
+// finished before its first keep-alive. Later warns stay in the request log.
 func (ps *pluginStream) recordWarn(outcome plugins.Outcome) {
 	if outcome.Decision.Action == pluginapi.ActionWarn {
 		ps.state.AddResponseHeader(plugins.GuardrailHeader, plugins.WarnHeaderValue(outcome.Decision))

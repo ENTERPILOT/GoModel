@@ -8,7 +8,7 @@ import (
 )
 
 // MediaConfig says where the gateway keeps media files: audio and images
-// captured for the audit log today, generated videos and images later. Media
+// captured for the request log today, generated videos and images later. Media
 // metadata always lives in the shared storage backend; only the bytes go
 // here. See docs/adr/0013-media-storage.md.
 type MediaConfig struct {

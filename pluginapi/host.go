@@ -40,7 +40,7 @@ type InferenceRequest struct {
 	// Model is a "provider/model" reference, an alias, or a virtual model.
 	Model string
 	// UserPath optionally overrides the user path the internal call is scoped
-	// to (for budgets and audit). Empty means the current request's path.
+	// to (for budgets and request logs). Empty means the current request's path.
 	UserPath string
 	// Messages is the conversation to send.
 	Messages []Message

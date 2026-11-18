@@ -12,21 +12,21 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/gateway"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
 // NewHandler creates a handler with the given routable provider and no
 // optional resolvers.
-func NewHandler(provider core.RoutableProvider, logger auditlog.LoggerInterface, usageLogger usage.LoggerInterface, pricingResolver usage.PricingResolver) *Handler {
+func NewHandler(provider core.RoutableProvider, logger requestlog.LoggerInterface, usageLogger usage.LoggerInterface, pricingResolver usage.PricingResolver) *Handler {
 	return newHandler(provider, logger, usageLogger, pricingResolver, nil, nil, nil, nil)
 }
 
 func newHandler(
 	provider core.RoutableProvider,
-	logger auditlog.LoggerInterface,
+	logger requestlog.LoggerInterface,
 	usageLogger usage.LoggerInterface,
 	pricingResolver usage.PricingResolver,
 	modelResolver RequestModelResolver,

@@ -121,7 +121,7 @@ obraz w base64, może mieć do 32 MiB; pluginy strumienia domyślnie mieszczą
 najwyżej 4 MiB, więc większy obraz kończy strumień, który przez nie przechodzi.
 Gdy takie pluginy są włączone, żądaj obrazów 2K i 4K bez streamingu.
 
-Każdy obraz to kilka megabajtów base64. Logi audytowe przechwytują maksymalnie 1 MB
+Każdy obraz to kilka megabajtów base64. Logi requestów przechwytują maksymalnie 1 MB
 body odpowiedzi, więc zalogowane body jest obcinane i odpowiednio oznaczane. Cache
 odpowiedzi przechowuje całą odpowiedź.
 

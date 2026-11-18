@@ -221,7 +221,7 @@ test("usageFiltersEmpty checks every filter in the table", () => {
 
 // --- Request types ---
 
-test("usageTypeForOperation folds operations into the audit log's request types", () => {
+test("usageTypeForOperation folds operations into the request log's request types", () => {
   assert.equal(usageTypeForOperation("chat_completions"), "chat");
   assert.equal(usageTypeForOperation("audio_transcriptions"), "audio");
   assert.equal(usageTypeForOperation("conversations"), "responses");

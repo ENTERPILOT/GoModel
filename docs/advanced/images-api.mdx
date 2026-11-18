@@ -227,7 +227,7 @@ run through the full inference orchestrator**. Compared with `/v1/chat/completio
 
 - **No failover, guardrails, or response cache** — these stages are skipped.
   Requests are still authorized, budget-checked, rate-limited, metered, and
-  written to the [audit log](/advanced/admin-endpoints).
+  written to the [request log](/advanced/admin-endpoints).
 - **No streaming** — `stream: true` is rejected with a `400` because streamed
   image generation is delivered as server-sent events, which these endpoints do
   not relay. Omit `stream` (or set it to `false`) to receive the complete JSON
@@ -269,9 +269,9 @@ In OpenAI-compatible mode, generation forwards to Gemini's
 `/openai/images/generations` endpoint and edits are rejected (that surface has
 no edits endpoint).
 
-## Audit logging
+## Request logging
 
-Image requests appear in the audit log like any other model interaction. When
+Image requests appear in the request log like any other model interaction. When
 `LOGGING_LOG_BODIES` is enabled:
 
 - The generation request is stored as JSON. An edit request is stored as an
@@ -282,7 +282,7 @@ Image requests appear in the audit log like any other model interaction. When
   are kept as links.
 
 The pixels themselves are **not** stored unless
-[`LOGGING_LOG_IMAGE_BODIES=true`](/advanced/configuration#audit-logging). With
+[`LOGGING_LOG_IMAGE_BODIES=true`](/advanced/configuration#request-logging). With
 it on, uploads and generated images are written to
 [media storage](/advanced/configuration#media-storage) and each item carries a
 `media_id` the dashboard renders inline through `GET /admin/media/{id}`;
@@ -291,4 +291,4 @@ it on, uploads and generated images are written to
 (`stored: false`). Either way the entry stays small and complete — it never
 hits the generic 1 MB body truncation even for large `b64_json` results, and
 there is no per-entry cap on stored images. Files are kept as long as the
-audit entries that reference them (`LOGGING_RETENTION_DAYS`).
+request log entries that reference them (`LOGGING_RETENTION_DAYS`).

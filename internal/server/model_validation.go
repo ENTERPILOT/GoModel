@@ -6,8 +6,8 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/tidwall/gjson"
 
-	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/requestlog"
 )
 
 // WorkflowResolutionWithResolverAndPolicy resolves the request-scoped workflow
@@ -153,7 +153,7 @@ func storeWorkflow(c *echo.Context, workflow *core.Workflow) {
 	if ctx := c.Request().Context(); core.GetWorkflow(ctx) != workflow {
 		c.SetRequest(c.Request().WithContext(core.WithWorkflow(ctx, workflow)))
 	}
-	auditlog.EnrichEntryWithWorkflow(c, workflow)
+	requestlog.EnrichEntryWithWorkflow(c, workflow)
 }
 
 func selectorHintsForValidation(c *echo.Context) (model, provider string, parsed bool, err error) {
@@ -258,24 +258,24 @@ func passthroughRouteInfo(c *echo.Context) *core.PassthroughRouteInfo {
 		if workflow.Passthrough.Provider == "" && strings.TrimSpace(workflow.ProviderType) != "" {
 			workflow.Passthrough.Provider = strings.TrimSpace(workflow.ProviderType)
 		}
-		if workflow.Passthrough.AuditPath == "" {
-			workflow.Passthrough.AuditPath = c.Request().URL.Path
+		if workflow.Passthrough.RequestLogPath == "" {
+			workflow.Passthrough.RequestLogPath = c.Request().URL.Path
 		}
 		return workflow.Passthrough
 	}
 	if env := core.GetWhiteBoxPrompt(c.Request().Context()); env != nil {
 		if info := env.CachedPassthroughRouteInfo(); info != nil {
-			if info.AuditPath == "" {
-				info.AuditPath = c.Request().URL.Path
+			if info.RequestLogPath == "" {
+				info.RequestLogPath = c.Request().URL.Path
 			}
 			return info
 		}
 		if env.OperationType == string(core.OperationProviderPassthrough) {
 			info := &core.PassthroughRouteInfo{
-				Provider:    env.RouteHints.Provider,
-				RawEndpoint: env.RouteHints.Endpoint,
-				Model:       env.RouteHints.Model,
-				AuditPath:   c.Request().URL.Path,
+				Provider:       env.RouteHints.Provider,
+				RawEndpoint:    env.RouteHints.Endpoint,
+				Model:          env.RouteHints.Model,
+				RequestLogPath: c.Request().URL.Path,
 			}
 			if info.Provider != "" || info.RawEndpoint != "" || info.Model != "" {
 				return info
@@ -287,8 +287,8 @@ func passthroughRouteInfo(c *echo.Context) *core.PassthroughRouteInfo {
 		return nil
 	}
 	return &core.PassthroughRouteInfo{
-		Provider:    provider,
-		RawEndpoint: endpoint,
-		AuditPath:   c.Request().URL.Path,
+		Provider:       provider,
+		RawEndpoint:    endpoint,
+		RequestLogPath: c.Request().URL.Path,
 	}
 }

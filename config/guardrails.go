@@ -29,7 +29,7 @@ type GuardrailRuleConfig struct {
 	Type string `yaml:"type"`
 
 	// UserPath scopes internal auxiliary guardrail requests for workflow
-	// selection and audit logging. When empty, the caller user path is used.
+	// selection and request logging. When empty, the caller user path is used.
 	UserPath string `yaml:"user_path"`
 
 	// Order controls execution ordering relative to other guardrails.
