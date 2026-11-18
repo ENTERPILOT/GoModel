@@ -2147,6 +2147,14 @@ func TestRecordStreamFailure_ClassifiesClientDisconnect(t *testing.T) {
 			wantType: "stream_error",
 		},
 		{
+			// A cancellation that follows the reset does not make it the
+			// client's.
+			name:     "provider connection reset while reading, then canceled ctx",
+			ctx:      canceledCtx,
+			err:      &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET},
+			wantType: "stream_error",
+		},
+		{
 			name:     "client connection reset while writing",
 			ctx:      context.Background(),
 			err:      &net.OpError{Op: "write", Net: "tcp", Err: syscall.ECONNRESET},

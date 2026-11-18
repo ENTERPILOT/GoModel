@@ -782,7 +782,12 @@ func classifyStreamError(ctx context.Context, err error) string {
 	switch {
 	case errors.Is(err, ErrClientStall):
 		return "client_stalled"
-	case (errors.Is(err, streaming.ErrStreamIncomplete) || isNetworkReadError(err)) && (ctx == nil || ctx.Err() != context.Canceled):
+	case isNetworkReadError(err):
+		// The gateway reads only from the provider while relaying, so the
+		// failed connection is the provider's even if the client has since
+		// gone away too.
+		return "stream_error"
+	case errors.Is(err, streaming.ErrStreamIncomplete) && (ctx == nil || ctx.Err() != context.Canceled):
 		// The provider stream failed while being read, so a connection reset
 		// it wraps is the provider's, not the client's.
 		return "stream_error"
@@ -792,9 +797,7 @@ func classifyStreamError(ctx context.Context, err error) string {
 	return "stream_error"
 }
 
-// isNetworkReadError reports a network read that failed. While a response is
-// relayed the gateway reads only from the provider, so the failed connection
-// is the provider's.
+// isNetworkReadError reports a network read that failed.
 func isNetworkReadError(err error) bool {
 	opErr, ok := errors.AsType[*net.OpError](err)
 	return ok && opErr.Op == "read"

@@ -459,6 +459,29 @@ func TestGatewayErrorHandler_ClassifiesFailuresOnCommittedResponses(t *testing.T
 // The direct gatewayErrorHandler tests stub the error; this one drives the real
 // server so the goccy serializer, echo's dispatch and the handler are all in
 // the path — the shape that produced the opaque 500 in #881.
+// echo's default request logger delivers an escaped error twice; it is handled
+// once. A panic that follows on the same request is still reported in full.
+func TestGatewayErrorHandler_HandlesARepeatedErrorOnceButAlwaysReportsAPanic(t *testing.T) {
+	var logs bytes.Buffer
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(original) })
+
+	c, rec := echotest.Post(t, "/v1/messages", nil)
+	require.NoError(t, c.String(http.StatusOK, "partial"))
+
+	relayErr := io.ErrUnexpectedEOF
+	gatewayErrorHandler(c, relayErr)
+	gatewayErrorHandler(c, relayErr)
+	assert.Equal(t, 1, strings.Count(logs.String(), `"msg":"response terminated abnormally"`), logs.String())
+
+	gatewayErrorHandler(c, &middleware.PanicStackError{Err: errors.New("middleware blew up"), Stack: []byte("goroutine 1")})
+
+	assert.Contains(t, logs.String(), `"panic":"middleware blew up"`)
+	assert.Contains(t, logs.String(), `"stack":"goroutine 1"`)
+	assert.Equal(t, "partial", rec.Body.String())
+}
+
 func TestGatewayErrorHandler_UnencodableResponseThroughRealServer(t *testing.T) {
 	logs := &bytes.Buffer{}
 	original := slog.Default()

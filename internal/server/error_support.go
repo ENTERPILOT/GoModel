@@ -99,17 +99,25 @@ func gatewayErrorHandler(c *echo.Context, err error) {
 	if err == nil {
 		return
 	}
+	_, panicked := errors.AsType[*middleware.PanicStackError](err)
 	// echo's default request logger hands an error here and then returns it,
-	// so the server delivers the same error a second time.
-	if handled, _ := c.Get(escapedErrorHandledKey).(bool); handled {
-		return
+	// so the server delivers the same error a second time. A panic arrives
+	// once, from the recovery middleware outside that logger, and is always
+	// reported, even after an earlier error on the same request.
+	if !panicked {
+		if handled, _ := c.Get(escapedErrorHandledKey).(bool); handled {
+			return
+		}
+		c.Set(escapedErrorHandledKey, true)
 	}
-	c.Set(escapedErrorHandledKey, true)
 	// Once the response has started it cannot become an error response, so a
 	// failure while writing it is a broken relay (most often the client hanging
 	// up), not a gateway 500. A panic is still reported as one.
 	committed := responseCommitted(c)
-	if _, panicked := errors.AsType[*middleware.PanicStackError](err); committed && !panicked {
+	if committed && !panicked {
+		if !auditlog.HasRecordedError(c) {
+			enrichAuditEntryWithProviderAttempts(c)
+		}
 		recordStreamFailure(c, nil, "response terminated abnormally", err)
 		return
 	}
