@@ -105,6 +105,42 @@ func BenchmarkResponsesRequestJSONMarshal(b *testing.B) {
 	}
 }
 
+// benchmarkChatConversationOfSize builds a multi-turn chat request of at least
+// target bytes, the shape agentic clients resend on every turn.
+func benchmarkChatConversationOfSize(target int) []byte {
+	var buf strings.Builder
+	buf.WriteString(`{"model":"gpt-5-mini","stream":true,"messages":[{"role":"system","content":"You are a helpful assistant."}`)
+	for i := 0; buf.Len() < target; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		buf.WriteString(`,{"role":"` + role + `","content":"turn ` + strconv.Itoa(i) + `: `)
+		buf.WriteString(strings.Repeat("analyze this repeated log line and summarize it. ", 20))
+		buf.WriteString(`"}`)
+	}
+	buf.WriteString(`]}`)
+	return []byte(buf.String())
+}
+
+// BenchmarkDecodeChatRequestBySize measures the canonical chat decode on large
+// bodies, where any whole-body copy dominates the allocated bytes.
+func BenchmarkDecodeChatRequestBySize(b *testing.B) {
+	for _, size := range []int{16 << 10, 60 << 10} {
+		body := benchmarkChatConversationOfSize(size)
+		b.Run(strconv.Itoa(size>>10)+"KB", func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(body)))
+			for b.Loop() {
+				req, err := DecodeChatRequest(body, nil)
+				if err != nil || req == nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 // benchmarkMultimodalChatPayload is a vision request of the shape agentic
 // clients send: one message carrying many content parts, each with the
 // passthrough members a client attaches. Marshalling used to copy the raw

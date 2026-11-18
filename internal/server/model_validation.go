@@ -194,7 +194,9 @@ func selectorHintsFromJSONGJSON(body []byte) (model, provider string, parsed boo
 		return "", "", false
 	}
 
-	root := gjson.ParseBytes(body)
+	// Parsed in place; the selector strings are cloned below so they do not
+	// alias the body.
+	root := core.ParseJSONNoCopy(body)
 	if !root.IsObject() {
 		return "", "", false
 	}
@@ -213,10 +215,10 @@ func selectorHintsFromJSONGJSON(body []byte) (model, provider string, parsed boo
 	}
 
 	if modelResult.Type == gjson.String {
-		model = modelResult.String()
+		model = strings.Clone(modelResult.String())
 	}
 	if providerResult.Type == gjson.String {
-		provider = providerResult.String()
+		provider = strings.Clone(providerResult.String())
 	}
 	return model, provider, true
 }

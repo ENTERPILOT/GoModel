@@ -186,7 +186,7 @@ func validateUnknownJSONObject(body []byte) error {
 	if !gjson.ValidBytes(body) {
 		return fmt.Errorf("invalid JSON object")
 	}
-	root := gjson.ParseBytes(body)
+	root := ParseJSONNoCopy(body)
 	if !root.IsObject() {
 		return fmt.Errorf("expected JSON object")
 	}
@@ -201,7 +201,7 @@ func appendUnknownJSONMembers(buf *bytes.Buffer, body []byte, skip map[string]st
 	if len(body) == 0 || bytes.Equal(body, []byte("{}")) {
 		return nil
 	}
-	root := gjson.ParseBytes(body)
+	root := ParseJSONNoCopy(body)
 
 	root.ForEach(func(key, value gjson.Result) bool {
 		if _, shouldSkip := skip[key.String()]; shouldSkip {
@@ -277,12 +277,13 @@ func decoderAcceptsJSONValue(raw string) bool {
 }
 
 // forEachMember visits the stored members in document order until visit
-// returns false. A value that is not a JSON object has no members.
+// returns false. A value that is not a JSON object has no members. name and
+// value alias fields.raw, so visit must copy anything it keeps.
 func (fields UnknownJSONFields) forEachMember(visit func(name string, value gjson.Result) bool) {
 	if len(fields.raw) == 0 {
 		return
 	}
-	root := gjson.ParseBytes(fields.raw)
+	root := ParseJSONNoCopy(fields.raw)
 	if !root.IsObject() {
 		return
 	}
@@ -389,7 +390,8 @@ func extractUnknownJSONFieldsWith(data []byte, isKnown func(string) bool) (Unkno
 		return UnknownJSONFields{}, fmt.Errorf("expected JSON object")
 	}
 
-	root := gjson.ParseBytes(data)
+	// Parsed in place: every byte the result keeps is copied into buf below.
+	root := ParseJSONNoCopy(data)
 	if !root.IsObject() {
 		return UnknownJSONFields{}, fmt.Errorf("expected JSON object")
 	}
