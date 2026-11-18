@@ -23,7 +23,7 @@ import (
 // no subscriber it issues no query at all.
 //
 // Remote entries arrive only once persisted, so a dashboard sees them as
-// completed requests (audit.flushed, usage.flushed), up to the peer's flush
+// completed requests (request_log.flushed, usage.flushed), up to the peer's flush
 // interval plus remoteInterval after they finish, and never their in-flight
 // or per-chunk stream events.
 const (

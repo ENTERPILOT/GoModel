@@ -11,6 +11,7 @@ import {
   requestLogLivePauseMessage,
   liveLogsMethods,
   liveLogsStreamPath,
+  normalizeLiveLogEvent,
 } from "../src/pages/requests/live-logs-logic.js";
 import { requestLogRecordKey, mergeRequestLogRecord } from "../src/pages/requests/request-log-records.js";
 import { emptyUsageFilters, usageFiltersEmpty } from "../src/pages/usage/usage-query.js";
@@ -76,8 +77,8 @@ function liveReaderFromChunks(chunks) {
 }
 
 test("live logs stream path carries the replay cursor", () => {
-  assert.equal(liveLogsStreamPath(0), "/admin/live/logs?types=audit,usage");
-  assert.equal(liveLogsStreamPath(42), "/admin/live/logs?types=audit,usage&cursor=42");
+  assert.equal(liveLogsStreamPath(0), "/admin/live/logs?types=request_log,audit,usage");
+  assert.equal(liveLogsStreamPath(42), "/admin/live/logs?types=request_log,audit,usage&cursor=42");
 });
 
 test("live request log lifecycle events merge into one dashboard row by request id", () => {
@@ -85,22 +86,22 @@ test("live request log lifecycle events merge into one dashboard row by request 
 
   app.applyLiveLogEvent({
     seq: 1,
-    type: "audit.started",
+    type: "request_log.started",
     data: { id: "request-log-1", request_id: "req-1", method: "POST", path: "/v1/chat/completions" },
   });
   app.applyLiveLogEvent({
     seq: 2,
-    type: "audit.updated",
+    type: "request_log.updated",
     data: { id: "request-log-1", request_id: "req-1", requested_model: "gpt-test", provider: "openai" },
   });
   app.applyLiveLogEvent({
     seq: 3,
-    type: "audit.completed",
+    type: "request_log.completed",
     data: { id: "request-log-1", request_id: "req-1", status_code: 200, duration_ns: 1000 },
   });
   app.applyLiveLogEvent({
     seq: 4,
-    type: "audit.flushed",
+    type: "request_log.flushed",
     data: { id: "request-log-1", request_id: "req-1", status_code: 200, duration_ns: 1000 },
   });
 
@@ -108,22 +109,78 @@ test("live request log lifecycle events merge into one dashboard row by request 
   assert.equal(app.requestLog.entries.length, 1);
   assert.equal(app.requestLog.entries[0].requested_model, "gpt-test");
   assert.equal(app.requestLog.entries[0].status_code, 200);
-  assert.equal(app.requestLog.entries[0]._live_state, "audit.flushed");
+  assert.equal(app.requestLog.entries[0]._live_state, "request_log.flushed");
   assert.equal(app.requestLog.entries[0]._live_pending, false);
   assert.equal(app.requestLog.entries[0]._request_log_flushed, true);
 });
 
-test("audit.stream events merge partial response bodies and keep rows pending", () => {
+// A replica still on v0.2.5 sends request log events under their old audit.*
+// names; they must drive the row exactly as the request_log.* ones do.
+test("legacy audit.* live events are handled as request_log.* events", () => {
   const app = createLiveLogsApp();
 
   app.applyLiveLogEvent({
     seq: 1,
     type: "audit.started",
+    data: { id: "request-log-1", request_id: "req-1", method: "POST", _live_state: "audit.started", _live_pending: true },
+  });
+  assert.equal(app.requestLog.entries.length, 1);
+  assert.equal(app.requestLog.entries[0]._live_state, "request_log.started");
+
+  app.applyLiveLogEvent({
+    seq: 2,
+    type: "audit.flushed",
+    data: { id: "request-log-1", request_id: "req-1", status_code: 200, _live_state: "audit.flushed" },
+  });
+  assert.equal(app.requestLog.entries.length, 1);
+  assert.equal(app.requestLog.entries[0]._live_state, "request_log.flushed");
+  assert.equal(app.requestLog.entries[0]._live_pending, false);
+  assert.equal(app.requestLog.entries[0]._request_log_flushed, true);
+
+  app.applyLiveLogEvent({
+    seq: 3,
+    type: "audit.started",
+    data: { id: "request-log-2", request_id: "req-2", method: "POST" },
+  });
+  app.applyLiveLogEvent({ seq: 4, type: "audit.removed", data: { id: "request-log-2", request_id: "req-2" } });
+  assert.deepEqual(app.requestLog.entries.map((entry) => entry.id), ["request-log-1"]);
+  assert.equal(app.liveLogsLastSeq, 4);
+});
+
+test("normalizeLiveLogEvent renames only legacy request log names", () => {
+  const legacy = { seq: 7, type: "audit.updated", data: { id: "a", _live_state: "audit.updated" } };
+  assert.deepEqual(normalizeLiveLogEvent(legacy), {
+    seq: 7,
+    type: "request_log.updated",
+    data: { id: "a", _live_state: "request_log.updated" },
+  });
+  // The event the stream parser handed over is left as it was.
+  assert.equal(legacy.type, "audit.updated");
+  assert.equal(legacy.data._live_state, "audit.updated");
+
+  assert.deepEqual(normalizeLiveLogEvent({ type: "audit.removed" }), { type: "request_log.removed" });
+
+  for (const event of [
+    { seq: 1, type: "request_log.updated", data: { _live_state: "request_log.updated" } },
+    { seq: 2, type: "usage.completed", data: { _live_state: "usage.completed" } },
+    { seq: 3, type: "heartbeat" },
+    { seq: 4, type: "reset" },
+  ]) {
+    assert.equal(normalizeLiveLogEvent(event), event);
+  }
+});
+
+test("request_log.stream events merge partial response bodies and keep rows pending", () => {
+  const app = createLiveLogsApp();
+
+  app.applyLiveLogEvent({
+    seq: 1,
+    type: "request_log.started",
     data: { id: "request-log-1", request_id: "req-1", method: "POST", path: "/v1/chat/completions" },
   });
   app.applyLiveLogEvent({
     seq: 2,
-    type: "audit.stream",
+    type: "request_log.stream",
     data: {
       id: "request-log-1",
       request_id: "req-1",
@@ -139,12 +196,12 @@ test("audit.stream events merge partial response bodies and keep rows pending", 
   const streaming = app.requestLog.entries[0];
   assert.equal(streaming._response_partial, true);
   assert.equal(streaming._live_pending, true);
-  assert.equal(streaming._live_state, "audit.stream");
+  assert.equal(streaming._live_state, "request_log.stream");
   assert.equal(streaming.data.response_body.choices[0].message.content, "partial");
 
   app.applyLiveLogEvent({
     seq: 3,
-    type: "audit.completed",
+    type: "request_log.completed",
     data: {
       id: "request-log-1",
       request_id: "req-1",
@@ -158,7 +215,7 @@ test("audit.stream events merge partial response bodies and keep rows pending", 
 
   const completed = app.requestLog.entries[0];
   assert.equal(completed._response_partial, false);
-  assert.equal(completed._live_state, "audit.completed");
+  assert.equal(completed._live_state, "request_log.completed");
   assert.equal(completed.data.response_body.choices[0].message.content, "final");
 });
 
@@ -167,12 +224,12 @@ test("live request log merges update the normalized record cache", () => {
 
   app.applyLiveLogEvent({
     seq: 1,
-    type: "audit.started",
+    type: "request_log.started",
     data: { id: "request-log-1", request_id: "req-1" },
   });
   app.applyLiveLogEvent({
     seq: 2,
-    type: "audit.stream",
+    type: "request_log.stream",
     data: { id: "request-log-1", request_id: "req-1", data: { response_body: { choices: [] }, response_body_partial: true } },
   });
 
@@ -187,7 +244,7 @@ test("live request log removed event drops suppressed preview rows", () => {
 
   app.applyLiveLogEvent({
     seq: 4,
-    type: "audit.removed",
+    type: "request_log.removed",
     data: { id: "request-log-1", request_id: "req-1" },
   });
 
@@ -206,7 +263,7 @@ test("live request log removed event decrements total by removed row count", () 
 
   app.applyLiveLogEvent({
     seq: 5,
-    type: "audit.removed",
+    type: "request_log.removed",
     data: { request_id: "req-1" },
   });
 
@@ -220,7 +277,7 @@ test("live request log inserts are blocked while a custom request log date range
   app.customStartDate = new Date();
   app.applyLiveLogEvent({
     seq: 1,
-    type: "audit.started",
+    type: "request_log.started",
     data: { id: "request-log-start", request_id: "req-start" },
   });
 
@@ -228,7 +285,7 @@ test("live request log inserts are blocked while a custom request log date range
   app.customEndDate = new Date();
   app.applyLiveLogEvent({
     seq: 2,
-    type: "audit.started",
+    type: "request_log.started",
     data: { id: "request-log-end", request_id: "req-end" },
   });
 
@@ -247,7 +304,7 @@ test("live request log inserts flow while the custom date range ends today", () 
 
   app.applyLiveLogEvent({
     seq: 1,
-    type: "audit.started",
+    type: "request_log.started",
     data: { id: "request-log-today", request_id: "req-today" },
   });
 
@@ -265,7 +322,7 @@ test("live request log inserts stay blocked for a custom range detached from tod
 
   app.applyLiveLogEvent({
     seq: 1,
-    type: "audit.started",
+    type: "request_log.started",
     data: { id: "request-log-past", request_id: "req-past" },
   });
 
@@ -312,7 +369,7 @@ test("live request log inserts are blocked while filters or pagination are activ
 
   app.applyLiveLogEvent({
     seq: 1,
-    type: "audit.started",
+    type: "request_log.started",
     data: { id: "request-log-1", request_id: "req-1" },
   });
   assert.equal(app.requestLog.entries.length, 0);
@@ -321,7 +378,7 @@ test("live request log inserts are blocked while filters or pagination are activ
   app.requestLog.offset = 25;
   app.applyLiveLogEvent({
     seq: 2,
-    type: "audit.started",
+    type: "request_log.started",
     data: { id: "request-log-2", request_id: "req-2" },
   });
   assert.equal(app.requestLog.entries.length, 0);
@@ -331,7 +388,7 @@ test("paused list insertion still updates normalized records", () => {
   const app = createLiveLogsApp({ requestLogSearch: "filtered" });
   app.applyLiveLogEvent({
     seq: 1,
-    type: "audit.updated",
+    type: "request_log.updated",
     data: {
       id: "request-log-hidden",
       session_id: "session-open-in-drawer",
@@ -353,7 +410,7 @@ test("live request log inserts cap the preview buffer at the page limit", () => 
   for (let i = 1; i <= 5; i++) {
     app.applyLiveLogEvent({
       seq: i,
-      type: "audit.started",
+      type: "request_log.started",
       data: { id: "request-log-" + i, request_id: "req-" + i },
     });
   }
@@ -369,7 +426,7 @@ test("live logs parser handles CRLF-separated SSE frames", async () => {
 
   await app.consumeLiveLogsBody(liveReaderFromChunks([
     'data: {"seq":1,"type":"heartbeat"}\r\n\r\n',
-    'data: {"seq":2,"type":"audit.started","data":{"id":"request-log-1","request_id":"req-1"}}\r\n\r\n',
+    'data: {"seq":2,"type":"request_log.started","data":{"id":"request-log-1","request_id":"req-1"}}\r\n\r\n',
   ]));
 
   assert.equal(app.liveLogsLastSeq, 2);
@@ -381,7 +438,7 @@ test("live logs parser joins split chunks and flushes a trailing frame", async (
   const app = createLiveLogsApp();
 
   await app.consumeLiveLogsBody(liveReaderFromChunks([
-    'data: {"seq":1,"type":"audit.star',
+    'data: {"seq":1,"type":"request_log.star',
     'ted","data":{"id":"request-log-1","request_id":"req-1"}}\n\ndata: {"seq":2,"type":"heartbeat"}',
   ]));
 
@@ -554,7 +611,7 @@ test("hidden cached live usage attaches to later request log previews", () => {
 
   app.applyLiveLogEvent({
     seq: 12,
-    type: "audit.completed",
+    type: "request_log.completed",
     data: {
       id: "request-log-cache",
       request_id: "req-cache",
@@ -674,7 +731,7 @@ test("request log detail merge preserves existing live lifecycle state", () => {
     id: "request-log-1",
     request_id: "req-1",
     _live: true,
-    _live_state: "audit.completed",
+    _live_state: "request_log.completed",
     _live_pending: true,
     _request_log_flushed: false,
     data: {
@@ -688,10 +745,10 @@ test("request log detail merge preserves existing live lifecycle state", () => {
     data: {
       request_headers: { authorization: "Bearer redacted" },
     },
-  }, "audit.detail");
+  }, "request_log.detail");
 
   assert.equal(merged._live, true);
-  assert.equal(merged._live_state, "audit.completed");
+  assert.equal(merged._live_state, "request_log.completed");
   assert.equal(merged._live_pending, true);
   assert.equal(merged._request_log_flushed, false);
   assert.equal(merged._detail_loaded, true);
@@ -713,7 +770,7 @@ test("live request log lifecycle patches merge captured detail data", () => {
 
   app.applyLiveLogEvent({
     seq: 9,
-    type: "audit.flushed",
+    type: "request_log.flushed",
     data: {
       id: "request-log-1",
       request_id: "req-1",
@@ -725,7 +782,7 @@ test("live request log lifecycle patches merge captured detail data", () => {
   });
 
   assert.equal(app.requestLog.entries[0].status_code, 200);
-  assert.equal(app.requestLog.entries[0]._live_state, "audit.flushed");
+  assert.equal(app.requestLog.entries[0]._live_state, "request_log.flushed");
   assert.equal(app.requestLog.entries[0]._live_pending, false);
   assert.deepEqual(app.requestLog.entries[0].data.request_headers, { authorization: "Bearer redacted" });
   assert.deepEqual(app.requestLog.entries[0].data.response_headers, { "x-request-id": "req-1" });
@@ -737,16 +794,16 @@ test("late queued events do not regress flushed live rows to pending", () => {
 
   app.applyLiveLogEvent({
     seq: 1,
-    type: "audit.flushed",
+    type: "request_log.flushed",
     data: { id: "request-log-1", request_id: "req-1", status_code: 200, duration_ns: 1000 },
   });
   app.applyLiveLogEvent({
     seq: 2,
-    type: "audit.completed",
+    type: "request_log.completed",
     data: { id: "request-log-1", request_id: "req-1", status_code: 200, duration_ns: 1000 },
   });
 
-  assert.equal(app.requestLog.entries[0]._live_state, "audit.flushed");
+  assert.equal(app.requestLog.entries[0]._live_state, "request_log.flushed");
   assert.equal(app.requestLog.entries[0]._live_pending, false);
   assert.equal(app.requestLog.entries[0]._request_log_flushed, true);
 
@@ -777,7 +834,7 @@ test("flushed expanded live request rows retry detail fetch", () => {
     id: "request-log-1",
     request_id: "req-1",
     _live: true,
-    _live_state: "audit.completed",
+    _live_state: "request_log.completed",
     _live_pending: true,
     _request_log_flushed: false,
   }];
@@ -785,12 +842,12 @@ test("flushed expanded live request rows retry detail fetch", () => {
   app.fetchRequestEntryDetail = (entry) => {
     detailFetches++;
     assert.equal(entry.id, "request-log-1");
-    assert.equal(entry._live_state, "audit.flushed");
+    assert.equal(entry._live_state, "request_log.flushed");
   };
 
   app.applyLiveLogEvent({
     seq: 5,
-    type: "audit.flushed",
+    type: "request_log.flushed",
     data: { id: "request-log-1", request_id: "req-1", status_code: 200 },
   });
 
@@ -802,12 +859,12 @@ test("failed live events clear pending state", () => {
 
   app.applyLiveLogEvent({
     seq: 1,
-    type: "audit.completed",
+    type: "request_log.completed",
     data: { id: "request-log-1", request_id: "req-1" },
   });
   app.applyLiveLogEvent({
     seq: 2,
-    type: "audit.failed",
+    type: "request_log.failed",
     data: { id: "request-log-1", request_id: "req-1" },
   });
   app.applyLiveLogEvent({
@@ -821,7 +878,7 @@ test("failed live events clear pending state", () => {
     data: { id: "usage-1", request_id: "req-1", total_tokens: 14 },
   });
 
-  assert.equal(app.requestLog.entries[0]._live_state, "audit.failed");
+  assert.equal(app.requestLog.entries[0]._live_state, "request_log.failed");
   assert.equal(app.requestLog.entries[0]._live_pending, false);
   assert.equal(app.usageLog.entries[0]._live_state, "usage.failed");
   assert.equal(app.usageLog.entries[0]._live_pending, false);
@@ -893,7 +950,7 @@ test("request log detail fetch gating: skips captured data, waits for live flush
   assert.equal(app.requestEntryShouldFetchDetail({
     id: "request-log-1",
     _live: true,
-    _live_state: "audit.updated",
+    _live_state: "request_log.updated",
     _live_pending: true,
     _request_log_flushed: false,
     data: { request_body: { model: "gpt-test" } },
@@ -903,7 +960,7 @@ test("request log detail fetch gating: skips captured data, waits for live flush
   assert.equal(app.requestEntryShouldFetchDetail({
     id: "request-log-1",
     _live: true,
-    _live_state: "audit.flushed",
+    _live_state: "request_log.flushed",
     _live_pending: false,
     _request_log_flushed: true,
     data: { request_body: { model: "gpt-test" } },
@@ -931,7 +988,7 @@ test("grouped mode folds a new live entry into its on-screen thread", () => {
 
   app.mergeLiveRequestEntry(
     { id: "live-3", request_id: "req-3", session_id: "s-a", path: "/v1/chat/completions" },
-    "audit.started",
+    "request_log.started",
   );
 
   // Thread bubbles to the top with the new entry as head and count bumped.
@@ -961,7 +1018,7 @@ test("parent headers do not assign sessions before the server resolves them", ()
     request_id: "req-3",
     path: "/v1/chat/completions",
     data: { request_headers: { "X-GoModel-Interaction-Parent": "head-a" } },
-  }, "audit.started");
+  }, "request_log.started");
 
   assert.equal(app.requestLog.entries.length, 2);
   assert.equal(app.requestLog.entries[0].id, "live-3");
@@ -976,7 +1033,7 @@ test("grouped fold retains the displaced head of an unexpanded thread", () => {
   ];
   app.requestLog.total = 1;
 
-  app.mergeLiveRequestEntry({ id: "live-2", session_id: "s-a" }, "audit.started");
+  app.mergeLiveRequestEntry({ id: "live-2", session_id: "s-a" }, "request_log.started");
 
   assert.equal(app.requestLog.entries[0].id, "live-2");
   assert.equal(app.requestLog.entries[0].session_count, 3);
@@ -996,7 +1053,7 @@ test("grouped mode without a matching thread prepends a singleton head", () => {
   app.requestLog.entries = [{ id: "head-a", session_id: "s-a", session_count: 2 }];
   app.requestLog.total = 1;
 
-  app.mergeLiveRequestEntry({ id: "live-9", session_id: "s-new" }, "audit.started");
+  app.mergeLiveRequestEntry({ id: "live-9", session_id: "s-new" }, "request_log.started");
 
   assert.deepEqual(
     app.requestLog.entries.map((entry) => entry.id),
@@ -1010,7 +1067,7 @@ test("flat mode never folds by session", () => {
   app.requestLog.entries = [{ id: "row-1", session_id: "s-a" }];
   app.requestLog.total = 1;
 
-  app.mergeLiveRequestEntry({ id: "row-2", session_id: "s-a" }, "audit.started");
+  app.mergeLiveRequestEntry({ id: "row-2", session_id: "s-a" }, "request_log.started");
 
   assert.deepEqual(
     app.requestLog.entries.map((entry) => entry.id),
@@ -1024,7 +1081,7 @@ test("grouped fold respects the live insert gate", () => {
   app.requestLog.entries = [{ id: "head-a", session_id: "s-a", session_count: 2 }];
   app.requestLog.total = 1;
 
-  app.mergeLiveRequestEntry({ id: "live-3", session_id: "s-a" }, "audit.started");
+  app.mergeLiveRequestEntry({ id: "live-3", session_id: "s-a" }, "request_log.started");
 
   assert.deepEqual(app.requestLog.entries.map((entry) => entry.id), ["head-a"]);
   assert.equal(app.requestLog.entries[0].session_count, 2);
@@ -1043,7 +1100,7 @@ test("live updates merge into displaced entries living in children lists", () =>
 
   app.mergeLiveRequestEntry(
     { id: "child-1", request_id: "req-c1", status_code: 200 },
-    "audit.flushed",
+    "request_log.flushed",
   );
 
   const child = app.requestThreadChildren["s-a"].entries[0];
@@ -1076,7 +1133,7 @@ test("late usage updates enrich displaced entries living in children lists", () 
   assert.equal(app.requestLog.entries[0].usage, undefined);
 });
 
-test("audit.detail events hydrate children-list entries", () => {
+test("request_log.detail events hydrate children-list entries", () => {
   const app = createLiveLogsApp({ requestLogGroupSessions: true });
   app.requestThreadChildren = {
     "s-a": { loading: false, entries: [{ id: "child-1" }], total: 2 },
@@ -1084,7 +1141,7 @@ test("audit.detail events hydrate children-list entries", () => {
 
   const merged = app.mergeLiveRequestEntry(
     { id: "child-1", data: { request_body: { model: "gpt-4o" } } },
-    "audit.detail",
+    "request_log.detail",
   );
 
   assert.equal(merged._detail_loaded, true);
@@ -1094,7 +1151,7 @@ test("audit.detail events hydrate children-list entries", () => {
   );
 });
 
-test("audit.removed cleans children lists and decrements the head count", () => {
+test("request_log.removed cleans children lists and decrements the head count", () => {
   const app = createLiveLogsApp({ requestLogGroupSessions: true });
   app.requestLog.entries = [{ id: "head", session_id: "s-a", session_count: 3 }];
   app.requestLog.total = 1;
@@ -1118,7 +1175,7 @@ test("audit.removed cleans children lists and decrements the head count", () => 
   assert.equal(app.requestLog.total, 1);
 });
 
-test("audit.removed promotes a loaded child when a grouped head disappears", () => {
+test("request_log.removed promotes a loaded child when a grouped head disappears", () => {
   const app = createLiveLogsApp({ requestLogGroupSessions: true });
   app.requestLog.entries = [{ id: "head", session_id: "s-a", session_count: 3 }];
   app.requestLog.total = 1;
@@ -1145,7 +1202,7 @@ test("audit.removed promotes a loaded child when a grouped head disappears", () 
   assert.equal(app.requestThreadChildren["s-a"].total, 2);
 });
 
-test("audit.removed reloads an unexpanded grouped thread when its head disappears", () => {
+test("request_log.removed reloads an unexpanded grouped thread when its head disappears", () => {
   const app = createLiveLogsApp({ requestLogGroupSessions: true });
   app.requestLog.entries = [{ id: "head", session_id: "s-a", session_count: 3 }];
   app.requestLog.total = 1;
@@ -1165,17 +1222,17 @@ test("a sessionless live row re-folds on the pre-response session update", () =>
     "s-a": { loading: false, entries: [{ id: "old-child" }], total: 2 },
   };
 
-  // audit.started fires before session detection: the row arrives sessionless
+  // request_log.started fires before session detection: the row arrives sessionless
   // and prepends as its own singleton thread.
-  app.mergeLiveRequestEntry({ id: "live-1", request_id: "req-1" }, "audit.started");
+  app.mergeLiveRequestEntry({ id: "live-1", request_id: "req-1" }, "request_log.started");
   assert.equal(app.requestLog.entries.length, 2);
   assert.equal(app.requestLog.total, 2);
 
-  // SessionCapture delivers audit.updated before the provider handler runs:
+  // SessionCapture delivers request_log.updated before the provider handler runs:
   // the row folds without waiting for a response or terminal event.
   app.mergeLiveRequestEntry(
     { id: "live-1", request_id: "req-1", session_id: "s-a" },
-    "audit.updated",
+    "request_log.updated",
   );
 
   assert.deepEqual(app.requestLog.entries.map((entry) => entry.id), ["live-1"]);
@@ -1192,20 +1249,20 @@ test("re-fold leaves rows alone in flat mode and without a matching head", () =>
   const flat = createLiveLogsApp({ requestLogGroupSessions: false });
   flat.requestLog.entries = [{ id: "row-a", session_id: "s-a" }];
   flat.requestLog.total = 1;
-  flat.mergeLiveRequestEntry({ id: "row-a", session_id: "s-a", status_code: 200 }, "audit.flushed");
+  flat.mergeLiveRequestEntry({ id: "row-a", session_id: "s-a", status_code: 200 }, "request_log.flushed");
   assert.equal(flat.requestLog.entries.length, 1);
 
   const grouped = createLiveLogsApp({ requestLogGroupSessions: true });
   grouped.requestLog.entries = [{ id: "solo", session_id: "s-new" }];
   grouped.requestLog.total = 1;
-  grouped.mergeLiveRequestEntry({ id: "solo", session_id: "s-new", status_code: 200 }, "audit.flushed");
+  grouped.mergeLiveRequestEntry({ id: "solo", session_id: "s-new", status_code: 200 }, "request_log.flushed");
   assert.deepEqual(grouped.requestLog.entries.map((entry) => entry.id), ["solo"]);
   assert.equal(grouped.requestLog.total, 1);
 });
 
 test("interleaved first-session requests do not inflate the thread count", () => {
   // Regression: two live requests open a brand-new session while the page is
-  // watching. Both audit.started events arrive sessionless, later events
+  // watching. Both request_log.started events arrive sessionless, later events
   // deliver the session id, and the demoted row keeps producing lifecycle
   // events. Before the fix each late event for a displaced (and dropped) row
   // re-counted it as a new session member, inflating the badge 2x-3x.
@@ -1213,21 +1270,21 @@ test("interleaved first-session requests do not inflate the thread count", () =>
 
   app.mergeLiveRequestEntry(
     { id: "a", request_id: "req-a", timestamp: "2026-07-28T10:00:00Z" },
-    "audit.started",
+    "request_log.started",
   );
   app.mergeLiveRequestEntry(
     { id: "b", request_id: "req-b", timestamp: "2026-07-28T10:00:02Z" },
-    "audit.started",
+    "request_log.started",
   );
   app.mergeLiveRequestEntry(
     { id: "b", request_id: "req-b", session_id: "s-1", timestamp: "2026-07-28T10:00:02Z" },
-    "audit.updated",
+    "request_log.updated",
   );
   // A gains the session id: the two rows collapse into one thread and A is
   // demoted under B (the newer request).
   app.mergeLiveRequestEntry(
     { id: "a", request_id: "req-a", session_id: "s-1", timestamp: "2026-07-28T10:00:00Z" },
-    "audit.updated",
+    "request_log.updated",
   );
   assert.deepEqual(app.requestLog.entries.map((entry) => entry.id), ["b"]);
   assert.equal(app.requestLog.entries[0].session_count, 2);
@@ -1237,19 +1294,19 @@ test("interleaved first-session requests do not inflate the thread count", () =>
   // thread total must not move again.
   app.mergeLiveRequestEntry(
     { id: "a", request_id: "req-a", session_id: "s-1", status_code: 200 },
-    "audit.completed",
+    "request_log.completed",
   );
   app.mergeLiveRequestEntry(
     { id: "b", request_id: "req-b", session_id: "s-1", status_code: 200 },
-    "audit.completed",
+    "request_log.completed",
   );
   app.mergeLiveRequestEntry(
     { id: "a", request_id: "req-a", session_id: "s-1", status_code: 200 },
-    "audit.flushed",
+    "request_log.flushed",
   );
   app.mergeLiveRequestEntry(
     { id: "b", request_id: "req-b", session_id: "s-1", status_code: 200 },
-    "audit.flushed",
+    "request_log.flushed",
   );
 
   assert.deepEqual(app.requestLog.entries.map((entry) => entry.id), ["b"]);
@@ -1267,21 +1324,21 @@ test("re-fold keeps the newest request as head when completions arrive out of or
   // A starts first, B starts later; both sessionless.
   app.mergeLiveRequestEntry(
     { id: "req-a", timestamp: "2026-07-27T10:00:00Z" },
-    "audit.started",
+    "request_log.started",
   );
   app.mergeLiveRequestEntry(
     { id: "req-b", timestamp: "2026-07-27T10:00:05Z" },
-    "audit.started",
+    "request_log.started",
   );
   // B completes first and gains the session id (no other head yet: stays put).
   app.mergeLiveRequestEntry(
     { id: "req-b", timestamp: "2026-07-27T10:00:05Z", session_id: "s-a", status_code: 200 },
-    "audit.flushed",
+    "request_log.flushed",
   );
   // A completes last: it must fold UNDER B, which is the newer request.
   app.mergeLiveRequestEntry(
     { id: "req-a", timestamp: "2026-07-27T10:00:00Z", session_id: "s-a", status_code: 200 },
-    "audit.flushed",
+    "request_log.flushed",
   );
 
   assert.deepEqual(app.requestLog.entries.map((entry) => entry.id), ["req-b"]);
@@ -1294,12 +1351,12 @@ test("live guardrail outcomes survive the merge into the request row", () => {
 
   app.applyLiveLogEvent({
     seq: 1,
-    type: "audit.started",
+    type: "request_log.started",
     data: { id: "request-log-1", request_id: "req-1", method: "POST", path: "/v1/chat/completions" },
   });
   app.applyLiveLogEvent({
     seq: 2,
-    type: "audit.completed",
+    type: "request_log.completed",
     data: {
       id: "request-log-1",
       request_id: "req-1",
@@ -1320,18 +1377,18 @@ test("live guardrail outcomes survive the merge into the request row", () => {
   // The flush carries no data of its own: the outcomes stay on the row.
   app.applyLiveLogEvent({
     seq: 3,
-    type: "audit.flushed",
+    type: "request_log.flushed",
     data: { id: "request-log-1", request_id: "req-1", status_code: 403, duration_ns: 1000 },
   });
   const flushed = app.requestLog.entries[0];
-  assert.equal(flushed._live_state, "audit.flushed");
+  assert.equal(flushed._live_state, "request_log.flushed");
   assert.equal(flushed.data.guardrails[0].instance, "policy");
   assert.equal(flushed.data.guardrails[0].code, "content_policy");
 });
 
 // --- Other replicas' traffic ---------------------------------------------------
 // A request served by another replica reaches this stream only once that
-// replica persisted it, seconds late, as audit.flushed / usage.flushed.
+// replica persisted it, seconds late, as request_log.flushed / usage.flushed.
 
 test("a late live request log entry is placed by its timestamp, not on top", () => {
   const app = createLiveLogsApp();
@@ -1343,7 +1400,7 @@ test("a late live request log entry is placed by its timestamp, not on top", () 
 
   app.applyLiveLogEvent({
     seq: 7,
-    type: "audit.flushed",
+    type: "request_log.flushed",
     data: { id: "remote", request_id: "req-remote", timestamp: "2026-10-30T12:00:05Z" },
   });
 
@@ -1354,7 +1411,7 @@ test("a late live request log entry is placed by its timestamp, not on top", () 
   // A later event for an entry already listed merges in place.
   app.applyLiveLogEvent({
     seq: 8,
-    type: "audit.flushed",
+    type: "request_log.flushed",
     data: { id: "remote", request_id: "req-remote", timestamp: "2026-10-30T12:00:05Z", status_code: 200 },
   });
   assert.deepEqual(app.requestLog.entries.map((entry) => entry.id), ["newest", "remote", "older"]);
@@ -1371,7 +1428,7 @@ test("a late live request log entry older than the whole page only counts", () =
   ];
   app.requestLog.total = 2;
 
-  app.mergeLiveRequestEntry({ id: "remote", timestamp: "2026-10-30T12:00:01Z" }, "audit.flushed");
+  app.mergeLiveRequestEntry({ id: "remote", timestamp: "2026-10-30T12:00:01Z" }, "request_log.flushed");
 
   assert.deepEqual(app.requestLog.entries.map((entry) => entry.id), ["a", "b"]);
   assert.equal(app.requestLog.total, 3);
@@ -1413,7 +1470,7 @@ test("grouped mode adds a late request older than its thread head as a child", (
 
   app.mergeLiveRequestEntry(
     { id: "remote", session_id: "s-a", timestamp: "2026-10-30T12:00:05Z" },
-    "audit.flushed",
+    "request_log.flushed",
   );
 
   // The head and the thread's position are kept; only the count moves.
@@ -1435,7 +1492,7 @@ test("grouped mode places a late new thread head by its timestamp", () => {
 
   app.mergeLiveRequestEntry(
     { id: "remote", session_id: "s-a", timestamp: "2026-10-30T12:00:05Z" },
-    "audit.flushed",
+    "request_log.flushed",
   );
 
   assert.deepEqual(app.requestLog.entries.map((entry) => entry.id), ["other", "remote"]);
@@ -1460,7 +1517,7 @@ test("a remote entry the grouped page already counted joins its thread without a
 
   app.mergeLiveRequestEntry(
     { id: "child", session_id: "s-a", timestamp: "2026-10-30T12:00:05Z", _remote_written_at: AS_OF - 1 },
-    "audit.flushed",
+    "request_log.flushed",
   );
 
   assert.equal(app.requestLog.entries[0].session_count, 2, "the fetched count already holds it");
@@ -1480,7 +1537,7 @@ test("a remote entry persisted after the grouped page was read is counted", () =
 
   app.mergeLiveRequestEntry(
     { id: "child", session_id: "s-a", timestamp: "2026-10-30T12:00:05Z", _remote_written_at: AS_OF + 1 },
-    "audit.flushed",
+    "request_log.flushed",
   );
 
   assert.equal(app.requestLog.entries[0].session_count, 3);
@@ -1498,7 +1555,7 @@ test("a local entry is counted whatever the page's as_of", () => {
 
   app.mergeLiveRequestEntry(
     { id: "live", session_id: "s-a", timestamp: "2026-10-30T12:00:20Z" },
-    "audit.started",
+    "request_log.started",
   );
 
   assert.equal(app.requestLog.entries[0].id, "live");
@@ -1526,14 +1583,14 @@ test("a fetched children list does not recount a remote entry it already counted
 
   app.mergeLiveRequestEntry(
     { id: "counted", session_id: "s-a", timestamp: "2026-10-30T12:00:05Z", _remote_written_at: AS_OF },
-    "audit.flushed",
+    "request_log.flushed",
   );
   assert.equal(app.requestLog.entries[0].session_count, 3);
   assert.equal(app.requestThreadChildren["s-a"].total, 2);
 
   app.mergeLiveRequestEntry(
     { id: "new", session_id: "s-a", timestamp: "2026-10-30T12:00:06Z", _remote_written_at: AS_OF + 5 },
-    "audit.flushed",
+    "request_log.flushed",
   );
   assert.equal(app.requestLog.entries[0].session_count, 4);
   assert.equal(app.requestThreadChildren["s-a"].total, 3);
@@ -1559,14 +1616,14 @@ test("the flat list total counts a remote entry only when the page has not", () 
   // Below the page: counted in its total, not shown.
   app.mergeLiveRequestEntry(
     { id: "older", timestamp: "2026-10-30T12:00:01Z", _remote_written_at: AS_OF - 10 },
-    "audit.flushed",
+    "request_log.flushed",
   );
   assert.deepEqual(app.requestLog.entries.map((entry) => entry.id), ["b", "a"]);
   assert.equal(app.requestLog.total, 40);
 
   app.mergeLiveRequestEntry(
     { id: "newer", timestamp: "2026-10-30T12:00:11Z", _remote_written_at: AS_OF + 10 },
-    "audit.flushed",
+    "request_log.flushed",
   );
   assert.deepEqual(app.requestLog.entries.map((entry) => entry.id), ["newer", "b"]);
   assert.equal(app.requestLog.total, 41);

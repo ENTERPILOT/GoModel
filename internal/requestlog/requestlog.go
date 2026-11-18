@@ -62,14 +62,18 @@ const (
 	GuardrailTargetResponse = "response"
 )
 
+// LiveEventRequestLogPrefix starts every request log live event type. A live
+// stream filters on it without the trailing dot.
+const LiveEventRequestLogPrefix = "request_log."
+
 const (
-	LiveEventRequestLogStarted   = "audit.started"
-	LiveEventRequestLogUpdated   = "audit.updated"
-	LiveEventRequestLogStream    = "audit.stream"
-	LiveEventRequestLogCompleted = "audit.completed"
-	LiveEventRequestLogFailed    = "audit.failed"
-	LiveEventRequestLogFlushed   = "audit.flushed"
-	LiveEventRequestLogRemoved   = "audit.removed"
+	LiveEventRequestLogStarted   = LiveEventRequestLogPrefix + "started"
+	LiveEventRequestLogUpdated   = LiveEventRequestLogPrefix + "updated"
+	LiveEventRequestLogStream    = LiveEventRequestLogPrefix + "stream"
+	LiveEventRequestLogCompleted = LiveEventRequestLogPrefix + "completed"
+	LiveEventRequestLogFailed    = LiveEventRequestLogPrefix + "failed"
+	LiveEventRequestLogFlushed   = LiveEventRequestLogPrefix + "flushed"
+	LiveEventRequestLogRemoved   = LiveEventRequestLogPrefix + "removed"
 )
 
 const maxAttemptErrorMessageLength = 2048

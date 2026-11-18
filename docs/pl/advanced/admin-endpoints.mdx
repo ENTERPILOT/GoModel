@@ -1089,6 +1089,20 @@ zaległości po krótkich przerwach w sieci.
 kursor przeglądarki wypadnie poza bufor odtwarzania, stream wysyła zdarzenie resetu,
 a dashboard przeładowuje dane ze zwykłych endpointów REST.
 
+Zdarzenia logu requestów nazywają się `request_log.started`, `request_log.updated`,
+`request_log.stream`, `request_log.completed`, `request_log.failed`,
+`request_log.flushed` i `request_log.removed`, a zdarzenia użycia `usage.*`.
+Parametr zapytania `types` wybiera rodzaje zdarzeń, które otrzymuje stream:
+`types=request_log,usage`.
+
+Przed zmianą nazwy logu requestów zdarzenia te nazywały się `audit.*`. Te nazwy
+są przestarzałe, ale nadal obsługiwane. Stream, który wymienia `request_log`
+w `types`, otrzymuje nowe nazwy. Stream, który wymienia tylko stary alias
+`audit` albo nie podaje `types`, nadal otrzymuje `audit.*` (jako nazwę zdarzenia
+SSE, w polu `type` i w `_live_state` ładunku), dopóki przestarzałe nazwy nie
+zostaną usunięte; daty usunięcia jeszcze nie ustalono. Aby przejść na nowe
+nazwy, podaj `types=request_log,usage`.
+
 ## Wyłączanie funkcji administracyjnych
 
 Aby wyłączyć wszystkie funkcje administracyjne:

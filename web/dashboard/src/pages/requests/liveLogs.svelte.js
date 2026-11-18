@@ -26,7 +26,7 @@ import { untrack } from "svelte";
 import { apiFetch, getJSON, isAbortError } from "$lib/api/client.js";
 import { nextReconnect } from "$lib/api/eventStream.js";
 import { access } from "$lib/stores/access.svelte.js";
-import { readStored } from "$lib/utils/storage.js";
+import { readStoredRenamed } from "$lib/utils/storage.js";
 import { normalizeHiddenTypes } from "./request-operations.js";
 import { auth } from "$lib/stores/auth.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
@@ -72,7 +72,7 @@ class LiveLogsStore {
   // Both live here so the live merge engine can fold displaced heads into a
   // thread's children.
   requestLogGroupSessions = $state(
-    readStored("gomodel_audit_group_sessions", "true") !== "false",
+    readStoredRenamed("gomodel_requests_group_sessions", "gomodel_audit_group_sessions", "true") !== "false",
   );
   requestThreadChildren = $state({});
   usageLogSearch = $state("");
@@ -296,7 +296,7 @@ class LiveLogsStore {
       if (!result.ok) {
         return;
       }
-      detailEntry = this.mergeLiveRequestEntry(result.data, "audit.detail") || detailEntry;
+      detailEntry = this.mergeLiveRequestEntry(result.data, "request_log.detail") || detailEntry;
     } catch (e) {
       console.error("Failed to fetch request log detail:", e);
     } finally {
@@ -350,7 +350,7 @@ $effect.root(() => {
 
 function readStoredHiddenTypes() {
   try {
-    return normalizeHiddenTypes(JSON.parse(readStored("gomodel_audit_hidden_types", "[]")));
+    return normalizeHiddenTypes(JSON.parse(readStoredRenamed("gomodel_requests_hidden_types", "gomodel_audit_hidden_types", "[]")));
   } catch {
     return [];
   }

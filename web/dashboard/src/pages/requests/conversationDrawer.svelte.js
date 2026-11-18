@@ -265,7 +265,7 @@ class ConversationDrawerStore {
       }
       liveLogs.upsertRequestLogRecord(
         { ...result.data, _detail_loaded: true },
-        "audit.detail",
+        "request_log.detail",
       );
     } catch (e) {
       requested.delete(entryID);

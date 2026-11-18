@@ -82,7 +82,7 @@ func (o *StreamLogObserver) OnJSONEvent(event map[string]any) {
 }
 
 // maybePublishLivePreview publishes the partially reconstructed response body
-// as an audit.stream live event. Publishes are skipped until new content
+// as an request_log.stream live event. Publishes are skipped until new content
 // accumulated, throttled to livePreviewInterval, and dropped entirely while no
 // dashboard is subscribed (the next connected subscriber catches up on the
 // following tick because each preview carries the full accumulated body).

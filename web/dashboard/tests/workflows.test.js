@@ -725,7 +725,7 @@ test("workflowRequestLogChart marks live current steps and waits for async flush
       id: "request-log-live-1",
       request_id: "req-live-1",
       _live: true,
-      _live_state: "audit.started",
+      _live_state: "request_log.started",
       _live_pending: true,
     },
     null,
@@ -741,7 +741,7 @@ test("workflowRequestLogChart marks live current steps and waits for async flush
       provider: "openai",
       requested_model: "gpt-5",
       _live: true,
-      _live_state: "audit.updated",
+      _live_state: "request_log.updated",
       _live_pending: true,
     },
     null,
@@ -757,7 +757,7 @@ test("workflowRequestLogChart marks live current steps and waits for async flush
       requested_model: "gpt-5",
       status_code: 200,
       _live: true,
-      _live_state: "audit.completed",
+      _live_state: "request_log.completed",
       _live_pending: true,
       _usage_live_state: "usage.completed",
       _usage_live_pending: true,
@@ -779,7 +779,7 @@ test("workflowRequestLogChart marks live current steps and waits for async flush
     status_code: 200,
     usage: { entries: 1 },
     _live: true,
-    _live_state: "audit.flushed",
+    _live_state: "request_log.flushed",
     _live_pending: false,
     _request_log_flushed: true,
     _usage_live_state: "usage.completed",
@@ -2136,7 +2136,7 @@ test("a response-phase block leaves the AI node green and colors the response no
 test("guardrail phases without outcomes are skipped only once the entry finished", () => {
   // Live, still running: nothing is known yet.
   const running = workflowRequestLogChart(
-    { ...guardedEntry([]), status_code: null, _live: true, _live_pending: true, _live_state: "audit.started" },
+    { ...guardedEntry([]), status_code: null, _live: true, _live_pending: true, _live_state: "request_log.started" },
     GUARDED_SOURCE,
     ALL_CAPS,
   );

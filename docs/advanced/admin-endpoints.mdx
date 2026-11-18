@@ -1117,8 +1117,22 @@ The persisted request-log and usage tables remain the source of truth. If the
 browser's cursor falls outside the replay buffer, the stream sends a reset event
 and the dashboard reloads from the normal REST endpoints.
 
+Request log events are named `request_log.started`, `request_log.updated`,
+`request_log.stream`, `request_log.completed`, `request_log.failed`,
+`request_log.flushed` and `request_log.removed`, and usage events `usage.*`.
+The `types` query parameter picks the kinds a stream receives:
+`types=request_log,usage`.
+
+Request log events were named `audit.*` before the request log was renamed.
+Those names are deprecated but still served. A stream that lists `request_log`
+in `types` gets the new names. A stream that lists only the old `audit` alias,
+or passes no `types`, keeps getting `audit.*` (as the SSE event name, in the
+`type` field and in the payload's `_live_state`) until the deprecated names are
+removed; no removal date is set yet. Pass `types=request_log,usage` to move to
+the new names.
+
 With more than one replica on a shared database, the stream also carries the
-requests the other replicas served, as `audit.flushed` and `usage.flushed`
+requests the other replicas served, as `request_log.flushed` and `usage.flushed`
 events once those replicas have persisted them, typically within 7 seconds.
 Their payload carries `_remote_written_at`, the writing replica's stamp in unix
 microseconds. `GET /admin/request-logs`, `/admin/request-logs/sessions` and

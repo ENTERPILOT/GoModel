@@ -38,7 +38,7 @@ function liveEntry(overrides = {}) {
     id: "request-log-1",
     _live: true,
     _live_pending: true,
-    _live_state: "audit.updated",
+    _live_state: "request_log.updated",
     path: "/v1/chat/completions",
     timestamp: "2026-07-06T12:00:00Z",
     data: {
@@ -53,9 +53,9 @@ test("live entries render locally: pending live state skips the persisted fetch"
   // still streaming renders from preview data; flushed/persisted entries
   // hydrate from /admin/request-logs/conversation.
   assert.equal(live.requestEntryLiveDetailPending(liveEntry()), true);
-  assert.equal(live.requestEntryLiveDetailPending(liveEntry({ _live_state: "audit.failed" })), true);
+  assert.equal(live.requestEntryLiveDetailPending(liveEntry({ _live_state: "request_log.failed" })), true);
   assert.equal(live.requestEntryLiveDetailPending(liveEntry({
-    _live_state: "audit.flushed",
+    _live_state: "request_log.flushed",
     _live_pending: false,
     _request_log_flushed: true,
   })), false);
@@ -71,7 +71,7 @@ test("live entries render locally: pending live state skips the persisted fetch"
 
 test("streaming chunks re-render as partial assistant messages", () => {
   const streamed = liveEntry({
-    _live_state: "audit.stream",
+    _live_state: "request_log.stream",
     _response_partial: true,
     data: {
       request_body: { messages: [{ role: "user", content: "Hi" }] },
@@ -85,8 +85,8 @@ test("streaming chunks re-render as partial assistant messages", () => {
   assert.equal(messages[1].role, "assistant");
 
   // The spinner logic: a streaming state is not settled, completed is.
-  assert.equal(live.liveRequestLogStateSettled("audit.stream"), false);
-  assert.equal(live.liveRequestLogStateSettled("audit.completed"), true);
+  assert.equal(live.liveRequestLogStateSettled("request_log.stream"), false);
+  assert.equal(live.liveRequestLogStateSettled("request_log.completed"), true);
 });
 
 test("chat-completions threads shape system, tool and assistant turns", () => {
@@ -760,9 +760,9 @@ test("latest-selection detection enables follow-latest only for the newest recor
 });
 
 test("only the selected anchor's flush triggers persisted hydration", () => {
-  assert.equal(shouldHydrateConversation("audit.flushed", "older", "newer"), false);
-  assert.equal(shouldHydrateConversation("audit.completed", "newer", "newer"), false);
-  assert.equal(shouldHydrateConversation("audit.flushed", "newer", "newer"), true);
+  assert.equal(shouldHydrateConversation("request_log.flushed", "older", "newer"), false);
+  assert.equal(shouldHydrateConversation("request_log.completed", "newer", "newer"), false);
+  assert.equal(shouldHydrateConversation("request_log.flushed", "newer", "newer"), true);
 });
 
 test("empty hydration never erases known live conversation records", () => {
