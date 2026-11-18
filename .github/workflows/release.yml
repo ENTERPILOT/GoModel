@@ -67,7 +67,9 @@ jobs:
           name: dashboard-dist
           path: internal/admin/dashboard/static/dist
           if-no-files-found: error
-          retention-days: 1
+          # The publishing jobs download this after the release environment is
+          # approved, so it has to outlive the wait for a reviewer.
+          retention-days: 7
 
   docker:
     name: Build and push Docker image by digest
